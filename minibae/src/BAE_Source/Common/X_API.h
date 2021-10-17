@@ -268,7 +268,8 @@
 #ifndef __X_API__
 #define __X_API__
 
-#include <machine/types.h>
+#include <sys/types.h>
+#include <stdint.h>
 
 // some common types
 #undef TRUE

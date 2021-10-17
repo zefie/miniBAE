@@ -5705,8 +5705,13 @@ void BAESong_DisplayInfo(BAESong song)
             BAE_STDERR("    songLoopCount %d\n", pSong->songLoopCount);
             BAE_STDERR("    songMaxLoopCount %d\n", pSong->songMaxLoopCount);                                                   // -1 means GM style bank select, -2 means allow program changes on percussion
 
-            BAE_STDERR("    songMidiTickLength %ld\n", pSong->songMidiTickLength);
-            BAE_STDERR("    songMicrosecondLength %ld\n", pSong->songMicrosecondLength);
+#if USE_FLOAT == FALSE
+            printf("    songMidiTickLength %ld\n", (long)pSong->songMidiTickLength);
+            printf("    songMicrosecondLength %ld\n", (long)pSong->songMicrosecondLength);
+#else
+            printf("    songMidiTickLength %f\n", (float)pSong->songMidiTickLength);
+            printf("    songMicrosecondLength %f\n", (float)pSong->songMicrosecondLength);
+#endif
 
             for (count = 0; count < 16; count++)
             {
