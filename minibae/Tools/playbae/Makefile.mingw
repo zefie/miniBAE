@@ -1,4 +1,4 @@
-TARGET = playbae
+TARGET = playbae.exe
 
 vpath	%.c ../../BAE_Source/Common ../../BAE_Source/Platform ../../BAE_MPEG_Source_II
 
@@ -6,7 +6,9 @@ INC_PATH	:= -I../../BAE_Source/Common
 INC_PATH	+= -I../../BAE_Source/Platform
 INC_PATH	+= -I../../BAE_MPEG_Source_II
 
-SRC		:=	BAE_API_Ansi.c
+SRC		:=	BAE_API_WinOS.c \
+			BAE_API_WinOS_Capture.c \
+			BAE_API_WinOS_Thread.c \
 
 SRC		+= \
 			DriverTools.c \
@@ -68,19 +70,32 @@ OBJ_DIR := obj/
 OBJ := $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
 
 ARCH		:= -m32 -static
-CC		:= gcc
-CXX		:= g++
-LD		:= gcc
+CC		:= i686-w64-mingw32-gcc-win32
+CXX		:= i686-w64-mingw32-g++-win32
+LD		:= i686-w64-mingw32-g++-win32
 
-CFLAGS  	:= $(ARCH) -g -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
-CFLAGS		+= -DX_PLATFORM=X_ANSI
+CFLAGS  	:= $(ARCH) -g -Os $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
+CFLAGS		+= -DX_PLATFORM=X_WIN95
 #CFLAGS		+= -D_DEBUG=1
 CXXFLAGS 	:= $(CFLAGS)
 LDFLAGS		:= $(ARCH)
 
 
-LIBS	= 	-lpthread
-
+LIBS	= 	-ldxguid \
+		-ldsound \
+		-lole32 \
+		-lwinmm \
+		-lkernel32 \
+		-luser32 \
+		-lgdi32 \
+		-lwinspool \
+		-lcomdlg32 \
+		-ladvapi32 \
+		-lshell32 \
+		-loleaut32 \
+		-luuid \
+		-lodbc32 \
+		-lodbccp32
 
 DEFAULT_PATCHES	:= ../TestSuite/patches.hsb
 
@@ -88,7 +103,7 @@ all: $(TARGET)
 
 $(TARGET): $(OBJ)
 	cp $(DEFAULT_PATCHES) patches.hsb
-	${LD} -s -o $@ ${LDFLAGS} ${OBJ} -Wl,--format=binary -Wl,patches.hsb -Wl,--format=default ${LIBS}
+	${LD} -o $@ ${LDFLAGS} ${OBJ} -Wl,--format=binary -Wl,patches.hsb -Wl,--format=default ${LIBS}
 	rm -f patches.hsb
 
 # Rules for compiling source files to object files
@@ -107,31 +122,11 @@ install: all
 
 lib_install:
 
-test: ${TARGET}
-	./${TARGET} -p ../TestSuite/minibae-wtv.hsb -m ../TestSuite/world1.mid -mr 44100 -o ~/test44.wav
-
-test2: ${TARGET}
-	./${TARGET} -p ../TestSuite/minibae-wtv.hsb -m ../TestSuite/karTV.mid -mr 44100 -o ~/test_loop.wav
-
-test3: ${TARGET}
-	./${TARGET} -p ../TestSuite/minibae-wtv.hsb -m ../TestSuite/world1.mid -mr 11025 -o ~/test11.wav
-
-test4: ${TARGET}
-	./${TARGET} -p ../TestSuite/minibae-wtv.hsb -m ../TestSuite/world1.mid -mr 16000 -o ~/test16.wav
-
-test5: ${TARGET}
-	./${TARGET} -p ../TestSuite/minibae-wtv.hsb -m ../TestSuite/world1.mid -mr 32000 -o ~/test32.wav
-
-test6: ${TARGET}
-	./${TARGET} -m ../TestSuite/world1.mid -mr 44100 -o ~/test.wav
-
 pack: ${TARGET}
-	cat ./${TARGET} | gzip -9c > ./playbae_static.gz
+	cat ./${TARGET} | gzip -9c > ./playbae.exe.gz
 
 clean:
 	@rm -f $(TARGET)
 	@rm -rdf $(OBJ_DIR)
 	@rm -rdf build
 	@echo Cleaned!
-
-

@@ -36,22 +36,94 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include "MiniBAE.h"
-#include "BAE_API.h"
+#include <MiniBAE.h>
+#include <X_Assert.h>
+#include <BAE_API.h>
+#include <GenSnd.h>
+#include <signal.h>
+#include <stdarg.h>
+
+static volatile int interruptPlayBack = FALSE;
+static volatile int verboseMode = FALSE;
+static volatile int silentMode = FALSE;
+static volatile int fadeOut = TRUE;
+
+void intHandler(int dummy) {
+    interruptPlayBack = TRUE;
+}
+
+void playbae_dprintf(const char *fmt, ...) {
+        if (verboseMode) {
+            va_list args;
+            va_start(args, fmt);
+            vfprintf(stdout, fmt, args);
+            va_end(args);
+        }
+}
+
+void playbae_printf(const char *fmt, ...) {
+	if (!silentMode) {
+	    va_list args;
+	    va_start(args, fmt);
+	    vfprintf(stdout, fmt, args);
+	    va_end(args);
+	}
+}
+
 
 // prototypes
+
+char const copyrightInfo[] =
+{
+   "Copyright (C) 2009 Beatnik, Inc and Copyright (C) 2021 Zefie Networks. All rights reserved.\n"
+};
 
 char const usageString[] =
 {
    "USAGE:  playbae  -p  {patches.hsb}\n"
-   "                 -w  {Play a WAV file}\n"
+   "                 -f  {Play a file (MIDI, RMF, WAV or AIFF}\n"
+   "                 -o  {write output to file}\n"
+   "                 -mr {mixer sample rate ie. 11025}\n"
+   "                 -l  {# of times to loop}\n"
+   "                 -v  {max volume (in percent, overdrive allowed) (default: 100)}\n"
+   "                 -t  {max length in seconds to play midi (0 = forever)}\n"
+   "		     -mc {MIDI/RMF Channels to mute, 1-16, comma seperated (example: 1,10,16)}\n"
+   "                 -rv {set default reverb type}\n"
+   "                 -rl {display reverb definitions}\n"
+   "                 -nf {disable fade-out when stopping via time limit or CTRL-C}\n"
+   "                 -q  {quiet mode}\n"
+   "                 -d  {verbose (debug) mode}\n"
+   "                 -h  {displays this message then exits}\n"
+   "                 -x  {displays additional lesser-used options}\n"
+};
+
+char const usageStringExtra[] =
+{
+   " Additional flags:\n"
+   "                 -2p {use 2-point Interpolation rather than default of Linear}\n"
+   "                 -mv {max voices (default: 64)}\n"
    "                 -sw {Stream a WAV file}\n"
    "                 -sa {Stream a AIF file}\n"
    "                 -a  {Play a AIF file}\n"
    "                 -r  {Play a RMF file}\n"
    "                 -m  {Play a MID file}\n"
-   "                 -o  {write output to file}\n"
-   "                 -mr {mixer sample rate ie. 11025}\n"
+};
+
+char const reverbTypeList[] =
+{
+  "Valid Reverb Types for -rv command:\n"
+  "   0               Default\n"
+  "   1               None\n"
+  "   2               Igor's Closet\n"
+  "   3               Igor's Garage\n"
+  "   4               Igor's Acoustic Lab\n"
+  "   5               Igor's Cavern\n"
+  "   6               Igor's Dungeon\n"
+  "   7               Small reflections (Reverb used for WebTV)\n"
+  "   8               Early reflections (variable verb)\n"
+  "   9               Basement (variable verb)\n"
+  "   10              Banquet hall (variable verb)\n"
+  "   11              Catacombs (variable verb)\n"
 };
 
 
@@ -86,7 +158,7 @@ static void PV_Idle(BAEMixer theMixer, unsigned long time)
 
 static void PV_StreamCallback(BAEStream stream, unsigned long reference)
 {
-   printf("Stream %p reference %lx done\n", stream, reference);
+   playbae_dprintf("Stream %p reference %lx done\n", stream, reference);
 }
 
 static int PV_ParseCommands(int argc, char *argv[], char *command, int getResult, char *result)
@@ -109,14 +181,47 @@ static int PV_ParseCommands(int argc, char *argv[], char *command, int getResult
 }
 
 
+BAE_UNSIGNED_FIXED calculateVolume(BAE_UNSIGNED_FIXED volume, BAE_BOOL multiply) {
+	BAE_UNSIGNED_FIXED temp = 0;
+	if (multiply) {
+		temp = (volume / 100) *  MAX_SONG_VOLUME;
+	} else {
+		temp = volume / MAX_SONG_VOLUME;
+	}
+	return temp;
+}
+
+
+static BAEResult MuteCommaSeperatedChannels(BAESong theSong, char* channelsToMute) {
+	BAEResult err = 0;
+	char *token = strtok(channelsToMute, ",");
+	int tokenInt = 0;
+	while (token != NULL && err == 0)
+        {
+	     tokenInt = atoi(token);
+	     if (tokenInt > 0 && tokenInt <= 16) {
+		err = BAESong_MuteChannel(theSong,tokenInt - 1);
+	        playbae_printf("Muting midi channel %i\n", tokenInt);
+		token = strtok(NULL, ",");
+	     } else {
+	        playbae_printf("Invalid MIDI channel specified: %s\n", token);
+		token = strtok(NULL, ",");
+             }
+        }
+	return err;
+}
+
 // PlayPCM()
 // ---------------------------------------------------------------------
 //
 //
-static BAEResult PlayPCM(BAEMixer theMixer, char *fileName, BAEFileType type)
+static BAEResult PlayPCM(BAEMixer theMixer, char *fileName, BAEFileType type, BAE_UNSIGNED_FIXED volume, unsigned int timeLimit)
 {
    BAEResult err;
    BAESound  sound = BAESound_New(theMixer);
+   BAESampleInfo songInfo;
+   unsigned long currentPosition;
+   int rate, m, s;
    BAE_BOOL  done;
 
    if (sound)
@@ -124,14 +229,35 @@ static BAEResult PlayPCM(BAEMixer theMixer, char *fileName, BAEFileType type)
       err = BAESound_LoadFileSample(sound, (BAEPathName)fileName, type);
       if (err == BAE_NO_ERROR)
       {
+	 BAESound_SetVolume(sound, calculateVolume(volume, TRUE));
          err = BAESound_Start(sound, 0, BAE_FIXED_1, 0);
          if (err == BAE_NO_ERROR)
          {
-            printf("BAE memory used for everything %ld\n\n", BAE_GetSizeOfMemoryUsed());
+	    BAESound_GetInfo(sound, &songInfo);
+	    rate = songInfo.sampledRate / 65536;
+            playbae_dprintf("BAE memory used for everything %ld bytes\n\n", BAE_GetSizeOfMemoryUsed()); 
+	    playbae_printf("Master sound volume set to %lu%%\n", calculateVolume(volume, FALSE));
             done = FALSE;
             while (done == FALSE)
             {
+	       if (interruptPlayBack) {
+		  playbae_printf("Stop requested... please wait for data flush...\n");
+		  interruptPlayBack = FALSE;
+		  BAESound_Stop(sound, fadeOut);
+	       }
                BAESound_IsDone(sound, &done);
+	       BAESound_GetSamplePlaybackPosition(sound, &currentPosition);
+	       currentPosition = (currentPosition / rate);
+	       m = (currentPosition / 60);
+	       s = (currentPosition - (m*60));
+	       if (s > 0 || m > 0) {
+	          playbae_printf("Playback position: %02d:%02d\r",m,s);
+	       }
+               if (timeLimit > 0) {
+ 		  if (currentPosition >= timeLimit) {
+			BAESound_Stop(sound, fadeOut);
+		  }
+	       }
                if (done == FALSE)
                {
                   PV_Idle(theMixer, 15000);
@@ -141,12 +267,12 @@ static BAEResult PlayPCM(BAEMixer theMixer, char *fileName, BAEFileType type)
          }
          else
          {
-            printf("playbae:  Couldn't start sound (BAE Error #%d)\n", err);
+            playbae_printf("playbae:  Couldn't start sound (BAE Error #%d)\n", err);
          }
       }
       else
       {
-         printf("playbae:  Couldn't open sound file '%s' (BAE Error #%d)\n", fileName, err);
+         playbae_printf("playbae:  Couldn't open sound file '%s' (BAE Error #%d)\n", fileName, err);
       }
    }
    else
@@ -161,7 +287,7 @@ static BAEResult PlayPCM(BAEMixer theMixer, char *fileName, BAEFileType type)
 // ---------------------------------------------------------------------
 //
 //
-static BAEResult PlayPCMStreamed(BAEMixer theMixer, char *fileName, BAEFileType type)
+static BAEResult PlayPCMStreamed(BAEMixer theMixer, char *fileName, BAEFileType type, BAE_UNSIGNED_FIXED volume)
 {
    BAEResult err;
    BAEStream stream = BAEStream_New(theMixer);
@@ -176,14 +302,21 @@ static BAEResult PlayPCMStreamed(BAEMixer theMixer, char *fileName, BAEFileType 
 
       if (err == BAE_NO_ERROR)
       {
+	 BAEStream_SetVolume(stream, calculateVolume(volume, TRUE));
          BAEStream_SetCallback(stream, PV_StreamCallback, 0x1234);
          err = BAEStream_Start(stream);
          if (err == BAE_NO_ERROR)
          {
-            printf("BAE memory used for everything %ld\n\n", BAE_GetSizeOfMemoryUsed());
+ 	    playbae_printf("Master stream volume set to %lu%%\n", calculateVolume(volume, FALSE));
+            playbae_dprintf("BAE memory used for everything %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
             done = FALSE;
             while (done == FALSE)
             {
+	       if (interruptPlayBack) {
+		  playbae_printf("Stop requested... please wait for data flush...\n");
+		  interruptPlayBack = 0;
+		  BAEStream_Stop(stream, fadeOut);
+	       }
                BAEStream_IsDone(stream, &done);
                if (done == FALSE)
                {
@@ -194,12 +327,12 @@ static BAEResult PlayPCMStreamed(BAEMixer theMixer, char *fileName, BAEFileType 
          }
          else
          {
-            printf("playbae:  Couldn't start sound (BAE Error #%d)\n", err);
+            playbae_printf("playbae:  Couldn't start sound (BAE Error #%d)\n", err);
          }
       }
       else
       {
-         printf("playbae:  Couldn't open sound file '%s' (BAE Error #%d)\n", fileName, err);
+         playbae_printf("playbae:  Couldn't open sound file '%s' (BAE Error #%d)\n", fileName, err);
       }
    }
    else
@@ -215,12 +348,13 @@ static BAEResult PlayPCMStreamed(BAEMixer theMixer, char *fileName, BAEFileType 
 // ---------------------------------------------------------------------
 //
 //
-static BAEResult PlayMidi(BAEMixer theMixer, char *fileName)
+static BAEResult PlayMidi(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED volume, unsigned int timeLimit, unsigned int loopCount, BAEReverbType reverbType, char *midiMuteChannels)
 {
    BAEResult err;
    BAESong   theSong = BAESong_New(theMixer);
+   unsigned long currentPosition;
+   int m, s, ms = 0;
    BAE_BOOL  done;
-
    if (theSong)
    {
 #if 0
@@ -230,15 +364,53 @@ static BAEResult PlayMidi(BAEMixer theMixer, char *fileName)
       err = BAESong_LoadMidiFromFile(theSong, (BAEPathName)fileName, TRUE);
       if (err == BAE_NO_ERROR)
       {
+	 BAESong_SetVolume(theSong, calculateVolume(volume, TRUE));
          err = BAESong_Start(theSong, 0);
-         BAESong_DisplayInfo(theSong);
          if (err == BAE_NO_ERROR)
          {
-            printf("BAE memory used for everything %ld\n\n", BAE_GetSizeOfMemoryUsed());
+	    if (verboseMode) {
+	            BAESong_DisplayInfo(theSong);
+	    }
+
+            BAEMixer_SetDefaultReverb(theMixer, (BAEReverbType)reverbType);
+            playbae_printf("Reverb Type set to %d\n", reverbType);
+
+	    if (strlen(midiMuteChannels) > 0) {
+		MuteCommaSeperatedChannels(theSong, midiMuteChannels);
+	    }
+
+            BAESong_SetLoops(theSong, loopCount);
+	    playbae_printf("Master song volume set to %lu%%\n", calculateVolume(volume, FALSE));
+	    if (loopCount > 0) {
+		playbae_printf("Will loop song %u times\n", loopCount);
+	    }
+            if (timeLimit > 0) {
+		playbae_printf("Max Play Duration: %d seconds\n", timeLimit);
+            }
+
+            playbae_dprintf("BAE memory used for everything %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
             done = FALSE;
             while (done == FALSE)
             {
+	       if (interruptPlayBack) {
+		  playbae_printf("Stop requested... please wait for data flush...\n");
+		  interruptPlayBack = 0;
+		  BAESong_Stop(theSong, fadeOut);
+	       }
                BAESong_IsDone(theSong, &done);
+	       BAESong_GetMicrosecondPosition(theSong, &currentPosition);
+               currentPosition = currentPosition / 1000;
+               m = (currentPosition / 60000);
+               s = (currentPosition - (m*60000)) / 1000;
+               ms = (currentPosition - (60000*m) - (s*1000));
+               if (ms > 1 || s > 0 || m > 0) {
+                  playbae_printf("Playback position: %02d:%02d.%03d\r",m,s,ms);
+               }
+               if (timeLimit > 0) {
+                  if (currentPosition > (timeLimit * 1000) - 750) {
+                        BAESong_Stop(theSong, fadeOut);
+                  }
+               }
                if (done == FALSE)
                {
                   PV_Idle(theMixer, 15000);
@@ -248,12 +420,12 @@ static BAEResult PlayMidi(BAEMixer theMixer, char *fileName)
          }
          else
          {
-            printf("playbae:  Couldn't start song (BAE Error #%d)\n", err);
+            playbae_printf("playbae:  Couldn't start song (BAE Error #%d)\n", err);
          }
       }
       else
       {
-         printf("playbae:  Couldn't open Midi file '%s' (BAE Error #%d)\n", fileName, err);
+         playbae_printf("playbae:  Couldn't open Midi file '%s' (BAE Error #%d)\n", fileName, err);
       }
 #endif
    }
@@ -261,6 +433,7 @@ static BAEResult PlayMidi(BAEMixer theMixer, char *fileName)
    {
       err = BAE_MEMORY_ERR;
    }
+   playbae_printf("\n");
    BAESong_Delete(theSong);
    return(err);
 }
@@ -269,10 +442,12 @@ static BAEResult PlayMidi(BAEMixer theMixer, char *fileName)
 // ---------------------------------------------------------------------
 //
 //
-static BAEResult PlayRMF(BAEMixer theMixer, char *fileName)
+static BAEResult PlayRMF(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED volume,  unsigned int timeLimit, unsigned int loopCount, BAEReverbType reverbType, char *midiMuteChannels)
 {
    BAEResult err;
    BAESong   theSong = BAESong_New(theMixer);
+   unsigned long currentPosition;
+   int m, s, ms = 0;
    BAE_BOOL  done;
 
    if (theSong)
@@ -280,16 +455,52 @@ static BAEResult PlayRMF(BAEMixer theMixer, char *fileName)
       err = BAESong_LoadRmfFromFile(theSong, (BAEPathName)fileName, 0, TRUE);
       if (err == BAE_NO_ERROR)
       {
+	 BAESong_SetVolume(theSong, calculateVolume(volume, TRUE));
          err = BAESong_Start(theSong, 0);
-         BAESong_DisplayInfo(theSong);
-         BAESong_SetLoops(theSong, 0);
          if (err == BAE_NO_ERROR)
          {
-            printf("BAE memory used for everything %ld\n\n", BAE_GetSizeOfMemoryUsed());
+	    if (verboseMode) {
+	            BAESong_DisplayInfo(theSong);
+	    }
+
+            BAEMixer_SetDefaultReverb(theMixer, (BAEReverbType)reverbType);
+            playbae_printf("Reverb Type set to %d\n", reverbType);
+
+	    if (strlen(midiMuteChannels) > 0) {
+		MuteCommaSeperatedChannels(theSong, midiMuteChannels);
+	    }
+
+            BAESong_SetLoops(theSong, loopCount);
+	    playbae_printf("Master song volume set to %lu%%\n", calculateVolume(volume, FALSE));
+	    if (loopCount > 0) {
+		playbae_printf("Will loop song %u times\n", loopCount);
+	    }
+	    if (timeLimit > 0) {
+		playbae_printf("Max Play Duration: %d seconds\n", timeLimit);
+            }
+            playbae_dprintf("BAE memory used for everything %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
             done = FALSE;
-            while (done == FALSE)
+	    while (done == FALSE)
             {
+	       if (interruptPlayBack) {
+		  playbae_printf("Stop requested... please wait for data flush...\n");
+		  interruptPlayBack = 0;
+		  BAESong_Stop(theSong, fadeOut);
+	       }
                BAESong_IsDone(theSong, &done);
+	       BAESong_GetMicrosecondPosition(theSong, &currentPosition);
+               currentPosition = currentPosition / 1000;
+               m = (currentPosition / 60000);
+               s = (currentPosition - (m*60000)) / 1000;
+               ms = (currentPosition - (60000*m) - (s*1000));
+               if (ms > 1 || s > 0 || m > 0) {
+                  playbae_printf("Playback position: %02d:%02d.%03d\r",m,s,ms);
+               }
+               if (timeLimit > 0) {
+                  if (currentPosition > (timeLimit * 1000) - 750) {
+                        BAESong_Stop(theSong, fadeOut);
+                  }
+               }
                if (done == FALSE)
                {
                   PV_Idle(theMixer, 15000);
@@ -299,22 +510,22 @@ static BAEResult PlayRMF(BAEMixer theMixer, char *fileName)
          }
          else
          {
-            printf("playbae:  Couldn't start song (BAE Error #%d)\n", err);
+            playbae_printf("playbae:  Couldn't start song (BAE Error #%d)\n", err);
          }
       }
       else
       {
-         printf("playbae:  Couldn't open RMF file '%s' (BAE Error #%d)\n", fileName, err);
+         playbae_printf("playbae:  Couldn't open RMF file '%s' (BAE Error #%d)\n", fileName, err);
       }
    }
    else
    {
       err = BAE_MEMORY_ERR;
    }
+   playbae_printf("\n");
    BAESong_Delete(theSong);
    return(err);
 }
-
 
 // main()
 // ---------------------------------------------------------------------
@@ -323,31 +534,119 @@ int main(int argc, char *argv[])
    BAEResult    err;
    BAEMixer     theMixer;
    short int    rmf, pcm, level;
+   unsigned int loopCount = 0;
+   unsigned int timeLimit = 0;
+   BAE_UNSIGNED_FIXED volume = 100 * BAE_MAX_MIDI_VOLUME;
+   BAETerpMode interpol = BAE_LINEAR_INTERPOLATION;
+   int maxVoices = BAE_MAX_VOICES;
    BAEBankToken bank;
-   int          doneCommand = 0;
-   char         parmFile[1024];
-   BAERate      rate;
+   int doneCommand = 0;
+   short reverbType = 8; // early reflections
+   char parmFile[1024];
+   char midiMuteChannels[512];
+   BAERate rate = BAE_RATE_44K;
 
+   midiMuteChannels[511] = '\0';
+
+   if (PV_ParseCommands(argc, argv, "-q", FALSE, NULL))
+   {
+        silentMode = TRUE;
+ 	verboseMode = FALSE;
+   }
+
+   if (PV_ParseCommands(argc, argv, "-d", FALSE, NULL))
+   {
+        silentMode = FALSE;
+	verboseMode = TRUE;
+   }
+
+   if (!silentMode) {
+      playbae_printf(copyrightInfo);
+   }
+
+   signal(SIGINT, intHandler);
    theMixer = BAEMixer_New();
    if (theMixer)
    {
-       pcm   = 1;
-       rmf   = BAE_MAX_VOICES - pcm;
-       level = rmf / 3;
-      rate  = BAE_RATE_44K;
-      if (PV_ParseCommands(argc, argv, "-mr", TRUE, parmFile))
-      {
-         rate = (BAERate)atoi(parmFile);
-      }
+       if (PV_ParseCommands(argc, argv, "-mv", TRUE, parmFile))
+       {
+           maxVoices = atoi(parmFile);
+	   if (maxVoices < BAE_MIN_VOICES) {
+		playbae_printf("Invalid value for max voices: %d, expected 4-64. Set to %d.\n", maxVoices, BAE_MIN_VOICES);
+		maxVoices = BAE_MIN_VOICES;
+	   }
+	   if (maxVoices > BAE_MAX_VOICES) {
+		playbae_printf("Invalid value for max voices: %d, expected 4-64. Set to %d.\n", maxVoices, BAE_MAX_VOICES);
+		maxVoices = BAE_MAX_VOICES;
+	   }
+       }
 
-      printf("Allocating mixer with %d voices for RMF/Midi playback\n"
+       pcm   = 1;
+       rmf   = maxVoices - pcm;
+       level = rmf / 3;
+       if (PV_ParseCommands(argc, argv, "-rl", FALSE, NULL))
+       {
+           playbae_printf(reverbTypeList);
+           return 0;
+       }
+       if (PV_ParseCommands(argc, argv, "-h", FALSE, NULL))
+       {
+           playbae_printf(usageString);
+           return 0;
+       }
+       if (PV_ParseCommands(argc, argv, "-x", FALSE, NULL))
+       {
+           playbae_printf(usageStringExtra);
+           return 0;
+       }
+       if (PV_ParseCommands(argc, argv, "-mr", TRUE, parmFile))
+       {
+          rate = (BAERate)atoi(parmFile);
+       }
+
+       if (PV_ParseCommands(argc, argv, "-l", TRUE, parmFile))
+       {
+          loopCount = (unsigned int)atoi(parmFile);
+       }
+
+       if (PV_ParseCommands(argc, argv, "-mc", TRUE, parmFile))
+       {
+	  strcpy(midiMuteChannels,parmFile);
+       }
+
+       if (PV_ParseCommands(argc, argv, "-v", TRUE, parmFile))
+       {
+          volume = (unsigned int)(atoi(parmFile) * BAE_MAX_MIDI_VOLUME);
+          if (volume > (BAE_MAX_OVERDRIVE_PCT * BAE_MAX_MIDI_VOLUME)) {
+		playbae_printf("Volume Overdrive limit reached: Setting volume to %u%%\n", BAE_MAX_OVERDRIVE_PCT);
+		volume = (BAE_MAX_OVERDRIVE_PCT * BAE_MAX_MIDI_VOLUME);
+          }
+       }
+
+       if (PV_ParseCommands(argc, argv, "-t", TRUE, parmFile))
+       {
+          timeLimit = (unsigned int)atoi(parmFile);
+       }
+
+       if (PV_ParseCommands(argc, argv, "-nf", FALSE, NULL))
+       {
+          fadeOut = FALSE;
+       }
+
+       if (PV_ParseCommands(argc, argv, "-2p", FALSE, NULL))
+       {
+          interpol = BAE_2_POINT_INTERPOLATION;
+       }
+
+
+      playbae_dprintf("Allocating mixer with %d voices for RMF/Midi playback\n"
              "and %d voices for PCM playback at %d sample rate\n",
              rmf, pcm,
              rate);
 
       err = BAEMixer_Open(theMixer,
                           rate,
-                          BAE_LINEAR_INTERPOLATION,
+                          interpol,
                           BAE_USE_STEREO | BAE_USE_16,
                           rmf,                                          // midi voices
                           pcm,                                          // pcm voices
@@ -357,17 +656,48 @@ int main(int argc, char *argv[])
       {
          BAEMixer_SetAudioTask(theMixer, PV_Task, (void *)theMixer);
 
-          // turn on nice verb
-         BAEMixer_SetDefaultReverb(theMixer, BAE_REVERB_TYPE_8);
-                  
-         printf("BAE memory used during idle prior to SetBankToFile: %ld\n\n", BAE_GetSizeOfMemoryUsed());
+         // turn on nice verb
+         if (PV_ParseCommands(argc, argv, "-rv", TRUE, parmFile))
+         {
+	    // user selected reverb
+            reverbType = (short)atoi(parmFile);
+	    if (reverbType > 11) {
+		playbae_printf("Invalid reverbType %d, expected 1-11. Ignored.\n", reverbType);
+		reverbType = 8;
+  	    }
+         }
+         playbae_dprintf("BAE memory used during idle prior to SetBankToFile: %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
 
          if (PV_ParseCommands(argc, argv, "-p", TRUE, parmFile))
          {
-            printf("Using bank '%s'\n", parmFile);
+            playbae_printf("Using bank '%s'\n", parmFile);
             err = BAEMixer_AddBankFromFile(theMixer, (BAEPathName)parmFile, &bank);
-            printf("BAE memory used during idle after SetBankToFile: %ld\n\n", BAE_GetSizeOfMemoryUsed());
-         }
+            if (err > 0) {
+		playbae_printf("Error %d loading patch bank %s",err,parmFile);
+		return(1);
+	    }
+            playbae_dprintf("BAE memory used during idle after SetBankToFile: %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
+         } else {
+            playbae_printf("Using built-in bank\n");
+#ifdef __MINGW32__
+	    extern char binary_patches_hsb_start[];
+	    extern char binary_patches_hsb_size[];
+	    err = BAEMixer_AddBankFromMemory(theMixer,binary_patches_hsb_start,(unsigned int)&binary_patches_hsb_size,&bank);
+#else
+	#ifdef __EMSCRIPTEN__
+            err = BAEMixer_AddBankFromFile(theMixer, (BAEPathName)"patches.hsb", &bank);
+	#else
+	    extern char _binary_patches_hsb_start[];
+	    extern char _binary_patches_hsb_size[];
+	    err = BAEMixer_AddBankFromMemory(theMixer,_binary_patches_hsb_start,(unsigned int)&_binary_patches_hsb_size,&bank);
+	#endif
+#endif
+            if (err > 0) {
+		playbae_printf("Error %d loading patch bank", err);
+		return(1);
+	    }
+            playbae_dprintf("BAE memory used during idle after SetBankToFile: %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
+	 }
 
          if (PV_ParseCommands(argc, argv, "-o", TRUE, parmFile))
          {
@@ -377,49 +707,78 @@ int main(int argc, char *argv[])
                                              BAE_COMPRESSION_NONE);
             if (err)
             {
-               printf("BAEMixer_StartOutputToFile failed with error %d\n", err);
+               playbae_printf("Error %d accessing file for write: %s\n", err, parmFile);
             }
             else
             {
                gWriteToFile = TRUE;
-               printf("Writing to file %s\n", parmFile);
+               playbae_printf("Writing to file %s\n", parmFile);
             }
          }
 
+         if (PV_ParseCommands(argc, argv, "-f", TRUE, parmFile))
+         {
+		char fileHeader[5]; // 4 char + 1 null byte
+		long filePtr;
+		filePtr = BAE_FileOpenForRead(parmFile);
+		if (filePtr > 0) {
+			BAE_ReadFile(filePtr, &fileHeader, 4);
+			BAE_FileClose(filePtr);
+			if (strcmp(fileHeader,X_FILETYPE_MIDI) == 0) {
+        		    playbae_printf("Playing MIDI %s\n", parmFile);
+		            err = PlayMidi(theMixer, parmFile, volume, timeLimit, loopCount, reverbType, midiMuteChannels);
+			} else if (strcmp(fileHeader,X_FILETYPE_RMF) == 0) {
+        		    playbae_printf("Playing RMF %s\n", parmFile);
+		            err = PlayRMF(theMixer, parmFile, volume, timeLimit, loopCount, reverbType, midiMuteChannels);
+			} else if (strcmp(fileHeader,X_FILETYPE_AIFF) == 0) {
+			    playbae_printf("Playing AIFF %s\n", parmFile);
+			    err = PlayPCM(theMixer, parmFile, BAE_AIFF_TYPE, volume, timeLimit);
+			} else if (strcmp(fileHeader,X_FILETYPE_WAVE) == 0) {
+        		    playbae_printf("Playing WAVE %s\n", parmFile);
+		            err = PlayPCM(theMixer, parmFile, BAE_AIFF_TYPE, volume, timeLimit);
+			} else {
+			    err = 10069;
+			}
+		} else {
+			err = filePtr;
+		}
+                doneCommand = 1;
+	}
+
          if (PV_ParseCommands(argc, argv, "-a", TRUE, parmFile))
          {
-            printf("Play AIFF\n");
-            err         = PlayPCM(theMixer, parmFile, BAE_AIFF_TYPE);
+            playbae_printf("Playing AIFF %s\n", parmFile);
+            err         = PlayPCM(theMixer, parmFile, BAE_AIFF_TYPE, volume, timeLimit);
             doneCommand = 1;
          }
          if (PV_ParseCommands(argc, argv, "-sa", TRUE, parmFile))
          {
-            printf("Stream AIFF\n");
-            err         = PlayPCMStreamed(theMixer, parmFile, BAE_AIFF_TYPE);
+            playbae_printf("Streaming AIFF %s\n", parmFile);
+            err         = PlayPCMStreamed(theMixer, parmFile, BAE_AIFF_TYPE, volume);
             doneCommand = 1;
          }
          if (PV_ParseCommands(argc, argv, "-w", TRUE, parmFile))
          {
-            printf("Play WAVE\n");
-            err         = PlayPCM(theMixer, parmFile, BAE_WAVE_TYPE);
+            playbae_printf("Playing WAVE %s\n", parmFile);
+            err         = PlayPCM(theMixer, parmFile, BAE_WAVE_TYPE, volume, timeLimit);
             doneCommand = 1;
          }
          if (PV_ParseCommands(argc, argv, "-sw", TRUE, parmFile))
          {
-            printf("Stream WAVE\n");
-            err         = PlayPCMStreamed(theMixer, parmFile, BAE_WAVE_TYPE);
+            playbae_dprintf("Streaming WAVE %s\n", parmFile);
+            err         = PlayPCMStreamed(theMixer, parmFile, BAE_WAVE_TYPE, volume);
             doneCommand = 1;
          }
          if (PV_ParseCommands(argc, argv, "-r", TRUE, parmFile))
          {
-            printf("PlayRMF\n");
-            err         = PlayRMF(theMixer, parmFile);
+            playbae_printf("Playing RMF %s\n", parmFile);
+            err         = PlayRMF(theMixer, parmFile, volume, timeLimit, loopCount, reverbType, midiMuteChannels);
             doneCommand = 1;
          }
          if (PV_ParseCommands(argc, argv, "-m", TRUE, parmFile))
          {
-            printf("PlayMidi\n");
-            err         = PlayMidi(theMixer, parmFile);
+            playbae_printf("Playing MIDI %s\n", parmFile);
+            err         = PlayMidi(theMixer, parmFile, volume, timeLimit, loopCount, reverbType, midiMuteChannels);
             doneCommand = 1;
          }
 
@@ -430,17 +789,22 @@ int main(int argc, char *argv[])
       }
       else
       {
-         printf("playbae:  Couldn't open mixer (BAE Error #%d)\n", err);
+         playbae_printf("playbae:  Couldn't open mixer (BAE Error #%d)\n", err);
       }
    }
    else
    {
-      printf("playbae:  Memory error.\n");
+      playbae_printf("playbae:  Memory error.\n");
+   }
+
+   if (err > 0) {
+        playbae_printf("playbae:  BAE Error #%d\n", err);
+	return(1);
    }
 
    if (doneCommand == 0)
    {
-      printf(usageString);
+      playbae_printf(usageString);
    }
 
    BAE_WaitMicroseconds(160000);

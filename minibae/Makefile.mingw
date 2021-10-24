@@ -9,7 +9,9 @@ INC_PATH	+= -IBAE_Source/Platform
 INC_PATH	+= -IBAE_MPEG_Source_II
 INC_PATH	+= -Ibanks/patches
 
-SRC		:=	BAE_API_Ansi.c
+SRC		:=	BAE_API_WinOS.c \
+			BAE_API_WinOS_Capture.c \
+			BAE_API_WinOS_Thread.c \
 
 SRC		+= \
 			DriverTools.c \
@@ -69,32 +71,46 @@ OBJ_DIR := obj/
 OBJ := $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
 
 ARCH		:= -m32
-CC		:= gcc
-CXX		:= g++
-LD		:= gcc
-AR      	:= ar
-STRIP		:= strip
+CC		:= i686-w64-mingw32-gcc-win32
+CXX		:= i686-w64-mingw32-g++-win32
+LD		:= i686-w64-mingw32-g++-win32
+AR      	:= i686-w64-mingw32-gcc-ar-win32
+STRIP      	:= i686-w64-mingw32-strip
 
-CFLAGS  	:= $(ARCH) -static -fPIC -g -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
-CFLAGS		+= -DX_PLATFORM=X_ANSI
+CFLAGS  	:= $(ARCH) -static -g -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
+CFLAGS		+= -DX_PLATFORM=X_WIN95
 #CFLAGS		+= -D_DEBUG=1
 CXXFLAGS 	:= $(CFLAGS)
-LDFLAGS		:= $(ARCH)
+LDFLAGS		:= $(ARCH) -static
 
 
-LIBS	= 	-lpthread
+LIBS	= 	-ldxguid \
+		-ldsound \
+		-lole32 \
+		-lwinmm \
+		-lkernel32 \
+		-luser32 \
+		-lgdi32 \
+		-lwinspool \
+		-lcomdlg32 \
+		-ladvapi32 \
+		-lshell32 \
+		-loleaut32 \
+		-luuid \
+		-lodbc32 \
+		-lodbccp32
 
-all: $(TARGET).a ${TARGET}_debug.so ${TARGET}.so
+all: $(TARGET).a ${TARGET}_debug.dll ${TARGET}.dll
 
 $(TARGET).a: $(OBJ)
 	$(AR) rcs $(TARGET).a $(OBJ)
 
-$(TARGET)_debug.so: ${OBJ}
-	${CC} -shared ${ARCH} ${OBJ} -o ${TARGET}_debug.so
+$(TARGET)_debug.dll: ${OBJ}
+	${CC} -shared ${ARCH} ${OBJ} -o ${TARGET}_debug.dll -Wl,--subsystem,windows ${LIBS}
 
-$(TARGET).so: $(TARGET)_debug.so
-	cp $(TARGET)_debug.so $(TARGET).so
-	${STRIP} -s ${TARGET}.so
+$(TARGET).dll: $(TARGET)_debug.dll
+	cp $(TARGET)_debug.dll $(TARGET).dll
+	${STRIP} -s ${TARGET}.dll
 
 # Rules for compiling source files to object files
 $(OBJ_DIR)%.o : %.cpp

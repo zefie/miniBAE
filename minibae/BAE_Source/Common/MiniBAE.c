@@ -560,6 +560,8 @@ AudioFileType BAE_TranslateBAEFileType(BAEFileType fileType)
         case BAE_AU_TYPE:
             haeFileType = FILE_AU_TYPE;
             break;
+	default:
+	    break;
     }
     return haeFileType;
 }
@@ -1901,7 +1903,7 @@ BAEResult BAEMixer_ChangeAudioModes(BAEMixer mixer, BAERate q, BAETerpMode t, BA
         theRate = (Rate)q;
         if (theRate == BAE_RATE_INVALID)
         {
-            printf("BAEMixer_ChangeAudioModes:invalid rate %ld\n", (long)q);
+            BAE_STDERR("BAEMixer_ChangeAudioModes:invalid rate %ld\n", (long)q);
             err = PARAM_ERR;
         }
         
@@ -1946,7 +1948,7 @@ BAEResult BAEMixer_ChangeAudioModes(BAEMixer mixer, BAERate q, BAETerpMode t, BA
         {
             err = GM_ChangeAudioModes(NULL, theRate, theTerp, theMods);
             if (err)
-                printf("audio:failed change %ld\n",(long)err);
+                BAE_STDERR("audio:failed change %ld\n",(long)err);
         }
     }
     else
@@ -2146,7 +2148,7 @@ BAEResult BAEMixer_SetHardwareVolume(BAEMixer mixer, BAE_UNSIGNED_FIXED theVolum
         if (mixer->mMuteCount != 0) // are we muted?
         {
             mixer->mMutedVolumeLevel = newVol;
-            printf("audio:SetHardwareVolume, muted %d\n", newVol);
+            BAE_STDERR("audio:SetHardwareVolume, muted %d\n", newVol);
         }
         else
         {
@@ -2470,7 +2472,7 @@ BAEResult BAEMixer_Mute(BAEMixer mixer)
     {
         err = NULL_OBJECT;
     }
-    return err;
+    return (BAEResult)err;
 }
 
 BAEResult BAEMixer_Unmute(BAEMixer mixer)
@@ -2491,7 +2493,7 @@ BAEResult BAEMixer_Unmute(BAEMixer mixer)
     {
         err = NULL_OBJECT;
     }
-    return err;
+    return (BAEResult)err;
 }
 
 
@@ -2958,7 +2960,7 @@ BAEResult BAEMixer_StartOutputToFile(BAEMixer theMixer,
 
             w->bitSize = ( theModifiers/*iModifiers*/ & BAE_USE_16) ? 16 : 8;
             w->channels = ( theModifiers /*iModifiers*/ & BAE_USE_STEREO) ? 2 : 1;
-            w->sampledRate = LONG_TO_UNSIGNED_FIXED(GM_ConvertFromOutputRateToRate(theRate/*iRate*/));
+            w->sampledRate = LONG_TO_UNSIGNED_FIXED(GM_ConvertFromOutputRateToRate((Rate)theRate/*iRate*/));
             w->compressionType = C_NONE;
             w->theWaveform = &buf;
             w->waveFrames = 1;
@@ -3261,7 +3263,7 @@ BAEResult BAESound_Delete(BAESound sound)
     }
     else
     {
-        printf("audio: BAESound_Delete invalid object\n");
+        BAE_STDERR("audio: BAESound_Delete invalid object\n");
         err = NULL_OBJECT;
     }
     return BAE_TranslateOPErr(err);
@@ -3353,7 +3355,7 @@ static void PV_BAESound_Unload(BAESound sound)
 
     while (GM_IsSampleProcessing(voice))
     {
-//      printf("BAE:deleting sound...\n");
+//      BAE_STDERR("BAE:deleting sound...\n");
         XWaitMicroseocnds(BAE_GetSliceTimeInMicroseconds());
     }
 
@@ -3362,7 +3364,7 @@ static void PV_BAESound_Unload(BAESound sound)
         GM_FreeWaveform(sound->pWave);
         sound->pWave = NULL;
     }
-//  printf("BAE:deleting sound done\n");
+//  BAE_STDERR("BAE:deleting sound done\n");
 }
 
 // BAESound_Unload()
@@ -3551,7 +3553,7 @@ BAEResult BAESound_LoadMemorySample(BAESound sound, void *pMemoryFile, unsigned 
             }
 //          else
 //          {
-//              printf("audio::sound loop start %ld end %ld\n", sound->pWave->startLoop,
+//              BAE_STDERR("audio::sound loop start %ld end %ld\n", sound->pWave->startLoop,
 //                                                              sound->pWave->endLoop);
 //          }
             BAE_ReleaseMutex(sound->mLock);
@@ -3785,7 +3787,7 @@ static void PV_DefaultSoundDoneCallback(void *reference)
                 }
                 else
                 {
-                    printf("audio:sound not in mixer list, no callback\n");
+                    BAE_STDERR("audio:sound not in mixer list, no callback\n");
                 }
             }
         }
@@ -3797,7 +3799,7 @@ static void PV_DefaultSoundDoneCallback(void *reference)
     }
     else
     {
-        printf("audio:sound no longer valid, no callback\n");
+        BAE_STDERR("audio:sound no longer valid, no callback\n");
     }
 }
 
@@ -5224,7 +5226,7 @@ BAEResult           BAEStream_IsPaused(BAEStream stream,
         }
         else
         {
-            err = PARAM_ERR;
+            err = (BAEResult)PARAM_ERR;
         }
     }
     else
@@ -5653,81 +5655,81 @@ void BAESong_DisplayInfo(BAESong song)
     GM_Song *pSong;
     int count;
 
-    printf("MiniBAE::Display Song info\n");
+    BAE_STDERR("MiniBAE::Display Song info\n");
 
     if ( (song) && (song->mID == OBJECT_ID) )
     {
         pSong = song->pSong;
 
-        printf("    seqType: ");
+        BAE_STDERR("    seqType: ");
         if (pSong->seqType == SEQ_MIDI)
         {
-            printf("MIDI\n");
+            BAE_STDERR("MIDI\n");
         }
         else
         {
     #if (X_PLATFORM == X_DANGER)
             if (pSong->seqType == SEQ_RTX)
             {
-                printf("RTX\n");
+                BAE_STDERR("RTX\n");
             }
             else
     #endif
             {
-                printf("UNKNOWN\n");
+                BAE_STDERR("UNKNOWN\n");
             }
         }
-        printf("    sequenceDataSize %ld\n", pSong->sequenceDataSize);
+        BAE_STDERR("    sequenceDataSize %ld\n", pSong->sequenceDataSize);
 
-        printf("    songID %d\n", pSong->songID);
-        printf("    maxSongVoices %d\n", pSong->maxSongVoices);
-        printf("    mixLevel %d\n", pSong->mixLevel);
-        printf("    maxEffectVoices %d\n", pSong->maxEffectVoices);
-        printf("    MasterTempo %ld\n", pSong->MasterTempo);
-        printf("    songTempo %d\n", pSong->songTempo);
-        printf("    songPitchShift %d\n", pSong->songPitchShift);
-        printf("    songPaused %s\n", pSong->songPaused ? "TRUE" : "FALSE");
-        printf("    songPrerolled %s\n", pSong->songPrerolled ? "TRUE" : "FALSE");
-        printf("    songPriority %d\n", pSong->songPriority);
-        printf("    songVolume %d\n", pSong->songVolume);
+        BAE_STDERR("    songID %d\n", pSong->songID);
+        BAE_STDERR("    maxSongVoices %d\n", pSong->maxSongVoices);
+        BAE_STDERR("    mixLevel %d\n", pSong->mixLevel);
+        BAE_STDERR("    maxEffectVoices %d\n", pSong->maxEffectVoices);
+        BAE_STDERR("    MasterTempo %ld\n", pSong->MasterTempo);
+        BAE_STDERR("    songTempo %d\n", pSong->songTempo);
+        BAE_STDERR("    songPitchShift %d\n", pSong->songPitchShift);
+        BAE_STDERR("    songPaused %s\n", pSong->songPaused ? "TRUE" : "FALSE");
+        BAE_STDERR("    songPrerolled %s\n", pSong->songPrerolled ? "TRUE" : "FALSE");
+        BAE_STDERR("    songPriority %d\n", pSong->songPriority);
+        BAE_STDERR("    songVolume %d\n", pSong->songVolume);
 
         if (pSong->seqType == SEQ_MIDI)
         {
-            printf("    ignoreBadInstruments %s\n", pSong->ignoreBadInstruments ? "TRUE" : "FALSE");
-            printf("    allowProgramChanges %s\n", pSong->allowProgramChanges ? "TRUE" : "FALSE");
-            printf("    loopSong %s\n", pSong->loopSong ? "TRUE" : "FALSE");
-            printf("    metaLoopDisabled %s\n", pSong->metaLoopDisabled ? "TRUE" : "FALSE");
-            printf("    disposeSongDataWhenDone %s\n", pSong->disposeSongDataWhenDone ? "TRUE" : "FALSE");
-            printf("    SomeTrackIsAlive %s\n", pSong->SomeTrackIsAlive ? "TRUE" : "FALSE");
-            printf("    songFinished %s\n", pSong->songFinished ? "TRUE" : "FALSE");
-            printf("    songLoopCount %d\n", pSong->songLoopCount);
-            printf("    songMaxLoopCount %d\n", pSong->songMaxLoopCount);                                                   // -1 means GM style bank select, -2 means allow program changes on percussion
+            BAE_STDERR("    ignoreBadInstruments %s\n", pSong->ignoreBadInstruments ? "TRUE" : "FALSE");
+            BAE_STDERR("    allowProgramChanges %s\n", pSong->allowProgramChanges ? "TRUE" : "FALSE");
+            BAE_STDERR("    loopSong %s\n", pSong->loopSong ? "TRUE" : "FALSE");
+            BAE_STDERR("    metaLoopDisabled %s\n", pSong->metaLoopDisabled ? "TRUE" : "FALSE");
+            BAE_STDERR("    disposeSongDataWhenDone %s\n", pSong->disposeSongDataWhenDone ? "TRUE" : "FALSE");
+            BAE_STDERR("    SomeTrackIsAlive %s\n", pSong->SomeTrackIsAlive ? "TRUE" : "FALSE");
+            BAE_STDERR("    songFinished %s\n", pSong->songFinished ? "TRUE" : "FALSE");
+            BAE_STDERR("    songLoopCount %d\n", pSong->songLoopCount);
+            BAE_STDERR("    songMaxLoopCount %d\n", pSong->songMaxLoopCount);                                                   // -1 means GM style bank select, -2 means allow program changes on percussion
 
-            printf("    songMidiTickLength %ld\n", pSong->songMidiTickLength);
-            printf("    songMicrosecondLength %ld\n", pSong->songMicrosecondLength);
+            BAE_STDERR("    songMidiTickLength %ld\n", pSong->songMidiTickLength);
+            BAE_STDERR("    songMicrosecondLength %ld\n", pSong->songMicrosecondLength);
 
             for (count = 0; count < 16; count++)
             {
-                printf("    channelVolume[%d] %d\n", count, pSong->channelVolume[count]);
+                BAE_STDERR("    channelVolume[%d] %d\n", count, pSong->channelVolume[count]);
             }
         }
 
         int inst = 0;
 
-        printf("    Instruments loaded: ");
+        BAE_STDERR("    Instruments loaded: ");
         for (count = 0; count < MAX_INSTRUMENTS * MAX_BANKS; count++)
         {
             if (pSong->instrumentData[count])
             {
-                printf("%d ", count);
+                BAE_STDERR("%d ", count);
                 inst++;
             }
         }
-        printf("\n    total loaded %d\n", inst);
+        BAE_STDERR("\n    total loaded %d\n", inst);
     }
     else
     {
-        printf("    null song\n");
+        BAE_STDERR("    null song\n");
     }
 }
 
@@ -6036,7 +6038,7 @@ BAEResult BAESong_LoadGroovoid(BAESong song, char *cName, BAE_BOOL ignoreBadInst
                 }
                 else
                 {
-                    theErr = BAE_GENERAL_BAD; // a BAESong must always have a pSong...
+                    theErr = (OPErr)BAE_GENERAL_BAD; // a BAESong must always have a pSong...
                 }
                 XDisposePtr(pXSong);
             }
@@ -6224,7 +6226,7 @@ BAEResult BAESong_LoadMidiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL 
                 }
                 else
                 {
-                    theErr = BAE_GENERAL_BAD;  // a BAESong must always have a pSong...
+                    theErr = (OPErr)BAE_GENERAL_BAD;  // a BAESong must always have a pSong...
                 }
                 XDisposePtr(pXSong);
             }
@@ -7055,7 +7057,7 @@ BAEResult BAESong_NoteOnWithLoad(BAESong song,
         }
         else
         {
-            err = BAE_GENERAL_BAD;
+            err = (OPErr)BAE_GENERAL_BAD;
         }
     
         BAE_ReleaseMutex(song->mLock);
@@ -7393,7 +7395,7 @@ static void PV_DefaultSongDoneCallback(void *threadContext, GM_Song *pSong, void
                 }
                 else
                 {
-                    printf("audio:song not in mixer list, no callback\n");
+                    BAE_STDERR("audio:song not in mixer list, no callback\n");
                 }
             }
         }
@@ -7405,7 +7407,7 @@ static void PV_DefaultSongDoneCallback(void *threadContext, GM_Song *pSong, void
     }
     else
     {
-        printf("audio:song no longer valid, no callback\n");
+        BAE_STDERR("audio:song no longer valid, no callback\n");
     }
 }
 
@@ -7480,7 +7482,7 @@ static void PV_DefaultSongControllerCallback(void *threadContext, struct GM_Song
                     }
                     else
                     {
-                        printf("audio:song not in mixer list, no callback\n");
+                        BAE_STDERR("audio:song not in mixer list, no callback\n");
                     }
             }
         }
@@ -7492,7 +7494,7 @@ static void PV_DefaultSongControllerCallback(void *threadContext, struct GM_Song
     }
     else
     {
-        printf("audio:song no longer valid, no callback\n");
+        BAE_STDERR("audio:song no longer valid, no callback\n");
     }
 }
 

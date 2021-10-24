@@ -201,12 +201,12 @@
 
 /* Instrument and Song structures
 */
-typedef struct 
+typedef struct X_PACKBY1
 {
     short int       instrumentNumber;
     short int       ResourceINSTID;
-} X_PACKBY1 Remap;
-    
+} Remap;
+
 enum
 {
     ID_NULL     =   0L,
@@ -270,7 +270,7 @@ typedef enum
 #define XBF_reserved6                   0x01
 
 // Song resource (SMS type)
-typedef struct
+typedef struct X_PACKBY1
 {
     XShortResourceID    midiResourceID;
     char                reserved_0;
@@ -292,7 +292,7 @@ typedef struct
     unsigned char       author;                         // variable pascal string
     unsigned char       title;                          // variable pascal string
     unsigned char       licensor_contact;
-} X_PACKBY1 SongResource_SMS;
+} SongResource_SMS;
 
 
 typedef enum
@@ -332,7 +332,7 @@ typedef enum
 
 
 // Song resource (RMF type - structured)
-typedef struct
+typedef struct X_PACKBY1
 {
     XShortResourceID    rmfResourceID;
     char                reserved_0;
@@ -367,7 +367,7 @@ typedef struct
 //  char                compser_notes[1];               // variable C string
 //  char                index_number[1];                // variable C string
 //  short int           velocityCurve[128];
-} X_PACKBY1 SongResource_RMF;
+} SongResource_RMF;
 
 // bits for SongResource_RMF_Linear flags
 #define XBFL_disableLoops               0x80
@@ -380,7 +380,7 @@ typedef struct
 #define XBFL_reserved0                  0x01
 
 // Song resource (RMF type - linear)
-typedef struct
+typedef struct X_PACKBY1
 {
     XShortResourceID    audioResourceID;
     char                reserved_0;
@@ -420,22 +420,22 @@ typedef struct
 //  char                foreign_rights[1];              // variable C string
 //  char                compser_notes[1];               // variable C string
 //  char                index_number[1];                // variable C string
-} X_PACKBY1 SongResource_RMF_Linear;
+} SongResource_RMF_Linear;
 
 #define DEFAULT_RESOURCE_VERS_ID    0       // ID used inside of RMF file, or a bank
 // version structure
-typedef struct
+typedef struct X_PACKBY1
 {
     short int   versionMajor;
     short int   versionMinor;
     short int   versionSubMinor;
-} X_PACKBY1 XVersion;
+} XVersion;
 
 typedef void SongResource;
 
 // SongResource structure expanded. These values are always in native word order
 // Use XGetSongResourceInfo, and XNewSongResourceInfo/XDisposeSongResourceInfo
-typedef struct
+typedef struct X_PACKBY1
 {
     short int           maxMidiNotes;
     short int           maxEffects;
@@ -479,10 +479,10 @@ typedef struct
     short int           *remaps;
 
     short int           *velocityCurve;
-} X_PACKBY1 SongResource_Info;
+} SongResource_Info;
 
 
-typedef struct
+typedef struct X_PACKBY1
 {
     char                lowMidi;
     char                highMidi;
@@ -492,7 +492,7 @@ typedef struct
                                             // rootKey for sample
     short int           miscParameter2;     // if ZBF_enableSoundModifier is enabled then its
                                             // used as smodParmeter2, otherwise its a volume level
-} X_PACKBY1 KeySplit;
+} KeySplit;
 
 // bits for Instrument flags1
 #define ZBF_enableInterpolate           0x80    // not used
@@ -514,7 +514,7 @@ typedef struct
 #define ZBF_playFromSplit               0x01    // not used
 
 // Special Instrument resource. This can only be used when there is no tremolo data, or key splits
-typedef struct
+typedef struct X_PACKBY1
 {
     XShortResourceID    sndResourceID;
     short int           midiRootKey;
@@ -534,42 +534,42 @@ typedef struct
     short int           reserved_3;
     short int           descriptorName;     // Always 0
     short int           descriptorFlags;    // Always 0
-} X_PACKBY1 InstrumentResource;
+} InstrumentResource;
 
 #define DEFAULT_RESOURCE_BANK_ID    0       // ID used inside of RMF file
 #define BANK_NAME_MAX_SIZE          4096
 // This is a ID_BANK resource
-typedef struct
+typedef struct X_PACKBY1
 {
     unsigned long   version;
     char            bankURL[BANK_NAME_MAX_SIZE];
     char            bankName[BANK_NAME_MAX_SIZE];
-} X_PACKBY1 BankStatus;
+} BankStatus;
 
 #define DEFAULT_RESOURCE_PASSWORD_ID 0      // ID used inside of RMF file
 // This is a ID_PASSWORD resource
-typedef struct
+typedef struct X_PACKBY1
 {
     unsigned long   version;
 //  char            eacs[];     // variable length password accessed with XDecryptAndDuplicateStr
-} X_PACKBY1 PasswordAccess;
+} PasswordAccess;
 
 #define DEFAULT_RESOURCE_ALIAS_ID   0       // ID used inside of a patch file
 #define ALIAS_ID_RESOURCE_VERSION   0
 
-typedef struct
+typedef struct X_PACKBY1
 {
     XLongResourceID aliasFrom;
     XLongResourceID aliasTo;
-} X_PACKBY1 XAliasLink;
+} XAliasLink;
 
 // This is a ID_ALIAS resource
-typedef struct
+typedef struct X_PACKBY1
 {
     unsigned long   version;
     unsigned long   numberOfAliases;
     XAliasLink      list[1];    // dynamic list
-} X_PACKBY1 XAliasLinkResource;
+} XAliasLinkResource;
 
 
 // audioType for the AudioResource structure
@@ -587,7 +587,7 @@ enum
 };
 
 #define AUDIO_OBJECT_VERSION            0x0001
-typedef struct
+typedef struct X_PACKBY1
 {
     unsigned long   version;            // structure version 1
     unsigned long   dataLength;         // length of sample data in bytes
@@ -611,7 +611,7 @@ typedef struct
     unsigned long   filler[16];
     unsigned long   firstSampleFiller;
 //  data
-} X_PACKBY1 AudioResource;
+} AudioResource;
 
 // Sun compiler warns about this as an enum
 #define rate48khz           0xBB800000L // 48000.00000 in fixed-point
@@ -660,7 +660,7 @@ enum
 
 // This is the third sample format support by Beatnik.
 //
-typedef struct
+typedef struct X_PACKBY1
 {
     XResourceType       subType;            // sub type: C_NONE, C_IMA4, C_ULAW, C_MPEG, etc
     XFIXED              sampleRate;         // sample rate
@@ -687,10 +687,10 @@ typedef struct
     XDWORD              reserved3[8];       // extra
 
     XBYTE               sampleArea[1];      // space for when samples follow directly
-} X_PACKBY1 XSoundHeader3;
+} XSoundHeader3;
 
 
-typedef struct
+typedef struct X_PACKBY1
 {
     char                    *samplePtr;     /*if NIL then samples are in sampleArea*/
     unsigned long           length;         /*length of sound in bytes*/
@@ -700,10 +700,10 @@ typedef struct
     unsigned char           encode;         /*header encoding*/
     unsigned char           baseFrequency;  /*baseFrequency value*/
     unsigned char           sampleArea[1];  /*space for when samples follow directly*/
-} X_PACKBY1 XSoundHeader;
+} XSoundHeader;
 typedef XSoundHeader *XSoundHeaderPtr;
 
-typedef struct
+typedef struct X_PACKBY1
 {
     char                    *samplePtr;         /*if nil then samples are in sample area*/
     unsigned long           numChannels;        /*number of channels i.e. mono = 1*/
@@ -729,10 +729,10 @@ typedef struct
     unsigned short          sampleSize;         /*number of bits in non-compressed sample*/
                                                 //MOE: For ALAW, ULAW, and IMA, the number of bytes is stored!
     unsigned char           sampleArea[1];      /*space for when samples follow directly*/
-} X_PACKBY1 XCmpSoundHeader;
+} XCmpSoundHeader;
 typedef XCmpSoundHeader * XCmpSoundHeaderPtr;
 
-typedef struct
+typedef struct X_PACKBY1
 {
     char                    *samplePtr;         /*if nil then samples are in sample area*/
     unsigned long           numChannels;        /*number of channels,  ie mono = 1*/
@@ -753,10 +753,10 @@ typedef struct
     unsigned long           futureUse3;         /*reserved by Apple*/
     unsigned long           futureUse4;         /*reserved by Apple*/
     unsigned char           sampleArea[1];      /*space for when samples follow directly*/
-} X_PACKBY1 XExtSoundHeader;
+} XExtSoundHeader;
 typedef XExtSoundHeader *XExtSoundHeaderPtr;
 
-typedef struct
+typedef struct X_PACKBY1
 {
     short int       type;
     short int       numModifiers;
@@ -767,27 +767,27 @@ typedef struct
     unsigned short  cmd;
     short int       param1;
     long            param2;
-} X_PACKBY1 XSoundFormat1;
+} XSoundFormat1;
 
-typedef struct
+typedef struct X_PACKBY1
 {
     XSoundFormat1   sndHeader;
     XSoundHeader    sndBuffer;
-} X_PACKBY1 XSndHeader1;
+} XSndHeader1;
 
-typedef struct
+typedef struct X_PACKBY1
 {
     XSoundFormat1   sndHeader;
     XExtSoundHeader sndBuffer;
-} X_PACKBY1 XExtSndHeader1;
+} XExtSndHeader1;
 
-typedef struct
+typedef struct X_PACKBY1
 {
     XSoundFormat1   sndHeader;
     XCmpSoundHeader sndBuffer;
-} X_PACKBY1 XCmpSndHeader1;
+} XCmpSndHeader1;
 
-typedef struct
+typedef struct X_PACKBY1
 {
     short int       type;
     short int       refCount;
@@ -796,25 +796,25 @@ typedef struct
     unsigned short  cmd;
     short int       param1;
     long            param2;
-} X_PACKBY1 XSoundFormat2;
+} XSoundFormat2;
 
-typedef struct
+typedef struct X_PACKBY1
 {
     XSoundFormat2   sndHeader;
     XSoundHeader    sndBuffer;
-} X_PACKBY1 XSndHeader2;
+} XSndHeader2;
 
-typedef struct
+typedef struct X_PACKBY1
 {
     XSoundFormat2   sndHeader;
     XExtSoundHeader sndBuffer;
-} X_PACKBY1 XExtSndHeader2;
+} XExtSndHeader2;
 
-typedef struct
+typedef struct X_PACKBY1
 {
     short int       type;
     XSoundHeader3   sndBuffer;
-} X_PACKBY1 XSndHeader3;
+} XSndHeader3;
 
 #include "X_UnpackStructures.h"
 

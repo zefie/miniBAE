@@ -1297,7 +1297,7 @@ void * GM_AudioStreamGetDoneCallback(STREAM_REFERENCE reference, GM_SoundDoneCal
     void                    *doneCallbackReference;
 
     doneCallback = NULL;
-    reference = NULL;
+    reference = -1;
     pStream = PV_AudioStreamGetFromReference(reference);
     if (pStream)
     {

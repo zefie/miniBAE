@@ -295,6 +295,9 @@ SongResource * XNewSongPtr( SongType songType,
             }
             song = (SongResource *)songRMF2;
             break;
+
+        default:
+	    break;
     }
     return song;
 }
@@ -559,6 +562,8 @@ static XBOOL PV_ValidResourceForSongType(SongResourceType resourceType, SongType
                 case R_INSTRUMENT_REMAP:
                     valid = TRUE;
                     break;
+	       default:
+		    break;
             }
             break;
         case SONG_TYPE_RMF:
@@ -594,8 +599,13 @@ static XBOOL PV_ValidResourceForSongType(SongResourceType resourceType, SongType
                 case R_MISC8:
                     valid = TRUE;
                     break;
+	       default:
+		    break;
             }
             break;
+
+       default:
+	    break;
     }
     return valid;
 }
@@ -742,6 +752,8 @@ SongResource * XChangeSongResource(SongResource *theSong, long songSize, SongRes
                                 pData += name4[0] + 1;
                             }
                             break;
+			default:
+ 			    break;
                     }
                     break;
                 case SONG_TYPE_RMF:
@@ -755,6 +767,10 @@ SongResource * XChangeSongResource(SongResource *theSong, long songSize, SongRes
                     newSong = PV_AddRMFSongResource(theSong, resourceType, pResource, resourceLength);
                     // we don't throw away this because we let the caller do that
                     break;
+
+		default:
+		    break;
+
             }
         }
     }
@@ -831,7 +847,7 @@ unsigned long XGetSongInformationSize(SongResource *theSong, long songSize, Song
                     case I_COMPOSER:
                         // name is a pascal string
                         length = songSize;
-        
+
                         pData = (char *)&songSMS->remaps;
                         pData += sizeof(Remap) * songSMS->remapCount;
                         offset = pData - (char *)songSMS;
@@ -849,7 +865,7 @@ unsigned long XGetSongInformationSize(SongResource *theSong, long songSize, Song
                     case I_COPYRIGHT:
                         // name is a pascal string
                         length = songSize;
-        
+
                         pData = (char *)&songSMS->remaps;
                         pData += sizeof(Remap) * songSMS->remapCount;
                         offset = pData - (char *)songSMS;
@@ -865,7 +881,7 @@ unsigned long XGetSongInformationSize(SongResource *theSong, long songSize, Song
                     case I_TITLE:
                         // name is a pascal string
                         length = songSize;
-        
+
                         pData = (char *)&songSMS->remaps;
                         pData += sizeof(Remap) * songSMS->remapCount;
                         offset = pData - (char *)songSMS;
@@ -891,7 +907,7 @@ unsigned long XGetSongInformationSize(SongResource *theSong, long songSize, Song
                     case I_PUBLISHER_CONTACT:
                         // name is a pascal string
                         length = songSize;
-        
+
                         pData = (char *)&songSMS->remaps;
                         pData += sizeof(Remap) * songSMS->remapCount;
                         offset = pData - (char *)songSMS;
@@ -918,9 +934,11 @@ unsigned long XGetSongInformationSize(SongResource *theSong, long songSize, Song
                             }
                         }
                         break;
+		    default:
+			break;
                 }
                 break;
-            
+
             case SONG_TYPE_RMF:
                 songRMF = (SongResource_RMF *)theSong;
                 r_temp = PV_TranslateSongInfoIntoSongResourceType(type);
@@ -932,9 +950,12 @@ unsigned long XGetSongInformationSize(SongResource *theSong, long songSize, Song
                                             pData, length, NULL, &size);
                 }
                 break;
-            
-            case SONG_TYPE_RMF_LINEAR:
-                break;
+
+//            case SONG_TYPE_RMF_LINEAR:
+//              break;
+
+	    default:
+		break;
         }
     }
     return size;
@@ -965,7 +986,7 @@ void XGetSongInformation(SongResource *theSong, long songSize, SongInfo type,
                     case I_COMPOSER:
                         // name is a pascal string
                         length = songSize;
-        
+
                         pData = (char *)&songSMS->remaps;
                         pData += sizeof(Remap) * songSMS->remapCount;
                         offset = pData - (char *)songSMS;
@@ -984,7 +1005,7 @@ void XGetSongInformation(SongResource *theSong, long songSize, SongInfo type,
                     case I_COPYRIGHT:
                         // name is a pascal string
                         length = songSize;
-        
+
                         pData = (char *)&songSMS->remaps;
                         pData += sizeof(Remap) * songSMS->remapCount;
                         offset = pData - (char *)songSMS;
@@ -1001,7 +1022,7 @@ void XGetSongInformation(SongResource *theSong, long songSize, SongInfo type,
                     case I_TITLE:
                         // name is a pascal string
                         length = songSize;
-        
+
                         pData = (char *)&songSMS->remaps;
                         pData += sizeof(Remap) * songSMS->remapCount;
                         offset = pData - (char *)songSMS;
@@ -1028,7 +1049,7 @@ void XGetSongInformation(SongResource *theSong, long songSize, SongInfo type,
                     case I_PUBLISHER_CONTACT:
                         // name is a pascal string
                         length = songSize;
-        
+
                         pData = (char *)&songSMS->remaps;
                         pData += sizeof(Remap) * songSMS->remapCount;
                         offset = pData - (char *)songSMS;
@@ -1056,9 +1077,12 @@ void XGetSongInformation(SongResource *theSong, long songSize, SongInfo type,
                             }
                         }
                         break;
+
+		    default:
+			break;
                 }
                 break;
-            
+
             case SONG_TYPE_RMF:
                 songRMF = (SongResource_RMF *)theSong;
                 r_temp = PV_TranslateSongInfoIntoSongResourceType(type);
@@ -1071,9 +1095,12 @@ void XGetSongInformation(SongResource *theSong, long songSize, SongInfo type,
                                             pData, length, targetBuffer, &bufferBytes);
                 }
                 break;
-            
-            case SONG_TYPE_RMF_LINEAR:
-                break;
+
+//            case SONG_TYPE_RMF_LINEAR:
+//                break;
+
+	    default:
+		break;
         }
 
 // there should be no bad characters
@@ -1549,6 +1576,8 @@ static char * PV_GetStringItemFromResource_info(SongResource_Info *pSongInfo, So
         case R_MISC8:
             resourceName = pSongInfo->misc8;
             break;
+	default:
+	    break;
     }
     return resourceName;
 }
@@ -1635,6 +1664,8 @@ static void PV_SetStringItemFromResource_info(SongResource_Info *pSongInfo, Song
         case R_MISC8:
             pSongInfo->misc8 = resourceName;
             break;
+	default:
+	    break;
     }
 }
 #endif
@@ -1712,8 +1743,11 @@ SongResource_Info * XGetSongResourceInfo(SongResource *pSong, long songSize)
                     pInfo->objectResourceID = (XShortResourceID)XGetShort(&songRMF2->audioResourceID);
                     pInfo->songTempo = (unsigned short)XGetShort(&songRMF2->songTempo);
                     break;
+
+		default:
+		    break;
             }
-            
+
             // now copy in all the strings
             max = sizeof(rmf_processTypes) / sizeof(SongResourceType);
             for (count = 0; count < max; count++)
@@ -1776,6 +1810,8 @@ SongResource * XNewSongFromSongResourceInfo(SongResource_Info *pSongInfo)
                     max = sizeof(rmf_processTypes) / sizeof(SongResourceType);
                     XSetSongVolume(newSong, pSongInfo->songVolume);
                     break;
+		default:
+		    break;
             }
 
             if (pProcess)

@@ -68,14 +68,14 @@ SRC		+= \
 OBJ_DIR := obj/
 OBJ := $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
 
-ARCH		:= -m32
-CC		:= gcc
-CXX		:= g++
-LD		:= gcc
-AR      	:= ar
+ARCH		:= -m32 -static
+CC		:= emcc
+CXX		:= emcc
+LD		:= emcc
+AR      	:= emar
 STRIP		:= strip
 
-CFLAGS  	:= $(ARCH) -static -fPIC -g -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
+CFLAGS  	:= $(ARCH) -static -fPIC -g -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
 CFLAGS		+= -DX_PLATFORM=X_ANSI
 #CFLAGS		+= -D_DEBUG=1
 CXXFLAGS 	:= $(CFLAGS)
@@ -84,17 +84,13 @@ LDFLAGS		:= $(ARCH)
 
 LIBS	= 	-lpthread
 
-all: $(TARGET).a ${TARGET}_debug.so ${TARGET}.so
+all: $(TARGET).a ${TARGET}.so
 
 $(TARGET).a: $(OBJ)
 	$(AR) rcs $(TARGET).a $(OBJ)
 
-$(TARGET)_debug.so: ${OBJ}
-	${CC} -shared ${ARCH} ${OBJ} -o ${TARGET}_debug.so
-
-$(TARGET).so: $(TARGET)_debug.so
-	cp $(TARGET)_debug.so $(TARGET).so
-	${STRIP} -s ${TARGET}.so
+$(TARGET).so:
+	${CC} -shared -s ${ARCH} ${OBJ} -o ${TARGET}.so
 
 # Rules for compiling source files to object files
 $(OBJ_DIR)%.o : %.cpp

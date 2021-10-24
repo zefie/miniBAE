@@ -209,7 +209,7 @@
 //  extended waveform format structure used for all non-PCM formats. this
 //  structure is common to all non-PCM formats.
 //
-typedef struct
+typedef struct X_PACKBY1
 {
     XWORD       wFormatTag;         /* format type */
     XWORD       nChannels;          /* number of channels (i.e. mono, stereo...) */
@@ -219,8 +219,8 @@ typedef struct
     XWORD       wBitsPerSample;     /* number of bits per sample of mono data */
     XWORD       cbSize;             /* the count in bytes of the size of */
                                     /* extra information (after cbSize) */
-} X_PACKBY1 XWaveHeader;
- 
+} XWaveHeader;
+
 
 //
 //  IMA endorsed ADPCM structure definitions--note that this is exactly
@@ -229,16 +229,16 @@ typedef struct
 //      for WAVE_FORMAT_IMA_ADPCM   (0x0011)
 //
 //
-typedef struct 
+typedef struct X_PACKBY1
 {
         XWaveHeader     wfx;
         XWORD           wSamplesPerBlock;
-} X_PACKBY1 XWaveHeaderIMA;
+} XWaveHeaderIMA;
 
 
 
 
-typedef struct 
+typedef struct X_PACKBY1
 {
   XDWORD            dwIdentifier;       // a unique number (ie, different than the ID number of any other SampleLoop structure). This field may
                                         // correspond with the dwIdentifier field of some CuePoint stored in the Cue chunk. In other words, the CuePoint structure which has the
@@ -259,9 +259,9 @@ typedef struct
                                         // value of 0x80000000 represents 1/2 of a sample length.
   XDWORD            dwPlayCount;        // number of times to play the loop. A value of 0 specifies an infinite sustain loop (ie, the wave keeps looping
                                         // until some external force interrupts playback, such as the musician releasing the key that triggered that wave's playback).
-} X_PACKBY1 XSampleLoop;
+} XSampleLoop;
 
-typedef struct 
+typedef struct X_PACKBY1
 {
   XDWORD            dwManufacturer;     // the MMA Manufacturer code for the intended sampler
   XDWORD            dwProduct;          // Product code (ie, model ID) of the intended sampler for the dwManufacturer.
@@ -292,7 +292,7 @@ typedef struct
   XDWORD            cbSamplerData;      // The cbSamplerData field specifies the size (in bytes) of any optional fields that an application wishes to append to this chunk.
 
   XSampleLoop       loops[1];
-} X_PACKBY1 XSamplerChunk;
+} XSamplerChunk;
 
 // WAVE form wFormatTag IDs
 
@@ -373,22 +373,22 @@ enum
     X_BODY          = FOUR_CHAR('B','O','D','Y')        //      'BODY'
 };
 
-typedef struct
+typedef struct X_PACKBY1
 {
     long    ckID;      /* ID */
     long    ckSize;    /* size */
     long    ckData;
-} X_PACKBY1 XIFFChunk;
+} XIFFChunk;
 
-typedef struct
+typedef struct X_PACKBY1
 {
     short int       numChannels;
     unsigned long   numSampleFrames;
     short int       sampleSize;
     unsigned char   sampleRate[10];
-} X_PACKBY1 XAIFFHeader;
+} XAIFFHeader;
 
-typedef struct
+typedef struct X_PACKBY1
 {
     short int       numChannels;
     unsigned long   numSampleFrames;
@@ -396,9 +396,9 @@ typedef struct
     unsigned char   sampleRate[10];
     unsigned long   compressionType;
     char            compressionName[256];           /* variable length array, Pascal string */
-} X_PACKBY1 XAIFFExtenedHeader;
+} XAIFFExtenedHeader;
 
-typedef struct
+typedef struct X_PACKBY1
 {
     unsigned short  numMarkers; // 2
     short int       id1;        // 0
@@ -407,9 +407,9 @@ typedef struct
     short int       id2;        // 1
     unsigned long   position2;
     char            name2[8];   // 07656E644C6F6F70 'endLoop'
-} X_PACKBY1 XSingleLoopMarker;
+} XSingleLoopMarker;
 
-typedef struct
+typedef struct X_PACKBY1
 {
     unsigned char   baseFrequency;
     unsigned char   detune;
@@ -425,19 +425,19 @@ typedef struct
     short int       releaseLoop_beginLoop;
     short int       releaseLoop_endLoop;
     short int       extra;
-} X_PACKBY1 XInstrumentHeader;
+} XInstrumentHeader;
 
-typedef struct
+typedef struct X_PACKBY1
 {
     unsigned long   offset;
     unsigned long   blockSize;
-} X_PACKBY1 XSoundData;
+} XSoundData;
 
 /**********************- AU Defines -**************************/
     
 #include "g72x.h"
 
-typedef struct 
+typedef struct
 {
     unsigned long magic;          // magic number 
     unsigned long hdr_size;       // size of the whole header, including optional comment.
@@ -445,14 +445,14 @@ typedef struct
     unsigned long encoding;       // format of data contained in this file 
     unsigned long sample_rate;    // sample rate of data in this file 
     unsigned long channels;       // numbder of interleaved channels (usually 1 or 2) 
-} X_PACKBY1 SunAudioFileHeader;
+} SunAudioFileHeader;
 
 typedef struct
 {
     struct g72x_state   state;
     unsigned int        buffer;
     int                 bits;
-} X_PACKBY1 SunDecodeState;
+} SunDecodeState;
 
 // Note these are defined for big-endian architectures 
 #define SUN_AUDIO_FILE_MAGIC_NUMBER (0x2E736E64L)       // '.snd'
@@ -544,6 +544,8 @@ static long IFF_GetNextGroup(X_IFF *pIFF, XIFFChunk *pChunk)
                 }
                 pChunk->ckData = XGetLong(&pChunk->ckData);
                 break;
+	   default:
+		break;
         }
     }
     else
@@ -923,7 +925,7 @@ static OPErr PV_ReadSunAUFile(  long encoding,
                 sampleByteLength -= 2;
             }
 #else
-// fast             
+// fast
             sampleByteLength = sampleByteLength / (MAX_AU_DECODE_BLOCK_SIZE*2);
             while (sampleByteLength > 0)
             {
@@ -987,6 +989,8 @@ decode_adpcm:
                 }
             }
             break;
+	default:
+	    break;
     }
     if (pBufferLength)
     {
@@ -1377,6 +1381,8 @@ static GM_Waveform* PV_ReadIntoMemoryWaveFile(XFILE file, XBOOL decodeData,
                     case X_WAVE_FORMAT_MULAW:
                         wave->bitSize = 16;
                         break;
+		    default:
+			break;
                     }
 
                     // file is positioned at the sample data
@@ -2864,18 +2870,27 @@ void * GM_CreateFileState(AudioFileType fileType)
                 ((SunDecodeState *)state)->bits = 0;
             }
             break;
+	default:
+	    break;
     }
     return state;
 }
 
 void GM_DisposeFileState(AudioFileType fileType, void *state)
 {
+    if (fileType == FILE_AU_TYPE) {
+	XDisposePtr((XPTR)state);
+    }
+/*
     switch (fileType)
     {
         case FILE_AU_TYPE:
             XDisposePtr((XPTR)state);
             break;
+        default:
+            break;
     }
+*/
 }
 
 // Read into memory a file
@@ -3346,6 +3361,9 @@ OPErr GM_ReadAndDecodeFileStream(XFILE fileReference,
                         break;
                 }
                 break;
+
+	    default:
+		break;
         }
         if (calculateFileSize && fileReference)
         {

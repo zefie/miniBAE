@@ -109,6 +109,11 @@
     extern "C" {
 #endif
 
+#define X_FILETYPE_MIDI "MThd"
+#define X_FILETYPE_RMF  "IREZ"
+#define X_FILETYPE_AIFF "FORM"
+#define X_FILETYPE_WAVE "RIFF"
+
 // This file contains API's that need to be defined in order to get BAE (IgorAudio)
 // to link and compile.
 

@@ -79,8 +79,11 @@
 //      in between the () and does nothing.
 
 
+#define BAE_STDOUT		printf
+#define BAE_STDERR(...)         fprintf (stderr, __VA_ARGS__)
+
 #ifndef _DEBUG
-    #if (X_PLATFORM == X_WIN95) || (X_PLATFORM == X_WIN_HARDWARE) || (X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS)
+    #if (X_PLATFORM == X_WIN95) || (X_PLATFORM == X_WIN_HARDWARE) || (X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS) || (X_PLATFORM == X_ANSI)
         #define BAE_PRINTF
     #else
         #define BAE_PRINTF(...)
@@ -88,8 +91,8 @@
     #define BAE_ASSERT(exp)         ((void)0)
     #define BAE_VERIFY(exp)         (exp)
 #else
-    #if (X_PLATFORM == X_WIN95) || (X_PLATFORM == X_WIN_HARDWARE) || (X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS)
-        #define BAE_PRINTF          printf      
+    #if (X_PLATFORM == X_WIN95) || (X_PLATFORM == X_WIN_HARDWARE) || (X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS) || (X_PLATFORM == X_ANSI)
+        #define BAE_PRINTF		BAE_STDERR
         #ifdef ASSERT
             #define BAE_ASSERT(exp)     ASSERT(exp)
             #define BAE_VERIFY(exp)     ASSERT(exp)

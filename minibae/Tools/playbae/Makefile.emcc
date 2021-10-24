@@ -1,4 +1,4 @@
-TARGET = playbae
+TARGET = playbae.js
 
 vpath	%.c ../../BAE_Source/Common ../../BAE_Source/Platform ../../BAE_MPEG_Source_II
 
@@ -68,15 +68,15 @@ OBJ_DIR := obj/
 OBJ := $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
 
 ARCH		:= -m32 -static
-CC		:= gcc
-CXX		:= g++
-LD		:= gcc
+CC		:= emcc
+CXX		:= emcc
+LD		:= emcc
 
-CFLAGS  	:= $(ARCH) -g -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
+CFLAGS  	:= $(ARCH) -g -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value -Wno-pragma-pack
 CFLAGS		+= -DX_PLATFORM=X_ANSI
 #CFLAGS		+= -D_DEBUG=1
 CXXFLAGS 	:= $(CFLAGS)
-LDFLAGS		:= $(ARCH)
+LDFLAGS		:= $(ARCH) --embed-file patches.hsb@/home/web_user/patches.hsb -s SINGLE_FILE=1 -s 'DEFAULT_LIBRARY_FUNCS_TO_INCLUDE=[$$Browser]' -s EXPORT_ES6=1 -s 'EXPORTED_RUNTIME_METHODS=[FS]'
 
 
 LIBS	= 	-lpthread
@@ -88,7 +88,7 @@ all: $(TARGET)
 
 $(TARGET): $(OBJ)
 	cp $(DEFAULT_PATCHES) patches.hsb
-	${LD} -s -o $@ ${LDFLAGS} ${OBJ} -Wl,--format=binary -Wl,patches.hsb -Wl,--format=default ${LIBS}
+	${LD} -o $@ ${LDFLAGS} ${OBJ} ${LIBS}
 	rm -f patches.hsb
 
 # Rules for compiling source files to object files
@@ -106,27 +106,6 @@ install: all
 	cp $(TARGET) ../../bin/.
 
 lib_install:
-
-test: ${TARGET}
-	./${TARGET} -p ../TestSuite/minibae-wtv.hsb -m ../TestSuite/world1.mid -mr 44100 -o ~/test44.wav
-
-test2: ${TARGET}
-	./${TARGET} -p ../TestSuite/minibae-wtv.hsb -m ../TestSuite/karTV.mid -mr 44100 -o ~/test_loop.wav
-
-test3: ${TARGET}
-	./${TARGET} -p ../TestSuite/minibae-wtv.hsb -m ../TestSuite/world1.mid -mr 11025 -o ~/test11.wav
-
-test4: ${TARGET}
-	./${TARGET} -p ../TestSuite/minibae-wtv.hsb -m ../TestSuite/world1.mid -mr 16000 -o ~/test16.wav
-
-test5: ${TARGET}
-	./${TARGET} -p ../TestSuite/minibae-wtv.hsb -m ../TestSuite/world1.mid -mr 32000 -o ~/test32.wav
-
-test6: ${TARGET}
-	./${TARGET} -m ../TestSuite/world1.mid -mr 44100 -o ~/test.wav
-
-pack: ${TARGET}
-	cat ./${TARGET} | gzip -9c > ./playbae_static.gz
 
 clean:
 	@rm -f $(TARGET)

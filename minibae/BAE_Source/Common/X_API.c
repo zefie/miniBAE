@@ -1248,7 +1248,7 @@ XERR XGetTempXFILENAME(XFILENAME* xfilename)
     char sfn[30] = "/tmp/bae_tmp.XXXXXX";
     char* result = NULL;
 
-    result = mktemp(sfn);
+    result = mkstemp(sfn);
     XConvertNativeFileToXFILENAME(result, xfilename);
 #endif
 

@@ -326,10 +326,12 @@ typedef long            BAE_EVENT_REFERENCE;    // reference to an idle time eve
 // General defines
 enum 
 {
+    BAE_MIN_VOICES              =   4,
     BAE_MAX_VOICES              =   64,     // total number of voices. This is shared amongst
                                             // all BAESound's, BAESoundStream's, and BAEMidiSong's
     BAE_MAX_INSTRUMENTS         =   768,    // 3 banks, pitched and perc
     BAE_MAX_SONGS               =   2,
+    BAE_MAX_OVERDRIVE_PCT	=   524188,
     BAE_MAX_MIDI_VOLUME         =   127,
     BAE_MAX_MIDI_TRACKS         =   65,     // 64 midi tracks, plus 1 tempo track
     BAE_MAX_MIDI_CHANNELS       =   16,

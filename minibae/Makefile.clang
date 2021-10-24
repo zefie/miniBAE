@@ -69,20 +69,21 @@ OBJ_DIR := obj/
 OBJ := $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
 
 ARCH		:= -m32
-CC		:= gcc
-CXX		:= g++
-LD		:= gcc
+CC		:= clang
+CXX		:= clang++
+LD		:= clang
 AR      	:= ar
 STRIP		:= strip
 
-CFLAGS  	:= $(ARCH) -static -fPIC -g -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
+CFLAGS  	:= $(ARCH) -static -g -O2 -fPIC $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
 CFLAGS		+= -DX_PLATFORM=X_ANSI
 #CFLAGS		+= -D_DEBUG=1
 CXXFLAGS 	:= $(CFLAGS)
-LDFLAGS		:= $(ARCH)
+LDFLAGS		:= -shared $(ARCH)
 
 
-LIBS	= 	-lpthread
+LIBS	= 	-lm \
+		-lpthread
 
 all: $(TARGET).a ${TARGET}_debug.so ${TARGET}.so
 
@@ -90,7 +91,7 @@ $(TARGET).a: $(OBJ)
 	$(AR) rcs $(TARGET).a $(OBJ)
 
 $(TARGET)_debug.so: ${OBJ}
-	${CC} -shared ${ARCH} ${OBJ} -o ${TARGET}_debug.so
+	${LD} ${LDFLAGS} ${LIBS} ${OBJ} -o ${TARGET}_debug.so
 
 $(TARGET).so: $(TARGET)_debug.so
 	cp $(TARGET)_debug.so $(TARGET).so

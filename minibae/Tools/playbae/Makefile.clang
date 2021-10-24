@@ -68,18 +68,19 @@ OBJ_DIR := obj/
 OBJ := $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
 
 ARCH		:= -m32 -static
-CC		:= gcc
-CXX		:= g++
-LD		:= gcc
+CC		:= clang
+CXX		:= clang
+LD		:= clang
 
-CFLAGS  	:= $(ARCH) -g -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
+CFLAGS  	:= $(ARCH) -g -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value -Wno-pragma-pack
 CFLAGS		+= -DX_PLATFORM=X_ANSI
 #CFLAGS		+= -D_DEBUG=1
 CXXFLAGS 	:= $(CFLAGS)
-LDFLAGS		:= $(ARCH)
+LDFLAGS		:= $(ARCH) -Wl,--format=binary -Wl,patches.hsb -Wl,--format=default
 
 
-LIBS	= 	-lpthread
+LIBS	= 	-lm \
+		-lpthread
 
 
 DEFAULT_PATCHES	:= ../TestSuite/patches.hsb
@@ -88,7 +89,7 @@ all: $(TARGET)
 
 $(TARGET): $(OBJ)
 	cp $(DEFAULT_PATCHES) patches.hsb
-	${LD} -s -o $@ ${LDFLAGS} ${OBJ} -Wl,--format=binary -Wl,patches.hsb -Wl,--format=default ${LIBS}
+	${LD} -o $@ ${LDFLAGS} ${OBJ} ${LIBS}
 	rm -f patches.hsb
 
 # Rules for compiling source files to object files
