@@ -6,7 +6,7 @@ INC_PATH	:= -I../../BAE_Source/Common
 INC_PATH	+= -I../../BAE_Source/Platform
 INC_PATH	+= -I../../BAE_MPEG_Source_II
 
-SRC		:=	BAE_API_MacOSX.c
+SRC		:=	BAE_API_Ansi.c
 
 SRC		+= \
 			DriverTools.c \
@@ -68,25 +68,25 @@ OBJ_DIR := obj/
 OBJ := $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
 
 #ARCH	:= -arch x86_64
-ARCH	:= -arch i386
+ARCH	:= -m32 -static
 CC		:= gcc
 CXX		:= g++
 LD		:= g++
 
-CFLAGS  	:= $(ARCH) -g -O3 $(INC_PATH) -D_THREAD_SAFE
+CFLAGS  	:= $(ARCH) -g -Os $(INC_PATH) -D_THREAD_SAFE
 CFLAGS		+= -DX_PLATFORM=X_MACINTOSH
 #CFLAGS		+= -DUSE_MPEG_DECODER=1
 CFLAGS		+= -D_DEBUG=1
 #CFLAGS		+= -DREVERB_USED=REVERB_DISABLED
 CXXFLAGS 	:= $(CFLAGS)
-LDFLAGS		:= $(ARCH) -all_load -prebind
+LDFLAGS		:= $(ARCH)
 
 
 LIBS	= 	-L/opt/local/lib \
 			-lpthread \
-			-Wl,-framework,CoreFoundation \
-			-Wl,-framework,CoreAudio \
-			-Wl,-framework,AudioToolbox
+#			-Wl,-framework,CoreFoundation \
+#			-Wl,-framework,CoreAudio \
+#			-Wl,-framework,AudioToolbox
 
 all: $(TARGET)
 
