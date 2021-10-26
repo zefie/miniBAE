@@ -127,7 +127,7 @@ static BAEResult PlayPCM(BAEMixer theMixer, char *fileName, BAEFileType type)
          err = BAESound_Start(sound, 0, BAE_FIXED_1, 0);
          if (err == BAE_NO_ERROR)
          {
-            printf("BAE memory used for everything %ld\n\n", BAE_GetSizeOfMemoryUsed());
+            printf("BAE memory used for everything %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
             done = FALSE;
             while (done == FALSE)
             {
@@ -180,7 +180,7 @@ static BAEResult PlayPCMStreamed(BAEMixer theMixer, char *fileName, BAEFileType 
          err = BAEStream_Start(stream);
          if (err == BAE_NO_ERROR)
          {
-            printf("BAE memory used for everything %ld\n\n", BAE_GetSizeOfMemoryUsed());
+            printf("BAE memory used for everything %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
             done = FALSE;
             while (done == FALSE)
             {
@@ -234,7 +234,7 @@ static BAEResult PlayMidi(BAEMixer theMixer, char *fileName)
          BAESong_DisplayInfo(theSong);
          if (err == BAE_NO_ERROR)
          {
-            printf("BAE memory used for everything %ld\n\n", BAE_GetSizeOfMemoryUsed());
+            printf("BAE memory used for everything %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
             done = FALSE;
             while (done == FALSE)
             {
@@ -285,7 +285,7 @@ static BAEResult PlayRMF(BAEMixer theMixer, char *fileName)
          BAESong_SetLoops(theSong, 0);
          if (err == BAE_NO_ERROR)
          {
-            printf("BAE memory used for everything %ld\n\n", BAE_GetSizeOfMemoryUsed());
+            printf("BAE memory used for everything %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
             done = FALSE;
             while (done == FALSE)
             {
@@ -334,11 +334,11 @@ int main(int argc, char *argv[])
        pcm   = 1;
        rmf   = BAE_MAX_VOICES - pcm;
        level = rmf / 3;
-      rate  = BAE_RATE_44K;
-      if (PV_ParseCommands(argc, argv, "-mr", TRUE, parmFile))
-      {
-         rate = (BAERate)atoi(parmFile);
-      }
+       rate  = BAE_RATE_44K;
+       if (PV_ParseCommands(argc, argv, "-mr", TRUE, parmFile))
+       {
+          rate = (BAERate)atoi(parmFile);
+       }
 
       printf("Allocating mixer with %d voices for RMF/Midi playback\n"
              "and %d voices for PCM playback at %d sample rate\n",
@@ -359,14 +359,13 @@ int main(int argc, char *argv[])
 
           // turn on nice verb
          BAEMixer_SetDefaultReverb(theMixer, BAE_REVERB_TYPE_8);
-                  
-         printf("BAE memory used during idle prior to SetBankToFile: %ld\n\n", BAE_GetSizeOfMemoryUsed());
+         printf("BAE memory used during idle prior to SetBankToFile: %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
 
          if (PV_ParseCommands(argc, argv, "-p", TRUE, parmFile))
          {
             printf("Using bank '%s'\n", parmFile);
             err = BAEMixer_AddBankFromFile(theMixer, (BAEPathName)parmFile, &bank);
-            printf("BAE memory used during idle after SetBankToFile: %ld\n\n", BAE_GetSizeOfMemoryUsed());
+            printf("BAE memory used during idle after SetBankToFile: %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
          }
 
          if (PV_ParseCommands(argc, argv, "-o", TRUE, parmFile))
