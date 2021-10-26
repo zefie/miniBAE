@@ -1,9 +1,15 @@
 .DS_Store
 obj/
-local.properties
+*/obj/
 out/
+*/out/
 bin/
+*/bin/
 gen/
+*/gen/
+
+local.properties
 .idea/
-playbae
+
+minibae/Tools/playbae/playbae
 libMiniBAE.a
