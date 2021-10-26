@@ -69,11 +69,11 @@ OBJ := $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
 
 #ARCH	:= -arch x86_64
 ARCH	:= -m32 -static
-CC		:= gcc
+CC		:= clang
 CXX		:= g++
 LD		:= g++
 
-CFLAGS  	:= $(ARCH) -g -Os $(INC_PATH) -D_THREAD_SAFE
+CFLAGS  	:= $(ARCH) -g -Os $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
 CFLAGS		+= -DX_PLATFORM=X_ANSI
 #CFLAGS		+= -DUSE_MPEG_DECODER=1
 CFLAGS		+= -D_DEBUG=1

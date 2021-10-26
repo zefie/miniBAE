@@ -560,6 +560,8 @@ AudioFileType BAE_TranslateBAEFileType(BAEFileType fileType)
         case BAE_AU_TYPE:
             haeFileType = FILE_AU_TYPE;
             break;
+	default:
+	    break;
     }
     return haeFileType;
 }
@@ -2470,7 +2472,7 @@ BAEResult BAEMixer_Mute(BAEMixer mixer)
     {
         err = NULL_OBJECT;
     }
-    return err;
+    return (BAEResult)err;
 }
 
 BAEResult BAEMixer_Unmute(BAEMixer mixer)
@@ -2491,7 +2493,7 @@ BAEResult BAEMixer_Unmute(BAEMixer mixer)
     {
         err = NULL_OBJECT;
     }
-    return err;
+    return (BAEResult)err;
 }
 
 
@@ -2958,7 +2960,7 @@ BAEResult BAEMixer_StartOutputToFile(BAEMixer theMixer,
 
             w->bitSize = ( theModifiers/*iModifiers*/ & BAE_USE_16) ? 16 : 8;
             w->channels = ( theModifiers /*iModifiers*/ & BAE_USE_STEREO) ? 2 : 1;
-            w->sampledRate = LONG_TO_UNSIGNED_FIXED(GM_ConvertFromOutputRateToRate(theRate/*iRate*/));
+            w->sampledRate = LONG_TO_UNSIGNED_FIXED(GM_ConvertFromOutputRateToRate((Rate)theRate/*iRate*/));
             w->compressionType = C_NONE;
             w->theWaveform = &buf;
             w->waveFrames = 1;
@@ -5224,7 +5226,7 @@ BAEResult           BAEStream_IsPaused(BAEStream stream,
         }
         else
         {
-            err = PARAM_ERR;
+            err = (BAEResult)PARAM_ERR;
         }
     }
     else
@@ -6036,7 +6038,7 @@ BAEResult BAESong_LoadGroovoid(BAESong song, char *cName, BAE_BOOL ignoreBadInst
                 }
                 else
                 {
-                    theErr = BAE_GENERAL_BAD; // a BAESong must always have a pSong...
+                    theErr = (OPErr)BAE_GENERAL_BAD; // a BAESong must always have a pSong...
                 }
                 XDisposePtr(pXSong);
             }
@@ -6224,7 +6226,7 @@ BAEResult BAESong_LoadMidiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL 
                 }
                 else
                 {
-                    theErr = BAE_GENERAL_BAD;  // a BAESong must always have a pSong...
+                    theErr = (OPErr)BAE_GENERAL_BAD;  // a BAESong must always have a pSong...
                 }
                 XDisposePtr(pXSong);
             }
@@ -7055,7 +7057,7 @@ BAEResult BAESong_NoteOnWithLoad(BAESong song,
         }
         else
         {
-            err = BAE_GENERAL_BAD;
+            err = (OPErr)BAE_GENERAL_BAD;
         }
     
         BAE_ReleaseMutex(song->mLock);

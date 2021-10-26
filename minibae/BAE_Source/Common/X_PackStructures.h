@@ -69,6 +69,7 @@
 #undef X_BF_4
 #undef X_BF_5
 
+
 #ifndef X_PACK_FAST
 // controls to enable structure packing by 1 byte
     #if (X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS) || (X_PLATFORM == X_ANDROID) || (X_PLATFORM == X_ANSI)
@@ -87,16 +88,21 @@
         #if CPU_TYPE == kRISC
             #pragma options align=mac68k
         #endif
+
         #if ((CPU_TYPE == k80X86) || (CPU_TYPE == kSPARC) || (CPU_TYPE == kARM))
             #pragma pack (1)
         #endif
+
         #error unknown X_PLATFORM type
-        
+
         // This define is used when declaring the structures. Some compilers, like GCC
         // need to use '__attribute__ ((packed))' at each structure to pack by a byte.
 
-        //#define X_PACKBY1 __attribute__ ((packed))
-        #define X_PACKBY1
+	#if (COMPILER_TYPE == GCC_COMPILER)
+	   #define X_PACKBY1 __attribute__ ((packed))
+	#else
+	   #define X_PACKBY1
+	#endif
 
         #define X_BF_1
         #define X_BF_2
@@ -106,12 +112,11 @@
     #endif
 
 #else
-
 // controls to enable structure packing by 4/8 bytes.
     #if X_PLATFORM == X_BE
         #pragma pack (4)
     #endif
-    #if (((X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS)) && (COMPILER_TYPE == GCC_COMPILER))     
+    #if (((X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS)) && (COMPILER_TYPE == GCC_COMPILER))
         #pragma pack (4)
     #else
         #if CPU_TYPE == kRISC
@@ -122,6 +127,7 @@
             #pragma pack (4)
         #endif
         /* $$kk: pack(4) for solaris x86 */
+
         #if (CPU_TYPE == k80X86)
             #if (X_PLATFORM == X_SOLARIS)
                 #pragma pack (4)
@@ -136,7 +142,10 @@
     #define X_BF_3
     #define X_BF_4
     #define X_BF_5
-
-    #define X_PACKBY1
+    #if (COMPILER_TYPE == GCC_COMPILER)
+	   #define X_PACKBY1 __attribute__ ((packed))
+    #else
+	   #define X_PACKBY1
+    #endif
 
 #endif

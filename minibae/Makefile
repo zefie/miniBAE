@@ -70,12 +70,12 @@ OBJ := $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
 
 #ARCH	:= -arch x86_64
 ARCH	:= -m32 -static
-CC		:= gcc
+CC		:= clang
 CXX		:= g++
 LD		:= g++
 AR      := ar
 
-CFLAGS  	:= $(ARCH) -g -O0 $(INC_PATH) -D_THREAD_SAFE
+CFLAGS  	:= $(ARCH) -g -Os $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
 CFLAGS		+= -DX_PLATFORM=X_ANSI
 CFLAGS		+= -D_DEBUG=1
 #CFLAGS		+= -DREVERB_USED=REVERB_DISABLED
@@ -93,7 +93,7 @@ all: $(TARGET)
 
 $(TARGET): $(OBJ)
 	$(AR) rcs $(TARGET) $(OBJ)
-		
+
 # Rules for compiling source files to object files
 $(OBJ_DIR)%.o : %.cpp
 	@echo @compile $<

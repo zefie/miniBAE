@@ -116,6 +116,14 @@ void * HAE_Allocate(unsigned long size)
 		{
 			memset(data, 0, size);
 		}
+
+		// log memory usage
+		g_memory_buoy += size;
+
+		// log highest memory usage
+		if (g_memory_buoy > g_memory_buoy_max) {
+			g_memory_buoy_max = g_memory_buoy;
+		}
 	}
 	return data;
 }
@@ -202,19 +210,28 @@ short int HAE_GetHardwareBalance(void)
 // range, just scale it.
 void HAE_SetHardwareBalance(short int balance)
 {
-
+   // pin balance to box
+   if (balance > 256)
+   {
+      balance = 256;
+   }
+   if (balance < -256)
+   {
+      balance = -256;
+   }
+   g_balance = balance;
 }
 
 // returned volume is in the range of 0 to 256
 short int HAE_GetHardwareVolume(void)
 {
-	return 1;
+	return g_unscaled_volume;
 }
 
 // newVolume is in the range of 0 to 256
 void HAE_SetHardwareVolume(short int newVolume)
 {
-
+	g_unscaled_volume = newVolume;
 }
 
 

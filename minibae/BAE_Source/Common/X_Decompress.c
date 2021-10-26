@@ -432,6 +432,8 @@ void XCompressLaw(SndCompressionType compressionType, short int *pSource, char *
                 case C_ALAW:
                     *pDest = linear2alaw(*pSource);
                     break;
+		default:
+		    break;
             }
             pSource++;
             pDest++;

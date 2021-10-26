@@ -544,6 +544,8 @@ static long IFF_GetNextGroup(X_IFF *pIFF, XIFFChunk *pChunk)
                 }
                 pChunk->ckData = XGetLong(&pChunk->ckData);
                 break;
+	   default:
+		break;
         }
     }
     else
@@ -923,7 +925,7 @@ static OPErr PV_ReadSunAUFile(  long encoding,
                 sampleByteLength -= 2;
             }
 #else
-// fast             
+// fast
             sampleByteLength = sampleByteLength / (MAX_AU_DECODE_BLOCK_SIZE*2);
             while (sampleByteLength > 0)
             {
@@ -987,6 +989,8 @@ decode_adpcm:
                 }
             }
             break;
+	default:
+	    break;
     }
     if (pBufferLength)
     {
@@ -1377,6 +1381,8 @@ static GM_Waveform* PV_ReadIntoMemoryWaveFile(XFILE file, XBOOL decodeData,
                     case X_WAVE_FORMAT_MULAW:
                         wave->bitSize = 16;
                         break;
+		    default:
+			break;
                     }
 
                     // file is positioned at the sample data
@@ -2864,18 +2870,27 @@ void * GM_CreateFileState(AudioFileType fileType)
                 ((SunDecodeState *)state)->bits = 0;
             }
             break;
+	default:
+	    break;
     }
     return state;
 }
 
 void GM_DisposeFileState(AudioFileType fileType, void *state)
 {
+    if (fileType == FILE_AU_TYPE) {
+	XDisposePtr((XPTR)state);
+    }
+/*
     switch (fileType)
     {
         case FILE_AU_TYPE:
             XDisposePtr((XPTR)state);
             break;
+        default:
+            break;
     }
+*/
 }
 
 // Read into memory a file
@@ -3346,6 +3361,9 @@ OPErr GM_ReadAndDecodeFileStream(XFILE fileReference,
                         break;
                 }
                 break;
+
+	    default:
+		break;
         }
         if (calculateFileSize && fileReference)
         {
