@@ -130,7 +130,7 @@ $(OBJ_DIR)%.o : %.c
 	@${CC} -c ${CFLAGS} $< -o $@
 
 clean:
-	@rm -f $(TARGET).*
+	@rm -f $(TARGET).* ${TARGET}_debug.*
 	@rm -rdf $(OBJ_DIR)
 	@rm -rdf build
 	@echo Cleaned!
