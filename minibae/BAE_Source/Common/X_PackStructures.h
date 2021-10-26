@@ -71,7 +71,7 @@
 
 #ifndef X_PACK_FAST
 // controls to enable structure packing by 1 byte
-    #if (X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS) || (X_PLATFORM == X_ANDROID)
+    #if (X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS) || (X_PLATFORM == X_ANDROID) || (X_PLATFORM == X_ANSI)
         #define X_PACKBY1   __attribute__ ((packed))
         #define X_BF_1  :1
         #define X_BF_2  :2
