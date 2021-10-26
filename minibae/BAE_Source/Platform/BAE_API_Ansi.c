@@ -44,7 +44,7 @@
 #include <string.h>
 #include "BAE_API.h"
 
-#define BUFFER_SIZE   896  
+#define BUFFER_SIZE   1024
 
 // only one of these can be true
 #define USE_ANSI_IO			1
