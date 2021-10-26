@@ -132,6 +132,9 @@ test: ${TARGET}
 test2: ${TARGET}
 	./${TARGET} -p ../TestSuite/minibae-wtv.hsb -m ../TestSuite/karTV.mid -mr 44100 -o ~/test.wav
 
+test3: ${TARGET}
+	./${TARGET} -p ../TestSuite/minibae-wtv.hsb -m ../TestSuite/world1.mid -mr 11025 -o ~/test.wav
+
 #test1: $(TARGET)
 #	./$(TARGET) -p $(TEST_BANK) -m $(CONTENT)/rmf/kartv.mid -mr 44100
 

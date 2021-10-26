@@ -50,6 +50,7 @@ char const usageString[] =
    "                 -a  {Play a AIF file}\n"
    "                 -r  {Play a RMF file}\n"
    "                 -m  {Play a MID file}\n"
+   "                 -l  {# of times to loop}\n"
    "                 -o  {write output to file}\n"
    "                 -mr {mixer sample rate ie. 11025}\n"
 };
@@ -215,7 +216,7 @@ static BAEResult PlayPCMStreamed(BAEMixer theMixer, char *fileName, BAEFileType 
 // ---------------------------------------------------------------------
 //
 //
-static BAEResult PlayMidi(BAEMixer theMixer, char *fileName)
+static BAEResult PlayMidi(BAEMixer theMixer, char *fileName, int loopCount)
 {
    BAEResult err;
    BAESong   theSong = BAESong_New(theMixer);
@@ -232,6 +233,7 @@ static BAEResult PlayMidi(BAEMixer theMixer, char *fileName)
       {
          err = BAESong_Start(theSong, 0);
          BAESong_DisplayInfo(theSong);
+         BAESong_SetLoops(theSong, loopCount);
          if (err == BAE_NO_ERROR)
          {
             printf("BAE memory used for everything %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
@@ -269,7 +271,7 @@ static BAEResult PlayMidi(BAEMixer theMixer, char *fileName)
 // ---------------------------------------------------------------------
 //
 //
-static BAEResult PlayRMF(BAEMixer theMixer, char *fileName)
+static BAEResult PlayRMF(BAEMixer theMixer, char *fileName, int loopCount)
 {
    BAEResult err;
    BAESong   theSong = BAESong_New(theMixer);
@@ -282,7 +284,7 @@ static BAEResult PlayRMF(BAEMixer theMixer, char *fileName)
       {
          err = BAESong_Start(theSong, 0);
          BAESong_DisplayInfo(theSong);
-         BAESong_SetLoops(theSong, 0);
+         BAESong_SetLoops(theSong, loopCount);
          if (err == BAE_NO_ERROR)
          {
             printf("BAE memory used for everything %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
@@ -322,7 +324,7 @@ int main(int argc, char *argv[])
 {
    BAEResult    err;
    BAEMixer     theMixer;
-   short int    rmf, pcm, level;
+   short int    rmf, pcm, level, loopCount;
    BAEBankToken bank;
    int          doneCommand = 0;
    char         parmFile[1024];
@@ -335,10 +337,17 @@ int main(int argc, char *argv[])
        rmf   = BAE_MAX_VOICES - pcm;
        level = rmf / 3;
        rate  = BAE_RATE_44K;
+       loopCount = 0;
        if (PV_ParseCommands(argc, argv, "-mr", TRUE, parmFile))
        {
           rate = (BAERate)atoi(parmFile);
        }
+
+       if (PV_ParseCommands(argc, argv, "-l", TRUE, parmFile))
+       {
+          loopCount = (BAERate)atoi(parmFile);
+       }
+
 
       printf("Allocating mixer with %d voices for RMF/Midi playback\n"
              "and %d voices for PCM playback at %d sample rate\n",
@@ -412,13 +421,13 @@ int main(int argc, char *argv[])
          if (PV_ParseCommands(argc, argv, "-r", TRUE, parmFile))
          {
             printf("PlayRMF\n");
-            err         = PlayRMF(theMixer, parmFile);
+            err         = PlayRMF(theMixer, parmFile, loopCount);
             doneCommand = 1;
          }
          if (PV_ParseCommands(argc, argv, "-m", TRUE, parmFile))
          {
             printf("PlayMidi\n");
-            err         = PlayMidi(theMixer, parmFile);
+            err         = PlayMidi(theMixer, parmFile, loopCount);
             doneCommand = 1;
          }
 
