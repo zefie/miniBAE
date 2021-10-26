@@ -129,20 +129,23 @@ TEST_RMF	:= chop-squad-full.rmf
 test: ${TARGET}
 	./${TARGET} -p ../TestSuite/minibae-wtv.hsb -m ../TestSuite/world1.mid -mr 44100 -o ~/test.wav
 
-test1: $(TARGET)
-	./$(TARGET) -p $(BANKS)/patches/patches.hsb -m $(CONTENT)/rmf/kartv.mid -mr 44100
+test2: ${TARGET}
+	./${TARGET} -p ../TestSuite/minibae-wtv.hsb -m ../TestSuite/karTV.mid -mr 44100 -o ~/test.wav
 
-test2: $(TARGET)
-	./$(TARGET) -p $(BANKS)/patches/patches.hsb -m $(CONTENT)/midi/synco.mid -mr 44100
+#test1: $(TARGET)
+#	./$(TARGET) -p $(TEST_BANK) -m $(CONTENT)/rmf/kartv.mid -mr 44100
 
-test3: $(TARGET)
-	./$(TARGET) -p $(BANKS)/patches/patches.hsb -r $(CONTENT)/rmf/$(TEST_RMF) -mr 44100
+#test2: $(TARGET)
+#	./$(TARGET) -p $(TEST_BANK) -m $(CONTENT)/midi/synco.mid -mr 44100
 
-test4: $(TARGET)
-	./$(TARGET) -p $(BANKS)/patches/patches.hsb -w $(CONTENT)/wav/sexy_coffee_pot.wav -mr 44100
+#test3: $(TARGET)
+#	./$(TARGET) -p $(TEST_BANK) -r $(CONTENT)/rmf/$(TEST_RMF) -mr 44100
 
-test5: $(TARGET)
-	./$(TARGET) -p $(BANKS)/patches/patches.hsb -sw $(CONTENT)/wav/sexy_coffee_pot.wav -mr 44100
+#test4: $(TARGET)
+#	./$(TARGET) -p $(TEST_BANK) -w $(CONTENT)/wav/sexy_coffee_pot.wav -mr 44100
+
+#test5: $(TARGET)
+#	./$(TARGET) -p $(TEST_BANK) -sw $(CONTENT)/wav/sexy_coffee_pot.wav -mr 44100
 
 clean:
 	@rm -f $(TARGET)

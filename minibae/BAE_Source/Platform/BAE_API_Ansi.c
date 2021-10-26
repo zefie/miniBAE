@@ -44,7 +44,7 @@
 #include <string.h>
 #include "BAE_API.h"
 
-#define BUFFER_SIZE   1024
+#define BUFFER_SIZE   2048
 
 // only one of these can be true
 #define USE_ANSI_IO			1
@@ -184,7 +184,7 @@ void HAE_BlockMove(void * source, void * dest, unsigned long size)
 // Return 1 if stereo hardware is supported, otherwise 0.
 int HAE_IsStereoSupported(void)
 {
-	return 0;
+	return 1;
 }
 
 // Return 1, if sound hardware support 16 bit output, otherwise 0.
