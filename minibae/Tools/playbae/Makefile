@@ -135,6 +135,9 @@ test2: ${TARGET}
 test3: ${TARGET}
 	./${TARGET} -p ../TestSuite/minibae-wtv.hsb -m ../TestSuite/world1.mid -mr 11025 -o ~/test.wav
 
+pack: ${TARGET}
+	cat ./${TARGET} | gzip -9c > ~/playbae_static.gz
+
 #test1: $(TARGET)
 #	./$(TARGET) -p $(TEST_BANK) -m $(CONTENT)/rmf/kartv.mid -mr 44100
 
