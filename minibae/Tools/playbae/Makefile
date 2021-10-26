@@ -1,4 +1,4 @@
-TARGET = playbae
+TARGET = playbae.exe
 
 vpath	%.c ../../BAE_Source/Common ../../BAE_Source/Platform ../../BAE_MPEG_Source_II
 
@@ -6,7 +6,9 @@ INC_PATH	:= -I../../BAE_Source/Common
 INC_PATH	+= -I../../BAE_Source/Platform
 INC_PATH	+= -I../../BAE_MPEG_Source_II
 
-SRC		:=	BAE_API_Ansi.c
+SRC		:=	BAE_API_WinOS.c \
+			BAE_API_WinOS_Capture.c \
+			BAE_API_WinOS_Thread.c \
 
 SRC		+= \
 			DriverTools.c \
@@ -69,12 +71,12 @@ OBJ := $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
 
 #ARCH	:= -arch x86_64
 ARCH	:= -m32 -static
-CC		:= clang
-CXX		:= g++
-LD		:= g++
+CC		:= i686-w64-mingw32-gcc-win32
+CXX		:= i686-w64-mingw32-g++-win32
+LD		:= i686-w64-mingw32-g++-win32
 
-CFLAGS  	:= $(ARCH) -g -Os $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
-CFLAGS		+= -DX_PLATFORM=X_ANSI
+CFLAGS  	:= $(ARCH) -g -Os $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
+CFLAGS		+= -DX_PLATFORM=X_WIN95
 #CFLAGS		+= -DUSE_MPEG_DECODER=1
 CFLAGS		+= -D_DEBUG=1
 #CFLAGS		+= -DREVERB_USED=REVERB_DISABLED
@@ -83,7 +85,21 @@ LDFLAGS		:= $(ARCH)
 
 
 LIBS	= 	-L/opt/local/lib \
-			-lpthread \
+			-ldxguid \
+			-ldsound \
+			-lole32 \
+			-lwinmm \
+			-lkernel32 \
+			-luser32 \
+			-lgdi32 \
+			-lwinspool \
+			-lcomdlg32 \
+			-ladvapi32 \
+			-lshell32 \
+			-loleaut32 \
+			-luuid \
+			-lodbc32 \
+			-lodbccp32
 #			-Wl,-framework,CoreFoundation \
 #			-Wl,-framework,CoreAudio \
 #			-Wl,-framework,AudioToolbox
@@ -136,7 +152,7 @@ test3: ${TARGET}
 	./${TARGET} -p ../TestSuite/minibae-wtv.hsb -m ../TestSuite/world1.mid -mr 11025 -o ~/test.wav
 
 pack: ${TARGET}
-	cat ./${TARGET} | gzip -9c > ~/playbae_static.gz
+	cat ./${TARGET} | gzip -9c > ~/playbae.exe.gz
 
 #test1: $(TARGET)
 #	./$(TARGET) -p $(TEST_BANK) -m $(CONTENT)/rmf/kartv.mid -mr 44100

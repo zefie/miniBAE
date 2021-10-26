@@ -210,6 +210,7 @@
 // windows.h mucks with the C4201 warning, so include it first and 
 //  then set the pragma before mmsystem.h
 #include <windows.h>
+#include <windowsx.h>
 #pragma warning(disable: 4201)  // L4: nonstandard extension used : nameless struct/union (mmsystem.h)
 #include <mmsystem.h>
 
@@ -221,10 +222,13 @@
 #pragma warning(default: 4115)  // L1/3: name type definition in parentheses (rpcasync.h)
 #pragma warning(disable: 4201)  // L4: nonstandard extension used : nameless struct/union (directx headers)
 #include <dsound.h>
+#include <ddraw.h>
 #endif // USE_DIRECTSOUND
 
 #include <assert.h>
 #include <stdio.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 
 #include "BAE_API.h"
 
@@ -391,7 +395,7 @@ static BOOL PV_IsDX5OrHigher()
                               NULL,
                               CLSCTX_INPROC_SERVER,
                               &IID_IDirectDraw,
-                              &pDDraw);
+                              (LPVOID)&pDDraw);
     if (FAILED(result))
         goto theEnd;
 
@@ -450,7 +454,7 @@ static BOOL PV_DirectSoundCreate(void)
             g_comInitialized = TRUE;
             if (!FAILED(CoCreateInstance(&CLSID_DirectSound, NULL,
                                             CLSCTX_INPROC_SERVER, &IID_IDirectSound,
-                                            &g_pDirectSoundObject)))
+                                            (LPVOID)&g_pDirectSoundObject)))
             {
                 HRESULT     result;
 
@@ -2394,5 +2398,65 @@ void BAE_GetDeviceName(long deviceID, char *cName, unsigned long cNameLength)
     }
 }
 
+int BAE_NewMutex(BAE_Mutex* lock, char *name, char *file, int lineno)
+{
+/*
+    pthread_mutex_t *pMutex = (pthread_mutex_t *) BAE_Allocate(sizeof(pthread_mutex_t));
+    pthread_mutexattr_t attrib;
+    pthread_mutexattr_init(&attrib);
+    pthread_mutexattr_settype(&attrib, PTHREAD_MUTEX_RECURSIVE);
+    // Create reentrant (within same thread) mutex.
+    pthread_mutex_init(pMutex, &attrib);
+    pthread_mutexattr_destroy(&attrib);
+    *lock = (BAE_Mutex) pMutex;
+*/
+    return 1; // ok
+}
+
+void BAE_AcquireMutex(BAE_Mutex lock)
+{
+/*
+    pthread_mutex_t *pMutex = (pthread_mutex_t*) lock;
+    pthread_mutex_lock(pMutex);
+*/
+}
+
+void BAE_ReleaseMutex(BAE_Mutex lock)
+{
+/*
+    pthread_mutex_t *pMutex = (pthread_mutex_t*) lock;
+    pthread_mutex_unlock(pMutex);
+*/
+}
+
+void BAE_DestroyMutex(BAE_Mutex lock)
+{
+/*
+    pthread_mutex_t *pMutex = (pthread_mutex_t*) lock;
+    pthread_mutex_destroy(pMutex);
+    BAE_Deallocate(pMutex);
+*/
+}
+
+// Mute/unmute audio. Shutdown amps, etc.
+// return 0 if ok, -1 if failed
+int BAE_Mute(void)
+{
+   return(0);
+}
+
+int BAE_Unmute(void)
+{
+   return(0);
+}
+
+// This function is called at render time with w route bus flag. If there's
+// no change, return currentRoute, other wise return one of audiosys.h route values.
+// This will change an active rendered's voice placement.
+void BAE_ProcessRouteBus(int currentRoute, long *pChannels, int count)
+{
+}
+
+// EOF of BAE_API_ANSI.c
 
 // EOF of BAE_API_WinOS.c

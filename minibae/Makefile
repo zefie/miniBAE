@@ -9,7 +9,9 @@ INC_PATH	+= -IBAE_Source/Platform
 INC_PATH	+= -IBAE_MPEG_Source_II
 INC_PATH	+= -Ibanks/patches
 
-SRC		:=	BAE_API_Ansi.c
+SRC		:=	BAE_API_WinOS.c \
+			BAE_API_WinOS_Capture.c \
+			BAE_API_WinOS_Thread.c \
 
 SRC		+= \
 			DriverTools.c \
@@ -70,13 +72,13 @@ OBJ := $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
 
 #ARCH	:= -arch x86_64
 ARCH	:= -m32 -static
-CC		:= clang
-CXX		:= g++
-LD		:= g++
-AR      := ar
+CC		:= i686-w64-mingw32-gcc-win32
+CXX		:= i686-w64-mingw32-g++-win32
+LD		:= i686-w64-mingw32-g++-win32
+AR      	:= i686-w64-mingw32-gcc-ar-win32
 
 CFLAGS  	:= $(ARCH) -g -Os $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
-CFLAGS		+= -DX_PLATFORM=X_ANSI
+CFLAGS		+= -DX_PLATFORM=X_WIN95
 CFLAGS		+= -D_DEBUG=1
 #CFLAGS		+= -DREVERB_USED=REVERB_DISABLED
 CXXFLAGS 	:= $(CFLAGS)
@@ -84,7 +86,21 @@ LDFLAGS		:= $(ARCH)
 
 
 LIBS	= 	-L/opt/local/lib \
-			-lpthread \
+			-ldxguid \
+			-ldsound \
+			-lole32 \
+			-lwinmm \
+			-lkernel32 \
+			-luser32 \
+			-lgdi32 \
+			-lwinspool \
+			-lcomdlg32 \
+			-ladvapi32 \
+			-lshell32 \
+			-loleaut32 \
+			-luuid \
+			-lodbc32 \
+			-lodbccp32
 #			-Wl,-framework,CoreFoundation \
 #			-Wl,-framework,CoreAudio \
 #			-Wl,-framework,AudioToolbox

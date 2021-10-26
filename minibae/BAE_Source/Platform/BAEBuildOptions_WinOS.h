@@ -91,6 +91,10 @@
 #define USE_TERP2                       TRUE
 #define FILE_NAME_LENGTH                _MAX_PATH
 #define USE_DEVICE_ENUM_SUPPORT         TRUE
+#define USE_CALLBACKS                   TRUE
+#define USE_CREATION_API                TRUE
+#define BAE_COMPLETE                    1
+#define USE_STREAM_API                  TRUE
 
 
 // Overwritable Flags -- default values

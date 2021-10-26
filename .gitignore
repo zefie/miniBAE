@@ -11,5 +11,5 @@ gen/
 local.properties
 .idea/
 
-minibae/Tools/playbae/playbae
+minibae/Tools/playbae/playbae.exe
 libMiniBAE.a
