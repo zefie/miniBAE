@@ -35,15 +35,17 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <string.h>
 #include "MiniBAE.h"
 #include "BAE_API.h"
 #include <signal.h>
 
-static volatile int interruptPlayBack = 0;
+static volatile bool interruptPlayBack = FALSE;
+static volatile bool fadeOut = TRUE;
 
 void intHandler(int dummy) {
-    interruptPlayBack = 1;
+    interruptPlayBack = TRUE;
 }
 
 // prototypes
@@ -57,11 +59,12 @@ char const usageString[] =
    "                 -a  {Play a AIF file}\n"
    "                 -r  {Play a RMF file}\n"
    "                 -m  {Play a MID file}\n"
-   "                 -l  {# of times to loop}\n"
-//   "                 -v  {max volume (0-127, default 127)}\n"
-   "                 -t  {max length in seconds to play midi (0 = forever)}"
    "                 -o  {write output to file}\n"
    "                 -mr {mixer sample rate ie. 11025}\n"
+   "                 -l  {# of times to loop}\n"
+   "                 -v  {max volume (0-127, default 127)}\n"
+   "                 -t  {max length in seconds to play midi (0 = forever)}\n"
+   "                 -nf {disable fade-out when stopping via time limit or CTRL-C}\n"
 };
 
 
@@ -127,8 +130,9 @@ static BAEResult PlayPCM(BAEMixer theMixer, char *fileName, BAEFileType type, BA
 {
    BAEResult err;
    BAESound  sound = BAESound_New(theMixer);
-   long currentPosition;
-   int m, s, ms = 0;
+   BAESampleInfo songInfo;
+   unsigned long currentPosition;
+   int rate, m, s;
    BAE_BOOL  done;
 
    if (sound)
@@ -137,31 +141,33 @@ static BAEResult PlayPCM(BAEMixer theMixer, char *fileName, BAEFileType type, BA
       if (err == BAE_NO_ERROR)
       {
 	 BAESound_SetVolume(sound, volume * 1000);
-	 printf("Master sound volume set to %d%%\n", volume);
+	 printf("Master sound volume set to %lu%%\n", volume);
          err = BAESound_Start(sound, 0, BAE_FIXED_1, 0); 
+
          if (err == BAE_NO_ERROR)
          {
+	    BAESound_GetInfo(sound, &songInfo);
+	    rate = songInfo.sampledRate / 65536;
             printf("BAE memory used for everything %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
             done = FALSE;
             while (done == FALSE)
             {
 	       if (interruptPlayBack) {
 		  printf("Stop requested... please wait for data flush...\n");
-		  interruptPlayBack = 0;
-		  BAESound_Stop(sound, TRUE);
+		  interruptPlayBack = FALSE;
+		  BAESound_Stop(sound, fadeOut);
 	       }
                BAESound_IsDone(sound, &done);
 	       BAESound_GetSamplePlaybackPosition(sound, &currentPosition);
-	       currentPosition = currentPosition / 1000;
-	       m = (currentPosition / 60000);
-	       s = (currentPosition - (m*60000)) / 600;
-               ms = (currentPosition - (60000*m) - (s*600));
-	       if (ms > 1 || s > 0 || m > 0) {
-	          printf("Playback position: %02d:%02d.%03d\r",m,s,ms);
+	       currentPosition = (currentPosition / rate);
+	       m = (currentPosition / 60);
+	       s = (currentPosition - (m*60));
+	       if (s > 0 || m > 0) {
+	          printf("Playback position: %02d:%02d\r",m,s);
 	       }
                if (timeLimit > 0) {
- 		  if (currentPosition > (timeLimit * 1000) - 750) {
-			BAESound_Stop(sound, TRUE);
+ 		  if (currentPosition >= timeLimit) {
+			BAESound_Stop(sound, fadeOut);
 		  }
 	       }
                if (done == FALSE)
@@ -209,7 +215,7 @@ static BAEResult PlayPCMStreamed(BAEMixer theMixer, char *fileName, BAEFileType 
       if (err == BAE_NO_ERROR)
       {
 	 BAEStream_SetVolume(stream, volume * 1000);
-	 printf("Master stream volume set to %d%%\n", volume);
+	 printf("Master stream volume set to %lu%%\n", volume);
 
          BAEStream_SetCallback(stream, PV_StreamCallback, 0x1234);
          err = BAEStream_Start(stream);
@@ -222,7 +228,7 @@ static BAEResult PlayPCMStreamed(BAEMixer theMixer, char *fileName, BAEFileType 
 	       if (interruptPlayBack) {
 		  printf("Stop requested... please wait for data flush...\n");
 		  interruptPlayBack = 0;
-		  BAEStream_Stop(stream, TRUE);
+		  BAEStream_Stop(stream, fadeOut);
 	       }
                BAEStream_IsDone(stream, &done);
                if (done == FALSE)
@@ -259,7 +265,7 @@ static BAEResult PlayMidi(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED 
 {
    BAEResult err;
    BAESong   theSong = BAESong_New(theMixer);
-   long currentPosition;
+   unsigned long currentPosition;
    int m, s, ms = 0;
    BAE_BOOL  done;
    if (theSong)
@@ -272,7 +278,7 @@ static BAEResult PlayMidi(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED 
       if (err == BAE_NO_ERROR)
       {
 	 BAESong_SetVolume(theSong, volume * 1000);
-	 printf("Master song volume set to %d%%\n", volume);
+	 printf("Master song volume set to %lu%%\n", volume);
          err = BAESong_Start(theSong, 0);
          BAESong_DisplayInfo(theSong);
          BAESong_SetLoops(theSong, loopCount);
@@ -288,7 +294,7 @@ static BAEResult PlayMidi(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED 
 	       if (interruptPlayBack) {
 		  printf("Stop requested... please wait for data flush...\n");
 		  interruptPlayBack = 0;
-		  BAESong_Stop(theSong, TRUE);
+		  BAESong_Stop(theSong, fadeOut);
 	       }
                BAESong_IsDone(theSong, &done);
 	       BAESong_GetMicrosecondPosition(theSong, &currentPosition);
@@ -301,7 +307,7 @@ static BAEResult PlayMidi(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED 
                }
                if (timeLimit > 0) {
                   if (currentPosition > (timeLimit * 1000) - 750) {
-                        BAESong_Stop(theSong, TRUE);
+                        BAESong_Stop(theSong, fadeOut);
                   }
                }
                if (done == FALSE)
@@ -339,7 +345,7 @@ static BAEResult PlayRMF(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED v
 {
    BAEResult err;
    BAESong   theSong = BAESong_New(theMixer);
-   long currentPosition;
+   unsigned long currentPosition;
    int m, s, ms = 0;
    BAE_BOOL  done;
 
@@ -349,7 +355,7 @@ static BAEResult PlayRMF(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED v
       if (err == BAE_NO_ERROR)
       {
 	 BAESong_SetVolume(theSong, volume * 1000);
-	 printf("Master song volume set to %d%%\n", volume);
+	 printf("Master song volume set to %lu%%\n", volume);
          err = BAESong_Start(theSong, 0);
          BAESong_DisplayInfo(theSong);
          BAESong_SetLoops(theSong, loopCount);
@@ -365,7 +371,7 @@ static BAEResult PlayRMF(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED v
 	       if (interruptPlayBack) {
 		  printf("Stop requested... please wait for data flush...\n");
 		  interruptPlayBack = 0;
-		  BAESong_Stop(theSong, TRUE);
+		  BAESong_Stop(theSong, fadeOut);
 	       }
                BAESong_IsDone(theSong, &done);
 	       BAESong_GetMicrosecondPosition(theSong, &currentPosition);
@@ -378,7 +384,7 @@ static BAEResult PlayRMF(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED v
                }
                if (timeLimit > 0) {
                   if (currentPosition > (timeLimit * 1000) - 750) {
-                        BAESong_Stop(theSong, TRUE);
+                        BAESong_Stop(theSong, fadeOut);
                   }
                }
                if (done == FALSE)
@@ -445,9 +451,9 @@ int main(int argc, char *argv[])
           timeLimit = (unsigned int)atoi(parmFile);
        }
 
-       if (PV_ParseCommands(argc, argv, "-v", TRUE, parmFile))
+       if (PV_ParseCommands(argc, argv, "-nf", FALSE, NULL))
        {
-          volume = (float)atoi(parmFile);
+          fadeOut = FALSE;
        }
 
 
