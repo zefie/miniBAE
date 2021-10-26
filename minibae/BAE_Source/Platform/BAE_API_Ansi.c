@@ -43,8 +43,8 @@
 #include <assert.h>
 #include <string.h>
 #include "BAE_API.h"
+#include <X_API.h>
 
-#define BUFFER_SIZE   2048
 
 // only one of these can be true
 #define USE_ANSI_IO			1
@@ -631,7 +631,11 @@ long HAE_GetAudioByteBufferSize(void)
 int HAE_AquireAudioCard(void *threadContext, unsigned long sampleRate, unsigned long channels, unsigned long bits)
 {
 	// need to set callback which will in turn call BuildMixerSlice every so often
-	g_audioByteBufferSize = BUFFER_SIZE;
+
+	// BUFFER_SIZE is based on 44100hz Stereo 16Bit
+	float bufferCalc = 689.0625;
+	g_audioByteBufferSize = (XSDWORD)((sampleRate * channels * bits) / bufferCalc);
+	printf("sampleRate: %lu, channels: %lu, bits: %lu, g_audioByteBufferSize: %lu\n",sampleRate,channels,bits,g_audioByteBufferSize); 
 
 	return 0;
 }
