@@ -11,5 +11,10 @@ gen/
 local.properties
 .idea/
 
+minibae/Tools/playbae/playbae
 minibae/Tools/playbae/playbae.exe
-libMiniBAE.a
+libminiBAE.a
+libminiBAE_debug.so
+libminiBAE_debug.dll
+libminiBAE.so
+libminiBAE.dll

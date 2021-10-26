@@ -1,4 +1,4 @@
-TARGET = libMiniBAE.a
+TARGET = libminiBAE
 
 vpath	%.c BAE_Source/Common BAE_Source/Platform 
 vpath	%.c banks/patches
@@ -71,18 +71,19 @@ OBJ_DIR := obj/
 OBJ := $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
 
 #ARCH	:= -arch x86_64
-ARCH	:= -m32 -static
+ARCH	:= -m32
 CC		:= i686-w64-mingw32-gcc-win32
 CXX		:= i686-w64-mingw32-g++-win32
 LD		:= i686-w64-mingw32-g++-win32
 AR      	:= i686-w64-mingw32-gcc-ar-win32
+STRIP      	:= i686-w64-mingw32-strip
 
-CFLAGS  	:= $(ARCH) -g -Os $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
+CFLAGS  	:= $(ARCH) -static -g -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
 CFLAGS		+= -DX_PLATFORM=X_WIN95
 CFLAGS		+= -D_DEBUG=1
 #CFLAGS		+= -DREVERB_USED=REVERB_DISABLED
 CXXFLAGS 	:= $(CFLAGS)
-LDFLAGS		:= $(ARCH)
+LDFLAGS		:= $(ARCH) -static
 
 
 LIBS	= 	-L/opt/local/lib \
@@ -105,10 +106,17 @@ LIBS	= 	-L/opt/local/lib \
 #			-Wl,-framework,CoreAudio \
 #			-Wl,-framework,AudioToolbox
 
-all: $(TARGET)
+all: $(TARGET).a ${TARGET}_debug.dll ${TARGET}.dll
 
-$(TARGET): $(OBJ)
-	$(AR) rcs $(TARGET) $(OBJ)
+$(TARGET).a: $(OBJ)
+	$(AR) rcs $(TARGET).a $(OBJ)
+
+$(TARGET)_debug.dll: ${OBJ}
+	${CC} -shared ${ARCH} ${OBJ} -o ${TARGET}_debug.dll -Wl,--subsystem,windows ${LIBS}
+
+$(TARGET).dll: $(TARGET)_debug.dll
+	cp $(TARGET)_debug.dll $(TARGET).dll
+	${STRIP} -s ${TARGET}.dll
 
 # Rules for compiling source files to object files
 $(OBJ_DIR)%.o : %.cpp
