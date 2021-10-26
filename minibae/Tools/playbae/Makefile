@@ -126,6 +126,9 @@ BANKS := ../../banks
 #TEST_RMF	:= polyzoot-full.rmf
 TEST_RMF	:= chop-squad-full.rmf
 
+test: ${TARGET}
+	./${TARGET} -p ../TestSuite/patches-wtv.hsb -m ../TestSuite/world1.mid -mr 44100 -o ~/test.wav
+
 test1: $(TARGET)
 	./$(TARGET) -p $(BANKS)/patches/patches.hsb -m $(CONTENT)/rmf/kartv.mid -mr 44100
 
