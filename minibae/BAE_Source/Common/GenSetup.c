@@ -475,10 +475,9 @@ static void PV_SetSampleSliceSize(GM_Mixer *pMixer, Rate theRate)
         // round up to next multiple of 16
         maxChunkSize = 16 * ((maxChunkSize / 16)+1);
     }
-
+    
     // calulcate microseconds per buffer
-    // zefie note: plays too fast without multiplier
-    pMixer->bufferTime = ((maxChunkSize * 0.875) * 1000000) / rate;
+    pMixer->bufferTime = (maxChunkSize * 1000000) / rate;
 
     // calulcate microseconds per buffer used for lfo changes
     pMixer->lfoBufferTime = XFixedMultiply(BUFFER_SLICE_TIME, pMixer->bufferTime);
