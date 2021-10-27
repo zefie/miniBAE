@@ -613,6 +613,10 @@ int main(int argc, char *argv[])
       printf("playbae:  Memory error.\n");
    }
 
+   if (err) {
+	return((int)err);
+   }
+
    if (doneCommand == 0)
    {
       printf(usageString);
