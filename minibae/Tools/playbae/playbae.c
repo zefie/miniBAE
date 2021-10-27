@@ -541,6 +541,10 @@ int main(int argc, char *argv[])
          {
             printf("Using bank '%s'\n", parmFile);
             err = BAEMixer_AddBankFromFile(theMixer, (BAEPathName)parmFile, &bank);
+            if (err > 0) {
+		printf("Error %d loading patch bank %s",err,parmFile);
+		return(1);
+	    }
             printf("BAE memory used during idle after SetBankToFile: %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
          }
 
@@ -613,8 +617,8 @@ int main(int argc, char *argv[])
       printf("playbae:  Memory error.\n");
    }
 
-   if (err) {
-	return((int)err);
+   if (err > 0) {
+	return(1);
    }
 
    if (doneCommand == 0)
