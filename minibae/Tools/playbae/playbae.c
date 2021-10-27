@@ -39,6 +39,7 @@
 #include <string.h>
 #include "MiniBAE.h"
 #include "BAE_API.h"
+#include <GenSnd.h>
 #include <signal.h>
 
 static volatile bool interruptPlayBack = FALSE;
@@ -62,7 +63,7 @@ char const usageString[] =
    "                 -o  {write output to file}\n"
    "                 -mr {mixer sample rate ie. 11025}\n"
    "                 -l  {# of times to loop}\n"
-   "                 -v  {max volume (0-127, default 127)}\n"
+   "                 -v  {max volume (in percent, overdrive allowed)}\n"
    "                 -t  {max length in seconds to play midi (0 = forever)}\n"
    "                 -nf {disable fade-out when stopping via time limit or CTRL-C}\n"
 };
@@ -122,6 +123,14 @@ static int PV_ParseCommands(int argc, char *argv[], char *command, int getResult
 }
 
 
+BAE_UNSIGNED_FIXED calculateVolume(BAE_UNSIGNED_FIXED volume) {
+	BAE_UNSIGNED_FIXED temp = (volume / 100) *  MAX_SONG_VOLUME;
+
+	printf("Debug volume calc: %lu\n",temp);
+	return temp;
+}
+
+
 // PlayPCM()
 // ---------------------------------------------------------------------
 //
@@ -140,15 +149,14 @@ static BAEResult PlayPCM(BAEMixer theMixer, char *fileName, BAEFileType type, BA
       err = BAESound_LoadFileSample(sound, (BAEPathName)fileName, type);
       if (err == BAE_NO_ERROR)
       {
-	 BAESound_SetVolume(sound, volume * 1000);
-	 printf("Master sound volume set to %lu%%\n", volume);
-         err = BAESound_Start(sound, 0, BAE_FIXED_1, 0); 
-
+	 BAESound_SetVolume(sound, calculateVolume(volume));
+         err = BAESound_Start(sound, 0, BAE_FIXED_1, 0);
          if (err == BAE_NO_ERROR)
          {
 	    BAESound_GetInfo(sound, &songInfo);
 	    rate = songInfo.sampledRate / 65536;
             printf("BAE memory used for everything %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
+	    printf("Master sound volume set to %lu%%\n", volume / 1000);
             done = FALSE;
             while (done == FALSE)
             {
@@ -214,13 +222,12 @@ static BAEResult PlayPCMStreamed(BAEMixer theMixer, char *fileName, BAEFileType 
 
       if (err == BAE_NO_ERROR)
       {
-	 BAEStream_SetVolume(stream, volume * 1000);
-	 printf("Master stream volume set to %lu%%\n", volume);
-
+	 BAEStream_SetVolume(stream, calculateVolume(volume));
          BAEStream_SetCallback(stream, PV_StreamCallback, 0x1234);
          err = BAEStream_Start(stream);
          if (err == BAE_NO_ERROR)
          {
+ 	    printf("Master stream volume set to %lu%%\n", volume / 1000);
             printf("BAE memory used for everything %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
             done = FALSE;
             while (done == FALSE)
@@ -277,16 +284,19 @@ static BAEResult PlayMidi(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED 
       err = BAESong_LoadMidiFromFile(theSong, (BAEPathName)fileName, TRUE);
       if (err == BAE_NO_ERROR)
       {
-	 BAESong_SetVolume(theSong, volume * 1000);
-	 printf("Master song volume set to %lu%%\n", volume);
+	 BAESong_SetVolume(theSong, calculateVolume(volume));
          err = BAESong_Start(theSong, 0);
-         BAESong_DisplayInfo(theSong);
-         BAESong_SetLoops(theSong, loopCount);
-	 if (timeLimit > 0) {
-		printf("Max Play Duration: %d seconds\n", timeLimit);
-         }
          if (err == BAE_NO_ERROR)
          {
+            BAESong_DisplayInfo(theSong);
+            BAESong_SetLoops(theSong, loopCount);
+	    printf("Master song volume set to %lu%%\n", volume / 1000);
+	    if (loopCount > 0) {
+		printf("Will loop song %u times\n", loopCount);
+	    }
+            if (timeLimit > 0) {
+		printf("Max Play Duration: %d seconds\n", timeLimit);
+            }
             printf("BAE memory used for everything %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
             done = FALSE;
             while (done == FALSE)
@@ -354,16 +364,19 @@ static BAEResult PlayRMF(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED v
       err = BAESong_LoadRmfFromFile(theSong, (BAEPathName)fileName, 0, TRUE);
       if (err == BAE_NO_ERROR)
       {
-	 BAESong_SetVolume(theSong, volume * 1000);
-	 printf("Master song volume set to %lu%%\n", volume);
+	 BAESong_SetVolume(theSong, calculateVolume(volume));
          err = BAESong_Start(theSong, 0);
-         BAESong_DisplayInfo(theSong);
-         BAESong_SetLoops(theSong, loopCount);
-	 if (timeLimit > 0) {
-		printf("Max Play Duration: %d seconds\n", timeLimit);
-         }
          if (err == BAE_NO_ERROR)
          {
+            BAESong_DisplayInfo(theSong);
+            BAESong_SetLoops(theSong, loopCount);
+	    printf("Master song volume set to %lu%%\n", volume / 1000);
+	    if (loopCount > 0) {
+		printf("Will loop song %u times\n", loopCount);
+	    }
+	    if (timeLimit > 0) {
+		printf("Max Play Duration: %d seconds\n", timeLimit);
+            }
             printf("BAE memory used for everything %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
             done = FALSE;
 	    while (done == FALSE)
@@ -413,7 +426,6 @@ static BAEResult PlayRMF(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED v
    return(err);
 }
 
-
 // main()
 // ---------------------------------------------------------------------
 int main(int argc, char *argv[])
@@ -422,7 +434,7 @@ int main(int argc, char *argv[])
    BAEMixer     theMixer;
    short int    rmf, pcm, level;
    unsigned int loopCount, timeLimit = 0;
-   BAE_UNSIGNED_FIXED volume = 100;
+   BAE_UNSIGNED_FIXED volume = 100000; // (percent * 1000)
    BAEBankToken bank;
    int          doneCommand = 0;
    char         parmFile[1024];
@@ -444,6 +456,11 @@ int main(int argc, char *argv[])
        if (PV_ParseCommands(argc, argv, "-l", TRUE, parmFile))
        {
           loopCount = (unsigned int)atoi(parmFile);
+       }
+
+       if (PV_ParseCommands(argc, argv, "-v", TRUE, parmFile))
+       {
+          volume = (unsigned int)(atoi(parmFile) * 1000);
        }
 
        if (PV_ParseCommands(argc, argv, "-t", TRUE, parmFile))
