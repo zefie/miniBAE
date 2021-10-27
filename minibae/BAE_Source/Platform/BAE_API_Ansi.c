@@ -646,8 +646,8 @@ int HAE_AquireAudioCard(void *threadContext, unsigned long sampleRate, unsigned 
 
 	// BUFFER_SIZE is based on 44100hz Stereo 16Bit
 	float bufferCalc = 689.0625;
-	g_audioByteBufferSize = (XSDWORD)roundUp(((sampleRate * channels * bits) / bufferCalc),8);
-	printf("sampleRate: %lu, channels: %lu, bits: %lu, g_audioByteBufferSize: %lu\n",sampleRate,channels,bits,g_audioByteBufferSize); 
+	g_audioByteBufferSize = (XSDWORD)roundUp(((sampleRate * channels * bits) / bufferCalc), 64);
+	printf("sampleRate: %lu, channels: %lu, bits: %lu, g_audioByteBufferSize: %lu\n",sampleRate, channels, bits, g_audioByteBufferSize); 
 
 	return 0;
 }
