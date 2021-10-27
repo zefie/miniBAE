@@ -63,7 +63,7 @@ char const usageString[] =
    "                 -o  {write output to file}\n"
    "                 -mr {mixer sample rate ie. 11025}\n"
    "                 -l  {# of times to loop}\n"
-   "                 -v  {max volume (in percent, overdrive allowed)}\n"
+   "                 -v  {max volume (in percent, overdrive allowed) (default: 100)}\n"
    "                 -t  {max length in seconds to play midi (0 = forever)}\n"
    "                 -rv {set default reverb type}\n"
    "                 -rl {display reverb definitions}\n"
@@ -178,7 +178,7 @@ static BAEResult PlayPCM(BAEMixer theMixer, char *fileName, BAEFileType type, BA
 	    BAESound_GetInfo(sound, &songInfo);
 	    rate = songInfo.sampledRate / 65536;
             printf("BAE memory used for everything %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
-	    printf("Master sound volume set to %lu%%\n", volume / 1000);
+	    printf("Master sound volume set to %lu%%\n", volume / 300);
             done = FALSE;
             while (done == FALSE)
             {
@@ -249,7 +249,7 @@ static BAEResult PlayPCMStreamed(BAEMixer theMixer, char *fileName, BAEFileType 
          err = BAEStream_Start(stream);
          if (err == BAE_NO_ERROR)
          {
- 	    printf("Master stream volume set to %lu%%\n", volume / 1000);
+ 	    printf("Master stream volume set to %lu%%\n", volume / 300);
             printf("BAE memory used for everything %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
             done = FALSE;
             while (done == FALSE)
@@ -316,7 +316,7 @@ static BAEResult PlayMidi(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED 
             printf("Reverb Type set to %d\n", reverbType);
 
             BAESong_SetLoops(theSong, loopCount);
-	    printf("Master song volume set to %lu%%\n", volume / 1000);
+	    printf("Master song volume set to %lu%%\n", volume / 300);
 	    if (loopCount > 0) {
 		printf("Will loop song %u times\n", loopCount);
 	    }
@@ -401,7 +401,7 @@ static BAEResult PlayRMF(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED v
             printf("Reverb Type set to %d\n", reverbType);
 
             BAESong_SetLoops(theSong, loopCount);
-	    printf("Master song volume set to %lu%%\n", volume / 1000);
+	    printf("Master song volume set to %lu%%\n", volume / 300);
 	    if (loopCount > 0) {
 		printf("Will loop song %u times\n", loopCount);
 	    }
@@ -466,7 +466,7 @@ int main(int argc, char *argv[])
    short int    rmf, pcm, level;
    unsigned int loopCount = 0;
    unsigned int timeLimit = 0;
-   BAE_UNSIGNED_FIXED volume = 100000; // (percent * 1000)
+   BAE_UNSIGNED_FIXED volume = 30000; // (percent * 300)
    BAETerpMode interpol = BAE_LINEAR_INTERPOLATION;
    int maxVoices = BAE_MAX_VOICES;
    BAEBankToken bank;
@@ -510,7 +510,7 @@ int main(int argc, char *argv[])
 
        if (PV_ParseCommands(argc, argv, "-v", TRUE, parmFile))
        {
-          volume = (unsigned int)(atoi(parmFile) * 1000);
+          volume = (unsigned int)(atoi(parmFile) * 300);
        }
 
        if (PV_ParseCommands(argc, argv, "-t", TRUE, parmFile))
