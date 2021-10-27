@@ -482,6 +482,14 @@ int main(int argc, char *argv[])
        if (PV_ParseCommands(argc, argv, "-mv", TRUE, parmFile))
        {
            maxVoices = atoi(parmFile);
+	   if (maxVoices < BAE_MIN_VOICES) {
+		printf("Invalid value for max voices: %d, expected 4-64. Set to %d.\n", reverbType, BAE_MIN_VOICES);
+		maxVoices = BAE_MIN_VOICES;
+	   }
+	   if (maxVoices > BAE_MAX_VOICES) {
+		printf("Invalid value for max voices: %d, expected 4-64. Set to %d.\n", reverbType, BAE_MAX_VOICES);
+		maxVoices = BAE_MAX_VOICES;
+	   }
        }
 
        pcm   = 1;
