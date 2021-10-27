@@ -8,14 +8,6 @@ Table of Contents (TOC)
 =======================
 
    * [miniBAE](#miniBAE)
-   * [Flexible](#flexible)
-   * [Interactivity Oriented](#interactivity-oriented)
-   * [Great Sounding](#great-sounding)
-   * [Powerful and Extensible](#powerful-and-extensible)
-   * [Efficient](#efficient)
-   * [Hardware Independent – Sound Card Agnostic](#hardware-independent-sound-card-agnostic)
-   * [Consistent Across Plattforms](#consistent-across-plattforms)
-   * [An Inexpensive Cross Platform Audio Solution](#an-inexpensive-cross-palform-audio-solution)
    * [Why do we care?](#why-do-we-care)
    * [What can it be used for](#what-can-it-be-used-for)
    * [What’s is cost?](#whats-is-cost)
@@ -34,55 +26,8 @@ Table of Contents (TOC)
 
 ![Alt text](docs/block.jpg)
 
-### Flexible
-
- It can play several leading industry standard music and audio file formats from disk or from memory.  
-
-### Interactivity oriented
-
- You can pause and resume any media playback at will, change pitch while a sound is playing, etc. The feature-rich miniBAE API is full of
- opportunities for innovative integration of sound design into
- interactive virtual worlds, for example, miniBAE includes a MIDI synthesizer that your application, or user, can play in real-time.
-  
-### Great Sounding
-
- The audio engine DSP quality is very good, comparable to high-end PC
- wavetable sound cards even though the processing is entirely
- software-based, and audio quality is selectable all the way from 8-bit
- 8 kHz up to 16-bit 44.1 kHz.
-  
-### Powerful and Extensible
-
- The miniBAE music synthesizer is a high-quality wavetable instrument with LFOs, ADSRs, and filters. It can be delivered with a complete
- General MIDI patch bank, or for small footprints a ‘light’ General MIDI
- approximation can be used. Custom instrument banks can be built with the Beatnik Editor application.
-
-### Efficient
-
- Despite miniBAE’s power, the per-voice processor load is impressively
- low.
-  
-### Hardware Independent – Sound Card Agnostic
-  
- Some other sound systems require consumers to buy expensive (and
- quickly outdated) hardware sound cards – but miniBAE avoids nearly
- all sound card support issues because it’s 100% software. miniBAE
- requires no particular sound hardware in the host system, only an audio
- output.
-
-### Consistent Across Platforms
-  
- Because it’s a software-only solution, consistently great sounding music is much easier to achieve with miniBAE than with many other computer music systems.  
-
-### An Inexpensive Cross-Platform Audio Solution
-
- miniBAE provides the same music and sound capabilities on every supported platform, so porting music and sound content is a
- no-brainer, requiring literally no additional sound artist work –
- simply reuse the files. Abstracted high-performance audio mixing engine. Designed for very low latency. Very efficient.
-
 ### Why do we care?
-Interactive audio is the core need for quality video games and sonified UIX.
-Audio is one of the senses, and any platform without good support suffers.
+Nostalgia.
 
 ### What can it be used for?
 Playing just about any kind of audio content. Either stored locally, via a network stream or stored in an application.
