@@ -65,7 +65,26 @@ char const usageString[] =
    "                 -l  {# of times to loop}\n"
    "                 -v  {max volume (in percent, overdrive allowed)}\n"
    "                 -t  {max length in seconds to play midi (0 = forever)}\n"
+   "                 -rv {set default reverb type}\n"
+   "                 -rl {display reverb definitions}\n"
    "                 -nf {disable fade-out when stopping via time limit or CTRL-C}\n"
+};
+
+char const reverbTypeList[] =
+{
+  "Valid Reverb Types for -rv command:\n"
+  "   0               Default\n"
+  "   1               None\n"
+  "   2               Igor's Closet\n"
+  "   3               Igor's Garage\n"
+  "   4               Igor's Acoustic Lab\n"
+  "   5               Igor's Cavern\n"
+  "   6               Igor's Dungeon\n"
+  "   7               Small reflections (Reverb used for WebTV)\n"
+  "   8               Early reflections (variable verb)\n"
+  "   9               Basement (variable verb)\n"
+  "   10              Banquet hall (variable verb)\n"
+  "   11              Catacombs (variable verb)\n"
 };
 
 
@@ -268,7 +287,7 @@ static BAEResult PlayPCMStreamed(BAEMixer theMixer, char *fileName, BAEFileType 
 // ---------------------------------------------------------------------
 //
 //
-static BAEResult PlayMidi(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED volume, unsigned int timeLimit, unsigned int loopCount)
+static BAEResult PlayMidi(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED volume, unsigned int timeLimit, unsigned int loopCount, BAEReverbType reverbType)
 {
    BAEResult err;
    BAESong   theSong = BAESong_New(theMixer);
@@ -289,6 +308,10 @@ static BAEResult PlayMidi(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED 
          if (err == BAE_NO_ERROR)
          {
             BAESong_DisplayInfo(theSong);
+
+            BAEMixer_SetDefaultReverb(theMixer, (BAEReverbType)reverbType);
+            printf("Reverb Type set to %d\n", reverbType);
+
             BAESong_SetLoops(theSong, loopCount);
 	    printf("Master song volume set to %lu%%\n", volume / 1000);
 	    if (loopCount > 0) {
@@ -297,6 +320,7 @@ static BAEResult PlayMidi(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED 
             if (timeLimit > 0) {
 		printf("Max Play Duration: %d seconds\n", timeLimit);
             }
+
             printf("BAE memory used for everything %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
             done = FALSE;
             while (done == FALSE)
@@ -351,7 +375,7 @@ static BAEResult PlayMidi(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED 
 // ---------------------------------------------------------------------
 //
 //
-static BAEResult PlayRMF(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED volume,  unsigned int timeLimit, unsigned int loopCount)
+static BAEResult PlayRMF(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED volume,  unsigned int timeLimit, unsigned int loopCount, BAEReverbType reverbType)
 {
    BAEResult err;
    BAESong   theSong = BAESong_New(theMixer);
@@ -369,6 +393,10 @@ static BAEResult PlayRMF(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED v
          if (err == BAE_NO_ERROR)
          {
             BAESong_DisplayInfo(theSong);
+
+            BAEMixer_SetDefaultReverb(theMixer, (BAEReverbType)reverbType);
+            printf("Reverb Type set to %d\n", reverbType);
+
             BAESong_SetLoops(theSong, loopCount);
 	    printf("Master song volume set to %lu%%\n", volume / 1000);
 	    if (loopCount > 0) {
@@ -438,6 +466,7 @@ int main(int argc, char *argv[])
    BAE_UNSIGNED_FIXED volume = 100000; // (percent * 1000)
    BAEBankToken bank;
    int          doneCommand = 0;
+   short	reverbType = 8; // early reflections
    char         parmFile[1024];
    BAERate      rate;
 
@@ -449,6 +478,11 @@ int main(int argc, char *argv[])
        rmf   = BAE_MAX_VOICES - pcm;
        level = rmf / 3;
        rate  = BAE_RATE_44K;
+       if (PV_ParseCommands(argc, argv, "-rl", FALSE, NULL))
+       {
+           printf(reverbTypeList);
+           return 0;
+       }
        if (PV_ParseCommands(argc, argv, "-mr", TRUE, parmFile))
        {
           rate = (BAERate)atoi(parmFile);
@@ -474,7 +508,6 @@ int main(int argc, char *argv[])
           fadeOut = FALSE;
        }
 
-
       printf("Allocating mixer with %d voices for RMF/Midi playback\n"
              "and %d voices for PCM playback at %d sample rate\n",
              rmf, pcm,
@@ -492,8 +525,16 @@ int main(int argc, char *argv[])
       {
          BAEMixer_SetAudioTask(theMixer, PV_Task, (void *)theMixer);
 
-          // turn on nice verb
-         BAEMixer_SetDefaultReverb(theMixer, BAE_REVERB_TYPE_8);
+         // turn on nice verb
+         if (PV_ParseCommands(argc, argv, "-rv", TRUE, parmFile))
+         {
+	    // user selected reverb
+            reverbType = (short)atoi(parmFile);
+	    if (reverbType > 11) {
+		printf("Invalid reverbType %d, expected 1-11. Ignored.\n", reverbType);
+		reverbType = 8;
+  	    }
+         }
          printf("BAE memory used during idle prior to SetBankToFile: %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
 
          if (PV_ParseCommands(argc, argv, "-p", TRUE, parmFile))
@@ -547,13 +588,13 @@ int main(int argc, char *argv[])
          if (PV_ParseCommands(argc, argv, "-r", TRUE, parmFile))
          {
             printf("PlayRMF\n");
-            err         = PlayRMF(theMixer, parmFile, volume, timeLimit, loopCount);
+            err         = PlayRMF(theMixer, parmFile, volume, timeLimit, loopCount, reverbType);
             doneCommand = 1;
          }
          if (PV_ParseCommands(argc, argv, "-m", TRUE, parmFile))
          {
             printf("PlayMidi\n");
-            err         = PlayMidi(theMixer, parmFile, volume, timeLimit, loopCount);
+            err         = PlayMidi(theMixer, parmFile, volume, timeLimit, loopCount, reverbType);
             doneCommand = 1;
          }
 
