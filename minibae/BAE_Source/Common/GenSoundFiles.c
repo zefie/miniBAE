@@ -219,7 +219,7 @@ typedef struct
     XWORD       wBitsPerSample;     /* number of bits per sample of mono data */
     XWORD       cbSize;             /* the count in bytes of the size of */
                                     /* extra information (after cbSize) */
-} X_PACKBY1 XWaveHeader;
+} XWaveHeader;
  
 
 //
@@ -233,7 +233,7 @@ typedef struct
 {
         XWaveHeader     wfx;
         XWORD           wSamplesPerBlock;
-} X_PACKBY1 XWaveHeaderIMA;
+} XWaveHeaderIMA;
 
 
 
@@ -259,7 +259,7 @@ typedef struct
                                         // value of 0x80000000 represents 1/2 of a sample length.
   XDWORD            dwPlayCount;        // number of times to play the loop. A value of 0 specifies an infinite sustain loop (ie, the wave keeps looping
                                         // until some external force interrupts playback, such as the musician releasing the key that triggered that wave's playback).
-} X_PACKBY1 XSampleLoop;
+} XSampleLoop;
 
 typedef struct 
 {
@@ -292,7 +292,7 @@ typedef struct
   XDWORD            cbSamplerData;      // The cbSamplerData field specifies the size (in bytes) of any optional fields that an application wishes to append to this chunk.
 
   XSampleLoop       loops[1];
-} X_PACKBY1 XSamplerChunk;
+} XSamplerChunk;
 
 // WAVE form wFormatTag IDs
 
@@ -378,7 +378,7 @@ typedef struct
     long    ckID;      /* ID */
     long    ckSize;    /* size */
     long    ckData;
-} X_PACKBY1 XIFFChunk;
+} XIFFChunk;
 
 typedef struct
 {
@@ -386,7 +386,7 @@ typedef struct
     unsigned long   numSampleFrames;
     short int       sampleSize;
     unsigned char   sampleRate[10];
-} X_PACKBY1 XAIFFHeader;
+} XAIFFHeader;
 
 typedef struct
 {
@@ -396,7 +396,7 @@ typedef struct
     unsigned char   sampleRate[10];
     unsigned long   compressionType;
     char            compressionName[256];           /* variable length array, Pascal string */
-} X_PACKBY1 XAIFFExtenedHeader;
+} XAIFFExtenedHeader;
 
 typedef struct
 {
@@ -407,7 +407,7 @@ typedef struct
     short int       id2;        // 1
     unsigned long   position2;
     char            name2[8];   // 07656E644C6F6F70 'endLoop'
-} X_PACKBY1 XSingleLoopMarker;
+} XSingleLoopMarker;
 
 typedef struct
 {
@@ -425,13 +425,13 @@ typedef struct
     short int       releaseLoop_beginLoop;
     short int       releaseLoop_endLoop;
     short int       extra;
-} X_PACKBY1 XInstrumentHeader;
+} XInstrumentHeader;
 
 typedef struct
 {
     unsigned long   offset;
     unsigned long   blockSize;
-} X_PACKBY1 XSoundData;
+} XSoundData;
 
 /**********************- AU Defines -**************************/
     
@@ -445,14 +445,14 @@ typedef struct
     unsigned long encoding;       // format of data contained in this file 
     unsigned long sample_rate;    // sample rate of data in this file 
     unsigned long channels;       // numbder of interleaved channels (usually 1 or 2) 
-} X_PACKBY1 SunAudioFileHeader;
+} SunAudioFileHeader;
 
 typedef struct
 {
     struct g72x_state   state;
     unsigned int        buffer;
     int                 bits;
-} X_PACKBY1 SunDecodeState;
+} SunDecodeState;
 
 // Note these are defined for big-endian architectures 
 #define SUN_AUDIO_FILE_MAGIC_NUMBER (0x2E736E64L)       // '.snd'

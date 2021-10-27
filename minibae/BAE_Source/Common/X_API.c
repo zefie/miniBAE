@@ -924,11 +924,11 @@ XFIXED XFixedSin(int angle)
     }
     else if ( (angle >= 180) && (angle < 270) )
     {
-        sin = -cosSinTable90[270 - angle];  // 180-269
+        sin = -(int)cosSinTable90[270 - angle];  // 180-269
     }
     else if ( (angle >= 270) && (angle <= 359) )
     {
-        sin = -cosSinTable90[angle - 270];  // 270-359
+        sin = -(int)cosSinTable90[angle - 270];  // 270-359
     }
     return sin;
 }
@@ -946,11 +946,11 @@ XFIXED XFixedCos(int angle)
     }
     else if ( (angle >= 90) && (angle < 180) )
     {
-        cos = -cosSinTable90[180 - angle];  // 90-179
+        cos = -(int)cosSinTable90[180 - angle];  // 90-179
     }
     else if ( (angle >= 180) && (angle < 270) )
     {
-        cos = -cosSinTable90[angle - 180];  // 180-269
+        cos = -(int)cosSinTable90[angle - 180];  // 180-269
     }
     else if ( (angle >= 270) && (angle <= 359) )
     {

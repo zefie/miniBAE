@@ -11,8 +11,17 @@ gen/
 local.properties
 .idea/
 
+minibae/.vs
+minibae/Debug
+minibae/Release
+
 minibae/Tools/playbae/playbae
 minibae/Tools/playbae/playbae.exe
+
+minibae/Tools/playbae/.vs
+minibae/Tools/playbae/Debug
+minibae/Tools/playbae/Release
+
 libminiBAE.a
 libminiBAE_debug.so
 libminiBAE_debug.dll

@@ -1115,6 +1115,7 @@ int BAE_SetFileLength(long fileReference, unsigned long newSize)
 
 static int PV_IsNT(void)
 {
+    /*
     static int  firstTime = TRUE;
     static int  underNT;
 
@@ -1124,6 +1125,9 @@ static int PV_IsNT(void)
         firstTime = FALSE;
     }
     return underNT;
+    */
+    // in 2021 assume true ;)
+    return TRUE;
 }
 
 // When using DirectSound, we need a window handle (!). So this function looks
