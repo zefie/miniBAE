@@ -68,6 +68,9 @@ char const usageString[] =
    "                 -rv {set default reverb type}\n"
    "                 -rl {display reverb definitions}\n"
    "                 -nf {disable fade-out when stopping via time limit or CTRL-C}\n"
+   "                 -2p {use 2-point Interpolation rather than default of Linear}\n"
+   "                 -mv  {max voices (default: 64)}\n"
+   "                 -h  {displays this message then exists}\n"
 };
 
 char const reverbTypeList[] =
@@ -464,25 +467,37 @@ int main(int argc, char *argv[])
    unsigned int loopCount = 0;
    unsigned int timeLimit = 0;
    BAE_UNSIGNED_FIXED volume = 100000; // (percent * 1000)
+   BAETerpMode interpol = BAE_LINEAR_INTERPOLATION;
+   int maxVoices = BAE_MAX_VOICES;
    BAEBankToken bank;
-   int          doneCommand = 0;
-   short	reverbType = 8; // early reflections
-   char         parmFile[1024];
-   BAERate      rate;
+   int doneCommand = 0;
+   short reverbType = 8; // early reflections
+   char parmFile[1024];
+   BAERate rate = BAE_RATE_44K;
 
    signal(SIGINT, intHandler);
    theMixer = BAEMixer_New();
    if (theMixer)
    {
+       if (PV_ParseCommands(argc, argv, "-mv", TRUE, parmFile))
+       {
+           maxVoices = atoi(parmFile);
+       }
+
        pcm   = 1;
-       rmf   = BAE_MAX_VOICES - pcm;
+       rmf   = maxVoices - pcm;
        level = rmf / 3;
-       rate  = BAE_RATE_44K;
        if (PV_ParseCommands(argc, argv, "-rl", FALSE, NULL))
        {
            printf(reverbTypeList);
            return 0;
        }
+       if (PV_ParseCommands(argc, argv, "-h", FALSE, NULL))
+       {
+           printf(usageString);
+           return 0;
+       }
+
        if (PV_ParseCommands(argc, argv, "-mr", TRUE, parmFile))
        {
           rate = (BAERate)atoi(parmFile);
@@ -508,6 +523,12 @@ int main(int argc, char *argv[])
           fadeOut = FALSE;
        }
 
+       if (PV_ParseCommands(argc, argv, "-2p", FALSE, NULL))
+       {
+          interpol = BAE_2_POINT_INTERPOLATION;
+       }
+
+
       printf("Allocating mixer with %d voices for RMF/Midi playback\n"
              "and %d voices for PCM playback at %d sample rate\n",
              rmf, pcm,
@@ -515,7 +536,7 @@ int main(int argc, char *argv[])
 
       err = BAEMixer_Open(theMixer,
                           rate,
-                          BAE_LINEAR_INTERPOLATION,
+                          interpol,
                           BAE_USE_STEREO | BAE_USE_16,
                           rmf,                                          // midi voices
                           pcm,                                          // pcm voices
