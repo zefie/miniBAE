@@ -310,8 +310,8 @@ static BAEResult PlayMidi(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED 
 	       BAESong_GetMicrosecondPosition(theSong, &currentPosition);
                currentPosition = currentPosition / 1000;
                m = (currentPosition / 60000);
-               s = (currentPosition - (m*60000)) / 600;
-               ms = (currentPosition - (60000*m) - (s*600));
+               s = (currentPosition - (m*60000)) / 1000;
+               ms = (currentPosition - (60000*m) - (s*1000));
                if (ms > 1 || s > 0 || m > 0) {
                   printf("Playback position: %02d:%02d.%03d\r",m,s,ms);
                }
@@ -390,8 +390,8 @@ static BAEResult PlayRMF(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED v
 	       BAESong_GetMicrosecondPosition(theSong, &currentPosition);
                currentPosition = currentPosition / 1000;
                m = (currentPosition / 60000);
-               s = (currentPosition - (m*60000)) / 600;
-               ms = (currentPosition - (60000*m) - (s*600));
+               s = (currentPosition - (m*60000)) / 1000;
+               ms = (currentPosition - (60000*m) - (s*1000));
                if (ms > 1 || s > 0 || m > 0) {
                   printf("Playback position: %02d:%02d.%03d\r",m,s,ms);
                }
