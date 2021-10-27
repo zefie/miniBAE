@@ -433,7 +433,8 @@ int main(int argc, char *argv[])
    BAEResult    err;
    BAEMixer     theMixer;
    short int    rmf, pcm, level;
-   unsigned int loopCount, timeLimit = 0;
+   unsigned int loopCount = 0;
+   unsigned int timeLimit = 0;
    BAE_UNSIGNED_FIXED volume = 100000; // (percent * 1000)
    BAEBankToken bank;
    int          doneCommand = 0;
