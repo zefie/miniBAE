@@ -69,7 +69,7 @@ char const usageString[] =
    "                 -rl {display reverb definitions}\n"
    "                 -nf {disable fade-out when stopping via time limit or CTRL-C}\n"
    "                 -2p {use 2-point Interpolation rather than default of Linear}\n"
-   "                 -mv  {max voices (default: 64)}\n"
+   "                 -mv {max voices (default: 64)}\n"
    "                 -h  {displays this message then exists}\n"
 };
 
