@@ -628,13 +628,25 @@ long HAE_GetAudioByteBufferSize(void)
 // **** Audio card support
 // Aquire and enabled audio card
 // return 0 if ok, -1 if failed
+int roundUp(int numToRound, int multiple)
+{
+    if (multiple == 0)
+        return numToRound;
+
+    int remainder = numToRound % multiple;
+    if (remainder == 0)
+        return numToRound;
+
+    return numToRound + multiple - remainder;
+}
+
 int HAE_AquireAudioCard(void *threadContext, unsigned long sampleRate, unsigned long channels, unsigned long bits)
 {
 	// need to set callback which will in turn call BuildMixerSlice every so often
 
 	// BUFFER_SIZE is based on 44100hz Stereo 16Bit
 	float bufferCalc = 689.0625;
-	g_audioByteBufferSize = (XSDWORD)((sampleRate * channels * bits) / bufferCalc);
+	g_audioByteBufferSize = (XSDWORD)roundUp(((sampleRate * channels * bits) / bufferCalc),8);
 	printf("sampleRate: %lu, channels: %lu, bits: %lu, g_audioByteBufferSize: %lu\n",sampleRate,channels,bits,g_audioByteBufferSize); 
 
 	return 0;
