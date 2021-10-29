@@ -5,14 +5,14 @@ TARGET_BIN	:= playbae.js
 PACK_FILENAME	:= playbae_wasm32.tar.gz
 
 vpath	%.c src/BAE_Source/Common src/BAE_Source/Platform
-vpath	%.c src/banks/patches
+vpath	%.c src/banks/patches111
 vpath	%.c src/playbae
 vpath	%.c src/BAE_MPEG_Source_II
 
 INC_PATH	:= -Isrc/BAE_Source/Common
 INC_PATH	+= -Isrc/BAE_Source/Platform
 INC_PATH	+= -Isrc/BAE_MPEG_Source_II
-INC_PATH	+= -Isrc/banks/patches
+INC_PATH	+= -Isrc/banks/patches111
 
 EXTRA_FILES		:= \
 			src/playbae/minibae-audio.htm \
