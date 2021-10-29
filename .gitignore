@@ -9,6 +9,8 @@ bin/
 */bin/
 gen/
 */gen/
+tests/
+*/tests/
 
 local.properties
 .idea/
