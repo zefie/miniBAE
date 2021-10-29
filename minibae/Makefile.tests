@@ -37,3 +37,9 @@ test8: $(TARGET_BIN)
 	# test clang stuck note
 	@mkdir -p tests
 	$(TEST_BIN) -p ../extras/TestSuite/minibae-wtv.hsb -m ../extras/TestSuite/karTV.mid -mr 44100 -t 30 -o $(TEST_OUT_DIR)test_clang.wav
+
+test9: $(TARGET_BIN)
+	# test flag-less media file argument
+	@mkdir -p tests
+	$(TEST_BIN) ../extras/TestSuite/world1.mid -p ../extras/TestSuite/minibae-wtv.hsb -mr 44100 -o $(TEST_OUT_DIR)test_44100.wav
+
