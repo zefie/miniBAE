@@ -19,20 +19,24 @@ class MiniBAEAudio extends HTMLAudioElement {
     async _handleError() {
         if(this?.error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED) {
             let playbaeOptions = {};
+            playbaeOptions.arguments = ['-q'];
+
             playbaeOptions.preRun = [(Module) => {
                 Module.FS.createPreloadedFile("/home/web_user/", "audio", this.currentSrc, true, true);
                 if(this.dataset.minibaePatches) {
-                    Module.FS.unlink("/home/web_user/patches.hsb");
+                    playbaeOptions.arguments.push("-p", "/home/web_user/patches.hsb");
                     Module.FS.createPreloadedFile("/home/web_user/", "patches.hsb", this.dataset.minibaePatches, true, true);
                 }
             }];
-            playbaeOptions.arguments = ['-q'];
-            playbaeOptions.arguments.push("-p", "/home/web_user/patches.hsb");
+
             if(this.dataset.minibaeType) {
                 playbaeOptions.arguments.push(TYPE_TO_CMD[this.dataset.minibaeType]);
+            } else {
+                playbaeOptions.arguments.push('-f');
             }
             playbaeOptions.arguments.push("/home/web_user/audio");
             playbaeOptions.arguments.push("-o", "/home/web_user/audio.wav");
+			
             let playbae = await PlayBAE(playbaeOptions);
             let uint8array = playbae.FS.readFile("/home/web_user/audio.wav");
             let blob = new Blob([uint8array], {type: 'audio/wav'});
