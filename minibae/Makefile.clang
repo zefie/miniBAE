@@ -78,14 +78,14 @@ OBJ_DIR 	:= $(BUILD_DIR)obj/
 OBJ 		:= $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
 OBJ_BIN 	:= $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC_BIN})))
 
-ARCH		:= -m32 -static
+ARCH		:= -m32
 CC		:= clang
 CXX		:= clang++
 LD		:= clang
 AR      	:= ar
 STRIP		:= strip
 
-CFLAGS  	:= $(ARCH) -g -fPIC -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
+CFLAGS  	:= $(ARCH) -static -g -fPIC -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
 CFLAGS		+= -DX_PLATFORM=X_ANSI
 #CFLAGS		+= -D_DEBUG=1
 CXXFLAGS 	:= $(CFLAGS)
