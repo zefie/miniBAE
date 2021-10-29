@@ -3,23 +3,13 @@ obj/
 */obj/
 out/
 */out/
+build/
+*/buuld/
 bin/
 */bin/
 gen/
 */gen/
 
-ghrel_out/
-*/ghrel_out/
-
 local.properties
 .idea/
 
-minibae/Tools/playbae/playbae
-minibae/Tools/playbae/playbae_sm
-minibae/Tools/playbae/playbae.*
-minibae/Tools/playbae/playbae_sm.*
-libminiBAE.a
-libminiBAE_debug.so
-libminiBAE_debug.dll
-libminiBAE.so
-libminiBAE.dll

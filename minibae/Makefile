@@ -1,13 +1,20 @@
-TARGET = libminiBAE
+BUILD_DIR	:= build/
+TEST_OUT_DIR	:= tests/
+TARGET_OUT	:= bin/
+TARGET_LIB	:= libminiBAE
+TARGET_BIN	:= playbae
 
-vpath	%.c BAE_Source/Common BAE_Source/Platform
-vpath	%.c banks/patches
-vpath	%.c BAE_MPEG_Source_II
+TEST_BIN	:= $(TARGET_OUT)$(TARGET_BIN)
 
-INC_PATH	:= -IBAE_Source/Common
-INC_PATH	+= -IBAE_Source/Platform
-INC_PATH	+= -IBAE_MPEG_Source_II
-INC_PATH	+= -Ibanks/patches
+vpath	%.c src/BAE_Source/Common src/BAE_Source/Platform
+vpath	%.c src/banks/patches
+vpath	%.c src/playbae
+vpath	%.c src/BAE_MPEG_Source_II
+
+INC_PATH	:= -Isrc/BAE_Source/Common
+INC_PATH	+= -Isrc/BAE_Source/Platform
+INC_PATH	+= -Isrc/BAE_MPEG_Source_II
+INC_PATH	+= -Isrc/banks/patches
 
 SRC		:=	BAE_API_Ansi.c
 
@@ -65,8 +72,11 @@ SRC		+= \
 #			mpa_dec_vec.c \
 #			mpa_version.c
 
-OBJ_DIR := obj/
-OBJ := $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
+SRC_BIN		:= $(SRC) playbae.c
+
+OBJ_DIR 	:= $(BUILD_DIR)obj/
+OBJ 		:= $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
+OBJ_BIN 	:= $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC_BIN})))
 
 ARCH		:= -m32
 CC		:= gcc
@@ -79,22 +89,26 @@ CFLAGS  	:= $(ARCH) -static -fPIC -g -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-unused-
 CFLAGS		+= -DX_PLATFORM=X_ANSI
 #CFLAGS		+= -D_DEBUG=1
 CXXFLAGS 	:= $(CFLAGS)
-LDFLAGS		:= $(ARCH)
-
+LDFLAGS		:= -s $(ARCH)
 
 LIBS	= 	-lpthread
 
-all: $(TARGET).a ${TARGET}_debug.so ${TARGET}.so
+all: $(TARGET_LIB).a ${TARGET_LIB}.so $(TARGET_BIN)
 
-$(TARGET).a: $(OBJ)
-	$(AR) rcs $(TARGET).a $(OBJ)
+$(TARGET_LIB).a: $(OBJ)
+	@mkdir -p $(TARGET_OUT)
+	$(AR) rcs $(TARGET_OUT)$(TARGET_LIB).a $(OBJ)
 
-$(TARGET)_debug.so: ${OBJ}
-	${CC} -shared ${ARCH} ${OBJ} -o ${TARGET}_debug.so
+$(TARGET_LIB).so: ${OBJ}
+	@mkdir -p $(TARGET_OUT)
+	${CC} -shared ${ARCH} ${OBJ} $(LIBS) -o $(TARGET_OUT)${TARGET_LIB}.so
 
-$(TARGET).so: $(TARGET)_debug.so
-	cp $(TARGET)_debug.so $(TARGET).so
-	${STRIP} -s ${TARGET}.so
+$(TARGET_BIN): ${OBJ_BIN}
+	@mkdir -p $(TARGET_OUT)
+	${LD} -s -o $(TARGET_OUT)${TARGET_BIN} ${LDFLAGS} ${OBJ_BIN} ${LIBS}
+
+pack: ${TARGET_BIN}
+	cat $(TARGET_OUT)${TARGET_BIN} | gzip -9c > $(TARGET_OUT)playbae_linux32_static.gz
 
 # Rules for compiling source files to object files
 $(OBJ_DIR)%.o : %.cpp
@@ -108,9 +122,10 @@ $(OBJ_DIR)%.o : %.c
 	@${CC} -c ${CFLAGS} $< -o $@
 
 clean:
-	@rm -f $(TARGET).* ${TARGET}_debug.*
+	@rm -rdf $(TARGET_OUT)
 	@rm -rdf $(OBJ_DIR)
-	@rm -rdf build
+	@rm -rdf $(BUILD_DIR)
+	@rm -rdf $(TEST_OUT_DIR)
 	@echo Cleaned!
 
-
+include Makefile.tests

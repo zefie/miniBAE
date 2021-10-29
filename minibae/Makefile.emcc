@@ -1,13 +1,23 @@
-TARGET = libminiBAE
+BUILD_DIR	:= build/
+TARGET_OUT	:= bin/
+TARGET_LIB	:= libminiBAE
+TARGET_BIN	:= playbae.js
+PACK_FILENAME	:= playbae_wasm32.tar.gz
 
-vpath	%.c BAE_Source/Common BAE_Source/Platform
-vpath	%.c banks/patches
-vpath	%.c BAE_MPEG_Source_II
+vpath	%.c src/BAE_Source/Common src/BAE_Source/Platform
+vpath	%.c src/banks/patches
+vpath	%.c src/playbae
+vpath	%.c src/BAE_MPEG_Source_II
 
-INC_PATH	:= -IBAE_Source/Common
-INC_PATH	+= -IBAE_Source/Platform
-INC_PATH	+= -IBAE_MPEG_Source_II
-INC_PATH	+= -Ibanks/patches
+INC_PATH	:= -Isrc/BAE_Source/Common
+INC_PATH	+= -Isrc/BAE_Source/Platform
+INC_PATH	+= -Isrc/BAE_MPEG_Source_II
+INC_PATH	+= -Isrc/banks/patches
+
+EXTRA_FILES		:= \
+			src/playbae/minibae-audio.htm \
+			src/playbae/minibae-audio.js
+
 
 SRC		:=	BAE_API_Ansi.c
 
@@ -65,8 +75,11 @@ SRC		+= \
 #			mpa_dec_vec.c \
 #			mpa_version.c
 
-OBJ_DIR := obj/
-OBJ := $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
+SRC_BIN         := $(SRC) playbae.c
+
+OBJ_DIR         := $(BUILD_DIR)obj/
+OBJ             := $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
+OBJ_BIN         := $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC_BIN})))
 
 ARCH		:= -m32 -static
 CC		:= emcc
@@ -75,7 +88,7 @@ LD		:= emcc
 AR      	:= emar
 STRIP		:= strip
 
-CFLAGS  	:= $(ARCH) -static -fPIC -g -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
+CFLAGS  	:= $(ARCH) -fPIC -g -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value -s SINGLE_FILE=1 -s ASYNCIFY=1
 CFLAGS		+= -DX_PLATFORM=X_ANSI
 #CFLAGS		+= -D_DEBUG=1
 CXXFLAGS 	:= $(CFLAGS)
@@ -84,13 +97,31 @@ LDFLAGS		:= $(ARCH)
 
 LIBS	= 	-lpthread
 
-all: $(TARGET).a ${TARGET}.so
+all: $(TARGET_LIB).a ${TARGET_LIB}.so $(TARGET_BIN)
 
-$(TARGET).a: $(OBJ)
-	$(AR) rcs $(TARGET).a $(OBJ)
+$(TARGET_LIB).a: $(OBJ)
+	@mkdir -p $(TARGET_OUT)
+	$(AR) rcs $(TARGET_OUT)$(TARGET_LIB).a $(OBJ)
 
-$(TARGET).so:
-	${CC} -shared -s ${ARCH} ${OBJ} -o ${TARGET}.so
+$(TARGET_LIB).so: ${OBJ}
+	@mkdir -p $(TARGET_OUT)
+	${CC} -shared ${ARCH} ${OBJ} $(LIBS) -o $(TARGET_OUT)${TARGET_LIB}.so
+
+$(TARGET_BIN): ${OBJ_BIN}
+	@mkdir -p $(TARGET_OUT)
+	@cp $(EXTRA_FILES) $(TARGET_OUT)
+	${LD} -s -o $(TARGET_OUT)${TARGET_BIN} ${LDFLAGS} ${OBJ_BIN} ${LIBS}
+
+pack: ${TARGET_BIN}
+	@rm -f $(TARGET_OUT)$(PACK_FILENAME)
+	@tar -zcf $(PACK_FILENAME) -C $(TARGET_OUT) --exclude "./$(PACK_FILENAME)" .
+	@mv $(PACK_FILENAME) $(TARGET_OUT)$(PACK_FILENAME)
+
+$(DST_FILES): ${TARGET_OUT}/% : %
+	@echo "$< ==> $@"
+	@[ -e $< ] || (echo "unspecified error copying $<" && false)
+	@mkdir -p $(dir $@)
+	@cp  $< $@
 
 # Rules for compiling source files to object files
 $(OBJ_DIR)%.o : %.cpp
@@ -104,9 +135,9 @@ $(OBJ_DIR)%.o : %.c
 	@${CC} -c ${CFLAGS} $< -o $@
 
 clean:
-	@rm -f $(TARGET).* ${TARGET}_debug.*
+	@rm -rdf $(TARGET_OUT)
 	@rm -rdf $(OBJ_DIR)
-	@rm -rdf build
+	@rm -rdf $(BUILD_DIR)
+	@rm -rdf $(TEST_OUT_DIR)
 	@echo Cleaned!
-
 

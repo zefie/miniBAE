@@ -42,6 +42,7 @@
 #include <GenSnd.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <BAEPatches.h>
 
 static volatile int interruptPlayBack = FALSE;
 static volatile int verboseMode = FALSE;
@@ -679,19 +680,7 @@ int main(int argc, char *argv[])
             playbae_dprintf("BAE memory used during idle after SetBankToFile: %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
          } else {
             playbae_printf("Using built-in bank\n");
-#ifdef __MINGW32__
-	    extern char binary_patches_hsb_start[];
-	    extern char binary_patches_hsb_size[];
-	    err = BAEMixer_AddBankFromMemory(theMixer,binary_patches_hsb_start,(unsigned int)&binary_patches_hsb_size,&bank);
-#else
-	#ifdef __EMSCRIPTEN__
-            err = BAEMixer_AddBankFromFile(theMixer, (BAEPathName)"patches.hsb", &bank);
-	#else
-	    extern char _binary_patches_hsb_start[];
-	    extern char _binary_patches_hsb_size[];
-	    err = BAEMixer_AddBankFromMemory(theMixer,_binary_patches_hsb_start,(unsigned int)&_binary_patches_hsb_size,&bank);
-	#endif
-#endif
+	    err = BAEMixer_AddBankFromMemory(theMixer, BAE_PATCHES,(unsigned int)&BAE_PATCHES_size,&bank);
             if (err > 0) {
 		playbae_printf("Error %d loading patch bank", err);
 		return(1);

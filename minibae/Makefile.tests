@@ -1,0 +1,27 @@
+test: $(TARGET_BIN)
+	@mkdir -p tests
+	$(TEST_BIN) -p ../extras/TestSuite/minibae-wtv.hsb -m ../extras/TestSuite/world1.mid -mr 44100 -o $(TEST_OUT_DIR)test_44100.wav
+
+test2: $(TARGET_BIN)
+	@mkdir -p tests
+	$(TEST_BIN) -p ../extras/TestSuite/minibae-wtv.hsb -m ../extras/TestSuite/karTV.mid -mr 44100 -o $(TEST_OUT_DIR)test_karTV_loop.wav
+
+test3: $(TARGET_BIN)
+	@mkdir -p tests
+	$(TEST_BIN) -p ../extras/TestSuite/minibae-wtv.hsb -m ../extras/TestSuite/world1.mid -mr 11025 -o $(TEST_OUT_DIR)test_11025.wav
+
+test4: $(TARGET_BIN)
+	@mkdir -p tests
+	$(TEST_BIN) -p ../extras/TestSuite/minibae-wtv.hsb -m ../extras/TestSuite/world1.mid -mr 16000 -o $(TEST_OUT_DIR)test_16000.wav
+
+test5: $(TARGET_BIN)
+	@mkdir -p tests
+	$(TEST_BIN) -p ../extras/TestSuite/minibae-wtv.hsb -m ../extras/TestSuite/world1.mid -mr 32000 -o $(TEST_OUT_DIR)test_32000.wav
+
+test6: $(TARGET_BIN)
+	@mkdir -p tests
+	$(TEST_BIN) -p ../extras/TestSuite/minibae-wtv.hsb -m ../extras/TestSuite/world1.mid -mr 32768 -o $(TEST_OUT_DIR)test_32768.wav
+
+test7: $(TARGET_BIN)
+	@mkdir -p tests
+	$(TEST_BIN) -m ../extras/TestSuite/world1.mid -mr 44100 -o $(TEST_OUT_DIR)test_builtin_patches.wav
