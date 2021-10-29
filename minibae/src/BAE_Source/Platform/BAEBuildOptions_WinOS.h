@@ -95,6 +95,7 @@
 #define USE_CREATION_API                TRUE
 #define BAE_COMPLETE                    1
 #define USE_STREAM_API                  TRUE
+#define SUPPORT_IGOR_FEATURE            TRUE
 
 
 // Overwritable Flags -- default values
