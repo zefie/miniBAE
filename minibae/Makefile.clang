@@ -7,14 +7,14 @@ TARGET_BIN	:= playbae
 TEST_BIN	:= $(TARGET_OUT)$(TARGET_BIN)
 
 vpath	%.c src/BAE_Source/Common src/BAE_Source/Platform
-vpath	%.c src/banks/patches
+vpath	%.c src/banks/patches111
 vpath	%.c src/playbae
 vpath	%.c src/BAE_MPEG_Source_II
 
 INC_PATH	:= -Isrc/BAE_Source/Common
 INC_PATH	+= -Isrc/BAE_Source/Platform
 INC_PATH	+= -Isrc/BAE_MPEG_Source_II
-INC_PATH	+= -Isrc/banks/patches
+INC_PATH	+= -Isrc/banks/patches111
 
 SRC		:=	BAE_API_Ansi.c
 
@@ -85,12 +85,17 @@ LD		:= clang
 AR      	:= ar
 STRIP		:= strip
 
-CFLAGS  	:= $(ARCH) -static -g -fPIC -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
-CFLAGS		+= -DX_PLATFORM=X_ANSI
+
+CLANG_SANI	:= -fsanitize=integer
+CFLAGS  	:= $(ARCH) -static -g -O0 -fno-unroll-loops $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
+CFLAGS		+= -DX_PLATFORM=X_ANS
 #CFLAGS		+= -D_DEBUG=1
 CXXFLAGS 	:= $(CFLAGS)
 LDFLAGS		:= $(ARCH)
 
+
+#CFLAGS		+= $(CLANG_SANI)
+#LDFLAGS	+= $(CLANG_SANI)
 
 LIBS	= 	-lm \
 		-lpthread
