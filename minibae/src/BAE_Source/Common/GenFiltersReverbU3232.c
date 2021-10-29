@@ -291,7 +291,7 @@ void PV_ServeU3232StereoFilterPartialBufferNewReverb (GM_Voice *this_voice, XBOO
                     THE_CHECK_U3232(UBYTE *);
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80) << 2;
+                    sample = (XSDWORD)(((unsigned int)((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16)) + b - 0x80) << 2);
                     sample = (sample * Xn + Z1value * Z1) >> 16;
                     Z1value = sample - (sample >> 9);
                     destL[0] += sample * amplitudeL;
@@ -320,7 +320,7 @@ void PV_ServeU3232StereoFilterPartialBufferNewReverb (GM_Voice *this_voice, XBOO
                     THE_CHECK_U3232(UBYTE *);
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80) << 2;
+                    sample = (XSDWORD)(((unsigned int)((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80)) << 2);
                     sample = (sample * Xn + Z1value * Z1 + z[zIndex1 & MAXRESONANCE] * Zn) >> 16;
                     zIndex1++;
                     z[zIndex2 & MAXRESONANCE] = (INT16)sample;
@@ -343,8 +343,8 @@ void PV_ServeU3232StereoFilterPartialBufferNewReverb (GM_Voice *this_voice, XBOO
     this_voice->zIndex = zIndex2;
     this_voice->samplePosition.i = cur_wave_i;
     this_voice->samplePosition.f = cur_wave_f;
-    this_voice->lastAmplitudeL = amplitudeL << 2;
-    this_voice->lastAmplitudeR = amplitudeR << 2;
+    this_voice->lastAmplitudeL = (XSDWORD)(((unsigned int)amplitudeL) << 2);
+    this_voice->lastAmplitudeR = (XSDWORD)(((unsigned int)amplitudeR) << 2);
 FINISH:
     return;
 }
@@ -517,7 +517,7 @@ void PV_ServeU3232StereoFilterFullBufferNewReverb (GM_Voice *this_voice)
                 {
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80) << 2;
+                    sample = (XSDWORD)(((unsigned int)(((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80)) << 2));
                     sample = (sample * Xn + Z1value * Z1) >> 16;
                     Z1value = sample - (sample >> 9);
                     destL[0] += sample * amplitudeL;
@@ -545,7 +545,7 @@ void PV_ServeU3232StereoFilterFullBufferNewReverb (GM_Voice *this_voice)
                 {
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80) << 2;
+                    sample = (XSDWORD)(((unsigned int)((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80)) << 2);
                     sample = (sample * Xn + Z1value * Z1 + z[zIndex1 & MAXRESONANCE] * Zn) >> 16;
                     zIndex1++;
                     z[zIndex2 & MAXRESONANCE] = (INT16)sample;
@@ -568,8 +568,8 @@ void PV_ServeU3232StereoFilterFullBufferNewReverb (GM_Voice *this_voice)
     this_voice->zIndex = zIndex2;
     this_voice->samplePosition.i = cur_wave_i;
     this_voice->samplePosition.f = cur_wave_f;
-    this_voice->lastAmplitudeL = amplitudeL << 2;
-    this_voice->lastAmplitudeR = amplitudeR << 2;
+    this_voice->lastAmplitudeL = (XSDWORD)(((unsigned int)amplitudeL) << 2);
+    this_voice->lastAmplitudeR = (XSDWORD)(((unsigned int)amplitudeR) << 2);
 }
 
 // еееееееееееее еееееееееееее еееееееееееее еееееееееееее еееееееееееее еееееееееееее ееееееееее

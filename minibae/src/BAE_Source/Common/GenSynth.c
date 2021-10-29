@@ -1146,7 +1146,7 @@ foundRelease:
                 else
                 {
                     a->mode = ADSR_TERMINATE;
-                    currentTime -= PV_GetLFOAdjustedTimeInMicroseconds();       // prevent long note times from overflowing if they stay on for more than 32.767 seconds
+                    currentTime -= (XSDWORD)PV_GetLFOAdjustedTimeInMicroseconds();       // prevent long note times from overflowing if they stay on for more than 32.767 seconds
                 }
             }
             else

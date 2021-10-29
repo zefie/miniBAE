@@ -1047,8 +1047,8 @@ void RunNewReverb(INT32 *sourceP, INT32 *destP, int nSampleFrames)
         CIRCULAR_INCREMENT( stereoWriteIndex, kStereoizerBufferMask);
 
         // ADD in reverb to output buffer
-        *destP++ += reverbOutL << (INPUTSHIFT);
-        *destP++ += reverbOutR << (INPUTSHIFT);
+        *destP++ += (XSDWORD)(((unsigned int)reverbOutL) << (INPUTSHIFT));
+        *destP++ += (XSDWORD)(((unsigned int)reverbOutR) << (INPUTSHIFT));
     }
 
 
