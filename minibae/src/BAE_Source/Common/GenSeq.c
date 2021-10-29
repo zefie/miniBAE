@@ -398,7 +398,7 @@ System Exclusive ID number:
 #define DISABLE_QUEUE       0       // if 1 then QGM_ API is not queued. This is used for debugging only
 
 // Prototypes
-#if NOT_SUPPORT_IGOR_FEATURE
+#if SUPPORT_IGOR_FEATURE
 static void PV_SetSampleIntoCache(GM_Song * pSong, XSampleID theID, XBankToken bankToken, XPTR pSndFormatData, OPErr * pErr);
 #endif
 
@@ -2878,7 +2878,7 @@ LENGTH
 DATA
 }
 */
-#if NOT_SUPPORT_IGOR_FEATURE
+#if SUPPORT_IGOR_FEATURE
 static void PV_ProcessIgorResource(GM_Song *pSong,
                                    long command,
                                    unsigned char *pMidiStream,
@@ -2941,7 +2941,7 @@ static void PV_ProcessIgorResource(GM_Song *pSong,
             if ( (theID >= 0) && (theID < (MAX_INSTRUMENTS*MAX_BANKS)) )
             {
                 GM_SetUsedInstrument(pSong, (XLongResourceID)theID, -1L, TRUE); // load this instrument for key splits and such
-                theI = PV_GetInstrument((XSampleID) theID,
+                theI = PV_GetInstrument(NULL, pSong, (XSampleID) theID,
                                         bankToken,
                                         (void *) pMidiStream,
                                         length,
@@ -3368,7 +3368,7 @@ GetMIDIevent:
                 //      printf("Meta event 0x7F length %ld\n", value);
                 //      BAE_PrintHexDump(midi_stream, (value < 32) ? value : 32);
                 //  }
-#if NOT_SUPPORT_IGOR_FEATURE
+#if SUPPORT_IGOR_FEATURE
                     if (midi_stream[0] == 0x00)     // IGOR sysex ID
                     {
                         if (midi_stream[1] == 0x01)
