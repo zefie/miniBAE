@@ -547,7 +547,7 @@ int main(int argc, char *argv[])
    char midiMuteChannels[512];
    BAERate rate = BAE_RATE_44K;
 
-   midiMuteChannels[511] = '\0';
+   memset(midiMuteChannels, '\0', 512);
 
    if (PV_ParseCommands(argc, argv, "-q", FALSE, NULL))
    {
