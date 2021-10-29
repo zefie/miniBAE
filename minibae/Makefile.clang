@@ -85,11 +85,13 @@ LD		:= clang
 AR      	:= ar
 STRIP		:= strip
 
-CFLAGS  	:= $(ARCH) -g -fPIC -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
+OPTI		:= -O2 -fPIC
+CLANG_SANI	:= -fsanitize=integer
+CFLAGS  	:= $(ARCH) $(OPTI) -g $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
 CFLAGS		+= -DX_PLATFORM=X_ANSI
 #CFLAGS		+= -D_DEBUG=1
 CXXFLAGS 	:= $(CFLAGS)
-LDFLAGS		:= $(ARCH)
+LDFLAGS		:= $(ARCH) $(OPTI)
 
 
 LIBS	= 	-lm \
@@ -103,7 +105,7 @@ $(TARGET_LIB).a: $(OBJ)
 
 $(TARGET_LIB).so: ${OBJ}
 	@mkdir -p $(TARGET_OUT)
-	${CC} -shared ${ARCH} ${OBJ} $(LIBS) -o $(TARGET_OUT)${TARGET_LIB}.so
+	${LD} -shared ${ARCH} ${OBJ} $(LIBS) -o $(TARGET_OUT)${TARGET_LIB}.so
 
 $(TARGET_BIN): ${OBJ_BIN}
 	@mkdir -p $(TARGET_OUT)

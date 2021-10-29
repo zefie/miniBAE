@@ -78,18 +78,19 @@ OBJ_DIR 	:= $(BUILD_DIR)obj/
 OBJ 		:= $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
 OBJ_BIN 	:= $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC_BIN})))
 
-ARCH		:= -m32
+ARCH		:= -m32 -static
 CC		:= gcc
 CXX		:= g++
 LD		:= gcc
 AR      	:= ar
 STRIP		:= strip
 
-CFLAGS  	:= $(ARCH) -static -fPIC -g -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
+OPTI            := -O2 -fPIC
+CFLAGS  	:= $(ARCH) $(OPTI) -g $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
 CFLAGS		+= -DX_PLATFORM=X_ANSI
 #CFLAGS		+= -D_DEBUG=1
 CXXFLAGS 	:= $(CFLAGS)
-LDFLAGS		:= -s $(ARCH)
+LDFLAGS		:= $(ARCH) $(OPTI) -s
 
 LIBS	= 	-lpthread
 
@@ -101,7 +102,7 @@ $(TARGET_LIB).a: $(OBJ)
 
 $(TARGET_LIB).so: ${OBJ}
 	@mkdir -p $(TARGET_OUT)
-	${CC} -shared ${ARCH} ${OBJ} $(LIBS) -o $(TARGET_OUT)${TARGET_LIB}.so
+	${LD} -shared ${ARCH} ${OBJ} $(LIBS) -o $(TARGET_OUT)${TARGET_LIB}.so
 
 $(TARGET_BIN): ${OBJ_BIN}
 	@mkdir -p $(TARGET_OUT)

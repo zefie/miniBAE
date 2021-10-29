@@ -1,6 +1,6 @@
 BUILD_DIR	:= build/
 TARGET_OUT	:= bin/
-TARGET_LIB	:= libminiBAE
+TARGET_LIB	:= libminiBAE.js
 TARGET_BIN	:= playbae.js
 PACK_FILENAME	:= playbae_wasm32.tar.gz
 
@@ -88,24 +88,22 @@ LD		:= emcc
 AR      	:= emar
 STRIP		:= strip
 
-CFLAGS  	:= $(ARCH) -fPIC -g -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value -s SINGLE_FILE=1 -s ASYNCIFY=1
+
+OPTI		:= -O2
+CFLAGS  	:= $(ARCH) $(OPTI) -fPIC -g $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
 CFLAGS		+= -DX_PLATFORM=X_ANSI
 #CFLAGS		+= -D_DEBUG=1
 CXXFLAGS 	:= $(CFLAGS)
-LDFLAGS		:= $(ARCH)
+LDFLAGS		:= $(ARCH) $(OPTI) -s 'DEFAULT_LIBRARY_FUNCS_TO_INCLUDE=[$$Browser]' -s EXPORT_ES6=1 -s EXPORTED_RUNTIME_METHODS=[FS] -s SINGLE_FILE=1
 
 
 LIBS	= 	-lpthread
 
-all: $(TARGET_LIB).a ${TARGET_LIB}.so $(TARGET_BIN)
+all: ${TARGET_LIB} $(TARGET_BIN)
 
-$(TARGET_LIB).a: $(OBJ)
+$(TARGET_LIB): ${OBJ}
 	@mkdir -p $(TARGET_OUT)
-	$(AR) rcs $(TARGET_OUT)$(TARGET_LIB).a $(OBJ)
-
-$(TARGET_LIB).so: ${OBJ}
-	@mkdir -p $(TARGET_OUT)
-	${CC} -shared ${ARCH} ${OBJ} $(LIBS) -o $(TARGET_OUT)${TARGET_LIB}.so
+	${LD} -s -o $(TARGET_OUT)${TARGET_LIB} ${LDFLAGS} ${OBJ} $(LIBS)
 
 $(TARGET_BIN): ${OBJ_BIN}
 	@mkdir -p $(TARGET_OUT)
