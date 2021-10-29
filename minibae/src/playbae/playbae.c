@@ -528,6 +528,35 @@ static BAEResult PlayRMF(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED v
    return(err);
 }
 
+int playFile(BAEMixer theMixer, char *parmFile, BAE_UNSIGNED_FIXED volume, unsigned int timeLimit, unsigned int loopCount, BAEReverbType reverbType, char *midiMuteChannels) {
+	int err = 0;
+	char fileHeader[5]; // 4 char + 1 null byte
+	long filePtr;
+	filePtr = BAE_FileOpenForRead(parmFile);
+	if (filePtr > 0) {
+		BAE_ReadFile(filePtr, &fileHeader, 4);
+		BAE_FileClose(filePtr);
+		if (strcmp(fileHeader,X_FILETYPE_MIDI) == 0) {
+       		    playbae_printf("Playing MIDI %s\n", parmFile);
+	            err = PlayMidi(theMixer, parmFile, volume, timeLimit, loopCount, reverbType, midiMuteChannels);
+		} else if (strcmp(fileHeader,X_FILETYPE_RMF) == 0) {
+       		    playbae_printf("Playing RMF %s\n", parmFile);
+	            err = PlayRMF(theMixer, parmFile, volume, timeLimit, loopCount, reverbType, midiMuteChannels);
+		} else if (strcmp(fileHeader,X_FILETYPE_AIFF) == 0) {
+		    playbae_printf("Playing AIFF %s\n", parmFile);
+		    err = PlayPCM(theMixer, parmFile, BAE_AIFF_TYPE, volume, timeLimit);
+		} else if (strcmp(fileHeader,X_FILETYPE_WAVE) == 0) {
+       		    playbae_printf("Playing WAVE %s\n", parmFile);
+	            err = PlayPCM(theMixer, parmFile, BAE_AIFF_TYPE, volume, timeLimit);
+		} else {
+		    err = 10069;
+		}
+	} else {
+		err = filePtr;
+	}
+	return err;
+}
+
 // main()
 // ---------------------------------------------------------------------
 int main(int argc, char *argv[])
@@ -537,6 +566,7 @@ int main(int argc, char *argv[])
    short int    rmf, pcm, level;
    unsigned int loopCount = 0;
    unsigned int timeLimit = 0;
+   int fileSpecified = FALSE;
    BAE_UNSIGNED_FIXED volume = 100 * BAE_MAX_MIDI_VOLUME;
    BAETerpMode interpol = BAE_LINEAR_INTERPOLATION;
    int maxVoices = BAE_MAX_VOICES;
@@ -547,7 +577,9 @@ int main(int argc, char *argv[])
    char midiMuteChannels[512];
    BAERate rate = BAE_RATE_44K;
 
+   memset(parmFile, '\0', 1024);
    memset(midiMuteChannels, '\0', 512);
+
 
    if (PV_ParseCommands(argc, argv, "-q", FALSE, NULL))
    {
@@ -569,6 +601,7 @@ int main(int argc, char *argv[])
    theMixer = BAEMixer_New();
    if (theMixer)
    {
+
        if (PV_ParseCommands(argc, argv, "-mv", TRUE, parmFile))
        {
            maxVoices = atoi(parmFile);
@@ -705,67 +738,57 @@ int main(int argc, char *argv[])
             }
          }
 
-         if (PV_ParseCommands(argc, argv, "-f", TRUE, parmFile))
-         {
-		char fileHeader[5]; // 4 char + 1 null byte
-		long filePtr;
-		filePtr = BAE_FileOpenForRead(parmFile);
-		if (filePtr > 0) {
-			BAE_ReadFile(filePtr, &fileHeader, 4);
-			BAE_FileClose(filePtr);
-			if (strcmp(fileHeader,X_FILETYPE_MIDI) == 0) {
-        		    playbae_printf("Playing MIDI %s\n", parmFile);
-		            err = PlayMidi(theMixer, parmFile, volume, timeLimit, loopCount, reverbType, midiMuteChannels);
-			} else if (strcmp(fileHeader,X_FILETYPE_RMF) == 0) {
-        		    playbae_printf("Playing RMF %s\n", parmFile);
-		            err = PlayRMF(theMixer, parmFile, volume, timeLimit, loopCount, reverbType, midiMuteChannels);
-			} else if (strcmp(fileHeader,X_FILETYPE_AIFF) == 0) {
-			    playbae_printf("Playing AIFF %s\n", parmFile);
-			    err = PlayPCM(theMixer, parmFile, BAE_AIFF_TYPE, volume, timeLimit);
-			} else if (strcmp(fileHeader,X_FILETYPE_WAVE) == 0) {
-        		    playbae_printf("Playing WAVE %s\n", parmFile);
-		            err = PlayPCM(theMixer, parmFile, BAE_AIFF_TYPE, volume, timeLimit);
-			} else {
-			    err = 10069;
-			}
-		} else {
-			err = filePtr;
-		}
+         if (argc > 1 && argv[1][0] != (char)'-') {
+		err = playFile(theMixer, argv[1], volume, timeLimit, loopCount, reverbType, midiMuteChannels);
+		fileSpecified = TRUE;
                 doneCommand = 1;
-	}
+         }
 
-         if (PV_ParseCommands(argc, argv, "-a", TRUE, parmFile))
+         if (PV_ParseCommands(argc, argv, "-f", TRUE, parmFile) && !fileSpecified)
          {
+		err = playFile(theMixer, parmFile, volume, timeLimit, loopCount, reverbType, midiMuteChannels);
+		fileSpecified = TRUE;
+                doneCommand = 1;
+	 }
+
+         if (PV_ParseCommands(argc, argv, "-a", TRUE, parmFile) && !fileSpecified)
+         {
+	    fileSpecified = TRUE;
             playbae_printf("Playing AIFF %s\n", parmFile);
             err         = PlayPCM(theMixer, parmFile, BAE_AIFF_TYPE, volume, timeLimit);
             doneCommand = 1;
          }
-         if (PV_ParseCommands(argc, argv, "-sa", TRUE, parmFile))
+         if (PV_ParseCommands(argc, argv, "-sa", TRUE, parmFile) && !fileSpecified)
          {
+	    fileSpecified = TRUE;
             playbae_printf("Streaming AIFF %s\n", parmFile);
             err         = PlayPCMStreamed(theMixer, parmFile, BAE_AIFF_TYPE, volume);
             doneCommand = 1;
          }
-         if (PV_ParseCommands(argc, argv, "-w", TRUE, parmFile))
+         if (PV_ParseCommands(argc, argv, "-w", TRUE, parmFile) && !fileSpecified)
          {
+	    fileSpecified = TRUE;
             playbae_printf("Playing WAVE %s\n", parmFile);
             err         = PlayPCM(theMixer, parmFile, BAE_WAVE_TYPE, volume, timeLimit);
             doneCommand = 1;
          }
-         if (PV_ParseCommands(argc, argv, "-sw", TRUE, parmFile))
+         if (PV_ParseCommands(argc, argv, "-sw", TRUE, parmFile) && !fileSpecified)
          {
+	    fileSpecified = TRUE;
             playbae_dprintf("Streaming WAVE %s\n", parmFile);
             err         = PlayPCMStreamed(theMixer, parmFile, BAE_WAVE_TYPE, volume);
             doneCommand = 1;
          }
-         if (PV_ParseCommands(argc, argv, "-r", TRUE, parmFile))
+         if (PV_ParseCommands(argc, argv, "-r", TRUE, parmFile) && !fileSpecified)
          {
+	    fileSpecified = TRUE;
             playbae_printf("Playing RMF %s\n", parmFile);
             err         = PlayRMF(theMixer, parmFile, volume, timeLimit, loopCount, reverbType, midiMuteChannels);
             doneCommand = 1;
          }
-         if (PV_ParseCommands(argc, argv, "-m", TRUE, parmFile))
+         if (PV_ParseCommands(argc, argv, "-m", TRUE, parmFile) && !fileSpecified)
          {
+	    fileSpecified = TRUE;
             playbae_printf("Playing MIDI %s\n", parmFile);
             err         = PlayMidi(theMixer, parmFile, volume, timeLimit, loopCount, reverbType, midiMuteChannels);
             doneCommand = 1;
