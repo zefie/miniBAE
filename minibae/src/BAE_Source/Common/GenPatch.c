@@ -501,7 +501,7 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                                 pADSR = &theI->volumeADSRRecord;
                                 for (count2 = 0; count2 < unitSubCount; count2++)
                                 {
-                                    pADSR->ADSRLevel[count2] = XGetLong(pUnit);
+                                    pADSR->ADSRLevel[count2] = (XSDWORD)XGetLong(pUnit);
                                     pUnit += 4;
 
                                     pADSR->ADSRTime[count2] = XGetLong(pUnit);
@@ -513,7 +513,7 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                                 break;
 
                             case INST_LOW_PASS_FILTER:      // low pass global filter parameters
-                                theI->LPF_frequency = XGetLong(pUnit);
+                                theI->LPF_frequency = (XSDWORD)XGetLong(pUnit);
                                 pUnit += 4;
                                 theI->LPF_resonance = XGetLong(pUnit);
                                 pUnit += 4;
@@ -547,7 +547,7 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                                 pLFO = &theI->LFORecords[lfoCount];
                                 for (count2 = 0; count2 < unitSubCount; count2++)
                                 {
-                                    pLFO->a.ADSRLevel[count2] = XGetLong(pUnit);
+                                    pLFO->a.ADSRLevel[count2] = (XSDWORD)XGetLong(pUnit);
                                     pUnit += 4;
                                     pLFO->a.ADSRTime[count2] = XGetLong(pUnit);
                                     pUnit += 4;
@@ -560,7 +560,7 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                                 pUnit += 4;
                                 pLFO->waveShape = PV_TranslateFromFileToMemoryID(XGetLong(pUnit));
                                 pUnit += 4;
-                                pLFO->DC_feed = XGetLong(pUnit);
+                                pLFO->DC_feed = (XSDWORD)XGetLong(pUnit);
                                 pUnit += 4;
                                 pLFO->level = XGetLong(pUnit);
                                 pUnit += 4;

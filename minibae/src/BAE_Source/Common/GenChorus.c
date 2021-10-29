@@ -320,7 +320,7 @@ INT32 GetChorusReadIncrement(INT32 readIndex, long writeIndex, long nSampleFrame
 
 
 
-    ratio = (currentDelayFrame - desiredDelayFrame + nSampleFrames) << READINDEXSHIFT;
+    ratio = (XSDWORD)(((unsigned int)(currentDelayFrame - desiredDelayFrame + nSampleFrames)) << READINDEXSHIFT);
 
 #if 0
     ratio >>= sampleFramesShift;

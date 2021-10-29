@@ -3264,7 +3264,7 @@ OPErr PV_ProcessMidiSequencerSlice(void *threadContext, GM_Song *pSong)
                 pSong->trackon[currentTrack] = TRACK_RUNNING;       // running
                 goto UpdateDeltaTime;
             }
-            pSong->trackticks[currentTrack] -= pSong->MIDIDivision;
+            pSong->trackticks[currentTrack] -= (IFLOAT)pSong->MIDIDivision;
 Do_GetEvent:
             if (pSong->trackticks[currentTrack] < (IFLOAT)0)
             {
@@ -3622,8 +3622,8 @@ void PV_ProcessSequencerEvents(void *threadContext)
             // is used only when real time midi data, that is being time stamped with
             // XMicroseconds is enabled
             long    drift;
-            
-            drift = XMicroseconds() - pMixer->syncCount;
+
+            drift = (long)XMicroseconds() - (long)pMixer->syncCount;
             if (drift > 1000)   // if drift more than 1 ms reset
             {
                 pMixer->syncCount = XMicroseconds();

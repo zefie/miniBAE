@@ -1524,7 +1524,7 @@ static OPErr PV_WriteFromMemoryWaveFile(XFILENAME *file, GM_Waveform const* pAud
                 // write form type
                 pIFF->formPosition = XFileGetPosition(pIFF->fileReference);  // get current pos
                 IFF_WriteType(pIFF, X_RIFF);
-                IFF_WriteSize(pIFF, -1);    // we come back to this and rewrite it after completely done
+                IFF_WriteSize(pIFF, 0);    // we come back to this and rewrite it after completely done
                 pIFF->formLength = -1;
 
                 IFF_WriteType(pIFF, X_WAVE);
