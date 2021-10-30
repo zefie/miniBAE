@@ -78,18 +78,18 @@ OBJ_DIR 	:= $(BUILD_DIR)obj/
 OBJ 		:= $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
 OBJ_BIN 	:= $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC_BIN})))
 
-ARCH		:= -m32
+ARCH		:= -m32 -static
 CC		:= gcc
 CXX		:= g++
 LD		:= gcc
 AR      	:= ar
 STRIP		:= strip
 
-CFLAGS  	:= $(ARCH) -static -fPIC -g -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
+CFLAGS  	:= $(ARCH) -g -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
 CFLAGS		+= -DX_PLATFORM=X_ANSI
 #CFLAGS		+= -D_DEBUG=1
 CXXFLAGS 	:= $(CFLAGS)
-LDFLAGS		:= -s $(ARCH)
+LDFLAGS		:= $(ARCH) -s
 
 LIBS	= 	-lpthread
 

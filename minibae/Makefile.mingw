@@ -80,18 +80,18 @@ OBJ_DIR 	:= $(BUILD_DIR)obj/
 OBJ 		:= $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
 OBJ_BIN 	:= $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC_BIN})))
 
-ARCH		:= -m32
+ARCH		:= -m32 -static
 CC		:= i686-w64-mingw32-gcc-win32
 CXX		:= i686-w64-mingw32-g++-win32
 LD		:= i686-w64-mingw32-g++-win32
 AR      	:= i686-w64-mingw32-gcc-ar-win32
 STRIP      	:= i686-w64-mingw32-strip
 
-CFLAGS  	:= $(ARCH) -static -g -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
+CFLAGS  	:= $(ARCH) -g -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
 CFLAGS		+= -DX_PLATFORM=X_WIN95
 #CFLAGS		+= -D_DEBUG=1
 CXXFLAGS 	:= $(CFLAGS)
-LDFLAGS		:= $(ARCH) -static -s
+LDFLAGS		:= $(ARCH) -s
 
 
 LIBS	= 	-ldxguid \
@@ -119,7 +119,7 @@ $(TARGET_LIB).a: $(OBJ)
 
 $(TARGET_LIB).dll: ${OBJ}
 	@mkdir -p $(TARGET_OUT)
-	${CC} -shared ${ARCH} ${OBJ} -Wl,--subsystem,windows ${LIBS}  -o $(TARGET_OUT)${TARGET_LIB}.dll
+	${CC} -shared ${ARCH} ${OBJ} -Wl,--subsystem,windows ${LIBS} -o $(TARGET_OUT)${TARGET_LIB}.dll
 
 $(TARGET_BIN): ${OBJ_BIN}
 	@mkdir -p $(TARGET_OUT)
