@@ -137,7 +137,7 @@
 #define LOOKBACK    (1L << OFFSETBITS)              /* size of lookback buffer              */
 
 // forwards
-static void         doLZSSDecode(unsigned char* srcBuffer, XDWORD srcBytes, unsigned char* dstBuffer, long dstSize);
+static void         doLZSSDecode(unsigned char* srcBuffer, XDWORD srcBytes, unsigned char* dstBuffer, XSDWORD dstSize);
 #if USE_CREATION_API == TRUE
 static void         DeltaMono8(unsigned char* pData, XDWORD frameCount);
 static void         DeltaStereo8(unsigned char* pData, XDWORD frameCount);
@@ -244,8 +244,8 @@ void LZSSUncompressDeltaStereo16(XBYTE* src, XDWORD srcBytes,
  *
  * Parameters:
  *  unsigned char * theData;            -- the buffer of data to search.
- *  long    dataLen;            -- the size of the buffer
- *  long    patternStart;       -- the buffer position of the pattern string.
+ *  XSDWORD    dataLen;            -- the size of the buffer
+ *  XSDWORD    patternStart;       -- the buffer position of the pattern string.
  *  short*  codeWord;           -- encoded token: AAAA BBBB BBBB BBBB
  *                                  A = size of match string - THRESHOLD
  *                                  B = offset of match string from patternStart - LOOKBACK
@@ -366,7 +366,7 @@ static short int findLongestMatch(XBYTE * theData, XDWORD dataLen,
     register XBYTE *lookback;               // scanning compare pointer
     register XBYTE *tPointer;               // scanning source pointer
     register XBYTE *tLookback;              // scanning compare pointer
-    register long   counter;                // number of bytes to scan
+    register XSDWORD   counter;                // number of bytes to scan
     register XDWORD  maxLen;                 // maximum match length
     register XDWORD  bestLen;                // best match length
     register XDWORD  bestOff;                // best match offset
@@ -640,7 +640,7 @@ XBYTE           codeBuf[16];                /* buffer for the code group */
 /* -------------------------------------------------------------------------------- */
 #if (X_PLATFORM == X_MACINTOSH) && (CPU_TYPE == k68000) && (ASM_doLZSSDecode)
 static asm void doLZSSDecode(unsigned char * srcBuffer, XDWORD srcBytes,
-                                unsigned char * dstBuffer, long dstSize)
+                                unsigned char * dstBuffer, XSDWORD dstSize)
 {
             fralloc +
             MOVEM.L     D2-D7/A2-A3,-(A7)
@@ -720,13 +720,13 @@ Chris3
 
 
 static void doLZSSDecode(unsigned char* srcBuffer, XDWORD srcBytes,
-                            unsigned char* dstBuffer, long dstSize)
+                            unsigned char* dstBuffer, XSDWORD dstSize)
 {
 #if 1   //Moe's version
 unsigned char*  src;
 unsigned char*  dst;
-long            srcCountdown;
-long            dstCountdown;
+XSDWORD            srcCountdown;
+XSDWORD            dstCountdown;
 
     src = srcBuffer;
     dst = dstBuffer;
@@ -748,8 +748,8 @@ long            dstCountdown;
         {
             // In the RMF files I've tested,
             // this case is hit for about 1/2 the time  -Moe
-            *(long*)dst = *(long*)src;
-            *(long*)(dst + 4) = *(long*)(src + 4);
+            *(XSDWORD*)dst = *(XSDWORD*)src;
+            *(XSDWORD*)(dst + 4) = *(XSDWORD*)(src + 4);
             src += 8;
             dst += 8;
             srcCountdown -= 8;
@@ -798,7 +798,7 @@ long            dstCountdown;
                     longCount = byteCount / 4;
                     while ((int)--longCount >= 0)
                     {
-                        *(long*)dst = *(long*)previousBuffer;
+                        *(XSDWORD*)dst = *(XSDWORD*)previousBuffer;
                         dst += 4;
                         previousBuffer += 4;
                     }
@@ -819,7 +819,7 @@ long            dstCountdown;
     register short              regD2;
     register unsigned char *    prevBuffer;
 
-    while((long)--srcBytes >= 0)
+    while((XSDWORD)--srcBytes >= 0)
     {
         regD3 = *(srcBuffer++);
         regD2 = 7;
@@ -830,7 +830,7 @@ long            dstCountdown;
             if(temp == 0)
             {
                 srcBytes -= 2;
-                if((long)srcBytes < 0) 
+                if((XSDWORD)srcBytes < 0) 
                 {
                     //Debugger();
                     return;
@@ -863,7 +863,7 @@ long            dstCountdown;
             }
             else
             {
-                if((long)--srcBytes < 0) 
+                if((XSDWORD)--srcBytes < 0) 
                 {
                     //Debugger();
                     return;

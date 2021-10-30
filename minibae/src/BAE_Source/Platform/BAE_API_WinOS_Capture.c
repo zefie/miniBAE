@@ -120,12 +120,12 @@
 
 
 static void             *g_audioBufferBlock[BAE_WAVEIN_NUM_BUFFERS];        // actual data buffers
-static long             g_audioBytesPerBuffer;                              // size of each audio buffer in bytes
+static XSDWORD             g_audioBytesPerBuffer;                              // size of each audio buffer in bytes
 
 static HWAVEIN          g_captureSound = NULL;          // the capture device
 static BOOL             g_captureShutdown;              // false if capture active, otherwise true
 
-long                    g_audioFramesPerBuffer;         // size in sample frames of each capture buffer
+XSDWORD                    g_audioFramesPerBuffer;         // size in sample frames of each capture buffer
                                                         // $$kk: 10.13.98: right now this is fixed as BAE_WAVEIN_FRAMES_PER_BUFFER
                                                         // $$kk: 10.13.98: need to figure out how to configure this
 
@@ -201,16 +201,16 @@ static void PV_AudioWaveInFrameThread(void* threadContext)
     WAVEHDR         waveHeader[BAE_WAVEIN_NUM_BUFFERS];
     MMTIME          audioStatus;
 
-    long            count, currentPos, lastPos, framesToRead, bytesToRead, buffersToRead, error;
+    XSDWORD            count, currentPos, lastPos, framesToRead, bytesToRead, buffersToRead, error;
 
-    long            waveHeaderCount;    // current index in the array of waveheaders
+    XSDWORD            waveHeaderCount;    // current index in the array of waveheaders
     LPWAVEHDR       pCurrentWaveHdr;
 
     bytesToRead = g_audioBytesPerBuffer; 
     framesToRead = g_audioFramesPerBuffer;  
 
     memset(&waveHeader, 0, sizeof(WAVEHDR) * BAE_WAVEIN_NUM_BUFFERS);
-    memset(&audioStatus, 0, (long)sizeof(MMTIME));
+    memset(&audioStatus, 0, (XSDWORD)sizeof(MMTIME));
     audioStatus.wType = TIME_BYTES; // get byte position
     
     error = waveInGetPosition(g_captureSound, &audioStatus, sizeof(MMTIME));
@@ -224,7 +224,7 @@ static void PV_AudioWaveInFrameThread(void* threadContext)
         waveHeader[count].dwBufferLength = g_audioBytesPerBuffer;
         waveHeader[count].dwFlags       = 0;
         waveHeader[count].dwLoops       = 0;
-        error = waveInPrepareHeader(g_captureSound, &waveHeader[count], (long)sizeof(WAVEHDR));
+        error = waveInPrepareHeader(g_captureSound, &waveHeader[count], (XSDWORD)sizeof(WAVEHDR));
     }
 
     // add all the capture buffers
@@ -292,7 +292,7 @@ static void PV_AudioWaveInFrameThread(void* threadContext)
     // unprepare headers
     for (count = 0; count < BAE_WAVEIN_NUM_BUFFERS; count++)
     {
-        error = waveInUnprepareHeader(g_captureSound, &waveHeader[count], (long)sizeof(WAVEHDR));
+        error = waveInUnprepareHeader(g_captureSound, &waveHeader[count], (XSDWORD)sizeof(WAVEHDR));
     }
     // do this here, when we can't call it anymore.
     g_captureDoneProc = NULL;
@@ -301,8 +301,8 @@ static void PV_AudioWaveInFrameThread(void* threadContext)
     
 // Aquire and enabled audio card
 // return 0 if ok, -1 if failed
-int BAE_AquireAudioCapture(void *threadContext, unsigned long sampleRate, unsigned long channels, unsigned long bits,
-                            unsigned long *pCaptureHandle)
+int BAE_AquireAudioCapture(void *threadContext, XDWORD sampleRate, XDWORD channels, XDWORD bits,
+                            XDWORD *pCaptureHandle)
 {
     MMRESULT        theErr;
     WAVEINCAPS      caps;
@@ -345,7 +345,7 @@ int BAE_AquireAudioCapture(void *threadContext, unsigned long sampleRate, unsign
 
             if (pCaptureHandle)
             {
-                *pCaptureHandle = (unsigned long)g_captureSound;
+                *pCaptureHandle = (XDWORD)g_captureSound;
             }
         }
         else 
@@ -360,10 +360,10 @@ int BAE_AquireAudioCapture(void *threadContext, unsigned long sampleRate, unsign
 // Given the capture hardware is working, fill a buffer with some data. This call is
 // asynchronous. When this buffer is filled, the function done will be called.
 // returns 0 for success, -1 for failure
-//int BAE_StartAudioCapture(void *buffer, unsigned long bufferSize, BAE_CaptureDone done, void *callbackContext)
+//int BAE_StartAudioCapture(void *buffer, XDWORD bufferSize, BAE_CaptureDone done, void *callbackContext)
 int BAE_StartAudioCapture(BAE_CaptureDone done, void *callbackContext)
 {
-    long error = 0;
+    XSDWORD error = 0;
     int i;
 
     // start capture
@@ -495,7 +495,7 @@ int BAE_ReleaseAudioCapture(void *threadContext)
 // number of devices. ie different versions of the BAE connection. DirectSound and waveOut
 // return number of devices. ie 1 is one device, 2 is two devices.
 // NOTE: This function needs to function before any other calls may have happened.
-long BAE_MaxCaptureDevices(void)
+XSDWORD BAE_MaxCaptureDevices(void)
 {
     return waveInGetNumDevs();
 }
@@ -505,7 +505,7 @@ long BAE_MaxCaptureDevices(void)
 // NOTE:    This function needs to function before any other calls may have happened.
 //          Also you will need to call BAE_ReleaseAudioCard then BAE_AquireAudioCard
 //          in order for the change to take place.
-void BAE_SetCaptureDeviceID(long deviceID, void *deviceParameter)
+void BAE_SetCaptureDeviceID(XSDWORD deviceID, void *deviceParameter)
 {
     if (deviceID < BAE_MaxCaptureDevices())
     {
@@ -517,7 +517,7 @@ void BAE_SetCaptureDeviceID(long deviceID, void *deviceParameter)
 
 // return current device ID
 // NOTE: This function needs to function before any other calls may have happened.
-long BAE_GetCaptureDeviceID(void *deviceParameter)
+XSDWORD BAE_GetCaptureDeviceID(void *deviceParameter)
 {
     deviceParameter;
     if (g_soundDeviceIndex)
@@ -531,7 +531,7 @@ long BAE_GetCaptureDeviceID(void *deviceParameter)
 // get deviceID name 
 // NOTE:    This function needs to function before any other calls may have happened.
 //          The names returned in this function are platform specific.
-void BAE_GetCaptureDeviceName(long deviceID, char *cName, unsigned long cNameLength)
+void BAE_GetCaptureDeviceName(XSDWORD deviceID, char *cName, XDWORD cNameLength)
 {
     WAVEINCAPS      caps;
     MMRESULT        theErr;
@@ -540,7 +540,7 @@ void BAE_GetCaptureDeviceName(long deviceID, char *cName, unsigned long cNameLen
     {
         if (deviceID == 0)
         {
-            deviceID = (long)WAVE_MAPPER;
+            deviceID = (XSDWORD)WAVE_MAPPER;
         }
 
         theErr = waveInGetDevCaps((UINT)deviceID, &caps, sizeof(WAVEINCAPS));
@@ -555,7 +555,7 @@ void BAE_GetCaptureDeviceName(long deviceID, char *cName, unsigned long cNameLen
 
 // return the number of frames in the capture buffer
 // (should make this settable?)
-unsigned long BAE_GetCaptureBufferSizeInFrames()
+XDWORD BAE_GetCaptureBufferSizeInFrames()
 {
     return BAE_WAVEIN_FRAMES_PER_BUFFER;
 }
@@ -570,7 +570,7 @@ int BAE_GetCaptureBufferCount()
 
 // return the number of samples captured at the device
 // $$kk: 10.15.98: need to implement!
-unsigned long BAE_GetDeviceSamplesCapturedPosition()
+XDWORD BAE_GetDeviceSamplesCapturedPosition()
 {
     return 0L;
 }

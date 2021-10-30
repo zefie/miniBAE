@@ -247,9 +247,9 @@
 // Process any fading effects voices
 static void PV_ServeEffectsFades(void)
 {
-    long        count, minValue, maxValue;
+    XSDWORD        count, minValue, maxValue;
     GM_Voice    *pVoice;
-    long        value;
+    XSDWORD        value;
     GM_Mixer    *pMixer;
 
     pMixer = GM_GetCurrentMixer();
@@ -292,7 +292,7 @@ static void PV_ServeEffectsFades(void)
 #if USE_CALLBACKS
 static void PV_ServeEffectCallbacks(void *threadContext)
 {
-    long                    count, minValue, maxValue;
+    XSDWORD                    count, minValue, maxValue;
     XDWORD           offsetStart, offsetEnd;
     GM_Voice                *pVoice;
     GM_SampleCallbackEntry  *pCallbackEntry;
@@ -322,7 +322,7 @@ static void PV_ServeEffectCallbacks(void *threadContext)
                         {
                             if (pCallbackEntry->pCallback)
                             {
-                                (*pCallbackEntry->pCallback)(threadContext, pCallbackEntry->reference, PV_GetPositionFromVoice(pVoice));
+                                (*pCallbackEntry->pCallback)(threadContext, (XSDWORD)pCallbackEntry->reference, PV_GetPositionFromVoice(pVoice));
                                 break;
                             }
                         }
@@ -414,7 +414,7 @@ INT16 GM_GetEffectsVolume(void)
 
 static GM_Voice * PV_FindFreeSampleVoice(GM_Mixer *pMixer, VOICE_REFERENCE *pOutputIndex)
 {
-    long        min, max, count;
+    XSDWORD        min, max, count;
     GM_Voice    *pVoice;
 
     pVoice = NULL;
@@ -451,7 +451,7 @@ XBOOL GM_IsSoundReferenceValid(VOICE_REFERENCE reference)
     if (MusicGlobals)
     {
         //FIX: not 64 bit
-        if ( ((long)reference >= 0) && ((long)reference < (MusicGlobals->MaxNotes+MusicGlobals->MaxEffects)) )
+        if ( ((XSDWORD)reference >= 0) && ((XSDWORD)reference < (MusicGlobals->MaxNotes+MusicGlobals->MaxEffects)) )
         {
             goodVoice = TRUE;
         }
@@ -467,7 +467,7 @@ GM_Voice * PV_GetVoiceFromSoundReference(VOICE_REFERENCE reference)
     pVoice = NULL;
     if (GM_IsSoundReferenceValid(reference))
     {
-        pVoice = &MusicGlobals->NoteEntry[(long)reference];
+        pVoice = &MusicGlobals->NoteEntry[(XSDWORD)reference];
         // is voice alive?
         if (pVoice->voiceMode == VOICE_UNUSED)
         {

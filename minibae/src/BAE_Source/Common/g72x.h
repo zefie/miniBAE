@@ -41,7 +41,7 @@
  * included in this Recommendation.
  */
 struct g72x_state {
-    long yl;    /* Locked or steady state step size multiplier. */
+    XSDWORD yl;    /* Locked or steady state step size multiplier. */
     short yu;   /* Unlocked or non-steady state step size multiplier. */
     short dms;  /* Short term energy estimate. */
     short dml;  /* Long term energy estimate. */

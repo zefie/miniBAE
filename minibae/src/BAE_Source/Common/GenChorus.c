@@ -130,7 +130,7 @@ void InitChorus()
     ChorusParams* params = GetChorusParams();
     
     // allocate the delay line memory
-    long kMaxBytes = 2 * sizeof(INT32) * kChorusBufferFrameSize;
+    XSDWORD kMaxBytes = 2 * sizeof(INT32) * kChorusBufferFrameSize;
     params->mChorusBufferL = (INT32*)XNewPtr(kMaxBytes );
     params->mChorusBufferR = (INT32*)XNewPtr(kMaxBytes );
 
@@ -151,20 +151,20 @@ void InitChorus()
         for(i = 0; i < 200; i++)
         {
             static count = 0;
-            double x;
+            float x;
             INT32 value;
-            double halfTableLength = kModulationTableLength * 0.5;
+            float halfTableLength = kModulationTableLength * 0.5;
             
             if(i < 100)
             {
-                x = ((double(i) / halfTableLength) - 0.5) * 2;  // rising exponential
+                x = ((float(i) / halfTableLength) - 0.5) * 2;  // rising exponential
             }
             else
             {
-                x = ((double(kModulationTableLength - i) / halfTableLength) - 0.5) * 2; // descending
+                x = ((float(kModulationTableLength - i) / halfTableLength) - 0.5) * 2; // descending
             }
             
-            value = pow(2, x) * (double)(1L << 15);;
+            value = pow(2, x) * (float)(1L << 15);;
             
             fprintf(fp, "%d, ", value);
             
@@ -252,16 +252,16 @@ static INT32 expTable[] =   /* kModulationTableLength entries fixed point 16.16 
 //  GetChorusReadIncrement()
 //
 //++------------------------------------------------------------------------------
-INT32 GetChorusReadIncrement(INT32 readIndex, long writeIndex, long nSampleFrames, INT32 phase)
+INT32 GetChorusReadIncrement(INT32 readIndex, XSDWORD writeIndex, XSDWORD nSampleFrames, INT32 phase)
 {
     ChorusParams* params = GetChorusParams();
 
     INT32   phi = params->mPhi;
     //float depth = params->mDepth;
-    long    sampleFramesDelay = params->mSampleFramesDelay;
+    XSDWORD    sampleFramesDelay = params->mSampleFramesDelay;
 
-    long    currentDelayFrame;
-    long    desiredDelayFrame;
+    XSDWORD    currentDelayFrame;
+    XSDWORD    desiredDelayFrame;
 
     INT32   ratio;
 #if 0
@@ -311,7 +311,7 @@ INT32 GetChorusReadIncrement(INT32 readIndex, long writeIndex, long nSampleFrame
 #endif  
     
     
-    currentDelayFrame = ((long)(kChorusBufferFrameSize + writeIndex - (readIndex >> READINDEXSHIFT) )) % kChorusBufferFrameSize;
+    currentDelayFrame = ((XSDWORD)(kChorusBufferFrameSize + writeIndex - (readIndex >> READINDEXSHIFT) )) % kChorusBufferFrameSize;
     
     
     desiredDelayFrame = sampleFramesDelay + /*depth * */ (offsetFrame );
@@ -346,7 +346,7 @@ void RunChorus(INT32 *sourceP, INT32 *destP, int nSampleFrames)
     INT32   phi = params->mPhi;
     INT32   rate = params->mRate;
     INT32   feedbackGain = -params->mFeedbackGain;  // avoid "limit points"
-    long    writeIndex = params->mWriteIndex;
+    XSDWORD    writeIndex = params->mWriteIndex;
     
     INT32   readIndexL = params->mReadIndexL;
     INT32   readIndexR = params->mReadIndexR;

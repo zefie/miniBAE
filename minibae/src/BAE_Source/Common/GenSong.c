@@ -212,7 +212,7 @@
 
 
 static GM_Song * PV_CreateSongFromMidi(XLongResourceID theID,
-                                        XPTR useThisMidiData, long midiSize,
+                                        XPTR useThisMidiData, XSDWORD midiSize,
                                         OPErr *pErr)
 {
     XPTR        theMidiData;
@@ -236,7 +236,7 @@ static GM_Song * PV_CreateSongFromMidi(XLongResourceID theID,
     }
     if (theMidiData)
     {
-        theSong = (GM_Song *)XNewPtr((long)sizeof(GM_Song));
+        theSong = (GM_Song *)XNewPtr((XSDWORD)sizeof(GM_Song));
         if (theSong)
         {
             theSong->sequenceData = theMidiData;
@@ -258,7 +258,7 @@ static GM_Song * PV_CreateSongFromMidi(XLongResourceID theID,
     return theSong;
 }
 
-static void PV_SetTempo(GM_Song *pSong, long masterTempo)
+static void PV_SetTempo(GM_Song *pSong, XSDWORD masterTempo)
 {
     if (pSong)
     {
@@ -338,7 +338,7 @@ void GM_MergeExternalSong(void *theExternalSong, XShortResourceID theSongID, GM_
 
 static void PV_ClearSongInstruments(GM_Song *pSong)
 {
-    long    count;
+    XSDWORD    count;
 
     if (pSong)
     {
@@ -803,7 +803,7 @@ GM_Song * GM_CreateLiveSong(void *context, XShortResourceID songID)
 
     pSong = NULL;
 
-    pSong = (GM_Song *)XNewPtr((long)sizeof(GM_Song));
+    pSong = (GM_Song *)XNewPtr((XSDWORD)sizeof(GM_Song));
     if (pSong)
     {
         pSong->context = context;
@@ -1341,7 +1341,7 @@ UINT32 GM_GetSongTickLength(GM_Song *pSong, OPErr *pErr)
 
 // meta event callback that collects track names
 #if USE_CREATION_API == TRUE
-static void PV_TrackNameCallback(void *threadContext, GM_Song *pSong, char markerType, void *pMetaText, long metaTextLength, short currentTrack)
+static void PV_TrackNameCallback(void *threadContext, GM_Song *pSong, char markerType, void *pMetaText, XSDWORD metaTextLength, short currentTrack)
 {
     XBYTE **tnArray,*str;
 
@@ -1437,7 +1437,7 @@ OPErr GM_GetSongInstrumentChanges(void *theSongResource, GM_Song **outSong, XBYT
         // second pass: get the program changes, add bank events before each one
         if (err == NO_ERR)
         {
-            GM_SetSongMetaEventCallback(theSong, PV_TrackNameCallback, (long)outTrackNames);
+            GM_SetSongMetaEventCallback(theSong, PV_TrackNameCallback, (XSDWORD)outTrackNames);
             saveScan = theSong->AnalyzeMode;
             theSong->AnalyzeMode = SCAN_FIND_PATCHES;
             saveLoop = GM_GetSongLoopFlag(theSong);
@@ -1482,7 +1482,7 @@ OPErr GM_SetSongTickPosition(GM_Song *pSong, UINT32 songTickPosition)
     GM_Song     *theSong;
     OPErr       theErr;
     XBOOL       foundPosition;
-    long        count;
+    XSDWORD        count;
     XBOOL       songPaused = FALSE;
 
     if (pSong->seqType != SEQ_MIDI)
@@ -1612,7 +1612,7 @@ OPErr GM_SetSongMicrosecondPosition(GM_Song *pSong, UINT32 songMicrosecondPositi
     GM_Song     *theSong;
     OPErr       theErr;
     XBOOL       foundPosition;
-    long        count;
+    XSDWORD        count;
     XBOOL       songPaused = FALSE;
 
     // $$kk: 02.10.98

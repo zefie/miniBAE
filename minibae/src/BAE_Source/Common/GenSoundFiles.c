@@ -511,9 +511,9 @@ static void IFF_SetFormType(X_IFF *pIFF, XDWORD formType)
 
 
 /* -1 is error */
-static long IFF_GetNextGroup(X_IFF *pIFF, XIFFChunk *pChunk)
+static XSDWORD IFF_GetNextGroup(X_IFF *pIFF, XIFFChunk *pChunk)
 {
-    long    err = 0;
+    XSDWORD    err = 0;
 
     if (XFileRead(pIFF->fileReference, pChunk, (XDWORD)sizeof(XIFFChunk) - sizeof(XDWORD)) != -1)   // get chunk ID
     {
@@ -559,7 +559,7 @@ static long IFF_GetNextGroup(X_IFF *pIFF, XIFFChunk *pChunk)
 
 /******- Determine if a file is a IFF type -******************************/
 
-static long IFF_FileType(X_IFF *pIFF)
+static XSDWORD IFF_FileType(X_IFF *pIFF)
 {
     XIFFChunk type;
 
@@ -577,11 +577,11 @@ static long IFF_FileType(X_IFF *pIFF)
 }
 
 /*- scan past nested FORM's -*/
-static long IFF_NextBlock(X_IFF *pIFF, XDWORD blockID)
+static XSDWORD IFF_NextBlock(X_IFF *pIFF, XDWORD blockID)
 {
     XDWORD saveFORM, saveFLEN;
     XIFFChunk type;
-    long flag;
+    XSDWORD flag;
 
     flag = -1;
     while (XFileGetPosition(pIFF->fileReference) < (pIFF->formPosition + pIFF->formLength))
@@ -621,7 +621,7 @@ static long IFF_NextBlock(X_IFF *pIFF, XDWORD blockID)
 
 
 /******- Scan a FORM for a 4 letter block -*******************************/
-static long IFF_ScanToBlock(X_IFF *pIFF, XDWORD block)
+static XSDWORD IFF_ScanToBlock(X_IFF *pIFF, XDWORD block)
 {
     if (XFileSetPosition(pIFF->fileReference, pIFF->formPosition + 4) == 0)     // set to inside of FORM
     {
@@ -635,7 +635,7 @@ static long IFF_ScanToBlock(X_IFF *pIFF, XDWORD block)
 }
 
 /******************- Return Chunk size -**********************************/
-static long IFF_ChunkSize(X_IFF *pIFF, XDWORD block)
+static XSDWORD IFF_ChunkSize(X_IFF *pIFF, XDWORD block)
 {
     XDWORD size;
 
@@ -661,7 +661,7 @@ static long IFF_ChunkSize(X_IFF *pIFF, XDWORD block)
 
 
 /*- go inside a FORM that has been found -*/
-static long IFF_NextForm(X_IFF *pIFF)
+static XSDWORD IFF_NextForm(X_IFF *pIFF)
 {
     XIFFChunk type;
 
@@ -678,13 +678,13 @@ static long IFF_NextForm(X_IFF *pIFF)
     return -1;
 }
 
-static long IFF_CurrentForm(X_IFF *pIFF)
+static XSDWORD IFF_CurrentForm(X_IFF *pIFF)
 {
     pIFF->formPosition = XFileGetPosition(pIFF->fileReference);
     return IFF_NextForm(pIFF);
 }
 
-static long IFF_ReadBlock(X_IFF *pIFF, XPTR pData, XDWORD Length)
+static XSDWORD IFF_ReadBlock(X_IFF *pIFF, XPTR pData, XDWORD Length)
 {
     if (XFileRead(pIFF->fileReference, pData, Length) == -1)
     {
@@ -694,7 +694,7 @@ static long IFF_ReadBlock(X_IFF *pIFF, XPTR pData, XDWORD Length)
 }
 
 
-static long IFF_GetChunk(X_IFF *pIFF, XDWORD block, XDWORD size, XPTR p)
+static XSDWORD IFF_GetChunk(X_IFF *pIFF, XDWORD block, XDWORD size, XPTR p)
 {
     if (IFF_ScanToBlock(pIFF, block) == -1L)
     {
@@ -729,7 +729,7 @@ static long IFF_GetChunk(X_IFF *pIFF, XDWORD block, XDWORD size, XPTR p)
 }
 
 
-static long IFF_NextChunk(X_IFF *pIFF, XDWORD block, XDWORD size, XPTR p)
+static XSDWORD IFF_NextChunk(X_IFF *pIFF, XDWORD block, XDWORD size, XPTR p)
 {
     if (IFF_NextBlock(pIFF, block) == -1)
     {
@@ -786,7 +786,7 @@ static OPErr IFF_WriteBlock(X_IFF *pIFF, XPTR pData, XDWORD Length)
 }
 
 // write size of block, but order in the format particulars
-static long IFF_WriteSize(X_IFF *pIFF, XDWORD size)
+static XSDWORD IFF_WriteSize(X_IFF *pIFF, XDWORD size)
 {
     XDWORD theSize;
 
@@ -974,7 +974,7 @@ decode_adpcm:
                 pState = &state;
             }
             /* Read and unpack input codes and process them */
-            while (PV_UnpackInput(fileReference, &pState->buffer, &pState->bits, &code, dec_bits) >= 0) 
+            while (PV_UnpackInput(fileReference, (unsigned int *)&pState->buffer, (int *)&pState->bits, &code, dec_bits) >= 0) 
             {
                 sample = (*dec_routine)(code, AUDIO_ENCODING_LINEAR, &pState->state);
                 *pSample16++ = sample;
@@ -1011,7 +1011,7 @@ decode_adpcm:
 
 static XWORD IFF_GetWAVFormatTag(X_IFF *pIFF)
 {
-    long        theErr;
+    XSDWORD        theErr;
     XWaveHeader header;
 
     theErr = IFF_GetChunk(pIFF, X_FMT, (XDWORD)sizeof(XWaveHeader), (void *)&header);
@@ -1022,9 +1022,9 @@ static XWORD IFF_GetWAVFormatTag(X_IFF *pIFF)
     return header.wFormatTag;
 }
 
-static long IFF_GetWAVHeader(X_IFF *pIFF, XWaveHeader * pHeaderInfo)
+static XSDWORD IFF_GetWAVHeader(X_IFF *pIFF, XWaveHeader * pHeaderInfo)
 {
-    long    theErr;
+    XSDWORD    theErr;
 
     theErr = IFF_GetChunk(pIFF, X_FMT, (XDWORD)sizeof(XWaveHeader), (void *)pHeaderInfo);
 
@@ -1040,9 +1040,9 @@ static long IFF_GetWAVHeader(X_IFF *pIFF, XWaveHeader * pHeaderInfo)
     return theErr;
 }
 
-static long IFF_GetWAVIMAHeader(X_IFF *pIFF, XWaveHeaderIMA * pHeaderInfo)
+static XSDWORD IFF_GetWAVIMAHeader(X_IFF *pIFF, XWaveHeaderIMA * pHeaderInfo)
 {
-    long    theErr;
+    XSDWORD    theErr;
 
     theErr = IFF_GetChunk(pIFF, X_FMT, (XDWORD)sizeof(XWaveHeaderIMA), (void *)pHeaderInfo);
 
@@ -1060,10 +1060,10 @@ static long IFF_GetWAVIMAHeader(X_IFF *pIFF, XWaveHeaderIMA * pHeaderInfo)
 }
 
 // Get compressed and uncompressed size. Return 0 if successful, 1 if failure
-static long IFF_GetWAVSampleSize(X_IFF *pIFF, XDWORD *pUncompressedSize, XDWORD *pCompressedSize)
+static XSDWORD IFF_GetWAVSampleSize(X_IFF *pIFF, XDWORD *pUncompressedSize, XDWORD *pCompressedSize)
 {
     XDWORD            size;
-    long             error;
+    XSDWORD             error;
     XWaveHeaderIMA  header;
 
     error = 0;
@@ -1183,10 +1183,10 @@ static OPErr IFF_WriteWAVLoopPoints(X_IFF *pIFF, GM_Waveform const* pWaveform)
 #endif
 
 // Returns WAV loop points, if there. Return 0 if successful, -1 if failure
-static long IFF_GetWAVLoopPoints(X_IFF *pIFF, XDWORD *pLoopStart, XDWORD *pLoopEnd, XDWORD *pLoopCount)
+static XSDWORD IFF_GetWAVLoopPoints(X_IFF *pIFF, XDWORD *pLoopStart, XDWORD *pLoopEnd, XDWORD *pLoopCount)
 {
     XSamplerChunk   *pSampler;
-    long            theErr;
+    XSDWORD            theErr;
     XDWORD   size;
 
     *pLoopStart = 0;
@@ -1870,9 +1870,9 @@ void XConvertToIeeeExtended(XFIXED ieeeFixedRate, XBYTE *bytes)
 {
     int             sign;
     int             expon;
-    double          fMant, fsMant;
+    float          fMant, fsMant;
     XDWORD   hiMant, loMant;
-    double          num;
+    float          num;
 
     num = XFIXED_TO_FLOAT(ieeeFixedRate);
     if (num < 0) 
@@ -1933,9 +1933,9 @@ void XConvertToIeeeExtended(XFIXED ieeeFixedRate, XBYTE *bytes)
     #pragma mark ## AIFF read functions ##
 #endif
 // get AIFF header. Returns 0 if ok, -1 if failed
-static long IFF_GetAIFFHeader(X_IFF *pIFF, XAIFFHeader * pHeaderInfo)
+static XSDWORD IFF_GetAIFFHeader(X_IFF *pIFF, XAIFFHeader * pHeaderInfo)
 {
-    long    theErr;
+    XSDWORD    theErr;
 
     theErr = IFF_GetChunk(pIFF, X_Common, (XDWORD)sizeof(XAIFFHeader), (void *)pHeaderInfo);
 
@@ -1948,9 +1948,9 @@ static long IFF_GetAIFFHeader(X_IFF *pIFF, XAIFFHeader * pHeaderInfo)
 }
 
 // get AIFF extended header. Returns 0 if ok, -1 if failed
-static long IFF_GetAIFFExtenedHeader(X_IFF *pIFF, XAIFFExtenedHeader * pHeaderInfo)
+static XSDWORD IFF_GetAIFFExtenedHeader(X_IFF *pIFF, XAIFFExtenedHeader * pHeaderInfo)
 {
-    long    theErr;
+    XSDWORD    theErr;
     char    size;
 
     theErr = IFF_GetChunk(pIFF, X_Common, (XDWORD)sizeof(XAIFFHeader) + sizeof(XDWORD), (void *)pHeaderInfo);
@@ -1968,9 +1968,9 @@ static long IFF_GetAIFFExtenedHeader(X_IFF *pIFF, XAIFFExtenedHeader * pHeaderIn
     return theErr;
 }
 
-static long IFF_GetAIFFInstrument(X_IFF *pIFF, XInstrumentHeader * pInstrumentInfo)
+static XSDWORD IFF_GetAIFFInstrument(X_IFF *pIFF, XInstrumentHeader * pInstrumentInfo)
 {
-    long    theErr;
+    XSDWORD    theErr;
 
     theErr = IFF_GetChunk(pIFF, X_Instrument, (XDWORD)sizeof(XInstrumentHeader), (void *)pInstrumentInfo);
 
@@ -1999,7 +1999,7 @@ static long IFF_GetAIFFInstrument(X_IFF *pIFF, XInstrumentHeader * pInstrumentIn
 static XBOOL IFF_GetAIFFMarkerValue(X_IFF *pIFF, XSWORD ID, XDWORD *pMarkerValue)
 {
     XBYTE   loopMark[1024];
-    long            theErr;
+    XSDWORD            theErr;
     XBYTE   *pData, *pEnd;
     XWORD  len;
     
@@ -2034,10 +2034,10 @@ static XBOOL IFF_GetAIFFMarkerValue(X_IFF *pIFF, XSWORD ID, XDWORD *pMarkerValue
 }
 
 // Returns AIFF loop points, if there. Return 0 if successful, -1 if failure
-static long IFF_GetAIFFLoopPoints(X_IFF *pIFF, XDWORD *pLoopStart, XDWORD *pLoopEnd)
+static XSDWORD IFF_GetAIFFLoopPoints(X_IFF *pIFF, XDWORD *pLoopStart, XDWORD *pLoopEnd)
 {
     XInstrumentHeader   inst;
-    long                err;
+    XSDWORD                err;
 
     *pLoopStart = 0;
     *pLoopEnd = 0;
@@ -2095,10 +2095,10 @@ static OPErr IFF_WriteAIFFLoopPoints(X_IFF *pIFF, GM_Waveform const* pWaveform)
 #endif
 
 // Returns AIFF base pitch, if there. Return 0 if successful, -1 if failure
-static long IFF_GetAIFFBasePitch(X_IFF *pIFF, XWORD *pBasePitch)
+static XSDWORD IFF_GetAIFFBasePitch(X_IFF *pIFF, XWORD *pBasePitch)
 {
     XInstrumentHeader   inst;
-    long                err;
+    XSDWORD                err;
 
     err = IFF_GetAIFFInstrument(pIFF, &inst);
     if (err == 0)
@@ -2109,10 +2109,10 @@ static long IFF_GetAIFFBasePitch(X_IFF *pIFF, XWORD *pBasePitch)
 }
 
 // Get compressed and uncompressed size. Return 0 if successful, -1 if failure
-static long IFF_GetAIFFSampleSize(X_IFF *pIFF, XDWORD *pUncompressedSize, XDWORD *pCompressedSize)
+static XSDWORD IFF_GetAIFFSampleSize(X_IFF *pIFF, XDWORD *pUncompressedSize, XDWORD *pCompressedSize)
 {
     XDWORD                size;
-    long                    error;
+    XSDWORD                    error;
     XAIFFExtenedHeader  header;
 
     size = 0L;

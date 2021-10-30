@@ -387,7 +387,7 @@ static short int st_ulaw_to_linear(unsigned char ulawbyte)
 
 void XExpandULawto16BitLinear(XBYTE *pSource, XSWORD *pDest, XDWORD frames, XDWORD channels)
 {
-    long    count;
+    XSDWORD    count;
 
     frames *= channels;
     for (count = 0; count < frames; count++)
@@ -401,7 +401,7 @@ void XExpandULawto16BitLinear(XBYTE *pSource, XSWORD *pDest, XDWORD frames, XDWO
 
 void XExpandALawto16BitLinear(XBYTE *pSource, XSWORD *pDest, XDWORD frames, XDWORD channels)
 {
-    long    count;
+    XSDWORD    count;
 
     frames *= channels;
     for (count = 0; count < frames; count++)
@@ -603,7 +603,7 @@ void XDecryptData(void *pData, XDWORD size)
         R = INIT_R;
         pByte = (unsigned char *)pData;
         pEnd = pByte + size;
-//      BAE_PRINTF("s = 0x%lx e = 0x%lx sz = 0x%lx\n", (long)pByte, (long)pEnd, (long)size);
+//      BAE_PRINTF("s = 0x%lx e = 0x%lx sz = 0x%lx\n", (XSDWORD)pByte, (XSDWORD)pEnd, (XSDWORD)size);
         while (pByte < pEnd)
         {
             crc2 += *pByte;

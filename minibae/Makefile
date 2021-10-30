@@ -78,7 +78,7 @@ OBJ_DIR 	:= $(BUILD_DIR)obj/
 OBJ 		:= $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
 OBJ_BIN 	:= $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC_BIN})))
 
-ARCH		:= -m32 -static
+ARCH		:= -m64 -static
 CC		:= gcc
 CXX		:= g++
 LD		:= gcc

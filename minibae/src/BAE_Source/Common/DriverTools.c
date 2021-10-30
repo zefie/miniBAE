@@ -260,7 +260,7 @@ SongResource * XNewSongPtr( SongType songType,
                 songSMS->reverbType = (char)reverbType;
                 songSMS->flags1 = XBF_enableMIDIProgram;
                 songSMS->flags2 = XBF_ignoreBadPatches;
-                songSMS->defaultPercusionProgram = (XShortResourceID)-1;        // 126
+                songSMS->defaultPercusionProgram = (XBYTE)(XShortResourceID)-1;        // 126
 //              XPutShort(&songSMS->remapCount, 0);
             }
             song = (SongResource *)songSMS;

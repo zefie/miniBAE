@@ -543,7 +543,7 @@ short           sample;
         sampleCount -= 8;
     }
 #else   // X_WORD_ORDER == TRUE
-    while ((long)(sampleCount -= 2) >= 0)
+    while ((XSDWORD)(sampleCount -= 2) >= 0)
     {
     unsigned short  nybbles;
 
@@ -594,7 +594,7 @@ short           sample;
         sampleCount -= 8;
     }
 #else   // X_WORD_ORDER == TRUE
-    while ((long)(sampleCount -= 2) >= 0)
+    while ((XSDWORD)(sampleCount -= 2) >= 0)
     {
     unsigned short  nybbles;
 
@@ -851,7 +851,7 @@ short       index;
     dst8 += 2;  // skip other channel's first sample
     sampleCount--;
     
-    while ((long)(sampleCount -= 8) >= 0)
+    while ((XSDWORD)(sampleCount -= 8) >= 0)
     {
     XDWORD      nybbles;
     int         nybbleCount;
@@ -887,7 +887,7 @@ short       index;
     dst16 += 2; // skip other channel's first sample
     sampleCount--;
 
-    while ((long)(sampleCount -= 8) >= 0)
+    while ((XSDWORD)(sampleCount -= 8) >= 0)
     {
     XDWORD      nybbles;
     int         nybbleCount;
@@ -929,11 +929,11 @@ char const*     pSourceL;
 char const*     pSourceR;
 short int       *pDest16;
 char            *pDest8;
-long            stepL, indexL;
-long            diffL, predsampleL;
+XSDWORD            stepL, indexL;
+XSDWORD            diffL, predsampleL;
 char            codebufL, codeL;
-long            stepR, indexR;
-long            diffR, predsampleR;
+XSDWORD            stepR, indexR;
+XSDWORD            diffR, predsampleR;
 char            codebufR, codeR;
 XDWORD          count;
 char            macBlockOffset;
@@ -1112,11 +1112,11 @@ XDWORD XExpandAiffImaStream(XBYTE const* src, XDWORD srcBytesPerBlock,
     INT32           predsampleL;
     char            codebufL, codeL;
     int             stepR, indexR;
-    long            diffL;
-    long            diffR;
+    XSDWORD            diffL;
+    XSDWORD            diffR;
     INT32           predsampleR;
     char            codebufR, codeR;
-    unsigned long   count, srcIndex;
+    XDWORD   count, srcIndex;
 
     predsampleL = predictorCache[0];
     predsampleR = predictorCache[1];
@@ -1327,8 +1327,8 @@ static INLINE int imaadpcmSampleDecode
     int              nStepSize
 )
 {
-    long            lDifference;
-    long            lNewSample;
+    XSDWORD            lDifference;
+    XSDWORD            lNewSample;
 
     //
     //  calculate difference:
@@ -1363,7 +1363,7 @@ static INLINE int imaadpcmSampleDecode
     //  Note that this is optimized for the most common case, when we
     //  don't have to clamp.
     //
-    if( (long)(short)lNewSample == lNewSample )
+    if( (XSDWORD)(short)lNewSample == lNewSample )
     {
         return (int)lNewSample;
     }

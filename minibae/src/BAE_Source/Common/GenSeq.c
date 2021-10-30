@@ -582,8 +582,8 @@ OPErr PV_ConfigureMusic(GM_Song *pSong)
     {
         safe = FALSE;
         // don't walk past the midi file length
-        size = (lengthToMidiEnd < 3000 - sizeof(long)) ? lengthToMidiEnd : 
-                                                            3000 - sizeof(long);
+        size = (lengthToMidiEnd < 3000 - sizeof(XSDWORD)) ? lengthToMidiEnd : 
+                                                            3000 - sizeof(XSDWORD);
         for (count = 0; count < size; count++)
         {
             if (XGetLong(pMidiStream) == ID_MTHD)
@@ -605,8 +605,8 @@ OPErr PV_ConfigureMusic(GM_Song *pSong)
                 // search for first midi track
                 safe = FALSE;
                 // don't walk past the midi file length
-                size = (lengthToMidiEnd < 3000 - sizeof(long)) ? lengthToMidiEnd : 
-                                                                    3000 - sizeof(long);
+                size = (lengthToMidiEnd < 3000 - sizeof(XSDWORD)) ? lengthToMidiEnd : 
+                                                                    3000 - sizeof(XSDWORD);
                 // find first Midi track
                 for (count = 0; count < size; count++)
                 {
@@ -677,7 +677,7 @@ OPErr PV_ConfigureMusic(GM_Song *pSong)
 // Process any fading song voices
 static void PV_ServeSongFade(void *threadContext, GM_Song *pSong)
 {
-    long    value;
+    XSDWORD    value;
 
     if (pSong)
     {
@@ -759,11 +759,11 @@ void GM_ResumeSequencer(void)
                 pSong = pMixer->pSongsToPlay[count];
                 if (pSong)
                 {
-//                  printf("pre MIDITempo %ld pre MIDIDivision %ld\n", (long)pSong->MIDITempo, (long)pSong->MIDIDivision);
+//                  printf("pre MIDITempo %ld pre MIDIDivision %ld\n", (XSDWORD)pSong->MIDITempo, (XSDWORD)pSong->MIDIDivision);
                     // recalucate tempo values in case timebase changed
                     pSong->MIDITempo = (pSong->UnscaledMIDITempo / (UFLOAT)BAE_GetSliceTimeInMicroseconds());
                     PV_ScaleDivision(pSong, pSong->UnscaledMIDIDivision);
-//                  printf("post MIDITempo %ld pre MIDIDivision %ld\n", (long)pSong->MIDITempo, (long)pSong->MIDIDivision);
+//                  printf("post MIDITempo %ld pre MIDIDivision %ld\n", (XSDWORD)pSong->MIDITempo, (XSDWORD)pSong->MIDIDivision);
                 }
             }
             pMixer->sequencerPaused = FALSE;
@@ -830,7 +830,7 @@ XBOOL GM_IsSongPaused(GM_Song *pSong)
 
 XBOOL GM_IsSongDone(GM_Song *pSong)
 {
-    register long   count;
+    register XSDWORD   count;
     XBOOL           songDone;
 
     songDone = FALSE;
@@ -890,7 +890,7 @@ void GM_SetSongTimeCallback(GM_Song *theSong, GM_SongTimeCallbackProcPtr theCall
 
 
 // Call meta event callback if there
-static void PV_CallSongMetaEventCallback(void *threadContext, GM_Song *pSong, char markerType, void *pText, long textLength, short currentTrack)
+static void PV_CallSongMetaEventCallback(void *threadContext, GM_Song *pSong, char markerType, void *pText, XSDWORD textLength, short currentTrack)
 {
     GM_SongMetaCallbackProcPtr theCallback;
 
@@ -956,7 +956,7 @@ void GM_GetRealtimeAudioInformation(GM_AudioInfo *pInfo)
     }
     else
     {
-        XSetMemory((void *)pInfo, (long)sizeof(GM_AudioInfo), 0);
+        XSetMemory((void *)pInfo, (XSDWORD)sizeof(GM_AudioInfo), 0);
     }
 }
 #endif  // X_PLATFORM != X_WEBTV
@@ -991,7 +991,7 @@ void GM_SetControllerCallback(GM_Song *theSong, void * reference, GM_ControlerCa
         pControlerCallBack = theSong->controllerCallback;
         if (pControlerCallBack == NULL)
         {   // not allocated yet?
-            pControlerCallBack = (GM_ControlCallbackPtr)XNewPtr((long)sizeof(GM_ControlCallback));
+            pControlerCallBack = (GM_ControlCallbackPtr)XNewPtr((XSDWORD)sizeof(GM_ControlCallback));
             theSong->controllerCallback = pControlerCallBack;
         }
         if (pControlerCallBack)
@@ -1567,7 +1567,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, INT16 MIDIChannel, INT16 cur
                 // not caring how big the file is, we move total size - 4 up 4
                 // this will always work 
                 // plus it moves the 
-                if ((long)(pSong->pPatchInfo->instrPtrLoc - pSong->pPatchInfo->bankPtrLoc) > 3) 
+                if ((XSDWORD)(pSong->pPatchInfo->instrPtrLoc - pSong->pPatchInfo->bankPtrLoc) > 3) 
                 {
                     PV_InsertBankSelect(pSong,MIDIChannel,currentTrack);
                     pSong->pPatchInfo->streamIncrement = 4;
@@ -1585,7 +1585,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, INT16 MIDIChannel, INT16 cur
                 // between the pointers if the delta time was very small. Since we write dt 0
                 // between controller and pgm when modifying the file, this will at least
                 // find our handiwork
-                if ((long)(pSong->pPatchInfo->instrPtrLoc - pSong->pPatchInfo->bankPtrLoc) > 3)
+                if ((XSDWORD)(pSong->pPatchInfo->instrPtrLoc - pSong->pPatchInfo->bankPtrLoc) > 3)
                 {
                     pSong->pPatchInfo->instrCount++;
                 }
@@ -2276,7 +2276,7 @@ void DumpMIDIQueue(GM_Mixer *pMixer)
 // Clean external midi event queue, without a mutex lock
 static void PV_CleanQueueWithoutLock(GM_Mixer *pMixer)
 {
-    long        count;
+    XSDWORD        count;
 
     if (pMixer)
     {
@@ -2405,7 +2405,7 @@ static Q_MIDIEvent * PV_GetNextStorableQueueEvent(UINT32 externalTimeStamp)
         pHead = pMixer->pHead;  // get current write event pointer
         #ifdef QUEUE_DEBUG
             BAE_PRINTF("minibae::PV_GetNextStorableQueueEvent head: 0x%lx tail: 0x%lx\n",
-                                  (unsigned long)pMixer->pHead, (unsigned long)pMixer->pTail);
+                                  (XDWORD)pMixer->pHead, (XDWORD)pMixer->pTail);
         #endif
         count = 0;
         do
@@ -2450,7 +2450,7 @@ static Q_MIDIEvent * PV_GetNextStorableQueueEvent(UINT32 externalTimeStamp)
     }
 #ifdef QUEUE_DEBUG
     BAE_PRINTF(pStoredEvent ? "\tput event 0x%lx on queue. Head now 0x%lx\n" : "QUEUE FULL!\n", 
-                                (long)pStoredEvent, (long)pMixer->pHead);
+                                (XSDWORD)pStoredEvent, (XSDWORD)pMixer->pHead);
 #endif
     return pStoredEvent;
 }
@@ -2702,7 +2702,7 @@ void GM_PitchBend(GM_Song *pSong, INT16 channel, UBYTE valueMSB, UBYTE valueLSB)
 // return pitch bend for channel
 void GM_GetPitchBend(GM_Song *pSong, INT16 channel, unsigned char *pLSB, unsigned char *pMSB)
 {
-    register long           the_pitch_bend;
+    register XSDWORD           the_pitch_bend;
 
     if (pSong && pLSB && pMSB)
     {
@@ -2754,7 +2754,7 @@ static void PV_ProcessExternalMIDIQueue(GM_Song *pSong)
     //  if (qindex < 5000) sprintf(msgQueue[qindex++].s, "***** SLICE (%d) *****\n", ticks);
 #endif
 #ifdef TIMESLICE_DEBUG
-        { static prevTicks = 0;  unsigned long usecs = XMicroseconds();
+        { static prevTicks = 0;  XDWORD usecs = XMicroseconds();
           BAE_PRINTF("slice delta: %d usecs\n", usecs - prevTicks);
           prevTicks = usecs;
         }
@@ -2880,11 +2880,11 @@ DATA
 */
 #if SUPPORT_IGOR_FEATURE
 static void PV_ProcessIgorResource(GM_Song *pSong,
-                                   long command,
+                                   XSDWORD command,
                                    unsigned char *pMidiStream,
-                                   long theID,
+                                   XSDWORD theID,
                                    XBankToken bankToken,
-                                   long length)
+                                   XSDWORD length)
 {
     GM_Instrument   *theI;
     XPTR            theNewData;
@@ -2996,7 +2996,7 @@ static void PV_SetSampleIntoCache(GM_Song * pSong,
 
 
 // Validate command types. This is used to protect us from bad memory pointers, etc
-static XBOOL PV_ValidateType(long command)
+static XBOOL PV_ValidateType(XSDWORD command)
 {
     XBOOL   valid;
 
@@ -3015,7 +3015,7 @@ static XBOOL PV_ValidateType(long command)
 }
 
 // Validate command types. This is used to protect us from bad memory pointers, etc
-static XBOOL PV_ValidateTypeCommands(long command)
+static XBOOL PV_ValidateTypeCommands(XSDWORD command)
 {
     XBOOL   valid;
 
@@ -3036,7 +3036,7 @@ static XBOOL PV_ValidateTypeCommands(long command)
 // Process Igor Meta events given a midi stream right after the sysex ID
 static void PV_ProcessIgorMeta(GM_Song *pSong, unsigned char *pMidiStream)
 {
-    long                command,
+    XSDWORD                command,
                         unitCount,
                         cmdCount,
                         count,
@@ -3122,15 +3122,15 @@ static void PV_ProcessIgorMeta(GM_Song *pSong, unsigned char *pMidiStream)
 
 // Given a song pointer and a string marker command, and a string length; process that command.
 // If TRUE is returned, then the current track process is restarted at track 0
-static XBOOL PV_ProcessMetaMarkerEvents(GM_Song *pSong, char *markerText, long markerLength)
+static XBOOL PV_ProcessMetaMarkerEvents(GM_Song *pSong, char *markerText, XSDWORD markerLength)
 {
-    long    count;
+    XSDWORD    count;
     XBOOL   restartTracks;
 
     restartTracks = FALSE;
     // support Beatnik marker events
 
-    // markerText is a pointer to the in memory midi sequence that stays around as long
+    // markerText is a pointer to the in memory midi sequence that stays around as XSDWORD
     // as the file is playing.
     if ((pSong->AnalyzeMode == SCAN_SAVE_PATCHES) && (markerLength >= 6))
     {
@@ -3287,7 +3287,7 @@ UpdateDeltaTime:
             midi_stream = temp_midi_stream;
             pSong->trackticks[currentTrack] += (IFLOAT)(value << 6);
 //          pSong->trackcumuticks[currentTrack] += value;
-//          printf("track %ld, time %ld\n", (long)currentTrack, (long)pSong->trackticks[currentTrack]);
+//          printf("track %ld, time %ld\n", (XSDWORD)currentTrack, (XSDWORD)pSong->trackticks[currentTrack]);
             goto Do_GetEvent;
         }
         goto ServeNextTrack;
@@ -3386,7 +3386,7 @@ GetMIDIevent:
                 // End-of-track:
                 case 0x2F:
             //      if (pSong->AnalyzeMode == SCAN_NORMAL)
-            //          printf("End of track %ld\n", (long)currentTrack);
+            //          printf("End of track %ld\n", (XSDWORD)currentTrack);
                     pSong->trackon[currentTrack] = TRACK_OFF;
                     goto ServeNextTrack;
             }
@@ -3621,9 +3621,9 @@ void PV_ProcessSequencerEvents(void *threadContext)
         {   // if enabled, this will fix the drift of real time with our synth time. This
             // is used only when real time midi data, that is being time stamped with
             // XMicroseconds is enabled
-            long    drift;
+            XSDWORD    drift;
 
-            drift = (long)XMicroseconds() - (long)pMixer->syncCount;
+            drift = (XSDWORD)XMicroseconds() - (XSDWORD)pMixer->syncCount;
             if (drift > 1000)   // if drift more than 1 ms reset
             {
                 pMixer->syncCount = XMicroseconds();

@@ -310,7 +310,7 @@ struct GM_AudioStreamFileInfo
 #if USE_HIGHLEVEL_FILE_API != FALSE
     AudioFileType           fileType;
 #endif
-    long                    formatType;             // typed file compression mode
+    XSDWORD                    formatType;             // typed file compression mode
 
     XPTR                    pBlockBuffer;           // used for decompression
     XDWORD           blockSize;              // used for decompression
@@ -351,8 +351,8 @@ typedef struct GM_PlaybackEvent GM_PlaybackEvent;
 // this structure, once allocated, becomes a STREAM_REFERENCE
 struct GM_AudioStream
 {
-    long                    userReference;
-    long                    streamID;
+    XSDWORD                    userReference;
+    XSDWORD                    streamID;
     VOICE_REFERENCE         playbackReference;  // voice reference to live mixer voice. It
                                                 // will be DEAD_VOICE if not active
 
@@ -534,7 +534,7 @@ static STREAM_REFERENCE PV_GetEmptyAudioStream(void)
     STREAM_REFERENCE    ref;
 
     ref = DEAD_STREAM;
-    pStream = (GM_AudioStream *)XNewPtr((long)sizeof(GM_AudioStream));
+    pStream = (GM_AudioStream *)XNewPtr((XSDWORD)sizeof(GM_AudioStream));
     if (pStream)
     {
         pStream->userReference = 0;
@@ -1297,8 +1297,8 @@ void * GM_AudioStreamGetDoneCallback(STREAM_REFERENCE reference, GM_SoundDoneCal
     void                    *doneCallbackReference;
 
     doneCallback = NULL;
-    reference = -1;
-    pStream = PV_AudioStreamGetFromReference(reference);
+    reference = (STREAM_REFERENCE)-1;
+    pStream = (STREAM_REFERENCE)PV_AudioStreamGetFromReference(reference);
     if (pStream)
     {
         if (pStream->pFileStream)
@@ -1360,7 +1360,7 @@ STREAM_REFERENCE GM_AudioStreamFileSetup(void *threadContext,
     STREAM_REFERENCE        reference;
     GM_Waveform             *pWaveform;
     GM_AudioStreamFileInfo  *pStream;
-    long                    format;
+    XSDWORD                    format;
     XDWORD           blockSize;
     OPErr                   err;
     void                    *blockPtr;
@@ -1370,7 +1370,7 @@ STREAM_REFERENCE GM_AudioStreamFileSetup(void *threadContext,
     pWaveform = GM_ReadFileInformation(file, fileType, &format, &blockPtr, &blockSize, &err);
     if (pWaveform && (err == NO_ERR))
     {
-        pStream = (GM_AudioStreamFileInfo *)XNewPtr((long)sizeof(GM_AudioStreamFileInfo));
+        pStream = (GM_AudioStreamFileInfo *)XNewPtr((XSDWORD)sizeof(GM_AudioStreamFileInfo));
         if (pStream)
         {
             pStream->playbackFile = *file;
@@ -1400,7 +1400,7 @@ STREAM_REFERENCE GM_AudioStreamFileSetup(void *threadContext,
             {
                 bufferSize = (bufferSize * blockSize) / blockSize;  // round down to blockSize
             }
-            reference = GM_AudioStreamSetup(threadContext, (long)pStream, PV_FileStreamCallback,
+            reference = GM_AudioStreamSetup(threadContext, (XSDWORD)pStream, PV_FileStreamCallback,
                                                 bufferSize,
                                                 pWaveform->sampledRate,
                                                 pWaveform->bitSize,
@@ -1425,7 +1425,7 @@ STREAM_REFERENCE GM_AudioStreamFileSetup(void *threadContext,
 // OUTPUT:
 //  long            This is an audio reference number. Will be non-zero for valid stream
 
-STREAM_REFERENCE GM_AudioStreamSetup(void *threadContext, long userReference, GM_StreamObjectProc pProc,                        
+STREAM_REFERENCE GM_AudioStreamSetup(void *threadContext, XSDWORD userReference, GM_StreamObjectProc pProc,                        
                                      XDWORD bufferSize,
                             XFIXED sampleRate,  // Fixed 16.16 sample rate
                             char dataBitSize,       // 8 or 16 bit data
@@ -1478,7 +1478,7 @@ STREAM_REFERENCE GM_AudioStreamSetup(void *threadContext, long userReference, GM
                     pStream->streamVolume = MAX_NOTE_VOLUME;
                     pStream->streamStereoPosition = 0;
                     ssData.pData = NULL;
-                    ssData.userReference = pStream->userReference;
+                    ssData.userReference = (XPTR)pStream->userReference;
                     ssData.streamReference = (STREAM_REFERENCE)pStream;
                     ssData.sampleRate = sampleRate;
                     ssData.dataBitSize = dataBitSize;
@@ -1514,7 +1514,7 @@ STREAM_REFERENCE GM_AudioStreamSetup(void *threadContext, long userReference, GM
                         pStream->startupBufferFullCount = 0;
 
                         // ok, fill first buffer
-                        ssData.userReference = pStream->userReference;
+                        ssData.userReference = (XPTR)pStream->userReference;
                         ssData.streamReference = (STREAM_REFERENCE)pStream;
                         ssData.pData = pStream->pStreamData1;
                         // get the full amount this buffer only
@@ -1575,7 +1575,7 @@ STREAM_REFERENCE GM_AudioStreamSetup(void *threadContext, long userReference, GM
                                     PV_CopyLastSamplesToFirst((char *)pStream->pStreamData1, (char *)pStream->pStreamData2, &ssData);
 
                                     // ok, now fill second buffer
-                                    ssData.userReference = pStream->userReference;
+                                    ssData.userReference = (XPTR)pStream->userReference;
                                     ssData.streamReference = (STREAM_REFERENCE)pStream;
 
                                     // now, push second pointer out for oversampling, and get fewer bytes for this buffer
@@ -1614,7 +1614,7 @@ STREAM_REFERENCE GM_AudioStreamSetup(void *threadContext, long userReference, GM
                         }
                         if ( (theErr != NO_ERR) && (theErr != STREAM_STOP_PLAY) )
                         {   // we've got to dispose of the data now
-                            ssData.userReference = pStream->userReference;
+                            ssData.userReference = (XPTR)pStream->userReference;
                             ssData.streamReference = (STREAM_REFERENCE)pStream;
                             ssData.pData = pStream->pStreamBuffer;
                             ssData.dataLength = pStream->streamBufferLength;
@@ -1771,10 +1771,10 @@ OPErr GM_AudioStreamStart(STREAM_REFERENCE reference)
     return theErr;
 }
 
-long GM_AudioStreamGetReference(STREAM_REFERENCE reference)
+XSDWORD GM_AudioStreamGetReference(STREAM_REFERENCE reference)
 {
     GM_AudioStream      *pStream;
-    long                userReference;
+    XSDWORD                userReference;
 
     pStream = PV_AudioStreamGetFromReference(reference);
     if (pStream)
@@ -1833,7 +1833,7 @@ static OPErr PV_AudioStreamStopAndFreeNow(void *threadContext, STREAM_REFERENCE 
         {
             ssData = pStream->streamData;
 
-            ssData.userReference = pStream->userReference;
+            ssData.userReference = (XPTR)pStream->userReference;
             ssData.streamReference = (STREAM_REFERENCE)pStream;
             ssData.pData = pStream->pStreamBuffer;
             ssData.dataLength = pStream->streamBufferLength;
@@ -1870,7 +1870,7 @@ OPErr GM_AudioStreamStop(void *threadContext, STREAM_REFERENCE reference)
         // if audio data is already dead, then
         if (GM_IsSoundDone(pStream->playbackReference))
         {   // we've already flushed the audio data, so just free it now
-            PV_AudioStreamStopAndFreeNow(threadContext, (long)pStream);
+            PV_AudioStreamStopAndFreeNow(threadContext, (XSDWORD)pStream);
             pStream->streamMode = STREAM_MODE_DEAD;
         }
     }
@@ -2041,7 +2041,7 @@ OPErr GM_AudioStreamSetFileSamplePosition(STREAM_REFERENCE reference, XDWORD fra
                 }
                 pStream->streamPlaybackPosition = framePos;
                 ssData = pStream->streamData;
-                ssData.userReference = pStream->userReference;
+                ssData.userReference = (XPTR)pStream->userReference;
                 ssData.streamReference = (STREAM_REFERENCE)pStream;
                 ssData.framePosition = framePos;
                 err = (*pStream->streamCallback)(NULL, STREAM_SET_POSITION, &ssData);
@@ -2067,7 +2067,7 @@ OPErr GM_AudioStreamGetData(void *threadContext, STREAM_REFERENCE reference, XDW
             ssData = pStream->streamData;
             ssData.dataLength = bufferLength / ssData.channelSize / (ssData.dataBitSize / 8);
             ssData.pData = (char *)pBuffer;
-            ssData.userReference = pStream->userReference;
+            ssData.userReference = (XPTR)pStream->userReference;
             ssData.streamReference = (STREAM_REFERENCE)pStream;
             ssData.startSample = startFrame;
             ssData.endSample = stopFrame;
@@ -2546,7 +2546,7 @@ XBOOL GM_IsAudioStreamValid(STREAM_REFERENCE reference)
 void PV_ServeStreamFades(void)
 {
     GM_AudioStream  *pStream;
-    long            value;
+    XSDWORD            value;
 
     pStream = theStreams;
     while (pStream)
@@ -2613,7 +2613,7 @@ void GM_AudioStreamService(void *threadContext)
             {
                 ssData = pStream->streamData;
                 // do i need the rest of this ssData setup??
-                ssData.userReference = pStream->userReference;
+                ssData.userReference = (XPTR)pStream->userReference;
                 ssData.startSample = pStream->startEvent.framePosition;
                 
                 theErr = (*theProc)(threadContext, STREAM_START, &ssData);
@@ -2628,7 +2628,7 @@ void GM_AudioStreamService(void *threadContext)
             {
                 ssData = pStream->streamData;
                 // do i need the rest of this ssData setup??
-                ssData.userReference = pStream->userReference;
+                ssData.userReference = (XPTR)pStream->userReference;
                 ssData.startSample = pStream->stopEvent.framePosition;
                 if (pStream->startupStatus == STREAM_STOP_PLAY)
                 {
@@ -2685,7 +2685,7 @@ void GM_AudioStreamService(void *threadContext)
                         {
 
                             //fprintf(stderr, "GM_AudioStreamService::STREAM_MODE_FREE_STREAM %d\n", pStream);
-                            //fprintf(stderr, "pStream->samplesPlayed: %d, sample position: %d \n", pStream->samplesPlayed, GM_AudioStreamGetFileSamplePosition((long)pStream));
+                            //fprintf(stderr, "pStream->samplesPlayed: %d, sample position: %d \n", pStream->samplesPlayed, GM_AudioStreamGetFileSamplePosition((XSDWORD)pStream));
 
                             // figure out whether all the samples have been played out through the device
                             // before freeing the stream
@@ -2727,7 +2727,7 @@ void GM_AudioStreamService(void *threadContext)
 /*
                                 if (pStream->streamFlushed)
                                 {   // we've already flushed the audio data, so just free it now
-                                    PV_AudioStreamStopAndFreeNow(threadContext, (long)pStream);
+                                    PV_AudioStreamStopAndFreeNow(threadContext, (XSDWORD)pStream);
                                 }
                                 // otherwise we do nothing, because the audio callback will set the streamMode to STREAM_MODE_FREE_STREAM
                                 // when the samples are finished playing
@@ -2741,7 +2741,7 @@ void GM_AudioStreamService(void *threadContext)
                         #endif
                         ssData.dataLength = pStream->streamOrgLength1;
                         ssData.pData = pStream->pStreamData1;
-                        ssData.userReference = pStream->userReference;
+                        ssData.userReference = (XPTR)pStream->userReference;
                         ssData.streamReference = (STREAM_REFERENCE)pStream;
 
 // $$kk: 09.23.98: changed this ->
@@ -2781,7 +2781,7 @@ void GM_AudioStreamService(void *threadContext)
                             pStream->samplesWritten += pStream->streamLength1;
 
                             // ok, now fill second buffer
-                            ssData.userReference = pStream->userReference;
+                            ssData.userReference = (XPTR)pStream->userReference;
                             ssData.streamReference = (STREAM_REFERENCE)pStream;
 
                             // now, push second pointer out for oversampling, and get fewer bytes for this buffer
@@ -2831,7 +2831,7 @@ void GM_AudioStreamService(void *threadContext)
                         {
                             ssData.dataLength = pStream->streamOrgLength1 - MAX_SAMPLE_OVERSAMPLE;
                             ssData.pData = (char *)pStream->pStreamData1 + (PV_GetSampleSizeInBytes(&ssData) * MAX_SAMPLE_OVERSAMPLE);
-                            ssData.userReference = pStream->userReference;
+                            ssData.userReference = (XPTR)pStream->userReference;
                             ssData.streamReference = (STREAM_REFERENCE)pStream;
 
 // $$kk: 09.23.98: changed this ->
@@ -2889,7 +2889,7 @@ void GM_AudioStreamService(void *threadContext)
                         {
                             ssData.dataLength = pStream->streamOrgLength2 - MAX_SAMPLE_OVERSAMPLE;
                             ssData.pData = (char *)pStream->pStreamData2 + (PV_GetSampleSizeInBytes(&ssData) * MAX_SAMPLE_OVERSAMPLE);
-                            ssData.userReference = pStream->userReference;
+                            ssData.userReference = (XPTR)pStream->userReference;
                             ssData.streamReference = (STREAM_REFERENCE)pStream;
 // $$kk: 09.23.98: changed this ->
 //                          if ((*theProc)(threadContext, STREAM_GET_DATA, &ssData) != NO_ERR)

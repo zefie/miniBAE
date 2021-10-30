@@ -220,7 +220,7 @@ int BAE_DestroyFrameThread(void* threadContext)
     return -1;
 }
 // Make the frame thread sleep for the given number of milliseconds
-int BAE_SleepFrameThread(void* threadContext, long msec)
+int BAE_SleepFrameThread(void* threadContext, XSDWORD msec)
 {
     threadContext;
     Sleep(msec);

@@ -184,7 +184,7 @@ XBOOL InitNewReverb()
     // buffer which happen to perfectly fit into the old buffer ;-)
     //TODO: fix layed out shared verb memory
 #if 1
-    long kMaxBytes = sizeof(INT32) * kCombBufferFrameSize;
+    XSDWORD kMaxBytes = sizeof(INT32) * kCombBufferFrameSize;
     
     // allocate the comb filter delay line memory
     for(i = 0; i < kNumberOfCombFilters; i++)
@@ -535,7 +535,7 @@ void GenerateFeedbackValues()
     
     for(i = 0; i < kNumberOfCombFilters; i++)
     {
-        long frames = params->mDelayFrames[i];
+        XSDWORD frames = params->mDelayFrames[i];
         
         
         float D = (float)(params->mDelayFrames[i]) / 44100.0;
@@ -553,7 +553,7 @@ void GenerateFeedbackValues()
 
     for(i = 0; i < kNumberOfCombFilters; i++)
     {
-        long frames = (params->mDelayFrames[i] * Get44100_SRRatio() ) >> 16;
+        XSDWORD frames = (params->mDelayFrames[i] * Get44100_SRRatio() ) >> 16;
         INT32 fakeRatio = (frames << COMB_FILTER_SHIFT) / params->mRoomSize;
         int k;
         INT32 g, kOneHalf;
@@ -711,7 +711,7 @@ void SetupDiffusion()
     
     for(i = 0; i < kNumberOfDiffusionStages; i++)
     {
-        long delayFrames = (diffusionFrameList[i] * GetSR_44100Ratio() ) >> 16;
+        XSDWORD delayFrames = (diffusionFrameList[i] * GetSR_44100Ratio() ) >> 16;
         
         params->mDiffReadIndex[i] = kDiffusionBufferFrameSize - delayFrames;
         params->mDiffWriteIndex[i] = 0;
@@ -726,7 +726,7 @@ void SetupDiffusion()
 void SetupStereoizer()
 {
     NewReverbParams* params = GetNewReverbParams();
-    long delayFrames;
+    XSDWORD delayFrames;
     
     // generated lopass filter coeffs for different sample rates
     static INT32 lopassKList[] = {63467, 60227, 46883, 44824, 30573, 28693};

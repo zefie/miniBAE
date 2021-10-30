@@ -140,18 +140,18 @@ typedef struct
     short int                       mBalance;
     
     // size of audio buffers in bytes
-    long                            mAudioByteBufferSize;
+    XSDWORD                            mAudioByteBufferSize;
     
     char                            mDataReady;
     char                            mDonePlaying;
     char                            mShutdownDoubleBuffer;
     
     // number of samples per audio frame to generate
-    long                            mAudioFramesToGenerate;
+    XSDWORD                            mAudioFramesToGenerate;
     
     // How many audio frames to generate at one time
     unsigned int                    mSynthFramesPerBlock;
-    unsigned long                   mSamplesPlayed;
+    XDWORD                   mSamplesPlayed;
 
     AudioUnit                       mAudioUnit;
     AudioStreamBasicDescription     mFormat;
@@ -182,7 +182,7 @@ int BAE_Cleanup(void)
 
 // **** Memory management
 // allocate a block of locked, zeroed memory. Return a pointer
-void *BAE_Allocate(unsigned long size)
+void *BAE_Allocate(XDWORD size)
 {
     assert(size > 0);
     void* data = (void*)calloc(1, size);
@@ -196,14 +196,14 @@ void BAE_Deallocate(void *memoryBlock)
 }
 
 // return memory used
-unsigned long BAE_GetSizeOfMemoryUsed(void)
+XDWORD BAE_GetSizeOfMemoryUsed(void)
 {
 //  return g_memory_buoy;
    return(0);
 }
 
 // return max memory used
-unsigned long BAE_GetMaxSizeOfMemoryUsed(void)
+XDWORD BAE_GetMaxSizeOfMemoryUsed(void)
 {
 //  return g_memory_buoy_max;
    return(0);
@@ -215,7 +215,7 @@ unsigned long BAE_GetMaxSizeOfMemoryUsed(void)
 // causing a memory protection
 // fault.
 // return 0 for valid, or 1 for bad pointer, or 2 for not supported.
-int BAE_IsBadReadPointer(void *memoryBlock, unsigned long size)
+int BAE_IsBadReadPointer(void *memoryBlock, XDWORD size)
 {
    memoryBlock = memoryBlock;
    size        = size;
@@ -225,14 +225,14 @@ int BAE_IsBadReadPointer(void *memoryBlock, unsigned long size)
 
 // this will return the size of the memory pointer allocated with BAE_Allocate. Return
 // 0 if you don't support this feature
-unsigned long BAE_SizeOfPointer(void *memoryBlock)
+XDWORD BAE_SizeOfPointer(void *memoryBlock)
 {
     return malloc_size(memoryBlock);
 }
 
 // block move memory. This is basicly memmove, but its exposed to take advantage of
 // special block move speed ups, various hardware has available.
-void BAE_BlockMove(void *source, void *dest, unsigned long size)
+void BAE_BlockMove(void *source, void *dest, XDWORD size)
 {
     assert(dest != NULL && source != NULL);
     memmove(dest, source, size);
@@ -301,7 +301,7 @@ short int BAE_GetHardwareVolume(void)
 // theVolume is in the range of 0 to 256
 void BAE_SetHardwareVolume(short int newVolume)
 {
-   unsigned long volume;
+   XDWORD volume;
    short int     lbm, rbm;
 
    // pin volume
@@ -333,10 +333,10 @@ void BAE_SetHardwareVolume(short int newVolume)
 
 // **** Timing services
 // return microseconds
-unsigned long BAE_Microseconds(void)
+XDWORD BAE_Microseconds(void)
 {
    static int           firstTime = TRUE;
-   static unsigned long offset    = 0;
+   static XDWORD offset    = 0;
    struct timeval       tv;
 
    if (firstTime)
@@ -350,7 +350,7 @@ unsigned long BAE_Microseconds(void)
 }
 
 // wait or sleep this thread for this many microseconds
-void BAE_WaitMicroseconds(unsigned long usec)
+void BAE_WaitMicroseconds(XDWORD usec)
 {
    usleep(usec);
 }
@@ -425,7 +425,7 @@ void BAE_CopyFileNameNative(void *fileNameSource, void *fileNameDest)
     }
 }
 
-long BAE_FileCreate(void *fileName)
+XSDWORD BAE_FileCreate(void *fileName)
 {
     int file;
     
@@ -437,7 +437,7 @@ long BAE_FileCreate(void *fileName)
     return((file != -1) ? 0 : -1);  
 }
 
-long BAE_FileDelete(void *fileName)
+XSDWORD BAE_FileDelete(void *fileName)
 {
     if (fileName)
     {
@@ -452,7 +452,7 @@ long BAE_FileDelete(void *fileName)
 
 // Open a file
 // Return -1 if error, otherwise file handle
-long BAE_FileOpenForRead(void *fileName)
+XSDWORD BAE_FileOpenForRead(void *fileName)
 {
     CFURLRef dataURL;
     CFStringRef cfResourceName;
@@ -473,13 +473,13 @@ long BAE_FileOpenForRead(void *fileName)
 
         if ((ok == TRUE) && (fullPath[0]))
         {
-            return (long)open(fullPath, O_RDONLY);
+            return (XSDWORD)open(fullPath, O_RDONLY);
         }
     }
     return -1;
 }
 
-long BAE_FileOpenForWrite(void *fileName)
+XSDWORD BAE_FileOpenForWrite(void *fileName)
 {
     if (fileName)
     {
@@ -488,7 +488,7 @@ long BAE_FileOpenForWrite(void *fileName)
     return(-1);
 }
 
-long BAE_FileOpenForReadWrite(void *fileName)
+XSDWORD BAE_FileOpenForReadWrite(void *fileName)
 {
     if (fileName)
     {
@@ -498,14 +498,14 @@ long BAE_FileOpenForReadWrite(void *fileName)
 }
 
 // Close a file
-void BAE_FileClose(long fileReference)
+void BAE_FileClose(XSDWORD fileReference)
 {
     close(fileReference);
 }
 
 // Read a block of memory from a file.
 // Return -1 if error, otherwise length of data read.
-long BAE_ReadFile(long fileReference, void *pBuffer, long bufferLength)
+XSDWORD BAE_ReadFile(XSDWORD fileReference, void *pBuffer, XSDWORD bufferLength)
 {
     if ((pBuffer) && (bufferLength))
     {
@@ -516,7 +516,7 @@ long BAE_ReadFile(long fileReference, void *pBuffer, long bufferLength)
 
 // Write a block of memory from a file
 // Return -1 if error, otherwise length of data written.
-long BAE_WriteFile(long fileReference, void *pBuffer, long bufferLength)
+XSDWORD BAE_WriteFile(XSDWORD fileReference, void *pBuffer, XSDWORD bufferLength)
 {
     if ((pBuffer) && (bufferLength))
     {
@@ -527,21 +527,21 @@ long BAE_WriteFile(long fileReference, void *pBuffer, long bufferLength)
 
 // set file position in absolute file byte position
 // Return -1 if error, otherwise 0.
-long BAE_SetFilePosition(long fileReference, unsigned long filePosition)
+XSDWORD BAE_SetFilePosition(XSDWORD fileReference, XDWORD filePosition)
 {
     return((lseek(fileReference, filePosition, SEEK_SET) == -1) ? -1 : 0);
 }
 
 // get file position in absolute file bytes
-unsigned long BAE_GetFilePosition(long fileReference)
+XDWORD BAE_GetFilePosition(XSDWORD fileReference)
 {
     return(lseek(fileReference, 0, SEEK_CUR));
 }
 
 // get length of file
-unsigned long BAE_GetFileLength(long fileReference)
+XDWORD BAE_GetFileLength(XSDWORD fileReference)
 {
-    unsigned long pos;
+    XDWORD pos;
 
     pos = lseek(fileReference, 0, SEEK_END);
     lseek(fileReference, 0, SEEK_SET);
@@ -549,7 +549,7 @@ unsigned long BAE_GetFileLength(long fileReference)
 }
 
 // set the length of a file. Return 0, if ok, or -1 for error
-int BAE_SetFileLength(long fileReference, unsigned long newSize)
+int BAE_SetFileLength(XSDWORD fileReference, XDWORD newSize)
 {
     return -1;
 }
@@ -557,11 +557,11 @@ int BAE_SetFileLength(long fileReference, unsigned long newSize)
 // This function is called at render time with w route bus flag. If there's
 // no change, return currentRoute, other wise return one of audiosys.h route values.
 // This will change an active rendered's voice placement.
-void BAE_ProcessRouteBus(int currentRoute, long *pChannels, int count)
+void BAE_ProcessRouteBus(int currentRoute, XSDWORD *pChannels, int count)
 {
 }
 
-static void PV_ClearOutputBuffer(void *pBuffer, short int channels, short int bits, unsigned long frames)
+static void PV_ClearOutputBuffer(void *pBuffer, short int channels, short int bits, XDWORD frames)
 {
     short int count;
     char      *dest8;
@@ -617,7 +617,7 @@ int BAE_GetAudioBufferCount(void)
 }
 
 // Return the number of bytes used for audio buffer for output to card
-long BAE_GetAudioByteBufferSize(void)
+XSDWORD BAE_GetAudioByteBufferSize(void)
 {
    return(sHardwareChannel->mAudioByteBufferSize);
 }
@@ -683,10 +683,10 @@ const int kInputBus = 1;
 // **** Audio card support
 // Aquire and enabled audio card
 // return 0 if ok, -1 if failed
-int BAE_AquireAudioCard(void *threadContext, unsigned long sampleRate, unsigned long channels, unsigned long bits)
+int BAE_AquireAudioCard(void *threadContext, XDWORD sampleRate, XDWORD channels, XDWORD bits)
 {
     int           flag;
-    long          bufferSize;
+    XSDWORD          bufferSize;
     OSStatus      err = noErr;
 
     sHardwareChannel = BAE_Allocate(sizeof(AudioControlData));
@@ -837,7 +837,7 @@ int BAE_ReleaseAudioCard(void *threadContext)
 }
 
 // return device position in samples
-unsigned long BAE_GetDeviceSamplesPlayedPosition(void)
+XDWORD BAE_GetDeviceSamplesPlayedPosition(void)
 {
    return(sHardwareChannel->mSamplesPlayed);
 }
@@ -846,7 +846,7 @@ unsigned long BAE_GetDeviceSamplesPlayedPosition(void)
 // number of devices. ie different versions of the BAE connection. DirectSound and waveOut
 // return number of devices. ie 1 is one device, 2 is two devices.
 // NOTE: This function needs to function before any other calls may have happened.
-long BAE_MaxDevices(void)
+XSDWORD BAE_MaxDevices(void)
 {
    return(1);
 }
@@ -855,7 +855,7 @@ long BAE_MaxDevices(void)
 // NOTE:    This function needs to function before any other calls may have happened.
 //          Also you will need to call BAE_ReleaseAudioCard then BAE_AquireAudioCard
 //          in order for the change to take place.
-void BAE_SetDeviceID(long deviceID, void *deviceParameter)
+void BAE_SetDeviceID(XSDWORD deviceID, void *deviceParameter)
 {
    deviceID;
    deviceParameter;
@@ -863,7 +863,7 @@ void BAE_SetDeviceID(long deviceID, void *deviceParameter)
 
 // return current device ID
 // NOTE: This function needs to function before any other calls may have happened.
-long BAE_GetDeviceID(void *deviceParameter)
+XSDWORD BAE_GetDeviceID(void *deviceParameter)
 {
    deviceParameter;
    return(0);
@@ -878,13 +878,13 @@ long BAE_GetDeviceID(void *deviceParameter)
 //          "WinOS,waveOut,multi threaded"
 //          "WinOS,VxD,low level hardware"
 //          "WinOS,plugin,Director"
-void BAE_GetDeviceName(long deviceID, char *cName, unsigned long cNameLength)
+void BAE_GetDeviceName(XSDWORD deviceID, char *cName, XDWORD cNameLength)
 {
    static char id[] =
    {
       "MacOS,Cocoa,AudioQueue"
    };
-   unsigned long length;
+   XDWORD length;
 
    if ((cName) && (cNameLength))
    {

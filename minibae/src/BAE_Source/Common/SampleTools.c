@@ -579,9 +579,9 @@ UINT32          const decodingBytes = decodingFrames * bytesPerFrame;
     case C_MACE3 :
     case C_MACE6 :
     {
-    void        (*maceFunction)(void *inBuffer, void *outBuffer, unsigned long cnt, 
+    void        (*maceFunction)(void *inBuffer, void *outBuffer, XDWORD cnt, 
                                 void * inState, void * outState, 
-                                unsigned long numChannels, unsigned long whichChannel);
+                                XDWORD numChannels, XDWORD whichChannel);
     XDWORD      maceFrames;
     
         maceFunction = (src->compressionType == C_MACE3) ? XExpandMace1to3
@@ -830,7 +830,7 @@ XERR XGetSampleInfoFromSnd(XPTR pResource, SampleDataInfo *pOutInfo)
             }
 
             // verify loop points
-            if (((long)pOutInfo->loopStart < 0) ||
+            if (((XSDWORD)pOutInfo->loopStart < 0) ||
                 (pOutInfo->loopStart > pOutInfo->loopEnd) ||
                 (pOutInfo->loopEnd > pOutInfo->frames))
             {
@@ -1104,7 +1104,7 @@ XBYTE               order = X_WORD_ORDER;
         sampleData = info->pMasterPtr;
     }
     
-    if (((long)info->loopStart < 0) ||
+    if (((XSDWORD)info->loopStart < 0) ||
         (info->loopStart > info->loopEnd) ||
         (info->loopEnd > info->frames))
     {
@@ -1127,7 +1127,7 @@ XDWORD              samplePtrOffset;
 XWORD                   encode;
 #if X_PLATFORM == X_MACINTOSH
 XPTR                        rightData;
-long                        count;
+XSDWORD                        count;
 char                        *pLeft, *pRight;
 #endif
 
@@ -1477,7 +1477,7 @@ char                        *pLeft, *pRight;
         break;
     }
 
-    if (((long)info->loopStart < 0) ||
+    if (((XSDWORD)info->loopStart < 0) ||
         (info->loopStart > info->loopEnd) ||
         (info->loopEnd > info->frames))
     {
@@ -1524,7 +1524,7 @@ XBOOL XGetSampleNameFromID(XLongResourceID sampleSoundID, char *cName)
 XWORD * XConvert8BitTo16Bit(XBYTE * p8BitPCMData, XDWORD frames, XDWORD channels)
 {
     XWORD           *newData;
-    unsigned long   count, ccount;
+    XDWORD   count, ccount;
     short int       sample;
 
     ccount = frames * channels;
@@ -1549,7 +1549,7 @@ XWORD * XConvert8BitTo16Bit(XBYTE * p8BitPCMData, XDWORD frames, XDWORD channels
 XBYTE * XConvert16BitTo8Bit(XWORD * p16BitPCMData, XDWORD frames, XDWORD channels)
 {
     XBYTE           *newData = NULL;
-    unsigned long   count, ccount;
+    XDWORD   count, ccount;
     XBYTE           sample;
 
     if (p16BitPCMData)
@@ -1876,7 +1876,7 @@ XSoundFormat1*      header;
                  (data[1] == 0x44) &&
                  (data[2] == 0x33))
             {
-                unsigned long tagSize;
+                XDWORD tagSize;
                 // inital tag ok. Now try to get size.
                 
                 // The ID3v2 tag size is encoded with four bytes where the most significant bit (bit 7) 
@@ -1983,7 +1983,7 @@ static AudioResource *XCreateAudioObjectFromData(XPTR pPCMData, SampleDataInfo *
             XPutShort(&pNewSampleObject->baseMidiKey, pSampleInfo->baseKey);
             XPutShort(&pNewSampleObject->bitSize, pSampleInfo->channels);
             XPutShort(&pNewSampleObject->channels, pSampleInfo->bitSize);
-            XBlockMove(pPCMData, (char *)(&pNewSampleObject->firstSampleFiller) + sizeof(long),
+            XBlockMove(pPCMData, (char *)(&pNewSampleObject->firstSampleFiller) + sizeof(XSDWORD),
                                         pSampleInfo->size);
         }
     }
@@ -1997,7 +1997,7 @@ static AudioResource *XCreateAudioObjectFromData(XPTR pPCMData, SampleDataInfo *
 static XPTR XGetAudioObjectFromMemory(AudioResource *pAudioObject, SampleDataInfo *pInfo)
 {
     XPTR                pSampleData;
-    unsigned long       size;
+    XDWORD       size;
 
     pSampleData = NULL;
     pInfo->size = 0;        // if left alone, then wrong type of resource
@@ -2027,7 +2027,7 @@ static XPTR XGetAudioObjectFromMemory(AudioResource *pAudioObject, SampleDataInf
                         pInfo->baseKey = XGetShort(&pAudioObject->baseMidiKey);
                         pInfo->bitSize = XGetShort(&pAudioObject->bitSize);
                         pInfo->channels = XGetShort(&pAudioObject->channels);
-                        pSampleData = XGetSamplePtrFromSnd((XPTR)((char *)(&pAudioObject->firstSampleFiller) + sizeof(long)), pInfo);
+                        pSampleData = XGetSamplePtrFromSnd((XPTR)((char *)(&pAudioObject->firstSampleFiller) + sizeof(XSDWORD)), pInfo);
                     }
                     break;
             }

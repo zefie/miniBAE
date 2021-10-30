@@ -437,7 +437,7 @@ INT32 GM_GetMasterVolume(void)
 
 // Return the number of microseconds of real time that will be generated when calling
 // BAE_BuildMixerSlice.
-unsigned long BAE_GetSliceTimeInMicroseconds(void)
+XDWORD BAE_GetSliceTimeInMicroseconds(void)
 {
     return MusicGlobals->bufferTime;
 }
@@ -573,7 +573,7 @@ OPErr GM_InitGeneralSound(void *threadContext, Rate theRate, TerpMode theTerp, A
     if (theErr == NO_ERR)
     {
 // Allocate MusicGlobals
-        MusicGlobals = (GM_Mixer *)XNewPtr( (long)sizeof(GM_Mixer) );
+        MusicGlobals = (GM_Mixer *)XNewPtr( (XSDWORD)sizeof(GM_Mixer) );
         pMixer = MusicGlobals;
         if (pMixer)
         {
@@ -1007,15 +1007,15 @@ static void PV_RemapMidiPan(INT32 stereoPosition, UINT32 *pLeft, UINT32 *pRight)
 void PV_CalculateMonoVolume(GM_Voice *pVoice, INT32 *pVolume)
 {
     UINT32  noteVolume;
-    long    channels[2];
+    XSDWORD    channels[2];
 
     // scale new volume based up channel volume, song volume, and current note volume
 //  noteVolume = PV_ScaleVolumeFromChannelAndSong(pVoice->pSong, pVoice->NoteChannel, pVoice->NoteVolume);
     noteVolume = pVoice->NoteVolume;
     noteVolume = (noteVolume * (UINT32)pVoice->NoteVolumeEnvelope) >> VOLUME_PRECISION_SCALAR;
 
-    channels[0] = (long)noteVolume;
-    channels[1] = (long)noteVolume;
+    channels[0] = (XSDWORD)noteVolume;
+    channels[1] = (XSDWORD)noteVolume;
 
     // with the voice route bus, modify the left and right channel volume
     BAE_ProcessRouteBus(pVoice->routeBus, channels, 2);
@@ -1029,7 +1029,7 @@ void PV_CalculateStereoVolume(GM_Voice *pVoice, INT32 *pLeft, INT32 *pRight)
     INT32   stereoPosition;
     UINT32  left, right;
     UINT32  noteVolume;
-    long    channels[2];
+    XSDWORD    channels[2];
 
     stereoPosition = pVoice->stereoPosition + pVoice->stereoPanBend;
 
@@ -1096,8 +1096,8 @@ void PV_CalculateStereoVolume(GM_Voice *pVoice, INT32 *pLeft, INT32 *pRight)
         right = 0;
     }
     
-    channels[0] = (long)left;
-    channels[1] = (long)right;
+    channels[0] = (XSDWORD)left;
+    channels[1] = (XSDWORD)right;
 
     // with the voice route bus, modify the left and right channel volume
     BAE_ProcessRouteBus(pVoice->routeBus, channels, 2);
@@ -1250,7 +1250,7 @@ INT16 SetChannelPitchBend(GM_Song *pSong, INT16 the_channel, UBYTE bendRange, UB
 {
     register LOOPCOUNT      count;
     register GM_Mixer       *pMixer;
-    register long           bendAmount, the_pitch_bend;
+    register XSDWORD           bendAmount, the_pitch_bend;
     register GM_Voice       *pNote;
 
     pMixer = MusicGlobals;
@@ -1338,12 +1338,12 @@ GM_AudioOutputCallbackPtr GM_GetAudioOutput(void)
 #ifdef BAE_COMPLETE
 XBOOL GM_StartHardwareSoundManager(void *threadContext)
 {
-    long    sampleRate;
+    XSDWORD    sampleRate;
     int     ok;
 
     if (MusicGlobals)
     {
-        sampleRate = (long)GM_ConvertFromOutputRateToRate(MusicGlobals->outputRate);
+        sampleRate = (XSDWORD)GM_ConvertFromOutputRateToRate(MusicGlobals->outputRate);
 
         ok = BAE_AquireAudioCard(threadContext, sampleRate,
                                     (MusicGlobals->generateStereoOutput) ? 2 : 1,

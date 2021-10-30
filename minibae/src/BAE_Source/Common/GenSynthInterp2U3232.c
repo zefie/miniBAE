@@ -494,12 +494,12 @@ void PV_ServeU3232FullBuffer16 (GM_Voice *this_voice)
     }
 #endif
     amplitude = this_voice->lastAmplitudeL;
-    //BAE_PRINTF("f0, amp = %ld n = %ld nve = %ld\n", (long)amplitude, (long)this_voice->NoteVolume,
-    //                                              (long)this_voice->NoteVolumeEnvelope);
+    //BAE_PRINTF("f0, amp = %ld n = %ld nve = %ld\n", (XSDWORD)amplitude, (XSDWORD)this_voice->NoteVolume,
+    //                                              (XSDWORD)this_voice->NoteVolumeEnvelope);
     amplitudeAdjust = (this_voice->NoteVolume * this_voice->NoteVolumeEnvelope) >> VOLUME_PRECISION_SCALAR;
     amplitudeAdjust = (amplitudeAdjust - amplitude) / MusicGlobals->Four_Loop >> 4;
     amplitude = amplitude >> 4;
-    //BAE_PRINTF("f1, amp = %ld aa = %ld\n", (long)amplitude, (long)amplitudeAdjust);
+    //BAE_PRINTF("f1, amp = %ld aa = %ld\n", (XSDWORD)amplitude, (XSDWORD)amplitudeAdjust);
 
     dest = &MusicGlobals->songBufferDry[0];
     source = (short *) this_voice->NotePtr;
@@ -583,7 +583,7 @@ void PV_ServeU3232PartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
     amplitudeAdjust = (this_voice->NoteVolume * this_voice->NoteVolumeEnvelope) >> VOLUME_PRECISION_SCALAR;
     amplitudeAdjust = (amplitudeAdjust - amplitude) / MusicGlobals->Four_Loop >> 4;
     amplitude = amplitude >> 4;
-    //BAE_PRINTF("p,amp = %ld\n", (long)amplitude);
+    //BAE_PRINTF("p,amp = %ld\n", (XSDWORD)amplitude);
     dest = &MusicGlobals->songBufferDry[0];
     cur_wave_i = this_voice->samplePosition.i;
     cur_wave_f = this_voice->samplePosition.f;

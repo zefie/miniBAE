@@ -90,6 +90,8 @@
 #ifndef BAE_AUDIO
 #define BAE_AUDIO
 
+#include <X_API.h>
+
 #ifdef __cplusplus
     extern "C" {
 #endif
@@ -133,7 +135,7 @@ typedef enum
 #define BAE_USE_STEREO          (1<<1L)     // use stereo output
 #define BAE_DISABLE_REVERB      (1<<2L)     // disable reverb
 #define BAE_STEREO_FILTER       (1<<3L)     // if stereo is enabled, use a stereo filter
-typedef long BAEAudioModifiers;
+typedef XSDWORD BAEAudioModifiers;
 
 typedef enum  
 {
@@ -283,18 +285,18 @@ typedef enum
 // All volume levels are a 16.16 fixed value. 1.0 is 0x10000. Use can use this macro
 // to convert a floating point number to a fixed value, and visa versa
 
-typedef long                                BAE_FIXED;              // fixed point value can be signed
-typedef unsigned long                       BAE_UNSIGNED_FIXED;     // fixed point value unsigned 
+typedef XSDWORD                                BAE_FIXED;              // fixed point value can be signed
+typedef XDWORD                       BAE_UNSIGNED_FIXED;     // fixed point value unsigned 
 
 #define BAE_FIXED_1                         0x10000L
-#define FLOAT_TO_FIXED(x)                   ((BAE_FIXED)((double)(x) * 65536.0))    // the extra long is for signed values
-#define FIXED_TO_FLOAT(x)                   ((double)(x) / 65536.0)
+#define FLOAT_TO_FIXED(x)                   ((BAE_FIXED)((float)(x) * 65536.0))    // the extra long is for signed values
+#define FIXED_TO_FLOAT(x)                   ((float)(x) / 65536.0)
 #define LONG_TO_FIXED(x)                    ((BAE_FIXED)(x) * BAE_FIXED_1)
 #define FIXED_TO_LONG(x)                    ((x) / BAE_FIXED_1)
 #define FIXED_TO_SHORT(x)                   ((short)((x) / BAE_FIXED_1))
 
-#define FLOAT_TO_UNSIGNED_FIXED(x)          ((BAE_UNSIGNED_FIXED)((double)(x) * 65536.0))   // the extra long is for signed values
-#define UNSIGNED_FIXED_TO_FLOAT(x)          ((double)(x) / 65536.0)
+#define FLOAT_TO_UNSIGNED_FIXED(x)          ((BAE_UNSIGNED_FIXED)((float)(x) * 65536.0))   // the extra long is for signed values
+#define UNSIGNED_FIXED_TO_FLOAT(x)          ((float)(x) / 65536.0)
 #define LONG_TO_UNSIGNED_FIXED(x)           ((BAE_UNSIGNED_FIXED)(x) * BAE_FIXED_1)
 #define UNSIGNED_FIXED_TO_LONG(x)           ((x) / BAE_FIXED_1)
 #define UNSIGNED_FIXED_TO_SHORT(x)          ((unsigned short)((x) / BAE_FIXED_1))
@@ -309,8 +311,8 @@ typedef unsigned long                       BAE_UNSIGNED_FIXED;     // fixed poi
 
 
 typedef char            BAE_BOOL;
-typedef unsigned long   BAE_INSTRUMENT;         // reference to an instrument
-typedef long            BAE_EVENT_REFERENCE;    // reference to an idle time event
+typedef XDWORD   BAE_INSTRUMENT;         // reference to an instrument
+typedef XSDWORD            BAE_EVENT_REFERENCE;    // reference to an idle time event
 
 #ifndef TRUE
     #define TRUE    1
@@ -379,12 +381,12 @@ struct BAEAudioInfo
     short int       voicesActive;                       // number of voices active
     short int       voice[BAE_MAX_VOICES];              // voice index
     BAEVoiceType    voiceType[BAE_MAX_VOICES];          // voice type
-    long            instrument[BAE_MAX_VOICES];         // current instruments
+    XSDWORD            instrument[BAE_MAX_VOICES];         // current instruments
     short int       midiVolume[BAE_MAX_VOICES];         // current volumes
     short int       scaledVolume[BAE_MAX_VOICES];       // current scaled volumes
     short int       channel[BAE_MAX_VOICES];            // current channel
     short int       midiNote[BAE_MAX_VOICES];           // current midi note
-    long            userReference[BAE_MAX_VOICES];      // userReference associated with voice
+    XSDWORD            userReference[BAE_MAX_VOICES];      // userReference associated with voice
 };
 typedef struct BAEAudioInfo BAEAudioInfo;
 
@@ -395,10 +397,10 @@ struct BAESampleInfo
     unsigned short      bitSize;            // number of bits per sample
     unsigned short      channels;           // number of channels (1 or 2)
     unsigned short      baseMidiPitch;      // base Midi pitch of recorded sample ie. 60 is middle 'C'
-    unsigned long       waveSize;           // total waveform size in bytes
-    unsigned long       waveFrames;         // number of frames
-    unsigned long       startLoop;          // start loop point offset
-    unsigned long       endLoop;            // end loop point offset
+    XDWORD       waveSize;           // total waveform size in bytes
+    XDWORD       waveFrames;         // number of frames
+    XDWORD       startLoop;          // start loop point offset
+    XDWORD       endLoop;            // end loop point offset
     BAE_UNSIGNED_FIXED  sampledRate;        // fixed 16.16 value for recording
 };
 typedef struct BAESampleInfo BAESampleInfo;
@@ -559,7 +561,7 @@ BAEResult           BAEMixer_GetAudioTask(BAEMixer mixer, BAE_AudioTaskCallbackP
 // --------------------------------------
 // Calculates amount of memory used by this mixer in bytes. 
 //
-BAEResult           BAEMixer_GetMemoryUsed(BAEMixer mixer, unsigned long *pOutResult);
+BAEResult           BAEMixer_GetMemoryUsed(BAEMixer mixer, XDWORD *pOutResult);
 
 // BAEMixer_GetMixerVersion()
 // ------------------------------------
@@ -585,7 +587,7 @@ BAEResult           BAEMixer_GetFadeRate(BAEMixer mixer, BAE_UNSIGNED_FIXED *out
 // 0.
 //
 BAEResult           BAEMixer_GetMaxDeviceCount(BAEMixer mixer,
-                            long *outMaxDeviceCount);
+                            XSDWORD *outMaxDeviceCount);
 
 
 // BAEMixer_SetCurrentDevice()
@@ -596,7 +598,7 @@ BAEResult           BAEMixer_GetMaxDeviceCount(BAEMixer mixer,
 // no effect.
 //
 BAEResult           BAEMixer_SetCurrentDevice(BAEMixer mixer, 
-                            long deviceID,
+                            XSDWORD deviceID,
                             void *deviceParameter);
 
 
@@ -609,7 +611,7 @@ BAEResult           BAEMixer_SetCurrentDevice(BAEMixer mixer,
 //
 BAEResult           BAEMixer_GetCurrentDevice(BAEMixer mixer, 
                             void *deviceParameter, 
-                            long *outDeviceID);
+                            XSDWORD *outDeviceID);
 
 
 // BAEMixer_GetDeviceName()
@@ -621,9 +623,9 @@ BAEResult           BAEMixer_GetCurrentDevice(BAEMixer mixer,
 // devices, this call has no effect.
 //
 BAEResult           BAEMixer_GetDeviceName(BAEMixer mixer, 
-                            long deviceID, 
+                            XSDWORD deviceID, 
                             char *cName, 
-                            unsigned long cNameLength);
+                            XDWORD cNameLength);
 
         
 // BAEMixer_SetDefaultReverb()
@@ -796,7 +798,7 @@ BAEResult           BAEMixer_AddBankFromFile(BAEMixer mixer,
 // ------------------------------------
 BAEResult           BAEMixer_AddBankFromMemory(BAEMixer mixer,
                             void * pAudioFile,
-                            unsigned long fileSize,
+                            XDWORD fileSize,
                             BAEBankToken *outToken);
 
 
@@ -860,7 +862,7 @@ BAEResult           BAEMixer_GetBankVersion(BAEMixer mixer,
 //           BAE_NOT_SETUP -- The indicated mixer has not not been initialized
 // ------------------------------------
 BAEResult           BAEMixer_GetGroovoidNameFromBank(BAEMixer mixer,
-                            long index,
+                            XSDWORD index,
                             char *cSongName);
 
 
@@ -965,7 +967,7 @@ BAEResult           BAEMixer_GetMixLevel(BAEMixer mixer,
 // time, expressed in microseconds elapsed since initialization.
 //
 BAEResult           BAEMixer_GetTick(BAEMixer mixer,
-                            unsigned long *outTick);
+                            XDWORD *outTick);
 
 
 // BAEMixer_SetAudioLatency()
@@ -978,7 +980,7 @@ BAEResult           BAEMixer_GetTick(BAEMixer mixer,
 //           BAE_NOT_SETUP -- Function not available on this platform.
 // ------------------------------------
 BAEResult           BAEMixer_SetAudioLatency(BAEMixer mixer,
-                            unsigned long requestedLatency);
+                            XDWORD requestedLatency);
 
 
 // BAEMixer_GetAudioLatency()
@@ -988,7 +990,7 @@ BAEResult           BAEMixer_SetAudioLatency(BAEMixer mixer,
 // second).
 //
 BAEResult           BAEMixer_GetAudioLatency(BAEMixer mixer,
-                            unsigned long *outLatency);
+                            XDWORD *outLatency);
 
 
 BAEResult BAEMixer_SetRouteBus(BAEMixer mixer, int routeBus);
@@ -1074,22 +1076,22 @@ BAEResult           BAEMixer_GetRealtimeStatus(BAEMixer mixer,
 
 // BAEMixer_GetCPULoadInMicroseconds()
 // ------------------------------------
-// Upon return, parameter outLoad will point to an unsigned long containing an
+// Upon return, parameter outLoad will point to an XDWORD containing an
 // estimate of the number of microseconds the indicated BAEMixer is taking to
 // generate each audio output buffer.
 //
 BAEResult           BAEMixer_GetCPULoadInMicroseconds(BAEMixer mixer,
-                            unsigned long *outLoad);
+                            XDWORD *outLoad);
 
 
 // BAEMixer_GetCPULoadInPercent()
 // ------------------------------------
-// Upon return, parameter outLoad will point to an unsigned long containing an
+// Upon return, parameter outLoad will point to an XDWORD containing an
 // integer in the range 0-100 reporting what percentage of the available
 // procerssor time the indicated BAEMixer is using.
 //
 BAEResult           BAEMixer_GetCPULoadInPercent(BAEMixer mixer,
-                            unsigned long *outLoad);
+                            XDWORD *outLoad);
 
 
 
@@ -1112,7 +1114,7 @@ BAEResult           BAEMixer_ServiceAudioOutputToFile(BAEMixer mixer);
 // BAEStream:  Sound effects, linear audio files, streamed
 // -----------------------------------------------------------------------------------------
 // -----------------------------------------------------------------------------------------
-typedef void        (*BAE_AudioStreamCallbackPtr)(BAEStream stream, unsigned long reference);
+typedef void        (*BAE_AudioStreamCallbackPtr)(BAEStream stream, XDWORD reference);
 
 BAEStream           BAEStream_New(BAEMixer mixer);
 
@@ -1131,7 +1133,7 @@ BAEResult           BAEMixer_ServiceStreams(BAEMixer theMixer);
 // --------------------------------------
 // Returns total number of bytes used by this object.
 //
-BAEResult           BAEStream_GetMemoryUsed(BAEStream stream, unsigned long *pOutResult);
+BAEResult           BAEStream_GetMemoryUsed(BAEStream stream, XDWORD *pOutResult);
 
 // BAEStream_SetMixer()
 // BAEResult BAEStream_SetMixer(BAEStream stream, BAEMixer mixer);
@@ -1190,10 +1192,10 @@ BAEResult           BAEStream_GetInfo(BAEStream stream,
 // prepare to play a formatted file as a stream.
 BAEResult           BAEStream_SetupFile(BAEStream stream, BAEPathName cFileName, 
                             BAEFileType fileType,
-                            unsigned long bufferSize,       // temp buffer to read file
+                            XDWORD bufferSize,       // temp buffer to read file
                             BAE_BOOL loopFile);             // TRUE will loop file
 
-BAEResult           BAEStream_SetCallback(BAEStream stream, BAE_AudioStreamCallbackPtr callback, unsigned long reference);
+BAEResult           BAEStream_SetCallback(BAEStream stream, BAE_AudioStreamCallbackPtr callback, XDWORD reference);
 
 // BAEStream_Preroll()
 // --------------------------------------
@@ -1384,7 +1386,7 @@ BAEResult           BAESound_Delete(BAESound sound);
 // --------------------------------------
 // Returns total number of bytes used by this object.
 //
-BAEResult           BAESound_GetMemoryUsed(BAESound sound, unsigned long *pOutResult);
+BAEResult           BAESound_GetMemoryUsed(BAESound sound, XDWORD *pOutResult);
 
 // BAESound_SetMixer()
 // BAEResult BAESound_SetMixer(BAESound sound, BAEMixer mixer);
@@ -1428,8 +1430,8 @@ BAEResult           BAESound_SetCallback(BAESound sound, BAE_SoundCallbackPtr pC
 BAEResult           BAESound_GetCallback(BAESound sound, BAE_SoundCallbackPtr *pResult);
 
 
-BAEResult           BAESound_SetSoundFrame(BAESound sound, unsigned long startFrameOffset,
-                                            void *sourceSamples, unsigned long sourceFrames);
+BAEResult           BAESound_SetSoundFrame(BAESound sound, XDWORD startFrameOffset,
+                                            void *sourceSamples, XDWORD sourceFrames);
 
 
 // BAESound_LoadMemorySample()
@@ -1456,7 +1458,7 @@ BAEResult           BAESound_SetSoundFrame(BAESound sound, unsigned long startFr
 // ------------------------------------
 BAEResult           BAESound_LoadMemorySample(BAESound sound,
                             void *pMemoryFile,
-                            unsigned long memoryFileSize,
+                            XDWORD memoryFileSize,
                             BAEFileType fileType);
 
 
@@ -1485,12 +1487,12 @@ BAEResult           BAESound_LoadFileSample(BAESound sound,
 //
 //
 BAEResult BAESound_LoadEmptySample(BAESound sound,
-                            unsigned long frames,           // number of frames of audio
+                            XDWORD frames,           // number of frames of audio
                             unsigned short int bitSize,     // bits per sample 8 or 16
                             unsigned short int channels,    // mono or stereo 1 or 2
                             BAE_UNSIGNED_FIXED rate,        // 16.16 fixed sample rate
-                            unsigned long loopStart,        // loop start in frames
-                            unsigned long loopEnd);         // loop end in frames
+                            XDWORD loopStart,        // loop start in frames
+                            XDWORD loopEnd);         // loop end in frames
 
 // BAESound_LoadCustomSample()
 // --------------------------------------
@@ -1513,12 +1515,12 @@ BAEResult BAESound_LoadEmptySample(BAESound sound,
 // ------------------------------------
 BAEResult           BAESound_LoadCustomSample(BAESound sound,
                             void * sampleData,
-                            unsigned long frames,
+                            XDWORD frames,
                             unsigned short int bitSize,
                             unsigned short int channels,
                             BAE_UNSIGNED_FIXED rate,
-                            unsigned long loopStart,
-                            unsigned long loopEnd);
+                            XDWORD loopStart,
+                            XDWORD loopEnd);
 
 
 // BAESound_Unload()
@@ -1547,7 +1549,7 @@ BAEResult           BAESound_GetInfo(BAESound sound,
 // Allocate some memory and pass that point into BAESound_GetRawPCMData() to
 // get the currently loaded PCM data
 BAEResult           BAESound_GetRawPCMData(BAESound sound, char *outDataPointer, 
-                                                            unsigned long outDataSize);
+                                                            XDWORD outDataSize);
 
 
 BAEResult           BAESound_SetAutoBuzzFlash(BAESound sound, BAE_BOOL buzzOn, BAE_BOOL flashOn);
@@ -1565,7 +1567,7 @@ BAEResult           BAESound_SetAutoBuzzFlash(BAESound sound, BAE_BOOL buzzOn, B
 BAEResult           BAESound_Start(BAESound sound,
                             short int priority,
                             BAE_UNSIGNED_FIXED sampleVolume,    // sample volume
-                            unsigned long startOffsetFrame);    // starting offset in frames
+                            XDWORD startOffsetFrame);    // starting offset in frames
 
 
 // BAESound_Stop()
@@ -1716,13 +1718,13 @@ BAEResult           BAESound_GetFrequencyAmountFilter(BAESound sound,
 //           BAE_NOT_SETUP        -- No sound data loaded
 // ------------------------------------
 BAEResult           BAESound_SetSampleLoopPoints(BAESound sound,
-                            unsigned long start,
-                            unsigned long end);
+                            XDWORD start,
+                            XDWORD end);
 
 
 // BAESound_GetSampleLoopPoints()
 // --------------------------------------
-// Upon return, the unsigned longs pointed at by parameters outStart and outEnd
+// Upon return, the XDWORDs pointed at by parameters outStart and outEnd
 // will hold copies of the current loop starting and ending points (respectively)
 // of the indicated BAESound, both expressed in terms of sample frame numbers.
 // ------------------------------------
@@ -1730,25 +1732,25 @@ BAEResult           BAESound_SetSampleLoopPoints(BAESound sound,
 //           BAE_NOT_SETUP -- No sound data loaded
 // ------------------------------------
 BAEResult           BAESound_GetSampleLoopPoints(BAESound sound,
-                            unsigned long *outStart,
-                            unsigned long *outEnd);
+                            XDWORD *outStart,
+                            XDWORD *outEnd);
 
 
 // BAESound_SetSamplePlaybackPosition()
 // --------------------------------------
 //
 //
-BAEResult BAESound_SetSamplePlaybackPosition(BAESound sound, unsigned long pos);
+BAEResult BAESound_SetSamplePlaybackPosition(BAESound sound, XDWORD pos);
 
 
 // BAESound_GetSamplePlaybackPosition()
 // --------------------------------------
 //
 //
-BAEResult BAESound_GetSamplePlaybackPosition(BAESound sound, unsigned long *outPos);
+BAEResult BAESound_GetSamplePlaybackPosition(BAESound sound, XDWORD *outPos);
 
 
-void * BAESound_GetSamplePlaybackPointer(BAESound sound, unsigned long *outLength);
+void * BAESound_GetSamplePlaybackPointer(BAESound sound, XDWORD *outLength);
 
 
 // -----------------------------------------------------------------------------------------
@@ -1787,7 +1789,7 @@ BAEResult           BAESong_GetTitle(BAESong song, char *cName, int maxSize);
 // Calculates amount of memory used by this song in bytes. Counts instruments, samples,
 // and midi data.
 //
-BAEResult           BAESong_GetMemoryUsed(BAESong song, unsigned long *pOutResult);
+BAEResult           BAESong_GetMemoryUsed(BAESong song, XDWORD *pOutResult);
 
 // BAESong_SetMixer()
 // ------------------------------------
@@ -1866,7 +1868,7 @@ BAEResult           BAESong_AllowChannelTranspose(BAESong song,
 // pitch offset.
 //
 BAEResult           BAESong_SetTranspose(BAESong song,
-                            long semitones);
+                            XSDWORD semitones);
 
 
 // BAESong_GetTranspose()
@@ -1875,7 +1877,7 @@ BAEResult           BAESong_SetTranspose(BAESong song,
 // of the indicated BAESong's current pitch offset. (See BAESong_SetTranspose)
 //
 BAEResult           BAESong_GetTranspose(BAESong song,
-                            long *outSemitones);
+                            XSDWORD *outSemitones);
 
 
 // BAESong_MuteChannel()
@@ -2041,7 +2043,7 @@ BAEResult           BAESong_ParseMidiData(BAESong song,
                             unsigned char data1Byte, 
                             unsigned char data2Byte,
                             unsigned char data3Byte,
-                            unsigned long time);
+                            XDWORD time);
 
 
 // BAESong_NoteOff()
@@ -2059,7 +2061,7 @@ BAEResult           BAESong_NoteOff(BAESong song,
                             unsigned char channel, 
                             unsigned char note, 
                             unsigned char velocity,
-                            unsigned long time);
+                            XDWORD time);
 
 
 // BAESong_NoteOnWithLoad()
@@ -2086,7 +2088,7 @@ BAEResult           BAESong_NoteOnWithLoad(BAESong song,
                             unsigned char channel, 
                             unsigned char note, 
                             unsigned char velocity,
-                            unsigned long time);
+                            XDWORD time);
 
 
 // BAESong_NoteOn()
@@ -2108,7 +2110,7 @@ BAEResult           BAESong_NoteOn(BAESong song,
                             unsigned char channel, 
                             unsigned char note, 
                             unsigned char velocity,
-                            unsigned long time);
+                            XDWORD time);
 
 
 // BAESong_KeyPressure()
@@ -2123,7 +2125,7 @@ BAEResult           BAESong_KeyPressure(BAESong song,
                             unsigned char channel, 
                             unsigned char note, 
                             unsigned char pressure,
-                            unsigned long time);
+                            XDWORD time);
 
 
 // BAESong_ControlChange()
@@ -2138,7 +2140,7 @@ BAEResult           BAESong_ControlChange(BAESong song,
                             unsigned char channel, 
                             unsigned char controlNumber,
                             unsigned char controlValue, 
-                            unsigned long time);
+                            XDWORD time);
 
 
 // BAESong_ProgramBankChange()
@@ -2156,7 +2158,7 @@ BAEResult           BAESong_ProgramBankChange(BAESong song,
                             unsigned char channel,
                             unsigned char programNumber,
                             unsigned char bankNumber,
-                            unsigned long time);
+                            XDWORD time);
 
 
 // BAESong_ProgramChange()
@@ -2174,7 +2176,7 @@ BAEResult           BAESong_ProgramBankChange(BAESong song,
 BAEResult           BAESong_ProgramChange(BAESong song, 
                             unsigned char channel, 
                             unsigned char programNumber,
-                            unsigned long time);
+                            XDWORD time);
 
 
 // BAESong_ChannelPressure()
@@ -2187,7 +2189,7 @@ BAEResult           BAESong_ProgramChange(BAESong song,
 BAEResult           BAESong_ChannelPressure(BAESong song, 
                             unsigned char channel,  
                             unsigned char pressure, 
-                            unsigned long time);
+                            XDWORD time);
 
 
 // BAESong_PitchBend()
@@ -2207,7 +2209,7 @@ BAEResult           BAESong_PitchBend(BAESong song,
                             unsigned char channel, 
                             unsigned char lsb, 
                             unsigned char msb,
-                            unsigned long time);
+                            XDWORD time);
 
 
 // BAESong_AllNotesOff()
@@ -2221,7 +2223,7 @@ BAEResult           BAESong_PitchBend(BAESong song,
 // playback position reaches (or passes) time.
 //
 BAEResult           BAESong_AllNotesOff(BAESong song,
-                            unsigned long time);
+                            XDWORD time);
 
 
 // BAESong_LoadGroovoid()
@@ -2255,7 +2257,7 @@ BAEResult           BAESong_LoadGroovoid(BAESong song,
 // ------------------------------------
 BAEResult           BAESong_LoadMidiFromMemory(BAESong song,
                             void const* pMidiData, 
-                            unsigned long midiSize, 
+                            XDWORD midiSize, 
                             BAE_BOOL ignoreBadInstruments);
 
 
@@ -2292,7 +2294,7 @@ BAEResult           BAESong_LoadMidiFromFile(BAESong song,
 // ------------------------------------
 BAEResult           BAESong_LoadRmfFromMemory(BAESong song, 
                             void *pRMFData, 
-                            unsigned long rmfSize, 
+                            XDWORD rmfSize, 
                             short int songIndex, 
                             BAE_BOOL ignoreBadInstruments);
 
@@ -2464,28 +2466,28 @@ BAEResult           BAESong_GetLoops(BAESong song,
 // data.
 //
 BAEResult           BAESong_SetMicrosecondPosition(BAESong song, 
-                            unsigned long ticks);
+                            XDWORD ticks);
 
 
 // BAESong_GetMicrosecondPosition()
 // ------------------------------------
-// Upon return, parameter outTicks will point to an unsigned long containing the
+// Upon return, parameter outTicks will point to an XDWORD containing the
 // current playback position of the indicated BAESong, expressed in microseconds.
 //
 BAEResult           BAESong_GetMicrosecondPosition(BAESong song,
-                            unsigned long *outTicks);
+                            XDWORD *outTicks);
 
 
 // BAESong_GetMicrosecondLength()
 // ------------------------------------
-// Upon return, parameter outLength will point to an unsigned long containing the
+// Upon return, parameter outLength will point to an XDWORD containing the
 // length in microseconds of the indicated BAESong's currently loaded MIDI or RMF
 // song data.  The result assumes that the song would be played at the tempo
 // stored in the song data, so any changes made via BAESong_SetTempo would not be
 // reflected.
 //
 BAEResult           BAESong_GetMicrosecondLength(BAESong song,
-                            unsigned long *outLength);
+                            XDWORD *outLength);
 
 
 // BAESong_SetMasterTempo()
@@ -2616,7 +2618,7 @@ BAE_INSTRUMENT      TranslateBankProgramToInstrument(unsigned short bank,
 //           BAE_NOT_SETUP -- RMF info feature not supported
 // --------------------------------------
 BAEResult BAEUtil_GetRmfSongInfoFromFile(BAEPathName filePath, short songIndex,
-                                 BAEInfoType infoType, char* targetBuffer, unsigned long bufferBytes);
+                                 BAEInfoType infoType, char* targetBuffer, XDWORD bufferBytes);
 
 // BAEUtil_GetInfoSizeFromFile()
 // --------------------------------------
@@ -2629,7 +2631,7 @@ BAEResult BAEUtil_GetRmfSongInfoFromFile(BAEPathName filePath, short songIndex,
 BAEResult BAEUtil_GetInfoSizeFromFile(BAEPathName filePath, 
                                       short songIndex, 
                                       BAEInfoType infoType, 
-                                      unsigned long *pOutResourceSize);
+                                      XDWORD *pOutResourceSize);
         
         
 // BAEUtil_GetRmfSongInfo()
@@ -2646,11 +2648,11 @@ BAEResult BAEUtil_GetInfoSizeFromFile(BAEPathName filePath,
 //           BAE_NOT_SETUP -- RMF info feature not supported
 // --------------------------------------
 BAEResult           BAEUtil_GetRmfSongInfo(void *pRMFData, 
-                            unsigned long rmfSize, 
+                            XDWORD rmfSize, 
                             short songIndex, 
                             BAEInfoType infoType, 
                             char* targetBuffer, 
-                            unsigned long bufferBytes);
+                            XDWORD bufferBytes);
 
 
 // BAEUtil_GetInfoSize()
@@ -2662,8 +2664,8 @@ BAEResult           BAEUtil_GetRmfSongInfo(void *pRMFData,
 // 
 // Returns: Text info field size in bytes
 //
-unsigned long       BAEUtil_GetInfoSize(void *pRMFData, 
-                            unsigned long rmfSize, 
+XDWORD       BAEUtil_GetInfoSize(void *pRMFData, 
+                            XDWORD rmfSize, 
                             short songIndex, 
                             BAEInfoType infoType);
 
@@ -2676,7 +2678,7 @@ unsigned long       BAEUtil_GetInfoSize(void *pRMFData,
 // RMF data.
 //
 BAE_BOOL            BAEUtil_IsRmfSongEncrypted(void *pRMFData, 
-                            unsigned long rmfSize, 
+                            XDWORD rmfSize, 
                             short songIndex);
 
 
@@ -2691,7 +2693,7 @@ BAE_BOOL            BAEUtil_IsRmfSongEncrypted(void *pRMFData,
 // songs, the RMF file format also accomodates uncompressed songs.
 //
 BAE_BOOL            BAEUtil_IsRmfSongCompressed(void *pRMFData,
-                            unsigned long rmfSize, 
+                            XDWORD rmfSize, 
                             short songIndex);
 
 
@@ -2707,7 +2709,7 @@ BAE_BOOL            BAEUtil_IsRmfSongCompressed(void *pRMFData,
 //           BAE_PARAM_ERR -- Null parameters or bad RMF data
 // --------------------------------------
 BAEResult           BAEUtil_GetRmfVersion(void *pRMFData, 
-                            unsigned long rmfSize, 
+                            XDWORD rmfSize, 
                             short int *pVersionMajor, 
                             short int *pVersionMinor, 
                             short int *pVersionSubMinor);

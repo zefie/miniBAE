@@ -507,7 +507,7 @@ XSDWORD GM_SetSustainDecayLevelInTime(XDWORD timeInMicroseconds)
     {
         timeInMicroseconds = 50000;
     }
-    return -1 * (long)timeInMicroseconds;
+    return -1 * (XSDWORD)timeInMicroseconds;
 }
 #endif  //#if USE_CREATION_API == TRUE
 
@@ -692,11 +692,11 @@ static const UBYTE volumeScaleTwoTimesExp[] = {
 };
 
 #if 0
-static unsigned long PV_AdjustTimeFromRate(unsigned long time)
+static XDWORD PV_AdjustTimeFromRate(XDWORD time)
 {
     Rate q = MusicGlobals->outputRate;
-    unsigned long mixerRate;
-    unsigned long realMixerRate;
+    XDWORD mixerRate;
+    XDWORD realMixerRate;
 
     mixerRate = GM_ConvertFromOutputRateToPerceivedRate(q);
     realMixerRate = GM_ConvertFromOutputRateToRate(q);
@@ -711,19 +711,19 @@ static unsigned long PV_AdjustTimeFromRate(unsigned long time)
 #endif
 
 // This value returns is the clock the evelope's and LFO run on. In microseconds.
-static unsigned long PV_GetLFOAdjustedTimeInMicroseconds(void)
+static XDWORD PV_GetLFOAdjustedTimeInMicroseconds(void)
 {
 #if 1
     return MusicGlobals->lfoBufferTime;
 #else
-    unsigned long time = (FIXED_BUFFER_SLICE_TIME * MAX_CHUNK_SIZE / FIXED_MAX_CHUNK_SIZE) - 610;
+    XDWORD time = (FIXED_BUFFER_SLICE_TIME * MAX_CHUNK_SIZE / FIXED_MAX_CHUNK_SIZE) - 610;
 
     return PV_AdjustTimeFromRate(time);
 #endif
 }
 
 // given a midi volume, translate it via a table to a new value
-long PV_ModifyVelocityFromCurve(GM_Song *pSong, long volume)
+XSDWORD PV_ModifyVelocityFromCurve(GM_Song *pSong, XSDWORD volume)
 {
     volume = 127L - (volume & 0x7FL);       // restrict to 0-127 and reverse
     switch (pSong->velocityCurveType)
@@ -768,7 +768,7 @@ void PV_CleanNoteEntry(GM_Voice * the_entry)
     VoiceMode   mode;
 
     mode = the_entry->voiceMode;
-    XSetMemory((char *)the_entry, (long)sizeof(GM_Voice), 0);
+    XSetMemory((char *)the_entry, (XSDWORD)sizeof(GM_Voice), 0);
     the_entry->voiceMode = mode;
 }
 
@@ -807,9 +807,9 @@ static short int PV_L2(short maxVoice)
 
 static short int PV_L2(short maxVoice)
 {
-    double  ratio;
+    float  ratio;
 
-    ratio = 1.0 / sqrt((double)maxVoice);
+    ratio = 1.0 / sqrt((float)maxVoice);
 
     return (short int)(ratio * L2_ZERO_LEVEL);
 }
@@ -823,7 +823,7 @@ void PV_CalcScaleBack(void)
     pMixer->scaleBackAmount = PV_L2(pMixer->mixLevel); 
 #else
     int             noteScale;
-    long            scaleSize;
+    XSDWORD            scaleSize;
 
     noteScale = (pMixer->MaxNotes + pMixer->MaxEffects) * UPSCALAR;
     scaleSize = noteScale * MAX_MASTER_VOLUME;
@@ -850,7 +850,7 @@ void PV_CalcScaleBack(void)
 
 #if USE_CALLBACKS
 // used by macro THE_CHECK. This mainly used by double buffered audio clips
-long PV_DoubleBufferCallbackAndSwap(GM_DoubleBufferCallbackPtr doubleBufferCallback, 
+XSDWORD PV_DoubleBufferCallbackAndSwap(GM_DoubleBufferCallbackPtr doubleBufferCallback, 
                                         GM_Voice *pVoice)
 {
     INT32   bufferSize;
@@ -889,10 +889,10 @@ long PV_DoubleBufferCallbackAndSwap(GM_DoubleBufferCallbackPtr doubleBufferCallb
 }
 #endif
 
-unsigned long PV_GetPositionFromVoice(GM_Voice *pVoice)
+XDWORD PV_GetPositionFromVoice(GM_Voice *pVoice)
 {
-    unsigned long   pos;
-    unsigned long   size;
+    XDWORD   pos;
+    XDWORD   size;
 
     switch (MusicGlobals->interpolationMode)
     {
@@ -921,7 +921,7 @@ unsigned long PV_GetPositionFromVoice(GM_Voice *pVoice)
     return pos;
 }
 
-void PV_SetPositionFromVoice(GM_Voice *pVoice, unsigned long pos)
+void PV_SetPositionFromVoice(GM_Voice *pVoice, XDWORD pos)
 {
     switch (MusicGlobals->interpolationMode)
     {
@@ -1169,7 +1169,7 @@ foundRelease:
             break;
     }
 #endif
-    //BAE_PRINTF("currentLevel = %ld\n", (long)a->currentLevel);
+    //BAE_PRINTF("currentLevel = %ld\n", (XSDWORD)a->currentLevel);
     a->currentTime = currentTime;
     a->currentPosition = index & 7; // protect against runaway indexes
 }
@@ -1365,8 +1365,8 @@ static void PV_UnlockInstrumentAndVoice(GM_Voice *pVoice)
 // Process this active voice
 static void PV_ServeThisInstrument(GM_Voice *pVoice)
 {
-    register unsigned long  start, end, loopend, size;
-    register long           n, i, value;
+    register XDWORD  start, end, loopend, size;
+    register XSDWORD           n, i, value;
     GM_LFO                  *rec;
     GM_Mixer                *pMixer;
 
@@ -1600,17 +1600,17 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
     // now reduce the current volume by the sustainDecayLevel which is fixed point
     pVoice->NoteVolumeEnvelope = (INT16)XFixedMultiply(pVoice->volumeADSRRecord.currentLevel, 
                                                     pVoice->volumeADSRRecord.sustainingDecayLevel);
-    //BAE_PRINTF("cl = %ld sdl = %ld\n", (long)pVoice->volumeADSRRecord.currentLevel, 
-    //                                  (long)pVoice->volumeADSRRecord.sustainingDecayLevel);
-    //BAE_PRINTF("nve = %ld\n", (long)pVoice->NoteVolumeEnvelope);
+    //BAE_PRINTF("cl = %ld sdl = %ld\n", (XSDWORD)pVoice->volumeADSRRecord.currentLevel, 
+    //                                  (XSDWORD)pVoice->volumeADSRRecord.sustainingDecayLevel);
+    //BAE_PRINTF("nve = %ld\n", (XSDWORD)pVoice->NoteVolumeEnvelope);
 
     pVoice->NoteVolumeEnvelopeBeforeLFO = pVoice->NoteVolumeEnvelope;
-    //BAE_PRINTF("2;NoteVolumeEnvelopeBeforeLFO = %ld\n", (long)pVoice->NoteVolumeEnvelopeBeforeLFO);
+    //BAE_PRINTF("2;NoteVolumeEnvelopeBeforeLFO = %ld\n", (XSDWORD)pVoice->NoteVolumeEnvelopeBeforeLFO);
     if (pVoice->volumeLFOValue >= 0)        // don't handle volume LFO values less than zero.
     {
         pVoice->NoteVolumeEnvelope = (INT16)((pVoice->NoteVolumeEnvelope * pVoice->volumeLFOValue) >> 12L);
     }
-    //BAE_PRINTF("3;NoteVolumeEnvelope = %ld\n", (long)pVoice->NoteVolumeEnvelope);
+    //BAE_PRINTF("3;NoteVolumeEnvelope = %ld\n", (XSDWORD)pVoice->NoteVolumeEnvelope);
 
     // now modify the pVoice->NoteVolumeEnvelope to zero, if this voice doesn't match
     // the current audio route
@@ -1625,7 +1625,7 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
     */
     if (pVoice->NoteLoopEnd)
     {
-        loopend = (unsigned long)pVoice->NoteLoopEnd - (unsigned long)pVoice->NotePtr;
+        loopend = (XDWORD)pVoice->NoteLoopEnd - (XDWORD)pVoice->NotePtr;
     }
     else
     {
@@ -2080,14 +2080,14 @@ static int          gToneFreq = 1000;
 static int          gTonePhase = 0;
 
 
-static void PV_FillTone(void *pBuffer, unsigned long toneFrames, int bitSize, int stereo)
+static void PV_FillTone(void *pBuffer, XDWORD toneFrames, int bitSize, int stereo)
 {
     char            *pAudioB;
     short           *pAudioW;
-    unsigned long   count;
-    unsigned long   mixerRate = GM_ConvertFromOutputRateToRate(MusicGlobals->outputRate);
+    XDWORD   count;
+    XDWORD   mixerRate = GM_ConvertFromOutputRateToRate(MusicGlobals->outputRate);
     XFIXED          v;
-    long            angle, ta;
+    XSDWORD            angle, ta;
     short           value = 0;
 
     pAudioB = (char *)pBuffer;
@@ -2148,7 +2148,7 @@ void GM_TestTone(XBOOL toneStatus)
 void BAE_BuildMCUSlice(void * threadContext, XDWORD dspTime)
 {
     GM_Mixer        *pMixer;
-    unsigned long   delta, end;
+    XDWORD   delta, end;
     OPErr           err;
 
     pMixer = GM_GetCurrentMixer();
@@ -2208,11 +2208,11 @@ void BAE_BuildMCUSlice(void * threadContext, XDWORD dspTime)
 // at the moment. sampleFrames is how many sample frames. These two values should match
 // ie. sampleFrames = bufferByteLength / channels / bitsize / 8
 #if BAE_COMPLETE
-void BAE_BuildMixerSlice(void *threadContext, void *pAudioBuffer, long bufferByteLength,
-                                                            long sampleFrames)
+void BAE_BuildMixerSlice(void *threadContext, void *pAudioBuffer, XSDWORD bufferByteLength,
+                                                            XSDWORD sampleFrames)
 {
     GM_Mixer        *pMixer;
-    unsigned long   delta, end;
+    XDWORD   delta, end;
 
     pMixer = MusicGlobals;
     if (pMixer && pAudioBuffer && bufferByteLength && sampleFrames)
@@ -2320,7 +2320,7 @@ static void PV_ProcessSyncronizedVoiceStart(void)
     GM_Voice        *pVoice;
     void            *syncReference;
     LOOPCOUNT       count, max;
-    unsigned long   time;
+    XDWORD   time;
 
     pMixer = GM_GetCurrentMixer();
 
@@ -3377,7 +3377,7 @@ void PV_StartMIDINote(GM_Song *pSong, INT16 the_instrument,
                         }
                         break;
                     case VOLUME_ATTACK_LEVEL:
-                        //if (1)    //(*((long *) 0x17a))
+                        //if (1)    //(*((XSDWORD *) 0x17a))
                         {
                             if (the_entry->volumeADSRRecord.ADSRLevel[0] >  the_entry->volumeADSRRecord.ADSRLevel[1])
                             {
@@ -3797,8 +3797,8 @@ void GM_DisplayVoiceData(void)
             BAE_PRINTF("### Voice %ld\n", count);
             BAE_PRINTF("    voiceMode %d\n", pVoice->voiceMode);
             BAE_PRINTF("    voiceStartTimeStamp %ld\n", pVoice->voiceStartTimeStamp);
-            BAE_PRINTF("    pSong %lx\n", (long)pVoice->pSong);
-            BAE_PRINTF("    pInstrument %lx\n", (long)pVoice->pInstrument);
+            BAE_PRINTF("    pSong %lx\n", (XSDWORD)pVoice->pSong);
+            BAE_PRINTF("    pInstrument %lx\n", (XSDWORD)pVoice->pInstrument);
             BAE_PRINTF("    NoteChannel %d\n", pVoice->NoteChannel);
             BAE_PRINTF("    NoteMIDIPitch %d\n", pVoice->NoteMIDIPitch);
             BAE_PRINTF("    sustainMode %d\n", pVoice->sustainMode);

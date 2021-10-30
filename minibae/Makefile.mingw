@@ -80,12 +80,12 @@ OBJ_DIR 	:= $(BUILD_DIR)obj/
 OBJ 		:= $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC})))
 OBJ_BIN 	:= $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC_BIN})))
 
-ARCH		:= -m32 -static
-CC		:= i686-w64-mingw32-gcc-win32
-CXX		:= i686-w64-mingw32-g++-win32
-LD		:= i686-w64-mingw32-g++-win32
-AR      	:= i686-w64-mingw32-gcc-ar-win32
-STRIP      	:= i686-w64-mingw32-strip
+ARCH		:= -m64 -static
+CC		:= x86_64-w64-mingw32-gcc-win32
+CXX		:= x86_64-w64-mingw32-g++-win32
+LD		:= x86_64-w64-mingw32-g++-win32
+AR      	:= x86_64-w64-mingw32-gcc-ar-win32
+STRIP      	:= x86_64-w64-mingw32-strip
 
 CFLAGS  	:= $(ARCH) -g -O2 $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
 CFLAGS		+= -DX_PLATFORM=X_WIN95

@@ -1663,7 +1663,7 @@ XSDWORD GM_GetMasterVolume(void);
 // Used in various functions that need to return and reference a voice.
 #define DEAD_VOICE          -1L             // this represents a dead or invalid voice
 // will be used to index into an array of GM_Voice objects
-typedef long              VOICE_REFERENCE;        // reference returned that is a allocated active voice
+typedef XSDWORD              VOICE_REFERENCE;        // reference returned that is a allocated active voice
 
 #define DEAD_LINKED_VOICE   (XPTR)0L              // this represents a dead or invalid voice
 typedef XPTR              LINKED_VOICE_REFERENCE; // this represents a series of linked VOICE_REFERENCE's
@@ -2337,7 +2337,7 @@ typedef OPErr (*GM_StreamObjectProc)(void *threadContext, GM_StreamMessage messa
 // OUTPUT:
 //  long            This is an audio stream reference number. Will be 0 if error
 STREAM_REFERENCE    GM_AudioStreamSetup(    void *threadContext,                    // platform threadContext
-                                    long userReference,             // user reference
+                                    XSDWORD userReference,             // user reference
                                     GM_StreamObjectProc pProc,      // control callback
                                         XDWORD bufferSize,       // buffer size
                                     XFIXED sampleRate,          // Fixed 16.16
@@ -2392,7 +2392,7 @@ OPErr       GM_SetSyncAudioStreamReference(STREAM_REFERENCE reference, void *syn
 // mixer slice. Will return an error (not NO_ERR) if its an invalid reference, or syncReference is NULL.
 OPErr       GM_SyncAudioStreamStart(STREAM_REFERENCE reference);
 
-long        GM_AudioStreamGetReference(STREAM_REFERENCE reference);
+XSDWORD        GM_AudioStreamGetReference(STREAM_REFERENCE reference);
 
 OPErr       GM_AudioStreamGetData(  void *threadContext,                    // platform threadContext
                                     STREAM_REFERENCE reference, 

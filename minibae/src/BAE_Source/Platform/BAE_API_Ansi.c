@@ -66,22 +66,22 @@
 	#include <fcntl.h>
 #endif
 
-static unsigned long		g_memory_buoy = 0;		// amount of memory allocated at this moment
-static unsigned long		g_memory_buoy_max = 0;
+static XDWORD		g_memory_buoy = 0;		// amount of memory allocated at this moment
+static XDWORD		g_memory_buoy_max = 0;
 
 static short int		g_balance = 0;			// balance scale -256 to 256 (left to right)
 static short int		g_unscaled_volume = 256;	// hardware volume in BAE scale
 
-static long			g_audioByteBufferSize;		// size of audio buffers in bytes
+static XSDWORD			g_audioByteBufferSize;		// size of audio buffers in bytes
 
-static long			g_shutDownDoubleBuffer;
-static long			g_activeDoubleBuffer;
+static XSDWORD			g_shutDownDoubleBuffer;
+static XSDWORD			g_activeDoubleBuffer;
 
 // $$kk: 05.06.98: made lastPos a global variable
-static long			g_lastPos;
+static XSDWORD			g_lastPos;
 
  // number of samples per audio frame to generate
-long				g_audioFramesToGenerate;
+XSDWORD				g_audioFramesToGenerate;
 
 // How many audio frames to generate at one time
 static unsigned int		g_synthFramesPerBlock;	// setup upon runtime
@@ -106,7 +106,7 @@ int BAE_Cleanup(void)
 
 // **** Memory management
 // allocate a block of locked, zeroed memory. Return a pointer
-void * BAE_Allocate(unsigned long size)
+void * BAE_Allocate(XDWORD size)
 {
 	void *data = NULL;
 	if (size)
@@ -138,13 +138,13 @@ void BAE_Deallocate(void * memoryBlock)
 }
 
 // return memory used
-unsigned long BAE_GetSizeOfMemoryUsed(void)
+XDWORD BAE_GetSizeOfMemoryUsed(void)
 {
 	return g_memory_buoy;
 }
 
 // return max memory used
-unsigned long BAE_GetMaxSizeOfMemoryUsed(void)
+XDWORD BAE_GetMaxSizeOfMemoryUsed(void)
 {
 	return g_memory_buoy_max;
 };
@@ -155,7 +155,7 @@ unsigned long BAE_GetMaxSizeOfMemoryUsed(void)
 // causing a memory protection
 // fault.
 // return 0 for valid, or 1 for bad pointer, or 2 for not supported.
-int BAE_IsBadReadPointer(void *memoryBlock, unsigned long size)
+int BAE_IsBadReadPointer(void *memoryBlock, XDWORD size)
 {
 	// return (IsBadReadPtr(memoryBlock, size)) ? 1 : 0;
 	return 2;
@@ -163,7 +163,7 @@ int BAE_IsBadReadPointer(void *memoryBlock, unsigned long size)
 
 // this will return the size of the memory pointer allocated with BAE_Allocate. Return
 // 0 if you don't support this feature
-unsigned long BAE_SizeOfPointer(void * memoryBlock)
+XDWORD BAE_SizeOfPointer(void * memoryBlock)
 {
 	return 0;
 }
@@ -172,7 +172,7 @@ unsigned long BAE_SizeOfPointer(void * memoryBlock)
 // special block move speed ups, various hardware has available.
 // NOTE:	Must use a function like memmove that insures a valid copy in the case
 //			of overlapping memory blocks.
-void BAE_BlockMove(void * source, void * dest, unsigned long size)
+void BAE_BlockMove(void * source, void * dest, XDWORD size)
 {
 	if (source && dest && size)
 	{
@@ -231,7 +231,7 @@ short int BAE_GetHardwareVolume(void)
 // newVolume is in the range of 0 to 256
 void BAE_SetHardwareVolume(short int newVolume)
 {
-    unsigned long   volume;
+    XDWORD   volume;
 
     // pin volume
     if (newVolume > 256)
@@ -249,14 +249,14 @@ void BAE_SetHardwareVolume(short int newVolume)
 
 // **** Timing services
 // return microseconds
-unsigned long BAE_Microseconds(void)
+XDWORD BAE_Microseconds(void)
 {
 #if USE_WINDOWS_IO
-	static unsigned long	starttick = 0;
+	static XDWORD	starttick = 0;
 	static char				firstTime = TRUE;
 	static char				QPClockSupport = FALSE;
-	static unsigned long	clockpusu = 0;	// clocks per microsecond
-	unsigned long			time;
+	static XDWORD	clockpusu = 0;	// clocks per microsecond
+	XDWORD			time;
 	LARGE_INTEGER			p;
 
 	if (firstTime)
@@ -264,14 +264,14 @@ unsigned long BAE_Microseconds(void)
 		if (QueryPerformanceFrequency(&p))
 		{
 			QPClockSupport = TRUE;
-			clockpusu = (unsigned long)(p.QuadPart / 1000000L);
+			clockpusu = (XDWORD)(p.QuadPart / 1000000L);
 		}
 		firstTime = FALSE;
 	}
 	if (QPClockSupport)
 	{
 		QueryPerformanceCounter(&p);
-		time = (unsigned long)(p.QuadPart / clockpusu);
+		time = (XDWORD)(p.QuadPart / clockpusu);
 	}
 	else
 	{
@@ -285,7 +285,7 @@ unsigned long BAE_Microseconds(void)
 	return (time - starttick);
 #else
    static int           firstTime = TRUE;
-   static unsigned long offset    = 0;
+   static XDWORD offset    = 0;
    struct timeval       tv;
 
    if (firstTime)
@@ -302,10 +302,10 @@ unsigned long BAE_Microseconds(void)
 // wait or sleep this thread for this many microseconds
 // CLS??: If this function is called from within the frame thread and
 // JAVA_THREAD is non-zero, we'll probably crash.
-void BAE_WaitMicroseconds(unsigned long waitAmount)
+void BAE_WaitMicroseconds(XDWORD waitAmount)
 {
 #if USE_WINDOWS_IO
-	unsigned long	ticks;
+	XDWORD	ticks;
 
 	ticks = BAE_Microseconds() + waitAmount;
 	while (BAE_Microseconds() < ticks)
@@ -354,7 +354,7 @@ void BAE_CopyFileNameNative(void *fileNameSource, void *fileNameDest)
 	}
 }
 
-long BAE_FileCreate(void *fileName)
+XSDWORD BAE_FileCreate(void *fileName)
 {
 
 	
@@ -368,7 +368,7 @@ long BAE_FileCreate(void *fileName)
 	return (file != -1) ? 0 : -1;
 #elif USE_ANSI_IO
 	FILE *fp = fopen((char *)fileName, "wb");
-	return (long)fp;
+	return (XSDWORD)fp;
 	if(fp)
 	{
 		fclose(fp);
@@ -390,7 +390,7 @@ long BAE_FileCreate(void *fileName)
 #endif
 }
 
-long BAE_FileDelete(void *fileName)
+XSDWORD BAE_FileDelete(void *fileName)
 {
 #if USE_ANSI_IO
 	remove ((char *)fileName);
@@ -410,7 +410,7 @@ long BAE_FileDelete(void *fileName)
 
 // Open a file
 // Return -1 if error, otherwise file handle
-long BAE_FileOpenForRead(void *fileName)
+XSDWORD BAE_FileOpenForRead(void *fileName)
 {
 
 	if (fileName)
@@ -419,7 +419,7 @@ long BAE_FileOpenForRead(void *fileName)
 	   return _open((char *)fileName, _O_RDONLY | _O_BINARY);
 #elif USE_ANSI_IO
        FILE *fp = fopen((char *)fileName, "rb");
-       return (long)fp;
+       return (XSDWORD)fp;
 #elif USE_WINDOWS_IO
 		HANDLE	file;
 
@@ -435,13 +435,13 @@ long BAE_FileOpenForRead(void *fileName)
 			DWORD	lastErr = GetLastError();
 			return -1;
 		}
-		return (long)file;
+		return (XSDWORD)file;
 #endif
 	}
 	return -1;
 }
 
-long BAE_FileOpenForWrite(void *fileName)
+XSDWORD BAE_FileOpenForWrite(void *fileName)
 {
 
 	if (fileName)
@@ -450,7 +450,7 @@ long BAE_FileOpenForWrite(void *fileName)
 		return _open((char *)fileName, _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY);
 #elif USE_ANSI_IO
 		FILE *fp = fopen((char *)fileName, "wb");
-		return (long)fp;;
+		return (XSDWORD)fp;;
 #elif USE_WINDOWS_IO
 		HANDLE	file;
 
@@ -462,14 +462,14 @@ long BAE_FileOpenForWrite(void *fileName)
 			DWORD	lastErr = GetLastError();
 			return -1;
 		}
-		return (long)file;
+		return (XSDWORD)file;
 
 #endif
 	}
 	return -1;
 }
 
-long BAE_FileOpenForReadWrite(void *fileName)
+XSDWORD BAE_FileOpenForReadWrite(void *fileName)
 {
 	if (fileName)
 	{
@@ -477,7 +477,7 @@ long BAE_FileOpenForReadWrite(void *fileName)
 		return _open((char *)fileName, _O_RDWR | _O_BINARY);
 #elif USE_ANSI_IO
 		FILE *fp = fopen((char *)fileName, "r+b" /*"arb"*/ /*"wrb"*/);
-		return (long)fp;
+		return (XSDWORD)fp;
 #elif USE_WINDOWS_IO
 		HANDLE	file;
 
@@ -492,7 +492,7 @@ long BAE_FileOpenForReadWrite(void *fileName)
 			DWORD	lastErr = GetLastError();
 			return -1;
 		}
-		return (long)file;
+		return (XSDWORD)file;
 
 #endif
 	}
@@ -500,7 +500,7 @@ long BAE_FileOpenForReadWrite(void *fileName)
 }
 
 // Close a file
-void BAE_FileClose(long fileReference)
+void BAE_FileClose(XSDWORD fileReference)
 {
 #if  USE_UNIX_IO
 	_close(fileReference);
@@ -513,14 +513,14 @@ void BAE_FileClose(long fileReference)
 
 // Read a block of memory from a file.
 // Return -1 if error, otherwise length of data read.
-long BAE_ReadFile(long fileReference, void *pBuffer, long bufferLength)
+XSDWORD BAE_ReadFile(XSDWORD fileReference, void *pBuffer, XSDWORD bufferLength)
 {
 	if (pBuffer && bufferLength)
 	{
 #if  USE_UNIX_IO
 		return _read(fileReference, (char *)pBuffer, bufferLength);
 #elif USE_ANSI_IO
-		long bytesRead = 0;
+		XSDWORD bytesRead = 0;
 		bytesRead = fread( (char *)pBuffer, 1, bufferLength, (FILE *)fileReference);
 		return (bytesRead <= 0) ? -1: bytesRead;
 #elif USE_WINDOWS_IO
@@ -528,7 +528,7 @@ long BAE_ReadFile(long fileReference, void *pBuffer, long bufferLength)
 			DWORD	readFromBuffer;
 			return ReadFile((HANDLE)fileReference, (LPVOID)pBuffer,
 										bufferLength, &readFromBuffer,
-										NULL) ? (long)readFromBuffer : -1;
+										NULL) ? (XSDWORD)readFromBuffer : -1;
 		}
 #endif
 	}
@@ -537,14 +537,14 @@ long BAE_ReadFile(long fileReference, void *pBuffer, long bufferLength)
 
 // Write a block of memory from a file
 // Return -1 if error, otherwise length of data written.
-long BAE_WriteFile(long fileReference, void *pBuffer, long bufferLength)
+XSDWORD BAE_WriteFile(XSDWORD fileReference, void *pBuffer, XSDWORD bufferLength)
 {
 	if (pBuffer && bufferLength)
 	{
 #if  USE_UNIX_IO
 		return _write(fileReference, (char *)pBuffer, bufferLength);
 #elif USE_ANSI_IO
-		long bytesWritten = 0;
+		XSDWORD bytesWritten = 0;
 		int val = ftell((FILE *)fileReference);
 		fflush((FILE *)fileReference);
 		bytesWritten = fwrite( (char *)pBuffer, 1, bufferLength, (FILE *)fileReference);
@@ -555,7 +555,7 @@ long BAE_WriteFile(long fileReference, void *pBuffer, long bufferLength)
 			DWORD	writtenFromBuffer;
 			return WriteFile((HANDLE)fileReference, (LPVOID)pBuffer,
 										bufferLength, &writtenFromBuffer,
-										NULL) ? (long)writtenFromBuffer : -1;
+										NULL) ? (XSDWORD)writtenFromBuffer : -1;
 		}
 #endif
 	}
@@ -564,7 +564,7 @@ long BAE_WriteFile(long fileReference, void *pBuffer, long bufferLength)
 
 // set file position in absolute file byte position
 // Return -1 if error, otherwise 0.
-long BAE_SetFilePosition(long fileReference, unsigned long filePosition)
+XSDWORD BAE_SetFilePosition(XSDWORD fileReference, XDWORD filePosition)
 {
 #if  USE_UNIX_IO
 	return (_lseek(fileReference, filePosition, SEEK_SET) == -1) ? -1 : 0;
@@ -580,7 +580,7 @@ long BAE_SetFilePosition(long fileReference, unsigned long filePosition)
 }
 
 // get file position in absolute file bytes
-unsigned long BAE_GetFilePosition(long fileReference)
+XDWORD BAE_GetFilePosition(XSDWORD fileReference)
 {
 #if USE_UNIX_IO
 	return _lseek(fileReference, 0, SEEK_CUR);
@@ -592,9 +592,9 @@ unsigned long BAE_GetFilePosition(long fileReference)
 }
 
 // get length of file
-unsigned long BAE_GetFileLength(long fileReference)
+XDWORD BAE_GetFileLength(XSDWORD fileReference)
 {
-	unsigned long pos = 0;
+	XDWORD pos = 0;
 	int val = 0;
 
 #if  USE_UNIX_IO
@@ -615,7 +615,7 @@ unsigned long BAE_GetFileLength(long fileReference)
 }
 
 // set the length of a file. Return 0, if ok, or -1 for error
-int BAE_SetFileLength(long fileReference, unsigned long newSize)
+int BAE_SetFileLength(XSDWORD fileReference, XDWORD newSize)
 {
 #if USE_UNIX_IO
 	return _chsize(fileReference, newSize);
@@ -641,7 +641,7 @@ int BAE_GetAudioBufferCount(void)
 }
 
 // Return the number of bytes used for audio buffer for output to card
-long BAE_GetAudioByteBufferSize(void)
+XSDWORD BAE_GetAudioByteBufferSize(void)
 {
 	return g_audioByteBufferSize;
 }
@@ -663,7 +663,7 @@ int roundUp(int numToRound, int multiple)
     return numToRound + multiple - remainder;
 }
 
-int BAE_AquireAudioCard(void *threadContext, unsigned long sampleRate, unsigned long channels, unsigned long bits)
+int BAE_AquireAudioCard(void *threadContext, XDWORD sampleRate, XDWORD channels, XDWORD bits)
 {
 	// need to set callback which will in turn call BuildMixerSlice every so often
 
@@ -683,9 +683,9 @@ int BAE_ReleaseAudioCard(void *threadContext)
 }
 
 // return device position in samples since the device was opened
-unsigned long BAE_GetDeviceSamplesPlayedPosition(void)
+XDWORD BAE_GetDeviceSamplesPlayedPosition(void)
 {
-	unsigned long pos = 0;
+	XDWORD pos = 0;
 
 	return pos;
 }
@@ -693,7 +693,7 @@ unsigned long BAE_GetDeviceSamplesPlayedPosition(void)
 // number of devices. ie different versions of the BAE connection. DirectSound and waveOut
 // return number of devices. ie 1 is one device, 2 is two devices.
 // NOTE: This function needs to function before any other calls may have happened.
-long BAE_MaxDevices(void)
+XSDWORD BAE_MaxDevices(void)
 {
 	return 1;
 }
@@ -702,14 +702,14 @@ long BAE_MaxDevices(void)
 // NOTE:	This function needs to function before any other calls may have happened.
 //			Also you will need to call BAE_ReleaseAudioCard then BAE_AquireAudioCard
 //			in order for the change to take place.
-void BAE_SetDeviceID(long deviceID, void *deviceParameter)
+void BAE_SetDeviceID(XSDWORD deviceID, void *deviceParameter)
 {
 
 }
 
 // return current device ID
 // NOTE: This function needs to function before any other calls may have happened.
-long BAE_GetDeviceID(void *deviceParameter)
+XSDWORD BAE_GetDeviceID(void *deviceParameter)
 {
 	return 1;
 }
@@ -722,7 +722,7 @@ long BAE_GetDeviceID(void *deviceParameter)
 //			"WinOS,waveOut,multi threaded"
 //			"WinOS,VxD,low level hardware"
 //			"WinOS,plugin,Director"
-void BAE_GetDeviceName(long deviceID, char *cName, unsigned long cNameLength)
+void BAE_GetDeviceName(XSDWORD deviceID, char *cName, XDWORD cNameLength)
 {
 
 }
@@ -774,7 +774,7 @@ int BAE_Unmute(void)
 // This function is called at render time with w route bus flag. If there's
 // no change, return currentRoute, other wise return one of audiosys.h route values.
 // This will change an active rendered's voice placement.
-void BAE_ProcessRouteBus(int currentRoute, long *pChannels, int count)
+void BAE_ProcessRouteBus(int currentRoute, XSDWORD *pChannels, int count)
 {
 }
 

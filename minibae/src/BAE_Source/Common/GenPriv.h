@@ -339,7 +339,7 @@
 
 #if LOOPS_USED == U3232_LOOPS
 
-typedef unsigned long   U32;
+typedef XDWORD   U32;
 typedef struct U3232
 {
     U32     i;
@@ -630,7 +630,7 @@ typedef struct GM_SampleCacheEntry GM_SampleCacheEntry;
 
 #define MAX_QUEUE_EVENTS                1024
 
-#define REVERB_BUFFER_SIZE_SMALL        4096        // * sizeof(long)
+#define REVERB_BUFFER_SIZE_SMALL        4096        // * sizeof(XSDWORD)
 #define REVERB_BUFFER_MASK_SMALL        4095
 
 #if REVERB_USED == SMALL_MEMORY_REVERB
@@ -899,7 +899,7 @@ typedef struct ChorusParams ChorusParams;
 ChorusParams* GetChorusParams();
 void InitChorus();
 void ShutdownChorus();
-XSDWORD GetChorusReadIncrement(XSDWORD readIndex, long writeIndex, long nSampleFrames, XSDWORD phase);
+XSDWORD GetChorusReadIncrement(XSDWORD readIndex, XSDWORD writeIndex, XSDWORD nSampleFrames, XSDWORD phase);
 void SetupChorusDelay();
 void RunChorus(XSDWORD *sourceP, XSDWORD *destP, int nSampleFrames);
 
@@ -970,7 +970,7 @@ struct ParametricEq
 
     float   mControlList[3];
     
-    double  pi;
+    float  pi;
 
     float   sweep;
     
@@ -1006,7 +1006,7 @@ struct ResonantFilterParams
 
     float   mControlList[2];
     
-    double  pi;
+    float  pi;
 
     float   sweep;
     
@@ -1044,7 +1044,7 @@ void PV_Generate8outputMono(OUTSAMPLE8 * dest8);
 void PV_Generate16outputStereo(OUTSAMPLE16 * dest16);
 void PV_Generate16outputMono(OUTSAMPLE16 * dest16);
 
-long PV_DoubleBufferCallbackAndSwap(GM_DoubleBufferCallbackPtr doubleBufferCallback, 
+XSDWORD PV_DoubleBufferCallbackAndSwap(GM_DoubleBufferCallbackPtr doubleBufferCallback, 
                                         GM_Voice *this_voice);
 void PV_CalculateStereoVolume(GM_Voice *this_voice, XSDWORD *pLeft, XSDWORD *pRight);
 void PV_CalculateMonoVolume(GM_Voice *pVoice, XSDWORD *pVolume);
@@ -1221,7 +1221,7 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                                     XLongResourceID theID,
                                      XBankToken bankToken,
                                      void *theExternalX,
-                                     long patchSize,
+                                     XSDWORD patchSize,
                                      OPErr *pErr);
 
 // unload an instrument and remove all of its memory and optionally the samples
@@ -1249,8 +1249,8 @@ U3232 PV_GetWavePitchU3232(XFIXED notePitch);
 #endif
 
 // get voice sample position from active voice
-unsigned long PV_GetPositionFromVoice(GM_Voice *pVoice);
-void PV_SetPositionFromVoice(GM_Voice *pVoice, unsigned long pos);
+XDWORD PV_GetPositionFromVoice(GM_Voice *pVoice);
+void PV_SetPositionFromVoice(GM_Voice *pVoice, XDWORD pos);
 
 // GenModFiles.c
 void PV_WriteModOutput(Rate q, XBOOL stereo);
@@ -1265,7 +1265,7 @@ void PV_InsertBankSelect(GM_Song *pSong, short channel, short currentTrack);
 void PV_CallSongCallback(void *threadContext, GM_Song *theSong, XBOOL clearCallback);
 
 // GenSynth.c
-long PV_ModifyVelocityFromCurve(GM_Song *pSong, long volume);
+XSDWORD PV_ModifyVelocityFromCurve(GM_Song *pSong, XSDWORD volume);
 
 // GenSample.c
 GM_Voice * PV_GetVoiceFromSoundReference(VOICE_REFERENCE reference);

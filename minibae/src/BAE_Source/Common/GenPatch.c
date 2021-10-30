@@ -246,7 +246,7 @@
 #include "SMOD.h"
 
 // SMOD jump table
-static void (*smod_functions[])(unsigned char *pSample, long length, long param1, long param2) =
+static void (*smod_functions[])(unsigned char *pSample, XSDWORD length, XSDWORD param1, XSDWORD param2) =
 {
     VolumeAmpScaler,        //  Amplifier/Volume Scaler
     NULL,
@@ -273,8 +273,8 @@ static void (*smod_functions[])(unsigned char *pSample, long length, long param1
 ******************************************************************************/
 #if BAE_NOT_USED
 static void PV_ProcessSampleWithSMOD(void *pSample,
-                                     long length,
-                                     long masterID,
+                                     XSDWORD length,
+                                     XSDWORD masterID,
                                      XShortResourceID smodID,
                                      short param1,
                                      short param2)
@@ -391,10 +391,10 @@ static UNIT_TYPE PV_TranslateFromFileToMemoryID(XDWORD fileUnitType)
 
 // Given an external instrument resource and an internal resource type fill the envelope data
 // and if not there, place a default envelope
-static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, long theXSize)
+static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, XSDWORD theXSize)
 {
-    long                    count, count2, lfoCount;
-    long                    size, unitCount, unitType, unitSubCount;
+    XSDWORD                    count, count2, lfoCount;
+    XSDWORD                    size, unitCount, unitType, unitSubCount;
     unsigned short int      data;
     register char           *pData, *pData2;
     register char           *pUnit;
@@ -442,7 +442,7 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                 {
                     count += 4;                             // skip past end token and extra word
                     data = (unsigned short)pData[count] + 1;            // get first string length;
-                    count2 = (long)pData[count+data] + 1;           // get second string length
+                    count2 = (XSDWORD)pData[count+data] + 1;           // get second string length
                     pUnit = (char *) (&pData[count + data + count2]);
                     // NOTE: src will be non aligned, possibly on a byte boundry.
                     break;
@@ -461,7 +461,7 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                     for (count = 0; count < unitCount; count++)
                     {
                         unitType = XGetLong(pUnit) & 0x5F5F5F5F;
-                        pUnit += 4; // long
+                        pUnit += 4; // XSDWORD
                         switch (unitType)
                         {
                             case INST_EXPONENTIAL_CURVE:
@@ -666,7 +666,7 @@ static GM_Instrument * PV_CreateInstrumentFromResource(GM_Instrument *theMaster,
 
     if (theSound)
     {
-        theI = (GM_Instrument *)XNewPtr((long)sizeof(GM_Instrument));
+        theI = (GM_Instrument *)XNewPtr((XSDWORD)sizeof(GM_Instrument));
         if (theI)
         {
             theI->u.w.theWaveform = (SBYTE *)theSound;
@@ -733,13 +733,13 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                                  XLongResourceID theID,
                                  XBankToken bankToken,
                                  void *theExternalX,
-                                 long patchSize,
+                                 XSDWORD patchSize,
                                  OPErr *pErr)
 {
     GM_Instrument *         theI;
     GM_Instrument *         theS;
     InstrumentResource *    theX;
-    long                    size;
+    XSDWORD                    size;
     short int               count;
     XPTR                    theSound;
     KeySplit                theXSplit;
@@ -764,7 +764,7 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
             // NOTE:    I know this is awfull, but if you change it things will break. The
             //          internal ID values are all 32 bit signed, and some of the external
             //          file structures are 16 bit signed.
-            theSampleID = (long) ((short) XGetShort(&theX->sndResourceID));
+            theSampleID = (XSDWORD) ((short) XGetShort(&theX->sndResourceID));
 
             //  First, if there is no entry in the cache for this ID, create it.
             //  Next, increment refcount and grab it's pointer.
@@ -790,7 +790,7 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
             
             if (theSound)
             {
-                theI = (GM_Instrument *)XNewPtr((long)sizeof(GM_Instrument));
+                theI = (GM_Instrument *)XNewPtr((XSDWORD)sizeof(GM_Instrument));
                 if (theI)
                 {
                     theI->u.w.theWaveform = (SBYTE *)theSound;
@@ -843,7 +843,7 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                         if ( (theI->enableSoundModifier) && (theI->u.w.bitSize == 8) && (theI->u.w.channels == 1) )
                         {
                     #if DEBUG_DISPLAY_PATCHES
-                            BAE_PRINTF("---->Processing instrument %ld with SMOD %ld\n", (long)theID, (long)theI->smodResourceID);
+                            BAE_PRINTF("---->Processing instrument %ld with SMOD %ld\n", (XSDWORD)theID, (XSDWORD)theI->smodResourceID);
                     #endif
                             PV_ProcessSampleWithSMOD(theI->u.w.theWaveform,
                                                     theI->u.w.waveSize,
@@ -864,7 +864,7 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
         else
         {   // Keysplits
         #if DEBUG_DISPLAY_PATCHES
-            BAE_PRINTF("----->Processing %ld keysplits\n", (long)XGetShort(&theX->keySplitCount));
+            BAE_PRINTF("----->Processing %ld keysplits\n", (XSDWORD)XGetShort(&theX->keySplitCount));
         #endif
             size = XGetShort(&theX->keySplitCount) * sizeof(GM_KeymapSplit);
             size += sizeof(GM_KeymapSplitInfo);
@@ -924,9 +924,9 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                     if (GM_IsInstrumentRangeUsed(pSong, theID, (INT16)theXSplit.lowMidi, (INT16)theXSplit.highMidi))
                     {
                     #if DEBUG_DISPLAY_PATCHES
-                        BAE_PRINTF("------->Keysplit %ld low %ld high %ld\n", (long)count, 
-                                                                    (long)theXSplit.lowMidi, 
-                                                                    (long)theXSplit.highMidi);
+                        BAE_PRINTF("------->Keysplit %ld low %ld high %ld\n", (XSDWORD)count, 
+                                                                    (XSDWORD)theXSplit.lowMidi, 
+                                                                    (XSDWORD)theXSplit.highMidi);
                     #endif
                         theS =  PV_CreateInstrumentFromResource(theI,
                                                                 (XSampleID) theXSplit.sndResourceID,
@@ -970,7 +970,7 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                                 if ( (theS->enableSoundModifier) && (theS->u.w.bitSize == 8) && (theS->u.w.channels == 1) )
                                 {
                                 #if DEBUG_DISPLAY_PATCHES
-                                    BAE_PRINTF("----->Processing instrument %ld with SMOD %ld\n", (long)theID, (long)theI->smodResourceID);
+                                    BAE_PRINTF("----->Processing instrument %ld with SMOD %ld\n", (XSDWORD)theID, (XSDWORD)theI->smodResourceID);
                                 #endif
                                     PV_ProcessSampleWithSMOD(   theS->u.w.theWaveform,
                                                             theS->u.w.waveSize,
@@ -985,7 +985,7 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                     }
                 }
             #if DEBUG_DISPLAY_PATCHES
-                BAE_PRINTF("-------->INST info: masterRootKey %ld\n", (long)theI->masterRootKey);
+                BAE_PRINTF("-------->INST info: masterRootKey %ld\n", (XSDWORD)theI->masterRootKey);
             #endif
             }
             else
@@ -1274,7 +1274,7 @@ OPErr GM_LoadSongInstruments(GM_Song *theSong,
                              XBankToken bankToken,
                              XBOOL loadInstruments)
 {
-    register long       count, instCount;
+    register XSDWORD       count, instCount;
     XLongResourceID     realInstrument, fallbackInstrument;
     XBOOL               loopSongSave;
     OPErr               theErr;
@@ -1444,7 +1444,7 @@ OPErr GM_LoadSongInstruments(GM_Song *theSong,
                             if (theErr)
                             {
                             #if DEBUG_DISPLAY_PATCHES
-                                BAE_PRINTF("Failed to load instrument %ld (%ld)\n", (long)realInstrument, (long)theErr);
+                                BAE_PRINTF("Failed to load instrument %ld (%ld)\n", (XSDWORD)realInstrument, (XSDWORD)theErr);
                             #endif
                                 break;
                             }
@@ -1533,7 +1533,7 @@ void GM_SetUsedInstrumentRange(GM_Song *pSong, XLongResourceID thePatch, int sta
 // Set the patch & key used bit. Pass -1 in theKey to set all the keys in that patch
 void GM_SetUsedInstrument(GM_Song *pSong, XLongResourceID thePatch, INT16 theKey, XBOOL used)
 {
-    unsigned long   bit, count;
+    XDWORD   bit, count;
 
     if (pSong && pSong->pUsedPatchList)
     {
@@ -1542,7 +1542,7 @@ void GM_SetUsedInstrument(GM_Song *pSong, XLongResourceID thePatch, INT16 theKey
     #endif
         if (theKey != -1)
         {
-            bit = ((long)thePatch * 128L) + (long)theKey;
+            bit = ((XSDWORD)thePatch * 128L) + (XSDWORD)theKey;
 //          if (bit < (MAX_INSTRUMENTS*MAX_BANKS*128L))
             {
                 if (used)
@@ -1559,7 +1559,7 @@ void GM_SetUsedInstrument(GM_Song *pSong, XLongResourceID thePatch, INT16 theKey
         {
             for (count = 0; count < MAX_INSTRUMENTS; count++)
             {
-                bit = ((long)thePatch * 128L) + count;
+                bit = ((XSDWORD)thePatch * 128L) + count;
 //              if (bit < (MAX_INSTRUMENTS*MAX_BANKS*128L))
                 {
                     if (used)
@@ -1583,10 +1583,10 @@ XBOOL GM_IsInstrumentUsed(GM_Song *pSong, XLongResourceID thePatch, INT16 theKey
 // faster code
     if (pSong && pSong->pUsedPatchList)
     {
-        register unsigned long   bit, count,byteIndex,bitIndex;
+        register XDWORD   bit, count,byteIndex,bitIndex;
         register unsigned char  *patchlist = (unsigned char*)pSong->pUsedPatchList;
 
-        bit = (long)thePatch << 7;
+        bit = (XSDWORD)thePatch << 7;
         if (theKey != -1)
         {
             bit += theKey;
@@ -1616,7 +1616,7 @@ XBOOL GM_IsInstrumentUsed(GM_Song *pSong, XLongResourceID thePatch, INT16 theKey
     }
     return TRUE;
 #else
-    register unsigned long  bit, count;
+    register XDWORD  bit, count;
     register XBOOL      used;
 
     used = FALSE;
@@ -1624,7 +1624,7 @@ XBOOL GM_IsInstrumentUsed(GM_Song *pSong, XLongResourceID thePatch, INT16 theKey
     {
         if (theKey != -1)
         {
-            bit = ((long)thePatch * 128L) + (long)theKey;
+            bit = ((XSDWORD)thePatch * 128L) + (XSDWORD)theKey;
 //          if (bit < (MAX_INSTRUMENTS*MAX_BANKS*128L))
             {
                 used = XTestBit((void *)pSong->pUsedPatchList, bit);
@@ -1634,7 +1634,7 @@ XBOOL GM_IsInstrumentUsed(GM_Song *pSong, XLongResourceID thePatch, INT16 theKey
         {
             for (count = 0; count < MAX_INSTRUMENTS; count++)
             {
-                bit = ((long)thePatch * 128L) + count;
+                bit = ((XSDWORD)thePatch * 128L) + count;
 //              if (bit < (MAX_INSTRUMENTS*MAX_BANKS*128L))
                 {
                     used = XTestBit((void *)pSong->pUsedPatchList, bit);
@@ -1656,7 +1656,7 @@ XBOOL GM_IsInstrumentUsed(GM_Song *pSong, XLongResourceID thePatch, INT16 theKey
 
 void GM_GetInstrumentUsedRange(GM_Song *pSong, XLongResourceID thePatch, SBYTE *pUsedArray)
 {
-    register unsigned long bit, count;
+    register XDWORD bit, count;
 
     if (pSong)
     {
@@ -1664,7 +1664,7 @@ void GM_GetInstrumentUsedRange(GM_Song *pSong, XLongResourceID thePatch, SBYTE *
         {
             for (count = 0; count < MAX_INSTRUMENTS; count++)
             {
-                bit = ((long)thePatch * 128L) + count;
+                bit = ((XSDWORD)thePatch * 128L) + count;
                 pUsedArray[count] = XTestBit((void *)pSong->pUsedPatchList, bit);
             }
         }
@@ -1711,9 +1711,9 @@ XBOOL GM_IsInstrumentRangeUsed(GM_Song *pSong, XLongResourceID thePatch, INT16 t
     }
 
 #if DEBUG_DISPLAY_PATCHES
-    BAE_PRINTF("---->Testing INST %ld - key range (%ld to %ld) = %s\n", (long)thePatch,
-                                                                            (long)theLowKey,
-                                                                            (long)theHighKey,
+    BAE_PRINTF("---->Testing INST %ld - key range (%ld to %ld) = %s\n", (XSDWORD)thePatch,
+                                                                            (XSDWORD)theLowKey,
+                                                                            (XSDWORD)theHighKey,
                                                                             (used) ? "VALID" : "FAILED");
 #endif
     return used;

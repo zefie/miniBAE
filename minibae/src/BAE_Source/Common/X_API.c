@@ -548,7 +548,7 @@ void * XPtoCstr(register void *pstr)
 {
     register char * source;
     register char * dest;
-    register long   length;
+    register XSDWORD   length;
     char            data[256];
 
     if (pstr)
@@ -626,7 +626,7 @@ XPTR XResizePtr(XPTR ptr, XDWORD size)
 
         if (newPtr && ptr)
         {
-        long        copyLength;
+        XSDWORD        copyLength;
         
             copyLength = currentSize;
             if (copyLength > size)
@@ -677,7 +677,7 @@ XPTR XNewPtr(XDWORD size)
 
 void XDisposePtr(XPTR data)
 {
-    long            size;
+    XSDWORD            size;
     XPTR            osAllocatedData;
     XPI_Memblock    *pBlock;
 
@@ -1464,7 +1464,7 @@ XFILE XFileOpenResource(XFILENAME *file, XBOOL readOnly)
                     XPutLong(&map.mapID, XFILERESOURCE_ID);
                     XPutLong(&map.version, 1);
                     XPutLong(&map.totalResources, 0);
-                    XFileWrite((XFILE)pReference, &map, (long)sizeof(XFILERESOURCEMAP));
+                    XFileWrite((XFILE)pReference, &map, (XSDWORD)sizeof(XFILERESOURCEMAP));
                 }
             }
         }
@@ -1737,7 +1737,7 @@ static XBYTE * PV_GetFilePositionFromMemoryResource(XFILE fileRef)
 XDWORD XFileGetPosition(XFILE fileRef)
 {
     XFILENAME   *pReference;
-    long        pos;
+    XSDWORD        pos;
 
     pos = (XDWORD)-1;
     pReference = (XFILENAME *)fileRef;
@@ -1799,7 +1799,7 @@ XDWORD XFileGetLength(XFILE fileRef)
 static XFILE_CACHED_ITEM * PV_XGetCacheEntry(XFILE fileRef, XResourceType resourceType, XLongResourceID resourceID)
 {
     XFILENAME           *pReference;
-    long                count, total;
+    XSDWORD                count, total;
     XFILERESOURCECACHE  *pCache;
     XFILE_CACHED_ITEM   *pItem;
 
@@ -1831,7 +1831,7 @@ static XFILE_CACHED_ITEM * PV_XGetCacheEntry(XFILE fileRef, XResourceType resour
 static XFILE_CACHED_ITEM * PV_XGetNamedCacheEntry(XFILE fileRef, XResourceType resourceType, void *cName)
 {
     XFILENAME           *pReference;
-    long                count, total;
+    XSDWORD                count, total;
     XFILERESOURCECACHE  *pCache;
     XFILE_CACHED_ITEM   *pItem;
     XERR                err=0;
@@ -1951,7 +1951,7 @@ char *  XGetResourceNameOnly(XFILE fileRef, XResourceType resourceType, XLongRes
     XERR                err;
     XFILERESOURCEMAP    map;
     XDWORD                data, next;
-    long                count, total;
+    XSDWORD                count, total;
     char                tempPascalName[256];
     XFILE_CACHED_ITEM   *pCacheItem;
 
@@ -2083,7 +2083,7 @@ XERR XReadPartialFileResource(XFILE fileRef, XResourceType resourceType, XLongRe
     XERR                err;
     XFILERESOURCEMAP    map;
     XDWORD                data, next;
-    long                count, total;
+    XSDWORD                count, total;
     XPTR                pData;
     char                tempPascalName[256];
     XFILE_CACHED_ITEM   *pCacheItem;
@@ -2257,7 +2257,7 @@ XPTR XGetFileResource(XFILE fileRef, XResourceType resourceType, XLongResourceID
     XERR                err;
     XFILERESOURCEMAP    map;
     XDWORD                data, next;
-    long                count, total;
+    XSDWORD                count, total;
     XPTR                pData;
     char                tempPascalName[256];
     XFILE_CACHED_ITEM   *pCacheItem;
@@ -2453,7 +2453,7 @@ static XBOOL PV_AddToAccessCache(XFILE fileRef, XFILE_CACHED_ITEM *cacheItemPtr 
 {
     XFILENAME           *pReference;
     XFILERESOURCECACHE  *pCache,*newCache;
-    long            resCount;
+    XSDWORD            resCount;
     XFILE_CACHED_ITEM   *pItem;
 
     pReference = (XFILENAME *)fileRef;
@@ -2491,7 +2491,7 @@ XFILERESOURCECACHE * XCreateAccessCache(XFILE fileRef)
     XERR                err;
     XFILERESOURCEMAP    map;
     XDWORD                data, next;
-    long                count, total;
+    XSDWORD                count, total;
     XFILERESOURCECACHE  *pCache;
     char                pPName[256];
 
@@ -2567,7 +2567,7 @@ XFILERESOURCECACHE * XCreateAccessCache(XFILE fileRef)
 void XSwapLongsInAccessCache(XFILERESOURCECACHE *pCache, XBOOL inFileOrder)
 {
 #if X_WORD_ORDER != FALSE
-long                count;
+XSDWORD                count;
 XFILE_CACHED_ITEM   *item;
 
     count = pCache->totalResources;
@@ -2672,7 +2672,7 @@ XDWORD XCountTypes(XFILE fileRef)
     XERR                err;
     XFILERESOURCEMAP    map;
     XDWORD                data, next;
-    long                count, total;
+    XSDWORD                count, total;
     XDWORD                *pTypes;
 
     err = 0;
@@ -2762,7 +2762,7 @@ XResourceType XGetIndexedType(XFILE fileRef, XDWORD resourceIndex)
     XERR                err;
     XFILERESOURCEMAP    map;
     XDWORD                data, next;
-    long                count, total;
+    XSDWORD                count, total;
     XDWORD                *pTypes;
 
 #if X_PLATFORM == X_MACINTOSH_9
@@ -3186,7 +3186,7 @@ XBOOL XCleanResourceFile(XFILE fileRef)
             //Update the resource map
             XFileSetPosition(fileRef, 0L);      // at start
             XPutLong(&map.totalResources, outResTotal);
-            err = XFileWrite(fileRef, &map, (long)sizeof(XFILERESOURCEMAP));
+            err = XFileWrite(fileRef, &map, (XSDWORD)sizeof(XFILERESOURCEMAP));
 
 #if USE_FILE_CACHE != 0
             if (err == 0)
@@ -3220,7 +3220,7 @@ XBOOL XDeleteFileResource(XFILE fileRef, XResourceType resourceType, XLongResour
     XERR                err=0;
     XFILERESOURCEMAP    map;
     XDWORD                data, next;
-    long                count, total;
+    XSDWORD                count, total;
     XDWORD                whereType, whereID;
     XFILE_CACHED_ITEM   *pCachedItem;
 
@@ -3384,7 +3384,7 @@ XDWORD XCountFileResourcesOfType(XFILE fileRef, XResourceType theType)
     XERR                err;
     XFILERESOURCEMAP    map;
     XDWORD                data, next;
-    long                count, total;
+    XSDWORD                count, total;
     XFILERESOURCECACHE  *pCache;
     XFILE_CACHED_ITEM   *pCacheItem;
 
@@ -3463,7 +3463,7 @@ XDWORD XCountFileResourcesOfType(XFILE fileRef, XResourceType theType)
 XPTR XGetIndexedResource(XResourceType resourceType, XLongResourceID *pReturnedID, XDWORD resourceIndex,
                                 void *pResourceName, XDWORD *pReturnedResourceSize)
 {
-    long    count;
+    XSDWORD    count;
     XPTR    pData;
 
     pData = NULL;
@@ -3487,7 +3487,7 @@ XPTR XGetIndexedResource(XResourceType resourceType, XLongResourceID *pReturnedI
         Handle      data;
         short       shortID;
         char        pPName[256];
-        long        total;
+        XSDWORD        total;
 
         data = Get1IndResource(resourceType, resourceIndex + 1);
         if (data)
@@ -3531,7 +3531,7 @@ XPTR XGetIndexedFileResource(XFILE fileRef, XResourceType resourceType, XLongRes
     XERR                err;
     XFILERESOURCEMAP    map;
     XDWORD                data, next;
-    long                count, total, typeCount;
+    XSDWORD                count, total, typeCount;
     XPTR                pData;
     char                pPName[256];
     XFILERESOURCECACHE  *pCache;
@@ -3740,7 +3740,7 @@ XERR XGetUniqueFileResourceID(XFILE fileRef, XResourceType resourceType, XLongRe
     XFILENAME           *pReference;
     XERR                err;
     XFILERESOURCECACHE  *pCache;
-    long                count, total, idCount;
+    XSDWORD                count, total, idCount;
     XDWORD              next, data;
     XLongResourceID     *pIDs;
     XFILERESOURCEMAP    map;
@@ -4126,7 +4126,7 @@ XPTR XGetNamedResource(XResourceType resourceType, void *cName, XDWORD *pReturne
     XPTR                pData;
     XFILE_CACHED_ITEM   *pCacheItem;
     char                pResourceName[256];
-    long                count, total;
+    XSDWORD                count, total;
     int                 fileCount;
     XERR                err;
     XFILE               fileRef;
