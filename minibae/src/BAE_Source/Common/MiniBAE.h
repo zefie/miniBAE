@@ -90,6 +90,8 @@
 #ifndef BAE_AUDIO
 #define BAE_AUDIO
 
+#include <GenSnd.h>
+
 #ifdef __cplusplus
     extern "C" {
 #endif
@@ -1810,6 +1812,7 @@ BAEResult           BAESong_GetMixer(BAESong song,
 BAEResult           BAESong_SetCallback(BAESong sound, BAE_SongCallbackPtr pCallback, void *callbackReference);
 BAEResult           BAESong_GetCallback(BAESong sound, BAE_SongCallbackPtr *pResult);
 
+BAEResult	    BAESong_SetMetaEventCallback(BAESong song, GM_SongMetaCallbackProcPtr  pCallback, unsigned long callbackReference);
 BAEResult           BAESong_GetControllerCallback(BAESong song, BAE_SongControllerCallbackPtr *pResult);
 BAEResult           BAESong_SetControllerCallback(BAESong song, BAE_SongControllerCallbackPtr pCallback, void *callbackReference, short int controller);
 

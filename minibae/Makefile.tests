@@ -43,3 +43,8 @@ test9: $(TARGET_BIN)
 	@mkdir -p tests
 	$(TEST_BIN) ../extras/TestSuite/world1.mid -p ../extras/TestSuite/minibae-wtv.hsb -mr 44100 -o $(TEST_OUT_DIR)test_44100.wav
 
+test10: $(TARGET_BIN)
+	# test karaoke
+	@mkdir -p tests
+	$(TEST_BIN) ../extras/TestSuite/allthethingsshesaid.kar -mr 44100 -d -o $(TEST_OUT_DIR)test_karaoke.wav
+

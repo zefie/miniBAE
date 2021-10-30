@@ -211,9 +211,9 @@ struct sBAESong
 
     BAE_Mutex               mLock;
     BAE_SongCallbackPtr     mCallback;
-    void                    *mCallbackReference;
+    void	            *mCallbackReference;
 
-    BAE_SongControllerCallbackPtr   
+    BAE_SongControllerCallbackPtr
                             mControllerCallback;
     void                    *mControllerCallbackReference;
 
@@ -7411,13 +7411,37 @@ static void PV_DefaultSongDoneCallback(void *threadContext, GM_Song *pSong, void
     }
 }
 
+
+
+// song callbacks
+static void PV_BAESong_SetMetaEventCallback(BAESong song, GM_SongMetaCallbackProcPtr pCallback, unsigned long callbackReference) {
+	GM_SetSongMetaEventCallback(song->pSong, pCallback, callbackReference);
+}
+
+BAEResult BAESong_SetMetaEventCallback(BAESong song, GM_SongMetaCallbackProcPtr pCallback, unsigned long callbackReference)
+{
+    OPErr       err;
+
+    err = NO_ERR;
+    if ( (song) && (song->mID == OBJECT_ID) )
+    {
+        BAE_AcquireMutex(song->mLock);
+        PV_BAESong_SetMetaEventCallback(song, pCallback, callbackReference);
+        BAE_ReleaseMutex(song->mLock);
+    }
+    else
+    {
+        err = NULL_OBJECT;
+    }
+    return BAE_TranslateOPErr(err);
+}
+
 static void PV_BAESong_SetCallback(BAESong song, BAE_SongCallbackPtr pCallback, void *callbackReference)
 {
     song->mCallback = pCallback;
     song->mCallbackReference = callbackReference;
 }
 
-// song callbacks
 BAEResult BAESong_SetCallback(BAESong song, BAE_SongCallbackPtr pCallback, void *callbackReference)
 {
     OPErr       err;

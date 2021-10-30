@@ -3293,7 +3293,7 @@ UpdateDeltaTime:
         goto ServeNextTrack;
 GetMIDIevent:
         midi_byte = *midi_stream++;
-        if (midi_byte == 0xFF)
+	if (midi_byte == 0xFF)
         {
             /* Meta Event
             */
@@ -3332,6 +3332,19 @@ GetMIDIevent:
                 case 0x04:
                 // Lyric event
                 case 0x05:
+#if SUPPORT_KARAOKE
+ 		    // Karaoke is not in sync when played back at 1x speed
+		    // Needs more work
+                    temp_midi_stream = midi_stream;
+                    value = PV_ReadVariableLengthMidi(&temp_midi_stream);   // get length
+                    // there might be a problem here. need to relook into this.
+                    // maybe we should only do these callbacks during NORMAL_SCAN??
+                    temp_midi_stream[value] = '\0';
+                    PV_CallSongMetaEventCallback(threadContext, pSong, midi_byte, (void *)temp_midi_stream, value, (short)currentTrack);
+
+//                  BAE_PRINTF("lyric event: %s\n", (char *)temp_midi_stream);
+		    goto SkipMeta;
+#endif
                 // Cue point event
                 case 0x07:
                 // program name
@@ -3345,7 +3358,7 @@ GetMIDIevent:
                     // there might be a problem here. need to relook into this.
                     // maybe we should only do these callbacks during NORMAL_SCAN??
                     PV_CallSongMetaEventCallback(threadContext, pSong, midi_byte, (void *)temp_midi_stream, value, (short)currentTrack);
-                    
+
                     if (midi_byte == 0x06)
                     {
                         if (PV_ProcessMetaMarkerEvents(pSong, (char *)temp_midi_stream, value))

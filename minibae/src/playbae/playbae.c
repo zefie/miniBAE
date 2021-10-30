@@ -157,10 +157,22 @@ static void PV_Idle(BAEMixer theMixer, unsigned long time)
    }
 }
 
+#if _DEBUG
 static void PV_StreamCallback(BAEStream stream, unsigned long reference)
 {
    playbae_dprintf("Stream %p reference %lx done\n", stream, reference);
 }
+
+static void PV_SongCallback(BAESong song, void *reference)
+{
+   playbae_dprintf("Song %p reference %lx done\n", song, reference);
+}
+
+static void PV_SongMetaCallback(BAESong song, void *reference, char markerType, void *pText, long textLength, short currentTrack)
+{
+   playbae_dprintf("Song meta: reference %lx, markerType: %lx, txtlen: %lx, trk: %d, txt: %s\n", reference, markerType, textLength, currentTrack, (char *)pText);
+}
+#endif
 
 static int PV_ParseCommands(int argc, char *argv[], char *command, int getResult, char *result)
 {
@@ -304,7 +316,9 @@ static BAEResult PlayPCMStreamed(BAEMixer theMixer, char *fileName, BAEFileType 
       if (err == BAE_NO_ERROR)
       {
 	 BAEStream_SetVolume(stream, calculateVolume(volume, TRUE));
+#if _DEBUG
          BAEStream_SetCallback(stream, PV_StreamCallback, 0x1234);
+#endif
          err = BAEStream_Start(stream);
          if (err == BAE_NO_ERROR)
          {
@@ -365,10 +379,14 @@ static BAEResult PlayMidi(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED 
       err = BAESong_LoadMidiFromFile(theSong, (BAEPathName)fileName, TRUE);
       if (err == BAE_NO_ERROR)
       {
-	 BAESong_SetVolume(theSong, calculateVolume(volume, TRUE));
          err = BAESong_Start(theSong, 0);
          if (err == BAE_NO_ERROR)
          {
+	    BAESong_SetVolume(theSong, calculateVolume(volume, TRUE));
+#if _DEBUG
+            BAESong_SetCallback(theSong, (BAE_SongCallbackPtr)PV_SongCallback, (void *)0x1234);
+	    BAESong_SetMetaEventCallback(theSong, (GM_SongMetaCallbackProcPtr)PV_SongMetaCallback, 0x1235);
+#endif
 	    if (verboseMode) {
 	            BAESong_DisplayInfo(theSong);
 	    }
@@ -457,6 +475,9 @@ static BAEResult PlayRMF(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED v
       if (err == BAE_NO_ERROR)
       {
 	 BAESong_SetVolume(theSong, calculateVolume(volume, TRUE));
+#if _DEBUG
+         BAESong_SetCallback(theSong, (BAE_SongCallbackPtr)PV_SongCallback, (void *)0x1234);
+#endif
          err = BAESong_Start(theSong, 0);
          if (err == BAE_NO_ERROR)
          {
