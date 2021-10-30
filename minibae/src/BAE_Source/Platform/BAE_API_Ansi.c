@@ -35,7 +35,6 @@
 
 #include <stdio.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <sys/time.h>
@@ -48,12 +47,12 @@
 
 
 // only one of these can be true
-#define USE_ANSI_IO			1
-#define USE_UNIX_IO			0
-#define USE_WINDOWS_IO		0
+#define USE_ANSI_IO			TRUE
+#define USE_UNIX_IO			FALSE
+#define USE_WINDOWS_IO			FALSE
 
 
-// includes for USE_WINDOWS_IO 
+// includes for USE_WINDOWS_IO
 #if USE_WINDOWS_IO
 	#include <windows.h>
 	#include <mmsystem.h>
@@ -63,36 +62,36 @@
 #endif
 
 // includes for USE_UNIX_IO
-#if USE_UNIX_IO
+#if USE_UNIX_IO || USE_UNIX_IO
 	#include <fcntl.h>
 #endif
 
-static unsigned long		g_memory_buoy = 0;			// amount of memory allocated at this moment
+static unsigned long		g_memory_buoy = 0;		// amount of memory allocated at this moment
 static unsigned long		g_memory_buoy_max = 0;
 
-static short int			g_balance = 0;				// balance scale -256 to 256 (left to right)
-static short int			g_unscaled_volume = 256;	// hardware volume in HAE scale
+static short int		g_balance = 0;			// balance scale -256 to 256 (left to right)
+static short int		g_unscaled_volume = 256;	// hardware volume in BAE scale
 
-static long					g_audioByteBufferSize;			// size of audio buffers in bytes
+static long			g_audioByteBufferSize;		// size of audio buffers in bytes
 
-static long					g_shutDownDoubleBuffer;
-static long					g_activeDoubleBuffer;
+static long			g_shutDownDoubleBuffer;
+static long			g_activeDoubleBuffer;
 
 // $$kk: 05.06.98: made lastPos a global variable
-static long					g_lastPos;
+static long			g_lastPos;
 
  // number of samples per audio frame to generate
-long						g_audioFramesToGenerate;
+long				g_audioFramesToGenerate;
 
 // How many audio frames to generate at one time
-static unsigned int			g_synthFramesPerBlock;	// setup upon runtime
+static unsigned int		g_synthFramesPerBlock;	// setup upon runtime
 
 
 // **** System setup and cleanup functions
 // Setup function. Called before memory allocation, or anything serious. Can be used to
 // load a DLL, library, etc.
 // return 0 for ok, or -1 for failure
-int HAE_Setup(void)
+int BAE_Setup(void)
 {
 	return 0;
 }
@@ -100,14 +99,14 @@ int HAE_Setup(void)
 // Cleanup function. Called after all memory and the last buffers are deallocated, and
 // audio hardware is released. Can be used to unload a DLL, library, etc.
 // return 0 for ok, or -1 for failure
-int HAE_Cleanup(void)
+int BAE_Cleanup(void)
 {
 	return 0;
 }
 
 // **** Memory management
 // allocate a block of locked, zeroed memory. Return a pointer
-void * HAE_Allocate(unsigned long size)
+void * BAE_Allocate(unsigned long size)
 {
 	void *data = NULL;
 	if (size)
@@ -129,8 +128,8 @@ void * HAE_Allocate(unsigned long size)
 	return data;
 }
 
-// dispose of memory allocated with HAE_Allocate
-void HAE_Deallocate(void * memoryBlock)
+// dispose of memory allocated with BAE_Allocate
+void BAE_Deallocate(void * memoryBlock)
 {
 	if (memoryBlock)
 	{
@@ -156,15 +155,15 @@ unsigned long BAE_GetMaxSizeOfMemoryUsed(void)
 // causing a memory protection
 // fault.
 // return 0 for valid, or 1 for bad pointer, or 2 for not supported.
-int HAE_IsBadReadPointer(void *memoryBlock, unsigned long size)
+int BAE_IsBadReadPointer(void *memoryBlock, unsigned long size)
 {
 	// return (IsBadReadPtr(memoryBlock, size)) ? 1 : 0;
 	return 2;
 }
 
-// this will return the size of the memory pointer allocated with HAE_Allocate. Return
+// this will return the size of the memory pointer allocated with BAE_Allocate. Return
 // 0 if you don't support this feature
-unsigned long HAE_SizeOfPointer(void * memoryBlock)
+unsigned long BAE_SizeOfPointer(void * memoryBlock)
 {
 	return 0;
 }
@@ -173,7 +172,7 @@ unsigned long HAE_SizeOfPointer(void * memoryBlock)
 // special block move speed ups, various hardware has available.
 // NOTE:	Must use a function like memmove that insures a valid copy in the case
 //			of overlapping memory blocks.
-void HAE_BlockMove(void * source, void * dest, unsigned long size)
+void BAE_BlockMove(void * source, void * dest, unsigned long size)
 {
 	if (source && dest && size)
 	{
@@ -183,33 +182,33 @@ void HAE_BlockMove(void * source, void * dest, unsigned long size)
 
 // **** Audio Card modifiers
 // Return 1 if stereo hardware is supported, otherwise 0.
-int HAE_IsStereoSupported(void)
+int BAE_IsStereoSupported(void)
 {
 	return 1;
 }
 
 // Return 1, if sound hardware support 16 bit output, otherwise 0.
-int HAE_Is16BitSupported(void)
+int BAE_Is16BitSupported(void)
 {
 	return 1;
 }
 
 // Return 1, if sound hardware support 8 bit output, otherwise 0.
-int HAE_Is8BitSupported(void)
+int BAE_Is8BitSupported(void)
 {
 	return 1;
 }
 
 // returned balance is in the range of -256 to 256. Left to right. If you're hardware doesn't support this
 // range, just scale it.
-short int HAE_GetHardwareBalance(void)
+short int BAE_GetHardwareBalance(void)
 {
 	return g_balance;
 }
 
 // 'balance' is in the range of -256 to 256. Left to right. If you're hardware doesn't support this
 // range, just scale it.
-void HAE_SetHardwareBalance(short int balance)
+void BAE_SetHardwareBalance(short int balance)
 {
    // pin balance to box
    if (balance > 256)
@@ -224,22 +223,33 @@ void HAE_SetHardwareBalance(short int balance)
 }
 
 // returned volume is in the range of 0 to 256
-short int HAE_GetHardwareVolume(void)
+short int BAE_GetHardwareVolume(void)
 {
 	return g_unscaled_volume;
 }
 
 // newVolume is in the range of 0 to 256
-void HAE_SetHardwareVolume(short int newVolume)
+void BAE_SetHardwareVolume(short int newVolume)
 {
-	g_unscaled_volume = newVolume;
+    unsigned long   volume;
+
+    // pin volume
+    if (newVolume > 256)
+    {
+        newVolume = 256;
+    }
+    if (newVolume < 0)
+    {
+        newVolume = 0;
+    }
+    g_unscaled_volume = newVolume;
 }
 
 
 
 // **** Timing services
 // return microseconds
-unsigned long HAE_Microseconds(void)
+unsigned long BAE_Microseconds(void)
 {
 #if USE_WINDOWS_IO
 	static unsigned long	starttick = 0;
@@ -274,29 +284,42 @@ unsigned long HAE_Microseconds(void)
 	}
 	return (time - starttick);
 #else
-	return 0;
+   static int           firstTime = TRUE;
+   static unsigned long offset    = 0;
+   struct timeval       tv;
+
+   if (firstTime)
+   {
+      gettimeofday(&tv, NULL);
+      offset    = tv.tv_sec;
+      firstTime = FALSE;
+   }
+   gettimeofday(&tv, NULL);
+   return(((tv.tv_sec - offset) * 1000000UL) + tv.tv_usec);
 #endif
 }
 
 // wait or sleep this thread for this many microseconds
 // CLS??: If this function is called from within the frame thread and
 // JAVA_THREAD is non-zero, we'll probably crash.
-void HAE_WaitMicroseconds(unsigned long waitAmount)
+void BAE_WaitMicroseconds(unsigned long waitAmount)
 {
 #if USE_WINDOWS_IO
 	unsigned long	ticks;
 
-	ticks = HAE_Microseconds() + waitAmount;
-	while (HAE_Microseconds() < ticks)
+	ticks = BAE_Microseconds() + waitAmount;
+	while (BAE_Microseconds() < ticks)
 	{
 		Sleep(0);	// Give up the rest of this time slice to other threads
 	}
+#else
+	usleep(waitAmount);
 #endif
 }
 
 // If no thread support, this will be called during idle times. Used for host
 // rendering without threads.
-void HAE_Idle(void *userContext)
+void BAE_Idle(void *userContext)
 {
 	userContext;
 }
@@ -305,9 +328,9 @@ void HAE_Idle(void *userContext)
 // Create a file, delete orignal if duplicate file name.
 // Return -1 if error
 
-// Given the fileNameSource that comes from the call HAE_FileXXXX, copy the name
+// Given the fileNameSource that comes from the call BAE_FileXXXX, copy the name
 // in the native format to the pointer passed fileNameDest.
-void HAE_CopyFileNameNative(void *fileNameSource, void *fileNameDest)
+void BAE_CopyFileNameNative(void *fileNameSource, void *fileNameDest)
 {
 	char *dest;
 	char *src;
@@ -331,7 +354,7 @@ void HAE_CopyFileNameNative(void *fileNameSource, void *fileNameDest)
 	}
 }
 
-long HAE_FileCreate(void *fileName)
+long BAE_FileCreate(void *fileName)
 {
 
 	
@@ -367,7 +390,7 @@ long HAE_FileCreate(void *fileName)
 #endif
 }
 
-long HAE_FileDelete(void *fileName)
+long BAE_FileDelete(void *fileName)
 {
 #if USE_ANSI_IO
 	remove ((char *)fileName);
@@ -387,7 +410,7 @@ long HAE_FileDelete(void *fileName)
 
 // Open a file
 // Return -1 if error, otherwise file handle
-long HAE_FileOpenForRead(void *fileName)
+long BAE_FileOpenForRead(void *fileName)
 {
 
 	if (fileName)
@@ -418,7 +441,7 @@ long HAE_FileOpenForRead(void *fileName)
 	return -1;
 }
 
-long HAE_FileOpenForWrite(void *fileName)
+long BAE_FileOpenForWrite(void *fileName)
 {
 
 	if (fileName)
@@ -446,7 +469,7 @@ long HAE_FileOpenForWrite(void *fileName)
 	return -1;
 }
 
-long HAE_FileOpenForReadWrite(void *fileName)
+long BAE_FileOpenForReadWrite(void *fileName)
 {
 	if (fileName)
 	{
@@ -477,7 +500,7 @@ long HAE_FileOpenForReadWrite(void *fileName)
 }
 
 // Close a file
-void HAE_FileClose(long fileReference)
+void BAE_FileClose(long fileReference)
 {
 #if  USE_UNIX_IO
 	_close(fileReference);
@@ -490,7 +513,7 @@ void HAE_FileClose(long fileReference)
 
 // Read a block of memory from a file.
 // Return -1 if error, otherwise length of data read.
-long HAE_ReadFile(long fileReference, void *pBuffer, long bufferLength)
+long BAE_ReadFile(long fileReference, void *pBuffer, long bufferLength)
 {
 	if (pBuffer && bufferLength)
 	{
@@ -514,7 +537,7 @@ long HAE_ReadFile(long fileReference, void *pBuffer, long bufferLength)
 
 // Write a block of memory from a file
 // Return -1 if error, otherwise length of data written.
-long HAE_WriteFile(long fileReference, void *pBuffer, long bufferLength)
+long BAE_WriteFile(long fileReference, void *pBuffer, long bufferLength)
 {
 	if (pBuffer && bufferLength)
 	{
@@ -541,7 +564,7 @@ long HAE_WriteFile(long fileReference, void *pBuffer, long bufferLength)
 
 // set file position in absolute file byte position
 // Return -1 if error, otherwise 0.
-long HAE_SetFilePosition(long fileReference, unsigned long filePosition)
+long BAE_SetFilePosition(long fileReference, unsigned long filePosition)
 {
 #if  USE_UNIX_IO
 	return (_lseek(fileReference, filePosition, SEEK_SET) == -1) ? -1 : 0;
@@ -557,7 +580,7 @@ long HAE_SetFilePosition(long fileReference, unsigned long filePosition)
 }
 
 // get file position in absolute file bytes
-unsigned long HAE_GetFilePosition(long fileReference)
+unsigned long BAE_GetFilePosition(long fileReference)
 {
 #if USE_UNIX_IO
 	return _lseek(fileReference, 0, SEEK_CUR);
@@ -569,7 +592,7 @@ unsigned long HAE_GetFilePosition(long fileReference)
 }
 
 // get length of file
-unsigned long HAE_GetFileLength(long fileReference)
+unsigned long BAE_GetFileLength(long fileReference)
 {
 	unsigned long pos = 0;
 	int val = 0;
@@ -592,7 +615,7 @@ unsigned long HAE_GetFileLength(long fileReference)
 }
 
 // set the length of a file. Return 0, if ok, or -1 for error
-int HAE_SetFileLength(long fileReference, unsigned long newSize)
+int BAE_SetFileLength(long fileReference, unsigned long newSize)
 {
 #if USE_UNIX_IO
 	return _chsize(fileReference, newSize);
@@ -602,7 +625,7 @@ int HAE_SetFileLength(long fileReference, unsigned long newSize)
 	int error;
 	
 	error = -1;
-	if (HAE_SetFilePosition(fileReference, newSize) == 0)
+	if (BAE_SetFilePosition(fileReference, newSize) == 0)
 	{
 		error = SetEndOfFile((HANDLE)fileReference) ? 0 : -1;
 	}
@@ -612,13 +635,13 @@ int HAE_SetFileLength(long fileReference, unsigned long newSize)
 
 
 // Return the number of 11 ms buffer blocks that are built at one time.
-int HAE_GetAudioBufferCount(void)
+int BAE_GetAudioBufferCount(void)
 {
 	return g_synthFramesPerBlock;
 }
 
 // Return the number of bytes used for audio buffer for output to card
-long HAE_GetAudioByteBufferSize(void)
+long BAE_GetAudioByteBufferSize(void)
 {
 	return g_audioByteBufferSize;
 }
@@ -640,7 +663,7 @@ int roundUp(int numToRound, int multiple)
     return numToRound + multiple - remainder;
 }
 
-int HAE_AquireAudioCard(void *threadContext, unsigned long sampleRate, unsigned long channels, unsigned long bits)
+int BAE_AquireAudioCard(void *threadContext, unsigned long sampleRate, unsigned long channels, unsigned long bits)
 {
 	// need to set callback which will in turn call BuildMixerSlice every so often
 
@@ -654,39 +677,39 @@ int HAE_AquireAudioCard(void *threadContext, unsigned long sampleRate, unsigned 
 
 // Release and free audio card.
 // return 0 if ok, -1 if failed.
-int HAE_ReleaseAudioCard(void *threadContext)
+int BAE_ReleaseAudioCard(void *threadContext)
 {
 	return 0;
 }
 
 // return device position in samples since the device was opened
-unsigned long HAE_GetDeviceSamplesPlayedPosition(void)
+unsigned long BAE_GetDeviceSamplesPlayedPosition(void)
 {
 	unsigned long pos = 0;
 
 	return pos;
 }
 
-// number of devices. ie different versions of the HAE connection. DirectSound and waveOut
+// number of devices. ie different versions of the BAE connection. DirectSound and waveOut
 // return number of devices. ie 1 is one device, 2 is two devices.
 // NOTE: This function needs to function before any other calls may have happened.
-long HAE_MaxDevices(void)
+long BAE_MaxDevices(void)
 {
 	return 1;
 }
 
-// set the current device. device is from 0 to HAE_MaxDevices()
+// set the current device. device is from 0 to BAE_MaxDevices()
 // NOTE:	This function needs to function before any other calls may have happened.
-//			Also you will need to call HAE_ReleaseAudioCard then HAE_AquireAudioCard
+//			Also you will need to call BAE_ReleaseAudioCard then BAE_AquireAudioCard
 //			in order for the change to take place.
-void HAE_SetDeviceID(long deviceID, void *deviceParameter)
+void BAE_SetDeviceID(long deviceID, void *deviceParameter)
 {
 
 }
 
 // return current device ID
 // NOTE: This function needs to function before any other calls may have happened.
-long HAE_GetDeviceID(void *deviceParameter)
+long BAE_GetDeviceID(void *deviceParameter)
 {
 	return 1;
 }
@@ -699,7 +722,7 @@ long HAE_GetDeviceID(void *deviceParameter)
 //			"WinOS,waveOut,multi threaded"
 //			"WinOS,VxD,low level hardware"
 //			"WinOS,plugin,Director"
-void HAE_GetDeviceName(long deviceID, char *cName, unsigned long cNameLength)
+void BAE_GetDeviceName(long deviceID, char *cName, unsigned long cNameLength)
 {
 
 }
