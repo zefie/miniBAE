@@ -48,6 +48,8 @@ static volatile int interruptPlayBack = FALSE;
 static volatile int verboseMode = FALSE;
 static volatile int silentMode = FALSE;
 static volatile int fadeOut = TRUE;
+static short positionDisplayMultiplier = 10; // 100 = 1 second
+static short positionDisplayMultiplierCounter = 0;
 
 void intHandler(int dummy) {
     interruptPlayBack = TRUE;
@@ -224,6 +226,21 @@ static BAEResult MuteCommaSeperatedChannels(BAESong theSong, char* channelsToMut
 	return err;
 }
 
+
+static void * displayCurrentPosition(unsigned long currentPosition) {
+	int m, s, ms = 0;
+	positionDisplayMultiplierCounter = positionDisplayMultiplierCounter + 1;
+	if (positionDisplayMultiplierCounter == positionDisplayMultiplier) {
+		positionDisplayMultiplierCounter = 0;
+		m = (currentPosition / 60000);
+		s = (currentPosition - (m*60000)) / 1000;
+		ms = (currentPosition - (60000*m) - (s*1000));
+		if (ms > 1 || s > 0 || m > 0) {
+			playbae_printf("Playback position: %02d:%02d.%03d\r",m,s,ms);
+		}
+	}
+}
+
 // PlayPCM()
 // ---------------------------------------------------------------------
 //
@@ -234,7 +251,7 @@ static BAEResult PlayPCM(BAEMixer theMixer, char *fileName, BAEFileType type, BA
    BAESound  sound = BAESound_New(theMixer);
    BAESampleInfo songInfo;
    unsigned long currentPosition;
-   int rate, m, s;
+   int m, s, rate;
    BAE_BOOL  done;
 
    if (sound)
@@ -261,11 +278,12 @@ static BAEResult PlayPCM(BAEMixer theMixer, char *fileName, BAEFileType type, BA
                BAESound_IsDone(sound, &done);
 	       BAESound_GetSamplePlaybackPosition(sound, &currentPosition);
 	       currentPosition = (currentPosition / rate);
-	       m = (currentPosition / 60);
-	       s = (currentPosition - (m*60));
-	       if (s > 0 || m > 0) {
-	          playbae_printf("Playback position: %02d:%02d\r",m,s);
-	       }
+               m = (currentPosition / 60);
+               s = (currentPosition - (m*60));
+               if (s > 0 || m > 0) {
+                  playbae_printf("Playback position: %02d:%02d\r",m,s);
+               }
+
                if (timeLimit > 0) {
  		  if (currentPosition >= timeLimit) {
 			BAESound_Stop(sound, fadeOut);
@@ -368,7 +386,6 @@ static BAEResult PlayMidi(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED 
    BAEResult err;
    BAESong   theSong = BAESong_New(theMixer);
    unsigned long currentPosition;
-   int m, s, ms = 0;
    BAE_BOOL  done;
    if (theSong)
    {
@@ -419,12 +436,7 @@ static BAEResult PlayMidi(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED 
                BAESong_IsDone(theSong, &done);
 	       BAESong_GetMicrosecondPosition(theSong, &currentPosition);
                currentPosition = currentPosition / 1000;
-               m = (currentPosition / 60000);
-               s = (currentPosition - (m*60000)) / 1000;
-               ms = (currentPosition - (60000*m) - (s*1000));
-               if (ms > 1 || s > 0 || m > 0) {
-                  playbae_printf("Playback position: %02d:%02d.%03d\r",m,s,ms);
-               }
+               displayCurrentPosition(currentPosition);
                if (timeLimit > 0) {
                   if (currentPosition > (timeLimit * 1000) - 750) {
                         BAESong_Stop(theSong, fadeOut);
@@ -466,7 +478,6 @@ static BAEResult PlayRMF(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED v
    BAEResult err;
    BAESong   theSong = BAESong_New(theMixer);
    unsigned long currentPosition;
-   int m, s, ms = 0;
    BAE_BOOL  done;
 
    if (theSong)
@@ -512,12 +523,7 @@ static BAEResult PlayRMF(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED v
                BAESong_IsDone(theSong, &done);
 	       BAESong_GetMicrosecondPosition(theSong, &currentPosition);
                currentPosition = currentPosition / 1000;
-               m = (currentPosition / 60000);
-               s = (currentPosition - (m*60000)) / 1000;
-               ms = (currentPosition - (60000*m) - (s*1000));
-               if (ms > 1 || s > 0 || m > 0) {
-                  playbae_printf("Playback position: %02d:%02d.%03d\r",m,s,ms);
-               }
+               displayCurrentPosition(currentPosition);
                if (timeLimit > 0) {
                   if (currentPosition > (timeLimit * 1000) - 750) {
                         BAESong_Stop(theSong, fadeOut);
