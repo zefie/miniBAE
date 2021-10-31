@@ -84,7 +84,7 @@ OBJ_BIN         := $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC_BIN}))
 ARCH		:= -m32 -static
 CC		:= emcc
 CXX		:= emcc
-LD		:= emcc
+LD		:= $(CC)
 AR      	:= emar
 STRIP		:= strip
 
@@ -93,6 +93,10 @@ OPTI		:= -O2
 CFLAGS  	:= $(ARCH) $(OPTI) -fPIC -g $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
 CFLAGS		+= -DX_PLATFORM=X_ANSI
 #CFLAGS		+= -D_DEBUG=1
+
+include Makefile.versioning
+CFLAGS		+= -D_VERSION=\""$(VERSION)"\"
+
 CXXFLAGS 	:= $(CFLAGS)
 LDFLAGS		:= $(ARCH) $(OPTI) -s 'DEFAULT_LIBRARY_FUNCS_TO_INCLUDE=[$$Browser]' -s EXPORT_ES6=1 -s EXPORTED_RUNTIME_METHODS=[FS] -s SINGLE_FILE=1
 

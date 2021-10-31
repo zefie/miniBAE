@@ -96,6 +96,11 @@
     extern "C" {
 #endif
 
+
+const char * BAE_GetCurrentCPUArchitecture();
+const char * BAE_GetVersion();
+const char * BAE_GetCompileInfo();
+
 // types
 typedef enum 
 {

@@ -81,7 +81,7 @@ OBJ_BIN 	:= $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC_BIN})))
 ARCH		:= -m32 -static
 CC		:= gcc
 CXX		:= g++
-LD		:= gcc
+LD		:= $(CC)
 AR      	:= ar
 STRIP		:= strip
 
@@ -89,8 +89,13 @@ OPTI            := -O2 -fPIC
 CFLAGS  	:= $(ARCH) $(OPTI) -g $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
 CFLAGS		+= -DX_PLATFORM=X_ANSI
 #CFLAGS		+= -D_DEBUG=1
+
+include Makefile.versioning
+CFLAGS		+= -D_VERSION=\""$(VERSION)"\"
+
 CXXFLAGS 	:= $(CFLAGS)
 LDFLAGS		:= $(ARCH) $(OPTI) -s
+
 
 LIBS	= 	-lpthread
 

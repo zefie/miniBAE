@@ -208,7 +208,7 @@ BAE_UNSIGNED_FIXED calculateVolume(BAE_UNSIGNED_FIXED volume, BAE_BOOL multiply)
 
 
 static BAEResult MuteCommaSeperatedChannels(BAESong theSong, char* channelsToMute) {
-	BAEResult err = 0;
+	BAEResult err = BAE_NO_ERROR;
 	char *token = strtok(channelsToMute, ",");
 	int tokenInt = 0;
 	while (token != NULL && err == 0)
@@ -227,7 +227,7 @@ static BAEResult MuteCommaSeperatedChannels(BAESong theSong, char* channelsToMut
 }
 
 
-static void * displayCurrentPosition(unsigned long currentPosition) {
+static void displayCurrentPosition(unsigned long currentPosition) {
 	int m, s, ms = 0;
 	positionDisplayMultiplierCounter = positionDisplayMultiplierCounter + 1;
 	if (positionDisplayMultiplierCounter == positionDisplayMultiplier) {
@@ -555,8 +555,8 @@ static BAEResult PlayRMF(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED v
    return(err);
 }
 
-int playFile(BAEMixer theMixer, char *parmFile, BAE_UNSIGNED_FIXED volume, unsigned int timeLimit, unsigned int loopCount, BAEReverbType reverbType, char *midiMuteChannels) {
-	int err = 0;
+BAEResult playFile(BAEMixer theMixer, char *parmFile, BAE_UNSIGNED_FIXED volume, unsigned int timeLimit, unsigned int loopCount, BAEReverbType reverbType, char *midiMuteChannels) {
+	BAEResult err = BAE_NO_ERROR;
 	char fileHeader[5]; // 4 char + 1 null byte
 	long filePtr;
 	filePtr = BAE_FileOpenForRead(parmFile);
@@ -576,10 +576,10 @@ int playFile(BAEMixer theMixer, char *parmFile, BAE_UNSIGNED_FIXED volume, unsig
        		    playbae_printf("Playing WAVE %s\n", parmFile);
 	            err = PlayPCM(theMixer, parmFile, BAE_AIFF_TYPE, volume, timeLimit);
 		} else {
-		    err = 10069;
+		    err = (BAEResult)10069;
 		}
 	} else {
-		err = filePtr;
+		err = (BAEResult)filePtr;
 	}
 	return err;
 }
@@ -599,11 +599,13 @@ int main(int argc, char *argv[])
    int maxVoices = BAE_MAX_VOICES;
    BAEBankToken bank;
    int doneCommand = 0;
-   short reverbType = 8; // early reflections
+   BAEReverbType reverbType = BAE_REVERB_TYPE_8; // early reflections
    char parmFile[1024];
    char midiMuteChannels[512];
+   const char *libMiniBAECPUArch;
+   const char *libMiniBAEVersion;
+   const char *libMiniBAECompInfo;
    BAERate rate = BAE_RATE_44K;
-
    memset(parmFile, '\0', 1024);
    memset(midiMuteChannels, '\0', 512);
 
@@ -621,6 +623,10 @@ int main(int argc, char *argv[])
    }
 
    if (!silentMode) {
+      libMiniBAEVersion = BAE_GetVersion();
+      libMiniBAECompInfo = BAE_GetCompileInfo();
+      libMiniBAECPUArch = BAE_GetCurrentCPUArchitecture();
+      playbae_printf("playbae %s built with %s, libminiBAE %s\n", libMiniBAECPUArch, libMiniBAECompInfo, libMiniBAEVersion);
       playbae_printf(copyrightInfo);
    }
 

@@ -83,7 +83,7 @@ OBJ_BIN 	:= $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC_BIN})))
 ARCH		:= -m32 -static
 CC		:= i686-w64-mingw32-gcc-win32
 CXX		:= i686-w64-mingw32-g++-win32
-LD		:= i686-w64-mingw32-g++-win32
+LD		:= $(CC)
 AR      	:= i686-w64-mingw32-gcc-ar-win32
 STRIP      	:= i686-w64-mingw32-strip
 
@@ -91,6 +91,10 @@ OPTI            := -O2
 CFLAGS  	:= $(ARCH) $(OPTI) -g $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
 CFLAGS		+= -DX_PLATFORM=X_WIN95
 #CFLAGS		+= -D_DEBUG=1
+
+include Makefile.versioning
+CFLAGS		+= -D_VERSION=\""$(VERSION)"\"
+
 CXXFLAGS 	:= $(CFLAGS)
 LDFLAGS		:= $(ARCH) $(OPTI) -s
 

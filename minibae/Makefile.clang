@@ -81,7 +81,7 @@ OBJ_BIN 	:= $(addprefix $(OBJ_DIR),$(addsuffix .o,$(basename ${SRC_BIN})))
 ARCH		:= -m32 -static
 CC		:= clang
 CXX		:= clang++
-LD		:= clang
+LD		:= $(CC)
 AR      	:= ar
 STRIP		:= strip
 
@@ -90,6 +90,10 @@ CLANG_SANI	:= -fsanitize=integer
 CFLAGS  	:= $(ARCH) $(OPTI) -g $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
 CFLAGS		+= -DX_PLATFORM=X_ANSI
 #CFLAGS		+= -D_DEBUG=1
+
+include Makefile.versioning
+CFLAGS		+= -D_VERSION=\""$(VERSION)"\"
+
 CXXFLAGS 	:= $(CFLAGS)
 LDFLAGS		:= $(ARCH) $(OPTI)
 
