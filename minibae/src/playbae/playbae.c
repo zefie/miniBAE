@@ -750,6 +750,9 @@ int main(int argc, char *argv[])
 
          if (PV_ParseCommands(argc, argv, "-o", TRUE, parmFile))
          {
+	    // do not update position timer as often since it will be much faster
+	    positionDisplayMultiplier = 100; // 1 update per second of media
+
             err = BAEMixer_StartOutputToFile(theMixer,
                                              (BAEPathName)parmFile,
                                              BAE_WAVE_TYPE,
