@@ -14,7 +14,7 @@ AR      	:= i686-w64-mingw32-gcc-ar-win32
 STRIP      	:= i686-w64-mingw32-strip
 
 OPTI            := -O2
-CFLAGS  	:= $(ARCH) $(OPTI) -g $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
+CFLAGS  	:= $(ARCH) $(OPTI) $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
 
 ifneq ($(BAE_FLAGS),)
 	CFLAGS	+= $(BAE_FLAGS)
@@ -51,11 +51,11 @@ $(TARGET_LIB).a: $(OBJ)
 
 $(TARGET_LIB).dll: ${OBJ}
 	@mkdir -p $(TARGET_OUT)
-	${CC} -shared ${ARCH} ${OBJ} -Wl,--subsystem,windows ${LIBS} -o $(TARGET_OUT)${TARGET_LIB}.dll
+	${CC} -shared $(LDFLAGS) ${OBJ} -Wl,--subsystem,windows ${LIBS} -o $(TARGET_OUT)${TARGET_LIB}.dll
 
 $(TARGET_BIN): ${OBJ_BIN}
 	@mkdir -p $(TARGET_OUT)
-	${LD} -s -o $(TARGET_OUT)${TARGET_BIN} ${LDFLAGS} ${OBJ_BIN} ${LIBS}
+	${LD} -o $(TARGET_OUT)${TARGET_BIN} ${LDFLAGS} ${OBJ_BIN} ${LIBS}
 
 pack: ${TARGET_BIN}
 	cat $(TARGET_OUT)${TARGET_BIN} | gzip -9c > $(TARGET_OUT)playbae.exe.gz

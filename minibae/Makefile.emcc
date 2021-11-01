@@ -20,8 +20,8 @@ AR      	:= emar
 STRIP		:= strip
 
 
-OPTI		:= -O2
-CFLAGS  	:= $(ARCH) $(OPTI) -fPIC -g $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
+OPTI		:= -O2 -fPIC
+CFLAGS  	:= $(ARCH) $(OPTI) $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
 
 ifneq ($(BAE_FLAGS),)
 	CFLAGS	+= $(BAE_FLAGS)
@@ -40,12 +40,12 @@ all: ${TARGET_LIB} $(TARGET_BIN)
 
 $(TARGET_LIB): ${OBJ}
 	@mkdir -p $(TARGET_OUT)
-	${LD} -s -o $(TARGET_OUT)${TARGET_LIB} ${LDFLAGS} ${OBJ} $(LIBS)
+	${LD} -o $(TARGET_OUT)${TARGET_LIB} ${LDFLAGS} ${OBJ} $(LIBS)
 
 $(TARGET_BIN): ${OBJ_BIN}
 	@mkdir -p $(TARGET_OUT)
 	@cp $(EXTRA_FILES) $(TARGET_OUT)
-	${LD} -s -o $(TARGET_OUT)${TARGET_BIN} ${LDFLAGS} ${OBJ_BIN} ${LIBS}
+	${LD} -o $(TARGET_OUT)${TARGET_BIN} ${LDFLAGS} ${OBJ_BIN} ${LIBS}
 
 pack: ${TARGET_BIN}
 	@rm -f $(TARGET_OUT)$(PACK_FILENAME)
