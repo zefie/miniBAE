@@ -42,7 +42,10 @@
 #include <GenSnd.h>
 #include <signal.h>
 #include <stdarg.h>
-#include <BAEPatches.h>
+
+#ifdef _BUILT_IN_PATCHES
+	#include <BAEPatches.h>
+#endif
 
 static volatile int interruptPlayBack = FALSE;
 static volatile int verboseMode = FALSE;
@@ -745,6 +748,7 @@ int main(int argc, char *argv[])
 	    }
             playbae_dprintf("BAE memory used during idle after SetBankToFile: %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
          } else {
+#ifdef _BUILT_IN_PATCHES
             playbae_printf("Using built-in bank\n");
 	    err = BAEMixer_AddBankFromMemory(theMixer, BAE_PATCHES,(unsigned int)&BAE_PATCHES_size,&bank);
             if (err > 0) {
@@ -752,8 +756,12 @@ int main(int argc, char *argv[])
 		return(1);
 	    }
             playbae_dprintf("BAE memory used during idle after SetBankToFile: %ld bytes\n\n", BAE_GetSizeOfMemoryUsed());
+#else
+            playbae_printf("ERR: Built-in patches were disabled at compile-time. -p flag is required.\n");
+            playbae_printf(usageString);
+            return 0;
+#endif
 	 }
-
          if (PV_ParseCommands(argc, argv, "-o", TRUE, parmFile))
          {
 	    // do not update position timer as often since it will be much faster
