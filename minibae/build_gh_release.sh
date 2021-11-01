@@ -42,7 +42,8 @@ runcmd make -f Makefile.clang clean
 echo "Building MingW32..."
 runcmd make -f Makefile.mingw clean all pack
 install_file "${BDIR}/playbae.exe.gz" "${ODIR}/playbae.exe.gz"
-runcmd zip -u "${ODIR}/libMiniBAE_win_DLL.zip" "${BDIR}/"*.dll
+runcmd cd "${BDIR}" && runcmd zip -u "${ODIR}/libMiniBAE_win.zip" *.dll *.lib
+runcmd cd "${RDIR}"
 runcmd make -f Makefile.mingw clean
 
 echo "Building Enscripten WASM32..."

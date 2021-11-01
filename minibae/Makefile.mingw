@@ -12,7 +12,7 @@ CXX		:= i686-w64-mingw32-g++-win32
 LD		:= $(CC)
 AR      	:= i686-w64-mingw32-gcc-ar-win32
 STRIP      	:= i686-w64-mingw32-strip
-
+DLLTOOL		:= i686-w64-mingw32-dlltool
 OPTI            := -O2
 CFLAGS  	:= $(ARCH) $(OPTI) $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
 
@@ -51,7 +51,12 @@ $(TARGET_LIB).a: $(OBJ)
 
 $(TARGET_LIB).dll: ${OBJ}
 	@mkdir -p $(TARGET_OUT)
-	${CC} -shared $(LDFLAGS) ${OBJ} -Wl,--subsystem,windows ${LIBS} -o $(TARGET_OUT)${TARGET_LIB}.dll
+	@$(DLLTOOL) --export-all --export-all-symbols -e $(OBJ_DIR)exports.o -z $(OBJ_DIR)$(TARGET_LIB).def2 $(OBJ)
+	@echo "EXPORTS" > $(OBJ_DIR)$(TARGET_LIB).def
+	@cat $(OBJ_DIR)$(TARGET_LIB).def2 | grep "BAE" >> $(OBJ_DIR)$(TARGET_LIB).def
+	@rm -f $(OBJ_DIR)$(TARGET_LIB).def2 $(OBJ_DIR)exports.o
+	@$(DLLTOOL) -e $(OBJ_DIR)exports.o -d $(OBJ_DIR)$(TARGET_LIB).def -l $(TARGET_OUT)$(TARGET_LIB).lib $(OBJ)
+	${CC} -shared $(LDFLAGS) ${OBJ} $(OBJ_DIR)exports.o -Wl,--subsystem,windows ${LIBS} -o $(TARGET_OUT)${TARGET_LIB}.dll
 
 $(TARGET_BIN): ${OBJ_BIN}
 	@mkdir -p $(TARGET_OUT)
