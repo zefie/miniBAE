@@ -560,7 +560,7 @@ static BAEResult PlayRMF(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED v
 
 BAEResult playFile(BAEMixer theMixer, char *parmFile, BAE_UNSIGNED_FIXED volume, unsigned int timeLimit, unsigned int loopCount, BAEReverbType reverbType, char *midiMuteChannels) {
 	BAEResult err = BAE_NO_ERROR;
-	char fileHeader[5]; // 4 char + 1 null byte
+	char fileHeader[5] = {0}; // 4 char + 1 null byte
 	long filePtr;
 	filePtr = BAE_FileOpenForRead(parmFile);
 	if (filePtr > 0) {
