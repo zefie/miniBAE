@@ -750,7 +750,7 @@ int main(int argc, char *argv[])
          } else {
 #ifdef _BUILT_IN_PATCHES
             playbae_printf("Using built-in bank\n");
-	    err = BAEMixer_AddBankFromMemory(theMixer, BAE_PATCHES,(unsigned int)&BAE_PATCHES_size,&bank);
+	    err = BAEMixer_AddBankFromMemory(theMixer, BAE_PATCHES,(unsigned int)BAE_PATCHES_size,&bank);
             if (err > 0) {
 		playbae_printf("Error %d loading patch bank", err);
 		return(1);
