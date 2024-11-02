@@ -152,14 +152,18 @@ static void PV_Idle(BAEMixer theMixer, unsigned long time)
    {
       BAEMixer_ServiceAudioOutputToFile(theMixer);
    }
+#ifndef WASM
    else
    {
+#endif
       max = time / 12000;
       for (count = 0; count < max; count++)
       {
          BAE_WaitMicroseconds(12000);
       }
+#ifndef WASM
    }
+#endif
 }
 
 #if _DEBUG
@@ -240,6 +244,9 @@ static void displayCurrentPosition(unsigned long currentPosition) {
 		ms = (currentPosition - (60000*m) - (s*1000));
 		if (ms > 1 || s > 0 || m > 0) {
 			playbae_printf("Playback position: %02d:%02d.%03d\r",m,s,ms);
+#ifdef WASM
+   playbae_printf("\n");
+#endif
 		}
 	}
 }

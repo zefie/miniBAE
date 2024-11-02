@@ -5,7 +5,7 @@
 **	This provides platform specfic functions for ANSI C compilation
 **
 **
-**	© Copyright 1995-2000 Beatnik, Inc, All Rights Reserved.
+**	ï¿½ Copyright 1995-2000 Beatnik, Inc, All Rights Reserved.
 **	Written by Steve Hales
 **
 **	Beatnik products contain certain trade secrets and confidential and
@@ -51,6 +51,9 @@
 #define USE_UNIX_IO			FALSE
 #define USE_WINDOWS_IO			FALSE
 
+#ifdef WASM
+	#include <emscripten.h>
+#endif
 
 // includes for USE_WINDOWS_IO
 #if USE_WINDOWS_IO
@@ -313,7 +316,11 @@ void BAE_WaitMicroseconds(unsigned long waitAmount)
 		Sleep(0);	// Give up the rest of this time slice to other threads
 	}
 #else
+#ifdef WASM
+	emscripten_sleep((waitAmount / 1000) - 2);
+#else
 	usleep(waitAmount);
+#endif	
 #endif
 }
 

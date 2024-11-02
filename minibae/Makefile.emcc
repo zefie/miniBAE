@@ -1,4 +1,4 @@
-BAE_BUILT_IN_PATCHES	:= 0
+BAE_BUILT_IN_PATCHES	:= 1
 BAE_API			:= Ansi
 DEBUG			:= 0
 
@@ -21,7 +21,7 @@ STRIP		:= strip
 
 
 OPTI		:= -O2 -fPIC
-CFLAGS  	:= $(ARCH) $(OPTI) $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
+CFLAGS  	:= $(ARCH) $(OPTI) $(INC_PATH) -DWASM -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
 
 ifneq ($(BAE_FLAGS),)
 	CFLAGS	+= $(BAE_FLAGS)
@@ -31,7 +31,9 @@ include inc/Makefile.versioning
 CFLAGS		+= -D_VERSION=\""$(VERSION)"\"
 
 CXXFLAGS 	:= $(CFLAGS)
-LDFLAGS		:= $(ARCH) $(OPTI) -s 'DEFAULT_LIBRARY_FUNCS_TO_INCLUDE=[$$Browser]' -s EXPORT_ES6=1 -s EXPORTED_RUNTIME_METHODS=[FS] -s SINGLE_FILE=1
+LDFLAGS		:= $(ARCH) $(OPTI) -s 'ASYNCIFY=1' -s 'DEFAULT_LIBRARY_FUNCS_TO_INCLUDE=[$$Browser]' -s EXPORT_ES6=1 -s EXPORTED_RUNTIME_METHODS=[FS] -s SINGLE_FILE=1 \
+ --embed-file src/banks/patches111/patches111.hsb\@/home/web_user/patches.hsb -Wno-unused-command-line-argument
+
 
 
 LIBS	= 	-lpthread

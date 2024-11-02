@@ -157,6 +157,17 @@
 #include "X_Assert.h"
 #include <limits.h>
 
+#ifdef WASM
+    #include <emscripten.h>
+
+void process_and_send_audio(int16_t* rawAudio, int length) {
+    // Call the JavaScript function "postAudioData" with the pointer
+    EM_ASM({
+        window.miniBAEInstance.postAudioData($0, $1);
+    }, rawAudio, length);
+}
+#endif
+
 #define TRACKING 0
 
 
@@ -3172,6 +3183,16 @@ BAEResult BAEMixer_ServiceAudioOutputToFile(BAEMixer theMixer)
 // end block added for MiniBAE
 
     theErr = NO_ERR;
+
+#ifdef WASM
+    channels = ( theModifiers /*iModifiers*/ & ~BAE_USE_STEREO) ? 2 : 1;
+    sampleSize = (theModifiers /*iModifiers*/ & BAE_USE_16) ? 2 : 1;
+    unsigned long numSamples = (unsigned long)(mWritingDataBlockSize / sampleSize / channels);
+
+    BAE_BuildMixerSlice(NULL, mWritingDataBlock, mWritingDataBlockSize, numSamples);
+    process_and_send_audio(mWritingDataBlock, numSamples);
+    return theErr;
+#endif
 
 
 
