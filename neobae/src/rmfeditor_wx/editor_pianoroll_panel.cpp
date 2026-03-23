@@ -251,6 +251,43 @@ struct NoteTrackCache {
     std::vector<std::vector<std::vector<uint32_t>>> pitchBins;
 };
 
+struct RenderCache {
+    wxPen   penNoteNormal;
+    wxPen   penNoteSelected;
+    wxBrush brushNoteNormal;
+    wxBrush brushNoteSelected;
+
+    wxPen   penAutomationBorder;
+    wxPen   penAutomationSelectedBorder;
+    wxBrush brushAutomationBg;
+    wxBrush brushAutomationGutter;
+
+    wxPen   penTimelineEnd;
+    wxBrush brushTimelineEnd;
+
+    wxPen   penLoopLine;
+    wxBrush brushLoopFill;
+
+    wxBrush brushWhiteKey;
+    wxBrush brushBlackKey;
+    wxPen   penNoteSeparator;
+    wxPen   penGutterSeparator;
+    wxBrush brushRulerBg;
+    wxBrush brushRulerGutterBg;
+    wxPen   penRulerSubTick;
+    wxPen   penRulerBarTick;
+    wxPen   penRulerBeatTick;
+    wxPen   penRulerBorder;
+    wxPen   penRulerGutterBorder;
+    wxPen   penPlayhead;
+    wxBrush brushSelectionBox;
+    wxPen   penSelectionBoxBorder;
+    wxPen   penTimelineHandle;
+    wxBrush brushTimelineHandleFill;
+    wxBrush brushMidiLoopShade;
+    wxPen   penAutomationCenterLine;
+};
+
 static wxString GetControllerLaneLabel(unsigned char controller) {
     switch (controller) {
         case 1: return "Mod Wheel (CC1)";
@@ -516,6 +553,37 @@ public:
           m_draggingTimelineEnd(false),
           m_timelineEndDragTick(0),
           m_theme(DetectSystemDarkMode() ? MakeDarkTheme() : MakeLightTheme()) {
+                m_rc.penNoteNormal    = wxPen(wxColour(34, 72, 120), 1);
+        
+        m_rc.penNoteSelected  = wxPen(wxColour(110, 42, 17), 2);
+        m_rc.brushNoteNormal  = wxBrush(wxColour(73, 135, 210));
+        m_rc.brushNoteSelected= wxBrush(wxColour(216, 106, 58));
+        m_rc.penAutomationBorder = wxPen(m_theme.automationLaneBorder);
+        m_rc.penAutomationSelectedBorder = wxPen(m_theme.automationSelectedBorder, 2);
+        m_rc.brushAutomationBg = wxBrush(m_theme.automationLaneBg);
+        m_rc.brushAutomationGutter = wxBrush(m_theme.automationLaneGutterBg);
+        m_rc.penTimelineEnd = wxPen(wxColour(180,130,50), 2);
+        m_rc.brushTimelineEnd = wxBrush(wxColour(200,155,60));
+        m_rc.penLoopLine = wxPen(wxColour(72,160,105), 1);
+        m_rc.brushLoopFill = wxBrush(wxColour(72,160,105));
+        m_rc.brushWhiteKey = wxBrush(m_theme.whiteKeyFill);
+        m_rc.brushBlackKey = wxBrush(m_theme.blackKeyFill);
+        m_rc.penNoteSeparator = wxPen(m_theme.noteSeparator);
+        m_rc.penGutterSeparator = wxPen(m_theme.gutterSeparator);
+        m_rc.brushRulerBg = wxBrush(m_theme.rulerBg);
+        m_rc.brushRulerGutterBg = wxBrush(m_theme.rulerGutterBg);
+        m_rc.penRulerSubTick = wxPen(m_theme.rulerSubTick);
+        m_rc.penRulerBarTick = wxPen(m_theme.rulerBarTick);
+        m_rc.penRulerBeatTick = wxPen(m_theme.rulerBeatTick);
+        m_rc.penRulerBorder = wxPen(m_theme.rulerBorder);
+        m_rc.penRulerGutterBorder = wxPen(m_theme.rulerGutterBorder);
+        m_rc.penPlayhead = wxPen(wxColour(210, 40, 40), 2);
+        m_rc.brushSelectionBox = wxBrush(wxColour(73, 135, 210, 48));
+        m_rc.penSelectionBoxBorder = wxPen(wxColour(45, 98, 168), 1);
+        m_rc.penTimelineHandle = wxPen(wxColour(140, 100, 35));
+        m_rc.brushTimelineHandleFill = wxBrush(wxColour(200, 155, 60));
+        m_rc.brushMidiLoopShade = wxBrush(wxColour(88, 180, 120, 26));
+        
         SetBackgroundStyle(wxBG_STYLE_PAINT);
         SetScrollRate(16, 16);
         Bind(wxEVT_PAINT, &PianoRollPanel::OnPaint, this);
@@ -877,7 +945,8 @@ private:
     std::vector<AutomationLaneCache> m_automationLaneCaches;
     std::vector<AutomationDisplayCache> m_automationDisplayCaches;
     std::vector<AutomationRampSegmentKey> m_rampSegments;
-
+    RenderCache m_rc;
+    
     void InvalidateNoteCache() {
         m_noteTrackCache.valid = false;
         m_noteTrackCache.trackIndex = -1;
@@ -887,67 +956,50 @@ private:
     }
 
     bool BuildNoteTrackCache() {
-        uint32_t noteCount;
-        uint32_t maxEndTick;
+        if (!HasTrack()) { InvalidateNoteCache(); return false; }
 
-        if (!HasTrack()) {
-            InvalidateNoteCache();
-            return false;
-        }
-        noteCount = 0;
+        uint32_t noteCount = 0;
         if (BAERmfEditorDocument_GetNoteCount(m_document,
                                               static_cast<uint16_t>(m_selectedTrack),
                                               &noteCount) != BAE_NO_ERROR) {
-            InvalidateNoteCache();
-            return false;
+            InvalidateNoteCache(); return false;
         }
 
         m_noteTrackCache.valid = false;
         m_noteTrackCache.trackIndex = m_selectedTrack;
         m_noteTrackCache.ticksPerBin = std::max<uint32_t>(GetTicksPerQuarter(), 1);
         m_noteTrackCache.notes.clear();
-        m_noteTrackCache.notes.reserve(static_cast<size_t>(noteCount));
-        maxEndTick = m_noteTrackCache.ticksPerBin;
+        m_noteTrackCache.notes.reserve(noteCount);
+        uint32_t maxEndTick = m_noteTrackCache.ticksPerBin;
 
-        for (uint32_t noteIndex = 0; noteIndex < noteCount; ++noteIndex) {
-            BAERmfEditorNoteInfo noteInfo;
-            NoteCacheEntry entry;
-
-            if (!GetNoteInfo(noteIndex, &noteInfo)) {
-                continue;
-            }
-            entry.noteInfo = noteInfo;
-            entry.sourceIndex = noteIndex;
-            entry.endTick = noteInfo.startTick + std::max<uint32_t>(1, noteInfo.durationTicks);
-            maxEndTick = std::max(maxEndTick, entry.endTick);
-            m_noteTrackCache.notes.push_back(entry);
+        for (uint32_t i = 0; i < noteCount; ++i) {
+            BAERmfEditorNoteInfo info;
+            if (!GetNoteInfo(i, &info)) continue;
+            NoteCacheEntry e{info, i,
+                             info.startTick + std::max<uint32_t>(1, info.durationTicks)};
+            maxEndTick = std::max(maxEndTick, e.endTick);
+            m_noteTrackCache.notes.push_back(e);
         }
 
-        {
-            uint32_t binCount;
+        // ---- Pitch‑bin allocation – reserve once, then fill ----
+        const uint32_t binCount = std::max<uint32_t>(1,
+                    (maxEndTick / m_noteTrackCache.ticksPerBin) + 1);
+        m_noteTrackCache.pitchBins.assign(128, {});
+        for (auto &vec : m_noteTrackCache.pitchBins)
+            vec.resize(binCount);
 
-            binCount = std::max<uint32_t>(1, (maxEndTick / m_noteTrackCache.ticksPerBin) + 1);
-            m_noteTrackCache.pitchBins.clear();
-            m_noteTrackCache.pitchBins.resize(128);
-            for (int pitch = 0; pitch < 128; ++pitch) {
-                m_noteTrackCache.pitchBins[static_cast<size_t>(pitch)].resize(binCount);
-            }
-            for (uint32_t entryIndex = 0; entryIndex < static_cast<uint32_t>(m_noteTrackCache.notes.size()); ++entryIndex) {
-                NoteCacheEntry const &entry = m_noteTrackCache.notes[entryIndex];
-                uint32_t startBin;
-                uint32_t endBin;
-
-                startBin = entry.noteInfo.startTick / m_noteTrackCache.ticksPerBin;
-                endBin = (entry.endTick - 1) / m_noteTrackCache.ticksPerBin;
-                for (uint32_t binIndex = startBin; binIndex <= endBin; ++binIndex) {
-                    m_noteTrackCache.pitchBins[static_cast<size_t>(entry.noteInfo.note)][binIndex].push_back(entryIndex);
-                }
-            }
+        for (uint32_t idx = 0; idx < m_noteTrackCache.notes.size(); ++idx) {
+            const auto &e = m_noteTrackCache.notes[idx];
+            const uint32_t startBin = e.noteInfo.startTick / m_noteTrackCache.ticksPerBin;
+            const uint32_t endBin   = (e.endTick - 1) / m_noteTrackCache.ticksPerBin;
+            for (uint32_t b = startBin; b <= endBin; ++b)
+                m_noteTrackCache.pitchBins[e.noteInfo.note][b].push_back(idx);
         }
 
         m_noteTrackCache.valid = true;
         return true;
     }
+
 
     NoteTrackCache const *GetNoteTrackCache() {
         if (!HasTrack()) {
@@ -992,30 +1044,17 @@ private:
         bottomNote = std::clamp(YToNote(rect.GetBottom()), 0, 127);
         lowNote = std::min(topNote, bottomNote);
         highNote = std::max(topNote, bottomNote);
-        seen.assign(cache->notes.size(), 0);
-
+        
         for (int pitch = lowNote; pitch <= highNote; ++pitch) {
             for (uint32_t binIndex = startBin; binIndex <= endBin; ++binIndex) {
                 for (uint32_t entryIndex : cache->pitchBins[static_cast<size_t>(pitch)][binIndex]) {
                     NoteCacheEntry const &entry = cache->notes[entryIndex];
-
-                    if (seen[entryIndex]) {
+                    if (entry.endTick <= visibleStartTick || entry.noteInfo.startTick > visibleEndTick)
                         continue;
-                    }
-                    if (entry.endTick <= visibleStartTick || entry.noteInfo.startTick > visibleEndTick) {
-                        continue;
-                    }
-                    seen[entryIndex] = 1;
                     outEntryIndices->push_back(entryIndex);
                 }
             }
         }
-
-        std::sort(outEntryIndices->begin(),
-                  outEntryIndices->end(),
-                  [&](uint32_t left, uint32_t right) {
-                      return cache->notes[left].sourceIndex < cache->notes[right].sourceIndex;
-                  });
     }
 
     bool IsRampSegmentKey(int laneIndex, uint32_t tick, int value) const {
@@ -1112,6 +1151,7 @@ private:
             return nullptr;
         }
         cache = &m_automationDisplayCaches[static_cast<size_t>(laneIndex)];
+        
         if (cache->valid &&
             cache->revision == m_automationRevision &&
             cache->visibleLeft == visibleLeft &&
@@ -1121,8 +1161,7 @@ private:
         }
 
         bucketCount = std::max(1, visibleRight - visibleLeft + 1);
-        cache->buckets.clear();
-        cache->buckets.resize(static_cast<size_t>(bucketCount));
+        cache->buckets.resize(bucketCount, {});
         for (int bucketIndex = 0; bucketIndex < bucketCount; ++bucketIndex) {
             AutomationDisplayBucket &bucket = cache->buckets[static_cast<size_t>(bucketIndex)];
 
@@ -1671,54 +1710,45 @@ private:
         return laneBottom - 1 - ((clampedValue * (kAutomationLaneHeight - 1)) / std::max(1, lane.maxValue));
     }
 
-    bool HitTestAutomationNode(wxPoint point, AutomationHitInfo *outHitInfo = nullptr) {
-        std::vector<AutomationLaneDescriptor> const &lanes = GetAutomationLanes();
-        uint32_t documentEndTick;
+    bool HitTestAutomationNode(wxPoint pt, AutomationHitInfo *out) {
+        if (!m_document || pt.y < GetAutomationAreaTop()) return false;
 
-        if (!m_document || point.y < GetAutomationAreaTop()) {
-            return false;
-        }
-        documentEndTick = GetDocumentEndTick();
-        for (int laneIndex = 0; laneIndex < static_cast<int>(lanes.size()); ++laneIndex) {
-            AutomationLaneCache const *laneCache;
-            int laneTop;
-            int laneBottom;
+        const uint32_t docEnd = GetDocumentEndTick();
+        const auto &lanes = GetAutomationLanes();
 
-            if (!IsAutomationLaneVisible(laneIndex)) {
-                continue;
-            }
-            laneTop = GetAutomationLaneY(laneIndex);
-            laneBottom = laneTop + kAutomationLaneHeight;
-            if (point.y < laneTop - kAutomationNodeHitRadius || point.y >= laneBottom + kAutomationNodeHitRadius) {
-                continue;
-            }
-            laneCache = GetAutomationLaneCache(laneIndex, documentEndTick);
-            if (!laneCache) {
-                continue;
-            }
-            for (AutomationCurveNode const &node : laneCache->nodes) {
-                int nodeX;
-                int nodeY;
+        for (int laneIdx = 0; laneIdx < static_cast<int>(lanes.size()); ++laneIdx) {
+            if (!IsAutomationLaneVisible(laneIdx)) continue;
+            const int laneTop = GetAutomationLaneY(laneIdx);
+            const int laneBottom = laneTop + kAutomationLaneHeight;
+            if (pt.y < laneTop - kAutomationNodeHitRadius ||
+                pt.y >= laneBottom + kAutomationNodeHitRadius) continue;
 
-                nodeX = TickToX(node.tick);
-                nodeY = AutomationValueToY(laneIndex, node.value);
-                if (std::abs(point.x - nodeX) <= kAutomationNodeHitRadius &&
-                    std::abs(point.y - nodeY) <= kAutomationNodeHitRadius) {
-                    if (outHitInfo) {
-                        outHitInfo->laneIndex = laneIndex;
-                        outHitInfo->eventIndex = node.sourceEventIndex;
-                        outHitInfo->tick = node.tick;
-                        outHitInfo->endTick = documentEndTick;
-                        outHitInfo->laneTop = laneTop;
-                        outHitInfo->laneBottom = laneBottom;
-                        outHitInfo->leftX = nodeX;
-                        outHitInfo->rightX = nodeX;
-                        outHitInfo->value = node.value;
-                        outHitInfo->hasFollowingEvent = false;
-                        for (AutomationCurveSegment const &segment : laneCache->segments) {
-                            if (segment.sourceEventIndex == node.sourceEventIndex) {
-                                outHitInfo->endTick = segment.endTick;
-                                outHitInfo->hasFollowingEvent = segment.hasFollowingEvent;
+            const AutomationLaneCache *cache = GetAutomationLaneCache(laneIdx, docEnd);
+            if (!cache) continue;
+
+            const auto toX = [&](uint32_t t){ return TickToX(t); };
+            const auto toY = [&](int v){ return AutomationValueToY(laneIdx, v); };
+
+            for (const auto &node : cache->nodes) {
+                const int nx = toX(node.tick);
+                const int ny = toY(node.value);
+                if (std::abs(pt.x - nx) <= kAutomationNodeHitRadius &&
+                    std::abs(pt.y - ny) <= kAutomationNodeHitRadius) {
+                    if (out) {
+                        out->laneIndex = laneIdx;
+                        out->eventIndex = node.sourceEventIndex;
+                        out->tick = node.tick;
+                        out->endTick = docEnd;
+                        out->laneTop = laneTop;
+                        out->laneBottom = laneBottom;
+                        out->leftX = nx;
+                        out->rightX = nx;
+                        out->value = node.value;
+                        out->hasFollowingEvent = false;
+                        for (const auto &seg : cache->segments) {
+                            if (seg.sourceEventIndex == node.sourceEventIndex) {
+                                out->endTick = seg.endTick;
+                                out->hasFollowingEvent = seg.hasFollowingEvent;
                                 break;
                             }
                         }
@@ -2957,7 +2987,7 @@ private:
         int visibleLeft;
         int visibleRight;
 
-        visibleLeft = std::max(0, visibleRect.GetLeft());
+        visibleLeft  = std::max(0, visibleRect.GetLeft());
         visibleRight = std::min(virtualSize.GetWidth(), visibleRect.GetRight());
         documentEndTick = GetDocumentEndTick();
 
@@ -2970,25 +3000,36 @@ private:
 
             laneTop = GetAutomationLaneY(laneIndex);
             laneBottom = laneTop + kAutomationLaneHeight;
-            if (laneBottom < visibleRect.GetTop() || laneTop > visibleRect.GetBottom()) {
+            if (laneBottom < visibleRect.GetTop() ||
+                laneTop   > visibleRect.GetBottom())
                 continue;
-            }
-            laneVisibleLeft = std::max(kPianoRollLeftGutter, visibleLeft);
+
+            laneVisibleLeft  = std::max(kPianoRollLeftGutter, visibleLeft);
             laneVisibleWidth = std::max(0, visibleRight - laneVisibleLeft);
+
             dc.SetPen(*wxTRANSPARENT_PEN);
-            dc.SetBrush(wxBrush(m_theme.automationLaneBg));
-            if (laneVisibleWidth > 0) {
-                dc.DrawRectangle(laneVisibleLeft, laneTop, laneVisibleWidth, kAutomationLaneHeight);
-            }
-            dc.SetBrush(wxBrush(m_theme.automationLaneGutterBg));
-            dc.DrawRectangle(0, laneTop, kPianoRollLeftGutter, kAutomationLaneHeight);
-            dc.SetPen(wxPen(m_theme.automationLaneBorder));
+            dc.SetBrush(m_rc.brushAutomationBg);
+            if (laneVisibleWidth > 0)
+                dc.DrawRectangle(laneVisibleLeft, laneTop,
+                                 laneVisibleWidth, kAutomationLaneHeight);
+
+            dc.SetBrush(m_rc.brushAutomationGutter);
+            dc.DrawRectangle(0, laneTop,
+                             kPianoRollLeftGutter, kAutomationLaneHeight);
+
+            dc.SetPen(m_rc.penAutomationBorder);
             dc.DrawLine(0, laneBottom, visibleRight, laneBottom);
+
             dc.SetTextForeground(m_theme.automationLaneLabel);
-            dc.DrawText(lane.label, 8, laneTop + (kAutomationLaneHeight / 2) - 8);
+            dc.DrawText(lane.label, 8,
+                        laneTop + (kAutomationLaneHeight / 2) - 8);
+
             if (lane.bipolar) {
                 dc.SetPen(wxPen(m_theme.automationLaneCenterLine));
-                dc.DrawLine(kPianoRollLeftGutter, laneTop + (kAutomationLaneHeight / 2), visibleRight, laneTop + (kAutomationLaneHeight / 2));
+                dc.DrawLine(kPianoRollLeftGutter,
+                            laneTop + (kAutomationLaneHeight / 2),
+                            visibleRight,
+                            laneTop + (kAutomationLaneHeight / 2));
             }
             if (!m_document) {
                 continue;
@@ -3155,136 +3196,81 @@ private:
         SetVirtualSize(width, height);
     }
 
-    void DrawStickyRuler(wxDC &dc) {
-        int scrollPixelsX;
-        int scrollPixelsY;
-        int viewUnitsX;
-        int viewUnitsY;
-        int scrollX;
-        int scrollY;
-        int screenW;
-        int rulerH;
-        int rulerTop;
-        int rulerBot;
-        int relLeft;
-        int relRight;
-        uint32_t tick;
-        uint32_t quarterTicks;
-        uint32_t stepTicks;
-        uint32_t tickStart;
-        uint32_t tickEnd;
+    void DrawStickyRuler(wxDC &dc)
+    {
+        int scrollX = GetViewStartX();
+        int scrollY = GetViewStartY();
+        int screenW = GetClientSize().GetWidth();
 
-        GetScrollPixelsPerUnit(&scrollPixelsX, &scrollPixelsY);
-        if (scrollPixelsX <= 0) scrollPixelsX = 1;
-        if (scrollPixelsY <= 0) scrollPixelsY = 1;
-        GetViewStart(&viewUnitsX, &viewUnitsY);
-        scrollX = viewUnitsX * scrollPixelsX;
-        scrollY = viewUnitsY * scrollPixelsY;
-        screenW = GetClientSize().GetWidth();
+        int rulerH  = kPianoRollTopGutter;
+        int rulerTop = scrollY;
+        int rulerBot = scrollY + rulerH;
 
-        rulerH  = kPianoRollTopGutter;
-        rulerTop = scrollY;
-        rulerBot = scrollY + rulerH;
-
-        // Ruler background
+        // Background
         dc.SetPen(*wxTRANSPARENT_PEN);
-        dc.SetBrush(wxBrush(m_theme.rulerBg));
+        dc.SetBrush(m_rc.brushRulerBg);
         dc.DrawRectangle(scrollX, rulerTop, screenW, rulerH);
 
         // Left gutter corner (darker)
-        dc.SetBrush(wxBrush(m_theme.rulerGutterBg));
+        dc.SetBrush(m_rc.brushRulerGutterBg);
         dc.DrawRectangle(scrollX, rulerTop, kPianoRollLeftGutter, rulerH);
 
-        // Gutter labels pinned to screen-left
+        // Gutter labels (text – unchanged)
         dc.SetTextForeground(m_theme.rulerGutterBeatText);
         dc.DrawText("Beat", scrollX + 3, rulerTop + 1);
         dc.SetTextForeground(m_theme.rulerGutterTimeText);
         dc.DrawText("Time", scrollX + 3, rulerTop + rulerH / 2);
 
-        relLeft  = std::max(0, scrollX - kPianoRollLeftGutter);
-        relRight = scrollX + screenW - kPianoRollLeftGutter;
-        quarterTicks = GetTicksPerQuarter();
-        stepTicks = std::max<uint32_t>(1, quarterTicks / 4);
-        tickStart = (XToTick(kPianoRollLeftGutter + relLeft) / stepTicks) * stepTicks;
-        tickEnd = XToTick(kPianoRollLeftGutter + relRight);
+        int relLeft  = std::max(0, scrollX - kPianoRollLeftGutter);
+        int relRight = scrollX + screenW - kPianoRollLeftGutter;
+        uint32_t quarterTicks = GetTicksPerQuarter();
+        uint32_t stepTicks    = std::max<uint32_t>(1, quarterTicks / 4);
+        uint32_t tickStart    = (XToTick(kPianoRollLeftGutter + relLeft) / stepTicks) * stepTicks;
+        uint32_t tickEnd      = XToTick(kPianoRollLeftGutter + relRight);
 
-        // Sub-beat (16th-note) small ticks
-        for (tick = tickStart; tick <= tickEnd; tick += stepTicks) {
-            int vx;
-
-            if ((tick % quarterTicks) == 0) continue;
-            vx = TickToX(tick);
-            dc.SetPen(wxPen(m_theme.rulerSubTick));
+        // Sub‑beat (16th‑note) small ticks
+        for (uint32_t t = tickStart; t <= tickEnd; t += stepTicks) {
+            if ((t % quarterTicks) == 0) continue;
+            int vx = TickToX(t);
+            dc.SetPen(m_rc.penRulerSubTick);
             dc.DrawLine(vx, rulerBot - 5, vx, rulerBot - 1);
-            if (tickEnd - tick < stepTicks) {
-                break;
-            }
+            if (tickEnd - t < stepTicks) break;
         }
 
-        // Quarter-note beat labels and taller ticks
+        // Quarter‑note beat labels and taller ticks
         tickStart = (tickStart / quarterTicks) * quarterTicks;
-        for (tick = tickStart; tick <= tickEnd; tick += quarterTicks) {
-            int vx;
-            int beatNum;
-            double seconds;
-            int mm;
-            int ss;
-            int ds;
-            bool isBar;
-
-            vx = TickToX(tick);
-            beatNum = static_cast<int>(tick / quarterTicks) + 1;
-            isBar = ((tick % (quarterTicks * 4)) == 0);
-            seconds = TickToSeconds(tick);
-            mm = static_cast<int>(seconds / 60.0);
-            ss = static_cast<int>(seconds) % 60;
-            ds = static_cast<int>((seconds - std::floor(seconds)) * 10.0);
-
-            // Tick mark: taller at bar starts
-            dc.SetPen(wxPen(isBar ? m_theme.rulerBarTick : m_theme.rulerBeatTick));
+        for (uint32_t t = tickStart; t <= tickEnd; t += quarterTicks) {
+            int vx = TickToX(t);
+            bool isBar = ((t % (quarterTicks * 4)) == 0);
+            dc.SetPen(isBar ? m_rc.penRulerBarTick : m_rc.penRulerBeatTick);
             dc.DrawLine(vx, rulerTop + (isBar ? 2 : rulerH / 2), vx, rulerBot - 1);
 
             // Beat number (top row)
             dc.SetTextForeground(isBar ? m_theme.rulerBarText : m_theme.rulerBeatText);
+            int beatNum = static_cast<int>(t / quarterTicks) + 1;
             dc.DrawText(wxString::Format("%d", beatNum), vx + 2, rulerTop + 1);
 
             // Time code (bottom row)
             dc.SetTextForeground(m_theme.rulerTimeText);
-            dc.DrawText(wxString::Format("%d:%02d.%d", mm, ss, ds), vx + 2, rulerTop + rulerH / 2);
-            if (tickEnd - tick < quarterTicks) {
-                break;
-            }
+            double seconds = TickToSeconds(t);
+            int mm = static_cast<int>(seconds / 60.0);
+            int ss = static_cast<int>(seconds) % 60;
+            int ds = static_cast<int>((seconds - std::floor(seconds)) * 10.0);
+            dc.DrawText(wxString::Format("%d:%02d.%d", mm, ss, ds), vx + 2,
+                        rulerTop + rulerH / 2);
+            if (tickEnd - t < quarterTicks) break;
         }
 
         // Bottom border
-        dc.SetPen(wxPen(m_theme.rulerBorder));
+        dc.SetPen(m_rc.penRulerBorder);
         dc.DrawLine(scrollX, rulerBot - 1, scrollX + screenW, rulerBot - 1);
 
-        // Left gutter right-edge (re-draw on top of ruler)
-        dc.SetPen(wxPen(m_theme.rulerGutterBorder));
-        dc.DrawLine(scrollX + kPianoRollLeftGutter, rulerTop, scrollX + kPianoRollLeftGutter, rulerBot);
-
-        // Timeline end handle in ruler
-        {
-            uint32_t endTick;
-            int endX;
-
-            endTick = m_draggingTimelineEnd ? m_timelineEndDragTick : GetDocumentEndTick();
-            endX = TickToX(endTick);
-            if (endX >= scrollX && endX <= scrollX + screenW) {
-                dc.SetPen(wxPen(wxColour(180, 130, 50), 2));
-                dc.DrawLine(endX, rulerTop, endX, rulerBot);
-                /* Small triangular tab at bottom of ruler */
-                wxPoint triangle[3];
-                triangle[0] = wxPoint(endX, rulerBot - 2);
-                triangle[1] = wxPoint(endX - 5, rulerBot - 10);
-                triangle[2] = wxPoint(endX + 5, rulerBot - 10);
-                dc.SetPen(wxPen(wxColour(140, 100, 35)));
-                dc.SetBrush(wxBrush(wxColour(200, 155, 60)));
-                dc.DrawPolygon(3, triangle);
-            }
-        }
+        // Left gutter right‑edge (re‑draw on top of ruler)
+        dc.SetPen(m_rc.penRulerGutterBorder);
+        dc.DrawLine(scrollX + kPianoRollLeftGutter, rulerTop,
+                    scrollX + kPianoRollLeftGutter, rulerBot);
     }
+
 
     bool IsPointInStickyRuler(wxPoint logicalPoint) const {
         int scrollPixelsX;
@@ -3343,30 +3329,25 @@ private:
     }
 
     void DrawMidiLoopOverlay(wxDC &dc, wxRect const &visibleRect, wxSize const &virtualSize) {
-        int startX;
-        int endX;
-        int shadeLeft;
-        int shadeRight;
-
-        if (!m_midiLoopEnabled || m_midiLoopEndTick <= m_midiLoopStartTick) {
+        if (!m_midiLoopEnabled || m_midiLoopEndTick <= m_midiLoopStartTick)
             return;
-        }
-        startX = TickToX(m_midiLoopStartTick);
-        endX = TickToX(m_midiLoopEndTick);
-        if (endX < visibleRect.GetLeft() - 2 || startX > visibleRect.GetRight() + 2) {
-            return;
-        }
 
-        shadeLeft = std::max(startX, kPianoRollLeftGutter);
-        shadeRight = std::max(shadeLeft + 1, endX);
+        int startX = TickToX(m_midiLoopStartTick);
+        int endX   = TickToX(m_midiLoopEndTick);
+        if (endX < visibleRect.GetLeft() - 2 || startX > visibleRect.GetRight() + 2)
+            return;
+
+        int shadeLeft  = std::max(startX, kPianoRollLeftGutter);
+        int shadeRight = std::max(shadeLeft + 1, endX);
 
         dc.SetPen(*wxTRANSPARENT_PEN);
-        dc.SetBrush(wxBrush(wxColour(88, 180, 120, 26)));
+        dc.SetBrush(m_rc.brushMidiLoopShade);
         dc.DrawRectangle(shadeLeft,
                          kPianoRollTopGutter,
                          shadeRight - shadeLeft,
                          std::max(1, virtualSize.GetHeight() - kPianoRollTopGutter));
     }
+
 
     void DrawMidiLoopRulerOverlay(wxDC &dc, wxRect const &visibleRect, wxSize const &virtualSize) {
         int startX;
@@ -3387,7 +3368,7 @@ private:
             return;
         }
 
-        dc.SetPen(wxPen(wxColour(72, 160, 105), 1));
+        dc.SetPen(m_rc.penLoopLine);
         dc.DrawLine(startX, kPianoRollTopGutter, startX, virtualSize.GetHeight());
         dc.DrawLine(endX, kPianoRollTopGutter, endX, virtualSize.GetHeight());
 
@@ -3399,7 +3380,7 @@ private:
         rulerTop = viewUnitsY * scrollPixelsY;
         rulerBottom = rulerTop + kPianoRollTopGutter;
 
-        dc.SetBrush(wxBrush(wxColour(72, 160, 105)));
+        dc.SetBrush(m_rc.brushLoopFill);
         dc.SetPen(*wxTRANSPARENT_PEN);
         dc.DrawRectangle(startX - 4, rulerBottom - 12, 8, 10);
         dc.DrawRectangle(endX - 4, rulerBottom - 12, 8, 10);
@@ -3478,174 +3459,183 @@ private:
             CancelUndoAction();
         }
     }
+    
+    inline int GetScrollX() const {
+        int sx, sy;
+        GetScrollPixelsPerUnit(&sx, &sy);
+        return sx > 0 ? sx : 1;
+    }
+    inline int GetScrollY() const {
+        int sx, sy;
+        GetScrollPixelsPerUnit(&sx, &sy);
+        return sy > 0 ? sy : 1;
+    }
+    inline int GetViewStartX() const {
+        int ux, uy;
+        GetViewStart(&ux, &uy);
+        return ux * GetScrollX();
+    }
+    inline int GetViewStartY() const {
+        int ux, uy;
+        GetViewStart(&ux, &uy);
+        return uy * GetScrollY();
+    }
 
     void OnPaint(wxPaintEvent &) {
         wxAutoBufferedPaintDC dc(this);
-        wxSize clientSize;
-        wxRect visibleRect;
-        wxRect notesVisibleRect;
-        wxSize windowSize;
-        int scrollPixelsX;
-        int scrollPixelsY;
-        int viewUnitsX;
-        int viewUnitsY;
-        int viewLeft;
-        int viewTop;
-        int viewRight;
-        int viewBottom;
-        int note;
-        int noteY;
-        int gridTop;
-        int gridBottom;
-        uint32_t gridTick;
-        uint32_t quarterTicks;
-        uint32_t stepTicks;
-        uint32_t tickStart;
-        uint32_t tickEnd;
-
         PrepareDC(dc);
-        clientSize = GetVirtualSize();
-        GetScrollPixelsPerUnit(&scrollPixelsX, &scrollPixelsY);
-        if (scrollPixelsX <= 0) {
-            scrollPixelsX = 1;
-        }
-        if (scrollPixelsY <= 0) {
-            scrollPixelsY = 1;
-        }
-        GetViewStart(&viewUnitsX, &viewUnitsY);
-        windowSize = GetClientSize();
-        viewLeft = viewUnitsX * scrollPixelsX;
-        viewTop = viewUnitsY * scrollPixelsY;
-        viewRight = std::min(clientSize.GetWidth(), viewLeft + std::max(1, windowSize.GetWidth()));
-        viewBottom = std::min(clientSize.GetHeight(), viewTop + std::max(1, windowSize.GetHeight()));
-        visibleRect = wxRect(viewLeft, viewTop, std::max(1, viewRight - viewLeft), std::max(1, viewBottom - viewTop));
-        notesVisibleRect = wxRect(std::max(kPianoRollLeftGutter, visibleRect.GetLeft()),
-                                  visibleRect.GetTop(),
-                                  std::max(1, visibleRect.GetRight() - std::max(kPianoRollLeftGutter, visibleRect.GetLeft())),
-                                  visibleRect.GetHeight());
-        dc.SetBackground(wxBrush(m_theme.whiteKeyFill));
+
+        // Cache frequently used values once per paint
+        const int pixelsX   = GetPixelsPerQuarter();
+        const uint16_t tpq = GetTicksPerQuarter();
+        const int leftGutter = kPianoRollLeftGutter;
+        const int topGutter  = kPianoRollTopGutter;
+        const int noteH      = kNoteHeight;
+        const int automHeight = kAutomationLaneHeight;
+        const int automGap   = kAutomationLaneGap;
+        const int gutterW   = leftGutter;
+
+        dc.SetBackground(m_rc.brushWhiteKey);
         dc.Clear();
 
-        for (note = 0; note <= 127; ++note) {
-            bool blackKey;
-            wxColour fillColor;
+        const wxSize clientSize = GetVirtualSize();
+        const int viewLeft   = GetViewStartX();
+        const int viewTop    = GetViewStartY();
+        const int viewRight  = viewLeft + GetClientSize().GetWidth();
+        const int viewBottom = viewTop  + GetClientSize().GetHeight();
 
-            noteY = NoteToY(note);
-            if (noteY + kNoteHeight < visibleRect.GetTop() || noteY > visibleRect.GetBottom()) {
-                continue;
-            }
-            blackKey = (note % 12 == 1) || (note % 12 == 3) || (note % 12 == 6) || (note % 12 == 8) || (note % 12 == 10);
-            fillColor = blackKey ? m_theme.blackKeyFill : m_theme.whiteKeyFill;
+        // Pre‑compute note‑Y positions once
+        static int noteY[128];
+        static bool noteYValid = false;
+        if (!noteYValid) {
+            for (int n = 0; n < 128; ++n)
+                noteY[n] = NoteToY(n);
+            noteYValid = true;
+        }
+
+        for (int note = 0; note < 128; ++note) {
+            const int y = noteY[note];
+            if (y + noteH < viewTop || y > viewBottom) continue;
+
+            const bool black = (note % 12 == 1) || (note % 12 == 3) ||
+                               (note % 12 == 6) || (note % 12 == 8) ||
+                               (note % 12 == 10);
+            dc.SetBrush(black ? m_rc.brushBlackKey : m_rc.brushWhiteKey);
             dc.SetPen(*wxTRANSPARENT_PEN);
-            dc.SetBrush(wxBrush(fillColor));
-            dc.DrawRectangle(visibleRect.GetLeft(), noteY, visibleRect.GetWidth(), kNoteHeight);
-            dc.SetPen(wxPen(m_theme.noteSeparator));
-            dc.DrawLine(kPianoRollLeftGutter, noteY, visibleRect.GetRight(), noteY);
+            dc.DrawRectangle(viewLeft, y, viewRight - viewLeft, noteH);
+            dc.SetPen(m_rc.penNoteSeparator);
+            dc.DrawLine(gutterW, y, viewRight, y);
+
             if (note % 12 == 0) {
                 dc.SetTextForeground(m_theme.noteLabelText);
-                dc.DrawText(wxString::Format("C%d", (note / 12) - 1), 6, noteY - 1);
+                dc.DrawText(wxString::Format("C%d", (note / 12) - 1), 6, y - 1);
             }
         }
 
-        quarterTicks = GetTicksPerQuarter();
-        stepTicks = std::max<uint32_t>(1, quarterTicks / 4);
-        tickStart = (XToTick(visibleRect.GetLeft()) / stepTicks) * stepTicks;
-        tickEnd = XToTick(visibleRect.GetRight());
-        gridTop = std::max(kPianoRollTopGutter, visibleRect.GetTop());
-        gridBottom = visibleRect.GetBottom();
-        for (gridTick = tickStart; gridTick <= tickEnd; gridTick += stepTicks) {
-            int x;
-            bool major;
+        const uint32_t quarterTicks = tpq;
+        const uint32_t stepTicks    = std::max<uint32_t>(1, quarterTicks / 4);
+        const uint32_t tickStart    = (XToTick(viewLeft) / stepTicks) * stepTicks;
+        const uint32_t tickEnd      = XToTick(viewRight);
+        const int gridTop            = std::max(topGutter, viewTop);
+        const int gridBottom         = viewBottom;
 
-            x = TickToX(gridTick);
-            major = ((gridTick % quarterTicks) == 0);
-            dc.SetPen(wxPen(major ? m_theme.majorGridLine : m_theme.minorGridLine));
+        for (uint32_t t = tickStart; t <= tickEnd; t += stepTicks) {
+            const int x = TickToX(t);
+            dc.SetPen((t % quarterTicks) == 0
+                      ? m_rc.penRulerBarTick
+                      : m_rc.penRulerSubTick);
             dc.DrawLine(x, gridTop, x, gridBottom);
-            if (tickEnd - gridTick < stepTicks) {
-                break;
-            }
+            if (tickEnd - t < stepTicks) break;
         }
 
-        dc.SetPen(wxPen(m_theme.gutterSeparator));
-        dc.DrawLine(kPianoRollLeftGutter, visibleRect.GetTop(), kPianoRollLeftGutter, visibleRect.GetBottom());
+        dc.SetPen(m_rc.penGutterSeparator);
+        dc.DrawLine(gutterW, viewTop, gutterW, viewBottom);
 
-        /* Draw loop shading before notes so notes remain visually readable and editable. */
-        DrawMidiLoopOverlay(dc, visibleRect, clientSize);
+        DrawMidiLoopOverlay(dc, wxRect(viewLeft, viewTop,
+                                        viewRight - viewLeft, viewBottom - viewTop),
+                            clientSize);
 
         if (HasTrack()) {
-            NoteTrackCache const *noteCache;
-            std::vector<uint32_t> visibleEntries;
+            const NoteTrackCache *cache = GetNoteTrackCache();
+            if (cache) {
+                std::vector<uint32_t> visibleEntries;
+                GatherNoteEntriesInRect(wxRect(viewLeft, viewTop,
+                                                viewRight - viewLeft, viewBottom - viewTop),
+                                        &visibleEntries);
+                for (uint32_t idx : visibleEntries) {
+                    const auto &entry = cache->notes[idx];
+                    const wxRect r = BuildNoteRect(entry.noteInfo);
+                    const bool sel = IsNoteSelected(static_cast<long>(entry.sourceIndex));
 
-            noteCache = GetNoteTrackCache();
-            if (noteCache) {
-                GatherNoteEntriesInRect(notesVisibleRect, &visibleEntries);
-            }
-            for (uint32_t entryIndex : visibleEntries) {
-                NoteCacheEntry const &entry = noteCache->notes[entryIndex];
-                wxRect noteRect;
-                bool selected;
+                    dc.SetBrush(sel ? m_rc.brushNoteSelected : m_rc.brushNoteNormal);
+                    dc.SetPen(sel   ? m_rc.penNoteSelected   : m_rc.penNoteNormal);
+                    dc.DrawRectangle(r);
 
-                noteRect = BuildNoteRect(entry.noteInfo);
-                if (!noteRect.Intersects(notesVisibleRect)) {
-                    continue;
-                }
-                selected = IsNoteSelected(static_cast<long>(entry.sourceIndex));
-                dc.SetBrush(wxBrush(selected ? wxColour(216, 106, 58) : wxColour(73, 135, 210)));
-                dc.SetPen(wxPen(selected ? wxColour(110, 42, 17) : wxColour(34, 72, 120)));
-                dc.DrawRectangle(noteRect);
-                if (selected && static_cast<long>(entry.sourceIndex) == m_selectedNote) {
-                    int handleTop;
-
-                    handleTop = noteRect.GetTop() + 1;
-                    dc.SetBrush(wxBrush(wxColour(242, 225, 214)));
-                    dc.SetPen(*wxTRANSPARENT_PEN);
-                    dc.DrawRectangle(noteRect.GetLeft(), handleTop, 3, std::max(2, noteRect.GetHeight() - 2));
-                    dc.DrawRectangle(noteRect.GetRight() - 2, handleTop, 3, std::max(2, noteRect.GetHeight() - 2));
+                    if (sel && static_cast<long>(entry.sourceIndex) == m_selectedNote) {
+                        const int h = std::max(2, r.GetHeight() - 2);
+                        dc.SetBrush(wxBrush(wxColour(242, 225, 214)));
+                        dc.SetPen(*wxTRANSPARENT_PEN);
+                        dc.DrawRectangle(r.GetLeft(), r.GetTop() + 1, 3, h);
+                        dc.DrawRectangle(r.GetRight() - 2, r.GetTop() + 1, 3, h);
+                    }
                 }
             }
         }
-        DrawAutomationLanes(dc, clientSize, visibleRect);
+
+        DrawAutomationLanes(dc, clientSize,
+                            wxRect(viewLeft, viewTop,
+                                   viewRight - viewLeft, viewBottom - viewTop));
+
         if (m_showPlayhead) {
-            int playheadX;
-
-            playheadX = TickToX(m_playheadTick);
-            if (playheadX >= visibleRect.GetLeft() - 2 && playheadX <= visibleRect.GetRight() + 2) {
-                dc.SetPen(wxPen(wxColour(210, 40, 40), 2));
-                dc.DrawLine(playheadX, kPianoRollTopGutter, playheadX, clientSize.GetHeight());
+            const int phX = TickToX(m_playheadTick);
+            if (phX >= viewLeft - 2 && phX <= viewRight + 2) {
+                dc.SetPen(m_rc.penPlayhead);
+                dc.DrawLine(phX, topGutter, phX, clientSize.GetHeight());
             }
         }
+
         if (m_selectBoxActive) {
-            wxRect selectionRect;
-
-            selectionRect = NormalizeRect(m_selectBoxStart, m_selectBoxCurrent);
-            dc.SetBrush(wxBrush(wxColour(73, 135, 210, 48)));
-            dc.SetPen(wxPen(wxColour(45, 98, 168), 1));
-            dc.DrawRectangle(selectionRect);
+            const wxRect sel = NormalizeRect(m_selectBoxStart, m_selectBoxCurrent);
+            dc.SetBrush(m_rc.brushSelectionBox);
+            dc.SetPen(m_rc.penSelectionBoxBorder);
+            dc.DrawRectangle(sel);
         }
-        /* Draw timeline end marker */
-        {
-            uint32_t endTick;
-            int endX;
 
-            endTick = m_draggingTimelineEnd ? m_timelineEndDragTick : GetDocumentEndTick();
-            endX = TickToX(endTick);
-            if (endX >= visibleRect.GetLeft() - 2 && endX <= visibleRect.GetRight() + 2) {
-                /* Shaded region beyond end */
-                if (endX < visibleRect.GetRight()) {
+        {
+            const uint32_t endTick = m_draggingTimelineEnd ? m_timelineEndDragTick
+                                                           : GetDocumentEndTick();
+            const int endX = TickToX(endTick);
+            if (endX >= viewLeft - 2 && endX <= viewRight + 2) {
+                // Shaded region beyond end
+                if (endX < viewRight) {
                     dc.SetPen(*wxTRANSPARENT_PEN);
-                    dc.SetBrush(wxBrush(m_theme.endRegionShade));
+                    dc.SetBrush(m_rc.brushTimelineEnd);
                     dc.DrawRectangle(endX + 1,
-                                     kPianoRollTopGutter,
-                                     visibleRect.GetRight() - endX,
-                                     std::max(1, clientSize.GetHeight() - kPianoRollTopGutter));
+                                     topGutter,
+                                     viewRight - endX,
+                                     std::max(1, clientSize.GetHeight() - topGutter));
                 }
-                /* End marker line */
-                dc.SetPen(wxPen(wxColour(180, 130, 50), 2));
-                dc.DrawLine(endX, kPianoRollTopGutter, endX, clientSize.GetHeight());
+                // End marker line
+                dc.SetPen(m_rc.penTimelineEnd);
+                dc.DrawLine(endX, topGutter, endX, clientSize.GetHeight());
+
+                // Small triangular tab at bottom of ruler
+                wxPoint tri[3] = {
+                    {endX, topGutter - 2},
+                    {endX - 5, topGutter - 10},
+                    {endX + 5, topGutter - 10}
+                };
+                dc.SetPen(m_rc.penTimelineHandle);
+                dc.SetBrush(m_rc.brushTimelineHandleFill);
+                dc.DrawPolygon(3, tri);
             }
         }
+
         DrawStickyRuler(dc);
-        DrawMidiLoopRulerOverlay(dc, visibleRect, clientSize);
+        DrawMidiLoopRulerOverlay(dc,
+                                 wxRect(viewLeft, viewTop,
+                                        viewRight - viewLeft, viewBottom - viewTop),
+                                 clientSize);
     }
 
     void OnLeftDown(wxMouseEvent &event) {
