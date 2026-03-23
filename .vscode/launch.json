@@ -18,6 +18,24 @@
             }
         ],
         "preLaunchTask": "Build GUI with Debug Logging and Symbols"
+    },
+    {
+        "name": "Build & Debug NBStudio",
+        "type": "cppdbg",
+        "request": "launch",
+        "program": "${workspaceFolder}/neobae/bin/nbstudio",
+        "args": [],
+        "cwd": "${workspaceFolder}/neobae/bin",
+        "MIMode": "gdb",
+        "miDebuggerPath": "gdb",
+        "setupCommands": [
+            {
+                "description": "Enable pretty-printing for gdb",
+                "text": "-enable-pretty-printing",
+                "ignoreFailures": true
+            }
+        ],
+        "preLaunchTask": "Build NeoBAE Studio (RMF Editor)"
     }
   ]
 }

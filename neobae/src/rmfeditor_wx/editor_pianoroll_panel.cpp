@@ -5,7 +5,10 @@
 #include <functional>
 #include <vector>
 
+#include <cstring>
+
 #include <wx/dcbuffer.h>
+#include <wx/image.h>
 #include <wx/msgdlg.h>
 #include <wx/scrolwin.h>
 #include <wx/spinctrl.h>
@@ -65,6 +68,38 @@ struct AutomationLaneDescriptor {
     int maxValue;
     bool bipolar;
 };
+
+static void FillRectWithBrush(wxDC &dc, wxRect const &rect, wxBrush const &brush) {
+    if (rect.GetWidth() <= 0 || rect.GetHeight() <= 0) {
+        return;
+    }
+
+    wxColour const colour = brush.GetColour();
+    if (!colour.IsOk() || colour.Alpha() == wxALPHA_OPAQUE) {
+        dc.SetPen(*wxTRANSPARENT_PEN);
+        dc.SetBrush(brush);
+        dc.DrawRectangle(rect);
+        return;
+    }
+
+    // Plain wxDC rectangle fills ignore brush alpha on wxMSW because GDI
+    // does not alpha-blend when drawing with a solid brush onto a non-ARGB
+    // surface.  wxGraphicsContext / GDI+ has the same limitation when the
+    // backing bitmap has no alpha channel (the case for wxAutoBufferedPaintDC).
+    //
+    // The portable fix: build a wxImage with a proper alpha channel, convert
+    // it to a wxBitmap (wx pre-multiplies alpha for Windows automatically),
+    // and draw it with DrawBitmap(..., true).  On wxMSW this calls AlphaBlend;
+    // on GTK it uses Cairo source-over compositing.
+    const int w = rect.GetWidth();
+    const int h = rect.GetHeight();
+
+    wxImage img(w, h);
+    img.SetRGB(wxRect(0, 0, w, h), colour.Red(), colour.Green(), colour.Blue());
+    img.InitAlpha();
+    memset(img.GetAlpha(), colour.Alpha(), static_cast<size_t>(w) * h);
+    dc.DrawBitmap(wxBitmap(img), rect.GetX(), rect.GetY(), true);
+}
 
 /* ---------- Theme palette for the piano roll grid area ---------- */
 struct PianoRollTheme {
@@ -582,7 +617,7 @@ public:
         m_rc.penSelectionBoxBorder = wxPen(wxColour(45, 98, 168), 1);
         m_rc.penTimelineHandle = wxPen(wxColour(140, 100, 35));
         m_rc.brushTimelineHandleFill = wxBrush(wxColour(200, 155, 60));
-        m_rc.brushMidiLoopShade = wxBrush(wxColour(88, 180, 120, 26));
+        m_rc.brushMidiLoopShade = wxBrush(wxColour(88, 180, 120, 55));
         
         SetBackgroundStyle(wxBG_STYLE_PAINT);
         SetScrollRate(16, 16);
@@ -3340,12 +3375,19 @@ private:
         int shadeLeft  = std::max(startX, kPianoRollLeftGutter);
         int shadeRight = std::max(shadeLeft + 1, endX);
 
-        dc.SetPen(*wxTRANSPARENT_PEN);
-        dc.SetBrush(m_rc.brushMidiLoopShade);
-        dc.DrawRectangle(shadeLeft,
-                         kPianoRollTopGutter,
-                         shadeRight - shadeLeft,
-                         std::max(1, virtualSize.GetHeight() - kPianoRollTopGutter));
+        // Clip the fill to the visible area so the intermediate wxImage is
+        // bounded by the client viewport height rather than the full virtual
+        // scroll height (which can be thousands of pixels).
+        const int shadeBottom = visibleRect.GetBottom();
+        if (shadeBottom <= kPianoRollTopGutter)
+            return;
+
+        FillRectWithBrush(dc,
+                          wxRect(shadeLeft,
+                                 kPianoRollTopGutter,
+                                 shadeRight - shadeLeft,
+                                 shadeBottom - kPianoRollTopGutter),
+                          m_rc.brushMidiLoopShade);
     }
 
 
@@ -3596,8 +3638,9 @@ private:
 
         if (m_selectBoxActive) {
             const wxRect sel = NormalizeRect(m_selectBoxStart, m_selectBoxCurrent);
-            dc.SetBrush(m_rc.brushSelectionBox);
+            FillRectWithBrush(dc, sel, m_rc.brushSelectionBox);
             dc.SetPen(m_rc.penSelectionBoxBorder);
+            dc.SetBrush(*wxTRANSPARENT_BRUSH);
             dc.DrawRectangle(sel);
         }
 
