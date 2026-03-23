@@ -2253,7 +2253,9 @@ private:
         m_rootSpin->Bind(wxEVT_SPINCTRL, [this](wxCommandEvent &) { NotifyParameterChanged(); });
         m_rootSpin->Bind(wxEVT_TEXT, [this](wxCommandEvent &) { NotifyParameterChanged(); });
         m_lowSpin->Bind(wxEVT_SPINCTRL, [this](wxCommandEvent &) { NotifyParameterChanged(); });
+        m_lowSpin->Bind(wxEVT_TEXT, [this](wxCommandEvent &) { NotifyParameterChanged(); });
         m_highSpin->Bind(wxEVT_SPINCTRL, [this](wxCommandEvent &) { NotifyParameterChanged(); });
+        m_highSpin->Bind(wxEVT_TEXT, [this](wxCommandEvent &) { NotifyParameterChanged(); });
         m_sampleRateSpin->Bind(wxEVT_SPINCTRL, [this](wxCommandEvent &) { NotifyParameterChanged(); });
         m_sampleRateSpin->Bind(wxEVT_TEXT, [this](wxCommandEvent &) { NotifyParameterChanged(); });
         m_splitVolumeSpin->Bind(wxEVT_SPINCTRL, [this](wxCommandEvent &) { NotifyParameterChanged(); });

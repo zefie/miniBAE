@@ -710,10 +710,19 @@ public:
                                 sampleInfo.sampleRate = m_bankDirtyExtInfo.sampleRate;
                                 sampleInfo.loopStart = m_bankDirtyExtInfo.sampleLoopStart;
                                 sampleInfo.loopEnd = m_bankDirtyExtInfo.sampleLoopEnd;
-                                (void)BAERmfEditorBank_SetInstrumentSampleInfo(m_bankToken,
+                                if (BAERmfEditorBank_SetInstrumentSampleInfo(m_bankToken,
                                                                                idx,
                                                                                m_bankDirtyExtInfo.sampleOverrideIndex,
-                                                                               &sampleInfo);
+                                                                               &sampleInfo) == BAE_NO_ERROR) {
+                                    /* SetInstrumentSampleInfo may have written a new midiRootKey
+                                     * into the INST resource (when ZBF_useSoundModifierAsRootKey
+                                     * is not set).  Re-read it so the SetInstrumentExtInfo call
+                                     * below doesn't overwrite it with the stale cached value. */
+                                    BAERmfEditorInstrumentExtInfo refreshed;
+                                    if (BAERmfEditorBank_GetInstrumentExtInfo(m_bankToken, idx, &refreshed) == BAE_NO_ERROR) {
+                                        m_bankDirtyExtInfo.midiRootKey = refreshed.midiRootKey;
+                                    }
+                                }
                             }
                         }
 

@@ -14259,18 +14259,35 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
     if (splitCount > 0)
     {
         unsigned char *splitPtr;
+        unsigned char flags2;
 
         if (sampleIndex >= (uint32_t)splitCount)
         {
             XDisposePtr(instData);
             return BAE_PARAM_ERR;
         }
+
         splitPtr = (unsigned char *)instData + 14 + (sampleIndex * kInstKeySplitSize);
         splitPtr[0] = info->lowKey;
         splitPtr[1] = info->highKey;
-        XPutShort(splitPtr + 4, (uint16_t)info->rootKey);
         XPutShort(splitPtr + 6, (uint16_t)info->splitVolume);
         sndID = (XShortResourceID)XGetShort(splitPtr + 2);
+
+        /* Root key storage depends on ZBF_useSoundModifierAsRootKey.
+         * When set, each split stores its own root in miscParameter1.
+         * When clear, all splits share the instrument-level midiRootKey. */
+        flags2 = ((unsigned char *)instData)[6];
+        if (TEST_FLAG_VALUE(flags2, ZBF_useSoundModifierAsRootKey))
+        {
+            XPutShort(splitPtr + 4, (uint16_t)info->rootKey);
+        }
+        else
+        {
+            /* Write to the shared midiRootKey — this affects all splits,
+             * which is correct because the format has no per-split root
+             * key in this mode. */
+            XPutShort((unsigned char *)instData + 2, (uint16_t)info->rootKey);
+        }
     }
     else
     {
@@ -14339,7 +14356,11 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
 
         hz = info->sampleRate;
         sampleRate = (BAE_UNSIGNED_FIXED)(hz << 16);
-        XSetSoundBaseKey(sndPlain, (int16_t)info->rootKey);
+        /* Do NOT overwrite the SND's baseFrequency/baseMidiPitch here.
+         * That field represents the sample's recorded pitch (used by the
+         * engine's baseMidiPitch calculation) and is a property of the
+         * audio data itself.  The instrument root key is stored in the
+         * INST resource (midiRootKey / split miscParameter1) above. */
         XSetSoundSampleRate(sndPlain, sampleRate);
         XSetSoundLoopPoints(sndPlain, (int32_t)info->loopStart, (int32_t)info->loopEnd);
     }
