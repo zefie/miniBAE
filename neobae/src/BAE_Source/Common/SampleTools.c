@@ -268,6 +268,37 @@ static void * PV_GetSoundHeaderPtr(XPTR pRes, int16_t  *pEncode)
     return pSndBuffer;
 }
 
+static XBOOL PV_ShouldUseSamplePtrOffsetFix(void)
+{
+    XFILE fileRef;
+    XFILERESOURCEMAP map;
+    int32_t savedPos;
+
+    fileRef = XFileGetCurrentResourceFile();
+    if (!fileRef)
+    {
+        return FALSE;
+    }
+
+    savedPos = XFileGetPosition(fileRef);
+    if (savedPos < 0)
+    {
+        return FALSE;
+    }
+    if (XFileSetPosition(fileRef, 0) != 0)
+    {
+        return FALSE;
+    }
+    if (XFileRead(fileRef, (XPTR)&map, (int32_t)sizeof(XFILERESOURCEMAP)) != 0)
+    {
+        (void)XFileSetPosition(fileRef, savedPos);
+        return FALSE;
+    }
+    (void)XFileSetPosition(fileRef, savedPos);
+
+    return (XGetLong(&map.mapID) == XFILERESOURCE_ZMF_ID) ? TRUE : FALSE;
+}
+
 
 // Given a Mac sample, and loop points, this will change the data associated with it
 #if USE_CREATION_API == TRUE
@@ -1003,6 +1034,7 @@ XPTR                encodedData;
 UINT32              startFrame;
 XBYTE*              inIntelOrder;
 XPTR                sampleData;
+XBOOL               useSamplePtrOffsetFix;
 XBYTE               order = X_WORD_ORDER;
 XDWORD              roundTripSavedRate;  /* non-zero if XSOUND_OPUS_ROUNDTRIP_RESAMPLE is set */
 
@@ -1029,12 +1061,12 @@ XDWORD              roundTripSavedRate;  /* non-zero if XSOUND_OPUS_ROUNDTRIP_RE
 
     encodedData = NULL;
     startFrame = 0;
+    useSamplePtrOffsetFix = PV_ShouldUseSamplePtrOffsetFix();
 
     switch (headerType)
     {
     case XStandardHeader:   // standard header
-        // samplePtr is a 32-bit on-disk value. If non-zero, treat as offset from start.
-        if (XGetLong(&header->samplePtr))
+        if (useSamplePtrOffsetFix && XGetLong(&header->samplePtr))
         {
             encodedData = (XPTR)((char*)header + (uintptr_t)XGetLong(&header->samplePtr));
         }
@@ -1056,13 +1088,22 @@ XDWORD              roundTripSavedRate;  /* non-zero if XSOUND_OPUS_ROUNDTRIP_RE
     XExtSoundHeader*    headerExt;
 
         headerExt = (XExtSoundHeader*)header;
-        // samplePtr is a 32-bit on-disk value. If non-zero, treat as offset from start.
-        encodedData = (XPTR)(uintptr_t)XGetLong(&headerExt->samplePtr);
-        if (encodedData)
+        if (useSamplePtrOffsetFix)
         {
-            encodedData = (XPTR)((char*)header + (uintptr_t)encodedData);
+            encodedData = (XPTR)(uintptr_t)XGetLong(&headerExt->samplePtr);
+            if (encodedData)
+            {
+                encodedData = (XPTR)((char*)header + (uintptr_t)encodedData);
+            }
+            if (!encodedData)
+            {
+                encodedData = (char *)&headerExt->sampleArea[0];
+            }
         }
-        if (!encodedData) { encodedData = (char *)&headerExt->sampleArea[0]; }
+        else
+        {
+            encodedData = (char *)&headerExt->sampleArea[0];
+        }
         info->channels = (int16_t)XGetLong(&headerExt->numChannels);
         info->bitSize = XGetShort(&headerExt->sampleSize);
         info->frames = XGetLong(&headerExt->numFrames);
@@ -1080,9 +1121,8 @@ XDWORD              roundTripSavedRate;  /* non-zero if XSOUND_OPUS_ROUNDTRIP_RE
     int16_t               compressionID;
 
         headerCmp = (XCmpSoundHeader*)header;
-        // samplePtr is a 32-bit on-disk value. If non-zero, treat as offset from start.
         encodedData = (XPTR)(uintptr_t)XGetLong(&headerCmp->samplePtr);
-        if (encodedData)
+        if (useSamplePtrOffsetFix && encodedData)
         {
             encodedData = (XPTR)((char*)header + (uintptr_t)encodedData);
         }

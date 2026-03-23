@@ -26,6 +26,10 @@
 
 # Future
 - More throughly test backwards compatiblity with BeatnikX, maybe even WebTV Plus
+  - Put on back-burner for now
+  - old 2021 miniBAE can play files (obv without mp3) that BeatnikX can't
+  - would have to undo changes actually done by Beatnik to 'retrograde' the engine to the old buggy state
+    if we want to really be 1:1
   - ~~mod2rmf doesn't play as intended in BeatnikX, are we generating correctly? (edited RMF seems fine)~~
   - ~~Works fine in NeoBAE, but RMF files in particular NEED to be properly backwards compatible~~
   - ~~Change happened between 2025-08-23 and 2025-09-01 release (MIN_LOOP_SIZE dropped from 20 to 2)~~

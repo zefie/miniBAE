@@ -1464,23 +1464,20 @@ static int build_song_model_native(Mod2RmfConverter *conv, ModSongModel *song)
                          */
                         XBOOL willTriggerNote = FALSE;
 
-                        /* Sample number sets the program.  Volume is only
-                         * reset to the sample's default when a note (period)
-                         * is also present — matching OpenMPT behavior.
-                         * Sample-number-without-period just selects the
-                         * instrument for the next note trigger. */
+                        /* Sample number sets the program and resets the
+                         * channel volume to the sample's default.
+                         * ProTracker always resets volume when a sample
+                         * number appears, even without a note (period). */
                         if (sampleNum > 0 && sampleNum <= h->sampleCount &&
                             conv->slotToProgram[sampleNum - 1] != 0xFF)
                         {
                             ch->program = conv->slotToProgram[sampleNum - 1];
-                            if (period != 0)
-                                ch->volume = conv->rawSamples[sampleNum - 1].defaultVolume;
+                            ch->volume = conv->rawSamples[sampleNum - 1].defaultVolume;
                         }
                         else if (sampleNum > 0 && sampleNum <= h->sampleCount)
                         {
                             ch->program = 0xFF;
-                            if (period != 0)
-                                ch->volume = conv->rawSamples[sampleNum - 1].defaultVolume;
+                            ch->volume = conv->rawSamples[sampleNum - 1].defaultVolume;
                         }
 
                         /* 0x0C: Set Volume — processed before note trigger
@@ -3298,11 +3295,17 @@ static int setup_instrument_ext(Mod2RmfConverter *conv, const ModSongModel *song
         }
 
         extInfo.flags1 |= MOD2RMF_ZBF_USE_SAMPLE_RATE;
-        /* Enable advanced interpolation (cubic Hermite with loop-boundary
-         * wrapping) for both ZMF and RMF.  This is required for click-free
-         * loop playback with 16-bit samples. */
-        extInfo.flags1 &= (unsigned char)~MOD2RMF_ZBF_ENABLE_INTERPOLATE;
-        extInfo.flags2 |= MOD2RMF_ZBF_ADVANCED_INTERPOLATION;
+        /* RMF uses normal interpolation; advanced interpolation is ZMF-only. */
+        if (useZmfContainer)
+        {
+            extInfo.flags1 &= (unsigned char)~MOD2RMF_ZBF_ENABLE_INTERPOLATE;
+            extInfo.flags2 |= MOD2RMF_ZBF_ADVANCED_INTERPOLATION;
+        }
+        else
+        {
+            extInfo.flags1 |= MOD2RMF_ZBF_ENABLE_INTERPOLATE;
+            extInfo.flags2 &= (unsigned char)~MOD2RMF_ZBF_ADVANCED_INTERPOLATION;
+        }
         extInfo.flags1 &= (unsigned char)~(MOD2RMF_ZBF_DISABLE_SND_LOOPING | MOD2RMF_ZBF_SAMPLE_AND_HOLD);
         /* Match what the instrument editor produces on OK for plain samples:
          * do not force miscParameter1 as root key. */
