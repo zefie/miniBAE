@@ -418,10 +418,11 @@ void karaoke_commit_line(uint32_t time_us, const char *line);
 #endif
 
 // Total playtime globals (ms) tracked across the session — used by transport UI
-// This timer accumulates playback time even when the song loops and is
-// advanced using deltas of the engine position so it does not reset on loops.
+// This timer accumulates actual wall-clock playback time while transport is
+// running, so engine timeline jumps (loop markers/seeks) do not skew totals.
 static int g_total_play_ms = 0;
 static int g_last_engine_pos_ms = 0;
+static uint32_t g_last_play_tick_ms = 0;
 
 // Progress bar stripe animation state
 static int g_progress_stripe_offset = 0;
@@ -3774,35 +3775,31 @@ int main(int argc, char *argv[])
         draw_text(R, slash_x, time_y, "/", labelCol);
         draw_text(R, slash_x + 10, time_y, dbuf, labelCol);
 
-        // Update session total-played time using engine position deltas so it
-        // doesn't reset when the song loops.
+        // Update session total-played time using wall-clock deltas while
+        // playing so loop-point timeline jumps do not inflate totals.
         if (playing)
         {
-            int curPos = bae_get_pos_ms();
-            if (g_last_engine_pos_ms == 0)
+            uint32_t now_ms = SDL_GetTicks();
+            if (g_last_play_tick_ms == 0)
             {
-                // Initialize to current engine pos when we first start playing
-                g_last_engine_pos_ms = curPos;
+                g_last_play_tick_ms = now_ms;
             }
-            int delta = curPos - g_last_engine_pos_ms;
-            if (delta < 0)
+            else
             {
-                // Negative delta indicates a loop or seek backwards; treat as
-                // continuation and do not subtract — assume a loop advanced total
-                // by (curPos) since engine wrapped to start. In that case add curPos.
-                delta = curPos;
+                uint32_t delta_ms = now_ms - g_last_play_tick_ms;
+                // Ignore implausible spikes (e.g. debugger pause) to keep UI sane.
+                if (delta_ms < (uint32_t)(5 * 60 * 1000))
+                {
+                    g_total_play_ms += (int)delta_ms;
+                }
+                g_last_play_tick_ms = now_ms;
             }
-            // Only account reasonably-sized deltas to avoid spikes from seeks
-            if (delta >= 0 && delta < 5 * 60 * 1000)
-            { // ignore >5 minutes jumps
-                g_total_play_ms += delta;
-            }
-            g_last_engine_pos_ms = curPos;
+            g_last_engine_pos_ms = bae_get_pos_ms();
         }
         else if (!playing)
         {
-            // When not playing, keep last engine pos synced so resume deltas
-            // are computed correctly and don't double-count paused intervals.
+            // Reset play tick while paused so we don't count pause time.
+            g_last_play_tick_ms = 0;
             g_last_engine_pos_ms = bae_get_pos_ms();
         }
 
@@ -3891,6 +3888,7 @@ int main(int argc, char *argv[])
             // Reset total-play timer on user Stop
             g_total_play_ms = 0;
             g_last_engine_pos_ms = 0;
+            g_last_play_tick_ms = 0;
             // Clear visible virtual keyboard notes on Stop (use live song fallback)
             if (g_show_virtual_keyboard)
             {
@@ -5066,6 +5064,7 @@ int main(int argc, char *argv[])
                 // Reset total-play timer on user Stop
                 g_total_play_ms = 0;
                 g_last_engine_pos_ms = 0;
+                g_last_play_tick_ms = 0;
                 // Also stop export if active
                 if (g_exporting)
                 {
