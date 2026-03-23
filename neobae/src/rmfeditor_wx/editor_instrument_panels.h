@@ -1723,10 +1723,8 @@ public:
             auto [codecIdx, bitrateIdx] = CompressionTypeToCodecBitrate(effectiveComp);
             if (codecIdx == 6 && data.opusRoundTripResample) codecIdx = 7;
             m_codecChoice->SetSelection(codecIdx);
-            m_codecChoice->SetString(0, "Don't Change");
-            UpdateBitrateChoice(codecIdx);
-            if (bitrateIdx >= 0 && bitrateIdx < (int)m_bitrateChoice->GetCount())
-                m_bitrateChoice->SetSelection(bitrateIdx);
+            m_codecChoice->SetString(0, data.hasOriginalData ? "Original" : "Don't Change");
+            UpdateBitrateChoice(codecIdx, bitrateIdx);
             if (m_opusModeChoice) {
                 m_opusModeChoice->SetSelection(data.opusMode == BAE_EDITOR_OPUS_MODE_VOICE ? 1 : 0);
                 m_opusModeChoice->Enable(codecIdx == 6 || codecIdx == 7);
@@ -1836,6 +1834,7 @@ public:
     int GetRootKey() const { return m_rootSpin->GetValue(); }
     int GetLowKey() const { return m_lowSpin->GetValue(); }
     int GetHighKey() const { return m_highSpin->GetValue(); }
+    int GetCodecSelection() const { return m_codecChoice ? m_codecChoice->GetSelection() : 0; }
 
     /* Enable or disable the New/Delete/Replace/Export buttons.
      * The bank editor sets write=false since banks are read-only;
@@ -2067,26 +2066,37 @@ private:
         }
     }
 
-    void UpdateBitrateChoice(int codecIdx) {
+    void UpdateBitrateChoice(int codecIdx, int preferredSelection = -1) {
+        auto chooseIndex = [&](int count, int defaultSelection) {
+            int index = defaultSelection;
+            if (preferredSelection >= 0 && preferredSelection < count) {
+                index = preferredSelection;
+            }
+            if (index < 0 || index >= count) {
+                index = 0;
+            }
+            m_bitrateChoice->SetSelection(index);
+        };
+
         m_bitrateChoice->Clear();
         switch (codecIdx) {
             case 3:
                 for (auto s : {"32k","48k","64k","96k","128k","192k","256k","320k"})
                     m_bitrateChoice->Append(s);
-                m_bitrateChoice->SetSelection(0);
+                chooseIndex((int)m_bitrateChoice->GetCount(), 0);
                 m_bitrateChoice->Enable(true);
                 break;
             case 4:
                 for (auto s : {"32k","48k","64k","80k","96k","128k","160k","192k","256k"})
                     m_bitrateChoice->Append(s);
-                m_bitrateChoice->SetSelection(0);
+                chooseIndex((int)m_bitrateChoice->GetCount(), 0);
                 m_bitrateChoice->Enable(true);
                 break;
             case 7:
             case 6:
                 for (auto s : {"12k","16k","24k","32k","48k","64k","80k","96k","128k","160k","192k","256k"})
                     m_bitrateChoice->Append(s);
-                m_bitrateChoice->SetSelection(0);
+                chooseIndex((int)m_bitrateChoice->GetCount(), 0);
                 m_bitrateChoice->Enable(true);
                 break;
             default:
@@ -2177,10 +2187,12 @@ private:
             sizer->Add(row, 0, wxLEFT | wxRIGHT | wxBOTTOM, 6);
 
             m_codecChoice->Bind(wxEVT_CHOICE, [this](wxCommandEvent &) {
-                UpdateBitrateChoice(m_codecChoice->GetSelection());
+                int selectedCodec = m_codecChoice->GetSelection();
+                int previousBitrate = m_bitrateChoice->IsEnabled() ? m_bitrateChoice->GetSelection() : -1;
+
+                UpdateBitrateChoice(selectedCodec, previousBitrate);
                 if (m_opusModeChoice) {
-                    int sel = m_codecChoice->GetSelection();
-                    m_opusModeChoice->Enable(sel == 6 || sel == 7);
+                    m_opusModeChoice->Enable(selectedCodec == 6 || selectedCodec == 7);
                 }
                 NotifyParameterChanged();
             });

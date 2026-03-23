@@ -54,6 +54,12 @@ void BankEditorPanel_SetPreviewCallbacks(
     std::function<void()> invalidateCallback,
     std::function<void(BAERmfEditorInstrumentExtInfo const *info)> dirtyParamsCallback);
 
+/* Optional callback to provide source codec text from cached original SND.
+ * Returns true and fills outCodecDescription when a cached source exists. */
+void BankEditorPanel_SetSourceCodecCallback(
+    BankEditorPanel *panel,
+    std::function<bool(uint16_t sndID, wxString &outCodecDescription)> sourceCodecCallback);
+
 /* Set instrument context-menu callbacks (right-click on instrument tree items). */
 void BankEditorPanel_SetInstrumentContextCallbacks(
     BankEditorPanel *panel,

@@ -13584,13 +13584,16 @@ BAEResult BAERmfEditorBank_GetInstrumentSampleInfo(BAEBankToken bankToken,
         int32_t sndSize;
         static const XResourceType sndTypes[] = { ID_SND, ID_CSND, ID_ESND, 0 };
         int32_t typeIdx;
+        XResourceType foundSndType;
 
         sndData = NULL;
+        foundSndType = 0;
         for (typeIdx = 0; sndTypes[typeIdx] != 0; ++typeIdx)
         {
             sndData = XGetFileResource(bankFile, sndTypes[typeIdx], (XLongResourceID)sndID, NULL, &sndSize);
             if (sndData)
             {
+                foundSndType = sndTypes[typeIdx];
                 BAE_PRINTF("[BankSampleInfo] Found SND %d as type %d, size %d\n",
                            (int)sndID, (int)typeIdx, (int)sndSize);
                 /* Decompress CSND (LZSS) or decrypt ESND before reading header */
@@ -13647,6 +13650,20 @@ BAEResult BAERmfEditorBank_GetInstrumentSampleInfo(BAEBankToken bankToken,
                 BAE_PRINTF("[BankSampleInfo] SND %d has unrecognized format %d\n", (int)sndID, (int)soundFormat);
             }
             XDisposePtr(sndData);
+        }
+
+        /* Report the container type so callers can reflect it in the UI */
+        if (foundSndType == ID_CSND)
+        {
+            outInfo->sndStorageType = BAE_EDITOR_SND_STORAGE_CSND;
+        }
+        else if (foundSndType == ID_SND)
+        {
+            outInfo->sndStorageType = BAE_EDITOR_SND_STORAGE_SND;
+        }
+        else
+        {
+            outInfo->sndStorageType = BAE_EDITOR_SND_STORAGE_ESND; /* default / ESND */
         }
     }
 
@@ -14041,6 +14058,177 @@ static BAEResult PV_BankRewrapSndForType(XFILE bankFile,
     }
 
     return BAE_PARAM_ERR;
+}
+
+/* Like PV_BankReplaceResource, but allows the container type to change.
+ * Scans the bank and when a resource matching (oldType, id) is found it is
+ * replaced with (newType, id, data).  When oldType == newType this is
+ * identical to PV_BankReplaceResource. */
+static BAEResult PV_BankReplaceResourceEx(XFILE bankFile,
+                                           XResourceType oldType,
+                                           XResourceType newType,
+                                           XLongResourceID id,
+                                           char const *pascalName,
+                                           XPTR data,
+                                           int32_t size)
+{
+    static const XResourceType bankResourceTypes[] = {
+        ID_INST,
+        ID_SND,
+        ID_CSND,
+        ID_ESND,
+        ID_ALIAS,
+        ID_BANK,
+        ID_SONG,
+        ID_MIDI,
+        ID_MIDI_OLD,
+        ID_CMID,
+        ID_EMID,
+        ID_ECMI,
+        ID_RMF,
+        ID_TEXT,
+        ID_VERS,
+        0
+    };
+    XFILERESOURCEMAP map;
+    int32_t resourceID;
+    XFILE outFile;
+    int32_t typeIdx;
+    XPTR packedData;
+    int32_t packedSize;
+    XBOOL replaced;
+
+    if (!bankFile || !data || size <= 0)
+    {
+        return BAE_PARAM_ERR;
+    }
+    if (XFileSetPosition(bankFile, 0L) != 0 ||
+        XFileRead(bankFile, &map, (int32_t)sizeof(XFILERESOURCEMAP)) != 0)
+    {
+        return BAE_BAD_FILE;
+    }
+    resourceID = (int32_t)XGetLong(&map.mapID);
+    if (!XFILERESOURCE_ID_IS_VALID(resourceID))
+    {
+        return BAE_BAD_FILE;
+    }
+
+    outFile = XFileOpenVirtualResource(resourceID);
+    if (!outFile)
+    {
+        return BAE_MEMORY_ERR;
+    }
+
+    replaced = FALSE;
+    for (typeIdx = 0; bankResourceTypes[typeIdx] != 0; ++typeIdx)
+    {
+        XResourceType resType;
+        int32_t resCount;
+        int32_t resIndex;
+
+        resType = bankResourceTypes[typeIdx];
+        resCount = XCountFileResourcesOfType(bankFile, resType);
+        for (resIndex = 0; resIndex < resCount; ++resIndex)
+        {
+            XLongResourceID resID;
+            int32_t resSize;
+            XPTR resData;
+            char resName[256];
+
+            resName[0] = 0;
+            resData = XGetIndexedFileResource(bankFile,
+                                              resType,
+                                              &resID,
+                                              resIndex,
+                                              resName,
+                                              &resSize);
+            if (!resData)
+            {
+                continue;
+            }
+
+            if (resType == oldType && resID == id)
+            {
+                if (!replaced)
+                {
+                    char const *replaceName;
+
+                    replaceName = pascalName ? pascalName : resName;
+                    /* Write with newType instead of oldType (handles container change) */
+                    if (XAddFileResource(outFile,
+                                         newType,
+                                         id,
+                                         replaceName,
+                                         data,
+                                         size) != 0)
+                    {
+                        XDisposePtr(resData);
+                        XFileClose(outFile);
+                        return BAE_FILE_IO_ERROR;
+                    }
+                    replaced = TRUE;
+                }
+                XDisposePtr(resData);
+                continue;
+            }
+
+            if (XAddFileResource(outFile, resType, resID, resName, resData, resSize) != 0)
+            {
+                XDisposePtr(resData);
+                XFileClose(outFile);
+                return BAE_FILE_IO_ERROR;
+            }
+            XDisposePtr(resData);
+        }
+    }
+
+    if (!replaced)
+    {
+        if (XAddFileResource(outFile, newType, id, pascalName, data, size) != 0)
+        {
+            XFileClose(outFile);
+            return BAE_FILE_IO_ERROR;
+        }
+    }
+
+    if (XCleanResourceFile(outFile) == FALSE)
+    {
+        XFileClose(outFile);
+        return BAE_FILE_IO_ERROR;
+    }
+
+    packedData = NULL;
+    packedSize = 0;
+    if (XFileGetMemoryFileAsData(outFile, &packedData, &packedSize) != 0 ||
+        !packedData || packedSize <= 0)
+    {
+        XFileClose(outFile);
+        if (packedData)
+        {
+            XDisposePtr(packedData);
+        }
+        return BAE_FILE_IO_ERROR;
+    }
+    XFileClose(outFile);
+
+    if (bankFile->pCache)
+    {
+        XDisposePtr(bankFile->pCache);
+        bankFile->pCache = NULL;
+    }
+    if (bankFile->pResourceData && bankFile->ownsResourceData)
+    {
+        XDisposePtr(bankFile->pResourceData);
+    }
+
+    bankFile->pResourceData = packedData;
+    bankFile->resMemLength = packedSize;
+    bankFile->resMemOffset = 0;
+    bankFile->ownsResourceData = TRUE;
+    bankFile->resizeResourceData = TRUE;
+    bankFile->readOnly = FALSE;
+    bankFile->allowMemCopy = TRUE;
+    return BAE_NO_ERROR;
 }
 
 BAEResult BAERmfEditorBank_SetInstrumentExtInfo(BAEBankToken bankToken,
@@ -15363,5 +15551,630 @@ BAEResult BAERmfEditorDocument_DebugReportMidiRoundTripDiff(BAERmfEditorDocument
         PV_DebugReportMidiRoundTripDiff(document, &midiData);
     }
     PV_ByteBufferDispose(&midiData);
+    return result;
+}
+
+/* Core encode-and-replace logic shared by BAERmfEditorBank_ReEncodeSample and
+   BAERmfEditorBank_ReEncodeSampleFromPCM.  waveData is borrowed — caller owns it. */
+static BAEResult PV_BankReEncodeSampleCore(XFILE bankFile,
+                                            BAERmfEditorBankSampleInfo *pSampleInfo,
+                                            void *waveData,
+                                            uint32_t frameCount,
+                                            uint16_t bitSize,
+                                            uint16_t channels,
+                                            BAE_UNSIGNED_FIXED sampleRate,
+                                            BAERmfEditorCompressionType compressionType,
+                                            BAERmfEditorSndStorageType sndStorageType,
+                                            BAERmfEditorOpusMode opusMode,
+                                            XBOOL opusRoundTripResample)
+{
+    BAEResult result;
+    SndCompressionType compType;
+    SndCompressionSubType compSubType;
+    SndCompressionSubType encodeCompSubType;
+    GM_Waveform writeWaveform;
+    XResourceType oldSndType;
+    XResourceType newSndType;
+    XPTR oldSndRawData;
+    int32_t oldSndRawSize;
+    XPTR oldSndPlain;
+    int32_t oldSndPlainSize;
+    XBOOL oldSndPlainOwned;
+    SampleDataInfo oldSndInfo;
+    int16_t preservedBaseKey;
+    char sndName[256];
+    XPTR sndResource;
+    XPTR encodeWaveDataOwner;
+    XPTR wrappedSnd;
+    int32_t wrappedSndSize;
+    OPErr opErr;
+    XBOOL sampleWasEncodedMpeg;
+    int32_t normalizedLoopStart;
+    int32_t normalizedLoopEnd;
+    uint32_t inputPcmRateHz;
+    uint32_t decodedSampleRateForSnd;
+    uint32_t decodedFramesForRate;
+    int32_t roundTripSourceRate;
+    int32_t loopStart;
+    int32_t loopEnd;
+
+    /* Map editor compression type to SND compression type / sub-type */
+    sampleWasEncodedMpeg = FALSE;
+    normalizedLoopStart = (int32_t)pSampleInfo->loopStart;
+    normalizedLoopEnd = (int32_t)pSampleInfo->loopEnd;
+    inputPcmRateHz = 0;
+    decodedSampleRateForSnd = 0;
+    decodedFramesForRate = 0;
+    roundTripSourceRate = 0;
+    loopStart = 0;
+    loopEnd = 0;
+    oldSndPlain = NULL;
+    oldSndPlainSize = 0;
+    oldSndPlainOwned = FALSE;
+    XSetMemory(&oldSndInfo, (int32_t)sizeof(oldSndInfo), 0);
+    preservedBaseKey = (int16_t)pSampleInfo->rootKey;
+    compType = C_NONE;
+    compSubType = CS_DEFAULT;
+    switch (compressionType)
+    {
+        case BAE_EDITOR_COMPRESSION_ADPCM:
+            compType = C_IMA4;
+            compSubType = CS_DEFAULT;
+            break;
+        case BAE_EDITOR_COMPRESSION_MP3_32K:
+            compType = C_MPEG_32;  compSubType = CS_MPEG2; sampleWasEncodedMpeg = TRUE; break;
+        case BAE_EDITOR_COMPRESSION_MP3_48K:
+            compType = C_MPEG_48;  compSubType = CS_MPEG2; sampleWasEncodedMpeg = TRUE; break;
+        case BAE_EDITOR_COMPRESSION_MP3_64K:
+            compType = C_MPEG_64;  compSubType = CS_MPEG2; sampleWasEncodedMpeg = TRUE; break;
+        case BAE_EDITOR_COMPRESSION_MP3_96K:
+            compType = C_MPEG_96;  compSubType = CS_MPEG2; sampleWasEncodedMpeg = TRUE; break;
+        case BAE_EDITOR_COMPRESSION_MP3_128K:
+            compType = C_MPEG_128; compSubType = CS_MPEG2; sampleWasEncodedMpeg = TRUE; break;
+        case BAE_EDITOR_COMPRESSION_MP3_192K:
+            compType = C_MPEG_192; compSubType = CS_MPEG2; sampleWasEncodedMpeg = TRUE; break;
+        case BAE_EDITOR_COMPRESSION_MP3_256K:
+            compType = C_MPEG_256; compSubType = CS_MPEG2; sampleWasEncodedMpeg = TRUE; break;
+        case BAE_EDITOR_COMPRESSION_MP3_320K:
+            compType = C_MPEG_320; compSubType = CS_MPEG2; sampleWasEncodedMpeg = TRUE; break;
+#if USE_VORBIS_ENCODER == TRUE && USE_VORBIS_DECODER == TRUE
+        case BAE_EDITOR_COMPRESSION_VORBIS_32K:
+            compType = C_VORBIS; compSubType = CS_VORBIS_32K; break;
+        case BAE_EDITOR_COMPRESSION_VORBIS_48K:
+            compType = C_VORBIS; compSubType = CS_VORBIS_48K; break;
+        case BAE_EDITOR_COMPRESSION_VORBIS_64K:
+            compType = C_VORBIS; compSubType = CS_VORBIS_64K; break;
+        case BAE_EDITOR_COMPRESSION_VORBIS_80K:
+            compType = C_VORBIS; compSubType = CS_VORBIS_80K; break;
+        case BAE_EDITOR_COMPRESSION_VORBIS_96K:
+            compType = C_VORBIS; compSubType = CS_VORBIS_96K; break;
+        case BAE_EDITOR_COMPRESSION_VORBIS_128K:
+            compType = C_VORBIS; compSubType = CS_VORBIS_128K; break;
+        case BAE_EDITOR_COMPRESSION_VORBIS_160K:
+            compType = C_VORBIS; compSubType = CS_VORBIS_160K; break;
+        case BAE_EDITOR_COMPRESSION_VORBIS_192K:
+            compType = C_VORBIS; compSubType = CS_VORBIS_192K; break;
+        case BAE_EDITOR_COMPRESSION_VORBIS_256K:
+            compType = C_VORBIS; compSubType = CS_VORBIS_256K; break;
+#endif
+#if USE_FLAC_ENCODER == TRUE && USE_FLAC_DECODER == TRUE
+        case BAE_EDITOR_COMPRESSION_FLAC:
+            compType = C_FLAC; compSubType = CS_DEFAULT; break;
+#endif
+#if USE_OPUS_ENCODER == TRUE || USE_OPUS_DECODER == TRUE
+        case BAE_EDITOR_COMPRESSION_OPUS_12K:
+            compType = C_OPUS; compSubType = CS_OPUS_12K; break;
+        case BAE_EDITOR_COMPRESSION_OPUS_16K:
+            compType = C_OPUS; compSubType = CS_OPUS_16K; break;
+        case BAE_EDITOR_COMPRESSION_OPUS_24K:
+            compType = C_OPUS; compSubType = CS_OPUS_24K; break;
+        case BAE_EDITOR_COMPRESSION_OPUS_32K:
+            compType = C_OPUS; compSubType = CS_OPUS_32K; break;
+        case BAE_EDITOR_COMPRESSION_OPUS_48K:
+            compType = C_OPUS; compSubType = CS_OPUS_48K; break;
+        case BAE_EDITOR_COMPRESSION_OPUS_64K:
+            compType = C_OPUS; compSubType = CS_OPUS_64K; break;
+        case BAE_EDITOR_COMPRESSION_OPUS_80K:
+            compType = C_OPUS; compSubType = CS_OPUS_80K; break;
+        case BAE_EDITOR_COMPRESSION_OPUS_96K:
+            compType = C_OPUS; compSubType = CS_OPUS_96K; break;
+        case BAE_EDITOR_COMPRESSION_OPUS_128K:
+            compType = C_OPUS; compSubType = CS_OPUS_128K; break;
+        case BAE_EDITOR_COMPRESSION_OPUS_160K:
+            compType = C_OPUS; compSubType = CS_OPUS_160K; break;
+        case BAE_EDITOR_COMPRESSION_OPUS_192K:
+            compType = C_OPUS; compSubType = CS_OPUS_192K; break;
+        case BAE_EDITOR_COMPRESSION_OPUS_256K:
+            compType = C_OPUS; compSubType = CS_OPUS_256K; break;
+#endif
+        case BAE_EDITOR_COMPRESSION_PCM:
+        default:
+            compType = C_NONE;
+            compSubType = CS_DEFAULT;
+            break;
+    }
+
+    /* Find and inspect the existing SND resource first so we can preserve
+     * source playback metadata (notably base key) across re-encodes. */
+    sndName[0] = 0;
+    oldSndRawData = NULL;
+    oldSndRawSize = 0;
+    result = PV_BankFindSndResource(bankFile, pSampleInfo->sndResourceID,
+                                    &oldSndType, &oldSndRawData, &oldSndRawSize, sndName);
+    if (result != BAE_NO_ERROR)
+    {
+        return result;
+    }
+
+    oldSndPlain = oldSndRawData;
+    oldSndPlainSize = oldSndRawSize;
+    if (oldSndType == ID_CSND)
+    {
+        oldSndPlain = XDecompressPtr(oldSndRawData, (uint32_t)oldSndRawSize, FALSE);
+        oldSndPlainSize = oldSndPlain ? XGetPtrSize(oldSndPlain) : 0;
+        oldSndPlainOwned = TRUE;
+    }
+    else if (oldSndType == ID_ESND)
+    {
+        XDecryptData(oldSndPlain, (uint32_t)oldSndPlainSize);
+    }
+
+    if (oldSndPlain && oldSndPlainSize > 0)
+    {
+        if (XGetSampleInfoFromSnd(oldSndPlain, &oldSndInfo) == 0 &&
+            oldSndInfo.baseKey >= 0 && oldSndInfo.baseKey <= 127)
+        {
+            preservedBaseKey = oldSndInfo.baseKey;
+        }
+    }
+
+    /* Build the source waveform descriptor */
+    XSetMemory(&writeWaveform, (int32_t)sizeof(writeWaveform), 0);
+    writeWaveform.theWaveform   = (SBYTE *)waveData;
+    writeWaveform.waveFrames    = frameCount;
+    writeWaveform.waveSize      = (int32_t)(frameCount * (uint32_t)(bitSize / 8u) * (uint32_t)channels);
+    writeWaveform.bitSize       = bitSize;
+    writeWaveform.channels      = channels;
+    writeWaveform.sampledRate   = (int32_t)sampleRate;
+    writeWaveform.baseMidiPitch = (uint16_t)preservedBaseKey;
+    writeWaveform.compressionType = C_NONE;
+
+    /* Bank sample metadata loop points are stored in sample-rate domain.
+     * For non-RT Opus re-encode, incoming PCM may be decoded at 48kHz while
+     * metadata/sampleRate remains at playback/header rate; remap loops to the
+     * actual PCM frame domain before validation. */
+#if USE_OPUS_ENCODER == TRUE || USE_OPUS_DECODER == TRUE
+    if (compType == C_OPUS && !opusRoundTripResample)
+    {
+        if ((uint32_t)sampleRate >= (4000u << 16))
+        {
+            inputPcmRateHz = (uint32_t)sampleRate >> 16;
+        }
+        else if ((uint32_t)sampleRate >= 4000u && (uint32_t)sampleRate <= 384000u)
+        {
+            inputPcmRateHz = (uint32_t)sampleRate;
+        }
+
+        if (inputPcmRateHz > 0 && pSampleInfo->sampleRate > 0 && inputPcmRateHz != pSampleInfo->sampleRate)
+        {
+            uint32_t mappedStart;
+            uint32_t mappedEnd;
+
+            mappedStart = (uint32_t)(((uint64_t)(uint32_t)normalizedLoopStart * (uint64_t)inputPcmRateHz) /
+                                     (uint64_t)pSampleInfo->sampleRate);
+            mappedEnd = (uint32_t)((((uint64_t)(uint32_t)normalizedLoopEnd * (uint64_t)inputPcmRateHz) +
+                                    ((uint64_t)pSampleInfo->sampleRate - 1ULL)) /
+                                   (uint64_t)pSampleInfo->sampleRate);
+
+            if (mappedStart > frameCount)
+            {
+                mappedStart = frameCount;
+            }
+            if (mappedEnd > frameCount)
+            {
+                mappedEnd = frameCount;
+            }
+
+            normalizedLoopStart = (int32_t)mappedStart;
+            normalizedLoopEnd = (int32_t)mappedEnd;
+        }
+    }
+#endif
+
+    /* Validate/clamp loop points */
+    if (normalizedLoopStart >= 0 &&
+        normalizedLoopEnd > normalizedLoopStart &&
+        (uint32_t)normalizedLoopEnd <= frameCount)
+    {
+        writeWaveform.startLoop = (uint32_t)normalizedLoopStart;
+        writeWaveform.endLoop   = (uint32_t)normalizedLoopEnd;
+    }
+
+    /* Normalize sample rate to fixed-point */
+    if ((uint32_t)writeWaveform.sampledRate == 0u)
+    {
+        writeWaveform.sampledRate = PV_IsOpusCompression(compressionType)
+                                    ? (int32_t)(48000u << 16)
+                                    : (int32_t)(44100u << 16);
+    }
+    else if ((uint32_t)writeWaveform.sampledRate < (4000u << 16))
+    {
+        if ((uint32_t)writeWaveform.sampledRate >= 4000u &&
+            (uint32_t)writeWaveform.sampledRate <= 384000u)
+        {
+            writeWaveform.sampledRate <<= 16;
+        }
+        else
+        {
+            writeWaveform.sampledRate = PV_IsOpusCompression(compressionType)
+                                        ? (int32_t)(48000u << 16)
+                                        : (int32_t)(44100u << 16);
+        }
+    }
+
+    encodeWaveDataOwner = NULL;
+
+    /* MPEG: resample to a codec-compatible rate if needed */
+    if (sampleWasEncodedMpeg)
+    {
+        BAE_UNSIGNED_FIXED sourceRate;
+        BAE_UNSIGNED_FIXED targetRate;
+
+        sourceRate = PV_NormalizeSampleRateForSave((BAE_UNSIGNED_FIXED)writeWaveform.sampledRate);
+        targetRate = PV_ChooseCodecRateFromSourceHz(compressionType, (uint32_t)(sourceRate >> 16));
+        if (targetRate == 0)
+        {
+            targetRate = (44100u << 16);
+        }
+        if (sourceRate != targetRate)
+        {
+            result = PV_ResampleWaveformLinear(&writeWaveform, targetRate, &encodeWaveDataOwner);
+            if (result != BAE_NO_ERROR)
+            {
+                return result;
+            }
+        }
+    }
+
+#if USE_OPUS_ENCODER == TRUE || USE_OPUS_DECODER == TRUE
+    /* Opus: resample to optimal rate for the chosen bitrate tier */
+    if (compType == C_OPUS)
+    {
+        BAE_UNSIGNED_FIXED sourceRate;
+        BAE_UNSIGNED_FIXED targetRate;
+
+        sourceRate = PV_NormalizeSampleRateForSave((BAE_UNSIGNED_FIXED)writeWaveform.sampledRate);
+        targetRate = sourceRate;
+        if (!opusRoundTripResample)
+        {
+            targetRate = PV_ChooseCodecRateFromSourceHz(compressionType, (uint32_t)(sourceRate >> 16));
+            if (targetRate == 0)
+            {
+                targetRate = (48000u << 16);
+            }
+        }
+        if (sourceRate != targetRate)
+        {
+            result = PV_ResampleWaveformLinear(&writeWaveform, targetRate, &encodeWaveDataOwner);
+            if (result != BAE_NO_ERROR)
+            {
+                if (encodeWaveDataOwner) { XDisposePtr(encodeWaveDataOwner); }
+                return result;
+            }
+        }
+        encodeCompSubType = PV_ComposeOpusEncodeSubType(compSubType, opusMode);
+        if (opusRoundTripResample)
+        {
+            roundTripSourceRate = writeWaveform.sampledRate;
+            writeWaveform.sampledRate = (int32_t)(48000u << 16);
+        }
+    }
+    else
+#endif
+    {
+        encodeCompSubType = compSubType;
+    }
+
+    /* Encode */
+    sndResource = NULL;
+    opErr = XCreateSoundObjectFromData(&sndResource, &writeWaveform, compType, encodeCompSubType, NULL, NULL);
+
+    if (encodeWaveDataOwner)
+    {
+        XDisposePtr(encodeWaveDataOwner);
+        encodeWaveDataOwner = NULL;
+    }
+
+    if (opErr != NO_ERR || !sndResource)
+    {
+        return BAE_BAD_FILE;
+    }
+
+    /* Store the compression sub-type in the SND header */
+    PV_StoreCompressionSubTypeInSnd(sndResource, XGetPtrSize(sndResource), compType, compSubType);
+
+    /* Update sample rate from the decoded stream (important for MPEG) */
+    {
+        int32_t sndSampleRate = writeWaveform.sampledRate;
+        SampleDataInfo decodedInfo;
+        XPTR decodedOwner;
+
+        XSetMemory(&decodedInfo, (int32_t)sizeof(decodedInfo), 0);
+        decodedOwner = NULL;
+        (void)XGetSamplePtrFromSnd(sndResource, &decodedInfo);
+        if (sampleWasEncodedMpeg && decodedInfo.rate != 0)
+        {
+            sndSampleRate = (int32_t)decodedInfo.rate;
+            decodedSampleRateForSnd = (uint32_t)decodedInfo.rate;
+        }
+
+        decodedFramesForRate = decodedInfo.frames ? decodedInfo.frames : writeWaveform.waveFrames;
+        loopStart = (int32_t)writeWaveform.startLoop;
+        loopEnd   = (int32_t)writeWaveform.endLoop;
+
+#if USE_OPUS_ENCODER == TRUE || USE_OPUS_DECODER == TRUE
+        if (compType == C_OPUS)
+        {
+            if (opusRoundTripResample)
+            {
+                /* Match document save path: preserve source frame domain in RT mode,
+                 * but clamp loop end to the actual encoded decode capacity. */
+                PV_ForceSndDecodedFrameCount(sndResource, writeWaveform.waveFrames);
+                decodedFramesForRate = writeWaveform.waveFrames;
+                if (decodedInfo.frames > 0 && loopEnd > (int32_t)decodedInfo.frames)
+                {
+                    loopEnd = (int32_t)decodedInfo.frames;
+                    if (loopStart >= loopEnd)
+                    {
+                        loopStart = 0;
+                        loopEnd = 0;
+                    }
+                }
+            }
+            else
+            {
+                /* Match document save non-RT path: keep decoder-probed frame domain
+                 * and remap loops from writeWaveform domain into final decoded domain. */
+                decodedFramesForRate = decodedInfo.frames ? decodedInfo.frames : writeWaveform.waveFrames;
+                PV_ForceSndDecodedFrameCount(sndResource, decodedFramesForRate);
+                PV_RemapLoopPointsToFrameCount(writeWaveform.waveFrames,
+                                               decodedFramesForRate,
+                                               &loopStart,
+                                               &loopEnd);
+            }
+        }
+        else
+#endif
+        {
+            PV_ForceSndDecodedFrameCount(sndResource, decodedFramesForRate);
+            if (compType != C_IMA4)
+            {
+                PV_RemapLoopPointsToFrameCount(writeWaveform.waveFrames,
+                                               decodedFramesForRate,
+                                               &loopStart,
+                                               &loopEnd);
+            }
+        }
+
+        writeWaveform.startLoop = (uint32_t)loopStart;
+        writeWaveform.endLoop   = (uint32_t)loopEnd;
+
+#if USE_OPUS_ENCODER == TRUE || USE_OPUS_DECODER == TRUE
+        if (roundTripSourceRate != 0)
+        {
+            sndSampleRate = roundTripSourceRate;
+        }
+#endif
+
+        XSetSoundBaseKey(sndResource, preservedBaseKey);
+        XSetSoundSampleRate(sndResource, sndSampleRate);
+        XSetSoundLoopPoints(sndResource,
+                            (int32_t)writeWaveform.startLoop,
+                            (int32_t)writeWaveform.endLoop);
+        PV_ForceSndLoopPoints(sndResource,
+                              (int32_t)writeWaveform.startLoop,
+                              (int32_t)writeWaveform.endLoop);
+#if USE_OPUS_ENCODER == TRUE || USE_OPUS_DECODER == TRUE
+        if (roundTripSourceRate != 0)
+        {
+            XSetSoundOpusRoundTripFlag(sndResource, TRUE);
+        }
+#endif
+        XSetSoundEmbeddedStatus(sndResource, TRUE);
+
+        if (decodedInfo.pMasterPtr && decodedInfo.pMasterPtr != sndResource)
+        {
+            decodedOwner = decodedInfo.pMasterPtr;
+        }
+        if (decodedOwner)
+        {
+            XDisposePtr(decodedOwner);
+        }
+    }
+    (void)decodedSampleRateForSnd; /* unused after rate-update block */
+
+    if (oldSndPlainOwned && oldSndPlain)
+    {
+        XDisposePtr(oldSndPlain);
+    }
+    if (oldSndRawData)
+    {
+        XDisposePtr(oldSndRawData);
+    }
+
+    /* Map sndStorageType to XResourceType */
+    switch (sndStorageType)
+    {
+        case BAE_EDITOR_SND_STORAGE_CSND: newSndType = ID_CSND; break;
+        case BAE_EDITOR_SND_STORAGE_SND:  newSndType = ID_SND;  break;
+        case BAE_EDITOR_SND_STORAGE_ESND:
+        default:                          newSndType = ID_ESND; break;
+    }
+
+    /* Wrap the encoded SND in the target container */
+    wrappedSnd = NULL;
+    wrappedSndSize = 0;
+    result = PV_BankRewrapSndForType(bankFile, newSndType, sndResource,
+                                     XGetPtrSize(sndResource), &wrappedSnd, &wrappedSndSize);
+    XDisposePtr(sndResource);
+    if (result != BAE_NO_ERROR)
+    {
+        return result;
+    }
+
+    /* Replace the SND resource in the bank (handles container type change) */
+    if (oldSndType == newSndType)
+    {
+        result = PV_BankReplaceResource(bankFile, newSndType,
+                                        (XLongResourceID)pSampleInfo->sndResourceID,
+                                        sndName, wrappedSnd, wrappedSndSize);
+    }
+    else
+    {
+        result = PV_BankReplaceResourceEx(bankFile, oldSndType, newSndType,
+                                          (XLongResourceID)pSampleInfo->sndResourceID,
+                                          sndName, wrappedSnd, wrappedSndSize);
+    }
+    XDisposePtr(wrappedSnd);
+    return result;
+}
+
+BAEResult BAERmfEditorBank_ReEncodeSample(BAEBankToken bankToken,
+                                           uint32_t instrumentIndex,
+                                           uint32_t sampleIndex,
+                                           BAERmfEditorCompressionType compressionType,
+                                           BAERmfEditorSndStorageType sndStorageType,
+                                           BAERmfEditorOpusMode opusMode)
+{
+    XFILE bankFile;
+    BAERmfEditorBankSampleInfo sampleInfo;
+    void *waveData;
+    uint32_t frameCount;
+    uint16_t bitSize;
+    uint16_t channels;
+    BAE_UNSIGNED_FIXED sampleRate;
+    BAEResult result;
+
+    if (!bankToken)
+    {
+        return BAE_PARAM_ERR;
+    }
+    if (compressionType == BAE_EDITOR_COMPRESSION_DONT_CHANGE)
+    {
+        return BAE_NO_ERROR;
+    }
+
+    bankFile = (XFILE)bankToken;
+
+    /* Decode the sample to PCM */
+    waveData = NULL;
+    frameCount = 0;
+    bitSize = 0;
+    channels = 0;
+    sampleRate = 0;
+    result = BAERmfEditorBank_GetSampleWaveformData(bankToken, instrumentIndex, sampleIndex,
+                                                    &waveData, &frameCount, &bitSize, &channels, &sampleRate);
+    if (result != BAE_NO_ERROR)
+    {
+        return result;
+    }
+    if (!waveData || frameCount == 0 || bitSize == 0 || channels == 0)
+    {
+        if (waveData) { XDisposePtr(waveData); }
+        return BAE_BAD_FILE;
+    }
+
+    /* Get sample metadata (loop points, root key, current container type) */
+    result = BAERmfEditorBank_GetInstrumentSampleInfo(bankToken, instrumentIndex, sampleIndex, &sampleInfo);
+    if (result != BAE_NO_ERROR)
+    {
+        XDisposePtr(waveData);
+        return result;
+    }
+
+    result = PV_BankReEncodeSampleCore(bankFile, &sampleInfo,
+                                       waveData, frameCount, bitSize, channels, sampleRate,
+                                       compressionType, sndStorageType, opusMode, FALSE);
+    XDisposePtr(waveData);
+    return result;
+}
+
+BAEResult BAERmfEditorBank_ReEncodeSampleFromPCM(BAEBankToken bankToken,
+                                                  uint32_t instrumentIndex,
+                                                  uint32_t sampleIndex,
+                                                  BAERmfEditorCompressionType compressionType,
+                                                  BAERmfEditorSndStorageType sndStorageType,
+                                                  BAERmfEditorOpusMode opusMode,
+                                                  const void *sourcePcm,
+                                                  uint32_t frameCount,
+                                                  uint16_t bitSize,
+                                                  uint16_t channels,
+                                                  BAE_UNSIGNED_FIXED sampleRate)
+{
+        return BAERmfEditorBank_ReEncodeSampleFromPCMEx(bankToken,
+                                                                                                         instrumentIndex,
+                                                                                                         sampleIndex,
+                                                                                                         compressionType,
+                                                                                                         sndStorageType,
+                                                                                                         opusMode,
+                                                                                                         FALSE,
+                                                                                                         sourcePcm,
+                                                                                                         frameCount,
+                                                                                                         bitSize,
+                                                                                                         channels,
+                                                                                                         sampleRate);
+}
+
+BAEResult BAERmfEditorBank_ReEncodeSampleFromPCMEx(BAEBankToken bankToken,
+                                                                                                        uint32_t instrumentIndex,
+                                                                                                        uint32_t sampleIndex,
+                                                                                                        BAERmfEditorCompressionType compressionType,
+                                                                                                        BAERmfEditorSndStorageType sndStorageType,
+                                                                                                        BAERmfEditorOpusMode opusMode,
+                                                                                                        XBOOL opusRoundTripResample,
+                                                                                                        const void *sourcePcm,
+                                                                                                        uint32_t frameCount,
+                                                                                                        uint16_t bitSize,
+                                                                                                        uint16_t channels,
+                                                                                                        BAE_UNSIGNED_FIXED sampleRate)
+{
+    XFILE bankFile;
+    BAERmfEditorBankSampleInfo sampleInfo;
+    BAEResult result;
+    void *pcmCopy;
+    int32_t pcmBytes;
+
+    if (!bankToken || !sourcePcm || frameCount == 0 || bitSize == 0 || channels == 0)
+    {
+        return BAE_PARAM_ERR;
+    }
+    if (compressionType == BAE_EDITOR_COMPRESSION_DONT_CHANGE)
+    {
+        return BAE_NO_ERROR;
+    }
+
+    bankFile = (XFILE)bankToken;
+
+    result = BAERmfEditorBank_GetInstrumentSampleInfo(bankToken, instrumentIndex, sampleIndex, &sampleInfo);
+    if (result != BAE_NO_ERROR)
+    {
+        return result;
+    }
+
+    /* Make a writable copy of the caller's PCM so PV_BankReEncodeSampleCore can pass it to
+       XCreateSoundObjectFromData (which may modify the buffer in place for some codecs). */
+    pcmBytes = (int32_t)(frameCount * (uint32_t)(bitSize / 8u) * (uint32_t)channels);
+    pcmCopy = XNewPtr(pcmBytes);
+    if (!pcmCopy)
+    {
+        return BAE_MEMORY_ERR;
+    }
+    XBlockMove((XPTR)(uintptr_t)sourcePcm, pcmCopy, pcmBytes);
+
+    result = PV_BankReEncodeSampleCore(bankFile, &sampleInfo,
+                                       pcmCopy, frameCount, bitSize, channels, sampleRate,
+                                       compressionType, sndStorageType, opusMode,
+                                       opusRoundTripResample);
+    XDisposePtr(pcmCopy);
     return result;
 }

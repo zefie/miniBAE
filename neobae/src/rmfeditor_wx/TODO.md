@@ -33,6 +33,7 @@
   - ~~lots of bugs with sample editor~~
   - needs context menus still
   - musicial keyboard vs form fields
+  - ~~compression issues in sample editor~~
   - ~~LFO broken~~
   - Bank editor must force ZSB if using ZMF features
 

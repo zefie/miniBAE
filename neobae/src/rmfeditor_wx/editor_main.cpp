@@ -152,9 +152,14 @@ static constexpr uint16_t kNbsFieldBankFlags    = 0x0007;  /* Bank restore flags
 static constexpr uint16_t kNbsFieldBankDisplayName = 0x0008; /* Preferred bank display name */
 static constexpr uint16_t kNbsFieldMediaDisplayName = 0x0009; /* Preferred media display name */
 static constexpr uint16_t kNbsFieldDirtyFlags = 0x000A; /* Dirty status flags (1 byte) */
+static constexpr uint16_t kNbsFieldBankSamplePcmCache = 0x000B; /* Legacy PCM cache field (read-only compatibility) */
+static constexpr uint16_t kNbsFieldBankSampleSndCache = 0x000C; /* Original raw SND/CSND/ESND cache for re-encoded samples */
 static constexpr uint8_t  kNbsBankFlagIsOverlay = 0x01;    /* Blob is overlay; load built-in first */
 static constexpr uint8_t  kNbsDirtyFlagSongModified = 0x01;
 static constexpr uint8_t  kNbsDirtyFlagBankModified = 0x02;
+static constexpr BAERmfEditorSndStorageType kBankOriginalStorageSentinel =
+    (BAERmfEditorSndStorageType)0x7FFF;
+static constexpr int kBankOpusRoundTripStorageFlag = 0x4000;
 
 /* Default timeline length for a new document: 30 s at 120 BPM / 480 TPQ
  * 30 s * 2 beats/s * 480 ticks/beat = 28 800 ticks */
@@ -397,7 +402,6 @@ public:
                     m_editorNotebook(nullptr),
                     m_bankEditorPanel(nullptr),
                     m_editorMode(kEditorModeMidi),
-                    m_bankEditorWarningAccepted(false),
                     m_playbackMixer(nullptr),
                     m_playbackSong(nullptr),
                     m_notePreviewSong(nullptr),
@@ -698,11 +702,81 @@ public:
                         idx = BankEditorPanel_GetCurrentInstrumentIndex(m_bankEditorPanel);
                         if (m_bankDirtyExtInfo.hasSampleOverride && m_bankToken) {
                             BAERmfEditorBankSampleInfo sampleInfo;
+                            bool reencodeRequested =
+                                (m_bankDirtyExtInfo.sampleTargetCompression != BAE_EDITOR_COMPRESSION_DONT_CHANGE ||
+                                 m_bankDirtyExtInfo.sampleTargetStorageType == kBankOriginalStorageSentinel);
 
                             if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bankToken,
                                                                          idx,
                                                                          m_bankDirtyExtInfo.sampleOverrideIndex,
                                                                          &sampleInfo) == BAE_NO_ERROR) {
+                                if (reencodeRequested) {
+                                    uint16_t sndID = sampleInfo.sndResourceID;
+                                    auto it = m_bankSampleSndCache.find(sndID);
+                                    if (it == m_bankSampleSndCache.end()) {
+                                        static const XResourceType sndTypes[] = { ID_SND, ID_CSND, ID_ESND, 0 };
+                                        int32_t typeIdx;
+                                        for (typeIdx = 0; sndTypes[typeIdx] != 0; ++typeIdx)
+                                        {
+                                            int32_t rawSize = 0;
+                                            XPTR rawData = XGetFileResource((XFILE)m_bankToken,
+                                                                            sndTypes[typeIdx],
+                                                                            (XLongResourceID)sndID,
+                                                                            NULL,
+                                                                            &rawSize);
+                                            if (rawData && rawSize > 0)
+                                            {
+                                                BankSampleSndEntry entry;
+                                                entry.sndType = sndTypes[typeIdx];
+                                                entry.sndData.assign(static_cast<uint8_t *>(rawData),
+                                                                     static_cast<uint8_t *>(rawData) + rawSize);
+                                                XDisposePtr(rawData);
+                                                m_bankSampleSndCache.emplace(sndID, std::move(entry));
+                                                it = m_bankSampleSndCache.find(sndID);
+                                                break;
+                                            }
+                                            if (rawData)
+                                            {
+                                                XDisposePtr(rawData);
+                                            }
+                                        }
+                                    }
+
+                                    if (it != m_bankSampleSndCache.end() && !it->second.sndData.empty()) {
+                                        const BankSampleSndEntry &entry = it->second;
+                                        XPTR srcSnd = XNewPtr((int32_t)entry.sndData.size());
+                                        if (srcSnd) {
+                                            int32_t srcSndSize = (int32_t)entry.sndData.size();
+                                            XBlockMove((XPTR)entry.sndData.data(), srcSnd, srcSndSize);
+                                            if (entry.sndType == ID_CSND) {
+                                                XPTR decompressed = XDecompressPtr(srcSnd, (uint32_t)srcSndSize, FALSE);
+                                                XDisposePtr(srcSnd);
+                                                srcSnd = decompressed;
+                                                srcSndSize = srcSnd ? XGetPtrSize(srcSnd) : 0;
+                                            } else if (entry.sndType == ID_ESND) {
+                                                XDecryptData(srcSnd, (uint32_t)srcSndSize);
+                                            }
+                                            if (srcSnd && srcSndSize > 0) {
+                                                SampleDataInfo srcInfo;
+                                                XSetMemory(&srcInfo, (int32_t)sizeof(srcInfo), 0);
+                                                if (XGetSampleInfoFromSnd(srcSnd, &srcInfo) == 0) {
+                                                    sampleInfo.loopStart = srcInfo.loopStart;
+                                                    sampleInfo.loopEnd = srcInfo.loopEnd;
+                                                    m_bankDirtyExtInfo.sampleLoopStart = srcInfo.loopStart;
+                                                    m_bankDirtyExtInfo.sampleLoopEnd = srcInfo.loopEnd;
+                                                    if (srcInfo.rate != 0) {
+                                                        sampleInfo.sampleRate = (uint32_t)(srcInfo.rate >> 16);
+                                                        m_bankDirtyExtInfo.sampleRate = sampleInfo.sampleRate;
+                                                    }
+                                                }
+                                            }
+                                            if (srcSnd) {
+                                                XDisposePtr(srcSnd);
+                                            }
+                                        }
+                                    }
+                                }
+
                                 sampleInfo.rootKey = m_bankDirtyExtInfo.sampleRootKey;
                                 sampleInfo.lowKey = m_bankDirtyExtInfo.sampleLowKey;
                                 sampleInfo.highKey = m_bankDirtyExtInfo.sampleHighKey;
@@ -721,6 +795,242 @@ public:
                                     BAERmfEditorInstrumentExtInfo refreshed;
                                     if (BAERmfEditorBank_GetInstrumentExtInfo(m_bankToken, idx, &refreshed) == BAE_NO_ERROR) {
                                         m_bankDirtyExtInfo.midiRootKey = refreshed.midiRootKey;
+                                    }
+                                }
+                            }
+                        }
+
+                        /* Re-encode from original raw SND cache when a codec target was set.
+                         * This must run after SetInstrumentSampleInfo so that the updated
+                         * loop / root-key metadata is used when writing the SND header. */
+                        if (m_bankDirtyExtInfo.hasSampleOverride && m_bankToken &&
+                            (m_bankDirtyExtInfo.sampleTargetCompression != BAE_EDITOR_COMPRESSION_DONT_CHANGE ||
+                             m_bankDirtyExtInfo.sampleTargetStorageType == kBankOriginalStorageSentinel))
+                        {
+                            uint32_t sampleIdx = m_bankDirtyExtInfo.sampleOverrideIndex;
+                            BAERmfEditorBankSampleInfo sampleInfo2;
+                            if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bankToken, idx,
+                                                                          sampleIdx, &sampleInfo2) == BAE_NO_ERROR)
+                            {
+                                uint16_t sndID = sampleInfo2.sndResourceID;
+                                auto it = m_bankSampleSndCache.find(sndID);
+                                if (it == m_bankSampleSndCache.end())
+                                {
+                                    /* First time: cache the original wrapped SND payload so
+                                     * every subsequent apply starts from the same pristine source. */
+                                    static const XResourceType sndTypes[] = { ID_SND, ID_CSND, ID_ESND, 0 };
+                                    int32_t typeIdx;
+                                    for (typeIdx = 0; sndTypes[typeIdx] != 0; ++typeIdx)
+                                    {
+                                        int32_t rawSize = 0;
+                                        XPTR rawData = XGetFileResource((XFILE)m_bankToken,
+                                                                        sndTypes[typeIdx],
+                                                                        (XLongResourceID)sndID,
+                                                                        NULL,
+                                                                        &rawSize);
+                                        if (rawData && rawSize > 0)
+                                        {
+                                            BankSampleSndEntry entry;
+                                            entry.sndType = sndTypes[typeIdx];
+                                            entry.sndData.assign(static_cast<uint8_t *>(rawData),
+                                                                 static_cast<uint8_t *>(rawData) + rawSize);
+                                            XDisposePtr(rawData);
+                                            m_bankSampleSndCache.emplace(sndID, std::move(entry));
+                                            it = m_bankSampleSndCache.find(sndID);
+                                            break;
+                                        }
+                                        if (rawData)
+                                        {
+                                            XDisposePtr(rawData);
+                                        }
+                                    }
+                                }
+
+                                if (it != m_bankSampleSndCache.end())
+                                {
+                                    const BankSampleSndEntry &entry = it->second;
+
+                                    /* Decode cached original raw SND on demand, then encode. */
+                                    BAEResult reencodeResult = BAE_BAD_FILE;
+                                    BAERmfEditorCompressionType targetCompression =
+                                        m_bankDirtyExtInfo.sampleTargetCompression;
+                                    BAERmfEditorSndStorageType targetStorage =
+                                        m_bankDirtyExtInfo.sampleTargetStorageType;
+                                    bool useOpusRoundTrip =
+                                        (((int)m_bankDirtyExtInfo.sampleTargetStorageType &
+                                          kBankOpusRoundTripStorageFlag) != 0);
+                                    if (targetStorage != kBankOriginalStorageSentinel)
+                                    {
+                                        targetStorage = (BAERmfEditorSndStorageType)
+                                            ((int)targetStorage & ~kBankOpusRoundTripStorageFlag);
+                                    }
+                                    if (!entry.sndData.empty() &&
+                                        (entry.sndType == ID_SND || entry.sndType == ID_CSND || entry.sndType == ID_ESND))
+                                    {
+                                        XPTR sndData = XNewPtr((int32_t)entry.sndData.size());
+                                        if (sndData)
+                                        {
+                                            int32_t sndSize = (int32_t)entry.sndData.size();
+                                            XBlockMove((XPTR)entry.sndData.data(), sndData, sndSize);
+
+                                            if (entry.sndType == ID_CSND)
+                                            {
+                                                XPTR decompressed = XDecompressPtr(sndData, (uint32_t)sndSize, FALSE);
+                                                XDisposePtr(sndData);
+                                                sndData = decompressed;
+                                                sndSize = sndData ? XGetPtrSize(sndData) : 0;
+                                            }
+                                            else if (entry.sndType == ID_ESND)
+                                            {
+                                                XDecryptData(sndData, (uint32_t)sndSize);
+                                            }
+
+                                            if (sndData && sndSize > 0)
+                                            {
+                                                SampleDataInfo srcInfo;
+                                                SampleDataInfo sdi;
+                                                XPTR pcmData;
+                                                XPTR pcmOwner;
+
+                                                XSetMemory(&srcInfo, (int32_t)sizeof(srcInfo), 0);
+                                                (void)XGetSampleInfoFromSnd(sndData, &srcInfo);
+
+                                                if (targetStorage == kBankOriginalStorageSentinel)
+                                                {
+                                                    auto mapBankCompression = [](uint32_t compressionType,
+                                                                                 uint32_t compressionSubType)
+                                                        -> BAERmfEditorCompressionType
+                                                    {
+                                                        switch (compressionType)
+                                                        {
+                                                            case 0:
+                                                            case FOUR_CHAR('n','o','n','e'):
+                                                                return BAE_EDITOR_COMPRESSION_PCM;
+                                                            case FOUR_CHAR('i','m','a','4'):
+                                                            case FOUR_CHAR('i','m','a','W'):
+                                                            case FOUR_CHAR('i','m','a','3'):
+                                                                return BAE_EDITOR_COMPRESSION_ADPCM;
+                                                            case FOUR_CHAR('f','L','a','C'):
+                                                            case FOUR_CHAR('F','L','A','C'):
+                                                                return BAE_EDITOR_COMPRESSION_FLAC;
+                                                            case FOUR_CHAR('m','p','g','n'): return BAE_EDITOR_COMPRESSION_MP3_32K;
+                                                            case FOUR_CHAR('m','p','g','b'): return BAE_EDITOR_COMPRESSION_MP3_48K;
+                                                            case FOUR_CHAR('m','p','g','d'): return BAE_EDITOR_COMPRESSION_MP3_64K;
+                                                            case FOUR_CHAR('m','p','g','f'): return BAE_EDITOR_COMPRESSION_MP3_96K;
+                                                            case FOUR_CHAR('m','p','g','h'): return BAE_EDITOR_COMPRESSION_MP3_128K;
+                                                            case FOUR_CHAR('m','p','g','j'): return BAE_EDITOR_COMPRESSION_MP3_192K;
+                                                            case FOUR_CHAR('m','p','g','l'): return BAE_EDITOR_COMPRESSION_MP3_256K;
+                                                            case FOUR_CHAR('m','p','g','m'): return BAE_EDITOR_COMPRESSION_MP3_320K;
+                                                            case FOUR_CHAR('O','g','g','V'):
+                                                            case FOUR_CHAR('V','O','R','B'):
+                                                                switch (compressionSubType)
+                                                                {
+                                                                    case FOUR_CHAR('v','0','3','2'): return BAE_EDITOR_COMPRESSION_VORBIS_32K;
+                                                                    case FOUR_CHAR('v','0','4','8'): return BAE_EDITOR_COMPRESSION_VORBIS_48K;
+                                                                    case FOUR_CHAR('v','0','6','4'): return BAE_EDITOR_COMPRESSION_VORBIS_64K;
+                                                                    case FOUR_CHAR('v','0','8','0'): return BAE_EDITOR_COMPRESSION_VORBIS_80K;
+                                                                    case FOUR_CHAR('v','0','9','6'): return BAE_EDITOR_COMPRESSION_VORBIS_96K;
+                                                                    case FOUR_CHAR('v','1','2','8'): return BAE_EDITOR_COMPRESSION_VORBIS_128K;
+                                                                    case FOUR_CHAR('v','1','6','0'): return BAE_EDITOR_COMPRESSION_VORBIS_160K;
+                                                                    case FOUR_CHAR('v','1','9','2'): return BAE_EDITOR_COMPRESSION_VORBIS_192K;
+                                                                    case FOUR_CHAR('v','2','5','6'): return BAE_EDITOR_COMPRESSION_VORBIS_256K;
+                                                                    default:                         return BAE_EDITOR_COMPRESSION_VORBIS_128K;
+                                                                }
+                                                            case FOUR_CHAR('O','g','g','O'):
+                                                            case FOUR_CHAR('O','P','U','S'):
+                                                                switch (compressionSubType)
+                                                                {
+                                                                    case FOUR_CHAR('o','0','1','2'): return BAE_EDITOR_COMPRESSION_OPUS_12K;
+                                                                    case FOUR_CHAR('o','0','1','6'): return BAE_EDITOR_COMPRESSION_OPUS_16K;
+                                                                    case FOUR_CHAR('o','0','2','4'): return BAE_EDITOR_COMPRESSION_OPUS_24K;
+                                                                    case FOUR_CHAR('o','0','3','2'): return BAE_EDITOR_COMPRESSION_OPUS_32K;
+                                                                    case FOUR_CHAR('o','0','4','8'): return BAE_EDITOR_COMPRESSION_OPUS_48K;
+                                                                    case FOUR_CHAR('o','0','6','4'): return BAE_EDITOR_COMPRESSION_OPUS_64K;
+                                                                    case FOUR_CHAR('o','0','8','0'): return BAE_EDITOR_COMPRESSION_OPUS_80K;
+                                                                    case FOUR_CHAR('o','0','9','6'): return BAE_EDITOR_COMPRESSION_OPUS_96K;
+                                                                    case FOUR_CHAR('o','1','2','8'): return BAE_EDITOR_COMPRESSION_OPUS_128K;
+                                                                    case FOUR_CHAR('o','1','6','0'): return BAE_EDITOR_COMPRESSION_OPUS_160K;
+                                                                    case FOUR_CHAR('o','1','9','2'): return BAE_EDITOR_COMPRESSION_OPUS_192K;
+                                                                    case FOUR_CHAR('o','2','5','6'): return BAE_EDITOR_COMPRESSION_OPUS_256K;
+                                                                    default:                         return BAE_EDITOR_COMPRESSION_OPUS_48K;
+                                                                }
+                                                            default:
+                                                                return BAE_EDITOR_COMPRESSION_PCM;
+                                                        }
+                                                    };
+
+                                                    uint32_t sourceSubType = (uint32_t)CS_DEFAULT;
+                                                    if ((uint32_t)srcInfo.compressionType == (uint32_t)C_VORBIS ||
+                                                        (uint32_t)srcInfo.compressionType == (uint32_t)C_OPUS)
+                                                    {
+                                                        XSndHeader3 *header3 = (XSndHeader3 *)sndData;
+                                                        if (sndSize >= (int32_t)sizeof(XSndHeader3) &&
+                                                            XGetShort(&header3->type) == XThirdSoundFormat &&
+                                                            (uint32_t)XGetLong(&header3->sndBuffer.subType) == (uint32_t)srcInfo.compressionType &&
+                                                            (uint32_t)XGetLong(&header3->sndBuffer.reserved3[0]) == (uint32_t)FOUR_CHAR('b','q','s','t'))
+                                                        {
+                                                            sourceSubType = (uint32_t)XGetLong(&header3->sndBuffer.reserved3[1]);
+                                                        }
+                                                    }
+
+                                                    targetCompression = mapBankCompression((uint32_t)srcInfo.compressionType,
+                                                                                           sourceSubType);
+                                                    targetStorage = (entry.sndType == ID_CSND) ? BAE_EDITOR_SND_STORAGE_CSND :
+                                                                    (entry.sndType == ID_SND)  ? BAE_EDITOR_SND_STORAGE_SND :
+                                                                                                  BAE_EDITOR_SND_STORAGE_ESND;
+                                                    useOpusRoundTrip = XGetSoundOpusRoundTripFlag(sndData) ? true : false;
+                                                }
+
+                                                XSetMemory(&sdi, (int32_t)sizeof(sdi), 0);
+                                                pcmData = XGetSamplePtrFromSnd(sndData, &sdi);
+                                                pcmOwner = NULL;
+                                                if (sdi.pMasterPtr && sdi.pMasterPtr != sndData)
+                                                {
+                                                    pcmOwner = sdi.pMasterPtr;
+                                                }
+
+                                                if (pcmData && sdi.frames > 0 && sdi.bitSize > 0 && sdi.channels > 0)
+                                                {
+                                                    /* Re-encode must use the decoded PCM rate domain.
+                                                     * For Opus this is typically 48kHz, while srcInfo.rate can
+                                                     * represent playback/header rate. Using sdi.rate keeps loop
+                                                     * frame mapping consistent with pcmData/sdi.frames. */
+                                                    BAE_UNSIGNED_FIXED sourceRate = sdi.rate ? sdi.rate : srcInfo.rate;
+                                                    reencodeResult = BAERmfEditorBank_ReEncodeSampleFromPCMEx(
+                                                        m_bankToken, idx, sampleIdx,
+                                                        targetCompression,
+                                                        targetStorage,
+                                                        m_bankDirtyExtInfo.sampleTargetOpusMode,
+                                                        useOpusRoundTrip ? TRUE : FALSE,
+                                                        pcmData,
+                                                        sdi.frames,
+                                                        sdi.bitSize,
+                                                        sdi.channels,
+                                                        sourceRate);
+                                                }
+
+                                                if (pcmOwner)
+                                                {
+                                                    XDisposePtr(pcmOwner);
+                                                }
+                                            }
+
+                                            if (sndData)
+                                            {
+                                                XDisposePtr(sndData);
+                                            }
+                                        }
+                                    }
+
+                                    /* Fallback path: if cached decode failed for any reason,
+                                     * keep behaviour functional by using the bank API decode path. */
+                                    if (reencodeResult != BAE_NO_ERROR)
+                                    {
+                                        (void)BAERmfEditorBank_ReEncodeSample(
+                                            m_bankToken, idx, sampleIdx,
+                                            targetCompression,
+                                            targetStorage,
+                                            m_bankDirtyExtInfo.sampleTargetOpusMode);
                                     }
                                 }
                             }
@@ -749,6 +1059,105 @@ public:
                 [this](uint32_t instrumentIndex) { CloneBankInstrumentToSongByIndex(instrumentIndex); },
                 [this](uint32_t instrumentIndex) { AliasBankInstrumentToSongByIndex(instrumentIndex); },
                 [this](uint32_t instrumentIndex) { DeleteSongInstrumentMatchingBankIndex(instrumentIndex); });
+            BankEditorPanel_SetSourceCodecCallback(
+                m_bankEditorPanel,
+                [this](uint16_t sndID, wxString &outCodecDescription) -> bool {
+                    auto it = m_bankSampleSndCache.find(sndID);
+                    if (it == m_bankSampleSndCache.end() || it->second.sndData.empty()) {
+                        return false;
+                    }
+
+                    const BankSampleSndEntry &entry = it->second;
+                    XPTR sndData = XNewPtr((int32_t)entry.sndData.size());
+                    if (!sndData) {
+                        return false;
+                    }
+
+                    XBlockMove((XPTR)entry.sndData.data(), sndData, (int32_t)entry.sndData.size());
+                    int32_t sndSize = (int32_t)entry.sndData.size();
+                    if (entry.sndType == ID_CSND) {
+                        XPTR decompressed = XDecompressPtr(sndData, (uint32_t)sndSize, FALSE);
+                        XDisposePtr(sndData);
+                        sndData = decompressed;
+                        sndSize = sndData ? XGetPtrSize(sndData) : 0;
+                    } else if (entry.sndType == ID_ESND) {
+                        XDecryptData(sndData, (uint32_t)sndSize);
+                    }
+
+                    if (!sndData || sndSize <= 0) {
+                        if (sndData) XDisposePtr(sndData);
+                        return false;
+                    }
+
+                    SampleDataInfo srcInfo;
+                    uint32_t subType = (uint32_t)CS_DEFAULT;
+                    XSetMemory(&srcInfo, (int32_t)sizeof(srcInfo), 0);
+                    (void)XGetSampleInfoFromSnd(sndData, &srcInfo);
+
+                    if (((uint32_t)srcInfo.compressionType == (uint32_t)C_VORBIS ||
+                         (uint32_t)srcInfo.compressionType == (uint32_t)C_OPUS) &&
+                        sndSize >= (int32_t)sizeof(XSndHeader3)) {
+                        XSndHeader3 *header3 = (XSndHeader3 *)sndData;
+                        if (XGetShort(&header3->type) == XThirdSoundFormat &&
+                            (uint32_t)XGetLong(&header3->sndBuffer.subType) == (uint32_t)srcInfo.compressionType &&
+                            (uint32_t)XGetLong(&header3->sndBuffer.reserved3[0]) == (uint32_t)FOUR_CHAR('b','q','s','t')) {
+                            subType = (uint32_t)XGetLong(&header3->sndBuffer.reserved3[1]);
+                        }
+                    }
+
+                    auto codecText = [&](uint32_t ct, uint32_t st) -> wxString {
+                        switch (ct) {
+                            case 0:
+                            case FOUR_CHAR('n','o','n','e'): return "PCM";
+                            case FOUR_CHAR('i','m','a','4'): return "IMA4";
+                            case FOUR_CHAR('i','m','a','W'): return "IMA4 (WAV)";
+                            case FOUR_CHAR('i','m','a','3'): return "IMA3";
+                            case FOUR_CHAR('f','L','a','C'):
+                            case FOUR_CHAR('F','L','A','C'): return "FLAC";
+                            case FOUR_CHAR('m','p','g','n'): return "MP3 32k";
+                            case FOUR_CHAR('m','p','g','b'): return "MP3 48k";
+                            case FOUR_CHAR('m','p','g','d'): return "MP3 64k";
+                            case FOUR_CHAR('m','p','g','f'): return "MP3 96k";
+                            case FOUR_CHAR('m','p','g','h'): return "MP3 128k";
+                            case FOUR_CHAR('m','p','g','j'): return "MP3 192k";
+                            case FOUR_CHAR('m','p','g','l'): return "MP3 256k";
+                            case FOUR_CHAR('m','p','g','m'): return "MP3 320k";
+                            case FOUR_CHAR('O','g','g','V'):
+                            case FOUR_CHAR('V','O','R','B'):
+                                return wxString::Format("Vorbis %s",
+                                    (st == FOUR_CHAR('v','0','3','2')) ? "32k" :
+                                    (st == FOUR_CHAR('v','0','4','8')) ? "48k" :
+                                    (st == FOUR_CHAR('v','0','6','4')) ? "64k" :
+                                    (st == FOUR_CHAR('v','0','8','0')) ? "80k" :
+                                    (st == FOUR_CHAR('v','0','9','6')) ? "96k" :
+                                    (st == FOUR_CHAR('v','1','2','8')) ? "128k" :
+                                    (st == FOUR_CHAR('v','1','6','0')) ? "160k" :
+                                    (st == FOUR_CHAR('v','1','9','2')) ? "192k" :
+                                    (st == FOUR_CHAR('v','2','5','6')) ? "256k" : "?");
+                            case FOUR_CHAR('O','g','g','O'):
+                            case FOUR_CHAR('O','P','U','S'):
+                                return wxString::Format("Opus %s%s",
+                                    (st == FOUR_CHAR('o','0','1','2')) ? "12k" :
+                                    (st == FOUR_CHAR('o','0','1','6')) ? "16k" :
+                                    (st == FOUR_CHAR('o','0','2','4')) ? "24k" :
+                                    (st == FOUR_CHAR('o','0','3','2')) ? "32k" :
+                                    (st == FOUR_CHAR('o','0','4','8')) ? "48k" :
+                                    (st == FOUR_CHAR('o','0','6','4')) ? "64k" :
+                                    (st == FOUR_CHAR('o','0','8','0')) ? "80k" :
+                                    (st == FOUR_CHAR('o','0','9','6')) ? "96k" :
+                                    (st == FOUR_CHAR('o','1','2','8')) ? "128k" :
+                                    (st == FOUR_CHAR('o','1','6','0')) ? "160k" :
+                                    (st == FOUR_CHAR('o','1','9','2')) ? "192k" :
+                                    (st == FOUR_CHAR('o','2','5','6')) ? "256k" : "?",
+                                    XGetSoundOpusRoundTripFlag(sndData) ? " (RT)" : "");
+                            default: return wxString::Format("0x%08X", (unsigned)ct);
+                        }
+                    };
+
+                    outCodecDescription = codecText((uint32_t)srcInfo.compressionType, subType);
+                    XDisposePtr(sndData);
+                    return true;
+                });
         }
 
         {
@@ -901,7 +1310,6 @@ private:
     wxNotebook *m_editorNotebook;
     BankEditorPanel *m_bankEditorPanel;
     EditorMode m_editorMode;
-    bool m_bankEditorWarningAccepted;
     wxMenu *m_midiFileMenu;
     wxMenu *m_bankFileMenu;
     wxListBox *m_trackList;
@@ -999,6 +1407,16 @@ private:
     uint32_t m_cleanStateHash = 0;  // Hash of document when last saved
     uint32_t m_cleanBankStateHash = 0;  // Hash of bank when last saved (0 = built-in)
 
+    /* Original SND payload for samples that have been re-encoded in the current bank
+     * session.  Keyed by sndResourceID (uint16_t).  Once populated for a given
+     * sample the entry is never evicted until the bank itself changes, so every
+     * subsequent re-encode for that sample always starts from the clean source. */
+    struct BankSampleSndEntry {
+        XResourceType sndType = 0;
+        std::vector<uint8_t> sndData;
+    };
+    std::unordered_map<uint16_t, BankSampleSndEntry> m_bankSampleSndCache;
+
     bool IsSessionDirty() const {
         return m_hasUnsavedChanges || m_bankHasUnsavedChanges;
     }
@@ -1027,6 +1445,7 @@ private:
             if (!newDirty) {
                 m_bankModifiedHintFromSession = false;
             }
+            UpdateLoadedBankStatus();
             UpdateStatusBar();
             UpdateFrameTitle();
         }
@@ -1128,7 +1547,7 @@ private:
             m_currentBankMenuItem->SetItemLabel(label);
         }
         if (m_reloadInternalBankMenuItem) {
-            m_reloadInternalBankMenuItem->Enable(!isInternalBankCurrent);
+            m_reloadInternalBankMenuItem->Enable(!isInternalBankCurrent || m_bankHasUnsavedChanges);
         }
     }
 
@@ -2013,6 +2432,7 @@ private:
         m_bankToken = nullptr;
         m_bankLoaded = false;
         m_bankTokens.clear();
+        m_bankSampleSndCache.clear();
         m_loadedBankPath.clear();
         m_bankDisplayName.clear();
         m_bankModifiedHintFromSession = false;
@@ -2122,6 +2542,7 @@ private:
         m_bankToken = nullptr;
         m_bankLoaded = false;
         m_bankTokens.clear();
+        m_bankSampleSndCache.clear();
         m_loadedBankPath.clear();
 
         BAEBankToken builtinToken;
@@ -5779,26 +6200,6 @@ private:
             m_editorMode = kEditorModeMidi;
             HotReloadBankIntoMixer();
         } else if (page == kEditorModeBank) {
-            if (!m_bankEditorWarningAccepted) {
-                int answer = wxMessageBox(
-                    "The Bank Editor is incomplete and many functions are not yet "
-                    "implemented or not yet functioning correctly.\n\n"
-                    "By continuing you agree that you understand this.",
-                    "Bank Editor — Incomplete Feature",
-                    wxOK | wxCANCEL | wxICON_WARNING,
-                    this);
-                if (answer != wxOK) {
-                    event.Veto();
-                    /* Restore the notebook selection to the previous tab without
-                     * re-triggering this handler. */
-                    m_editorNotebook->Unbind(wxEVT_NOTEBOOK_PAGE_CHANGED, &MainFrame::OnEditorTabChanged, this);
-                    m_editorNotebook->SetSelection((size_t)kEditorModeMidi);
-                    m_editorNotebook->Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, &MainFrame::OnEditorTabChanged, this);
-                    m_editorMode = kEditorModeMidi;
-                    return;
-                }
-                m_bankEditorWarningAccepted = true;
-            }
             m_editorMode = kEditorModeBank;
         }
         event.Skip();
@@ -5943,6 +6344,7 @@ private:
         m_bankToken = nullptr;
         m_bankLoaded = false;
         m_bankTokens.clear();
+        m_bankSampleSndCache.clear();
         m_loadedBankPath.clear();
         m_bankDisplayName.clear();
         m_bankModifiedHintFromSession = false;
@@ -6380,6 +6782,24 @@ private:
             }
         }
 
+        /* Build TLV payload: original raw SND cache for re-encoded samples
+         * Format: [entry_count:4]
+         *         per entry: [sndID:2][sndType:4][sndDataSize:4][sndData:N] */
+        if (!m_bankSampleSndCache.empty()) {
+            std::vector<unsigned char> cachePayload;
+            AppendLE32(cachePayload, static_cast<uint32_t>(m_bankSampleSndCache.size()));
+            for (auto const &kv : m_bankSampleSndCache) {
+                const BankSampleSndEntry &e = kv.second;
+                AppendLE16(cachePayload, kv.first);                          /* sndID */
+                AppendLE32(cachePayload, static_cast<uint32_t>(e.sndType));
+                AppendLE32(cachePayload, static_cast<uint32_t>(e.sndData.size()));
+                cachePayload.insert(cachePayload.end(), e.sndData.begin(), e.sndData.end());
+            }
+            AppendLE16(payload, kNbsFieldBankSampleSndCache);
+            AppendLE32(payload, static_cast<uint32_t>(cachePayload.size()));
+            payload.insert(payload.end(), cachePayload.begin(), cachePayload.end());
+        }
+
         /* Compress with LZMA */
         compBound = lzma_stream_buffer_bound(payload.size());
         compressed.resize(compBound);
@@ -6595,6 +7015,36 @@ private:
                     std::string bankPathStr(reinterpret_cast<const char *>(payload.data() + offset), fieldLen);
                     bankPath = wxString::FromUTF8(bankPathStr.c_str());
                 }
+            } else if (fieldId == kNbsFieldBankSampleSndCache) {
+                /* Deserialise the original raw SND cache.
+                 * Format: [entry_count:4]
+                 *         per entry: [sndID:2][sndType:4][sndDataSize:4][sndData:N] */
+                m_bankSampleSndCache.clear();
+                if (fieldLen >= 4) {
+                    unsigned char const *cp = payload.data() + offset;
+                    unsigned char const *cend = cp + fieldLen;
+                    uint32_t entryCount = ReadLE32(cp); cp += 4;
+                    static constexpr size_t kEntryHeaderSize = 2 + 4 + 4;
+                    for (uint32_t ei = 0; ei < entryCount && cp + kEntryHeaderSize <= cend; ++ei) {
+                        uint16_t sndID = ReadLE16(cp); cp += 2;
+                        XResourceType sndType = static_cast<XResourceType>(ReadLE32(cp)); cp += 4;
+                        uint32_t sndDataSize = ReadLE32(cp); cp += 4;
+                        if (cp + sndDataSize > cend) { break; }
+                        if (sndType != ID_SND && sndType != ID_CSND && sndType != ID_ESND) {
+                            cp += sndDataSize;
+                            continue;
+                        }
+                        BankSampleSndEntry entry;
+                        entry.sndType = sndType;
+                        entry.sndData.assign(cp, cp + sndDataSize);
+                        m_bankSampleSndCache.emplace(sndID, std::move(entry));
+                        cp += sndDataSize;
+                    }
+                }
+            } else if (fieldId == kNbsFieldBankSamplePcmCache) {
+                /* Legacy v2 compatibility: old sessions may include PCM cache field.
+                 * We no longer use this representation and simply ignore its payload. */
+                m_bankSampleSndCache.clear();
             }
             /* Unknown fields are silently skipped */
             offset += fieldLen;
@@ -6678,6 +7128,7 @@ private:
             m_bankToken = nullptr;
             m_bankLoaded = false;
             m_bankTokens.clear();
+            m_bankSampleSndCache.clear();
             m_loadedBankPath.clear();
             m_bankDisplayName.clear();
             (void)bankFlags;

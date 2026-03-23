@@ -3571,13 +3571,10 @@ private:
         PrepareDC(dc);
 
         // Cache frequently used values once per paint
-        const int pixelsX   = GetPixelsPerQuarter();
         const uint16_t tpq = GetTicksPerQuarter();
         const int leftGutter = kPianoRollLeftGutter;
         const int topGutter  = kPianoRollTopGutter;
         const int noteH      = kNoteHeight;
-        const int automHeight = kAutomationLaneHeight;
-        const int automGap   = kAutomationLaneGap;
         const int gutterW   = leftGutter;
 
         dc.SetBackground(m_rc.brushWhiteKey);

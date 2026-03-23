@@ -3062,6 +3062,13 @@ typedef struct BAERmfEditorInstrumentExtInfo
     uint32_t sampleRate;            /* integer Hz; converted to 16.16 for sampledRate */
     uint32_t sampleLoopStart;       /* startLoop for GM_Waveform */
     uint32_t sampleLoopEnd;         /* endLoop for GM_Waveform */
+
+    /* Codec re-encode target (set by bank editor; consumed by dirtyParamsCallback).
+       When sampleTargetCompression == BAE_EDITOR_COMPRESSION_DONT_CHANGE the other
+       two fields are ignored and no re-encode is performed. */
+    BAERmfEditorCompressionType sampleTargetCompression;
+    BAERmfEditorSndStorageType  sampleTargetStorageType;
+    BAERmfEditorOpusMode        sampleTargetOpusMode;
 } BAERmfEditorInstrumentExtInfo;
 
 // BAESong_PatchLoadedInstrumentExtInfo()
@@ -3408,6 +3415,7 @@ typedef struct BAERmfEditorBankSampleInfo
     uint32_t loopEnd;                    /* Loop end frame */
     XResourceType compressionType;       /* Compression type (X_UNCOMPRESSED, X_FLAC, etc.) */
     uint32_t compressionSubType;          /* Compression sub-type (CS_VORBIS_*K, CS_OPUS_*K, or CS_DEFAULT) */
+    BAERmfEditorSndStorageType sndStorageType; /* Container type of the SND resource (esnd/csnd/snd) */
 } BAERmfEditorBankSampleInfo;
 
 /* Count the number of samples (key splits) in a bank instrument.
@@ -3469,6 +3477,52 @@ BAEResult BAERmfEditorBank_GetSampleWaveformData(BAEBankToken bankToken,
 
 /* Free waveform data returned by BAERmfEditorBank_GetSampleWaveformData. */
 void BAERmfEditorBank_FreeWaveformData(void *waveData);
+
+/* Re-encode the audio data for a specific sample in a bank instrument using the
+ * specified codec and container type.  The sample PCM is decoded from the current
+ * SND resource, re-encoded with compressionType, wrapped in sndStorageType, and
+ * stored back into the bank's in-memory resource image.
+ * Returns BAE_NO_ERROR on success, or an error code on failure.
+ * Does nothing (returns BAE_NO_ERROR) when compressionType is
+ * BAE_EDITOR_COMPRESSION_DONT_CHANGE. */
+BAEResult BAERmfEditorBank_ReEncodeSample(BAEBankToken bankToken,
+                                           uint32_t instrumentIndex,
+                                           uint32_t sampleIndex,
+                                           BAERmfEditorCompressionType compressionType,
+                                           BAERmfEditorSndStorageType sndStorageType,
+                                           BAERmfEditorOpusMode opusMode);
+
+/* Re-encode a bank sample using caller-supplied original PCM data.
+ * Use this variant when you have cached the original clean PCM to avoid
+ * re-decoding from already-compressed data.  sourcePcm is borrowed (not
+ * transferred); the function makes an internal copy before encoding. */
+BAEResult BAERmfEditorBank_ReEncodeSampleFromPCM(BAEBankToken bankToken,
+                                                  uint32_t instrumentIndex,
+                                                  uint32_t sampleIndex,
+                                                  BAERmfEditorCompressionType compressionType,
+                                                  BAERmfEditorSndStorageType sndStorageType,
+                                                  BAERmfEditorOpusMode opusMode,
+                                                  const void *sourcePcm,
+                                                  uint32_t frameCount,
+                                                  uint16_t bitSize,
+                                                  uint16_t channels,
+                                                  BAE_UNSIGNED_FIXED sampleRate);
+
+/* Extended variant with explicit Opus round-trip mode.
+ * When opusRoundTripResample is TRUE and compressionType is Opus, the encoder
+ * writes a round-trip Opus stream and preserves source-rate playback semantics. */
+BAEResult BAERmfEditorBank_ReEncodeSampleFromPCMEx(BAEBankToken bankToken,
+                                                    uint32_t instrumentIndex,
+                                                    uint32_t sampleIndex,
+                                                    BAERmfEditorCompressionType compressionType,
+                                                    BAERmfEditorSndStorageType sndStorageType,
+                                                    BAERmfEditorOpusMode opusMode,
+                                                    XBOOL opusRoundTripResample,
+                                                    const void *sourcePcm,
+                                                    uint32_t frameCount,
+                                                    uint16_t bitSize,
+                                                    uint16_t channels,
+                                                    BAE_UNSIGNED_FIXED sampleRate);
 
 #ifdef __cplusplus
 } // extern "C"

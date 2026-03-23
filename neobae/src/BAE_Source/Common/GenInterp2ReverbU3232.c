@@ -181,9 +181,8 @@ void PV_ServeU3232FullBufferNewReverb(GM_Voice *this_voice)
 
                 for (inner = 0; inner < 16; inner++)
                 {
-                    U32 next_wave_i;
                     calculated_source = source + cur_wave_i * 2;
-                    next_wave_i = cur_wave_i + 1;
+                    b = calculated_source[0] + calculated_source[1];
                     c = calculated_source[2] + calculated_source[3];
                     sample = ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x100) >> 1;
                     *dest += sample * amplitude;
@@ -207,7 +206,7 @@ void PV_ServeU3232PartialBufferNewReverb (GM_Voice *this_voice, XBOOL looping)
     register INT32          *dest;
     register INT32          *destReverb, *destChorus;
     register LOOPCOUNT      a, inner;
-    register UBYTE          *source, *calculated_source;
+    register UBYTE          *source;
     register INT32          b, c, sample;
     register U32            cur_wave_i, cur_wave_f;
     register U32            end_wave, wave_adjust = 0;
@@ -734,7 +733,7 @@ void PV_ServeU3232PartialBuffer16NewReverb (GM_Voice *this_voice, XBOOL looping)
     register INT32          *dest;
     register INT32          *destReverb, *destChorus;
     register LOOPCOUNT      a, inner;
-    register INT16          *source, *calculated_source;
+    register INT16          *source;
     register INT32          b, c, sample;
     register U32            cur_wave_i, cur_wave_f;
     register U32            end_wave, wave_adjust = 0;
@@ -1168,7 +1167,7 @@ void PV_ServeU3232StereoPartialBuffer16NewReverb (GM_Voice *this_voice, XBOOL lo
     register INT32          *destL;
     register INT32          *destReverb, *destChorus;
     register LOOPCOUNT      a, inner;
-    register INT16          *source, *calculated_source;
+    register INT16          *source;
     register INT32          b, c, sample;
     register U32            cur_wave_i, cur_wave_f;
     register U32            end_wave, wave_adjust = 0;
