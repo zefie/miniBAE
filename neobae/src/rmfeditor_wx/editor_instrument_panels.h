@@ -235,26 +235,30 @@ private:
         dc.SetPen(wxPen(centerColour, 1));
         dc.DrawLine(0, centerY, size.x, centerY);
 
+        if (m_frameCount == 0 || size.x <= 0) return;
+
         dc.SetPen(wxPen(waveColour, 1));
-        uint32_t framesPerPixel = std::max<uint32_t>(1, m_frameCount / (uint32_t)std::max(1, size.x));
+        int amp = std::max(1, (laneHeight / 2) - 3);
+
+        // Use floating-point mapping so that samples smaller than the panel
+        // width are drawn spread across all pixels (zoomed in), and large
+        // samples are correctly min/max-bucketed into each pixel column.
+        float framesPerPixel = (float)m_frameCount / (float)size.x;
         for (int x = 0; x < size.x; ++x) {
-            uint32_t start = (uint32_t)x * framesPerPixel;
-            uint32_t end = std::min<uint32_t>(m_frameCount, start + framesPerPixel);
+            float fStart = (float)x * framesPerPixel;
+            float fEnd   = fStart + framesPerPixel;
+            uint32_t iStart = (uint32_t)fStart;
+            uint32_t iEnd   = std::min<uint32_t>(m_frameCount, (uint32_t)std::ceil(fEnd));
+            if (iStart >= m_frameCount) break;
+            if (iEnd <= iStart) iEnd = iStart + 1;
+
             float minV = 1.0f;
             float maxV = -1.0f;
-
-            if (start >= m_frameCount) {
-                break;
-            }
-            if (end <= start) {
-                end = std::min<uint32_t>(m_frameCount, start + 1);
-            }
-            for (uint32_t f = start; f < end; f++) {
+            for (uint32_t f = iStart; f < iEnd; ++f) {
                 float v = SampleAt(f, channel);
                 if (v < minV) minV = v;
                 if (v > maxV) maxV = v;
             }
-            int amp = std::max(1, (laneHeight / 2) - 3);
             int y1 = centerY - (int)(maxV * amp);
             int y2 = centerY - (int)(minV * amp);
             dc.DrawLine(x, y1, x, y2);
