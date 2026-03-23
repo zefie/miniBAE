@@ -3166,10 +3166,12 @@ static int setup_tracks(Mod2RmfConverter *conv, const ModSongModel *song)
         char trackName[64];
 
         memset(&setup, 0, sizeof(setup));
-        /* Skip MIDI channel 9 (GM percussion) so all tracker channels
-         * get melodic instrument handling.  Cap at 15 (MIDI max). */
+        /* Cap at 15 (16) (MIDI max). */
         {
-            unsigned char midiCh = (unsigned char)((i < 9u) ? i : (i + 1u));
+            //unsigned char midiCh = (unsigned char)((i < 9u) ? i : (i + 1u));
+            unsigned char midiCh = (unsigned char)(i);
+            // TODO: Smart distrubution of channels > 15 across MIDI channels, instead of just capping.
+            // This is especially relevant for S3M which can have 32 channels
             if (midiCh > 15u) midiCh = 15u;
             setup.channel = midiCh;
         }

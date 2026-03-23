@@ -680,7 +680,27 @@ public:
         m_dragOriginalNotes.clear();
         InvalidateNoteCache();
         InvalidateAutomationCaches();
-        UpdateVirtualSize();
+        {
+            // Preserve scroll position around UpdateVirtualSize, which calls
+            // SetVirtualSize and can reset scroll to (0,0) on some backends.
+            int scrollPixelsX = 0;
+            int scrollPixelsY = 0;
+            GetScrollPixelsPerUnit(&scrollPixelsX, &scrollPixelsY);
+            if (scrollPixelsX < 1) scrollPixelsX = 1;
+            if (scrollPixelsY < 1) scrollPixelsY = 1;
+            int viewUnitsX = 0;
+            int viewUnitsY = 0;
+            GetViewStart(&viewUnitsX, &viewUnitsY);
+            const int savedScrollX = viewUnitsX * scrollPixelsX;
+            const int savedScrollY = viewUnitsY * scrollPixelsY;
+
+            UpdateVirtualSize();
+
+            GetScrollPixelsPerUnit(&scrollPixelsX, &scrollPixelsY);
+            if (scrollPixelsX < 1) scrollPixelsX = 1;
+            if (scrollPixelsY < 1) scrollPixelsY = 1;
+            Scroll(savedScrollX / scrollPixelsX, savedScrollY / scrollPixelsY);
+        }
         ScrollToMidiContentCenter();
         Refresh();
     }
@@ -757,7 +777,30 @@ public:
         m_dragUndoLabel.clear();
         InvalidateNoteCache();
         InvalidateAutomationCaches();
-        UpdateVirtualSize();
+        {
+            // SetVirtualSize (called inside UpdateVirtualSize) can reset the
+            // scroll position to (0,0) on some wx backends when the virtual
+            // area size changes.  Save and restore both axes so undo/redo
+            // never jumps the view.
+            int scrollPixelsX = 0;
+            int scrollPixelsY = 0;
+            GetScrollPixelsPerUnit(&scrollPixelsX, &scrollPixelsY);
+            if (scrollPixelsX < 1) scrollPixelsX = 1;
+            if (scrollPixelsY < 1) scrollPixelsY = 1;
+            int viewUnitsX = 0;
+            int viewUnitsY = 0;
+            GetViewStart(&viewUnitsX, &viewUnitsY);
+            const int savedScrollX = viewUnitsX * scrollPixelsX;
+            const int savedScrollY = viewUnitsY * scrollPixelsY;
+
+            UpdateVirtualSize();
+
+            // Re-read pixel-per-unit in case it changed with the virtual size.
+            GetScrollPixelsPerUnit(&scrollPixelsX, &scrollPixelsY);
+            if (scrollPixelsX < 1) scrollPixelsX = 1;
+            if (scrollPixelsY < 1) scrollPixelsY = 1;
+            Scroll(savedScrollX / scrollPixelsX, savedScrollY / scrollPixelsY);
+        }
         Refresh();
         if (m_selectionChangedCallback) {
             m_selectionChangedCallback();

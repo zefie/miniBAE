@@ -210,7 +210,36 @@ struct UndoDocumentState {
     std::vector<UndoTempoEventState> tempoEvents;
     std::vector<UndoTrackState> tracks;
     std::vector<unsigned char> serializedDocument;
+    uint32_t documentHash = 0;  // Simple hash for dirty-flag optimization
+    int pianoScrollVX = 0;      // Piano roll horizontal scroll position
+    int pianoScrollVY = 0;      // Piano roll vertical scroll position
 };
+
+static uint32_t ComputeDocumentHash(UndoDocumentState const &state) {
+    uint32_t hash = 5381;  // djb2 hash seed
+    hash = ((hash << 5) + hash) ^ state.tempoBpm;
+    for (auto const &te : state.tempoEvents) {
+        hash = ((hash << 5) + hash) ^ te.tick;
+        hash = ((hash << 5) + hash) ^ te.microsecondsPerQuarter;
+    }
+    for (auto const &track : state.tracks) {
+        for (auto const &note : track.notes) {
+            hash = ((hash << 5) + hash) ^ note.startTick;
+            hash = ((hash << 5) + hash) ^ note.durationTicks;
+            hash = ((hash << 5) + hash) ^ note.note;
+            hash = ((hash << 5) + hash) ^ note.velocity;
+            hash = ((hash << 5) + hash) ^ note.channel;
+            hash = ((hash << 5) + hash) ^ note.bank;
+            hash = ((hash << 5) + hash) ^ note.program;
+        }
+        for (auto const &cc : track.ccEvents) {
+            hash = ((hash << 5) + hash) ^ cc.controller;
+            hash = ((hash << 5) + hash) ^ cc.tick;
+            hash = ((hash << 5) + hash) ^ cc.value;
+        }
+    }
+    return hash;
+}
 
 struct UndoEntry {
     wxString label;
@@ -863,6 +892,7 @@ private:
     bool m_restoringUndo;
     bool m_hasUnsavedChanges;
     bool m_bankHasUnsavedChanges;
+    uint32_t m_cleanStateHash = 0;  // Hash of document when last saved
 
     static wxString GetIniPath() {
         return wxFileName::GetHomeDir() + "/.nbstudio.ini";
@@ -1205,16 +1235,40 @@ private:
         m_pendingUndoState = UndoDocumentState();
         m_pendingUndoLabel.clear();
         m_hasPendingUndo = false;
+        // Capture the current document state hash as the "clean" state
+        UndoDocumentState currentState;
+        if (CaptureUndoState(&currentState)) {
+            m_cleanStateHash = ComputeDocumentHash(currentState);
+        }
         InvalidatePianoRollPreviewSong();
         UpdateUndoMenuState();
     }
 
     void MarkDocumentClean() {
         m_hasUnsavedChanges = false;
+        // Update clean hash whenever saved
+        UndoDocumentState currentState;
+        if (CaptureUndoState(&currentState)) {
+            m_cleanStateHash = ComputeDocumentHash(currentState);
+        }
         UpdateFrameTitle();
     }
 
     void MarkDocumentDirty() {
+        // Check if we're actually back at the clean state (user may have undone/reversed edits)
+        if (m_cleanStateHash != 0) {
+            UndoDocumentState currentState;
+            if (CaptureUndoState(&currentState)) {
+                uint32_t currentHash = ComputeDocumentHash(currentState);
+                if (currentHash == m_cleanStateHash) {
+                    // We're back at the original saved state, so mark clean
+                    m_hasUnsavedChanges = false;
+                    UpdateFrameTitle();
+                    return;
+                }
+            }
+        }
+        
         if (!m_hasUnsavedChanges) {
             m_hasUnsavedChanges = true;
             UpdateFrameTitle();
@@ -1478,6 +1532,12 @@ private:
         if (!CaptureSerializedDocument(&outState->serializedDocument)) {
             outState->serializedDocument.clear();
         }
+        // Capture current piano roll scroll position
+        outState->pianoScrollVX = 0;
+        outState->pianoScrollVY = 0;
+        if (wxScrolledWindow *sw = dynamic_cast<wxScrolledWindow *>(PianoRollPanel_AsWindow(m_pianoRoll))) {
+            sw->GetViewStart(&outState->pianoScrollVX, &outState->pianoScrollVY);
+        }
         return true;
     }
 
@@ -1596,6 +1656,8 @@ private:
         entry.label = label.empty() ? m_pendingUndoLabel : label;
         entry.before = m_pendingUndoState;
         entry.after = afterState;
+        entry.before.documentHash = ComputeDocumentHash(entry.before);
+        entry.after.documentHash = ComputeDocumentHash(entry.after);
         m_undoStack.push_back(entry);
         m_redoStack.clear();
         if (m_undoStack.size() > 128) {
@@ -1646,8 +1708,13 @@ private:
         PopulateSampleList();
         RefreshMidiLoopControlsFromDocument();
         PianoRollPanel_RefreshFromDocument(m_pianoRoll, true);
+        // Restore scroll position that was captured when this undo entry was created
+        if (wxScrolledWindow *sw = dynamic_cast<wxScrolledWindow *>(PianoRollPanel_AsWindow(m_pianoRoll))) {
+            sw->Scroll(entry.before.pianoScrollVX, entry.before.pianoScrollVY);
+        }
         InvalidatePianoRollPreviewSong();
         UpdateControlsFromSelection();
+        // MarkDocumentDirty() checks if we're back at the clean hash and clears dirty if so
         MarkDocumentDirty();
         SetStatusText(entry.label.empty() ? "Undo" : wxString::Format("Undid %s", entry.label), 0);
         UpdateUndoMenuState();
@@ -1685,8 +1752,13 @@ private:
         PopulateSampleList();
         RefreshMidiLoopControlsFromDocument();
         PianoRollPanel_RefreshFromDocument(m_pianoRoll, true);
+        // Restore scroll position that was captured when this undo entry was created
+        if (wxScrolledWindow *sw = dynamic_cast<wxScrolledWindow *>(PianoRollPanel_AsWindow(m_pianoRoll))) {
+            sw->Scroll(entry.after.pianoScrollVX, entry.after.pianoScrollVY);
+        }
         InvalidatePianoRollPreviewSong();
         UpdateControlsFromSelection();
+        // MarkDocumentDirty() checks if we're back at the clean hash and clears dirty if so
         MarkDocumentDirty();
         SetStatusText(entry.label.empty() ? "Redo" : wxString::Format("Redid %s", entry.label), 0);
         UpdateUndoMenuState();
