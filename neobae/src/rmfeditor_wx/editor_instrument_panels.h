@@ -1092,26 +1092,6 @@ public:
             m_adsrFlags[i]->Show(visible);
         }
 
-        /* If the instrument lacks INST_DEFAULT_MOD, the engine auto-generates
-         * a default mod-wheel pitch LFO (see PV_GetEnvelopeData).  Inject it
-         * into the editor's LFO list so the user can see it. */
-        if (!m_extInfo.hasDefaultMod &&
-            m_extInfo.lfoCount < BAE_EDITOR_MAX_LFOS)
-        {
-            BAERmfEditorLFOInfo &lfo = m_extInfo.lfos[m_extInfo.lfoCount];
-            memset(&lfo, 0, sizeof(lfo));
-            lfo.destination = (int32_t)FOUR_CHAR('P','I','T','C');  /* PITCH_LFO */
-            lfo.period      = 180000;
-            lfo.waveShape   = (int32_t)FOUR_CHAR('S','I','N','E');  /* SINE_WAVE */
-            lfo.DC_feed     = 0;
-            lfo.level       = 64;
-            lfo.adsr.stageCount = 1;
-            lfo.adsr.stages[0].level = 65536;
-            lfo.adsr.stages[0].time  = 0;
-            lfo.adsr.stages[0].flags = (int32_t)FOUR_CHAR('L','A','S','T'); /* TERMINATE */
-            m_extInfo.lfoCount++;
-        }
-
         /* LFO */
         m_lfoCountSpin->SetValue((int)m_extInfo.lfoCount);
         if (m_extInfo.lfoCount > 0) {
@@ -1875,6 +1855,16 @@ public:
         Layout();
     }
 
+    void SetCodecControlsVisible(bool visible) {
+        wxSizer *parentSizer = GetSizer();
+
+        if (parentSizer) {
+            if (m_codecRow) parentSizer->Show(m_codecRow, visible);
+            if (m_storageRow) parentSizer->Show(m_storageRow, visible);
+        }
+        Layout();
+    }
+
     void SetDeleteEnabled(bool enabled) {
         if (m_deleteSampleBtn) m_deleteSampleBtn->Enable(enabled);
     }
@@ -2066,12 +2056,14 @@ private:
             ApplyLoopFromUI();
         }
         NotifyLoopChanged();
+        NotifyParameterChanged();
     }
 
     void OnLoopPointChanged() {
         if (m_loopEnableCheck->GetValue()) {
             ApplyLoopFromUI();
             NotifyLoopChanged();
+            NotifyParameterChanged();
         }
     }
 
@@ -2250,6 +2242,7 @@ private:
                 m_loopInfoLabel->SetLabel("");
             }
             NotifyLoopChanged();
+            NotifyParameterChanged();
         });
         sizer->Add(m_waveformPanel, 1, wxEXPAND | wxALL, 8);
 

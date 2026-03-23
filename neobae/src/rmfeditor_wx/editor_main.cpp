@@ -131,8 +131,7 @@ enum {
     ID_CloneFromBank,
     ID_CloneAllUsedFromBank,
     ID_AliasFromBank,
-    ID_SaveSession,
-    ID_SaveSessionAs,
+    ID_SongSaveAs,
     ID_BankSave,
     ID_BankSaveAs,
     ID_BankLoadBuiltin,
@@ -150,7 +149,12 @@ static constexpr uint16_t kNbsFieldUserEndTick  = 0x0004;
 static constexpr uint16_t kNbsFieldBankPath     = 0x0005;  /* Bank file path (for display/compat only) */
 static constexpr uint16_t kNbsFieldBankBlob     = 0x0006;  /* Embedded bank binary blob */
 static constexpr uint16_t kNbsFieldBankFlags    = 0x0007;  /* Bank restore flags (1 byte) */
+static constexpr uint16_t kNbsFieldBankDisplayName = 0x0008; /* Preferred bank display name */
+static constexpr uint16_t kNbsFieldMediaDisplayName = 0x0009; /* Preferred media display name */
+static constexpr uint16_t kNbsFieldDirtyFlags = 0x000A; /* Dirty status flags (1 byte) */
 static constexpr uint8_t  kNbsBankFlagIsOverlay = 0x01;    /* Blob is overlay; load built-in first */
+static constexpr uint8_t  kNbsDirtyFlagSongModified = 0x01;
+static constexpr uint8_t  kNbsDirtyFlagBankModified = 0x02;
 
 /* Default timeline length for a new document: 30 s at 120 BPM / 480 TPQ
  * 30 s * 2 beats/s * 480 ticks/beat = 28 800 ticks */
@@ -223,6 +227,11 @@ struct UndoDocumentState {
 static uint32_t ComputeDocumentHash(UndoDocumentState const &state) {
     uint32_t hash = 5381;  // djb2 hash seed
     hash = ((hash << 5) + hash) ^ state.tempoBpm;
+    hash = ((hash << 5) + hash) ^ static_cast<uint32_t>(state.tracks.size());
+    /* Mix in the serialized document size so that structural changes
+     * (adding/removing tracks or instruments) alter the hash even when
+     * the note/CC content is identical. */
+    hash = ((hash << 5) + hash) ^ static_cast<uint32_t>(state.serializedDocument.size());
     for (auto const &te : state.tempoEvents) {
         hash = ((hash << 5) + hash) ^ te.tick;
         hash = ((hash << 5) + hash) ^ te.microsecondsPerQuarter;
@@ -246,20 +255,50 @@ static uint32_t ComputeDocumentHash(UndoDocumentState const &state) {
     return hash;
 }
 
-static uint32_t ComputeBankHash(wxString const &bankPath, bool hasUnsavedChanges) {
-    uint32_t hash = 5381;  // djb2 hash seed
-    
-    // Hash includes the bank path (or empty if built-in)
-    wxScopedCharBuffer utf8 = bankPath.utf8_str();
-    const char *p = utf8.data();
-    while (*p) {
-        hash = ((hash << 5) + hash) ^ static_cast<unsigned char>(*p);
-        ++p;
+static uint32_t ComputeBankHash(BAEBankToken bankToken) {
+    unsigned char *bankData = nullptr;
+    uint32_t bankSize = 0;
+    uint32_t hash = 5381;
+
+    if (!bankToken) {
+        return 0;
     }
-    
-    // Hash includes the dirty status
-    hash = ((hash << 5) + hash) ^ (hasUnsavedChanges ? 0x12345678 : 0);
-    
+    if (BAERmfEditorBank_SaveToMemory(bankToken, &bankData, &bankSize) != BAE_NO_ERROR || !bankData || bankSize == 0) {
+        if (bankData) {
+            XDisposePtr(bankData);
+        }
+        return 0;
+    }
+    for (uint32_t i = 0; i < bankSize; ++i) {
+        hash = ((hash << 5) + hash) ^ bankData[i];
+    }
+    XDisposePtr(bankData);
+    return hash;
+}
+
+static bool IsInstrumentExtInfoEquivalentForDirty(BAERmfEditorInstrumentExtInfo const &left,
+                                                  BAERmfEditorInstrumentExtInfo const &right) {
+    BAERmfEditorInstrumentExtInfo a = left;
+    BAERmfEditorInstrumentExtInfo b = right;
+
+    /* UI callbacks may hand us different displayName pointers for the same
+     * logical settings; ignore pointer identity for dirty tracking. */
+    a.displayName = nullptr;
+    b.displayName = nullptr;
+    return memcmp(&a, &b, sizeof(a)) == 0;
+}
+
+static uint32_t MixInstrumentExtInfoDirtyHash(uint32_t seed,
+                                              BAERmfEditorInstrumentExtInfo const &info,
+                                              uint32_t instrumentIndex) {
+    BAERmfEditorInstrumentExtInfo normalized = info;
+    unsigned char const *p = reinterpret_cast<unsigned char const *>(&normalized);
+    uint32_t hash = ((seed << 5) + seed) ^ instrumentIndex;
+
+    normalized.displayName = nullptr;
+    for (size_t i = 0; i < sizeof(normalized); ++i) {
+        hash = ((hash << 5) + hash) ^ p[i];
+    }
     return hash;
 }
 
@@ -413,10 +452,12 @@ public:
         fileMenu = new wxMenu();
         fileMenu->Append(wxID_NEW, "&New\tCtrl+N");
         fileMenu->Append(wxID_OPEN, "&Open\tCtrl+O");
-        fileMenu->Append(wxID_SAVEAS, "&Export as...\tCtrl+Shift+S");
         fileMenu->AppendSeparator();
-        fileMenu->Append(ID_SaveSession, "Save &Session\tCtrl+S");
-        fileMenu->Append(ID_SaveSessionAs, "Save S&ession as...");
+        fileMenu->Append(ID_SongSaveAs, "&Export Song As...");
+        fileMenu->Append(ID_BankSaveAs, "Export Bank As...");
+        fileMenu->AppendSeparator();
+        fileMenu->Append(wxID_SAVE, "Save &Session\tCtrl+S");
+        fileMenu->Append(wxID_SAVEAS, "Save S&ession as...\tCtrl+Shift+S");
         fileMenu->AppendSeparator();
         soundBankMenu = new wxMenu();
         m_currentBankMenuItem = soundBankMenu->Append(ID_CurrentBankDisplay, "Current: Built-in");
@@ -425,32 +466,13 @@ public:
         }
         soundBankMenu->AppendSeparator();
         soundBankMenu->Append(ID_LoadBank, "Load a &Bank (HSB/ZSB)...\tCtrl+B");
-        soundBankMenu->Append(ID_CloneFromBank, "&Clone an Instrument from currently loaded Bank...");
         soundBankMenu->Append(ID_CloneAllUsedFromBank, "Clone &All Used Instruments from MIDI Stream...");
-        soundBankMenu->Append(ID_AliasFromBank, "&Alias an Instrument from currently loaded Bank...");
         m_reloadInternalBankMenuItem = soundBankMenu->Append(ID_ReloadInternalBank, "&Unload All Banks and Reload Internal Bank");
         fileMenu->AppendSubMenu(soundBankMenu, "Sound &Bank");
         fileMenu->AppendSeparator();
         fileMenu->Append(wxID_EXIT, "E&xit");
         m_midiFileMenu = fileMenu;
-
-        /* Bank Editor File menu */
-        {
-            wxMenu *bankMenu = new wxMenu();
-            bankMenu->Append(wxID_OPEN, "&Open\tCtrl+O");
-            bankMenu->Append(ID_LoadBank, "Load a &Bank (HSB/ZSB)...\tCtrl+B");
-            bankMenu->AppendSeparator();
-            bankMenu->Append(ID_BankSave, "&Save Bank\tCtrl+S");
-            bankMenu->Append(ID_BankSaveAs, "Save Bank &As...\tCtrl+Shift+S");
-            bankMenu->AppendSeparator();
-            bankMenu->Append(ID_BankLoadBuiltin, "Load &Built-in Bank");
-            bankMenu->AppendSeparator();
-            bankMenu->Append(ID_SaveSession, "Save S&ession\tCtrl+Alt+S");
-            bankMenu->Append(ID_SaveSessionAs, "Save Se&ssion as...");
-            bankMenu->AppendSeparator();
-            bankMenu->Append(wxID_EXIT, "E&xit");
-            m_bankFileMenu = bankMenu;
-        }
+        m_bankFileMenu = m_midiFileMenu;
 
         editMenu = new wxMenu();
         editMenu->Append(wxID_UNDO, "&Undo\tCtrl+Z");
@@ -668,19 +690,56 @@ public:
                 },
                 [this](BAERmfEditorInstrumentExtInfo const *info) {
                     if (info) {
+                        BAEResult extResult;
+                        uint32_t idx;
+
                         m_bankDirtyExtInfo = *info;
-                        m_hasBankDirtyExtInfo = true;
-                        m_bankHasUnsavedChanges = true;
+
+                        idx = BankEditorPanel_GetCurrentInstrumentIndex(m_bankEditorPanel);
+                        if (m_bankDirtyExtInfo.hasSampleOverride && m_bankToken) {
+                            BAERmfEditorBankSampleInfo sampleInfo;
+
+                            if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bankToken,
+                                                                         idx,
+                                                                         m_bankDirtyExtInfo.sampleOverrideIndex,
+                                                                         &sampleInfo) == BAE_NO_ERROR) {
+                                sampleInfo.rootKey = m_bankDirtyExtInfo.sampleRootKey;
+                                sampleInfo.lowKey = m_bankDirtyExtInfo.sampleLowKey;
+                                sampleInfo.highKey = m_bankDirtyExtInfo.sampleHighKey;
+                                sampleInfo.splitVolume = m_bankDirtyExtInfo.sampleSplitVolume;
+                                sampleInfo.sampleRate = m_bankDirtyExtInfo.sampleRate;
+                                sampleInfo.loopStart = m_bankDirtyExtInfo.sampleLoopStart;
+                                sampleInfo.loopEnd = m_bankDirtyExtInfo.sampleLoopEnd;
+                                (void)BAERmfEditorBank_SetInstrumentSampleInfo(m_bankToken,
+                                                                               idx,
+                                                                               m_bankDirtyExtInfo.sampleOverrideIndex,
+                                                                               &sampleInfo);
+                            }
+                        }
+
+                        extResult = BAE_BAD_FILE;
+                        if (m_bankToken) {
+                            m_bankDirtyExtInfo.hasSampleOverride = FALSE;
+                            extResult = BAERmfEditorBank_SetInstrumentExtInfo(m_bankToken,
+                                                                               idx,
+                                                                               &m_bankDirtyExtInfo);
+                        }
+
+                        m_hasBankDirtyExtInfo = (extResult != BAE_NO_ERROR);
                         m_bankPreviewDirtyApplied = false;
-                        /* Force instrument reload so the patch is applied
-                         * on top of a fresh copy from the bank. */
                         m_bankPreviewLoadedInst = static_cast<BAE_INSTRUMENT>(-1);
                     } else {
                         m_hasBankDirtyExtInfo = false;
                         m_bankPreviewDirtyApplied = false;
                         m_bankPreviewLoadedInst = static_cast<BAE_INSTRUMENT>(-1);
                     }
+                    RefreshBankDirtyStateFromHash();
                 });
+            BankEditorPanel_SetInstrumentContextCallbacks(
+                m_bankEditorPanel,
+                [this](uint32_t instrumentIndex) { CloneBankInstrumentToSongByIndex(instrumentIndex); },
+                [this](uint32_t instrumentIndex) { AliasBankInstrumentToSongByIndex(instrumentIndex); },
+                [this](uint32_t instrumentIndex) { DeleteSongInstrumentMatchingBankIndex(instrumentIndex); });
         }
 
         {
@@ -696,9 +755,9 @@ public:
 
         Bind(wxEVT_MENU, &MainFrame::OnNew, this, wxID_NEW);
         Bind(wxEVT_MENU, &MainFrame::OnOpen, this, wxID_OPEN);
-        Bind(wxEVT_MENU, &MainFrame::OnSaveAs, this, wxID_SAVEAS);
-        Bind(wxEVT_MENU, &MainFrame::OnSaveSession, this, ID_SaveSession);
-        Bind(wxEVT_MENU, &MainFrame::OnSaveSessionAs, this, ID_SaveSessionAs);
+        Bind(wxEVT_MENU, &MainFrame::OnSaveAs, this, ID_SongSaveAs);
+        Bind(wxEVT_MENU, &MainFrame::OnSaveSession, this, wxID_SAVE);
+        Bind(wxEVT_MENU, &MainFrame::OnSaveSessionAs, this, wxID_SAVEAS);
         Bind(wxEVT_MENU, &MainFrame::OnUndo, this, wxID_UNDO);
         Bind(wxEVT_MENU, &MainFrame::OnRedo, this, wxID_REDO);
         Bind(wxEVT_MENU, [this](wxCommandEvent &) {
@@ -761,9 +820,7 @@ public:
         Bind(wxEVT_MENU, &MainFrame::OnCompressInstrument, this, ID_CompressInstrument);
         Bind(wxEVT_MENU, &MainFrame::OnCompressAllInstruments, this, ID_CompressAllInstruments);
         Bind(wxEVT_MENU, &MainFrame::OnDeleteAllInstruments, this, ID_DeleteAllInstruments);
-        Bind(wxEVT_MENU, &MainFrame::OnCloneFromBank, this, ID_CloneFromBank);
         Bind(wxEVT_MENU, &MainFrame::OnCloneAllUsedFromBank, this, ID_CloneAllUsedFromBank);
-        Bind(wxEVT_MENU, &MainFrame::OnAliasFromBank, this, ID_AliasFromBank);
         Bind(wxEVT_TIMER, &MainFrame::OnPlaybackTimer, this, ID_PlaybackTimer);
         Bind(wxEVT_TIMER, &MainFrame::OnNotePreviewTimer, this, ID_NotePreviewTimer);
         m_editorNotebook->Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, &MainFrame::OnEditorTabChanged, this);
@@ -909,10 +966,14 @@ private:
     bool m_bankLoaded;
     std::vector<BAEBankToken> m_bankTokens; /* all loaded banks for enumeration */
     wxString m_loadedBankPath;
+    wxString m_bankDisplayName;
+    wxString m_mediaDisplayName;
     wxMenuItem *m_currentBankMenuItem;
     wxMenuItem *m_reloadInternalBankMenuItem;
     wxMenu *m_settingsMenu;
     wxCheckBox *m_savePreviewToSongCheck;
+    bool m_mediaModifiedHintFromSession = false;
+    bool m_bankModifiedHintFromSession = false;
     bool m_initialStatusBarLayoutPending = true;
     bool m_pendingLoopHotReload;
     uint32_t m_pendingLoopHotReloadPosUsec;
@@ -928,6 +989,39 @@ private:
     bool m_bankHasUnsavedChanges;
     uint32_t m_cleanStateHash = 0;  // Hash of document when last saved
     uint32_t m_cleanBankStateHash = 0;  // Hash of bank when last saved (0 = built-in)
+
+    bool IsSessionDirty() const {
+        return m_hasUnsavedChanges || m_bankHasUnsavedChanges;
+    }
+
+    uint32_t ComputeCurrentBankStateHash() const {
+        uint32_t hash = ComputeBankHash(m_bankToken);
+
+        if (m_hasBankDirtyExtInfo && m_bankEditorPanel) {
+            uint32_t idx = BankEditorPanel_GetCurrentInstrumentIndex(m_bankEditorPanel);
+            hash = MixInstrumentExtInfoDirtyHash(hash, m_bankDirtyExtInfo, idx);
+        }
+        return hash;
+    }
+
+    void RefreshBankDirtyStateFromHash() {
+        bool newDirty;
+
+        if (!m_bankLoaded || !m_bankToken) {
+            newDirty = false;
+        } else {
+            uint32_t currentHash = ComputeCurrentBankStateHash();
+            newDirty = (currentHash != m_cleanBankStateHash);
+        }
+        if (m_bankHasUnsavedChanges != newDirty) {
+            m_bankHasUnsavedChanges = newDirty;
+            if (!newDirty) {
+                m_bankModifiedHintFromSession = false;
+            }
+            UpdateStatusBar();
+            UpdateFrameTitle();
+        }
+    }
 
     static wxString GetIniPath() {
         return wxFileName::GetHomeDir() + "/.nbstudio.ini";
@@ -1099,6 +1193,7 @@ private:
         SyncPianoRollMidiLoopMarkersFromDocument();
         InvalidatePianoRollPreviewSong();
         RefreshPlaybackAtCurrentPosition();
+        MarkDocumentDirty();
         return true;
     }
 
@@ -1270,23 +1365,23 @@ private:
         m_pendingUndoState = UndoDocumentState();
         m_pendingUndoLabel.clear();
         m_hasPendingUndo = false;
-        // Capture the current document state hash as the "clean" state
-        UndoDocumentState currentState;
-        if (CaptureUndoState(&currentState)) {
-            m_cleanStateHash = ComputeDocumentHash(currentState);
-        }
+        /* Do NOT overwrite m_cleanStateHash here — it must reflect the
+         * last-saved state so that MarkDocumentDirty() can detect when
+         * the document has been restored to its original state. */
         InvalidatePianoRollPreviewSong();
         UpdateUndoMenuState();
     }
 
     void MarkDocumentClean() {
         m_hasUnsavedChanges = false;
+        m_mediaModifiedHintFromSession = false;
         // Update clean hash whenever saved
         UndoDocumentState currentState;
         if (CaptureUndoState(&currentState)) {
             m_cleanStateHash = ComputeDocumentHash(currentState);
         }
         UpdateFrameTitle();
+        UpdateStatusBar();
     }
 
     void MarkDocumentDirty() {
@@ -1299,6 +1394,7 @@ private:
                     // We're back at the original saved state, so mark clean
                     m_hasUnsavedChanges = false;
                     UpdateFrameTitle();
+                    UpdateStatusBar();
                     return;
                 }
             }
@@ -1307,15 +1403,53 @@ private:
         if (!m_hasUnsavedChanges) {
             m_hasUnsavedChanges = true;
             UpdateFrameTitle();
+            UpdateStatusBar();
+        } else {
+            UpdateFrameTitle();
         }
     }
 
     bool ConfirmDiscardUnsavedChanges(wxString const &action) {
-        if (!m_hasUnsavedChanges || !m_document) {
+        if (!IsSessionDirty() || !m_document) {
             return true;
         }
         int choice = wxMessageBox(
             "You have unsaved changes.\n\nWould you like to save your session?",
+            "Unsaved Changes",
+            wxYES_NO | wxCANCEL | wxICON_WARNING,
+            this);
+        if (choice == wxCANCEL) {
+            return false;
+        }
+        if (choice == wxYES) {
+            if (m_sessionPath.empty()) {
+                wxFileDialog dialog(this,
+                                    "Save Session",
+                                    wxEmptyString,
+                                    GetDefaultSessionName(),
+                                    "NeoBAE Session (*.nbs)|*.nbs",
+                                    wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+                if (dialog.ShowModal() != wxID_OK) {
+                    return false;
+                }
+                if (!WriteSessionToFile(dialog.GetPath())) {
+                    return false;
+                }
+            } else {
+                if (!WriteSessionToFile(m_sessionPath)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    bool ConfirmDiscardMediaChanges() {
+        if (!m_hasUnsavedChanges || !m_document) {
+            return true;
+        }
+        int choice = wxMessageBox(
+            "You have unsaved media/song changes.\n\nWould you like to save your session?",
             "Unsaved Changes",
             wxYES_NO | wxCANCEL | wxICON_WARNING,
             this);
@@ -1372,11 +1506,14 @@ private:
         }
         /* User chose No, or save succeeded — discard is OK */
         m_bankHasUnsavedChanges = false;
+        m_bankModifiedHintFromSession = false;
+        UpdateStatusBar();
+        UpdateFrameTitle();
         return true;
     }
 
     void OnCloseWindow(wxCloseEvent &event) {
-        if (event.CanVeto() && m_hasUnsavedChanges && m_document) {
+        if (event.CanVeto() && IsSessionDirty() && m_document) {
             int choice = wxMessageBox(
                 "You have unsaved changes.\n\nSave session before exiting?",
                 "Unsaved Changes",
@@ -1410,7 +1547,7 @@ private:
                 }
             }
         }
-        if (event.CanVeto() && m_bankHasUnsavedChanges) {
+        if (event.CanVeto() && m_bankHasUnsavedChanges && !m_document) {
             int choice = wxMessageBox(
                 "The bank has unsaved changes.\n\nSave bank before exiting?",
                 "Unsaved Bank Changes",
@@ -1840,9 +1977,11 @@ private:
                 m_bankLoaded = true;
                 m_bankTokens.push_back(m_bankToken);
                 m_loadedBankPath.clear();
+                m_bankDisplayName = "Built-in";
                 // Capture hash of built-in bank state (empty path = built-in)
-                m_cleanBankStateHash = ComputeBankHash(wxString(), false);
+                m_cleanBankStateHash = ComputeBankHash(m_bankToken);
                 m_bankHasUnsavedChanges = false;
+                m_bankModifiedHintFromSession = false;
             }
 #else
             fprintf(stderr, "[nbstudio] WARNING: _BUILT_IN_PATCHES not defined, no bank loaded!\n");
@@ -1866,22 +2005,20 @@ private:
         m_bankLoaded = false;
         m_bankTokens.clear();
         m_loadedBankPath.clear();
-        /* Reload internal bank first so it remains available */
-#ifdef _BUILT_IN_PATCHES
-        {
-            BAEBankToken builtinToken;
-            if (BAEMixer_LoadBuiltinBank(m_playbackMixer, &builtinToken) == BAE_NO_ERROR) {
-                m_bankTokens.push_back(builtinToken);
-            }
-        }
-#endif
+        m_bankDisplayName.clear();
+        m_bankModifiedHintFromSession = false;
         utf8 = path.utf8_str();
         if (BAEMixer_AddBankFromFile(m_playbackMixer, const_cast<char *>(utf8.data()), &newToken) != BAE_NO_ERROR) {
-            /* Restore internal bank state even if external load fails */
-            if (!m_bankTokens.empty()) {
-                m_bankToken = m_bankTokens[0];
+            /* Restore internal bank as a single-bank fallback if external load fails. */
+#ifdef _BUILT_IN_PATCHES
+            BAEResult bankResult = BAEMixer_LoadBuiltinBank(m_playbackMixer, &m_bankToken);
+            if (bankResult == BAE_NO_ERROR) {
                 m_bankLoaded = true;
+                m_bankTokens.push_back(m_bankToken);
+                m_bankDisplayName = "Built-in";
+                m_cleanBankStateHash = ComputeBankHash(m_bankToken);
             }
+#endif
             UpdateLoadedBankStatus();
             return false;
         }
@@ -1889,15 +2026,18 @@ private:
         m_bankLoaded = true;
         m_bankTokens.push_back(newToken);
         m_loadedBankPath = path;
+        m_bankModifiedHintFromSession = false;
         // Capture hash of loaded bank state
-        m_cleanBankStateHash = ComputeBankHash(m_loadedBankPath, false);
+        m_cleanBankStateHash = ComputeBankHash(m_bankToken);
         m_bankHasUnsavedChanges = false;
         char friendlyBuf[128];
         wxString bankName;
         if (BAE_GetBankFriendlyName(m_playbackMixer, newToken, friendlyBuf, sizeof(friendlyBuf)) == BAE_NO_ERROR) {
             bankName = wxString::Format("Bank loaded: %s", friendlyBuf);
+            m_bankDisplayName = wxString::FromUTF8(friendlyBuf);
         } else {
             bankName = wxString::Format("Bank loaded: %s", wxFileNameFromPath(path));
+            m_bankDisplayName = wxFileName(path).GetName();
         }
         SetStatusText(bankName, 0);
         UpdateStatusBar();
@@ -1918,6 +2058,9 @@ private:
                          "Save Bank", wxOK | wxICON_ERROR, this);
         } else {
             m_bankHasUnsavedChanges = false;
+            m_bankModifiedHintFromSession = false;
+            m_bankDisplayName = wxFileName(m_loadedBankPath).GetName();
+            m_cleanBankStateHash = ComputeBankHash(m_bankToken);
             SetStatusText(wxString::Format("Bank saved: %s", wxFileNameFromPath(m_loadedBankPath)), 0);
             UpdateStatusBar();
         }
@@ -1943,9 +2086,11 @@ private:
                              "Save Bank As", wxOK | wxICON_ERROR, this);
             } else {
                 m_loadedBankPath = savePath;
+                m_bankDisplayName = wxFileName(savePath).GetName();
                 m_bankHasUnsavedChanges = false;
+                m_bankModifiedHintFromSession = false;
                 // Capture hash of newly saved bank state
-                m_cleanBankStateHash = ComputeBankHash(m_loadedBankPath, false);
+                m_cleanBankStateHash = ComputeBankHash(m_bankToken);
                 SetStatusText(wxString::Format("Bank saved: %s", wxFileNameFromPath(savePath)), 0);
                 UpdateStatusBar();
             }
@@ -1980,9 +2125,11 @@ private:
         m_bankToken = builtinToken;
         m_bankLoaded = true;
         m_bankTokens.push_back(builtinToken);
+        m_bankDisplayName = "Built-in";
         // Capture hash of built-in bank state
-        m_cleanBankStateHash = ComputeBankHash(wxString(), false);
+        m_cleanBankStateHash = ComputeBankHash(m_bankToken);
         m_bankHasUnsavedChanges = false;
+        m_bankModifiedHintFromSession = false;
         UpdateLoadedBankStatus();
 
         UpdateStatusBar();
@@ -5408,6 +5555,8 @@ private:
         InvalidatePianoRollPreviewSong();
         ClearUndoHistory();
         m_currentPath = path;
+        m_mediaDisplayName = wxFileNameFromPath(path);
+        m_mediaModifiedHintFromSession = false;
         m_sessionPath.clear();
         MarkDocumentClean();
         PianoRollPanel_SetDocument(m_pianoRoll, m_document);
@@ -5497,6 +5646,9 @@ private:
     }
 
     wxString GetBankDisplayName() const {
+        if (!m_bankDisplayName.empty()) {
+            return m_bankDisplayName;
+        }
         if (!m_bankLoaded || !m_bankToken) {
             return "Built-in";
         }
@@ -5513,6 +5665,16 @@ private:
             return wxFileName(m_loadedBankPath).GetName();
         }
         return "Built-in";
+    }
+
+    wxString GetMediaDisplayName() const {
+        if (!m_mediaDisplayName.empty()) {
+            return m_mediaDisplayName;
+        }
+        if (!m_currentPath.empty()) {
+            return wxFileNameFromPath(m_currentPath);
+        }
+        return "None";
     }
 
     void EnsureStatusInfoLabel() {
@@ -5551,11 +5713,20 @@ private:
     }
 
     void UpdateStatusBar() {
-        wxString sessionName = m_sessionPath.empty() ? "New Project" : wxFileName(m_sessionPath).GetName();
-        wxString mediaName   = m_currentPath.empty()  ? "None"     : wxFileNameFromPath(m_currentPath);
+        wxString projectName = m_sessionPath.empty() ? "New Project" : wxFileName(m_sessionPath).GetName();
+        wxString mediaName   = GetMediaDisplayName();
         wxString bankName    = GetBankDisplayName();
-        wxString status = wxString::Format("Session: %s  |  Media File: %s  |  Bank: %s",
-                                           sessionName, mediaName, bankName);
+        if (IsSessionDirty()) {
+            projectName += " (Modified)";
+        }
+        if ((m_hasUnsavedChanges || m_mediaModifiedHintFromSession) && mediaName != "None") {
+            mediaName += " (Modified)";
+        }
+        if (m_bankHasUnsavedChanges || m_bankModifiedHintFromSession) {
+            bankName += " (Modified)";
+        }
+        wxString status = wxString::Format("Project: %s  |  Media File: %s  |  Bank: %s",
+                                           projectName, mediaName, bankName);
         EnsureStatusInfoLabel();
         if (m_statusInfoLabel) {
             m_statusInfoLabel->SetLabel(status);
@@ -5587,6 +5758,9 @@ private:
     void UpdateFrameTitle() {
         wxString title = wxString::Format("NeoBAE Studio v%s - ", kVersionString);
         title += m_sessionPath.empty() ? "New Project" : wxFileName(m_sessionPath).GetName();
+        if (IsSessionDirty()) {
+            title += " *";
+        }
         SetTitle(title);
     }
 
@@ -5594,8 +5768,7 @@ private:
         int page = event.GetSelection();
         if (page == kEditorModeMidi) {
             m_editorMode = kEditorModeMidi;
-            SwapFileMenu(m_midiFileMenu);
-            /* TODO Phase 4: hot-reload bank if dirty */
+            HotReloadBankIntoMixer();
         } else if (page == kEditorModeBank) {
             if (!m_bankEditorWarningAccepted) {
                 int answer = wxMessageBox(
@@ -5613,13 +5786,11 @@ private:
                     m_editorNotebook->SetSelection((size_t)kEditorModeMidi);
                     m_editorNotebook->Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, &MainFrame::OnEditorTabChanged, this);
                     m_editorMode = kEditorModeMidi;
-                    SwapFileMenu(m_midiFileMenu);
                     return;
                 }
                 m_bankEditorWarningAccepted = true;
             }
             m_editorMode = kEditorModeBank;
-            SwapFileMenu(m_bankFileMenu);
         }
         event.Skip();
     }
@@ -5678,6 +5849,8 @@ private:
             BAERmfEditorDocument_AddTrack(m_document, &setup, &trackIndex);
         }
         m_currentPath.clear();
+        m_mediaDisplayName.clear();
+        m_mediaModifiedHintFromSession = false;
         m_sessionPath.clear();
         if (resetSettings) {
             if (m_settingsMenu) {
@@ -5719,10 +5892,11 @@ private:
             return;
         }
         DoNewDocument();
+        ReloadInternalBank(false);
     }
 
     void OnOpen(wxCommandEvent &) {
-        if (!ConfirmDiscardUnsavedChanges("Open a new file")) {
+        if (!ConfirmDiscardMediaChanges()) {
             return;
         }
         wxFileDialog dialog(this,
@@ -5746,6 +5920,77 @@ private:
                 SwitchToEditorTab(kEditorModeMidi);
             }
         }
+    }
+
+    void ReloadInternalBank(bool confirmBankChanges) {
+        if (!m_playbackMixer) {
+            return;
+        }
+        if (confirmBankChanges && !ConfirmDiscardBankChanges()) {
+            return;
+        }
+        StopPlayback(true);
+        BAEMixer_UnloadBanks(m_playbackMixer);
+        m_bankToken = nullptr;
+        m_bankLoaded = false;
+        m_bankTokens.clear();
+        m_loadedBankPath.clear();
+        m_bankDisplayName.clear();
+        m_bankModifiedHintFromSession = false;
+#ifdef _BUILT_IN_PATCHES
+        {
+            BAEResult bankResult = BAEMixer_LoadBuiltinBank(m_playbackMixer, &m_bankToken);
+            if (bankResult == BAE_NO_ERROR) {
+                m_bankLoaded = true;
+                m_bankTokens.push_back(m_bankToken);
+                m_bankDisplayName = "Built-in";
+                m_cleanBankStateHash = ComputeBankHash(m_bankToken);
+                SetStatusText("Internal bank reloaded", 0);
+            } else {
+                SetStatusText("Failed to reload internal bank", 0);
+            }
+        }
+        if (m_bankEditorPanel && m_bankLoaded && m_bankToken) {
+            BankEditorPanel_LoadBank(m_bankEditorPanel, m_bankToken, "(built-in)");
+        }
+#else
+        SetStatusText("All banks unloaded", 0);
+        m_cleanBankStateHash = 0;
+        if (m_bankEditorPanel) {
+            BankEditorPanel_Clear(m_bankEditorPanel);
+        }
+#endif
+        m_hasBankDirtyExtInfo = false;
+        m_bankHasUnsavedChanges = false;
+        UpdateLoadedBankStatus();
+        UpdateStatusBar();
+        UpdateFrameTitle();
+    }
+
+    /* Flush any pending bank edits into the bank token and invalidate
+     * cached preview songs so that MIDI playback/preview uses the
+     * modified instruments.  Called when switching to the MIDI tab. */
+    void HotReloadBankIntoMixer() {
+        if (!m_bankLoaded || !m_bankToken || !m_playbackMixer) {
+            return;
+        }
+        if (!m_bankHasUnsavedChanges && !m_hasBankDirtyExtInfo) {
+            return;
+        }
+
+        /* Flush any uncommitted dirty params for the currently-selected
+         * instrument so they are written to the bank token in-place. */
+        if (m_hasBankDirtyExtInfo && m_bankEditorPanel) {
+            uint32_t dirtyIdx = BankEditorPanel_GetCurrentInstrumentIndex(m_bankEditorPanel);
+            BAERmfEditorBank_SetInstrumentExtInfo(m_bankToken, dirtyIdx, &m_bankDirtyExtInfo);
+        }
+
+        /* Invalidate cached preview songs so they rebuild against the
+         * current (modified) bank data on next use. */
+        StopPlayback(true);
+        StopBankPreview();
+        InvalidatePianoRollPreviewSong();
+        StopKeyboardPreview();
     }
 
     void OnSaveAs(wxCommandEvent &) {
@@ -5904,6 +6149,10 @@ private:
                 if (saveDoc != m_document) {
                     BAERmfEditorDocument_Delete(saveDoc);
                 }
+                m_currentPath = targetPath;
+                m_mediaDisplayName = wxFileNameFromPath(targetPath);
+                m_mediaModifiedHintFromSession = false;
+                MarkDocumentClean();
                 UpdateStatusBar();
                 return;
             }
@@ -5963,6 +6212,10 @@ private:
             if (saveDoc != m_document) {
                 BAERmfEditorDocument_Delete(saveDoc);
             }
+            m_currentPath = targetPath;
+            m_mediaDisplayName = wxFileNameFromPath(targetPath);
+            m_mediaModifiedHintFromSession = false;
+            MarkDocumentClean();
             UpdateStatusBar();
         }
     }
@@ -5971,6 +6224,9 @@ private:
         std::vector<unsigned char> rmfBlob;
         std::vector<unsigned char> payload;
         NbsSessionSettings settings;
+        uint8_t dirtyFlags;
+        wxString storedMediaDisplayName;
+        wxString storedBankDisplayName;
         size_t compBound;
         size_t compPos;
         std::vector<unsigned char> compressed;
@@ -5993,6 +6249,21 @@ private:
         settings.panFix          = (m_settingsMenu && m_settingsMenu->IsChecked(ID_SettingsPanFix)) ? 1 : 0;
         settings.classicChorus   = (m_settingsMenu && m_settingsMenu->IsChecked(ID_SettingsClassicChorus)) ? 1 : 0;
         settings.savePreviewToSong = (m_savePreviewToSongCheck && m_savePreviewToSongCheck->GetValue()) ? 1 : 0;
+        dirtyFlags = 0;
+        if (m_hasUnsavedChanges || m_mediaModifiedHintFromSession) {
+            dirtyFlags |= kNbsDirtyFlagSongModified;
+        }
+        if (m_bankHasUnsavedChanges || m_bankModifiedHintFromSession) {
+            dirtyFlags |= kNbsDirtyFlagBankModified;
+        }
+        storedMediaDisplayName = m_mediaDisplayName;
+        if (storedMediaDisplayName.empty() && !m_currentPath.empty()) {
+            storedMediaDisplayName = wxFileNameFromPath(m_currentPath);
+        }
+        storedBankDisplayName = m_bankDisplayName;
+        if (storedBankDisplayName.empty()) {
+            storedBankDisplayName = GetBankDisplayName();
+        }
 
         /* Build TLV payload: RMF blob */
         AppendLE16(payload, kNbsFieldRmfBlob);
@@ -6030,12 +6301,39 @@ private:
             }
         }
 
+        /* Build TLV payload: dirty flags */
+        AppendLE16(payload, kNbsFieldDirtyFlags);
+        AppendLE32(payload, 1);
+        payload.push_back(dirtyFlags);
+
+        /* Build TLV payload: media display name (if known) */
+        if (!storedMediaDisplayName.empty()) {
+            wxScopedCharBuffer utf8 = storedMediaDisplayName.utf8_str();
+            size_t len = strlen(utf8.data());
+            AppendLE16(payload, kNbsFieldMediaDisplayName);
+            AppendLE32(payload, static_cast<uint32_t>(len));
+            payload.insert(payload.end(),
+                           reinterpret_cast<unsigned char const *>(utf8.data()),
+                           reinterpret_cast<unsigned char const *>(utf8.data()) + len);
+        }
+
+        /* Build TLV payload: bank display name (if known) */
+        if (!storedBankDisplayName.empty()) {
+            wxScopedCharBuffer utf8 = storedBankDisplayName.utf8_str();
+            size_t len = strlen(utf8.data());
+            AppendLE16(payload, kNbsFieldBankDisplayName);
+            AppendLE32(payload, static_cast<uint32_t>(len));
+            payload.insert(payload.end(),
+                           reinterpret_cast<unsigned char const *>(utf8.data()),
+                           reinterpret_cast<unsigned char const *>(utf8.data()) + len);
+        }
+
         /* Build TLV payload: bank blob
          * Embed the bank whenever a custom bank is loaded OR the built-in has
          * been modified.  Skip only when the built-in is unmodified. */
         {
             bool hasCustomBank   = !m_loadedBankPath.empty();
-            bool builtinModified = m_loadedBankPath.empty() && m_hasBankDirtyExtInfo;
+            bool builtinModified = m_loadedBankPath.empty() && m_bankHasUnsavedChanges;
             if (m_bankLoaded && m_bankToken && (hasCustomBank || builtinModified)) {
                 /* If there are uncommitted dirty params for the current instrument,
                  * write them back to the bank token before serialising so they
@@ -6164,17 +6462,25 @@ private:
         std::vector<unsigned char> rmfBlob;
         std::vector<unsigned char> bankBlob;
         uint8_t bankFlags = 0;
+        uint8_t dirtyFlags = 0;
         NbsSessionSettings settings;
         bool haveSettings;
+        bool haveDirtyFlags;
         size_t offset;
         uint32_t userEndTick;
         uint16_t fileVersion;
         wxString bankPath;
+        wxString originalPath;
+        wxString mediaDisplayName;
+        wxString bankDisplayName;
 
         memset(&settings, 0, sizeof(settings));
         settings.selectedTrack = -1;
         haveSettings = false;
+        haveDirtyFlags = false;
         userEndTick = 0;
+        m_mediaModifiedHintFromSession = false;
+        m_bankModifiedHintFromSession = false;
 
         if (!file.Open(path, wxFile::read)) {
             wxMessageBox("Could not open session file.", "Open Session", wxOK | wxICON_ERROR, this);
@@ -6245,6 +6551,11 @@ private:
                     memcpy(&settings, payload.data() + offset, copyLen);
                     haveSettings = true;
                 }
+            } else if (fieldId == kNbsFieldOriginalPath) {
+                if (fieldLen > 0) {
+                    std::string originalPathStr(reinterpret_cast<const char *>(payload.data() + offset), fieldLen);
+                    originalPath = wxString::FromUTF8(originalPathStr.c_str());
+                }
             } else if (fieldId == kNbsFieldUserEndTick) {
                 if (fieldLen >= 4) {
                     userEndTick = ReadLE32(payload.data() + offset);
@@ -6254,6 +6565,21 @@ private:
             } else if (fieldId == kNbsFieldBankFlags) {
                 if (fieldLen >= 1) {
                     bankFlags = payload[offset];
+                }
+            } else if (fieldId == kNbsFieldDirtyFlags) {
+                if (fieldLen >= 1) {
+                    dirtyFlags = payload[offset];
+                    haveDirtyFlags = true;
+                }
+            } else if (fieldId == kNbsFieldMediaDisplayName) {
+                if (fieldLen > 0) {
+                    std::string mediaNameStr(reinterpret_cast<const char *>(payload.data() + offset), fieldLen);
+                    mediaDisplayName = wxString::FromUTF8(mediaNameStr.c_str());
+                }
+            } else if (fieldId == kNbsFieldBankDisplayName) {
+                if (fieldLen > 0) {
+                    std::string bankNameStr(reinterpret_cast<const char *>(payload.data() + offset), fieldLen);
+                    bankDisplayName = wxString::FromUTF8(bankNameStr.c_str());
                 }
             } else if (fieldId == kNbsFieldBankPath) {
                 if (fieldLen > 0) {
@@ -6317,7 +6643,8 @@ private:
         }
         InvalidatePianoRollPreviewSong();
         ClearUndoHistory();
-        m_currentPath = path;
+        m_currentPath = originalPath;
+        m_mediaDisplayName = mediaDisplayName;
         m_sessionPath = path;
         MarkDocumentClean();
         PianoRollPanel_SetDocument(m_pianoRoll, m_document);
@@ -6343,17 +6670,8 @@ private:
             m_bankLoaded = false;
             m_bankTokens.clear();
             m_loadedBankPath.clear();
-
-            bool isOverlay = (bankFlags & kNbsBankFlagIsOverlay) != 0;
-            if (isOverlay) {
-                /* Custom bank overlay: load built-in first */
-#ifdef _BUILT_IN_PATCHES
-                BAEBankToken builtinToken;
-                if (BAEMixer_LoadBuiltinBank(m_playbackMixer, &builtinToken) == BAE_NO_ERROR) {
-                    m_bankTokens.push_back(builtinToken);
-                }
-#endif
-            }
+            m_bankDisplayName.clear();
+            (void)bankFlags;
 
             BAEBankToken blobToken;
             if (BAEMixer_AddBankFromMemory(m_playbackMixer,
@@ -6366,10 +6684,14 @@ private:
 
                 /* Restore original file path (for display and future Save Bank) */
                 m_loadedBankPath = bankPath;
+                m_bankDisplayName = bankDisplayName;
+                if (m_bankDisplayName.empty()) {
+                    m_bankDisplayName = !bankPath.empty() ? wxFileName(bankPath).GetName() : wxString("Built-in");
+                }
+                m_cleanBankStateHash = ComputeBankHash(m_bankToken);
 
-                /* If this was a modified built-in (no path), mark it as having
-                 * unsaved changes so the user knows to save it if they want. */
-                m_bankHasUnsavedChanges = bankPath.empty();
+                /* Session load restores state; runtime dirty starts clean. */
+                m_bankHasUnsavedChanges = false;
 
                 if (m_bankEditorPanel) {
                     wxString displayLabel = bankPath.empty()
@@ -6378,16 +6700,37 @@ private:
                     wxScopedCharBuffer utf8 = displayLabel.utf8_str();
                     BankEditorPanel_LoadBank(m_bankEditorPanel, m_bankToken, utf8.data());
                 }
-            } else if (!m_bankTokens.empty()) {
-                /* Blob load failed — fall back to whatever was loaded (built-in) */
-                m_bankToken = m_bankTokens[0];
-                m_bankLoaded = true;
-                m_bankHasUnsavedChanges = false;
+            } else {
+                /* Blob load failed — fallback to built-in as the only bank. */
+#ifdef _BUILT_IN_PATCHES
+                BAEResult bankResult = BAEMixer_LoadBuiltinBank(m_playbackMixer, &m_bankToken);
+                if (bankResult == BAE_NO_ERROR) {
+                    m_bankLoaded = true;
+                    m_bankTokens.push_back(m_bankToken);
+                    m_bankHasUnsavedChanges = false;
+                    m_bankDisplayName = "Built-in";
+                    m_cleanBankStateHash = ComputeBankHash(m_bankToken);
+                }
+#endif
             }
             UpdateLoadedBankStatus();
         } else if (!bankPath.empty()) {
             /* Backward compat: old sessions that only saved a bank path */
             LoadBankFromFile(bankPath);
+            if (!bankDisplayName.empty()) {
+                m_bankDisplayName = bankDisplayName;
+            }
+        }
+
+        if (m_mediaDisplayName.empty() && !m_currentPath.empty()) {
+            m_mediaDisplayName = wxFileNameFromPath(m_currentPath);
+        }
+        if (!bankDisplayName.empty() && m_bankDisplayName.empty()) {
+            m_bankDisplayName = bankDisplayName;
+        }
+        if (haveDirtyFlags) {
+            m_mediaModifiedHintFromSession = (dirtyFlags & kNbsDirtyFlagSongModified) != 0;
+            m_bankModifiedHintFromSession = (dirtyFlags & kNbsDirtyFlagBankModified) != 0;
         }
 
         /* Restore selected track from session */
@@ -6428,10 +6771,12 @@ private:
         wxObject *source;
         bool bankProgramControl;
         bool defaultInstrumentUpdated;
+        bool documentModified;
 
         if (!m_document || m_updatingControls) {
             return;
         }
+        documentModified = false;
         source = event.GetEventObject();
         bankProgramControl = (source == m_bankSpin || source == m_programSpin);
         selectedTrack = GetSelectedTrack();
@@ -6460,12 +6805,14 @@ private:
                 trackInfo.bank = bank;
                 trackInfo.program = program;
                 defaultInstrumentUpdated = true;
+                documentModified = true;
             }
         }
         trackInfo.transpose = static_cast<int16_t>(m_transposeSpin->GetValue());
         trackInfo.pan = static_cast<unsigned char>(m_panSpin->GetValue());
         trackInfo.volume = static_cast<unsigned char>(m_volumeSpin->GetValue());
         if (!bankProgramControl && BAERmfEditorDocument_SetTrackInfo(m_document, static_cast<uint16_t>(selectedTrack), &trackInfo) == BAE_NO_ERROR) {
+            documentModified = true;
             if (selectedTrack >= 0 && selectedTrack < static_cast<int>(m_trackList->GetCount())) {
                 m_trackList->SetString(static_cast<unsigned>(selectedTrack), BuildTrackLabel(selectedTrack, trackInfo));
             }
@@ -6480,6 +6827,9 @@ private:
         }
         if (bankProgramControl) {
             InvalidatePianoRollPreviewSong();
+        }
+        if (documentModified) {
+            MarkDocumentDirty();
         }
     }
 
@@ -6578,6 +6928,7 @@ private:
         wxScopedCharBuffer utf8 = trackName.utf8_str();
         setup.name = const_cast<char *>(utf8.data());
         if (BAERmfEditorDocument_AddTrack(m_document, &setup, &newTrackIndex) == BAE_NO_ERROR) {
+            MarkDocumentDirty();
             ClearUndoHistory();
             PopulateTrackList();
             m_trackList->SetSelection(newTrackIndex);
@@ -6600,6 +6951,7 @@ private:
             return;
         }
         if (BAERmfEditorDocument_DeleteTrack(m_document, static_cast<uint16_t>(selectedTrack)) == BAE_NO_ERROR) {
+            MarkDocumentDirty();
             ClearUndoHistory();
             PopulateTrackList();
         }
@@ -6648,6 +7000,7 @@ private:
                     m_trackList->SetString(static_cast<unsigned>(selectedTrack),
                                            BuildTrackLabel(selectedTrack, trackInfo));
                 }
+                MarkDocumentDirty();
                 SetStatusText("Track renamed", 0);
             }
         }
@@ -6945,6 +7298,7 @@ private:
             SyncPianoRollMidiLoopMarkersFromDocument();
             InvalidatePianoRollPreviewSong();
             RefreshPlaybackAtCurrentPosition();
+            MarkDocumentDirty();
         }
 
         if (m_midiLoopStartText) m_midiLoopStartText->Enable(enabled != FALSE);
@@ -7119,41 +7473,189 @@ private:
     }
 
     void OnReloadInternalBank(wxCommandEvent &) {
-        if (!m_playbackMixer) {
-            return;
+        ReloadInternalBank(true);
+    }
+
+    bool PromptTargetProgram(wxString const &title, wxString const &label, long *outProgram) {
+        bool usedPrograms[128];
+        long defaultProgram = 0;
+
+        if (!outProgram || !m_document) {
+            return false;
         }
-        if (!ConfirmDiscardBankChanges()) {
-            return;
-        }
-        StopPlayback(true);
-        BAEMixer_UnloadBanks(m_playbackMixer);
-        m_bankToken = nullptr;
-        m_bankLoaded = false;
-        m_bankTokens.clear();
-        m_loadedBankPath.clear();
-#ifdef _BUILT_IN_PATCHES
+        memset(usedPrograms, 0, sizeof(usedPrograms));
         {
-            BAEResult bankResult = BAEMixer_LoadBuiltinBank(m_playbackMixer, &m_bankToken);
-            if (bankResult == BAE_NO_ERROR) {
-                m_bankLoaded = true;
-                m_bankTokens.push_back(m_bankToken);
-                SetStatusText("Internal bank reloaded", 0);
-            } else {
-                SetStatusText("Failed to reload internal bank", 0);
+            uint32_t sampleCount = 0;
+            BAERmfEditorDocument_GetSampleCount(m_document, &sampleCount);
+            for (uint32_t i = 0; i < sampleCount; ++i) {
+                BAERmfEditorSampleInfo sInfo;
+                if (BAERmfEditorDocument_GetSampleInfo(m_document, i, &sInfo) == BAE_NO_ERROR &&
+                    sInfo.program < 128) {
+                    usedPrograms[sInfo.program] = true;
+                }
             }
         }
-        /* Reload the built-in bank into the bank editor too */
-        if (m_bankEditorPanel && m_bankLoaded && m_bankToken) {
-            BankEditorPanel_LoadBank(m_bankEditorPanel, m_bankToken, "(built-in)");
+        for (int i = 0; i < 128; ++i) {
+            if (!usedPrograms[i]) {
+                defaultProgram = i;
+                break;
+            }
         }
-#else
-        SetStatusText("All banks unloaded", 0);
-        if (m_bankEditorPanel) {
-            BankEditorPanel_Clear(m_bankEditorPanel);
+        *outProgram = wxGetNumberFromUser(label,
+                                          "Program",
+                                          title,
+                                          defaultProgram,
+                                          0,
+                                          127,
+                                          this);
+        return *outProgram >= 0;
+    }
+
+    void CloneBankInstrumentToSongByIndex(uint32_t bankInstIndex) {
+        BAEResult result;
+        long targetProgram;
+
+        if (!m_document) {
+            wxMessageBox("Open or create a document first.", "Clone to Song", wxOK | wxICON_INFORMATION, this);
+            return;
         }
-#endif
-        m_bankHasUnsavedChanges = false;
-        UpdateLoadedBankStatus();
+        if (!EnsurePlaybackEngine() || !m_bankToken) {
+            wxMessageBox("No active bank loaded.", "Clone to Song", wxOK | wxICON_INFORMATION, this);
+            return;
+        }
+        if (!PromptTargetProgram("Clone Instrument to Song",
+                                 "MIDI program number for cloned instrument (0-127):",
+                                 &targetProgram)) {
+            return;
+        }
+
+        BeginUndoAction("Clone Instrument from Bank");
+        result = BAERmfEditorDocument_CloneInstrumentFromBank(m_document,
+                                                              m_bankToken,
+                                                              bankInstIndex,
+                                                              static_cast<unsigned char>(targetProgram));
+        if (result != BAE_NO_ERROR) {
+            CancelUndoAction();
+            wxMessageBox("Failed to clone instrument from bank.", "Clone to Song", wxOK | wxICON_ERROR, this);
+            return;
+        }
+        CommitUndoAction("Clone Instrument from Bank");
+
+        PopulateSampleList();
+        StopKeyboardPreview();
+        {
+            uint32_t sampleCount = 0;
+            if (BAERmfEditorDocument_GetSampleCount(m_document, &sampleCount) == BAE_NO_ERROR && sampleCount > 0) {
+                SelectTreeItemForSample(sampleCount - 1);
+            }
+        }
+        SetStatusText(wxString::Format("Cloned instrument to program %ld", targetProgram), 0);
+    }
+
+    void AliasBankInstrumentToSongByIndex(uint32_t bankInstIndex) {
+        BAEResult result;
+        long targetProgram;
+
+        if (!m_document) {
+            wxMessageBox("Open or create a document first.", "Alias to Song", wxOK | wxICON_INFORMATION, this);
+            return;
+        }
+        if (!EnsurePlaybackEngine() || !m_bankToken) {
+            wxMessageBox("No active bank loaded.", "Alias to Song", wxOK | wxICON_INFORMATION, this);
+            return;
+        }
+        if (!PromptTargetProgram("Alias Instrument to Song",
+                                 "MIDI program number for aliased instrument (0-127):",
+                                 &targetProgram)) {
+            return;
+        }
+
+        BeginUndoAction("Alias Instrument from Bank");
+        result = BAERmfEditorDocument_AliasInstrumentFromBank(m_document,
+                                                              m_bankToken,
+                                                              bankInstIndex,
+                                                              static_cast<unsigned char>(targetProgram));
+        if (result != BAE_NO_ERROR) {
+            CancelUndoAction();
+            wxMessageBox("Failed to alias instrument from bank.", "Alias to Song", wxOK | wxICON_ERROR, this);
+            return;
+        }
+        CommitUndoAction("Alias Instrument from Bank");
+
+        PopulateSampleList();
+        StopKeyboardPreview();
+        {
+            uint32_t sampleCount = 0;
+            if (BAERmfEditorDocument_GetSampleCount(m_document, &sampleCount) == BAE_NO_ERROR && sampleCount > 0) {
+                SelectTreeItemForSample(sampleCount - 1);
+            }
+        }
+        SetStatusText(wxString::Format("Aliased instrument to program %ld", targetProgram), 0);
+    }
+
+    void DeleteSongInstrumentMatchingBankIndex(uint32_t bankInstIndex) {
+        BAERmfEditorBankInstrumentInfo bankInfo;
+        std::vector<uint32_t> toDelete;
+
+        if (!m_document || !m_bankToken) {
+            return;
+        }
+        if (BAERmfEditorBank_GetInstrumentInfo(m_bankToken, bankInstIndex, &bankInfo) != BAE_NO_ERROR) {
+            wxMessageBox("Failed to read bank instrument info.", "Delete Instrument", wxOK | wxICON_ERROR, this);
+            return;
+        }
+        {
+            uint32_t sampleCount = 0;
+            BAERmfEditorDocument_GetSampleCount(m_document, &sampleCount);
+            for (uint32_t i = 0; i < sampleCount; ++i) {
+                BAERmfEditorSampleInfo info;
+                uint32_t instID = 0;
+                uint32_t sampleBank = 0;
+                uint32_t sampleProgram = 0;
+                uint32_t sampleNote = 0;
+
+                if (BAERmfEditorDocument_GetSampleInfo(m_document, i, &info) != BAE_NO_ERROR) {
+                    continue;
+                }
+                if (BAERmfEditorDocument_GetInstIDForSample(m_document, i, &instID) != BAE_NO_ERROR || instID == 0) {
+                    continue;
+                }
+                if (TranslateInstrumentToBankProgram(instID, &sampleBank, &sampleProgram, &sampleNote) != BAE_NO_ERROR) {
+                    continue;
+                }
+                if (sampleBank == bankInfo.bank && sampleProgram == bankInfo.program) {
+                    toDelete.push_back(i);
+                }
+            }
+        }
+        if (toDelete.empty()) {
+            wxMessageBox(wxString::Format("No song instrument found at B%u P%u.",
+                                          static_cast<unsigned>(bankInfo.bank),
+                                          static_cast<unsigned>(bankInfo.program)),
+                         "Delete Instrument",
+                         wxOK | wxICON_INFORMATION,
+                         this);
+            return;
+        }
+        if (wxMessageBox(wxString::Format("Delete song instrument B%u P%u (%u split(s))?",
+                                          static_cast<unsigned>(bankInfo.bank),
+                                          static_cast<unsigned>(bankInfo.program),
+                                          static_cast<unsigned>(toDelete.size())),
+                         "Confirm Delete",
+                         wxYES_NO | wxICON_QUESTION,
+                         this) != wxYES) {
+            return;
+        }
+        BeginUndoAction("Delete Instrument");
+        for (auto it = toDelete.rbegin(); it != toDelete.rend(); ++it) {
+            BAERmfEditorDocument_DeleteSample(m_document, *it);
+        }
+        CommitUndoAction("Delete Instrument");
+        PopulateSampleList();
+        SetStatusText(wxString::Format("Deleted song instrument B%u P%u",
+                                       static_cast<unsigned>(bankInfo.bank),
+                                       static_cast<unsigned>(bankInfo.program)),
+                      0);
     }
 
     void OnCloneFromBank(wxCommandEvent &) {
@@ -7166,12 +7668,12 @@ private:
             wxMessageBox("Failed to initialize playback engine.", "Clone from Bank", wxOK | wxICON_ERROR, this);
             return;
         }
-        if (m_bankTokens.empty()) {
-            wxMessageBox("No banks loaded.", "Clone from Bank", wxOK | wxICON_INFORMATION, this);
+        if (m_bankTokens.empty() || !m_bankToken) {
+            wxMessageBox("No active bank is loaded.", "Clone from Bank", wxOK | wxICON_INFORMATION, this);
             return;
         }
 
-        /* Enumerate instruments from ALL loaded banks */
+        /* Enumerate instruments from the currently active bank only. */
         struct BankInstEntry {
             BAEBankToken token;
             uint32_t bankIndex;     /* index within the bank */
@@ -7179,19 +7681,12 @@ private:
         wxArrayString choices;
         std::vector<BankInstEntry> entries;
 
-        for (size_t bk = 0; bk < m_bankTokens.size(); ++bk) {
-            BAEBankToken token = m_bankTokens[bk];
+        {
+            BAEBankToken token = m_bankToken;
             uint32_t instCount = 0;
             if (BAERmfEditorBank_GetInstrumentCount(token, &instCount) != BAE_NO_ERROR) {
-                continue;
-            }
-            /* Get bank friendly name for display */
-            char friendlyBuf[128];
-            wxString bankLabel;
-            if (BAE_GetBankFriendlyName(m_playbackMixer, token, friendlyBuf, sizeof(friendlyBuf)) == BAE_NO_ERROR) {
-                bankLabel = wxString::FromUTF8(friendlyBuf);
-            } else if (m_bankTokens.size() > 1) {
-                bankLabel = wxString::Format("Bank %u", static_cast<unsigned>(bk + 1));
+                wxMessageBox("Failed to enumerate instruments from the active bank.", "Clone from Bank", wxOK | wxICON_ERROR, this);
+                return;
             }
 
             for (uint32_t i = 0; i < instCount; ++i) {
@@ -7212,15 +7707,12 @@ private:
                                                  static_cast<unsigned>(info.bank),
                                                  static_cast<int>(info.keySplitCount));
                 }
-                if (!bankLabel.empty()) {
-                    instLabel = wxString::Format("[%s] %s", bankLabel, instLabel);
-                }
                 choices.Add(instLabel);
                 entries.push_back({token, i});
             }
         }
         if (choices.IsEmpty()) {
-            wxMessageBox("No instruments found in loaded banks.", "Clone from Bank", wxOK | wxICON_INFORMATION, this);
+            wxMessageBox("No instruments found in the active bank.", "Clone from Bank", wxOK | wxICON_INFORMATION, this);
             return;
         }
 
@@ -7811,6 +8303,7 @@ private:
             wxMessageBox("Failed to add sample.", "Embedded Instruments", wxOK | wxICON_ERROR, this);
             return;
         }
+        MarkDocumentDirty();
         PopulateSampleList();
         {
             uint32_t sampleCount = 0;
@@ -7897,6 +8390,8 @@ private:
                     /* User likely canceled without replacing; remove placeholder sample. */
                     BAERmfEditorDocument_DeleteSample(m_document, checkIndex);
                     PopulateSampleList();
+                } else {
+                    MarkDocumentDirty();
                 }
             }
         }
@@ -7978,6 +8473,7 @@ private:
             BAERmfEditorDocument_DeleteSample(m_document, *it);
         }
         PopulateSampleList();
+        MarkDocumentDirty();
     }
 
     void OnCompressInstrument(wxCommandEvent &) {
@@ -8070,6 +8566,7 @@ private:
                 }
             }
             PopulateSampleList();
+            MarkDocumentDirty();
         }
     }
 
@@ -8125,6 +8622,7 @@ private:
                 }
             }
             PopulateSampleList();
+            MarkDocumentDirty();
         }
     }
 
@@ -8163,6 +8661,7 @@ private:
 
         PopulateSampleList();
         if (allDeleted) {
+            MarkDocumentDirty();
             SetStatusText("Deleted all instruments", 0);
         } else {
             wxMessageBox("Failed while deleting instruments. Some items may remain.",
@@ -8383,6 +8882,7 @@ private:
 
         StopKeyboardPreview();
         InvalidatePianoRollPreviewSong();
+        MarkDocumentDirty();
 
     }
 };

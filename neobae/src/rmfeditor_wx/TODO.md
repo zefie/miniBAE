@@ -25,6 +25,19 @@
 - ~~Revamp CC tracks in piano roll~~
 - ~~Store bank (if not unmodified built-in bank) in NBS session~~
 - ~~Revamp titlebar and statusbar handling~~
+- ~~smarter dirty (modified) tracking~~
+- Sound Bank Editor
+  - ~~need killswitch for bad ADSR~~
+  - ~~need apply button~~
+  - ~~make sure we load the edited bank (not original) into memory when switching to midi tab~~
+  - ~~lots of bugs with sample editor~~
+  - needs context menus still
+  - musicial keyboard vs form fields
+  - ~~LFO broken~~
+  - Bank editor must force ZSB if using ZMF features
+
+
+# 0.11a
 - Allow dragging samples to other instruments
   - Ask user if they want to move, or alias the sample
   - If its the only sample of the source instrument and they choose move, prompt user:
@@ -55,17 +68,8 @@
 
 
 # Harder stuff
-- Sound Bank Editor
-  - ~~need killswitch for bad ADSR~~
-  - ~~need apply button~~
-  - make sure we load the edited bank (not original) into memory when switching to midi tab
-  - lots of bugs with sample editor
-  - needs context menus still
-  - musicial keyboard vs form fields
-  - ~~LFO broken~~
-
-- Allow for automation like Volume to be able have a slide on it
-  - for example, to easily make a fadein or fadeout
+- ~~Allow for automation like Volume to be able have a slide on it~~
+  - ~~for example, to easily make a fadein or fadeout~~
   - the edit dialog could have "start (item)" "end (item)"
 
 - Externally imported MP3 samples (not encoded by us) may have a gap

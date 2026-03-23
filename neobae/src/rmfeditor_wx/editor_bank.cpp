@@ -155,6 +155,67 @@ static const char *CompressionTypeName(uint32_t ct, uint32_t subType)
     return base;
 }
 
+static BAERmfEditorCompressionType EditorCompressionFromBankCodec(uint32_t compressionType,
+                                                                  uint32_t compressionSubType)
+{
+    switch (compressionType)
+    {
+        case 0:
+        case FOUR_CHAR('n','o','n','e'):
+            return BAE_EDITOR_COMPRESSION_PCM;
+        case FOUR_CHAR('i','m','a','4'):
+        case FOUR_CHAR('i','m','a','W'):
+        case FOUR_CHAR('i','m','a','3'):
+            return BAE_EDITOR_COMPRESSION_ADPCM;
+        case FOUR_CHAR('f','L','a','C'):
+        case FOUR_CHAR('F','L','A','C'):
+            return BAE_EDITOR_COMPRESSION_FLAC;
+        case FOUR_CHAR('m','p','g','n'): return BAE_EDITOR_COMPRESSION_MP3_32K;
+        case FOUR_CHAR('m','p','g','b'): return BAE_EDITOR_COMPRESSION_MP3_48K;
+        case FOUR_CHAR('m','p','g','d'): return BAE_EDITOR_COMPRESSION_MP3_64K;
+        case FOUR_CHAR('m','p','g','f'): return BAE_EDITOR_COMPRESSION_MP3_96K;
+        case FOUR_CHAR('m','p','g','h'): return BAE_EDITOR_COMPRESSION_MP3_128K;
+        case FOUR_CHAR('m','p','g','j'): return BAE_EDITOR_COMPRESSION_MP3_192K;
+        case FOUR_CHAR('m','p','g','l'): return BAE_EDITOR_COMPRESSION_MP3_256K;
+        case FOUR_CHAR('m','p','g','m'): return BAE_EDITOR_COMPRESSION_MP3_320K;
+        case FOUR_CHAR('O','g','g','V'):
+        case FOUR_CHAR('V','O','R','B'):
+            switch (compressionSubType)
+            {
+                case FOUR_CHAR('v','0','3','2'): return BAE_EDITOR_COMPRESSION_VORBIS_32K;
+                case FOUR_CHAR('v','0','4','8'): return BAE_EDITOR_COMPRESSION_VORBIS_48K;
+                case FOUR_CHAR('v','0','6','4'): return BAE_EDITOR_COMPRESSION_VORBIS_64K;
+                case FOUR_CHAR('v','0','8','0'): return BAE_EDITOR_COMPRESSION_VORBIS_80K;
+                case FOUR_CHAR('v','0','9','6'): return BAE_EDITOR_COMPRESSION_VORBIS_96K;
+                case FOUR_CHAR('v','1','2','8'): return BAE_EDITOR_COMPRESSION_VORBIS_128K;
+                case FOUR_CHAR('v','1','6','0'): return BAE_EDITOR_COMPRESSION_VORBIS_160K;
+                case FOUR_CHAR('v','1','9','2'): return BAE_EDITOR_COMPRESSION_VORBIS_192K;
+                case FOUR_CHAR('v','2','5','6'): return BAE_EDITOR_COMPRESSION_VORBIS_256K;
+                default:                         return BAE_EDITOR_COMPRESSION_VORBIS_128K;
+            }
+        case FOUR_CHAR('O','g','g','O'):
+        case FOUR_CHAR('O','P','U','S'):
+            switch (compressionSubType)
+            {
+                case FOUR_CHAR('o','0','1','2'): return BAE_EDITOR_COMPRESSION_OPUS_12K;
+                case FOUR_CHAR('o','0','1','6'): return BAE_EDITOR_COMPRESSION_OPUS_16K;
+                case FOUR_CHAR('o','0','2','4'): return BAE_EDITOR_COMPRESSION_OPUS_24K;
+                case FOUR_CHAR('o','0','3','2'): return BAE_EDITOR_COMPRESSION_OPUS_32K;
+                case FOUR_CHAR('o','0','4','8'): return BAE_EDITOR_COMPRESSION_OPUS_48K;
+                case FOUR_CHAR('o','0','6','4'): return BAE_EDITOR_COMPRESSION_OPUS_64K;
+                case FOUR_CHAR('o','0','8','0'): return BAE_EDITOR_COMPRESSION_OPUS_80K;
+                case FOUR_CHAR('o','0','9','6'): return BAE_EDITOR_COMPRESSION_OPUS_96K;
+                case FOUR_CHAR('o','1','2','8'): return BAE_EDITOR_COMPRESSION_OPUS_128K;
+                case FOUR_CHAR('o','1','6','0'): return BAE_EDITOR_COMPRESSION_OPUS_160K;
+                case FOUR_CHAR('o','1','9','2'): return BAE_EDITOR_COMPRESSION_OPUS_192K;
+                case FOUR_CHAR('o','2','5','6'): return BAE_EDITOR_COMPRESSION_OPUS_256K;
+                default:                         return BAE_EDITOR_COMPRESSION_OPUS_48K;
+            }
+        default:
+            return BAE_EDITOR_COMPRESSION_PCM;
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* Bank group helpers                                                 */
 /* ------------------------------------------------------------------ */
@@ -233,6 +294,9 @@ struct BankEditorPanel {
     std::function<void(int)> stopCallback;
     std::function<void()> invalidateCallback;
     std::function<void(BAERmfEditorInstrumentExtInfo const *)> dirtyParamsCallback;
+    std::function<void(uint32_t)> cloneToSongCallback;
+    std::function<void(uint32_t)> aliasToSongCallback;
+    std::function<void(uint32_t)> deleteFromSongCallback;
     bool mousePreviewActive;
     std::unordered_map<int, int> keyboardPreviewNotes;   /* keyCode -> MIDI note */
 
@@ -267,6 +331,7 @@ static void ShowInstrumentDetail(BankEditorPanel *bp, uint32_t instrumentIndex);
 static void ShowSampleDetail(BankEditorPanel *bp, uint32_t instrumentIndex, uint32_t sampleIndex);
 static void OnInstrumentSelected(BankEditorPanel *bp, wxTreeEvent &event);
 static void OnSampleSelected(BankEditorPanel *bp, wxListEvent &event);
+static void OnInstrumentContextMenu(BankEditorPanel *bp, wxTreeEvent &event);
 static void BuildInstrumentTab(BankEditorPanel *bp);
 static void BuildSamplesTab(BankEditorPanel *bp);
 static void InvalidateBankPreviewCache(BankEditorPanel *bp);
@@ -275,6 +340,7 @@ static void FreeCachedWaveform(BankEditorPanel *bp);
 static void StopBankKeyboardPreview(BankEditorPanel *bp);
 static void ApplyDirtyParams(BankEditorPanel *bp);
 static void StopAllBankNotes(BankEditorPanel *bp);
+static void RefreshSampleListRow(BankEditorPanel *bp, uint32_t instrumentIndex, uint32_t sampleIndex);
 
 /* ------------------------------------------------------------------ */
 /* Preview cache invalidation                                         */
@@ -320,6 +386,12 @@ static void ApplyDirtyParams(BankEditorPanel *bp)
 
     if (bp->dirtyParamsCallback) {
         bp->dirtyParamsCallback(&bp->dirtyExtInfo);
+    }
+
+    /* Refresh the sample list row so columns (key range, root key, rate)
+     * immediately reflect the stored values after a successful write. */
+    if (bp->hasSampleSelection) {
+        RefreshSampleListRow(bp, bp->currentInstrumentIndex, bp->currentSampleIndex);
     }
 
     /* Tear down the preview song so the next note forces a full
@@ -566,6 +638,30 @@ static void PopulateSampleList(BankEditorPanel *bp, uint32_t instrumentIndex)
     }
 }
 
+/* Refresh the columns of a single row in the sample list after edits. */
+static void RefreshSampleListRow(BankEditorPanel *bp, uint32_t instrumentIndex, uint32_t sampleIndex)
+{
+    if (!bp->bankToken || !bp->sampleList) return;
+
+    BAERmfEditorBankSampleInfo sampleInfo;
+    if (BAERmfEditorBank_GetInstrumentSampleInfo(bp->bankToken, instrumentIndex, sampleIndex, &sampleInfo) != BAE_NO_ERROR) {
+        return;
+    }
+
+    long row = static_cast<long>(sampleIndex);
+    if (row >= bp->sampleList->GetItemCount()) return;
+
+    wxString keyRange = wxString::Format("%u-%u", sampleInfo.lowKey, sampleInfo.highKey);
+    wxString rootKey = (sampleInfo.rootKey == 0)
+        ? wxString("60 (default)")
+        : wxString::Format("%u", sampleInfo.rootKey);
+    wxString rate = wxString::Format("%u Hz", sampleInfo.sampleRate);
+
+    bp->sampleList->SetItem(row, 1, keyRange);
+    bp->sampleList->SetItem(row, 2, rootKey);
+    bp->sampleList->SetItem(row, 3, rate);
+}
+
 /* ------------------------------------------------------------------ */
 /* Show instrument detail in the Instrument tab                       */
 /* ------------------------------------------------------------------ */
@@ -742,7 +838,8 @@ static void ShowSampleDetail(BankEditorPanel *bp, uint32_t instrumentIndex, uint
         data.waveFrames = sampleInfo.frameCount;
         data.loopStart = sampleInfo.loopStart;
         data.loopEnd = sampleInfo.loopEnd;
-        data.compressionType = (BAERmfEditorCompressionType)0;
+        data.compressionType = EditorCompressionFromBankCodec((uint32_t)sampleInfo.compressionType,
+                                      sampleInfo.compressionSubType);
         data.hasOriginalData = false;
         data.sndStorageType = (BAERmfEditorSndStorageType)0;
         data.opusMode = BAE_EDITOR_OPUS_MODE_AUDIO;
@@ -765,6 +862,10 @@ static void ShowSampleDetail(BankEditorPanel *bp, uint32_t instrumentIndex, uint
 static void OnInstrumentSelected(BankEditorPanel *bp, wxTreeEvent &event)
 {
     wxTreeItemId item = event.GetItem();
+
+    if (bp->hasInstrument) {
+        ApplyDirtyParams(bp);
+    }
     if (!item.IsOk()) {
         return;
     }
@@ -790,11 +891,64 @@ static void OnSampleSelected(BankEditorPanel *bp, wxListEvent &event)
     if (!bp->hasInstrument) {
         return;
     }
+    if (bp->hasSampleSelection) {
+        ApplyDirtyParams(bp);
+    }
     long sel = event.GetIndex();
     if (sel < 0) {
         return;
     }
     ShowSampleDetail(bp, bp->currentInstrumentIndex, (uint32_t)sel);
+}
+
+static void OnInstrumentContextMenu(BankEditorPanel *bp, wxTreeEvent &event)
+{
+    enum {
+        kCtxCloneToSong = wxID_HIGHEST + 200,
+        kCtxAliasToSong,
+        kCtxDeleteFromSong
+    };
+    wxTreeItemId item = event.GetItem();
+    BankInstrumentItemData *data;
+    uint32_t instrumentIndex;
+    wxMenu menu;
+
+    if (!item.IsOk()) {
+        return;
+    }
+    data = dynamic_cast<BankInstrumentItemData *>(bp->instrumentTree->GetItemData(item));
+    if (!data) {
+        return;
+    }
+    instrumentIndex = data->GetInstrumentIndex();
+
+    /* Ensure right-clicked item becomes active selection first. */
+    if (bp->instrumentTree->GetSelection() != item) {
+        bp->instrumentTree->SelectItem(item);
+    }
+
+    menu.Append(kCtxCloneToSong, "Clone Instrument to Song");
+    menu.Append(kCtxAliasToSong, "Alias Instrument to Song");
+    menu.AppendSeparator();
+    menu.Append(kCtxDeleteFromSong, "Delete Instrument");
+
+    menu.Bind(wxEVT_MENU, [bp, instrumentIndex](wxCommandEvent &) {
+        if (bp->cloneToSongCallback) {
+            bp->cloneToSongCallback(instrumentIndex);
+        }
+    }, kCtxCloneToSong);
+    menu.Bind(wxEVT_MENU, [bp, instrumentIndex](wxCommandEvent &) {
+        if (bp->aliasToSongCallback) {
+            bp->aliasToSongCallback(instrumentIndex);
+        }
+    }, kCtxAliasToSong);
+    menu.Bind(wxEVT_MENU, [bp, instrumentIndex](wxCommandEvent &) {
+        if (bp->deleteFromSongCallback) {
+            bp->deleteFromSongCallback(instrumentIndex);
+        }
+    }, kCtxDeleteFromSong);
+
+    bp->instrumentTree->PopupMenu(&menu);
 }
 
 /* ------------------------------------------------------------------ */
@@ -836,7 +990,11 @@ static void BuildSamplesTab(BankEditorPanel *bp)
     /* Shared sample params panel (read-only for bank viewer) */
     bp->sampleParamsPanel = new SampleParamsPanel(bp->samplesPage);
     bp->sampleParamsPanel->SetWriteMode(false, false, false, false);
+    bp->sampleParamsPanel->SetCodecControlsVisible(true);
     bp->sampleParamsPanel->SetOnParameterChanged([bp]() {
+        ApplyDirtyParams(bp);
+    });
+    bp->sampleParamsPanel->SetOnLoopChanged([bp]() {
         ApplyDirtyParams(bp);
     });
     sizer->Add(bp->sampleParamsPanel, 1, wxEXPAND);
@@ -954,6 +1112,9 @@ BankEditorPanel *CreateBankEditorPanel(wxWindow *parent)
     /* Bind events */
     bp->instrumentTree->Bind(wxEVT_TREE_SEL_CHANGED, [bp](wxTreeEvent &event) {
         OnInstrumentSelected(bp, event);
+    });
+    bp->instrumentTree->Bind(wxEVT_TREE_ITEM_RIGHT_CLICK, [bp](wxTreeEvent &event) {
+        OnInstrumentContextMenu(bp, event);
     });
 
     bp->sampleList->Bind(wxEVT_LIST_ITEM_SELECTED, [bp](wxListEvent &event) {
@@ -1134,6 +1295,20 @@ void BankEditorPanel_SetPreviewCallbacks(
     panel->stopCallback = std::move(stopCallback);
     panel->invalidateCallback = std::move(invalidateCallback);
     panel->dirtyParamsCallback = std::move(dirtyParamsCallback);
+}
+
+void BankEditorPanel_SetInstrumentContextCallbacks(
+    BankEditorPanel *panel,
+    std::function<void(uint32_t instrumentIndex)> cloneToSongCallback,
+    std::function<void(uint32_t instrumentIndex)> aliasToSongCallback,
+    std::function<void(uint32_t instrumentIndex)> deleteFromSongCallback)
+{
+    if (!panel) {
+        return;
+    }
+    panel->cloneToSongCallback = std::move(cloneToSongCallback);
+    panel->aliasToSongCallback = std::move(aliasToSongCallback);
+    panel->deleteFromSongCallback = std::move(deleteFromSongCallback);
 }
 
 uint32_t BankEditorPanel_GetCurrentInstrumentIndex(BankEditorPanel *panel)

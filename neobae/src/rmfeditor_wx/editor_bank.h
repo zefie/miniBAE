@@ -54,6 +54,13 @@ void BankEditorPanel_SetPreviewCallbacks(
     std::function<void()> invalidateCallback,
     std::function<void(BAERmfEditorInstrumentExtInfo const *info)> dirtyParamsCallback);
 
+/* Set instrument context-menu callbacks (right-click on instrument tree items). */
+void BankEditorPanel_SetInstrumentContextCallbacks(
+    BankEditorPanel *panel,
+    std::function<void(uint32_t instrumentIndex)> cloneToSongCallback,
+    std::function<void(uint32_t instrumentIndex)> aliasToSongCallback,
+    std::function<void(uint32_t instrumentIndex)> deleteFromSongCallback);
+
 /* Return the index of the currently selected instrument (for dirty param commit). */
 uint32_t BankEditorPanel_GetCurrentInstrumentIndex(BankEditorPanel *panel);
 
