@@ -1135,3 +1135,11 @@ void BankEditorPanel_SetPreviewCallbacks(
     panel->invalidateCallback = std::move(invalidateCallback);
     panel->dirtyParamsCallback = std::move(dirtyParamsCallback);
 }
+
+uint32_t BankEditorPanel_GetCurrentInstrumentIndex(BankEditorPanel *panel)
+{
+    if (!panel) {
+        return 0;
+    }
+    return panel->currentInstrumentIndex;
+}

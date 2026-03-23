@@ -146,6 +146,10 @@ static constexpr uint16_t kNbsFieldRmfBlob      = 0x0001;
 static constexpr uint16_t kNbsFieldSettings     = 0x0002;
 static constexpr uint16_t kNbsFieldOriginalPath = 0x0003;
 static constexpr uint16_t kNbsFieldUserEndTick  = 0x0004;
+static constexpr uint16_t kNbsFieldBankPath     = 0x0005;  /* Bank file path (for display/compat only) */
+static constexpr uint16_t kNbsFieldBankBlob     = 0x0006;  /* Embedded bank binary blob */
+static constexpr uint16_t kNbsFieldBankFlags    = 0x0007;  /* Bank restore flags (1 byte) */
+static constexpr uint8_t  kNbsBankFlagIsOverlay = 0x01;    /* Blob is overlay; load built-in first */
 
 /* Default timeline length for a new document: 30 s at 120 BPM / 480 TPQ
  * 30 s * 2 beats/s * 480 ticks/beat = 28 800 ticks */
@@ -238,6 +242,23 @@ static uint32_t ComputeDocumentHash(UndoDocumentState const &state) {
             hash = ((hash << 5) + hash) ^ cc.value;
         }
     }
+    return hash;
+}
+
+static uint32_t ComputeBankHash(wxString const &bankPath, bool hasUnsavedChanges) {
+    uint32_t hash = 5381;  // djb2 hash seed
+    
+    // Hash includes the bank path (or empty if built-in)
+    wxScopedCharBuffer utf8 = bankPath.utf8_str();
+    const char *p = utf8.data();
+    while (*p) {
+        hash = ((hash << 5) + hash) ^ static_cast<unsigned char>(*p);
+        ++p;
+    }
+    
+    // Hash includes the dirty status
+    hash = ((hash << 5) + hash) ^ (hasUnsavedChanges ? 0x12345678 : 0);
+    
     return hash;
 }
 
@@ -648,6 +669,7 @@ public:
                     if (info) {
                         m_bankDirtyExtInfo = *info;
                         m_hasBankDirtyExtInfo = true;
+                        m_bankHasUnsavedChanges = true;
                         m_bankPreviewDirtyApplied = false;
                         /* Force instrument reload so the patch is applied
                          * on top of a fresh copy from the bank. */
@@ -893,6 +915,7 @@ private:
     bool m_hasUnsavedChanges;
     bool m_bankHasUnsavedChanges;
     uint32_t m_cleanStateHash = 0;  // Hash of document when last saved
+    uint32_t m_cleanBankStateHash = 0;  // Hash of bank when last saved (0 = built-in)
 
     static wxString GetIniPath() {
         return wxFileName::GetHomeDir() + "/.nbstudio.ini";
@@ -1805,6 +1828,9 @@ private:
                 m_bankLoaded = true;
                 m_bankTokens.push_back(m_bankToken);
                 m_loadedBankPath.clear();
+                // Capture hash of built-in bank state (empty path = built-in)
+                m_cleanBankStateHash = ComputeBankHash(wxString(), false);
+                m_bankHasUnsavedChanges = false;
             }
 #else
             fprintf(stderr, "[nbstudio] WARNING: _BUILT_IN_PATCHES not defined, no bank loaded!\n");
@@ -1851,6 +1877,9 @@ private:
         m_bankLoaded = true;
         m_bankTokens.push_back(newToken);
         m_loadedBankPath = path;
+        // Capture hash of loaded bank state
+        m_cleanBankStateHash = ComputeBankHash(m_loadedBankPath, false);
+        m_bankHasUnsavedChanges = false;
         char friendlyBuf[128];
         wxString bankName;
         if (BAE_GetBankFriendlyName(m_playbackMixer, newToken, friendlyBuf, sizeof(friendlyBuf)) == BAE_NO_ERROR) {
@@ -1901,6 +1930,8 @@ private:
             } else {
                 m_loadedBankPath = savePath;
                 m_bankHasUnsavedChanges = false;
+                // Capture hash of newly saved bank state
+                m_cleanBankStateHash = ComputeBankHash(m_loadedBankPath, false);
                 SetTitle(wxString("NeoBAE Studio - ") + wxFileNameFromPath(savePath));
                 SetStatusText(wxString("Bank saved: ") + wxFileNameFromPath(savePath));
             }
@@ -1935,6 +1966,9 @@ private:
         m_bankToken = builtinToken;
         m_bankLoaded = true;
         m_bankTokens.push_back(builtinToken);
+        // Capture hash of built-in bank state
+        m_cleanBankStateHash = ComputeBankHash(wxString(), false);
+        m_bankHasUnsavedChanges = false;
         UpdateLoadedBankStatus();
 
         SetTitle("NeoBAE Studio - Built-in Bank");
@@ -5907,6 +5941,49 @@ private:
             }
         }
 
+        /* Build TLV payload: bank blob
+         * Embed the bank whenever a custom bank is loaded OR the built-in has
+         * been modified.  Skip only when the built-in is unmodified. */
+        {
+            bool hasCustomBank   = !m_loadedBankPath.empty();
+            bool builtinModified = m_loadedBankPath.empty() && m_hasBankDirtyExtInfo;
+            if (m_bankLoaded && m_bankToken && (hasCustomBank || builtinModified)) {
+                /* If there are uncommitted dirty params for the current instrument,
+                 * write them back to the bank token before serialising so they
+                 * are included in the blob. */
+                if (m_hasBankDirtyExtInfo && m_bankEditorPanel) {
+                    uint32_t dirtyIdx = BankEditorPanel_GetCurrentInstrumentIndex(m_bankEditorPanel);
+                    BAERmfEditorBank_SetInstrumentExtInfo(m_bankToken, dirtyIdx, &m_bankDirtyExtInfo);
+                }
+                unsigned char *bankData = nullptr;
+                uint32_t bankDataSize = 0;
+                if (BAERmfEditorBank_SaveToMemory(m_bankToken, &bankData, &bankDataSize) == BAE_NO_ERROR
+                        && bankData && bankDataSize > 0) {
+                    /* Bank blob field */
+                    AppendLE16(payload, kNbsFieldBankBlob);
+                    AppendLE32(payload, bankDataSize);
+                    payload.insert(payload.end(), bankData, bankData + bankDataSize);
+                    XDisposePtr(bankData);
+                    /* Bank flags field (1 byte): custom overlay vs standalone */
+                    AppendLE16(payload, kNbsFieldBankFlags);
+                    AppendLE32(payload, 1);
+                    payload.push_back(hasCustomBank ? kNbsBankFlagIsOverlay : 0);
+                    /* Bank path field (for display / backward compat) */
+                    if (!m_loadedBankPath.empty()) {
+                        wxScopedCharBuffer utf8 = m_loadedBankPath.utf8_str();
+                        size_t len = strlen(utf8.data());
+                        AppendLE16(payload, kNbsFieldBankPath);
+                        AppendLE32(payload, static_cast<uint32_t>(len));
+                        payload.insert(payload.end(),
+                                       reinterpret_cast<unsigned char const *>(utf8.data()),
+                                       reinterpret_cast<unsigned char const *>(utf8.data()) + len);
+                    }
+                } else if (bankData) {
+                    XDisposePtr(bankData);
+                }
+            }
+        }
+
         /* Compress with LZMA */
         compBound = lzma_stream_buffer_bound(payload.size());
         compressed.resize(compBound);
@@ -5996,11 +6073,14 @@ private:
         uint32_t uncompressedSize;
         std::vector<unsigned char> payload;
         std::vector<unsigned char> rmfBlob;
+        std::vector<unsigned char> bankBlob;
+        uint8_t bankFlags = 0;
         NbsSessionSettings settings;
         bool haveSettings;
         size_t offset;
         uint32_t userEndTick;
         uint16_t fileVersion;
+        wxString bankPath;
 
         memset(&settings, 0, sizeof(settings));
         settings.selectedTrack = -1;
@@ -6080,6 +6160,17 @@ private:
                 if (fieldLen >= 4) {
                     userEndTick = ReadLE32(payload.data() + offset);
                 }
+            } else if (fieldId == kNbsFieldBankBlob) {
+                bankBlob.assign(payload.data() + offset, payload.data() + offset + fieldLen);
+            } else if (fieldId == kNbsFieldBankFlags) {
+                if (fieldLen >= 1) {
+                    bankFlags = payload[offset];
+                }
+            } else if (fieldId == kNbsFieldBankPath) {
+                if (fieldLen > 0) {
+                    std::string bankPathStr(reinterpret_cast<const char *>(payload.data() + offset), fieldLen);
+                    bankPath = wxString::FromUTF8(bankPathStr.c_str());
+                }
             }
             /* Unknown fields are silently skipped */
             offset += fieldLen;
@@ -6153,6 +6244,62 @@ private:
         PopulateTrackList();
         PopulateSampleList();
         RefreshMidiLoopControlsFromDocument();
+
+        /* Restore bank from session */
+        if (!bankBlob.empty()) {
+            /* Blob present — restore bank from embedded data */
+            StopPlayback(true);
+            BAEMixer_UnloadBanks(m_playbackMixer);
+            m_bankToken = nullptr;
+            m_bankLoaded = false;
+            m_bankTokens.clear();
+            m_loadedBankPath.clear();
+
+            bool isOverlay = (bankFlags & kNbsBankFlagIsOverlay) != 0;
+            if (isOverlay) {
+                /* Custom bank overlay: load built-in first */
+#ifdef _BUILT_IN_PATCHES
+                BAEBankToken builtinToken;
+                if (BAEMixer_LoadBuiltinBank(m_playbackMixer, &builtinToken) == BAE_NO_ERROR) {
+                    m_bankTokens.push_back(builtinToken);
+                }
+#endif
+            }
+
+            BAEBankToken blobToken;
+            if (BAEMixer_AddBankFromMemory(m_playbackMixer,
+                                          bankBlob.data(),
+                                          static_cast<uint32_t>(bankBlob.size()),
+                                          &blobToken) == BAE_NO_ERROR) {
+                m_bankToken = blobToken;
+                m_bankLoaded = true;
+                m_bankTokens.push_back(blobToken);
+
+                /* Restore original file path (for display and future Save Bank) */
+                m_loadedBankPath = bankPath;
+
+                /* If this was a modified built-in (no path), mark it as having
+                 * unsaved changes so the user knows to save it if they want. */
+                m_bankHasUnsavedChanges = bankPath.empty();
+
+                if (m_bankEditorPanel) {
+                    wxString displayLabel = bankPath.empty()
+                        ? wxString("(built-in, modified)")
+                        : wxFileNameFromPath(bankPath);
+                    wxScopedCharBuffer utf8 = displayLabel.utf8_str();
+                    BankEditorPanel_LoadBank(m_bankEditorPanel, m_bankToken, utf8.data());
+                }
+            } else if (!m_bankTokens.empty()) {
+                /* Blob load failed — fall back to whatever was loaded (built-in) */
+                m_bankToken = m_bankTokens[0];
+                m_bankLoaded = true;
+                m_bankHasUnsavedChanges = false;
+            }
+            UpdateLoadedBankStatus();
+        } else if (!bankPath.empty()) {
+            /* Backward compat: old sessions that only saved a bank path */
+            LoadBankFromFile(bankPath);
+        }
 
         /* Restore selected track from session */
         if (haveSettings && settings.selectedTrack >= 0 &&

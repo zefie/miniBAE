@@ -54,4 +54,7 @@ void BankEditorPanel_SetPreviewCallbacks(
     std::function<void()> invalidateCallback,
     std::function<void(BAERmfEditorInstrumentExtInfo const *info)> dirtyParamsCallback);
 
+/* Return the index of the currently selected instrument (for dirty param commit). */
+uint32_t BankEditorPanel_GetCurrentInstrumentIndex(BankEditorPanel *panel);
+
 #endif /* EDITOR_BANK_H */
