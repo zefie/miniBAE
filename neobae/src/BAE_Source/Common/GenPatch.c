@@ -745,6 +745,7 @@ static GM_Instrument * PV_CreateInstrumentFromResource(GM_Instrument *theMaster,
 #endif
                 theI->useSampleRate = theMaster->useSampleRate;
                 theI->sampleAndHold = theMaster->sampleAndHold;
+                theI->minLoopSize = theMaster->minLoopSize;
             }
             else
             {
@@ -757,6 +758,7 @@ static GM_Instrument * PV_CreateInstrumentFromResource(GM_Instrument *theMaster,
 #endif
                 theI->useSampleRate = FALSE;
                 theI->sampleAndHold = FALSE;
+                theI->minLoopSize = (XBYTE)MIN_LOOP_SIZE_RMF;
             }
             theI->u.w.bitSize = sndInfo->bitSize;
             theI->u.w.channels = sndInfo->channels;
@@ -777,6 +779,15 @@ static GM_Instrument * PV_CreateInstrumentFromResource(GM_Instrument *theMaster,
         }
     }
     return theI;
+}
+
+static XBYTE PV_GetInstrumentMinLoopSize(const GM_Song *pSong)
+{
+    if (pSong && (pSong->engineConfigFlags & SONG_CONFIG_CONTAINER_IS_ZMF))
+    {
+        return (XBYTE)MIN_LOOP_SIZE_ZMF;
+    }
+    return (XBYTE)MIN_LOOP_SIZE_RMF;
 }
 
 /******************************************************************************
@@ -854,6 +865,7 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                     theI->sampleAndHold = TEST_FLAG_VALUE(header.flags1, ZBF_sampleAndHold);
                     theI->advancedInterpolation = TEST_FLAG_VALUE(sndInfo->sndFlags, XSOUND_ADVANCED_INTERPOLATION);
                     theI->sampleOffsetStartEnabled = TEST_FLAG_VALUE(header.flags2, ZBF_enableSampleOffsetStart);
+                    theI->minLoopSize = PV_GetInstrumentMinLoopSize(pSong);
                     theI->useSoundModifierAsRootKey = TEST_FLAG_VALUE(header.flags2, ZBF_useSoundModifierAsRootKey);
                     PV_GetEnvelopeData(theX, theI, patchSize);
                     theI->u.w.bitSize = sndInfo->bitSize;
@@ -917,6 +929,7 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                 theI->sampleAndHold = TEST_FLAG_VALUE(header.flags1, ZBF_sampleAndHold);
                 theI->playAtSampledFreq = TEST_FLAG_VALUE(header.flags2, ZBF_playAtSampledFreq);
                 theI->sampleOffsetStartEnabled = TEST_FLAG_VALUE(header.flags2, ZBF_enableSampleOffsetStart);
+                theI->minLoopSize = PV_GetInstrumentMinLoopSize(pSong);
                 theI->useSoundModifierAsRootKey = TEST_FLAG_VALUE(header.flags2, ZBF_useSoundModifierAsRootKey);
                 PV_GetEnvelopeData(theX, theI, patchSize);
                 theI->u.k.KeymapSplitCount = header.keySplitCount;

@@ -26,8 +26,9 @@
 
 # Future
 - More throughly test backwards compatiblity with BeatnikX, maybe even WebTV Plus
-  - mod2rmf doesn't play as intended in BeatnikX, are we generating correctly?
-  - Works fine in NeoBAE, but RMF files in particular NEED to be properly backwards compatible
+  - ~~mod2rmf doesn't play as intended in BeatnikX, are we generating correctly? (edited RMF seems fine)~~
+  - ~~Works fine in NeoBAE, but RMF files in particular NEED to be properly backwards compatible~~
+  - ~~Change happened between 2025-08-23 and 2025-09-01 release (MIN_LOOP_SIZE dropped from 20 to 2)~~
 - bankrecomp: wtv.hsb recomp prog 100 weirdness
 - Graphics for pitch envelope
 - Interpolation configuration (none, linear, cubic, etc, current is just on/off)

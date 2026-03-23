@@ -12771,6 +12771,12 @@ BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document)
     {
         BAERmfEditorSample const *sample = &document->samples[i];
 
+        if (sample->sampleInfo.endLoop > sample->sampleInfo.startLoop &&
+            (sample->sampleInfo.endLoop - sample->sampleInfo.startLoop) < MIN_LOOP_SIZE_RMF)
+        {
+            return TRUE;
+        }
+
         switch (sample->targetCompressionType)
         {
             case BAE_EDITOR_COMPRESSION_VORBIS_32K:

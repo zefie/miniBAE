@@ -5713,7 +5713,7 @@ private:
                 return;
             }
 
-            /* Enforce .zmf extension when document contains FLAC/Vorbis/Opus samples */
+            /* Enforce .zmf extension when document contains RMF-incompatible sample data */
             if (requiresZmf) {
                 wxFileName fn(targetPath);
                 if (fn.GetExt().Lower() != "zmf") {

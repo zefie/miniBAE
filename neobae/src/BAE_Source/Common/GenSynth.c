@@ -3276,6 +3276,7 @@ void PV_StartMIDINote(GM_Song *pSong, INT16 the_instrument,
     UINT16 splitCount;
     UINT32 loopstart, loopend;
     UINT32 noteStartOffsetFrames;
+    UINT32 minLoopSize;
     register INT32 i, j;
     INT32 volume32;
     INT32 sampleNumber;
@@ -3401,11 +3402,12 @@ void PV_StartMIDINote(GM_Song *pSong, INT16 the_instrument,
 
     loopstart = pInstrument->u.w.startLoop;
     loopend = pInstrument->u.w.endLoop;
+    minLoopSize = pInstrument->minLoopSize ? pInstrument->minLoopSize : MIN_LOOP_SIZE_RMF;
     if ((pInstrument->disableSndLooping) ||
         (loopstart == loopend) ||
         (loopstart > loopend) ||
         (loopend > pInstrument->u.w.waveFrames) ||
-        (loopend - loopstart < MIN_LOOP_SIZE))
+        (loopend - loopstart < minLoopSize))
     {
         loopstart = 0;
         loopend = 0;
@@ -3419,7 +3421,7 @@ void PV_StartMIDINote(GM_Song *pSong, INT16 the_instrument,
         {
             loopstart = noteStartOffsetFrames;
         }
-        if (loopend <= loopstart + MIN_LOOP_SIZE)
+        if (loopend <= loopstart + minLoopSize)
         {
             loopstart = 0;
             loopend = 0;

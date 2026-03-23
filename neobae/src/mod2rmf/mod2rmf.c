@@ -3519,6 +3519,7 @@ static int save_document(Mod2RmfConverter *conv, const char *destPath)
     BAEResult result;
     const char *ext;
     XBOOL useZmfContainer;
+    XBOOL requiresZmf;
 
     if (!conv || !conv->document || !destPath)
     {
@@ -3527,6 +3528,17 @@ static int save_document(Mod2RmfConverter *conv, const char *destPath)
 
     ext = strrchr(destPath, '.');
     useZmfContainer = (ext && (!strcmp(ext, ".zmf") || !strcmp(ext, ".ZMF"))) ? TRUE : FALSE;
+    requiresZmf = BAERmfEditorDocument_RequiresZmf(conv->document);
+
+    if (requiresZmf && !useZmfContainer)
+    {
+        fprintf(stderr,
+                "Error: document requires ZMF format due to RMF-incompatible sample data \n"
+                "(modern codec, advanced interpolation, engine config, or loop shorter than %u frames). \n"
+                "Please use a .zmf output extension.\n",
+                (unsigned)MIN_LOOP_SIZE_RMF);
+        return 0;
+    }
 
     rmfData = NULL;
     rmfSize = 0;

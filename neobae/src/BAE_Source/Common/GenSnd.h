@@ -569,7 +569,9 @@ extern "C"
 #define PERCUSSION_CHANNEL 9      // which channel (zero based) is the default percussion channel
 #define MAX_SAMPLE_FRAMES 1048576 // max number of sample frames that we can play in one voice
                                   // 1024 * 1024 = 1MB. This limit exisits only in DROP_SAMPLE, TERP1, TERP2 cases
-#define MIN_LOOP_SIZE 2          // min number of loop samples that can be processed
+#define MIN_LOOP_SIZE_RMF 20     // classic RMF minimum loop size
+#define MIN_LOOP_SIZE_ZMF 2      // ZMF minimum loop size
+#define MIN_LOOP_SIZE MIN_LOOP_SIZE_ZMF // default/minimum used by generic non-RMF paths
 
 #define MIN_SAMPLE_RATE ((uint32_t)1L) // min sample rate. 1.5258789E-5 kHz
 #define MAX_SAMPLE_RATE rate48khz      // max sample rate  48 kHz
@@ -1046,6 +1048,7 @@ typedef int32_t UNIT_TYPE;
         XBOOL useSampleRate; // factor in sample rate into pitch calculation
         XBOOL advancedInterpolation; // sample flagged for higher-resolution interpolation
         XBOOL sampleOffsetStartEnabled; // if TRUE, start note at sampleOffsetStartFrames
+        XBYTE minLoopSize; // minimum loop size for this instrument source (RMF/ZMF)
 
         XBOOL processingSlice;
         XBOOL useSoundModifierAsRootKey;

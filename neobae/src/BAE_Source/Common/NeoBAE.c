@@ -7815,6 +7815,33 @@ static XBOOL PV_XFileHasModernCodecSamples(XFILE fileRef)
     return FALSE;
 }
 
+static void PV_TagSongResourceContainerType(SongResource *songResource, XBOOL isZmfContainer)
+{
+    SongResource_RMF *songRMF;
+    uint32_t flags;
+
+    if (!songResource)
+    {
+        return;
+    }
+    if (((SongResource_SMS *)songResource)->songType != SONG_TYPE_RMF)
+    {
+        return;
+    }
+
+    songRMF = (SongResource_RMF *)songResource;
+    flags = (uint32_t)XGetLong(&songRMF->unused[SONG_CONFIG_UNUSED_INDEX]);
+    if (isZmfContainer)
+    {
+        flags |= SONG_CONFIG_CONTAINER_IS_ZMF;
+    }
+    else
+    {
+        flags &= ~((uint32_t)SONG_CONFIG_CONTAINER_IS_ZMF);
+    }
+    XPutLong(&songRMF->unused[SONG_CONFIG_UNUSED_INDEX], flags);
+}
+
 // BAESong_LoadRmfFromMemory()
 // --------------------------------------
 // was BAERmfSong::LoadFromMemory()
@@ -7828,8 +7855,10 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
     OPErr theErr;
     XLongResourceID theID;
     int32_t size;
+    XBOOL isZmfContainer;
 
     theErr = NO_ERR;
+    isZmfContainer = FALSE;
     if ((song) && (song->mID == OBJECT_ID))
     {
         BAE_AcquireMutex(song->mLock);
@@ -7855,6 +7884,10 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
                                 return BAE_UNSUPPORTED_FORMAT;
                             }
                         }
+                        else if (XGetLong(&mapHdr.mapID) == XFILERESOURCE_ZMF_ID)
+                        {
+                            isZmfContainer = TRUE;
+                        }
                     }
                 }
                 {
@@ -7866,6 +7899,7 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
                 pXSong = (SongResource *)XGetIndexedFileResource(fileRef, ID_SONG, &theID, songIndex, NULL, &size);
                 if (pXSong)
                 {
+                    PV_TagSongResourceContainerType(pXSong, isZmfContainer);
                     BAE_PRINTF("[RMF] Primary path: XGetIndexedFileResource succeeded, pXSong=%p\n", pXSong);
                     if (song->pSong)
                     {
@@ -7940,6 +7974,7 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
                     if (fallbackSong)
                     {
                         pXSong = fallbackSong; // treat as found
+                        PV_TagSongResourceContainerType(pXSong, isZmfContainer);
                         theErr = NO_ERR;
                         if (song->pSong)
                         {
@@ -8064,8 +8099,10 @@ BAEResult BAESong_LoadRmfFromFile(BAESong song, BAEPathName filePath, int16_t so
     OPErr theErr;
     XLongResourceID theID;
     int32_t size;
+    XBOOL isZmfContainer;
 
     theErr = NO_ERR;
+    isZmfContainer = FALSE;
     if ((song) && (song->mID == OBJECT_ID))
     {
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_XMF_SUPPORT == TRUE
@@ -8096,11 +8133,16 @@ BAEResult BAESong_LoadRmfFromFile(BAESong song, BAEPathName filePath, int16_t so
                             return BAE_UNSUPPORTED_FORMAT;
                         }
                     }
+                    else if (XGetLong(&mapHdr.mapID) == XFILERESOURCE_ZMF_ID)
+                    {
+                        isZmfContainer = TRUE;
+                    }
                 }
             }
             pXSong = (SongResource *)XGetIndexedFileResource(fileRef, ID_SONG, &theID, songIndex, NULL, &size);
             if (pXSong)
             {
+                PV_TagSongResourceContainerType(pXSong, isZmfContainer);
                 {
 #if _DEBUG
                     int32_t songCount = XCountFileResourcesOfType(fileRef, ID_SONG);
