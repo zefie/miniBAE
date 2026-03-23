@@ -28,6 +28,7 @@
 #include <wx/slider.h>
 #include <wx/spinctrl.h>
 #include <wx/splitter.h>
+#include <wx/stattext.h>
 #include <wx/textdlg.h>
 #include <wx/timer.h>
 #include <wx/treectrl.h>
@@ -351,7 +352,7 @@ static bool UndoSnapshotsEqual(UndoDocumentState const &left, UndoDocumentState 
 class MainFrame final : public wxFrame {
 public:
     MainFrame()
-        : wxFrame(nullptr, wxID_ANY, wxString::Format("NeoBAE Studio v%s", kVersionString), wxDefaultPosition, wxSize(1400, 940)),
+        : wxFrame(nullptr, wxID_ANY, wxString::Format("NeoBAE Studio v%s - New Project", kVersionString), wxDefaultPosition, wxSize(1400, 940)),
           m_document(nullptr),
                     m_updatingControls(false),
                     m_editorNotebook(nullptr),
@@ -682,8 +683,15 @@ public:
                 });
         }
 
-        CreateStatusBar(2);
+        {
+            int statusWidths[2] = {500, -1};
+            CreateStatusBar(2);
+            SetStatusWidths(2, statusWidths);
+            EnsureStatusInfoLabel();
+            LayoutStatusInfoLabel();
+        }
         SetStatusText("Welcome to NeoBAE Studio!");
+        UpdateStatusBar();
         UpdateLoadedBankStatus();
 
         Bind(wxEVT_MENU, &MainFrame::OnNew, this, wxID_NEW);
@@ -705,6 +713,8 @@ public:
         }, ID_SettingsClassicChorus);
         Bind(wxEVT_MENU, [this](wxCommandEvent &) { Close(); }, wxID_EXIT);
         Bind(wxEVT_CLOSE_WINDOW, &MainFrame::OnCloseWindow, this);
+        Bind(wxEVT_SIZE, &MainFrame::OnFrameResized, this);
+        Bind(wxEVT_IDLE, &MainFrame::OnInitialStatusBarIdle, this);
         m_trackList->Bind(wxEVT_LISTBOX, &MainFrame::OnTrackSelected, this);
         m_trackList->Bind(wxEVT_CONTEXT_MENU, &MainFrame::OnTrackContextMenu, this);
         m_sampleTree->Bind(wxEVT_CONTEXT_MENU, &MainFrame::OnSampleContextMenu, this);
@@ -849,6 +859,7 @@ private:
     wxTextCtrl *m_midiLoopStartText;
     wxTextCtrl *m_midiLoopEndText;
     wxButton *m_channelsConfigButton;
+    wxStaticText *m_statusInfoLabel = nullptr;
     wxSlider *m_positionSlider;
     wxStaticText *m_positionLabel;
     wxTreeCtrl *m_sampleTree;
@@ -902,6 +913,7 @@ private:
     wxMenuItem *m_reloadInternalBankMenuItem;
     wxMenu *m_settingsMenu;
     wxCheckBox *m_savePreviewToSongCheck;
+    bool m_initialStatusBarLayoutPending = true;
     bool m_pendingLoopHotReload;
     uint32_t m_pendingLoopHotReloadPosUsec;
     bool m_pendingLoopHotReloadPaused;
@@ -1888,6 +1900,7 @@ private:
             bankName = wxString::Format("Bank loaded: %s", wxFileNameFromPath(path));
         }
         SetStatusText(bankName, 0);
+        UpdateStatusBar();
         UpdateLoadedBankStatus();
         return true;
     }
@@ -1905,7 +1918,8 @@ private:
                          "Save Bank", wxOK | wxICON_ERROR, this);
         } else {
             m_bankHasUnsavedChanges = false;
-            SetStatusText(wxString("Bank saved: ") + wxFileNameFromPath(m_loadedBankPath));
+            SetStatusText(wxString::Format("Bank saved: %s", wxFileNameFromPath(m_loadedBankPath)), 0);
+            UpdateStatusBar();
         }
     }
 
@@ -1932,8 +1946,8 @@ private:
                 m_bankHasUnsavedChanges = false;
                 // Capture hash of newly saved bank state
                 m_cleanBankStateHash = ComputeBankHash(m_loadedBankPath, false);
-                SetTitle(wxString("NeoBAE Studio - ") + wxFileNameFromPath(savePath));
-                SetStatusText(wxString("Bank saved: ") + wxFileNameFromPath(savePath));
+                SetStatusText(wxString::Format("Bank saved: %s", wxFileNameFromPath(savePath)), 0);
+                UpdateStatusBar();
             }
         }
     }
@@ -1971,7 +1985,7 @@ private:
         m_bankHasUnsavedChanges = false;
         UpdateLoadedBankStatus();
 
-        SetTitle("NeoBAE Studio - Built-in Bank");
+        UpdateStatusBar();
         if (m_bankEditorPanel) {
             BankEditorPanel_LoadBank(m_bankEditorPanel, m_bankToken, "(built-in)");
         }
@@ -2001,7 +2015,7 @@ private:
             return;
         }
         fprintf(stderr, "[nbstudio] LoadBankForEditing: bank loaded, bankToken=%p\n", static_cast<void *>(m_bankToken));
-        SetTitle(wxString::Format("NeoBAE Studio v%s - %s", kVersionString, wxFileNameFromPath(path)));
+        UpdateStatusBar();
         fprintf(stderr, "[nbstudio] LoadBankForEditing: populating bank editor...\n");
         if (m_bankEditorPanel) {
             wxScopedCharBuffer utf8Path = path.utf8_str();
@@ -5407,7 +5421,7 @@ private:
         PopulateSampleList();
         RefreshMidiLoopControlsFromDocument();
         UpdateFrameTitle();
-        SetStatusText(path, 1);
+        UpdateStatusBar();
     }
 
     void PopulateTrackList() {
@@ -5482,22 +5496,97 @@ private:
         m_updatingControls = false;
     }
 
-    void UpdateFrameTitle() {
-        wxString title;
-        wxString displayPath;
-
-        title = "NeoBAE Studio v";
-        title += kVersionString;
-        displayPath = !m_sessionPath.empty() ? m_sessionPath : m_currentPath;
-        if (!displayPath.empty()) {
-            title += " - ";
-            if (m_hasUnsavedChanges) {
-                title += "*";
-            }
-            title += wxFileNameFromPath(displayPath);
-        } else if (m_hasUnsavedChanges && m_document) {
-            title += " - *untitled";
+    wxString GetBankDisplayName() const {
+        if (!m_bankLoaded || !m_bankToken) {
+            return "Built-in";
         }
+        if (m_bankHasUnsavedChanges && m_loadedBankPath.empty()) {
+            return "Custom";
+        }
+        char friendlyBuf[128] = {0};
+        if (m_playbackMixer &&
+            BAE_GetBankFriendlyName(m_playbackMixer, m_bankToken, friendlyBuf, sizeof(friendlyBuf)) == BAE_NO_ERROR &&
+            friendlyBuf[0] != '\0') {
+            return wxString::FromUTF8(friendlyBuf);
+        }
+        if (!m_loadedBankPath.empty()) {
+            return wxFileName(m_loadedBankPath).GetName();
+        }
+        return "Built-in";
+    }
+
+    void EnsureStatusInfoLabel() {
+        wxStatusBar *statusBar = GetStatusBar();
+        if (!statusBar || m_statusInfoLabel) {
+            return;
+        }
+        m_statusInfoLabel = new wxStaticText(statusBar,
+                                             wxID_ANY,
+                                             wxEmptyString,
+                                             wxDefaultPosition,
+                                             wxDefaultSize,
+                                             wxALIGN_RIGHT | wxST_NO_AUTORESIZE);
+        if (m_statusInfoLabel) {
+            m_statusInfoLabel->SetFont(statusBar->GetFont());
+            m_statusInfoLabel->SetForegroundColour(statusBar->GetForegroundColour());
+        }
+    }
+
+    void LayoutStatusInfoLabel() {
+        wxStatusBar *statusBar = GetStatusBar();
+        wxRect fieldRect;
+
+        if (!statusBar || !m_statusInfoLabel || !statusBar->GetFieldRect(1, fieldRect)) {
+            return;
+        }
+
+        fieldRect.Deflate(4, 1);
+        if (fieldRect.width <= 0 || fieldRect.height <= 0) {
+            m_statusInfoLabel->Hide();
+            return;
+        }
+        m_statusInfoLabel->SetPosition(fieldRect.GetPosition());
+        m_statusInfoLabel->SetSize(fieldRect.GetSize());
+        m_statusInfoLabel->Show();
+    }
+
+    void UpdateStatusBar() {
+        wxString sessionName = m_sessionPath.empty() ? "New Project" : wxFileName(m_sessionPath).GetName();
+        wxString mediaName   = m_currentPath.empty()  ? "None"     : wxFileNameFromPath(m_currentPath);
+        wxString bankName    = GetBankDisplayName();
+        wxString status = wxString::Format("Session: %s  |  Media File: %s  |  Bank: %s",
+                                           sessionName, mediaName, bankName);
+        EnsureStatusInfoLabel();
+        if (m_statusInfoLabel) {
+            m_statusInfoLabel->SetLabel(status);
+            LayoutStatusInfoLabel();
+        }
+        SetStatusText(wxEmptyString, 1);
+    }
+
+    void OnFrameResized(wxSizeEvent &event) {
+        LayoutStatusInfoLabel();
+        event.Skip();
+    }
+
+    void OnInitialStatusBarIdle(wxIdleEvent &event) {
+        if (m_initialStatusBarLayoutPending && IsShownOnScreen()) {
+            m_initialStatusBarLayoutPending = false;
+            /* Drive the same path that manual resize uses, but later in startup
+             * when GTK has finalized frame/statusbar geometry. */
+            SendSizeEvent(wxSEND_EVENT_POST);
+            CallAfter([this]() {
+                LayoutStatusInfoLabel();
+                UpdateStatusBar();
+            });
+            Unbind(wxEVT_IDLE, &MainFrame::OnInitialStatusBarIdle, this);
+        }
+        event.Skip();
+    }
+
+    void UpdateFrameTitle() {
+        wxString title = wxString::Format("NeoBAE Studio v%s - ", kVersionString);
+        title += m_sessionPath.empty() ? "New Project" : wxFileName(m_sessionPath).GetName();
         SetTitle(title);
     }
 
@@ -5621,7 +5710,7 @@ private:
         PopulateSampleList();
         RefreshMidiLoopControlsFromDocument();
         UpdateFrameTitle();
-        SetStatusText(wxEmptyString, 1);
+        UpdateStatusBar();
         SwitchToEditorTab(kEditorModeMidi);
     }
 
@@ -5815,7 +5904,7 @@ private:
                 if (saveDoc != m_document) {
                     BAERmfEditorDocument_Delete(saveDoc);
                 }
-                SetStatusText(targetPath, 1);
+                UpdateStatusBar();
                 return;
             }
 
@@ -5874,7 +5963,7 @@ private:
             if (saveDoc != m_document) {
                 BAERmfEditorDocument_Delete(saveDoc);
             }
-            SetStatusText(targetPath, 1);
+            UpdateStatusBar();
         }
     }
 
@@ -6017,7 +6106,7 @@ private:
         m_sessionPath = path;
         MarkDocumentClean();
         UpdateFrameTitle();
-        SetStatusText(path, 1);
+        UpdateStatusBar();
         return true;
     }
 
@@ -6310,7 +6399,7 @@ private:
         }
 
         UpdateFrameTitle();
-        SetStatusText(path, 1);
+        UpdateStatusBar();
         return true;
     }
 

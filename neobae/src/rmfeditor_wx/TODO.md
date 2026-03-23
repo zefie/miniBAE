@@ -24,7 +24,7 @@
 - ~~Fix loop markers covered the note field~~
 - ~~Revamp CC tracks in piano roll~~
 - ~~Store bank (if not unmodified built-in bank) in NBS session~~
-- Revamp titlebar and statusbar handling
+- ~~Revamp titlebar and statusbar handling~~
 - Allow dragging samples to other instruments
   - Ask user if they want to move, or alias the sample
   - If its the only sample of the source instrument and they choose move, prompt user:
@@ -41,7 +41,7 @@
 - More throughly test backwards compatiblity with BeatnikX, maybe even WebTV Plus
   - Put on back-burner for now
   - old 2021 miniBAE can play files (obv without mp3) that BeatnikX can't
-  - try to modify our rmf generator so that we don't generate files that don't work on BeatnikX
+  - try to modify our RMF generator so that we don't generate files that don't work on BeatnikX
     but still work on NeoBAE
   - ~~mod2rmf doesn't play as intended in BeatnikX, are we generating correctly? (edited RMF seems fine)~~
   - ~~Works fine in NeoBAE, but RMF files in particular NEED to be properly backwards compatible~~
