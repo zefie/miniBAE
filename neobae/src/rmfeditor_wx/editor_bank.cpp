@@ -298,6 +298,11 @@ struct BankEditorPanel {
     std::function<void(uint32_t)> cloneToSongCallback;
     std::function<void(uint32_t)> aliasToSongCallback;
     std::function<void(uint32_t)> deleteFromSongCallback;
+    std::function<void(uint32_t)> compressInstrumentSamplesCallback;
+    std::function<void(uint32_t, uint32_t)> addSampleCallback;
+    std::function<void(uint32_t, uint32_t)> deleteSampleCallback;
+    std::function<void(uint32_t, uint32_t)> aliasSampleToInstrumentCallback;
+    std::function<void(uint32_t, uint32_t)> copySampleToInstrumentCallback;
     bool mousePreviewActive;
     std::unordered_map<int, int> keyboardPreviewNotes;   /* keyCode -> MIDI note */
 
@@ -346,6 +351,7 @@ static void ShowSampleDetail(BankEditorPanel *bp,
 static void OnInstrumentSelected(BankEditorPanel *bp, wxTreeEvent &event);
 static void OnSampleSelected(BankEditorPanel *bp, wxListEvent &event);
 static void OnInstrumentContextMenu(BankEditorPanel *bp, wxTreeEvent &event);
+static void OnSampleContextMenu(BankEditorPanel *bp, wxContextMenuEvent &event);
 static void BuildInstrumentTab(BankEditorPanel *bp);
 static void BuildSamplesTab(BankEditorPanel *bp);
 static void InvalidateBankPreviewCache(BankEditorPanel *bp);
@@ -1022,7 +1028,8 @@ static void OnInstrumentContextMenu(BankEditorPanel *bp, wxTreeEvent &event)
     enum {
         kCtxCloneToSong = wxID_HIGHEST + 200,
         kCtxAliasToSong,
-        kCtxDeleteFromSong
+        kCtxDeleteFromSong,
+        kCtxCompressInstrumentSamples
     };
     wxTreeItemId item = event.GetItem();
     BankInstrumentItemData *data;
@@ -1045,6 +1052,7 @@ static void OnInstrumentContextMenu(BankEditorPanel *bp, wxTreeEvent &event)
 
     menu.Append(kCtxCloneToSong, "Clone Instrument to Song");
     menu.Append(kCtxAliasToSong, "Alias Instrument to Song");
+    menu.Append(kCtxCompressInstrumentSamples, "Compress Instrument Samples");
     menu.AppendSeparator();
     menu.Append(kCtxDeleteFromSong, "Delete Instrument");
 
@@ -1063,8 +1071,79 @@ static void OnInstrumentContextMenu(BankEditorPanel *bp, wxTreeEvent &event)
             bp->deleteFromSongCallback(instrumentIndex);
         }
     }, kCtxDeleteFromSong);
+    menu.Bind(wxEVT_MENU, [bp, instrumentIndex](wxCommandEvent &) {
+        if (bp->compressInstrumentSamplesCallback) {
+            bp->compressInstrumentSamplesCallback(instrumentIndex);
+        }
+    }, kCtxCompressInstrumentSamples);
 
     bp->instrumentTree->PopupMenu(&menu);
+}
+
+static void OnSampleContextMenu(BankEditorPanel *bp, wxContextMenuEvent &event)
+{
+    enum {
+        kCtxAddSample = wxID_HIGHEST + 300,
+        kCtxDeleteSample,
+        kCtxAliasSampleToInstrument,
+        kCtxCopySampleToInstrument
+    };
+    wxPoint screenPos;
+    wxPoint clientPos;
+    int hitFlags = 0;
+    long hit = -1;
+    uint32_t sampleIndex;
+    wxMenu menu;
+
+    if (!bp || !bp->hasInstrument) {
+        return;
+    }
+
+    screenPos = event.GetPosition();
+    if (screenPos == wxDefaultPosition) {
+        screenPos = wxGetMousePosition();
+    }
+    clientPos = bp->sampleList->ScreenToClient(screenPos);
+    hit = bp->sampleList->HitTest(clientPos, hitFlags, NULL);
+    if (hit >= 0) {
+        bp->sampleList->SetItemState(hit,
+                                     wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED,
+                                     wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
+        sampleIndex = (uint32_t)hit;
+    } else if (bp->hasSampleSelection) {
+        sampleIndex = bp->currentSampleIndex;
+    } else {
+        return;
+    }
+
+    menu.Append(kCtxAddSample, "Add Sample");
+    menu.Append(kCtxDeleteSample, "Delete Sample");
+    menu.AppendSeparator();
+    menu.Append(kCtxAliasSampleToInstrument, "Alias Sample to Another Instrument");
+    menu.Append(kCtxCopySampleToInstrument, "Copy Sample to Another Instrument");
+
+    menu.Bind(wxEVT_MENU, [bp, sampleIndex](wxCommandEvent &) {
+        if (bp->addSampleCallback) {
+            bp->addSampleCallback(bp->currentInstrumentIndex, sampleIndex);
+        }
+    }, kCtxAddSample);
+    menu.Bind(wxEVT_MENU, [bp, sampleIndex](wxCommandEvent &) {
+        if (bp->deleteSampleCallback) {
+            bp->deleteSampleCallback(bp->currentInstrumentIndex, sampleIndex);
+        }
+    }, kCtxDeleteSample);
+    menu.Bind(wxEVT_MENU, [bp, sampleIndex](wxCommandEvent &) {
+        if (bp->aliasSampleToInstrumentCallback) {
+            bp->aliasSampleToInstrumentCallback(bp->currentInstrumentIndex, sampleIndex);
+        }
+    }, kCtxAliasSampleToInstrument);
+    menu.Bind(wxEVT_MENU, [bp, sampleIndex](wxCommandEvent &) {
+        if (bp->copySampleToInstrumentCallback) {
+            bp->copySampleToInstrumentCallback(bp->currentInstrumentIndex, sampleIndex);
+        }
+    }, kCtxCopySampleToInstrument);
+
+    bp->sampleList->PopupMenu(&menu, clientPos);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1240,6 +1319,9 @@ BankEditorPanel *CreateBankEditorPanel(wxWindow *parent)
 
     bp->sampleList->Bind(wxEVT_LIST_ITEM_SELECTED, [bp](wxListEvent &event) {
         OnSampleSelected(bp, event);
+    });
+    bp->sampleList->Bind(wxEVT_CONTEXT_MENU, [bp](wxContextMenuEvent &event) {
+        OnSampleContextMenu(bp, event);
     });
 
     /* Keyboard preview: AWSEDFTGYHUJKO keys map to semitones around root key.
@@ -1436,7 +1518,8 @@ void BankEditorPanel_SetInstrumentContextCallbacks(
     BankEditorPanel *panel,
     std::function<void(uint32_t instrumentIndex)> cloneToSongCallback,
     std::function<void(uint32_t instrumentIndex)> aliasToSongCallback,
-    std::function<void(uint32_t instrumentIndex)> deleteFromSongCallback)
+    std::function<void(uint32_t instrumentIndex)> deleteFromSongCallback,
+    std::function<void(uint32_t instrumentIndex)> compressInstrumentSamplesCallback)
 {
     if (!panel) {
         return;
@@ -1444,6 +1527,23 @@ void BankEditorPanel_SetInstrumentContextCallbacks(
     panel->cloneToSongCallback = std::move(cloneToSongCallback);
     panel->aliasToSongCallback = std::move(aliasToSongCallback);
     panel->deleteFromSongCallback = std::move(deleteFromSongCallback);
+    panel->compressInstrumentSamplesCallback = std::move(compressInstrumentSamplesCallback);
+}
+
+void BankEditorPanel_SetSampleContextCallbacks(
+    BankEditorPanel *panel,
+    std::function<void(uint32_t instrumentIndex, uint32_t sampleIndex)> addSampleCallback,
+    std::function<void(uint32_t instrumentIndex, uint32_t sampleIndex)> deleteSampleCallback,
+    std::function<void(uint32_t instrumentIndex, uint32_t sampleIndex)> aliasSampleToInstrumentCallback,
+    std::function<void(uint32_t instrumentIndex, uint32_t sampleIndex)> copySampleToInstrumentCallback)
+{
+    if (!panel) {
+        return;
+    }
+    panel->addSampleCallback = std::move(addSampleCallback);
+    panel->deleteSampleCallback = std::move(deleteSampleCallback);
+    panel->aliasSampleToInstrumentCallback = std::move(aliasSampleToInstrumentCallback);
+    panel->copySampleToInstrumentCallback = std::move(copySampleToInstrumentCallback);
 }
 
 uint32_t BankEditorPanel_GetCurrentInstrumentIndex(BankEditorPanel *panel)

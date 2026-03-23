@@ -65,7 +65,16 @@ void BankEditorPanel_SetInstrumentContextCallbacks(
     BankEditorPanel *panel,
     std::function<void(uint32_t instrumentIndex)> cloneToSongCallback,
     std::function<void(uint32_t instrumentIndex)> aliasToSongCallback,
-    std::function<void(uint32_t instrumentIndex)> deleteFromSongCallback);
+    std::function<void(uint32_t instrumentIndex)> deleteFromSongCallback,
+    std::function<void(uint32_t instrumentIndex)> compressInstrumentSamplesCallback);
+
+/* Set sample-list context-menu callbacks (right-click on sample rows). */
+void BankEditorPanel_SetSampleContextCallbacks(
+    BankEditorPanel *panel,
+    std::function<void(uint32_t instrumentIndex, uint32_t sampleIndex)> addSampleCallback,
+    std::function<void(uint32_t instrumentIndex, uint32_t sampleIndex)> deleteSampleCallback,
+    std::function<void(uint32_t instrumentIndex, uint32_t sampleIndex)> aliasSampleToInstrumentCallback,
+    std::function<void(uint32_t instrumentIndex, uint32_t sampleIndex)> copySampleToInstrumentCallback);
 
 /* Return the index of the currently selected instrument (for dirty param commit). */
 uint32_t BankEditorPanel_GetCurrentInstrumentIndex(BankEditorPanel *panel);

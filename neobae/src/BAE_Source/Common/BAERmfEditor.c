@@ -12831,6 +12831,114 @@ BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document)
     }
     return FALSE;
 }
+
+BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken)
+{
+    uint32_t instrumentCount;
+    uint32_t instrumentIndex;
+
+    if (!bankToken)
+    {
+        return FALSE;
+    }
+
+    instrumentCount = 0;
+    if (BAERmfEditorBank_GetInstrumentCount(bankToken, &instrumentCount) != BAE_NO_ERROR)
+    {
+        return FALSE;
+    }
+
+    for (instrumentIndex = 0; instrumentIndex < instrumentCount; ++instrumentIndex)
+    {
+        BAERmfEditorInstrumentExtInfo extInfo;
+        BAERmfEditorBankSampleInfo firstSampleInfo;
+        uint32_t sampleCount;
+        uint32_t sampleIndex;
+
+        if (BAERmfEditorBank_GetInstrumentExtInfo(bankToken, instrumentIndex, &extInfo) == BAE_NO_ERROR)
+        {
+            if (extInfo.hasExtendedData && TEST_FLAG_VALUE(extInfo.flags2, ZBF_advancedInterpolation))
+            {
+#if defined(_DEBUG) && (_DEBUG != 0)
+                uint32_t debugSndID = 0;
+                if (BAERmfEditorBank_GetInstrumentSampleInfo(bankToken,
+                                                             instrumentIndex,
+                                                             0,
+                                                             &firstSampleInfo) == BAE_NO_ERROR)
+                {
+                    debugSndID = (uint32_t)(uint16_t)firstSampleInfo.sndResourceID;
+                }
+                BAE_STDERR("[BankRequiresZsb] TRIP reason=advanced-interpolation instIndex=%u sndID=%u flags2=0x%02X\n",
+                           (unsigned)instrumentIndex,
+                           (unsigned)debugSndID,
+                           (unsigned)extInfo.flags2);
+#endif
+                return TRUE;
+            }
+        }
+
+        sampleCount = 0;
+        if (BAERmfEditorBank_GetInstrumentSampleCount(bankToken, instrumentIndex, &sampleCount) != BAE_NO_ERROR)
+        {
+            continue;
+        }
+
+        for (sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex)
+        {
+            BAERmfEditorBankSampleInfo sampleInfo;
+            uint32_t compressionType;
+
+            if (BAERmfEditorBank_GetInstrumentSampleInfo(bankToken,
+                                                         instrumentIndex,
+                                                         sampleIndex,
+                                                         &sampleInfo) != BAE_NO_ERROR)
+            {
+                continue;
+            }
+
+            if (sampleInfo.loopEnd > sampleInfo.loopStart)
+            {
+                uint32_t loopLength = sampleInfo.loopEnd - sampleInfo.loopStart;
+                if (loopLength >= MIN_LOOP_SIZE_ZMF && loopLength < MIN_LOOP_SIZE_RMF)
+                {
+#if defined(_DEBUG) && (_DEBUG != 0)
+                BAE_STDERR("[BankRequiresZsb] TRIP reason=short-loop-rmf-window instIndex=%u sndID=%u loopStart=%u loopEnd=%u loopLen=%u minZmf=%u minRmf=%u\n",
+                           (unsigned)instrumentIndex,
+                           (unsigned)(uint16_t)sampleInfo.sndResourceID,
+                           (unsigned)sampleInfo.loopStart,
+                           (unsigned)sampleInfo.loopEnd,
+                           (unsigned)loopLength,
+                           (unsigned)MIN_LOOP_SIZE_ZMF,
+                           (unsigned)MIN_LOOP_SIZE_RMF);
+#endif
+                    return TRUE;
+                }
+            }
+
+            compressionType = (uint32_t)sampleInfo.compressionType;
+            if (compressionType == (uint32_t)C_FLAC ||
+                compressionType == (uint32_t)C_VORBIS ||
+                compressionType == (uint32_t)C_OPUS)
+            {
+#if defined(_DEBUG) && (_DEBUG != 0)
+                BAE_STDERR("[BankRequiresZsb] TRIP reason=modern-codec instIndex=%u sndID=%u compressionType=0x%08X\n",
+                           (unsigned)instrumentIndex,
+                           (unsigned)(uint16_t)sampleInfo.sndResourceID,
+                           (unsigned)compressionType);
+#endif
+                return TRUE;
+            }
+        }
+    }
+
+    return FALSE;
+}
+#else
+BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken)
+{
+    (void)bankToken;
+    return FALSE;
+}
 #endif
 
 /* ---------- Bank instrument enumeration and cloning ---------- */
@@ -14459,7 +14567,15 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
         splitPtr[0] = info->lowKey;
         splitPtr[1] = info->highKey;
         XPutShort(splitPtr + 6, (uint16_t)info->splitVolume);
-        sndID = (XShortResourceID)XGetShort(splitPtr + 2);
+        if (info->sndResourceID != 0)
+        {
+            XPutShort(splitPtr + 2, (uint16_t)info->sndResourceID);
+            sndID = info->sndResourceID;
+        }
+        else
+        {
+            sndID = (XShortResourceID)XGetShort(splitPtr + 2);
+        }
 
         /* Root key storage depends on ZBF_useSoundModifierAsRootKey.
          * When set, each split stores its own root in miscParameter1.
@@ -14493,7 +14609,15 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
         {
             XPutShort((unsigned char *)instData + 8, (uint16_t)info->rootKey);
         }
-        sndID = (XShortResourceID)XGetShort((unsigned char *)instData + 0);
+        if (info->sndResourceID != 0)
+        {
+            XPutShort((unsigned char *)instData + 0, (uint16_t)info->sndResourceID);
+            sndID = info->sndResourceID;
+        }
+        else
+        {
+            sndID = (XShortResourceID)XGetShort((unsigned char *)instData + 0);
+        }
     }
 
     result = PV_BankReplaceResource(bankFile,

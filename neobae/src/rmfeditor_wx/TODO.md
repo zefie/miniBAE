@@ -31,11 +31,12 @@
   - ~~need apply button~~
   - ~~make sure we load the edited bank (not original) into memory when switching to midi tab~~
   - ~~lots of bugs with sample editor~~
-  - needs context menus still
+  - ~~needs context menus still~~
   - musicial keyboard vs form fields
   - ~~compression issues in sample editor~~
   - ~~LFO broken~~
-  - Bank editor must force ZSB if using ZMF features
+  - ~~Bank editor must force ZSB if using ZMF features~~
+  - Sample tree
 
 
 # 0.11a

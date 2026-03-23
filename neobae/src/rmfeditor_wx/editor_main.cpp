@@ -37,6 +37,7 @@
 extern "C" {
 #include "NeoBAE.h"
 #include "GenSnd.h"
+#include "X_API.h"
 #include "X_Formats.h"
 }
 
@@ -104,6 +105,63 @@ static bool IsMpegCompressionType(BAERmfEditorCompressionType compressionType) {
             return true;
         default:
             return false;
+    }
+}
+
+static BAERmfEditorCompressionType BankCompressionFromCodec(uint32_t compressionType,
+                                                            uint32_t compressionSubType) {
+    switch (compressionType) {
+        case 0:
+        case FOUR_CHAR('n','o','n','e'):
+            return BAE_EDITOR_COMPRESSION_PCM;
+        case FOUR_CHAR('i','m','a','4'):
+        case FOUR_CHAR('i','m','a','W'):
+        case FOUR_CHAR('i','m','a','3'):
+            return BAE_EDITOR_COMPRESSION_ADPCM;
+        case FOUR_CHAR('f','L','a','C'):
+        case FOUR_CHAR('F','L','A','C'):
+            return BAE_EDITOR_COMPRESSION_FLAC;
+        case FOUR_CHAR('m','p','g','n'): return BAE_EDITOR_COMPRESSION_MP3_32K;
+        case FOUR_CHAR('m','p','g','b'): return BAE_EDITOR_COMPRESSION_MP3_48K;
+        case FOUR_CHAR('m','p','g','d'): return BAE_EDITOR_COMPRESSION_MP3_64K;
+        case FOUR_CHAR('m','p','g','f'): return BAE_EDITOR_COMPRESSION_MP3_96K;
+        case FOUR_CHAR('m','p','g','h'): return BAE_EDITOR_COMPRESSION_MP3_128K;
+        case FOUR_CHAR('m','p','g','j'): return BAE_EDITOR_COMPRESSION_MP3_192K;
+        case FOUR_CHAR('m','p','g','l'): return BAE_EDITOR_COMPRESSION_MP3_256K;
+        case FOUR_CHAR('m','p','g','m'): return BAE_EDITOR_COMPRESSION_MP3_320K;
+        case FOUR_CHAR('O','g','g','V'):
+        case FOUR_CHAR('V','O','R','B'):
+            switch (compressionSubType) {
+                case FOUR_CHAR('v','0','3','2'): return BAE_EDITOR_COMPRESSION_VORBIS_32K;
+                case FOUR_CHAR('v','0','4','8'): return BAE_EDITOR_COMPRESSION_VORBIS_48K;
+                case FOUR_CHAR('v','0','6','4'): return BAE_EDITOR_COMPRESSION_VORBIS_64K;
+                case FOUR_CHAR('v','0','8','0'): return BAE_EDITOR_COMPRESSION_VORBIS_80K;
+                case FOUR_CHAR('v','0','9','6'): return BAE_EDITOR_COMPRESSION_VORBIS_96K;
+                case FOUR_CHAR('v','1','2','8'): return BAE_EDITOR_COMPRESSION_VORBIS_128K;
+                case FOUR_CHAR('v','1','6','0'): return BAE_EDITOR_COMPRESSION_VORBIS_160K;
+                case FOUR_CHAR('v','1','9','2'): return BAE_EDITOR_COMPRESSION_VORBIS_192K;
+                case FOUR_CHAR('v','2','5','6'): return BAE_EDITOR_COMPRESSION_VORBIS_256K;
+                default:                         return BAE_EDITOR_COMPRESSION_VORBIS_128K;
+            }
+        case FOUR_CHAR('O','g','g','O'):
+        case FOUR_CHAR('O','P','U','S'):
+            switch (compressionSubType) {
+                case FOUR_CHAR('o','0','1','2'): return BAE_EDITOR_COMPRESSION_OPUS_12K;
+                case FOUR_CHAR('o','0','1','6'): return BAE_EDITOR_COMPRESSION_OPUS_16K;
+                case FOUR_CHAR('o','0','2','4'): return BAE_EDITOR_COMPRESSION_OPUS_24K;
+                case FOUR_CHAR('o','0','3','2'): return BAE_EDITOR_COMPRESSION_OPUS_32K;
+                case FOUR_CHAR('o','0','4','8'): return BAE_EDITOR_COMPRESSION_OPUS_48K;
+                case FOUR_CHAR('o','0','6','4'): return BAE_EDITOR_COMPRESSION_OPUS_64K;
+                case FOUR_CHAR('o','0','8','0'): return BAE_EDITOR_COMPRESSION_OPUS_80K;
+                case FOUR_CHAR('o','0','9','6'): return BAE_EDITOR_COMPRESSION_OPUS_96K;
+                case FOUR_CHAR('o','1','2','8'): return BAE_EDITOR_COMPRESSION_OPUS_128K;
+                case FOUR_CHAR('o','1','6','0'): return BAE_EDITOR_COMPRESSION_OPUS_160K;
+                case FOUR_CHAR('o','1','9','2'): return BAE_EDITOR_COMPRESSION_OPUS_192K;
+                case FOUR_CHAR('o','2','5','6'): return BAE_EDITOR_COMPRESSION_OPUS_256K;
+                default:                         return BAE_EDITOR_COMPRESSION_OPUS_48K;
+            }
+        default:
+            return BAE_EDITOR_COMPRESSION_PCM;
     }
 }
 
@@ -1058,7 +1116,14 @@ public:
                 m_bankEditorPanel,
                 [this](uint32_t instrumentIndex) { CloneBankInstrumentToSongByIndex(instrumentIndex); },
                 [this](uint32_t instrumentIndex) { AliasBankInstrumentToSongByIndex(instrumentIndex); },
-                [this](uint32_t instrumentIndex) { DeleteSongInstrumentMatchingBankIndex(instrumentIndex); });
+                [this](uint32_t instrumentIndex) { DeleteSongInstrumentMatchingBankIndex(instrumentIndex); },
+                [this](uint32_t instrumentIndex) { CompressBankInstrumentSamples(instrumentIndex); });
+            BankEditorPanel_SetSampleContextCallbacks(
+                m_bankEditorPanel,
+                [this](uint32_t instrumentIndex, uint32_t sampleIndex) { AddBankSample(instrumentIndex, sampleIndex); },
+                [this](uint32_t instrumentIndex, uint32_t sampleIndex) { DeleteBankSample(instrumentIndex, sampleIndex); },
+                [this](uint32_t instrumentIndex, uint32_t sampleIndex) { AliasBankSampleToInstrument(instrumentIndex, sampleIndex); },
+                [this](uint32_t instrumentIndex, uint32_t sampleIndex) { CopyBankSampleToInstrument(instrumentIndex, sampleIndex); });
             BankEditorPanel_SetSourceCodecCallback(
                 m_bankEditorPanel,
                 [this](uint16_t sndID, wxString &outCodecDescription) -> bool {
@@ -1247,6 +1312,7 @@ public:
         Bind(wxEVT_MENU, &MainFrame::OnBankLoadBuiltin, this, ID_BankLoadBuiltin);
         m_savePreviewToSongCheck->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent &) {
             ApplyEngineConfigToDocument();
+            UpdateStatusBar();
         });
         LoadIniSettings();
         EnsurePlaybackEngine();
@@ -1416,6 +1482,47 @@ private:
         std::vector<uint8_t> sndData;
     };
     std::unordered_map<uint16_t, BankSampleSndEntry> m_bankSampleSndCache;
+    bool m_batchCompressHasUserCodecChoice = false;
+    BAERmfEditorCompressionType m_batchCompressLastCompressionType = BAE_EDITOR_COMPRESSION_DONT_CHANGE;
+    BAERmfEditorOpusMode m_batchCompressLastOpusMode = BAE_EDITOR_OPUS_MODE_AUDIO;
+    bool m_batchCompressLastOpusRoundTrip = false;
+
+    void GetBatchCompressionDialogInitialSelection(BAERmfEditorCompressionType *outCompressionType,
+                                                   BAERmfEditorOpusMode *outOpusMode,
+                                                   bool *outOpusRoundTrip) const
+    {
+        if (!outCompressionType || !outOpusMode || !outOpusRoundTrip) {
+            return;
+        }
+
+        if (m_batchCompressHasUserCodecChoice) {
+            *outCompressionType = m_batchCompressLastCompressionType;
+            *outOpusMode = m_batchCompressLastOpusMode;
+            *outOpusRoundTrip = m_batchCompressLastOpusRoundTrip;
+        } else {
+            *outCompressionType = BAE_EDITOR_COMPRESSION_DONT_CHANGE;
+            *outOpusMode = BAE_EDITOR_OPUS_MODE_AUDIO;
+            *outOpusRoundTrip = false;
+        }
+    }
+
+    void UpdateBatchCompressionDialogSelection(BAERmfEditorCompressionType compressionType,
+                                               BAERmfEditorOpusMode opusMode,
+                                               bool opusRoundTrip)
+    {
+        if (compressionType == BAE_EDITOR_COMPRESSION_DONT_CHANGE) {
+            m_batchCompressHasUserCodecChoice = false;
+            m_batchCompressLastCompressionType = BAE_EDITOR_COMPRESSION_DONT_CHANGE;
+            m_batchCompressLastOpusMode = BAE_EDITOR_OPUS_MODE_AUDIO;
+            m_batchCompressLastOpusRoundTrip = false;
+            return;
+        }
+
+        m_batchCompressHasUserCodecChoice = true;
+        m_batchCompressLastCompressionType = compressionType;
+        m_batchCompressLastOpusMode = opusMode;
+        m_batchCompressLastOpusRoundTrip = opusRoundTrip;
+    }
 
     bool IsSessionDirty() const {
         return m_hasUnsavedChanges || m_bankHasUnsavedChanges;
@@ -1448,7 +1555,19 @@ private:
             UpdateLoadedBankStatus();
             UpdateStatusBar();
             UpdateFrameTitle();
+            return;
         }
+
+        /* Keep status metadata (like ZSB requirement) fresh even when dirty
+         * state itself did not toggle. */
+        UpdateStatusBar();
+    }
+
+    bool BankRequiresZsb() const {
+        if (!m_bankToken) {
+            return false;
+        }
+        return BAERmfEditorBank_RequiresZsb(m_bankToken) ? true : false;
     }
 
     static wxString GetIniPath() {
@@ -6146,6 +6265,8 @@ private:
         wxString projectName = m_sessionPath.empty() ? "New Project" : wxFileName(m_sessionPath).GetName();
         wxString mediaName   = GetMediaDisplayName();
         wxString bankName    = GetBankDisplayName();
+        wxString requirementLabel;
+        wxString requirementValue;
         if (IsSessionDirty()) {
             projectName += " (Modified)";
         }
@@ -6155,8 +6276,21 @@ private:
         if (m_bankHasUnsavedChanges || m_bankModifiedHintFromSession) {
             bankName += " (Modified)";
         }
-        wxString status = wxString::Format("Project: %s  |  Media File: %s  |  Bank: %s",
-                                           projectName, mediaName, bankName);
+
+        if (m_editorMode == kEditorModeBank) {
+            requirementLabel = "ZSB Required";
+            requirementValue = BankRequiresZsb() ? "Yes" : "No";
+        } else {
+            requirementLabel = "ZMF Required";
+            requirementValue = (m_document && BAERmfEditorDocument_RequiresZmf(m_document)) ? "Yes" : "No";
+        }
+
+        wxString status = wxString::Format("Project: %s  |  Media File: %s  |  Bank: %s  |  %s: %s",
+                                           projectName,
+                                           mediaName,
+                                           bankName,
+                                           requirementLabel,
+                                           requirementValue);
         EnsureStatusInfoLabel();
         if (m_statusInfoLabel) {
             m_statusInfoLabel->SetLabel(status);
@@ -6202,6 +6336,7 @@ private:
         } else if (page == kEditorModeBank) {
             m_editorMode = kEditorModeBank;
         }
+        UpdateStatusBar();
         event.Skip();
     }
 
@@ -8118,6 +8253,553 @@ private:
                       0);
     }
 
+    bool PromptBankTargetInstrument(uint32_t sourceInstrumentIndex,
+                                    uint32_t *outTargetInstrumentIndex,
+                                    wxString const &title,
+                                    wxString const &message)
+    {
+        wxArrayString choices;
+        std::vector<uint32_t> indices;
+        uint32_t instCount = 0;
+
+        if (!m_bankToken || !outTargetInstrumentIndex) {
+            return false;
+        }
+        if (BAERmfEditorBank_GetInstrumentCount(m_bankToken, &instCount) != BAE_NO_ERROR || instCount == 0) {
+            return false;
+        }
+        for (uint32_t i = 0; i < instCount; ++i) {
+            BAERmfEditorBankInstrumentInfo info;
+            wxString label;
+
+            if (i == sourceInstrumentIndex) {
+                continue;
+            }
+            if (BAERmfEditorBank_GetInstrumentInfo(m_bankToken, i, &info) != BAE_NO_ERROR) {
+                continue;
+            }
+            if (info.name[0]) {
+                label = wxString::Format("P%u B%u: %s (%d splits)",
+                                         static_cast<unsigned>(info.program),
+                                         static_cast<unsigned>(info.bank),
+                                         wxString::FromUTF8(info.name),
+                                         static_cast<int>(info.keySplitCount));
+            } else {
+                label = wxString::Format("P%u B%u: (unnamed) (%d splits)",
+                                         static_cast<unsigned>(info.program),
+                                         static_cast<unsigned>(info.bank),
+                                         static_cast<int>(info.keySplitCount));
+            }
+            choices.Add(label);
+            indices.push_back(i);
+        }
+        if (choices.IsEmpty()) {
+            wxMessageBox("No other instruments are available in the current bank.",
+                         title,
+                         wxOK | wxICON_INFORMATION,
+                         this);
+            return false;
+        }
+
+        wxSingleChoiceDialog pickDlg(this, message, title, choices);
+        if (pickDlg.ShowModal() != wxID_OK) {
+            return false;
+        }
+        int selection = pickDlg.GetSelection();
+        if (selection < 0 || static_cast<size_t>(selection) >= indices.size()) {
+            return false;
+        }
+        *outTargetInstrumentIndex = indices[static_cast<size_t>(selection)];
+        return true;
+    }
+
+    void ReloadBankEditorAfterMutation()
+    {
+        if (m_bankEditorPanel && m_bankToken) {
+            if (m_loadedBankPath.empty()) {
+                BankEditorPanel_LoadBank(m_bankEditorPanel, m_bankToken, "(built-in)");
+            } else {
+                wxScopedCharBuffer utf8 = m_loadedBankPath.utf8_str();
+                BankEditorPanel_LoadBank(m_bankEditorPanel, m_bankToken, utf8.data());
+            }
+        }
+        RefreshBankDirtyStateFromHash();
+    }
+
+    void CompressBankInstrumentSamples(uint32_t instrumentIndex)
+    {
+        uint32_t sampleCount = 0;
+        std::vector<uint32_t> sampleIndices;
+        BAERmfEditorCompressionType initialCompressionType = BAE_EDITOR_COMPRESSION_DONT_CHANGE;
+        BAERmfEditorOpusMode initialOpusMode = BAE_EDITOR_OPUS_MODE_AUDIO;
+        bool initialOpusRoundTrip = false;
+        bool anyFailed = false;
+
+        if (!m_bankToken) {
+            return;
+        }
+        if (BAERmfEditorBank_GetInstrumentSampleCount(m_bankToken, instrumentIndex, &sampleCount) != BAE_NO_ERROR || sampleCount == 0) {
+            wxMessageBox("No samples found for the selected instrument.",
+                         "Compress Instrument Samples",
+                         wxOK | wxICON_INFORMATION,
+                         this);
+            return;
+        }
+
+        sampleIndices.reserve(sampleCount);
+        for (uint32_t i = 0; i < sampleCount; ++i) {
+            sampleIndices.push_back(i);
+        }
+
+        GetBatchCompressionDialogInitialSelection(&initialCompressionType,
+                                                  &initialOpusMode,
+                                                  &initialOpusRoundTrip);
+
+        BatchCompressDialog dlg(this,
+                                sampleIndices,
+                                false,
+                                initialCompressionType,
+                                initialOpusMode,
+                                initialOpusRoundTrip);
+        if (dlg.ShowModal() != wxID_OK) {
+            return;
+        }
+
+        {
+            BAERmfEditorCompressionType compressionType = dlg.GetSelectedCompressionType();
+            BAERmfEditorOpusMode opusMode = dlg.GetSelectedOpusMode();
+            bool opusRoundTrip = dlg.GetSelectedOpusRoundTrip();
+
+            UpdateBatchCompressionDialogSelection(compressionType, opusMode, opusRoundTrip);
+
+            for (uint32_t sampleIndex : sampleIndices) {
+                BAERmfEditorBankSampleInfo sampleInfo;
+                BAEResult encodeResult;
+                BAERmfEditorCompressionType effectiveCompressionType = compressionType;
+                BAERmfEditorSndStorageType effectiveStorageType;
+                bool effectiveOpusRoundTrip = opusRoundTrip;
+                uint16_t sndID;
+                auto it = m_bankSampleSndCache.end();
+
+                if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bankToken, instrumentIndex, sampleIndex, &sampleInfo) != BAE_NO_ERROR) {
+                    anyFailed = true;
+                    continue;
+                }
+
+                effectiveStorageType = sampleInfo.sndStorageType;
+
+                /* Match bank-editor apply semantics: always compress from the
+                 * pristine original wrapped SND payload cached by sndResourceID. */
+                sndID = sampleInfo.sndResourceID;
+                it = m_bankSampleSndCache.find(sndID);
+                if (it == m_bankSampleSndCache.end()) {
+                    static const XResourceType sndTypes[] = { ID_SND, ID_CSND, ID_ESND, 0 };
+                    int32_t typeIdx;
+                    for (typeIdx = 0; sndTypes[typeIdx] != 0; ++typeIdx)
+                    {
+                        int32_t rawSize = 0;
+                        XPTR rawData = XGetFileResource((XFILE)m_bankToken,
+                                                        sndTypes[typeIdx],
+                                                        (XLongResourceID)sndID,
+                                                        NULL,
+                                                        &rawSize);
+                        if (rawData && rawSize > 0)
+                        {
+                            BankSampleSndEntry entry;
+                            entry.sndType = sndTypes[typeIdx];
+                            entry.sndData.assign(static_cast<uint8_t *>(rawData),
+                                                 static_cast<uint8_t *>(rawData) + rawSize);
+                            XDisposePtr(rawData);
+                            m_bankSampleSndCache.emplace(sndID, std::move(entry));
+                            it = m_bankSampleSndCache.find(sndID);
+                            break;
+                        }
+                        if (rawData)
+                        {
+                            XDisposePtr(rawData);
+                        }
+                    }
+                }
+
+                encodeResult = BAE_BAD_FILE;
+                if (it != m_bankSampleSndCache.end() && !it->second.sndData.empty()) {
+                    BankSampleSndEntry const &entry = it->second;
+                    XPTR sndData = XNewPtr((int32_t)entry.sndData.size());
+                    if (sndData) {
+                        int32_t sndSize = (int32_t)entry.sndData.size();
+                        XBlockMove((XPTR)entry.sndData.data(), sndData, sndSize);
+
+                        if (entry.sndType == ID_CSND) {
+                            XPTR decompressed = XDecompressPtr(sndData, (uint32_t)sndSize, FALSE);
+                            XDisposePtr(sndData);
+                            sndData = decompressed;
+                            sndSize = sndData ? XGetPtrSize(sndData) : 0;
+                        } else if (entry.sndType == ID_ESND) {
+                            XDecryptData(sndData, (uint32_t)sndSize);
+                        }
+
+                        if (sndData && sndSize > 0) {
+                            SampleDataInfo srcInfo;
+                            SampleDataInfo sdi;
+                            XPTR pcmData;
+                            XPTR pcmOwner;
+
+                            XSetMemory(&srcInfo, (int32_t)sizeof(srcInfo), 0);
+                            (void)XGetSampleInfoFromSnd(sndData, &srcInfo);
+
+                            XSetMemory(&sdi, (int32_t)sizeof(sdi), 0);
+                            pcmData = XGetSamplePtrFromSnd(sndData, &sdi);
+                            pcmOwner = NULL;
+                            if (sdi.pMasterPtr && sdi.pMasterPtr != sndData)
+                            {
+                                pcmOwner = sdi.pMasterPtr;
+                            }
+
+                            if (pcmData && sdi.frames > 0 && sdi.bitSize > 0 && sdi.channels > 0)
+                            {
+                                if (effectiveCompressionType == BAE_EDITOR_COMPRESSION_DONT_CHANGE)
+                                {
+                                    auto mapBankCompression = [](uint32_t compressionType,
+                                                                 uint32_t compressionSubType)
+                                        -> BAERmfEditorCompressionType
+                                    {
+                                        switch (compressionType)
+                                        {
+                                            case 0:
+                                            case FOUR_CHAR('n','o','n','e'):
+                                                return BAE_EDITOR_COMPRESSION_PCM;
+                                            case FOUR_CHAR('i','m','a','4'):
+                                            case FOUR_CHAR('i','m','a','W'):
+                                            case FOUR_CHAR('i','m','a','3'):
+                                                return BAE_EDITOR_COMPRESSION_ADPCM;
+                                            case FOUR_CHAR('f','L','a','C'):
+                                            case FOUR_CHAR('F','L','A','C'):
+                                                return BAE_EDITOR_COMPRESSION_FLAC;
+                                            case FOUR_CHAR('m','p','g','n'): return BAE_EDITOR_COMPRESSION_MP3_32K;
+                                            case FOUR_CHAR('m','p','g','b'): return BAE_EDITOR_COMPRESSION_MP3_48K;
+                                            case FOUR_CHAR('m','p','g','d'): return BAE_EDITOR_COMPRESSION_MP3_64K;
+                                            case FOUR_CHAR('m','p','g','f'): return BAE_EDITOR_COMPRESSION_MP3_96K;
+                                            case FOUR_CHAR('m','p','g','h'): return BAE_EDITOR_COMPRESSION_MP3_128K;
+                                            case FOUR_CHAR('m','p','g','j'): return BAE_EDITOR_COMPRESSION_MP3_192K;
+                                            case FOUR_CHAR('m','p','g','l'): return BAE_EDITOR_COMPRESSION_MP3_256K;
+                                            case FOUR_CHAR('m','p','g','m'): return BAE_EDITOR_COMPRESSION_MP3_320K;
+                                            case FOUR_CHAR('O','g','g','V'):
+                                            case FOUR_CHAR('V','O','R','B'):
+                                                switch (compressionSubType)
+                                                {
+                                                    case FOUR_CHAR('v','0','3','2'): return BAE_EDITOR_COMPRESSION_VORBIS_32K;
+                                                    case FOUR_CHAR('v','0','4','8'): return BAE_EDITOR_COMPRESSION_VORBIS_48K;
+                                                    case FOUR_CHAR('v','0','6','4'): return BAE_EDITOR_COMPRESSION_VORBIS_64K;
+                                                    case FOUR_CHAR('v','0','8','0'): return BAE_EDITOR_COMPRESSION_VORBIS_80K;
+                                                    case FOUR_CHAR('v','0','9','6'): return BAE_EDITOR_COMPRESSION_VORBIS_96K;
+                                                    case FOUR_CHAR('v','1','2','8'): return BAE_EDITOR_COMPRESSION_VORBIS_128K;
+                                                    case FOUR_CHAR('v','1','6','0'): return BAE_EDITOR_COMPRESSION_VORBIS_160K;
+                                                    case FOUR_CHAR('v','1','9','2'): return BAE_EDITOR_COMPRESSION_VORBIS_192K;
+                                                    case FOUR_CHAR('v','2','5','6'): return BAE_EDITOR_COMPRESSION_VORBIS_256K;
+                                                    default:                         return BAE_EDITOR_COMPRESSION_VORBIS_128K;
+                                                }
+                                            case FOUR_CHAR('O','g','g','O'):
+                                            case FOUR_CHAR('O','P','U','S'):
+                                                switch (compressionSubType)
+                                                {
+                                                    case FOUR_CHAR('o','0','1','2'): return BAE_EDITOR_COMPRESSION_OPUS_12K;
+                                                    case FOUR_CHAR('o','0','1','6'): return BAE_EDITOR_COMPRESSION_OPUS_16K;
+                                                    case FOUR_CHAR('o','0','2','4'): return BAE_EDITOR_COMPRESSION_OPUS_24K;
+                                                    case FOUR_CHAR('o','0','3','2'): return BAE_EDITOR_COMPRESSION_OPUS_32K;
+                                                    case FOUR_CHAR('o','0','4','8'): return BAE_EDITOR_COMPRESSION_OPUS_48K;
+                                                    case FOUR_CHAR('o','0','6','4'): return BAE_EDITOR_COMPRESSION_OPUS_64K;
+                                                    case FOUR_CHAR('o','0','8','0'): return BAE_EDITOR_COMPRESSION_OPUS_80K;
+                                                    case FOUR_CHAR('o','0','9','6'): return BAE_EDITOR_COMPRESSION_OPUS_96K;
+                                                    case FOUR_CHAR('o','1','2','8'): return BAE_EDITOR_COMPRESSION_OPUS_128K;
+                                                    case FOUR_CHAR('o','1','6','0'): return BAE_EDITOR_COMPRESSION_OPUS_160K;
+                                                    case FOUR_CHAR('o','1','9','2'): return BAE_EDITOR_COMPRESSION_OPUS_192K;
+                                                    case FOUR_CHAR('o','2','5','6'): return BAE_EDITOR_COMPRESSION_OPUS_256K;
+                                                    default:                         return BAE_EDITOR_COMPRESSION_OPUS_48K;
+                                                }
+                                            default:
+                                                return BAE_EDITOR_COMPRESSION_PCM;
+                                        }
+                                    };
+
+                                    uint32_t sourceSubType = (uint32_t)CS_DEFAULT;
+                                    if ((uint32_t)srcInfo.compressionType == (uint32_t)C_VORBIS ||
+                                        (uint32_t)srcInfo.compressionType == (uint32_t)C_OPUS)
+                                    {
+                                        XSndHeader3 *header3 = (XSndHeader3 *)sndData;
+                                        if (sndSize >= (int32_t)sizeof(XSndHeader3) &&
+                                            XGetShort(&header3->type) == XThirdSoundFormat &&
+                                            (uint32_t)XGetLong(&header3->sndBuffer.subType) == (uint32_t)srcInfo.compressionType &&
+                                            (uint32_t)XGetLong(&header3->sndBuffer.reserved3[0]) == (uint32_t)FOUR_CHAR('b','q','s','t'))
+                                        {
+                                            sourceSubType = (uint32_t)XGetLong(&header3->sndBuffer.reserved3[1]);
+                                        }
+                                    }
+
+                                    effectiveCompressionType = mapBankCompression((uint32_t)srcInfo.compressionType,
+                                                                                  sourceSubType);
+                                    effectiveStorageType = (entry.sndType == ID_CSND) ? BAE_EDITOR_SND_STORAGE_CSND :
+                                                           (entry.sndType == ID_SND)  ? BAE_EDITOR_SND_STORAGE_SND :
+                                                                                         BAE_EDITOR_SND_STORAGE_ESND;
+                                    effectiveOpusRoundTrip = XGetSoundOpusRoundTripFlag(sndData) ? true : false;
+                                }
+
+                                BAE_UNSIGNED_FIXED sourceRate = sdi.rate ? sdi.rate : srcInfo.rate;
+                                encodeResult = BAERmfEditorBank_ReEncodeSampleFromPCMEx(
+                                    m_bankToken,
+                                    instrumentIndex,
+                                    sampleIndex,
+                                    effectiveCompressionType,
+                                    effectiveStorageType,
+                                    opusMode,
+                                    effectiveOpusRoundTrip ? TRUE : FALSE,
+                                    pcmData,
+                                    sdi.frames,
+                                    sdi.bitSize,
+                                    sdi.channels,
+                                    sourceRate);
+                            }
+
+                            if (pcmOwner)
+                            {
+                                XDisposePtr(pcmOwner);
+                            }
+                        }
+
+                        if (sndData)
+                        {
+                            XDisposePtr(sndData);
+                        }
+                    }
+                }
+
+                if (encodeResult != BAE_NO_ERROR) {
+                    /* Keep this operation resilient even if cache decode fails. */
+                    encodeResult = BAERmfEditorBank_ReEncodeSample(
+                        m_bankToken,
+                        instrumentIndex,
+                        sampleIndex,
+                        effectiveCompressionType,
+                        effectiveStorageType,
+                        opusMode);
+                }
+
+                if (encodeResult != BAE_NO_ERROR) {
+                    anyFailed = true;
+                    continue;
+                }
+            }
+        }
+
+        if (anyFailed) {
+            wxMessageBox("One or more samples failed to compress.",
+                         "Compress Instrument Samples",
+                         wxOK | wxICON_WARNING,
+                         this);
+        }
+        ReloadBankEditorAfterMutation();
+    }
+
+    void AddBankSample(uint32_t instrumentIndex, uint32_t sampleIndex)
+    {
+        (void)instrumentIndex;
+        (void)sampleIndex;
+        wxMessageBox("Adding bank samples is not supported by the current bank editing API yet.",
+                     "Add Sample",
+                     wxOK | wxICON_INFORMATION,
+                     this);
+    }
+
+    void DeleteBankSample(uint32_t instrumentIndex, uint32_t sampleIndex)
+    {
+        (void)instrumentIndex;
+        (void)sampleIndex;
+        wxMessageBox("Deleting bank samples is not supported by the current bank editing API yet.",
+                     "Delete Sample",
+                     wxOK | wxICON_INFORMATION,
+                     this);
+    }
+
+    void AliasBankSampleToInstrument(uint32_t sourceInstrumentIndex, uint32_t sourceSampleIndex)
+    {
+        uint32_t targetInstrumentIndex = 0;
+        uint32_t targetSampleCount = 0;
+        uint32_t targetSampleIndex = 0;
+        BAERmfEditorBankSampleInfo sourceInfo;
+        BAERmfEditorBankSampleInfo targetInfo;
+        BAEResult setResult;
+
+        if (!m_bankToken) {
+            return;
+        }
+        if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bankToken, sourceInstrumentIndex, sourceSampleIndex, &sourceInfo) != BAE_NO_ERROR) {
+            wxMessageBox("Failed to read source sample.", "Alias Sample", wxOK | wxICON_ERROR, this);
+            return;
+        }
+        if (!PromptBankTargetInstrument(sourceInstrumentIndex,
+                                        &targetInstrumentIndex,
+                                        "Alias Sample to Another Instrument",
+                                        "Select the destination instrument for aliasing:")) {
+            return;
+        }
+        if (BAERmfEditorBank_GetInstrumentSampleCount(m_bankToken, targetInstrumentIndex, &targetSampleCount) != BAE_NO_ERROR || targetSampleCount == 0) {
+            wxMessageBox("Destination instrument has no writable sample slots.", "Alias Sample", wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        targetSampleIndex = std::min(sourceSampleIndex, targetSampleCount - 1);
+        if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bankToken, targetInstrumentIndex, targetSampleIndex, &targetInfo) != BAE_NO_ERROR) {
+            wxMessageBox("Failed to read destination sample.", "Alias Sample", wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        targetInfo.sndResourceID = sourceInfo.sndResourceID;
+        targetInfo.rootKey = sourceInfo.rootKey;
+        targetInfo.sampleRate = sourceInfo.sampleRate;
+        targetInfo.loopStart = sourceInfo.loopStart;
+        targetInfo.loopEnd = sourceInfo.loopEnd;
+        targetInfo.frameCount = sourceInfo.frameCount;
+        targetInfo.bitDepth = sourceInfo.bitDepth;
+        targetInfo.channels = sourceInfo.channels;
+        targetInfo.compressionType = sourceInfo.compressionType;
+        targetInfo.compressionSubType = sourceInfo.compressionSubType;
+        targetInfo.sndStorageType = sourceInfo.sndStorageType;
+
+        setResult = BAERmfEditorBank_SetInstrumentSampleInfo(m_bankToken,
+                                                             targetInstrumentIndex,
+                                                             targetSampleIndex,
+                                                             &targetInfo);
+        if (setResult != BAE_NO_ERROR) {
+            wxMessageBox("Failed to alias sample to destination instrument.", "Alias Sample", wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        ReloadBankEditorAfterMutation();
+        SetStatusText("Aliased sample to destination instrument", 0);
+    }
+
+    void CopyBankSampleToInstrument(uint32_t sourceInstrumentIndex, uint32_t sourceSampleIndex)
+    {
+        static const XResourceType kSndTypes[] = { ID_SND, ID_CSND, ID_ESND, 0 };
+        uint32_t targetInstrumentIndex = 0;
+        uint32_t targetSampleCount = 0;
+        uint32_t targetSampleIndex = 0;
+        BAERmfEditorBankSampleInfo sourceInfo;
+        BAERmfEditorBankSampleInfo targetInfo;
+        XLongResourceID newSndID = 0;
+        XResourceType sourceType = 0;
+        XPTR sourceRawData = NULL;
+        int32_t sourceRawSize = 0;
+        char sourceName[256];
+        bool added = false;
+        BAEResult setResult;
+
+        if (!m_bankToken) {
+            return;
+        }
+        if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bankToken, sourceInstrumentIndex, sourceSampleIndex, &sourceInfo) != BAE_NO_ERROR) {
+            wxMessageBox("Failed to read source sample.", "Copy Sample", wxOK | wxICON_ERROR, this);
+            return;
+        }
+        if (!PromptBankTargetInstrument(sourceInstrumentIndex,
+                                        &targetInstrumentIndex,
+                                        "Copy Sample to Another Instrument",
+                                        "Select the destination instrument for copied audio:")) {
+            return;
+        }
+        if (BAERmfEditorBank_GetInstrumentSampleCount(m_bankToken, targetInstrumentIndex, &targetSampleCount) != BAE_NO_ERROR || targetSampleCount == 0) {
+            wxMessageBox("Destination instrument has no writable sample slots.", "Copy Sample", wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        targetSampleIndex = std::min(sourceSampleIndex, targetSampleCount - 1);
+        if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bankToken, targetInstrumentIndex, targetSampleIndex, &targetInfo) != BAE_NO_ERROR) {
+            wxMessageBox("Failed to read destination sample.", "Copy Sample", wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        sourceName[0] = 0;
+        for (int i = 0; kSndTypes[i] != 0; ++i) {
+            sourceRawData = XGetFileResource((XFILE)m_bankToken,
+                                             kSndTypes[i],
+                                             (XLongResourceID)sourceInfo.sndResourceID,
+                                             NULL,
+                                             &sourceRawSize);
+            if (sourceRawData && sourceRawSize > 0) {
+                sourceType = kSndTypes[i];
+                (void)XGetFileResourceName((XFILE)m_bankToken,
+                                           sourceType,
+                                           (XLongResourceID)sourceInfo.sndResourceID,
+                                           sourceName);
+                break;
+            }
+            if (sourceRawData) {
+                XDisposePtr(sourceRawData);
+                sourceRawData = NULL;
+            }
+        }
+
+        if (!sourceRawData || sourceRawSize <= 0 || sourceType == 0) {
+            if (sourceRawData) {
+                XDisposePtr(sourceRawData);
+            }
+            wxMessageBox("Failed to load source sample resource data.", "Copy Sample", wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        if (XGetUniqueFileResourceID((XFILE)m_bankToken, sourceType, &newSndID) == 0 &&
+            newSndID > 0 && newSndID <= 0xFFFF &&
+            XAddFileResource((XFILE)m_bankToken,
+                             sourceType,
+                             newSndID,
+                             sourceName,
+                             sourceRawData,
+                             sourceRawSize) == 0)
+        {
+            added = true;
+        }
+
+        if (!added) {
+            XDisposePtr(sourceRawData);
+            wxMessageBox("Failed to create copied sample resource.", "Copy Sample", wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        {
+            BankSampleSndEntry cacheEntry;
+            cacheEntry.sndType = sourceType;
+            cacheEntry.sndData.assign(static_cast<uint8_t *>(sourceRawData),
+                                      static_cast<uint8_t *>(sourceRawData) + sourceRawSize);
+            m_bankSampleSndCache[(uint16_t)newSndID] = std::move(cacheEntry);
+        }
+        XDisposePtr(sourceRawData);
+
+        targetInfo.sndResourceID = (XShortResourceID)newSndID;
+        targetInfo.rootKey = sourceInfo.rootKey;
+        targetInfo.sampleRate = sourceInfo.sampleRate;
+        targetInfo.loopStart = sourceInfo.loopStart;
+        targetInfo.loopEnd = sourceInfo.loopEnd;
+        targetInfo.frameCount = sourceInfo.frameCount;
+        targetInfo.bitDepth = sourceInfo.bitDepth;
+        targetInfo.channels = sourceInfo.channels;
+        targetInfo.compressionType = sourceInfo.compressionType;
+        targetInfo.compressionSubType = sourceInfo.compressionSubType;
+        targetInfo.sndStorageType = (sourceType == ID_CSND) ? BAE_EDITOR_SND_STORAGE_CSND :
+                                    (sourceType == ID_SND) ? BAE_EDITOR_SND_STORAGE_SND :
+                                                             BAE_EDITOR_SND_STORAGE_ESND;
+
+        setResult = BAERmfEditorBank_SetInstrumentSampleInfo(m_bankToken,
+                                                             targetInstrumentIndex,
+                                                             targetSampleIndex,
+                                                             &targetInfo);
+        if (setResult != BAE_NO_ERROR) {
+            wxMessageBox("Failed to assign copied sample to destination instrument.", "Copy Sample", wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        ReloadBankEditorAfterMutation();
+        SetStatusText("Copied sample to destination instrument", 0);
+    }
+
     void OnCloneFromBank(wxCommandEvent &) {
         if (!m_document) {
             wxMessageBox("Open or create a document first.", "Clone from Bank", wxOK | wxICON_INFORMATION, this);
@@ -8993,18 +9675,12 @@ private:
         }
 
         // Show compression dialog
-        BAERmfEditorCompressionType initialCompressionType = BAE_EDITOR_COMPRESSION_OPUS_128K;
+        BAERmfEditorCompressionType initialCompressionType = BAE_EDITOR_COMPRESSION_DONT_CHANGE;
         BAERmfEditorOpusMode initialOpusMode = BAE_EDITOR_OPUS_MODE_AUDIO;
         bool initialOpusRoundTrip = false;
-        {
-            BAERmfEditorSampleInfo initialInfo;
-            if (BAERmfEditorDocument_GetSampleInfo(m_document, sampleIndices[0], &initialInfo) == BAE_NO_ERROR)
-            {
-                initialCompressionType = initialInfo.compressionType;
-                initialOpusMode = initialInfo.opusMode;
-                initialOpusRoundTrip = (initialInfo.opusRoundTripResample == TRUE);
-            }
-        }
+        GetBatchCompressionDialogInitialSelection(&initialCompressionType,
+                                                  &initialOpusMode,
+                                                  &initialOpusRoundTrip);
         BatchCompressDialog dlg(this,
                                 sampleIndices,
                                 false,
@@ -9015,6 +9691,9 @@ private:
             BAERmfEditorCompressionType compressionType = dlg.GetSelectedCompressionType();
             BAERmfEditorOpusMode opusMode = dlg.GetSelectedOpusMode();
             bool opusRoundTrip = dlg.GetSelectedOpusRoundTrip();
+
+            UpdateBatchCompressionDialogSelection(compressionType, opusMode, opusRoundTrip);
+
             // Apply compression to all samples
             for (uint32_t sampleIndex : sampleIndices) {
                 BAERmfEditorSampleInfo info;
@@ -9049,18 +9728,12 @@ private:
         }
 
         // Show compression dialog
-        BAERmfEditorCompressionType initialCompressionType = BAE_EDITOR_COMPRESSION_OPUS_128K;
+        BAERmfEditorCompressionType initialCompressionType = BAE_EDITOR_COMPRESSION_DONT_CHANGE;
         BAERmfEditorOpusMode initialOpusMode = BAE_EDITOR_OPUS_MODE_AUDIO;
         bool initialOpusRoundTrip = false;
-        {
-            BAERmfEditorSampleInfo initialInfo;
-            if (BAERmfEditorDocument_GetSampleInfo(m_document, allSampleIndices[0], &initialInfo) == BAE_NO_ERROR)
-            {
-                initialCompressionType = initialInfo.compressionType;
-                initialOpusMode = initialInfo.opusMode;
-                initialOpusRoundTrip = (initialInfo.opusRoundTripResample == TRUE);
-            }
-        }
+        GetBatchCompressionDialogInitialSelection(&initialCompressionType,
+                                                  &initialOpusMode,
+                                                  &initialOpusRoundTrip);
         BatchCompressDialog dlg(this,
                                 allSampleIndices,
                                 true,
@@ -9071,6 +9744,9 @@ private:
             BAERmfEditorCompressionType compressionType = dlg.GetSelectedCompressionType();
             BAERmfEditorOpusMode opusMode = dlg.GetSelectedOpusMode();
             bool opusRoundTrip = dlg.GetSelectedOpusRoundTrip();
+
+            UpdateBatchCompressionDialogSelection(compressionType, opusMode, opusRoundTrip);
+
             // Apply compression to all samples
             for (uint32_t sampleIndex : allSampleIndices) {
                 BAERmfEditorSampleInfo info;
@@ -9388,8 +10064,7 @@ public:
                 }
             }
             if (darkMode) {
-                g_object_set(gtk_settings_get_default(),
-                             "gtk-application-prefer-dark-theme", TRUE, NULL);
+                g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme", TRUE, NULL);
             }
         }
 #endif // __WXGTK__

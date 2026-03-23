@@ -10,7 +10,7 @@ public:
     BatchCompressDialog(wxWindow *parent,
                         const std::vector<uint32_t> &sampleIndices,
                         bool compressAll = false,
-                        BAERmfEditorCompressionType initialCompressionType = BAE_EDITOR_COMPRESSION_OPUS_128K,
+                        BAERmfEditorCompressionType initialCompressionType = BAE_EDITOR_COMPRESSION_DONT_CHANGE,
                         BAERmfEditorOpusMode initialOpusMode = BAE_EDITOR_OPUS_MODE_AUDIO,
                         bool initialOpusRoundTrip = false);
     ~BatchCompressDialog();

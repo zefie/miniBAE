@@ -3328,6 +3328,7 @@ BAE_BOOL BAERmfEditorDocument_CanSaveAsMidi(BAERmfEditorDocument const *document
 BAEResult BAERmfEditorDocument_DebugReportMidiRoundTripDiff(BAERmfEditorDocument *document);
 BAEResult BAERmfEditorDocument_Validate(BAERmfEditorDocument *document);
 BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document);
+BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken);
 
 /* ---------- Bank instrument enumeration and cloning ---------- */
 
