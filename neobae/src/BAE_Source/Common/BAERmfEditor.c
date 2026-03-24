@@ -12219,46 +12219,47 @@ BAEResult BAERmfEditorDocument_GetSampleCodecDescription(BAERmfEditorDocument co
 #if USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE
     else if (sample->sourceCompressionType == (uint32_t)C_OPUS)
     {
+        const char *rt = (sample->opusUseRoundTripResampling) ? " RT" : "";
         switch ((SndCompressionSubType)sample->sourceCompressionSubType)
         {
             case CS_OPUS_12K:
-                PV_CopyStringBounded(outCodec, outCodecSize, "Ogg Opus 12k");
+                snprintf(outCodec, outCodecSize, "Ogg Opus%s 12k", rt);
                 break;
             case CS_OPUS_16K:
-                PV_CopyStringBounded(outCodec, outCodecSize, "Ogg Opus 16k");
+                snprintf(outCodec, outCodecSize, "Ogg Opus%s 16k", rt);
                 break;
             case CS_OPUS_24K:
-                PV_CopyStringBounded(outCodec, outCodecSize, "Ogg Opus 24k");
+                snprintf(outCodec, outCodecSize, "Ogg Opus%s 24k", rt);
                 break;
             case CS_OPUS_32K:
-                PV_CopyStringBounded(outCodec, outCodecSize, "Ogg Opus 32k");
+                snprintf(outCodec, outCodecSize, "Ogg Opus%s 32k", rt);
                 break;
             case CS_OPUS_48K:
-                PV_CopyStringBounded(outCodec, outCodecSize, "Ogg Opus 48k");
+                snprintf(outCodec, outCodecSize, "Ogg Opus%s 48k", rt);
                 break;
             case CS_OPUS_64K:
-                PV_CopyStringBounded(outCodec, outCodecSize, "Ogg Opus 64k");
+                snprintf(outCodec, outCodecSize, "Ogg Opus%s 64k", rt);
                 break;
             case CS_OPUS_80K:
-                PV_CopyStringBounded(outCodec, outCodecSize, "Ogg Opus 80k");
+                snprintf(outCodec, outCodecSize, "Ogg Opus%s 80k", rt);
                 break;
             case CS_OPUS_96K:
-                PV_CopyStringBounded(outCodec, outCodecSize, "Ogg Opus 96k");
+                snprintf(outCodec, outCodecSize, "Ogg Opus%s 96k", rt);
                 break;
             case CS_OPUS_128K:
-                PV_CopyStringBounded(outCodec, outCodecSize, "Ogg Opus 128k");
+                snprintf(outCodec, outCodecSize, "Ogg Opus%s 128k", rt);
                 break;
             case CS_OPUS_160K:
-                PV_CopyStringBounded(outCodec, outCodecSize, "Ogg Opus 160k");
+                snprintf(outCodec, outCodecSize, "Ogg Opus%s 160k", rt);
                 break;
             case CS_OPUS_192K:
-                PV_CopyStringBounded(outCodec, outCodecSize, "Ogg Opus 192k");
+                snprintf(outCodec, outCodecSize, "Ogg Opus%s 192k", rt);
                 break;
             case CS_OPUS_256K:
-                PV_CopyStringBounded(outCodec, outCodecSize, "Ogg Opus 256k");
+                snprintf(outCodec, outCodecSize, "Ogg Opus%s 256k", rt);
                 break;
             default:
-                PV_CopyStringBounded(outCodec, outCodecSize, "Ogg Opus");
+                snprintf(outCodec, outCodecSize, "Ogg Opus%s", rt);
                 break;
         }
     }
@@ -13803,6 +13804,7 @@ BAEResult BAERmfEditorBank_GetInstrumentSampleInfo(BAEBankToken bankToken,
                     outInfo->compressionType = sampleInfo.compressionType;
                     outInfo->compressionSubType = PV_GetStoredCompressionSubTypeFromSnd(
                         sndData, sndSize, (uint32_t)sampleInfo.compressionType);
+                    outInfo->opusRoundTripResample = XGetSoundOpusRoundTripFlag(sndData);
                 }
                 else
                 {

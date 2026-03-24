@@ -1106,12 +1106,13 @@ public:
                         m_hasBankDirtyExtInfo = (extResult != BAE_NO_ERROR);
                         m_bankPreviewDirtyApplied = false;
                         m_bankPreviewLoadedInst = static_cast<BAE_INSTRUMENT>(-1);
+                        /* Bank was modified — recompute dirty state hash. */
+                        RefreshBankDirtyStateFromHash();
                     } else {
                         m_hasBankDirtyExtInfo = false;
                         m_bankPreviewDirtyApplied = false;
                         m_bankPreviewLoadedInst = static_cast<BAE_INSTRUMENT>(-1);
                     }
-                    RefreshBankDirtyStateFromHash();
                 });
             BankEditorPanel_SetInstrumentContextCallbacks(
                 m_bankEditorPanel,
@@ -1211,7 +1212,8 @@ public:
                                     (st == FOUR_CHAR('v','2','5','6')) ? "256k" : "?");
                             case FOUR_CHAR('O','g','g','O'):
                             case FOUR_CHAR('O','P','U','S'):
-                                return wxString::Format("Opus %s%s",
+                                return wxString::Format("Opus%s %s",
+                                    XGetSoundOpusRoundTripFlag(sndData) ? " RT" : "",
                                     (st == FOUR_CHAR('o','0','1','2')) ? "12k" :
                                     (st == FOUR_CHAR('o','0','1','6')) ? "16k" :
                                     (st == FOUR_CHAR('o','0','2','4')) ? "24k" :
@@ -1223,8 +1225,7 @@ public:
                                     (st == FOUR_CHAR('o','1','2','8')) ? "128k" :
                                     (st == FOUR_CHAR('o','1','6','0')) ? "160k" :
                                     (st == FOUR_CHAR('o','1','9','2')) ? "192k" :
-                                    (st == FOUR_CHAR('o','2','5','6')) ? "256k" : "?",
-                                    XGetSoundOpusRoundTripFlag(sndData) ? " (RT)" : "");
+                                    (st == FOUR_CHAR('o','2','5','6')) ? "256k" : "?");
                             default: return wxString::Format("0x%08X", (unsigned)ct);
                         }
                     };

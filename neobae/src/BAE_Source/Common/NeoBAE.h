@@ -3431,6 +3431,7 @@ typedef struct BAERmfEditorBankSampleInfo
     XResourceType compressionType;       /* Compression type (X_UNCOMPRESSED, X_FLAC, etc.) */
     uint32_t compressionSubType;          /* Compression sub-type (CS_VORBIS_*K, CS_OPUS_*K, or CS_DEFAULT) */
     BAERmfEditorSndStorageType sndStorageType; /* Container type of the SND resource (esnd/csnd/snd) */
+    XBOOL opusRoundTripResample;          /* For Opus: TRUE if round-trip resampling flag is set */
 } BAERmfEditorBankSampleInfo;
 
 /* Count the number of samples (key splits) in a bank instrument.
