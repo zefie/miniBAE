@@ -599,10 +599,10 @@ static wxTreeItemId FindInstrumentTreeItemByInstID(BankEditorPanel *bp, uint32_t
         return wxTreeItemId();
     }
 
-    group = bp->instrumentTree->GetFirstChild(root, cookie);
+    group = (bp->instrumentTree->GetFirstChild)(root, cookie);
     while (group.IsOk()) {
         wxTreeItemIdValue itemCookie;
-        wxTreeItemId item = bp->instrumentTree->GetFirstChild(group, itemCookie);
+        wxTreeItemId item = (bp->instrumentTree->GetFirstChild)(group, itemCookie);
         while (item.IsOk()) {
             BankInstrumentItemData *data = dynamic_cast<BankInstrumentItemData *>(
                 bp->instrumentTree->GetItemData(item));
@@ -632,10 +632,10 @@ static wxTreeItemId FindInstrumentTreeItemByIndex(BankEditorPanel *bp, uint32_t 
         return wxTreeItemId();
     }
 
-    group = bp->instrumentTree->GetFirstChild(root, cookie);
+    group = (bp->instrumentTree->GetFirstChild)(root, cookie);
     while (group.IsOk()) {
         wxTreeItemIdValue itemCookie;
-        wxTreeItemId item = bp->instrumentTree->GetFirstChild(group, itemCookie);
+        wxTreeItemId item = (bp->instrumentTree->GetFirstChild)(group, itemCookie);
         while (item.IsOk()) {
             BankInstrumentItemData *data = dynamic_cast<BankInstrumentItemData *>(
                 bp->instrumentTree->GetItemData(item));
@@ -665,7 +665,7 @@ static wxTreeItemId FindSampleTreeItemBySndID(BankEditorPanel *bp, uint16_t sndI
         return wxTreeItemId();
     }
 
-    item = bp->sampleTree->GetFirstChild(root, cookie);
+    item = (bp->sampleTree->GetFirstChild)(root, cookie);
     while (item.IsOk()) {
         BankSampleItemData *data = dynamic_cast<BankSampleItemData *>(
             bp->sampleTree->GetItemData(item));
@@ -1371,7 +1371,7 @@ static void OnInstrumentContextMenu(BankEditorPanel *bp, wxTreeEvent &event)
         memset(usedPrograms, 0, sizeof(usedPrograms));
         
         wxTreeItemIdValue cookie;
-        wxTreeItemId childItem = bp->instrumentTree->GetFirstChild(item, cookie);
+        wxTreeItemId childItem = (bp->instrumentTree->GetFirstChild)(item, cookie);
         while (childItem.IsOk()) {
             BankInstrumentItemData *childData = dynamic_cast<BankInstrumentItemData *>(
                 bp->instrumentTree->GetItemData(childItem));
@@ -1400,7 +1400,7 @@ static void OnInstrumentContextMenu(BankEditorPanel *bp, wxTreeEvent &event)
         uint32_t groupInstIDBase = 0;
         {
             wxTreeItemIdValue cookieBase;
-            wxTreeItemId firstChild = bp->instrumentTree->GetFirstChild(item, cookieBase);
+            wxTreeItemId firstChild = (bp->instrumentTree->GetFirstChild)(item, cookieBase);
             if (firstChild.IsOk()) {
                 BankInstrumentItemData *firstData = dynamic_cast<BankInstrumentItemData *>(
                     bp->instrumentTree->GetItemData(firstChild));
@@ -2158,11 +2158,11 @@ void BankEditorPanel_SelectInstrument(BankEditorPanel *panel, uint32_t instrumen
     /* Find the tree item with matching instrumentIndex */
     wxTreeItemIdValue cookie;
     wxTreeItemId root = panel->instrumentTree->GetRootItem();
-    wxTreeItemId item = panel->instrumentTree->GetFirstChild(root, cookie);
+    wxTreeItemId item = (panel->instrumentTree->GetFirstChild)(root, cookie);
     
     while (item.IsOk()) {
         wxTreeItemIdValue groupCookie;
-        wxTreeItemId children = panel->instrumentTree->GetFirstChild(item, groupCookie);
+        wxTreeItemId children = (panel->instrumentTree->GetFirstChild)(item, groupCookie);
         
         while (children.IsOk()) {
             BankInstrumentItemData *data = static_cast<BankInstrumentItemData *>(panel->instrumentTree->GetItemData(children));

@@ -2868,10 +2868,10 @@ private:
             return;
         }
 
-        assetNode = m_sampleTree->GetFirstChild(root, assetCookie);
+        assetNode = (m_sampleTree->GetFirstChild)(root, assetCookie);
         while (assetNode.IsOk()) {
             wxTreeItemIdValue usageCookie;
-            wxTreeItemId usageNode = m_sampleTree->GetFirstChild(assetNode, usageCookie);
+            wxTreeItemId usageNode = (m_sampleTree->GetFirstChild)(assetNode, usageCookie);
             while (usageNode.IsOk()) {
                 SampleTreeItemData *data;
 

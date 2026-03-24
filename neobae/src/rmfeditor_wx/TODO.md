@@ -37,9 +37,10 @@
   - ~~Bank editor must force ZSB if using ZMF features~~
   - ~~Sample tree~~
 - ~~Allow cut/copy/pasting notes~~
-- Allow cut/copy/pasting instruments
+
 
 # 0.11a
+- Allow cut/copy/pasting instruments
 - Allow dragging samples to other instruments
   - Ask user if they want to move, or alias the sample
   - If its the only sample/alias of the source instrument and they choose move, prompt user:
