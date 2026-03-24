@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <set>
@@ -1116,14 +1117,23 @@ public:
                 m_bankEditorPanel,
                 [this](uint32_t instrumentIndex) { CloneBankInstrumentToSongByIndex(instrumentIndex); },
                 [this](uint32_t instrumentIndex) { AliasBankInstrumentToSongByIndex(instrumentIndex); },
-                [this](uint32_t instrumentIndex) { DeleteSongInstrumentMatchingBankIndex(instrumentIndex); },
-                [this](uint32_t instrumentIndex) { CompressBankInstrumentSamples(instrumentIndex); });
+                [this](uint32_t instrumentIndex, uint32_t displayInstID) { DeleteBankInstrument(instrumentIndex, displayInstID); },
+                [this](uint32_t instrumentIndex) { CompressBankInstrumentSamples(instrumentIndex); },
+                [this](uint32_t instIDBase) { AddBankInstrument(instIDBase); },
+                [this](uint32_t instrumentIndex) { CloneBankInstrument(instrumentIndex); },
+                [this](uint32_t instrumentIndex) { AliasBankInstrument(instrumentIndex); });
             BankEditorPanel_SetSampleContextCallbacks(
                 m_bankEditorPanel,
                 [this](uint32_t instrumentIndex, uint32_t sampleIndex) { AddBankSample(instrumentIndex, sampleIndex); },
                 [this](uint32_t instrumentIndex, uint32_t sampleIndex) { DeleteBankSample(instrumentIndex, sampleIndex); },
                 [this](uint32_t instrumentIndex, uint32_t sampleIndex) { AliasBankSampleToInstrument(instrumentIndex, sampleIndex); },
                 [this](uint32_t instrumentIndex, uint32_t sampleIndex) { CopyBankSampleToInstrument(instrumentIndex, sampleIndex); });
+            BankEditorPanel_SetGlobalSampleContextCallbacks(
+                m_bankEditorPanel,
+                [this](uint16_t sndID) { AddGlobalSampleToInstrument(sndID); },
+                [this](uint16_t sndID) { CopyGlobalSampleToInstrument(sndID); },
+                [this](uint16_t sndID, const std::vector<std::pair<uint32_t, uint32_t>> &refs) { DeleteGlobalSample(sndID, refs); },
+                [this](uint16_t sndID, const std::vector<std::pair<uint32_t, uint32_t>> &refs) { EditGlobalSample(sndID, refs); });
             BankEditorPanel_SetSourceCodecCallback(
                 m_bankEditorPanel,
                 [this](uint16_t sndID, wxString &outCodecDescription) -> bool {
@@ -2730,7 +2740,7 @@ private:
         wxTreeItemId root;
 
         m_sampleTree->DeleteAllItems();
-        root = m_sampleTree->AddRoot("Sample Assets");
+        root = m_sampleTree->AddRoot("Embedded Samples");
         if (!m_document) {
             return;
         }
@@ -2958,12 +2968,14 @@ private:
                                                          unsigned char resolvedProgram,
                                                          unsigned char resolvedBank,
                                                          unsigned char preloadNote,
-                                                         uint32_t *outPreviewSampleIndex) -> BAERmfEditorDocument * {
+                                                         uint32_t *outPreviewSampleIndex,
+                                                         uint32_t *outResolvedPreviewInstID) -> BAERmfEditorDocument * {
             BAERmfEditorDocument *previewDocument;
             unsigned char programFlags[128];
             uint32_t copiedCount;
             uint32_t previewSampleCount;
             uint32_t mappedSampleIndex;
+            uint32_t activeInstID;
             BAERmfEditorSampleInfo sourceSampleInfo;
             BAERmfEditorTrackSetup preloadTrackSetup;
             uint16_t preloadTrackIndex;
@@ -2985,13 +2997,41 @@ private:
                 return nullptr;
             }
 
-            /* Keep only samples for the current instrument in this minimal preview doc. */
+            /* Keep only samples for the current instrument in this minimal preview doc.
+             * Alias instIDs may not be materialized in the copied preview document,
+             * so resolve to an instID that actually exists in that document. */
             previewSampleCount = 0;
             if (BAERmfEditorDocument_GetSampleCount(previewDocument, &previewSampleCount) != BAE_NO_ERROR) {
                 BAERmfEditorDocument_Delete(previewDocument);
                 return nullptr;
             }
-            if (resolvedInstID != 0) {
+            activeInstID = resolvedInstID;
+            if (previewSampleCount > 0) {
+                uint32_t firstInstID = 0;
+                bool foundActiveInstID = false;
+
+                for (uint32_t sampleScanIndex = 0; sampleScanIndex < previewSampleCount; ++sampleScanIndex) {
+                    uint32_t sampleInstID = 0;
+
+                    if (BAERmfEditorDocument_GetInstIDForSample(previewDocument,
+                                                                sampleScanIndex,
+                                                                &sampleInstID) != BAE_NO_ERROR) {
+                        continue;
+                    }
+                    if (sampleInstID != 0 && firstInstID == 0) {
+                        firstInstID = sampleInstID;
+                    }
+                    if (activeInstID != 0 && sampleInstID == activeInstID) {
+                        foundActiveInstID = true;
+                    }
+                }
+
+                if ((activeInstID == 0 || !foundActiveInstID) && firstInstID != 0) {
+                    activeInstID = firstInstID;
+                }
+            }
+
+            if (activeInstID != 0) {
                 for (uint32_t sampleDeleteIndex = previewSampleCount; sampleDeleteIndex > 0; --sampleDeleteIndex) {
                     uint32_t sampleInstID;
 
@@ -3001,10 +3041,14 @@ private:
                                                                 &sampleInstID) != BAE_NO_ERROR) {
                         continue;
                     }
-                    if (sampleInstID != 0 && sampleInstID != resolvedInstID) {
+                    if (sampleInstID != 0 && sampleInstID != activeInstID) {
                         BAERmfEditorDocument_DeleteSample(previewDocument, sampleDeleteIndex - 1);
                     }
                 }
+            }
+
+            if (outResolvedPreviewInstID) {
+                *outResolvedPreviewInstID = activeInstID;
             }
 
             mappedSampleIndex = 0;
@@ -3145,17 +3189,22 @@ private:
                 BAELoadResult loadInfo;
                 BAEResult loadResult;
                 uint32_t previewSampleIndex;
+                uint32_t previewResolvedInstID;
 
                 previewSampleIndex = 0;
+                previewResolvedInstID = selectedInstID;
                 previewDoc = buildMinimalInstrumentPreviewDocument(sampleIndex,
                                                                    selectedInstID,
                                                                    previewProgram,
                                                                    previewBank,
                                                                    static_cast<unsigned char>(std::clamp((noteId > 0 && noteId <= 127U) ? static_cast<int>(noteId) : midiKey, 0, 127)),
-                                                                   &previewSampleIndex);
+                                                                   &previewSampleIndex,
+                                                                   &previewResolvedInstID);
                 if (!previewDoc) {
                     return false;
                 }
+
+                selectedInstID = previewResolvedInstID;
 
                 if (overrideInfo || rootKeyOverride <= 127 ||
                     compressionOverride != BAE_EDITOR_COMPRESSION_DONT_CHANGE ||
@@ -3187,7 +3236,7 @@ private:
                     }
                 }
 
-                if (extOverride && hasSelectedInstID) {
+                if (extOverride && hasSelectedInstID && selectedInstID != 0) {
                     BAERmfEditorInstrumentExtInfo previewExt;
 
                     previewExt = *extOverride;
@@ -6285,7 +6334,7 @@ private:
             requirementValue = (m_document && BAERmfEditorDocument_RequiresZmf(m_document)) ? "Yes" : "No";
         }
 
-        wxString status = wxString::Format("Project: %s  |  Media File: %s  |  Bank: %s  |  %s: %s",
+        wxString status = wxString::Format("Project: %s  |  MIDI File: %s  |  Bank: %s  |  %s: %s",
                                            projectName,
                                            mediaName,
                                            bankName,
@@ -7467,7 +7516,7 @@ private:
             menu.AppendSeparator();
             if (selectedData->IsAssetNode()) {
                 menu.Append(ID_CompressInstrument, "Compress Instrument");
-                menu.Append(ID_SampleDelete, "Delete Sample Asset");
+                menu.Append(ID_SampleDelete, "Delete Embedded Sample");
             } else {
                 menu.Append(ID_CompressInstrument, "Compress Instrument");
                 menu.Append(ID_SampleDelete, "Delete Instrument");
@@ -8256,10 +8305,21 @@ private:
     bool PromptBankTargetInstrument(uint32_t sourceInstrumentIndex,
                                     uint32_t *outTargetInstrumentIndex,
                                     wxString const &title,
-                                    wxString const &message)
+                                    wxString const &message,
+                                    bool includeSongInstruments = false,
+                                    bool *outTargetIsSongOnly = nullptr,
+                                    uint32_t *outTargetBank = nullptr,
+                                    uint32_t *outTargetProgram = nullptr)
     {
+        auto chooserLabelPrefixFromInstID = [](uint32_t instID) -> wxString {
+            return ((instID % 256u) >= 128u) ? wxString("(Perc) ") : wxString();
+        };
         wxArrayString choices;
         std::vector<uint32_t> indices;
+        std::vector<bool> songOnlyFlags;
+        std::vector<uint32_t> banks;
+        std::vector<uint32_t> programs;
+        std::vector<BAERmfEditorBankInstrumentInfo> bankInfos;
         uint32_t instCount = 0;
 
         if (!m_bankToken || !outTargetInstrumentIndex) {
@@ -8268,33 +8328,188 @@ private:
         if (BAERmfEditorBank_GetInstrumentCount(m_bankToken, &instCount) != BAE_NO_ERROR || instCount == 0) {
             return false;
         }
+        bankInfos.resize(instCount);
         for (uint32_t i = 0; i < instCount; ++i) {
             BAERmfEditorBankInstrumentInfo info;
             wxString label;
 
-            if (i == sourceInstrumentIndex) {
-                continue;
-            }
             if (BAERmfEditorBank_GetInstrumentInfo(m_bankToken, i, &info) != BAE_NO_ERROR) {
                 continue;
             }
+            bankInfos[i] = info;
+            if (i == sourceInstrumentIndex) {
+                continue;
+            }
             if (info.name[0]) {
-                label = wxString::Format("P%u B%u: %s (%d splits)",
+                label = wxString::Format("%sP%u B%u: %s (%d splits)",
+                                         chooserLabelPrefixFromInstID(info.instID),
                                          static_cast<unsigned>(info.program),
                                          static_cast<unsigned>(info.bank),
                                          wxString::FromUTF8(info.name),
                                          static_cast<int>(info.keySplitCount));
             } else {
-                label = wxString::Format("P%u B%u: (unnamed) (%d splits)",
+                label = wxString::Format("%sP%u B%u: (unnamed) (%d splits)",
+                                         chooserLabelPrefixFromInstID(info.instID),
                                          static_cast<unsigned>(info.program),
                                          static_cast<unsigned>(info.bank),
                                          static_cast<int>(info.keySplitCount));
             }
             choices.Add(label);
             indices.push_back(i);
+            songOnlyFlags.push_back(false);
+            banks.push_back(info.bank);
+            programs.push_back(info.program);
         }
+
+        if (includeSongInstruments && m_document) {
+            uint32_t sampleCount = 0;
+            std::unordered_map<uint32_t, uint32_t> songInstrumentCounts;
+            std::unordered_map<uint32_t, wxString> songInstrumentTitles;
+            std::unordered_map<uint32_t, bool> songInstrumentPercussion;
+            std::unordered_map<uint32_t, bool> songInstrumentHasCustomLocal;
+            std::vector<uint32_t> sortedKeys;
+
+            if (BAERmfEditorDocument_GetSampleCount(m_document, &sampleCount) == BAE_NO_ERROR) {
+                for (uint32_t sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex) {
+                    BAERmfEditorSampleInfo sampleInfo;
+                    BAERmfEditorInstrumentExtInfo extInfo;
+                    uint32_t instID = 0;
+                    uint32_t bank = 0;
+                    uint32_t program = 0;
+                    uint32_t note = 0;
+                    uint32_t key = 0;
+                    wxString title;
+                    XBOOL isAlias = FALSE;
+
+                    if (BAERmfEditorDocument_GetSampleInfo(m_document, sampleIndex, &sampleInfo) != BAE_NO_ERROR) {
+                        continue;
+                    }
+                    if (BAERmfEditorDocument_GetInstIDForSample(m_document, sampleIndex, &instID) != BAE_NO_ERROR) {
+                        instID = 0;
+                    }
+                    if (instID == 0) {
+                        /* Match preview fallback behavior: unresolved document instruments
+                         * map to custom bank (B2) with sample program. */
+                        instID = 512U + static_cast<uint32_t>(sampleInfo.program);
+                    }
+                    if (instID == 0) {
+                        continue;
+                    }
+                    if (TranslateInstrumentToBankProgram(instID, &bank, &program, &note) != BAE_NO_ERROR) {
+                        /* Be resilient for unresolved/custom song instruments.
+                         * If translation fails, treat as custom bank B2 using the
+                         * sample's program as the instrument slot. */
+                        bank = 2;
+                        program = static_cast<uint32_t>(sampleInfo.program);
+                    }
+
+                    /* Strong custom-instrument fallback: editor-created instruments
+                     * (no sourcePath and not bank aliases) should always be treated
+                     * as custom bank B2 destinations in chooser dialogs. */
+                    (void)BAERmfEditorDocument_IsSampleBankAlias(m_document, sampleIndex, &isAlias);
+                    if (isAlias == FALSE && (!sampleInfo.sourcePath || sampleInfo.sourcePath[0] == '\0')) {
+                        bank = 2;
+                        program = static_cast<uint32_t>(sampleInfo.program);
+                        songInstrumentHasCustomLocal[((bank & 0xFFFFu) << 8) | (program & 0xFFu)] = true;
+                    }
+
+                    key = ((bank & 0xFFFFu) << 8) | (program & 0xFFu);
+                    songInstrumentCounts[key]++;
+                    if ((instID % 256u) >= 128u) {
+                        songInstrumentPercussion[key] = true;
+                    }
+
+                    title.clear();
+                    memset(&extInfo, 0, sizeof(extInfo));
+                    if (BAERmfEditorDocument_GetInstrumentExtInfo(m_document, instID, &extInfo) == BAE_NO_ERROR &&
+                        extInfo.displayName && extInfo.displayName[0]) {
+                        title = wxString::FromUTF8(extInfo.displayName);
+                    }
+                    if (title.IsEmpty() && sampleInfo.displayName && sampleInfo.displayName[0]) {
+                        title = wxString::FromUTF8(sampleInfo.displayName);
+                    }
+                    title.Replace("\r", "");
+                    title.Replace("\n", " ");
+                    title.Trim();
+                    title.Trim(false);
+                    if (!title.IsEmpty() &&
+                        songInstrumentTitles.find(key) == songInstrumentTitles.end()) {
+                        songInstrumentTitles.emplace(key, title);
+                    }
+                }
+            }
+
+            sortedKeys.reserve(songInstrumentCounts.size());
+            for (auto const &it : songInstrumentCounts) {
+                sortedKeys.push_back(it.first);
+            }
+            std::sort(sortedKeys.begin(), sortedKeys.end());
+
+            for (uint32_t key : sortedKeys) {
+                uint32_t bank = (key >> 8) & 0xFFFFu;
+                uint32_t program = key & 0xFFu;
+                uint32_t matchedBankInstrumentIndex = UINT32_MAX;
+                bool preferSongOnly = false;
+
+                {
+                    auto customIt = songInstrumentHasCustomLocal.find(key);
+                    if (customIt != songInstrumentHasCustomLocal.end() && customIt->second) {
+                        preferSongOnly = true;
+                    }
+                }
+
+                for (uint32_t i = 0; i < instCount; ++i) {
+                    BAERmfEditorBankInstrumentInfo const &info = bankInfos[i];
+                    if (info.bank == bank && info.program == program) {
+                        matchedBankInstrumentIndex = i;
+                        break;
+                    }
+                }
+
+                if (matchedBankInstrumentIndex != UINT32_MAX && matchedBankInstrumentIndex == sourceInstrumentIndex) {
+                    continue;
+                }
+
+                if (matchedBankInstrumentIndex != UINT32_MAX && !preferSongOnly) {
+                    wxString prefix = chooserLabelPrefixFromInstID(bankInfos[matchedBankInstrumentIndex].instID);
+                    choices.Add(wxString::Format("[Song] P%u B%u (%u splits)",
+                                                 static_cast<unsigned>(program),
+                                                 static_cast<unsigned>(bank),
+                                                 static_cast<unsigned>(songInstrumentCounts[key])));
+                    if (!prefix.IsEmpty()) {
+                        choices[choices.GetCount() - 1] = prefix + choices[choices.GetCount() - 1];
+                    }
+                    indices.push_back(matchedBankInstrumentIndex);
+                    songOnlyFlags.push_back(false);
+                    banks.push_back(bank);
+                    programs.push_back(program);
+                } else {
+                    wxString title = "(unnamed)";
+                    bool isPerc = false;
+                    auto titleIt = songInstrumentTitles.find(key);
+                    auto percIt = songInstrumentPercussion.find(key);
+                    if (titleIt != songInstrumentTitles.end() && !titleIt->second.IsEmpty()) {
+                        title = titleIt->second;
+                    }
+                    if (percIt != songInstrumentPercussion.end()) {
+                        isPerc = percIt->second;
+                    }
+                    choices.Add(wxString::Format("%s[Song only] P%u B%u: %s (%u splits)",
+                                                 isPerc ? "(Perc) " : "",
+                                                 static_cast<unsigned>(program),
+                                                 static_cast<unsigned>(bank),
+                                                 title,
+                                                 static_cast<unsigned>(songInstrumentCounts[key])));
+                    indices.push_back(0xFFFFFFFFu);
+                    songOnlyFlags.push_back(true);
+                    banks.push_back(bank);
+                    programs.push_back(program);
+                }
+            }
+        }
+
         if (choices.IsEmpty()) {
-            wxMessageBox("No other instruments are available in the current bank.",
+            wxMessageBox("No target instruments are available.",
                          title,
                          wxOK | wxICON_INFORMATION,
                          this);
@@ -8310,6 +8525,15 @@ private:
             return false;
         }
         *outTargetInstrumentIndex = indices[static_cast<size_t>(selection)];
+        if (outTargetIsSongOnly) {
+            *outTargetIsSongOnly = songOnlyFlags[static_cast<size_t>(selection)];
+        }
+        if (outTargetBank) {
+            *outTargetBank = banks[static_cast<size_t>(selection)];
+        }
+        if (outTargetProgram) {
+            *outTargetProgram = programs[static_cast<size_t>(selection)];
+        }
         return true;
     }
 
@@ -8599,6 +8823,414 @@ private:
         ReloadBankEditorAfterMutation();
     }
 
+    // Returns a choice-dialog-friendly label for a MIDI program number.
+    static wxString ProgramLabel(int p, bool isPercussion = false)
+    {
+        static const char *const kGMNames[128] = {
+            "Acoustic Grand Piano", "Bright Acoustic Piano", "Electric Grand Piano", "Honky-tonk Piano",
+            "Electric Piano 1", "Electric Piano 2", "Harpsichord", "Clavinet",
+            "Celesta", "Glockenspiel", "Music Box", "Vibraphone",
+            "Marimba", "Xylophone", "Tubular Bells", "Dulcimer",
+            "Drawbar Organ", "Percussive Organ", "Rock Organ", "Church Organ",
+            "Reed Organ", "Accordion", "Harmonica", "Tango Accordion",
+            "Nylon String Guitar", "Steel String Guitar", "Jazz Guitar", "Clean Guitar",
+            "Muted Guitar", "Overdriven Guitar", "Distortion Guitar", "Guitar Harmonics",
+            "Acoustic Bass", "Finger Bass", "Pick Bass", "Fretless Bass",
+            "Slap Bass 1", "Slap Bass 2", "Synth Bass 1", "Synth Bass 2",
+            "Violin", "Viola", "Cello", "Contrabass",
+            "Tremolo Strings", "Pizzicato Strings", "Orchestral Harp", "Timpani",
+            "String Ensemble 1", "String Ensemble 2", "Synth Strings 1", "Synth Strings 2",
+            "Choir Aahs", "Voice Oohs", "Synth Voice", "Orchestra Hit",
+            "Trumpet", "Trombone", "Tuba", "Muted Trumpet",
+            "French Horn", "Brass Section", "Synth Brass 1", "Synth Brass 2",
+            "Soprano Sax", "Alto Sax", "Tenor Sax", "Baritone Sax",
+            "Oboe", "English Horn", "Bassoon", "Clarinet",
+            "Piccolo", "Flute", "Recorder", "Pan Flute",
+            "Blown Bottle", "Shakuhachi", "Whistle", "Ocarina",
+            "Square Lead", "Sawtooth Lead", "Calliope Lead", "Chiff Lead",
+            "Charang Lead", "Voice Lead", "Fifths Lead", "Bass+Lead",
+            "New Age Pad", "Warm Pad", "Polysynth Pad", "Choir Pad",
+            "Bowed Pad", "Metallic Pad", "Halo Pad", "Sweep Pad",
+            "Rain FX", "Soundtrack FX", "Crystal FX", "Atmosphere FX",
+            "Brightness FX", "Goblins FX", "Echoes FX", "Sci-fi FX",
+            "Sitar", "Banjo", "Shamisen", "Koto",
+            "Kalimba", "Bagpipe", "Fiddle", "Shanai",
+            "Tinkle Bell", "Agogo", "Steel Drums", "Woodblock",
+            "Taiko Drum", "Melodic Tom", "Synth Drum", "Reverse Cymbal",
+            "Guitar Fret Noise", "Breath Noise", "Seashore", "Bird Tweet",
+            "Telephone Ring", "Helicopter", "Applause", "Gunshot"
+        };
+        // GM percussion note names indexed by MIDI note number (0-127)
+        // Notes 35-81 have defined GM names; others are unnamed.
+        static const char *const kGMPercNames[128] = {
+            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, // 0-7
+            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, // 8-15
+            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, // 16-23
+            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, // 24-31
+            nullptr, nullptr, nullptr,                                              // 32-34
+            "Acoustic Bass Drum", "Bass Drum 1",                                   // 35-36
+            "Side Stick", "Acoustic Snare", "Hand Clap", "Electric Snare",         // 37-40
+            "Low Floor Tom", "Closed Hi-Hat", "High Floor Tom",                    // 41-43
+            "Pedal Hi-Hat", "Low Tom", "Open Hi-Hat",                              // 44-46
+            "Low-Mid Tom", "Hi-Mid Tom", "Crash Cymbal 1",                         // 47-49
+            "High Tom", "Ride Cymbal 1", "Chinese Cymbal", "Ride Bell",            // 50-53
+            "Tambourine", "Splash Cymbal", "Cowbell", "Crash Cymbal 2",            // 54-57
+            "Vibraslap", "Ride Cymbal 2",                                          // 58-59
+            "Hi Bongo", "Low Bongo", "Mute Hi Conga", "Open Hi Conga",            // 60-63
+            "Low Conga", "High Timbale", "Low Timbale",                            // 64-66
+            "High Agogo", "Low Agogo", "Cabasa", "Maracas",                        // 67-70
+            "Short Whistle", "Long Whistle", "Short Guiro", "Long Guiro",          // 71-74
+            "Claves", "Hi Wood Block", "Low Wood Block",                           // 75-77
+            "Mute Cuica", "Open Cuica",                                            // 78-79
+            "Mute Triangle", "Open Triangle",                                      // 80-81
+            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,                  // 82-87
+            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, // 88-95
+            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, // 96-103
+            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, // 104-111
+            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, // 112-119
+            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr  // 120-127
+        };
+        if (p >= 0 && p < 128) {
+            if (isPercussion) {
+                if (kGMPercNames[p])
+                    return wxString::Format("P%d - %s", p, kGMPercNames[p]);
+                return wxString::Format("P%d - (Drum Note)", p);
+            }
+            return wxString::Format("P%d - %s", p, kGMNames[p]);
+        }
+        return wxString::Format("P%d", p);
+    }
+
+    // Show a single-choice dialog listing only unused programs; returns chosen program or -1 on cancel.
+    long PickAvailableProgram(const bool usedPrograms[128], long defaultProgram,
+                              const wxString &title, bool isPercussion = false)
+    {
+        wxArrayString choices;
+        std::vector<int> available;
+        int defaultSel = 0;
+        available.reserve(128);
+        for (int i = 0; i < 128; ++i) {
+            if (!usedPrograms[i]) {
+                if (i == defaultProgram)
+                    defaultSel = static_cast<int>(available.size());
+                available.push_back(i);
+                choices.Add(ProgramLabel(i, isPercussion));
+            }
+        }
+        if (available.empty())
+            return -2; // signal: all used
+        wxSingleChoiceDialog dlg(this,
+                                 "Select an available MIDI program:",
+                                 title,
+                                 choices);
+        dlg.SetSelection(defaultSel);
+        if (dlg.ShowModal() != wxID_OK)
+            return -1;
+        return static_cast<long>(available[static_cast<size_t>(dlg.GetSelection())]);
+    }
+
+    void AddBankInstrument(uint32_t instIDBase)
+    {
+        bool usedPrograms[128];
+        uint32_t instCount = 0;
+        long defaultProgram = 0;
+        long targetProgram;
+        long rootKey;
+        uint32_t targetInstID;
+        uint32_t createdInstrumentIndex = 0;
+        bool foundCreatedInstrument = false;
+        InstrumentResource instrument;
+        char resourceName[256];
+
+        if (!m_bankToken) {
+            return;
+        }
+
+        memset(usedPrograms, 0, sizeof(usedPrograms));
+        if (BAERmfEditorBank_GetInstrumentCount(m_bankToken, &instCount) != BAE_NO_ERROR) {
+            wxMessageBox("Failed to enumerate bank instruments.", "Add Instrument", wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        // Mark programs already occupied in this group's instID range [instIDBase, instIDBase+127]
+        for (uint32_t i = 0; i < instCount; ++i) {
+            BAERmfEditorBankInstrumentInfo info;
+            if (BAERmfEditorBank_GetInstrumentInfo(m_bankToken, i, &info) != BAE_NO_ERROR) {
+                continue;
+            }
+            if (info.instID >= instIDBase && info.instID < instIDBase + 128u) {
+                usedPrograms[info.instID - instIDBase] = true;
+            }
+        }
+
+        for (int i = 0; i < 128; ++i) {
+            if (!usedPrograms[i]) {
+                defaultProgram = i;
+                break;
+            }
+        }
+        bool isPercussion = (instIDBase % 256u) >= 128u;
+        targetProgram = PickAvailableProgram(usedPrograms, defaultProgram, "Add Instrument", isPercussion);
+        if (targetProgram == -2) {
+            wxMessageBox("All 128 programs in this bank group are already in use.",
+                         "Add Instrument",
+                         wxOK | wxICON_INFORMATION,
+                         this);
+            return;
+        }
+        if (targetProgram < 0) {
+            return;
+        }
+
+        rootKey = wxGetNumberFromUser("Root key (0-127)",
+                                      "Root Key",
+                                      "Add Instrument",
+                                      60,
+                                      0,
+                                      127,
+                                      this);
+        if (rootKey < 0) {
+            return;
+        }
+
+        targetInstID = instIDBase + static_cast<uint32_t>(targetProgram);
+
+        memset(&instrument, 0, sizeof(instrument));
+        XPutShort(&instrument.sndResourceID, 0);
+        XPutShort(&instrument.midiRootKey, static_cast<uint16_t>(rootKey));
+        instrument.panPlacement = 0;
+        instrument.flags1 = ZBF_useSampleRate;
+        instrument.flags2 = ZBF_useSoundModifierAsRootKey;
+        XPutShort(&instrument.miscParameter1, static_cast<uint16_t>(rootKey));
+        XPutShort(&instrument.miscParameter2, 100);
+        XPutShort(&instrument.keySplitCount, 0);
+        XPutShort(&instrument.tremoloCount, 0);
+        XPutShort(&instrument.tremoloEnd, 0x8000);
+
+        memset(resourceName, 0, sizeof(resourceName));
+        {
+            wxString displayName = wxString::Format("Empty Instrument P%ld", targetProgram);
+            wxScopedCharBuffer utf8 = displayName.utf8_str();
+            size_t len = std::min<size_t>(255, strlen(utf8.data()));
+            resourceName[0] = static_cast<char>(len);
+            if (len > 0) {
+                memcpy(resourceName + 1, utf8.data(), len);
+            }
+        }
+
+        if (XAddFileResource((XFILE)m_bankToken,
+                             ID_INST,
+                             (XLongResourceID)targetInstID,
+                             resourceName,
+                             &instrument,
+                             (int32_t)sizeof(instrument)) != 0) {
+            wxMessageBox("Failed to add instrument to bank.", "Add Instrument", wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        if (BAERmfEditorBank_GetInstrumentCount(m_bankToken, &instCount) == BAE_NO_ERROR) {
+            for (uint32_t i = 0; i < instCount; ++i) {
+                BAERmfEditorBankInstrumentInfo info;
+                if (BAERmfEditorBank_GetInstrumentInfo(m_bankToken, i, &info) != BAE_NO_ERROR) {
+                    continue;
+                }
+                if (info.instID == targetInstID) {
+                    createdInstrumentIndex = i;
+                    foundCreatedInstrument = true;
+                    break;
+                }
+            }
+        }
+
+        ReloadBankEditorAfterMutation();
+        if (foundCreatedInstrument && m_bankEditorPanel) {
+            BankEditorPanel_SelectInstrument(m_bankEditorPanel, createdInstrumentIndex);
+        }
+        SetStatusText(wxString::Format("Added bank instrument (instID %u, P%ld)",
+                                       static_cast<unsigned>(targetInstID),
+                                       targetProgram), 0);
+    }
+
+    // Build a flat map of all used instIDs (0-511) in the loaded bank
+    void BuildUsedInstIDMap(bool usedInstIDs[512]) {
+        memset(usedInstIDs, 0, 512 * sizeof(bool));
+        if (!m_bankToken) return;
+        uint32_t instCount = 0;
+        BAERmfEditorBank_GetInstrumentCount(m_bankToken, &instCount);
+        for (uint32_t i = 0; i < instCount; ++i) {
+            BAERmfEditorBankInstrumentInfo info;
+            if (BAERmfEditorBank_GetInstrumentInfo(m_bankToken, i, &info) == BAE_NO_ERROR &&
+                info.instID < 512u) {
+                usedInstIDs[info.instID] = true;
+            }
+        }
+        // Also mark aliased-from IDs as used
+        XFILE bankFile = (XFILE)m_bankToken;
+        XAliasLinkResource *pAlias = XGetAliasLinkFromFile(bankFile);
+        if (pAlias) {
+            uint32_t cnt = (uint32_t)XGetLong(&pAlias->numberOfAliases);
+            for (uint32_t i = 0; i < cnt; ++i) {
+                uint32_t fromID = (uint32_t)XGetLong(&pAlias->list[i].aliasFrom);
+                if (fromID < 512u) usedInstIDs[fromID] = true;
+            }
+            XDisposePtr((XPTR)pAlias);
+        }
+    }
+
+    // Ask user to pick a free instID from a dialog; returns destInstID or (uint32_t)-1 on cancel/full.
+    // allowPercussion: when false, hides the percussion ranges (128-255, 384-511).
+    uint32_t PickDestInstID(const wxString &title, bool allowPercussion) {
+        bool usedInstIDs[512];
+        BuildUsedInstIDMap(usedInstIDs);
+
+        // Group the 512 slots into the 4 bank groups
+        static const struct { uint32_t base; const char *label; bool isPerc; } kGroups[] = {
+            { 0,   "GM Melodic (Bank 0)",             false },
+            { 128, "GM Percussion (Bank 0)",           true  },
+            { 256, "Special Melodic (Bank 1)",         false },
+            { 384, "Special Percussion (Bank 1)",      true  },
+            { 512, nullptr, false }  // sentinel
+        };
+
+        // Build choice list across applicable groups
+        wxArrayString choices;
+        std::vector<uint32_t> available;
+        for (int g = 0; kGroups[g].label != nullptr; ++g) {
+            if (kGroups[g].isPerc && !allowPercussion) continue;
+            uint32_t base = kGroups[g].base;
+            bool isPerc   = kGroups[g].isPerc;
+            for (int p = 0; p < 128; ++p) {
+                if (!usedInstIDs[base + p]) {
+                    wxString lbl = wxString::Format("[%s] %s",
+                                                   kGroups[g].label,
+                                                   ProgramLabel(p, isPerc));
+                    choices.Add(lbl);
+                    available.push_back(base + static_cast<uint32_t>(p));
+                }
+            }
+        }
+
+        if (available.empty()) {
+            wxMessageBox("All 512 bank instrument slots are in use.",
+                         title, wxOK | wxICON_INFORMATION, this);
+            return static_cast<uint32_t>(-1);
+        }
+
+        wxSingleChoiceDialog dlg(this,
+                                 "Select destination instrument slot:",
+                                 title,
+                                 choices);
+        dlg.SetSelection(0);
+        if (dlg.ShowModal() != wxID_OK)
+            return static_cast<uint32_t>(-1);
+        return available[static_cast<size_t>(dlg.GetSelection())];
+    }
+
+    void CloneBankInstrument(uint32_t instrumentIndex) {
+        if (!m_bankToken) return;
+
+        BAERmfEditorBankInstrumentInfo info;
+        bool allowPerc = false;
+        if (BAERmfEditorBank_GetInstrumentInfo(m_bankToken, instrumentIndex, &info) == BAE_NO_ERROR)
+            allowPerc = (info.keySplitCount == 0);
+
+        uint32_t destInstID = PickDestInstID("Clone Instrument", allowPerc);
+        if (destInstID == static_cast<uint32_t>(-1)) return;
+
+        wxArrayString modeChoices;
+        modeChoices.Add("Create pointers (share samples)");
+        modeChoices.Add("Deep clone (duplicate samples)");
+        wxSingleChoiceDialog modeDlg(this,
+                                     "How should samples be handled?",
+                                     "Clone Instrument",
+                                     modeChoices);
+        modeDlg.SetSelection(0);  // default: pointers
+        if (modeDlg.ShowModal() != wxID_OK) return;
+        bool deepClone = (modeDlg.GetSelection() == 1);
+
+        if (BAERmfEditorBank_CloneInstrument(m_bankToken, instrumentIndex,
+                                              destInstID,
+                                              deepClone ? TRUE : FALSE) != BAE_NO_ERROR) {
+            wxMessageBox("Failed to clone instrument.", "Clone Instrument",
+                         wxOK | wxICON_ERROR, this);
+            return;
+        }
+        ReloadBankEditorAfterMutation();
+        SetStatusText(wxString::Format("Cloned instrument to instID %u", static_cast<unsigned>(destInstID)), 0);
+    }
+
+    void AliasBankInstrument(uint32_t instrumentIndex) {
+        if (!m_bankToken) return;
+
+        BAERmfEditorBankInstrumentInfo info;
+        bool allowPerc = false;
+        if (BAERmfEditorBank_GetInstrumentInfo(m_bankToken, instrumentIndex, &info) == BAE_NO_ERROR)
+            allowPerc = (info.keySplitCount == 0);
+
+        uint32_t destInstID = PickDestInstID("Alias Instrument", allowPerc);
+        if (destInstID == static_cast<uint32_t>(-1)) return;
+
+        if (BAERmfEditorBank_AliasInstrument(m_bankToken, instrumentIndex, destInstID) != BAE_NO_ERROR) {
+            wxMessageBox("Failed to create alias.", "Alias Instrument",
+                         wxOK | wxICON_ERROR, this);
+            return;
+        }
+        ReloadBankEditorAfterMutation();
+        SetStatusText(wxString::Format("Added alias instID %u", static_cast<unsigned>(destInstID)), 0);
+    }
+
+    void DeleteBankInstrument(uint32_t instrumentIndex, uint32_t displayInstID)
+    {
+        BAERmfEditorBankInstrumentInfo info;
+
+        if (!m_bankToken) {
+            return;
+        }
+
+        if (BAERmfEditorBank_GetInstrumentInfo(m_bankToken, instrumentIndex, &info) != BAE_NO_ERROR) {
+            wxMessageBox("Failed to read bank instrument info.",
+                         "Delete Instrument",
+                         wxOK | wxICON_ERROR,
+                         this);
+            return;
+        }
+
+        // If displayInstID differs from the real instID, the user right-clicked an alias
+        // node — remove only the alias entry, not the underlying INST resource.
+        if (displayInstID != info.instID) {
+            if (BAERmfEditorBank_DeleteAlias(m_bankToken, displayInstID) != BAE_NO_ERROR) {
+                wxMessageBox(wxString::Format("Failed to delete alias for instrument slot %u.",
+                                              static_cast<unsigned>(displayInstID)),
+                             "Delete Alias",
+                             wxOK | wxICON_ERROR,
+                             this);
+                return;
+            }
+            ReloadBankEditorAfterMutation();
+            SetStatusText(wxString::Format("Deleted alias for instrument slot %u",
+                                           static_cast<unsigned>(displayInstID)),
+                          0);
+            return;
+        }
+
+        // Real instrument — delete the INST resource (and any aliases pointing to it).
+        if (BAERmfEditorBank_DeleteInstrument(m_bankToken, instrumentIndex) != BAE_NO_ERROR) {
+            wxMessageBox(wxString::Format("Failed to delete bank instrument B%u P%u.",
+                                          static_cast<unsigned>(info.bank),
+                                          static_cast<unsigned>(info.program)),
+                         "Delete Instrument",
+                         wxOK | wxICON_ERROR,
+                         this);
+            return;
+        }
+
+        ReloadBankEditorAfterMutation();
+        SetStatusText(wxString::Format("Deleted bank instrument B%u P%u",
+                                       static_cast<unsigned>(info.bank),
+                                       static_cast<unsigned>(info.program)),
+                      0);
+    }
+
     void AddBankSample(uint32_t instrumentIndex, uint32_t sampleIndex)
     {
         (void)instrumentIndex;
@@ -8611,12 +9243,57 @@ private:
 
     void DeleteBankSample(uint32_t instrumentIndex, uint32_t sampleIndex)
     {
-        (void)instrumentIndex;
-        (void)sampleIndex;
-        wxMessageBox("Deleting bank samples is not supported by the current bank editing API yet.",
-                     "Delete Sample",
-                     wxOK | wxICON_INFORMATION,
-                     this);
+        BAEResult getResult;
+        BAEResult deleteResult;
+        BAERmfEditorBankSampleInfo sampleInfo;
+
+        if (!m_bankToken) {
+            return;
+        }
+
+        getResult = BAERmfEditorBank_GetInstrumentSampleInfo(m_bankToken,
+                                                             instrumentIndex,
+                                                             sampleIndex,
+                                                             &sampleInfo);
+        if (getResult != BAE_NO_ERROR) {
+            wxMessageBox("Failed to read sample info.",
+                         "Delete Sample",
+                         wxOK | wxICON_ERROR,
+                         this);
+            return;
+        }
+
+        if (sampleInfo.sndResourceID == 0) {
+            wxMessageBox("This sample slot is already empty.",
+                         "Delete Sample",
+                         wxOK | wxICON_INFORMATION,
+                         this);
+            return;
+        }
+
+        if (wxMessageBox(wxString::Format("Remove sample ID %u from this instrument split?", (unsigned)sampleInfo.sndResourceID),
+                         "Delete Sample",
+                         wxYES_NO | wxICON_QUESTION,
+                         this) != wxYES) {
+            return;
+        }
+
+        deleteResult = BAERmfEditorBank_DeleteInstrumentSample(m_bankToken,
+                                                               instrumentIndex,
+                                                               sampleIndex,
+                                                               TRUE);
+        if (deleteResult != BAE_NO_ERROR) {
+            wxMessageBox("Failed to remove sample from instrument.",
+                         "Delete Sample",
+                         wxOK | wxICON_ERROR,
+                         this);
+            return;
+        }
+
+        ReloadBankEditorAfterMutation();
+        SetStatusText(wxString::Format("Removed sample from instrument %u split %u",
+                                       static_cast<unsigned>(instrumentIndex),
+                                       static_cast<unsigned>(sampleIndex)), 0);
     }
 
     void AliasBankSampleToInstrument(uint32_t sourceInstrumentIndex, uint32_t sourceSampleIndex)
@@ -8800,7 +9477,623 @@ private:
         SetStatusText("Copied sample to destination instrument", 0);
     }
 
+    void AddGlobalSampleToInstrument(uint16_t sndID)
+    {
+        uint32_t targetInstrumentIndex = 0;
+        uint32_t targetBank = 0;
+        uint32_t targetProgram = 0;
+        uint32_t targetSampleCount = 0;
+        uint32_t targetSampleIndex = 0;
+        bool targetIsSongOnly = false;
+        bool foundEmptySlot = false;
+        BAERmfEditorBankSampleInfo targetInfo;
+        BAEResult setResult;
+
+        if (!m_bankToken) {
+            return;
+        }
+
+        /* Show dialog to select destination instrument */
+        if (!PromptBankTargetInstrument(0xFFFFFFFF,
+                                        &targetInstrumentIndex,
+                                        "Add Sample Pointer (Alias) to Instrument",
+                                        "Select the destination instrument to add this sample pointer (alias) to:",
+                                        true,
+                                        &targetIsSongOnly,
+                                        &targetBank,
+                                        &targetProgram)) {
+            return;
+        }
+
+        if (targetIsSongOnly) {
+            (void)AddGlobalSampleAliasToSongInstrument(sndID, targetBank, targetProgram);
+            return;
+        }
+
+        if (BAERmfEditorBank_GetInstrumentSampleCount(m_bankToken, targetInstrumentIndex, &targetSampleCount) != BAE_NO_ERROR || targetSampleCount == 0) {
+            wxMessageBox("Destination instrument has no writable sample slots.", "Add Sample", wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        /* Find first empty sample slot (sndResourceID == 0). Do not overwrite existing samples. */
+        for (uint32_t i = 0; i < targetSampleCount; ++i) {
+            if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bankToken, targetInstrumentIndex, i, &targetInfo) == BAE_NO_ERROR) {
+                if (targetInfo.sndResourceID == 0) {
+                    targetSampleIndex = i;
+                    foundEmptySlot = true;
+                    break;
+                }
+            }
+        }
+
+        if (!foundEmptySlot) {
+            BAEResult growResult = BAERmfEditorBank_GrowInstrumentSampleSlots(m_bankToken,
+                                                                              targetInstrumentIndex,
+                                                                              targetSampleCount + 1);
+            if (growResult != BAE_NO_ERROR) {
+                wxMessageBox("Destination instrument has no empty sample slots and failed to grow.",
+                             "Add Sample",
+                             wxOK | wxICON_ERROR,
+                             this);
+                return;
+            }
+
+            targetSampleIndex = targetSampleCount;
+            foundEmptySlot = true;
+        }
+
+        /* Reference-link only: do not rewrite SND metadata. */
+        setResult = BAERmfEditorBank_SetInstrumentSampleSndID(m_bankToken,
+                                                              targetInstrumentIndex,
+                                                              targetSampleIndex,
+                                                              (XShortResourceID)sndID);
+        if (setResult != BAE_NO_ERROR) {
+            wxMessageBox("Failed to assign sample pointer to destination instrument.", "Add Sample Pointer", wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        /* Refresh the bank editor with updated sample references */
+        ReloadBankEditorAfterMutation();
+        
+        /* Also refresh the sample tree explicitly to show updated reference counts */
+        if (m_bankEditorPanel) {
+            BankEditorPanel_LoadBank(m_bankEditorPanel, m_bankToken, "");
+        }
+        
+        SetStatusText(wxString::Format("Added sample pointer %u to destination instrument", (unsigned)sndID), 0);
+    }
+
+    bool AddGlobalSampleAliasToSongInstrument(uint16_t sndID, uint32_t targetBank, uint32_t targetProgram)
+    {
+        uint32_t instCount = 0;
+        bool foundSource = false;
+        BAERmfEditorBankSampleInfo sourceInfo;
+        uint32_t targetInstID = 0;
+        uint32_t docSampleCount = 0;
+        uint32_t newSampleIndex = 0;
+        BAERmfEditorSampleInfo addedInfo;
+        char sourceName[256] = {0};
+        wxString displayName;
+
+        if (!m_document) {
+            wxMessageBox("Open or create a document first.", "Add Sample Pointer", wxOK | wxICON_INFORMATION, this);
+            return false;
+        }
+        if (BAERmfEditorBank_GetInstrumentCount(m_bankToken, &instCount) != BAE_NO_ERROR) {
+            wxMessageBox("Failed to enumerate bank instruments.", "Add Sample Pointer", wxOK | wxICON_ERROR, this);
+            return false;
+        }
+
+        for (uint32_t i = 0; i < instCount && !foundSource; ++i) {
+            uint32_t sampleCount = 0;
+            if (BAERmfEditorBank_GetInstrumentSampleCount(m_bankToken, i, &sampleCount) != BAE_NO_ERROR) {
+                continue;
+            }
+            for (uint32_t s = 0; s < sampleCount; ++s) {
+                if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bankToken, i, s, &sourceInfo) != BAE_NO_ERROR) {
+                    continue;
+                }
+                if (sourceInfo.sndResourceID == sndID) {
+                    foundSource = true;
+                    break;
+                }
+            }
+        }
+
+        if (!foundSource) {
+            wxMessageBox("Failed to locate source sample in bank.", "Add Sample Pointer", wxOK | wxICON_ERROR, this);
+            return false;
+        }
+
+        if (BAERmfEditorDocument_GetSampleCount(m_document, &docSampleCount) == BAE_NO_ERROR) {
+            for (uint32_t i = 0; i < docSampleCount; ++i) {
+                uint32_t instID = 0;
+                uint32_t bank = 0;
+                uint32_t program = 0;
+                uint32_t note = 0;
+
+                if (BAERmfEditorDocument_GetInstIDForSample(m_document, i, &instID) != BAE_NO_ERROR || instID == 0) {
+                    continue;
+                }
+                if (TranslateInstrumentToBankProgram(instID, &bank, &program, &note) != BAE_NO_ERROR) {
+                    continue;
+                }
+                if (bank == targetBank && program == targetProgram) {
+                    targetInstID = instID;
+                    break;
+                }
+            }
+        }
+
+        if (targetInstID == 0) {
+            targetInstID = (targetBank * 256u) + (targetProgram & 0x7Fu);
+        }
+
+        if (XGetFileResourceName((XFILE)m_bankToken, ID_SND, (XLongResourceID)sndID, sourceName) != 0 || sourceName[0] == 0) {
+            if (sourceName[0] == 0) {
+                (void)XGetFileResourceName((XFILE)m_bankToken, ID_CSND, (XLongResourceID)sndID, sourceName);
+            }
+            if (sourceName[0] == 0) {
+                (void)XGetFileResourceName((XFILE)m_bankToken, ID_ESND, (XLongResourceID)sndID, sourceName);
+            }
+        }
+        displayName = sourceName[0] ? wxString::FromUTF8(sourceName) : wxString::Format("Sample %u", (unsigned)sndID);
+        displayName.Replace("\r", "");
+        displayName.Replace("\n", " ");
+        displayName.Trim();
+        displayName.Trim(false);
+        if (displayName.IsEmpty()) {
+            displayName = wxString::Format("Sample %u", (unsigned)sndID);
+        }
+
+        {
+            wxScopedCharBuffer displayNameUtf8 = displayName.utf8_str();
+
+            BeginUndoAction("Add Bank Sample Pointer to Song Instrument");
+            if (BAERmfEditorDocument_AddBankAliasSample(m_document,
+                                                        m_bankToken,
+                                                        targetInstID,
+                                                        static_cast<unsigned char>(std::min<uint32_t>(targetProgram, 127)),
+                                                        (XShortResourceID)sndID,
+                                                        displayNameUtf8.data(),
+                                                        sourceInfo.rootKey,
+                                                        sourceInfo.lowKey,
+                                                        sourceInfo.highKey,
+                                                        &newSampleIndex,
+                                                        &addedInfo) != BAE_NO_ERROR) {
+                CancelUndoAction();
+                wxMessageBox("Failed to add sample pointer alias to song instrument.", "Add Sample Pointer", wxOK | wxICON_ERROR, this);
+                return false;
+            }
+        }
+
+        if (BAERmfEditorDocument_GetSampleInfo(m_document, newSampleIndex, &addedInfo) == BAE_NO_ERROR) {
+            addedInfo.splitVolume = sourceInfo.splitVolume;
+            (void)BAERmfEditorDocument_SetSampleInfo(m_document, newSampleIndex, &addedInfo);
+        }
+
+        CommitUndoAction("Add Bank Sample Pointer to Song Instrument");
+        PopulateSampleList();
+        SelectTreeItemForSample(newSampleIndex);
+        StopKeyboardPreview();
+        InvalidatePianoRollPreviewSong();
+        MarkDocumentDirty();
+        SetStatusText(wxString::Format("Added sample pointer %u to song instrument B%u P%u",
+                                       (unsigned)sndID,
+                                       (unsigned)targetBank,
+                                       (unsigned)targetProgram), 0);
+        return true;
+    }
+
+    bool CopyGlobalSampleToSongInstrument(uint16_t sndID, uint32_t targetBank, uint32_t targetProgram)
+    {
+        uint32_t instCount = 0;
+        uint32_t sourceInstrumentIndex = 0;
+        uint32_t sourceSampleIndex = 0;
+        bool foundSource = false;
+        BAERmfEditorBankSampleInfo sourceInfo;
+        void *waveData = nullptr;
+        uint32_t frameCount = 0;
+        uint16_t bitSize = 16;
+        uint16_t channels = 1;
+        BAE_UNSIGNED_FIXED sampleRate = 0;
+        BAERmfEditorSampleSetup setup;
+        BAESampleInfo dummyInfo;
+        BAESampleInfo replacedInfo;
+        uint32_t newSampleIndex = 0;
+        char sourceName[256] = {0};
+        wxString displayName;
+
+        if (!m_document) {
+            wxMessageBox("Open or create a document first.", "Copy Sample", wxOK | wxICON_INFORMATION, this);
+            return false;
+        }
+        if (targetBank != 2) {
+            wxMessageBox("Copy to song currently supports custom instruments in Bank 2 only.",
+                         "Copy Sample",
+                         wxOK | wxICON_INFORMATION,
+                         this);
+            return false;
+        }
+        if (BAERmfEditorBank_GetInstrumentCount(m_bankToken, &instCount) != BAE_NO_ERROR) {
+            wxMessageBox("Failed to enumerate bank instruments.", "Copy Sample", wxOK | wxICON_ERROR, this);
+            return false;
+        }
+
+        for (uint32_t i = 0; i < instCount && !foundSource; ++i) {
+            uint32_t sampleCount = 0;
+            if (BAERmfEditorBank_GetInstrumentSampleCount(m_bankToken, i, &sampleCount) != BAE_NO_ERROR) {
+                continue;
+            }
+            for (uint32_t s = 0; s < sampleCount; ++s) {
+                if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bankToken, i, s, &sourceInfo) != BAE_NO_ERROR) {
+                    continue;
+                }
+                if (sourceInfo.sndResourceID == sndID) {
+                    sourceInstrumentIndex = i;
+                    sourceSampleIndex = s;
+                    foundSource = true;
+                    break;
+                }
+            }
+        }
+
+        if (!foundSource) {
+            wxMessageBox("Failed to locate source sample in bank.", "Copy Sample", wxOK | wxICON_ERROR, this);
+            return false;
+        }
+
+        if (BAERmfEditorBank_GetSampleWaveformData(m_bankToken,
+                                                   sourceInstrumentIndex,
+                                                   sourceSampleIndex,
+                                                   &waveData,
+                                                   &frameCount,
+                                                   &bitSize,
+                                                   &channels,
+                                                   &sampleRate) != BAE_NO_ERROR ||
+            !waveData || frameCount == 0) {
+            if (waveData) {
+                BAERmfEditorBank_FreeWaveformData(waveData);
+            }
+            wxMessageBox("Failed to decode source sample audio.", "Copy Sample", wxOK | wxICON_ERROR, this);
+            return false;
+        }
+
+        if (XGetFileResourceName((XFILE)m_bankToken, ID_SND, (XLongResourceID)sndID, sourceName) != 0 || sourceName[0] == 0) {
+            if (sourceName[0] == 0) {
+                (void)XGetFileResourceName((XFILE)m_bankToken, ID_CSND, (XLongResourceID)sndID, sourceName);
+            }
+            if (sourceName[0] == 0) {
+                (void)XGetFileResourceName((XFILE)m_bankToken, ID_ESND, (XLongResourceID)sndID, sourceName);
+            }
+        }
+        displayName = sourceName[0] ? wxString::FromUTF8(sourceName) : wxString::Format("Sample %u", (unsigned)sndID);
+        displayName.Replace("\r", "");
+        displayName.Replace("\n", " ");
+        displayName.Trim();
+        displayName.Trim(false);
+        if (displayName.IsEmpty()) {
+            displayName = wxString::Format("Sample %u", (unsigned)sndID);
+        }
+
+        memset(&setup, 0, sizeof(setup));
+        {
+            wxScopedCharBuffer displayNameUtf8 = displayName.utf8_str();
+            setup.program = static_cast<unsigned char>(std::min<uint32_t>(targetProgram, 127));
+            setup.rootKey = sourceInfo.rootKey ? sourceInfo.rootKey : 60;
+            setup.lowKey = sourceInfo.lowKey;
+            setup.highKey = sourceInfo.highKey;
+            setup.displayName = const_cast<char *>(displayNameUtf8.data());
+
+            BeginUndoAction("Copy Bank Sample to Song Instrument");
+            if (BAERmfEditorDocument_AddEmptySample(m_document, &setup, &newSampleIndex, &dummyInfo) != BAE_NO_ERROR) {
+                CancelUndoAction();
+                BAERmfEditorBank_FreeWaveformData(waveData);
+                wxMessageBox("Failed to create destination song sample.", "Copy Sample", wxOK | wxICON_ERROR, this);
+                return false;
+            }
+        }
+
+        if (BAERmfEditorDocument_ReplaceSampleFromPCM(m_document,
+                                                      newSampleIndex,
+                                                      waveData,
+                                                      frameCount,
+                                                      bitSize,
+                                                      channels,
+                                                      sampleRate,
+                                                      sourceInfo.loopStart,
+                                                      sourceInfo.loopEnd,
+                                                      &replacedInfo) != BAE_NO_ERROR) {
+            CancelUndoAction();
+            BAERmfEditorBank_FreeWaveformData(waveData);
+            wxMessageBox("Failed to copy sample audio into the song instrument.", "Copy Sample", wxOK | wxICON_ERROR, this);
+            return false;
+        }
+        BAERmfEditorBank_FreeWaveformData(waveData);
+
+        {
+            BAERmfEditorSampleInfo docInfo;
+            wxScopedCharBuffer displayNameUtf8 = displayName.utf8_str();
+            if (BAERmfEditorDocument_GetSampleInfo(m_document, newSampleIndex, &docInfo) == BAE_NO_ERROR) {
+                docInfo.displayName = const_cast<char *>(displayNameUtf8.data());
+                docInfo.sourcePath = NULL;
+                docInfo.program = static_cast<unsigned char>(std::min<uint32_t>(targetProgram, 127));
+                docInfo.rootKey = sourceInfo.rootKey ? sourceInfo.rootKey : 60;
+                docInfo.lowKey = sourceInfo.lowKey;
+                docInfo.highKey = sourceInfo.highKey;
+                docInfo.splitVolume = sourceInfo.splitVolume;
+                (void)BAERmfEditorDocument_SetSampleInfo(m_document, newSampleIndex, &docInfo);
+            }
+        }
+
+        CommitUndoAction("Copy Bank Sample to Song Instrument");
+        PopulateSampleList();
+        SelectTreeItemForSample(newSampleIndex);
+        StopKeyboardPreview();
+        InvalidatePianoRollPreviewSong();
+        MarkDocumentDirty();
+        SetStatusText(wxString::Format("Copied sample %u to song instrument B%u P%u",
+                                       (unsigned)sndID,
+                                       (unsigned)targetBank,
+                                       (unsigned)targetProgram), 0);
+        return true;
+    }
+
+    void CopyGlobalSampleToInstrument(uint16_t sndID)
+    {
+        static const XResourceType kSndTypes[] = {ID_SND, ID_CSND, ID_ESND, 0};
+        uint32_t targetInstrumentIndex = 0;
+        uint32_t targetBank = 0;
+        uint32_t targetProgram = 0;
+        uint32_t targetSampleCount = 0;
+        uint32_t targetSampleIndex = 0;
+        bool targetIsSongOnly = false;
+        bool foundEmptySlot = false;
+        BAERmfEditorBankSampleInfo targetInfo;
+        BAEResult setResult;
+        XPTR sourceRawData = NULL;
+        int32_t sourceRawSize = 0;
+        XResourceType sourceType = 0;
+        XLongResourceID newSndID = 0;
+        bool added = false;
+        char sourceName[256] = {0};
+
+        if (!m_bankToken) {
+            return;
+        }
+
+        /* Show dialog to select destination instrument */
+        if (!PromptBankTargetInstrument(0xFFFFFFFF,
+                                        &targetInstrumentIndex,
+                                        "Copy Sample to an Instrument",
+                                        "Select the destination instrument to copy this sample to:",
+                                        true,
+                                        &targetIsSongOnly,
+                                        &targetBank,
+                                        &targetProgram)) {
+            return;
+        }
+
+        if (targetIsSongOnly) {
+            (void)CopyGlobalSampleToSongInstrument(sndID, targetBank, targetProgram);
+            return;
+        }
+
+        if (BAERmfEditorBank_GetInstrumentSampleCount(m_bankToken, targetInstrumentIndex, &targetSampleCount) != BAE_NO_ERROR || targetSampleCount == 0) {
+            wxMessageBox("Destination instrument has no writable sample slots.", "Copy Sample", wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        /* Find first empty sample slot (sndResourceID == 0). Do not overwrite existing samples. */
+        for (uint32_t i = 0; i < targetSampleCount; ++i) {
+            if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bankToken, targetInstrumentIndex, i, &targetInfo) == BAE_NO_ERROR) {
+                if (targetInfo.sndResourceID == 0) {
+                    targetSampleIndex = i;
+                    foundEmptySlot = true;
+                    break;
+                }
+            }
+        }
+
+        if (!foundEmptySlot) {
+            BAEResult growResult = BAERmfEditorBank_GrowInstrumentSampleSlots(m_bankToken,
+                                                                              targetInstrumentIndex,
+                                                                              targetSampleCount + 1);
+            if (growResult != BAE_NO_ERROR) {
+                wxMessageBox("Destination instrument has no empty sample slots and failed to grow.",
+                             "Copy Sample",
+                             wxOK | wxICON_ERROR,
+                             this);
+                return;
+            }
+
+            targetSampleIndex = targetSampleCount;
+            foundEmptySlot = true;
+        }
+
+        /* Load the source sample resource */
+        for (int i = 0; kSndTypes[i] != 0; ++i) {
+            sourceRawData = XGetFileResource((XFILE)m_bankToken,
+                                             kSndTypes[i],
+                                             (XLongResourceID)sndID,
+                                             NULL,
+                                             &sourceRawSize);
+            if (sourceRawData && sourceRawSize > 0) {
+                sourceType = kSndTypes[i];
+                (void)XGetFileResourceName((XFILE)m_bankToken,
+                                           sourceType,
+                                           (XLongResourceID)sndID,
+                                           sourceName);
+                break;
+            }
+            if (sourceRawData) {
+                XDisposePtr(sourceRawData);
+                sourceRawData = NULL;
+            }
+        }
+
+        if (!sourceRawData || sourceRawSize <= 0 || sourceType == 0) {
+            if (sourceRawData) {
+                XDisposePtr(sourceRawData);
+            }
+            wxMessageBox("Failed to load source sample resource data.", "Copy Sample", wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        /* Create a new resource ID for the copied sample */
+        if (XGetUniqueFileResourceID((XFILE)m_bankToken, sourceType, &newSndID) == 0 &&
+            newSndID > 0 && newSndID <= 0xFFFF &&
+            XAddFileResource((XFILE)m_bankToken,
+                             sourceType,
+                             newSndID,
+                             sourceName,
+                             sourceRawData,
+                             sourceRawSize) == 0)
+        {
+            added = true;
+        }
+
+        if (!added) {
+            XDisposePtr(sourceRawData);
+            wxMessageBox("Failed to create copied sample resource.", "Copy Sample", wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        /* Cache the new sample */
+        {
+            BankSampleSndEntry cacheEntry;
+            cacheEntry.sndType = sourceType;
+            cacheEntry.sndData.assign(static_cast<uint8_t *>(sourceRawData),
+                                      static_cast<uint8_t *>(sourceRawData) + sourceRawSize);
+            m_bankSampleSndCache[(uint16_t)newSndID] = std::move(cacheEntry);
+        }
+        XDisposePtr(sourceRawData);
+
+        /* Reference-link only: do not rewrite SND metadata. */
+        setResult = BAERmfEditorBank_SetInstrumentSampleSndID(m_bankToken,
+                                                              targetInstrumentIndex,
+                                                              targetSampleIndex,
+                                                              (XShortResourceID)newSndID);
+        if (setResult != BAE_NO_ERROR) {
+            wxMessageBox("Failed to assign copied sample to destination instrument.", "Copy Sample", wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        ReloadBankEditorAfterMutation();
+        SetStatusText(wxString::Format("Copied sample %u to destination instrument with new ID %u", 
+                           (unsigned)sndID, (unsigned)newSndID), 0);
+    }
+
+    void DeleteGlobalSample(uint16_t sndID, const std::vector<std::pair<uint32_t, uint32_t>> &referencingInstruments)
+    {
+        wxString message = wxString::Format(
+            "Delete sample 0x%04X?\n\nThis sample is referenced by %d instrument(s):\n",
+            (unsigned)sndID,
+            (int)referencingInstruments.size());
+
+        /* List all instruments referencing this sample */
+        for (size_t i = 0; i < referencingInstruments.size() && i < 10; ++i) {
+            uint32_t instIdx = referencingInstruments[i].first;
+            BAERmfEditorBankInstrumentInfo instInfo;
+            if (BAERmfEditorBank_GetInstrumentInfo(m_bankToken, instIdx, &instInfo) == BAE_NO_ERROR) {
+                wxString instName = instInfo.name[0] ? wxString(instInfo.name) : wxString("(unnamed)");
+                message += wxString::Format("  - P%u B%u: %s\n", 
+                                           (unsigned)instInfo.program,
+                                           (unsigned)instInfo.bank,
+                                           instName);
+            }
+        }
+        if (referencingInstruments.size() > 10) {
+            message += wxString::Format("  ... and %d more\n", (int)(referencingInstruments.size() - 10));
+        }
+        message += "\nDeleting this sample will remove it from all these instruments.";
+
+        int result = wxMessageBox(message, "Delete Sample", wxYES_NO | wxICON_WARNING, this);
+        if (result != wxYES) {
+            return;
+        }
+
+        /* Remove sample from all referencing instruments */
+        for (auto &ref : referencingInstruments) {
+            uint32_t instIdx = ref.first;
+            uint32_t sampleIdx = ref.second;
+            BAERmfEditorBankSampleInfo sampleInfo;
+
+            if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bankToken, instIdx, sampleIdx, &sampleInfo) != BAE_NO_ERROR) {
+                continue;
+            }
+
+            /* Clear the sample reference by setting sndResourceID to 0 */
+            sampleInfo.sndResourceID = 0;
+            BAERmfEditorBank_SetInstrumentSampleInfo(m_bankToken, instIdx, sampleIdx, &sampleInfo);
+        }
+
+        /* Note: Actual deletion of the resource from the file would require direct resource API calls
+         * For now, we just unlink the sample from all instruments. The orphaned resource can be cleaned
+         * up later or left in the file. A full implementation would use XDeleteFileResource. */
+
+        ReloadBankEditorAfterMutation();
+        SetStatusText(wxString::Format("Removed sample %u from all instruments", (unsigned)sndID), 0);
+    }
+
+    void EditGlobalSample(uint16_t sndID, const std::vector<std::pair<uint32_t, uint32_t>> &referencingInstruments)
+    {
+        auto chooserLabelPrefixFromInstID = [](uint32_t instID) -> wxString {
+            return ((instID % 256u) >= 128u) ? wxString("(Perc) ") : wxString();
+        };
+        if (referencingInstruments.empty()) {
+            wxMessageBox("No instruments reference this sample.", "Edit Sample", wxOK | wxICON_INFORMATION, this);
+            return;
+        }
+
+        uint32_t selectedInstIdx = referencingInstruments[0].first;
+        uint32_t selectedSampleIdx = referencingInstruments[0].second;
+
+        /* If multiple references, show choice dialog */
+        if (referencingInstruments.size() > 1) {
+            wxArrayString choices;
+            for (auto &ref : referencingInstruments) {
+                uint32_t instIdx = ref.first;
+                BAERmfEditorBankInstrumentInfo instInfo;
+                if (BAERmfEditorBank_GetInstrumentInfo(m_bankToken, instIdx, &instInfo) == BAE_NO_ERROR) {
+                    wxString instName = instInfo.name[0] ? wxString(instInfo.name) : wxString("(unnamed)");
+                    wxString choice = wxString::Format("%sP%u B%u: %s",
+                                                      chooserLabelPrefixFromInstID(instInfo.instID),
+                                                      (unsigned)instInfo.program,
+                                                      (unsigned)instInfo.bank,
+                                                      instName);
+                    choices.Add(choice);
+                }
+            }
+
+            wxSingleChoiceDialog dialog(
+                this,
+                wxString::Format("This sample (%u) is referenced by multiple instruments.\n"
+                                "Select which instrument to edit:", (unsigned)sndID),
+                "Select Instrument",
+                choices);
+
+            if (dialog.ShowModal() == wxID_OK) {
+                int sel = dialog.GetSelection();
+                if (sel >= 0 && sel < (int)referencingInstruments.size()) {
+                    selectedInstIdx = referencingInstruments[sel].first;
+                    selectedSampleIdx = referencingInstruments[sel].second;
+                }
+            } else {
+                return;  /* User cancelled */
+            }
+        }
+
+        /* Load the selected instrument and show its sample */
+        BankEditorPanel_SelectSample(m_bankEditorPanel, selectedInstIdx, selectedSampleIdx);
+
+        SetStatusText(wxString::Format("Editing sample %u", (unsigned)sndID), 0);
+    }
+
     void OnCloneFromBank(wxCommandEvent &) {
+        auto chooserLabelPrefixFromInstID = [](uint32_t instID) -> wxString {
+            return ((instID % 256u) >= 128u) ? wxString("(Perc) ") : wxString();
+        };
         if (!m_document) {
             wxMessageBox("Open or create a document first.", "Clone from Bank", wxOK | wxICON_INFORMATION, this);
             return;
@@ -8838,13 +10131,15 @@ private:
                 }
                 wxString instLabel;
                 if (info.name[0]) {
-                    instLabel = wxString::Format("P%u B%u: %s (%d splits)",
+                    instLabel = wxString::Format("%sP%u B%u: %s (%d splits)",
+                                                 chooserLabelPrefixFromInstID(info.instID),
                                                  static_cast<unsigned>(info.program),
                                                  static_cast<unsigned>(info.bank),
                                                  wxString::FromUTF8(info.name),
                                                  static_cast<int>(info.keySplitCount));
                 } else {
-                    instLabel = wxString::Format("P%u B%u: (unnamed) (%d splits)",
+                    instLabel = wxString::Format("%sP%u B%u: (unnamed) (%d splits)",
+                                                 chooserLabelPrefixFromInstID(info.instID),
                                                  static_cast<unsigned>(info.program),
                                                  static_cast<unsigned>(info.bank),
                                                  static_cast<int>(info.keySplitCount));
@@ -9258,6 +10553,9 @@ private:
     }
 
     void OnAliasFromBank(wxCommandEvent &) {
+        auto chooserLabelPrefixFromInstID = [](uint32_t instID) -> wxString {
+            return ((instID % 256u) >= 128u) ? wxString("(Perc) ") : wxString();
+        };
         if (!m_document) {
             wxMessageBox("Open or create a document first.", "Alias from Bank", wxOK | wxICON_INFORMATION, this);
             return;
@@ -9299,13 +10597,15 @@ private:
                 }
                 wxString instLabel;
                 if (info.name[0]) {
-                    instLabel = wxString::Format("P%u B%u: %s (%d splits)",
+                    instLabel = wxString::Format("%sP%u B%u: %s (%d splits)",
+                                                 chooserLabelPrefixFromInstID(info.instID),
                                                  static_cast<unsigned>(info.program),
                                                  static_cast<unsigned>(info.bank),
                                                  wxString::FromUTF8(info.name),
                                                  static_cast<int>(info.keySplitCount));
                 } else {
-                    instLabel = wxString::Format("P%u B%u: (unnamed) (%d splits)",
+                    instLabel = wxString::Format("%sP%u B%u: (unnamed) (%d splits)",
+                                                 chooserLabelPrefixFromInstID(info.instID),
                                                  static_cast<unsigned>(info.program),
                                                  static_cast<unsigned>(info.bank),
                                                  static_cast<int>(info.keySplitCount));
@@ -9456,6 +10756,33 @@ private:
     }
 
     void OnSampleNewInstrument(wxCommandEvent &) {
+        wxArrayString choices;
+        int selection;
+
+        if (!m_document) {
+            return;
+        }
+
+        choices.Add("Empty Instrument (no sample)");
+        choices.Add("New Instrument with Sample");
+
+        wxSingleChoiceDialog choiceDialog(this,
+                                          "How would you like to add an instrument?",
+                                          "Add Instrument",
+                                          choices);
+        if (choiceDialog.ShowModal() != wxID_OK) {
+            return;
+        }
+
+        selection = choiceDialog.GetSelection();
+        if (selection == 0) {
+            CreateEmptyInstrument();
+        } else {
+            CreateInstrumentWithSample();
+        }
+    }
+
+    void CreateEmptyInstrument() {
         BAERmfEditorSampleSetup setup;
         BAESampleInfo info;
         uint32_t newSampleIndex;
@@ -9465,9 +10792,72 @@ private:
         long program;
         long root;
 
-        if (!m_document) {
+        sampleCount = 0;
+        memset(usedPrograms, 0, sizeof(usedPrograms));
+        BAERmfEditorDocument_GetSampleCount(m_document, &sampleCount);
+        for (uint32_t i = 0; i < sampleCount; ++i) {
+            BAERmfEditorSampleInfo sampleInfo;
+            if (BAERmfEditorDocument_GetSampleInfo(m_document, i, &sampleInfo) == BAE_NO_ERROR &&
+                sampleInfo.program < 128) {
+                usedPrograms[sampleInfo.program] = true;
+            }
+        }
+
+        defaultProgram = 0;
+        for (int i = 0; i < 128; ++i) {
+            if (!usedPrograms[i]) {
+                defaultProgram = i;
+                break;
+            }
+        }
+
+        program = PickAvailableProgram(usedPrograms, defaultProgram, "New Empty Instrument");
+        if (program == -2) {
+            wxMessageBox("All 128 instrument programs are already in use.",
+                         "New Empty Instrument",
+                         wxOK | wxICON_INFORMATION,
+                         this);
             return;
         }
+        if (program < 0) {
+            return;
+        }
+        root = wxGetNumberFromUser("Root key (0-127)",
+                                   "Root Key",
+                                   "New Empty Instrument",
+                                   60,
+                                   0,
+                                   127,
+                                   this);
+        if (root < 0) {
+            return;
+        }
+
+        setup.program = static_cast<unsigned char>(program);
+        setup.rootKey = static_cast<unsigned char>(root);
+        setup.lowKey = 0;
+        setup.highKey = 127;
+        setup.displayName = const_cast<char *>("Empty Instrument");
+
+        if (BAERmfEditorDocument_AddEmptySample(m_document, &setup, &newSampleIndex, &info) != BAE_NO_ERROR) {
+            wxMessageBox("Failed to create empty instrument.", "Embedded Instruments", wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        PopulateSampleList();
+        SelectTreeItemForSample(newSampleIndex);
+        SetStatusText(wxString::Format("Created empty instrument at program %d", static_cast<int>(program)), 0);
+    }
+
+    void CreateInstrumentWithSample() {
+        BAERmfEditorSampleSetup setup;
+        BAESampleInfo info;
+        uint32_t newSampleIndex;
+        uint32_t sampleCount;
+        bool usedPrograms[128];
+        long defaultProgram;
+        long program;
+        long root;
 
         sampleCount = 0;
         memset(usedPrograms, 0, sizeof(usedPrograms));
@@ -9487,13 +10877,14 @@ private:
             }
         }
 
-        program = wxGetNumberFromUser("MIDI program for new instrument (0-127)",
-                                      "Program",
-                                      "New Instrument",
-                                      defaultProgram,
-                                      0,
-                                      127,
-                                      this);
+        program = PickAvailableProgram(usedPrograms, defaultProgram, "New Instrument");
+        if (program == -2) {
+            wxMessageBox("All 128 instrument programs are already in use.",
+                         "New Instrument",
+                         wxOK | wxICON_INFORMATION,
+                         this);
+            return;
+        }
         if (program < 0) {
             return;
         }
@@ -9570,10 +10961,10 @@ private:
             }
             {
                 wxString msg = toDelete.size() > 1
-                    ? wxString::Format("Delete sample asset A%u and all %u usages?",
+                    ? wxString::Format("Delete sample A%u and all %u usages?",
                                        static_cast<unsigned>(selectedAssetID),
                                        static_cast<unsigned>(toDelete.size()))
-                    : wxString::Format("Delete sample asset A%u?", static_cast<unsigned>(selectedAssetID));
+                    : wxString::Format("Delete sample A%u?", static_cast<unsigned>(selectedAssetID));
                 if (wxMessageBox(msg, "Confirm Delete", wxYES_NO | wxICON_QUESTION, this) != wxYES) {
                     return;
                 }
@@ -9824,6 +11215,7 @@ private:
         std::vector<uint32_t> sampleIndices;
         std::vector<InstrumentEditorEditedSample> editedSamples;
         bool accepted;
+        bool previewFailureLatched = false;
 
         if (!m_document) {
             return;
@@ -9850,7 +11242,10 @@ private:
             [this](wxString const &label) { BeginUndoAction(label); },
             [this](wxString const &label) { CommitUndoAction(label); },
             [this]() { CancelUndoAction(); },
-            [this](uint32_t sampleIndex, int key, BAESampleInfo const *overrideInfo, int16_t splitVolumeOverride, unsigned char rootKeyOverride, BAERmfEditorCompressionType compressionOverride, bool opusRoundTripOverride, int previewTag, BAERmfEditorInstrumentExtInfo const *extOverride) {
+            [this, &previewFailureLatched](uint32_t sampleIndex, int key, BAESampleInfo const *overrideInfo, int16_t splitVolumeOverride, unsigned char rootKeyOverride, BAERmfEditorCompressionType compressionOverride, bool opusRoundTripOverride, int previewTag, BAERmfEditorInstrumentExtInfo const *extOverride) {
+                if (previewFailureLatched) {
+                    return;
+                }
                 if (!PreviewSampleAtKey(sampleIndex,
                                         key,
                                         overrideInfo,
@@ -9860,6 +11255,8 @@ private:
                                         opusRoundTripOverride,
                                         previewTag,
                                         extOverride)) {
+                    previewFailureLatched = true;
+                    StopAndDestroyInstrumentPreviewSession();
                     wxMessageBox("Preview playback failed for this sample.",
                                  "Sample Preview", wxOK | wxICON_ERROR, this);
                 }
@@ -9943,9 +11340,9 @@ private:
                         } else {
                             wxMessageDialog choiceDialog(
                                 this,
-                                wxString::Format("Sample asset A%u is used by %u instrument usages.\n\n"
+                                wxString::Format("Sample A%u is used by %u instrument usages.\n\n"
                                                  "Choose how to apply this compression change.\n"
-                                                 "(\"This Instrument Only\" will clone the sample asset, creating a new sample asset with the new compression, and only this instrument will use it. \"All Shared Uses\" will change the compression for all instruments that use this sample asset.)",
+                                                 "(\"This Instrument Only\" will clone the sample, creating a new sample with the new compression, and only this instrument will use it. \"All Shared Uses\" will change the compression for all instruments that use this sample asset.)",
                                                  static_cast<unsigned>(assetID),
                                                  static_cast<unsigned>(usageCount)),
                                 "Shared Sample Asset",

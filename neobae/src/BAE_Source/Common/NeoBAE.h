@@ -3366,6 +3366,20 @@ BAEResult BAERmfEditorDocument_AliasInstrumentFromBank(BAERmfEditorDocument *doc
                                                        uint32_t instrumentIndex,
                                                        unsigned char targetProgram);
 
+/* Add one sample to a song instrument as a bank alias pointer to an existing
+ * SND in the loaded bank, without embedding PCM/sample blob in the document. */
+BAEResult BAERmfEditorDocument_AddBankAliasSample(BAERmfEditorDocument *document,
+                                                  BAEBankToken bankToken,
+                                                  uint32_t targetInstID,
+                                                  unsigned char targetProgram,
+                                                  XShortResourceID sndID,
+                                                  char const *displayName,
+                                                  unsigned char rootKey,
+                                                  unsigned char lowKey,
+                                                  unsigned char highKey,
+                                                  uint32_t *outSampleIndex,
+                                                  BAERmfEditorSampleInfo *outSampleInfo);
+
 /* Resolve an INST ID to a concrete instrument index in the bank.
  * Checks real INST resources first, then falls back to the bank's ID_ALIAS table.
  * On success outResolvedInstID is the concrete INST ID (may differ when aliased)
@@ -3451,6 +3465,57 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
                                                     uint32_t instrumentIndex,
                                                     uint32_t sampleIndex,
                                                     BAERmfEditorBankSampleInfo const *info);
+
+/* Set only the SND resource reference for a sample slot within an instrument.
+ * Unlike BAERmfEditorBank_SetInstrumentSampleInfo, this does not rewrite SND
+ * waveform metadata (sample rate/loop/etc). */
+BAEResult BAERmfEditorBank_SetInstrumentSampleSndID(BAEBankToken bankToken,
+                                                     uint32_t instrumentIndex,
+                                                     uint32_t sampleIndex,
+                                                     XShortResourceID sndResourceID);
+
+/* Ensure a bank instrument has at least desiredSampleCount sample slots.
+ * For non-split instruments this converts the instrument to key-split mode when
+ * desiredSampleCount > 1 and preserves existing sample data in slot 0.
+ * Returns BAE_NO_ERROR when no growth is needed. */
+BAEResult BAERmfEditorBank_GrowInstrumentSampleSlots(BAEBankToken bankToken,
+                                                      uint32_t instrumentIndex,
+                                                      uint32_t desiredSampleCount);
+
+/* Delete a sample slot from a bank instrument.
+ * For split instruments this removes the selected split and compacts the split list.
+ * For non-split instruments (sampleIndex == 0), this clears sndResourceID.
+ * When deleteSndIfUnreferenced is TRUE, the underlying SND/CSND/ESND resource is
+ * removed if no other bank instrument still references it. */
+BAEResult BAERmfEditorBank_DeleteInstrumentSample(BAEBankToken bankToken,
+                                                   uint32_t instrumentIndex,
+                                                   uint32_t sampleIndex,
+                                                   XBOOL deleteSndIfUnreferenced);
+
+/* Delete an instrument (ID_INST resource) from the bank at the given index.
+ * Any alias entries pointing to this instrument are also removed.
+ * The bank must be reloaded/refreshed after this call. */
+BAEResult BAERmfEditorBank_DeleteInstrument(BAEBankToken bankToken,
+                                            uint32_t instrumentIndex);
+
+/* Remove a single alias entry from the bank's ID_ALIAS resource by its aliasFrom ID.
+ * Does NOT delete the underlying INST resource. */
+BAEResult BAERmfEditorBank_DeleteAlias(BAEBankToken bankToken,
+                                       uint32_t aliasFromInstID);
+
+/* Clone an instrument to a new instID within the same bank.
+ * If deepClone is TRUE, all referenced SND/CSND/ESND resources are also duplicated.
+ * If deepClone is FALSE, the new instrument shares the same SND resource IDs (pointers). */
+BAEResult BAERmfEditorBank_CloneInstrument(BAEBankToken bankToken,
+                                           uint32_t instrumentIndex,
+                                           uint32_t destInstID,
+                                           XBOOL deepClone);
+
+/* Add an alias entry mapping aliasInstID -> the instrument at instrumentIndex.
+ * The alias is stored in the bank's ID_ALIAS resource. */
+BAEResult BAERmfEditorBank_AliasInstrument(BAEBankToken bankToken,
+                                           uint32_t instrumentIndex,
+                                           uint32_t aliasInstID);
 
 /* Save the modified bank to a file.
  * filePath should have extension .hsb for IREZ format or .zsb for ZREZ format.

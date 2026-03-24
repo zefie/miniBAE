@@ -47,6 +47,23 @@ private:
     uint32_t m_instID;
 };
 
+/* Tree item data for global sample nodes */
+class BankSampleItemData : public wxTreeItemData {
+public:
+    BankSampleItemData(uint16_t sndID)
+        : m_sndID(sndID) {}
+    uint16_t GetSndID() const { return m_sndID; }
+        BankSampleItemData(uint16_t sndID, const std::vector<std::pair<uint32_t, uint32_t>> &references)
+            : m_sndID(sndID), m_references(references) {}
+    void AddReference(uint32_t instrumentIndex, uint32_t sampleIndex) {
+        m_references.push_back(std::make_pair(instrumentIndex, sampleIndex));
+    }
+    const std::vector<std::pair<uint32_t, uint32_t>> &GetReferences() const { return m_references; }
+private:
+    uint16_t m_sndID;
+    std::vector<std::pair<uint32_t, uint32_t>> m_references;  /* (instrumentIndex, sampleIndex) pairs */
+};
+
 /* ------------------------------------------------------------------ */
 /* Compression type name helper                                       */
 /* ------------------------------------------------------------------ */
@@ -270,8 +287,19 @@ static wxString GetBankGroupName(uint32_t instID)
 struct BankEditorPanel {
     wxPanel *panel;
     wxSplitterWindow *splitter;
+    
+    /* Left side: tabbed interface with Instruments and Samples trees */
+    wxNotebook *leftNotebook;
+    
+    /* Instruments tab (left/top) */
+    wxPanel *instrumentsTabPanel;
     wxTreeCtrl *instrumentTree;
-    wxListCtrl *sampleList;
+    wxListCtrl *sampleList;  /* Sample list within selected instrument */
+    
+    /* Samples tab (left/top) - global samples tree */
+    wxPanel *samplesTabPanel;
+    wxTreeCtrl *sampleTree;
+    
     BAEBankToken bankToken;
     wxString bankPath;
 
@@ -297,12 +325,21 @@ struct BankEditorPanel {
     std::function<bool(uint16_t, wxString &)> sourceCodecCallback;
     std::function<void(uint32_t)> cloneToSongCallback;
     std::function<void(uint32_t)> aliasToSongCallback;
-    std::function<void(uint32_t)> deleteFromSongCallback;
+    std::function<void(uint32_t, uint32_t)> deleteFromSongCallback;
     std::function<void(uint32_t)> compressInstrumentSamplesCallback;
+    std::function<void(uint32_t instIDBase)> addInstrumentCallback;
+    std::function<void(uint32_t instrumentIndex)> cloneInstrumentCallback;
+    std::function<void(uint32_t instrumentIndex)> aliasInstrumentCallback;
     std::function<void(uint32_t, uint32_t)> addSampleCallback;
     std::function<void(uint32_t, uint32_t)> deleteSampleCallback;
     std::function<void(uint32_t, uint32_t)> aliasSampleToInstrumentCallback;
     std::function<void(uint32_t, uint32_t)> copySampleToInstrumentCallback;
+    
+    /* Global sample operations callbacks */
+    std::function<void(uint16_t sndID)> globalAddSampleToInstrumentCallback;
+    std::function<void(uint16_t sndID)> globalCopySampleToInstrumentCallback;
+    std::function<void(uint16_t sndID, const std::vector<std::pair<uint32_t, uint32_t>> &)> globalDeleteSampleCallback;
+    std::function<void(uint16_t sndID, const std::vector<std::pair<uint32_t, uint32_t>> &)> globalEditSampleCallback;
     bool mousePreviewActive;
     std::unordered_map<int, int> keyboardPreviewNotes;   /* keyCode -> MIDI note */
 
@@ -340,6 +377,7 @@ static constexpr int kBankOpusRoundTripStorageFlag = 0x4000;
 /* ------------------------------------------------------------------ */
 
 static void PopulateInstrumentTree(BankEditorPanel *bp);
+static void PopulateSampleTree(BankEditorPanel *bp);
 static void PopulateSampleList(BankEditorPanel *bp, uint32_t instrumentIndex);
 static void ShowInstrumentDetail(BankEditorPanel *bp, uint32_t instrumentIndex);
 static void ShowSampleDetail(BankEditorPanel *bp,
@@ -350,8 +388,11 @@ static void ShowSampleDetail(BankEditorPanel *bp,
                              bool preferredOpusRoundTrip);
 static void OnInstrumentSelected(BankEditorPanel *bp, wxTreeEvent &event);
 static void OnSampleSelected(BankEditorPanel *bp, wxListEvent &event);
+static void OnSampleItemRightClick(BankEditorPanel *bp, wxListEvent &event);
+static void OnGlobalSampleSelected(BankEditorPanel *bp, wxTreeEvent &event);
 static void OnInstrumentContextMenu(BankEditorPanel *bp, wxTreeEvent &event);
 static void OnSampleContextMenu(BankEditorPanel *bp, wxContextMenuEvent &event);
+static void OnGlobalSampleContextMenu(BankEditorPanel *bp, wxTreeEvent &event);
 static void BuildInstrumentTab(BankEditorPanel *bp);
 static void BuildSamplesTab(BankEditorPanel *bp);
 static void InvalidateBankPreviewCache(BankEditorPanel *bp);
@@ -361,6 +402,10 @@ static void StopBankKeyboardPreview(BankEditorPanel *bp);
 static void ApplyDirtyParams(BankEditorPanel *bp, bool commitSampleReEncode);
 static void StopAllBankNotes(BankEditorPanel *bp);
 static void RefreshSampleListRow(BankEditorPanel *bp, uint32_t instrumentIndex, uint32_t sampleIndex);
+
+static wxTreeItemId FindInstrumentTreeItemByInstID(BankEditorPanel *bp, uint32_t instID);
+static wxTreeItemId FindInstrumentTreeItemByIndex(BankEditorPanel *bp, uint32_t instrumentIndex);
+static wxTreeItemId FindSampleTreeItemBySndID(BankEditorPanel *bp, uint16_t sndID);
 
 /* ------------------------------------------------------------------ */
 /* Preview cache invalidation                                         */
@@ -539,10 +584,120 @@ static bool IsBankTextEditingFocus(wxWindow *focus)
 /* Instrument tree population                                         */
 /* ------------------------------------------------------------------ */
 
+static wxTreeItemId FindInstrumentTreeItemByInstID(BankEditorPanel *bp, uint32_t instID)
+{
+    wxTreeItemId root;
+    wxTreeItemIdValue cookie;
+    wxTreeItemId group;
+
+    if (!bp || !bp->instrumentTree) {
+        return wxTreeItemId();
+    }
+
+    root = bp->instrumentTree->GetRootItem();
+    if (!root.IsOk()) {
+        return wxTreeItemId();
+    }
+
+    group = bp->instrumentTree->GetFirstChild(root, cookie);
+    while (group.IsOk()) {
+        wxTreeItemIdValue itemCookie;
+        wxTreeItemId item = bp->instrumentTree->GetFirstChild(group, itemCookie);
+        while (item.IsOk()) {
+            BankInstrumentItemData *data = dynamic_cast<BankInstrumentItemData *>(
+                bp->instrumentTree->GetItemData(item));
+            if (data && data->GetInstID() == instID) {
+                return item;
+            }
+            item = bp->instrumentTree->GetNextChild(group, itemCookie);
+        }
+        group = bp->instrumentTree->GetNextChild(root, cookie);
+    }
+
+    return wxTreeItemId();
+}
+
+static wxTreeItemId FindInstrumentTreeItemByIndex(BankEditorPanel *bp, uint32_t instrumentIndex)
+{
+    wxTreeItemId root;
+    wxTreeItemIdValue cookie;
+    wxTreeItemId group;
+
+    if (!bp || !bp->instrumentTree) {
+        return wxTreeItemId();
+    }
+
+    root = bp->instrumentTree->GetRootItem();
+    if (!root.IsOk()) {
+        return wxTreeItemId();
+    }
+
+    group = bp->instrumentTree->GetFirstChild(root, cookie);
+    while (group.IsOk()) {
+        wxTreeItemIdValue itemCookie;
+        wxTreeItemId item = bp->instrumentTree->GetFirstChild(group, itemCookie);
+        while (item.IsOk()) {
+            BankInstrumentItemData *data = dynamic_cast<BankInstrumentItemData *>(
+                bp->instrumentTree->GetItemData(item));
+            if (data && data->GetInstrumentIndex() == instrumentIndex) {
+                return item;
+            }
+            item = bp->instrumentTree->GetNextChild(group, itemCookie);
+        }
+        group = bp->instrumentTree->GetNextChild(root, cookie);
+    }
+
+    return wxTreeItemId();
+}
+
+static wxTreeItemId FindSampleTreeItemBySndID(BankEditorPanel *bp, uint16_t sndID)
+{
+    wxTreeItemId root;
+    wxTreeItemIdValue cookie;
+    wxTreeItemId item;
+
+    if (!bp || !bp->sampleTree) {
+        return wxTreeItemId();
+    }
+
+    root = bp->sampleTree->GetRootItem();
+    if (!root.IsOk()) {
+        return wxTreeItemId();
+    }
+
+    item = bp->sampleTree->GetFirstChild(root, cookie);
+    while (item.IsOk()) {
+        BankSampleItemData *data = dynamic_cast<BankSampleItemData *>(
+            bp->sampleTree->GetItemData(item));
+        if (data && data->GetSndID() == sndID) {
+            return item;
+        }
+        item = bp->sampleTree->GetNextChild(root, cookie);
+    }
+
+    return wxTreeItemId();
+}
+
 static void PopulateInstrumentTree(BankEditorPanel *bp)
 {
     uint32_t instCount = 0;
     wxTreeItemId root;
+    bool hadSelectedInstrument = false;
+    uint32_t selectedInstID = 0;
+    uint32_t selectedInstrumentIndex = 0;
+
+    {
+        wxTreeItemId selected = bp->instrumentTree->GetSelection();
+        if (selected.IsOk()) {
+            BankInstrumentItemData *selectedData = dynamic_cast<BankInstrumentItemData *>(
+                bp->instrumentTree->GetItemData(selected));
+            if (selectedData) {
+                hadSelectedInstrument = true;
+                selectedInstID = selectedData->GetInstID();
+                selectedInstrumentIndex = selectedData->GetInstrumentIndex();
+            }
+        }
+    }
 
     bp->instrumentTree->DeleteAllItems();
     root = bp->instrumentTree->AddRoot("Instruments");
@@ -667,6 +822,140 @@ static void PopulateInstrumentTree(BankEditorPanel *bp)
     if (groups.size() <= 4) {
         for (auto &g : groups) {
             bp->instrumentTree->Expand(g.node);
+        }
+    }
+
+    if (hadSelectedInstrument) {
+        wxTreeItemId restoreItem = FindInstrumentTreeItemByInstID(bp, selectedInstID);
+        if (!restoreItem.IsOk()) {
+            restoreItem = FindInstrumentTreeItemByIndex(bp, selectedInstrumentIndex);
+        }
+        if (restoreItem.IsOk()) {
+            bp->instrumentTree->SelectItem(restoreItem);
+            bp->instrumentTree->EnsureVisible(restoreItem);
+            {
+                BankInstrumentItemData *restoreData = dynamic_cast<BankInstrumentItemData *>(
+                    bp->instrumentTree->GetItemData(restoreItem));
+                if (restoreData) {
+                    PopulateSampleList(bp, restoreData->GetInstrumentIndex());
+                }
+            }
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Global sample tree population                                      */
+/* ------------------------------------------------------------------ */
+
+static void PopulateSampleTree(BankEditorPanel *bp)
+{
+    /* Build a map of SNDID -> list of (instrumentIndex, sampleIndex) references */
+    std::unordered_map<uint16_t, std::vector<std::pair<uint32_t, uint32_t>>> sampleMap;
+    uint32_t instCount = 0;
+    bool hadSelectedSample = false;
+    uint16_t selectedSndID = 0;
+
+    {
+        wxTreeItemId selected = bp->sampleTree->GetSelection();
+        if (selected.IsOk()) {
+            BankSampleItemData *selectedData = dynamic_cast<BankSampleItemData *>(
+                bp->sampleTree->GetItemData(selected));
+            if (selectedData) {
+                hadSelectedSample = true;
+                selectedSndID = selectedData->GetSndID();
+            }
+        }
+    }
+
+    bp->sampleTree->DeleteAllItems();
+    wxTreeItemId root = bp->sampleTree->AddRoot("Samples");
+
+    if (!bp->bankToken) {
+        bp->sampleTree->Expand(root);
+        return;
+    }
+
+    if (BAERmfEditorBank_GetInstrumentCount(bp->bankToken, &instCount) != BAE_NO_ERROR) {
+        bp->sampleTree->Expand(root);
+        return;
+    }
+
+    /* Collect all unique samples and their referencing instruments */
+    for (uint32_t i = 0; i < instCount; ++i) {
+        uint32_t sampleCount = 0;
+        if (BAERmfEditorBank_GetInstrumentSampleCount(bp->bankToken, i, &sampleCount) != BAE_NO_ERROR) {
+            continue;
+        }
+        for (uint32_t s = 0; s < sampleCount; ++s) {
+            BAERmfEditorBankSampleInfo sampleInfo;
+            if (BAERmfEditorBank_GetInstrumentSampleInfo(bp->bankToken, i, s, &sampleInfo) != BAE_NO_ERROR) {
+                continue;
+            }
+            sampleMap[sampleInfo.sndResourceID].push_back(std::make_pair(i, s));
+        }
+    }
+
+    /* Build list of samples with their names for sorting */
+    struct SampleEntry {
+        uint16_t sndID;
+        wxString displayName;
+        std::vector<std::pair<uint32_t, uint32_t>> references;
+    };
+    std::vector<SampleEntry> entries;
+
+    for (auto &mapEntry : sampleMap) {
+        SampleEntry entry;
+        entry.sndID = mapEntry.first;
+        entry.references = mapEntry.second;
+
+        /* Get sample name from resource */
+        char sampleName[256] = {0};
+        XGetFileResourceName((XFILE)bp->bankToken, ID_SND, (XLongResourceID)entry.sndID, sampleName);
+        if (sampleName[0] == 0) {
+            XGetFileResourceName((XFILE)bp->bankToken, ID_CSND, (XLongResourceID)entry.sndID, sampleName);
+        }
+        if (sampleName[0] == 0) {
+            XGetFileResourceName((XFILE)bp->bankToken, ID_ESND, (XLongResourceID)entry.sndID, sampleName);
+        }
+        
+        wxString name = sampleName[0] ? wxString(sampleName) : wxString();
+        name.Replace("\r", "");
+        name.Replace("\n", " ");
+        name.Trim();
+        
+        /* Check if name is generic or invalid */
+        if (!name.IsEmpty() && name != "(null)" && name != "unknown" && name != "sample") {
+            entry.displayName = name;
+        } else {
+            /* Fall back to SNDID */
+            entry.displayName = wxString::Format("Sample 0x%04X", static_cast<unsigned>(entry.sndID));
+        }
+        entries.push_back(entry);
+    }
+
+    /* Sort by display name (which includes fallback to SNDID) */
+    std::sort(entries.begin(), entries.end(), [](const SampleEntry &a, const SampleEntry &b) {
+        return a.displayName < b.displayName;
+    });
+
+    /* Add to tree */
+    for (auto const &entry : entries) {
+        wxString label = wxString::Format("%s (sndID: %u) - %d refs", 
+                                          entry.displayName,
+                                          static_cast<unsigned>(entry.sndID),
+                                          static_cast<int>(entry.references.size()));
+        bp->sampleTree->AppendItem(root, label, -1, -1,
+                                   new BankSampleItemData(entry.sndID, entry.references));
+    }
+
+    bp->sampleTree->Expand(root);
+
+    if (hadSelectedSample) {
+        wxTreeItemId restoreItem = FindSampleTreeItemBySndID(bp, selectedSndID);
+        if (restoreItem.IsOk()) {
+            bp->sampleTree->SelectItem(restoreItem);
+            bp->sampleTree->EnsureVisible(restoreItem);
         }
     }
 }
@@ -930,7 +1219,23 @@ static void ShowSampleDetail(BankEditorPanel *bp,
     /* Populate the shared sample params panel */
     if (bp->sampleParamsPanel) {
         SampleParamsPanelData data;
-        data.displayName = wxString::Format("Sample %u", (unsigned)sampleIndex);
+        char sampleName[256] = {0};
+        XGetFileResourceName((XFILE)bp->bankToken, ID_SND, (XLongResourceID)sampleInfo.sndResourceID, sampleName);
+        if (sampleName[0] == 0) {
+            XGetFileResourceName((XFILE)bp->bankToken, ID_CSND, (XLongResourceID)sampleInfo.sndResourceID, sampleName);
+        }
+        if (sampleName[0] == 0) {
+            XGetFileResourceName((XFILE)bp->bankToken, ID_ESND, (XLongResourceID)sampleInfo.sndResourceID, sampleName);
+        }
+        wxString resolvedName = sampleName[0] ? wxString(sampleName) : wxString();
+        resolvedName.Replace("\r", "");
+        resolvedName.Replace("\n", " ");
+        resolvedName.Trim();
+        if (!resolvedName.IsEmpty() && resolvedName != "(null)" && resolvedName != "unknown" && resolvedName != "sample") {
+            data.displayName = resolvedName;
+        } else {
+            data.displayName = wxString::Format("Sample %u", (unsigned)sampleIndex);
+        }
         data.rootKey = (sampleInfo.rootKey == 0) ? 60 : sampleInfo.rootKey;
         data.lowKey = sampleInfo.lowKey;
         data.highKey = sampleInfo.highKey;
@@ -993,6 +1298,10 @@ static void OnInstrumentSelected(BankEditorPanel *bp, wxTreeEvent &event)
             bp->sampleParamsPanel->Hide();
         }
         bp->instHeaderLabel->SetLabel("Select an instrument to view details.");
+        if (bp->instParamsPanel) {
+            bp->instParamsPanel->ClearUI();
+            bp->instParamsPanel->Hide();
+        }
         bp->hasInstrument = false;
         return;
     }
@@ -1029,7 +1338,10 @@ static void OnInstrumentContextMenu(BankEditorPanel *bp, wxTreeEvent &event)
         kCtxCloneToSong = wxID_HIGHEST + 200,
         kCtxAliasToSong,
         kCtxDeleteFromSong,
-        kCtxCompressInstrumentSamples
+        kCtxCompressInstrumentSamples,
+        kCtxAddInstrument,
+        kCtxCloneInstrument,
+        kCtxAliasInstrument
     };
     wxTreeItemId item = event.GetItem();
     BankInstrumentItemData *data;
@@ -1039,8 +1351,80 @@ static void OnInstrumentContextMenu(BankEditorPanel *bp, wxTreeEvent &event)
     if (!item.IsOk()) {
         return;
     }
+    
     data = dynamic_cast<BankInstrumentItemData *>(bp->instrumentTree->GetItemData(item));
     if (!data) {
+        /* This is a group node (no BankInstrumentItemData attached).
+         * Check if it's a direct child of the root. */
+        wxTreeItemId root = bp->instrumentTree->GetRootItem();
+        wxTreeItemId parent = bp->instrumentTree->GetItemParent(item);
+        
+        if (!root.IsOk() || !parent.IsOk() || parent != root) {
+            return;
+        }
+
+        /* This is a group node under root. Show "Add Instrument" option. */
+        bool canAdd = false;
+        
+        /* Scan children to check if all programs (0-127) are used */
+        bool usedPrograms[128];
+        memset(usedPrograms, 0, sizeof(usedPrograms));
+        
+        wxTreeItemIdValue cookie;
+        wxTreeItemId childItem = bp->instrumentTree->GetFirstChild(item, cookie);
+        while (childItem.IsOk()) {
+            BankInstrumentItemData *childData = dynamic_cast<BankInstrumentItemData *>(
+                bp->instrumentTree->GetItemData(childItem));
+            if (childData && bp->bankToken) {
+                BAERmfEditorBankInstrumentInfo info;
+                if (BAERmfEditorBank_GetInstrumentInfo(bp->bankToken, childData->GetInstrumentIndex(), &info) == BAE_NO_ERROR) {
+                    if (info.program < 128) {
+                        usedPrograms[info.program] = true;
+                    }
+                }
+            }
+            childItem = bp->instrumentTree->GetNextChild(item, cookie);
+        }
+
+        /* Check if all 128 programs are used */
+        for (int i = 0; i < 128; ++i) {
+            if (!usedPrograms[i]) {
+                canAdd = true;
+                break;
+            }
+        }
+
+        menu.Append(kCtxAddInstrument, "Add Instrument");
+        menu.Enable(kCtxAddInstrument, canAdd);
+        /* Determine the instID base for this group from the first child with data. */
+        uint32_t groupInstIDBase = 0;
+        {
+            wxTreeItemIdValue cookieBase;
+            wxTreeItemId firstChild = bp->instrumentTree->GetFirstChild(item, cookieBase);
+            if (firstChild.IsOk()) {
+                BankInstrumentItemData *firstData = dynamic_cast<BankInstrumentItemData *>(
+                    bp->instrumentTree->GetItemData(firstChild));
+                if (firstData) {
+                    uint32_t fid = firstData->GetInstID();
+                    /* Round down to group boundary (0,128,256,384,512,...) */
+                    groupInstIDBase = (fid / 128u) * 128u;
+                }
+            } else {
+                /* Empty group — derive base from label by checking which range is empty */
+                wxString label = bp->instrumentTree->GetItemText(item);
+                if      (label.Contains("GM Melodic"))         groupInstIDBase = 0;
+                else if (label.Contains("GM Percussion"))      groupInstIDBase = 128;
+                else if (label.Contains("Special Melodic"))    groupInstIDBase = 256;
+                else if (label.Contains("Special Percussion")) groupInstIDBase = 384;
+                else                                            groupInstIDBase = 512;
+            }
+        }
+        menu.Bind(wxEVT_MENU, [bp, groupInstIDBase](wxCommandEvent &) {
+            if (bp->addInstrumentCallback) {
+                bp->addInstrumentCallback(groupInstIDBase);
+            }
+        }, kCtxAddInstrument);
+        bp->instrumentTree->PopupMenu(&menu);
         return;
     }
     instrumentIndex = data->GetInstrumentIndex();
@@ -1054,6 +1438,62 @@ static void OnInstrumentContextMenu(BankEditorPanel *bp, wxTreeEvent &event)
     menu.Append(kCtxAliasToSong, "Alias Instrument to Song");
     menu.Append(kCtxCompressInstrumentSamples, "Compress Instrument Samples");
     menu.AppendSeparator();
+
+    /* Gate Clone/Alias Instrument by whether any free instID slot exists across all groups */
+    /* Determine whether percussion slots are valid destinations:
+     * Only instruments with 0 splits (single-sample drum note instruments)
+     * can target the percussion ID ranges (128-255, 384-511). */
+    int splitCount = 0;
+    {
+        BAERmfEditorBankInstrumentInfo thisInfo;
+        if (BAERmfEditorBank_GetInstrumentInfo(bp->bankToken, instrumentIndex, &thisInfo) == BAE_NO_ERROR)
+            splitCount = thisInfo.keySplitCount;
+    }
+    bool allowPerc = (splitCount == 0);
+
+    bool anyFreeSlot = false;
+    if (bp->bankToken) {
+        uint32_t instCount = 0;
+        BAERmfEditorBank_GetInstrumentCount(bp->bankToken, &instCount);
+        bool usedInstIDs[512];
+        memset(usedInstIDs, 0, sizeof(usedInstIDs));
+        for (uint32_t i = 0; i < instCount; ++i) {
+            BAERmfEditorBankInstrumentInfo info;
+            if (BAERmfEditorBank_GetInstrumentInfo(bp->bankToken, i, &info) == BAE_NO_ERROR &&
+                info.instID < 512u) {
+                usedInstIDs[info.instID] = true;
+            }
+        }
+        /* Also mark aliased-from IDs as occupied */
+        XFILE bankFile = (XFILE)bp->bankToken;
+        XAliasLinkResource *pAlias = XGetAliasLinkFromFile(bankFile);
+        if (pAlias) {
+            uint32_t cnt = (uint32_t)XGetLong(&pAlias->numberOfAliases);
+            for (uint32_t i = 0; i < cnt; ++i) {
+                uint32_t fromID = (uint32_t)XGetLong(&pAlias->list[i].aliasFrom);
+                if (fromID < 512u) usedInstIDs[fromID] = true;
+            }
+            XDisposePtr((XPTR)pAlias);
+        }
+        /* Check melodic ranges always; percussion ranges only when splits == 0 */
+        static const struct { int lo; int hi; bool isPerc; } kRanges[] = {
+            {   0, 127, false },
+            { 128, 255, true  },
+            { 256, 383, false },
+            { 384, 511, true  },
+        };
+        for (int r = 0; r < 4 && !anyFreeSlot; ++r) {
+            if (kRanges[r].isPerc && !allowPerc) continue;
+            for (int i = kRanges[r].lo; i <= kRanges[r].hi; ++i) {
+                if (!usedInstIDs[i]) { anyFreeSlot = true; break; }
+            }
+        }
+    }
+    menu.Append(kCtxCloneInstrument, "Clone Instrument");
+    menu.Enable(kCtxCloneInstrument, anyFreeSlot);
+    menu.Append(kCtxAliasInstrument, "Alias Instrument");
+    menu.Enable(kCtxAliasInstrument, anyFreeSlot);
+    menu.AppendSeparator();
     menu.Append(kCtxDeleteFromSong, "Delete Instrument");
 
     menu.Bind(wxEVT_MENU, [bp, instrumentIndex](wxCommandEvent &) {
@@ -1066,16 +1506,39 @@ static void OnInstrumentContextMenu(BankEditorPanel *bp, wxTreeEvent &event)
             bp->aliasToSongCallback(instrumentIndex);
         }
     }, kCtxAliasToSong);
-    menu.Bind(wxEVT_MENU, [bp, instrumentIndex](wxCommandEvent &) {
-        if (bp->deleteFromSongCallback) {
-            bp->deleteFromSongCallback(instrumentIndex);
+    uint32_t displayInstID = data->GetInstID();
+    menu.Bind(wxEVT_MENU, [bp, instrumentIndex, displayInstID](wxCommandEvent &) {
+        /* Confirm deletion before proceeding */
+        wxMessageDialog confirmDlg(nullptr,
+            "Are you sure you want to delete this instrument?",
+            "Delete Instrument",
+            wxYES_NO | wxICON_QUESTION);
+        if (confirmDlg.ShowModal() != wxID_YES) {
+            return;
         }
+        
+        if (bp->deleteFromSongCallback) {
+            bp->deleteFromSongCallback(instrumentIndex, displayInstID);
+        }
+        
+        /* Refresh the instrument tree to remove the deleted instrument */
+        PopulateInstrumentTree(bp);
     }, kCtxDeleteFromSong);
     menu.Bind(wxEVT_MENU, [bp, instrumentIndex](wxCommandEvent &) {
         if (bp->compressInstrumentSamplesCallback) {
             bp->compressInstrumentSamplesCallback(instrumentIndex);
         }
     }, kCtxCompressInstrumentSamples);
+    menu.Bind(wxEVT_MENU, [bp, instrumentIndex](wxCommandEvent &) {
+        if (bp->cloneInstrumentCallback) {
+            bp->cloneInstrumentCallback(instrumentIndex);
+        }
+    }, kCtxCloneInstrument);
+    menu.Bind(wxEVT_MENU, [bp, instrumentIndex](wxCommandEvent &) {
+        if (bp->aliasInstrumentCallback) {
+            bp->aliasInstrumentCallback(instrumentIndex);
+        }
+    }, kCtxAliasInstrument);
 
     bp->instrumentTree->PopupMenu(&menu);
 }
@@ -1090,8 +1553,6 @@ static void OnSampleContextMenu(BankEditorPanel *bp, wxContextMenuEvent &event)
     };
     wxPoint screenPos;
     wxPoint clientPos;
-    int hitFlags = 0;
-    long hit = -1;
     uint32_t sampleIndex;
     wxMenu menu;
 
@@ -1099,19 +1560,21 @@ static void OnSampleContextMenu(BankEditorPanel *bp, wxContextMenuEvent &event)
         return;
     }
 
+    /* Mouse right-clicks are handled by wxEVT_LIST_ITEM_RIGHT_CLICK so we can
+     * use the exact row index from wxListEvent. Keep this handler for keyboard
+     * menu invocation (Shift+F10 / Menu key). */
     screenPos = event.GetPosition();
-    if (screenPos == wxDefaultPosition) {
-        screenPos = wxGetMousePosition();
+    if (screenPos != wxDefaultPosition) {
+        return;
     }
-    clientPos = bp->sampleList->ScreenToClient(screenPos);
-    hit = bp->sampleList->HitTest(clientPos, hitFlags, NULL);
-    if (hit >= 0) {
-        bp->sampleList->SetItemState(hit,
-                                     wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED,
-                                     wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
-        sampleIndex = (uint32_t)hit;
-    } else if (bp->hasSampleSelection) {
+
+    if (bp->hasSampleSelection) {
         sampleIndex = bp->currentSampleIndex;
+        long focused = bp->sampleList->GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_FOCUSED);
+        if (focused >= 0) {
+            sampleIndex = (uint32_t)focused;
+        }
+        clientPos = wxPoint(16, 16);
     } else {
         return;
     }
@@ -1144,6 +1607,130 @@ static void OnSampleContextMenu(BankEditorPanel *bp, wxContextMenuEvent &event)
     }, kCtxCopySampleToInstrument);
 
     bp->sampleList->PopupMenu(&menu, clientPos);
+}
+
+static void OnSampleItemRightClick(BankEditorPanel *bp, wxListEvent &event)
+{
+    enum {
+        kCtxAddSample = wxID_HIGHEST + 300,
+        kCtxDeleteSample,
+        kCtxAliasSampleToInstrument,
+        kCtxCopySampleToInstrument
+    };
+    long hit = event.GetIndex();
+    uint32_t sampleIndex;
+    wxPoint clientPos = event.GetPoint();
+    wxMenu menu;
+
+    if (!bp || !bp->hasInstrument || hit < 0) {
+        return;
+    }
+
+    bp->sampleList->SetItemState(hit,
+                                 wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED,
+                                 wxLIST_STATE_SELECTED | wxLIST_STATE_FOCUSED);
+    sampleIndex = (uint32_t)hit;
+
+    menu.Append(kCtxAddSample, "Add Sample");
+    menu.Append(kCtxDeleteSample, "Delete Sample");
+    menu.AppendSeparator();
+    menu.Append(kCtxAliasSampleToInstrument, "Alias Sample to Another Instrument");
+    menu.Append(kCtxCopySampleToInstrument, "Copy Sample to Another Instrument");
+
+    menu.Bind(wxEVT_MENU, [bp, sampleIndex](wxCommandEvent &) {
+        if (bp->addSampleCallback) {
+            bp->addSampleCallback(bp->currentInstrumentIndex, sampleIndex);
+        }
+    }, kCtxAddSample);
+    menu.Bind(wxEVT_MENU, [bp, sampleIndex](wxCommandEvent &) {
+        if (bp->deleteSampleCallback) {
+            bp->deleteSampleCallback(bp->currentInstrumentIndex, sampleIndex);
+        }
+    }, kCtxDeleteSample);
+    menu.Bind(wxEVT_MENU, [bp, sampleIndex](wxCommandEvent &) {
+        if (bp->aliasSampleToInstrumentCallback) {
+            bp->aliasSampleToInstrumentCallback(bp->currentInstrumentIndex, sampleIndex);
+        }
+    }, kCtxAliasSampleToInstrument);
+    menu.Bind(wxEVT_MENU, [bp, sampleIndex](wxCommandEvent &) {
+        if (bp->copySampleToInstrumentCallback) {
+            bp->copySampleToInstrumentCallback(bp->currentInstrumentIndex, sampleIndex);
+        }
+    }, kCtxCopySampleToInstrument);
+
+    bp->sampleList->PopupMenu(&menu, clientPos);
+}
+
+static void OnGlobalSampleSelected(BankEditorPanel *bp, wxTreeEvent &event)
+{
+    wxTreeItemId item = event.GetItem();
+    if (!item.IsOk()) {
+        return;
+    }
+    if (!dynamic_cast<BankSampleItemData *>(bp->sampleTree->GetItemData(item))) {
+        /* Root node selected */
+        return;
+    }
+
+    /* Intentionally do not auto-load sample details on single-click.
+     * Editing is triggered via double-click or the context menu's Edit action. */
+}
+
+static void OnGlobalSampleContextMenu(BankEditorPanel *bp, wxTreeEvent &event)
+{
+    enum {
+        kCtxAddSampleToInstrument = wxID_HIGHEST + 400,
+        kCtxCopySampleToInstrument,
+        kCtxEditSample,
+        kCtxDeleteSample
+    };
+    wxTreeItemId item = event.GetItem();
+    BankSampleItemData *data;
+    uint16_t sndID;
+    wxMenu menu;
+
+    if (!item.IsOk()) {
+        return;
+    }
+    data = dynamic_cast<BankSampleItemData *>(bp->sampleTree->GetItemData(item));
+    if (!data) {
+        /* Root node selected, no context menu */
+        return;
+    }
+    sndID = data->GetSndID();
+
+    if (bp->sampleTree->GetSelection() != item) {
+        bp->sampleTree->SelectItem(item);
+    }
+
+    menu.Append(kCtxAddSampleToInstrument, "Add Sample Pointer (Alias) to Instrument");
+    menu.Append(kCtxCopySampleToInstrument, "Copy Sample to an Instrument");
+    menu.Append(kCtxEditSample, "Edit Sample");
+    menu.AppendSeparator();
+    menu.Append(kCtxDeleteSample, "Delete Sample");
+
+    menu.Bind(wxEVT_MENU, [bp, sndID](wxCommandEvent &) {
+        if (bp->globalAddSampleToInstrumentCallback) {
+            bp->globalAddSampleToInstrumentCallback(sndID);
+        }
+    }, kCtxAddSampleToInstrument);
+    menu.Bind(wxEVT_MENU, [bp, sndID](wxCommandEvent &) {
+        if (bp->globalCopySampleToInstrumentCallback) {
+            bp->globalCopySampleToInstrumentCallback(sndID);
+        }
+    }, kCtxCopySampleToInstrument);
+    menu.Bind(wxEVT_MENU, [bp, sndID, data](wxCommandEvent &) {
+        if (bp->globalEditSampleCallback) {
+            bp->globalEditSampleCallback(sndID, data->GetReferences());
+        }
+    }, kCtxEditSample);
+    menu.Bind(wxEVT_MENU, [bp, sndID, data](wxCommandEvent &) {
+        if (bp->globalDeleteSampleCallback) {
+            bp->globalDeleteSampleCallback(sndID, data->GetReferences());
+        }
+    }, kCtxDeleteSample);
+
+    bp->sampleTree->PopupMenu(&menu);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1229,17 +1816,23 @@ BankEditorPanel *CreateBankEditorPanel(wxWindow *parent)
     bp->splitter = new wxSplitterWindow(bp->panel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
                                         wxSP_LIVE_UPDATE | wxSP_3D);
 
-    /* Left side: instrument tree + sample list */
+    /* Left side: tabbed interface with Instruments and Samples tabs */
     wxPanel *leftPanel = new wxPanel(bp->splitter);
-    wxBoxSizer *leftSizer = new wxBoxSizer(wxVERTICAL);
-
-    leftSizer->Add(new wxStaticText(leftPanel, wxID_ANY, "Instruments"), 0, wxALL, 4);
-    bp->instrumentTree = new wxTreeCtrl(leftPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+    wxBoxSizer *leftPanelSizer = new wxBoxSizer(wxVERTICAL);
+    
+    bp->leftNotebook = new wxNotebook(leftPanel, wxID_ANY);
+    
+    /* ===== Instruments Tab ===== */
+    bp->instrumentsTabPanel = new wxPanel(bp->leftNotebook);
+    wxBoxSizer *instTabSizer = new wxBoxSizer(wxVERTICAL);
+    
+    instTabSizer->Add(new wxStaticText(bp->instrumentsTabPanel, wxID_ANY, "Instruments"), 0, wxALL, 4);
+    bp->instrumentTree = new wxTreeCtrl(bp->instrumentsTabPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
                                         wxTR_HAS_BUTTONS | wxTR_LINES_AT_ROOT | wxTR_SINGLE);
-    leftSizer->Add(bp->instrumentTree, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 4);
+    instTabSizer->Add(bp->instrumentTree, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 4);
 
-    leftSizer->Add(new wxStaticText(leftPanel, wxID_ANY, "Samples / Key Splits"), 0, wxLEFT | wxRIGHT, 4);
-    bp->sampleList = new wxListCtrl(leftPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+    instTabSizer->Add(new wxStaticText(bp->instrumentsTabPanel, wxID_ANY, "Samples / Key Splits"), 0, wxLEFT | wxRIGHT, 4);
+    bp->sampleList = new wxListCtrl(bp->instrumentsTabPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
                                     wxLC_REPORT | wxLC_SINGLE_SEL);
     bp->sampleList->SetMinSize(wxSize(-1, 150));
     bp->sampleList->InsertColumn(0, "Sample", wxLIST_FORMAT_LEFT, 80);
@@ -1249,8 +1842,23 @@ BankEditorPanel *CreateBankEditorPanel(wxWindow *parent)
     bp->sampleList->InsertColumn(4, "Format", wxLIST_FORMAT_LEFT, 100);
     bp->sampleList->InsertColumn(5, "Codec", wxLIST_FORMAT_LEFT, 70);
     bp->sampleList->InsertColumn(6, "Frames", wxLIST_FORMAT_LEFT, 80);
-    leftSizer->Add(bp->sampleList, 0, wxEXPAND | wxALL, 4);
-    leftPanel->SetSizer(leftSizer);
+    instTabSizer->Add(bp->sampleList, 0, wxEXPAND | wxALL, 4);
+    bp->instrumentsTabPanel->SetSizer(instTabSizer);
+    bp->leftNotebook->AddPage(bp->instrumentsTabPanel, "Instruments");
+    
+    /* ===== Samples Tab (Global) ===== */
+    bp->samplesTabPanel = new wxPanel(bp->leftNotebook);
+    wxBoxSizer *sampTabSizer = new wxBoxSizer(wxVERTICAL);
+    
+    sampTabSizer->Add(new wxStaticText(bp->samplesTabPanel, wxID_ANY, "All Samples (sorted by name)"), 0, wxALL, 4);
+    bp->sampleTree = new wxTreeCtrl(bp->samplesTabPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+                                    wxTR_HAS_BUTTONS | wxTR_LINES_AT_ROOT | wxTR_SINGLE);
+    sampTabSizer->Add(bp->sampleTree, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 4);
+    bp->samplesTabPanel->SetSizer(sampTabSizer);
+    bp->leftNotebook->AddPage(bp->samplesTabPanel, "Samples");
+    
+    leftPanelSizer->Add(bp->leftNotebook, 1, wxEXPAND);
+    leftPanel->SetSizer(leftPanelSizer);
 
     /* Right side: detail notebook with Instrument and Samples tabs */
     wxPanel *rightPanel = new wxPanel(bp->splitter);
@@ -1316,9 +1924,33 @@ BankEditorPanel *CreateBankEditorPanel(wxWindow *parent)
     bp->instrumentTree->Bind(wxEVT_TREE_ITEM_RIGHT_CLICK, [bp](wxTreeEvent &event) {
         OnInstrumentContextMenu(bp, event);
     });
+    
+    /* Global sample tree events */
+    bp->sampleTree->Bind(wxEVT_TREE_SEL_CHANGED, [bp](wxTreeEvent &event) {
+        OnGlobalSampleSelected(bp, event);
+    });
+    bp->sampleTree->Bind(wxEVT_TREE_ITEM_RIGHT_CLICK, [bp](wxTreeEvent &event) {
+        OnGlobalSampleContextMenu(bp, event);
+    });
+    bp->sampleTree->Bind(wxEVT_TREE_ITEM_ACTIVATED, [bp](wxTreeEvent &event) {
+        // Double-click or Enter to edit sample
+        wxTreeItemId id = event.GetItem();
+        if (id.IsOk()) {
+            BankSampleItemData *data = static_cast<BankSampleItemData *>(bp->sampleTree->GetItemData(id));
+            if (data) {
+                uint16_t sndID = data->GetSndID();
+                if (bp->globalEditSampleCallback) {
+                    bp->globalEditSampleCallback(sndID, data->GetReferences());
+                }
+            }
+        }
+    });
 
     bp->sampleList->Bind(wxEVT_LIST_ITEM_SELECTED, [bp](wxListEvent &event) {
         OnSampleSelected(bp, event);
+    });
+    bp->sampleList->Bind(wxEVT_LIST_ITEM_RIGHT_CLICK, [bp](wxListEvent &event) {
+        OnSampleItemRightClick(bp, event);
     });
     bp->sampleList->Bind(wxEVT_CONTEXT_MENU, [bp](wxContextMenuEvent &event) {
         OnSampleContextMenu(bp, event);
@@ -1454,6 +2086,7 @@ void BankEditorPanel_LoadBank(BankEditorPanel *panel,
     panel->hasLastUiCodecState = false;
     if (panel->dirtyParamsCallback) panel->dirtyParamsCallback(nullptr);
     PopulateInstrumentTree(panel);
+    PopulateSampleTree(panel);
     panel->sampleList->DeleteAllItems();
     panel->instHeaderLabel->SetLabel("Select an instrument to view details.");
     panel->sampleHeaderLabel->SetLabel("Select a sample from the list to view details.");
@@ -1480,6 +2113,8 @@ void BankEditorPanel_Clear(BankEditorPanel *panel)
     panel->instrumentTree->DeleteAllItems();
     panel->instrumentTree->AddRoot("Instruments");
     panel->sampleList->DeleteAllItems();
+    panel->sampleTree->DeleteAllItems();
+    panel->sampleTree->AddRoot("Samples");
     panel->instHeaderLabel->SetLabel("Open an HSB or ZSB file to begin editing.");
     panel->sampleHeaderLabel->SetLabel("Select a sample from the list to view details.");
     if (panel->sampleParamsPanel) {
@@ -1518,8 +2153,11 @@ void BankEditorPanel_SetInstrumentContextCallbacks(
     BankEditorPanel *panel,
     std::function<void(uint32_t instrumentIndex)> cloneToSongCallback,
     std::function<void(uint32_t instrumentIndex)> aliasToSongCallback,
-    std::function<void(uint32_t instrumentIndex)> deleteFromSongCallback,
-    std::function<void(uint32_t instrumentIndex)> compressInstrumentSamplesCallback)
+    std::function<void(uint32_t instrumentIndex, uint32_t displayInstID)> deleteFromSongCallback,
+    std::function<void(uint32_t instrumentIndex)> compressInstrumentSamplesCallback,
+    std::function<void(uint32_t instIDBase)> addInstrumentCallback,
+    std::function<void(uint32_t instrumentIndex)> cloneInstrumentCallback,
+    std::function<void(uint32_t instrumentIndex)> aliasInstrumentCallback)
 {
     if (!panel) {
         return;
@@ -1528,6 +2166,9 @@ void BankEditorPanel_SetInstrumentContextCallbacks(
     panel->aliasToSongCallback = std::move(aliasToSongCallback);
     panel->deleteFromSongCallback = std::move(deleteFromSongCallback);
     panel->compressInstrumentSamplesCallback = std::move(compressInstrumentSamplesCallback);
+    panel->addInstrumentCallback = std::move(addInstrumentCallback);
+    panel->cloneInstrumentCallback = std::move(cloneInstrumentCallback);
+    panel->aliasInstrumentCallback = std::move(aliasInstrumentCallback);
 }
 
 void BankEditorPanel_SetSampleContextCallbacks(
@@ -1546,10 +2187,75 @@ void BankEditorPanel_SetSampleContextCallbacks(
     panel->copySampleToInstrumentCallback = std::move(copySampleToInstrumentCallback);
 }
 
+void BankEditorPanel_SetGlobalSampleContextCallbacks(
+    BankEditorPanel *panel,
+    std::function<void(uint16_t sndID)> addSampleToInstrumentCallback,
+    std::function<void(uint16_t sndID)> copySampleToInstrumentCallback,
+    std::function<void(uint16_t sndID, const std::vector<std::pair<uint32_t, uint32_t>> &referencingInstruments)> deleteSampleCallback,
+    std::function<void(uint16_t sndID, const std::vector<std::pair<uint32_t, uint32_t>> &referencingInstruments)> editSampleCallback)
+{
+    if (!panel) {
+        return;
+    }
+    panel->globalAddSampleToInstrumentCallback = std::move(addSampleToInstrumentCallback);
+    panel->globalCopySampleToInstrumentCallback = std::move(copySampleToInstrumentCallback);
+    panel->globalDeleteSampleCallback = std::move(deleteSampleCallback);
+    panel->globalEditSampleCallback = std::move(editSampleCallback);
+}
+
 uint32_t BankEditorPanel_GetCurrentInstrumentIndex(BankEditorPanel *panel)
 {
     if (!panel) {
         return 0;
     }
     return panel->currentInstrumentIndex;
+}
+
+void BankEditorPanel_SelectInstrument(BankEditorPanel *panel, uint32_t instrumentIndex)
+{
+    if (!panel || !panel->bankToken) {
+        return;
+    }
+
+    /* Find the tree item with matching instrumentIndex */
+    wxTreeItemIdValue cookie;
+    wxTreeItemId root = panel->instrumentTree->GetRootItem();
+    wxTreeItemId item = panel->instrumentTree->GetFirstChild(root, cookie);
+    
+    while (item.IsOk()) {
+        wxTreeItemIdValue groupCookie;
+        wxTreeItemId children = panel->instrumentTree->GetFirstChild(item, groupCookie);
+        
+        while (children.IsOk()) {
+            BankInstrumentItemData *data = static_cast<BankInstrumentItemData *>(panel->instrumentTree->GetItemData(children));
+            if (data && data->GetInstrumentIndex() == instrumentIndex) {
+                panel->instrumentTree->SelectItem(children);
+                panel->instrumentTree->EnsureVisible(children);
+                // Trigger OnInstrumentSelected via selection event
+                wxTreeEvent event(wxEVT_TREE_SEL_CHANGED, panel->instrumentTree, children);
+                OnInstrumentSelected(panel, event);
+                return;
+            }
+            children = panel->instrumentTree->GetNextChild(item, groupCookie);
+        }
+        item = panel->instrumentTree->GetNextChild(root, cookie);
+    }
+}
+
+void BankEditorPanel_SelectSample(BankEditorPanel *panel, uint32_t instrumentIndex, uint32_t sampleIndex)
+{
+    if (!panel || !panel->bankToken) {
+        return;
+    }
+
+    /* First ensure the instrument is loaded */
+    BankEditorPanel_SelectInstrument(panel, instrumentIndex);
+
+    /* Then show the sample detail */
+    ShowSampleDetail(panel,
+                     instrumentIndex,
+                     sampleIndex,
+                     BAE_EDITOR_COMPRESSION_DONT_CHANGE,
+                     BAE_EDITOR_OPUS_MODE_AUDIO,
+                     false);
 }

@@ -32,14 +32,14 @@
   - ~~make sure we load the edited bank (not original) into memory when switching to midi tab~~
   - ~~lots of bugs with sample editor~~
   - ~~needs context menus still~~
-  - musicial keyboard vs form fields
+  - musicial keyboard vs form fields, allow clicking empty space in dialog to unfocus fields
   - ~~compression issues in sample editor~~
   - ~~LFO broken~~
   - ~~Bank editor must force ZSB if using ZMF features~~
-  - Sample tree
-
+  - ~~Sample tree~~
 
 # 0.11a
+- Allow copy/pasting notes
 - Allow dragging samples to other instruments
   - Ask user if they want to move, or alias the sample
   - If its the only sample of the source instrument and they choose move, prompt user:
@@ -48,9 +48,7 @@
   - and destroy old INST if requested
   - If instrument has more than one sample, we still have to modify both the source and dest INST to update SNDID
   - If the user CTRL-drags then we just alias the sample
-  - alias is just adding that SNDID to the inst without removing it from the old
-
-    
+  - alias is just adding that SNDID to the inst without removing it from the old    
 
 # Future
 - More throughly test backwards compatiblity with BeatnikX, maybe even WebTV Plus

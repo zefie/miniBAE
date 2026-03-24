@@ -65,8 +65,11 @@ void BankEditorPanel_SetInstrumentContextCallbacks(
     BankEditorPanel *panel,
     std::function<void(uint32_t instrumentIndex)> cloneToSongCallback,
     std::function<void(uint32_t instrumentIndex)> aliasToSongCallback,
-    std::function<void(uint32_t instrumentIndex)> deleteFromSongCallback,
-    std::function<void(uint32_t instrumentIndex)> compressInstrumentSamplesCallback);
+    std::function<void(uint32_t instrumentIndex, uint32_t displayInstID)> deleteFromSongCallback,
+    std::function<void(uint32_t instrumentIndex)> compressInstrumentSamplesCallback,
+    std::function<void(uint32_t instIDBase)> addInstrumentCallback,
+    std::function<void(uint32_t instrumentIndex)> cloneInstrumentCallback,
+    std::function<void(uint32_t instrumentIndex)> aliasInstrumentCallback);
 
 /* Set sample-list context-menu callbacks (right-click on sample rows). */
 void BankEditorPanel_SetSampleContextCallbacks(
@@ -76,7 +79,24 @@ void BankEditorPanel_SetSampleContextCallbacks(
     std::function<void(uint32_t instrumentIndex, uint32_t sampleIndex)> aliasSampleToInstrumentCallback,
     std::function<void(uint32_t instrumentIndex, uint32_t sampleIndex)> copySampleToInstrumentCallback);
 
+/* Set global sample-tree context-menu callbacks (for the new Samples tab).
+ * sndID is the resource ID of the sample.
+ * instrumentIndices/sampleIndices are the (instrument, sample) indices that reference this sndID.
+ * These callbacks allow global sample operations across the entire bank. */
+void BankEditorPanel_SetGlobalSampleContextCallbacks(
+    BankEditorPanel *panel,
+    std::function<void(uint16_t sndID)> addSampleToInstrumentCallback,
+    std::function<void(uint16_t sndID)> copySampleToInstrumentCallback,
+    std::function<void(uint16_t sndID, const std::vector<std::pair<uint32_t, uint32_t>> &referencingInstruments)> deleteSampleCallback,
+    std::function<void(uint16_t sndID, const std::vector<std::pair<uint32_t, uint32_t>> &referencingInstruments)> editSampleCallback);
+
 /* Return the index of the currently selected instrument (for dirty param commit). */
 uint32_t BankEditorPanel_GetCurrentInstrumentIndex(BankEditorPanel *panel);
+
+/* Select and display an instrument in the bank editor panel. */
+void BankEditorPanel_SelectInstrument(BankEditorPanel *panel, uint32_t instrumentIndex);
+
+/* Select and display a specific sample from the current instrument. */
+void BankEditorPanel_SelectSample(BankEditorPanel *panel, uint32_t instrumentIndex, uint32_t sampleIndex);
 
 #endif /* EDITOR_BANK_H */
