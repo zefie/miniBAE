@@ -80,7 +80,12 @@ $(TARGET_BIN): ${OBJ_BIN}
 	else \
 		cp ../deps/win/LZMA-$(LZMA_VERS)/x86_64-w64-mingw32/bin/liblzma-5.dll $(TARGET_OUT) 2>/dev/null || true; \
 	fi
-    
+	@if [ "$(BITS)" = "32" ]; then \
+		cp ../deps/win/lame/i686-w64-mingw32/bin/libmp3lame-0.dll $(TARGET_OUT) 2>/dev/null || true; \
+	else \
+		cp ../deps/win/lame/x86_64-w64-mingw32/bin/libmp3lame-0.dll $(TARGET_OUT) 2>/dev/null || true; \
+	fi
+
 # Generate rules for all unique source files
 ALL_SOURCES := $(sort $(SRC) $(SRC_BIN))
 $(foreach src,$(ALL_SOURCES),$(eval $(call make_obj_rule,$(src))))

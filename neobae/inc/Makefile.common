@@ -381,17 +381,27 @@ endif
 # to avoid problematic licensing. This compiles the bundled LAME sources
 # and provides an adapter that implements the legacy MPG_Encode* API.
 ifeq ($(MP3_ENC),1)
-	BAE_LIBS += -lmp3lame
-	# Let LAME detect standard headers correctly on our build host
-	BAE_FLAGS += -DUSE_MPEG_ENCODER=1 -DUSE_LAME_ENCODER=1 -DIEEE_FLOAT -DSTDC_HEADERS=1 -DHAVE_STDINT_H=1 -DHAVE_INTTYPES_H=1 -DHAVE_CONFIG_H=1
-	# Add LAME include path so adapter can find "lame.h"
-	INC_PATH += -Isrc/thirdparty/lame-3.100-slim/include
-	# Also make top-level LAME dir visible so <config.h> (provided below) is found
-	INC_PATH += -Isrc/thirdparty/lame-3.100-slim
-	INC_PATH += -Isrc/thirdparty/lame-3.100-slim/libmp3lame
-	# Let the build find LAME source files (libmp3lame and mpglib)
-	# Add all libmp3lame and mpglib C sources and the LAME adapter.
-	# Using wildcard keeps this list maintainable when LAME sources change.
+	ifeq ($(WINDOWS),1)					
+		ifeq ($(BITS),32)
+			INC_PATH += -I../deps/win/lame/i686-w64-mingw32/include
+			BAE_LD_FLAGS += -L../deps/win/lame/i686-w64-mingw32/lib/
+			BAE_LIBS += ../deps/win/lame/i686-w64-mingw32/lib/libmp3lame-0.dll.a -Wl,-rpath,'$$ORIGIN'
+		else
+			INC_PATH += -I../deps/win/lame/x86_64-w64-mingw32/include
+			BAE_LD_FLAGS += -L../deps/win/lame/x86_64-w64-mingw32/lib/
+			BAE_LIBS += ../deps/win/lame/x86_64-w64-mingw32/lib/libmp3lame-0.dll.a -Wl,-rpath,'$$ORIGIN'
+		endif			
+	else		
+		INC_PATH += $(shell pkg-config --cflags libmp3lame 2>/dev/null)
+		LAME_LIBS := $(shell pkg-config --libs libmp3lame 2>/dev/null)
+		ifneq ($(LAME_LIBS),)
+			BAE_LIBS += $(LAME_LIBS)
+		else
+			BAE_LIBS += -lmp3lame
+		endif
+	endif
+
+	BAE_FLAGS += -DUSE_MPEG_ENCODER=1 -DUSE_LAME_ENCODER=1
 	SRC += src/BAE_MPEG_Source_II/XMPEG_lame_encoder.cpp
 endif
 
