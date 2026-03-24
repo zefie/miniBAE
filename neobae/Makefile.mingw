@@ -105,25 +105,32 @@ $(TARGET_LIB).dll: ${OBJ}
 	@$(DLLTOOL) -e $(OBJ_DIR)exports.o -d $(OBJ_DIR)$(TARGET_LIB).def -l $(TARGET_OUT)$(TARGET_LIB).lib $(OBJ)
 	${CC} -shared $(LDFLAGS) ${OBJ} $(OBJ_DIR)exports.o -o $(TARGET_OUT)${TARGET_LIB}.dll ${LIBS}
 
-ifeq ($(USE_BASSMIDI),1)
-ifeq ($(BITS),32)
-	@$(shell cp src/thirdparty/bassmidi/libs/x86/bass*.dll* $(TARGET_OUT) 2>/dev/null || true)
-else
-	@$(shell cp src/thirdparty/bassmidi/libs/x86_64/bass*.dll* $(TARGET_OUT) 2>/dev/null || true)
-endif
-endif
+	@if [ "$(USE_FLUIDSYNTH)" = "1" ]; then \
+		if [ "$(BITS)" = "32" ]; then \
+			cp ../deps/win/FluidSynth/i686-w64-mingw32/bin/libfluidsynth-3.dll $(TARGET_OUT) 2>/dev/null || true; \
+			cp ../deps/win/FluidSynth/i686-w64-mingw32/bin/sndfile.dll $(TARGET_OUT) 2>/dev/null || true; \
+		else \
+			cp ../deps/win/FluidSynth/x86_64-w64-mingw32/bin/libfluidsynth-3.dll $(TARGET_OUT) 2>/dev/null || true; \
+			cp ../deps/win/FluidSynth/x86_64-w64-mingw32/bin/sndfile.dll $(TARGET_OUT) 2>/dev/null || true; \
+		fi; \
+	fi
 
-ifeq ($(USE_FLUIDSYNTH),1)
-ifeq ($(BITS),32)
-	@$(shell cp ../deps/win/FluidSynth/i686-w64-mingw32/bin/libfluidsynth-3.dll $(TARGET_OUT) 2>/dev/null || true)
-	@$(shell cp ../deps/win/FluidSynth/i686-w64-mingw32/bin/sndfile.dll $(TARGET_OUT) 2>/dev/null || true)
-	@cp ../deps/win/SDL3/i686-w64-mingw32/bin/SDL3.dll $(TARGET_OUT)
-else
-	@$(shell cp ../deps/win/FluidSynth/x86_64-w64-mingw32/bin/libfluidsynth-3.dll $(TARGET_OUT) 2>/dev/null || true)
-	@$(shell cp ../deps/win/FluidSynth/x86_64-w64-mingw32/bin/sndfile.dll $(TARGET_OUT) 2>/dev/null || true)
-	@cp ../deps/win/SDL3/x86_64-w64-mingw32/bin/SDL3.dll $(TARGET_OUT)
-endif
-endif
+	@if [ "$(USE_SDL3)" = "1" ]; then \
+		if [ "$(BITS)" = "32" ]; then \
+    		cp ../deps/win/SDL3/i686-w64-mingw32/bin/SDL3.dll $(TARGET_OUT) 2>/dev/null || true; \
+		    cp ../deps/win/SDL3_ttf/i686-w64-mingw32/bin/SDL3_ttf.dll $(TARGET_OUT) 2>/dev/null || true; \
+	    else \
+    		cp ../deps/win/SDL3/x86_64-w64-mingw32/bin/SDL3.dll $(TARGET_OUT) 2>/dev/null || true; \
+		    cp ../deps/win/SDL3_ttf/x86_64-w64-mingw32/bin/SDL3_ttf.dll $(TARGET_OUT) 2>/dev/null || true; \
+	    fi; \
+    fi
+
+	@if [ "$(BITS)" = "32" ]; then \
+		cp ../deps/win/LZMA-$(LZMA_VERS)/i686-w64-mingw32/bin/liblzma-5.dll $(TARGET_OUT) 2>/dev/null || true; \
+	else \
+		cp ../deps/win/LZMA-$(LZMA_VERS)/x86_64-w64-mingw32/bin/liblzma-5.dll $(TARGET_OUT) 2>/dev/null || true; \
+	fi
+
 
 $(TARGET_BIN): ${OBJ_BIN}
 	@mkdir -p $(TARGET_OUT)Banks

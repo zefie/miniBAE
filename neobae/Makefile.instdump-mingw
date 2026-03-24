@@ -1,5 +1,6 @@
 BAE_API := WinOS
 NOAUTO := 1
+WINDOWS := 1
 EMBED_PATCHES := 0
 SF2_SUPPORT := 0
 ZMF_SUPPORT := 1
@@ -72,6 +73,12 @@ all: $(TARGET_BIN)
 $(TARGET_BIN): ${OBJ_BIN}
 	@mkdir -p $(TARGET_OUT)
 	${LD} -static -o $(TARGET_OUT)${TARGET_BIN} ${LDFLAGS} ${OBJ_BIN} ${LIBS}
+
+	@if [ "$(BITS)" = "32" ]; then \
+		cp ../deps/win/LZMA-$(LZMA_VERS)/i686-w64-mingw32/bin/liblzma-5.dll $(TARGET_OUT) 2>/dev/null || true; \
+	else \
+		cp ../deps/win/LZMA-$(LZMA_VERS)/x86_64-w64-mingw32/bin/liblzma-5.dll $(TARGET_OUT) 2>/dev/null || true; \
+	fi
 
 # Generate rules for all unique source files
 ALL_SOURCES := $(sort $(SRC) $(SRC_BIN))
