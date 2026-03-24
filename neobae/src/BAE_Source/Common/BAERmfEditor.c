@@ -782,9 +782,9 @@ static XBOOL PV_AssetSupportsDontChange(BAERmfEditorDocument const *document, ui
 
 static BAE_UNSIGNED_FIXED PV_NormalizeSampleRateForSave(BAE_UNSIGNED_FIXED sampleRate)
 {
-    if (sampleRate < (4000U << 16))
+    if (sampleRate < (1000U << 16))
     {
-        if (sampleRate >= 4000U && sampleRate <= 384000U)
+        if (sampleRate >= 1000U && sampleRate <= 384000U)
         {
             return sampleRate << 16;
         }
@@ -844,7 +844,7 @@ static uint32_t PV_ExtractOpusInputRateFromOriginalSnd(BAERmfEditorSample const 
             {
                 uint32_t hz;
                 hz = PV_ReadLE32(p + 12);
-                if (hz >= 4000U && hz <= 384000U)
+                if (hz >= 1000U && hz <= 384000U)
                 {
                     return hz;
                 }
@@ -863,7 +863,7 @@ static uint32_t PV_ExtractOpusInputRateFromOriginalSnd(BAERmfEditorSample const 
         {
             uint32_t hz;
             hz = PV_ReadLE32(p + 12);
-            if (hz >= 4000U && hz <= 384000U)
+            if (hz >= 1000U && hz <= 384000U)
             {
                 return hz;
             }
@@ -7798,10 +7798,10 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                 BAE_STDERR("[RMF Save] Sample[%u] defaulting to 44100 Hz (was 0)\n", (unsigned)index);
             }
         }
-        else if (writeSampleRate < (4000U << 16))
+        else if (writeSampleRate < (1000U << 16))
         {
             /* Looks like raw Hz instead of fixed-point */
-            if (writeSampleRate >= 4000U && writeSampleRate <= 384000U)
+            if (writeSampleRate >= 1000U && writeSampleRate <= 384000U)
             {
                 /* Valid raw Hz range, convert to fixed-point */
                 BAE_STDERR("[RMF Save] Sample[%u] converting raw Hz to fixed-point: %lu -> ", 
@@ -8414,9 +8414,9 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                 scaledRate = (((uint64_t)(uint32_t)sndSampleRate * (uint64_t)writeWaveform.waveFrames) +
                               ((uint64_t)decodedFramesForRate / 2ULL)) /
                              (uint64_t)decodedFramesForRate;
-                if (scaledRate < ((uint64_t)4000U << 16))
+                if (scaledRate < ((uint64_t)1000U << 16))
                 {
-                    scaledRate = ((uint64_t)4000U << 16);
+                    scaledRate = ((uint64_t)1000U << 16);
                 }
                 if (scaledRate > (uint64_t)0xFFFF0000u)
                 {
@@ -8449,9 +8449,9 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                     scaledRate = (((uint64_t)(uint32_t)roundTripWriteRate * (uint64_t)writeWaveform.waveFrames) +
                                   ((uint64_t)decodedFramesForRate / 2ULL)) /
                                  (uint64_t)decodedFramesForRate;
-                    if (scaledRate < ((uint64_t)4000U << 16))
+                    if (scaledRate < ((uint64_t)1000U << 16))
                     {
-                        scaledRate = ((uint64_t)4000U << 16);
+                        scaledRate = ((uint64_t)1000U << 16);
                     }
                     if (scaledRate > (uint64_t)0xFFFF0000u)
                     {
@@ -11640,7 +11640,7 @@ BAEResult BAERmfEditorDocument_SetSampleInfo(BAERmfEditorDocument *document,
     {
         newSampleRate = oldSampleRate;
     }
-    else if (newSampleRate >= 4000U && newSampleRate <= 384000U)
+    else if (newSampleRate >= 1000U && newSampleRate <= 384000U)
     {
         /* Accept plain-Hz values from UI callers and normalize to 16.16 fixed. */
         newSampleRate <<= 16;
@@ -16944,11 +16944,11 @@ static BAEResult PV_BankReEncodeSampleCore(XFILE bankFile,
 #if USE_OPUS_ENCODER == TRUE || USE_OPUS_DECODER == TRUE
     if (compType == C_OPUS && !opusRoundTripResample)
     {
-        if ((uint32_t)sampleRate >= (4000u << 16))
+        if ((uint32_t)sampleRate >= (1000u << 16))
         {
             inputPcmRateHz = (uint32_t)sampleRate >> 16;
         }
-        else if ((uint32_t)sampleRate >= 4000u && (uint32_t)sampleRate <= 384000u)
+        else if ((uint32_t)sampleRate >= 1000u && (uint32_t)sampleRate <= 384000u)
         {
             inputPcmRateHz = (uint32_t)sampleRate;
         }
@@ -16995,9 +16995,9 @@ static BAEResult PV_BankReEncodeSampleCore(XFILE bankFile,
                                     ? (int32_t)(48000u << 16)
                                     : (int32_t)(44100u << 16);
     }
-    else if ((uint32_t)writeWaveform.sampledRate < (4000u << 16))
+    else if ((uint32_t)writeWaveform.sampledRate < (1000u << 16))
     {
-        if ((uint32_t)writeWaveform.sampledRate >= 4000u &&
+        if ((uint32_t)writeWaveform.sampledRate >= 1000u &&
             (uint32_t)writeWaveform.sampledRate <= 384000u)
         {
             writeWaveform.sampledRate <<= 16;

@@ -490,7 +490,10 @@ int mod2rmf_s3m_parse_module(const unsigned char *data, size_t size,
                 {
                     uint32_t c;
                     for (c = 0; c < (uint32_t)64 * channelCount; c++)
+                    {
+                        mod->patterns[i].cells[c].note = 255;
                         mod->patterns[i].cells[c].volume = 255;
+                    }
                 }
                 continue;
             }

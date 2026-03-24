@@ -68,8 +68,10 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 2 ]; then
 	runcmd make -f Makefile.mingw "-j$(nproc)" all
     signit "${BDIR}/playbae.exe" "${BDIR}/playbae_signed.exe"
     mv "${BDIR}/playbae_signed.exe" "${BDIR}/playbae.exe"
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/playbae_win_sdl3_x32.zip" -- playbae.exe libfluid*.dll SDL*.dll liblzma*.dll
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/playbae_win_sdl3_x32.zip" -- playbae.exe libfluidsynth*.dll SDL*.dll liblzma*.dll libmp3lame*.dll
 	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/libNeoBAE_win_sdl3_x32.zip" -- *.dll *.lib *.a
+	runcmd zip -d "${ODIR}/playbae_win_sdl3_x32.zip" -- SDL2_ttf.dll SDL3_ttf.dll
+	runcmd zip -d "${ODIR}/libNeoBAE_win_sdl3_x32.zip" -- SDL2_ttf.dll SDL3_ttf.dll
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f Makefile.mingw clean
 fi
@@ -82,8 +84,10 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 3 ]; then
 	runcmd make -f Makefile.mingw "-j$(nproc)" all
     signit "${BDIR}/playbae.exe" "${BDIR}/playbae_signed.exe"
     mv "${BDIR}/playbae_signed.exe" "${BDIR}/playbae.exe"
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/playbae_win_sdl3_x64.zip" -- playbae.exe libfluid*.dll SDL*.dll liblzma*.dll
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/playbae_win_sdl3_x64.zip" -- playbae.exe libfluidsynth*.dll SDL*.dll liblzma*.dll libmp3lame*.dll
 	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/libNeoBAE_win_sdl3_x64.zip" -- *.dll *.lib *.a
+	runcmd zip -d "${ODIR}/playbae_win_sdl3_x64.zip" -- SDL2_ttf.dll SDL3_ttf.dll
+	runcmd zip -d "${ODIR}/libNeoBAE_win_sdl3_x64.zip" -- SDL2_ttf.dll SDL3_ttf.dll	
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f Makefile.mingw clean
 fi
@@ -98,7 +102,7 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 4 ]; then
     mv "${BDIR}/zefidi_signed.exe" "${BDIR}/zefidi.exe"
 	signit "${BDIR}/RegisterFiletypes.exe" "${BDIR}/RegisterFiletypes_signed.exe"
 	mv "${BDIR}/RegisterFiletypes_signed.exe" "${BDIR}/RegisterFiletypes.exe"
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/zefidi_win_sdl3_x32.zip" -- zefidi.exe RegisterFiletypes.exe libfluid*.dll SDL*.dll liblzma*.dll
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/zefidi_win_sdl3_x32.zip" -- zefidi.exe RegisterFiletypes.exe libfluidsynth*.dll SDL*.dll liblzma*.dll libmp3lame*.dll
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f Makefile.gui-mingw clean
 fi
@@ -113,7 +117,7 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 5 ]; then
     mv "${BDIR}/zefidi_signed.exe" "${BDIR}/zefidi.exe"
 	signit "${BDIR}/RegisterFiletypes.exe" "${BDIR}/RegisterFiletypes_signed.exe"
 	mv "${BDIR}/RegisterFiletypes_signed.exe" "${BDIR}/RegisterFiletypes.exe"	
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/zefidi_win_sdl3_x64.zip" -- zefidi.exe RegisterFiletypes.exe libfluid*.dll SDL*.dll liblzma*.dll
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/zefidi_win_sdl3_x64.zip" -- zefidi.exe RegisterFiletypes.exe libfluidsynth*.dll SDL*.dll liblzma*.dll libmp3lame*.dll
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f Makefile.gui-mingw clean
 fi
@@ -224,7 +228,7 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 13 ]; then
 	runcmd make -f Makefile.mod2rmf-mingw "-j$(nproc)" all
 	signit "${BDIR}/mod2rmf.exe" "${BDIR}/mod2rmf_signed.exe"
     mv "${BDIR}/mod2rmf_signed.exe" "${BDIR}/mod2rmf.exe"	
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x32.zip" -- mod2rmf.exe liblzma*.dll
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x32.zip" -- mod2rmf.exe liblzma*.dll libmp3lame*.dll
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f Makefile.mod2rmf-mingw clean
 fi
@@ -236,7 +240,7 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 14 ]; then
 	runcmd make -f Makefile.mod2rmf-mingw "-j$(nproc)" all
 	signit "${BDIR}/mod2rmf.exe" "${BDIR}/mod2rmf_signed.exe"
     mv "${BDIR}/mod2rmf_signed.exe" "${BDIR}/mod2rmf.exe"	
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- mod2rmf.exe liblzma*.dll
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- mod2rmf.exe liblzma*.dll libmp3lame*.dll
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f Makefile.mod2rmf-mingw clean
 fi
