@@ -246,8 +246,8 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 15 ]; then
 	echo "Building RMF-InstDump (x32)..."
 	runcmd make clean
 	runcmd make -f Makefile.instdump-mingw "-j$(nproc)" all
-	signit "${BDIR}/instdump.exe" "${BDIR}/instdump_signed.exe"
-    mv "${BDIR}/instdump_signed.exe" "${BDIR}/rmf-instdump.exe"	
+	signit "${BDIR}/rmf-instdump.exe" "${BDIR}/rmf-instdump_signed.exe"
+    mv "${BDIR}/rmf-instdump_signed.exe" "${BDIR}/rmf-instdump.exe"	
 	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x32.zip" -- rmf-instdump.exe liblzma*.dll
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f Makefile.instdump-mingw clean
@@ -258,8 +258,8 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 16 ]; then
 	echo "Building RMF-InstDump (x64)..."
 	runcmd make clean
 	runcmd make -f Makefile.instdump-mingw "-j$(nproc)" all
-	signit "${BDIR}/instdump.exe" "${BDIR}/instdump_signed.exe"
-    mv "${BDIR}/instdump_signed.exe" "${BDIR}/rmf-instdump.exe"	
+	signit "${BDIR}/rmf-instdump.exe" "${BDIR}/rmf-instdump_signed.exe"
+    mv "${BDIR}/rmf-instdump_signed.exe" "${BDIR}/rmf-instdump.exe"	
 	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- rmf-instdump.exe liblzma*.dll
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f Makefile.instdump-mingw clean
