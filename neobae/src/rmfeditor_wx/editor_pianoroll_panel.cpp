@@ -46,6 +46,10 @@ enum {
     ID_PianoRollEdit = wxID_HIGHEST + 2000,
     ID_PianoRollDelete,
     ID_PianoRollToggleRamp,
+    ID_PianoRollCopy,
+    ID_PianoRollCut,
+    ID_PianoRollPaste,
+    ID_PianoRollSelectAll,
 };
 
 enum class PianoRollSelectionKind {
@@ -633,6 +637,10 @@ public:
         Bind(wxEVT_MENU, &PianoRollPanel::OnEditSelectedItem, this, ID_PianoRollEdit);
         Bind(wxEVT_MENU, &PianoRollPanel::OnDeleteSelectedItem, this, ID_PianoRollDelete);
         Bind(wxEVT_MENU, &PianoRollPanel::OnToggleRampSegment, this, ID_PianoRollToggleRamp);
+        Bind(wxEVT_MENU, [this](wxCommandEvent &) { CopySelectedNotes(); }, ID_PianoRollCopy);
+        Bind(wxEVT_MENU, [this](wxCommandEvent &) { CutSelectedNotes(); }, ID_PianoRollCut);
+        Bind(wxEVT_MENU, [this](wxCommandEvent &) { PasteNotes(); }, ID_PianoRollPaste);
+        Bind(wxEVT_MENU, [this](wxCommandEvent &) { SelectAllNotes(); }, ID_PianoRollSelectAll);
         UpdateVirtualSize();
     }
 
@@ -2172,6 +2180,7 @@ private:
 
     bool EditSelectedNote() {
         BAERmfEditorNoteInfo noteInfo;
+        BAERmfEditorNoteInfo originalInfo;
         BAERmfEditorTrackInfo trackInfo;
         bool hasResonance;
         unsigned char resonanceValue;
@@ -2183,6 +2192,7 @@ private:
         if (!GetSelectedNoteInfo(&noteInfo)) {
             return false;
         }
+        originalInfo = noteInfo;
         hasResonance = GetTrackCCValueAtTick(71, noteInfo.startTick, &resonanceValue);
         if (!hasResonance) {
             resonanceValue = 64;
@@ -2223,14 +2233,46 @@ private:
                 return false;
             }
         }
+
+        /* Gather all selected note indices */
+        std::vector<long> indices = m_selectedNotes;
+        if (indices.empty() && m_selectedNote >= 0) {
+            indices.push_back(m_selectedNote);
+        }
+
+        /* Compute deltas from original primary note to apply to all */
+        int32_t deltaStartTick = static_cast<int32_t>(noteInfo.startTick) - static_cast<int32_t>(originalInfo.startTick);
+        int32_t deltaDuration  = static_cast<int32_t>(noteInfo.durationTicks) - static_cast<int32_t>(originalInfo.durationTicks);
+        int deltaNote          = static_cast<int>(noteInfo.note) - static_cast<int>(originalInfo.note);
+        int deltaVelocity      = static_cast<int>(noteInfo.velocity) - static_cast<int>(originalInfo.velocity);
+
         BeginUndoAction("Edit Note");
-        if (BAERmfEditorDocument_SetNoteInfo(m_document,
+        for (long idx : indices) {
+            if (idx < 0) continue;
+            BAERmfEditorNoteInfo ni;
+            if (BAERmfEditorDocument_GetNoteInfo(m_document,
+                                                 static_cast<uint16_t>(m_selectedTrack),
+                                                 static_cast<uint32_t>(idx),
+                                                 &ni) != BAE_NO_ERROR) {
+                continue;
+            }
+            if (idx == m_selectedNote) {
+                /* Primary note gets exact dialog values */
+                ni = noteInfo;
+            } else {
+                /* Other notes get delta-adjusted values */
+                ni.startTick = static_cast<uint32_t>(std::max<int32_t>(0, static_cast<int32_t>(ni.startTick) + deltaStartTick));
+                ni.durationTicks = static_cast<uint32_t>(std::max<int32_t>(1, static_cast<int32_t>(ni.durationTicks) + deltaDuration));
+                ni.note = static_cast<unsigned char>(std::clamp(static_cast<int>(ni.note) + deltaNote, 0, 127));
+                ni.velocity = static_cast<unsigned char>(std::clamp(static_cast<int>(ni.velocity) + deltaVelocity, 0, 127));
+                ni.channel = noteInfo.channel;
+                ni.bank = noteInfo.bank;
+                ni.program = noteInfo.program;
+            }
+            BAERmfEditorDocument_SetNoteInfo(m_document,
                                              static_cast<uint16_t>(m_selectedTrack),
-                                             static_cast<uint32_t>(m_selectedNote),
-                                             &noteInfo) != BAE_NO_ERROR) {
-            CancelUndoAction();
-            wxMessageBox("Failed to update note.", "Edit Note", wxOK | wxICON_ERROR, this);
-            return false;
+                                             static_cast<uint32_t>(idx),
+                                             &ni);
         }
         if (setResonance && !UpsertTrackCCAtTick(71, noteInfo.startTick, resonanceValue)) {
             CancelUndoAction();
@@ -4050,6 +4092,13 @@ private:
 
             nodeHit = HitTestAutomationNode(logicalPoint, &automationNodeHit);
             if (!(nodeHit || HitTestAutomation(logicalPoint, &automationHit))) {
+                /* Right-click on empty piano roll background — show paste menu */
+                wxMenu bgMenu;
+                bgMenu.Append(ID_PianoRollPaste, "Paste\tCtrl+V");
+                bgMenu.Enable(ID_PianoRollPaste, !GetClipboard().empty());
+                bgMenu.AppendSeparator();
+                bgMenu.Append(ID_PianoRollSelectAll, "Select All\tCtrl+A");
+                PopupMenu(&bgMenu, event.GetPosition());
                 return;
             }
             if (nodeHit) {
@@ -4062,6 +4111,10 @@ private:
             m_selectedAutomationEvent = static_cast<long>(automationHit.eventIndex);
         }
         menu.Append(ID_PianoRollEdit, "Edit");
+        if (m_selectedItemKind == PianoRollSelectionKind::Note) {
+            menu.Append(ID_PianoRollCopy, "Copy\tCtrl+C");
+            menu.Append(ID_PianoRollCut, "Cut\tCtrl+X");
+        }
         if (m_selectedItemKind == PianoRollSelectionKind::Automation) {
             menu.Append(ID_PianoRollToggleRamp, "Toggle Ramp To Next\tR");
         }
@@ -4339,6 +4392,120 @@ private:
         }
     }
 
+    /* ---- Clipboard for note cut/copy/paste ---- */
+
+    static std::vector<BAERmfEditorNoteInfo> &GetClipboard() {
+        static std::vector<BAERmfEditorNoteInfo> s_clipboard;
+        return s_clipboard;
+    }
+
+    void CopySelectedNotes() {
+        if (!HasTrack()) return;
+        std::vector<long> indices = m_selectedNotes;
+        if (indices.empty() && m_selectedNote >= 0) {
+            indices.push_back(m_selectedNote);
+        }
+        if (indices.empty()) return;
+
+        std::vector<BAERmfEditorNoteInfo> &clipboard = GetClipboard();
+        clipboard.clear();
+        for (long idx : indices) {
+            BAERmfEditorNoteInfo info;
+            if (GetNoteInfo(static_cast<uint32_t>(idx), &info)) {
+                clipboard.push_back(info);
+            }
+        }
+    }
+
+    void CutSelectedNotes() {
+        CopySelectedNotes();
+        if (!GetClipboard().empty()) {
+            DeleteSelectedNote();
+        }
+    }
+
+    void PasteNotes() {
+        std::vector<BAERmfEditorNoteInfo> const &clipboard = GetClipboard();
+        if (clipboard.empty() || !HasTrack()) return;
+
+        /* Find the earliest tick in the clipboard to compute offsets */
+        uint32_t minTick = clipboard[0].startTick;
+        for (size_t i = 1; i < clipboard.size(); ++i) {
+            if (clipboard[i].startTick < minTick) {
+                minTick = clipboard[i].startTick;
+            }
+        }
+
+        /* Paste at the playhead position */
+        uint32_t pasteTick = m_playheadTick;
+
+        BeginUndoAction("Paste Notes");
+        uint32_t preCount = 0;
+        BAERmfEditorDocument_GetNoteCount(m_document,
+                                          static_cast<uint16_t>(m_selectedTrack),
+                                          &preCount);
+
+        bool anyAdded = false;
+        for (auto const &note : clipboard) {
+            uint32_t newTick = pasteTick + (note.startTick - minTick);
+            if (BAERmfEditorDocument_AddNote(m_document,
+                                             static_cast<uint16_t>(m_selectedTrack),
+                                             newTick,
+                                             note.durationTicks,
+                                             note.note,
+                                             note.velocity) == BAE_NO_ERROR) {
+                anyAdded = true;
+            }
+        }
+
+        if (anyAdded) {
+            /* Select the newly pasted notes and set their bank/program */
+            uint32_t postCount = 0;
+            BAERmfEditorDocument_GetNoteCount(m_document,
+                                              static_cast<uint16_t>(m_selectedTrack),
+                                              &postCount);
+            m_selectedNotes.clear();
+            for (uint32_t i = preCount; i < postCount; ++i) {
+                BAERmfEditorNoteInfo pastedInfo;
+                if (BAERmfEditorDocument_GetNoteInfo(m_document,
+                                                     static_cast<uint16_t>(m_selectedTrack),
+                                                     i, &pastedInfo) == BAE_NO_ERROR) {
+                    /* Preserve bank/program from copied notes */
+                    size_t clipIdx = i - preCount;
+                    if (clipIdx < clipboard.size()) {
+                        pastedInfo.bank = clipboard[clipIdx].bank;
+                        pastedInfo.program = clipboard[clipIdx].program;
+                        BAERmfEditorDocument_SetNoteInfo(m_document,
+                                                         static_cast<uint16_t>(m_selectedTrack),
+                                                         i, &pastedInfo);
+                    }
+                }
+                m_selectedNotes.push_back(static_cast<long>(i));
+            }
+            UpdatePrimarySelectedNote();
+            CommitUndoAction("Paste Notes");
+            InvalidateNoteCache();
+            UpdateVirtualSize();
+            Refresh();
+        } else {
+            CancelUndoAction();
+        }
+    }
+
+    void SelectAllNotes() {
+        if (!HasTrack()) return;
+        NoteTrackCache const *cache = GetNoteTrackCache();
+        if (!cache) return;
+        m_selectedNotes.clear();
+        for (auto const &entry : cache->notes) {
+            m_selectedNotes.push_back(static_cast<long>(entry.sourceIndex));
+        }
+        UpdatePrimarySelectedNote();
+        m_selectedAutomationLane = -1;
+        m_selectedAutomationEvent = -1;
+        Refresh();
+    }
+
     void OnCharHook(wxKeyEvent &event) {
         if (event.GetKeyCode() == 'R' || event.GetKeyCode() == 'r') {
             if (ToggleRampForSelectedAutomationSegment()) {
@@ -4348,6 +4515,25 @@ private:
         if (event.GetKeyCode() == WXK_DELETE || event.GetKeyCode() == WXK_BACK) {
             DeleteCurrentSelection();
             return;
+        }
+        if (event.ControlDown()) {
+            int key = event.GetKeyCode();
+            if (key == 'C' || key == 'c') {
+                CopySelectedNotes();
+                return;
+            }
+            if (key == 'X' || key == 'x') {
+                CutSelectedNotes();
+                return;
+            }
+            if (key == 'V' || key == 'v') {
+                PasteNotes();
+                return;
+            }
+            if (key == 'A' || key == 'a') {
+                SelectAllNotes();
+                return;
+            }
         }
         event.Skip();
     }

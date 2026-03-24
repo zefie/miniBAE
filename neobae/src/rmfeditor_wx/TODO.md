@@ -36,12 +36,13 @@
   - ~~LFO broken~~
   - ~~Bank editor must force ZSB if using ZMF features~~
   - ~~Sample tree~~
+- ~~Allow cut/copy/pasting notes~~
+- Allow cut/copy/pasting instruments
 
 # 0.11a
-- Allow copy/pasting notes
 - Allow dragging samples to other instruments
   - Ask user if they want to move, or alias the sample
-  - If its the only sample of the source instrument and they choose move, prompt user:
+  - If its the only sample/alias of the source instrument and they choose move, prompt user:
   - Create a new empty sample for the instrument [instrument name]? Selecting No will destroy the old instrument.
   - Implement functions to create new empty sample in old instrument, reassign sample SNDID to target INST
   - and destroy old INST if requested
