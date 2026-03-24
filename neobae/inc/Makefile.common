@@ -12,7 +12,7 @@ BUILD_DIR	  := build/
 TEST_OUT_DIR  := tests/
 TARGET_OUT	  := bin/
 BAE_FLAGS	  :=
-BAE_LD_FLAGS  :=
+BAE_LD_FLAGS  := -Wl,-rpath,'$$ORIGIN'
 BAE_LIBS      :=
 .DEFAULT_GOAL := all
 LZMA_VERS := 5.8.2
@@ -385,11 +385,11 @@ ifeq ($(MP3_ENC),1)
 		ifeq ($(BITS),32)
 			INC_PATH += -I../deps/win/lame/i686-w64-mingw32/include
 			BAE_LD_FLAGS += -L../deps/win/lame/i686-w64-mingw32/lib/
-			BAE_LIBS += ../deps/win/lame/i686-w64-mingw32/lib/libmp3lame-0.dll.a -Wl,-rpath,'$$ORIGIN'
+			BAE_LIBS += ../deps/win/lame/i686-w64-mingw32/lib/libmp3lame-0.dll.a
 		else
 			INC_PATH += -I../deps/win/lame/x86_64-w64-mingw32/include
 			BAE_LD_FLAGS += -L../deps/win/lame/x86_64-w64-mingw32/lib/
-			BAE_LIBS += ../deps/win/lame/x86_64-w64-mingw32/lib/libmp3lame-0.dll.a -Wl,-rpath,'$$ORIGIN'
+			BAE_LIBS += ../deps/win/lame/x86_64-w64-mingw32/lib/libmp3lame-0.dll.a
 		endif			
 	else		
 		INC_PATH += $(shell pkg-config --cflags libmp3lame 2>/dev/null)
@@ -458,11 +458,11 @@ ifeq ($(LZMA_SUPPORT),1)
 			ifeq ($(BITS),32)
 				INC_PATH += -I../deps/win/LZMA-$(LZMA_VERS)/i686-w64-mingw32/include
 				BAE_LD_FLAGS += -L../deps/win/LZMA-$(LZMA_VERS)/i686-w64-mingw32/lib/
-				BAE_LIBS += ../deps/win/LZMA-$(LZMA_VERS)/i686-w64-mingw32/lib/liblzma-5.dll.a -Wl,-rpath,'$$ORIGIN'
+				BAE_LIBS += ../deps/win/LZMA-$(LZMA_VERS)/i686-w64-mingw32/lib/liblzma-5.dll.a 
 			else
 				INC_PATH += -I../deps/win/LZMA-$(LZMA_VERS)/x86_64-w64-mingw32/include
 				BAE_LD_FLAGS += -L../deps/win/LZMA-$(LZMA_VERS)/x86_64-w64-mingw32/lib/
-				BAE_LIBS += ../deps/win/LZMA-$(LZMA_VERS)/x86_64-w64-mingw32/lib/liblzma-5.dll.a -Wl,-rpath,'$$ORIGIN'
+				BAE_LIBS += ../deps/win/LZMA-$(LZMA_VERS)/x86_64-w64-mingw32/lib/liblzma-5.dll.a
 			endif	
 		else
 			BAE_LIBS += -llzma
