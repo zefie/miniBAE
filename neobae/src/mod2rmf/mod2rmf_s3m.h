@@ -55,7 +55,9 @@ typedef struct Mod2RmfS3mModule
     uint8_t  initialSpeed;   /* default 6 */
     uint8_t  initialTempo;   /* default 125 */
     uint8_t  masterVolume;   /* bit7=stereo, bits0-6=volume */
+    uint8_t  hasDefaultPanning; /* optional default panning table present */
     uint8_t  channelSettings[32]; /* per-channel panning/type */
+    uint8_t  defaultPanning[32];  /* 0..255, 255=not set */
     uint8_t  orders[MOD2RMF_S3M_MAX_ORDERS];
 
     uint16_t channelCount;   /* derived: highest used channel + 1 */

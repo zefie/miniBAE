@@ -313,10 +313,24 @@ int mod2rmf_s3m_parse_module(const unsigned char *data, size_t size,
 
     memset(mod, 0, sizeof(*mod));
 
+    {
+        uint32_t pi;
+        mod->hasDefaultPanning = 0;
+        for (pi = 0; pi < 32u; ++pi)
+            mod->defaultPanning[pi] = 255u;
+    }
+
     if (!mod2rmf_s3m_is_signature(data, size))
     {
         if (errBuf && errBufSize > 0)
             snprintf(errBuf, errBufSize, "not an S3M file");
+        return 0;
+    }
+
+    if (size < 0x60)
+    {
+        if (errBuf && errBufSize > 0)
+            snprintf(errBuf, errBufSize, "truncated S3M header");
         return 0;
     }
 
@@ -387,6 +401,31 @@ int mod2rmf_s3m_parse_module(const unsigned char *data, size_t size,
 
         instPtrs = data + ptrsOff;
         patPtrs  = data + ptrsOff + instPtrsSize;
+
+        /* Optional default panning table (32 bytes) follows parapointers
+         * when header byte 0x35 is 0xFC. Each entry uses bit5 as "set"
+         * and low nibble 0..15 as pan from left to right. */
+        if (data[0x35] == 0xFC)
+        {
+            size_t panOff = ptrsOff + instPtrsSize + patPtrsSize;
+            if (panOff + 32u <= size)
+            {
+                for (i = 0; i < 32u; ++i)
+                {
+                    uint8_t pv;
+                    pv = data[panOff + i];
+                    if (pv & 0x20u)
+                    {
+                        mod->defaultPanning[i] = (uint8_t)((pv & 0x0Fu) * 17u);
+                    }
+                    else
+                    {
+                        mod->defaultPanning[i] = 255u;
+                    }
+                }
+                mod->hasDefaultPanning = 1;
+            }
+        }
     }
 
     /* --- Load samples --- */

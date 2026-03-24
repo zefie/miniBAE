@@ -60,13 +60,6 @@ rm -f "${ODIR}/"*
 rmdir "${ODIR}" 2>/dev/null
 mkdir "${ODIR}"
 
-if [ "${USE_BASSMIDI}" == 1 ]; then
-	if [ ! -d "${RDIR}/src/thirdparty/bassmidi/" ]; then
-		# Custom for zefie's Jenkins build system
-		cp -r /opt/bassmidi "${RDIR}/src/thirdparty"
-	fi
-fi
-
 if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 2 ]; then
 	export USE_SDL3=1
 	export BITS=32
@@ -130,6 +123,8 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 6 ]; then
 	echo "Building RMFInfo (x32)..."
 	runcmd make clean
 	runcmd make -f Makefile.rmfinfo-mingw "-j$(nproc)" all
+	signit "${BDIR}/rmfinfo.exe" "${BDIR}/rmfinfo_signed.exe"
+    mv "${BDIR}/rmfinfo_signed.exe" "${BDIR}/rmfinfo.exe"
 	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x32.zip" -- rmfinfo.exe
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f Makefile.rmfinfo-mingw clean
@@ -140,6 +135,8 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 7 ]; then
 	echo "Building RMFInfo (x64)..."
 	runcmd make clean
 	runcmd make -f Makefile.rmfinfo-mingw "-j$(nproc)" all
+	signit "${BDIR}/rmfinfo.exe" "${BDIR}/rmfinfo_signed.exe"
+    mv "${BDIR}/rmfinfo_signed.exe" "${BDIR}/rmfinfo.exe"	
 	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- rmfinfo.exe
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f Makefile.rmfinfo-mingw clean
@@ -150,6 +147,8 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 8 ]; then
 	echo "Building RMF2MID (x32)..."
 	runcmd make clean
 	runcmd make -f Makefile.rmf2mid-mingw "-j$(nproc)" all
+	signit "${BDIR}/rmf2mid.exe" "${BDIR}/rmf2mid_signed.exe"
+    mv "${BDIR}/rmf2mid_signed.exe" "${BDIR}/rmf2mid.exe"	
 	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x32.zip" -- rmf2mid.exe
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f Makefile.rmf2mid-mingw clean
@@ -160,6 +159,8 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 9 ]; then
 	echo "Building RMF2MID (x64)..."
 	runcmd make clean
 	runcmd make -f Makefile.rmf2mid-mingw "-j$(nproc)" all
+	signit "${BDIR}/rmf2mid.exe" "${BDIR}/rmf2mid_signed.exe"
+    mv "${BDIR}/rmf2mid_signed.exe" "${BDIR}/rmf2mid.exe"
 	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- rmf2mid.exe
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f Makefile.rmf2mid-mingw clean
@@ -171,6 +172,8 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 9 ]; then
 	echo "Building MID2RMF (x32)..."
 	runcmd make clean
 	runcmd make -f Makefile.mid2rmf-mingw "-j$(nproc)" all
+	signit "${BDIR}/mid2rmf.exe" "${BDIR}/mid2rmf_signed.exe"
+    mv "${BDIR}/mid2rmf_signed.exe" "${BDIR}/mid2rmf.exe"	
 	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x32.zip" -- mid2rmf.exe
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f Makefile.mid2rmf-mingw clean
@@ -181,6 +184,8 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 10 ]; then
 	echo "Building MID2RMF (x64)..."
 	runcmd make clean
 	runcmd make -f Makefile.mid2rmf-mingw "-j$(nproc)" all
+	signit "${BDIR}/mid2rmf.exe" "${BDIR}/mid2rmf_signed.exe"
+    mv "${BDIR}/mid2rmf_signed.exe" "${BDIR}/mid2rmf.exe"		
 	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- mid2rmf.exe
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f Makefile.mid2rmf-mingw clean
@@ -192,6 +197,8 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 11 ]; then
 	echo "Building MID2RMI (x32)..."
 	runcmd make clean
 	runcmd make -f Makefile.mid2rmi-mingw "-j$(nproc)" all
+	signit "${BDIR}/mid2rmi.exe" "${BDIR}/mid2rmi_signed.exe"
+    mv "${BDIR}/mid2rmi_signed.exe" "${BDIR}/mid2rmi.exe"		
 	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x32.zip" -- mid2rmi.exe
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f Makefile.mid2rmi-mingw clean
@@ -203,9 +210,35 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 12 ]; then
 	echo "Building MID2RMI (x64)..."
 	runcmd make clean
 	runcmd make -f Makefile.mid2rmi-mingw "-j$(nproc)" all
+	signit "${BDIR}/mid2rmi.exe" "${BDIR}/mid2rmi_signed.exe"
+    mv "${BDIR}/mid2rmi_signed.exe" "${BDIR}/mid2rmi.exe"		
 	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- mid2rmi.exe
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f Makefile.mid2rmi-mingw clean
+fi
+
+if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 13 ]; then
+	export BITS=32
+	echo "Building MOD2RMF (x32)..."
+	runcmd make clean
+	runcmd make -f Makefile.mod2rmf-mingw "-j$(nproc)" all
+	signit "${BDIR}/mod2rmf.exe" "${BDIR}/mod2rmf_signed.exe"
+    mv "${BDIR}/mod2rmf_signed.exe" "${BDIR}/mod2rmf.exe"	
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x32.zip" -- mod2rmf.exe
+	runcmd cd "${RDIR}" || exit 1
+	runcmd make -f Makefile.mod2rmf-mingw clean
+fi
+
+if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 14 ]; then
+	export BITS=64
+	echo "Building MOD2RMF (x64)..."
+	runcmd make clean
+	runcmd make -f Makefile.mod2rmf-mingw "-j$(nproc)" all
+	signit "${BDIR}/mod2rmf.exe" "${BDIR}/mod2rmf_signed.exe"
+    mv "${BDIR}/mod2rmf_signed.exe" "${BDIR}/mod2rmf.exe"	
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- mod2rmf.exe
+	runcmd cd "${RDIR}" || exit 1
+	runcmd make -f Makefile.mod2rmf-mingw clean
 fi
 
 
