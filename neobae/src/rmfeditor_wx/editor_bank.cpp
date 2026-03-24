@@ -824,6 +824,9 @@ static void PopulateInstrumentTree(BankEditorPanel *bp)
             bp->instrumentTree->Expand(g.node);
         }
     }
+    /* Scroll back to top — on Windows, Expand() can auto-scroll to the
+     * last expanded node, leaving the view near the bottom of the tree. */
+    bp->instrumentTree->EnsureVisible(root);
 
     if (hadSelectedInstrument) {
         wxTreeItemId restoreItem = FindInstrumentTreeItemByInstID(bp, selectedInstID);
@@ -950,6 +953,7 @@ static void PopulateSampleTree(BankEditorPanel *bp)
     }
 
     bp->sampleTree->Expand(root);
+    bp->sampleTree->EnsureVisible(root);
 
     if (hadSelectedSample) {
         wxTreeItemId restoreItem = FindSampleTreeItemBySndID(bp, selectedSndID);
@@ -1098,6 +1102,7 @@ static void ShowInstrumentDetail(BankEditorPanel *bp, uint32_t instrumentIndex)
         instName.Replace("\n", " ");
         instName.Trim();
         bp->instParamsPanel->LoadFromExtInfo(bp->currentExtInfo, instName, instInfo.program);
+        bp->instParamsPanel->Show();
     }
 
     bp->instPage->Layout();
