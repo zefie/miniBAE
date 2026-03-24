@@ -21,6 +21,10 @@
 #include "editor_instrument_ext_dialog.h"
 #include "editor_instrument_panels.h"
 
+extern "C" {
+#include "X_API.h"
+}
+
 namespace {
 
 static unsigned char NormalizeRootKeyForSingleKeySplit(unsigned char rootKey,
@@ -228,10 +232,13 @@ public:
             event.Skip();
         });
 
-        /* Load initial sample data */
+        /* Load initial sample data; center piano on C4 regardless of root key. */
         if (!m_samples.empty()) {
             m_splitChoice->SetSelection(0);
             LoadLocalSample(0);
+            if (m_pianoPanel) {
+                m_pianoPanel->CenterOnNote(60);  /* C4 */
+            }
         }
 
         auto instantApply = [this](wxCommandEvent &event) {
@@ -248,6 +255,7 @@ public:
                 if (!m_loadingUiValues) {
                     wxCommandEvent evt;
                     OnApply(evt);
+                    RefreshWaveformIfCodecChanged();
                 }
             });
         }
@@ -300,6 +308,9 @@ private:
     SampleParamsPanel *m_sampleParamsPanel;
     std::unordered_map<int, int> m_keyboardPreviewNotes;
     bool m_mousePreviewActive = false;
+    int m_lastPreviewedCodecIdx = -1;
+    int m_lastPreviewedBitrateIdx = -1;
+    std::vector<unsigned char> m_compressedPreviewBuffer;
 
     static int NormalizeAsciiKeyCode(int keyCode) {
         if (keyCode >= 'a' && keyCode <= 'z') {
@@ -865,6 +876,8 @@ private:
             }
         }
         m_sampleParamsPanel->LoadSample(data);
+        m_lastPreviewedCodecIdx = -1;
+        m_lastPreviewedBitrateIdx = -1;
         RefreshWaveform();
         UpdateSampleButtonState();
         m_loadingUiValues = false;
@@ -884,18 +897,75 @@ private:
     }
 
     void RefreshWaveform() {
-        void const *waveData = nullptr;
-        uint32_t frameCount = 0;
-        uint16_t bitSize = 16, channels = 1;
-        BAE_UNSIGNED_FIXED sampleRate = 0;
         if (m_currentLocalIndex < 0 || m_currentLocalIndex >= (int)m_sampleIndices.size()) return;
         uint32_t si = m_sampleIndices[(size_t)m_currentLocalIndex];
-        if (BAERmfEditorDocument_GetSampleWaveformData(m_document, si, &waveData, &frameCount, &bitSize, &channels, &sampleRate) == BAE_NO_ERROR) {
-            m_sampleParamsPanel->SetWaveform(waveData, frameCount, bitSize, channels);
+
+        if (m_sampleParamsPanel) {
+            m_lastPreviewedCodecIdx   = m_sampleParamsPanel->GetCodecSelection();
+            m_lastPreviewedBitrateIdx = m_sampleParamsPanel->GetBitrateSelection();
         }
+
+        /* Try to show the post-encode waveform for compressed codecs.
+         * Save the document to RMF in memory (which encodes), reload
+         * (which decodes), then grab the decoded waveform. */
+        bool previewShown = false;
+        if (m_currentLocalIndex < (int)m_samples.size()) {
+            EditedSample const &s = m_samples[(size_t)m_currentLocalIndex];
+            BAERmfEditorCompressionType ct = s.compressionType;
+            if (ct != BAE_EDITOR_COMPRESSION_PCM && ct != BAE_EDITOR_COMPRESSION_DONT_CHANGE) {
+                unsigned char *rmfData = nullptr;
+                uint32_t rmfSize = 0;
+                if (BAERmfEditorDocument_SaveAsRmfToMemory(m_document, FALSE, &rmfData, &rmfSize) == BAE_NO_ERROR
+                    && rmfData && rmfSize > 0) {
+                    BAERmfEditorDocument *tempDoc = BAERmfEditorDocument_LoadFromMemory(rmfData, rmfSize, BAE_RMF);
+                    XDisposePtr((XPTR)rmfData);
+                    if (tempDoc) {
+                        void const *waveData = nullptr;
+                        uint32_t frameCount = 0;
+                        uint16_t bitSize = 16, channels = 1;
+                        BAE_UNSIGNED_FIXED sampleRate = 0;
+                        if (BAERmfEditorDocument_GetSampleWaveformData(tempDoc, si, &waveData,
+                                &frameCount, &bitSize, &channels, &sampleRate) == BAE_NO_ERROR
+                            && waveData && frameCount > 0) {
+                            uint32_t bytesPerFrame = (static_cast<uint32_t>(bitSize) / 8U) * static_cast<uint32_t>(channels);
+                            size_t totalBytes = static_cast<size_t>(frameCount) * bytesPerFrame;
+                            m_compressedPreviewBuffer.assign(
+                                static_cast<unsigned char const *>(waveData),
+                                static_cast<unsigned char const *>(waveData) + totalBytes);
+                            previewShown = true;
+                        }
+                        BAERmfEditorDocument_Delete(tempDoc);
+                        if (previewShown) {
+                            m_sampleParamsPanel->SetWaveform(m_compressedPreviewBuffer.data(), frameCount, bitSize, channels);
+                        }
+                    }
+                }
+            }
+        }
+
+        /* Fall back to the raw decoded waveform from the document */
+        if (!previewShown) {
+            void const *waveData = nullptr;
+            uint32_t frameCount = 0;
+            uint16_t bitSize = 16, channels = 1;
+            BAE_UNSIGNED_FIXED sampleRate = 0;
+            if (BAERmfEditorDocument_GetSampleWaveformData(m_document, si, &waveData, &frameCount, &bitSize, &channels, &sampleRate) == BAE_NO_ERROR) {
+                m_sampleParamsPanel->SetWaveform(waveData, frameCount, bitSize, channels);
+            }
+        }
+
         if (m_currentLocalIndex >= 0 && m_currentLocalIndex < (int)m_samples.size()) {
             EditedSample const &s = m_samples[(size_t)m_currentLocalIndex];
             m_sampleParamsPanel->SetLoopPoints(s.sampleInfo.startLoop, s.sampleInfo.endLoop);
+        }
+    }
+
+    void RefreshWaveformIfCodecChanged() {
+        if (!m_sampleParamsPanel || m_loadingUiValues) return;
+        int codecIdx   = m_sampleParamsPanel->GetCodecSelection();
+        int bitrateIdx = m_sampleParamsPanel->GetBitrateSelection();
+        if (codecIdx != m_lastPreviewedCodecIdx || bitrateIdx != m_lastPreviewedBitrateIdx) {
+            RefreshWaveform();
         }
     }
 

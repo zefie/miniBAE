@@ -157,6 +157,7 @@ private:
         None,
         Start,
         End,
+        Region,
     };
 
     void const *m_waveData;
@@ -164,6 +165,9 @@ private:
     uint16_t m_bitSize, m_channels;
     uint32_t m_loopStart, m_loopEnd;
     DragMode m_dragMode;
+    int m_dragAnchorX = 0;
+    uint32_t m_dragAnchorLoopStart = 0;
+    uint32_t m_dragAnchorLoopEnd = 0;
     std::function<void(uint32_t, uint32_t)> m_loopChanged;
 
     float SampleAt(uint32_t frame, int channel) const {
@@ -312,22 +316,23 @@ private:
     }
 
     void OnLeftDown(wxMouseEvent &event) {
-        int x;
-        int startX;
-        int endX;
-
         if (!HasLoop()) {
             event.Skip();
             return;
         }
-        x = event.GetX();
-        startX = XFromFrame(m_loopStart);
-        endX = XFromFrame(m_loopEnd);
+        int x = event.GetX();
+        int startX = XFromFrame(m_loopStart);
+        int endX = XFromFrame(m_loopEnd);
 
         if (std::abs(x - startX) <= 6) {
             m_dragMode = DragMode::Start;
         } else if (std::abs(x - endX) <= 6) {
             m_dragMode = DragMode::End;
+        } else if (x > startX + 6 && x < endX - 6) {
+            m_dragMode = DragMode::Region;
+            m_dragAnchorX = x;
+            m_dragAnchorLoopStart = m_loopStart;
+            m_dragAnchorLoopEnd = m_loopEnd;
         } else {
             event.Skip();
             return;
@@ -338,6 +343,9 @@ private:
     }
 
     void OnLeftUp(wxMouseEvent &) {
+        if (m_dragMode != DragMode::None) {
+            NotifyLoopChanged();
+        }
         m_dragMode = DragMode::None;
         if (HasCapture()) {
             ReleaseMouse();
@@ -345,26 +353,39 @@ private:
     }
 
     void OnMouseMove(wxMouseEvent &event) {
-        uint32_t frame;
-
         if (m_dragMode == DragMode::None || !event.LeftIsDown() || m_frameCount == 0) {
             event.Skip();
             return;
         }
-        frame = FrameFromX(event.GetX());
         if (m_dragMode == DragMode::Start) {
+            uint32_t frame = FrameFromX(event.GetX());
             uint32_t newStart = std::min(frame, (m_loopEnd > 0) ? (m_loopEnd - 1) : 0);
             if (newStart != m_loopStart) {
                 m_loopStart = newStart;
-                NotifyLoopChanged();
                 Refresh();
             }
         } else if (m_dragMode == DragMode::End) {
+            uint32_t frame = FrameFromX(event.GetX());
             uint32_t newEnd = std::max(frame, m_loopStart + 1);
             newEnd = std::min(newEnd, m_frameCount);
             if (newEnd != m_loopEnd) {
                 m_loopEnd = newEnd;
-                NotifyLoopChanged();
+                Refresh();
+            }
+        } else if (m_dragMode == DragMode::Region) {
+            int delta = event.GetX() - m_dragAnchorX;
+            int width = std::max(1, GetClientSize().x - 1);
+            uint32_t loopLen = m_dragAnchorLoopEnd - m_dragAnchorLoopStart;
+            int64_t frameDelta = ((int64_t)delta * (int64_t)m_frameCount) / width;
+            int64_t newStart = (int64_t)m_dragAnchorLoopStart + frameDelta;
+            if (newStart < 0) newStart = 0;
+            if ((uint64_t)newStart + loopLen > m_frameCount)
+                newStart = (int64_t)m_frameCount - (int64_t)loopLen;
+            uint32_t ns = (uint32_t)newStart;
+            uint32_t ne = ns + loopLen;
+            if (ns != m_loopStart || ne != m_loopEnd) {
+                m_loopStart = ns;
+                m_loopEnd = ne;
                 Refresh();
             }
         }
@@ -412,6 +433,9 @@ private:
     }
 
     void OnMouseCaptureLost(wxMouseCaptureLostEvent &) {
+        if (m_dragMode != DragMode::None) {
+            NotifyLoopChanged();
+        }
         m_dragMode = DragMode::None;
     }
 };
@@ -1835,6 +1859,7 @@ public:
     int GetLowKey() const { return m_lowSpin->GetValue(); }
     int GetHighKey() const { return m_highSpin->GetValue(); }
     int GetCodecSelection() const { return m_codecChoice ? m_codecChoice->GetSelection() : 0; }
+    int GetBitrateSelection() const { return (m_bitrateChoice && m_bitrateChoice->IsEnabled()) ? m_bitrateChoice->GetSelection() : -1; }
 
     /* Enable or disable the New/Delete/Replace/Export buttons.
      * The bank editor sets write=false since banks are read-only;

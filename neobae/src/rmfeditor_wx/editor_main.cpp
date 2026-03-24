@@ -649,7 +649,7 @@ public:
         transportSizer->Add(m_playButton, 0, wxRIGHT, 8);
         transportSizer->Add(m_pauseButton, 0, wxRIGHT, 8);
         transportSizer->Add(m_stopButton, 0, wxRIGHT, 8);
-        transportSizer->Add(new wxStaticText(editorPanel, wxID_ANY, "Playback"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+        transportSizer->Add(new wxStaticText(editorPanel, wxID_ANY, "Song"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
         transportSizer->Add(m_playScopeChoice, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);
         transportSizer->Add(new wxStaticText(editorPanel, wxID_ANY, "Preview Vol"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
         transportSizer->Add(m_previewVolumeSlider, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 12);

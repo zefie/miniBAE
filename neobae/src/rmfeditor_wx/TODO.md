@@ -26,13 +26,12 @@
 - ~~Store bank (if not unmodified built-in bank) in NBS session~~
 - ~~Revamp titlebar and statusbar handling~~
 - ~~smarter dirty (modified) tracking~~
-- Sound Bank Editor
+- ~~Sound Bank Editor~~
   - ~~need killswitch for bad ADSR~~
   - ~~need apply button~~
   - ~~make sure we load the edited bank (not original) into memory when switching to midi tab~~
   - ~~lots of bugs with sample editor~~
   - ~~needs context menus still~~
-  - musicial keyboard vs form fields, allow clicking empty space in dialog to unfocus fields
   - ~~compression issues in sample editor~~
   - ~~LFO broken~~
   - ~~Bank editor must force ZSB if using ZMF features~~
@@ -68,6 +67,9 @@
 
 
 # Harder stuff
+- Do things more efficiently
+  - building preview bank and song and instruments can be memory/cpu intensive
+
 - ~~Allow for automation like Volume to be able have a slide on it~~
   - ~~for example, to easily make a fadein or fadeout~~
   - the edit dialog could have "start (item)" "end (item)"

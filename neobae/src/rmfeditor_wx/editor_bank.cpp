@@ -1668,7 +1668,21 @@ static void OnGlobalSampleSelected(BankEditorPanel *bp, wxTreeEvent &event)
         return;
     }
     if (!dynamic_cast<BankSampleItemData *>(bp->sampleTree->GetItemData(item))) {
-        /* Root node selected */
+        /* Root node selected — clear both right-hand panels */
+        bp->hasInstrument = false;
+        bp->hasSampleSelection = false;
+        bp->instHeaderLabel->SetLabel("Select an instrument to view details.");
+        if (bp->instParamsPanel) {
+            bp->instParamsPanel->ClearUI();
+            bp->instParamsPanel->Hide();
+            if (bp->instPage) bp->instPage->Layout();
+        }
+        bp->sampleHeaderLabel->SetLabel("Select a sample from the list to view details.");
+        if (bp->sampleParamsPanel) {
+            bp->sampleParamsPanel->ClearUI();
+            bp->sampleParamsPanel->Hide();
+            bp->samplesPage->Layout();
+        }
         return;
     }
 
@@ -1751,6 +1765,7 @@ static void BuildInstrumentTab(BankEditorPanel *bp)
     bp->instParamsPanel->SetOnParameterChanged([bp]() {
         ApplyDirtyParams(bp, false);
     });
+    bp->instParamsPanel->Hide();
     sizer->Add(bp->instParamsPanel, 1, wxEXPAND);
 
     bp->instPage->SetSizerAndFit(sizer);
@@ -1956,103 +1971,12 @@ BankEditorPanel *CreateBankEditorPanel(wxWindow *parent)
         OnSampleContextMenu(bp, event);
     });
 
-    /* Keyboard preview: AWSEDFTGYHUJKO keys map to semitones around root key.
-     * We use wxEVT_CHAR_HOOK on the top-level panel so that musical keys are
-     * intercepted before child controls (tree, list, spin) process them. */
-    auto handleKeyDown = [bp](wxKeyEvent &event) {
-        int keyCode;
-        int semitoneOffset;
-        int root;
-        int note;
-        constexpr int kKeyboardCenterSemitone = 7;
-
-        if (!bp->playCallback || !bp->hasSampleSelection || !bp->hasInstrument) {
-            event.Skip();
-            return;
-        }
-        /* Allow normal typing in text/spin fields for non-musical keys,
-         * but intercept musical keys even there. */
-        keyCode = NormalizeBankKeyCode(event.GetKeyCode());
-        semitoneOffset = BankKeyCodeToSemitoneOffset(keyCode);
-        if (semitoneOffset < 0) {
-            event.Skip();
-            return;
-        }
-        if (bp->keyboardPreviewNotes.find(keyCode) != bp->keyboardPreviewNotes.end()) {
-            return;
-        }
-        root = static_cast<int>(bp->currentSampleInfo.rootKey);
-        note = std::clamp(root + (semitoneOffset - kKeyboardCenterSemitone), 0, 127);
-        {
-            bool isPerc = (bp->currentInstInfo.instID % 256) >= 128;
-            bp->playCallback(
-                static_cast<unsigned char>(std::clamp<uint32_t>(bp->currentInstInfo.bank, 0, 127)),
-                static_cast<unsigned char>(std::clamp<uint32_t>(bp->currentInstInfo.program, 0, 127)),
-                note, keyCode, isPerc);
-        }
-        bp->keyboardPreviewNotes[keyCode] = note;
-        if (bp->pianoPanel) {
-            std::set<int> activeNotes;
-            for (auto const &kv : bp->keyboardPreviewNotes) {
-                activeNotes.insert(kv.second);
-            }
-            bp->pianoPanel->SetExternalPressedNotes(activeNotes);
-        }
-    };
-
-    auto handleKeyUp = [bp](wxKeyEvent &event) {
-        int keyCode = NormalizeBankKeyCode(event.GetKeyCode());
-        auto it = bp->keyboardPreviewNotes.find(keyCode);
-        if (it == bp->keyboardPreviewNotes.end()) {
-            event.Skip();
-            return;
-        }
-        if (bp->stopCallback) {
-            bp->stopCallback(keyCode);
-        }
-        bp->keyboardPreviewNotes.erase(it);
-        if (bp->pianoPanel) {
-            if (bp->keyboardPreviewNotes.empty()) {
-                bp->pianoPanel->ClearExternalPressedNote();
-            } else {
-                std::set<int> activeNotes;
-                for (auto const &kv : bp->keyboardPreviewNotes) {
-                    activeNotes.insert(kv.second);
-                }
-                bp->pianoPanel->SetExternalPressedNotes(activeNotes);
-            }
-        }
-    };
-
-    /* Bind CHAR_HOOK on the panel and on focusable child widgets.  On GTK
-     * wxEVT_CHAR_HOOK is delivered only to the focused window, so a
-     * panel-level binding alone is not enough to intercept keystrokes
-     * when a tree or list control has focus. */
-    bp->panel->Bind(wxEVT_CHAR_HOOK, handleKeyDown);
-    bp->panel->Bind(wxEVT_KEY_UP, handleKeyUp);
-    bp->instrumentTree->Bind(wxEVT_CHAR_HOOK, handleKeyDown);
-    bp->instrumentTree->Bind(wxEVT_KEY_UP, handleKeyUp);
-    bp->sampleList->Bind(wxEVT_CHAR_HOOK, handleKeyDown);
-    bp->sampleList->Bind(wxEVT_KEY_UP, handleKeyUp);
-    if (bp->pianoPanel) {
-        bp->pianoPanel->Bind(wxEVT_CHAR_HOOK, handleKeyDown);
-        bp->pianoPanel->Bind(wxEVT_KEY_UP, handleKeyUp);
-    }
-    if (bp->sampleParamsPanel) {
-        bp->sampleParamsPanel->Bind(wxEVT_CHAR_HOOK, handleKeyDown);
-        bp->sampleParamsPanel->Bind(wxEVT_KEY_UP, handleKeyUp);
-    }
-    if (bp->instPage) {
-        bp->instPage->Bind(wxEVT_CHAR_HOOK, handleKeyDown);
-        bp->instPage->Bind(wxEVT_KEY_UP, handleKeyUp);
-    }
-    bp->samplesPage->Bind(wxEVT_CHAR_HOOK, handleKeyDown);
-    bp->samplesPage->Bind(wxEVT_KEY_UP, handleKeyUp);
-
     /* Click-to-defocus: clicking on panel backgrounds moves focus away from
-     * text/spin fields so the musical keyboard becomes active. */
+     * text/spin fields so the musical keyboard becomes active.
+     * SetFocusIgnoringChildren() is used instead of SetFocus() so that GTK
+     * reliably removes the keyboard focus from any active text/spin child. */
     auto defocusClick = [bp](wxMouseEvent &event) {
-        bp->panel->SetFocus();
+        bp->panel->SetFocusIgnoringChildren();
         event.Skip();
     };
     bp->panel->Bind(wxEVT_LEFT_DOWN, defocusClick);
@@ -2060,6 +1984,12 @@ BankEditorPanel *CreateBankEditorPanel(wxWindow *parent)
         bp->instPage->Bind(wxEVT_LEFT_DOWN, defocusClick);
     }
     bp->samplesPage->Bind(wxEVT_LEFT_DOWN, defocusClick);
+    if (bp->instParamsPanel) {
+        bp->instParamsPanel->Bind(wxEVT_LEFT_DOWN, defocusClick);
+    }
+    if (bp->sampleParamsPanel) {
+        bp->sampleParamsPanel->Bind(wxEVT_LEFT_DOWN, defocusClick);
+    }
 
     return bp;
 }
@@ -2089,6 +2019,10 @@ void BankEditorPanel_LoadBank(BankEditorPanel *panel,
     PopulateSampleTree(panel);
     panel->sampleList->DeleteAllItems();
     panel->instHeaderLabel->SetLabel("Select an instrument to view details.");
+    if (panel->instParamsPanel) {
+        panel->instParamsPanel->ClearUI();
+        panel->instParamsPanel->Hide();
+    }
     panel->sampleHeaderLabel->SetLabel("Select a sample from the list to view details.");
     if (panel->sampleParamsPanel) {
         panel->sampleParamsPanel->ClearUI();
@@ -2116,6 +2050,10 @@ void BankEditorPanel_Clear(BankEditorPanel *panel)
     panel->sampleTree->DeleteAllItems();
     panel->sampleTree->AddRoot("Samples");
     panel->instHeaderLabel->SetLabel("Open an HSB or ZSB file to begin editing.");
+    if (panel->instParamsPanel) {
+        panel->instParamsPanel->ClearUI();
+        panel->instParamsPanel->Hide();
+    }
     panel->sampleHeaderLabel->SetLabel("Select a sample from the list to view details.");
     if (panel->sampleParamsPanel) {
         panel->sampleParamsPanel->ClearUI();
