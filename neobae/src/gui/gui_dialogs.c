@@ -12,11 +12,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 
 // Dialog state
 bool g_show_rmf_info_dialog = false;
 bool g_rmf_info_loaded = false;
 char g_rmf_info_values[INFO_TYPE_COUNT][512];
+char g_rmf_container_version[64];
 
 bool g_show_about_dialog = false;
 int g_about_page = 0;
@@ -130,7 +132,52 @@ void rmf_info_reset(void)
     {
         g_rmf_info_values[i][0] = '\0';
     }
+    g_rmf_container_version[0] = '\0';
     g_rmf_info_loaded = false;
+}
+
+static void rmf_info_load_container_version(void)
+{
+    FILE *f;
+    unsigned char hdr[12];
+    uint32_t mapID;
+    uint32_t version;
+    const char *kind;
+
+    g_rmf_container_version[0] = '\0';
+    if (!g_bae.loaded_path || !g_bae.loaded_path[0])
+    {
+        return;
+    }
+
+    f = fopen(g_bae.loaded_path, "rb");
+    if (!f)
+    {
+        return;
+    }
+    if (fread(hdr, 1, sizeof(hdr), f) != sizeof(hdr))
+    {
+        fclose(f);
+        return;
+    }
+    fclose(f);
+
+    mapID = ((uint32_t)hdr[0] << 24) |
+            ((uint32_t)hdr[1] << 16) |
+            ((uint32_t)hdr[2] << 8) |
+            (uint32_t)hdr[3];
+    version = ((uint32_t)hdr[4] << 24) |
+              ((uint32_t)hdr[5] << 16) |
+              ((uint32_t)hdr[6] << 8) |
+              (uint32_t)hdr[7];
+
+    if (mapID != XFILERESOURCE_ID && mapID != XFILERESOURCE_ZMF_ID)
+    {
+        return;
+    }
+
+    kind = (version >= 2u) ? "ZMF" : "RMF";
+    snprintf(g_rmf_container_version, sizeof(g_rmf_container_version), "%s Version: %u", kind, (unsigned)version);
 }
 
 void rmf_info_load_if_needed(void)
@@ -154,6 +201,7 @@ void rmf_info_load_if_needed(void)
             }
         }
     }
+    rmf_info_load_container_version();
     g_rmf_info_loaded = true;
 }
 
@@ -884,6 +932,13 @@ void render_rmf_info_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
     measure_text("RMF Metadata", &titleW, &titleH);
     if (titleW > longestInner)
         longestInner = titleW;
+    if (g_rmf_container_version[0])
+    {
+        int w = 0, h = 0;
+        measure_text(g_rmf_container_version, &w, &h);
+        if (w > longestInner)
+            longestInner = w;
+    }
     for (int i = 0; i < INFO_TYPE_COUNT; i++)
     {
         if (g_rmf_info_values[i][0])
@@ -907,6 +962,13 @@ void render_rmf_info_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
 
     // Now compute total wrapped lines for chosen width
     int totalLines = 0;
+    if (g_rmf_container_version[0])
+    {
+        int count = count_wrapped_lines(g_rmf_container_version, dlgW - pad * 2 - 8);
+        if (count <= 0)
+            count = 1;
+        totalLines += count;
+    }
     for (int i = 0; i < INFO_TYPE_COUNT; i++)
     {
         if (g_rmf_info_values[i][0])
@@ -977,6 +1039,18 @@ void render_rmf_info_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
     // Render wrapped fields
     int y = dlg.y + 32;
     int rendered = 0;
+    if (g_rmf_container_version[0])
+    {
+        int drawn = draw_wrapped_text(R,
+                                      dlg.x + 10,
+                                      y,
+                                      g_rmf_container_version,
+                                      g_text_color,
+                                      dlgW - pad * 2 - 8,
+                                      lineH);
+        y += drawn * lineH;
+        rendered += drawn;
+    }
     for (int i = 0; i < INFO_TYPE_COUNT; i++)
     {
         if (g_rmf_info_values[i][0])

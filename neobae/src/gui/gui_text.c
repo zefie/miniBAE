@@ -125,9 +125,7 @@ void draw_text(SDL_Renderer *R, int x, int y, const char *text, SDL_Color col)
     bitmap_draw(R, x, y, text, col);
 }
 
-// Simple word-wrapping helpers used by RMF Info dialog.
-// Returns number of wrapped lines that the text would occupy within max_w pixels.
-int count_wrapped_lines(const char *text, int max_w)
+static int count_wrapped_single_line(const char *text, int max_w)
 {
     if (!text || !*text)
         return 0;
@@ -139,7 +137,7 @@ int count_wrapped_lines(const char *text, int max_w)
     {
         // Extract next word
         const char *q = p;
-        while (*q && *q != ' ' && *q != '\t' && *q != '\n' && *q != '\r')
+        while (*q && *q != ' ' && *q != '\t')
             q++;
         int wlen = (int)(q - p);
         char word[512];
@@ -203,7 +201,7 @@ int count_wrapped_lines(const char *text, int max_w)
         }
         // Advance past whitespace
         p = q;
-        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+        while (*p == ' ' || *p == '\t')
             p++;
     }
     if (buf[0])
@@ -211,8 +209,7 @@ int count_wrapped_lines(const char *text, int max_w)
     return lines;
 }
 
-// Draw text with simple word-wrapping within max_w pixels. Returns number of lines drawn.
-int draw_wrapped_text(SDL_Renderer *R, int x, int y, const char *text, SDL_Color col, int max_w, int lineH)
+static int draw_wrapped_single_line(SDL_Renderer *R, int x, int y, const char *text, SDL_Color col, int max_w, int lineH)
 {
     if (!text || !*text)
         return 0;
@@ -223,7 +220,7 @@ int draw_wrapped_text(SDL_Renderer *R, int x, int y, const char *text, SDL_Color
     while (*p)
     {
         const char *q = p;
-        while (*q && *q != ' ' && *q != '\t' && *q != '\n' && *q != '\r')
+        while (*q && *q != ' ' && *q != '\t')
             q++;
         int wlen = (int)(q - p);
         char word[512];
@@ -292,7 +289,7 @@ int draw_wrapped_text(SDL_Renderer *R, int x, int y, const char *text, SDL_Color
             }
         }
         p = q;
-        while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+        while (*p == ' ' || *p == '\t')
             p++;
     }
     if (buf[0])
@@ -300,5 +297,98 @@ int draw_wrapped_text(SDL_Renderer *R, int x, int y, const char *text, SDL_Color
         draw_text(R, x, y + lines * lineH, buf, col);
         lines++;
     }
+    return lines;
+}
+
+// Simple word-wrapping helpers used by RMF Info dialog.
+// Returns number of wrapped lines that the text would occupy within max_w pixels.
+int count_wrapped_lines(const char *text, int max_w)
+{
+    int total;
+    const char *p;
+
+    if (!text || !*text)
+        return 0;
+
+    total = 0;
+    p = text;
+    while (1)
+    {
+        const char *nl;
+        char line[2048];
+        int len;
+
+        nl = strchr(p, '\n');
+        len = nl ? (int)(nl - p) : (int)strlen(p);
+        if (len >= (int)sizeof(line))
+            len = (int)sizeof(line) - 1;
+        safe_strncpy(line, p, len);
+        line[len] = '\0';
+
+        if (line[0])
+            total += count_wrapped_single_line(line, max_w);
+        else
+            total += 1;
+
+        if (!nl)
+            break;
+        p = nl + 1;
+        if (*p == '\0')
+        {
+            total += 1;
+            break;
+        }
+    }
+
+    return total;
+}
+
+// Draw text with simple word-wrapping within max_w pixels. Returns number of lines drawn.
+int draw_wrapped_text(SDL_Renderer *R, int x, int y, const char *text, SDL_Color col, int max_w, int lineH)
+{
+    int lines;
+    const char *p;
+
+    if (!text || !*text)
+        return 0;
+
+    lines = 0;
+    p = text;
+    while (1)
+    {
+        const char *nl;
+        char line[2048];
+        int len;
+        int drawn;
+
+        nl = strchr(p, '\n');
+        len = nl ? (int)(nl - p) : (int)strlen(p);
+        if (len >= (int)sizeof(line))
+            len = (int)sizeof(line) - 1;
+        safe_strncpy(line, p, len);
+        line[len] = '\0';
+
+        if (line[0])
+        {
+            drawn = draw_wrapped_single_line(R, x, y + lines * lineH, line, col, max_w, lineH);
+            if (drawn <= 0)
+                drawn = 1;
+            lines += drawn;
+        }
+        else
+        {
+            lines += 1;
+        }
+
+        if (!nl)
+            break;
+        p = nl + 1;
+        if (*p == '\0')
+        {
+            lines += 1;
+            break;
+        }
+    }
+
     return lines;
 }

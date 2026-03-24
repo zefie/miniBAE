@@ -1056,10 +1056,38 @@ const char *rmf_info_label(BAEInfoType t)
 
 static void playbae_print_rmf_info(BAEPathName song)
 {
+   FILE *f;
+   unsigned char hdr[12];
+   uint32_t mapID;
+   uint32_t version;
+   const char *kind;
    char buf[256];
    BAEInfoType it;
 
    playbae_printf("RMF Metadata Info:\n");
+
+   f = fopen(song, "rb");
+   if (f)
+   {
+      if (fread(hdr, 1, sizeof(hdr), f) == sizeof(hdr))
+      {
+         mapID = ((uint32_t)hdr[0] << 24) |
+                 ((uint32_t)hdr[1] << 16) |
+                 ((uint32_t)hdr[2] << 8) |
+                 (uint32_t)hdr[3];
+         version = ((uint32_t)hdr[4] << 24) |
+                   ((uint32_t)hdr[5] << 16) |
+                   ((uint32_t)hdr[6] << 8) |
+                   (uint32_t)hdr[7];
+         if (mapID == XFILERESOURCE_ID || mapID == XFILERESOURCE_ZMF_ID)
+         {
+            kind = (version >= 2u) ? "ZMF" : "RMF";
+            playbae_printf("  %s Version: %u\n", kind, (unsigned)version);
+         }
+      }
+      fclose(f);
+   }
+
    for (it = TITLE_INFO; it <= ORIGINAL_SOURCE_INFO; it = (BAEInfoType)(it + 1))
    {
       if (BAEUtil_GetRmfSongInfoFromFile(song, 0, it, buf, sizeof(buf) - 1) == BAE_NO_ERROR)

@@ -6480,6 +6480,11 @@ static BAEResult PV_EncodeMidiForResourceType(XResourceType resourceType,
             }
             return BAE_BAD_FILE;
         }
+        if ((uint32_t)compressedSize >= plainMidi->size)
+        {
+            XDisposePtr(encoded);
+            return BAE_BAD_FILE;
+        }
         if (resourceType == ID_ECMI)
         {
             XEncryptData(encoded, (uint32_t)compressedSize);

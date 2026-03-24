@@ -229,6 +229,9 @@ enum
     ID_PASSWORD =   FOUR_CHAR('E','A','C','S'), //  'EACS'      // encryption access control string (password)
  
     ID_ALIAS    =   FOUR_CHAR('A','L','I','S'), //  'ALIS'      // alias link resource
+
+    ID_ZINS     =   FOUR_CHAR('Z','I','N','S'), //  'ZINS'      // ZMF v3 packed INST block
+    ID_ZSNG     =   FOUR_CHAR('Z','S','N','G'), //  'ZSNG'      // ZMF v3 packed SONG block
  
     ID_VERS     =   FOUR_CHAR('V','E','R','S'), //  'VERS'      // version ID
     ID_TEXT     =   FOUR_CHAR('T','E','X','T'), //  'TEXT'      // text

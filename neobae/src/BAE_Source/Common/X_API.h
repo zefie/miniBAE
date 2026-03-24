@@ -717,9 +717,9 @@ typedef struct XBankToken XBankToken;
 #define XFILERESOURCE_ID_IS_VALID(id) \
     ((id) == XFILERESOURCE_ID || (id) == XFILERESOURCE_ZMF_ID)
 
-// Resource file version numbers: RMF uses 1 (original), ZMF uses 2
+// Resource file version numbers: RMF uses 1 (original), ZMF uses 3
 #define XFILERESOURCE_VERSION_RMF   1
-#define XFILERESOURCE_VERSION_ZMF   2
+#define XFILERESOURCE_VERSION_ZMF   3
 
 // Return the correct version number for a given mapID
 #define XFILERESOURCE_VERSION_FOR_ID(id) \
