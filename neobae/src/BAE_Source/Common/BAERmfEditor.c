@@ -15750,10 +15750,12 @@ BAEResult BAERmfEditorBank_DeleteInstrumentSample(BAEBankToken bankToken,
  * be written to disk or loaded via BAEMixer_AddBankFromMemory.
  *
  * The format is preserved from the source bank (IREZ stays IREZ, ZREZ
- * stays ZREZ).  All resource types are copied verbatim. */
-BAEResult BAERmfEditorBank_SaveToMemory(BAEBankToken bankToken,
-                                        unsigned char **outData,
-                                        uint32_t *outSize)
+ * stays ZREZ) unless overrideResourceID is non-zero, in which case that
+ * format is used instead.  All resource types are copied verbatim. */
+static BAEResult PV_BankSaveToMemory(BAEBankToken bankToken,
+                                     int32_t overrideResourceID,
+                                     unsigned char **outData,
+                                     uint32_t *outSize)
 {
     XFILE bankFile;
     XFILE outFile;
@@ -15784,6 +15786,12 @@ BAEResult BAERmfEditorBank_SaveToMemory(BAEBankToken bankToken,
     if (!XFILERESOURCE_ID_IS_VALID(resourceID))
     {
         return BAE_BAD_FILE;
+    }
+
+    /* Override format if requested (e.g. .zsb extension forces ZREZ) */
+    if (overrideResourceID != 0)
+    {
+        resourceID = overrideResourceID;
     }
 
     /* Create a virtual (in-memory) resource file with the same format */
@@ -15877,6 +15885,14 @@ BAEResult BAERmfEditorBank_SaveToMemory(BAEBankToken bankToken,
     return BAE_NO_ERROR;
 }
 
+/* Public wrapper — preserves source bank format (no override). */
+BAEResult BAERmfEditorBank_SaveToMemory(BAEBankToken bankToken,
+                                        unsigned char **outData,
+                                        uint32_t *outSize)
+{
+    return PV_BankSaveToMemory(bankToken, 0, outData, outSize);
+}
+
 BAEResult BAERmfEditorBank_SaveToFile(BAEBankToken bankToken,
                                       BAEPathName filePath)
 {
@@ -15885,15 +15901,29 @@ BAEResult BAERmfEditorBank_SaveToFile(BAEBankToken bankToken,
     XFILENAME name;
     XFILE fileRef;
     BAEResult result;
+    int32_t overrideResourceID;
+    const char *ext;
 
     if (!bankToken || !filePath)
     {
         return BAE_PARAM_ERR;
     }
 
+    /* Choose ZREZ format for .zsb files, like ZMF does for .zmf */
+    overrideResourceID = 0;
+    ext = strrchr(filePath, '.');
+    if (ext && (strcmp(ext, ".zsb") == 0 || strcmp(ext, ".ZSB") == 0))
+    {
+        overrideResourceID = XFILERESOURCE_ZMF_ID;
+    }
+    else if (ext && (strcmp(ext, ".hsb") == 0 || strcmp(ext, ".HSB") == 0))
+    {
+        overrideResourceID = XFILERESOURCE_ID;
+    }
+
     bankData = NULL;
     bankSize = 0;
-    result = BAERmfEditorBank_SaveToMemory(bankToken, &bankData, &bankSize);
+    result = PV_BankSaveToMemory(bankToken, overrideResourceID, &bankData, &bankSize);
     if (result != BAE_NO_ERROR)
     {
         return result;
