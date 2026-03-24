@@ -130,16 +130,28 @@ A brand new WebAssembly API for the NeoBAE engine is available thanks to [webcd]
 
 The new API can be used to build your own player, but a sample of webcd's Music Studio is included to demonstrate the WebAssembly's capabilities.
 
-Please note that the WebAssembly engine does not yet support FluidSynth, and is limited to Beatnik HSB banks.
-
 ## Supported Formats
 
 | Format | Extensions | Notes |
 |--------|------------|-------|
 | MIDI | `.mid`, `.midi` | Standard MIDI files |
 | RMF | `.rmf` | Rich Music Format (Beatnik's proprietary format) |
+| ZMF | `.zmf` | zefie MIDI File (Spinoff of RMF with modern features) |
 | Audio | `.wav`, `.aiff`, `.au` | Uncompressed audio |
 | Compressed | `.mp2`, `.mp3`, `.flac`, `.ogg` | Various compressed formats |
+
+## NeoBAE Studio
+
+**NeoBAE Studio** is a powerful MIDI/RMF/ZMF editor for creating and authoring music files. It provides an intuitive interface for composing, editing instruments, and managing audio resources.
+
+⚠️ **Alpha Stage**: NeoBAE Studio is currently in active development. While core functionality is available, expect ongoing improvements, potential bugs, and API changes. Please report issues and provide feedback to help shape its future.
+
+**Features:**
+- Create and edit RMF (Rich Music Format) and ZMF (zefie MIDI File) files
+- Instrument and bank management
+- Modern codec support (FLAC, Vorbis, Opus) via ZMF
+- Real-time preview and playback
+- Cross-platform support
 
 ## Architecture
 
@@ -149,6 +161,7 @@ NeoBAE consists of several key components:
 - **Platform Layer**: Abstraction for different operating systems
 - **Format Handlers**: Support for various audio/music file formats
 - **Applications**: Command-line and GUI frontends
+- **Library**: libNeoBAE for use in your own application
 
 ## License
 
