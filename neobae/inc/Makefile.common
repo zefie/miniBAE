@@ -159,9 +159,9 @@ endif
 ifneq ($(filter 1,$(FLAC_ENC) $(FLAC_DEC)),) 
 	INC_PATH	+= -Isrc/thirdparty/flac/include -Isrc/thirdparty/flac/src/libFLAC/include
 	ifeq ($(XPHACK),1)
-		BAE_LIBS := -lFLAC.dll -lpthread $(BAE_LIBS)
+		BAE_LIBS += -lFLAC.dll -lpthread $(BAE_LIBS)
 	else
-		BAE_LIBS := -lFLAC -lpthread $(BAE_LIBS)
+		BAE_LIBS += -lFLAC -lpthread $(BAE_LIBS)
 	endif
 	BAE_FLAGS += -DHAVE_STDINT_H=1 -DHAVE_INTTYPES_H=1 -DSIZE_T_MAX=SIZE_MAX
 	ifeq ($(OGG_SUPPORT),1)
@@ -171,20 +171,30 @@ ifneq ($(filter 1,$(FLAC_ENC) $(FLAC_DEC)),)
 	endif
 endif
 
+ifeq ($(WINDOWS),1)
+	ifeq ($(BITS),32)
+		INC_PATH += -I/mingw32/include -I/usr/i686-w64-mingw32/include
+		BAE_LIBS += -L/mingw32/lib -L/usr/i686-w64-mingw32/lib
+	else
+		INC_PATH += -I/mingw64/include -I/usr/x86_64-w64-mingw32/include
+		BAE_LIBS += -L/mingw64/lib -L/usr/x86_64-w64-mingw32/lib
+	endif
+endif
+
 ifneq ($(filter 1,$(OPUS_DEC) $(OPUS_ENC)),)
 	INC_PATH	+= -Isrc/thirdparty/opus/include
 	ifeq ($(OPUS_DEC),1)
 		INC_PATH	+= -Isrc/thirdparty/opusfile/include
 	endif
 	ifeq ($(XPHACK),1)
-		BAE_LIBS 	:= -lopus.dll $(BAE_LIBS)
+		BAE_LIBS 	+= -lopus.dll $(BAE_LIBS)
 		ifeq ($(OPUS_DEC),1)
-			BAE_LIBS 	:= -lopusfile.dll $(BAE_LIBS)
+			BAE_LIBS 	+= -lopusfile.dll $(BAE_LIBS)
 		endif
 	else
 		BAE_LIBS 	:= -lopus $(BAE_LIBS)
 		ifeq ($(OPUS_DEC),1)
-			BAE_LIBS 	:= -lopusfile $(BAE_LIBS)
+			BAE_LIBS 	+= -lopusfile $(BAE_LIBS)
 		endif
 	endif
 	ifeq ($(OPUS_DEC),1)
@@ -508,6 +518,7 @@ else
 						# libNeoBAE srcs + split mod2rmf sources
 						SRC_BIN	:= $(SRC) src/mod2rmf/mod2rmf.c src/mod2rmf/mod2rmf_encoder.c src/mod2rmf/mod2rmf_resampler.c
 						BAE_LIBS += -lxmp
+						BAE_FLAGS += -DLIBXMP_STATIC=1 
 					else
 						ifeq ($(MID2RMI),1)
 							# libNeoBAE srcs + mid2rmi.c
