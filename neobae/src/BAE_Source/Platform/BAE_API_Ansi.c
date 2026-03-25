@@ -77,12 +77,6 @@ static int16_t		g_unscaled_volume = 256;	// hardware volume in BAE scale
 
 static int32_t			g_audioByteBufferSize;		// size of audio buffers in bytes
 
-static int32_t			g_shutDownDoubleBuffer;
-static int32_t			g_activeDoubleBuffer;
-
-// $$kk: 05.06.98: made lastPos a global variable
-static int32_t			g_lastPos;
-
  // number of samples per audio frame to generate
 int32_t				g_audioFramesToGenerate;
 
@@ -234,8 +228,6 @@ int16_t BAE_GetHardwareVolume(void)
 // newVolume is in the range of 0 to 256
 void BAE_SetHardwareVolume(int16_t newVolume)
 {
-    uint32_t   volume;
-
     // pin volume
     if (newVolume > 256)
     {
@@ -513,7 +505,7 @@ void BAE_FileClose(intptr_t fileReference)
 #if  USE_UNIX_IO
 	_close(fileReference);
 #elif USE_ANSI_IO
-	int val = fclose((FILE *)fileReference);
+	fclose((FILE *)fileReference);
 #elif USE_WINDOWS_IO
 	CloseHandle((HANDLE)fileReference);
 #endif
@@ -553,7 +545,7 @@ int32_t BAE_WriteFile(intptr_t fileReference, void *pBuffer, int32_t bufferLengt
 		return _write(fileReference, (char *)pBuffer, bufferLength);
 #elif USE_ANSI_IO
 		int32_t bytesWritten = 0;
-		int val = ftell((FILE *)fileReference);
+		ftell((FILE *)fileReference);
 		fflush((FILE *)fileReference);
 		bytesWritten = fwrite( (char *)pBuffer, 1, bufferLength, (FILE *)fileReference);
 		fflush((FILE *)fileReference);
@@ -603,7 +595,6 @@ uint32_t BAE_GetFilePosition(intptr_t fileReference)
 uint32_t BAE_GetFileLength(intptr_t fileReference)
 {
 	uint32_t pos = 0;
-	int val = 0;
 
 #if  USE_UNIX_IO
 	pos = _lseek(fileReference, 0, SEEK_END);
@@ -678,7 +669,7 @@ int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t chan
 	// BUFFER_SIZE is based on 44100hz Stereo 16Bit
 	float bufferCalc = 689.0625;
 	g_audioByteBufferSize = (XSDWORD)roundUp(((sampleRate * channels * bits) / bufferCalc), 64);
-	BAE_PRINTF("buffer debug: sampleRate: %lu, channels: %lu, bits: %lu, bufferSize: %lu\n",sampleRate, channels, bits, g_audioByteBufferSize);
+	BAE_PRINTF("buffer debug: sampleRate: %u, channels: %u, bits: %u, bufferSize: %u\n",sampleRate, channels, bits, g_audioByteBufferSize);
 
 	return 0;
 }
