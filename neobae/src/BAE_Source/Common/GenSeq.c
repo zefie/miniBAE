@@ -3712,51 +3712,59 @@ static XBOOL PV_ProcessMetaMarkerEvents(GM_Song *pSong, char *markerText, long m
         }
     }
 
-    if ((pSong->AnalyzeMode == SCAN_NORMAL) && (markerLength >= 1) && (pSong->metaLoopDisabled == FALSE))
+    if ((pSong->AnalyzeMode == SCAN_NORMAL || pSong->AnalyzeMode == SCAN_DETERMINE_LENGTH) && (markerLength >= 1))
     {
         if (XLStrnCmp("loopstart", markerText, 9) == 0 || XLStrnCmp("start", markerText, 5) == 0 || XLStrnCmp("[", markerText, 1) == 0)
         {
-            // Limit markerLength for debug output to prevent buffer issues
-#if _DEBUG
-            long debugLength = (markerLength > 256) ? 256 : markerLength;
-            BAE_PRINTF("Loop Start found: %.*s\n", (int)debugLength, markerText);
-#endif
-            count = -1;                        // loop forever
-            if (pSong->loopbackSaved == FALSE) // only allow one save
+            if ((pSong->AnalyzeMode == SCAN_DETERMINE_LENGTH) || (pSong->metaLoopDisabled == FALSE))
             {
-                if (XLStrnCmp("loopstart=", markerText, 10) == 0)
+                // Limit markerLength for debug output to prevent buffer issues
+#if _DEBUG
+                long debugLength = (markerLength > 256) ? 256 : markerLength;
+                BAE_PRINTF("Loop Start found: %.*s\n", (int)debugLength, markerText);
+#endif
+                count = -1;                        // loop forever
+                if (pSong->loopbackSaved == FALSE) // only allow one save
                 {
-                    // check for loop counts
-                    count = XStrnToLong(&markerText[10], markerLength - 10);
-                }
-                pSong->loopbackCount = (SBYTE)count;
+                    if (XLStrnCmp("loopstart=", markerText, 10) == 0)
+                    {
+                        // check for loop counts
+                        count = XStrnToLong(&markerText[10], markerLength - 10);
+                    }
+                    pSong->loopbackCount = (SBYTE)count;
 
-                pSong->loopbackSaved = TRUE;
-                for (count = 0; count < MAX_TRACKS; count++)
-                {
-                    pSong->pTrackPositionSave[count] = pSong->ptrack[count];
-                    pSong->trackTicksSave[count] = pSong->trackticks[count];
-                    pSong->trackStatusSave[count] = pSong->trackon[count];
+                    pSong->loopbackSaved = TRUE;
+                    for (count = 0; count < MAX_TRACKS; count++)
+                    {
+                        pSong->pTrackPositionSave[count] = pSong->ptrack[count];
+                        pSong->trackTicksSave[count] = pSong->trackticks[count];
+                        pSong->trackStatusSave[count] = pSong->trackon[count];
+                    }
+                    pSong->currentMidiClockSave = pSong->CurrentMidiClock;
+                    pSong->songMicrosecondsSave = pSong->songMicroseconds;
                 }
-                pSong->currentMidiClockSave = pSong->CurrentMidiClock;
-                pSong->songMicrosecondsSave = pSong->songMicroseconds;
             }
         }
-        else if (XLStrnCmp("loopend", markerText, 7) == 0 || XLStrnCmp("end", markerText, 3) == 0 || XLStrnCmp("]", markerText, 1) == 0)
+        else if ((pSong->AnalyzeMode == SCAN_NORMAL) && (pSong->metaLoopDisabled == FALSE))
         {
-            // Limit markerLength for debug output to prevent buffer issues
-            long debugLength = (markerLength > 256) ? 256 : markerLength;
-            BAE_PRINTF("Loop End found: %.*s\n", (int)debugLength, markerText);
-            if (pSong->loopbackSaved) // have we saved a position?
+            if (XLStrnCmp("loopend", markerText, 7) == 0 || XLStrnCmp("end", markerText, 3) == 0 || XLStrnCmp("]", markerText, 1) == 0)
             {
-                if ((pSong->loopbackCount > 0) && (pSong->loopbackCount < 100))
+                // Limit markerLength for debug output to prevent buffer issues
+#if _DEBUG                
+                long debugLength = (markerLength > 256) ? 256 : markerLength;
+                BAE_PRINTF("Loop End found: %.*s\n", (int)debugLength, markerText);
+#endif
+                if (pSong->loopbackSaved) // have we saved a position?
                 {
-                    pSong->loopbackCount--;
-                }
-                if (pSong->loopbackCount)
-                {
-                    // ok, reloop.
-                    restartTracks = TRUE;
+                    if ((pSong->loopbackCount > 0) && (pSong->loopbackCount < 100))
+                    {
+                        pSong->loopbackCount--;
+                    }
+                    if (pSong->loopbackCount)
+                    {
+                        // ok, reloop.
+                        restartTracks = TRUE;
+                    }
                 }
             }
         }
