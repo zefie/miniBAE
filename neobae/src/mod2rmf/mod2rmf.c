@@ -22,7 +22,8 @@
 #include "mod2rmf_encoder.h"
 #include "mod2rmf_resampler.h"
 
-#define MOD2RMF_MAX_CHANNELS 16
+#define MOD2RMF_MAX_CHANNELS 64
+#define MOD2RMF_MAX_MIDI_CHANNELS BAE_MAX_MIDI_CHANNELS
 #define MOD2RMF_MAX_SAMPLES 256
 #define MOD2RMF_ROW_TICKS 120
 #define MOD2RMF_SAMPLE_RATE 8287
@@ -53,6 +54,13 @@
 #define MOD2RMF_FX_MULTI_RETRIG         0x1B
 #define MOD2RMF_FX_TONEPORTA            0x03
 #define MOD2RMF_FX_TONE_VSLIDE          0x05
+#define MOD2RMF_MAX_ADSR_STAGES         8 /* matches BAE_EDITOR_MAX_ADSR_STAGES */
+
+typedef struct {
+    int32_t level;  /* 0..VOLUME_RANGE */
+    int32_t timeUs; /* microseconds */
+    int32_t flags;  /* ADSR_LINEAR_RAMP_LONG, ADSR_SUSTAIN_LONG, etc. */
+} ModAdsrStage;
 
 typedef struct {
     XBOOL valid;
@@ -65,11 +73,9 @@ typedef struct {
     int8_t  finetune;           /* unused; libxmp handles finetune via pitchbend */
     uint8_t loopType;           /* MOD2RMF_LOOP_FORWARD/BIDIR/REVERSE */
     XBOOL   hasEnvelope;        /* instrument has an amplitude envelope */
-    uint32_t adsrAttackMs;
-    uint32_t adsrPeakLevel;     /* 0..VOLUME_RANGE, attack target */
-    uint32_t adsrDecayMs;
-    uint32_t adsrSustainLevel;  /* 0..VOLUME_RANGE */
-    uint32_t adsrReleaseMs;
+    uint32_t adsrStageCount;
+    ModAdsrStage adsrStages[MOD2RMF_MAX_ADSR_STAGES];
+    int16_t defaultPan;          /* sub-instrument pan: 0..255, 128=center, -1=unset */
     int8_t *pcm8;
 } ModRawSample;
 
@@ -82,11 +88,9 @@ typedef struct {
     XBOOL hasSampleRateOverride;
     uint32_t sampleRateOverrideHz;
     XBOOL hasVolumeAdsr;
-    uint32_t adsrAttackMs;
-    uint32_t adsrPeakLevel;    /* 0..VOLUME_RANGE, attack target */
-    uint32_t adsrDecayMs;
-    uint32_t adsrReleaseMs;
-    uint32_t adsrSustainLevel; /* 0..VOLUME_RANGE */
+    uint32_t adsrStageCount;
+    ModAdsrStage adsrStages[MOD2RMF_MAX_ADSR_STAGES];
+    int8_t panPlacement;         /* BAE pan: -128..+127, 0=center */
     char displayName[256];
     ModRawSample *rawSample;
 } ModPlayable;
@@ -105,12 +109,14 @@ typedef struct {
     uint32_t tick;
     unsigned char cc;
     unsigned char value;
+    unsigned char program;  /* active program when this CC was emitted (0xFF = unknown) */
 } ModCCEvent;
 
 typedef struct {
     uint16_t sourceChannel;
     uint32_t tick;
     uint16_t value; /* 14-bit, center 0x2000 */
+    unsigned char program;  /* active program when this bend was emitted (0xFF = unknown) */
 } ModPitchBendEvent;
 
 static XBOOL mod2rmf_sample_requires_processing(const ModPlayable *playable,
@@ -191,6 +197,36 @@ typedef struct {
     uint8_t delayedVolume;      /* volume at time of row start */
 } ChannelEffectState;
 
+/* --- Channel mapping structs -------------------------------------------- */
+
+/* Per-tracker-channel usage profile, built by analyze_channel_usage(). */
+#define CHANNEL_PROFILE_MAX_PROGRAMS 16  /* max tracked unique programs per ch */
+
+typedef struct {
+    uint32_t startTick;
+    uint32_t endTick;
+} TickRange;
+
+typedef struct {
+    /* Which programs (sample-mapped instruments) appear on this channel */
+    uint8_t programs[CHANNEL_PROFILE_MAX_PROGRAMS];
+    uint32_t programCount;
+    /* Active note ranges (sorted by startTick) */
+    TickRange *activeRanges;
+    uint32_t rangeCount;
+    uint32_t rangeCapacity;
+    /* Total note count */
+    uint32_t noteCount;
+    /* Whether this channel has any events at all */
+    XBOOL used;
+} ChannelProfile;
+
+/* Mapping from tracker channels (0..63) to MIDI channels (0..15). */
+typedef struct {
+    uint8_t trackerToMidi[MOD2RMF_MAX_CHANNELS];
+    XBOOL midiChannelUsed[MOD2RMF_MAX_MIDI_CHANNELS];
+} ChannelMap;
+
 typedef struct {
     void *sourceData;
     size_t sourceSize;
@@ -201,6 +237,7 @@ typedef struct {
 
     BAERmfEditorDocument *document;
     uint16_t *channelToTrackIndex;
+    ChannelMap channelMap;
     Mod2RmfResamplerSettings resamplerSettings;
     XBOOL forceOriginalSamples;
     uint8_t stereoSeparation;  /* 0=mono (center), 75=default, 100=hard L/R */
@@ -240,6 +277,7 @@ static void print_usage(const char *program_name)
             "  --resample-filter N   Interpolation: nearest|linear|cubic|sinc (default: sinc)\n"
             "  --filters             List available filter/resample options\n"
             "  --stereo-separation N Stereo width 0-100%% (0=mono, 75=default, 100=hard L/R)\n"
+            "  --spread              [Experimental] Spread instruments across MIDI channels\n"
             "  --tempomap            Reserved for future tempo-map handling\n"
             "  --help, -h            Show this help\n",
             program_name);
@@ -428,7 +466,8 @@ static int song_model_append_cc_event(ModSongModel *song,
                                       uint16_t sourceChannel,
                                       uint32_t tick,
                                       unsigned char cc,
-                                      unsigned char value)
+                                      unsigned char value,
+                                      unsigned char program)
 {
     ModCCEvent *newEvents;
     uint32_t newCapacity;
@@ -464,6 +503,7 @@ static int song_model_append_cc_event(ModSongModel *song,
     song->ccEvents[song->ccCount].tick = tick;
     song->ccEvents[song->ccCount].cc = cc;
     song->ccEvents[song->ccCount].value = value;
+    song->ccEvents[song->ccCount].program = program;
     song->ccCount++;
     return 1;
 }
@@ -471,7 +511,8 @@ static int song_model_append_cc_event(ModSongModel *song,
 static int song_model_append_pitch_bend(ModSongModel *song,
                                         uint16_t sourceChannel,
                                         uint32_t tick,
-                                        uint16_t value)
+                                        uint16_t value,
+                                        unsigned char program)
 {
     ModPitchBendEvent *newEvents;
     uint32_t newCapacity;
@@ -496,6 +537,7 @@ static int song_model_append_pitch_bend(ModSongModel *song,
     song->pitchBendEvents[song->pitchBendCount].sourceChannel = sourceChannel;
     song->pitchBendEvents[song->pitchBendCount].tick = tick;
     song->pitchBendEvents[song->pitchBendCount].value = value;
+    song->pitchBendEvents[song->pitchBendCount].program = program;
     song->pitchBendCount++;
     return 1;
 }
@@ -696,27 +738,26 @@ static uint16_t libxmp_pitchbend_to_midi(int16_t xmpPitchbend,
     return (uint16_t)bend;
 }
 
-/* Extract a 4-stage ADSR approximation from a libxmp instrument's amplitude
- * envelope.  Writes the result directly into the raw sample's ADSR fields
- * and sets hasEnvelope = TRUE.
+/* Map a libxmp instrument's amplitude envelope directly to BAE ADSR stages.
+ * Each pair of consecutive envelope points becomes one LINEAR_RAMP stage,
+ * preserving the multi-segment shape.  BAE supports up to 8 stages; with
+ * sustain + terminate that leaves room for up to 6 envelope segments (7 points).
  *
  * Envelope x-coordinates are in ticks (one per tracker frame), converted
- * to milliseconds via 2500/bpm.  y-coordinates are 0..64, scaled to
+ * to microseconds via (2500/bpm)*1000.  y-coordinates are 0..64, scaled to
  * 0..VOLUME_RANGE for BAE. */
 static void extract_envelope_adsr(const struct xmp_instrument *inst,
                                   uint32_t bpm,
                                   ModRawSample *raw)
 {
     const struct xmp_envelope *aei;
-    int peakIdx;
     int sustainIdx;
     int npt;
     int idx;
-    uint32_t peakX;
-    uint32_t sustainX;
-    uint32_t peakY;
-    uint32_t sustainY;
-    double msPerTick;
+    double usPerTick; /* microseconds per envelope tick */
+    uint32_t stage;
+    /* Max segments before sustain+terminate = 8-2 = 6, needing up to 7 points */
+    int maxSegments;
 
     if (!inst || !raw)
     {
@@ -736,7 +777,7 @@ static void extract_envelope_adsr(const struct xmp_instrument *inst,
     }
 
     raw->hasEnvelope = TRUE;
-    msPerTick = 2500.0 / (double)(bpm > 0 ? bpm : 125);
+    usPerTick = 2500000.0 / (double)(bpm > 0 ? bpm : 125);
 
     /* Find sustain point (or last point if no sustain flag). */
     sustainIdx = (aei->flg & XMP_ENVELOPE_SUS) ? aei->sus : npt - 1;
@@ -749,64 +790,98 @@ static void extract_envelope_adsr(const struct xmp_instrument *inst,
         sustainIdx = npt - 1;
     }
 
-    /* Find peak point (highest y between first point and sustain). */
-    peakIdx = 0;
-    peakY = 0;
-    for (idx = 0; idx <= sustainIdx; ++idx)
+    #ifdef _DEBUG
     {
-        uint32_t y = (uint32_t)aei->data[idx * 2 + 1];
-        if (y >= peakY)
+        int dbgIdx;
+        fprintf(stderr, "[mod2rmf]  ADSR extract: npt=%d flg=0x%02x sus=%d rls=%d usPerTick=%.1f\n",
+                npt, aei->flg, aei->sus, inst->rls, usPerTick);
+        for (dbgIdx = 0; dbgIdx < npt; ++dbgIdx)
         {
-            peakY = y;
-            peakIdx = idx;
+            fprintf(stderr, "    pt[%d]: X=%d Y=%d%s\n",
+                    dbgIdx, aei->data[dbgIdx * 2], aei->data[dbgIdx * 2 + 1],
+                    (dbgIdx == sustainIdx) ? " <sustain>" : "");
         }
     }
+    #endif
 
-    peakX = (uint32_t)aei->data[peakIdx * 2];
-    sustainX = (uint32_t)aei->data[sustainIdx * 2];
-    sustainY = (uint32_t)aei->data[sustainIdx * 2 + 1];
+    /* Map each envelope segment (pair of consecutive points) up to and including
+     * the sustain point as a LINEAR_RAMP stage.  Reserve 2 stages for
+     * sustain-hold and terminate. */
+    maxSegments = MOD2RMF_MAX_ADSR_STAGES - 2;
+    stage = 0;
 
-    /* Attack: time from envelope start to peak. */
-    raw->adsrAttackMs = (uint32_t)(peakX * msPerTick + 0.5);
-    raw->adsrPeakLevel = (uint32_t)(peakY * VOLUME_RANGE / 64u);
-
-    /* Decay: time from peak to sustain point. */
-    raw->adsrDecayMs = (sustainX > peakX)
-                         ? (uint32_t)((sustainX - peakX) * msPerTick + 0.5)
-                         : 0;
-
-    /* Sustain level. */
-    raw->adsrSustainLevel = (uint32_t)(sustainY * VOLUME_RANGE / 64u);
-
-    /* Release: derive from instrument fadeout (rls) or post-sustain points. */
-    if (inst->rls > 0)
+    /* If the first envelope point is not at Y=0 and X=0, insert an initial
+     * ramp to the first point's level (the envelope starts at pt[0] level). */
+    for (idx = 0; idx <= sustainIdx && (int)stage < maxSegments; ++idx)
     {
-        /* rls is fadeout per tick (XM: 0..65535).  Time to fade from
-         * sustain amplitude to silence = sustain / rls * 65536 ticks
-         * (each tick decreases a 16.16 counter by rls). */
-        double releaseTicks = (sustainY > 0)
-                                ? ((double)sustainY * 1024.0 / (double)inst->rls)
-                                : 1.0;
-        raw->adsrReleaseMs = (uint32_t)(releaseTicks * msPerTick + 0.5);
-    }
-    else if (sustainIdx + 1 < npt)
-    {
-        /* Use post-sustain envelope points as release duration. */
-        uint32_t lastX = (uint32_t)aei->data[(npt - 1) * 2];
-        raw->adsrReleaseMs = (lastX > sustainX)
-                               ? (uint32_t)((lastX - sustainX) * msPerTick + 0.5)
-                               : 50;
-    }
-    else
-    {
-        raw->adsrReleaseMs = 50; /* reasonable default */
+        uint32_t ptX = (uint32_t)aei->data[idx * 2];
+        uint32_t ptY = (uint32_t)aei->data[idx * 2 + 1];
+        uint32_t prevX = (idx > 0) ? (uint32_t)aei->data[(idx - 1) * 2] : 0;
+        uint32_t deltaX = ptX - prevX;
+
+        raw->adsrStages[stage].level = (int32_t)(ptY * VOLUME_RANGE / 64u);
+        raw->adsrStages[stage].timeUs = (int32_t)(deltaX * usPerTick + 0.5);
+        raw->adsrStages[stage].flags = ADSR_LINEAR_RAMP_LONG;
+        stage++;
     }
 
-    /* Clamp release so it's not excessively long. */
-    if (raw->adsrReleaseMs > 10000)
+    /* Sustain-hold stage at the sustain point's level */
     {
-        raw->adsrReleaseMs = 10000;
+        uint32_t susY = (uint32_t)aei->data[sustainIdx * 2 + 1];
+        raw->adsrStages[stage].level = (int32_t)(susY * VOLUME_RANGE / 64u);
+        raw->adsrStages[stage].timeUs = 0;
+        raw->adsrStages[stage].flags = ADSR_SUSTAIN_LONG;
+        stage++;
     }
+
+    /* Terminate/release stage */
+    {
+        uint32_t susY = (uint32_t)aei->data[sustainIdx * 2 + 1];
+        uint32_t releaseUs = 50000; /* 50ms default */
+
+        if (inst->rls > 0)
+        {
+            /* rls is fadeout per tick (XM: 0..65535).  Time to fade from
+             * sustain amplitude to silence = susY / rls * 1024 ticks. */
+            double releaseTicks = (susY > 0)
+                                    ? ((double)susY * 1024.0 / (double)inst->rls)
+                                    : 1.0;
+            releaseUs = (uint32_t)(releaseTicks * usPerTick + 0.5);
+        }
+        else if (sustainIdx + 1 < npt)
+        {
+            uint32_t lastX = (uint32_t)aei->data[(npt - 1) * 2];
+            uint32_t susX = (uint32_t)aei->data[sustainIdx * 2];
+            releaseUs = (lastX > susX)
+                          ? (uint32_t)((lastX - susX) * usPerTick + 0.5)
+                          : 50000;
+        }
+
+        if (releaseUs > 10000000u) /* 10 second cap */
+        {
+            releaseUs = 10000000u;
+        }
+
+        raw->adsrStages[stage].level = 0;
+        raw->adsrStages[stage].timeUs = (int32_t)releaseUs;
+        raw->adsrStages[stage].flags = ADSR_TERMINATE_LONG;
+        stage++;
+    }
+
+    raw->adsrStageCount = stage;
+
+    #ifdef _DEBUG
+    {
+        uint32_t s;
+        fprintf(stderr, "[mod2rmf]  ADSR result: %u stages\n", stage);
+        for (s = 0; s < stage; ++s)
+        {
+            fprintf(stderr, "    stage[%u]: level=%d time=%dus flags=0x%08x\n",
+                    s, raw->adsrStages[s].level, raw->adsrStages[s].timeUs,
+                    raw->adsrStages[s].flags);
+        }
+    }
+    #endif
 }
 
 /* Emulate a bidirectional (ping-pong) sample loop by appending a reversed
@@ -1082,6 +1157,7 @@ static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
         trim_copy_ascii(raw->name, sizeof(raw->name), s->name);
         raw->rootKey = 72;
         raw->defaultVolume = 64;
+        raw->defaultPan = -1; /* unset; will be filled from sub-instrument */
         raw->finetune = 0;
 
         len = s->len;
@@ -1136,19 +1212,37 @@ static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
             raw->frameCount = outFrames;
         }
 
-        raw->loopStart = (s->lps > 0) ? (uint32_t)s->lps : 0u;
-        raw->loopEnd = (s->lpe > s->lps) ? (uint32_t)s->lpe : 0u;
-        if (raw->loopStart > raw->frameCount) raw->loopStart = 0;
-        if (raw->loopEnd > raw->frameCount) raw->loopEnd = raw->frameCount;
+        raw->loopStart = 0;
+        raw->loopEnd = 0;
 
-        /* Detect loop type from libxmp flags. */
-        if (s->flg & XMP_SAMPLE_LOOP_BIDIR)
+        /* Only set loop points if libxmp reports the sample as looping.
+         * Many tracker formats store lps=0 lpe=2 as a "no loop" sentinel;
+         * without the flag check those would produce a tiny invalid loop. */
+        if (s->flg & XMP_SAMPLE_LOOP)
         {
-            raw->loopType = MOD2RMF_LOOP_BIDIR;
-        }
-        else if (s->flg & XMP_SAMPLE_LOOP_REVERSE)
-        {
-            raw->loopType = MOD2RMF_LOOP_REVERSE;
+            raw->loopStart = (s->lps > 0) ? (uint32_t)s->lps : 0u;
+            raw->loopEnd = (s->lpe > s->lps) ? (uint32_t)s->lpe : 0u;
+            if (raw->loopStart > raw->frameCount) raw->loopStart = 0;
+            if (raw->loopEnd > raw->frameCount) raw->loopEnd = raw->frameCount;
+            /* Discard degenerate loops (< 3 frames) */
+            if (raw->loopEnd - raw->loopStart < 3)
+            {
+                raw->loopStart = 0;
+                raw->loopEnd = 0;
+            }
+
+            /* Detect loop type from libxmp flags (only meaningful with a valid loop). */
+            if (raw->loopEnd > raw->loopStart)
+            {
+                if (s->flg & XMP_SAMPLE_LOOP_BIDIR)
+                {
+                    raw->loopType = MOD2RMF_LOOP_BIDIR;
+                }
+                else if (s->flg & XMP_SAMPLE_LOOP_REVERSE)
+                {
+                    raw->loopType = MOD2RMF_LOOP_REVERSE;
+                }
+            }
         }
 
         raw->valid = TRUE;
@@ -1198,6 +1292,11 @@ static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                     extract_envelope_adsr(inst, (uint32_t)(mod->bpm > 0 ? mod->bpm : 125),
                                           &conv->rawSamples[sid]);
                     sampleHasEnvelope[sid] = conv->rawSamples[sid].hasEnvelope;
+                }
+                /* Capture default pan from sub-instrument (first assignment wins) */
+                if (conv->rawSamples[sid].defaultPan < 0)
+                {
+                    conv->rawSamples[sid].defaultPan = (int16_t)inst->sub[sub].pan;
                 }
             }
 
@@ -1276,6 +1375,29 @@ static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
         xmp_get_frame_info(ctx, &fi);
         tick = fp_ticks_to_int(currentTickFP);
 
+        /* Check for loop BEFORE processing this frame's events.
+         * When loop_count > 0 libxmp has already jumped back, so this
+         * frame is the first frame of the repeated section.  We must
+         * not emit its events a second time (they were already recorded
+         * during the first playthrough), and the loop end tick is the
+         * current tick (the first tick that would repeat). */
+        if (fi.loop_count > 0)
+        {
+            song->loopEnabled = TRUE;
+            /* fi.pos is the position libxmp jumped back to (Bxx target).
+             * Use the recorded tick for that position as the loop start. */
+            if (fi.pos >= 0 && fi.pos < XMP_MAX_MOD_LENGTH && positionSeen[fi.pos])
+            {
+                song->loopStartTick = fp_ticks_to_int(positionTickFP[fi.pos]);
+            }
+            else
+            {
+                song->loopStartTick = 0;
+            }
+            song->loopEndTick = tick;
+            break;
+        }
+
         /* Track the MIDI tick at the start of each order position so we
          * can map Bxx loop targets back to MIDI ticks. */
         if (fi.pos >= 0 && fi.pos < XMP_MAX_MOD_LENGTH && fi.pos != lastPos)
@@ -1324,7 +1446,8 @@ static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                 {
                     chLastPan[ch] = adjPan;
                     (void)song_model_append_cc_event(song, (uint16_t)ch, tick, 10,
-                                                     (unsigned char)(adjPan >> 1));
+                                                     (unsigned char)(adjPan >> 1),
+                                                     activeNotes[ch].program);
                 }
             }
             if (ci->volume != chLastVol[ch])
@@ -1333,7 +1456,8 @@ static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                 vol64 = (uint8_t)clamp_int((int)ci->volume, 0, 64);
                 chLastVol[ch] = vol64;
                 (void)song_model_append_cc_event(song, (uint16_t)ch, tick, 7,
-                                                 mod_vol_to_midi(vol64));
+                                                 mod_vol_to_midi(vol64),
+                                                 activeNotes[ch].program);
             }
 
             if (activeNotes[ch].active)
@@ -1344,7 +1468,8 @@ static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                 if (bend != chLastBend[ch])
                 {
                     chLastBend[ch] = bend;
-                    (void)song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend);
+                    (void)song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend,
+                                                       activeNotes[ch].program);
                 }
             }
 
@@ -1432,7 +1557,8 @@ static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                 bend = libxmp_pitchbend_to_midi(ci->pitchbend,
                                                                 song->pitchBendRangeSemitones);
                                 chLastBend[ch] = bend;
-                                (void)song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend);
+                                (void)song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend,
+                                                                    activeNotes[ch].program);
                             }
                         }
                     }
@@ -1493,7 +1619,8 @@ static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                             bend = libxmp_pitchbend_to_midi(ci->pitchbend,
                                                             song->pitchBendRangeSemitones);
                             chLastBend[ch] = bend;
-                            (void)song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend);
+                            (void)song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend,
+                                                                activeNotes[ch].program);
                         }
                     }
                     chEffects[ch].hasDelayedNote = FALSE;
@@ -1525,7 +1652,8 @@ static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                         bend = libxmp_pitchbend_to_midi(ci->pitchbend,
                                                         song->pitchBendRangeSemitones);
                         chLastBend[ch] = bend;
-                        (void)song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend);
+                        (void)song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend,
+                                                            activeNotes[ch].program);
                     }
                 }
             }
@@ -1533,23 +1661,6 @@ static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
 
         currentTickFP += tickPerFrameFP;
         frameGuard++;
-
-        if (fi.loop_count > 0)
-        {
-            song->loopEnabled = TRUE;
-            /* fi.pos is the position libxmp jumped back to (Bxx target).
-             * Use the recorded tick for that position as the loop start. */
-            if (fi.pos >= 0 && fi.pos < XMP_MAX_MOD_LENGTH && positionSeen[fi.pos])
-            {
-                song->loopStartTick = fp_ticks_to_int(positionTickFP[fi.pos]);
-            }
-            else
-            {
-                song->loopStartTick = 0;
-            }
-            song->loopEndTick = fp_ticks_to_int(currentTickFP);
-            break;
-        }
     }
 
     if (playerStarted)
@@ -1605,14 +1716,18 @@ static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
          * ADSR so the engine produces smooth volume shaping instead of
          * relying on per-frame CC7 events.  The per-frame CC7 tracking
          * is correspondingly suppressed for enveloped channels. */
-        if (conv->rawSamples[i].hasEnvelope)
+        if (conv->rawSamples[i].hasEnvelope && conv->rawSamples[i].adsrStageCount > 0)
         {
             p->hasVolumeAdsr = TRUE;
-            p->adsrAttackMs = conv->rawSamples[i].adsrAttackMs;
-            p->adsrPeakLevel = conv->rawSamples[i].adsrPeakLevel;
-            p->adsrDecayMs = conv->rawSamples[i].adsrDecayMs;
-            p->adsrSustainLevel = conv->rawSamples[i].adsrSustainLevel;
-            p->adsrReleaseMs = conv->rawSamples[i].adsrReleaseMs;
+            p->adsrStageCount = conv->rawSamples[i].adsrStageCount;
+            memcpy(p->adsrStages, conv->rawSamples[i].adsrStages,
+                   conv->rawSamples[i].adsrStageCount * sizeof(ModAdsrStage));
+        }
+
+        /* Map sub-instrument default pan to BAE panPlacement */
+        if (conv->rawSamples[i].defaultPan >= 0)
+        {
+            p->panPlacement = (int8_t)((int)conv->rawSamples[i].defaultPan - 128);
         }
 
         if (conv->rawSamples[i].name[0])
@@ -1780,7 +1895,7 @@ static int setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
                                                      &sampleInfo);
         if (result != BAE_NO_ERROR)
         {
-            fprintf(stderr, "Warning: failed to add sample for program %u (%d)\n", (unsigned)setup.program, (int)result);
+            fprintf(stderr, "[mod2rmf] Warning: failed to add sample for program %u (%d)\n", (unsigned)setup.program, (int)result);
             continue;
         }
 
@@ -1812,8 +1927,7 @@ static int setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
                 }
                 else
                 {
-                    fprintf(stderr,
-                            "Warning: failed to share sample asset for program %u (%d); falling back to PCM copy\n",
+                    fprintf(stderr, "[mod2rmf] Warning: failed to share sample asset for program %u (%d); falling back to PCM copy\n",
                             (unsigned)setup.program,
                             (int)result);
                 }
@@ -1856,8 +1970,7 @@ static int setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
                                                                         &sampleInfo);
                      if (result != BAE_NO_ERROR)
                      {
-                         fprintf(stderr,
-                                 "Warning: failed to inject raw 8-bit PCM for program %u (%d)\n",
+                         fprintf(stderr, "[mod2rmf] Warning: failed to inject raw 8-bit PCM for program %u (%d)\n",
                                  (unsigned)setup.program,
                                  (int)result);
                      }
@@ -1885,7 +1998,7 @@ static int setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
                     if (!pcm16)
                     {
                         fprintf(stderr,
-                                "Warning: failed to process sample for program %u\n",
+                                "[mod2rmf] Warning: failed to process sample for program %u\n",
                                 (unsigned)setup.program);
                         continue;
                     }
@@ -1934,7 +2047,7 @@ static int setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
                     if (result != BAE_NO_ERROR)
                     {
                         fprintf(stderr,
-                                "Warning: failed to inject processed PCM for program %u (%d)\n",
+                                "[mod2rmf] Warning: failed to inject processed PCM for program %u (%d)\n",
                                 (unsigned)setup.program,
                                 (int)result);
                     }
@@ -2007,7 +2120,7 @@ static int setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
             if (infoResult != BAE_NO_ERROR)
             {
                 fprintf(stderr,
-                        "Warning: failed to apply loop points for program %u (%d)\n",
+                        "[mod2rmf] Warning: failed to apply loop points for program %u (%d)\n",
                         (unsigned)setup.program,
                         (int)infoResult);
             }
@@ -2017,23 +2130,504 @@ static int setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
     return 1;
 }
 
-static int setup_tracks(Mod2RmfConverter *conv, const ModSongModel *song)
+/* --- Event sorting helpers for channel spreading ------------------------ */
+
+/* Sort pitch bend events by tick. At the same tick, center-value resets
+ * (MOD2RMF_PITCH_BEND_CENTER) sort first so that a new note's initial bend
+ * at the same tick overrides the previous note's center reset. */
+static int compare_pitch_bend_by_tick(const void *a, const void *b)
+{
+    const ModPitchBendEvent *ea = (const ModPitchBendEvent *)a;
+    const ModPitchBendEvent *eb = (const ModPitchBendEvent *)b;
+
+    if (ea->tick != eb->tick)
+    {
+        return (ea->tick < eb->tick) ? -1 : 1;
+    }
+    /* Same tick: center resets first */
+    {
+        int aCenter = (ea->value == MOD2RMF_PITCH_BEND_CENTER) ? 0 : 1;
+        int bCenter = (eb->value == MOD2RMF_PITCH_BEND_CENTER) ? 0 : 1;
+        return aCenter - bCenter;
+    }
+}
+
+/* Sort CC events by tick. */
+static int compare_cc_by_tick(const void *a, const void *b)
+{
+    const ModCCEvent *ea = (const ModCCEvent *)a;
+    const ModCCEvent *eb = (const ModCCEvent *)b;
+
+    if (ea->tick != eb->tick)
+    {
+        return (ea->tick < eb->tick) ? -1 : 1;
+    }
+    return 0;
+}
+
+/* --- Channel spreading by program --------------------------------------- */
+
+/* Spread tracker channels so each unique program (instrument/sample) gets its
+ * own virtual channel.  The BAE engine is fully polyphonic (note-on over
+ * note-on is supported), so there is no need to split the same program across
+ * multiple channels even if it plays on several tracker channels at once.
+ *
+ * After spreading:
+ *  - note->sourceChannel is rewritten to the program's virtual channel
+ *  - CC and pitch-bend events are routed via their program tag
+ *  - song->channelCount is updated to reflect the new virtual channel count
+ *
+ * If unique programs > 16, programs are packed into 16 channels using an
+ * overlap-minimizing algorithm. */
+
+static int spread_channels_by_program(ModSongModel *song, XBOOL isMod,
+                                      uint8_t stereoSep)
+{
+    uint8_t uniquePrograms[128];
+    uint32_t uniqueCount = 0;
+    uint8_t programToVirtual[128]; /* program -> virtual channel index */
+    uint32_t i;
+    uint32_t origChannelCount;
+    uint32_t preBendCount;
+
+    (void)isMod;
+    (void)stereoSep;
+
+    if (!song || song->noteCount == 0)
+    {
+        return 1;
+    }
+
+    memset(programToVirtual, 0xFF, sizeof(programToVirtual));
+
+    /* Phase 1: Collect unique programs */
+    for (i = 0; i < song->noteCount; ++i)
+    {
+        uint8_t prog = song->notes[i].program;
+        if (programToVirtual[prog] == 0xFF)
+        {
+            if (uniqueCount >= 128)
+            {
+                break;
+            }
+            uniquePrograms[uniqueCount] = prog;
+            programToVirtual[prog] = 0xFE; /* mark as seen */
+            uniqueCount++;
+        }
+    }
+
+    /* Reset for actual channel assignment */
+    memset(programToVirtual, 0xFF, sizeof(programToVirtual));
+
+    if (uniqueCount <= 1)
+    {
+        return 1;
+    }
+
+    origChannelCount = song->channelCount;
+
+    if (uniqueCount <= MOD2RMF_MAX_MIDI_CHANNELS)
+    {
+        for (i = 0; i < uniqueCount; ++i)
+        {
+            programToVirtual[uniquePrograms[i]] = (uint8_t)i;
+        }
+        song->channelCount = uniqueCount;
+    }
+    else
+    {
+        /* More than 16 programs — pack using overlap analysis. */
+        TickRange *progRanges[128];
+        uint32_t progRangeCount[128];
+        uint32_t progRangeCapacity[128];
+        TickRange *bucketRanges[MOD2RMF_MAX_MIDI_CHANNELS];
+        uint32_t bucketRangeCount[MOD2RMF_MAX_MIDI_CHANNELS];
+        uint32_t bucketRangeCapacity[MOD2RMF_MAX_MIDI_CHANNELS];
+
+        memset(progRanges, 0, sizeof(progRanges));
+        memset(progRangeCount, 0, sizeof(progRangeCount));
+        memset(progRangeCapacity, 0, sizeof(progRangeCapacity));
+        memset(bucketRanges, 0, sizeof(bucketRanges));
+        memset(bucketRangeCount, 0, sizeof(bucketRangeCount));
+        memset(bucketRangeCapacity, 0, sizeof(bucketRangeCapacity));
+
+        for (i = 0; i < song->noteCount; ++i)
+        {
+            uint8_t prog = song->notes[i].program;
+            if (progRangeCount[prog] >= progRangeCapacity[prog])
+            {
+                uint32_t newCap = (progRangeCapacity[prog] == 0) ? 64 : progRangeCapacity[prog] * 2;
+                TickRange *tmp = (TickRange *)realloc(progRanges[prog], newCap * sizeof(TickRange));
+                if (!tmp) goto pack_cleanup;
+                progRanges[prog] = tmp;
+                progRangeCapacity[prog] = newCap;
+            }
+            progRanges[prog][progRangeCount[prog]].startTick = song->notes[i].startTick;
+            progRanges[prog][progRangeCount[prog]].endTick = song->notes[i].startTick + song->notes[i].durationTicks;
+            progRangeCount[prog]++;
+        }
+
+        for (i = 0; i < uniqueCount; ++i)
+        {
+            uint8_t prog = uniquePrograms[i];
+            uint8_t bestBucket = 0;
+            uint32_t bestOverlap = UINT32_MAX;
+            uint8_t b;
+            uint32_t j, k;
+
+            for (b = 0; b < MOD2RMF_MAX_MIDI_CHANNELS; ++b)
+            {
+                uint32_t ovlap = 0;
+
+                if (bucketRangeCount[b] == 0)
+                {
+                    bestBucket = b;
+                    bestOverlap = 0;
+                    break;
+                }
+
+                for (j = 0; j < progRangeCount[prog]; ++j)
+                {
+                    for (k = 0; k < bucketRangeCount[b]; ++k)
+                    {
+                        uint32_t lo = (progRanges[prog][j].startTick > bucketRanges[b][k].startTick)
+                                      ? progRanges[prog][j].startTick : bucketRanges[b][k].startTick;
+                        uint32_t hi = (progRanges[prog][j].endTick < bucketRanges[b][k].endTick)
+                                      ? progRanges[prog][j].endTick : bucketRanges[b][k].endTick;
+                        if (lo < hi) ovlap += (hi - lo);
+                    }
+                }
+
+                if (ovlap < bestOverlap)
+                {
+                    bestOverlap = ovlap;
+                    bestBucket = b;
+                    if (ovlap == 0) break;
+                }
+            }
+
+            programToVirtual[prog] = bestBucket;
+
+            for (j = 0; j < progRangeCount[prog]; ++j)
+            {
+                if (bucketRangeCount[bestBucket] >= bucketRangeCapacity[bestBucket])
+                {
+                    uint32_t newCap = (bucketRangeCapacity[bestBucket] == 0) ? 64 : bucketRangeCapacity[bestBucket] * 2;
+                    TickRange *tmp = (TickRange *)realloc(bucketRanges[bestBucket], newCap * sizeof(TickRange));
+                    if (!tmp) goto pack_cleanup;
+                    bucketRanges[bestBucket] = tmp;
+                    bucketRangeCapacity[bestBucket] = newCap;
+                }
+                bucketRanges[bestBucket][bucketRangeCount[bestBucket]] = progRanges[prog][j];
+                bucketRangeCount[bestBucket]++;
+            }
+        }
+
+        song->channelCount = MOD2RMF_MAX_MIDI_CHANNELS;
+
+pack_cleanup:
+        for (i = 0; i < 128; ++i) free(progRanges[i]);
+        for (i = 0; i < MOD2RMF_MAX_MIDI_CHANNELS; ++i) free(bucketRanges[i]);
+    }
+
+    /* Phase 3: Rewrite note sourceChannels */
+    for (i = 0; i < song->noteCount; ++i)
+    {
+        uint8_t prog = song->notes[i].program;
+        if (programToVirtual[prog] != 0xFF)
+        {
+            song->notes[i].sourceChannel = programToVirtual[prog];
+        }
+    }
+
+    /* Phase 4: Route CC events using program tag */
+    for (i = 0; i < song->ccCount; ++i)
+    {
+        uint8_t prog = song->ccEvents[i].program;
+        if (prog != 0xFF && programToVirtual[prog] != 0xFF)
+        {
+            song->ccEvents[i].sourceChannel = programToVirtual[prog];
+        }
+    }
+
+    /* Phase 5: Route pitch bend events using program tag.
+     * Only process events that existed before we add center resets below. */
+    preBendCount = song->pitchBendCount;
+    for (i = 0; i < preBendCount; ++i)
+    {
+        uint8_t prog = song->pitchBendEvents[i].program;
+        if (prog != 0xFF && programToVirtual[prog] != 0xFF)
+        {
+            song->pitchBendEvents[i].sourceChannel = programToVirtual[prog];
+        }
+    }
+
+    /* Phase 6: Emit pitch-bend-center resets at note end ticks to prevent
+     * vibrato/portamento from bleeding into subsequent notes on the same
+     * virtual channel.  Emitted after Phase 5 so they are not re-routed. */
+    for (i = 0; i < song->noteCount; ++i)
+    {
+        uint32_t endTick = song->notes[i].startTick + song->notes[i].durationTicks;
+        (void)song_model_append_pitch_bend(song,
+            song->notes[i].sourceChannel,
+            endTick,
+            MOD2RMF_PITCH_BEND_CENTER,
+            song->notes[i].program);
+    }
+
+    /* Phase 7: Sort events by tick so the write-phase dedup processes them
+     * chronologically.  Phase 6 appended events out of order; without
+     * sorting the dedup can incorrectly skip or misoreder events. */
+    if (song->pitchBendCount > 1)
+    {
+        qsort(song->pitchBendEvents, song->pitchBendCount,
+              sizeof(ModPitchBendEvent), compare_pitch_bend_by_tick);
+    }
+    if (song->ccCount > 1)
+    {
+        qsort(song->ccEvents, song->ccCount,
+              sizeof(ModCCEvent), compare_cc_by_tick);
+    }
+
+    #ifdef _DEBUG
+    fprintf(stderr, "[mod2rmf] Channel spread: %u tracker channels, %u unique programs -> %u virtual channels\n",
+            origChannelCount, uniqueCount, song->channelCount);
+    for (i = 0; i < uniqueCount; ++i)
+    {
+        fprintf(stderr, "  program %u -> virtual ch %u\n",
+                uniquePrograms[i], programToVirtual[uniquePrograms[i]]);
+    }
+    #endif
+
+    return 1;
+}
+
+/* --- Channel analysis and mapping --------------------------------------- */
+
+static void channel_profile_cleanup(ChannelProfile *profiles, uint32_t count)
+{
+    uint32_t i;
+    for (i = 0; i < count; ++i)
+    {
+        free(profiles[i].activeRanges);
+        profiles[i].activeRanges = NULL;
+        profiles[i].rangeCount = 0;
+        profiles[i].rangeCapacity = 0;
+    }
+}
+
+static int channel_profile_add_range(ChannelProfile *p, uint32_t start, uint32_t end)
+{
+    if (p->rangeCount >= p->rangeCapacity)
+    {
+        uint32_t newCap = (p->rangeCapacity == 0) ? 64 : p->rangeCapacity * 2;
+        TickRange *tmp = (TickRange *)realloc(p->activeRanges, newCap * sizeof(TickRange));
+        if (!tmp) return 0;
+        p->activeRanges = tmp;
+        p->rangeCapacity = newCap;
+    }
+    p->activeRanges[p->rangeCount].startTick = start;
+    p->activeRanges[p->rangeCount].endTick = end;
+    p->rangeCount++;
+    return 1;
+}
+
+static void channel_profile_add_program(ChannelProfile *p, uint8_t program)
+{
+    uint32_t i;
+    for (i = 0; i < p->programCount; ++i)
+    {
+        if (p->programs[i] == program) return;
+    }
+    if (p->programCount < CHANNEL_PROFILE_MAX_PROGRAMS)
+    {
+        p->programs[p->programCount++] = program;
+    }
+}
+
+static void analyze_channel_usage(const ModSongModel *song,
+                                  ChannelProfile profiles[],
+                                  uint32_t maxChannels)
+{
+    uint32_t i;
+
+    memset(profiles, 0, maxChannels * sizeof(ChannelProfile));
+
+    /* Scan notes to build active ranges and program sets */
+    for (i = 0; i < song->noteCount; ++i)
+    {
+        const ModNoteEvent *n = &song->notes[i];
+        uint16_t ch = n->sourceChannel;
+        if (ch >= maxChannels) continue;
+
+        profiles[ch].used = TRUE;
+        profiles[ch].noteCount++;
+        channel_profile_add_program(&profiles[ch], n->program);
+        channel_profile_add_range(&profiles[ch], n->startTick,
+                                  n->startTick + n->durationTicks);
+    }
+}
+
+/* Check whether any active range in profile 'a' overlaps with any in 'b'. */
+static XBOOL ranges_overlap(const ChannelProfile *a, const ChannelProfile *b)
+{
+    uint32_t i, j;
+    for (i = 0; i < a->rangeCount; ++i)
+    {
+        for (j = 0; j < b->rangeCount; ++j)
+        {
+            if (a->activeRanges[i].startTick < b->activeRanges[j].endTick &&
+                b->activeRanges[j].startTick < a->activeRanges[i].endTick)
+            {
+                return TRUE;
+            }
+        }
+    }
+    return FALSE;
+}
+
+/* Count how many ticks of overlap exist between two channel profiles. */
+static uint32_t overlap_ticks(const ChannelProfile *a, const ChannelProfile *b)
+{
+    uint32_t total = 0;
+    uint32_t i, j;
+    for (i = 0; i < a->rangeCount; ++i)
+    {
+        for (j = 0; j < b->rangeCount; ++j)
+        {
+            uint32_t lo = (a->activeRanges[i].startTick > b->activeRanges[j].startTick)
+                          ? a->activeRanges[i].startTick : b->activeRanges[j].startTick;
+            uint32_t hi = (a->activeRanges[i].endTick < b->activeRanges[j].endTick)
+                          ? a->activeRanges[i].endTick : b->activeRanges[j].endTick;
+            if (lo < hi) total += (hi - lo);
+        }
+    }
+    return total;
+}
+
+/* Build aggregate profile for a MIDI channel (union of all tracker channels
+ * already assigned to it). Only considers active ranges for overlap testing. */
+static void build_midi_channel_aggregate(const ChannelProfile trackerProfiles[],
+                                         const uint8_t trackerToMidi[],
+                                         uint32_t trackerCount,
+                                         uint8_t midiCh,
+                                         ChannelProfile *agg)
+{
+    uint32_t i, j;
+    memset(agg, 0, sizeof(*agg));
+    for (i = 0; i < trackerCount; ++i)
+    {
+        if (trackerToMidi[i] != midiCh) continue;
+        if (!trackerProfiles[i].used) continue;
+
+        for (j = 0; j < trackerProfiles[i].rangeCount; ++j)
+        {
+            channel_profile_add_range(agg, trackerProfiles[i].activeRanges[j].startTick,
+                                           trackerProfiles[i].activeRanges[j].endTick);
+        }
+        agg->noteCount += trackerProfiles[i].noteCount;
+        agg->used = TRUE;
+    }
+}
+
+static void compute_channel_map(const ChannelProfile profiles[],
+                                uint32_t trackerCount,
+                                ChannelMap *map)
+{
+    uint32_t i;
+    uint8_t midiCh;
+
+    memset(map, 0, sizeof(*map));
+    /* Initialize all mappings to 0xFF (unmapped) */
+    memset(map->trackerToMidi, 0xFF, sizeof(map->trackerToMidi));
+
+    /* Pass 1: Direct assignment for first min(trackerCount, 16) channels */
+    for (i = 0; i < trackerCount && i < MOD2RMF_MAX_MIDI_CHANNELS; ++i)
+    {
+        map->trackerToMidi[i] = (uint8_t)i;
+        if (profiles[i].used)
+        {
+            map->midiChannelUsed[i] = TRUE;
+        }
+    }
+
+    /* Pass 2: Overflow assignment for channels 16+ */
+    for (i = MOD2RMF_MAX_MIDI_CHANNELS; i < trackerCount; ++i)
+    {
+        uint8_t bestMidi = 0;
+        uint32_t bestScore = UINT32_MAX; /* lower = better */
+        XBOOL foundEmpty = FALSE;
+
+        if (!profiles[i].used)
+        {
+            /* Unused tracker channel — map to ch 0 as placeholder */
+            map->trackerToMidi[i] = 0;
+            continue;
+        }
+
+        for (midiCh = 0; midiCh < MOD2RMF_MAX_MIDI_CHANNELS; ++midiCh)
+        {
+            ChannelProfile agg;
+            uint32_t ovlap;
+
+            memset(&agg, 0, sizeof(agg));
+
+            if (!map->midiChannelUsed[midiCh])
+            {
+                /* Empty MIDI channel — best possible choice */
+                bestMidi = midiCh;
+                foundEmpty = TRUE;
+                break;
+            }
+
+            /* Build aggregate profile for this MIDI channel */
+            build_midi_channel_aggregate(profiles, map->trackerToMidi,
+                                         trackerCount, midiCh, &agg);
+
+            /* Check overlap between overflow channel and aggregate */
+            ovlap = overlap_ticks(&profiles[i], &agg);
+            free(agg.activeRanges);
+
+            if (ovlap < bestScore)
+            {
+                bestScore = ovlap;
+                bestMidi = midiCh;
+                if (ovlap == 0) break; /* no overlap = no conflict */
+            }
+        }
+
+        map->trackerToMidi[i] = bestMidi;
+        map->midiChannelUsed[bestMidi] = TRUE;
+
+        if (!foundEmpty && bestScore > 0)
+        {
+            #ifdef _DEBUG
+            fprintf(stderr, "[mod2rmf] Channel map: tracker ch %u -> MIDI ch %u (overlap %u ticks)\n",
+                    i, bestMidi, bestScore);
+            #endif
+        }
+    }
+}
+
+static int setup_tracks(Mod2RmfConverter *conv, const ModSongModel *song, const ChannelMap *chMap)
 {
     uint32_t i;
     uint32_t channelsToAdd;
+    XBOOL midiChInitialized[MOD2RMF_MAX_MIDI_CHANNELS];
 
-    if (!conv || !song)
+    if (!conv || !song || !chMap)
     {
         return 0;
     }
 
-    channelsToAdd = (song->channelCount < MOD2RMF_MAX_CHANNELS) ? song->channelCount : MOD2RMF_MAX_CHANNELS;
+    channelsToAdd = song->channelCount;
     conv->channelToTrackIndex = (uint16_t *)malloc(song->channelCount * sizeof(uint16_t));
     if (!conv->channelToTrackIndex)
     {
         return 0;
     }
     memset(conv->channelToTrackIndex, 0xFF, song->channelCount * sizeof(uint16_t));
+    memset(midiChInitialized, 0, sizeof(midiChInitialized));
 
     for (i = 0; i < channelsToAdd; ++i)
     {
@@ -2043,15 +2637,7 @@ static int setup_tracks(Mod2RmfConverter *conv, const ModSongModel *song)
         char trackName[64];
 
         memset(&setup, 0, sizeof(setup));
-        /* Use all 16 MIDI channels (0..15), including channel 10 (index 9).
-         * Channel 10 is switched to melodic mode via NRPN below. */
-        {
-            unsigned char midiCh = (unsigned char)i;
-            // TODO: Smart distrubution of channels > 15 across MIDI channels, instead of just capping.
-            // This is especially relevant for S3M which can have 32 channels
-            if (midiCh > 15u) midiCh = 15u;
-            setup.channel = midiCh;
-        }
+        setup.channel = chMap->trackerToMidi[i];
         setup.bank = MOD2RMF_EMBEDDED_BANK;
         setup.program = 0;
         snprintf(trackName, sizeof(trackName), "Ch %u", i + 1);
@@ -2060,6 +2646,7 @@ static int setup_tracks(Mod2RmfConverter *conv, const ModSongModel *song)
         result = BAERmfEditorDocument_AddTrack(conv->document, &setup, &trackIndex);
         if (result != BAE_NO_ERROR)
         {
+            fprintf(stderr, "[mod2rmf] Warning: failed to add track for channel %u (%d)\n", i, (int)result);
             continue;
         }
 
@@ -2069,20 +2656,27 @@ static int setup_tracks(Mod2RmfConverter *conv, const ModSongModel *song)
                                    MOD2RMF_EMBEDDED_BANK,
                                    0);
 
-        /* Set pitch bend range to ±12 semitones via RPN */
-        BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 101, 0, 0); /* RPN MSB */
-        BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 100, 0, 0); /* RPN LSB */
-        BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex,   6, 0,
-                                             song->pitchBendRangeSemitones);         /* Data Entry */
-        BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex,  38, 0, 0); /* Data LSB */
-
-        /* MIDI channel 10 (zero-based 9) defaults to percussion in many synths.
-         * NRPN 5,0 with data 3 switches it to melodic playback. */
-        if (setup.channel == 9u)
+        /* Per-MIDI-channel initialization (pitch bend range, ch10 melodic mode)
+         * — only emit once per MIDI channel even if multiple tracks share it. */
+        if (!midiChInitialized[setup.channel])
         {
-            BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 99, 0, 5); /* NRPN MSB */
-            BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 98, 0, 0); /* NRPN LSB */
-            BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex,  6, 0, 3); /* Data Entry MSB */
+            midiChInitialized[setup.channel] = TRUE;
+
+            /* Set pitch bend range to ±N semitones via RPN */
+            BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 101, 0, 0); /* RPN MSB */
+            BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 100, 0, 0); /* RPN LSB */
+            BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex,   6, 0,
+                                                 song->pitchBendRangeSemitones);         /* Data Entry */
+            BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex,  38, 0, 0); /* Data LSB */
+
+            /* MIDI channel 10 (zero-based 9) defaults to percussion in many synths.
+             * NRPN 5,0 with data 3 switches it to melodic playback. */
+            if (setup.channel == 9u)
+            {
+                BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 99, 0, 5); /* NRPN MSB */
+                BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 98, 0, 0); /* NRPN LSB */
+                BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex,  6, 0, 3); /* Data Entry MSB */
+            }
         }
     }
 
@@ -2155,28 +2749,21 @@ static int setup_instrument_ext(Mod2RmfConverter *conv, const ModSongModel *song
          * causes some S3M samples to play at the wrong pitch. */
         extInfo.midiRootKey = 60;
 
-        if (playable->hasVolumeAdsr)
+        /* Apply per-instrument pan placement from tracker sub-instrument */
+        extInfo.panPlacement = playable->panPlacement;
+
+        if (playable->hasVolumeAdsr && playable->adsrStageCount > 0)
         {
-            /* Envelope mapped to ADSR: attack -> decay -> sustain -> release. */
-            int32_t peakLevel = (playable->adsrPeakLevel > 0)
-                                  ? (int32_t)playable->adsrPeakLevel
-                                  : VOLUME_RANGE;
-            extInfo.volumeADSR.stageCount = 4;
-            extInfo.volumeADSR.stages[0].level = peakLevel;
-            extInfo.volumeADSR.stages[0].time = (int32_t)playable->adsrAttackMs;
-            extInfo.volumeADSR.stages[0].flags = ADSR_LINEAR_RAMP_LONG;
-
-            extInfo.volumeADSR.stages[1].level = (int32_t)playable->adsrSustainLevel;
-            extInfo.volumeADSR.stages[1].time = (int32_t)playable->adsrDecayMs;
-            extInfo.volumeADSR.stages[1].flags = ADSR_LINEAR_RAMP_LONG;
-
-            extInfo.volumeADSR.stages[2].level = (int32_t)playable->adsrSustainLevel;
-            extInfo.volumeADSR.stages[2].time = 0;
-            extInfo.volumeADSR.stages[2].flags = ADSR_SUSTAIN_LONG;
-
-            extInfo.volumeADSR.stages[3].level = 0;
-            extInfo.volumeADSR.stages[3].time = (int32_t)playable->adsrReleaseMs;
-            extInfo.volumeADSR.stages[3].flags = ADSR_TERMINATE_LONG;
+            /* Multi-stage envelope: each stage was pre-built by extract_envelope_adsr
+             * with level, timeUs, and flags already in BAE format. */
+            uint32_t s;
+            extInfo.volumeADSR.stageCount = playable->adsrStageCount;
+            for (s = 0; s < playable->adsrStageCount && s < BAE_EDITOR_MAX_ADSR_STAGES; ++s)
+            {
+                extInfo.volumeADSR.stages[s].level = playable->adsrStages[s].level;
+                extInfo.volumeADSR.stages[s].time = playable->adsrStages[s].timeUs;
+                extInfo.volumeADSR.stages[s].flags = playable->adsrStages[s].flags;
+            }
         }
         else
         {
@@ -2294,10 +2881,6 @@ static int write_song_notes(Mod2RmfConverter *conv, const ModSongModel *song)
         uint16_t trackIndex;
 
         note = &song->notes[i];
-        if (note->sourceChannel >= song->channelCount)
-        {
-            continue;
-        }
         trackIndex = conv->channelToTrackIndex[note->sourceChannel];
         if (trackIndex == (uint16_t)0xFFFF)
         {
@@ -2319,27 +2902,51 @@ static int write_song_notes(Mod2RmfConverter *conv, const ModSongModel *song)
 static int write_song_cc_events(Mod2RmfConverter *conv, const ModSongModel *song)
 {
     uint32_t i;
+    /* For deduplication: track the primary RMF track per MIDI channel,
+     * and the last emitted value per (midiCh, cc#) to avoid redundant events. */
+    uint16_t midiChPrimaryTrack[MOD2RMF_MAX_MIDI_CHANNELS];
+    /* Last emitted CC values: [midiCh][cc] — 0xFFFF = not yet emitted */
+    uint16_t lastCC[MOD2RMF_MAX_MIDI_CHANNELS][128];
 
     if (!conv || !song)
     {
         return 0;
     }
 
+    memset(lastCC, 0xFF, sizeof(lastCC));
+
+    /* Find primary (first) RMF track for each MIDI channel */
+    memset(midiChPrimaryTrack, 0xFF, sizeof(midiChPrimaryTrack));
+    for (i = 0; i < song->channelCount; ++i)
+    {
+        uint8_t midiCh = conv->channelMap.trackerToMidi[i];
+        if (midiCh < MOD2RMF_MAX_MIDI_CHANNELS &&
+            midiChPrimaryTrack[midiCh] == (uint16_t)0xFFFF &&
+            conv->channelToTrackIndex[i] != (uint16_t)0xFFFF)
+        {
+            midiChPrimaryTrack[midiCh] = conv->channelToTrackIndex[i];
+        }
+    }
+
     for (i = 0; i < song->ccCount; ++i)
     {
         const ModCCEvent *ev;
+        uint8_t midiCh;
         uint16_t trackIndex;
 
         ev = &song->ccEvents[i];
-        if (ev->sourceChannel >= song->channelCount)
-        {
-            continue;
-        }
-        trackIndex = conv->channelToTrackIndex[ev->sourceChannel];
-        if (trackIndex == (uint16_t)0xFFFF)
-        {
-            continue;
-        }
+        if (ev->sourceChannel >= song->channelCount) continue;
+
+        midiCh = conv->channelMap.trackerToMidi[ev->sourceChannel];
+        if (midiCh >= MOD2RMF_MAX_MIDI_CHANNELS) continue;
+
+        /* Route through the primary track for this MIDI channel */
+        trackIndex = midiChPrimaryTrack[midiCh];
+        if (trackIndex == (uint16_t)0xFFFF) continue;
+
+        /* Skip if this CC value was already emitted for this MIDI channel */
+        if (lastCC[midiCh][ev->cc] == (uint16_t)ev->value) continue;
+        lastCC[midiCh][ev->cc] = (uint16_t)ev->value;
 
         (void)BAERmfEditorDocument_AddTrackCCEvent(conv->document,
                                                    trackIndex,
@@ -2354,27 +2961,50 @@ static int write_song_cc_events(Mod2RmfConverter *conv, const ModSongModel *song
 static int write_song_pitch_bend_events(Mod2RmfConverter *conv, const ModSongModel *song)
 {
     uint32_t i;
+    /* Deduplication: primary track and last value per MIDI channel */
+    uint16_t midiChPrimaryTrack[MOD2RMF_MAX_MIDI_CHANNELS];
+    uint16_t lastBend[MOD2RMF_MAX_MIDI_CHANNELS];
 
     if (!conv || !song)
     {
         return 0;
     }
 
+    /* 0xFFFF = not yet emitted */
+    memset(lastBend, 0xFF, sizeof(lastBend));
+
+    /* Find primary (first) RMF track for each MIDI channel */
+    memset(midiChPrimaryTrack, 0xFF, sizeof(midiChPrimaryTrack));
+    for (i = 0; i < song->channelCount; ++i)
+    {
+        uint8_t midiCh = conv->channelMap.trackerToMidi[i];
+        if (midiCh < MOD2RMF_MAX_MIDI_CHANNELS &&
+            midiChPrimaryTrack[midiCh] == (uint16_t)0xFFFF &&
+            conv->channelToTrackIndex[i] != (uint16_t)0xFFFF)
+        {
+            midiChPrimaryTrack[midiCh] = conv->channelToTrackIndex[i];
+        }
+    }
+
     for (i = 0; i < song->pitchBendCount; ++i)
     {
         const ModPitchBendEvent *ev;
+        uint8_t midiCh;
         uint16_t trackIndex;
 
         ev = &song->pitchBendEvents[i];
-        if (ev->sourceChannel >= song->channelCount)
-        {
-            continue;
-        }
-        trackIndex = conv->channelToTrackIndex[ev->sourceChannel];
-        if (trackIndex == (uint16_t)0xFFFF)
-        {
-            continue;
-        }
+        if (ev->sourceChannel >= song->channelCount) continue;
+
+        midiCh = conv->channelMap.trackerToMidi[ev->sourceChannel];
+        if (midiCh >= MOD2RMF_MAX_MIDI_CHANNELS) continue;
+
+        /* Route through the primary track for this MIDI channel */
+        trackIndex = midiChPrimaryTrack[midiCh];
+        if (trackIndex == (uint16_t)0xFFFF) continue;
+
+        /* Skip if bend value hasn't changed for this MIDI channel */
+        if (lastBend[midiCh] == ev->value) continue;
+        lastBend[midiCh] = ev->value;
 
         (void)BAERmfEditorDocument_AddTrackPitchBendEvent(conv->document,
                                                            trackIndex,
@@ -2433,9 +3063,9 @@ static int save_document(Mod2RmfConverter *conv, const char *destPath)
     if (requiresZmf && !useZmfContainer)
     {
         fprintf(stderr,
-                "Error: document requires ZMF format due to RMF-incompatible sample data \n"
-                "(modern codec, advanced interpolation, engine config, or loop shorter than %u frames). \n"
-                "Please use a .zmf output extension.\n",
+                "[mod2rmf] Error: document requires ZMF format due to RMF-incompatible sample data \n"
+                "[mod2rmf] (use of a modern codec, or likely a loop shorter than %u frames). \n"
+                "[mod2rmf] Please use a .zmf output extension.\n",
                 (unsigned)MIN_LOOP_SIZE_RMF);
         return 0;
     }
@@ -2448,7 +3078,7 @@ static int save_document(Mod2RmfConverter *conv, const char *destPath)
                                                     &rmfSize);
     if (result != BAE_NO_ERROR)
     {
-        fprintf(stderr, "Error: save failed (%d): %s\n", (int)result, destPath);
+        fprintf(stderr, "[mod2rmf] Error: save failed (%d): %s\n", (int)result, destPath);
         return 0;
     }
 
@@ -2486,6 +3116,7 @@ int main(int argc, char *argv[])
     XBOOL forceOriginalSamples;
     XBOOL codecArgSeen;
     XBOOL bitrateArgSeen;
+    XBOOL spreadChannels;
     uint8_t stereoSeparation;
 
     sourcePath = NULL;
@@ -2496,6 +3127,7 @@ int main(int argc, char *argv[])
     forceOriginalSamples = FALSE;
     codecArgSeen = FALSE;
     bitrateArgSeen = FALSE;
+    spreadChannels = FALSE;
     stereoSeparation = 75;
     song_model_init(&song);
 
@@ -2513,6 +3145,11 @@ int main(int argc, char *argv[])
         if (!strcmp(arg, "--tempomap"))
         {
             tempoMap = 1;
+            continue;
+        }
+        if (!strcmp(arg, "--spread"))
+        {
+            spreadChannels = TRUE;
             continue;
         }
         if (!strcmp(arg, "--original"))
@@ -2743,6 +3380,21 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    /* Spread tracker channels by program so each instrument gets its own
+     * MIDI channel where possible. Must run before setup_document because
+     * it may increase song.channelCount. */
+    if (spreadChannels)
+    {
+        if (!spread_channels_by_program(&song, conv->isMod, conv->stereoSeparation))
+        {
+            fprintf(stderr, "Error: channel spreading failed\n");
+            song_model_dispose(&song);
+            converter_delete(conv);
+            BAE_Cleanup();
+            return 1;
+        }
+    }
+
     if (!setup_document(conv, &song, sourcePath))
     {
         fprintf(stderr, "Error: document setup failed\n");
@@ -2775,8 +3427,40 @@ int main(int argc, char *argv[])
                 (unsigned)song.loopStartTick, (unsigned)song.loopEndTick);
     }
 
-    if (!setup_samples(conv, &song) ||
-        !setup_tracks(conv, &song) ||
+    if (!setup_samples(conv, &song))
+    {
+        fprintf(stderr, "Error: sample setup failed\n");
+        song_model_dispose(&song);
+        converter_delete(conv);
+        BAE_Cleanup();
+        return 1;
+    }
+
+    /* Analyze channel usage and compute tracker→MIDI channel mapping */
+    {
+        ChannelProfile profiles[MOD2RMF_MAX_CHANNELS];
+
+        analyze_channel_usage(&song, profiles, song.channelCount);
+        compute_channel_map(profiles, song.channelCount, &conv->channelMap);
+
+        #ifdef _DEBUG
+        {
+            uint32_t ci;
+            for (ci = 0; ci < song.channelCount; ++ci)
+            {
+                if (profiles[ci].used)
+                {
+                    fprintf(stderr, "[mod2rmf] Channel map: tracker ch %u -> MIDI ch %u (%u notes, %u ranges)\n",
+                            ci, conv->channelMap.trackerToMidi[ci], profiles[ci].noteCount, profiles[ci].rangeCount);
+                }
+            }
+        }
+        #endif
+
+        channel_profile_cleanup(profiles, song.channelCount);
+    }
+
+    if (!setup_tracks(conv, &song, &conv->channelMap) ||
         !setup_instrument_ext(conv, &song, useZmfContainer) ||
         !write_song_cc_events(conv, &song) ||
         !write_song_notes(conv, &song) ||
