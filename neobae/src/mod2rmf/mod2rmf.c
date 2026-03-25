@@ -2,8 +2,8 @@
  *
  * mod2rmf.c
  *
- * Native MOD/S3M -> RMF converter
- * Supports ProTracker/SoundTracker MOD and Scream Tracker 3 S3M formats.
+ * Tracker module -> RMF/ZMF converter (via libxmp).
+ * Supports all formats handled by libxmp (MOD, S3M, XM, IT, etc.).
  *
  ****************************************************************************/
 
@@ -14,11 +14,11 @@
 #include <unistd.h>
 #include <math.h>
 
+#include <xmp.h>
+
 #include <NeoBAE.h>
 #include <X_Formats.h>
 
-#include "mod2rmf_mod.h"
-#include "mod2rmf_s3m.h"
 #include "mod2rmf_encoder.h"
 #include "mod2rmf_resampler.h"
 
@@ -39,9 +39,20 @@
 #define MOD2RMF_ZBF_DISABLE_SND_LOOPING 0x20
 #define MOD2RMF_ZBF_SAMPLE_AND_HOLD 0x04
 #define MOD2RMF_PITCH_BEND_CENTER       0x2000
-#define MOD2RMF_PITCH_BEND_RANGE_ST     12
+#define MOD2RMF_PITCH_BEND_RANGE_ST     24
 #define MOD2RMF_MOD_PERIOD_MIN          113
 #define MOD2RMF_MOD_PERIOD_MAX          1712
+/* Loop type constants for ModRawSample.loopType */
+#define MOD2RMF_LOOP_FORWARD            0
+#define MOD2RMF_LOOP_BIDIR              1
+#define MOD2RMF_LOOP_REVERSE            2
+/* Effect type constants (libxmp internal numbering, same as raw MOD/XM) */
+#define MOD2RMF_FX_EXTENDED             0x0E
+#define MOD2RMF_EX_RETRIG               0x09
+#define MOD2RMF_EX_DELAY                0x0D
+#define MOD2RMF_FX_MULTI_RETRIG         0x1B
+#define MOD2RMF_FX_TONEPORTA            0x03
+#define MOD2RMF_FX_TONE_VSLIDE          0x05
 
 typedef struct {
     XBOOL valid;
@@ -51,7 +62,14 @@ typedef struct {
     uint32_t loopEnd;
     unsigned char rootKey;
     unsigned char defaultVolume; /* 0..64 from MOD sample header */
-    int8_t  finetune;           /* -8..+7 from MOD sample header */
+    int8_t  finetune;           /* unused; libxmp handles finetune via pitchbend */
+    uint8_t loopType;           /* MOD2RMF_LOOP_FORWARD/BIDIR/REVERSE */
+    XBOOL   hasEnvelope;        /* instrument has an amplitude envelope */
+    uint32_t adsrAttackMs;
+    uint32_t adsrPeakLevel;     /* 0..VOLUME_RANGE, attack target */
+    uint32_t adsrDecayMs;
+    uint32_t adsrSustainLevel;  /* 0..VOLUME_RANGE */
+    uint32_t adsrReleaseMs;
     int8_t *pcm8;
 } ModRawSample;
 
@@ -65,6 +83,7 @@ typedef struct {
     uint32_t sampleRateOverrideHz;
     XBOOL hasVolumeAdsr;
     uint32_t adsrAttackMs;
+    uint32_t adsrPeakLevel;    /* 0..VOLUME_RANGE, attack target */
     uint32_t adsrDecayMs;
     uint32_t adsrReleaseMs;
     uint32_t adsrSustainLevel; /* 0..VOLUME_RANGE */
@@ -95,7 +114,8 @@ typedef struct {
 } ModPitchBendEvent;
 
 static XBOOL mod2rmf_sample_requires_processing(const ModPlayable *playable,
-                                                const Mod2RmfResamplerSettings *settings)
+                                                const Mod2RmfResamplerSettings *settings,
+                                                uint32_t moduleBaseRateHz)
 {
     uint32_t srcRate;
 
@@ -114,7 +134,7 @@ static XBOOL mod2rmf_sample_requires_processing(const ModPlayable *playable,
         return FALSE;
     }
 
-    srcRate = MOD2RMF_SAMPLE_RATE;
+    srcRate = moduleBaseRateHz;
     if (playable->hasSampleRateOverride && playable->sampleRateOverrideHz > 0u)
     {
         srcRate = playable->sampleRateOverrideHz;
@@ -163,51 +183,21 @@ typedef struct {
 } ActiveNote;
 
 typedef struct {
-    uint16_t period;          /* current base period (modified by porta) */
-    uint16_t targetPeriod;    /* tone porta target */
-    uint16_t noteBasePeriod;  /* period at last note-on (for pitch bend ref) */
-    unsigned char volume;     /* 0..64 */
-    unsigned char panning;    /* 0..255 */
-    unsigned char program;
-
-    /* Effect memory (reused when param==0) */
-    uint8_t portaUpSpeed;
-    uint8_t portaDownSpeed;
-    uint8_t tonePortaSpeed;
-    uint8_t vibratoSpeed;
-    uint8_t vibratoDepth;
-    uint8_t tremoloSpeed;
-    uint8_t tremoloDepth;
-    uint8_t arpeggioParam;
-    uint8_t sampleOffset;
-    uint8_t retriggerParam;
-    int8_t  finetune;
-    uint8_t glissando;
-
-    /* Oscillators */
-    uint8_t vibratoPos;
-    uint8_t vibratoWaveform;  /* 0..3, bit 2 = no retrig on note */
-    uint8_t tremoloPos;
-    uint8_t tremoloWaveform;
-
-    /* Pattern loop (per-channel in PT) */
-    uint32_t loopStartRow;
-    uint8_t  loopCount;
-
-    /* Dedup tracking */
-    uint16_t lastPitchBend;
-    unsigned char lastCCVolume;
-    unsigned char lastCCPanning;
-} ChannelState;
+    uint8_t retrigInterval;     /* retrigger every N frames (0 = inactive) */
+    uint8_t noteDelayFrames;    /* delay note-on by N frames (0 = no delay) */
+    XBOOL   hasDelayedNote;     /* a note is pending for this row */
+    unsigned char delayedEvNote;/* the note value to trigger after delay */
+    int     delayedSid;         /* sample ID for the delayed note */
+    uint8_t delayedVolume;      /* volume at time of row start */
+} ChannelEffectState;
 
 typedef struct {
     void *sourceData;
     size_t sourceSize;
-    ModFormat format;
-    ModHeader header;
     ModRawSample *rawSamples;
-    unsigned char *slotToProgram;
-    XBOOL enableZmfSampleOffset;
+    uint32_t rawSampleCount;
+    uint32_t moduleBaseRateHz;
+    XBOOL isMod;
 
     BAERmfEditorDocument *document;
     uint16_t *channelToTrackIndex;
@@ -216,10 +206,29 @@ typedef struct {
     uint8_t stereoSeparation;  /* 0=mono (center), 75=default, 100=hard L/R */
 } Mod2RmfConverter;
 
+static XBOOL libxmp_is_mod_family(const char *type)
+{
+    if (!type || !type[0])
+    {
+        return FALSE;
+    }
+
+    if (strstr(type, "MOD") ||
+        strstr(type, "ProTracker") ||
+        strstr(type, "NoiseTracker") ||
+        strstr(type, "Startrekker") ||
+        strstr(type, "Fast Tracker"))
+    {
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
 static void print_usage(const char *program_name)
 {
     fprintf(stderr,
-            "Usage: %s [options] <source.mod|source.s3m> <dest.rmf|dest.zmf>\n"
+            "Usage: %s [options] <source module> <dest.rmf|dest.zmf>\n"
             "\n"
             "Options:\n"
             "  --codec N|NAME        Set sample compression (number or name, default: 0/pcm)\n"
@@ -236,11 +245,6 @@ static void print_usage(const char *program_name)
             program_name);
 }
 
-static uint16_t read_be16(const unsigned char *ptr)
-{
-    return (uint16_t)(((uint16_t)ptr[0] << 8) | (uint16_t)ptr[1]);
-}
-
 static int file_exists(const char *path)
 {
     FILE *f;
@@ -253,185 +257,6 @@ static int file_exists(const char *path)
     return 1;
 }
 
-/* Standard ProTracker period table: C-1 (index 0) through B-5 (index 59).
- * MIDI note = 36 + index. */
-static const uint16_t gPeriodTable[] = {
-    1712,1616,1524,1440,1356,1280,1208,1140,1076,1016, 960, 907,
-     856, 808, 762, 720, 678, 640, 604, 570, 538, 508, 480, 453,
-     428, 404, 381, 360, 339, 320, 302, 285, 269, 254, 240, 226,
-     214, 202, 190, 180, 170, 160, 151, 143, 135, 127, 120, 113,
-     107, 101,  95,  90,  85,  80,  75,  71,  67,  63,  60,  56
-};
-#define PERIOD_TABLE_SIZE (sizeof(gPeriodTable) / sizeof(gPeriodTable[0]))
-
-/* Half-wave sine table (0..255) for vibrato/tremolo oscillators. */
-static const uint8_t gSineTable[32] = {
-      0,  24,  49,  74,  97, 120, 141, 161,
-    180, 197, 212, 224, 235, 244, 250, 253,
-    255, 253, 250, 244, 235, 224, 212, 197,
-    180, 161, 141, 120,  97,  74,  49,  24
-};
-
-static int16_t get_waveform_value(uint8_t waveform, uint8_t pos)
-{
-    int16_t val;
-    pos &= 63u;
-    switch (waveform & 3u)
-    {
-        case 0: /* sine */
-            val = (int16_t)gSineTable[pos & 31u];
-            if (pos >= 32u) val = -val;
-            break;
-        case 1: /* ramp down */
-            val = (int16_t)(255 - (int16_t)(pos & 63u) * 8);
-            break;
-        case 2: /* square */
-            val = (pos < 32u) ? 255 : -255;
-            break;
-        default: /* random (approximate with sine) */
-            val = (int16_t)gSineTable[pos & 31u];
-            if (pos >= 32u) val = -val;
-            break;
-    }
-    return val;
-}
-
-static uint16_t period_to_pitch_bend_range(uint16_t basePeriod,
-                                           uint16_t currentPeriod,
-                                           uint16_t rangeSemitones);
-
-static uint16_t period_to_pitch_bend(uint16_t basePeriod, uint16_t currentPeriod)
-{
-    return period_to_pitch_bend_range(basePeriod, currentPeriod, MOD2RMF_PITCH_BEND_RANGE_ST);
-}
-
-static uint16_t period_to_pitch_bend_range(uint16_t basePeriod,
-                                           uint16_t currentPeriod,
-                                           uint16_t rangeSemitones)
-{
-    double cents;
-    int32_t bend;
-
-    if (basePeriod == 0 || currentPeriod == 0)
-    {
-        return MOD2RMF_PITCH_BEND_CENTER;
-    }
-    if (rangeSemitones == 0)
-    {
-        rangeSemitones = MOD2RMF_PITCH_BEND_RANGE_ST;
-    }
-    /* cents > 0 = pitch up (current period smaller = higher freq) */
-    cents = 1200.0 * log2((double)basePeriod / (double)currentPeriod);
-    bend = (int32_t)(MOD2RMF_PITCH_BEND_CENTER +
-                     cents * (double)MOD2RMF_PITCH_BEND_CENTER /
-                     ((double)rangeSemitones * 100.0));
-    if (bend < 0) bend = 0;
-    if (bend > 0x3FFF) bend = 0x3FFF;
-    return (uint16_t)bend;
-}
-
-static void clamp_period(uint16_t *period)
-{
-    if (*period < MOD2RMF_MOD_PERIOD_MIN)
-    {
-        *period = MOD2RMF_MOD_PERIOD_MIN;
-    }
-    if (*period > MOD2RMF_MOD_PERIOD_MAX)
-    {
-        *period = MOD2RMF_MOD_PERIOD_MAX;
-    }
-}
-
-static int period_to_midi(uint16_t period, unsigned char *outMidi)
-{
-    uint32_t i;
-    uint32_t bestIndex;
-    uint32_t bestDiff;
-
-    if (!outMidi || period == 0)
-    {
-        return 0;
-    }
-
-    bestIndex = 0;
-    bestDiff = 0xFFFFFFFFu;
-
-    for (i = 0; i < (uint32_t)PERIOD_TABLE_SIZE; ++i)
-    {
-        uint32_t diff;
-        diff = (gPeriodTable[i] > period)
-             ? (uint32_t)(gPeriodTable[i] - period)
-             : (uint32_t)(period - gPeriodTable[i]);
-        if (diff < bestDiff)
-        {
-            bestDiff = diff;
-            bestIndex = i;
-        }
-    }
-
-    /* Map C-1 table start one octave higher for embedded sample root-key
-     * defaults; sample rate tuning handles the remaining alignment. */
-    {
-        uint32_t midi = 36u + bestIndex;
-        if (midi > 127u)
-        {
-            midi = 127u;
-        }
-        *outMidi = (unsigned char)midi;
-    }
-    return 1;
-}
-
-static int song_model_append_pitch_bend(ModSongModel *song,
-                                        uint16_t sourceChannel,
-                                        uint32_t tick,
-                                        uint16_t value);
-
-static uint16_t midi_note_to_mod_period(unsigned char midiNote)
-{
-    double semitones;
-    double period;
-    int32_t p;
-
-    semitones = (double)((int)midiNote - 36);
-    period = 1712.0 * pow(2.0, -semitones / 12.0);
-    p = (int32_t)(period + 0.5);
-    if (p < (int32_t)MOD2RMF_MOD_PERIOD_MIN)
-    {
-        p = MOD2RMF_MOD_PERIOD_MIN;
-    }
-    if (p > (int32_t)MOD2RMF_MOD_PERIOD_MAX)
-    {
-        p = MOD2RMF_MOD_PERIOD_MAX;
-    }
-    return (uint16_t)p;
-}
-
-static void append_pitch_bend_if_changed(ModSongModel *song,
-                                         uint16_t sourceChannel,
-                                         uint32_t tick,
-                                         uint16_t noteBasePeriod,
-                                         uint16_t effectivePeriod,
-                                         uint16_t bendRangeSemitones,
-                                         uint16_t *lastPitchBend)
-{
-    uint16_t bend;
-
-    if (!song || !lastPitchBend)
-    {
-        return;
-    }
-
-    bend = period_to_pitch_bend_range(noteBasePeriod,
-                                      effectivePeriod,
-                                      bendRangeSemitones);
-    if (bend == *lastPitchBend)
-    {
-        return;
-    }
-    *lastPitchBend = bend;
-    (void)song_model_append_pitch_bend(song, sourceChannel, tick, bend);
-}
 
 static void song_model_init(ModSongModel *song)
 {
@@ -705,183 +530,6 @@ static int song_model_append_tempo_change(ModSongModel *song,
     return 1;
 }
 
-static int materialize_playables(Mod2RmfConverter *conv, ModSongModel *song)
-{
-    const ModHeader *h;
-    uint32_t used;
-    uint32_t i;
-
-    if (!conv || !song)
-    {
-        return 0;
-    }
-
-    h = &conv->header;
-    used = 0;
-    for (i = 0; i < h->sampleCount; ++i)
-    {
-        if (conv->slotToProgram[i] != 0xFF)
-        {
-            used++;
-        }
-    }
-
-    song->playableCount = used;
-    if (used)
-    {
-        song->playables = (ModPlayable *)calloc(used, sizeof(ModPlayable));
-        if (!song->playables)
-        {
-            return 0;
-        }
-    }
-
-    for (i = 0; i < h->sampleCount; ++i)
-    {
-        unsigned char program;
-        ModPlayable *playable;
-        if (conv->slotToProgram[i] == 0xFF)
-        {
-            continue;
-        }
-        program = conv->slotToProgram[i];
-        playable = &song->playables[program];
-        playable->sourceSlot = i;
-        playable->program = program;
-        playable->rootKey = 60;
-        playable->sampleOffsetBytes = 0;
-        playable->offsetVariant = FALSE;
-        playable->rawSample = &conv->rawSamples[i];
-        if (conv->rawSamples[i].name[0])
-        {
-            snprintf(playable->displayName, sizeof(playable->displayName), "%s", conv->rawSamples[i].name);
-        }
-        else
-        {
-            snprintf(playable->displayName, sizeof(playable->displayName), "Sample %u", i + 1);
-        }
-    }
-
-    return 1;
-}
-
-static ModPlayable *find_playable_by_program(ModSongModel *song, unsigned char program)
-{
-    uint32_t i;
-
-    if (!song)
-    {
-        return NULL;
-    }
-    for (i = 0; i < song->playableCount; ++i)
-    {
-        if (song->playables[i].program == program)
-        {
-            return &song->playables[i];
-        }
-    }
-    return NULL;
-}
-
-static unsigned char ensure_sample_offset_variant_program(Mod2RmfConverter *conv,
-                                                          ModSongModel *song,
-                                                          unsigned char baseProgram,
-                                                          uint32_t offsetBytes)
-{
-    ModPlayable *base;
-    ModPlayable *newPlayables;
-    ModPlayable *v;
-    uint32_t i;
-    uint32_t newIndex;
-
-    if (!conv || !song || offsetBytes == 0)
-    {
-        return baseProgram;
-    }
-
-    base = find_playable_by_program(song, baseProgram);
-    if (!base || !base->rawSample || !base->rawSample->valid || !base->rawSample->pcm8)
-    {
-        return baseProgram;
-    }
-    if (offsetBytes >= base->rawSample->frameCount)
-    {
-        return baseProgram;
-    }
-
-    for (i = 0; i < song->playableCount; ++i)
-    {
-        v = &song->playables[i];
-        if (v->sourceSlot == base->sourceSlot &&
-            v->offsetVariant &&
-            v->sampleOffsetBytes == offsetBytes)
-        {
-            return v->program;
-        }
-    }
-
-    if (song->playableCount >= 128u)
-    {
-        return baseProgram;
-    }
-
-    newPlayables = (ModPlayable *)realloc(song->playables,
-                                          (song->playableCount + 1u) * sizeof(ModPlayable));
-    if (!newPlayables)
-    {
-        return baseProgram;
-    }
-    song->playables = newPlayables;
-
-    newIndex = song->playableCount;
-    v = &song->playables[newIndex];
-    memset(v, 0, sizeof(*v));
-    v->sourceSlot = base->sourceSlot;
-    v->program = (unsigned char)newIndex;
-    v->rootKey = base->rootKey;
-    v->sampleOffsetBytes = offsetBytes;
-    v->offsetVariant = TRUE;
-    v->rawSample = base->rawSample;
-    snprintf(v->displayName,
-             sizeof(v->displayName),
-             "%s +ofs%u",
-             base->displayName,
-             (unsigned)offsetBytes);
-
-    song->playableCount++;
-    return v->program;
-}
-
-static uint64_t mod_row_ticks_fp(uint8_t speed, uint16_t bpm)
-{
-    (void)bpm;
-
-    if (speed == 0)
-    {
-        speed = 6;
-    }
-
-    /* Tracker speed controls ticks-per-row. BPM is emitted separately as
-     * tempo events, so applying BPM here would double-scale time. */
-    return (((uint64_t)MOD2RMF_ROW_TICKS * (uint64_t)speed) << 16) /
-           (uint64_t)6u;
-}
-
-/* Scale a period delta from S3M c2spd-dependent period space to our
- * raw Amiga period space.  S3M porta/vibrato speeds are designed for
- * periods proportional to 8363/c2spd; our periods assume c2spd=8363,
- * so deltas need to be multiplied by c2spd/8363. */
-static int32_t s3m_scale_delta(int32_t delta, uint32_t c2spd)
-{
-    int64_t scaled;
-    if (c2spd == 0u || c2spd == 8363u)
-        return delta;
-    scaled = (int64_t)delta * (int64_t)c2spd;
-    if (scaled >= 0)
-        return (int32_t)((scaled + 4181) / 8363);
-    return (int32_t)((scaled - 4181) / 8363);
-}
-
 static uint32_t fp_ticks_to_int(uint64_t fp)
 {
     return (uint32_t)((fp + 0x8000u) >> 16);
@@ -927,6 +575,8 @@ static Mod2RmfConverter *converter_create(void)
     if (conv)
     {
         memset(conv, 0, sizeof(*conv));
+        conv->moduleBaseRateHz = MOD2RMF_SAMPLE_RATE;
+        conv->isMod = FALSE;
     }
     return conv;
 }
@@ -944,12 +594,11 @@ static void converter_delete(Mod2RmfConverter *conv)
         BAERmfEditorDocument_Delete(conv->document);
     }
     free(conv->sourceData);
-    free(conv->slotToProgram);
     free(conv->channelToTrackIndex);
 
     if (conv->rawSamples)
     {
-        for (i = 0; i < conv->header.sampleCount; ++i)
+        for (i = 0; i < conv->rawSampleCount; ++i)
         {
             free(conv->rawSamples[i].pcm8);
         }
@@ -959,2776 +608,1028 @@ static void converter_delete(Mod2RmfConverter *conv)
     free(conv);
 }
 
-static int parse_mod_header(Mod2RmfConverter *conv)
-{
-    const unsigned char *data;
-    size_t size;
-    ModHeader *h;
-    ModHeader candidate;
-    uint32_t channels;
-
-    if (!conv || !conv->sourceData)
-    {
-        return 0;
-    }
-
-    data = (const unsigned char *)conv->sourceData;
-    size = conv->sourceSize;
-    h = &conv->header;
-    memset(h, 0, sizeof(*h));
-
-    conv->format = mod2rmf_detect_mod_format(data, size);
-
-    /* Prefer explicit 31-sample signatures; fallback to 15-sample layout when invalid. */
-    channels = 0;
-    if (size >= 1084)
-    {
-        channels = mod2rmf_detect_mod_channel_count(data + 1080);
-    }
-    if (channels >= 1 && channels <= 32 &&
-        mod2rmf_try_parse_layout(&candidate,
-                     data,
-                     size,
-                     31,
-                     (unsigned char)channels,
-                     950,
-                     951,
-                     952,
-                     1084,
-                     MOD2RMF_MAX_SAMPLES))
-    {
-        *h = candidate;
-        conv->format = MOD_FORMAT_31;
-        return 1;
-    }
-
-    if (size >= 600 && mod2rmf_try_parse_layout(&candidate,
-                                                data,
-                                                size,
-                                                15,
-                                                4,
-                                                470,
-                                                471,
-                                                472,
-                                                600,
-                                                MOD2RMF_MAX_SAMPLES))
-    {
-        *h = candidate;
-        conv->format = MOD_FORMAT_15;
-        return 1;
-    }
-
-    conv->format = MOD_FORMAT_UNKNOWN;
-    return 0;
-}
-
-static int extract_mod_samples(Mod2RmfConverter *conv)
-{
-    const unsigned char *data;
-    size_t size;
-    const ModHeader *h;
-    uint32_t i;
-    size_t sampleDataCursor;
-    size_t sampleHeaderBase;
-
-    if (!conv || !conv->sourceData)
-    {
-        return 0;
-    }
-
-    data = (const unsigned char *)conv->sourceData;
-    size = conv->sourceSize;
-    h = &conv->header;
-
-    conv->rawSamples = (ModRawSample *)calloc(h->sampleCount, sizeof(ModRawSample));
-    if (!conv->rawSamples)
-    {
-        return 0;
-    }
-
-    sampleDataCursor = h->sampleDataOffset;
-    sampleHeaderBase = 20;
-
-    for (i = 0; i < h->sampleCount; ++i)
-    {
-        const unsigned char *sh;
-        uint32_t sampleBytes;
-        uint32_t loopStart;
-        uint32_t repeatLength;
-        uint32_t f;
-        ModRawSample *sample;
-
-        sh = data + sampleHeaderBase + i * 30u;
-        sample = &conv->rawSamples[i];
-
-        memset(sample->name, 0, sizeof(sample->name));
-        memcpy(sample->name, sh, 22);
-        sample->name[22] = '\0';
-        sample->rootKey = 60;
-        {
-            int8_t ft;
-            ft = (int8_t)(sh[24] & 0x0Fu);
-            if (ft > 7) ft -= 16;
-            sample->finetune = ft;
-        }
-        sample->defaultVolume = (sh[25] > 64u) ? 64u : sh[25];
-
-        sampleBytes = (uint32_t)read_be16(sh + 22) * 2u;
-        loopStart = (uint32_t)read_be16(sh + 26) * 2u;
-        repeatLength = (uint32_t)read_be16(sh + 28) * 2u;
-
-        if (sampleBytes == 0)
-        {
-            continue;
-        }
-        if (sampleDataCursor + sampleBytes > size)
-        {
-            return 0;
-        }
-
-        sample->pcm8 = (int8_t *)malloc(sampleBytes);
-        if (!sample->pcm8)
-        {
-            return 0;
-        }
-
-        for (f = 0; f < sampleBytes; ++f)
-        {
-            /* MOD stores 8-bit sample data as signed PCM; engine expects unsigned 8-bit PCM. */
-            sample->pcm8[f] = (int8_t)(data[sampleDataCursor + f] ^ 0x80u);
-        }
-
-        sample->frameCount = sampleBytes;
-        sample->loopStart = (loopStart < sampleBytes) ? loopStart : 0;
-        sample->loopEnd = (repeatLength > 2 && loopStart < sampleBytes)
-                        ? ((loopStart + repeatLength <= sampleBytes) ? (loopStart + repeatLength) : sampleBytes)
-                        : 0;
-        sample->valid = TRUE;
-
-        sampleDataCursor += sampleBytes;
-    }
-
-    return 1;
-}
-
-static int build_slot_program_map(Mod2RmfConverter *conv)
-{
-    const ModHeader *h;
-    const unsigned char *data;
-    uint32_t nextProgram;
-    uint32_t orderIndex;
-
-    if (!conv || !conv->sourceData)
-    {
-        return 0;
-    }
-
-    h = &conv->header;
-    data = (const unsigned char *)conv->sourceData;
-
-    conv->slotToProgram = (unsigned char *)malloc(h->sampleCount);
-    if (!conv->slotToProgram)
-    {
-        return 0;
-    }
-    memset(conv->slotToProgram, 0xFF, h->sampleCount);
-
-    nextProgram = 0;
-    for (orderIndex = 0; orderIndex < h->songLength; ++orderIndex)
-    {
-        uint32_t pattern;
-        uint32_t row;
-
-        pattern = h->orders[orderIndex];
-        if (pattern >= h->patternCount)
-        {
-            continue;
-        }
-        for (row = 0; row < 64; ++row)
-        {
-            uint32_t channel;
-            for (channel = 0; channel < h->channelCount; ++channel)
-            {
-                size_t cellOffset;
-                const unsigned char *cell;
-                uint8_t sampleNum;
-
-                cellOffset = h->patternDataOffset +
-                             (size_t)pattern * 64u * h->channelCount * 4u +
-                             (size_t)row * h->channelCount * 4u +
-                             (size_t)channel * 4u;
-                cell = data + cellOffset;
-                sampleNum = (uint8_t)((cell[0] & 0xF0u) | ((cell[2] & 0xF0u) >> 4));
-
-                if (sampleNum == 0 || sampleNum > h->sampleCount)
-                {
-                    continue;
-                }
-                if (!conv->rawSamples[sampleNum - 1].valid ||
-                    !conv->rawSamples[sampleNum - 1].pcm8 ||
-                    conv->rawSamples[sampleNum - 1].frameCount == 0)
-                {
-                    continue;
-                }
-                if (conv->slotToProgram[sampleNum - 1] != 0xFF)
-                {
-                    continue;
-                }
-                if (nextProgram >= 128)
-                {
-                    fprintf(stderr, "Error: too many used sample slots for MIDI program mapping\n");
-                    return 0;
-                }
-                conv->slotToProgram[sampleNum - 1] = (unsigned char)nextProgram;
-                nextProgram++;
-            }
-        }
-    }
-
-    return 1;
-}
-
-static void init_channel_state(ChannelState *ch)
-{
-    memset(ch, 0, sizeof(*ch));
-    ch->volume = 64;
-    ch->panning = 128;
-    ch->program = 0xFF;
-    ch->lastPitchBend = MOD2RMF_PITCH_BEND_CENTER;
-    ch->lastCCVolume = 0xFF;
-    ch->lastCCPanning = 0xFF;
-}
 
 static unsigned char mod_vol_to_midi(unsigned char vol64)
 {
-    /* MOD volume 0..64 → MIDI 0..127, capped to prevent overflow */
+    double linear;
+    int midi;
+    /* MOD volume 0..64 is linear amplitude.
+     * MIDI volume (CC 7) is usually squared by the engine.
+     * So we need to apply a square root curve to the MOD volume. */
     if (vol64 >= 64u) return 127u;
-    return (unsigned char)(vol64 * 2u);
+    if (vol64 == 0u) return 0u;
+    
+    linear = (double)vol64 / 64.0;
+    midi = (int)(sqrt(linear) * 127.0 + 0.5);
+    if (midi > 127) midi = 127;
+    if (midi < 0) midi = 0;
+    return (unsigned char)midi;
 }
 
 static unsigned char note_velocity_from_volume(unsigned char vol64)
 {
-    unsigned char v;
-    v = mod_vol_to_midi(vol64);
-    /* Keep note-on semantic even for near-silent starts. */
-    return (v == 0u) ? 1u : v;
+    /* Trackers don't have a separate "velocity" concept — volume is
+     * continuous and already captured as CC7 every frame.  Using max
+     * velocity avoids double-attenuation (CC7 × velocity) that would
+     * make moderate-volume notes disproportionately quiet.  CC7 is
+     * emitted at the same tick before the note-on, so the initial
+     * loudness is correct. */
+    (void)vol64;
+    return 127u;
 }
 
-static BAE_UNSIGNED_FIXED mod_sample_rate_from_finetune_fixed(int8_t finetune)
+static int clamp_int(int v, int lo, int hi)
 {
-    double ratio;
-    double rate;
+    if (v < lo) return lo;
+    if (v > hi) return hi;
+    return v;
+}
 
-    /* ProTracker finetune step is 1/8 semitone. */
-    ratio = pow(2.0, (double)finetune / 96.0);
-    rate = (double)MOD2RMF_SAMPLE_RATE * ratio;
-    if (rate < 1.0)
+/* Apply stereo separation to a raw libxmp panning value (0..255).
+ * For MOD-family formats, uses the Amiga LRRL hard-panning pattern
+ * scaled by the separation percentage.  For other formats, scales the
+ * native panning distance from center by the separation percentage.
+ * Returns an adjusted 0..255 panning value. */
+static uint8_t apply_stereo_separation(uint8_t rawPan, uint32_t ch,
+                                       XBOOL isMod, uint8_t stereoSep)
+{
+    if (stereoSep == 0)
     {
-        rate = 1.0;
+        return 128u; /* mono: center */
     }
-    return (BAE_UNSIGNED_FIXED)(rate * 65536.0 + 0.5);
+
+    if (isMod)
+    {
+        /* Amiga L-R-R-L hard-panning pattern */
+        static const int amigaSide[4] = { -1, 1, 1, -1 };
+        int offset = (128 * (int)stereoSep) / 100;
+        int pan = 128 + amigaSide[ch % 4u] * offset;
+        return (uint8_t)clamp_int(pan, 0, 255);
+    }
+
+    /* Non-MOD: scale native panning around center */
+    {
+        int centered = (int)rawPan - 128;
+        int scaled = (centered * (int)stereoSep) / 100;
+        return (uint8_t)clamp_int(128 + scaled, 0, 255);
+    }
 }
 
-static void emit_volume_cc(ModSongModel *song, uint16_t channel,
-                           ChannelState *ch, uint32_t tick, unsigned char vol64)
+static uint16_t libxmp_pitchbend_to_midi(int16_t xmpPitchbend,
+                                         uint16_t bendRangeSemitones)
 {
-    unsigned char midiVol;
-    midiVol = mod_vol_to_midi(vol64);
-    if (midiVol == ch->lastCCVolume)
+    double semitoneDelta;
+    int32_t bend;
+
+    if (bendRangeSemitones == 0)
+    {
+        bendRangeSemitones = MOD2RMF_PITCH_BEND_RANGE_ST;
+    }
+
+    /* libxmp pitchbend units are in cents (100 = 1 semitone). */
+    semitoneDelta = (double)xmpPitchbend / 100.0;
+    bend = (int32_t)(MOD2RMF_PITCH_BEND_CENTER +
+                     (semitoneDelta / (double)bendRangeSemitones) *
+                     (double)MOD2RMF_PITCH_BEND_CENTER);
+    if (bend < 0) bend = 0;
+    if (bend > 0x3FFF) bend = 0x3FFF;
+    return (uint16_t)bend;
+}
+
+/* Extract a 4-stage ADSR approximation from a libxmp instrument's amplitude
+ * envelope.  Writes the result directly into the raw sample's ADSR fields
+ * and sets hasEnvelope = TRUE.
+ *
+ * Envelope x-coordinates are in ticks (one per tracker frame), converted
+ * to milliseconds via 2500/bpm.  y-coordinates are 0..64, scaled to
+ * 0..VOLUME_RANGE for BAE. */
+static void extract_envelope_adsr(const struct xmp_instrument *inst,
+                                  uint32_t bpm,
+                                  ModRawSample *raw)
+{
+    const struct xmp_envelope *aei;
+    int peakIdx;
+    int sustainIdx;
+    int npt;
+    int idx;
+    uint32_t peakX;
+    uint32_t sustainX;
+    uint32_t peakY;
+    uint32_t sustainY;
+    double msPerTick;
+
+    if (!inst || !raw)
     {
         return;
     }
-    ch->lastCCVolume = midiVol;
-    song_model_append_cc_event(song, channel, tick, 7, midiVol);
-}
 
-static void emit_panning_cc(ModSongModel *song, uint16_t channel,
-                            ChannelState *ch, uint32_t tick, unsigned char pan255)
-{
-    unsigned char midiPan;
-    midiPan = (unsigned char)(pan255 >> 1);
-    if (midiPan == ch->lastCCPanning)
+    aei = &inst->aei;
+    if (!(aei->flg & XMP_ENVELOPE_ON) || aei->npt < 2)
     {
         return;
     }
-    ch->lastCCPanning = midiPan;
-    song_model_append_cc_event(song, channel, tick, 10, midiPan);
-}
 
-static void emit_pitch_bend(ModSongModel *song, uint16_t channel,
-                            ChannelState *ch, uint32_t tick)
-{
-    uint16_t bend;
-    bend = period_to_pitch_bend(ch->noteBasePeriod, ch->period);
-    if (bend == ch->lastPitchBend)
+    npt = aei->npt;
+    if (npt > XMP_MAX_ENV_POINTS)
     {
-        return;
-    }
-    ch->lastPitchBend = bend;
-    song_model_append_pitch_bend(song, channel, tick, bend);
-}
-
-static void do_vibrato(ChannelState *ch)
-{
-    /* Vibrato modifies effective pitch but not the base period.
-     * The caller should compute the effective period as:
-     *   effectivePeriod = ch->period + vibratoDelta
-     * We store the delta separately so it doesn't permanently alter ch->period. */
-}
-
-static int16_t get_vibrato_delta(const ChannelState *ch)
-{
-    int16_t waveVal;
-    waveVal = get_waveform_value(ch->vibratoWaveform, ch->vibratoPos);
-    return (int16_t)((waveVal * (int16_t)ch->vibratoDepth) / 128);
-}
-
-static int16_t get_tremolo_delta(const ChannelState *ch)
-{
-    int16_t waveVal;
-    waveVal = get_waveform_value(ch->tremoloWaveform, ch->tremoloPos);
-    return (int16_t)((waveVal * (int16_t)ch->tremoloDepth) / 64);
-}
-
-static void emit_pitch_with_vibrato(ModSongModel *song, uint16_t channel,
-                                    ChannelState *ch, uint32_t tick)
-{
-    int32_t effectivePeriod;
-    uint16_t savedPeriod;
-    int16_t vibDelta;
-
-    vibDelta = get_vibrato_delta(ch);
-    effectivePeriod = (int32_t)ch->period + vibDelta;
-    if (effectivePeriod < MOD2RMF_MOD_PERIOD_MIN)
-    {
-        effectivePeriod = MOD2RMF_MOD_PERIOD_MIN;
-    }
-    if (effectivePeriod > MOD2RMF_MOD_PERIOD_MAX)
-    {
-        effectivePeriod = MOD2RMF_MOD_PERIOD_MAX;
+        npt = XMP_MAX_ENV_POINTS;
     }
 
-    savedPeriod = ch->period;
-    ch->period = (uint16_t)effectivePeriod;
-    emit_pitch_bend(song, channel, ch, tick);
-    ch->period = savedPeriod;
-}
+    raw->hasEnvelope = TRUE;
+    msPerTick = 2500.0 / (double)(bpm > 0 ? bpm : 125);
 
-static void emit_volume_with_tremolo(ModSongModel *song, uint16_t channel,
-                                     ChannelState *ch, uint32_t tick)
-{
-    int16_t effectiveVol;
-    effectiveVol = (int16_t)ch->volume + get_tremolo_delta(ch);
-    if (effectiveVol < 0) effectiveVol = 0;
-    if (effectiveVol > 64) effectiveVol = 64;
-    emit_volume_cc(song, channel, ch, tick, (unsigned char)effectiveVol);
-}
-
-static void do_volume_slide(ChannelState *ch, uint8_t param)
-{
-    uint8_t up, down;
-    int16_t vol;
-
-    up = (uint8_t)((param >> 4) & 0x0Fu);
-    down = (uint8_t)(param & 0x0Fu);
-    vol = (int16_t)ch->volume;
-
-    if (up > 0)
+    /* Find sustain point (or last point if no sustain flag). */
+    sustainIdx = (aei->flg & XMP_ENVELOPE_SUS) ? aei->sus : npt - 1;
+    if (sustainIdx < 0)
     {
-        vol += up;
+        sustainIdx = 0;
+    }
+    if (sustainIdx >= npt)
+    {
+        sustainIdx = npt - 1;
+    }
+
+    /* Find peak point (highest y between first point and sustain). */
+    peakIdx = 0;
+    peakY = 0;
+    for (idx = 0; idx <= sustainIdx; ++idx)
+    {
+        uint32_t y = (uint32_t)aei->data[idx * 2 + 1];
+        if (y >= peakY)
+        {
+            peakY = y;
+            peakIdx = idx;
+        }
+    }
+
+    peakX = (uint32_t)aei->data[peakIdx * 2];
+    sustainX = (uint32_t)aei->data[sustainIdx * 2];
+    sustainY = (uint32_t)aei->data[sustainIdx * 2 + 1];
+
+    /* Attack: time from envelope start to peak. */
+    raw->adsrAttackMs = (uint32_t)(peakX * msPerTick + 0.5);
+    raw->adsrPeakLevel = (uint32_t)(peakY * VOLUME_RANGE / 64u);
+
+    /* Decay: time from peak to sustain point. */
+    raw->adsrDecayMs = (sustainX > peakX)
+                         ? (uint32_t)((sustainX - peakX) * msPerTick + 0.5)
+                         : 0;
+
+    /* Sustain level. */
+    raw->adsrSustainLevel = (uint32_t)(sustainY * VOLUME_RANGE / 64u);
+
+    /* Release: derive from instrument fadeout (rls) or post-sustain points. */
+    if (inst->rls > 0)
+    {
+        /* rls is fadeout per tick (XM: 0..65535).  Time to fade from
+         * sustain amplitude to silence = sustain / rls * 65536 ticks
+         * (each tick decreases a 16.16 counter by rls). */
+        double releaseTicks = (sustainY > 0)
+                                ? ((double)sustainY * 1024.0 / (double)inst->rls)
+                                : 1.0;
+        raw->adsrReleaseMs = (uint32_t)(releaseTicks * msPerTick + 0.5);
+    }
+    else if (sustainIdx + 1 < npt)
+    {
+        /* Use post-sustain envelope points as release duration. */
+        uint32_t lastX = (uint32_t)aei->data[(npt - 1) * 2];
+        raw->adsrReleaseMs = (lastX > sustainX)
+                               ? (uint32_t)((lastX - sustainX) * msPerTick + 0.5)
+                               : 50;
     }
     else
     {
-        vol -= down;
+        raw->adsrReleaseMs = 50; /* reasonable default */
     }
-    if (vol < 0) vol = 0;
-    if (vol > 64) vol = 64;
-    ch->volume = (unsigned char)vol;
+
+    /* Clamp release so it's not excessively long. */
+    if (raw->adsrReleaseMs > 10000)
+    {
+        raw->adsrReleaseMs = 10000;
+    }
 }
 
-static void do_porta_up(ChannelState *ch, uint8_t speed)
+/* Emulate a bidirectional (ping-pong) sample loop by appending a reversed
+ * copy of the loop body (minus the two endpoints) after loopEnd.  The
+ * resulting sample uses a standard forward loop that is (2*loopLen - 2)
+ * frames long, producing the same audible oscillation as a true bidi loop
+ * without a click at the turnaround point. */
+static void emulate_bidi_loop(ModRawSample *raw)
 {
-    int32_t p;
-    p = (int32_t)ch->period - (int32_t)speed;
-    if (p < MOD2RMF_MOD_PERIOD_MIN) p = MOD2RMF_MOD_PERIOD_MIN;
-    ch->period = (uint16_t)p;
+    uint32_t loopLen;
+    uint32_t reversedLen;
+    uint32_t newFrameCount;
+    int8_t  *newPcm;
+    uint32_t dst;
+    uint32_t src;
+
+    if (!raw || !raw->pcm8 || raw->loopEnd <= raw->loopStart)
+    {
+        return;
+    }
+
+    loopLen = raw->loopEnd - raw->loopStart;
+    if (loopLen < 3)
+    {
+        /* Bidi with fewer than 3 frames is identical to forward loop. */
+        raw->loopType = MOD2RMF_LOOP_FORWARD;
+        return;
+    }
+
+    reversedLen = loopLen - 2; /* skip both endpoints to avoid doubling */
+    newFrameCount = raw->loopEnd + reversedLen;
+
+    newPcm = (int8_t *)malloc(newFrameCount);
+    if (!newPcm)
+    {
+        return; /* leave sample unchanged on OOM */
+    }
+
+    /* Copy everything up to loopEnd. */
+    memcpy(newPcm, raw->pcm8, raw->loopEnd);
+
+    /* Append reversed loop body, skipping the endpoint samples. */
+    dst = raw->loopEnd;
+    for (src = raw->loopEnd - 2; src > raw->loopStart; --src)
+    {
+        newPcm[dst++] = raw->pcm8[src];
+    }
+
+    free(raw->pcm8);
+    raw->pcm8 = newPcm;
+    raw->frameCount = newFrameCount;
+    raw->loopEnd = raw->loopStart + loopLen + reversedLen; /* = loopStart + 2*loopLen - 2 */
+    raw->loopType = MOD2RMF_LOOP_FORWARD;
 }
 
-static void do_porta_down(ChannelState *ch, uint8_t speed)
+/* Emulate a reverse (backwards-only) sample loop by reversing the samples
+ * in the loop region in-place.  After this, a standard forward loop will
+ * play the region in the originally backward direction. */
+static void emulate_reverse_loop(ModRawSample *raw)
 {
-    int32_t p;
-    p = (int32_t)ch->period + (int32_t)speed;
-    if (p > MOD2RMF_MOD_PERIOD_MAX) p = MOD2RMF_MOD_PERIOD_MAX;
-    ch->period = (uint16_t)p;
+    uint32_t lo;
+    uint32_t hi;
+    int8_t   tmp;
+
+    if (!raw || !raw->pcm8 || raw->loopEnd <= raw->loopStart)
+    {
+        return;
+    }
+
+    lo = raw->loopStart;
+    hi = raw->loopEnd - 1;
+    while (lo < hi)
+    {
+        tmp = raw->pcm8[lo];
+        raw->pcm8[lo] = raw->pcm8[hi];
+        raw->pcm8[hi] = tmp;
+        lo++;
+        hi--;
+    }
+
+    raw->loopType = MOD2RMF_LOOP_FORWARD;
 }
 
-static void do_tone_porta(ChannelState *ch)
+/* Parse a row's primary and secondary effect columns for retrigger and
+ * note-delay commands.  Sets *outRetrigInterval and *outDelayFrames
+ * (either may remain unchanged if the effect is not present). */
+static void parse_row_effects(const struct xmp_event *ev,
+                              uint8_t *outRetrigInterval,
+                              uint8_t *outDelayFrames)
 {
-    if (ch->period < ch->targetPeriod)
+    int col;
+
+    if (!ev || !outRetrigInterval || !outDelayFrames)
     {
-        ch->period += ch->tonePortaSpeed;
-        if (ch->period > ch->targetPeriod)
+        return;
+    }
+
+    /* Check both primary (fxt/fxp) and secondary (f2t/f2p) columns. */
+    for (col = 0; col < 2; ++col)
+    {
+        uint8_t fxType = (col == 0) ? ev->fxt : ev->f2t;
+        uint8_t fxParam = (col == 0) ? ev->fxp : ev->f2p;
+
+        if (fxType == MOD2RMF_FX_EXTENDED)
         {
-            ch->period = ch->targetPeriod;
+            uint8_t subCmd = (fxParam >> 4) & 0x0F;
+            uint8_t subVal = fxParam & 0x0F;
+
+            if (subCmd == MOD2RMF_EX_RETRIG && subVal > 0)
+            {
+                *outRetrigInterval = subVal;
+            }
+            else if (subCmd == MOD2RMF_EX_DELAY && subVal > 0)
+            {
+                *outDelayFrames = subVal;
+            }
+        }
+        else if (fxType == MOD2RMF_FX_MULTI_RETRIG)
+        {
+            uint8_t interval = fxParam & 0x0F;
+            if (interval > 0)
+            {
+                *outRetrigInterval = interval;
+            }
         }
     }
-    else if (ch->period > ch->targetPeriod)
-    {
-        int32_t p;
-        p = (int32_t)ch->period - (int32_t)ch->tonePortaSpeed;
-        if (p < (int32_t)ch->targetPeriod)
-        {
-            p = (int32_t)ch->targetPeriod;
-        }
-        ch->period = (uint16_t)p;
-    }
-    clamp_period(&ch->period);
 }
 
-/* Re-anchor the MIDI note when tone portamento has slid the current period
- * to a different MIDI note than the one actively playing.  Without this,
- * sustained tone porta can exceed the ±12 semitone pitch-bend range and
- * the pitch saturates at the wrong value.
- *
- * Call this AFTER do_tone_porta() + emit_pitch_bend() on every tone-porta
- * tick (effects 0x03/0x05 for MOD, G/L for S3M).  Returns 0 on alloc fail. */
-static int maybe_reanchor_tone_porta(ModSongModel *song,
-                                     uint16_t channel,
-                                     ChannelState *ch,
-                                     ActiveNote *note,
-                                     uint64_t tickPosFP,
-                                     uint32_t midiTick)
+/* Return TRUE if tone portamento (effect 3xx or 5xx) is active in either
+ * effect column of this row.  When tone portamento is active the note in
+ * the pattern is the slide TARGET; the sample must NOT be retriggered. */
+static XBOOL row_has_tone_portamento(const struct xmp_event *ev)
 {
-    unsigned char newMidi;
-
-    if (!note->active || ch->period == 0 || ch->noteBasePeriod == 0)
+    if (!ev)
     {
-        return 1;
+        return FALSE;
     }
-
-    if (!period_to_midi(ch->period, &newMidi))
+    if (ev->fxt == MOD2RMF_FX_TONEPORTA || ev->fxt == MOD2RMF_FX_TONE_VSLIDE)
     {
-        return 1;
+        return TRUE;
     }
-
-    /* When the slide has reached its target, snap noteBasePeriod so the
-     * pitch bend resolves to the exact target pitch (avoids ~50 cent drift
-     * from the re-anchor boundary not aligning with the target period). */
-    if (ch->period == ch->targetPeriod && ch->noteBasePeriod != ch->period)
+    if (ev->f2t == MOD2RMF_FX_TONEPORTA || ev->f2t == MOD2RMF_FX_TONE_VSLIDE)
     {
-        if (newMidi == note->note)
-        {
-            /* Same MIDI note — just update the base and correct the bend */
-            ch->noteBasePeriod = ch->period;
-            ch->lastPitchBend = MOD2RMF_PITCH_BEND_CENTER;
-            song_model_append_pitch_bend(song, channel, midiTick, MOD2RMF_PITCH_BEND_CENTER);
-            return 1;
-        }
+        return TRUE;
     }
-
-    /* If the MIDI note hasn't changed, no re-anchor needed */
-    if (newMidi == note->note)
-    {
-        return 1;
-    }
-
-    /* Flush the old note, ending at the current tick (no gap).
-     * The engine will cut the old voice when the new note-on arrives
-     * on the same channel, so overlapping by 1 tick is fine. */
-    if (!flush_active_note(song, channel, note, tickPosFP))
-    {
-        return 0;
-    }
-
-    /* Update base period and reset pitch bend */
-    ch->noteBasePeriod = ch->period;
-    ch->lastPitchBend = MOD2RMF_PITCH_BEND_CENTER;
-    song_model_append_pitch_bend(song, channel, midiTick, MOD2RMF_PITCH_BEND_CENTER);
-
-    /* Emit volume so the new note inherits the current level */
-    emit_volume_cc(song, channel, ch, midiTick, ch->volume);
-
-    /* Start new note at the correct MIDI pitch */
-    note->active = TRUE;
-    note->startTickFP = tickPosFP;
-    note->note = newMidi;
-    note->velocity = 127;
-    note->program = ch->program;
-
-    return 1;
-}
-
-static int build_song_model_native(Mod2RmfConverter *conv, ModSongModel *song)
-{
-    const ModHeader *h;
-    const unsigned char *data;
-    ActiveNote activeNotes[MOD2RMF_MAX_CHANNELS];
-    ChannelState channels[MOD2RMF_MAX_CHANNELS];
-    uint64_t currentTickFP;
-    uint8_t speed;
-    uint16_t bpm;
-    uint32_t i;
-    uint32_t orderPos;
-    uint32_t rowPos;
-    uint32_t rowsProcessed;
-    uint32_t maxRows;
-
-    if (!conv || !song || !conv->sourceData)
-    {
-        return 0;
-    }
-
-    h = &conv->header;
-    data = (const unsigned char *)conv->sourceData;
-
-    song_model_init(song);
-    snprintf(song->moduleName, sizeof(song->moduleName), "%s",
-             h->title[0] ? h->title : "Untitled MOD");
-    song->channelCount = h->channelCount;
-    song->bpm = 125;
-    speed = 6;
-    bpm = 125;
-
-    for (i = 0; i < MOD2RMF_MAX_CHANNELS; ++i)
-    {
-        activeNotes[i].active = FALSE;
-        activeNotes[i].startTickFP = 0;
-        init_channel_state(&channels[i]);
-    }
-
-    /* Apply classic Amiga stereo separation (LRRL pattern).
-     * stereoSeparation: 0=mono (all center), 75=default, 100=hard L/R.
-     * Channels follow the Amiga hardware layout: L R R L repeating. */
-    {
-        static const int amigaSide[4] = { -1, 1, 1, -1 }; /* L R R L */
-        uint32_t ch;
-        int sep = (int)conv->stereoSeparation;
-        for (ch = 0; ch < h->channelCount && ch < MOD2RMF_MAX_CHANNELS; ++ch)
-        {
-            /* sep=100: offset=127 → left=1, right=255 (hard pan)
-             * sep=75:  offset=95  → left=33, right=223 (~73%)
-             * sep=0:   offset=0   → all center (128) */
-            int offset = (127 * sep) / 100;
-            int pan = 128 + amigaSide[ch % 4u] * offset;
-            if (pan < 0) pan = 0;
-            if (pan > 255) pan = 255;
-            channels[ch].panning = (unsigned char)pan;
-        }
-    }
-
-    if (!materialize_playables(conv, song))
-    {
-        return 0;
-    }
-
-    /* Collect source-order sample names into metadata notes. */
-    {
-        uint32_t si;
-        char clean[64];
-
-        song->composerNotes[0] = '\0';
-        for (si = 0; si < h->sampleCount; ++si)
-        {
-            trim_copy_ascii(clean, sizeof(clean), conv->rawSamples[si].name);
-            if (!clean[0])
-            {
-                (void)snprintf(clean, sizeof(clean), "%s", "");
-            }
-            append_linef(song->composerNotes, sizeof(song->composerNotes), clean);
-        }
-    }
-
-    /* Emit initial panning (CC#10) at tick 0 for all channels. */
-    {
-        uint32_t ch;
-        for (ch = 0; ch < h->channelCount && ch < MOD2RMF_MAX_CHANNELS; ++ch)
-        {
-            emit_panning_cc(song, (uint16_t)ch, &channels[ch], 0, channels[ch].panning);
-        }
-    }
-
-    currentTickFP = 0;
-    orderPos = 0;
-    rowPos = 0;
-    rowsProcessed = 0;
-    maxRows = (uint32_t)h->songLength * 64u * 4u;
-    if (maxRows < 1024u)
-    {
-        maxRows = 1024u;
-    }
-
-    /* Order visit tracking for song-loop detection.
-     * When a backward jump (Bxx) targets an already-visited order at row 0,
-     * the song has looped and we stop. */
-    {
-        uint8_t orderVisited[128];
-        uint64_t orderStartTickFP[128]; /* FP tick value at which each order began */
-        memset(orderVisited, 0, sizeof(orderVisited));
-        {
-            uint32_t oi;
-            for (oi = 0; oi < 128u; ++oi)
-                orderStartTickFP[oi] = UINT64_MAX;
-        }
-
-    {
-    XBOOL patternLoopBack = FALSE; /* TRUE when E6x just sent us back */
-
-    while (orderPos < h->songLength && rowsProcessed < maxRows)
-    {
-        uint32_t pattern;
-        uint32_t channel;
-        uint64_t rowTickFP;
-        uint64_t rowAdvanceFP;
-        int jumpOrder;
-        int breakRow;
-        uint8_t rowSpeed;
-        uint16_t rowBpm;
-        uint8_t patternDelayRows;
-        int patternLoopChannel;
-        XBOOL patternLoopActive;
-
-        /* Detect song loop: if we enter an order at row 0 that we've seen
-         * before AND we got here via order transition (not E6x pattern loop),
-         * the song has looped and we stop. */
-        if (rowPos == 0 && !patternLoopBack)
-        {
-            if (orderVisited[orderPos])
-            {
-                /* Loop back to this order — record loop markers */
-                if (orderStartTickFP[orderPos] != UINT64_MAX)
-                {
-                    song->loopEnabled = TRUE;
-                    song->loopStartTick = fp_ticks_to_int(orderStartTickFP[orderPos]);
-                    song->loopEndTick   = fp_ticks_to_int(currentTickFP);
-                }
-                break;
-            }
-            orderStartTickFP[orderPos] = currentTickFP;
-            orderVisited[orderPos] = 1;
-        }
-        patternLoopBack = FALSE;
-
-        /* Cell data cache per channel for the current row */
-        uint8_t cellSample[MOD2RMF_MAX_CHANNELS];
-        uint16_t cellPeriod[MOD2RMF_MAX_CHANNELS];
-        uint8_t cellEffect[MOD2RMF_MAX_CHANNELS];
-        uint8_t cellParam[MOD2RMF_MAX_CHANNELS];
-
-        pattern = h->orders[orderPos];
-        if (pattern >= h->patternCount)
-        {
-            orderPos++;
-            rowPos = 0;
-            continue;
-        }
-
-        /* ---- Parse all cells in this row ---- */
-        for (channel = 0; channel < h->channelCount; ++channel)
-        {
-            size_t cellOffset;
-            const unsigned char *cell;
-
-            cellOffset = h->patternDataOffset +
-                         (size_t)pattern * 64u * h->channelCount * 4u +
-                         (size_t)rowPos * h->channelCount * 4u +
-                         (size_t)channel * 4u;
-            cell = data + cellOffset;
-
-            cellSample[channel] = (uint8_t)((cell[0] & 0xF0u) | ((cell[2] & 0xF0u) >> 4));
-            cellPeriod[channel] = (uint16_t)(((uint16_t)(cell[0] & 0x0Fu) << 8) | (uint16_t)cell[1]);
-            cellEffect[channel] = (uint8_t)(cell[2] & 0x0Fu);
-            cellParam[channel] = cell[3];
-        }
-
-        /* ---- First pass: structural effects ---- */
-        jumpOrder = -1;
-        breakRow = -1;
-        rowSpeed = speed;
-        rowBpm = bpm;
-        patternDelayRows = 0;
-        patternLoopChannel = -1;
-        patternLoopActive = FALSE;
-
-        for (channel = 0; channel < h->channelCount; ++channel)
-        {
-            uint8_t effect, param;
-            effect = cellEffect[channel];
-            param = cellParam[channel];
-
-            if (effect == 0x0B)
-            {
-                jumpOrder = (int)param;
-            }
-            else if (effect == 0x0D)
-            {
-                int rb;
-                rb = ((int)((param >> 4) & 0x0Fu) * 10) + (int)(param & 0x0Fu);
-                if (rb < 0) rb = 0;
-                if (rb > 63) rb = 63;
-                breakRow = rb;
-            }
-            else if (effect == 0x0F)
-            {
-                if (param > 0 && param <= 31)
-                {
-                    rowSpeed = param;
-                }
-                else if (param >= 32)
-                {
-                    rowBpm = param;
-                }
-            }
-            else if (effect == 0x0E)
-            {
-                uint8_t subEff;
-                subEff = (uint8_t)((param >> 4) & 0x0Fu);
-                if (subEff == 0x0E)
-                {
-                    uint8_t dr;
-                    dr = (uint8_t)(param & 0x0Fu);
-                    if (dr > patternDelayRows) patternDelayRows = dr;
-                }
-                else if (subEff == 0x06)
-                {
-                    /* Pattern loop */
-                    uint8_t loopParam;
-                    loopParam = (uint8_t)(param & 0x0Fu);
-                    if (loopParam == 0)
-                    {
-                        channels[channel].loopStartRow = rowPos;
-                    }
-                    else
-                    {
-                        if (channels[channel].loopCount == 0)
-                        {
-                            channels[channel].loopCount = loopParam;
-                            patternLoopChannel = (int)channel;
-                            patternLoopActive = TRUE;
-                        }
-                        else
-                        {
-                            channels[channel].loopCount--;
-                            if (channels[channel].loopCount > 0)
-                            {
-                                patternLoopChannel = (int)channel;
-                                patternLoopActive = TRUE;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        /* Apply tempo/speed changes */
-        if (rowBpm != bpm)
-        {
-            bpm = rowBpm;
-            song_model_append_tempo_change(song, fp_ticks_to_int(currentTickFP), bpm);
-        }
-        speed = rowSpeed;
-        rowTickFP = mod_row_ticks_fp(speed, bpm);
-        rowAdvanceFP = rowTickFP * (uint64_t)(1u + patternDelayRows);
-
-        /* ---- Second pass: tick-by-tick simulation ---- */
-        {
-            uint32_t totalModTicks;
-            uint32_t modTick;
-
-            totalModTicks = (uint32_t)speed * (1u + (uint32_t)patternDelayRows);
-
-            for (modTick = 0; modTick < totalModTicks; ++modTick)
-            {
-                uint64_t tickPosFP;
-                uint32_t midiTick;
-
-                tickPosFP = currentTickFP +
-                            (rowAdvanceFP * (uint64_t)modTick) / (uint64_t)totalModTicks;
-                midiTick = fp_ticks_to_int(tickPosFP);
-
-                for (channel = 0; channel < h->channelCount; ++channel)
-                {
-                    uint8_t sampleNum, effect, param;
-                    uint16_t period;
-                    ChannelState *ch;
-                    uint8_t subEff;
-
-                    sampleNum = cellSample[channel];
-                    period = cellPeriod[channel];
-                    effect = cellEffect[channel];
-                    param = cellParam[channel];
-                    ch = &channels[channel];
-                    subEff = (effect == 0x0E) ? (uint8_t)((param >> 4) & 0x0Fu) : 0;
-
-                    /* ===================== TICK 0 ===================== */
-                    if (modTick == 0)
-                    {
-                        /* --- Phase 1: Resolve volume state (no CC yet) ---
-                         *
-                         * ProTracker processes sample number, then 0x0C, before
-                         * the note trigger.  We resolve ch->volume first but
-                         * DEFER the CC#7 emission until after any active note
-                         * is flushed, so a volume jump doesn't briefly reach
-                         * the old (still-looping) voice.
-                         */
-                        XBOOL willTriggerNote = FALSE;
-
-                        /* Sample number sets the program and resets the
-                         * channel volume to the sample's default.
-                         * ProTracker always resets volume when a sample
-                         * number appears, even without a note (period). */
-                        if (sampleNum > 0 && sampleNum <= h->sampleCount &&
-                            conv->slotToProgram[sampleNum - 1] != 0xFF)
-                        {
-                            ch->program = conv->slotToProgram[sampleNum - 1];
-                            ch->volume = conv->rawSamples[sampleNum - 1].defaultVolume;
-                        }
-                        else if (sampleNum > 0 && sampleNum <= h->sampleCount)
-                        {
-                            ch->program = 0xFF;
-                            ch->volume = conv->rawSamples[sampleNum - 1].defaultVolume;
-                        }
-
-                        /* 0x0C: Set Volume — processed before note trigger
-                         * (ProTracker: Cxx overrides sample default volume). */
-                        if (effect == 0x0C)
-                        {
-                            ch->volume = (param > 64) ? 64 : (unsigned char)param;
-                        }
-
-                        /* Determine whether a note will trigger on this row
-                         * so we can defer CC#7 until after the old note is flushed. */
-                        if (period != 0 && ch->program != 0xFF &&
-                            !(effect == 0x03 || effect == 0x05) &&
-                            !(effect == 0x0E && subEff == 0x0D && (param & 0x0Fu) > 0))
-                        {
-                            willTriggerNote = TRUE;
-                        }
-
-                        /* Emit CC#7 now ONLY if no note trigger is coming.
-                         * When a note triggers, CC#7 is emitted after the
-                         * old note is flushed (see Phase 3 below). */
-                        if (!willTriggerNote)
-                        {
-                            emit_volume_cc(song, (uint16_t)channel, ch, midiTick, ch->volume);
-                        }
-
-                        /* --- Phase 2: Update effect memory --- */
-                        if (effect == 0x01 && param != 0) ch->portaUpSpeed = param;
-                        if (effect == 0x02 && param != 0) ch->portaDownSpeed = param;
-                        if (effect == 0x03 && param != 0) ch->tonePortaSpeed = param;
-                        if (effect == 0x04)
-                        {
-                            if ((param >> 4) != 0) ch->vibratoSpeed = (uint8_t)(param >> 4);
-                            if ((param & 0x0F) != 0) ch->vibratoDepth = (uint8_t)(param & 0x0F);
-                        }
-                        if (effect == 0x07)
-                        {
-                            if ((param >> 4) != 0) ch->tremoloSpeed = (uint8_t)(param >> 4);
-                            if ((param & 0x0F) != 0) ch->tremoloDepth = (uint8_t)(param & 0x0F);
-                        }
-                        if (effect == 0x00 && param != 0) ch->arpeggioParam = param;
-                        if (effect == 0x09 && param != 0) ch->sampleOffset = param;
-
-                        /* --- Phase 3: Note trigger --- */
-
-                        /* Note delay: skip note trigger on tick 0 if EDx with x>0 */
-                        if (effect == 0x0E && subEff == 0x0D && (param & 0x0Fu) > 0)
-                        {
-                            /* Note will be triggered on the specified tick below */
-                        }
-                        else if (period != 0 && ch->program != 0xFF)
-                        {
-                            if (effect == 0x03 || effect == 0x05)
-                            {
-                                /* Tone portamento: set target, don't trigger new note */
-                                ch->targetPeriod = period;
-                            }
-                            else
-                            {
-                                unsigned char midiNote;
-                                uint64_t noteStartFP;
-                                unsigned char noteProgram;
-
-                                noteStartFP = tickPosFP;
-                                noteProgram = ch->program;
-                                if (conv->enableZmfSampleOffset && ch->sampleOffset > 0)
-                                {
-                                    noteProgram = ensure_sample_offset_variant_program(conv,
-                                                                                       song,
-                                                                                       ch->program,
-                                                                                       (uint32_t)ch->sampleOffset * 256u);
-                                }
-
-                                if (!period_to_midi(period, &midiNote))
-                                {
-                                    goto next_channel_tick0;
-                                }
-
-                                /* Flush any active note, ending it 1 tick before
-                                 * the new note so the CC#7 volume change at this
-                                 * tick doesn't briefly reach the old (possibly
-                                 * looping) voice.  1 MIDI tick is sub-ms. */
-                                {
-                                    uint64_t flushEndFP;
-                                    flushEndFP = (noteStartFP >= 0x10000u)
-                                               ? (noteStartFP - 0x10000u) : 0u;
-                                    if (!flush_active_note(song, (uint16_t)channel,
-                                                           &activeNotes[channel], flushEndFP))
-                                    {
-                                        return 0;
-                                    }
-                                }
-
-                                /* Emit CC#7 with the resolved volume. */
-                                emit_volume_cc(song, (uint16_t)channel, ch, midiTick, ch->volume);
-
-                                ch->period = period;
-                                ch->noteBasePeriod = period;
-                                ch->targetPeriod = period;
-
-                                /* Reset vibrato position if waveform < 4 (retrigger mode) */
-                                if (ch->vibratoWaveform < 4) ch->vibratoPos = 0;
-                                if (ch->tremoloWaveform < 4) ch->tremoloPos = 0;
-
-                                /* Reset pitch bend to center for new note */
-                                if (ch->lastPitchBend != MOD2RMF_PITCH_BEND_CENTER)
-                                {
-                                    ch->lastPitchBend = MOD2RMF_PITCH_BEND_CENTER;
-                                    song_model_append_pitch_bend(song, (uint16_t)channel,
-                                                                 midiTick, MOD2RMF_PITCH_BEND_CENTER);
-                                }
-
-                                activeNotes[channel].active = TRUE;
-                                activeNotes[channel].startTickFP = noteStartFP;
-                                activeNotes[channel].note = midiNote;
-                                activeNotes[channel].velocity = 127;
-                                activeNotes[channel].program = noteProgram;
-                            }
-                        }
-
-next_channel_tick0:
-                        /* ---- Tick-0-only effects (post-trigger) ---- */
-
-                        /* 0x08: Set Panning */
-                        if (effect == 0x08)
-                        {
-                            ch->panning = param;
-                            emit_panning_cc(song, (uint16_t)channel, ch, midiTick, ch->panning);
-                        }
-
-                        /* E1x: Fine Portamento Up */
-                        if (effect == 0x0E && subEff == 0x01)
-                        {
-                            do_porta_up(ch, (uint8_t)(param & 0x0Fu));
-                            emit_pitch_bend(song, (uint16_t)channel, ch, midiTick);
-                        }
-
-                        /* E2x: Fine Portamento Down */
-                        if (effect == 0x0E && subEff == 0x02)
-                        {
-                            do_porta_down(ch, (uint8_t)(param & 0x0Fu));
-                            emit_pitch_bend(song, (uint16_t)channel, ch, midiTick);
-                        }
-
-                        /* E3x: Glissando Control */
-                        if (effect == 0x0E && subEff == 0x03)
-                        {
-                            ch->glissando = (uint8_t)(param & 0x0Fu);
-                        }
-
-                        /* E4x: Set Vibrato Waveform */
-                        if (effect == 0x0E && subEff == 0x04)
-                        {
-                            ch->vibratoWaveform = (uint8_t)(param & 0x07u);
-                        }
-
-                        /* E5x: Set Finetune */
-                        if (effect == 0x0E && subEff == 0x05)
-                        {
-                            ch->finetune = (int8_t)(param & 0x0Fu);
-                            if (ch->finetune > 7) ch->finetune -= 16;
-                        }
-
-                        /* E7x: Set Tremolo Waveform */
-                        if (effect == 0x0E && subEff == 0x07)
-                        {
-                            ch->tremoloWaveform = (uint8_t)(param & 0x07u);
-                        }
-
-                        /* E8x: Set Panning (coarse, 0-F → 0-255) */
-                        if (effect == 0x0E && subEff == 0x08)
-                        {
-                            ch->panning = (unsigned char)((param & 0x0Fu) * 17u);
-                            emit_panning_cc(song, (uint16_t)channel, ch, midiTick, ch->panning);
-                        }
-
-                        /* EAx: Fine Volume Slide Up */
-                        if (effect == 0x0E && subEff == 0x0A)
-                        {
-                            int16_t v;
-                            v = (int16_t)ch->volume + (int16_t)(param & 0x0Fu);
-                            if (v > 64) v = 64;
-                            ch->volume = (unsigned char)v;
-                            emit_volume_cc(song, (uint16_t)channel, ch, midiTick, ch->volume);
-                        }
-
-                        /* EBx: Fine Volume Slide Down */
-                        if (effect == 0x0E && subEff == 0x0B)
-                        {
-                            int16_t v;
-                            v = (int16_t)ch->volume - (int16_t)(param & 0x0Fu);
-                            if (v < 0) v = 0;
-                            ch->volume = (unsigned char)v;
-                            emit_volume_cc(song, (uint16_t)channel, ch, midiTick, ch->volume);
-                        }
-
-                        /* E9x: Retrigger (tick 0 counts if param divides 0) */
-                        if (effect == 0x0E && subEff == 0x09)
-                        {
-                            ch->retriggerParam = (uint8_t)(param & 0x0Fu);
-                        }
-
-                    } /* end tick == 0 */
-
-                    /* ===================== TICK > 0 ===================== */
-                    if (modTick > 0)
-                    {
-                        /* 0x01: Portamento Up */
-                        if (effect == 0x01)
-                        {
-                            do_porta_up(ch, ch->portaUpSpeed);
-                            emit_pitch_bend(song, (uint16_t)channel, ch, midiTick);
-                        }
-
-                        /* 0x02: Portamento Down */
-                        if (effect == 0x02)
-                        {
-                            do_porta_down(ch, ch->portaDownSpeed);
-                            emit_pitch_bend(song, (uint16_t)channel, ch, midiTick);
-                        }
-
-                        /* 0x03: Tone Portamento */
-                        if (effect == 0x03)
-                        {
-                            do_tone_porta(ch);
-                            if (ch->glissando)
-                            {
-                                /* Quantize to nearest semitone */
-                                unsigned char dummy;
-                                if (period_to_midi(ch->period, &dummy) && dummy >= 36u)
-                                {
-                                    ch->period = gPeriodTable[dummy - 36u];
-                                }
-                            }
-                            emit_pitch_bend(song, (uint16_t)channel, ch, midiTick);
-                            if (!maybe_reanchor_tone_porta(song, (uint16_t)channel, ch,
-                                                           &activeNotes[channel],
-                                                           tickPosFP, midiTick))
-                            {
-                                return 0;
-                            }
-                        }
-
-                        /* 0x04: Vibrato */
-                        if (effect == 0x04)
-                        {
-                            ch->vibratoPos += ch->vibratoSpeed;
-                            emit_pitch_with_vibrato(song, (uint16_t)channel, ch, midiTick);
-                        }
-
-                        /* 0x05: Tone Porta + Volume Slide */
-                        if (effect == 0x05)
-                        {
-                            do_tone_porta(ch);
-                            if (param != 0) do_volume_slide(ch, param);
-                            emit_pitch_bend(song, (uint16_t)channel, ch, midiTick);
-                            if (param != 0) emit_volume_cc(song, (uint16_t)channel, ch, midiTick, ch->volume);
-                            if (!maybe_reanchor_tone_porta(song, (uint16_t)channel, ch,
-                                                           &activeNotes[channel],
-                                                           tickPosFP, midiTick))
-                            {
-                                return 0;
-                            }
-                        }
-
-                        /* 0x06: Vibrato + Volume Slide */
-                        if (effect == 0x06)
-                        {
-                            ch->vibratoPos += ch->vibratoSpeed;
-                            if (param != 0) do_volume_slide(ch, param);
-                            emit_pitch_with_vibrato(song, (uint16_t)channel, ch, midiTick);
-                            if (param != 0) emit_volume_cc(song, (uint16_t)channel, ch, midiTick, ch->volume);
-                        }
-
-                        /* 0x07: Tremolo */
-                        if (effect == 0x07)
-                        {
-                            ch->tremoloPos += ch->tremoloSpeed;
-                            emit_volume_with_tremolo(song, (uint16_t)channel, ch, midiTick);
-                        }
-
-                        /* 0x0A: Volume Slide (ProTracker: param 0 = no effect) */
-                        if (effect == 0x0A && param != 0)
-                        {
-                            do_volume_slide(ch, param);
-                            emit_volume_cc(song, (uint16_t)channel, ch, midiTick, ch->volume);
-                        }
-                    } /* end tick > 0 */
-
-                    /* ===================== EVERY TICK ===================== */
-
-                    /* 0x00: Arpeggio (cycles through base, +x, +y semitones).
-                     * effect=0x00 with param=0x00 means "no effect", NOT arpeggio. */
-                    if (effect == 0x00 && param != 0 &&
-                        ch->noteBasePeriod > 0 && activeNotes[channel].active)
-                    {
-                        uint8_t arpX, arpY, arpNote;
-                        uint16_t arpPeriod;
-                        uint16_t savedPeriod;
-                        uint32_t baseIndex;
-
-                        arpX = (uint8_t)((ch->arpeggioParam >> 4) & 0x0Fu);
-                        arpY = (uint8_t)(ch->arpeggioParam & 0x0Fu);
-
-                        /* Find the base note index in the period table */
-                        baseIndex = 0;
-                        {
-                            uint32_t bi;
-                            uint32_t bestDiff = 0xFFFFFFFFu;
-                            for (bi = 0; bi < (uint32_t)PERIOD_TABLE_SIZE; ++bi)
-                            {
-                                uint32_t d;
-                                d = (gPeriodTable[bi] > ch->noteBasePeriod)
-                                    ? (uint32_t)(gPeriodTable[bi] - ch->noteBasePeriod)
-                                    : (uint32_t)(ch->noteBasePeriod - gPeriodTable[bi]);
-                                if (d < bestDiff) { bestDiff = d; baseIndex = bi; }
-                            }
-                        }
-
-                        switch (modTick % 3u)
-                        {
-                            case 0:
-                                arpNote = 0;
-                                break;
-                            case 1:
-                                arpNote = arpX;
-                                break;
-                            default:
-                                arpNote = arpY;
-                                break;
-                        }
-
-                        if (baseIndex + arpNote < (uint32_t)PERIOD_TABLE_SIZE)
-                        {
-                            arpPeriod = gPeriodTable[baseIndex + arpNote];
-                        }
-                        else
-                        {
-                            arpPeriod = gPeriodTable[PERIOD_TABLE_SIZE - 1];
-                        }
-
-                        savedPeriod = ch->period;
-                        ch->period = arpPeriod;
-                        emit_pitch_bend(song, (uint16_t)channel, ch, midiTick);
-                        ch->period = savedPeriod;
-                    }
-
-                    /* ECx: Note Cut on tick x */
-                    if (effect == 0x0E && subEff == 0x0C)
-                    {
-                        uint8_t cutTick;
-                        cutTick = (uint8_t)(param & 0x0Fu);
-                        if (modTick == cutTick && activeNotes[channel].active)
-                        {
-                            if (!flush_active_note(song, (uint16_t)channel,
-                                                   &activeNotes[channel], tickPosFP))
-                            {
-                                return 0;
-                            }
-                            ch->volume = 0;
-                            emit_volume_cc(song, (uint16_t)channel, ch, midiTick, 0);
-                        }
-                    }
-
-                    /* EDx: Note Delay - trigger note on tick x */
-                    if (effect == 0x0E && subEff == 0x0D)
-                    {
-                        uint8_t delayTick;
-                        delayTick = (uint8_t)(param & 0x0Fu);
-                        if (modTick == delayTick && period != 0 && ch->program != 0xFF)
-                        {
-                            unsigned char midiNote;
-                            unsigned char noteProgram;
-                            if (period_to_midi(period, &midiNote))
-                            {
-                                noteProgram = ch->program;
-                                if (conv->enableZmfSampleOffset && ch->sampleOffset > 0)
-                                {
-                                    noteProgram = ensure_sample_offset_variant_program(conv,
-                                                                                       song,
-                                                                                       ch->program,
-                                                                                       (uint32_t)ch->sampleOffset * 256u);
-                                }
-
-                                if (!flush_active_note(song, (uint16_t)channel,
-                                                       &activeNotes[channel], tickPosFP))
-                                {
-                                    return 0;
-                                }
-
-                                ch->period = period;
-                                ch->noteBasePeriod = period;
-                                ch->targetPeriod = period;
-                                if (ch->vibratoWaveform < 4) ch->vibratoPos = 0;
-                                if (ch->tremoloWaveform < 4) ch->tremoloPos = 0;
-
-                                if (ch->lastPitchBend != MOD2RMF_PITCH_BEND_CENTER)
-                                {
-                                    ch->lastPitchBend = MOD2RMF_PITCH_BEND_CENTER;
-                                    song_model_append_pitch_bend(song, (uint16_t)channel,
-                                                                 midiTick, MOD2RMF_PITCH_BEND_CENTER);
-                                }
-
-                                emit_volume_cc(song, (uint16_t)channel, ch, midiTick, ch->volume);
-
-                                activeNotes[channel].active = TRUE;
-                                activeNotes[channel].startTickFP = tickPosFP;
-                                activeNotes[channel].note = midiNote;
-                                activeNotes[channel].velocity = 127;
-                                activeNotes[channel].program = noteProgram;
-                            }
-                        }
-                    }
-
-                    /* E9x: Retrigger note every x ticks */
-                    if (effect == 0x0E && subEff == 0x09 && ch->retriggerParam > 0)
-                    {
-                        if (modTick > 0 && (modTick % ch->retriggerParam) == 0 &&
-                            activeNotes[channel].active)
-                        {
-                            unsigned char retrigNote;
-                            unsigned char retrigVel;
-
-                            retrigNote = activeNotes[channel].note;
-                            retrigVel = activeNotes[channel].velocity;
-
-                            if (!flush_active_note(song, (uint16_t)channel,
-                                                   &activeNotes[channel], tickPosFP))
-                            {
-                                return 0;
-                            }
-
-                            activeNotes[channel].active = TRUE;
-                            activeNotes[channel].startTickFP = tickPosFP;
-                            activeNotes[channel].note = retrigNote;
-                            activeNotes[channel].velocity = retrigVel;
-                            activeNotes[channel].program = ch->program;
-                        }
-                    }
-
-                } /* end channel loop */
-            } /* end modTick loop */
-        }
-
-        /* Advance the tick counter */
-        currentTickFP += rowAdvanceFP;
-
-        /* ---- Flow control ---- */
-        if (patternLoopActive && patternLoopChannel >= 0)
-        {
-            rowPos = channels[patternLoopChannel].loopStartRow;
-            patternLoopBack = TRUE;
-        }
-        else if (jumpOrder >= 0)
-        {
-            if (jumpOrder < (int)h->songLength)
-            {
-                orderPos = (uint32_t)jumpOrder;
-                rowPos = (breakRow >= 0) ? (uint32_t)breakRow : 0u;
-            }
-            else
-            {
-                break;
-            }
-        }
-        else if (breakRow >= 0)
-        {
-            orderPos++;
-            rowPos = (uint32_t)breakRow;
-        }
-        else
-        {
-            rowPos++;
-            if (rowPos >= 64)
-            {
-                orderPos++;
-                rowPos = 0;
-            }
-        }
-
-        rowsProcessed++;
-    }
-
-    /* Natural end: song played through all orders without a Bxx backward jump.
-     * MOD files always loop — use restartPos (or order 0) as the loop start. */
-    if (!song->loopEnabled)
-    {
-        unsigned char rp = h->restartPos;
-        if (rp >= h->songLength)
-        {
-            rp = 0;
-        }
-        if (orderStartTickFP[rp] != UINT64_MAX)
-        {
-            song->loopEnabled = TRUE;
-            song->loopStartTick = fp_ticks_to_int(orderStartTickFP[rp]);
-            song->loopEndTick   = fp_ticks_to_int(currentTickFP);
-        }
-    }
-
-    } /* end patternLoopBack scope */
-    } /* end orderVisited scope */
-
-    /* Flush any remaining active notes */
-    for (i = 0; i < h->channelCount; ++i)
-    {
-        if (activeNotes[i].active)
-        {
-            if (!flush_active_note(song, (uint16_t)i, &activeNotes[i],
-                                   currentTickFP + mod_row_ticks_fp(speed, bpm)))
-            {
-                return 0;
-            }
-        }
-    }
-
-    fprintf(stderr, "native: %u rows, %u notes, %u CC, %u PB, %u tempo, speed=%u bpm=%u ch=%u\n",
-            rowsProcessed, song->noteCount, song->ccCount, song->pitchBendCount,
-            song->tempoChangeCount, (unsigned)speed, (unsigned)bpm, (unsigned)h->channelCount);
-
-    return 1;
-}
-
-static int build_song_model_s3m(Mod2RmfConverter *conv, ModSongModel *song)
-{
-    typedef struct
-    {
-        uint8_t inst;      /* 1-based S3M instrument */
-        uint8_t program;   /* mapped playable program */
-        uint8_t volume;    /* 0..64 */
-        uint8_t pan;       /* 0..255 */
-        uint8_t sampleOffsetCmd; /* Oxx memory, in 256-byte units */
-        uint8_t retrigCmd;       /* Qxy memory */
-        uint8_t volSlideCmd;     /* Dxy memory */
-        uint8_t portaDownCmd;    /* Exx memory */
-        uint8_t portaUpCmd;      /* Fxx memory */
-        uint8_t tonePortaCmd;    /* Gxx memory */
-        uint8_t vibratoSpeed;    /* Hx0/Kx0 memory */
-        uint8_t vibratoDepth;    /* H0x/K0x memory */
-        uint8_t vibratoPos;
-        uint8_t fineVibratoSpeed; /* Ux0 memory */
-        uint8_t fineVibratoDepth; /* U0x memory */
-        uint8_t fineVibratoPos;
-        uint8_t tremoloSpeed;    /* Rx0 memory */
-        uint8_t tremoloDepth;    /* R0x memory */
-        uint8_t tremoloPos;
-        uint8_t tremorCmd;       /* Ixy memory */
-        uint8_t vibratoWaveform; /* S3x: 0=sine 1=ramp 2=square 3=random */
-        uint8_t tremoloWaveform; /* S4x: 0=sine 1=ramp 2=square 3=random */
-        uint16_t period;
-        uint16_t targetPeriod;
-        uint16_t noteBasePeriod;
-        uint16_t lastPitchBend;
-        XBOOL active;
-        uint64_t startTickFP;
-        unsigned char activeNote;
-        unsigned char activeVelocity;
-        unsigned char activeProgram;
-        /* SBx pattern loop state */
-        uint32_t loopStartRow;
-        uint8_t loopCount;
-        uint32_t c2spd;        /* instrument C2Spd for pitch-delta scaling */
-    } S3mChannelState;
-
-    const unsigned char *srcData;
-    size_t srcSize;
-    Mod2RmfS3mModule s3m;
-    char parseErr[256];
-    uint32_t i;
-    uint32_t k;
-    uint32_t playableCap;
-    uint32_t playableCount;
-    S3mChannelState *channels;
-    uint64_t orderStartTickFP[256];
-    uint64_t currentTickFP;
-    uint16_t speed;
-    uint16_t bpm;
-    uint32_t orderPos;
-    uint32_t rowPos;
-    uint32_t stepGuard;
-    const uint32_t maxSteps = 400000u;
-
-    if (!conv || !song || !conv->sourceData)
-    {
-        return 0;
-    }
-
-    srcData = (const unsigned char *)conv->sourceData;
-    srcSize = conv->sourceSize;
-
-    memset(&s3m, 0, sizeof(s3m));
-    memset(parseErr, 0, sizeof(parseErr));
-    if (!mod2rmf_s3m_parse_module(srcData, srcSize, &s3m, parseErr, sizeof(parseErr)))
-    {
-        fprintf(stderr, "Error: S3M parse failed: %s\n", parseErr[0] ? parseErr : "unknown");
-        return 0;
-    }
-
-    snprintf(song->moduleName, sizeof(song->moduleName), "%s", s3m.name);
-    song->channelCount = s3m.channelCount;
-    song->bpm = (s3m.initialTempo > 0) ? s3m.initialTempo : 125u;
-    if (song->bpm == 0)
-    {
-        song->bpm = 125u;
-    }
-
-    /* Collect source-order instrument/sample names into metadata notes. */
-    {
-        uint32_t si;
-        char clean[64];
-
-        song->composerNotes[0] = '\0';
-        for (si = 0; si < s3m.instrumentCount; ++si)
-        {
-            trim_copy_ascii(clean, sizeof(clean), s3m.samples[si].name);
-            if (!clean[0])
-            {
-                (void)snprintf(clean, sizeof(clean), "%s", "");
-            }
-            append_linef(song->composerNotes, sizeof(song->composerNotes), clean);
-        }
-    }
-
-    /* --- Register S3M samples as playables --- */
-    playableCap = MOD2RMF_MAX_SAMPLES;
-    conv->rawSamples = (ModRawSample *)calloc(playableCap, sizeof(ModRawSample));
-    song->playables = (ModPlayable *)calloc(playableCap, sizeof(ModPlayable));
-    if (!conv->rawSamples || !song->playables)
-    {
-        mod2rmf_s3m_free_module(&s3m);
-        free(conv->rawSamples);
-        conv->rawSamples = NULL;
-        free(song->playables);
-        song->playables = NULL;
-        return 0;
-    }
-
-    playableCount = 0;
-    for (i = 0; i < s3m.instrumentCount && playableCount < playableCap; ++i)
-    {
-        Mod2RmfS3mSample *ss;
-        ModRawSample *raw;
-        ModPlayable *playable;
-
-        ss = &s3m.samples[i];
-        if (ss->type != 1 || !ss->pcm8 || ss->length == 0)
-        {
-            continue;
-        }
-
-        raw = &conv->rawSamples[playableCount];
-        playable = &song->playables[playableCount];
-
-        memset(raw, 0, sizeof(*raw));
-        memset(playable, 0, sizeof(*playable));
-
-        raw->valid = TRUE;
-        snprintf(raw->name, sizeof(raw->name), "%s", ss->name);
-        raw->frameCount = ss->length;
-        raw->loopStart = ss->loopStart;
-        raw->loopEnd = ss->loopEnd;
-        raw->defaultVolume = ss->volume;
-        raw->rootKey = 60;
-        raw->finetune = 0;
-        raw->pcm8 = (int8_t *)malloc(ss->length);
-        if (!raw->pcm8)
-        {
-            for (k = 0; k < playableCount; ++k)
-            {
-                free(conv->rawSamples[k].pcm8);
-                conv->rawSamples[k].pcm8 = NULL;
-            }
-            mod2rmf_s3m_free_module(&s3m);
-            return 0;
-        }
-        memcpy(raw->pcm8, ss->pcm8, ss->length);
-
-        playable->sourceSlot = playableCount;
-        playable->program = (unsigned char)playableCount;
-        playable->rootKey = raw->rootKey;
-        playable->rawSample = raw;
-        /* S3M C2Spd (C-4 playback rate) maps directly to sample rate. */
-        playable->hasSampleRateOverride = TRUE;
-        playable->sampleRateOverrideHz = (ss->c2spd > 0) ? ss->c2spd : 8363u;
-        snprintf(playable->displayName,
-                 sizeof(playable->displayName),
-                 "%u %s",
-                 (unsigned)(i + 1u),
-                 ss->name[0] ? ss->name : "S3M Sample");
-
-        playableCount++;
-    }
-
-    song->playableCount = playableCount;
-    conv->header.sampleCount = (unsigned char)((playableCount > 255u) ? 255u : playableCount);
-
-    /* Build instrument-to-program mapping (1-based inst → 0-based program).
-     * S3M instruments are 1:1 with samples, but empty/OPL slots are skipped. */
-    {
-        uint8_t instToProgram[256];
-        uint32_t progIdx;
-        memset(instToProgram, 0xFF, sizeof(instToProgram));
-        progIdx = 0;
-        for (i = 0; i < s3m.instrumentCount; ++i)
-        {
-            if (s3m.samples[i].type == 1 && s3m.samples[i].pcm8 && s3m.samples[i].length > 0)
-            {
-                instToProgram[i] = (uint8_t)progIdx;
-                progIdx++;
-            }
-        }
-
-    /* --- Allocate channel state --- */
-    channels = (S3mChannelState *)calloc(s3m.channelCount, sizeof(S3mChannelState));
-    if (!channels)
-    {
-        mod2rmf_s3m_free_module(&s3m);
-        return 0;
-    }
-
-    /* S3M default panning: channels with setting 0..7 are left, 8..15 are right.
-     * Apply stereo separation scaling (0=mono, 75=default, 100=hard L/R). */
-    for (i = 0; i < s3m.channelCount; ++i)
-    {
-        uint8_t cs = s3m.channelSettings[i];
-        int sep = (int)conv->stereoSeparation;
-        int rawPan;
-        channels[i].inst = 0;
-        channels[i].program = 0;
-        channels[i].volume = s3m.globalVolume;
-        channels[i].lastPitchBend = MOD2RMF_PITCH_BEND_CENTER;
-        if (s3m.hasDefaultPanning && s3m.defaultPanning[i] != 255u)
-        {
-            rawPan = (int)s3m.defaultPanning[i];
-        }
-        else if (cs < 8)
-            rawPan = 76;   /* slightly left */
-        else if (cs < 16)
-            rawPan = 179;  /* slightly right */
-        else
-            rawPan = 128;  /* center */
-
-        /* Scale panning distance from center by separation %.
-         * sep=100 maps original pan to full range (hard L/R for edge values).
-         * sep=75 (default) preserves roughly the original S3M distances.
-         * sep=0 collapses everything to center. */
-        {
-            int offset = rawPan - 128;
-            offset = (offset * sep) / 75;
-            rawPan = 128 + offset;
-            if (rawPan < 0) rawPan = 0;
-            if (rawPan > 255) rawPan = 255;
-        }
-        channels[i].pan = (uint8_t)rawPan;
-        channels[i].c2spd = 8363u;
-        (void)song_model_append_cc_event(song, (uint16_t)i, 0, 7, mod_vol_to_midi(channels[i].volume));
-        (void)song_model_append_cc_event(song, (uint16_t)i, 0, 10, (unsigned char)(channels[i].pan >> 1));
-    }
-
-    {
-    uint8_t orderVisited[256];
-    XBOOL patternLoopBack = FALSE;
-    memset(orderVisited, 0, sizeof(orderVisited));
-
-    for (i = 0; i < 256u; ++i)
-    {
-        orderStartTickFP[i] = UINT64_MAX;
-    }
-
-    currentTickFP = 0;
-    speed = s3m.initialSpeed ? s3m.initialSpeed : 6u;
-    bpm = s3m.initialTempo ? s3m.initialTempo : 125u;
-    orderPos = 0;
-    rowPos = 0;
-    stepGuard = 0;
-    (void)song_model_append_tempo_change(song, 0, bpm);
-
-    while (orderPos < s3m.orderCount && stepGuard < maxSteps)
-    {
-        uint8_t patNum;
-        Mod2RmfS3mPattern *pat;
-        uint64_t rowTicksFP;
-        int jumpOrder;
-        int breakRow;
-        int patternLoopChannel;
-        XBOOL patternLoopActive;
-        uint8_t patternDelayRows;
-
-        /* Skip marker (254) and end-of-song (255) orders */
-        if (s3m.orders[orderPos] >= 254u)
-        {
-            if (s3m.orders[orderPos] == 255u)
-                break;
-            orderPos++;
-            rowPos = 0;
-            stepGuard++;
-            continue;
-        }
-
-        /* Song-loop detection: if we enter an order at row 0 that we've
-         * already visited (and we didn't get here via SBx pattern loop),
-         * the song has looped — record loop markers and stop. */
-        if (rowPos == 0 && !patternLoopBack)
-        {
-            if (orderVisited[orderPos])
-            {
-                if (orderStartTickFP[orderPos] != UINT64_MAX)
-                {
-                    song->loopEnabled = TRUE;
-                    song->loopStartTick = fp_ticks_to_int(orderStartTickFP[orderPos]);
-                    song->loopEndTick   = fp_ticks_to_int(currentTickFP);
-                }
-                break;
-            }
-            orderStartTickFP[orderPos] = currentTickFP;
-            orderVisited[orderPos] = 1;
-        }
-        patternLoopBack = FALSE;
-
-        patNum = s3m.orders[orderPos];
-        if (patNum >= s3m.patternCount)
-        {
-            orderPos++;
-            rowPos = 0;
-            stepGuard++;
-            continue;
-        }
-
-        pat = &s3m.patterns[patNum];
-        if (rowPos >= pat->rows)
-        {
-            orderPos++;
-            rowPos = 0;
-            stepGuard++;
-            continue;
-        }
-
-        jumpOrder = -1;
-        breakRow = -1;
-        rowTicksFP = mod_row_ticks_fp((uint8_t)((speed == 0u) ? 1u : speed), bpm);
-        if (rowTicksFP == 0u)
-        {
-            rowTicksFP = ((uint64_t)MOD2RMF_ROW_TICKS << 16);
-        }
-
-        patternLoopChannel = -1;
-        patternLoopActive = FALSE;
-        patternDelayRows = 0;
-
-        for (i = 0; i < s3m.channelCount; ++i)
-        {
-            Mod2RmfS3mCell *cell;
-            S3mChannelState *ch;
-            uint8_t note;
-            uint8_t instrument;
-            uint8_t volume;
-            uint8_t command;
-            uint8_t info;
-
-            cell = &pat->cells[(uint32_t)rowPos * (uint32_t)s3m.channelCount + i];
-            ch = &channels[i];
-            note = cell->note;
-            instrument = cell->instrument;
-            volume = cell->volume;
-            command = cell->command;
-            info = cell->info;
-
-            /* Instrument column: update program mapping.
-             * Volume resets to instrument default only on note trigger
-             * (not note-off 254, not empty 255, not tone porta G/L). */
-            if (instrument >= 1u && instrument <= s3m.instrumentCount)
-            {
-                uint32_t instIdx = (uint32_t)(instrument - 1u);
-                ch->inst = instrument;
-                ch->c2spd = (s3m.samples[instIdx].c2spd > 0u) ? s3m.samples[instIdx].c2spd : 8363u;
-                if (instToProgram[instIdx] != 0xFFu)
-                {
-                    ch->program = instToProgram[instIdx];
-                }
-                /* Reset volume to instrument default on note trigger.
-                 * Only emit CC7 here if there is NO explicit volume column
-                 * on this row — otherwise the volume column handler will
-                 * emit it with the correct override value. */
-                if (note != 255u && note != 254u && command != 7u && command != 12u)
-                {
-                    ch->volume = s3m.samples[instIdx].volume;
-                    if (ch->volume > 64u) ch->volume = 64u;
-                    if (volume == 255u)
-                    {
-                        (void)song_model_append_cc_event(song, (uint16_t)i,
-                                                         fp_ticks_to_int(currentTickFP), 7,
-                                                         mod_vol_to_midi(ch->volume));
-                    }
-                }
-            }
-
-            /* Volume column (255 = not present) */
-            if (volume != 255u)
-            {
-                ch->volume = (volume > 64u) ? 64u : volume;
-                (void)song_model_append_cc_event(song,
-                                                 (uint16_t)i,
-                                                 fp_ticks_to_int(currentTickFP),
-                                                 7,
-                                                 mod_vol_to_midi(ch->volume));
-            }
-
-            /* --- Effect processing ---
-             * S3M effects use letters A-Z mapped to command values 1-26.
-             *   A=1  Set speed
-             *   B=2  Jump to order
-             *   C=3  Break to row
-             *   D=4  Volume slide
-             *   E=5  Porta down (EFx=fine, EEx=extra-fine)
-             *   F=6  Porta up (FFx=fine, FEx=extra-fine)
-             *   G=7  Tone portamento (suppress note trigger)
-             *   H=8  Vibrato
-             *   I=9  Tremor
-             *   J=10 Arpeggio
-             *   K=11 Vibrato + volume slide
-             *   L=12 Tone porta + volume slide (suppress note trigger)
-             *   O=15 Sample offset
-             *   Q=17 Retrigger + volume slide
-             *   R=18 Tremolo
-             *   S=19 Extended effects (S3x/S4x waveform, S8x pan,
-             *        SBx loop, SCx cut, SDx delay, SEx pat delay)
-             *   T=20 Set tempo / tempo slide (T0x down, T1x up)
-             *   U=21 Fine vibrato
-             *   V=22 Set global volume
-             *   X=24 Set panning
-             */
-
-            /* O: Sample offset memory (256-byte units). */
-            if (command == 15u && info > 0u)
-            {
-                ch->sampleOffsetCmd = info;
-            }
-
-            /* Q: Retrigger + volume slide memory. */
-            if (command == 17u && info > 0u)
-            {
-                ch->retrigCmd = info;
-            }
-
-            /* E/F/G/H effect memory (reuse when xx=00). */
-            if (command == 5u && info > 0u)
-            {
-                ch->portaDownCmd = info;
-            }
-            if (command == 6u && info > 0u)
-            {
-                ch->portaUpCmd = info;
-            }
-            if ((command == 7u || command == 12u) && info > 0u)
-            {
-                ch->tonePortaCmd = info;
-            }
-            if (command == 8u && info > 0u)
-            {
-                if ((info >> 4) != 0u)
-                {
-                    ch->vibratoSpeed = (uint8_t)(info >> 4);
-                }
-                if ((info & 0x0Fu) != 0u)
-                {
-                    ch->vibratoDepth = (uint8_t)(info & 0x0Fu);
-                }
-            }
-            if ((command == 11u || command == 12u) && info > 0u)
-            {
-                ch->volSlideCmd = info;
-            }
-            if (command == 9u && info > 0u)
-            {
-                ch->tremorCmd = info;
-            }
-            if (command == 18u && info > 0u)
-            {
-                if ((info >> 4) != 0u)
-                {
-                    ch->tremoloSpeed = (uint8_t)(info >> 4);
-                }
-                if ((info & 0x0Fu) != 0u)
-                {
-                    ch->tremoloDepth = (uint8_t)(info & 0x0Fu);
-                }
-            }
-            if (command == 21u && info > 0u)
-            {
-                if ((info >> 4) != 0u)
-                {
-                    ch->fineVibratoSpeed = (uint8_t)(info >> 4);
-                }
-                if ((info & 0x0Fu) != 0u)
-                {
-                    ch->fineVibratoDepth = (uint8_t)(info & 0x0Fu);
-                }
-            }
-
-            /* A: Set speed */
-            if (command == 1u && info > 0u)
-            {
-                speed = info;
-                if (speed == 0u)
-                {
-                    speed = 1u;
-                }
-                rowTicksFP = mod_row_ticks_fp((uint8_t)speed, bpm);
-                if (rowTicksFP == 0u)
-                {
-                    rowTicksFP = ((uint64_t)MOD2RMF_ROW_TICKS << 16);
-                }
-            }
-            /* T: Set tempo / tempo slide.
-             * Txx (xx >= 0x20): set tempo to xx BPM.
-             * T0x: slide tempo down by x per tick (ticks 1..speed-1).
-             * T1x: slide tempo up by x per tick (ticks 1..speed-1). */
-            else if (command == 20u)
-            {
-                if (info >= 0x20u)
-                {
-                    bpm = info;
-                }
-                else
-                {
-                    /* Tempo slide: apply net change over (speed-1) ticks. */
-                    uint8_t slideVal = (uint8_t)(info & 0x0Fu);
-                    uint16_t ticks = (speed > 1u) ? (uint16_t)(speed - 1u) : 1u;
-                    if ((info >> 4) == 0u)
-                    {
-                        /* T0x: slide down */
-                        int32_t newBpm = (int32_t)bpm - (int32_t)slideVal * (int32_t)ticks;
-                        bpm = (uint16_t)((newBpm < 32) ? 32 : newBpm);
-                    }
-                    else if ((info >> 4) == 1u)
-                    {
-                        /* T1x: slide up */
-                        int32_t newBpm = (int32_t)bpm + (int32_t)slideVal * (int32_t)ticks;
-                        bpm = (uint16_t)((newBpm > 255) ? 255 : newBpm);
-                    }
-                }
-                rowTicksFP = mod_row_ticks_fp((uint8_t)((speed == 0u) ? 1u : speed), bpm);
-                if (rowTicksFP == 0u)
-                {
-                    rowTicksFP = ((uint64_t)MOD2RMF_ROW_TICKS << 16);
-                }
-                (void)song_model_append_tempo_change(song, fp_ticks_to_int(currentTickFP), bpm);
-            }
-            /* B: Jump to order */
-            else if (command == 2u)
-            {
-                jumpOrder = (int)info;
-                if (breakRow < 0)
-                    breakRow = 0;
-            }
-            /* C: Break to row */
-            else if (command == 3u)
-            {
-                if (jumpOrder < 0)
-                    jumpOrder = (int)(orderPos + 1u);
-                breakRow = (int)(((info >> 4) * 10u) + (info & 0x0Fu));
-            }
-            /* D: Volume slide.
-             * Dx0 = slide up x per tick (speed-1 ticks).
-             * D0x = slide down x per tick (speed-1 ticks).
-             * DxF = fine slide up x (once).
-             * DFx = fine slide down x (once). */
-            else if (command == 4u)
-            {
-                uint8_t slideParam;
-                uint8_t up = (uint8_t)(info >> 4);
-                uint8_t down = (uint8_t)(info & 0x0Fu);
-                slideParam = (info != 0u) ? info : ch->volSlideCmd;
-                if (info != 0u)
-                {
-                    ch->volSlideCmd = info;
-                }
-                up = (uint8_t)(slideParam >> 4);
-                down = (uint8_t)(slideParam & 0x0Fu);
-                if (down == 0x0Fu && up > 0u)
-                {
-                    /* Fine slide up (once) */
-                    int32_t v = (int32_t)ch->volume + (int32_t)up;
-                    ch->volume = (unsigned char)((v > 64) ? 64 : v);
-                }
-                else if (up == 0x0Fu && down > 0u)
-                {
-                    /* Fine slide down (once) */
-                    int32_t v = (int32_t)ch->volume - (int32_t)down;
-                    ch->volume = (unsigned char)((v < 0) ? 0 : v);
-                }
-                else if (up > 0u && down == 0u)
-                {
-                    /* Normal slide up: applied (speed-1) times */
-                    uint16_t ticks = (speed > 1u) ? (uint16_t)(speed - 1u) : 1u;
-                    int32_t v = (int32_t)ch->volume + (int32_t)up * (int32_t)ticks;
-                    ch->volume = (unsigned char)((v > 64) ? 64 : v);
-                }
-                else if (down > 0u && up == 0u)
-                {
-                    /* Normal slide down: applied (speed-1) times */
-                    uint16_t ticks = (speed > 1u) ? (uint16_t)(speed - 1u) : 1u;
-                    int32_t v = (int32_t)ch->volume - (int32_t)down * (int32_t)ticks;
-                    ch->volume = (unsigned char)((v < 0) ? 0 : v);
-                }
-                (void)song_model_append_cc_event(song,
-                                                 (uint16_t)i,
-                                                 fp_ticks_to_int(currentTickFP),
-                                                 7,
-                                                 mod_vol_to_midi(ch->volume));
-            }
-            /* X: Set panning (0x00=left, 0x40=center, 0x80=right, 0xA4=surround) */
-            else if (command == 24u)
-            {
-                if (info <= 0x80u)
-                {
-                    /* Map S3M 0..128 to 0..255 */
-                    ch->pan = (uint8_t)((uint32_t)info * 255u / 128u);
-                }
-                (void)song_model_append_cc_event(song,
-                                                 (uint16_t)i,
-                                                 fp_ticks_to_int(currentTickFP),
-                                                 10,
-                                                 (unsigned char)(ch->pan >> 1));
-            }
-            /* E: Fine/extra-fine porta down (tick 0 only).
-             * EFx = fine porta down x units once.
-             * EEx = extra-fine porta down x/4 units once.
-             * Normal Exx (xx < 0xE0) handled in per-tick loop below. */
-            else if (command == 5u && ch->active)
-            {
-                uint8_t param = (info != 0u) ? info : ch->portaDownCmd;
-                if (param >= 0xF0u)
-                {
-                    int32_t p = (int32_t)ch->period + s3m_scale_delta((int32_t)(param & 0x0Fu), ch->c2spd);
-                    if (p > MOD2RMF_MOD_PERIOD_MAX) p = MOD2RMF_MOD_PERIOD_MAX;
-                    ch->period = (uint16_t)p;
-                    append_pitch_bend_if_changed(song, (uint16_t)i,
-                                                 fp_ticks_to_int(currentTickFP),
-                                                 ch->noteBasePeriod, ch->period,
-                                                 song->pitchBendRangeSemitones,
-                                                 &ch->lastPitchBend);
-                }
-                else if (param >= 0xE0u)
-                {
-                    int32_t p = (int32_t)ch->period + s3m_scale_delta((int32_t)((param & 0x0Fu) >> 2), ch->c2spd);
-                    if (p > MOD2RMF_MOD_PERIOD_MAX) p = MOD2RMF_MOD_PERIOD_MAX;
-                    ch->period = (uint16_t)p;
-                    append_pitch_bend_if_changed(song, (uint16_t)i,
-                                                 fp_ticks_to_int(currentTickFP),
-                                                 ch->noteBasePeriod, ch->period,
-                                                 song->pitchBendRangeSemitones,
-                                                 &ch->lastPitchBend);
-                }
-            }
-            /* F: Fine/extra-fine porta up (tick 0 only).
-             * FFx = fine porta up x units once.
-             * FEx = extra-fine porta up x/4 units once.
-             * Normal Fxx (xx < 0xE0) handled in per-tick loop below. */
-            else if (command == 6u && ch->active)
-            {
-                uint8_t param = (info != 0u) ? info : ch->portaUpCmd;
-                if (param >= 0xF0u)
-                {
-                    int32_t p = (int32_t)ch->period - s3m_scale_delta((int32_t)(param & 0x0Fu), ch->c2spd);
-                    if (p < MOD2RMF_MOD_PERIOD_MIN) p = MOD2RMF_MOD_PERIOD_MIN;
-                    ch->period = (uint16_t)p;
-                    append_pitch_bend_if_changed(song, (uint16_t)i,
-                                                 fp_ticks_to_int(currentTickFP),
-                                                 ch->noteBasePeriod, ch->period,
-                                                 song->pitchBendRangeSemitones,
-                                                 &ch->lastPitchBend);
-                }
-                else if (param >= 0xE0u)
-                {
-                    int32_t p = (int32_t)ch->period - s3m_scale_delta((int32_t)((param & 0x0Fu) >> 2), ch->c2spd);
-                    if (p < MOD2RMF_MOD_PERIOD_MIN) p = MOD2RMF_MOD_PERIOD_MIN;
-                    ch->period = (uint16_t)p;
-                    append_pitch_bend_if_changed(song, (uint16_t)i,
-                                                 fp_ticks_to_int(currentTickFP),
-                                                 ch->noteBasePeriod, ch->period,
-                                                 song->pitchBendRangeSemitones,
-                                                 &ch->lastPitchBend);
-                }
-            }
-            /* V: Set global volume (0..64) — scale all channel volumes. */
-            else if (command == 22u)
-            {
-                uint8_t gv = (info > 64u) ? 64u : info;
-                uint32_t ci;
-                s3m.globalVolume = gv;
-                /* Re-emit CC7 for all active channels with updated volume. */
-                for (ci = 0; ci < s3m.channelCount; ++ci)
-                {
-                    (void)song_model_append_cc_event(song, (uint16_t)ci,
-                                                     fp_ticks_to_int(currentTickFP),
-                                                     7,
-                                                     mod_vol_to_midi(channels[ci].volume));
-                }
-            }
-            /* S: Extended effects (S3M "S" = command 19) */
-            else if (command == 19u)
-            {
-                uint8_t sub = (uint8_t)(info >> 4);
-                uint8_t val = (uint8_t)(info & 0x0Fu);
-
-                /* SBx: Pattern loop */
-                if (sub == 0x0Bu)
-                {
-                    if (val == 0u)
-                    {
-                        ch->loopStartRow = rowPos;
-                    }
-                    else
-                    {
-                        if (ch->loopCount == 0u)
-                        {
-                            ch->loopCount = val;
-                            patternLoopChannel = (int)i;
-                            patternLoopActive = TRUE;
-                        }
-                        else
-                        {
-                            ch->loopCount--;
-                            if (ch->loopCount > 0u)
-                            {
-                                patternLoopChannel = (int)i;
-                                patternLoopActive = TRUE;
-                            }
-                        }
-                    }
-                }
-                /* SCx: Note cut after x ticks */
-                else if (sub == 0x0Cu)
-                {
-                    if (ch->active && speed > 0u && val < speed)
-                    {
-                        uint64_t cutTickFP;
-                        uint32_t cutTick;
-                        uint32_t startTick = fp_ticks_to_int(ch->startTickFP);
-                        cutTickFP = currentTickFP +
-                                    (rowTicksFP * (uint64_t)val) / (uint64_t)speed;
-                        cutTick = fp_ticks_to_int(cutTickFP);
-                        if (cutTick > startTick)
-                        {
-                            (void)song_model_append_note(song,
-                                                         (uint16_t)i,
-                                                         startTick,
-                                                         cutTick - startTick,
-                                                         ch->activeNote,
-                                                         ch->activeVelocity,
-                                                         ch->activeProgram);
-                            ch->active = FALSE;
-                        }
-                    }
-                }
-                /* S3x: Set vibrato waveform (0=sine, 1=ramp, 2=square, 3=random). */
-                else if (sub == 0x03u)
-                {
-                    ch->vibratoWaveform = (uint8_t)(val & 0x03u);
-                }
-                /* S4x: Set tremolo waveform (0=sine, 1=ramp, 2=square, 3=random). */
-                else if (sub == 0x04u)
-                {
-                    ch->tremoloWaveform = (uint8_t)(val & 0x03u);
-                }
-                /* S8x: panning (0..15 => 0..255). */
-                else if (sub == 0x08u)
-                {
-                    ch->pan = (uint8_t)(val * 17u);
-                    (void)song_model_append_cc_event(song,
-                                                     (uint16_t)i,
-                                                     fp_ticks_to_int(currentTickFP),
-                                                     10,
-                                                     (unsigned char)(ch->pan >> 1));
-                }
-                /* SDx: Note delay x ticks — handled below in note trigger */
-                /* SEx: Pattern delay — repeat this row for x additional rows. */
-                else if (sub == 0x0Eu)
-                {
-                    if (val > patternDelayRows)
-                        patternDelayRows = val;
-                }
-            }
-
-            /* --- Note handling --- */
-            /* S3M note byte: 254=note off, 255=no note, else hi=octave lo=semi */
-            if (note == 254u)
-            {
-                /* Note off */
-                if (ch->active)
-                {
-                    uint32_t dur;
-                    dur = (currentTickFP > ch->startTickFP)
-                        ? (fp_ticks_to_int(currentTickFP) - fp_ticks_to_int(ch->startTickFP))
-                        : MOD2RMF_ROW_TICKS;
-                    (void)song_model_append_note(song,
-                                                 (uint16_t)i,
-                                                 fp_ticks_to_int(ch->startTickFP),
-                                                 dur,
-                                                 ch->activeNote,
-                                                 ch->activeVelocity,
-                                                 ch->activeProgram);
-                    ch->active = FALSE;
-                }
-            }
-            else if (note != 255u)
-            {
-                /* Tone portamento (G=7) and tone porta + volslide (L=12)
-                 * use the note as slide target, so they suppress retrigger
-                 * only when a note is already active on this channel. */
-                if ((command != 7u && command != 12u) || !ch->active)
-                {
-                    unsigned char midiNote;
-                    unsigned char velocity;
-                    uint8_t noteDelayTicks;
-                    uint64_t noteStartTickFP;
-                    uint32_t noteStartTick;
-                    unsigned char noteProgram;
-                    uint32_t offsetBytes;
-                    uint8_t octave;
-                    uint8_t semi;
-
-                    octave = (uint8_t)(note >> 4);
-                    semi = (uint8_t)(note & 0x0Fu);
-                    if (semi > 11u)
-                    {
-                        continue;
-                    }
-                    /* S3M: C-4 (note 0x40) = MIDI 60.  base = 60 - 4*12 = 12. */
-                    {
-                        int mn = 12 + (int)octave * 12 + (int)semi;
-                        if (mn > 127) mn = 127;
-                        if (mn < 0) mn = 0;
-                        midiNote = (unsigned char)mn;
-                    }
-
-                    noteDelayTicks = 0u;
-                    if (command == 19u && (info >> 4) == 0x0Du)
-                    {
-                        noteDelayTicks = (uint8_t)(info & 0x0Fu);
-                        if (speed > 0u && noteDelayTicks >= speed)
-                        {
-                            noteDelayTicks = (uint8_t)(speed - 1u);
-                        }
-                    }
-                    if (speed > 0u)
-                    {
-                        noteStartTickFP = currentTickFP +
-                                          (rowTicksFP * (uint64_t)noteDelayTicks) / (uint64_t)speed;
-                    }
-                    else
-                    {
-                        noteStartTickFP = currentTickFP;
-                    }
-                    noteStartTick = fp_ticks_to_int(noteStartTickFP);
-                    /* Use fixed velocity for S3M; all volume control goes
-                     * through CC7 so per-row volume column changes
-                     * (fade-ins, envelopes) remain audible. */
-                    velocity = 100u;
-                    noteProgram = ch->program;
-
-                    /* Oxx sample offset starts playback at xx*256 bytes.
-                     * For S3M 16-bit samples we already decoded to 8-bit frames,
-                     * so this is an approximation in decoded-byte space. */
-                    offsetBytes = (uint32_t)ch->sampleOffsetCmd * 256u;
-                    if (conv->enableZmfSampleOffset && offsetBytes > 0u)
-                    {
-                        noteProgram = ensure_sample_offset_variant_program(conv,
-                                                                          song,
-                                                                          noteProgram,
-                                                                          offsetBytes);
-                    }
-
-                    /* Close previous note */
-                    if (ch->active)
-                    {
-                        uint32_t dur;
-                        dur = (noteStartTick > fp_ticks_to_int(ch->startTickFP))
-                                ? (noteStartTick - fp_ticks_to_int(ch->startTickFP))
-                                : MOD2RMF_ROW_TICKS;
-                        (void)song_model_append_note(song,
-                                                     (uint16_t)i,
-                                                     fp_ticks_to_int(ch->startTickFP),
-                                                     dur,
-                                                     ch->activeNote,
-                                                     ch->activeVelocity,
-                                                     ch->activeProgram);
-                    }
-
-                    ch->active = TRUE;
-                    ch->startTickFP = noteStartTickFP;
-                    ch->activeNote = midiNote;
-                    ch->activeVelocity = velocity;
-                    ch->activeProgram = noteProgram;
-                    ch->period = midi_note_to_mod_period(midiNote);
-                    ch->targetPeriod = ch->period;
-                    ch->noteBasePeriod = ch->period;
-                    ch->vibratoPos = 0;
-                    ch->fineVibratoPos = 0;
-                    ch->tremoloPos = 0;
-
-                    /* New note starts from neutral bend. */
-                    if (ch->lastPitchBend != MOD2RMF_PITCH_BEND_CENTER)
-                    {
-                        ch->lastPitchBend = MOD2RMF_PITCH_BEND_CENTER;
-                        (void)song_model_append_pitch_bend(song,
-                                                           (uint16_t)i,
-                                                           noteStartTick,
-                                                           MOD2RMF_PITCH_BEND_CENTER);
-                    }
-                }
-                else
-                {
-                    /* G/L with active voice: set target note for portamento. */
-                    uint8_t octave;
-                    uint8_t semi;
-                    unsigned char midiNote;
-
-                    octave = (uint8_t)(note >> 4);
-                    semi = (uint8_t)(note & 0x0Fu);
-                    if (semi <= 11u)
-                    {
-                        int mn;
-                        mn = 12 + (int)octave * 12 + (int)semi;
-                        if (mn > 127) mn = 127;
-                        if (mn < 0) mn = 0;
-                        midiNote = (unsigned char)mn;
-                        ch->targetPeriod = midi_note_to_mod_period(midiNote);
-                    }
-                }
-            }
-
-            /* Pitch effects that operate across row ticks. */
-            if (ch->active && speed > 1u &&
-                (command == 5u || command == 6u || command == 7u ||
-                  command == 8u || command == 11u || command == 12u ||
-                  command == 21u))
-            {
-                uint8_t t;
-                int32_t scaledSlide;
-                int32_t scaledTone;
-
-                scaledSlide = 0;
-                scaledTone = 0;
-
-                if (command == 5u)
-                {
-                    uint8_t sp = (info != 0u) ? info : ch->portaDownCmd;
-                    /* Fine (xFy) and extra-fine (xEy) handled on tick 0 above. */
-                    if (sp >= 0xE0u) sp = 0u;
-                    scaledSlide = s3m_scale_delta((int32_t)sp, ch->c2spd);
-                }
-                else if (command == 6u)
-                {
-                    uint8_t sp = (info != 0u) ? info : ch->portaUpCmd;
-                    if (sp >= 0xE0u) sp = 0u;
-                    scaledSlide = s3m_scale_delta((int32_t)sp, ch->c2spd);
-                }
-
-                if (command == 7u || command == 12u)
-                {
-                    uint8_t ts = (info != 0u) ? info : ch->tonePortaCmd;
-                    scaledTone = s3m_scale_delta((int32_t)ts, ch->c2spd);
-                }
-
-                for (t = 1u; t < speed; ++t)
-                {
-                    uint64_t tickFP;
-                    uint32_t tick;
-
-                    tickFP = currentTickFP +
-                             (rowTicksFP * (uint64_t)t) / (uint64_t)speed;
-                    tick = fp_ticks_to_int(tickFP);
-
-                    if (command == 5u && scaledSlide > 0)
-                    {
-                        int32_t p;
-                        p = (int32_t)ch->period + scaledSlide;
-                        if (p > MOD2RMF_MOD_PERIOD_MAX) p = MOD2RMF_MOD_PERIOD_MAX;
-                        ch->period = (uint16_t)p;
-                        append_pitch_bend_if_changed(song,
-                                                     (uint16_t)i,
-                                                     tick,
-                                                     ch->noteBasePeriod,
-                                                     ch->period,
-                                                     song->pitchBendRangeSemitones,
-                                                     &ch->lastPitchBend);
-                    }
-                    else if (command == 6u && scaledSlide > 0)
-                    {
-                        int32_t p;
-                        p = (int32_t)ch->period - scaledSlide;
-                        if (p < MOD2RMF_MOD_PERIOD_MIN) p = MOD2RMF_MOD_PERIOD_MIN;
-                        ch->period = (uint16_t)p;
-                        append_pitch_bend_if_changed(song,
-                                                     (uint16_t)i,
-                                                     tick,
-                                                     ch->noteBasePeriod,
-                                                     ch->period,
-                                                     song->pitchBendRangeSemitones,
-                                                     &ch->lastPitchBend);
-                    }
-                    else if ((command == 7u || command == 12u) && scaledTone > 0)
-                    {
-                        if (ch->period < ch->targetPeriod)
-                        {
-                            int32_t p = (int32_t)ch->period + scaledTone;
-                            ch->period = (uint16_t)((p > (int32_t)ch->targetPeriod) ? ch->targetPeriod : (uint16_t)p);
-                        }
-                        else if (ch->period > ch->targetPeriod)
-                        {
-                            int32_t p = (int32_t)ch->period - scaledTone;
-                            ch->period = (uint16_t)((p < (int32_t)ch->targetPeriod) ? ch->targetPeriod : p);
-                        }
-                        clamp_period(&ch->period);
-                        append_pitch_bend_if_changed(song,
-                                                     (uint16_t)i,
-                                                     tick,
-                                                     ch->noteBasePeriod,
-                                                     ch->period,
-                                                     song->pitchBendRangeSemitones,
-                                                     &ch->lastPitchBend);
-
-                        /* Re-anchor / snap noteBasePeriod for tone porta. */
-                        if (ch->active)
-                        {
-                            unsigned char newMidi;
-                            if (period_to_midi(ch->period, &newMidi))
-                            {
-                                if (newMidi != ch->activeNote)
-                                {
-                                    /* MIDI note changed — flush old, start new */
-                                    {
-                                        uint32_t startT = fp_ticks_to_int(ch->startTickFP);
-                                        uint32_t dur;
-                                        dur = (tick >= startT) ? (tick - startT + 1u) : 1u;
-                                        (void)song_model_append_note(song,
-                                                                     (uint16_t)i,
-                                                                     startT,
-                                                                     dur,
-                                                                     ch->activeNote,
-                                                                     ch->activeVelocity,
-                                                                     ch->activeProgram);
-                                    }
-                                    ch->noteBasePeriod = ch->period;
-                                    ch->lastPitchBend = MOD2RMF_PITCH_BEND_CENTER;
-                                    (void)song_model_append_pitch_bend(song,
-                                                                       (uint16_t)i,
-                                                                       tick,
-                                                                       MOD2RMF_PITCH_BEND_CENTER);
-                                    ch->startTickFP = tickFP;
-                                    ch->activeNote = newMidi;
-                                }
-                                else if (ch->period == ch->targetPeriod &&
-                                         ch->noteBasePeriod != ch->period)
-                                {
-                                    /* Same MIDI note but reached target — snap
-                                     * noteBasePeriod to eliminate residual
-                                     * pitch drift (~50 cents) from re-anchor
-                                     * boundary not aligning with target. */
-                                    ch->noteBasePeriod = ch->period;
-                                    ch->lastPitchBend = MOD2RMF_PITCH_BEND_CENTER;
-                                    (void)song_model_append_pitch_bend(song,
-                                                                       (uint16_t)i,
-                                                                       tick,
-                                                                       MOD2RMF_PITCH_BEND_CENTER);
-                                }
-                            }
-                        }
-                    }
-
-                    if (command == 8u || command == 11u || command == 21u)
-                    {
-                        int32_t effective;
-                        int16_t wave;
-                        int16_t delta;
-
-                        if (command == 21u)
-                        {
-                            ch->fineVibratoPos = (uint8_t)(ch->fineVibratoPos + ch->fineVibratoSpeed);
-                            wave = get_waveform_value(ch->vibratoWaveform, ch->fineVibratoPos);
-                            delta = (int16_t)((wave * (int16_t)ch->fineVibratoDepth) / 256);
-                        }
-                        else
-                        {
-                            ch->vibratoPos = (uint8_t)(ch->vibratoPos + ch->vibratoSpeed);
-                            wave = get_waveform_value(ch->vibratoWaveform, ch->vibratoPos);
-                            delta = (int16_t)((wave * (int16_t)ch->vibratoDepth) / 128);
-                        }
-                        effective = (int32_t)ch->period + s3m_scale_delta((int32_t)delta, ch->c2spd);
-                        if (effective < MOD2RMF_MOD_PERIOD_MIN)
-                        {
-                            effective = MOD2RMF_MOD_PERIOD_MIN;
-                        }
-                        if (effective > MOD2RMF_MOD_PERIOD_MAX)
-                        {
-                            effective = MOD2RMF_MOD_PERIOD_MAX;
-                        }
-                        append_pitch_bend_if_changed(song,
-                                                     (uint16_t)i,
-                                                     tick,
-                                                     ch->noteBasePeriod,
-                                                     (uint16_t)effective,
-                                                     song->pitchBendRangeSemitones,
-                                                     &ch->lastPitchBend);
-                    }
-                }
-
-                /* K/L include a D-style volume slide component. */
-                if (command == 11u || command == 12u)
-                {
-                    uint8_t slideInfo;
-                    uint8_t up;
-                    uint8_t down;
-
-                    slideInfo = (info != 0u) ? info : ch->volSlideCmd;
-                    up = (uint8_t)(slideInfo >> 4);
-                    down = (uint8_t)(slideInfo & 0x0Fu);
-                    if (up > 0u && down == 0u)
-                    {
-                        int32_t v;
-                        v = (int32_t)ch->volume + (int32_t)up * (int32_t)(speed - 1u);
-                        if (v > 64) v = 64;
-                        ch->volume = (uint8_t)v;
-                    }
-                    else if (down > 0u && up == 0u)
-                    {
-                        int32_t v;
-                        v = (int32_t)ch->volume - (int32_t)down * (int32_t)(speed - 1u);
-                        if (v < 0) v = 0;
-                        ch->volume = (uint8_t)v;
-                    }
-                    (void)song_model_append_cc_event(song,
-                                                     (uint16_t)i,
-                                                     fp_ticks_to_int(currentTickFP + rowTicksFP),
-                                                     7,
-                                                     mod_vol_to_midi(ch->volume));
-                }
-            }
-
-            /* R: Tremolo (volume modulation, does not alter base channel volume). */
-            if (ch->active && command == 18u && speed > 1u)
-            {
-                uint8_t t;
-                for (t = 1u; t < speed; ++t)
-                {
-                    uint64_t tickFP;
-                    uint32_t tick;
-                    int16_t wave;
-                    int16_t delta;
-                    int32_t effectiveVol;
-
-                    tickFP = currentTickFP +
-                             (rowTicksFP * (uint64_t)t) / (uint64_t)speed;
-                    tick = fp_ticks_to_int(tickFP);
-
-                    ch->tremoloPos = (uint8_t)(ch->tremoloPos + ch->tremoloSpeed);
-                    wave = get_waveform_value(ch->tremoloWaveform, ch->tremoloPos);
-                    delta = (int16_t)((wave * (int16_t)ch->tremoloDepth) / 64);
-                    effectiveVol = (int32_t)ch->volume + (int32_t)delta;
-                    if (effectiveVol < 0) effectiveVol = 0;
-                    if (effectiveVol > 64) effectiveVol = 64;
-
-                    (void)song_model_append_cc_event(song,
-                                                     (uint16_t)i,
-                                                     tick,
-                                                     7,
-                                                     mod_vol_to_midi((unsigned char)effectiveVol));
-                }
-            }
-
-            /* I: Tremor (periodic gate using current channel volume). */
-            if (ch->active && command == 9u && speed > 1u)
-            {
-                uint8_t tremor;
-                uint8_t onTicks;
-                uint8_t offTicks;
-                uint8_t t;
-                XBOOL gateOn;
-
-                tremor = (info != 0u) ? info : ch->tremorCmd;
-                onTicks = (uint8_t)((tremor >> 4) & 0x0Fu);
-                offTicks = (uint8_t)(tremor & 0x0Fu);
-                onTicks = (uint8_t)(onTicks + 1u);
-                offTicks = (uint8_t)(offTicks + 1u);
-                gateOn = TRUE;
-
-                for (t = 1u; t < speed; ++t)
-                {
-                    uint64_t tickFP;
-                    uint32_t tick;
-                    uint8_t pos;
-
-                    tickFP = currentTickFP +
-                             (rowTicksFP * (uint64_t)t) / (uint64_t)speed;
-                    tick = fp_ticks_to_int(tickFP);
-                    pos = (uint8_t)(t % (uint8_t)(onTicks + offTicks));
-                    gateOn = (pos < onTicks) ? TRUE : FALSE;
-
-                    (void)song_model_append_cc_event(song,
-                                                     (uint16_t)i,
-                                                     tick,
-                                                     7,
-                                                     gateOn ? mod_vol_to_midi(ch->volume) : 0u);
-                }
-
-                (void)song_model_append_cc_event(song,
-                                                 (uint16_t)i,
-                                                 fp_ticks_to_int(currentTickFP + rowTicksFP),
-                                                 7,
-                                                 mod_vol_to_midi(ch->volume));
-            }
-
-            /* Q: Retrigger + volume slide */
-            if (ch->active && command == 17u)
-            {
-                uint8_t qparam;
-                uint8_t retrigEvery;
-                uint8_t volOp;
-
-                qparam = (info != 0u) ? info : ch->retrigCmd;
-                retrigEvery = (uint8_t)(qparam & 0x0Fu);
-                volOp = (uint8_t)((qparam >> 4) & 0x0Fu);
-                if (retrigEvery > 0u && speed > 0u)
-                {
-                    uint8_t t;
-                    uint64_t startTickFP = ch->startTickFP;
-                    for (t = retrigEvery; t < speed; t = (uint8_t)(t + retrigEvery))
-                    {
-                        uint64_t retrigTickFP;
-                        uint32_t retrigTick;
-                        uint32_t startTick;
-
-                        retrigTickFP = currentTickFP +
-                                       (rowTicksFP * (uint64_t)t) / (uint64_t)speed;
-                        retrigTick = fp_ticks_to_int(retrigTickFP);
-                        startTick = fp_ticks_to_int(startTickFP);
-                        if (retrigTick <= startTick)
-                            continue;
-                        (void)song_model_append_note(song,
-                                                     (uint16_t)i,
-                                                     startTick,
-                                                     retrigTick - startTick,
-                                                     ch->activeNote,
-                                                     ch->activeVelocity,
-                                                     ch->activeProgram);
-
-                        /* QxY retrigger volume op (x nibble). */
-                        {
-                            int32_t v;
-                            v = (int32_t)ch->volume;
-                            switch (volOp)
-                            {
-                                case 0x1: v -= 1; break;
-                                case 0x2: v -= 2; break;
-                                case 0x3: v -= 4; break;
-                                case 0x4: v -= 8; break;
-                                case 0x5: v -= 16; break;
-                                case 0x6: v = (v * 2) / 3; break;
-                                case 0x7: v = v / 2; break;
-                                case 0x8: break;
-                                case 0x9: v += 1; break;
-                                case 0xA: v += 2; break;
-                                case 0xB: v += 4; break;
-                                case 0xC: v += 8; break;
-                                case 0xD: v += 16; break;
-                                case 0xE: v = (v * 3) / 2; break;
-                                case 0xF: v = v * 2; break;
-                                default: break;
-                            }
-                            if (v < 0) v = 0;
-                            if (v > 64) v = 64;
-                            ch->volume = (uint8_t)v;
-                            (void)song_model_append_cc_event(song,
-                                                             (uint16_t)i,
-                                                             retrigTick,
-                                                             7,
-                                                             mod_vol_to_midi(ch->volume));
-                        }
-
-                        startTickFP = retrigTickFP;
-                    }
-                    ch->startTickFP = startTickFP;
-                }
-            }
-
-            /* J: Arpeggio (Jxy) */
-            if (ch->active && command == 10u && info != 0u)
-            {
-                uint8_t x = (uint8_t)(info >> 4);
-                uint8_t y = (uint8_t)(info & 0x0Fu);
-                uint8_t t;
-                uint64_t rowEndTickFP = currentTickFP + rowTicksFP;
-                uint32_t rowEndTick = fp_ticks_to_int(rowEndTickFP);
-                uint64_t segStartFP = ch->startTickFP;
-                unsigned char baseNote;
-
-                if (segStartFP < currentTickFP)
-                    segStartFP = currentTickFP;
-                baseNote = ch->activeNote;
-
-                for (t = 0; t < speed && fp_ticks_to_int(segStartFP) < rowEndTick; ++t)
-                {
-                    uint64_t tickStartFP;
-                    uint64_t tickEndFP;
-                    uint32_t tickStart;
-                    uint32_t tickEnd;
-                    unsigned char noteOut;
-
-                    tickStartFP = currentTickFP +
-                                  (rowTicksFP * (uint64_t)t) / (uint64_t)speed;
-                    tickEndFP = currentTickFP +
-                                (rowTicksFP * (uint64_t)(t + 1u)) / (uint64_t)speed;
-                    if (tickEndFP > rowEndTickFP)
-                        tickEndFP = rowEndTickFP;
-
-                    tickStart = fp_ticks_to_int(tickStartFP);
-                    tickEnd = fp_ticks_to_int(tickEndFP);
-                    if (tickEnd > rowEndTick)
-                        tickEnd = rowEndTick;
-                    if (tickEnd <= fp_ticks_to_int(segStartFP))
-                        continue;
-                    if (tickStart < fp_ticks_to_int(segStartFP))
-                        tickStart = fp_ticks_to_int(segStartFP);
-
-                    noteOut = baseNote;
-                    if ((t % 3u) == 1u)
-                    {
-                        int n = (int)baseNote + (int)x;
-                        if (n > 127) n = 127;
-                        noteOut = (unsigned char)n;
-                    }
-                    else if ((t % 3u) == 2u)
-                    {
-                        int n = (int)baseNote + (int)y;
-                        if (n > 127) n = 127;
-                        noteOut = (unsigned char)n;
-                    }
-
-                    if (tickEnd > tickStart)
-                    {
-                        (void)song_model_append_note(song,
-                                                     (uint16_t)i,
-                                                     tickStart,
-                                                     tickEnd - tickStart,
-                                                     noteOut,
-                                                     ch->activeVelocity,
-                                                     ch->activeProgram);
-                    }
-                    segStartFP = tickEndFP;
-                }
-
-                ch->activeNote = baseNote;
-                ch->startTickFP = rowEndTickFP;
-            }
-        } /* end channel loop */
-
-        /* Row duration (SEx pattern delay extends by extra rows) */
-        currentTickFP += rowTicksFP * (uint64_t)(1u + patternDelayRows);
-
-        /* Row advancement / flow control */
-        if (patternLoopActive && patternLoopChannel >= 0)
-        {
-            rowPos = channels[patternLoopChannel].loopStartRow;
-            patternLoopBack = TRUE;
-        }
-        else if (jumpOrder >= 0)
-        {
-            uint32_t targetOrder = (uint32_t)jumpOrder;
-            uint32_t targetRow = (breakRow >= 0) ? (uint32_t)breakRow : 0u;
-            if (targetOrder < s3m.orderCount &&
-                !song->loopEnabled &&
-                (targetOrder < orderPos || (targetOrder == orderPos && targetRow < rowPos)))
-            {
-                song->loopEnabled = TRUE;
-                song->loopStartTick = (orderStartTickFP[targetOrder] != UINT64_MAX)
-                                        ? fp_ticks_to_int(orderStartTickFP[targetOrder])
-                                        : 0u;
-                song->loopEndTick = fp_ticks_to_int(currentTickFP);
-            }
-            orderPos = targetOrder;
-            rowPos = targetRow;
-        }
-        else
-        {
-            rowPos++;
-            if (pat && rowPos >= pat->rows)
-            {
-                orderPos++;
-                rowPos = 0;
-            }
-        }
-
-        stepGuard++;
-    }
-
-    /* Flush any remaining active notes */
-    for (i = 0; i < s3m.channelCount; ++i)
-    {
-        if (channels[i].active)
-        {
-            uint32_t dur;
-            dur = (currentTickFP > channels[i].startTickFP)
-                ? (fp_ticks_to_int(currentTickFP) - fp_ticks_to_int(channels[i].startTickFP))
-                : MOD2RMF_ROW_TICKS;
-            (void)song_model_append_note(song,
-                                         (uint16_t)i,
-                                         fp_ticks_to_int(channels[i].startTickFP),
-                                         dur,
-                                         channels[i].activeNote,
-                                         channels[i].activeVelocity,
-                                         channels[i].activeProgram);
-            channels[i].active = FALSE;
-        }
-    }
-
-    fprintf(stderr,
-            "s3m: orders=%u ch=%u samples=%u notes=%u cc=%u tempo=%u bpm=%u speed=%u\n",
-            (unsigned)s3m.orderCount,
-            (unsigned)s3m.channelCount,
-            (unsigned)song->playableCount,
-            (unsigned)song->noteCount,
-            (unsigned)song->ccCount,
-            (unsigned)song->tempoChangeCount,
-            (unsigned)bpm,
-            (unsigned)speed);
-
-    free(channels);
-    } /* end orderVisited scope */
-    } /* end instToProgram scope */
-    mod2rmf_s3m_free_module(&s3m);
-    return 1;
+    return FALSE;
 }
 
 static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
 {
-    if (conv && conv->sourceData &&
-        mod2rmf_s3m_is_signature((const unsigned char *)conv->sourceData, conv->sourceSize))
+    xmp_context ctx;
+    struct xmp_module_info mi;
+    struct xmp_module *mod;
+    struct xmp_frame_info fi;
+    ActiveNote activeNotes[MOD2RMF_MAX_CHANNELS];
+    ChannelEffectState chEffects[MOD2RMF_MAX_CHANNELS];
+    uint8_t chLastVol[MOD2RMF_MAX_CHANNELS];
+    uint8_t chLastPan[MOD2RMF_MAX_CHANNELS];
+    uint16_t chLastBend[MOD2RMF_MAX_CHANNELS];
+    int16_t sampleTranspose[MOD2RMF_MAX_SAMPLES];  /* sub-instrument xpo per sample */
+    XBOOL sampleHasEnvelope[MOD2RMF_MAX_SAMPLES];   /* instrument has amplitude envelope */
+    uint64_t positionTickFP[XMP_MAX_MOD_LENGTH]; /* MIDI tick at start of each order position */
+    int positionSeen[XMP_MAX_MOD_LENGTH];        /* whether we've recorded the tick for this pos */
+    int lastPos;                                 /* last seen order position */
+    int *sampleToProgram;
+    uint32_t nextProgram;
+    uint64_t currentTickFP;
+    uint64_t tickPerFrameFP;
+    uint32_t frameGuard;
+    uint16_t lastBpm;
+    int playerStarted;
+    uint32_t i;
+
+    if (!conv || !song || !conv->sourceData || conv->sourceSize == 0)
     {
-        return build_song_model_s3m(conv, song);
+        return 0;
     }
-    return build_song_model_native(conv, song);
+
+    ctx = xmp_create_context();
+    if (!ctx)
+    {
+        return 0;
+    }
+    if (xmp_load_module_from_memory(ctx, conv->sourceData, (long)conv->sourceSize) != 0)
+    {
+        xmp_free_context(ctx);
+        return 0;
+    }
+
+    memset(&mi, 0, sizeof(mi));
+    xmp_get_module_info(ctx, &mi);
+    mod = mi.mod;
+    if (!mod)
+    {
+        xmp_release_module(ctx);
+        xmp_free_context(ctx);
+        return 0;
+    }
+
+    trim_copy_ascii(song->moduleName, sizeof(song->moduleName), mod->name);
+    if (mi.comment)
+    {
+        trim_copy_ascii(song->composerNotes, sizeof(song->composerNotes), mi.comment);
+    }
+
+     conv->isMod = libxmp_is_mod_family(mod->type);
+     conv->moduleBaseRateHz = conv->isMod ? MOD2RMF_SAMPLE_RATE : 8363u;
+
+    song->channelCount = (mod->chn > MOD2RMF_MAX_CHANNELS) ? MOD2RMF_MAX_CHANNELS : (uint32_t)mod->chn;
+    lastBpm = (mod->bpm > 0) ? (uint16_t)mod->bpm : 125u;
+    song->bpm = lastBpm;
+    song->pitchBendRangeSemitones = MOD2RMF_PITCH_BEND_RANGE_ST;
+    (void)song_model_append_tempo_change(song, 0, lastBpm);
+
+    free(conv->rawSamples);
+    conv->rawSamples = NULL;
+    conv->rawSampleCount = (mod->smp > 0) ? (uint32_t)mod->smp : 0u;
+    if (conv->rawSampleCount > 0)
+    {
+        conv->rawSamples = (ModRawSample *)calloc(conv->rawSampleCount, sizeof(ModRawSample));
+        if (!conv->rawSamples)
+        {
+            xmp_release_module(ctx);
+            xmp_free_context(ctx);
+            return 0;
+        }
+    }
+
+    /* Capture per-sample instrument transpose (sub->xpo) so we can
+     * reconstruct the transposed note for MIDI output.  libxmp's public
+     * ci->note (= xc->key) is the raw pattern key WITHOUT transpose,
+     * while ci->pitchbend is relative to the TRANSPOSED note. */
+    memset(sampleTranspose, 0, sizeof(sampleTranspose));
+    memset(sampleHasEnvelope, 0, sizeof(sampleHasEnvelope));
+    if (mod->ins > 0 && mod->xxi)
+    {
+        for (i = 0; i < (uint32_t)mod->ins; ++i)
+        {
+            const struct xmp_instrument *inst;
+            int sub;
+
+            inst = &mod->xxi[i];
+            if (inst->nsm <= 0 || !inst->sub)
+            {
+                continue;
+            }
+
+            for (sub = 0; sub < inst->nsm; ++sub)
+            {
+                int sid;
+                sid = inst->sub[sub].sid;
+                if (sid < 0 || sid >= (int)conv->rawSampleCount || sid >= MOD2RMF_MAX_SAMPLES)
+                {
+                    continue;
+                }
+                if (sampleTranspose[sid] == 0)
+                {
+                    sampleTranspose[sid] = (int16_t)inst->sub[sub].xpo;
+                }
+            }
+        }
+    }
+
+    for (i = 0; i < conv->rawSampleCount; ++i)
+    {
+        const struct xmp_sample *s;
+        ModRawSample *raw;
+        int len;
+
+        s = &mod->xxs[i];
+        raw = &conv->rawSamples[i];
+        memset(raw, 0, sizeof(*raw));
+        trim_copy_ascii(raw->name, sizeof(raw->name), s->name);
+        raw->rootKey = 72;
+        raw->defaultVolume = 64;
+        raw->finetune = 0;
+
+        len = s->len;
+        if (len <= 0 || !s->data || (s->flg & XMP_SAMPLE_SYNTH))
+        {
+            continue;
+        }
+
+        if (s->flg & XMP_SAMPLE_16BIT)
+        {
+            const int16_t *src16;
+            uint32_t outFrames;
+            uint32_t f;
+
+            outFrames = (uint32_t)len;
+            raw->pcm8 = (int8_t *)malloc(outFrames);
+            if (!raw->pcm8)
+            {
+                xmp_release_module(ctx);
+                xmp_free_context(ctx);
+                return 0;
+            }
+            src16 = (const int16_t *)s->data;
+            for (f = 0; f < outFrames; ++f)
+            {
+                int v;
+                v = (int)src16[f] >> 8;
+                v += 128;
+                raw->pcm8[f] = (int8_t)clamp_int(v, 0, 255);
+            }
+            raw->frameCount = outFrames;
+        }
+        else
+        {
+            const uint8_t *src8;
+            uint32_t outFrames;
+            uint32_t f;
+
+            outFrames = (uint32_t)len;
+            raw->pcm8 = (int8_t *)malloc(outFrames);
+            if (!raw->pcm8)
+            {
+                xmp_release_module(ctx);
+                xmp_free_context(ctx);
+                return 0;
+            }
+            src8 = (const uint8_t *)s->data;
+            for (f = 0; f < outFrames; ++f)
+            {
+                raw->pcm8[f] = (int8_t)(src8[f] ^ 0x80u);
+            }
+            raw->frameCount = outFrames;
+        }
+
+        raw->loopStart = (s->lps > 0) ? (uint32_t)s->lps : 0u;
+        raw->loopEnd = (s->lpe > s->lps) ? (uint32_t)s->lpe : 0u;
+        if (raw->loopStart > raw->frameCount) raw->loopStart = 0;
+        if (raw->loopEnd > raw->frameCount) raw->loopEnd = raw->frameCount;
+
+        /* Detect loop type from libxmp flags. */
+        if (s->flg & XMP_SAMPLE_LOOP_BIDIR)
+        {
+            raw->loopType = MOD2RMF_LOOP_BIDIR;
+        }
+        else if (s->flg & XMP_SAMPLE_LOOP_REVERSE)
+        {
+            raw->loopType = MOD2RMF_LOOP_REVERSE;
+        }
+
+        raw->valid = TRUE;
+
+        /* Emulate non-forward loop types by transforming the PCM data
+         * so the BAE engine's forward-only loop player can reproduce
+         * the correct audible result. */
+        if (raw->loopType == MOD2RMF_LOOP_BIDIR)
+        {
+            emulate_bidi_loop(raw);
+        }
+        else if (raw->loopType == MOD2RMF_LOOP_REVERSE)
+        {
+            emulate_reverse_loop(raw);
+        }
+    }
+
+    /* Extract amplitude envelope ADSR for each sample from the first
+     * instrument that references it (same "first wins" policy as
+     * sampleTranspose).  This runs AFTER the sample extraction loop
+     * above so the memset() on each raw sample doesn't clobber the
+     * envelope data. */
+    if (mod->ins > 0 && mod->xxi)
+    {
+        for (i = 0; i < (uint32_t)mod->ins; ++i)
+        {
+            struct xmp_instrument *inst;
+            int sub;
+
+            inst = &mod->xxi[i];
+            if (inst->nsm <= 0 || !inst->sub)
+            {
+                continue;
+            }
+
+            for (sub = 0; sub < inst->nsm; ++sub)
+            {
+                int sid;
+                sid = inst->sub[sub].sid;
+                if (sid < 0 || sid >= (int)conv->rawSampleCount || sid >= MOD2RMF_MAX_SAMPLES)
+                {
+                    continue;
+                }
+                if (!sampleHasEnvelope[sid] &&
+                    (inst->aei.flg & XMP_ENVELOPE_ON) && inst->aei.npt >= 2)
+                {
+                    extract_envelope_adsr(inst, (uint32_t)(mod->bpm > 0 ? mod->bpm : 125),
+                                          &conv->rawSamples[sid]);
+                    sampleHasEnvelope[sid] = conv->rawSamples[sid].hasEnvelope;
+                }
+            }
+
+            /* Now that we have captured the ADSR parameters, disable the
+             * amplitude envelope so libxmp no longer folds it into
+             * ci->volume.  This lets us emit CC7 from the raw channel
+             * volume (including volume slides) while BAE handles the
+             * envelope shape through its own ADSR engine. */
+            if (inst->aei.flg & XMP_ENVELOPE_ON)
+            {
+                inst->aei.flg &= ~XMP_ENVELOPE_ON;
+            }
+        }
+    }
+
+    sampleToProgram = NULL;
+    if (conv->rawSampleCount > 0)
+    {
+        sampleToProgram = (int *)malloc(conv->rawSampleCount * sizeof(int));
+        if (!sampleToProgram)
+        {
+            xmp_release_module(ctx);
+            xmp_free_context(ctx);
+            return 0;
+        }
+        for (i = 0; i < conv->rawSampleCount; ++i)
+        {
+            sampleToProgram[i] = -1;
+        }
+    }
+
+    memset(activeNotes, 0, sizeof(activeNotes));
+    memset(chEffects, 0, sizeof(chEffects));
+    for (i = 0; i < MOD2RMF_MAX_CHANNELS; ++i)
+    {
+        chLastVol[i] = 0xFF;
+        chLastPan[i] = 0xFF;
+        chLastBend[i] = MOD2RMF_PITCH_BEND_CENTER;
+    }
+
+    nextProgram = 0;
+    currentTickFP = 0;
+    /* MOD2RMF_ROW_TICKS (120) is defined as MIDI ticks per row at speed 6.
+     * Dividing by 6 gives 20 MIDI ticks per tracker frame (tick).
+     * Speed changes are handled naturally: fewer frames per row at lower
+     * speed means fewer MIDI ticks per row = rows play faster.  The /6
+     * constant must NOT be replaced with the current speed. */
+    tickPerFrameFP = ((uint64_t)MOD2RMF_ROW_TICKS << 16) / 6u;
+    frameGuard = 0;
+    playerStarted = 0;
+    memset(positionTickFP, 0, sizeof(positionTickFP));
+    memset(positionSeen, 0, sizeof(positionSeen));
+    lastPos = -1;
+
+    if (xmp_start_player(ctx, 44100, 0) != 0)
+    {
+        free(sampleToProgram);
+        xmp_release_module(ctx);
+        xmp_free_context(ctx);
+        return 0;
+    }
+    playerStarted = 1;
+
+    while (frameGuard < 4000000u)
+    {
+        uint32_t ch;
+        int playRc;
+        uint32_t tick;
+
+        playRc = xmp_play_frame(ctx);
+        if (playRc != 0)
+        {
+            break;
+        }
+
+        xmp_get_frame_info(ctx, &fi);
+        tick = fp_ticks_to_int(currentTickFP);
+
+        /* Track the MIDI tick at the start of each order position so we
+         * can map Bxx loop targets back to MIDI ticks. */
+        if (fi.pos >= 0 && fi.pos < XMP_MAX_MOD_LENGTH && fi.pos != lastPos)
+        {
+            lastPos = fi.pos;
+            if (!positionSeen[fi.pos])
+            {
+                positionSeen[fi.pos] = 1;
+                positionTickFP[fi.pos] = currentTickFP;
+            }
+        }
+
+        if (fi.bpm > 0 && (uint16_t)fi.bpm != lastBpm)
+        {
+            lastBpm = (uint16_t)fi.bpm;
+            song->bpm = lastBpm;
+            (void)song_model_append_tempo_change(song, tick, lastBpm);
+        }
+
+        for (ch = 0; ch < song->channelCount; ++ch)
+        {
+            const struct xmp_channel_info *ci;
+            uint8_t evNote;
+            uint8_t sampleNum;
+            int sid;
+            int program;
+
+            ci = &fi.channel_info[ch];
+            evNote = ci->event.note;
+            sampleNum = ci->sample;
+            sid = (int)sampleNum; /* 0-based index into mod->xxs[] */
+
+            /* Volume, panning, and pitch bend update on every frame
+             * so that slides/vibrato/tremolo are captured.
+             *
+             * For enveloped instruments the BAE ADSR handles the volume
+             * shape, so we only emit CC7 at row boundaries (frame 0)
+             * where ci->volume reflects the channel volume before the
+             * envelope has modulated it.  This avoids a flood of CC7
+             * events that just approximate the envelope curve. */
+            {
+                uint8_t adjPan;
+                adjPan = apply_stereo_separation((uint8_t)ci->pan, ch,
+                                                 conv->isMod, conv->stereoSeparation);
+                if (adjPan != chLastPan[ch])
+                {
+                    chLastPan[ch] = adjPan;
+                    (void)song_model_append_cc_event(song, (uint16_t)ch, tick, 10,
+                                                     (unsigned char)(adjPan >> 1));
+                }
+            }
+            if (ci->volume != chLastVol[ch])
+            {
+                uint8_t vol64;
+                vol64 = (uint8_t)clamp_int((int)ci->volume, 0, 64);
+                chLastVol[ch] = vol64;
+                (void)song_model_append_cc_event(song, (uint16_t)ch, tick, 7,
+                                                 mod_vol_to_midi(vol64));
+            }
+
+            if (activeNotes[ch].active)
+            {
+                uint16_t bend;
+                bend = libxmp_pitchbend_to_midi(ci->pitchbend,
+                                                song->pitchBendRangeSemitones);
+                if (bend != chLastBend[ch])
+                {
+                    chLastBend[ch] = bend;
+                    (void)song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend);
+                }
+            }
+
+            /* ---- Row boundary (frame 0): parse effects, handle note events ---- */
+            if (fi.frame == 0)
+            {
+                uint8_t retrigInterval = 0;
+                uint8_t noteDelayFrames = 0;
+
+                /* Reset per-row effect state. */
+                memset(&chEffects[ch], 0, sizeof(chEffects[ch]));
+
+                /* Parse retrigger and note-delay effects from both effect columns. */
+                parse_row_effects(&ci->event, &retrigInterval, &noteDelayFrames);
+                chEffects[ch].retrigInterval = retrigInterval;
+                chEffects[ch].noteDelayFrames = noteDelayFrames;
+
+                /* Key-off events are always processed immediately, even with delay. */
+                if (evNote == XMP_KEY_OFF || evNote == XMP_KEY_CUT || evNote == XMP_KEY_FADE)
+                {
+                    if (!flush_active_note(song, (uint16_t)ch, &activeNotes[ch], currentTickFP))
+                    {
+                        if (playerStarted) xmp_end_player(ctx);
+                        free(sampleToProgram);
+                        xmp_release_module(ctx);
+                        xmp_free_context(ctx);
+                        return 0;
+                    }
+                }
+                else if (evNote > 0 && evNote <= 120 && sid >= 0 && sid < (int)conv->rawSampleCount)
+                {
+                    if (conv->rawSamples[sid].valid)
+                    {
+                        if (noteDelayFrames > 0)
+                        {
+                            /* Note delay: defer the note-on to a later frame. */
+                            chEffects[ch].hasDelayedNote = TRUE;
+                            chEffects[ch].delayedEvNote = evNote;
+                            chEffects[ch].delayedSid = sid;
+                            chEffects[ch].delayedVolume = (uint8_t)clamp_int((int)ci->volume, 0, 64);
+                        }
+                        else
+                        {
+                            /* Normal note-on (or retrigger tick 0). */
+                            int midiNote;
+                            int noteXpo;
+
+                            if (sampleToProgram[sid] < 0)
+                            {
+                                if (nextProgram >= 128u)
+                                {
+                                    if (playerStarted) xmp_end_player(ctx);
+                                    free(sampleToProgram);
+                                    xmp_release_module(ctx);
+                                    xmp_free_context(ctx);
+                                    return 0;
+                                }
+                                sampleToProgram[sid] = (int)nextProgram;
+                                nextProgram++;
+                            }
+
+                            program = sampleToProgram[sid];
+
+                            if (!flush_active_note(song, (uint16_t)ch, &activeNotes[ch], currentTickFP))
+                            {
+                                if (playerStarted) xmp_end_player(ctx);
+                                free(sampleToProgram);
+                                xmp_release_module(ctx);
+                                xmp_free_context(ctx);
+                                return 0;
+                            }
+
+                            noteXpo = (sid >= 0 && sid < MOD2RMF_MAX_SAMPLES)
+                                        ? (int)sampleTranspose[sid] : 0;
+                            midiNote = (int)ci->note + 12 + noteXpo;
+
+                            activeNotes[ch].active = TRUE;
+                            activeNotes[ch].startTickFP = currentTickFP;
+                            activeNotes[ch].note = (unsigned char)clamp_int(midiNote, 0, 127);
+                            activeNotes[ch].velocity = note_velocity_from_volume((uint8_t)clamp_int((int)ci->volume, 0, 64));
+                            activeNotes[ch].program = (uint8_t)program;
+                            chLastBend[ch] = 0xFFFFu;
+                            {
+                                uint16_t bend;
+                                bend = libxmp_pitchbend_to_midi(ci->pitchbend,
+                                                                song->pitchBendRangeSemitones);
+                                chLastBend[ch] = bend;
+                                (void)song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend);
+                            }
+                        }
+                    }
+                }
+            }
+
+            /* ---- Non-zero frames: handle note delay trigger and retrigger ---- */
+            if (fi.frame > 0)
+            {
+                /* Note delay: trigger the deferred note-on at the correct frame. */
+                if (chEffects[ch].hasDelayedNote &&
+                    (uint8_t)fi.frame == chEffects[ch].noteDelayFrames)
+                {
+                    int delaySid = chEffects[ch].delayedSid;
+                    if (delaySid >= 0 && delaySid < (int)conv->rawSampleCount &&
+                        conv->rawSamples[delaySid].valid)
+                    {
+                        int midiNote;
+                        int noteXpo;
+
+                        if (sampleToProgram[delaySid] < 0)
+                        {
+                            if (nextProgram >= 128u)
+                            {
+                                if (playerStarted) xmp_end_player(ctx);
+                                free(sampleToProgram);
+                                xmp_release_module(ctx);
+                                xmp_free_context(ctx);
+                                return 0;
+                            }
+                            sampleToProgram[delaySid] = (int)nextProgram;
+                            nextProgram++;
+                        }
+
+                        program = sampleToProgram[delaySid];
+
+                        if (!flush_active_note(song, (uint16_t)ch, &activeNotes[ch], currentTickFP))
+                        {
+                            if (playerStarted) xmp_end_player(ctx);
+                            free(sampleToProgram);
+                            xmp_release_module(ctx);
+                            xmp_free_context(ctx);
+                            return 0;
+                        }
+
+                        noteXpo = (delaySid >= 0 && delaySid < MOD2RMF_MAX_SAMPLES)
+                                    ? (int)sampleTranspose[delaySid] : 0;
+                        midiNote = (int)ci->note + 12 + noteXpo;
+
+                        activeNotes[ch].active = TRUE;
+                        activeNotes[ch].startTickFP = currentTickFP;
+                        activeNotes[ch].note = (unsigned char)clamp_int(midiNote, 0, 127);
+                        activeNotes[ch].velocity = note_velocity_from_volume((uint8_t)clamp_int((int)ci->volume, 0, 64));
+                        activeNotes[ch].program = (uint8_t)program;
+                        chLastBend[ch] = 0xFFFFu;
+                        {
+                            uint16_t bend;
+                            bend = libxmp_pitchbend_to_midi(ci->pitchbend,
+                                                            song->pitchBendRangeSemitones);
+                            chLastBend[ch] = bend;
+                            (void)song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend);
+                        }
+                    }
+                    chEffects[ch].hasDelayedNote = FALSE;
+                }
+
+                /* Retrigger: fire a new note-on at each interval boundary. */
+                if (chEffects[ch].retrigInterval > 0 &&
+                    ((uint8_t)fi.frame % chEffects[ch].retrigInterval) == 0 &&
+                    activeNotes[ch].active)
+                {
+                    if (!flush_active_note(song, (uint16_t)ch, &activeNotes[ch], currentTickFP))
+                    {
+                        if (playerStarted) xmp_end_player(ctx);
+                        free(sampleToProgram);
+                        xmp_release_module(ctx);
+                        xmp_free_context(ctx);
+                        return 0;
+                    }
+
+                    /* Re-trigger the same note with current volume from libxmp
+                     * (which already applies Rxy volume table changes). */
+                    activeNotes[ch].active = TRUE;
+                    activeNotes[ch].startTickFP = currentTickFP;
+                    /* note and program stay the same from the row's note-on */
+                    activeNotes[ch].velocity = note_velocity_from_volume((uint8_t)clamp_int((int)ci->volume, 0, 64));
+                    chLastBend[ch] = 0xFFFFu;
+                    {
+                        uint16_t bend;
+                        bend = libxmp_pitchbend_to_midi(ci->pitchbend,
+                                                        song->pitchBendRangeSemitones);
+                        chLastBend[ch] = bend;
+                        (void)song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend);
+                    }
+                }
+            }
+        }
+
+        currentTickFP += tickPerFrameFP;
+        frameGuard++;
+
+        if (fi.loop_count > 0)
+        {
+            song->loopEnabled = TRUE;
+            /* fi.pos is the position libxmp jumped back to (Bxx target).
+             * Use the recorded tick for that position as the loop start. */
+            if (fi.pos >= 0 && fi.pos < XMP_MAX_MOD_LENGTH && positionSeen[fi.pos])
+            {
+                song->loopStartTick = fp_ticks_to_int(positionTickFP[fi.pos]);
+            }
+            else
+            {
+                song->loopStartTick = 0;
+            }
+            song->loopEndTick = fp_ticks_to_int(currentTickFP);
+            break;
+        }
+    }
+
+    if (playerStarted)
+    {
+        xmp_end_player(ctx);
+    }
+
+    for (i = 0; i < song->channelCount; ++i)
+    {
+        if (!flush_active_note(song, (uint16_t)i, &activeNotes[i], currentTickFP))
+        {
+            free(sampleToProgram);
+            xmp_release_module(ctx);
+            xmp_free_context(ctx);
+            return 0;
+        }
+    }
+
+    song->playableCount = nextProgram;
+    if (song->playableCount > 0)
+    {
+        song->playables = (ModPlayable *)calloc(song->playableCount, sizeof(ModPlayable));
+        if (!song->playables)
+        {
+            free(sampleToProgram);
+            xmp_release_module(ctx);
+            xmp_free_context(ctx);
+            return 0;
+        }
+    }
+    for (i = 0; i < conv->rawSampleCount; ++i)
+    {
+        ModPlayable *p;
+        int program;
+        char tmp[64];
+
+        program = sampleToProgram ? sampleToProgram[i] : -1;
+        if (program < 0 || (uint32_t)program >= song->playableCount)
+        {
+            continue;
+        }
+        p = &song->playables[program];
+        p->sourceSlot = i;
+        p->program = (unsigned char)program;
+        p->rootKey = 72;
+        p->hasSampleRateOverride = TRUE;
+        p->sampleRateOverrideHz = conv->moduleBaseRateHz;
+        p->sampleOffsetBytes = 0;
+        p->offsetVariant = FALSE;
+        p->rawSample = &conv->rawSamples[i];
+
+        /* If the instrument has an amplitude envelope, map it to a BAE
+         * ADSR so the engine produces smooth volume shaping instead of
+         * relying on per-frame CC7 events.  The per-frame CC7 tracking
+         * is correspondingly suppressed for enveloped channels. */
+        if (conv->rawSamples[i].hasEnvelope)
+        {
+            p->hasVolumeAdsr = TRUE;
+            p->adsrAttackMs = conv->rawSamples[i].adsrAttackMs;
+            p->adsrPeakLevel = conv->rawSamples[i].adsrPeakLevel;
+            p->adsrDecayMs = conv->rawSamples[i].adsrDecayMs;
+            p->adsrSustainLevel = conv->rawSamples[i].adsrSustainLevel;
+            p->adsrReleaseMs = conv->rawSamples[i].adsrReleaseMs;
+        }
+
+        if (conv->rawSamples[i].name[0])
+        {
+            snprintf(p->displayName, sizeof(p->displayName), "%s", conv->rawSamples[i].name);
+        }
+        else
+        {
+            snprintf(tmp, sizeof(tmp), "Sample %u", (unsigned)(i + 1u));
+            trim_copy_ascii(p->displayName, sizeof(p->displayName), tmp);
+        }
+    }
+
+    free(sampleToProgram);
+    xmp_release_module(ctx);
+    xmp_free_context(ctx);
+    return 1;
 }
 
 static int load_source_data(Mod2RmfConverter *conv, const char *sourcePath)
@@ -3779,80 +1680,6 @@ static int load_source_data(Mod2RmfConverter *conv, const char *sourcePath)
     bytesRead = fread(conv->sourceData, 1, fileSize, file);
     fclose(file);
     return bytesRead == fileSize;
-}
-
-static int write_wav_mono8(const char *path,
-                           const int8_t *samples,
-                            uint32_t frameCount,
-                            uint32_t sampleRate)
-{
-    FILE *file;
-    uint32_t dataSize;
-    uint32_t riffSize;
-    unsigned char header[44];
-    uint8_t *wav8;
-    uint32_t i;
-
-    if (!path || !samples || frameCount == 0 || sampleRate == 0)
-    {
-        return 0;
-    }
-
-    dataSize = frameCount;
-    riffSize = 36 + dataSize;
-    memset(header, 0, sizeof(header));
-
-    memcpy(header + 0, "RIFF", 4);
-    header[4] = (unsigned char)(riffSize & 0xFF);
-    header[5] = (unsigned char)((riffSize >> 8) & 0xFF);
-    header[6] = (unsigned char)((riffSize >> 16) & 0xFF);
-    header[7] = (unsigned char)((riffSize >> 24) & 0xFF);
-    memcpy(header + 8, "WAVEfmt ", 8);
-    header[16] = 16;
-    header[20] = 1;
-    header[22] = 1;
-    header[24] = (unsigned char)(sampleRate & 0xFF);
-    header[25] = (unsigned char)((sampleRate >> 8) & 0xFF);
-    header[26] = (unsigned char)((sampleRate >> 16) & 0xFF);
-    header[27] = (unsigned char)((sampleRate >> 24) & 0xFF);
-    header[28] = (unsigned char)(sampleRate & 0xFF);
-    header[29] = (unsigned char)((sampleRate >> 8) & 0xFF);
-    header[30] = (unsigned char)((sampleRate >> 16) & 0xFF);
-    header[31] = (unsigned char)((sampleRate >> 24) & 0xFF);
-    header[32] = 1;
-    header[34] = 8;
-    memcpy(header + 36, "data", 4);
-    header[40] = (unsigned char)(dataSize & 0xFF);
-    header[41] = (unsigned char)((dataSize >> 8) & 0xFF);
-    header[42] = (unsigned char)((dataSize >> 16) & 0xFF);
-    header[43] = (unsigned char)((dataSize >> 24) & 0xFF);
-
-    file = fopen(path, "wb");
-    if (!file)
-    {
-        return 0;
-    }
-
-    wav8 = (uint8_t *)malloc(frameCount);
-    if (!wav8)
-    {
-        fclose(file);
-        return 0;
-    }
-    for (i = 0; i < frameCount; ++i)
-    {
-        wav8[i] = (uint8_t)((int)samples[i] + 128);
-    }
-
-    if (fwrite(header, 1, sizeof(header), file) != sizeof(header) ||
-        fwrite(wav8, 1, frameCount, file) != frameCount)
-    {
-        free(wav8);
-        fclose(file);
-        return 0;
-    }
-    free(wav8);
-    return fclose(file) == 0;
 }
 
 static int setup_document(Mod2RmfConverter *conv,
@@ -3962,7 +1789,6 @@ static int setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
             uint32_t pcmFrames;
             uint32_t loopStart;
             uint32_t loopEnd;
-            BAE_UNSIGNED_FIXED sampledRate;
 
             pcmFrames = raw->frameCount;
             loopStart = 0;
@@ -4001,43 +1827,41 @@ static int setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
                 chosenLoopEnd = loopEnd;
                 needsProcessing = conv->forceOriginalSamples ? FALSE : TRUE;
 
-                if (!needsProcessing)
-                {
-                    BAE_UNSIGNED_FIXED sampledRate;
+                 if (!needsProcessing)
+                 {
+                     BAE_UNSIGNED_FIXED sampledRate;
+                     double baseRate = playable->hasSampleRateOverride ? 
+                                         (double)playable->sampleRateOverrideHz : 
+                                         (double)conv->moduleBaseRateHz;
+                     /* finetune is intentionally NOT applied to sample rate;
+                      * libxmp folds it into ci->pitchbend (which we emit as
+                      * MIDI pitch bend events) so applying it here would
+                      * double the offset. */
+                     double finetuneRatio = pow(2.0, (double)raw->finetune / 96.0);
+                     sampledRate = (BAE_UNSIGNED_FIXED)((double)baseRate * finetuneRatio * 65536.0 + 0.5);
+                     if (sampledRate < 65536u)
+                     {
+                         sampledRate = 65536u;
+                     }
 
-                    if (playable->hasSampleRateOverride)
-                    {
-                        sampledRate = (BAE_UNSIGNED_FIXED)(playable->sampleRateOverrideHz << 16);
-                    }
-                    else
-                    {
-                        double finetuneRatio = pow(2.0, (double)raw->finetune / 96.0);
-
-                        sampledRate = (BAE_UNSIGNED_FIXED)((double)MOD2RMF_SAMPLE_RATE * finetuneRatio * 65536.0 + 0.5);
-                        if (sampledRate < 65536u)
-                        {
-                            sampledRate = 65536u;
-                        }
-                    }
-
-                    result = BAERmfEditorDocument_ReplaceSampleFromPCM(conv->document,
-                                                                       sampleIndex,
-                                                                       raw->pcm8,
-                                                                       pcmFrames,
-                                                                       8,
-                                                                       1,
-                                                                       sampledRate,
-                                                                       loopStart,
-                                                                       loopEnd,
-                                                                       &sampleInfo);
-                    if (result != BAE_NO_ERROR)
-                    {
-                        fprintf(stderr,
-                                "Warning: failed to inject raw 8-bit PCM for program %u (%d)\n",
-                                (unsigned)setup.program,
-                                (int)result);
-                    }
-                }
+                     result = BAERmfEditorDocument_ReplaceSampleFromPCM(conv->document,
+                                                                        sampleIndex,
+                                                                        raw->pcm8,
+                                                                        pcmFrames,
+                                                                        8,
+                                                                        1,
+                                                                        sampledRate,
+                                                                        loopStart,
+                                                                        loopEnd,
+                                                                        &sampleInfo);
+                     if (result != BAE_NO_ERROR)
+                     {
+                         fprintf(stderr,
+                                 "Warning: failed to inject raw 8-bit PCM for program %u (%d)\n",
+                                 (unsigned)setup.program,
+                                 (int)result);
+                     }
+                 }
                 else
                 {
                     int16_t *pcm16;
@@ -4051,11 +1875,8 @@ static int setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
                     /* Apply Amiga hardware filter and/or resampling.  The
                      * returned int16 buffer is already 16-bit so the engine can
                      * use the advancedInterpolation (PV_LoopWrapSample16) path. */
-                    srcRateForProcessing = MOD2RMF_SAMPLE_RATE;
-                    if (playable->hasSampleRateOverride && playable->sampleRateOverrideHz > 0u)
-                    {
-                        srcRateForProcessing = playable->sampleRateOverrideHz;
-                    }
+                     srcRateForProcessing = playable->hasSampleRateOverride && playable->sampleRateOverrideHz > 0u ?
+                                             playable->sampleRateOverrideHz : conv->moduleBaseRateHz;
 
                     pcm16 = mod2rmf_process_sample(raw->pcm8, pcmFrames,
                                                    srcRateForProcessing,
@@ -4075,8 +1896,8 @@ static int setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
                     }
                     else
                     {
-                        /* MOD path: apply finetune pitch correction to effective
-                         * output rate. ProTracker finetune step is 1/8 semitone. */
+                        /* finetune is intentionally NOT applied here;
+                         * libxmp folds it into ci->pitchbend. */
                         double finetuneRatio = pow(2.0, (double)raw->finetune / 96.0);
                         sampledRate = (BAE_UNSIGNED_FIXED)((double)outRate * finetuneRatio * 65536.0 + 0.5);
                         if (sampledRate < 65536u)
@@ -4337,8 +2158,11 @@ static int setup_instrument_ext(Mod2RmfConverter *conv, const ModSongModel *song
         if (playable->hasVolumeAdsr)
         {
             /* Envelope mapped to ADSR: attack -> decay -> sustain -> release. */
+            int32_t peakLevel = (playable->adsrPeakLevel > 0)
+                                  ? (int32_t)playable->adsrPeakLevel
+                                  : VOLUME_RANGE;
             extInfo.volumeADSR.stageCount = 4;
-            extInfo.volumeADSR.stages[0].level = VOLUME_RANGE;
+            extInfo.volumeADSR.stages[0].level = peakLevel;
             extInfo.volumeADSR.stages[0].time = (int32_t)playable->adsrAttackMs;
             extInfo.volumeADSR.stages[0].flags = ADSR_LINEAR_RAMP_LONG;
 
@@ -4659,7 +2483,6 @@ int main(int argc, char *argv[])
     Mod2RmfEncoderSettings encSettings;
     Mod2RmfResamplerSettings resamplerSettings;
     BAERmfEditorCompressionType compressionType;
-    XBOOL s3mDetected;
     XBOOL forceOriginalSamples;
     XBOOL codecArgSeen;
     XBOOL bitrateArgSeen;
@@ -4881,8 +2704,7 @@ int main(int argc, char *argv[])
     }
 
     (void)tempoMap; /* Reserved for future tempo-map handling. */
-    useZmfContainer = is_zmf_path(destPath);
-    conv->enableZmfSampleOffset = useZmfContainer;
+    useZmfContainer = is_zmf_path(destPath);    
     conv->resamplerSettings = resamplerSettings;
     conv->forceOriginalSamples = forceOriginalSamples;
     conv->stereoSeparation = stereoSeparation;
@@ -4896,34 +2718,29 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    s3mDetected = mod2rmf_s3m_is_signature((const unsigned char *)conv->sourceData, conv->sourceSize) ? TRUE : FALSE;
-
-    if (s3mDetected)
     {
-        fprintf(stderr, "S3M detected\n");
-
-        if (!build_song_model(conv, &song))
+        struct xmp_test_info testInfo;
+        memset(&testInfo, 0, sizeof(testInfo));
+        if (xmp_test_module_from_memory(conv->sourceData, (long)conv->sourceSize, &testInfo) != 0)
         {
-            fprintf(stderr, "Error: failed to parse source with native S3M parser\n");
+            fprintf(stderr, "Error: unsupported or invalid tracker module\n");
             song_model_dispose(&song);
             converter_delete(conv);
             BAE_Cleanup();
             return 1;
         }
+        fprintf(stderr, "Module detected by libxmp: %s (%s)\n",
+                testInfo.name[0] ? testInfo.name : "(untitled)",
+                testInfo.type[0] ? testInfo.type : "unknown");
     }
-    else
+
+    if (!build_song_model(conv, &song))
     {
-        if (!parse_mod_header(conv) ||
-            !extract_mod_samples(conv) ||
-            !build_slot_program_map(conv) ||
-            !build_song_model(conv, &song))
-        {
-            fprintf(stderr, "Error: failed to parse source with native MOD parser\n");
-            song_model_dispose(&song);
-            converter_delete(conv);
-            BAE_Cleanup();
-            return 1;
-        }
+        fprintf(stderr, "Error: failed to build song model\n");
+        song_model_dispose(&song);
+        converter_delete(conv);
+        BAE_Cleanup();
+        return 1;
     }
 
     if (!setup_document(conv, &song, sourcePath))
@@ -4982,3 +2799,4 @@ int main(int argc, char *argv[])
     BAE_Cleanup();
     return 0;
 }
+
