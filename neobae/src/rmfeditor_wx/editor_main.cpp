@@ -5391,8 +5391,9 @@ private:
 
         rmfData = nullptr;
         rmfSize = 0;
+        bool requiresZmf = BAERmfEditorDocument_RequiresZmf(m_document);
         if (BAERmfEditorDocument_SaveAsRmfToMemory(m_document,
-                                                    FALSE,
+                                                    requiresZmf ? TRUE : FALSE,
                                                     &rmfData,
                                                     &rmfSize) != BAE_NO_ERROR || !rmfData || rmfSize == 0) {
             return false;
@@ -5422,7 +5423,7 @@ private:
         rmfData = nullptr;
         rmfSize = 0;
         if (BAERmfEditorDocument_SaveAsRmfToMemory(tempDoc,
-                                                    FALSE,
+                                                    requiresZmf ? TRUE : FALSE,
                                                     &rmfData,
                                                     &rmfSize) != BAE_NO_ERROR || !rmfData || rmfSize == 0) {
             BAERmfEditorDocument_Delete(tempDoc);
@@ -5544,8 +5545,9 @@ private:
          * without affecting the original. */
         rmfData = nullptr;
         rmfSize = 0;
+        bool requiresZmf = BAERmfEditorDocument_RequiresZmf(m_document);
         if (BAERmfEditorDocument_SaveAsRmfToMemory(m_document,
-                                                    FALSE,
+                                                    requiresZmf ? TRUE : FALSE,
                                                     &rmfData,
                                                     &rmfSize) != BAE_NO_ERROR || !rmfData || rmfSize == 0) {
             return false;
@@ -5575,7 +5577,7 @@ private:
         rmfData = nullptr;
         rmfSize = 0;
         if (BAERmfEditorDocument_SaveAsRmfToMemory(tempDoc,
-                                                    FALSE,
+                                                    requiresZmf ? TRUE : FALSE,
                                                     &rmfData,
                                                     &rmfSize) != BAE_NO_ERROR || !rmfData || rmfSize == 0) {
             BAERmfEditorDocument_Delete(tempDoc);
@@ -5697,7 +5699,6 @@ private:
         // Use the document directly to save as RMF - it includes all instruments
         requiresZmf = (BAERmfEditorDocument_RequiresZmf(m_document) != 0);
         blobData = nullptr;
-        blobSize = 0;
         saveResult = BAERmfEditorDocument_SaveAsRmfToMemory(m_document,
                                                             requiresZmf ? TRUE : FALSE,
                                                             &blobData,

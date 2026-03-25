@@ -16372,12 +16372,14 @@ static BAEResult PV_WriteRmfDocumentToResourceFile(BAERmfEditorDocument *documen
 
     isZmf = (resourceID == XFILERESOURCE_ZMF_ID) ? TRUE : FALSE;
 
+    BAE_STDERR("[RMF Save] Starting save, trackCount=%u, format=%s\n", document->trackCount, isZmf ? "ZMF" : "RMF");
     result = BAERmfEditorDocument_Validate(document);
     BAE_STDERR("[RMF Save] Validate result=%d, trackCount=%u\n", (int)result, document->trackCount);
     if (result != BAE_NO_ERROR)
     {
         return result;
     }
+    
     XSetMemory(&midiData, sizeof(midiData), 0);
     result = PV_BuildMidiFile(document, &midiData);
     BAE_STDERR("[RMF Save] BuildMidiFile result=%d, size=%u\n", (int)result, midiData.size);
