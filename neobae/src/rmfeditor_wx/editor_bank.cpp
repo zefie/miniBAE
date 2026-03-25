@@ -102,7 +102,8 @@ static const char *CompressionSubTypeBitrate(uint32_t subType)
 }
 
 static const char *CompressionTypeName(uint32_t ct, uint32_t subType,
-                                       bool opusRoundTrip = false)
+                                       bool opusRoundTrip = false,
+                                       uint16_t bitDepth = 0)
 {
     static char combined[48];
     const char *base = NULL;
@@ -110,8 +111,14 @@ static const char *CompressionTypeName(uint32_t ct, uint32_t subType,
 
     switch (ct)
     {
-        case 0:                                     return "PCM (raw)";
-        case FOUR_CHAR('n','o','n','e'):            return "PCM";
+        case 0:
+        case FOUR_CHAR('n','o','n','e'):
+            if (bitDepth == 8 || bitDepth == 16)
+            {
+                snprintf(combined, sizeof(combined), "PCM %u-bit", (unsigned)bitDepth);
+                return combined;
+            }
+            return (ct == 0) ? "PCM (raw)" : "PCM";
         /* IMA ADPCM */
         case FOUR_CHAR('i','m','a','4'):            return "IMA4";
         case FOUR_CHAR('i','m','a','W'):            return "IMA4 (WAV)";
@@ -1014,8 +1021,9 @@ static void PopulateSampleList(BankEditorPanel *bp, uint32_t instrumentIndex)
         wxString rate = wxString::Format("%u Hz", sampleInfo.sampleRate);
         wxString frames = wxString::Format("%u", sampleInfo.frameCount);
         wxString codec = CompressionTypeName((uint32_t)sampleInfo.compressionType,
-                                               sampleInfo.compressionSubType,
-                                               sampleInfo.opusRoundTripResample ? true : false);
+                             sampleInfo.compressionSubType,
+                             sampleInfo.opusRoundTripResample ? true : false,
+                             sampleInfo.bitDepth);
         wxString bits = wxString::Format("%d-bit %s",
                                          sampleInfo.bitDepth,
                                          sampleInfo.channels == 2 ? "stereo" : "mono");
@@ -1053,7 +1061,8 @@ static void RefreshSampleListRow(BankEditorPanel *bp, uint32_t instrumentIndex, 
                                      sampleInfo.channels == 2 ? "stereo" : "mono");
     wxString codec = CompressionTypeName((uint32_t)sampleInfo.compressionType,
                                          sampleInfo.compressionSubType,
-                                         sampleInfo.opusRoundTripResample ? true : false);
+                                         sampleInfo.opusRoundTripResample ? true : false,
+                                         sampleInfo.bitDepth);
     wxString frames = wxString::Format("%u", sampleInfo.frameCount);
 
     bp->sampleList->SetItem(row, 1, keyRange);
@@ -1304,7 +1313,8 @@ static void ShowSampleDetail(BankEditorPanel *bp,
         data.codecDescription = wxString::FromUTF8(
             CompressionTypeName((uint32_t)sampleInfo.compressionType,
                                 sampleInfo.compressionSubType,
-                                sampleInfo.opusRoundTripResample ? true : false));
+                                sampleInfo.opusRoundTripResample ? true : false,
+                                sampleInfo.bitDepth));
         if (bp->sourceCodecCallback) {
             wxString sourceCodec;
             if (bp->sourceCodecCallback((uint16_t)sampleInfo.sndResourceID, sourceCodec) && !sourceCodec.empty()) {

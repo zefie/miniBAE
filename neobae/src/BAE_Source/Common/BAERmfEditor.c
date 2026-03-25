@@ -12176,12 +12176,14 @@ BAEResult BAERmfEditorDocument_GetSampleCodecDescription(BAERmfEditorDocument co
                                                          uint32_t outCodecSize)
 {
     BAERmfEditorSample const *sample;
+    uint16_t bitSize;
 
     if (!document || !outCodec || outCodecSize == 0 || sampleIndex >= document->sampleCount)
     {
         return BAE_PARAM_ERR;
     }
     sample = &document->samples[sampleIndex];
+    bitSize = (sample->waveform) ? sample->waveform->bitSize : 0;
     outCodec[0] = 0;
 #if USE_VORBIS_DECODER == TRUE || USE_VORBIS_ENCODER == TRUE    
     if (sample->sourceCompressionType == (uint32_t)C_VORBIS)
@@ -12273,7 +12275,20 @@ BAEResult BAERmfEditorDocument_GetSampleCodecDescription(BAERmfEditorDocument co
     else
 #endif        
     {
-        XGetCompressionName((int32_t)sample->sourceCompressionType, outCodec);
+        if ((sample->sourceCompressionType == (uint32_t)C_NONE || sample->sourceCompressionType == 0)
+            && (bitSize == 8 || bitSize == 16))
+        {
+            snprintf(outCodec, outCodecSize, "PCM %u-bit", (unsigned)bitSize);
+        }
+        else
+        {
+            XGetCompressionName((int32_t)sample->sourceCompressionType, outCodec);
+            if ((bitSize == 8 || bitSize == 16)
+                && (!XStrCmp(outCodec, "PCM") || !XStrCmp(outCodec, "PCM (raw)")))
+            {
+                snprintf(outCodec, outCodecSize, "PCM %u-bit", (unsigned)bitSize);
+            }
+        }
     }
     if (outCodec[0] == 0)
     {
