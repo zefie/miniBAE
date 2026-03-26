@@ -2,7 +2,7 @@
 /*
 **  XOpusFiles.c
 **
-**  Integration of libopus/libopusfile for Ogg Opus audio file support in miniBAE
+**  Integration of libopus/libopusfile for Ogg Opus audio file support in NeoBAE
 **
 **  This file provides decoding support for Ogg Opus audio files and
 **  encoding support for Ogg Opus export/sample workflows.
@@ -342,7 +342,7 @@ static long PV_WriteOggPages(XOpusEncoder *enc, XFILE output_file, XOpusMemBuf *
 static int PV_QueueOpusHeaders(XOpusEncoder *enc)
 {
     unsigned char head[19];
-    const char vendor[] = "miniBAE";
+    const char vendor[] = "NeoBAE";
     unsigned char tags[8 + 4 + sizeof(vendor) - 1 + 4];
     ogg_packet op;
 

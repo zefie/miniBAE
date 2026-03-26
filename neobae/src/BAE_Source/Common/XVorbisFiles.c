@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2025 miniBAE Project
+    Copyright (c) 2025 NeoBAE Project
     
     Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are
@@ -12,7 +12,7 @@
     notice, this list of conditions and the following disclaimer in the
     documentation and/or other materials provided with the distribution.
     
-    Neither the name of the miniBAE Project nor the names of its contributors
+    Neither the name of the NeoBAE Project nor the names of its contributors
     may be used to endorse or promote products derived from this software
     without specific prior written permission.
     
@@ -32,7 +32,7 @@
 /*
 **  XVorbisFiles.c
 **
-**  Integration of libvorbis for Ogg Vorbis audio file support in miniBAE
+**  Integration of libvorbis for Ogg Vorbis audio file support in NeoBAE
 **
 **  This file provides encoding and decoding support for Ogg Vorbis audio files
 **  using the reference libvorbis implementation.
@@ -312,7 +312,7 @@ void* XInitVorbisEncoder(UINT32 sample_rate, UINT32 channels, float quality)
     
     // Initialize comment
     vorbis_comment_init(&encoder->vc);
-    vorbis_comment_add_tag(&encoder->vc, "ENCODER", "miniBAE");
+    vorbis_comment_add_tag(&encoder->vc, "ENCODER", "NeoBAE");
     
     // Initialize analysis state and auxiliary encoding storage
     vorbis_analysis_init(&encoder->vd, &encoder->vi);

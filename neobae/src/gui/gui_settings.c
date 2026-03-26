@@ -636,7 +636,7 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
     // Declare rects that will be used in dropdown rendering
     Rect vcRect = {controlRightX, dlg.y + 32, controlW, 24};
     Rect srRect = {controlRightX, dlg.y + 68, controlW, 24};
-#if USE_MPEG_ENCODER == TRUE
+#if USE_MPEG_ENCODER == TRUE || USE_VORBIS_ENCODER == TRUE || USE_OPUS_ENCODER == TRUE || USE_FLAC_ENCODER == TRUE
     Rect expRect = {controlRightX, dlg.y + 104, controlW, 24};
 #endif
 #if SUPPORT_MIDI_HW == TRUE
@@ -648,7 +648,7 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
     // Left column controls (stacked)
     // Volume Curve selector
     draw_text(R, leftX, dlg.y + 36, "Vol. Curve (HSB):", g_text_color);
-    const char *volumeCurveNames[] = {"miniBAE S Curve", "Peaky S Curve", "WebTV Curve", "2x Exponential", "2x Linear"};
+    const char *volumeCurveNames[] = {"NeoBAE S Curve", "Peaky S Curve", "WebTV Curve", "2x Exponential", "2x Linear"};
     int vcCount = 5;
     bool volumeCurveEnabled = !g_midiRecordFormatDropdownOpen;
     SDL_Color dd_bg = g_button_base;
@@ -838,11 +838,11 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
             {
                 int api = g_midi_device_api[g_midi_input_device_index];
                 int port = g_midi_device_port[g_midi_input_device_index];
-                midi_input_init("miniBAE", api, port);
+                midi_input_init("NeoBAE", api, port);
             }
             else
             {
-                midi_input_init("miniBAE", -1, -1);
+                midi_input_init("NeoBAE", -1, -1);
             }
             if (g_bae.mixer)
             {
@@ -951,18 +951,18 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
         int apiCount = rtmidi_get_compiled_api(apis, (unsigned int)(sizeof(apis) / sizeof(apis[0])));
         if (apiCount <= 0)
             apiCount = 0;
-        const char *dbg = getenv("MINIBAE_DEBUG_MIDI");
+        const char *dbg = getenv("NEOBAE_DEBUG_MIDI");
         // First: inputs
         for (int ai = 0; ai < apiCount && g_midi_device_count < 64; ++ai)
         {
-            RtMidiInPtr r = rtmidi_in_create(apis[ai], "miniBAE_enum", 1000);
+            RtMidiInPtr r = rtmidi_in_create(apis[ai], "NeoBAE_enum", 1000);
             if (!r)
                 continue;
             unsigned int cnt = rtmidi_get_port_count(r);
             if (dbg)
             {
                 const char *an = rtmidi_api_name(apis[ai]);
-                fprintf(stderr, "[MIDI ENUM IN] API %d (%s): ok=%d msg='%s' ports=%u\n", ai, an ? an : "?", r->ok, r->msg ? r->msg : "", cnt);
+                BAE_STDERR("[MIDI ENUM IN] API %d (%s): ok=%d msg='%s' ports=%u\n", ai, an ? an : "?", r->ok, r->msg ? r->msg : "", cnt);
             }
             for (unsigned int di = 0; di < cnt && g_midi_device_count < 64; ++di)
             {
@@ -999,14 +999,14 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
         // Then: outputs (append after inputs)
         for (int ai = 0; ai < apiCount && g_midi_device_count < 64; ++ai)
         {
-            RtMidiOutPtr r = rtmidi_out_create(apis[ai], "miniBAE_enum");
+            RtMidiOutPtr r = rtmidi_out_create(apis[ai], "NeoBAE_enum");
             if (!r)
                 continue;
             unsigned int cnt = rtmidi_get_port_count(r);
             if (dbg)
             {
                 const char *an = rtmidi_api_name(apis[ai]);
-                fprintf(stderr, "[MIDI ENUM OUT] API %d (%s): ok=%d msg='%s' ports=%u\n", ai, an ? an : "?", r->ok, r->msg ? r->msg : "", cnt);
+                BAE_STDERR("[MIDI ENUM OUT] API %d (%s): ok=%d msg='%s' ports=%u\n", ai, an ? an : "?", r->ok, r->msg ? r->msg : "", cnt);
             }
             for (unsigned int di = 0; di < cnt && g_midi_device_count < 64; ++di)
             {
@@ -1094,7 +1094,7 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
             {
                 // try to init default output (will open first port or virtual)
                 // Ensure any previous output is cleanly silenced first
-                midi_output_init("miniBAE", -1, -1);
+                midi_output_init("NeoBAE", -1, -1);
                 // After opening, send current instrument table so external device matches internal synth
                 if (g_bae.song)
                 {
@@ -1311,12 +1311,12 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
                             {
                                 int api = g_midi_device_api[g_midi_input_device_index];
                                 int port = g_midi_device_port[g_midi_input_device_index];
-                                midi_input_init("miniBAE", api, port);
+                                midi_input_init("NeoBAE", api, port);
                                 midi_service_start();
                             }
                             else
                             {
-                                midi_input_init("miniBAE", -1, -1);
+                                midi_input_init("NeoBAE", -1, -1);
                                 midi_service_start();
                             }
                         }
@@ -1377,7 +1377,7 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
                     g_midi_input_device_dd_open = false; // reopen midi input with chosen device
                     midi_service_stop();
                     midi_input_shutdown();
-                    midi_input_init("miniBAE", g_midi_device_api[i], g_midi_device_port[i]);
+                    midi_input_init("NeoBAE", g_midi_device_api[i], g_midi_device_port[i]);
                     midi_service_start();
                     save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, *loopPlay);
                 }
@@ -1436,7 +1436,7 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
                     // Silence previous device before switching
                     midi_output_send_all_notes_off();
                     midi_output_shutdown();
-                    midi_output_init("miniBAE", g_midi_device_api[g_midi_input_device_count + i], g_midi_device_port[g_midi_input_device_count + i]);
+                    midi_output_init("NeoBAE", g_midi_device_api[g_midi_input_device_count + i], g_midi_device_port[g_midi_input_device_count + i]);
                     // After opening, send current instrument table
                     if (g_bae.song)
                     {

@@ -186,6 +186,7 @@ typedef struct {
     unsigned char note;
     unsigned char velocity;
     unsigned char program;
+    int bendOffsetCents;
 } ActiveNote;
 
 typedef struct {
@@ -670,12 +671,6 @@ static unsigned char mod_vol_to_midi(unsigned char vol64)
 
 static unsigned char note_velocity_from_volume(unsigned char vol64)
 {
-    /* Trackers don't have a separate "velocity" concept — volume is
-     * continuous and already captured as CC7 every frame.  Using max
-     * velocity avoids double-attenuation (CC7 × velocity) that would
-     * make moderate-volume notes disproportionately quiet.  CC7 is
-     * emitted at the same tick before the note-on, so the initial
-     * loudness is correct. */
     (void)vol64;
     return 127u;
 }
@@ -717,7 +712,7 @@ static uint8_t apply_stereo_separation(uint8_t rawPan, uint32_t ch,
     }
 }
 
-static uint16_t libxmp_pitchbend_to_midi(int16_t xmpPitchbend,
+static uint16_t libxmp_pitchbend_to_midi(int32_t xmpPitchbend,
                                          uint16_t bendRangeSemitones)
 {
     double semitoneDelta;
@@ -1047,7 +1042,6 @@ static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
     int positionSeen[XMP_MAX_MOD_LENGTH];        /* whether we've recorded the tick for this pos */
     int lastPos;                                 /* last seen order position */
     int *sampleToProgram;
-    uint32_t nextProgram;
     uint64_t currentTickFP;
     uint64_t tickPerFrameFP;
     uint32_t frameGuard;
@@ -1337,7 +1331,6 @@ static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
         chLastBend[i] = MOD2RMF_PITCH_BEND_CENTER;
     }
 
-    nextProgram = 0;
     currentTickFP = 0;
     /* MOD2RMF_ROW_TICKS (120) is defined as MIDI ticks per row at speed 6.
      * Dividing by 6 gives 20 MIDI ticks per tracker frame (tick).
@@ -1437,89 +1430,112 @@ static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
              * shape, so we only emit CC7 at row boundaries (frame 0)
              * where ci->volume reflects the channel volume before the
              * envelope has modulated it.  This avoids a flood of CC7
-             * events that just approximate the envelope curve. */
+             * events that just approximate the envelope curve.
+             *
+             * Snapshot the CC event count so we can fix program tags
+             * below if a note-on changes the active program this frame.
+             * CC7/CC10 emitted here use the *previous* note's program,
+             * but the volume/pan actually belongs to the incoming note. */
             {
-                uint8_t adjPan;
-                adjPan = apply_stereo_separation((uint8_t)ci->pan, ch,
-                                                 conv->isMod, conv->stereoSeparation);
-                if (adjPan != chLastPan[ch])
+                uint32_t preNoteCCIdx = song->ccCount;
+                uint32_t preNoteBendIdx = song->pitchBendCount;
+                uint8_t  preNoteProg  = activeNotes[ch].program;
+
                 {
-                    chLastPan[ch] = adjPan;
-                    (void)song_model_append_cc_event(song, (uint16_t)ch, tick, 10,
-                                                     (unsigned char)(adjPan >> 1),
-                                                     activeNotes[ch].program);
-                }
-            }
-            if (ci->volume != chLastVol[ch])
-            {
-                uint8_t vol64;
-                vol64 = (uint8_t)clamp_int((int)ci->volume, 0, 64);
-                chLastVol[ch] = vol64;
-                (void)song_model_append_cc_event(song, (uint16_t)ch, tick, 7,
-                                                 mod_vol_to_midi(vol64),
-                                                 activeNotes[ch].program);
-            }
-
-            if (activeNotes[ch].active)
-            {
-                uint16_t bend;
-                bend = libxmp_pitchbend_to_midi(ci->pitchbend,
-                                                song->pitchBendRangeSemitones);
-                if (bend != chLastBend[ch])
-                {
-                    chLastBend[ch] = bend;
-                    (void)song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend,
-                                                       activeNotes[ch].program);
-                }
-            }
-
-            /* ---- Row boundary (frame 0): parse effects, handle note events ---- */
-            if (fi.frame == 0)
-            {
-                uint8_t retrigInterval = 0;
-                uint8_t noteDelayFrames = 0;
-
-                /* Reset per-row effect state. */
-                memset(&chEffects[ch], 0, sizeof(chEffects[ch]));
-
-                /* Parse retrigger and note-delay effects from both effect columns. */
-                parse_row_effects(&ci->event, &retrigInterval, &noteDelayFrames);
-                chEffects[ch].retrigInterval = retrigInterval;
-                chEffects[ch].noteDelayFrames = noteDelayFrames;
-
-                /* Key-off events are always processed immediately, even with delay. */
-                if (evNote == XMP_KEY_OFF || evNote == XMP_KEY_CUT || evNote == XMP_KEY_FADE)
-                {
-                    if (!flush_active_note(song, (uint16_t)ch, &activeNotes[ch], currentTickFP))
+                    uint8_t adjPan;
+                    adjPan = apply_stereo_separation((uint8_t)ci->pan, ch,
+                                                     conv->isMod, conv->stereoSeparation);
+                    if (adjPan != chLastPan[ch])
                     {
-                        if (playerStarted) xmp_end_player(ctx);
-                        free(sampleToProgram);
-                        xmp_release_module(ctx);
-                        xmp_free_context(ctx);
-                        return 0;
+                        chLastPan[ch] = adjPan;
+                        (void)song_model_append_cc_event(song, (uint16_t)ch, tick, 10,
+                                                         (unsigned char)(adjPan >> 1),
+                                                         activeNotes[ch].program);
                     }
                 }
-                else if (evNote > 0 && evNote <= 120 && sid >= 0 && sid < (int)conv->rawSampleCount)
+                if (ci->volume != chLastVol[ch])
                 {
-                    if (conv->rawSamples[sid].valid)
-                    {
-                        if (noteDelayFrames > 0)
-                        {
-                            /* Note delay: defer the note-on to a later frame. */
-                            chEffects[ch].hasDelayedNote = TRUE;
-                            chEffects[ch].delayedEvNote = evNote;
-                            chEffects[ch].delayedSid = sid;
-                            chEffects[ch].delayedVolume = (uint8_t)clamp_int((int)ci->volume, 0, 64);
-                        }
-                        else
-                        {
-                            /* Normal note-on (or retrigger tick 0). */
-                            int midiNote;
-                            int noteXpo;
+                    uint8_t vol64;
+                    vol64 = (uint8_t)clamp_int((int)ci->volume, 0, 64);
+                    chLastVol[ch] = vol64;
+                    (void)song_model_append_cc_event(song, (uint16_t)ch, tick, 7,
+                                                    mod_vol_to_midi(vol64),
+                                                    activeNotes[ch].program);
+                }
 
-                            if (sampleToProgram[sid] < 0)
+                if (activeNotes[ch].active)
+                {
+                    uint16_t bend;
+                    bend = libxmp_pitchbend_to_midi(ci->pitchbend + activeNotes[ch].bendOffsetCents,
+                                                    song->pitchBendRangeSemitones);
+                    if (bend != chLastBend[ch])
+                    {
+                        chLastBend[ch] = bend;
+                        (void)song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend,
+                                                        activeNotes[ch].program);
+                    }
+                }
+
+                /* ---- Row boundary (frame 0): parse effects, handle note events ---- */
+                if (fi.frame == 0)
+                {
+                    uint8_t retrigInterval = 0;
+                    uint8_t noteDelayFrames = 0;
+
+                    /* Reset per-row effect state. */
+                    memset(&chEffects[ch], 0, sizeof(chEffects[ch]));
+
+                    /* Parse retrigger and note-delay effects from both effect columns. */
+                    parse_row_effects(&ci->event, &retrigInterval, &noteDelayFrames);
+                    chEffects[ch].retrigInterval = retrigInterval;
+                    chEffects[ch].noteDelayFrames = noteDelayFrames;
+
+                    /* Key-off events are always processed immediately, even with delay. */
+                    if (evNote == XMP_KEY_OFF || evNote == XMP_KEY_CUT || evNote == XMP_KEY_FADE)
+                    {
+                        if (!flush_active_note(song, (uint16_t)ch, &activeNotes[ch], currentTickFP))
+                        {
+                            if (playerStarted) xmp_end_player(ctx);
+                            free(sampleToProgram);
+                            xmp_release_module(ctx);
+                            xmp_free_context(ctx);
+                            return 0;
+                        }
+                    }
+                    else if (evNote > 0 && evNote <= 120 && sid >= 0 && sid < (int)conv->rawSampleCount)
+                    {
+                        if (conv->rawSamples[sid].valid)
+                        {
+                            if (noteDelayFrames > 0)
                             {
-                                if (nextProgram >= 128u)
+                                /* Note delay: defer the note-on to a later frame. */
+                                chEffects[ch].hasDelayedNote = TRUE;
+                                chEffects[ch].delayedEvNote = evNote;
+                                chEffects[ch].delayedSid = sid;
+                                chEffects[ch].delayedVolume = (uint8_t)clamp_int((int)ci->volume, 0, 64);
+                            }
+                            else
+                            {
+                                /* Normal note-on (or retrigger tick 0). */
+                                int midiNote;
+                                int noteXpo;
+
+                                if (sampleToProgram[sid] < 0)
+                                {
+                                    if (sid >= 128)
+                                    {
+                                        if (playerStarted) xmp_end_player(ctx);
+                                        free(sampleToProgram);
+                                        xmp_release_module(ctx);
+                                        xmp_free_context(ctx);
+                                        return 0;
+                                    }
+                                    sampleToProgram[sid] = sid;
+                                }
+
+                                program = sampleToProgram[sid];
+
+                                if (!flush_active_note(song, (uint16_t)ch, &activeNotes[ch], currentTickFP))
                                 {
                                     if (playerStarted) xmp_end_player(ctx);
                                     free(sampleToProgram);
@@ -1527,11 +1543,59 @@ static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                     xmp_free_context(ctx);
                                     return 0;
                                 }
-                                sampleToProgram[sid] = (int)nextProgram;
-                                nextProgram++;
+
+                                noteXpo = (sid >= 0 && sid < MOD2RMF_MAX_SAMPLES)
+                                            ? (int)sampleTranspose[sid] : 0;
+                                midiNote = (int)ci->note + 12 + noteXpo;
+
+                                activeNotes[ch].active = TRUE;
+                                activeNotes[ch].startTickFP = currentTickFP;
+                                activeNotes[ch].note = (unsigned char)clamp_int(midiNote, 0, 127);
+                                activeNotes[ch].velocity = note_velocity_from_volume((uint8_t)clamp_int((int)ci->volume, 0, 64));
+                                activeNotes[ch].program = (uint8_t)program;
+                                activeNotes[ch].bendOffsetCents = (midiNote - (int)activeNotes[ch].note) * 100;
+                                chLastBend[ch] = 0xFFFFu;
+                                {
+                                    uint16_t bend;
+                                    bend = libxmp_pitchbend_to_midi(ci->pitchbend + activeNotes[ch].bendOffsetCents,
+                                                                    song->pitchBendRangeSemitones);
+                                    chLastBend[ch] = bend;
+                                    (void)song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend,
+                                                                        activeNotes[ch].program);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                /* ---- Non-zero frames: handle note delay trigger and retrigger ---- */
+                if (fi.frame > 0)
+                {
+                    /* Note delay: trigger the deferred note-on at the correct frame. */
+                    if (chEffects[ch].hasDelayedNote &&
+                        (uint8_t)fi.frame == chEffects[ch].noteDelayFrames)
+                    {
+                        int delaySid = chEffects[ch].delayedSid;
+                        if (delaySid >= 0 && delaySid < (int)conv->rawSampleCount &&
+                            conv->rawSamples[delaySid].valid)
+                        {
+                            int midiNote;
+                            int noteXpo;
+
+                            if (sampleToProgram[delaySid] < 0)
+                            {
+                                if (delaySid >= 128)
+                                {
+                                    if (playerStarted) xmp_end_player(ctx);
+                                    free(sampleToProgram);
+                                    xmp_release_module(ctx);
+                                    xmp_free_context(ctx);
+                                    return 0;
+                                }
+                                sampleToProgram[delaySid] = delaySid;
                             }
 
-                            program = sampleToProgram[sid];
+                            program = sampleToProgram[delaySid];
 
                             if (!flush_active_note(song, (uint16_t)ch, &activeNotes[ch], currentTickFP))
                             {
@@ -1542,8 +1606,8 @@ static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                 return 0;
                             }
 
-                            noteXpo = (sid >= 0 && sid < MOD2RMF_MAX_SAMPLES)
-                                        ? (int)sampleTranspose[sid] : 0;
+                            noteXpo = (delaySid >= 0 && delaySid < MOD2RMF_MAX_SAMPLES)
+                                        ? (int)sampleTranspose[delaySid] : 0;
                             midiNote = (int)ci->note + 12 + noteXpo;
 
                             activeNotes[ch].active = TRUE;
@@ -1551,50 +1615,25 @@ static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                             activeNotes[ch].note = (unsigned char)clamp_int(midiNote, 0, 127);
                             activeNotes[ch].velocity = note_velocity_from_volume((uint8_t)clamp_int((int)ci->volume, 0, 64));
                             activeNotes[ch].program = (uint8_t)program;
+                            activeNotes[ch].bendOffsetCents = (midiNote - (int)activeNotes[ch].note) * 100;
                             chLastBend[ch] = 0xFFFFu;
                             {
                                 uint16_t bend;
-                                bend = libxmp_pitchbend_to_midi(ci->pitchbend,
+                                bend = libxmp_pitchbend_to_midi(ci->pitchbend + activeNotes[ch].bendOffsetCents,
                                                                 song->pitchBendRangeSemitones);
                                 chLastBend[ch] = bend;
                                 (void)song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend,
                                                                     activeNotes[ch].program);
                             }
                         }
+                        chEffects[ch].hasDelayedNote = FALSE;
                     }
-                }
-            }
 
-            /* ---- Non-zero frames: handle note delay trigger and retrigger ---- */
-            if (fi.frame > 0)
-            {
-                /* Note delay: trigger the deferred note-on at the correct frame. */
-                if (chEffects[ch].hasDelayedNote &&
-                    (uint8_t)fi.frame == chEffects[ch].noteDelayFrames)
-                {
-                    int delaySid = chEffects[ch].delayedSid;
-                    if (delaySid >= 0 && delaySid < (int)conv->rawSampleCount &&
-                        conv->rawSamples[delaySid].valid)
+                    /* Retrigger: fire a new note-on at each interval boundary. */
+                    if (chEffects[ch].retrigInterval > 0 &&
+                        ((uint8_t)fi.frame % chEffects[ch].retrigInterval) == 0 &&
+                        activeNotes[ch].active)
                     {
-                        int midiNote;
-                        int noteXpo;
-
-                        if (sampleToProgram[delaySid] < 0)
-                        {
-                            if (nextProgram >= 128u)
-                            {
-                                if (playerStarted) xmp_end_player(ctx);
-                                free(sampleToProgram);
-                                xmp_release_module(ctx);
-                                xmp_free_context(ctx);
-                                return 0;
-                            }
-                            sampleToProgram[delaySid] = (int)nextProgram;
-                            nextProgram++;
-                        }
-
-                        program = sampleToProgram[delaySid];
-
                         if (!flush_active_note(song, (uint16_t)ch, &activeNotes[ch], currentTickFP))
                         {
                             if (playerStarted) xmp_end_player(ctx);
@@ -1604,59 +1643,41 @@ static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                             return 0;
                         }
 
-                        noteXpo = (delaySid >= 0 && delaySid < MOD2RMF_MAX_SAMPLES)
-                                    ? (int)sampleTranspose[delaySid] : 0;
-                        midiNote = (int)ci->note + 12 + noteXpo;
-
+                        /* Re-trigger the same note with current volume from libxmp
+                        * (which already applies Rxy volume table changes). */
                         activeNotes[ch].active = TRUE;
                         activeNotes[ch].startTickFP = currentTickFP;
-                        activeNotes[ch].note = (unsigned char)clamp_int(midiNote, 0, 127);
+                        /* note and program stay the same from the row's note-on */
                         activeNotes[ch].velocity = note_velocity_from_volume((uint8_t)clamp_int((int)ci->volume, 0, 64));
-                        activeNotes[ch].program = (uint8_t)program;
                         chLastBend[ch] = 0xFFFFu;
                         {
                             uint16_t bend;
-                            bend = libxmp_pitchbend_to_midi(ci->pitchbend,
+                            bend = libxmp_pitchbend_to_midi(ci->pitchbend + activeNotes[ch].bendOffsetCents,
                                                             song->pitchBendRangeSemitones);
                             chLastBend[ch] = bend;
                             (void)song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend,
                                                                 activeNotes[ch].program);
                         }
                     }
-                    chEffects[ch].hasDelayedNote = FALSE;
                 }
 
-                /* Retrigger: fire a new note-on at each interval boundary. */
-                if (chEffects[ch].retrigInterval > 0 &&
-                    ((uint8_t)fi.frame % chEffects[ch].retrigInterval) == 0 &&
-                    activeNotes[ch].active)
+                /* If the note-on changed the active program, patch the CC
+                 * and pitch bend events we emitted earlier this frame so
+                 * they carry the correct program tag for spread-mode
+                 * routing. */
+                if (activeNotes[ch].program != preNoteProg)
                 {
-                    if (!flush_active_note(song, (uint16_t)ch, &activeNotes[ch], currentTickFP))
+                    uint32_t j;
+                    for (j = preNoteCCIdx; j < song->ccCount; ++j)
                     {
-                        if (playerStarted) xmp_end_player(ctx);
-                        free(sampleToProgram);
-                        xmp_release_module(ctx);
-                        xmp_free_context(ctx);
-                        return 0;
+                        song->ccEvents[j].program = activeNotes[ch].program;
                     }
-
-                    /* Re-trigger the same note with current volume from libxmp
-                     * (which already applies Rxy volume table changes). */
-                    activeNotes[ch].active = TRUE;
-                    activeNotes[ch].startTickFP = currentTickFP;
-                    /* note and program stay the same from the row's note-on */
-                    activeNotes[ch].velocity = note_velocity_from_volume((uint8_t)clamp_int((int)ci->volume, 0, 64));
-                    chLastBend[ch] = 0xFFFFu;
+                    for (j = preNoteBendIdx; j < song->pitchBendCount; ++j)
                     {
-                        uint16_t bend;
-                        bend = libxmp_pitchbend_to_midi(ci->pitchbend,
-                                                        song->pitchBendRangeSemitones);
-                        chLastBend[ch] = bend;
-                        (void)song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend,
-                                                            activeNotes[ch].program);
+                        song->pitchBendEvents[j].program = activeNotes[ch].program;
                     }
                 }
-            }
+            } /* end preNoteCCIdx scope */
         }
 
         currentTickFP += tickPerFrameFP;
@@ -1679,7 +1700,22 @@ static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
         }
     }
 
-    song->playableCount = nextProgram;
+    /* playableCount must cover the highest assigned program number + 1.
+     * Since programs now equal sample indices (which may have gaps), find
+     * the maximum assigned program. */
+    {
+        uint32_t maxProg = 0;
+        XBOOL anyAssigned = FALSE;
+        for (i = 0; i < conv->rawSampleCount; ++i) {
+            if (sampleToProgram[i] >= 0) {
+                if ((uint32_t)sampleToProgram[i] >= maxProg) {
+                    maxProg = (uint32_t)sampleToProgram[i] + 1;
+                }
+                anyAssigned = TRUE;
+            }
+        }
+        song->playableCount = anyAssigned ? maxProg : 0;
+    }
     if (song->playableCount > 0)
     {
         song->playables = (ModPlayable *)calloc(song->playableCount, sizeof(ModPlayable));
@@ -1708,6 +1744,7 @@ static int build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
         p->rootKey = 72;
         p->hasSampleRateOverride = TRUE;
         p->sampleRateOverrideHz = conv->moduleBaseRateHz;
+        
         p->sampleOffsetBytes = 0;
         p->offsetVariant = FALSE;
         p->rawSample = &conv->rawSamples[i];
@@ -1880,7 +1917,13 @@ static int setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
 
         memset(&setup, 0, sizeof(setup));
         setup.program = playable->program;
-        setup.rootKey = playable->rootKey;
+        
+        /* BAE limits downward pitch shifts to -24 semitones from rootKey.
+         * To allow tracker modules to play extremely low notes (e.g. laugh samples),
+         * we virtually shift the rootKey down by 2 octaves (24 semitones) and 
+         * correspondingly divide the sample rate by 4 prior to saving. */
+        setup.rootKey = (playable->rootKey >= 24) ? (playable->rootKey - 24) : 0;
+        
         setup.lowKey = 0;
         setup.highKey = 127;
         setup.displayName = (char *)playable->displayName;
@@ -1952,7 +1995,8 @@ static int setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
                       * MIDI pitch bend events) so applying it here would
                       * double the offset. */
                      double finetuneRatio = pow(2.0, (double)raw->finetune / 96.0);
-                     sampledRate = (BAE_UNSIGNED_FIXED)((double)baseRate * finetuneRatio * 65536.0 + 0.5);
+                     /* Divide the physical baseRate by 4 to complement the -24 rootKey shift */
+                     sampledRate = (BAE_UNSIGNED_FIXED)((double)(baseRate / 4.0) * finetuneRatio * 65536.0 + 0.5);
                      if (sampledRate < 65536u)
                      {
                          sampledRate = 65536u;
@@ -2005,14 +2049,14 @@ static int setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
 
                     if (playable->hasSampleRateOverride)
                     {
-                        sampledRate = (BAE_UNSIGNED_FIXED)(outRate << 16);
+                        sampledRate = (BAE_UNSIGNED_FIXED)((outRate / 4u) << 16);
                     }
                     else
                     {
                         /* finetune is intentionally NOT applied here;
                          * libxmp folds it into ci->pitchbend. */
                         double finetuneRatio = pow(2.0, (double)raw->finetune / 96.0);
-                        sampledRate = (BAE_UNSIGNED_FIXED)((double)outRate * finetuneRatio * 65536.0 + 0.5);
+                        sampledRate = (BAE_UNSIGNED_FIXED)((double)(outRate / 4.0) * finetuneRatio * 65536.0 + 0.5);
                         if (sampledRate < 65536u)
                         {
                             sampledRate = 65536u;
@@ -2165,6 +2209,201 @@ static int compare_cc_by_tick(const void *a, const void *b)
     return 0;
 }
 
+/* --- Loop CC state reset ------------------------------------------------ */
+
+/* When a song loops via meta markers, the engine kills active notes but does
+ * NOT reset channel state (CC7, CC10, pitch bend, etc.).  If a channel's last
+ * CC7 value at the end of the song differs from what was in effect at the loop
+ * start, the channel will have the wrong volume until its first CC7 event
+ * replays.
+ *
+ * This function finds the effective CC7 value at loopStartTick (the last CC7
+ * at or before that tick, or 127 if none) and the last CC7 at or before
+ * loopEndTick.  If they differ, it inserts a CC7 at loopStartTick with the
+ * correct first-playthrough value so that the engine's channel state is
+ * restored on loop-back.  A re-sort of CCs is performed afterwards to keep
+ * chronological order. */
+
+static int ensure_loop_cc_resets(ModSongModel *song)
+{
+    uint32_t ch, i;
+    XBOOL needsSort = FALSE;
+
+    if (!song || !song->loopEnabled)
+    {
+        return 1;
+    }
+
+    for (ch = 0; ch < song->channelCount; ++ch)
+    {
+        XBOOL hasNotes = FALSE;
+        uint8_t channelProgram = 0xFF;
+        /* Track the effective CC7 at loopStartTick and loopEndTick.
+         * Engine default is 127 (MAX_NOTE_VOLUME). */
+        uint8_t cc7AtLoopStart = 127; /* engine default */
+        uint8_t cc7AtLoopEnd = 127;   /* engine default */
+        XBOOL hasCC7 = FALSE;
+        XBOOL hasCC7AtLoopStart = FALSE;
+
+        /* Check if this channel has notes */
+        for (i = 0; i < song->noteCount; ++i)
+        {
+            if (song->notes[i].sourceChannel == ch)
+            {
+                hasNotes = TRUE;
+                if (channelProgram == 0xFF)
+                {
+                    channelProgram = song->notes[i].program;
+                }
+                break;
+            }
+        }
+        if (!hasNotes) continue;
+
+        /* Scan CC7 events (sorted by tick) to find:
+         * 1. Effective CC7 at loopStartTick (last CC7 at or before that tick)
+         * 2. Effective CC7 at loopEndTick (last CC7 at or before that tick)
+         * 3. Whether an explicit CC7 exists exactly at loopStartTick */
+        for (i = 0; i < song->ccCount; ++i)
+        {
+            if (song->ccEvents[i].sourceChannel == ch && song->ccEvents[i].cc == 7)
+            {
+                hasCC7 = TRUE;
+                if (song->ccEvents[i].tick <= song->loopStartTick)
+                {
+                    cc7AtLoopStart = song->ccEvents[i].value;
+                    if (song->ccEvents[i].tick == song->loopStartTick)
+                    {
+                        hasCC7AtLoopStart = TRUE;
+                    }
+                }
+                if (song->ccEvents[i].tick <= song->loopEndTick)
+                {
+                    cc7AtLoopEnd = song->ccEvents[i].value;
+                }
+            }
+        }
+
+        /* Only insert a reset if:
+         * 1. The channel has CC7 events (otherwise engine default applies)
+         * 2. No explicit CC7 already exists at loopStartTick
+         * 3. The CC7 at loopEnd differs from CC7 at loopStart — meaning the
+         *    engine will have the wrong volume when it loops back */
+        if (hasCC7 && !hasCC7AtLoopStart && cc7AtLoopEnd != cc7AtLoopStart)
+        {
+            if (!song_model_append_cc_event(song, (uint16_t)ch,
+                                            song->loopStartTick, 7,
+                                            cc7AtLoopStart,
+                                            channelProgram))
+            {
+                return 0;
+            }
+            needsSort = TRUE;
+            #ifdef _DEBUG
+            fprintf(stderr, "[mod2rmf] Loop CC7 reset: ch %u -> CC7=%u @ tick %u (end was %u)\n",
+                    ch, cc7AtLoopStart, (unsigned)song->loopStartTick, cc7AtLoopEnd);
+            #endif
+        }
+    }
+
+    if (needsSort && song->ccCount > 1)
+    {
+        qsort(song->ccEvents, song->ccCount,
+              sizeof(ModCCEvent), compare_cc_by_tick);
+    }
+
+    return 1;
+}
+
+/* Same idea as ensure_loop_cc_resets, but for pitch bend.  The engine keeps
+ * channel pitch-bend state across loop-back, so if the last bend before
+ * loopEnd differs from what was active at loopStart, notes will play at the
+ * wrong pitch on subsequent loops (and it compounds each iteration). */
+
+static int ensure_loop_pitch_bend_resets(ModSongModel *song)
+{
+    uint32_t ch, i;
+    XBOOL needsSort = FALSE;
+
+    if (!song || !song->loopEnabled)
+    {
+        return 1;
+    }
+
+    for (ch = 0; ch < song->channelCount; ++ch)
+    {
+        XBOOL hasNotes = FALSE;
+        uint8_t channelProgram = 0xFF;
+        /* Engine default pitch bend is center */
+        uint16_t bendAtLoopStart = MOD2RMF_PITCH_BEND_CENTER;
+        uint16_t bendAtLoopEnd = MOD2RMF_PITCH_BEND_CENTER;
+        XBOOL hasBend = FALSE;
+        XBOOL hasBendAtLoopStart = FALSE;
+
+        /* Check if this channel has notes */
+        for (i = 0; i < song->noteCount; ++i)
+        {
+            if (song->notes[i].sourceChannel == ch)
+            {
+                hasNotes = TRUE;
+                if (channelProgram == 0xFF)
+                {
+                    channelProgram = song->notes[i].program;
+                }
+                break;
+            }
+        }
+        if (!hasNotes) continue;
+
+        /* Scan pitch bend events to find effective values at loop boundaries */
+        for (i = 0; i < song->pitchBendCount; ++i)
+        {
+            if (song->pitchBendEvents[i].sourceChannel == ch)
+            {
+                hasBend = TRUE;
+                if (song->pitchBendEvents[i].tick <= song->loopStartTick)
+                {
+                    bendAtLoopStart = song->pitchBendEvents[i].value;
+                    if (song->pitchBendEvents[i].tick == song->loopStartTick)
+                    {
+                        hasBendAtLoopStart = TRUE;
+                    }
+                }
+                if (song->pitchBendEvents[i].tick <= song->loopEndTick)
+                {
+                    bendAtLoopEnd = song->pitchBendEvents[i].value;
+                }
+            }
+        }
+
+        /* Insert a reset if bends exist, no explicit bend at loop start,
+         * and the end-of-song bend differs from the loop-start bend */
+        if (hasBend && !hasBendAtLoopStart && bendAtLoopEnd != bendAtLoopStart)
+        {
+            if (!song_model_append_pitch_bend(song, (uint16_t)ch,
+                                              song->loopStartTick,
+                                              bendAtLoopStart,
+                                              channelProgram))
+            {
+                return 0;
+            }
+            needsSort = TRUE;
+            #ifdef _DEBUG
+            fprintf(stderr, "[mod2rmf] Loop pitch bend reset: ch %u -> bend=%u @ tick %u (end was %u)\n",
+                    ch, bendAtLoopStart, (unsigned)song->loopStartTick, bendAtLoopEnd);
+            #endif
+        }
+    }
+
+    if (needsSort && song->pitchBendCount > 1)
+    {
+        qsort(song->pitchBendEvents, song->pitchBendCount,
+              sizeof(ModPitchBendEvent), compare_pitch_bend_by_tick);
+    }
+
+    return 1;
+}
+
 /* --- Channel spreading by program --------------------------------------- */
 
 /* Spread tracker channels so each unique program (instrument/sample) gets its
@@ -2183,11 +2422,10 @@ static int compare_cc_by_tick(const void *a, const void *b)
 static int spread_channels_by_program(ModSongModel *song, XBOOL isMod,
                                       uint8_t stereoSep)
 {
-    uint8_t uniquePrograms[128];
-    uint32_t uniqueCount = 0;
-    uint8_t programToVirtual[128]; /* program -> virtual channel index */
+    uint8_t virtualChanMap[MOD2RMF_MAX_CHANNELS][128];
+    uint8_t originalChMapped[MOD2RMF_MAX_CHANNELS];
+    uint8_t nextVirtualChan;
     uint32_t i;
-    uint32_t origChannelCount;
     uint32_t preBendCount;
 
     (void)isMod;
@@ -2198,186 +2436,80 @@ static int spread_channels_by_program(ModSongModel *song, XBOOL isMod,
         return 1;
     }
 
-    memset(programToVirtual, 0xFF, sizeof(programToVirtual));
+    memset(virtualChanMap, 0xFF, sizeof(virtualChanMap));
+    memset(originalChMapped, 0, sizeof(originalChMapped));
+    
+    nextVirtualChan = (uint8_t)song->channelCount;
 
-    /* Phase 1: Collect unique programs */
+    /* Phase 1: Assign a virtual channel to each (tracker channel, program) tuple */
     for (i = 0; i < song->noteCount; ++i)
     {
+        uint8_t ch = song->notes[i].sourceChannel;
         uint8_t prog = song->notes[i].program;
-        if (programToVirtual[prog] == 0xFF)
+
+        if (ch >= MOD2RMF_MAX_CHANNELS) continue;
+
+        if (virtualChanMap[ch][prog] == 0xFF)
         {
-            if (uniqueCount >= 128)
+            if (originalChMapped[ch] == 0)
             {
-                break;
+                /* First program seen on this tracker channel keeps the original channel ID */
+                virtualChanMap[ch][prog] = ch;
+                originalChMapped[ch] = 1;
             }
-            uniquePrograms[uniqueCount] = prog;
-            programToVirtual[prog] = 0xFE; /* mark as seen */
-            uniqueCount++;
-        }
-    }
-
-    /* Reset for actual channel assignment */
-    memset(programToVirtual, 0xFF, sizeof(programToVirtual));
-
-    if (uniqueCount <= 1)
-    {
-        return 1;
-    }
-
-    origChannelCount = song->channelCount;
-
-    if (uniqueCount <= MOD2RMF_MAX_MIDI_CHANNELS)
-    {
-        for (i = 0; i < uniqueCount; ++i)
-        {
-            programToVirtual[uniquePrograms[i]] = (uint8_t)i;
-        }
-        song->channelCount = uniqueCount;
-    }
-    else
-    {
-        /* More than 16 programs — pack using overlap analysis. */
-        TickRange *progRanges[128];
-        uint32_t progRangeCount[128];
-        uint32_t progRangeCapacity[128];
-        TickRange *bucketRanges[MOD2RMF_MAX_MIDI_CHANNELS];
-        uint32_t bucketRangeCount[MOD2RMF_MAX_MIDI_CHANNELS];
-        uint32_t bucketRangeCapacity[MOD2RMF_MAX_MIDI_CHANNELS];
-
-        memset(progRanges, 0, sizeof(progRanges));
-        memset(progRangeCount, 0, sizeof(progRangeCount));
-        memset(progRangeCapacity, 0, sizeof(progRangeCapacity));
-        memset(bucketRanges, 0, sizeof(bucketRanges));
-        memset(bucketRangeCount, 0, sizeof(bucketRangeCount));
-        memset(bucketRangeCapacity, 0, sizeof(bucketRangeCapacity));
-
-        for (i = 0; i < song->noteCount; ++i)
-        {
-            uint8_t prog = song->notes[i].program;
-            if (progRangeCount[prog] >= progRangeCapacity[prog])
+            else if (nextVirtualChan < MOD2RMF_MAX_CHANNELS)
             {
-                uint32_t newCap = (progRangeCapacity[prog] == 0) ? 64 : progRangeCapacity[prog] * 2;
-                TickRange *tmp = (TickRange *)realloc(progRanges[prog], newCap * sizeof(TickRange));
-                if (!tmp) goto pack_cleanup;
-                progRanges[prog] = tmp;
-                progRangeCapacity[prog] = newCap;
+                /* Subsequent programs on this channel get a new virtual channel */
+                virtualChanMap[ch][prog] = nextVirtualChan++;
             }
-            progRanges[prog][progRangeCount[prog]].startTick = song->notes[i].startTick;
-            progRanges[prog][progRangeCount[prog]].endTick = song->notes[i].startTick + song->notes[i].durationTicks;
-            progRangeCount[prog]++;
-        }
-
-        for (i = 0; i < uniqueCount; ++i)
-        {
-            uint8_t prog = uniquePrograms[i];
-            uint8_t bestBucket = 0;
-            uint32_t bestOverlap = UINT32_MAX;
-            uint8_t b;
-            uint32_t j, k;
-
-            for (b = 0; b < MOD2RMF_MAX_MIDI_CHANNELS; ++b)
+            else
             {
-                uint32_t ovlap = 0;
-
-                if (bucketRangeCount[b] == 0)
-                {
-                    bestBucket = b;
-                    bestOverlap = 0;
-                    break;
-                }
-
-                for (j = 0; j < progRangeCount[prog]; ++j)
-                {
-                    for (k = 0; k < bucketRangeCount[b]; ++k)
-                    {
-                        uint32_t lo = (progRanges[prog][j].startTick > bucketRanges[b][k].startTick)
-                                      ? progRanges[prog][j].startTick : bucketRanges[b][k].startTick;
-                        uint32_t hi = (progRanges[prog][j].endTick < bucketRanges[b][k].endTick)
-                                      ? progRanges[prog][j].endTick : bucketRanges[b][k].endTick;
-                        if (lo < hi) ovlap += (hi - lo);
-                    }
-                }
-
-                if (ovlap < bestOverlap)
-                {
-                    bestOverlap = ovlap;
-                    bestBucket = b;
-                    if (ovlap == 0) break;
-                }
-            }
-
-            programToVirtual[prog] = bestBucket;
-
-            for (j = 0; j < progRangeCount[prog]; ++j)
-            {
-                if (bucketRangeCount[bestBucket] >= bucketRangeCapacity[bestBucket])
-                {
-                    uint32_t newCap = (bucketRangeCapacity[bestBucket] == 0) ? 64 : bucketRangeCapacity[bestBucket] * 2;
-                    TickRange *tmp = (TickRange *)realloc(bucketRanges[bestBucket], newCap * sizeof(TickRange));
-                    if (!tmp) goto pack_cleanup;
-                    bucketRanges[bestBucket] = tmp;
-                    bucketRangeCapacity[bestBucket] = newCap;
-                }
-                bucketRanges[bestBucket][bucketRangeCount[bestBucket]] = progRanges[prog][j];
-                bucketRangeCount[bestBucket]++;
+                /* Fallback if we run out of virtual channels */
+                virtualChanMap[ch][prog] = ch;
             }
         }
-
-        song->channelCount = MOD2RMF_MAX_MIDI_CHANNELS;
-
-pack_cleanup:
-        for (i = 0; i < 128; ++i) free(progRanges[i]);
-        for (i = 0; i < MOD2RMF_MAX_MIDI_CHANNELS; ++i) free(bucketRanges[i]);
+        
+        song->notes[i].sourceChannel = virtualChanMap[ch][prog];
     }
-
-    /* Phase 3: Rewrite note sourceChannels */
-    for (i = 0; i < song->noteCount; ++i)
-    {
-        uint8_t prog = song->notes[i].program;
-        if (programToVirtual[prog] != 0xFF)
-        {
-            song->notes[i].sourceChannel = programToVirtual[prog];
-        }
-    }
-
-    /* Phase 4: Route CC events using program tag */
+    
+    /* Phase 2: Route CC events */
     for (i = 0; i < song->ccCount; ++i)
     {
+        uint8_t ch = song->ccEvents[i].sourceChannel;
         uint8_t prog = song->ccEvents[i].program;
-        if (prog != 0xFF && programToVirtual[prog] != 0xFF)
+        if (ch < MOD2RMF_MAX_CHANNELS)
         {
-            song->ccEvents[i].sourceChannel = programToVirtual[prog];
+            if (virtualChanMap[ch][prog] == 0xFF)
+            {
+                if (originalChMapped[ch] == 0) { virtualChanMap[ch][prog] = ch; originalChMapped[ch] = 1; }
+                else if (nextVirtualChan < MOD2RMF_MAX_CHANNELS) { virtualChanMap[ch][prog] = nextVirtualChan++; }
+                else { virtualChanMap[ch][prog] = ch; }
+            }
+            song->ccEvents[i].sourceChannel = virtualChanMap[ch][prog];
         }
     }
 
-    /* Phase 5: Route pitch bend events using program tag.
-     * Only process events that existed before we add center resets below. */
+    /* Phase 3: Route pitch bend events */
     preBendCount = song->pitchBendCount;
     for (i = 0; i < preBendCount; ++i)
     {
+        uint8_t ch = song->pitchBendEvents[i].sourceChannel;
         uint8_t prog = song->pitchBendEvents[i].program;
-        if (prog != 0xFF && programToVirtual[prog] != 0xFF)
+        if (ch < MOD2RMF_MAX_CHANNELS)
         {
-            song->pitchBendEvents[i].sourceChannel = programToVirtual[prog];
+            if (virtualChanMap[ch][prog] == 0xFF)
+            {
+                if (originalChMapped[ch] == 0) { virtualChanMap[ch][prog] = ch; originalChMapped[ch] = 1; }
+                else if (nextVirtualChan < MOD2RMF_MAX_CHANNELS) { virtualChanMap[ch][prog] = nextVirtualChan++; }
+                else { virtualChanMap[ch][prog] = ch; }
+            }
+            song->pitchBendEvents[i].sourceChannel = virtualChanMap[ch][prog];
         }
     }
 
-    /* Phase 6: Emit pitch-bend-center resets at note end ticks to prevent
-     * vibrato/portamento from bleeding into subsequent notes on the same
-     * virtual channel.  Emitted after Phase 5 so they are not re-routed. */
-    for (i = 0; i < song->noteCount; ++i)
-    {
-        uint32_t endTick = song->notes[i].startTick + song->notes[i].durationTicks;
-        (void)song_model_append_pitch_bend(song,
-            song->notes[i].sourceChannel,
-            endTick,
-            MOD2RMF_PITCH_BEND_CENTER,
-            song->notes[i].program);
-    }
+    song->channelCount = nextVirtualChan;
 
-    /* Phase 7: Sort events by tick so the write-phase dedup processes them
-     * chronologically.  Phase 6 appended events out of order; without
-     * sorting the dedup can incorrectly skip or misoreder events. */
+    /* Phase 4: Sort events by tick so the write-phase dedup processes them chronologically. */
     if (song->pitchBendCount > 1)
     {
         qsort(song->pitchBendEvents, song->pitchBendCount,
@@ -2388,16 +2520,6 @@ pack_cleanup:
         qsort(song->ccEvents, song->ccCount,
               sizeof(ModCCEvent), compare_cc_by_tick);
     }
-
-    #ifdef _DEBUG
-    fprintf(stderr, "[mod2rmf] Channel spread: %u tracker channels, %u unique programs -> %u virtual channels\n",
-            origChannelCount, uniqueCount, song->channelCount);
-    for (i = 0; i < uniqueCount; ++i)
-    {
-        fprintf(stderr, "  program %u -> virtual ch %u\n",
-                uniquePrograms[i], programToVirtual[uniquePrograms[i]]);
-    }
-    #endif
 
     return 1;
 }
@@ -2913,6 +3035,7 @@ static int write_song_cc_events(Mod2RmfConverter *conv, const ModSongModel *song
         return 0;
     }
 
+    XBOOL ccDedupReset = FALSE;
     memset(lastCC, 0xFF, sizeof(lastCC));
 
     /* Find primary (first) RMF track for each MIDI channel */
@@ -2936,6 +3059,17 @@ static int write_song_cc_events(Mod2RmfConverter *conv, const ModSongModel *song
 
         ev = &song->ccEvents[i];
         if (ev->sourceChannel >= song->channelCount) continue;
+
+        /* When we reach the loop start tick, reset dedup so every CC
+         * value is re-emitted.  The engine's channel state at loop-back
+         * comes from the end of the song, which may differ from what
+         * was active at the loop start on the first playthrough. */
+        if (song->loopEnabled && !ccDedupReset &&
+            ev->tick >= song->loopStartTick)
+        {
+            memset(lastCC, 0xFF, sizeof(lastCC));
+            ccDedupReset = TRUE;
+        }
 
         midiCh = conv->channelMap.trackerToMidi[ev->sourceChannel];
         if (midiCh >= MOD2RMF_MAX_MIDI_CHANNELS) continue;
@@ -2971,6 +3105,7 @@ static int write_song_pitch_bend_events(Mod2RmfConverter *conv, const ModSongMod
     }
 
     /* 0xFFFF = not yet emitted */
+    XBOOL bendDedupReset = FALSE;
     memset(lastBend, 0xFF, sizeof(lastBend));
 
     /* Find primary (first) RMF track for each MIDI channel */
@@ -2991,9 +3126,19 @@ static int write_song_pitch_bend_events(Mod2RmfConverter *conv, const ModSongMod
         const ModPitchBendEvent *ev;
         uint8_t midiCh;
         uint16_t trackIndex;
+        uint32_t j;
+        XBOOL superseded = FALSE;
 
         ev = &song->pitchBendEvents[i];
         if (ev->sourceChannel >= song->channelCount) continue;
+
+        /* Reset dedup at loop start so bend state is re-established */
+        if (song->loopEnabled && !bendDedupReset &&
+            ev->tick >= song->loopStartTick)
+        {
+            memset(lastBend, 0xFF, sizeof(lastBend));
+            bendDedupReset = TRUE;
+        }
 
         midiCh = conv->channelMap.trackerToMidi[ev->sourceChannel];
         if (midiCh >= MOD2RMF_MAX_MIDI_CHANNELS) continue;
@@ -3002,8 +3147,31 @@ static int write_song_pitch_bend_events(Mod2RmfConverter *conv, const ModSongMod
         trackIndex = midiChPrimaryTrack[midiCh];
         if (trackIndex == (uint16_t)0xFFFF) continue;
 
+        /* Look ahead to see if there's another bend for this MIDI channel at the same tick.
+         * If there is, we skip this one and let the later one take effect. */
+        for (j = i + 1; j < song->pitchBendCount; ++j)
+        {
+            const ModPitchBendEvent *nextEv = &song->pitchBendEvents[j];
+            if (nextEv->tick > ev->tick) break; /* Events are strictly sorted by tick */
+            if (nextEv->tick == ev->tick)
+            {
+                if (nextEv->sourceChannel < song->channelCount &&
+                    conv->channelMap.trackerToMidi[nextEv->sourceChannel] == midiCh)
+                {
+                    superseded = TRUE;
+                    break;
+                }
+            }
+        }
+        
+        if (superseded) {
+            continue;
+        }
+
         /* Skip if bend value hasn't changed for this MIDI channel */
-        if (lastBend[midiCh] == ev->value) continue;
+        if (lastBend[midiCh] == ev->value) {
+            continue;
+        }
         lastBend[midiCh] = ev->value;
 
         (void)BAERmfEditorDocument_AddTrackPitchBendEvent(conv->document,
@@ -3395,6 +3563,95 @@ int main(int argc, char *argv[])
         }
     }
 
+    /* Ensure channels have correct CC state at loop start so the engine's
+     * meta-marker loop-back (which doesn't reset CC state) works properly. */
+    if (!ensure_loop_cc_resets(&song))
+    {
+        fprintf(stderr, "Error: loop CC reset failed\n");
+        song_model_dispose(&song);
+        converter_delete(conv);
+        BAE_Cleanup();
+        return 1;
+    }
+
+    /* Same for pitch bend — engine keeps bend state across loop-back. */
+    if (!ensure_loop_pitch_bend_resets(&song))
+    {
+        fprintf(stderr, "Error: loop pitch bend reset failed\n");
+        song_model_dispose(&song);
+        converter_delete(conv);
+        BAE_Cleanup();
+        return 1;
+    }
+
+#ifdef _DEBUG
+    /* Diagnostic dump: per-virtual-channel event summary (spread mode only) */
+    if (spreadChannels)
+    {
+        uint32_t vch;
+        uint32_t maxCh = song.channelCount;
+        fprintf(stderr, "\n=== POST-SPREAD EVENT SUMMARY (loopStart=%u loopEnd=%u) ===\n",
+                (unsigned)song.loopStartTick, (unsigned)song.loopEndTick);
+        for (vch = 0; vch < maxCh; ++vch)
+        {
+            uint32_t ei;
+            uint32_t firstNoteTick = UINT32_MAX, lastNoteTick = 0;
+            uint32_t firstNoteCount = 0;
+            uint32_t firstCC7Tick = UINT32_MAX, lastCC7Tick = 0;
+            uint8_t firstCC7Val = 0, lastCC7Val = 0;
+            XBOOL hasCC7 = FALSE;
+            uint32_t firstBendTick = UINT32_MAX, lastBendTick = 0;
+            uint16_t firstBendVal = 0, lastBendVal = 0;
+            XBOOL hasBend = FALSE;
+
+            /* Scan notes */
+            for (ei = 0; ei < song.noteCount; ++ei) {
+                if (song.notes[ei].sourceChannel == vch) {
+                    firstNoteCount++;
+                    if (song.notes[ei].startTick < firstNoteTick) firstNoteTick = song.notes[ei].startTick;
+                    if (song.notes[ei].startTick > lastNoteTick) lastNoteTick = song.notes[ei].startTick;
+                }
+            }
+            /* Scan CC7 */
+            for (ei = 0; ei < song.ccCount; ++ei) {
+                if (song.ccEvents[ei].sourceChannel == vch && song.ccEvents[ei].cc == 7) {
+                    if (!hasCC7 || song.ccEvents[ei].tick < firstCC7Tick) {
+                        firstCC7Tick = song.ccEvents[ei].tick;
+                        firstCC7Val = song.ccEvents[ei].value;
+                    }
+                    if (!hasCC7 || song.ccEvents[ei].tick > lastCC7Tick) {
+                        lastCC7Tick = song.ccEvents[ei].tick;
+                        lastCC7Val = song.ccEvents[ei].value;
+                    }
+                    hasCC7 = TRUE;
+                }
+            }
+            /* Scan pitch bend */
+            for (ei = 0; ei < song.pitchBendCount; ++ei) {
+                if (song.pitchBendEvents[ei].sourceChannel == vch) {
+                    if (!hasBend || song.pitchBendEvents[ei].tick < firstBendTick) {
+                        firstBendTick = song.pitchBendEvents[ei].tick;
+                        firstBendVal = song.pitchBendEvents[ei].value;
+                    }
+                    if (!hasBend || song.pitchBendEvents[ei].tick > lastBendTick) {
+                        lastBendTick = song.pitchBendEvents[ei].tick;
+                        lastBendVal = song.pitchBendEvents[ei].value;
+                    }
+                    hasBend = TRUE;
+                }
+            }
+            if (firstNoteCount == 0) continue;
+            fprintf(stderr, "  vCh %u: notes=%u first@%u last@%u", vch, firstNoteCount, firstNoteTick, lastNoteTick);
+            if (hasCC7) fprintf(stderr, "  CC7: first=%u@%u last=%u@%u", firstCC7Val, firstCC7Tick, lastCC7Val, lastCC7Tick);
+            else fprintf(stderr, "  CC7: NONE");
+            if (hasBend) fprintf(stderr, "  Bend: first=0x%04X@%u last=0x%04X@%u", firstBendVal, firstBendTick, lastBendVal, lastBendTick);
+            else fprintf(stderr, "  Bend: NONE");
+            fprintf(stderr, "\n");
+        }
+        fprintf(stderr, "=== END EVENT SUMMARY ===\n\n");
+    }
+#endif
+
     if (!setup_document(conv, &song, sourcePath))
     {
         fprintf(stderr, "Error: document setup failed\n");
@@ -3463,8 +3720,8 @@ int main(int argc, char *argv[])
     if (!setup_tracks(conv, &song, &conv->channelMap) ||
         !setup_instrument_ext(conv, &song, useZmfContainer) ||
         !write_song_cc_events(conv, &song) ||
-        !write_song_notes(conv, &song) ||
         !write_song_pitch_bend_events(conv, &song) ||
+        !write_song_notes(conv, &song) ||
         !write_song_tempo_events(conv, &song) ||
         !mod2rmf_encoder_apply(conv->document, &encSettings, compressionType) ||
         !save_document(conv, destPath))

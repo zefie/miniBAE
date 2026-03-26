@@ -3,6 +3,7 @@
 #include "gui_widgets.h"
 #include "gui_theme.h"
 #include "gui_text.h"
+#include "gui_common.h"
 #include <stdio.h>
 
 // Utility function implementations
@@ -308,8 +309,16 @@ bool ui_dropdown_two_column_above(SDL_Renderer *R, Rect r, int *value, const cha
         int cols = 2;
         int rows = (count + cols - 1) / cols;
         int totalH = itemH * rows;
-        // Render ABOVE the button instead of below
-        Rect box = {r.x, r.y - totalH - 1, r.w, totalH};
+        // Render above if there's room, otherwise render below
+        int boxY;
+        if (r.y >= totalH + 1) {
+            boxY = r.y - totalH - 1;
+        } else if (r.y + r.h + totalH + 1 < g_window_h) {
+            boxY = r.y + r.h + 1;
+        } else {
+            boxY = r.y - totalH - 1;
+        }
+        Rect box = {r.x, boxY, r.w, totalH};
         draw_rect(R, box, g_panel_bg);
         draw_frame(R, box, frame);
         int colW = box.w / cols;

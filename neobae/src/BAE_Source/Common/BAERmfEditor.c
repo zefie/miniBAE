@@ -1985,7 +1985,7 @@ static void PV_DebugDumpMidiTrack(const char *label, unsigned char const *data, 
     targetTrackOffset = offset + 8;
     if (targetTrackOffset + targetTrackLength > dataSize) return;
 
-    BAE_STDERR("[MIDI DUMP] %s Track %u:\n", label, (unsigned)trackIndex);
+    BAE_PRINTF("[MIDI DUMP] %s Track %u:\n", label, (unsigned)trackIndex);
     currentTick = 0;
     runningStatus = 0;
     offset = targetTrackOffset;
@@ -2023,11 +2023,11 @@ static void PV_DebugDumpMidiTrack(const char *label, unsigned char const *data, 
             if (ml == 3 && mt == 0x51)
             {
                 uint32_t us = ((uint32_t)data[offset] << 16) | ((uint32_t)data[offset+1] << 8) | data[offset+2];
-                BAE_STDERR("[MIDI DUMP]   [%u] tick=%-6u META%02X bpm=%u\n", evtIndex, currentTick, (unsigned)mt, (unsigned)(60000000UL / us));
+                BAE_PRINTF("[MIDI DUMP]   [%u] tick=%-6u META%02X bpm=%u\n", evtIndex, currentTick, (unsigned)mt, (unsigned)(60000000UL / us));
             }
             else
             {
-                BAE_STDERR("[MIDI DUMP]   [%u] tick=%-6u META%02X len=%u\n", evtIndex, currentTick, (unsigned)mt, (unsigned)ml);
+                BAE_PRINTF("[MIDI DUMP]   [%u] tick=%-6u META%02X len=%u\n", evtIndex, currentTick, (unsigned)mt, (unsigned)ml);
             }
             offset += ml;
         }
@@ -2035,7 +2035,7 @@ static void PV_DebugDumpMidiTrack(const char *label, unsigned char const *data, 
         {
             uint32_t sl;
             if (PV_ReadVLQ(data, targetTrackOffset + targetTrackLength, &offset, &sl) != BAE_NO_ERROR) break;
-            BAE_STDERR("[MIDI DUMP]   [%u] tick=%-6u SYSEX len=%u\n", evtIndex, currentTick, (unsigned)sl);
+            BAE_PRINTF("[MIDI DUMP]   [%u] tick=%-6u SYSEX len=%u\n", evtIndex, currentTick, (unsigned)sl);
             offset += sl;
         }
         else
@@ -2048,15 +2048,15 @@ static void PV_DebugDumpMidiTrack(const char *label, unsigned char const *data, 
                 if (offset + 2 > targetTrackOffset + targetTrackLength) break;
                 d1 = data[offset++]; d2 = data[offset++];
                 if (evtype == NOTE_ON)
-                    BAE_STDERR("[MIDI DUMP]   [%u] tick=%-6u NON  ch=%u note=%u vel=%u\n", evtIndex, currentTick, (unsigned)ch, (unsigned)d1, (unsigned)d2);
+                    BAE_PRINTF("[MIDI DUMP]   [%u] tick=%-6u NON  ch=%u note=%u vel=%u\n", evtIndex, currentTick, (unsigned)ch, (unsigned)d1, (unsigned)d2);
                 else if (evtype == NOTE_OFF)
-                    BAE_STDERR("[MIDI DUMP]   [%u] tick=%-6u NOFF ch=%u note=%u vel=%u\n", evtIndex, currentTick, (unsigned)ch, (unsigned)d1, (unsigned)d2);
+                    BAE_PRINTF("[MIDI DUMP]   [%u] tick=%-6u NOFF ch=%u note=%u vel=%u\n", evtIndex, currentTick, (unsigned)ch, (unsigned)d1, (unsigned)d2);
                 else if (evtype == CONTROL_CHANGE)
-                    BAE_STDERR("[MIDI DUMP]   [%u] tick=%-6u CC   ch=%u cc=%u val=%u\n", evtIndex, currentTick, (unsigned)ch, (unsigned)d1, (unsigned)d2);
+                    BAE_PRINTF("[MIDI DUMP]   [%u] tick=%-6u CC   ch=%u cc=%u val=%u\n", evtIndex, currentTick, (unsigned)ch, (unsigned)d1, (unsigned)d2);
                 else if (evtype == PITCH_BEND)
-                    BAE_STDERR("[MIDI DUMP]   [%u] tick=%-6u PB   ch=%u lsb=%u msb=%u\n", evtIndex, currentTick, (unsigned)ch, (unsigned)d1, (unsigned)d2);
+                    BAE_PRINTF("[MIDI DUMP]   [%u] tick=%-6u PB   ch=%u lsb=%u msb=%u\n", evtIndex, currentTick, (unsigned)ch, (unsigned)d1, (unsigned)d2);
                 else
-                    BAE_STDERR("[MIDI DUMP]   [%u] tick=%-6u PA   ch=%u note=%u val=%u\n", evtIndex, currentTick, (unsigned)ch, (unsigned)d1, (unsigned)d2);
+                    BAE_PRINTF("[MIDI DUMP]   [%u] tick=%-6u PA   ch=%u note=%u val=%u\n", evtIndex, currentTick, (unsigned)ch, (unsigned)d1, (unsigned)d2);
             }
             else if (evtype == PROGRAM_CHANGE || evtype == CHANNEL_AFTERTOUCH)
             {
@@ -2064,13 +2064,13 @@ static void PV_DebugDumpMidiTrack(const char *label, unsigned char const *data, 
                 if (offset + 1 > targetTrackOffset + targetTrackLength) break;
                 d1 = data[offset++];
                 if (evtype == PROGRAM_CHANGE)
-                    BAE_STDERR("[MIDI DUMP]   [%u] tick=%-6u PC   ch=%u prog=%u\n", evtIndex, currentTick, (unsigned)ch, (unsigned)d1);
+                    BAE_PRINTF("[MIDI DUMP]   [%u] tick=%-6u PC   ch=%u prog=%u\n", evtIndex, currentTick, (unsigned)ch, (unsigned)d1);
                 else
-                    BAE_STDERR("[MIDI DUMP]   [%u] tick=%-6u CA   ch=%u val=%u\n", evtIndex, currentTick, (unsigned)ch, (unsigned)d1);
+                    BAE_PRINTF("[MIDI DUMP]   [%u] tick=%-6u CA   ch=%u val=%u\n", evtIndex, currentTick, (unsigned)ch, (unsigned)d1);
             }
             else
             {
-                BAE_STDERR("[MIDI DUMP]   [%u] tick=%-6u UNK  status=%02X\n", evtIndex, currentTick, (unsigned)status);
+                BAE_PRINTF("[MIDI DUMP]   [%u] tick=%-6u UNK  status=%02X\n", evtIndex, currentTick, (unsigned)status);
                 break;
             }
         }
@@ -2106,7 +2106,7 @@ static void PV_DebugReportMidiRoundTripDiff(BAERmfEditorDocument const *document
 
     if (resultOriginal != BAE_NO_ERROR || resultGenerated != BAE_NO_ERROR)
     {
-        BAE_STDERR("[MIDI DIFF] Unable to parse original/generated MIDI for diff (orig=%d gen=%d)\n",
+        BAE_PRINTF("[MIDI DIFF] Unable to parse original/generated MIDI for diff (orig=%d gen=%d)\n",
                    (int)resultOriginal,
                    (int)resultGenerated);
         PV_DebugFreeMidiStats(&originalStats);
@@ -2114,7 +2114,7 @@ static void PV_DebugReportMidiRoundTripDiff(BAERmfEditorDocument const *document
         return;
     }
 
-    BAE_STDERR("[MIDI DIFF] Original tracks=%u Generated tracks=%u\n",
+    BAE_PRINTF("[MIDI DIFF] Original tracks=%u Generated tracks=%u\n",
                (unsigned)originalStats.trackCount,
                (unsigned)generatedStats.trackCount);
 
@@ -2158,7 +2158,7 @@ static void PV_DebugReportMidiRoundTripDiff(BAERmfEditorDocument const *document
             orig->eventHash != gen->eventHash)
         {
             printedTrackHeader = TRUE;
-            BAE_STDERR("[MIDI DIFF] Track %u: ON %u->%u OFF %u->%u CC %u->%u PC %u->%u PB %u->%u CA %u->%u PA %u->%u SX %u->%u TMP %u->%u META %u->%u EVT %u->%u HASH %08lx->%08lx\n",
+            BAE_PRINTF("[MIDI DIFF] Track %u: ON %u->%u OFF %u->%u CC %u->%u PC %u->%u PB %u->%u CA %u->%u PA %u->%u SX %u->%u TMP %u->%u META %u->%u EVT %u->%u HASH %08lx->%08lx\n",
                        (unsigned)i,
                        (unsigned)orig->noteOnCount,
                        (unsigned)gen->noteOnCount,
@@ -2205,9 +2205,9 @@ static void PV_DebugReportMidiRoundTripDiff(BAERmfEditorDocument const *document
                 if (!printedTrackHeader)
                 {
                     printedTrackHeader = TRUE;
-                    BAE_STDERR("[MIDI DIFF] Track %u controller deltas:\n", (unsigned)i);
+                    BAE_PRINTF("[MIDI DIFF] Track %u controller deltas:\n", (unsigned)i);
                 }
-                BAE_STDERR("[MIDI DIFF]   CC%u count %u->%u firstTick %ld->%ld\n",
+                BAE_PRINTF("[MIDI DIFF]   CC%u count %u->%u firstTick %ld->%ld\n",
                            (unsigned)cc,
                            (unsigned)orig->ccCount[cc],
                            (unsigned)gen->ccCount[cc],
@@ -2220,7 +2220,7 @@ static void PV_DebugReportMidiRoundTripDiff(BAERmfEditorDocument const *document
     maxTracks = originalStats.trackCount > generatedStats.trackCount ? originalStats.trackCount : generatedStats.trackCount;
     if (compareCount < maxTracks)
     {
-        BAE_STDERR("[MIDI DIFF] Warning: unmatched track tail (compare=%u max=%u offset=%u)\n",
+        BAE_PRINTF("[MIDI DIFF] Warning: unmatched track tail (compare=%u max=%u offset=%u)\n",
                    (unsigned)compareCount,
                    (unsigned)maxTracks,
                    (unsigned)genOffset);
@@ -5708,7 +5708,7 @@ static void PV_LoadEmbeddedSamplesFromRmf(BAERmfEditorDocument *document, XFILE 
                                                 PV_ClampMidi7Bit((int32_t)split.lowMidi),
                                                 PV_ClampMidi7Bit((int32_t)split.highMidi)) != BAE_NO_ERROR)
                 {
-                    BAE_STDERR("[RMF] INST ID=%ld split=%d failed to load sndID=%d\n",
+                    BAE_PRINTF("[RMF] INST ID=%ld split=%d failed to load sndID=%d\n",
                                (long)instID, (int)splitIndex, (int)split.sndResourceID);
                 }
                 else
@@ -5768,7 +5768,7 @@ static void PV_LoadEmbeddedSamplesFromRmf(BAERmfEditorDocument *document, XFILE 
                                             0,
                                             127) != BAE_NO_ERROR)
             {
-                BAE_STDERR("[RMF] INST ID=%ld failed to load base sndID=%d\n",
+                BAE_PRINTF("[RMF] INST ID=%ld failed to load base sndID=%d\n",
                            (long)instID, (int)baseSndID);
             }
             else
@@ -5823,24 +5823,24 @@ static XPTR PV_DecodeMidiData(XPTR raw, XResourceType rtype, int32_t *ioSize)
     }
     if (rtype == ID_ECMI)
     {
-        BAE_STDERR("[RMF] ecmi: raw size=%ld, first bytes: %02x %02x %02x %02x\n",
+        BAE_PRINTF("[RMF] ecmi: raw size=%ld, first bytes: %02x %02x %02x %02x\n",
                    (long)*ioSize,
                    ((unsigned char*)raw)[0], ((unsigned char*)raw)[1],
                    ((unsigned char*)raw)[2], ((unsigned char*)raw)[3]);
         XDecryptData(raw, (uint32_t)*ioSize);
-        BAE_STDERR("[RMF] ecmi: after decrypt first bytes: %02x %02x %02x %02x %02x %02x %02x %02x\n",
+        BAE_PRINTF("[RMF] ecmi: after decrypt first bytes: %02x %02x %02x %02x %02x %02x %02x %02x\n",
                    ((unsigned char*)raw)[0], ((unsigned char*)raw)[1],
                    ((unsigned char*)raw)[2], ((unsigned char*)raw)[3],
                    ((unsigned char*)raw)[4], ((unsigned char*)raw)[5],
                    ((unsigned char*)raw)[6], ((unsigned char*)raw)[7]);
         dec = XDecompressPtr(raw, (uint32_t)*ioSize, TRUE);
-        BAE_STDERR("[RMF] ecmi: XDecompressPtr returned %s, size=%ld\n",
+        BAE_PRINTF("[RMF] ecmi: XDecompressPtr returned %s, size=%ld\n",
                    dec ? "non-NULL" : "NULL", dec ? (long)XGetPtrSize(dec) : 0L);
         XDisposePtr(raw);
         if (dec)
         {
             *ioSize = (int32_t)XGetPtrSize(dec);
-            BAE_STDERR("[RMF] ecmi: first 4 decompressed bytes: %02x %02x %02x %02x\n",
+            BAE_PRINTF("[RMF] ecmi: first 4 decompressed bytes: %02x %02x %02x %02x\n",
                        ((unsigned char*)dec)[0], ((unsigned char*)dec)[1],
                        ((unsigned char*)dec)[2], ((unsigned char*)dec)[3]);
         }
@@ -5886,20 +5886,20 @@ static BAEResult PV_LoadRmfResourceIntoDocument(BAERmfEditorDocument *document, 
     result = PV_CaptureOriginalResourcesFromFile(document, fileRef);
     if (result != BAE_NO_ERROR)
     {
-        BAE_STDERR("[RMF] Failed to capture original resource map result=%d\n", (int)result);
+        BAE_PRINTF("[RMF] Failed to capture original resource map result=%d\n", (int)result);
         return result;
     }
     songResource = (SongResource *)XGetIndexedFileResource(fileRef, ID_SONG, &songID, 0, NULL, &songSize);
     if (!songResource)
     {
-        BAE_STDERR("[RMF] No SONG resource found\n");
+        BAE_PRINTF("[RMF] No SONG resource found\n");
         return BAE_BAD_FILE;
     }
-    BAE_STDERR("[RMF] SONG resource found, ID=%ld, size=%ld\n", (long)songID, (long)songSize);
+    BAE_PRINTF("[RMF] SONG resource found, ID=%ld, size=%ld\n", (long)songID, (long)songSize);
     songInfo = XGetSongResourceInfo(songResource, songSize);
     if (!songInfo)
     {
-        BAE_STDERR("[RMF] XGetSongResourceInfo failed\n");
+        BAE_PRINTF("[RMF] XGetSongResourceInfo failed\n");
         XDisposePtr(songResource);
         return BAE_BAD_FILE;
     }
@@ -5983,7 +5983,7 @@ static BAEResult PV_LoadRmfResourceIntoDocument(BAERmfEditorDocument *document, 
     document->originalSongID = songID;
     document->originalObjectResourceID = (XLongResourceID)objectResourceID;
     document->originalMidiType = ID_MIDI;
-    BAE_STDERR("[RMF] objectResourceID=%d, tempo=%ld\n", (int)objectResourceID, (long)songInfo->songTempo);
+    BAE_PRINTF("[RMF] objectResourceID=%d, tempo=%ld\n", (int)objectResourceID, (long)songInfo->songTempo);
     midiData = XGetFileResource(fileRef, ID_MIDI, objectResourceID, NULL, &midiSize);
     if (midiData)
     {
@@ -5991,7 +5991,7 @@ static BAEResult PV_LoadRmfResourceIntoDocument(BAERmfEditorDocument *document, 
     }
     if (!midiData)
     {
-        BAE_STDERR("[RMF] No ID_MIDI with objectResourceID=%d, trying ID_MIDI_OLD\n", (int)objectResourceID);
+        BAE_PRINTF("[RMF] No ID_MIDI with objectResourceID=%d, trying ID_MIDI_OLD\n", (int)objectResourceID);
         midiData = XGetFileResource(fileRef, ID_MIDI_OLD, objectResourceID, NULL, &midiSize);
         if (midiData)
         {
@@ -6000,7 +6000,7 @@ static BAEResult PV_LoadRmfResourceIntoDocument(BAERmfEditorDocument *document, 
     }
     if (!midiData)
     {
-        BAE_STDERR("[RMF] No ID_MIDI_OLD with objectResourceID=%d, trying ID_ECMI\n", (int)objectResourceID);
+        BAE_PRINTF("[RMF] No ID_MIDI_OLD with objectResourceID=%d, trying ID_ECMI\n", (int)objectResourceID);
         midiData = PV_DecodeMidiData(XGetFileResource(fileRef, ID_ECMI, objectResourceID, NULL, &midiSize), ID_ECMI, &midiSize);
         if (midiData)
         {
@@ -6009,7 +6009,7 @@ static BAEResult PV_LoadRmfResourceIntoDocument(BAERmfEditorDocument *document, 
     }
     if (!midiData)
     {
-        BAE_STDERR("[RMF] No ID_ECMI with objectResourceID=%d, trying ID_EMID\n", (int)objectResourceID);
+        BAE_PRINTF("[RMF] No ID_ECMI with objectResourceID=%d, trying ID_EMID\n", (int)objectResourceID);
         midiData = PV_DecodeMidiData(XGetFileResource(fileRef, ID_EMID, objectResourceID, NULL, &midiSize), ID_EMID, &midiSize);
         if (midiData)
         {
@@ -6018,7 +6018,7 @@ static BAEResult PV_LoadRmfResourceIntoDocument(BAERmfEditorDocument *document, 
     }
     if (!midiData)
     {
-        BAE_STDERR("[RMF] No ID_EMID with objectResourceID=%d, trying ID_CMID\n", (int)objectResourceID);
+        BAE_PRINTF("[RMF] No ID_EMID with objectResourceID=%d, trying ID_CMID\n", (int)objectResourceID);
         midiData = PV_DecodeMidiData(XGetFileResource(fileRef, ID_CMID, objectResourceID, NULL, &midiSize), ID_CMID, &midiSize);
         if (midiData)
         {
@@ -6027,9 +6027,9 @@ static BAEResult PV_LoadRmfResourceIntoDocument(BAERmfEditorDocument *document, 
     }
     if (midiData)
     {
-        BAE_STDERR("[RMF] Got MIDI data, size=%ld\n", (long)midiSize);
+        BAE_PRINTF("[RMF] Got MIDI data, size=%ld\n", (long)midiSize);
         result = PV_LoadMidiBytesIntoDocument(document, (unsigned char const *)midiData, (uint32_t)midiSize);
-        BAE_STDERR("[RMF] PV_LoadMidiBytesIntoDocument result=%d, trackCount=%u\n", (int)result, document->trackCount);
+        BAE_PRINTF("[RMF] PV_LoadMidiBytesIntoDocument result=%d, trackCount=%u\n", (int)result, document->trackCount);
         if (result == BAE_NO_ERROR)
         {
             BAEResult copyResult;
@@ -6048,14 +6048,14 @@ static BAEResult PV_LoadRmfResourceIntoDocument(BAERmfEditorDocument *document, 
     }
     else
     {
-        BAE_STDERR("[RMF] No MIDI data found by objectResourceID\n");
+        BAE_PRINTF("[RMF] No MIDI data found by objectResourceID\n");
     }
     if (result != BAE_NO_ERROR)
     {
         XLongResourceID fallbackID;
         int32_t fallbackIndex;
 
-        BAE_STDERR("[RMF] Primary MIDI load failed, trying indexed fallback scan\n");
+        BAE_PRINTF("[RMF] Primary MIDI load failed, trying indexed fallback scan\n");
         fallbackIndex = 0;
         while (result != BAE_NO_ERROR)
         {
@@ -6067,12 +6067,12 @@ static BAEResult PV_LoadRmfResourceIntoDocument(BAERmfEditorDocument *document, 
             midiData = XGetIndexedFileResource(fileRef, ID_MIDI, &fallbackID, fallbackIndex++, NULL, &midiSize);
             if (!midiData)
             {
-                BAE_STDERR("[RMF] No more indexed ID_MIDI resources\n");
+                BAE_PRINTF("[RMF] No more indexed ID_MIDI resources\n");
                 break;
             }
-            BAE_STDERR("[RMF] Trying indexed ID_MIDI[%d], ID=%ld, size=%ld\n", (int)(fallbackIndex-1), (long)fallbackID, (long)midiSize);
+            BAE_PRINTF("[RMF] Trying indexed ID_MIDI[%d], ID=%ld, size=%ld\n", (int)(fallbackIndex-1), (long)fallbackID, (long)midiSize);
             result = PV_LoadMidiBytesIntoDocument(document, (unsigned char const *)midiData, (uint32_t)midiSize);
-            BAE_STDERR("[RMF] indexed ID_MIDI result=%d\n", (int)result);
+            BAE_PRINTF("[RMF] indexed ID_MIDI result=%d\n", (int)result);
             if (result == BAE_NO_ERROR)
             {
                 document->originalObjectResourceID = fallbackID;
@@ -6090,12 +6090,12 @@ static BAEResult PV_LoadRmfResourceIntoDocument(BAERmfEditorDocument *document, 
             midiData = XGetIndexedFileResource(fileRef, ID_MIDI_OLD, &fallbackID, fallbackIndex++, NULL, &midiSize);
             if (!midiData)
             {
-                BAE_STDERR("[RMF] No more indexed ID_MIDI_OLD resources\n");
+                BAE_PRINTF("[RMF] No more indexed ID_MIDI_OLD resources\n");
                 break;
             }
-            BAE_STDERR("[RMF] Trying indexed ID_MIDI_OLD[%d], ID=%ld, size=%ld\n", (int)(fallbackIndex-1), (long)fallbackID, (long)midiSize);
+            BAE_PRINTF("[RMF] Trying indexed ID_MIDI_OLD[%d], ID=%ld, size=%ld\n", (int)(fallbackIndex-1), (long)fallbackID, (long)midiSize);
             result = PV_LoadMidiBytesIntoDocument(document, (unsigned char const *)midiData, (uint32_t)midiSize);
-            BAE_STDERR("[RMF] indexed ID_MIDI_OLD result=%d\n", (int)result);
+            BAE_PRINTF("[RMF] indexed ID_MIDI_OLD result=%d\n", (int)result);
             if (result == BAE_NO_ERROR)
             {
                 document->originalObjectResourceID = fallbackID;
@@ -6113,12 +6113,12 @@ static BAEResult PV_LoadRmfResourceIntoDocument(BAERmfEditorDocument *document, 
             midiData = PV_DecodeMidiData(XGetIndexedFileResource(fileRef, ID_ECMI, &fallbackID, fallbackIndex++, NULL, &midiSize), ID_ECMI, &midiSize);
             if (!midiData)
             {
-                BAE_STDERR("[RMF] No more indexed ID_ECMI resources\n");
+                BAE_PRINTF("[RMF] No more indexed ID_ECMI resources\n");
                 break;
             }
-            BAE_STDERR("[RMF] Trying indexed ID_ECMI[%d], ID=%ld, size=%ld\n", (int)(fallbackIndex-1), (long)fallbackID, (long)midiSize);
+            BAE_PRINTF("[RMF] Trying indexed ID_ECMI[%d], ID=%ld, size=%ld\n", (int)(fallbackIndex-1), (long)fallbackID, (long)midiSize);
             result = PV_LoadMidiBytesIntoDocument(document, (unsigned char const *)midiData, (uint32_t)midiSize);
-            BAE_STDERR("[RMF] indexed ID_ECMI result=%d\n", (int)result);
+            BAE_PRINTF("[RMF] indexed ID_ECMI result=%d\n", (int)result);
             if (result == BAE_NO_ERROR)
             {
                 document->originalObjectResourceID = fallbackID;
@@ -6136,12 +6136,12 @@ static BAEResult PV_LoadRmfResourceIntoDocument(BAERmfEditorDocument *document, 
             midiData = PV_DecodeMidiData(XGetIndexedFileResource(fileRef, ID_EMID, &fallbackID, fallbackIndex++, NULL, &midiSize), ID_EMID, &midiSize);
             if (!midiData)
             {
-                BAE_STDERR("[RMF] No more indexed ID_EMID resources\n");
+                BAE_PRINTF("[RMF] No more indexed ID_EMID resources\n");
                 break;
             }
-            BAE_STDERR("[RMF] Trying indexed ID_EMID[%d], ID=%ld, size=%ld\n", (int)(fallbackIndex-1), (long)fallbackID, (long)midiSize);
+            BAE_PRINTF("[RMF] Trying indexed ID_EMID[%d], ID=%ld, size=%ld\n", (int)(fallbackIndex-1), (long)fallbackID, (long)midiSize);
             result = PV_LoadMidiBytesIntoDocument(document, (unsigned char const *)midiData, (uint32_t)midiSize);
-            BAE_STDERR("[RMF] indexed ID_EMID result=%d\n", (int)result);
+            BAE_PRINTF("[RMF] indexed ID_EMID result=%d\n", (int)result);
             if (result == BAE_NO_ERROR)
             {
                 document->originalObjectResourceID = fallbackID;
@@ -6159,12 +6159,12 @@ static BAEResult PV_LoadRmfResourceIntoDocument(BAERmfEditorDocument *document, 
             midiData = PV_DecodeMidiData(XGetIndexedFileResource(fileRef, ID_CMID, &fallbackID, fallbackIndex++, NULL, &midiSize), ID_CMID, &midiSize);
             if (!midiData)
             {
-                BAE_STDERR("[RMF] No more indexed ID_CMID resources\n");
+                BAE_PRINTF("[RMF] No more indexed ID_CMID resources\n");
                 break;
             }
-            BAE_STDERR("[RMF] Trying indexed ID_CMID[%d], ID=%ld, size=%ld\n", (int)(fallbackIndex-1), (long)fallbackID, (long)midiSize);
+            BAE_PRINTF("[RMF] Trying indexed ID_CMID[%d], ID=%ld, size=%ld\n", (int)(fallbackIndex-1), (long)fallbackID, (long)midiSize);
             result = PV_LoadMidiBytesIntoDocument(document, (unsigned char const *)midiData, (uint32_t)midiSize);
-            BAE_STDERR("[RMF] indexed ID_CMID result=%d\n", (int)result);
+            BAE_PRINTF("[RMF] indexed ID_CMID result=%d\n", (int)result);
             if (result == BAE_NO_ERROR)
             {
                 document->originalObjectResourceID = fallbackID;
@@ -6215,12 +6215,12 @@ static BAEResult PV_LoadRmfFileIntoDocument(BAERmfEditorDocument *document, BAEP
     {
         return BAE_PARAM_ERR;
     }
-    BAE_STDERR("[RMF] Loading RMF file: %s\n", filePath);
+    BAE_PRINTF("[RMF] Loading RMF file: %s\n", filePath);
     XConvertPathToXFILENAME(filePath, &name);
     fileRef = XFileOpenResource(&name, TRUE);
     if (!fileRef)
     {
-        BAE_STDERR("[RMF] XFileOpenResource failed\n");
+        BAE_PRINTF("[RMF] XFileOpenResource failed\n");
         return BAE_FILE_IO_ERROR;
     }
     result = PV_LoadRmfResourceIntoDocument(document, fileRef);
@@ -6536,7 +6536,7 @@ static BAEResult PV_EncodeMidiBestEffort(ByteBuffer const *plainMidi,
     result = PV_EncodeMidiForResourceType(ID_EMID, plainMidi, outData, outSize, isZmf);
     if (result == BAE_NO_ERROR)
     {
-        BAE_STDERR("[RMF Save] ECMI compression failed; using EMID (encrypted uncompressed) fallback\n");
+        BAE_PRINTF("[RMF Save] ECMI compression failed; using EMID (encrypted uncompressed) fallback\n");
         *outUsedType = ID_EMID;
         return BAE_NO_ERROR;
     }
@@ -6581,7 +6581,7 @@ static BAEResult PV_EncodeMidiForStorageType(BAERmfEditorMidiStorageType storage
             result = PV_EncodeMidiForResourceType(ID_MIDI, plainMidi, outData, outSize, isZmf);
             if (result == BAE_NO_ERROR)
             {
-                BAE_STDERR("[RMF Save] CMID compression failed; using MIDI fallback\n");
+                BAE_PRINTF("[RMF Save] CMID compression failed; using MIDI fallback\n");
                 *outUsedType = ID_MIDI;
                 return BAE_NO_ERROR;
             }
@@ -7538,14 +7538,14 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
     XShortResourceID *sampleSndIDs;
     XLongResourceID *sampleInstIDs;
 
-    BAE_STDERR("[RMF Save] PV_AddSampleResources entered sampleCount=%u\n", document ? (unsigned)document->sampleCount : 0U);
+    BAE_PRINTF("[RMF Save] PV_AddSampleResources entered sampleCount=%u\n", document ? (unsigned)document->sampleCount : 0U);
     if (!document || !fileRef)
     {
         return BAE_PARAM_ERR;
     }
     if (document->sampleCount == 0)
     {
-        BAE_STDERR("[RMF Save] PV_AddSampleResources: no samples, returning OK\n");
+        BAE_PRINTF("[RMF Save] PV_AddSampleResources: no samples, returning OK\n");
         return BAE_NO_ERROR;
     }
 
@@ -7715,7 +7715,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                 }
             }
         }
-        BAE_STDERR("[RMF Save] Sample[%u] program=%u waveform=%p theWaveform=%p waveSize=%ld\n",
+        BAE_PRINTF("[RMF Save] Sample[%u] program=%u waveform=%p theWaveform=%p waveSize=%ld\n",
                    (unsigned)index, (unsigned)sample->program,
                    (void *)sample->waveform,
                    sample->waveform ? (void *)sample->waveform->theWaveform : NULL,
@@ -7774,7 +7774,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
         writeWaveform.waveSize = (int32_t)(writeWaveform.waveFrames * (uint32_t)bytesPerFrame);
 
         writeSampleRate = (uint32_t)writeWaveform.sampledRate;
-        BAE_STDERR("[RMF Save] Sample[%u] sampledRate check: writeRate=0x%08lx\n",
+        BAE_PRINTF("[RMF Save] Sample[%u] sampledRate check: writeRate=0x%08lx\n",
                    (unsigned)index,
                    (unsigned long)writeSampleRate);
         
@@ -7790,12 +7790,12 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
             if (PV_IsOpusCompression(sample->targetCompressionType))
             {
                 writeSampleRate = 48000L << 16;
-                BAE_STDERR("[RMF Save] Sample[%u] defaulting to 48000 Hz for Opus (was 0)\n", (unsigned)index);
+                BAE_PRINTF("[RMF Save] Sample[%u] defaulting to 48000 Hz for Opus (was 0)\n", (unsigned)index);
             }
             else
             {
                 writeSampleRate = 44100L << 16;
-                BAE_STDERR("[RMF Save] Sample[%u] defaulting to 44100 Hz (was 0)\n", (unsigned)index);
+                BAE_PRINTF("[RMF Save] Sample[%u] defaulting to 44100 Hz (was 0)\n", (unsigned)index);
             }
         }
         else if (writeSampleRate < (1000U << 16))
@@ -7804,15 +7804,15 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
             if (writeSampleRate >= 1000U && writeSampleRate <= 384000U)
             {
                 /* Valid raw Hz range, convert to fixed-point */
-                BAE_STDERR("[RMF Save] Sample[%u] converting raw Hz to fixed-point: %lu -> ", 
+                BAE_PRINTF("[RMF Save] Sample[%u] converting raw Hz to fixed-point: %lu -> ", 
                            (unsigned)index, (unsigned long)writeSampleRate);
                 writeSampleRate <<= 16;
-                BAE_STDERR("0x%08lx\n", (unsigned long)writeSampleRate);
+                BAE_PRINTF("0x%08lx\n", (unsigned long)writeSampleRate);
             }
             else
             {
                 /* Out of range raw Hz, default */
-                BAE_STDERR("[RMF Save] Sample[%u] raw Hz out of range (%lu), defaulting\n", 
+                BAE_PRINTF("[RMF Save] Sample[%u] raw Hz out of range (%lu), defaulting\n", 
                            (unsigned)index, (unsigned long)writeSampleRate);
                 if (PV_IsOpusCompression(sample->targetCompressionType))
                 {
@@ -7827,7 +7827,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
         else
         {
             /* Already in fixed-point format, preserve as-is */
-            BAE_STDERR("[RMF Save] Sample[%u] preserving fixed-point rate 0x%08lx\n", 
+            BAE_PRINTF("[RMF Save] Sample[%u] preserving fixed-point rate 0x%08lx\n", 
                        (unsigned)index, (unsigned long)writeSampleRate);
         }
         writeWaveform.sampledRate = (int32_t)writeSampleRate;
@@ -7849,11 +7849,11 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
         writeWaveform.startLoop = (uint32_t)loopStart;
         writeWaveform.endLoop = (uint32_t)loopEnd;
 
-        BAE_STDERR("[RMF Save] Sample[%u] rate raw=0x%08lx write=0x%08lx\n",
+        BAE_PRINTF("[RMF Save] Sample[%u] rate raw=0x%08lx write=0x%08lx\n",
                    (unsigned)index,
                    (unsigned long)(uint32_t)sample->waveform->sampledRate,
                    (unsigned long)(uint32_t)writeWaveform.sampledRate);
-        BAE_STDERR("[RMF Save] Sample[%u] frames=%u size=%ld bits=%u ch=%u loop=%u-%u\n",
+        BAE_PRINTF("[RMF Save] Sample[%u] frames=%u size=%ld bits=%u ch=%u loop=%u-%u\n",
                    (unsigned)index,
                    (unsigned)writeWaveform.waveFrames,
                    (long)writeWaveform.waveSize,
@@ -7875,7 +7875,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                 return BAE_MEMORY_ERR;
             }
             XBlockMove(sample->originalSndData, sndResource, (int32_t)sample->originalSndSize);
-            BAE_STDERR("[RMF Save] Sample[%u] using cached plain SND blob (%ld bytes)\n",
+            BAE_PRINTF("[RMF Save] Sample[%u] using cached plain SND blob (%ld bytes)\n",
                        (unsigned)index, (long)sample->originalSndSize);
         }
         else
@@ -8092,7 +8092,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                         XDisposePtr((XPTR)sampleInstIDs);
                         return result;
                     }
-                    BAE_STDERR("[RMF Save] Sample[%u] retimed decoded Opus PCM %luHz -> %luHz for non-Opus encode\n",
+                    BAE_PRINTF("[RMF Save] Sample[%u] retimed decoded Opus PCM %luHz -> %luHz for non-Opus encode\n",
                                (unsigned)index,
                                (unsigned long)(decodedRate >> 16),
                                (unsigned long)(targetRate >> 16));
@@ -8182,7 +8182,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                     writeWaveform.channels = 1;
                     writeWaveform.waveSize = (int32_t)monoBytes;
                     encodeWaveDataOwner = monoData;
-                    BAE_STDERR("[RMF Save] Sample[%u] collapsed dual-mono PCM to mono for Opus encode\n",
+                    BAE_PRINTF("[RMF Save] Sample[%u] collapsed dual-mono PCM to mono for Opus encode\n",
                                (unsigned)index);
                 }
             }
@@ -8217,7 +8217,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                         XDisposePtr((XPTR)sampleInstIDs);
                         return result;
                     }
-                    BAE_STDERR("[RMF Save] Sample[%u] MPEG resampled %uHz -> %uHz (%u -> %u frames)\n",
+                    BAE_PRINTF("[RMF Save] Sample[%u] MPEG resampled %uHz -> %uHz (%u -> %u frames)\n",
                                (unsigned)index,
                                (unsigned)(sourceRate >> 16),
                                (unsigned)(targetRate >> 16),
@@ -8257,7 +8257,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                         XDisposePtr((XPTR)sampleInstIDs);
                         return result;
                     }
-                    BAE_STDERR("[RMF Save] Sample[%u] resampled %uHz -> %uHz (%u -> %u frames)\n",
+                    BAE_PRINTF("[RMF Save] Sample[%u] resampled %uHz -> %uHz (%u -> %u frames)\n",
                                (unsigned)index,
                                (unsigned)(sourceRate >> 16),
                                (unsigned)(targetRate >> 16),
@@ -8272,7 +8272,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
             {
                 roundTripSourceRate = writeWaveform.sampledRate;
                 writeWaveform.sampledRate = (int32_t)(48000u << 16);
-                BAE_STDERR("[RMF Save] Sample[%u] round-trip: spoofing encoder rate %uHz -> 48000Hz\n",
+                BAE_PRINTF("[RMF Save] Sample[%u] round-trip: spoofing encoder rate %uHz -> 48000Hz\n",
                            (unsigned)index, (unsigned)(roundTripSourceRate >> 16));
             }
 #endif
@@ -8283,7 +8283,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                                                encodeCompSubType,
                                                NULL,
                                                NULL);
-            BAE_STDERR("[RMF Save] Sample[%u] XCreateSoundObjectFromData compType=%d opErr=%d sndResource=%p\n",
+            BAE_PRINTF("[RMF Save] Sample[%u] XCreateSoundObjectFromData compType=%d opErr=%d sndResource=%p\n",
                        (unsigned)index, (int)compType, (int)opErr, (void *)sndResource);
             if (encodeWaveDataOwner)
             {
@@ -8347,7 +8347,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                     }
                     writeWaveform.startLoop = (uint32_t)loopStart;
                     writeWaveform.endLoop = (uint32_t)loopEnd;
-                    BAE_STDERR("[RMF Save] Sample[%u] Opus RT: frameCount=%u encFrames=%u loop %u-%u\n",
+                    BAE_PRINTF("[RMF Save] Sample[%u] Opus RT: frameCount=%u encFrames=%u loop %u-%u\n",
                                (unsigned)index,
                                (unsigned)writeWaveform.waveFrames,
                                (unsigned)encodedFrames,
@@ -8375,7 +8375,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                     }
                     writeWaveform.startLoop = (uint32_t)loopStart;
                     writeWaveform.endLoop = (uint32_t)loopEnd;
-                    BAE_STDERR("[RMF Save] Sample[%u] loop remap srcFrames=%u encFrames=%u -> %u-%u\n",
+                    BAE_PRINTF("[RMF Save] Sample[%u] loop remap srcFrames=%u encFrames=%u -> %u-%u\n",
                                (unsigned)index,
                                (unsigned)writeWaveform.waveFrames,
                                (unsigned)encodedFrames,
@@ -8401,7 +8401,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
             if (sampleWasEncodedMpeg && decodedSampleRateForSnd != 0)
             {
                 sndSampleRate = (int32_t)decodedSampleRateForSnd;
-                BAE_STDERR("[RMF Save] Sample[%u] MPEG rate align using decoded stream rate %uHz\n",
+                BAE_PRINTF("[RMF Save] Sample[%u] MPEG rate align using decoded stream rate %uHz\n",
                            (unsigned)index,
                            (unsigned)(decodedSampleRateForSnd >> 16));
             }
@@ -8422,7 +8422,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                 {
                     scaledRate = (uint64_t)0xFFFF0000u;
                 }
-                BAE_STDERR("[RMF Save] Sample[%u] playAtSampledFreq Opus rate adjust %uHz -> %uHz (srcFrames=%u decodedFrames=%u)\n",
+                BAE_PRINTF("[RMF Save] Sample[%u] playAtSampledFreq Opus rate adjust %uHz -> %uHz (srcFrames=%u decodedFrames=%u)\n",
                            (unsigned)index,
                            (unsigned)(((uint32_t)sndSampleRate) >> 16),
                            (unsigned)(((uint32_t)scaledRate) >> 16),
@@ -8463,7 +8463,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                  * the engine can time-stretch correctly on decode. */
                 XSetSoundSampleRate(sndResource, roundTripWriteRate);
                 XSetSoundOpusRoundTripFlag(sndResource, TRUE);
-                BAE_STDERR("[RMF Save] Sample[%u] round-trip: SND rate fixed to %uHz + XSOUND_OPUS_ROUNDTRIP_RESAMPLE set\n",
+                BAE_PRINTF("[RMF Save] Sample[%u] round-trip: SND rate fixed to %uHz + XSOUND_OPUS_ROUNDTRIP_RESAMPLE set\n",
                            (unsigned)index, (unsigned)(((uint32_t)roundTripWriteRate) >> 16));
             }
 #endif
@@ -8821,7 +8821,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                     if (extTail) XDisposePtr(extTail);
                 }
 
-                BAE_STDERR("[RMF Save] INST id=%ld splitCount=%u using split map leaderSample=%u leaderFrames=%u\n",
+                BAE_PRINTF("[RMF Save] INST id=%ld splitCount=%u using split map leaderSample=%u leaderFrames=%u\n",
                            (long)instID,
                            (unsigned)collected,
                            (unsigned)leaderIndex,
@@ -8938,7 +8938,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                     XBlockMove(&instrument, instBuf, (int32_t)sizeof(instrument));
                     XBlockMove(extTail, instBuf + sizeof(instrument), extTailSize);
                     XDisposePtr(extTail);
-                    BAE_STDERR("[RMF Save] INST id=%ld midiRootKey=%d sampleRootKey=%u (extended, %ld bytes)\n",
+                    BAE_PRINTF("[RMF Save] INST id=%ld midiRootKey=%d sampleRootKey=%u (extended, %ld bytes)\n",
                                (long)instID, 60, (unsigned)leaderSample->rootKey, (long)totalSize);
                     if (XAddFileResource(fileRef, ID_INST, instID, pascalName, instBuf, totalSize) != 0)
                     {
@@ -8952,7 +8952,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                 else
                 {
                     if (extTail) XDisposePtr(extTail);
-                    BAE_STDERR("[RMF Save] INST id=%ld fallback midiRootKey=%d sampleRootKey=%u\n",
+                    BAE_PRINTF("[RMF Save] INST id=%ld fallback midiRootKey=%d sampleRootKey=%u\n",
                                (long)instID,
                                60,
                                (unsigned)leaderSample->rootKey);
@@ -8980,7 +8980,7 @@ static BAEResult PV_AddSongResource(BAERmfEditorDocument *document, XFILE fileRe
     char pascalName[256];
     BAEResult result;
 
-    BAE_STDERR("[RMF Save] PV_AddSongResource entered midiID=%ld\n", (long)midiResourceID);
+    BAE_PRINTF("[RMF Save] PV_AddSongResource entered midiID=%ld\n", (long)midiResourceID);
     songInfo = XNewSongResourceInfo();
     if (!songInfo)
     {
@@ -12892,7 +12892,7 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken)
                 {
                     debugSndID = (uint32_t)(uint16_t)firstSampleInfo.sndResourceID;
                 }
-                BAE_STDERR("[BankRequiresZsb] TRIP reason=advanced-interpolation instIndex=%u sndID=%u flags2=0x%02X\n",
+                BAE_PRINTF("[BankRequiresZsb] TRIP reason=advanced-interpolation instIndex=%u sndID=%u flags2=0x%02X\n",
                            (unsigned)instrumentIndex,
                            (unsigned)debugSndID,
                            (unsigned)extInfo.flags2);
@@ -12926,7 +12926,7 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken)
                 if (loopLength >= MIN_LOOP_SIZE_ZMF && loopLength < MIN_LOOP_SIZE_RMF)
                 {
 #if defined(_DEBUG) && (_DEBUG != 0)
-                BAE_STDERR("[BankRequiresZsb] TRIP reason=short-loop-rmf-window instIndex=%u sndID=%u loopStart=%u loopEnd=%u loopLen=%u minZmf=%u minRmf=%u\n",
+                BAE_PRINTF("[BankRequiresZsb] TRIP reason=short-loop-rmf-window instIndex=%u sndID=%u loopStart=%u loopEnd=%u loopLen=%u minZmf=%u minRmf=%u\n",
                            (unsigned)instrumentIndex,
                            (unsigned)(uint16_t)sampleInfo.sndResourceID,
                            (unsigned)sampleInfo.loopStart,
@@ -12945,7 +12945,7 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken)
                 compressionType == (uint32_t)C_OPUS)
             {
 #if defined(_DEBUG) && (_DEBUG != 0)
-                BAE_STDERR("[BankRequiresZsb] TRIP reason=modern-codec instIndex=%u sndID=%u compressionType=0x%08X\n",
+                BAE_PRINTF("[BankRequiresZsb] TRIP reason=modern-codec instIndex=%u sndID=%u compressionType=0x%08X\n",
                            (unsigned)instrumentIndex,
                            (unsigned)(uint16_t)sampleInfo.sndResourceID,
                            (unsigned)compressionType);
@@ -13152,7 +13152,7 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBank(BAERmfEditorDocument *doc
                                             PV_ClampMidi7Bit((int32_t)split.lowMidi),
                                             PV_ClampMidi7Bit((int32_t)split.highMidi)) != BAE_NO_ERROR)
             {
-                BAE_STDERR("[CloneFromBank] INST ID=%ld split=%d failed to load sndID=%d\n",
+                BAE_PRINTF("[CloneFromBank] INST ID=%ld split=%d failed to load sndID=%d\n",
                            (long)instID, (int)splitIndex, (int)split.sndResourceID);
             }
             else
@@ -13197,7 +13197,7 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBank(BAERmfEditorDocument *doc
                                         0,
                                         127) != BAE_NO_ERROR)
         {
-            BAE_STDERR("[CloneFromBank] INST ID=%ld failed to load base sndID=%d\n",
+            BAE_PRINTF("[CloneFromBank] INST ID=%ld failed to load base sndID=%d\n",
                        (long)instID, (int)baseSndID);
             XDisposePtr(instData);
             return BAE_GENERAL_ERR;
@@ -13351,7 +13351,7 @@ BAEResult BAERmfEditorDocument_AliasInstrumentFromBank(BAERmfEditorDocument *doc
                                       PV_ClampMidi7Bit((int32_t)split.lowMidi),
                                       PV_ClampMidi7Bit((int32_t)split.highMidi)) != BAE_NO_ERROR)
             {
-                BAE_STDERR("[AliasFromBank] INST ID=%ld split=%d failed sndID=%d\n",
+                BAE_PRINTF("[AliasFromBank] INST ID=%ld split=%d failed sndID=%d\n",
                            (long)instID, (int)splitIndex, (int)split.sndResourceID);
             }
             else
@@ -13391,7 +13391,7 @@ BAEResult BAERmfEditorDocument_AliasInstrumentFromBank(BAERmfEditorDocument *doc
                                   0,
                                   127) != BAE_NO_ERROR)
         {
-            BAE_STDERR("[AliasFromBank] INST ID=%ld failed base sndID=%d\n",
+            BAE_PRINTF("[AliasFromBank] INST ID=%ld failed base sndID=%d\n",
                        (long)instID, (int)baseSndID);
             XDisposePtr(instData);
             return BAE_GENERAL_ERR;
@@ -16265,7 +16265,7 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBankToInstID(
                                             PV_ClampMidi7Bit((int32_t)split.lowMidi),
                                             PV_ClampMidi7Bit((int32_t)split.highMidi)) != BAE_NO_ERROR)
             {
-                BAE_STDERR("[CloneToInstID] INST ID=%ld split=%d failed to load sndID=%d\n",
+                BAE_PRINTF("[CloneToInstID] INST ID=%ld split=%d failed to load sndID=%d\n",
                            (long)instID, (int)splitIndex, (int)split.sndResourceID);
             }
             else
@@ -16310,7 +16310,7 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBankToInstID(
                                         0,
                                         127) != BAE_NO_ERROR)
         {
-            BAE_STDERR("[CloneToInstID] INST ID=%ld failed to load base sndID=%d\n",
+            BAE_PRINTF("[CloneToInstID] INST ID=%ld failed to load base sndID=%d\n",
                        (long)instID, (int)baseSndID);
             XDisposePtr(instData);
             return BAE_GENERAL_ERR;
@@ -16372,9 +16372,9 @@ static BAEResult PV_WriteRmfDocumentToResourceFile(BAERmfEditorDocument *documen
 
     isZmf = (resourceID == XFILERESOURCE_ZMF_ID) ? TRUE : FALSE;
 
-    BAE_STDERR("[RMF Save] Starting save, trackCount=%u, format=%s\n", document->trackCount, isZmf ? "ZMF" : "RMF");
+    BAE_PRINTF("[RMF Save] Starting save, trackCount=%u, format=%s\n", document->trackCount, isZmf ? "ZMF" : "RMF");
     result = BAERmfEditorDocument_Validate(document);
-    BAE_STDERR("[RMF Save] Validate result=%d, trackCount=%u\n", (int)result, document->trackCount);
+    BAE_PRINTF("[RMF Save] Validate result=%d, trackCount=%u\n", (int)result, document->trackCount);
     if (result != BAE_NO_ERROR)
     {
         return result;
@@ -16382,7 +16382,7 @@ static BAEResult PV_WriteRmfDocumentToResourceFile(BAERmfEditorDocument *documen
     
     XSetMemory(&midiData, sizeof(midiData), 0);
     result = PV_BuildMidiFile(document, &midiData);
-    BAE_STDERR("[RMF Save] BuildMidiFile result=%d, size=%u\n", (int)result, midiData.size);
+    BAE_PRINTF("[RMF Save] BuildMidiFile result=%d, size=%u\n", (int)result, midiData.size);
     if (result != BAE_NO_ERROR)
     {
         PV_ByteBufferDispose(&midiData);
@@ -16390,7 +16390,7 @@ static BAEResult PV_WriteRmfDocumentToResourceFile(BAERmfEditorDocument *documen
     }
     PV_DebugReportMidiRoundTripDiff(document, &midiData);
     result = PV_EnsureResourceFileReady(fileRef, resourceID);
-    BAE_STDERR("[RMF Save] EnsureResourceFileReady result=%d\n", (int)result);
+    BAE_PRINTF("[RMF Save] EnsureResourceFileReady result=%d\n", (int)result);
     if (result != BAE_NO_ERROR)
     {
         PV_ByteBufferDispose(&midiData);
@@ -16488,7 +16488,7 @@ static BAEResult PV_WriteRmfDocumentToResourceFile(BAERmfEditorDocument *documen
             return result;
         }
         result = PV_AddSampleResources(document, fileRef, isZmf);
-        BAE_STDERR("[RMF Save] loadedFromRmf AddSampleResources result=%d, sampleCount=%u\n",
+        BAE_PRINTF("[RMF Save] loadedFromRmf AddSampleResources result=%d, sampleCount=%u\n",
                    (int)result, document->sampleCount);
         if (result != BAE_NO_ERROR)
         {
@@ -16518,13 +16518,13 @@ static BAEResult PV_WriteRmfDocumentToResourceFile(BAERmfEditorDocument *documen
                                              isZmf);
         if (result != BAE_NO_ERROR)
         {
-            BAE_STDERR("[RMF Save] MIDI encode failed result=%d\n", (int)result);
+            BAE_PRINTF("[RMF Save] MIDI encode failed result=%d\n", (int)result);
             PV_ByteBufferDispose(&midiData);
             return result;
         }
         if (PV_GetAvailableResourceID(fileRef, usedMidiType, 1, &midiID) != BAE_NO_ERROR)
         {
-            BAE_STDERR("[RMF Save] GetAvailableResourceID for selected MIDI type failed\n");
+            BAE_PRINTF("[RMF Save] GetAvailableResourceID for selected MIDI type failed\n");
             XDisposePtr(encodedMidi);
             PV_ByteBufferDispose(&midiData);
             return BAE_FILE_IO_ERROR;
@@ -16532,28 +16532,28 @@ static BAEResult PV_WriteRmfDocumentToResourceFile(BAERmfEditorDocument *documen
         if (XAddFileResource(fileRef, usedMidiType, midiID, midiName, encodedMidi, encodedMidiSize) != 0)
         {
             XDisposePtr(encodedMidi);
-            BAE_STDERR("[RMF Save] XAddFileResource(MIDI) failed\n");
+            BAE_PRINTF("[RMF Save] XAddFileResource(MIDI) failed\n");
             PV_ByteBufferDispose(&midiData);
             return BAE_FILE_IO_ERROR;
         }
         XDisposePtr(encodedMidi);
     }
     result = PV_AddSampleResources(document, fileRef, isZmf);
-    BAE_STDERR("[RMF Save] AddSampleResources result=%d, sampleCount=%u\n", (int)result, document->sampleCount);
+    BAE_PRINTF("[RMF Save] AddSampleResources result=%d, sampleCount=%u\n", (int)result, document->sampleCount);
     if (result == BAE_NO_ERROR)
     {
         result = PV_AddSongResource(document, fileRef, midiID);
-        BAE_STDERR("[RMF Save] AddSongResource result=%d\n", (int)result);
+        BAE_PRINTF("[RMF Save] AddSongResource result=%d\n", (int)result);
     }
     if (result == BAE_NO_ERROR)
     {
         if (XCleanResourceFile(fileRef) == FALSE)
         {
-            BAE_STDERR("[RMF Save] XCleanResourceFile failed\n");
+            BAE_PRINTF("[RMF Save] XCleanResourceFile failed\n");
             result = BAE_FILE_IO_ERROR;
         }
     }
-    BAE_STDERR("[RMF Save] Final result=%d\n", (int)result);
+    BAE_PRINTF("[RMF Save] Final result=%d\n", (int)result);
     PV_ByteBufferDispose(&midiData);
     return result;
 }

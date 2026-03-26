@@ -6798,7 +6798,7 @@ int main(int argc, char *argv[])
             // expRect defined in settings dialog: position dropdown beneath it
             // Compute using same dialog math as the settings dialog so dropdown aligns with the control
             int dlgW = 560;
-            int dlgH = 280; // must match settings dialog above (wider)
+            int dlgH = 316; // must match settings dialog (gui_settings.c)
             int pad = 10;
             int controlW = 150;
             int dlgX = (WINDOW_W - dlgW) / 2;
@@ -6815,7 +6815,16 @@ int main(int argc, char *argv[])
             int itemW = expRect.w;
             int boxW = itemW * cols + gapX * (cols - 1);
             int boxH = itemH * rows;
-            Rect box = {expRect.x, expRect.y + expRect.h + 1, boxW, boxH};
+            // Render below if there's room, otherwise render above
+            int boxY;
+            if (expRect.y + expRect.h + 1 + boxH < g_window_h) {
+                boxY = expRect.y + expRect.h + 1;
+            } else if (expRect.y - boxH - 1 >= 0) {
+                boxY = expRect.y - boxH - 1;
+            } else {
+                boxY = expRect.y + expRect.h + 1;
+            }
+            Rect box = {expRect.x, boxY, boxW, boxH};
             SDL_Color ddBg = g_panel_bg;
             ddBg.a = 255;
             Rect shadowRect = {box.x + 2, box.y + 2, box.w, box.h};
