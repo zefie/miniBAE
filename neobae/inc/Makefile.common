@@ -516,7 +516,7 @@ else
 				else
 					ifeq ($(MOD2RMF),1)
 						# libNeoBAE srcs + split mod2rmf sources
-						SRC_BIN	:= $(SRC) src/mod2rmf/mod2rmf.c src/mod2rmf/mod2rmf_encoder.c src/mod2rmf/mod2rmf_resampler.c
+						SRC_BIN	:= $(SRC) src/mod2rmf/mod2rmf_common.c src/mod2rmf/mod2rmf_encoder.c src/mod2rmf/mod2rmf_resampler.c src/mod2rmf/mod2rmf_rmfcreat.c src/mod2rmf/mod2rmf_song.c src/mod2rmf/mod2rmf_main.c
 						BAE_LIBS += -lxmp
 						BAE_FLAGS += -DLIBXMP_STATIC=1 
 					else
