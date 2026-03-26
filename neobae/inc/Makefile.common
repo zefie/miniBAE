@@ -527,7 +527,7 @@ else
 						SRC_BIN	:= $(SRC) src/mid2rmi/mid2rmi.c
 					else
 						ifeq ($(MOD2RMF_APP),1)
-							SRC_BIN	+= src/mod2rmf/mod2rmf_main.c
+							SRC_BIN	:= $(SRC) src/mod2rmf/mod2rmf_main.c
 						else
 							ifeq ($(BANKRECOMP),1)
 								# libNeoBAE srcs + bankrecomp.c
