@@ -19,9 +19,20 @@ typedef struct {
     uint8_t stereoSeparation;  /* 0=mono (center), 75=default, 100=hard L/R */
 } Mod2RmfConverter;
 
-int load_source_data(Mod2RmfConverter *conv, const char *sourcePath);
-int setup_samples(Mod2RmfConverter *conv, const ModSongModel *song);
-int setup_document(Mod2RmfConverter *conv,
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char *sourcePath, unsigned char useZmfContainer);
+
+#ifdef __cplusplus
+}
+#endif
+
+int mod2rmf_load_source_data(Mod2RmfConverter *conv, const char *sourcePath);
+int mod2rmf_setup_samples(Mod2RmfConverter *conv, const ModSongModel *song);
+int mod2rmf_setup_document(Mod2RmfConverter *conv,
                           const ModSongModel *song,
                           const char *sourcePath);
 

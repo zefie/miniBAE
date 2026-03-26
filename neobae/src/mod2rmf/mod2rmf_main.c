@@ -317,7 +317,7 @@ int main(int argc, char *argv[])
     conv->forceOriginalSamples = forceOriginalSamples;
     conv->stereoSeparation = stereoSeparation;
 
-    if (!load_source_data(conv, sourcePath))
+    if (!mod2rmf_load_source_data(conv, sourcePath))
     {
         fprintf(stderr, "Error: failed to read source file\n");
         mod2rmf_song_model_dispose(&song);
@@ -455,7 +455,7 @@ int main(int argc, char *argv[])
     }
 #endif
 
-    if (!setup_document(conv, &song, sourcePath))
+    if (!mod2rmf_setup_document(conv, &song, sourcePath))
     {
         fprintf(stderr, "Error: document setup failed\n");
         mod2rmf_song_model_dispose(&song);
@@ -487,7 +487,7 @@ int main(int argc, char *argv[])
                 (unsigned)song.loopStartTick, (unsigned)song.loopEndTick);
     }
 
-    if (!setup_samples(conv, &song))
+    if (!mod2rmf_setup_samples(conv, &song))
     {
         fprintf(stderr, "Error: sample setup failed\n");
         mod2rmf_song_model_dispose(&song);

@@ -24,6 +24,9 @@
       <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
       <Extensions>h;hh;hpp;hxx</Extensions>
     </Filter>
+    <Filter Include="Source Files\MOD2RMF">
+      <UniqueIdentifier>{a007ad85-a0a0-4650-9313-33587809bee8}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <!-- RMF Editor -->
@@ -192,6 +195,21 @@
     <ClCompile Include="..\src\BAE_Source\Common\X_LZMA.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
+    <ClCompile Include="..\src\mod2rmf\mod2rmf_common.c">
+      <Filter>Source Files\MOD2RMF</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\mod2rmf\mod2rmf_encoder.c">
+      <Filter>Source Files\MOD2RMF</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\mod2rmf\mod2rmf_resampler.c">
+      <Filter>Source Files\MOD2RMF</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\mod2rmf\mod2rmf_rmfcreat.c">
+      <Filter>Source Files\MOD2RMF</Filter>
+    </ClCompile>
+    <ClCompile Include="..\src\mod2rmf\mod2rmf_song.c">
+      <Filter>Source Files\MOD2RMF</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src\BAE_Source\Common\NeoBAE.h">
@@ -223,6 +241,24 @@
     </ClInclude>
     <ClInclude Include="..\src\rmfeditor_wx\editor_bank.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\mod2rmf\mod2rmf_common.h">
+      <Filter>Source Files\MOD2RMF</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\mod2rmf\mod2rmf_encoder.h">
+      <Filter>Source Files\MOD2RMF</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\mod2rmf\mod2rmf_resampler.h">
+      <Filter>Source Files\MOD2RMF</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\mod2rmf\mod2rmf_rmfcreat.h">
+      <Filter>Source Files\MOD2RMF</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\mod2rmf\mod2rmf_song.h">
+      <Filter>Source Files\MOD2RMF</Filter>
+    </ClInclude>
+    <ClInclude Include="..\src\BAE_Source\Common\X_Assert.h">
+      <Filter>Source Files\BAE Common</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

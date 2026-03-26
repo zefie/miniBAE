@@ -480,6 +480,14 @@ ifeq ($(LZMA_SUPPORT),1)
 	endif
 endif
 
+ifeq ($(MOD2RMF),1)
+	# libNeoBAE srcs + split mod2rmf sources
+	SRC += src/mod2rmf/mod2rmf_common.c src/mod2rmf/mod2rmf_encoder.c src/mod2rmf/mod2rmf_resampler.c src/mod2rmf/mod2rmf_rmfcreat.c src/mod2rmf/mod2rmf_song.c
+	INC_PATH += -Isrc/mod2rmf
+	BAE_LIBS += -lxmp
+	BAE_FLAGS += -DLIBXMP_STATIC=1 
+endif
+
 ifeq ($(BUILD_GUI),1)
 	BAE_FLAGS += -D_ZEFI_GUI=1
 	SRC_BIN	:= src/gui/gui_theme.c \
@@ -514,15 +522,12 @@ else
 					# libNeoBAE srcs + mid2rmf.c
 					SRC_BIN	:= $(SRC) src/mid2rmf/mid2rmf.c
 				else
-					ifeq ($(MOD2RMF),1)
-						# libNeoBAE srcs + split mod2rmf sources
-						SRC_BIN	:= $(SRC) src/mod2rmf/mod2rmf_common.c src/mod2rmf/mod2rmf_encoder.c src/mod2rmf/mod2rmf_resampler.c src/mod2rmf/mod2rmf_rmfcreat.c src/mod2rmf/mod2rmf_song.c src/mod2rmf/mod2rmf_main.c
-						BAE_LIBS += -lxmp
-						BAE_FLAGS += -DLIBXMP_STATIC=1 
+					ifeq ($(MID2RMI),1)
+						# libNeoBAE srcs + mid2rmi.c
+						SRC_BIN	:= $(SRC) src/mid2rmi/mid2rmi.c
 					else
-						ifeq ($(MID2RMI),1)
-							# libNeoBAE srcs + mid2rmi.c
-							SRC_BIN	:= $(SRC) src/mid2rmi/mid2rmi.c
+						ifeq ($(MOD2RMF_APP),1)
+							SRC_BIN	+= src/mod2rmf/mod2rmf_main.c
 						else
 							ifeq ($(BANKRECOMP),1)
 								# libNeoBAE srcs + bankrecomp.c

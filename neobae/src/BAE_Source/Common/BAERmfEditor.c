@@ -6954,7 +6954,7 @@ static BAEResult PV_BuildTrackData(BAERmfEditorTrack const *track,
     uint32_t eventCount;
     uint32_t eventIndex;
     uint32_t noteIndex;
-    uint32_t previousTick;
+    uint32_t previousTick = 0;
     uint16_t currentBank[BAE_MAX_MIDI_CHANNELS];
     unsigned char currentProgram[BAE_MAX_MIDI_CHANNELS];
     unsigned char explicitBankMsb[BAE_MAX_MIDI_CHANNELS];

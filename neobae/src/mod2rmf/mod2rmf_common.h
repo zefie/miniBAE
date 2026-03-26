@@ -186,7 +186,7 @@ typedef struct {
 
 int mod2rmf_compare_pitch_bend_by_tick(const void *a, const void *b);
 int mod2rmf_compare_cc_by_tick(const void *a, const void *b);
-uint16_t mod2rmf_libxmp_pitchbend_to_midi(int32_t xmpPitchbend,
+uint16_t mod2rmf_pitchbend_to_midi(int32_t xmpPitchbend,
                                          uint16_t bendRangeSemitones);
 void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
                                   uint32_t bpm,

@@ -48,6 +48,10 @@ extern "C" {
 #include "editor_pianoroll_panel.h"
 #include "batch_compress_dialog.h"
 
+#include "mod2rmf_common.h"
+#include "mod2rmf_song.h"
+#include "mod2rmf_rmfcreat.h"
+
 #define STR2(x) #x
 #define STR(x) STR2(x)
 
@@ -238,6 +242,18 @@ struct NbsSessionSettings {
     uint8_t  savePreviewToSong;
 };
 #pragma pack(pop)
+
+static bool isSupportedModule(char const *ext) {
+    if (!ext) {
+        return false;
+    }
+    std::string extLower = wxString(ext).Lower().ToStdString();
+    static const std::set<std::string> supportedExtensions = {
+        "mod", "s3m", "xm", "it", "mtm", "stm", "669", "far", "ult", "amf",
+        "dbm", "imf", "liq", "med", "mgt", "okt", "ptm", "xmf"
+    };
+    return supportedExtensions.find(extLower) != supportedExtensions.end();
+}
 
 static void AppendLE16(std::vector<unsigned char> &buf, uint16_t val) {
     buf.push_back(static_cast<unsigned char>(val & 0xFF));
@@ -6075,87 +6091,55 @@ private:
         return m_trackList->GetSelection();
     }
 
-    void LoadDocument(wxString const &path) {
-        wxFile file;
-        wxFileOffset length;
-        std::vector<unsigned char> data;
-        wxString ext;
-        BAEFileType fileTypeHint;
+    void LoadDocumentFromMemory(unsigned char const *data, uint32_t size, BAEFileType fileTypeHint, const wxString &mediaDisplayName) {
         BAERmfEditorDocument *document;
 
-        fileTypeHint = BAE_INVALID_TYPE;
-        ext = wxFileName(path).GetExt().Lower();
-        if (ext == "rmf" || ext == "zmf") {
-            fileTypeHint = BAE_RMF;
-        } else if (ext == "rmi") {
-            fileTypeHint = BAE_RMI;
-        } else if (ext == "mid" || ext == "midi" || ext == "kar") {
-            fileTypeHint = BAE_MIDI_TYPE;
-        }
-
-        document = nullptr;
-        if (file.Open(path, wxFile::read)) {
-            length = file.Length();
-            if (length > 0) {
-                data.assign(static_cast<size_t>(length), 0);
-                if (file.Read(data.data(), static_cast<size_t>(length)) == length) {
-                    document = BAERmfEditorDocument_LoadFromMemory(data.data(),
-                                                                   static_cast<uint32_t>(data.size()),
-                                                                   fileTypeHint);
-                }
-            }
-            file.Close();
-        }
-        if (!document) {
-            wxScopedCharBuffer utf8Path;
-
-            utf8Path = path.utf8_str();
-            document = BAERmfEditorDocument_LoadFromFile(const_cast<char *>(utf8Path.data()));
-        }
-        if (!document) {
-            wxMessageBox("Failed to open file as RMF or MIDI.", "Open Failed", wxOK | wxICON_ERROR, this);
+        if (!data || size == 0) {
             return;
         }
-        if (m_document) {
+        document = BAERmfEditorDocument_LoadFromMemory(data, size, fileTypeHint);
+        if (!document) {
+            wxMessageBox("Failed to load document from memory.", "Load Failed", wxOK | wxICON_ERROR, this);
+            return;
+        }
+        InitializeDocument(document, mediaDisplayName);
+    }
+
+    void InitializeDocument(BAERmfEditorDocument *&document, const wxString &mediaDisplayName) {        
         if (!m_previewSampleTempPath.empty() && wxFileExists(m_previewSampleTempPath)) {
             wxRemoveFile(m_previewSampleTempPath);
         }
-            BAERmfEditorDocument_Delete(m_document);
+        BAERmfEditorMidiStorageType storageType;
+        if (BAERmfEditorDocument_GetMidiStorageType(m_document, &storageType) == BAE_NO_ERROR) {
+           SetSelectedMidiStorageType(storageType);
         }
-        m_document = document;
-        {
-            BAERmfEditorMidiStorageType storageType;
 
-            if (BAERmfEditorDocument_GetMidiStorageType(m_document, &storageType) == BAE_NO_ERROR) {
-                SetSelectedMidiStorageType(storageType);
+        // If the document has per-song engine config, load it into the settings UI.
+        int32_t engineFlags = 0;
+        if (BAERmfEditorDocument_GetEngineConfig(m_document, &engineFlags) == BAE_NO_ERROR && engineFlags != 0) {
+            bool docHasPanFix    = (engineFlags & SONG_CONFIG_HAS_PANFIX) != 0;
+            bool docHasChorus    = (engineFlags & SONG_CONFIG_HAS_CLASSIC_CHORUS) != 0;
+            bool docPanFix       = (engineFlags & SONG_CONFIG_PANFIX_ON) != 0;
+            bool docClassicChorus= (engineFlags & SONG_CONFIG_CLASSIC_CHORUS_ON) != 0;
+            if (m_savePreviewToSongCheck) {
+                m_savePreviewToSongCheck->SetValue(true);
             }
-        }
-        {
-            // If the document has per-song engine config, load it into the settings UI.
-            int32_t engineFlags = 0;
-            if (BAERmfEditorDocument_GetEngineConfig(m_document, &engineFlags) == BAE_NO_ERROR && engineFlags != 0) {
-                bool docHasPanFix    = (engineFlags & SONG_CONFIG_HAS_PANFIX) != 0;
-                bool docHasChorus    = (engineFlags & SONG_CONFIG_HAS_CLASSIC_CHORUS) != 0;
-                bool docPanFix       = (engineFlags & SONG_CONFIG_PANFIX_ON) != 0;
-                bool docClassicChorus= (engineFlags & SONG_CONFIG_CLASSIC_CHORUS_ON) != 0;
-                if (m_savePreviewToSongCheck) {
-                    m_savePreviewToSongCheck->SetValue(true);
+            if (m_settingsMenu) {
+                if (docHasPanFix) {
+                    m_settingsMenu->Check(ID_SettingsPanFix, docPanFix);
                 }
-                if (m_settingsMenu) {
-                    if (docHasPanFix) {
-                        m_settingsMenu->Check(ID_SettingsPanFix, docPanFix);
-                    }
-                    if (docHasChorus) {
-                        m_settingsMenu->Check(ID_SettingsClassicChorus, docClassicChorus);
-                    }
+                if (docHasChorus) {
+                    m_settingsMenu->Check(ID_SettingsClassicChorus, docClassicChorus);
                 }
-                ApplyMixerEngineSettings();
             }
+            ApplyMixerEngineSettings();
         }
+
+        m_document = document;
         InvalidatePianoRollPreviewSong();
         ClearUndoHistory();
-        m_currentPath = path;
-        m_mediaDisplayName = wxFileNameFromPath(path);
+        m_currentPath.clear();
+        m_mediaDisplayName = mediaDisplayName;
         m_mediaModifiedHintFromSession = false;
         m_sessionPath.clear();
         MarkDocumentClean();
@@ -6171,6 +6155,35 @@ private:
         RefreshMidiLoopControlsFromDocument();
         UpdateFrameTitle();
         UpdateStatusBar();
+    }
+
+    void LoadDocument(wxString const &path) {
+        wxFile file;
+        wxFileOffset length;
+        std::vector<unsigned char> data;
+        wxString ext;
+        BAEFileType fileTypeHint;
+
+        fileTypeHint = BAE_INVALID_TYPE;
+        ext = wxFileName(path).GetExt().Lower();
+        if (ext == "rmf" || ext == "zmf") {
+            fileTypeHint = BAE_RMF;
+        } else if (ext == "rmi") {
+            fileTypeHint = BAE_RMI;
+        } else if (ext == "mid" || ext == "midi" || ext == "kar") {
+            fileTypeHint = BAE_MIDI_TYPE;
+        }
+
+        if (file.Open(path, wxFile::read)) {
+            length = file.Length();
+            if (length > 0) {
+                data.assign(static_cast<size_t>(length), 0);
+                if (file.Read(data.data(), static_cast<size_t>(length)) == length) {
+                    return LoadDocumentFromMemory(data.data(), static_cast<uint32_t>(data.size()), fileTypeHint, wxFileNameFromPath(path));
+                }
+            }
+            file.Close();
+        }
     }
 
     void PopulateTrackList() {
@@ -6499,7 +6512,8 @@ private:
                             "Open RMF, MIDI, Bank, or Session",
                             wxEmptyString,
                             wxEmptyString,
-                            "All supported files (*.rmf;*.zmf;*.mid;*.midi;*.kar;*.rmi;*.hsb;*.zsb;*.nbs)|*.rmf;*.zmf;*.mid;*.midi;*.kar;*.rmi;*.hsb;*.zsb;*.nbs|NeoBAE Session (*.nbs)|*.nbs|RMF files (*.rmf;*.zmf)|*.rmf;*.zmf|MIDI files (*.mid;*.midi;*.kar;*.rmi)|*.mid;*.midi;*.kar;*.rmi|Bank files (*.hsb;*.zsb)|*.hsb;*.zsb|All files (*.*)|*.*",
+                            
+                            "All supported files|*.rmf;*.zmf;*.mid;*.midi;*.kar;*.rmi;*.hsb;*.zsb;*.nbs;*.mod;*.s3m;*.xm;*.it;*.mtm,*.stm,*.669;*.far;*.ult;*.amf;*.dbm;*.imf;*.liq;*.med;*.mgt;*.okt;*.ptm;*.xmf|NeoBAE Session (*.nbs)|*.nbs|RMF files (*.rmf;*.zmf)|*.rmf;*.zmf|Module Tracker file (*.mod;*.s3m;*.xm;*.it;*.mtm,*.stm,*.669;*.far;*.ult;*.amf;*.dbm;*.imf;*.liq;*.med;*.mgt;*.okt;*.ptm;*.xmf)|*.mod;*.s3m;*.xm;*.it;*.mtm,*.stm,*.669;*.far;*.ult;*.amf;*.dbm;*.imf;*.liq;*.med;*.mgt;*.okt;*.ptm;*.xmf|MIDI files (*.mid;*.midi;*.kar;*.rmi)|*.mid;*.midi;*.kar;*.rmi|Bank files (*.hsb;*.zsb)|*.hsb;*.zsb|All files (*.*)|*.*",
                             wxFD_OPEN | wxFD_FILE_MUST_EXIST);
         if (dialog.ShowModal() == wxID_OK) {
             wxString selectedPath = dialog.GetPath();
@@ -6511,6 +6525,23 @@ private:
                     return;
                 }
                 LoadBankForEditing(selectedPath);
+            } else if (isSupportedModule(ext)) {
+                BAERmfEditorDocument *document;
+                wxScopedCharBuffer utf8SelectedPath;
+
+                // For supported module formats, we hook into mod2rmf
+                // to convert them to RMF on-the-fly, so just load as a regular document.
+                document = nullptr;
+                utf8SelectedPath = selectedPath.utf8_str();
+                BAEResult result = mod2rmf_load_module_to_document(&document,
+                                                                   utf8SelectedPath.data(),
+                                                                   true);
+                if (result != BAE_NO_ERROR) {
+                    wxMessageBox("Failed to load module file.", "Load Failed", wxOK | wxICON_ERROR, this);
+                    return;
+                }
+                InitializeDocument(document, wxFileNameFromPath(selectedPath));
+                SwitchToEditorTab(kEditorModeMidi);
             } else {
                 LoadDocument(selectedPath);
                 SwitchToEditorTab(kEditorModeMidi);

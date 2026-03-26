@@ -3,11 +3,12 @@
     "libflac",
     "libogg",
     "libvorbis",
-	"opus",
-	"opusfile",
+    "opus",
+    "opusfile",
     "mp3lame",
     "wxwidgets",
-	"zlib",
-	"liblzma"
+    "zlib",
+    "liblzma",
+    "libxmp"
   ]
 }

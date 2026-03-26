@@ -12,6 +12,7 @@ FLAC_ENC := 1
 ZMF_SUPPORT := 1
 CREATION_API := 1
 MOD2RMF := 1
+MOD2RMF_APP := 1
 include inc/Makefile.common
 
 TARGET_BIN := mod2rmf

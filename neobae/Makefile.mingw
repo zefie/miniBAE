@@ -136,7 +136,7 @@ $(TARGET_LIB).dll: ${OBJ}
 	else \
 		cp ../deps/win/lame/x86_64-w64-mingw32/bin/libmp3lame-0.dll $(TARGET_OUT) 2>/dev/null || true; \
 	fi	
-
+	
 $(TARGET_BIN): ${OBJ_BIN}
 	@mkdir -p $(TARGET_OUT)Banks
 	$(SHELL) src/banks/copy.sh $(TARGET_OUT)Banks

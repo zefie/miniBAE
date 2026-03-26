@@ -3,6 +3,7 @@ USE_SDL3 := 1
 NOAUTO := 1
 SF2_SUPPORT := 0
 EMBED_PATCHES := 1
+MOD2RMF := 1
 NBSTUDIO := 1
 include inc/Makefile.common
 

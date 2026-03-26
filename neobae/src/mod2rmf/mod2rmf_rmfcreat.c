@@ -2,9 +2,10 @@
 #include "mod2rmf_common.h"
 #include "mod2rmf_song.h"
 #include "X_Formats.h"
+#include "X_Assert.h"
 #include <xmp.h>
 
-int load_source_data(Mod2RmfConverter *conv, const char *sourcePath)
+int mod2rmf_load_source_data(Mod2RmfConverter *conv, const char *sourcePath)
 {
     FILE *file;
     size_t fileSize;
@@ -54,7 +55,7 @@ int load_source_data(Mod2RmfConverter *conv, const char *sourcePath)
     return bytesRead == fileSize;
 }
 
-int setup_document(Mod2RmfConverter *conv,
+int mod2rmf_setup_document(Mod2RmfConverter *conv,
                           const ModSongModel *song,
                           const char *sourcePath)
 {
@@ -102,7 +103,7 @@ int setup_document(Mod2RmfConverter *conv,
     return result == BAE_NO_ERROR;
 }
 
-int setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
+int mod2rmf_setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
 {
     uint32_t i;
     uint32_t baseAssetBySourceSlot[MOD2RMF_MAX_SAMPLES];
@@ -835,7 +836,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                 if (activeNotes[ch].active)
                 {
                     uint16_t bend;
-                    bend = mod2rmf_libxmp_pitchbend_to_midi(ci->pitchbend + activeNotes[ch].bendOffsetCents,
+                    bend = mod2rmf_pitchbend_to_midi(ci->pitchbend + activeNotes[ch].bendOffsetCents,
                                                     song->pitchBendRangeSemitones);
                     if (bend != chLastBend[ch])
                     {
@@ -926,7 +927,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                 chLastBend[ch] = 0xFFFFu;
                                 {
                                     uint16_t bend;
-                                    bend = mod2rmf_libxmp_pitchbend_to_midi(ci->pitchbend + activeNotes[ch].bendOffsetCents,
+                                    bend = mod2rmf_pitchbend_to_midi(ci->pitchbend + activeNotes[ch].bendOffsetCents,
                                                                     song->pitchBendRangeSemitones);
                                     chLastBend[ch] = bend;
                                     (void)mod2rmf_song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend,
@@ -988,7 +989,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                             chLastBend[ch] = 0xFFFFu;
                             {
                                 uint16_t bend;
-                                bend = mod2rmf_libxmp_pitchbend_to_midi(ci->pitchbend + activeNotes[ch].bendOffsetCents,
+                                bend = mod2rmf_pitchbend_to_midi(ci->pitchbend + activeNotes[ch].bendOffsetCents,
                                                                 song->pitchBendRangeSemitones);
                                 chLastBend[ch] = bend;
                                 (void)mod2rmf_song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend,
@@ -1021,7 +1022,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                         chLastBend[ch] = 0xFFFFu;
                         {
                             uint16_t bend;
-                            bend = mod2rmf_libxmp_pitchbend_to_midi(ci->pitchbend + activeNotes[ch].bendOffsetCents,
+                            bend = mod2rmf_pitchbend_to_midi(ci->pitchbend + activeNotes[ch].bendOffsetCents,
                                                             song->pitchBendRangeSemitones);
                             chLastBend[ch] = bend;
                             (void)mod2rmf_song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend,
@@ -1773,4 +1774,128 @@ void mod2rmf_build_midi_channel_aggregate(const ChannelProfile trackerProfiles[]
         agg->noteCount += trackerProfiles[i].noteCount;
         agg->used = TRUE;
     }
+}
+
+BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char *sourcePath, XBOOL useZmfContainer) {
+    Mod2RmfResamplerSettings resamplerSettings;
+    Mod2RmfConverter *conv = mod2rmf_converter_create();
+    ModSongModel song;
+    mod2rmf_song_model_init(&song);    
+    mod2rmf_resampler_defaults(&resamplerSettings);
+    if (!mod2rmf_load_source_data(conv, sourcePath))
+    {
+        BAE_STDERR("Error: failed to read source file\n");
+        mod2rmf_song_model_dispose(&song);
+        mod2rmf_converter_delete(conv);
+        return BAE_FILE_IO_ERROR; 
+    }
+
+    struct xmp_test_info testInfo;
+    memset(&testInfo, 0, sizeof(testInfo));
+    if (xmp_test_module_from_memory(conv->sourceData, (long)conv->sourceSize, &testInfo) != 0)
+    {
+        BAE_STDERR("Error: unsupported or invalid tracker module\n");
+        mod2rmf_song_model_dispose(&song);
+        mod2rmf_converter_delete(conv);
+        return BAE_UNSUPPORTED_FORMAT;
+    }
+    BAE_PRINTF("Module detected by libxmp: %s (%s)\n",
+            testInfo.name[0] ? testInfo.name : "(untitled)",
+            testInfo.type[0] ? testInfo.type : "unknown");
+
+    if (!mod2rmf_build_song_model(conv, &song))
+    {
+        BAE_STDERR("Error: failed to build song model\n");
+        mod2rmf_song_model_dispose(&song);
+        mod2rmf_converter_delete(conv);
+        return BAE_INVALID_TYPE;
+    }
+
+    if (!mod2rmf_ensure_loop_cc_resets(&song))
+    {
+        fprintf(stderr, "Error: loop CC reset failed\n");
+        mod2rmf_song_model_dispose(&song);
+        mod2rmf_converter_delete(conv);
+        return BAE_MEMORY_ERR;
+    }
+
+    /* Same for pitch bend — engine keeps bend state across loop-back. */
+    if (!mod2rmf_ensure_loop_pitch_bend_resets(&song))
+    {
+        fprintf(stderr, "Error: loop pitch bend reset failed\n");
+        mod2rmf_song_model_dispose(&song);
+        mod2rmf_converter_delete(conv);
+        return BAE_MEMORY_ERR;
+    }
+
+    if (!mod2rmf_setup_document(conv, &song, sourcePath))
+    {
+        fprintf(stderr, "Error: document setup failed\n");
+        mod2rmf_song_model_dispose(&song);
+        mod2rmf_converter_delete(conv);
+        return 1;
+    }
+
+        /* Emit MIDI loop markers if the song has an infinite loop */
+    if (song.loopEnabled)
+    {
+        BAERmfEditorDocument_SetMidiLoopMarkers(conv->document,
+                                                TRUE,
+                                                song.loopStartTick,
+                                                song.loopEndTick,
+                                                -1); /* -1 = loop forever */
+        fprintf(stderr, "Loop detected: start=%u end=%u ticks\n",
+                (unsigned)song.loopStartTick, (unsigned)song.loopEndTick);
+    }
+
+    if (!mod2rmf_setup_samples(conv, &song))
+    {
+        fprintf(stderr, "Error: sample setup failed\n");
+        mod2rmf_song_model_dispose(&song);
+        mod2rmf_converter_delete(conv);
+        return 1;
+    }
+
+    /* Analyze channel usage and compute tracker→MIDI channel mapping */
+    {
+        ChannelProfile profiles[MOD2RMF_MAX_CHANNELS];
+
+        mod2rmf_analyze_channel_usage(&song, profiles, song.channelCount);
+        mod2rmf_compute_channel_map(profiles, song.channelCount, &conv->channelMap);
+
+        #ifdef _DEBUG
+        {
+            uint32_t ci;
+            for (ci = 0; ci < song.channelCount; ++ci)
+            {
+                if (profiles[ci].used)
+                {
+                    fprintf(stderr, "[mod2rmf] Channel map: tracker ch %u -> MIDI ch %u (%u notes, %u ranges)\n",
+                            ci, conv->channelMap.trackerToMidi[ci], profiles[ci].noteCount, profiles[ci].rangeCount);
+                }
+            }
+        }
+        #endif
+
+        mod2rmf_channel_profile_cleanup(profiles, song.channelCount);
+    }
+
+    if (!mod2rmf_setup_tracks(conv, &song, &conv->channelMap) ||
+        !mod2rmf_setup_instrument_ext(conv, &song, useZmfContainer) ||
+        !mod2rmf_write_song_cc_events(conv, &song) ||
+        !mod2rmf_write_song_pitch_bend_events(conv, &song) ||
+        !mod2rmf_write_song_notes(conv, &song) ||
+        !mod2rmf_write_song_tempo_events(conv, &song))
+    {
+        BAE_STDERR("Error: conversion failed\n");
+        mod2rmf_song_model_dispose(&song);
+        mod2rmf_converter_delete(conv);
+        return BAE_MEMORY_ERR;
+    }
+
+    *doc = conv->document; /* Return the created document via output parameter */
+    conv->document = NULL;
+    mod2rmf_song_model_dispose(&song);
+    mod2rmf_converter_delete(conv);
+    return BAE_NO_ERROR;
 }

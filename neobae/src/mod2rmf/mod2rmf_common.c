@@ -38,7 +38,7 @@ int mod2rmf_compare_cc_by_tick(const void *a, const void *b)
 }
 
 
-uint16_t mod2rmf_libxmp_pitchbend_to_midi(int32_t xmpPitchbend,
+uint16_t mod2rmf_pitchbend_to_midi(int32_t xmpPitchbend,
                                          uint16_t bendRangeSemitones)
 {
     double semitoneDelta;
