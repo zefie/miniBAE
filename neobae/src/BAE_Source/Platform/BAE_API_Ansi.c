@@ -668,7 +668,7 @@ int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t chan
 
 	// BUFFER_SIZE is based on 44100hz Stereo 16Bit
 	float bufferCalc = 689.0625;
-	g_audioByteBufferSize = (XSDWORD)roundUp(((sampleRate * channels * bits) / bufferCalc), 64);
+	g_audioByteBufferSize = (int32_t)roundUp(((sampleRate * channels * bits) / bufferCalc), 64);
 	BAE_PRINTF("buffer debug: sampleRate: %u, channels: %u, bits: %u, bufferSize: %u\n",sampleRate, channels, bits, g_audioByteBufferSize);
 
 	return 0;

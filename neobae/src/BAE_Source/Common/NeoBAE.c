@@ -181,7 +181,7 @@
 #if USE_FLAC_ENCODER == TRUE
 #include "FLAC/stream_encoder.h"
 // Forward declaration of FLAC encoding function from GenSoundFiles.c
-OPErr PV_WriteFromMemoryFLACFile(XFILENAME *file, GM_Waveform const *pAudioData, XWORD formatTag);
+OPErr PV_WriteFromMemoryFLACFile(XFILENAME *file, GM_Waveform const *pAudioData, uint16_t formatTag);
 // Wave format constant
 #define X_WAVE_FORMAT_PCM 0x0001
 #endif
@@ -337,7 +337,7 @@ const char *BAE_GetFeatureString()
 {
     static char featBuf[512];
     featBuf[0] = '\0';
-    XBOOL first = TRUE;
+    bool first = TRUE;
 
     // Debugging
 #ifdef _DEBUG
@@ -663,7 +663,7 @@ struct sBAESong
 #endif
     int mInstrumentsLoadedCount;
 
-    XSWORD mVolume;
+    int16_t mVolume;
     int mRouteBus;
     BAE_BOOL mAutoBuzz;
     BAE_BOOL mAutoFlash;
@@ -672,12 +672,12 @@ struct sBAESong
 
     // Saved mixer state for per-song engine config override/restore
 #if BAE_CLASSIC_CHORUS
-    XBOOL mSavedClassicChorus;
-    XBOOL mHasSavedClassicChorus;
+    bool mSavedClassicChorus;
+    bool mHasSavedClassicChorus;
 #endif
 #if BAE_FIX_SPAN_DC
-    XBOOL mSavedFixSpanDC;
-    XBOOL mHasSavedFixSpanDC;
+    bool mSavedFixSpanDC;
+    bool mHasSavedFixSpanDC;
 #endif
 };
 
@@ -879,7 +879,7 @@ static BAE_BOOL PV_BAEMixer_ValidateObject(BAEMixer mixer, void *theObject, BAE_
 
 static BAEResult PV_BAEMixer_AddBank(BAEMixer mixer, XFILE newPatchFile);
 static void PV_BAEMixer_SubmitBankOrder(BAEMixer mixer);
-static XBOOL PV_XFileHasModernCodecSamples(XFILE fileRef);
+static bool PV_XFileHasModernCodecSamples(XFILE fileRef);
 
 static BAE_FIXED PV_CalculateTimeDeltaForFade(
     BAE_FIXED sourceVolume,
@@ -1084,7 +1084,7 @@ BAEResult BAE_TranslateOPErr(OPErr theErr)
 }
 
 #if USE_SF2_SUPPORT == TRUE
-XBOOL BAESong_IsSF2Song(BAESong song)
+bool BAESong_IsSF2Song(BAESong song)
 {
     if (!song || !song->pSong)
         return FALSE;
@@ -1185,7 +1185,7 @@ BAEResult BAE_SetSpanDCFix(BAE_BOOL enable)
     GM_Mixer *pMixer = MusicGlobals;
     if (!pMixer)
         return BAE_NOT_SETUP;
-    pMixer->fixSpanDC = (XBOOL)enable;
+    pMixer->fixSpanDC = (bool)enable;
     return BAE_NO_ERROR;
 #else
     (void)enable;
@@ -1215,7 +1215,7 @@ BAEResult BAE_SetClassicChorus(BAE_BOOL enable)
     GM_Mixer *pMixer = MusicGlobals;
     if (!pMixer)
         return BAE_NOT_SETUP;
-    pMixer->classicChorus = (XBOOL)enable;
+    pMixer->classicChorus = (bool)enable;
     return BAE_NO_ERROR;
 #else
     (void)enable;
@@ -2854,7 +2854,7 @@ BAEResult BAEMixer_SetMasterVolume(BAEMixer mixer, BAE_UNSIGNED_FIXED theVolume)
     err = NO_ERR;
     if (mixer)
     {
-        GM_SetMasterVolume((INT32)(UNSIGNED_FIXED_TO_LONG_ROUNDED(theVolume * MAX_MASTER_VOLUME)));
+        GM_SetMasterVolume((int32_t)(UNSIGNED_FIXED_TO_LONG_ROUNDED(theVolume * MAX_MASTER_VOLUME)));
     }
     else
     {
@@ -2901,7 +2901,7 @@ BAEResult BAEMixer_SetGlobalVolume(BAEMixer mixer, BAE_UNSIGNED_FIXED theVolume)
     err = NO_ERR;
     if (mixer)
     {
-        GM_SetGlobalVolume((INT32)(UNSIGNED_FIXED_TO_LONG_ROUNDED(theVolume * MAX_MASTER_VOLUME)));
+        GM_SetGlobalVolume((int32_t)(UNSIGNED_FIXED_TO_LONG_ROUNDED(theVolume * MAX_MASTER_VOLUME)));
     }
     else
     {
@@ -3149,7 +3149,7 @@ BAEResult BAEMixer_GetRealtimeStatus(BAEMixer mixer, BAEAudioInfo *pStatus)
 BAEResult BAEMixer_IsAudioEngaged(BAEMixer mixer, BAE_BOOL *outIsEngaged)
 {
     OPErr err;
-    XBOOL isPaused;
+    bool isPaused;
 
     err = NO_ERR;
     if (mixer)
@@ -3306,7 +3306,7 @@ BAEResult BAEMixer_TestToneFrequency(BAE_UNSIGNED_FIXED freq)
 
 BAEResult BAEMixer_TestTone(BAE_BOOL status)
 {
-    GM_TestTone((XBOOL)status);
+    GM_TestTone((bool)status);
     return BAE_NO_ERROR;
 }
 
@@ -3414,8 +3414,8 @@ BAEResult BAEMixer_GetModifiers(BAEMixer mixer, BAEAudioModifiers *outMods)
 {
     BAEAudioModifiers theMods;
     OPErr err;
-    XBOOL generate16output;
-    XBOOL generateStereoOutput;
+    bool generate16output;
+    bool generateStereoOutput;
 
     err = NO_ERR;
     if (mixer)
@@ -3535,7 +3535,7 @@ BAEResult BAEMixer_GetRate(BAEMixer mixer, BAERate *outRate)
 BAEResult BAEMixer_GetMidiVoices(BAEMixer mixer, int16_t *outNumMidiVoices)
 {
     OPErr err;
-    INT16 song, mix, sound;
+    int16_t song, mix, sound;
 
     err = NO_ERR;
     if (mixer)
@@ -3571,7 +3571,7 @@ BAEResult BAEMixer_GetMidiVoices(BAEMixer mixer, int16_t *outNumMidiVoices)
 BAEResult BAEMixer_GetSoundVoices(BAEMixer mixer, int16_t *outNumSoundVoices)
 {
     OPErr err;
-    INT16 song, mix, sound;
+    int16_t song, mix, sound;
 
     err = NO_ERR;
     if (mixer)
@@ -3607,7 +3607,7 @@ BAEResult BAEMixer_GetSoundVoices(BAEMixer mixer, int16_t *outNumSoundVoices)
 BAEResult BAEMixer_GetMixLevel(BAEMixer mixer, int16_t *outMixLevel)
 {
     OPErr err;
-    INT16 song, mix, sound;
+    int16_t song, mix, sound;
 
     err = NO_ERR;
     if (mixer)
@@ -3721,12 +3721,12 @@ BAEResult BAEMixer_StartOutputToFile(BAEMixer theMixer,
             mWritingToFileReference = (void *)XFileOpenForWrite(&theFile, TRUE);
             if (mWritingToFileReference)
             {
-                XDWORD channels = (theModifiers & BAE_USE_STEREO) ? 2 : 1;
+                uint32_t channels = (theModifiers & BAE_USE_STEREO) ? 2 : 1;
                 // Preserve original slice size (typically ~11ms worth) to maintain correct sequencing tempo.
                 // The MP3 encoder will internally accumulate multiple slices to reach a full 1152-frame MP3 frame.
                 // helper translates compression enum to per-channel bitrate in bits/sec
                 extern uint32_t BAE_TranslateMPEGTypeToBitrate(BAECompressionType ct);
-                extern XBOOL PV_RefillMPEGEncodeBuffer(void *buffer, void *userRef);
+                extern bool PV_RefillMPEGEncodeBuffer(void *buffer, void *userRef);
                 mWritingEncoder = MPG_EncodeNewStream(BAE_TranslateMPEGTypeToBitrate(compressionType),
                                                       GM_ConvertFromOutputRateToRate((Rate)theRate),
                                                       channels,
@@ -3790,10 +3790,10 @@ BAEResult BAEMixer_StartOutputToFile(BAEMixer theMixer,
             mWritingToFileReference = (void *)XFileOpenForWrite(&theFile, TRUE);
             if (mWritingToFileReference)
             {
-                XDWORD channels = (theModifiers & BAE_USE_STEREO) ? 2 : 1;
+                uint32_t channels = (theModifiers & BAE_USE_STEREO) ? 2 : 1;
 
                 /* Initialize Vorbis encoder and write headers. */
-                extern void *XInitVorbisEncoder(UINT32 sample_rate, UINT32 channels, float quality);
+                extern void *XInitVorbisEncoder(uint32_t sample_rate, uint32_t channels, float quality);
                 extern long XWriteVorbisHeader(void *encoder_handle, XFILE output_file);
 
                 float quality = BAE_TranslateVorbisTypeToQuality(compressionType);
@@ -3839,10 +3839,10 @@ BAEResult BAEMixer_StartOutputToFile(BAEMixer theMixer,
             mWritingToFileReference = (void *)XFileOpenForWrite(&theFile, TRUE);
             if (mWritingToFileReference)
             {
-                XDWORD channels = (theModifiers & BAE_USE_STEREO) ? 2 : 1;
+                uint32_t channels = (theModifiers & BAE_USE_STEREO) ? 2 : 1;
 
                 extern uint32_t BAE_TranslateOpusTypeToBitrate(BAECompressionType ct);
-                extern void *XInitOpusEncoder(UINT32 sample_rate, UINT32 channels, UINT32 bitrate);
+                extern void *XInitOpusEncoder(uint32_t sample_rate, uint32_t channels, uint32_t bitrate);
                 extern long XWriteOpusHeader(void *encoder_handle, XFILE output_file);
 
                 uint32_t bitrate = BAE_TranslateOpusTypeToBitrate(compressionType);
@@ -4185,8 +4185,8 @@ BAEResult BAEMixer_ServiceAudioOutputToFile(BAEMixer theMixer)
                 case BAE_MPEG_TYPE:
                 {
                     XPTR compressedData = NULL;
-                    XDWORD compressedLength = 0;
-                    XBOOL isDone = FALSE;
+                    uint32_t compressedLength = 0;
+                    bool isDone = FALSE;
                     if (!mWritingEncoder)
                     {
                         BAE_PRINTF("audio: MPEG encode service called with NULL encoder (encoder not built?) aborting export.\n");
@@ -4336,12 +4336,12 @@ BAEResult BAEMixer_ServiceAudioOutputToFile(BAEMixer theMixer)
                 case BAE_OPUS_TYPE:
                 {
                     uint32_t framesToProcess = (uint32_t)(mWritingDataBlockSize / sampleSize / channels);
-                    extern long XEncodeOpusData(void *encoder_handle, const INT16 *pcm_interleaved, long frames, XFILE output_file);
+                    extern long XEncodeOpusData(void *encoder_handle, const int16_t *pcm_interleaved, long frames, XFILE output_file);
 
                     BAE_BuildMixerSlice(NULL, mWritingDataBlock, mWritingDataBlockSize, framesToProcess);
 
                     if (XEncodeOpusData(mWritingEncoder,
-                                        (const INT16 *)mWritingDataBlock,
+                                        (const int16_t *)mWritingDataBlock,
                                         (long)framesToProcess,
                                         (XFILE)mWritingToFileReference) < 0)
                     {
@@ -4643,7 +4643,7 @@ BAEResult BAESound_LoadEmptySample(BAESound sound,
                 if (bitSize == 8)
                 {
                     // 8 bit passed in is signed, but internal engine 8 bit data is unsigned.
-                    XPhase8BitWaveform((XBYTE *)pWave->theWaveform, pWave->waveSize);
+                    XPhase8BitWaveform((unsigned char *)pWave->theWaveform, pWave->waveSize);
                 }
                 sound->pWave = pWave;
             }
@@ -4906,8 +4906,8 @@ BAEResult BAESound_Resume(BAESound sound)
 BAEResult BAESound_Fade(BAESound sound, BAE_FIXED sourceVolume, BAE_FIXED destVolume, BAE_FIXED timeInMiliseconds)
 {
     int16_t source, dest;
-    INT16 minVolume;
-    INT16 maxVolume;
+    int16_t minVolume;
+    int16_t maxVolume;
     OPErr err;
 
     err = NO_ERR;
@@ -4950,7 +4950,7 @@ static void PV_LoopingSoundDoneCallback(void *reference)
     BAESound sound;
     BAE_SoundCallbackPtr userCallback;
     void *userCallbackReference;
-    XBOOL shouldRestart = FALSE;
+    bool shouldRestart = FALSE;
 
     sound = (BAESound)reference;
     userCallback = NULL;
@@ -4987,7 +4987,7 @@ static void PV_LoopingSoundDoneCallback(void *reference)
                 if (shouldRestart)
                 {
                     // Restart the sound from the beginning
-                    XSDWORD volume = UNSIGNED_FIXED_TO_LONG_ROUNDED(sound->mVolume * MAX_NOTE_VOLUME);
+                    int32_t volume = UNSIGNED_FIXED_TO_LONG_ROUNDED(sound->mVolume * MAX_NOTE_VOLUME);
                     sound->voiceRef = GM_SetupSampleFromInfo(sound->pWave, (void *)sound,
                                                              volume,
                                                              0,
@@ -7374,7 +7374,7 @@ BAEResult BAESong_LoadMidiFromMemory(BAESong song, void const *pMidiData, uint32
     short soundVoices, midiVoices, mixLevel;
     char *title;
     unsigned char *extractedMidi = NULL;
-    XBOOL wasRMI = FALSE;
+    bool wasRMI = FALSE;
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
     uint32_t extractedMidiLen = 0;
 #endif
@@ -7408,7 +7408,7 @@ BAEResult BAESong_LoadMidiFromMemory(BAESong song, void const *pMidiData, uint32
         else
 #endif
         {
-            pMidiData = XDuplicateMemory((XPTRC)pMidiData, (XDWORD)midiSize);
+            pMidiData = XDuplicateMemory((XPTRC)pMidiData, (uint32_t)midiSize);
         }
         
         // Note: extractedMidi is already allocated, don't duplicate again
@@ -7462,7 +7462,7 @@ BAEResult BAESong_LoadMidiFromMemory(BAESong song, void const *pMidiData, uint32
                             title = XNewPtr(pSong->titleLength + 1);
                             if (title)
                             {
-                                XBlockMove(((XBYTE *)pSong->sequenceData) + pSong->titleOffset,
+                                XBlockMove(((unsigned char *)pSong->sequenceData) + pSong->titleOffset,
                                            title, pSong->titleLength);
                                 title[pSong->titleLength] = 0;
                             }
@@ -7770,7 +7770,7 @@ BAEResult BAESong_LoadMidiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL 
 //
 // Returns TRUE if at least one such resource is found, FALSE otherwise.
 //
-static XBOOL PV_XFileHasModernCodecSamples(XFILE fileRef)
+static bool PV_XFileHasModernCodecSamples(XFILE fileRef)
 {
     static const XResourceType sndTypes[] = { ID_SND, ID_CSND, ID_ESND };
     // FourCC values for the blocked codecs – hard-coded so the check works
@@ -7815,7 +7815,7 @@ static XBOOL PV_XFileHasModernCodecSamples(XFILE fileRef)
     return FALSE;
 }
 
-static void PV_TagSongResourceContainerType(SongResource *songResource, XBOOL isZmfContainer)
+static void PV_TagSongResourceContainerType(SongResource *songResource, bool isZmfContainer)
 {
     SongResource_RMF *songRMF;
     uint32_t flags;
@@ -7855,7 +7855,7 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
     OPErr theErr;
     XLongResourceID theID;
     int32_t size;
-    XBOOL isZmfContainer;
+    bool isZmfContainer;
 
     theErr = NO_ERR;
     isZmfContainer = FALSE;
@@ -8099,7 +8099,7 @@ BAEResult BAESong_LoadRmfFromFile(BAESong song, BAEPathName filePath, int16_t so
     OPErr theErr;
     XLongResourceID theID;
     int32_t size;
-    XBOOL isZmfContainer;
+    bool isZmfContainer;
 
     theErr = NO_ERR;
     isZmfContainer = FALSE;
@@ -8714,7 +8714,7 @@ static void PV_PatchInstrumentEnvelopes(GM_Instrument *theI,
         theI->volumeADSRRecord.ADSRLevel[i] = info->volumeADSR.stages[i].level;
         theI->volumeADSRRecord.ADSRTime[i] = info->volumeADSR.stages[i].time;
         theI->volumeADSRRecord.ADSRFlags[i] =
-            PV_TranslateFromFileToMemoryID((XDWORD)info->volumeADSR.stages[i].flags);
+            PV_TranslateFromFileToMemoryID((uint32_t)info->volumeADSR.stages[i].flags);
     }
     for (; i < ADSR_STAGES; i++)
     {
@@ -8738,7 +8738,7 @@ static void PV_PatchInstrumentEnvelopes(GM_Instrument *theI,
     {
         GM_LFO *pLFO = &theI->LFORecords[i];
         pLFO->where_to_feed = PV_TranslateFromFileToMemoryID(
-            (XDWORD)info->lfos[i].destination);
+            (uint32_t)info->lfos[i].destination);
 #if DEBUG
         BAE_PRINTF("  lfo[%d] dest=0x%x->%d period=%d shape=0x%x dc=%d level=%d adsr.stages=%u\n",
                    (int)i, (unsigned)info->lfos[i].destination, (int)pLFO->where_to_feed,
@@ -8750,7 +8750,7 @@ static void PV_PatchInstrumentEnvelopes(GM_Instrument *theI,
         if (pLFO->period != 0 && pLFO->period <= 512)
             pLFO->period = 0; // disable invalid LFO period
         pLFO->waveShape = PV_TranslateFromFileToMemoryID(
-            (XDWORD)info->lfos[i].waveShape);
+            (uint32_t)info->lfos[i].waveShape);
         pLFO->DC_feed = info->lfos[i].DC_feed;
         pLFO->level = info->lfos[i].level;
 
@@ -8759,7 +8759,7 @@ static void PV_PatchInstrumentEnvelopes(GM_Instrument *theI,
             pLFO->a.ADSRLevel[j] = info->lfos[i].adsr.stages[j].level;
             pLFO->a.ADSRTime[j] = info->lfos[i].adsr.stages[j].time;
             pLFO->a.ADSRFlags[j] = PV_TranslateFromFileToMemoryID(
-                (XDWORD)info->lfos[i].adsr.stages[j].flags);
+                (uint32_t)info->lfos[i].adsr.stages[j].flags);
         }
         for (; j < ADSR_STAGES; j++)
         {
@@ -8835,8 +8835,8 @@ BAEResult BAESong_PatchLoadedInstrumentExtInfo(BAESong song,
         /* If this is a keysplit instrument, propagate to all sub-instruments */
         if (theI->doKeymapSplit)
         {
-            XWORD splitCount = theI->u.k.KeymapSplitCount;
-            XWORD s;
+            uint16_t splitCount = theI->u.k.KeymapSplitCount;
+            uint16_t s;
             for (s = 0; s < splitCount; s++)
             {
                 GM_Instrument *theS = theI->u.k.keySplits[s].pSplitInstrument;
@@ -8853,28 +8853,28 @@ BAEResult BAESong_PatchLoadedInstrumentExtInfo(BAESong song,
             uint32_t idx = info->sampleOverrideIndex;
             if (theI->doKeymapSplit)
             {
-                XWORD splitCount = theI->u.k.KeymapSplitCount;
+                uint16_t splitCount = theI->u.k.KeymapSplitCount;
                 if (idx < (uint32_t)splitCount)
                 {
                     GM_KeymapSplit *ks = &theI->u.k.keySplits[idx];
                     GM_Instrument *theS = ks->pSplitInstrument;
                     ks->lowMidi = info->sampleLowKey;
                     ks->highMidi = info->sampleHighKey;
-                    ks->miscParameter1 = (XSWORD)info->sampleRootKey;
-                    ks->miscParameter2 = (XSWORD)info->sampleSplitVolume;
+                    ks->miscParameter1 = (int16_t)info->sampleRootKey;
+                    ks->miscParameter2 = (int16_t)info->sampleSplitVolume;
                     if (theS && !theS->doKeymapSplit)
                     {
-                        theS->u.w.baseMidiPitch = (XWORD)info->sampleRootKey;
-                        theS->u.w.sampledRate = (XFIXED)((XDWORD)info->sampleRate << 16);
-                        theS->u.w.startLoop = (XDWORD)info->sampleLoopStart;
-                        theS->u.w.endLoop = (XDWORD)info->sampleLoopEnd;
+                        theS->u.w.baseMidiPitch = (uint16_t)info->sampleRootKey;
+                        theS->u.w.sampledRate = (XFIXED)((uint32_t)info->sampleRate << 16);
+                        theS->u.w.startLoop = (uint32_t)info->sampleLoopStart;
+                        theS->u.w.endLoop = (uint32_t)info->sampleLoopEnd;
                         /* GenSynth uses miscParameter1/2 from the sub-instrument
                          * when useSoundModifierAsRootKey is TRUE (HSB/SF2 banks). */
                         if (theS->useSoundModifierAsRootKey)
                         {
-                            theS->miscParameter1 = (XSWORD)info->sampleRootKey;
+                            theS->miscParameter1 = (int16_t)info->sampleRootKey;
                         }
-                        theS->miscParameter2 = (XSWORD)info->sampleSplitVolume;
+                        theS->miscParameter2 = (int16_t)info->sampleSplitVolume;
                     }
                 }
             }
@@ -8883,15 +8883,15 @@ BAEResult BAESong_PatchLoadedInstrumentExtInfo(BAESong song,
                 /* Non-split instrument: patch the base waveform directly */
                 if (idx == 0)
                 {
-                    theI->u.w.baseMidiPitch = (XWORD)info->sampleRootKey;
-                    theI->u.w.sampledRate = (XFIXED)((XDWORD)info->sampleRate << 16);
-                    theI->u.w.startLoop = (XDWORD)info->sampleLoopStart;
-                    theI->u.w.endLoop = (XDWORD)info->sampleLoopEnd;
+                    theI->u.w.baseMidiPitch = (uint16_t)info->sampleRootKey;
+                    theI->u.w.sampledRate = (XFIXED)((uint32_t)info->sampleRate << 16);
+                    theI->u.w.startLoop = (uint32_t)info->sampleLoopStart;
+                    theI->u.w.endLoop = (uint32_t)info->sampleLoopEnd;
                     if (theI->useSoundModifierAsRootKey)
                     {
-                        theI->miscParameter1 = (XSWORD)info->sampleRootKey;
+                        theI->miscParameter1 = (int16_t)info->sampleRootKey;
                     }
-                    theI->miscParameter2 = (XSWORD)info->sampleSplitVolume;
+                    theI->miscParameter2 = (int16_t)info->sampleSplitVolume;
                 }
             }
             BAE_PRINTF("PatchExtInfo: sampleOverride idx=%u rootKey=%u rate=%u loop=%u-%u lowKey=%u highKey=%u splitVol=%d smod=%d\n",
@@ -8981,10 +8981,10 @@ BAEResult BAESong_GetProgramBank(BAESong song,
                                  unsigned char channel,
                                  unsigned char *outProgram,
                                  unsigned char *outBank,
-                                 XBOOL useRawBank)
+                                 bool useRawBank)
 {
     OPErr err;
-    XSWORD bank, program;
+    int16_t bank, program;
 
     err = NO_ERR;
     if ((song) && (song->mID == OBJECT_ID))
@@ -9891,7 +9891,7 @@ BAEResult BAESong_GetControllerCallback(BAESong song, BAE_SongControllerCallback
 static void PV_ApplySongEngineConfig(BAESong song)
 {
     GM_Mixer *pMixer;
-    XDWORD flags;
+    uint32_t flags;
 
     if (!song || !song->pSong)
         return;
@@ -10073,8 +10073,8 @@ static BAE_FIXED PV_CalculateTimeDeltaForFade(BAE_FIXED sourceVolume, BAE_FIXED 
 BAEResult BAESong_Fade(BAESong song, BAE_FIXED sourceVolume, BAE_FIXED destVolume, BAE_FIXED timeInMiliseconds)
 {
     int16_t source, dest;
-    INT16 minVolume;
-    INT16 maxVolume;
+    int16_t minVolume;
+    int16_t maxVolume;
     OPErr err;
 
     err = NO_ERR;
@@ -11253,7 +11253,7 @@ uint32_t BAE_TranslateOpusTypeToBitrate(BAECompressionType ct)
 
 #if USE_MPEG_ENCODER == TRUE
 // Refill callback: build next mixer slice of PCM into provided buffer.
-XBOOL PV_RefillMPEGEncodeBuffer(void *buffer, void *userRef)
+bool PV_RefillMPEGEncodeBuffer(void *buffer, void *userRef)
 {
     if (!buffer || !mWritingDataBlock || !mWritingDataBlockSize)
         return FALSE;
@@ -11584,14 +11584,14 @@ BAEResult BAEMixer_LoadFromMemory(BAEMixer mixer, void const *pData, uint32_t da
     }
 }
 
-XBOOL GM_IsAudioTailActive(GM_Mixer *mixer)
+bool GM_IsAudioTailActive(GM_Mixer *mixer)
 {
     if (!mixer)
         return FALSE;
       
     NewReverbParams *nr = GetNewReverbParams();
 
-    XBOOL needCheck = FALSE;
+    bool needCheck = FALSE;
     if (mixer && mixer->reverbBuffer && mixer->reverbBufferSize > 0)
         needCheck = TRUE;
     if (nr && nr->mIsInitialized)
@@ -11599,18 +11599,18 @@ XBOOL GM_IsAudioTailActive(GM_Mixer *mixer)
     if (!needCheck && !BAENeoReverb_IsActive())
         return FALSE; // no reverb buffers allocated
                     
-    XBOOL foundNonZero = FALSE;
+    bool foundNonZero = FALSE;
 
     // 1) Legacy fixed reverb buffer
     if (!foundNonZero && mixer && mixer->reverbBuffer && mixer->reverbBufferSize > 0)
     {
-        XDWORD wb = mixer->reverbBufferSize;
-        XDWORD wp = (XDWORD)mixer->reverbPtr;
-        XDWORD window = (wb < 1024) ? wb : 1024;
-        XDWORD start = (wp >= window) ? (wp - window) : 0;
-        for (XDWORD j = 0; j < window; ++j)
+        uint32_t wb = mixer->reverbBufferSize;
+        uint32_t wp = (uint32_t)mixer->reverbPtr;
+        uint32_t window = (wb < 1024) ? wb : 1024;
+        uint32_t start = (wp >= window) ? (wp - window) : 0;
+        for (uint32_t j = 0; j < window; ++j)
         {
-            XDWORD idx = (start + j) % wb;
+            uint32_t idx = (start + j) % wb;
             if (mixer->reverbBuffer[idx] != 0)
             {
                 foundNonZero = TRUE;
@@ -11623,20 +11623,20 @@ XBOOL GM_IsAudioTailActive(GM_Mixer *mixer)
     if (!foundNonZero && nr && nr->mIsInitialized)
     {
         // sample a small window around each write pointer for signs of activity
-        const XDWORD sampleWindow = 256;
+        const uint32_t sampleWindow = 256;
 
         // comb filters
         for (int ci = 0; ci < kNumberOfCombFilters && !foundNonZero; ++ci)
         {
             if (nr->mReverbBuffer[ci])
             {
-                XDWORD wb = (XDWORD)kCombBufferFrameSize;
-                XDWORD wp = (XDWORD)nr->mWriteIndex[ci];
-                XDWORD window = (wb < sampleWindow) ? wb : sampleWindow;
-                XDWORD start = (wp >= window) ? (wp - window) : 0;
-                for (XDWORD j = 0; j < window; ++j)
+                uint32_t wb = (uint32_t)kCombBufferFrameSize;
+                uint32_t wp = (uint32_t)nr->mWriteIndex[ci];
+                uint32_t window = (wb < sampleWindow) ? wb : sampleWindow;
+                uint32_t start = (wp >= window) ? (wp - window) : 0;
+                for (uint32_t j = 0; j < window; ++j)
                 {
-                    XDWORD idx = (start + j) % wb;
+                    uint32_t idx = (start + j) % wb;
                     if (nr->mReverbBuffer[ci][idx] != 0)
                     {
                         foundNonZero = TRUE;
@@ -11649,13 +11649,13 @@ XBOOL GM_IsAudioTailActive(GM_Mixer *mixer)
         // early reflections
         if (!foundNonZero && nr->mEarlyReflectionBuffer)
         {
-            XDWORD wb = (XDWORD)kEarlyReflectionBufferFrameSize;
-            XDWORD wp = (XDWORD)nr->mReflectionWriteIndex;
-            XDWORD window = (wb < sampleWindow) ? wb : sampleWindow;
-            XDWORD start = (wp >= window) ? (wp - window) : 0;
-            for (XDWORD j = 0; j < window; ++j)
+            uint32_t wb = (uint32_t)kEarlyReflectionBufferFrameSize;
+            uint32_t wp = (uint32_t)nr->mReflectionWriteIndex;
+            uint32_t window = (wb < sampleWindow) ? wb : sampleWindow;
+            uint32_t start = (wp >= window) ? (wp - window) : 0;
+            for (uint32_t j = 0; j < window; ++j)
             {
-                XDWORD idx = (start + j) % wb;
+                uint32_t idx = (start + j) % wb;
                 if (nr->mEarlyReflectionBuffer[idx] != 0)
                 {
                     foundNonZero = TRUE;
@@ -11669,13 +11669,13 @@ XBOOL GM_IsAudioTailActive(GM_Mixer *mixer)
         {
             if (nr->mDiffusionBuffer[di])
             {
-                XDWORD wb = (XDWORD)kDiffusionBufferFrameSize;
-                XDWORD wp = (XDWORD)nr->mDiffWriteIndex[di];
-                XDWORD window = (wb < sampleWindow) ? wb : sampleWindow;
-                XDWORD start = (wp >= window) ? (wp - window) : 0;
-                for (XDWORD j = 0; j < window; ++j)
+                uint32_t wb = (uint32_t)kDiffusionBufferFrameSize;
+                uint32_t wp = (uint32_t)nr->mDiffWriteIndex[di];
+                uint32_t window = (wb < sampleWindow) ? wb : sampleWindow;
+                uint32_t start = (wp >= window) ? (wp - window) : 0;
+                for (uint32_t j = 0; j < window; ++j)
                 {
-                    XDWORD idx = (start + j) % wb;
+                    uint32_t idx = (start + j) % wb;
                     if (nr->mDiffusionBuffer[di][idx] != 0)
                     {
                         foundNonZero = TRUE;
@@ -11688,13 +11688,13 @@ XBOOL GM_IsAudioTailActive(GM_Mixer *mixer)
         // stereoizer buffers
         if (!foundNonZero && (nr->mStereoizerBufferL || nr->mStereoizerBufferR))
         {
-            XDWORD wb = (XDWORD)kStereoizerBufferFrameSize;
-            XDWORD wp = (XDWORD)nr->mStereoWriteIndex;
-            XDWORD window = (wb < sampleWindow) ? wb : sampleWindow;
-            XDWORD start = (wp >= window) ? (wp - window) : 0;
-            for (XDWORD j = 0; j < window && !foundNonZero; ++j)
+            uint32_t wb = (uint32_t)kStereoizerBufferFrameSize;
+            uint32_t wp = (uint32_t)nr->mStereoWriteIndex;
+            uint32_t window = (wb < sampleWindow) ? wb : sampleWindow;
+            uint32_t start = (wp >= window) ? (wp - window) : 0;
+            for (uint32_t j = 0; j < window && !foundNonZero; ++j)
             {
-                XDWORD idx = (start + j) % wb;
+                uint32_t idx = (start + j) % wb;
                 if ((nr->mStereoizerBufferL && nr->mStereoizerBufferL[idx] != 0) ||
                     (nr->mStereoizerBufferR && nr->mStereoizerBufferR[idx] != 0))
                 {
@@ -11719,7 +11719,7 @@ XBOOL GM_IsAudioTailActive(GM_Mixer *mixer)
 /* Public wrapper that accepts a BAEMixer handle and checks the underlying
  * GM_Mixer for an active audio tail. This avoids exposing sBAEMixer internals
  * to callers that only have a BAEMixer opaque pointer. */
-XBOOL BAEMixer_IsAudioTailActive(BAEMixer mixer)
+bool BAEMixer_IsAudioTailActive(BAEMixer mixer)
 {
     if (!mixer) return FALSE;
     if (!mixer->pMixer) return FALSE;

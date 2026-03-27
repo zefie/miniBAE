@@ -334,7 +334,7 @@ void mod2rmf_parse_row_effects(const struct xmp_event *ev,
 /* Return TRUE if tone portamento (effect 3xx or 5xx) is active in either
  * effect column of this row.  When tone portamento is active the note in
  * the pattern is the slide TARGET; the sample must NOT be retriggered. */
-XBOOL mod2rmf_row_has_tone_portamento(const struct xmp_event *ev)
+bool mod2rmf_row_has_tone_portamento(const struct xmp_event *ev)
 {
     if (!ev)
     {
@@ -352,7 +352,7 @@ XBOOL mod2rmf_row_has_tone_portamento(const struct xmp_event *ev)
 }
 
 
-XBOOL mod2rmf_is_mod_family(const char *type)
+bool mod2rmf_is_mod_family(const char *type)
 {
     if (!type || !type[0])
     {
@@ -505,7 +505,7 @@ void mod2rmf_compute_channel_map(const ChannelProfile profiles[],
     {
         uint8_t bestMidi = 0;
         uint32_t bestScore = UINT32_MAX; /* lower = better */
-        XBOOL foundEmpty = FALSE;
+        bool foundEmpty = FALSE;
 
         if (!profiles[i].used)
         {
@@ -559,7 +559,7 @@ void mod2rmf_compute_channel_map(const ChannelProfile profiles[],
 }
 
 /* Check whether any active range in profile 'a' overlaps with any in 'b'. */
-XBOOL mod2rmf_ranges_overlap(const ChannelProfile *a, const ChannelProfile *b)
+bool mod2rmf_ranges_overlap(const ChannelProfile *a, const ChannelProfile *b)
 {
     uint32_t i, j;
     for (i = 0; i < a->rangeCount; ++i)
@@ -615,7 +615,7 @@ const char *mod2rmf_path_basename_ptr(const char *path)
     return last;
 }
 
-XBOOL mod2rmf_sample_requires_processing(const ModPlayable *playable,
+bool mod2rmf_sample_requires_processing(const ModPlayable *playable,
                                                 const Mod2RmfResamplerSettings *settings,
                                                 uint32_t moduleBaseRateHz)
 {
@@ -651,7 +651,7 @@ XBOOL mod2rmf_sample_requires_processing(const ModPlayable *playable,
  * native panning distance from center by the separation percentage.
  * Returns an adjusted 0..255 panning value. */
 uint8_t mod2rmf_apply_stereo_separation(uint8_t rawPan, uint32_t ch,
-                                    XBOOL isMod, uint8_t stereoSep)
+                                    bool isMod, uint8_t stereoSep)
 {
     if (stereoSep == 0)
     {

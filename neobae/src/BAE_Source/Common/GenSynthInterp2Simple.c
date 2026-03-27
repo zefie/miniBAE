@@ -61,14 +61,14 @@
 **  3/1/96      Removed extra PV_DoCallBack, and PV_GetWavePitch
 **  4/25/96     Fixed bug with PV_ServeInterp2PartialBuffer16 that preserved the amp differently 
 **              than PV_ServeInterpFulllBuffer16. Caused a click when playing mono with mono output
-**  5/2/96      Changed 'int's to INT32 and to BOOL_FLAG
+**  5/2/96      Changed 'int's to int32_t and to BOOL_FLAG
 **  7/8/96      Improved enveloping and wave shaping code
 **  7/10/96     Fixed stereo filter bug
 **  12/30/96    Changed copyright
 **  6/4/97      Added USE_SMALL_MEMORY_REVERB tests around code to disable when this
 **              flag is used
 **  2/3/98      Renamed songBufferLeftMono to songBufferDry
-**  2/8/98      Changed BOOL_FLAG to XBOOL
+**  2/8/98      Changed BOOL_FLAG to bool
 **  2/20/98     now support variable send chorus as well as reverb
 **
 **  6/5/98      Jim Nitchals RIP    1/15/62 - 6/5/98
@@ -102,33 +102,33 @@
 // Cubic Hermite (Catmull-Rom) interpolation for advanced interpolation mode.
 // Takes 4 consecutive sample values and a fractional position (0..STEP_FULL_RANGE).
 // Returns the interpolated sample value with smooth C1-continuous curve.
-static inline INT32 PV_CubicHermiteInterp(INT32 s0, INT32 s1, INT32 s2, INT32 s3, INT32 frac)
+static inline int32_t PV_CubicHermiteInterp(int32_t s0, int32_t s1, int32_t s2, int32_t s3, int32_t frac)
 {
     // Catmull-Rom coefficients (scaled by 2 to eliminate fractions):
     //   A = -s0 + 3*s1 - 3*s2 + s3
     //   B = 2*s0 - 5*s1 + 4*s2 - s3
     //   C = s2 - s0
     // result = (((A*t + B)*t + C)*t) / 2 + s1   (Horner form, t in [0,1))
-    INT32 A = -s0 + 3*s1 - 3*s2 + s3;
-    INT32 B = 2*s0 - 5*s1 + 4*s2 - s3;
-    INT32 C = s2 - s0;
-    INT32 r;
-    r = (INT32)(((int64_t)A * frac) >> STEP_BIT_RANGE) + B;
-    r = (INT32)(((int64_t)r * frac) >> STEP_BIT_RANGE) + C;
-    r = (INT32)(((int64_t)r * frac) >> (STEP_BIT_RANGE + 1));
+    int32_t A = -s0 + 3*s1 - 3*s2 + s3;
+    int32_t B = 2*s0 - 5*s1 + 4*s2 - s3;
+    int32_t C = s2 - s0;
+    int32_t r;
+    r = (int32_t)(((int64_t)A * frac) >> STEP_BIT_RANGE) + B;
+    r = (int32_t)(((int64_t)r * frac) >> STEP_BIT_RANGE) + C;
+    r = (int32_t)(((int64_t)r * frac) >> (STEP_BIT_RANGE + 1));
     return s1 + r;
 }
 
 // Fetch a sample with loop-wrapping for cubic Hermite boundary cases.
 // idx is the sample index to fetch, which may be outside [loopStart, loopEnd).
-static inline INT32 PV_LoopWrapSample16(INT16 *source, INT32 idx, INT32 loopStart, INT32 loopEnd)
+static inline int32_t PV_LoopWrapSample16(int16_t *source, int32_t idx, int32_t loopStart, int32_t loopEnd)
 {
-    INT32 loopLen = loopEnd - loopStart;
+    int32_t loopLen = loopEnd - loopStart;
     if (idx < loopStart)
         idx += loopLen;
     else if (idx >= loopEnd)
         idx -= loopLen;
-    return (INT32)source[idx];
+    return (int32_t)source[idx];
 }
 
 #if LOOPS_USED == LIMITED_LOOPS
@@ -146,13 +146,13 @@ void PV_ServeInterp2FullBuffer (GM_Voice *this_voice)
     this_voice;
 #else
 // Not required because 8-bit samples are converted to 16-bit upon load.
-    register INT32          *dest;
-    register LOOPCOUNT      a, inner;
-    register UBYTE          *source, *calculated_source;
-    register INT32          b, c;
+    register int32_t          *dest;
+    register int32_t      a, inner;
+    register unsigned char          *source, *calculated_source;
+    register int32_t          b, c;
     register XFIXED         cur_wave;
     register XFIXED         wave_increment;
-    register INT32          amplitude, amplitudeAdjust;
+    register int32_t          amplitude, amplitudeAdjust;
 
 #if REVERB_USED == VARIABLE_REVERB
     if (this_voice->reverbLevel || this_voice->chorusLevel)
@@ -177,25 +177,25 @@ void PV_ServeInterp2FullBuffer (GM_Voice *this_voice)
             calculated_source = source + (cur_wave>> STEP_BIT_RANGE);
             b = calculated_source[0];
             c = calculated_source[1];
-            *dest += ((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x80) * amplitude;
+            *dest += ((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x80) * amplitude;
             cur_wave += wave_increment;
 
             calculated_source = source + (cur_wave>> STEP_BIT_RANGE);
             b = calculated_source[0];
             c = calculated_source[1];
-            dest[1] += ((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x80) * amplitude;
+            dest[1] += ((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x80) * amplitude;
             cur_wave += wave_increment;
 
             calculated_source = source + (cur_wave>> STEP_BIT_RANGE);
             b = calculated_source[0];
             c = calculated_source[1];
-            dest[2] += ((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x80) * amplitude;
+            dest[2] += ((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x80) * amplitude;
             cur_wave += wave_increment;
 
             calculated_source = source + (cur_wave>> STEP_BIT_RANGE);
             b = calculated_source[0];
             c = calculated_source[1];
-            dest[3] += ((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x80) * amplitude;
+            dest[3] += ((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x80) * amplitude;
             cur_wave += wave_increment;
             dest += 4;
             amplitude += amplitudeAdjust;
@@ -210,7 +210,7 @@ void PV_ServeInterp2FullBuffer (GM_Voice *this_voice)
                 calculated_source = source + ((cur_wave>> STEP_BIT_RANGE) * 2);
                 b = calculated_source[0] + calculated_source[1];    // average left & right channels
                 c = calculated_source[2] + calculated_source[3];
-                *dest += (((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x100) * amplitude) >> 1;
+                *dest += (((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x100) * amplitude) >> 1;
                 dest++;
                 cur_wave += wave_increment;
             }
@@ -227,21 +227,21 @@ void PV_ServeInterp2FullBuffer (GM_Voice *this_voice)
 // handle 8 bit voices that are mixed down mono in the partial case in which we can 
 // process a complete slice of data but we check for loop points every 4 samples 
 // with the macro THE_CHECK
-void PV_ServeInterp2PartialBuffer (GM_Voice *this_voice, XBOOL looping)
+void PV_ServeInterp2PartialBuffer (GM_Voice *this_voice, bool looping)
 {
 #if 1
     this_voice;
     looping;
 #else
 // Not required because 8-bit samples are converted to 16-bit upon load.
-    register INT32          *dest;
-    register LOOPCOUNT      a, inner;
-    register UBYTE          *source, *calculated_source;
-    register INT32          b, c;
+    register int32_t          *dest;
+    register int32_t      a, inner;
+    register unsigned char          *source, *calculated_source;
+    register int32_t          b, c;
     register XFIXED         cur_wave;
     register XFIXED         wave_increment;
     register XFIXED         end_wave, wave_adjust;
-    register INT32          amplitude, amplitudeAdjust;
+    register int32_t          amplitude, amplitudeAdjust;
 
 #if REVERB_USED == VARIABLE_REVERB
     if (this_voice->reverbLevel || this_voice->chorusLevel)
@@ -275,10 +275,10 @@ void PV_ServeInterp2PartialBuffer (GM_Voice *this_voice, XBOOL looping)
         {
             for (inner = 0; inner < 4; inner++)
             {
-                THE_CHECK(UBYTE *);
+                THE_CHECK(unsigned char *);
                 b = source[cur_wave>>STEP_BIT_RANGE];
                 c = source[(cur_wave>>STEP_BIT_RANGE)+1];
-                *dest += ((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x80) * amplitude;
+                *dest += ((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x80) * amplitude;
                 dest++;
                 cur_wave += wave_increment;
             }
@@ -291,11 +291,11 @@ void PV_ServeInterp2PartialBuffer (GM_Voice *this_voice, XBOOL looping)
         {
             for (inner = 0; inner < 4; inner++)
             {
-                THE_CHECK(UBYTE *);
+                THE_CHECK(unsigned char *);
                 calculated_source = source + ( (cur_wave>> STEP_BIT_RANGE) * 2);
                 b = calculated_source[0] + calculated_source[1];
                 c = calculated_source[2] + calculated_source[3];
-                *dest += (((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x100) * amplitude) >> 1;
+                *dest += (((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x100) * amplitude) >> 1;
                 dest++;
                 cur_wave += wave_increment;
             }
@@ -325,7 +325,7 @@ void PV_ServeStereoInterp2FullBuffer(GM_Voice *this_voice)
 // handle 8 bit voices that are mixed down stereo in the partial case in which we can 
 // process a complete slice of data but we check for loop points every 4 samples 
 // with the macro THE_CHECK
-void PV_ServeStereoInterp2PartialBuffer (GM_Voice *this_voice, XBOOL looping)
+void PV_ServeStereoInterp2PartialBuffer (GM_Voice *this_voice, bool looping)
 {
     // dead function placed here as a placeholder. Will be removed later.
     this_voice;
@@ -345,13 +345,13 @@ void PV_ServeStereoInterp2PartialBuffer (GM_Voice *this_voice, XBOOL looping)
 // process a complete slice of data without checking for loop points
 void PV_ServeInterp2FullBuffer16 (GM_Voice *this_voice)
 {
-    register INT32          *dest;
-    register LOOPCOUNT      a, inner;
-    register INT16          *source, *calculated_source;
-    register INT32          b, c, sample;
+    register int32_t          *dest;
+    register int32_t      a, inner;
+    register int16_t          *source, *calculated_source;
+    register int32_t          b, c, sample;
     register XFIXED         cur_wave;
     register XFIXED         wave_increment;
-    register INT32          amplitude, amplitudeAdjust;
+    register int32_t          amplitude, amplitudeAdjust;
 
 #if REVERB_USED == VARIABLE_REVERB
     if (this_voice->reverbLevel || this_voice->chorusLevel)
@@ -399,12 +399,12 @@ void PV_ServeInterp2FullBuffer16 (GM_Voice *this_voice)
             {
                 for (inner = 0; inner < 4; inner++)
                 {
-                    INT32 pos = cur_wave >> STEP_BIT_RANGE;
-                    INT32 frac = cur_wave & STEP_FULL_RANGE;
-                    INT32 s0 = source[(pos > 0) ? pos - 1 : 0];
-                    INT32 s1 = source[pos];
-                    INT32 s2 = source[pos + 1];
-                    INT32 s3 = source[pos + 2];
+                    int32_t pos = cur_wave >> STEP_BIT_RANGE;
+                    int32_t frac = cur_wave & STEP_FULL_RANGE;
+                    int32_t s0 = source[(pos > 0) ? pos - 1 : 0];
+                    int32_t s1 = source[pos];
+                    int32_t s2 = source[pos + 1];
+                    int32_t s3 = source[pos + 2];
                     dest[inner] += (PV_CubicHermiteInterp(s0, s1, s2, s3, frac) * amplitude) >> 4;
                     cur_wave += wave_increment;
                 }
@@ -418,22 +418,22 @@ void PV_ServeInterp2FullBuffer16 (GM_Voice *this_voice)
             {
                 b = source[cur_wave>>STEP_BIT_RANGE];
                 c = source[(cur_wave>>STEP_BIT_RANGE)+1];
-                *dest += ((((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
+                *dest += ((((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
 
                 cur_wave += wave_increment;
                 b = source[cur_wave>>STEP_BIT_RANGE];
                 c = source[(cur_wave>>STEP_BIT_RANGE)+1];
-                dest[1] += ((((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
+                dest[1] += ((((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
 
                 cur_wave += wave_increment;
                 b = source[cur_wave>>STEP_BIT_RANGE];
                 c = source[(cur_wave>>STEP_BIT_RANGE)+1];
-                dest[2] += ((((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
+                dest[2] += ((((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
 
                 cur_wave += wave_increment;
                 b = source[cur_wave>>STEP_BIT_RANGE];
                 c = source[(cur_wave>>STEP_BIT_RANGE)+1];
-                dest[3] += ((((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
+                dest[3] += ((((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
                 dest += 4;
                 cur_wave += wave_increment;
                 amplitude += amplitudeAdjust;
@@ -448,13 +448,13 @@ void PV_ServeInterp2FullBuffer16 (GM_Voice *this_voice)
             {
                 for (inner = 0; inner < 4; inner++)
                 {
-                    INT32 pos = cur_wave >> STEP_BIT_RANGE;
-                    INT32 frac = cur_wave & STEP_FULL_RANGE;
-                    INT32 prev_pos = (pos > 0) ? pos - 1 : 0;
-                    INT32 s0 = source[prev_pos*2] + source[prev_pos*2 + 1];
-                    INT32 s1 = source[pos*2] + source[pos*2 + 1];
-                    INT32 s2 = source[(pos+1)*2] + source[(pos+1)*2 + 1];
-                    INT32 s3 = source[(pos+2)*2] + source[(pos+2)*2 + 1];
+                    int32_t pos = cur_wave >> STEP_BIT_RANGE;
+                    int32_t frac = cur_wave & STEP_FULL_RANGE;
+                    int32_t prev_pos = (pos > 0) ? pos - 1 : 0;
+                    int32_t s0 = source[prev_pos*2] + source[prev_pos*2 + 1];
+                    int32_t s1 = source[pos*2] + source[pos*2 + 1];
+                    int32_t s2 = source[(pos+1)*2] + source[(pos+1)*2 + 1];
+                    int32_t s3 = source[(pos+2)*2] + source[(pos+2)*2 + 1];
                     sample = PV_CubicHermiteInterp(s0, s1, s2, s3, frac);
                     *dest += (sample * amplitude) >> 5;
                     dest++;
@@ -472,7 +472,7 @@ void PV_ServeInterp2FullBuffer16 (GM_Voice *this_voice)
                     calculated_source = source + ((cur_wave>> STEP_BIT_RANGE) * 2);
                     b = calculated_source[0] + calculated_source[1];
                     c = calculated_source[2] + calculated_source[3];
-                    sample = ((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b;
+                    sample = ((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b;
                     *dest += (sample  * amplitude) >> 5;    // divide extra for summed stereo channels
                     dest++;
                     cur_wave += wave_increment;
@@ -499,16 +499,16 @@ void PV_ServeInterp2FullBuffer16 (GM_Voice *this_voice)
 // handle 16 bit voices that are mixed down mono in the partial case in which we can 
 // process a complete slice of data but we check for loop points every 4 samples 
 // with the macro THE_CHECK
-void PV_ServeInterp2PartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
+void PV_ServeInterp2PartialBuffer16 (GM_Voice *this_voice, bool looping)
 {
-    register INT32          *dest;
-    register LOOPCOUNT      a, inner;
-    register INT16          *source, *calculated_source;
-    register INT32          b, c, sample;
+    register int32_t          *dest;
+    register int32_t      a, inner;
+    register int16_t          *source, *calculated_source;
+    register int32_t          b, c, sample;
     register XFIXED         cur_wave;
     register XFIXED         wave_increment;
     register XFIXED         end_wave, wave_adjust;
-    register INT32          amplitude, amplitudeAdjust;
+    register int32_t          amplitude, amplitudeAdjust;
 
 #if REVERB_USED == VARIABLE_REVERB
     if (this_voice->reverbLevel || this_voice->chorusLevel)
@@ -564,9 +564,9 @@ void PV_ServeInterp2PartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
         if (this_voice->advancedInterpolation)
         {
             // Cubic Hermite interpolation with loop-aware boundary handling
-            INT32 loopStartIdx = (INT32)(this_voice->NoteLoopPtr - this_voice->NotePtr);
-            INT32 loopEndIdx = (INT32)(this_voice->NoteLoopEnd - this_voice->NotePtr);
-            INT32 totalFrames = (INT32)(this_voice->NotePtrEnd - this_voice->NotePtr);
+            int32_t loopStartIdx = (int32_t)(this_voice->NoteLoopPtr - this_voice->NotePtr);
+            int32_t loopEndIdx = (int32_t)(this_voice->NoteLoopEnd - this_voice->NotePtr);
+            int32_t totalFrames = (int32_t)(this_voice->NotePtrEnd - this_voice->NotePtr);
 
             for (a = MusicGlobals->Four_Loop; a > 0; --a)
             {
@@ -575,11 +575,11 @@ void PV_ServeInterp2PartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
                     // Slow path: near boundary, check each sample
                     for (inner = 0; inner < 4; inner++)
                     {
-                        THE_CHECK(INT16 *);
-                        INT32 pos = cur_wave >> STEP_BIT_RANGE;
-                        INT32 frac = cur_wave & STEP_FULL_RANGE;
-                        INT32 s1 = source[pos];
-                        INT32 s0, s2, s3;
+                        THE_CHECK(int16_t *);
+                        int32_t pos = cur_wave >> STEP_BIT_RANGE;
+                        int32_t frac = cur_wave & STEP_FULL_RANGE;
+                        int32_t s1 = source[pos];
+                        int32_t s0, s2, s3;
                         if (looping)
                         {
                             s0 = PV_LoopWrapSample16(source, pos - 1, loopStartIdx, loopEndIdx);
@@ -601,12 +601,12 @@ void PV_ServeInterp2PartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
                     // Fast path: no boundary in next 4 samples
                     for (inner = 0; inner < 4; inner++)
                     {
-                        INT32 pos = cur_wave >> STEP_BIT_RANGE;
-                        INT32 frac = cur_wave & STEP_FULL_RANGE;
-                        INT32 s0 = source[(pos > 0) ? pos - 1 : 0];
-                        INT32 s1 = source[pos];
-                        INT32 s2 = source[pos + 1];
-                        INT32 s3 = source[pos + 2];
+                        int32_t pos = cur_wave >> STEP_BIT_RANGE;
+                        int32_t frac = cur_wave & STEP_FULL_RANGE;
+                        int32_t s0 = source[(pos > 0) ? pos - 1 : 0];
+                        int32_t s1 = source[pos];
+                        int32_t s2 = source[pos + 1];
+                        int32_t s3 = source[pos + 2];
                         dest[inner] += (PV_CubicHermiteInterp(s0, s1, s2, s3, frac) * amplitude) >> 4;
                         cur_wave += wave_increment;
                     }
@@ -622,54 +622,54 @@ void PV_ServeInterp2PartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
             {
                 if (cur_wave + (wave_increment << 2) >= end_wave)
                 {
-                    THE_CHECK(INT16 *);
+                    THE_CHECK(int16_t *);
                     calculated_source = source + (cur_wave>> STEP_BIT_RANGE);
                     b = *calculated_source;
                     c = calculated_source[1];
-                    *dest += ((((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
+                    *dest += ((((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
                     cur_wave += wave_increment;
-                    THE_CHECK(INT16 *);
+                    THE_CHECK(int16_t *);
                     calculated_source = source + (cur_wave>> STEP_BIT_RANGE);
                     b = *calculated_source;
                     c = calculated_source[1];
-                    dest[1] += ((((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
+                    dest[1] += ((((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
                     cur_wave += wave_increment;
-                    THE_CHECK(INT16 *);
+                    THE_CHECK(int16_t *);
                     calculated_source = source + (cur_wave>> STEP_BIT_RANGE);
                     b = *calculated_source;
                     c = calculated_source[1];
-                    dest[2] += ((((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
+                    dest[2] += ((((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
                     cur_wave += wave_increment;
-                    THE_CHECK(INT16 *);
+                    THE_CHECK(int16_t *);
                     calculated_source = source + (cur_wave>> STEP_BIT_RANGE);
                     b = *calculated_source;
                     c = calculated_source[1];
-                    dest[3] += ((((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
+                    dest[3] += ((((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
                 }
                 else
                 {
                     calculated_source = source + (cur_wave>> STEP_BIT_RANGE);
                     b = *calculated_source;
                     c = calculated_source[1];
-                    *dest += ((((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
+                    *dest += ((((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
                     cur_wave += wave_increment;
 
                     calculated_source = source + (cur_wave>> STEP_BIT_RANGE);
                     b = *calculated_source;
                     c = calculated_source[1];
-                    dest[1] += ((((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
+                    dest[1] += ((((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
                     cur_wave += wave_increment;
 
                     calculated_source = source + (cur_wave>> STEP_BIT_RANGE);
                     b = *calculated_source;
                     c = calculated_source[1];
-                    dest[2] += ((((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
+                    dest[2] += ((((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
                     cur_wave += wave_increment;
 
                     calculated_source = source + (cur_wave>> STEP_BIT_RANGE);
                     b = *calculated_source;
                     c = calculated_source[1];
-                    dest[3] += ((((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
+                    dest[3] += ((((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b)))>>STEP_BIT_RANGE) + b) * amplitude) >> 4;
                 }
                 dest += 4;
                 cur_wave += wave_increment;
@@ -682,20 +682,20 @@ void PV_ServeInterp2PartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
         if (this_voice->advancedInterpolation)
         {
             // Cubic Hermite for stereo with loop-aware boundary handling
-            INT32 loopStartIdx = (INT32)(this_voice->NoteLoopPtr - this_voice->NotePtr);
-            INT32 loopEndIdx = (INT32)(this_voice->NoteLoopEnd - this_voice->NotePtr);
+            int32_t loopStartIdx = (int32_t)(this_voice->NoteLoopPtr - this_voice->NotePtr);
+            int32_t loopEndIdx = (int32_t)(this_voice->NoteLoopEnd - this_voice->NotePtr);
 
             for (a = MusicGlobals->Four_Loop; a > 0; --a)
             {
                 for (inner = 0; inner < 4; inner++)
                 {
-                    THE_CHECK(INT16 *);
-                    INT32 pos = cur_wave >> STEP_BIT_RANGE;
-                    INT32 frac = cur_wave & STEP_FULL_RANGE;
-                    INT32 idx0, idx2, idx3;
+                    THE_CHECK(int16_t *);
+                    int32_t pos = cur_wave >> STEP_BIT_RANGE;
+                    int32_t frac = cur_wave & STEP_FULL_RANGE;
+                    int32_t idx0, idx2, idx3;
                     if (looping)
                     {
-                        INT32 loopLen = loopEndIdx - loopStartIdx;
+                        int32_t loopLen = loopEndIdx - loopStartIdx;
                         idx0 = pos - 1;
                         if (idx0 < loopStartIdx) idx0 += loopLen;
                         idx2 = pos + 1;
@@ -709,10 +709,10 @@ void PV_ServeInterp2PartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
                         idx2 = pos + 1;
                         idx3 = pos + 2;
                     }
-                    INT32 s0 = source[idx0*2] + source[idx0*2 + 1];
-                    INT32 s1 = source[pos*2] + source[pos*2 + 1];
-                    INT32 s2 = source[idx2*2] + source[idx2*2 + 1];
-                    INT32 s3 = source[idx3*2] + source[idx3*2 + 1];
+                    int32_t s0 = source[idx0*2] + source[idx0*2 + 1];
+                    int32_t s1 = source[pos*2] + source[pos*2 + 1];
+                    int32_t s2 = source[idx2*2] + source[idx2*2 + 1];
+                    int32_t s3 = source[idx3*2] + source[idx3*2 + 1];
                     sample = PV_CubicHermiteInterp(s0, s1, s2, s3, frac);
                     *dest += ((sample >> 1) * amplitude) >> 5;
                     dest++;
@@ -727,11 +727,11 @@ void PV_ServeInterp2PartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
             {
                 for (inner = 0; inner < 4; inner++)
                 {
-                    THE_CHECK(INT16 *);
+                    THE_CHECK(int16_t *);
                     calculated_source = source + ((cur_wave>> STEP_BIT_RANGE) * 2);
                     b = calculated_source[0] + calculated_source[1];
                     c = calculated_source[2] + calculated_source[3];
-                    sample = ((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b;
+                    sample = ((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b;
                     *dest += ((sample >> 1) * amplitude) >> 5;
                     dest++;
                     cur_wave += wave_increment;
@@ -770,7 +770,7 @@ void PV_ServeStereoInterp2FullBuffer16 (GM_Voice *this_voice)
 // handle 8 bit voices that are mixed down stereo in the partial case in which we can 
 // process a complete slice of data but we check for loop points every 4 samples 
 // with the macro THE_CHECK
-void PV_ServeStereoInterp2PartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
+void PV_ServeStereoInterp2PartialBuffer16 (GM_Voice *this_voice, bool looping)
 {
     // dead function placed here as a placeholder. Will be removed later.
     this_voice;

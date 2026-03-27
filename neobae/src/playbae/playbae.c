@@ -202,7 +202,7 @@ static void cli_karaoke_lyric_callback(struct GM_Song *songPtr, const char *lyri
 }
 
 // Meta event fallback callback (used only if lyric callback API unsupported).
-static void cli_karaoke_meta_callback(void *threadContext, struct GM_Song *pSong, char markerType, void *pMetaText, int32_t metaTextLength, XSWORD currentTrack)
+static void cli_karaoke_meta_callback(void *threadContext, struct GM_Song *pSong, char markerType, void *pMetaText, int32_t metaTextLength, int16_t currentTrack)
 {
    (void)threadContext;
    (void)pSong;
@@ -2076,7 +2076,7 @@ int main(int argc, char *argv[])
          if (PV_ParseCommands(argc, argv, "-p", TRUE, parmFile))
          {
             const char *ext = strrchr(parmFile, '.');
-            XBOOL bankLoaded = FALSE;
+            bool bankLoaded = FALSE;
 #if USE_SF2_SUPPORT == TRUE
             if (ext && (strcasecmp(ext, ".sf2") == 0 
 #if USE_VORBIS_DECODER == TRUE

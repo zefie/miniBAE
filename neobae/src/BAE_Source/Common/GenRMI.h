@@ -29,7 +29,7 @@
  */
 OPErr GM_LoadRMIFromMemory(const unsigned char *buf, uint32_t len,
                            unsigned char **outMidiData, uint32_t *outMidiLen,
-                           XBOOL loadDLS);
+                           bool loadDLS);
 
 /**
  * GM_IsRMIFile
@@ -41,7 +41,7 @@ OPErr GM_LoadRMIFromMemory(const unsigned char *buf, uint32_t len,
  * @param len  Length of the file data
  * @return TRUE if the data appears to be an RMI file, FALSE otherwise
  */
-XBOOL GM_IsRMIFile(const unsigned char *buf, uint32_t len);
+bool GM_IsRMIFile(const unsigned char *buf, uint32_t len);
 
 /**
  * GM_LastRMIHadEmbeddedSoundbank
@@ -50,7 +50,7 @@ XBOOL GM_IsRMIFile(const unsigned char *buf, uint32_t len);
  * 
  * @return TRUE if the last RMI had an embedded soundbank, FALSE otherwise
  */
-XBOOL GM_LastRMIHadEmbeddedSoundbank(void);
+bool GM_LastRMIHadEmbeddedSoundbank(void);
 
 /**
  * GM_ClearRMISoundbankFlag

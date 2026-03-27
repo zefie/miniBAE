@@ -1371,7 +1371,7 @@ private:
 
         for (int i = 0; i < count; ++i) {
             int64_t cutoff = (int64_t)baseFreq + (sourceLevels[i] * (int64_t)amount) / maxAbsLevel;
-            cutoff = std::clamp<int64_t>(cutoff, INT32_MIN, INT32_MAX);
+            cutoff = std::clamp<int64_t>(cutoff, 0, UINT32_MAX);
             levels[i] = (int32_t)cutoff;
         }
         m_filterGraph->SetEnvelope(count, levels, times, flags);

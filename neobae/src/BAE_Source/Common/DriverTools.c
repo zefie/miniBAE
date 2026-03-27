@@ -468,14 +468,14 @@ static void * PV_FindSongResourceTypePointer(SongResource_RMF *songRMF, SongReso
 //
 // dataTarget or lengthTarget can be NULL. If not NULL, then data will be placed there
 // if both are non-NULL, *lengthTarget is assumed to be the length in bytes of the block at dataTarget
-static void PV_FillSongResource(SongResourceType resourceType, int16_t resourceCount, XBOOL encrypted, 
+static void PV_FillSongResource(SongResourceType resourceType, int16_t resourceCount, bool encrypted, 
                                 void* pResourceData, uint32_t resourceDataLength, 
                                 void* dataTarget, uint32_t* lengthTarget)
 {
     char                *pUnit;
     int16_t           count, subCount;
     SongResourceType    type;
-    XBOOL               fill;
+    bool               fill;
     uint32_t       length;
     uint32_t       textBytes;
 
@@ -487,7 +487,7 @@ static void PV_FillSongResource(SongResourceType resourceType, int16_t resourceC
             type = (SongResourceType)XGetLong(pUnit);
             pUnit += sizeof (SongResourceType);
 
-            fill = (XBOOL)((resourceType == type) ? TRUE : FALSE);
+            fill = (bool)((resourceType == type) ? TRUE : FALSE);
             switch (type)
             {
                 default:
@@ -577,9 +577,9 @@ static void PV_FillSongResource(SongResourceType resourceType, int16_t resourceC
 #endif  //USE_FULL_RMF_SUPPORT == TRUE
 
 #if USE_CREATION_API == TRUE
-static XBOOL PV_ValidResourceForSongType(SongResourceType resourceType, SongType type)
+static bool PV_ValidResourceForSongType(SongResourceType resourceType, SongType type)
 {
-    XBOOL   valid;
+    bool   valid;
 
     valid = FALSE;
     switch (type)
@@ -1226,12 +1226,12 @@ void XSetSongResourceObjectID(SongResource *pSong, XShortResourceID id)
 #endif  // USE_CREATION_API == TRUE
 
 #if X_PLATFORM != X_WEBTV
-XBOOL XIsSongCompressed(SongResource *pSong)
+bool XIsSongCompressed(SongResource *pSong)
 {
     XShortResourceID    id;
     XPTR                data;
     int32_t                type;
-    XBOOL               compressed;
+    bool               compressed;
 
     compressed = FALSE;
     if (pSong)
@@ -1263,9 +1263,9 @@ XBOOL XIsSongCompressed(SongResource *pSong)
     return compressed;
 }
 
-XBOOL XIsSongLocked(SongResource *pSong)
+bool XIsSongLocked(SongResource *pSong)
 {
-    XBOOL                   locked;
+    bool                   locked;
     SongResource_SMS        *songSMS;
     SongResource_RMF        *songRMF;
     SongResource_RMF_Linear *songRMF2;
@@ -1295,7 +1295,7 @@ XBOOL XIsSongLocked(SongResource *pSong)
 #endif  // X_PLATFORM != X_WEBTV
 
 #if USE_CREATION_API == TRUE
-void XSetSongLocked(SongResource *pSong, XBOOL locked)
+void XSetSongLocked(SongResource *pSong, bool locked)
 {
     SongResource_SMS        *songSMS;
     SongResource_RMF        *songRMF;
@@ -1408,12 +1408,12 @@ void XSetSongLocked(SongResource *pSong, XBOOL locked)
 }
 #endif  // USE_CREATION_API == TRUE
 
-XBOOL XGetSongEmbeddedStatus(SongResource *pSong)
+bool XGetSongEmbeddedStatus(SongResource *pSong)
 {
 //  SongResource_SMS        *songSMS;
     SongResource_RMF        *songRMF;
     SongResource_RMF_Linear *songRMF2;
-    XBOOL                   embedded;
+    bool                   embedded;
 
     embedded = FALSE;
     if (pSong)
@@ -1439,7 +1439,7 @@ XBOOL XGetSongEmbeddedStatus(SongResource *pSong)
 }
 
 #if USE_CREATION_API == TRUE
-void XSetSongEmbeddedStatus(SongResource *pSong, XBOOL embedded)
+void XSetSongEmbeddedStatus(SongResource *pSong, bool embedded)
 {
 //  SongResource_SMS        *songSMS;
     SongResource_RMF        *songRMF;
@@ -2396,10 +2396,10 @@ XAliasLinkResource * XGetAliasLink(void)
 }
 
 // Given a alias structure and a sourceID, this will return in pDest a valid alias. -1 will
-// be returned via XERR if there's no alias present
-XERR XLookupAlias(XAliasLinkResource *pLink, XLongResourceID sourceID, XLongResourceID *pDestID)
+// be returned via int32_t if there's no alias present
+int32_t XLookupAlias(XAliasLinkResource *pLink, XLongResourceID sourceID, XLongResourceID *pDestID)
 {
-    XERR                err;
+    int32_t                err;
     uint32_t       count, max;
     const unsigned char *pBase;
     const unsigned char *pEntry;

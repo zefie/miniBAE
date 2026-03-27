@@ -1235,9 +1235,9 @@ void pcm_opus_finalize(void)
         OPErr err;
 
         XSetMemory(&src, sizeof(src), 0);
-        src.compressionType = (XDWORD)C_NONE;
-        src.channels = (XBYTE)g_pcm_wav_channels;
-        src.bitSize = (XBYTE)g_pcm_wav_bits;
+        src.compressionType = (uint32_t)C_NONE;
+        src.channels = (unsigned char)g_pcm_wav_channels;
+        src.bitSize = (unsigned char)g_pcm_wav_bits;
         src.sampledRate = ((XFIXED)g_pcm_wav_sample_rate) << 16L;
         src.waveFrames = g_pcm_opus_accumulated_frames;
         src.theWaveform = (XPTR)g_pcm_opus_accumulated_samples;

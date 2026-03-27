@@ -171,7 +171,7 @@
 **  1/22/98     Renamed LOWPASS_AMOUNT to LOW_PASS_AMOUNT
 **  1/29/98     Put more code wrappers around verb type 8
 **  2/3/98      Renamed songBufferLeftMono to songBufferDry
-**  2/8/98      Changed BOOL_FLAG to XBOOL
+**  2/8/98      Changed BOOL_FLAG to bool
 **  2/10/98     Fixed problem with PV_ServeThisInstrument that allowed a looping sample
 **              to stop looping after time
 **  2/11/98     Put code wrappers around functions not used for WebTV
@@ -223,7 +223,7 @@
 **  3/4/99      Fixed PV_StartMIDINote to handle samples with loop points starting at 0.
 **  3/5/99      Added threadContext to PV_ProcessSampleFrame and renamed from ProcessSampleFrame
 **  3/9/99      Renamed myMusicGlobals to pMixer
-**              Changed parameter of PV_ADSRModule to use a XBOOL rather than a INT32
+**              Changed parameter of PV_ADSRModule to use a bool rather than a int32_t
 **  3/11/99     Renamed ADSRRecord to GM_ADSR. Renamed LFORecord to GM_LFO. Renamed CurveRecord to GM_TieTo.
 **  3/12/99     Put in support for different loop types
 **  3/31/99     Renamed ServeMIDINote to PV_StartMIDINote, renamed StopMIDINote to PV_StopMIDINote
@@ -373,7 +373,7 @@ GM_Mixer *MusicGlobals = NULL;
         (960 * ys) / (x), \
         (1017 * ys) / (x)
 
-static const UINT32 majorPitchTable[] =
+static const uint32_t majorPitchTable[] =
     {
         PTmake(102400),
         PTmake(51200),
@@ -392,7 +392,7 @@ static const UINT32 majorPitchTable[] =
         PTmake(25),    // divide by 25 then multiply by 2.  Same as divide by 12.5
         PTmake(25)};
 
-static const UINT32 fractionalPitchTable[] =
+static const uint32_t fractionalPitchTable[] =
     {
         65536, 65566, 65595, 65625, 65654, 65684, 65714, 65743,
         65773, 65803, 65832, 65862, 65892, 65922, 65951, 65981,
@@ -430,23 +430,23 @@ static const UINT32 fractionalPitchTable[] =
 //  150 ms
 //  125 ms
 //  80 ms
-static const INT32 logLookupTable[] =
+static const int32_t logLookupTable[] =
     {
         15000000, 10000000, 5000000, 4000000, 3000000, 2500000, 2000000, 1500000, 1000000, 700000,
         500000, 400000, 250000, 200000, 150000, 150000, 100000, 100000, 100000, 100000};
 
 // lookup an entry from the logLookupTable, but compensate for synthesis time per chunk being
 // something other than 11 ms.
-static INLINE INT32 PV_GetLogLookupTableEntry(INT32 entry)
+static INLINE int32_t PV_GetLogLookupTableEntry(int32_t entry)
 {
-    UINT32 value;
+    uint32_t value;
 
     // this narly peice of code basicly is in floating point:
     // value = (logLookupTable[entry] * FIXED_BUFFER_SLICE_TIME) / BUFFER_SLICE_TIME;
     // we do this fixed point trick instead, ug.
     value = logLookupTable[entry] / 100;
     value = ((value * FIXED_BUFFER_SLICE_TIME) / (MusicGlobals->bufferTime / 100));
-    return (INT32)value;
+    return (int32_t)value;
 }
 
 // 16.16 fixed point table starting at .8 to .9995. range 0 to 319.
@@ -515,7 +515,7 @@ int32_t GM_SetSustainDecayLevelInTime(uint32_t timeInMicroseconds)
 #endif // #if USE_CREATION_API == TRUE
 
 /*
-static const UBYTE defaultVolumeScale[] = {
+static const unsigned char defaultVolumeScale[] = {
 // Subtle curve that ends into zero
 127, 125, 123, 121, 119, 117, 115, 113, 111, 109, 108, 106, 104, 102, 101, 99, 97,
 96, 94, 93, 91, 90, 88, 87, 85, 84, 82, 81, 80, 78, 77, 76, 75, 73, 72, 71, 70, 69,
@@ -526,7 +526,7 @@ static const UBYTE defaultVolumeScale[] = {
 17, 16, 16, 16, 16, 0
 };
 
-static const UBYTE defaultVlumeScale[] = {
+static const unsigned char defaultVlumeScale[] = {
 // harsh curve that ends into zero
 127, 124, 121, 118, 115, 112, 109, 106, 104, 101, 98, 96, 93, 91, 89, 87, 84, 82, 80,
 78, 76, 74, 72, 71, 69, 67, 65, 64, 62, 60, 59, 57, 56, 55, 53, 52, 51, 49, 48, 47, 46,
@@ -622,7 +622,7 @@ static const uint16_t defaultVolumeScale[] = {
 };
 */
 
-static const UBYTE defaultVolumeScale[] = {
+static const unsigned char defaultVolumeScale[] = {
     // cool S curve version 2
     252, 248, 246, 242, 240, 238, 232, 230, 228, 222,
     220, 218, 214, 212, 208, 204, 200, 198, 194, 190,
@@ -638,7 +638,7 @@ static const UBYTE defaultVolumeScale[] = {
     16, 16, 12, 12, 12, 10, 10, 10, 8, 8,
     8, 4, 4, 4, 2, 2, 1, 0};
 
-static const UBYTE volumeScaleSCurveOriginal[] = {
+static const unsigned char volumeScaleSCurveOriginal[] = {
     // cool S Curve version 1
     254, 252, 252, 252, 252, 252, 252, 250, 250, 250, 250, 248, 248, 248, 246, 246,
     246, 246, 244, 244, 244, 244, 242, 242, 242, 242, 240, 240, 240, 238, 238, 238,
@@ -649,7 +649,7 @@ static const UBYTE volumeScaleSCurveOriginal[] = {
     58, 56, 54, 52, 50, 48, 46, 44, 42, 40, 38, 36, 34, 32, 30, 28, 26, 24, 22, 20,
     18, 16, 14, 12, 10, 8, 6, 4, 2, 0};
 
-static const UBYTE volumeScaleTwoTimes[] = {
+static const unsigned char volumeScaleTwoTimes[] = {
     // two times linear curve
     254, 252, 250, 248, 246, 244, 242, 240, 238, 236, 234, 232, 230, 228, 226,
     224, 222, 220, 218, 216, 214, 212, 210, 208, 206, 204, 202, 200, 198, 196,
@@ -660,7 +660,7 @@ static const UBYTE volumeScaleTwoTimes[] = {
     68, 66, 64, 62, 60, 58, 56, 54, 52, 50, 48, 46, 44, 42, 40, 38, 36, 34, 32,
     30, 28, 26, 24, 22, 20, 18, 16, 14, 12, 10, 8, 6, 4, 2, 0};
 
-static const UBYTE volumeScaleSubtle[] = {
+static const unsigned char volumeScaleSubtle[] = {
     // Subtle curve that is above zero
     // This is the default velocity curve for WebTV
     254, 248, 243, 238, 232, 227, 222, 217, 213, 208, 203, 199, 194, 190, 186, 182, 178, 174,
@@ -671,7 +671,7 @@ static const UBYTE volumeScaleSubtle[] = {
     28, 27, 26, 26, 25, 25, 24, 24, 23, 23, 22, 22, 21, 21, 20, 20, 19, 19, 18, 18, 18, 17,
     17, 17, 16, 16, 15, 0};
 
-static const UBYTE volumeScaleTwoTimesExp[] = {
+static const unsigned char volumeScaleTwoTimesExp[] = {
     // Rev Exp x2
     255, 250, 246, 242, 240, 236, 232, 228, 224, 220,
     216, 212, 210, 206, 202, 198, 194, 190, 186, 182,
@@ -815,7 +815,7 @@ void PV_CalcScaleBack(void)
 
 #if 1
     pMixer->scaleBackAmount = PV_L2(pMixer->mixLevel);
-    pMixer->scaleBackAmount = (int16_t)(((INT32)pMixer->scaleBackAmount * HSB_MAX_OUTPUT_SCALE_NUM) / HSB_MAX_OUTPUT_SCALE_DEN);
+    pMixer->scaleBackAmount = (int16_t)(((int32_t)pMixer->scaleBackAmount * HSB_MAX_OUTPUT_SCALE_NUM) / HSB_MAX_OUTPUT_SCALE_DEN);
 #else
     int noteScale;
     int32_t scaleSize;
@@ -848,13 +848,13 @@ void PV_CalcScaleBack(void)
 static void PV_ApplyOutputLimiter(GM_Mixer *pMixer)
 {
     // Threshold: maximum 32-bit value that fits in 16-bit after OUTPUT_SCALAR shift
-    #define LIMITER_THRESHOLD       ((INT32)32767 << OUTPUT_SCALAR)
+    #define LIMITER_THRESHOLD       ((int32_t)32767 << OUTPUT_SCALAR)
 
-    INT32   *buffer = pMixer->songBufferDry;
-    LOOPCOUNT samples = pMixer->One_Loop * (pMixer->generateStereoOutput ? 2 : 1);
-    INT32   peak = 0;
-    INT32   absVal;
-    LOOPCOUNT i;
+    int32_t   *buffer = pMixer->songBufferDry;
+    int32_t samples = pMixer->One_Loop * (pMixer->generateStereoOutput ? 2 : 1);
+    int32_t   peak = 0;
+    int32_t   absVal;
+    int32_t i;
 
     // Find peak absolute value in the buffer
     for (i = 0; i < samples; i++)
@@ -869,10 +869,10 @@ static void PV_ApplyOutputLimiter(GM_Mixer *pMixer)
     // If any sample would clip, scale the entire frame down
     if (peak > LIMITER_THRESHOLD)
     {
-        XSDWORD gain = (XSDWORD)(((int64_t)LIMITER_THRESHOLD * 65536) / peak);
+        int32_t gain = (int32_t)(((int64_t)LIMITER_THRESHOLD * 65536) / peak);
         for (i = 0; i < samples; i++)
         {
-            buffer[i] = (INT32)(((int64_t)buffer[i] * gain) >> 16);
+            buffer[i] = (int32_t)(((int64_t)buffer[i] * gain) >> 16);
         }
     }
 }
@@ -882,9 +882,9 @@ static void PV_ApplyOutputLimiter(GM_Mixer *pMixer)
 int32_t PV_DoubleBufferCallbackAndSwap(GM_DoubleBufferCallbackPtr doubleBufferCallback,
                                        GM_Voice *pVoice)
 {
-    INT32 bufferSize;
+    int32_t bufferSize;
 
-    bufferSize = (XBYTE *)pVoice->NotePtrEnd - (XBYTE *)pVoice->NotePtr;
+    bufferSize = (unsigned char *)pVoice->NotePtrEnd - (unsigned char *)pVoice->NotePtr;
     // we hit the end of the loop call double buffer to notify swap
     (*doubleBufferCallback)(pVoice->NoteContext, pVoice->NotePtr, &bufferSize);
     // now we swap pointers
@@ -892,13 +892,13 @@ int32_t PV_DoubleBufferCallbackAndSwap(GM_DoubleBufferCallbackPtr doubleBufferCa
     {
         if (pVoice->NotePtr == pVoice->doubleBufferPtr1)
         {
-            pVoice->NotePtr = (XBYTE *)pVoice->doubleBufferPtr2;
-            pVoice->NotePtrEnd = (XBYTE *)pVoice->doubleBufferPtr2 + bufferSize;
+            pVoice->NotePtr = (unsigned char *)pVoice->doubleBufferPtr2;
+            pVoice->NotePtrEnd = (unsigned char *)pVoice->doubleBufferPtr2 + bufferSize;
         }
         else
         {
-            pVoice->NotePtr = (XBYTE *)pVoice->doubleBufferPtr1;
-            pVoice->NotePtrEnd = (XBYTE *)pVoice->doubleBufferPtr1 + bufferSize;
+            pVoice->NotePtr = (unsigned char *)pVoice->doubleBufferPtr1;
+            pVoice->NotePtrEnd = (unsigned char *)pVoice->doubleBufferPtr1 + bufferSize;
         }
 
         pVoice->NoteLoopPtr = pVoice->NotePtr;
@@ -936,7 +936,7 @@ uint32_t PV_GetPositionFromVoice(GM_Voice *pVoice)
         break;
 #endif
     default:
-        size = (XBYTE *)pVoice->NotePtrEnd - (XBYTE *)pVoice->NotePtr; // get sample size of active voice
+        size = (unsigned char *)pVoice->NotePtrEnd - (unsigned char *)pVoice->NotePtr; // get sample size of active voice
         if (size < MAX_SAMPLE_FRAMES)
         {
             pos = pVoice->NoteWave >> STEP_BIT_RANGE;
@@ -1027,8 +1027,8 @@ U3232 PV_GetWavePitchU3232(XFIXED notePitch)
     // MOE: eventually replace all this with pure integer code
     pitch = PV_GetWavePitchFloat(notePitch);
 
-    increment.i = (U32)(INT32)pitch;
-    increment.f = (U32)(INT32)((pitch - (UFLOAT)(INT32)increment.i) * (65536.0 * 65536 / 2)) * 2;
+    increment.i = (U32)(int32_t)pitch;
+    increment.f = (U32)(int32_t)((pitch - (UFLOAT)(int32_t)increment.i) * (65536.0 * 65536 / 2)) * 2;
     // BAE_PRINTF("i = %ld f = %ld\n", increment.i, increment.f);
     return increment;
 #endif
@@ -1059,9 +1059,9 @@ XFIXED PV_GetWavePitch(XFIXED notePitch)
 #endif
 
 // given a voice structure, calculate what voice this is
-XWORD PV_GetVoiceNumberFromVoice(GM_Voice *pVoice)
+uint16_t PV_GetVoiceNumberFromVoice(GM_Voice *pVoice)
 {
-    XWORD voice;
+    uint16_t voice;
     GM_Mixer *pMixer;
 
     voice = 0;
@@ -1077,11 +1077,11 @@ XWORD PV_GetVoiceNumberFromVoice(GM_Voice *pVoice)
 // ------------------------------------------------------------------------------------------------------//
 
 // Generic ADSR Unit
-static void PV_ADSRModule(GM_ADSR *a, XBOOL sustaining)
+static void PV_ADSRModule(GM_ADSR *a, bool sustaining)
 {
-    INT32 currentTime = a->currentTime;
-    INT32 index = a->currentPosition;
-    INT32 scalar, i;
+    int32_t currentTime = a->currentTime;
+    int32_t index = a->currentPosition;
+    int32_t scalar, i;
 
     // Find the release or LAST marker when the note is being turned off.
 
@@ -1116,7 +1116,7 @@ static void PV_ADSRModule(GM_ADSR *a, XBOOL sustaining)
         {
             if (a->sustainingDecayLevel)
             {
-                XSDWORD ADSRLevel;
+                int32_t ADSRLevel;
                 XFIXED levelScale;
 
                 ADSRLevel = a->ADSRLevel[index];
@@ -1173,7 +1173,7 @@ static void PV_ADSRModule(GM_ADSR *a, XBOOL sustaining)
             else
             {
                 a->mode = ADSR_TERMINATE;
-                currentTime -= (XSDWORD)PV_GetLFOAdjustedTimeInMicroseconds(); // prevent long note times from overflowing if they stay on for more than 32.767 seconds
+                currentTime -= (int32_t)PV_GetLFOAdjustedTimeInMicroseconds(); // prevent long note times from overflowing if they stay on for more than 32.767 seconds
             }
         }
         else
@@ -1201,7 +1201,7 @@ static void PV_ADSRModule(GM_ADSR *a, XBOOL sustaining)
     a->currentPosition = index & 7; // protect against runaway indexes
 }
 
-static INLINE INT32 PV_GetWaveShape(INT32 where, INT32 what_kind)
+static INLINE int32_t PV_GetWaveShape(int32_t where, int32_t what_kind)
 {
     switch (what_kind)
     {
@@ -1225,7 +1225,7 @@ static INLINE INT32 PV_GetWaveShape(INT32 where, INT32 what_kind)
             // Convert 'where' (0..65535) to radians (0..2π)
             double radians = ((double)where / 65536.0) * (2.0 * 3.14159265358979323846);
             double s = sin(radians);
-            return (INT32)(s * 65536.0);
+            return (int32_t)(s * 65536.0);
         }
     case SAWTOOTH_WAVE:
         return (32768 - where) * 2;
@@ -1456,9 +1456,9 @@ static const char resonantFilterLookup[] =
 
 static INLINE void PV_ServeInstrumentCurves(GM_Voice *pVoice)
 {
-    INT32 i, j, count, tieFromValue, scalar;
+    int32_t i, j, count, tieFromValue, scalar;
     GM_Instrument *pInstrument;
-    INT32 curveCount;
+    int32_t curveCount;
 
     if (pVoice->ModWheelValue != pVoice->LastModWheelValue)
     {
@@ -1484,8 +1484,8 @@ static INLINE void PV_ServeInstrumentCurves(GM_Voice *pVoice)
                                     scalar = pInstrument->curve[i].to_Scalar[count];
                                     if (pInstrument->curve[i].from_Value[count] != pInstrument->curve[i].from_Value[count + 1])
                                     {
-                                        INT32 from_difference = pInstrument->curve[i].from_Value[count + 1] - pInstrument->curve[i].from_Value[count];
-                                        INT32 to_difference = pInstrument->curve[i].to_Scalar[count + 1] - pInstrument->curve[i].to_Scalar[count];
+                                        int32_t from_difference = pInstrument->curve[i].from_Value[count + 1] - pInstrument->curve[i].from_Value[count];
+                                        int32_t to_difference = pInstrument->curve[i].to_Scalar[count + 1] - pInstrument->curve[i].to_Scalar[count];
                                         scalar += ((((tieFromValue - pInstrument->curve[i].from_Value[count]) << 8) / from_difference) * to_difference) >> 8;
                                     }
                                 }
@@ -1622,15 +1622,15 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
         {
             rec = &(pVoice->LFORecords[i]);
             PV_ADSRModule(&(rec->a),
-                          (XBOOL)((pVoice->voiceMode == VOICE_SUSTAINING) ||
+                          (bool)((pVoice->voiceMode == VOICE_SUSTAINING) ||
                                   (pVoice->sustainMode == SUS_ON_NOTE_ON)));
             if ((rec->level) || (rec->DC_feed))
             {
                 // scale the current adsr level by the sustainDecayLevel which is fixed point
-                XSDWORD adsrLevel = rec->a.currentLevel;
+                int32_t adsrLevel = rec->a.currentLevel;
                 if (rec->a.currentLevel < 0)
                 {
-                    adsrLevel = -((XSDWORD)(((-rec->a.currentLevel >> 1) * (rec->a.sustainingDecayLevel >> 1)) >> 14));
+                    adsrLevel = -((int32_t)(((-rec->a.currentLevel >> 1) * (rec->a.sustainingDecayLevel >> 1)) >> 14));
                 }
                 else
                     adsrLevel = ((rec->a.currentLevel >> 1) * (rec->a.sustainingDecayLevel >> 1)) >> 14;
@@ -1719,7 +1719,7 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
 
     if (n != pVoice->LastPitchBend)
     {
-        pVoice->LastPitchBend = (INT16)n;
+        pVoice->LastPitchBend = (int16_t)n;
         n += pVoice->ProcessedPitch << 8; // ProcessedPitch is based on the sample data and MIDI pitch.
 
         // Clip value to within reasonable MIDI pitch range
@@ -1764,13 +1764,13 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
             fwave_increment = PV_GetWavePitchFixed(pVoice->NotePitch);
 
             result = (fwave_increment * (pMixer->One_Slice + 1)) / XFIXED_1;
-            pVoice->NoteNextSize = (INT16)result;
+            pVoice->NoteNextSize = (int16_t)result;
 #else
             // use floating point code
             UFLOAT fwave_increment;
 
             fwave_increment = PV_GetWavePitchFloat(pVoice->NotePitch);
-            pVoice->NoteNextSize = (INT16)(fwave_increment * (pMixer->One_Slice + 1)) + 1;
+            pVoice->NoteNextSize = (int16_t)(fwave_increment * (pMixer->One_Slice + 1)) + 1;
 #endif
         }
         size = pVoice->NoteNextSize;
@@ -1784,7 +1784,7 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
             UFLOAT fwave_increment;
 
             fwave_increment = PV_GetWavePitchFloat(pVoice->NotePitch);
-            pVoice->NoteNextSize = (INT16)(fwave_increment * (pMixer->One_Slice + 1)) + 1;
+            pVoice->NoteNextSize = (int16_t)(fwave_increment * (pMixer->One_Slice + 1)) + 1;
         }
         size = pVoice->NoteNextSize;
         start = pVoice->samplePosition_f;
@@ -1798,22 +1798,22 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
 
             wave_increment = PV_GetWavePitch(pVoice->NotePitch);
             pVoice->NoteNextSize =
-                (INT16)((wave_increment * (pMixer->One_Slice + 1) + STEP_FULL_RANGE) >> STEP_BIT_RANGE);
+                (int16_t)((wave_increment * (pMixer->One_Slice + 1) + STEP_FULL_RANGE) >> STEP_BIT_RANGE);
         }
         size = pVoice->NoteNextSize;
         start = pVoice->NoteWave >> STEP_BIT_RANGE;
-        end = (XBYTE *)pVoice->NotePtrEnd - (XBYTE *)pVoice->NotePtr;
+        end = (unsigned char *)pVoice->NotePtrEnd - (unsigned char *)pVoice->NotePtr;
         break;
 #endif
     }
 
     // This is sure easier than the LFO modules!
     PV_ADSRModule(&(pVoice->volumeADSRRecord),
-                  (XBOOL)((pVoice->voiceMode == VOICE_SUSTAINING) ||
+                  (bool)((pVoice->voiceMode == VOICE_SUSTAINING) ||
                           (pVoice->sustainMode == SUS_ON_NOTE_ON)));
 
     // now reduce the current volume by the sustainDecayLevel which is fixed point
-    pVoice->NoteVolumeEnvelope = (INT16)XFixedMultiply(pVoice->volumeADSRRecord.currentLevel,
+    pVoice->NoteVolumeEnvelope = (int16_t)XFixedMultiply(pVoice->volumeADSRRecord.currentLevel,
                                                        pVoice->volumeADSRRecord.sustainingDecayLevel);
     // BAE_PRINTF("cl = %ld sdl = %ld\n", (int32_t)pVoice->volumeADSRRecord.currentLevel,
     //                                   (int32_t)pVoice->volumeADSRRecord.sustainingDecayLevel);
@@ -1823,7 +1823,7 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
     // BAE_PRINTF("2;NoteVolumeEnvelopeBeforeLFO = %ld\n", (int32_t)pVoice->NoteVolumeEnvelopeBeforeLFO);
     if (pVoice->volumeLFOValue >= 0) // don't handle volume LFO values less than zero.
     {
-        pVoice->NoteVolumeEnvelope = (INT16)((pVoice->NoteVolumeEnvelope * pVoice->volumeLFOValue) >> 12L);
+        pVoice->NoteVolumeEnvelope = (int16_t)((pVoice->NoteVolumeEnvelope * pVoice->volumeLFOValue) >> 12L);
     }
     // BAE_PRINTF("3;NoteVolumeEnvelope = %ld\n", (int32_t)pVoice->NoteVolumeEnvelope);
 
@@ -2119,7 +2119,7 @@ static void PV_ClearReverbBuffer()
     // old content keeps re-feeding the reverb every slice and notes "stack" forever.
     // Historically only the variable reverb path cleared it; Neo reverb modes also
     // consume songBufferReverb even though they're configured as "fixed".
-    XBOOL shouldClear = FALSE;
+    bool shouldClear = FALSE;
 
 #if REVERB_USED == VARIABLE_REVERB
     if (GM_IsReverbFixed() == FALSE)
@@ -2137,8 +2137,8 @@ static void PV_ClearReverbBuffer()
 
     if (shouldClear)
     {
-        register INT32 *destL = &MusicGlobals->songBufferReverb[0];
-        register LOOPCOUNT count, four_loop = MusicGlobals->Four_Loop;
+        register int32_t *destL = &MusicGlobals->songBufferReverb[0];
+        register int32_t count, four_loop = MusicGlobals->Four_Loop;
 
         for (count = 0; count < four_loop; count++)
         {
@@ -2157,8 +2157,8 @@ static void PV_ClearReverbBuffer()
 static void PV_ClearChorusBuffer()
 {
 #if USE_NEW_EFFECTS
-    register INT32 *destL = &MusicGlobals->songBufferChorus[0];
-    register LOOPCOUNT count, four_loop = MusicGlobals->Four_Loop;
+    register int32_t *destL = &MusicGlobals->songBufferChorus[0];
+    register int32_t count, four_loop = MusicGlobals->Four_Loop;
 
     for (count = 0; count < four_loop; count++)
     {
@@ -2173,10 +2173,10 @@ static void PV_ClearChorusBuffer()
 #endif
 
 #ifdef BAE_COMPLETE
-INLINE static void PV_ClearMixBuffers(XBOOL doStereo)
+INLINE static void PV_ClearMixBuffers(bool doStereo)
 {
-    register INT32 *destL;
-    register LOOPCOUNT count, four_loop;
+    register int32_t *destL;
+    register int32_t count, four_loop;
 
     destL = &MusicGlobals->songBufferDry[0];
     four_loop = MusicGlobals->Four_Loop;
@@ -2222,9 +2222,9 @@ INLINE static void PV_ClearMixBuffers(XBOOL doStereo)
 INLINE static void PV_ServeInstruments(void)
 {
     register GM_Mixer *pMixer;
-    register LOOPCOUNT count;
+    register int32_t count;
     register GM_Voice *pVoice;
-    XBOOL someSoundActive;
+    bool someSoundActive;
 
     pMixer = MusicGlobals;
     // Process active voices for the inexpensive reverb cases:
@@ -2260,7 +2260,7 @@ INLINE static void PV_ServeInstruments(void)
 INLINE static void PV_ServeInstruments(void)
 {
     register GM_Mixer *pMixer;
-    register LOOPCOUNT count;
+    register int32_t count;
     register GM_Voice *pVoice;
 
     pMixer = MusicGlobals;
@@ -2435,7 +2435,7 @@ void GM_TestToneFrequency(XFIXED freq)
     }
 }
 
-void GM_TestTone(XBOOL toneStatus)
+void GM_TestTone(bool toneStatus)
 {
     GM_TestToneFrequency(gToneFreq << 16L);
     gToneOn = toneStatus;
@@ -2443,7 +2443,7 @@ void GM_TestTone(XBOOL toneStatus)
 
 #ifdef BAE_MCU
 // build next frame. Causes messages to be sent to the DSP. Calls GM_ProcessSyncUpdateFromDSP
-void BAE_BuildMCUSlice(void *threadContext, XDWORD dspTime)
+void BAE_BuildMCUSlice(void *threadContext, uint32_t dspTime)
 {
     GM_Mixer *pMixer;
     uint32_t delta, end;
@@ -2613,7 +2613,7 @@ static void PV_ProcessSyncronizedVoiceStart(void)
     GM_Mixer *pMixer;
     GM_Voice *pVoice;
     void *syncReference;
-    LOOPCOUNT count, max;
+    int32_t count, max;
     uint32_t time;
 
     pMixer = GM_GetCurrentMixer();
@@ -2656,7 +2656,7 @@ static void PV_ProcessSyncronizedVoiceStart(void)
 #ifdef BAE_MCU
 // setup, runtime, a valid sample process loop. Either filtered, or not, reverb/chorused or not.
 // Return TRUE, if everything is valid.
-static XBOOL PV_SetupProcessFunctions(GM_Mixer *pMixer)
+static bool PV_SetupProcessFunctions(GM_Mixer *pMixer)
 {
     if (pMixer)
     {
@@ -2706,9 +2706,9 @@ static XBOOL PV_SetupProcessFunctions(GM_Mixer *pMixer)
 #ifdef BAE_COMPLETE
 // setup, runtime, a valid sample process loop. Either filtered, or not, reverb/chorused or not.
 // Return TRUE, if everything is valid.
-static XBOOL PV_SetupProcessFunctions(GM_Mixer *pMixer)
+static bool PV_SetupProcessFunctions(GM_Mixer *pMixer)
 {
-    XBOOL okdoky;
+    bool okdoky;
 
     okdoky = TRUE;
     // Set up the various procs for mixdown:
@@ -2878,7 +2878,7 @@ static XBOOL PV_SetupProcessFunctions(GM_Mixer *pMixer)
 
 #ifdef BAE_MCU
 // process next frame
-OPErr GM_ProcessSyncUpdateFromDSP(XDWORD dspTime)
+OPErr GM_ProcessSyncUpdateFromDSP(uint32_t dspTime)
 {
     GM_Mixer *pMixer;
 
@@ -2992,11 +2992,11 @@ void PV_ProcessSampleFrame(void *threadContext, void *destinationSamples)
         // Apply global volume to the final mix buffer
         if (pMixer->globalVolume != MAX_MASTER_VOLUME)
         {
-            INT32 *buffer = pMixer->songBufferDry;
-            LOOPCOUNT samples = pMixer->One_Loop * (pMixer->generateStereoOutput ? 2 : 1);
-            for (LOOPCOUNT i = 0; i < samples; i++)
+            int32_t *buffer = pMixer->songBufferDry;
+            int32_t samples = pMixer->One_Loop * (pMixer->generateStereoOutput ? 2 : 1);
+            for (int32_t i = 0; i < samples; i++)
             {
-                buffer[i] = (INT32)(((int64_t)buffer[i] * pMixer->globalVolume) / MAX_MASTER_VOLUME);
+                buffer[i] = (int32_t)(((int64_t)buffer[i] * pMixer->globalVolume) / MAX_MASTER_VOLUME);
             }
         }
 
@@ -3048,17 +3048,17 @@ void PV_ProcessSampleFrame(void *threadContext, void *destinationSamples)
 // them to decay more completely before being killed.
 static GM_Voice *PV_FindFreeVoice(GM_Mixer *pMixer,
                                   GM_Song *pSong,
-                                  XSDWORD calculatedNewVolume,
-                                  XWORD newMidiPitch,
-                                  XSWORD the_instrument,
-                                  XSWORD the_channel)
+                                  int32_t calculatedNewVolume,
+                                  uint16_t newMidiPitch,
+                                  int16_t the_instrument,
+                                  int16_t the_channel)
 {
     GM_Voice *the_entry = NULL, *pVoice;
-    LOOPCOUNT count;
+    int32_t count;
     XFIXED bestLevel;
-    XSWORD priority;
-    XSDWORD volume32;
-    XDWORD timeStamp;
+    int16_t priority;
+    int32_t volume32;
+    uint32_t timeStamp;
 
     // get synth priority to determine note stealing
     priority = pSong->songPriority;
@@ -3175,13 +3175,13 @@ static GM_Voice *PV_FindFreeVoice(GM_Mixer *pMixer,
     for (count = 0; count < pMixer->MaxNotes; count++)
     {
         pVoice = &pMixer->NoteEntry[count];
-        if (pVoice->NoteVolume < (XSDWORD)bestLevel)
+        if (pVoice->NoteVolume < (int32_t)bestLevel)
         {
             bestLevel = pVoice->NoteVolume;
             the_entry = pVoice;
         }
     }
-    if (((XSDWORD)bestLevel * 4) < volume32) // NOTE:  was * 8 before 6/7/01     DS
+    if (((int32_t)bestLevel * 4) < volume32) // NOTE:  was * 8 before 6/7/01     DS
     {
         goto EnterNote;
     }
@@ -3192,7 +3192,7 @@ static GM_Voice *PV_FindFreeVoice(GM_Mixer *pMixer,
     for (count = 0; count < pMixer->MaxNotes; count++)
     {
         pVoice = &pMixer->NoteEntry[count];
-        if ((XSDWORD)bestLevel > ((pMixer->NoteEntry[count].NoteVolume *
+        if ((int32_t)bestLevel > ((pMixer->NoteEntry[count].NoteVolume *
                                    pVoice->NoteVolumeEnvelopeBeforeLFO) >>
                                   VOLUME_PRECISION_SCALAR))
         {
@@ -3201,7 +3201,7 @@ static GM_Voice *PV_FindFreeVoice(GM_Mixer *pMixer,
         }
     }
 
-    if (((XSDWORD)bestLevel * 4) < volume32)
+    if (((int32_t)bestLevel * 4) < volume32)
     {
         goto EnterNote;
     }
@@ -3262,24 +3262,24 @@ EnterNote:
 // This function also will kill notes if needed to activate this new note.
 //
 // This function is primarly called from the BAE midi sequencer. There's no need to call it directly.
-void PV_StartMIDINote(GM_Song *pSong, INT16 the_instrument,
-                      INT16 the_channel, INT16 the_track, INT16 notePitch, INT32 Volume)
+void PV_StartMIDINote(GM_Song *pSong, int16_t the_instrument,
+                      int16_t the_channel, int16_t the_track, int16_t notePitch, int32_t Volume)
 {
     register GM_Mixer *pMixer;
-    register UBYTE *pSample;
+    register unsigned char *pSample;
     register GM_Voice *the_entry;
     register GM_Instrument *theI;
     register GM_Instrument *pInstrument;
     register GM_KeymapSplit *k;
-    register INT32 count;
-    INT16 newPitch, playPitch;
-    UINT16 splitCount;
-    UINT32 loopstart, loopend;
-    UINT32 noteStartOffsetFrames;
-    UINT32 minLoopSize;
-    register INT32 i, j;
-    INT32 volume32;
-    INT32 sampleNumber;
+    register int32_t count;
+    int16_t newPitch, playPitch;
+    uint16_t splitCount;
+    uint32_t loopstart, loopend;
+    uint32_t noteStartOffsetFrames;
+    uint32_t minLoopSize;
+    register int32_t i, j;
+    int32_t volume32;
+    int32_t sampleNumber;
 
     pMixer = GM_GetCurrentMixer();
 
@@ -3465,11 +3465,11 @@ void PV_StartMIDINote(GM_Song *pSong, INT16 the_instrument,
         the_entry->pInstrument = pInstrument;
         the_entry->pSong = pSong;
         the_entry->NoteVolumeEnvelopeBeforeLFO = VOLUME_PRECISION_SCALAR;
-        pSample = (UBYTE *)pInstrument->u.w.theWaveform;
+        pSample = (unsigned char *)pInstrument->u.w.theWaveform;
         the_entry->NotePtr = pSample;
         the_entry->NotePtrEnd = pSample + pInstrument->u.w.waveFrames;
-        the_entry->NoteChannel = (SBYTE)the_channel;
-        the_entry->NoteTrack = (SBYTE)the_track;
+        the_entry->NoteChannel = (signed char)the_channel;
+        the_entry->NoteTrack = (signed char)the_track;
 
         // copy the volume ADSR record into the GM_Voice
         the_entry->volumeADSRRecord = pInstrument->volumeADSRRecord;
@@ -3493,7 +3493,7 @@ void PV_StartMIDINote(GM_Song *pSong, INT16 the_instrument,
 #if REVERB_USED != REVERB_DISABLED
         the_entry->avoidReverb = pInstrument->avoidReverb;          // use instrument default. in case instrument designer
         the_entry->reverbLevel = pSong->channelReverb[the_channel]; // set current verb level
-        the_entry->chorusLevel = (INT16)PV_ModifyVelocityFromCurve(pSong, pSong->channelChorus[the_channel]);
+        the_entry->chorusLevel = (int16_t)PV_ModifyVelocityFromCurve(pSong, pSong->channelChorus[the_channel]);
         // wants no verb enabled
         if (GM_IsReverbFixed())
         {
@@ -3535,8 +3535,8 @@ void PV_StartMIDINote(GM_Song *pSong, INT16 the_instrument,
         }
         if (loopend - loopstart)
         {
-            the_entry->NoteLoopPtr = (XBYTE *)the_entry->NotePtr + loopstart;
-            the_entry->NoteLoopEnd = (XBYTE *)the_entry->NotePtr + loopend;
+            the_entry->NoteLoopPtr = (unsigned char *)the_entry->NotePtr + loopstart;
+            the_entry->NoteLoopEnd = (unsigned char *)the_entry->NotePtr + loopend;
         }
         else
         {
@@ -3552,9 +3552,9 @@ void PV_StartMIDINote(GM_Song *pSong, INT16 the_instrument,
         }
 
         the_entry->NoteProgram = the_instrument;
-        the_entry->NoteMIDIPitch = (SBYTE)notePitch; // save note pitch unprocessed
-        the_entry->noteOffsetStart = (SBYTE)pSong->songPitchShift;
-        the_entry->NoteMIDIVolume = (INT16)Volume; // save note volume unscaled
+        the_entry->NoteMIDIPitch = (signed char)notePitch; // save note pitch unprocessed
+        the_entry->noteOffsetStart = (signed char)pSong->songPitchShift;
+        the_entry->NoteMIDIVolume = (int16_t)Volume; // save note volume unscaled
 
         the_entry->NoteVolume = volume32;
         // Resonant low-pass filter stuff
@@ -3606,9 +3606,9 @@ void PV_StartMIDINote(GM_Song *pSong, INT16 the_instrument,
         {
             for (i = 0; i < pInstrument->curveRecordCount; i++)
             {
-                INT32 scalar;
-                INT32 tieFromValue = 0;
-                INT32 curveCount = pInstrument->curve[i].curveCount;
+                int32_t scalar;
+                int32_t tieFromValue = 0;
+                int32_t curveCount = pInstrument->curve[i].curveCount;
                 switch (pInstrument->curve[i].tieFrom)
                 {
                 case PITCH_LFO:
@@ -3638,8 +3638,8 @@ void PV_StartMIDINote(GM_Song *pSong, INT16 the_instrument,
                             scalar = pInstrument->curve[i].to_Scalar[count];
                             if (pInstrument->curve[i].from_Value[count] != pInstrument->curve[i].from_Value[count + 1])
                             {
-                                INT32 from_difference = pInstrument->curve[i].from_Value[count + 1] - pInstrument->curve[i].from_Value[count];
-                                INT32 to_difference = pInstrument->curve[i].to_Scalar[count + 1] - pInstrument->curve[i].to_Scalar[count];
+                                int32_t from_difference = pInstrument->curve[i].from_Value[count + 1] - pInstrument->curve[i].from_Value[count];
+                                int32_t to_difference = pInstrument->curve[i].to_Scalar[count + 1] - pInstrument->curve[i].to_Scalar[count];
                                 scalar += ((((tieFromValue - pInstrument->curve[i].from_Value[count]) << 8) / from_difference) * to_difference) >> 8;
                             }
                         }
@@ -3781,7 +3781,7 @@ void PV_StartMIDINote(GM_Song *pSong, INT16 the_instrument,
         if (the_entry->volumeADSRRecord.ADSRTime[0] == 0)
         {
             the_entry->volumeADSRRecord.currentLevel = the_entry->volumeADSRRecord.ADSRLevel[0];
-            the_entry->NoteVolumeEnvelope = (INT16)the_entry->volumeADSRRecord.ADSRLevel[0];
+            the_entry->NoteVolumeEnvelope = (int16_t)the_entry->volumeADSRRecord.ADSRLevel[0];
             if (pMixer->generateStereoOutput)
             {
                 PV_CalculateStereoVolume(the_entry, &the_entry->lastAmplitudeL, &the_entry->lastAmplitudeR);
@@ -3822,14 +3822,14 @@ void PV_StartMIDINote(GM_Song *pSong, INT16 the_instrument,
 //
 // The heristic is kill the longest note of the type passed. For example with two notes at 60, one of time 3000,
 // and one at time 6000. The time 3000 note at 60 will be killed.
-void PV_StopMIDINote(GM_Song *pSong, XSWORD the_instrument, XSWORD the_channel, XSWORD the_track, XSWORD notePitch)
+void PV_StopMIDINote(GM_Song *pSong, int16_t the_instrument, int16_t the_channel, int16_t the_track, int16_t notePitch)
 {
-    register LOOPCOUNT count;
+    register int32_t count;
     register GM_Mixer *pMixer;
-    register XSWORD decay;
+    register int16_t decay;
     register GM_Voice *pNote;
-    XSWORD realNote, compareNote;
-    XDWORD youngestTime;
+    int16_t realNote, compareNote;
+    uint32_t youngestTime;
     GM_Voice *pNoteToKill;
 
     pMixer = GM_GetCurrentMixer();
@@ -3908,7 +3908,7 @@ void PV_StopMIDINote(GM_Song *pSong, XSWORD the_instrument, XSWORD the_channel, 
 // without release. May cause clicks.
 // Set useChannel to -1 if kill all notes, otherwise its a channel filter.
 // Set useChannel to -1 to ignore instrument, otherwise its an instrument filter.
-static void PV_EndNotes(GM_Song *pSong, XSWORD useChannel, XLongResourceID useInstrument, XBOOL kill)
+static void PV_EndNotes(GM_Song *pSong, int16_t useChannel, XLongResourceID useInstrument, bool kill)
 {
     register int16_t count;
     register GM_Mixer *pMixer;
@@ -3987,7 +3987,7 @@ void GM_KillSongNotes(GM_Song *pSong)
 // instrument.
 void GM_KillSongInstrument(GM_Song *pSong, XLongResourceID instrument)
 {
-    PV_EndNotes(pSong, -1, (XSWORD)instrument, TRUE);
+    PV_EndNotes(pSong, -1, (int16_t)instrument, TRUE);
 }
 
 // Stop just midi notes. Note: This kills the notes currently playing. It may result in clicks.
@@ -3999,14 +3999,14 @@ void GM_KillAllNotes(void)
 // Used to get the current frame of audio data that has been built. Useful for fun displays. Returns 16 bit information
 // only. If generating 8 bit, then data output is converted. If mono data then right channel will be dead.
 // This code is deliberately less efficient than the real output scaling code, for space conservation purposes.
-INT16 GM_GetAudioSampleFrame(INT16 *pLeft, INT16 *pRight)
+int16_t GM_GetAudioSampleFrame(int16_t *pLeft, int16_t *pRight)
 {
 #ifdef BAE_MCU
     return 0;
 #else
-    register LOOPCOUNT size, count;
-    register INT32 *sourceL;
-    register INT32 i, k8000;
+    register int32_t size, count;
+    register int32_t *sourceL;
+    register int32_t i, k8000;
     GM_Mixer *pMixer;
 
     pMixer = GM_GetCurrentMixer();
@@ -4030,7 +4030,7 @@ INT16 GM_GetAudioSampleFrame(INT16 *pLeft, INT16 *pRight)
                     else
                         i = 0;
                 }
-                *pLeft++ = (INT16)(i - k8000);
+                *pLeft++ = (int16_t)(i - k8000);
                 i = (*sourceL++ >> OUTPUT_SCALAR);
                 i += k8000;
                 if (i & 0xFFFF0000)
@@ -4040,7 +4040,7 @@ INT16 GM_GetAudioSampleFrame(INT16 *pLeft, INT16 *pRight)
                     else
                         i = 0;
                 }
-                *pRight++ = (INT16)(i - k8000);
+                *pRight++ = (int16_t)(i - k8000);
 
                 i = (*sourceL++ >> OUTPUT_SCALAR);
                 i += k8000;
@@ -4051,7 +4051,7 @@ INT16 GM_GetAudioSampleFrame(INT16 *pLeft, INT16 *pRight)
                     else
                         i = 0;
                 }
-                *pLeft++ = (INT16)(i - k8000);
+                *pLeft++ = (int16_t)(i - k8000);
                 i = (*sourceL++ >> OUTPUT_SCALAR);
                 i += k8000;
                 if (i & 0xFFFF0000)
@@ -4061,7 +4061,7 @@ INT16 GM_GetAudioSampleFrame(INT16 *pLeft, INT16 *pRight)
                     else
                         i = 0;
                 }
-                *pRight++ = (INT16)(i - k8000);
+                *pRight++ = (int16_t)(i - k8000);
 
                 i = (*sourceL++ >> OUTPUT_SCALAR);
                 i += k8000;
@@ -4072,7 +4072,7 @@ INT16 GM_GetAudioSampleFrame(INT16 *pLeft, INT16 *pRight)
                     else
                         i = 0;
                 }
-                *pLeft++ = (INT16)(i - k8000);
+                *pLeft++ = (int16_t)(i - k8000);
                 i = (*sourceL++ >> OUTPUT_SCALAR);
                 i += k8000;
                 if (i & 0xFFFF0000)
@@ -4082,7 +4082,7 @@ INT16 GM_GetAudioSampleFrame(INT16 *pLeft, INT16 *pRight)
                     else
                         i = 0;
                 }
-                *pRight++ = (INT16)(i - k8000);
+                *pRight++ = (int16_t)(i - k8000);
 
                 i = (*sourceL++ >> OUTPUT_SCALAR);
                 i += k8000;
@@ -4093,7 +4093,7 @@ INT16 GM_GetAudioSampleFrame(INT16 *pLeft, INT16 *pRight)
                     else
                         i = 0;
                 }
-                *pLeft++ = (INT16)(i - k8000);
+                *pLeft++ = (int16_t)(i - k8000);
                 i = (*sourceL++ >> OUTPUT_SCALAR);
                 i += k8000;
                 if (i & 0xFFFF0000)
@@ -4103,7 +4103,7 @@ INT16 GM_GetAudioSampleFrame(INT16 *pLeft, INT16 *pRight)
                     else
                         i = 0;
                 }
-                *pRight++ = (INT16)(i - k8000);
+                *pRight++ = (int16_t)(i - k8000);
             }
         }
         else
@@ -4119,7 +4119,7 @@ INT16 GM_GetAudioSampleFrame(INT16 *pLeft, INT16 *pRight)
                     else
                         i = 0;
                 }
-                *pLeft++ = (INT16)(i - k8000);
+                *pLeft++ = (int16_t)(i - k8000);
                 i = (*sourceL++ >> OUTPUT_SCALAR);
                 i += k8000;
                 if (i & 0xFFFF0000)
@@ -4129,7 +4129,7 @@ INT16 GM_GetAudioSampleFrame(INT16 *pLeft, INT16 *pRight)
                     else
                         i = 0;
                 }
-                *pLeft++ = (INT16)(i - k8000);
+                *pLeft++ = (int16_t)(i - k8000);
 
                 i = (*sourceL++ >> OUTPUT_SCALAR);
                 i += k8000;
@@ -4140,7 +4140,7 @@ INT16 GM_GetAudioSampleFrame(INT16 *pLeft, INT16 *pRight)
                     else
                         i = 0;
                 }
-                *pLeft++ = (INT16)(i - k8000);
+                *pLeft++ = (int16_t)(i - k8000);
                 i = (*sourceL++ >> OUTPUT_SCALAR);
                 i += k8000;
                 if (i & 0xFFFF0000)
@@ -4150,7 +4150,7 @@ INT16 GM_GetAudioSampleFrame(INT16 *pLeft, INT16 *pRight)
                     else
                         i = 0;
                 }
-                *pLeft++ = (INT16)(i - k8000);
+                *pLeft++ = (int16_t)(i - k8000);
 
                 i = (*sourceL++ >> OUTPUT_SCALAR);
                 i += k8000;
@@ -4161,7 +4161,7 @@ INT16 GM_GetAudioSampleFrame(INT16 *pLeft, INT16 *pRight)
                     else
                         i = 0;
                 }
-                *pLeft++ = (INT16)(i - k8000);
+                *pLeft++ = (int16_t)(i - k8000);
                 i = (*sourceL++ >> OUTPUT_SCALAR);
                 i += k8000;
                 if (i & 0xFFFF0000)
@@ -4171,7 +4171,7 @@ INT16 GM_GetAudioSampleFrame(INT16 *pLeft, INT16 *pRight)
                     else
                         i = 0;
                 }
-                *pLeft++ = (INT16)(i - k8000);
+                *pLeft++ = (int16_t)(i - k8000);
 
                 i = (*sourceL++ >> OUTPUT_SCALAR);
                 i += k8000;
@@ -4182,7 +4182,7 @@ INT16 GM_GetAudioSampleFrame(INT16 *pLeft, INT16 *pRight)
                     else
                         i = 0;
                 }
-                *pLeft++ = (INT16)(i - k8000);
+                *pLeft++ = (int16_t)(i - k8000);
                 i = (*sourceL++ >> OUTPUT_SCALAR);
                 i += k8000;
                 if (i & 0xFFFF0000)
@@ -4192,11 +4192,11 @@ INT16 GM_GetAudioSampleFrame(INT16 *pLeft, INT16 *pRight)
                     else
                         i = 0;
                 }
-                *pLeft++ = (INT16)(i - k8000);
+                *pLeft++ = (int16_t)(i - k8000);
             }
         }
     }
-    return (INT16)size;
+    return (int16_t)size;
 #endif
 }
 
@@ -4204,7 +4204,7 @@ INT16 GM_GetAudioSampleFrame(INT16 *pLeft, INT16 *pRight)
 void GM_DisplayVoiceData(void)
 {
     GM_Mixer *pMixer = GM_GetCurrentMixer();
-    LOOPCOUNT count;
+    int32_t count;
     GM_Voice *pVoice;
 
     for (count = 0; count < (pMixer->MaxNotes + pMixer->MaxEffects); count++)
@@ -4233,13 +4233,13 @@ void GM_DisplayVoiceData(void)
 
 // This will check active voices and look at a sub sample of the audio output to
 // determine if there's any audio still playing
-static INT16 pcmLeft[2048], pcmRight[2048];
-XBOOL GM_IsAudioActive(void)
+static int16_t pcmLeft[2048], pcmRight[2048];
+bool GM_IsAudioActive(void)
 {
     register GM_Mixer *pMixer;
-    register LOOPCOUNT count;
+    register int32_t count;
     register GM_Voice *pVoice;
-    XBOOL someSoundActive;
+    bool someSoundActive;
 
     pMixer = MusicGlobals;
     someSoundActive = FALSE;
@@ -4256,7 +4256,7 @@ XBOOL GM_IsAudioActive(void)
     // other effects that can cause audio
     if (someSoundActive == FALSE)
     {
-        INT16 pcm, samples;
+        int16_t pcm, samples;
 
         samples = GM_GetAudioSampleFrame(pcmLeft, pcmRight);
         pcm = 0;

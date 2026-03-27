@@ -22,7 +22,7 @@
 #define MAX_BITSTREAM_SIZE 8192
 #define LAME_DECODER_PRIMING_SAMPLES 529U
 
-typedef XBOOL (*MPEGFillBufferInternalFn)(void *buffer, void *userRef);
+typedef bool (*MPEGFillBufferInternalFn)(void *buffer, void *userRef);
 
 struct LAMEEncoderStream {
     lame_t gf;
@@ -37,7 +37,7 @@ struct LAMEEncoderStream {
     /* 2x size: last frame may produce both encode + flush output */
     unsigned char bitstream[MAX_BITSTREAM_SIZE * 2];
     uint32_t bitstreamBytes;
-    XBOOL lastFrame;
+    bool lastFrame;
     /* leftover frames when slice doesn't align to MP3 frame size */
     int16_t *leftoverBuf;
     uint32_t leftoverFrames;
@@ -152,7 +152,7 @@ extern "C" uint32_t MPG_EncodeGetDelay(void *stream){
 
 /* Process: call refill, assemble PCM frames into a buffer sized for lame_encode_buffer_interleaved,
    invoke LAME and return produced bytes. */
-extern "C" int MPG_EncodeProcess(void *stream, XPTR *pReturnedBuffer, uint32_t *pReturnedSize, XBOOL *pLastFrame){
+extern "C" int MPG_EncodeProcess(void *stream, XPTR *pReturnedBuffer, uint32_t *pReturnedSize, bool *pLastFrame){
     if(pLastFrame) *pLastFrame = FALSE;
     if(!stream){ if(pReturnedBuffer) *pReturnedBuffer=NULL; if(pReturnedSize) *pReturnedSize=0; return 0; }
     LAMEEncoderStream *s = (LAMEEncoderStream*)stream;
@@ -197,7 +197,7 @@ extern "C" int MPG_EncodeProcess(void *stream, XPTR *pReturnedBuffer, uint32_t *
     } else {
         /* Streaming/callback mode: call refill to get new PCM data each time */
         while(filled < targetFrames && !s->lastFrame){
-            XBOOL ok = s->refill(s->pcmBuffer, s->refillUser);
+            bool ok = s->refill(s->pcmBuffer, s->refillUser);
             if(!ok){ s->lastFrame = TRUE; break; }
             uint32_t sliceFrames = s->pcmFramesPerCall;
             uint32_t need = targetFrames - filled;
@@ -307,7 +307,7 @@ static const uint32_t sMpegSamplesPerFrame[2][3] = {
 
 /* Find and parse the first valid MPEG sync-word in the buffer.
  * Returns TRUE on success, filling the out-parameters. */
-static XBOOL PV_ParseFirstMpegFrame(const uint8_t *buf, uint32_t bufSize,
+static bool PV_ParseFirstMpegFrame(const uint8_t *buf, uint32_t bufSize,
                                      uint32_t *outSampleRate, uint32_t *outChannels,
                                      uint32_t *outBitrateKbps, uint32_t *outSamplesPerFrame,
                                      uint32_t *outFrameBytes)
@@ -400,7 +400,7 @@ extern "C" OPErr XCloseMPEGStream(XMPEGDecodedData *stream) {
 }
 
 // Stub implementation of XFillMPEGStreamBuffer for encoder-only builds
-extern "C" OPErr XFillMPEGStreamBuffer(XMPEGDecodedData *stream, void *pcmAudioBuffer, XBOOL *pDone) {
+extern "C" OPErr XFillMPEGStreamBuffer(XMPEGDecodedData *stream, void *pcmAudioBuffer, bool *pDone) {
     // Simple stub - this shouldn't be called in normal encoder-only operation
     if (pDone) *pDone = TRUE;
     return PARAM_ERR; // Signal that this is not a real decoder

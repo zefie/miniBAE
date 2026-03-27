@@ -83,45 +83,45 @@
 // Cubic Hermite (Catmull-Rom) interpolation for advanced interpolation mode.
 // frac is U3232 fractional part (full 32-bit), representing position between s1 and s2.
 // Returns the interpolated sample value with smooth C1-continuous curve.
-static inline INT32 PV_CubicHermiteInterpU3232(INT32 s0, INT32 s1, INT32 s2, INT32 s3, U32 frac)
+static inline int32_t PV_CubicHermiteInterpU3232(int32_t s0, int32_t s1, int32_t s2, int32_t s3, U32 frac)
 {
     // Use top 15 bits of fraction for interpolation (matching U3232 precision)
-    INT32 t = (INT32)(frac >> 17);  // 0..32767
+    int32_t t = (int32_t)(frac >> 17);  // 0..32767
     // Catmull-Rom via Horner's method, scaled by 2 to avoid fractions:
     //   A = -s0 + 3*s1 - 3*s2 + s3
     //   B = 2*s0 - 5*s1 + 4*s2 - s3
     //   C = s2 - s0
     //   result = ((A*t + B)*t + C)*t / 2 + s1   (t in 0..1 mapped to 0..32767)
-    INT32 A = -s0 + 3*s1 - 3*s2 + s3;
-    INT32 B = 2*s0 - 5*s1 + 4*s2 - s3;
-    INT32 C = s2 - s0;
-    INT32 r;
-    r = (INT32)(((int64_t)A * t) >> 15) + B;
-    r = (INT32)(((int64_t)r * t) >> 15) + C;
-    r = (INT32)(((int64_t)r * t) >> 16);  // >> 15 for t scale, +1 for the /2
+    int32_t A = -s0 + 3*s1 - 3*s2 + s3;
+    int32_t B = 2*s0 - 5*s1 + 4*s2 - s3;
+    int32_t C = s2 - s0;
+    int32_t r;
+    r = (int32_t)(((int64_t)A * t) >> 15) + B;
+    r = (int32_t)(((int64_t)r * t) >> 15) + C;
+    r = (int32_t)(((int64_t)r * t) >> 16);  // >> 15 for t scale, +1 for the /2
     return s1 + r;
 }
 
 // Fetch a 16-bit sample with loop-wrapping for cubic Hermite boundary cases.
-static inline INT32 PV_LoopWrapSample16U3232(INT16 *source, INT32 idx, INT32 loopStart, INT32 loopEnd)
+static inline int32_t PV_LoopWrapSample16U3232(int16_t *source, int32_t idx, int32_t loopStart, int32_t loopEnd)
 {
-    INT32 loopLen = loopEnd - loopStart;
+    int32_t loopLen = loopEnd - loopStart;
     if (idx < loopStart)
         idx += loopLen;
     else if (idx >= loopEnd)
         idx -= loopLen;
-    return (INT32)source[idx];
+    return (int32_t)source[idx];
 }
 
 void PV_ServeU3232FullBuffer (GM_Voice *this_voice)
 {
-    register INT32          *dest;
-    register LOOPCOUNT      a, inner;
-    register UBYTE          *source, *calculated_source;
-    register INT32          b, c;
+    register int32_t          *dest;
+    register int32_t      a, inner;
+    register unsigned char          *source, *calculated_source;
+    register int32_t          b, c;
     register U32            cur_wave_i, cur_wave_f;
     U3232                   wave_increment;
-    register INT32          amplitude, amplitudeAdjust;
+    register int32_t          amplitude, amplitudeAdjust;
 
 #if REVERB_USED == VARIABLE_REVERB
     if (this_voice->reverbLevel || this_voice->chorusLevel)
@@ -147,22 +147,22 @@ void PV_ServeU3232FullBuffer (GM_Voice *this_voice)
             {
                 b = source[cur_wave_i];
                 c = source[cur_wave_i+1];
-                dest[0] += ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80) * amplitude;
+                dest[0] += ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) * amplitude;
                 ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
                 b = source[cur_wave_i];
                 c = source[cur_wave_i+1];
-                dest[1] += ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80) * amplitude;
+                dest[1] += ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) * amplitude;
                 ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
                 b = source[cur_wave_i];
                 c = source[cur_wave_i+1];
-                dest[2] += ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80) * amplitude;
+                dest[2] += ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) * amplitude;
                 ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
                 b = source[cur_wave_i];
                 c = source[cur_wave_i+1];
-                dest[3] += ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80) * amplitude;
+                dest[3] += ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) * amplitude;
                 ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
                 dest += 4;
@@ -178,7 +178,7 @@ void PV_ServeU3232FullBuffer (GM_Voice *this_voice)
                     calculated_source = source + cur_wave_i * 2;
                     b = calculated_source[0] + calculated_source[1];    // average left & right channels
                     c = calculated_source[2] + calculated_source[3];
-                    *dest += (((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x100) * amplitude) >> 1;
+                    *dest += (((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x100) * amplitude) >> 1;
                     dest++;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
                 }
@@ -191,16 +191,16 @@ void PV_ServeU3232FullBuffer (GM_Voice *this_voice)
     this_voice->lastAmplitudeL = amplitude;
 }
 
-void PV_ServeU3232PartialBuffer (GM_Voice *this_voice, XBOOL looping)
+void PV_ServeU3232PartialBuffer (GM_Voice *this_voice, bool looping)
 {
-    register INT32          *dest;
-    register LOOPCOUNT      a, inner;
-    register UBYTE          *source, *calculated_source;
-    register INT32          b, c;
+    register int32_t          *dest;
+    register int32_t      a, inner;
+    register unsigned char          *source, *calculated_source;
+    register int32_t          b, c;
     register U32            cur_wave_i, cur_wave_f;
     register U32            end_wave, wave_adjust = 0;
     U3232                   wave_increment;
-    register INT32          amplitude, amplitudeAdjust;
+    register int32_t          amplitude, amplitudeAdjust;
 
 #if REVERB_USED == VARIABLE_REVERB
     if (this_voice->reverbLevel || this_voice->chorusLevel)
@@ -236,10 +236,10 @@ void PV_ServeU3232PartialBuffer (GM_Voice *this_voice, XBOOL looping)
             {
                 for (inner = 0; inner < 4; inner++)
                 {
-                    THE_CHECK_U3232(UBYTE *);
+                    THE_CHECK_U3232(unsigned char *);
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    *dest += ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80) * amplitude;
+                    *dest += ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) * amplitude;
                     dest++;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
                 }
@@ -252,11 +252,11 @@ void PV_ServeU3232PartialBuffer (GM_Voice *this_voice, XBOOL looping)
             {
                 for (inner = 0; inner < 4; inner++)
                 {
-                    THE_CHECK_U3232(UBYTE *);
+                    THE_CHECK_U3232(unsigned char *);
                     calculated_source = source + cur_wave_i * 2;
                     b = calculated_source[0] + calculated_source[1];
                     c = calculated_source[2] + calculated_source[3];
-                    *dest += (((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x100) * amplitude) >> 1;
+                    *dest += (((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x100) * amplitude) >> 1;
                     dest++;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
                 }
@@ -274,18 +274,18 @@ FINISH:
 
 void PV_ServeU3232StereoFullBuffer(GM_Voice *this_voice)
 {
-    register INT32          *destL;
-    register LOOPCOUNT      a, inner;
-    register UBYTE          *source, *calculated_source;
-    register INT32          b, c;
+    register int32_t          *destL;
+    register int32_t      a, inner;
+    register unsigned char          *source, *calculated_source;
+    register int32_t          b, c;
     register U32            cur_wave_i, cur_wave_f;
     U3232                   wave_increment;
-    register INT32          sample;
-    INT32                   ampValueL, ampValueR;
-    register INT32          amplitudeL;
-    register INT32          amplitudeR;
-    register INT32          amplitudeLincrement;
-    register INT32          amplitudeRincrement;
+    register int32_t          sample;
+    int32_t                   ampValueL, ampValueR;
+    register int32_t          amplitudeL;
+    register int32_t          amplitudeR;
+    register int32_t          amplitudeLincrement;
+    register int32_t          amplitudeRincrement;
 
 #if REVERB_USED == VARIABLE_REVERB
     if (this_voice->reverbLevel || this_voice->chorusLevel)
@@ -314,28 +314,28 @@ void PV_ServeU3232StereoFullBuffer(GM_Voice *this_voice)
             {
                 b = source[cur_wave_i];
                 c = source[cur_wave_i+1];
-                sample = (((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80;
+                sample = (((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80;
                 destL[0] += sample * amplitudeL;
                 destL[1] += sample * amplitudeR;
                 ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
                 b = source[cur_wave_i];
                 c = source[cur_wave_i+1];
-                sample = (((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80;
+                sample = (((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80;
                 destL[2] += sample * amplitudeL;
                 destL[3] += sample * amplitudeR;
                 ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
                 b = source[cur_wave_i];
                 c = source[cur_wave_i+1];
-                sample = (((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80;
+                sample = (((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80;
                 destL[4] += sample * amplitudeL;
                 destL[5] += sample * amplitudeR;
                 ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
                 b = source[cur_wave_i];
                 c = source[cur_wave_i+1];
-                sample = (((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80;
+                sample = (((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80;
                 destL[6] += sample * amplitudeL;
                 destL[7] += sample * amplitudeR;
                 ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
@@ -354,10 +354,10 @@ void PV_ServeU3232StereoFullBuffer(GM_Voice *this_voice)
                     calculated_source = source + cur_wave_i * 2;
                     b = calculated_source[0];
                     c = calculated_source[2];
-                    destL[0] += ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80) * amplitudeL;
+                    destL[0] += ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) * amplitudeL;
                     b = calculated_source[1];
                     c = calculated_source[3];
-                    destL[1] += ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80) * amplitudeR;
+                    destL[1] += ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) * amplitudeR;
                     destL += 2;
             
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
@@ -373,19 +373,19 @@ void PV_ServeU3232StereoFullBuffer(GM_Voice *this_voice)
     this_voice->samplePosition.f = cur_wave_f;
 }
 
-void PV_ServeU3232StereoPartialBuffer (GM_Voice *this_voice, XBOOL looping)
+void PV_ServeU3232StereoPartialBuffer (GM_Voice *this_voice, bool looping)
 {
-    register INT32          *destL;
-    register LOOPCOUNT      a, inner;
-    register UBYTE          *source, *calculated_source;
-    register INT32          b, c, sample;
+    register int32_t          *destL;
+    register int32_t      a, inner;
+    register unsigned char          *source, *calculated_source;
+    register int32_t          b, c, sample;
     register U32            cur_wave_i, cur_wave_f;
     register U32            end_wave, wave_adjust = 0;
     U3232                   wave_increment;
-    INT32                   ampValueL, ampValueR;
-    register INT32          amplitudeL;
-    register INT32          amplitudeR;
-    register INT32          amplitudeLincrement, amplitudeRincrement;
+    int32_t                   ampValueL, ampValueR;
+    register int32_t          amplitudeL;
+    register int32_t          amplitudeR;
+    register int32_t          amplitudeLincrement, amplitudeRincrement;
 
 #if REVERB_USED == VARIABLE_REVERB
     if (this_voice->reverbLevel || this_voice->chorusLevel)
@@ -425,44 +425,44 @@ void PV_ServeU3232StereoPartialBuffer (GM_Voice *this_voice, XBOOL looping)
 #if 1   //MOE'S OBSESSIVE FOLLY
                 for (inner = 0; inner < 4; inner++)
                 {
-                    THE_CHECK_U3232(UBYTE *);
+                    THE_CHECK_U3232(unsigned char *);
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = (((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80;
+                    sample = (((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80;
                     destL[0] += sample * amplitudeL;
                     destL[1] += sample * amplitudeR;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
                     destL += 2;
                 }
 #else
-                THE_CHECK_U3232(UBYTE *);
+                THE_CHECK_U3232(unsigned char *);
                 b = source[cur_wave_i];
                 c = source[cur_wave_i+1];
-                sample = (((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80;
+                sample = (((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80;
                 destL[0] += sample * amplitudeL;
                 destL[1] += sample * amplitudeR;
                 ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
                 
-                THE_CHECK_U3232(UBYTE *);
+                THE_CHECK_U3232(unsigned char *);
                 b = source[cur_wave_i];
                 c = source[cur_wave_i+1];
-                sample = (((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80;
+                sample = (((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80;
                 destL[2] += sample * amplitudeL;
                 destL[3] += sample * amplitudeR;
                 ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
-                THE_CHECK_U3232(UBYTE *);
+                THE_CHECK_U3232(unsigned char *);
                 b = source[cur_wave_i];
                 c = source[cur_wave_i+1];
-                sample = (((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80;
+                sample = (((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80;
                 destL[4] += sample * amplitudeL;
                 destL[5] += sample * amplitudeR;
                 ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
-                THE_CHECK_U3232(UBYTE *);
+                THE_CHECK_U3232(unsigned char *);
                 b = source[cur_wave_i];
                 c = source[cur_wave_i+1];
-                sample = (((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80;
+                sample = (((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80;
                 destL[6] += sample * amplitudeL;
                 destL[7] += sample * amplitudeR;
                 ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
@@ -479,14 +479,14 @@ void PV_ServeU3232StereoPartialBuffer (GM_Voice *this_voice, XBOOL looping)
             {
                 for (inner = 0; inner < 4; inner++)
                 {
-                    THE_CHECK_U3232(UBYTE *);
+                    THE_CHECK_U3232(unsigned char *);
                     calculated_source = source + cur_wave_i * 2;
                     b = calculated_source[0];
                     c = calculated_source[2];
-                    destL[0] += ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80) * amplitudeL;
+                    destL[0] += ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) * amplitudeL;
                     b = calculated_source[1];
                     c = calculated_source[3];
-                    destL[1] += ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80) * amplitudeR;
+                    destL[1] += ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) * amplitudeR;
                     destL += 2;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
                 }
@@ -506,13 +506,13 @@ FINISH:
 // 16 bit cases
 void PV_ServeU3232FullBuffer16 (GM_Voice *this_voice)
 {
-    register INT32          *dest;
-    register LOOPCOUNT      a, inner;
-    register INT16          *source, *calculated_source;
-    register INT32          b, c, sample;
+    register int32_t          *dest;
+    register int32_t      a, inner;
+    register int16_t          *source, *calculated_source;
+    register int32_t          b, c, sample;
     register U32            cur_wave_i, cur_wave_f;
     U3232                   wave_increment;
-    register INT32          amplitude, amplitudeAdjust;
+    register int32_t          amplitude, amplitudeAdjust;
 
 #if REVERB_USED == VARIABLE_REVERB
     if (this_voice->reverbLevel || this_voice->chorusLevel)
@@ -543,14 +543,14 @@ void PV_ServeU3232FullBuffer16 (GM_Voice *this_voice)
             {
                 for (a = MusicGlobals->Four_Loop; a > 0; --a)
                 {
-                    LOOPCOUNT ii;
+                    int32_t ii;
                     for (ii = 0; ii < 4; ii++)
                     {
-                        INT32 pos = (INT32)cur_wave_i;
-                        INT32 s0 = source[(pos > 0) ? pos - 1 : 0];
-                        INT32 s1 = source[pos];
-                        INT32 s2 = source[pos + 1];
-                        INT32 s3 = source[pos + 2];
+                        int32_t pos = (int32_t)cur_wave_i;
+                        int32_t s0 = source[(pos > 0) ? pos - 1 : 0];
+                        int32_t s1 = source[pos];
+                        int32_t s2 = source[pos + 1];
+                        int32_t s3 = source[pos + 2];
                         dest[ii] += (PV_CubicHermiteInterpU3232(s0, s1, s2, s3, cur_wave_f) * amplitude) >> 4;
                         ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
                     }
@@ -564,22 +564,22 @@ void PV_ServeU3232FullBuffer16 (GM_Voice *this_voice)
                 {
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    dest[0] += (((((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b) * amplitude) >> 4;
+                    dest[0] += (((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) * amplitude) >> 4;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    dest[1] += (((((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b) * amplitude) >> 4;
+                    dest[1] += (((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) * amplitude) >> 4;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    dest[2] += (((((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b) * amplitude) >> 4;
+                    dest[2] += (((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) * amplitude) >> 4;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    dest[3] += (((((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b) * amplitude) >> 4;
+                    dest[3] += (((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) * amplitude) >> 4;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
                     dest += 4;
@@ -595,12 +595,12 @@ void PV_ServeU3232FullBuffer16 (GM_Voice *this_voice)
                 {
                     for (inner = 0; inner < 4; inner++)
                     {
-                        INT32 pos = (INT32)cur_wave_i;
-                        INT32 prev_pos = (pos > 0) ? pos - 1 : 0;
-                        INT32 s0 = source[prev_pos*2] + source[prev_pos*2 + 1];
-                        INT32 s1 = source[pos*2] + source[pos*2 + 1];
-                        INT32 s2 = source[(pos+1)*2] + source[(pos+1)*2 + 1];
-                        INT32 s3 = source[(pos+2)*2] + source[(pos+2)*2 + 1];
+                        int32_t pos = (int32_t)cur_wave_i;
+                        int32_t prev_pos = (pos > 0) ? pos - 1 : 0;
+                        int32_t s0 = source[prev_pos*2] + source[prev_pos*2 + 1];
+                        int32_t s1 = source[pos*2] + source[pos*2 + 1];
+                        int32_t s2 = source[(pos+1)*2] + source[(pos+1)*2 + 1];
+                        int32_t s3 = source[(pos+2)*2] + source[(pos+2)*2 + 1];
                         sample = PV_CubicHermiteInterpU3232(s0, s1, s2, s3, cur_wave_f);
                         *dest += (sample * amplitude) >> 5;
                         dest++;
@@ -618,7 +618,7 @@ void PV_ServeU3232FullBuffer16 (GM_Voice *this_voice)
                         calculated_source = source + cur_wave_i * 2;
                         b = calculated_source[0] + calculated_source[1];
                         c = calculated_source[2] + calculated_source[3];
-                        sample = (((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b;
+                        sample = (((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b;
                         *dest += (sample  * amplitude) >> 5;    // divide extra for summed stereo channels
                         dest++;
 
@@ -634,16 +634,16 @@ void PV_ServeU3232FullBuffer16 (GM_Voice *this_voice)
     this_voice->lastAmplitudeL = amplitude << 4;
 }
 
-void PV_ServeU3232PartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
+void PV_ServeU3232PartialBuffer16 (GM_Voice *this_voice, bool looping)
 {
-    register INT32          *dest;
-    register LOOPCOUNT      a, inner;
-    register INT16          *source, *calculated_source;
-    register INT32          b, c, sample;
+    register int32_t          *dest;
+    register int32_t      a, inner;
+    register int16_t          *source, *calculated_source;
+    register int32_t          b, c, sample;
     register U32            cur_wave_i, cur_wave_f;
     register U32            end_wave, wave_adjust = 0;
     U3232                   wave_increment;
-    register INT32          amplitude, amplitudeAdjust;
+    register int32_t          amplitude, amplitudeAdjust;
 
 #if REVERB_USED == VARIABLE_REVERB
     if (this_voice->reverbLevel || this_voice->chorusLevel)
@@ -680,18 +680,18 @@ void PV_ServeU3232PartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
             if (this_voice->advancedInterpolation)
             {
                 // Cubic Hermite with loop-aware boundary handling
-                INT32 loopStartIdx = (INT32)(this_voice->NoteLoopPtr - this_voice->NotePtr);
-                INT32 loopEndIdx = (INT32)(this_voice->NoteLoopEnd - this_voice->NotePtr);
-                INT32 totalFrames = (INT32)(this_voice->NotePtrEnd - this_voice->NotePtr);
+                int32_t loopStartIdx = (int32_t)(this_voice->NoteLoopPtr - this_voice->NotePtr);
+                int32_t loopEndIdx = (int32_t)(this_voice->NoteLoopEnd - this_voice->NotePtr);
+                int32_t totalFrames = (int32_t)(this_voice->NotePtrEnd - this_voice->NotePtr);
 
                 for (a = MusicGlobals->Four_Loop; a > 0; --a)
                 {
                     for (inner = 0; inner < 4; inner++)
                     {
-                        THE_CHECK_U3232(INT16 *);
-                        INT32 pos = (INT32)cur_wave_i;
-                        INT32 s1 = source[pos];
-                        INT32 s0, s2, s3;
+                        THE_CHECK_U3232(int16_t *);
+                        int32_t pos = (int32_t)cur_wave_i;
+                        int32_t s1 = source[pos];
+                        int32_t s0, s2, s3;
                         if (looping)
                         {
                             s0 = PV_LoopWrapSample16U3232(source, pos - 1, loopStartIdx, loopEndIdx);
@@ -718,36 +718,36 @@ void PV_ServeU3232PartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
 #if 1   //MOE'S OBSESSIVE FOLLY
                     for (inner = 0; inner < 4; inner++)
                     {
-                        THE_CHECK_U3232(INT16 *);
+                        THE_CHECK_U3232(int16_t *);
                         b = source[cur_wave_i];
                         c = source[cur_wave_i+1];
-                        dest[0] += (((((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b) * amplitude) >> 4;
+                        dest[0] += (((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) * amplitude) >> 4;
                         ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
                         dest++;
                     }
 #else
-                    THE_CHECK_U3232(INT16 *);
+                    THE_CHECK_U3232(int16_t *);
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    dest[0] += (((((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b) * amplitude) >> 4;
+                    dest[0] += (((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) * amplitude) >> 4;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
-                    THE_CHECK_U3232(INT16 *);
+                    THE_CHECK_U3232(int16_t *);
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    dest[1] += (((((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b) * amplitude) >> 4;
+                    dest[1] += (((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) * amplitude) >> 4;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
-                    THE_CHECK_U3232(INT16 *);
+                    THE_CHECK_U3232(int16_t *);
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    dest[2] += (((((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b) * amplitude) >> 4;
+                    dest[2] += (((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) * amplitude) >> 4;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
-                    THE_CHECK_U3232(INT16 *);
+                    THE_CHECK_U3232(int16_t *);
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    dest[3] += (((((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b) * amplitude) >> 4;
+                    dest[3] += (((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) * amplitude) >> 4;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
                     dest += 4;
@@ -761,19 +761,19 @@ void PV_ServeU3232PartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
             if (this_voice->advancedInterpolation)
             {
                 // Cubic Hermite for stereo with loop-aware boundary handling
-                INT32 loopStartIdx = (INT32)(this_voice->NoteLoopPtr - this_voice->NotePtr);
-                INT32 loopEndIdx = (INT32)(this_voice->NoteLoopEnd - this_voice->NotePtr);
+                int32_t loopStartIdx = (int32_t)(this_voice->NoteLoopPtr - this_voice->NotePtr);
+                int32_t loopEndIdx = (int32_t)(this_voice->NoteLoopEnd - this_voice->NotePtr);
 
                 for (a = MusicGlobals->Four_Loop; a > 0; --a)
                 {
                     for (inner = 0; inner < 4; inner++)
                     {
-                        THE_CHECK_U3232(INT16 *);
-                        INT32 pos = (INT32)cur_wave_i;
-                        INT32 idx0, idx2, idx3;
+                        THE_CHECK_U3232(int16_t *);
+                        int32_t pos = (int32_t)cur_wave_i;
+                        int32_t idx0, idx2, idx3;
                         if (looping)
                         {
-                            INT32 loopLen = loopEndIdx - loopStartIdx;
+                            int32_t loopLen = loopEndIdx - loopStartIdx;
                             idx0 = pos - 1;
                             if (idx0 < loopStartIdx) idx0 += loopLen;
                             idx2 = pos + 1;
@@ -787,10 +787,10 @@ void PV_ServeU3232PartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
                             idx2 = pos + 1;
                             idx3 = pos + 2;
                         }
-                        INT32 s0 = source[idx0*2] + source[idx0*2 + 1];
-                        INT32 s1 = source[pos*2] + source[pos*2 + 1];
-                        INT32 s2 = source[idx2*2] + source[idx2*2 + 1];
-                        INT32 s3 = source[idx3*2] + source[idx3*2 + 1];
+                        int32_t s0 = source[idx0*2] + source[idx0*2 + 1];
+                        int32_t s1 = source[pos*2] + source[pos*2 + 1];
+                        int32_t s2 = source[idx2*2] + source[idx2*2 + 1];
+                        int32_t s3 = source[idx3*2] + source[idx3*2 + 1];
                         sample = PV_CubicHermiteInterpU3232(s0, s1, s2, s3, cur_wave_f);
                         *dest += ((sample >> 1) * amplitude) >> 5;
                         dest++;
@@ -805,11 +805,11 @@ void PV_ServeU3232PartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
                 {
                     for (inner = 0; inner < 4; inner++)
                     {
-                        THE_CHECK_U3232(INT16 *);
+                        THE_CHECK_U3232(int16_t *);
                         calculated_source = source + cur_wave_i * 2;
                         b = calculated_source[0] + calculated_source[1];
                         c = calculated_source[2] + calculated_source[3];
-                        sample = (((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b;
+                        sample = (((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b;
                         *dest += ((sample >> 1) * amplitude) >> 5;
                         dest++;
                         ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
@@ -828,18 +828,18 @@ FINISH:
 
 void PV_ServeU3232StereoFullBuffer16 (GM_Voice *this_voice)
 {
-    register INT32          *destL;
-    register LOOPCOUNT      a, inner;
-    register INT16          *source, *calculated_source;
-    register INT32          b, c;
+    register int32_t          *destL;
+    register int32_t      a, inner;
+    register int16_t          *source, *calculated_source;
+    register int32_t          b, c;
     register U32            cur_wave_i, cur_wave_f;
     U3232                   wave_increment;
-    register INT32          sample;
-    INT32                   ampValueL, ampValueR;
-    register INT32          amplitudeL;
-    register INT32          amplitudeR;
-    register INT32          amplitudeLincrement;
-    register INT32          amplitudeRincrement;
+    register int32_t          sample;
+    int32_t                   ampValueL, ampValueR;
+    register int32_t          amplitudeL;
+    register int32_t          amplitudeR;
+    register int32_t          amplitudeLincrement;
+    register int32_t          amplitudeRincrement;
 
 #if REVERB_USED == VARIABLE_REVERB
     if (this_voice->reverbLevel || this_voice->chorusLevel)
@@ -875,11 +875,11 @@ void PV_ServeU3232StereoFullBuffer16 (GM_Voice *this_voice)
                 {
                     for (inner = 0; inner < 4; inner++)
                     {
-                        INT32 pos = (INT32)cur_wave_i;
-                        INT32 s0 = source[(pos > 0) ? pos - 1 : 0];
-                        INT32 s1 = source[pos];
-                        INT32 s2 = source[pos + 1];
-                        INT32 s3 = source[pos + 2];
+                        int32_t pos = (int32_t)cur_wave_i;
+                        int32_t s0 = source[(pos > 0) ? pos - 1 : 0];
+                        int32_t s1 = source[pos];
+                        int32_t s2 = source[pos + 1];
+                        int32_t s3 = source[pos + 2];
                         sample = PV_CubicHermiteInterpU3232(s0, s1, s2, s3, cur_wave_f);
                         destL[0] += (sample * amplitudeL) >> 4;
                         destL[1] += (sample * amplitudeR) >> 4;
@@ -896,28 +896,28 @@ void PV_ServeU3232StereoFullBuffer16 (GM_Voice *this_voice)
                 {
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = (((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b;
+                    sample = (((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b;
                     destL[0] += (sample * amplitudeL) >> 4;
                     destL[1] += (sample * amplitudeR) >> 4;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = (((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b;
+                    sample = (((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b;
                     destL[2] += (sample * amplitudeL) >> 4;
                     destL[3] += (sample * amplitudeR) >> 4;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = (((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b;
+                    sample = (((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b;
                     destL[4] += (sample * amplitudeL) >> 4;
                     destL[5] += (sample * amplitudeR) >> 4;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = (((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b;
+                    sample = (((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b;
                     destL[6] += (sample * amplitudeL) >> 4;
                     destL[7] += (sample * amplitudeR) >> 4;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
@@ -936,19 +936,19 @@ void PV_ServeU3232StereoFullBuffer16 (GM_Voice *this_voice)
                 {
                     for (inner = 0; inner < 4; inner++)
                     {
-                        INT32 pos = (INT32)cur_wave_i;
-                        INT32 prev_pos = (pos > 0) ? pos - 1 : 0;
+                        int32_t pos = (int32_t)cur_wave_i;
+                        int32_t prev_pos = (pos > 0) ? pos - 1 : 0;
                         // Left channel
-                        INT32 sL0 = source[prev_pos*2];
-                        INT32 sL1 = source[pos*2];
-                        INT32 sL2 = source[(pos+1)*2];
-                        INT32 sL3 = source[(pos+2)*2];
+                        int32_t sL0 = source[prev_pos*2];
+                        int32_t sL1 = source[pos*2];
+                        int32_t sL2 = source[(pos+1)*2];
+                        int32_t sL3 = source[(pos+2)*2];
                         destL[0] += (PV_CubicHermiteInterpU3232(sL0, sL1, sL2, sL3, cur_wave_f) * amplitudeL) >> 4;
                         // Right channel
-                        INT32 sR0 = source[prev_pos*2 + 1];
-                        INT32 sR1 = source[pos*2 + 1];
-                        INT32 sR2 = source[(pos+1)*2 + 1];
-                        INT32 sR3 = source[(pos+2)*2 + 1];
+                        int32_t sR0 = source[prev_pos*2 + 1];
+                        int32_t sR1 = source[pos*2 + 1];
+                        int32_t sR2 = source[(pos+1)*2 + 1];
+                        int32_t sR3 = source[(pos+2)*2 + 1];
                         destL[1] += (PV_CubicHermiteInterpU3232(sR0, sR1, sR2, sR3, cur_wave_f) * amplitudeR) >> 4;
                         destL += 2;
                         ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
@@ -966,11 +966,11 @@ void PV_ServeU3232StereoFullBuffer16 (GM_Voice *this_voice)
                         calculated_source = source + cur_wave_i * 2;
                         b = calculated_source[0];
                         c = calculated_source[2];
-                        sample = (((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b;
+                        sample = (((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b;
                         destL[0] += (sample * amplitudeL) >> 4;
                         b = calculated_source[1];
                         c = calculated_source[3];
-                        sample = (((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b;
+                        sample = (((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b;
                         destL[1] += (sample * amplitudeR) >> 4;
                         destL += 2;
                 
@@ -988,19 +988,19 @@ void PV_ServeU3232StereoFullBuffer16 (GM_Voice *this_voice)
     this_voice->samplePosition.f = cur_wave_f;
 }
 
-void PV_ServeU3232StereoPartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
+void PV_ServeU3232StereoPartialBuffer16 (GM_Voice *this_voice, bool looping)
 {
-    register INT32          *destL;
-    register LOOPCOUNT      a, inner;
-    register INT16          *source, *calculated_source;
-    register INT32          b, c, sample;
+    register int32_t          *destL;
+    register int32_t      a, inner;
+    register int16_t          *source, *calculated_source;
+    register int32_t          b, c, sample;
     register U32            cur_wave_i, cur_wave_f;
     register U32            end_wave, wave_adjust = 0;
     U3232                   wave_increment;
-    INT32                   ampValueL, ampValueR;
-    register INT32          amplitudeL;
-    register INT32          amplitudeR;
-    register INT32          amplitudeLincrement, amplitudeRincrement;
+    int32_t                   ampValueL, ampValueR;
+    register int32_t          amplitudeL;
+    register int32_t          amplitudeR;
+    register int32_t          amplitudeLincrement, amplitudeRincrement;
 
 #if REVERB_USED == VARIABLE_REVERB
     if (this_voice->reverbLevel || this_voice->chorusLevel)
@@ -1043,18 +1043,18 @@ void PV_ServeU3232StereoPartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
             if (this_voice->advancedInterpolation)
             {
                 // Cubic Hermite with loop-aware boundary handling
-                INT32 loopStartIdx = (INT32)(this_voice->NoteLoopPtr - this_voice->NotePtr);
-                INT32 loopEndIdx = (INT32)(this_voice->NoteLoopEnd - this_voice->NotePtr);
-                INT32 totalFrames = (INT32)(this_voice->NotePtrEnd - this_voice->NotePtr);
+                int32_t loopStartIdx = (int32_t)(this_voice->NoteLoopPtr - this_voice->NotePtr);
+                int32_t loopEndIdx = (int32_t)(this_voice->NoteLoopEnd - this_voice->NotePtr);
+                int32_t totalFrames = (int32_t)(this_voice->NotePtrEnd - this_voice->NotePtr);
 
                 for (a = MusicGlobals->Four_Loop; a > 0; --a)
                 {
                     for (inner = 0; inner < 4; inner++)
                     {
-                        THE_CHECK_U3232(INT16 *);
-                        INT32 pos = (INT32)cur_wave_i;
-                        INT32 s1 = source[pos];
-                        INT32 s0, s2, s3;
+                        THE_CHECK_U3232(int16_t *);
+                        int32_t pos = (int32_t)cur_wave_i;
+                        int32_t s1 = source[pos];
+                        int32_t s0, s2, s3;
                         if (looping)
                         {
                             s0 = PV_LoopWrapSample16U3232(source, pos - 1, loopStartIdx, loopEndIdx);
@@ -1084,44 +1084,44 @@ void PV_ServeU3232StereoPartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
 #if 1   //MOE'S OBSESSIVE FOLLY
                     for (inner = 0; inner < 4; inner++)
                     {
-                        THE_CHECK_U3232(INT16 *);
+                        THE_CHECK_U3232(int16_t *);
                         b = source[cur_wave_i];
                         c = source[cur_wave_i+1];
-                        sample = (((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b;
+                        sample = (((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b;
                         destL[0] += (sample * amplitudeL) >> 4;
                         destL[1] += (sample * amplitudeR) >> 4;
                         ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
                         destL += 2;
                     }
 #else
-                    THE_CHECK_U3232(INT16 *);
+                    THE_CHECK_U3232(int16_t *);
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = (((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b;
+                    sample = (((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b;
                     destL[0] += (sample * amplitudeL) >> 4;
                     destL[1] += (sample * amplitudeR) >> 4;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
-                    THE_CHECK_U3232(INT16 *);
+                    THE_CHECK_U3232(int16_t *);
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = (((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b;
+                    sample = (((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b;
                     destL[2] += (sample * amplitudeL) >> 4;
                     destL[3] += (sample * amplitudeR) >> 4;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
-                    THE_CHECK_U3232(INT16 *);
+                    THE_CHECK_U3232(int16_t *);
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = (((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b;
+                    sample = (((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b;
                     destL[4] += (sample * amplitudeL) >> 4;
                     destL[5] += (sample * amplitudeR) >> 4;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
 
-                    THE_CHECK_U3232(INT16 *);
+                    THE_CHECK_U3232(int16_t *);
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = (((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b;
+                    sample = (((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b;
                     destL[6] += (sample * amplitudeL) >> 4;
                     destL[7] += (sample * amplitudeR) >> 4;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
@@ -1137,19 +1137,19 @@ void PV_ServeU3232StereoPartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
         {   // Stereo 16 bit instrument
             if (this_voice->advancedInterpolation)
             {
-                INT32 loopStartIdx = (INT32)(this_voice->NoteLoopPtr - this_voice->NotePtr);
-                INT32 loopEndIdx = (INT32)(this_voice->NoteLoopEnd - this_voice->NotePtr);
+                int32_t loopStartIdx = (int32_t)(this_voice->NoteLoopPtr - this_voice->NotePtr);
+                int32_t loopEndIdx = (int32_t)(this_voice->NoteLoopEnd - this_voice->NotePtr);
 
                 for (a = MusicGlobals->Four_Loop; a > 0; --a)
                 {
                     for (inner = 0; inner < 4; inner++)
                     {
-                        THE_CHECK_U3232(INT16 *);
-                        INT32 pos = (INT32)cur_wave_i;
-                        INT32 idx0, idx2, idx3;
+                        THE_CHECK_U3232(int16_t *);
+                        int32_t pos = (int32_t)cur_wave_i;
+                        int32_t idx0, idx2, idx3;
                         if (looping)
                         {
-                            INT32 loopLen = loopEndIdx - loopStartIdx;
+                            int32_t loopLen = loopEndIdx - loopStartIdx;
                             idx0 = pos - 1;
                             if (idx0 < loopStartIdx) idx0 += loopLen;
                             idx2 = pos + 1;
@@ -1164,16 +1164,16 @@ void PV_ServeU3232StereoPartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
                             idx3 = pos + 2;
                         }
                         // Left channel
-                        INT32 sL0 = source[idx0*2];
-                        INT32 sL1 = source[pos*2];
-                        INT32 sL2 = source[idx2*2];
-                        INT32 sL3 = source[idx3*2];
+                        int32_t sL0 = source[idx0*2];
+                        int32_t sL1 = source[pos*2];
+                        int32_t sL2 = source[idx2*2];
+                        int32_t sL3 = source[idx3*2];
                         destL[0] += (PV_CubicHermiteInterpU3232(sL0, sL1, sL2, sL3, cur_wave_f) * amplitudeL) >> 4;
                         // Right channel
-                        INT32 sR0 = source[idx0*2 + 1];
-                        INT32 sR1 = source[pos*2 + 1];
-                        INT32 sR2 = source[idx2*2 + 1];
-                        INT32 sR3 = source[idx3*2 + 1];
+                        int32_t sR0 = source[idx0*2 + 1];
+                        int32_t sR1 = source[pos*2 + 1];
+                        int32_t sR2 = source[idx2*2 + 1];
+                        int32_t sR3 = source[idx3*2 + 1];
                         destL[1] += (PV_CubicHermiteInterpU3232(sR0, sR1, sR2, sR3, cur_wave_f) * amplitudeR) >> 4;
                         destL += 2;
                         ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
@@ -1188,15 +1188,15 @@ void PV_ServeU3232StereoPartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
                 {
                     for (inner = 0; inner < 4; inner++)
                     {
-                        THE_CHECK_U3232(INT16 *);
+                        THE_CHECK_U3232(int16_t *);
                         calculated_source = source + cur_wave_i * 2;
                         b = calculated_source[0];
                         c = calculated_source[2];
-                        sample = (((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b;
+                        sample = (((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b;
                         destL[0] += (sample * amplitudeL) >> 4;
                         b = calculated_source[1];
                         c = calculated_source[3];
-                        sample = (((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b;
+                        sample = (((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b;
                         destL[1] += (sample * amplitudeR) >> 4;
                         destL += 2;
                         ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);

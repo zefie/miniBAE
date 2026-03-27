@@ -119,7 +119,7 @@ typedef struct
 
     // used when using a file
     XFILE               m_streamFile;
-    XBOOL               m_closeFileWhenDone;
+    bool               m_closeFileWhenDone;
 
 #if USE_MPEG_DECODER != FALSE
     // decoder variables
@@ -823,9 +823,9 @@ static OPErr MPEGEncoder_Process(MPEGStreamData *data)
     mpa_s16         insamples[MPA_MAX_CHANNELS * MPA_SAMPLES_IN_CHANNEL];
     uint32_t   dataSize;
     
-    XDWORD          numChannels, numSamples, numBytes, numFrames;
-    XDWORD          channel, frame, maxFrames;
-    XDWORD          numBytesCompressed;
+    uint32_t          numChannels, numSamples, numBytes, numFrames;
+    uint32_t          channel, frame, maxFrames;
+    uint32_t          numBytesCompressed;
 
     err = NO_ERR;
     if (data)
@@ -1275,7 +1275,7 @@ void MPG_EncodeSetRefillCallback(void *stream, MPEGFillBufferFn callback, void *
 // ----------------------------------------------------------------------------
 // compress a frame.  Returns number of samples compressed
 //
-int MPG_EncodeProcess(void *stream, XPTR *pReturnedBuffer, uint32_t *pReturnedSize, XBOOL *pLastFrame)
+int MPG_EncodeProcess(void *stream, XPTR *pReturnedBuffer, uint32_t *pReturnedSize, bool *pLastFrame)
 {
     int     total;
 

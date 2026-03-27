@@ -785,7 +785,7 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
             safe_strncpy(temp_bank_name, g_bae.bank_name, sizeof(temp_bank_name) - 1);
         }
         
-        sr = BAESong_LoadRmiFromFile(g_bae.song, (BAEPathName)path, TRUE, (XBOOL)use_embedded_banks);
+        sr = BAESong_LoadRmiFromFile(g_bae.song, (BAEPathName)path, TRUE, (bool)use_embedded_banks);
         
         // If RMI load failed and we requested embedded banks, restore user bank and retry without embedded bank
         if (sr != BAE_NO_ERROR && use_embedded_banks && had_bank_before && temp_bank_path[0] != '\0')
@@ -1309,7 +1309,7 @@ bool bae_play(bool *playing)
                     BAESong_Preroll(g_bae.song);
                     Settings settings = load_settings();
 #if USE_SF2_SUPPORT == TRUE
-                    XBOOL isSF2Song = BAESong_IsSF2Song(g_bae.song);
+                    bool isSF2Song = BAESong_IsSF2Song(g_bae.song);
                     if (isSF2Song) {
                         BAESong_SetVelocityCurve(g_bae.song, 1); // Perky for SF2
                     }

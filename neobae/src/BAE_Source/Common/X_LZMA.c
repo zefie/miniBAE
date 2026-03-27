@@ -24,7 +24,7 @@
 /* Compress srcBytes of data from src into dst.
  * dst must be at least LZMACompressBound(srcBytes) bytes.
  * Returns the number of compressed bytes written on success, or -1 on failure. */
-int32_t LZMACompress(XBYTE *src, uint32_t srcBytes, XBYTE *dst,
+int32_t LZMACompress(unsigned char *src, uint32_t srcBytes, unsigned char *dst,
                      XCompressStatusProc proc, void *procData)
 {
     size_t      outPos;
@@ -58,33 +58,33 @@ int32_t LZMACompress(XBYTE *src, uint32_t srcBytes, XBYTE *dst,
  * compress, then undo delta encoding so the caller's buffer is unchanged. */
 
 /* --- 8-bit mono delta --- */
-static void PV_DeltaMono8(XBYTE *buf, uint32_t bytes)
+static void PV_DeltaMono8(unsigned char *buf, uint32_t bytes)
 {
     uint32_t i;
-    XBYTE prev = 0;
-    XBYTE cur;
+    unsigned char prev = 0;
+    unsigned char cur;
 
     for (i = 0; i < bytes; i++)
     {
         cur = buf[i];
-        buf[i] = (XBYTE)(cur - prev);
+        buf[i] = (unsigned char)(cur - prev);
         prev = cur;
     }
 }
 
-static void PV_UnDeltaMono8(XBYTE *buf, uint32_t bytes)
+static void PV_UnDeltaMono8(unsigned char *buf, uint32_t bytes)
 {
     uint32_t i;
-    XBYTE prev = 0;
+    unsigned char prev = 0;
 
     for (i = 0; i < bytes; i++)
     {
-        buf[i] = (XBYTE)(buf[i] + prev);
+        buf[i] = (unsigned char)(buf[i] + prev);
         prev = buf[i];
     }
 }
 
-int32_t LZMACompressDeltaMono8(XBYTE *src, uint32_t srcBytes, XBYTE *dst,
+int32_t LZMACompressDeltaMono8(unsigned char *src, uint32_t srcBytes, unsigned char *dst,
                                XCompressStatusProc proc, void *procData)
 {
     int32_t result;
@@ -96,38 +96,38 @@ int32_t LZMACompressDeltaMono8(XBYTE *src, uint32_t srcBytes, XBYTE *dst,
 }
 
 /* --- 8-bit stereo delta --- */
-static void PV_DeltaStereo8(XBYTE *buf, uint32_t frameCount)
+static void PV_DeltaStereo8(unsigned char *buf, uint32_t frameCount)
 {
     uint32_t i;
-    XBYTE prevL = 0, prevR = 0;
-    XBYTE curL, curR;
+    unsigned char prevL = 0, prevR = 0;
+    unsigned char curL, curR;
 
     for (i = 0; i < frameCount; i++)
     {
         curL = buf[i * 2];
         curR = buf[i * 2 + 1];
-        buf[i * 2]     = (XBYTE)(curL - prevL);
-        buf[i * 2 + 1] = (XBYTE)(curR - prevR);
+        buf[i * 2]     = (unsigned char)(curL - prevL);
+        buf[i * 2 + 1] = (unsigned char)(curR - prevR);
         prevL = curL;
         prevR = curR;
     }
 }
 
-static void PV_UnDeltaStereo8(XBYTE *buf, uint32_t frameCount)
+static void PV_UnDeltaStereo8(unsigned char *buf, uint32_t frameCount)
 {
     uint32_t i;
-    XBYTE prevL = 0, prevR = 0;
+    unsigned char prevL = 0, prevR = 0;
 
     for (i = 0; i < frameCount; i++)
     {
-        buf[i * 2]     = (XBYTE)(buf[i * 2] + prevL);
-        buf[i * 2 + 1] = (XBYTE)(buf[i * 2 + 1] + prevR);
+        buf[i * 2]     = (unsigned char)(buf[i * 2] + prevL);
+        buf[i * 2 + 1] = (unsigned char)(buf[i * 2 + 1] + prevR);
         prevL = buf[i * 2];
         prevR = buf[i * 2 + 1];
     }
 }
 
-int32_t LZMACompressDeltaStereo8(XBYTE *src, uint32_t srcBytes, XBYTE *dst,
+int32_t LZMACompressDeltaStereo8(unsigned char *src, uint32_t srcBytes, unsigned char *dst,
                                  XCompressStatusProc proc, void *procData)
 {
     uint32_t frameCount = srcBytes / 2;
@@ -165,14 +165,14 @@ static void PV_UnDeltaMono16(int16_t *buf, uint32_t frameCount)
     }
 }
 
-int32_t LZMACompressDeltaMono16(int16_t *src, uint32_t srcBytes, XBYTE *dst,
+int32_t LZMACompressDeltaMono16(int16_t *src, uint32_t srcBytes, unsigned char *dst,
                                 XCompressStatusProc proc, void *procData)
 {
     uint32_t frameCount = srcBytes / 2;
     int32_t result;
 
     PV_DeltaMono16(src, frameCount);
-    result = LZMACompress((XBYTE *)src, srcBytes, dst, proc, procData);
+    result = LZMACompress((unsigned char *)src, srcBytes, dst, proc, procData);
     PV_UnDeltaMono16(src, frameCount);
     return result;
 }
@@ -209,14 +209,14 @@ static void PV_UnDeltaStereo16(int16_t *buf, uint32_t frameCount)
     }
 }
 
-int32_t LZMACompressDeltaStereo16(int16_t *src, uint32_t srcBytes, XBYTE *dst,
+int32_t LZMACompressDeltaStereo16(int16_t *src, uint32_t srcBytes, unsigned char *dst,
                                   XCompressStatusProc proc, void *procData)
 {
     uint32_t frameCount = srcBytes / 4;
     int32_t result;
 
     PV_DeltaStereo16(src, frameCount);
-    result = LZMACompress((XBYTE *)src, srcBytes, dst, proc, procData);
+    result = LZMACompress((unsigned char *)src, srcBytes, dst, proc, procData);
     PV_UnDeltaStereo16(src, frameCount);
     return result;
 }

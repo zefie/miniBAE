@@ -50,7 +50,7 @@ void karaoke_commit_line(uint32_t time_us, const char *line);
 void karaoke_suspend(bool suspend);
 
 // BAE callback functions
-void gui_meta_event_callback(void *threadContext, struct GM_Song *pSong, char markerType, void *pMetaText, int32_t metaTextLength, XSWORD currentTrack);
+void gui_meta_event_callback(void *threadContext, struct GM_Song *pSong, char markerType, void *pMetaText, int32_t metaTextLength, int16_t currentTrack);
 void gui_lyric_callback(struct GM_Song *songPtr, const char *lyric, uint32_t t_us, void *ref);
 
 // Karaoke rendering

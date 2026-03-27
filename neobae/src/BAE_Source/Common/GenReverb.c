@@ -116,10 +116,10 @@
 #if USE_MONO_OUTPUT == TRUE
 static void PV_RunMonoFixedReverb(ReverbMode which)
 {
-    register INT32      b, c, bz, cz;
-    register INT32      *sourceLR;
-    register INT32      *reverbBuf;
-    register LOOPCOUNT  a = 0;
+    register int32_t      b, c, bz, cz;
+    register int32_t      *sourceLR;
+    register int32_t      *reverbBuf;
+    register int32_t  a = 0;
     register int32_t       reverbPtr1, reverbPtr2, reverbPtr3, reverbPtr4;
 
     reverbBuf = &MusicGlobals->reverbBuffer[0];
@@ -404,10 +404,10 @@ static void PV_RunMonoFixedReverb(ReverbMode which)
 
 static void PV_RunStereoFixedReverb(ReverbMode which)
 {
-    register INT32      b, c, bz, cz;
-    register INT32      *sourceLR;
-    register INT32      *reverbBuf;
-    register LOOPCOUNT  a = 0;
+    register int32_t      b, c, bz, cz;
+    register int32_t      *sourceLR;
+    register int32_t      *reverbBuf;
+    register int32_t  a = 0;
     register int32_t       reverbPtr1, reverbPtr2, reverbPtr3, reverbPtr4;
 
     reverbBuf = &MusicGlobals->reverbBuffer[0];
@@ -810,9 +810,9 @@ static GM_ReverbConfigure verbTypes[MAX_REVERB_TYPES] =
         REVERB_TYPE_8,
         0,
         FALSE,                          // fixed
-        (kNumberOfDiffusionStages * kDiffusionBufferFrameSize * sizeof(INT32)) +
-            (sizeof(INT32) * kStereoizerBufferFrameSize * 2) + 
-            ((kCombBufferFrameSize*kNumberOfCombFilters + kEarlyReflectionBufferFrameSize) * sizeof(INT32)),
+        (kNumberOfDiffusionStages * kDiffusionBufferFrameSize * sizeof(int32_t)) +
+            (sizeof(int32_t) * kStereoizerBufferFrameSize * 2) + 
+            ((kCombBufferFrameSize*kNumberOfCombFilters + kEarlyReflectionBufferFrameSize) * sizeof(int32_t)),
         NULL,
         PV_RunStereoNewReverb
     },
@@ -820,9 +820,9 @@ static GM_ReverbConfigure verbTypes[MAX_REVERB_TYPES] =
         REVERB_TYPE_9,
         0,
         FALSE,                          // fixed
-        (kNumberOfDiffusionStages * kDiffusionBufferFrameSize * sizeof(INT32)) +
-            (sizeof(INT32) * kStereoizerBufferFrameSize * 2) + 
-            ((kCombBufferFrameSize*kNumberOfCombFilters + kEarlyReflectionBufferFrameSize) * sizeof(INT32)),
+        (kNumberOfDiffusionStages * kDiffusionBufferFrameSize * sizeof(int32_t)) +
+            (sizeof(int32_t) * kStereoizerBufferFrameSize * 2) + 
+            ((kCombBufferFrameSize*kNumberOfCombFilters + kEarlyReflectionBufferFrameSize) * sizeof(int32_t)),
         NULL,
         PV_RunStereoNewReverb
     },
@@ -830,9 +830,9 @@ static GM_ReverbConfigure verbTypes[MAX_REVERB_TYPES] =
         REVERB_TYPE_10,
         0,
         FALSE,                          // fixed
-        (kNumberOfDiffusionStages * kDiffusionBufferFrameSize * sizeof(INT32)) +
-            (sizeof(INT32) * kStereoizerBufferFrameSize * 2) + 
-            ((kCombBufferFrameSize*kNumberOfCombFilters + kEarlyReflectionBufferFrameSize) * sizeof(INT32)),
+        (kNumberOfDiffusionStages * kDiffusionBufferFrameSize * sizeof(int32_t)) +
+            (sizeof(int32_t) * kStereoizerBufferFrameSize * 2) + 
+            ((kCombBufferFrameSize*kNumberOfCombFilters + kEarlyReflectionBufferFrameSize) * sizeof(int32_t)),
         NULL,
         PV_RunStereoNewReverb
     },
@@ -840,9 +840,9 @@ static GM_ReverbConfigure verbTypes[MAX_REVERB_TYPES] =
         REVERB_TYPE_11,
         0,
         FALSE,                          // fixed
-        (kNumberOfDiffusionStages * kDiffusionBufferFrameSize * sizeof(INT32)) +
-            (sizeof(INT32) * kStereoizerBufferFrameSize * 2) + 
-            ((kCombBufferFrameSize*kNumberOfCombFilters + kEarlyReflectionBufferFrameSize) * sizeof(INT32)),
+        (kNumberOfDiffusionStages * kDiffusionBufferFrameSize * sizeof(int32_t)) +
+            (sizeof(int32_t) * kStereoizerBufferFrameSize * 2) + 
+            ((kCombBufferFrameSize*kNumberOfCombFilters + kEarlyReflectionBufferFrameSize) * sizeof(int32_t)),
         NULL,
         PV_RunStereoNewReverb
 #if USE_NEO_EFFECTS == TRUE        
@@ -948,7 +948,7 @@ static GM_ReverbConfigure verbTypes[MAX_REVERB_TYPES] =
 #define MAX_VERB_CONFIG_ENTRIES     (int32_t)(sizeof (verbTypes) / sizeof(GM_ReverbConfigure))
 
 // private function to allocate and setup the fixed verb types
-static XBOOL PV_SetupFixedReverb(void)
+static bool PV_SetupFixedReverb(void)
 {
     GM_Mixer    *pMixer;
     int32_t        size;
@@ -962,12 +962,12 @@ static XBOOL PV_SetupFixedReverb(void)
     pMixer->LPfilterRz = 0;
 
     size = REVERB_BUFFER_SIZE * 2L * sizeof(int32_t);
-    pMixer->reverbBuffer = (INT32 *)XNewPtr(size);
+    pMixer->reverbBuffer = (int32_t *)XNewPtr(size);
     if (pMixer->reverbBuffer == NULL)
     {
         // if this failed, try to allocate the smaller verb entry
         size = REVERB_BUFFER_SIZE_SMALL * 2L * sizeof(int32_t);
-        pMixer->reverbBuffer = (INT32 *)XNewPtr(size);
+        pMixer->reverbBuffer = (int32_t *)XNewPtr(size);
         if (pMixer->reverbBuffer == NULL)
         {
             size = 0;   // no verb
@@ -1115,9 +1115,9 @@ void GM_CleanupReverb(void)
 }
 
 // get highest MIDI verb amount required to activate verb
-UBYTE GM_GetReverbEnableThreshold(void)
+unsigned char GM_GetReverbEnableThreshold(void)
 {
-    UBYTE   thres;
+    unsigned char   thres;
 
     thres = MAX_NOTE_VOLUME;
     if (MusicGlobals)
@@ -1131,9 +1131,9 @@ UBYTE GM_GetReverbEnableThreshold(void)
 }
 
 // Is current reverb fixed (old style)?
-XBOOL GM_IsReverbFixed(void)
+bool GM_IsReverbFixed(void)
 {
-    UBYTE   fixed;
+    unsigned char   fixed;
 
     fixed = TRUE;
     if (MusicGlobals)
@@ -1149,7 +1149,7 @@ XBOOL GM_IsReverbFixed(void)
 // Set the global reverb type. This can happen at interrupt time, so don't allocate any memory
 void GM_SetReverbType(ReverbMode reverbMode)
 {
-    XBOOL   changed;
+    bool   changed;
 
     changed = FALSE;
     if (MusicGlobals)
@@ -1204,7 +1204,7 @@ void GM_SetReverbType(ReverbMode reverbMode)
         // now walk through all active voices and reset various reverb controls
         if (changed)
         {
-            register LOOPCOUNT count;
+            register int32_t count;
             register GM_Voice *pVoice;
 
             for (count = 0; count < MusicGlobals->MaxNotes + MusicGlobals->MaxEffects; count++)
@@ -1223,7 +1223,7 @@ void GM_SetReverbType(ReverbMode reverbMode)
                             pVoice->avoidReverb = FALSE;
                         }
                         pVoice->reverbLevel = pVoice->pSong->channelReverb[(unsigned char)pVoice->NoteChannel];    // set current verb level
-                        pVoice->chorusLevel = (INT16)PV_ModifyVelocityFromCurve(pVoice->pSong, pVoice->pSong->channelChorus[(unsigned char)pVoice->NoteChannel]);
+                        pVoice->chorusLevel = (int16_t)PV_ModifyVelocityFromCurve(pVoice->pSong, pVoice->pSong->channelChorus[(unsigned char)pVoice->NoteChannel]);
                                                                             // wants no verb enabled
                         if (GM_IsReverbFixed())
                         {

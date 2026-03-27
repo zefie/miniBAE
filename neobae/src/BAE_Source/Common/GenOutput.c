@@ -105,8 +105,8 @@
 void PV_Generate8outputStereo(OUTSAMPLE8 * dest8)
 {
     
-    register INT32          *sourceLR;
-    register LOOPCOUNT      count;
+    register int32_t          *sourceLR;
+    register int32_t      count;
 
     /* Convert intermediate 16-bit sample format to 16 bit output samples:
     */
@@ -131,7 +131,7 @@ void PV_Generate8outputStereo(OUTSAMPLE8 * dest8)
     }
     else
     {            
-        register INT32          b, c;       
+        register int32_t          b, c;       
         // 11k terped to 22k, and 22k terped to 44k
         for (count = MusicGlobals->Four_Loop; count > 0; --count)
         {
@@ -171,9 +171,9 @@ void PV_Generate8outputStereo(OUTSAMPLE8 * dest8)
 #if (USE_8_BIT_OUTPUT == TRUE) && (USE_MONO_OUTPUT == TRUE)
 void PV_Generate8outputMono(OUTSAMPLE8 * dest8)
 {
-    register LOOPCOUNT      count;
-    register INT32          b;
-    register INT32          *source;
+    register int32_t      count;
+    register int32_t          b;
+    register int32_t          *source;
 
     /* Convert intermediate 16-bit sample format to 16 bit output samples:
     */
@@ -224,12 +224,12 @@ void PV_Generate8outputMono(OUTSAMPLE8 * dest8)
 #if (USE_16_BIT_OUTPUT == TRUE) && (USE_STEREO_OUTPUT == TRUE)
 void PV_Generate16outputStereo(OUTSAMPLE16 * dest16)
 {
-    register LOOPCOUNT  count;
+    register int32_t  count;
 #if X_PLATFORM != X_WEBTV
-    register INT32      b, c;
+    register int32_t      b, c;
 #endif
-    register INT32      *sourceLR;
-    register INT32      i, overflow_test, k8000;
+    register int32_t      *sourceLR;
+    register int32_t      i, overflow_test, k8000;
 
     /* Convert intermediate 16-bit sample format to 16 bit output samples:
     */
@@ -397,11 +397,11 @@ void PV_Generate16outputStereo(OUTSAMPLE16 * dest16)
 #if (USE_16_BIT_OUTPUT == TRUE) && (USE_MONO_OUTPUT == TRUE)
 void PV_Generate16outputMono(OUTSAMPLE16 * dest16)
 {
-    register LOOPCOUNT  count;
-    register INT32      i;
-    register INT32      *source;
-    register INT32      overflow_test;
-    register INT32      k8000 = 0x8000;
+    register int32_t  count;
+    register int32_t      i;
+    register int32_t      *source;
+    register int32_t      overflow_test;
+    register int32_t      k8000 = 0x8000;
 
     /* Convert intermediate 16-bit sample format to 16 bit output samples:
     */

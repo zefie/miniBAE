@@ -156,7 +156,7 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1isAudioTailActive
     (void)clazz;
     BAEMixer mixer = (BAEMixer)(intptr_t)reference;
     if (!mixer) return 0;
-    /* BAEMixer_IsAudioTailActive returns XBOOL; convert to jint 0/1 */
+    /* BAEMixer_IsAudioTailActive returns bool; convert to jint 0/1 */
     return BAEMixer_IsAudioTailActive(mixer) ? 1 : 0;
 }
 
@@ -459,7 +459,7 @@ JNIEXPORT jstring JNICALL Java_com_zefie_NeoBAE_Mixer__1getBankFriendlyName
 	GM_SetMixerSF2Mode(FALSE);
 	
 	// Check for SF2/DLS format by magic bytes
-	XBOOL isSF2 = FALSE;
+	bool isSF2 = FALSE;
 	if (read_total >= 12) {
 		if (mem[0] == 'R' && mem[1] == 'I' && mem[2] == 'F' && mem[3] == 'F') {
 			if ((mem[8] == 's' && mem[9] == 'f' && mem[10] == 'b' && mem[11] == 'k') ||
@@ -533,7 +533,7 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemory
 	// Try to detect if this is SF2/DLS format by checking magic bytes
 	// SF2 starts with "RIFF....sfbk" (offset 0 and 8)
 	// DLS starts with "RIFF....DLS " (offset 0 and 8)
-	XBOOL isSF2 = FALSE;
+	bool isSF2 = FALSE;
 	if (len >= 12) {
 		unsigned char *ubytes = (unsigned char*)bytes;
 		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Magic bytes: %02X %02X %02X %02X ... %02X %02X %02X %02X",
@@ -611,7 +611,7 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemoryWithFilena
 	// Try to detect if this is SF2/DLS format by checking magic bytes
 	// SF2 starts with "RIFF....sfbk" (offset 0 and 8)
 	// DLS starts with "RIFF....DLS " (offset 0 and 8)
-	XBOOL isSF2 = FALSE;
+	bool isSF2 = FALSE;
 	if (len >= 12) {
 		unsigned char *ubytes = (unsigned char*)bytes;
 		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Magic bytes: %02X %02X %02X %02X ... %02X %02X %02X %02X",

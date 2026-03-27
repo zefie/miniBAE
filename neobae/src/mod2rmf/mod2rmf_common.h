@@ -48,7 +48,7 @@ typedef struct {
 } ModAdsrStage;
 
 typedef struct {
-    XBOOL valid;
+    bool valid;
     char name[23];
     uint32_t frameCount;
     uint32_t loopStart;
@@ -57,7 +57,7 @@ typedef struct {
     unsigned char defaultVolume; /* 0..64 from MOD sample header */
     int8_t  finetune;           /* unused; libxmp handles finetune via pitchbend */
     uint8_t loopType;           /* MOD2RMF_LOOP_FORWARD/BIDIR/REVERSE */
-    XBOOL   hasEnvelope;        /* instrument has an amplitude envelope */
+    bool   hasEnvelope;        /* instrument has an amplitude envelope */
     uint32_t adsrStageCount;
     ModAdsrStage adsrStages[MOD2RMF_MAX_ADSR_STAGES];
     int16_t defaultPan;          /* sub-instrument pan: 0..255, 128=center, -1=unset */
@@ -69,10 +69,10 @@ typedef struct {
     unsigned char program;
     unsigned char rootKey;
     uint32_t sampleOffsetBytes;
-    XBOOL offsetVariant;
-    XBOOL hasSampleRateOverride;
+    bool offsetVariant;
+    bool hasSampleRateOverride;
     uint32_t sampleRateOverrideHz;
-    XBOOL hasVolumeAdsr;
+    bool hasVolumeAdsr;
     uint32_t adsrStageCount;
     ModAdsrStage adsrStages[MOD2RMF_MAX_ADSR_STAGES];
     int8_t panPlacement;         /* BAE pan: -128..+127, 0=center */
@@ -130,13 +130,13 @@ typedef struct {
     ModTempoChange *tempoChanges;
     uint32_t tempoChangeCapacity;
     /* Song-level loop markers (filled by build_song_model_native) */
-    XBOOL loopEnabled;
+    bool loopEnabled;
     uint32_t loopStartTick;  /* MIDI tick where playback should loop back to */
     uint32_t loopEndTick;    /* MIDI tick where the loop point is (end of song data) */
 } ModSongModel;
 
 typedef struct {
-    XBOOL active;
+    bool active;
     uint64_t startTickFP;
     unsigned char note;
     unsigned char velocity;
@@ -147,7 +147,7 @@ typedef struct {
 typedef struct {
     uint8_t retrigInterval;     /* retrigger every N frames (0 = inactive) */
     uint8_t noteDelayFrames;    /* delay note-on by N frames (0 = no delay) */
-    XBOOL   hasDelayedNote;     /* a note is pending for this row */
+    bool   hasDelayedNote;     /* a note is pending for this row */
     unsigned char delayedEvNote;/* the note value to trigger after delay */
     int     delayedSid;         /* sample ID for the delayed note */
     uint8_t delayedVolume;      /* volume at time of row start */
@@ -174,13 +174,13 @@ typedef struct {
     /* Total note count */
     uint32_t noteCount;
     /* Whether this channel has any events at all */
-    XBOOL used;
+    bool used;
 } ChannelProfile;
 
 /* Mapping from tracker channels (0..63) to MIDI channels (0..15). */
 typedef struct {
     uint8_t trackerToMidi[MOD2RMF_MAX_CHANNELS];
-    XBOOL midiChannelUsed[MOD2RMF_MAX_MIDI_CHANNELS];
+    bool midiChannelUsed[MOD2RMF_MAX_MIDI_CHANNELS];
 } ChannelMap;
 
 
@@ -197,9 +197,9 @@ void mod2rmf_parse_row_effects(const struct xmp_event *ev,
                               uint8_t *outRetrigInterval,
                               uint8_t *outDelayFrames);
 
-XBOOL mod2rmf_row_has_tone_portamento(const struct xmp_event *ev);
+bool mod2rmf_row_has_tone_portamento(const struct xmp_event *ev);
 
-XBOOL mod2rmf_is_mod_family(const char *type);
+bool mod2rmf_is_mod_family(const char *type);
 int mod2rmf_is_ascii_space(char c);
 void mod2rmf_trim_copy_ascii(char *dst, size_t dstSize, const char *src);
 void mod2rmf_append_linef(char *dst, size_t dstSize, const char *text);
@@ -210,14 +210,14 @@ int mod2rmf_clamp_int(int v, int lo, int hi);
 void mod2rmf_compute_channel_map(const ChannelProfile profiles[],
                                 uint32_t trackerCount,
                                 ChannelMap *map);
-XBOOL mod2rmf_ranges_overlap(const ChannelProfile *a, const ChannelProfile *b);
+bool mod2rmf_ranges_overlap(const ChannelProfile *a, const ChannelProfile *b);
 uint32_t mod2rmf_overlap_ticks(const ChannelProfile *a, const ChannelProfile *b);
 const char *mod2rmf_path_basename_ptr(const char *path);
 
-XBOOL mod2rmf_sample_requires_processing(const ModPlayable *playable,
+bool mod2rmf_sample_requires_processing(const ModPlayable *playable,
                                                 const Mod2RmfResamplerSettings *settings,
                                                 uint32_t moduleBaseRateHz);
 
 uint8_t mod2rmf_apply_stereo_separation(uint8_t rawPan, uint32_t ch,
-                                    XBOOL isMod, uint8_t stereoSep);                                                
+                                    bool isMod, uint8_t stereoSep);                                                
 #endif /* MOD2RMF_COMMON_H */

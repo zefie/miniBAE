@@ -69,7 +69,7 @@ typedef struct {
     char raw_format[8];
     char content[48];
     char details[256];
-    XBOOL is_object_resource;
+    bool is_object_resource;
 } ResourceEntry;
 
 typedef struct {
@@ -117,7 +117,7 @@ static uint32_t read_be32(const unsigned char *data)
            (uint32_t)data[3];
 }
 
-static const char *bool_text(XBOOL value)
+static const char *bool_text(bool value)
 {
     return value ? "Yes" : "No";
 }
@@ -137,13 +137,13 @@ static const char *song_type_label(SongType type)
     }
 }
 
-static XBOOL is_midi_resource_type(XResourceType type)
+static bool is_midi_resource_type(XResourceType type)
 {
     return (type == ID_MIDI || type == ID_MIDI_OLD || type == ID_CMID ||
             type == ID_EMID || type == ID_ECMI);
 }
 
-static XBOOL is_sample_resource_type(XResourceType type)
+static bool is_sample_resource_type(XResourceType type)
 {
     return (type == ID_SND || type == ID_CSND || type == ID_ESND);
 }
@@ -410,7 +410,7 @@ static void inspect_song_resource(ResourceEntry *entry, XPTR raw, int32_t raw_si
     XDisposePtr(raw);
 }
 
-static XBOOL is_object_resource_for_song(const SongResource_Info *info, XResourceType type, XLongResourceID id)
+static bool is_object_resource_for_song(const SongResource_Info *info, XResourceType type, XLongResourceID id)
 {
     if (!info || id != info->objectResourceID)
     {

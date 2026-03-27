@@ -136,7 +136,7 @@ void * MPG_EncodeNewStream(uint32_t encodeRate,
 // compress frame
 // returns number of samples processed
 // returns *pLastFrame TRUE if last mpeg frame
-int MPG_EncodeProcess(void *stream, XPTR *pReturnedBuffer, uint32_t *pReturnedSize, XBOOL *pLastFrame);
+int MPG_EncodeProcess(void *stream, XPTR *pReturnedBuffer, uint32_t *pReturnedSize, bool *pLastFrame);
 
 // free vaild stream and return compressed MPG stream m_results
 void MPG_EncodeFreeStream(void *stream);
@@ -153,7 +153,7 @@ uint32_t MPG_EncodeGetDelay(void *stream);
 // Use these to make your buffer ('data' in MPG_EncodeNewStream) refillable
 // by having this callback refill the 'data' buffer when called.
 // MPEGFillBufferFn() returns TRUE if the buffer has been refilled
-typedef XBOOL (*MPEGFillBufferFn)(void *buffer, void *userRef);
+typedef bool (*MPEGFillBufferFn)(void *buffer, void *userRef);
 void MPG_EncodeSetRefillCallback(void *stream, MPEGFillBufferFn callback, void *userRef);
 
 

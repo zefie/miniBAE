@@ -1722,7 +1722,7 @@ private:
     }
 
     void SyncPianoRollMidiLoopMarkersFromDocument() {
-        XBOOL enabled;
+        bool enabled;
         uint32_t startTick;
         uint32_t endTick;
         int32_t loopCount;
@@ -1808,7 +1808,7 @@ private:
     }
 
     void RefreshMidiLoopControlsFromDocument() {
-        XBOOL enabled;
+        bool enabled;
         uint32_t startTick;
         uint32_t endTick;
         int32_t loopCount;
@@ -2177,7 +2177,7 @@ private:
     bool CaptureSerializedDocument(std::vector<unsigned char> *outBytes) const {
         unsigned char *data;
         uint32_t size;
-        XBOOL useZmf;
+        bool useZmf;
 
         if (!outBytes || !m_document) {
             return false;
@@ -2834,7 +2834,7 @@ private:
                 }
 
                 {
-                    XBOOL isAlias = FALSE;
+                    bool isAlias = FALSE;
                     BAERmfEditorDocument_IsSampleBankAlias(m_document, sampleIndex, &isAlias);
                     usageLabel = wxString::Format("%sP%u %s [%u-%u] rk=%u",
                                                   isAlias ? "[Alias] " : "",
@@ -4567,7 +4567,7 @@ private:
         unsigned char requiredPrograms[128];
         unsigned char *rmfData;
         uint32_t rmfSize;
-        XBOOL useZmf;
+        bool useZmf;
 
         if (!m_document || trackIndex < 0) {
             return nullptr;
@@ -4695,7 +4695,7 @@ private:
         BAERmfEditorDocument *midiDoc;
         unsigned char *rmfData;
         uint32_t rmfSize;
-        XBOOL useZmf;
+        bool useZmf;
         uint32_t sampleCount;
 
         if (!sourceDoc) {
@@ -4892,7 +4892,7 @@ private:
         unsigned char requiredPrograms[128];
         unsigned char *rmfData;
         uint32_t rmfSize;
-        XBOOL useZmf;
+        bool useZmf;
 
         if (!m_document || channelMask == 0) {
             return nullptr;
@@ -7979,7 +7979,7 @@ private:
             wxCommandEvent playEvent(wxEVT_BUTTON, m_playButton ? m_playButton->GetId() : wxID_ANY);
             uint32_t restorePosUsec = m_pendingLoopHotReloadPosUsec;
             bool restorePaused = m_pendingLoopHotReloadPaused;
-            XBOOL loopEnabled;
+            bool loopEnabled;
             uint32_t loopStartTick;
             uint32_t loopEndTick;
             int32_t loopCount;
@@ -8016,7 +8016,7 @@ private:
     }
 
     void OnMidiLoopMarkersChanged(wxCommandEvent &) {
-        XBOOL enabled;
+        bool enabled;
         uint32_t startTick;
         uint32_t endTick;
         uint64_t startUsec;
@@ -8503,7 +8503,7 @@ private:
                     uint32_t note = 0;
                     uint32_t key = 0;
                     wxString title;
-                    XBOOL isAlias = FALSE;
+                    bool isAlias = FALSE;
 
                     if (BAERmfEditorDocument_GetSampleInfo(m_document, sampleIndex, &sampleInfo) != BAE_NO_ERROR) {
                         continue;

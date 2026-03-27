@@ -132,7 +132,7 @@
 **  9/8/99      MOE: Added decodeData parameter to GM_ReadFileIntoMemory(),
 **              GM_ReadFileIntoMemoryFromMemory(), and related PV_ functions
 **  10/21/99    MSD: Added PV_WriteFromMemoryAiffFile()
-**  10/26/99    MSD: Added (SBYTE*) cast to wave->theWaveform in PV_ReadIntoMemoryMPEGFile()
+**  10/26/99    MSD: Added (signed char*) cast to wave->theWaveform in PV_ReadIntoMemoryMPEGFile()
 **              to appease certain compilers (visual, CW Solaris)
 **  10/28/99    MSD: Added PV_WriteFromMemorySunAUFile()
 **  1/26/00     Changed PV_ReadIntoMemoryMPEGFile to close the mpeg stream after getting info
@@ -222,7 +222,7 @@
 
 #if USE_VORBIS_DECODER != FALSE
 // Forward declaration for Vorbis file reading
-static GM_Waveform* PV_ReadIntoMemoryVorbisFile(XFILE file, XBOOL decodeData, 
+static GM_Waveform* PV_ReadIntoMemoryVorbisFile(XFILE file, bool decodeData, 
                                                int32_t *pFormat, void **ppBlockPtr, uint32_t *pBlockSize, OPErr *pError);
 
 // Callback functions for libvorbisfile to read from XFILE
@@ -230,7 +230,7 @@ static size_t PV_VorbisReadFunc(void *ptr, size_t size, size_t nmemb, void *data
 {
     XFILE file = (XFILE)datasource;
     size_t bytes_to_read = size * nmemb;
-    XERR err;
+    int32_t err;
     
     if (bytes_to_read == 0) return 0;
     
@@ -298,7 +298,7 @@ static long PV_VorbisTellFunc(void *datasource)
 static int PV_OpusReadFunc(void *stream, unsigned char *ptr, int nbytes)
 {
     XFILE file = (XFILE)stream;
-    XERR err;
+    int32_t err;
     
     if (nbytes == 0) return 0;
     
@@ -371,13 +371,13 @@ static OpusFileCallbacks PV_OpusCallbacks = {
 //
 typedef struct X_PACKBY1
 {
-    XWORD       wFormatTag;         /* format type */
-    XWORD       nChannels;          /* number of channels (i.e. mono, stereo...) */
-    XDWORD      nSamplesPerSec;     /* sample rate */
-    XDWORD      nAvgBytesPerSec;    /* for buffer estimation */
-    XWORD       nBlockAlign;        /* block size of data */
-    XWORD       wBitsPerSample;     /* number of bits per sample of mono data */
-    XWORD       cbSize;             /* the count in bytes of the size of */
+    uint16_t       wFormatTag;         /* format type */
+    uint16_t       nChannels;          /* number of channels (i.e. mono, stereo...) */
+    uint32_t      nSamplesPerSec;     /* sample rate */
+    uint32_t      nAvgBytesPerSec;    /* for buffer estimation */
+    uint16_t       nBlockAlign;        /* block size of data */
+    uint16_t       wBitsPerSample;     /* number of bits per sample of mono data */
+    uint16_t       cbSize;             /* the count in bytes of the size of */
                                     /* extra information (after cbSize) */
 } XWaveHeader;
 
@@ -392,7 +392,7 @@ typedef struct X_PACKBY1
 typedef struct X_PACKBY1
 {
         XWaveHeader     wfx;
-        XWORD           wSamplesPerBlock;
+        uint16_t           wSamplesPerBlock;
 } XWaveHeaderIMA;
 
 
@@ -400,56 +400,56 @@ typedef struct X_PACKBY1
 
 typedef struct X_PACKBY1
 {
-  XDWORD            dwIdentifier;       // a unique number (ie, different than the ID number of any other SampleLoop structure). This field may
+  uint32_t            dwIdentifier;       // a unique number (ie, different than the ID number of any other SampleLoop structure). This field may
                                         // correspond with the dwIdentifier field of some CuePoint stored in the Cue chunk. In other words, the CuePoint structure which has the
                                         // same ID number would be considered to be describing the same loop as this SampleLoop structure. Furthermore, this field corresponds to
                                         // the dwIndentifier field of any label stored in the Associated Data List. In other words, the text string (within some chunk in the Associated
                                         // Data List) which has the same ID number would be considered to be this loop's "name" or "label".
 
-  XDWORD            dwType;             // the loop type (ie, how the loop plays back) as so:
+  uint32_t            dwType;             // the loop type (ie, how the loop plays back) as so:
                                         // 0 - Loop forward (normal)
                                         // 1 - Alternating loop (forward/backward)
                                         // 2 - Loop backward
                                         // 3-31 - reserved for future standard types
                                         // 32-? - sampler specific types (manufacturer defined)   
 
-  XDWORD            dwStart;            // the startpoint of the loop. In sample frames
-  XDWORD            dwEnd;              // the endpoint of the loop. In sample frames
-  XDWORD            dwFraction;         // allows fine-tuning for loop fractional areas between samples. Values range from 0x00000000 to 0xFFFFFFFF. A
+  uint32_t            dwStart;            // the startpoint of the loop. In sample frames
+  uint32_t            dwEnd;              // the endpoint of the loop. In sample frames
+  uint32_t            dwFraction;         // allows fine-tuning for loop fractional areas between samples. Values range from 0x00000000 to 0xFFFFFFFF. A
                                         // value of 0x80000000 represents 1/2 of a sample length.
-  XDWORD            dwPlayCount;        // number of times to play the loop. A value of 0 specifies an infinite sustain loop (ie, the wave keeps looping
+  uint32_t            dwPlayCount;        // number of times to play the loop. A value of 0 specifies an infinite sustain loop (ie, the wave keeps looping
                                         // until some external force interrupts playback, such as the musician releasing the key that triggered that wave's playback).
 } XSampleLoop;
 
 typedef struct X_PACKBY1
 {
-  XDWORD            dwManufacturer;     // the MMA Manufacturer code for the intended sampler
-  XDWORD            dwProduct;          // Product code (ie, model ID) of the intended sampler for the dwManufacturer.
+  uint32_t            dwManufacturer;     // the MMA Manufacturer code for the intended sampler
+  uint32_t            dwProduct;          // Product code (ie, model ID) of the intended sampler for the dwManufacturer.
 
-  XDWORD            dwSamplePeriod;     // specifies the period of one sample in nanoseconds (normally 1/nSamplesPerSec from the Format chunk. But
+  uint32_t            dwSamplePeriod;     // specifies the period of one sample in nanoseconds (normally 1/nSamplesPerSec from the Format chunk. But
                                         // note that this field allows finer tuning than nSamplesPerSec). For example, 44.1 KHz would be specified as 22675 (0x00005893).
 
-  XDWORD            dwMIDIUnityNote;    // MIDI note number at which the instrument plays back the waveform data without pitch modification
+  uint32_t            dwMIDIUnityNote;    // MIDI note number at which the instrument plays back the waveform data without pitch modification
                                         // (ie, at the same sample rate that was used when the waveform was created). This value ranges 0 through 127, inclusive. Middle C is 60
 
-  XDWORD            dwMIDIPitchFraction;// specifies the fraction of a semitone up from the specified dwMIDIUnityNote. A value of 0x80000000 is
+  uint32_t            dwMIDIPitchFraction;// specifies the fraction of a semitone up from the specified dwMIDIUnityNote. A value of 0x80000000 is
                                         // 1/2 semitone (50 cents); a value of 0x00000000 represents no fine tuning between semitones.
 
-  XDWORD            dwSMPTEFormat;      // specifies the SMPTE time format used in the dwSMPTEOffset field. Possible values are:
+  uint32_t            dwSMPTEFormat;      // specifies the SMPTE time format used in the dwSMPTEOffset field. Possible values are:
                                         //  0  = no SMPTE offset (dwSMPTEOffset should also be 0)
                                         //  24 = 24 frames per second
                                         //  25 = 25 frames per second
                                         //  29 = 30 frames per second with frame dropping ('30 drop')
                                         //  30 = 30 frames per second       
 
-  XDWORD            dwSMPTEOffset;      // specifies a time offset for the sample if it is to be syncronized or calibrated according to a start time other than
+  uint32_t            dwSMPTEOffset;      // specifies a time offset for the sample if it is to be syncronized or calibrated according to a start time other than
                                         // 0. The format of this value is 0xhhmmssff. hh is a signed Hours value [-23..23]. mm is an unsigned Minutes value [0..59]. ss is
                                         // unsigned Seconds value [0..59]. ff is an unsigned value [0..( - 1)]. 
 
-  XDWORD            cSampleLoops;       // number (count) of SampleLoop structures that are appended to this chunk. These structures immediately
+  uint32_t            cSampleLoops;       // number (count) of SampleLoop structures that are appended to this chunk. These structures immediately
                                         // follow the cbSamplerData field. This field will be 0 if there are no SampleLoop structures.
 
-  XDWORD            cbSamplerData;      // The cbSamplerData field specifies the size (in bytes) of any optional fields that an application wishes to append to this chunk.
+  uint32_t            cbSamplerData;      // The cbSamplerData field specifies the size (in bytes) of any optional fields that an application wishes to append to this chunk.
 
   XSampleLoop       loops[1];
 } XSamplerChunk;
@@ -1434,7 +1434,7 @@ static OPErr PV_ReadWAVEAndDecompressIMA(XFILE fileReference, uint32_t sourceLen
 {
     uint32_t           writeBufferLength, size, offset;
     OPErr                   error;
-    XBOOL                   customBlockBuffer;
+    bool                   customBlockBuffer;
     
     error = MEMORY_ERR;
     writeBufferLength = 0;
@@ -1466,7 +1466,7 @@ static OPErr PV_ReadWAVEAndDecompressIMA(XFILE fileReference, uint32_t sourceLen
             offset = 0;
             if (size)
             {
-                offset = XExpandWavIma((XBYTE const*)pBlockBuffer, blockSize,
+                offset = XExpandWavIma((unsigned char const*)pBlockBuffer, blockSize,
                                         pDestSample, outputBitSize,
                                         size, channels);
             }
@@ -1500,7 +1500,7 @@ static OPErr PV_ReadWAVEAndDecompressIMA(XFILE fileReference, uint32_t sourceLen
 // This will read into memory the entire wave file and return a GM_Waveform structure.
 // When disposing make sure and dispose of both the GM_Waveform structure and the
 // theWaveform inside of that structure with XDisposePtr
-static GM_Waveform* PV_ReadIntoMemoryWaveFile(XFILE file, XBOOL decodeData,
+static GM_Waveform* PV_ReadIntoMemoryWaveFile(XFILE file, bool decodeData,
                                                 int32_t *pFormat, uint32_t *pBlockSize,
                                                 OPErr *pError)
 {
@@ -1526,8 +1526,8 @@ static GM_Waveform* PV_ReadIntoMemoryWaveFile(XFILE file, XBOOL decodeData,
             if ((IFF_FileType(pIFF) == X_WAVE) &&
                 (IFF_GetWAVIMAHeader(pIFF, &waveHeader) == 0))
             {
-                wave->channels = (UBYTE)waveHeader.wfx.nChannels;
-                wave->bitSize = (UBYTE)waveHeader.wfx.wBitsPerSample;
+                wave->channels = (unsigned char)waveHeader.wfx.nChannels;
+                wave->bitSize = (unsigned char)waveHeader.wfx.wBitsPerSample;
                 wave->sampledRate = waveHeader.wfx.nSamplesPerSec << 16L;
                 wave->baseMidiPitch = 60;
                 wave->compressionType = C_NONE;
@@ -1571,7 +1571,7 @@ static GM_Waveform* PV_ReadIntoMemoryWaveFile(XFILE file, XBOOL decodeData,
                     }
                     else    // if (decodeData) // for now
                     {
-                        wave->theWaveform = (SBYTE *)XNewPtr(size);
+                        wave->theWaveform = (signed char *)XNewPtr(size);
                         if (wave->theWaveform)
                         {
                             switch(waveHeader.wfx.wFormatTag)
@@ -1669,7 +1669,7 @@ static GM_Waveform* PV_ReadIntoMemoryWaveFile(XFILE file, XBOOL decodeData,
 }
 
 #if USE_CREATION_API == TRUE
-static OPErr PV_WriteFromMemoryWaveFile(XFILENAME *file, GM_Waveform const* pAudioData, XWORD formatTag)
+static OPErr PV_WriteFromMemoryWaveFile(XFILENAME *file, GM_Waveform const* pAudioData, uint16_t formatTag)
 {
     X_IFF           *pIFF;
     XWaveHeader     waveHeader;
@@ -1785,7 +1785,7 @@ static OPErr PV_WriteFromMemoryWaveFile(XFILENAME *file, GM_Waveform const* pAud
     return err;
 }
 
-static OPErr PV_WriteFromMemorySunAUFile(XFILENAME *file, GM_Waveform const* pAudioData, XWORD formatTag)
+static OPErr PV_WriteFromMemorySunAUFile(XFILENAME *file, GM_Waveform const* pAudioData, uint16_t formatTag)
 {
     SunAudioFileHeader  auHeader;
     OPErr               err = NO_ERR;
@@ -1835,7 +1835,7 @@ static OPErr PV_WriteFromMemorySunAUFile(XFILENAME *file, GM_Waveform const* pAu
             if (pAudioData->bitSize == 8)
             {
                 // 8 bit .AU data is signed, but internal engine 8 bit data is unsigned.
-                XPhase8BitWaveform((XBYTE*)pAudioData->theWaveform, pAudioData->waveSize);
+                XPhase8BitWaveform((unsigned char*)pAudioData->theWaveform, pAudioData->waveSize);
             }
 
             #if X_WORD_ORDER != FALSE   // intel?
@@ -1851,7 +1851,7 @@ static OPErr PV_WriteFromMemorySunAUFile(XFILENAME *file, GM_Waveform const* pAu
             if (pAudioData->bitSize == 8)
             {
                 // undo the switch
-                XPhase8BitWaveform((XBYTE*)pAudioData->theWaveform, pAudioData->waveSize);
+                XPhase8BitWaveform((unsigned char*)pAudioData->theWaveform, pAudioData->waveSize);
             }
 
             #if X_WORD_ORDER != FALSE   // intel?
@@ -2166,7 +2166,7 @@ static int32_t IFF_GetAIFFInstrument(X_IFF *pIFF, XInstrumentHeader * pInstrumen
     pstring                         name;               // endloop
 */
 // searches for MARK and pulls the ID marker's value
-static XBOOL IFF_GetAIFFMarkerValue(X_IFF *pIFF, int16_t ID, uint32_t *pMarkerValue)
+static bool IFF_GetAIFFMarkerValue(X_IFF *pIFF, int16_t ID, uint32_t *pMarkerValue)
 {
     unsigned char   loopMark[1024];
     int32_t            theErr;
@@ -2265,7 +2265,7 @@ static OPErr IFF_WriteAIFFLoopPoints(X_IFF *pIFF, GM_Waveform const* pWaveform)
 #endif
 
 // Returns AIFF base pitch, if there. Return 0 if successful, -1 if failure
-static int32_t IFF_GetAIFFBasePitch(X_IFF *pIFF, XWORD *pBasePitch)
+static int32_t IFF_GetAIFFBasePitch(X_IFF *pIFF, uint16_t *pBasePitch)
 {
     XInstrumentHeader   inst;
     int32_t                err;
@@ -2342,7 +2342,7 @@ static int32_t IFF_GetAIFFSampleSize(X_IFF *pIFF, int32_t *pUncompressedSize, in
 }
 
 #if USE_CREATION_API == TRUE
-static OPErr PV_WriteFromMemoryAiffFile(XFILENAME *file, GM_Waveform const* pAudioData, XWORD formatTag)
+static OPErr PV_WriteFromMemoryAiffFile(XFILENAME *file, GM_Waveform const* pAudioData, uint16_t formatTag)
 {
     X_IFF           *pIFF;
     XAIFFHeader     aiffHeader;
@@ -2397,7 +2397,7 @@ static OPErr PV_WriteFromMemoryAiffFile(XFILENAME *file, GM_Waveform const* pAud
 
                     if (pAudioData->bitSize == 8)
                     {
-                        XPhase8BitWaveform((XBYTE*)pAudioData->theWaveform, pAudioData->waveSize);
+                        XPhase8BitWaveform((unsigned char*)pAudioData->theWaveform, pAudioData->waveSize);
                     }
 
                     // write out loop points                    
@@ -2424,7 +2424,7 @@ static OPErr PV_WriteFromMemoryAiffFile(XFILENAME *file, GM_Waveform const* pAud
                     // put back the way we found it
                     if (pAudioData->bitSize == 8)
                     {
-                        XPhase8BitWaveform((XBYTE*)pAudioData->theWaveform, pAudioData->waveSize);
+                        XPhase8BitWaveform((unsigned char*)pAudioData->theWaveform, pAudioData->waveSize);
                     }
 
                     #if X_WORD_ORDER != FALSE   // intel?
@@ -2468,7 +2468,7 @@ static OPErr PV_ReadAIFFAndDecompressIMA(XFILE fileReference, int32_t sourceLeng
                                             uint32_t *pBufferLength,
                                             int16_t predictorCache[2])
 {
-    XBYTE       codeBlock[AIFF_IMA_BUFFER_SIZE];
+    unsigned char       codeBlock[AIFF_IMA_BUFFER_SIZE];
     int32_t        writeBufferLength, size, offset;
     OPErr       err;
 
@@ -2533,7 +2533,7 @@ static OPErr PV_ReadAIFFAndDecompressIMA(XFILE fileReference, int32_t sourceLeng
 // This will read into memory the entire AIFF file and return a GM_Waveform structure.
 // When disposing make sure and dispose of both the GM_Waveform structure and the
 // theWaveform inside of that structure with XDisposePtr
-static GM_Waveform * PV_ReadIntoMemoryAIFFFile(XFILE file, XBOOL decodeData,
+static GM_Waveform * PV_ReadIntoMemoryAIFFFile(XFILE file, bool decodeData,
                                                 int32_t *pFormat, uint32_t *pBlockSize,
                                                 OPErr *pError)
 {
@@ -2583,8 +2583,8 @@ X_IFF               *pIFF;
                 }
 
 
-                wave->channels = (UBYTE)aiffHeader.numChannels;
-                wave->bitSize = (UBYTE)aiffHeader.sampleSize;
+                wave->channels = (unsigned char)aiffHeader.numChannels;
+                wave->bitSize = (unsigned char)aiffHeader.sampleSize;
                 wave->baseMidiPitch = 60;
                 wave->compressionType = C_NONE;
 
@@ -2621,7 +2621,7 @@ X_IFF               *pIFF;
                         switch (aiffHeader.compressionType)
                         {
                         case X_NONE:
-                            wave->theWaveform = (SBYTE*)XNewPtr(size);
+                            wave->theWaveform = (signed char*)XNewPtr(size);
                             if (wave->theWaveform)
                             {
                                 if (XFileRead(pIFF->fileReference, wave->theWaveform, size) != -1)
@@ -2648,7 +2648,7 @@ X_IFF               *pIFF;
                         case X_IMA4:
                             if (decodeData)
                             {
-                                wave->theWaveform = (SBYTE*)XNewPtr(size);
+                                wave->theWaveform = (signed char*)XNewPtr(size);
                                 if (wave->theWaveform)
                                 {
                                 int16_t       predictorCache[2];
@@ -2658,7 +2658,7 @@ X_IFF               *pIFF;
                                     pIFF->lastError =
                                         PV_ReadAIFFAndDecompressIMA(pIFF->fileReference,
                                                                     sourceLength,
-                                                                    (XBYTE*)wave->theWaveform,
+                                                                    (unsigned char*)wave->theWaveform,
                                                                     wave->waveSize,
                                                                     wave->bitSize,
                                                                     wave->channels,
@@ -2672,13 +2672,13 @@ X_IFF               *pIFF;
                             }
                             else
                             {
-                            XDWORD      const imaBlocks =
+                            uint32_t      const imaBlocks =
                                             (wave->waveFrames + AIFF_IMA_BLOCK_FRAMES - 1) /
                                             AIFF_IMA_BLOCK_FRAMES;
                                 
                                 wave->waveSize = imaBlocks * wave->channels * AIFF_IMA_BLOCK_BYTES;
                                 BAE_ASSERT(wave->waveSize > 0);
-                                wave->theWaveform = (SBYTE*)XNewPtr(wave->waveSize);
+                                wave->theWaveform = (signed char*)XNewPtr(wave->waveSize);
                                 if (wave->theWaveform)
                                 {
                                     if (XFileRead(file, wave->theWaveform, wave->waveSize))
@@ -2706,7 +2706,7 @@ X_IFF               *pIFF;
                             if (wave->bitSize == 8)
                             {
                                 BAE_ASSERT(wave->theWaveform);
-                                XPhase8BitWaveform((XBYTE*)wave->theWaveform, wave->waveSize);
+                                XPhase8BitWaveform((unsigned char*)wave->theWaveform, wave->waveSize);
                             }
                         }
                     }
@@ -2737,7 +2737,7 @@ X_IFF               *pIFF;
 // This will read into memory the entire Sun AU file and return a GM_Waveform structure.
 // When disposing make sure and dispose of both the GM_Waveform structure and the
 // theWaveform inside of that structure with XDisposePtr
-static GM_Waveform * PV_ReadIntoMemorySunAUFile(XFILE file, XBOOL decodeData,
+static GM_Waveform * PV_ReadIntoMemorySunAUFile(XFILE file, bool decodeData,
                                                 int32_t *pFormat, uint32_t *pBlockSize,
                                                 OPErr *pError)
 {
@@ -2805,9 +2805,9 @@ SunAudioFileHeader  sunHeader;
                 wave = (GM_Waveform*)XNewPtr(sizeof(GM_Waveform));
                 if (wave)
                 {
-                    wave->channels = (UBYTE)XGetLong(&sunHeader.channels);
+                    wave->channels = (unsigned char)XGetLong(&sunHeader.channels);
                     wave->baseMidiPitch = 60;
-                    wave->bitSize = (UBYTE)bits;
+                    wave->bitSize = (unsigned char)bits;
                     wave->sampledRate = XGetLong(&sunHeader.sample_rate) << 16L;
                     // we want the byte size
                     wave->waveSize = waveLength;
@@ -2831,7 +2831,7 @@ SunAudioFileHeader  sunHeader;
                     }
                     else    // if (decodeData) // for now
                     {
-                        wave->theWaveform = (SBYTE*)XNewPtr(wave->waveSize);
+                        wave->theWaveform = (signed char*)XNewPtr(wave->waveSize);
                         if (wave->theWaveform)
                         {
                             err = PV_ReadSunAUFile(encoding, file,
@@ -2888,7 +2888,7 @@ SunAudioFileHeader  sunHeader;
 
 #if USE_MPEG_DECODER != 0
 static
-GM_Waveform* PV_ReadIntoMemoryMPEGFile(XFILE file, XBOOL decodeData,
+GM_Waveform* PV_ReadIntoMemoryMPEGFile(XFILE file, bool decodeData,
                                         int32_t *pFormat, void **ppBlockPtr, uint32_t *pBlockSize,
                                         OPErr *pError)
 {
@@ -2908,8 +2908,8 @@ XMPEGDecodedData*   stream;
         wave = (GM_Waveform*)XNewPtr(sizeof(GM_Waveform));
         if (wave)
         {
-            wave->channels = (UBYTE)stream->channels;
-            wave->bitSize = (UBYTE)stream->bitSize;
+            wave->channels = (unsigned char)stream->channels;
+            wave->bitSize = (unsigned char)stream->bitSize;
             wave->baseMidiPitch = 60;
             wave->sampledRate = stream->sampleRate;
             // we want the byte size
@@ -2935,23 +2935,23 @@ XMPEGDecodedData*   stream;
             // So let's allocate it and read it into memory
             if (decodeData)
             {
-            UINT32      const decodingBytes = stream->maxFrameBuffers * stream->frameBufferSize;
+            uint32_t      const decodingBytes = stream->maxFrameBuffers * stream->frameBufferSize;
             
                 BAE_ASSERT(wave->waveSize <= decodingBytes);
-                wave->theWaveform = (SBYTE*)XNewPtr(decodingBytes);
+                wave->theWaveform = (signed char*)XNewPtr(decodingBytes);
                 if (wave->theWaveform)
                 {
                     // now decode the mpeg sample and store into the resulting buffer
                     {
-                    SBYTE*          data;
-                    UINT32          count;
-                    UINT32          usefulBytes;
+                    signed char*          data;
+                    uint32_t          count;
+                    uint32_t          usefulBytes;
                     
-                        data = (SBYTE *)wave->theWaveform;
+                        data = (signed char *)wave->theWaveform;
                         count = 0;
                         while (count < stream->maxFrameBuffers)
                         {
-                        XBOOL           done;
+                        bool           done;
 
                             done = FALSE;
                             err = XFillMPEGStreamBuffer(stream, data, &done);
@@ -2963,13 +2963,13 @@ XMPEGDecodedData*   stream;
                             count++;
                         }
                         
-                        usefulBytes = data - (SBYTE*)wave->theWaveform;
+                        usefulBytes = data - (signed char*)wave->theWaveform;
                         if (usefulBytes < wave->waveSize)
                         {
                             wave->waveSize = usefulBytes;
                             wave->waveFrames = usefulBytes / (wave->channels * (wave->bitSize / 8));
                         }
-                        data = (SBYTE*)XResizePtr(wave->theWaveform, wave->waveSize);
+                        data = (signed char*)XResizePtr(wave->theWaveform, wave->waveSize);
                         if (data) wave->theWaveform = data;
                     }
                 }
@@ -2980,10 +2980,10 @@ XMPEGDecodedData*   stream;
             }
             else
             {
-            UINT32      const encodedBytes = XFileGetLength(file);
+            uint32_t      const encodedBytes = XFileGetLength(file);
             
                 wave->waveSize = encodedBytes;
-                wave->theWaveform = (SBYTE*)XNewPtr(encodedBytes);
+                wave->theWaveform = (signed char*)XNewPtr(encodedBytes);
                 if (wave->theWaveform)
                 {
                     if (XFileSetPosition(file, 0) ||
@@ -3028,14 +3028,14 @@ XMPEGDecodedData*   stream;
 
 typedef struct {
     GM_Waveform*    wave;
-    SBYTE*          sampleData;
+    signed char*          sampleData;
     uint32_t        totalSamples;
     uint32_t        currentSample;
     OPErr           error;
-    XBOOL           metadataComplete;
+    bool           metadataComplete;
     
     // Memory-based file data
-    const XBYTE*    fileData;
+    const unsigned char*    fileData;
     uint32_t        fileSize;
     uint32_t        filePosition;
     
@@ -3224,9 +3224,9 @@ static void flac_metadata_callback(
     
     if (metadata->type == FLAC__METADATA_TYPE_STREAMINFO) {
         if (state->wave) {
-            state->wave->channels = (UBYTE)metadata->data.stream_info.channels;
+            state->wave->channels = (unsigned char)metadata->data.stream_info.channels;
             // Store original bit depth for conversion, but output will be 16-bit
-            UBYTE originalBitSize = (UBYTE)metadata->data.stream_info.bits_per_sample;
+            unsigned char originalBitSize = (unsigned char)metadata->data.stream_info.bits_per_sample;
             state->wave->bitSize = originalBitSize;
             state->wave->sampledRate = metadata->data.stream_info.sample_rate << 16L;
             state->wave->waveFrames = (uint32_t)metadata->data.stream_info.total_samples;
@@ -3255,7 +3255,7 @@ static void flac_error_callback(
 }
 
 // Main FLAC decoder function
-static GM_Waveform* PV_ReadIntoMemoryFLACFile(XFILE file, XBOOL decodeData, 
+static GM_Waveform* PV_ReadIntoMemoryFLACFile(XFILE file, bool decodeData, 
                                                int32_t *pFormat, void **ppBlockPtr, uint32_t *pBlockSize, 
                                                OPErr *pError)
 {
@@ -3284,7 +3284,7 @@ static GM_Waveform* PV_ReadIntoMemoryFLACFile(XFILE file, XBOOL decodeData,
     }
     
     // Allocate memory for the entire file
-    XBYTE* fileBuffer = (XBYTE*)XNewPtr(fileSize);
+    unsigned char* fileBuffer = (unsigned char*)XNewPtr(fileSize);
     if (!fileBuffer) {
         err = MEMORY_ERR;
         goto cleanup;
@@ -3333,7 +3333,7 @@ static GM_Waveform* PV_ReadIntoMemoryFLACFile(XFILE file, XBOOL decodeData,
     
     if (decodeData) {
         // For now, just allocate some space but don't decode
-        wave->theWaveform = (SBYTE*)XNewPtr(1024); // Small test allocation
+        wave->theWaveform = (signed char*)XNewPtr(1024); // Small test allocation
         if (!wave->theWaveform) {
             err = MEMORY_ERR;
             goto cleanup;
@@ -3387,7 +3387,7 @@ static GM_Waveform* PV_ReadIntoMemoryFLACFile(XFILE file, XBOOL decodeData,
     // correctly.
     uint32_t outBytesPerSample = 2; // 16-bit output
     uint32_t outSize = (uint32_t)wave->waveFrames * (uint32_t)wave->channels * outBytesPerSample;
-    state.sampleData = (SBYTE*)XNewPtr(outSize);
+    state.sampleData = (signed char*)XNewPtr(outSize);
         if (!state.sampleData) {
             err = MEMORY_ERR;
             goto cleanup;
@@ -3415,7 +3415,7 @@ static GM_Waveform* PV_ReadIntoMemoryFLACFile(XFILE file, XBOOL decodeData,
         
         // Convert 8-bit samples if needed (phase conversion)
         if (wave->bitSize == 8) {
-            XPhase8BitWaveform((XBYTE*)wave->theWaveform, wave->waveSize);
+            XPhase8BitWaveform((unsigned char*)wave->theWaveform, wave->waveSize);
         }
     } else {
         // Just getting info, no decoding
@@ -3460,7 +3460,7 @@ cleanup:
 #if USE_VORBIS_DECODER != FALSE
 
 // Expand/decode Vorbis compressed data from memory
-OPErr XExpandVorbis(GM_Waveform const* src, UINT32 startFrame, GM_Waveform* dst)
+OPErr XExpandVorbis(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst)
 {
     OPErr err = NO_ERR;
     GM_Waveform *decoded = NULL;
@@ -3521,7 +3521,7 @@ OPErr XExpandVorbis(GM_Waveform const* src, UINT32 startFrame, GM_Waveform* dst)
             const uint32_t requestedBytes = availableFrames * bytesPerFrame;
             
             // Allocate memory for decoded audio data
-            dst->theWaveform = (SBYTE*)XNewPtr(requestedBytes);
+            dst->theWaveform = (signed char*)XNewPtr(requestedBytes);
             if (!dst->theWaveform)
             {
                 GM_FreeWaveform(decoded);
@@ -3530,7 +3530,7 @@ OPErr XExpandVorbis(GM_Waveform const* src, UINT32 startFrame, GM_Waveform* dst)
 
             // Copy the decoded audio data starting from the requested frame
 #ifdef _MSC_VER
-            XBlockMove((XBYTE*)decoded->theWaveform + (startFrame * bytesPerFrame),
+            XBlockMove((unsigned char*)decoded->theWaveform + (startFrame * bytesPerFrame),
 #else
             XBlockMove(decoded->theWaveform + (startFrame * bytesPerFrame),
 #endif
@@ -3554,7 +3554,7 @@ OPErr XExpandVorbis(GM_Waveform const* src, UINT32 startFrame, GM_Waveform* dst)
 #if USE_OPUS_DECODER != FALSE
 
 // Read an Opus file into memory and return a GM_Waveform structure
-static GM_Waveform* PV_ReadIntoMemoryOpusFile(XFILE file, XBOOL decodeData, 
+static GM_Waveform* PV_ReadIntoMemoryOpusFile(XFILE file, bool decodeData, 
                                              int32_t *pFormat, void **ppBlockPtr, uint32_t *pBlockSize, OPErr *pError)
 {
     GM_Waveform *wave = NULL;
@@ -3617,7 +3617,7 @@ static GM_Waveform* PV_ReadIntoMemoryOpusFile(XFILE file, XBOOL decodeData,
         ogg_int64_t pcm_total = op_pcm_total(of, -1);
         uint32_t expected_size = 0;
         if (pcm_total > 0 && pcm_total <= (ogg_int64_t)0xFFFFFFFF) {
-            wave->waveFrames = (UINT32)pcm_total;
+            wave->waveFrames = (uint32_t)pcm_total;
             expected_size = wave->waveFrames * wave->channels * 2; // 16-bit samples
         } else {
             // Unknown length - proceed to decode until EOF
@@ -3630,7 +3630,7 @@ static GM_Waveform* PV_ReadIntoMemoryOpusFile(XFILE file, XBOOL decodeData,
             capacity = expected_size;
         }
 
-        wave->theWaveform = (SBYTE*)XNewPtr(capacity);
+        wave->theWaveform = (signed char*)XNewPtr(capacity);
         if (wave->theWaveform == NULL) {
             op_free(of);
             XDisposePtr(wave);
@@ -3651,7 +3651,7 @@ static GM_Waveform* PV_ReadIntoMemoryOpusFile(XFILE file, XBOOL decodeData,
                     newCapacity *= 2;
                 }
                 {
-                    SBYTE *resized = (SBYTE*)XResizePtr(wave->theWaveform, (int32_t)newCapacity);
+                    signed char *resized = (signed char*)XResizePtr(wave->theWaveform, (int32_t)newCapacity);
                     if (resized == NULL) {
                         op_free(of);
                         XDisposePtr(wave->theWaveform);
@@ -3684,7 +3684,7 @@ static GM_Waveform* PV_ReadIntoMemoryOpusFile(XFILE file, XBOOL decodeData,
             // If buffer is full, grow it
             if (capacity - total_read < 4096) {
                 uint32_t newCapacity = capacity * 2;
-                SBYTE *resized = (SBYTE*)XResizePtr(wave->theWaveform, (int32_t)newCapacity);
+                signed char *resized = (signed char*)XResizePtr(wave->theWaveform, (int32_t)newCapacity);
                 if (resized == NULL) {
                     op_free(of);
                     XDisposePtr(wave->theWaveform);
@@ -3707,7 +3707,7 @@ static GM_Waveform* PV_ReadIntoMemoryOpusFile(XFILE file, XBOOL decodeData,
         
         // Shrink to the actual decoded size
         {
-            SBYTE *shrunk = (SBYTE*)XResizePtr(wave->theWaveform, (int32_t)total_read);
+            signed char *shrunk = (signed char*)XResizePtr(wave->theWaveform, (int32_t)total_read);
             if (shrunk) {
                 wave->theWaveform = shrunk;
             }
@@ -3728,7 +3728,7 @@ static GM_Waveform* PV_ReadIntoMemoryOpusFile(XFILE file, XBOOL decodeData,
                 if (op_pcm_seek(of, 0) == 0) {
                     /* allocate a new buffer and decode floats into it, converting to int16 */
                     uint32_t newCapacity = 64 * 1024;
-                    SBYTE *newBuf = (SBYTE*)XNewPtr(newCapacity);
+                    signed char *newBuf = (signed char*)XNewPtr(newCapacity);
                     if (newBuf) {
                         uint32_t new_total = 0;
                         float *fbuf = NULL;
@@ -3737,7 +3737,7 @@ static GM_Waveform* PV_ReadIntoMemoryOpusFile(XFILE file, XBOOL decodeData,
                         for (;;) {
                             if (newCapacity - new_total < 4096) {
                                 uint32_t nc = newCapacity * 2;
-                                SBYTE *r = (SBYTE*)XResizePtr(newBuf, (int32_t)nc);
+                                signed char *r = (signed char*)XResizePtr(newBuf, (int32_t)nc);
                                 if (r == NULL) break;
                                 newBuf = r; newCapacity = nc;
                             }
@@ -3766,7 +3766,7 @@ static GM_Waveform* PV_ReadIntoMemoryOpusFile(XFILE file, XBOOL decodeData,
                             if (newCapacity - new_total < (uint32_t)(totalFloats * 2)) {
                                 uint32_t nc = newCapacity * 2;
                                 while (nc - new_total < (uint32_t)(totalFloats * 2)) nc *= 2;
-                                SBYTE *r = (SBYTE*)XResizePtr(newBuf, (int32_t)nc);
+                                signed char *r = (signed char*)XResizePtr(newBuf, (int32_t)nc);
                                 if (r == NULL) break;
                                 newBuf = r; newCapacity = nc;
                             }
@@ -3804,7 +3804,7 @@ static GM_Waveform* PV_ReadIntoMemoryOpusFile(XFILE file, XBOOL decodeData,
         
         ogg_int64_t pcm_total = op_pcm_total(of, -1);
         if (pcm_total > 0 && pcm_total <= (ogg_int64_t)0xFFFFFFFF) {
-            wave->waveFrames = (UINT32)pcm_total;
+            wave->waveFrames = (uint32_t)pcm_total;
             wave->waveSize = wave->waveFrames * wave->channels * 2;
         }
     }
@@ -3815,7 +3815,7 @@ static GM_Waveform* PV_ReadIntoMemoryOpusFile(XFILE file, XBOOL decodeData,
 }
 
 // Expand/decode Opus compressed data from memory
-OPErr XExpandOpus(GM_Waveform const* src, UINT32 startFrame, GM_Waveform* dst)
+OPErr XExpandOpus(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst)
 {
     OPErr err = NO_ERR;
     GM_Waveform *decoded = NULL;
@@ -3871,7 +3871,7 @@ OPErr XExpandOpus(GM_Waveform const* src, UINT32 startFrame, GM_Waveform* dst)
             const uint32_t requestedBytes = availableFrames * bytesPerFrame;
             
             // Allocate memory for decoded audio data
-            dst->theWaveform = (SBYTE*)XNewPtr(requestedBytes);
+            dst->theWaveform = (signed char*)XNewPtr(requestedBytes);
             if (!dst->theWaveform)
             {
                 GM_FreeWaveform(decoded);
@@ -3880,7 +3880,7 @@ OPErr XExpandOpus(GM_Waveform const* src, UINT32 startFrame, GM_Waveform* dst)
 
             // Copy the decoded audio data starting from the requested frame
 #ifdef _MSC_VER
-            XBlockMove((XBYTE*)decoded->theWaveform + (startFrame * bytesPerFrame),
+            XBlockMove((unsigned char*)decoded->theWaveform + (startFrame * bytesPerFrame),
 #else
             XBlockMove(decoded->theWaveform + (startFrame * bytesPerFrame),
 #endif
@@ -3905,14 +3905,14 @@ OPErr XExpandOpus(GM_Waveform const* src, UINT32 startFrame, GM_Waveform* dst)
 
 #if USE_VORBIS_DECODER != FALSE
 // Read a Vorbis file into memory and return a GM_Waveform structure
-static GM_Waveform* PV_ReadIntoMemoryVorbisFile(XFILE file, XBOOL decodeData, 
+static GM_Waveform* PV_ReadIntoMemoryVorbisFile(XFILE file, bool decodeData, 
                                                int32_t *pFormat, void **ppBlockPtr, uint32_t *pBlockSize, OPErr *pError)
 {
     GM_Waveform *wave = NULL;
     OggVorbis_File vf;
     vorbis_info *vi;
-    UINT32 sample_rate;
-    UINT32 channels;
+    uint32_t sample_rate;
+    uint32_t channels;
     long bytes_read;
     uint32_t total_read = 0;
     uint32_t capacity = 0;
@@ -4000,7 +4000,7 @@ static GM_Waveform* PV_ReadIntoMemoryVorbisFile(XFILE file, XBOOL decodeData,
         const uint32_t readChunk = 16 * 1024;
 
         capacity = minChunk;
-        wave->theWaveform = (SBYTE*)XNewPtr(capacity);
+        wave->theWaveform = (signed char*)XNewPtr(capacity);
         if (wave->theWaveform == NULL) {
             ov_clear(&vf);
             XDisposePtr(wave);
@@ -4018,7 +4018,7 @@ static GM_Waveform* PV_ReadIntoMemoryVorbisFile(XFILE file, XBOOL decodeData,
                     newCapacity *= 2;
                 }
                 {
-                    SBYTE *resized = (SBYTE*)XResizePtr(wave->theWaveform, (int32_t)newCapacity);
+                    signed char *resized = (signed char*)XResizePtr(wave->theWaveform, (int32_t)newCapacity);
                     if (resized == NULL)
                     {
                         ov_clear(&vf);
@@ -4065,7 +4065,7 @@ static GM_Waveform* PV_ReadIntoMemoryVorbisFile(XFILE file, XBOOL decodeData,
 
         // Shrink to the actual decoded size
         {
-            SBYTE *shrunk = (SBYTE*)XResizePtr(wave->theWaveform, (int32_t)total_read);
+            signed char *shrunk = (signed char*)XResizePtr(wave->theWaveform, (int32_t)total_read);
             if (shrunk)
             {
                 wave->theWaveform = shrunk;
@@ -4082,7 +4082,7 @@ static GM_Waveform* PV_ReadIntoMemoryVorbisFile(XFILE file, XBOOL decodeData,
             ogg_int64_t pcm_total = ov_pcm_total(&vf, -1);
             if (pcm_total > 0 && pcm_total <= (ogg_int64_t)0xFFFFFFFF)
             {
-                wave->waveFrames = (UINT32)pcm_total;
+                wave->waveFrames = (uint32_t)pcm_total;
                 wave->waveSize = wave->waveFrames * channels * 2;
             }
         }
@@ -4098,7 +4098,7 @@ static GM_Waveform* PV_ReadIntoMemoryVorbisFile(XFILE file, XBOOL decodeData,
 #if USE_VORBIS_DECODER != FALSE
 typedef struct
 {
-    XBOOL initialized;
+    bool initialized;
     OggVorbis_File vf;
 } VorbisStreamState;
 
@@ -4134,9 +4134,9 @@ typedef struct
 {
     FLAC__StreamDecoder *decoder;
     XFILE file;
-    XBOOL initialized;
-    XBOOL metadataComplete;
-    XBOOL eof;
+    bool initialized;
+    bool metadataComplete;
+    bool eof;
 
     uint8_t channels;
     uint32_t sampleRate;
@@ -4144,13 +4144,13 @@ typedef struct
     uint8_t sourceBits;
 
     // Output staging (leftovers across calls)
-    XBYTE *stash;
+    unsigned char *stash;
     uint32_t stashCap;
     uint32_t stashLen;
     uint32_t stashPos;
 
     // Per-call output target (owned by caller)
-    XBYTE *out;
+    unsigned char *out;
     uint32_t outNeed;
     uint32_t outWritten;
 
@@ -4162,7 +4162,7 @@ static uint32_t PV_FlacStashAvailable(const FLACStreamState *st)
     return (st && st->stashLen > st->stashPos) ? (st->stashLen - st->stashPos) : 0;
 }
 
-static XBOOL PV_FlacStashEnsure(FLACStreamState *st, uint32_t extraBytes)
+static bool PV_FlacStashEnsure(FLACStreamState *st, uint32_t extraBytes)
 {
     if (!st)
         return FALSE;
@@ -4174,7 +4174,7 @@ static XBOOL PV_FlacStashEnsure(FLACStreamState *st, uint32_t extraBytes)
         newCap *= 2;
     }
     {
-        XBYTE *resized = (XBYTE *)XResizePtr(st->stash, (int32_t)newCap);
+        unsigned char *resized = (unsigned char *)XResizePtr(st->stash, (int32_t)newCap);
         if (!resized)
             return FALSE;
         st->stash = resized;
@@ -4347,9 +4347,9 @@ static FLAC__StreamDecoderWriteStatus flac_stream_write_callback(
         for (uint32_t ch = 0; ch < channels; ch++)
         {
             int16_t s16 = PV_FlacConvertSampleToS16(buffer[ch][i], bitDepth);
-            XBYTE outBytes[2];
-            outBytes[0] = (XBYTE)(s16 & 0xFF);
-            outBytes[1] = (XBYTE)((s16 >> 8) & 0xFF);
+            unsigned char outBytes[2];
+            outBytes[0] = (unsigned char)(s16 & 0xFF);
+            outBytes[1] = (unsigned char)((s16 >> 8) & 0xFF);
 
             // Prefer writing into the current request buffer
             if (st->out && st->outWritten + 2 <= st->outNeed)
@@ -4597,7 +4597,7 @@ void * GM_CreateFileState(AudioFileType fileType)
 
 #if USE_FLAC_DECODER != 0
 // Wrapper to expand FLAC compressed GM_Waveform into decoded PCM waveform
-OPErr XExpandFLAC(GM_Waveform const* src, UINT32 startFrame, GM_Waveform* dst)
+OPErr XExpandFLAC(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst)
 {
     OPErr err = NO_ERR;
     GM_Waveform *decoded = NULL;
@@ -4650,7 +4650,7 @@ OPErr XExpandFLAC(GM_Waveform const* src, UINT32 startFrame, GM_Waveform* dst)
         // Copy requested range from decoded buffer
         if (copyBytes > 0)
         {
-            XBlockMove(((XBYTE*)decoded->theWaveform) + (startFrame * bytesPerFrame), dst->theWaveform, copyBytes);
+            XBlockMove(((unsigned char*)decoded->theWaveform) + (startFrame * bytesPerFrame), dst->theWaveform, copyBytes);
         }
 
         // Set dst metadata
@@ -4734,7 +4734,7 @@ void GM_DisposeFileState(AudioFileType fileType, void *state)
 
 // Read into memory a file
 GM_Waveform* GM_ReadFileIntoMemory(XFILENAME *filename, AudioFileType fileType,
-                                    XBOOL decodeData, OPErr *pErr)
+                                    bool decodeData, OPErr *pErr)
 {
 XFILE           file;
 OPErr           err;
@@ -4799,7 +4799,7 @@ GM_Waveform     *waveform;
 
 // Read into memory a file
 GM_Waveform* GM_ReadFileIntoMemoryFromMemory(void *pFileBlock, uint32_t fileBlockSize,
-                                                AudioFileType fileType, XBOOL decodeData,
+                                                AudioFileType fileType, bool decodeData,
                                                 OPErr *pErr)
 {
 XFILE           file;
@@ -4958,7 +4958,7 @@ OPErr GM_RepositionFileStream(XFILE fileReference,
                                         uint32_t *pOuputNewPlaybackPositionInBytes)
 {
     OPErr           fileError;
-    XBOOL           reSeek;
+    bool           reSeek;
     int16_t       frameBlockSize, decodeBlockSize;
     uint32_t   filePos;
 
@@ -5137,7 +5137,7 @@ OPErr GM_ReadAndDecodeFileStream(XFILE fileReference,
 #if USE_MPEG_DECODER != 0
     int32_t                    count, frames;
 #endif
-    XBOOL                   calculateFileSize;
+    bool                   calculateFileSize;
 
     returnedLength = 0;
     writeLength = 0;
@@ -5170,7 +5170,7 @@ OPErr GM_ReadAndDecodeFileStream(XFILE fileReference,
                 if (pBlockBuffer)
                 {
                     XMPEGDecodedData    *pMPG;
-                    XBOOL               mpegDone;
+                    bool               mpegDone;
                     char                *pcmAudio;                  
 
                     pMPG = (XMPEGDecodedData *)pBlockBuffer;
@@ -5228,7 +5228,7 @@ OPErr GM_ReadAndDecodeFileStream(XFILE fileReference,
                     }
 
                     // Decode until the request buffer is full or EOF
-                    st->out = (XBYTE *)pBuffer + writeLength;
+                    st->out = (unsigned char *)pBuffer + writeLength;
                     st->outNeed = bufferSize - writeLength;
                     st->outWritten = 0;
                     while (st->outNeed > 0)
@@ -5461,11 +5461,11 @@ OPErr GM_ReadAndDecodeFileStream(XFILE fileReference,
 }
 
 #if USE_FLAC_ENCODER != FALSE
-OPErr PV_WriteFromMemoryFLACFile(XFILENAME *file, GM_Waveform const* pAudioData, XWORD formatTag)
+OPErr PV_WriteFromMemoryFLACFile(XFILENAME *file, GM_Waveform const* pAudioData, uint16_t formatTag)
 {
     FLAC__StreamEncoder *encoder = NULL;
     OPErr err = NO_ERR;
-    XBOOL ok = TRUE;
+    bool ok = TRUE;
     
     if (!file || !pAudioData || formatTag != X_WAVE_FORMAT_PCM)
     {
@@ -5617,11 +5617,11 @@ OPErr XEncodeFLACToMemory(GM_Waveform const *src, int compressionLevel,
     FLAC__StreamEncoderInitStatus  initStatus;
     FLAC__int32                   *samples;
     uint32_t                       total, i;
-    XBOOL                          ok;
+    bool                          ok;
 
     if (!src || !src->theWaveform || !outData || !outSize)
         return PARAM_ERR;
-    if (src->compressionType != (XDWORD)C_NONE)
+    if (src->compressionType != (uint32_t)C_NONE)
         return PARAM_ERR;
     if (src->bitSize != 8 && src->bitSize != 16)
         return PARAM_ERR;
@@ -5743,7 +5743,7 @@ OPErr GM_FinalizeFileHeader(XFILE file, AudioFileType fileType)
     uint32_t chunk;
     uint32_t fileSize;
     uint32_t tmp;
-    XERR xerr;
+    int32_t xerr;
 
     err = NO_ERR;
     chunk = 0;
@@ -6067,7 +6067,7 @@ GM_Waveform * GM_ReadRawAudioIntoMemoryFromMemory(void * sampleData,            
                 if (bitSize == 8)
                 {
                     // 8 bit passed in is signed, but internal engine 8 bit data is unsigned.
-                    XPhase8BitWaveform((XBYTE*)pWave->theWaveform, pWave->waveSize);
+                    XPhase8BitWaveform((unsigned char*)pWave->theWaveform, pWave->waveSize);
                 }
             }
             else

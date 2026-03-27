@@ -94,7 +94,7 @@
 **  9/25/96     Added GM_Song pointer in NoteRecord structure
 **  9/27/96     Added more parameters to ServeMIDINote & PV_StopMIDINote
 **  10/18/96    Made CacheSampleInfo smaller
-**  10/23/96    Removed reference to BYTE and changed them all to XBYTE or XSBYTE
+**  10/23/96    Removed reference to BYTE and changed them all to unsigned char or signed char
 **  12/19/96    Added Sparc pragmas
 **  12/30/96    Changed copyrights
 **  1/23/97     Added support for stereoFilter
@@ -131,19 +131,19 @@
 **  12/4/97     Renamed GM_Mixer to GM_Mixer. Renamed NoteRecord to GM_Voice
 **  1/14/98     kk: added NoteLoopTarget to GM_Voice (number of loops between loop points desired
 **              before sample continues to end.
-**              changed NoteLoopCount from XBYTE to XDWORD because we are actually counting loops now and  
+**              changed NoteLoopCount from unsigned char to uint32_t because we are actually counting loops now and  
 **              may want quite a few.
 **  1/27/98     Renamed MACINTOSH to H_MACINTOSH
 **  2/3/98      Renamed songBufferLeftMono to songBufferDry
 **  2/5/98      Added a GM_Song pointer to PV_SetSampleIntoCache
-**  2/8/98      Changed BOOL_FLAG to XBOOL
+**  2/8/98      Changed BOOL_FLAG to bool
 **  2/10/98     added a bunch of structures for storing new effect parameters
 **  2/20/98     kcr converted floating-point to fixed for new effects -- added chorus buffer
 **  2/23/98     Removed last of old variable reverb code
 **  2/24/98     kcr deal with sample-rate changes for chorus and reverb...
 **  3/16/98     Removed PV_ProcessReverbMono & PV_ProcessReverbStereo & PV_PostFilterStereo
 **              from public view
-**              Changed InitNewReverb to return a XBOOL for success or failure
+**              Changed InitNewReverb to return a bool for success or failure
 **  4/1/98      MOE: took out references to FilterEnvelope{} so that all compiles
 **  4/14/98     Added some comments and removed extra structures that are not being used
 **
@@ -186,8 +186,8 @@
 **              wire event model.
 **  6/15/99     Changed PV_CleanExternalQueue parmeters
 **  7/9/99      Added taskReference for the Taskcallback
-**  7/19/99     Renamed UBYTE to XBYTE. Renamed INT16 to XSWORD. Renamed INT32 to XSDWORD.
-**              Renamed UINT32 to XDWORD. Renamed SBYTE to XSBYTE. Renamed UINT16 to XWORD
+**  7/19/99     Renamed unsigned char to unsigned char. Renamed int16_t to int16_t. Renamed int32_t to int32_t.
+**              Renamed uint32_t to uint32_t. Renamed signed char to signed char. Renamed uint16_t to uint16_t
 **  8/3/99      Changed pragma settings for X_BE
 **  10/19/99    MSD: switched to REVERB_USED and LOOPS_USED
 **  10/30/99    Removed cacheBlockID field from CacheSampleInfo
@@ -204,7 +204,7 @@
 **  2000.05.16 AER  Completed modifications for new sample cache
 **  2000.05.28 sh   Added PV_UnloadInstrumentData, and documented PV_GetInstrument
 **  2000.06.01 sh   Changed element voiceStartTimeStamp in GM_Voice structure
-**                  to a XDWORD.
+**                  to a uint32_t.
 **  7/07/2000  DS:  Increased MIDI queue size to 1024 for Windows platform.  Added
 **                  mutex struct to GM_Mixer as future placeholder, but #ifdef'd out.
 **  7/11/2000  DS:  Added NoteStartFrame member to GM_Voice.
@@ -506,16 +506,16 @@ struct GM_Voice
     void                    *syncVoiceReference;    // this field is used when voiceMode has been set to VOICE_ALLOCATED_READY_TO_SYNC_START
                                                     // A single pass search will happen and it will look for matching syncVoiceReference
                                                     // values. Once the voice is started it will be set to NULL.
-    XSWORD                  NoteDecay;              // after voiceMode == VOICE_RELEASING then this is ticks of decay
-    XDWORD                  voiceStartTimeStamp;    // this is a time stamp of when this voice is started, used to
+    int16_t                  NoteDecay;              // after voiceMode == VOICE_RELEASING then this is ticks of decay
+    uint32_t                  voiceStartTimeStamp;    // this is a time stamp of when this voice is started, used to
                                                     // track unique voices
     GM_Instrument           *pInstrument;           // read-only pointer to instrument information
     GM_Song                 *pSong;                 // read-only pointer to song information
     struct GM_Mixer         *pMixer;                // read-only pointer to mixer information
                                                     // used to backtrace where note came from
-    XBYTE                   *NotePtr;               // pointer to start of sample
-    XBYTE                   *NotePtrEnd;            // pointer to end of sample
-    XDWORD                  NoteStartFrame;         // offset to start of sample in frames
+    unsigned char                   *NotePtr;               // pointer to start of sample
+    unsigned char                   *NotePtrEnd;            // pointer to end of sample
+    uint32_t                  NoteStartFrame;         // offset to start of sample in frames
 #if LOOPS_USED == U3232_LOOPS
     U3232                   samplePosition;         // new index from NotePtr
 #endif
@@ -525,18 +525,18 @@ struct GM_Voice
     XFIXED                  NoteWave;               // current fractional position within sample (NotePtr:NotePtrEnd)
     XFIXED                  NotePitch;              // playback pitch in 16.16 fixed. 1.0 will play recorded speed
     XFIXED                  noteSamplePitchAdjust;  // adjustment to pitch based on difference from 22KHz in recorded rate
-    XBYTE                   *NoteLoopPtr;           // pointer to start of loop point within NotePtr & NotePtrEnd
-    XBYTE                   *NoteLoopEnd;           // pointer to end of loop point within NotePtr & NotePtrEnd
+    unsigned char                   *NoteLoopPtr;           // pointer to start of loop point within NotePtr & NotePtrEnd
+    unsigned char                   *NoteLoopEnd;           // pointer to end of loop point within NotePtr & NotePtrEnd
     
     // $$kk: 01.14.98: added NoteLoopTarget
-    XDWORD                  NoteLoopTarget;         // target number of loops before continuing to end of sample
+    uint32_t                  NoteLoopTarget;         // target number of loops before continuing to end of sample
 
 #if USE_CALLBACKS
     void                    *NoteContext;           // user context for callbacks
 // Double buffer variables. If using double buffering, then doubleBufferPtr1 will be non-zero. These variables
 // will be swapped with NotePtr, NotePtrEnd, NoteLoopPtr, NoteLoopPtrEnd
-    XBYTE                       *doubleBufferPtr1;
-    XBYTE                       *doubleBufferPtr2;
+    unsigned char                       *doubleBufferPtr1;
+    unsigned char                       *doubleBufferPtr2;
     GM_DoubleBufferCallbackPtr  doubleBufferProc;
 
 // Call back procs
@@ -544,66 +544,66 @@ struct GM_Voice
     GM_SoundDoneCallbackPtr     NoteEndCallback;    // sample done callback proc
 #endif
 
-    XSWORD                  NoteNextSize;           // number of samples per slice. Use 0 to recalculate
-    XSBYTE                  NoteMIDIPitch;          // midi note pitch to start note
-    XSBYTE                  noteOffsetStart;        // at the start of the midi note, what was the offset
-    XSWORD                  ProcessedPitch;         // actual pitch to play (proccessed)
+    int16_t                  NoteNextSize;           // number of samples per slice. Use 0 to recalculate
+    signed char                  NoteMIDIPitch;          // midi note pitch to start note
+    signed char                  noteOffsetStart;        // at the start of the midi note, what was the offset
+    int16_t                  ProcessedPitch;         // actual pitch to play (proccessed)
     XLongResourceID         NoteProgram;            // note program number. This is a combined value
                                                     // of program and bank.
-    XSBYTE                  NoteChannel;            // channel note is playing on
-    XSBYTE                  NoteTrack;              // track note is playing on
-    XSDWORD                 NoteVolume;             // note volume (scaled)
-    XSWORD                  NoteVolumeEnvelope;     // scalar from volume ADSR and LFO's.  0 min, VOLUME_RANGE max.
-    XSWORD                  NoteVolumeEnvelopeBeforeLFO;    // as described.
-    XSWORD                  NoteMIDIVolume;         // note volume (unscaled)
-    XSWORD                  NotePitchBend;          // 8.8 Fixed amount of bend
-    XSWORD                  ModWheelValue;          // 0-127
-    XSWORD                  LastModWheelValue;      // has it changed?  This is how we know.
-    XSWORD                  LastPitchBend;          // last bend
-    XSWORD                  stereoPosition;         // -63 (left) 0 (Middle) 63 (Right)
-    XSWORD                  routeBus;
+    signed char                  NoteChannel;            // channel note is playing on
+    signed char                  NoteTrack;              // track note is playing on
+    int32_t                 NoteVolume;             // note volume (scaled)
+    int16_t                  NoteVolumeEnvelope;     // scalar from volume ADSR and LFO's.  0 min, VOLUME_RANGE max.
+    int16_t                  NoteVolumeEnvelopeBeforeLFO;    // as described.
+    int16_t                  NoteMIDIVolume;         // note volume (unscaled)
+    int16_t                  NotePitchBend;          // 8.8 Fixed amount of bend
+    int16_t                  ModWheelValue;          // 0-127
+    int16_t                  LastModWheelValue;      // has it changed?  This is how we know.
+    int16_t                  LastPitchBend;          // last bend
+    int16_t                  stereoPosition;         // -63 (left) 0 (Middle) 63 (Right)
+    int16_t                  routeBus;
 
-    // $$kk: 01.14.98: changed NoteLoopCount from XBYTE to XSDWORD because we are actually counting loops now and may want quite a few
-    XDWORD                  NoteLoopCount;
+    // $$kk: 01.14.98: changed NoteLoopCount from unsigned char to int32_t because we are actually counting loops now and may want quite a few
+    uint32_t                  NoteLoopCount;
 
-    XBYTE                   bitSize;                // 8 or 16 bit data
-    XBYTE                   channels;               // mono or stereo data
-    XBYTE                   sustainMode;            // sustain mode, for pedal controls
-    XBYTE                   sampleAndHold;          // flag whether to sample & hold, or sample & release
-    XBYTE                   advancedInterpolation;  // use higher-resolution interpolation for this voice
-    XBYTE                   processingSlice;        // if TRUE, then thread is processing slice of this instrument
-    XBYTE                   avoidReverb;            // don't mix into reverb unit
-    XDWORD                  largestPeak;
+    unsigned char                   bitSize;                // 8 or 16 bit data
+    unsigned char                   channels;               // mono or stereo data
+    unsigned char                   sustainMode;            // sustain mode, for pedal controls
+    unsigned char                   sampleAndHold;          // flag whether to sample & hold, or sample & release
+    unsigned char                   advancedInterpolation;  // use higher-resolution interpolation for this voice
+    unsigned char                   processingSlice;        // if TRUE, then thread is processing slice of this instrument
+    unsigned char                   avoidReverb;            // don't mix into reverb unit
+    uint32_t                  largestPeak;
 #if REVERB_USED != REVERB_DISABLED
-    XBYTE                   reverbLevel;            // 0-127 when reverb is enabled
+    unsigned char                   reverbLevel;            // 0-127 when reverb is enabled
 #endif
 
 // sound effects variables. Not used for normal envelope or instruments
-    XBYTE                   soundEndAtFade;
+    unsigned char                   soundEndAtFade;
     XFIXED                  soundFadeRate;          // when non-zero fading is enabled
     XFIXED                  soundFixedVolume;       // inital volume level that will be changed by soundFadeRate
-    XSWORD                  soundFadeMaxVolume;     // max volume
-    XSWORD                  soundFadeMinVolume;     // min volume
+    int16_t                  soundFadeMaxVolume;     // max volume
+    int16_t                  soundFadeMinVolume;     // min volume
 #if USE_CALLBACKS
     GM_SampleCallbackEntry  *pSampleMarkList;       // linked list of callbacks on a per sample frame basis
 #endif
 
-    XSDWORD                 stereoPanBend;
+    int32_t                 stereoPanBend;
 
     GM_ADSR                 volumeADSRRecord;
-    XSDWORD                 volumeLFOValue;
-    XSWORD                  LFORecordCount;
+    int32_t                 volumeLFOValue;
+    int16_t                  LFORecordCount;
     GM_LFO                  LFORecords[MAX_LFOS];   // allocate for maximum allowed
-    XSDWORD                 lastAmplitudeL;
-    XSDWORD                 lastAmplitudeR;         // used to interpolate between points in volume ADSR
+    int32_t                 lastAmplitudeL;
+    int32_t                 lastAmplitudeR;         // used to interpolate between points in volume ADSR
 #if REVERB_USED != REVERB_DISABLED
-    XSWORD                  chorusLevel;            // 0-127 when chorus is enabled
+    int16_t                  chorusLevel;            // 0-127 when chorus is enabled
 #endif
-    XSWORD                  z[MAXRESONANCE+1];
-    XSDWORD                 zIndex, Z1value, previous_zFrequency;
-    XSDWORD                 LPF_lowpassAmount, LPF_frequency, LPF_resonance;
-    XSDWORD                 LPF_base_lowpassAmount, LPF_base_frequency, LPF_base_resonance;
-//  XSDWORD                 s1Left, s2Left, s3Left, s4Left, s5Left, s6Left; // for INTERP3 mode only
+    int16_t                  z[MAXRESONANCE+1];
+    int32_t                 zIndex, Z1value, previous_zFrequency;
+    int32_t                 LPF_lowpassAmount, LPF_frequency, LPF_resonance;
+    int32_t                 LPF_base_lowpassAmount, LPF_base_frequency, LPF_base_resonance;
+//  int32_t                 s1Left, s2Left, s3Left, s4Left, s5Left, s6Left; // for INTERP3 mode only
 };
 typedef struct GM_Voice GM_Voice;
 
@@ -622,7 +622,7 @@ struct GM_SampleCacheEntry
     uint32_t   loopEnd;        // loop end frame
     char            bitSize;        // sample bit size; 8 or 16
     char            channels;       // mono or stereo; 1 or 2
-    XBYTE           sndFlags;       // XSoundHeader3 reserved2[0] flags
+    unsigned char           sndFlags;       // XSoundHeader3 reserved2[0] flags
     int16_t       baseKey;        // base sample key
     int32_t            referenceCount; // how many references to this sample block
     void            *pSampleData;   // pointer to sample data. This may be an offset into the pMasterPtr
@@ -657,17 +657,17 @@ enum
 struct Q_MIDIEvent
 {
     GM_Song         *pSong;         // pSong the event was placed from
-    XDWORD          timeStamp;      // timestamp of event
-    XBYTE           status;         // status of event: 0 - dead, 1 - allocating, 2 - ready
-    XBYTE           midiChannel;    // which channel
-    XBYTE           command;        // which command
-    XBYTE           byte1;          // note, controller
-    XBYTE           byte2;          // velocity, lsb/msb
+    uint32_t          timeStamp;      // timestamp of event
+    unsigned char           status;         // status of event: 0 - dead, 1 - allocating, 2 - ready
+    unsigned char           midiChannel;    // which channel
+    unsigned char           command;        // which command
+    unsigned char           byte1;          // note, controller
+    unsigned char           byte2;          // velocity, lsb/msb
 };
 typedef struct Q_MIDIEvent Q_MIDIEvent;
 
 typedef void            (*InnerLoop)(GM_Voice *pVoice);
-typedef void            (*InnerLoop2)(GM_Voice *pVoice, XBOOL looping);
+typedef void            (*InnerLoop2)(GM_Voice *pVoice, bool looping);
 
 // tried to 8 byte align structure (7/17/97)
 struct GM_Mixer
@@ -678,55 +678,55 @@ struct GM_Mixer
     ReverbMode          reverbUnitType;                 // verb mode
     ReverbMode          reverbTypeAllocated;            // verb mode allocated
 
-    XBYTE               sampleFrameSize;                // size in bytes of each sample frame
-    XBYTE               sampleExpansion;                // output expansion factor 1, 2, or 4
-    XSWORD              MasterVolume;
-    XSWORD              globalVolume;                   // global volume for final mixdown
+    unsigned char               sampleFrameSize;                // size in bytes of each sample frame
+    unsigned char               sampleExpansion;                // output expansion factor 1, 2, or 4
+    int16_t              MasterVolume;
+    int16_t              globalVolume;                   // global volume for final mixdown
 
-    XSWORD              effectsVolume;                  // volume multiplier of all effects
-    XSDWORD             scaleBackAmount;
-    XSWORD              routeBus;
+    int16_t              effectsVolume;                  // volume multiplier of all effects
+    int32_t             scaleBackAmount;
+    int16_t              routeBus;
 
-    XSWORD              MaxNotes;
-    XSWORD              mixLevel;
-    XSWORD              MaxEffects;
-    XSWORD              maxChunkSize;
-    XDWORD              bufferTime;
-    XDWORD              lfoBufferTime;
+    int16_t              MaxNotes;
+    int16_t              mixLevel;
+    int16_t              MaxEffects;
+    int16_t              maxChunkSize;
+    uint32_t              bufferTime;
+    uint32_t              lfoBufferTime;
 
-    XWORD               One_Slice, One_Loop, Two_Loop, Four_Loop;
-    XWORD               Sixteen_Loop;
+    uint16_t               One_Slice, One_Loop, Two_Loop, Four_Loop;
+    uint16_t               Sixteen_Loop;
 
-    XBOOL       /*0*/   generate16output;               // if TRUE, then build 16 bit output
-    XBOOL       /*1*/   generateStereoOutput;           // if TRUE, then output stereo data
-    XBOOL       /*2*/   insideAudioInterrupt;
-    XBOOL       /*3*/   systemPaused;                   // all sound paused and disengaged from hardware
+    bool       /*0*/   generate16output;               // if TRUE, then build 16 bit output
+    bool       /*1*/   generateStereoOutput;           // if TRUE, then output stereo data
+    bool       /*2*/   insideAudioInterrupt;
+    bool       /*3*/   systemPaused;                   // all sound paused and disengaged from hardware
 
-    XBOOL       /*4*/   enableDriftFixer;               // if enabled, this will fix the drift of real time with our synth time.
-    XBOOL       /*5*/   sequencerPaused;                // MIDI sequencer paused
-    XBOOL       /*6*/   cacheInstruments;               // current not used
+    bool       /*4*/   enableDriftFixer;               // if enabled, this will fix the drift of real time with our synth time.
+    bool       /*5*/   sequencerPaused;                // MIDI sequencer paused
+    bool       /*6*/   cacheInstruments;               // current not used
 
-    XBOOL       /*7*/   stereoFilter;                   // if TRUE, then filter stereo output
+    bool       /*7*/   stereoFilter;                   // if TRUE, then filter stereo output
 #if BAE_FIX_SPAN_DC
-    XBOOL       /*8*/   fixSpanDC;                      // if TRUE, skip DC_feed for STEREO_PAN LFOs
+    bool       /*8*/   fixSpanDC;                      // if TRUE, skip DC_feed for STEREO_PAN LFOs
 #endif
 #if BAE_CLASSIC_CHORUS
-    XBOOL       /*9*/   classicChorus;                  // if TRUE, use pre-DLS chorus ordering (reverb before chorus, no chorus in fixed reverb)
+    bool       /*9*/   classicChorus;                  // if TRUE, use pre-DLS chorus ordering (reverb before chorus, no chorus in fixed reverb)
 #endif
-    XBYTE       /*0*/   processExternalMidiQueue;       // counter flag to lock processing of queue. 0 means process
+    unsigned char       /*0*/   processExternalMidiQueue;       // counter flag to lock processing of queue. 0 means process
     GM_SampleCacheEntry *sampleCaches[MAX_SAMPLES];     // cache of samples loaded
 
     // voice allocation, and dry and wet mix buffers
     GM_Voice            NoteEntry[MAX_VOICES];
 #ifdef BAE_COMPLETE
-    XSDWORD             songBufferDry[(MAX_CHUNK_SIZE+64)*2];   // interleaved samples: left-right
+    int32_t             songBufferDry[(MAX_CHUNK_SIZE+64)*2];   // interleaved samples: left-right
 #if REVERB_USED != REVERB_DISABLED
-    XSDWORD             songBufferReverb[MAX_CHUNK_SIZE+64];    // the +64 is for 48k output
-    XSDWORD             songBufferChorus[MAX_CHUNK_SIZE+64];
+    int32_t             songBufferReverb[MAX_CHUNK_SIZE+64];    // the +64 is for 48k output
+    int32_t             songBufferChorus[MAX_CHUNK_SIZE+64];
 #endif
 #endif
 #if USE_SF2_SUPPORT == TRUE
-    XBOOL               isSF2;
+    bool               isSF2;
 #endif
 
 // MIDI Interpreter variables
@@ -754,14 +754,14 @@ struct GM_Mixer
     Q_MIDIEvent         *pHead;                         // pointer to events to read from queue
     Q_MIDIEvent         *pTail;                         // pointer to events to write to queue
                                                         // always points to the next one to use
-    XDWORD              syncCount;                      // in microseconds. Current tick of audio output
-    XSDWORD             syncBufferCount;
+    uint32_t              syncCount;                      // in microseconds. Current tick of audio output
+    int32_t             syncBufferCount;
 
-    XDWORD              samplesPlayed;                  // number of samples played by device
-    XDWORD              samplesWritten;                 // number of samples written to device
-    XDWORD              lastSamplePosition;             // last time GM_UpdateSamplesPlayed was called
+    uint32_t              samplesPlayed;                  // number of samples played by device
+    uint32_t              samplesWritten;                 // number of samples written to device
+    uint32_t              lastSamplePosition;             // last time GM_UpdateSamplesPlayed was called
 
-    XDWORD              timeSliceDifference;            // value in microseconds between calls to
+    uint32_t              timeSliceDifference;            // value in microseconds between calls to
                                                         // HAE_BuildMixerSlice
 #if USE_CALLBACKS
     GM_AudioTaskCallbackPtr     pTaskProc;              // callback for audio tasks
@@ -770,16 +770,16 @@ struct GM_Mixer
 #endif
 #if REVERB_USED != REVERB_DISABLED
 // variables used for "classic" fixed verb
-    XSDWORD             *reverbBuffer;          // this is the master pointer used
+    int32_t             *reverbBuffer;          // this is the master pointer used
                                                 // for verb. It is shared between
                                                 // different types of verbs, although
                                                 // the data maybe different
-    XDWORD              reverbBufferSize;       // Set the size of memory allocated here.
+    uint32_t              reverbBufferSize;       // Set the size of memory allocated here.
                                                 // Make sure you set this because it is
                                                 // compared and tested against
-    XSDWORD             reverbPtr;              // delay line index into verb buffer
-    XSDWORD             LPfilterL, LPfilterR;   // used for fixed verb
-    XSDWORD             LPfilterLz, LPfilterRz;
+    int32_t             reverbPtr;              // delay line index into verb buffer
+    int32_t             LPfilterL, LPfilterR;   // used for fixed verb
+    int32_t             LPfilterLz, LPfilterRz;
 #endif
 };
 typedef struct GM_Mixer GM_Mixer;
@@ -818,19 +818,19 @@ extern GM_Mixer *MusicGlobals;
 
 struct NewReverbParams
 {
-    XBOOL               mIsInitialized;
+    bool               mIsInitialized;
     Rate                mSampleRate;
-    XSDWORD             mReverbType;    
+    int32_t             mReverbType;    
     
     /* early reflection params */
-    XSDWORD             *mEarlyReflectionBuffer;
-    XSDWORD             mEarlyReflectionGain[kNumberOfEarlyReflections];
+    int32_t             *mEarlyReflectionBuffer;
+    int32_t             mEarlyReflectionGain[kNumberOfEarlyReflections];
     int                 mReflectionWriteIndex;
     int                 mReflectionReadIndex[kNumberOfEarlyReflections];
     
     
     /* comb filter params */    
-    XSDWORD             *mReverbBuffer[kNumberOfCombFilters];
+    int32_t             *mReverbBuffer[kNumberOfCombFilters];
     
     int                 mReadIndex[kNumberOfCombFilters];
     int                 mWriteIndex[kNumberOfCombFilters];
@@ -838,25 +838,25 @@ struct NewReverbParams
     int32_t                mUnscaledDelayFrames[kNumberOfCombFilters];
     int32_t                mDelayFrames[kNumberOfCombFilters];
     
-    XSDWORD                 mFeedbackList[kNumberOfCombFilters];
+    int32_t                 mFeedbackList[kNumberOfCombFilters];
     
-    XSDWORD             mRoomSize;
-    XSDWORD             mRoomChoice;
-    XSDWORD             mMaxRegen;      // 0-127
-    XSDWORD             mDiffusedBalance;
+    int32_t             mRoomSize;
+    int32_t             mRoomChoice;
+    int32_t             mMaxRegen;      // 0-127
+    int32_t             mDiffusedBalance;
     
     /* diffusion params */
-    XSDWORD             *mDiffusionBuffer[kNumberOfDiffusionStages];
+    int32_t             *mDiffusionBuffer[kNumberOfDiffusionStages];
     int                 mDiffReadIndex[kNumberOfDiffusionStages];
     int                 mDiffWriteIndex[kNumberOfDiffusionStages];
     
     /* output filter */
-    XSDWORD             mLopassK;
-    XSDWORD             mFilterMemory;
+    int32_t             mLopassK;
+    int32_t             mFilterMemory;
     
     /* stereoizer params */
-    XSDWORD             *mStereoizerBufferL;
-    XSDWORD             *mStereoizerBufferR;
+    int32_t             *mStereoizerBufferL;
+    int32_t             *mStereoizerBufferR;
     int                 mStereoReadIndex;
     int                 mStereoWriteIndex;
 };
@@ -875,27 +875,27 @@ NeoReverbParams*    GetNeoReverbParams();
 
 /* Query whether Neo reverb is currently active or still decaying.
    Returns TRUE if Neo reverb reports activity or non-zero internal state. */
-XBOOL   BAENeoReverb_IsActive(void);
-XBOOL InitNewReverb();  // returns TRUE if success
+bool   BAENeoReverb_IsActive(void);
+bool InitNewReverb();  // returns TRUE if success
 void ShutdownNewReverb();
-XBOOL CheckReverbType();
+bool CheckReverbType();
 void ScaleDelayTimes();
 void GenerateDelayTimes();
 void GenerateFeedbackValues();
 void SetupDiffusion();
 void SetupStereoizer();
 void SetupEarlyReflections();
-void RunNewReverb(XSDWORD *sourceP, XSDWORD *destP, int nSampleFrames);
-XDWORD GetSamplingRate();
-XDWORD GetSR_44100Ratio();
-XDWORD Get44100_SRRatio();
+void RunNewReverb(int32_t *sourceP, int32_t *destP, int nSampleFrames);
+uint32_t GetSamplingRate();
+uint32_t GetSR_44100Ratio();
+uint32_t Get44100_SRRatio();
 
 #if USE_NEO_EFFECTS == TRUE
 // Neo reverb (MT-32 style)
-XBOOL       InitNeoReverb(void);
+bool       InitNeoReverb(void);
 void        ShutdownNeoReverb(void);
-XBOOL       CheckNeoReverbType(void);
-void        RunNeoReverb(INT32 *sourceP, INT32 *destP, int numFrames);
+bool       CheckNeoReverbType(void);
+void        RunNeoReverb(int32_t *sourceP, int32_t *destP, int numFrames);
 void        SetNeoReverbMix(int wetLevel);
 int         GetNeoReverbMix(void);
 void        SetNeoReverbTime(int reverbTime);
@@ -925,23 +925,23 @@ void        GetNeoReverbPresetParams(int reverbType, int *combCount, int *delays
 
 struct ChorusParams
 {
-    XBOOL               mIsInitialized;
+    bool               mIsInitialized;
     Rate                mSampleRate;
     
-    XSDWORD*                mChorusBufferL;
-    XSDWORD*                mChorusBufferR;
+    int32_t*                mChorusBufferL;
+    int32_t*                mChorusBufferR;
 
     int                 mWriteIndex;
-    XSDWORD             mReadIndexL;
-    XSDWORD             mReadIndexR;
+    int32_t             mReadIndexL;
+    int32_t             mReadIndexR;
     
     int                 mSampleFramesDelay;
 
-    XSDWORD             mRate;
+    int32_t             mRate;
     //float             mDepth;
-    XSDWORD             mPhi;
+    int32_t             mPhi;
     
-    XSDWORD             mFeedbackGain;  // between 0-127
+    int32_t             mFeedbackGain;  // between 0-127
 };
 
 typedef struct ChorusParams ChorusParams;
@@ -950,9 +950,9 @@ typedef struct ChorusParams ChorusParams;
 ChorusParams* GetChorusParams();
 void InitChorus();
 void ShutdownChorus();
-XSDWORD GetChorusReadIncrement(XSDWORD readIndex, int32_t writeIndex, int32_t nSampleFrames, XSDWORD phase);
+int32_t GetChorusReadIncrement(int32_t readIndex, int32_t writeIndex, int32_t nSampleFrames, int32_t phase);
 void SetupChorusDelay();
-void RunChorus(XSDWORD *sourceP, XSDWORD *destP, int nSampleFrames);
+void RunChorus(int32_t *sourceP, int32_t *destP, int nSampleFrames);
 
 
 #if 0   // only reverb and chorus are currently activated...
@@ -962,7 +962,7 @@ void RunChorus(XSDWORD *sourceP, XSDWORD *destP, int nSampleFrames);
 
 struct DelayEffect
 {
-    XSDWORD*                mDelayBuffer;
+    int32_t*                mDelayBuffer;
 
     int                 mWriteIndex;
     int                 mReadIndex;
@@ -972,9 +972,9 @@ struct DelayEffect
     float               mFeedbackValue;
     float               mFeedbackGain;
     
-    XSDWORD             mFilterMemoryL;
-    XSDWORD             mFilterMemoryR;
-    XSDWORD             mLopassK;
+    int32_t             mFilterMemoryL;
+    int32_t             mFilterMemoryR;
+    int32_t             mLopassK;
 };
 
 typedef struct DelayEffect DelayEffect;
@@ -982,7 +982,7 @@ typedef struct DelayEffect DelayEffect;
 /* prototypes */
 void Delay_Initialize(DelayEffect *This);
 void Delay_Shutdown(DelayEffect *This);
-void Delay_Run(DelayEffect *This, XSDWORD *sourceP);
+void Delay_Run(DelayEffect *This, int32_t *sourceP);
 
 extern DelayEffect      gDelay;
 
@@ -993,10 +993,10 @@ extern DelayEffect      gDelay;
 struct GraphicEqParams
 {
     /* right and left filter memory */
-    XSDWORD     mHistory1L[kNumberOfBands];
-    XSDWORD     mHistory2L[kNumberOfBands];
-    XSDWORD     mHistory1R[kNumberOfBands];
-    XSDWORD     mHistory2R[kNumberOfBands];
+    int32_t     mHistory1L[kNumberOfBands];
+    int32_t     mHistory2L[kNumberOfBands];
+    int32_t     mHistory1R[kNumberOfBands];
+    int32_t     mHistory2R[kNumberOfBands];
     
     float       mControlList[kNumberOfBands];       /* values between 0.0 and 1.0 */
     float       mGain[kNumberOfBands];
@@ -1008,7 +1008,7 @@ typedef struct GraphicEqParams GraphicEqParams;
 GraphicEqParams* GetGraphicEqParams();
 void InitGraphicEq();
 void CalculateGraphicEqGains();
-void RunGraphicEq(XSDWORD *sourceP, int nSampleFrames);
+void RunGraphicEq(int32_t *sourceP, int nSampleFrames);
 
 
 /******************************* parametric eq stuff *****************************/
@@ -1026,10 +1026,10 @@ struct ParametricEq
     float   sweep;
     
     /* filter memory */
-    XSDWORD x1;
-    XSDWORD x2;
-    XSDWORD y1;
-    XSDWORD y2;
+    int32_t x1;
+    int32_t x2;
+    int32_t y1;
+    int32_t y2;
     
     /* filter coefficients */
     float   b0;
@@ -1044,7 +1044,7 @@ typedef struct ParametricEq ParametricEq;
 /* prototypes */
 void    ParametricEq_Initialize(ParametricEq *This);
 void    ParametricEq_CalculateParams(ParametricEq *This);
-void    ParametricEq_Run(ParametricEq *This, XSDWORD *buffer);
+void    ParametricEq_Run(ParametricEq *This, int32_t *buffer);
 
 extern ParametricEq     gParametricEq;
 
@@ -1062,8 +1062,8 @@ struct ResonantFilterParams
     float   sweep;
     
     /* filter memory */
-    XSDWORD y1;
-    XSDWORD y2;
+    int32_t y1;
+    int32_t y2;
     
     /* filter coefficients */
     float   c0;
@@ -1077,7 +1077,7 @@ typedef struct ResonantFilterParams ResonantFilterParams;
 ResonantFilterParams* GetResonantFilterParams();
 void InitResonantFilter();
 void CalculateResonantParams(float inFrequency, float inResonance);
-void RunResonantFilter(XSDWORD *buffer, int nSampleFrames);
+void RunResonantFilter(int32_t *buffer, int nSampleFrames);
 
 #endif // 0
 
@@ -1097,8 +1097,8 @@ void PV_Generate16outputMono(OUTSAMPLE16 * dest16);
 
 int32_t PV_DoubleBufferCallbackAndSwap(GM_DoubleBufferCallbackPtr doubleBufferCallback, 
                                         GM_Voice *this_voice);
-void PV_CalculateStereoVolume(GM_Voice *this_voice, XSDWORD *pLeft, XSDWORD *pRight);
-void PV_CalculateMonoVolume(GM_Voice *pVoice, XSDWORD *pVolume);
+void PV_CalculateStereoVolume(GM_Voice *this_voice, int32_t *pLeft, int32_t *pRight);
+void PV_CalculateMonoVolume(GM_Voice *pVoice, int32_t *pVolume);
 
 void PV_ProcessSampleEvents(void *threadContext);           // process all sample events
 
@@ -1113,35 +1113,35 @@ void PV_ServeU3232StereoFilterFullBuffer (GM_Voice *this_voice);
 void PV_ServeU3232FilterFullBuffer16 (GM_Voice *this_voice);
 void PV_ServeU3232StereoFilterFullBuffer16 (GM_Voice *this_voice);
 
-void PV_ServeU3232FilterPartialBuffer (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeU3232StereoFilterPartialBuffer (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeU3232FilterPartialBuffer16 (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeU3232StereoFilterPartialBuffer16 (GM_Voice *this_voice, XBOOL looping);
+void PV_ServeU3232FilterPartialBuffer (GM_Voice *this_voice, bool looping);
+void PV_ServeU3232StereoFilterPartialBuffer (GM_Voice *this_voice, bool looping);
+void PV_ServeU3232FilterPartialBuffer16 (GM_Voice *this_voice, bool looping);
+void PV_ServeU3232StereoFilterPartialBuffer16 (GM_Voice *this_voice, bool looping);
 
-void PV_ServeU3232FilterPartialBufferNewReverb (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeU3232FilterPartialBufferNewReverb16 (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeU3232StereoFilterPartialBufferNewReverb (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeU3232StereoFilterPartialBufferNewReverb16 (GM_Voice *this_voice, XBOOL looping);
+void PV_ServeU3232FilterPartialBufferNewReverb (GM_Voice *this_voice, bool looping);
+void PV_ServeU3232FilterPartialBufferNewReverb16 (GM_Voice *this_voice, bool looping);
+void PV_ServeU3232StereoFilterPartialBufferNewReverb (GM_Voice *this_voice, bool looping);
+void PV_ServeU3232StereoFilterPartialBufferNewReverb16 (GM_Voice *this_voice, bool looping);
 
 void PV_ServeU3232FullBuffer (GM_Voice *this_voice);
 void PV_ServeU3232StereoFullBuffer (GM_Voice *this_voice);
 void PV_ServeU3232FullBuffer16 (GM_Voice *this_voice);
 void PV_ServeU3232StereoFullBuffer16 (GM_Voice *this_voice);
 
-void PV_ServeU3232PartialBuffer (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeU3232StereoPartialBuffer (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeU3232PartialBuffer16 (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeU3232StereoPartialBuffer16 (GM_Voice *this_voice, XBOOL looping);
+void PV_ServeU3232PartialBuffer (GM_Voice *this_voice, bool looping);
+void PV_ServeU3232StereoPartialBuffer (GM_Voice *this_voice, bool looping);
+void PV_ServeU3232PartialBuffer16 (GM_Voice *this_voice, bool looping);
+void PV_ServeU3232StereoPartialBuffer16 (GM_Voice *this_voice, bool looping);
 
 void PV_ServeU3232FullBufferNewReverb (GM_Voice *this_voice);
 void PV_ServeU3232StereoFullBufferNewReverb (GM_Voice *this_voice);
 void PV_ServeU3232FullBuffer16NewReverb (GM_Voice *this_voice);
 void PV_ServeU3232StereoFullBuffer16NewReverb (GM_Voice *this_voice);
 
-void PV_ServeU3232PartialBufferNewReverb (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeU3232StereoPartialBufferNewReverb (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeU3232PartialBuffer16NewReverb (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeU3232StereoPartialBuffer16NewReverb (GM_Voice *this_voice, XBOOL looping);
+void PV_ServeU3232PartialBufferNewReverb (GM_Voice *this_voice, bool looping);
+void PV_ServeU3232StereoPartialBufferNewReverb (GM_Voice *this_voice, bool looping);
+void PV_ServeU3232PartialBuffer16NewReverb (GM_Voice *this_voice, bool looping);
+void PV_ServeU3232StereoPartialBuffer16NewReverb (GM_Voice *this_voice, bool looping);
 #endif
 
 #if LOOPS_USED == FLOAT_LOOPS
@@ -1155,35 +1155,35 @@ void PV_ServeStereoFloatFilterFullBuffer (GM_Voice *this_voice);
 void PV_ServeFloatFilterFullBuffer16 (GM_Voice *this_voice);
 void PV_ServeStereoFloatFilterFullBuffer16 (GM_Voice *this_voice);
 
-void PV_ServeFloatFilterPartialBuffer (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeStereoFloatFilterPartialBuffer (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeFloatFilterPartialBuffer16 (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeStereoFloatFilterPartialBuffer16 (GM_Voice *this_voice, XBOOL looping);
+void PV_ServeFloatFilterPartialBuffer (GM_Voice *this_voice, bool looping);
+void PV_ServeStereoFloatFilterPartialBuffer (GM_Voice *this_voice, bool looping);
+void PV_ServeFloatFilterPartialBuffer16 (GM_Voice *this_voice, bool looping);
+void PV_ServeStereoFloatFilterPartialBuffer16 (GM_Voice *this_voice, bool looping);
 
-void PV_ServeFloatFilterPartialBufferNewReverb (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeFloatFilterPartialBufferNewReverb16 (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeStereoFloatFilterPartialBufferNewReverb (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeStereoFloatFilterPartialBufferNewReverb16 (GM_Voice *this_voice, XBOOL looping);
+void PV_ServeFloatFilterPartialBufferNewReverb (GM_Voice *this_voice, bool looping);
+void PV_ServeFloatFilterPartialBufferNewReverb16 (GM_Voice *this_voice, bool looping);
+void PV_ServeStereoFloatFilterPartialBufferNewReverb (GM_Voice *this_voice, bool looping);
+void PV_ServeStereoFloatFilterPartialBufferNewReverb16 (GM_Voice *this_voice, bool looping);
 
 void PV_ServeFloatFullBuffer (GM_Voice *this_voice);
 void PV_ServeStereoFloatFullBuffer (GM_Voice *this_voice);
 void PV_ServeFloatFullBuffer16 (GM_Voice *this_voice);
 void PV_ServeStereoFloatFullBuffer16 (GM_Voice *this_voice);
 
-void PV_ServeFloatPartialBuffer (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeStereoFloatPartialBuffer (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeFloatPartialBuffer16 (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeStereoFloatPartialBuffer16 (GM_Voice *this_voice, XBOOL looping);
+void PV_ServeFloatPartialBuffer (GM_Voice *this_voice, bool looping);
+void PV_ServeStereoFloatPartialBuffer (GM_Voice *this_voice, bool looping);
+void PV_ServeFloatPartialBuffer16 (GM_Voice *this_voice, bool looping);
+void PV_ServeStereoFloatPartialBuffer16 (GM_Voice *this_voice, bool looping);
 
 void PV_ServeFloatFullBufferNewReverb (GM_Voice *this_voice);
 void PV_ServeStereoFloatFullBufferNewReverb (GM_Voice *this_voice);
 void PV_ServeFloatFullBuffer16NewReverb (GM_Voice *this_voice);
 void PV_ServeStereoFloatFullBuffer16NewReverb (GM_Voice *this_voice);
 
-void PV_ServeFloatPartialBufferNewReverb (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeStereoFloatPartialBufferNewReverb (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeFloatPartialBuffer16NewReverb (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeStereoFloatPartialBuffer16NewReverb (GM_Voice *this_voice, XBOOL looping);
+void PV_ServeFloatPartialBufferNewReverb (GM_Voice *this_voice, bool looping);
+void PV_ServeStereoFloatPartialBufferNewReverb (GM_Voice *this_voice, bool looping);
+void PV_ServeFloatPartialBuffer16NewReverb (GM_Voice *this_voice, bool looping);
+void PV_ServeStereoFloatPartialBuffer16NewReverb (GM_Voice *this_voice, bool looping);
 #endif
 
 void PV_ServeInterp2FilterFullBufferNewReverb (GM_Voice *this_voice);
@@ -1196,60 +1196,60 @@ void PV_ServeStereoInterp2FilterFullBuffer (GM_Voice *this_voice);
 void PV_ServeInterp2FilterFullBuffer16 (GM_Voice *this_voice);
 void PV_ServeStereoInterp2FilterFullBuffer16 (GM_Voice *this_voice);
 
-void PV_ServeInterp2FilterPartialBuffer (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeStereoInterp2FilterPartialBuffer (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeInterp2FilterPartialBuffer16 (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeStereoInterp2FilterPartialBuffer16 (GM_Voice *this_voice, XBOOL looping);
+void PV_ServeInterp2FilterPartialBuffer (GM_Voice *this_voice, bool looping);
+void PV_ServeStereoInterp2FilterPartialBuffer (GM_Voice *this_voice, bool looping);
+void PV_ServeInterp2FilterPartialBuffer16 (GM_Voice *this_voice, bool looping);
+void PV_ServeStereoInterp2FilterPartialBuffer16 (GM_Voice *this_voice, bool looping);
 
-void PV_ServeInterp2FilterPartialBufferNewReverb (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeInterp2FilterPartialBufferNewReverb16 (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeStereoInterp2FilterPartialBufferNewReverb (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeStereoInterp2FilterPartialBufferNewReverb16 (GM_Voice *this_voice, XBOOL looping);
+void PV_ServeInterp2FilterPartialBufferNewReverb (GM_Voice *this_voice, bool looping);
+void PV_ServeInterp2FilterPartialBufferNewReverb16 (GM_Voice *this_voice, bool looping);
+void PV_ServeStereoInterp2FilterPartialBufferNewReverb (GM_Voice *this_voice, bool looping);
+void PV_ServeStereoInterp2FilterPartialBufferNewReverb16 (GM_Voice *this_voice, bool looping);
 
 void PV_ServeInterp2FullBuffer (GM_Voice *this_voice);
 void PV_ServeStereoInterp2FullBuffer (GM_Voice *this_voice);
 void PV_ServeInterp2FullBuffer16 (GM_Voice *this_voice);
 void PV_ServeStereoInterp2FullBuffer16 (GM_Voice *this_voice);
 
-void PV_ServeInterp2PartialBuffer (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeStereoInterp2PartialBuffer (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeInterp2PartialBuffer16 (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeStereoInterp2PartialBuffer16 (GM_Voice *this_voice, XBOOL looping);
+void PV_ServeInterp2PartialBuffer (GM_Voice *this_voice, bool looping);
+void PV_ServeStereoInterp2PartialBuffer (GM_Voice *this_voice, bool looping);
+void PV_ServeInterp2PartialBuffer16 (GM_Voice *this_voice, bool looping);
+void PV_ServeStereoInterp2PartialBuffer16 (GM_Voice *this_voice, bool looping);
 
 void PV_ServeInterp2FullBufferNewReverb (GM_Voice *this_voice);
 void PV_ServeStereoInterp2FullBufferNewReverb (GM_Voice *this_voice);
 void PV_ServeInterp2FullBuffer16NewReverb (GM_Voice *this_voice);
 void PV_ServeStereoInterp2FullBuffer16NewReverb (GM_Voice *this_voice);
 
-void PV_ServeInterp2PartialBufferNewReverb (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeStereoInterp2PartialBufferNewReverb (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeInterp2PartialBuffer16NewReverb (GM_Voice *this_voice, XBOOL looping);
-void PV_ServeStereoInterp2PartialBuffer16NewReverb (GM_Voice *this_voice, XBOOL looping);
+void PV_ServeInterp2PartialBufferNewReverb (GM_Voice *this_voice, bool looping);
+void PV_ServeStereoInterp2PartialBufferNewReverb (GM_Voice *this_voice, bool looping);
+void PV_ServeInterp2PartialBuffer16NewReverb (GM_Voice *this_voice, bool looping);
+void PV_ServeStereoInterp2PartialBuffer16NewReverb (GM_Voice *this_voice, bool looping);
 
 void PV_ServeInterp1FullBuffer (GM_Voice *this_voice);
-void PV_ServeInterp1PartialBuffer (GM_Voice *this_voice, XBOOL looping);
+void PV_ServeInterp1PartialBuffer (GM_Voice *this_voice, bool looping);
 void PV_ServeStereoInterp1FullBuffer (GM_Voice *this_voice);
-void PV_ServeStereoInterp1PartialBuffer (GM_Voice *this_voice, XBOOL looping);
+void PV_ServeStereoInterp1PartialBuffer (GM_Voice *this_voice, bool looping);
 
 void PV_ServeDropSampleFullBuffer (GM_Voice *this_voice);
-void PV_ServeDropSamplePartialBuffer (GM_Voice *this_voice, XBOOL looping);
+void PV_ServeDropSamplePartialBuffer (GM_Voice *this_voice, bool looping);
 void PV_ServeDropSampleFullBuffer16 (GM_Voice *this_voice);
-void PV_ServeDropSamplePartialBuffer16 (GM_Voice *this_voice, XBOOL looping);
+void PV_ServeDropSamplePartialBuffer16 (GM_Voice *this_voice, bool looping);
 void PV_ServeStereoAmpFullBuffer (GM_Voice *this_voice);
-void PV_ServeStereoAmpPartialBuffer (GM_Voice *this_voice, XBOOL looping);
+void PV_ServeStereoAmpPartialBuffer (GM_Voice *this_voice, bool looping);
 
 
-void PV_StartMIDINote(GM_Song *pSong, XSWORD the_instrument, 
-                        XSWORD the_channel, XSWORD the_track, XSWORD notePitch, XSDWORD Volume);
-void PV_StopMIDINote(GM_Song *pSong, XSWORD the_instrument, 
-                        XSWORD the_channel, XSWORD the_track, XSWORD notePitch);
+void PV_StartMIDINote(GM_Song *pSong, int16_t the_instrument, 
+                        int16_t the_channel, int16_t the_track, int16_t notePitch, int32_t Volume);
+void PV_StopMIDINote(GM_Song *pSong, int16_t the_instrument, 
+                        int16_t the_channel, int16_t the_track, int16_t notePitch);
 
 // voices modifiers
-XSWORD SetChannelPitchBend(GM_Song *pSong, XSWORD the_channel, XBYTE bendRange, XBYTE bendMSB, XBYTE bendLSB);
-void SetChannelVolume(GM_Song *pSong, XSWORD the_channel, XSWORD newVolume);
-XSWORD SetChannelStereoPosition(GM_Song *pSong, XSWORD the_channel, XWORD newPosition);
-void SetChannelModWheel(GM_Song *pSong, XSWORD the_channel, XWORD value);
-void PV_ChangeSustainedNotes(GM_Song *pSong, XSWORD the_channel, XSWORD data);
+int16_t SetChannelPitchBend(GM_Song *pSong, int16_t the_channel, unsigned char bendRange, unsigned char bendMSB, unsigned char bendLSB);
+void SetChannelVolume(GM_Song *pSong, int16_t the_channel, int16_t newVolume);
+int16_t SetChannelStereoPosition(GM_Song *pSong, int16_t the_channel, uint16_t newPosition);
+void SetChannelModWheel(GM_Song *pSong, int16_t the_channel, uint16_t value);
+void PV_ChangeSustainedNotes(GM_Song *pSong, int16_t the_channel, int16_t data);
 
 void PV_CleanExternalQueue(GM_Mixer *pMixer);
 
@@ -1262,7 +1262,7 @@ OPErr PV_ProcessMidiSequencerSlice(void *threadContext, GM_Song *pSong);
 // MIDI
 void PV_ConfigureInstruments(GM_Song *theSong);
 OPErr PV_ConfigureMusic(GM_Song *theSong);
-void PV_ResetControlers(GM_Song *pSong, XSWORD channel2Reset, XBOOL completeReset);
+void PV_ResetControlers(GM_Song *pSong, int16_t channel2Reset, bool completeReset);
 
 // GenPatch.c
 
@@ -1276,9 +1276,9 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                                      OPErr *pErr);
 
 // unload an instrument and remove all of its memory and optionally the samples
-OPErr PV_UnloadInstrumentData(GM_Instrument *theI, GM_Mixer *pMixer, XBOOL freeSamples);
+OPErr PV_UnloadInstrumentData(GM_Instrument *theI, GM_Mixer *pMixer, bool freeSamples);
 
-XDWORD PV_ScaleVolumeFromChannelAndSong(GM_Song *pSong, XSWORD channel, XDWORD volume);
+uint32_t PV_ScaleVolumeFromChannelAndSong(GM_Song *pSong, int16_t channel, uint32_t volume);
 #if USE_CALLBACKS
 void PV_DoCallBack(GM_Voice *this_one);
 #endif
@@ -1287,7 +1287,7 @@ void PV_CalcScaleBack(void);
 
 
 // given a voice structure, calculate what voice this is
-XWORD PV_GetVoiceNumberFromVoice(GM_Voice *pVoice);
+uint16_t PV_GetVoiceNumberFromVoice(GM_Voice *pVoice);
 
 XFIXED PV_GetWavePitch(XFIXED notePitch);
 #if LOOPS_USED == FLOAT_LOOPS
@@ -1304,7 +1304,7 @@ uint32_t PV_GetPositionFromVoice(GM_Voice *pVoice);
 void PV_SetPositionFromVoice(GM_Voice *pVoice, uint32_t pos);
 
 // GenModFiles.c
-void PV_WriteModOutput(Rate q, XBOOL stereo);
+void PV_WriteModOutput(Rate q, bool stereo);
 
 // GenAudioStreams.c
 void PV_ServeStreamFades(void);
@@ -1313,7 +1313,7 @@ void PV_ServeStreamFades(void);
 void PV_FreePatchInfo(GM_Song *pSong);
 void PV_InsertBankSelect(GM_Song *pSong, int16_t channel, int16_t currentTrack);
 // process end song callback
-void PV_CallSongCallback(void *threadContext, GM_Song *theSong, XBOOL clearCallback);
+void PV_CallSongCallback(void *threadContext, GM_Song *theSong, bool clearCallback);
 
 // GenSynth.c
 int32_t PV_ModifyVelocityFromCurve(GM_Song *pSong, int32_t volume);
@@ -1325,7 +1325,7 @@ int GetNeoCustomReverbLowpass();
 
 // GenSetup.c
 #if (X_PLATFORM == X_WIN95) && (USE_KAT)
-XBOOL PV_IntelKatActive(void);
+bool PV_IntelKatActive(void);
 #endif
 
 #ifdef __cplusplus

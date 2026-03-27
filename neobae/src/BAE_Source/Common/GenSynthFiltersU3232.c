@@ -101,27 +101,27 @@
 
 
 
-void PV_ServeU3232FilterPartialBuffer (GM_Voice *this_voice, XBOOL looping)
+void PV_ServeU3232FilterPartialBuffer (GM_Voice *this_voice, bool looping)
 {
-    register INT32          *destL;
-    register UBYTE          *source;
+    register int32_t          *destL;
+    register unsigned char          *source;
 #if 1   // MOE'S OBSESSIVE FOLLY
-    register INT32          b, c;
+    register int32_t          b, c;
 #else
-    register UBYTE          b, c;
+    register unsigned char          b, c;
 #endif
     register U32            cur_wave_i, cur_wave_f;
     register U32            end_wave, wave_adjust = 0;
     U3232                   wave_increment;
-    register INT32          amplitudeL;
-    register INT32          inner;
+    register int32_t          amplitudeL;
+    register int32_t          inner;
 
-    INT32                   amplitudeLincrement;
-    INT32                   ampValueL;
-    INT32                   a;
+    int32_t                   amplitudeLincrement;
+    int32_t                   ampValueL;
+    int32_t                   a;
 
-    register INT16          *z;
-    register INT32          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
+    register int16_t          *z;
+    register int32_t          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
 
 #if REVERB_USED == VARIABLE_REVERB
     if (this_voice->reverbLevel > 1 || this_voice->chorusLevel > 1)
@@ -167,10 +167,10 @@ void PV_ServeU3232FilterPartialBuffer (GM_Voice *this_voice, XBOOL looping)
             {
                 for (inner = 0; inner < 4; inner++)
                 {
-                    THE_CHECK_U3232(UBYTE *);
+                    THE_CHECK_U3232(unsigned char *);
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80) << 2;
+                    sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
                     sample = (sample * Xn + Z1value * Z1) >> 16;
                     Z1value = sample - (sample >> 9);   // remove DC bias
                     *destL += sample * amplitudeL;
@@ -189,13 +189,13 @@ void PV_ServeU3232FilterPartialBuffer (GM_Voice *this_voice, XBOOL looping)
 
                 for (inner = 0; inner < 4; inner++)
                 {
-                    THE_CHECK_U3232(UBYTE *);
+                    THE_CHECK_U3232(unsigned char *);
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80) << 2;
+                    sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
                     sample = (sample * Xn + Z1value * Z1 + z[zIndex1 & MAXRESONANCE] * Zn) >> 16;
                     zIndex1++;
-                    z[zIndex2 & MAXRESONANCE] = (INT16)sample;
+                    z[zIndex2 & MAXRESONANCE] = (int16_t)sample;
                     zIndex2++;
                     Z1value = sample - (sample >> 9);
                     *destL += sample * amplitudeL;
@@ -215,26 +215,26 @@ FINISH:
     return;
 }
 
-void PV_ServeU3232StereoFilterPartialBuffer (GM_Voice *this_voice, XBOOL looping)
+void PV_ServeU3232StereoFilterPartialBuffer (GM_Voice *this_voice, bool looping)
 {
-    register INT32          *destL;
-    register UBYTE          *source;
+    register int32_t          *destL;
+    register unsigned char          *source;
 #if 1   // MOE'S OBSESSIVE FOLLY
-    register INT32          b, c;
+    register int32_t          b, c;
 #else
-    register UBYTE          b, c;
+    register unsigned char          b, c;
 #endif
     register U32            cur_wave_i, cur_wave_f;
     register U32            end_wave, wave_adjust = 0;
     U3232                   wave_increment;
-    register INT32          amplitudeL;
-    register INT32          amplitudeR;
-    register INT32          inner;
-    INT32                   amplitudeLincrement, amplitudeRincrement;
-    INT32                   ampValueL, ampValueR;
-    INT32                   a;
-    register INT16          *z;
-    register INT32          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
+    register int32_t          amplitudeL;
+    register int32_t          amplitudeR;
+    register int32_t          inner;
+    int32_t                   amplitudeLincrement, amplitudeRincrement;
+    int32_t                   ampValueL, ampValueR;
+    int32_t                   a;
+    register int16_t          *z;
+    register int32_t          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
 
     if (this_voice->channels > 1) 
     {
@@ -289,10 +289,10 @@ void PV_ServeU3232StereoFilterPartialBuffer (GM_Voice *this_voice, XBOOL looping
             {
                 for (inner = 0; inner < 4; inner++)
                 {
-                    THE_CHECK_U3232(UBYTE *);
+                    THE_CHECK_U3232(unsigned char *);
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80) << 2;
+                    sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
                     sample = (sample * Xn + Z1value * Z1) >> 16;
                     Z1value = sample - (sample >> 9);
                     destL[0] += sample * amplitudeL;
@@ -313,13 +313,13 @@ void PV_ServeU3232StereoFilterPartialBuffer (GM_Voice *this_voice, XBOOL looping
 
                 for (inner = 0; inner < 4; inner++)
                 {
-                    THE_CHECK_U3232(UBYTE *);
+                    THE_CHECK_U3232(unsigned char *);
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80) << 2;
+                    sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
                     sample = (sample * Xn + Z1value * Z1 + z[zIndex1 & MAXRESONANCE] * Zn) >> 16;
                     zIndex1++;
-                    z[zIndex2 & MAXRESONANCE] = (INT16)sample;
+                    z[zIndex2 & MAXRESONANCE] = (int16_t)sample;
                     zIndex2++;
                     Z1value = sample - (sample >> 9);
                     destL[0] += sample * amplitudeL;
@@ -345,24 +345,24 @@ FINISH:
 
 void PV_ServeU3232FilterFullBuffer(GM_Voice *this_voice)
 {
-    register INT32          *destL;
-    register UBYTE          *source;
+    register int32_t          *destL;
+    register unsigned char          *source;
 #if 1   // MOE'S OBSESSIVE FOLLY
-    register INT32          b, c;
+    register int32_t          b, c;
 #else
-    register UBYTE          b, c;
+    register unsigned char          b, c;
 #endif
     register U32            cur_wave_i, cur_wave_f;
     U3232                   wave_increment;
-    register INT32          amplitudeL;
-    register INT32          inner;
+    register int32_t          amplitudeL;
+    register int32_t          inner;
 
-    INT32                   amplitudeLincrement;
-    INT32                   ampValueL;
-    INT32                   a;
+    int32_t                   amplitudeLincrement;
+    int32_t                   ampValueL;
+    int32_t                   a;
 
-    register INT16          *z;
-    register INT32          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
+    register int16_t          *z;
+    register int32_t          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
 
     // We can't filter stereo samples, so bail on this.
     if (this_voice->channels > 1) 
@@ -406,7 +406,7 @@ void PV_ServeU3232FilterFullBuffer(GM_Voice *this_voice)
                 {
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80) << 2;
+                    sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
                     sample = (sample * Xn + Z1value * Z1) >> 16;
                     Z1value = sample - (sample >> 9);   // remove DC bias
                     *destL += sample * amplitudeL;
@@ -427,10 +427,10 @@ void PV_ServeU3232FilterFullBuffer(GM_Voice *this_voice)
                 {
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80) << 2;
+                    sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
                     sample = (sample * Xn + Z1value * Z1 + z[zIndex1 & MAXRESONANCE] * Zn) >> 16;
                     zIndex1++;
-                    z[zIndex2 & MAXRESONANCE] = (INT16)sample;
+                    z[zIndex2 & MAXRESONANCE] = (int16_t)sample;
                     zIndex2++;
                     Z1value = sample - (sample >> 9);
                     *destL += sample * amplitudeL;
@@ -452,24 +452,24 @@ void PV_ServeU3232FilterFullBuffer(GM_Voice *this_voice)
 
 void PV_ServeU3232StereoFilterFullBuffer (GM_Voice *this_voice)
 {
-    register INT32          *destL;
-    register UBYTE          *source;
+    register int32_t          *destL;
+    register unsigned char          *source;
 #if 1   // MOE'S OBSESSIVE FOLLY
-    register INT32          b, c;
+    register int32_t          b, c;
 #else
-    register UBYTE          b, c;
+    register unsigned char          b, c;
 #endif
     register U32            cur_wave_i, cur_wave_f;
     U3232                   wave_increment;
-    register INT32          amplitudeL;
-    register INT32          amplitudeR;
-    register INT32          inner;
-    INT32                   amplitudeLincrement, amplitudeRincrement;
-    INT32                   ampValueL, ampValueR;
-    INT32                   a;
+    register int32_t          amplitudeL;
+    register int32_t          amplitudeR;
+    register int32_t          inner;
+    int32_t                   amplitudeLincrement, amplitudeRincrement;
+    int32_t                   ampValueL, ampValueR;
+    int32_t                   a;
 
-    register INT16          *z;
-    register INT32          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
+    register int16_t          *z;
+    register int32_t          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
 
     if (this_voice->channels > 1) 
     {
@@ -515,7 +515,7 @@ void PV_ServeU3232StereoFilterFullBuffer (GM_Voice *this_voice)
                 {
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80) << 2;
+                    sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
                     sample = (sample * Xn + Z1value * Z1) >> 16;
                     Z1value = sample - (sample >> 9);
                     destL[0] += sample * amplitudeL;
@@ -538,10 +538,10 @@ void PV_ServeU3232StereoFilterFullBuffer (GM_Voice *this_voice)
                 {
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = ((((INT32)(cur_wave_f >> 16) * (INT32)(c-b)) >> 16) + b - 0x80) << 2;
+                    sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
                     sample = (sample * Xn + Z1value * Z1 + z[zIndex1 & MAXRESONANCE] * Zn) >> 16;
                     zIndex1++;
-                    z[zIndex2 & MAXRESONANCE] = (INT16)sample;
+                    z[zIndex2 & MAXRESONANCE] = (int16_t)sample;
                     zIndex2++;
                     Z1value = sample - (sample >> 9);
                     destL[0] += sample * amplitudeL;
@@ -574,23 +574,23 @@ void PV_ServeU3232FilterFullBuffer16 (GM_Voice *this_voice)
     PV_ServeU3232FilterPartialBuffer16 (this_voice, FALSE);
 }
 
-void PV_ServeU3232FilterPartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
+void PV_ServeU3232FilterPartialBuffer16 (GM_Voice *this_voice, bool looping)
 {
-    register INT32          *destL;
-    register INT16          *source;
-    register INT16          b, c;
+    register int32_t          *destL;
+    register int16_t          *source;
+    register int16_t          b, c;
     register U32            cur_wave_i, cur_wave_f;
     register U32            end_wave, wave_adjust = 0;
     U3232                   wave_increment;
-    register INT32          amplitudeL;
-    register INT32          inner;
+    register int32_t          amplitudeL;
+    register int32_t          inner;
 
-    INT32                   amplitudeLincrement;
-    INT32                   ampValueL;
-    INT32                   a;
+    int32_t                   amplitudeLincrement;
+    int32_t                   ampValueL;
+    int32_t                   a;
 
-    register INT16          *z;
-    register INT32          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
+    register int16_t          *z;
+    register int32_t          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
 
     if (this_voice->channels > 1) 
     { 
@@ -638,10 +638,10 @@ void PV_ServeU3232FilterPartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
             {
                 for (inner = 0; inner < 4; inner++)
                 {
-                    THE_CHECK_U3232(INT16 *);       // is in the mail
+                    THE_CHECK_U3232(int16_t *);       // is in the mail
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = ((((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b) >> 6;
+                    sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
                     sample = (sample * Xn + Z1value * Z1) >> 16;
                     Z1value = sample - (sample >> 9);   // remove DC bias
                     *destL += (sample * amplitudeL) >> 2;
@@ -660,13 +660,13 @@ void PV_ServeU3232FilterPartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
 
                 for (inner = 0; inner < 4; inner++)
                 {
-                    THE_CHECK_U3232(INT16 *);       // is in the mail
+                    THE_CHECK_U3232(int16_t *);       // is in the mail
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = ((((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b) >> 6;
+                    sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
                     sample = (sample * Xn + Z1value * Z1 + z[zIndex1 & MAXRESONANCE] * Zn) >> 16;
                     zIndex1++;
-                    z[zIndex2 & MAXRESONANCE] = (INT16)sample;
+                    z[zIndex2 & MAXRESONANCE] = (int16_t)sample;
                     zIndex2++;
                     Z1value = sample - (sample >> 9);
                     *destL += (sample * amplitudeL) >> 2;
@@ -692,24 +692,24 @@ void PV_ServeU3232StereoFilterFullBuffer16 (GM_Voice *this_voice)
     PV_ServeU3232StereoFilterPartialBuffer16 (this_voice, FALSE);
 }
 
-void PV_ServeU3232StereoFilterPartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
+void PV_ServeU3232StereoFilterPartialBuffer16 (GM_Voice *this_voice, bool looping)
 {
-    register INT32          *destL;
-    register INT16          *source;
-    register INT16          b, c;
+    register int32_t          *destL;
+    register int16_t          *source;
+    register int16_t          b, c;
     register U32            cur_wave_i, cur_wave_f;
     register U32            end_wave, wave_adjust = 0;
     U3232                   wave_increment;
-    register INT32          amplitudeL;
-    register INT32          amplitudeR;
-    register INT32          inner;
+    register int32_t          amplitudeL;
+    register int32_t          amplitudeR;
+    register int32_t          inner;
 
-    INT32                   amplitudeLincrement, amplitudeRincrement;
-    INT32                   ampValueL, ampValueR;
-    INT32                   a;
+    int32_t                   amplitudeLincrement, amplitudeRincrement;
+    int32_t                   ampValueL, ampValueR;
+    int32_t                   a;
 
-    register INT16          *z;
-    register INT32          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
+    register int16_t          *z;
+    register int32_t          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
 
     if (this_voice->channels > 1) 
     { 
@@ -760,10 +760,10 @@ void PV_ServeU3232StereoFilterPartialBuffer16 (GM_Voice *this_voice, XBOOL loopi
             {
                 for (inner = 0; inner < 4; inner++)
                 {
-                    THE_CHECK_U3232(INT16 *);       // is in the mail
+                    THE_CHECK_U3232(int16_t *);       // is in the mail
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = ((((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b) >> 6;
+                    sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
                     sample = (sample * Xn + Z1value * Z1) >> 16;
                     Z1value = sample - (sample >> 9);
                     destL[0] += (sample * amplitudeL) >> 2;
@@ -784,13 +784,13 @@ void PV_ServeU3232StereoFilterPartialBuffer16 (GM_Voice *this_voice, XBOOL loopi
 
                 for (inner = 0; inner < 4; inner++)
                 {
-                    THE_CHECK_U3232(INT16 *);
+                    THE_CHECK_U3232(int16_t *);
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];
-                    sample = ((((INT32)(cur_wave_f >> 17) * (INT32)(c-b)) >> 15) + b) >> 6;
+                    sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
                     sample = (sample * Xn + Z1value * Z1 + z[zIndex1 & MAXRESONANCE] * Zn) >> 16;
                     zIndex1++;
-                    z[zIndex2 & MAXRESONANCE] = (INT16)sample;
+                    z[zIndex2 & MAXRESONANCE] = (int16_t)sample;
                     zIndex2++;
                     Z1value = sample - (sample >> 9);
                     destL[0] += (sample * amplitudeL) >> 2;

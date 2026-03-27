@@ -863,7 +863,7 @@ const char *BAE_WASM_GetFeatureString(void) {
  */
 EMSCRIPTEN_KEEPALIVE
 int BAE_WASM_HasEmbeddedSoundbank(void) {
-    extern XBOOL GM_LastRMIHadEmbeddedSoundbank(void);
+    extern bool GM_LastRMIHadEmbeddedSoundbank(void);
     return GM_LastRMIHadEmbeddedSoundbank() ? 1 : 0;
 }
 

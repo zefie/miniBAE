@@ -35,10 +35,10 @@ typedef struct Minimp3Stream {
     /* Source */
     MM_READ_STYLE   readMode;
     XFILE           file;       /* original file handle (if any) */
-    XBOOL           closeFile;  /* close on free */
+    bool           closeFile;  /* close on free */
     const uint8_t  *mem;        /* mp3 data buffer */
     size_t          mem_size;   /* total bytes */
-    XBOOL           own_mem;    /* we allocated mem and must free */
+    bool           own_mem;    /* we allocated mem and must free */
 
     /* Decoder */
     mp3dec_t        dec;

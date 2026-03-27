@@ -100,7 +100,7 @@
 **  6/30/96     Fixed bug with PV_GetSoundResource (!)
 **              Changed font and re tabbed
 **  7/5/96      Fixed thread order problem with GM_UnloadInstrument & GM_UnloadSongInstruments
-**  10/23/96    Removed reference to BYTE and changed them all to UBYTE or SBYTE
+**  10/23/96    Removed reference to BYTE and changed them all to unsigned char or signed char
 **              Added defines for instrument types
 **              Changed GetKeySplitFromPtr to XGetKeySplitFromPtr
 **  10/31/96    Added GM_IsInstrumentLoaded
@@ -129,7 +129,7 @@
 **              PV_GetInstrument
 **              Added OPErr to GM_FlushInstrumentCache so return STILL_PLAYING if instrument
 **              is busy
-**  10/16/97    Changed GM_LoadSongInstruments to use a XBOOL for a flag rather than an int
+**  10/16/97    Changed GM_LoadSongInstruments to use a bool for a flag rather than an int
 **              Renamed ignoreBadPatches to ignoreBadInstruments
 **              Removed lame support for instrument caching from GM_UnloadInstrument
 **  10/27/97    Changed GM_UnloadSongInstruments to handle errors better
@@ -139,7 +139,7 @@
 **              no error happened. Needed to wrap test around break.
 **  1/20/98     Fixed GM_LoadSongInstruments to return the correct error code when failing
 **  2/5/98      Added a GM_Song pointer to PV_SetSampleIntoCache
-**  2/8/98      Changed BOOL_FLAG to XBOOL
+**  2/8/98      Changed BOOL_FLAG to bool
 **  5/4/98      Eliminated neverInterpolate & enablePitchRandomness from the 
 **              GM_Instrument structure and all code that used it. Its not used.
 **
@@ -333,7 +333,7 @@ static void PV_ProcessSampleWithSMOD(void *pSample,
                                      int16_t param1,
                                      int16_t param2)
 {
-    register INT16      count;
+    register int16_t      count;
 
     if ( (smodID < SMOD_COUNT) && smod_functions[smodID])
     {
@@ -379,7 +379,7 @@ static void PV_ProcessSampleWithSMOD(void *pSample,
 
 // All instrument control identifiers are stored in the file as 4 bytes. This function
 // translates between the larger 4 byte id into a smaller 1 byte ID for in memory use.
-UNIT_TYPE PV_TranslateFromFileToMemoryID(XDWORD fileUnitType)
+UNIT_TYPE PV_TranslateFromFileToMemoryID(uint32_t fileUnitType)
 {
 #if USE_MEMORY_OPTS == 0
     return fileUnitType;
@@ -387,7 +387,7 @@ UNIT_TYPE PV_TranslateFromFileToMemoryID(XDWORD fileUnitType)
     typedef struct
     {
         UNIT_TYPE   memoryType;
-        XDWORD      fileType;
+        uint32_t      fileType;
     } MemoryToFileXlate;
     int16_t   count;
 
@@ -455,7 +455,7 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
     register GM_LFO         *pLFO;
     register GM_ADSR        *pADSR;
     register GM_TieTo       *pCurve;
-    XBOOL                   disableModWheel;
+    bool                   disableModWheel;
     InstrumentResourceHeaderView header;
     const unsigned char     *pBase;
 
@@ -560,7 +560,7 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                                 pADSR = &theI->volumeADSRRecord;
                                 for (count2 = 0; count2 < unitSubCount; count2++)
                                 {
-                                    pADSR->ADSRLevel[count2] = (XSDWORD)XGetLong(pUnit);
+                                    pADSR->ADSRLevel[count2] = (int32_t)XGetLong(pUnit);
                                     pUnit += 4;
 
                                     pADSR->ADSRTime[count2] = XGetLong(pUnit);
@@ -572,7 +572,7 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                                 break;
 
                             case INST_LOW_PASS_FILTER:      // low pass global filter parameters
-                                theI->LPF_frequency = (XSDWORD)XGetLong(pUnit);
+                                theI->LPF_frequency = (int32_t)XGetLong(pUnit);
                                 pUnit += 4;
                                 theI->LPF_resonance = XGetLong(pUnit);
                                 pUnit += 4;
@@ -606,7 +606,7 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                                 pLFO = &theI->LFORecords[lfoCount];
                                 for (count2 = 0; count2 < unitSubCount; count2++)
                                 {
-                                    pLFO->a.ADSRLevel[count2] = (XSDWORD)XGetLong(pUnit);
+                                    pLFO->a.ADSRLevel[count2] = (int32_t)XGetLong(pUnit);
                                     pUnit += 4;
                                     pLFO->a.ADSRTime[count2] = XGetLong(pUnit);
                                     pUnit += 4;
@@ -619,7 +619,7 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                                 pUnit += 4;
                                 pLFO->waveShape = PV_TranslateFromFileToMemoryID(XGetLong(pUnit));
                                 pUnit += 4;
-                                pLFO->DC_feed = (XSDWORD)XGetLong(pUnit);
+                                pLFO->DC_feed = (int32_t)XGetLong(pUnit);
                                 pUnit += 4;
                                 pLFO->level = XGetLong(pUnit);
                                 pUnit += 4;
@@ -732,7 +732,7 @@ static GM_Instrument * PV_CreateInstrumentFromResource(GM_Instrument *theMaster,
         theI = (GM_Instrument *)XNewPtr((int32_t)sizeof(GM_Instrument));
         if (theI)
         {
-            theI->u.w.theWaveform = (SBYTE *)theSound;
+            theI->u.w.theWaveform = (signed char *)theSound;
 
             if (theMaster)
             {
@@ -758,7 +758,7 @@ static GM_Instrument * PV_CreateInstrumentFromResource(GM_Instrument *theMaster,
 #endif
                 theI->useSampleRate = FALSE;
                 theI->sampleAndHold = FALSE;
-                theI->minLoopSize = (XBYTE)MIN_LOOP_SIZE_RMF;
+                theI->minLoopSize = (unsigned char)MIN_LOOP_SIZE_RMF;
             }
             theI->u.w.bitSize = sndInfo->bitSize;
             theI->u.w.channels = sndInfo->channels;
@@ -781,13 +781,13 @@ static GM_Instrument * PV_CreateInstrumentFromResource(GM_Instrument *theMaster,
     return theI;
 }
 
-static XBYTE PV_GetInstrumentMinLoopSize(const GM_Song *pSong)
+static unsigned char PV_GetInstrumentMinLoopSize(const GM_Song *pSong)
 {
     if (pSong && (pSong->engineConfigFlags & SONG_CONFIG_CONTAINER_IS_ZMF))
     {
-        return (XBYTE)MIN_LOOP_SIZE_ZMF;
+        return (unsigned char)MIN_LOOP_SIZE_ZMF;
     }
-    return (XBYTE)MIN_LOOP_SIZE_RMF;
+    return (unsigned char)MIN_LOOP_SIZE_RMF;
 }
 
 /******************************************************************************
@@ -819,7 +819,7 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
     XPTR                    theSound;
     KeySplit                theXSplit;
     GM_SampleCacheEntry *   sndInfo;
-    LOOPCOUNT               i;
+    int32_t               i;
     XSampleID               theSampleID;
 
     theI = NULL;
@@ -853,7 +853,7 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                 theI = (GM_Instrument *)XNewPtr((int32_t)sizeof(GM_Instrument));
                 if (theI)
                 {
-                    theI->u.w.theWaveform = (SBYTE *)theSound;
+                    theI->u.w.theWaveform = (signed char *)theSound;
                     theI->disableSndLooping = TEST_FLAG_VALUE(header.flags1, ZBF_disableSndLooping);
                     theI->playAtSampledFreq = TEST_FLAG_VALUE(header.flags2, ZBF_playAtSampledFreq);
                     theI->doKeymapSplit = FALSE;
@@ -884,8 +884,8 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                     if (theI->sampleOffsetStartEnabled)
                     {
                         theI->sampleOffsetStartFrames =
-                            (((XDWORD)(uint16_t)theI->miscParameter1) << 16) |
-                            (XDWORD)(uint16_t)theI->miscParameter2;
+                            (((uint32_t)(uint16_t)theI->miscParameter1) << 16) |
+                            (uint32_t)(uint16_t)theI->miscParameter2;
                     }
                     if (theI->useSoundModifierAsRootKey)
                     {
@@ -941,8 +941,8 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                 if (theI->sampleOffsetStartEnabled)
                 {
                     theI->sampleOffsetStartFrames =
-                        (((XDWORD)(uint16_t)theI->miscParameter1) << 16) |
-                        (XDWORD)(uint16_t)theI->miscParameter2;
+                        (((uint32_t)(uint16_t)theI->miscParameter1) << 16) |
+                        (uint32_t)(uint16_t)theI->miscParameter2;
                 }
                 if (theI->useSoundModifierAsRootKey)
                 {
@@ -962,7 +962,7 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                     theI->u.k.keySplits[count].miscParameter1 = theXSplit.miscParameter1;
                     if (theI->useSoundModifierAsRootKey && (theXSplit.miscParameter2 == 0)) { theXSplit.miscParameter2 = 100; }
                     theI->u.k.keySplits[count].miscParameter2 = theXSplit.miscParameter2;
-                    if (GM_IsInstrumentRangeUsed(pSong, theID, (INT16)theXSplit.lowMidi, (INT16)theXSplit.highMidi))
+                    if (GM_IsInstrumentRangeUsed(pSong, theID, (int16_t)theXSplit.lowMidi, (int16_t)theXSplit.highMidi))
                     {
                         theS =  PV_CreateInstrumentFromResource(theI, (XSampleID) theXSplit.sndResourceID, bankToken, pErr);
                         theI->u.k.keySplits[count].pSplitInstrument = theS;
@@ -976,8 +976,8 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                             if (theS->sampleOffsetStartEnabled)
                             {
                                 theS->sampleOffsetStartFrames =
-                                    (((XDWORD)(uint16_t)theS->miscParameter1) << 16) |
-                                    (XDWORD)(uint16_t)theS->miscParameter2;
+                                    (((uint32_t)(uint16_t)theS->miscParameter1) << 16) |
+                                    (uint32_t)(uint16_t)theS->miscParameter2;
                             }
                             theS->masterRootKey = theI->masterRootKey;
                             theS->panPlacement = theI->panPlacement;
@@ -1015,11 +1015,11 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
     return theI;
 }
 
-XBOOL GM_AnyStereoInstrumentsLoaded(GM_Song *pSong)
+bool GM_AnyStereoInstrumentsLoaded(GM_Song *pSong)
 {
     register GM_Instrument  *theI;
     register int16_t      instrument;
-    XBOOL               stereoLoaded;
+    bool               stereoLoaded;
 
     stereoLoaded = FALSE;
     if (pSong)
@@ -1043,7 +1043,7 @@ XBOOL GM_AnyStereoInstrumentsLoaded(GM_Song *pSong)
     return stereoLoaded;
 }
 
-XBOOL GM_IsInstrumentLoaded(GM_Song *pSong, XLongResourceID instrument)
+bool GM_IsInstrumentLoaded(GM_Song *pSong, XLongResourceID instrument)
 {
     if ( pSong && (instrument >= 0) && (instrument < (MAX_INSTRUMENTS*MAX_BANKS)) )
     {
@@ -1061,7 +1061,7 @@ OPErr GM_LoadInstrumentFromExternalData(GM_Song *pSong,
                                         XLongResourceID instrument,
                                         XBankToken bankToken,
                                         void *theX,
-                                        UINT32 theXPatchSize)
+                                        uint32_t theXPatchSize)
 {
     register GM_Instrument  *theI;
     OPErr                   theErr;
@@ -1118,7 +1118,7 @@ OPErr GM_LoadInstrument(GM_Song *pSong,
         if (pSong)
         {
             theErr = NO_ERR;
-            XBOOL instrumentLoaded = FALSE;
+            bool instrumentLoaded = FALSE;
             theI = pSong->instrumentData[instrument];
             // use cached instrument, if its not there, then load it
             if (theI == NULL)
@@ -1165,7 +1165,7 @@ OPErr GM_LoadInstrument(GM_Song *pSong,
 }
 
 // unload an instrument and remove all of its memory and optionally the samples
-OPErr PV_UnloadInstrumentData(GM_Instrument *theI, GM_Mixer *pMixer, XBOOL freeSamples)
+OPErr PV_UnloadInstrumentData(GM_Instrument *theI, GM_Mixer *pMixer, bool freeSamples)
 {
     register GM_KeymapSplit *k;
     OPErr                   theErr;
@@ -1243,7 +1243,7 @@ OPErr PV_UnloadInstrumentData(GM_Instrument *theI, GM_Mixer *pMixer, XBOOL freeS
 // Given a valid GM_Song pointer and an instrument this will release
 // an instrument. The freeSamples flag will release samples
 static OPErr PV_UnloadSongInstrument(GM_Song *pSong, XLongResourceID instrument,
-                                            XBOOL freeSamples)
+                                            bool freeSamples)
 {
     register GM_Instrument      *theI;
     register OPErr              theErr;
@@ -1291,15 +1291,15 @@ OPErr GM_UnloadInstrument(GM_Song *pSong, XLongResourceID instrument)
 OPErr GM_LoadSongInstruments(GM_Song *theSong,
                              XShortResourceID *pArray,
                              XBankToken bankToken,
-                             XBOOL loadInstruments)
+                             bool loadInstruments)
 {
     register int32_t       count, instCount;
     XLongResourceID     realInstrument, fallbackInstrument;
-    XBOOL               loopSongSave;
+    bool               loopSongSave;
     OPErr               theErr;
-    XBOOL               emptyStart;
-    SBYTE               remapUsedSaved[MAX_INSTRUMENTS];
-    SBYTE               remapUsed[MAX_INSTRUMENTS];
+    bool               emptyStart;
+    signed char               remapUsedSaved[MAX_INSTRUMENTS];
+    signed char               remapUsed[MAX_INSTRUMENTS];
 
     if (theSong->seqType != SEQ_MIDI)
     {
@@ -1307,7 +1307,7 @@ OPErr GM_LoadSongInstruments(GM_Song *theSong,
     }
     // Set the sequencer to mark instruments only
     theErr = NO_ERR;
-    theSong->pUsedPatchList = (SBYTE *)XNewPtr((MAX_INSTRUMENTS*MAX_BANKS*128L) / 8);
+    theSong->pUsedPatchList = (signed char *)XNewPtr((MAX_INSTRUMENTS*MAX_BANKS*128L) / 8);
     if (theSong->pUsedPatchList)
     {
         GM_SetupSongRemaps(theSong, TRUE);
@@ -1515,7 +1515,7 @@ OPErr GM_UnloadSongInstruments(GM_Song *pSong)
     return err;
 }
 
-void GM_SetUsedInstrumentRange(GM_Song *pSong, XLongResourceID thePatch, int start, int end, XBOOL used)
+void GM_SetUsedInstrumentRange(GM_Song *pSong, XLongResourceID thePatch, int start, int end, bool used)
 {
     int count, tmp;
 
@@ -1544,7 +1544,7 @@ void GM_SetUsedInstrumentRange(GM_Song *pSong, XLongResourceID thePatch, int sta
 }
 
 // Set the patch & key used bit. Pass -1 in theKey to set all the keys in that patch
-void GM_SetUsedInstrument(GM_Song *pSong, XLongResourceID thePatch, INT16 theKey, XBOOL used)
+void GM_SetUsedInstrument(GM_Song *pSong, XLongResourceID thePatch, int16_t theKey, bool used)
 {
     uint32_t   bit, count;
 
@@ -1590,7 +1590,7 @@ void GM_SetUsedInstrument(GM_Song *pSong, XLongResourceID thePatch, INT16 theKey
 }
 
 
-XBOOL GM_IsInstrumentUsed(GM_Song *pSong, XLongResourceID thePatch, INT16 theKey)
+bool GM_IsInstrumentUsed(GM_Song *pSong, XLongResourceID thePatch, int16_t theKey)
 {
 #if 1
 // faster code
@@ -1630,7 +1630,7 @@ XBOOL GM_IsInstrumentUsed(GM_Song *pSong, XLongResourceID thePatch, INT16 theKey
     return TRUE;
 #else
     register uint32_t  bit, count;
-    register XBOOL      used;
+    register bool      used;
 
     used = FALSE;
     if (pSong && pSong->pUsedPatchList)
@@ -1667,7 +1667,7 @@ XBOOL GM_IsInstrumentUsed(GM_Song *pSong, XLongResourceID thePatch, INT16 theKey
 #endif
 }
 
-void GM_GetInstrumentUsedRange(GM_Song *pSong, XLongResourceID thePatch, SBYTE *pUsedArray)
+void GM_GetInstrumentUsedRange(GM_Song *pSong, XLongResourceID thePatch, signed char *pUsedArray)
 {
     register uint32_t bit, count;
 
@@ -1684,9 +1684,9 @@ void GM_GetInstrumentUsedRange(GM_Song *pSong, XLongResourceID thePatch, SBYTE *
     }
 }
 
-void GM_SetInstrumentUsedRange(GM_Song *pSong, XLongResourceID thePatch, SBYTE *pUsedArray)
+void GM_SetInstrumentUsedRange(GM_Song *pSong, XLongResourceID thePatch, signed char *pUsedArray)
 {
-    register INT16      count;
+    register int16_t      count;
 
     if (pSong)
     {
@@ -1701,14 +1701,14 @@ void GM_SetInstrumentUsedRange(GM_Song *pSong, XLongResourceID thePatch, SBYTE *
 }
 
 
-XBOOL GM_IsInstrumentRangeUsed(GM_Song *pSong, XLongResourceID thePatch, INT16 theLowKey, INT16 theHighKey)
+bool GM_IsInstrumentRangeUsed(GM_Song *pSong, XLongResourceID thePatch, int16_t theLowKey, int16_t theHighKey)
 {
 #if 0
     // enable this path to always load samples from a particular instrument
     return TRUE;
 #else
-    register XBOOL  used;
-    register INT16      count;
+    register bool  used;
+    register int16_t      count;
 
     used = FALSE;
     if (pSong)

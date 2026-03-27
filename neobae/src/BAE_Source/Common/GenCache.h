@@ -92,7 +92,7 @@ OPErr GMCache_ClearSampleCache(GM_Mixer * pMixer);
 
 
 
-XBOOL GMCache_IsIDInCache(const GM_Mixer * pMixer,
+bool GMCache_IsIDInCache(const GM_Mixer * pMixer,
                           const XSampleID theID,
                           const XBankToken bankToken);
 GM_SampleCacheEntry * GMCache_GetCachePtrFromID(const GM_Mixer * pMixer,

@@ -81,7 +81,7 @@
 
 // Private Prototypes
 static OPErr PV_FreeCacheEntry(GM_Mixer * pMixer, GM_SampleCacheEntry * pCache);
-UINT32 PV_GetCacheIndexFromCachePtr(GM_Mixer * pMixer,
+uint32_t PV_GetCacheIndexFromCachePtr(GM_Mixer * pMixer,
                                     GM_SampleCacheEntry * pCache,
                                     OPErr * pErr);
 OPErr PV_PlaceSampleInCache(GM_Mixer * pMixer, GM_SampleCacheEntry * pCache);
@@ -98,8 +98,8 @@ static XPTR PV_ConvertToMono(XPTR pSamples, SampleDataInfo *pInfo)
 {
     uint32_t   sizeb, count;
     XPTR            newData = NULL;
-    XWORD           *src16, *dest16;
-    XBYTE           *src8, *dest8;
+    uint16_t           *src16, *dest16;
+    unsigned char           *src8, *dest8;
 
     if (pSamples && pInfo)
     {
@@ -111,8 +111,8 @@ static XPTR PV_ConvertToMono(XPTR pSamples, SampleDataInfo *pInfo)
             {
                 if (pInfo->bitSize == 16)
                 {
-                    dest16 = (XWORD *)newData;
-                    src16 = (XWORD *)pSamples;
+                    dest16 = (uint16_t *)newData;
+                    src16 = (uint16_t *)pSamples;
                     for (count = 0; count < pInfo->frames; count++)
                     {
                         dest16[count] = (src16[count] + src16[count+1]) / 2;
@@ -122,8 +122,8 @@ static XPTR PV_ConvertToMono(XPTR pSamples, SampleDataInfo *pInfo)
                 }
                 else
                 {
-                    dest8 = (XBYTE *)newData;
-                    src8 = (XBYTE *)pSamples;
+                    dest8 = (unsigned char *)newData;
+                    src8 = (unsigned char *)pSamples;
                     for (count = 0; count < pInfo->frames; count++)
                     {
                         dest8[count] = (src8[count] + src8[count+1]) / 2;
@@ -149,7 +149,7 @@ static XPTR PV_ConvertTo8Bit(XPTR pSamples, SampleDataInfo *pInfo)
     {
         if (pInfo->bitSize != 8)
         {
-            newData = XConvert16BitTo8Bit((XWORD *)pSamples, pInfo->frames, pInfo->channels);
+            newData = XConvert16BitTo8Bit((uint16_t *)pSamples, pInfo->frames, pInfo->channels);
             if (newData)
             {
                 XDisposePtr(pSamples);
@@ -206,7 +206,7 @@ GM_SampleCacheEntry * GMCache_BuildSampleCacheEntry(GM_Mixer * pMixer,
     XPTR                    theData, thePreSound;
     GM_SampleCacheEntry *   pCache;
     SampleDataInfo          newSoundInfo;
-    INT32                   size;
+    int32_t                   size;
 
     *pErr = NO_ERR;
     pCache = NULL;
@@ -270,7 +270,7 @@ GM_SampleCacheEntry * GMCache_BuildSampleCacheEntry(GM_Mixer * pMixer,
                 pCache->baseKey = newSoundInfo.baseKey;
                 pCache->bitSize = (char)newSoundInfo.bitSize;
                 pCache->channels = (char)newSoundInfo.channels;
-                pCache->sndFlags = (XBYTE)(newSoundInfo.sndFlags & 0xFFu);
+                pCache->sndFlags = (unsigned char)(newSoundInfo.sndFlags & 0xFFu);
                 pCache->rate = newSoundInfo.rate;
                 pCache->pSampleData = thePreSound;
                 pCache->pMasterPtr = newSoundInfo.pMasterPtr;
@@ -316,7 +316,7 @@ GM_SampleCacheEntry * GMCache_BuildSampleCacheEntry(GM_Mixer * pMixer,
 ******************************************************************************/
 OPErr PV_PlaceSampleInCache(GM_Mixer * pMixer, GM_SampleCacheEntry * pCache)
 {
-    register INT16          count;
+    register int16_t          count;
     OPErr                   pErr;
 
     pErr = GENERAL_BAD;
@@ -365,7 +365,7 @@ OPErr GMCache_IncrCacheEntryRef(const GM_Mixer * pMixer,
 {
 #ifdef DISPLAY_CACHE_SAVINGS
     char                foo[255];
-    static UINT32       byteCount = 0;
+    static uint32_t       byteCount = 0;
 #endif // DISPLAY_CACHE_SAVINGS
 
     if (pMixer && pCache)
@@ -428,7 +428,7 @@ OPErr GMCache_DecrCacheEntryRef(GM_Mixer * pMixer,
 ******************************************************************************/
 OPErr GMCache_ClearSampleCache(GM_Mixer * pMixer)
 {
-    register INT16      count;
+    register int16_t      count;
 
     BAE_ASSERT(pMixer);
 
@@ -459,7 +459,7 @@ OPErr GMCache_ClearSampleCache(GM_Mixer * pMixer)
 ******************************************************************************/
 static OPErr PV_FreeCacheEntry(GM_Mixer * pMixer, GM_SampleCacheEntry * pCache)
 {
-    UINT32              entryLoc;
+    uint32_t              entryLoc;
     OPErr               pErr;
 
     if (pCache)
@@ -510,11 +510,11 @@ static OPErr PV_FreeCacheEntry(GM_Mixer * pMixer, GM_SampleCacheEntry * pCache)
 **  2000.05.09 AER  Imported from MiniBAE
 **
 ******************************************************************************/
-XBOOL GMCache_IsIDInCache(const GM_Mixer * pMixer,
+bool GMCache_IsIDInCache(const GM_Mixer * pMixer,
                           const XSampleID theID,
                           const XBankToken bankToken)
 {
-    register INT16          count;
+    register int16_t          count;
     GM_SampleCacheEntry *   pCache;
 
     BAE_ASSERT(pMixer);
@@ -554,7 +554,7 @@ GM_SampleCacheEntry * GMCache_GetCachePtrFromID(const GM_Mixer * pMixer,
                                                 const XBankToken bankToken,
                                                 OPErr * pErr)
 {
-    register UINT16         count;
+    register uint16_t         count;
     GM_SampleCacheEntry *   pCache;
 
     if (pMixer)
@@ -594,7 +594,7 @@ GM_SampleCacheEntry * GMCache_GetCachePtrFromPtr(const GM_Mixer * pMixer,
                                                  const XPTR pSample,
                                                  OPErr * pErr)
 {
-    register UINT16         count;
+    register uint16_t         count;
     GM_SampleCacheEntry *   pCache;
 
     if (pMixer)
@@ -651,11 +651,11 @@ XPTR GMCache_GetSamplePtr(const GM_SampleCacheEntry * pCache,
 **  2000.05.15 AER  Function created
 **
 ******************************************************************************/
-UINT32 PV_GetCacheIndexFromCachePtr(GM_Mixer * pMixer,
+uint32_t PV_GetCacheIndexFromCachePtr(GM_Mixer * pMixer,
                                     GM_SampleCacheEntry * pCache,
                                     OPErr * pErr)
 {
-    register UINT32     count;
+    register uint32_t     count;
 
     if (pMixer && pCache)
     {

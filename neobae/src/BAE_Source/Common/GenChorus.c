@@ -132,9 +132,9 @@ void InitChorus()
     ChorusParams* params = GetChorusParams();
     
     // allocate the delay line memory
-    int32_t kMaxBytes = 2 * sizeof(INT32) * kChorusBufferFrameSize;
-    params->mChorusBufferL = (INT32*)XNewPtr(kMaxBytes );
-    params->mChorusBufferR = (INT32*)XNewPtr(kMaxBytes );
+    int32_t kMaxBytes = 2 * sizeof(int32_t) * kChorusBufferFrameSize;
+    params->mChorusBufferL = (int32_t*)XNewPtr(kMaxBytes );
+    params->mChorusBufferR = (int32_t*)XNewPtr(kMaxBytes );
 
     SetupChorusDelay();
     
@@ -154,7 +154,7 @@ void InitChorus()
         {
             static count = 0;
             double x;
-            INT32 value;
+            int32_t value;
             double halfTableLength = kModulationTableLength * 0.5;
             
             if(i < 100)
@@ -225,7 +225,7 @@ void SetupChorusDelay()
 
 // this table doesn't have to be extremely accurate -- just used to modulate chorus delay
 
-static INT32 expTable[] =   /* kModulationTableLength entries fixed point 16.16 */
+static int32_t expTable[] =   /* kModulationTableLength entries fixed point 16.16 */
 {
     16384, 16612, 16844, 17079, 17318, 17559, 17805, 18053, 18305, 18561, 
     18820, 19082, 19349, 19619, 19893, 20171, 20452, 20738, 21027, 21321, 
@@ -254,26 +254,26 @@ static INT32 expTable[] =   /* kModulationTableLength entries fixed point 16.16 
 //  GetChorusReadIncrement()
 //
 //++------------------------------------------------------------------------------
-INT32 GetChorusReadIncrement(INT32 readIndex, int32_t writeIndex, int32_t nSampleFrames, INT32 phase)
+int32_t GetChorusReadIncrement(int32_t readIndex, int32_t writeIndex, int32_t nSampleFrames, int32_t phase)
 {
     ChorusParams* params = GetChorusParams();
 
-    INT32   phi = params->mPhi;
+    int32_t   phi = params->mPhi;
     //float depth = params->mDepth;
     int32_t    sampleFramesDelay = params->mSampleFramesDelay;
 
     int32_t    currentDelayFrame;
     int32_t    desiredDelayFrame;
 
-    INT32   ratio;
+    int32_t   ratio;
 #if 0
     int     sampleFramesShift = 9;
 #endif
-    INT32   phiIndex = (phi * kModulationTableLength) + (phase << PHISHIFT);    // in 16.16
-    INT32   b = expTable[   (phiIndex >> PHISHIFT)      % kModulationTableLength];
-    INT32   c = expTable[(  (phiIndex >> PHISHIFT) + 1) % kModulationTableLength];
-    INT32   expValue = (((INT32) (phiIndex & PHIMASK) * (c - b))>>PHISHIFT) + b;
-    INT32   offsetFrame = (kMaxDepthRange * expValue) >> 16;
+    int32_t   phiIndex = (phi * kModulationTableLength) + (phase << PHISHIFT);    // in 16.16
+    int32_t   b = expTable[   (phiIndex >> PHISHIFT)      % kModulationTableLength];
+    int32_t   c = expTable[(  (phiIndex >> PHISHIFT) + 1) % kModulationTableLength];
+    int32_t   expValue = (((int32_t) (phiIndex & PHIMASK) * (c - b))>>PHISHIFT) + b;
+    int32_t   offsetFrame = (kMaxDepthRange * expValue) >> 16;
     
     // compensate for sampling rate
     offsetFrame = (GetSR_44100Ratio() * offsetFrame) >> 16;
@@ -322,7 +322,7 @@ INT32 GetChorusReadIncrement(INT32 readIndex, int32_t writeIndex, int32_t nSampl
 
 
 
-    ratio = (XSDWORD)(((unsigned int)(currentDelayFrame - desiredDelayFrame + nSampleFrames)) << READINDEXSHIFT);
+    ratio = (int32_t)(((unsigned int)(currentDelayFrame - desiredDelayFrame + nSampleFrames)) << READINDEXSHIFT);
 
 #if 0
     ratio >>= sampleFramesShift;
@@ -337,27 +337,27 @@ INT32 GetChorusReadIncrement(INT32 readIndex, int32_t writeIndex, int32_t nSampl
 //  RunChorus()
 //
 //++------------------------------------------------------------------------------
-void RunChorus(INT32 *sourceP, INT32 *destP, int nSampleFrames)
+void RunChorus(int32_t *sourceP, int32_t *destP, int nSampleFrames)
 {
 #define FEEDBACKSHIFT   7
 
     ChorusParams* params = GetChorusParams();
 
-    INT32   *bufferL = params->mChorusBufferL;
-    INT32   *bufferR = params->mChorusBufferR;
-    INT32   phi = params->mPhi;
-    INT32   rate = params->mRate;
-    INT32   feedbackGain = -params->mFeedbackGain;  // avoid "limit points"
+    int32_t   *bufferL = params->mChorusBufferL;
+    int32_t   *bufferR = params->mChorusBufferR;
+    int32_t   phi = params->mPhi;
+    int32_t   rate = params->mRate;
+    int32_t   feedbackGain = -params->mFeedbackGain;  // avoid "limit points"
     int32_t    writeIndex = params->mWriteIndex;
     
-    INT32   readIndexL = params->mReadIndexL;
-    INT32   readIndexR = params->mReadIndexR;
+    int32_t   readIndexL = params->mReadIndexL;
+    int32_t   readIndexR = params->mReadIndexR;
     
-    INT32   readIndexIncrL;
-    INT32   readIndexIncrR;
+    int32_t   readIndexIncrL;
+    int32_t   readIndexIncrR;
 
 
-    INT32   kReadIndexAdjust = (kChorusBufferFrameSize << READINDEXSHIFT);
+    int32_t   kReadIndexAdjust = (kChorusBufferFrameSize << READINDEXSHIFT);
     
 
     if(!params->mIsInitialized) return; // we're not properly initialized for processing...
@@ -390,24 +390,24 @@ void RunChorus(INT32 *sourceP, INT32 *destP, int nSampleFrames)
     while(nSampleFrames-- > 0)
     {
     // get input
-        INT32 inputL = *sourceP++;  // mono input
-        INT32 inputR = inputL;
+        int32_t inputL = *sourceP++;  // mono input
+        int32_t inputR = inputL;
 
 
     // calculate sample value
         int intReadIndexL = readIndexL >> READINDEXSHIFT;
         int intReadIndex2L = (intReadIndexL + 1) % kChorusBufferFrameSize;
-        INT32 bL = bufferL[intReadIndexL];
-        INT32 cL = bufferL[intReadIndex2L];
+        int32_t bL = bufferL[intReadIndexL];
+        int32_t cL = bufferL[intReadIndex2L];
         
         
         int intReadIndexR = readIndexR >> READINDEXSHIFT;
         int intReadIndex2R = (intReadIndexR + 1) % kChorusBufferFrameSize;
-        INT32 bR = bufferR[intReadIndexR];
-        INT32 cR = bufferR[intReadIndex2R];
+        int32_t bR = bufferR[intReadIndexR];
+        int32_t cR = bufferR[intReadIndex2R];
         
-        INT32 tapL = (((INT32) (readIndexL & READINDEXMASK) * (cL - bL))>>READINDEXSHIFT) + bL;
-        INT32 tapR = (((INT32) (readIndexR & READINDEXMASK) * (cR - bR))>>READINDEXSHIFT) + bR;
+        int32_t tapL = (((int32_t) (readIndexL & READINDEXMASK) * (cL - bL))>>READINDEXSHIFT) + bL;
+        int32_t tapR = (((int32_t) (readIndexR & READINDEXMASK) * (cR - bR))>>READINDEXSHIFT) + bR;
 
     // write input plus feedback back into the delay line
         bufferL[writeIndex] = inputL + ((tapL*feedbackGain) >> FEEDBACKSHIFT) ;
@@ -454,22 +454,22 @@ void RunChorus(INT32 *sourceP, INT32 *destP, int nSampleFrames)
 #if 0       // old mono chorus code   -- don't delete!
     while(nSampleFrames-- > 0)
     {
-        INT32 chorusOut;
+        int32_t chorusOut;
         
     // get input
-        INT32 inputL = sourceP[0];
-        INT32 inputR = sourceP[1];
-        INT32 input = inputL + inputR;
+        int32_t inputL = sourceP[0];
+        int32_t inputR = sourceP[1];
+        int32_t input = inputL + inputR;
 
 
     // calculate sample value
         int intReadIndex = readIndex >> READINDEXSHIFT;
         int intReadIndex2 = (intReadIndex + 1) % kChorusBufferFrameSize;
 
-        INT32 b = buffer[intReadIndex];
-        INT32 c = buffer[intReadIndex2];
+        int32_t b = buffer[intReadIndex];
+        int32_t c = buffer[intReadIndex2];
         
-        INT32 tap = (((INT32) (readIndex & READINDEXMASK) * (c-b))>>READINDEXSHIFT) + b;
+        int32_t tap = (((int32_t) (readIndex & READINDEXMASK) * (c-b))>>READINDEXSHIFT) + b;
 
 
     // write input plus feedback back into the delay line

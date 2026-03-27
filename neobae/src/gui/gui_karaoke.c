@@ -154,7 +154,7 @@ void karaoke_commit_line(uint32_t time_us, const char *line)
 
 // Meta event callback from engine (lyrics arrive here)
 // Legacy meta event callback path retained (if lyric callback not available). Filtered to lyric events only.
-void gui_meta_event_callback(void *threadContext, struct GM_Song *pSong, char markerType, void *pMetaText, int32_t metaTextLength, XSWORD currentTrack)
+void gui_meta_event_callback(void *threadContext, struct GM_Song *pSong, char markerType, void *pMetaText, int32_t metaTextLength, int16_t currentTrack)
 {
     (void)threadContext;
     (void)pSong;

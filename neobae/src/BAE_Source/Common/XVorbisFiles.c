@@ -57,8 +57,8 @@
 typedef struct {
     OggVorbis_File vf;
     vorbis_info *vi;
-    INT32 current_section;
-    XBOOL is_open;
+    int32_t current_section;
+    bool is_open;
 } XVorbisDecoder;
 
 // Structure to hold Vorbis encoder state
@@ -71,7 +71,7 @@ typedef struct {
     vorbis_comment vc;
     vorbis_dsp_state vd;
     vorbis_block vb;
-    XBOOL is_initialized;
+    bool is_initialized;
 } XVorbisEncoder;
 #endif
 
@@ -81,7 +81,7 @@ static size_t vorbis_read_func(void *ptr, size_t size, size_t nmemb, void *datas
 {
     XFILE file = (XFILE)datasource;
     size_t bytes_to_read = size * nmemb;
-    XERR err;
+    int32_t err;
     if (bytes_to_read == 0) return 0;
 
     /* XFileRead returns 0 on success, -1 on failure. It will fail if
@@ -166,7 +166,7 @@ static ov_callbacks vorbis_callbacks = {
 #if USE_VORBIS_DECODER == TRUE
 
 // Check if file is an Ogg Vorbis file
-XBOOL XIsVorbisFile(XFILE file)
+bool XIsVorbisFile(XFILE file)
 {
     OggVorbis_File vf;
     int result;
@@ -223,8 +223,8 @@ void* XOpenVorbisFile(XFILE file)
 }
 
 // Get Vorbis file information
-OPErr XGetVorbisFileInfo(void *decoder_handle, UINT32 *samples, UINT32 *sample_rate, 
-                        UINT32 *channels, UINT32 *bit_depth)
+OPErr XGetVorbisFileInfo(void *decoder_handle, uint32_t *samples, uint32_t *sample_rate, 
+                        uint32_t *channels, uint32_t *bit_depth)
 {
     XVorbisDecoder *decoder = (XVorbisDecoder*)decoder_handle;
     
@@ -232,7 +232,7 @@ OPErr XGetVorbisFileInfo(void *decoder_handle, UINT32 *samples, UINT32 *sample_r
         return PARAM_ERR;
     }
     
-    if (samples) *samples = (UINT32)ov_pcm_total(&decoder->vf, -1);
+    if (samples) *samples = (uint32_t)ov_pcm_total(&decoder->vf, -1);
     if (sample_rate) *sample_rate = decoder->vi->rate;
     if (channels) *channels = decoder->vi->channels;
     if (bit_depth) *bit_depth = 16; // Vorbis outputs 16-bit PCM
@@ -289,7 +289,7 @@ void XCloseVorbisFile(void *decoder_handle)
 #if USE_VORBIS_ENCODER == TRUE
 
 // Initialize Vorbis encoder
-void* XInitVorbisEncoder(UINT32 sample_rate, UINT32 channels, float quality)
+void* XInitVorbisEncoder(uint32_t sample_rate, uint32_t channels, float quality)
 {
     XVorbisEncoder *encoder;
     int result;
@@ -484,7 +484,7 @@ OPErr XEncodeVorbisToMemory(GM_Waveform const *src, float quality,
 
     if (!src || !src->theWaveform || !outData || !outSize)
         return PARAM_ERR;
-    if (src->compressionType != (XDWORD)C_NONE)
+    if (src->compressionType != (uint32_t)C_NONE)
         return PARAM_ERR;
     if (src->channels < 1 || src->channels > 2)
         return PARAM_ERR;
@@ -494,8 +494,8 @@ OPErr XEncodeVorbisToMemory(GM_Waveform const *src, float quality,
     XSetMemory(&buf, sizeof(buf), 0);
 
     enc = (XVorbisEncoder *)XInitVorbisEncoder(
-            (UINT32)(src->sampledRate >> 16),
-            (UINT32)src->channels,
+            (uint32_t)(src->sampledRate >> 16),
+            (uint32_t)src->channels,
             quality);
     if (!enc) return MEMORY_ERR;
 

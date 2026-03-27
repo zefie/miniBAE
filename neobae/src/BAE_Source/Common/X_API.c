@@ -226,7 +226,7 @@
 **  1/9/98      Added XFileDelete
 **  1/21/98     Changed the functions XGetShort & XGetLong & XPutShort & XPutLong
 **              into macros that fall out for Motorola order hardware
-**  1/26/98     Added XERR to various functions
+**  1/26/98     Added int32_t to various functions
 **  1/31/98     Moved XPI_Memblock structures to X_API.h, and moved the function
 **              XIsOurMemoryPtr to X_API.h
 **  2/7/98      Changed XFIXED back to an uint32_t to fix broken content
@@ -312,7 +312,7 @@
 **              to BAEModSong. Renamed BAEGroup to BAENoiseGroup. Renamed BAEReverbMode to BAEReverbType.
 **              Renamed BAEAudioNoise to BAENoise.
 **  7/27/99     Fixed misspelling in XWaitMicroseocnds
-**  8/10/99     Changed XFileSetPositionRelative & XFileSetLength to return an XERR
+**  8/10/99     Changed XFileSetPositionRelative & XFileSetLength to return an int32_t
 **  8/11/99     MOE: Changed XAddFileResource() to fix two problems:
 **                  writing name was failing but XFileWrite()'s return value was ignored
 **                  cacheItem.fileOffsetData was not being set right
@@ -330,7 +330,7 @@
 **              resource access, only access the resource API's that you pass in an XFILE.
 **              This is going to change.
 **              Increased MAX_OPEN_XFILES to 10 open files at once. Removed obsolete macro USE_WIN32_FILE_IO.
-**  9/1/99      Changed PV_CopyWithinFile to return an XERR rather than a int.
+**  9/1/99      Changed PV_CopyWithinFile to return an int32_t rather than a int.
 **  9/8/99      MOE: Changed XResizePtr() to check for same-size reallocation
 **  9/8/99      MOE: Changed XResizePtr() to not always attempt to reallocate large blocks
 **              This is a hack to be taken out when BAE_ResizePointer() exists
@@ -423,7 +423,7 @@ static XFILE        g_openResourceFiles[MAX_OPEN_XFILES];
 #define ZMF_INST_BLOCK_MAGIC       FOUR_CHAR('Z','I','N','S')
 #define ZMF_SONG_BLOCK_MAGIC       FOUR_CHAR('Z','S','N','G')
 
-static XBOOL PV_XFileValid(XFILE fileRef);
+static bool PV_XFileValid(XFILE fileRef);
 
 static uint16_t PV_ReadBE16(unsigned char const *p)
 {
@@ -452,7 +452,7 @@ static void PV_WriteBE32(unsigned char *p, uint32_t value)
     p[3] = (unsigned char)(value & 0xFFu);
 }
 
-static XBOOL PV_AppendBytes(XPTR *buffer, int32_t *size, int32_t *capacity, void const *src, int32_t srcSize)
+static bool PV_AppendBytes(XPTR *buffer, int32_t *size, int32_t *capacity, void const *src, int32_t srcSize)
 {
     int32_t required;
     int32_t newCapacity;
@@ -486,12 +486,12 @@ static XBOOL PV_AppendBytes(XPTR *buffer, int32_t *size, int32_t *capacity, void
         *buffer = grown;
         *capacity = newCapacity;
     }
-    XBlockMove((void *)src, (XBYTE *)(*buffer) + *size, srcSize);
+    XBlockMove((void *)src, (unsigned char *)(*buffer) + *size, srcSize);
     *size = required;
     return TRUE;
 }
 
-static XBOOL PV_GetResourceMapInfo(XFILE fileRef, int32_t *outMapID, int32_t *outVersion)
+static bool PV_GetResourceMapInfo(XFILE fileRef, int32_t *outMapID, int32_t *outVersion)
 {
     XFILERESOURCEMAP map;
     int32_t savedPos;
@@ -561,8 +561,8 @@ static XPTR PV_GetInstFromZmfBlockByID(XFILE fileRef,
 {
     XPTR block;
     int32_t blockSize;
-    XBYTE *p;
-    XBYTE *end;
+    unsigned char *p;
+    unsigned char *end;
     uint32_t count;
     uint32_t i;
 
@@ -573,7 +573,7 @@ static XPTR PV_GetInstFromZmfBlockByID(XFILE fileRef,
         return NULL;
     }
 
-    p = (XBYTE *)block;
+    p = (unsigned char *)block;
     end = p + blockSize;
     if (PV_ReadBE32(p) != (uint32_t)ZMF_INST_BLOCK_MAGIC || PV_ReadBE32(p + 4) != 1u)
     {
@@ -588,8 +588,8 @@ static XPTR PV_GetInstFromZmfBlockByID(XFILE fileRef,
         uint32_t id;
         uint16_t nameLen;
         uint32_t dataLen;
-        XBYTE *namePtr;
-        XBYTE *dataPtr;
+        unsigned char *namePtr;
+        unsigned char *dataPtr;
         XPTR copy;
         uint16_t pNameLen;
 
@@ -634,10 +634,10 @@ static XPTR PV_GetInstFromZmfBlockByID(XFILE fileRef,
             if (pResourceName)
             {
                 pNameLen = (nameLen > 255u) ? 255u : nameLen;
-                ((XBYTE *)pResourceName)[0] = (XBYTE)pNameLen;
+                ((unsigned char *)pResourceName)[0] = (unsigned char)pNameLen;
                 if (pNameLen > 0)
                 {
-                    XBlockMove(namePtr, (XBYTE *)pResourceName + 1, pNameLen);
+                    XBlockMove(namePtr, (unsigned char *)pResourceName + 1, pNameLen);
                 }
             }
             XDisposePtr(block);
@@ -659,8 +659,8 @@ static XPTR PV_GetIndexedInstFromZmfBlock(XFILE fileRef,
 {
     XPTR block;
     int32_t blockSize;
-    XBYTE *p;
-    XBYTE *end;
+    unsigned char *p;
+    unsigned char *end;
     uint32_t count;
     uint32_t i;
 
@@ -671,7 +671,7 @@ static XPTR PV_GetIndexedInstFromZmfBlock(XFILE fileRef,
         return NULL;
     }
 
-    p = (XBYTE *)block;
+    p = (unsigned char *)block;
     end = p + blockSize;
     if (PV_ReadBE32(p) != (uint32_t)ZMF_INST_BLOCK_MAGIC || PV_ReadBE32(p + 4) != 1u)
     {
@@ -691,8 +691,8 @@ static XPTR PV_GetIndexedInstFromZmfBlock(XFILE fileRef,
         uint32_t id;
         uint16_t nameLen;
         uint32_t dataLen;
-        XBYTE *namePtr;
-        XBYTE *dataPtr;
+        unsigned char *namePtr;
+        unsigned char *dataPtr;
         XPTR copy;
         uint16_t pNameLen;
 
@@ -741,10 +741,10 @@ static XPTR PV_GetIndexedInstFromZmfBlock(XFILE fileRef,
             if (pResourceName)
             {
                 pNameLen = (nameLen > 255u) ? 255u : nameLen;
-                ((XBYTE *)pResourceName)[0] = (XBYTE)pNameLen;
+                ((unsigned char *)pResourceName)[0] = (unsigned char)pNameLen;
                 if (pNameLen > 0)
                 {
-                    XBlockMove(namePtr, (XBYTE *)pResourceName + 1, pNameLen);
+                    XBlockMove(namePtr, (unsigned char *)pResourceName + 1, pNameLen);
                 }
             }
             XDisposePtr(block);
@@ -769,20 +769,20 @@ static int32_t PV_CountInstsInZmfBlock(XFILE fileRef)
         if (block) XDisposePtr(block);
         return 0;
     }
-    if (PV_ReadBE32((XBYTE *)block) != (uint32_t)ZMF_INST_BLOCK_MAGIC ||
-        PV_ReadBE32((XBYTE *)block + 4) != 1u)
+    if (PV_ReadBE32((unsigned char *)block) != (uint32_t)ZMF_INST_BLOCK_MAGIC ||
+        PV_ReadBE32((unsigned char *)block + 4) != 1u)
     {
         XDisposePtr(block);
         return 0;
     }
     {
-        int32_t count = (int32_t)PV_ReadBE32((XBYTE *)block + 8);
+        int32_t count = (int32_t)PV_ReadBE32((unsigned char *)block + 8);
         XDisposePtr(block);
         return (count < 0) ? 0 : count;
     }
 }
 
-static XBOOL PV_PackInstResourcesIntoZmfBlock(XFILE fileRef)
+static bool PV_PackInstResourcesIntoZmfBlock(XFILE fileRef)
 {
     int32_t mapID;
     int32_t version;
@@ -1045,8 +1045,8 @@ static XPTR PV_GetSongFromZmfBlockByID(XFILE fileRef,
 {
     XPTR block;
     int32_t blockSize;
-    XBYTE *p;
-    XBYTE *end;
+    unsigned char *p;
+    unsigned char *end;
     uint32_t count;
     uint32_t i;
 
@@ -1057,7 +1057,7 @@ static XPTR PV_GetSongFromZmfBlockByID(XFILE fileRef,
         return NULL;
     }
 
-    p = (XBYTE *)block;
+    p = (unsigned char *)block;
     end = p + blockSize;
     if (PV_ReadBE32(p) != (uint32_t)ZMF_SONG_BLOCK_MAGIC || PV_ReadBE32(p + 4) != 1u)
     {
@@ -1072,8 +1072,8 @@ static XPTR PV_GetSongFromZmfBlockByID(XFILE fileRef,
         uint32_t id;
         uint16_t nameLen;
         uint32_t dataLen;
-        XBYTE *namePtr;
-        XBYTE *dataPtr;
+        unsigned char *namePtr;
+        unsigned char *dataPtr;
         XPTR copy;
         uint16_t pNameLen;
 
@@ -1118,10 +1118,10 @@ static XPTR PV_GetSongFromZmfBlockByID(XFILE fileRef,
             if (pResourceName)
             {
                 pNameLen = (nameLen > 255u) ? 255u : nameLen;
-                ((XBYTE *)pResourceName)[0] = (XBYTE)pNameLen;
+                ((unsigned char *)pResourceName)[0] = (unsigned char)pNameLen;
                 if (pNameLen > 0)
                 {
-                    XBlockMove(namePtr, (XBYTE *)pResourceName + 1, pNameLen);
+                    XBlockMove(namePtr, (unsigned char *)pResourceName + 1, pNameLen);
                 }
             }
             XDisposePtr(block);
@@ -1143,8 +1143,8 @@ static XPTR PV_GetIndexedSongFromZmfBlock(XFILE fileRef,
 {
     XPTR block;
     int32_t blockSize;
-    XBYTE *p;
-    XBYTE *end;
+    unsigned char *p;
+    unsigned char *end;
     uint32_t count;
     uint32_t i;
 
@@ -1155,7 +1155,7 @@ static XPTR PV_GetIndexedSongFromZmfBlock(XFILE fileRef,
         return NULL;
     }
 
-    p = (XBYTE *)block;
+    p = (unsigned char *)block;
     end = p + blockSize;
     if (PV_ReadBE32(p) != (uint32_t)ZMF_SONG_BLOCK_MAGIC || PV_ReadBE32(p + 4) != 1u)
     {
@@ -1175,8 +1175,8 @@ static XPTR PV_GetIndexedSongFromZmfBlock(XFILE fileRef,
         uint32_t id;
         uint16_t nameLen;
         uint32_t dataLen;
-        XBYTE *namePtr;
-        XBYTE *dataPtr;
+        unsigned char *namePtr;
+        unsigned char *dataPtr;
         XPTR copy;
         uint16_t pNameLen;
 
@@ -1225,10 +1225,10 @@ static XPTR PV_GetIndexedSongFromZmfBlock(XFILE fileRef,
             if (pResourceName)
             {
                 pNameLen = (nameLen > 255u) ? 255u : nameLen;
-                ((XBYTE *)pResourceName)[0] = (XBYTE)pNameLen;
+                ((unsigned char *)pResourceName)[0] = (unsigned char)pNameLen;
                 if (pNameLen > 0)
                 {
-                    XBlockMove(namePtr, (XBYTE *)pResourceName + 1, pNameLen);
+                    XBlockMove(namePtr, (unsigned char *)pResourceName + 1, pNameLen);
                 }
             }
             XDisposePtr(block);
@@ -1253,20 +1253,20 @@ static int32_t PV_CountSongsInZmfBlock(XFILE fileRef)
         if (block) XDisposePtr(block);
         return 0;
     }
-    if (PV_ReadBE32((XBYTE *)block) != (uint32_t)ZMF_SONG_BLOCK_MAGIC ||
-        PV_ReadBE32((XBYTE *)block + 4) != 1u)
+    if (PV_ReadBE32((unsigned char *)block) != (uint32_t)ZMF_SONG_BLOCK_MAGIC ||
+        PV_ReadBE32((unsigned char *)block + 4) != 1u)
     {
         XDisposePtr(block);
         return 0;
     }
     {
-        int32_t count = (int32_t)PV_ReadBE32((XBYTE *)block + 8);
+        int32_t count = (int32_t)PV_ReadBE32((unsigned char *)block + 8);
         XDisposePtr(block);
         return (count < 0) ? 0 : count;
     }
 }
 
-static XBOOL PV_PackSongResourcesIntoZmfBlock(XFILE fileRef)
+static bool PV_PackSongResourcesIntoZmfBlock(XFILE fileRef)
 {
     int32_t mapID;
     int32_t version;
@@ -1492,10 +1492,10 @@ static XBOOL PV_PackSongResourcesIntoZmfBlock(XFILE fileRef)
 // Private functions
 
 // Check for a valid file reference
-static XBOOL PV_XFileValid(XFILE fileRef)
+static bool PV_XFileValid(XFILE fileRef)
 {
     XFILENAME   *pReference;
-    XBOOL       valid;
+    bool       valid;
 
     valid = FALSE;
     pReference = fileRef;
@@ -1515,7 +1515,7 @@ static XBOOL PV_XFileValid(XFILE fileRef)
 }
 
 // Return TRUE if file is locked (read only) – helper referenced by deletion code
-static XBOOL PV_IsXFileLocked(XFILE fileRef)
+static bool PV_IsXFileLocked(XFILE fileRef)
 {
     XFILENAME *pReference = (XFILENAME *)fileRef;
     if (!PV_XFileValid(fileRef))
@@ -1527,14 +1527,14 @@ static XBOOL PV_IsXFileLocked(XFILE fileRef)
 
 // Copy data within the same file (used when compacting resource files)
 // Returns 0 on success, non–zero on error.
-XERR PV_CopyWithinFile(XFILE fileRef,
+int32_t PV_CopyWithinFile(XFILE fileRef,
                               int32_t srcPos,
                               int32_t dstPos,
                               int32_t size,
                               void *tempBuffer,
                               int32_t tempBufferSize)
 {
-    XERR err = 0;
+    int32_t err = 0;
     int32_t remaining = size;
     int32_t localSrc = srcPos;
     int32_t localDst = dstPos;
@@ -1578,11 +1578,11 @@ static int16_t PV_FindResourceFileReferenceIndex(XFILE fileRef)
 // add an newly open resource file to the resource search path.
 // NOTE:    This is not thread safe. There's a hack cause this function to fail if another
 //          thread is trying to add at the same time.
-static XBOOL PV_AddResourceFileToOpenFiles(XFILE fileRef)
+static bool PV_AddResourceFileToOpenFiles(XFILE fileRef)
 {
-    XBOOL           full;
+    bool           full;
     int16_t       count;
-    static XBOOL    inUse = FALSE;
+    static bool    inUse = FALSE;
 
     full = TRUE;
     if (inUse == FALSE)
@@ -1611,7 +1611,7 @@ static void PV_RemoveResourceFileFromOpenFiles(XFILE fileRef)
 {
     int16_t       count;
     int16_t       found;
-    static XBOOL    inUse = FALSE;
+    static bool    inUse = FALSE;
 
     found = -1;
     if (inUse == FALSE)
@@ -1639,7 +1639,7 @@ static void PV_RemoveResourceFileFromOpenFiles(XFILE fileRef)
     }
 }
 
-static INLINE XBOOL PV_IsAnyOpenResourceFiles(void)
+static INLINE bool PV_IsAnyOpenResourceFiles(void)
 {
     return (g_resourceFileCount) ? TRUE : FALSE;
 }
@@ -1888,7 +1888,7 @@ void XClearBit(void *pBitArray, uint32_t whichbit)
 }
 
 // Given a pointer, and a bit number; this return the value of that bit
-XBOOL XTestBit(void *pBitArray, uint32_t whichbit)
+bool XTestBit(void *pBitArray, uint32_t whichbit)
 {
     register uint32_t  byteindex, byte, bitindex;
         
@@ -1929,7 +1929,7 @@ void XBubbleSortArray(int16_t theArray[], int16_t theCount)
 
 
 // Does sound hardware support stereo output
-XBOOL XIsStereoSupported(void)
+bool XIsStereoSupported(void)
 {
     return BAE_IsStereoSupported();
 }
@@ -1951,13 +1951,13 @@ uint32_t XMicroseconds(void)
 }
 
 // Does sound hardware support 16 bit output
-XBOOL XIs16BitSupported(void)
+bool XIs16BitSupported(void)
 {
     return BAE_Is16BitSupported();
 }
 
 // Does sound hardware support 8 bit output
-XBOOL XIs8BitSupported(void)
+bool XIs8BitSupported(void)
 {
     return BAE_Is8BitSupported();
 }
@@ -2144,8 +2144,8 @@ void XPutShort(void *pData, uint16_t data)
     register unsigned char  *pByte;
 
     pByte = (unsigned char *)pData;
-    pByte[0] = (UBYTE)((data >> 8) & 0xFF);
-    pByte[1] = (UBYTE)(data & 0xFF);
+    pByte[0] = (unsigned char)((data >> 8) & 0xFF);
+    pByte[1] = (unsigned char)(data & 0xFF);
 }
 
 // given a pointer and a value, this with put a long in a ordered 68k way
@@ -2154,10 +2154,10 @@ void XPutLong(void *pData, uint32_t data)
     register unsigned char  *pByte;
 
     pByte = (unsigned char *)pData;
-    pByte[0] = (UBYTE)((data >> 24) & 0xFF);
-    pByte[1] = (UBYTE)((data >> 16) & 0xFF);
-    pByte[2] = (UBYTE)((data >> 8) & 0xFF);
-    pByte[3] = (UBYTE)(data & 0xFF);
+    pByte[0] = (unsigned char)((data >> 24) & 0xFF);
+    pByte[1] = (unsigned char)((data >> 16) & 0xFF);
+    pByte[2] = (unsigned char)((data >> 8) & 0xFF);
+    pByte[3] = (unsigned char)(data & 0xFF);
 }
 
 uint32_t XSwapLong(uint32_t value)
@@ -2219,10 +2219,10 @@ uint32_t XSwapShortInLong(uint32_t value)
     return newValue;
 }
 // if TRUE, then motorola; if FALSE then intel
-XBOOL XDetermineByteOrder(void)
+bool XDetermineByteOrder(void)
 {
     static int32_t value = 0x12345678;
-    XBOOL       order;
+    bool       order;
 
     order = FALSE;
     if (XGetLong(&value) == 0x12345678)
@@ -2244,7 +2244,7 @@ void XConvertPathToXFILENAME(void *path, XFILENAME *xfile)
     char    tmp[256];
     char    *src, *dst;
     OSErr   err;
-    XBOOL   firstChar;
+    bool   firstChar;
 
     firstChar = TRUE;
     tmp[0] = 0;
@@ -2310,11 +2310,11 @@ void XConvertNativeFileToXFILENAME(void *file, XFILENAME *xfile)
 // Read a file into memory and return an allocated pointer.
 // 0 is ok, -1 failed to open, -2 failed to read, -3 failed memory
 // if 0, then *pData is valid
-XERR XGetFileAsData(XFILENAME *pResourceName, XPTR *ppData, int32_t *pSize)
+int32_t XGetFileAsData(XFILENAME *pResourceName, XPTR *ppData, int32_t *pSize)
 {
     XFILE   ref;
     int32_t    size;
-    XERR    error;
+    int32_t    error;
     XPTR    pData;
 
     error = -3; // failed memory
@@ -2362,7 +2362,7 @@ XERR XGetFileAsData(XFILENAME *pResourceName, XPTR *ppData, int32_t *pSize)
 
 #if USE_CREATION_API == TRUE
 // Create a temporary file name and fill an XFILENAME structure. Return -1 for failure, or 0 for sucess.
-XERR XGetTempXFILENAME(XFILENAME* xfilename)
+int32_t XGetTempXFILENAME(XFILENAME* xfilename)
 {
 #if X_PLATFORM == X_IOS
     return -1;
@@ -2426,9 +2426,9 @@ XERR XGetTempXFILENAME(XFILENAME* xfilename)
 #endif
 
 // Given an open file, return TRUE if this is a valid resource file.
-XBOOL XFileIsValidResource(XFILE file)
+bool XFileIsValidResource(XFILE file)
 {
-    XBOOL               valid;
+    bool               valid;
     XFILERESOURCEMAP    map;
 
     valid = FALSE;
@@ -2451,9 +2451,9 @@ XBOOL XFileIsValidResource(XFILE file)
 }
 
 // Given a filename, return TRUE if this is a valid resource file.
-XBOOL XFileIsValidResourceFromName(XFILENAME *file)
+bool XFileIsValidResourceFromName(XFILENAME *file)
 {
-    XBOOL               valid;
+    bool               valid;
     XFILE               reference;
 
     valid = FALSE;
@@ -2467,7 +2467,7 @@ XBOOL XFileIsValidResourceFromName(XFILENAME *file)
 }
 
 
-XFILE XFileOpenResourceFromMemory(XPTR pResource, uint32_t resourceLength, XBOOL allowCopy)
+XFILE XFileOpenResourceFromMemory(XPTR pResource, uint32_t resourceLength, bool allowCopy)
 {
     XFILENAME           *pReference;
     XFILERESOURCEMAP    map;
@@ -2530,11 +2530,11 @@ XFILE XFileOpenResourceFromMemory(XPTR pResource, uint32_t resourceLength, XBOOL
     return pReference;
 }
 
-XFILE XFileOpenResource(XFILENAME *file, XBOOL readOnly)
+XFILE XFileOpenResource(XFILENAME *file, bool readOnly)
 {
     XFILENAME           *pReference;
     XFILERESOURCEMAP    map;
-    XERR                err;
+    int32_t                err;
 
     err = 0;
     pReference = (XFILENAME *)XNewPtr((int32_t)sizeof(XFILENAME));
@@ -2750,7 +2750,7 @@ XFILE XFileOpenForRead(XFILENAME *file)
 }
 
 #if USE_CREATION_API == TRUE
-XFILE XFileOpenForWrite(XFILENAME *file, XBOOL create)
+XFILE XFileOpenForWrite(XFILENAME *file, bool create)
 {
     XFILENAME   *pReference;
 
@@ -2782,7 +2782,7 @@ XFILE XFileOpenForWrite(XFILENAME *file, XBOOL create)
 #endif
 
 // delete file. 0 is ok, -1 for failure
-XERR XFileDelete(XFILENAME *file)
+int32_t XFileDelete(XFILENAME *file)
 {
     void    *dest;
 
@@ -2816,7 +2816,7 @@ void XFileClose(XFILE fileRef)
     }
 }
 
-XERR XFileRead(XFILE fileRef, XPTR buffer, int32_t bufferLength)
+int32_t XFileRead(XFILE fileRef, XPTR buffer, int32_t bufferLength)
 {
     XFILENAME   *pReference;
     int32_t        newLength;
@@ -2847,7 +2847,7 @@ XERR XFileRead(XFILE fileRef, XPTR buffer, int32_t bufferLength)
     return -1;
 }
 
-XERR XFileWrite(XFILE fileRef, XPTRC buffer, int32_t bufferLength)
+int32_t XFileWrite(XFILE fileRef, XPTRC buffer, int32_t bufferLength)
 {
     XFILENAME   *pReference;
 
@@ -2900,10 +2900,10 @@ XERR XFileWrite(XFILE fileRef, XPTRC buffer, int32_t bufferLength)
     return -1;
 }
 
-XERR XFileSetPosition(XFILE fileRef, int32_t filePosition)
+int32_t XFileSetPosition(XFILE fileRef, int32_t filePosition)
 {
     XFILENAME   *pReference;
-    XERR        err;
+    int32_t        err;
 
     err = -1;
     pReference = fileRef;
@@ -2926,10 +2926,10 @@ XERR XFileSetPosition(XFILE fileRef, int32_t filePosition)
     return err;
 }
 
-XERR XFileSetPositionRelative(XFILE fileRef, int32_t relativeOffset)
+int32_t XFileSetPositionRelative(XFILE fileRef, int32_t relativeOffset)
 {
     int32_t        pos;
-    XERR        err;
+    int32_t        err;
 
     err = -1;
     pos = XFileGetPosition(fileRef);
@@ -2940,10 +2940,10 @@ XERR XFileSetPositionRelative(XFILE fileRef, int32_t relativeOffset)
     return err;
 }
 
-static XBYTE * PV_GetFilePositionFromMemoryResource(XFILE fileRef)
+static unsigned char * PV_GetFilePositionFromMemoryResource(XFILE fileRef)
 {
     XFILENAME   *pReference;
-    XBYTE       *pos;
+    unsigned char       *pos;
 
     pos = NULL;
     pReference = fileRef;
@@ -2951,7 +2951,7 @@ static XBYTE * PV_GetFilePositionFromMemoryResource(XFILE fileRef)
     {
         if (pReference->pResourceData)
         {
-            pos = ((XBYTE *)pReference->pResourceData) + pReference->resMemOffset;
+            pos = ((unsigned char *)pReference->pResourceData) + pReference->resMemOffset;
         }
     }
     return pos;
@@ -2979,7 +2979,7 @@ int32_t XFileGetPosition(XFILE fileRef)
 }
 
 #if USE_CREATION_API == TRUE
-XERR XFileSetLength(XFILE fileRef, uint32_t newSize)
+int32_t XFileSetLength(XFILE fileRef, uint32_t newSize)
 {
     XFILENAME   *pReference;
     int32_t        error;
@@ -3023,7 +3023,7 @@ XERR XFileSetLength(XFILE fileRef, uint32_t newSize)
 }
 #endif
 
-XERR XFileGetMemoryFileAsData(XFILE fileRef, XPTR *ppData, int32_t *pSize)
+int32_t XFileGetMemoryFileAsData(XFILE fileRef, XPTR *ppData, int32_t *pSize)
 {
     XFILENAME *pReference;
     XPTR copy;
@@ -3360,12 +3360,12 @@ char *  XGetResourceNameOnly(XFILE fileRef, XResourceType resourceType, XLongRes
     return (err ? NULL : pResourceName);
 }
 
-XERR XReadPartialFileResource(XFILE fileRef, XResourceType resourceType, XLongResourceID resourceID,
+int32_t XReadPartialFileResource(XFILE fileRef, XResourceType resourceType, XLongResourceID resourceID,
                                 char *pResourceName,
                                 XPTR *pReturnedBuffer, int32_t bytesToReadAndAllocate)
 {
     XFILENAME           *pReference;
-    XERR                err;
+    int32_t                err;
     XFILERESOURCEMAP    map;
     int32_t                data, next;
     int32_t                count, total;
@@ -3538,7 +3538,7 @@ XERR XReadPartialFileResource(XFILE fileRef, XResourceType resourceType, XLongRe
 XPTR XGetFileResource(XFILE fileRef, XResourceType resourceType, XLongResourceID resourceID, void *pResourceName, int32_t *pReturnedResourceSize)
 {
     XFILENAME           *pReference;
-    XERR                err;
+    int32_t                err;
     XFILERESOURCEMAP    map;
     int32_t                data, next;
     int32_t                count, total;
@@ -3756,7 +3756,7 @@ void XFileFreeResourceCache(XFILE fileRef)
 }
 
 // Force a clean/update of the resource file. Simplified: rebuild in‑memory cache.
-XBOOL XCleanResourceFile(XFILE fileRef)
+bool XCleanResourceFile(XFILE fileRef)
 {
     if (!PV_XFileValid(fileRef))
     {
@@ -3840,7 +3840,7 @@ XPTR XGetIndexedFileResource(XFILE fileRef, XResourceType resourceType, XLongRes
 ******************************************************************************/
 
 
-XBOOL AreBankTokensIdentical(XBankToken tok1, XBankToken tok2)
+bool AreBankTokensIdentical(XBankToken tok1, XBankToken tok2)
 {
     if (tok1.fileLen == tok2.fileLen && tok1.xFile == tok2.xFile)
     {
@@ -3859,11 +3859,11 @@ XBankToken CreateBankToken(void)
     return retVal;
 }
 
-XBankToken CreateBankTokenFromInputs(XTOKEN tok1, XTOKEN tok2)
+XBankToken CreateBankTokenFromInputs(uint32_t tok1, uint32_t tok2)
 {
     XBankToken          retVal;
-    // Legacy API passed two XTOKEN values; interpret tok2 as XFILE pointer value
-    // and tok1 as file length. If tok2 was produced by casting a pointer to XTOKEN
+    // Legacy API passed two uint32_t values; interpret tok2 as XFILE pointer value
+    // and tok1 as file length. If tok2 was produced by casting a pointer to uint32_t
     // previously, this will require callers to be updated to pass a real XFILE.
     retVal.fileLen = (int32_t)tok1;
     retVal.xFile = (XFILE)(uintptr_t)tok2; // tolerate older callers until migrated
@@ -3876,7 +3876,7 @@ XBankToken CreateBankTokenFromInputs(XTOKEN tok1, XTOKEN tok2)
 //  Adds another cache entry to end of cache.
 
 #if USE_CREATION_API == TRUE
-static XBOOL PV_AddToAccessCache(XFILE fileRef, XFILE_CACHED_ITEM *cacheItemPtr )
+static bool PV_AddToAccessCache(XFILE fileRef, XFILE_CACHED_ITEM *cacheItemPtr )
 {
     XFILENAME           *pReference;
     XFILERESOURCECACHE  *pCache,*newCache;
@@ -4025,7 +4025,7 @@ XFILERESOURCECACHE * XCreateAccessCache(XFILE fileRef)
 //  Not the fastest thing in the world, but none of the resource functions are!
 //
 #if USE_CREATION_API == TRUE
-XBOOL XDeleteFileResource(XFILE fileRef, XResourceType resourceType, XLongResourceID resourceID, XBOOL collectTrash )
+bool XDeleteFileResource(XFILE fileRef, XResourceType resourceType, XLongResourceID resourceID, bool collectTrash )
 {
     XFILENAME           *pReference;
     int32_t                err=0;
@@ -4164,7 +4164,7 @@ deleteanyways:
 // return the number of resources of a particular type.
 int32_t XCountResourcesOfType(XResourceType resourceType)
 {
-    XERR    err;
+    int32_t    err;
 
     err = -1;
 
@@ -4339,9 +4339,9 @@ XPTR XGetIndexedResource(XResourceType resourceType, XLongResourceID *pReturnedI
 }
 
 // get unique ID from most recent open resource file
-XERR XGetUniqueResourceID(XResourceType resourceType, XLongResourceID *pReturnedID)
+int32_t XGetUniqueResourceID(XResourceType resourceType, XLongResourceID *pReturnedID)
 {
-    XERR    err;
+    int32_t    err;
 
     err = -1;
 #if X_PLATFORM == X_MACINTOSH_9
@@ -4360,10 +4360,10 @@ XERR XGetUniqueResourceID(XResourceType resourceType, XLongResourceID *pReturned
 
 // Given a resource file, and a type, scan through the file and return a unique and unused XLongResourceID. Will
 // return 0 if ok, -1 if failure
-XERR XGetUniqueFileResourceID(XFILE fileRef, XResourceType resourceType, XLongResourceID *pReturnedID)
+int32_t XGetUniqueFileResourceID(XFILE fileRef, XResourceType resourceType, XLongResourceID *pReturnedID)
 {
     XFILENAME           *pReference;
-    XERR                err;
+    int32_t                err;
     XFILERESOURCECACHE  *pCache;
     int32_t                count, total, idCount, next, data;
     XLongResourceID     *pIDs;
@@ -4458,7 +4458,7 @@ XERR XGetUniqueFileResourceID(XFILE fileRef, XResourceType resourceType, XLongRe
         // a match, try again.
         if (pIDs && (err == 0))
         {
-            XBOOL               good, failureCount;
+            bool               good, failureCount;
             XLongResourceID     newID;
 
             good = FALSE;
@@ -4512,7 +4512,7 @@ XERR XGetUniqueFileResourceID(XFILE fileRef, XResourceType resourceType, XLongRe
     return err;
 }
 
-XERR XMakeUniqueResourceID(XResourceType resourceType,
+int32_t XMakeUniqueResourceID(XResourceType resourceType,
                                 XLongResourceID* id)
 {
     if (XExistsResource(resourceType, *id))
@@ -4528,7 +4528,7 @@ XERR XMakeUniqueResourceID(XResourceType resourceType,
     }
     return 0;
 }
-XERR XMakeUniqueFileResourceID(XFILE fileRef, XResourceType resourceType,
+int32_t XMakeUniqueFileResourceID(XFILE fileRef, XResourceType resourceType,
                                 XLongResourceID* id)
 {
     if (XExistsResource(resourceType, *id))
@@ -4551,9 +4551,9 @@ XERR XMakeUniqueFileResourceID(XFILE fileRef, XResourceType resourceType,
 //      pResourceName is a pascal string
 //      pData is the data block to add
 //      length is the length of the data block
-XERR    XAddResource(XResourceType resourceType, XLongResourceID resourceID, void *pResourceName, void *pData, int32_t length)
+int32_t    XAddResource(XResourceType resourceType, XLongResourceID resourceID, void *pResourceName, void *pData, int32_t length)
 {
-    XERR    err;
+    int32_t    err;
 
     err = -1;
 #if X_PLATFORM == X_MACINTOSH_9
@@ -4584,7 +4584,7 @@ XERR    XAddResource(XResourceType resourceType, XLongResourceID resourceID, voi
 //      resourceType is a type
 //      resourceID is an ID
 //      collectTrash if TRUE will force an update, otherwise it will happen when the file is closed
-XBOOL XDeleteResource(XResourceType resourceType, XLongResourceID resourceID, XBOOL collectTrash)
+bool XDeleteResource(XResourceType resourceType, XLongResourceID resourceID, bool collectTrash)
 {
 #if X_PLATFORM == X_MACINTOSH_9
     if (PV_IsAnyOpenResourceFiles() == FALSE)
@@ -4618,7 +4618,7 @@ XBOOL XDeleteResource(XResourceType resourceType, XLongResourceID resourceID, XB
 //      pResourceName is a pascal string
 //      pData is the data block to add
 //      length is the length of the data block
-XERR XAddFileResource(XFILE fileRef, XResourceType resourceType,
+int32_t XAddFileResource(XFILE fileRef, XResourceType resourceType,
                         XLongResourceID resourceID, void const* pResourceName,
                         void *pData, int32_t length)
 {
@@ -4752,7 +4752,7 @@ XPTR XGetNamedResource(XResourceType resourceType, void *cName, int32_t *pReturn
     char                pResourceName[256];
     int32_t                count, total;
     int16_t           fileCount;
-    XERR                err;
+    int32_t                err;
     XFILE               fileRef;
     XFILERESOURCEMAP    map;
     int32_t                next, data;
@@ -4889,13 +4889,13 @@ XPTR XGetNamedResource(XResourceType resourceType, void *cName, int32_t *pReturn
     return pData;
 }
 
-XBOOL XExistsResource(XResourceType resourceType, XLongResourceID resourceID)
+bool XExistsResource(XResourceType resourceType, XLongResourceID resourceID)
 {
     char        name[256];
 
     return XGetResourceName(resourceType, resourceID, name);
 }
-XBOOL XExistsFileResource(XFILE fileRef,
+bool XExistsFileResource(XFILE fileRef,
                             XResourceType resourceType, XLongResourceID resourceID)
 {
     char        name[256];
@@ -4905,7 +4905,7 @@ XBOOL XExistsFileResource(XFILE fileRef,
 
 // Get just the resource name from resourceType and resourceID.
 // The cName is a 'C' string which is returned
-XBOOL XGetResourceName(XResourceType resourceType, XLongResourceID resourceID,
+bool XGetResourceName(XResourceType resourceType, XLongResourceID resourceID,
                         char *cName)
 {
     int         count;
@@ -4962,7 +4962,7 @@ XBOOL XGetResourceName(XResourceType resourceType, XLongResourceID resourceID,
     }
     return FALSE;
 }
-XBOOL XGetFileResourceName(XFILE fileRef, XResourceType resourceType,
+bool XGetFileResourceName(XFILE fileRef, XResourceType resourceType,
                             XLongResourceID resourceID, char *cName)
 {
     if (cName)
@@ -5130,14 +5130,14 @@ void XFileUseThisResourceFile(XFILE fileRef)
 // Type 0 is Delta LZSS compression
 // Type 0x80+ is Delta LZMA compression (ZMF containers)
 #if USE_LZMA_COMPRESSION == TRUE
-static XBOOL PV_IsLZMACompressionType(XCOMPRESSION_TYPE t)
+static bool PV_IsLZMACompressionType(XCOMPRESSION_TYPE t)
 {
     return (t == X_LZMA_RAW ||
             (t >= X_LZMA_MONO_8 && t <= X_LZMA_STEREO_16)) ? TRUE : FALSE;
 }
 #endif
 
-void * XDecompressPtr(void* pData, uint32_t dataSize, XBOOL ignoreType)
+void * XDecompressPtr(void* pData, uint32_t dataSize, bool ignoreType)
 {
     uint32_t       theTotalSize;
     XCOMPRESSION_TYPE   theType;
@@ -5258,7 +5258,7 @@ int32_t XCompressPtr(XPTR* compressedDataTarget,
 {
 XPTR            compressedData;
 int32_t            compressedSize = 0;
-XBYTE           *realData;
+unsigned char           *realData;
 uint32_t        allocSize;
 
     if (!compressedDataTarget)
@@ -5295,54 +5295,54 @@ uint32_t        allocSize;
     switch (type)
     {
     case X_RAW:
-        compressedSize = LZSSCompress((XBYTE*)pData, dataSize,
-                                        (XBYTE*)compressedData,
+        compressedSize = LZSSCompress((unsigned char*)pData, dataSize,
+                                        (unsigned char*)compressedData,
                                         proc, procData);
         break;
     case X_MONO_8:
-        compressedSize = LZSSCompressDeltaMono8((XBYTE*)pData, dataSize,
-                                                (XBYTE*)compressedData,
+        compressedSize = LZSSCompressDeltaMono8((unsigned char*)pData, dataSize,
+                                                (unsigned char*)compressedData,
                                                 proc, procData);
         break;
     case X_STEREO_8:
-        compressedSize = LZSSCompressDeltaStereo8((XBYTE*)pData, dataSize,
-                                                    (XBYTE*)compressedData,
+        compressedSize = LZSSCompressDeltaStereo8((unsigned char*)pData, dataSize,
+                                                    (unsigned char*)compressedData,
                                                     proc, procData);
         break;
     case X_MONO_16:
         compressedSize = LZSSCompressDeltaMono16((int16_t*)pData, dataSize,
-                                                    (XBYTE*)compressedData,
+                                                    (unsigned char*)compressedData,
                                                     proc, procData);
         break;
     case X_STEREO_16:
         compressedSize = LZSSCompressDeltaStereo16((int16_t*)pData, dataSize,
-                                                    (XBYTE*)compressedData,
+                                                    (unsigned char*)compressedData,
                                                     proc, procData);
         break;
 #if USE_LZMA_COMPRESSION == TRUE
     case X_LZMA_RAW:
-        compressedSize = LZMACompress((XBYTE*)pData, dataSize,
-                                        (XBYTE*)compressedData,
+        compressedSize = LZMACompress((unsigned char*)pData, dataSize,
+                                        (unsigned char*)compressedData,
                                         proc, procData);
         break;
     case X_LZMA_MONO_8:
-        compressedSize = LZMACompressDeltaMono8((XBYTE*)pData, dataSize,
-                                                (XBYTE*)compressedData,
+        compressedSize = LZMACompressDeltaMono8((unsigned char*)pData, dataSize,
+                                                (unsigned char*)compressedData,
                                                 proc, procData);
         break;
     case X_LZMA_STEREO_8:
-        compressedSize = LZMACompressDeltaStereo8((XBYTE*)pData, dataSize,
-                                                    (XBYTE*)compressedData,
+        compressedSize = LZMACompressDeltaStereo8((unsigned char*)pData, dataSize,
+                                                    (unsigned char*)compressedData,
                                                     proc, procData);
         break;
     case X_LZMA_MONO_16:
         compressedSize = LZMACompressDeltaMono16((int16_t*)pData, dataSize,
-                                                    (XBYTE*)compressedData,
+                                                    (unsigned char*)compressedData,
                                                     proc, procData);
         break;
     case X_LZMA_STEREO_16:
         compressedSize = LZMACompressDeltaStereo16((int16_t*)pData, dataSize,
-                                                    (XBYTE*)compressedData,
+                                                    (unsigned char*)compressedData,
                                                     proc, procData);
         break;
 #endif
@@ -5351,11 +5351,11 @@ uint32_t        allocSize;
     if (compressedSize > 0)
     {
         compressedSize += sizeof(int32_t);
-        realData = (XBYTE*)XNewPtr(compressedSize);
+        realData = (unsigned char*)XNewPtr(compressedSize);
         if (realData)
         {
             XPutLong(realData, dataSize);
-            realData[0] = (XBYTE)type;
+            realData[0] = (unsigned char)type;
             XBlockMove(compressedData, realData + sizeof(int32_t),
                         compressedSize - sizeof(int32_t));
         }
@@ -5368,7 +5368,7 @@ uint32_t        allocSize;
 
 #endif  // USE_CREATION_API == TRUE
 
-XPTR XDuplicateMemory(XPTRC src, XDWORD len)
+XPTR XDuplicateMemory(XPTRC src, uint32_t len)
 {
     XPTR dup;
 
@@ -5469,7 +5469,7 @@ char * XStrCpy(char *dest, char const* src)
     return sav;
 }
 
-XBOOL XIsDigit(int16_t c)
+bool XIsDigit(int16_t c)
 {
     if (c >= '0' && c <= '9')
     {
@@ -5771,7 +5771,7 @@ char*           t;
         {
         uint32_t   v;
         uint32_t   power;
-        XBOOL           nonzeroFound;
+        bool           nonzeroFound;
 
             v = value;
             if (value < 0)
@@ -6074,18 +6074,18 @@ static const unsigned char macToWinTable[128] =
 
 ////////////////////////////////////////////////// FUNCTIONS:
 
-XBOOL XIsWinInMac(char ansiChar)
+bool XIsWinInMac(char ansiChar)
 {
-    return (XTranslateWinToMac(ansiChar) == (char)0xF0) ? (XBOOL)FALSE
-                                                 : (XBOOL)TRUE;
+    return (XTranslateWinToMac(ansiChar) == (char)0xF0) ? (bool)FALSE
+                                                 : (bool)TRUE;
 }
 
-XBOOL XIsMacInWin(char macChar)
+bool XIsMacInWin(char macChar)
 {
 char        ansiChar = XTranslateMacToWin(macChar);
 
-    return (XTranslateWinToMac(ansiChar) != macChar) ? (XBOOL)FALSE
-                                                    : (XBOOL)TRUE;
+    return (XTranslateWinToMac(ansiChar) != macChar) ? (bool)FALSE
+                                                    : (bool)TRUE;
 }
 
 char XTranslateWinToMac(char ansiChar)

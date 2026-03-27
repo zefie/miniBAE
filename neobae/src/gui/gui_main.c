@@ -138,7 +138,7 @@ static void draw_io_arrow_icon(SDL_Renderer *R, Rect r, bool up, SDL_Color col)
 
 // Forward declarations for internal types used in meta callback to avoid including heavy internal headers
 struct GM_Song;       // opaque
-typedef short XSWORD; // 16-bit signed used by engine for track index
+typedef short int16_t; // 16-bit signed used by engine for track index
 
 // Forward declarations for functions
 bool bae_load_song(const char *path, bool use_embedded_banks);
@@ -582,7 +582,7 @@ bool recreate_mixer_and_restore(int sampleRateHz, int reverbType,
 #endif    
     // Create new mixer
 #if USE_SF2_SUPPORT == TRUE
-    XBOOL wasSF2 = GM_GetMixerSF2Mode();
+    bool wasSF2 = GM_GetMixerSF2Mode();
 #endif
     g_bae.mixer = BAEMixer_New();
     if (!g_bae.mixer)

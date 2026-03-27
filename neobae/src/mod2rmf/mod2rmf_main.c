@@ -58,7 +58,7 @@ static int file_exists(const char *path)
     return 1;
 }
 
-static XBOOL is_zmf_path(const char *path)
+static bool is_zmf_path(const char *path)
 {
     const char *ext;
 
@@ -77,17 +77,17 @@ int main(int argc, char *argv[])
     const char *destPath;
     int argi;
     int tempoMap;
-    XBOOL useZmfContainer;
+    bool useZmfContainer;
     Mod2RmfConverter *conv;
     ModSongModel song;
     BAEResult setupResult;
     Mod2RmfEncoderSettings encSettings;
     Mod2RmfResamplerSettings resamplerSettings;
     BAERmfEditorCompressionType compressionType;
-    XBOOL forceOriginalSamples;
-    XBOOL codecArgSeen;
-    XBOOL bitrateArgSeen;
-    XBOOL spreadChannels;
+    bool forceOriginalSamples;
+    bool codecArgSeen;
+    bool bitrateArgSeen;
+    bool spreadChannels;
     uint8_t stereoSeparation;
 
     sourcePath = NULL;
@@ -398,14 +398,14 @@ int main(int argc, char *argv[])
         for (vch = 0; vch < maxCh; ++vch)
         {
             uint32_t ei;
-            uint32_t firstNoteTick = UINT32_MAX, lastNoteTick = 0;
+            uint32_t firstNoteTick = uint32_t_MAX, lastNoteTick = 0;
             uint32_t firstNoteCount = 0;
-            uint32_t firstCC7Tick = UINT32_MAX, lastCC7Tick = 0;
+            uint32_t firstCC7Tick = uint32_t_MAX, lastCC7Tick = 0;
             uint8_t firstCC7Val = 0, lastCC7Val = 0;
-            XBOOL hasCC7 = FALSE;
-            uint32_t firstBendTick = UINT32_MAX, lastBendTick = 0;
+            bool hasCC7 = FALSE;
+            uint32_t firstBendTick = uint32_t_MAX, lastBendTick = 0;
             uint16_t firstBendVal = 0, lastBendVal = 0;
-            XBOOL hasBend = FALSE;
+            bool hasBend = FALSE;
 
             /* Scan notes */
             for (ei = 0; ei < song.noteCount; ++ei) {

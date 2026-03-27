@@ -58,7 +58,7 @@ static int PV_FindBytes(const unsigned char *buf, uint32_t len, const char *pat,
 }
 
 // Quick zlib header validation to reduce false-positive inflate attempts
-static XBOOL PV_IsLikelyZlibHeader(const unsigned char *buf, uint32_t len, uint32_t offset)
+static bool PV_IsLikelyZlibHeader(const unsigned char *buf, uint32_t len, uint32_t offset)
 {
     if (!buf || offset + 2 > len) return FALSE;
     unsigned cmf = buf[offset];
@@ -72,7 +72,7 @@ static XBOOL PV_IsLikelyZlibHeader(const unsigned char *buf, uint32_t len, uint3
 }
 
 // If region holds a RIFF 'RMID' container, locate 'data' chunk and return SMF bytes
-static XBOOL PV_ExtractRMIDToSMF(const unsigned char *buf, uint32_t len, const unsigned char **outSmf, uint32_t *outSmfLen)
+static bool PV_ExtractRMIDToSMF(const unsigned char *buf, uint32_t len, const unsigned char **outSmf, uint32_t *outSmfLen)
 {
     if (!buf || len < 12) return FALSE;
     if (!(buf[0]=='R'&&buf[1]=='I'&&buf[2]=='F'&&buf[3]=='F')) return FALSE;
@@ -110,23 +110,23 @@ static XPTR PV_GetFileAsData(XFILENAME *pFile, int32_t *pSize)
 
 // Forward declaration used by packed extractor
 // Returns TRUE if a bank was successfully loaded from the blob
-static XBOOL PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len);
+static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len);
 
 // Forward prototypes for inflate helpers (defined later)
-static XBOOL PV_InflateFromOffset(const unsigned char *buf, uint32_t len, uint32_t offset,
+static bool PV_InflateFromOffset(const unsigned char *buf, uint32_t len, uint32_t offset,
                                   unsigned char **outBuf, uint32_t *outLen);
-static XBOOL PV_InflateRawFromOffset(const unsigned char *buf, uint32_t len, uint32_t offset,
+static bool PV_InflateRawFromOffset(const unsigned char *buf, uint32_t len, uint32_t offset,
                                      unsigned char **outBuf, uint32_t *outLen);
 
 // Forward prototype for LZSS probe (defined later)
-static XBOOL PV_ProbeLZSS(const unsigned char *bytes, uint32_t ulen, uint32_t offset,
+static bool PV_ProbeLZSS(const unsigned char *bytes, uint32_t ulen, uint32_t offset,
                           const unsigned char **outMidi, uint32_t *outMidiLen,
                           const unsigned char **outRmf, uint32_t *outRmfLen);
 
 // -------------------- XMF v1 (1.00) minimal parser --------------------
 
 // Read a 7-bit VLQ; updates *pos, returns TRUE on success
-static XBOOL PV_ReadVLQ(const unsigned char *buf, uint32_t len, uint32_t *pos, uint32_t *out)
+static bool PV_ReadVLQ(const unsigned char *buf, uint32_t len, uint32_t *pos, uint32_t *out)
 {
     if (!buf || !pos || !out) return FALSE;
     uint32_t p = *pos;
@@ -147,7 +147,7 @@ static XBOOL PV_ReadVLQ(const unsigned char *buf, uint32_t len, uint32_t *pos, u
 }
 
 // Read a VLQ within a bounded slice [start,end)
-static XBOOL PV_ReadVLQSlice(const unsigned char *buf, uint32_t start, uint32_t end, uint32_t *pos, uint32_t *out)
+static bool PV_ReadVLQSlice(const unsigned char *buf, uint32_t start, uint32_t end, uint32_t *pos, uint32_t *out)
 {
     if (!buf || !pos || !out || *pos < start || *pos >= end) return FALSE;
     uint32_t p = *pos;
@@ -239,10 +239,10 @@ static void PV_ParseXMF1Metadata(const unsigned char *bytes, uint32_t len, uint3
 }
 
 // Parse a node recursively, extracting inline resources (SMF/RMF/RMID) and trying to load SF2/DLS banks
-static XBOOL PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t *pos,
+static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t *pos,
                               const unsigned char **outMidi, uint32_t *outMidiLen,
                               const unsigned char **outRmf, uint32_t *outRmfLen,
-                              XBOOL *bankLoaded)
+                              bool *bankLoaded)
 {
     if (!bytes || !pos || *pos >= len) return FALSE;
 
@@ -292,7 +292,7 @@ static XBOOL PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t
     // Land exactly at end of header
     *pos = headerEnd;
     // We don't parse unpackers in detail; presence means packed content
-    XBOOL isPacked = (unpackersLen > 0) ? TRUE : FALSE;
+    bool isPacked = (unpackersLen > 0) ? TRUE : FALSE;
     BAE_PRINTF("[XMF1] header %u..%u metaLen=%u unpackersLen=%u isPacked=%d rfTypeHint=%d rfIdHint=%d\n",
                headerStart, headerEnd, metadataLen, unpackersLen, (int)isPacked, rfType, rfId);
 
@@ -340,7 +340,7 @@ static XBOOL PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t
             if (nOff >= len) return FALSE;
             uint32_t cpos = nOff;
             BAE_PRINTF("[XMF1] file: inFileNode -> recurse at off=%u\n", nOff);
-            XBOOL ok = PV_ParseXMF1Node(bytes, len, &cpos, outMidi, outMidiLen, outRmf, outRmfLen, bankLoaded);
+            bool ok = PV_ParseXMF1Node(bytes, len, &cpos, outMidi, outMidiLen, outRmf, outRmfLen, bankLoaded);
             // Move to end of current node content regardless
             *pos = nodeEnd;
             return ok;
@@ -443,7 +443,7 @@ static XBOOL PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t
 
         // Try based on resourceFormat when available, else heuristic
         const unsigned char *smfRMID=NULL; uint32_t smfRMIDLen=0;
-    XBOOL preferBank = FALSE;
+    bool preferBank = FALSE;
         if (rfType == 0) { // standard
             if (rfId == 2 || rfId == 3 || rfId == 4 || rfId == 5) preferBank = TRUE; // DLS
         }
@@ -512,10 +512,10 @@ static XBOOL PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t
 }
 
 // Entry for XMF_1.00 parsing: returns TRUE if any content was found
-static XBOOL PV_TryParseXMF1(const unsigned char *bytes, uint32_t len,
+static bool PV_TryParseXMF1(const unsigned char *bytes, uint32_t len,
                              const unsigned char **outMidi, uint32_t *outMidiLen,
                              const unsigned char **outRmf, uint32_t *outRmfLen,
-                             XBOOL *bankLoaded)
+                             bool *bankLoaded)
 {
     if (outMidi) { *outMidi = NULL; }
     if (outMidiLen) { *outMidiLen = 0; }
@@ -534,12 +534,12 @@ static XBOOL PV_TryParseXMF1(const unsigned char *bytes, uint32_t len,
 
     pos = rootOffset;
     BAE_PRINTF("[XMF] Parsing XMF_1.00, root node @%u, fileLen(VLQ)=%u, metaTableLen=%u\n", rootOffset, fileLen, metaTableLen);
-    XBOOL ok = PV_ParseXMF1Node(bytes, len, &pos, outMidi, outMidiLen, outRmf, outRmfLen, bankLoaded);
+    bool ok = PV_ParseXMF1Node(bytes, len, &pos, outMidi, outMidiLen, outRmf, outRmfLen, bankLoaded);
     return ok && ((outMidi && *outMidi) || (outRmf && *outRmf));
 }
 
 // Try to inflate a zlib stream starting at a given offset. Returns newly allocated buffer on success.
-static XBOOL PV_InflateFromOffset(const unsigned char *buf, uint32_t len, uint32_t offset,
+static bool PV_InflateFromOffset(const unsigned char *buf, uint32_t len, uint32_t offset,
                                   unsigned char **outBuf, uint32_t *outLen)
 {
 #if USE_XMF_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
@@ -548,8 +548,8 @@ static XBOOL PV_InflateFromOffset(const unsigned char *buf, uint32_t len, uint32
     if (offset + 2 > len) return FALSE;
     unsigned char b0 = buf[offset];
     unsigned char b1 = buf[offset+1];
-    XBOOL is_zlib = (b0 == 0x78);
-    XBOOL is_gzip = (b0 == 0x1f && b1 == 0x8b);
+    bool is_zlib = (b0 == 0x78);
+    bool is_gzip = (b0 == 0x1f && b1 == 0x8b);
     if (!is_zlib && !is_gzip) return FALSE;
 
     // Inflate using streaming API so we don't need exact output size.
@@ -573,7 +573,7 @@ static XBOOL PV_InflateFromOffset(const unsigned char *buf, uint32_t len, uint32
     zs.next_out = (Bytef *)dst;
     zs.avail_out = (uInt)cap;
 
-    XBOOL ok = FALSE;
+    bool ok = FALSE;
     int zret;
     do {
     zret = inflate(&zs, Z_NO_FLUSH);
@@ -637,7 +637,7 @@ static XBOOL PV_InflateFromOffset(const unsigned char *buf, uint32_t len, uint32
 }
 
 // Try to inflate a raw DEFLATE stream (no zlib/gzip header) starting at offset.
-static XBOOL PV_InflateRawFromOffset(const unsigned char *buf, uint32_t len, uint32_t offset,
+static bool PV_InflateRawFromOffset(const unsigned char *buf, uint32_t len, uint32_t offset,
                                      unsigned char **outBuf, uint32_t *outLen)
 {
 #if USE_XMF_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
@@ -661,7 +661,7 @@ static XBOOL PV_InflateRawFromOffset(const unsigned char *buf, uint32_t len, uin
     zs.next_out = (Bytef *)dst;
     zs.avail_out = (uInt)cap;
 
-    XBOOL ok = FALSE;
+    bool ok = FALSE;
     int zret;
     do {
         zret = inflate(&zs, Z_NO_FLUSH);
@@ -745,7 +745,7 @@ static uint32_t PV_ComputeSMFLen(const unsigned char *p, uint32_t len)
 }
 
 // Try LZSS decompress at offset and extract SMF/RMF
-static XBOOL PV_ProbeLZSS(const unsigned char *bytes, uint32_t ulen, uint32_t offset,
+static bool PV_ProbeLZSS(const unsigned char *bytes, uint32_t ulen, uint32_t offset,
                           const unsigned char **outMidi, uint32_t *outMidiLen,
                           const unsigned char **outRmf, uint32_t *outRmfLen)
 {
@@ -802,10 +802,10 @@ static XBOOL PV_ProbeLZSS(const unsigned char *bytes, uint32_t ulen, uint32_t of
     return FALSE;
 }
 // Scan a buffer for zlib streams; try raw and decrypted windows; for each inflated blob, try to extract bank and midi/rmf.
-static XBOOL PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ulen,
+static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ulen,
                                          const unsigned char **outMidi, uint32_t *outMidiLen,
                                          const unsigned char **outRmf, uint32_t *outRmfLen,
-                                         XBOOL *bankLoaded)
+                                         bool *bankLoaded)
 {
     if (outMidi) {
         *outMidi = NULL;
@@ -836,8 +836,8 @@ static XBOOL PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ul
     for (uint32_t i = 0; i + 2 < ulen && foundStreams < kMaxStreams; ++i)
     {
         // Look for zlib (0x78 ..) or gzip (0x1f 0x8b)
-        XBOOL isZ = (bytes[i] == 0x78) ? TRUE : FALSE;
-        XBOOL isGz = (!isZ && i + 1 < ulen && bytes[i] == 0x1f && bytes[i+1] == 0x8b) ? TRUE : FALSE;
+        bool isZ = (bytes[i] == 0x78) ? TRUE : FALSE;
+        bool isGz = (!isZ && i + 1 < ulen && bytes[i] == 0x1f && bytes[i+1] == 0x8b) ? TRUE : FALSE;
         if (!isZ && !isGz) continue;
         if (isZ && !PV_IsLikelyZlibHeader(bytes, ulen, i)) continue;
 
@@ -1053,11 +1053,11 @@ done_scan:
     return (foundMidi != NULL) || (foundRmf != NULL);
 }
 
-static XBOOL PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
+static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
 {
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
     // Collect RIFF SF2/DLS candidates and try them in priority order
-    typedef struct { uint32_t off, bytes; XBOOL isDLS, hasWvpl; uint64_t score; } cand_t;
+    typedef struct { uint32_t off, bytes; bool isDLS, hasWvpl; uint64_t score; } cand_t;
     cand_t cands[16];
     int candCount = 0;
     for (uint32_t i = 0; i + 12 <= len; ++i)
@@ -1067,11 +1067,11 @@ static XBOOL PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
             uint32_t sz = (uint32_t)buf[i+4] | ((uint32_t)buf[i+5] << 8) | ((uint32_t)buf[i+6] << 16) | ((uint32_t)buf[i+7] << 24);
             if (i + 8 + sz > len) { continue; }
             const unsigned char *type = &buf[i+8];
-            XBOOL isDLS = (type[0] == 'D' && type[1] == 'L' && type[2] == 'S' && type[3] == ' ');
-            XBOOL isSF2 = (type[0] == 's' && type[1] == 'f' && type[2] == 'b' && type[3] == 'k');
+            bool isDLS = (type[0] == 'D' && type[1] == 'L' && type[2] == 'S' && type[3] == ' ');
+            bool isSF2 = (type[0] == 's' && type[1] == 'f' && type[2] == 'b' && type[3] == 'k');
             if (!(isDLS || isSF2)) { i += (8 + sz) - 1; continue; }
             BAE_PRINTF("[XMF] RIFF at +%u type=%.4s size=%u (isDLS=%d isSF2=%d)\n", i, type, sz, (int)isDLS, (int)isSF2);
-            XBOOL hasWvpl = FALSE;
+            bool hasWvpl = FALSE;
 #if _DEBUG
             uint32_t waveCount = 0;
 #endif            
@@ -1121,7 +1121,7 @@ static XBOOL PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
         OPErr r = GM_LoadSF2SoundfontAsXMFOverlay(buf + c->off, (size_t)c->bytes);
         if (r == NO_ERR) {
             int presetCount = 0;
-            XBOOL okPresets = GM_SF2_CurrentFontHasAnyPreset(&presetCount);
+            bool okPresets = GM_SF2_CurrentFontHasAnyPreset(&presetCount);
             if (okPresets) {
                 BAE_PRINTF("[XMF] bank overlay succeeded on candidate #%d (presets>0)\n", idx+1);
                 return TRUE;
@@ -1185,7 +1185,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
         BAE_PRINTF("[XMF] Detected XMF_2.00 (MXMF), size=%u\n", ulen);
         const unsigned char *mid=NULL; uint32_t midLen=0;
         const unsigned char *rmf=NULL; uint32_t rmfLen=0;
-        XBOOL bankLoaded = FALSE;
+        bool bankLoaded = FALSE;
         if (PV_TryExtractFromPackedMXMF(bytes, ulen, &mid, &midLen, &rmf, &rmfLen, &bankLoaded))
         {
             BAEResult lerr;
@@ -1222,7 +1222,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
     {
         const unsigned char *mid=NULL; uint32_t midLen=0;
         const unsigned char *rmf=NULL; uint32_t rmfLen=0;
-        XBOOL bankLoaded = FALSE;
+        bool bankLoaded = FALSE;
         if (PV_TryParseXMF1(bytes, ulen, &mid, &midLen, &rmf, &rmfLen, &bankLoaded))
         {
             BAEResult lerr = BAE_BAD_FILE;
@@ -1249,7 +1249,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
         // If parsing didn't yield content, try a packed-stream scan across the whole file
         if (!(mid && midLen) && !(rmf && rmfLen))
         {
-            const unsigned char *pm=NULL; uint32_t pmLen=0; const unsigned char *pr=NULL; uint32_t prLen=0; XBOOL bank2 = bankLoaded;
+            const unsigned char *pm=NULL; uint32_t pmLen=0; const unsigned char *pr=NULL; uint32_t prLen=0; bool bank2 = bankLoaded;
             if (PV_TryExtractFromPackedMXMF(bytes, ulen, &pm, &pmLen, &pr, &prLen, &bank2))
             {
                 BAEResult lerr2 = BAE_BAD_FILE;
@@ -1510,8 +1510,8 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
                     // First pass: zlib/gzip headered inflates
                     for (uint32_t i = 0; i + 2 < mlen; ++i)
                     {
-                        XBOOL z = (m[i] == 0x78) ? TRUE : FALSE;
-                        XBOOL gz = (!z && i + 1 < mlen && m[i] == 0x1f && m[i+1] == 0x8b) ? TRUE : FALSE;
+                        bool z = (m[i] == 0x78) ? TRUE : FALSE;
+                        bool gz = (!z && i + 1 < mlen && m[i] == 0x1f && m[i+1] == 0x8b) ? TRUE : FALSE;
                         if (!z && !gz) continue;
                         if (z && !PV_IsLikelyZlibHeader(m, mlen, i)) continue;
                         unsigned char *out = NULL; uint32_t outLen = 0;

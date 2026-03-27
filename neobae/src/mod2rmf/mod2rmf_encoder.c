@@ -250,7 +250,7 @@ int mod2rmf_encoder_apply(BAERmfEditorDocument *document,
     uint32_t sampleCount;
     uint32_t i;
     uint32_t applied;
-    XBOOL forceOpusRoundTrip;
+    bool forceOpusRoundTrip;
 
     if (!document || !settings) return 0;
     if (ct == BAE_EDITOR_COMPRESSION_PCM) return 1;

@@ -197,8 +197,8 @@ XMPEGDecodedData * XOpenMPEGStreamFromXFILE(XFILE file, OPErr *pErr)
             if (pStream->stream)
             {
                 pStream->sampleRate = UNSIGNED_LONG_TO_XFIXED(MPG_GetSampleRate(pStream->stream));
-                pStream->bitSize = (XBYTE)MPG_GetBitSize(pStream->stream);
-                pStream->channels = (XBYTE)MPG_GetChannels(pStream->stream);
+                pStream->bitSize = (unsigned char)MPG_GetBitSize(pStream->stream);
+                pStream->channels = (unsigned char)MPG_GetChannels(pStream->stream);
                 pStream->bitrate = MPG_GetBitrate(pStream->stream);
 
                 pStream->lengthInBytes = MPG_GetSizeInBytes(pStream->stream);
@@ -245,8 +245,8 @@ XMPEGDecodedData * XOpenMPEGStreamFromMemory(XPTR pBlock, uint32_t blockSize, OP
         if (pStream->stream)
         {
             pStream->sampleRate = UNSIGNED_LONG_TO_XFIXED(MPG_GetSampleRate(pStream->stream));
-            pStream->bitSize = (XBYTE)MPG_GetBitSize(pStream->stream);
-            pStream->channels = (XBYTE)MPG_GetChannels(pStream->stream);
+            pStream->bitSize = (unsigned char)MPG_GetBitSize(pStream->stream);
+            pStream->channels = (unsigned char)MPG_GetChannels(pStream->stream);
             pStream->bitrate = MPG_GetBitrate(pStream->stream);
 
             pStream->lengthInBytes = MPG_GetSizeInBytes(pStream->stream);
@@ -296,7 +296,7 @@ OPErr XCloseMPEGStream(XMPEGDecodedData *pStream)
     return err;
 }
 
-OPErr XFillMPEGStreamBuffer(XMPEGDecodedData *pStream, void *pcmAudioBuffer, XBOOL *pDone)
+OPErr XFillMPEGStreamBuffer(XMPEGDecodedData *pStream, void *pcmAudioBuffer, bool *pDone)
 {
     OPErr   err;
 
@@ -321,7 +321,7 @@ OPErr XFillMPEGStreamBuffer(XMPEGDecodedData *pStream, void *pcmAudioBuffer, XBO
 }
 
 // given a MPEG stream and an offset, decode the mpeg stream into memory
-OPErr XExpandMPEG(GM_Waveform const* src, UINT32 startFrame, GM_Waveform* dst)
+OPErr XExpandMPEG(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst)
 {
 OPErr               err;
 XMPEGDecodedData*   stream;
@@ -335,24 +335,24 @@ XMPEGDecodedData*   stream;
     stream = XOpenMPEGStreamFromMemory(src->theWaveform, src->waveSize, &err);
     if (stream)
     {
-    UINT32      decodingBytes;
+    uint32_t      decodingBytes;
     XPTR        decodingData;
 
         decodingBytes = stream->maxFrameBuffers * stream->frameBufferSize;
         decodingData = XNewPtr(decodingBytes);
         if (decodingData)
         {
-        UINT32          const bytesPerFrame = dst->channels * sizeof(int16_t);
-        XBYTE*          data;
-        UINT32          startByte;
-        UINT32          count;
+        uint32_t          const bytesPerFrame = dst->channels * sizeof(int16_t);
+        unsigned char*          data;
+        uint32_t          startByte;
+        uint32_t          count;
 
-            data = (XBYTE*)decodingData;
+            data = (unsigned char*)decodingData;
             startByte = startFrame * bytesPerFrame;
             count = 0;
             while (count < stream->maxFrameBuffers)
             {
-            XBOOL       done;
+            bool       done;
                 
                 err = XFillMPEGStreamBuffer(stream, data, &done);
 
@@ -381,10 +381,10 @@ XMPEGDecodedData*   stream;
             
             if (err == NO_ERR)
             {
-            UINT32          decodedBytes;
-            UINT32          definedBytes;
+            uint32_t          decodedBytes;
+            uint32_t          definedBytes;
 
-                decodedBytes = data - (XBYTE*)decodingData;
+                decodedBytes = data - (unsigned char*)decodingData;
                 definedBytes = dst->waveFrames * bytesPerFrame;
                 if (decodedBytes < definedBytes)
                 {
@@ -407,7 +407,7 @@ XMPEGDecodedData*   stream;
                     }
                 }
                 
-                dst->theWaveform = (XSBYTE *)decodingData;
+                dst->theWaveform = (signed char *)decodingData;
                 dst->waveSize = definedBytes;
             }
             else
@@ -477,7 +477,7 @@ uint32_t       firstNonSilentFrame;
 XMPEGDecodedData    *stream;
 OPErr               err;
 char                *tempBuffer;
-XBOOL               done;
+bool               done;
 uint32_t            decodedFrames;
 uint32_t            framesPerBuffer;
 
@@ -661,7 +661,7 @@ OPErr XProcessMPEGEncoder(XMPEGEncodeData *stream)
     XPTR                encodedBuffer;
     uint32_t       encodedLength;
     char                *resultBuffer = NULL;
-    XBOOL               lastFrame;
+    bool               lastFrame;
 
     theErr = NO_ERR;
     if (stream)
@@ -745,10 +745,10 @@ OPErr XCloseMPEGEncodeStream(XMPEGEncodeData *stream, XPTR *pReturnedBuffer, uin
 
 // Given an mpeg bit encode rate, and a sample rate, this will return TRUE if
 // this encoder can encode, or FALSE if it will not work.
-XBOOL XIsValidMPEGSampleRateAndEncodeRate(XMPEGEncodeRate encodeRate, XFIXED sampleRate, 
+bool XIsValidMPEGSampleRateAndEncodeRate(XMPEGEncodeRate encodeRate, XFIXED sampleRate, 
         SndCompressionSubType subType, int16_t numChannels)
 {
-    XBOOL               safe;
+    bool               safe;
     int                 count;
     const int           TEMP_BUFFER_FRAMES = 2500;
     const int           TEMP_BUFFER_SIZE = TEMP_BUFFER_FRAMES * 2;
@@ -775,14 +775,14 @@ XBOOL XIsValidMPEGSampleRateAndEncodeRate(XMPEGEncodeRate encodeRate, XFIXED sam
     {
         for (count = 0; count < TEMP_BUFFER_SIZE; count++)
         {
-            ((XBYTE *)tempBuffer)[count] = (XBYTE)(127.0 * cos(count));
+            ((unsigned char *)tempBuffer)[count] = (unsigned char)(127.0 * cos(count));
         }
 
         test = GM_NewWaveform();
         if (test)
         {
             XPTR            encodedData;
-            UINT32          encodedBytes;
+            uint32_t          encodedBytes;
 
             test->theWaveform = tempBuffer;
             test->bitSize = 16;
@@ -824,9 +824,9 @@ OPErr XCompressMPEG(GM_Waveform const* wave,
                     SndCompressionType compressionType,
                     SndCompressionSubType compressionSubType,
                     XCompressStatusProc proc, void* procData,
-                    XPTR* pCompressedData, XDWORD* pCompressedBytes,
-                    XDWORD* pFrameBufferCount, XDWORD* pFrameBufferBytes,   //MOE: we don't really need these
-                    XDWORD* startFrame)
+                    XPTR* pCompressedData, uint32_t* pCompressedBytes,
+                    uint32_t* pFrameBufferCount, uint32_t* pFrameBufferBytes,   //MOE: we don't really need these
+                    uint32_t* startFrame)
 {
 XMPEGEncodeRate     const encodeRate = XGetMPEGEncodeRate(compressionType);
 GM_Waveform         hackedWave;

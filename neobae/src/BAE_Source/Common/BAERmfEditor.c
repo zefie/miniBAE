@@ -32,7 +32,7 @@ static void PV_CopyStringBounded(char *dst, uint32_t dstSize, char const *src)
     dst[i] = 0;
 }
 
-static XBOOL PV_PathHasExtensionIgnoreCase(char const *filePath, char const *ext)
+static bool PV_PathHasExtensionIgnoreCase(char const *filePath, char const *ext)
 {
     char const *dot;
     uint32_t i;
@@ -313,7 +313,7 @@ static void PV_StoreCompressionSubTypeInSnd(XPTR sndData,
     XPutLong(&header3->sndBuffer.reserved3[1], (uint32_t)compressionSubType);
 }
 
-static XBOOL PV_IsValidEditorOpusMode(BAERmfEditorOpusMode opusMode)
+static bool PV_IsValidEditorOpusMode(BAERmfEditorOpusMode opusMode)
 {
     return (opusMode == BAE_EDITOR_OPUS_MODE_AUDIO ||
             opusMode == BAE_EDITOR_OPUS_MODE_VOICE) ? TRUE : FALSE;
@@ -453,11 +453,11 @@ typedef struct BAERmfEditorSample
     /* Compression control */
     BAERmfEditorCompressionType targetCompressionType; /* desired output codec */
     BAERmfEditorOpusMode targetOpusMode;
-    XBOOL opusUseRoundTripResampling;  /* for Opus: encode at 48kHz, play back time-stretched at source rate */
+    bool opusUseRoundTripResampling;  /* for Opus: encode at 48kHz, play back time-stretched at source rate */
     XPTR    originalSndData;   /* normalized plain SND blob (ESND/CSND already unwrapped) */
     int32_t originalSndSize;   /* byte count of originalSndData */
     /* Bank alias fields: sample references a loaded bank's SND without PCM decode */
-    XBOOL   isBankAlias;       /* TRUE if this sample is a bank alias (no waveform) */
+    bool   isBankAlias;       /* TRUE if this sample is a bank alias (no waveform) */
     BAEBankToken aliasBankToken;       /* bank that owns the SND resource */
     XShortResourceID aliasSndResourceID;  /* SND resource ID within the bank */
 } BAERmfEditorSample;
@@ -504,15 +504,15 @@ typedef struct BAERmfEditorInstrumentExt
 {
     XLongResourceID instID;
     char           *displayName;      /* INST resource name */
-    XBOOL           hasExtendedData;  /* TRUE if loaded from an extended-format INST */
-    XBOOL           dirty;            /* TRUE if user modified via Set API */
+    bool           hasExtendedData;  /* TRUE if loaded from an extended-format INST */
+    bool           dirty;            /* TRUE if user modified via Set API */
     unsigned char   flags1;           /* ZBF_ bitmask from InstrumentResource */
     unsigned char   flags2;           /* ZBF_ bitmask from InstrumentResource */
     char            panPlacement;     /* stereo pan from INST header */
     int16_t         midiRootKey;      /* master root key from INST header */
     int16_t         miscParameter1;   /* offset high-word when ZBF_enableSampleOffsetStart, else root key or 0 */
     int16_t         miscParameter2;   /* volume level (100 = default) */
-    XBOOL           hasDefaultMod;    /* TRUE if INST_DEFAULT_MOD unit was present */
+    bool           hasDefaultMod;    /* TRUE if INST_DEFAULT_MOD unit was present */
     int32_t         LPF_frequency;
     int32_t         LPF_resonance;
     int32_t         LPF_lowpassAmount;
@@ -550,8 +550,8 @@ struct BAERmfEditorDocument
     SongType songType;
     int32_t songTempo;
     int16_t songPitchShift;
-    XBOOL songLocked;
-    XBOOL songEmbedded;
+    bool songLocked;
+    bool songEmbedded;
     int16_t maxMidiNotes;
     int16_t maxEffects;
     int16_t mixLevel;
@@ -577,8 +577,8 @@ struct BAERmfEditorDocument
     BAERmfEditorMidiStorageType midiStorageType;
     unsigned char *debugOriginalMidiData;
     uint32_t debugOriginalMidiDataSize;
-    XBOOL loadedFromRmf;
-    XBOOL isPristine;
+    bool loadedFromRmf;
+    bool isPristine;
     BAERmfEditorInstrumentExt *instrumentExts;
     uint32_t instrumentExtCount;
     uint32_t instrumentExtCapacity;
@@ -606,7 +606,7 @@ static uint32_t PV_AllocateSampleAssetID(BAERmfEditorDocument *document)
        unrelated instruments become grouped under the same asset in the editor. */
     for (;;)
     {
-        XBOOL reserved;
+        bool reserved;
 
         reserved = FALSE;
         for (i = 0; i < document->originalResourceCount; ++i)
@@ -730,7 +730,7 @@ static uint32_t PV_CountSamplesForAsset(BAERmfEditorDocument const *document, ui
     return count;
 }
 
-static XBOOL PV_IsOpusCompression(BAERmfEditorCompressionType ct)
+static bool PV_IsOpusCompression(BAERmfEditorCompressionType ct)
 {
     switch (ct)
     {
@@ -752,10 +752,10 @@ static XBOOL PV_IsOpusCompression(BAERmfEditorCompressionType ct)
     }
 }
 
-static XBOOL PV_AssetSupportsDontChange(BAERmfEditorDocument const *document, uint32_t assetID)
+static bool PV_AssetSupportsDontChange(BAERmfEditorDocument const *document, uint32_t assetID)
 {
     uint32_t i;
-    XBOOL sawAny;
+    bool sawAny;
 
     if (!document || assetID == 0)
     {
@@ -793,7 +793,7 @@ static BAE_UNSIGNED_FIXED PV_NormalizeSampleRateForSave(BAE_UNSIGNED_FIXED sampl
     return sampleRate;
 }
 
-static XBOOL PV_IsMpegCompression(BAERmfEditorCompressionType ct)
+static bool PV_IsMpegCompression(BAERmfEditorCompressionType ct)
 {
     switch (ct)
     {
@@ -1315,7 +1315,7 @@ static uint32_t PV_GetDecodedFrameCountFromSnd(XPTR sndResource)
 /* SND dedup is only safe when all SND-header-significant parameters match.
  * Same asset ID alone is not enough because differing root key or loop points
  * changes playback pitch/loop behavior. */
-static XBOOL PV_CanReuseSndResourceForSamples(BAERmfEditorSample const *left,
+static bool PV_CanReuseSndResourceForSamples(BAERmfEditorSample const *left,
                                               BAERmfEditorSample const *right)
 {
     if (!left || !right)
@@ -1397,7 +1397,7 @@ static BAEResult PV_CopyOriginalInstExtendedTail(BAERmfEditorInstrumentExt const
         return BAE_BAD_FILE;
     }
 
-    oldSplitCount = (uint16_t)XGetShort(((XBYTE const *)ext->originalInstData) + kInstOffset_keySplitCount);
+    oldSplitCount = (uint16_t)XGetShort(((unsigned char const *)ext->originalInstData) + kInstOffset_keySplitCount);
     tailOffset = (int32_t)(kInstOffset_keySplitData + ((int32_t)oldSplitCount * kKeySplitFileSize) + kInstTailSize);
     if (tailOffset < 0 || tailOffset > ext->originalInstSize)
     {
@@ -1415,7 +1415,7 @@ static BAEResult PV_CopyOriginalInstExtendedTail(BAERmfEditorInstrumentExt const
     {
         return BAE_MEMORY_ERR;
     }
-    XBlockMove(((XBYTE const *)ext->originalInstData) + tailOffset, tailCopy, tailSize);
+    XBlockMove(((unsigned char const *)ext->originalInstData) + tailOffset, tailCopy, tailSize);
     *outTail = tailCopy;
     *outTailSize = tailSize;
     return BAE_NO_ERROR;
@@ -1529,12 +1529,12 @@ static BAEResult PV_AddInstrumentExt(BAERmfEditorDocument *document, BAERmfEdito
 static void PV_ClearInstrumentExts(BAERmfEditorDocument *document);
 static XPTR PV_SerializeExtendedInstTail(BAERmfEditorInstrumentExt const *ext, int32_t *outSize);
 static int PV_CompareCCEvents(void const *left, void const *right);
-static XBOOL PV_TrackHasMetaType(BAERmfEditorTrack const *track, unsigned char type);
+static bool PV_TrackHasMetaType(BAERmfEditorTrack const *track, unsigned char type);
 static BAERmfEditorCCEvent *PV_FindTrackCCEvent(BAERmfEditorTrack *track, unsigned char cc, uint32_t eventIndex, uint32_t *outActualIndex);
 static BAERmfEditorCCEvent const *PV_FindTrackCCEventConst(BAERmfEditorTrack const *track, unsigned char cc, uint32_t eventIndex, uint32_t *outActualIndex);
 static unsigned char PV_ToLowerAscii(unsigned char c);
-static XBOOL PV_IsLoopStartMarkerText(unsigned char const *data, uint32_t size, int32_t *outLoopCount);
-static XBOOL PV_IsLoopEndMarkerText(unsigned char const *data, uint32_t size);
+static bool PV_IsLoopStartMarkerText(unsigned char const *data, uint32_t size, int32_t *outLoopCount);
+static bool PV_IsLoopEndMarkerText(unsigned char const *data, uint32_t size);
 static void PV_RemoveLoopMarkersFromTrack(BAERmfEditorTrack *track);
 
 static char *PV_DuplicateString(char const *source)
@@ -2141,7 +2141,7 @@ static void PV_DebugReportMidiRoundTripDiff(BAERmfEditorDocument const *document
         BAEDebugMidiTrackStats const *orig = &originalStats.tracks[i];
         BAEDebugMidiTrackStats const *gen = &generatedStats.tracks[(uint16_t)(i + genOffset)];
         uint32_t cc;
-        XBOOL printedTrackHeader;
+        bool printedTrackHeader;
 
         printedTrackHeader = FALSE;
         if (orig->noteOnCount != gen->noteOnCount ||
@@ -2535,7 +2535,7 @@ static unsigned char PV_ToLowerAscii(unsigned char c)
     return c;
 }
 
-static XBOOL PV_MarkerStartsWith(unsigned char const *data, uint32_t size, char const *text)
+static bool PV_MarkerStartsWith(unsigned char const *data, uint32_t size, char const *text)
 {
     uint32_t i;
 
@@ -2557,7 +2557,7 @@ static XBOOL PV_MarkerStartsWith(unsigned char const *data, uint32_t size, char 
     return TRUE;
 }
 
-static XBOOL PV_IsLoopStartMarkerText(unsigned char const *data, uint32_t size, int32_t *outLoopCount)
+static bool PV_IsLoopStartMarkerText(unsigned char const *data, uint32_t size, int32_t *outLoopCount)
 {
     if (outLoopCount)
     {
@@ -2601,7 +2601,7 @@ static XBOOL PV_IsLoopStartMarkerText(unsigned char const *data, uint32_t size, 
     return FALSE;
 }
 
-static XBOOL PV_IsLoopEndMarkerText(unsigned char const *data, uint32_t size)
+static bool PV_IsLoopEndMarkerText(unsigned char const *data, uint32_t size)
 {
     if (!data || size == 0)
     {
@@ -2992,7 +2992,7 @@ static AudioFileType PV_TranslateEditorFileType(BAEFileType fileType)
     }
 }
 
-static XBOOL PV_IsEditorCompressedImportType(BAEFileType fileType)
+static bool PV_IsEditorCompressedImportType(BAEFileType fileType)
 {
     switch (fileType)
     {
@@ -3017,7 +3017,7 @@ static XBOOL PV_IsEditorCompressedImportType(BAEFileType fileType)
     }
 }
 
-static XBOOL PV_IsSupportedPassthroughCompression(SndCompressionType compressionType)
+static bool PV_IsSupportedPassthroughCompression(SndCompressionType compressionType)
 {
     switch (compressionType)
     {
@@ -3192,9 +3192,9 @@ static BAEResult PV_CreatePassthroughSndFromEncodedData(GM_Waveform const *decod
         XPutLong(&snd->sndBuffer.startFrame, 0);
         XPutLong(&snd->sndBuffer.loopStart[0], decodedWaveform->startLoop);
         XPutLong(&snd->sndBuffer.loopEnd[0], decodedWaveform->endLoop);
-        snd->sndBuffer.baseKey = (XBYTE)decodedWaveform->baseMidiPitch;
-        snd->sndBuffer.channels = (XBYTE)decodedWaveform->channels;
-        snd->sndBuffer.bitSize = (XBYTE)decodedWaveform->bitSize;
+        snd->sndBuffer.baseKey = (unsigned char)decodedWaveform->baseMidiPitch;
+        snd->sndBuffer.channels = (unsigned char)decodedWaveform->channels;
+        snd->sndBuffer.bitSize = (unsigned char)decodedWaveform->bitSize;
         snd->sndBuffer.isEmbedded = TRUE;
         XBlockMove(encodedData, snd->sndBuffer.sampleArea, encodedSize);
     }
@@ -3287,9 +3287,9 @@ static BAEResult PV_CreatePassthroughSndFromCompressedWaveform(GM_Waveform const
         XPutLong(&snd->sndBuffer.startFrame, 0);
         XPutLong(&snd->sndBuffer.loopStart[0], decodedWaveform->startLoop);
         XPutLong(&snd->sndBuffer.loopEnd[0], decodedWaveform->endLoop);
-        snd->sndBuffer.baseKey = (XBYTE)decodedWaveform->baseMidiPitch;
-        snd->sndBuffer.channels = (XBYTE)decodedWaveform->channels;
-        snd->sndBuffer.bitSize = (XBYTE)decodedWaveform->bitSize;
+        snd->sndBuffer.baseKey = (unsigned char)decodedWaveform->baseMidiPitch;
+        snd->sndBuffer.channels = (unsigned char)decodedWaveform->channels;
+        snd->sndBuffer.bitSize = (unsigned char)decodedWaveform->bitSize;
         snd->sndBuffer.isEmbedded = TRUE;
         XBlockMove(compressedWaveform->theWaveform, snd->sndBuffer.sampleArea, compressedWaveform->waveSize);
     }
@@ -4131,7 +4131,7 @@ static BAEResult PV_LoadMidiTrackIntoDocument(BAERmfEditorDocument *document,
     uint32_t currentTick;
     unsigned char runningStatus;
     BAEResult result;
-    XBOOL sawChannel;
+    bool sawChannel;
     uint16_t channelBank[BAE_MAX_MIDI_CHANNELS];
     unsigned char channelProgram[BAE_MAX_MIDI_CHANNELS];
     uint16_t initChannel;
@@ -4818,7 +4818,7 @@ static BAEResult PV_AddEmbeddedSampleVariant(BAERmfEditorDocument *document,
                 return BAE_MEMORY_ERR;
             }
             XBlockMove(pcmData, ownedPcm, pcmSize);
-            waveform->theWaveform = (SBYTE *)ownedPcm;
+            waveform->theWaveform = (signed char *)ownedPcm;
         }
     }
     /* theWaveform now contains raw PCM copy; keep compression metadata aligned with data format */
@@ -4948,7 +4948,7 @@ static BAEResult PV_AddBankAliasSample(BAERmfEditorDocument *document,
     BAERmfEditorSample *sample;
     BAEResult growResult;
     SampleDataInfo sdi;
-    XBOOL haveSdi;
+    bool haveSdi;
 
     XSetMemory(&sdi, sizeof(sdi), 0);
     haveSdi = FALSE;
@@ -5533,7 +5533,7 @@ static XPTR PV_SerializeExtendedInstTail(BAERmfEditorInstrumentExt const *ext, i
 /* Extract INST + SND resources from an open RMF resource file and add them
    as editable samples in the document. Includes all key-split variants. */
 /* Check whether a SND resource ID exists among the document's captured original resources. */
-static XBOOL PV_SndExistsInOriginalResources(BAERmfEditorDocument const *document, XShortResourceID sndID)
+static bool PV_SndExistsInOriginalResources(BAERmfEditorDocument const *document, XShortResourceID sndID)
 {
     uint32_t i;
     for (i = 0; i < document->originalResourceCount; ++i)
@@ -5638,7 +5638,7 @@ static void PV_LoadEmbeddedSamplesFromRmf(BAERmfEditorDocument *document, XFILE 
          * masterRootKey + baseMidiPitch - 60, but that edge case is uncommon in practice.
          */
         {
-            XBOOL useSoundModifierAsRootKey = TEST_FLAG_VALUE(inst->flags2, ZBF_useSoundModifierAsRootKey);
+            bool useSoundModifierAsRootKey = TEST_FLAG_VALUE(inst->flags2, ZBF_useSoundModifierAsRootKey);
             int16_t instMiscParam1 = (int16_t)XGetShort(&inst->miscParameter1);
 
         if (splitCount > 0)
@@ -6351,7 +6351,7 @@ static BAEResult PV_PrepareResourceFilePath(XFILENAME *name, int32_t resourceID)
 {
     XFILE fileRef;
     XFILERESOURCEMAP map;
-    XBOOL isValid;
+    bool isValid;
 
     if (!name)
     {
@@ -6430,7 +6430,7 @@ static BAEResult PV_EncodeMidiForResourceType(XResourceType resourceType,
                                               ByteBuffer const *plainMidi,
                                               XPTR *outData,
                                               int32_t *outSize,
-                                              XBOOL isZmf)
+                                              bool isZmf)
 {
     XPTR encoded;
     XCOMPRESSION_TYPE compType;
@@ -6518,7 +6518,7 @@ static BAEResult PV_EncodeMidiBestEffort(ByteBuffer const *plainMidi,
                                          XPTR *outData,
                                          int32_t *outSize,
                                          XResourceType *outUsedType,
-                                         XBOOL isZmf)
+                                         bool isZmf)
 {
     BAEResult result;
 
@@ -6558,7 +6558,7 @@ static BAEResult PV_EncodeMidiForStorageType(BAERmfEditorMidiStorageType storage
                                              XPTR *outData,
                                              int32_t *outSize,
                                              XResourceType *outUsedType,
-                                             XBOOL isZmf)
+                                             bool isZmf)
 {
     storageType = PV_NormalizeMidiStorageType(storageType);
     if (!outUsedType)
@@ -6620,7 +6620,7 @@ static BAEResult PV_EncodeMidiForStorageType(BAERmfEditorMidiStorageType storage
     }
 }
 
-static XBOOL PV_IsMidiResourceType(XResourceType resourceType)
+static bool PV_IsMidiResourceType(XResourceType resourceType)
 {
     return (resourceType == ID_ECMI ||
             resourceType == ID_EMID ||
@@ -6917,7 +6917,7 @@ static BAEResult PV_BuildConductorTrack(BAERmfEditorDocument *document,
     return PV_AppendMetaEvent(trackData, 0, 0x2F, NULL, 0);
 }
 
-static XBOOL PV_IsMetaOnlyConductorTrack(BAERmfEditorTrack const *track)
+static bool PV_IsMetaOnlyConductorTrack(BAERmfEditorTrack const *track)
 {
     if (!track)
     {
@@ -6929,7 +6929,7 @@ static XBOOL PV_IsMetaOnlyConductorTrack(BAERmfEditorTrack const *track)
             track->auxEventCount == 0) ? TRUE : FALSE;
 }
 
-static XBOOL PV_TrackHasMetaType(BAERmfEditorTrack const *track, unsigned char type)
+static bool PV_TrackHasMetaType(BAERmfEditorTrack const *track, unsigned char type)
 {
     uint32_t index;
 
@@ -7434,8 +7434,8 @@ static BAEResult PV_BuildMidiFile(BAERmfEditorDocument *document, ByteBuffer *ou
     BAEResult result;
     uint32_t trackIndex;
     uint16_t trackCount;
-    XBOOL useTrack0AsConductor;
-    XBOOL hasTempoMetaInTracks;
+    bool useTrack0AsConductor;
+    bool hasTempoMetaInTracks;
 
     XSetMemory(&tempoTrack, sizeof(tempoTrack), 0);
     XSetMemory(&trackData, sizeof(trackData), 0);
@@ -7532,7 +7532,7 @@ static BAEResult PV_BuildMidiFile(BAERmfEditorDocument *document, ByteBuffer *ou
     return BAE_NO_ERROR;
 }
 
-static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fileRef, XBOOL isZmf)
+static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fileRef, bool isZmf)
 {
     uint32_t index;
     XShortResourceID *sampleSndIDs;
@@ -7585,10 +7585,10 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
         uint32_t loopFrameLimit;
         XResourceType writeSndType;
         int32_t roundTripSourceRate;  /* non-zero when encoding Opus round-trip */
-        XBOOL samplePlayAtSampledFreq;
-        XBOOL sampleAdvancedInterpolation;
-        XBOOL sampleWasEncodedOpus;
-        XBOOL sampleWasEncodedMpeg;
+        bool samplePlayAtSampledFreq;
+        bool sampleAdvancedInterpolation;
+        bool sampleWasEncodedOpus;
+        bool sampleWasEncodedMpeg;
         uint32_t decodedFramesForRate;
         uint32_t decodedSampleRateForSnd;
 
@@ -7653,7 +7653,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
             return result;
         }
         {
-            XBOOL usedPreferredID;
+            bool usedPreferredID;
             XLongResourceID preferredID;
 
             usedPreferredID = FALSE;
@@ -7689,7 +7689,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                  * every save of the same document produces the same SND IDs. */
                 XLongResourceID candidateID;
                 uint32_t priorIDIndex;
-                XBOOL conflict;
+                bool conflict;
 
                 sndID = 0;
                 for (candidateID = 1; candidateID <= 32767; ++candidateID)
@@ -8111,7 +8111,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                 writeWaveform.waveFrames > 0 &&
                 (writeWaveform.bitSize == 8 || writeWaveform.bitSize == 16))
             {
-                XBOOL dualMono;
+                bool dualMono;
                 uint32_t frame;
                 uint32_t monoBytes;
                 XPTR monoData;
@@ -8524,7 +8524,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                 break;
         }
         {
-            XBYTE *dbgBytes = (XBYTE *)sndResource;
+            unsigned char *dbgBytes = (unsigned char *)sndResource;
             int32_t dbgSize = XGetPtrSize(sndResource);
             int16_t dbgFmt = (dbgSize >= 2) ? (int16_t)XGetShort(dbgBytes) : -1;
             BAE_PRINTF("[RMF Save] SND id=%ld fmt=%d size=%ld first8=",
@@ -8651,7 +8651,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                     kInstTailSize = 10
                 };
                 int32_t instSize;
-                XBYTE *instBytes;
+                unsigned char *instBytes;
                 int32_t tailOffset;
                 uint32_t *instSampleIndices;
                 uint32_t collected;
@@ -8735,7 +8735,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                 headerMiscParam2 = 0;
                 if (extForInst && extForInst->originalInstData && extForInst->originalInstSize >= 12)
                 {
-                    XBYTE const *origBytes = (XBYTE const *)extForInst->originalInstData;
+                    unsigned char const *origBytes = (unsigned char const *)extForInst->originalInstData;
                     headerMiscParam1 = (int16_t)XGetShort((void *)(origBytes + kInstOffset_miscParameter1));
                     headerMiscParam2 = (int16_t)XGetShort((void *)(origBytes + kInstOffset_miscParameter2));
                 }
@@ -8764,7 +8764,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                         }
                     }
 
-                    instBytes = (XBYTE *)XNewPtr(instSize + extTailSize);
+                    instBytes = (unsigned char *)XNewPtr(instSize + extTailSize);
                     if (!instBytes)
                     {
                         if (extTail) XDisposePtr(extTail);
@@ -8781,7 +8781,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                      * defaultInstrumentID but is not used for split playback. */
                     XPutShort(instBytes + kInstOffset_sndResourceID, (uint16_t)sampleSndIDs[instSampleIndices[0]]);
                     XPutShort(instBytes + kInstOffset_midiRootKey, extForInst ? extForInst->midiRootKey : 60);
-                    instBytes[kInstOffset_panPlacement] = extForInst ? (XBYTE)extForInst->panPlacement : 0;
+                    instBytes[kInstOffset_panPlacement] = extForInst ? (unsigned char)extForInst->panPlacement : 0;
                     instBytes[kInstOffset_flags1] = writeFlags1;
                     instBytes[kInstOffset_flags2] = writeFlags2;
                     instBytes[kInstOffset_smodResourceID] = 0;
@@ -8794,12 +8794,12 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                     for (i = 0; i < collected; ++i)
                     {
                         BAERmfEditorSample const *splitSample;
-                        XBYTE *splitPtr;
+                        unsigned char *splitPtr;
 
                         splitSample = &document->samples[instSampleIndices[i]];
                         splitPtr = instBytes + kInstOffset_keySplitData + (i * kKeySplitFileSize);
-                        splitPtr[0] = (XBYTE)splitSample->lowKey;
-                        splitPtr[1] = (XBYTE)splitSample->highKey;
+                        splitPtr[0] = (unsigned char)splitSample->lowKey;
+                        splitPtr[1] = (unsigned char)splitSample->highKey;
                         XPutShort(splitPtr + 2, (uint16_t)sampleSndIDs[instSampleIndices[i]]);
                         XPutShort(splitPtr + 4, (uint16_t)splitSample->rootKey);
                         XPutShort(splitPtr + 6, splitSample->splitVolume ? (uint16_t)splitSample->splitVolume : 100);
@@ -8864,7 +8864,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
 
                 if (extForInst && extForInst->originalInstData && extForInst->originalInstSize >= 12)
                 {
-                    XBYTE const *origBytes = (XBYTE const *)extForInst->originalInstData;
+                    unsigned char const *origBytes = (unsigned char const *)extForInst->originalInstData;
                     headerMiscParam1 = (int16_t)XGetShort((void *)(origBytes + 8));
                     headerMiscParam2 = (int16_t)XGetShort((void *)(origBytes + 10));
                 }
@@ -8927,7 +8927,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                 {
                     /* Must write as byte buffer to append extended tail */
                     int32_t totalSize = (int32_t)sizeof(instrument) + extTailSize;
-                    XBYTE *instBuf = (XBYTE *)XNewPtr(totalSize);
+                    unsigned char *instBuf = (unsigned char *)XNewPtr(totalSize);
                     if (!instBuf)
                     {
                         XDisposePtr(extTail);
@@ -9425,13 +9425,13 @@ BAEResult BAERmfEditorDocument_SetTempoBPM(BAERmfEditorDocument *document, uint3
 }
 
 BAEResult BAERmfEditorDocument_GetMidiLoopMarkers(BAERmfEditorDocument const *document,
-                                                  XBOOL *outEnabled,
+                                                  bool *outEnabled,
                                                   uint32_t *outStartTick,
                                                   uint32_t *outEndTick,
                                                   int32_t *outLoopCount)
 {
-    XBOOL hasStart;
-    XBOOL hasEnd;
+    bool hasStart;
+    bool hasEnd;
     uint32_t startTick;
     uint32_t endTick;
     int32_t loopCount;
@@ -9497,7 +9497,7 @@ BAEResult BAERmfEditorDocument_GetMidiLoopMarkers(BAERmfEditorDocument const *do
 }
 
 BAEResult BAERmfEditorDocument_SetMidiLoopMarkers(BAERmfEditorDocument *document,
-                                                  XBOOL enabled,
+                                                  bool enabled,
                                                   uint32_t startTick,
                                                   uint32_t endTick,
                                                   int32_t loopCount)
@@ -10477,8 +10477,8 @@ static BAEResult PV_InsertBankSelectBeforeAuxEvent(BAERmfEditorTrack *track,
                                                    uint32_t auxIndex,
                                                    unsigned char channel,
                                                    uint16_t targetBank,
-                                                   XBOOL insertMsb,
-                                                   XBOOL insertLsb)
+                                                   bool insertMsb,
+                                                   bool insertLsb)
 {
     uint32_t insertCount;
     uint32_t targetOrder;
@@ -10549,10 +10549,10 @@ static BAEResult PV_RemapTrackInstrumentReferences(BAERmfEditorTrack *track,
                                                    uint16_t targetBank,
                                                    unsigned char targetProgram,
                                                    uint16_t remapChannelMask,
-                                                   XBOOL *outChanged)
+                                                   bool *outChanged)
 {
-    XBOOL changed;
-    XBOOL restartScan;
+    bool changed;
+    bool restartScan;
 
     if (!track)
     {
@@ -10635,7 +10635,7 @@ static BAEResult PV_RemapTrackInstrumentReferences(BAERmfEditorTrack *track,
             }
             else if (eventType == PROGRAM_CHANGE && aux->dataBytes >= 1)
             {
-                XBOOL channelFallbackAllowed;
+                bool channelFallbackAllowed;
 
                 channelFallbackAllowed = ((((remapChannelMask & (uint16_t)(1u << channel)) != 0)
                                            && (lastBankMsbIndex[channel] == 0xFFFFFFFFu)
@@ -10653,8 +10653,8 @@ static BAEResult PV_RemapTrackInstrumentReferences(BAERmfEditorTrack *track,
                     if (sourceBank != targetBank && currentBank[channel] != targetBank)
                     {
                         BAEResult insertResult;
-                        XBOOL needMsb;
-                        XBOOL needLsb;
+                        bool needMsb;
+                        bool needLsb;
 
                         needMsb = (lastBankMsbIndex[channel] == 0xFFFFFFFFu) ? TRUE : FALSE;
                         needLsb = (lastBankLsbIndex[channel] == 0xFFFFFFFFu) ? TRUE : FALSE;
@@ -10711,7 +10711,7 @@ BAEResult BAERmfEditorDocument_RemapInstrumentReferences(BAERmfEditorDocument *d
                                                          unsigned char targetProgram)
 {
     uint32_t trackIndex;
-    XBOOL changed;
+    bool changed;
 
     if (!document || sourceBank > 16383 || targetBank > 16383 || sourceProgram >= 128 || targetProgram >= 128)
     {
@@ -10727,7 +10727,7 @@ BAEResult BAERmfEditorDocument_RemapInstrumentReferences(BAERmfEditorDocument *d
     {
         BAERmfEditorTrack *track;
         uint32_t noteIndex;
-        XBOOL trackChanged;
+        bool trackChanged;
         uint16_t remapChannelMask;
         BAEResult remapResult;
 
@@ -10987,7 +10987,7 @@ BAEResult BAERmfEditorDocument_AddSampleFromFile(BAERmfEditorDocument *document,
     XFILENAME fileName;
     GM_Waveform *waveform;
     GM_Waveform *compressedWaveform;
-    XBOOL isCompressedImport;
+    bool isCompressedImport;
     SndCompressionType sourceCompressionType;
     XPTR encodedData;
     int32_t encodedSize;
@@ -11188,7 +11188,7 @@ BAEResult BAERmfEditorDocument_AddEmptySample(BAERmfEditorDocument *document,
         return BAE_MEMORY_ERR;
     }
     pcm[0] = 0;
-    waveform->theWaveform = (SBYTE *)pcm;
+    waveform->theWaveform = (signed char *)pcm;
     waveform->waveFrames = 1;
     waveform->waveSize = sizeof(int16_t);
     waveform->bitSize = 16;
@@ -11480,7 +11480,7 @@ BAEResult BAERmfEditorDocument_SetSampleAssetCompression(BAERmfEditorDocument *d
 {
     uint32_t i;
     BAERmfEditorCompressionType resolvedType;
-    XBOOL touched;
+    bool touched;
 
     if (!document || assetID == 0)
     {
@@ -11582,7 +11582,7 @@ BAEResult BAERmfEditorDocument_SetSampleInfo(BAERmfEditorDocument *document,
 {
     BAERmfEditorSample *sample;
     BAEResult result;
-    XBOOL loopChanged;
+    bool loopChanged;
     BAE_UNSIGNED_FIXED newSampleRate;
     BAE_UNSIGNED_FIXED incomingSampleRate;
     BAE_UNSIGNED_FIXED oldSampleRate;
@@ -11767,7 +11767,7 @@ BAEResult BAERmfEditorDocument_ReplaceSampleFromFile(BAERmfEditorDocument *docum
     XFILENAME fileName;
     GM_Waveform *waveform;
     GM_Waveform *compressedWaveform;
-    XBOOL isCompressedImport;
+    bool isCompressedImport;
     SndCompressionType sourceCompressionType;
     XPTR encodedData;
     int32_t encodedSize;
@@ -11975,7 +11975,7 @@ BAEResult BAERmfEditorDocument_ReplaceSampleFromPCM(BAERmfEditorDocument *docume
     XBlockMove(pcmData, pcmCopy, (int32_t)waveSize);
 
     sample = &document->samples[sampleIndex];
-    waveform->theWaveform = (SBYTE *)pcmCopy;
+    waveform->theWaveform = (signed char *)pcmCopy;
     waveform->waveFrames = frameCount;
     waveform->waveSize = (int32_t)waveSize;
     waveform->bitSize = bitSize;
@@ -12086,7 +12086,7 @@ BAEResult BAERmfEditorDocument_PropagateReplacementToAsset(BAERmfEditorDocument 
                 return BAE_MEMORY_ERR;
             }
             XBlockMove(source->waveform->theWaveform, waveData, source->waveform->waveSize);
-            dupWaveform->theWaveform = (XSWORD *)waveData;
+            dupWaveform->theWaveform = (int16_t *)waveData;
         }
         else
         {
@@ -12341,7 +12341,7 @@ BAEResult BAERmfEditorDocument_ExportSampleToFile(BAERmfEditorDocument const *do
     if (sample->originalSndData && sample->originalSndSize > (int32_t)sizeof(XSndHeader3))
     {
         SndCompressionType srcCodec = (SndCompressionType)sample->sourceCompressionType;
-        XBOOL isCompressed = FALSE;
+        bool isCompressed = FALSE;
 
         switch (srcCodec)
         {
@@ -12382,7 +12382,7 @@ BAEResult BAERmfEditorDocument_ExportSampleToFile(BAERmfEditorDocument const *do
             if (bitstreamSize > 0 && bitstream + bitstreamSize <= blobEnd)
             {
                 XFILE outFile;
-                XERR writeErr;
+                int32_t writeErr;
                 XConvertPathToXFILENAME(filePath, &fileName);
                 outFile = XFileOpenForWrite(&fileName, TRUE);
                 if (!outFile)
@@ -12710,7 +12710,7 @@ static BAEResult PV_CopySampleEntry(BAERmfEditorDocument *dest,
                 return BAE_MEMORY_ERR;
             }
             XBlockMove(srcSample->waveform->theWaveform, pcmCopy, (int32_t)srcSample->waveform->waveSize);
-            waveform->theWaveform = (SBYTE *)pcmCopy;
+            waveform->theWaveform = (signed char *)pcmCopy;
         }
     }
     dstSample->waveform = waveform;
@@ -13126,7 +13126,7 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBank(BAERmfEditorDocument *doc
     int16_t baseRootKey;
     int16_t splitCount;
     int16_t splitIndex;
-    XBOOL useSoundModifierAsRootKey;
+    bool useSoundModifierAsRootKey;
     int16_t instMiscParam1;
     XLongResourceID targetInstID;
 
@@ -13325,7 +13325,7 @@ BAEResult BAERmfEditorDocument_AliasInstrumentFromBank(BAERmfEditorDocument *doc
     int16_t baseRootKey;
     int16_t splitCount;
     int16_t splitIndex;
-    XBOOL useSoundModifierAsRootKey;
+    bool useSoundModifierAsRootKey;
     int16_t instMiscParam1;
     XLongResourceID targetInstID;
 
@@ -13547,7 +13547,7 @@ BAEResult BAERmfEditorDocument_AddBankAliasSample(BAERmfEditorDocument *document
 
 BAEResult BAERmfEditorDocument_IsSampleBankAlias(BAERmfEditorDocument const *document,
                                                   uint32_t sampleIndex,
-                                                  XBOOL *outIsAlias)
+                                                  bool *outIsAlias)
 {
     if (!document || !outIsAlias)
     {
@@ -13709,7 +13709,7 @@ BAEResult BAERmfEditorBank_GetInstrumentSampleInfo(BAEBankToken bankToken,
     int16_t splitCount;
     int16_t baseRootKey;
     int16_t baseVolume;
-    XBOOL useSoundModifierAsRootKey;
+    bool useSoundModifierAsRootKey;
     int16_t miscParam1;
 
     if (!outInfo)
@@ -14037,7 +14037,7 @@ static BAEResult PV_BankReplaceResource(XFILE bankFile,
     int32_t typeIdx;
     XPTR packedData;
     int32_t packedSize;
-    XBOOL replaced;
+    bool replaced;
 
     if (!bankFile || !data || size <= 0)
     {
@@ -14343,7 +14343,7 @@ static BAEResult PV_BankReplaceResourceEx(XFILE bankFile,
     int32_t typeIdx;
     XPTR packedData;
     int32_t packedSize;
-    XBOOL replaced;
+    bool replaced;
 
     if (!bankFile || !data || size <= 0)
     {
@@ -15229,7 +15229,7 @@ BAEResult BAERmfEditorBank_DeleteAlias(BAEBankToken bankToken,
 BAEResult BAERmfEditorBank_CloneInstrument(BAEBankToken bankToken,
                                            uint32_t instrumentIndex,
                                            uint32_t destInstID,
-                                           XBOOL deepClone)
+                                           bool deepClone)
 {
     enum { kInstHeaderMinSize = 14, kInstKeySplitSize = 8 };
     XFILE bankFile;
@@ -15278,7 +15278,7 @@ BAEResult BAERmfEditorBank_CloneInstrument(BAEBankToken bankToken,
                 {
                     int32_t sndCount = XCountFileResourcesOfType(bankFile, ID_SND);
                     // Collect used IDs across SND/CSND/ESND
-                    XBOOL usedIDs[65536];
+                    bool usedIDs[65536];
                     XSetMemory(usedIDs, sizeof(usedIDs), 0);
                     static const XResourceType sndTypes[] = { ID_SND, ID_CSND, ID_ESND, 0 };
                     for (int t = 0; sndTypes[t] != 0; ++t)
@@ -15592,7 +15592,7 @@ BAEResult BAERmfEditorBank_GrowInstrumentSampleSlots(BAEBankToken bankToken,
         int16_t baseRoot = (int16_t)XGetShort((unsigned char *)instData + 2);
         int16_t miscParam1 = (int16_t)XGetShort((unsigned char *)instData + 8);
         int16_t baseVolume = (int16_t)XGetShort((unsigned char *)instData + 10);
-        XBOOL useSoundModifierAsRootKey = TEST_FLAG_VALUE(((unsigned char *)instData)[6], ZBF_useSoundModifierAsRootKey);
+        bool useSoundModifierAsRootKey = TEST_FLAG_VALUE(((unsigned char *)instData)[6], ZBF_useSoundModifierAsRootKey);
         int16_t splitRoot = baseRoot;
 
         if (useSoundModifierAsRootKey)
@@ -15653,7 +15653,7 @@ BAEResult BAERmfEditorBank_GrowInstrumentSampleSlots(BAEBankToken bankToken,
 BAEResult BAERmfEditorBank_DeleteInstrumentSample(BAEBankToken bankToken,
                                                    uint32_t instrumentIndex,
                                                    uint32_t sampleIndex,
-                                                   XBOOL deleteSndIfUnreferenced)
+                                                   bool deleteSndIfUnreferenced)
 {
     enum
     {
@@ -16243,7 +16243,7 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBankToInstID(
     int16_t baseRootKey;
     int16_t splitCount;
     int16_t splitIndex;
-    XBOOL useSoundModifierAsRootKey;
+    bool useSoundModifierAsRootKey;
     int16_t instMiscParam1;
 
     if (!document || !bankToken)
@@ -16424,7 +16424,7 @@ static BAEResult PV_WriteRmfDocumentToResourceFile(BAERmfEditorDocument *documen
     ByteBuffer midiData;
     char midiName[256];
     BAEResult result;
-    XBOOL isZmf;
+    bool isZmf;
 
     if (!document || !fileRef)
     {
@@ -16620,7 +16620,7 @@ static BAEResult PV_WriteRmfDocumentToResourceFile(BAERmfEditorDocument *documen
 }
 
 BAEResult BAERmfEditorDocument_SaveAsRmfToMemory(BAERmfEditorDocument *document,
-                                                 XBOOL useZmfContainer,
+                                                 bool useZmfContainer,
                                                  unsigned char **outData,
                                                  uint32_t *outSize)
 {
@@ -16678,7 +16678,7 @@ BAEResult BAERmfEditorDocument_SaveAsRmf(BAERmfEditorDocument *document,
     XFILENAME name;
     XFILE fileRef;
     BAEResult result;
-    XBOOL useZmfContainer;
+    bool useZmfContainer;
     const char *ext;
 
     if (!document || !filePath)
@@ -16842,7 +16842,7 @@ static BAEResult PV_BankReEncodeSampleCore(XFILE bankFile,
                                             BAERmfEditorCompressionType compressionType,
                                             BAERmfEditorSndStorageType sndStorageType,
                                             BAERmfEditorOpusMode opusMode,
-                                            XBOOL opusRoundTripResample)
+                                            bool opusRoundTripResample)
 {
     BAEResult result;
     SndCompressionType compType;
@@ -16855,7 +16855,7 @@ static BAEResult PV_BankReEncodeSampleCore(XFILE bankFile,
     int32_t oldSndRawSize;
     XPTR oldSndPlain;
     int32_t oldSndPlainSize;
-    XBOOL oldSndPlainOwned;
+    bool oldSndPlainOwned;
     SampleDataInfo oldSndInfo;
     int16_t preservedBaseKey;
     char sndName[256];
@@ -16864,7 +16864,7 @@ static BAEResult PV_BankReEncodeSampleCore(XFILE bankFile,
     XPTR wrappedSnd;
     int32_t wrappedSndSize;
     OPErr opErr;
-    XBOOL sampleWasEncodedMpeg;
+    bool sampleWasEncodedMpeg;
     int32_t normalizedLoopStart;
     int32_t normalizedLoopEnd;
     uint32_t inputPcmRateHz;
@@ -17006,7 +17006,7 @@ static BAEResult PV_BankReEncodeSampleCore(XFILE bankFile,
 
     /* Build the source waveform descriptor */
     XSetMemory(&writeWaveform, (int32_t)sizeof(writeWaveform), 0);
-    writeWaveform.theWaveform   = (SBYTE *)waveData;
+    writeWaveform.theWaveform   = (signed char *)waveData;
     writeWaveform.waveFrames    = frameCount;
     writeWaveform.waveSize      = (int32_t)(frameCount * (uint32_t)(bitSize / 8u) * (uint32_t)channels);
     writeWaveform.bitSize       = bitSize;
@@ -17407,7 +17407,7 @@ BAEResult BAERmfEditorBank_ReEncodeSampleFromPCMEx(BAEBankToken bankToken,
                                                                                                         BAERmfEditorCompressionType compressionType,
                                                                                                         BAERmfEditorSndStorageType sndStorageType,
                                                                                                         BAERmfEditorOpusMode opusMode,
-                                                                                                        XBOOL opusRoundTripResample,
+                                                                                                        bool opusRoundTripResample,
                                                                                                         const void *sourcePcm,
                                                                                                         uint32_t frameCount,
                                                                                                         uint16_t bitSize,

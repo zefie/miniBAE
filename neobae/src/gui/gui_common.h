@@ -13,7 +13,7 @@
 
 // Forward declarations for internal types used in meta callback
 struct GM_Song;       // opaque
-typedef short XSWORD; // 16-bit signed used by engine for track index
+typedef short int16_t; // 16-bit signed used by engine for track index
 
 // Common macros
 #ifndef MIN

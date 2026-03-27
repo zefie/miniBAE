@@ -61,7 +61,7 @@
 **  2/24/98     kcr         now clear reverb buffers every time change reverb mode
 **  3/12/98     igor        Modified GetSamplingRate to use the rate function
 **                          GM_ConvertFromOutputQualityToRate
-**  3/16/98     igor        Changed InitNewReverb to return a XBOOL for success or failure
+**  3/16/98     igor        Changed InitNewReverb to return a bool for success or failure
 **
 **  6/5/98      Jim Nitchals RIP    1/15/62 - 6/5/98
 **              I'm going to miss your irreverent humor. Your coding style and desire
@@ -143,13 +143,13 @@ NewReverbParams* GetNewReverbParams()
 
 
 
-//static INT32 lopassKList[6];
+//static int32_t lopassKList[6];
 
 //++------------------------------------------------------------------------------
 //  InitNewReverb()
 //
 //++------------------------------------------------------------------------------
-XBOOL InitNewReverb()
+bool InitNewReverb()
 {
     int i;
     NewReverbParams* params = GetNewReverbParams();
@@ -167,7 +167,7 @@ XBOOL InitNewReverb()
         float freq = filterValue  *  22000.0;
         float srate = srList[i];
         
-        INT32 lopassK = (1.0 - exp(-2*_PI * freq / srate) ) * COEFF_MULTIPLY;
+        int32_t lopassK = (1.0 - exp(-2*_PI * freq / srate) ) * COEFF_MULTIPLY;
         
         fprintf(fp, "%d\n", lopassK);
     }
@@ -184,12 +184,12 @@ XBOOL InitNewReverb()
     // actually allocate our own buffers for the 6 comb filters and the early reflections
     // buffer which happen to perfectly fit into the old buffer ;-)
 #if 0
-    int32_t kMaxBytes = sizeof(INT32) * kCombBufferFrameSize;
+    int32_t kMaxBytes = sizeof(int32_t) * kCombBufferFrameSize;
     
     // allocate the comb filter delay line memory
     for(i = 0; i < kNumberOfCombFilters; i++)
     {
-        params->mReverbBuffer[i] = (INT32*)XNewPtr(kMaxBytes );
+        params->mReverbBuffer[i] = (int32_t*)XNewPtr(kMaxBytes );
         if (params->mReverbBuffer[i] == NULL)
         {
             ShutdownNewReverb();
@@ -197,7 +197,7 @@ XBOOL InitNewReverb()
         }
     }
 
-    params->mEarlyReflectionBuffer = (INT32*)XNewPtr(sizeof(INT32) * kEarlyReflectionBufferFrameSize);
+    params->mEarlyReflectionBuffer = (int32_t*)XNewPtr(sizeof(int32_t) * kEarlyReflectionBufferFrameSize);
     if (params->mEarlyReflectionBuffer == NULL)
     {
         ShutdownNewReverb();
@@ -227,7 +227,7 @@ XBOOL InitNewReverb()
     // allocate the diffusion delay line memory
     for(i = 0; i < kNumberOfDiffusionStages; i++)
     {
-        params->mDiffusionBuffer[i] = (INT32*)XNewPtr(sizeof(INT32) * kDiffusionBufferFrameSize);       
+        params->mDiffusionBuffer[i] = (int32_t*)XNewPtr(sizeof(int32_t) * kDiffusionBufferFrameSize);       
         if (params->mDiffusionBuffer[i] == NULL)
         {
             ShutdownNewReverb();
@@ -235,13 +235,13 @@ XBOOL InitNewReverb()
         }
     }
 
-    params->mStereoizerBufferL = (INT32*)XNewPtr(sizeof(INT32) * kStereoizerBufferFrameSize);
+    params->mStereoizerBufferL = (int32_t*)XNewPtr(sizeof(int32_t) * kStereoizerBufferFrameSize);
     if (params->mStereoizerBufferL == NULL)
     {
         ShutdownNewReverb();
         return FALSE;
     }
-    params->mStereoizerBufferR = (INT32*)XNewPtr(sizeof(INT32) * kStereoizerBufferFrameSize);
+    params->mStereoizerBufferR = (int32_t*)XNewPtr(sizeof(int32_t) * kStereoizerBufferFrameSize);
     if (params->mStereoizerBufferR == NULL)
     {
         ShutdownNewReverb();
@@ -268,9 +268,9 @@ XBOOL InitNewReverb()
 
     params->mIsInitialized = TRUE;
     params->mSampleRate = MusicGlobals->outputRate;
-    MusicGlobals->reverbBufferSize =    (kNumberOfDiffusionStages * kDiffusionBufferFrameSize * sizeof(INT32)) +
-                                        (sizeof(INT32) * kStereoizerBufferFrameSize * 2) + 
-                                        ((kCombBufferFrameSize*kNumberOfCombFilters + kEarlyReflectionBufferFrameSize) * sizeof(INT32));
+    MusicGlobals->reverbBufferSize =    (kNumberOfDiffusionStages * kDiffusionBufferFrameSize * sizeof(int32_t)) +
+                                        (sizeof(int32_t) * kStereoizerBufferFrameSize * 2) + 
+                                        ((kCombBufferFrameSize*kNumberOfCombFilters + kEarlyReflectionBufferFrameSize) * sizeof(int32_t));
     return TRUE;
 }
 
@@ -323,9 +323,9 @@ void ShutdownNewReverb()
 //
 //      Should be called 
 //++------------------------------------------------------------------------------
-XBOOL CheckReverbType()
+bool CheckReverbType()
 {
-    XBOOL changed = FALSE;
+    bool changed = FALSE;
     NewReverbParams* params = GetNewReverbParams();
     int i;
     
@@ -363,10 +363,10 @@ XBOOL CheckReverbType()
             // clear out shared buffers, when switching reverb modes...
             for(i = 0; i < kNumberOfCombFilters; i++)
             {
-                XSetMemory(params->mReverbBuffer[i], sizeof(INT32)*kCombBufferFrameSize, 0);
+                XSetMemory(params->mReverbBuffer[i], sizeof(int32_t)*kCombBufferFrameSize, 0);
             }
             
-            XSetMemory(params->mEarlyReflectionBuffer, sizeof(INT32)*kEarlyReflectionBufferFrameSize, 0);
+            XSetMemory(params->mEarlyReflectionBuffer, sizeof(int32_t)*kEarlyReflectionBufferFrameSize, 0);
             params->mIsInitialized = TRUE;  // enable runtime again
         }
     }   
@@ -378,9 +378,9 @@ XBOOL CheckReverbType()
 //  GetSR_44100Ratio()
 //
 //++------------------------------------------------------------------------------
-UINT32 GetSR_44100Ratio()
+uint32_t GetSR_44100Ratio()
 {
-    UINT32 currentSR = GetSamplingRate();
+    uint32_t currentSR = GetSamplingRate();
     
     return currentSR / 44100UL;
 }
@@ -389,9 +389,9 @@ UINT32 GetSR_44100Ratio()
 //  Get44100_SRRatio()
 //
 //++------------------------------------------------------------------------------
-UINT32 Get44100_SRRatio()
+uint32_t Get44100_SRRatio()
 {
-    UINT32 currentSR = GetSamplingRate();
+    uint32_t currentSR = GetSamplingRate();
     
     return (44100UL << 16L) / (currentSR >> 16L);
 }
@@ -402,7 +402,7 @@ UINT32 Get44100_SRRatio()
 //
 //      fixed point 16.16
 //++------------------------------------------------------------------------------
-UINT32 GetSamplingRate()
+uint32_t GetSamplingRate()
 {
     return GM_ConvertFromOutputRateToRate(MusicGlobals->outputRate) * XFIXED_1;
 }
@@ -416,7 +416,7 @@ UINT32 GetSamplingRate()
     The value is COEFF_MULTIPLY * log10(0.7 + 0.3 * (float(i) / 16.0) ) / (-3.0)    
  */
  
-static INT32 regenList[] =
+static int32_t regenList[] =
 {
     3383,
     3133,
@@ -444,15 +444,15 @@ void ScaleDelayTimes()
 {
     NewReverbParams* params = GetNewReverbParams();
     int i;
-    INT32       T60;
-    INT32       desiredMinFrames;
-    INT32       kMinDelayFrames;
-    INT32       currentMinFrames;
-    INT32       delayScale;
-    INT32       delayFrames;
-    INT32       log10maxG;
-    UINT32      srate = GetSamplingRate() >> 16;
-    INT32       maxDelayFrame;
+    int32_t       T60;
+    int32_t       desiredMinFrames;
+    int32_t       kMinDelayFrames;
+    int32_t       currentMinFrames;
+    int32_t       delayScale;
+    int32_t       delayFrames;
+    int32_t       log10maxG;
+    uint32_t      srate = GetSamplingRate() >> 16;
+    int32_t       maxDelayFrame;
 
     // mRoomSize 0-127
     T60 = params->mRoomSize * 4;    // range of 4 seconds
@@ -503,7 +503,7 @@ void ScaleDelayTimes()
    divided by the room size (0-127) multiplied by (1L << 16)
  */
  
-static INT32 inverseFeedbackTable[] =   /* 100 entries */
+static int32_t inverseFeedbackTable[] =   /* 100 entries */
 {
     9062688, 8932591, 8803775, 8676216, 8549889, 8424772, 8300840, 8178072, 8056446, 7935941, 
     7816537, 7698213, 7580950, 7464730, 7349533, 7235343, 7122142, 7009912, 6898637, 6788302, 
@@ -553,9 +553,9 @@ void GenerateFeedbackValues()
     for(i = 0; i < kNumberOfCombFilters; i++)
     {
         int32_t frames = (params->mDelayFrames[i] * Get44100_SRRatio() ) >> 16;
-        INT32 fakeRatio = (frames << COMB_FILTER_SHIFT) / params->mRoomSize;
+        int32_t fakeRatio = (frames << COMB_FILTER_SHIFT) / params->mRoomSize;
         int k;
-        INT32 g, kOneHalf;
+        int32_t g, kOneHalf;
         
         for(k = 0; k < 100; k++)
         {
@@ -586,13 +586,13 @@ void GenerateFeedbackValues()
     {
         static count = 0;
         
-        //INT32 fakeRatio = (frames << 16) / params->mRoomSize;
+        //int32_t fakeRatio = (frames << 16) / params->mRoomSize;
         double g = 0.5 + (0.01 * i) * 0.5;
         
         const double k = -3 * 32 / 44100.0;
         
         double fakeRatio = log10(g) / k;
-        INT32 intFakeRatio = fakeRatio * (1L << COMB_FILTER_SHIFT);
+        int32_t intFakeRatio = fakeRatio * (1L << COMB_FILTER_SHIFT);
         
         
         fprintf(fp, "%d, ", intFakeRatio);
@@ -689,7 +689,7 @@ void GenerateDelayTimes()
     ScaleDelayTimes();
 }
 
-static INT32 diffusionFrameList[] =
+static int32_t diffusionFrameList[] =
 {
     105,
     176,
@@ -728,7 +728,7 @@ void SetupStereoizer()
     int32_t delayFrames;
     
     // generated lopass filter coeffs for different sample rates
-    static INT32 lopassKList[] = {63467, 60227, 46883, 44824, 30573, 28693};
+    static int32_t lopassKList[] = {63467, 60227, 46883, 44824, 30573, 28693};
     
     int i;
 
@@ -778,10 +778,10 @@ void SetupStereoizer()
 
 // early reflection stuff
 
-static INT32 earlyReflectionFrames[] =
+static int32_t earlyReflectionFrames[] =
  {0x00000f7b, 0x00000861, 0x00000de2, 0x00000ac2, 0x00000b74, 0x00001420, /*0x0000089d*/ 0x00000550};
  
-static INT32 earlyReflectionsGains[] =
+static int32_t earlyReflectionsGains[] =
 {
     50918,      //  0.77695906162261963
     127900,     //  1.9516065120697021
@@ -806,7 +806,7 @@ void SetupEarlyReflections()
         
     for(i = 0; i < kNumberOfEarlyReflections; i++)
     {
-        INT32 frames = (earlyReflectionFrames[i] * GetSR_44100Ratio() ) >> 16;
+        int32_t frames = (earlyReflectionFrames[i] * GetSR_44100Ratio() ) >> 16;
         params->mEarlyReflectionGain[i] = earlyReflectionsGains[i];
         params->mReflectionReadIndex[i] = kEarlyReflectionBufferFrameSize - frames;
     }
@@ -820,24 +820,24 @@ void SetupEarlyReflections()
 //  RunNewReverb()
 //
 //++------------------------------------------------------------------------------
-void RunNewReverb(INT32 *sourceP, INT32 *destP, int nSampleFrames)
+void RunNewReverb(int32_t *sourceP, int32_t *destP, int nSampleFrames)
 {
     NewReverbParams* params = GetNewReverbParams();
 
     // get local state variables from global struct (for efficiency)
-    INT32 *delayBuffer1 = params->mReverbBuffer[0];
-    INT32 *delayBuffer2 = params->mReverbBuffer[1];
-    INT32 *delayBuffer3 = params->mReverbBuffer[2];
-    INT32 *delayBuffer4 = params->mReverbBuffer[3];
-    INT32 *delayBuffer5 = params->mReverbBuffer[4];
-    INT32 *delayBuffer6 = params->mReverbBuffer[5];
+    int32_t *delayBuffer1 = params->mReverbBuffer[0];
+    int32_t *delayBuffer2 = params->mReverbBuffer[1];
+    int32_t *delayBuffer3 = params->mReverbBuffer[2];
+    int32_t *delayBuffer4 = params->mReverbBuffer[3];
+    int32_t *delayBuffer5 = params->mReverbBuffer[4];
+    int32_t *delayBuffer6 = params->mReverbBuffer[5];
 
-    INT32   intFeedback1 = params->mFeedbackList[0];
-    INT32   intFeedback2 = params->mFeedbackList[1];
-    INT32   intFeedback3 = params->mFeedbackList[2];
-    INT32   intFeedback4 = params->mFeedbackList[3];
-    INT32   intFeedback5 = params->mFeedbackList[4];
-    INT32   intFeedback6 = params->mFeedbackList[5];
+    int32_t   intFeedback1 = params->mFeedbackList[0];
+    int32_t   intFeedback2 = params->mFeedbackList[1];
+    int32_t   intFeedback3 = params->mFeedbackList[2];
+    int32_t   intFeedback4 = params->mFeedbackList[3];
+    int32_t   intFeedback5 = params->mFeedbackList[4];
+    int32_t   intFeedback6 = params->mFeedbackList[5];
     
     int     readIndex1 = params->mReadIndex[0];
     int     readIndex2 = params->mReadIndex[1];
@@ -854,9 +854,9 @@ void RunNewReverb(INT32 *sourceP, INT32 *destP, int nSampleFrames)
     int     writeIndex6 = params->mWriteIndex[5];
     
     // diffusion parameters 
-    INT32   *diffusionBuffer1 = params->mDiffusionBuffer[0];
-    INT32   *diffusionBuffer2 = params->mDiffusionBuffer[1];
-    INT32   *diffusionBuffer3 = params->mDiffusionBuffer[2];
+    int32_t   *diffusionBuffer1 = params->mDiffusionBuffer[0];
+    int32_t   *diffusionBuffer2 = params->mDiffusionBuffer[1];
+    int32_t   *diffusionBuffer3 = params->mDiffusionBuffer[2];
     
     int     diffReadIndex1 = params->mDiffReadIndex[0];
     int     diffReadIndex2 = params->mDiffReadIndex[1];
@@ -868,8 +868,8 @@ void RunNewReverb(INT32 *sourceP, INT32 *destP, int nSampleFrames)
     
     
 
-    INT32   *stereoizerBufferL = params->mStereoizerBufferL;
-    INT32   *stereoizerBufferR = params->mStereoizerBufferR;
+    int32_t   *stereoizerBufferL = params->mStereoizerBufferL;
+    int32_t   *stereoizerBufferR = params->mStereoizerBufferR;
 
     int     stereoReadIndex = params->mStereoReadIndex;
     int     stereoWriteIndex = params->mStereoWriteIndex;
@@ -877,15 +877,15 @@ void RunNewReverb(INT32 *sourceP, INT32 *destP, int nSampleFrames)
 
 
     // early reflection stuff
-    INT32 earlyReflectionGain1 = params->mEarlyReflectionGain[0];
-    INT32 earlyReflectionGain2 = params->mEarlyReflectionGain[1];
-    INT32 earlyReflectionGain3 = params->mEarlyReflectionGain[2];
-    INT32 earlyReflectionGain4 = params->mEarlyReflectionGain[3];
-    INT32 earlyReflectionGain5 = params->mEarlyReflectionGain[4];
-    INT32 earlyReflectionGain6 = params->mEarlyReflectionGain[5];
+    int32_t earlyReflectionGain1 = params->mEarlyReflectionGain[0];
+    int32_t earlyReflectionGain2 = params->mEarlyReflectionGain[1];
+    int32_t earlyReflectionGain3 = params->mEarlyReflectionGain[2];
+    int32_t earlyReflectionGain4 = params->mEarlyReflectionGain[3];
+    int32_t earlyReflectionGain5 = params->mEarlyReflectionGain[4];
+    int32_t earlyReflectionGain6 = params->mEarlyReflectionGain[5];
     
     // 0-127 corresponds to 0x to 2x the mEarlyReflectionGain[6] value
-    INT32 preDelayGain = (params->mEarlyReflectionGain[6] * params->mDiffusedBalance) >> 6;
+    int32_t preDelayGain = (params->mEarlyReflectionGain[6] * params->mDiffusedBalance) >> 6;
     
     int     reflectionReadIndex1 = params->mReflectionReadIndex[0];
     int     reflectionReadIndex2 = params->mReflectionReadIndex[1];
@@ -897,12 +897,12 @@ void RunNewReverb(INT32 *sourceP, INT32 *destP, int nSampleFrames)
     
     int     reflectionWriteIndex = params->mReflectionWriteIndex;
 
-    INT32   *earlyReflectionBuffer = params->mEarlyReflectionBuffer;
+    int32_t   *earlyReflectionBuffer = params->mEarlyReflectionBuffer;
 
 
     // filter stuff
-    INT32 lopassK = params->mLopassK;
-    INT32 filterMemory = params->mFilterMemory;
+    int32_t lopassK = params->mLopassK;
+    int32_t filterMemory = params->mFilterMemory;
 
     int framesToProcess = nSampleFrames;
 
@@ -925,32 +925,32 @@ void RunNewReverb(INT32 *sourceP, INT32 *destP, int nSampleFrames)
     
     while(framesToProcess-- > 0)
     {
-        INT32 reverbOutL, reverbOutR;
-        INT32 diffOut1, diffOut2, diffOut3;
-        INT32 wet, combOutput, temp, combInput, diffInput, filterOutput, stereoInput;
+        int32_t reverbOutL, reverbOutR;
+        int32_t diffOut1, diffOut2, diffOut3;
+        int32_t wet, combOutput, temp, combInput, diffInput, filterOutput, stereoInput;
 
-        INT32 input = *sourceP++ >> (INPUTSHIFT + 1);
+        int32_t input = *sourceP++ >> (INPUTSHIFT + 1);
 
 
         // comb filter bank
-        INT32 tap1 = (delayBuffer1[readIndex1] * intFeedback1) >> COMB_FILTER_SHIFT;
-        INT32 tap2 = (delayBuffer2[readIndex2] * intFeedback2) >> COMB_FILTER_SHIFT;
-        INT32 tap3 = (delayBuffer3[readIndex3] * intFeedback3) >> COMB_FILTER_SHIFT;
-        INT32 tap4 = (delayBuffer4[readIndex4] * intFeedback4) >> COMB_FILTER_SHIFT;
-        INT32 tap5 = (delayBuffer5[readIndex5] * intFeedback5) >> COMB_FILTER_SHIFT;
-        INT32 tap6 = (delayBuffer6[readIndex6] * intFeedback6) >> COMB_FILTER_SHIFT;
+        int32_t tap1 = (delayBuffer1[readIndex1] * intFeedback1) >> COMB_FILTER_SHIFT;
+        int32_t tap2 = (delayBuffer2[readIndex2] * intFeedback2) >> COMB_FILTER_SHIFT;
+        int32_t tap3 = (delayBuffer3[readIndex3] * intFeedback3) >> COMB_FILTER_SHIFT;
+        int32_t tap4 = (delayBuffer4[readIndex4] * intFeedback4) >> COMB_FILTER_SHIFT;
+        int32_t tap5 = (delayBuffer5[readIndex5] * intFeedback5) >> COMB_FILTER_SHIFT;
+        int32_t tap6 = (delayBuffer6[readIndex6] * intFeedback6) >> COMB_FILTER_SHIFT;
 
 
         // early reflections
-        INT32 refl1 = (earlyReflectionBuffer[reflectionReadIndex1] * earlyReflectionGain1) >> COEFF_SHIFT;
-        INT32 refl2 = (earlyReflectionBuffer[reflectionReadIndex2] * earlyReflectionGain2) >> COEFF_SHIFT;
-        INT32 refl3 = (earlyReflectionBuffer[reflectionReadIndex3] * earlyReflectionGain3) >> COEFF_SHIFT;
-        INT32 refl4 = (earlyReflectionBuffer[reflectionReadIndex4] * earlyReflectionGain4) >> COEFF_SHIFT;
-        INT32 refl5 = (earlyReflectionBuffer[reflectionReadIndex5] * earlyReflectionGain5) >> COEFF_SHIFT;
-        INT32 refl6 = (earlyReflectionBuffer[reflectionReadIndex6] * earlyReflectionGain6) >> COEFF_SHIFT;
-        INT32 preDelay = (earlyReflectionBuffer[reflectionReadIndex7] * preDelayGain) >> COEFF_SHIFT;
+        int32_t refl1 = (earlyReflectionBuffer[reflectionReadIndex1] * earlyReflectionGain1) >> COEFF_SHIFT;
+        int32_t refl2 = (earlyReflectionBuffer[reflectionReadIndex2] * earlyReflectionGain2) >> COEFF_SHIFT;
+        int32_t refl3 = (earlyReflectionBuffer[reflectionReadIndex3] * earlyReflectionGain3) >> COEFF_SHIFT;
+        int32_t refl4 = (earlyReflectionBuffer[reflectionReadIndex4] * earlyReflectionGain4) >> COEFF_SHIFT;
+        int32_t refl5 = (earlyReflectionBuffer[reflectionReadIndex5] * earlyReflectionGain5) >> COEFF_SHIFT;
+        int32_t refl6 = (earlyReflectionBuffer[reflectionReadIndex6] * earlyReflectionGain6) >> COEFF_SHIFT;
+        int32_t preDelay = (earlyReflectionBuffer[reflectionReadIndex7] * preDelayGain) >> COEFF_SHIFT;
 
-        INT32 reflSum = refl1 + refl2 + refl3 + refl4 + refl5 + refl6;
+        int32_t reflSum = refl1 + refl2 + refl3 + refl4 + refl5 + refl6;
 
         earlyReflectionBuffer[reflectionWriteIndex] = input;
 
@@ -1048,8 +1048,8 @@ void RunNewReverb(INT32 *sourceP, INT32 *destP, int nSampleFrames)
         CIRCULAR_INCREMENT( stereoWriteIndex, kStereoizerBufferMask);
 
         // ADD in reverb to output buffer
-        *destP++ += (XSDWORD)(((unsigned int)reverbOutL) << (INPUTSHIFT));
-        *destP++ += (XSDWORD)(((unsigned int)reverbOutR) << (INPUTSHIFT));
+        *destP++ += (int32_t)(((unsigned int)reverbOutL) << (INPUTSHIFT));
+        *destP++ += (int32_t)(((unsigned int)reverbOutR) << (INPUTSHIFT));
     }
 
 

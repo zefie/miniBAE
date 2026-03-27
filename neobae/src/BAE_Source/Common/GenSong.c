@@ -99,7 +99,7 @@
 **  8/7/97      Changed GM_SongTicks & GM_SetSongTickPosition & GM_GetSongTickLength
 **              to support UFLOAT
 **  8/13/97     Renamed GM_GetSongProgramChanges to GM_GetSongInstrumentChanges and changed
-**              Byte reference to XBYTE
+**              Byte reference to unsigned char
 **  8/15/97     Fixed a bug in which a data block was being freed in GM_FreeSong after
 **              the main pointer was trashed.
 **              Added disposal in GM_FreeSong of the new controller callbacks
@@ -119,7 +119,7 @@
 **              pointer now rather than let the decoder thread get it later.
 **  10/27/97    Removed reference to MusicGlobals->theSongPlaying
 **  2/2/98      Added GM_SetVelocityCurveType
-**  2/8/98      Changed BOOL_FLAG to XBOOL
+**  2/8/98      Changed BOOL_FLAG to bool
 ** JAVASOFT
 **  02.10.98:   $$kk: GM_SetSongMicrosecondPosition: added check for whether
 **              song was paused so that we don't resume if this method was called on a paused song.
@@ -134,7 +134,7 @@
 **              political issues. Your generosity. Your great mimicking of cartoon voices.
 **              Your friendship. - Steve Hales
 **
-**  6/30/98     Removed INT16 casting in GM_MergeExternalSong
+**  6/30/98     Removed int16_t casting in GM_MergeExternalSong
 **              Changed GM_LoadSong/GM_CreateLiveSong to accept a int32_t rather than a short for
 **              the songID
 **  7/6/98      Added GM_IsSongInstrumentLoaded
@@ -342,7 +342,7 @@ void GM_MergeExternalSong(void *theExternalSong, XShortResourceID theSongID, GM_
             PV_SetTempo(theSong, XGetShort(&songRMF->songTempo));
             theSong->songVolume = XGetSongVolume((SongResource *)theExternalSong);
             // Read per-song engine config flags from unused[0]
-            theSong->engineConfigFlags = (XDWORD)XGetLong(&songRMF->unused[SONG_CONFIG_UNUSED_INDEX]);
+            theSong->engineConfigFlags = (uint32_t)XGetLong(&songRMF->unused[SONG_CONFIG_UNUSED_INDEX]);
             break;
         }
     }
@@ -502,11 +502,11 @@ static int16_t PV_FindEmptySongSlot(GM_Mixer *pMixer, GM_Song *pSong)
 
 // preroll song but don't start
 OPErr GM_PrerollSong(GM_Song *pSong, GM_SongCallbackProcPtr theCallbackProc,
-                     XBOOL useEmbeddedMixerSettings, XBOOL autoLevel)
+                     bool useEmbeddedMixerSettings, bool autoLevel)
 {
     OPErr theErr;
     int16_t count;
-    INT16 sMaxSong, sMixLevel, sMaxEffect;
+    int16_t sMaxSong, sMixLevel, sMaxEffect;
 
     theErr = NO_ERR;
     if (pSong)
@@ -614,9 +614,9 @@ OPErr GM_PrerollSong(GM_Song *pSong, GM_SongCallbackProcPtr theCallbackProc,
 }
 
 // return preroll status
-XBOOL GM_IsSongPrerolled(GM_Song *pSong)
+bool GM_IsSongPrerolled(GM_Song *pSong)
 {
-    XBOOL roll;
+    bool roll;
 
     roll = FALSE;
     if (pSong)
@@ -628,7 +628,7 @@ XBOOL GM_IsSongPrerolled(GM_Song *pSong)
 
 // Set up the system to start playing a song
 OPErr GM_BeginSong(GM_Song *pSong, GM_SongCallbackProcPtr theCallbackProc,
-                   XBOOL useEmbeddedMixerSettings, XBOOL autoLevel)
+                   bool useEmbeddedMixerSettings, bool autoLevel)
 {
     OPErr theErr;
     GM_Mixer *pMixer = GM_GetCurrentMixer();
@@ -667,9 +667,9 @@ OPErr GM_BeginSong(GM_Song *pSong, GM_SongCallbackProcPtr theCallbackProc,
     return theErr;
 }
 
-XSWORD GM_GetSongRouteBus(GM_Song *pSong)
+int16_t GM_GetSongRouteBus(GM_Song *pSong)
 {
-    XSWORD routeBus;
+    int16_t routeBus;
 
     routeBus = 0;
     if (pSong)
@@ -679,7 +679,7 @@ XSWORD GM_GetSongRouteBus(GM_Song *pSong)
     return routeBus;
 }
 
-OPErr GM_SetSongRouteBus(GM_Song *pSong, XSWORD routeBus)
+OPErr GM_SetSongRouteBus(GM_Song *pSong, int16_t routeBus)
 {
     OPErr theErr = NO_ERR;
 
@@ -695,9 +695,9 @@ OPErr GM_SetSongRouteBus(GM_Song *pSong, XSWORD routeBus)
 }
 
 // Get song priority level. Higher values will allow for better note stealing.
-XSWORD GM_GetSongPriority(GM_Song *pSong)
+int16_t GM_GetSongPriority(GM_Song *pSong)
 {
-    XSWORD priority;
+    int16_t priority;
 
     priority = 0;
     if (pSong)
@@ -708,7 +708,7 @@ XSWORD GM_GetSongPriority(GM_Song *pSong)
 }
 
 // Set song priority level. Higher values will allow for better note stealing.
-OPErr GM_SetSongPriority(GM_Song *pSong, XSWORD songPriority)
+OPErr GM_SetSongPriority(GM_Song *pSong, int16_t songPriority)
 {
     OPErr theErr = NO_ERR;
 
@@ -725,7 +725,7 @@ OPErr GM_SetSongPriority(GM_Song *pSong, XSWORD songPriority)
 
 // REMAP
 
-OPErr GM_SetupSongRemaps(GM_Song *pSong, XBOOL checkForAliases)
+OPErr GM_SetupSongRemaps(GM_Song *pSong, bool checkForAliases)
 {
     int16_t count;
     XAliasLinkResource *pAlias;
@@ -869,7 +869,7 @@ void GM_ResetSongLyricState(GM_Song *pSong)
     }
 }
 
-OPErr GM_StartLiveSong(GM_Song *pSong, XBOOL loadPatches, XBankToken bankToken)
+OPErr GM_StartLiveSong(GM_Song *pSong, bool loadPatches, XBankToken bankToken)
 {
     OPErr theErr;
     int16_t songSlot, count;
@@ -982,10 +982,10 @@ OPErr GM_UnloadSongInstrument(GM_Song *pSong, XLongResourceID instrument)
 
 // Will check to see if an instrument has got a remap.
 // Returns TRUE if instrument is remapped, otherwise FALSE
-XBOOL GM_IsSongInstrumentRemapped(GM_Song *pSong, XLongResourceID instrument)
+bool GM_IsSongInstrumentRemapped(GM_Song *pSong, XLongResourceID instrument)
 {
     XLongResourceID realInstrument;
-    XBOOL aliased;
+    bool aliased;
 
     aliased = FALSE;
     if (pSong && (instrument >= 0) && (instrument < (MAX_INSTRUMENTS * MAX_BANKS)))
@@ -1004,10 +1004,10 @@ XBOOL GM_IsSongInstrumentRemapped(GM_Song *pSong, XLongResourceID instrument)
 
 // Returns TRUE if instrument is loaded, otherwise FALSE
 // This follows reamped or aliased instruments.
-XBOOL GM_IsSongInstrumentLoaded(GM_Song *pSong, XLongResourceID instrument)
+bool GM_IsSongInstrumentLoaded(GM_Song *pSong, XLongResourceID instrument)
 {
     XLongResourceID realInstrument;
-    XBOOL loaded;
+    bool loaded;
 
     loaded = FALSE;
     if (pSong && (instrument >= 0) && (instrument < (MAX_INSTRUMENTS * MAX_BANKS)))
@@ -1052,8 +1052,8 @@ GM_Song *GM_LoadSong(struct GM_Mixer *pMixer,
                      void *theExternalMidiData,
                      int32_t midiSize,
                      XShortResourceID *pInstrumentArray,
-                     XBOOL loadInstruments,
-                     XBOOL ignoreBadInstruments,
+                     bool loadInstruments,
+                     bool ignoreBadInstruments,
                      XBankToken bankToken,
                      OPErr *pErr)
 {
@@ -1127,9 +1127,9 @@ GM_Song *GM_LoadSong(struct GM_Mixer *pMixer,
 // Stop this song playing, or pass NULL with pSong to stop all songs. "removeFromMixer" determines
 // if the song is removed from the mixer or not. If TRUE then you can still send midi events to the song
 // because the song is still in the mixer for event processing. FALSE removes the song from the mixer.
-static void PV_EndSongWithControl(void *threadContext, GM_Song *pSong, XBOOL removeFromMixer)
+static void PV_EndSongWithControl(void *threadContext, GM_Song *pSong, bool removeFromMixer)
 {
-    LOOPCOUNT count;
+    int32_t count;
     GM_Mixer *pMixer;
 
     pMixer = MusicGlobals;
@@ -1284,10 +1284,10 @@ OPErr GM_FreeSong(void *threadContext, GM_Song *pSong)
 
 //  pSong   GM_Song structure. Data will be cloned for this function.
 //  pErr    OPErr error type
-UINT32 GM_GetSongTickLength(GM_Song *pSong, OPErr *pErr)
+uint32_t GM_GetSongTickLength(GM_Song *pSong, OPErr *pErr)
 {
     GM_Song *theSong;
-    UINT32 tickLength;
+    uint32_t tickLength;
     OPErr err;
 
     err = NO_ERR;
@@ -1346,7 +1346,7 @@ UINT32 GM_GetSongTickLength(GM_Song *pSong, OPErr *pErr)
                 theSong->songEndCallbackPtr = NULL;
                 theSong->disposeSongDataWhenDone = FALSE;
 
-                tickLength = (UINT32)theSong->CurrentMidiClock;
+                tickLength = (uint32_t)theSong->CurrentMidiClock;
                 if (tickLength == 0xFFFFFFFFL)
                 {
                     err = OUT_OF_RANGE;
@@ -1368,7 +1368,7 @@ UINT32 GM_GetSongTickLength(GM_Song *pSong, OPErr *pErr)
     }
     else
     {
-        tickLength = (UINT32)pSong->songMidiTickLength;
+        tickLength = (uint32_t)pSong->songMidiTickLength;
         if (tickLength == 0xFFFFFFFFL)
         {
             tickLength = 0;
@@ -1386,18 +1386,18 @@ UINT32 GM_GetSongTickLength(GM_Song *pSong, OPErr *pErr)
 #if USE_CREATION_API == TRUE
 void PV_TrackNameCallback(void *threadContext, GM_Song *pSong, char markerType, void *pMetaText, int32_t metaTextLength, int16_t currentTrack)
 {
-    XBYTE **tnArray, *str;
+    unsigned char **tnArray, *str;
 
     if (markerType == 0x03)
     { // track name
         if (currentTrack != -1)
         {
-            str = (XBYTE *)XNewPtr(metaTextLength + 1);
+            str = (unsigned char *)XNewPtr(metaTextLength + 1);
             if (str)
             {
                 XBlockMove(pMetaText, str + 1, metaTextLength);
-                str[0] = (XBYTE)metaTextLength;
-                tnArray = (XBYTE **)pSong->metaEventCallbackReference;
+                str[0] = (unsigned char)metaTextLength;
+                tnArray = (unsigned char **)pSong->metaEventCallbackReference;
                 tnArray[currentTrack] = str;
             }
         }
@@ -1413,11 +1413,11 @@ void PV_TrackNameCallback(void *threadContext, GM_Song *pSong, char markerType, 
 //  outSong      modified, loaded song
 //  trackNames   array of track names extracted
 #if USE_CREATION_API == TRUE
-OPErr GM_GetSongInstrumentChanges(void *theSongResource, GM_Song **outSong, XBYTE **outTrackNames)
+OPErr GM_GetSongInstrumentChanges(void *theSongResource, GM_Song **outSong, unsigned char **outTrackNames)
 {
     OPErr       err;
     ScanMode    saveScan;
-    XBOOL       saveLoop,saveAlive;
+    bool       saveLoop,saveAlive;
     GM_Song     *theSong;
     void        *newMidiData;
     
@@ -1519,13 +1519,13 @@ OPErr GM_GetSongInstrumentChanges(void *theSongResource, GM_Song **outSong, XBYT
 #endif
 
 // Set the song position in midi ticks
-OPErr GM_SetSongTickPosition(GM_Song *pSong, UINT32 songTickPosition)
+OPErr GM_SetSongTickPosition(GM_Song *pSong, uint32_t songTickPosition)
 {
     GM_Song *theSong;
     OPErr theErr;
-    XBOOL foundPosition;
+    bool foundPosition;
     int32_t count;
-    XBOOL songPaused = FALSE;
+    bool songPaused = FALSE;
 
     if (pSong->seqType != SEQ_MIDI)
     {
@@ -1609,34 +1609,34 @@ OPErr GM_SetSongTickPosition(GM_Song *pSong, UINT32 songTickPosition)
     return theErr;
 }
 
-UINT32 GM_SongTicks(GM_Song *pSong)
+uint32_t GM_SongTicks(GM_Song *pSong)
 {
     if (pSong)
     {
         if (GM_IsSongDone(pSong) == FALSE)
         {
-            return (UINT32)pSong->CurrentMidiClock;
+            return (uint32_t)pSong->CurrentMidiClock;
         }
     }
     return 0L;
 }
 
-UINT32 GM_SongMicroseconds(GM_Song *pSong)
+uint32_t GM_SongMicroseconds(GM_Song *pSong)
 {
     if (pSong)
     {
         if (GM_IsSongDone(pSong) == FALSE)
         {
             // XXX - callers should check for overflow
-            return (UINT32)pSong->songMicroseconds;
+            return (uint32_t)pSong->songMicroseconds;
         }
     }
     return 0L;
 }
 
-UINT32 GM_GetSongMicrosecondLength(GM_Song *pSong, OPErr *pErr)
+uint32_t GM_GetSongMicrosecondLength(GM_Song *pSong, OPErr *pErr)
 {
-    UINT32 ms;
+    uint32_t ms;
 
     ms = 0;
     if (pErr && pSong)
@@ -1644,7 +1644,7 @@ UINT32 GM_GetSongMicrosecondLength(GM_Song *pSong, OPErr *pErr)
         GM_GetSongTickLength(pSong, pErr);
         if (*pErr == NO_ERR)
         {
-            ms = (UINT32)pSong->songMicrosecondLength;
+            ms = (uint32_t)pSong->songMicrosecondLength;
             if (ms == 0xFFFFFFFFL)
             {
                 // we've overflowed,
@@ -1658,13 +1658,13 @@ UINT32 GM_GetSongMicrosecondLength(GM_Song *pSong, OPErr *pErr)
 
 // Set the song position in microseconds
 // $$kk: 08.12.98 merge: changed this method
-OPErr GM_SetSongMicrosecondPosition(GM_Song *pSong, UINT32 songMicrosecondPosition)
+OPErr GM_SetSongMicrosecondPosition(GM_Song *pSong, uint32_t songMicrosecondPosition)
 {
     GM_Song *theSong;
     OPErr theErr;
-    XBOOL foundPosition;
+    bool foundPosition;
     int32_t count;
-    XBOOL songPaused = FALSE;
+    bool songPaused = FALSE;
 
     // $$kk: 02.10.98
     // the way this was, it paused the song, changed the position, and resumed.
@@ -1762,7 +1762,7 @@ OPErr GM_SetSongMicrosecondPosition(GM_Song *pSong, UINT32 songMicrosecondPositi
 //  pInstrumentArray    array, if not NULL will be filled with the instruments that need to be loaded.
 //  pErr                pointer to an OPErr
 #if USE_CREATION_API == TRUE
-INT32 GM_GetUsedPatchlist(void *theExternalSong,
+int32_t GM_GetUsedPatchlist(void *theExternalSong,
                           void *theExternalMidiData,
                           int32_t midiSize,
                           XShortResourceID *pInstrumentArray,
@@ -1817,7 +1817,7 @@ void GM_SetVelocityCurveType(GM_Song *pSong, VelocityCurveType velocityCurveType
     }
 }
 
-OPErr GM_SetDisposeSongDataWhenDoneFlag(GM_Song *pSong, XBOOL disposeData)
+OPErr GM_SetDisposeSongDataWhenDoneFlag(GM_Song *pSong, bool disposeData)
 {
     OPErr theErr;
 
@@ -1833,7 +1833,7 @@ OPErr GM_SetDisposeSongDataWhenDoneFlag(GM_Song *pSong, XBOOL disposeData)
     return theErr;
 }
 
-OPErr GM_GetDisposeSongDataWhenDoneFlag(GM_Song *pSong, XBOOL *outDisposeData)
+OPErr GM_GetDisposeSongDataWhenDoneFlag(GM_Song *pSong, bool *outDisposeData)
 {
     OPErr theErr;
 
@@ -1856,7 +1856,7 @@ OPErr GM_GetDisposeSongDataWhenDoneFlag(GM_Song *pSong, XBOOL *outDisposeData)
     return theErr;
 }
 
-OPErr GM_GetSongVoices(GM_Song *pSong, INT16 *pMaxSongVoices, INT16 *pMixLevel, INT16 *pMaxEffectVoices)
+OPErr GM_GetSongVoices(GM_Song *pSong, int16_t *pMaxSongVoices, int16_t *pMixLevel, int16_t *pMaxEffectVoices)
 {
     OPErr theErr;
 
@@ -1881,7 +1881,7 @@ OPErr GM_GetSongVoices(GM_Song *pSong, INT16 *pMaxSongVoices, INT16 *pMixLevel, 
     return theErr;
 }
 
-OPErr GM_ChangeSongVoices(GM_Song *pSong, INT16 maxSongVoices, INT16 mixLevel, INT16 maxEffectVoices)
+OPErr GM_ChangeSongVoices(GM_Song *pSong, int16_t maxSongVoices, int16_t mixLevel, int16_t maxEffectVoices)
 {
     OPErr theErr;
 
@@ -1910,7 +1910,7 @@ OPErr GM_ChangeSongVoices(GM_Song *pSong, INT16 maxSongVoices, INT16 mixLevel, I
     return theErr;
 }
 
-OPErr GM_GetProgramBank(GM_Song *pSong, XSWORD channel, XSWORD *outProgram, XSWORD *outBank, XBOOL useRawBank)
+OPErr GM_GetProgramBank(GM_Song *pSong, int16_t channel, int16_t *outProgram, int16_t *outBank, bool useRawBank)
 {
     OPErr err;
 

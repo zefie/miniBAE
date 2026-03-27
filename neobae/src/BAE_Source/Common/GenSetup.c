@@ -77,7 +77,7 @@
 **  7/31/96     Fixed PV_ChangeSustainedNotes to do pedal changes as 127=on,
 **              anything else as off
 **  10/11/96    Added GM_BeginSampleFromInfo
-**  10/23/96    Removed reference to BYTE and changed them all to UBYTE or SBYTE
+**  10/23/96    Removed reference to BYTE and changed them all to unsigned char or signed char
 **  11/3/96     Fixed a bug in GM_BeginDoubleBuffer. Changed currentPosition to
 **              currentLevel
 **              Changed the way the expression controller calculates extra volume,
@@ -141,7 +141,7 @@
 **  1/20/98     Modified SetChannelVolume to allow for zero volume levels without killing
 **              note
 **  2/3/98      Added GM_SetupReverb & GM_CleanupReverb
-**  2/8/98      Changed BOOL_FLAG to XBOOL
+**  2/8/98      Changed BOOL_FLAG to bool
 **  2/10/98     kcr     initialize new effect types (new reverb, chorus, etc.)
 **  2/11/98     Added support for Q_48K & Q_24K & Q_8K & Q_22K_TERP_44K & Q_11K_TERP_22K
 **              Fixed bug in GM_ChangeAudioModes that changed the verb mode
@@ -226,7 +226,7 @@
 #include <stdint.h>
 
 // Add rates here, to allow use
-static XBOOL PV_ValidateRate(Rate theRate)
+static bool PV_ValidateRate(Rate theRate)
 {
     // Accept explicit supported positive rates in the enum inclusively (>= 7K, <= 48K)
     // and allow the two special interpolated negative "TERP" rates.
@@ -312,7 +312,7 @@ OPErr GM_ResumeGeneralSound(void *threadContext)
     return theErr;
 }
 
-OPErr GM_IsGeneralSoundPaused(XBOOL *outIsPaused)
+OPErr GM_IsGeneralSoundPaused(bool *outIsPaused)
 {
     OPErr   theErr;
 
@@ -335,7 +335,7 @@ OPErr GM_IsGeneralSoundPaused(XBOOL *outIsPaused)
     return theErr;
 }
 
-void GM_GetSystemVoices(INT16 *pMaxSongVoices, INT16 *pMixLevel, INT16 *pMaxEffectVoices)
+void GM_GetSystemVoices(int16_t *pMaxSongVoices, int16_t *pMixLevel, int16_t *pMaxEffectVoices)
 {
     if (MusicGlobals && pMaxSongVoices && pMixLevel && pMaxEffectVoices)
     {
@@ -345,10 +345,10 @@ void GM_GetSystemVoices(INT16 *pMaxSongVoices, INT16 *pMixLevel, INT16 *pMaxEffe
     }
 }
 
-OPErr GM_ChangeSystemVoices(INT16 maxSongVoices, INT16 mixLevel, INT16 maxEffectVoices)
+OPErr GM_ChangeSystemVoices(int16_t maxSongVoices, int16_t mixLevel, int16_t maxEffectVoices)
 {
     OPErr   theErr;
-    XBOOL   change;
+    bool   change;
 
     theErr = NO_ERR;
     if (MusicGlobals)
@@ -394,11 +394,11 @@ OPErr GM_ChangeSystemVoices(INT16 maxSongVoices, INT16 mixLevel, INT16 maxEffect
 }
 
 // Set the master volume, and recalculate all volumes. Scale is 0 to MAX_MASTER_VOLUME
-void GM_SetMasterVolume(INT32 theVolume)
+void GM_SetMasterVolume(int32_t theVolume)
 {
     if (MusicGlobals)
     {
-        MusicGlobals->MasterVolume = (INT16)theVolume;
+        MusicGlobals->MasterVolume = (int16_t)theVolume;
         PV_CalcScaleBack();
 
 #if USE_STREAM_API
@@ -424,7 +424,7 @@ void GM_SetMasterVolume(INT32 theVolume)
     }
 }
 
-INT32 GM_GetMasterVolume(void)
+int32_t GM_GetMasterVolume(void)
 {
     if (MusicGlobals)
     {
@@ -436,7 +436,7 @@ INT32 GM_GetMasterVolume(void)
     }
 }
 
-void GM_SetGlobalVolume(INT32 theVolume)
+void GM_SetGlobalVolume(int32_t theVolume)
 {
     if (MusicGlobals)
     {
@@ -444,11 +444,11 @@ void GM_SetGlobalVolume(INT32 theVolume)
             theVolume = 0;
         if (theVolume > MAX_MASTER_VOLUME)
             theVolume = MAX_MASTER_VOLUME;
-        MusicGlobals->globalVolume = (INT16)theVolume;
+        MusicGlobals->globalVolume = (int16_t)theVolume;
     }
 }
 
-INT32 GM_GetGlobalVolume(void)
+int32_t GM_GetGlobalVolume(void)
 {
     if (MusicGlobals)
     {
@@ -535,10 +535,10 @@ struct GM_Mixer * GM_GetCurrentMixer(void)
 //
 // This allocates MusicGlobals, which is the common GM_Mixer structure.
 OPErr GM_InitGeneralSound(void *threadContext, Rate theRate, TerpMode theTerp, AudioModifiers theMods,
-                INT16 maxVoices, INT16 normVoices, INT16 maxEffects, GM_Mixer **outMixer)
+                int16_t maxVoices, int16_t normVoices, int16_t maxEffects, GM_Mixer **outMixer)
 {
     register GM_Mixer   *pMixer;
-    register INT32      count;
+    register int32_t      count;
     OPErr               theErr;
 
     theErr = NO_ERR;
@@ -754,7 +754,7 @@ OPErr GM_ChangeAudioModes(void *threadContext,
     ReverbMode          verb = REVERB_TYPE_1;
 #endif
     // $$kk: 01.26.98: added this var reacquireDevice 
-    XBOOL           reacquireDevice = FALSE;
+    bool           reacquireDevice = FALSE;
 
     theErr = NO_ERR;
     pMixer = MusicGlobals;
@@ -847,8 +847,8 @@ OPErr GM_ChangeAudioModes(void *threadContext,
             // sample position
             if (pMixer->interpolationMode != theTerp)
             {
-                INT32   count;
-                UINT32  pos;
+                int32_t   count;
+                uint32_t  pos;
 
                 for (count = 0; count < (pMixer->MaxNotes+pMixer->MaxEffects); count++)
                 {
@@ -908,9 +908,9 @@ void GM_FinisGeneralSound(void *threadContext, GM_Mixer *mixer)
     BAE_Cleanup();
 }
 
-UINT32 PV_ScaleVolumeFromChannelAndSong(GM_Song *pSong, INT16 channel, UINT32 volume)
+uint32_t PV_ScaleVolumeFromChannelAndSong(GM_Song *pSong, int16_t channel, uint32_t volume)
 {
-    register UINT32     newVolume;
+    register uint32_t     newVolume;
 
     // scale song volume based upon master song volume, only if a song channel
     if (channel != SOUND_EFFECT_CHANNEL)
@@ -921,14 +921,14 @@ UINT32 PV_ScaleVolumeFromChannelAndSong(GM_Song *pSong, INT16 channel, UINT32 vo
             {
                 // for now, let's just scale up the volume level of the channel
                 // Say 127 is 10.2% higher
-                volume = (volume * (UINT32)pSong->channelExpression[channel]) / (MAX_NOTE_VOLUME - 12);
+                volume = (volume * (uint32_t)pSong->channelExpression[channel]) / (MAX_NOTE_VOLUME - 12);
             }
 
             // scale note velocity via current channel volume
-            newVolume = (volume * (UINT32)pSong->channelVolume[channel]) / MAX_NOTE_VOLUME;
+            newVolume = (volume * (uint32_t)pSong->channelVolume[channel]) / MAX_NOTE_VOLUME;
 
             // scale note velocity via current song volume
-            newVolume = (newVolume * (UINT32)pSong->songVolume) / MAX_SONG_VOLUME;
+            newVolume = (newVolume * (uint32_t)pSong->songVolume) / MAX_SONG_VOLUME;
         }
         else
         {
@@ -938,7 +938,7 @@ UINT32 PV_ScaleVolumeFromChannelAndSong(GM_Song *pSong, INT16 channel, UINT32 vo
     else
     {
         // scale note velocity via current master effects volume
-        newVolume = (volume * (UINT32)MusicGlobals->effectsVolume) / MAX_MASTER_VOLUME;
+        newVolume = (volume * (uint32_t)MusicGlobals->effectsVolume) / MAX_MASTER_VOLUME;
     }
     if (newVolume > MAX_NOTE_VOLUME * 8)
     {
@@ -951,7 +951,7 @@ UINT32 PV_ScaleVolumeFromChannelAndSong(GM_Song *pSong, INT16 channel, UINT32 vo
 // ------------------------------------------------------------------------------------------------------//
 
 /*
-static const UBYTE stereoPanRamp[] =
+static const unsigned char stereoPanRamp[] =
 {
 0, 1, 1, 2, 2, 3, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13,
 14, 14, 15, 15, 16, 16, 17, 17, 18, 19, 19, 20, 20, 21, 22, 22, 23, 23, 24, 25, 25, 26, 27, 27,
@@ -978,9 +978,9 @@ static const int16_t newStereoPanRamp[] =
 3810, 3826, 3842, 3866, 3882, 3897, 3913, 3929, 3945, 3961, 3977, 3992, 4008, 
 4016, 4032, 4040, 4056, 4064, 
 }; 
-static void PV_RemapMidiPan(INT32 stereoPosition, UINT32 *pLeft, UINT32 *pRight)
+static void PV_RemapMidiPan(int32_t stereoPosition, uint32_t *pLeft, uint32_t *pRight)
 {
-    UINT32  left, right;
+    uint32_t  left, right;
 
     stereoPosition >>= 1;
     left = newStereoPanRamp[63 - stereoPosition] / 16;
@@ -991,7 +991,7 @@ static void PV_RemapMidiPan(INT32 stereoPosition, UINT32 *pLeft, UINT32 *pRight)
 #endif
 
 #if USE_DLS
-static const UBYTE stereoPanRamp[] = 
+static const unsigned char stereoPanRamp[] = 
 {
 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 6, 6,
 6, 6, 7, 7, 7, 7, 8, 8, 8, 8, 9, 9, 9, 10, 10, 10, 11, 11, 11, 11, 12, 12,
@@ -1001,9 +1001,9 @@ static const UBYTE stereoPanRamp[] =
 46, 47, 49, 50, 51, 53, 54, 56, 58, 60, 62, 64, 67, 70, 73, 76, 80, 85, 91,
 98, 109, 127
 };
-static void PV_RemapMidiPan(INT32 stereoPosition, UINT32 *pLeft, UINT32 *pRight)
+static void PV_RemapMidiPan(int32_t stereoPosition, uint32_t *pLeft, uint32_t *pRight)
 {
-    UINT32  left, right;
+    uint32_t  left, right;
 
     stereoPosition >>= 1;
     left = stereoPanRamp[63 - stereoPosition] * 5;
@@ -1013,9 +1013,9 @@ static void PV_RemapMidiPan(INT32 stereoPosition, UINT32 *pLeft, UINT32 *pRight)
 }
 #endif
 #if USE_DLS == 0 && USE_GS_RAMP == 0
-static void PV_RemapMidiPan(INT32 stereoPosition, UINT32 *pLeft, UINT32 *pRight)
+static void PV_RemapMidiPan(int32_t stereoPosition, uint32_t *pLeft, uint32_t *pRight)
 {
-    UINT32  left, right;
+    uint32_t  left, right;
 
     if (stereoPosition)
     {
@@ -1042,31 +1042,31 @@ static void PV_RemapMidiPan(INT32 stereoPosition, UINT32 *pLeft, UINT32 *pRight)
 }
 #endif
 
-void PV_CalculateMonoVolume(GM_Voice *pVoice, INT32 *pVolume)
+void PV_CalculateMonoVolume(GM_Voice *pVoice, int32_t *pVolume)
 {
-    UINT32  noteVolume;
+    uint32_t  noteVolume;
     int32_t    channels[2];
 
     // scale new volume based up channel volume, song volume, and current note volume
 //  noteVolume = PV_ScaleVolumeFromChannelAndSong(pVoice->pSong, pVoice->NoteChannel, pVoice->NoteVolume);
     noteVolume = pVoice->NoteVolume;
-    noteVolume = (noteVolume * (UINT32)pVoice->NoteVolumeEnvelope) >> VOLUME_PRECISION_SCALAR;
+    noteVolume = (noteVolume * (uint32_t)pVoice->NoteVolumeEnvelope) >> VOLUME_PRECISION_SCALAR;
 
     channels[0] = (int32_t)noteVolume;
     channels[1] = (int32_t)noteVolume;
 
     // with the voice route bus, modify the left and right channel volume
     BAE_ProcessRouteBus(pVoice->routeBus, channels, 2);
-    noteVolume = (UINT32)channels[0];
+    noteVolume = (uint32_t)channels[0];
     *pVolume = noteVolume;
 }
 
 // Given a stereo position from -63 to 63, return a volume level
-void PV_CalculateStereoVolume(GM_Voice *pVoice, INT32 *pLeft, INT32 *pRight)
+void PV_CalculateStereoVolume(GM_Voice *pVoice, int32_t *pLeft, int32_t *pRight)
 {
-    INT32   stereoPosition;
-    UINT32  left, right;
-    UINT32  noteVolume;
+    int32_t   stereoPosition;
+    uint32_t  left, right;
+    uint32_t  noteVolume;
     int32_t    channels[2];
 
     stereoPosition = pVoice->stereoPosition + pVoice->stereoPanBend;
@@ -1119,7 +1119,7 @@ void PV_CalculateStereoVolume(GM_Voice *pVoice, INT32 *pLeft, INT32 *pRight)
     // scale new volume based up channel volume, song volume, and current note volume
 //  noteVolume = PV_ScaleVolumeFromChannelAndSong(pVoice->pSong, pVoice->NoteChannel, pVoice->NoteVolume);
     noteVolume = pVoice->NoteVolume;
-    noteVolume = (noteVolume * (UINT32)pVoice->NoteVolumeEnvelope) >> VOLUME_PRECISION_SCALAR;
+    noteVolume = (noteVolume * (uint32_t)pVoice->NoteVolumeEnvelope) >> VOLUME_PRECISION_SCALAR;
 
     left = (left * noteVolume) / MAX_NOTE_VOLUME;
     right = (right * noteVolume) / MAX_NOTE_VOLUME;
@@ -1139,15 +1139,15 @@ void PV_CalculateStereoVolume(GM_Voice *pVoice, INT32 *pLeft, INT32 *pRight)
 
     // with the voice route bus, modify the left and right channel volume
     BAE_ProcessRouteBus(pVoice->routeBus, channels, 2);
-    *pLeft = (UINT32)channels[0];
-    *pRight = (UINT32)channels[1];
+    *pLeft = (uint32_t)channels[0];
+    *pRight = (uint32_t)channels[1];
 }
 
 
-void SetChannelVolume(GM_Song *pSong, INT16 the_channel, INT16 newVolume)
+void SetChannelVolume(GM_Song *pSong, int16_t the_channel, int16_t newVolume)
 {
     register GM_Mixer       *pMixer;
-    register LOOPCOUNT      count;
+    register int32_t      count;
     register GM_Voice       *theNote;
 
     pMixer = MusicGlobals;
@@ -1173,9 +1173,9 @@ void SetChannelVolume(GM_Song *pSong, INT16 the_channel, INT16 newVolume)
 #endif
                 // now calculate the new volume based upon the current channel volume and
                 // the unscaled note volume
-                newVolume = (INT16)PV_ScaleVolumeFromChannelAndSong(theNote->pSong, the_channel, theNote->NoteMIDIVolume);
+                newVolume = (int16_t)PV_ScaleVolumeFromChannelAndSong(theNote->pSong, the_channel, theNote->NoteMIDIVolume);
                 //CLS:  Do we not want to use a 32-bit intermediate value here?
-                newVolume = (INT16)((newVolume * pMixer->scaleBackAmount) >> 8);
+                newVolume = (int16_t)((newVolume * pMixer->scaleBackAmount) >> 8);
                 if (newVolume > MAX_NOTE_VOLUME * 8) {
                     newVolume = MAX_NOTE_VOLUME * 8;
                 }
@@ -1187,10 +1187,10 @@ void SetChannelVolume(GM_Song *pSong, INT16 the_channel, INT16 newVolume)
 
 
 // Put all notes that have been in 'SUS_ON_NOTE' mode into their normal decay release mode
-void PV_ChangeSustainedNotes(GM_Song *pSong, INT16 the_channel, INT16 data)
+void PV_ChangeSustainedNotes(GM_Song *pSong, int16_t the_channel, int16_t data)
 {
     register GM_Mixer       *pMixer;
-    register LOOPCOUNT      count;
+    register int32_t      count;
     register GM_Voice       *theNote;
 
     pMixer = MusicGlobals;
@@ -1224,12 +1224,12 @@ void PV_ChangeSustainedNotes(GM_Song *pSong, INT16 the_channel, INT16 data)
 }
 
 // Set stereo position from control values of 0-127. This will translate into values of 63 to -63
-INT16 SetChannelStereoPosition(GM_Song *pSong, INT16 the_channel, UINT16 newPosition)
+int16_t SetChannelStereoPosition(GM_Song *pSong, int16_t the_channel, uint16_t newPosition)
 {
     register GM_Mixer       *pMixer;
-    register LOOPCOUNT      count;
+    register int32_t      count;
     register GM_Voice * theNote;
-    register INT16          newLogPosition;
+    register int16_t          newLogPosition;
     static char stereoScale[] =
     {
         63, 58, 55, 52, 50, 47, 45, 43,     41, 39, 37, 35, 33, 32, 30, 29,
@@ -1263,10 +1263,10 @@ INT16 SetChannelStereoPosition(GM_Song *pSong, INT16 the_channel, UINT16 newPosi
 }
 
 // Set mod wheel position from control values of 0-127.
-void SetChannelModWheel(GM_Song *pSong, INT16 the_channel, UINT16 value)
+void SetChannelModWheel(GM_Song *pSong, int16_t the_channel, uint16_t value)
 {
     register GM_Mixer       *pMixer;
-    register LOOPCOUNT      count;
+    register int32_t      count;
     register GM_Voice       *theNote;
 
     pMixer = MusicGlobals;
@@ -1287,9 +1287,9 @@ void SetChannelModWheel(GM_Song *pSong, INT16 the_channel, UINT16 value)
 
 
 // Change pitch all notes playing on this channel, and for new notes on this channel
-INT16 SetChannelPitchBend(GM_Song *pSong, INT16 the_channel, UBYTE bendRange, UBYTE bendMSB, UBYTE bendLSB)
+int16_t SetChannelPitchBend(GM_Song *pSong, int16_t the_channel, unsigned char bendRange, unsigned char bendMSB, unsigned char bendLSB)
 {
-    register LOOPCOUNT      count;
+    register int32_t      count;
     register GM_Mixer       *pMixer;
     register int32_t           bendAmount, the_pitch_bend;
     register GM_Voice       *pNote;
@@ -1310,17 +1310,17 @@ INT16 SetChannelPitchBend(GM_Song *pSong, INT16 the_channel, UBYTE bendRange, UB
         {
             if (pNote->NoteChannel == the_channel)
             {
-                pNote->NotePitchBend = (INT16)the_pitch_bend;
+                pNote->NotePitchBend = (int16_t)the_pitch_bend;
             }
         }
     }
-    return (INT16)the_pitch_bend;
+    return (int16_t)the_pitch_bend;
 }
 
 
 
 
-UINT32 GM_GetSamplesPlayed(void) 
+uint32_t GM_GetSamplesPlayed(void) 
 {
     if (MusicGlobals)
     {
@@ -1377,7 +1377,7 @@ GM_AudioOutputCallbackPtr GM_GetAudioOutput(void)
 // Return FALSE if failure, otherwise TRUE
 
 #ifdef BAE_COMPLETE
-XBOOL GM_StartHardwareSoundManager(void *threadContext)
+bool GM_StartHardwareSoundManager(void *threadContext)
 {
     int32_t    sampleRate;
     int     ok;
@@ -1409,7 +1409,7 @@ void GM_StopHardwareSoundManager(void *threadContext)
     // down the device, we want to move it to represent everything submitted.  if the
     // device has been opened and closed before, the device-end-position is different
     // than MusicGlobals->samplesWritten.
-    static UINT32 lastSamplesWritten = 0;
+    static uint32_t lastSamplesWritten = 0;
 
     // everything that's going to play has been played; samples played by mixer
     // should equal samples submitted.  if we don't synch these here, our count
@@ -1430,18 +1430,18 @@ void GM_StopHardwareSoundManager(void *threadContext)
 // audio device.  it never decreases.
 // $$kk: this and all the time stamp methods should move into a common file
 // CLS:  copied this function in from Kara's
-UINT32 GM_GetDeviceTimeStamp(void)
+uint32_t GM_GetDeviceTimeStamp(void)
 {
-    UINT16  sampleRate;
+    uint16_t  sampleRate;
 
     if (MusicGlobals)
     {
         // convert from samples into microseconds
-        sampleRate = (UINT16)GM_ConvertFromOutputRateToRate(MusicGlobals->outputRate);
+        sampleRate = (uint16_t)GM_ConvertFromOutputRateToRate(MusicGlobals->outputRate);
 #if USE_FLOAT == FALSE
         return (MusicGlobals->samplesPlayed * 1000000) / sampleRate;
 #else
-        return (UINT32)(((float) MusicGlobals->samplesPlayed / sampleRate) * 1000000);
+        return (uint32_t)(((float) MusicGlobals->samplesPlayed / sampleRate) * 1000000);
 #endif
     }
     return 0L;
@@ -1513,9 +1513,9 @@ void GM_GetDeviceName(int32_t deviceID, char *cName, uint32_t cNameLength)
 }
 
 // Get current audio time stamp based upon the audio built interrupt
-UINT32 GM_GetSyncTimeStamp(void)
+uint32_t GM_GetSyncTimeStamp(void)
 {
-    UINT32  ticks;
+    uint32_t  ticks;
 
     ticks = 0L;
     if (MusicGlobals)
@@ -1532,12 +1532,12 @@ int32_t GM_GetAudioBufferOutputSize(void)
 
 // Get current audio time stamp based upon the audio built interrupt, but ahead in time and quantized for
 // the particular OS
-UINT32 GM_GetSyncTimeStampQuantizedAhead(void)
+uint32_t GM_GetSyncTimeStampQuantizedAhead(void)
 {
     return GM_GetSyncTimeStamp() + (BAE_GetSliceTimeInMicroseconds() * BAE_GetAudioBufferCount());
 }
 
-OPErr GM_Generate16bitOutP(XBOOL *outGenerate16)
+OPErr GM_Generate16bitOutP(bool *outGenerate16)
 {
     OPErr theErr;
 
@@ -1560,7 +1560,7 @@ OPErr GM_Generate16bitOutP(XBOOL *outGenerate16)
     return theErr;
 }
 
-OPErr GM_GenerateStereoOutP(XBOOL *outGenerateStereo)
+OPErr GM_GenerateStereoOutP(bool *outGenerateStereo)
 {
     OPErr theErr;
 

@@ -106,7 +106,7 @@ static uint32_t g_mp3rec_sample_rate = 0;
 static uint32_t g_mp3rec_bits = 0;
 static uint32_t g_mp3rec_bitrate = 0; // total bits/sec
 
-static XBOOL pcm_wav_write_header_local(FILE *f, uint32_t channels, uint32_t sample_rate, uint32_t bits, uint64_t data_bytes)
+static bool pcm_wav_write_header_local(FILE *f, uint32_t channels, uint32_t sample_rate, uint32_t bits, uint64_t data_bytes)
 {
     if (!f)
         return FALSE;
@@ -816,8 +816,8 @@ uint32_t BAE_GetFilePosition(intptr_t ref)
     if (p < 0)
         return 0;
     // Ensure we don't overflow uint32_t on 64-bit systems
-    if (p > UINT32_MAX)
-        return UINT32_MAX;
+    if (p > uint32_t_MAX)
+        return uint32_t_MAX;
     return (uint32_t)p;
 }
 uint32_t BAE_GetFileLength(intptr_t ref)
@@ -834,8 +834,8 @@ uint32_t BAE_GetFileLength(intptr_t ref)
     if (end < 0)
         return 0;
     // Ensure we don't overflow uint32_t on 64-bit systems
-    if (end > UINT32_MAX)
-        return UINT32_MAX;
+    if (end > uint32_t_MAX)
+        return uint32_t_MAX;
     return (uint32_t)end;
 }
 int BAE_SetFileLength(intptr_t ref, uint32_t newSize)
@@ -1127,7 +1127,7 @@ void BAE_PrintHexDump(void *address, int32_t length)
 #include "XMPEG_BAE_API.h"
 
 // Refill callback to pull PCM frames from ring buffer for encoder thread
-static XBOOL MP3Refill_FromRing(void *buffer, void *userRef)
+static bool MP3Refill_FromRing(void *buffer, void *userRef)
 {
     if (!buffer || !userRef)
         return FALSE;
@@ -1193,7 +1193,7 @@ static int MP3EncoderThread(void *userdata)
     {
         XPTR bitbuf = NULL;
         uint32_t bitsz = 0;
-        XBOOL last = FALSE;
+        bool last = FALSE;
         (void)MPG_EncodeProcess(s->enc, &bitbuf, &bitsz, &last);
         if (bitsz > 0 && bitbuf)
         {

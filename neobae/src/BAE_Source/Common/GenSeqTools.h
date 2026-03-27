@@ -74,12 +74,12 @@
     extern "C" {
 #endif
 
-XWORD       XGetShortWordAligned(XWORD *pData, int32_t byteOffset);
-XDWORD      XGetLongWordAligned(XWORD *pData, int32_t byteOffset);
-XWORD       XGetCharWordAligned(XWORD *pData, int32_t byteOffset);
+uint16_t       XGetShortWordAligned(uint16_t *pData, int32_t byteOffset);
+uint32_t      XGetLongWordAligned(uint16_t *pData, int32_t byteOffset);
+uint16_t       XGetCharWordAligned(uint16_t *pData, int32_t byteOffset);
 
-int16_t   XLStrnCmpWordAligned(const char* s1, XWORD *s2, int32_t byteOffset, int32_t n);
-int32_t        XStrnToLongWordAligned(XWORD* pData, int32_t byteOffset, int32_t length);
+int16_t   XLStrnCmpWordAligned(const char* s1, uint16_t *s2, int32_t byteOffset, int32_t n);
+int32_t        XStrnToLongWordAligned(uint16_t* pData, int32_t byteOffset, int32_t length);
 
 #ifdef __cplusplus
     }

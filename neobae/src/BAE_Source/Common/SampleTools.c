@@ -185,10 +185,10 @@
 // NOTE: This samples parameter is not guarenteed to be word aligned.
 void XSwapShorts(int16_t* shortArray, int32_t count)
 {
-UBYTE*          byteArray;
-UBYTE           data;
+unsigned char*          byteArray;
+unsigned char           data;
 
-    byteArray = (UBYTE*)shortArray;
+    byteArray = (unsigned char*)shortArray;
     while (--count >= 0)
     {
         data = byteArray[0];
@@ -268,7 +268,7 @@ static void * PV_GetSoundHeaderPtr(XPTR pRes, int16_t  *pEncode)
     return pSndBuffer;
 }
 
-static XBOOL PV_ShouldUseSamplePtrOffsetFix(void)
+static bool PV_ShouldUseSamplePtrOffsetFix(void)
 {
     XFILE fileRef;
     XFILERESOURCEMAP map;
@@ -344,7 +344,7 @@ void XSetSoundLoopPoints(XPTR pRes, int32_t loopStart, int32_t loopEnd)
     }
 }
 
-void XSetSoundEmbeddedStatus(XPTR pRes, XBOOL soundEmbedded)
+void XSetSoundEmbeddedStatus(XPTR pRes, bool soundEmbedded)
 {
     register XSoundHeader       *pSndBuffer;
     register XCmpSoundHeader    *pCmpBuffer;
@@ -378,14 +378,14 @@ void XSetSoundEmbeddedStatus(XPTR pRes, XBOOL soundEmbedded)
     }
 }
 
-XBOOL XGetSoundEmbeddedStatus(XPTR pRes)
+bool XGetSoundEmbeddedStatus(XPTR pRes)
 {
     register XSoundHeader       *pSndBuffer;
     register XCmpSoundHeader    *pCmpBuffer;
     register XExtSoundHeader    *pExtBuffer;
     register XSoundHeader3      *pType3Buffer;
     int16_t                    encode;
-    XBOOL                       soundEmbedded;
+    bool                       soundEmbedded;
 
     soundEmbedded = FALSE;
     pSndBuffer = (XSoundHeader *)PV_GetSoundHeaderPtr(pRes, &encode);
@@ -531,7 +531,7 @@ int16_t  XGetSoundBaseKey(XPTR pRes)
 
 /* Set or clear the XSOUND_OPUS_ROUNDTRIP_RESAMPLE bit in reserved2[0].
  * Only has effect on XType3Header SND resources. */
-void XSetSoundOpusRoundTripFlag(XPTR pRes, XBOOL enabled)
+void XSetSoundOpusRoundTripFlag(XPTR pRes, bool enabled)
 {
     register XSoundHeader3      *pType3Buffer;
     int16_t                    encode;
@@ -551,7 +551,7 @@ void XSetSoundOpusRoundTripFlag(XPTR pRes, XBOOL enabled)
 }
 
 /* Return TRUE if the XSOUND_OPUS_ROUNDTRIP_RESAMPLE bit is set. */
-XBOOL XGetSoundOpusRoundTripFlag(XPTR pRes)
+bool XGetSoundOpusRoundTripFlag(XPTR pRes)
 {
     register XSoundHeader3      *pType3Buffer;
     int16_t                    encode;
@@ -566,7 +566,7 @@ XBOOL XGetSoundOpusRoundTripFlag(XPTR pRes)
 
 /* Set or clear the XSOUND_ADVANCED_INTERPOLATION bit in reserved2[0].
  * Only has effect on XType3Header SND resources. */
-void XSetSoundAdvancedInterpolationFlag(XPTR pRes, XBOOL enabled)
+void XSetSoundAdvancedInterpolationFlag(XPTR pRes, bool enabled)
 {
     int16_t encode;
     register XSoundHeader3      *pType3Buffer;
@@ -590,7 +590,7 @@ void XSetSoundAdvancedInterpolationFlag(XPTR pRes, XBOOL enabled)
 }
 
 /* Return TRUE if the XSOUND_ADVANCED_INTERPOLATION bit is set. */
-XBOOL XGetSoundAdvancedInterpolationFlag(XPTR pRes)
+bool XGetSoundAdvancedInterpolationFlag(XPTR pRes)
 {
     int16_t encode;
     register XSoundHeader3      *pType3Buffer;
@@ -612,12 +612,12 @@ XBOOL XGetSoundAdvancedInterpolationFlag(XPTR pRes)
 //MOE: should probably eliminate "encodedData" and "encodedBytes" and take
 //     these data from "info".  Maybe alter "info" with new data afterwards,
 //     or fill "dstInfo" structure.
-OPErr XDecodeSampleData(GM_Waveform const* src, UINT32 startFrame, GM_Waveform* dst)
+OPErr XDecodeSampleData(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst)
 {
-UINT32          const bytesPerFrame = src->channels * (src->bitSize / 8);
-UINT32          const startByte = startFrame * bytesPerFrame;
-UINT32          const decodingFrames = src->waveFrames + startFrame;
-UINT32          const decodingBytes = decodingFrames * bytesPerFrame;
+uint32_t          const bytesPerFrame = src->channels * (src->bitSize / 8);
+uint32_t          const startByte = startFrame * bytesPerFrame;
+uint32_t          const decodingFrames = src->waveFrames + startFrame;
+uint32_t          const decodingBytes = decodingFrames * bytesPerFrame;
 
     BAE_ASSERT(src);
     BAE_ASSERT(dst);
@@ -647,22 +647,22 @@ UINT32          const decodingBytes = decodingFrames * bytesPerFrame;
             XBlockMove(src->theWaveform, dst->theWaveform, decodingBytes);
             break;
         case C_IMA4 :
-            XExpandAiffIma((XBYTE*)src->theWaveform, AIFF_IMA_BLOCK_BYTES,
+            XExpandAiffIma((unsigned char*)src->theWaveform, AIFF_IMA_BLOCK_BYTES,
                             dst->theWaveform, dst->bitSize,
                             decodingFrames, dst->channels);
             break;
         case C_IMA4_WAV :
-            XExpandWavIma((XBYTE*)src->theWaveform, AIFF_IMA_BLOCK_BYTES,
+            XExpandWavIma((unsigned char*)src->theWaveform, AIFF_IMA_BLOCK_BYTES,
                             dst->theWaveform, dst->bitSize,
                             src->waveSize, dst->channels);
             break;
         case C_ALAW :
-            XExpandALawto16BitLinear((XBYTE*)src->theWaveform,
+            XExpandALawto16BitLinear((unsigned char*)src->theWaveform,
                                         (int16_t*)dst->theWaveform,
                                         decodingFrames, dst->channels);
             break;
         case C_ULAW :
-            XExpandULawto16BitLinear((XBYTE*)src->theWaveform,
+            XExpandULawto16BitLinear((unsigned char*)src->theWaveform,
                                         (int16_t*)dst->theWaveform,
                                         decodingFrames, dst->channels);
             break;
@@ -709,7 +709,7 @@ UINT32          const decodingBytes = decodingFrames * bytesPerFrame;
     void        (*maceFunction)(void *inBuffer, void *outBuffer, uint32_t cnt, 
                                 void * inState, void * outState, 
                                 uint32_t numChannels, uint32_t whichChannel);
-    XDWORD      maceFrames;
+    uint32_t      maceFrames;
     
         maceFunction = (src->compressionType == C_MACE3) ? XExpandMace1to3
                                                          : XExpandMace1to6;
@@ -728,9 +728,9 @@ UINT32          const decodingBytes = decodingFrames * bytesPerFrame;
         else
         {
         XPTR        rightData;
-        XBYTE*      pLeft;
-        XBYTE*      pRight;
-        XDWORD      i;
+        unsigned char*      pLeft;
+        unsigned char*      pRight;
+        uint32_t      i;
         
             rightData = XNewPtr(dst->waveSize / 2);
             if (!rightData)
@@ -743,8 +743,8 @@ UINT32          const decodingBytes = decodingFrames * bytesPerFrame;
             (*maceFunction)(src->theWaveform, dst->theWaveform, maceFrames, NULL, NULL, 2, 1);
             (*maceFunction)(src->theWaveform, rightData, maceFrames, NULL, NULL, 2, 2);
             
-            pLeft = (XBYTE*)dst->theWaveform;
-            pRight = (XBYTE*)rightData;
+            pLeft = (unsigned char*)dst->theWaveform;
+            pRight = (unsigned char*)rightData;
             i = decodingFrames - 1;
             // interleave the data into a stereo sample block
             // must copy backwards!
@@ -768,7 +768,7 @@ UINT32          const decodingBytes = decodingFrames * bytesPerFrame;
     XPTR            resizedData;
 
         BAE_ASSERT(dst->waveSize == decodingBytes - startByte); 
-        XBlockMove((XBYTE*)dst->theWaveform + startByte, dst->theWaveform, dst->waveSize);
+        XBlockMove((unsigned char*)dst->theWaveform + startByte, dst->theWaveform, dst->waveSize);
 
         //MOE: we should really get XResizePtr() working efficiently.
         resizedData = XResizePtr(dst->theWaveform, dst->waveSize);
@@ -787,9 +787,9 @@ UINT32          const decodingBytes = decodingFrames * bytesPerFrame;
 //          -2  badly formatted resource
 //          -3  not supported format type
 #if USE_CREATION_API == TRUE
-XERR XGetSampleInfoFromSnd(XPTR pResource, SampleDataInfo *pOutInfo)
+int32_t XGetSampleInfoFromSnd(XPTR pResource, SampleDataInfo *pOutInfo)
 {
-    XERR                err;
+    int32_t                err;
     XSoundHeader*       header;
     int16_t               headerType;
 
@@ -939,7 +939,7 @@ XERR XGetSampleInfoFromSnd(XPTR pResource, SampleDataInfo *pOutInfo)
                         pOutInfo->bitSize = 16;
 
                         // header's "frameCount" is garbage (was once MPEG block count) recalculate
-                        pOutInfo->frames = (XDWORD)XGetLong(&header3->decodedBytes) / pOutInfo->channels / 2;
+                        pOutInfo->frames = (uint32_t)XGetLong(&header3->decodedBytes) / pOutInfo->channels / 2;
                         break;
             #endif
 #if USE_FLAC_DECODER == TRUE
@@ -1031,12 +1031,12 @@ XPTR XGetSamplePtrFromSnd(XPTR pRes, SampleDataInfo* info)
 XSoundHeader*       header;
 int16_t               headerType;
 XPTR                encodedData;
-UINT32              startFrame;
-XBYTE*              inIntelOrder;
+uint32_t              startFrame;
+unsigned char*              inIntelOrder;
 XPTR                sampleData;
-XBOOL               useSamplePtrOffsetFix;
-XBYTE               order = X_WORD_ORDER;
-XDWORD              roundTripSavedRate;  /* non-zero if XSOUND_OPUS_ROUNDTRIP_RESAMPLE is set */
+bool               useSamplePtrOffsetFix;
+unsigned char               order = X_WORD_ORDER;
+uint32_t              roundTripSavedRate;  /* non-zero if XSOUND_OPUS_ROUNDTRIP_RESAMPLE is set */
 
     roundTripSavedRate = 0;
     inIntelOrder = &order;
@@ -1111,7 +1111,7 @@ XDWORD              roundTripSavedRate;  /* non-zero if XSOUND_OPUS_ROUNDTRIP_RE
         info->loopEnd = XGetLong(&headerExt->loopEnd);
         info->baseKey = headerExt->baseFrequency;
         info->rate = XGetLong(&headerExt->sampleRate);
-        inIntelOrder = (XBYTE*)&headerExt->sampleIsIntelOrder;
+        inIntelOrder = (unsigned char*)&headerExt->sampleIsIntelOrder;
         break;
     }
 
@@ -1232,7 +1232,7 @@ XDWORD              roundTripSavedRate;  /* non-zero if XSOUND_OPUS_ROUNDTRIP_RE
             info->bitSize = 16;
 
             // header's "frameCount" is garbage (was once MPEG block count) recalculate
-            info->frames = (XDWORD)XGetLong(&header3->decodedBytes) / info->channels / 2;
+            info->frames = (uint32_t)XGetLong(&header3->decodedBytes) / info->channels / 2;
             startFrame /= info->channels;           // header3->startFrame counts samples, not frames (for MPEG only)
             break;
 #endif
@@ -1465,8 +1465,8 @@ char                        *pLeft, *pRight;
         case C_MPEG_256:
         case C_MPEG_320:
         {
-        XDWORD      startFrame;
-        XDWORD      encodedBytes;
+        uint32_t      startFrame;
+        uint32_t      encodedBytes;
         OPErr       err;
         
             startFrame = XGetLong(&pType3Buffer->startFrame) / info->channels;
@@ -1583,7 +1583,7 @@ char                        *pLeft, *pRight;
                 decodedData = XNewPtr(info->size);
                 if (decodedData)
                 {
-                    XExpandAiffIma((XBYTE const*)sampleData, AIFF_IMA_BLOCK_BYTES,
+                    XExpandAiffIma((unsigned char const*)sampleData, AIFF_IMA_BLOCK_BYTES,
                                     decodedData, info->bitSize,
                                     info->frames,info->channels);
                 }
@@ -1594,7 +1594,7 @@ char                        *pLeft, *pRight;
                 decodedData = XNewPtr(info->size);
                 if (decodedData)
                 {
-                    XExpandALawto16BitLinear((XBYTE*)sampleData,
+                    XExpandALawto16BitLinear((unsigned char*)sampleData,
                                                 (int16_t  *)decodedData,
                                                 info->frames, info->channels);
                 }
@@ -1605,7 +1605,7 @@ char                        *pLeft, *pRight;
                 decodedData = XNewPtr(info->size);
                 if (decodedData)
                 {
-                    XExpandULawto16BitLinear((XBYTE*)sampleData,
+                    XExpandULawto16BitLinear((unsigned char*)sampleData,
                                                 (int16_t  *)decodedData,
                                                 info->frames, info->channels);
                 }
@@ -1717,11 +1717,11 @@ char                        *pLeft, *pRight;
 #if USE_CREATION_API == TRUE
 // Given a sample ID, this will search through sample types and return a 'C' string
 // of the resource name of the currently open resource files
-XBOOL XGetSampleNameFromID(XLongResourceID sampleSoundID, char *cName)
+bool XGetSampleNameFromID(XLongResourceID sampleSoundID, char *cName)
 {
     static XResourceType    sampleType[] = {ID_CSND, ID_ESND, ID_SND};
     int16_t                count;
-    XBOOL                   bad;
+    bool                   bad;
 
     bad = FALSE;
     if (cName)
@@ -1747,14 +1747,14 @@ XBOOL XGetSampleNameFromID(XLongResourceID sampleSoundID, char *cName)
 
 #if USE_CREATION_API == TRUE
 // given 8 bit data, convert this to 16 bit data
-XWORD * XConvert8BitTo16Bit(XBYTE * p8BitPCMData, uint32_t frames, uint32_t channels)
+uint16_t * XConvert8BitTo16Bit(unsigned char * p8BitPCMData, uint32_t frames, uint32_t channels)
 {
-    XWORD           *newData;
+    uint16_t           *newData;
     uint32_t   count, ccount;
     int16_t        sample;
 
     ccount = frames * channels;
-    newData = (XWORD *)XNewPtr(ccount * sizeof(int16_t));
+    newData = (uint16_t *)XNewPtr(ccount * sizeof(int16_t));
     if (newData)
     {
         for (count = 0; count < ccount; count++)
@@ -1772,16 +1772,16 @@ XWORD * XConvert8BitTo16Bit(XBYTE * p8BitPCMData, uint32_t frames, uint32_t chan
 #endif
 
 // given 16 bit data, convert this to 8 bit data
-XBYTE * XConvert16BitTo8Bit(XWORD * p16BitPCMData, uint32_t frames, uint32_t channels)
+unsigned char * XConvert16BitTo8Bit(uint16_t * p16BitPCMData, uint32_t frames, uint32_t channels)
 {
-    XBYTE           *newData = NULL;
+    unsigned char           *newData = NULL;
     uint32_t   count, ccount;
-    XBYTE           sample;
+    unsigned char           sample;
 
     if (p16BitPCMData)
     {
         ccount = frames * channels;
-        newData = (XBYTE *)XNewPtr(ccount * sizeof(char));
+        newData = (unsigned char *)XNewPtr(ccount * sizeof(char));
         if (newData)
         {
             for (count = 0; count < ccount; count++)
@@ -1833,7 +1833,7 @@ XSoundFormat1*      header;
     }
     else
 */
-    if ((src.compressionType != (XDWORD)C_NONE) && (src.compressionType != (XDWORD)dstCompression))
+    if ((src.compressionType != (uint32_t)C_NONE) && (src.compressionType != (uint32_t)dstCompression))
     {
     GM_Waveform     decoded;
     OPErr           err;
@@ -1888,7 +1888,7 @@ XSoundFormat1*      header;
         {
             // Fix alignment warning by using a properly aligned pointer
             // sampleArea is packed, so we use a union to ensure proper alignment
-            union { XBYTE *bytes; int16_t *samples; } aligned_ptr;
+            union { unsigned char *bytes; int16_t *samples; } aligned_ptr;
             aligned_ptr.bytes = snd->sndBuffer.sampleArea;
             PV_Swap16BitSamplesIfIntel(aligned_ptr.samples,
                                         src.waveFrames * src.channels);
@@ -1900,9 +1900,9 @@ XSoundFormat1*      header;
 
     case C_IMA4:
     {
-    XDWORD          const imaBlocks =
+    uint32_t          const imaBlocks =
                         (src.waveFrames + AIFF_IMA_BLOCK_FRAMES - 1) / AIFF_IMA_BLOCK_FRAMES;
-    XDWORD          const imaBytes =
+    uint32_t          const imaBytes =
                         imaBlocks * src.channels * AIFF_IMA_BLOCK_BYTES;
     XCmpSndHeader1* snd;
 
@@ -1958,8 +1958,8 @@ XSoundFormat1*      header;
     case C_ULAW:
     case C_ALAW:
     {
-    XDWORD          const lawBlocks = src.waveFrames / 2;
-    XDWORD          const lawBytes = lawBlocks * sizeof(int16_t) * src.channels;
+    uint32_t          const lawBlocks = src.waveFrames / 2;
+    uint32_t          const lawBytes = lawBlocks * sizeof(int16_t) * src.channels;
     XCmpSndHeader1  *snd;
 
         if ((src.bitSize != 16) && (src.compressionType == C_NONE))
@@ -1967,7 +1967,7 @@ XSoundFormat1*      header;
         XPTR        wordData;
         
             // convert to 16 bit data first, then compress
-            wordData = XConvert8BitTo16Bit((XBYTE*)src.theWaveform,
+            wordData = XConvert8BitTo16Bit((unsigned char*)src.theWaveform,
                                             src.waveFrames, src.channels);
             XDisposePtr(intermediateData);
             if (!wordData)
@@ -2016,7 +2016,7 @@ XSoundFormat1*      header;
         }
         else
         {
-            BAE_ASSERT(src.compressionType == (XDWORD)dstCompression);
+            BAE_ASSERT(src.compressionType == (uint32_t)dstCompression);
             BAE_ASSERT(src.waveSize <= lawBytes);
             if (src.waveSize > lawBytes) src.waveSize = lawBytes;
             XBlockMove(src.theWaveform, snd->sndBuffer.sampleArea, src.waveSize);
@@ -2043,20 +2043,20 @@ XSoundFormat1*      header;
     case C_MPEG_256:
     case C_MPEG_320:
     {
-    UINT32          decodedBytes;
-    UINT32          startFrame;
-    UINT32          blockBytes;
-    UINT32          blockCount;
-    UINT32          desiredDecodedFrames;
-    UINT32          sourceFramesForDuration;
-    UINT32          sourceRateHzForDuration;
+    uint32_t          decodedBytes;
+    uint32_t          startFrame;
+    uint32_t          blockBytes;
+    uint32_t          blockCount;
+    uint32_t          desiredDecodedFrames;
+    uint32_t          sourceFramesForDuration;
+    uint32_t          sourceRateHzForDuration;
     OPErr           err;
     XSndHeader3*    snd;
 
         if (src.compressionType == C_NONE)
         {
         XPTR            encodedData;
-        UINT32          encodedBytes;
+        uint32_t          encodedBytes;
 
             sourceFramesForDuration = src.waveFrames;
             sourceRateHzForDuration = XFIXED_TO_UNSIGNED_LONG(src.sampledRate);
@@ -2071,7 +2071,7 @@ XSoundFormat1*      header;
             XPTR            wordData;
             
                 // convert to 16 bit data first, then compress
-                wordData = XConvert8BitTo16Bit((XBYTE*)src.theWaveform,
+                wordData = XConvert8BitTo16Bit((unsigned char*)src.theWaveform,
                                                 src.waveFrames, src.channels);
                 XDisposePtr(intermediateData);
                 if (!wordData)
@@ -2102,7 +2102,7 @@ XSoundFormat1*      header;
              * sample rate to the closest legal MPEG value. */
             {
                 XMPEGDecodedData *encodedStream;
-                UINT32 encodedRateHz;
+                uint32_t encodedRateHz;
 
                 encodedStream = XOpenMPEGStreamFromMemory(src.theWaveform, src.waveSize, &err);
                 if (!encodedStream)
@@ -2111,14 +2111,14 @@ XSoundFormat1*      header;
                     return err;
                 }
                 src.sampledRate = encodedStream->sampleRate;
-                src.channels = (XBYTE)encodedStream->channels;
+                src.channels = (unsigned char)encodedStream->channels;
                 src.waveFrames = encodedStream->lengthInSamples;
 
                 encodedRateHz = XFIXED_TO_UNSIGNED_LONG(src.sampledRate);
                 if (encodedRateHz > 0 && sourceRateHzForDuration > 0 &&
                     encodedRateHz != sourceRateHzForDuration)
                 {
-                    desiredDecodedFrames = (UINT32)((((uint64_t)sourceFramesForDuration * (uint64_t)encodedRateHz) +
+                    desiredDecodedFrames = (uint32_t)((((uint64_t)sourceFramesForDuration * (uint64_t)encodedRateHz) +
                                                      ((uint64_t)sourceRateHzForDuration / 2ULL)) /
                                                     (uint64_t)sourceRateHzForDuration);
                     if (desiredDecodedFrames == 0 && sourceFramesForDuration > 0)
@@ -2140,7 +2140,7 @@ XSoundFormat1*      header;
         else
         {
             XMPEGDecodedData*   stream;
-            XBYTE               data[10];
+            unsigned char               data[10];
         
             // we need to check for the ID3 format tag and skip it.
             // see http://www.id3.org/ for details.
@@ -2176,7 +2176,7 @@ XSoundFormat1*      header;
                 return err;
             }
             src.sampledRate = stream->sampleRate;
-            src.channels = (XBYTE)stream->channels;
+            src.channels = (unsigned char)stream->channels;
             src.waveFrames = stream->lengthInSamples;
             blockBytes = stream->frameBufferSize;
             blockCount = stream->maxFrameBuffers + 2;
@@ -2207,8 +2207,8 @@ XSoundFormat1*      header;
         XPutLong(&snd->sndBuffer.decodedBytes, decodedBytes);
         XPutLong(&snd->sndBuffer.loopStart[0], src.startLoop);
         XPutLong(&snd->sndBuffer.loopEnd[0], src.endLoop);
-        snd->sndBuffer.baseKey = (XBYTE)src.baseMidiPitch;
-        snd->sndBuffer.channels = (XBYTE)src.channels;
+        snd->sndBuffer.baseKey = (unsigned char)src.baseMidiPitch;
+        snd->sndBuffer.channels = (unsigned char)src.channels;
         snd->sndBuffer.bitSize = 16;
         XBlockMove(src.theWaveform, snd->sndBuffer.sampleArea, src.waveSize);
 
@@ -2229,7 +2229,7 @@ XSoundFormat1*      header;
         /* Ensure we have raw PCM to encode */
         pcmSrc = src;
         err = NO_ERR;
-        if (pcmSrc.compressionType != (XDWORD)C_NONE)
+        if (pcmSrc.compressionType != (uint32_t)C_NONE)
         {
             /* Should have been decoded above, but handle defensively */
             XDisposePtr(intermediateData);
@@ -2263,9 +2263,9 @@ XSoundFormat1*      header;
         XPutLong(&snd->sndBuffer.startFrame,   0);
         XPutLong(&snd->sndBuffer.loopStart[0], src.startLoop);
         XPutLong(&snd->sndBuffer.loopEnd[0],   src.endLoop);
-        snd->sndBuffer.baseKey    = (XBYTE)src.baseMidiPitch;
-        snd->sndBuffer.channels   = (XBYTE)src.channels;
-        snd->sndBuffer.bitSize    = (XBYTE)src.bitSize;
+        snd->sndBuffer.baseKey    = (unsigned char)src.baseMidiPitch;
+        snd->sndBuffer.channels   = (unsigned char)src.channels;
+        snd->sndBuffer.bitSize    = (unsigned char)src.bitSize;
         snd->sndBuffer.isEmbedded = TRUE;
         XBlockMove(encodedData, snd->sndBuffer.sampleArea, (int32_t)encodedBytes);
         XDisposePtr(encodedData);
@@ -2284,7 +2284,7 @@ XSoundFormat1*      header;
     GM_Waveform pcmSrc;
 
         pcmSrc = src;
-        if (pcmSrc.compressionType != (XDWORD)C_NONE)
+        if (pcmSrc.compressionType != (uint32_t)C_NONE)
         {
             XDisposePtr(intermediateData);
             return PARAM_ERR;
@@ -2330,9 +2330,9 @@ XSoundFormat1*      header;
         XPutLong(&snd->sndBuffer.startFrame,   0);
         XPutLong(&snd->sndBuffer.loopStart[0], src.startLoop);
         XPutLong(&snd->sndBuffer.loopEnd[0],   src.endLoop);
-        snd->sndBuffer.baseKey    = (XBYTE)src.baseMidiPitch;
-        snd->sndBuffer.channels   = (XBYTE)src.channels;
-        snd->sndBuffer.bitSize    = (XBYTE)src.bitSize;
+        snd->sndBuffer.baseKey    = (unsigned char)src.baseMidiPitch;
+        snd->sndBuffer.channels   = (unsigned char)src.channels;
+        snd->sndBuffer.bitSize    = (unsigned char)src.bitSize;
         snd->sndBuffer.isEmbedded = TRUE;
         XBlockMove(encodedData, snd->sndBuffer.sampleArea, (int32_t)encodedBytes);
         XDisposePtr(encodedData);
@@ -2353,7 +2353,7 @@ XSoundFormat1*      header;
     GM_Waveform pcmSrc;
 
         pcmSrc = src;
-        if (pcmSrc.compressionType != (XDWORD)C_NONE)
+        if (pcmSrc.compressionType != (uint32_t)C_NONE)
         {
             XDisposePtr(intermediateData);
             return PARAM_ERR;
@@ -2411,9 +2411,9 @@ XSoundFormat1*      header;
         XPutLong(&snd->sndBuffer.startFrame,   0);
         XPutLong(&snd->sndBuffer.loopStart[0], src.startLoop);
         XPutLong(&snd->sndBuffer.loopEnd[0],   src.endLoop);
-        snd->sndBuffer.baseKey    = (XBYTE)src.baseMidiPitch;
-        snd->sndBuffer.channels   = (XBYTE)src.channels;
-        snd->sndBuffer.bitSize    = (XBYTE)src.bitSize;
+        snd->sndBuffer.baseKey    = (unsigned char)src.baseMidiPitch;
+        snd->sndBuffer.channels   = (unsigned char)src.channels;
+        snd->sndBuffer.bitSize    = (unsigned char)src.bitSize;
         snd->sndBuffer.isEmbedded = TRUE;
         XBlockMove(encodedData, snd->sndBuffer.sampleArea, (int32_t)encodedBytes);
         XDisposePtr(encodedData);
@@ -2553,12 +2553,12 @@ void XTranslateFromSampleDataToWaveform(SampleDataInfo const* pSource, GM_Wavefo
         pDest->waveSize = pSource->size;
         pDest->startLoop = pSource->loopStart;
         pDest->endLoop = pSource->loopEnd;
-        pDest->bitSize = (XBYTE)pSource->bitSize;
-        pDest->channels = (XBYTE)pSource->channels;
-        pDest->baseMidiPitch = (XBYTE)pSource->baseKey;
+        pDest->bitSize = (unsigned char)pSource->bitSize;
+        pDest->channels = (unsigned char)pSource->channels;
+        pDest->baseMidiPitch = (unsigned char)pSource->baseKey;
         pDest->waveformID = pSource->theID;
         pDest->compressionType = pSource->compressionType;
-        pDest->theWaveform = (SBYTE *)pSource->pMasterPtr;
+        pDest->theWaveform = (signed char *)pSource->pMasterPtr;
     }
     else
     {

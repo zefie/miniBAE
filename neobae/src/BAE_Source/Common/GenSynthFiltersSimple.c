@@ -71,7 +71,7 @@
 **              flag is used
 **  12/16/97    Moe: removed compiler warnings
 **  2/3/98      Renamed songBufferLeftMono to songBufferDry
-**  2/8/98      Changed BOOL_FLAG to XBOOL
+**  2/8/98      Changed BOOL_FLAG to bool
 **  2/20/98     now support variable send chorus as well as reverb
 **
 **  6/5/98      Jim Nitchals RIP    1/15/62 - 6/5/98
@@ -133,32 +133,32 @@
 // handle 8 bit voices that are mixed down mono in the partial case in which we can 
 // process a complete slice of data but we check for loop points every 4 samples 
 // with the macro THE_CHECK
-void PV_ServeInterp2FilterPartialBuffer (GM_Voice *this_voice, XBOOL looping)
+void PV_ServeInterp2FilterPartialBuffer (GM_Voice *this_voice, bool looping)
 {
 #if 1
     this_voice;
     looping;
 #else
 // Not required because 8-bit samples are converted to 16-bit upon load.
-    register INT32          *destL;
-    register UBYTE          *source;
+    register int32_t          *destL;
+    register unsigned char          *source;
 #if 1   // MOE'S OBSESSIVE FOLLY
-    register INT32          b, c;
+    register int32_t          b, c;
 #else
-    register UBYTE          b, c;
+    register unsigned char          b, c;
 #endif
     register XFIXED         cur_wave;
     register XFIXED         wave_increment;
     register XFIXED         end_wave, wave_adjust;
-    register INT32          amplitudeL;
-    register INT32          inner;
+    register int32_t          amplitudeL;
+    register int32_t          inner;
 
-    INT32                   amplitudeLincrement;
-    INT32                   ampValueL;
-    INT32                   a;
+    int32_t                   amplitudeLincrement;
+    int32_t                   ampValueL;
+    int32_t                   a;
 
-    register INT16          *z;
-    register INT32          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
+    register int16_t          *z;
+    register int32_t          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
 
 #if REVERB_USED == VARIABLE_REVERB
     if (this_voice->reverbLevel > 1 || this_voice->chorusLevel > 1)
@@ -202,10 +202,10 @@ void PV_ServeInterp2FilterPartialBuffer (GM_Voice *this_voice, XBOOL looping)
         {
             for (inner = 0; inner < 4; inner++)
             {
-                THE_CHECK(UBYTE *);
+                THE_CHECK(unsigned char *);
                 b = source[cur_wave>>STEP_BIT_RANGE];
                 c = source[(cur_wave>>STEP_BIT_RANGE)+1];
-                sample = ((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x80) << 2;
+                sample = ((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x80) << 2;
                 sample = (sample * Xn + Z1value * Z1) >> 16;
                 Z1value = sample - (sample >> 9);   // remove DC bias
                 *destL += sample * amplitudeL;
@@ -224,13 +224,13 @@ void PV_ServeInterp2FilterPartialBuffer (GM_Voice *this_voice, XBOOL looping)
 
             for (inner = 0; inner < 4; inner++)
             {
-                THE_CHECK(UBYTE *);
+                THE_CHECK(unsigned char *);
                 b = source[cur_wave>>STEP_BIT_RANGE];
                 c = source[(cur_wave>>STEP_BIT_RANGE)+1];
-                sample = ((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x80) << 2;
+                sample = ((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x80) << 2;
                 sample = (sample * Xn + Z1value * Z1 + z[zIndex1 & MAXRESONANCE] * Zn) >> 16;
                 zIndex1++;
-                z[zIndex2 & MAXRESONANCE] = (INT16)sample;
+                z[zIndex2 & MAXRESONANCE] = (int16_t)sample;
                 zIndex2++;
                 Z1value = sample - (sample >> 9);
                 *destL += sample * amplitudeL;
@@ -253,7 +253,7 @@ FINISH:
 // handle 8 bit voices that are mixed down stereo in the partial case in which we can 
 // process a complete slice of data but we check for loop points every 4 samples 
 // with the macro THE_CHECK
-void PV_ServeStereoInterp2FilterPartialBuffer (GM_Voice *this_voice, XBOOL looping)
+void PV_ServeStereoInterp2FilterPartialBuffer (GM_Voice *this_voice, bool looping)
 {
     this_voice;
     looping;
@@ -267,24 +267,24 @@ void PV_ServeInterp2FilterFullBuffer(GM_Voice *this_voice)
     this_voice;
 #else
 // Not required because 8-bit samples are converted to 16-bit upon load.
-    register INT32          *destL;
-    register UBYTE          *source;
+    register int32_t          *destL;
+    register unsigned char          *source;
 #if 1   // MOE'S OBSESSIVE FOLLY
-    register INT32          b, c;
+    register int32_t          b, c;
 #else
-    register UBYTE          b, c;
+    register unsigned char          b, c;
 #endif
     register XFIXED         cur_wave;
     register XFIXED         wave_increment;
-    register INT32          amplitudeL;
-    register INT32          inner;
+    register int32_t          amplitudeL;
+    register int32_t          inner;
 
-    INT32                   amplitudeLincrement;
-    INT32                   ampValueL;
-    INT32                   a;
+    int32_t                   amplitudeLincrement;
+    int32_t                   ampValueL;
+    int32_t                   a;
 
-    register INT16          *z;
-    register INT32          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
+    register int16_t          *z;
+    register int32_t          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
 
     // We can't filter stereo samples, so bail on this.
     if (this_voice->channels > 1) 
@@ -326,7 +326,7 @@ void PV_ServeInterp2FilterFullBuffer(GM_Voice *this_voice)
             {
                 b = source[cur_wave>>STEP_BIT_RANGE];
                 c = source[(cur_wave>>STEP_BIT_RANGE)+1];
-                sample = ((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x80) << 2;
+                sample = ((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x80) << 2;
                 sample = (sample * Xn + Z1value * Z1) >> 16;
                 Z1value = sample - (sample >> 9);   // remove DC bias
                 *destL += sample * amplitudeL;
@@ -347,10 +347,10 @@ void PV_ServeInterp2FilterFullBuffer(GM_Voice *this_voice)
             {
                 b = source[cur_wave>>STEP_BIT_RANGE];
                 c = source[(cur_wave>>STEP_BIT_RANGE)+1];
-                sample = ((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x80) << 2;
+                sample = ((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b - 0x80) << 2;
                 sample = (sample * Xn + Z1value * Z1 + z[zIndex1 & MAXRESONANCE] * Zn) >> 16;
                 zIndex1++;
-                z[zIndex2 & MAXRESONANCE] = (INT16)sample;
+                z[zIndex2 & MAXRESONANCE] = (int16_t)sample;
                 zIndex2++;
                 Z1value = sample - (sample >> 9);
                 *destL += sample * amplitudeL;
@@ -393,23 +393,23 @@ void PV_ServeInterp2FilterFullBuffer16 (GM_Voice *this_voice)
 // handle 16 bit voices that are mixed down mono in the partial case in which we can 
 // process a complete slice of data but we check for loop points every 4 samples 
 // with the macro THE_CHECK
-void PV_ServeInterp2FilterPartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
+void PV_ServeInterp2FilterPartialBuffer16 (GM_Voice *this_voice, bool looping)
 {
-    register INT32          *destL;
-    register INT16          *source;
-    register INT16          b, c;
+    register int32_t          *destL;
+    register int16_t          *source;
+    register int16_t          b, c;
     register XFIXED         cur_wave;
     register XFIXED         wave_increment;
     register XFIXED         end_wave, wave_adjust;
-    register INT32          amplitudeL;
-    register INT32          inner;
+    register int32_t          amplitudeL;
+    register int32_t          inner;
 
-    INT32                   amplitudeLincrement;
-    INT32                   ampValueL;
-    INT32                   a;
+    int32_t                   amplitudeLincrement;
+    int32_t                   ampValueL;
+    int32_t                   a;
 
-    register INT16          *z;
-    register INT32          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
+    register int16_t          *z;
+    register int32_t          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
 
 #if WRITE_LOOPS == TRUE
     FILE *file = NULL;
@@ -485,10 +485,10 @@ void PV_ServeInterp2FilterPartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
         {
             for (inner = 0; inner < 4; inner++)
             {
-                THE_CHECK(INT16 *);     // is in the mail
+                THE_CHECK(int16_t *);     // is in the mail
                 b = source[cur_wave>>STEP_BIT_RANGE];
                 c = source[(cur_wave>>STEP_BIT_RANGE)+1];
-                sample = ((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b) >> 6;
+                sample = ((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b) >> 6;
                 sample = (sample * Xn + Z1value * Z1) >> 16;
                 Z1value = sample - (sample >> 9);   // remove DC bias
                 *destL += (sample * amplitudeL) >> 2;
@@ -507,13 +507,13 @@ void PV_ServeInterp2FilterPartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
 
             for (inner = 0; inner < 4; inner++)
             {
-                THE_CHECK(INT16 *);     // is in the mail
+                THE_CHECK(int16_t *);     // is in the mail
                 b = source[cur_wave>>STEP_BIT_RANGE];
                 c = source[(cur_wave>>STEP_BIT_RANGE)+1];
-                sample = ((((INT32) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b) >> 6;
+                sample = ((((int32_t) (cur_wave & STEP_FULL_RANGE) * (c-b))>>STEP_BIT_RANGE) + b) >> 6;
                 sample = (sample * Xn + Z1value * Z1 + z[zIndex1 & MAXRESONANCE] * Zn) >> 16;
                 zIndex1++;
-                z[zIndex2 & MAXRESONANCE] = (INT16)sample;
+                z[zIndex2 & MAXRESONANCE] = (int16_t)sample;
                 zIndex2++;
                 Z1value = sample - (sample >> 9);
                 *destL += (sample * amplitudeL) >> 2;
@@ -551,7 +551,7 @@ void PV_ServeStereoInterp2FilterFullBuffer16 (GM_Voice *this_voice)
 // handle 16 bit voices that are mixed down stereo in the partial case in which we can 
 // process a complete slice of data but we check for loop points every 4 samples 
 // with the macro THE_CHECK
-void PV_ServeStereoInterp2FilterPartialBuffer16 (GM_Voice *this_voice, XBOOL looping)
+void PV_ServeStereoInterp2FilterPartialBuffer16 (GM_Voice *this_voice, bool looping)
 {
     this_voice;
     looping;

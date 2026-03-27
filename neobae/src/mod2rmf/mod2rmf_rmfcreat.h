@@ -9,13 +9,13 @@ typedef struct {
     ModRawSample *rawSamples;
     uint32_t rawSampleCount;
     uint32_t moduleBaseRateHz;
-    XBOOL isMod;
+    bool isMod;
 
     BAERmfEditorDocument *document;
     uint16_t *channelToTrackIndex;
     ChannelMap channelMap;
     Mod2RmfResamplerSettings resamplerSettings;
-    XBOOL forceOriginalSamples;
+    bool forceOriginalSamples;
     uint8_t stereoSeparation;  /* 0=mono (center), 75=default, 100=hard L/R */
 } Mod2RmfConverter;
 
@@ -24,7 +24,7 @@ typedef struct {
 extern "C" {
 #endif
 
-BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char *sourcePath, unsigned char useZmfContainer);
+BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char *sourcePath, bool useZmfContainer);
 
 #ifdef __cplusplus
 }
@@ -55,7 +55,7 @@ int mod2rmf_add_programmed_note(Mod2RmfConverter *conv,
                                unsigned char program);
 
 int mod2rmf_write_song_notes(Mod2RmfConverter *conv, const ModSongModel *song);
-int mod2rmf_setup_instrument_ext(Mod2RmfConverter *conv, const ModSongModel *song, XBOOL useZmfContainer);
+int mod2rmf_setup_instrument_ext(Mod2RmfConverter *conv, const ModSongModel *song, bool useZmfContainer);
 int mod2rmf_setup_tracks(Mod2RmfConverter *conv, const ModSongModel *song, const ChannelMap *chMap);
 void mod2rmf_build_midi_channel_aggregate(const ChannelProfile trackerProfiles[],
                                          const uint8_t trackerToMidi[],

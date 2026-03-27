@@ -133,7 +133,7 @@
 **  10/13/96    Changed QGM_AllNotesOff to work with the queue and post an event
 **              Added GM_ReadIntoMemoryWaveFile & GM_ReadIntoMemoryAIFFFile
 **  10/18/96    Made WaveformInfo smaller
-**  10/23/96    Removed reference to BYTE and changed them all to XBYTE or XSBYTE
+**  10/23/96    Removed reference to BYTE and changed them all to unsigned char or signed char
 **              Added defines for MOD_WHEEL_CONTROL = 'MODW & SAMPLE_NUMBER = 'SAMP'
 **              Added more defines for instrument types
 **  10/28/96    Modified QGM_NoteOn & QGM_NoteOff & QGM_ProgramChange &
@@ -211,7 +211,7 @@
 **              implementing the Song Program List capability
 **              Changed GM_SongMetaCallbackProcPtr and added currenTrack
 **  8/13/97     Renamed GM_GetSongProgramChanges to GM_GetSongInstrumentChanges and changed
-**              Byte reference to XBYTE
+**              Byte reference to unsigned char
 **  8/27/97     Moved GM_StartHardwareSoundManager & GM_StopHardwareSoundManager from
 **              GenPriv.h
 **  9/15/97     Added GM_GetSampleReverb && GM_AudioStreamGetReverb
@@ -221,7 +221,7 @@
 **  10/15/97    Added processingSlice to GM_Song and GM_Instrument to handle threading release issues.
 **  10/16/97    Changed GM_LoadSong parmeters to include an option to ignore bad instruments
 **              when loading.
-**              Changed GM_LoadSongInstruments to use a XBOOL for a flag rather than an int
+**              Changed GM_LoadSongInstruments to use a bool for a flag rather than an int
 **              Added GM_AnyStereoInstrumentsLoaded
 **              Added GM_CacheSamples
 **  11/12/97    Added GM_MaxDevices & GM_SetDeviceID & GM_GetDeviceID & GM_GetDeviceName
@@ -236,7 +236,7 @@
 **  1/29/98     Added new defer parameter to GM_AudioStreamSetVolume
 **  2/2/98      Added GM_SetVelocityCurveType
 **  2/3/98      Added GM_SetupReverb & GM_CleanupReverb
-**  2/8/98      Changed BOOL_FLAG to XBOOL
+**  2/8/98      Changed BOOL_FLAG to bool
 **  2/11/98     Added Q_48K, Q_24K, Q_8K and GM_ConvertFromOutputQualityToRate
 **  2/15/98     Removed songMicrosecondIncrement from the GM_Song structure. Not used
 **  2/23/98     Removed GM_InitReverbTaps & GM_GetReverbTaps & GM_SetReverbTaps
@@ -269,7 +269,7 @@
 **
 **  6/19/98     Added message STREAM_HAVE_DATA to GM_StreamMessage
 **  6/26/98     Added GM_IsReverbFixed
-**  6/30/98     Changed songID from XSWORD to XSDWORD in GM_Song structure
+**  6/30/98     Changed songID from int16_t to int32_t in GM_Song structure
 **  7/1/98      Changed various API to use the new XResourceType and XLongResourceID or XShortResourceID
 **  7/6/98      Added GM_IsSongInstrumentLoaded
 **              Fixed type problems with GM_LoadSong
@@ -330,8 +330,8 @@
 **  6/8/99      Added channelMonoMode in GM_Song
 **  6/15/99     Added GM_EndSongButKeepActive
 **  7/9/99      Modified GM_AudioTaskCallbackPtr to use a reference
-**  7/19/99     Renamed UBYTE to XBYTE. Renamed INT16 to XSWORD. Renamed INT32 to XSDWORD.
-**              Renamed UINT32 to XDWORD. Renamed SBYTE to XSBYTE. Renamed UINT16 to XWORD
+**  7/19/99     Renamed unsigned char to unsigned char. Renamed int16_t to int16_t. Renamed int32_t to int32_t.
+**              Renamed uint32_t to uint32_t. Renamed signed char to signed char. Renamed uint16_t to uint16_t
 **  8/3/99      Added GM_WriteFileFromMemory
 **              Changed pragma settings for X_BE
 **  9/9/99      MOE: Added GM_Waveform.compressionType
@@ -369,7 +369,7 @@
 **  2000.05.16 AER  Completed modifications for new sample cache
 **  2000.05.22 sh   Changed sustainingDecayLevel to XFIXED, which is what it is.
 **                  Added GM_GetSustainDecayLevelInTime & GM_SetSustainDecayLevelInTime
-**  2000.05.24 sh   Added metaLoopDisabled in GM_Song. Added bitfields in various XBOOL's in
+**  2000.05.24 sh   Added metaLoopDisabled in GM_Song. Added bitfields in various bool's in
 **                  GM_Song & GM_Instrument structures.
 **  2000.05.25  sh  Added GM_GetSongMetaLoopFlag & GM_SetSongMetaLoopFlag.
 **  2000.05.28  sh  Added GM_GetCurrentMixer
@@ -388,7 +388,7 @@
 **                  songMicrosecondLength. 0 means not calculated not -1.
 **                  Changed songMidiTickLength & songMicrosecondLength from the GM_Song
 **                  structure to be UFLOAT's. So that we preserve long files. This will
-**                  later fail when we deliver to the client a UINT32, but at least internaly
+**                  later fail when we deliver to the client a uint32_t, but at least internaly
 **                  we're ok.
 **  12/12/2000  sh  Added GM_ResetTempoToDefault
 **  1/2/2001    sh  Happy New Space Odyssey 2001! Added GM_SetSamplePlaybackPosition.
@@ -511,8 +511,8 @@ extern "C"
     typedef struct
     {
         ReverbMode type;
-        XBYTE thresholdEnableValue; // 0 for variable, value to enable fixed
-        XBOOL isFixed;
+        unsigned char thresholdEnableValue; // 0 for variable, value to enable fixed
+        bool isFixed;
         uint32_t globalReverbUsageSize; // GM_Mixer->reverbBuffer size
         GM_ReverbProc pMonoRuntimeProc;
         GM_ReverbProc pStereoRuntimeProc;
@@ -649,16 +649,16 @@ extern "C"
     typedef XLongResourceID XSampleID;
 
     // sample and instrument callbacks
-    typedef XBOOL (*GM_LoopDoneCallbackPtr)(void *context);
-    typedef void (*GM_DoubleBufferCallbackPtr)(void *context, XPTR pWhichBufferFinished, XSDWORD *pBufferSize);
+    typedef bool (*GM_LoopDoneCallbackPtr)(void *context);
+    typedef void (*GM_DoubleBufferCallbackPtr)(void *context, XPTR pWhichBufferFinished, int32_t *pBufferSize);
     typedef void (*GM_SoundDoneCallbackPtr)(void *context);
-    typedef void (*GM_SampleFrameCallbackPtr)(void *threadContext, XSDWORD reference, XSDWORD sampleFrame);
+    typedef void (*GM_SampleFrameCallbackPtr)(void *threadContext, int32_t reference, int32_t sampleFrame);
 
     // sequencer callbacks
     typedef void (*GM_ControlerCallbackPtr)(void *threadContext, struct GM_Song *pSong, void *reference, int16_t channel, int16_t track, int16_t controler, int16_t value);
     typedef void (*GM_SongCallbackProcPtr)(void *threadContext, struct GM_Song *pSong, void *reference);
-    typedef void (*GM_SongTimeCallbackProcPtr)(void *threadContext, struct GM_Song *pSong, XDWORD currentMicroseconds, XDWORD currentMidiClock);
-    typedef void (*GM_SongMetaCallbackProcPtr)(void *threadContext, struct GM_Song *pSong, char markerType, void *pMetaText, int32_t metaTextLength, XSWORD currentTrack);
+    typedef void (*GM_SongTimeCallbackProcPtr)(void *threadContext, struct GM_Song *pSong, uint32_t currentMicroseconds, uint32_t currentMidiClock);
+    typedef void (*GM_SongMetaCallbackProcPtr)(void *threadContext, struct GM_Song *pSong, char markerType, void *pMetaText, int32_t metaTextLength, int16_t currentTrack);
     // New lyric-specific callback providing precise song microsecond timestamp when lyric meta event (0x05) occurs
     typedef void (*GM_SongLyricCallbackProcPtr)(struct GM_Song *pSong, const char *lyricText, uint32_t lyricTimeMicroseconds, void *reference);
 
@@ -758,17 +758,17 @@ typedef int32_t UNIT_TYPE;
 
     struct GM_ADSR
     {
-        XSDWORD currentTime;
-        XSDWORD currentLevel;
-        XSDWORD previousTarget;
+        int32_t currentTime;
+        int32_t currentLevel;
+        int32_t previousTarget;
         XFIXED sustainingDecayLevel;
-        XSDWORD ADSRLevel[ADSR_STAGES];
-        XSDWORD ADSRTime[ADSR_STAGES];
+        int32_t ADSRLevel[ADSR_STAGES];
+        int32_t ADSRTime[ADSR_STAGES];
         UNIT_TYPE ADSRFlags[ADSR_STAGES];
         UNIT_TYPE mode;
-        XBYTE currentPosition; //  ranges from 0 to ADSR_STAGES
+        unsigned char currentPosition; //  ranges from 0 to ADSR_STAGES
 #if USE_SF2_SUPPORT == TRUE
-        XBOOL isSF2Envelope;   // TRUE if this is an SF2 envelope (don't modify sustainingDecayLevel)
+        bool isSF2Envelope;   // TRUE if this is an SF2 envelope (don't modify sustainingDecayLevel)
 #endif
     };
     typedef struct GM_ADSR GM_ADSR;
@@ -931,12 +931,12 @@ typedef int32_t UNIT_TYPE;
 
     struct GM_LFO
     {
-        XSDWORD DC_feed; // DC feed amount
-        XSDWORD level;
-        XSDWORD period;
-        XSDWORD currentTime;
-        XSDWORD LFOcurrentTime;
-        XSDWORD currentWaveValue;
+        int32_t DC_feed; // DC feed amount
+        int32_t level;
+        int32_t period;
+        int32_t currentTime;
+        int32_t LFOcurrentTime;
+        int32_t currentWaveValue;
         UNIT_TYPE where_to_feed;
         UNIT_TYPE waveShape;
         UNIT_TYPE mode;
@@ -967,22 +967,22 @@ typedef int32_t UNIT_TYPE;
 
     struct GM_TieTo
     {
-        XSWORD to_Scalar[MAX_CURVES];
-        XBYTE from_Value[MAX_CURVES]; // midi range 0 to 127
+        int16_t to_Scalar[MAX_CURVES];
+        unsigned char from_Value[MAX_CURVES]; // midi range 0 to 127
         UNIT_TYPE tieFrom;
         UNIT_TYPE tieTo;
-        XSWORD curveCount;
+        int16_t curveCount;
     };
     typedef struct GM_TieTo GM_TieTo;
 
     struct GM_KeymapSplit
     {
-        XBYTE lowMidi;
-        XBYTE highMidi;
-        XSWORD miscParameter1; // can be smodParmeter1 if enableSoundModifier
+        unsigned char lowMidi;
+        unsigned char highMidi;
+        int16_t miscParameter1; // can be smodParmeter1 if enableSoundModifier
                                // enabled, otherwise its a replacement
                                // rootKey for sample
-        XSWORD miscParameter2;
+        int16_t miscParameter2;
         struct GM_Instrument *pSplitInstrument;
     };
     typedef struct GM_KeymapSplit GM_KeymapSplit;
@@ -990,7 +990,7 @@ typedef int32_t UNIT_TYPE;
     struct GM_KeymapSplitInfo
     {
         XShortResourceID defaultInstrumentID;
-        XWORD KeymapSplitCount;
+        uint16_t KeymapSplitCount;
         GM_KeymapSplit keySplits[1];
     };
     typedef struct GM_KeymapSplitInfo GM_KeymapSplitInfo;
@@ -1013,16 +1013,16 @@ typedef int32_t UNIT_TYPE;
     struct GM_Waveform
     {
         XLongResourceID waveformID; // extra specific data
-        XDWORD currentFilePosition; // if used will be an file byte position
-        XDWORD compressionType;     // format of "theWaveform" (SndCompressionType)
-        XWORD baseMidiPitch;        // base Midi pitch of recorded sample ie. 60 is middle 'C'
-        XBYTE bitSize;              // number of bits per sample
-        XBYTE channels;             // number of channels
-        XDWORD waveSize;            // total waveform size in bytes
-        XDWORD waveFrames;          // number of frames
-        XDWORD startLoop;           // start loop point offset
-        XDWORD endLoop;             // end loop point offset
-        XDWORD numLoops;            // number of loops between loop points before continuing to end of sample
+        uint32_t currentFilePosition; // if used will be an file byte position
+        uint32_t compressionType;     // format of "theWaveform" (SndCompressionType)
+        uint16_t baseMidiPitch;        // base Midi pitch of recorded sample ie. 60 is middle 'C'
+        unsigned char bitSize;              // number of bits per sample
+        unsigned char channels;             // number of channels
+        uint32_t waveSize;            // total waveform size in bytes
+        uint32_t waveFrames;          // number of frames
+        uint32_t startLoop;           // start loop point offset
+        uint32_t endLoop;             // end loop point offset
+        uint32_t numLoops;            // number of loops between loop points before continuing to end of sample
         XFIXED sampledRate;         // FIXED_VALUE 16.16 value for recording
         XPTR theWaveform;           // array data that morphs into what ever you need
     };
@@ -1033,39 +1033,39 @@ typedef int32_t UNIT_TYPE;
     struct GM_Instrument
     {
         AccessSemaphore accessStatus;
-        XSWORD masterRootKey;
+        int16_t masterRootKey;
         XShortResourceID smodResourceID;
-        XSWORD miscParameter1;
-        XSWORD miscParameter2;
+        int16_t miscParameter1;
+        int16_t miscParameter2;
 
-        XBOOL disableSndLooping; // Disable waveform looping
-        XBOOL playAtSampledFreq; // Play instrument at sampledRate only
-        XBOOL doKeymapSplit;     // If TRUE, then this instrument is a keysplit defination
-        XBOOL notPolyphonic;     // if FALSE, then instrument is a mono instrument
-        XBOOL enableSoundModifier;
-        XBOOL extendedFormat; // extended format instrument
-        XBOOL sampleAndHold;
-        XBOOL useSampleRate; // factor in sample rate into pitch calculation
-        XBOOL advancedInterpolation; // sample flagged for higher-resolution interpolation
-        XBOOL sampleOffsetStartEnabled; // if TRUE, start note at sampleOffsetStartFrames
-        XBYTE minLoopSize; // minimum loop size for this instrument source (RMF/ZMF)
+        bool disableSndLooping; // Disable waveform looping
+        bool playAtSampledFreq; // Play instrument at sampledRate only
+        bool doKeymapSplit;     // If TRUE, then this instrument is a keysplit defination
+        bool notPolyphonic;     // if FALSE, then instrument is a mono instrument
+        bool enableSoundModifier;
+        bool extendedFormat; // extended format instrument
+        bool sampleAndHold;
+        bool useSampleRate; // factor in sample rate into pitch calculation
+        bool advancedInterpolation; // sample flagged for higher-resolution interpolation
+        bool sampleOffsetStartEnabled; // if TRUE, start note at sampleOffsetStartFrames
+        unsigned char minLoopSize; // minimum loop size for this instrument source (RMF/ZMF)
 
-        XBOOL processingSlice;
-        XBOOL useSoundModifierAsRootKey;
+        bool processingSlice;
+        bool useSoundModifierAsRootKey;
 #if REVERB_USED != REVERB_DISABLED
-        XBOOL avoidReverb; // if TRUE, this instrument is not mixed into reverb unit
+        bool avoidReverb; // if TRUE, this instrument is not mixed into reverb unit
 #endif
-        XBYTE usageReferenceCount; // number of references this instrument is associated to
+        unsigned char usageReferenceCount; // number of references this instrument is associated to
 
-        XBYTE LFORecordCount;
-        XBYTE curveRecordCount;
+        unsigned char LFORecordCount;
+        unsigned char curveRecordCount;
 
-        XSWORD panPlacement; // inital stereo pan placement of this instrument
-        XDWORD sampleOffsetStartFrames; // note-on start offset in frames when sampleOffsetStartEnabled is TRUE
+        int16_t panPlacement; // inital stereo pan placement of this instrument
+        uint32_t sampleOffsetStartFrames; // note-on start offset in frames when sampleOffsetStartEnabled is TRUE
 
-        XSDWORD LPF_frequency;
-        XSDWORD LPF_resonance;
-        XSDWORD LPF_lowpassAmount;
+        int32_t LPF_frequency;
+        int32_t LPF_resonance;
+        int32_t LPF_lowpassAmount;
 
         GM_LFO LFORecords[MAX_LFOS];
         GM_ADSR volumeADSRRecord;
@@ -1103,8 +1103,8 @@ typedef int32_t UNIT_TYPE;
 #endif
 #if DISABLE_BEATNIK_SF2_NRPN != TRUE
     typedef struct LastControlEntry {
-        INT16 control;
-        UINT16 value;
+        int16_t control;
+        uint16_t value;
     } LastControlEntry;
 #endif
     // Internal Song structure
@@ -1114,24 +1114,24 @@ typedef int32_t UNIT_TYPE;
         struct GM_Mixer *pMixer; // mixer associated to this song
 
         XShortResourceID songID;
-        XSWORD maxSongVoices;
-        XSWORD mixLevel;
-        XSWORD maxEffectVoices;
-        XSWORD routeBus;
+        int16_t maxSongVoices;
+        int16_t mixLevel;
+        int16_t maxEffectVoices;
+        int16_t routeBus;
 
         // various values calculated during first scan of midi file. The one's marked
         // with a '*' are actaully usefull.
-        XSWORD averageTotalVoices;
-        XSWORD averageActiveVoices;
-        XSWORD voiceCount, voiceSustain;
-        XSWORD averageVoiceUsage; // * average voice usage over time
-        XSWORD maxVoiceUsage;     // * max number of voices used
+        int16_t averageTotalVoices;
+        int16_t averageActiveVoices;
+        int16_t voiceCount, voiceSustain;
+        int16_t averageVoiceUsage; // * average voice usage over time
+        int16_t maxVoiceUsage;     // * max number of voices used
 
         XFIXED MasterTempo;    // master midi tempo (fixed point)
-        XWORD songTempo;       // tempo (16667 = 1.0)
-        XSWORD songPitchShift; // master pitch shift
+        uint16_t songTempo;       // tempo (16667 = 1.0)
+        int16_t songPitchShift; // master pitch shift
 
-        XWORD allowPitchShift[(MAX_CHANNELS / 16) + 1]; // allow pitch shift
+        uint16_t allowPitchShift[(MAX_CHANNELS / 16) + 1]; // allow pitch shift
 
         void *context;         // context of song creation. C++ 'this' pointer, thread, etc
         int32_t userReference; // user reference. Can be anything
@@ -1149,19 +1149,19 @@ typedef int32_t UNIT_TYPE;
         void *lyricCallbackReference;
         
         // Lyric processing state tracking (per-song)
-        XBOOL seenTrueLyric;
-        XBOOL seenGenericTextLyric;
-        XBOOL seenLyricMeta;
+        bool seenTrueLyric;
+        bool seenGenericTextLyric;
+        bool seenLyricMeta;
       
         // Lyric deduplication (to filter duplicate events in MIDI files)
         char lastLyric[256];          // Last lyric text sent to callback
-        XDWORD lastLyricTimestamp;    // Timestamp of last lyric (microseconds)
+        uint32_t lastLyricTimestamp;    // Timestamp of last lyric (microseconds)
 
         // Lyric line break timing
-        XDWORD lastLyricTimeUs;       // Timestamp of last lyric for gap detection
-        XDWORD lyricLineBreakThreshold; // Threshold in microseconds for line breaks
-        XDWORD currentLineLength;      // Current line length for word wrapping
-        XBOOL lyricsHaveNewlines;     // TRUE if MIDI lyrics contain explicit newlines
+        uint32_t lastLyricTimeUs;       // Timestamp of last lyric for gap detection
+        uint32_t lyricLineBreakThreshold; // Threshold in microseconds for line breaks
+        uint32_t currentLineLength;      // Current line length for word wrapping
+        bool lyricsHaveNewlines;     // TRUE if MIDI lyrics contain explicit newlines
 
         // Optional raw MIDI event callback (mirroring/export). If set, this will be
         // called with the raw MIDI bytes for any MIDI event processed for this song.
@@ -1182,51 +1182,51 @@ typedef int32_t UNIT_TYPE;
         VelocityCurveType velocityCurveType; // which curve to use. (Range is 0 to 4)
 
         ScanMode AnalyzeMode;       // analyze mode (Byte)
-        XBOOL ignoreBadInstruments; // allow bad patches. Don't fail because it can't load
+        bool ignoreBadInstruments; // allow bad patches. Don't fail because it can't load
 
-        XBOOL allowProgramChanges;
-        XBOOL loopSong;                // loop song when done
-        XBOOL metaLoopDisabled;        // if TRUE, then meta loopstart/loopend are disabled
-        XBOOL disposeSongDataWhenDone; // if TRUE, then free midi data
-        XBOOL SomeTrackIsAlive;        // song still alive
-        XBOOL songFinished;            // TRUE at start of song, FALSE and end
-        XBOOL processingSlice;         // TRUE if processing slice of this song
-        XBOOL omniModeOn;              // if TRUE, then omni mode is on
+        bool allowProgramChanges;
+        bool loopSong;                // loop song when done
+        bool metaLoopDisabled;        // if TRUE, then meta loopstart/loopend are disabled
+        bool disposeSongDataWhenDone; // if TRUE, then free midi data
+        bool SomeTrackIsAlive;        // song still alive
+        bool songFinished;            // TRUE at start of song, FALSE and end
+        bool processingSlice;         // TRUE if processing slice of this song
+        bool omniModeOn;              // if TRUE, then omni mode is on
 
-        XBOOL hasPercData;         // if TRUE, then no channel 9 data
-        XBOOL hasAutoGenerateData; // if TRUE, then has auto generate data
+        bool hasPercData;         // if TRUE, then no channel 9 data
+        bool hasAutoGenerateData; // if TRUE, then has auto generate data
 
-        XBOOL songPaused;        // if TRUE, sequencer is paused.
-        XBOOL songPrerolled;     // if TRUE, instruments are loaded, midi queued
-        XBOOL checkedForAliases; // if FALSE, then aliases from bank have not been
+        bool songPaused;        // if TRUE, sequencer is paused.
+        bool songPrerolled;     // if TRUE, instruments are loaded, midi queued
+        bool checkedForAliases; // if FALSE, then aliases from bank have not been
                                  // incorporated into the remapArray yet.
 
-        XBOOL songEndAtFade;      // when true, stop song at end of fade
+        bool songEndAtFade;      // when true, stop song at end of fade
         XFIXED songFadeRate;      // when non-zero fading is enabled
         XFIXED songFixedVolume;   // inital volume level that will be changed by songFadeRate
-        XSWORD songFadeMaxVolume; // max volume
-        XSWORD songFadeMinVolume; // min volume
+        int16_t songFadeMaxVolume; // max volume
+        int16_t songFadeMinVolume; // min volume
 
-        XSWORD songPriority; // higher values determine note stealing level
+        int16_t songPriority; // higher values determine note stealing level
 
-        XSWORD songVolume;
-        XSWORD songMasterStereoPlacement; // master stereo placement (-8192 to 8192)
+        int16_t songVolume;
+        int16_t songMasterStereoPlacement; // master stereo placement (-8192 to 8192)
 
-        XSWORD defaultPercusionProgram; // default percussion program for percussion channel.
+        int16_t defaultPercusionProgram; // default percussion program for percussion channel.
                                         // -1 means GM style bank select, -2 means allow program changes on percussion
 
-        XSWORD songLoopCount;    // current loop counter. Starts at 0
-        XSWORD songMaxLoopCount; // when songLoopCount reaches songMaxLoopCount it will be set to 0
+        int16_t songLoopCount;    // current loop counter. Starts at 0
+        int16_t songMaxLoopCount; // when songLoopCount reaches songMaxLoopCount it will be set to 0
 
         UFLOAT songMidiTickLength;    // song midi tick length. 0 not calculated yet.
         UFLOAT songMicrosecondLength; // song microsecond length. 0 not calculated yet.
 
         SequenceType seqType;
         void *sequenceData;      // sequence pointer data for this song
-        XDWORD sequenceDataSize; // sequence size of data
+        uint32_t sequenceDataSize; // sequence size of data
 
-        XDWORD titleOffset; // offset in bytes of midi file
-        XDWORD titleLength; // for title=
+        uint32_t titleOffset; // offset in bytes of midi file
+        uint32_t titleLength; // for title=
         //  instrument array. These are the instruments that are used by just this song
   
         GM_Instrument *instrumentData[MAX_INSTRUMENTS * MAX_BANKS];
@@ -1240,53 +1240,53 @@ typedef int32_t UNIT_TYPE;
                               // the instruments that need to be loaded
                               // total divided by 8 bits. each bit represents an instrument
 
-        XSBYTE firstChannelBank[MAX_CHANNELS];    // set during preprocess. this is the program
-        XSWORD firstChannelProgram[MAX_CHANNELS]; // to be set at the start of a song
-        XSWORD firstNoteOnChannel;                // first channel a noteon event occurs
+        signed char firstChannelBank[MAX_CHANNELS];    // set during preprocess. this is the program
+        int16_t firstChannelProgram[MAX_CHANNELS]; // to be set at the start of a song
+        int16_t firstNoteOnChannel;                // first channel a noteon event occurs
 
         // channel based controler values
-        XSBYTE channelWhichParameter[MAX_CHANNELS];            // 0 for none, 1 for RPN, 2 for NRPN
-        XSBYTE channelRegisteredParameterLSB[MAX_CHANNELS];    // Registered Parameter least signifcant byte
-        XSBYTE channelRegisteredParameterMSB[MAX_CHANNELS];    // Registered Parameter most signifcant byte
-        XSBYTE channelNonRegisteredParameterLSB[MAX_CHANNELS]; // Non-Registered Parameter least signifcant byte
-        XSBYTE channelNonRegisteredParameterMSB[MAX_CHANNELS]; // Non-Registered Parameter most signifcant byte
-        XBYTE channelBankMode[MAX_CHANNELS];                   // channel bank mode
-        XBYTE channelSustain[MAX_CHANNELS];                    // sustain pedal on/off
-        XBYTE channelVolume[MAX_CHANNELS];                     // current channel volume
-        XBYTE channelExpression[MAX_CHANNELS];                 // current channel expression
-        XBYTE channelPitchBendRange[MAX_CHANNELS];             // current bend range in half steps
+        signed char channelWhichParameter[MAX_CHANNELS];            // 0 for none, 1 for RPN, 2 for NRPN
+        signed char channelRegisteredParameterLSB[MAX_CHANNELS];    // Registered Parameter least signifcant byte
+        signed char channelRegisteredParameterMSB[MAX_CHANNELS];    // Registered Parameter most signifcant byte
+        signed char channelNonRegisteredParameterLSB[MAX_CHANNELS]; // Non-Registered Parameter least signifcant byte
+        signed char channelNonRegisteredParameterMSB[MAX_CHANNELS]; // Non-Registered Parameter most signifcant byte
+        unsigned char channelBankMode[MAX_CHANNELS];                   // channel bank mode
+        unsigned char channelSustain[MAX_CHANNELS];                    // sustain pedal on/off
+        unsigned char channelVolume[MAX_CHANNELS];                     // current channel volume
+        unsigned char channelExpression[MAX_CHANNELS];                 // current channel expression
+        unsigned char channelPitchBendRange[MAX_CHANNELS];             // current bend range in half steps
 #if DISABLE_NOKIA_PATCH != TRUE
-        XBOOL isNokiaVibrationChannel[MAX_CHANNELS]; // TRUE if channel is Nokia vibration channel
+        bool isNokiaVibrationChannel[MAX_CHANNELS]; // TRUE if channel is Nokia vibration channel
 #endif        
 #if REVERB_USED != REVERB_DISABLED
-        XBYTE channelReverb[MAX_CHANNELS]; // current channel reverb
-        XBYTE channelChorus[MAX_CHANNELS]; // current channel chorus
+        unsigned char channelReverb[MAX_CHANNELS]; // current channel reverb
+        unsigned char channelChorus[MAX_CHANNELS]; // current channel chorus
 #endif
-        XBYTE channelModWheel[MAX_CHANNELS];              // Mod wheel (primarily affects pitch bend)
-        XBYTE channelLowPassAmount[MAX_CHANNELS];         // low pass amount controller (NOT CONNECTED as of 3.8.99)
-        XBYTE channelResonanceFilterAmount[MAX_CHANNELS]; // Resonance amount controller (NOT CONNECTED as of 3.8.99)
-        XBYTE channelFrequencyFilterAmount[MAX_CHANNELS]; // Frequency amount controller (NOT CONNECTED as of 3.8.99)
-        XBYTE channelMonoMode[MAX_CHANNELS];              // boolean for mono mode being on or off (NOT CONNECTED as of 6.8.99)
-        XSWORD channelBend[MAX_CHANNELS];                 // MUST BE AN XSWORD!! current amount to bend new notes
-        XSWORD channelProgram[MAX_CHANNELS];              // current channel program
-        XBYTE channelRawBank[MAX_CHANNELS];              // current raw bank (0-255)
-        XSBYTE channelLSB[MAX_CHANNELS];                   // current LSB bank
-        XSBYTE channelBank[MAX_CHANNELS];                 // current bank
-        XSWORD channelStereoPosition[MAX_CHANNELS];       // current channel stereo position
+        unsigned char channelModWheel[MAX_CHANNELS];              // Mod wheel (primarily affects pitch bend)
+        unsigned char channelLowPassAmount[MAX_CHANNELS];         // low pass amount controller (NOT CONNECTED as of 3.8.99)
+        unsigned char channelResonanceFilterAmount[MAX_CHANNELS]; // Resonance amount controller (NOT CONNECTED as of 3.8.99)
+        unsigned char channelFrequencyFilterAmount[MAX_CHANNELS]; // Frequency amount controller (NOT CONNECTED as of 3.8.99)
+        unsigned char channelMonoMode[MAX_CHANNELS];              // boolean for mono mode being on or off (NOT CONNECTED as of 6.8.99)
+        int16_t channelBend[MAX_CHANNELS];                 // MUST BE AN int16_t!! current amount to bend new notes
+        int16_t channelProgram[MAX_CHANNELS];              // current channel program
+        unsigned char channelRawBank[MAX_CHANNELS];              // current raw bank (0-255)
+        signed char channelLSB[MAX_CHANNELS];                   // current LSB bank
+        signed char channelBank[MAX_CHANNELS];                 // current bank
+        int16_t channelStereoPosition[MAX_CHANNELS];       // current channel stereo position
 #if USE_SF2_SUPPORT == TRUE
-        XBYTE channelType[MAX_CHANNELS];
+        unsigned char channelType[MAX_CHANNELS];
 #endif
 
         // Realtime note activity tracking for GUI virtual keyboard.
         // Stores current velocity (>0) for active notes per channel; 0 means off.
-        XBYTE channelActiveNotes[16][128];
+        unsigned char channelActiveNotes[16][128];
 
         // mute controls for tracks, channels, and solos
         // NOTE: Do not access these directly. Use XSetBit & XClearBit & XTestBit
-        XDWORD trackMuted[(MAX_TRACKS / 32) + 1];        // track mute control bits
-        XDWORD soloTrackMuted[(MAX_TRACKS / 32) + 1];    // solo track mute control bits
-        XWORD channelMuted[(MAX_CHANNELS / 16) + 1];     // current channel muted status
-        XWORD soloChannelMuted[(MAX_CHANNELS / 16) + 1]; // current channel muted status
+        uint32_t trackMuted[(MAX_TRACKS / 32) + 1];        // track mute control bits
+        uint32_t soloTrackMuted[(MAX_TRACKS / 32) + 1];    // solo track mute control bits
+        uint16_t channelMuted[(MAX_CHANNELS / 16) + 1];     // current channel muted status
+        uint16_t soloChannelMuted[(MAX_CHANNELS / 16) + 1]; // current channel muted status
 
         // internal timing variables for sequencer
         UFLOAT UnscaledMIDITempo;
@@ -1297,31 +1297,31 @@ typedef int32_t UNIT_TYPE;
         UFLOAT songMicroseconds;
 
         // storage for loop playback
-        XBOOL loopbackSaved;
-        XBYTE *pTrackPositionSave[MAX_TRACKS];
+        bool loopbackSaved;
+        unsigned char *pTrackPositionSave[MAX_TRACKS];
         IFLOAT trackTicksSave[MAX_TRACKS]; // must be signed
         TrackStatus trackStatusSave[MAX_TRACKS];
         UFLOAT currentMidiClockSave;
         UFLOAT songMicrosecondsSave;
-        XSBYTE loopbackCount;
+        signed char loopbackCount;
 
         // internal position variables for sequencer. Set after inital preprocess
         TrackStatus trackon[MAX_TRACKS]; // track playing? TRACK_FREE is free, TRACK_RUNNING is playing
-        XDWORD tracklen[MAX_TRACKS];     // length of track in bytes
-        XBYTE *ptrack[MAX_TRACKS];       // current position in track
-        XBYTE *trackstart[MAX_TRACKS];   // start of track
-        XBYTE runningStatus[MAX_TRACKS]; // midi running status
+        uint32_t tracklen[MAX_TRACKS];     // length of track in bytes
+        unsigned char *ptrack[MAX_TRACKS];       // current position in track
+        unsigned char *trackstart[MAX_TRACKS];   // start of track
+        unsigned char runningStatus[MAX_TRACKS]; // midi running status
         IFLOAT trackticks[MAX_TRACKS];   // current position of track in ticks. must be signed
-        //  XSDWORD             trackcumuticks[MAX_TRACKS];     // current number of beat ticks into track
+        //  int32_t             trackcumuticks[MAX_TRACKS];     // current number of beat ticks into track
 
 #if USE_SF2_SUPPORT == TRUE
         // SF2 integration support
         void *sf2Info;             // Pointer to GM_SF2Info structure when SF2 is active
-        XBOOL isSF2Song;               // TRUE if this song uses SF2 instruments
-        XDWORD songFlags;                // Song flags including SONG_FLAG_USE_SF2 and SONG_FLAG_IS_RMF
-        XDWORD RMFInstrumentIDs[MAX_INSTRUMENTS+1];
-        XBYTE channelBankMSB[MAX_CHANNELS];  // Bank MSB values for SF2 program changes
-        XBYTE channelBankLSB[MAX_CHANNELS];  // Bank LSB values for SF2 program changes
+        bool isSF2Song;               // TRUE if this song uses SF2 instruments
+        uint32_t songFlags;                // Song flags including SONG_FLAG_USE_SF2 and SONG_FLAG_IS_RMF
+        uint32_t RMFInstrumentIDs[MAX_INSTRUMENTS+1];
+        unsigned char channelBankMSB[MAX_CHANNELS];  // Bank MSB values for SF2 program changes
+        unsigned char channelBankLSB[MAX_CHANNELS];  // Bank LSB values for SF2 program changes
 #if DISABLE_BEATNIK_SF2_NRPN != TRUE
         LastControlEntry lastThreeControl[MAX_CHANNELS][4];
 #endif
@@ -1329,7 +1329,7 @@ typedef int32_t UNIT_TYPE;
 
         // Per-song engine config flags from SongResource_RMF.unused[0] (SONG_CONFIG_* bits).
         // Zero means no per-song overrides.
-        XDWORD engineConfigFlags;
+        uint32_t engineConfigFlags;
     };
     typedef struct GM_Song GM_Song;
 
@@ -1340,9 +1340,9 @@ typedef int32_t UNIT_TYPE;
     /**************************************************/
     /*
     ** FUNCTION InitGeneralSound(Rate theRate,
-    **                              TerpMode theTerp, XSWORD maxVoices,
-    **                              XSWORD normVoices, XSWORD maxEffects,
-    **                              XSWORD maxChunkSize)
+    **                              TerpMode theTerp, int16_t maxVoices,
+    **                              int16_t normVoices, int16_t maxEffects,
+    **                              int16_t maxChunkSize)
     **
     ** Overvue --
     **  This will setup the sound system, allocate memory, and such,
@@ -1375,10 +1375,10 @@ typedef int32_t UNIT_TYPE;
     */
     /**************************************************/
     OPErr GM_InitGeneralSound(void *threadContext, Rate theRate, TerpMode theTerp, AudioModifiers theMods,
-                              XSWORD maxVoices, XSWORD normVoices, XSWORD maxEffects, struct GM_Mixer **outMixer);
+                              int16_t maxVoices, int16_t normVoices, int16_t maxEffects, struct GM_Mixer **outMixer);
 
-    OPErr GM_Generate16bitOutP(XBOOL *outGenerate16);
-    OPErr GM_GenerateStereoOutP(XBOOL *outGenerateStereo);
+    OPErr GM_Generate16bitOutP(bool *outGenerate16);
+    OPErr GM_GenerateStereoOutP(bool *outGenerateStereo);
     OPErr GM_GetRate(Rate *outRate);
     OPErr GM_GetInterpolationMode(TerpMode *outTerpMode);
 
@@ -1426,9 +1426,9 @@ typedef int32_t UNIT_TYPE;
     // deallocate the reverb buffers
     void GM_CleanupReverb(void);
     // Is current reverb fixed (old style)?
-    XBOOL GM_IsReverbFixed(void);
+    bool GM_IsReverbFixed(void);
     // get highest MIDI verb amount required to activate verb
-    XBYTE GM_GetReverbEnableThreshold(void);
+    unsigned char GM_GetReverbEnableThreshold(void);
     // Set the global reverb type
     void GM_SetReverbType(ReverbMode theReverbMode);
     // Set the global reverb type and update BAEMixer's cached default
@@ -1440,12 +1440,12 @@ typedef int32_t UNIT_TYPE;
     void GM_ProcessReverb(void);
 #endif
 
-    void GM_TestTone(XBOOL toneStatus);
+    void GM_TestTone(bool toneStatus);
     void GM_TestToneFrequency(XFIXED freq);
 
     /* Sound hardware specific
      */
-    XBOOL GM_StartHardwareSoundManager(void *threadContext);
+    bool GM_StartHardwareSoundManager(void *threadContext);
     void GM_StopHardwareSoundManager(void *threadContext);
 
     // number of devices. ie different versions of the HAE connection. DirectSound and waveOut
@@ -1476,9 +1476,9 @@ typedef int32_t UNIT_TYPE;
     //          "WinOS,plugin,Director"
     void GM_GetDeviceName(int32_t deviceID, char *cName, uint32_t cNameLength);
 
-    void GM_GetSystemVoices(XSWORD *pMaxSongVoices, XSWORD *pMixLevel, XSWORD *pMaxEffectVoices);
+    void GM_GetSystemVoices(int16_t *pMaxSongVoices, int16_t *pMixLevel, int16_t *pMaxEffectVoices);
 
-    OPErr GM_ChangeSystemVoices(XSWORD maxVoices, XSWORD mixLevel, XSWORD maxEffects);
+    OPErr GM_ChangeSystemVoices(int16_t maxVoices, int16_t mixLevel, int16_t maxEffects);
 
     OPErr GM_ChangeAudioModes(void *threadContext, Rate theRate, TerpMode theTerp, AudioModifiers theMods);
 
@@ -1498,24 +1498,24 @@ typedef int32_t UNIT_TYPE;
     */
     /**************************************************/
     OPErr GM_PauseGeneralSound(void *threadContext);
-    OPErr GM_IsGeneralSoundPaused(XBOOL *outIsPaused);
+    OPErr GM_IsGeneralSoundPaused(bool *outIsPaused);
 
     // Pause all songs
-    void GM_PauseSequencer(XBOOL endVoices);
+    void GM_PauseSequencer(bool endVoices);
     // resume all songs
     void GM_ResumeSequencer(void);
 
     // Pause just this song
-    void GM_PauseSong(GM_Song *pSong, XBOOL endVoices);
+    void GM_PauseSong(GM_Song *pSong, bool endVoices);
     // Resume just this song
     void GM_ResumeSong(GM_Song *pSong);
-    XBOOL GM_IsSongPaused(GM_Song *pSong);
+    bool GM_IsSongPaused(GM_Song *pSong);
 
-    char GM_GetControllerValue(GM_Song *pSong, XSWORD channel, XSWORD controller);
+    char GM_GetControllerValue(GM_Song *pSong, int16_t channel, int16_t controller);
     // return pitch bend for channel
-    void GM_GetPitchBend(GM_Song *pSong, XSWORD channel, unsigned char *pLSB, unsigned char *pMSB);
+    void GM_GetPitchBend(GM_Song *pSong, int16_t channel, unsigned char *pLSB, unsigned char *pMSB);
 
-    OPErr GM_GetProgramBank(GM_Song *pSong, XSWORD channel, XSWORD *outProgram, XSWORD *outBank, XBOOL useRawBank);
+    OPErr GM_GetProgramBank(GM_Song *pSong, int16_t channel, int16_t *outProgram, int16_t *outBank, bool useRawBank);
 
     /**************************************************/
     /*
@@ -1558,21 +1558,21 @@ typedef int32_t UNIT_TYPE;
     /**************************************************/
 
     // return preroll status
-    XBOOL GM_IsSongPrerolled(GM_Song *pSong);
+    bool GM_IsSongPrerolled(GM_Song *pSong);
     // Call GM_PreollSong to allocate the song in the song buss, configure the sequencer
     // but don't start the sequence
     OPErr GM_PrerollSong(GM_Song *pSong, GM_SongCallbackProcPtr theCallbackProc,
-                         XBOOL useEmbeddedMixerSettings, XBOOL autoLevel);
+                         bool useEmbeddedMixerSettings, bool autoLevel);
     // Start the song. Will call GM_PrerollSong if not already done.
-    OPErr GM_BeginSong(GM_Song *theSong, GM_SongCallbackProcPtr theCallbackProc, XBOOL useEmbeddedMixerSettings, XBOOL autoLevel);
+    OPErr GM_BeginSong(GM_Song *theSong, GM_SongCallbackProcPtr theCallbackProc, bool useEmbeddedMixerSettings, bool autoLevel);
 
     // Set song priority level. Higher values will allow for better note stealing.
-    OPErr GM_SetSongPriority(GM_Song *pSong, XSWORD songPriority);
+    OPErr GM_SetSongPriority(GM_Song *pSong, int16_t songPriority);
     // Get song priority level. Higher values will allow for better note stealing.
-    XSWORD GM_GetSongPriority(GM_Song *pSong);
+    int16_t GM_GetSongPriority(GM_Song *pSong);
 
-    XSWORD GM_GetSongRouteBus(GM_Song *pSong);
-    OPErr GM_SetSongRouteBus(GM_Song *pSong, XSWORD routeBus);
+    int16_t GM_GetSongRouteBus(GM_Song *pSong);
+    OPErr GM_SetSongRouteBus(GM_Song *pSong, int16_t routeBus);
 
     // return valid context for song that was pass in when calling GM_LoadSong or GM_CreateLiveSong
     void *GM_GetSongContext(GM_Song *pSong);
@@ -1611,13 +1611,13 @@ typedef int32_t UNIT_TYPE;
                          void *theExternalMidiData, // MOE: This parameter should be const!
                          int32_t midiSize,
                          XShortResourceID *pInstrumentArray,
-                         XBOOL loadInstruments,
-                         XBOOL ignoreBadInstruments,
+                         bool loadInstruments,
+                         bool ignoreBadInstruments,
                          XBankToken bankToken,
                          OPErr *pErr);
     // Create Song with no midi data associated. Used for direct control of a synth object
     GM_Song *GM_CreateLiveSong(void *context, XShortResourceID songID);
-    OPErr GM_StartLiveSong(GM_Song *pSong, XBOOL loadPatches, XBankToken bankToken);
+    OPErr GM_StartLiveSong(GM_Song *pSong, bool loadPatches, XBankToken bankToken);
     
     // Reset lyric processing state for the song (clears seen flags)
     void GM_ResetSongLyricState(GM_Song *pSong);
@@ -1628,9 +1628,9 @@ typedef int32_t UNIT_TYPE;
     void GM_SetSongPitchOffset(GM_Song *pSong, int32_t offset);
     // If allowPitch is FALSE, then "GM_SetSongPitchOffset" will have no effect on passed
     // channel (0 to 15)
-    void GM_AllowChannelPitchOffset(GM_Song *pSong, uint16_t channel, XBOOL allowPitch);
+    void GM_AllowChannelPitchOffset(GM_Song *pSong, uint16_t channel, bool allowPitch);
     // Return if the passed channel will allow pitch offset
-    XBOOL GM_DoesChannelAllowPitchOffset(GM_Song *pSong, uint16_t channel);
+    bool GM_DoesChannelAllowPitchOffset(GM_Song *pSong, uint16_t channel);
 
     // Stop this song playing, or if NULL stop all songs playing.
     // This removes the Song from the mixer, so you can no longer send
@@ -1651,7 +1651,7 @@ typedef int32_t UNIT_TYPE;
     void GM_KillSongEventsFromQueue(GM_Song *pSong);
 
     // Return TRUE if there are events pending for the passed in song.
-    XBOOL GM_AreEventsPending(GM_Song *pSong);
+    bool GM_AreEventsPending(GM_Song *pSong);
 
     /**************************************************/
     /*
@@ -1662,35 +1662,35 @@ typedef int32_t UNIT_TYPE;
     **  currently playing.
     **
     **  INPUT   --
-    **  OUTPUT  --  XSDWORD,        returns ticks since BeginSong.
+    **  OUTPUT  --  int32_t,        returns ticks since BeginSong.
     **                      returns 0 if no song is playing.
     **
     ** NOTE:
     */
     /**************************************************/
-    XDWORD GM_SongTicks(GM_Song *pSong);
+    uint32_t GM_SongTicks(GM_Song *pSong);
 
     // Return the length in MIDI ticks of the song passed
     //  pSong   GM_Song structure. Data will be cloned for this function.
     //  pErr        OPErr error type
-    XDWORD GM_GetSongTickLength(GM_Song *pSong, OPErr *pErr);
-    OPErr GM_SetSongTickPosition(GM_Song *pSong, XDWORD songTickPosition);
+    uint32_t GM_GetSongTickLength(GM_Song *pSong, OPErr *pErr);
+    OPErr GM_SetSongTickPosition(GM_Song *pSong, uint32_t songTickPosition);
 
     // scan through song and build data structure with all program changes
-    OPErr GM_GetSongInstrumentChanges(void *theSongResource, GM_Song **outSong, XBYTE **outTrackNames);
+    OPErr GM_GetSongInstrumentChanges(void *theSongResource, GM_Song **outSong, unsigned char **outTrackNames);
 
-    XDWORD GM_SongMicroseconds(GM_Song *pSong);
-    XDWORD GM_GetSongMicrosecondLength(GM_Song *pSong, OPErr *pErr);
+    uint32_t GM_SongMicroseconds(GM_Song *pSong);
+    uint32_t GM_GetSongMicrosecondLength(GM_Song *pSong, OPErr *pErr);
     // Set the song position in microseconds
-    OPErr GM_SetSongMicrosecondPosition(GM_Song *pSong, XDWORD songMicrosecondPosition);
+    OPErr GM_SetSongMicrosecondPosition(GM_Song *pSong, uint32_t songMicrosecondPosition);
 
     // Get current audio time stamp based upon the audio built interrupt
-    XDWORD GM_GetSyncTimeStamp(void);
+    uint32_t GM_GetSyncTimeStamp(void);
 
     // Get current audio time stamp in microseconds; this is the
     // microseconds' worth of samples that have passed through the
     // audio device.  it never decreases.
-    XDWORD GM_GetDeviceTimeStamp(void);
+    uint32_t GM_GetDeviceTimeStamp(void);
 
     // Update count of samples played.  This function caluculates from number of bytes,
     // given the sample frame size from the mixer variables, and the bytes of data written
@@ -1698,12 +1698,12 @@ typedef int32_t UNIT_TYPE;
 
     // Get current audio time stamp based upon the audio built interrupt, but ahead in time
     // and quantized for the particular OS
-    XDWORD GM_GetSyncTimeStampQuantizedAhead(void);
+    uint32_t GM_GetSyncTimeStampQuantizedAhead(void);
 
     // Get current number of samples played; this is the
     // number of samples that have passed through the
     // audio device.  it never decreases.
-    XDWORD GM_GetSamplesPlayed(void);
+    uint32_t GM_GetSamplesPlayed(void);
 
     // Return the used patch array of instruments used in the song passed.
     //  theExternalSong standard SONG resource structure
@@ -1711,7 +1711,7 @@ typedef int32_t UNIT_TYPE;
     //  midiSize            size of midi data if theExternalMidiData is not NULL
     //  pInstrumentArray    array, if not NULL will be filled with the instruments that need to be loaded.
     //  pErr                pointer to an OPErr
-    XSDWORD GM_GetUsedPatchlist(void *theExternalSong, void *theExternalMidiData, int32_t midiSize,
+    int32_t GM_GetUsedPatchlist(void *theExternalSong, void *theExternalMidiData, int32_t midiSize,
                                 XShortResourceID *pInstrumentArray, OPErr *pErr);
 
     // set key velocity curve type
@@ -1722,16 +1722,16 @@ typedef int32_t UNIT_TYPE;
     ** FUNCTION IsSongDone;
     **
     ** Overvue --
-    **  This will return a XBOOL if a song is done playing or not.
+    **  This will return a bool if a song is done playing or not.
     **
     **  INPUT   --
-    **  OUTPUT  --  XBOOL,  returns TRUE if song is done playing,
+    **  OUTPUT  --  bool,  returns TRUE if song is done playing,
     **                          or FALSE if not playing.
     **
     ** NOTE:
     */
     /**************************************************/
-    XBOOL GM_IsSongDone(GM_Song *pSong);
+    bool GM_IsSongDone(GM_Song *pSong);
 
     // Mute and unmute tracks (0 to 64)
     void GM_MuteTrack(GM_Song *pSong, int16_t track);
@@ -1770,10 +1770,10 @@ typedef int32_t UNIT_TYPE;
     **  There is somewhat of a CPU hit, while calulating the new scale buffer.
     */
     /*************************************************/
-    void GM_SetMasterVolume(XSDWORD theVolume);
-    XSDWORD GM_GetMasterVolume(void);
-    void GM_SetGlobalVolume(XSDWORD theVolume);
-    XSDWORD GM_GetGlobalVolume(void);
+    void GM_SetMasterVolume(int32_t theVolume);
+    int32_t GM_GetMasterVolume(void);
+    void GM_SetGlobalVolume(int32_t theVolume);
+    int32_t GM_GetGlobalVolume(void);
 
 // This is an active voice reference that represents a valid/active voice.
 // Used in various functions that need to return and reference a voice.
@@ -1800,29 +1800,29 @@ typedef int32_t UNIT_TYPE;
     **          The functions do NOT steal voices, and do NOT allocate from MIDI voices.
     */
     /**************************************************/
-    VOICE_REFERENCE GM_SetupSample(XPTR theData, XDWORD startFrame, XDWORD frames, XFIXED theRate,
-                                   XDWORD startLoopFrame, XDWORD endLoopFrame, XDWORD theLoopTarget,
-                                   XSDWORD sampleVolume, XSDWORD stereoPosition,
-                                   void *context, XSWORD bitSize, XSWORD channels,
+    VOICE_REFERENCE GM_SetupSample(XPTR theData, uint32_t startFrame, uint32_t frames, XFIXED theRate,
+                                   uint32_t startLoopFrame, uint32_t endLoopFrame, uint32_t theLoopTarget,
+                                   int32_t sampleVolume, int32_t stereoPosition,
+                                   void *context, int16_t bitSize, int16_t channels,
                                    GM_LoopDoneCallbackPtr theLoopContinueProc,
                                    GM_SoundDoneCallbackPtr theCallbackProc);
 
     // given a VOICE_REFERENCE returned from GM_Begin... this will tell return TRUE, if voice is
     // valid
-    XBOOL GM_IsSoundReferenceValid(VOICE_REFERENCE reference);
+    bool GM_IsSoundReferenceValid(VOICE_REFERENCE reference);
 
-    VOICE_REFERENCE GM_SetupSampleDoubleBuffer(XPTR pBuffer1, XPTR pBuffer2, XDWORD theSize, XFIXED theRate,
-                                               XSWORD bitSize, XSWORD channels,
-                                               XSDWORD sampleVolume, XSWORD stereoPosition,
+    VOICE_REFERENCE GM_SetupSampleDoubleBuffer(XPTR pBuffer1, XPTR pBuffer2, uint32_t theSize, XFIXED theRate,
+                                               int16_t bitSize, int16_t channels,
+                                               int32_t sampleVolume, int16_t stereoPosition,
                                                void *context,
                                                GM_DoubleBufferCallbackPtr bufferCallback,
                                                GM_SoundDoneCallbackPtr doneCallbackProc);
 
     VOICE_REFERENCE GM_SetupSampleFromInfo(GM_Waveform *pSample, void *context,
-                                           XSDWORD sampleVolume, XSDWORD stereoPosition,
+                                           int32_t sampleVolume, int32_t stereoPosition,
                                            GM_LoopDoneCallbackPtr theLoopContinueProc,
                                            GM_SoundDoneCallbackPtr theCallbackProc,
-                                           XDWORD startOffsetFrame);
+                                           uint32_t startOffsetFrame);
 
     // set all the voices you want to start at the same time the same syncReference. Then call GM_SyncStartSample
     // to start the sync start. Will return an error if its an invalid reference, or syncReference is NULL.
@@ -1842,21 +1842,21 @@ typedef int32_t UNIT_TYPE;
     void GM_EndSample(VOICE_REFERENCE reference);
 
     // Returns TRUE, if voice is being rendered
-    XBOOL GM_IsSampleProcessing(VOICE_REFERENCE reference);
+    bool GM_IsSampleProcessing(VOICE_REFERENCE reference);
 
     // This will return status of a sound that is being played.
-    XBOOL GM_IsSoundDone(VOICE_REFERENCE reference);
+    bool GM_IsSoundDone(VOICE_REFERENCE reference);
 
     void GM_ChangeSamplePitch(VOICE_REFERENCE reference, XFIXED theNewRate);
     XFIXED GM_GetSamplePitch(VOICE_REFERENCE reference);
 
     void GM_SetSampleRouteBus(VOICE_REFERENCE reference, int16_t routeBus);
 
-    void GM_ChangeSampleVolume(VOICE_REFERENCE reference, XSWORD newVolume);
-    XSWORD GM_GetSampleVolumeUnscaled(VOICE_REFERENCE reference);
-    XSWORD GM_GetSampleVolume(VOICE_REFERENCE reference);
+    void GM_ChangeSampleVolume(VOICE_REFERENCE reference, int16_t newVolume);
+    int16_t GM_GetSampleVolumeUnscaled(VOICE_REFERENCE reference);
+    int16_t GM_GetSampleVolume(VOICE_REFERENCE reference);
     void GM_SetSampleFadeRate(VOICE_REFERENCE reference, XFIXED fadeRate,
-                              XSWORD minVolume, XSWORD maxVolume, XBOOL endSample);
+                              int16_t minVolume, int16_t maxVolume, bool endSample);
 
     // get/set frequency filter amount. Range is 512 to 32512
     int16_t GM_GetSampleFrequencyFilter(VOICE_REFERENCE reference);
@@ -1875,23 +1875,23 @@ typedef int32_t UNIT_TYPE;
     OPErr GM_SetWaveformLoopPoints(GM_Waveform *pWave, uint32_t start, uint32_t end);
     OPErr GM_GetWaveformLoopPoints(GM_Waveform *pWave, uint32_t *outStart, uint32_t *outEnd);
 
-    OPErr GM_SetWaveformByteSize(GM_Waveform *pWave, XDWORD byteSize);
-    OPErr GM_GetWaveformByteSize(GM_Waveform *pWave, XDWORD *outByteSize);
+    OPErr GM_SetWaveformByteSize(GM_Waveform *pWave, uint32_t byteSize);
+    OPErr GM_GetWaveformByteSize(GM_Waveform *pWave, uint32_t *outByteSize);
 
-    OPErr GM_SetWaveformNumFrames(GM_Waveform *pWave, XDWORD numFrames);
-    OPErr GM_GetWaveformNumFrames(GM_Waveform *pWave, XDWORD *outNumFrames);
+    OPErr GM_SetWaveformNumFrames(GM_Waveform *pWave, uint32_t numFrames);
+    OPErr GM_GetWaveformNumFrames(GM_Waveform *pWave, uint32_t *outNumFrames);
 
-    OPErr GM_SetWaveformBitDepth(GM_Waveform *pWave, XWORD bitDepth);
-    OPErr GM_GetWaveformBitDepth(GM_Waveform *pWave, XWORD *outBitDepth);
+    OPErr GM_SetWaveformBitDepth(GM_Waveform *pWave, uint16_t bitDepth);
+    OPErr GM_GetWaveformBitDepth(GM_Waveform *pWave, uint16_t *outBitDepth);
 
-    OPErr GM_SetWaveformNumChannels(GM_Waveform *pWave, XWORD numChannels);
-    OPErr GM_GetWaveformNumChannels(GM_Waveform *pWave, XWORD *outNumChannels);
+    OPErr GM_SetWaveformNumChannels(GM_Waveform *pWave, uint16_t numChannels);
+    OPErr GM_GetWaveformNumChannels(GM_Waveform *pWave, uint16_t *outNumChannels);
 
     OPErr GM_SetWaveformSampleRate(GM_Waveform *pWave, XFIXED sampleRate);
     OPErr GM_GetWaveformSampleRate(GM_Waveform *pWave, XFIXED *outSampleRate);
 
-    OPErr GM_SetWaveformBaseMidiPitch(GM_Waveform *pWave, XWORD baseMidiPitch);
-    OPErr GM_GetWaveformBaseMidiPitch(GM_Waveform *pWave, XWORD *outBaseMidiPitch);
+    OPErr GM_SetWaveformBaseMidiPitch(GM_Waveform *pWave, uint16_t baseMidiPitch);
+    OPErr GM_GetWaveformBaseMidiPitch(GM_Waveform *pWave, uint16_t *outBaseMidiPitch);
 
     OPErr GM_SetWaveformSampleData(GM_Waveform *pWave, XPTR sampleData);
     OPErr GM_GetWaveformSampleData(GM_Waveform *pWave, XPTR *outSampleData);
@@ -1905,8 +1905,8 @@ typedef int32_t UNIT_TYPE;
 
     void *GM_GetSamplePlaybackPointer(VOICE_REFERENCE reference, uint32_t *outFrameLength);
 
-    void GM_ChangeSampleStereoPosition(VOICE_REFERENCE reference, XSWORD newStereoPosition);
-    XSWORD GM_GetSampleStereoPosition(VOICE_REFERENCE reference);
+    void GM_ChangeSampleStereoPosition(VOICE_REFERENCE reference, int16_t newStereoPosition);
+    int16_t GM_GetSampleStereoPosition(VOICE_REFERENCE reference);
 
 #if REVERB_USED != REVERB_DISABLED
     // return the current amount of reverb mix. 0-127 is the range.
@@ -1914,9 +1914,9 @@ typedef int32_t UNIT_TYPE;
     // set amount of reverb to mix. 0-127 is the range.
     void GM_SetSampleReverbAmount(VOICE_REFERENCE reference, int16_t amount);
     // change status of reverb. Force on, or off
-    void GM_ChangeSampleReverb(VOICE_REFERENCE reference, XBOOL enable);
+    void GM_ChangeSampleReverb(VOICE_REFERENCE reference, bool enable);
     // Get current status of reverb. On or off
-    XBOOL GM_GetSampleReverb(VOICE_REFERENCE reference);
+    bool GM_GetSampleReverb(VOICE_REFERENCE reference);
 #endif
 
     void GM_SetSampleOffsetCallbackLinks(VOICE_REFERENCE reference, GM_SampleCallbackEntry *pTopEntry);
@@ -1939,7 +1939,7 @@ typedef int32_t UNIT_TYPE;
 
     /**************************************************/
     /*
-    ** FUNCTION SetMasterSongTempo(XSDWORD newTempo);
+    ** FUNCTION SetMasterSongTempo(int32_t newTempo);
     **
     ** Overvue --
     **  This will set the master tempo for the currently playing song.
@@ -1956,18 +1956,18 @@ typedef int32_t UNIT_TYPE;
     XFIXED GM_GetMasterSongTempo(GM_Song *pSong);
 
     // Sets tempo in microsecond per quarter note
-    void GM_SetSongTempo(GM_Song *pSong, XDWORD newTempo);
+    void GM_SetSongTempo(GM_Song *pSong, uint32_t newTempo);
     // returns tempo in microsecond per quarter note
-    XDWORD GM_GetSongTempo(GM_Song *pSong);
+    uint32_t GM_GetSongTempo(GM_Song *pSong);
 
     // sets tempo in beats per minute
-    void GM_SetSongTempInBeatsPerMinute(GM_Song *pSong, XDWORD newTempoBPM);
+    void GM_SetSongTempInBeatsPerMinute(GM_Song *pSong, uint32_t newTempoBPM);
     // returns tempo in beats per minute
-    XDWORD GM_GetSongTempoInBeatsPerMinute(GM_Song *pSong);
+    uint32_t GM_GetSongTempoInBeatsPerMinute(GM_Song *pSong);
 
     // Instrument API
     // Translate a FOUR_CHAR file-format ID to the compact in-memory UNIT_TYPE.
-    UNIT_TYPE PV_TranslateFromFileToMemoryID(XDWORD fileUnitType);
+    UNIT_TYPE PV_TranslateFromFileToMemoryID(uint32_t fileUnitType);
 
     // Given an instrument number from 0 to MAX_INSTRUMENTS*MAX_BANKS, this will load that instrument into the musicvars globals, including
     // splits. The instrument is assumed to be the real instrument. No remaps or aliases are taken care of here
@@ -1978,24 +1978,24 @@ typedef int32_t UNIT_TYPE;
                                             XLongResourceID instrument,
                                             XBankToken bankToken,
                                             void *theX,
-                                            UINT32 theXPatchSize);
-    XBOOL GM_AnyStereoInstrumentsLoaded(GM_Song *pSong);
+                                            uint32_t theXPatchSize);
+    bool GM_AnyStereoInstrumentsLoaded(GM_Song *pSong);
 
     // Given an instrument number from 0 to MAX_INSTRUMENTS*MAX_BANKS, this will unload that instrument including
     // splits. The instrument is assumed to be the real instrument. No remaps or aliases are taken care of here
     // Can return STILL_PLAYING if instrument fails to unload
     OPErr GM_UnloadInstrument(GM_Song *pSong, XLongResourceID instrument);
 
-    OPErr GM_SetupSongRemaps(GM_Song *pSong, XBOOL checkForAliases);
+    OPErr GM_SetupSongRemaps(GM_Song *pSong, bool checkForAliases);
     OPErr GM_GetSongInstrumentRemap(GM_Song *pSong, XLongResourceID fromInstrument, XLongResourceID *pToInstrument);
     OPErr GM_RemapInstrument(GM_Song *pSong, XLongResourceID from, XLongResourceID to);
 
     //// Pass TRUE to cache samples, and share them. FALSE to create new copy for each sample
-    // void GM_SetCacheSamples(GM_Song *pSong, XBOOL cacheSamples);
-    // XBOOL GM_GetCacheSamples(GM_Song *pSong);
+    // void GM_SetCacheSamples(GM_Song *pSong, bool cacheSamples);
+    // bool GM_GetCacheSamples(GM_Song *pSong);
 
     // returns TRUE if instrument is loaded, FALSE if otherwise
-    XBOOL GM_IsInstrumentLoaded(GM_Song *pSong, XLongResourceID instrument);
+    bool GM_IsInstrumentLoaded(GM_Song *pSong, XLongResourceID instrument);
 
     /**************************************************/
     /*
@@ -2019,7 +2019,7 @@ typedef int32_t UNIT_TYPE;
     OPErr GM_LoadSongInstruments(GM_Song *theSong,
                                  XShortResourceID *pArray,
                                  XBankToken bankToken,
-                                 XBOOL loadInstruments);
+                                 bool loadInstruments);
 
     // Will unload all instruments assoicated to this song. Will follow remaps or instrument aliases.
     // can return STILL_PLAYING if instruments are still in process. Call again to clear
@@ -2036,36 +2036,36 @@ typedef int32_t UNIT_TYPE;
 
     // Will check to see if an instrument is loaded into this song. Will follow remaps or instrument aliases.
     // Returns TRUE if instrument is loaded, otherwise FALSE
-    XBOOL GM_IsSongInstrumentLoaded(GM_Song *pSong, XLongResourceID instrument);
+    bool GM_IsSongInstrumentLoaded(GM_Song *pSong, XLongResourceID instrument);
 
     // Will check to see if an instrument has got a remap.
     // Returns TRUE if instrument is remapped, otherwise FALSE
-    XBOOL GM_IsSongInstrumentRemapped(GM_Song *pSong, XLongResourceID instrument);
+    bool GM_IsSongInstrumentRemapped(GM_Song *pSong, XLongResourceID instrument);
 
-    void GM_SetSongLoopFlag(GM_Song *theSong, XBOOL loopSong);
-    XBOOL GM_GetSongLoopFlag(GM_Song *theSong);
+    void GM_SetSongLoopFlag(GM_Song *theSong, bool loopSong);
+    bool GM_GetSongLoopFlag(GM_Song *theSong);
 
     // pass TRUE to enabled meta loops for a song, FALSE to not loop
-    void GM_SetSongMetaLoopFlag(GM_Song *theSong, XBOOL loopSong);
+    void GM_SetSongMetaLoopFlag(GM_Song *theSong, bool loopSong);
     // return the meta loop status for a song
-    XBOOL GM_GetSongMetaLoopFlag(GM_Song *theSong);
+    bool GM_GetSongMetaLoopFlag(GM_Song *theSong);
 
     int16_t GM_GetSongLoopMax(GM_Song *theSong);
     void GM_SetSongLoopMax(GM_Song *theSong, int16_t maxLoopCount);
 
     int16_t GM_GetChannelVolume(GM_Song *theSong, int16_t channel);
-    void GM_SetChannelVolume(GM_Song *theSong, int16_t channel, int16_t volume, XBOOL updateNow);
+    void GM_SetChannelVolume(GM_Song *theSong, int16_t channel, int16_t volume, bool updateNow);
 
-    OPErr GM_SetDisposeSongDataWhenDoneFlag(GM_Song *pSong, XBOOL disposeData);
-    OPErr GM_GetDisposeSongDataWhenDoneFlag(GM_Song *pSong, XBOOL *outDisposeData);
+    OPErr GM_SetDisposeSongDataWhenDoneFlag(GM_Song *pSong, bool disposeData);
+    OPErr GM_GetDisposeSongDataWhenDoneFlag(GM_Song *pSong, bool *outDisposeData);
 
-    OPErr GM_ChangeSongVoices(GM_Song *pSong, INT16 maxSongVoices, INT16 mixLevel, INT16 maxEffectVoices);
-    OPErr GM_GetSongVoices(GM_Song *pSong, INT16 *pMaxSongVoices, INT16 *pMixLevel, INT16 *pMaxEffectVoices);
+    OPErr GM_ChangeSongVoices(GM_Song *pSong, int16_t maxSongVoices, int16_t mixLevel, int16_t maxEffectVoices);
+    OPErr GM_GetSongVoices(GM_Song *pSong, int16_t *pMaxSongVoices, int16_t *pMixLevel, int16_t *pMaxEffectVoices);
 
 #if REVERB_USED != REVERB_DISABLED
     // set reverb of a channel of a current song. If updateNow is active and the song is playing
     // the voice will up updated
-    void GM_SetChannelReverb(GM_Song *theSong, int16_t channel, XBYTE reverbAmount, XBOOL updateNow);
+    void GM_SetChannelReverb(GM_Song *theSong, int16_t channel, unsigned char reverbAmount, bool updateNow);
 
     // Given a song and a channel, this will return the current reverb level
     int16_t GM_GetChannelReverb(GM_Song *theSong, int16_t channel);
@@ -2073,26 +2073,26 @@ typedef int32_t UNIT_TYPE;
 
     // Given a song and a new volume set/return the master volume of the song
     // Range is 0 to 127. You can overdrive
-    void GM_SetSongVolume(GM_Song *theSong, XSWORD newVolume);
-    XSWORD GM_GetSongVolume(GM_Song *theSong);
+    void GM_SetSongVolume(GM_Song *theSong, int16_t newVolume);
+    int16_t GM_GetSongVolume(GM_Song *theSong);
 
     // set/get song position. Range is MAX_PAN_LEFT to MAX_PAN_RIGHT
-    void GM_SetSongStereoPosition(GM_Song *theSong, XSWORD newStereoPosition);
-    XSWORD GM_GetSetStereoPosition(GM_Song *theSong);
+    void GM_SetSongStereoPosition(GM_Song *theSong, int16_t newStereoPosition);
+    int16_t GM_GetSetStereoPosition(GM_Song *theSong);
 
     void GM_SetSongFadeRate(GM_Song *pSong, XFIXED fadeRate,
-                            XSWORD minVolume, XSWORD maxVolume, XBOOL endSong);
+                            int16_t minVolume, int16_t maxVolume, bool endSong);
 
     // range is 0 to MAX_MASTER_VOLUME (256)
-    void GM_SetEffectsVolume(XSWORD newVolume);
-    XSWORD GM_GetEffectsVolume(void);
+    void GM_SetEffectsVolume(int16_t newVolume);
+    int16_t GM_GetEffectsVolume(void);
 
-    XBOOL GM_IsInstrumentRangeUsed(GM_Song *pSong, XLongResourceID thePatch, XSWORD theLowKey, XSWORD theHighKey);
-    XBOOL GM_IsInstrumentUsed(GM_Song *pSong, XLongResourceID thePatch, XSWORD theKey);
-    void GM_SetUsedInstrumentRange(GM_Song *pSong, XLongResourceID thePatch, int start, int end, XBOOL used);
-    void GM_SetUsedInstrument(GM_Song *pSong, XLongResourceID thePatch, XSWORD theKey, XBOOL used);
-    void GM_SetInstrumentUsedRange(GM_Song *pSong, XLongResourceID thePatch, XSBYTE *pUsedArray);
-    void GM_GetInstrumentUsedRange(GM_Song *pSong, XLongResourceID thePatch, XSBYTE *pUsedArray);
+    bool GM_IsInstrumentRangeUsed(GM_Song *pSong, XLongResourceID thePatch, int16_t theLowKey, int16_t theHighKey);
+    bool GM_IsInstrumentUsed(GM_Song *pSong, XLongResourceID thePatch, int16_t theKey);
+    void GM_SetUsedInstrumentRange(GM_Song *pSong, XLongResourceID thePatch, int start, int end, bool used);
+    void GM_SetUsedInstrument(GM_Song *pSong, XLongResourceID thePatch, int16_t theKey, bool used);
+    void GM_SetInstrumentUsedRange(GM_Song *pSong, XLongResourceID thePatch, signed char *pUsedArray);
+    void GM_GetInstrumentUsedRange(GM_Song *pSong, XLongResourceID thePatch, signed char *pUsedArray);
 
     // resets the tempo to the inital default state
     void GM_ResetTempoToDefault(GM_Song *pSong);
@@ -2108,11 +2108,11 @@ typedef int32_t UNIT_TYPE;
     void GM_SetSongProgramBankCallback(GM_Song *theSong, GM_ProgramBankCallbackPtr theCallback, void *reference);
 
     // Display
-    XSWORD GM_GetAudioSampleFrame(XSWORD *pLeft, XSWORD *pRight);
+    int16_t GM_GetAudioSampleFrame(int16_t *pLeft, int16_t *pRight);
 
     // This will check active voices and look at a sub sample of the audio output to
     // determine if there's any audio still playing
-    XBOOL GM_IsAudioActive(void);
+    bool GM_IsAudioActive(void);
 
     typedef enum
     {
@@ -2122,16 +2122,16 @@ typedef int32_t UNIT_TYPE;
 
     struct GM_AudioInfo
     {
-        XSWORD maxNotesAllocated;
-        XSWORD maxEffectsAllocated;
-        XSWORD mixLevelAllocated;
-        XSWORD voicesActive;                // number of voices active
+        int16_t maxNotesAllocated;
+        int16_t maxEffectsAllocated;
+        int16_t mixLevelAllocated;
+        int16_t voicesActive;                // number of voices active
         XLongResourceID patch[MAX_VOICES];  // current patches (program, and bank)
-        XSWORD volume[MAX_VOICES];          // current volumes
-        XSWORD scaledVolume[MAX_VOICES];    // current scaled volumes
-        XSWORD channel[MAX_VOICES];         // current channel
-        XSWORD midiNote[MAX_VOICES];        // current midi note
-        XSWORD voice[MAX_VOICES];           // voice index
+        int16_t volume[MAX_VOICES];          // current volumes
+        int16_t scaledVolume[MAX_VOICES];    // current scaled volumes
+        int16_t channel[MAX_VOICES];         // current channel
+        int16_t midiNote[MAX_VOICES];        // current midi note
+        int16_t voice[MAX_VOICES];           // voice index
         GM_VoiceType voiceType[MAX_VOICES]; // voice type
         GM_Song *pSong[MAX_VOICES];         // song associated with voice
     };
@@ -2233,21 +2233,21 @@ typedef int32_t UNIT_TYPE;
 // External MIDI links
 #define Q_GET_TICK 0L // if you pass this constant for timeStamp it will get the current
                       // tick
-    void QGM_NoteOn(GM_Song *pSong, XDWORD timeStamp, XSWORD channel, XSWORD note, XSWORD velocity);
-    void QGM_NoteOff(GM_Song *pSong, XDWORD timeStamp, XSWORD channel, XSWORD note, XSWORD velocity);
-    void QGM_ProgramChange(GM_Song *pSong, XDWORD timeStamp, XSWORD channel, XSWORD program);
-    void QGM_PitchBend(GM_Song *pSong, XDWORD timeStamp, XSWORD channel, XBYTE valueMSB, XBYTE valueLSB);
-    void QGM_Controller(GM_Song *pSong, XDWORD timeStamp, XSWORD channel, XSWORD controller, XSWORD value);
-    void QGM_AllNotesOff(GM_Song *pSong, XDWORD timeStamp);
+    void QGM_NoteOn(GM_Song *pSong, uint32_t timeStamp, int16_t channel, int16_t note, int16_t velocity);
+    void QGM_NoteOff(GM_Song *pSong, uint32_t timeStamp, int16_t channel, int16_t note, int16_t velocity);
+    void QGM_ProgramChange(GM_Song *pSong, uint32_t timeStamp, int16_t channel, int16_t program);
+    void QGM_PitchBend(GM_Song *pSong, uint32_t timeStamp, int16_t channel, unsigned char valueMSB, unsigned char valueLSB);
+    void QGM_Controller(GM_Song *pSong, uint32_t timeStamp, int16_t channel, int16_t controller, int16_t value);
+    void QGM_AllNotesOff(GM_Song *pSong, uint32_t timeStamp);
     void QGM_LockExternalMidiQueue(void);
     void QGM_UnlockExternalMidiQueue(void);
 
     // External MIDI Links using a GM_Song. Will be unstable unless called via GM_AudioTaskCallbackPtr
-    void GM_NoteOn(GM_Song *pSong, XSWORD channel, XSWORD note, XSWORD velocity);
-    void GM_NoteOff(GM_Song *pSong, XSWORD channel, XSWORD note, XSWORD velocity);
-    void GM_ProgramChange(GM_Song *pSong, XSWORD channel, XSWORD program);
-    void GM_PitchBend(GM_Song *pSong, XSWORD channel, XBYTE valueMSB, XBYTE valueLSB);
-    void GM_Controller(GM_Song *pSong, XSWORD channel, XSWORD controller, XSWORD value);
+    void GM_NoteOn(GM_Song *pSong, int16_t channel, int16_t note, int16_t velocity);
+    void GM_NoteOff(GM_Song *pSong, int16_t channel, int16_t note, int16_t velocity);
+    void GM_ProgramChange(GM_Song *pSong, int16_t channel, int16_t program);
+    void GM_PitchBend(GM_Song *pSong, int16_t channel, unsigned char valueMSB, unsigned char valueLSB);
+    void GM_Controller(GM_Song *pSong, int16_t channel, int16_t controller, int16_t value);
     void GM_AllNotesOff(GM_Song *pSong);
 
     // mixer callbacks and tasks
@@ -2285,7 +2285,7 @@ typedef int32_t UNIT_TYPE;
 
     // This will read into memory the entire file and return a GM_Waveform structure.
     // To dispose of a GM_Waveform structure, call GM_FreeWaveform
-    GM_Waveform *GM_ReadFileIntoMemory(XFILENAME *file, AudioFileType fileType, XBOOL decodeData, OPErr *pErr);
+    GM_Waveform *GM_ReadFileIntoMemory(XFILENAME *file, AudioFileType fileType, bool decodeData, OPErr *pErr);
 
     // write memory to a file
     OPErr GM_WriteFileFromMemory(XFILENAME *file,
@@ -2322,7 +2322,7 @@ typedef int32_t UNIT_TYPE;
     // To dispose of a GM_Waveform structure, call GM_FreeWaveform
     GM_Waveform *GM_ReadFileIntoMemoryFromMemory(void *pFileBlock, uint32_t fileBlockSize,
                                                  AudioFileType fileType,
-                                                 XBOOL decodeSamples, OPErr *pErr);
+                                                 bool decodeSamples, OPErr *pErr);
 
     GM_Waveform *GM_ReadRawAudioIntoMemoryFromMemory(void *sampleData,   // pointer to audio data
                                                      uint32_t frames,    // number of frames of audio
@@ -2513,7 +2513,7 @@ typedef int32_t UNIT_TYPE;
                                              AudioFileType fileType, // type of file
                                              uint32_t bufferSize,    // temp buffer to read file
                                              GM_Waveform *pFileInfo,
-                                             XBOOL loopFile); // TRUE will loop file
+                                             bool loopFile); // TRUE will loop file
 
     // setup a streaming memory block
     STREAM_REFERENCE GM_AudioStreamMemorySetup(void *threadContext,    // platform threadContext
@@ -2522,14 +2522,14 @@ typedef int32_t UNIT_TYPE;
                                                AudioFileType fileType,
                                                uint32_t bufferSize,
                                                GM_Waveform *pFileInfo,
-                                               XBOOL loopFile);
+                                               bool loopFile);
 #endif                                                        // USE_HIGHLEVEL_FILE_API
 
 #if USE_HIGHLEVEL_FILE_API
     // Set the loop flag of a audio stream
-    void GM_AudioStreamSetLoop(STREAM_REFERENCE reference, XBOOL loopFile);
+    void GM_AudioStreamSetLoop(STREAM_REFERENCE reference, bool loopFile);
     // Get the loop flag of a audio stream
-    XBOOL GM_AudioStreamGetLoop(STREAM_REFERENCE reference);
+    bool GM_AudioStreamGetLoop(STREAM_REFERENCE reference);
     // Get the done callback and reference flag of a audio stream
     void *GM_AudioStreamGetDoneCallback(STREAM_REFERENCE reference, GM_SoundDoneCallbackPtr *pDoneCallback);
     // Set the done callback and reference flag of a audio stream
@@ -2587,13 +2587,13 @@ typedef int32_t UNIT_TYPE;
     void GM_AudioStreamService(void *threadContext);
 
     // Returns TRUE or FALSE if a given AudioStream is still active
-    XBOOL GM_IsAudioStreamPlaying(STREAM_REFERENCE reference);
+    bool GM_IsAudioStreamPlaying(STREAM_REFERENCE reference);
 
     // Returns TRUE if a given AudioStream is valid
-    XBOOL GM_IsAudioStreamValid(STREAM_REFERENCE reference);
+    bool GM_IsAudioStreamValid(STREAM_REFERENCE reference);
 
     // Set the volume level of a audio stream
-    void GM_AudioStreamSetVolume(STREAM_REFERENCE reference, int16_t newVolume, XBOOL defer);
+    void GM_AudioStreamSetVolume(STREAM_REFERENCE reference, int16_t newVolume, bool defer);
 
     // set the volume level of all open streams
     void GM_AudioStreamSetVolumeAll(int16_t newVolume);
@@ -2603,7 +2603,7 @@ typedef int32_t UNIT_TYPE;
 
     // start a stream fading
     void GM_SetAudioStreamFadeRate(STREAM_REFERENCE reference, XFIXED fadeRate,
-                                   XSWORD minVolume, XSWORD maxVolume, XBOOL endStream);
+                                   int16_t minVolume, int16_t maxVolume, bool endStream);
 
     // Set the sample rate of a audio stream
     void GM_AudioStreamSetRate(STREAM_REFERENCE reference, XFIXED newRate);
@@ -2638,8 +2638,8 @@ typedef int32_t UNIT_TYPE;
     void GM_AudioStreamFlush(STREAM_REFERENCE reference);
 
     // Enable/Disable reverb on this particular audio stream
-    void GM_AudioStreamReverb(STREAM_REFERENCE reference, XBOOL useReverb);
-    XBOOL GM_AudioStreamGetReverb(STREAM_REFERENCE reference);
+    void GM_AudioStreamReverb(STREAM_REFERENCE reference, bool useReverb);
+    bool GM_AudioStreamGetReverb(STREAM_REFERENCE reference);
     // get/set reverb mix level
     void GM_SetStreamReverbAmount(STREAM_REFERENCE reference, int16_t reverbAmount);
     int16_t GM_GetStreamReverbAmount(STREAM_REFERENCE reference);
@@ -2688,14 +2688,14 @@ typedef int32_t UNIT_TYPE;
 
     // Volume range is from 0 to MAX_NOTE_VOLUME
     // set in unison the sample volume for all the linked streams
-    void GM_SetLinkedStreamVolume(LINKED_STREAM_REFERENCE pTop, XSWORD sampleVolume, XBOOL defer);
+    void GM_SetLinkedStreamVolume(LINKED_STREAM_REFERENCE pTop, int16_t sampleVolume, bool defer);
 
     // set in unison the sample rate for all the linked streams
     void GM_SetLinkedStreamRate(LINKED_STREAM_REFERENCE pTop, XFIXED theNewRate);
 
     // set in unison the sample position for all the linked streams
     // range from -63 to 63
-    void GM_SetLinkedStreamPosition(LINKED_STREAM_REFERENCE pTop, XSWORD newStereoPosition);
+    void GM_SetLinkedStreamPosition(LINKED_STREAM_REFERENCE pTop, int16_t newStereoPosition);
 
 #endif // USE_STREAM_API
 
@@ -2730,82 +2730,82 @@ typedef int32_t UNIT_TYPE;
 
     // Volume range is from 0 to MAX_NOTE_VOLUME
     // set in unison the sample volume for all the linked samples
-    void GM_SetLinkedSampleVolume(LINKED_VOICE_REFERENCE reference, XSWORD sampleVolume);
+    void GM_SetLinkedSampleVolume(LINKED_VOICE_REFERENCE reference, int16_t sampleVolume);
 
     // set in unison the sample rate for all the linked samples
     void GM_SetLinkedSampleRate(LINKED_VOICE_REFERENCE reference, XFIXED theNewRate);
 
     // set in unison the sample position for all the linked samples
     // range from -63 to 63
-    void GM_SetLinkedSamplePosition(LINKED_VOICE_REFERENCE reference, XSWORD newStereoPosition);
+    void GM_SetLinkedSamplePosition(LINKED_VOICE_REFERENCE reference, int16_t newStereoPosition);
 
 #ifdef BAE_MCU
     // build next frame. Causes messages to be sent to the DSP. Calls GM_ProcessSyncUpdateFromDSP
-    void BAE_BuildMCUSlice(void *threadContext, XDWORD dspTime);
+    void BAE_BuildMCUSlice(void *threadContext, uint32_t dspTime);
 
     // process next frame. Causes messages to be sent to the DSP
-    OPErr GM_ProcessSyncUpdateFromDSP(XDWORD dspTime);
+    OPErr GM_ProcessSyncUpdateFromDSP(uint32_t dspTime);
 
     typedef struct GM_Voice GM_Voice;
 
     // 8 bit, stereo
     void GM_DSPMix8SFullBuffer(GM_Voice *this_voice);
-    void GM_DSPMix8SPartialBuffer(GM_Voice *this_voice, XBOOL looping);
+    void GM_DSPMix8SPartialBuffer(GM_Voice *this_voice, bool looping);
 
     // 8 bit, mono
     void GM_DSPMix8MFullBuffer(GM_Voice *this_voice);
-    void GM_DSPMix8MPartialBuffer(GM_Voice *this_voice, XBOOL looping);
+    void GM_DSPMix8MPartialBuffer(GM_Voice *this_voice, bool looping);
 
     // 16 bit, stereo
     void GM_DSPMix16SFullBuffer(GM_Voice *this_voice);
-    void GM_DSPMix16SPartialBuffer(GM_Voice *this_voice, XBOOL looping);
+    void GM_DSPMix16SPartialBuffer(GM_Voice *this_voice, bool looping);
 
     // 16 bit, mono
     void GM_DSPMix16MFullBuffer(GM_Voice *this_voice);
-    void GM_DSPMix16MPartialBuffer(GM_Voice *this_voice, XBOOL looping);
+    void GM_DSPMix16MPartialBuffer(GM_Voice *this_voice, bool looping);
 
     // 8 bit, stereo, filters
     void GM_DSPMix8SFilterFullBuffer(GM_Voice *this_voice);
-    void GM_DSPMix8SFilterPartialBuffer(GM_Voice *this_voice, XBOOL looping);
+    void GM_DSPMix8SFilterPartialBuffer(GM_Voice *this_voice, bool looping);
 
     // 8 bit, mono, filters
     void GM_DSPMix8MFilterFullBuffer(GM_Voice *this_voice);
-    void GM_DSPMix8MFilterPartialBuffer(GM_Voice *this_voice, XBOOL looping);
+    void GM_DSPMix8MFilterPartialBuffer(GM_Voice *this_voice, bool looping);
 
     // 16 bit, stereo, filters
     void GM_DSPMix16SFilterFullBuffer(GM_Voice *this_voice);
-    void GM_DSPMix16SFilterPartialBuffer(GM_Voice *this_voice, XBOOL looping);
+    void GM_DSPMix16SFilterPartialBuffer(GM_Voice *this_voice, bool looping);
 
     // 16 bit, mono, filters
     void GM_DSPMix16MFilterFullBuffer(GM_Voice *this_voice);
-    void GM_DSPMix16MFilterPartialBuffer(GM_Voice *this_voice, XBOOL looping);
+    void GM_DSPMix16MFilterPartialBuffer(GM_Voice *this_voice, bool looping);
 
     // dsp transfer functions
 
     // given a voice, and samples and the number of samples, send them
     // over to the dsp for futhar processing.
     // assumes samples are 16 bit.
-    OPErr GM_SendVoiceSamplesToDSP16(XWORD voice, XSWORD *samples, XWORD channels, XWORD frames);
+    OPErr GM_SendVoiceSamplesToDSP16(uint16_t voice, int16_t *samples, uint16_t channels, uint16_t frames);
 
     // given a voice, and samples and the number of samples, send them
     // over to the dsp for futhar processing.
     // assumes samples are 8 bit.
-    OPErr GM_SendVoiceSamplesToDSP8(XWORD voice, XBYTE *samples, XWORD channels, XWORD frames);
+    OPErr GM_SendVoiceSamplesToDSP8(uint16_t voice, unsigned char *samples, uint16_t channels, uint16_t frames);
 
     // update voice given a voice, pos, and amplitude envelope vectors
     // no filters only interpolator
-    OPErr GM_UpdateVoiceOnDSPNoFilter(XWORD voice, XDWORD waveInc, XDWORD ampEnvL, XDWORD ampEnvR);
+    OPErr GM_UpdateVoiceOnDSPNoFilter(uint16_t voice, uint32_t waveInc, uint32_t ampEnvL, uint32_t ampEnvR);
 
     // update voice given a voice, pos, and amplitude envelope vectors
     // low pass filter and interpolator
-    OPErr GM_UpdateVoiceOnDSPOnePole(XWORD voice, XDWORD waveInc, XDWORD ampEnvL, XDWORD ampEnvR,
-                                     XDWORD filterTapZero, XDWORD filterTapOne);
+    OPErr GM_UpdateVoiceOnDSPOnePole(uint16_t voice, uint32_t waveInc, uint32_t ampEnvL, uint32_t ampEnvR,
+                                     uint32_t filterTapZero, uint32_t filterTapOne);
 
     // update voice given a voice, pos, and amplitude envelope vectors
     // low pass filter and interpolator and resonant delay line
-    OPErr GM_UpdateVoiceOnDSPDelayLine(XWORD voice, XDWORD waveInc, XDWORD ampEnvL, XDWORD ampEnvR,
-                                       XDWORD filterTapZero, XDWORD filterTapOne,
-                                       XDWORD filterTapTwo, XDWORD filterDelayLength);
+    OPErr GM_UpdateVoiceOnDSPDelayLine(uint16_t voice, uint32_t waveInc, uint32_t ampEnvL, uint32_t ampEnvR,
+                                       uint32_t filterTapZero, uint32_t filterTapOne,
+                                       uint32_t filterTapTwo, uint32_t filterDelayLength);
 
     // init a voice using the given parmeters on the DSP.
     OPErr GM_InitVoiceOnDSP(GM_Voice *pVoice);
@@ -2822,7 +2822,7 @@ typedef int32_t UNIT_TYPE;
 #endif
 
 
-void PV_ProcessController(GM_Song *pSong, INT16 MIDIChannel, INT16 currentTrack, INT16 controler, UINT16 value);
+void PV_ProcessController(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTrack, int16_t controler, uint16_t value);
 
-XBOOL PV_IsMuted(GM_Song *pSong, INT16 MIDIChannel, INT16 currentTrack);
+bool PV_IsMuted(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTrack);
 #endif /* GenSnd.h */

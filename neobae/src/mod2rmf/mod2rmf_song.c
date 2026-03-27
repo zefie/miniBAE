@@ -180,7 +180,7 @@ void mod2rmf_analyze_channel_usage(const ModSongModel *song,
 int mod2rmf_ensure_loop_cc_resets(ModSongModel *song)
 {
     uint32_t ch, i;
-    XBOOL needsSort = FALSE;
+    bool needsSort = FALSE;
 
     if (!song || !song->loopEnabled)
     {
@@ -189,14 +189,14 @@ int mod2rmf_ensure_loop_cc_resets(ModSongModel *song)
 
     for (ch = 0; ch < song->channelCount; ++ch)
     {
-        XBOOL hasNotes = FALSE;
+        bool hasNotes = FALSE;
         uint8_t channelProgram = 0xFF;
         /* Track the effective CC7 at loopStartTick and loopEndTick.
          * Engine default is 127 (MAX_NOTE_VOLUME). */
         uint8_t cc7AtLoopStart = 127; /* engine default */
         uint8_t cc7AtLoopEnd = 127;   /* engine default */
-        XBOOL hasCC7 = FALSE;
-        XBOOL hasCC7AtLoopStart = FALSE;
+        bool hasCC7 = FALSE;
+        bool hasCC7AtLoopStart = FALSE;
 
         /* Check if this channel has notes */
         for (i = 0; i < song->noteCount; ++i)
@@ -276,7 +276,7 @@ int mod2rmf_ensure_loop_cc_resets(ModSongModel *song)
 int mod2rmf_ensure_loop_pitch_bend_resets(ModSongModel *song)
 {
     uint32_t ch, i;
-    XBOOL needsSort = FALSE;
+    bool needsSort = FALSE;
 
     if (!song || !song->loopEnabled)
     {
@@ -285,13 +285,13 @@ int mod2rmf_ensure_loop_pitch_bend_resets(ModSongModel *song)
 
     for (ch = 0; ch < song->channelCount; ++ch)
     {
-        XBOOL hasNotes = FALSE;
+        bool hasNotes = FALSE;
         uint8_t channelProgram = 0xFF;
         /* Engine default pitch bend is center */
         uint16_t bendAtLoopStart = MOD2RMF_PITCH_BEND_CENTER;
         uint16_t bendAtLoopEnd = MOD2RMF_PITCH_BEND_CENTER;
-        XBOOL hasBend = FALSE;
-        XBOOL hasBendAtLoopStart = FALSE;
+        bool hasBend = FALSE;
+        bool hasBendAtLoopStart = FALSE;
 
         /* Check if this channel has notes */
         for (i = 0; i < song->noteCount; ++i)
@@ -373,7 +373,7 @@ int mod2rmf_ensure_loop_pitch_bend_resets(ModSongModel *song)
  * overlap-minimizing algorithm. */
 
 
-int mod2rmf_spread_channels_by_program(ModSongModel *song, XBOOL isMod,
+int mod2rmf_spread_channels_by_program(ModSongModel *song, bool isMod,
                                       uint8_t stereoSep)
 {
     uint8_t virtualChanMap[MOD2RMF_MAX_CHANNELS][128];

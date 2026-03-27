@@ -52,7 +52,7 @@ char const usageString[] =
 	"		[inst] optional instrument to display. Default is all instruments.\n";
 
 
-static char * PV_GetBoolText(XBOOL flag)
+static char * PV_GetBoolText(bool flag)
 {
 	static char *b_false = "false";
 	static char *b_true = "true";

@@ -50,10 +50,10 @@ extern "C" {
 #if USE_VORBIS_DECODER == TRUE
 
 // Vorbis decoder functions
-XBOOL XIsVorbisFile(XFILE file);
+bool XIsVorbisFile(XFILE file);
 void* XOpenVorbisFile(XFILE file);
-OPErr XGetVorbisFileInfo(void *decoder_handle, UINT32 *samples, UINT32 *sample_rate, 
-                        UINT32 *channels, UINT32 *bit_depth);
+OPErr XGetVorbisFileInfo(void *decoder_handle, uint32_t *samples, uint32_t *sample_rate, 
+                        uint32_t *channels, uint32_t *bit_depth);
 long XDecodeVorbisFile(void *decoder_handle, void *buffer, long buffer_size);
 void XCloseVorbisFile(void *decoder_handle);
 
@@ -62,7 +62,7 @@ void XCloseVorbisFile(void *decoder_handle);
 #if USE_VORBIS_ENCODER == TRUE
 
 // Vorbis encoder functions
-void* XInitVorbisEncoder(UINT32 sample_rate, UINT32 channels, float quality);
+void* XInitVorbisEncoder(uint32_t sample_rate, uint32_t channels, float quality);
 long XWriteVorbisHeader(void *encoder_handle, XFILE output_file);
 long XEncodeVorbisData(void *encoder_handle, float **pcm_data, long samples, XFILE output_file);
 void XCloseVorbisEncoder(void *encoder_handle);

@@ -35,7 +35,7 @@ void mod2rmf_analyze_channel_usage(const ModSongModel *song,
 void mod2rmf_channel_profile_cleanup(ChannelProfile *profiles, uint32_t count);
 int mod2rmf_channel_profile_add_range(ChannelProfile *p, uint32_t start, uint32_t end);
 void mod2rmf_channel_profile_add_program(ChannelProfile *p, uint8_t program);
-int mod2rmf_spread_channels_by_program(ModSongModel *song, XBOOL isMod,
+int mod2rmf_spread_channels_by_program(ModSongModel *song, bool isMod,
                                       uint8_t stereoSep);
 
 #endif /* MOD2RMF_SONG_H */

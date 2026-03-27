@@ -169,6 +169,6 @@ JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Song__1isSF2Song(JNIEnv* env, j
     (void)env; (void)clazz;
     if(songRef == 0){ return JNI_FALSE; }
     BAESong song = (BAESong)(intptr_t)songRef;
-    XBOOL isSF2 = BAESong_IsSF2Song(song);
+    bool isSF2 = BAESong_IsSF2Song(song);
     return (isSF2) ? JNI_TRUE : JNI_FALSE;
 }

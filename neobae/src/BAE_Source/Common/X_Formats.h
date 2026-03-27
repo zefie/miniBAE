@@ -159,7 +159,7 @@
 **  8/3/99      Added XSwap16BitSamples
 **  9/9/99      MOE: Added C_IMA4_WAV
 **  9/9/99      MOE: Changed the type of XExtSoundHeader.sampleIsIntelOrder
-**              from char to XBYTE
+**              from char to unsigned char
 **  9/9/99      MOE: Added XMPEGDecodedData.bitrate
 **  9/9/99      MOE: Changed XSwap16BitSamples() calls to XSwapShorts(), which I added for 1.52
 **  9/9/99      MOE: eliminated XOpenMPEGStreamFromXFILENAME() since it wasn't
@@ -465,8 +465,8 @@ typedef struct X_PACKBY1
     SongType            songType;
     int32_t                songTempo;
     int16_t           songPitchShift;
-    XBOOL               songLocked;
-    XBOOL               songEmbedded;
+    bool               songLocked;
+    bool               songEmbedded;
 
     char                *title;                         // 0
     char                *performed;                     // 1
@@ -691,29 +691,29 @@ typedef struct X_PACKBY1
 {
     XResourceType       subType;            // sub type: C_NONE, C_IMA4, C_ULAW, C_MPEG, etc
     XFIXED              sampleRate;         // sample rate
-    XDWORD              decodedBytes;       // the size of the decoded data, not including the frames skipped by startFrame
-    XDWORD              frameCount;         // the number of sample-frames, not including the frames skipped by startFrame
+    uint32_t              decodedBytes;       // the size of the decoded data, not including the frames skipped by startFrame
+    uint32_t              frameCount;         // the number of sample-frames, not including the frames skipped by startFrame
                                             // if C_MPEG, the number of blocks
-    XDWORD              encodedBytes;       // the size of the encoded data (same as decodedBytes if C_NONE)
-    XDWORD              blockBytes;         // once stored the size of an MPEG block, now unused
-    XDWORD              startFrame;         // how many frames to skip at the beginning of uncompressed sample data
+    uint32_t              encodedBytes;       // the size of the encoded data (same as decodedBytes if C_NONE)
+    uint32_t              blockBytes;         // once stored the size of an MPEG block, now unused
+    uint32_t              startFrame;         // how many frames to skip at the beginning of uncompressed sample data
                                             // if C_MPEG, the number of 16-bit words (samples)
-    XDWORD              loopStart[6];       // loop start frame for each channel. max 6 channels
-    XDWORD              loopEnd[6];         // loop end frame
+    uint32_t              loopStart[6];       // loop start frame for each channel. max 6 channels
+    uint32_t              loopEnd[6];         // loop end frame
     XResourceType       nameResourceType;   // Resource name type. ie (AUDIO_NAME_TYPE)
                                             // if ID_NULL, then no name
     XLongResourceID     nameResourceID;     // Resource name id. ie AUDIO_NAME_TYPE ID 2000
 
-    XBYTE               baseKey;            // base sample key
-    XBYTE               channels;           // 1 for mono, 2 for stereo, up to 6
-    XBYTE               bitSize;            // sample bit size; 8 or 16
-    XBYTE               isEmbedded;         // is sample embedded
-    XBYTE               isEncrypted;        // is sample encrypted
-    XBYTE               isSampleIntelOrder; // if true, then sampleArea data is intel ordered
-    XBYTE               reserved2[2];       // alignment to 8 bytes
-    XDWORD              reserved3[8];       // extra
+    unsigned char               baseKey;            // base sample key
+    unsigned char               channels;           // 1 for mono, 2 for stereo, up to 6
+    unsigned char               bitSize;            // sample bit size; 8 or 16
+    unsigned char               isEmbedded;         // is sample embedded
+    unsigned char               isEncrypted;        // is sample encrypted
+    unsigned char               isSampleIntelOrder; // if true, then sampleArea data is intel ordered
+    unsigned char               reserved2[2];       // alignment to 8 bytes
+    uint32_t              reserved3[8];       // extra
 
-    XBYTE               sampleArea[1];      // space for when samples follow directly
+    unsigned char               sampleArea[1];      // space for when samples follow directly
 } XSoundHeader3;
 
 
@@ -971,7 +971,7 @@ typedef struct
     int16_t           baseKey;            // base sample key
     XShortResourceID    theID;              // sample ID if required
     XResourceType       compressionType;    // compression type
-    XDWORD              sndFlags;           // XSoundHeader3 reserved2[0] flags (0 for non-type3 headers)
+    uint32_t              sndFlags;           // XSoundHeader3 reserved2[0] flags (0 for non-type3 headers)
     void                *pMasterPtr;        // master pointer if required
                                             //MOE: This field needs documenting!
 } SampleDataInfo;
@@ -1047,7 +1047,7 @@ XPTR XGetSamplePtrFromSnd(XPTR pRes, SampleDataInfo *pInfo);
 //          -1  if parameter err
 //          -2  badly formatted resource
 //          -3  not supported format type
-XERR XGetSampleInfoFromSnd(XPTR pResource, SampleDataInfo *pOutInfo);
+int32_t XGetSampleInfoFromSnd(XPTR pResource, SampleDataInfo *pOutInfo);
 
 void XSetSoundLoopPoints(XPTR pRes, int32_t loopStart, int32_t loopEnd);
 void XSetSoundSampleRate(XPTR pRes, XFIXED sampleRate);
@@ -1055,20 +1055,20 @@ void XSetSoundBaseKey(XPTR pRes, int16_t baseKey);
 int16_t XGetSoundBaseKey(XPTR pRes);
 
 /* Set or clear the XSOUND_OPUS_ROUNDTRIP_RESAMPLE bit in reserved2[0] (XType3Header only). */
-void XSetSoundOpusRoundTripFlag(XPTR pRes, XBOOL enabled);
+void XSetSoundOpusRoundTripFlag(XPTR pRes, bool enabled);
 /* Return TRUE if the XSOUND_OPUS_ROUNDTRIP_RESAMPLE bit is set. */
-XBOOL XGetSoundOpusRoundTripFlag(XPTR pRes);
+bool XGetSoundOpusRoundTripFlag(XPTR pRes);
 
 /* Set or clear the XSOUND_ADVANCED_INTERPOLATION bit in reserved2[0] (XType3Header only). */
-void XSetSoundAdvancedInterpolationFlag(XPTR pRes, XBOOL enabled);
+void XSetSoundAdvancedInterpolationFlag(XPTR pRes, bool enabled);
 /* Return TRUE if the XSOUND_ADVANCED_INTERPOLATION bit is set. */
-XBOOL XGetSoundAdvancedInterpolationFlag(XPTR pRes);
+bool XGetSoundAdvancedInterpolationFlag(XPTR pRes);
 
-XBOOL XGetSoundEmbeddedStatus(XPTR pRes);
-void XSetSoundEmbeddedStatus(XPTR pRes, XBOOL soundEmbedded);
+bool XGetSoundEmbeddedStatus(XPTR pRes);
+void XSetSoundEmbeddedStatus(XPTR pRes, bool soundEmbedded);
 
 // Decodes compressed sound data into a newly allocated memory block
-OPErr XDecodeSampleData(GM_Waveform const* src, UINT32 startFrame, GM_Waveform* dst);
+OPErr XDecodeSampleData(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst);
 
 // Given a data stream in (dst). This can be unformatted PCM data, or a compressed stream,
 // a GM_Waveform (src) describing the data 
@@ -1083,7 +1083,7 @@ OPErr XCreateSoundObjectFromData(XPTR* dst,
                                     SndCompressionSubType dstSubCompression,
                                 XCompressStatusProc proc, void* procData);
 
-XBOOL XGetSampleNameFromID(XLongResourceID sampleSoundID, char *cName);
+bool XGetSampleNameFromID(XLongResourceID sampleSoundID, char *cName);
 
 SongResource_Info * XGetSongResourceInfo(SongResource *pSong, int32_t songSize);
 
@@ -1100,11 +1100,11 @@ SongResource * XNewSongFromSongResourceInfo(SongResource_Info *pSongInfo);
 
 XShortResourceID XGetSongResourceObjectID(SongResource *pSong);
 void XSetSongResourceObjectID(SongResource *pSong, XShortResourceID id);
-XBOOL XIsSongLocked(SongResource *pSong);
-void XSetSongLocked(SongResource *pSong, XBOOL locked);
+bool XIsSongLocked(SongResource *pSong);
+void XSetSongLocked(SongResource *pSong, bool locked);
 
 // will determine if song is using compression. Requires active resource file
-XBOOL XIsSongCompressed(SongResource *pSong);
+bool XIsSongCompressed(SongResource *pSong);
 
 void XGetSongPerformanceSettings(SongResource * theSong, int16_t *maxMidiVoices, 
                                     int16_t *maxEffectsVoices, int16_t *mixLevel);
@@ -1123,16 +1123,16 @@ SongType XGetSongResourceObjectType(SongResource *pSong);
 SongResource * XChangeSongResource(SongResource *theSong, int32_t songSize, 
                     SongResourceType resourceType, void *pResource, int32_t resourceLength);
 
-XBOOL XGetSongEmbeddedStatus(SongResource *pSong);
-void XSetSongEmbeddedStatus(SongResource *pSong, XBOOL embedded);
+bool XGetSongEmbeddedStatus(SongResource *pSong);
+void XSetSongEmbeddedStatus(SongResource *pSong, bool embedded);
 
 // Return an AliasLinkResource, and deal with endian issues. Always safe for host.
 XAliasLinkResource * XGetAliasLinkFromFile(XFILE thisFile);
 // Return an AliasLinkResource, and deal with endian issues. Always safe for host.
 XAliasLinkResource * XGetAliasLink(void);
 // Given a alias structure and a sourceID, this will return in pDest a valid alias. -1 will
-// be returned via XERR if there's no alias present
-XERR XLookupAlias(XAliasLinkResource *pLink, XLongResourceID sourceID, XLongResourceID *pDestID);
+// be returned via int32_t if there's no alias present
+int32_t XLookupAlias(XAliasLinkResource *pLink, XLongResourceID sourceID, XLongResourceID *pDestID);
 
 // Translate a GM_Waveform structure into a SampleDataInfo structure
 void XTranslateFromWaveformToSampleData(GM_Waveform const* pSource, SampleDataInfo *pDest);
@@ -1158,9 +1158,9 @@ void XCompressLaw(SndCompressionType compressionType, int16_t *pSource, char *pD
                         uint32_t frames, uint32_t channels);
 
 // Simple utility to convert promote 8-bit samples to 16 bit
-XWORD * XConvert8BitTo16Bit(XBYTE * p8BitPCMData, uint32_t frames, uint32_t channels);
+uint16_t * XConvert8BitTo16Bit(unsigned char * p8BitPCMData, uint32_t frames, uint32_t channels);
 // given 16 bit data, convert this to 8 bit data
-XBYTE * XConvert16BitTo8Bit(XWORD * p16BitPCMData, uint32_t frames, uint32_t channels);
+unsigned char * XConvert16BitTo8Bit(uint16_t * p16BitPCMData, uint32_t frames, uint32_t channels);
 
 
 // MPEG decoder
@@ -1169,8 +1169,8 @@ struct XMPEGDecodedData
 {
     void            *stream;
     XFIXED          sampleRate;
-    XBYTE           bitSize;
-    XBYTE           channels;
+    unsigned char           bitSize;
+    unsigned char           channels;
     uint32_t   bitrate;
     uint32_t   lengthInBytes;      // right now, it's simply frameBufferSize*maxFrameBuffers
                                         // with new MPEG code, it should be the minimum decoded size
@@ -1184,7 +1184,7 @@ typedef struct XMPEGDecodedData XMPEGDecodedData;
 XMPEGDecodedData * XOpenMPEGStreamFromMemory(XPTR pBlock, uint32_t blockSize, OPErr *pErr);
 OPErr XCloseMPEGStream(XMPEGDecodedData *stream);
 SndCompressionType XGetMPEGBitrateType(uint32_t bitrate);
-OPErr XFillMPEGStreamBuffer(XMPEGDecodedData *stream, void *pcmAudioBuffer, XBOOL *pDone);
+OPErr XFillMPEGStreamBuffer(XMPEGDecodedData *stream, void *pcmAudioBuffer, bool *pDone);
 #endif
 
 #if USE_MPEG_DECODER != FALSE
@@ -1246,24 +1246,24 @@ OPErr   XCloseMPEGEncodeStream(XMPEGEncodeData *stream, XPTR *pReturnedBuffer, u
 
 // Given an mpeg bit encode rate, and a sample rate, this will return TRUE if
 // this encoder can encode, or FALSE if it will not work.
-XBOOL XIsValidMPEGSampleRateAndEncodeRate(XMPEGEncodeRate encodeRate, XFIXED sampleRate, SndCompressionSubType subType, int16_t numChannel);
+bool XIsValidMPEGSampleRateAndEncodeRate(XMPEGEncodeRate encodeRate, XFIXED sampleRate, SndCompressionSubType subType, int16_t numChannel);
 
 // This will encode an MPEG stream from a formatted GM_Waveform
 OPErr XCompressMPEG(GM_Waveform const* pWave,
                     SndCompressionType compressionType, 
                     SndCompressionSubType compressionSubType, // CS_DEFAULT is CS_MPEG2
                     XCompressStatusProc proc, void* procData,
-                    XPTR* pCompressedData, XDWORD* pCompressedBytes,
-                    XDWORD* pFrameBufferCount, XDWORD* pFrameBufferBytes,
-                    XDWORD* startFrame);
+                    XPTR* pCompressedData, uint32_t* pCompressedBytes,
+                    uint32_t* pFrameBufferCount, uint32_t* pFrameBufferBytes,
+                    uint32_t* startFrame);
 #endif  // USE_MPEG_ENCODER
 
 #if USE_MPEG_ENCODER != 0 || USE_MPEG_DECODER != 0
-OPErr XExpandMPEG(GM_Waveform const* src, UINT32 startFrame, GM_Waveform* dst);
+OPErr XExpandMPEG(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst);
 #endif
 
 #if USE_FLAC_DECODER != 0
-OPErr XExpandFLAC(GM_Waveform const* src, UINT32 startFrame, GM_Waveform* dst);
+OPErr XExpandFLAC(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst);
 #endif
 
 #if USE_FLAC_ENCODER != FALSE
@@ -1275,7 +1275,7 @@ OPErr XEncodeFLACToMemory(GM_Waveform const *src, int compressionLevel,
 #endif
 
 #if USE_VORBIS_DECODER != 0
-OPErr XExpandVorbis(GM_Waveform const* src, UINT32 startFrame, GM_Waveform* dst);
+OPErr XExpandVorbis(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst);
 #endif
 
 #if USE_VORBIS_ENCODER == TRUE
@@ -1287,7 +1287,7 @@ OPErr XEncodeVorbisToMemory(GM_Waveform const *src, float quality,
 #endif
 
 #if USE_OPUS_DECODER != 0
-OPErr XExpandOpus(GM_Waveform const* src, UINT32 startFrame, GM_Waveform* dst);
+OPErr XExpandOpus(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst);
 #endif
 
 #if USE_OPUS_ENCODER == TRUE

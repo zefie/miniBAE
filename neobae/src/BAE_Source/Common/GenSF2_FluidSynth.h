@@ -29,7 +29,7 @@ typedef struct GM_SF2Info
     fluid_synth_t*      sf2_synth;         // FluidSynth synthesizer handle
     fluid_settings_t*   sf2_settings;     // FluidSynth settings handle
     int                 sf2_soundfont_id; // FluidSynth soundfont ID
-    XBOOL               sf2_active;        // TRUE if SF2 is handling this song
+    bool               sf2_active;        // TRUE if SF2 is handling this song
     char                sf2_path[256];     // path to loaded SF2 file
     float               sf2_master_volume; // master volume scaling
     int16_t             sf2_sample_rate;   // sample rate for SF2 rendering
@@ -41,7 +41,7 @@ typedef struct GM_SF2Info
     uint8_t             channelReverb[16];
     uint8_t             channelChorus[16];
     // Channel mute states
-    XBOOL               channelMuted[16];
+    bool               channelMuted[16];
 } GM_SF2Info;
 
 // Initialize FluidSynth support for the mixer
@@ -49,8 +49,8 @@ OPErr GM_InitializeSF2(void);
 void GM_CleanupSF2(void);
 
 // FluidSynth mixer mode management
-void GM_SetMixerSF2Mode(XBOOL isSF2);
-XBOOL GM_GetMixerSF2Mode(void);
+void GM_SetMixerSF2Mode(bool isSF2);
+bool GM_GetMixerSF2Mode(void);
 
 // Load SF2 soundfont for FluidSynth rendering
 OPErr GM_LoadSF2SoundfontFromMemory(const unsigned char *data, size_t size);
@@ -64,10 +64,10 @@ void GM_UnloadXMFOverlaySoundFont(void);
 bool is_libinstpatch_loaded(void);
 
 // Check if a song should use FluidSynth rendering
-XBOOL GM_IsSF2Song(GM_Song* pSong);
+bool GM_IsSF2Song(GM_Song* pSong);
 
 // Enable/disable FluidSynth rendering for a song
-OPErr GM_EnableSF2ForSong(GM_Song* pSong, XBOOL enable);
+OPErr GM_EnableSF2ForSong(GM_Song* pSong, bool enable);
 
 void GM_SF2_SetGain(float volume);
 float GM_SF2_GetGain();
@@ -94,13 +94,13 @@ void GM_SF2_SilenceSong(GM_Song* pSong);
 // FluidSynth configuration
 float GM_SF2_GetMasterVolume(void);
 int16_t GM_SF2_GetMaxVoices(void);
-void GM_SF2_SetStereoMode(XBOOL stereo, XBOOL applyNow);
+void GM_SF2_SetStereoMode(bool stereo, bool applyNow);
 void GM_SF2_SetSampleRate(int32_t sampleRate);
 void GM_SF2_KillAllNotes(void);
 
 // FluidSynth status queries
 uint16_t GM_SF2_GetActiveVoiceCount(void);
-XBOOL GM_SF2_IsActive(void);
+bool GM_SF2_IsActive(void);
 
 // FluidSynth reset
 void GM_ResetSF2(void);
@@ -116,11 +116,11 @@ void PV_SF2_SetBankPreset(GM_Song* pSong, int16_t channel, int16_t bank, int16_t
 
 // Query whether the currently loaded soundfont exposes any presets at all.
 // Optionally returns the counted number of presets.
-XBOOL GM_SF2_CurrentFontHasAnyPreset(int *outPresetCount);
-XBOOL GM_SF2_HasXmfEmbeddedBank();
-XBOOL GM_SF2_XmfOverlayHasPreset(int bank, int program);
+bool GM_SF2_CurrentFontHasAnyPreset(int *outPresetCount);
+bool GM_SF2_HasXmfEmbeddedBank();
+bool GM_SF2_XmfOverlayHasPreset(int bank, int program);
 void GM_SF2_SetChannelBankAndProgram(int16_t channel, int16_t bank, int16_t program);
-XBOOL GM_SF2_isDLS(void);
+bool GM_SF2_isDLS(void);
 #endif // USE_SF2_SUPPORT
 
 #ifdef __cplusplus

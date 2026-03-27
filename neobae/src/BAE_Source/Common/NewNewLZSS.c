@@ -131,9 +131,9 @@
 #define OFFSETBITS  12L                             /* number of bits used for token offset */
 #define CODEBITS    (TOKENBITS+OFFSETBITS)          /* total token bits                     */
 
-#define MAXTOKENS   (1L << TOKENBITS)               /* range of token sizes                 */
+#define MAuint32_tS   (1L << TOKENBITS)               /* range of token sizes                 */
 #define THRESHOLD   ((CODEBITS / 8) + 1)            /* minimum match length                 */
-#define MAXMATCH    (THRESHOLD + MAXTOKENS - 1)     /* maximum match length                 */
+#define MAXMATCH    (THRESHOLD + MAuint32_tS - 1)     /* maximum match length                 */
 #define LOOKBACK    (1L << OFFSETBITS)              /* size of lookback buffer              */
 
 // forwards
@@ -150,7 +150,7 @@ static void         UnDeltaMono16(int16_t* pData, uint32_t frameCount);
 static void         UnDeltaStereo16(int16_t* pData, uint32_t frameCount);
 
 #if USE_CREATION_API == TRUE
-int32_t LZSSCompressDeltaMono8(XBYTE* src, uint32_t srcBytes, XBYTE* dst,
+int32_t LZSSCompressDeltaMono8(unsigned char* src, uint32_t srcBytes, unsigned char* dst,
                             XCompressStatusProc proc, void* procData)
 {
 int32_t            dstBytes;
@@ -160,7 +160,7 @@ int32_t            dstBytes;
     UnDeltaMono8(src, srcBytes);
     return dstBytes;
 }
-int32_t LZSSCompressDeltaStereo8(XBYTE* src, uint32_t srcBytes, XBYTE* dst,
+int32_t LZSSCompressDeltaStereo8(unsigned char* src, uint32_t srcBytes, unsigned char* dst,
                                 XCompressStatusProc proc, void* procData)
 {
 uint32_t   const frameCount = srcBytes / 2;
@@ -171,25 +171,25 @@ int32_t            dstBytes;
     UnDeltaStereo8(src, frameCount);
     return dstBytes;
 }
-int32_t LZSSCompressDeltaMono16(int16_t* src, uint32_t srcBytes, XBYTE* dst,
+int32_t LZSSCompressDeltaMono16(int16_t* src, uint32_t srcBytes, unsigned char* dst,
                                 XCompressStatusProc proc, void* procData)
 {
 uint32_t   const frameCount = srcBytes / 2;
 int32_t            dstBytes;
 
     DeltaMono16(src, frameCount);
-    dstBytes = LZSSCompress((XBYTE*)src, srcBytes, dst, proc, procData);
+    dstBytes = LZSSCompress((unsigned char*)src, srcBytes, dst, proc, procData);
     UnDeltaMono16(src, frameCount);
     return dstBytes;
 }
-int32_t LZSSCompressDeltaStereo16(int16_t* src, uint32_t srcBytes, XBYTE* dst,
+int32_t LZSSCompressDeltaStereo16(int16_t* src, uint32_t srcBytes, unsigned char* dst,
                                 XCompressStatusProc proc, void* procData)
 {
 uint32_t   const frameCount = srcBytes / 4;
 int32_t            dstBytes;
 
     DeltaStereo16(src, frameCount);
-    dstBytes = LZSSCompress((XBYTE*)src, srcBytes, dst, proc, procData);
+    dstBytes = LZSSCompress((unsigned char*)src, srcBytes, dst, proc, procData);
     UnDeltaStereo16(src, frameCount);
     return dstBytes;
 }
@@ -449,7 +449,7 @@ uint32_t           forward;                // bytes to scan ahead
 /* -------------------------------------------------------------------------------- *
  * Compress srcBuffer using LZSS technique.
  * -------------------------------------------------------------------------------- */
-int32_t LZSSCompress(XBYTE* srcBuffer, uint32_t srcBytes, XBYTE* dstBuffer,
+int32_t LZSSCompress(unsigned char* srcBuffer, uint32_t srcBytes, unsigned char* dstBuffer,
                     XCompressStatusProc proc, void* procData)
 //  srcBuffer;                  /* pointer to uncompressed data */
 //  srcBytes;                   /* size of uncompressed data */
@@ -458,11 +458,11 @@ int32_t LZSSCompress(XBYTE* srcBuffer, uint32_t srcBytes, XBYTE* dstBuffer,
 #if 0
 // This code currently does not generate byte for byte version of the compressed output. It's suspect.
 
-XBYTE*          const srcEnd = srcBuffer + srcBytes;
-XBYTE*          const dstEnd = dstBuffer + srcBytes;
-XBYTE*          srcPtr;                 /* pointer to uncompressed data */
-XBYTE*          dstPtr;                 /* pointer to compressed data */
-XBYTE*          callProcPtr;            /* src position at which to call proc */
+unsigned char*          const srcEnd = srcBuffer + srcBytes;
+unsigned char*          const dstEnd = dstBuffer + srcBytes;
+unsigned char*          srcPtr;                 /* pointer to uncompressed data */
+unsigned char*          dstPtr;                 /* pointer to compressed data */
+unsigned char*          callProcPtr;            /* src position at which to call proc */
 
     srcPtr = srcBuffer;
     dstPtr = dstBuffer;
@@ -480,7 +480,7 @@ XBYTE*          callProcPtr;            /* src position at which to call proc */
     {
     unsigned int    codeCount;              /* index for the code group */
     unsigned int    codeNumber;             /* the number 0-7 of the code element */
-    XBYTE           codeBuf[17];            /* buffer for flags and the code bytes */
+    unsigned char           codeBuf[17];            /* buffer for flags and the code bytes */
 
         if (srcPtr >= callProcPtr)
         {
@@ -505,8 +505,8 @@ XBYTE*          callProcPtr;            /* src position at which to call proc */
             if (matchLen)
             {
                 /* if we have a match over THRESHOLD characters, encode it */
-                codeBuf[codeCount++] = (XBYTE)(codeWord >> 8);
-                codeBuf[codeCount++] = (XBYTE)(codeWord & 0x00FF);
+                codeBuf[codeCount++] = (unsigned char)(codeWord >> 8);
+                codeBuf[codeCount++] = (unsigned char)(codeWord & 0x00FF);
                 srcPtr += matchLen;
             }
             else
@@ -537,9 +537,9 @@ XBYTE*          callProcPtr;            /* src position at which to call proc */
     
 #else
 
-register XBYTE *dataPtr;                    /* pointer to uncompressed data */
+register unsigned char *dataPtr;                    /* pointer to uncompressed data */
 register uint32_t  dataPos;                    /* buffer position for uncompressed data */
-register XBYTE *cdataPtr;                   /* pointer to compressed data */
+register unsigned char *cdataPtr;                   /* pointer to compressed data */
 register uint32_t  cdataPos;                   /* buffer position for compressed data */
 uint32_t           callProcPos;                /* src position at which to call proc */
 
@@ -548,7 +548,7 @@ register unsigned int   codeNumber;                 /* the number 0-7 of the cod
 register unsigned int   flags;                      /* the flags byte of a code group */
 unsigned int            matchLen;                   /* the length of the match found */
 uint16_t          codeWord;                   /* coded token */
-XBYTE           codeBuf[16];                /* buffer for the code group */
+unsigned char           codeBuf[16];                /* buffer for the code group */
 
     /* initalize the index variables */
     dataPtr = srcBuffer;
@@ -588,8 +588,8 @@ XBYTE           codeBuf[16];                /* buffer for the code group */
             if (matchLen)
             {
                 /* if we have a match over THRESHOLD characters, encode it */
-                codeBuf[codeCount++] = (XBYTE)(codeWord >> 8);
-                codeBuf[codeCount++] = (XBYTE)(codeWord & 0x00FF);
+                codeBuf[codeCount++] = (unsigned char)(codeWord >> 8);
+                codeBuf[codeCount++] = (unsigned char)(codeWord & 0x00FF);
                 dataPos += matchLen;
             }
             else
@@ -612,7 +612,7 @@ XBYTE           codeBuf[16];                /* buffer for the code group */
         }
 
         /* write out the flags byte */
-        cdataPtr[cdataPos] = (XBYTE)flags;
+        cdataPtr[cdataPos] = (unsigned char)flags;
         cdataPos++;
 
         /* write out the 8 (or less) characters/code blocks */

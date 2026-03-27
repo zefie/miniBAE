@@ -506,7 +506,7 @@ static XPTR recompressSnd(XPTR sndData, int32_t sndSize,
         XFIXED      sndSampleRate;
         int32_t     loopStart;
         int32_t     loopEnd;
-        XBOOL       isMpeg;
+        bool       isMpeg;
 
         XSetMemory(&decodedInfo, (int32_t)sizeof(decodedInfo), 0);
         decodedOwner = NULL;

@@ -2035,7 +2035,7 @@ extern "C"
                                      unsigned char channel,
                                      unsigned char *outProgram,
                                      unsigned char *outBank,
-                                     XBOOL useRawBank);
+                                     bool useRawBank);
 
     // BAESong_GetPitchBend()
     // --------------------------------------
@@ -2761,7 +2761,7 @@ extern "C"
                                     int16_t *pVersionSubMinor);
 
 #if USE_SF2_SUPPORT == TRUE
-    XBOOL BAESong_IsSF2Song(BAESong song);
+    bool BAESong_IsSF2Song(BAESong song);
 #endif
 
 // Content-based file type detection functions
@@ -2855,7 +2855,7 @@ BAEResult BAELoadResult_Cleanup(BAELoadResult *result);
 
 BAEResult BAESong_LoadRmiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL ignoreBadInstruments, BAE_BOOL useEmbeddedBank);
 BAEResult BAESong_LoadRmiFromMemory(BAESong song, void const *pRmiData, uint32_t rmiSize, BAE_BOOL ignoreBadInstruments, BAE_BOOL useEmbeddedBank);
-XBOOL GM_IsAudioTailActive(GM_Mixer *mixer);
+bool GM_IsAudioTailActive(GM_Mixer *mixer);
 
 typedef struct BAERmfEditorDocument BAERmfEditorDocument;
 
@@ -3102,12 +3102,12 @@ BAEResult BAERmfEditorDocument_SetTempoEvent(BAERmfEditorDocument *document,
 BAEResult BAERmfEditorDocument_DeleteTempoEvent(BAERmfEditorDocument *document,
                                                 uint32_t eventIndex);
 BAEResult BAERmfEditorDocument_GetMidiLoopMarkers(BAERmfEditorDocument const *document,
-                                                  XBOOL *outEnabled,
+                                                  bool *outEnabled,
                                                   uint32_t *outStartTick,
                                                   uint32_t *outEndTick,
                                                   int32_t *outLoopCount);
 BAEResult BAERmfEditorDocument_SetMidiLoopMarkers(BAERmfEditorDocument *document,
-                                                  XBOOL enabled,
+                                                  bool enabled,
                                                   uint32_t startTick,
                                                   uint32_t endTick,
                                                   int32_t loopCount);
@@ -3320,7 +3320,7 @@ BAEResult BAERmfEditorDocument_SetMidiStorageType(BAERmfEditorDocument *document
 BAEResult BAERmfEditorDocument_GetMidiStorageType(BAERmfEditorDocument const *document,
                                                   BAERmfEditorMidiStorageType *outStorageType);
 BAEResult BAERmfEditorDocument_SaveAsRmfToMemory(BAERmfEditorDocument *document,
-                                                 XBOOL useZmfContainer,
+                                                 bool useZmfContainer,
                                                  unsigned char **outData,
                                                  uint32_t *outSize);
 BAEResult BAERmfEditorDocument_SaveAsRmf(BAERmfEditorDocument *document,
@@ -3425,11 +3425,11 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBankToInstID(
 /* Query whether a sample is a bank alias (pointer to bank SND, no embedded data). */
 BAEResult BAERmfEditorDocument_IsSampleBankAlias(BAERmfEditorDocument const *document,
                                                   uint32_t sampleIndex,
-                                                  XBOOL *outIsAlias);
+                                                  bool *outIsAlias);
 
 /* Wrapper that accepts a BAEMixer (opaque) and returns whether the audio tail is active.
  * Implemented in NeoBAE.c so callers without access to sBAEMixer internals can use it. */
-XBOOL BAEMixer_IsAudioTailActive(BAEMixer mixer);
+bool BAEMixer_IsAudioTailActive(BAEMixer mixer);
 
 /* ---------- Bank sample enumeration and editing ---------- */
 
@@ -3454,7 +3454,7 @@ typedef struct BAERmfEditorBankSampleInfo
     XResourceType compressionType;       /* Compression type (X_UNCOMPRESSED, X_FLAC, etc.) */
     uint32_t compressionSubType;          /* Compression sub-type (CS_VORBIS_*K, CS_OPUS_*K, or CS_DEFAULT) */
     BAERmfEditorSndStorageType sndStorageType; /* Container type of the SND resource (esnd/csnd/snd) */
-    XBOOL opusRoundTripResample;          /* For Opus: TRUE if round-trip resampling flag is set */
+    bool opusRoundTripResample;          /* For Opus: TRUE if round-trip resampling flag is set */
 } BAERmfEditorBankSampleInfo;
 
 /* Count the number of samples (key splits) in a bank instrument.
@@ -3514,7 +3514,7 @@ BAEResult BAERmfEditorBank_GrowInstrumentSampleSlots(BAEBankToken bankToken,
 BAEResult BAERmfEditorBank_DeleteInstrumentSample(BAEBankToken bankToken,
                                                    uint32_t instrumentIndex,
                                                    uint32_t sampleIndex,
-                                                   XBOOL deleteSndIfUnreferenced);
+                                                   bool deleteSndIfUnreferenced);
 
 /* Delete an instrument (ID_INST resource) from the bank at the given index.
  * Any alias entries pointing to this instrument are also removed.
@@ -3533,7 +3533,7 @@ BAEResult BAERmfEditorBank_DeleteAlias(BAEBankToken bankToken,
 BAEResult BAERmfEditorBank_CloneInstrument(BAEBankToken bankToken,
                                            uint32_t instrumentIndex,
                                            uint32_t destInstID,
-                                           XBOOL deepClone);
+                                           bool deepClone);
 
 /* Add an alias entry mapping aliasInstID -> the instrument at instrumentIndex.
  * The alias is stored in the bank's ID_ALIAS resource. */
@@ -3607,7 +3607,7 @@ BAEResult BAERmfEditorBank_ReEncodeSampleFromPCMEx(BAEBankToken bankToken,
                                                     BAERmfEditorCompressionType compressionType,
                                                     BAERmfEditorSndStorageType sndStorageType,
                                                     BAERmfEditorOpusMode opusMode,
-                                                    XBOOL opusRoundTripResample,
+                                                    bool opusRoundTripResample,
                                                     const void *sourcePcm,
                                                     uint32_t frameCount,
                                                     uint16_t bitSize,

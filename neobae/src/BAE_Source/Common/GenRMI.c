@@ -42,7 +42,7 @@
 #endif
 
 // Global flag to track if the last loaded RMI had an embedded soundbank
-static XBOOL g_last_rmi_had_soundbank = FALSE;
+static bool g_last_rmi_had_soundbank = FALSE;
 
 
 // Helper: Read 32-bit little-endian value
@@ -58,7 +58,7 @@ static uint16_t PV_ReadLE16(const unsigned char *p)
 }
 
 // Helper: Check if four characters match
-static XBOOL PV_MatchFourCC(const unsigned char *p, const char *fourcc)
+static bool PV_MatchFourCC(const unsigned char *p, const char *fourcc)
 {
     return (p[0] == fourcc[0] && p[1] == fourcc[1] && 
             p[2] == fourcc[2] && p[3] == fourcc[3]);
@@ -76,7 +76,7 @@ static XBOOL PV_MatchFourCC(const unsigned char *p, const char *fourcc)
  * @param outSmfLen Pointer to receive the SMF data length
  * @return TRUE if MIDI data was successfully extracted, FALSE otherwise
  */
-static XBOOL PV_ExtractRMIDToSMF(const unsigned char *buf, uint32_t len, 
+static bool PV_ExtractRMIDToSMF(const unsigned char *buf, uint32_t len, 
                                   const unsigned char **outSmf, uint32_t *outSmfLen)
 {
     if (!buf || len < 12) return FALSE;
@@ -137,9 +137,9 @@ static XBOOL PV_ExtractRMIDToSMF(const unsigned char *buf, uint32_t len,
  * @param outIsSF2    Pointer to receive TRUE if SF2/SF3, FALSE if DLS (optional)
  * @return TRUE if soundbank data was found, FALSE otherwise
  */
-static XBOOL PV_FindSoundbankInRMI(const unsigned char *buf, uint32_t len,
+static bool PV_FindSoundbankInRMI(const unsigned char *buf, uint32_t len,
                                     const unsigned char **outBank, uint32_t *outBankLen,
-                                    XBOOL *outIsSF2)
+                                    bool *outIsSF2)
 {
     if (!buf || len < 12) return FALSE;
     
@@ -166,7 +166,7 @@ static XBOOL PV_FindSoundbankInRMI(const unsigned char *buf, uint32_t len,
         // Look for nested RIFF chunks (soundbank)
         if (PV_MatchFourCC(chunk, "RIFF") && chunkSize >= 4)
         {
-            XBOOL isSF2 = FALSE;
+            bool isSF2 = FALSE;
             
             // Check if this is SF2/SF3
             if (PV_MatchFourCC(&chunk[8], "sfbk"))
@@ -213,7 +213,7 @@ static XBOOL PV_FindSoundbankInRMI(const unsigned char *buf, uint32_t len,
 typedef struct
 {
     int16_t bankOffset;      // DBNK chunk: bank offset (-1 = not specified)
-    XBOOL hasEncoding;       // TRUE if IENC was found
+    bool hasEncoding;       // TRUE if IENC was found
     char encoding[32];       // IENC chunk: text encoding (e.g., "utf-8")
     char midiEncoding[32];   // MENC chunk: MIDI text encoding
 } RMIInfo;
@@ -383,7 +383,7 @@ static void PV_ParseRMIInfo(const unsigned char *buf, uint32_t len, RMIInfo *inf
  */
 OPErr GM_LoadRMIFromMemory(const unsigned char *buf, uint32_t len,
                            unsigned char **outMidiData, uint32_t *outMidiLen,
-                           XBOOL loadDLS)
+                           bool loadDLS)
 {
     const unsigned char *midiData = NULL;
     uint32_t midiLen = 0;
@@ -464,7 +464,7 @@ OPErr GM_LoadRMIFromMemory(const unsigned char *buf, uint32_t len,
     {
         const unsigned char *bankData = NULL;
         uint32_t bankLen = 0;
-        XBOOL isSF2 = FALSE;
+        bool isSF2 = FALSE;
         
         // Reset flag at start
         g_last_rmi_had_soundbank = FALSE;
@@ -508,7 +508,7 @@ OPErr GM_LoadRMIFromMemory(const unsigned char *buf, uint32_t len,
             {
                 // Verify the bank loaded successfully with presets
                 int presetCount = 0;
-                XBOOL hasPresets = GM_SF2_CurrentFontHasAnyPreset(&presetCount);
+                bool hasPresets = GM_SF2_CurrentFontHasAnyPreset(&presetCount);
                 
                 if (hasPresets)
                 {
@@ -578,7 +578,7 @@ OPErr GM_LoadRMIFromMemory(const unsigned char *buf, uint32_t len,
  */
 OPErr GM_LoadRMIFromFile(const char *path,
                          unsigned char **outMidiData, uint32_t *outMidiLen,
-                         XBOOL loadDLS)
+                         bool loadDLS)
 {
     XPTR fileData = NULL;
     XFILENAME fileName;
@@ -640,7 +640,7 @@ OPErr GM_LoadRMIFromFile(const char *path,
  * @param len  Length of the file data
  * @return TRUE if the data appears to be an RMI file, FALSE otherwise
  */
-XBOOL GM_IsRMIFile(const unsigned char *buf, uint32_t len)
+bool GM_IsRMIFile(const unsigned char *buf, uint32_t len)
 {
     if (!buf || len < 12) return FALSE;
     
@@ -655,7 +655,7 @@ XBOOL GM_IsRMIFile(const unsigned char *buf, uint32_t len)
  * 
  * @return TRUE if the last RMI had an embedded soundbank, FALSE otherwise
  */
-XBOOL GM_LastRMIHadEmbeddedSoundbank(void)
+bool GM_LastRMIHadEmbeddedSoundbank(void)
 {
     return g_last_rmi_had_soundbank;
 }

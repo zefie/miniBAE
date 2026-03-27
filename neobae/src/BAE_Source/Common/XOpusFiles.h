@@ -20,10 +20,10 @@ extern "C" {
 #if USE_OPUS_DECODER == TRUE
 
 // Opus decoder functions
-XBOOL XIsOpusFile(XFILE file);
+bool XIsOpusFile(XFILE file);
 void* XOpenOpusFile(XFILE file);
-OPErr XGetOpusFileInfo(void *decoder_handle, UINT32 *samples, UINT32 *sample_rate, 
-                      UINT32 *channels, UINT32 *bit_depth);
+OPErr XGetOpusFileInfo(void *decoder_handle, uint32_t *samples, uint32_t *sample_rate, 
+                      uint32_t *channels, uint32_t *bit_depth);
 long XDecodeOpusFile(void *decoder_handle, void *buffer, long buffer_size);
 void XCloseOpusFile(void *decoder_handle);
 
@@ -32,9 +32,9 @@ void XCloseOpusFile(void *decoder_handle);
 #if USE_OPUS_ENCODER == TRUE
 
 // Opus encoder functions
-void* XInitOpusEncoder(UINT32 sample_rate, UINT32 channels, UINT32 bitrate, UINT32 mode);
+void* XInitOpusEncoder(uint32_t sample_rate, uint32_t channels, uint32_t bitrate, uint32_t mode);
 long XWriteOpusHeader(void *encoder_handle, XFILE output_file);
-long XEncodeOpusData(void *encoder_handle, const INT16 *pcm_interleaved, long frames, XFILE output_file);
+long XEncodeOpusData(void *encoder_handle, const int16_t *pcm_interleaved, long frames, XFILE output_file);
 long XFlushOpusEncoder(void *encoder_handle, XFILE output_file);
 void XCloseOpusEncoder(void *encoder_handle);
 

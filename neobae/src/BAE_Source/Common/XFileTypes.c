@@ -372,7 +372,7 @@ BAEFileType X_DetermineFileType(const char *filePath)
             // Initialize buffer
             memset(buffer, 0, FILETYPE_PROBE_SIZE);
             
-            XERR readResult = XFileRead(fileRef, buffer, FILETYPE_PROBE_SIZE);
+            int32_t readResult = XFileRead(fileRef, buffer, FILETYPE_PROBE_SIZE);
             
             if (readResult == 0) // NO_ERR = 0, success
             {
@@ -554,7 +554,7 @@ BAEFileType X_DetermineFileTypeFromPath(const char *filePath)
     // Initialize buffer
     memset(buffer, 0, FILETYPE_PROBE_SIZE);
     
-    XERR readResult = XFileRead(fileRef, buffer, FILETYPE_PROBE_SIZE);
+    int32_t readResult = XFileRead(fileRef, buffer, FILETYPE_PROBE_SIZE);
     
     if (readResult == 0) // NO_ERR = 0, success
     {

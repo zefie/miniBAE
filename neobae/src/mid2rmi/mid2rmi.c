@@ -2030,9 +2030,9 @@ int main(int argc, char **argv)
 	uint8_t *embedBank = NULL;
 	size_t embedBankLen = 0;
 
-	XBOOL isRIFF = (bankLen >= 12 && fourcc_eq(bank, "RIFF"));
-	XBOOL isDLS = (isRIFF && fourcc_eq(bank + 8, "DLS "));
-	XBOOL isSF2 = (isRIFF && fourcc_eq(bank + 8, "sfbk"));
+	bool isRIFF = (bankLen >= 12 && fourcc_eq(bank, "RIFF"));
+	bool isDLS = (isRIFF && fourcc_eq(bank + 8, "DLS "));
+	bool isSF2 = (isRIFF && fourcc_eq(bank + 8, "sfbk"));
 
 	if (isDLS)
 	{

@@ -102,7 +102,7 @@ static uint32_t g_mp3rec_bits = 0;
 static uint32_t g_mp3rec_bitrate = 0;
 
 // ---- Helpers ----
-static XBOOL pcm_wav_write_header_local(FILE *f, uint32_t channels, uint32_t sample_rate, uint32_t bits, uint64_t data_bytes)
+static bool pcm_wav_write_header_local(FILE *f, uint32_t channels, uint32_t sample_rate, uint32_t bits, uint64_t data_bytes)
 {
     if (!f) return FALSE;
     uint32_t byte_rate = sample_rate * channels * (bits / 8);
@@ -419,10 +419,10 @@ void BAE_PrintHexDump(void *address, int32_t length){ unsigned char *p=(unsigned
 
 #if USE_MPEG_ENCODER != FALSE
 #include "XMPEG_BAE_API.h"
-static XBOOL MP3Refill_FromRing(void *buffer, void *userRef)
+static bool MP3Refill_FromRing(void *buffer, void *userRef)
 { if(!buffer || !userRef) return FALSE; MP3EncState *s = (MP3EncState*)userRef; int16_t *dst=(int16_t*)buffer; const uint32_t needFrames = s->framesPerCall; uint32_t copied=0; SDL_LockMutex(s->mtx); while(copied < needFrames){ while(s->usedFrames==0){ if(!s->running){ if(copied>0){ uint32_t pad=(needFrames-copied)*s->channels; memset(dst+copied*s->channels,0,pad*sizeof(int16_t)); SDL_UnlockMutex(s->mtx); return TRUE; } SDL_UnlockMutex(s->mtx); return FALSE; } SDL_WaitCondition(s->cond, s->mtx); } uint32_t cont = s->ringFrames - s->readPos; uint32_t canRead = (s->usedFrames < cont)? s->usedFrames : cont; uint32_t want = needFrames - copied; if (canRead > want) canRead = want; memcpy(dst + copied * s->channels, s->ring + s->readPos * s->channels, canRead * s->channels * sizeof(int16_t)); s->readPos = (s->readPos + canRead) % s->ringFrames; s->usedFrames -= canRead; copied += canRead; } SDL_UnlockMutex(s->mtx); return TRUE; }
 static int MP3EncoderThread(void *userdata)
-{ MP3EncState *s = (MP3EncState*)userdata; if(!s) return 0; s->encPcmBuf = (int16_t*)XNewPtr(s->framesPerCall * s->channels * sizeof(int16_t)); if(!s->encPcmBuf) return 0; s->enc = MPG_EncodeNewStream(s->bitrate, s->sample_rate, s->channels, (XPTR)s->encPcmBuf, s->framesPerCall); if(!s->enc){ XDisposePtr((XPTR)s->encPcmBuf); s->encPcmBuf=NULL; return 0; } MPG_EncodeSetRefillCallback(s->enc, MP3Refill_FromRing, s); for(;;){ XPTR bitbuf=NULL; uint32_t bitsz=0; XBOOL last=FALSE; (void)MPG_EncodeProcess(s->enc, &bitbuf, &bitsz, &last); if(bitsz>0 && bitbuf){ XFileWrite(s->out, bitbuf, (int32_t)bitsz); } if(last && bitsz==0) break; SDL_Delay(1); } MPG_EncodeFreeStream(s->enc); s->enc=NULL; if(s->encPcmBuf){ XDisposePtr((XPTR)s->encPcmBuf); s->encPcmBuf=NULL; } return 0; }
+{ MP3EncState *s = (MP3EncState*)userdata; if(!s) return 0; s->encPcmBuf = (int16_t*)XNewPtr(s->framesPerCall * s->channels * sizeof(int16_t)); if(!s->encPcmBuf) return 0; s->enc = MPG_EncodeNewStream(s->bitrate, s->sample_rate, s->channels, (XPTR)s->encPcmBuf, s->framesPerCall); if(!s->enc){ XDisposePtr((XPTR)s->encPcmBuf); s->encPcmBuf=NULL; return 0; } MPG_EncodeSetRefillCallback(s->enc, MP3Refill_FromRing, s); for(;;){ XPTR bitbuf=NULL; uint32_t bitsz=0; bool last=FALSE; (void)MPG_EncodeProcess(s->enc, &bitbuf, &bitsz, &last); if(bitsz>0 && bitbuf){ XFileWrite(s->out, bitbuf, (int32_t)bitsz); } if(last && bitsz==0) break; SDL_Delay(1); } MPG_EncodeFreeStream(s->enc); s->enc=NULL; if(s->encPcmBuf){ XDisposePtr((XPTR)s->encPcmBuf); s->encPcmBuf=NULL; } return 0; }
 #endif
 
 #if USE_MPEG_ENCODER == TRUE

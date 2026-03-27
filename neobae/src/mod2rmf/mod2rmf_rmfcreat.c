@@ -127,7 +127,7 @@ int mod2rmf_setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
         uint32_t chosenLoopStart;
         uint32_t chosenLoopEnd;
         uint32_t sourceSlot;
-        XBOOL usedSharedAsset;
+        bool usedSharedAsset;
         const ModPlayable *playable;
         ModRawSample *raw;
 
@@ -204,7 +204,7 @@ int mod2rmf_setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
 
             if (!usedSharedAsset)
             {
-                XBOOL needsProcessing;
+                bool needsProcessing;
 
                 chosenLoopStart = loopStart;
                 chosenLoopEnd = loopEnd;
@@ -412,7 +412,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
     uint8_t chLastPan[MOD2RMF_MAX_CHANNELS];
     uint16_t chLastBend[MOD2RMF_MAX_CHANNELS];
     int16_t sampleTranspose[MOD2RMF_MAX_SAMPLES];  /* sub-instrument xpo per sample */
-    XBOOL sampleHasEnvelope[MOD2RMF_MAX_SAMPLES];   /* instrument has amplitude envelope */
+    bool sampleHasEnvelope[MOD2RMF_MAX_SAMPLES];   /* instrument has amplitude envelope */
     uint64_t positionTickFP[XMP_MAX_MOD_LENGTH]; /* MIDI tick at start of each order position */
     int positionSeen[XMP_MAX_MOD_LENGTH];        /* whether we've recorded the tick for this pos */
     int lastPos;                                 /* last seen order position */
@@ -1080,7 +1080,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
      * the maximum assigned program. */
     {
         uint32_t maxProg = 0;
-        XBOOL anyAssigned = FALSE;
+        bool anyAssigned = FALSE;
         for (i = 0; i < conv->rawSampleCount; ++i) {
             if (sampleToProgram[i] >= 0) {
                 if ((uint32_t)sampleToProgram[i] >= maxProg) {
@@ -1166,8 +1166,8 @@ int mod2rmf_save_document(Mod2RmfConverter *conv, const char *destPath)
     uint32_t rmfSize;
     BAEResult result;
     const char *ext;
-    XBOOL useZmfContainer;
-    XBOOL requiresZmf;
+    bool useZmfContainer;
+    bool requiresZmf;
 
     if (!conv || !conv->document || !destPath)
     {
@@ -1334,7 +1334,7 @@ int mod2rmf_write_song_cc_events(Mod2RmfConverter *conv, const ModSongModel *son
         return 0;
     }
 
-    XBOOL ccDedupReset = FALSE;
+    bool ccDedupReset = FALSE;
     memset(lastCC, 0xFF, sizeof(lastCC));
 
     /* Find primary (first) RMF track for each MIDI channel */
@@ -1404,7 +1404,7 @@ int mod2rmf_write_song_pitch_bend_events(Mod2RmfConverter *conv, const ModSongMo
     }
 
     /* 0xFFFF = not yet emitted */
-    XBOOL bendDedupReset = FALSE;
+    bool bendDedupReset = FALSE;
     memset(lastBend, 0xFF, sizeof(lastBend));
 
     /* Find primary (first) RMF track for each MIDI channel */
@@ -1426,7 +1426,7 @@ int mod2rmf_write_song_pitch_bend_events(Mod2RmfConverter *conv, const ModSongMo
         uint8_t midiCh;
         uint16_t trackIndex;
         uint32_t j;
-        XBOOL superseded = FALSE;
+        bool superseded = FALSE;
 
         ev = &song->pitchBendEvents[i];
         if (ev->sourceChannel >= song->channelCount) continue;
@@ -1558,7 +1558,7 @@ int mod2rmf_write_song_notes(Mod2RmfConverter *conv, const ModSongModel *song)
     return 1;
 }
 
-int mod2rmf_setup_instrument_ext(Mod2RmfConverter *conv, const ModSongModel *song, XBOOL useZmfContainer)
+int mod2rmf_setup_instrument_ext(Mod2RmfConverter *conv, const ModSongModel *song, bool useZmfContainer)
 {
     uint32_t i;
 
@@ -1689,7 +1689,7 @@ int mod2rmf_setup_tracks(Mod2RmfConverter *conv, const ModSongModel *song, const
 {
     uint32_t i;
     uint32_t channelsToAdd;
-    XBOOL midiChInitialized[MOD2RMF_MAX_MIDI_CHANNELS];
+    bool midiChInitialized[MOD2RMF_MAX_MIDI_CHANNELS];
 
     if (!conv || !song || !chMap)
     {
@@ -1784,7 +1784,7 @@ void mod2rmf_build_midi_channel_aggregate(const ChannelProfile trackerProfiles[]
     }
 }
 
-BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char *sourcePath, XBOOL useZmfContainer) {
+BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char *sourcePath, bool useZmfContainer) {
     Mod2RmfResamplerSettings resamplerSettings;
     Mod2RmfConverter *conv = mod2rmf_converter_create();
     ModSongModel song;

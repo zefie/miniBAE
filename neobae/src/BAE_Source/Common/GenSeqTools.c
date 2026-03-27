@@ -77,11 +77,11 @@
 
 // given a pointer, get a int16_t ordered in a Motorola way, and only 
 // access on word bounderies
-XWORD XGetShortWordAligned(XWORD *pData, int32_t byteOffset)
+uint16_t XGetShortWordAligned(uint16_t *pData, int32_t byteOffset)
 {
     int16_t   wordOffset;
     int16_t   byteIndex;
-    XWORD   result;
+    uint16_t   result;
     
     if (byteOffset >= 0)
     {
@@ -118,11 +118,11 @@ XWORD XGetShortWordAligned(XWORD *pData, int32_t byteOffset)
 }
 
 // given a pointer, get a long ordered in a Motorola way
-XDWORD XGetLongWordAligned(XWORD *pData, int32_t byteOffset)
+uint32_t XGetLongWordAligned(uint16_t *pData, int32_t byteOffset)
 {
     int16_t   wordOffset;
     int16_t   byteIndex;
-    XDWORD  result;
+    uint32_t  result;
     
     if (byteOffset >= 0)
     {
@@ -165,7 +165,7 @@ XDWORD XGetLongWordAligned(XWORD *pData, int32_t byteOffset)
 }
 
 
-XWORD XGetCharWordAligned(XWORD *pData, int32_t byteOffset)
+uint16_t XGetCharWordAligned(uint16_t *pData, int32_t byteOffset)
 {
     return (XGetShortWordAligned(pData, byteOffset) >> 8);
 }
@@ -177,9 +177,9 @@ static int16_t PV_ToLower(int16_t c)
 }
 
 
-int16_t XLStrnCmpWordAligned(const char* s1, XWORD *s2, int32_t byteOffset, int32_t n)
+int16_t XLStrnCmpWordAligned(const char* s1, uint16_t *s2, int32_t byteOffset, int32_t n)
 {
-    XWORD   ch1, ch2;
+    uint16_t   ch1, ch2;
 
     if ((s1 == NULL) || (s2 == NULL))
     {
@@ -210,10 +210,10 @@ int16_t XLStrnCmpWordAligned(const char* s1, XWORD *s2, int32_t byteOffset, int3
 }
 
 
-int32_t XStrnToLongWordAligned(XWORD* pData, int32_t byteOffset, int32_t length)
+int32_t XStrnToLongWordAligned(uint16_t* pData, int32_t byteOffset, int32_t length)
 {
     int32_t    result, numDigits, count;
-    XWORD   ch;
+    uint16_t   ch;
 
     result = 0;
     numDigits = 0;
