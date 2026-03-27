@@ -3070,9 +3070,9 @@ void QGM_NoteOn(GM_Song *pSong, UINT32 timeStamp, INT16 channel, INT16 note, INT
     if (iqindex < 5000)
     {
         if (velocity > 0)
-            sprintf(imsgQueue[iqindex++].s, "note on  %d  time %d\n", note, timeStamp);
+            snprintf(imsgQueue[iqindex++].s, "note on  %d  time %d\n", note, timeStamp);
         else
-            sprintf(imsgQueue[iqindex++].s, "note off %d  time %d\n", note, timeStamp);
+            snprintf(imsgQueue[iqindex++].s, "note off %d  time %d\n", note, timeStamp);
     }
 #endif
     pEvent = PV_GetNextStorableQueueEvent(timeStamp);

@@ -42,15 +42,15 @@
 # 0.11a
 - ~~Tell user why ZMF is required via tooltip over the status bar text~~
 - Allow cut/copy/pasting instruments
-- ~~Allow dragging samples to other instruments~~
-  - ~~Ask user if they want to move, or alias the sample~~
-  - ~~If its the only sample/alias of the source instrument and they choose move, prompt user:~~
-  - ~~Create a new empty sample for the instrument [instrument name]? Selecting No will destroy the old instrument.~~
-  - ~~Implement functions to create new empty sample in old instrument, reassign sample SNDID to target INST~~
-  - ~~and destroy old INST if requested~~
-  - ~~If instrument has more than one sample, we still have to modify both the source and dest INST to update SNDID~~
-  - ~~If the user CTRL-drags then we just alias the sample~~
-  - ~~alias is just adding that SNDID to the inst without removing it from the old~~    
+- Allow dragging samples to other instruments
+  - Ask user if they want to move, or alias the sample
+  - If its the only sample/alias of the source instrument and they choose move, prompt user:
+  - Create a new empty sample for the instrument [instrument name]? Selecting No will destroy the old instrument.
+  - Implement functions to create new empty sample in old instrument, reassign sample SNDID to target INST
+  - and destroy old INST if requested
+  - If instrument has more than one sample, we still have to modify both the source and dest INST to update SNDID
+  - If the user CTRL-drags then we just alias the sample
+  - alias is just adding that SNDID to the inst without removing it from the old
 
 # Future
 - More throughly test backwards compatiblity with BeatnikX, maybe even WebTV Plus

@@ -12796,39 +12796,45 @@ BAEResult BAERmfEditorDocument_Validate(BAERmfEditorDocument *document)
 
 
 #if USE_ZMF_SUPPORT == TRUE
-char const* BAEZMFReasonCodeToString(uint32_t reason) {
-    static char buffer[256];
-    buffer[0] = '\0';
-    
+void BAEZMFReasonCodeToString(uint32_t reason, char *outBuffer, uint32_t bufferSize)
+{
+    outBuffer[0] = '\0';
+
+    size_t cap = bufferSize;
+    size_t len = 0;
+
+    // helper lambda-style macro for bounded append
+    #define APPEND(text) do { \
+        const char* t = (text); \
+        size_t tlen = strlen(t); \
+        if (len + tlen < cap) { \
+            memcpy(outBuffer + len, t, tlen); \
+            len += tlen; \
+            outBuffer[len] = '\0'; \
+        } \
+    } while (0)
+
     if (reason & BAEZMF_REASON_LOOP_TOO_SHORT)
-    {
-        strcat(buffer, "An instrument's loop is too short; ");
-    }
+        APPEND("An instrument's loop is too short; ");
+
     if (reason & BAEZMF_REASON_MODERN_CODEC)
-    {
-        strcat(buffer, "Using a modern codec; ");
-    }
+        APPEND("Using a modern codec; ");
+
     if (reason & BAEZMF_REASON_CUBIC_INTERPOLATION)
-    {
-        strcat(buffer, "Using advanced interpolation; ");
-    }
+        APPEND("Using advanced interpolation; ");
+
     if (reason & BAEZMF_REASON_ENGINE_FLAGS)
+        APPEND("Song-specific engine flags are enabled; ");
+
+    if (len == 0)
     {
-        strcat(buffer, "Song-specific engine flags are enabled; ");
+        snprintf(outBuffer, bufferSize, "Unknown");
     }
-    
-    if (buffer[0] == '\0')
-    {
-        return "Unknown";
+
+    // remove trailing "; " safely
+    if (len >= 2) {
+        outBuffer[len - 2] = '\0';
     }
-    
-    // Remove trailing "; "
-    if (strlen(buffer) >= 2)
-    {
-        buffer[strlen(buffer) - 2] = '\0';
-    }
-    
-    return buffer;
 }
 
 BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document, uint32_t *outReason)

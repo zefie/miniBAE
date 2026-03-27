@@ -242,7 +242,7 @@ static const char AUDIO_EXT_FILTER[] =
     ""
 #endif
     "*.wav;*.aif;*.aiff;*.au;";
-    char fileBuf[1024] = {0};
+    char fileBuf[MAX_PATH] = {0};
     OPENFILENAMEA ofn;
     ZeroMemory(&ofn, sizeof(ofn));
     ofn.lStructSize = sizeof(ofn);
@@ -424,7 +424,7 @@ static const char AUDIO_EXT_FILTER[] =
 char *open_playlist_dialog(void)
 {
 #ifdef _WIN32
-    char fileBuf[1024] = {0};
+    char fileBuf[MAX_PATH] = {0};
     OPENFILENAMEA ofn;
     ZeroMemory(&ofn, sizeof(ofn));
     ofn.lStructSize = sizeof(ofn);
@@ -507,7 +507,7 @@ char *open_playlist_dialog(void)
 char *save_playlist_dialog(void)
 {
 #ifdef _WIN32
-    char fileBuf[1024] = {0};
+    char fileBuf[MAX_PATH] = {0};
     strcpy(fileBuf, "playlist.m3u"); // Default filename
     OPENFILENAMEA ofn;
     ZeroMemory(&ofn, sizeof(ofn));
@@ -608,7 +608,7 @@ char *save_playlist_dialog(void)
 char *open_neoreverb_dialog(void)
 {
 #ifdef _WIN32
-    char fileBuf[1024] = {0};
+    char fileBuf[MAX_PATH] = {0};
     OPENFILENAMEA ofn;
     ZeroMemory(&ofn, sizeof(ofn));
     ofn.lStructSize = sizeof(ofn);
@@ -691,7 +691,7 @@ char *open_neoreverb_dialog(void)
 char *save_neoreverb_dialog(const char *default_name)
 {
 #ifdef _WIN32
-    char fileBuf[1024] = {0};
+    char fileBuf[MAX_PATH] = {0};
     if (default_name && default_name[0])
     {
         safe_strncpy(fileBuf, default_name, sizeof(fileBuf));

@@ -1181,11 +1181,13 @@ int mod2rmf_save_document(Mod2RmfConverter *conv, const char *destPath)
 
     if (requiresZmf && !useZmfContainer)
     {
+        char reasonBuf[256];
+        BAEZMFReasonCodeToString(reason, reasonBuf, sizeof(reasonBuf));
         fprintf(stderr,
                 "[mod2rmf] Error: document requires ZMF format due to RMF-incompatible options \n"
                 "[mod2rmf] Reason(s): %s\n"
                 "[mod2rmf] Please use a .zmf output extension.\n",
-                BAEZMFReasonCodeToString(reason));
+                reasonBuf);
         return 0;
     }
 

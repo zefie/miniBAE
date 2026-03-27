@@ -3347,7 +3347,7 @@ enum BAEZMFReasonCode
 
 typedef enum BAEZMFReasonCode BAEZMFReasonCode;
 
-char const* BAEZMFReasonCodeToString(uint32_t reason);
+void BAEZMFReasonCodeToString(uint32_t reason, char *outBuffer, uint32_t bufferSize);
 
 #endif
 

@@ -1212,9 +1212,12 @@ void playlist_render(SDL_Renderer *R, Rect panel_rect, int mx, int my, bool mdow
         display_name[sizeof(display_name) - 1] = '\0';
 
         // Simple truncation (could be improved with text measurement)
-        if (strlen(display_name) > 40)
-        {
-            strcpy(display_name + 37, "...");
+        size_t max_len = 40;
+
+        if (strlen(display_name) > max_len) {
+            /* leave room for "..." and the null terminator */
+            memcpy(display_name + (max_len - 3), "...", 3);
+            display_name[max_len] = '\0';
         }
 
         draw_text(R, name_x, item_y + 2, display_name, text_color);

@@ -1660,7 +1660,11 @@ void bae_enable_midi_callback(void)
 
 void bae_disable_midi_callback(void)
 {
+#ifdef SUPPORT_MIDI_HW
+    if (g_bae.song && g_midi_output_enabled)
+#else
     if (g_bae.song)
+#endif
     {
         BAESong_SetMidiEventCallback(g_bae.song, NULL, NULL);
     }

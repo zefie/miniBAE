@@ -6404,10 +6404,12 @@ private:
         if (m_statusInfoLabel) {
             m_statusInfoLabel->SetLabel(status);
             if (m_zmfReason != 0) {
+                char reasonBuf[256] = {0};
+                BAEZMFReasonCodeToString((BAEZMFReasonCode)m_zmfReason, reasonBuf, sizeof(reasonBuf));
                 if (m_editorMode == kEditorModeBank) {
-                    m_statusInfoLabel->SetToolTip(wxString::Format("ZSB is required because: %s", BAEZMFReasonCodeToString((BAEZMFReasonCode)m_zmfReason)));
+                    m_statusInfoLabel->SetToolTip(wxString::Format("ZSB is required because: %s", reasonBuf));
                 } else {
-                    m_statusInfoLabel->SetToolTip(wxString::Format("ZMF is required because: %s", BAEZMFReasonCodeToString((BAEZMFReasonCode)m_zmfReason)));
+                    m_statusInfoLabel->SetToolTip(wxString::Format("ZMF is required because: %s", reasonBuf));
                 }
             } else {
                 m_statusInfoLabel->SetToolTip(wxEmptyString);

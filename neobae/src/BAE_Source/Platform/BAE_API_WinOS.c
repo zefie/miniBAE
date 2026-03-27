@@ -232,6 +232,7 @@
 #include <sys/stat.h>
 
 #include "BAE_API.h"
+#include "X_Assert.h"
 
 enum
 {
@@ -1898,7 +1899,7 @@ static void PV_CleanupDirectSound(void)
 #endif  // USE_DIRECTSOUND
 
 #if USE_PREFS
-// reads a file at "<WINDOWS>bae_setup.txt" that contains three numbers:
+// reads a file at "<appdir>bae_setup.txt" that contains three numbers:
 /*
 4 6 2 - 95/98
 
@@ -1928,8 +1929,21 @@ static BOOL PV_ReadFromPrefs(BAEDeviceID *pDeviceID, unsigned int *pSynthFramesP
     BOOL            found;
 
     found = FALSE;
-    GetWindowsDirectory(fileName, MAX_PATH);
-    strcat(fileName, "\\bae_setup.txt");
+    
+    get_executable_directory(fileName, MAX_PATH);
+
+    size_t len = strlen(fileName);
+    const char *suffix = "\\bae_setup.txt";
+    size_t suffix_len = strlen(suffix);
+
+    if (len + suffix_len < MAX_PATH) {
+        memcpy(fileName + len, suffix, suffix_len + 1); // +1 copies the null terminator
+    } else {
+        // handle overflow case (truncate, error, etc.)
+        // For example:
+        // fileName[0] = '\0'; // or log an error
+    }
+
 
     ref = BAE_FileOpenForRead(fileName);
     if (ref != -1)
