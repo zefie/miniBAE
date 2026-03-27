@@ -195,6 +195,10 @@ enum {
     ID_CloneFromBank,
     ID_CloneAllUsedFromBank,
     ID_AliasFromBank,
+    ID_CloneInstrument,
+    ID_AliasInstrument,
+    ID_ReassignSample,
+    ID_AssignSampleToInstrument,
     ID_SongSaveAs,
     ID_BankSave,
     ID_BankSaveAs,
@@ -1349,6 +1353,10 @@ public:
         Bind(wxEVT_MENU, &MainFrame::OnCompressAllInstruments, this, ID_CompressAllInstruments);
         Bind(wxEVT_MENU, &MainFrame::OnDeleteAllInstruments, this, ID_DeleteAllInstruments);
         Bind(wxEVT_MENU, &MainFrame::OnCloneAllUsedFromBank, this, ID_CloneAllUsedFromBank);
+        Bind(wxEVT_MENU, &MainFrame::OnCloneInstrument, this, ID_CloneInstrument);
+        Bind(wxEVT_MENU, &MainFrame::OnAliasInstrument, this, ID_AliasInstrument);
+        Bind(wxEVT_MENU, &MainFrame::OnReassignSample, this, ID_ReassignSample);
+        Bind(wxEVT_MENU, &MainFrame::OnAssignSampleToInstrument, this, ID_AssignSampleToInstrument);
         Bind(wxEVT_TIMER, &MainFrame::OnPlaybackTimer, this, ID_PlaybackTimer);
         Bind(wxEVT_TIMER, &MainFrame::OnNotePreviewTimer, this, ID_NotePreviewTimer);
         m_editorNotebook->Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, &MainFrame::OnEditorTabChanged, this);
@@ -7615,10 +7623,16 @@ private:
             menu.Append(ID_InstrumentEdit, "Edit Instrument...");
             menu.AppendSeparator();
             if (selectedData->IsAssetNode()) {
-                menu.Append(ID_CompressInstrument, "Compress Instrument");
-                menu.Append(ID_SampleDelete, "Delete Embedded Sample");
+                menu.Append(ID_CompressInstrument, "Compress Sample");
+                menu.Append(ID_SampleDelete, "Delete Sample");
+                menu.AppendSeparator();
+                menu.Append(ID_ReassignSample, "Re-assign Sample...");
+                menu.Append(ID_AssignSampleToInstrument, "Assign Sample to Additional Instrument...");
             } else {
-                menu.Append(ID_CompressInstrument, "Compress Instrument");
+                menu.Append(ID_CloneInstrument, "Clone Instrument...");
+                menu.Append(ID_AliasInstrument, "Alias Instrument...");
+                menu.AppendSeparator();
+                menu.Append(ID_CompressInstrument, "Compress all of Instrument's Samples");
                 menu.Append(ID_SampleDelete, "Delete Instrument");
             }
             menu.AppendSeparator();
@@ -11061,6 +11075,303 @@ private:
                 }
             }
         }
+    }
+
+    /* Collect all sampleIndices that belong to the same instrument (same program)
+     * as the given sampleIndex. Returns empty vector on error. */
+    std::vector<uint32_t> CollectSamplesByProgram(uint32_t referenceSampleIndex) {
+        std::vector<uint32_t> result;
+        BAERmfEditorSampleInfo refInfo;
+        uint32_t sampleCount = 0;
+
+        if (BAERmfEditorDocument_GetSampleInfo(m_document, referenceSampleIndex, &refInfo) != BAE_NO_ERROR) {
+            return result;
+        }
+        BAERmfEditorDocument_GetSampleCount(m_document, &sampleCount);
+        for (uint32_t i = 0; i < sampleCount; ++i) {
+            BAERmfEditorSampleInfo info;
+            if (BAERmfEditorDocument_GetSampleInfo(m_document, i, &info) == BAE_NO_ERROR &&
+                info.program == refInfo.program) {
+                result.push_back(i);
+            }
+        }
+        return result;
+    }
+
+    /* Clone or alias an instrument in the MIDI document to a new program.
+     * deepClone=true copies the sample audio assets independently;
+     * deepClone=false makes the new instrument share the same audio assets. */
+    void CloneOrAliasDocumentInstrument(bool deepClone) {
+        SampleTreeItemData *selectedData;
+        long targetProgram;
+        std::vector<uint32_t> sourceSamples;
+        BAERmfEditorSampleInfo sourceRefInfo;
+        uint32_t sourceInstID = 0;
+        BAERmfEditorInstrumentExtInfo extInfo;
+        bool hasExtInfo = false;
+        uint32_t lastNewSampleIndex = 0;
+
+        if (!m_document) {
+            return;
+        }
+        selectedData = GetSelectedSampleTreeData();
+        if (!selectedData || selectedData->IsAssetNode()) {
+            return;
+        }
+
+        sourceSamples = CollectSamplesByProgram(selectedData->GetSampleIndex());
+        if (sourceSamples.empty()) {
+            return;
+        }
+
+        /* Read ExtInfo from source instrument to copy it to the new one. */
+        if (BAERmfEditorDocument_GetInstIDForSample(m_document, sourceSamples[0], &sourceInstID) == BAE_NO_ERROR &&
+            BAERmfEditorDocument_GetInstrumentExtInfo(m_document, sourceInstID, &extInfo) == BAE_NO_ERROR) {
+            hasExtInfo = true;
+        }
+
+        if (!PromptTargetProgram(
+                deepClone ? "Clone Instrument" : "Alias Instrument",
+                deepClone ? "Target MIDI program for cloned instrument (0-127):"
+                          : "Target MIDI program for aliased instrument (0-127):",
+                &targetProgram)) {
+            return;
+        }
+
+        BeginUndoAction(deepClone ? "Clone Song Instrument" : "Alias Song Instrument");
+
+        for (uint32_t srcIdx : sourceSamples) {
+            BAERmfEditorSampleInfo srcInfo;
+            BAERmfEditorSampleSetup setup;
+            BAESampleInfo dummyInfo;
+            uint32_t newSampleIndex = 0;
+            uint32_t srcAssetID = 0;
+            uint32_t newInstID = 512u + static_cast<uint32_t>(targetProgram);
+
+            if (BAERmfEditorDocument_GetSampleInfo(m_document, srcIdx, &srcInfo) != BAE_NO_ERROR) {
+                continue;
+            }
+            if (BAERmfEditorDocument_GetSampleAssetIDForSample(m_document, srcIdx, &srcAssetID) != BAE_NO_ERROR) {
+                continue;
+            }
+
+            memset(&setup, 0, sizeof(setup));
+            setup.program    = static_cast<unsigned char>(targetProgram);
+            setup.rootKey    = srcInfo.rootKey;
+            setup.lowKey     = srcInfo.lowKey;
+            setup.highKey    = srcInfo.highKey;
+            wxString nameStr = srcInfo.displayName ? wxString::FromUTF8(srcInfo.displayName) : "New Instrument";
+            wxScopedCharBuffer nameUtf8 = nameStr.utf8_str();
+            setup.displayName = const_cast<char *>(nameUtf8.data());
+
+            if (BAERmfEditorDocument_AddEmptySample(m_document, &setup, &newSampleIndex, &dummyInfo) != BAE_NO_ERROR) {
+                CancelUndoAction();
+                wxMessageBox("Failed to create sample slot for new instrument.",
+                             deepClone ? "Clone Instrument" : "Alias Instrument",
+                             wxOK | wxICON_ERROR, this);
+                return;
+            }
+
+            /* Point the new sample at the source asset. */
+            if (BAERmfEditorDocument_SetSampleAssetForSample(m_document, newSampleIndex, srcAssetID) != BAE_NO_ERROR) {
+                CancelUndoAction();
+                wxMessageBox("Failed to assign sample asset.",
+                             deepClone ? "Clone Instrument" : "Alias Instrument",
+                             wxOK | wxICON_ERROR, this);
+                return;
+            }
+
+            if (deepClone) {
+                /* Separate the new sample onto its own independent copy of the asset. */
+                if (BAERmfEditorDocument_CloneSampleAssetForSample(m_document, newSampleIndex, nullptr) != BAE_NO_ERROR) {
+                    CancelUndoAction();
+                    wxMessageBox("Failed to clone sample audio data.",
+                                 "Clone Instrument", wxOK | wxICON_ERROR, this);
+                    return;
+                }
+            }
+
+            /* Set the instID (512 + program = NeoBAE special melodic band 2). */
+            BAERmfEditorDocument_SetSampleInstID(m_document, newSampleIndex, newInstID);
+
+            /* Copy remaining sample metadata (splitVolume, compression). */
+            {
+                BAERmfEditorSampleInfo newInfo;
+                if (BAERmfEditorDocument_GetSampleInfo(m_document, newSampleIndex, &newInfo) == BAE_NO_ERROR) {
+                    newInfo.splitVolume = srcInfo.splitVolume;
+                    newInfo.compressionType = srcInfo.compressionType;
+                    newInfo.sndStorageType = srcInfo.sndStorageType;
+                    BAERmfEditorDocument_SetSampleInfo(m_document, newSampleIndex, &newInfo);
+                }
+            }
+
+            lastNewSampleIndex = newSampleIndex;
+        }
+
+        /* Copy instrument extended info (ADSR, LFO, etc.) to the new instID. */
+        if (hasExtInfo) {
+            uint32_t newInstID = 512u + static_cast<uint32_t>(targetProgram);
+            extInfo.instID = newInstID;
+            BAERmfEditorDocument_SetInstrumentExtInfo(m_document, newInstID, &extInfo);
+        }
+
+        CommitUndoAction(deepClone ? "Clone Song Instrument" : "Alias Song Instrument");
+        PopulateSampleList();
+        SelectTreeItemForSample(lastNewSampleIndex);
+        StopKeyboardPreview();
+        InvalidatePianoRollPreviewSong();
+        MarkDocumentDirty();
+        SetStatusText(wxString::Format(deepClone ? "Cloned instrument to program %ld"
+                                                 : "Aliased instrument to program %ld",
+                                       targetProgram), 0);
+    }
+
+    void OnCloneInstrument(wxCommandEvent &) {
+        CloneOrAliasDocumentInstrument(true);
+    }
+
+    void OnAliasInstrument(wxCommandEvent &) {
+        CloneOrAliasDocumentInstrument(false);
+    }
+
+    /* Re-assign all usages of the selected sample asset to a different program. */
+    void OnReassignSample(wxCommandEvent &) {
+        SampleTreeItemData *selectedData;
+        uint32_t assetID;
+        uint32_t usageCount;
+        long targetProgram;
+        uint32_t newInstID;
+
+        if (!m_document) {
+            return;
+        }
+        selectedData = GetSelectedSampleTreeData();
+        if (!selectedData || !selectedData->IsAssetNode()) {
+            return;
+        }
+
+        assetID = selectedData->GetAssetID();
+        usageCount = 0;
+        if (BAERmfEditorDocument_GetSampleAssetUsageCount(m_document, assetID, &usageCount) != BAE_NO_ERROR ||
+            usageCount == 0) {
+            wxMessageBox("No usages found for this sample.", "Re-assign Sample",
+                         wxOK | wxICON_INFORMATION, this);
+            return;
+        }
+
+        if (!PromptTargetProgram("Re-assign Sample",
+                                 "New MIDI program for this sample (0-127):",
+                                 &targetProgram)) {
+            return;
+        }
+
+        newInstID = 512u + static_cast<uint32_t>(targetProgram);
+
+        BeginUndoAction("Re-assign Song Sample");
+
+        for (uint32_t usageIndex = 0; usageIndex < usageCount; ++usageIndex) {
+            uint32_t sampleIndex;
+
+            if (BAERmfEditorDocument_GetSampleAssetSampleIndex(m_document, assetID,
+                                                               usageIndex, &sampleIndex) != BAE_NO_ERROR) {
+                continue;
+            }
+
+            BAERmfEditorSampleInfo info;
+            if (BAERmfEditorDocument_GetSampleInfo(m_document, sampleIndex, &info) == BAE_NO_ERROR) {
+                info.program = static_cast<unsigned char>(targetProgram);
+                BAERmfEditorDocument_SetSampleInfo(m_document, sampleIndex, &info);
+            }
+            BAERmfEditorDocument_SetSampleInstID(m_document, sampleIndex, newInstID);
+        }
+
+        CommitUndoAction("Re-assign Song Sample");
+        PopulateSampleList();
+        {
+            uint32_t sampleIndex;
+            if (BAERmfEditorDocument_GetSampleAssetSampleIndex(m_document, assetID, 0, &sampleIndex) == BAE_NO_ERROR) {
+                SelectTreeItemForSample(sampleIndex);
+            }
+        }
+        StopKeyboardPreview();
+        InvalidatePianoRollPreviewSong();
+        MarkDocumentDirty();
+        SetStatusText(wxString::Format("Re-assigned sample A%u to program %ld",
+                                       static_cast<unsigned>(assetID), targetProgram), 0);
+    }
+
+    /* Add the selected sample asset as an additional usage in another instrument. */
+    void OnAssignSampleToInstrument(wxCommandEvent &) {
+        SampleTreeItemData *selectedData;
+        uint32_t assetID;
+        long targetProgram;
+        uint32_t newInstID;
+        BAERmfEditorSampleSetup setup;
+        BAESampleInfo dummyInfo;
+        uint32_t newSampleIndex = 0;
+
+        if (!m_document) {
+            return;
+        }
+        selectedData = GetSelectedSampleTreeData();
+        if (!selectedData || !selectedData->IsAssetNode()) {
+            return;
+        }
+
+        assetID = selectedData->GetAssetID();
+
+        /* Get metadata from first usage to seed the setup defaults. */
+        {
+            uint32_t firstSampleIndex = 0;
+            BAERmfEditorSampleInfo firstInfo;
+            memset(&setup, 0, sizeof(setup));
+            setup.rootKey = 60;
+            setup.lowKey  = 0;
+            setup.highKey = 127;
+            if (BAERmfEditorDocument_GetSampleAssetSampleIndex(m_document, assetID, 0, &firstSampleIndex) == BAE_NO_ERROR &&
+                BAERmfEditorDocument_GetSampleInfo(m_document, firstSampleIndex, &firstInfo) == BAE_NO_ERROR) {
+                setup.rootKey = firstInfo.rootKey;
+                setup.lowKey  = firstInfo.lowKey;
+                setup.highKey = firstInfo.highKey;
+            }
+        }
+
+        if (!PromptTargetProgram("Assign Sample to Additional Instrument",
+                                 "Target MIDI program to add this sample to (0-127):",
+                                 &targetProgram)) {
+            return;
+        }
+
+        newInstID = 512u + static_cast<uint32_t>(targetProgram);
+        setup.program = static_cast<unsigned char>(targetProgram);
+        setup.displayName = const_cast<char *>("New Instrument");
+
+        BeginUndoAction("Assign Song Sample to Additional Instrument");
+
+        if (BAERmfEditorDocument_AddEmptySample(m_document, &setup, &newSampleIndex, &dummyInfo) != BAE_NO_ERROR) {
+            CancelUndoAction();
+            wxMessageBox("Failed to create sample slot for additional instrument.",
+                         "Assign Sample to Additional Instrument", wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        if (BAERmfEditorDocument_SetSampleAssetForSample(m_document, newSampleIndex, assetID) != BAE_NO_ERROR) {
+            CancelUndoAction();
+            wxMessageBox("Failed to assign sample asset to additional instrument.",
+                         "Assign Sample to Additional Instrument", wxOK | wxICON_ERROR, this);
+            return;
+        }
+
+        BAERmfEditorDocument_SetSampleInstID(m_document, newSampleIndex, newInstID);
+
+        CommitUndoAction("Assign Song Sample to Additional Instrument");
+        PopulateSampleList();
+        SelectTreeItemForSample(newSampleIndex);
+        StopKeyboardPreview();
+        InvalidatePianoRollPreviewSong();
+        MarkDocumentDirty();
+        SetStatusText(wxString::Format("Assigned sample A%u to additional instrument P%ld",
+                                       static_cast<unsigned>(assetID), targetProgram), 0);
     }
 
     void OnSampleDelete(wxCommandEvent &) {

@@ -41,6 +41,10 @@
 
 # 0.11a
 - ~~Tell user why ZMF is required via tooltip over the status bar text~~
+- ~~Add "Clone this Instrument" and "Alias this Instrument" when right clicking instrument in MIDI Editor~~
+- ~~Add "Re-assign this Sample" and "Assign Sample to Additional Instrument" when right clicking samples in the MIDI editor~~
+
+# Future
 - Allow cut/copy/pasting instruments
 - Allow dragging samples to other instruments
   - Ask user if they want to move, or alias the sample
@@ -51,8 +55,6 @@
   - If instrument has more than one sample, we still have to modify both the source and dest INST to update SNDID
   - If the user CTRL-drags then we just alias the sample
   - alias is just adding that SNDID to the inst without removing it from the old
-
-# Future
 - More throughly test backwards compatiblity with BeatnikX, maybe even WebTV Plus
   - Put on back-burner for now
   - old 2021 miniBAE can play files (obv without mp3) that BeatnikX can't
