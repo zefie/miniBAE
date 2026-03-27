@@ -3190,6 +3190,9 @@ BAEResult BAERmfEditorDocument_SetSampleInfo(BAERmfEditorDocument *document,
 BAEResult BAERmfEditorDocument_GetSampleAssetIDForSample(BAERmfEditorDocument const *document,
                                                          uint32_t sampleIndex,
                                                          uint32_t *outAssetID);
+BAEResult BAERmfEditorDocument_SetSampleInstID(BAERmfEditorDocument *document,
+                                               uint32_t sampleIndex,
+                                               uint32_t instID);
 BAEResult BAERmfEditorDocument_GetSampleAssetCount(BAERmfEditorDocument const *document,
                                                    uint32_t *outAssetCount);
 BAEResult BAERmfEditorDocument_GetSampleAssetInfo(BAERmfEditorDocument const *document,

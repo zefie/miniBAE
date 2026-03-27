@@ -11326,6 +11326,18 @@ BAEResult BAERmfEditorDocument_GetSampleAssetIDForSample(BAERmfEditorDocument co
     return BAE_NO_ERROR;
 }
 
+BAEResult BAERmfEditorDocument_SetSampleInstID(BAERmfEditorDocument *document,
+                                               uint32_t sampleIndex,
+                                               uint32_t instID)
+{
+    if (!document || sampleIndex >= document->sampleCount)
+    {
+        return BAE_PARAM_ERR;
+    }
+    document->samples[sampleIndex].instID = instID;
+    return BAE_NO_ERROR;
+}
+
 BAEResult BAERmfEditorDocument_GetSampleAssetCount(BAERmfEditorDocument const *document,
                                                    uint32_t *outAssetCount)
 {

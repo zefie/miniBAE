@@ -163,6 +163,11 @@ int mod2rmf_setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
             continue;
         }
 
+        {
+            uint32_t sampleInstID = 512u + (uint32_t)playable->program;
+            BAERmfEditorDocument_SetSampleInstID(conv->document, sampleIndex, sampleInstID);
+        }
+
         if (raw && raw->valid && raw->pcm8 && raw->frameCount > 0)
         {
             uint32_t pcmFrames;
