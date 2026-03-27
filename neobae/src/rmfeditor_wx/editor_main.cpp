@@ -6376,7 +6376,7 @@ private:
             requirementValue = (m_document && BAERmfEditorDocument_RequiresZmf(m_document, &m_zmfReason)) ? "Yes" : "No";
         }
 
-        wxString status = wxString::Format("Project: %s  |  MIDI File: %s  |  Bank: %s  |  %s: %s",
+        wxString status = wxString::Format("Project: %s  |  Media File: %s  |  Bank: %s  |  %s: %s",
                                            projectName,
                                            mediaName,
                                            bankName,
