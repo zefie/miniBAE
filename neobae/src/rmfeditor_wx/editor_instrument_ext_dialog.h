@@ -10,6 +10,7 @@
 
 extern "C" {
 #include "NeoBAE.h"
+#include "X_Assert.h"
 }
 
 class wxWindow;

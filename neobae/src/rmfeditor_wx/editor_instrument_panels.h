@@ -831,9 +831,9 @@ private:
             }
             return true;
         } catch (std::exception const &ex) {
-            fprintf(stderr, "[nbstudio] piano preview note-on exception: %s\n", ex.what());
+            BAE_PRINTF( "[nbstudio] piano preview note-on exception: %s\n", ex.what());
         } catch (...) {
-            fprintf(stderr, "[nbstudio] piano preview note-on unknown exception\n");
+            BAE_PRINTF( "[nbstudio] piano preview note-on unknown exception\n");
         }
 
         if (m_releaseWatchdog.IsRunning()) {
@@ -852,9 +852,9 @@ private:
                 m_noteOff();
             }
         } catch (std::exception const &ex) {
-            fprintf(stderr, "[nbstudio] piano preview note-off exception: %s\n", ex.what());
+            BAE_PRINTF( "[nbstudio] piano preview note-off exception: %s\n", ex.what());
         } catch (...) {
-            fprintf(stderr, "[nbstudio] piano preview note-off unknown exception\n");
+            BAE_PRINTF( "[nbstudio] piano preview note-off unknown exception\n");
         }
     }
 
@@ -1209,9 +1209,9 @@ public:
         }
 
 #if _DEBUG
-        fprintf(stderr, "[SaveToExtInfo] lfoCount=%u lfoSel=%d\n", extInfo.lfoCount, lfoSel);
+        BAE_PRINTF( "[SaveToExtInfo] lfoCount=%u lfoSel=%d\n", extInfo.lfoCount, lfoSel);
         for (uint32_t dbg = 0; dbg < extInfo.lfoCount && dbg < BAE_EDITOR_MAX_LFOS; dbg++) {
-            fprintf(stderr, "  lfo[%u] dest=0x%x period=%d shape=0x%x dc=%d level=%d adsr.stages=%u\n",
+            BAE_PRINTF( "  lfo[%u] dest=0x%x period=%d shape=0x%x dc=%d level=%d adsr.stages=%u\n",
                     dbg, extInfo.lfos[dbg].destination, extInfo.lfos[dbg].period,
                     extInfo.lfos[dbg].waveShape, extInfo.lfos[dbg].DC_feed,
                     extInfo.lfos[dbg].level, extInfo.lfos[dbg].adsr.stageCount);

@@ -28,6 +28,7 @@ extern "C" {
 #include "NeoBAE.h"
 #include "X_API.h"
 #include "X_Formats.h"
+#include "X_Assert.h"
 }
 
 #include "editor_bank.h"
@@ -505,7 +506,7 @@ static void ApplyDirtyParams(BankEditorPanel *bp, bool commitSampleReEncode)
                 sData.compressionType, sData.opusMode, sData.opusRoundTripResample
             };
         }
-        fprintf(stderr, "[bank] ApplyDirtyParams: sampleOverride idx=%u rootKey=%u rate=%u loop=%u-%u\n",
+        BAE_PRINTF( "[bank] ApplyDirtyParams: sampleOverride idx=%u rootKey=%u rate=%u loop=%u-%u\n",
                 bp->currentSampleIndex, (unsigned)sData.rootKey, sData.sampleRate,
                 sData.loopStart, sData.loopEnd);
     } else {
@@ -728,17 +729,17 @@ static void PopulateInstrumentTree(BankEditorPanel *bp)
     root = bp->instrumentTree->AddRoot("Instruments");
 
     if (!bp->bankToken) {
-        fprintf(stderr, "[BankEditor] PopulateInstrumentTree: no bank token\n");
+        BAE_PRINTF( "[BankEditor] PopulateInstrumentTree: no bank token\n");
         bp->instrumentTree->Expand(root);
         return;
     }
 
     if (BAERmfEditorBank_GetInstrumentCount(bp->bankToken, &instCount) != BAE_NO_ERROR) {
-        fprintf(stderr, "[BankEditor] PopulateInstrumentTree: GetInstrumentCount failed\n");
+        BAE_PRINTF( "[BankEditor] PopulateInstrumentTree: GetInstrumentCount failed\n");
         bp->instrumentTree->Expand(root);
         return;
     }
-    fprintf(stderr, "[BankEditor] PopulateInstrumentTree: %u instruments\n", instCount);
+    BAE_PRINTF( "[BankEditor] PopulateInstrumentTree: %u instruments\n", instCount);
 
     struct BankGroup {
         int sortOrder;
@@ -1171,7 +1172,7 @@ static void RefreshWaveform(BankEditorPanel *bp)
     FreeCachedWaveform(bp);
 
     if (!bp->bankToken || !bp->hasSampleSelection) {
-        fprintf(stderr, "[bank] RefreshWaveform: skip (bankToken=%p hasSampleSel=%d)\n",
+        BAE_PRINTF( "[bank] RefreshWaveform: skip (bankToken=%p hasSampleSel=%d)\n",
                 (void *)bp->bankToken, bp->hasSampleSelection);
         if (bp->sampleParamsPanel) {
             bp->sampleParamsPanel->SetWaveform(nullptr, 0, 16, 1);
@@ -1185,7 +1186,7 @@ static void RefreshWaveform(BankEditorPanel *bp)
                                                 &waveData, &frameCount,
                                                 &bitSize, &channels,
                                                 &sampleRate);
-    fprintf(stderr, "[bank] RefreshWaveform: inst=%u sample=%u result=%d waveData=%p frames=%u bits=%u ch=%u\n",
+    BAE_PRINTF( "[bank] RefreshWaveform: inst=%u sample=%u result=%d waveData=%p frames=%u bits=%u ch=%u\n",
             bp->currentInstrumentIndex, bp->currentSampleIndex,
             (int)waveResult, waveData, frameCount, bitSize, channels);
     if (waveResult == BAE_NO_ERROR && waveData) {

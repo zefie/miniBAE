@@ -511,7 +511,7 @@ private:
         SaveExtInfoFromUI();
         if (!TriggerPreviewNote(note, keyCode)) {
     #if _DEBUG
-            fprintf(stderr, "[nbstudio] key-preview down key=%d note=%d trigger=miss active=%zu\n",
+            BAE_PRINTF( "[nbstudio] key-preview down key=%d note=%d trigger=miss active=%zu\n",
                 keyCode,
                 note,
                 m_keyboardPreviewNotes.size());
@@ -521,7 +521,7 @@ private:
 
         m_keyboardPreviewNotes[keyCode] = note;
     #if _DEBUG
-        fprintf(stderr, "[nbstudio] key-preview down key=%d note=%d trigger=ok active=%zu\n",
+        BAE_PRINTF( "[nbstudio] key-preview down key=%d note=%d trigger=ok active=%zu\n",
             keyCode,
             note,
             m_keyboardPreviewNotes.size());
@@ -548,7 +548,7 @@ private:
 
         if (found == m_keyboardPreviewNotes.end()) {
 #if _DEBUG
-            fprintf(stderr, "[nbstudio] key-preview up key=%d state=missing active=%zu\n",
+            BAE_PRINTF( "[nbstudio] key-preview up key=%d state=missing active=%zu\n",
                     keyCode,
                     m_keyboardPreviewNotes.size());
 #endif
@@ -558,7 +558,7 @@ private:
 
         m_keyboardPreviewNotes.erase(found);
 #if _DEBUG
-        fprintf(stderr, "[nbstudio] key-preview up key=%d state=found active=%zu\n",
+        BAE_PRINTF( "[nbstudio] key-preview up key=%d state=found active=%zu\n",
                 keyCode,
                 m_keyboardPreviewNotes.size());
 #endif
