@@ -74,7 +74,9 @@ struct AutomationLaneDescriptor {
 };
 
 static void FillRectWithBrush(wxDC &dc, wxRect const &rect, wxBrush const &brush) {
-    if (rect.GetWidth() <= 0 || rect.GetHeight() <= 0) {
+    const int w = rect.GetWidth();
+    const int h = rect.GetHeight();
+    if (w <= 0 || h <= 0 || w > 8192 || h > 8192) {
         return;
     }
 
@@ -95,8 +97,6 @@ static void FillRectWithBrush(wxDC &dc, wxRect const &rect, wxBrush const &brush
     // it to a wxBitmap (wx pre-multiplies alpha for Windows automatically),
     // and draw it with DrawBitmap(..., true).  On wxMSW this calls AlphaBlend;
     // on GTK it uses Cairo source-over compositing.
-    const int w = rect.GetWidth();
-    const int h = rect.GetHeight();
 
     wxImage img(w, h);
     img.SetRGB(wxRect(0, 0, w, h), colour.Red(), colour.Green(), colour.Blue());
@@ -3313,6 +3313,8 @@ private:
             lastTick = m_timelineEndDragTick;
         }
         width = TickToX(lastTick) + 200;
+        width = std::max(1, width);
+        height = std::max(1, height);
         SetVirtualSize(width, height);
     }
 
@@ -3612,6 +3614,11 @@ private:
         wxAutoBufferedPaintDC dc(this);
         PrepareDC(dc);
 
+        wxSize clientSize = GetClientSize();
+        if (clientSize.GetWidth() <= 0 || clientSize.GetHeight() <= 0) {
+            return;
+        }
+
         // Cache frequently used values once per paint
         const uint16_t tpq = GetTicksPerQuarter();
         const int leftGutter = kPianoRollLeftGutter;
@@ -3622,11 +3629,11 @@ private:
         dc.SetBackground(m_rc.brushWhiteKey);
         dc.Clear();
 
-        const wxSize clientSize = GetVirtualSize();
+        const wxSize virtualSize = GetVirtualSize();
         const int viewLeft   = GetViewStartX();
         const int viewTop    = GetViewStartY();
-        const int viewRight  = viewLeft + GetClientSize().GetWidth();
-        const int viewBottom = viewTop  + GetClientSize().GetHeight();
+        const int viewRight  = viewLeft + clientSize.GetWidth();
+        const int viewBottom = viewTop  + clientSize.GetHeight();
 
         // Pre‑compute note‑Y positions once
         static int noteY[128];
@@ -3677,7 +3684,7 @@ private:
 
         DrawMidiLoopOverlay(dc, wxRect(viewLeft, viewTop,
                                         viewRight - viewLeft, viewBottom - viewTop),
-                            clientSize);
+                            virtualSize);
 
         if (HasTrack()) {
             const NoteTrackCache *cache = GetNoteTrackCache();

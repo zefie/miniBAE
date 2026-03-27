@@ -1171,15 +1171,16 @@ int mod2rmf_save_document(Mod2RmfConverter *conv, const char *destPath)
 
     ext = strrchr(destPath, '.');
     useZmfContainer = (ext && (!strcmp(ext, ".zmf") || !strcmp(ext, ".ZMF"))) ? TRUE : FALSE;
-    requiresZmf = BAERmfEditorDocument_RequiresZmf(conv->document);
+    uint32_t reason;
+    requiresZmf = BAERmfEditorDocument_RequiresZmf(conv->document, &reason);
 
     if (requiresZmf && !useZmfContainer)
     {
         fprintf(stderr,
-                "[mod2rmf] Error: document requires ZMF format due to RMF-incompatible sample data \n"
-                "[mod2rmf] (use of a modern codec, or likely a loop shorter than %u frames). \n"
+                "[mod2rmf] Error: document requires ZMF format due to RMF-incompatible options \n"
+                "[mod2rmf] Reason(s): %s\n"
                 "[mod2rmf] Please use a .zmf output extension.\n",
-                (unsigned)MIN_LOOP_SIZE_RMF);
+                BAEZMFReasonCodeToString(reason));
         return 0;
     }
 
@@ -1782,6 +1783,16 @@ BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char
     ModSongModel song;
     mod2rmf_song_model_init(&song);    
     mod2rmf_resampler_defaults(&resamplerSettings);
+
+    if (useZmfContainer)
+    {
+        int32_t engineFlags;
+        engineFlags = 0;
+        BAERmfEditorDocument_GetEngineConfig(conv->document, &engineFlags);
+        engineFlags |= SONG_CONFIG_HAS_SAMPLE_OFFSET_START | SONG_CONFIG_SAMPLE_OFFSET_START_ON;
+        BAERmfEditorDocument_SetEngineConfig(conv->document, engineFlags);
+    }
+
     if (!mod2rmf_load_source_data(conv, sourcePath))
     {
         BAE_STDERR("Error: failed to read source file\n");
@@ -1894,6 +1905,7 @@ BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char
     }
 
     *doc = conv->document; /* Return the created document via output parameter */
+
     conv->document = NULL;
     mod2rmf_song_model_dispose(&song);
     mod2rmf_converter_delete(conv);

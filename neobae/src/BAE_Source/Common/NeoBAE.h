@@ -3327,8 +3327,28 @@ BAEResult BAERmfEditorDocument_SaveAsMidi(BAERmfEditorDocument *document,
 BAE_BOOL BAERmfEditorDocument_CanSaveAsMidi(BAERmfEditorDocument const *document);
 BAEResult BAERmfEditorDocument_DebugReportMidiRoundTripDiff(BAERmfEditorDocument *document);
 BAEResult BAERmfEditorDocument_Validate(BAERmfEditorDocument *document);
-BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document);
-BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken);
+BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document, uint32_t *outReason);
+BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReason);
+
+
+#if USE_ZMF_SUPPORT == TRUE
+enum BAEZMFReasonCode
+{
+    BAEZMF_REASON_NONE = 0,
+    BAEZMF_REASON_LOOP_TOO_SHORT = 1,
+    BAEZMF_REASON_MODERN_CODEC = 2,
+    BAEZMF_REASON_CUBIC_INTERPOLATION = 4,
+    BAEZMF_REASON_ENGINE_FLAGS = 8,
+    BAEZMF_REASON_OTHER = 16
+};
+
+typedef enum BAEZMFReasonCode BAEZMFReasonCode;
+
+char const* BAEZMFReasonCodeToString(uint32_t reason);
+
+#endif
+
+
 
 /* ---------- Bank instrument enumeration and cloning ---------- */
 

@@ -12782,10 +12782,47 @@ BAEResult BAERmfEditorDocument_Validate(BAERmfEditorDocument *document)
     return BAE_NO_ERROR;
 }
 
+
 #if USE_ZMF_SUPPORT == TRUE
-BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document)
+char const* BAEZMFReasonCodeToString(uint32_t reason) {
+    static char buffer[256];
+    buffer[0] = '\0';
+    
+    if (reason & BAEZMF_REASON_LOOP_TOO_SHORT)
+    {
+        strcat(buffer, "An instrument's loop is too short; ");
+    }
+    if (reason & BAEZMF_REASON_MODERN_CODEC)
+    {
+        strcat(buffer, "Using a modern codec; ");
+    }
+    if (reason & BAEZMF_REASON_CUBIC_INTERPOLATION)
+    {
+        strcat(buffer, "Using advanced interpolation; ");
+    }
+    if (reason & BAEZMF_REASON_ENGINE_FLAGS)
+    {
+        strcat(buffer, "Song-specific engine flags are enabled; ");
+    }
+    
+    if (buffer[0] == '\0')
+    {
+        return "Unknown";
+    }
+    
+    // Remove trailing "; "
+    if (strlen(buffer) >= 2)
+    {
+        buffer[strlen(buffer) - 2] = '\0';
+    }
+    
+    return buffer;
+}
+
+BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document, uint32_t *outReason)
 {
     uint32_t i;
+    uint32_t reason = 0;
 
     if (!document)
     {
@@ -12798,7 +12835,7 @@ BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document)
         if (sample->sampleInfo.endLoop > sample->sampleInfo.startLoop &&
             (sample->sampleInfo.endLoop - sample->sampleInfo.startLoop) < MIN_LOOP_SIZE_RMF)
         {
-            return TRUE;
+            reason |= BAEZMF_REASON_LOOP_TOO_SHORT;
         }
 
         switch (sample->targetCompressionType)
@@ -12825,6 +12862,8 @@ BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document)
             case BAE_EDITOR_COMPRESSION_OPUS_160K:
             case BAE_EDITOR_COMPRESSION_OPUS_192K:
             case BAE_EDITOR_COMPRESSION_OPUS_256K:
+                reason |= BAEZMF_REASON_MODERN_CODEC;
+                *outReason = reason;
                 return TRUE;
             case BAE_EDITOR_COMPRESSION_DONT_CHANGE:
                 /* Original data may contain a modern codec */
@@ -12833,6 +12872,8 @@ BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document)
                     sample->sourceCompressionType == (uint32_t)C_OPUS
                 )
                 {
+                    reason |= BAEZMF_REASON_MODERN_CODEC;
+                    *outReason = reason;
                     return TRUE;
                 }
                 break;
@@ -12846,20 +12887,22 @@ BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document)
 
         if (TEST_FLAG_VALUE(ext->flags2, ZBF_advancedInterpolation))
         {
-            return TRUE;
+            reason |= BAEZMF_REASON_CUBIC_INTERPOLATION;
         }
     }
     if (document->engineConfigFlags != 0)
     {
-        return TRUE;
+        reason |= BAEZMF_REASON_ENGINE_FLAGS;
     }
-    return FALSE;
+    *outReason = reason;
+    return (reason != 0) ? TRUE : FALSE;
 }
 
-BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken)
+BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReason)
 {
     uint32_t instrumentCount;
     uint32_t instrumentIndex;
+    uint32_t reason = 0;
 
     if (!bankToken)
     {
@@ -12896,8 +12939,8 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken)
                            (unsigned)instrumentIndex,
                            (unsigned)debugSndID,
                            (unsigned)extInfo.flags2);
-#endif
-                return TRUE;
+#endif                
+                reason |= BAEZMF_REASON_CUBIC_INTERPOLATION;
             }
         }
 
@@ -12935,7 +12978,7 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken)
                            (unsigned)MIN_LOOP_SIZE_ZMF,
                            (unsigned)MIN_LOOP_SIZE_RMF);
 #endif
-                    return TRUE;
+                    reason |= BAEZMF_REASON_LOOP_TOO_SHORT;
                 }
             }
 
@@ -12950,12 +12993,12 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken)
                            (unsigned)(uint16_t)sampleInfo.sndResourceID,
                            (unsigned)compressionType);
 #endif
-                return TRUE;
+                reason |= BAEZMF_REASON_MODERN_CODEC;
             }
         }
     }
-
-    return FALSE;
+    *outReason = reason;
+    return (reason != 0) ? TRUE : FALSE;
 }
 #else
 BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken)

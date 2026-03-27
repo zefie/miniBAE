@@ -40,6 +40,7 @@
 
 
 # 0.11a
+- ~~Tell user why ZMF is required via tooltip over the status bar text~~
 - Allow cut/copy/pasting instruments
 - Allow dragging samples to other instruments
   - Ask user if they want to move, or alias the sample

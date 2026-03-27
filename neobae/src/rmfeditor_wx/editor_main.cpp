@@ -63,7 +63,7 @@ extern "C" {
 #include <gtk/gtk.h>
 #endif // __WXGTK__
 
-#define VERSION "0.10a"
+#define VERSION "0.11a"
 
 namespace {
 
@@ -473,6 +473,7 @@ public:
     MainFrame()
         : wxFrame(nullptr, wxID_ANY, wxString::Format("NeoBAE Studio v%s - New Project", kVersionString), wxDefaultPosition, wxSize(1400, 940)),
           m_document(nullptr),
+                    m_zmfReason(0),
                     m_updatingControls(false),
                     m_editorNotebook(nullptr),
                     m_bankEditorPanel(nullptr),
@@ -1397,6 +1398,7 @@ private:
     };
 
     BAERmfEditorDocument *m_document;
+    mutable uint32_t m_zmfReason;
     bool m_updatingControls;
     wxString m_currentPath;
     wxString m_sessionPath;
@@ -1594,7 +1596,8 @@ private:
         if (!m_bankToken) {
             return false;
         }
-        return BAERmfEditorBank_RequiresZsb(m_bankToken) ? true : false;
+        bool result = BAERmfEditorBank_RequiresZsb(m_bankToken, &m_zmfReason) ? true : false;
+        return result;
     }
 
     static wxString GetIniPath() {
@@ -2164,7 +2167,7 @@ private:
 
         data = nullptr;
         size = 0;
-        useZmf = BAERmfEditorDocument_RequiresZmf(m_document) ? TRUE : FALSE;
+        useZmf = BAERmfEditorDocument_RequiresZmf(m_document, &m_zmfReason) ? TRUE : FALSE;
         if (BAERmfEditorDocument_SaveAsRmfToMemory(m_document,
                                                     useZmf,
                                                     &data,
@@ -4561,7 +4564,7 @@ private:
          * conductor/meta setup on track 0) survives in single-track exports. */
         rmfData = nullptr;
         rmfSize = 0;
-        useZmf = BAERmfEditorDocument_RequiresZmf(m_document) ? TRUE : FALSE;
+        useZmf = BAERmfEditorDocument_RequiresZmf(m_document, &m_zmfReason) ? TRUE : FALSE;
         if (BAERmfEditorDocument_SaveAsRmfToMemory(m_document,
                                                     useZmf,
                                                     &rmfData,
@@ -4683,7 +4686,7 @@ private:
 
         rmfData = nullptr;
         rmfSize = 0;
-        useZmf = BAERmfEditorDocument_RequiresZmf(sourceDoc) ? TRUE : FALSE;
+        useZmf = BAERmfEditorDocument_RequiresZmf(sourceDoc, &m_zmfReason) ? TRUE : FALSE;
         if (BAERmfEditorDocument_SaveAsRmfToMemory(sourceDoc,
                                                    useZmf,
                                                    &rmfData,
@@ -4879,7 +4882,7 @@ private:
 
         rmfData = nullptr;
         rmfSize = 0;
-        useZmf = BAERmfEditorDocument_RequiresZmf(m_document) ? TRUE : FALSE;
+        useZmf = BAERmfEditorDocument_RequiresZmf(m_document, &m_zmfReason) ? TRUE : FALSE;
         if (BAERmfEditorDocument_SaveAsRmfToMemory(m_document,
                                                    useZmf,
                                                    &rmfData,
@@ -5407,7 +5410,7 @@ private:
 
         rmfData = nullptr;
         rmfSize = 0;
-        bool requiresZmf = BAERmfEditorDocument_RequiresZmf(m_document);
+        bool requiresZmf = BAERmfEditorDocument_RequiresZmf(m_document, &m_zmfReason);
         if (BAERmfEditorDocument_SaveAsRmfToMemory(m_document,
                                                     requiresZmf ? TRUE : FALSE,
                                                     &rmfData,
@@ -5561,7 +5564,7 @@ private:
          * without affecting the original. */
         rmfData = nullptr;
         rmfSize = 0;
-        bool requiresZmf = BAERmfEditorDocument_RequiresZmf(m_document);
+        bool requiresZmf = BAERmfEditorDocument_RequiresZmf(m_document, &m_zmfReason);
         if (BAERmfEditorDocument_SaveAsRmfToMemory(m_document,
                                                     requiresZmf ? TRUE : FALSE,
                                                     &rmfData,
@@ -5713,7 +5716,7 @@ private:
         outData->clear();
 
         // Use the document directly to save as RMF - it includes all instruments
-        requiresZmf = (BAERmfEditorDocument_RequiresZmf(m_document) != 0);
+        requiresZmf = (BAERmfEditorDocument_RequiresZmf(m_document, &m_zmfReason) != 0);
         blobData = nullptr;
         saveResult = BAERmfEditorDocument_SaveAsRmfToMemory(m_document,
                                                             requiresZmf ? TRUE : FALSE,
@@ -5776,7 +5779,7 @@ private:
         if (!playDoc || !outData) {
             return false;
         }
-        requiresZmf = (BAERmfEditorDocument_RequiresZmf(playDoc) != 0);
+        requiresZmf = (BAERmfEditorDocument_RequiresZmf(playDoc, &m_zmfReason) != 0);
         blobData = nullptr;
         blobSize = 0;
         saveResult = BAERmfEditorDocument_SaveAsRmfToMemory(playDoc,
@@ -6292,6 +6295,13 @@ private:
 
     void EnsureStatusInfoLabel() {
         wxStatusBar *statusBar = GetStatusBar();
+        if (!statusBar) {
+            int statusWidths[2] = {500, -1};
+            statusBar = CreateStatusBar(2);
+            if (statusBar) {
+                SetStatusWidths(2, statusWidths);
+            }
+        }
         if (!statusBar || m_statusInfoLabel) {
             return;
         }
@@ -6311,14 +6321,31 @@ private:
         wxStatusBar *statusBar = GetStatusBar();
         wxRect fieldRect;
 
-        if (!statusBar || !m_statusInfoLabel || !statusBar->GetFieldRect(1, fieldRect)) {
+        if (!statusBar) {
+            return;
+        }
+        if (!m_statusInfoLabel) {
+            EnsureStatusInfoLabel();
+            if (!m_statusInfoLabel) {
+                return;
+            }
+        }
+        if (!statusBar->GetFieldRect(1, fieldRect)) {
             return;
         }
 
         fieldRect.Deflate(4, 1);
         if (fieldRect.width <= 0 || fieldRect.height <= 0) {
-            m_statusInfoLabel->Hide();
-            return;
+            SendSizeEvent(wxSEND_EVENT_POST);
+            Layout();
+            if (!statusBar->GetFieldRect(1, fieldRect)) {
+                return;
+            }
+            fieldRect.Deflate(4, 1);
+            if (fieldRect.width <= 0 || fieldRect.height <= 0) {
+                m_statusInfoLabel->Hide();
+                return;
+            }
         }
         m_statusInfoLabel->SetPosition(fieldRect.GetPosition());
         m_statusInfoLabel->SetSize(fieldRect.GetSize());
@@ -6346,7 +6373,7 @@ private:
             requirementValue = BankRequiresZsb() ? "Yes" : "No";
         } else {
             requirementLabel = "ZMF Required";
-            requirementValue = (m_document && BAERmfEditorDocument_RequiresZmf(m_document)) ? "Yes" : "No";
+            requirementValue = (m_document && BAERmfEditorDocument_RequiresZmf(m_document, &m_zmfReason)) ? "Yes" : "No";
         }
 
         wxString status = wxString::Format("Project: %s  |  MIDI File: %s  |  Bank: %s  |  %s: %s",
@@ -6358,6 +6385,13 @@ private:
         EnsureStatusInfoLabel();
         if (m_statusInfoLabel) {
             m_statusInfoLabel->SetLabel(status);
+            if (m_zmfReason != 0) {
+                if (m_editorMode == kEditorModeBank) {
+                    m_statusInfoLabel->SetToolTip(wxString::Format("ZSB is required because: %s", BAEZMFReasonCodeToString((BAEZMFReasonCode)m_zmfReason)));
+                } else {
+                    m_statusInfoLabel->SetToolTip(wxString::Format("ZMF is required because: %s", BAEZMFReasonCodeToString((BAEZMFReasonCode)m_zmfReason)));
+                }
+            }
             LayoutStatusInfoLabel();
         }
         SetStatusText(wxEmptyString, 1);
@@ -6535,7 +6569,7 @@ private:
                 utf8SelectedPath = selectedPath.utf8_str();
                 BAEResult result = mod2rmf_load_module_to_document(&document,
                                                                    utf8SelectedPath.data(),
-                                                                   true);
+                                                                   TRUE);
                 if (result != BAE_NO_ERROR) {
                     wxMessageBox("Failed to load module file.", "Load Failed", wxOK | wxICON_ERROR, this);
                     return;
@@ -6688,7 +6722,7 @@ private:
                     static_cast<unsigned>(m_playbackChannelMask));
         }
 
-        requiresZmf = BAERmfEditorDocument_RequiresZmf(saveDoc) != 0;
+        requiresZmf = BAERmfEditorDocument_RequiresZmf(saveDoc, &m_zmfReason) != 0;
         canSaveAsMidi = (BAERmfEditorDocument_CanSaveAsMidi(saveDoc) != 0);
         midiRequiresCustomDataDrop = !canSaveAsMidi;
         BAERmfEditorDocument_SetMidiStorageType(saveDoc, GetSelectedMidiStorageType());
