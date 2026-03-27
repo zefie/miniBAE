@@ -6391,6 +6391,8 @@ private:
                 } else {
                     m_statusInfoLabel->SetToolTip(wxString::Format("ZMF is required because: %s", BAEZMFReasonCodeToString((BAEZMFReasonCode)m_zmfReason)));
                 }
+            } else {
+                m_statusInfoLabel->SetToolTip(wxEmptyString);
             }
             LayoutStatusInfoLabel();
         }
