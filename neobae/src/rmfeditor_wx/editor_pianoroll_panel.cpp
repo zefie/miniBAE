@@ -1695,23 +1695,29 @@ private:
     }
 
     void ApplyZoomStep(int wheelRotation, wxPoint clientPoint) {
-        double oldScale;
-        uint32_t anchorTick;
-        int scrollPixelsX;
-        int scrollPixelsY;
-        int viewUnitsX;
-        int viewUnitsY;
-        int oldViewLeft;
-        int oldViewTop;
-        int logicalAnchorX;
-        int newAnchorX;
-        int newViewLeft;
-        int maxViewLeft;
-        int clientWidth;
-        wxSize virtualSize;
+        bool zoomIn = (wheelRotation > 0);
 
-        oldScale = m_zoomScale;
-        if (wheelRotation > 0) {
+        // --- Capture state BEFORE changing zoom ---
+        int scrollPixelsX, scrollPixelsY;
+        GetScrollPixelsPerUnit(&scrollPixelsX, &scrollPixelsY);
+        if (scrollPixelsX <= 0) scrollPixelsX = 1;
+        if (scrollPixelsY <= 0) scrollPixelsY = 1;
+
+        int viewUnitsX, viewUnitsY;
+        GetViewStart(&viewUnitsX, &viewUnitsY);
+        int scrollX = viewUnitsX * scrollPixelsX;
+        int scrollY = viewUnitsY * scrollPixelsY;
+
+        int clientWidth = GetClientSize().GetWidth();
+
+        // For zoom in: anchor on cursor. For zoom out: anchor on current center.
+        int anchorClientX = zoomIn ? clientPoint.x : (clientWidth / 2);
+        int anchorDocX = scrollX + anchorClientX;
+        uint32_t anchorTick = XToTick(anchorDocX);
+
+        // --- Apply new zoom scale ---
+        double oldScale = m_zoomScale;
+        if (zoomIn) {
             m_zoomScale = std::min(8.0f, m_zoomScale * 1.15f);
         } else {
             m_zoomScale = std::max(0.2f, m_zoomScale / 1.15f);
@@ -1720,27 +1726,23 @@ private:
             return;
         }
 
-        GetScrollPixelsPerUnit(&scrollPixelsX, &scrollPixelsY);
-        if (scrollPixelsX <= 0) {
-            scrollPixelsX = 1;
-        }
-        if (scrollPixelsY <= 0) {
-            scrollPixelsY = 1;
-        }
-        GetViewStart(&viewUnitsX, &viewUnitsY);
-        oldViewLeft = viewUnitsX * scrollPixelsX;
-        oldViewTop = viewUnitsY * scrollPixelsY;
-        logicalAnchorX = oldViewLeft + clientPoint.x;
-        anchorTick = XToTick(logicalAnchorX);
-
         UpdateVirtualSize();
-        newAnchorX = TickToX(anchorTick);
-        newViewLeft = std::max(0, newAnchorX - clientPoint.x);
-        clientWidth = GetClientSize().GetWidth();
-        virtualSize = GetVirtualSize();
-        maxViewLeft = std::max(0, virtualSize.GetWidth() - std::max(1, clientWidth));
-        newViewLeft = std::clamp(newViewLeft, 0, maxViewLeft);
-        Scroll(newViewLeft / scrollPixelsX, oldViewTop / scrollPixelsY);
+        InvalidateNoteCache();
+
+        // --- Recalculate scroll after zoom ---
+        GetScrollPixelsPerUnit(&scrollPixelsX, &scrollPixelsY);
+        if (scrollPixelsX <= 0) scrollPixelsX = 1;
+        if (scrollPixelsY <= 0) scrollPixelsY = 1;
+
+        // Place the anchor tick at the same client x position it was before
+        int newAnchorDocX = TickToX(anchorTick);
+        int newScrollX = newAnchorDocX - anchorClientX;
+
+        wxSize virtualSize = GetVirtualSize();
+        int maxScrollX = std::max(0, virtualSize.GetWidth() - clientWidth);
+        newScrollX = std::clamp(newScrollX, 0, maxScrollX);
+
+        Scroll(newScrollX / scrollPixelsX, scrollY / scrollPixelsY);
         Refresh();
     }
 
@@ -4436,6 +4438,9 @@ private:
             int previousHoverLane;
 
             logicalPoint = CalcUnscrolledPosition(event.GetPosition());
+            if (IsPointInStickyRuler(logicalPoint)) {
+                return;
+            }
             UpdateHoverCursor(logicalPoint);
             hasHover = HitTestAutomationNode(logicalPoint, &hoverHit);
             if (!hasHover) {
@@ -4808,7 +4813,30 @@ private:
             ApplyZoomStep(event.GetWheelRotation(), event.GetPosition());
             return;
         }
-        event.Skip();
+        
+        int wheelDelta = event.GetWheelDelta();
+        int wheelRotation = event.GetWheelRotation();
+        if (wheelDelta == 0 || wheelRotation == 0) {
+            return;
+        }
+        int steps = wheelRotation / wheelDelta;
+        if (steps == 0) {
+            steps = (wheelRotation > 0) ? 1 : -1;
+        }
+        int scrollPixelsX, scrollPixelsY;
+        GetScrollPixelsPerUnit(&scrollPixelsX, &scrollPixelsY);
+        if (scrollPixelsY <= 0) {
+            scrollPixelsY = 1;
+        }
+        int viewUnitsX, viewUnitsY;
+        GetViewStart(&viewUnitsX, &viewUnitsY);
+        int virtualHeight = GetVirtualSize().GetHeight();
+        int clientHeight = GetClientSize().GetHeight();
+        int maxTop = std::max(0, virtualHeight - clientHeight);
+        int currentTop = viewUnitsY * scrollPixelsY;
+        int newTop = currentTop - (steps * kNoteHeight * 3);
+        newTop = std::clamp(newTop, 0, maxTop);
+        Scroll(viewUnitsX, newTop / scrollPixelsY);
     }
 
     void OnScrollWin(wxScrollWinEvent &event) {
