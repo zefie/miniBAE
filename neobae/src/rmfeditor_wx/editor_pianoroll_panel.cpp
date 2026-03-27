@@ -3462,10 +3462,8 @@ private:
         int shadeLeft  = std::max(startX, kPianoRollLeftGutter);
         int shadeRight = std::max(shadeLeft + 1, endX);
 
-        // Clip the fill to the visible area so the intermediate wxImage is
-        // bounded by the client viewport height rather than the full virtual
-        // scroll height (which can be thousands of pixels).
-        const int shadeBottom = visibleRect.GetBottom();
+        // Use full virtual height so the shaded region extends through automation lanes
+        const int shadeBottom = virtualSize.GetHeight();
         if (shadeBottom <= kPianoRollTopGutter)
             return;
 
@@ -3713,7 +3711,7 @@ private:
             }
         }
 
-        DrawAutomationLanes(dc, clientSize,
+        DrawAutomationLanes(dc, virtualSize,
                             wxRect(viewLeft, viewTop,
                                    viewRight - viewLeft, viewBottom - viewTop));
 
@@ -3721,7 +3719,7 @@ private:
             const int phX = TickToX(m_playheadTick);
             if (phX >= viewLeft - 2 && phX <= viewRight + 2) {
                 dc.SetPen(m_rc.penPlayhead);
-                dc.DrawLine(phX, topGutter, phX, clientSize.GetHeight());
+                dc.DrawLine(phX, topGutter, phX, virtualSize.GetHeight());
             }
         }
 
@@ -3745,11 +3743,11 @@ private:
                     dc.DrawRectangle(endX + 1,
                                      topGutter,
                                      viewRight - endX,
-                                     std::max(1, clientSize.GetHeight() - topGutter));
+                                     std::max(1, virtualSize.GetHeight() - topGutter));
                 }
                 // End marker line
                 dc.SetPen(m_rc.penTimelineEnd);
-                dc.DrawLine(endX, topGutter, endX, clientSize.GetHeight());
+                dc.DrawLine(endX, topGutter, endX, virtualSize.GetHeight());
 
                 // Small triangular tab at bottom of ruler
                 wxPoint tri[3] = {
@@ -3767,7 +3765,7 @@ private:
         DrawMidiLoopRulerOverlay(dc,
                                  wxRect(viewLeft, viewTop,
                                         viewRight - viewLeft, viewBottom - viewTop),
-                                 clientSize);
+                                 virtualSize);
     }
 
     void OnLeftDown(wxMouseEvent &event) {
