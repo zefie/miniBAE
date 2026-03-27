@@ -40,6 +40,7 @@ extern "C" {
 #include "GenSnd.h"
 #include "X_API.h"
 #include "X_Formats.h"
+#include "X_Assert.h"
 }
 
 #include "editor_bank.h"
@@ -2535,10 +2536,10 @@ private:
         if (m_playbackMixer) {
             return true;
         }
-        fprintf(stderr, "[nbstudio] Creating mixer...\n");
+        BAE_PRINTF( "[nbstudio] Creating mixer...\n");
         m_playbackMixer = BAEMixer_New();
         if (!m_playbackMixer) {
-            fprintf(stderr, "[nbstudio] BAEMixer_New() failed\n");
+            BAE_PRINTF( "[nbstudio] BAEMixer_New() failed\n");
             return false;
         }
         BAEResult openResult = BAEMixer_Open(m_playbackMixer,
@@ -2549,7 +2550,7 @@ private:
                                              16,
                                              32,
                                              TRUE);
-        fprintf(stderr, "[nbstudio] BAEMixer_Open result=%d\n", static_cast<int>(openResult));
+        BAE_PRINTF( "[nbstudio] BAEMixer_Open result=%d\n", static_cast<int>(openResult));
         if (openResult != BAE_NO_ERROR) {
             BAEMixer_Delete(m_playbackMixer);
             m_playbackMixer = nullptr;
@@ -2560,14 +2561,14 @@ private:
         {
             BAERate actualRate;
             if (BAEMixer_GetRate(m_playbackMixer, &actualRate) == BAE_NO_ERROR) {
-                fprintf(stderr, "[nbstudio] Mixer active rate=%ld\n", static_cast<long>(actualRate));
+                BAE_PRINTF( "[nbstudio] Mixer active rate=%ld\n", static_cast<long>(actualRate));
             }
         }
         if (!m_bankLoaded) {
 #ifdef _BUILT_IN_PATCHES
-            fprintf(stderr, "[nbstudio] Loading built-in bank...\n");
+            BAE_PRINTF( "[nbstudio] Loading built-in bank...\n");
             BAEResult bankResult = BAEMixer_LoadBuiltinBank(m_playbackMixer, &m_bankToken);
-            fprintf(stderr, "[nbstudio] BAEMixer_LoadBuiltinBank result=%d\n", static_cast<int>(bankResult));
+            BAE_PRINTF( "[nbstudio] BAEMixer_LoadBuiltinBank result=%d\n", static_cast<int>(bankResult));
             if (bankResult == BAE_NO_ERROR) {
                 m_bankLoaded = true;
                 m_bankTokens.push_back(m_bankToken);
@@ -2579,7 +2580,7 @@ private:
                 m_bankModifiedHintFromSession = false;
             }
 #else
-            fprintf(stderr, "[nbstudio] WARNING: _BUILT_IN_PATCHES not defined, no bank loaded!\n");
+            BAE_PRINTF( "[nbstudio] WARNING: _BUILT_IN_PATCHES not defined, no bank loaded!\n");
 #endif
         }
         UpdateLoadedBankStatus();
@@ -2746,31 +2747,31 @@ private:
      * switches to the Bank Editor tab; otherwise the current tab is kept
      * (useful when loading from the MIDI editor's Sound Bank menu). */
     void LoadBankForEditing(wxString const &path, bool switchToBank = true) {
-        fprintf(stderr, "[nbstudio] LoadBankForEditing: %s\n", static_cast<const char *>(path.utf8_str()));
+        BAE_PRINTF( "[nbstudio] LoadBankForEditing: %s\n", static_cast<const char *>(path.utf8_str()));
         if (!EnsurePlaybackEngine()) {
             wxMessageBox("Failed to initialize audio engine.",
                          "Bank Load Error", wxOK | wxICON_ERROR, this);
             return;
         }
-        fprintf(stderr, "[nbstudio] LoadBankForEditing: engine ready, loading bank...\n");
+        BAE_PRINTF( "[nbstudio] LoadBankForEditing: engine ready, loading bank...\n");
         if (!LoadBankFromFile(path)) {
             wxMessageBox(wxString::Format("Failed to load bank file:\n%s", path),
                          "Bank Load Error", wxOK | wxICON_ERROR, this);
             return;
         }
-        fprintf(stderr, "[nbstudio] LoadBankForEditing: bank loaded, bankToken=%p\n", static_cast<void *>(m_bankToken));
+        BAE_PRINTF( "[nbstudio] LoadBankForEditing: bank loaded, bankToken=%p\n", static_cast<void *>(m_bankToken));
         UpdateStatusBar();
-        fprintf(stderr, "[nbstudio] LoadBankForEditing: populating bank editor...\n");
+        BAE_PRINTF( "[nbstudio] LoadBankForEditing: populating bank editor...\n");
         if (m_bankEditorPanel) {
             wxScopedCharBuffer utf8Path = path.utf8_str();
             BankEditorPanel_LoadBank(m_bankEditorPanel, m_bankToken, utf8Path.data());
         }
         m_bankHasUnsavedChanges = false;
         if (switchToBank) {
-            fprintf(stderr, "[nbstudio] LoadBankForEditing: switching to bank tab...\n");
+            BAE_PRINTF( "[nbstudio] LoadBankForEditing: switching to bank tab...\n");
             SwitchToEditorTab(kEditorModeBank);
         }
-        fprintf(stderr, "[nbstudio] LoadBankForEditing: done\n");
+        BAE_PRINTF( "[nbstudio] LoadBankForEditing: done\n");
     }
 
     void PopulateSampleList() {
@@ -3206,7 +3207,7 @@ private:
         if (previewTag != -1) {
             auto existing = m_taggedInstrumentPreviewNotes.find(previewTag);
 #if _DEBUG
-            fprintf(stderr, "[nbstudio] preview-tag=%d (char=%c) existing=%s\n",
+            BAE_PRINTF( "[nbstudio] preview-tag=%d (char=%c) existing=%s\n",
                     previewTag, (char)previewTag, existing != m_taggedInstrumentPreviewNotes.end() ? "yes" : "no");
 #endif
             if (existing != m_taggedInstrumentPreviewNotes.end()) {
@@ -3214,7 +3215,7 @@ private:
             } else {
                 channel = mapPreviewTagToChannel(previewTag);
 #if _DEBUG
-                fprintf(stderr, "[nbstudio]   -> mapped to channel=%u\n", channel);
+                BAE_PRINTF( "[nbstudio]   -> mapped to channel=%u\n", channel);
 #endif
             }
         }
@@ -3368,7 +3369,7 @@ private:
                                                                   static_cast<unsigned char>(std::clamp(midiKey, 0, 127)));
         instrumentID = hasSelectedInstID ? static_cast<BAE_INSTRUMENT>(selectedInstID) : translatedInstrumentID;
 #if _DEBUG
-        fprintf(stderr,
+        BAE_PRINTF(
             "[nbstudio] instrument-lookup: ch=%u prog=%u bank=%u key=%d hasSelected=%d selected=%u translated=%u using=%u\n",
                 channel,
                 previewProgram,
@@ -3386,7 +3387,7 @@ private:
         }
         if (loadInstrumentResult != BAE_NO_ERROR) {
 #if _DEBUG
-            fprintf(stderr,
+            BAE_PRINTF(
                 "[nbstudio] BAESong_LoadInstrument failed: instID=%u translated=%u err=%d\n",
                 static_cast<unsigned>(instrumentID),
                 static_cast<unsigned>(translatedInstrumentID),
@@ -3400,7 +3401,7 @@ private:
                                     100,
                                     previewNoteOnTime);
 #if _DEBUG
-        fprintf(stderr,
+        BAE_PRINTF(
             "[nbstudio] note-on: ch=%u key=%u vel=100 t_prog=%u t_on=%u result=%d\n",
             channel,
             std::clamp(midiKey, 0, 127),
@@ -3420,7 +3421,7 @@ private:
             tagged.bank = previewBank;
             m_taggedInstrumentPreviewNotes[previewTag] = tagged;
 #if _DEBUG
-            fprintf(stderr,
+            BAE_PRINTF(
                     "[nbstudio] note-preview on tag=%d ch=%u note=%u prog=%u bank=%u active=%zu\n",
                     previewTag,
                     static_cast<unsigned>(tagged.channel),
@@ -3973,7 +3974,7 @@ private:
                         BAEResult trimResult = trimDecodedPreviewToSourceWindow();
 
                         if (trimResult != BAE_NO_ERROR) {
-                            fprintf(stderr,
+                            BAE_PRINTF(
                                     "[nbstudio] Preview sample %u MP3 trim-to-source failed result=%d\n",
                                     static_cast<unsigned>(sampleIndex),
                                     static_cast<int>(trimResult));
@@ -4036,7 +4037,7 @@ private:
         if (loadResult == BAE_NO_ERROR && retimeDecodedPreviewToIntendedRate) {
             BAEResult resampleResult = rebuildPreviewAtIntendedRate(intendedSampleRate);
             if (resampleResult != BAE_NO_ERROR) {
-                fprintf(stderr,
+                BAE_PRINTF(
                         "[nbstudio] Preview sample %u resample-to-intended-rate failed result=%d intended=%lu\n",
                         static_cast<unsigned>(sampleIndex),
                         static_cast<int>(resampleResult),
@@ -4058,7 +4059,7 @@ private:
                                                      const_cast<char *>(sampleInfo.sourcePath),
                                                      sourceType);
             } else {
-                fprintf(stderr,
+                BAE_PRINTF(
                         "[nbstudio] Preview sample %u source='%s' unsupported type=%d\n",
                         static_cast<unsigned>(sampleIndex),
                         sampleInfo.sourcePath,
@@ -4108,12 +4109,12 @@ private:
                                                            &bitSize,
                                                            &channels,
                                                            &sampleRate) != BAE_NO_ERROR) {
-                fprintf(stderr,
+                BAE_PRINTF(
                         "[nbstudio] Preview sample %u GetSampleWaveformData failed\n",
                         static_cast<unsigned>(sampleIndex));
                 return false;
             }
-            fprintf(stderr,
+            BAE_PRINTF(
                     "[nbstudio] Preview sample %u raw format: frames=%u bits=%u channels=%u rate=0x%08lx loop=%u-%u root=%u basePitch=%u\n",
                     static_cast<unsigned>(sampleIndex),
                     static_cast<unsigned>(frameCount),
@@ -4147,7 +4148,7 @@ private:
                                                         sampleRate,
                                                         loopStart, loopEnd);
             if (loadResult != BAE_NO_ERROR) {
-                fprintf(stderr,
+                BAE_PRINTF(
                         "[nbstudio] Preview sample %u LoadCustomSample failed result=%d\n",
                         static_cast<unsigned>(sampleIndex),
                         static_cast<int>(loadResult));
@@ -4156,14 +4157,14 @@ private:
             if (retimeDecodedPreviewToIntendedRate) {
                 BAEResult resampleResult = rebuildPreviewAtIntendedRate(intendedSampleRate);
                 if (resampleResult != BAE_NO_ERROR) {
-                    fprintf(stderr,
+                    BAE_PRINTF(
                             "[nbstudio] Preview sample %u post-load resample-to-intended-rate failed result=%d intended=%lu\n",
                             static_cast<unsigned>(sampleIndex),
                             static_cast<int>(resampleResult),
                             static_cast<unsigned long>(normalizePreviewRate(intendedSampleRate)));
                 }
             }
-            fprintf(stderr,
+            BAE_PRINTF(
                     "[nbstudio] Preview sample %u LoadCustomSample ok\n",
                     static_cast<unsigned>(sampleIndex));
         }
@@ -4187,7 +4188,7 @@ private:
                     baseSampleRate = loadedInfo.sampledRate;
                 }
                 targetFrames = loadedInfo.waveFrames;
-                fprintf(stderr,
+                BAE_PRINTF(
                         "[nbstudio] Preview sample %u loaded info: frames=%u bits=%u channels=%u rate=%lu basePitch=%u\n",
                         static_cast<unsigned>(sampleIndex),
                         static_cast<unsigned>(loadedInfo.waveFrames),
@@ -4303,7 +4304,7 @@ private:
                 BAE_UNSIGNED_FIXED scaledRate = static_cast<BAE_UNSIGNED_FIXED>(std::clamp(adjustedRate,
                                                                                             kMinRateFixed,
                                                                                             kMaxRateFixed));
-                fprintf(stderr,
+                BAE_PRINTF(
                         "[nbstudio] Preview sample %u playAtSampledFreq rate adjust %lu -> %lu (sourceFrames=%u decodedFrames=%u)\n",
                         static_cast<unsigned>(sampleIndex),
                         static_cast<unsigned long>(nativeRate),
@@ -4335,7 +4336,7 @@ private:
 
         rateResult = BAESound_SetRate(m_previewSound, rate);
         if (rateResult != BAE_NO_ERROR) {
-            fprintf(stderr,
+            BAE_PRINTF(
                     "[nbstudio] Preview sample %u SetRate failed result=%d rate=%lu\n",
                     static_cast<unsigned>(sampleIndex),
                     static_cast<int>(rateResult),
@@ -4365,7 +4366,7 @@ private:
             if (noteFound != m_taggedInstrumentPreviewNotes.end()) {
                     if (m_keyboardPreviewSong) {
 #if _DEBUG
-                    fprintf(stderr,
+                    BAE_PRINTF(
                             "[nbstudio] note-preview off-start tag=%d ch=%u note=%u prog=%u bank=%u active=%zu\n",
                             previewTag,
                             static_cast<unsigned>(noteFound->second.channel),
@@ -4395,7 +4396,7 @@ private:
                                               0,
                                               0);
 #if _DEBUG
-                    fprintf(stderr,
+                    BAE_PRINTF(
                             "[nbstudio] note-preview off-sent tag=%d ch=%u note=%u + channel-panic\n",
                             previewTag,
                             static_cast<unsigned>(noteFound->second.channel),
@@ -4406,7 +4407,7 @@ private:
             }
 #if _DEBUG
             else {
-                fprintf(stderr,
+                BAE_PRINTF(
                         "[nbstudio] note-preview off-miss tag=%d active=%zu\n",
                         previewTag,
                         m_taggedInstrumentPreviewNotes.size());
@@ -4667,7 +4668,7 @@ private:
             }
         }
 
-        fprintf(stderr,
+        BAE_PRINTF(
                 "[nbstudio] Single-track build keepTrack0=1 selectedTrack=%d (program filter restored)\n",
                 trackIndex);
         return playDoc;
@@ -6718,7 +6719,7 @@ private:
                 wxMessageBox("Failed to build selected track for RMF save.", "Save Failed", wxOK | wxICON_ERROR, this);
                 return;
             }
-            fprintf(stderr,
+            BAE_PRINTF(
                     "[nbstudio] SaveAs using single-track document selectedTrack=%d\n",
                     selectedTrack);
         } else if (saveChannels) {
@@ -6739,7 +6740,7 @@ private:
                              this);
                 return;
             }
-            fprintf(stderr,
+            BAE_PRINTF(
                     "[nbstudio] SaveAs using channel-filtered document channelMask=0x%04x\n",
                     static_cast<unsigned>(m_playbackChannelMask));
         }
@@ -7767,11 +7768,15 @@ private:
             wxMessageBox("Failed to initialize audio engine.", "Playback Error", wxOK | wxICON_ERROR, this);
             return;
         }
+
+        uint32_t preseekTick = PianoRollPanel_GetPlayheadTick(m_pianoRoll);
+        uint64_t preseekUsec = TicksToMicroseconds(preseekTick);
+
         BAERmfEditorDocument_DebugReportMidiRoundTripDiff(m_document);
         selectedTrack = GetSelectedTrack();
         singleTrackMode = (m_playScopeChoice->GetSelection() == 1);
         channelsMode = (m_playScopeChoice->GetSelection() == 2);
-        fprintf(stderr,
+        BAE_PRINTF(
             "[nbstudio] OnPlay scope=%d selectedTrack=%d channelMask=0x%04x currentPath='%s'\n",
             channelsMode ? 2 : (singleTrackMode ? 1 : 0),
             selectedTrack,
@@ -7834,7 +7839,7 @@ private:
                              m_playbackSongBlob.data(),
                              static_cast<uint32_t>(m_playbackSongBlob.size()),
                                              &loadInfo);
-        fprintf(stderr,
+        BAE_PRINTF(
                 "[nbstudio] BAEMixer_LoadFromMemory result=%d type=%d fileType=%d\n",
                 static_cast<int>(loadResult),
                 static_cast<int>(loadInfo.type),
@@ -7858,21 +7863,25 @@ private:
             loopResult = BAESong_SetLoops(m_playbackSong, IsPreviewLoopEnabled() ? 32767 : 0);
             seekResult = BAESong_SetMicrosecondPosition(m_playbackSong, startUsec);
             prerollResult = BAESong_Preroll(m_playbackSong);
-            fprintf(stderr,
-                    "[nbstudio] Pre-start prep loops=%d seek=%d preroll=%d startUsec=%lu\n",
+            BAE_PRINTF("[nbstudio] Pre-start prep loops=%d seek=%d preroll=%d startUsec=%lu\n",
                     static_cast<int>(loopResult),
                     static_cast<int>(seekResult),
                     static_cast<int>(prerollResult),
                     static_cast<unsigned long>(startUsec));
         }
         BAEResult startResult = BAESong_Start(m_playbackSong, 0);
-        fprintf(stderr, "[nbstudio] BAESong_Start result=%d\n", static_cast<int>(startResult));
+        BAE_PRINTF("[nbstudio] BAESong_Start result=%d\n", static_cast<int>(startResult));
         if (startResult != BAE_NO_ERROR) {
             BAESong_Delete(m_playbackSong);
             m_playbackSong = nullptr;
             m_playbackSongBlob.clear();
             wxMessageBox("Failed to start playback.", "Playback Error", wxOK | wxICON_ERROR, this);
             return;
+        }
+        // restore position if needed
+        if (preseekUsec > 0) {
+            BAEResult seekResult = BAESong_SetMicrosecondPosition(m_playbackSong, preseekUsec);
+            BAE_PRINTF("[nbstudio] Restoring pre-play microsecond position result=%d pos=%lu\n", static_cast<int>(seekResult), static_cast<unsigned long>(preseekUsec));
         }
         ApplyPreviewReverbToMixer();
         BAESong_SetVolume(m_playbackSong, GetPreviewVolumeFixed());
@@ -7882,10 +7891,10 @@ private:
 
             /* Ensure editor playback always starts at engine-normal 1.0x speed. */
             tempoSetResult = BAESong_SetMasterTempo(m_playbackSong, static_cast<BAE_UNSIGNED_FIXED>(65536));
-            fprintf(stderr, "[nbstudio] BAESong_SetMasterTempo(1.0) result=%d\n", static_cast<int>(tempoSetResult));
+            BAE_PRINTF( "[nbstudio] BAESong_SetMasterTempo(1.0) result=%d\n", static_cast<int>(tempoSetResult));
             tempoFactor = 0;
             if (BAESong_GetMasterTempo(m_playbackSong, &tempoFactor) == BAE_NO_ERROR) {
-                fprintf(stderr, "[nbstudio] Song master tempo factor=%lu\n", static_cast<unsigned long>(tempoFactor));
+                BAE_PRINTF( "[nbstudio] Song master tempo factor=%lu\n", static_cast<unsigned long>(tempoFactor));
             }
         }
         m_playbackTimer.Start(40);

@@ -55,6 +55,13 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <!-- Import user-configurable paths (wxWidgets, SDL3, etc.) -->
   <Import Project="nbstudio.props" Condition="exists('nbstudio.props')" />
+  <!-- ================================================================
+       Output / Intermediate directories
+       ================================================================ -->
+  <PropertyGroup>
+    <OutDir>$(SolutionDir)bin\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)build\$(Configuration)\$(ProjectName)\</IntDir>
+  </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Target Name="GetGitInfo" BeforeTargets="PrepareForBuild">
     <!-- Commit -->
@@ -95,13 +102,6 @@
     <Message Text="GitVersionFinal='$(GitVersionFinal)'" Importance="High" />
   </Target>
   <!-- ================================================================
-       Output / Intermediate directories
-       ================================================================ -->
-  <PropertyGroup>
-    <OutDir>$(SolutionDir)bin\$(Configuration)\</OutDir>
-    <IntDir>$(SolutionDir)build\$(Configuration)\$(ProjectName)\</IntDir>
-  </PropertyGroup>
-  <!-- ================================================================
        Pre-Build Event: generate BAEPatches.h from embedded patch bank
        ================================================================ -->
   <PropertyGroup Label="Vcpkg">
@@ -133,8 +133,13 @@
       <LanguageStandard>stdcpp17</LanguageStandard>
       <LanguageStandard_C>Default</LanguageStandard_C>
       <SDLCheck>false</SDLCheck>
-      <EnableEnhancedInstructionSet>StreamingSIMDExtensions2</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions</EnableEnhancedInstructionSet>
       <ForcedIncludeFiles>$(ProjectDir)nbstudio\msvc_compat.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <OmitFramePointers>true</OmitFramePointers>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <FloatingPointModel>Fast</FloatingPointModel>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -144,6 +149,7 @@
       <AdditionalDependencies>wxmsw33u_core.lib;
 wxbase33u.lib;libmp3lame.lib;FLAC.lib;vorbisfile.lib;vorbisenc.lib;vorbis.lib;opus.lib;opusfile.lib;dsound.lib;ogg.lib;dxguid.lib;winmm.lib;comctl32.lib;rpcrt4.lib;wsock32.lib;zlib.lib;lzma.lib;libxmp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(ProjectDir)vcpkg_installed\x64-windows\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
     <PostBuildEvent>
       <Command>copy $(ProjectDir)vcpkg_installed\x64-windows\bin\*.dll $(OutDir);</Command>
@@ -163,7 +169,8 @@ wxbase33u.lib;libmp3lame.lib;FLAC.lib;vorbisfile.lib;vorbisenc.lib;vorbis.lib;op
       <SDLCheck>false</SDLCheck>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <ForcedIncludeFiles>$(ProjectDir)nbstudio\msvc_compat.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
-      <EnableEnhancedInstructionSet>StreamingSIMDExtensions2</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions</EnableEnhancedInstructionSet>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
