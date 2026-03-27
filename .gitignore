@@ -20,11 +20,12 @@ neobae/.vs/
 neobae/src/NeoBAEDroid/.gradle/
 neobae/src/thirdparty/bassmidi/
 
-neobae/vs2022/.vs/
-neobae/vs2022/bin/
-neobae/vs2022/generated/
-neobae/vs2022/nbstudio/x64/
-neobae/vs2022/vcpkg_installed/
+neobae/src/rmfeditor_wx/vs2022/.vs/
+neobae/src/rmfeditor_wx/vs2022/bin/
+neobae/src/rmfeditor_wx/vs2022/generated/
+neobae/src/rmfeditor_wx/vs2022/nbstudio/x64/
+neobae/src/rmfeditor_wx/vs2022/vcpkg_installed/
+neobae/src/rmfeditor_wx/vs2022/nbstudio/x86/
 
 neobae/src/NeoBAEDroid/NeoBAEDroid.iws
 neobae/src/NeoBAEDroid/NeoBAEDroid.ipr

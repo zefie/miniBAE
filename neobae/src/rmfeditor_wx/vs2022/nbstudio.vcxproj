@@ -111,8 +111,7 @@
     <PreBuildEvent>
       <Command>
         if not exist "$(ProjectDir)generated" mkdir "$(ProjectDir)generated"
-        python "$(ProjectDir)..\..\scripts\create_embedded_patches_h.py" "$(ProjectDir)..\src\banks\patches111\patches111.hsb" "$(ProjectDir)generated\BAEPatches.h"
-        if not exist "$(ProjectDir)generated\config.h" copy /Y "$(ProjectDir)..\src\thirdparty\lame-3.100-slim\configMS.h" "$(ProjectDir)generated\config.h"
+        python "$(ProjectDir)..\..\..\..\scripts\create_embedded_patches_h.py" "$(ProjectDir)..\..\banks\patches111\patches111.hsb" "$(ProjectDir)generated\BAEPatches.h"
       </Command>
       <Message>Generating embedded patch bank and LAME config...</Message>
     </PreBuildEvent>
@@ -128,7 +127,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;WINDOWS=1;NDEBUG;_WINDOWS;UNICODE;_UNICODE;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_WARNINGS;X_PLATFORM=X_WIN95;_BUILT_IN_PATCHES=1;USE_MINIMP3_WRAPPER=1;USE_MPEG_DECODER=1;USE_MPEG_ENCODER=1;USE_LAME_ENCODER=1;IEEE_FLOAT;STDC_HEADERS=1;HAVE_STDINT_H=1;HAVE_INTTYPES_H=1;HAVE_CONFIG_H=1;SIZE_T_MAX=SIZE_MAX;USE_FLAC_DECODER=1;USE_FLAC_ENCODER=1;FLAC__HAS_OGG=1;FLAC__NO_DLL;USE_OGG_FORMAT=1;SUPPORT_OGG_FORMAT=1;USE_VORBIS_DECODER=1;USE_VORBIS_ENCODER=1;USE_OPUS_DECODER=1;USE_OPUS_ENCODER=1;USE_ZMF_SUPPORT=1;BAE_FIX_SPAN_DC=1;BAE_CLASSIC_CHORUS=1;USE_LZMA_COMPRESSION=1;_VERSION="vs2022-release";%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(ProjectDir)generated;$(ProjectDir)..\src\BAE_Source\Common;$(ProjectDir)..\src\BAE_Source\Platform;$(ProjectDir)..\src\thirdparty\config;$(ProjectDir)..\src\BAE_MPEG_Source_II;$(ProjectDir)..\src\thirdparty\minimp3;$(ProjectDir)..\src\thirdparty\flac\include;$(ProjectDir)..\src\thirdparty\flac\src\libFLAC\include;$(ProjectDir)..\src\thirdparty\libvorbis\include;$(ProjectDir)..\src\thirdparty\libvorbis\lib;$(ProjectDir)..\src\thirdparty\libogg\include;$(ProjectDir)..\src\thirdparty\lame-3.100-slim\include;$(ProjectDir)..\src\thirdparty\lame-3.100-slim;$(ProjectDir)..\src\thirdparty\lame-3.100-slim\libmp3lame;$(ProjectDir)..\src\thirdparty\opus\include;$(ProjectDir)..\src\thirdparty\opusfile\include;$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)..\src\mod2rmf;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)generated;$(ProjectDir)..\..\BAE_Source\Common;$(ProjectDir)..\..\BAE_Source\Platform;$(ProjectDir)..\..\thirdparty\config;$(ProjectDir)..\..\BAE_MPEG_Source_II;$(ProjectDir)..\..\thirdparty\minimp3;$(ProjectDir)..\..\thirdparty\flac\include;$(ProjectDir)..\..\thirdparty\flac\src\libFLAC\include;$(ProjectDir)..\..\thirdparty\libvorbis\include;$(ProjectDir)..\..\thirdparty\libvorbis\lib;$(ProjectDir)..\..\thirdparty\libogg\include;$(ProjectDir)..\..\thirdparty\lame-3.100-slim\include;$(ProjectDir)..\..\thirdparty\lame-3.100-slim;$(ProjectDir)..\..\thirdparty\lame-3.100-slim\libmp3lame;$(ProjectDir)..\..\thirdparty\opus\include;$(ProjectDir)..\..\thirdparty\opusfile\include;$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)..\..\mod2rmf;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <WarningLevel>Level3</WarningLevel>
       <DisableSpecificWarnings>4100;4101;4244;4267;4305;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <LanguageStandard>stdcpp17</LanguageStandard>
@@ -156,7 +155,7 @@ wxbase33u.lib;libmp3lame.lib;FLAC.lib;vorbisfile.lib;vorbisenc.lib;vorbis.lib;op
       <Optimization>Disabled</Optimization>
       <AdditionalOptions>@$(ProjectDir)generated\git_version_flags.txt %(AdditionalOptions)</AdditionalOptions>
       <PreprocessorDefinitions>WIN32;WINDOWS=1;_DEBUG;_WINDOWS;UNICODE;_UNICODE;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_WARNINGS;X_PLATFORM=X_WIN95;_BUILT_IN_PATCHES=1;USE_MINIMP3_WRAPPER=1;USE_MPEG_DECODER=1;USE_MPEG_ENCODER=1;USE_LAME_ENCODER=1;IEEE_FLOAT;STDC_HEADERS=1;HAVE_STDINT_H=1;HAVE_INTTYPES_H=1;HAVE_CONFIG_H=1;SIZE_T_MAX=SIZE_MAX;USE_FLAC_DECODER=1;USE_FLAC_ENCODER=1;FLAC__HAS_OGG=1;FLAC__NO_DLL;USE_OGG_FORMAT=1;SUPPORT_OGG_FORMAT=1;USE_VORBIS_DECODER=1;USE_VORBIS_ENCODER=1;USE_OPUS_DECODER=1;USE_OPUS_ENCODER=1;USE_ZMF_SUPPORT=1;BAE_FIX_SPAN_DC=1;BAE_CLASSIC_CHORUS=1;USE_LZMA_COMPRESSION=1;OUTPUT_TO_LOGFILE=1;_VERSION="vs2022-debug";%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(ProjectDir)generated;$(ProjectDir)..\src\BAE_Source\Common;$(ProjectDir)..\src\BAE_Source\Platform;$(ProjectDir)..\src\thirdparty\config;$(ProjectDir)..\src\BAE_MPEG_Source_II;$(ProjectDir)..\src\thirdparty\minimp3;$(ProjectDir)..\src\thirdparty\flac\include;$(ProjectDir)..\src\thirdparty\flac\src\libFLAC\include;$(ProjectDir)..\src\thirdparty\libvorbis\include;$(ProjectDir)..\src\thirdparty\libvorbis\lib;$(ProjectDir)..\src\thirdparty\libogg\include;$(ProjectDir)..\src\thirdparty\lame-3.100-slim\include;$(ProjectDir)..\src\thirdparty\lame-3.100-slim;$(ProjectDir)..\src\thirdparty\lame-3.100-slim\libmp3lame;$(ProjectDir)..\src\thirdparty\opus\include;$(ProjectDir)..\src\thirdparty\opusfile\include;$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)..\src\mod2rmf;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)generated;$(ProjectDir)..\..\BAE_Source\Common;$(ProjectDir)..\..\BAE_Source\Platform;$(ProjectDir)..\..\thirdparty\config;$(ProjectDir)..\..\BAE_MPEG_Source_II;$(ProjectDir)..\..\thirdparty\minimp3;$(ProjectDir)..\..\thirdparty\flac\include;$(ProjectDir)..\..\thirdparty\flac\src\libFLAC\include;$(ProjectDir)..\..\thirdparty\libvorbis\include;$(ProjectDir)..\..\thirdparty\libvorbis\lib;$(ProjectDir)..\..\thirdparty\libogg\include;$(ProjectDir)..\..\thirdparty\lame-3.100-slim\include;$(ProjectDir)..\..\thirdparty\lame-3.100-slim;$(ProjectDir)..\..\thirdparty\lame-3.100-slim\libmp3lame;$(ProjectDir)..\..\thirdparty\opus\include;$(ProjectDir)..\..\thirdparty\opusfile\include;$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)..\..\mod2rmf;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <WarningLevel>Level3</WarningLevel>
       <DisableSpecificWarnings>4100;4101;4244;4267;4305;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <LanguageStandard>stdcpp17</LanguageStandard>
@@ -181,163 +180,163 @@ wxbase33u.lib;libmp3lame.lib;FLAC.lib;vorbisfile.lib;vorbisenc.lib;vorbis.lib;op
        ================================================================ -->
   <ItemGroup>
     <!-- RMF Editor (wxWidgets application) -->
-    <ClCompile Include="..\src\BAE_Source\Common\XOpusFiles.c" />
-    <ClCompile Include="..\src\BAE_Source\Common\X_LZMA.c" />
-    <ClCompile Include="..\src\mod2rmf\mod2rmf_common.c" />
-    <ClCompile Include="..\src\mod2rmf\mod2rmf_encoder.c" />
-    <ClCompile Include="..\src\mod2rmf\mod2rmf_resampler.c" />
-    <ClCompile Include="..\src\mod2rmf\mod2rmf_rmfcreat.c" />
-    <ClCompile Include="..\src\mod2rmf\mod2rmf_song.c" />
-    <ClCompile Include="..\src\rmfeditor_wx\editor_bank.cpp" />
-    <ClCompile Include="..\src\rmfeditor_wx\editor_instrument_ext_dialog.cpp" />
-    <ClCompile Include="..\src\rmfeditor_wx\editor_main.cpp">
+    <ClCompile Include="..\..\BAE_Source\Common\XOpusFiles.c" />
+    <ClCompile Include="..\..\BAE_Source\Common\X_LZMA.c" />
+    <ClCompile Include="..\..\mod2rmf\mod2rmf_common.c" />
+    <ClCompile Include="..\..\mod2rmf\mod2rmf_encoder.c" />
+    <ClCompile Include="..\..\mod2rmf\mod2rmf_resampler.c" />
+    <ClCompile Include="..\..\mod2rmf\mod2rmf_rmfcreat.c" />
+    <ClCompile Include="..\..\mod2rmf\mod2rmf_song.c" />
+    <ClCompile Include="..\editor_bank.cpp" />
+    <ClCompile Include="..\editor_instrument_ext_dialog.cpp" />
+    <ClCompile Include="..\editor_main.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <!-- BAE Platform: WinOS audio API (X_WIN95) -->
-    <ClCompile Include="..\src\BAE_Source\Platform\BAE_API_WinOS.c">
+    <ClCompile Include="..\..\BAE_Source\Platform\BAE_API_WinOS.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Platform\BAE_API_WinOS_Capture.c">
+    <ClCompile Include="..\..\BAE_Source\Platform\BAE_API_WinOS_Capture.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Platform\BAE_API_WinOS_Thread.c">
+    <ClCompile Include="..\..\BAE_Source\Platform\BAE_API_WinOS_Thread.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
     <!-- BAE Common library sources -->
-    <ClCompile Include="..\src\BAE_Source\Common\DriverTools.c">
+    <ClCompile Include="..\..\BAE_Source\Common\DriverTools.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenAudioStreams.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenAudioStreams.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\BAERmfEditor.c">
+    <ClCompile Include="..\..\BAE_Source\Common\BAERmfEditor.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenCache.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenCache.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenChorus.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenChorus.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenFiltersReverbU3232.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenFiltersReverbU3232.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenInterp2ReverbU3232.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenInterp2ReverbU3232.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenOutput.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenOutput.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenPatch.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenPatch.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenReverb.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenReverb.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenReverbNew.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenReverbNew.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenReverbNeo.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenReverbNeo.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenRMI.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenRMI.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSample.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSample.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSeq.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSeq.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSeqTools.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSeqTools.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSetup.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSetup.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSong.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSong.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSoundFiles.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSoundFiles.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSynth.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSynth.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSynthFiltersSimple.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSynthFiltersSimple.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSynthFiltersU3232.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSynthFiltersU3232.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSynthInterp2Simple.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSynthInterp2Simple.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSynthInterp2U3232.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSynthInterp2U3232.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\NeoBAE.c">
+    <ClCompile Include="..\..\BAE_Source\Common\NeoBAE.c">
       <CompileAs>CompileAsC</CompileAs>
       <!-- NeoBAE.c needs $(IntDir) for generated BAEPatches.h — provided via
            global include path $(ProjectDir)generated -->
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\NewNewLZSS.c">
+    <ClCompile Include="..\..\BAE_Source\Common\NewNewLZSS.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\SampleTools.c">
+    <ClCompile Include="..\..\BAE_Source\Common\SampleTools.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\X_API.c">
+    <ClCompile Include="..\..\BAE_Source\Common\X_API.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\X_Decompress.c">
+    <ClCompile Include="..\..\BAE_Source\Common\X_Decompress.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\X_IMA.c">
+    <ClCompile Include="..\..\BAE_Source\Common\X_IMA.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\g711.c">
+    <ClCompile Include="..\..\BAE_Source\Common\g711.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\g721.c">
+    <ClCompile Include="..\..\BAE_Source\Common\g721.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\g723_24.c">
+    <ClCompile Include="..\..\BAE_Source\Common\g723_24.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\g723_40.c">
+    <ClCompile Include="..\..\BAE_Source\Common\g723_40.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\g72x.c">
+    <ClCompile Include="..\..\BAE_Source\Common\g72x.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\sha1mini.c">
+    <ClCompile Include="..\..\BAE_Source\Common\sha1mini.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\XFileTypes.c">
+    <ClCompile Include="..\..\BAE_Source\Common\XFileTypes.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\XVorbisFiles.c">
+    <ClCompile Include="..\..\BAE_Source\Common\XVorbisFiles.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
     <!-- MPEG / MP3 support -->
-    <ClCompile Include="..\src\BAE_MPEG_Source_II\XMPEG_minimp3_wrapper.c">
+    <ClCompile Include="..\..\BAE_MPEG_Source_II\XMPEG_minimp3_wrapper.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_MPEG_Source_II\XMPEGFilesSun.c">
+    <ClCompile Include="..\..\BAE_MPEG_Source_II\XMPEGFilesSun.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_MPEG_Source_II\XMPEG_lame_encoder.cpp">
+    <ClCompile Include="..\..\BAE_MPEG_Source_II\XMPEG_lame_encoder.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>
     <!-- FLAC Windows UTF-8 I/O shim -->
-    <ClCompile Include="..\src\rmfeditor_wx\editor_metadata_dialog.cpp" />
-    <ClCompile Include="..\src\rmfeditor_wx\editor_pianoroll_panel.cpp" />
-    <ClCompile Include="..\src\rmfeditor_wx\batch_compress_dialog.cpp" />
-    <ClCompile Include="..\src\thirdparty\flac\src\share\win_utf8_io\win_utf8_io.c">
+    <ClCompile Include="..\editor_metadata_dialog.cpp" />
+    <ClCompile Include="..\editor_pianoroll_panel.cpp" />
+    <ClCompile Include="..\batch_compress_dialog.cpp" />
+    <ClCompile Include="..\..\thirdparty\flac\src\share\win_utf8_io\win_utf8_io.c">
       <CompileAs>CompileAsC</CompileAs>
       <AdditionalIncludeDirectories>
-        $(ProjectDir)..\src\thirdparty\flac\src\share\win_utf8_io;
+        $(ProjectDir)..\..\thirdparty\flac\src\share\win_utf8_io;
         %(AdditionalIncludeDirectories)
       </AdditionalIncludeDirectories>
       <PreprocessorDefinitions>FLAC__NO_DLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -354,24 +353,24 @@ wxbase33u.lib;libmp3lame.lib;FLAC.lib;vorbisfile.lib;vorbisenc.lib;vorbis.lib;op
        Header Files (for IDE navigation)
        ================================================================ -->
   <ItemGroup>
-    <ClInclude Include="..\src\BAE_Source\Common\NeoBAE.h" />
-    <ClInclude Include="..\src\BAE_Source\Common\BAERmfEditor.h" />
-    <ClInclude Include="..\src\BAE_Source\Common\X_Assert.h" />
-    <ClInclude Include="..\src\BAE_Source\Platform\BAE_API.h" />
-    <ClInclude Include="..\src\BAE_Source\Platform\BAEBuildOptions_WinOS.h" />
-    <ClInclude Include="..\src\mod2rmf\mod2rmf_common.h" />
-    <ClInclude Include="..\src\mod2rmf\mod2rmf_encoder.h" />
-    <ClInclude Include="..\src\mod2rmf\mod2rmf_resampler.h" />
-    <ClInclude Include="..\src\mod2rmf\mod2rmf_rmfcreat.h" />
-    <ClInclude Include="..\src\mod2rmf\mod2rmf_song.h" />
-    <ClInclude Include="..\src\rmfeditor_wx\editor_bank.h" />
-    <ClInclude Include="..\src\rmfeditor_wx\editor_instrument_ext_dialog.h" />
-    <ClInclude Include="..\src\rmfeditor_wx\editor_metadata_dialog.h" />
-    <ClInclude Include="..\src\rmfeditor_wx\editor_pianoroll_panel.h" />
+    <ClInclude Include="..\..\BAE_Source\Common\NeoBAE.h" />
+    <ClInclude Include="..\..\BAE_Source\Common\BAERmfEditor.h" />
+    <ClInclude Include="..\..\BAE_Source\Common\X_Assert.h" />
+    <ClInclude Include="..\..\BAE_Source\Platform\BAE_API.h" />
+    <ClInclude Include="..\..\BAE_Source\Platform\BAEBuildOptions_WinOS.h" />
+    <ClInclude Include="..\..\mod2rmf\mod2rmf_common.h" />
+    <ClInclude Include="..\..\mod2rmf\mod2rmf_encoder.h" />
+    <ClInclude Include="..\..\mod2rmf\mod2rmf_resampler.h" />
+    <ClInclude Include="..\..\mod2rmf\mod2rmf_rmfcreat.h" />
+    <ClInclude Include="..\..\mod2rmf\mod2rmf_song.h" />
+    <ClInclude Include="..\editor_bank.h" />
+    <ClInclude Include="..\editor_instrument_ext_dialog.h" />
+    <ClInclude Include="..\editor_metadata_dialog.h" />
+    <ClInclude Include="..\editor_pianoroll_panel.h" />
     <ClInclude Include="generated\BAEPatches.h" />
     <ClInclude Include="nbstudio\msvc_compat.h" />
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="..\src\rmfeditor_wx\editor.rc" />
+    <ResourceCompile Include="..\editor.rc" />
   </ItemGroup>
 </Project>

@@ -30,238 +30,238 @@
   </ItemGroup>
   <ItemGroup>
     <!-- RMF Editor -->
-    <ClCompile Include="..\src\rmfeditor_wx\editor_main.cpp">
+    <ClCompile Include="..\editor_main.cpp">
       <Filter>Source Files\RMF Editor</Filter>
     </ClCompile>
     <!-- BAE Platform -->
-    <ClCompile Include="..\src\BAE_Source\Platform\BAE_API_WinOS.c">
+    <ClCompile Include="..\..\BAE_Source\Platform\BAE_API_WinOS.c">
       <Filter>Source Files\BAE Platform</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Platform\BAE_API_WinOS_Capture.c">
+    <ClCompile Include="..\..\BAE_Source\Platform\BAE_API_WinOS_Capture.c">
       <Filter>Source Files\BAE Platform</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Platform\BAE_API_WinOS_Thread.c">
+    <ClCompile Include="..\..\BAE_Source\Platform\BAE_API_WinOS_Thread.c">
       <Filter>Source Files\BAE Platform</Filter>
     </ClCompile>
     <!-- BAE Common -->
-    <ClCompile Include="..\src\BAE_Source\Common\DriverTools.c">
+    <ClCompile Include="..\..\BAE_Source\Common\DriverTools.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenAudioStreams.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenAudioStreams.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\BAERmfEditor.c">
+    <ClCompile Include="..\..\BAE_Source\Common\BAERmfEditor.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenCache.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenCache.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenChorus.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenChorus.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenFiltersReverbU3232.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenFiltersReverbU3232.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenInterp2ReverbU3232.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenInterp2ReverbU3232.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenOutput.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenOutput.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenPatch.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenPatch.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenReverb.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenReverb.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenReverbNew.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenReverbNew.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenReverbNeo.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenReverbNeo.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenRMI.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenRMI.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSample.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSample.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSeq.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSeq.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSeqTools.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSeqTools.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSetup.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSetup.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSong.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSong.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSoundFiles.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSoundFiles.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSynth.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSynth.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSynthFiltersSimple.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSynthFiltersSimple.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSynthFiltersU3232.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSynthFiltersU3232.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSynthInterp2Simple.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSynthInterp2Simple.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\GenSynthInterp2U3232.c">
+    <ClCompile Include="..\..\BAE_Source\Common\GenSynthInterp2U3232.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\NeoBAE.c">
+    <ClCompile Include="..\..\BAE_Source\Common\NeoBAE.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\NewNewLZSS.c">
+    <ClCompile Include="..\..\BAE_Source\Common\NewNewLZSS.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\SampleTools.c">
+    <ClCompile Include="..\..\BAE_Source\Common\SampleTools.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\X_API.c">
+    <ClCompile Include="..\..\BAE_Source\Common\X_API.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\X_Decompress.c">
+    <ClCompile Include="..\..\BAE_Source\Common\X_Decompress.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\X_IMA.c">
+    <ClCompile Include="..\..\BAE_Source\Common\X_IMA.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\g711.c">
+    <ClCompile Include="..\..\BAE_Source\Common\g711.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\g721.c">
+    <ClCompile Include="..\..\BAE_Source\Common\g721.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\g723_24.c">
+    <ClCompile Include="..\..\BAE_Source\Common\g723_24.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\g723_40.c">
+    <ClCompile Include="..\..\BAE_Source\Common\g723_40.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\g72x.c">
+    <ClCompile Include="..\..\BAE_Source\Common\g72x.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\sha1mini.c">
+    <ClCompile Include="..\..\BAE_Source\Common\sha1mini.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\XFileTypes.c">
+    <ClCompile Include="..\..\BAE_Source\Common\XFileTypes.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\XVorbisFiles.c">
+    <ClCompile Include="..\..\BAE_Source\Common\XVorbisFiles.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
     <!-- MPEG -->
-    <ClCompile Include="..\src\BAE_MPEG_Source_II\XMPEG_minimp3_wrapper.c">
+    <ClCompile Include="..\..\BAE_MPEG_Source_II\XMPEG_minimp3_wrapper.c">
       <Filter>Source Files\MPEG</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_MPEG_Source_II\XMPEGFilesSun.c">
+    <ClCompile Include="..\..\BAE_MPEG_Source_II\XMPEGFilesSun.c">
       <Filter>Source Files\MPEG</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_MPEG_Source_II\XMPEG_lame_encoder.cpp">
+    <ClCompile Include="..\..\BAE_MPEG_Source_II\XMPEG_lame_encoder.cpp">
       <Filter>Source Files\MPEG</Filter>
     </ClCompile>
     <!-- FLAC -->
-    <ClCompile Include="..\src\thirdparty\flac\src\share\win_utf8_io\win_utf8_io.c">
+    <ClCompile Include="..\..\thirdparty\flac\src\share\win_utf8_io\win_utf8_io.c">
       <Filter>Source Files\FLAC</Filter>
     </ClCompile>
     <!-- LAME libmp3lame -->
     <!-- LAME mpglib -->
-    <ClCompile Include="..\src\rmfeditor_wx\editor_pianoroll_panel.cpp">
+    <ClCompile Include="..\editor_pianoroll_panel.cpp">
       <Filter>Source Files\RMF Editor</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\rmfeditor_wx\editor_instrument_ext_dialog.cpp">
+    <ClCompile Include="..\editor_instrument_ext_dialog.cpp">
       <Filter>Source Files\RMF Editor</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\rmfeditor_wx\editor_metadata_dialog.cpp">
+    <ClCompile Include="..\editor_metadata_dialog.cpp">
       <Filter>Source Files\RMF Editor</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\rmfeditor_wx\batch_compress_dialog.cpp">
+    <ClCompile Include="..\batch_compress_dialog.cpp">
       <Filter>Source Files\RMF Editor</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\XOpusFiles.c">
+    <ClCompile Include="..\..\BAE_Source\Common\XOpusFiles.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\rmfeditor_wx\editor_bank.cpp">
+    <ClCompile Include="..\editor_bank.cpp">
       <Filter>Source Files\RMF Editor</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\BAE_Source\Common\X_LZMA.c">
+    <ClCompile Include="..\..\BAE_Source\Common\X_LZMA.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\mod2rmf\mod2rmf_common.c">
+    <ClCompile Include="..\..\mod2rmf\mod2rmf_common.c">
       <Filter>Source Files\MOD2RMF</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\mod2rmf\mod2rmf_encoder.c">
+    <ClCompile Include="..\..\mod2rmf\mod2rmf_encoder.c">
       <Filter>Source Files\MOD2RMF</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\mod2rmf\mod2rmf_resampler.c">
+    <ClCompile Include="..\..\mod2rmf\mod2rmf_resampler.c">
       <Filter>Source Files\MOD2RMF</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\mod2rmf\mod2rmf_rmfcreat.c">
+    <ClCompile Include="..\..\mod2rmf\mod2rmf_rmfcreat.c">
       <Filter>Source Files\MOD2RMF</Filter>
     </ClCompile>
-    <ClCompile Include="..\src\mod2rmf\mod2rmf_song.c">
+    <ClCompile Include="..\..\mod2rmf\mod2rmf_song.c">
       <Filter>Source Files\MOD2RMF</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\src\BAE_Source\Common\NeoBAE.h">
+    <ClInclude Include="..\..\BAE_Source\Common\NeoBAE.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\BAE_Source\Common\BAERmfEditor.h">
+    <ClInclude Include="..\..\BAE_Source\Common\BAERmfEditor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\BAE_Source\Platform\BAE_API.h">
+    <ClInclude Include="..\..\BAE_Source\Platform\BAE_API.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="generated\BAEPatches.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\BAE_Source\Platform\BAEBuildOptions_WinOS.h">
+    <ClInclude Include="..\..\BAE_Source\Platform\BAEBuildOptions_WinOS.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="nbstudio\msvc_compat.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\rmfeditor_wx\editor_pianoroll_panel.h">
+    <ClInclude Include="..\editor_pianoroll_panel.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\rmfeditor_wx\editor_instrument_ext_dialog.h">
+    <ClInclude Include="..\editor_instrument_ext_dialog.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\rmfeditor_wx\editor_metadata_dialog.h">
+    <ClInclude Include="..\editor_metadata_dialog.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\rmfeditor_wx\editor_bank.h">
+    <ClInclude Include="..\editor_bank.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\mod2rmf\mod2rmf_common.h">
+    <ClInclude Include="..\..\mod2rmf\mod2rmf_common.h">
       <Filter>Source Files\MOD2RMF</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\mod2rmf\mod2rmf_encoder.h">
+    <ClInclude Include="..\..\mod2rmf\mod2rmf_encoder.h">
       <Filter>Source Files\MOD2RMF</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\mod2rmf\mod2rmf_resampler.h">
+    <ClInclude Include="..\..\mod2rmf\mod2rmf_resampler.h">
       <Filter>Source Files\MOD2RMF</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\mod2rmf\mod2rmf_rmfcreat.h">
+    <ClInclude Include="..\..\mod2rmf\mod2rmf_rmfcreat.h">
       <Filter>Source Files\MOD2RMF</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\mod2rmf\mod2rmf_song.h">
+    <ClInclude Include="..\..\mod2rmf\mod2rmf_song.h">
       <Filter>Source Files\MOD2RMF</Filter>
     </ClInclude>
-    <ClInclude Include="..\src\BAE_Source\Common\X_Assert.h">
+    <ClInclude Include="..\..\BAE_Source\Common\X_Assert.h">
       <Filter>Source Files\BAE Common</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="..\src\rmfeditor_wx\editor.rc" />
+    <ResourceCompile Include="..\editor.rc" />
   </ItemGroup>
 </Project>
