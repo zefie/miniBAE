@@ -42,17 +42,25 @@
 # 0.11a
 - ~~Tell user why ZMF is required via tooltip over the status bar text~~
 - Allow cut/copy/pasting instruments
-- Allow dragging samples to other instruments
-  - Ask user if they want to move, or alias the sample
-  - If its the only sample/alias of the source instrument and they choose move, prompt user:
-  - Create a new empty sample for the instrument [instrument name]? Selecting No will destroy the old instrument.
-  - Implement functions to create new empty sample in old instrument, reassign sample SNDID to target INST
-  - and destroy old INST if requested
-  - If instrument has more than one sample, we still have to modify both the source and dest INST to update SNDID
-  - If the user CTRL-drags then we just alias the sample
-  - alias is just adding that SNDID to the inst without removing it from the old    
+- ~~Allow dragging samples to other instruments~~
+  - ~~Ask user if they want to move, or alias the sample~~
+  - ~~If its the only sample/alias of the source instrument and they choose move, prompt user:~~
+  - ~~Create a new empty sample for the instrument [instrument name]? Selecting No will destroy the old instrument.~~
+  - ~~Implement functions to create new empty sample in old instrument, reassign sample SNDID to target INST~~
+  - ~~and destroy old INST if requested~~
+  - ~~If instrument has more than one sample, we still have to modify both the source and dest INST to update SNDID~~
+  - ~~If the user CTRL-drags then we just alias the sample~~
+  - ~~alias is just adding that SNDID to the inst without removing it from the old~~    
 
 # Future
+- More throughly test backwards compatiblity with BeatnikX, maybe even WebTV Plus
+  - Put on back-burner for now
+  - old 2021 miniBAE can play files (obv without mp3) that BeatnikX can't
+  - try to modify our RMF generator so that we don't generate files that don't work on BeatnikX
+    but still work on NeoBAE
+  - ~~mod2rmf doesn't play as intended in BeatnikX, are we generating correctly? (edited RMF seems fine)~~
+  - ~~Works fine in NeoBAE, but RMF files in particular NEED to be properly backwards compatible~~
+  - ~~Change happened between 2025-08-23 and 2025-09-01 release (MIN_LOOP_SIZE dropped from 20 to 2)~~
 - bankrecomp: wtv.hsb recomp prog 100 weirdness
 - Graphics for pitch envelope
 - Interpolation configuration (none, linear, cubic, etc, current is just on/off)

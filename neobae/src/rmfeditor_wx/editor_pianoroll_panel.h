@@ -54,3 +54,7 @@ uint32_t PianoRollPanel_GetUserEndTick(PianoRollPanel *panel);
 void PianoRollPanel_ClearPlayhead(PianoRollPanel *panel);
 void PianoRollPanel_ScrollToC4Center(PianoRollPanel *panel);
 void PianoRollPanel_Refresh(PianoRollPanel *panel);
+void PianoRollPanel_SetAutoFollowPlayhead(PianoRollPanel *panel, bool enable);
+bool PianoRollPanel_GetAutoFollowPlayhead(PianoRollPanel *panel);
+void PianoRollPanel_SetAutoFollowChangedCallback(PianoRollPanel *panel, std::function<void(bool)> callback);
+uint32_t PianoRollPanel_GetPlayheadTick(PianoRollPanel *panel);

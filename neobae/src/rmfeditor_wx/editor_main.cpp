@@ -608,10 +608,11 @@ public:
         m_previewVolumeSlider = new wxSlider(editorPanel, wxID_ANY, 100, 0, 100, wxDefaultPosition, wxSize(120, -1), wxSL_HORIZONTAL);
         m_previewReverbChoice = new wxChoice(editorPanel, wxID_ANY);
         m_previewLoopCheck = new wxCheckBox(editorPanel, wxID_ANY, "Loop");
-        m_midiLoopEnableCheck = new wxCheckBox(editorPanel, wxID_ANY, "MIDI Loop Markers");
+        m_midiLoopEnableCheck = new wxCheckBox(editorPanel, wxID_ANY, "MIDI Loop:");
         m_midiLoopStartText = new wxTextCtrl(editorPanel, wxID_ANY, "0:00.000", wxDefaultPosition, wxSize(110, -1));
         m_midiLoopEndText = new wxTextCtrl(editorPanel, wxID_ANY, "0:00.000", wxDefaultPosition, wxSize(110, -1));
         m_channelsConfigButton = new wxButton(editorPanel, wxID_ANY, "Channels");
+        m_autoFollowPlayheadCheck = new wxCheckBox(editorPanel, wxID_ANY, "Follow Playhead");
         m_playScopeChoice->Append("All Tracks");
         m_playScopeChoice->Append("Current Track");
         m_playScopeChoice->Append("Channels");
@@ -648,6 +649,7 @@ public:
         m_metadataButton->SetMinSize(wxSize(110, -1));
         m_previewReverbChoice->SetMinSize(wxSize(170, -1));
         m_previewLoopCheck->SetValue(false);
+        m_autoFollowPlayheadCheck->SetValue(true);
 
         controlsSizer->Add(new wxStaticText(editorPanel, wxID_ANY, "Tempo"), 0, wxALIGN_CENTER_VERTICAL);
         controlsSizer->Add(m_tempoSpin, 1, wxEXPAND);
@@ -699,7 +701,8 @@ public:
             midiLoopRow->Add(m_midiLoopStartText, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
             midiLoopRow->Add(new wxStaticText(editorPanel, wxID_ANY, "End Time"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
             midiLoopRow->Add(m_midiLoopEndText, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
-            midiLoopRow->Add(m_channelsConfigButton, 0, wxALIGN_CENTER_VERTICAL, 0);
+            midiLoopRow->Add(m_channelsConfigButton, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
+            midiLoopRow->Add(m_autoFollowPlayheadCheck, 0, wxALIGN_CENTER_VERTICAL, 0);
             extraControlsSizer->Add(m_metadataButton, 0, wxEXPAND, 0);
 
             leftControlsSizer->Add(controlsSizer, 0, wxEXPAND | wxBOTTOM, 8);
@@ -1315,6 +1318,19 @@ public:
         m_midiLoopEnableCheck->Bind(wxEVT_CHECKBOX, &MainFrame::OnMidiLoopMarkersChanged, this);
         m_midiLoopStartText->Bind(wxEVT_TEXT, &MainFrame::OnMidiLoopMarkersChanged, this);
         m_midiLoopEndText->Bind(wxEVT_TEXT, &MainFrame::OnMidiLoopMarkersChanged, this);
+        PianoRollPanel_SetAutoFollowChangedCallback(m_pianoRoll, [this](bool enabled) {
+            m_autoFollowPlayheadCheck->SetValue(enabled);
+            m_autoFollowPlayhead = enabled;
+        });
+        m_autoFollowPlayheadCheck->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent &) {
+            bool checked = m_autoFollowPlayheadCheck->GetValue();
+            m_autoFollowPlayhead = checked;
+            PianoRollPanel_SetAutoFollowPlayhead(m_pianoRoll, checked);
+            if (checked) {
+                uint32_t tick = PianoRollPanel_GetPlayheadTick(m_pianoRoll);
+                PianoRollPanel_EnsurePlayheadVisible(m_pianoRoll, tick);
+            }
+        });
         m_positionSlider->Bind(wxEVT_SLIDER, &MainFrame::OnSeekSlider, this);
         m_metadataButton->Bind(wxEVT_BUTTON, &MainFrame::OnMetadata, this);
         Bind(wxEVT_MENU, &MainFrame::OnTrackAdd, this, ID_TrackAdd);
@@ -1428,6 +1444,7 @@ private:
     wxTextCtrl *m_midiLoopStartText;
     wxTextCtrl *m_midiLoopEndText;
     wxButton *m_channelsConfigButton;
+    wxCheckBox *m_autoFollowPlayheadCheck;
     wxStaticText *m_statusInfoLabel = nullptr;
     wxSlider *m_positionSlider;
     wxStaticText *m_positionLabel;
@@ -2143,6 +2160,7 @@ private:
                 }
             }
         }
+        BAESong_Stop(m_playbackSong, FALSE);
         Destroy();
     }
 
@@ -7462,6 +7480,16 @@ private:
     void OnTrackSelected(wxCommandEvent &) {
         PianoRollPanel_SetSelectedTrack(m_pianoRoll, GetSelectedTrack());
         UpdateControlsFromSelection();
+        
+        uint32_t currentTick = PianoRollPanel_GetPlayheadTick(m_pianoRoll);
+        uint32_t endTick = PianoRollPanel_GetDocumentEndTick(m_pianoRoll);
+        if (currentTick > endTick) {
+            if (m_autoFollowPlayheadCheck->GetValue()) {
+                m_autoFollowPlayheadCheck->SetValue(false);
+                m_autoFollowPlayhead = false;
+                PianoRollPanel_SetAutoFollowPlayhead(m_pianoRoll, false);
+            }
+        }
     }
 
     void OnTempoChanged(wxCommandEvent &) {
@@ -7823,14 +7851,17 @@ private:
             BAEResult prerollResult;
             BAEResult loopResult;
 
+            uint32_t currentTick = PianoRollPanel_GetPlayheadTick(m_pianoRoll);
+            uint32_t startUsec = static_cast<uint32_t>(TicksToMicroseconds(currentTick));
             loopResult = BAESong_SetLoops(m_playbackSong, IsPreviewLoopEnabled() ? 32767 : 0);
-            seekResult = BAESong_SetMicrosecondPosition(m_playbackSong, 0);
+            seekResult = BAESong_SetMicrosecondPosition(m_playbackSong, startUsec);
             prerollResult = BAESong_Preroll(m_playbackSong);
             fprintf(stderr,
-                    "[nbstudio] Pre-start prep loops=%d seek0=%d preroll=%d\n",
+                    "[nbstudio] Pre-start prep loops=%d seek=%d preroll=%d startUsec=%lu\n",
                     static_cast<int>(loopResult),
                     static_cast<int>(seekResult),
-                    static_cast<int>(prerollResult));
+                    static_cast<int>(prerollResult),
+                    static_cast<unsigned long>(startUsec));
         }
         BAEResult startResult = BAESong_Start(m_playbackSong, 0);
         fprintf(stderr, "[nbstudio] BAESong_Start result=%d\n", static_cast<int>(startResult));
@@ -7857,8 +7888,23 @@ private:
         }
         m_playbackTimer.Start(40);
         m_ignoreSeekEvent = true;
-        m_positionSlider->SetValue(0);
+        
+        uint32_t endTick = PianoRollPanel_GetDocumentEndTick(m_pianoRoll);
+        uint64_t totalUsec = TicksToMicroseconds(endTick);
+        if (totalUsec == 0) totalUsec = 1;
+        
+        uint32_t currentTick = PianoRollPanel_GetPlayheadTick(m_pianoRoll);
+        uint64_t currentUsec = TicksToMicroseconds(currentTick);
+        int sliderPos = static_cast<int>((currentUsec * 1000ULL) / totalUsec);
+        sliderPos = std::clamp(sliderPos, 0, 1000);
+        
+        m_positionSlider->SetValue(sliderPos);
         m_ignoreSeekEvent = false;
+        
+        if (m_autoFollowPlayheadCheck->GetValue()) {
+            m_autoFollowPlayhead = true;
+            PianoRollPanel_SetAutoFollowPlayhead(m_pianoRoll, true);
+        }
         m_autoFollowPlayhead = true;
         PianoRollPanel_SetPlayheadTick(m_pianoRoll, 0);
         {
@@ -8023,6 +8069,7 @@ private:
         m_ignoreSeekEvent = true;
         m_positionSlider->SetValue(0);
         m_ignoreSeekEvent = false;
+        PianoRollPanel_SetPlayheadTick(m_pianoRoll, 0);
         PianoRollPanel_ClearPlayhead(m_pianoRoll);
         UpdatePositionLabelFromDocumentTick(0);
         SetStatusText("Stopped", 0);
@@ -8056,7 +8103,15 @@ private:
 
                     playheadTick = MicrosecondsToTicks(posUsec);
                     PianoRollPanel_SetPlayheadTick(m_pianoRoll, playheadTick);
+                    uint32_t endTick = PianoRollPanel_GetDocumentEndTick(m_pianoRoll);
                     if (m_autoFollowPlayhead) {
+                        if (playheadTick > endTick) {
+                            if (m_autoFollowPlayheadCheck->GetValue()) {
+                                m_autoFollowPlayheadCheck->SetValue(false);
+                                m_autoFollowPlayhead = false;
+                                PianoRollPanel_SetAutoFollowPlayhead(m_pianoRoll, false);
+                            }
+                        }
                         PianoRollPanel_EnsurePlayheadVisible(m_pianoRoll, playheadTick);
                     }
                 }
@@ -8081,7 +8136,6 @@ private:
         if (m_ignoreSeekEvent) {
             return;
         }
-        m_autoFollowPlayhead = false;
         seekTick = 0;
         if (m_playbackSong) {
             uint32_t lenUsec32;
@@ -8139,7 +8193,6 @@ private:
                 }
                 sliderPos = static_cast<int>((targetUsec * 1000ULL) / static_cast<uint64_t>(lenUsec));
                 sliderPos = std::clamp(sliderPos, 0, 1000);
-                m_autoFollowPlayhead = false;
                 m_ignoreSeekEvent = true;
                 m_positionSlider->SetValue(sliderPos);
                 m_ignoreSeekEvent = false;
@@ -8150,12 +8203,12 @@ private:
         } else {
             sliderPos = static_cast<int>((targetUsec * 1000ULL) / totalUsec);
             sliderPos = std::clamp(sliderPos, 0, 1000);
-            m_autoFollowPlayhead = false;
             m_ignoreSeekEvent = true;
             m_positionSlider->SetValue(sliderPos);
             m_ignoreSeekEvent = false;
             UpdatePositionLabel(targetUsec, totalUsec);
         }
+        
         PianoRollPanel_SetPlayheadTick(m_pianoRoll, playheadTick);
     }
 

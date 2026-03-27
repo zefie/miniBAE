@@ -325,6 +325,14 @@ struct RenderCache {
     wxBrush brushTimelineHandleFill;
     wxBrush brushMidiLoopShade;
     wxPen   penAutomationCenterLine;
+    
+    wxString noteLabels[11];
+    wxArrayString noteLabelArray;
+    void InitNoteLabels() {
+        for (int i = 0; i < 11; ++i) {
+            noteLabels[i] = wxString::Format("C%d", i - 1);
+        }
+    }
 };
 
 static wxString GetControllerLaneLabel(unsigned char controller) {
@@ -591,7 +599,9 @@ public:
           m_userEndTick(0),
           m_draggingTimelineEnd(false),
           m_timelineEndDragTick(0),
-          m_theme(DetectSystemDarkMode() ? MakeDarkTheme() : MakeLightTheme()) {
+          m_theme(DetectSystemDarkMode() ? MakeDarkTheme() : MakeLightTheme()),
+          m_prevPlayheadX(-1),
+          m_dragCacheDirty(false) {
                 m_rc.penNoteNormal    = wxPen(wxColour(34, 72, 120), 1);
         
         m_rc.penNoteSelected  = wxPen(wxColour(110, 42, 17), 2);
@@ -622,6 +632,7 @@ public:
         m_rc.penTimelineHandle = wxPen(wxColour(140, 100, 35));
         m_rc.brushTimelineHandleFill = wxBrush(wxColour(200, 155, 60));
         m_rc.brushMidiLoopShade = wxBrush(wxColour(88, 180, 120, 55));
+        m_rc.InitNoteLabels();
         
         SetBackgroundStyle(wxBG_STYLE_PAINT);
         SetScrollRate(16, 16);
@@ -633,6 +644,11 @@ public:
         Bind(wxEVT_MOTION, &PianoRollPanel::OnMotion, this);
         Bind(wxEVT_LEAVE_WINDOW, &PianoRollPanel::OnMouseLeave, this);
         Bind(wxEVT_MOUSEWHEEL, &PianoRollPanel::OnMouseWheel, this);
+        Bind(wxEVT_SCROLLWIN_THUMBTRACK, &PianoRollPanel::OnScrollWin, this);
+        Bind(wxEVT_SCROLLWIN_LINEUP, &PianoRollPanel::OnScrollWin, this);
+        Bind(wxEVT_SCROLLWIN_LINEDOWN, &PianoRollPanel::OnScrollWin, this);
+        Bind(wxEVT_SCROLLWIN_PAGEUP, &PianoRollPanel::OnScrollWin, this);
+        Bind(wxEVT_SCROLLWIN_PAGEDOWN, &PianoRollPanel::OnScrollWin, this);
         Bind(wxEVT_CHAR_HOOK, &PianoRollPanel::OnCharHook, this);
         Bind(wxEVT_MENU, &PianoRollPanel::OnEditSelectedItem, this, ID_PianoRollEdit);
         Bind(wxEVT_MENU, &PianoRollPanel::OnDeleteSelectedItem, this, ID_PianoRollDelete);
@@ -887,8 +903,39 @@ public:
 
     void SetPlayheadTick(uint32_t tick) {
         m_showPlayhead = true;
+        int oldPlayheadX = m_prevPlayheadX;
+        int newPlayheadX = TickToX(tick);
         m_playheadTick = tick;
-        Refresh();
+        m_prevPlayheadX = newPlayheadX;
+        
+        if (m_dragging) {
+            return;
+        }
+        
+        if (oldPlayheadX < 0 || oldPlayheadX != newPlayheadX) {
+            int clientW = GetClientSize().GetWidth();
+            int clientH = GetClientSize().GetHeight();
+            RefreshRect(wxRect(0, kPianoRollTopGutter, clientW, clientH - kPianoRollTopGutter), false);
+        }
+    }
+
+    void SetAutoFollowPlayhead(bool enable) {
+        m_autoFollowPlayhead = enable;
+        if (enable) {
+            m_justPageJumped = false;
+        }
+    }
+
+    bool GetAutoFollowPlayhead() const {
+        return m_autoFollowPlayhead;
+    }
+
+    uint32_t GetPlayheadTick() const {
+        return m_playheadTick;
+    }
+
+    void SetAutoFollowChangedCallback(std::function<void(bool)> callback) {
+        m_autoFollowChangedCallback = callback;
     }
 
     void EnsurePlayheadVisible(uint32_t tick) {
@@ -899,11 +946,13 @@ public:
         int viewLeft;
         int visibleWidth;
         int playheadX;
-        int followPadding;
-        int followBoundary;
         int newViewLeft;
         int maxViewLeft;
         wxSize virtualSize;
+
+        if (!m_autoFollowPlayhead) {
+            return;
+        }
 
         scrollPixelsX = 0;
         scrollPixelsY = 0;
@@ -918,17 +967,41 @@ public:
             return;
         }
 
-        playheadX = TickToX(tick);
-        followPadding = std::max(48, visibleWidth / 5);
-        followBoundary = viewLeft + visibleWidth - followPadding;
-        if (playheadX <= followBoundary) {
-            return;
-        }
-
         virtualSize = GetVirtualSize();
         maxViewLeft = std::max(0, virtualSize.GetWidth() - visibleWidth);
-        newViewLeft = std::min(maxViewLeft, playheadX - (visibleWidth - followPadding));
-        Scroll(newViewLeft / scrollPixelsX, viewUnitsY);
+        
+        playheadX = TickToX(tick);
+        int playheadRelativeX = playheadX - viewLeft;
+        
+        int leftEdge = visibleWidth / 10;
+        int rightEdge = visibleWidth - (visibleWidth / 10);
+        
+        if (playheadRelativeX > rightEdge) {
+            if (!m_justPageJumped) {
+                newViewLeft = playheadX - leftEdge;
+                newViewLeft = std::max(0, newViewLeft);
+                newViewLeft = std::min(maxViewLeft, newViewLeft);
+                if (newViewLeft != viewLeft) {
+                    m_isAutoScrolling = true;
+                    Scroll(newViewLeft / scrollPixelsX, viewUnitsY);
+                    m_isAutoScrolling = false;
+                }
+                m_justPageJumped = true;
+            }
+        } else if (playheadRelativeX <= rightEdge && playheadRelativeX >= leftEdge && m_justPageJumped) {
+            m_justPageJumped = false;
+        } else if (playheadX < viewLeft) {
+            newViewLeft = std::max(0, playheadX - leftEdge);
+            newViewLeft = std::min(maxViewLeft, newViewLeft);
+            if (newViewLeft != viewLeft) {
+                m_isAutoScrolling = true;
+                Scroll(newViewLeft / scrollPixelsX, viewUnitsY);
+                m_isAutoScrolling = false;
+            }
+            m_justPageJumped = false;
+        }
+        
+        m_lastPlayheadTick = tick;
     }
 
     void JumpToTick(uint32_t tick) {
@@ -955,12 +1028,23 @@ public:
         virtualSize = GetVirtualSize();
         targetViewLeft = std::clamp(targetViewLeft, 0, std::max(0, virtualSize.GetWidth() - visibleWidth));
         /* Preserve vertical scroll position; only change horizontal. */
+        m_isAutoScrolling = true;
         Scroll(targetViewLeft / scrollPixelsX, viewUnitsY);
+        m_isAutoScrolling = false;
+        m_lastPlayheadTick = tick;
+        m_lastViewStartX = targetViewLeft;
+        m_justPageJumped = false;
     }
 
     void ClearPlayhead() {
+        if (m_prevPlayheadX >= 0 && !m_dragging) {
+            int clientW = GetClientSize().GetWidth();
+            int clientH = GetClientSize().GetHeight();
+            RefreshRect(wxRect(0, kPianoRollTopGutter, clientW, clientH - kPianoRollTopGutter), false);
+        }
         m_showPlayhead = false;
-        Refresh();
+        m_prevPlayheadX = -1;
+        m_justPageJumped = false;
     }
 
     uint32_t GetVisibleDocumentEndTick() const {
@@ -1013,6 +1097,7 @@ private:
     std::function<void(wxString const &)> m_commitUndoCallback;
     std::function<void()> m_cancelUndoCallback;
     std::function<bool(bool, uint32_t, uint32_t)> m_midiLoopEditCallback;
+    std::function<void(bool)> m_autoFollowChangedCallback;
     bool m_dragUndoActive = false;
     wxString m_dragUndoLabel;
     float m_zoomScale;
@@ -1032,6 +1117,26 @@ private:
     std::vector<AutomationDisplayCache> m_automationDisplayCaches;
     std::vector<AutomationRampSegmentKey> m_rampSegments;
     RenderCache m_rc;
+    int m_prevPlayheadX;
+    bool m_dragCacheDirty;
+    std::vector<std::pair<int, wxRect>> m_dragDirtyRects;
+    bool m_autoFollowPlayhead = true;
+    uint32_t m_lastPlayheadTick = 0;
+    int m_lastViewStartX = -1;
+    bool m_justPageJumped = false;
+    bool m_isAutoScrolling = false;
+    
+    wxBitmap m_viewCache;
+    wxRect m_cacheRect;
+    uint64_t m_cacheNoteRevision = 0;
+    uint64_t m_cacheAutoRevision = 0;
+    float m_cacheZoomScale = 0.0f;
+    int m_cacheSelNote = -1;
+    int m_cacheSelAutoLane = -1;
+    int m_cacheSelAutoEvent = -1;
+    int m_cacheHoverAutoLane = -1;
+    int m_cacheHoverAutoEvent = -1;
+    bool m_cacheDirty = true;
     
     void InvalidateNoteCache() {
         m_noteTrackCache.valid = false;
@@ -1039,6 +1144,10 @@ private:
         m_noteTrackCache.ticksPerBin = 0;
         m_noteTrackCache.notes.clear();
         m_noteTrackCache.pitchBins.clear();
+        m_dragCacheDirty = false;
+        m_dragDirtyRects.clear();
+        m_cacheDirty = true;
+        m_cacheNoteRevision++;
     }
 
     bool BuildNoteTrackCache() {
@@ -1109,7 +1218,6 @@ private:
         int bottomNote;
         int lowNote;
         int highNote;
-        std::vector<unsigned char> seen;
 
         if (!outEntryIndices) {
             return;
@@ -1119,6 +1227,8 @@ private:
         if (!cache || cache->notes.empty() || cache->pitchBins.empty()) {
             return;
         }
+
+        std::vector<bool> seen(cache->notes.size(), false);
 
         visibleStartTick = XToTick(std::max(kPianoRollLeftGutter, rect.GetLeft()));
         visibleEndTick = XToTick(std::max(kPianoRollLeftGutter, rect.GetRight()));
@@ -1134,6 +1244,8 @@ private:
         for (int pitch = lowNote; pitch <= highNote; ++pitch) {
             for (uint32_t binIndex = startBin; binIndex <= endBin; ++binIndex) {
                 for (uint32_t entryIndex : cache->pitchBins[static_cast<size_t>(pitch)][binIndex]) {
+                    if (seen[entryIndex]) continue;
+                    seen[entryIndex] = true;
                     NoteCacheEntry const &entry = cache->notes[entryIndex];
                     if (entry.endTick <= visibleStartTick || entry.noteInfo.startTick > visibleEndTick)
                         continue;
@@ -1220,6 +1332,7 @@ private:
             cache.valid = false;
             cache.buckets.clear();
         }
+        m_cacheDirty = true;
     }
 
     AutomationDisplayCache const *GetAutomationDisplayCache(int laneIndex,
@@ -1636,6 +1749,52 @@ private:
                       NoteToY(noteInfo.note),
                       std::max(8, TickToX(noteInfo.startTick + noteInfo.durationTicks) - TickToX(noteInfo.startTick)),
                       kNoteHeight - 1);
+    }
+
+    void UpdateNoteCacheForDrag(uint32_t snappedTick, int snappedNote) {
+        if (!m_noteTrackCache.valid || m_selectedNote < 0) {
+            return;
+        }
+        m_dragDirtyRects.clear();
+        for (size_t i = 0; i < m_dragOriginalNoteIndices.size(); ++i) {
+            long noteIndex = m_dragOriginalNoteIndices[i];
+            if (noteIndex < 0 || noteIndex >= static_cast<long>(m_noteTrackCache.notes.size())) {
+                continue;
+            }
+            NoteCacheEntry &entry = m_noteTrackCache.notes[static_cast<size_t>(noteIndex)];
+            wxRect oldRect = BuildNoteRect(entry.noteInfo);
+            m_dragDirtyRects.emplace_back(static_cast<int>(i), oldRect);
+            BAERmfEditorNoteInfo updatedNote = m_dragOriginalNotes[i];
+            if (snappedTick >= m_dragStartTick) {
+                updatedNote.startTick = m_dragOriginalNotes[i].startTick + (snappedTick - m_dragStartTick);
+            } else {
+                uint32_t deltaTicks = m_dragStartTick - snappedTick;
+                updatedNote.startTick = (deltaTicks > m_dragOriginalNotes[i].startTick) ? 0 : (m_dragOriginalNotes[i].startTick - deltaTicks);
+            }
+            updatedNote.note = static_cast<unsigned char>(std::clamp(static_cast<int>(m_dragOriginalNotes[i].note) + (snappedNote - m_dragStartNote), 0, 127));
+            entry.noteInfo = updatedNote;
+            entry.endTick = updatedNote.startTick + std::max<uint32_t>(1, updatedNote.durationTicks);
+        }
+        m_dragCacheDirty = true;
+    }
+
+    void RefreshDraggedNotes() {
+        wxSize clientSize = GetClientSize();
+        if (clientSize.GetWidth() <= 0 || clientSize.GetHeight() <= 0) {
+            return;
+        }
+        for (auto &dirty : m_dragDirtyRects) {
+            RefreshRect(dirty.second, false);
+        }
+        for (size_t i = 0; i < m_dragOriginalNoteIndices.size(); ++i) {
+            long noteIndex = m_dragOriginalNoteIndices[i];
+            if (noteIndex < 0 || noteIndex >= static_cast<long>(m_noteTrackCache.notes.size())) {
+                continue;
+            }
+            wxRect newRect = BuildNoteRect(m_noteTrackCache.notes[static_cast<size_t>(noteIndex)].noteInfo);
+            RefreshRect(newRect, false);
+        }
+        m_dragDirtyRects.clear();
     }
 
     DragMode GetDragModeForPoint(wxRect const &noteRect, wxPoint point) const {
@@ -3184,8 +3343,9 @@ private:
                                                          lane,
                                                          laneCache);
             }
+            wxPen const lanePen(lane.color, 1);
             if (displayCache) {
-                dc.SetPen(wxPen(lane.color, 1));
+                dc.SetPen(lanePen);
                 for (AutomationDisplayBucket const &bucket : displayCache->buckets) {
                     if (!bucket.hasData) {
                         continue;
@@ -3249,39 +3409,52 @@ private:
                 int maxVisibleNodeMarkers;
                 bool suppressDenseNodeMarkers;
 
-                visibleNodeCount = 0;
-                for (AutomationCurveNode const &node : laneCache->nodes) {
-                    int nodeX;
+                auto nodeIt = std::lower_bound(laneCache->nodes.begin(),
+                                               laneCache->nodes.end(),
+                                               visibleStartTick,
+                                               [](AutomationCurveNode const &node, uint32_t tick) {
+                                                   return node.tick < tick;
+                                               });
+                
+                if (nodeIt != laneCache->nodes.begin()) {
+                    --nodeIt;
+                }
 
-                    nodeX = TickToX(node.tick);
-                    if (nodeX + 6 < visibleLeft || nodeX - 6 > visibleRight) {
+                visibleNodeCount = 0;
+                auto countIt = nodeIt;
+                for (; countIt != laneCache->nodes.end(); ++countIt) {
+                    int nodeX = TickToX(countIt->tick);
+                    if (nodeX - 6 > visibleRight) {
+                        break;
+                    }
+                    if (nodeX + 6 < visibleLeft) {
                         continue;
                     }
                     ++visibleNodeCount;
                 }
+                
                 maxVisibleNodeMarkers = std::max(24, laneVisibleWidth / 12);
                 suppressDenseNodeMarkers = visibleNodeCount > maxVisibleNodeMarkers;
-                for (AutomationCurveNode const &node : laneCache->nodes) {
-                    int nodeX;
-                    int nodeY;
-                    int radius;
-                    bool nodeSelected;
-                    bool nodeHovered;
-
-                    nodeX = TickToX(node.tick);
-                    if (nodeX + 6 < visibleLeft || nodeX - 6 > visibleRight) {
+                
+                for (; nodeIt != laneCache->nodes.end(); ++nodeIt) {
+                    int nodeX = TickToX(nodeIt->tick);
+                    if (nodeX - 6 > visibleRight) {
+                        break;
+                    }
+                    if (nodeX + 6 < visibleLeft) {
                         continue;
                     }
-                    nodeY = valueToY(node.value);
-                    nodeSelected = (m_selectedItemKind == PianoRollSelectionKind::Automation &&
+                    
+                    int nodeY = valueToY(nodeIt->value);
+                    bool nodeSelected = (m_selectedItemKind == PianoRollSelectionKind::Automation &&
                                     m_selectedAutomationLane == laneIndex &&
-                                    m_selectedAutomationEvent == static_cast<long>(node.sourceEventIndex));
-                    nodeHovered = (m_hoverAutomationLane == laneIndex &&
-                                   m_hoverAutomationEvent == static_cast<long>(node.sourceEventIndex));
+                                    m_selectedAutomationEvent == static_cast<long>(nodeIt->sourceEventIndex));
+                    bool nodeHovered = (m_hoverAutomationLane == laneIndex &&
+                                     m_hoverAutomationEvent == static_cast<long>(nodeIt->sourceEventIndex));
                     if (suppressDenseNodeMarkers && !nodeSelected && !nodeHovered) {
                         continue;
                     }
-                    radius = nodeSelected ? 4 : (nodeHovered ? 4 : 3);
+                    int radius = nodeSelected ? 4 : (nodeHovered ? 4 : 3);
                     dc.SetPen(wxPen(nodeSelected ? m_theme.automationSelectedBorder : lane.color,
                                     nodeSelected ? 2 : 1));
                     dc.SetBrush(wxBrush(nodeSelected ? m_theme.automationSelectedBorder
@@ -3617,7 +3790,6 @@ private:
             return;
         }
 
-        // Cache frequently used values once per paint
         const uint16_t tpq = GetTicksPerQuarter();
         const int leftGutter = kPianoRollLeftGutter;
         const int topGutter  = kPianoRollTopGutter;
@@ -3633,57 +3805,146 @@ private:
         const int viewRight  = viewLeft + clientSize.GetWidth();
         const int viewBottom = viewTop  + clientSize.GetHeight();
 
-        // Pre‑compute note‑Y positions once
-        static int noteY[128];
-        static bool noteYValid = false;
-        if (!noteYValid) {
-            for (int n = 0; n < 128; ++n)
-                noteY[n] = NoteToY(n);
-            noteYValid = true;
+        bool cacheNeedsUpdate = false;
+        if (m_cacheDirty || m_cacheRect.GetLeft() != viewLeft || m_cacheRect.GetTop() != viewTop ||
+            m_cacheRect.GetWidth() != clientSize.GetWidth() || m_cacheRect.GetHeight() != clientSize.GetHeight() ||
+            !m_viewCache.IsOk()) {
+            cacheNeedsUpdate = true;
+            m_cacheRect.SetLeft(viewLeft);
+            m_cacheRect.SetTop(viewTop);
+            m_cacheRect.SetWidth(clientSize.GetWidth());
+            m_cacheRect.SetHeight(clientSize.GetHeight());
+            m_cacheDirty = false;
         }
 
-        for (int note = 0; note < 128; ++note) {
-            const int y = noteY[note];
-            if (y + noteH < viewTop || y > viewBottom) continue;
+        if (cacheNeedsUpdate) {
+            m_viewCache = wxBitmap(clientSize.GetWidth(), clientSize.GetHeight());
+            wxMemoryDC memDC;
+            memDC.SelectObject(m_viewCache);
+            
+            // Set device origin so we can draw in logical coordinates
+            memDC.SetDeviceOrigin(-viewLeft, -viewTop);
 
-            const bool black = (note % 12 == 1) || (note % 12 == 3) ||
-                               (note % 12 == 6) || (note % 12 == 8) ||
-                               (note % 12 == 10);
-            dc.SetBrush(black ? m_rc.brushBlackKey : m_rc.brushWhiteKey);
-            dc.SetPen(*wxTRANSPARENT_PEN);
-            dc.DrawRectangle(viewLeft, y, viewRight - viewLeft, noteH);
-            dc.SetPen(m_rc.penNoteSeparator);
-            dc.DrawLine(gutterW, y, viewRight, y);
+            memDC.SetBackground(m_rc.brushWhiteKey);
+            memDC.Clear();
 
-            if (note % 12 == 0) {
-                dc.SetTextForeground(m_theme.noteLabelText);
-                dc.DrawText(wxString::Format("C%d", (note / 12) - 1), 6, y - 1);
+            static int noteY[128];
+            static bool noteYValid = false;
+            if (!noteYValid) {
+                for (int n = 0; n < 128; ++n)
+                    noteY[n] = NoteToY(n);
+                noteYValid = true;
             }
+
+            memDC.SetPen(m_rc.penNoteSeparator);
+            for (int note = 0; note < 128; ++note) {
+                const int y = noteY[note];
+                if (y + noteH < viewTop || y > viewBottom) continue;
+
+                const bool black = (note % 12 == 1) || (note % 12 == 3) ||
+                                   (note % 12 == 6) || (note % 12 == 8) ||
+                                   (note % 12 == 10);
+                memDC.SetBrush(black ? m_rc.brushBlackKey : m_rc.brushWhiteKey);
+                memDC.SetPen(*wxTRANSPARENT_PEN);
+                memDC.DrawRectangle(viewLeft, y, viewRight - viewLeft, noteH);
+                memDC.SetPen(m_rc.penNoteSeparator);
+                memDC.DrawLine(gutterW, y, viewRight, y);
+
+                if (note % 12 == 0) {
+                    const int labelIdx = (note / 12) - 1;
+                    if (labelIdx >= 0 && labelIdx < 11) {
+                        memDC.SetTextForeground(m_theme.noteLabelText);
+                        memDC.DrawText(m_rc.noteLabels[labelIdx], viewLeft + 6, y - 1);
+                    }
+                }
+            }
+
+            const uint32_t quarterTicks = tpq;
+            const uint32_t stepTicks    = std::max<uint32_t>(1, quarterTicks / 4);
+            const uint32_t tickStart    = (XToTick(viewLeft) / stepTicks) * stepTicks;
+            const uint32_t tickEnd      = XToTick(viewRight);
+            const int gridTop            = std::max(topGutter, viewTop);
+            const int gridBottom         = viewBottom;
+
+            for (uint32_t t = tickStart; t <= tickEnd; t += stepTicks) {
+                const int x = TickToX(t);
+                memDC.SetPen((t % quarterTicks) == 0
+                          ? m_rc.penRulerBarTick
+                          : m_rc.penRulerSubTick);
+                memDC.DrawLine(x, gridTop, x, gridBottom);
+                if (tickEnd - t < stepTicks) break;
+            }
+
+            memDC.SetPen(m_rc.penGutterSeparator);
+            memDC.DrawLine(gutterW, viewTop, gutterW, viewBottom);
+
+            DrawMidiLoopOverlay(memDC, wxRect(viewLeft, viewTop,
+                                            viewRight - viewLeft, viewBottom - viewTop),
+                                virtualSize);
+
+            if (HasTrack()) {
+                const NoteTrackCache *cache = GetNoteTrackCache();
+                if (cache) {
+                    std::vector<uint32_t> visibleEntries;
+                    GatherNoteEntriesInRect(wxRect(viewLeft, viewTop,
+                                                    viewRight - viewLeft, viewBottom - viewTop),
+                                            &visibleEntries);
+                    
+                    memDC.SetBrush(m_rc.brushNoteNormal);
+                    memDC.SetPen(m_rc.penNoteNormal);
+                    for (uint32_t idx : visibleEntries) {
+                        const auto &entry = cache->notes[idx];
+                        if (IsNoteSelected(static_cast<long>(entry.sourceIndex))) continue;
+                        const wxRect r = BuildNoteRect(entry.noteInfo);
+                        memDC.DrawRectangle(r);
+                    }
+                }
+            }
+            
+            DrawAutomationLanes(memDC, virtualSize,
+                                wxRect(viewLeft, viewTop,
+                                       viewRight - viewLeft, viewBottom - viewTop));
+
+            {
+                const uint32_t endTick = m_draggingTimelineEnd ? m_timelineEndDragTick
+                                                               : GetDocumentEndTick();
+                const int endX = TickToX(endTick);
+                if (endX >= viewLeft - 2 && endX <= viewRight + 2) {
+                    if (endX < viewRight) {
+                        memDC.SetPen(*wxTRANSPARENT_PEN);
+                        memDC.SetBrush(m_rc.brushTimelineEnd);
+                        memDC.DrawRectangle(endX + 1,
+                                         topGutter,
+                                         viewRight - endX,
+                                         std::max(1, virtualSize.GetHeight() - topGutter));
+                    }
+                    memDC.SetPen(m_rc.penTimelineEnd);
+                    memDC.DrawLine(endX, topGutter, endX, virtualSize.GetHeight());
+
+                    wxPoint tri[3] = {
+                        {endX, topGutter - 2},
+                        {endX - 5, topGutter - 10},
+                        {endX + 5, topGutter - 10}
+                    };
+                    memDC.SetPen(m_rc.penTimelineHandle);
+                    memDC.SetBrush(m_rc.brushTimelineHandleFill);
+                    memDC.DrawPolygon(3, tri);
+                }
+            }
+
+            DrawStickyRuler(memDC);
+            DrawMidiLoopRulerOverlay(memDC,
+                                     wxRect(viewLeft, viewTop,
+                                            viewRight - viewLeft, viewBottom - viewTop),
+                                     virtualSize);
+
+            memDC.SelectObject(wxNullBitmap);
         }
 
-        const uint32_t quarterTicks = tpq;
-        const uint32_t stepTicks    = std::max<uint32_t>(1, quarterTicks / 4);
-        const uint32_t tickStart    = (XToTick(viewLeft) / stepTicks) * stepTicks;
-        const uint32_t tickEnd      = XToTick(viewRight);
-        const int gridTop            = std::max(topGutter, viewTop);
-        const int gridBottom         = viewBottom;
+        // Draw the cached background and unselected notes
+        dc.DrawBitmap(m_viewCache, viewLeft, viewTop, false);
 
-        for (uint32_t t = tickStart; t <= tickEnd; t += stepTicks) {
-            const int x = TickToX(t);
-            dc.SetPen((t % quarterTicks) == 0
-                      ? m_rc.penRulerBarTick
-                      : m_rc.penRulerSubTick);
-            dc.DrawLine(x, gridTop, x, gridBottom);
-            if (tickEnd - t < stepTicks) break;
-        }
-
-        dc.SetPen(m_rc.penGutterSeparator);
-        dc.DrawLine(gutterW, viewTop, gutterW, viewBottom);
-
-        DrawMidiLoopOverlay(dc, wxRect(viewLeft, viewTop,
-                                        viewRight - viewLeft, viewBottom - viewTop),
-                            virtualSize);
-
+        // Draw selected notes dynamically so dragging doesn't invalidate cache
         if (HasTrack()) {
             const NoteTrackCache *cache = GetNoteTrackCache();
             if (cache) {
@@ -3691,29 +3952,26 @@ private:
                 GatherNoteEntriesInRect(wxRect(viewLeft, viewTop,
                                                 viewRight - viewLeft, viewBottom - viewTop),
                                         &visibleEntries);
+                
+                dc.SetBrush(m_rc.brushNoteSelected);
+                dc.SetPen(m_rc.penNoteSelected);
                 for (uint32_t idx : visibleEntries) {
                     const auto &entry = cache->notes[idx];
+                    if (!IsNoteSelected(static_cast<long>(entry.sourceIndex))) continue;
                     const wxRect r = BuildNoteRect(entry.noteInfo);
-                    const bool sel = IsNoteSelected(static_cast<long>(entry.sourceIndex));
-
-                    dc.SetBrush(sel ? m_rc.brushNoteSelected : m_rc.brushNoteNormal);
-                    dc.SetPen(sel   ? m_rc.penNoteSelected   : m_rc.penNoteNormal);
                     dc.DrawRectangle(r);
-
-                    if (sel && static_cast<long>(entry.sourceIndex) == m_selectedNote) {
+                    if (static_cast<long>(entry.sourceIndex) == m_selectedNote) {
                         const int h = std::max(2, r.GetHeight() - 2);
                         dc.SetBrush(wxBrush(wxColour(242, 225, 214)));
                         dc.SetPen(*wxTRANSPARENT_PEN);
                         dc.DrawRectangle(r.GetLeft(), r.GetTop() + 1, 3, h);
                         dc.DrawRectangle(r.GetRight() - 2, r.GetTop() + 1, 3, h);
+                        dc.SetBrush(m_rc.brushNoteSelected);
+                        dc.SetPen(m_rc.penNoteSelected);
                     }
                 }
             }
         }
-
-        DrawAutomationLanes(dc, virtualSize,
-                            wxRect(viewLeft, viewTop,
-                                   viewRight - viewLeft, viewBottom - viewTop));
 
         if (m_showPlayhead) {
             const int phX = TickToX(m_playheadTick);
@@ -3730,42 +3988,6 @@ private:
             dc.SetBrush(*wxTRANSPARENT_BRUSH);
             dc.DrawRectangle(sel);
         }
-
-        {
-            const uint32_t endTick = m_draggingTimelineEnd ? m_timelineEndDragTick
-                                                           : GetDocumentEndTick();
-            const int endX = TickToX(endTick);
-            if (endX >= viewLeft - 2 && endX <= viewRight + 2) {
-                // Shaded region beyond end
-                if (endX < viewRight) {
-                    dc.SetPen(*wxTRANSPARENT_PEN);
-                    dc.SetBrush(m_rc.brushTimelineEnd);
-                    dc.DrawRectangle(endX + 1,
-                                     topGutter,
-                                     viewRight - endX,
-                                     std::max(1, virtualSize.GetHeight() - topGutter));
-                }
-                // End marker line
-                dc.SetPen(m_rc.penTimelineEnd);
-                dc.DrawLine(endX, topGutter, endX, virtualSize.GetHeight());
-
-                // Small triangular tab at bottom of ruler
-                wxPoint tri[3] = {
-                    {endX, topGutter - 2},
-                    {endX - 5, topGutter - 10},
-                    {endX + 5, topGutter - 10}
-                };
-                dc.SetPen(m_rc.penTimelineHandle);
-                dc.SetBrush(m_rc.brushTimelineHandleFill);
-                dc.DrawPolygon(3, tri);
-            }
-        }
-
-        DrawStickyRuler(dc);
-        DrawMidiLoopRulerOverlay(dc,
-                                 wxRect(viewLeft, viewTop,
-                                        viewRight - viewLeft, viewBottom - viewTop),
-                                 virtualSize);
     }
 
     void OnLeftDown(wxMouseEvent &event) {
@@ -3973,7 +4195,24 @@ private:
             }
             Refresh();
         } else if (m_dragUndoActive) {
+            if (m_dragMode == DragMode::Move && m_dragCacheDirty) {
+                for (size_t i = 0; i < m_dragOriginalNoteIndices.size(); ++i) {
+                    long noteIndex = m_dragOriginalNoteIndices[i];
+                    if (noteIndex < 0 || noteIndex >= static_cast<long>(m_noteTrackCache.notes.size())) {
+                        continue;
+                    }
+                    BAERmfEditorNoteInfo const &updatedNote = m_noteTrackCache.notes[static_cast<size_t>(noteIndex)].noteInfo;
+                    BAERmfEditorDocument_SetNoteInfo(m_document,
+                                                     static_cast<uint16_t>(m_selectedTrack),
+                                                     static_cast<uint32_t>(noteIndex),
+                                                     &updatedNote);
+                }
+                InvalidateNoteCache();
+            }
             CommitUndoAction(m_dragUndoLabel);
+            InvalidateNoteCache();
+            UpdateVirtualSize();
+            Refresh();
         }
         m_dragging = false;
         m_dragAutomationValid = false;
@@ -3981,6 +4220,7 @@ private:
         m_dragUndoActive = false;
         m_dragUndoLabel.clear();
         m_lastPreviewDragNote = -1;
+        m_dragCacheDirty = false;
     }
 
     void OnLeftDoubleClick(wxMouseEvent &event) {
@@ -4231,29 +4471,8 @@ private:
             if (m_dragMode == DragMode::Move) {
                 snappedTick = SnapTick(XToTick(logicalPoint.x));
                 snappedNote = YToNote(logicalPoint.y);
-                for (size_t i = 0; i < m_dragOriginalNotes.size(); ++i) {
-                    BAERmfEditorNoteInfo movedNote;
-                    long noteIndex;
-
-                    movedNote = m_dragOriginalNotes[i];
-                    noteIndex = m_dragOriginalNoteIndices[i];
-                    if (noteIndex < 0) {
-                        continue;
-                    }
-                    if (snappedTick >= m_dragStartTick) {
-                        movedNote.startTick = m_dragOriginalNotes[i].startTick + (snappedTick - m_dragStartTick);
-                    } else {
-                        uint32_t deltaTicks;
-
-                        deltaTicks = m_dragStartTick - snappedTick;
-                        movedNote.startTick = (deltaTicks > m_dragOriginalNotes[i].startTick) ? 0 : (m_dragOriginalNotes[i].startTick - deltaTicks);
-                    }
-                    movedNote.note = static_cast<unsigned char>(std::clamp(static_cast<int>(m_dragOriginalNotes[i].note) + (snappedNote - m_dragStartNote), 0, 127));
-                    BAERmfEditorDocument_SetNoteInfo(m_document,
-                                                     static_cast<uint16_t>(m_selectedTrack),
-                                                     static_cast<uint32_t>(noteIndex),
-                                                     &movedNote);
-                }
+                UpdateNoteCacheForDrag(snappedTick, snappedNote);
+                RefreshDraggedNotes();
                 if (m_selectedNotes.size() == 1 && !m_dragOriginalNotes.empty()) {
                     BAERmfEditorNoteInfo previewNote;
 
@@ -4279,7 +4498,9 @@ private:
                 uint32_t snappedStartTick;
                 uint32_t maxStartTick;
                 uint32_t snapTicks;
+                wxRect oldRect;
 
+                oldRect = BuildNoteRect(m_dragOriginalNote);
                 updatedNote = m_dragOriginalNote;
                 snapTicks = GetSnapTicks();
                 originalEndTick = m_dragOriginalNote.startTick + m_dragOriginalNote.durationTicks;
@@ -4291,10 +4512,18 @@ private:
                                                  static_cast<uint16_t>(m_selectedTrack),
                                                  static_cast<uint32_t>(m_selectedNote),
                                                  &updatedNote);
+                if (m_noteTrackCache.valid && m_selectedNote >= 0 && m_selectedNote < static_cast<long>(m_noteTrackCache.notes.size())) {
+                    m_noteTrackCache.notes[static_cast<size_t>(m_selectedNote)].noteInfo = updatedNote;
+                    m_noteTrackCache.notes[static_cast<size_t>(m_selectedNote)].endTick = updatedNote.startTick + updatedNote.durationTicks;
+                }
+                RefreshRect(oldRect, false);
+                RefreshRect(BuildNoteRect(updatedNote), false);
             } else if (m_dragMode == DragMode::ResizeRight) {
                 uint32_t snappedEndTick;
                 uint32_t snapTicks;
+                wxRect oldRect;
 
+                oldRect = BuildNoteRect(m_dragOriginalNote);
                 updatedNote = m_dragOriginalNote;
                 snapTicks = GetSnapTicks();
                 snappedEndTick = SnapTick(XToTick(logicalPoint.x));
@@ -4306,10 +4535,13 @@ private:
                                                  static_cast<uint16_t>(m_selectedTrack),
                                                  static_cast<uint32_t>(m_selectedNote),
                                                  &updatedNote);
+                if (m_noteTrackCache.valid && m_selectedNote >= 0 && m_selectedNote < static_cast<long>(m_noteTrackCache.notes.size())) {
+                    m_noteTrackCache.notes[static_cast<size_t>(m_selectedNote)].noteInfo = updatedNote;
+                    m_noteTrackCache.notes[static_cast<size_t>(m_selectedNote)].endTick = updatedNote.startTick + updatedNote.durationTicks;
+                }
+                RefreshRect(oldRect, false);
+                RefreshRect(BuildNoteRect(updatedNote), false);
             }
-            InvalidateNoteCache();
-            UpdateVirtualSize();
-            Refresh();
             return;
         }
         if (m_selectedItemKind != PianoRollSelectionKind::Automation || !m_dragAutomationValid || m_selectedAutomationLane < 0 || m_selectedAutomationEvent < 0) {
@@ -4549,19 +4781,42 @@ private:
 
         logicalPoint = CalcUnscrolledPosition(event.GetPosition());
         wheelOnRuler = IsPointInStickyRuler(logicalPoint) && logicalPoint.x >= kPianoRollLeftGutter;
+        
+        bool scrolledHorizontally = false;
         if ((wheelOnRuler || event.AltDown()) && !event.ControlDown()) {
             if (ScrollHorizontallyWithWheel(event, 2)) {
-                return;
+                scrolledHorizontally = true;
             }
         }
-        if (wheelOnRuler && !event.ControlDown()) {
+        else if (wheelOnRuler && !event.ControlDown()) {
             if (ScrollHorizontallyWithWheel(event, 1)) {
-                return;
+                scrolledHorizontally = true;
             }
         }
+        
+        if (scrolledHorizontally) {
+            if (!m_isAutoScrolling && m_autoFollowPlayhead) {
+                m_autoFollowPlayhead = false;
+                if (m_autoFollowChangedCallback) {
+                    m_autoFollowChangedCallback(false);
+                }
+            }
+            return;
+        }
+        
         if (event.ControlDown()) {
             ApplyZoomStep(event.GetWheelRotation(), event.GetPosition());
             return;
+        }
+        event.Skip();
+    }
+
+    void OnScrollWin(wxScrollWinEvent &event) {
+        if (!m_isAutoScrolling && m_autoFollowPlayhead && event.GetOrientation() == wxHORIZONTAL) {
+            m_autoFollowPlayhead = false;
+            if (m_autoFollowChangedCallback) {
+                m_autoFollowChangedCallback(false);
+            }
         }
         event.Skip();
     }
@@ -4739,4 +4994,30 @@ void PianoRollPanel_Refresh(PianoRollPanel *panel) {
     if (panel) {
         panel->Refresh();
     }
+}
+
+void PianoRollPanel_SetAutoFollowPlayhead(PianoRollPanel *panel, bool enable) {
+    if (panel) {
+        panel->SetAutoFollowPlayhead(enable);
+    }
+}
+
+bool PianoRollPanel_GetAutoFollowPlayhead(PianoRollPanel *panel) {
+    if (panel) {
+        return panel->GetAutoFollowPlayhead();
+    }
+    return true;
+}
+
+void PianoRollPanel_SetAutoFollowChangedCallback(PianoRollPanel *panel, std::function<void(bool)> callback) {
+    if (panel) {
+        panel->SetAutoFollowChangedCallback(callback);
+    }
+}
+
+uint32_t PianoRollPanel_GetPlayheadTick(PianoRollPanel *panel) {
+    if (panel) {
+        return panel->GetPlayheadTick();
+    }
+    return 0;
 }
