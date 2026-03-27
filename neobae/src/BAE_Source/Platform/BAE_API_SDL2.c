@@ -816,8 +816,8 @@ uint32_t BAE_GetFilePosition(intptr_t ref)
     if (p < 0)
         return 0;
     // Ensure we don't overflow uint32_t on 64-bit systems
-    if (p > uint32_t_MAX)
-        return uint32_t_MAX;
+    if (p > UINT32_MAX)
+        return UINT32_MAX;
     return (uint32_t)p;
 }
 uint32_t BAE_GetFileLength(intptr_t ref)
@@ -834,8 +834,8 @@ uint32_t BAE_GetFileLength(intptr_t ref)
     if (end < 0)
         return 0;
     // Ensure we don't overflow uint32_t on 64-bit systems
-    if (end > uint32_t_MAX)
-        return uint32_t_MAX;
+    if (end > UINT32_MAX)
+        return UINT32_MAX;
     return (uint32_t)end;
 }
 int BAE_SetFileLength(intptr_t ref, uint32_t newSize)

@@ -285,7 +285,7 @@
 #endif
 
 #include <stdint.h>
-
+#include <stdbool.h>
 
 #if 0
     #pragma mark ## X_PLATFORM defines ##
@@ -972,12 +972,14 @@ typedef enum
     X_STEREO_8      = 1,
     X_MONO_16       = 2,
     X_STEREO_16     = 3,
+#if USE_LZMA_COMPRESSION == TRUE
     // LZMA variants (used in ZMF containers instead of LZSS)
     X_LZMA_RAW          = 0xFE,
     X_LZMA_MONO_8       = 0x80,
     X_LZMA_STEREO_8     = 0x81,
     X_LZMA_MONO_16      = 0x82,
     X_LZMA_STEREO_16    = 0x83
+#endif
 } XCOMPRESSION_TYPE;
 
 // First byte is a compression type.

@@ -363,7 +363,7 @@
 // #define TIMESLICE_DEBUG
 
 #include "GenSnd.h"
-#include <stddef.h> /* for size_t */
+#include <stddef.h>
 #include "GenCache.h"
 #include "GenPriv.h"
 #include "X_Formats.h"

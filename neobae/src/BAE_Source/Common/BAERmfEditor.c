@@ -13019,9 +13019,22 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
     return (reason != 0) ? TRUE : FALSE;
 }
 #else
-BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken)
+BAE_BOOL BAERmfEditorBank_RequiresZmf(BAERmfEditorDocument const *document, uint32_t *outReason)
+{
+    (void)document;
+    if (outReason)
+    {
+        *outReason = 0;
+    }
+    return FALSE;
+}
+BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReason)
 {
     (void)bankToken;
+    if (outReason)
+    {
+        *outReason = 0;
+    }
     return FALSE;
 }
 #endif

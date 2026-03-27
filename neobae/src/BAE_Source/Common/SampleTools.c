@@ -2217,7 +2217,7 @@ XSoundFormat1*      header;
     }
 #endif
 
-#if USE_FLAC_ENCODER == TRUE || USE_FLAC_DECODER == TRUE
+#if USE_FLAC_ENCODER == TRUE
     case C_FLAC:
     {
     XPTR        encodedData;
@@ -2273,7 +2273,7 @@ XSoundFormat1*      header;
     }
 #endif
 
-#if USE_VORBIS_ENCODER == TRUE || USE_VORBIS_DECODER == TRUE
+#if USE_VORBIS_ENCODER == TRUE
     case C_VORBIS:
     {
     XPTR        encodedData;

@@ -47,10 +47,8 @@ typedef struct {
 MidiRecordFormatInfo get_midi_record_format_info(int index);
 #endif
 
-#if USE_MPEG_ENCODER != FALSE
 extern const BAECompressionType g_exportCompressionMap[];
 extern const int g_exportCompressionCount;
-#endif
 
 // Export tick callback - called from the export thread between service calls
 // so scripts can track position during non-realtime export
