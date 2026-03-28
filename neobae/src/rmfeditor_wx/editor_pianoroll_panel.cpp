@@ -354,6 +354,7 @@ static wxString GetControllerLaneLabel(unsigned char controller) {
         case 72: return "Release (CC72)";
         case 73: return "Attack (CC73)";
         case 74: return "Brightness (CC74)";
+        case 76: return "Vibrato (CC76)";
         case 91: return "Reverb Send (CC91)";
         case 93: return "Chorus Send (CC93)";
         default:
@@ -381,6 +382,7 @@ static std::vector<AutomationLaneDescriptor> const &GetAutomationLanes() {
         { "Release (CC72)", AutomationLaneKind::Controller, 72, wxColour(228, 148, 56), 127, false },
         { "Attack (CC73)", AutomationLaneKind::Controller, 73, wxColour(82, 172, 170), 127, false },
         { "Brightness (CC74)", AutomationLaneKind::Controller, 74, wxColour(210, 96, 118), 127, false },
+        { "Vibrato (CC76)", AutomationLaneKind::Controller, 76, wxColour(196, 82, 88), 127, false },
         { "Reverb Send (CC91)", AutomationLaneKind::Controller, 91, wxColour(74, 136, 208), 127, false },
         { "Chorus Send (CC93)", AutomationLaneKind::Controller, 93, wxColour(166, 96, 196), 127, false },
         { "Pitch Bend", AutomationLaneKind::PitchBend, 0, wxColour(188, 120, 214), 16383, true },
@@ -1228,7 +1230,7 @@ private:
             return;
         }
 
-        std::vector<bool> seen(cache->notes.size(), false);
+        std::vector<uint8_t> seen(cache->notes.size(), 0);
 
         visibleStartTick = XToTick(std::max(kPianoRollLeftGutter, rect.GetLeft()));
         visibleEndTick = XToTick(std::max(kPianoRollLeftGutter, rect.GetRight()));
@@ -1245,7 +1247,7 @@ private:
             for (uint32_t binIndex = startBin; binIndex <= endBin; ++binIndex) {
                 for (uint32_t entryIndex : cache->pitchBins[static_cast<size_t>(pitch)][binIndex]) {
                     if (seen[entryIndex]) continue;
-                    seen[entryIndex] = true;
+                    seen[entryIndex] = 1;
                     NoteCacheEntry const &entry = cache->notes[entryIndex];
                     if (entry.endTick <= visibleStartTick || entry.noteInfo.startTick > visibleEndTick)
                         continue;
