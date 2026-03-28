@@ -1280,7 +1280,7 @@ public:
             wxBoxSizer *statusSizer = new wxBoxSizer(wxHORIZONTAL);
             int verticalOffset = 3;
 #ifdef __WXMSW__
-            verticalOffset += 2;
+            verticalOffset += 1;
 #endif            
             statusSizer->Add(m_statusInfoLabel, 1, wxTOP | wxBOTTOM, verticalOffset);
             statusSizer->Add(25, 1);
