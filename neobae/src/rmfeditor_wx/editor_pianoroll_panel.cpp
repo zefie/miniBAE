@@ -659,6 +659,7 @@ public:
         Bind(wxEVT_MENU, [this](wxCommandEvent &) { CutSelectedNotes(); }, ID_PianoRollCut);
         Bind(wxEVT_MENU, [this](wxCommandEvent &) { PasteNotes(); }, ID_PianoRollPaste);
         Bind(wxEVT_MENU, [this](wxCommandEvent &) { SelectAllNotes(); }, ID_PianoRollSelectAll);
+        SetSizeHints(100, 100, -1, -1);  // Minimum size hints
         UpdateVirtualSize();
     }
 
@@ -3945,8 +3946,9 @@ private:
             memDC.SelectObject(wxNullBitmap);
         }
 
-        // Draw the cached background and unselected notes
-        dc.DrawBitmap(m_viewCache, viewLeft, viewTop, false);
+        if (m_viewCache.IsOk() && m_viewCache.GetWidth() > 0 && m_viewCache.GetHeight() > 0) {
+            dc.DrawBitmap(m_viewCache, viewLeft, viewTop, false);
+        }
 
         // Draw selected notes dynamically so dragging doesn't invalidate cache
         if (HasTrack()) {

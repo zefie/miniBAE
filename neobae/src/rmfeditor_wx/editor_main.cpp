@@ -577,6 +577,8 @@ public:
         splitter = new wxSplitterWindow(m_editorNotebook, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxSP_LIVE_UPDATE | wxSP_3D);
         sidebar = new wxPanel(splitter);
         editorPanel = new wxPanel(splitter);
+        sidebar->SetMinSize(wxSize(150, 200));
+        editorPanel->SetMinSize(wxSize(400, 300));
         sidebarSizer = new wxBoxSizer(wxVERTICAL);
         editorSizer = new wxBoxSizer(wxVERTICAL);
 
@@ -1262,6 +1264,12 @@ public:
         }
 
         {
+            wxBoxSizer *frameSizer = new wxBoxSizer(wxVERTICAL);
+            frameSizer->Add(m_editorNotebook, 1, wxEXPAND);
+            SetSizer(frameSizer);
+        }
+
+        {
             int statusWidths[2] = {500, -1};
             CreateStatusBar(2);
             SetStatusWidths(2, statusWidths);
@@ -1382,10 +1390,6 @@ public:
         UpdateChannelsConfigButtonState();
         /* Start with a blank document so the UI is immediately interactive */
         DoNewDocument(false);
-        /* Defer the initial C5 scroll until after the window is laid out */
-        CallAfter([this]() {
-            PianoRollPanel_ScrollToC4Center(m_pianoRoll);
-        });
     }
 
     ~MainFrame() override {
@@ -1415,6 +1419,8 @@ public:
             LoadDocument(path);
         }
     }
+
+    PianoRollPanel *GetPianoRoll() const { return m_pianoRoll; }
 
 private:
     enum EditorMode {
@@ -11911,7 +11917,37 @@ public:
 #endif // __WXGTK__
 
         auto *frame = new MainFrame();
+#ifdef __WXGTK__
+        /* GTK3/ARM64 fix: GtkNotebook fires
+         *   gtk_distribute_natural_allocation: assertion 'extra_space >= 0'
+         * when gtk_widget_show_all() lays out the notebook against an
+         * allocation of 0 pixels (the window manager hasn't responded with
+         * real dimensions yet via ConfigureNotify).
+         *
+         * Force GTK to allocate the frame at its requested size BEFORE
+         * showing.  gtk_widget_realize() maps the GdkWindow so that the
+         * Wayland/X11 compositor can assign geometry, and SetSize()
+         * explicitly pushes a non-zero allocation through the sizer tree,
+         * so by the time Show() triggers show_all the notebook already has
+         * real dimensions to lay out against. */
+        frame->SetSize(frame->GetSize());
+        frame->GetHandle();  /* forces realize via wxWindow::GetHandle() */
+        {
+            GtkWidget *widget = frame->GetHandle();
+            if (widget && !gtk_widget_get_realized(widget)) {
+                gtk_widget_realize(widget);
+            }
+            /* Push the sizer layout with real dimensions now */
+            GtkAllocation alloc;
+            alloc.x = 0;
+            alloc.y = 0;
+            alloc.width = frame->GetSize().GetWidth();
+            alloc.height = frame->GetSize().GetHeight();
+            gtk_widget_size_allocate(widget, &alloc);
+        }
+#endif
         frame->Show(true);
+        PianoRollPanel_ScrollToC4Center(frame->GetPianoRoll());
 
         wxString startupPath;
         for (int i = 1; i < argc; ++i) {
