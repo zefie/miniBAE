@@ -43,6 +43,8 @@
 - ~~Tell user why ZMF is required via tooltip over the status bar text~~
 - ~~Add "Clone this Instrument" and "Alias this Instrument" when right clicking instrument in MIDI Editor~~
 - ~~Add "Re-assign this Sample" and "Assign Sample to Additional Instrument" when right clicking samples in the MIDI editor~~
+- ~~When loading a song, if the song has built in settings (ZMF), apply those settings to the editor UI (checking the menu option, and checking the Save settings to Song box)~~
+  - ~~Reset state of settings menu and "Save Settings to Song" box upon "new" or loaded document~~
 
 # Future
 - Allow cut/copy/pasting instruments

@@ -6147,13 +6147,21 @@ private:
             wxRemoveFile(m_previewSampleTempPath);
         }
         BAERmfEditorMidiStorageType storageType;
-        if (BAERmfEditorDocument_GetMidiStorageType(m_document, &storageType) == BAE_NO_ERROR) {
+        if (BAERmfEditorDocument_GetMidiStorageType(document, &storageType) == BAE_NO_ERROR) {
            SetSelectedMidiStorageType(storageType);
         }
 
-        // If the document has per-song engine config, load it into the settings UI.
+        // Reset settings to defaults, then override if the document has per-song engine config.
+        if (m_settingsMenu) {
+            m_settingsMenu->Check(ID_SettingsPanFix, true);
+            m_settingsMenu->Check(ID_SettingsClassicChorus, false);
+        }
+        if (m_savePreviewToSongCheck) {
+            m_savePreviewToSongCheck->SetValue(false);
+        }
+
         int32_t engineFlags = 0;
-        if (BAERmfEditorDocument_GetEngineConfig(m_document, &engineFlags) == BAE_NO_ERROR && engineFlags != 0) {
+        if (BAERmfEditorDocument_GetEngineConfig(document, &engineFlags) == BAE_NO_ERROR && engineFlags != 0) {
             bool docHasPanFix    = (engineFlags & SONG_CONFIG_HAS_PANFIX) != 0;
             bool docHasChorus    = (engineFlags & SONG_CONFIG_HAS_CLASSIC_CHORUS) != 0;
             bool docPanFix       = (engineFlags & SONG_CONFIG_PANFIX_ON) != 0;
@@ -6169,8 +6177,8 @@ private:
                     m_settingsMenu->Check(ID_SettingsClassicChorus, docClassicChorus);
                 }
             }
-            ApplyMixerEngineSettings();
         }
+        ApplyMixerEngineSettings();
 
         m_document = document;
         InvalidatePianoRollPreviewSong();
