@@ -1431,6 +1431,7 @@ private:
     BAERmfEditorDocument *m_document;
     mutable uint32_t m_zmfReason;
     bool m_updatingControls;
+    bool m_shouldWeSeek;
     wxString m_currentPath;
     wxString m_sessionPath;
     wxNotebook *m_editorNotebook;
@@ -6587,6 +6588,10 @@ private:
                             "All supported files|*.rmf;*.zmf;*.mid;*.midi;*.kar;*.rmi;*.hsb;*.zsb;*.nbs;*.mod;*.s3m;*.xm;*.it;*.mtm,*.stm,*.669;*.far;*.ult;*.amf;*.dbm;*.imf;*.liq;*.med;*.mgt;*.okt;*.ptm;*.xmf|NeoBAE Session (*.nbs)|*.nbs|RMF files (*.rmf;*.zmf)|*.rmf;*.zmf|Module Tracker file (*.mod;*.s3m;*.xm;*.it;*.mtm,*.stm,*.669;*.far;*.ult;*.amf;*.dbm;*.imf;*.liq;*.med;*.mgt;*.okt;*.ptm;*.xmf)|*.mod;*.s3m;*.xm;*.it;*.mtm,*.stm,*.669;*.far;*.ult;*.amf;*.dbm;*.imf;*.liq;*.med;*.mgt;*.okt;*.ptm;*.xmf|MIDI files (*.mid;*.midi;*.kar;*.rmi)|*.mid;*.midi;*.kar;*.rmi|Bank files (*.hsb;*.zsb)|*.hsb;*.zsb|All files (*.*)|*.*",
                             wxFD_OPEN | wxFD_FILE_MUST_EXIST);
         if (dialog.ShowModal() == wxID_OK) {
+            if (m_playbackSong) {
+                BAESong_Stop(m_playbackSong, false);
+                m_shouldWeSeek = false;
+            }            
             wxString selectedPath = dialog.GetPath();
             wxString ext = wxFileName(selectedPath).GetExt().Lower();
             if (ext == "nbs") {
@@ -7899,10 +7904,11 @@ private:
             return;
         }
         // restore position if needed
-        if (preseekUsec > 0) {
+        if (preseekUsec > 0 && m_shouldWeSeek) {
             BAEResult seekResult = BAESong_SetMicrosecondPosition(m_playbackSong, preseekUsec);
             BAE_PRINTF("[nbstudio] Restoring pre-play microsecond position result=%d pos=%lu\n", static_cast<int>(seekResult), static_cast<unsigned long>(preseekUsec));
         }
+        m_shouldWeSeek = true; // after the first play, we should seek on subsequent plays to restore position
         ApplyPreviewReverbToMixer();
         BAESong_SetVolume(m_playbackSong, GetPreviewVolumeFixed());
         {
