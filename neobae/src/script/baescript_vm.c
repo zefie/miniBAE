@@ -392,37 +392,37 @@ int32_t BAEScript_Eval(BAEScript_Context *ctx, BAEScript_Node *node)
         }
 
         case NODE_MIDI_PROP:
-            if (node->data.midi_prop == MIDIPROP_TIMESTAMP)
+            if (node->data.midi_prop == MIDI_PROP_TIMESTAMP)
                 return (int32_t)ctx->timestamp_ms;
-            if (node->data.midi_prop == MIDIPROP_TICKS) {
+            if (node->data.midi_prop == MIDI_PROP_TICKS) {
                 uint32_t ticks = 0;
                 if (ctx->song && BAESong_GetTickPosition(ctx->song, &ticks) == BAE_NO_ERROR)
                     return (int32_t)ticks;
                 return 0;
             }
-            if (node->data.midi_prop == MIDIPROP_LENGTH)
+            if (node->data.midi_prop == MIDI_PROP_LENGTH)
                 return (int32_t)ctx->length_ms;
-            if (node->data.midi_prop == MIDIPROP_EXPORTING)
+            if (node->data.midi_prop == MIDI_PROP_EXPORTING)
                 return ctx->exporting ? 1 : 0;
-            if (node->data.midi_prop == MIDIPROP_VOLUME) {
+            if (node->data.midi_prop == MIDI_PROP_VOLUME) {
                 BAE_UNSIGNED_FIXED vol = 0;
                 if (ctx->song && BAESong_GetVolume(ctx->song, &vol) == BAE_NO_ERROR)
                     return fixed_to_percent(vol);
                 return 0;
             }
-            if (node->data.midi_prop == MIDIPROP_TEMPO) {
+            if (node->data.midi_prop == MIDI_PROP_TEMPO) {
                 BAE_UNSIGNED_FIXED tempo = 0;
                 if (ctx->song && BAESong_GetMasterTempo(ctx->song, &tempo) == BAE_NO_ERROR)
                     return fixed_to_percent(tempo);
                 return 0;
             }
-            if (node->data.midi_prop == MIDIPROP_TEMPO_BPM) {
+            if (node->data.midi_prop == MIDI_PROP_TEMPO_BPM) {
                 uint32_t bpm = 0;
                 if (ctx->song && BAESong_GetTempoBPM(ctx->song, &bpm) == BAE_NO_ERROR)
                     return (int32_t)bpm;
                 return 0;
             }
-            if (node->data.midi_prop == MIDIPROP_TRANSPOSE) {
+            if (node->data.midi_prop == MIDI_PROP_TRANSPOSE) {
                 int32_t semitones = 0;
                 if (ctx->song && BAESong_GetTranspose(ctx->song, &semitones) == BAE_NO_ERROR)
                     return semitones;
@@ -598,36 +598,36 @@ void BAEScript_Exec(BAEScript_Context *ctx, BAEScript_Node *node)
 
         case NODE_MIDI_PROP_SET: {
             int32_t v = BAEScript_Eval(ctx, node->data.midi_prop_set.value);
-            if (node->data.midi_prop_set.prop == MIDIPROP_TIMESTAMP) {
+            if (node->data.midi_prop_set.prop == MIDI_PROP_TIMESTAMP) {
                 if (ctx->song) {
                     uint32_t us = (uint32_t)v * 1000u;
                     BAESong_SetMicrosecondPosition(ctx->song, us);
                     ctx->self_seek_this_tick = 1;
                 }
                 ctx->timestamp_ms = (uint32_t)v;
-            } else if (node->data.midi_prop_set.prop == MIDIPROP_TICKS) {
+            } else if (node->data.midi_prop_set.prop == MIDI_PROP_TICKS) {
                 if (v < 0) v = 0;
                 if (ctx->song) {
                     BAESong_SetTickPosition(ctx->song, (uint32_t)v);
                     ctx->self_seek_this_tick = 1;
                 }
-            } else if (node->data.midi_prop_set.prop == MIDIPROP_VOLUME) {
+            } else if (node->data.midi_prop_set.prop == MIDI_PROP_VOLUME) {
                 if (ctx->song)
                     BAESong_SetVolume(ctx->song, percent_to_fixed(v));
-            } else if (node->data.midi_prop_set.prop == MIDIPROP_TEMPO) {
+            } else if (node->data.midi_prop_set.prop == MIDI_PROP_TEMPO) {
                 if (ctx->song)
                     BAESong_SetMasterTempo(ctx->song, tempo_percent_to_fixed(v));
-            } else if (node->data.midi_prop_set.prop == MIDIPROP_TEMPO_BPM) {
+            } else if (node->data.midi_prop_set.prop == MIDI_PROP_TEMPO_BPM) {
                 if (ctx->song) {
                     if (v < 1) v = 1;
                     if (v > 499) v = 499;
                     BAESong_SetTempoBPM(ctx->song, (uint32_t)v);
                 }
-            } else if (node->data.midi_prop_set.prop == MIDIPROP_TRANSPOSE) {
+            } else if (node->data.midi_prop_set.prop == MIDI_PROP_TRANSPOSE) {
                 if (ctx->song)
                     BAESong_SetTranspose(ctx->song, v);
             }
-            /* MIDIPROP_LENGTH, MIDIPROP_EXPORTING are read-only — silently ignore writes */
+            /* MIDI_PROP_LENGTH, MIDI_PROP_EXPORTING are read-only — silently ignore writes */
             break;
         }
 

@@ -228,17 +228,17 @@ static BAEScript_Node *parse_midi_access(Parser *p)
     int line = p->current.line;
     parser_expect(p, TOK_DOT, "Expected '.' after 'midi'");
     BAEScript_Token tok = parser_advance(p);
-    BAEScript_MidiProp mp = MIDIPROP_TIMESTAMP;
+    BAEScript_MidiProp mp = MIDI_PROP_TIMESTAMP;
     if (tok.type == TOK_IDENT) {
-        if (strcmp(tok.value.str, "timestamp") == 0) mp = MIDIPROP_TIMESTAMP;
-        else if (strcmp(tok.value.str, "position") == 0) mp = MIDIPROP_TIMESTAMP;
-        else if (strcmp(tok.value.str, "ticks") == 0) mp = MIDIPROP_TICKS;
-        else if (strcmp(tok.value.str, "length") == 0) mp = MIDIPROP_LENGTH;
-        else if (strcmp(tok.value.str, "exporting") == 0) mp = MIDIPROP_EXPORTING;
-        else if (strcmp(tok.value.str, "volume") == 0) mp = MIDIPROP_VOLUME;
-        else if (strcmp(tok.value.str, "tempo") == 0) mp = MIDIPROP_TEMPO;
-        else if (strcmp(tok.value.str, "tempobpm") == 0) mp = MIDIPROP_TEMPO_BPM;
-        else if (strcmp(tok.value.str, "transpose") == 0) mp = MIDIPROP_TRANSPOSE;
+        if (strcmp(tok.value.str, "timestamp") == 0) mp = MIDI_PROP_TIMESTAMP;
+        else if (strcmp(tok.value.str, "position") == 0) mp = MIDI_PROP_TIMESTAMP;
+        else if (strcmp(tok.value.str, "ticks") == 0) mp = MIDI_PROP_TICKS;
+        else if (strcmp(tok.value.str, "length") == 0) mp = MIDI_PROP_LENGTH;
+        else if (strcmp(tok.value.str, "exporting") == 0) mp = MIDI_PROP_EXPORTING;
+        else if (strcmp(tok.value.str, "volume") == 0) mp = MIDI_PROP_VOLUME;
+        else if (strcmp(tok.value.str, "tempo") == 0) mp = MIDI_PROP_TEMPO;
+        else if (strcmp(tok.value.str, "tempobpm") == 0) mp = MIDI_PROP_TEMPO_BPM;
+        else if (strcmp(tok.value.str, "transpose") == 0) mp = MIDI_PROP_TRANSPOSE;
         else parser_error(p, "Expected midi property: timestamp, position, ticks, length, exporting, volume, tempo, tempobpm, or transpose");
     } else {
         parser_error(p, "Expected midi property name");
