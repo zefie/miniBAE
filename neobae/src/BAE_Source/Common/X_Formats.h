@@ -384,7 +384,6 @@ typedef struct X_PACKBY1
 // Value bits (meaningful only when corresponding presence bit is set):
 #define SONG_CONFIG_CLASSIC_CHORUS_ON           0x02
 #define SONG_CONFIG_PANFIX_ON                   0x08
-#define SONG_CONFIG_SAMPLE_OFFSET_START_ON      0x20
 // Runtime-only marker set by loader from container header (not authored metadata).
 #define SONG_CONFIG_CONTAINER_IS_ZMF            0x40000000u
 

@@ -464,17 +464,6 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    /* Set per-song engine config flags. For ZMF the sample-offset-start feature
-     * must be announced so the engine activates it on playback. */
-    if (useZmfContainer)
-    {
-        int32_t engineFlags;
-        engineFlags = 0;
-        BAERmfEditorDocument_GetEngineConfig(conv->document, &engineFlags);
-        engineFlags |= SONG_CONFIG_HAS_SAMPLE_OFFSET_START | SONG_CONFIG_SAMPLE_OFFSET_START_ON;
-        BAERmfEditorDocument_SetEngineConfig(conv->document, engineFlags);
-    }
-
     /* Emit MIDI loop markers if the song has an infinite loop */
     if (song.loopEnabled)
     {

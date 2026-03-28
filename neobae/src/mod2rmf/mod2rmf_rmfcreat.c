@@ -1791,15 +1791,6 @@ BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char
     mod2rmf_song_model_init(&song);    
     mod2rmf_resampler_defaults(&resamplerSettings);
 
-    if (useZmfContainer)
-    {
-        int32_t engineFlags;
-        engineFlags = 0;
-        BAERmfEditorDocument_GetEngineConfig(conv->document, &engineFlags);
-        engineFlags |= SONG_CONFIG_HAS_SAMPLE_OFFSET_START | SONG_CONFIG_SAMPLE_OFFSET_START_ON;
-        BAERmfEditorDocument_SetEngineConfig(conv->document, engineFlags);
-    }
-
     if (!mod2rmf_load_source_data(conv, sourcePath))
     {
         BAE_STDERR("Error: failed to read source file\n");
