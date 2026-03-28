@@ -69,7 +69,7 @@
       <Output TaskParameter="ConsoleOutput" PropertyName="GitCommit" />
     </Exec>
     <!-- Dirty flag -->
-    <Exec Command="git status --porcelain" ConsoleToMSBuild="true" IgnoreExitCode="true">
+    <Exec Command="git status --porcelain --ignore-submodules=all" ConsoleToMSBuild="true" IgnoreExitCode="true">
       <Output TaskParameter="ConsoleOutput" PropertyName="GitDirty" />
     </Exec>
     <!-- Latest tag commit -->
