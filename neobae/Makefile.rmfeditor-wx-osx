@@ -1,11 +1,27 @@
 BAE_BUILT_IN_PATCHES	:= 1
-BAE_API			:= SDL3
 
-BUILD_GUI   	:= 1
+BAE_API := SDL3
+USE_SDL3 := 1
+NOAUTO := 1
+SF2_SUPPORT := 0
+EMBED_PATCHES := 1
+MOD2RMF := 1
+NBSTUDIO := 1
+MACOSX := 1
+TARGET_BIN := nbstudio
+
 include inc/Makefile.common
 
-CC		:= gcc
-CXX		:= g++
+
+WX_CONFIG ?= wx-config
+
+WX_CXXFLAGS := $(shell $(WX_CONFIG) --cxxflags)
+WX_LIBS := $(shell $(WX_CONFIG) --libs core,base)
+
+BREW_PREFIX := $(shell brew --prefix)
+
+CC		:= clang
+CXX		:= clang++
 # Use C++ linker if we have any C++ sources
 ifneq ($(filter %.cpp,$(SRC) $(SRC_BIN)),)
 LD		:= $(CXX)
@@ -21,6 +37,8 @@ ifeq ($(LDEBUG),1)
     OPTI := -g -O0 -fPIC -fsanitize=address -fsanitize=undefined
 endif
 CFLAGS  	:= $(ARCH) $(OPTI) $(INC_PATH) -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
+CFLAGS += -I$(BREW_PREFIX)/include
+LD_FLAGS += -L$(BREW_PREFIX)/lib
 
 
 
@@ -41,10 +59,10 @@ ifneq ($(LDEBUG),1)
 	LDFLAGS += -s
 endif
 
-LIBS	:= 	-lpthread -lm -ldl
+LIBS	:= 	-lpthread -lm -ldl -lz
 
 ifneq ($(BAE_LIBS),)
-	LIBS += $(BAE_LIBS)
+	LIBS += $(BAE_LIBS) $(WX_LIBS)
 endif
 
 
@@ -123,19 +141,19 @@ ifneq ($(ENABLE_MIDI_HW),)
 	endif # pkg-config check
 endif # ENABLE_MIDI_HW
 
-CXXFLAGS 	:= $(CFLAGS)
+CXXFLAGS := $(CFLAGS) $(WX_CXXFLAGS) -std=c++17
 ifneq ($(MP3_ENC),)
     LD := $(CXX)
     LIBS += -lstdc++
 endif
 
 # macOS App Bundle configuration
-APP_NAME		:= zefidi
+APP_NAME		:= NeoBAE Studio
 APP_BUNDLE		:= $(TARGET_OUT)$(APP_NAME).app
 CONTENTS_DIR	:= $(APP_BUNDLE)/Contents
 MACOS_DIR		:= $(CONTENTS_DIR)/MacOS
 RESOURCES_DIR	:= $(CONTENTS_DIR)/Resources
-OSX_TEMPLATE	:= osx/zefidi/Contents
+OSX_TEMPLATE	:= osx/nbstudio/Contents
 
 all: $(APP_BUNDLE)
 
@@ -162,20 +180,17 @@ $(TARGET_BIN): ${OBJ_BIN}
 # Build the macOS app bundle
 $(APP_BUNDLE): $(TARGET_BIN)
 	@echo "Creating app bundle structure..."
-	@mkdir -p $(MACOS_DIR)
-	@mkdir -p $(RESOURCES_DIR)
+	@mkdir -p "$(MACOS_DIR)"
+	@mkdir -p "$(RESOURCES_DIR)"
 	@echo "Copying executable..."
-	@cp $(TARGET_OUT)$(TARGET_BIN) $(MACOS_DIR)/$(TARGET_BIN)
-	@chmod +x $(MACOS_DIR)/$(TARGET_BIN)
+	@cp $(TARGET_OUT)$(TARGET_BIN) "$(MACOS_DIR)/$(TARGET_BIN)"
+	@chmod +x "$(MACOS_DIR)/$(TARGET_BIN)"
 	@echo "Copying Info.plist..."
-	@cp $(OSX_TEMPLATE)/Info.plist $(CONTENTS_DIR)/Info.plist
+	@cp $(OSX_TEMPLATE)/Info.plist "$(CONTENTS_DIR)/Info.plist"
 	@echo "Copying resources..."
-	@cp $(OSX_TEMPLATE)/Resources/* $(RESOURCES_DIR)/
+	@cp $(OSX_TEMPLATE)/Resources/* "$(RESOURCES_DIR)/"
 	@echo "App bundle created: $(APP_BUNDLE)"
 
-
-pack: ${TARGET_BIN}
-	cat $(TARGET_OUT)${TARGET_BIN} | gzip -9c > $(TARGET_OUT)playbae_linux32_static.gz
 
 # Rules for compiling source files to object files
 $(OBJ_DIR)%.o : %.cpp
@@ -193,11 +208,12 @@ clean:
 	@rm -rdf $(OBJ_DIR)
 	@rm -rdf $(BUILD_DIR)
 	@rm -rdf $(TEST_OUT_DIR)
-	@rm -rdf $(APP_BUNDLE)
+	@rm -rdf "$(APP_BUNDLE)"
 	@echo Cleaned!
 
 # Generate rules for all unique source files (same approach as top-level Makefile)
-ALL_SOURCES := $(sort $(SRC) $(SRC_BIN))
+#ALL_SOURCES := $(sort $(SRC) $(SRC_BIN))
+ALL_SOURCES := $(sort $(SRC))
 $(foreach src,$(ALL_SOURCES),$(eval $(call make_obj_rule,$(src))))
 
 include inc/Makefile.tests

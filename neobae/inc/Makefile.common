@@ -540,8 +540,10 @@ else
 										src/rmfeditor_wx/editor_metadata_dialog.cpp \
 										src/rmfeditor_wx/editor_pianoroll_panel.cpp \
 										src/rmfeditor_wx/batch_compress_dialog.cpp
-									BAE_FLAGS += $(shell pkg-config --cflags gtk+-3.0) $(shell pkg-config --cflags glib-2.0)
-									BAE_LIBS += -lz $(shell pkg-config --libs gtk+-3.0) $(shell pkg-config --libs glib-2.0)
+									ifneq ($(MACOSX),1)
+										BAE_FLAGS += $(shell pkg-config --cflags gtk+-3.0) $(shell pkg-config --cflags glib-2.0)
+										BAE_LIBS += -lz $(shell pkg-config --libs gtk+-3.0) $(shell pkg-config --libs glib-2.0)
+									endif
 								else
 									# playbae = libNeoBAE srcs + playbae.c
 									SRC += src/playbae/playbae.c

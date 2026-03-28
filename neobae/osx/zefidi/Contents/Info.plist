@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>NeoBAE</string>
+	<string>zefidi</string>
 	<key>CFBundleDisplayName</key>
 	<string>zefidi</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.zefie.neobae</string>
+	<string>com.zefie.zefidi</string>
 	<key>CFBundleVersion</key>
 	<string>1.0</string>
 	<key>CFBundleExecutable</key>
