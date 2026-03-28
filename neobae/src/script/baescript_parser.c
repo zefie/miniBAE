@@ -8,6 +8,8 @@
  *   varDecl     = "var" IDENT "=" expr ";"
  *   ifStmt      = "if" "(" expr ")" block ("else" (ifStmt | block))?
  *   whileStmt   = "while" "(" expr ")" block
+ *   forStmt     = "for" "(" init? ";" cond? ";" step? ")" block
+ *   eventStmt   = "on" "." EVENT "(" block ")" ";"
  *   printStmt   = "print" "(" args ")" ";"
  *   assignment  = (IDENT "=" expr ";") | (chPropSet ";")
  *   chPropSet   = "ch" "[" expr "]" "." PROP "=" expr
@@ -24,8 +26,11 @@
  *               | midiProp | IDENT | "(" expr ")"
  *               | noteOn | noteOff
  *   chProp      = "ch" "[" expr "]" "." PROP
- *   midiProp    = "midi" "." ("timestamp" | "position" | "length")
+ *   midiProp    = "midi" "." ("timestamp" | "position" | "ticks" | "length" | "exporting" | "volume" | "tempo" | "tempobpm" | "transpose")
+ *   mixerProp   = "mixer" "." ("volume" | "classicchorus" | "stereodcpanfix" | "reverbtype")
  *   midiStop    = "midi" "." "stop" "(" ")" ";"
+ *   midiAllOff  = "midi" "." "allnotesoff" "(" ")" ";"
+ *   mixerReset  = "mixer" "." "reset" "(" ")" ";"
  *   noteOn      = "noteOn" "(" expr "," expr "," expr ")"
  *   noteOff     = "noteOff" "(" expr "," expr "," expr ")"
  ****************************************************************************/
@@ -88,6 +93,21 @@ static BAEScript_Node *new_node(BAEScript_NodeType type, int line)
     return n;
 }
 
+static BAEScript_Node *make_number_node(int line, int32_t value)
+{
+    BAEScript_Node *n = new_node(NODE_NUMBER, line);
+    n->data.num = value;
+    return n;
+}
+
+static BAEScript_Node *make_ident_node(int line, const char *name)
+{
+    BAEScript_Node *n = new_node(NODE_IDENT, line);
+    strncpy(n->data.str, name, sizeof(n->data.str) - 1);
+    n->data.str[sizeof(n->data.str) - 1] = '\0';
+    return n;
+}
+
 static void block_push(BAEScript_Node *block, BAEScript_Node *stmt)
 {
     if (!block || !stmt) return;
@@ -108,6 +128,41 @@ static BAEScript_Node *parse_expr(Parser *p);
 static BAEScript_Node *parse_statement(Parser *p);
 static BAEScript_Node *parse_block(Parser *p);
 
+static BAEScript_Node *parse_for_clause_assignment(Parser *p)
+{
+    BAEScript_Token name = parser_advance(p);
+    if (name.type != TOK_IDENT) {
+        parser_error(p, "Expected identifier in for-clause");
+        return make_number_node(p->current.line, 0);
+    }
+
+    if (parser_match(p, TOK_ASSIGN)) {
+        BAEScript_Node *n = new_node(NODE_ASSIGN, name.line);
+        strncpy(n->data.assign.name, name.value.str, sizeof(n->data.assign.name) - 1);
+        n->data.assign.name[sizeof(n->data.assign.name) - 1] = '\0';
+        n->data.assign.value = parse_expr(p);
+        return n;
+    }
+
+    if (parser_check(p, TOK_INC) || parser_check(p, TOK_DEC)) {
+        BAEScript_Node *n = new_node(NODE_ASSIGN, name.line);
+        BAEScript_TokenType op = p->current.type;
+        parser_advance(p);
+        strncpy(n->data.assign.name, name.value.str, sizeof(n->data.assign.name) - 1);
+        n->data.assign.name[sizeof(n->data.assign.name) - 1] = '\0';
+
+        BAEScript_Node *bin = new_node(NODE_BINOP, name.line);
+        bin->data.binop.op = (op == TOK_DEC) ? TOK_MINUS : TOK_PLUS;
+        bin->data.binop.left = make_ident_node(name.line, name.value.str);
+        bin->data.binop.right = make_number_node(name.line, 1);
+        n->data.assign.value = bin;
+        return n;
+    }
+
+    parser_error(p, "Expected '=', '++', or '--' in for-clause assignment");
+    return make_number_node(name.line, 0);
+}
+
 /* ── expression parsing (precedence climbing) ──────────────────────── */
 
 static BAEScript_ChProp parse_ch_property(Parser *p)
@@ -121,8 +176,11 @@ static BAEScript_ChProp parse_ch_property(Parser *p)
         if (strcmp(tok.value.str, "expression")  == 0) return CHPROP_EXPRESSION;
         if (strcmp(tok.value.str, "pitchbend")   == 0) return CHPROP_PITCHBEND;
         if (strcmp(tok.value.str, "mute")        == 0) return CHPROP_MUTE;
+        if (strcmp(tok.value.str, "reverb")      == 0) return CHPROP_REVERB;
+        if (strcmp(tok.value.str, "chorus")      == 0) return CHPROP_CHORUS;
+        if (strcmp(tok.value.str, "solo")        == 0) return CHPROP_SOLO;
     }
-    parser_error(p, "Expected channel property: instrument, volume, pan, expression, pitchbend, or mute");
+    parser_error(p, "Expected channel property: instrument, volume, pan, expression, pitchbend, mute, reverb, chorus, or solo");
     return CHPROP_INSTRUMENT;
 }
 
@@ -142,6 +200,28 @@ static BAEScript_Node *parse_ch_access(Parser *p)
     return n;
 }
 
+/* mixer.prop */
+static BAEScript_Node *parse_mixer_access(Parser *p)
+{
+    int line = p->current.line;
+    parser_expect(p, TOK_DOT, "Expected '.' after 'mixer'");
+    BAEScript_Token tok = parser_advance(p);
+    BAEScript_MixerProp mp = MIXERPROP_VOLUME;
+    if (tok.type == TOK_IDENT) {
+        if (strcmp(tok.value.str, "volume") == 0) mp = MIXERPROP_VOLUME;
+        else if (strcmp(tok.value.str, "classicchorus") == 0) mp = MIXERPROP_CLASSIC_CHORUS;
+        else if (strcmp(tok.value.str, "stereodcpanfix") == 0) mp = MIXERPROP_STEREO_DCPAN_FIX;
+        else if (strcmp(tok.value.str, "reverbtype") == 0) mp = MIXERPROP_REVERBTYPE;
+        else if (strcmp(tok.value.str, "voices") == 0) mp = MIXERPROP_VOICES;
+        else parser_error(p, "Expected mixer property: volume, classicchorus, stereodcpanfix, reverbtype, or voices");
+    } else {
+        parser_error(p, "Expected mixer property name");
+    }
+    BAEScript_Node *n = new_node(NODE_MIXER_PROP, line);
+    n->data.mixer_prop = mp;
+    return n;
+}
+
 /* midi.prop */
 static BAEScript_Node *parse_midi_access(Parser *p)
 {
@@ -152,9 +232,14 @@ static BAEScript_Node *parse_midi_access(Parser *p)
     if (tok.type == TOK_IDENT) {
         if (strcmp(tok.value.str, "timestamp") == 0) mp = MIDIPROP_TIMESTAMP;
         else if (strcmp(tok.value.str, "position") == 0) mp = MIDIPROP_TIMESTAMP;
+        else if (strcmp(tok.value.str, "ticks") == 0) mp = MIDIPROP_TICKS;
         else if (strcmp(tok.value.str, "length") == 0) mp = MIDIPROP_LENGTH;
         else if (strcmp(tok.value.str, "exporting") == 0) mp = MIDIPROP_EXPORTING;
-        else parser_error(p, "Expected midi property: timestamp, position, length, or exporting");
+        else if (strcmp(tok.value.str, "volume") == 0) mp = MIDIPROP_VOLUME;
+        else if (strcmp(tok.value.str, "tempo") == 0) mp = MIDIPROP_TEMPO;
+        else if (strcmp(tok.value.str, "tempobpm") == 0) mp = MIDIPROP_TEMPO_BPM;
+        else if (strcmp(tok.value.str, "transpose") == 0) mp = MIDIPROP_TRANSPOSE;
+        else parser_error(p, "Expected midi property: timestamp, position, ticks, length, exporting, volume, tempo, tempobpm, or transpose");
     } else {
         parser_error(p, "Expected midi property name");
     }
@@ -227,12 +312,49 @@ static BAEScript_Node *parse_primary(Parser *p)
         return parse_midi_access(p);
     }
 
+    /* mixer.prop */
+    if (parser_check(p, TOK_MIXER)) {
+        parser_advance(p);
+        return parse_mixer_access(p);
+    }
+
     /* identifier (variable or noteOn/noteOff) */
     if (parser_check(p, TOK_IDENT)) {
         BAEScript_Token t = parser_advance(p);
         /* built-in functions that look like identifiers */
         if (strcmp(t.value.str, "noteOn") == 0)  return parse_note_cmd(p, NODE_NOTE_ON);
         if (strcmp(t.value.str, "noteOff") == 0) return parse_note_cmd(p, NODE_NOTE_OFF);
+
+        if (((strcmp(t.value.str, "abs") == 0) ||
+            (strcmp(t.value.str, "min") == 0) ||
+            (strcmp(t.value.str, "max") == 0) ||
+            (strcmp(t.value.str, "clamp") == 0)) && parser_check(p, TOK_LPAREN)) {
+            BAEScript_Node *n = new_node(NODE_FUNC_CALL, line);
+            if (strcmp(t.value.str, "abs") == 0) n->data.func_call.fn = FUNC_ABS;
+            else if (strcmp(t.value.str, "min") == 0) n->data.func_call.fn = FUNC_MIN;
+            else if (strcmp(t.value.str, "max") == 0) n->data.func_call.fn = FUNC_MAX;
+            else n->data.func_call.fn = FUNC_CLAMP;
+
+            parser_expect(p, TOK_LPAREN, "Expected '(' after function name");
+            n->data.func_call.a = parse_expr(p);
+            if (n->data.func_call.fn == FUNC_ABS) {
+                parser_expect(p, TOK_RPAREN, "Expected ')' after abs(arg)");
+                return n;
+            }
+
+            parser_expect(p, TOK_COMMA, "Expected ',' separating function arguments");
+            n->data.func_call.b = parse_expr(p);
+
+            if (n->data.func_call.fn == FUNC_MIN || n->data.func_call.fn == FUNC_MAX) {
+                parser_expect(p, TOK_RPAREN, "Expected ')' after min/max args");
+                return n;
+            }
+
+            parser_expect(p, TOK_COMMA, "Expected ',' separating clamp arguments");
+            n->data.func_call.c = parse_expr(p);
+            parser_expect(p, TOK_RPAREN, "Expected ')' after clamp args");
+            return n;
+        }
 
         BAEScript_Node *n = new_node(NODE_IDENT, line);
         strncpy(n->data.str, t.value.str, sizeof(n->data.str) - 1);
@@ -438,6 +560,77 @@ static BAEScript_Node *parse_while(Parser *p)
     return n;
 }
 
+static BAEScript_Node *parse_for(Parser *p)
+{
+    int line = p->current.line;
+    parser_advance(p); /* consume 'for' */
+    parser_expect(p, TOK_LPAREN, "Expected '(' after 'for'");
+
+    BAEScript_Node *init = NULL;
+    BAEScript_Node *cond = NULL;
+    BAEScript_Node *step_stmt = NULL;
+
+    if (!parser_check(p, TOK_SEMICOLON)) {
+        if (parser_check(p, TOK_VAR)) {
+            parser_advance(p); /* consume 'var' */
+            BAEScript_Token name = parser_advance(p);
+            if (name.type != TOK_IDENT) {
+                parser_error(p, "Expected variable name in for initializer");
+                init = make_number_node(line, 0);
+            } else {
+                BAEScript_Node *n = new_node(NODE_VAR_DECL, name.line);
+                strncpy(n->data.var_decl.name, name.value.str, sizeof(n->data.var_decl.name) - 1);
+                n->data.var_decl.name[sizeof(n->data.var_decl.name) - 1] = '\0';
+                if (parser_match(p, TOK_ASSIGN))
+                    n->data.var_decl.init = parse_expr(p);
+                init = n;
+            }
+        } else if (parser_check(p, TOK_IDENT)) {
+            init = parse_for_clause_assignment(p);
+        } else {
+            BAEScript_Node *expr = parse_expr(p);
+            BAEScript_Node *n = new_node(NODE_EXPR_STMT, line);
+            n->data.expr = expr;
+            init = n;
+        }
+    }
+    parser_expect(p, TOK_SEMICOLON, "Expected ';' after for initializer");
+
+    if (!parser_check(p, TOK_SEMICOLON)) {
+        cond = parse_expr(p);
+    } else {
+        BAEScript_Node *always = new_node(NODE_BOOL, line);
+        always->data.boolval = 1;
+        cond = always;
+    }
+    parser_expect(p, TOK_SEMICOLON, "Expected ';' after for condition");
+
+    if (!parser_check(p, TOK_RPAREN)) {
+        if (parser_check(p, TOK_IDENT)) {
+            step_stmt = parse_for_clause_assignment(p);
+        } else {
+            BAEScript_Node *expr = parse_expr(p);
+            BAEScript_Node *n = new_node(NODE_EXPR_STMT, line);
+            n->data.expr = expr;
+            step_stmt = n;
+        }
+    }
+    parser_expect(p, TOK_RPAREN, "Expected ')' after for clauses");
+
+    BAEScript_Node *body = parse_block(p);
+    if (body && body->type == NODE_BLOCK && step_stmt)
+        block_push(body, step_stmt);
+
+    BAEScript_Node *while_n = new_node(NODE_WHILE, line);
+    while_n->data.while_stmt.cond = cond;
+    while_n->data.while_stmt.body = body;
+
+    BAEScript_Node *block = new_node(NODE_BLOCK, line);
+    if (init) block_push(block, init);
+    block_push(block, while_n);
+    return block;
+}
+
 static BAEScript_Node *parse_print(Parser *p)
 {
     int line = p->current.line;
@@ -473,6 +666,41 @@ static BAEScript_Node *parse_print(Parser *p)
     return n;
 }
 
+static BAEScript_Node *parse_event_decl(Parser *p)
+{
+    int line = p->current.line;
+    parser_advance(p); /* consume 'on' */
+    parser_expect(p, TOK_DOT, "Expected '.' after 'on'");
+
+    BAEScript_Token event_name = parser_advance(p);
+    if (event_name.type != TOK_IDENT) {
+        parser_error(p, "Expected event name after 'on.'");
+        return make_number_node(line, 0);
+    }
+
+    BAEScript_EventType event_type = EVENT_SCRIPT;
+    if (strcmp(event_name.value.str, "start") == 0) event_type = EVENT_START;
+    else if (strcmp(event_name.value.str, "pause") == 0) event_type = EVENT_PAUSE;
+    else if (strcmp(event_name.value.str, "resume") == 0) event_type = EVENT_RESUME;
+    else if (strcmp(event_name.value.str, "stop") == 0) event_type = EVENT_STOP;
+    else if (strcmp(event_name.value.str, "script") == 0) event_type = EVENT_SCRIPT;
+    else if (strcmp(event_name.value.str, "loop") == 0) event_type = EVENT_LOOP;
+    else if (strcmp(event_name.value.str, "seek") == 0) event_type = EVENT_SEEK;
+    else {
+        parser_error(p, "Unknown event. Expected: start, pause, resume, stop, script, loop, or seek");
+    }
+
+    parser_expect(p, TOK_LPAREN, "Expected '(' after event name");
+    BAEScript_Node *body = parse_block(p);
+    parser_expect(p, TOK_RPAREN, "Expected ')' after event block");
+    parser_expect(p, TOK_SEMICOLON, "Expected ';' after event declaration");
+
+    BAEScript_Node *n = new_node(NODE_EVENT_DECL, line);
+    n->data.event_decl.event_type = event_type;
+    n->data.event_decl.body = body;
+    return n;
+}
+
 static BAEScript_Node *parse_statement(Parser *p)
 {
     if (p->had_error) return new_node(NODE_NUMBER, p->current.line);
@@ -485,6 +713,12 @@ static BAEScript_Node *parse_statement(Parser *p)
 
     /* while */
     if (parser_check(p, TOK_WHILE)) return parse_while(p);
+
+    /* for */
+    if (parser_check(p, TOK_FOR)) return parse_for(p);
+
+    /* on.event({ ... }); */
+    if (parser_check(p, TOK_ON)) return parse_event_decl(p);
 
     /* print(...) */
     if (parser_check(p, TOK_IDENT) && strcmp(p->current.value.str, "print") == 0)
@@ -500,7 +734,7 @@ static BAEScript_Node *parse_statement(Parser *p)
         return new_node(NODE_HELP, line);
     }
 
-    /* midi.stop() or midi.prop = expr; */
+    /* midi.stop(), midi.allnotesoff(), or midi.prop = expr; */
     if (parser_check(p, TOK_MIDI)) {
         int line = p->current.line;
         parser_advance(p); /* consume 'midi' */
@@ -516,6 +750,13 @@ static BAEScript_Node *parse_statement(Parser *p)
                     parser_expect(p, TOK_RPAREN,    "Expected ')' after 'midi.stop('");
                     parser_expect(p, TOK_SEMICOLON, "Expected ';' after 'midi.stop()'");
                     return new_node(NODE_MIDI_STOP, line);
+                }
+                if (tok.type == TOK_IDENT && strcmp(tok.value.str, "allnotesoff") == 0) {
+                    parser_advance(p); /* consume 'allnotesoff' */
+                    parser_expect(p, TOK_LPAREN,    "Expected '(' after 'midi.allnotesoff'");
+                    parser_expect(p, TOK_RPAREN,    "Expected ')' after 'midi.allnotesoff('");
+                    parser_expect(p, TOK_SEMICOLON, "Expected ';' after 'midi.allnotesoff()'");
+                    return new_node(NODE_MIDI_ALL_NOTES_OFF, line);
                 }
             }
             /* Not stop — rewind and fall through to property parsing */
@@ -534,6 +775,46 @@ static BAEScript_Node *parse_statement(Parser *p)
             return n;
         } else {
             /* expression statement (read) */
+            parser_expect(p, TOK_SEMICOLON, "Expected ';'");
+            BAEScript_Node *n = new_node(NODE_EXPR_STMT, line);
+            n->data.expr = rd;
+            return n;
+        }
+    }
+
+    /* mixer.reset() or mixer.prop = expr; */
+    if (parser_check(p, TOK_MIXER)) {
+        int line = p->current.line;
+        parser_advance(p); /* consume 'mixer' */
+        /* Check for mixer.reset() */
+        {
+            BAEScript_Lexer saved_lex = p->lex;
+            BAEScript_Token saved_cur = p->current;
+            if (parser_match(p, TOK_DOT)) {
+                BAEScript_Token tok = p->current;
+                if (tok.type == TOK_IDENT && strcmp(tok.value.str, "reset") == 0) {
+                    parser_advance(p); /* consume 'reset' */
+                    parser_expect(p, TOK_LPAREN,    "Expected '(' after 'mixer.reset'");
+                    parser_expect(p, TOK_RPAREN,    "Expected ')' after 'mixer.reset('");
+                    parser_expect(p, TOK_SEMICOLON, "Expected ';' after 'mixer.reset()'");
+                    return new_node(NODE_MIXER_RESET, line);
+                }
+            }
+            /* Not reset — rewind and parse as property access */
+            p->lex     = saved_lex;
+            p->current = saved_cur;
+        }
+        BAEScript_Node *rd = parse_mixer_access(p);
+        BAEScript_MixerProp mp = rd->data.mixer_prop;
+        if (parser_match(p, TOK_ASSIGN)) {
+            BAEScript_Node *val = parse_expr(p);
+            parser_expect(p, TOK_SEMICOLON, "Expected ';'");
+            BAEScript_Node *n = new_node(NODE_MIXER_PROP_SET, line);
+            n->data.mixer_prop_set.prop  = mp;
+            n->data.mixer_prop_set.value = val;
+            free(rd);
+            return n;
+        } else {
             parser_expect(p, TOK_SEMICOLON, "Expected ';'");
             BAEScript_Node *n = new_node(NODE_EXPR_STMT, line);
             n->data.expr = rd;
@@ -672,6 +953,12 @@ void BAEScript_FreeNode(BAEScript_Node *node)
             BAEScript_FreeNode(node->data.unaryop.operand);
             break;
 
+        case NODE_FUNC_CALL:
+            BAEScript_FreeNode(node->data.func_call.a);
+            BAEScript_FreeNode(node->data.func_call.b);
+            BAEScript_FreeNode(node->data.func_call.c);
+            break;
+
         case NODE_CH_PROP:
             BAEScript_FreeNode(node->data.ch_prop.channel);
             break;
@@ -692,6 +979,14 @@ void BAEScript_FreeNode(BAEScript_Node *node)
             BAEScript_FreeNode(node->data.midi_prop_set.value);
             break;
 
+        case NODE_MIXER_PROP_SET:
+            BAEScript_FreeNode(node->data.mixer_prop_set.value);
+            break;
+
+        case NODE_EVENT_DECL:
+            BAEScript_FreeNode(node->data.event_decl.body);
+            break;
+
         case NODE_EXPR_STMT:
             BAEScript_FreeNode(node->data.expr);
             break;
@@ -701,7 +996,10 @@ void BAEScript_FreeNode(BAEScript_Node *node)
         case NODE_BOOL:
         case NODE_IDENT:
         case NODE_MIDI_PROP:
+        case NODE_MIXER_PROP:
         case NODE_MIDI_STOP:
+        case NODE_MIDI_ALL_NOTES_OFF:
+        case NODE_MIXER_RESET:
         case NODE_HELP:
             /* leaf nodes — nothing to free */
             break;

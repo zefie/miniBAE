@@ -2511,6 +2511,18 @@ extern "C"
     BAEResult BAESong_GetMicrosecondPosition(BAESong song,
                                              uint32_t *outTicks);
 
+    // BAESong_SetTickPosition()
+    // ------------------------------------
+    // Sets the current playback position in raw MIDI ticks.
+    BAEResult BAESong_SetTickPosition(BAESong song,
+                                      uint32_t ticks);
+
+    // BAESong_GetTickPosition()
+    // ------------------------------------
+    // Gets the current playback position in raw MIDI ticks.
+    BAEResult BAESong_GetTickPosition(BAESong song,
+                                      uint32_t *outTicks);
+
     // BAESong_GetMicrosecondLength()
     // ------------------------------------
     // Upon return, parameter outLength will point to an uint32_t containing the
@@ -2521,6 +2533,12 @@ extern "C"
     //
     BAEResult BAESong_GetMicrosecondLength(BAESong song,
                                            uint32_t *outLength);
+
+    // BAESong_GetTickLength()
+    // ------------------------------------
+    // Gets the length of the loaded song data in raw MIDI ticks.
+    BAEResult BAESong_GetTickLength(BAESong song,
+                                    uint32_t *outLength);
 
     // BAESong_SetMasterTempo()
     // --------------------------------------
@@ -2541,6 +2559,19 @@ extern "C"
     //
     BAEResult BAESong_GetMasterTempo(BAESong song,
                                      BAE_UNSIGNED_FIXED *outTempoFactor);
+
+    // BAESong_SetTempoBPM()
+    // --------------------------------------
+    // Sets the underlying song tempo in beats per minute (BPM). This updates the
+    // song's microseconds-per-quarter-note tempo directly.
+    BAEResult BAESong_SetTempoBPM(BAESong song,
+                                  uint32_t bpm);
+
+    // BAESong_GetTempoBPM()
+    // --------------------------------------
+    // Gets the underlying song tempo in beats per minute (BPM).
+    BAEResult BAESong_GetTempoBPM(BAESong song,
+                                  uint32_t *outBPM);
 
     // BAESong_MuteTrack()
     // --------------------------------------

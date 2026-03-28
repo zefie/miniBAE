@@ -146,10 +146,13 @@ BAEScript_Token BAEScript_Lexer_Next(BAEScript_Lexer *lex)
         if (strcmp(buf, "if")    == 0) return make_tok(TOK_IF,    line, col);
         if (strcmp(buf, "else")  == 0) return make_tok(TOK_ELSE,  line, col);
         if (strcmp(buf, "while") == 0) return make_tok(TOK_WHILE, line, col);
+        if (strcmp(buf, "for")   == 0) return make_tok(TOK_FOR,   line, col);
+        if (strcmp(buf, "on")    == 0) return make_tok(TOK_ON,    line, col);
         if (strcmp(buf, "true")  == 0) return make_tok(TOK_TRUE,  line, col);
         if (strcmp(buf, "false") == 0) return make_tok(TOK_FALSE, line, col);
         if (strcmp(buf, "ch")    == 0) return make_tok(TOK_CH,    line, col);
         if (strcmp(buf, "midi")  == 0) return make_tok(TOK_MIDI,  line, col);
+        if (strcmp(buf, "mixer") == 0) return make_tok(TOK_MIXER, line, col);
 
         BAEScript_Token t = make_tok(TOK_IDENT, line, col);
         strncpy(t.value.str, buf, sizeof(t.value.str) - 1);
@@ -160,8 +163,18 @@ BAEScript_Token BAEScript_Lexer_Next(BAEScript_Lexer *lex)
     /* ── operators & punctuation ─────────────────────────────────── */
     lex_advance(lex);
     switch (c) {
-        case '+': return make_tok(TOK_PLUS,     line, col);
-        case '-': return make_tok(TOK_MINUS,    line, col);
+        case '+':
+            if (!lex_eof(lex) && lex_peek(lex) == '+') {
+                lex_advance(lex);
+                return make_tok(TOK_INC, line, col);
+            }
+            return make_tok(TOK_PLUS, line, col);
+        case '-':
+            if (!lex_eof(lex) && lex_peek(lex) == '-') {
+                lex_advance(lex);
+                return make_tok(TOK_DEC, line, col);
+            }
+            return make_tok(TOK_MINUS, line, col);
         case '*': return make_tok(TOK_STAR,     line, col);
         case '/': return make_tok(TOK_SLASH,    line, col);
         case '%': return make_tok(TOK_PERCENT,  line, col);

@@ -464,7 +464,7 @@ char const usageStringFmt[] =
    "                 -b  {target bitrate kbps for MP3/Opus export (default 128)}\n"
     "                 -h  {displays this message then exits}\n"
 #ifdef SUPPORT_BAESCRIPT
-    "                 --script {path to BAEScript file for MIDI manipulation}\n"
+   "                 --script {path to BAEScript file for MIDI and mixer manipulation}\n"
 #endif
 #if BAE_FIX_SPAN_DC
     "                 --panfix=off {disable STEREO_PAN LFO DC fix (on by default)}\n"

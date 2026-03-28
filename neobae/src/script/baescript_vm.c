@@ -51,6 +51,8 @@ static const char *HELP_TEXT =
     "    if (cond) { }          Conditional\n"
     "    if (cond) { } else { } Conditional with else\n"
     "    while (cond) { }       Loop (max 10000 iterations/tick)\n"
+    "    for (i=0; i<4; i++) { } For-loop (C-style)\n"
+    "    on.start({ ... });     Event handler (one-shot per occurrence)\n"
     "\n"
     "  Operators:\n"
     "    +  -  *  /  %          Arithmetic\n"
@@ -64,6 +66,9 @@ static const char *HELP_TEXT =
     "    ch[N].expression       CC 11 (0-127)\n"
     "    ch[N].pitchbend        Pitch bend (0-16383, 8192=center)\n"
     "    ch[N].mute             Mute flag (0 or 1)\n"
+    "    ch[N].reverb           CC 91 (0-127)\n"
+    "    ch[N].chorus           CC 93 (0-127)\n"
+    "    ch[N].solo             Solo flag (0 or 1)\n"
     "    Read:  var v = ch[1].volume;\n"
     "    Write: ch[1].volume = 100;\n"
     "\n"
@@ -74,9 +79,30 @@ static const char *HELP_TEXT =
     "  Global Objects:\n"
     "    midi.timestamp         Current position in ms (read/write)\n"
     "    midi.position          Alias for midi.timestamp\n"
+    "    midi.ticks            Current position in MIDI ticks (read/write)\n"
     "    midi.length            Song length in ms (read-only)\n"
     "    midi.exporting         1 if exporting to file, 0 otherwise\n"
+    "    midi.volume            Song volume in percent (0-100, read/write)\n"
+    "    midi.tempo             Song master tempo percent (0-400, 100=normal)\n"
+    "    midi.tempobpm          Song tempo in BPM (read/write)\n"
+    "    midi.transpose         Song transpose in semitones (read/write)\n"
+    "    midi.allnotesoff()     Send all-notes-off immediately\n"
+    "    mixer.volume           Global mixer volume in percent (0-100, read/write)\n"
+    "    mixer.voices           Currently active mixer voices (read-only)\n"
+    "    mixer.reverbtype       Default reverb type enum value\n"
+    "    mixer.classicchorus    Classic chorus mode (0/1, default 0)\n"
+    "    mixer.stereodcpanfix   Stereo pan DC fix (0/1, default 1)\n"
+    "    mixer.reset()          Restore mixer defaults (volume=100, classicchorus=0, stereodcpanfix=1)\n"
     "    midi.stop()            Stop playback and export\n"
+    "\n"
+    "  Events:\n"
+    "    on.script({ ... });    Once after script bind\n"
+    "    on.start({ ... });     When playback starts\n"
+    "    on.pause({ ... });     On pause transition\n"
+    "    on.resume({ ... });    On resume transition\n"
+    "    on.stop({ ... });      When song reaches/stops at end\n"
+    "    on.loop({ ... });      On natural wrap from end to start\n"
+    "    on.seek({ ... });      On position jumps (including script seeks)\n"
     "\n"
     "  Output:\n"
     "    print(expr, ...);      Print values to console\n"
@@ -120,6 +146,57 @@ static int32_t *var_create(BAEScript_Context *ctx, const char *name)
     return &v->value;
 }
 
+/* ── percent/fixed helpers ─────────────────────────────────────────── */
+
+static int32_t clamp_percent(int32_t value)
+{
+    if (value < 0) return 0;
+    if (value > 100) return 100;
+    return value;
+}
+
+static BAE_UNSIGNED_FIXED percent_to_fixed(int32_t percent)
+{
+    return UNSIGNED_RATIO_TO_FIXED((uint32_t)clamp_percent(percent), 100u);
+}
+
+static int32_t clamp_tempo_percent(int32_t value)
+{
+    if (value < 0) return 0;
+    if (value > 400) return 400;
+    return value;
+}
+
+static BAE_UNSIGNED_FIXED tempo_percent_to_fixed(int32_t percent)
+{
+    return UNSIGNED_RATIO_TO_FIXED((uint32_t)clamp_tempo_percent(percent), 100u);
+}
+
+static int32_t fixed_to_percent(BAE_UNSIGNED_FIXED value)
+{
+    return (int32_t)UNSIGNED_FIXED_TO_LONG_ROUNDED(value * 100u);
+}
+
+static BAEMixer get_bound_mixer(BAEScript_Context *ctx)
+{
+    BAEMixer mixer = NULL;
+    if (!ctx || !ctx->song) return NULL;
+    if (BAESong_GetMixer(ctx->song, &mixer) != BAE_NO_ERROR) return NULL;
+    return mixer;
+}
+
+void BAEScript_DispatchEvent(BAEScript_Context *ctx, BAEScript_EventType event_type)
+{
+    BAEScript_Node *handler = NULL;
+
+    if (!ctx) return;
+    if ((int)event_type < 0 || event_type >= EVENT_COUNT) return;
+
+    handler = ctx->event_handlers[event_type];
+    if (handler)
+        BAEScript_Exec(ctx, handler);
+}
+
 /* ── channel property read ──────────────────────────────────────────── */
 
 static int32_t ch_prop_read(BAEScript_Context *ctx, int channel, BAEScript_ChProp prop)
@@ -161,6 +238,23 @@ static int32_t ch_prop_read(BAEScript_Context *ctx, int channel, BAEScript_ChPro
             if (ch >= 1 && ch <= 16) return muted[ch - 1] ? 1 : 0;
             return 0;
         }
+        case CHPROP_REVERB: {
+            char val = 0;
+            BAESong_GetControlValue(ctx->song, ch, 91 /* REVERB_SEND */, &val);
+            return (int32_t)(unsigned char)val;
+        }
+        case CHPROP_CHORUS: {
+            char val = 0;
+            BAESong_GetControlValue(ctx->song, ch, 93 /* CHORUS_SEND */, &val);
+            return (int32_t)(unsigned char)val;
+        }
+        case CHPROP_SOLO: {
+            BAE_BOOL solo[16];
+            memset(solo, 0, sizeof(solo));
+            BAESong_GetChannelSoloStatus(ctx->song, solo);
+            if (ch >= 1 && ch <= 16) return solo[ch - 1] ? 1 : 0;
+            return 0;
+        }
     }
     return 0;
 }
@@ -197,6 +291,18 @@ static void ch_prop_write(BAEScript_Context *ctx, int channel, BAEScript_ChProp 
                 BAESong_MuteChannel(ctx->song, ch);
             else
                 BAESong_UnmuteChannel(ctx->song, ch);
+            break;
+        case CHPROP_REVERB:
+            BAESong_ControlChange(ctx->song, ch, 91, (unsigned char)(value & 0x7F), 0);
+            break;
+        case CHPROP_CHORUS:
+            BAESong_ControlChange(ctx->song, ch, 93, (unsigned char)(value & 0x7F), 0);
+            break;
+        case CHPROP_SOLO:
+            if (value)
+                BAESong_SoloChannel(ctx->song, ch);
+            else
+                BAESong_UnSoloChannel(ctx->song, ch);
             break;
     }
 }
@@ -267,6 +373,19 @@ int32_t BAEScript_Eval(BAEScript_Context *ctx, BAEScript_Node *node)
                 return -BAEScript_Eval(ctx, node->data.unaryop.operand);
             return 0;
 
+        case NODE_FUNC_CALL: {
+            int32_t a = BAEScript_Eval(ctx, node->data.func_call.a);
+            int32_t b = BAEScript_Eval(ctx, node->data.func_call.b);
+            int32_t c = BAEScript_Eval(ctx, node->data.func_call.c);
+            switch (node->data.func_call.fn) {
+                case FUNC_ABS:   return a < 0 ? -a : a;
+                case FUNC_MIN:   return a < b ? a : b;
+                case FUNC_MAX:   return a > b ? a : b;
+                case FUNC_CLAMP: return a < b ? b : (a > c ? c : a);
+            }
+            return 0;
+        }
+
         case NODE_CH_PROP: {
             int ch = (int)BAEScript_Eval(ctx, node->data.ch_prop.channel);
             return ch_prop_read(ctx, ch, node->data.ch_prop.prop);
@@ -275,10 +394,77 @@ int32_t BAEScript_Eval(BAEScript_Context *ctx, BAEScript_Node *node)
         case NODE_MIDI_PROP:
             if (node->data.midi_prop == MIDIPROP_TIMESTAMP)
                 return (int32_t)ctx->timestamp_ms;
+            if (node->data.midi_prop == MIDIPROP_TICKS) {
+                uint32_t ticks = 0;
+                if (ctx->song && BAESong_GetTickPosition(ctx->song, &ticks) == BAE_NO_ERROR)
+                    return (int32_t)ticks;
+                return 0;
+            }
             if (node->data.midi_prop == MIDIPROP_LENGTH)
                 return (int32_t)ctx->length_ms;
             if (node->data.midi_prop == MIDIPROP_EXPORTING)
                 return ctx->exporting ? 1 : 0;
+            if (node->data.midi_prop == MIDIPROP_VOLUME) {
+                BAE_UNSIGNED_FIXED vol = 0;
+                if (ctx->song && BAESong_GetVolume(ctx->song, &vol) == BAE_NO_ERROR)
+                    return fixed_to_percent(vol);
+                return 0;
+            }
+            if (node->data.midi_prop == MIDIPROP_TEMPO) {
+                BAE_UNSIGNED_FIXED tempo = 0;
+                if (ctx->song && BAESong_GetMasterTempo(ctx->song, &tempo) == BAE_NO_ERROR)
+                    return fixed_to_percent(tempo);
+                return 0;
+            }
+            if (node->data.midi_prop == MIDIPROP_TEMPO_BPM) {
+                uint32_t bpm = 0;
+                if (ctx->song && BAESong_GetTempoBPM(ctx->song, &bpm) == BAE_NO_ERROR)
+                    return (int32_t)bpm;
+                return 0;
+            }
+            if (node->data.midi_prop == MIDIPROP_TRANSPOSE) {
+                int32_t semitones = 0;
+                if (ctx->song && BAESong_GetTranspose(ctx->song, &semitones) == BAE_NO_ERROR)
+                    return semitones;
+                return 0;
+            }
+            return 0;
+
+        case NODE_MIXER_PROP:
+            if (node->data.mixer_prop == MIXERPROP_VOLUME) {
+                BAEMixer mixer = get_bound_mixer(ctx);
+                BAE_UNSIGNED_FIXED vol = 0;
+                if (mixer && BAEMixer_GetGlobalVolume(mixer, &vol) == BAE_NO_ERROR)
+                    return fixed_to_percent(vol);
+                return 0;
+            }
+            if (node->data.mixer_prop == MIXERPROP_CLASSIC_CHORUS) {
+                BAE_BOOL enabled = FALSE;
+                if (BAE_GetClassicChorus(&enabled) == BAE_NO_ERROR)
+                    return enabled ? 1 : 0;
+                return 0;
+            }
+            if (node->data.mixer_prop == MIXERPROP_STEREO_DCPAN_FIX) {
+                BAE_BOOL enabled = FALSE;
+                if (BAE_GetSpanDCFix(&enabled) == BAE_NO_ERROR)
+                    return enabled ? 1 : 0;
+                return 0;
+            }
+            if (node->data.mixer_prop == MIXERPROP_VOICES) {
+                BAEMixer mixer = get_bound_mixer(ctx);
+                BAEAudioInfo info;
+                memset(&info, 0, sizeof(info));
+                if (mixer && BAEMixer_GetRealtimeStatus(mixer, &info) == BAE_NO_ERROR)
+                    return (int32_t)info.voicesActive;
+                return 0;
+            }
+            if (node->data.mixer_prop == MIXERPROP_REVERBTYPE) {
+                BAEMixer mixer = get_bound_mixer(ctx);
+                BAEReverbType verb = REVERB_NO_CHANGE;
+                if (mixer && BAEMixer_GetDefaultReverb(mixer, &verb) == BAE_NO_ERROR)
+                    return (int32_t)verb;
+                return 0;
+            }
             return 0;
 
         case NODE_NOTE_ON: {
@@ -390,6 +576,11 @@ void BAEScript_Exec(BAEScript_Context *ctx, BAEScript_Node *node)
                 BAESong_Stop(ctx->song, FALSE);
             break;
 
+        case NODE_MIDI_ALL_NOTES_OFF:
+            if (ctx->song)
+                BAESong_AllNotesOff(ctx->song, 0);
+            break;
+
         case NODE_HELP: {
             if (!ctx->help_shown) {
                 ctx_output(ctx, HELP_TEXT);
@@ -411,12 +602,75 @@ void BAEScript_Exec(BAEScript_Context *ctx, BAEScript_Node *node)
                 if (ctx->song) {
                     uint32_t us = (uint32_t)v * 1000u;
                     BAESong_SetMicrosecondPosition(ctx->song, us);
+                    ctx->self_seek_this_tick = 1;
                 }
                 ctx->timestamp_ms = (uint32_t)v;
+            } else if (node->data.midi_prop_set.prop == MIDIPROP_TICKS) {
+                if (v < 0) v = 0;
+                if (ctx->song) {
+                    BAESong_SetTickPosition(ctx->song, (uint32_t)v);
+                    ctx->self_seek_this_tick = 1;
+                }
+            } else if (node->data.midi_prop_set.prop == MIDIPROP_VOLUME) {
+                if (ctx->song)
+                    BAESong_SetVolume(ctx->song, percent_to_fixed(v));
+            } else if (node->data.midi_prop_set.prop == MIDIPROP_TEMPO) {
+                if (ctx->song)
+                    BAESong_SetMasterTempo(ctx->song, tempo_percent_to_fixed(v));
+            } else if (node->data.midi_prop_set.prop == MIDIPROP_TEMPO_BPM) {
+                if (ctx->song) {
+                    if (v < 1) v = 1;
+                    if (v > 499) v = 499;
+                    BAESong_SetTempoBPM(ctx->song, (uint32_t)v);
+                }
+            } else if (node->data.midi_prop_set.prop == MIDIPROP_TRANSPOSE) {
+                if (ctx->song)
+                    BAESong_SetTranspose(ctx->song, v);
             }
             /* MIDIPROP_LENGTH, MIDIPROP_EXPORTING are read-only — silently ignore writes */
             break;
         }
+
+        case NODE_MIXER_PROP_SET: {
+            int32_t v = BAEScript_Eval(ctx, node->data.mixer_prop_set.value);
+            switch (node->data.mixer_prop_set.prop) {
+                case MIXERPROP_VOLUME: {
+                    BAEMixer mixer = get_bound_mixer(ctx);
+                    if (mixer)
+                        BAEMixer_SetGlobalVolume(mixer, percent_to_fixed(v));
+                    break;
+                }
+                case MIXERPROP_CLASSIC_CHORUS:
+                    BAE_SetClassicChorus(v ? TRUE : FALSE);
+                    break;
+                case MIXERPROP_STEREO_DCPAN_FIX:
+                    BAE_SetSpanDCFix(v ? TRUE : FALSE);
+                    break;
+                case MIXERPROP_REVERBTYPE: {
+                    BAEMixer mixer = get_bound_mixer(ctx);
+                    if (mixer)
+                        BAEMixer_SetDefaultReverb(mixer, (BAEReverbType)v);
+                    break;
+                }
+                case MIXERPROP_VOICES:
+                    /* read-only */
+                    break;
+            }
+            break;
+        }
+
+        case NODE_MIXER_RESET: {
+            BAEMixer mixer = get_bound_mixer(ctx);
+            if (mixer)
+                BAEMixer_SetGlobalVolume(mixer, percent_to_fixed(100));
+            BAE_SetClassicChorus(FALSE);
+            BAE_SetSpanDCFix(TRUE);
+            break;
+        }
+
+        case NODE_EVENT_DECL:
+            /* Declarations are registered at tick start and do not execute inline. */
+            break;
 
         case NODE_EXPR_STMT:
             BAEScript_Eval(ctx, node->data.expr);

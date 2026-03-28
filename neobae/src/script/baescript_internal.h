@@ -30,16 +30,21 @@ typedef enum {
     TOK_IF,             /* if                               */
     TOK_ELSE,           /* else                             */
     TOK_WHILE,          /* while                            */
+    TOK_FOR,            /* for                              */
+    TOK_ON,             /* on                               */
     TOK_TRUE,           /* true                             */
     TOK_FALSE,          /* false                            */
 
     /* built-in objects */
     TOK_CH,             /* ch                               */
     TOK_MIDI,           /* midi                             */
+    TOK_MIXER,          /* mixer                            */
 
     /* operators */
     TOK_PLUS,           /* +  */
+    TOK_INC,            /* ++ */
     TOK_MINUS,          /* -  */
+    TOK_DEC,            /* -- */
     TOK_STAR,           /* *  */
     TOK_SLASH,          /* /  */
     TOK_PERCENT,        /* %  */
@@ -112,15 +117,32 @@ typedef enum {
     NODE_IDENT,             /* variable reference               */
     NODE_BINOP,             /* left OP right                    */
     NODE_UNARYOP,           /* !expr  or -expr                  */
+    NODE_FUNC_CALL,         /* builtin function call            */
     NODE_CH_PROP,           /* ch[expr].property  (read)        */
     NODE_CH_PROP_SET,       /* ch[expr].property = expr (write) */
     NODE_MIDI_PROP,         /* midi.property  (read)            */
     NODE_MIDI_PROP_SET,     /* midi.property = expr (write)     */
+    NODE_MIXER_PROP,        /* mixer.property (read)            */
+    NODE_MIXER_PROP_SET,    /* mixer.property = expr (write)    */
+    NODE_MIXER_RESET,       /* mixer.reset()                    */
     NODE_NOTE_ON,           /* noteOn(ch, note, vel)            */
     NODE_NOTE_OFF,          /* noteOff(ch, note, vel)           */
     NODE_MIDI_STOP,         /* midi.stop()                      */
+    NODE_MIDI_ALL_NOTES_OFF,/* midi.allnotesoff()               */
     NODE_HELP,              /* help()                           */
+    NODE_EVENT_DECL,        /* on.event({ ... });               */
 } BAEScript_NodeType;
+
+typedef enum {
+    EVENT_START = 0,
+    EVENT_PAUSE,
+    EVENT_RESUME,
+    EVENT_STOP,
+    EVENT_SCRIPT,
+    EVENT_LOOP,
+    EVENT_SEEK,
+    EVENT_COUNT
+} BAEScript_EventType;
 
 /* Channel properties the user can access */
 typedef enum {
@@ -130,14 +152,38 @@ typedef enum {
     CHPROP_EXPRESSION,
     CHPROP_PITCHBEND,
     CHPROP_MUTE,
+    CHPROP_REVERB,
+    CHPROP_CHORUS,
+    CHPROP_SOLO,
 } BAEScript_ChProp;
 
 /* MIDI global properties */
 typedef enum {
     MIDIPROP_TIMESTAMP,
+    MIDIPROP_TICKS,
     MIDIPROP_LENGTH,
     MIDIPROP_EXPORTING,
+    MIDIPROP_VOLUME,
+    MIDIPROP_TEMPO,
+    MIDIPROP_TEMPO_BPM,
+    MIDIPROP_TRANSPOSE,
 } BAEScript_MidiProp;
+
+/* Mixer global properties */
+typedef enum {
+    MIXERPROP_VOLUME,
+    MIXERPROP_CLASSIC_CHORUS,
+    MIXERPROP_STEREO_DCPAN_FIX,
+    MIXERPROP_REVERBTYPE,
+    MIXERPROP_VOICES,
+} BAEScript_MixerProp;
+
+typedef enum {
+    FUNC_ABS,
+    FUNC_MIN,
+    FUNC_MAX,
+    FUNC_CLAMP,
+} BAEScript_BuiltinFunc;
 
 typedef struct BAEScript_Node BAEScript_Node;
 
@@ -179,6 +225,9 @@ struct BAEScript_Node {
         /* NODE_UNARYOP */
         struct { BAEScript_TokenType op; BAEScript_Node *operand; } unaryop;
 
+        /* NODE_FUNC_CALL */
+        struct { BAEScript_BuiltinFunc fn; BAEScript_Node *a; BAEScript_Node *b; BAEScript_Node *c; } func_call;
+
         /* NODE_CH_PROP (read) */
         struct { BAEScript_Node *channel; BAEScript_ChProp prop; } ch_prop;
 
@@ -191,11 +240,20 @@ struct BAEScript_Node {
         /* NODE_MIDI_PROP_SET (write) */
         struct { BAEScript_MidiProp prop; BAEScript_Node *value; } midi_prop_set;
 
+        /* NODE_MIXER_PROP */
+        BAEScript_MixerProp mixer_prop;
+
+        /* NODE_MIXER_PROP_SET (write) */
+        struct { BAEScript_MixerProp prop; BAEScript_Node *value; } mixer_prop_set;
+
         /* NODE_NOTE_ON / NODE_NOTE_OFF */
         struct { BAEScript_Node *channel; BAEScript_Node *note; BAEScript_Node *velocity; } note_cmd;
 
         /* NODE_EXPR_STMT */
         BAEScript_Node *expr;
+
+        /* NODE_EVENT_DECL */
+        struct { BAEScript_EventType event_type; BAEScript_Node *body; } event_decl;
     } data;
 };
 
@@ -229,6 +287,16 @@ struct BAEScript_Context {
     void              *stop_ud;     /* userdata for stop callback   */
     int               exporting;    /* non-zero when exporting      */
     int               help_shown;   /* help() only fires once       */
+    BAEScript_Node   *event_handlers[EVENT_COUNT];
+    int               events_initialized;
+    int               script_event_fired;
+    int               started;
+    int               was_paused;
+    int               was_done;
+    int               has_prev_tick;
+    uint32_t          prev_tick_pos;
+    int               self_seek_this_tick;
+    int               last_self_seek;
 };
 
 /* Evaluate a node tree; returns the result as int32_t */
@@ -236,6 +304,9 @@ int32_t BAEScript_Eval(BAEScript_Context *ctx, BAEScript_Node *node);
 
 /* Execute a statement node */
 void BAEScript_Exec(BAEScript_Context *ctx, BAEScript_Node *node);
+
+/* Execute a registered event handler block by event type. */
+void BAEScript_DispatchEvent(BAEScript_Context *ctx, BAEScript_EventType event_type);
 
 #ifdef __cplusplus
 }

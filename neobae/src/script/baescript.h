@@ -12,6 +12,14 @@
  *   x = x + 1;                        // assignment & arithmetic
  *   if (condition) { ... }            // if / else if / else
  *   while (condition) { ... }         // while loops (use carefully!)
+ *   for (i = 0; i < 4; i++) { ... }   // for loops
+ *   on.start({ ... });                // event handlers (one-shot per occurrence)
+ *   on.pause({ ... });
+ *   on.resume({ ... });
+ *   on.stop({ ... });
+ *   on.script({ ... });
+ *   on.loop({ ... });
+ *   on.seek({ ... });
  *   ch[1].instrument                  // read channel 1 instrument
  *   ch[1].instrument = 100;           // set channel 1 instrument
  *   ch[1].volume                      // channel volume  (CC 7,  0-127)
@@ -19,10 +27,26 @@
  *   ch[1].expression                  // expression      (CC 11, 0-127)
  *   ch[1].pitchbend                   // pitch bend      (0-16383, 8192=center)
  *   ch[1].mute                        // 0 or 1
+ *   ch[1].reverb                      // reverb send     (CC 91, 0-127)
+ *   ch[1].chorus                      // chorus send     (CC 93, 0-127)
+ *   ch[1].solo                        // 0 or 1
  *   midi.timestamp                    // current position in ms (read/write)
  *   midi.position                     // alias for midi.timestamp
+ *   midi.ticks                        // current position in MIDI ticks (read/write)
  *   midi.length                       // total song length in ms (read-only)
  *   midi.exporting                    // 1 if exporting to file, 0 otherwise
+ *   midi.volume                       // BAESong volume percent (0-100)
+ *   midi.tempo                        // tempo percent (100 = normal)
+ *   midi.tempobpm                     // raw BPM tempo
+ *   midi.transpose                    // semitone transpose
+ *   midi.allnotesoff();               // send all notes off
+ *   mixer.volume                      // BAEMixer global volume percent (0-100)
+ *   mixer.voices                      // currently active voices (read-only)
+ *   mixer.reverbtype                  // BAEReverbType enum value
+ *   mixer.classicchorus               // 0 or 1 (default 0)
+ *   mixer.stereodcpanfix              // 0 or 1 (default 1)
+ *   mixer.reset();                    // restore default mixer values
+ *   abs(x), min(a,b), max(a,b), clamp(x,lo,hi)
  *   midi.stop();                      // stop playback and export
  *   print("hello");                   // debug output
  *   print(expression);                // print numeric or string values

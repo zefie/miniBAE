@@ -10278,6 +10278,35 @@ BAEResult BAESong_GetMicrosecondLength(BAESong song, uint32_t *outLength)
     return BAE_TranslateOPErr(err);
 }
 
+// BAESong_GetTickLength()
+// --------------------------------------
+//
+//
+BAEResult BAESong_GetTickLength(BAESong song, uint32_t *outLength)
+{
+    OPErr err;
+
+    err = NO_ERR;
+    if ((song) && (song->mID == OBJECT_ID))
+    {
+        BAE_AcquireMutex(song->mLock);
+        if (outLength)
+        {
+            *outLength = GM_GetSongTickLength(song->pSong, &err);
+        }
+        else
+        {
+            err = PARAM_ERR;
+        }
+        BAE_ReleaseMutex(song->mLock);
+    }
+    else
+    {
+        err = NULL_OBJECT;
+    }
+    return BAE_TranslateOPErr(err);
+}
+
 // BAESong_SetMicrosecondPosition()
 // --------------------------------------
 //
@@ -10318,6 +10347,60 @@ BAEResult BAESong_GetMicrosecondPosition(BAESong song, uint32_t *outTicks)
         if (outTicks)
         {
             *outTicks = GM_SongMicroseconds(song->pSong);
+        }
+        else
+        {
+            err = PARAM_ERR;
+        }
+        BAE_ReleaseMutex(song->mLock);
+    }
+    else
+    {
+        err = NULL_OBJECT;
+    }
+    return BAE_TranslateOPErr(err);
+}
+
+// BAESong_SetTickPosition()
+// --------------------------------------
+//
+//
+BAEResult BAESong_SetTickPosition(BAESong song, uint32_t ticks)
+{
+    OPErr err;
+
+    err = NO_ERR;
+    if ((song) && (song->mID == OBJECT_ID))
+    {
+        BAE_AcquireMutex(song->mLock);
+        if (song->pSong)
+        {
+            err = GM_SetSongTickPosition(song->pSong, ticks);
+        }
+        BAE_ReleaseMutex(song->mLock);
+    }
+    else
+    {
+        err = NULL_OBJECT;
+    }
+    return BAE_TranslateOPErr(err);
+}
+
+// BAESong_GetTickPosition()
+// --------------------------------------
+//
+//
+BAEResult BAESong_GetTickPosition(BAESong song, uint32_t *outTicks)
+{
+    OPErr err;
+
+    err = NO_ERR;
+    if ((song) && (song->mID == OBJECT_ID))
+    {
+        BAE_AcquireMutex(song->mLock);
+        if (outTicks)
+        {
+            *outTicks = GM_SongTicks(song->pSong);
         }
         else
         {
@@ -10443,6 +10526,64 @@ BAEResult BAESong_GetMasterTempo(BAESong song, BAE_UNSIGNED_FIXED *outTempoFacto
             err = PARAM_ERR;
         }
         BAE_ReleaseMutex(song->mLock);
+    }
+    else
+    {
+        err = NULL_OBJECT;
+    }
+    return BAE_TranslateOPErr(err);
+}
+
+// BAESong_SetTempoBPM()
+// --------------------------------------
+//
+//
+BAEResult BAESong_SetTempoBPM(BAESong song, uint32_t bpm)
+{
+    OPErr err;
+
+    err = NO_ERR;
+    if ((song) && (song->mID == OBJECT_ID))
+    {
+        if ((bpm > 0) && (bpm < 500))
+        {
+            BAE_AcquireMutex(song->mLock);
+            GM_SetSongTempInBeatsPerMinute(song->pSong, bpm);
+            BAE_ReleaseMutex(song->mLock);
+        }
+        else
+        {
+            err = PARAM_ERR;
+        }
+    }
+    else
+    {
+        err = NULL_OBJECT;
+    }
+    return BAE_TranslateOPErr(err);
+}
+
+// BAESong_GetTempoBPM()
+// --------------------------------------
+//
+//
+BAEResult BAESong_GetTempoBPM(BAESong song, uint32_t *outBPM)
+{
+    OPErr err;
+
+    err = NO_ERR;
+    if ((song) && (song->mID == OBJECT_ID))
+    {
+        if (outBPM)
+        {
+            BAE_AcquireMutex(song->mLock);
+            *outBPM = GM_GetSongTempoInBeatsPerMinute(song->pSong);
+            BAE_ReleaseMutex(song->mLock);
+        }
+        else
+        {
+            err = PARAM_ERR;
+        }
     }
     else
     {

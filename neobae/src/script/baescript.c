@@ -6,6 +6,53 @@
 
 #include "baescript_internal.h"
 
+static void BAEScript_InitEventHandlers(BAEScript_Context *ctx)
+{
+    int i;
+
+    if (!ctx || ctx->events_initialized || !ctx->program) return;
+    if (ctx->program->type != NODE_BLOCK) {
+        ctx->events_initialized = 1;
+        return;
+    }
+
+    memset(ctx->event_handlers, 0, sizeof(ctx->event_handlers));
+    for (i = 0; i < ctx->program->data.block.count; i++) {
+        BAEScript_Node *stmt = ctx->program->data.block.stmts[i];
+        if (!stmt || stmt->type != NODE_EVENT_DECL) continue;
+        if (stmt->data.event_decl.event_type >= EVENT_START && stmt->data.event_decl.event_type < EVENT_COUNT)
+            ctx->event_handlers[stmt->data.event_decl.event_type] = stmt->data.event_decl.body;
+    }
+    ctx->events_initialized = 1;
+}
+
+static int BAEScript_IsLikelyLoop(uint32_t previous_tick, uint32_t current_tick, uint32_t tick_length)
+{
+    uint32_t near_end;
+    uint32_t near_start;
+
+    if (tick_length == 0) return 0;
+    if (current_tick >= previous_tick) return 0;
+
+    near_end = tick_length - (tick_length / 8u);
+    near_start = tick_length / 8u;
+
+    return (previous_tick >= near_end && current_tick <= near_start) ? 1 : 0;
+}
+
+static void BAEScript_QuerySongState(BAEScript_Context *ctx,
+                                     BAE_BOOL *outPaused,
+                                     BAE_BOOL *outDone,
+                                     uint32_t *outTickPos,
+                                     uint32_t *outTickLength)
+{
+    if (!ctx || !ctx->song) return;
+    if (outPaused) BAESong_IsPaused(ctx->song, outPaused);
+    if (outDone) BAESong_IsDone(ctx->song, outDone);
+    if (outTickPos) BAESong_GetTickPosition(ctx->song, outTickPos);
+    if (outTickLength) BAESong_GetTickLength(ctx->song, outTickLength);
+}
+
 /* ── Load from file ────────────────────────────────────────────────── */
 
 BAEScript_Context *BAEScript_LoadFile(const char *path)
@@ -57,7 +104,19 @@ BAEScript_Context *BAEScript_LoadString(const char *source)
 
 void BAEScript_SetSong(BAEScript_Context *ctx, BAESong song)
 {
-    if (ctx) ctx->song = song;
+    if (!ctx) return;
+    if (ctx->song != song) {
+        ctx->song = song;
+        ctx->events_initialized = 0;
+        ctx->script_event_fired = 0;
+        ctx->started = 0;
+        ctx->was_paused = 0;
+        ctx->was_done = 0;
+        ctx->has_prev_tick = 0;
+        ctx->prev_tick_pos = 0;
+        ctx->self_seek_this_tick = 0;
+        ctx->last_self_seek = 0;
+    }
 }
 
 void BAEScript_SetExporting(BAEScript_Context *ctx, int exporting)
@@ -71,10 +130,71 @@ void BAEScript_Tick(BAEScript_Context *ctx,
                     uint32_t timestamp_ms,
                     uint32_t length_ms)
 {
+    BAE_BOOL paused = FALSE;
+    BAE_BOOL done = FALSE;
+    uint32_t tick_pos = 0;
+    uint32_t tick_length = 0;
+    int fire_seek = 0;
+    int fire_loop = 0;
+
     if (!ctx || !ctx->program) return;
+
+    BAEScript_InitEventHandlers(ctx);
+
     ctx->timestamp_ms = timestamp_ms;
     ctx->length_ms    = length_ms;
+
+    if (!ctx->script_event_fired) {
+        BAEScript_DispatchEvent(ctx, EVENT_SCRIPT);
+        ctx->script_event_fired = 1;
+    }
+
+    ctx->self_seek_this_tick = 0;
     BAEScript_Exec(ctx, ctx->program);
+
+    BAEScript_QuerySongState(ctx, &paused, &done, &tick_pos, &tick_length);
+
+    if (ctx->song && !done && !ctx->started) {
+        BAEScript_DispatchEvent(ctx, EVENT_START);
+        ctx->started = 1;
+    }
+
+    if (!ctx->was_paused && paused) {
+        BAEScript_DispatchEvent(ctx, EVENT_PAUSE);
+    } else if (ctx->was_paused && !paused) {
+        BAEScript_DispatchEvent(ctx, EVENT_RESUME);
+    }
+
+    if (!ctx->was_done && done) {
+        BAEScript_DispatchEvent(ctx, EVENT_STOP);
+        ctx->started = 0;
+    }
+
+    if (ctx->has_prev_tick && !done) {
+        if (ctx->self_seek_this_tick) {
+            fire_seek = 1;
+        } else if (tick_pos < ctx->prev_tick_pos) {
+            if (BAEScript_IsLikelyLoop(ctx->prev_tick_pos, tick_pos, tick_length))
+                fire_loop = 1;
+            else
+                fire_seek = 1;
+        } else if (tick_pos > ctx->prev_tick_pos) {
+            uint32_t delta = tick_pos - ctx->prev_tick_pos;
+            if (delta > 10000u)
+                fire_seek = 1;
+        }
+    }
+
+    if (fire_loop)
+        BAEScript_DispatchEvent(ctx, EVENT_LOOP);
+    if (fire_seek)
+        BAEScript_DispatchEvent(ctx, EVENT_SEEK);
+
+    ctx->last_self_seek = ctx->self_seek_this_tick;
+    ctx->prev_tick_pos = tick_pos;
+    ctx->has_prev_tick = 1;
+    ctx->was_paused = paused ? 1 : 0;
+    ctx->was_done = done ? 1 : 0;
 }
 
 /* ── Cleanup ───────────────────────────────────────────────────────── */

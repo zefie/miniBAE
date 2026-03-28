@@ -1,0 +1,30 @@
+// Example BAEScript: Song + mixer controls.
+// Demonstrates midi.volume, mixer.volume, mixer.classicchorus,
+// mixer.stereodcpanfix, and mixer.reset().
+
+if (midi.timestamp == 0 && (midi.volume != 85 || mixer.volume != 90)) {
+    // Reset to engine defaults before applying script-specific values.
+    mixer.reset();
+    midi.volume = 85;
+    mixer.volume = 90;
+    mixer.classicchorus = false;
+    mixer.stereodcpanfix = true;
+    print("Init volumes:", midi.volume, mixer.volume);
+}
+
+// Fade song volume down over first 4 seconds.
+if (midi.timestamp < 4000) {
+    midi.volume = 85 - (midi.timestamp * 35 / 4000);
+}
+
+// Demonstrate numeric booleans too.
+if (midi.timestamp == 5000) {
+    mixer.classicchorus = 1;
+    mixer.stereodcpanfix = 0;
+    print("classicchorus=", mixer.classicchorus, "stereodcpanfix=", mixer.stereodcpanfix);
+}
+
+// Restore defaults near the end.
+if (midi.timestamp >= midi.length - 1000) {
+    mixer.reset();
+}

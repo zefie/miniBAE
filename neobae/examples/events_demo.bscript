@@ -1,0 +1,33 @@
+on.script({
+    print("event:script");
+    seek_done = 0;
+});
+
+on.start({
+    print("event:start");
+});
+
+on.pause({
+    print("event:pause");
+});
+
+on.resume({
+    print("event:resume");
+});
+
+on.stop({
+    print("event:stop");
+});
+
+on.loop({
+    print("event:loop");
+});
+
+on.seek({
+    print("event:seek", midi.ticks);
+});
+
+if (midi.timestamp > 1200 && seek_done == 0) {
+    seek_done = 1;
+    midi.ticks = 0;
+}
