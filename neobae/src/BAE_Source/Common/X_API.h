@@ -317,6 +317,7 @@
 #define X_SDL2              18      // SDL2
 #define X_SDL3              19      // SDL3
 #define X_ANDROID           20      // Android
+#define X_FOOBAR2000_PLUGIN 21      // foobar2000 plugin
 
 // types for CPU_TYPE
 #define k68000              0
@@ -418,6 +419,8 @@
     #include "BAEBuildOptions_SDL2.h"
 #elif X_PLATFORM == X_SDL3
     #include "BAEBuildOptions_SDL3.h"
+#elif X_PLATFORM == X_FOOBAR2000_PLUGIN
+    #include "BAEBuildOptions_foobar2000.h"    
 #endif
 
 //-----------------------------------------------------------------------------------
