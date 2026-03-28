@@ -490,7 +490,7 @@ endif
 
 ifeq ($(BUILD_GUI),1)
 	BAE_FLAGS += -D_ZEFI_GUI=1
-	SRC_BIN	:= src/gui/gui_theme.c \
+	SRC	+= src/gui/gui_theme.c \
 		src/gui/gui_widgets.c \
 		src/gui/gui_text.c \
 		src/gui/gui_midi_vkbd.c \
@@ -503,39 +503,38 @@ ifeq ($(BUILD_GUI),1)
 	
 	# Add debug console for DEBUG builds
 	ifeq ($(DEBUG),1)
-		SRC_BIN += src/gui/gui_debug_console.c
+		SRC += src/gui/gui_debug_console.c
 	endif
 else
 	ifeq ($(RMFINFO),1)
 		# libNeoBAE srcs + rmfinfo.c
-		SRC_BIN	:= $(SRC) src/rmfinfo/rmfinfo.c
+		SRC += src/rmfinfo/rmfinfo.c
 	else
 		ifeq ($(INSTDUMP),1)
 			# libNeoBAE srcs + instdump.c
-			SRC_BIN	:= $(SRC) src/rmfinfo/instdump.c
+			SRC += src/rmfinfo/instdump.c
 		else
 			ifeq ($(RMF2MID),1)
 				# libNeoBAE srcs + rmf2mid.c
-				SRC_BIN	:= $(SRC) src/rmf2mid/rmf2mid.c
+				SRC += src/rmf2mid/rmf2mid.c
 			else
 				ifeq ($(MID2RMF),1)
 					# libNeoBAE srcs + mid2rmf.c
-					SRC_BIN	:= $(SRC) src/mid2rmf/mid2rmf.c
+					SRC += src/mid2rmf/mid2rmf.c
 				else
 					ifeq ($(MID2RMI),1)
 						# libNeoBAE srcs + mid2rmi.c
-						SRC_BIN	:= $(SRC) src/mid2rmi/mid2rmi.c
+						SRC += src/mid2rmi/mid2rmi.c
 					else
 						ifeq ($(MOD2RMF_APP),1)
-							SRC_BIN	:= $(SRC) src/mod2rmf/mod2rmf_main.c
+							SRC += src/mod2rmf/mod2rmf_main.c
 						else
 							ifeq ($(BANKRECOMP),1)
 								# libNeoBAE srcs + bankrecomp.c
-								SRC_BIN	:= $(SRC) src/bankrecomp/bankrecomp.c
+								SRC += src/bankrecomp/bankrecomp.c
 							else
 								ifeq ($(NBSTUDIO),1)
-									SRC_BIN := $(SRC) \
-										src/rmfeditor_wx/editor_main.cpp \
+									SRC += 	src/rmfeditor_wx/editor_main.cpp \
 										src/rmfeditor_wx/editor_bank.cpp \
 										src/rmfeditor_wx/editor_instrument_ext_dialog.cpp \
 										src/rmfeditor_wx/editor_metadata_dialog.cpp \
@@ -545,7 +544,7 @@ else
 									BAE_LIBS += -lz $(shell pkg-config --libs gtk+-3.0) $(shell pkg-config --libs glib-2.0)
 								else
 									# playbae = libNeoBAE srcs + playbae.c
-									SRC_BIN	:= $(SRC) src/playbae/playbae.c
+									SRC += src/playbae/playbae.c
 								endif
 							endif
 						endif
@@ -558,7 +557,7 @@ endif
 
 ifeq ($(KARAOKE),1)
 	ifneq ($(BUILD_GUI),)
-		SRC_BIN += src/gui/gui_karaoke.c
+		SRC += src/gui/gui_karaoke.c
 	endif
 endif
 
@@ -566,7 +565,7 @@ ifeq ($(ENABLE_MIDI_HW),1)
 	ifneq ($(BUILD_GUI),)
 		# RtMidi (C wrapper) - provide real-time MIDI input for GUI
 		BAE_FLAGS += -DSUPPORT_MIDI_HW=1
-		SRC_BIN +=  src/gui/gui_midi_hw.c \
+		SRC +=  src/gui/gui_midi_hw.c \
 			src/gui/gui_midi_hw_input.c \
 			src/gui/gui_midi_hw_output.c \
 			src/thirdparty/rtmidi/rtmidi_c.cpp \
@@ -577,7 +576,7 @@ endif
 ifeq ($(PLAYLIST),1)
 	ifneq ($(BUILD_GUI),)
 		BAE_FLAGS += -DSUPPORT_PLAYLIST=1
-		SRC_BIN +=  src/gui/gui_playlist.c
+		SRC +=  src/gui/gui_playlist.c
 	endif
 endif
 
@@ -591,7 +590,6 @@ ifeq ($(WINDOWS),1)
 		INC_PATH += -Isrc/thirdparty/flac/src/share/win_utf8_io
 		BAE_FLAGS += -DFLAC__NO_DLL
 		SRC += src/thirdparty/flac/src/share/win_utf8_io/win_utf8_io.c
-		SRC_BIN += src/thirdparty/flac/src/share/win_utf8_io/win_utf8_io.c
 	endif
 endif
 
@@ -602,12 +600,12 @@ endif
 ifeq ($(BAESCRIPT),1)
 	BAE_FLAGS += -DSUPPORT_BAESCRIPT=1
 	INC_PATH += -Isrc/script
-	SRC_BIN += src/script/baescript.c \
+	SRC += src/script/baescript.c \
 		src/script/baescript_lexer.c \
 		src/script/baescript_parser.c \
 		src/script/baescript_vm.c
 	ifneq ($(BUILD_GUI),)
-		SRC_BIN += src/gui/gui_script_editor.c
+		SRC += src/gui/gui_script_editor.c
 	endif
 endif
 
@@ -626,7 +624,7 @@ SRC_UNIQUE := $(subst src/thirdparty/libvorbis/lib/lpc.c,src/thirdparty/libvorbi
 SRC_UNIQUE := $(subst src/thirdparty/libvorbis/lib/window.c,src/thirdparty/libvorbis/lib/vorbis_window.c,$(SRC_UNIQUE))
 OBJ 		:= $(addprefix $(OBJ_DIR),$(addsuffix .o,$(notdir $(basename ${SRC_UNIQUE}))))
 
-SRC_BIN_UNIQUE := $(SRC_BIN)
+SRC_BIN_UNIQUE := $(SRC)
 SRC_BIN_UNIQUE := $(subst src/thirdparty/flac/src/libFLAC/lpc.c,src/thirdparty/flac/src/libFLAC/flac_lpc.c,$(SRC_BIN_UNIQUE))
 SRC_BIN_UNIQUE := $(subst src/thirdparty/flac/src/libFLAC/window.c,src/thirdparty/flac/src/libFLAC/flac_window.c,$(SRC_BIN_UNIQUE))
 SRC_BIN_UNIQUE := $(subst src/thirdparty/libvorbis/lib/lpc.c,src/thirdparty/libvorbis/lib/vorbis_lpc.c,$(SRC_BIN_UNIQUE))
