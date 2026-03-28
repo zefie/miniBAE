@@ -46,6 +46,10 @@
 - ~~When loading a song, if the song has built in settings (ZMF), apply those settings to the editor UI (checking the menu option, and checking the Save settings to Song box)~~
   - ~~Reset state of settings menu and "Save Settings to Song" box upon "new" or loaded document~~
 
+# 0.12a
+- ~~Fix ZMF tooltip~~
+- Graphics for pitch envelope
+
 # Future
 - Allow cut/copy/pasting instruments
 - Allow dragging samples to other instruments
@@ -66,7 +70,6 @@
   - ~~Works fine in NeoBAE, but RMF files in particular NEED to be properly backwards compatible~~
   - ~~Change happened between 2025-08-23 and 2025-09-01 release (MIN_LOOP_SIZE dropped from 20 to 2)~~
 - bankrecomp: wtv.hsb recomp prog 100 weirdness
-- Graphics for pitch envelope
 - Interpolation configuration (none, linear, cubic, etc, current is just on/off)
 - Neo Reverb for preview player
   - Custom .neoreverb support

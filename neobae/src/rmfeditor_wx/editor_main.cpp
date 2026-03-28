@@ -6379,21 +6379,19 @@ private:
     }
 
     void UpdateStatusBarTooltip() {
-        wxStatusBar *statusBar = GetStatusBar();
-
-        if (!statusBar) {
+        if (!m_statusInfoLabel) {
             return;
         }
         if (m_zmfReason != 0) {
             char reasonBuf[256] = {0};
             BAEZMFReasonCodeToString((BAEZMFReasonCode)m_zmfReason, reasonBuf, sizeof(reasonBuf));
             if (m_editorMode == kEditorModeBank) {
-                statusBar->SetToolTip(wxString::Format("ZSB is required because: %s", reasonBuf));
+                m_statusInfoLabel->SetToolTip(wxString::Format("ZSB is required because: %s", reasonBuf));
             } else {
-                statusBar->SetToolTip(wxString::Format("ZMF is required because: %s", reasonBuf));
+                m_statusInfoLabel->SetToolTip(wxString::Format("ZMF is required because: %s", reasonBuf));
             }
         } else {
-            statusBar->SetToolTip(wxEmptyString);
+            m_statusInfoLabel->SetToolTip(wxEmptyString);
         }
     }
 
