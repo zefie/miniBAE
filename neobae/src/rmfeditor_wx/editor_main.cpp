@@ -1270,11 +1270,23 @@ public:
         }
 
         {
-            int statusWidths[2] = {500, -1};
-            CreateStatusBar(2);
-            SetStatusWidths(2, statusWidths);
-            EnsureStatusInfoLabel();
-            LayoutStatusInfoLabel();
+            wxStatusBar *statusBar = CreateStatusBar(1, wxSTB_DEFAULT_STYLE & ~wxSTB_SHOW_TIPS);
+            m_statusInfoLabel = new wxStaticText(statusBar,
+                                                 wxID_ANY,
+                                                 wxEmptyString,
+                                                 wxDefaultPosition,
+                                                 wxDefaultSize,
+                                                 wxALIGN_RIGHT | wxST_NO_AUTORESIZE);
+            wxBoxSizer *statusSizer = new wxBoxSizer(wxHORIZONTAL);
+            int verticalOffset = 3;
+#ifdef __WXMSW__
+            verticalOffset += 2;
+#endif            
+            statusSizer->Add(m_statusInfoLabel, 1, wxTOP | wxBOTTOM, verticalOffset);
+            statusSizer->Add(25, 1);
+            statusBar->SetSizer(statusSizer);
+            statusBar->Layout();
+            statusBar->Refresh();
         }
         SetStatusText("Welcome to NeoBAE Studio!");
         UpdateStatusBar();
@@ -1299,8 +1311,6 @@ public:
         }, ID_SettingsClassicChorus);
         Bind(wxEVT_MENU, [this](wxCommandEvent &) { Close(); }, wxID_EXIT);
         Bind(wxEVT_CLOSE_WINDOW, &MainFrame::OnCloseWindow, this);
-        Bind(wxEVT_SIZE, &MainFrame::OnFrameResized, this);
-        Bind(wxEVT_IDLE, &MainFrame::OnInitialStatusBarIdle, this);
         m_trackList->Bind(wxEVT_LISTBOX, &MainFrame::OnTrackSelected, this);
         m_trackList->Bind(wxEVT_CONTEXT_MENU, &MainFrame::OnTrackContextMenu, this);
         m_sampleTree->Bind(wxEVT_CONTEXT_MENU, &MainFrame::OnSampleContextMenu, this);
@@ -1461,7 +1471,8 @@ private:
     wxTextCtrl *m_midiLoopEndText;
     wxButton *m_channelsConfigButton;
     wxCheckBox *m_autoFollowPlayheadCheck;
-    wxStaticText *m_statusInfoLabel = nullptr;
+    wxString m_statusMessage;
+    wxStaticText *m_statusInfoLabel;
     wxSlider *m_positionSlider;
     wxStaticText *m_positionLabel;
     wxTreeCtrl *m_sampleTree;
@@ -1519,7 +1530,6 @@ private:
     wxCheckBox *m_savePreviewToSongCheck;
     bool m_mediaModifiedHintFromSession = false;
     bool m_bankModifiedHintFromSession = false;
-    bool m_initialStatusBarLayoutPending = true;
     bool m_pendingLoopHotReload;
     uint32_t m_pendingLoopHotReloadPosUsec;
     bool m_pendingLoopHotReloadPaused;
@@ -6335,71 +6345,13 @@ private:
         return "None";
     }
 
-    void EnsureStatusInfoLabel() {
-        wxStatusBar *statusBar = GetStatusBar();
-        if (!statusBar) {
-            int statusWidths[2] = {500, -1};
-            statusBar = CreateStatusBar(2);
-            if (statusBar) {
-                SetStatusWidths(2, statusWidths);
-            }
-        }
-        if (!statusBar || m_statusInfoLabel) {
-            return;
-        }
-        m_statusInfoLabel = new wxStaticText(statusBar,
-                                             wxID_ANY,
-                                             wxEmptyString,
-                                             wxDefaultPosition,
-                                             wxDefaultSize,
-                                             wxALIGN_RIGHT | wxST_NO_AUTORESIZE);
-        if (m_statusInfoLabel) {
-            m_statusInfoLabel->SetFont(statusBar->GetFont());
-            m_statusInfoLabel->SetForegroundColour(statusBar->GetForegroundColour());
-        }
-    }
-
-    void LayoutStatusInfoLabel() {
-        wxStatusBar *statusBar = GetStatusBar();
-        wxRect fieldRect;
-
-        if (!statusBar) {
-            return;
-        }
-        if (!m_statusInfoLabel) {
-            EnsureStatusInfoLabel();
-            if (!m_statusInfoLabel) {
-                return;
-            }
-        }
-        if (!statusBar->GetFieldRect(1, fieldRect)) {
-            return;
-        }
-
-        fieldRect.Deflate(4, 1);
-        if (fieldRect.width <= 0 || fieldRect.height <= 0) {
-            SendSizeEvent(wxSEND_EVENT_POST);
-            Layout();
-            if (!statusBar->GetFieldRect(1, fieldRect)) {
-                return;
-            }
-            fieldRect.Deflate(4, 1);
-            if (fieldRect.width <= 0 || fieldRect.height <= 0) {
-                m_statusInfoLabel->Hide();
-                return;
-            }
-        }
-        m_statusInfoLabel->SetPosition(fieldRect.GetPosition());
-        m_statusInfoLabel->SetSize(fieldRect.GetSize());
-        m_statusInfoLabel->Show();
-    }
-
-    void UpdateStatusBar() {
+    wxString BuildStatusContextString() {
         wxString projectName = m_sessionPath.empty() ? "New Project" : wxFileName(m_sessionPath).GetName();
         wxString mediaName   = GetMediaDisplayName();
         wxString bankName    = GetBankDisplayName();
         wxString requirementLabel;
         wxString requirementValue;
+
         if (IsSessionDirty()) {
             projectName += " (Modified)";
         }
@@ -6418,49 +6370,58 @@ private:
             requirementValue = (m_document && BAERmfEditorDocument_RequiresZmf(m_document, &m_zmfReason)) ? "Yes" : "No";
         }
 
-        wxString status = wxString::Format("Project: %s  |  Media File: %s  |  Bank: %s  |  %s: %s",
-                                           projectName,
-                                           mediaName,
-                                           bankName,
-                                           requirementLabel,
-                                           requirementValue);
-        EnsureStatusInfoLabel();
-        if (m_statusInfoLabel) {
-            m_statusInfoLabel->SetLabel(status);
-            if (m_zmfReason != 0) {
-                char reasonBuf[256] = {0};
-                BAEZMFReasonCodeToString((BAEZMFReasonCode)m_zmfReason, reasonBuf, sizeof(reasonBuf));
-                if (m_editorMode == kEditorModeBank) {
-                    m_statusInfoLabel->SetToolTip(wxString::Format("ZSB is required because: %s", reasonBuf));
-                } else {
-                    m_statusInfoLabel->SetToolTip(wxString::Format("ZMF is required because: %s", reasonBuf));
-                }
+        return wxString::Format("Project: %s  |  Media File: %s  |  Bank: %s  |  %s: %s",
+                                projectName,
+                                mediaName,
+                                bankName,
+                                requirementLabel,
+                                requirementValue);
+    }
+
+    void UpdateStatusBarTooltip() {
+        wxStatusBar *statusBar = GetStatusBar();
+
+        if (!statusBar) {
+            return;
+        }
+        if (m_zmfReason != 0) {
+            char reasonBuf[256] = {0};
+            BAEZMFReasonCodeToString((BAEZMFReasonCode)m_zmfReason, reasonBuf, sizeof(reasonBuf));
+            if (m_editorMode == kEditorModeBank) {
+                statusBar->SetToolTip(wxString::Format("ZSB is required because: %s", reasonBuf));
             } else {
-                m_statusInfoLabel->SetToolTip(wxEmptyString);
+                statusBar->SetToolTip(wxString::Format("ZMF is required because: %s", reasonBuf));
             }
-            LayoutStatusInfoLabel();
+        } else {
+            statusBar->SetToolTip(wxEmptyString);
         }
-        SetStatusText(wxEmptyString, 1);
     }
 
-    void OnFrameResized(wxSizeEvent &event) {
-        LayoutStatusInfoLabel();
-        event.Skip();
+    wxString BuildCombinedStatusText(wxString const &message) {
+        wxString prefix = message;
+
+        if (prefix.empty()) {
+            prefix = "Ready";
+        }
+        return wxString::Format("%s | %s", prefix, BuildStatusContextString());
     }
 
-    void OnInitialStatusBarIdle(wxIdleEvent &event) {
-        if (m_initialStatusBarLayoutPending && IsShownOnScreen()) {
-            m_initialStatusBarLayoutPending = false;
-            /* Drive the same path that manual resize uses, but later in startup
-             * when GTK has finalized frame/statusbar geometry. */
-            SendSizeEvent(wxSEND_EVENT_POST);
-            CallAfter([this]() {
-                LayoutStatusInfoLabel();
-                UpdateStatusBar();
-            });
-            Unbind(wxEVT_IDLE, &MainFrame::OnInitialStatusBarIdle, this);
+    void SetStatusText(wxString const &text, int number = 0) {
+        if (number != 0) {
+            return;
         }
-        event.Skip();
+        m_statusMessage = text;
+        if (m_statusInfoLabel) {
+            m_statusInfoLabel->SetLabel(BuildCombinedStatusText(m_statusMessage));
+        }
+        UpdateStatusBarTooltip();
+    }
+
+    void UpdateStatusBar() {
+        if (m_statusInfoLabel) {
+            m_statusInfoLabel->SetLabel(BuildCombinedStatusText(m_statusMessage));
+        }
+        UpdateStatusBarTooltip();
     }
 
     void UpdateFrameTitle() {
