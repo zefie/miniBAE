@@ -537,8 +537,14 @@ void * BAE_Allocate(uint32_t size)
     data = 0;
     if (size)
     {
-        // the GHND flag includes the GMEM_ZEROINIT flag
-        data = (void *)GlobalAllocPtr(GHND, size);
+        /*
+        data = (void *)malloc(size);
+        if (data)
+        {
+            memset(data, 0, size);
+        }
+        */
+        data = (void *)calloc(1, size);
     }
     if (data)
     {
@@ -557,7 +563,7 @@ void BAE_Deallocate(void * memoryBlock)
     if (memoryBlock)
     {
         g_memory_buoy -= BAE_SizeOfPointer(memoryBlock);
-        GlobalFreePtr(memoryBlock);
+        free(memoryBlock);
     }
 }
 
@@ -581,26 +587,18 @@ uint32_t BAE_GetMaxSizeOfMemoryUsed(void)
 // return 0 for valid, or 1 for bad pointer, or 2 for not supported. 
 int BAE_IsBadReadPointer(void *memoryBlock, uint32_t size)
 {
-    return (IsBadReadPtr(memoryBlock, size)) ? 1 : 0;
+    // return (IsBadReadPtr(memoryBlock, size)) ? 1 : 0;
+    (void)memoryBlock;
+    (void)size;
+    return 2;
 }
 
 // this will return the size of the memory pointer allocated with BAE_Allocate. Return
 // 0 if you don't support this feature
 uint32_t BAE_SizeOfPointer(void * memoryBlock)
 {
-    uint32_t   size;
-    HANDLE          hData;
-            
-    size = 0;
-    if (memoryBlock)
-    {
-        hData = GlobalPtrHandle(memoryBlock);
-        if (hData)
-        {
-            size = GlobalSize(hData);
-        }
-    }
-    return size;
+    (void)memoryBlock;
+    return 0;
 }
 
 // block move memory. This is basicly memmove, but its exposed to take advantage of
@@ -611,7 +609,7 @@ void BAE_BlockMove(void * source, void * dest, uint32_t size)
 {
     if (source && dest && size)
     {
-        MoveMemory(dest, source, size);
+        memmove(dest, source, size);
     }
 }
 

@@ -585,8 +585,9 @@ struct XPI_Memblock
     int32_t    blockSize;          // block size
     int32_t    blockID_two;        // ID that this is our block. part 2
 #if (X_PLATFORM == X_SOLARIS)
-    int32_t    alignment8;         // used for alignment to 8 byte boundries
+    int32_t    alignment8;         // used for alignment to 8 byte boundries    
 #endif
+    char    *realPtr;
 };
 typedef struct XPI_Memblock XPI_Memblock;
 

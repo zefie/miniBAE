@@ -1694,6 +1694,31 @@ void * XPtoCstr(register void *pstr)
 }
 
 
+// Debug helper: verify header integrity and print details if corrupted
+static bool XValidateMemblockHeader(XPTR data, const char *context)
+{
+    if (!data) return true;
+    
+    XPI_Memblock *mb = (XPI_Memblock *)XIsOurMemoryPtr(data);
+    if (!mb) {
+        BAE_PRINTF("[MEM CORRUPTION] %s: XIsOurMemoryPtr returned NULL for data=%p\n", context, data);
+        BAE_ASSERT(FALSE);
+        return false;
+    }
+    
+    uint32_t id1 = XGetLong(&mb->blockID_one);
+    uint32_t id2 = XGetLong(&mb->blockID_two);
+    if (id1 != XPI_BLOCK_1_ID || id2 != XPI_BLOCK_2_ID) {
+        BAE_PRINTF("[MEM CORRUPTION] %s: header corrupted at data=%p mb=%p\n", context, data, mb);
+        BAE_PRINTF("  expected id1=0x%08X got=0x%08X\n", XPI_BLOCK_1_ID, id1);
+        BAE_PRINTF("  expected id2=0x%08X got=0x%08X\n", XPI_BLOCK_2_ID, id2);
+        BAE_PRINTF("  blockSize=%d\n", mb->blockSize);
+        BAE_ASSERT(FALSE);
+        return false;
+    }
+    return true;
+}
+
 // Determine if a data block was allocated with our memory allocation API
 XPI_Memblock * XIsOurMemoryPtr(XPTR data)
 {
@@ -1714,6 +1739,10 @@ XPI_Memblock * XIsOurMemoryPtr(XPTR data)
                 (XGetLong(&pBlock->blockID_two) == XPI_BLOCK_2_ID) )
             {
                 pBlockReturn = pBlock;
+            } else {
+                // Debug: print details about the failed pointer check
+                BAE_PRINTF("[MEM CHECK FAILED] XIsOurMemoryPtr: pointer %p is not a valid block header\n", data);
+                BAE_ASSERT(FALSE);
             }
         }
     }
@@ -1730,20 +1759,23 @@ int32_t        const currentSize = ptr ? XGetPtrSize(ptr) : 0;
 
     //MOE:  If we are allocating to a certain quantum (typically 16 bytes),
     //      We should apply that quantum before this test.
-    if (size != currentSize)
+    if (size != currentSize && ptr)
     {
+        
         XPI_Memblock *mb = (XPI_Memblock*)XIsOurMemoryPtr(ptr);
-        XPI_Memblock *newMb = realloc(mb, sizeof(XPI_Memblock) + size);
-
-        if (newMb) {
+        void *newReal = realloc(mb->realPtr, sizeof(XPI_Memblock) + size);
+        if (newReal) {
+            XPI_Memblock *newMb = (XPI_Memblock *)newReal;
+            newMb->realPtr = newReal;
             newMb->blockSize = size;
-            return (XPTR)(newMb + 1); // or &newMb->data[0]
+            return (XPTR)(newMb + 1);
         } else {
+            BAE_PRINTF("[MEM REALLOC FAILED] XResizePtr: realloc failed for ptr=%p size=%d\n", ptr, size);
             // fall back to the old way
             
-        XPTR        newPtr;
+            XPTR        newPtr;
 
-#if TRUE    // disable when these is an BAE_ResizePointer()
+            // disable when these is an BAE_ResizePointer()
             if ((size < currentSize) &&
                 (size >= 0x100000) &&               // if over 1Mb would have to be allocated
                 (currentSize - size <= 0x10000) &&  // if less than 64Kb would be saved
@@ -1752,7 +1784,6 @@ int32_t        const currentSize = ptr ? XGetPtrSize(ptr) : 0;
                 newPtr = NULL;  // force hacky but quick pseudo resizing
             }
             else
-#endif
             {
                 newPtr = XNewPtr(size);
             }
@@ -1803,6 +1834,7 @@ XPTR XNewPtr(int32_t size)
         pBlock = (XPI_Memblock *)data;
         XPutLong(&pBlock->blockID_one, XPI_BLOCK_1_ID);         // set our ID for this block
         XPutLong(&pBlock->blockID_two, XPI_BLOCK_2_ID);
+        pBlock->realPtr = data;
         data += sizeof(XPI_Memblock);
         pBlock->blockSize = size - sizeof(XPI_Memblock);
     }
@@ -1813,7 +1845,7 @@ void XDisposePtr(XPTR data)
 {
     XPTR            osAllocatedData;
     XPI_Memblock    *pBlock;
-
+    
     osAllocatedData = (XPTR)XIsOurMemoryPtr(data);
     if (osAllocatedData)
     {

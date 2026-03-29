@@ -2831,7 +2831,6 @@ static BAEResult PV_GrowBuffer(void **buffer, uint32_t *capacity, uint32_t eleme
 {
     void *nextBuffer;
     uint32_t nextCapacity;
-
     if (*capacity >= minimumCount)
     {
         return BAE_NO_ERROR;
@@ -2841,15 +2840,10 @@ static BAEResult PV_GrowBuffer(void **buffer, uint32_t *capacity, uint32_t eleme
     {
         nextCapacity *= 2;
     }
-    nextBuffer = XNewPtr((int32_t)(nextCapacity * elementSize));
+    nextBuffer = XResizePtr(*buffer, (int32_t)(nextCapacity * elementSize));
     if (!nextBuffer)
     {
         return BAE_MEMORY_ERR;
-    }
-    if (*buffer && *capacity)
-    {
-        XBlockMove(*buffer, nextBuffer, (int32_t)(*capacity * elementSize));
-        XDisposePtr(*buffer);
     }
     *buffer = nextBuffer;
     *capacity = nextCapacity;
@@ -2935,6 +2929,8 @@ static BAEResult PV_ByteBufferAppendVLQ(ByteBuffer *buffer, uint32_t value)
 
 static void PV_ByteBufferDispose(ByteBuffer *buffer)
 {
+    BAE_PRINTF("[RMF Save] PV_ByteBufferDispose: data=%p size=%u capacity=%u\n", 
+                buffer->data, (unsigned)buffer->size, (unsigned)buffer->capacity);
     if (buffer->data)
     {
         XDisposePtr(buffer->data);
@@ -14125,8 +14121,8 @@ static BAEResult PV_BankReplaceResource(XFILE bankFile,
     for (typeIdx = 0; bankResourceTypes[typeIdx] != 0; ++typeIdx)
     {
         XResourceType resType;
-        int32_t resCount;
-        int32_t resIndex;
+        int32_t resCount = 0;
+        int32_t resIndex = 0;
 
         resType = bankResourceTypes[typeIdx];
         resCount = XCountFileResourcesOfType(bankFile, resType);
