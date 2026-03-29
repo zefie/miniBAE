@@ -1749,6 +1749,23 @@ XPI_Memblock * XIsOurMemoryPtr(XPTR data)
     return pBlockReturn;
 }
 
+XPI_Memblock *XGetHeaderIfOurs(void *memoryBlock)
+{
+    if (!memoryBlock) {
+        return NULL;
+    }
+
+    XPI_Memblock *mb = (XPI_Memblock *)((char*)memoryBlock - sizeof(XPI_Memblock));
+
+    if (XGetLong(&mb->blockID_one) != XPI_BLOCK_1_ID ||
+        XGetLong(&mb->blockID_two) != XPI_BLOCK_2_ID) {
+        return NULL; // not one of our blocks
+    }
+
+    return mb;
+}
+
+
 // This function re-allocates a memory block
 // ptr may be NULL, in which case the functionality is the same as XNewPtr()
 // If allocation fails, ptr is unaffected (It's still allocated.)

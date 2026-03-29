@@ -1133,7 +1133,7 @@ char    XTranslateWinToMac(char ansiChar);
 char    XTranslateMacToWin(char macChar);
 
 int32_t PV_CopyWithinFile(XFILE fileRef, int32_t srcPos, int32_t dstPos, int32_t size, void *tempBuffer, int32_t tempBufferSize);
-
+XPI_Memblock *XGetHeaderIfOurs(void *memoryBlock);
 #ifdef __cplusplus
     }
 #endif

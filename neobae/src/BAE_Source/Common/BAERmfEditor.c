@@ -2840,15 +2840,23 @@ static BAEResult PV_GrowBuffer(void **buffer, uint32_t *capacity, uint32_t eleme
     {
         nextCapacity *= 2;
     }
-    nextBuffer = XNewPtr((int32_t)(nextCapacity * elementSize));
-    if (!nextBuffer)
-    {
-        return BAE_MEMORY_ERR;
-    }
-    if (*buffer && *capacity)
-    {
-        XBlockMove(*buffer, nextBuffer, (int32_t)(*capacity * elementSize));
-        XDisposePtr(*buffer);
+    XPI_Memblock *mb = XGetHeaderIfOurs(*buffer);
+    if (!mb) {
+        nextBuffer = XNewPtr((int32_t)(nextCapacity * elementSize));
+        if (!nextBuffer)
+        {
+            return BAE_MEMORY_ERR;
+        }
+        if (*buffer && *capacity)
+        {
+            XBlockMove(*buffer, nextBuffer, (int32_t)(*capacity * elementSize));
+            XDisposePtr(*buffer);
+        }
+    } else {
+        nextBuffer = XResizePtr(*buffer, (int32_t)(nextCapacity * elementSize));
+        if (!nextBuffer) {
+            return BAE_MEMORY_ERR;
+        }
     }
     *buffer = nextBuffer;
     *capacity = nextCapacity;
