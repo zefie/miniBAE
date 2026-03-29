@@ -22,6 +22,15 @@ struct InstrumentExtEditorResult {
      * from the embedded sample tab (same structs as the old dialog). */
 };
 
+enum InstrumentPreviewInvalidateReason {
+    kInstrumentPreviewInvalidate_None = 0,
+    kInstrumentPreviewInvalidate_Ext = 1 << 0,
+    kInstrumentPreviewInvalidate_SampleMeta = 1 << 1,
+    kInstrumentPreviewInvalidate_SampleCodec = 1 << 2,
+    kInstrumentPreviewInvalidate_SampleData = 1 << 3,
+    kInstrumentPreviewInvalidate_All = 0xFFFFFFFFu
+};
+
 /* Show the combined instrument editor dialog with Instrument and Samples tabs,
  * plus a piano keyboard for preview. Returns true if user clicked OK or Apply
  * (and changes should be committed). */
@@ -36,7 +45,7 @@ bool ShowInstrumentExtEditorDialog(
     std::function<void(uint32_t, int, BAESampleInfo const *, int16_t, unsigned char, BAERmfEditorCompressionType, bool, int, BAERmfEditorInstrumentExtInfo const *)> playCallback,
     std::function<void()> stopCallback,
     std::function<void(int)> stopTaggedCallback,
-    std::function<void()> invalidatePreviewCallback,
+    std::function<void(uint32_t)> invalidatePreviewCallback,
     std::function<bool(uint32_t, wxString const &)> replaceCallback,
     std::function<bool(uint32_t, wxString const &)> exportCallback,
     /* Output: sample edits (same as existing dialog) */

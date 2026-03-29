@@ -1159,6 +1159,13 @@ public:
             m_adsrTime[i]->Show(false);
             m_adsrFlags[i]->Show(false);
         }
+        m_lfoAdsrStageSpin->SetValue(0);
+        for (int i = 0; i < BAE_EDITOR_MAX_ADSR_STAGES; i++) {
+            m_lfoAdsrRowLabels[i]->Show(false);
+            m_lfoAdsrLevel[i]->Show(false);
+            m_lfoAdsrTime[i]->Show(false);
+            m_lfoAdsrFlags[i]->Show(false);
+        }
         m_lfoCountSpin->SetValue(0);
         m_currentLfoIndex = -1;
         m_lfoSelector->SetSelection(wxNOT_FOUND);
@@ -1257,7 +1264,15 @@ private:
     wxSpinCtrl *m_lfoPeriod;
     wxSpinCtrl *m_lfoDCFeed;
     wxSpinCtrl *m_lfoLevel;
+    wxCheckBox *m_lfoEnvelopeOnly;
     LFOWaveformGraphPanel *m_lfoGraph;
+    
+    /* LFO Envelope Variables */
+    wxSpinCtrl *m_lfoAdsrStageSpin;
+    wxSpinCtrl *m_lfoAdsrLevel[BAE_EDITOR_MAX_ADSR_STAGES];
+    wxSpinCtrlDouble *m_lfoAdsrTime[BAE_EDITOR_MAX_ADSR_STAGES];
+    wxChoice *m_lfoAdsrFlags[BAE_EDITOR_MAX_ADSR_STAGES];
+    wxStaticText *m_lfoAdsrRowLabels[BAE_EDITOR_MAX_ADSR_STAGES];
     ADSRGraphPanel *m_lfoAdsrGraph;
 
     /* State */
@@ -1386,6 +1401,16 @@ private:
             m_lfoPeriod->SetValue(0);
             m_lfoDCFeed->SetValue(0);
             m_lfoLevel->SetValue(0);
+            if (m_lfoEnvelopeOnly) m_lfoEnvelopeOnly->SetValue(false);
+            if (m_lfoShape) m_lfoShape->Enable(true);
+            if (m_lfoPeriod) m_lfoPeriod->Enable(true);
+            m_lfoAdsrStageSpin->SetValue(0);
+            for (int i = 0; i < BAE_EDITOR_MAX_ADSR_STAGES; i++) {
+                m_lfoAdsrRowLabels[i]->Show(false);
+                m_lfoAdsrLevel[i]->Show(false);
+                m_lfoAdsrTime[i]->Show(false);
+                m_lfoAdsrFlags[i]->Show(false);
+            }
             m_loading = wasLoading;
             RefreshLFOGraph();
             RefreshLFOEnvelopeGraph();
@@ -1397,6 +1422,29 @@ private:
         m_lfoPeriod->SetValue(lfo.period);
         m_lfoDCFeed->SetValue(lfo.DC_feed);
         m_lfoLevel->SetValue(lfo.level);
+        
+        bool isEnvOnly = (lfo.period == 0);
+        if (m_lfoEnvelopeOnly) {
+            m_lfoEnvelopeOnly->SetValue(isEnvOnly);
+        }
+        if (m_lfoShape) m_lfoShape->Enable(!isEnvOnly);
+        if (m_lfoPeriod) m_lfoPeriod->Enable(!isEnvOnly);
+
+        m_lfoAdsrStageSpin->SetValue((int)lfo.adsr.stageCount);
+        for (int i = 0; i < BAE_EDITOR_MAX_ADSR_STAGES; i++) {
+            int lvl = (i < (int)lfo.adsr.stageCount) ? lfo.adsr.stages[i].level : 0;
+            int32_t tmRaw = (i < (int)lfo.adsr.stageCount) ? lfo.adsr.stages[i].time : 0;
+            int fl = (i < (int)lfo.adsr.stageCount) ? lfo.adsr.stages[i].flags : 0;
+            m_lfoAdsrLevel[i]->SetValue(lvl);
+            m_lfoAdsrTime[i]->SetValue((double)tmRaw / 1000000.0);
+            m_lfoAdsrFlags[i]->SetSelection(FindLabelIndex(kADSRFlagLabels, kADSRFlagCount, fl));
+            bool visible = (i < (int)lfo.adsr.stageCount);
+            m_lfoAdsrRowLabels[i]->Show(visible);
+            m_lfoAdsrLevel[i]->Show(visible);
+            m_lfoAdsrTime[i]->Show(visible);
+            m_lfoAdsrFlags[i]->Show(visible);
+        }
+        
         m_loading = wasLoading;
         RefreshLFOGraph();
         RefreshLFOEnvelopeGraph();
@@ -1410,11 +1458,27 @@ private:
         int shapeSel = m_lfoShape->GetSelection();
         if (shapeSel >= 0 && shapeSel < kLFOShapeCount) lfo.waveShape = kLFOShapeLabels[shapeSel].value;
         lfo.period = m_lfoPeriod->GetValue();
-        if (lfo.period != 0 && lfo.period <= 512)
+
+        if (m_lfoEnvelopeOnly && m_lfoEnvelopeOnly->GetValue()) {
+            lfo.period = 0;
+        } else if (lfo.period != 0 && lfo.period <= 512) {
             lfo.period = 513; // engine requires period == 0 (disabled) or > 512
+        } else if (lfo.period == 0) {
+            lfo.period = 513;
+        }
+
         lfo.DC_feed = m_lfoDCFeed->GetValue();
         lfo.level = m_lfoLevel->GetValue();
+        
+        lfo.adsr.stageCount = (uint32_t)m_lfoAdsrStageSpin->GetValue();
+        for (int i = 0; i < (int)lfo.adsr.stageCount && i < BAE_EDITOR_MAX_ADSR_STAGES; i++) {
+            lfo.adsr.stages[i].level = m_lfoAdsrLevel[i]->GetValue();
+            lfo.adsr.stages[i].time = (int32_t)(m_lfoAdsrTime[i]->GetValue() * 1000000.0);
+            int sel = m_lfoAdsrFlags[i]->GetSelection();
+            lfo.adsr.stages[i].flags = (sel >= 0 && sel < kADSRFlagCount) ? kADSRFlagLabels[sel].value : 0;
+        }
     }
+
 
     void BuildUI() {
         wxBoxSizer *sizer = new wxBoxSizer(wxVERTICAL);
@@ -1583,16 +1647,19 @@ private:
 
         /* LFO section */
         {
-            lfoBox = new wxStaticBoxSizer(wxVERTICAL, this, "LFOs");
+            lfoBox = new wxStaticBoxSizer(wxVERTICAL, this, "Modulators (LFO / Envelope)");
             wxBoxSizer *row = new wxBoxSizer(wxHORIZONTAL);
             row->Add(new wxStaticText(lfoBox->GetStaticBox(), wxID_ANY, "Count:"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
             m_lfoCountSpin = new wxSpinCtrl(lfoBox->GetStaticBox(), wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(60, -1),
                                             wxSP_ARROW_KEYS, 0, BAE_EDITOR_MAX_LFOS, 0);
             row->Add(m_lfoCountSpin, 0, wxRIGHT, 15);
-            row->Add(new wxStaticText(lfoBox->GetStaticBox(), wxID_ANY, "Edit LFO:"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+            row->Add(new wxStaticText(lfoBox->GetStaticBox(), wxID_ANY, "Modulator:"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
             m_lfoSelector = new wxChoice(lfoBox->GetStaticBox(), wxID_ANY);
-            for (int i = 0; i < BAE_EDITOR_MAX_LFOS; i++) m_lfoSelector->Append(wxString::Format("LFO %d", i));
-            row->Add(m_lfoSelector, 0);
+            for (int i = 0; i < BAE_EDITOR_MAX_LFOS; i++) m_lfoSelector->Append(wxString::Format("%d", i));
+            row->Add(m_lfoSelector, 0, wxRIGHT, 15);
+
+            m_lfoEnvelopeOnly = new wxCheckBox(lfoBox->GetStaticBox(), wxID_ANY, "Envelope Only");
+            row->Add(m_lfoEnvelopeOnly, 0, wxALIGN_CENTER_VERTICAL);
             lfoBox->Add(row, 0, wxALL, 4);
 
             wxFlexGridSizer *grid = new wxFlexGridSizer(2, 4, 6);
@@ -1622,9 +1689,64 @@ private:
             lfoBox->Add(m_lfoGraph, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 4);
 
             lfoBox->Add(new wxStaticText(lfoBox->GetStaticBox(), wxID_ANY, "LFO Envelope (selected LFO)"), 0, wxLEFT | wxRIGHT | wxBOTTOM, 4);
+
+            wxBoxSizer *lfoAdsrCountRow = new wxBoxSizer(wxHORIZONTAL);
+            lfoAdsrCountRow->Add(new wxStaticText(lfoBox->GetStaticBox(), wxID_ANY, "Stages:"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 5);
+            m_lfoAdsrStageSpin = new wxSpinCtrl(lfoBox->GetStaticBox(), wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(60, -1),
+                                                wxSP_ARROW_KEYS, 0, BAE_EDITOR_MAX_ADSR_STAGES, 0);
+            lfoAdsrCountRow->Add(m_lfoAdsrStageSpin, 0);
+            lfoBox->Add(lfoAdsrCountRow, 0, wxLEFT | wxRIGHT | wxBOTTOM, 4);
+
             m_lfoAdsrGraph = new ADSRGraphPanel(lfoBox->GetStaticBox());
             m_lfoAdsrGraph->SetMinSize(wxSize(-1, 72));
             lfoBox->Add(m_lfoAdsrGraph, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 4);
+
+            wxFlexGridSizer *lfoAdsrGrid = new wxFlexGridSizer(0, 4, 2, 6);
+            lfoAdsrGrid->Add(new wxStaticText(lfoBox->GetStaticBox(), wxID_ANY, "#"), 0, wxALIGN_CENTER);
+            lfoAdsrGrid->Add(new wxStaticText(lfoBox->GetStaticBox(), wxID_ANY, "Level"), 0, wxALIGN_CENTER);
+            lfoAdsrGrid->Add(new wxStaticText(lfoBox->GetStaticBox(), wxID_ANY, "Time (s)"), 0, wxALIGN_CENTER);
+            lfoAdsrGrid->Add(new wxStaticText(lfoBox->GetStaticBox(), wxID_ANY, "Type"), 0, wxALIGN_CENTER);
+
+            for (int i = 0; i < BAE_EDITOR_MAX_ADSR_STAGES; i++) {
+                m_lfoAdsrRowLabels[i] = new wxStaticText(lfoBox->GetStaticBox(), wxID_ANY, wxString::Format("%d", i));
+                lfoAdsrGrid->Add(m_lfoAdsrRowLabels[i], 0, wxALIGN_CENTER_VERTICAL);
+                m_lfoAdsrLevel[i] = new wxSpinCtrl(lfoBox->GetStaticBox(), wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(80, -1),
+                                                   wxSP_ARROW_KEYS, -1000000, 1000000, 0);
+                lfoAdsrGrid->Add(m_lfoAdsrLevel[i], 0);
+                m_lfoAdsrTime[i] = new wxSpinCtrlDouble(lfoBox->GetStaticBox(), wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(100, -1),
+                                                        wxSP_ARROW_KEYS, -16.0, 16.0, 0.0, 0.001);
+                m_lfoAdsrTime[i]->SetDigits(3);
+                lfoAdsrGrid->Add(m_lfoAdsrTime[i], 0);
+                m_lfoAdsrFlags[i] = new wxChoice(lfoBox->GetStaticBox(), wxID_ANY);
+                FillChoice(m_lfoAdsrFlags[i], kADSRFlagLabels, kADSRFlagCount);
+                m_lfoAdsrFlags[i]->SetSelection(0);
+                lfoAdsrGrid->Add(m_lfoAdsrFlags[i], 0);
+
+                m_lfoAdsrLevel[i]->Bind(wxEVT_SPINCTRL, [this](wxCommandEvent &) { SaveLFOFromUI(m_currentLfoIndex); RefreshLFOEnvelopeGraph(); NotifyParameterChanged(); });
+                m_lfoAdsrTime[i]->Bind(wxEVT_SPINCTRLDOUBLE, [this](wxSpinDoubleEvent &) { SaveLFOFromUI(m_currentLfoIndex); RefreshLFOEnvelopeGraph(); NotifyParameterChanged(); });
+                m_lfoAdsrFlags[i]->Bind(wxEVT_CHOICE, [this](wxCommandEvent &) { SaveLFOFromUI(m_currentLfoIndex); RefreshLFOEnvelopeGraph(); NotifyParameterChanged(); });
+
+                m_lfoAdsrRowLabels[i]->Show(false);
+                m_lfoAdsrLevel[i]->Show(false);
+                m_lfoAdsrTime[i]->Show(false);
+                m_lfoAdsrFlags[i]->Show(false);
+            }
+            lfoBox->Add(lfoAdsrGrid, 0, wxLEFT | wxRIGHT | wxBOTTOM, 4);
+
+            m_lfoAdsrStageSpin->Bind(wxEVT_SPINCTRL, [this, lfoBox](wxCommandEvent &) {
+                int count = m_lfoAdsrStageSpin->GetValue();
+                for (int i = 0; i < BAE_EDITOR_MAX_ADSR_STAGES; i++) {
+                    bool vis = (i < count);
+                    m_lfoAdsrRowLabels[i]->Show(vis);
+                    m_lfoAdsrLevel[i]->Show(vis);
+                    m_lfoAdsrTime[i]->Show(vis);
+                    m_lfoAdsrFlags[i]->Show(vis);
+                }
+                lfoBox->GetStaticBox()->GetParent()->Layout();
+                SaveLFOFromUI(m_currentLfoIndex);
+                RefreshLFOEnvelopeGraph();
+                NotifyParameterChanged();
+            });
 
             m_lfoSelector->Bind(wxEVT_CHOICE, [this](wxCommandEvent &) {
                 if (m_loading) return;
@@ -1671,6 +1793,23 @@ private:
             m_lfoPeriod->Bind(wxEVT_SPINCTRL, lfoChanged);
             m_lfoDCFeed->Bind(wxEVT_SPINCTRL, lfoChanged);
             m_lfoLevel->Bind(wxEVT_SPINCTRL, lfoChanged);
+            
+            m_lfoEnvelopeOnly->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent &) {
+                if (m_loading) return;
+                bool isEnv = m_lfoEnvelopeOnly->GetValue();
+                m_lfoShape->Enable(!isEnv);
+                m_lfoPeriod->Enable(!isEnv);
+                if (isEnv) {
+                    m_lfoPeriod->SetValue(0);
+                } else if (m_lfoPeriod->GetValue() == 0) {
+                    /* Only force to 513 if it was exactly 0.
+                       If they want a specific valid engine speed, they can adjust it after unchecking */
+                    m_lfoPeriod->SetValue(513);
+                }
+                SaveLFOFromUI(m_currentLfoIndex);
+                RefreshLFOGraph();
+                NotifyParameterChanged();
+            });
         }
 
         /* Layout: LPF, then LFO+ADSR side-by-side */

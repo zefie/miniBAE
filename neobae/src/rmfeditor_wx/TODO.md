@@ -48,8 +48,12 @@
 
 # 0.12a
 - ~~Fix ZMF tooltip~~
-- Graphics for pitch envelope
-
+- ~~Graphics and implementation for pitch envelope~~
+- Do things more efficiently
+  - ~~Optimize bank loading~~
+  - Optimize bank rebuilding and instrument editor apply
+  - Add dialog with progress bar when doing long duration (>2s) operations
+  
 # Future
 - Allow cut/copy/pasting instruments
 - Allow dragging samples to other instruments
@@ -77,8 +81,6 @@
 
 
 # Harder stuff
-- Do things more efficiently
-  - building preview bank and song and instruments can be memory/cpu intensive
 
 - ~~Allow for automation like Volume to be able have a slide on it~~
   - ~~for example, to easily make a fadein or fadeout~~

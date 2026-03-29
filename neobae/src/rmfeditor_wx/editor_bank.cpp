@@ -418,6 +418,73 @@ static void BuildSamplesTab(BankEditorPanel *bp);
 static void InvalidateBankPreviewCache(BankEditorPanel *bp);
 static void RefreshWaveform(BankEditorPanel *bp);
 static void FreeCachedWaveform(BankEditorPanel *bp);
+
+static bool CollectInstrumentSndRefsFast(BankEditorPanel *bp,
+                                         uint32_t instrumentIndex,
+                                         std::vector<uint16_t> *outSndIds)
+{
+    enum
+    {
+        kInstHeaderMinSize = 14,
+        kInstKeySplitSize = 8
+    };
+    XLongResourceID instID = 0;
+    int32_t instSize = 0;
+    char instName[256] = {0};
+    XPTR instData;
+    int16_t splitCount;
+
+    if (!bp || !bp->bankToken || !outSndIds) {
+        return false;
+    }
+    outSndIds->clear();
+
+    instData = XGetIndexedFileResource((XFILE)bp->bankToken,
+                                       ID_INST,
+                                       &instID,
+                                       static_cast<int32_t>(instrumentIndex),
+                                       instName,
+                                       &instSize);
+    if (!instData || instSize < kInstHeaderMinSize) {
+        if (instData) {
+            XDisposePtr(instData);
+        }
+        return false;
+    }
+
+    splitCount = static_cast<int16_t>(XGetShort(static_cast<unsigned char *>(instData) + 12));
+    if (splitCount < 0) {
+        splitCount = 0;
+    }
+
+    if (splitCount == 0) {
+        uint16_t sndID = static_cast<uint16_t>(XGetShort(static_cast<unsigned char *>(instData) + 0));
+        outSndIds->push_back(sndID);
+        XDisposePtr(instData);
+        return true;
+    }
+
+    {
+        size_t splitBytes = static_cast<size_t>(splitCount) * static_cast<size_t>(kInstKeySplitSize);
+        size_t requiredSize = static_cast<size_t>(kInstHeaderMinSize) + splitBytes;
+        if (requiredSize > static_cast<size_t>(instSize)) {
+            XDisposePtr(instData);
+            return false;
+        }
+    }
+
+    outSndIds->reserve(static_cast<size_t>(splitCount));
+    for (int32_t splitIndex = 0; splitIndex < splitCount; ++splitIndex) {
+        unsigned char *splitPtr = static_cast<unsigned char *>(instData) +
+                                  kInstHeaderMinSize +
+                                  (splitIndex * kInstKeySplitSize);
+        uint16_t sndID = static_cast<uint16_t>(XGetShort(splitPtr + 2));
+        outSndIds->push_back(sndID);
+    }
+
+    XDisposePtr(instData);
+    return true;
+}
 static void StopBankKeyboardPreview(BankEditorPanel *bp);
 static void ApplyDirtyParams(BankEditorPanel *bp, bool commitSampleReEncode);
 static void StopAllBankNotes(BankEditorPanel *bp);
@@ -473,10 +540,22 @@ static void ApplyDirtyParams(BankEditorPanel *bp, bool commitSampleReEncode)
         /* Pass codec intent to the callback — it will handle re-encoding from the
          * original PCM cache so we never compress already-compressed data. */
         if (commitSampleReEncode && bp->sampleParamsPanel && bp->sampleParamsPanel->GetCodecSelection() == 0) {
+            auto it = bp->appliedCodecs.find({bp->currentInstrumentIndex, bp->currentSampleIndex});
+            bool wasChanged = (it != bp->appliedCodecs.end());
+            
             bp->dirtyExtInfo.sampleTargetCompression = BAE_EDITOR_COMPRESSION_DONT_CHANGE;
-            bp->dirtyExtInfo.sampleTargetStorageType = kBankOriginalStorageSentinel;
+            if (wasChanged) {
+                /* User is reverting a previous explicit codec change this session. */
+                bp->dirtyExtInfo.sampleTargetStorageType = kBankOriginalStorageSentinel;
+            } else {
+                /* It's already the original. Don't trigger a wasteful re-encode! */
+                bp->dirtyExtInfo.sampleTargetStorageType = (BAERmfEditorSndStorageType)sData.sndStorageType;
+            }
+            
             /* User chose "Original" — forget any previously applied codec */
-            bp->appliedCodecs.erase({bp->currentInstrumentIndex, bp->currentSampleIndex});
+            if (wasChanged) {
+                bp->appliedCodecs.erase(it);
+            }
         } else {
             int storageWithFlags = (int)sData.sndStorageType;
             if (sData.opusRoundTripResample) {
@@ -912,16 +991,13 @@ static void PopulateSampleTree(BankEditorPanel *bp)
 
     /* Collect all unique samples and their referencing instruments */
     for (uint32_t i = 0; i < instCount; ++i) {
-        uint32_t sampleCount = 0;
-        if (BAERmfEditorBank_GetInstrumentSampleCount(bp->bankToken, i, &sampleCount) != BAE_NO_ERROR) {
+        std::vector<uint16_t> sndRefs;
+
+        if (!CollectInstrumentSndRefsFast(bp, i, &sndRefs)) {
             continue;
         }
-        for (uint32_t s = 0; s < sampleCount; ++s) {
-            BAERmfEditorBankSampleInfo sampleInfo;
-            if (BAERmfEditorBank_GetInstrumentSampleInfo(bp->bankToken, i, s, &sampleInfo) != BAE_NO_ERROR) {
-                continue;
-            }
-            sampleMap[sampleInfo.sndResourceID].push_back(std::make_pair(i, s));
+        for (uint32_t s = 0; s < sndRefs.size(); ++s) {
+            sampleMap[sndRefs[s]].push_back(std::make_pair(i, s));
         }
     }
 
@@ -1825,7 +1901,6 @@ static void BuildInstrumentTab(BankEditorPanel *bp)
     bp->instParamsPanel = new InstrumentParamsPanel(bp->instPage);
     bp->instParamsPanel->SetOnParameterChanged([bp]() {
         bp->hasPendingEdits = true;
-        ApplyDirtyParams(bp, false);
     });
     bp->instParamsPanel->Hide();
     sizer->Add(bp->instParamsPanel, 1, wxEXPAND);
@@ -1853,11 +1928,9 @@ static void BuildSamplesTab(BankEditorPanel *bp)
     bp->sampleParamsPanel->Hide();
     bp->sampleParamsPanel->SetOnParameterChanged([bp]() {
         bp->hasPendingEdits = true;
-        ApplyDirtyParams(bp, false);
     });
     bp->sampleParamsPanel->SetOnLoopChanged([bp]() {
         bp->hasPendingEdits = true;
-        ApplyDirtyParams(bp, false);
     });
     sizer->Add(bp->sampleParamsPanel, 1, wxEXPAND);
 

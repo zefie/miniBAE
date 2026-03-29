@@ -71,7 +71,7 @@ public:
                               std::function<void(uint32_t, int, BAESampleInfo const *, int16_t, unsigned char, BAERmfEditorCompressionType, bool, int, BAERmfEditorInstrumentExtInfo const *)> playCallback,
                               std::function<void()> stopCallback,
                               std::function<void(int)> stopTaggedCallback,
-                              std::function<void()> invalidatePreviewCallback,
+                              std::function<void(uint32_t)> invalidatePreviewCallback,
                               std::function<bool(uint32_t, wxString const &)> replaceCallback,
                               std::function<bool(uint32_t, wxString const &)> exportCallback)
         : wxDialog(parent, wxID_ANY, "Edit Instrument", wxDefaultPosition, wxSize(1180, 560),
@@ -241,22 +241,10 @@ public:
             }
         }
 
-        auto instantApply = [this](wxCommandEvent &event) {
-            if (!m_loadingUiValues) {
-                wxCommandEvent evt;
-                OnApply(evt);
-            }
-            event.Skip();
-        };
-        /* Wire the sample params panel's parameter-changed callback to instant apply. */
         if (m_sampleParamsPanel) {
-            m_sampleParamsPanel->SetOnParameterChanged([this, instantApply]() {
+            m_sampleParamsPanel->SetOnParameterChanged([this]() {
                 RefreshPianoRangeFromRootUI();
-                if (!m_loadingUiValues) {
-                    wxCommandEvent evt;
-                    OnApply(evt);
-                    RefreshWaveformIfCodecChanged();
-                }
+                RefreshWaveformIfCodecChanged();
             });
         }
     }
@@ -290,7 +278,7 @@ private:
     std::function<void(uint32_t, int, BAESampleInfo const *, int16_t, unsigned char, BAERmfEditorCompressionType, bool, int, BAERmfEditorInstrumentExtInfo const *)> m_playCallback;
     std::function<void()> m_stopCallback;
     std::function<void(int)> m_stopTaggedCallback;
-    std::function<void()> m_invalidatePreviewCallback;
+    std::function<void(uint32_t)> m_invalidatePreviewCallback;
     std::function<bool(uint32_t, wxString const &)> m_replaceCallback;
     std::function<bool(uint32_t, wxString const &)> m_exportCallback;
 
@@ -417,9 +405,9 @@ private:
         }
     }
 
-    void InvalidatePreviewCache() {
+    void InvalidatePreviewCache(uint32_t reasonFlags = kInstrumentPreviewInvalidate_All) {
         if (m_invalidatePreviewCallback) {
-            m_invalidatePreviewCallback();
+            m_invalidatePreviewCallback(reasonFlags);
         }
     }
 
@@ -590,7 +578,6 @@ private:
         m_instParamsPanel = new InstrumentParamsPanel(m_notebook);
         m_instParamsPanel->LoadFromExtInfo(m_extInfo, instName, program);
         m_instParamsPanel->SetOnParameterChanged([this]() {
-            InvalidatePreviewCache();
         });
         m_notebook->AddPage(m_instParamsPanel, "Instrument");
     }
@@ -658,7 +645,7 @@ private:
         m_sampleParamsPanel->SetWriteMode(true, true, true, true);
         m_sampleParamsPanel->SetOnParameterChanged([this]() {
             RefreshPianoRangeFromRootUI();
-            InvalidatePreviewCache();
+            RefreshWaveformIfCodecChanged();
         });
         m_sampleParamsPanel->SetOnLoopChanged([this]() {
             CommitLoopChangeToUndo();
@@ -677,7 +664,7 @@ private:
             SaveCurrentSampleFromUI();
             int sel = m_splitChoice->GetSelection();
             if (sel >= 0) LoadLocalSample(sel);
-            InvalidatePreviewCache();
+            
         });
         UpdateSampleButtonState();
     }
@@ -1092,7 +1079,7 @@ private:
         if (m_commitUndoCallback) {
             m_commitUndoCallback("Edit Instrument");
         }
-        InvalidatePreviewCache();
+        InvalidatePreviewCache(kInstrumentPreviewInvalidate_All);
         m_inInstantApply = false;
     }
 
@@ -1120,7 +1107,7 @@ bool ShowInstrumentExtEditorDialog(
     std::function<void(uint32_t, int, BAESampleInfo const *, int16_t, unsigned char, BAERmfEditorCompressionType, bool, int, BAERmfEditorInstrumentExtInfo const *)> playCallback,
     std::function<void()> stopCallback,
     std::function<void(int)> stopTaggedCallback,
-    std::function<void()> invalidatePreviewCallback,
+    std::function<void(uint32_t)> invalidatePreviewCallback,
     std::function<bool(uint32_t, wxString const &)> replaceCallback,
     std::function<bool(uint32_t, wxString const &)> exportCallback,
     std::vector<uint32_t> *outDeletedSampleIndices,

@@ -1732,46 +1732,56 @@ int32_t        const currentSize = ptr ? XGetPtrSize(ptr) : 0;
     //      We should apply that quantum before this test.
     if (size != currentSize)
     {
-    XPTR        newPtr;
+        XPI_Memblock *mb = (XPI_Memblock*)XIsOurMemoryPtr(ptr);
+        XPI_Memblock *newMb = realloc(mb, sizeof(XPI_Memblock) + size);
+
+        if (newMb) {
+            newMb->blockSize = size;
+            return (XPTR)(newMb + 1); // or &newMb->data[0]
+        } else {
+            // fall back to the old way
+            
+        XPTR        newPtr;
 
 #if TRUE    // disable when these is an BAE_ResizePointer()
-        if ((size < currentSize) &&
-            (size >= 0x100000) &&               // if over 1Mb would have to be allocated
-            (currentSize - size <= 0x10000) &&  // if less than 64Kb would be saved
-            XIsOurMemoryPtr(ptr))
-        {
-            newPtr = NULL;  // force hacky but quick pseudo resizing
-        }
-        else
+            if ((size < currentSize) &&
+                (size >= 0x100000) &&               // if over 1Mb would have to be allocated
+                (currentSize - size <= 0x10000) &&  // if less than 64Kb would be saved
+                XIsOurMemoryPtr(ptr))
+            {
+                newPtr = NULL;  // force hacky but quick pseudo resizing
+            }
+            else
 #endif
-        {
-            newPtr = XNewPtr(size);
-        }
-
-        if (newPtr && ptr)
-        {
-        int32_t        copyLength;
-        
-            copyLength = currentSize;
-            if (copyLength > size)
             {
-                copyLength = size;
+                newPtr = XNewPtr(size);
             }
-            XBlockMove(ptr, newPtr, copyLength);
-            XDisposePtr(ptr);
-        }
-        else if (ptr && (size < currentSize))
-        {
-        XPI_Memblock*       odata;
 
-            odata = (XPI_Memblock*)XIsOurMemoryPtr(ptr);
-            if (odata)
+            if (newPtr && ptr)
             {
-                odata->blockSize = size;
-                return ptr;
+            int32_t        copyLength;
+            
+                copyLength = currentSize;
+                if (copyLength > size)
+                {
+                    copyLength = size;
+                }
+                XBlockMove(ptr, newPtr, copyLength);
+                XDisposePtr(ptr);
             }
+            else if (ptr && (size < currentSize))
+            {
+            XPI_Memblock*       odata;
+
+                odata = (XPI_Memblock*)XIsOurMemoryPtr(ptr);
+                if (odata)
+                {
+                    odata->blockSize = size;
+                    return ptr;
+                }
+            }
+            return newPtr;
         }
-        return newPtr;
     }
     return ptr;
 }

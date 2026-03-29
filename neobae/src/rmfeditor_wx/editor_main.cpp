@@ -64,13 +64,13 @@ extern "C" {
 #include <gtk/gtk.h>
 #endif // __WXGTK__
 
-#define VERSION "0.11a"
+#define VERSION "0.12a"
 
 namespace {
 
 #ifdef __WXMSW__
 #ifdef GIT_VERSION
-        constexpr char const* kVersionString = VERSION " (" STR(GIT_VERSION) ")";
+    constexpr char const* kVersionString = VERSION " (" STR(GIT_VERSION) ")";
 #else
     constexpr char const* kVersionString = VERSION;
 #endif // GIT_VERSION    
@@ -188,6 +188,7 @@ enum {
     ID_ReloadInternalBank,
     ID_PlaybackTimer,
     ID_NotePreviewTimer,
+    ID_KeyboardPreviewInvalidateTimer,
     ID_CompressInstrument,
     ID_CompressAllInstruments,
     ID_DeleteAllInstruments,
@@ -206,6 +207,8 @@ enum {
     ID_SettingsPanFix,
     ID_SettingsClassicChorus,
 };
+
+static constexpr int kKeyboardPreviewInvalidateDebounceMs = 250;
 
 static constexpr uint8_t  kNbsMagic[4] = {'N', 'B', 'S', '\0'};
 static constexpr uint16_t kNbsVersion = 2;       /* v2: LZMA compression (v1 used zlib) */
@@ -487,6 +490,7 @@ public:
                     m_playbackSong(nullptr),
                     m_notePreviewSong(nullptr),
                     m_keyboardPreviewSong(nullptr),
+                    m_keyboardPreviewBankToken(nullptr),
                     m_bankPreviewSong(nullptr),
                     m_bankPreviewSongStarted(false),
                     m_bankPreviewLoadedInst(static_cast<BAE_INSTRUMENT>(-1)),
@@ -495,6 +499,7 @@ public:
                     m_previewSound(nullptr),
                     m_playbackTimer(this, ID_PlaybackTimer),
                     m_notePreviewTimer(this, ID_NotePreviewTimer),
+                    m_previewInvalidateTimer(this, ID_KeyboardPreviewInvalidateTimer),
                     m_notePreviewActive(false),
                     m_notePreviewChannel(0),
                     m_notePreviewNote(0),
@@ -1133,6 +1138,7 @@ public:
                         m_hasBankDirtyExtInfo = (extResult != BAE_NO_ERROR);
                         m_bankPreviewDirtyApplied = false;
                         m_bankPreviewLoadedInst = static_cast<BAE_INSTRUMENT>(-1);
+                        m_bankDirtinessEpoch++;
                         /* Bank was modified — recompute dirty state hash. */
                         RefreshBankDirtyStateFromHash();
                     } else {
@@ -1377,6 +1383,7 @@ public:
         Bind(wxEVT_MENU, &MainFrame::OnAssignSampleToInstrument, this, ID_AssignSampleToInstrument);
         Bind(wxEVT_TIMER, &MainFrame::OnPlaybackTimer, this, ID_PlaybackTimer);
         Bind(wxEVT_TIMER, &MainFrame::OnNotePreviewTimer, this, ID_NotePreviewTimer);
+        Bind(wxEVT_TIMER, &MainFrame::OnKeyboardPreviewInvalidateTimer, this, ID_KeyboardPreviewInvalidateTimer);
         m_editorNotebook->Bind(wxEVT_NOTEBOOK_PAGE_CHANGED, &MainFrame::OnEditorTabChanged, this);
         Bind(wxEVT_MENU, &MainFrame::OnBankSave, this, ID_BankSave);
         Bind(wxEVT_MENU, &MainFrame::OnBankSaveAs, this, ID_BankSaveAs);
@@ -1484,6 +1491,8 @@ private:
     std::vector<unsigned char> m_notePreviewSongBlob;
     BAESong m_keyboardPreviewSong;
     std::vector<unsigned char> m_keyboardPreviewSongBlob;
+    BAEBankToken m_keyboardPreviewBankToken;
+    std::vector<unsigned char> m_keyboardPreviewBankBlob;
     BAESong m_bankPreviewSong;
     bool m_bankPreviewSongStarted;
     BAE_INSTRUMENT m_bankPreviewLoadedInst;
@@ -1511,6 +1520,7 @@ private:
     wxString m_previewSampleTempPath;
     wxTimer m_playbackTimer;
     wxTimer m_notePreviewTimer;
+    wxTimer m_previewInvalidateTimer;
     bool m_notePreviewActive;
     unsigned char m_notePreviewChannel;
     unsigned char m_notePreviewNote;
@@ -1543,7 +1553,8 @@ private:
     bool m_hasUnsavedChanges;
     bool m_bankHasUnsavedChanges;
     uint32_t m_cleanStateHash = 0;  // Hash of document when last saved
-    uint32_t m_cleanBankStateHash = 0;  // Hash of bank when last saved (0 = built-in)
+    uint32_t m_cleanBankStateHash = 0;
+    uint32_t m_bankDirtinessEpoch = 1;  // Hash of bank when last saved (0 = built-in)
 
     /* Original SND payload for samples that have been re-encoded in the current bank
      * session.  Keyed by sndResourceID (uint16_t).  Once populated for a given
@@ -1601,7 +1612,7 @@ private:
     }
 
     uint32_t ComputeCurrentBankStateHash() const {
-        uint32_t hash = ComputeBankHash(m_bankToken);
+        uint32_t hash = m_bankDirtinessEpoch;
 
         if (m_hasBankDirtyExtInfo && m_bankEditorPanel) {
             uint32_t idx = BankEditorPanel_GetCurrentInstrumentIndex(m_bankEditorPanel);
@@ -2600,7 +2611,7 @@ private:
                 m_loadedBankPath.clear();
                 m_bankDisplayName = "Built-in";
                 // Capture hash of built-in bank state (empty path = built-in)
-                m_cleanBankStateHash = ComputeBankHash(m_bankToken);
+                m_cleanBankStateHash = m_bankDirtinessEpoch;
                 m_bankHasUnsavedChanges = false;
                 m_bankModifiedHintFromSession = false;
             }
@@ -2638,7 +2649,7 @@ private:
                 m_bankLoaded = true;
                 m_bankTokens.push_back(m_bankToken);
                 m_bankDisplayName = "Built-in";
-                m_cleanBankStateHash = ComputeBankHash(m_bankToken);
+                m_cleanBankStateHash = m_bankDirtinessEpoch;
             }
 #endif
             UpdateLoadedBankStatus();
@@ -2650,7 +2661,7 @@ private:
         m_loadedBankPath = path;
         m_bankModifiedHintFromSession = false;
         // Capture hash of loaded bank state
-        m_cleanBankStateHash = ComputeBankHash(m_bankToken);
+        m_cleanBankStateHash = m_bankDirtinessEpoch;
         m_bankHasUnsavedChanges = false;
         char friendlyBuf[128];
         wxString bankName;
@@ -2682,7 +2693,7 @@ private:
             m_bankHasUnsavedChanges = false;
             m_bankModifiedHintFromSession = false;
             m_bankDisplayName = wxFileName(m_loadedBankPath).GetName();
-            m_cleanBankStateHash = ComputeBankHash(m_bankToken);
+            m_cleanBankStateHash = m_bankDirtinessEpoch;
             SetStatusText(wxString::Format("Bank saved: %s", wxFileNameFromPath(m_loadedBankPath)), 0);
             UpdateStatusBar();
         }
@@ -2712,7 +2723,7 @@ private:
                 m_bankHasUnsavedChanges = false;
                 m_bankModifiedHintFromSession = false;
                 // Capture hash of newly saved bank state
-                m_cleanBankStateHash = ComputeBankHash(m_bankToken);
+                m_cleanBankStateHash = m_bankDirtinessEpoch;
                 SetStatusText(wxString::Format("Bank saved: %s", wxFileNameFromPath(savePath)), 0);
                 UpdateStatusBar();
             }
@@ -2750,7 +2761,7 @@ private:
         m_bankTokens.push_back(builtinToken);
         m_bankDisplayName = "Built-in";
         // Capture hash of built-in bank state
-        m_cleanBankStateHash = ComputeBankHash(m_bankToken);
+        m_cleanBankStateHash = m_bankDirtinessEpoch;
         m_bankHasUnsavedChanges = false;
         m_bankModifiedHintFromSession = false;
         UpdateLoadedBankStatus();
@@ -2998,6 +3009,11 @@ private:
                 default: return 0;
             }
         };
+
+        /* A pending delayed teardown should not race a fresh key-triggered preview. */
+        if (m_previewInvalidateTimer.IsRunning()) {
+            m_previewInvalidateTimer.Stop();
+        }
 
         if (!m_document) {
             return false;
@@ -3317,6 +3333,23 @@ private:
                 if (!BuildPreviewPlaybackBlob(previewDoc, &m_keyboardPreviewSongBlob)) {
                     BAERmfEditorDocument_Delete(previewDoc);
                     return false;
+                }
+
+                m_keyboardPreviewBankBlob = m_keyboardPreviewSongBlob;
+                if (m_keyboardPreviewBankToken) {
+                    BAEMixer_UnloadBank(m_playbackMixer, m_keyboardPreviewBankToken);
+                    m_keyboardPreviewBankToken = nullptr;
+                }
+                if (m_playbackMixer && !m_keyboardPreviewBankBlob.empty()) {
+                    BAEBankToken previewBankToken = nullptr;
+                    BAEResult previewBankResult = BAEMixer_AddBankFromMemory(
+                        m_playbackMixer,
+                        m_keyboardPreviewBankBlob.data(),
+                        static_cast<uint32_t>(m_keyboardPreviewBankBlob.size()),
+                        &previewBankToken);
+                    if (previewBankResult == BAE_NO_ERROR) {
+                        m_keyboardPreviewBankToken = previewBankToken;
+                    }
                 }
                 BAERmfEditorDocument_Delete(previewDoc);
 
@@ -5105,6 +5138,9 @@ private:
     }
 
     void StopKeyboardPreview() {
+        if (m_previewInvalidateTimer.IsRunning()) {
+            m_previewInvalidateTimer.Stop();
+        }
         if (m_keyboardPreviewSong) {
             BAESong_AllNotesOff(m_keyboardPreviewSong, 0);
             BAESong_Stop(m_keyboardPreviewSong, FALSE);
@@ -5113,6 +5149,178 @@ private:
             m_keyboardPreviewSongBlob.clear();
             m_taggedInstrumentPreviewNotes.clear();
         }
+        if (m_keyboardPreviewBankToken && m_playbackMixer) {
+            BAEMixer_UnloadBank(m_playbackMixer, m_keyboardPreviewBankToken);
+            m_keyboardPreviewBankToken = nullptr;
+        }
+        m_keyboardPreviewBankBlob.clear();
+    }
+
+    bool ApplyDialogPreviewHotReload(uint32_t referenceSampleIndex,
+                                     uint32_t reasonFlags) {
+        uint32_t instID;
+        uint32_t resolvedInstID;
+        uint32_t instrumentIndex;
+        BAERmfEditorInstrumentExtInfo extInfo;
+        std::vector<uint32_t> sourceSamples;
+
+        if (!m_document || !m_keyboardPreviewSong) {
+            return false;
+        }
+        if (BAERmfEditorDocument_GetInstIDForSample(m_document, referenceSampleIndex, &instID) != BAE_NO_ERROR || instID == 0) {
+            return false;
+        }
+        resolvedInstID = instID;
+        instrumentIndex = 0;
+
+        /* Fast path for pure instrument-ext edits (LFO/ADSR/LPF/flags): patch
+         * the currently loaded instrument directly without requiring a bank-token
+         * mutation/reload cycle. */
+        if ((reasonFlags & kInstrumentPreviewInvalidate_Ext) != 0 &&
+            (reasonFlags & (kInstrumentPreviewInvalidate_SampleMeta |
+                            kInstrumentPreviewInvalidate_SampleCodec |
+                            kInstrumentPreviewInvalidate_SampleData)) == 0) {
+            if (BAERmfEditorDocument_GetInstrumentExtInfo(m_document, instID, &extInfo) != BAE_NO_ERROR) {
+                return false;
+            }
+            extInfo.instID = instID;
+            BAESong_PatchLoadedInstrumentExtInfo(m_keyboardPreviewSong,
+                                                 static_cast<BAE_INSTRUMENT>(instID),
+                                                 &extInfo);
+            return true;
+        }
+
+        if (!m_keyboardPreviewBankToken) {
+            return false;
+        }
+        if (BAERmfEditorBank_ResolveInstID(m_keyboardPreviewBankToken,
+                                           instID,
+                                           &resolvedInstID,
+                                           &instrumentIndex) != BAE_NO_ERROR) {
+            return false;
+        }
+
+        if ((reasonFlags & kInstrumentPreviewInvalidate_Ext) != 0) {
+            if (BAERmfEditorDocument_GetInstrumentExtInfo(m_document, instID, &extInfo) != BAE_NO_ERROR) {
+                return false;
+            }
+            extInfo.instID = resolvedInstID;
+            if (BAERmfEditorBank_SetInstrumentExtInfo(m_keyboardPreviewBankToken,
+                                                      instrumentIndex,
+                                                      &extInfo) != BAE_NO_ERROR) {
+                return false;
+            }
+        }
+
+        if ((reasonFlags & (kInstrumentPreviewInvalidate_SampleMeta |
+                            kInstrumentPreviewInvalidate_SampleCodec |
+                            kInstrumentPreviewInvalidate_SampleData)) != 0) {
+            sourceSamples = CollectSamplesByProgram(referenceSampleIndex);
+            if (sourceSamples.empty()) {
+                return false;
+            }
+            uint32_t bankSampleCount = 0;
+            if (BAERmfEditorBank_GetInstrumentSampleCount(m_keyboardPreviewBankToken,
+                                                          instrumentIndex,
+                                                          &bankSampleCount) != BAE_NO_ERROR) {
+                return false;
+            }
+            uint32_t sampleWriteCount = std::min<uint32_t>(bankSampleCount,
+                                                           static_cast<uint32_t>(sourceSamples.size()));
+            for (uint32_t sampleWriteIndex = 0; sampleWriteIndex < sampleWriteCount; ++sampleWriteIndex) {
+                BAERmfEditorSampleInfo sourceSampleInfo;
+                BAERmfEditorBankSampleInfo bankSampleInfo;
+                uint32_t sourceSampleIndex = sourceSamples[sampleWriteIndex];
+
+                if (BAERmfEditorDocument_GetSampleInfo(m_document,
+                                                       sourceSampleIndex,
+                                                       &sourceSampleInfo) != BAE_NO_ERROR) {
+                    return false;
+                }
+                if (BAERmfEditorBank_GetInstrumentSampleInfo(m_keyboardPreviewBankToken,
+                                                             instrumentIndex,
+                                                             sampleWriteIndex,
+                                                             &bankSampleInfo) != BAE_NO_ERROR) {
+                    return false;
+                }
+
+                if ((reasonFlags & kInstrumentPreviewInvalidate_SampleMeta) != 0) {
+                    bankSampleInfo.lowKey = sourceSampleInfo.lowKey;
+                    bankSampleInfo.highKey = sourceSampleInfo.highKey;
+                    bankSampleInfo.rootKey = sourceSampleInfo.rootKey;
+                    bankSampleInfo.splitVolume = sourceSampleInfo.splitVolume;
+                    bankSampleInfo.sampleRate = static_cast<uint32_t>(sourceSampleInfo.sampleInfo.sampledRate >> 16);
+                    bankSampleInfo.loopStart = sourceSampleInfo.sampleInfo.startLoop;
+                    bankSampleInfo.loopEnd = sourceSampleInfo.sampleInfo.endLoop;
+                    if (BAERmfEditorBank_SetInstrumentSampleInfo(m_keyboardPreviewBankToken,
+                                                                 instrumentIndex,
+                                                                 sampleWriteIndex,
+                                                                 &bankSampleInfo) != BAE_NO_ERROR) {
+                        return false;
+                    }
+                }
+
+                if ((reasonFlags & (kInstrumentPreviewInvalidate_SampleCodec |
+                                    kInstrumentPreviewInvalidate_SampleData)) != 0) {
+                    void const *pcmData = nullptr;
+                    uint32_t frameCount = 0;
+                    uint16_t bitSize = 0;
+                    uint16_t channels = 0;
+                    BAE_UNSIGNED_FIXED sampleRate = 0;
+                    BAERmfEditorCompressionType targetCompression = sourceSampleInfo.compressionType;
+
+                    if (targetCompression == BAE_EDITOR_COMPRESSION_DONT_CHANGE) {
+                        continue;
+                    }
+                    if (BAERmfEditorDocument_GetSampleWaveformData(m_document,
+                                                                   sourceSampleIndex,
+                                                                   &pcmData,
+                                                                   &frameCount,
+                                                                   &bitSize,
+                                                                   &channels,
+                                                                   &sampleRate) != BAE_NO_ERROR) {
+                        return false;
+                    }
+                    if (!pcmData || frameCount == 0 || bitSize == 0 || channels == 0) {
+                        return false;
+                    }
+                    if (BAERmfEditorBank_ReEncodeSampleFromPCMEx(
+                            m_keyboardPreviewBankToken,
+                            instrumentIndex,
+                            sampleWriteIndex,
+                            targetCompression,
+                            sourceSampleInfo.sndStorageType,
+                            sourceSampleInfo.opusMode,
+                            sourceSampleInfo.opusRoundTripResample ? TRUE : FALSE,
+                            pcmData,
+                            frameCount,
+                            bitSize,
+                            channels,
+                            sampleRate) != BAE_NO_ERROR) {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        (void)BAESong_UnloadInstrument(m_keyboardPreviewSong, static_cast<BAE_INSTRUMENT>(resolvedInstID));
+        if (BAESong_LoadInstrument(m_keyboardPreviewSong, static_cast<BAE_INSTRUMENT>(resolvedInstID)) != BAE_NO_ERROR) {
+            return false;
+        }
+        return true;
+    }
+
+    void ScheduleKeyboardPreviewInvalidation(uint32_t reasonFlags = kInstrumentPreviewInvalidate_All,
+                                             uint32_t referenceSampleIndex = static_cast<uint32_t>(-1)) {
+        if (referenceSampleIndex != static_cast<uint32_t>(-1) &&
+            ApplyDialogPreviewHotReload(referenceSampleIndex, reasonFlags)) {
+            return;
+        }
+        m_previewInvalidateTimer.StartOnce(kKeyboardPreviewInvalidateDebounceMs);
+    }
+
+    void OnKeyboardPreviewInvalidateTimer(wxTimerEvent &) {
+        StopKeyboardPreview();
     }
 
     void SeekKeyboardPreviewToSongEnd() {
@@ -6615,7 +6823,7 @@ private:
                 m_bankLoaded = true;
                 m_bankTokens.push_back(m_bankToken);
                 m_bankDisplayName = "Built-in";
-                m_cleanBankStateHash = ComputeBankHash(m_bankToken);
+                m_cleanBankStateHash = m_bankDirtinessEpoch;
                 SetStatusText("Internal bank reloaded", 0);
             } else {
                 SetStatusText("Failed to reload internal bank", 0);
@@ -7408,7 +7616,7 @@ private:
                 if (m_bankDisplayName.empty()) {
                     m_bankDisplayName = !bankPath.empty() ? wxFileName(bankPath).GetName() : wxString("Built-in");
                 }
-                m_cleanBankStateHash = ComputeBankHash(m_bankToken);
+                m_cleanBankStateHash = m_bankDirtinessEpoch;
 
                 /* Session load restores state; runtime dirty starts clean. */
                 m_bankHasUnsavedChanges = false;
@@ -7429,7 +7637,7 @@ private:
                     m_bankTokens.push_back(m_bankToken);
                     m_bankHasUnsavedChanges = false;
                     m_bankDisplayName = "Built-in";
-                    m_cleanBankStateHash = ComputeBankHash(m_bankToken);
+                    m_cleanBankStateHash = m_bankDirtinessEpoch;
                 }
 #endif
             }
@@ -8665,6 +8873,7 @@ private:
 
     void ReloadBankEditorAfterMutation()
     {
+        m_bankDirtinessEpoch++;
         if (m_bankEditorPanel && m_bankToken) {
             if (m_loadedBankPath.empty()) {
                 BankEditorPanel_LoadBank(m_bankEditorPanel, m_bankToken, "(built-in)");
@@ -11084,7 +11293,6 @@ private:
         SampleTreeItemData *selectedData;
         long targetProgram;
         std::vector<uint32_t> sourceSamples;
-        BAERmfEditorSampleInfo sourceRefInfo;
         uint32_t sourceInstID = 0;
         BAERmfEditorInstrumentExtInfo extInfo;
         bool hasExtInfo = false;
@@ -11690,8 +11898,8 @@ private:
             [this](int previewTag) {
                 StopPreviewSampleForTag(previewTag);
             },
-            [this]() {
-                StopKeyboardPreview();
+            [this, primarySampleIndex](uint32_t reasonFlags) {
+                ScheduleKeyboardPreviewInvalidation(reasonFlags, primarySampleIndex);
             },
             [this](uint32_t sampleIndex, wxString const &path) {
                 return ReplaceSampleFromPath(sampleIndex, path);
@@ -11884,7 +12092,7 @@ public:
                 }
             }
             if (darkMode) {
-                g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme", TRUE, NULL);
+                g_object_set(gtk_settings_get_default(), "gtk-application-prefer-dark-theme", TRUE, (gpointer)NULL);
             }
         }
 #endif // __WXGTK__

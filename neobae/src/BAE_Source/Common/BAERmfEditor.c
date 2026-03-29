@@ -14097,11 +14097,11 @@ static BAEResult PV_BankReplaceResource(XFILE bankFile,
     XPTR packedData;
     int32_t packedSize;
     bool replaced;
+    uint32_t type_u32 = (uint32_t)type;
+    BAE_PRINTF("[PV_BankReplaceResource] start: type=%c%c%c%c id=%d\n", (type_u32>>24)&0xFF, (type_u32>>16)&0xFF, (type_u32>>8)&0xFF, type_u32&0xFF, (int)id);
 
-    if (!bankFile || !data || size <= 0)
-    {
-        return BAE_PARAM_ERR;
-    }
+    BAE_PRINTF("[PV_BankReplaceResource] step 1: Write map...\n");
+
     if (XFileSetPosition(bankFile, 0L) != 0 ||
         XFileRead(bankFile, &map, (int32_t)sizeof(XFILERESOURCEMAP)) != 0)
     {
@@ -14113,12 +14113,14 @@ static BAEResult PV_BankReplaceResource(XFILE bankFile,
         return BAE_BAD_FILE;
     }
 
+    BAE_PRINTF("[PV_BankReplaceResource] step 2: XFileOpenVirtualResource...\n");
     outFile = XFileOpenVirtualResource(resourceID);
     if (!outFile)
     {
         return BAE_MEMORY_ERR;
     }
 
+    BAE_PRINTF("[PV_BankReplaceResource] step 3: Loop bankResourceTypes...\n");
     replaced = FALSE;
     for (typeIdx = 0; bankResourceTypes[typeIdx] != 0; ++typeIdx)
     {
@@ -14128,12 +14130,14 @@ static BAEResult PV_BankReplaceResource(XFILE bankFile,
 
         resType = bankResourceTypes[typeIdx];
         resCount = XCountFileResourcesOfType(bankFile, resType);
+        BAE_PRINTF("[PV_BankReplaceResource] Loop over resIndex %d of %d (type=%c%c%c%c)...\n", (int)resIndex, (int)resCount, ((uint32_t)resType>>24)&0xFF, ((uint32_t)resType>>16)&0xFF, ((uint32_t)resType>>8)&0xFF, (uint32_t)resType&0xFF);
         for (resIndex = 0; resIndex < resCount; ++resIndex)
         {
             XLongResourceID resID;
             int32_t resSize;
             XPTR resData;
             char resName[256];
+            uint32_t startTicks = XMicroseconds();
 
             resName[0] = 0;
             resData = XGetIndexedFileResource(bankFile,
@@ -14142,6 +14146,7 @@ static BAEResult PV_BankReplaceResource(XFILE bankFile,
                                               resIndex,
                                               resName,
                                               &resSize);
+            uint32_t midTicks = XMicroseconds();
             if (!resData)
             {
                 continue;
@@ -14177,10 +14182,15 @@ static BAEResult PV_BankReplaceResource(XFILE bankFile,
                 XFileClose(outFile);
                 return BAE_FILE_IO_ERROR;
             }
+            uint32_t endTicks = XMicroseconds();
+            if (endTicks - startTicks > 50000) {
+                BAE_PRINTF("[PV_BankReplaceResource] Slow resource copy: resIndex=%d resType=%c%c%c%c resID=%d size=%d XGetIndexedFileResource=%uus XAddFileResource=%uus\n", (int)resIndex, ((uint32_t)resType>>24)&0xFF, ((uint32_t)resType>>16)&0xFF, ((uint32_t)resType>>8)&0xFF, (uint32_t)resType&0xFF, (int)resID, (int)resSize, (unsigned)(midTicks - startTicks), (unsigned)(endTicks - midTicks));
+            }
             XDisposePtr(resData);
         }
     }
 
+    BAE_PRINTF("[PV_BankReplaceResource] step 4: Out of loop. Replace if needed...\n");
     if (!replaced)
     {
         if (XAddFileResource(outFile,
@@ -14195,12 +14205,14 @@ static BAEResult PV_BankReplaceResource(XFILE bankFile,
         }
     }
 
+    BAE_PRINTF("[PV_BankReplaceResource] step 5: XCleanResourceFile...\n");
     if (XCleanResourceFile(outFile) == FALSE)
     {
         XFileClose(outFile);
         return BAE_FILE_IO_ERROR;
     }
 
+    BAE_PRINTF("[PV_BankReplaceResource] step 6: XFileGetMemoryFileAsData...\n");
     packedData = NULL;
     packedSize = 0;
     if (XFileGetMemoryFileAsData(outFile, &packedData, &packedSize) != 0 ||
