@@ -3,6 +3,7 @@
 
 #include <BAE_API.h>
 #include <X_API.h>
+#include "X_Formats.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -316,9 +317,12 @@ static BAEResult apply_ext_info_for_zone(BAERmfEditorDocument *document,
     ext.instID = instID;
     ext.displayName = (char *)presetName;
     ext.hasExtendedData = TRUE;
+    /*
     if (isDrumPreset) {
-        ext.flags2 |= 0x40; /* ZBF_playAtSampledFreq */
+        ext.flags2 |= ZBF_playAtSampledFreq;
     }
+    */
+    ext.flags1 |= ZBF_sampleAndHold;
     ext.midiRootKey = 60; /* Master root key should always be 60; individual splits handle their own rootKey */
     ext.panPlacement = (char)sf2_pan_to_inst_pan(zone->pan);
     ext.miscParameter2 = cb_to_split_volume(zone->initialAttenuation);
