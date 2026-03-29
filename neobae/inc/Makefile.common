@@ -533,20 +533,25 @@ else
 								# libNeoBAE srcs + bankrecomp.c
 								SRC += src/bankrecomp/bankrecomp.c
 							else
-								ifeq ($(NBSTUDIO),1)
-									SRC += 	src/rmfeditor_wx/editor_main.cpp \
-										src/rmfeditor_wx/editor_bank.cpp \
-										src/rmfeditor_wx/editor_instrument_ext_dialog.cpp \
-										src/rmfeditor_wx/editor_metadata_dialog.cpp \
-										src/rmfeditor_wx/editor_pianoroll_panel.cpp \
-										src/rmfeditor_wx/batch_compress_dialog.cpp
-									ifneq ($(MACOSX),1)
-										BAE_FLAGS += $(shell pkg-config --cflags gtk+-3.0) $(shell pkg-config --cflags glib-2.0)
-										BAE_LIBS += -lz $(shell pkg-config --libs gtk+-3.0) $(shell pkg-config --libs glib-2.0)
+								ifeq ($(SF2_TO_HSB),1)
+									# libNeoBAE srcs + sf2-hsb
+									SRC += src/sf2-hsb/sf2_hsb_converter.c src/sf2-hsb/sf2_parser.c src/sf2-hsb/hsb_writer.c src/sf2-hsb/sf2_hsb_main.c
+								else							
+									ifeq ($(NBSTUDIO),1)
+										SRC += 	src/rmfeditor_wx/editor_main.cpp \
+											src/rmfeditor_wx/editor_bank.cpp \
+											src/rmfeditor_wx/editor_instrument_ext_dialog.cpp \
+											src/rmfeditor_wx/editor_metadata_dialog.cpp \
+											src/rmfeditor_wx/editor_pianoroll_panel.cpp \
+											src/rmfeditor_wx/batch_compress_dialog.cpp
+										ifneq ($(MACOSX),1)
+											BAE_FLAGS += $(shell pkg-config --cflags gtk+-3.0) $(shell pkg-config --cflags glib-2.0)
+											BAE_LIBS += -lz $(shell pkg-config --libs gtk+-3.0) $(shell pkg-config --libs glib-2.0)
+										endif
+									else
+										# playbae = libNeoBAE srcs + playbae.c
+										SRC += src/playbae/playbae.c
 									endif
-								else
-									# playbae = libNeoBAE srcs + playbae.c
-									SRC += src/playbae/playbae.c
 								endif
 							endif
 						endif

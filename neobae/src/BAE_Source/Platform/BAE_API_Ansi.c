@@ -619,7 +619,15 @@ int BAE_SetFileLength(intptr_t fileReference, uint32_t newSize)
 #if USE_UNIX_IO
 	return _chsize(fileReference, newSize);
 #elif USE_ANSI_IO
-	return -1;
+#if defined(_WIN32)
+	int fd = _fileno((FILE *)fileReference);
+	if (fd < 0) return -1;
+	return (_chsize(fd, (long)newSize) == 0) ? 0 : -1;
+#else
+	int fd = fileno((FILE *)fileReference);
+	if (fd < 0) return -1;
+	return (ftruncate(fd, (off_t)newSize) == 0) ? 0 : -1;
+#endif
 #elif USE_WINDOWS_IO
 	int error;
 	

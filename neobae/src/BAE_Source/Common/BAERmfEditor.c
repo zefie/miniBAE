@@ -516,6 +516,8 @@ typedef struct BAERmfEditorInstrumentExt
     int32_t         LPF_frequency;
     int32_t         LPF_resonance;
     int32_t         LPF_lowpassAmount;
+    int16_t         defaultReverbSend;
+    int16_t         defaultChorusSend;
     EditorADSR      volumeADSR;
     uint32_t        lfoCount;
     EditorLFO       lfos[EDITOR_MAX_LFOS];
@@ -1312,9 +1314,10 @@ static uint32_t PV_GetDecodedFrameCountFromSnd(XPTR sndResource)
     return info.frames;
 }
 
-/* SND dedup is only safe when all SND-header-significant parameters match.
- * Same asset ID alone is not enough because differing root key or loop points
- * changes playback pitch/loop behavior. */
+/* SND dedup is only safe when all SND-header-significant parameters that are
+ * not overridden by INST data match. Root key is controlled by INST/split data
+ * in this editor flow, so shared-asset dedupe may ignore root-key differences.
+ * Loop/rate must still match to preserve playback behavior. */
 static bool PV_CanReuseSndResourceForSamples(BAERmfEditorSample const *left,
                                               BAERmfEditorSample const *right)
 {
@@ -1347,10 +1350,6 @@ static bool PV_CanReuseSndResourceForSamples(BAERmfEditorSample const *left,
         left->originalSndData && right->originalSndData)
     {
         return TRUE;
-    }
-    if (left->rootKey != right->rootKey)
-    {
-        return FALSE;
     }
     if (left->sampleInfo.startLoop != right->sampleInfo.startLoop ||
         left->sampleInfo.endLoop != right->sampleInfo.endLoop)
@@ -5098,7 +5097,7 @@ static void PV_EnsureInstrumentExtForRemappedID(BAERmfEditorDocument *document,
     BAERmfEditorInstrumentExt clone;
     BAEResult addResult;
 
-    if (!document || oldInstID == 0 || newInstID == 0 || oldInstID == newInstID)
+    if (!document || oldInstID == (XLongResourceID)BAE_EDITOR_INST_ID_NONE || newInstID == (XLongResourceID)BAE_EDITOR_INST_ID_NONE || oldInstID == newInstID)
     {
         return;
     }
@@ -5314,6 +5313,18 @@ static void PV_ParseExtendedInstData(XPTR instData, int32_t instSize, BAERmfEdit
                 ext->hasDefaultMod = TRUE;
                 break;
 
+            case INST_REVERB_SEND:
+                if (pUnit + 4 > pEnd) goto bail;
+                ext->defaultReverbSend = (int16_t)XGetLong((void *)pUnit);
+                pUnit += 4;
+                break;
+
+            case INST_CHORUS_SEND:
+                if (pUnit + 4 > pEnd) goto bail;
+                ext->defaultChorusSend = (int16_t)XGetLong((void *)pUnit);
+                pUnit += 4;
+                break;
+
             /* LFO types */
             case INST_PITCH_LFO:
             case INST_VOLUME_LFO:
@@ -5409,6 +5420,18 @@ static XPTR PV_SerializeExtendedInstTail(BAERmfEditorInstrumentExt const *ext, i
         unitCount++;
     }
 
+    if (ext->defaultReverbSend > 0)
+    {
+        size += 4 + 4;
+        unitCount++;
+    }
+
+    if (ext->defaultChorusSend > 0)
+    {
+        size += 4 + 4;
+        unitCount++;
+    }
+
     /* LFOs */
     for (i = 0; i < ext->lfoCount; i++)
     {
@@ -5476,6 +5499,22 @@ static XPTR PV_SerializeExtendedInstTail(BAERmfEditorInstrumentExt const *ext, i
         XPutLong(p, (uint32_t)ext->LPF_resonance);
         p += 4;
         XPutLong(p, (uint32_t)ext->LPF_lowpassAmount);
+        p += 4;
+    }
+
+    if (ext->defaultReverbSend > 0)
+    {
+        XPutLong(p, (uint32_t)INST_REVERB_SEND);
+        p += 4;
+        XPutLong(p, (uint32_t)ext->defaultReverbSend);
+        p += 4;
+    }
+
+    if (ext->defaultChorusSend > 0)
+    {
+        XPutLong(p, (uint32_t)INST_CHORUS_SEND);
+        p += 4;
+        XPutLong(p, (uint32_t)ext->defaultChorusSend);
         p += 4;
     }
 
@@ -7601,7 +7640,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
         decodedFramesForRate = 0;
         decodedSampleRateForSnd = 0;
 
-        if (sample->instID != 0)
+        if (sample->instID != BAE_EDITOR_INST_ID_NONE)
         {
             BAERmfEditorInstrumentExt const *sampleExt;
 
@@ -7622,7 +7661,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
         if (sample->isBankAlias)
         {
             sampleSndIDs[index] = sample->aliasSndResourceID;
-            sampleInstIDs[index] = (sample->instID != 0)
+            sampleInstIDs[index] = (sample->instID != BAE_EDITOR_INST_ID_NONE)
                                     ? (XLongResourceID)sample->instID
                                     : (XLongResourceID)(512 + (uint32_t)sample->program);
             continue;
@@ -7636,7 +7675,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                 sampleSndIDs[prior] != 0)
             {
                 sampleSndIDs[index] = sampleSndIDs[prior];
-                sampleInstIDs[index] = (sample->instID != 0)
+                sampleInstIDs[index] = (sample->instID != BAE_EDITOR_INST_ID_NONE)
                                         ? (XLongResourceID)sample->instID
                                         : (XLongResourceID)(512 + (uint32_t)sample->program);
                 break;
@@ -8546,7 +8585,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
         }
         XDisposePtr(sndResource);
         sampleSndIDs[index] = (XShortResourceID)sndID;
-        sampleInstIDs[index] = (sample->instID != 0)
+        sampleInstIDs[index] = (sample->instID != BAE_EDITOR_INST_ID_NONE)
                                 ? (XLongResourceID)sample->instID
                                 : (XLongResourceID)(512 + (uint32_t)sample->program);
     }
@@ -11223,6 +11262,7 @@ BAEResult BAERmfEditorDocument_AddEmptySample(BAERmfEditorDocument *document,
     sample->targetOpusMode = BAE_EDITOR_OPUS_MODE_AUDIO;
     sample->originalSndData = NULL;
     sample->originalSndSize = 0;
+    sample->instID = BAE_EDITOR_INST_ID_NONE;
     sample->displayName = PV_DuplicateString(setup->displayName ? setup->displayName : "New Instrument");
     sample->sourcePath = NULL;
     if (!sample->displayName)
@@ -11613,7 +11653,7 @@ BAEResult BAERmfEditorDocument_SetSampleInfo(BAERmfEditorDocument *document,
     }
     sample->program = sampleInfo->program;
 
-    if (oldInstID != 0 && sampleInfo->program != oldProgram)
+    if (oldInstID != BAE_EDITOR_INST_ID_NONE && sampleInfo->program != oldProgram)
     {
         uint32_t newInstID;
         uint32_t i;
@@ -12504,6 +12544,8 @@ BAEResult BAERmfEditorDocument_GetInstrumentExtInfo(BAERmfEditorDocument const *
     outInfo->LPF_frequency = ext->LPF_frequency;
     outInfo->LPF_resonance = ext->LPF_resonance;
     outInfo->LPF_lowpassAmount = ext->LPF_lowpassAmount;
+    outInfo->defaultReverbSend = ext->defaultReverbSend;
+    outInfo->defaultChorusSend = ext->defaultChorusSend;
     PV_CopyEditorADSRToInfo(&ext->volumeADSR, &outInfo->volumeADSR);
     outInfo->lfoCount = ext->lfoCount;
     for (i = 0; i < ext->lfoCount && i < EDITOR_MAX_LFOS; i++)
@@ -12584,6 +12626,8 @@ BAEResult BAERmfEditorDocument_SetInstrumentExtInfo(BAERmfEditorDocument *docume
     ext->LPF_frequency = info->LPF_frequency;
     ext->LPF_resonance = info->LPF_resonance;
     ext->LPF_lowpassAmount = info->LPF_lowpassAmount;
+    ext->defaultReverbSend = info->defaultReverbSend;
+    ext->defaultChorusSend = info->defaultChorusSend;
     PV_CopyInfoToEditorADSR(&info->volumeADSR, &ext->volumeADSR);
     ext->lfoCount = info->lfoCount;
     if (ext->lfoCount > EDITOR_MAX_LFOS)
@@ -13989,6 +14033,8 @@ BAEResult BAERmfEditorBank_GetInstrumentExtInfo(BAEBankToken bankToken,
         outInfo->LPF_frequency = extData.LPF_frequency;
         outInfo->LPF_resonance = extData.LPF_resonance;
         outInfo->LPF_lowpassAmount = extData.LPF_lowpassAmount;
+        outInfo->defaultReverbSend = extData.defaultReverbSend;
+        outInfo->defaultChorusSend = extData.defaultChorusSend;
         PV_CopyEditorADSRToInfo(&extData.volumeADSR, &outInfo->volumeADSR);
         outInfo->lfoCount = extData.lfoCount;
         for (i = 0; i < extData.lfoCount && i < BAE_EDITOR_MAX_LFOS; i++)
@@ -15252,11 +15298,25 @@ BAEResult BAERmfEditorBank_CloneInstrument(BAEBankToken bankToken,
     char instName[256];
     int16_t splitCount;
     BAEResult result;
+    uint32_t resolvedInstID;
+    uint32_t resolvedIndex;
 
     if (!bankToken)
         return BAE_PARAM_ERR;
 
     bankFile = (XFILE)bankToken;
+
+    /* Duplicate guard: if destInstID already resolves to an existing INST
+       (directly or through ID_ALIAS), report it explicitly. */
+    result = BAERmfEditorBank_ResolveInstID(bankToken,
+                                            destInstID,
+                                            &resolvedInstID,
+                                            &resolvedIndex);
+    if (result == BAE_NO_ERROR)
+    {
+        return BAE_ALREADY_EXISTS;
+    }
+
     instName[0] = 0;
     instData = XGetIndexedFileResource(bankFile, ID_INST, &srcInstID,
                                        (int32_t)instrumentIndex, instName, &instSize);
@@ -15915,6 +15975,7 @@ static BAEResult PV_BankSaveToMemory(BAEBankToken bankToken,
         };
         int32_t typeIdx;
 
+        int32_t soundCount = 0;
         for (typeIdx = 0; bankResourceTypes[typeIdx] != 0; ++typeIdx)
         {
             XResourceType resType;
@@ -15925,6 +15986,15 @@ static BAEResult PV_BankSaveToMemory(BAEBankToken bankToken,
             resCount = XCountFileResourcesOfType(bankFile, resType);
             for (resIndex = 0; resIndex < resCount; ++resIndex)
             {
+                if (typeIdx == ID_SND || typeIdx == ID_CSND || typeIdx == ID_ESND)
+                {
+                    ++soundCount;
+                }
+                if (soundCount > MAX_SAMPLES)
+                {
+                    XFileClose(outFile);
+                    return BAE_TOO_MANY_SAMPLES;  // too many sound resources for 16-bit IDs
+                }
                 XLongResourceID resID;
                 int32_t resSize;
                 XPTR resData;
@@ -15937,11 +16007,12 @@ static BAEResult PV_BankSaveToMemory(BAEBankToken bankToken,
                 {
                     continue;
                 }
-                if (XAddFileResource(outFile, resType, resID, resName, resData, resSize) != 0)
+                int32_t result = XAddFileResource(outFile, resType, resID, resName, resData, resSize);
+                if (result != 0)
                 {
                     XDisposePtr(resData);
                     XFileClose(outFile);
-                    return BAE_FILE_IO_ERROR;
+                    return result;
                 }
                 XDisposePtr(resData);
             }
@@ -15965,7 +16036,7 @@ static BAEResult PV_BankSaveToMemory(BAEBankToken bankToken,
         {
             XDisposePtr(data);
         }
-        return BAE_FILE_IO_ERROR;
+        return BAE_MEMORY_ERR;
     }
     XFileClose(outFile);
 

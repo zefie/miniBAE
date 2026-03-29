@@ -3027,6 +3027,10 @@ typedef struct BAERmfEditorSampleAssetInfo
 
 /* ---------- Extended instrument data (ADSR, LFO, LPF, curves) ---------- */
 
+/* Sentinel value for BAERmfEditorSample.instID indicating the sample has no assigned instrument ID.
+ * Valid instIDs are small non-negative integers (0..~511); 0xFFFFFFFF is never a real ID. */
+#define BAE_EDITOR_INST_ID_NONE    0xFFFFFFFFu
+
 #define BAE_EDITOR_MAX_ADSR_STAGES 8
 #define BAE_EDITOR_MAX_LFOS        6
 #define BAE_EDITOR_MAX_CURVES      4
@@ -3078,6 +3082,8 @@ typedef struct BAERmfEditorInstrumentExtInfo
     int32_t LPF_frequency;
     int32_t LPF_resonance;
     int32_t LPF_lowpassAmount;
+    int16_t defaultReverbSend;  /* static reverb send level */
+    int16_t defaultChorusSend;  /* static chorus send level */
     BAERmfEditorADSRInfo volumeADSR;
     uint32_t lfoCount;
     BAERmfEditorLFOInfo lfos[BAE_EDITOR_MAX_LFOS];

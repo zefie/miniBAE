@@ -886,12 +886,16 @@ typedef int32_t UNIT_TYPE;
         ADSR_ENVELOPE_LONG = FOUR_CHAR('A', 'D', 'S', 'R'),     //  'ADSR'
         EXPONENTIAL_CURVE_LONG = FOUR_CHAR('C', 'U', 'R', 'V'), //  'CURV'
         LOW_PASS_FILTER_LONG = FOUR_CHAR('L', 'P', 'G', 'F'),   //  'LPGF'
+        REVERB_SEND_LONG = FOUR_CHAR('R', 'V', 'S', 'D'),       //  'RVSD'
+        CHORUS_SEND_LONG = FOUR_CHAR('C', 'H', 'S', 'D'),       //  'CHSD'
 
         // These must be defined as 4 byte identifiers because they are used to parse the
         // instrument from a file
         INST_ADSR_ENVELOPE = ADSR_ENVELOPE_LONG,
         INST_EXPONENTIAL_CURVE = EXPONENTIAL_CURVE_LONG,
         INST_LOW_PASS_FILTER = LOW_PASS_FILTER_LONG,
+        INST_REVERB_SEND = REVERB_SEND_LONG,
+        INST_CHORUS_SEND = CHORUS_SEND_LONG,
         INST_DEFAULT_MOD = DEFAULT_MOD_LONG,
         INST_PITCH_LFO = PITCH_LFO_LONG,
         INST_VOLUME_LFO = VOLUME_LFO_LONG,
@@ -1066,6 +1070,9 @@ typedef int32_t UNIT_TYPE;
         int32_t LPF_frequency;
         int32_t LPF_resonance;
         int32_t LPF_lowpassAmount;
+        
+        int16_t defaultReverbSend;
+        int16_t defaultChorusSend;
 
         GM_LFO LFORecords[MAX_LFOS];
         GM_ADSR volumeADSRRecord;

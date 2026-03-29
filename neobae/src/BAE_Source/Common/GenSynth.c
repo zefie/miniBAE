@@ -3494,6 +3494,15 @@ void PV_StartMIDINote(GM_Song *pSong, int16_t the_instrument,
         the_entry->avoidReverb = pInstrument->avoidReverb;          // use instrument default. in case instrument designer
         the_entry->reverbLevel = pSong->channelReverb[the_channel]; // set current verb level
         the_entry->chorusLevel = (int16_t)PV_ModifyVelocityFromCurve(pSong, pSong->channelChorus[the_channel]);
+        // If instrument specifies a default reverb/chorus send (from SF2 converter), blend it in when channel has none
+        if (pInstrument->defaultReverbSend > 0 && the_entry->reverbLevel < pInstrument->defaultReverbSend)
+        {
+            the_entry->reverbLevel = (unsigned char)pInstrument->defaultReverbSend;
+        }
+        if (pInstrument->defaultChorusSend > 0 && the_entry->chorusLevel < pInstrument->defaultChorusSend)
+        {
+            the_entry->chorusLevel = (int16_t)pInstrument->defaultChorusSend;
+        }
         // wants no verb enabled
         if (GM_IsReverbFixed())
         {

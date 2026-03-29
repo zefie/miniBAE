@@ -579,6 +579,16 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                                 theI->LPF_lowpassAmount = XGetLong(pUnit);
                                 pUnit += 4;
                                 break;
+
+                            case INST_REVERB_SEND:
+                                theI->defaultReverbSend = (int16_t)(int32_t)XGetLong(pUnit);
+                                pUnit += 4;
+                                break;
+
+                            case INST_CHORUS_SEND:
+                                theI->defaultChorusSend = (int16_t)(int32_t)XGetLong(pUnit);
+                                pUnit += 4;
+                                break;
                                 
                             case INST_DEFAULT_MOD:      // default mod wheel hookup
                                 disableModWheel = TRUE;
@@ -992,6 +1002,8 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                             theS->LPF_frequency = theI->LPF_frequency;
                             theS->LPF_resonance = theI->LPF_resonance;
                             theS->LPF_lowpassAmount = theI->LPF_lowpassAmount;
+                            theS->defaultReverbSend = theI->defaultReverbSend;
+                            theS->defaultChorusSend = theI->defaultChorusSend;
                         }
                         else if (pErr && *pErr != NO_ERR)
                         {
