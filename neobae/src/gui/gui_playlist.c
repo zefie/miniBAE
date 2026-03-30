@@ -97,18 +97,21 @@ static void playlist_ensure_capacity(int needed)
         }
 
         PlaylistEntry *new_entries = realloc(g_playlist.entries, sizeof(PlaylistEntry) * new_capacity);
+        if (!new_entries)
+            return;
+        g_playlist.entries = new_entries;
+
         bool *new_shuffle_played = realloc(g_playlist.shuffle_played, sizeof(bool) * new_capacity);
-        if (new_entries && new_shuffle_played)
+        if (!new_shuffle_played)
+            return;
+        g_playlist.shuffle_played = new_shuffle_played;
+
+        // Initialize new shuffle tracking entries
+        for (int i = g_playlist.capacity; i < new_capacity; i++)
         {
-            g_playlist.entries = new_entries;
-            g_playlist.shuffle_played = new_shuffle_played;
-            // Initialize new shuffle tracking entries
-            for (int i = g_playlist.capacity; i < new_capacity; i++)
-            {
-                g_playlist.shuffle_played[i] = false;
-            }
-            g_playlist.capacity = new_capacity;
+            g_playlist.shuffle_played[i] = false;
         }
+        g_playlist.capacity = new_capacity;
     }
 }
 

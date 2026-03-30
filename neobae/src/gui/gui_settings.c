@@ -19,6 +19,9 @@
 // Settings dialog state
 bool g_show_settings_dialog = false;
 
+// MIDI device enumeration dirty flag — set true to force re-enumeration
+static bool g_midi_device_list_dirty = true;
+
 // Volume curve settings
 int g_volume_curve = 0;
 bool g_volumeCurveDropdownOpen = false;
@@ -940,9 +943,10 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
         save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, *loopPlay);
     }
     // MIDI device dropdown (right-aligned in left column)
-    // populate device list lazily when dropdown opened
-    if (g_midi_input_device_dd_open || g_midi_output_device_dd_open)
+    // populate device list lazily when dropdown opened, but only re-enumerate when dirty
+    if ((g_midi_input_device_dd_open || g_midi_output_device_dd_open) && g_midi_device_list_dirty)
     {
+        g_midi_device_list_dirty = false;
         // Enumerate compiled RtMidi APIs and collect input ports first, then output ports.
         g_midi_device_count = 0;
         g_midi_input_device_count = 0;
@@ -1065,6 +1069,7 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
         g_midi_input_device_dd_open = !g_midi_input_device_dd_open;
         if (g_midi_input_device_dd_open)
         {
+            g_midi_device_list_dirty = true;
             g_volumeCurveDropdownOpen = false;
             g_sampleRateDropdownOpen = false;
             g_exportDropdownOpen = false;
@@ -1167,6 +1172,7 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
         g_midi_output_device_dd_open = !g_midi_output_device_dd_open;
         if (g_midi_output_device_dd_open)
         {
+            g_midi_device_list_dirty = true;
             g_volumeCurveDropdownOpen = false;
             g_sampleRateDropdownOpen = false;
             g_exportDropdownOpen = false;

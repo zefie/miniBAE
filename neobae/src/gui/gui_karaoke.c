@@ -57,6 +57,7 @@ char g_lyric_accumulate[256];    // accumulate partial words until newline (if n
 
 // Track display lines similar to BXPlayer logic
 char g_karaoke_line_current[256];
+static size_t g_karaoke_line_current_len = 0;
 char g_karaoke_line_previous[256];
 bool g_karaoke_have_meta_lyrics = false; // whether lyric meta events (0x05) encountered
 char g_karaoke_last_fragment[128];       // last raw fragment to detect cumulative vs per-word
@@ -70,12 +71,13 @@ extern int g_last_engine_pos_ms;
 void karaoke_newline(uint32_t t_us)
 {
     // Finish the current line: commit it, shift to previous display line, clear current.
-    if (g_karaoke_line_current[0])
+    if (g_karaoke_line_current_len > 0)
     {
         karaoke_commit_line(t_us, g_karaoke_line_current);
         safe_strncpy(g_karaoke_line_previous, g_karaoke_line_current, sizeof(g_karaoke_line_previous) - 1);
         g_karaoke_line_previous[sizeof(g_karaoke_line_previous) - 1] = '\0';
         g_karaoke_line_current[0] = '\0';
+        g_karaoke_line_current_len = 0;
     }
     g_karaoke_last_fragment[0] = '\0';
 }
@@ -91,13 +93,22 @@ void karaoke_add_fragment(const char *frag)
     if (cumulativeExtension)
     {
         // Replace with growing cumulative substring
-        safe_strncpy(g_karaoke_line_current, frag, sizeof(g_karaoke_line_current) - 1);
-        g_karaoke_line_current[sizeof(g_karaoke_line_current) - 1] = '\0';
+        size_t copyLen = fragLen < sizeof(g_karaoke_line_current) - 1 ? fragLen : sizeof(g_karaoke_line_current) - 1;
+        memcpy(g_karaoke_line_current, frag, copyLen);
+        g_karaoke_line_current_len = copyLen;
+        g_karaoke_line_current[g_karaoke_line_current_len] = '\0';
     }
     else
     {
-        // Append raw fragment (no added spaces)
-        strncat(g_karaoke_line_current, frag, sizeof(g_karaoke_line_current) - strlen(g_karaoke_line_current) - 1);
+        // Append raw fragment using tracked length (no added spaces)
+        size_t space = sizeof(g_karaoke_line_current) - 1 - g_karaoke_line_current_len;
+        size_t appendLen = fragLen < space ? fragLen : space;
+        if (appendLen > 0)
+        {
+            memcpy(g_karaoke_line_current + g_karaoke_line_current_len, frag, appendLen);
+            g_karaoke_line_current_len += appendLen;
+            g_karaoke_line_current[g_karaoke_line_current_len] = '\0';
+        }
     }
     safe_strncpy(g_karaoke_last_fragment, frag, sizeof(g_karaoke_last_fragment) - 1);
     g_karaoke_last_fragment[sizeof(g_karaoke_last_fragment) - 1] = '\0';
@@ -113,6 +124,7 @@ void karaoke_reset()
     g_lyric_cursor = 0;
     g_lyric_accumulate[0] = '\0';
     g_karaoke_line_current[0] = '\0';
+    g_karaoke_line_current_len = 0;
     g_karaoke_line_previous[0] = '\0';
     g_karaoke_have_meta_lyrics = false;
     g_karaoke_last_fragment[0] = '\0';

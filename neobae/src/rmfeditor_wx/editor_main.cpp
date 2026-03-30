@@ -7,6 +7,7 @@
 #include <memory>
 #include <set>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <iostream>
 
@@ -78,25 +79,7 @@ namespace {
     constexpr char const* kVersionString = VERSION " (" _VERSION ")";
 #endif
 
-static bool IsOpusCompressionType(BAERmfEditorCompressionType compressionType) {
-    switch (compressionType) {
-        case BAE_EDITOR_COMPRESSION_OPUS_12K:
-        case BAE_EDITOR_COMPRESSION_OPUS_16K:
-        case BAE_EDITOR_COMPRESSION_OPUS_24K:
-        case BAE_EDITOR_COMPRESSION_OPUS_32K:
-        case BAE_EDITOR_COMPRESSION_OPUS_48K:
-        case BAE_EDITOR_COMPRESSION_OPUS_64K:
-        case BAE_EDITOR_COMPRESSION_OPUS_80K:
-        case BAE_EDITOR_COMPRESSION_OPUS_96K:
-        case BAE_EDITOR_COMPRESSION_OPUS_128K:
-        case BAE_EDITOR_COMPRESSION_OPUS_160K:
-        case BAE_EDITOR_COMPRESSION_OPUS_192K:
-        case BAE_EDITOR_COMPRESSION_OPUS_256K:
-            return true;
-        default:
-            return false;
-    }
-}
+// IsOpusCompressionType is now defined in editor_instrument_ext_dialog.h
 
 static bool IsMpegCompressionType(BAERmfEditorCompressionType compressionType) {
     switch (compressionType) {
@@ -2016,21 +1999,29 @@ private:
     }
 
     void MarkDocumentDirty() {
+        MarkDocumentDirtyWithHash(0, false);
+    }
+
+    void MarkDocumentDirtyWithHash(uint32_t knownHash, bool hashValid) {
         // Check if we're actually back at the clean state (user may have undone/reversed edits)
         if (m_cleanStateHash != 0) {
-            UndoDocumentState currentState;
-            if (CaptureUndoState(&currentState)) {
-                uint32_t currentHash = ComputeDocumentHash(currentState);
-                if (currentHash == m_cleanStateHash) {
-                    // We're back at the original saved state, so mark clean
-                    m_hasUnsavedChanges = false;
-                    UpdateFrameTitle();
-                    UpdateStatusBar();
-                    return;
+            uint32_t currentHash = knownHash;
+            if (!hashValid) {
+                UndoDocumentState currentState;
+                if (CaptureUndoState(&currentState)) {
+                    currentHash = ComputeDocumentHash(currentState);
+                    hashValid = true;
                 }
             }
+            if (hashValid && currentHash == m_cleanStateHash) {
+                // We're back at the original saved state, so mark clean
+                m_hasUnsavedChanges = false;
+                UpdateFrameTitle();
+                UpdateStatusBar();
+                return;
+            }
         }
-        
+
         if (!m_hasUnsavedChanges) {
             m_hasUnsavedChanges = true;
             UpdateFrameTitle();
@@ -2470,7 +2461,7 @@ private:
         m_pendingUndoState = UndoDocumentState();
         m_pendingUndoLabel.clear();
         m_hasPendingUndo = false;
-        MarkDocumentDirty();
+        MarkDocumentDirtyWithHash(entry.after.documentHash, true);
         UpdateUndoMenuState();
     }
 
@@ -6051,7 +6042,7 @@ private:
                                                BAERmfEditorDocument const *src,
                                                unsigned char const *programFlags128) {
         uint32_t sampleCount;
-        std::vector<uint32_t> copiedInstIds;
+        std::unordered_set<uint32_t> copiedInstIds;
 
         if (!dest || !src || !programFlags128) {
             return false;
@@ -6074,7 +6065,7 @@ private:
             if (BAERmfEditorDocument_GetInstIDForSample(src, i, &instID) != BAE_NO_ERROR) {
                 continue;
             }
-            if (std::find(copiedInstIds.begin(), copiedInstIds.end(), instID) != copiedInstIds.end()) {
+            if (copiedInstIds.count(instID)) {
                 continue;
             }
             if (BAERmfEditorDocument_GetInstrumentExtInfo(src, instID, &extInfo) != BAE_NO_ERROR) {
@@ -6083,7 +6074,7 @@ private:
             if (BAERmfEditorDocument_SetInstrumentExtInfo(dest, instID, &extInfo) != BAE_NO_ERROR) {
                 return false;
             }
-            copiedInstIds.push_back(instID);
+            copiedInstIds.insert(instID);
         }
         return true;
     }
@@ -11920,8 +11911,8 @@ private:
         /* Apply sample edits */
         {
             bool ok = true;
-            std::vector<uint32_t> affectAllAssets;
-            std::vector<uint32_t> cloneAssets;
+            std::unordered_set<uint32_t> affectAllAssets;
+            std::unordered_set<uint32_t> cloneAssets;
 
             for (size_t i = 0; i < sampleIndices.size() && i < editedSamples.size(); ++i) {
                 BAERmfEditorCompressionType oldCompression;
@@ -11962,8 +11953,8 @@ private:
                     if (BAERmfEditorDocument_GetSampleAssetIDForSample(m_document, sampleIndices[i], &assetID) == BAE_NO_ERROR &&
                         BAERmfEditorDocument_GetSampleAssetUsageCount(m_document, assetID, &usageCount) == BAE_NO_ERROR &&
                         usageCount > 1 &&
-                        std::find(affectAllAssets.begin(), affectAllAssets.end(), assetID) == affectAllAssets.end()) {
-                        if (std::find(cloneAssets.begin(), cloneAssets.end(), assetID) != cloneAssets.end()) {
+                        !affectAllAssets.count(assetID)) {
+                        if (cloneAssets.count(assetID)) {
                             if (BAERmfEditorDocument_CloneSampleAssetForSample(m_document, sampleIndices[i], NULL) != BAE_NO_ERROR) {
                                 ok = false;
                                 break;
@@ -11985,13 +11976,13 @@ private:
                                 break;
                             }
                             if (choice == wxYES) {
-                                cloneAssets.push_back(assetID);
+                                cloneAssets.insert(assetID);
                                 if (BAERmfEditorDocument_CloneSampleAssetForSample(m_document, sampleIndices[i], NULL) != BAE_NO_ERROR) {
                                     ok = false;
                                     break;
                                 }
                             } else {
-                                affectAllAssets.push_back(assetID);
+                                affectAllAssets.insert(assetID);
                             }
                         }
                     }

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
+#include <unordered_set>
 #include <vector>
 
 #include <cstring>
@@ -863,7 +864,7 @@ public:
         }
         noteIndex = m_selectedNote;
         if (noteIndex < 0 && !m_selectedNotes.empty()) {
-            noteIndex = m_selectedNotes.front();
+            noteIndex = *m_selectedNotes.begin();
         }
         if (noteIndex < 0) {
             return false;
@@ -881,7 +882,7 @@ public:
         if (!HasTrack()) {
             return;
         }
-        noteIndices = m_selectedNotes;
+        noteIndices.assign(m_selectedNotes.begin(), m_selectedNotes.end());
         if (noteIndices.empty() && m_selectedNote >= 0) {
             noteIndices.push_back(m_selectedNote);
         }
@@ -1104,7 +1105,7 @@ private:
     BAERmfEditorDocument *m_document;
     int m_selectedTrack;
     long m_selectedNote;
-    std::vector<long> m_selectedNotes;
+    std::unordered_set<long> m_selectedNotes;
     bool m_dragging;
     DragMode m_dragMode;
     bool m_showPlayhead;
@@ -1710,13 +1711,13 @@ private:
     }
 
     bool IsNoteSelected(long noteIndex) const {
-        return std::find(m_selectedNotes.begin(), m_selectedNotes.end(), noteIndex) != m_selectedNotes.end();
+        return m_selectedNotes.count(noteIndex) != 0;
     }
 
     void SelectSingleNote(long noteIndex) {
         m_selectedNotes.clear();
         if (noteIndex >= 0) {
-            m_selectedNotes.push_back(noteIndex);
+            m_selectedNotes.insert(noteIndex);
             m_selectedNote = noteIndex;
             m_selectedItemKind = PianoRollSelectionKind::Note;
         } else {
@@ -1727,7 +1728,7 @@ private:
 
     void UpdatePrimarySelectedNote() {
         if (!m_selectedNotes.empty()) {
-            m_selectedNote = m_selectedNotes.front();
+            m_selectedNote = *m_selectedNotes.begin();
             m_selectedItemKind = PianoRollSelectionKind::Note;
         } else {
             m_selectedNote = -1;
@@ -1757,7 +1758,7 @@ private:
 
             noteRect = BuildNoteRect(cache->notes[entryIndex].noteInfo);
             if (noteRect.Intersects(selectionRect)) {
-                m_selectedNotes.push_back(static_cast<long>(cache->notes[entryIndex].sourceIndex));
+                m_selectedNotes.insert(static_cast<long>(cache->notes[entryIndex].sourceIndex));
             }
         }
         UpdatePrimarySelectedNote();
@@ -2508,7 +2509,7 @@ private:
         }
 
         /* Gather all selected note indices */
-        std::vector<long> indices = m_selectedNotes;
+        std::vector<long> indices(m_selectedNotes.begin(), m_selectedNotes.end());
         if (indices.empty() && m_selectedNote >= 0) {
             indices.push_back(m_selectedNote);
         }
@@ -3866,7 +3867,7 @@ private:
         if (!HasTrack()) {
             return;
         }
-        noteIndices = m_selectedNotes;
+        noteIndices.assign(m_selectedNotes.begin(), m_selectedNotes.end());
         if (noteIndices.empty() && m_selectedNote >= 0) {
             noteIndices.push_back(m_selectedNote);
         }
@@ -3874,7 +3875,6 @@ private:
             return;
         }
         std::sort(noteIndices.begin(), noteIndices.end());
-        noteIndices.erase(std::unique(noteIndices.begin(), noteIndices.end()), noteIndices.end());
         BeginUndoAction("Delete Note");
         bool anyDeleted = false;
         for (auto it = noteIndices.rbegin(); it != noteIndices.rend(); ++it) {
@@ -4439,7 +4439,7 @@ private:
                     m_selectedItemKind = PianoRollSelectionKind::Note;
                     m_selectedNote = static_cast<long>(noteCount - 1);
                     m_selectedNotes.clear();
-                    m_selectedNotes.push_back(m_selectedNote);
+                    m_selectedNotes.insert(m_selectedNote);
                     m_selectedAutomationLane = -1;
                     m_selectedAutomationEvent = -1;
                 }
@@ -4830,7 +4830,7 @@ private:
 
     void CopySelectedNotes() {
         if (!HasTrack()) return;
-        std::vector<long> indices = m_selectedNotes;
+        std::vector<long> indices(m_selectedNotes.begin(), m_selectedNotes.end());
         if (indices.empty() && m_selectedNote >= 0) {
             indices.push_back(m_selectedNote);
         }
@@ -4909,7 +4909,7 @@ private:
                                                          i, &pastedInfo);
                     }
                 }
-                m_selectedNotes.push_back(static_cast<long>(i));
+                m_selectedNotes.insert(static_cast<long>(i));
             }
             UpdatePrimarySelectedNote();
             CommitUndoAction("Paste Notes");
@@ -4927,7 +4927,7 @@ private:
         if (!cache) return;
         m_selectedNotes.clear();
         for (auto const &entry : cache->notes) {
-            m_selectedNotes.push_back(static_cast<long>(entry.sourceIndex));
+            m_selectedNotes.insert(static_cast<long>(entry.sourceIndex));
         }
         UpdatePrimarySelectedNote();
         m_selectedAutomationLane = -1;

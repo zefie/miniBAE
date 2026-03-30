@@ -36,25 +36,7 @@ static unsigned char NormalizeRootKeyForSingleKeySplit(unsigned char rootKey,
     return rootKey;
 }
 
-static bool IsOpusCompressionType(BAERmfEditorCompressionType compressionType) {
-    switch (compressionType) {
-        case BAE_EDITOR_COMPRESSION_OPUS_12K:
-        case BAE_EDITOR_COMPRESSION_OPUS_16K:
-        case BAE_EDITOR_COMPRESSION_OPUS_24K:
-        case BAE_EDITOR_COMPRESSION_OPUS_32K:
-        case BAE_EDITOR_COMPRESSION_OPUS_48K:
-        case BAE_EDITOR_COMPRESSION_OPUS_64K:
-        case BAE_EDITOR_COMPRESSION_OPUS_80K:
-        case BAE_EDITOR_COMPRESSION_OPUS_96K:
-        case BAE_EDITOR_COMPRESSION_OPUS_128K:
-        case BAE_EDITOR_COMPRESSION_OPUS_160K:
-        case BAE_EDITOR_COMPRESSION_OPUS_192K:
-        case BAE_EDITOR_COMPRESSION_OPUS_256K:
-            return true;
-        default:
-            return false;
-    }
-}
+// IsOpusCompressionType is now defined in editor_instrument_ext_dialog.h
 
 class InstrumentExtEditorDialog final : public wxDialog {
 public:

@@ -15,6 +15,26 @@ extern "C" {
 
 class wxWindow;
 
+inline bool IsOpusCompressionType(BAERmfEditorCompressionType compressionType) {
+    switch (compressionType) {
+        case BAE_EDITOR_COMPRESSION_OPUS_12K:
+        case BAE_EDITOR_COMPRESSION_OPUS_16K:
+        case BAE_EDITOR_COMPRESSION_OPUS_24K:
+        case BAE_EDITOR_COMPRESSION_OPUS_32K:
+        case BAE_EDITOR_COMPRESSION_OPUS_48K:
+        case BAE_EDITOR_COMPRESSION_OPUS_64K:
+        case BAE_EDITOR_COMPRESSION_OPUS_80K:
+        case BAE_EDITOR_COMPRESSION_OPUS_96K:
+        case BAE_EDITOR_COMPRESSION_OPUS_128K:
+        case BAE_EDITOR_COMPRESSION_OPUS_160K:
+        case BAE_EDITOR_COMPRESSION_OPUS_192K:
+        case BAE_EDITOR_COMPRESSION_OPUS_256K:
+            return true;
+        default:
+            return false;
+    }
+}
+
 struct InstrumentExtEditorResult {
     BAERmfEditorInstrumentExtInfo extInfo;
     bool extInfoModified;

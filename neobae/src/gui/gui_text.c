@@ -131,6 +131,7 @@ static int count_wrapped_single_line(const char *text, int max_w)
         return 0;
     int lines = 0;
     char buf[1024];
+    int bufLen = 0;
     buf[0] = '\0';
     const char *p = text;
     while (*p)
@@ -147,7 +148,7 @@ static int count_wrapped_single_line(const char *text, int max_w)
         word[wlen] = '\0';
 
         char attempt[1536];
-        if (buf[0])
+        if (bufLen > 0)
             snprintf(attempt, sizeof(attempt), "%s %s", buf, word);
         else
             snprintf(attempt, sizeof(attempt), "%s", word);
@@ -155,22 +156,35 @@ static int count_wrapped_single_line(const char *text, int max_w)
         measure_text(attempt, &tw, &th);
         if (tw <= max_w)
         {
-            if (buf[0])
-                strncat(buf, " ", sizeof(buf) - strlen(buf) - 1);
-            strncat(buf, word, sizeof(buf) - strlen(buf) - 1);
+            if (bufLen > 0 && bufLen < (int)sizeof(buf) - 1)
+            {
+                buf[bufLen++] = ' ';
+            }
+            int space = (int)sizeof(buf) - 1 - bufLen;
+            if (wlen > space)
+                wlen = space;
+            if (wlen > 0)
+            {
+                memcpy(buf + bufLen, word, wlen);
+                bufLen += wlen;
+            }
+            buf[bufLen] = '\0';
         }
         else
         {
-            if (buf[0])
+            if (bufLen > 0)
             {
                 lines++;
                 buf[0] = '\0';
+                bufLen = 0;
             }
             measure_text(word, &tw, &th);
             if (tw <= max_w)
             {
-                safe_strncpy(buf, word, sizeof(buf) - 1);
-                buf[sizeof(buf) - 1] = '\0';
+                int copyLen = wlen < (int)sizeof(buf) - 1 ? wlen : (int)sizeof(buf) - 1;
+                memcpy(buf, word, copyLen);
+                bufLen = copyLen;
+                buf[bufLen] = '\0';
             }
             else
             {
@@ -197,6 +211,7 @@ static int count_wrapped_single_line(const char *text, int max_w)
                     lines++;
                 }
                 buf[0] = '\0';
+                bufLen = 0;
             }
         }
         // Advance past whitespace
@@ -204,7 +219,7 @@ static int count_wrapped_single_line(const char *text, int max_w)
         while (*p == ' ' || *p == '\t')
             p++;
     }
-    if (buf[0])
+    if (bufLen > 0)
         lines++;
     return lines;
 }
@@ -215,6 +230,7 @@ static int draw_wrapped_single_line(SDL_Renderer *R, int x, int y, const char *t
         return 0;
     int lines = 0;
     char buf[1024];
+    int bufLen = 0;
     buf[0] = '\0';
     const char *p = text;
     while (*p)
@@ -230,7 +246,7 @@ static int draw_wrapped_single_line(SDL_Renderer *R, int x, int y, const char *t
         word[wlen] = '\0';
 
         char attempt[1536];
-        if (buf[0])
+        if (bufLen > 0)
             snprintf(attempt, sizeof(attempt), "%s %s", buf, word);
         else
             snprintf(attempt, sizeof(attempt), "%s", word);
@@ -238,23 +254,36 @@ static int draw_wrapped_single_line(SDL_Renderer *R, int x, int y, const char *t
         measure_text(attempt, &tw, &th);
         if (tw <= max_w)
         {
-            if (buf[0])
-                strncat(buf, " ", sizeof(buf) - strlen(buf) - 1);
-            strncat(buf, word, sizeof(buf) - strlen(buf) - 1);
+            if (bufLen > 0 && bufLen < (int)sizeof(buf) - 1)
+            {
+                buf[bufLen++] = ' ';
+            }
+            int space = (int)sizeof(buf) - 1 - bufLen;
+            if (wlen > space)
+                wlen = space;
+            if (wlen > 0)
+            {
+                memcpy(buf + bufLen, word, wlen);
+                bufLen += wlen;
+            }
+            buf[bufLen] = '\0';
         }
         else
         {
-            if (buf[0])
+            if (bufLen > 0)
             {
                 draw_text(R, x, y + lines * lineH, buf, col);
                 lines++;
                 buf[0] = '\0';
+                bufLen = 0;
             }
             measure_text(word, &tw, &th);
             if (tw <= max_w)
             {
-                safe_strncpy(buf, word, sizeof(buf) - 1);
-                buf[sizeof(buf) - 1] = '\0';
+                int copyLen = wlen < (int)sizeof(buf) - 1 ? wlen : (int)sizeof(buf) - 1;
+                memcpy(buf, word, copyLen);
+                bufLen = copyLen;
+                buf[bufLen] = '\0';
             }
             else
             {
@@ -286,13 +315,14 @@ static int draw_wrapped_single_line(SDL_Renderer *R, int x, int y, const char *t
                     start += take;
                 }
                 buf[0] = '\0';
+                bufLen = 0;
             }
         }
         p = q;
         while (*p == ' ' || *p == '\t')
             p++;
     }
-    if (buf[0])
+    if (bufLen > 0)
     {
         draw_text(R, x, y + lines * lineH, buf, col);
         lines++;
