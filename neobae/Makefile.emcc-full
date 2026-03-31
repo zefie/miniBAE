@@ -34,7 +34,7 @@ STRIP		:= strip
 
 
 OPTI		:= -fPIC -O3
-CFLAGS  	:= $(ARCH) $(OPTI) $(INC_PATH) -DWASM -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value -D_DEBUG=1
+CFLAGS  	:= $(ARCH) $(OPTI) $(INC_PATH) -DWASM -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
 
 ifneq ($(BAE_FLAGS),)
 	CFLAGS	+= $(BAE_FLAGS)
