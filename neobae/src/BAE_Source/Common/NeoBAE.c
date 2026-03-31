@@ -180,11 +180,7 @@
 
 
 #if _BUILT_IN_PATCHES == TRUE
-    #ifdef __ANDROID__
-        #include "../NeoBAEDroid/BAEPatches.h"
-    #else
-        #include "BAEPatches.h"
-    #endif
+#include "BAEPatches.h"
 #endif
 
 #if USE_FLAC_ENCODER == TRUE

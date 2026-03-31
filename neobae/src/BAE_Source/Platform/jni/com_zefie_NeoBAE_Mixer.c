@@ -330,6 +330,12 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromFile
 	if (ext && (strcasecmp(ext, ".sf2") == 0 || strcasecmp(ext, ".dls") == 0 || 
 	            strcasecmp(ext, ".sf3") == 0 || strcasecmp(ext, ".sfo") == 0))
 	{
+		
+#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_SF2 == TRUE
+        BAEBankToken token = NULL;        
+        BAEMixer_LoadBuiltinBank(mixer, token);
+        BAEMixer_SendBankToBack(mixer, token);
+#endif 		
 		// Load SF2/DLS bank
 		OPErr err = GM_LoadSF2Soundfont(cpath);		
 		if (err != NO_ERR)
@@ -470,6 +476,11 @@ JNIEXPORT jstring JNICALL Java_com_zefie_NeoBAE_Mixer__1getBankFriendlyName
 	}
 	
 	if (isSF2) {
+#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_SF2 == TRUE
+        BAEBankToken token = NULL;        
+        BAEMixer_LoadBuiltinBank(mixer, token);
+        BAEMixer_SendBankToBack(mixer, token);        
+#endif 	
 		// Load as SF2/DLS soundfont
 		OPErr err = GM_LoadSF2SoundfontFromMemory((const unsigned char*)mem, (size_t)read_total);
 		free(mem);
@@ -548,6 +559,11 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemory
 	}
 	
 	if (isSF2) {
+#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_SF2 == TRUE
+        BAEBankToken token = NULL;        
+        BAEMixer_LoadBuiltinBank(mixer, token);
+        BAEMixer_SendBankToBack(mixer, token);
+#endif 			
 		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Loading SF2 soundfont from memory...");
 		// Load as SF2/DLS soundfont
 		OPErr err = GM_LoadSF2SoundfontFromMemory((const unsigned char*)bytes, (size_t)len);
@@ -626,6 +642,11 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemoryWithFilena
 	}
 	
 	if (isSF2) {
+#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_SF2 == TRUE
+        BAEBankToken token = NULL;        
+        BAEMixer_LoadBuiltinBank(mixer, token);
+        BAEMixer_SendBankToBack(mixer, token);
+#endif 			
 		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Loading SF2 soundfont from memory...");
 		// Load as SF2/DLS soundfont
 		OPErr err = GM_LoadSF2SoundfontFromMemory((const unsigned char*)bytes, (size_t)len);

@@ -2086,6 +2086,10 @@ int main(int argc, char *argv[])
          || strcasecmp(ext, ".dls") == 0
 #endif                  
          ) && !bankLoaded) {
+#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_SF2 == TRUE
+               BAEMixer_LoadBuiltinBank(theMixer, &bank);
+               BAEMixer_SendBankToBack(theMixer, bank);        
+#endif    
                err = (BAEResult)GM_LoadSF2Soundfont(parmFile);
                if (err != BAE_NO_ERROR) {
                   playbae_printf("Error %d loading SoundFont bank %s", err, parmFile);

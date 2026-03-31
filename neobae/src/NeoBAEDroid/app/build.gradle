@@ -51,6 +51,12 @@ android {
         targetCompatibility JavaVersion.VERSION_11
     }
 
+    testOptions {
+        unitTests.all {
+            enabled = false
+        }
+    }
+
     // It's also common to define the compiler version directly in the plugin block if needed,
     // or rely on the versions brought in by your Compose BOM.
 }

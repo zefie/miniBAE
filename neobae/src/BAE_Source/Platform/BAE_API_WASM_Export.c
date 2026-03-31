@@ -231,7 +231,11 @@ int BAE_WASM_LoadSoundbank(const uint8_t* data, int length) {
         || isDLS
 #endif
        )
-    {
+       {
+#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_SF2 == TRUE
+        BAEMixer_LoadBuiltinBank(gMixer, token);
+        BAEMixer_SendBankToBack(gMixer, token);
+#endif 
         BAE_PRINTF("[BAE] LoadSoundbank: Loading SF2/SF3/DLS...\n");
 
         // Load from file instead
@@ -583,11 +587,13 @@ int BAE_WASM_SetVolume(int volume) {
 #if _USING_FLUIDSYNTH == TRUE && USE_SF2_SUPPORT == TRUE
     // Also set FluidSynth global volume
     if (GM_GetMixerSF2Mode()) {
-        if (volume > 100) {
-            GM_SF2_SetGain(((float)volume / 10000.0f) - 0.005f);
-        } else {
-            GM_SF2_SetGain(0.005f);
-        }
+        // Keep WASM volume behavior aligned with current SF2 defaults:
+        // 100% UI volume -> FluidSynth gain 0.5 (engine default),
+        // 200% UI volume -> gain 1.0, 0% -> gain 0.0.
+        float sf2Gain = (float)volume / 200.0f;
+        if (sf2Gain < 0.0f) sf2Gain = 0.0f;
+        if (sf2Gain > 1.0f) sf2Gain = 1.0f;
+        GM_SF2_SetGain(sf2Gain);
     }
 #endif
     return 0;

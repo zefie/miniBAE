@@ -155,6 +155,16 @@ LOCAL_SRC_FILES	:= \
       		../thirdparty/flac/src/libFLAC/stream_encoder.c \
 		  	../thirdparty/flac/src/libFLAC/ogg_encoder_aspect.c
 
+PATCHES_SCRIPT := $(LOCAL_PATH)/../../../scripts/create_embedded_patches_h.py
+PATCHES_HSB := $(LOCAL_PATH)/../banks/patches111/patches111.hsb
+GEN_DIR := /tmp/androbae
+PATCHES_H := $(GEN_DIR)/BAEPatches.h
+
+# ndk-build doesn't reliably trigger custom prerequisite rules for generated
+# headers, so generate at parse time via $(shell ...).
+BAE_GEN := $(shell mkdir -p "$(GEN_DIR)" && python3 "$(PATCHES_SCRIPT)" "$(PATCHES_HSB)" "$(PATCHES_H)")
+
+
 LOCAL_LDFLAGS += -Wl,-z,max-page-size=16384
 
 LOCAL_C_INCLUDES	  := $(LOCAL_PATH)/Common
@@ -173,8 +183,18 @@ LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/libvorbis/include
 LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/flac/include
 LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/flac/src/libFLAC/include
 LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/libvorbis/lib
+LOCAL_C_INCLUDES	+= $(GEN_DIR)
 
-LOCAL_CFLAGS := -std=c99 -O2 -D_VERSION=\"$(VERSION)\" -DX_PLATFORM=X_ANDROID -D__ANDROID__=1 -D_BUILT_IN_PATCHES=0 -DUSE_MINIMP3_WRAPPER=1 -DUSE_VORBIS_DECODER=1 -DUSE_FLAC_DECODER=1 -DUSE_MPEG_DECODER=1 -DUSE_SF2_SUPPORT=1 -DUSE_OGG_FORMAT=1 -DUSE_VORBIS_ENCODER=1 -DUSE_FLAC_ENCODER=1 -D_USING_FLUIDSYNTH=1 -DUSE_XMF_SUPPORT=1 -DUSE_HIGHLEVEL_FILE_API=1 -DSUPPORT_KARAOKE=1 -DUSE_OPUS_DECODER=1 -DUSE_LZMA_COMPRESSION=1 -DUSE_ZMF_FORMAT=1 -DBAE_FIX_SPAN_DC=1 -DBAE_CLASSIC_CHORUS=1 -DFLAC__NO_DLL -DHAVE_CONFIG_H=1 -Wall -fsigned-char
+LOCAL_CFLAGS := -std=c99 -O2 -D_VERSION=\"$(VERSION)\" \
+	-DX_PLATFORM=X_ANDROID -D__ANDROID__=1 -D_BUILT_IN_PATCHES=1 \
+	-DUSE_MINIMP3_WRAPPER=1 -DUSE_VORBIS_DECODER=1 -DUSE_FLAC_DECODER=1 \
+	-DUSE_MPEG_DECODER=1 -DUSE_SF2_SUPPORT=1 -DUSE_OGG_FORMAT=1 \
+	-DUSE_VORBIS_ENCODER=1 -DUSE_FLAC_ENCODER=1 -D_USING_FLUIDSYNTH=1 \
+	-DUSE_XMF_SUPPORT=1 -DUSE_HIGHLEVEL_FILE_API=1 -DSUPPORT_KARAOKE=1 \
+	-DUSE_OPUS_DECODER=1 -DUSE_LZMA_COMPRESSION=1 -DUSE_ZMF_FORMAT=1 \
+	-DBAE_FIX_SPAN_DC=1 -DBAE_CLASSIC_CHORUS=1 -DFLAC__NO_DLL \
+	-D_LOAD_BUILTIN_PATCHES_FOR_SF2=1 \
+	-DHAVE_CONFIG_H=1 -Wall -fsigned-char
 
 ifeq ($(APP_OPTIM),debug)
     LOCAL_CFLAGS += -D_DEBUG=1
@@ -194,7 +214,6 @@ LOCAL_LDLIBS    += -llog
 LOCAL_LDLIBS    += -landroid
 # for GenXMF zlib support
 LOCAL_LDLIBS    += -lz
-
 
 
 # Link against prebuilt FluidSynth

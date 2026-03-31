@@ -3,7 +3,6 @@
 ## Deps are: libsndfile (ogg, flac, vorbis, speex, mpg123, lame, opus), libfluidsynth
 ## For ZMF Support, liblzma is also required
 
-BAE_BUILT_IN_PATCHES	:= 1
 BAE_API			:= WASM
 WASM			:= 1
 NOAUTO			:= 1
@@ -11,6 +10,8 @@ SF2_SUPPORT		:= 1
 USE_FLUIDSYNTH  := 1
 MP3_DEC			:= 1
 KARAOKE			:= 1
+EMBED_PATCHES 	:= 1
+USE_BUILTIN_PATCHES_WITH_SF2 := 1
 XMF_SUPPORT		:= 1
 ZMF_SUPPORT		:= 1
 
@@ -33,7 +34,7 @@ STRIP		:= strip
 
 
 OPTI		:= -fPIC -O3
-CFLAGS  	:= $(ARCH) $(OPTI) $(INC_PATH) -DWASM -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value
+CFLAGS  	:= $(ARCH) $(OPTI) $(INC_PATH) -DWASM -D_THREAD_SAFE -Wno-pragma-pack -Wno-unused-value -D_DEBUG=1
 
 ifneq ($(BAE_FLAGS),)
 	CFLAGS	+= $(BAE_FLAGS)
@@ -43,7 +44,7 @@ include inc/Makefile.versioning
 CFLAGS		+= -D_VERSION=\""$(VERSION)"\"
 
 CXXFLAGS 	:= $(CFLAGS)
-LDFLAGS		:= $(ARCH) $(OPTI) -O3 -DNDEBUG -s WASM=1 -s ALLOW_MEMORY_GROWTH=1 -s INITIAL_MEMORY=67108864 -s MAXIMUM_MEMORY=2147483648 \
+LDFLAGS		:= $(ARCH) $(OPTI) -DNDEBUG -s WASM=1 -s ALLOW_MEMORY_GROWTH=1 -s INITIAL_MEMORY=67108864 -s MAXIMUM_MEMORY=2147483648 \
 -s EXPORTED_FUNCTIONS="['_BAE_WASM_Init', '_BAE_WASM_LoadSoundbank', '_BAE_WASM_LoadSong', '_BAE_WASM_Play', '_BAE_WASM_Pause', '_BAE_WASM_Resume', '_BAE_WASM_Stop', '_BAE_WASM_IsPlaying', '_BAE_WASM_GetPosition', '_BAE_WASM_SetPosition', '_BAE_WASM_GetDuration', '_BAE_WASM_SetVolume', '_BAE_WASM_SetTempo', '_BAE_WASM_SetTranspose', '_BAE_WASM_MuteChannel', '_BAE_WASM_MuteTrack', '_BAE_WASM_SoloTrack', '_BAE_WASM_GetTrackMuteStatus', '_BAE_WASM_GetTrackSoloStatus', '_BAE_WASM_ProgramChange', '_BAE_WASM_ProgramBankChange', '_BAE_WASM_GetProgram', '_BAE_WASM_SetReverbType', '_BAE_WASM_GenerateAudio', '_BAE_WASM_GetAudioBuffer', '_BAE_WASM_GetBufferFrames', '_BAE_WASM_Shutdown', '_BAE_WASM_GetSongInfo', '_BAE_WASM_SetOutputGain', '_BAE_WASM_GetOutputGain', '_BAE_WASM_LoadEffect', '_BAE_WASM_PlayEffect', '_BAE_WASM_StopEffect', '_BAE_WASM_IsEffectPlaying', '_BAE_WASM_LoadSampleBank', '_BAE_WASM_TriggerSample', '_BAE_WASM_SetLyricCallback', '_BAE_WASM_ResetLyricState', '_malloc', '_free']" \
 -s EXPORTED_RUNTIME_METHODS="['ccall','cwrap','UTF8ToString','HEAPU8','HEAP16','FS','addFunction']" -s MODULARIZE=1 -s EXPORT_NAME='BeatnikModule' -s ASSERTIONS=0 --no-entry \
 -s ALLOW_TABLE_GROWTH=1 \

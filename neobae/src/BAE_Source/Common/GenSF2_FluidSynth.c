@@ -938,7 +938,7 @@ OPErr GM_LoadSF2Soundfont(const char* sf2_path)
             return err;
         }
     }
-    
+  
     // Unload any existing soundfont
     GM_UnloadSF2Soundfont();
 
@@ -1647,7 +1647,7 @@ void GM_SF2_ProcessProgramChange(GM_Song* pSong, int16_t channel, int32_t progra
 
     if (isOddBankPerc)
     {
-        if (pSong->songFlags == SONG_FLAG_IS_RMF) {
+        if (pSong->songFlags & SONG_FLAG_IS_RMF) {
             // Odd banks are percussion in NeoBAE mapping
             midiBank = (midiBank - 1) / 2;     // Convert back to external MIDI bank
             // Route to SF2 percussion bank

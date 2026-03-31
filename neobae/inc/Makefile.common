@@ -31,6 +31,7 @@ ifneq ($(WASM),1)
 		XMF_SUPPORT := 1
 		DISABLE_NOKIA := 0			    
 		DISABLE_BEATNIK_SF2_NRPN := 0
+		USE_BUILTIN_PATCHES_WITH_SF2 := 1
 		FIX_SPAN_DC := 1
 		CLASSIC_CHORUS := 1
 		LZMA_SUPPORT := 1
@@ -549,8 +550,10 @@ else
 											BAE_LIBS += -lz $(shell pkg-config --libs gtk+-3.0) $(shell pkg-config --libs glib-2.0)
 										endif
 									else
-										# playbae = libNeoBAE srcs + playbae.c
-										SRC += src/playbae/playbae.c
+										ifneq ($(WASM),1)
+											# playbae = libNeoBAE srcs + playbae.c
+											SRC += src/playbae/playbae.c
+										endif
 									endif
 								endif
 							endif
@@ -670,8 +673,11 @@ $(EMBED_PATCH_HEADER): $(EMBED_PATCH_FILE) ../scripts/create_embedded_patches_h.
 	@mkdir -p $(dir $(EMBED_PATCH_HEADER))
 	@python3 ../scripts/create_embedded_patches_h.py $(EMBED_PATCH_FILE) $(EMBED_PATCH_HEADER)
 $(OBJ_DIR)NeoBAE.o: $(EMBED_PATCH_HEADER)
+	
+ifeq ($(USE_BUILTIN_PATCHES_WITH_SF2),1)
+BAE_FLAGS += -D_LOAD_BUILTIN_PATCHES_FOR_SF2=1
+endif # USE_BUILTIN_PATCHES_WITH_SF2
 
-# Ensure generated header is available to build when EMBED_PATCH_FILE is used
 endif # EMBED_PATCH_FILE
 endif
 

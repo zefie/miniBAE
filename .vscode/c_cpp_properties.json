@@ -45,6 +45,7 @@
                 "SUPPORT_KARAOKE=1",
                 "USE_XMF_SUPPORT=1",
                 "_BUILT_IN_PATCHES=1",
+                "_LOAD_BUILTIN_PATCHES_FOR_SF2=1",
                 "USE_NEO_EFFECTS=1",
                 "USE_OPUS_DECODER=1",
                 "USE_OPUS_ENCODER=1",

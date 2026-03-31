@@ -543,6 +543,10 @@ bool bae_load_bank(const char *bank_path)
     ))
     {
         // Load SF2 bank
+#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_SF2 == TRUE
+        BAEMixer_LoadBuiltinBank(g_bae.mixer, g_bae.bank_token);
+        BAEMixer_SendBankToBack(g_bae.mixer, g_bae.bank_token);        
+#endif    
         OPErr err = GM_LoadSF2Soundfont(bank_path);
         if (err != NO_ERR)
         {

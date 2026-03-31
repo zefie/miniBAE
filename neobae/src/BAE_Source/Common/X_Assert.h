@@ -196,6 +196,8 @@
                 debug_console_append(_dbg_buf);     \
                 BAE_STDERR(__VA_ARGS__);            \
             } while (0)
+    #elif __EMSCRIPTEN__
+        #define BAE_PRINTF(...) emscripten_log(EM_LOG_INFO, __VA_ARGS__)
     #else
         // Non-GUI debug builds (or non-DEBUG GUI builds) use BAE_STDERR as before
         #define BAE_PRINTF		BAE_STDERR

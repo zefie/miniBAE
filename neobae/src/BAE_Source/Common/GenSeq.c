@@ -1778,10 +1778,9 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
 #if USE_SF2_SUPPORT == TRUE
 
 
-            if (pSong->songFlags == SONG_FLAG_IS_RMF) {
+            if (pSong->songFlags & SONG_FLAG_IS_RMF) {
                 uint32_t bankId, progId = 0, noteId = 0;
-                int16_t thePatch = PV_ConvertPatchBank(pSong, program, MIDIChannel);                        
-                TranslateInstrumentToBankProgram(thePatch, &bankId, &progId, &noteId);                        
+                int16_t thePatch = PV_ConvertPatchBank(pSong, program, MIDIChannel);                      
                 bool foundPatch = FALSE;
                 for (uint32_t i = 1; i <= pSong->RMFInstrumentIDs[0]; i++)
                 {
@@ -1797,14 +1796,8 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                         }
                     }
                 }
-                if (!foundPatch && ((thePatch >=  384 && thePatch < 512) || (thePatch >= 640 && thePatch < 768)))
-                {
-                    // The patch ID matches a known beatnik percussion instrument
-                    // either MSB 1 or 2
-                    foundPatch = TRUE;
-                }
 
-                if (foundPatch || bankId == 1 || bankId == 2) {
+                if (foundPatch || bankId == 1 || bankId == 2 || thePatch >= 128) {
                     pSong->channelType[MIDIChannel] = CHANNEL_TYPE_RMF;
                 } else {
                     pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
@@ -1878,7 +1871,10 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                     pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
                 }
             } else {
-                BAE_PRINTF("ProcessProgramChange Debug: Channel %d is using an Embedded RMF Instrument (%d)\n", MIDIChannel, program);
+                uint32_t bankId, progId = 0, noteId = 0;
+                int16_t thePatch = PV_ConvertPatchBank(pSong, program, MIDIChannel);                        
+                TranslateInstrumentToBankProgram(thePatch, &bankId, &progId, &noteId);          
+                BAE_PRINTF("ProcessProgramChange Debug: Channel %d is using an RMF Instrument (instID=%d, bank=%d, program=%d)\n", MIDIChannel, thePatch, bankId, progId);
             }
 #endif
         }
@@ -2118,8 +2114,8 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                         return;
                     }
                     uint32_t bankId = 0, progId = 0, noteId = 0;
-                    if (pSong->songFlags == SONG_FLAG_IS_RMF) {
-                        int16_t thePatch = PV_ConvertPatchBank(pSong, note, MIDIChannel);                        
+                    if (pSong->songFlags & SONG_FLAG_IS_RMF) {
+                        int16_t thePatch = PV_ConvertPatchBank(pSong, note, MIDIChannel);
                         TranslateInstrumentToBankProgram(thePatch, &bankId, &progId, &noteId);                        
                         bool foundPatch = FALSE;
                         for (uint32_t i = 1; i <= pSong->RMFInstrumentIDs[0]; i++)
@@ -2162,7 +2158,7 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                             bankId = 120;
                         }                       
                         GM_SF2_ProcessNoteOn(pSong, MIDIChannel, note, volume);
-                        if (pSong->songFlags == SONG_FLAG_IS_RMF) {
+                        if (pSong->songFlags & SONG_FLAG_IS_RMF) {
                             if (bankId != 0) {
                                 PV_SF2_SetBankPreset(pSong, MIDIChannel, bankId, progId);
                             }
@@ -2360,7 +2356,7 @@ void PV_ProcessController(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTr
 #if USE_SF2_SUPPORT == TRUE
         if (GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2)
         {
-            if (pSong->songFlags == SONG_FLAG_IS_RMF) {
+            if (pSong->songFlags & SONG_FLAG_IS_RMF) {
                 if (controller == 0 && (value == 1 || value == 2)) {
                     // if we are an RMF file and just set a bank MSB of 1 or 2, we are now in RMF mode for this channel
                     pSong->channelType[MIDIChannel] = CHANNEL_TYPE_RMF;
