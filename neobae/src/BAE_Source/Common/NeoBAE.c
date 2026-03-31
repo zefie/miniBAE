@@ -169,6 +169,15 @@
 #endif
 #endif
 
+#if USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE
+#include <opus/opus.h>
+#include <ogg/ogg.h>
+#endif
+
+#if USE_OPUS_DECODER == TRUE
+#include <opusfile.h>
+#endif
+
 
 #if _BUILT_IN_PATCHES == TRUE
     #ifdef __ANDROID__
@@ -3842,11 +3851,11 @@ BAEResult BAEMixer_StartOutputToFile(BAEMixer theMixer,
                 uint32_t channels = (theModifiers & BAE_USE_STEREO) ? 2 : 1;
 
                 extern uint32_t BAE_TranslateOpusTypeToBitrate(BAECompressionType ct);
-                extern void *XInitOpusEncoder(uint32_t sample_rate, uint32_t channels, uint32_t bitrate);
+                extern void *XInitOpusEncoder(uint32_t sample_rate, uint32_t channels, uint32_t bitrate, uint32_t application);
                 extern long XWriteOpusHeader(void *encoder_handle, XFILE output_file);
 
                 uint32_t bitrate = BAE_TranslateOpusTypeToBitrate(compressionType);
-                mWritingEncoder = XInitOpusEncoder(GM_ConvertFromOutputRateToRate((Rate)theRate), channels, bitrate);
+                mWritingEncoder = XInitOpusEncoder(GM_ConvertFromOutputRateToRate((Rate)theRate), channels, bitrate, OPUS_APPLICATION_AUDIO);
                 if (mWritingEncoder)
                 {
                     (void)XWriteOpusHeader(mWritingEncoder, (XFILE)mWritingToFileReference);

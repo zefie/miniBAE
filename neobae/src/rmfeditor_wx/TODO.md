@@ -53,7 +53,7 @@
   - ~~Optimize bank loading~~
   - Optimize bank rebuilding and instrument editor apply
   - Add dialog with progress bar when doing long duration (>2s) operations
-  
+
 # Future
 - Allow cut/copy/pasting instruments
 - Allow dragging samples to other instruments

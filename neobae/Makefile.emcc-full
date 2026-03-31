@@ -1,6 +1,7 @@
 ## NOTE: Building the full emcc with libfluidsynth requires you to have installed the static versions of all the dependencies.
 ## Each dep must be built static with emcmake, emconfigure and/or emmake
 ## Deps are: libsndfile (ogg, flac, vorbis, speex, mpg123, lame, opus), libfluidsynth
+## For ZMF Support, liblzma is also required
 
 BAE_BUILT_IN_PATCHES	:= 1
 BAE_API			:= WASM
@@ -10,15 +11,15 @@ SF2_SUPPORT		:= 1
 USE_FLUIDSYNTH  := 1
 MP3_DEC			:= 1
 KARAOKE			:= 1
-VORBIS_DEC		:= 0 # not needed in miniBAE WASM
-FLAC_DEC		:= 0 # not needed in miniBAE WASM
+XMF_SUPPORT		:= 1
+ZMF_SUPPORT		:= 1
 
 TARGET_JS	:= engine.js
 PACK_FILENAME	:= miniBAE_WASM_FluidSynth.tar.gz
 
 include inc/Makefile.common
 
-ARCH		:= -static
+ARCH		:= 
 CC		:= emcc
 CXX		:= emcc
 # Use C++ linker if we have any C++ sources
@@ -59,7 +60,8 @@ endif
 
 
 #/usr/share/emscripten/cache/sysroot/lib
-LIBS	:= $(BAE_LIBS) -lfluidsynth -lsndfile -logg -lvorbis -lvorbisfile -lvorbisenc -lFLAC -lopus
+LIBS	:=  -lsndfile -lfluidsynth $(BAE_LIBS)
+
 
 all: ${TARGET_JS} extra-files
 
@@ -71,7 +73,7 @@ extra-files:
 	@cp src/wasm/player-class.js $(TARGET_OUT)
 	@cp src/wasm/player.html $(TARGET_OUT)
 	@cp src/wasm/player.css $(TARGET_OUT)
-	@cp src/gui/beatnik.ico $(TARGET_OUT)/favicon.ico
+	@cp src/icons/neobae.ico $(TARGET_OUT)/favicon.ico
 
 
 	
