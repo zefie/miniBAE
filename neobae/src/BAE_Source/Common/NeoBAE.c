@@ -374,15 +374,6 @@ const char *BAE_GetFeatureString()
         first = FALSE;
     }
 
-#if USE_ZMF_SUPPORT == TRUE
-    const char *zmf = "ZMF File Support";
-    if (zmf && zmf[0])
-    {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", zmf);
-        first = FALSE;
-    }
-#endif
-
     // Built-in patches
 #if _BUILT_IN_PATCHES == TRUE
     const char *patches = "Built-in Patches";
@@ -401,6 +392,16 @@ const char *BAE_GetFeatureString()
         first = FALSE;
     }
 #endif
+
+#if USE_ZMF_SUPPORT == TRUE
+    const char *zmf = "ZMF Support";
+    if (zmf && zmf[0])
+    {
+        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", zmf);
+        first = FALSE;
+    }
+#endif
+
 
     // SF2 support
 #if _USING_FLUIDSYNTH == TRUE
