@@ -436,7 +436,6 @@ const char *BAE_GetFeatureString()
         first = FALSE;
     }
 
-#if _ZEFI_GUI == TRUE
 #if SUPPORT_KARAOKE == TRUE
     const char *karaoke = "Karaoke Support";
     if (karaoke && karaoke[0])
@@ -454,6 +453,7 @@ const char *BAE_GetFeatureString()
 #endif
 
     // Playlist support
+#if _ZEFI_GUI == TRUE
 #if SUPPORT_PLAYLIST == TRUE
     const char *playlist = "Playlist Support";
 #else
