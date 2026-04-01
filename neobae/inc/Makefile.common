@@ -489,6 +489,8 @@ ifeq ($(MOD2RMF),1)
 	BAE_FLAGS += -DLIBXMP_STATIC=1 
 endif
 
+# Nested ifeq from hell!
+
 ifeq ($(BUILD_GUI),1)
 	BAE_FLAGS += -D_ZEFI_GUI=1
 	SRC	+= src/gui/gui_theme.c \
@@ -536,7 +538,10 @@ else
 							else
 								ifeq ($(SF2_TO_HSB),1)
 									# libNeoBAE srcs + sf2-hsb
-									SRC += src/sf2-hsb/sf2_hsb_converter.c src/sf2-hsb/sf2_parser.c src/sf2-hsb/hsb_writer.c src/sf2-hsb/sf2_hsb_main.c
+									SRC += src/sf2-hsb/sf2_hsb_converter.c \
+										src/sf2-hsb/sf2_parser.c \
+										src/sf2-hsb/hsb_writer.c \
+										src/sf2-hsb/sf2_hsb_main.c
 								else							
 									ifeq ($(NBSTUDIO),1)
 										SRC += 	src/rmfeditor_wx/editor_main.cpp \
@@ -554,17 +559,17 @@ else
 											# libNeoBAE not required, adp2wav.c
 											SRC := src/adp2wav/adp2wav.c
 										else
-											ifneq ($(WASM),1)
-												# playbae = libNeoBAE srcs + playbae.c
-												SRC += src/playbae/playbae.c
+											ifeq ($(MIDDECOMP),1)
+												SRC := src/mthc/mthc_decomp.c src/mthc/mthc_main.c
 											else
-												SRC += src/wasm/neobae.cpp \
-													src/wasm/player.c \
-													src/wasm/utility.c
-											endif
-											ifneq ($(MIDDECOMP),1)
-											else
-												SRC := src/mthc/middecomp.c
+												ifneq ($(WASM),1)
+													# playbae = libNeoBAE srcs + playbae.c
+													SRC += src/playbae/playbae.c
+												else
+													SRC += src/wasm/neobae.cpp \
+														src/wasm/player.c \
+														src/wasm/utility.c
+												endif
 											endif
 										endif
 									endif
