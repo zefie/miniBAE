@@ -550,9 +550,22 @@ else
 											BAE_LIBS += -lz $(shell pkg-config --libs gtk+-3.0) $(shell pkg-config --libs glib-2.0)
 										endif
 									else
-										ifneq ($(WASM),1)
-											# playbae = libNeoBAE srcs + playbae.c
-											SRC += src/playbae/playbae.c
+										ifeq ($(ADP2WAV),1)
+											# libNeoBAE not required, adp2wav.c
+											SRC := src/adp2wav/adp2wav.c
+										else
+											ifneq ($(WASM),1)
+												# playbae = libNeoBAE srcs + playbae.c
+												SRC += src/playbae/playbae.c
+											else
+												SRC += src/wasm/neobae.cpp \
+													src/wasm/player.c \
+													src/wasm/utility.c
+											endif
+											ifneq ($(MIDDECOMP),1)
+											else
+												SRC := src/mthc/middecomp.c
+											endif
 										endif
 									endif
 								endif
@@ -624,15 +637,10 @@ ifeq ($(WASM),1)
 	INC_PATH	+= -I../../emsdk/upstream/emscripten/cache/sysroot/include
 	BAE_LIBS	+= -L../../emsdk/upstream/emscripten/cache/sysroot/lib
 endif
-
 OBJ_DIR 	:= $(BUILD_DIR)obj/
 # Create unique object names by including source directory info for conflicting files
 SRC_UNIQUE := $(SRC)
 SRC_UNIQUE := $(subst src/thirdparty/flac/src/libFLAC/lpc.c,src/thirdparty/flac/src/libFLAC/flac_lpc.c,$(SRC_UNIQUE))
-SRC_UNIQUE := $(subst src/thirdparty/flac/src/libFLAC/window.c,src/thirdparty/flac/src/libFLAC/flac_window.c,$(SRC_UNIQUE))
-SRC_UNIQUE := $(subst src/thirdparty/libvorbis/lib/lpc.c,src/thirdparty/libvorbis/lib/vorbis_lpc.c,$(SRC_UNIQUE))
-SRC_UNIQUE := $(subst src/thirdparty/libvorbis/lib/window.c,src/thirdparty/libvorbis/lib/vorbis_window.c,$(SRC_UNIQUE))
-OBJ 		:= $(addprefix $(OBJ_DIR),$(addsuffix .o,$(notdir $(basename ${SRC_UNIQUE}))))
 
 SRC_BIN_UNIQUE := $(SRC)
 SRC_BIN_UNIQUE := $(subst src/thirdparty/flac/src/libFLAC/lpc.c,src/thirdparty/flac/src/libFLAC/flac_lpc.c,$(SRC_BIN_UNIQUE))
