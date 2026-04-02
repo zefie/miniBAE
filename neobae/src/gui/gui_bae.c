@@ -684,6 +684,9 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
 #if USE_OPUS_DECODER == TRUE
         || ftype == BAE_OPUS_TYPE
 #endif
+#if USE_ADP_SUPPORT == TRUE
+        || ftype == BAE_ADP_TYPE
+#endif
     )
     {
         isAudio = true;

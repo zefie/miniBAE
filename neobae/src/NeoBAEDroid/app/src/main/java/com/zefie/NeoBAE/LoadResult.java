@@ -70,6 +70,12 @@ public class LoadResult {
             case Mixer.BAE_MPEG_TYPE: return "MP3";
             case Mixer.BAE_FLAC_TYPE: return "FLAC";
             case Mixer.BAE_VORBIS_TYPE: return "OGG Vorbis";
+            case Mixer.BAE_OPUS_TYPE: return "Opus";
+            case Mixer.BAE_GROOVOID: return "Groovoid";
+            case Mixer.BAE_XMF: return "XMF";
+            case Mixer.BAE_MTHC: return "Nokia Compressed MIDI";
+            case Mixer.BAE_ADP_TYPE: return "Nokia ADP";
+            case Mixer.BAE_RAW_PCM: return "Raw PCM";
             default: return "Unknown";
         }
     }

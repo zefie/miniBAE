@@ -319,6 +319,9 @@ extern "C"
         BAE_MTHC,
 #endif          
         BAE_RMI,
+#if USE_ADP_SUPPORT == TRUE
+        BAE_ADP_TYPE,
+#endif  
         BAE_RAW_PCM
     } BAEFileType;
 

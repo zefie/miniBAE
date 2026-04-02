@@ -162,6 +162,7 @@
 #if USE_MTHC_SUPPORT == TRUE
 #include "../../mthc/mthc_decomp.h"
 #endif
+#include "../../adp2wav/adp2wav_decode.h"
 #include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -890,6 +891,7 @@ static BAE_BOOL PV_BAEMixer_ValidateObject(BAEMixer mixer, void *theObject, BAE_
 static BAEResult PV_BAEMixer_AddBank(BAEMixer mixer, XFILE newPatchFile);
 static void PV_BAEMixer_SubmitBankOrder(BAEMixer mixer);
 static bool PV_XFileHasModernCodecSamples(XFILE fileRef);
+static GM_Waveform *PV_ReadADPIntoMemoryFromMemory(void *pMemoryFile, uint32_t memoryFileSize, OPErr *pErr);
 
 static BAE_FIXED PV_CalculateTimeDeltaForFade(
     BAE_FIXED sourceVolume,
@@ -933,6 +935,44 @@ static XPTR PV_GetFileAsData(XFILENAME *pFile, int32_t *pSize)
         data = NULL;
     }
     return data;
+}
+
+static GM_Waveform *PV_ReadADPIntoMemoryFromMemory(void *pMemoryFile, uint32_t memoryFileSize, OPErr *pErr)
+{
+    BAEAdpDecodedAudio decodedAudio;
+    GM_Waveform *wave;
+
+    memset(&decodedAudio, 0, sizeof(decodedAudio));
+    wave = NULL;
+
+    if (BAEAdp_DecodeMemoryToPCM16Mono(pMemoryFile, memoryFileSize, NULL, &decodedAudio) != 0)
+    {
+        if (pErr)
+        {
+            *pErr = BAD_FILE;
+        }
+        return NULL;
+    }
+    if (decodedAudio.frameCount > 0xFFFFFFFFu)
+    {
+        BAEAdp_FreeDecodedAudio(&decodedAudio);
+        if (pErr)
+        {
+            *pErr = BAD_FILE;
+        }
+        return NULL;
+    }
+
+    wave = GM_ReadRawAudioIntoMemoryFromMemory(decodedAudio.samples,
+                                               (uint32_t)decodedAudio.frameCount,
+                                               16,
+                                               1,
+                                               LONG_TO_UNSIGNED_FIXED(decodedAudio.sampleRate),
+                                               0,
+                                               0,
+                                               pErr);
+    BAEAdp_FreeDecodedAudio(&decodedAudio);
+    return wave;
 }
 
 #if REVERB_USED != REVERB_DISABLED
@@ -4736,32 +4776,35 @@ BAEResult BAESound_LoadMemorySample(BAESound sound, void *pMemoryFile, uint32_t 
     theErr = NO_ERR;
     if ((sound) && (sound->mID == OBJECT_ID))
     {
-        type = BAE_TranslateBAEFileType(fileType);
-        if (type != FILE_INVALID_TYPE)
+        BAE_AcquireMutex(sound->mLock);
+
+        // if sound already loaded, then free it...
+        BAESound_Unload(sound);
+#if USE_ADP_SUPPORT == TRUE
+        if (fileType == BAE_ADP_TYPE)
         {
-            BAE_AcquireMutex(sound->mLock);
-
-            // if sound already loaded, then free it...
-            BAESound_Unload(sound);
-
-            // load new sound
-            sound->pWave = GM_ReadFileIntoMemoryFromMemory(pMemoryFile, memoryFileSize,
-                                                           type, TRUE, &theErr);
-            if ((sound->pWave == NULL) && (theErr == NO_ERR))
-            {
-                theErr = BAD_FILE;
-            }
-            //          else
-            //          {
-            //              BAE_PRINTF("audio::sound loop start %ld end %ld\n", sound->pWave->startLoop,
-            //                                                              sound->pWave->endLoop);
-            //          }
-            BAE_ReleaseMutex(sound->mLock);
+            sound->pWave = PV_ReadADPIntoMemoryFromMemory(pMemoryFile, memoryFileSize, &theErr);
         }
         else
+#endif        
         {
-            theErr = BAD_FILE_TYPE;
+            type = BAE_TranslateBAEFileType(fileType);
+            if (type != FILE_INVALID_TYPE)
+            {
+                sound->pWave = GM_ReadFileIntoMemoryFromMemory(pMemoryFile, memoryFileSize,
+                                                               type, TRUE, &theErr);
+            }
+            else
+            {
+                theErr = BAD_FILE_TYPE;
+            }
         }
+
+        if ((sound->pWave == NULL) && (theErr == NO_ERR))
+        {
+            theErr = BAD_FILE;
+        }
+        BAE_ReleaseMutex(sound->mLock);
     }
     else
     {
@@ -4783,32 +4826,54 @@ BAEResult BAESound_LoadFileSample(BAESound sound, BAEPathName filePath, BAEFileT
     XFILENAME theFile;
     OPErr theErr;
     AudioFileType type;
+    XPTR fileData;
+    int32_t fileSize;
 
     theErr = NO_ERR;
     if ((sound) && (sound->mID == OBJECT_ID))
     {
-        type = BAE_TranslateBAEFileType(fileType);
-        if (type != FILE_INVALID_TYPE)
+        fileData = NULL;
+        fileSize = 0;
+
+        BAE_AcquireMutex(sound->mLock);
+
+        // if sound already loaded, then free it...
+        BAESound_Unload(sound);
+
+        XConvertPathToXFILENAME(filePath, &theFile);
+#if USE_ADP_SUPPORT == TRUE
+        if (fileType == BAE_ADP_TYPE)
         {
-            BAE_AcquireMutex(sound->mLock);
-
-            // if sound already loaded, then free it...
-            BAESound_Unload(sound);
-
-            // load new sound...
-            XConvertPathToXFILENAME(filePath, &theFile);
-            sound->pWave = GM_ReadFileIntoMemory(&theFile, type, TRUE, &theErr);
-
-            if ((sound->pWave == NULL) && (theErr == NO_ERR))
+            fileData = PV_GetFileAsData(&theFile, &fileSize);
+            if (fileData && fileSize > 0)
             {
-                theErr = BAD_FILE;
+                sound->pWave = PV_ReadADPIntoMemoryFromMemory(fileData, (uint32_t)fileSize, &theErr);
             }
-            BAE_ReleaseMutex(sound->mLock);
         }
-        else
+#endif
+
+        if (sound->pWave == NULL && theErr == NO_ERR)
         {
-            theErr = BAD_FILE_TYPE;
+            type = BAE_TranslateBAEFileType(fileType);
+            if (type != FILE_INVALID_TYPE)
+            {
+                sound->pWave = GM_ReadFileIntoMemory(&theFile, type, TRUE, &theErr);
+            }
+            else
+            {
+                theErr = BAD_FILE_TYPE;
+            }
         }
+
+        if (fileData)
+        {
+            XDisposePtr(fileData);
+        }
+        if ((sound->pWave == NULL) && (theErr == NO_ERR))
+        {
+            theErr = BAD_FILE;
+        }
+        BAE_ReleaseMutex(sound->mLock);
 
         if ((sound->pWave == NULL) && (theErr == NO_ERR))
         {
@@ -11575,6 +11640,9 @@ BAEResult BAEMixer_LoadFromFile(BAEMixer mixer, BAEPathName filePath, BAELoadRes
 #if USE_OPUS_DECODER == TRUE
         || ftype == BAE_OPUS_TYPE
 #endif
+#if USE_ADP_SUPPORT == TRUE
+        || ftype == BAE_ADP_TYPE
+#endif
     )
     {
         isAudio = TRUE;
@@ -11804,6 +11872,9 @@ BAEResult BAEMixer_LoadFromMemory(BAEMixer mixer, void const *pData, uint32_t da
 #if USE_OPUS_DECODER == TRUE
         || ftype == BAE_OPUS_TYPE
 #endif
+    #if USE_ADP_SUPPORT == TRUE
+        || ftype == BAE_ADP_TYPE
+    #endif
     )
     {
         isAudio = TRUE;

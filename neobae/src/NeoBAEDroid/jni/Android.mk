@@ -103,6 +103,9 @@ LOCAL_SRC_FILES	:= \
 			Common/XFileTypes.c \
       		Common/XVorbisFiles.c \
 			Common/XOpusFiles.c \
+			../mthc/mthc_decomp.c \
+			../adp2wav/adp2wav_decode.c \
+			../thirdparty/libg722/g722_decode.c \
 			../BAE_MPEG_Source_II/XMPEG_minimp3_wrapper.c \
 			../BAE_MPEG_Source_II/XMPEGFilesSun.c \
 			Platform/jni/com_zefie_NeoBAE_Mixer.c \
@@ -183,6 +186,7 @@ LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/libvorbis/include
 LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/flac/include
 LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/flac/src/libFLAC/include
 LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/libvorbis/lib
+LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/libg722
 LOCAL_C_INCLUDES	+= $(GEN_DIR)
 
 LOCAL_CFLAGS := -std=c99 -O2 -D_VERSION=\"$(VERSION)\" \
@@ -193,7 +197,7 @@ LOCAL_CFLAGS := -std=c99 -O2 -D_VERSION=\"$(VERSION)\" \
 	-DUSE_XMF_SUPPORT=1 -DUSE_HIGHLEVEL_FILE_API=1 -DSUPPORT_KARAOKE=1 \
 	-DUSE_OPUS_DECODER=1 -DUSE_LZMA_COMPRESSION=1 -DUSE_ZMF_FORMAT=1 \
 	-DBAE_FIX_SPAN_DC=1 -DBAE_CLASSIC_CHORUS=1 -DFLAC__NO_DLL \
-	-D_LOAD_BUILTIN_PATCHES_FOR_SF2=1 \
+	-D_LOAD_BUILTIN_PATCHES_FOR_SF2=1 -DUSE_MTHC_SUPPORT=1 -DUSE_ADP_SUPPORT=1 \
 	-DHAVE_CONFIG_H=1 -Wall -fsigned-char
 
 ifeq ($(APP_OPTIM),debug)

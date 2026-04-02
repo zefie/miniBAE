@@ -36,6 +36,7 @@ ifneq ($(WASM),1)
 		CLASSIC_CHORUS := 1
 		LZMA_SUPPORT := 1
 		MTHC_SUPPORT := 1
+		ADP_SUPPORT := 1
 		CREATION_API := 0
 	endif
 endif
@@ -557,8 +558,8 @@ else
 										endif
 									else
 										ifeq ($(ADP2WAV),1)
-											# libNeoBAE not required, adp2wav.c
-											SRC := src/adp2wav/adp2wav.c
+											# adp2wav with third-party G.722 decoder
+											SRC := src/adp2wav/adp2wav_main.c src/adp2wav/adp2wav_decode.c src/thirdparty/libg722/g722_decode.c
 										else
 											ifeq ($(MIDDECOMP),1)
 												SRC := src/mthc/mthc_decomp.c src/mthc/mthc_main.c
@@ -590,6 +591,14 @@ ifeq ($(MTHC_SUPPORT),1)
 			SRC += src/mthc/mthc_decomp.c
 			BAE_FLAGS += -DUSE_MTHC_SUPPORT=1
 		endif
+	endif
+endif
+
+ifeq ($(ADP_SUPPORT),1)
+	ifneq ($(ADP2WAV),1)
+		SRC += src/adp2wav/adp2wav_decode.c \
+			src/thirdparty/libg722/g722_decode.c
+		BAE_FLAGS += -DUSE_ADP_SUPPORT=1
 	endif
 endif
 

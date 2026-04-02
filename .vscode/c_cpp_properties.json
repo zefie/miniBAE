@@ -50,7 +50,8 @@
                 "USE_OPUS_DECODER=1",
                 "USE_OPUS_ENCODER=1",
                 "USE_ZMF_SUPPORT=1",
-                "USE_MTHC_SUPPORT=1"
+                "USE_MTHC_SUPPORT=1",
+                "USE_ADP_SUPPORT=1"
             ],
             "compilerPath": "/usr/bin/x86_64-w64-mingw32-gcc",
             "intelliSenseMode": "linux-gcc-x64",

@@ -227,11 +227,14 @@ public class Mixer
 	public static final int BAE_MIDI_TYPE = 5;
 	public static final int BAE_FLAC_TYPE = 6;
 	public static final int BAE_VORBIS_TYPE = 7;
-	public static final int BAE_GROOVOID = 8;
-	public static final int BAE_RMF = 9;
-	public static final int BAE_XMF = 10;
-	public static final int BAE_RMI = 11;
-	public static final int BAE_RAW_PCM = 12;
+	public static final int BAE_OPUS_TYPE = 8;
+	public static final int BAE_GROOVOID = 9;
+	public static final int BAE_RMF = 10;
+	public static final int BAE_XMF = 11;
+	public static final int BAE_MTHC = 12;
+	public static final int BAE_RMI = 13;
+	public static final int BAE_ADP_TYPE = 14;
+	public static final int BAE_RAW_PCM = 15;
 
 	public static final int BAE_COMPRESSION_NONE = 0;
 	public static final int BAE_COMPRESSION_LOSSLESS = 1;

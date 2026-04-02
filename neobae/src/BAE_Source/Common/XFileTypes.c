@@ -294,6 +294,10 @@ BAEFileType X_DetermineFileTypeByPath(const char *filePath)
     // Check for audio file extensions
     if (strcmp(extLower, ".wav") == 0)
         return BAE_WAVE_TYPE;
+#if USE_ADP_SUPPORT == TRUE
+    else if (strcmp(extLower, ".adp") == 0)
+        return BAE_ADP_TYPE;
+#endif
     else if (strcmp(extLower, ".aif") == 0 || strcmp(extLower, ".aiff") == 0)
         return BAE_AIFF_TYPE;
     else if (strcmp(extLower, ".au") == 0)
@@ -432,7 +436,12 @@ BAEFileType X_DetermineFileTypeByData(const unsigned char *data, int32_t length)
         BAE_PRINTF("[FileType] Invalid data buffer or insufficient length (%d bytes)\n", length);
         return BAE_INVALID_TYPE;
     }
-    
+#if USE_ADP_SUPPORT == TRUE
+    if (length >= 10 && memcmp(data, X_FILETYPE_ADP, 10) == 0)
+    {
+        return BAE_ADP_TYPE;
+    }
+#endif    
     // Read the first FOURCC
     fourcc = PV_ReadBigEndian32(data);
     // Skip leading null bytes (up to 1024 bytes)
@@ -624,6 +633,9 @@ const char *X_GetFileTypeString(BAEFileType fileType)
 #if USE_MTHC_SUPPORT == TRUE
         case BAE_MTHC:          return "Nokia Compressed MIDI";
 #endif
+#if USE_ADP_SUPPORT == TRUE
+        case BAE_ADP_TYPE:      return "Nokia ADP (RotR2 G.722)";
+#endif
         case BAE_GROOVOID:      return "Groovoid";
         case BAE_RAW_PCM:       return "Raw PCM";
         case BAE_INVALID_TYPE:  return "Unknown";
@@ -650,7 +662,11 @@ BAEFileType X_ConvertFileTypeString(const char *typeString)
 #if USE_XMF_SUPPORT == TRUE
     else if (strcmp(typeString, X_FILETYPE_XMF) == 0)
         return BAE_XMF;
-#endif        
+#endif
+#if USE_MTHC_SUPPORT == TRUE
+    else if (strcmp(typeString, X_FILETYPE_MTHC) == 0)
+        return BAE_MTHC;
+#endif   
     else if (strcmp(typeString, X_FILETYPE_AIFF) == 0)
         return BAE_AIFF_TYPE;
     else if (strcmp(typeString, X_FILETYPE_WAVE) == 0)
@@ -666,6 +682,10 @@ BAEFileType X_ConvertFileTypeString(const char *typeString)
 #if USE_FLAC_DECODER == TRUE || USE_FLAC_ENCODER == TRUE        
     else if (strcmp(typeString, X_FILETYPE_FLAC) == 0)
         return BAE_FLAC_TYPE;
+#endif
+#if USE_ADP_SUPPORT == TRUE
+    else if (strcmp(typeString, X_FILETYPE_ADP) == 0)
+        return BAE_ADP_TYPE;
 #endif
     return BAE_INVALID_TYPE;
 }

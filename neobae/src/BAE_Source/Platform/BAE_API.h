@@ -118,6 +118,8 @@
 #define X_FILETYPE_OPUS "OpusHead"
 #define X_FILETYPE_FLAC "fLaC"
 #define X_FILETYPE_VORBIS "vorbis"
+#define X_FILETYPE_ADP  "audio/g722"
+#define X_FILETYPE_MTHC "MThc"
 #include <stdint.h>
 
 // This file contains API's that need to be defined in order to get BAE (IgorAudio)
