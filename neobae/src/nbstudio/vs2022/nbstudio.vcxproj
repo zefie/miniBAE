@@ -10,7 +10,7 @@
 
   Configurations: Debug|x64, Release|x64
 
-  Audio API: SDL3 (X_PLATFORM=X_SDL3) — matches Makefile.rmfeditor-wx
+  Audio API: SDL3 (X_PLATFORM=X_SDL3) — matches Makefile.nbstudio
 -->
 <Project DefaultTargets="Build" ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <!-- ================================================================
@@ -126,7 +126,7 @@
       <AdditionalOptions>@$(ProjectDir)generated\git_version_flags.txt %(AdditionalOptions)</AdditionalOptions>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>WIN32;WINDOWS=1;NDEBUG;_WINDOWS;UNICODE;_UNICODE;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_WARNINGS;X_PLATFORM=X_WIN95;_BUILT_IN_PATCHES=1;USE_MINIMP3_WRAPPER=1;USE_MPEG_DECODER=1;USE_MPEG_ENCODER=1;USE_LAME_ENCODER=1;IEEE_FLOAT;STDC_HEADERS=1;HAVE_STDINT_H=1;HAVE_INTTYPES_H=1;HAVE_CONFIG_H=1;SIZE_T_MAX=SIZE_MAX;USE_FLAC_DECODER=1;USE_FLAC_ENCODER=1;FLAC__HAS_OGG=1;FLAC__NO_DLL;USE_OGG_FORMAT=1;SUPPORT_OGG_FORMAT=1;USE_VORBIS_DECODER=1;USE_VORBIS_ENCODER=1;USE_OPUS_DECODER=1;USE_OPUS_ENCODER=1;USE_ZMF_SUPPORT=1;BAE_FIX_SPAN_DC=1;BAE_CLASSIC_CHORUS=1;USE_LZMA_COMPRESSION=1;_VERSION="vs2022-release";%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;WINDOWS=1;NDEBUG;_WINDOWS;UNICODE;_UNICODE;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_WARNINGS;X_PLATFORM=X_WIN95;_BUILT_IN_PATCHES=1;USE_MINIMP3_WRAPPER=1;USE_MPEG_DECODER=1;USE_MPEG_ENCODER=1;USE_LAME_ENCODER=1;IEEE_FLOAT;STDC_HEADERS=1;HAVE_STDINT_H=1;HAVE_INTTYPES_H=1;HAVE_CONFIG_H=1;SIZE_T_MAX=SIZE_MAX;USE_FLAC_DECODER=1;USE_FLAC_ENCODER=1;FLAC__HAS_OGG=1;FLAC__NO_DLL;USE_OGG_FORMAT=1;SUPPORT_OGG_FORMAT=1;USE_VORBIS_DECODER=1;USE_VORBIS_ENCODER=1;USE_OPUS_DECODER=1;USE_OPUS_ENCODER=1;USE_ZMF_SUPPORT=1;BAE_FIX_SPAN_DC=1;BAE_CLASSIC_CHORUS=1;USE_LZMA_COMPRESSION=1;USE_MTHC_SUPPORT=1;_VERSION="vs2022-release";%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(ProjectDir)generated;$(ProjectDir)..\..\BAE_Source\Common;$(ProjectDir)..\..\BAE_Source\Platform;$(ProjectDir)..\..\thirdparty\config;$(ProjectDir)..\..\BAE_MPEG_Source_II;$(ProjectDir)..\..\thirdparty\minimp3;$(ProjectDir)..\..\thirdparty\flac\include;$(ProjectDir)..\..\thirdparty\flac\src\libFLAC\include;$(ProjectDir)..\..\thirdparty\libvorbis\include;$(ProjectDir)..\..\thirdparty\libvorbis\lib;$(ProjectDir)..\..\thirdparty\libogg\include;$(ProjectDir)..\..\thirdparty\opus\include;$(ProjectDir)..\..\thirdparty\opusfile\include;$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)..\..\mod2rmf;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <WarningLevel>Level3</WarningLevel>
       <DisableSpecificWarnings>4100;4101;4244;4267;4305;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
@@ -160,11 +160,11 @@ wxbase33u.lib;libmp3lame.lib;FLAC.lib;vorbisfile.lib;vorbisenc.lib;vorbis.lib;op
     <ClCompile>
       <Optimization>Disabled</Optimization>
       <AdditionalOptions>@$(ProjectDir)generated\git_version_flags.txt %(AdditionalOptions)</AdditionalOptions>
-      <PreprocessorDefinitions>WIN32;WINDOWS=1;_DEBUG;_WINDOWS;UNICODE;_UNICODE;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_WARNINGS;X_PLATFORM=X_WIN95;_BUILT_IN_PATCHES=1;USE_MINIMP3_WRAPPER=1;USE_MPEG_DECODER=1;USE_MPEG_ENCODER=1;USE_LAME_ENCODER=1;IEEE_FLOAT;STDC_HEADERS=1;HAVE_STDINT_H=1;HAVE_INTTYPES_H=1;HAVE_CONFIG_H=1;SIZE_T_MAX=SIZE_MAX;USE_FLAC_DECODER=1;USE_FLAC_ENCODER=1;FLAC__HAS_OGG=1;FLAC__NO_DLL;USE_OGG_FORMAT=1;SUPPORT_OGG_FORMAT=1;USE_VORBIS_DECODER=1;USE_VORBIS_ENCODER=1;USE_OPUS_DECODER=1;USE_OPUS_ENCODER=1;USE_ZMF_SUPPORT=1;BAE_FIX_SPAN_DC=1;BAE_CLASSIC_CHORUS=1;USE_LZMA_COMPRESSION=1;OUTPUT_TO_LOGFILE=1;_VERSION="vs2022-debug";%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;WINDOWS=1;_DEBUG;_WINDOWS;UNICODE;_UNICODE;_CRT_SECURE_NO_WARNINGS;_CRT_NONSTDC_NO_WARNINGS;X_PLATFORM=X_WIN95;_BUILT_IN_PATCHES=1;USE_MINIMP3_WRAPPER=1;USE_MPEG_DECODER=1;USE_MPEG_ENCODER=1;USE_LAME_ENCODER=1;IEEE_FLOAT;STDC_HEADERS=1;HAVE_STDINT_H=1;HAVE_INTTYPES_H=1;HAVE_CONFIG_H=1;SIZE_T_MAX=SIZE_MAX;USE_FLAC_DECODER=1;USE_FLAC_ENCODER=1;FLAC__HAS_OGG=1;FLAC__NO_DLL;USE_OGG_FORMAT=1;SUPPORT_OGG_FORMAT=1;USE_VORBIS_DECODER=1;USE_VORBIS_ENCODER=1;USE_OPUS_DECODER=1;USE_OPUS_ENCODER=1;USE_ZMF_SUPPORT=1;BAE_FIX_SPAN_DC=1;BAE_CLASSIC_CHORUS=1;USE_LZMA_COMPRESSION=1;OUTPUT_TO_LOGFILE=1;USE_MTHC_SUPPORT=1;_VERSION="vs2022-debug";%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>$(ProjectDir)generated;$(ProjectDir)..\..\BAE_Source\Common;$(ProjectDir)..\..\BAE_Source\Platform;$(ProjectDir)..\..\thirdparty\config;$(ProjectDir)..\..\BAE_MPEG_Source_II;$(ProjectDir)..\..\thirdparty\minimp3;$(ProjectDir)..\..\thirdparty\flac\include;$(ProjectDir)..\..\thirdparty\flac\src\libFLAC\include;$(ProjectDir)..\..\thirdparty\libvorbis\include;$(ProjectDir)..\..\thirdparty\libvorbis\lib;$(ProjectDir)..\..\thirdparty\libogg\include;$(ProjectDir)..\..\thirdparty\opus\include;$(ProjectDir)..\..\thirdparty\opusfile\include;$(ProjectDir)vcpkg_installed\x64-windows\include;$(ProjectDir)..\..\mod2rmf;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <WarningLevel>Level3</WarningLevel>
       <DisableSpecificWarnings>4100;4101;4244;4267;4305;4996;%(DisableSpecificWarnings)</DisableSpecificWarnings>
-      <ForcedIncludeFiles>$(ProjectDir)nbstudio\msvc_compat.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>	  
+      <ForcedIncludeFiles>$(ProjectDir)nbstudio\msvc_compat.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <LanguageStandard_C>Default</LanguageStandard_C>
       <SDLCheck>false</SDLCheck>
@@ -195,6 +195,7 @@ wxbase33u.lib;libmp3lame.lib;FLAC.lib;vorbisfile.lib;vorbisenc.lib;vorbis.lib;op
     <ClCompile Include="..\..\mod2rmf\mod2rmf_resampler.c" />
     <ClCompile Include="..\..\mod2rmf\mod2rmf_rmfcreat.c" />
     <ClCompile Include="..\..\mod2rmf\mod2rmf_song.c" />
+    <ClCompile Include="..\..\mthc\mthc_decomp.c" />
     <ClCompile Include="..\editor_bank.cpp" />
     <ClCompile Include="..\editor_instrument_ext_dialog.cpp" />
     <ClCompile Include="..\editor_main.cpp">

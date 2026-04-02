@@ -27,6 +27,9 @@
     <Filter Include="Source Files\MOD2RMF">
       <UniqueIdentifier>{a007ad85-a0a0-4650-9313-33587809bee8}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\MTHC Support">
+      <UniqueIdentifier>{4d690885-1597-4b15-a133-a97cb06700ec}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <!-- RMF Editor -->
@@ -209,6 +212,9 @@
     </ClCompile>
     <ClCompile Include="..\..\mod2rmf\mod2rmf_song.c">
       <Filter>Source Files\MOD2RMF</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\mthc\mthc_decomp.c">
+      <Filter>Source Files\MTHC Support</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

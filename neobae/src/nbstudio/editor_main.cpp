@@ -6427,12 +6427,21 @@ private:
         } else if (ext == "mid" || ext == "midi" || ext == "kar") {
             fileTypeHint = BAE_MIDI_TYPE;
         }
+#if USE_MTHC_SUPPORT == TRUE
+        else if (ext == "mthc") {
+            fileTypeHint = BAE_MTHC;
+        }
+#endif
+          
 
         if (file.Open(path, wxFile::read)) {
             length = file.Length();
             if (length > 0) {
                 data.assign(static_cast<size_t>(length), 0);
                 if (file.Read(data.data(), static_cast<size_t>(length)) == length) {
+                    if (fileTypeHint == BAE_INVALID_TYPE) {
+                        fileTypeHint = X_DetermineFileTypeByData(data.data(), static_cast<uint32_t>(data.size()));
+                    }
                     return LoadDocumentFromMemory(data.data(), static_cast<uint32_t>(data.size()), fileTypeHint, wxFileNameFromPath(path));
                 }
             }

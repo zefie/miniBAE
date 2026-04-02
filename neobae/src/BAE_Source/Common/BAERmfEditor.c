@@ -8,6 +8,10 @@
 #include "X_Formats.h"
 #include "X_Assert.h"
 
+#if USE_MTHC_SUPPORT == TRUE
+#include "../../mthc/mthc_decomp.h"
+#endif
+
 #define BAE_RMF_EDITOR_SUBTYPE_TAG FOUR_CHAR('b','q','s','t')
 
 static void PV_CopyStringBounded(char *dst, uint32_t dstSize, char const *src)
@@ -195,6 +199,12 @@ static BAEFileType PV_DetermineEditorImportMemoryFileType(void const *data,
     {
         return BAE_MIDI_TYPE;
     }
+#if USE_MTHC_SUPPORT == TRUE
+    if (bytes[0] == 'M' && bytes[1] == 'T' && bytes[2] == 'h' && bytes[3] == 'c')
+    {
+        return BAE_MTHC;
+    }
+#endif
     if ((bytes[0] == 'I' && bytes[1] == 'R' && bytes[2] == 'E' && bytes[3] == 'Z') ||
         (bytes[0] == 'Z' && bytes[1] == 'R' && bytes[2] == 'E' && bytes[3] == 'Z'))
     {
@@ -9384,6 +9394,43 @@ BAERmfEditorDocument *BAERmfEditorDocument_LoadFromMemory(void const *data,
             result = BAE_BAD_FILE;
         }
     }
+#if USE_MTHC_SUPPORT == TRUE
+    else if (fileType == BAE_MTHC)
+    {
+        unsigned char *decodedMthcMidi = NULL;
+        uint32_t decodedMthcMidiLen = 0;
+
+        if (mthc_decompress_memory((unsigned char const *)data,
+                                    dataSize,
+                                    &decodedMthcMidi,
+                                    &decodedMthcMidiLen) != 0)
+        {
+            result = BAE_BAD_FILE;
+        }
+        else if (decodedMthcMidiLen >= 4 &&
+                 decodedMthcMidi[0]=='M' && decodedMthcMidi[1]=='T' && decodedMthcMidi[2]=='h' && decodedMthcMidi[3]=='d')
+        {
+            result = PV_LoadMidiBytesIntoDocument(document, decodedMthcMidi, decodedMthcMidiLen);
+            if (result == BAE_NO_ERROR)
+            {
+                result = PV_SetDebugOriginalMidiData(document, decodedMthcMidi, decodedMthcMidiLen);
+            }
+            if (result == BAE_NO_ERROR)
+            {
+                document->isPristine = TRUE;
+            }
+        }
+        else
+        {
+            result = BAE_BAD_FILE;
+        }
+
+        if (decodedMthcMidi)
+        {
+            free(decodedMthcMidi);
+        }
+    }
+#endif
     else
     {
         result = BAE_BAD_FILE_TYPE;

@@ -937,6 +937,7 @@ static XPTR PV_GetFileAsData(XFILENAME *pFile, int32_t *pSize)
     return data;
 }
 
+#if USE_ADP_SUPPORT == TRUE
 static GM_Waveform *PV_ReadADPIntoMemoryFromMemory(void *pMemoryFile, uint32_t memoryFileSize, OPErr *pErr)
 {
     BAEAdpDecodedAudio decodedAudio;
@@ -944,7 +945,6 @@ static GM_Waveform *PV_ReadADPIntoMemoryFromMemory(void *pMemoryFile, uint32_t m
 
     memset(&decodedAudio, 0, sizeof(decodedAudio));
     wave = NULL;
-
     if (BAEAdp_DecodeMemoryToPCM16Mono(pMemoryFile, memoryFileSize, NULL, &decodedAudio) != 0)
     {
         if (pErr)
@@ -952,7 +952,7 @@ static GM_Waveform *PV_ReadADPIntoMemoryFromMemory(void *pMemoryFile, uint32_t m
             *pErr = BAD_FILE;
         }
         return NULL;
-    }
+    }    
     if (decodedAudio.frameCount > 0xFFFFFFFFu)
     {
         BAEAdp_FreeDecodedAudio(&decodedAudio);
@@ -974,6 +974,7 @@ static GM_Waveform *PV_ReadADPIntoMemoryFromMemory(void *pMemoryFile, uint32_t m
     BAEAdp_FreeDecodedAudio(&decodedAudio);
     return wave;
 }
+#endif
 
 #if REVERB_USED != REVERB_DISABLED
 static const ReverbMode translateInternal[] = {
@@ -4827,13 +4828,17 @@ BAEResult BAESound_LoadFileSample(BAESound sound, BAEPathName filePath, BAEFileT
     OPErr theErr;
     AudioFileType type;
     XPTR fileData;
+#if USE_ADP_SUPPORT == TRUE
     int32_t fileSize;
+#endif
 
     theErr = NO_ERR;
     if ((sound) && (sound->mID == OBJECT_ID))
     {
         fileData = NULL;
+#if USE_ADP_SUPPORT == TRUE        
         fileSize = 0;
+#endif
 
         BAE_AcquireMutex(sound->mLock);
 
@@ -4841,7 +4846,7 @@ BAEResult BAESound_LoadFileSample(BAESound sound, BAEPathName filePath, BAEFileT
         BAESound_Unload(sound);
 
         XConvertPathToXFILENAME(filePath, &theFile);
-#if USE_ADP_SUPPORT == TRUE
+#if USE_ADP_SUPPORT == TRUE        
         if (fileType == BAE_ADP_TYPE)
         {
             fileData = PV_GetFileAsData(&theFile, &fileSize);
@@ -4851,6 +4856,7 @@ BAEResult BAESound_LoadFileSample(BAESound sound, BAEPathName filePath, BAEFileT
             }
         }
 #endif
+
 
         if (sound->pWave == NULL && theErr == NO_ERR)
         {

@@ -546,12 +546,12 @@ else
 										src/sf2-hsb/sf2_hsb_main.c
 								else							
 									ifeq ($(NBSTUDIO),1)
-										SRC += 	src/rmfeditor_wx/editor_main.cpp \
-											src/rmfeditor_wx/editor_bank.cpp \
-											src/rmfeditor_wx/editor_instrument_ext_dialog.cpp \
-											src/rmfeditor_wx/editor_metadata_dialog.cpp \
-											src/rmfeditor_wx/editor_pianoroll_panel.cpp \
-											src/rmfeditor_wx/batch_compress_dialog.cpp
+										SRC += 	src/nbstudio/editor_main.cpp \
+											src/nbstudio/editor_bank.cpp \
+											src/nbstudio/editor_instrument_ext_dialog.cpp \
+											src/nbstudio/editor_metadata_dialog.cpp \
+											src/nbstudio/editor_pianoroll_panel.cpp \
+											src/nbstudio/batch_compress_dialog.cpp
 										ifneq ($(MACOSX),1)
 											BAE_FLAGS += $(shell pkg-config --cflags gtk+-3.0) $(shell pkg-config --cflags glib-2.0)
 											BAE_LIBS += -lz $(shell pkg-config --libs gtk+-3.0) $(shell pkg-config --libs glib-2.0)
