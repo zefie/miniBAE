@@ -398,6 +398,24 @@ const char *BAE_GetFeatureString()
     }
 #endif
 
+#if USE_MTHC_SUPPORT == TRUE
+    const char *mthc = "Nokia Compressed MIDI (MThc) Support";
+    if (mthc && mthc[0])
+    {
+        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", mthc);
+        first = FALSE;
+    }
+#endif
+
+#if USE_ADP_SUPPORT == TRUE
+    const char *adp = "Nokia ADP Support";
+    if (adp && adp[0])
+    {
+        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", adp);
+        first = FALSE;
+    }
+#endif
+
 #if USE_ZMF_SUPPORT == TRUE
     const char *zmf = "ZMF Support";
     if (zmf && zmf[0])
