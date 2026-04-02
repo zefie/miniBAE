@@ -567,10 +567,6 @@ else
 												ifneq ($(WASM),1)
 													# playbae = libNeoBAE srcs + playbae.c
 													SRC += src/playbae/playbae.c
-												else
-													SRC += src/wasm/neobae.cpp \
-														src/wasm/player.c \
-														src/wasm/utility.c
 												endif
 											endif
 										endif

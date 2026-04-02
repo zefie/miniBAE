@@ -144,13 +144,13 @@ ifdef EMBED_TTF_FONT
 $(OBJ_DIR)gui_main.o: $(EMBED_FONT_HEADER)
 endif
 
-$(TARGET_LIB).a: $(OBJ)
+$(TARGET_LIB).a: $(OBJ_BIN)
 	@mkdir -p $(TARGET_OUT)
-	$(AR) rcs $(TARGET_OUT)$(TARGET_LIB).a $(OBJ)
+	$(AR) rcs $(TARGET_OUT)$(TARGET_LIB).a $(OBJ_BIN)
 
-$(TARGET_LIB).so: ${OBJ}
+$(TARGET_LIB).so: ${OBJ_BIN}
 	@mkdir -p $(TARGET_OUT)
-	${LD} -shared $(LDFLAGS) ${OBJ} $(LIBS) -o $(TARGET_OUT)${TARGET_LIB}.so
+	${LD} -shared $(LDFLAGS) ${OBJ_BIN} $(LIBS) -o $(TARGET_OUT)${TARGET_LIB}.so
 ifeq ($(USING_BASSMIDI),1)
 	@$(shell cp src/thirdparty/bassmidi/libs/$(if $(filter x86_64 aarch64,$(UNAME_M)),x86_64,x86)/libbass*.so* $(TARGET_OUT) 2>/dev/null || true)
 endif

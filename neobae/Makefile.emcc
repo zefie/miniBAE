@@ -71,9 +71,9 @@ extra-files:
 
 
 	
-$(TARGET_JS): ${OBJ}
+$(TARGET_JS): ${OBJ_BIN}
 	@mkdir -p $(TARGET_OUT)
-	${LD} -o $(TARGET_OUT)${TARGET_JS} ${LDFLAGS} ${OBJ} $(LIBS)
+	${LD} -o $(TARGET_OUT)${TARGET_JS} ${LDFLAGS} ${OBJ_BIN} $(LIBS)
 
 pack: ${TARGET_JS}
 	@rm -f $(TARGET_OUT)$(PACK_FILENAME)
