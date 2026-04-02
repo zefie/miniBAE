@@ -1403,7 +1403,7 @@ static void PV_AudioDirectSoundFrameThread(void* threadContext)
 
                     // I am incrementing g_lastPos right after the write operation
                     // to lessen the chance of a device open/close messing us up in the wait loop.
-                    g_lastPos += (g_audioByteBufferSize * g_synthFramesPerBlock);
+                    g_lastPos += g_audioByteBufferSize;
 
                     if (g_shutDownDoubleBuffer)
                     {

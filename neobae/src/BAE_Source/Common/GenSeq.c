@@ -3472,6 +3472,10 @@ static void PV_ProcessIgorResource(GM_Song *pSong,
                                   bankToken,
                                   theNewData,
                                   &err);
+            if (err != NO_ERR)
+            {
+                XDisposePtr(theNewData);  // cache refused to take ownership; free it
+            }
         }
         break;
     case ID_ESND:
@@ -3487,6 +3491,10 @@ static void PV_ProcessIgorResource(GM_Song *pSong,
                                   bankToken,
                                   theNewData,
                                   &err);
+            if (err != NO_ERR)
+            {
+                XDisposePtr(theNewData);  // cache refused to take ownership; free it
+            }
         }
         break;
     case ID_SND:
@@ -3501,6 +3509,10 @@ static void PV_ProcessIgorResource(GM_Song *pSong,
                                   bankToken,
                                   theNewData,
                                   &err);
+            if (err != NO_ERR)
+            {
+                XDisposePtr(theNewData);  // cache refused to take ownership; free it
+            }
         }
         break;
     case ID_INST:

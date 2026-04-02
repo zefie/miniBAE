@@ -9,6 +9,7 @@
 #include "BAE_API.h"
 #include "GenXMF.h"
 #include <string.h>
+#include <limits.h>
 // zlib for MXMF packed content
 
 #include "X_Assert.h" // BAE_PRINTF
@@ -60,7 +61,7 @@ static int PV_FindBytes(const unsigned char *buf, uint32_t len, const char *pat,
 // Quick zlib header validation to reduce false-positive inflate attempts
 static bool PV_IsLikelyZlibHeader(const unsigned char *buf, uint32_t len, uint32_t offset)
 {
-    if (!buf || offset + 2 > len) return FALSE;
+    if (!buf || len < 2 || offset > (len - 2)) return FALSE;
     unsigned cmf = buf[offset];
     unsigned flg = buf[offset + 1];
     // CMF lower 4 bits must be 8 (deflate)
@@ -77,14 +78,14 @@ static bool PV_ExtractRMIDToSMF(const unsigned char *buf, uint32_t len, const un
     if (!buf || len < 12) return FALSE;
     if (!(buf[0]=='R'&&buf[1]=='I'&&buf[2]=='F'&&buf[3]=='F')) return FALSE;
     uint32_t riffSize = (uint32_t)buf[4] | ((uint32_t)buf[5]<<8) | ((uint32_t)buf[6]<<16) | ((uint32_t)buf[7]<<24);
-    if (riffSize+8 > len) return FALSE;
+    if (riffSize > (len - 8)) return FALSE;
     if (!(buf[8]=='R'&&buf[9]=='M'&&buf[10]=='I'&&buf[11]=='D')) return FALSE;
     uint32_t i = 12;
     while (i + 8 <= len)
     {
         const unsigned char *ch = buf + i;
         uint32_t csize = (uint32_t)ch[4] | ((uint32_t)ch[5]<<8) | ((uint32_t)ch[6]<<16) | ((uint32_t)ch[7]<<24);
-        if (i + 8 + csize > len) break;
+        if (csize > (len - i - 8)) break;
         if (ch[0]=='d'&&ch[1]=='a'&&ch[2]=='t'&&ch[3]=='a')
         {
             if (outSmf) *outSmf = ch + 8;
@@ -93,7 +94,11 @@ static bool PV_ExtractRMIDToSMF(const unsigned char *buf, uint32_t len, const un
         }
         // chunks are word-aligned
         i += 8 + csize;
-        if (i & 1) i++;
+        if (i & 1)
+        {
+            if (i == 0xFFFFFFFFu) break;
+            i++;
+        }
     }
     return FALSE;
 }
@@ -252,12 +257,13 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
     if (!PV_ReadVLQ(bytes, len, pos, &itemCount)) return FALSE;
     if (!PV_ReadVLQ(bytes, len, pos, &headerLen)) return FALSE;
     if (nodeLen == 0) return FALSE;
+    if (start > len || nodeLen > (len - start)) return FALSE;
     uint32_t nodeEnd = start + nodeLen;
-    if (nodeEnd > len) return FALSE;
     BAE_PRINTF("[XMF1] node@%u len=%u items=%u headerLen=%u\n", start, nodeLen, itemCount, headerLen);
 
     // Header: metadataLen + metadata, unpackersLen + unpackers
     uint32_t headerStart = *pos;
+    if (headerStart > nodeEnd || headerLen > (nodeEnd - headerStart)) return FALSE;
     uint32_t headerEnd = headerStart + headerLen;
     if (headerEnd > len) return FALSE;
     uint32_t metadataLen = 0; uint32_t metaStart = 0;
@@ -266,7 +272,7 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
     if (*pos < headerEnd)
     {
         if (!PV_ReadVLQSlice(bytes, headerStart, headerEnd, pos, &metadataLen)) metadataLen = 0;
-        if (metadataLen > 0 && *pos + metadataLen <= headerEnd)
+        if (metadataLen > 0 && *pos <= headerEnd && metadataLen <= (headerEnd - *pos))
         {
             metaStart = *pos;
             PV_ParseXMF1Metadata(bytes, len, metaStart, metadataLen, &rfType, &rfId);
@@ -283,7 +289,7 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
     if (*pos < headerEnd)
     {
         if (!PV_ReadVLQSlice(bytes, headerStart, headerEnd, pos, &unpackersLen)) unpackersLen = 0;
-        if (*pos + unpackersLen <= headerEnd)
+        if (*pos <= headerEnd && unpackersLen <= (headerEnd - *pos))
         {
             *pos += unpackersLen;
         }
@@ -325,7 +331,7 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
             uint32_t off = 0, blen = 0;
             if (!PV_ReadVLQ(bytes, len, pos, &off)) return FALSE;
             if (!PV_ReadVLQ(bytes, len, pos, &blen)) return FALSE;
-            if (off > len || blen > len || off + blen > len) return FALSE;
+            if (off > len || blen > (len - off)) return FALSE;
             content = bytes + off;
             contentLen = blen;
             BAE_PRINTF("[XMF1] file: inFileResource off=%u len=%u rfType=%d rfId=%d first4=%02X %02X %02X %02X\n",
@@ -545,7 +551,7 @@ static bool PV_InflateFromOffset(const unsigned char *buf, uint32_t len, uint32_
 #if USE_XMF_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
     if (!buf || offset >= len || !outBuf || !outLen) return FALSE;
     // Quick header sanity: accept zlib (0x78 ..), or gzip (0x1f 0x8b)
-    if (offset + 2 > len) return FALSE;
+    if (len < 2 || offset > (len - 2)) return FALSE;
     unsigned char b0 = buf[offset];
     unsigned char b1 = buf[offset+1];
     bool is_zlib = (b0 == 0x78);
@@ -588,8 +594,20 @@ static bool PV_InflateFromOffset(const unsigned char *buf, uint32_t len, uint32_
             if (zs.avail_out == 0)
             {
                 uint32_t used = (uint32_t)((char *)zs.next_out - (char *)dst);
-                uint32_t ncap = cap + kChunk;
-                unsigned char *ndst = (unsigned char *)XNewPtr(ncap);
+                uint32_t ncap;
+                unsigned char *ndst;
+                if (cap > (UINT32_MAX - kChunk))
+                {
+                    ok = FALSE;
+                    break;
+                }
+                ncap = cap + kChunk;
+                if (ncap > (uint32_t)INT32_MAX)
+                {
+                    ok = FALSE;
+                    break;
+                }
+                ndst = (unsigned char *)XNewPtr((int32_t)ncap);
                 if (!ndst)
                 {
                     ok = FALSE;
@@ -675,8 +693,20 @@ static bool PV_InflateRawFromOffset(const unsigned char *buf, uint32_t len, uint
             if (zs.avail_out == 0)
             {
                 uint32_t used = (uint32_t)((char *)zs.next_out - (char *)dst);
-                uint32_t ncap = cap + kChunk;
-                unsigned char *ndst = (unsigned char *)XNewPtr(ncap);
+                uint32_t ncap;
+                unsigned char *ndst;
+                if (cap > (UINT32_MAX - kChunk))
+                {
+                    ok = FALSE;
+                    break;
+                }
+                ncap = cap + kChunk;
+                if (ncap > (uint32_t)INT32_MAX)
+                {
+                    ok = FALSE;
+                    break;
+                }
+                ndst = (unsigned char *)XNewPtr((int32_t)ncap);
                 if (!ndst)
                 {
                     ok = FALSE;
@@ -734,7 +764,7 @@ static uint32_t PV_ComputeSMFLen(const unsigned char *p, uint32_t len)
     uint32_t need = pos;
     for (uint16_t t=0; t<ntrks; ++t)
     {
-        if (need + 8 > len) return 0;
+        if (need > (len - 8)) return 0;
         const unsigned char *trk = p + need;
         if (!(trk[0]=='M'&&trk[1]=='T'&&trk[2]=='r'&&trk[3]=='k')) return 0;
         uint32_t tlen = (trk[4]<<24)|(trk[5]<<16)|(trk[6]<<8)|trk[7];
@@ -863,7 +893,7 @@ static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ule
             {
                 uint32_t copyLen = outLen - (uint32_t)off;
                 unsigned char *copy = (unsigned char *)XNewPtr(copyLen);
-                if (!copy) { XDisposePtr(out); return FALSE; }
+                if (!copy) { XDisposePtr(out); goto fail_scan; }
                 XBlockMove(out + off, copy, copyLen);
                 XDisposePtr(out);
                 foundMidi = copy;
@@ -879,7 +909,7 @@ static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ule
             {
                 uint32_t copyLen = outLen - (uint32_t)roff;
                 unsigned char *copy = (unsigned char *)XNewPtr(copyLen);
-                if (!copy) { XDisposePtr(out); return FALSE; }
+                if (!copy) { XDisposePtr(out); goto fail_scan; }
                 XBlockMove(out + roff, copy, copyLen);
                 XDisposePtr(out);
                 foundRmf = copy;
@@ -895,7 +925,7 @@ static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ule
                 if (!foundMidi)
                 {
                     unsigned char *copy = (unsigned char *)XNewPtr(rmidLen);
-                    if (!copy) { XDisposePtr(out); return FALSE; }
+                    if (!copy) { XDisposePtr(out); goto fail_scan; }
                     XBlockMove(rmidSmf, copy, rmidLen);
                     XDisposePtr(out);
                     foundMidi = copy;
@@ -938,7 +968,7 @@ static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ule
                 {
                     uint32_t copyLen = dlen - (uint32_t)off;
                     unsigned char *copy = (unsigned char *)XNewPtr(copyLen);
-                    if (!copy) { XDisposePtr(dout); XDisposePtr(cpy); return FALSE; }
+                    if (!copy) { XDisposePtr(dout); XDisposePtr(cpy); goto fail_scan; }
                     XBlockMove(dout + off, copy, copyLen);
                     XDisposePtr(dout);
                     XDisposePtr(cpy);
@@ -953,7 +983,7 @@ static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ule
                 {
                     uint32_t copyLen = dlen - (uint32_t)roff;
                     unsigned char *copy = (unsigned char *)XNewPtr(copyLen);
-                    if (!copy) { XDisposePtr(dout); XDisposePtr(cpy); return FALSE; }
+                    if (!copy) { XDisposePtr(dout); XDisposePtr(cpy); goto fail_scan; }
                     XBlockMove(dout + roff, copy, copyLen);
                     XDisposePtr(dout);
                     XDisposePtr(cpy);
@@ -969,7 +999,7 @@ static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ule
                     if (!foundMidi)
                     {
                         unsigned char *copy = (unsigned char *)XNewPtr(rmidLen);
-                        if (!copy) { XDisposePtr(dout); XDisposePtr(cpy); return FALSE; }
+                        if (!copy) { XDisposePtr(dout); XDisposePtr(cpy); goto fail_scan; }
                         XBlockMove(rmidSmf, copy, rmidLen);
                         XDisposePtr(dout);
                         XDisposePtr(cpy);
@@ -1051,6 +1081,17 @@ done_scan:
         *outRmfLen = foundRmfLen;
     }
     return (foundMidi != NULL) || (foundRmf != NULL);
+
+fail_scan:
+    if (foundMidi)
+    {
+        XDisposePtr((XPTR)foundMidi);
+    }
+    if (foundRmf)
+    {
+        XDisposePtr((XPTR)foundRmf);
+    }
+    return FALSE;
 }
 
 static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
@@ -1065,7 +1106,7 @@ static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
         if (buf[i] == 'R' && buf[i+1] == 'I' && buf[i+2] == 'F' && buf[i+3] == 'F')
         {
             uint32_t sz = (uint32_t)buf[i+4] | ((uint32_t)buf[i+5] << 8) | ((uint32_t)buf[i+6] << 16) | ((uint32_t)buf[i+7] << 24);
-            if (i + 8 + sz > len) { continue; }
+            if (sz > (len - i - 8)) { continue; }
             const unsigned char *type = &buf[i+8];
             bool isDLS = (type[0] == 'D' && type[1] == 'L' && type[2] == 'S' && type[3] == ' ');
             bool isSF2 = (type[0] == 's' && type[1] == 'f' && type[2] == 'b' && type[3] == 'k');

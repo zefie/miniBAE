@@ -43,6 +43,7 @@
 #include "X_Formats.h"
 #include "GenSnd.h"
 #include "GenPriv.h"
+#include <limits.h>
 
 #if USE_VORBIS_DECODER == TRUE || USE_VORBIS_ENCODER == TRUE
 
@@ -436,13 +437,30 @@ typedef struct {
 
 static int PV_VorbisMembufAppend(VorbisMembuf *buf, const unsigned char *bytes, long len)
 {
+    uint32_t addLen;
     uint32_t newSize;
+    uint32_t newCap;
+
     if (len <= 0) return 0;
-    newSize = buf->size + (uint32_t)len;
+    if (!buf || !bytes) return -1;
+    if ((unsigned long)len > (unsigned long)UINT32_MAX) return -1;
+
+    addLen = (uint32_t)len;
+    if (addLen > (uint32_t)INT32_MAX) return -1;
+    if (buf->size > (UINT32_MAX - addLen)) return -1;
+
+    newSize = buf->size + addLen;
     if (newSize > buf->capacity) {
-        uint32_t newCap = buf->capacity ? buf->capacity * 2 : 65536;
+        newCap = buf->capacity ? buf->capacity * 2 : 65536;
         unsigned char *grown;
-        while (newCap < newSize) newCap *= 2;
+        while (newCap < newSize) {
+            if (newCap > (UINT32_MAX / 2)) {
+                newCap = UINT32_MAX;
+                break;
+            }
+            newCap *= 2;
+        }
+        if (newCap < newSize || newCap > (uint32_t)INT32_MAX) return -1;
         grown = (unsigned char *)XNewPtr((int32_t)newCap);
         if (!grown) return -1;
         if (buf->data && buf->size) XBlockMove(buf->data, grown, (int32_t)buf->size);
@@ -450,7 +468,7 @@ static int PV_VorbisMembufAppend(VorbisMembuf *buf, const unsigned char *bytes, 
         buf->data = grown;
         buf->capacity = newCap;
     }
-    XBlockMove((void *)bytes, buf->data + buf->size, (int32_t)len);
+    XBlockMove((void *)bytes, buf->data + buf->size, (int32_t)addLen);
     buf->size = newSize;
     return 0;
 }

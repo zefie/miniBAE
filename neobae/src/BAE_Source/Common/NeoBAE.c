@@ -7332,8 +7332,15 @@ BAEResult BAESong_GetTitle(BAESong song, char *cName, int maxSize)
 {
     OPErr err = NO_ERR;
 
+    if (!cName || maxSize <= 0)
+    {
+        return BAE_TranslateOPErr(PARAM_ERR);
+    }
+
     if ((song) && (song->mID == OBJECT_ID))
     {
+        uint32_t copyLen;
+
         BAE_AcquireMutex(song->mLock);
         if (song->mTitle == NULL)
         {
@@ -7350,11 +7357,13 @@ BAEResult BAESong_GetTitle(BAESong song, char *cName, int maxSize)
         }
         if (song->mTitle)
         {
-            if (XStrLen(song->mTitle) > maxSize)
+            copyLen = XStrLen(song->mTitle);
+            if (copyLen >= (uint32_t)maxSize)
             {
-                song->mTitle[maxSize - 1] = 0;
+                copyLen = (uint32_t)maxSize - 1;
             }
-            XStrCpy(cName, song->mTitle);
+            XBlockMove(song->mTitle, cName, (int32_t)copyLen);
+            cName[copyLen] = 0;
         }
         else
         {

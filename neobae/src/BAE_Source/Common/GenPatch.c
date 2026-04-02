@@ -761,8 +761,11 @@ static GM_Instrument * PV_CreateInstrumentFromResource(GM_Instrument *theMaster,
     XPTR                    theSound;
     GM_SampleCacheEntry *   sndInfo;
     GM_Mixer *              pMixer;
+    bool                    cacheRefAdded;
 
     theI = NULL;
+    sndInfo = NULL;
+    cacheRefAdded = FALSE;
     pMixer = MusicGlobals;
 
     //  First, if there is no entry in the cache for this ID, create it.
@@ -780,6 +783,10 @@ static GM_Instrument * PV_CreateInstrumentFromResource(GM_Instrument *theMaster,
         sndInfo = GMCache_GetCachePtrFromID(pMixer, theID, bankToken, pErr);
         if (*pErr != NO_ERR) return theI;
         *pErr = GMCache_IncrCacheEntryRef(pMixer, sndInfo);
+        if (*pErr == NO_ERR)
+        {
+            cacheRefAdded = TRUE;
+        }
     }
     if (*pErr != NO_ERR) return theI;
     theSound = GMCache_GetSamplePtr(sndInfo, pErr);
@@ -835,6 +842,10 @@ static GM_Instrument * PV_CreateInstrumentFromResource(GM_Instrument *theMaster,
             }
         }
     }
+    if (!theI && cacheRefAdded && sndInfo)
+    {
+        GMCache_DecrCacheEntryRef(pMixer, sndInfo);
+    }
     return theI;
 }
 
@@ -878,8 +889,11 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
     GM_SampleCacheEntry *   sndInfo;
     int32_t               i;
     XSampleID               theSampleID;
+    bool                    cacheRefAdded;
 
     theI = NULL;
+    sndInfo = NULL;
+    cacheRefAdded = FALSE;
     theX = (InstrumentResource *)theExternalX;
 
     if (theExternalX == NULL)
@@ -902,6 +916,7 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                 sndInfo = GMCache_GetCachePtrFromID(pMixer, theSampleID, bankToken, pErr);
                 if (pErr && *pErr != NO_ERR) { return theI; }
                 *pErr = GMCache_IncrCacheEntryRef(pMixer, sndInfo);
+                if (pErr && *pErr == NO_ERR) { cacheRefAdded = TRUE; }
             }
             if (pErr && *pErr != NO_ERR) { return theI; }
             theSound = GMCache_GetSamplePtr(sndInfo, pErr);
@@ -967,6 +982,10 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                     *pErr = BAD_INSTRUMENT;
                     BAE_PRINTF("[PV_GetInstrument] Instrument %ld sample load failed (snd=%d) err=%d\n", (long)theID, (int)theSampleID, (int)*pErr);
                 }
+            }
+            if (!theI && cacheRefAdded && sndInfo)
+            {
+                GMCache_DecrCacheEntryRef(pMixer, sndInfo);
             }
         }
         else

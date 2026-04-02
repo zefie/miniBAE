@@ -346,14 +346,10 @@ int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t chan
     */
     if ((uint32_t)g_deviceSpec.freq != g_sampleRate || (uint32_t)g_deviceSpec.channels != g_channels)
     {
-        /* Unlike earlier attempt, we will adapt our internal rate if device differs, mirroring SDL2 backend behavior.
-           The engine slice sizing is tied to the effective output rate; failing to adapt can cause perceived tempo issues
-           if engine timing elsewhere assumes device rate. */
-        BAE_PRINTF("SDL3 device adjusted: requested %u Hz/%u ch -> device %d Hz/%d ch. Adapting internal slice.\n",
+          /* SDL3 stream handles conversion from requested stream format to device format.
+              Keep engine/sample-slice sizing aligned to the requested stream format. */
+          BAE_PRINTF("SDL3 device adjusted: requested %u Hz/%u ch -> device %d Hz/%d ch. Keeping requested stream format.\n",
                    g_sampleRate, g_channels, g_deviceSpec.freq, g_deviceSpec.channels);
-        g_sampleRate = (uint32_t)g_deviceSpec.freq;
-        g_channels = (uint32_t)g_deviceSpec.channels;
-        PV_ComputeSliceSizeFromEngine();
     }
     SDL_ResumeAudioDevice(g_playbackDevice);
     BAE_PRINTF("SDL3 audio active: actual %u Hz (%d req), %u ch (%d req), slice %u frames (%d bytes)\n",

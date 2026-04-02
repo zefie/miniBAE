@@ -925,11 +925,8 @@ int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t chan
     // If SDL adjusted the frequency or channel count, update and recompute slice.
     if ((uint32_t)g_have.freq != g_sampleRate || (uint32_t)g_have.channels != g_channels)
     {
-        BAE_PRINTF("SDL adjusted audio format (requested %u Hz/%u ch -> got %d Hz/%d ch). Recomputing slice.\n",
+        BAE_PRINTF("SDL adjusted audio format (requested %u Hz/%u ch -> got %d Hz/%d ch). Keeping requested callback format.\n",
                    g_sampleRate, g_channels, g_have.freq, g_have.channels);
-        g_sampleRate = (uint32_t)g_have.freq;
-        g_channels = (uint32_t)g_have.channels;
-        PV_ComputeSliceSizeFromEngine();
     }
 
     SDL_PauseAudioDevice(g_audioDevice, 0);

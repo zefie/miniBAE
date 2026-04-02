@@ -837,7 +837,7 @@ OPErr GM_LoadSF2SoundfontFromMemory(const unsigned char *data, size_t size) {
         fd = mkstemps(tmpl, 4);
 #else
         // On Linux/Unix, just use /tmp
-        strcpy(tmpl, "/tmp/neobae_dls_XXXXXX.dls");
+    snprintf(tmpl, sizeof(tmpl), "/tmp/neobae_dls_XXXXXX.dls");
         fd = mkstemps(tmpl, 4);
 #endif
 
@@ -1037,7 +1037,7 @@ OPErr GM_LoadSF2SoundfontAsXMFOverlay(const unsigned char *data, size_t size) {
         snprintf(tmpl, sizeof(tmpl), "%s/neobae_xmf_dls_XXXXXX.dls", tmpdir);
         fd = mkstemps(tmpl, 4);
 #else
-        strcpy(tmpl, "/tmp/neobae_xmf_dls_XXXXXX.dls");
+    snprintf(tmpl, sizeof(tmpl), "/tmp/neobae_xmf_dls_XXXXXX.dls");
         fd = mkstemps(tmpl, 4);
 #endif
 
