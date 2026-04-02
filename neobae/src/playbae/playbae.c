@@ -417,7 +417,7 @@ static void print_song_engine_config(BAESong song)
 // prototypes
 
 char const copyrightInfo[] =
-    "Copyright (C) 2009 Beatnik, Inc and Copyright (C) 2021-2025 Zefie Networks. All rights reserved.\n";
+    "Copyright (C) 2009 Beatnik, Inc and Copyright (C) 2021-2026 Zefie Networks. All rights reserved.\n";
 
 static char playFileString[512];
 
@@ -431,17 +431,20 @@ static void init_playFileString(void)
 #if USE_XMF_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
    strcat(playFileString, ", XMF/MXMF");
 #endif
-#if defined(USE_MPEG_DECODER) && (USE_MPEG_DECODER != 0)
+#if USE_MPEG_DECODER == TRUE
    strcat(playFileString, ", MPEG audio: MP2/MP3");
 #endif
-#if defined(USE_FLAC_DECODER) && (USE_FLAC_DECODER != 0)
+#if USE_FLAC_DECODER == TRUE
    strcat(playFileString, ", FLAC");
 #endif
-#if defined(USE_VORBIS_DECODER) && (USE_VORBIS_DECODER != 0)
+#if USE_VORBIS_DECODER == TRUE
    strcat(playFileString, ", Ogg Vorbis");
 #endif
-#if defined(USE_OPUS_DECODER) && (USE_OPUS_DECODER != 0)
+#if USE_OPUS_DECODER == TRUE
    strcat(playFileString, ", Ogg Opus");
+#endif
+#if USE_ADP_SUPPORT == TRUE
+   strcat(playFileString, ", Nokia ADP");
 #endif
    strcat(playFileString, ")");
 }
@@ -489,7 +492,7 @@ char const usageStringExtra[] =
         "                 -r  {Play a RMF file}\n"
         "                 -m  {Play a MID file}\n"
         "                 -i  {Show RMF file info}\n"
-#if defined(USE_MPEG_DECODER) && (USE_MPEG_DECODER != 0)
+#if USE_MPEG_DECODER == TRUE
         "                 -mp {Play an MPEG audio file (MP2/MP3)}\n"
 #endif
         "                 -d  {verbose (debug) mode}\n"};
