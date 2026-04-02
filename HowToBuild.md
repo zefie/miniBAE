@@ -1,208 +1,332 @@
-## How to compile
-All compilation was tested on **Debian Linux 11 (Buster) amd64** and **Debian Linux 13 (Trixie) amd64 (WSL2)**
+# How to build
 
-Package names and commands may vary if using a different OS.
+These instructions were tested on Debian Linux (including WSL2). Package names may differ on other distributions.
 
-When using the `-j` flag with `make`, do not run `clean` and `all` in the same command, it will fail. You can build with the `-j` flag after cleaning without it. See below.
+## Before you start
 
-By default, all builds will build with SF2 support via FluidSynth. FluidSynth provides SF2/SF3/SFO support, as well as limited DLS support.
+- Run commands from the repository root unless the section says otherwise.
+- Build artifacts are in `neobae/bin/`.
+- Keep `clean` separate from parallel builds. Do this:
 
-## Get the source (git, easier)
-- `git clone https://github.com/zefie/NeoBAE`
-- `cd NeoBAE && git submodule init --update`
+```bash
+make clean
+make -j$(nproc)
+```
 
-## Get the source (tarball or zip, more work)
-- Download tarball, extract it
-- Get the [minimp3 source](https://github.com/lieff/minimp3)
-   - Place it in the `neobae/src/thirdparty/minimp3` folder
-- Get the [FLAC source](https://xiph.org/flac/)
-   - Place it in the `neobae/src/thirdparty/flac` folder
-- Get the [OGG source](https://xiph.org/ogg/)
-   - Place it in the `neobae/src/thirdparty/libogg` folder
-- Get the [Vorbis source](https://xiph.org/vorbis/)
-   - Place it in the `neobae/src/thirdparty/libvorbis` folder
-- Get the [Opus source](https://www.opus-codec.org/downloads/)
-   - Place it in the `neobae/src/thirdparty/opus` folder
-- Get the [Opusfile source](https://www.opus-codec.org/downloads/)
-   - Place it in the `neobae/src/thirdparty/opusfile` folder
-- Get the [RtMidi source](https://github.com/thestk/rtmidi)
-   - Place it in the `neobae/src/thirdparty/rtmidi` folder
+Do not combine into one line like `make clean -j$(nproc)`.
 
-# Linux only
-- Get the [FluidSynth source](https://github.com/zefie/fluidsynth)
-   - Place it in the `neobae/src/thirdparty/fluidsynth` folder
+By default (without `NOAUTO=1`), builds enable modern format support and SoundFont via FluidSynth where applicable.
 
-- A slimmed down copy of Lame v3.100 is included in the main source tree, for mp3 encoding.
-- You only need to grab what you want to support, [see below](#modular-build-system).
+## What should I build?
 
-## Linux
+- `playbae`: command-line player and test tool.
+- `zefidi`: GUI player/editor utility.
+- `nbstudio`: NeoBAE Studio (RMF editor).
+- Web build: WebAssembly output (`engine.js` + `engine.wasm`).
 
-#### Setup & Compile Linux SDL3
-- Install dependencies support (one time):
-    - `apt-get update`
-    - `apt-get install libc6-dev libsdl3-dev libsndfile-dev libogg-dev libvorbis-dev libopus-dev libopusfile-dev libflac-dev`
-- Build Fluidsynth
-    - `cd neobae/src/thirdparty/fluidsynth`
-    - `mkdir build && cd build`
-    - `cmake ..`
-    - `make -j$(nproc)`
-    - `sudo make install`
-- Build playbae
-    - `cd neobae`
-    - `make clean`
-    - `make -j$(nproc)`
-- Using Build:
-    - Run `./bin/playbae -h` for information on usage
+## Get the source
 
-#### Setup & Compile Linux SDL3 with clang
-- Install dependencies support (one time):
-    - `apt-get update`
-    - `apt-get install clang libc6-dev libsdl3-dev libsndfile-dev libogg-dev libvorbis-dev libopus-dev libopusfile-dev libflac-dev`
-- Build Fluidsynth
-    - `cd neobae/src/thirdparty/fluidsynth`
-    - `mkdir build && cd build`
-    - `cmake ..`
-    - `make -j$(nproc)`
-    - `sudo make install`
-- Build playbae
-    - `cd neobae`
-    - `make clean`
-    - `make -f Makefile.clang -j$(nproc)`
-- Using Build:
-    - Run `./bin/playbae -h` for information on usage
+### Git (recommended)
 
-#### Setup & Compile zefidi GUI
-- Install dependencies:
-    - `apt-get update`
-    - `apt-get install libsdl3-dev libsdl3-ttf-dev libsndfile-dev libogg-dev libvorbis-dev libopus-dev libopusfile-dev libflac-dev`
-- Build Fluidsynth
-    - `cd neobae/src/thirdparty/fluidsynth`
-    - `mkdir build && cd build`
-    - `cmake ..`
-    - `make -j$(nproc)`
-    - `sudo make install`    
-- Build GUI
-    - `make clean && -f Makefile.gui -j$(nproc)`
-    - If you want hardware MIDI (in/out) support, you will have to choose if you want the ALSA backend, JACK backend, or both:
-       - ALSA: `make clean && make -f Makefile.gui ENABLE_MIDI_HW=1 ENABLE_ALSA=1 -j$(nproc)`
-       - Jack: `make clean && make -f Makefile.gui ENABLE_MIDI_HW=1 ENABLE_JACK=1 -j$(nproc)`
-       - Both: `make clean && make -f Makefile.gui ENABLE_MIDI_HW=1 ENABLE_ALSA=1 ENABLE_JACK=1 -j$(nproc)`
-       - Note: If `/dev/snd/seq` does not exist on your system (eg, WSL), ALSA will cause the neobae GUI to segfault when accessing the MIDI Devices dropdowns.
-    - It is up to you to install the development dependencies for Jack and/or ALSA.
-- Using Build:
-    - Copy the file to `/usr/local/bin` or your prefered path.
-    - Note: zefidi looks for `zenity`, `kdialog`, or `yad` (in this order) for file browsing.
-    - If you do not have these installed, the `Open`, `Load Bank`, `Export`, and `Record` buttons may not function.
+```bash
+git clone https://github.com/zefie/NeoBAE
+cd NeoBAE
+git submodule update --init --recursive
+```
 
-## Windows
+### Tarball/zip (manual dependency setup)
 
-The repository includes a binary copy of zefie's modified libfluidsynth.dll (better DLS support). Building for Windows may require libogg, libvorbis, libopus, libopusfile, and libflac to be compiled or installed in your environment.
+If you do not use git submodules, place third-party sources in these folders:
 
-#### Setup & Compile Win32 mingw build (using Debian WSL2)
-- Install mingw into your Debian WSL2:
-    - `apt-get update`
-    - `apt-get install binutils-mingw-w64-x86_64 g++-mingw-w64-x86_64 g++-mingw-w64-x86_64-posix g++-mingw-w64-x86_64-win32 gcc-mingw-w64-base gcc-mingw-w64-x86_64 gcc-mingw-w64-x86_64-posix gcc-mingw-w64-x86_64-posix-runtime gcc-mingw-w64-x86_64-win32 gcc-mingw-w64-x86_64-win32-runtime mingw-w64-common mingw-w64-x86_64-dev libz-mingw-w64-dev`
-- Build playbae
-    - `cd neobae`
-    - For DirectSound support:
-       - `make clean`
-       - `make -f Makefile.mingw -j$(nproc)`
-    - For SDL3 support:
-       - `make clean`
-       - `make -f Makefile.mingw USE_SDL=1 -j$(nproc)`
-- Using Build:
-    - Copy `./bin/playbae.exe` to a Windows system
-    - Run `playbae.exe -h`, or drag a supported file over the exe
+- [minimp3](https://github.com/lieff/minimp3) -> `neobae/src/thirdparty/minimp3`
+- [FLAC](https://xiph.org/flac/) -> `neobae/src/thirdparty/flac`
+- [OGG](https://xiph.org/ogg/) -> `neobae/src/thirdparty/libogg`
+- [Vorbis](https://xiph.org/vorbis/) -> `neobae/src/thirdparty/libvorbis`
+- [Opus](https://www.opus-codec.org/downloads/) -> `neobae/src/thirdparty/opus`
+- [Opusfile](https://www.opus-codec.org/downloads/) -> `neobae/src/thirdparty/opusfile`
+- [RtMidi](https://github.com/thestk/rtmidi) -> `neobae/src/thirdparty/rtmidi`
+- [libg722](https://github.com/sippy/libg722) -> `neobae/src/thirdparty/libg722`
+- Linux only: modified [FluidSynth](https://github.com/zefie/fluidsynth) -> `neobae/src/thirdparty/fluidsynth`
 
-#### Setup & Compile zefidi GUI (using Debian WSL2)
-- All SDL3 dependencies are already provided
-- Install mingw into your Debian WSL2:
-    - `apt-get install binutils-mingw-w64-x86_64 g++-mingw-w64-x86_64 g++-mingw-w64-x86_64-posix g++-mingw-w64-x86_64-win32 gcc-mingw-w64-base gcc-mingw-w64-x86_64 gcc-mingw-w64-x86_64-posix gcc-mingw-w64-x86_64-posix-runtime gcc-mingw-w64-x86_64-win32 gcc-mingw-w64-x86_64-win32-runtime mingw-w64-common mingw-w64-x86_64-dev libz-mingw-w64-dev`
-    - SDL dependency for mingw is provided in the repo
-- Build GUI
-    - `cd neobae`
-    - `make clean`
-    - `make -f Makefile.gui-mingw -j$(nproc)`
-    - Hardware MIDI support is already enabled for mingw builds
-- Using Build (Windows):
-    - Copy `./bin/zefidi.exe` to a Windows system
-    - Run `zefidi.exe`, or drag a supported file over the exe
+Notes:
 
-## MacOS X
-- TODO! It should build but I am not familar with the Mac build environment.
+- If you use `NOAUTO=1`, you only need third-party code for the features you enable.
 
-## zefidi GUI (Windows & Linux)
-#### Setup & Compile zefidi GUI
-- If using mingw32, all deps are already provided, you can just skip to build
-- Linux: Install dependencies:
-    - `apt-get update`
-    - `apt-get install libsdl3-dev libsdl3-ttf-dev libfluidsynth-dev`
-- Linux cross-dev (Windows):
-    - `apt-get install binutils-mingw-w64-x86_64 g++-mingw-w64-x86_64 g++-mingw-w64-x86_64-posix g++-mingw-w64-x86_64-win32 gcc-mingw-w64-base gcc-mingw-w64-x86_64 gcc-mingw-w64-x86_64-posix gcc-mingw-w64-x86_64-posix-runtime gcc-mingw-w64-x86_64-win32 gcc-mingw-w64-x86_64-win32-runtime mingw-w64-common mingw-w64-x86_64-dev libz-mingw-w64-dev`
-    - SDL dependency for mingw is provided in the repo
-- Build GUI
-    - Linux: `make clean && -f Makefile.gui -j$(nproc)`
-       - If you want hardware MIDI (in/out) support, you will have to choose if you want the ALSA backend, JACK backend, or both:
-          - ALSA: `make clean && make -f Makefile.gui ENABLE_MIDI_HW=1 ENABLE_ALSA=1 -j$(nproc)`
-          - Jack: `make clean && make -f Makefile.gui ENABLE_MIDI_HW=1 ENABLE_JACK=1 -j$(nproc)`
-          - Both: `make clean && make -f Makefile.gui ENABLE_MIDI_HW=1 ENABLE_ALSA=1 ENABLE_JACK=1 -j$(nproc)`
-          - Note: If `/dev/snd/seq` does not exist on your system (eg, WSL), ALSA will cause the neobae GUI to segfault when accessing the MIDI Devices dropdowns.
-       - It is up to you to install the development dependencies for Jack and/or ALSA.
-    - MingW: `make clean && make -f Makefile.gui-mingw -j$(nproc)`
-       - Hardware MIDI support is already enabled for mingw builds
-- Using Build (Linux):
-    - Copy the file to `/usr/local/bin` or your prefered path.
-    - Note: zefidi looks for `zenity`, `kdialog`, or `yad` (in this order) for file browsing.
-    - If you do not have these installed, the `Open`, `Load Bank`, `Export`, and `Record` buttons may not function.
-- Using Build (Windows):
-    - Copy `./bin/zefidi.exe` to a Windows system
-    - Run `zefidi.exe`, or drag a supported file over the exe
+## Quick start
 
-## WebAssembly
-#### Setup & Compile Emscripten WWebAssembly build (no SF2 support, uses WebAudio instead of sound hardware directly)
-- Install emscripten (one time):
-    - `apt-get update`
-    - `apt-get install emscripten`
-- Build playbae
-    - `cd neobae`
-    - `make clean`
-    - `make -f Makefile.emcc -j$(nproc)`
-- Using Build:
-    - Enter the `bin/` directory
-    - Run `python -m http.server 8888`
-    - Nagivate your browser to `http://localhost:8888/`
-    - Alternatively upload the contents of the `bin/` folder to a web server
-- Notes:
-    - The WebAssembly build and the old musicObject JS are completely different, and not compatible with each other, *yet*...
-    - MPEG Support is enabled by default in the WebAssembly build, so RMFs with MPEG samples should work just fine
+### Linux: playbae (SDL3)
 
-## Modular Build System
-zefie's modifications (aside from the core 64-bit port) are designed to be completely modular in the build system. If you don't like the idea of neobae having FLAC or Vorbis, you can easily build without them!
+```bash
+sudo apt-get update
+sudo apt-get install -y libc6-dev libsdl3-dev libsndfile-dev libmp3lame-dev \
+  libogg-dev libvorbis-dev libopus-dev libopusfile-dev libflac-dev liblzma-dev 
+cd neobae
+make clean
+make USE_SDL3=1 -j$(nproc)
+./bin/playbae -h
+```
 
-To get full control of what is built, pass `NOAUTO=1` to make, eg `make NOAUTO=1`.
+### Linux: zefidi GUI
 
-When passed `NOAUTO=1`, the build is under your control, and the automatic enabling of all features is disabled. You will have to enable features manually:
+```bash
+sudo apt-get update
+sudo apt-get install -y libsdl3-dev libsdl3-ttf-dev libsndfile-dev libmp3lame-dev \
+  libogg-dev libvorbis-dev libopus-dev libopusfile-dev libflac-dev liblzma-dev
+cd neobae
+make clean
+make -f Makefile.gui -j$(nproc)
+./bin/zefidi
+```
 
-- `MP3_DEC=1` - Enable MP3 Decoder (needed for full RMF support)
-- `MP3_ENC=1` - Enable MP3 Encoder (enables exporting to MP3)
-- `KARAOKE=1` - Enable support for MIDI Karaoke
-- `FLAC_DEC=1` - Enable FLAC playback
-- `FLAC_ENC=1` - Enable FLAC exporting
-- `VORBIS_DEC=1` - Enable OGG Vorbis playback
-- `VORBIS_ENC=1` - Enables OGG Vorbis exporting
-- `SF2_SUPPORT=1` - Enable SF2 SoundFont 2 support
-- `USE_FLUIDSYNTH=1` - Use FluidSynth for SF2 Support
-- `PLAYLIST=1` - Enable playlist support in the GUI
-- `USE_SDL2=1` - To enable usage of SDL2 on platforms that support other native audio
-- `USE_SDL3=1` - To enable usage of SDL3 on platforms that support other native audio
-- `OGG_SUPPORT=1` - Enable OGG Support (useless without Vorbis)
-- `XMF_SUPPORT=1` - Enables support for `.xmf` and `.mxmf` files. Requires `SF2_SUPPORT=1` and `USE_FLUIDSYNTH=1` (enabled by default), otherwise will disable itself.
-- `DISABLE_NOKIA_PATCH=1` - If you want to disable the harmless Nokia Patch (MSB5 -> MSB1, MSB6 -> MSB2)
-- `DISABLE_BEATNIK_NRPN=1` - Disables SF2 NRPN support for Beatnik extra percussion channel(s).
-- `DEBUG=1` - Enable verbose output (console for playbae, logfile for zefidi)
-- `LDEBUG=1` - For serious debugging, disables compile-time optimizations and leaves debugging symbols
+### Windows cross-compile from Linux/WSL: playbae (DirectSound)
 
-Some flags set other flags, or only work in certain situations:
-- `VORBIS_DEC=1` or `VORBIS_ENC=1` will automatically set `OGG_SUPPORT=1`
-- `USE_SDL=1` is currently only effective on `Makefile.mingw`
-- Building the zefidi GUI will assume usage of SDL2 since it depends on it
+```bash
+sudo apt-get update
+sudo apt-get install -y binutils-mingw-w64-x86_64 g++-mingw-w64-x86_64 \
+  g++-mingw-w64-x86_64-posix g++-mingw-w64-x86_64-win32 gcc-mingw-w64-base \
+  gcc-mingw-w64-x86_64 gcc-mingw-w64-x86_64-posix \
+  gcc-mingw-w64-x86_64-posix-runtime gcc-mingw-w64-x86_64-win32 \
+  gcc-mingw-w64-x86_64-win32-runtime mingw-w64-common mingw-w64-x86_64-dev \
+  libz-mingw-w64-dev
+cd neobae
+make clean
+make -f Makefile.mingw -j$(nproc)
+```
+
+Output executable is in `neobae/bin/`.
+
+## Linux builds
+
+### Optional but recommended: build FluidSynth from source
+
+Default feature sets expect FluidSynth support (SF2/SF3/SFO and limited DLS). On Linux, using zefie's modified FluidSynth tree gives best compatibility.
+
+```bash
+cd neobae/src/thirdparty/fluidsynth
+mkdir -p build && cd build
+cmake ..
+make -j$(nproc)
+sudo make install
+```
+
+### playbae (gcc)
+
+```bash
+cd neobae
+make clean
+make USE_SDL3=1 -j$(nproc)
+```
+
+### playbae (clang)
+
+```bash
+sudo apt-get install -y clang
+cd neobae
+make clean
+make -f Makefile.clang -j$(nproc)
+```
+
+### zefidi GUI (base)
+
+```bash
+cd neobae
+make clean
+make -f Makefile.gui -j$(nproc)
+```
+
+### zefidi GUI with hardware MIDI (Linux)
+
+Choose one of these:
+
+- ALSA:
+
+```bash
+cd neobae
+make clean
+make -f Makefile.gui ENABLE_MIDI_HW=1 ENABLE_ALSA=1 -j$(nproc)
+```
+
+- JACK:
+
+```bash
+cd neobae
+make clean
+make -f Makefile.gui ENABLE_MIDI_HW=1 ENABLE_JACK=1 -j$(nproc)
+```
+
+- ALSA + JACK:
+
+```bash
+cd neobae
+make clean
+make -f Makefile.gui ENABLE_MIDI_HW=1 ENABLE_ALSA=1 ENABLE_JACK=1 -j$(nproc)
+```
+
+You must install the corresponding development packages for ALSA and/or JACK.
+
+### Linux run notes for zefidi
+
+- `zefidi` looks for `zenity`, then `kdialog`, then `yad` for file dialogs.
+- Without one of those tools, `Open`, `Load Bank`, `Export`, and `Record` may not work.
+
+## Windows builds (cross-compile on Linux/WSL)
+
+### playbae via MinGW
+
+- DirectSound build:
+
+```bash
+cd neobae
+make clean
+make -f Makefile.mingw -j$(nproc)
+```
+
+- SDL3 build:
+
+```bash
+cd neobae
+make clean
+make -f Makefile.mingw USE_SDL3=1 -j$(nproc)
+```
+
+### zefidi GUI via MinGW
+
+```bash
+cd neobae
+make clean
+make -f Makefile.gui-mingw -j$(nproc)
+```
+
+Notes:
+
+- MinGW GUI dependencies for SDL are bundled in this repository.
+- Hardware MIDI support is enabled for MinGW GUI builds.
+- Copy outputs from `neobae/bin/` to Windows to run.
+
+## NeoBAE Studio (RMF editor)
+
+### Linux
+
+```bash
+sudo apt-get update
+sudo apt-get install -y libsdl3-dev libsdl3-ttf-dev libsndfile-dev \
+  libogg-dev libvorbis-dev libopus-dev libopusfile-dev libflac-dev \
+  liblzma-dev libmp3lame-dev libxmp-dev
+cd neobae
+make clean
+make -f Makefile.nbstudio -j$(nproc)
+```
+
+### Windows (Visual Studio)
+
+- Open `neobae/src/nbstudio/vs2022/nbstudio.vsxproj`.
+- In Developer PowerShell, run `vcpkg install --triplet x64-windows`.
+- Build in Visual Studio.
+
+## WebAssembly (Emscripten)
+
+This target uses WebAudio and does not use SF2 support in `Makefile.emcc`.
+
+
+```bash
+sudo apt-get update
+sudo apt-get install -y emscripten
+cd neobae
+make clean
+make -f Makefile.emcc -j$(nproc)
+cd bin
+python -m http.server 8888
+```
+
+Then open `http://localhost:8888/`.
+
+Notes:
+
+- The WebAssembly build and old `musicObject` JS are separate systems.
+- MPEG decode support is enabled in the WebAssembly build.
+- SF2 support is supported with `Makefile.emcc-full`, but requires you to compile the following with emscripten manually: lame, ogg, opus, opusfile, vorbis, vorbisfile, flac, libsndfile, and fluidsynth
+
+## macOS
+
+macOS build instructions are not yet documented in this guide.
+
+## Modular build system (advanced)
+
+To disable auto-enabled features and fully control options:
+
+```bash
+make NOAUTO=1 ...
+```
+
+### Common feature flags
+
+- `MP3_DEC=1`: MP3 decode
+- `MP3_ENC=1`: MP3 encode/export
+- `FLAC_DEC=1`: FLAC decode
+- `FLAC_ENC=1`: FLAC encode/export
+- `VORBIS_DEC=1`: Vorbis decode
+- `VORBIS_ENC=1`: Vorbis encode/export
+- `OPUS_DEC=1`: Opus decode
+- `OPUS_ENC=1`: Opus encode/export
+- `OGG_SUPPORT=1`: OGG container support
+- `KARAOKE=1`: MIDI karaoke support
+- `ZMF_SUPPORT=1`: `.zmf` support
+- `XMF_SUPPORT=1`: `.xmf` and `.mxmf` support
+- `MTHC_SUPPORT=1`: Nokia compressed MIDI (MThc)
+- `ADP_SUPPORT=1`: Nokia ADP G.722
+- `PLAYLIST=1`: GUI playlist support
+
+### Synth/audio backend flags
+
+- `SF2_SUPPORT=1`: enable SoundFont support
+- `USE_FLUIDSYNTH=1`: use FluidSynth backend
+- `USE_SDL2=1` or `USE_SDL3=1`: select SDL backend (mutually exclusive)
+
+### Debug/build behavior flags
+
+- `DEBUG=1`: debug-friendly build options where supported
+- `LDEBUG=1`: disable optimizations and keep debug symbols
+
+### Other lesser-used flags
+- `DISABLE_NOKIA`: Somewhat misleading, enabling this option disables the Nokia NRPN workarounds (eg disabling the ring track of a ringtone MIDI). The default (disabled) is recommended.
+- `DISABLE_BEATNIK_SF2_NRPN`: Enabling this option disables processing of BAE NRPN events in SF2 mode. The default (disabled) is recommended.
+- `USE_BUILTIN_PATCHES_WITH_SF2`: When enabled, loads the built-in HSB bank in the background along with the SF2 bank. The built-in bank is used with RMFs that call Bank 1. The default (enabled) is recommended.
+- `FIX_SPAN_DC`: Fixes some issues with certain HSB banks and incorrect stereo panning. This option can be toggled at runtime. No adverse effects have been noted with this option, so the default (enabled) is recommended.
+- `CLASSIC_CHORUS`: Enables the option to swap Chorus/Reverb processing order, bringing the player back to the 1.x style. This option can be toggled at runtime, and is disabled by default at runtime. The default (enabled) is recommended for compatiblity.
+- `LZMA_SUPPORT`: Enables LZMA compression. Required for `ZMF_SUPPORT`.
+- `CREATION_API`: Designed for use with applications that intend to create an RMF/ZMF file. It is recommended to use the Makefile defaults for this option.
+
+### Important flag relationships
+
+- `SF2_SUPPORT=1` forces `USE_FLUIDSYNTH=1`.
+- `XMF_SUPPORT` requires FluidSynth path (`USE_FLUIDSYNTH=1`).
+- Any Vorbis/FLAC/Opus enablement will force `OGG_SUPPORT=1`.
+- `ZMF_SUPPORT=1` pulls in modern codec paths, as well as lzma.
+- On MinGW CLI builds, use `USE_SDL3=1` to switch from DirectSound to SDL3.
+
+## Troubleshooting
+
+### Build command fails when cleaning with parallel jobs
+
+Run clean and build as separate commands:
+
+```bash
+make clean
+make -j$(nproc)
+```
+
+### zefidi crashes when opening MIDI device list on WSL
+
+If `/dev/snd/seq` is missing, ALSA MIDI support can crash when opening MIDI device dropdowns. Build without `ENABLE_MIDI_HW=1` on those systems.
+
+### FluidSynth logs `Not a SoundFont file` while loading DLS
+
+That message is expected in this project's DLS path. Treat later errors as the real failure signal.
+
+### I just want the original miniBAE without all this extra junk!
+
+That's fine, and totally possible! Just build `playbae` with the following options:
+- Linux: `make -f Makefile NOAUTO=1 MP3_DEC=1`
+- Windows: `make -f Makefile.mingw NOAUTO=1 MP3_DEC=1`
+
+This will produce a minimal playbae with only base miniBAE and MPEG support. No Nokia Patches, no Fluidsynth, no modern codecs... Just plain old original miniBAE.
