@@ -262,8 +262,29 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
             return false;
         }
 
-        // Use friendly name if available, otherwise use filename
-        const char *friendly_name = get_bank_friendly_name();
+        // SF2/SF3/SFO/DLS may use a built-in fallback bank internally,
+        // so the generic bank token friendly-name can point at the wrong bank.
+        // In that case, prefer filename-based labeling.
+        const char *ext = strrchr(path, '.');
+        bool prefer_filename_label = false;
+        if (ext)
+        {
+            if (strcasecmp(ext, ".sf2") == 0
+#if USE_VORBIS_DECODER == TRUE
+                || strcasecmp(ext, ".sf3") == 0
+                || strcasecmp(ext, ".sfo") == 0
+#endif
+#if _USING_FLUIDSYNTH == TRUE
+                || strcasecmp(ext, ".dls") == 0
+#endif
+            )
+            {
+                prefer_filename_label = true;
+            }
+        }
+
+        // Use friendly name when reliable, otherwise use filename.
+        const char *friendly_name = prefer_filename_label ? NULL : get_bank_friendly_name();
         const char *display_name;
 
         if (friendly_name && friendly_name[0])
@@ -532,6 +553,7 @@ bool bae_load_bank(const char *bank_path)
 #if USE_SF2_SUPPORT == TRUE
     GM_UnloadSF2Soundfont();
     GM_SetMixerSF2Mode(FALSE);
+    g_bae.bank_token = 0;
     // Check if this is an SF2 file
     if (ext && (strcasecmp(ext, ".sf2") == 0    
 #if _USING_FLUIDSYNTH == TRUE
@@ -544,8 +566,11 @@ bool bae_load_bank(const char *bank_path)
     {
         // Load SF2 bank
 #if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_SF2 == TRUE
-        BAEMixer_LoadBuiltinBank(g_bae.mixer, g_bae.bank_token);
-        BAEMixer_SendBankToBack(g_bae.mixer, g_bae.bank_token);        
+        BAEBankToken builtin_token = 0;
+        if (BAEMixer_LoadBuiltinBank(g_bae.mixer, &builtin_token) == BAE_NO_ERROR && builtin_token)
+        {
+            BAEMixer_SendBankToBack(g_bae.mixer, builtin_token);
+        }
 #endif    
         OPErr err = GM_LoadSF2Soundfont(bank_path);
         if (err != NO_ERR)
