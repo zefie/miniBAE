@@ -159,8 +159,12 @@
 #include "X_Formats.h"
 #include "BAE_API.h"
 #include "X_Assert.h"
+#if USE_MTHC_SUPPORT == TRUE
+#include "../../mthc/mthc_decomp.h"
+#endif
 #include <limits.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include "bankinfo.h" // embedded bank metadata (hash -> friendly)
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
 #include "GenSF2_FluidSynth.h"
@@ -7380,6 +7384,10 @@ BAEResult BAESong_LoadMidiFromMemory(BAESong song, void const *pMidiData, uint32
     short soundVoices, midiVoices, mixLevel;
     char *title;
     unsigned char *extractedMidi = NULL;
+#if USE_MTHC_SUPPORT == TRUE    
+    unsigned char *decodedMthcMidi = NULL;
+    uint32_t decodedMthcMidiLen = 0;
+#endif
     bool wasRMI = FALSE;
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
     uint32_t extractedMidiLen = 0;
@@ -7389,7 +7397,35 @@ BAEResult BAESong_LoadMidiFromMemory(BAESong song, void const *pMidiData, uint32
     if ((song) && (song->mID == OBJECT_ID))
     {
         BAE_AcquireMutex(song->mLock);
-        
+#if USE_MTHC_SUPPORT == TRUE
+        /* Transparent MThc support: decode container to raw MIDI bytes first. */
+        if (midiSize >= 4 && memcmp(pMidiData, "MThc", 4) == 0)
+        {
+            if (mthc_decompress_memory(pMidiData, midiSize, &decodedMthcMidi, &decodedMthcMidiLen) == 0)
+            {
+                if (decodedMthcMidiLen < 14 || memcmp(decodedMthcMidi, "MThd", 4) != 0)
+                {
+                    BAE_PRINTF("[BAE] MThc decode invalid MIDI in BAESong_LoadMidiFromMemory (len=%u, header=%02X %02X %02X %02X)\n",
+                               (unsigned int)decodedMthcMidiLen,
+                               (unsigned int)(decodedMthcMidiLen > 0 ? decodedMthcMidi[0] : 0),
+                               (unsigned int)(decodedMthcMidiLen > 1 ? decodedMthcMidi[1] : 0),
+                               (unsigned int)(decodedMthcMidiLen > 2 ? decodedMthcMidi[2] : 0),
+                               (unsigned int)(decodedMthcMidiLen > 3 ? decodedMthcMidi[3] : 0));
+                    free(decodedMthcMidi);
+                    decodedMthcMidi = NULL;
+                    BAE_ReleaseMutex(song->mLock);
+                    return BAE_TranslateOPErr(BAD_FILE);
+                }
+                pMidiData = decodedMthcMidi;
+                midiSize = decodedMthcMidiLen;
+            }
+            else
+            {
+                BAE_ReleaseMutex(song->mLock);
+                return BAE_TranslateOPErr(BAD_FILE);
+            }
+        }
+#endif        
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
         // Check if this is an RMI file and extract MIDI + DLS
         if (GM_IsRMIFile((const unsigned char *)pMidiData, midiSize))
@@ -7503,7 +7539,12 @@ BAEResult BAESong_LoadMidiFromMemory(BAESong song, void const *pMidiData, uint32
         {
             XDisposePtr(extractedMidi);
         }
-        
+#if USE_MTHC_SUPPORT == TRUE        
+        if (decodedMthcMidi)
+        {
+            free(decodedMthcMidi);
+        }
+#endif        
         BAE_ReleaseMutex(song->mLock);
     }
     else
@@ -7601,6 +7642,42 @@ BAEResult BAESong_LoadRmiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL i
         BAE_AcquireMutex(song->mLock);
         XConvertPathToXFILENAME(filePath, &name);
         pMidiData = PV_GetFileAsData(&name, &midiSize);
+
+#if USE_MTHC_SUPPORT == TRUE
+        /* If file content is MThc, decode to raw MIDI before loading. */
+        if (pMidiData && midiSize >= 4 && memcmp(pMidiData, "MThc", 4) == 0)
+        {
+            unsigned char *decodedMthcMidi = NULL;
+            uint32_t decodedMthcMidiLen = 0;
+            if (mthc_decompress_memory((unsigned char const *)pMidiData,
+                                       (uint32_t)midiSize,
+                                       &decodedMthcMidi,
+                                       &decodedMthcMidiLen) == 0)
+            {
+                XPTR midiCopy = XDuplicateMemory((XPTRC)decodedMthcMidi, decodedMthcMidiLen);
+                free(decodedMthcMidi);
+                decodedMthcMidi = NULL;
+                XDisposePtr(pMidiData);
+                pMidiData = midiCopy;
+                midiSize = (int32_t)decodedMthcMidiLen;
+                if (!pMidiData || midiSize < 14 || memcmp(pMidiData, "MThd", 4) != 0)
+                {
+                    if (pMidiData)
+                    {
+                        XDisposePtr(pMidiData);
+                        pMidiData = NULL;
+                    }
+                    theErr = BAD_FILE;
+                }
+            }
+            else
+            {
+                XDisposePtr(pMidiData);
+                pMidiData = NULL;
+                theErr = BAD_FILE;
+            }
+        }
+#endif
         
         if (pMidiData)
         {
@@ -7672,7 +7749,6 @@ BAEResult BAESong_LoadMidiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL 
     XShortResourceID theID;
     GM_Song *pSong;
     int16_t soundVoices, midiVoices, mixLevel;
-
     theErr = NO_ERR;
     if ((song) && (song->mID == OBJECT_ID))
     {
@@ -7685,6 +7761,52 @@ BAEResult BAESong_LoadMidiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL 
         BAE_AcquireMutex(song->mLock);
         XConvertPathToXFILENAME(filePath, &name);
         pMidiData = PV_GetFileAsData(&name, &midiSize);
+
+#if USE_MTHC_SUPPORT == TRUE
+        /* Transparent MThc support for file-based MIDI load. */
+        if (pMidiData && midiSize >= 4 && memcmp(pMidiData, "MThc", 4) == 0)
+        {
+            unsigned char *decodedMthcMidi = NULL;
+            uint32_t decodedMthcMidiLen = 0;
+
+            if (mthc_decompress_memory((unsigned char const *)pMidiData,
+                                       (uint32_t)midiSize,
+                                       &decodedMthcMidi,
+                                       &decodedMthcMidiLen) == 0)
+            {
+                XPTR midiCopy = XDuplicateMemory((XPTRC)decodedMthcMidi, decodedMthcMidiLen);
+                free(decodedMthcMidi);
+                decodedMthcMidi = NULL;
+
+                XDisposePtr(pMidiData);
+                pMidiData = midiCopy;
+                midiSize = (int32_t)decodedMthcMidiLen;
+
+                if (!pMidiData || midiSize < 14 || memcmp(pMidiData, "MThd", 4) != 0)
+                {
+                    BAE_PRINTF("[BAE] MThc decode invalid MIDI in BAESong_LoadMidiFromFile (len=%u, header=%02X %02X %02X %02X)\n",
+                               (unsigned int)((midiSize > 0) ? midiSize : 0),
+                               (unsigned int)(midiSize > 0 ? ((unsigned char *)pMidiData)[0] : 0),
+                               (unsigned int)(midiSize > 1 ? ((unsigned char *)pMidiData)[1] : 0),
+                               (unsigned int)(midiSize > 2 ? ((unsigned char *)pMidiData)[2] : 0),
+                               (unsigned int)(midiSize > 3 ? ((unsigned char *)pMidiData)[3] : 0));
+                    if (pMidiData)
+                    {
+                        XDisposePtr(pMidiData);
+                        pMidiData = NULL;
+                    }
+                    theErr = BAD_FILE;
+                }
+            }
+            else
+            {
+                BAE_PRINTF("[BAE] MThc decompress failed in BAESong_LoadMidiFromFile\n");
+                XDisposePtr(pMidiData);
+                pMidiData = NULL;
+                theErr = BAD_FILE;
+            }
+        }
+#endif
         
         if (pMidiData)
         {
@@ -7709,6 +7831,12 @@ BAEResult BAESong_LoadMidiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL 
                         GM_ResetSF2();
                     }
 #endif                    
+                    BAE_PRINTF("[BAE] BAESong_LoadMidiFromFile -> GM_LoadSong len=%d header=%02X %02X %02X %02X\n",
+                               (int)midiSize,
+                               (unsigned int)(midiSize > 0 ? ((unsigned char *)pMidiData)[0] : 0),
+                               (unsigned int)(midiSize > 1 ? ((unsigned char *)pMidiData)[1] : 0),
+                               (unsigned int)(midiSize > 2 ? ((unsigned char *)pMidiData)[2] : 0),
+                               (unsigned int)(midiSize > 3 ? ((unsigned char *)pMidiData)[3] : 0));
                     pSong = GM_LoadSong(song->mixer->pMixer,
                                         NULL,
                                         song,
@@ -11514,7 +11642,67 @@ BAEResult BAEMixer_LoadFromFile(BAEMixer mixer, BAEPathName filePath, BAELoadRes
         {
             sr = BAESong_LoadRmiFromFile(result->data.song, filePath, 0, TRUE);
         }
-#endif                
+#endif
+#if USE_MTHC_SUPPORT == TRUE
+        else if (ftype == BAE_MTHC)
+        {
+            XPTR pMidiData;
+            int32_t midiSize;
+            unsigned char *decodedMthcMidi = NULL;
+            uint32_t decodedMthcMidiLen = 0;
+            XFILENAME midiPath;
+            XConvertPathToXFILENAME((void *)filePath, &midiPath);
+            pMidiData = PV_GetFileAsData(&midiPath, &midiSize);
+            if (!pMidiData || midiSize <= 0)
+            {
+                BAESong_Delete(result->data.song);
+                result->data.song = NULL;
+                result->result = BAE_FILE_IO_ERROR;
+                return BAE_FILE_IO_ERROR;
+            }
+
+            if (mthc_decompress_memory((unsigned char const *)pMidiData,
+                                        (uint32_t)midiSize,
+                                        &decodedMthcMidi,
+                                        &decodedMthcMidiLen) == 0)
+            {
+                if (decodedMthcMidiLen < 14 || memcmp(decodedMthcMidi, "MThd", 4) != 0)
+                {
+                    BAE_PRINTF("[BAE] MThc decode invalid MIDI in BAEMixer_LoadFromFile (len=%u, header=%02X %02X %02X %02X)\n",
+                               (unsigned int)decodedMthcMidiLen,
+                               (unsigned int)(decodedMthcMidiLen > 0 ? decodedMthcMidi[0] : 0),
+                               (unsigned int)(decodedMthcMidiLen > 1 ? decodedMthcMidi[1] : 0),
+                               (unsigned int)(decodedMthcMidiLen > 2 ? decodedMthcMidi[2] : 0),
+                               (unsigned int)(decodedMthcMidiLen > 3 ? decodedMthcMidi[3] : 0));
+                    free(decodedMthcMidi);
+                    decodedMthcMidi = NULL;
+                    XDisposePtr(pMidiData);
+                    pMidiData = NULL;
+                    BAESong_Delete(result->data.song);
+                    result->data.song = NULL;
+                    result->result = BAE_BAD_FILE;
+                    return BAE_BAD_FILE;
+                }
+                sr = BAESong_LoadMidiFromMemory(result->data.song,
+                                                (void const *)decodedMthcMidi,
+                                                (uint32_t)decodedMthcMidiLen,
+                                                TRUE);
+                free(decodedMthcMidi);
+                decodedMthcMidi = NULL;
+                XDisposePtr(pMidiData);
+                pMidiData = NULL;
+            }
+            else
+            {
+                XDisposePtr(pMidiData);
+                pMidiData = NULL;
+                BAESong_Delete(result->data.song);
+                result->data.song = NULL;
+                result->result = BAE_BAD_FILE;
+                return BAE_BAD_FILE;
+            }
+        }
+#endif
 #if USE_XMF_SUPPORT == TRUE
         else if (ftype == BAE_XMF)
         {
@@ -11706,6 +11894,44 @@ BAEResult BAEMixer_LoadFromMemory(BAEMixer mixer, void const *pData, uint32_t da
             sr = BAESong_LoadXmfFromMemory(result->data.song, pData, dataSize, TRUE);
         }
 #endif
+#endif
+#if USE_MTHC_SUPPORT == TRUE
+        else if (ftype == BAE_MTHC)
+        {
+            unsigned char *decodedMthcMidi = NULL;
+            uint32_t decodedMthcMidiLen = 0;
+            if (mthc_decompress_memory((unsigned char const *)pData,
+                                        (uint32_t)dataSize,
+                                        &decodedMthcMidi,
+                                        &decodedMthcMidiLen) != 0)
+            {
+                BAESong_Delete(result->data.song);
+                sr = BAE_BAD_FILE;
+                result->data.song = NULL;
+                result->result = sr;
+                return sr;
+            }
+            if (decodedMthcMidiLen < 14 || memcmp(decodedMthcMidi, "MThd", 4) != 0)
+            {
+                BAE_PRINTF("[BAE] MThc decode invalid MIDI in BAEMixer_LoadFromMemory (len=%u, header=%02X %02X %02X %02X)\n",
+                           (unsigned int)decodedMthcMidiLen,
+                           (unsigned int)(decodedMthcMidiLen > 0 ? decodedMthcMidi[0] : 0),
+                           (unsigned int)(decodedMthcMidiLen > 1 ? decodedMthcMidi[1] : 0),
+                           (unsigned int)(decodedMthcMidiLen > 2 ? decodedMthcMidi[2] : 0),
+                           (unsigned int)(decodedMthcMidiLen > 3 ? decodedMthcMidi[3] : 0));
+                free(decodedMthcMidi);
+                decodedMthcMidi = NULL;
+                BAESong_Delete(result->data.song);
+                result->data.song = NULL;
+                sr = BAE_BAD_FILE;
+                result->result = sr;
+                return sr;
+            }
+            
+            sr = BAESong_LoadMidiFromMemory(result->data.song, (void *)decodedMthcMidi, (uint32_t)decodedMthcMidiLen, TRUE);
+            free(decodedMthcMidi);
+            decodedMthcMidi = NULL;
+        }
 #endif
         else if (ftype == BAE_MIDI_TYPE || ftype == BAE_RMI)
         {

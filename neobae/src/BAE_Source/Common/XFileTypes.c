@@ -36,6 +36,7 @@
 #define BAE_FOURCC_MIDI     0x4D546864  // "MThd" - Standard MIDI File
 #define BAE_FOURCC_RMF      0x4952455A  // "IREZ" - Rich Music Format
 #define BAE_FOURCC_ZMF      0x5A52455A  // "ZREZ" - ZMF (RMF with modern codecs)
+#define BAE_FOURCC_MTHC     0x4D546863  // "MThc" - MThc MIDI container
 #define BAE_FOURCC_XMF      0x584D465F  // "XMF_" - eXtensible Music Format
 #define BAE_FOURCC_RIFF     0x52494646  // "RIFF" - Resource Interchange File Format
 #define BAE_FOURCC_FORM     0x464F524D  // "FORM" - IFF FORM container (AIFF)
@@ -468,9 +469,17 @@ BAEFileType X_DetermineFileTypeByData(const unsigned char *data, int32_t length)
     {
         case BAE_FOURCC_MIDI:
             return BAE_MIDI_TYPE;
+
             
+#if USE_MTHC_SUPPORT == TRUE
+        case BAE_FOURCC_MTHC:
+            return BAE_MTHC;
+
+#endif  
         case BAE_FOURCC_RMF:
+#if USE_ZMF_SUPPORT == TRUE        
         case BAE_FOURCC_ZMF:
+#endif        
             return BAE_RMF;
 #if USE_XMF_SUPPORT == TRUE            
         case BAE_FOURCC_XMF:
@@ -611,6 +620,9 @@ const char *X_GetFileTypeString(BAEFileType fileType)
 #endif
 #if USE_OPUS_DECODER == TRUE
         case BAE_OPUS_TYPE:     return "Opus";
+#endif
+#if USE_MTHC_SUPPORT == TRUE
+        case BAE_MTHC:          return "Nokia Compressed MIDI";
 #endif
         case BAE_GROOVOID:      return "Groovoid";
         case BAE_RAW_PCM:       return "Raw PCM";

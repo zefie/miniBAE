@@ -92,18 +92,18 @@ $(TARGET_OUT)RegisterFiletypes.exe: $(OBJ_DIR)winreg_filetypes.o
 	${WINDRES} src/gui/winreg_filetypes.rc $(OBJ_DIR)winreg_filetypes_res.o; \
 	${LD} -o $(TARGET_OUT)RegisterFiletypes.exe ${LDFLAGS} $(OBJ_DIR)winreg_filetypes.o $(OBJ_DIR)winreg_filetypes_res.o -Wl,--subsystem,windows -lshlwapi -lgdi32 -lcomctl32
 
-$(TARGET_LIB).a: $(OBJ)
+$(TARGET_LIB).a: $(OBJ_BIN)
 	@mkdir -p $(TARGET_OUT)
-	$(AR) rcs $(TARGET_OUT)$(TARGET_LIB).a $(OBJ)
+	$(AR) rcs $(TARGET_OUT)$(TARGET_LIB).a $(OBJ_BIN)
 
-$(TARGET_LIB).dll: ${OBJ}
+$(TARGET_LIB).dll: ${OBJ_BIN}
 	@mkdir -p $(TARGET_OUT)
-	@$(DLLTOOL) --export-all --export-all-symbols -e $(OBJ_DIR)exports.o -z $(OBJ_DIR)$(TARGET_LIB).def2 $(OBJ)
+	@$(DLLTOOL) --export-all --export-all-symbols -e $(OBJ_DIR)exports.o -z $(OBJ_DIR)$(TARGET_LIB).def2 $(OBJ_BIN)
 	@echo "EXPORTS" > $(OBJ_DIR)$(TARGET_LIB).def
 	@cat $(OBJ_DIR)$(TARGET_LIB).def2 | grep "BAE" >> $(OBJ_DIR)$(TARGET_LIB).def
 	@rm -f $(OBJ_DIR)$(TARGET_LIB).def2 $(OBJ_DIR)exports.o
-	@$(DLLTOOL) -e $(OBJ_DIR)exports.o -d $(OBJ_DIR)$(TARGET_LIB).def -l $(TARGET_OUT)$(TARGET_LIB).lib $(OBJ)
-	$(CC) -shared $(LDFLAGS) ${OBJ} $(OBJ_DIR)exports.o -Wl,--subsystem,windows -o $(TARGET_OUT)${TARGET_LIB}.dll -Wl,--out-implib,$(TARGET_OUT)$(TARGET_LIB).dll.a -Wl,--export-all-symbols -Wl,--enable-auto-image-base -lstdc++ ${LIBS}
+	@$(DLLTOOL) -e $(OBJ_DIR)exports.o -d $(OBJ_DIR)$(TARGET_LIB).def -l $(TARGET_OUT)$(TARGET_LIB).lib $(OBJ_BIN)
+	$(CC) -shared $(LDFLAGS) ${OBJ_BIN} $(OBJ_DIR)exports.o -Wl,--subsystem,windows -o $(TARGET_OUT)${TARGET_LIB}.dll -Wl,--out-implib,$(TARGET_OUT)$(TARGET_LIB).dll.a -Wl,--export-all-symbols -Wl,--enable-auto-image-base -lstdc++ ${LIBS}
 
 	@if [ "$(USE_FLUIDSYNTH)" = "1" ]; then \
 		if [ "$(BITS)" = "32" ]; then \

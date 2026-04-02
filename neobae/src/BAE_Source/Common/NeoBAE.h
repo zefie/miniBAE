@@ -314,7 +314,10 @@ extern "C"
         BAE_RMF,
 #if USE_XMF_SUPPORT == TRUE        
         BAE_XMF,
-#endif        
+#endif
+#if USE_MTHC_SUPPORT == TRUE
+        BAE_MTHC,
+#endif          
         BAE_RMI,
         BAE_RAW_PCM
     } BAEFileType;
