@@ -12,10 +12,10 @@ FLAC_ENC := 0
 MIDDECOMP := 1
 include inc/Makefile.common
 
-# Build middecomp from split sources: reusable core + CLI wrapper.
+# Build mthc_decomp from split sources: reusable core + CLI wrapper.
 SRC_BIN := src/mthc/mthc_decomp.c src/mthc/mthc_main.c
 
-TARGET_BIN := middecomp
+TARGET_BIN := mthc_decomp
 
 CC		?= gcc
 CXX		?= g++

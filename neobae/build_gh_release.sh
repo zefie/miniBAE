@@ -269,6 +269,54 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 16 ]; then
 	runcmd make -f Makefile.instdump-mingw clean
 fi
 
+if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 17 ]; then
+	export BITS=32
+	echo "Building adp2wav (x32)..."
+	runcmd make clean
+	CC=i686-w64-mingw32-gcc runcmd make -f Makefile.adp2wav "-j$(nproc)" all
+	signit "${BDIR}/adp2wav.exe" "${BDIR}/adp2wav_signed.exe"
+    mv "${BDIR}/adp2wav_signed.exe" "${BDIR}/adp2wav.exe"	
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x32.zip" -- adp2wav.exe
+	runcmd cd "${RDIR}" || exit 1
+	runcmd make -f Makefile.adp2wav clean
+fi
+
+if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 18 ]; then
+	export BITS=64
+	echo "Building adp2wav (x64)..."
+	runcmd make clean
+	CC=x86_64-w64-mingw32-gcc runcmd make -f Makefile.adp2wav "-j$(nproc)" all
+	signit "${BDIR}/adp2wav.exe" "${BDIR}/adp2wav_signed.exe"
+    mv "${BDIR}/adp2wav_signed.exe" "${BDIR}/adp2wav.exe"	
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- adp2wav.exe
+	runcmd cd "${RDIR}" || exit 1
+	runcmd make -f Makefile.adp2wav clean
+fi
+
+if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 19 ]; then
+	export BITS=32
+	echo "Building mthc_decomp (x32)..."
+	runcmd make clean
+	CC=i686-w64-mingw32-gcc runcmd make -f Makefile.mthc_decomp "-j$(nproc)" all
+	signit "${BDIR}/mthc_decomp.exe" "${BDIR}/mthc_decomp_signed.exe"
+    mv "${BDIR}/mthc_decomp_signed.exe" "${BDIR}/mthc_decomp.exe"	
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x32.zip" -- mthc_decomp.exe
+	runcmd cd "${RDIR}" || exit 1
+	runcmd make -f Makefile.mthc_decomp clean
+fi
+
+if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 20 ]; then
+	export BITS=64
+	echo "Building mthc_decomp (x64)..."
+	runcmd make clean
+	CC=x86_64-w64-mingw32-gcc runcmd make -f Makefile.mthc_decomp "-j$(nproc)" all
+	signit "${BDIR}/mthc_decomp.exe" "${BDIR}/mthc_decomp_signed.exe"
+    mv "${BDIR}/mthc_decomp_signed.exe" "${BDIR}/mthc_decomp.exe"	
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- mthc_decomp.exe
+	runcmd cd "${RDIR}" || exit 1
+	runcmd make -f Makefile.mthc_decomp clean
+fi
+
 
 cd "${RDIR}" || exit 1
 ls -l "${ODIR}"
