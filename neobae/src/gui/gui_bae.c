@@ -129,6 +129,62 @@ static void gui_program_bank_callback(void *threadContext, struct GM_Song *pSong
 // Forward declarations
 bool bae_load_bank(const char *bank_path);
 
+static bool restore_bank_for_song_load(const char *bank_path, const char *bank_name_hint)
+{
+    if (!g_bae.mixer || !bank_path || !bank_path[0])
+        return false;
+
+#ifdef _BUILT_IN_PATCHES
+    if (strcmp(bank_path, "__builtin__") == 0)
+    {
+        BAEMixer_UnloadBanks(g_bae.mixer);
+#if USE_SF2_SUPPORT == TRUE
+        GM_UnloadSF2Soundfont();
+        GM_SetMixerSF2Mode(FALSE);
+#endif
+
+        BAEBankToken builtin_token = 0;
+        BAEResult br = BAEMixer_LoadBuiltinBank(g_bae.mixer, &builtin_token);
+        if (br != BAE_NO_ERROR || !builtin_token)
+            return false;
+
+        g_bae.bank_token = builtin_token;
+        g_bae.bank_loaded = true;
+        safe_strncpy(g_current_bank_path, "__builtin__", sizeof(g_current_bank_path) - 1);
+        g_current_bank_path[sizeof(g_current_bank_path) - 1] = '\0';
+
+        if (bank_name_hint && bank_name_hint[0])
+        {
+            safe_strncpy(g_bae.bank_name, bank_name_hint, sizeof(g_bae.bank_name) - 1);
+            g_bae.bank_name[sizeof(g_bae.bank_name) - 1] = '\0';
+        }
+        else
+        {
+            const char *friendly_name = get_bank_friendly_name();
+            const char *display_name = (friendly_name && friendly_name[0]) ? friendly_name : "(built-in)";
+            safe_strncpy(g_bae.bank_name, display_name, sizeof(g_bae.bank_name) - 1);
+            g_bae.bank_name[sizeof(g_bae.bank_name) - 1] = '\0';
+        }
+        return true;
+    }
+#endif
+
+    if (!bae_load_bank(bank_path))
+        return false;
+
+    g_bae.bank_loaded = true;
+    safe_strncpy(g_current_bank_path, bank_path, sizeof(g_current_bank_path) - 1);
+    g_current_bank_path[sizeof(g_current_bank_path) - 1] = '\0';
+
+    if (bank_name_hint && bank_name_hint[0])
+    {
+        safe_strncpy(g_bae.bank_name, bank_name_hint, sizeof(g_bae.bank_name) - 1);
+        g_bae.bank_name[sizeof(g_bae.bank_name) - 1] = '\0';
+    }
+
+    return true;
+}
+
 // Stub implementations for missing functions
 void load_bankinfo()
 {
@@ -633,13 +689,8 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
         // Reload the user's bank
         if (g_user_bank_path[0] != '\0')
         {
-            if (bae_load_bank(g_user_bank_path))
+            if (restore_bank_for_song_load(g_user_bank_path, g_user_bank_name))
             {
-                safe_strncpy(g_bae.bank_name, g_user_bank_name, sizeof(g_bae.bank_name) - 1);
-                g_bae.bank_name[sizeof(g_bae.bank_name) - 1] = '\0';
-                safe_strncpy(g_current_bank_path, g_user_bank_path, sizeof(g_current_bank_path) - 1);
-                g_current_bank_path[sizeof(g_current_bank_path) - 1] = '\0';
-                g_bae.bank_loaded = true;
                 BAE_PRINTF("Restored user bank successfully\n");
             }
             else
@@ -823,12 +874,8 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
         if (sr != BAE_NO_ERROR && use_embedded_banks && had_bank_before && temp_bank_path[0] != '\0')
         {
             BAE_PRINTF("RMI load with embedded bank failed (error %d), restoring previous bank and retrying: %s\n", sr, temp_bank_name);
-            if (bae_load_bank(temp_bank_path))
+            if (restore_bank_for_song_load(temp_bank_path, temp_bank_name))
             {
-                safe_strncpy(g_bae.bank_name, temp_bank_name, sizeof(g_bae.bank_name) - 1);
-                g_bae.bank_name[sizeof(g_bae.bank_name) - 1] = '\0';
-                safe_strncpy(g_current_bank_path, temp_bank_path, sizeof(g_current_bank_path) - 1);
-                g_current_bank_path[sizeof(g_current_bank_path) - 1] = '\0';
                 BAE_PRINTF("Successfully restored previous bank, now loading RMI without embedded bank\n");
                 
                 // Retry loading RMI without embedded bank option
