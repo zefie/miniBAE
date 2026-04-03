@@ -184,6 +184,11 @@ int mod2rmf_setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
         sourceSlot = playable->sourceSlot;
         usedSharedAsset = FALSE;
 
+        if (!raw || !raw->valid || !raw->pcm8 || raw->frameCount == 0)
+        {
+            continue;
+        }
+
         memset(&setup, 0, sizeof(setup));
         setup.program = playable->program;
         
@@ -460,6 +465,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
     uint64_t currentTickFP;
     uint64_t tickPerFrameFP;
     uint32_t frameGuard;
+    uint32_t nextProgram;
     uint16_t lastBpm;
     int playerStarted;
     uint32_t i;
@@ -736,6 +742,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
             sampleToProgram[i] = -1;
         }
     }
+    nextProgram = 0;
 
     memset(activeNotes, 0, sizeof(activeNotes));
     memset(chEffects, 0, sizeof(chEffects));
@@ -938,7 +945,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
 
                                 if (sampleToProgram[sid] < 0)
                                 {
-                                    if (sid >= 128)
+                                    if (nextProgram >= MOD2RMF_MAX_SAMPLES)
                                     {
                                         if (playerStarted) xmp_end_player(ctx);
                                         free(sampleToProgram);
@@ -946,7 +953,8 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                         xmp_free_context(ctx);
                                         return 0;
                                     }
-                                    sampleToProgram[sid] = sid;
+                                    sampleToProgram[sid] = (int)nextProgram;
+                                    nextProgram++;
                                 }
 
                                 program = sampleToProgram[sid];
@@ -1004,7 +1012,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
 
                             if (sampleToProgram[delaySid] < 0)
                             {
-                                if (delaySid >= 128)
+                                if (nextProgram >= MOD2RMF_MAX_SAMPLES)
                                 {
                                     if (playerStarted) xmp_end_player(ctx);
                                     free(sampleToProgram);
@@ -1012,7 +1020,8 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                     xmp_free_context(ctx);
                                     return 0;
                                 }
-                                sampleToProgram[delaySid] = delaySid;
+                                sampleToProgram[delaySid] = (int)nextProgram;
+                                nextProgram++;
                             }
 
                             program = sampleToProgram[delaySid];
@@ -1125,22 +1134,8 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
         }
     }
 
-    /* playableCount must cover the highest assigned program number + 1.
-     * Since programs now equal sample indices (which may have gaps), find
-     * the maximum assigned program. */
-    {
-        uint32_t maxProg = 0;
-        bool anyAssigned = FALSE;
-        for (i = 0; i < conv->rawSampleCount; ++i) {
-            if (sampleToProgram[i] >= 0) {
-                if ((uint32_t)sampleToProgram[i] >= maxProg) {
-                    maxProg = (uint32_t)sampleToProgram[i] + 1;
-                }
-                anyAssigned = TRUE;
-            }
-        }
-        song->playableCount = anyAssigned ? maxProg : 0;
-    }
+    /* Programs are assigned densely as samples are used, so playableCount is exact. */
+    song->playableCount = nextProgram;
     if (song->playableCount > 0)
     {
         song->playables = (ModPlayable *)calloc(song->playableCount, sizeof(ModPlayable));
@@ -1625,6 +1620,11 @@ int mod2rmf_setup_instrument_ext(Mod2RmfConverter *conv, const ModSongModel *son
         const ModPlayable *playable;
 
         playable = &song->playables[i];
+        if (!playable->rawSample || !playable->rawSample->valid ||
+            !playable->rawSample->pcm8 || playable->rawSample->frameCount == 0)
+        {
+            continue;
+        }
         instID = 512u + (uint32_t)playable->program;
 
         memset(&extInfo, 0, sizeof(extInfo));
