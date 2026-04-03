@@ -786,6 +786,7 @@ public:
         if (!enabled) {
             if (m_midiLoopEnabled) {
                 m_midiLoopEnabled = false;
+                m_cacheDirty = true;
                 Refresh();
             }
             return;
@@ -797,6 +798,7 @@ public:
             m_midiLoopEnabled = true;
             m_midiLoopStartTick = startTick;
             m_midiLoopEndTick = endTick;
+            m_cacheDirty = true;
             Refresh();
         }
     }
@@ -3736,6 +3738,7 @@ private:
     bool HitTestMidiLoopHandle(wxPoint point, MidiLoopDragMode *outMode = nullptr) const {
         int startX;
         int endX;
+        wxSize virtualSize;
 
         if (outMode) {
             *outMode = MidiLoopDragMode::None;
@@ -3743,7 +3746,12 @@ private:
         if (!m_midiLoopEnabled || m_midiLoopEndTick <= m_midiLoopStartTick) {
             return false;
         }
-        if (!IsPointInStickyRuler(point) || point.x < kPianoRollLeftGutter) {
+        virtualSize = GetVirtualSize();
+        if (point.x < kPianoRollLeftGutter) {
+            return false;
+        }
+        if (!IsPointInStickyRuler(point) &&
+            (point.y < kPianoRollTopGutter || point.y >= virtualSize.GetHeight())) {
             return false;
         }
         startX = TickToX(m_midiLoopStartTick);
@@ -4147,15 +4155,7 @@ private:
         SetFocus();
         previousAutomationLane = (m_selectedItemKind == PianoRollSelectionKind::Automation) ? m_selectedAutomationLane : -1;
         logicalPoint = CalcUnscrolledPosition(event.GetPosition());
-        if (IsPointInStickyRuler(logicalPoint) && logicalPoint.x >= kPianoRollLeftGutter) {
-            if (HitTestTimelineEndHandle(logicalPoint)) {
-                m_draggingTimelineEnd = true;
-                m_timelineEndDragTick = GetDocumentEndTick();
-                if (!HasCapture()) {
-                    CaptureMouse();
-                }
-                return;
-            }
+        if (logicalPoint.x >= kPianoRollLeftGutter) {
             MidiLoopDragMode loopDragMode;
 
             loopDragMode = MidiLoopDragMode::None;
@@ -4164,6 +4164,16 @@ private:
                 m_midiLoopDragMode = loopDragMode;
                 m_originalMidiLoopStartTick = m_midiLoopStartTick;
                 m_originalMidiLoopEndTick = m_midiLoopEndTick;
+                if (!HasCapture()) {
+                    CaptureMouse();
+                }
+                return;
+            }
+        }
+        if (IsPointInStickyRuler(logicalPoint) && logicalPoint.x >= kPianoRollLeftGutter) {
+            if (HitTestTimelineEndHandle(logicalPoint)) {
+                m_draggingTimelineEnd = true;
+                m_timelineEndDragTick = GetDocumentEndTick();
                 if (!HasCapture()) {
                     CaptureMouse();
                 }
@@ -4311,6 +4321,7 @@ private:
             }
             m_draggingMidiLoop = false;
             m_midiLoopDragMode = MidiLoopDragMode::None;
+            m_cacheDirty = true;
             Refresh();
             return;
         }
@@ -4553,6 +4564,7 @@ private:
                 }
                 m_midiLoopEndTick = snappedTick;
             }
+            m_cacheDirty = true;
             Refresh();
             return;
         }
@@ -4583,11 +4595,6 @@ private:
             int previousHoverLane;
 
             logicalPoint = CalcUnscrolledPosition(event.GetPosition());
-            if (IsPointInStickyRuler(logicalPoint)) {
-                return;
-            }
-            /* Perform hit tests once and share results for both cursor
-               and hover tracking (avoids iterating all visible lanes twice). */
             if (HitTestTimelineEndHandle(logicalPoint)) {
                 SetCursor(wxCursor(wxCURSOR_SIZEWE));
                 return;
@@ -4599,6 +4606,11 @@ private:
                     return;
                 }
             }
+            if (IsPointInStickyRuler(logicalPoint)) {
+                return;
+            }
+            /* Perform hit tests once and share results for both cursor
+               and hover tracking (avoids iterating all visible lanes twice). */
             hasNodeHover = false;
             hasSegmentHover = false;
             if (HasTrack()) {

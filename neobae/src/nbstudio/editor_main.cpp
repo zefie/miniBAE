@@ -1769,6 +1769,7 @@ private:
         } else {
             PianoRollPanel_SetMidiLoopMarkers(m_pianoRoll, false, 0, 0);
         }
+        PianoRollPanel_Refresh(m_pianoRoll);
     }
 
     bool ApplyMidiLoopMarkersFromPianoRoll(bool enabled, uint32_t startTick, uint32_t endTick) {
