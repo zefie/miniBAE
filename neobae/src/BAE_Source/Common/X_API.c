@@ -1776,6 +1776,10 @@ int32_t        const currentSize = ptr ? XGetPtrSize(ptr) : 0;
 
     //MOE:  If we are allocating to a certain quantum (typically 16 bytes),
     //      We should apply that quantum before this test.
+    if (ptr == NULL)
+    {
+        return XNewPtr(size);
+    }
     if (size != currentSize && ptr)
     {
         
