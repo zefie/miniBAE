@@ -466,6 +466,7 @@ public:
           m_document(nullptr),
                     m_zmfReason(0),
                     m_updatingControls(false),
+                    m_shouldWeSeek(false),
                     m_editorNotebook(nullptr),
                     m_bankEditorPanel(nullptr),
                     m_editorMode(kEditorModeMidi),
@@ -6402,6 +6403,7 @@ private:
         ApplyMixerEngineSettings();
 
         m_document = document;
+        m_shouldWeSeek = false;
         InvalidatePianoRollPreviewSong();
         ClearUndoHistory();
         m_currentPath.clear();
@@ -6694,6 +6696,7 @@ private:
             BAERmfEditorDocument_Delete(m_document);
         }
         m_document = BAERmfEditorDocument_New();
+        m_shouldWeSeek = false;
         if (m_document) {
             BAERmfEditorTrackSetup setup;
             uint16_t trackIndex;
@@ -7540,6 +7543,8 @@ private:
             wxMessageBox("Failed to restore document from session.", "Open Session", wxOK | wxICON_ERROR, this);
             return false;
         }
+
+        m_shouldWeSeek = false;
 
         /* Apply settings */
         if (haveSettings) {
