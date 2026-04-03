@@ -15,7 +15,7 @@ BAE_FLAGS	  :=
 BAE_LD_FLAGS  := -Wl,-rpath,'$$ORIGIN'
 BAE_LIBS      :=
 .DEFAULT_GOAL := all
-LZMA_VERS := 5.8.2
+LZMA_VERS := 5.8.3
 
 # Default build options (override with NOAUTO=1)
 ifneq ($(WASM),1)
