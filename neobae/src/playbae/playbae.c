@@ -404,12 +404,16 @@ static void print_song_engine_config(BAESong song)
    uint32_t flags = 0;
    if (BAESong_GetEngineConfig(song, &flags) == BAE_NO_ERROR && flags != 0)
    {
+      playbae_printf("  Song override flags raw: 0x%08X\n", (unsigned)flags);
       if (flags & SONG_CONFIG_HAS_CLASSIC_CHORUS)
          playbae_printf("  Song override: Classic Chorus %s\n",
                         (flags & SONG_CONFIG_CLASSIC_CHORUS_ON) ? "On" : "Off");
       if (flags & SONG_CONFIG_HAS_PANFIX)
          playbae_printf("  Song override: Pan Fix %s\n",
                         (flags & SONG_CONFIG_PANFIX_ON) ? "On" : "Off");
+      if (flags & SONG_CONFIG_HAS_EXTENDED_PITCH_RANGE)
+         playbae_printf("  Song override: Extended Pitch Range %s\n",
+                        (flags & SONG_CONFIG_EXTENDED_PITCH_RANGE_ON) ? "On" : "Off");
    }
 }
 

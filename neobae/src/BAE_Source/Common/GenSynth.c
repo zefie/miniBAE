@@ -346,6 +346,7 @@
 #include "GenPriv.h"
 #include "BAE_API.h"
 #include "X_Assert.h"
+#include "X_Formats.h"
 #include <stdint.h>
 #if USE_SF2_SUPPORT == TRUE
 #if _USING_FLUIDSYNTH == TRUE
@@ -375,21 +376,30 @@ GM_Mixer *MusicGlobals = NULL;
 
 static const uint32_t majorPitchTable[] =
     {
-        PTmake(102400),
-        PTmake(51200),
-        PTmake(25600), // 0..11
-        PTmake(12800), // 12..23
-        PTmake(6400),  // 24..35
-        PTmake(3200),  // 36..47
-        PTmake(1600),  // 48..59
-        PTmake(800),   // 60-71: first entry of this table should = $1,0000.
-        PTmake(400),   // 72-83
-        PTmake(200),   // 84-95
-        PTmake(100),   // 96-107
-        PTmake(50),    // 108-119
-        PTmake(25),    // 120-127 ($80-up unused)
-        PTmake(25),    // MPW probably won't handle this the same.  This means
-        PTmake(25),    // divide by 25 then multiply by 2.  Same as divide by 12.5
+        /* Six extra octave entries prepended for SONG_CONFIG_EXTENDED_PITCH_RANGE.
+         * Normal code uses [x + 24]; ZMF extended-pitch code uses [x + 96],
+         * allowing newPitch as low as -96 instead of the default -24. */
+        PTmake(6553600), // -96..-85 (ZMF extended)
+        PTmake(3276800), // -84..-73 (ZMF extended)
+        PTmake(1638400), // -72..-61 (ZMF extended)
+        PTmake(819200),  // -60..-49 (ZMF extended)
+        PTmake(409600),  // -48..-37 (ZMF extended)
+        PTmake(204800),  // -36..-25 (ZMF extended)
+        PTmake(102400),  // -24..-13
+        PTmake(51200),  // -12..-1
+        PTmake(25600),  // 0..11
+        PTmake(12800),  // 12..23
+        PTmake(6400),   // 24..35
+        PTmake(3200),   // 36..47
+        PTmake(1600),   // 48..59
+        PTmake(800),    // 60-71: first entry of this table should = $1,0000.
+        PTmake(400),    // 72-83
+        PTmake(200),    // 84-95
+        PTmake(100),    // 96-107
+        PTmake(50),     // 108-119
+        PTmake(25),     // 120-127 ($80-up unused)
+        PTmake(25),     // MPW probably won't handle this the same.  This means
+        PTmake(25),     // divide by 25 then multiply by 2.  Same as divide by 12.5
         PTmake(25)};
 
 static const uint32_t fractionalPitchTable[] =
@@ -1723,12 +1733,15 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
         n += pVoice->ProcessedPitch << 8; // ProcessedPitch is based on the sample data and MIDI pitch.
 
         // Clip value to within reasonable MIDI pitch range
-        if (n < -0x1800)
-            n += 0x0c00;
-        if (n < -0x1800)
-            n += 0x0c00;
-        if (n < -0x1800)
-            n = -0x1800;
+        {
+            int32_t pitchFloor = (pVoice->pSong && (pVoice->pSong->engineConfigFlags & SONG_CONFIG_HAS_EXTENDED_PITCH_RANGE))
+                                 ? -0x6000  /* -96 semitones in 8.8 fixed */
+                                 : -0x1800; /* -24 semitones in 8.8 fixed */
+            while (n < pitchFloor)
+                n += 0x0c00;
+            if (n < pitchFloor)
+                n = pitchFloor;
+        }
         if (n > 0x08C00)
             n -= 0x0C00; // 12 (one octave) in 8.8 Fixed form
         if (n > 0x08C00)
@@ -1738,7 +1751,7 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
         if (n > 0x08C00)
             n = 0x0C00; // 12 (one octave) in 8.8 Fixed form
                         // Process whole pitch value in semitones
-        pVoice->NotePitch = majorPitchTable[(n >> 8) + 24];
+        pVoice->NotePitch = majorPitchTable[(n >> 8) + 96];
         // Process fractional semitone values
         pVoice->NotePitch = XFixedMultiply(pVoice->NotePitch, fractionalPitchTable[(n & 0xFF) >> 1]);
         // factor in sample rate of sample, if enabled
@@ -3443,9 +3456,12 @@ void PV_StartMIDINote(GM_Song *pSong, int16_t the_instrument,
     {
         newPitch = playPitch + 60 - pInstrument->u.w.baseMidiPitch;
     }
-    while (newPitch < -24)
     {
-        newPitch += 12;
+        int16_t pitchFloor = (pSong && (pSong->engineConfigFlags & SONG_CONFIG_HAS_EXTENDED_PITCH_RANGE)) ? -96 : -24;
+        while (newPitch < pitchFloor)
+        {
+            newPitch += 12;
+        }
     }
     while (newPitch > 144)
     {
@@ -3524,7 +3540,7 @@ void PV_StartMIDINote(GM_Song *pSong, int16_t the_instrument,
         if (pInstrument->playAtSampledFreq == FALSE)
         {
             the_entry->ProcessedPitch = newPitch;
-            the_entry->NotePitch = majorPitchTable[newPitch + 24];
+            the_entry->NotePitch = majorPitchTable[newPitch + 96];
         }
         else
         {

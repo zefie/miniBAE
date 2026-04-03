@@ -42,6 +42,7 @@ static void print_usage(const char *program_name)
             "  --stereo-separation N Stereo width 0-100%% (0=mono, 75=default, 100=hard L/R)\n"
             "  --spread              [Experimental] Spread instruments across MIDI channels\n"
             "  --tempomap            Reserved for future tempo-map handling\n"
+            "  --ext-pitch           [ZMF] Allow pitch down to -96 semitones (vs default -24)\n"
             "  --help, -h            Show this help\n",
             program_name);
 }
@@ -88,6 +89,7 @@ int main(int argc, char *argv[])
     bool codecArgSeen;
     bool bitrateArgSeen;
     bool spreadChannels;
+    bool useExtendedPitchRange;
     uint8_t stereoSeparation;
 
     sourcePath = NULL;
@@ -99,6 +101,7 @@ int main(int argc, char *argv[])
     codecArgSeen = FALSE;
     bitrateArgSeen = FALSE;
     spreadChannels = FALSE;
+    useExtendedPitchRange = FALSE;
     stereoSeparation = 75;
     mod2rmf_song_model_init(&song);
 
@@ -137,6 +140,11 @@ int main(int argc, char *argv[])
         {
             mod2rmf_resampler_print_options();
             return 0;
+        }
+        if (!strcmp(arg, "--ext-pitch"))
+        {
+            useExtendedPitchRange = TRUE;
+            continue;
         }
         if (!strcmp(arg, "--amiga-filter"))
         {
@@ -508,7 +516,12 @@ int main(int argc, char *argv[])
 
         mod2rmf_channel_profile_cleanup(profiles, song.channelCount);
     }
+    uint32_t engineConfig = 0;
+    if (useExtendedPitchRange) {
+        engineConfig |= SONG_CONFIG_HAS_EXTENDED_PITCH_RANGE;
+    }
 
+    BAERmfEditorDocument_SetEngineConfig(conv->document, engineConfig);
     if (!mod2rmf_setup_tracks(conv, &song, &conv->channelMap) ||
         !mod2rmf_setup_instrument_ext(conv, &song, useZmfContainer) ||
         !mod2rmf_write_song_cc_events(conv, &song) ||
@@ -524,7 +537,6 @@ int main(int argc, char *argv[])
         BAE_Cleanup();
         return 1;
     }
-
     fprintf(stdout, "Conversion complete: %s -> %s\n", sourcePath, destPath);
 
     mod2rmf_song_model_dispose(&song);

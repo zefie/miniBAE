@@ -875,7 +875,10 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                                          activeNotes[ch].program);
                     }
                 }
-                if (ci->volume != chLastVol[ch])
+
+                /* Use row-start volume only; per-frame ci->volume is post-processed
+                 * (envelope/fade/runtime), not the raw channel volume intent. */
+                if (fi.frame == 0 && ci->volume != chLastVol[ch])
                 {
                     uint8_t vol64;
                     vol64 = (uint8_t)mod2rmf_clamp_int((int)ci->volume, 0, 64);
@@ -884,7 +887,6 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                                     mod2rmf_vol_to_midi(vol64),
                                                     activeNotes[ch].program);
                 }
-
                 if (activeNotes[ch].active)
                 {
                     uint16_t bend;

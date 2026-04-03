@@ -1310,11 +1310,24 @@ BAEResult BAE_GetClassicChorus(BAE_BOOL *outEnable)
 
 BAEResult BAESong_GetEngineConfig(BAESong song, uint32_t *outFlags)
 {
+    uint32_t flags;
+    
     if (!outFlags)
         return BAE_PARAM_ERR;
     if (!song || song->mID != OBJECT_ID || !song->pSong)
         return BAE_NULL_OBJECT;
-    *outFlags = song->pSong->engineConfigFlags;
+    
+    flags = song->pSong->engineConfigFlags;
+    // Only trust flags if container is ZMF; old RMF files may have garbage
+    if (!(flags & SONG_CONFIG_CONTAINER_IS_ZMF))
+    {
+        *outFlags = 0;  // not a ZMF file, discard flags
+    }
+    else
+    {
+        // ZMF file, clamp to valid bits to filter out any remaining garbage
+        *outFlags = flags & SONG_CONFIG_VALID_BITS_MASK;
+    }
     return BAE_NO_ERROR;
 }
 
@@ -10114,6 +10127,13 @@ static void PV_ApplySongEngineConfig(BAESong song)
         return;
 
     flags = song->pSong->engineConfigFlags;
+    // Only use flags if container is ZMF; old RMF files may have garbage
+    if (!(flags & SONG_CONFIG_CONTAINER_IS_ZMF))
+    {
+        return;  // not a ZMF file, discard flags
+    }
+    // ZMF file, clamp to valid bits to filter out any remaining garbage
+    flags &= SONG_CONFIG_VALID_BITS_MASK;
     if (flags == 0)
         return;  // no per-song overrides
 

@@ -378,14 +378,18 @@ typedef struct X_PACKBY1
 // Index into unused[] array:
 #define SONG_CONFIG_UNUSED_INDEX        0
 // Presence bits (song defines this setting):
-#define SONG_CONFIG_HAS_CLASSIC_CHORUS          0x01
-#define SONG_CONFIG_HAS_PANFIX                  0x04
-#define SONG_CONFIG_HAS_SAMPLE_OFFSET_START     0x10  // ZMF-only: instrument start-offset metadata is meaningful
-// Value bits (meaningful only when corresponding presence bit is set):
-#define SONG_CONFIG_CLASSIC_CHORUS_ON           0x02
-#define SONG_CONFIG_PANFIX_ON                   0x08
-// Runtime-only marker set by loader from container header (not authored metadata).
+#define SONG_CONFIG_HAS_CLASSIC_CHORUS          0x1
+#define SONG_CONFIG_CLASSIC_CHORUS_ON           0x2
+#define SONG_CONFIG_HAS_PANFIX                  0x4
+#define SONG_CONFIG_PANFIX_ON                   0x8
+#define SONG_CONFIG_HAS_SAMPLE_OFFSET_START     0x10  // instrument start-offset metadata is meaningful
+#define SONG_CONFIG_HAS_EXTENDED_PITCH_RANGE    0x20  // engine allows pitch down to -96 semitones (vs -24)
+#define SONG_CONFIG_EXTENDED_PITCH_RANGE_ON     0x40
 #define SONG_CONFIG_CONTAINER_IS_ZMF            0x40000000u
+
+// Validation mask: all valid config bits ORed together
+// Used to filter out garbage from corrupted/uninitialized memory
+#define SONG_CONFIG_VALID_BITS_MASK             0x4000007Fu
 
 // bits for SongResource_RMF_Linear flags
 #define XBFL_disableLoops               0x80

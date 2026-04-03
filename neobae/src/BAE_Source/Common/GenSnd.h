@@ -1183,9 +1183,6 @@ typedef int32_t UNIT_TYPE;
         // these pointers are NULL until used, then they are allocated
         GM_ControlCallbackPtr controllerCallback; // called during playback with controller info
 
-#if REVERB_USED != REVERB_DISABLED
-        ReverbMode defaultReverbType;
-#endif
         VelocityCurveType velocityCurveType; // which curve to use. (Range is 0 to 4)
 
         ScanMode AnalyzeMode;       // analyze mode (Byte)
@@ -1262,13 +1259,7 @@ typedef int32_t UNIT_TYPE;
         unsigned char channelVolume[MAX_CHANNELS];                     // current channel volume
         unsigned char channelExpression[MAX_CHANNELS];                 // current channel expression
         unsigned char channelPitchBendRange[MAX_CHANNELS];             // current bend range in half steps
-#if DISABLE_NOKIA_PATCH != TRUE
-        bool isNokiaVibrationChannel[MAX_CHANNELS]; // TRUE if channel is Nokia vibration channel
-#endif        
-#if REVERB_USED != REVERB_DISABLED
-        unsigned char channelReverb[MAX_CHANNELS]; // current channel reverb
-        unsigned char channelChorus[MAX_CHANNELS]; // current channel chorus
-#endif
+
         unsigned char channelModWheel[MAX_CHANNELS];              // Mod wheel (primarily affects pitch bend)
         unsigned char channelLowPassAmount[MAX_CHANNELS];         // low pass amount controller (NOT CONNECTED as of 3.8.99)
         unsigned char channelResonanceFilterAmount[MAX_CHANNELS]; // Resonance amount controller (NOT CONNECTED as of 3.8.99)
@@ -1280,9 +1271,6 @@ typedef int32_t UNIT_TYPE;
         signed char channelLSB[MAX_CHANNELS];                   // current LSB bank
         signed char channelBank[MAX_CHANNELS];                 // current bank
         int16_t channelStereoPosition[MAX_CHANNELS];       // current channel stereo position
-#if USE_SF2_SUPPORT == TRUE
-        unsigned char channelType[MAX_CHANNELS];
-#endif
 
         // Realtime note activity tracking for GUI virtual keyboard.
         // Stores current velocity (>0) for active notes per channel; 0 means off.
@@ -1321,8 +1309,21 @@ typedef int32_t UNIT_TYPE;
         IFLOAT trackticks[MAX_TRACKS];   // current position of track in ticks. must be signed
         //  int32_t             trackcumuticks[MAX_TRACKS];     // current number of beat ticks into track
 
+        // Per-song engine config flags from SongResource_RMF.unused[0] (SONG_CONFIG_* bits).
+        // Zero means no per-song overrides.
+        uint32_t engineConfigFlags;
+
+#if DISABLE_NOKIA_PATCH != TRUE
+        bool isNokiaVibrationChannel[MAX_CHANNELS]; // TRUE if channel is Nokia vibration channel
+#endif        
+#if REVERB_USED != REVERB_DISABLED
+        ReverbMode defaultReverbType;
+        unsigned char channelReverb[MAX_CHANNELS]; // current channel reverb
+        unsigned char channelChorus[MAX_CHANNELS]; // current channel chorus
+#endif
 #if USE_SF2_SUPPORT == TRUE
         // SF2 integration support
+        unsigned char channelType[MAX_CHANNELS];
         void *sf2Info;             // Pointer to GM_SF2Info structure when SF2 is active
         bool isSF2Song;               // TRUE if this song uses SF2 instruments
         uint32_t songFlags;                // Song flags including SONG_FLAG_USE_SF2 and SONG_FLAG_IS_RMF
@@ -1333,10 +1334,6 @@ typedef int32_t UNIT_TYPE;
         LastControlEntry lastThreeControl[MAX_CHANNELS][4];
 #endif
 #endif
-
-        // Per-song engine config flags from SongResource_RMF.unused[0] (SONG_CONFIG_* bits).
-        // Zero means no per-song overrides.
-        uint32_t engineConfigFlags;
     };
     typedef struct GM_Song GM_Song;
 

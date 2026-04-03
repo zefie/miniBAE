@@ -189,6 +189,7 @@ enum {
     ID_BankLoadBuiltin,
     ID_SettingsPanFix,
     ID_SettingsClassicChorus,
+    ID_SettingsExpandedPitchRange,
 };
 
 static constexpr int kKeyboardPreviewInvalidateDebounceMs = 250;
@@ -555,6 +556,7 @@ public:
         m_settingsMenu = new wxMenu();
         m_settingsMenu->AppendCheckItem(ID_SettingsPanFix, "STEREO_PAN LFO DC &Fix");
         m_settingsMenu->AppendCheckItem(ID_SettingsClassicChorus, "&Classic Chorus Order");
+        m_settingsMenu->AppendCheckItem(ID_SettingsExpandedPitchRange, "Expanded Pitch Range (-96 vs -24)");
         m_settingsMenu->Check(ID_SettingsPanFix, true);
         m_settingsMenu->Check(ID_SettingsClassicChorus, false);
         menuBar = new wxMenuBar();
@@ -595,7 +597,7 @@ public:
         m_programSpin = new wxSpinCtrl(editorPanel, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 0, 127, 0);
         m_transposeSpin = new wxSpinCtrl(editorPanel, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, -48, 48, 0);
         m_panSpin = new wxSpinCtrl(editorPanel, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 0, 127, 64);
-        m_volumeSpin = new wxSpinCtrl(editorPanel, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 0, 127, 100);
+        m_volumeSpin = new wxSpinCtrl(editorPanel, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 0, 127, 127);
         m_playButton = new wxButton(editorPanel, wxID_ANY, "Play");
         m_pauseButton = new wxButton(editorPanel, wxID_ANY, "Pause/Resume");
         m_stopButton = new wxButton(editorPanel, wxID_ANY, "Stop");
@@ -1685,6 +1687,7 @@ private:
         if (m_savePreviewToSongCheck->GetValue()) {
             bool panFix = m_settingsMenu && m_settingsMenu->IsChecked(ID_SettingsPanFix);
             bool classicChorus = m_settingsMenu && m_settingsMenu->IsChecked(ID_SettingsClassicChorus);
+            bool expandedPitchRange = m_settingsMenu && m_settingsMenu->IsChecked(ID_SettingsExpandedPitchRange);
             int32_t flags = 0;
             flags |= SONG_CONFIG_HAS_PANFIX;
             if (panFix) {
@@ -1693,6 +1696,10 @@ private:
             flags |= SONG_CONFIG_HAS_CLASSIC_CHORUS;
             if (classicChorus) {
                 flags |= SONG_CONFIG_CLASSIC_CHORUS_ON;
+            }
+            flags |= SONG_CONFIG_HAS_EXTENDED_PITCH_RANGE;
+            if (expandedPitchRange) {
+                flags |= SONG_CONFIG_EXTENDED_PITCH_RANGE_ON;
             }
             BAERmfEditorDocument_SetEngineConfig(m_document, flags);
         } else {
@@ -6388,6 +6395,8 @@ private:
             bool docHasChorus    = (engineFlags & SONG_CONFIG_HAS_CLASSIC_CHORUS) != 0;
             bool docPanFix       = (engineFlags & SONG_CONFIG_PANFIX_ON) != 0;
             bool docClassicChorus= (engineFlags & SONG_CONFIG_CLASSIC_CHORUS_ON) != 0;
+            bool docHasExtendedPitch= (engineFlags & SONG_CONFIG_HAS_EXTENDED_PITCH_RANGE) != 0;
+            bool docExtendedPitch= (engineFlags & SONG_CONFIG_EXTENDED_PITCH_RANGE_ON) != 0;
             if (m_savePreviewToSongCheck) {
                 m_savePreviewToSongCheck->SetValue(true);
             }
@@ -6397,6 +6406,9 @@ private:
                 }
                 if (docHasChorus) {
                     m_settingsMenu->Check(ID_SettingsClassicChorus, docClassicChorus);
+                }
+                if (docHasExtendedPitch) {
+                    m_settingsMenu->Check(ID_SettingsExpandedPitchRange, docExtendedPitch);
                 }
             }
         }
@@ -6508,7 +6520,7 @@ private:
             m_programSpin->SetValue(0);
             m_transposeSpin->SetValue(0);
             m_panSpin->SetValue(64);
-            m_volumeSpin->SetValue(100);
+            m_volumeSpin->SetValue(127);
             m_updatingControls = false;
             return;
         }

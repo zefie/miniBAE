@@ -4166,7 +4166,7 @@ static BAEResult PV_LoadMidiTrackIntoDocument(BAERmfEditorDocument *document,
     }
     track = &document->tracks[trackIndex];
     track->pan = 64;
-    track->volume = 100;
+    track->volume = 127;
     track->transpose = 0;
     activeNotes = NULL;
     offset = 0;
@@ -9162,6 +9162,7 @@ BAERmfEditorDocument *BAERmfEditorDocument_New(void)
         document->loadedFromRmf = FALSE;
         document->isPristine = FALSE;
         document->nextSampleAssetID = 1;
+        document->engineConfigFlags = 0;
     }
     return document;
 }
@@ -10195,7 +10196,7 @@ BAEResult BAERmfEditorDocument_AddTrack(BAERmfEditorDocument *document,
     track->bank = setup->bank;
     track->program = setup->program;
     track->pan = 64;
-    track->volume = 100;
+    track->volume = 127;
     track->transpose = 0;
     if (setup->name)
     {
@@ -12888,6 +12889,9 @@ void BAEZMFReasonCodeToString(uint32_t reason, char *outBuffer, uint32_t bufferS
         } \
     } while (0)
 
+    if (reason & BAEZMF_ALREADY_ZMF)
+        APPEND("Already a ZMF file; ");
+
     if (reason & BAEZMF_REASON_LOOP_TOO_SHORT)
         APPEND("An instrument's loop is too short; ");
 
@@ -12897,8 +12901,17 @@ void BAEZMFReasonCodeToString(uint32_t reason, char *outBuffer, uint32_t bufferS
     if (reason & BAEZMF_REASON_CUBIC_INTERPOLATION)
         APPEND("Using advanced interpolation; ");
 
-    if (reason & BAEZMF_REASON_ENGINE_FLAGS)
-        APPEND("Song-specific engine flags are enabled; ");
+    if (reason & BAEZMF_REASON_CLASSIC_CHORUS)
+        APPEND("Classic chorus song flag enabled; ");
+
+    if (reason & BAEZMF_REASON_PANFIX)
+        APPEND("Panfix song flag enabled; ");
+
+    if (reason & BAEZMF_REASON_EXTENDED_PITCH_RANGE)
+        APPEND("Extended pitch range enabled; ");
+
+    if (reason & BAEZMF_REASON_OTHER)
+        APPEND("Other engine flags set; ");        
 
     if (len == 0)
     {
@@ -12925,7 +12938,8 @@ BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document, 
         BAERmfEditorSample const *sample = &document->samples[i];
 
         if (sample->sampleInfo.endLoop > sample->sampleInfo.startLoop &&
-            (sample->sampleInfo.endLoop - sample->sampleInfo.startLoop) < MIN_LOOP_SIZE_RMF)
+            (sample->sampleInfo.endLoop - sample->sampleInfo.startLoop) < MIN_LOOP_SIZE_RMF &&
+            (reason & BAEZMF_REASON_LOOP_TOO_SHORT) == 0)
         {
             reason |= BAEZMF_REASON_LOOP_TOO_SHORT;
         }
@@ -12954,9 +12968,11 @@ BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document, 
             case BAE_EDITOR_COMPRESSION_OPUS_160K:
             case BAE_EDITOR_COMPRESSION_OPUS_192K:
             case BAE_EDITOR_COMPRESSION_OPUS_256K:
-                reason |= BAEZMF_REASON_MODERN_CODEC;
-                *outReason = reason;
-                return TRUE;
+                if ((reason & BAEZMF_REASON_MODERN_CODEC) == 0)
+                {
+                    reason |= BAEZMF_REASON_MODERN_CODEC;
+                }
+
             case BAE_EDITOR_COMPRESSION_DONT_CHANGE:
                 /* Original data may contain a modern codec */
                 if (sample->sourceCompressionType == (uint32_t)C_FLAC ||
@@ -12965,8 +12981,6 @@ BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document, 
                 )
                 {
                     reason |= BAEZMF_REASON_MODERN_CODEC;
-                    *outReason = reason;
-                    return TRUE;
                 }
                 break;
             default:
@@ -12977,17 +12991,39 @@ BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document, 
     {
         BAERmfEditorInstrumentExt const *ext = &document->instrumentExts[i];
 
-        if (TEST_FLAG_VALUE(ext->flags2, ZBF_advancedInterpolation))
-        {
+        if (TEST_FLAG_VALUE(ext->flags2, ZBF_advancedInterpolation) && (reason & BAEZMF_REASON_CUBIC_INTERPOLATION) == 0)
+        {            
             reason |= BAEZMF_REASON_CUBIC_INTERPOLATION;
         }
     }
-    if (document->engineConfigFlags != 0)
+    int32_t engineFlags;
+    BAERmfEditorDocument_GetEngineConfig(document, &engineFlags);
+    if (engineFlags & SONG_CONFIG_EXTENDED_PITCH_RANGE_ON)
     {
-        reason |= BAEZMF_REASON_ENGINE_FLAGS;
+        engineFlags &= ~SONG_CONFIG_EXTENDED_PITCH_RANGE_ON;
+        reason |= BAEZMF_REASON_EXTENDED_PITCH_RANGE;
+    }
+    if (engineFlags & SONG_CONFIG_CLASSIC_CHORUS_ON)
+    {
+        engineFlags &= ~SONG_CONFIG_CLASSIC_CHORUS_ON;
+        reason |= BAEZMF_REASON_CLASSIC_CHORUS;        
+    }
+    if (engineFlags & SONG_CONFIG_PANFIX_ON)
+    {
+        engineFlags &= ~SONG_CONFIG_PANFIX_ON;
+        reason |= BAEZMF_REASON_PANFIX;        
+    }    
+    if (engineFlags & SONG_CONFIG_CONTAINER_IS_ZMF)
+    {
+        engineFlags &= ~SONG_CONFIG_CONTAINER_IS_ZMF;
+        reason |= BAEZMF_ALREADY_ZMF;
+    }
+    if (engineFlags != SONG_CONFIG_UNUSED_INDEX)
+    {        
+        reason |= BAEZMF_REASON_OTHER;
     }
     *outReason = reason;
-    return (reason != 0) ? TRUE : FALSE;
+    return (reason != BAEZMF_REASON_NONE) ? TRUE : FALSE;
 }
 
 BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReason)
@@ -13090,7 +13126,7 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
         }
     }
     *outReason = reason;
-    return (reason != 0) ? TRUE : FALSE;
+    return (reason != BAEZMF_REASON_NONE) ? TRUE : FALSE;
 }
 #else
 BAE_BOOL BAERmfEditorBank_RequiresZmf(BAERmfEditorDocument const *document, uint32_t *outReason)

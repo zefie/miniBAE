@@ -40,6 +40,9 @@
 #define MOD2RMF_FX_MULTI_RETRIG         0x1B
 #define MOD2RMF_FX_TONEPORTA            0x03
 #define MOD2RMF_FX_TONE_VSLIDE          0x05
+#define MOD2RMF_FX_TRK_VOL              0x80
+#define MOD2RMF_FX_TRK_VSLIDE           0x81
+#define MOD2RMF_FX_TRK_FVSLIDE          0x82
 #define MOD2RMF_MAX_ADSR_STAGES         8 /* matches BAE_EDITOR_MAX_ADSR_STAGES */
 
 typedef struct {

@@ -342,7 +342,18 @@ void GM_MergeExternalSong(void *theExternalSong, XShortResourceID theSongID, GM_
             PV_SetTempo(theSong, XGetShort(&songRMF->songTempo));
             theSong->songVolume = XGetSongVolume((SongResource *)theExternalSong);
             // Read per-song engine config flags from unused[0]
+            // Only trust flags if this is a ZMF container; old RMF files may have garbage
             theSong->engineConfigFlags = (uint32_t)XGetLong(&songRMF->unused[SONG_CONFIG_UNUSED_INDEX]);
+            if (!(theSong->engineConfigFlags & SONG_CONFIG_CONTAINER_IS_ZMF))
+            {
+                // Not a ZMF container, discard all flags (they're likely garbage)
+                theSong->engineConfigFlags = 0;
+            }
+            else
+            {
+                // ZMF file, clamp to valid bits to filter out any remaining garbage
+                theSong->engineConfigFlags &= SONG_CONFIG_VALID_BITS_MASK;
+            }
             break;
         }
     }

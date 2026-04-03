@@ -296,11 +296,11 @@ SongResource * XNewSongPtr( SongType songType,
                 XPutShort(&songRMF->maxNotes, (uint16_t)maxSongVoices);
                 XPutShort(&songRMF->mixLevel, (uint16_t)mixLevel);
                 XPutShort(&songRMF->maxEffects, (uint16_t)maxEffectVoices);
-
+                XPutLong(&songRMF->unused[SONG_CONFIG_UNUSED_INDEX], 0);   // engine config flags
                 songRMF->reverbType = (char)reverbType;
 //              XPutShort(&songRMF->resourceCount, 0);      // no resources
             }
-            song = (SongResource *)songRMF;
+            song = (SongResource *)songRMF;        
             break;
         case SONG_TYPE_RMF_LINEAR:
             songRMF2 = (SongResource_RMF_Linear *)XNewPtr((int32_t)sizeof(SongResource_RMF_Linear) - sizeof(int16_t));
@@ -311,6 +311,7 @@ SongResource * XNewSongPtr( SongType songType,
                 XPutShort(&songRMF2->maxNotes, (uint16_t)maxSongVoices);
                 XPutShort(&songRMF2->mixLevel, (uint16_t)mixLevel);
                 XPutShort(&songRMF2->maxEffects, (uint16_t)maxEffectVoices);
+                XPutShort(&songRMF2->unused1, 0);   // engine config flags
 
                 songRMF2->reverbType = (char)reverbType;
 //              XPutShort(&songRMF2->resourceCount, 0);     // no resources
@@ -1780,6 +1781,16 @@ SongResource_Info * XGetSongResourceInfo(SongResource *pSong, int32_t songSize)
                     pInfo->songTempo = (uint16_t)XGetShort(&songRMF->songTempo);
                     pInfo->songPitchShift = (int16_t)XGetShort(&songRMF->songPitchShift);
                     pInfo->engineConfigFlags = (int32_t)XGetLong(&songRMF->unused[SONG_CONFIG_UNUSED_INDEX]);
+                    // Only trust flags if container is ZMF; old RMF files may have garbage
+                    if (!(pInfo->engineConfigFlags & SONG_CONFIG_CONTAINER_IS_ZMF))
+                    {
+                        pInfo->engineConfigFlags = 0;  // not a ZMF file, discard flags
+                    }
+                    else
+                    {
+                        // ZMF file, clamp to valid bits to filter out any remaining garbage
+                        pInfo->engineConfigFlags &= SONG_CONFIG_VALID_BITS_MASK;
+                    }
                     break;
 
                 case SONG_TYPE_RMF_LINEAR:
