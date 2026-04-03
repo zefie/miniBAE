@@ -250,18 +250,12 @@ int mod2rmf_encoder_apply(BAERmfEditorDocument *document,
     uint32_t sampleCount;
     uint32_t i;
     uint32_t applied;
-    bool forceOpusRoundTrip;
+    bool usingOpusRoundTrip;
 
     if (!document || !settings) return 0;
     if (ct == BAE_EDITOR_COMPRESSION_PCM) return 1;
 
-    /* Non-RT Opus currently has known pitch drift in this engine because
-     * decode/output rate handling is hard-wired to 48 kHz in parts of the
-     * stack.  Use round-trip mode for both opus and opus-rt in mod2rmf so
-     * source pitch is preserved reliably. */
-    forceOpusRoundTrip = (settings->codec == MOD2RMF_CODEC_OPUS ||
-                          settings->codec == MOD2RMF_CODEC_OPUS_RT) ? TRUE : FALSE;
-
+    usingOpusRoundTrip = (settings->codec == MOD2RMF_CODEC_OPUS_RT) ? TRUE : FALSE;
     sampleCount = 0;
     BAERmfEditorDocument_GetSampleCount(document, &sampleCount);
 
@@ -284,7 +278,7 @@ int mod2rmf_encoder_apply(BAERmfEditorDocument *document,
 
         /* For Opus round-trip mode, set the flag on the sample info so
          * the save path encodes at 48 kHz and preserves the original rate. */
-        if (forceOpusRoundTrip)
+        if (usingOpusRoundTrip)
         {
             BAERmfEditorSampleInfo sInfo;
             result = BAERmfEditorDocument_GetSampleInfo(document, i, &sInfo);
@@ -300,14 +294,8 @@ int mod2rmf_encoder_apply(BAERmfEditorDocument *document,
 
         fprintf(stderr, "Compression: %s%s applied to %u/%u samples\n",
             mod2rmf_encoder_label(ct),
-            forceOpusRoundTrip ? " (round-trip)" : "",
+            usingOpusRoundTrip ? " (round-trip)" : "",
             (unsigned)applied, (unsigned)sampleCount);
-
-        if (settings->codec == MOD2RMF_CODEC_OPUS)
-        {
-        fprintf(stderr,
-            "Note: --codec opus is using round-trip rate preservation to avoid known non-RT Opus detune.\n");
-        }
     return 1;
 }
 

@@ -8396,7 +8396,25 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                     decodedFramesForRate = writeWaveform.waveFrames;
                     if (encodedFrames > 0 && loopEnd > (int32_t)encodedFrames)
                     {
+                        int32_t delta;
+
+                        /* Preserve loop length when Opus decode capacity is
+                         * slightly shorter than source frames (pre-skip).
+                         * Clamping only loopEnd shrinks the cycle and can
+                         * audibly detune sustained notes. */
+                        delta = loopEnd - (int32_t)encodedFrames;
                         loopEnd = (int32_t)encodedFrames;
+                        if (delta > 0)
+                        {
+                            if (loopStart > delta)
+                            {
+                                loopStart -= delta;
+                            }
+                            else
+                            {
+                                loopStart = 0;
+                            }
+                        }
                         if (loopStart >= loopEnd)
                         {
                             loopStart = 0;
@@ -8463,31 +8481,6 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                            (unsigned)index,
                            (unsigned)(decodedSampleRateForSnd >> 16));
             }
-            if (sampleWasEncodedOpus && samplePlayAtSampledFreq &&
-                writeWaveform.waveFrames > 0 && decodedFramesForRate > 0 &&
-                decodedFramesForRate != writeWaveform.waveFrames)
-            {
-                uint64_t scaledRate;
-
-                scaledRate = (((uint64_t)(uint32_t)sndSampleRate * (uint64_t)writeWaveform.waveFrames) +
-                              ((uint64_t)decodedFramesForRate / 2ULL)) /
-                             (uint64_t)decodedFramesForRate;
-                if (scaledRate < ((uint64_t)1000U << 16))
-                {
-                    scaledRate = ((uint64_t)1000U << 16);
-                }
-                if (scaledRate > (uint64_t)0xFFFF0000u)
-                {
-                    scaledRate = (uint64_t)0xFFFF0000u;
-                }
-                BAE_PRINTF("[RMF Save] Sample[%u] playAtSampledFreq Opus rate adjust %uHz -> %uHz (srcFrames=%u decodedFrames=%u)\n",
-                           (unsigned)index,
-                           (unsigned)(((uint32_t)sndSampleRate) >> 16),
-                           (unsigned)(((uint32_t)scaledRate) >> 16),
-                           (unsigned)writeWaveform.waveFrames,
-                           (unsigned)decodedFramesForRate);
-                sndSampleRate = (int32_t)scaledRate;
-            }
             XSetSoundBaseKey(sndResource, sample->rootKey);
             XSetSoundSampleRate(sndResource, sndSampleRate);
             XSetSoundLoopPoints(sndResource, (int32_t)writeWaveform.startLoop, (int32_t)writeWaveform.endLoop);
@@ -8498,25 +8491,6 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                 int32_t roundTripWriteRate;
 
                 roundTripWriteRate = roundTripSourceRate;
-                if (samplePlayAtSampledFreq &&
-                    writeWaveform.waveFrames > 0 && decodedFramesForRate > 0 &&
-                    decodedFramesForRate != writeWaveform.waveFrames)
-                {
-                    uint64_t scaledRate;
-
-                    scaledRate = (((uint64_t)(uint32_t)roundTripWriteRate * (uint64_t)writeWaveform.waveFrames) +
-                                  ((uint64_t)decodedFramesForRate / 2ULL)) /
-                                 (uint64_t)decodedFramesForRate;
-                    if (scaledRate < ((uint64_t)1000U << 16))
-                    {
-                        scaledRate = ((uint64_t)1000U << 16);
-                    }
-                    if (scaledRate > (uint64_t)0xFFFF0000u)
-                    {
-                        scaledRate = (uint64_t)0xFFFF0000u;
-                    }
-                    roundTripWriteRate = (int32_t)scaledRate;
-                }
                 /* Override the spoofed 48000 rate with the true source rate so
                  * the engine can time-stretch correctly on decode. */
                 XSetSoundSampleRate(sndResource, roundTripWriteRate);
@@ -17351,7 +17325,21 @@ static BAEResult PV_BankReEncodeSampleCore(XFILE bankFile,
                 decodedFramesForRate = writeWaveform.waveFrames;
                 if (decodedInfo.frames > 0 && loopEnd > (int32_t)decodedInfo.frames)
                 {
+                    int32_t delta;
+
+                    delta = loopEnd - (int32_t)decodedInfo.frames;
                     loopEnd = (int32_t)decodedInfo.frames;
+                    if (delta > 0)
+                    {
+                        if (loopStart > delta)
+                        {
+                            loopStart -= delta;
+                        }
+                        else
+                        {
+                            loopStart = 0;
+                        }
+                    }
                     if (loopStart >= loopEnd)
                     {
                         loopStart = 0;

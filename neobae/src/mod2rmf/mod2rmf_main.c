@@ -398,12 +398,12 @@ int main(int argc, char *argv[])
         for (vch = 0; vch < maxCh; ++vch)
         {
             uint32_t ei;
-            uint32_t firstNoteTick = uint32_t_MAX, lastNoteTick = 0;
+            uint32_t firstNoteTick = UINT32_MAX, lastNoteTick = 0;
             uint32_t firstNoteCount = 0;
-            uint32_t firstCC7Tick = uint32_t_MAX, lastCC7Tick = 0;
+            uint32_t firstCC7Tick = UINT32_MAX, lastCC7Tick = 0;
             uint8_t firstCC7Val = 0, lastCC7Val = 0;
             bool hasCC7 = FALSE;
-            uint32_t firstBendTick = uint32_t_MAX, lastBendTick = 0;
+            uint32_t firstBendTick = UINT32_MAX, lastBendTick = 0;
             uint16_t firstBendVal = 0, lastBendVal = 0;
             bool hasBend = FALSE;
 

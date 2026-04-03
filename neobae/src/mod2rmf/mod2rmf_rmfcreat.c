@@ -1702,6 +1702,7 @@ int mod2rmf_setup_instrument_ext(Mod2RmfConverter *conv, const ModSongModel *son
             extInfo.flags1 |= MOD2RMF_ZBF_ENABLE_INTERPOLATE;
             extInfo.flags2 &= (unsigned char)~MOD2RMF_ZBF_ADVANCED_INTERPOLATION;
         }
+        extInfo.flags2 &= (unsigned char)~MOD2RMF_ZBF_PLAY_AT_SAMPLED_FREQ;
         extInfo.flags1 &= (unsigned char)~(MOD2RMF_ZBF_DISABLE_SND_LOOPING | MOD2RMF_ZBF_SAMPLE_AND_HOLD);
         /* Match what the instrument editor produces on OK for plain samples:
          * do not force miscParameter1 as root key. */
