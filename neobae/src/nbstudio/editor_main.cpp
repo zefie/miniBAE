@@ -474,6 +474,7 @@ public:
                     m_notePreviewSong(nullptr),
                     m_keyboardPreviewSong(nullptr),
                     m_keyboardPreviewBankToken(nullptr),
+                    m_forceDialogPreviewRebuild(false),
                     m_bankPreviewSong(nullptr),
                     m_bankPreviewSongStarted(false),
                     m_bankPreviewLoadedInst(static_cast<BAE_INSTRUMENT>(-1)),
@@ -1476,6 +1477,7 @@ private:
     std::vector<unsigned char> m_keyboardPreviewSongBlob;
     BAEBankToken m_keyboardPreviewBankToken;
     std::vector<unsigned char> m_keyboardPreviewBankBlob;
+    bool m_forceDialogPreviewRebuild;
     BAESong m_bankPreviewSong;
     bool m_bankPreviewSongStarted;
     BAE_INSTRUMENT m_bankPreviewLoadedInst;
@@ -3232,7 +3234,7 @@ private:
          * The song is set to null by StopKeyboardPreview (called by the
          * dialog when all keys are released or the dialog closes), so the
          * next press after an edit will always get a fresh build. */
-        armPreview = (m_keyboardPreviewSong == nullptr);
+        armPreview = (m_keyboardPreviewSong == nullptr) || m_forceDialogPreviewRebuild;
         if (armPreview) {
             StopKeyboardPreview();
         }
@@ -3376,6 +3378,10 @@ private:
             BAESong_AllNotesOff(m_keyboardPreviewSong, 0);
         } else if (!m_keyboardPreviewSong && !EnsureKeyboardPreviewSong()) {
             return false;
+        }
+
+        if (armPreview) {
+            m_forceDialogPreviewRebuild = false;
         }
 
         /* NoteOnWithLoad reads current channel program/bank immediately,
@@ -5304,6 +5310,11 @@ private:
 
     void ScheduleKeyboardPreviewInvalidation(uint32_t reasonFlags = kInstrumentPreviewInvalidate_All,
                                              uint32_t referenceSampleIndex = static_cast<uint32_t>(-1)) {
+        if (referenceSampleIndex != static_cast<uint32_t>(-1)) {
+            /* Force a one-shot song rebuild on the next dialog preview note so
+             * sample codec/data edits are audible immediately after Apply. */
+            m_forceDialogPreviewRebuild = true;
+        }
         if (referenceSampleIndex != static_cast<uint32_t>(-1) &&
             ApplyDialogPreviewHotReload(referenceSampleIndex, reasonFlags)) {
             return;

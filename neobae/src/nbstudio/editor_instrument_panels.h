@@ -1910,19 +1910,11 @@ public:
 
         /* Loop */
         {
-            bool loopEnabled = (data.loopStart < data.loopEnd);
-            int maxFrame = (data.waveFrames > 0) ? (int)data.waveFrames : INT_MAX;
-            m_loopEnableCheck->SetValue(loopEnabled);
-            m_loopStartSpin->SetRange(0, maxFrame);
-            m_loopEndSpin->SetRange(0, maxFrame);
-            m_loopStartSpin->SetValue((int)data.loopStart);
-            m_loopEndSpin->SetValue((int)data.loopEnd);
-            m_loopStartSpin->Enable(loopEnabled);
-            m_loopEndSpin->Enable(loopEnabled);
-            m_savedLoopStart = data.loopStart;
-            m_savedLoopEnd = data.loopEnd;
-            m_currentWaveFrames = data.waveFrames;
-            UpdateLoopInfoLabel();
+            SetLoopDisplayFromSource(data.loopStart,
+                                     data.loopEnd,
+                                     data.waveFrames,
+                                     data.waveFrames,
+                                     false);
         }
         m_loading = false;
     }
@@ -1951,8 +1943,40 @@ public:
         }
 
         if (m_loopEnableCheck->GetValue()) {
-            data.loopStart = (uint32_t)std::max(0, m_loopStartSpin->GetValue());
-            data.loopEnd = (uint32_t)std::max(0, m_loopEndSpin->GetValue());
+            uint32_t displayStart = (uint32_t)std::max(0, m_loopStartSpin->GetValue());
+            uint32_t displayEnd = (uint32_t)std::max(0, m_loopEndSpin->GetValue());
+
+            data.loopStart = displayStart;
+            data.loopEnd = displayEnd;
+
+            if (m_loopDisplayMapped &&
+                m_loopSourceFrames > 0 &&
+                m_loopDisplayFrames > 0 &&
+                m_loopDisplayFrames != m_loopSourceFrames) {
+                auto mapToSource = [this](uint32_t value) -> uint32_t {
+                    uint64_t mapped = ((uint64_t)value * (uint64_t)m_loopSourceFrames) +
+                                      ((uint64_t)m_loopDisplayFrames / 2ULL);
+                    mapped /= (uint64_t)m_loopDisplayFrames;
+                    if (mapped > m_loopSourceFrames) {
+                        mapped = m_loopSourceFrames;
+                    }
+                    return static_cast<uint32_t>(mapped);
+                };
+
+                data.loopStart = mapToSource(displayStart);
+                data.loopEnd = mapToSource(displayEnd);
+                if (data.loopEnd <= data.loopStart) {
+                    if (data.loopStart < m_loopSourceFrames) {
+                        data.loopEnd = data.loopStart + 1;
+                    } else if (m_loopSourceFrames > 0) {
+                        data.loopStart = m_loopSourceFrames - 1;
+                        data.loopEnd = m_loopSourceFrames;
+                    } else {
+                        data.loopStart = 0;
+                        data.loopEnd = 0;
+                    }
+                }
+            }
         } else {
             data.loopStart = 0;
             data.loopEnd = 0;
@@ -1966,6 +1990,74 @@ public:
 
     void SetLoopPoints(uint32_t start, uint32_t end) {
         if (m_waveformPanel) m_waveformPanel->SetLoopPoints(start, end);
+    }
+
+    void SetLoopDisplayFromSource(uint32_t sourceLoopStart,
+                                  uint32_t sourceLoopEnd,
+                                  uint32_t sourceFrames,
+                                  uint32_t displayFrames,
+                                  bool mapToDisplayFrames) {
+        uint32_t shownStart = sourceLoopStart;
+        uint32_t shownEnd = sourceLoopEnd;
+        bool loopEnabled;
+
+        m_loopSourceFrames = sourceFrames;
+        m_loopDisplayFrames = displayFrames;
+        m_loopDisplayMapped = mapToDisplayFrames &&
+                              sourceFrames > 0 &&
+                              displayFrames > 0 &&
+                              displayFrames != sourceFrames;
+
+        if (m_loopDisplayMapped) {
+            auto mapToDisplay = [this](uint32_t value) -> uint32_t {
+                uint64_t mapped = ((uint64_t)value * (uint64_t)m_loopDisplayFrames) +
+                                  ((uint64_t)m_loopSourceFrames / 2ULL);
+                mapped /= (uint64_t)m_loopSourceFrames;
+                if (mapped > m_loopDisplayFrames) {
+                    mapped = m_loopDisplayFrames;
+                }
+                return static_cast<uint32_t>(mapped);
+            };
+
+            shownStart = mapToDisplay(sourceLoopStart);
+            shownEnd = mapToDisplay(sourceLoopEnd);
+            if (shownEnd <= shownStart) {
+                if (shownStart < m_loopDisplayFrames) {
+                    shownEnd = shownStart + 1;
+                } else if (m_loopDisplayFrames > 0) {
+                    shownStart = m_loopDisplayFrames - 1;
+                    shownEnd = m_loopDisplayFrames;
+                } else {
+                    shownStart = 0;
+                    shownEnd = 0;
+                }
+            }
+        }
+
+        loopEnabled = (shownStart < shownEnd);
+        m_currentWaveFrames = (displayFrames > 0) ? displayFrames : sourceFrames;
+
+        {
+            int maxFrame = (m_currentWaveFrames > 0) ? (int)m_currentWaveFrames : INT_MAX;
+            m_loopEnableCheck->SetValue(loopEnabled);
+            m_loopStartSpin->SetRange(0, maxFrame);
+            m_loopEndSpin->SetRange(0, maxFrame);
+            m_loopStartSpin->SetValue((int)shownStart);
+            m_loopEndSpin->SetValue((int)shownEnd);
+            m_loopStartSpin->Enable(loopEnabled);
+            m_loopEndSpin->Enable(loopEnabled);
+            m_savedLoopStart = shownStart;
+            m_savedLoopEnd = shownEnd;
+        }
+
+        if (m_waveformPanel) {
+            if (loopEnabled) {
+                m_waveformPanel->SetLoopPoints(shownStart, shownEnd);
+            } else {
+                m_waveformPanel->SetLoopPoints(0, 0);
+            }
+        }
+        UpdateLoopInfoLabel();
     }
 
     void ClearUI() {
@@ -2136,6 +2228,9 @@ private:
     bool m_loading;
     uint32_t m_savedLoopStart = 0, m_savedLoopEnd = 0;
     uint32_t m_currentWaveFrames = 0;
+    uint32_t m_loopSourceFrames = 0;
+    uint32_t m_loopDisplayFrames = 0;
+    bool m_loopDisplayMapped = false;
 
     /* Callbacks */
     std::function<void()> m_onParameterChanged;

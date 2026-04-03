@@ -861,13 +861,15 @@ private:
         if (m_loadingUiValues || m_inInstantApply) {
             return;
         }
-        wxCommandEvent evt;
-        OnApply(evt);
+        /* Keep loop edits staged in-dialog. They should only commit to the
+         * document on Apply/OK so Cancel can discard post-Apply changes. */
+        SaveCurrentSampleFromUI();
     }
 
     void RefreshWaveform() {
         if (m_currentLocalIndex < 0 || m_currentLocalIndex >= (int)m_sampleIndices.size()) return;
         uint32_t si = m_sampleIndices[(size_t)m_currentLocalIndex];
+        uint32_t displayedFrameCount = 0;
 
         if (m_sampleParamsPanel) {
             m_lastPreviewedCodecIdx   = m_sampleParamsPanel->GetCodecSelection();
@@ -901,6 +903,7 @@ private:
                             m_compressedPreviewBuffer.assign(
                                 static_cast<unsigned char const *>(waveData),
                                 static_cast<unsigned char const *>(waveData) + totalBytes);
+                            displayedFrameCount = frameCount;
                             previewShown = true;
                         }
                         BAERmfEditorDocument_Delete(tempDoc);
@@ -920,12 +923,36 @@ private:
             BAE_UNSIGNED_FIXED sampleRate = 0;
             if (BAERmfEditorDocument_GetSampleWaveformData(m_document, si, &waveData, &frameCount, &bitSize, &channels, &sampleRate) == BAE_NO_ERROR) {
                 m_sampleParamsPanel->SetWaveform(waveData, frameCount, bitSize, channels);
+                displayedFrameCount = frameCount;
             }
         }
 
         if (m_currentLocalIndex >= 0 && m_currentLocalIndex < (int)m_samples.size()) {
             EditedSample const &s = m_samples[(size_t)m_currentLocalIndex];
-            m_sampleParamsPanel->SetLoopPoints(s.sampleInfo.startLoop, s.sampleInfo.endLoop);
+            bool isMpegCompression = false;
+            switch (s.compressionType) {
+                case BAE_EDITOR_COMPRESSION_MP3_32K:
+                case BAE_EDITOR_COMPRESSION_MP3_48K:
+                case BAE_EDITOR_COMPRESSION_MP3_64K:
+                case BAE_EDITOR_COMPRESSION_MP3_96K:
+                case BAE_EDITOR_COMPRESSION_MP3_128K:
+                case BAE_EDITOR_COMPRESSION_MP3_192K:
+                case BAE_EDITOR_COMPRESSION_MP3_256K:
+                case BAE_EDITOR_COMPRESSION_MP3_320K:
+                    isMpegCompression = true;
+                    break;
+                default:
+                    break;
+            }
+            bool mapLoopToDisplay = previewShown &&
+                                    ((IsOpusCompressionType(s.compressionType) && !s.opusRoundTripResample) ||
+                                     isMpegCompression);
+
+            m_sampleParamsPanel->SetLoopDisplayFromSource(s.sampleInfo.startLoop,
+                                                           s.sampleInfo.endLoop,
+                                                           s.sampleInfo.waveFrames,
+                                                           displayedFrameCount,
+                                                           mapLoopToDisplay);
         }
     }
 
@@ -1061,6 +1088,13 @@ private:
         if (m_commitUndoCallback) {
             m_commitUndoCallback("Edit Instrument");
         }
+
+        /* The sample waveform preview is generated from the current document
+         * state (save/reload path). After Apply writes sample metadata and
+         * codec settings, refresh immediately so the dialog reflects the
+         * re-encoded preview without reopening. */
+        RefreshWaveform();
+
         InvalidatePreviewCache(kInstrumentPreviewInvalidate_All);
         m_inInstantApply = false;
     }
