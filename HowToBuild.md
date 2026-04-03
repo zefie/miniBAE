@@ -90,7 +90,7 @@ sudo apt-get install -y binutils-mingw-w64-x86_64 g++-mingw-w64-x86_64 \
   libz-mingw-w64-dev
 cd neobae
 make clean
-make -f Makefile.mingw -j$(nproc)
+make -f mingw/Makefile -j$(nproc)
 ```
 
 Output executable is in `neobae/bin/`.
@@ -178,7 +178,7 @@ You must install the corresponding development packages for ALSA and/or JACK.
 ```bash
 cd neobae
 make clean
-make -f Makefile.mingw -j$(nproc)
+make -f mingw/Makefile -j$(nproc)
 ```
 
 - SDL3 build:
@@ -186,7 +186,7 @@ make -f Makefile.mingw -j$(nproc)
 ```bash
 cd neobae
 make clean
-make -f Makefile.mingw USE_SDL3=1 -j$(nproc)
+make -f mingw/Makefile USE_SDL3=1 -j$(nproc)
 ```
 
 ### zefidi GUI via MinGW
@@ -194,7 +194,7 @@ make -f Makefile.mingw USE_SDL3=1 -j$(nproc)
 ```bash
 cd neobae
 make clean
-make -f Makefile.gui-mingw -j$(nproc)
+make -f mingw/Makefile.gui -j$(nproc)
 ```
 
 Notes:
@@ -220,7 +220,7 @@ make -f Makefile.nbstudio -j$(nproc)
 ### Windows (Visual Studio)
 
 - Open `neobae/src/nbstudio/vs2022/nbstudio.vsxproj`.
-- In Developer PowerShell, run `vcpkg install --triplet x64-windows`.
+- In Developer PowerShell, within the `neobae/src/nbstudio/vs2022` folder, run `vcpkg install --triplet x64-windows`.
 - Build in Visual Studio.
 
 ## WebAssembly (Emscripten)

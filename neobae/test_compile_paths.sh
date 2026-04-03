@@ -32,7 +32,7 @@ runtest() {
     CURRENT=$((CURRENT + 1))
 }
 
-for f in Makefile.gui-mingw Makefile.mingw Makefile.gui Makefile Makefile.clang; do
+for f in mingw/Makefile.gui mingw/Makefile Makefile.gui Makefile Makefile.clang; do
     # basic
     runtest make -f ${f}
     # XMF

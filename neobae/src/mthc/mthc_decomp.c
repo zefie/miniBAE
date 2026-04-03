@@ -2,16 +2,7 @@
  *
  * middecomp.c
  *
- * Reverse-engineering helper for custom MThc/MThp MIDI containers.
- *
- * Current capabilities:
- * - validates and reports the outer MThc container structure
- * - extracts the raw MThp payload
- * - compares the payload against a known-good decompressed MIDI reference
- * - reports literal byte runs shared between the packed payload and MIDI tracks
- *
- * The actual decompression algorithm is not fully decoded yet. This tool is a
- * structured probe so the format work can continue inside the repository.
+ * Reverse-engineering helper for Nokia MThc/MThp MIDI containers.
  *
  ****************************************************************************/
 

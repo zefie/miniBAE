@@ -43,7 +43,7 @@ FileType supportedTypes[] = {
     { _T(".rmi"),  105, _T("RIFF MIDI") },
     { _T(".xmf"),  106, _T("Extensible Music Format") },
     { _T(".mxmf"), 107, _T("Mobile XMF") },
-    { _T(".zmf"),  115, _T("zefie Music Format") },
+    { _T(".zmf"),  115, _T("zefie MIDI File") },
     { _T(".wav"),  108, _T("PCM WAV Audio") },
     { _T(".au"),   109, _T("Sun Audio") },
     { _T(".aiff"), 110, _T("AIFF Audio") },

@@ -90,18 +90,18 @@ CXXFLAGS 	:= $(CFLAGS)
 
 all: $(TARGET_LIB).a ${TARGET_LIB}.dll $(TARGET_BIN)
 
-$(TARGET_LIB).a: $(OBJ)
+$(TARGET_LIB).a: $(OBJ_BIN)
 	@mkdir -p $(TARGET_OUT)
-	$(AR) rcs $(TARGET_OUT)$(TARGET_LIB).a $(OBJ)
+	$(AR) rcs $(TARGET_OUT)$(TARGET_LIB).a $(OBJ_BIN)
 
-$(TARGET_LIB).dll: ${OBJ}
+$(TARGET_LIB).dll: ${OBJ_BIN}
 	@mkdir -p $(TARGET_OUT)
-	@$(DLLTOOL) --export-all --export-all-symbols -e $(OBJ_DIR)exports.o -z $(OBJ_DIR)$(TARGET_LIB).def2 $(OBJ)
+	@$(DLLTOOL) --export-all --export-all-symbols -e $(OBJ_DIR)exports.o -z $(OBJ_DIR)$(TARGET_LIB).def2 $(OBJ_BIN)
 	@echo "EXPORTS" > $(OBJ_DIR)$(TARGET_LIB).def
 	@cat $(OBJ_DIR)$(TARGET_LIB).def2 | grep "BAE" >> $(OBJ_DIR)$(TARGET_LIB).def
 	@rm -f $(OBJ_DIR)$(TARGET_LIB).def2 $(OBJ_DIR)exports.o
-	@$(DLLTOOL) -e $(OBJ_DIR)exports.o -d $(OBJ_DIR)$(TARGET_LIB).def -l $(TARGET_OUT)$(TARGET_LIB).lib $(OBJ)
-		
+	@$(DLLTOOL) -e $(OBJ_DIR)exports.o -d $(OBJ_DIR)$(TARGET_LIB).def -l $(TARGET_OUT)$(TARGET_LIB).lib $(OBJ_BIN)
+
 $(TARGET_BIN): ${OBJ_BIN}
 	@mkdir -p $(TARGET_OUT)Banks
 	$(SHELL) src/banks/copy.sh $(TARGET_OUT)Banks

@@ -1,19 +1,14 @@
-BAE_API := Ansi
+BAE_API := SDL2
+USE_SDL3 := 1
 NOAUTO := 1
-EMBED_PATCHES := 0
 SF2_SUPPORT := 0
-MP3_DEC := 0
-MP3_ENC := 0
-OGG_SUPPORT := 0
-VORBIS_DEC := 0
-VORBIS_ENC := 0
-FLAC_DEC := 0
-FLAC_ENC := 0
-ZMF_SUPPORT := 1
-RMF2MID := 1
+EMBED_PATCHES := 1
+MOD2RMF := 1
+MTHC_SUPPORT := 1
+NBSTUDIO := 1
 include inc/Makefile.common
 
-TARGET_BIN := rmf2mid
+TARGET_BIN := nbstudio
 
 CC		?= gcc
 CXX		?= g++
@@ -27,7 +22,12 @@ ifeq ($(DEBUG),1)
     OPTI := -g -O0 -ggdb3 -fPIC
 endif
 
-CFLAGS  	:= $(ARCH) $(OPTI) $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
+WX_CONFIG ?= wx-config
+
+WX_CXXFLAGS := $(shell $(WX_CONFIG) --cxxflags)
+WX_LIBS := $(shell $(WX_CONFIG) --libs core,base)
+
+CFLAGS  	:= $(ARCH) $(OPTI) $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value $(EXTRA_CFLAGS)
 
 ifneq ($(BAE_FLAGS),)
 	CFLAGS	+= $(BAE_FLAGS)
@@ -46,18 +46,20 @@ ifneq ($(DEBUG),1)
 	LDFLAGS += -s
 endif
 
-LIBS	= 	-lpthread -lm -ldl
+LIBS	= 	-lpthread -lm -lSDL3
 
 ifneq ($(BAE_LIBS),)
 	LIBS += $(BAE_LIBS)
 endif
 
-CXXFLAGS 	:= $(CFLAGS)
+CXXFLAGS 	:= $(CFLAGS) $(WX_CXXFLAGS)
 # Use C++ linker if we have any C++ sources
 ifneq ($(filter %.cpp,$(SRC) $(SRC_BIN)),)
     LD := $(CXX)
     LIBS += -lstdc++
 endif
+
+LIBS += $(WX_LIBS)
 
 all: $(TARGET_BIN)
 

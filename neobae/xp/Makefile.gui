@@ -22,6 +22,13 @@ USE_FLUIDSYNTH := 1
 EMBED_PATCHES := 1
 EMBED_FONT := 1
 XMF_SUPPORT := 1
+ZMF_SUPPORT := 1
+USE_BUILTIN_PATCHES_WITH_SF2 := 1
+FIX_SPAN_DC := 1
+CLASSIC_CHORUS := 1
+LZMA_SUPPORT := 1
+MTHC_SUPPORT := 1
+ADP_SUPPORT := 1
 DISABLE_NOKIA := 0
 DISABLE_BEATNIK_SF2_NRPN := 0
 
@@ -134,6 +141,7 @@ $(TARGET_LIB).dll: ${OBJ_BIN}
 		find /opt/mingw32-xp -name libharfbuzz-0.dll -exec cp {} $(TARGET_OUT) \; 2>/dev/null || true; \
 		find /opt/mingw32-xp -name libpng16.dll -exec cp {} $(TARGET_OUT) \; 2>/dev/null || true; \
 		find /opt/mingw32-xp -name zlib1.dll -exec cp {} $(TARGET_OUT) \; 2>/dev/null || true; \
+		find /opt/mingw32-xp -name liblzma.dll -exec cp {} $(TARGET_OUT) \; 2>/dev/null || true; \
 	fi
 	
 	@if [ "$(OGG_SUPPORT)" = "1" ]; then \
