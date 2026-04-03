@@ -450,7 +450,6 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
     int32_t                    count, count2, lfoCount;
     int32_t                    size, unitCount, unitType, unitSubCount;
     uint16_t      data;
-    int32_t                    unitOffset;
     register char           *pData, *pData2;
     register char           *pUnit;
     register GM_LFO         *pLFO;
@@ -459,11 +458,6 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
     bool                   disableModWheel;
     InstrumentResourceHeaderView header;
     const unsigned char     *pBase;
-    const unsigned char     *pEnd;
-
-#define PV_REQUIRE_BYTES(n) do { \
-    if (((const unsigned char *)pUnit + (n)) > pEnd) goto bailoninstrument; \
-} while (0)
 
     disableModWheel = FALSE;
     theI->volumeADSRRecord.currentTime = 0;
@@ -490,46 +484,24 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
     {
         header = PV_ReadInstrumentHeader(theX);
         pBase = (const unsigned char *)theX;
-        pEnd = pBase + theXSize;
 
         if (header.flags1 & ZBF_extendedFormat)
         {
             // search for end of tremlo data $8000. If not there, don't walk past end of instrument
             // Calculate offset byte-by-byte to avoid unaligned access on ARM64
             count = header.keySplitCount;
-            unitOffset = kInstOffset_keySplitCount + (int32_t)sizeof(int16_t) + (count * KEY_SPLIT_FILE_SIZE);
-            if ((unitOffset < 0) || ((pBase + unitOffset) > pEnd))
-            {
-                goto bailoninstrument;
-            }
             // Each KeySplit is 8 bytes when packed (1+1+2+2+2)
             pData = (char *)(pBase + kInstOffset_keySplitCount + sizeof(int16_t) + (count * KEY_SPLIT_FILE_SIZE));
             pData2 = (char *)pBase;
             size -= (pData - pData2);
-            if (size < 2)
-            {
-                goto bailoninstrument;
-            }
-            for (count = 0; count < (size - 1); count++)
+            for (count = 0; count < size; count++)
             {
                 data = XGetShort(&pData[count]);
                 if (data == 0x8000)
                 {
                     count += 4;                             // skip past end token and extra word
-                    if (count >= size)
-                    {
-                        goto bailoninstrument;
-                    }
                     data = (uint16_t)pData[count] + 1;            // get first string length;
-                    if ((count + data) >= size)
-                    {
-                        goto bailoninstrument;
-                    }
                     count2 = (int32_t)pData[count+data] + 1;           // get second string length
-                    if ((count + data + count2) > size)
-                    {
-                        goto bailoninstrument;
-                    }
                     pUnit = (char *) (&pData[count + data + count2]);
                     // NOTE: src will be non aligned, possibly on a byte boundry.
                     break;
@@ -537,14 +509,9 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
             }
             if (pUnit)
             {
-                if (((const unsigned char *)pUnit + 12) > pEnd)
-                {
-                    goto bailoninstrument;
-                }
                 theI->extendedFormat = TRUE;
                 pUnit += 12;        // reserved global space
 
-                PV_REQUIRE_BYTES(1);
                 unitCount = *pUnit;     // how many unit records?
                 pUnit++;                    // byte
                 if (unitCount)
@@ -552,7 +519,6 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                     lfoCount = 0;
                     for (count = 0; count < unitCount; count++)
                     {
-                        PV_REQUIRE_BYTES(4);
                         unitType = XGetLong(pUnit) & 0x5F5F5F5F;
                         pUnit += 4; // int32_t
                         switch (unitType)
@@ -564,12 +530,10 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                                 }
                                 pCurve = &theI->curve[theI->curveRecordCount];
                                 theI->curveRecordCount++;
-                                PV_REQUIRE_BYTES(8);
                                 pCurve->tieFrom = PV_TranslateFromFileToMemoryID(XGetLong(pUnit) & 0x5F5F5F5F); 
                                 pUnit += 4;
                                 pCurve->tieTo = PV_TranslateFromFileToMemoryID(XGetLong(pUnit) & 0x5F5F5F5F);
                                 pUnit += 4;
-                                PV_REQUIRE_BYTES(1);
                                 unitSubCount = *pUnit++;
                                 if (unitSubCount > ADSR_STAGES)
                                 {
@@ -578,7 +542,6 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                                 pCurve->curveCount = (int16_t)unitSubCount;
                                 for (count2 = 0; count2 < unitSubCount; count2++)
                                 {
-                                    PV_REQUIRE_BYTES(3);
                                     pCurve->from_Value[count2] = *pUnit++;
                                     pCurve->to_Scalar[count2] = XGetShort(pUnit);
                                     pUnit += 2;
@@ -588,7 +551,6 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                                 pCurve->to_Scalar[count2] = pCurve->to_Scalar[count2-1];
                                 break;
                             case INST_ADSR_ENVELOPE:
-                                PV_REQUIRE_BYTES(1);
                                 unitSubCount = *pUnit;      // how many unit records?
                                 pUnit++;                    // byte
                                 if (unitSubCount > ADSR_STAGES)
@@ -598,7 +560,6 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                                 pADSR = &theI->volumeADSRRecord;
                                 for (count2 = 0; count2 < unitSubCount; count2++)
                                 {
-                                    PV_REQUIRE_BYTES(12);
                                     pADSR->ADSRLevel[count2] = (int32_t)XGetLong(pUnit);
                                     pUnit += 4;
 
@@ -611,7 +572,6 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                                 break;
 
                             case INST_LOW_PASS_FILTER:      // low pass global filter parameters
-                                PV_REQUIRE_BYTES(12);
                                 theI->LPF_frequency = (int32_t)XGetLong(pUnit);
                                 pUnit += 4;
                                 theI->LPF_resonance = XGetLong(pUnit);
@@ -621,13 +581,11 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                                 break;
 
                             case INST_REVERB_SEND:
-                                PV_REQUIRE_BYTES(4);
                                 theI->defaultReverbSend = (int16_t)(int32_t)XGetLong(pUnit);
                                 pUnit += 4;
                                 break;
 
                             case INST_CHORUS_SEND:
-                                PV_REQUIRE_BYTES(4);
                                 theI->defaultChorusSend = (int16_t)(int32_t)XGetLong(pUnit);
                                 pUnit += 4;
                                 break;
@@ -644,11 +602,10 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                             case INST_LOW_PASS_AMOUNT:
                             case INST_LPF_DEPTH:
                             case INST_LPF_FREQUENCY:
-                                if (lfoCount >= MAX_LFOS)
+                                if (lfoCount > MAX_LFOS)
                                 {
                                     goto bailoninstrument;
                                 }
-                                PV_REQUIRE_BYTES(1);
                                 unitSubCount = *pUnit;      // how many unit records?
                                 pUnit++;                    // byte
                                 if (unitSubCount > ADSR_STAGES)
@@ -659,7 +616,6 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                                 pLFO = &theI->LFORecords[lfoCount];
                                 for (count2 = 0; count2 < unitSubCount; count2++)
                                 {
-                                    PV_REQUIRE_BYTES(12);
                                     pLFO->a.ADSRLevel[count2] = (int32_t)XGetLong(pUnit);
                                     pUnit += 4;
                                     pLFO->a.ADSRTime[count2] = XGetLong(pUnit);
@@ -669,7 +625,6 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                                 }
                                 pLFO->where_to_feed = PV_TranslateFromFileToMemoryID(unitType & 0x5F5F5F5F);
 
-                                PV_REQUIRE_BYTES(16);
                                 pLFO->period = XGetLong(pUnit);
                                 pUnit += 4;
                                 pLFO->waveShape = PV_TranslateFromFileToMemoryID(XGetLong(pUnit));
@@ -738,8 +693,6 @@ bailoninstrument:
             }
         }
     }
-
-#undef PV_REQUIRE_BYTES
 }
 
 /******************************************************************************
