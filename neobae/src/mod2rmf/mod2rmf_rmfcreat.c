@@ -5,6 +5,54 @@
 #include "X_Assert.h"
 #include <xmp.h>
 
+/* Resolve per-note transpose from the active instrument mapping.
+ * Some formats (notably IT) can reuse the same sample across multiple
+ * instruments with different transpose settings, so a global per-sample
+ * transpose cache can detune only certain notes. */
+static int mod2rmf_resolve_note_transpose(const struct xmp_module *mod,
+                                          const struct xmp_channel_info *ci,
+                                          int sid,
+                                          const int16_t sampleTranspose[MOD2RMF_MAX_SAMPLES])
+{
+    int noteXpo = 0;
+    int instIndex = -1;
+
+    if (ci && ci->instrument > 0)
+    {
+        instIndex = (int)ci->instrument - 1;
+    }
+    if (mod && instIndex >= 0 && instIndex < mod->ins && mod->xxi)
+    {
+        const struct xmp_instrument *inst = &mod->xxi[instIndex];
+        int sub;
+        bool foundSub = FALSE;
+
+        if (inst->nsm > 0 && inst->sub && sid >= 0)
+        {
+            for (sub = 0; sub < inst->nsm; ++sub)
+            {
+                if (inst->sub[sub].sid == sid)
+                {
+                    noteXpo += inst->sub[sub].xpo;
+                    foundSub = TRUE;
+                    break;
+                }
+            }
+        }
+
+        if (!foundSub && sid >= 0 && sid < MOD2RMF_MAX_SAMPLES)
+        {
+            noteXpo += (int)sampleTranspose[sid];
+        }
+    }
+    else if (sid >= 0 && sid < MOD2RMF_MAX_SAMPLES)
+    {
+        noteXpo = (int)sampleTranspose[sid];
+    }
+
+    return noteXpo;
+}
+
 int mod2rmf_load_source_data(Mod2RmfConverter *conv, const char *sourcePath)
 {
     FILE *file;
@@ -216,13 +264,8 @@ int mod2rmf_setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
                      double baseRate = playable->hasSampleRateOverride ? 
                                          (double)playable->sampleRateOverrideHz : 
                                          (double)conv->moduleBaseRateHz;
-                     /* finetune is intentionally NOT applied to sample rate;
-                      * libxmp folds it into ci->pitchbend (which we emit as
-                      * MIDI pitch bend events) so applying it here would
-                      * double the offset. */
-                     double finetuneRatio = pow(2.0, (double)raw->finetune / 96.0);
                      /* Divide the physical baseRate by 4 to complement the -24 rootKey shift */
-                     sampledRate = (BAE_UNSIGNED_FIXED)((double)(baseRate / 4.0) * finetuneRatio * 65536.0 + 0.5);
+                     sampledRate = (BAE_UNSIGNED_FIXED)((double)(baseRate / 4.0) * 65536.0 + 0.5);
                      if (sampledRate < 65536u)
                      {
                          sampledRate = 65536u;
@@ -279,10 +322,7 @@ int mod2rmf_setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
                     }
                     else
                     {
-                        /* finetune is intentionally NOT applied here;
-                         * libxmp folds it into ci->pitchbend. */
-                        double finetuneRatio = pow(2.0, (double)raw->finetune / 96.0);
-                        sampledRate = (BAE_UNSIGNED_FIXED)((double)(outRate / 4.0) * finetuneRatio * 65536.0 + 0.5);
+                        sampledRate = (BAE_UNSIGNED_FIXED)((double)(outRate / 4.0) * 65536.0 + 0.5);
                         if (sampledRate < 65536u)
                         {
                             sampledRate = 65536u;
@@ -892,6 +932,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                             else
                             {
                                 /* Normal note-on (or retrigger tick 0). */
+                                int baseNote;
                                 int midiNote;
                                 int noteXpo;
 
@@ -919,9 +960,12 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                     return 0;
                                 }
 
-                                noteXpo = (sid >= 0 && sid < MOD2RMF_MAX_SAMPLES)
-                                            ? (int)sampleTranspose[sid] : 0;
-                                midiNote = (int)ci->note + 12 + noteXpo;
+                                baseNote = ((int)ci->note > 0) ? (int)ci->note : (int)evNote;
+                                noteXpo = mod2rmf_resolve_note_transpose(mod,
+                                                                         ci,
+                                                                         sid,
+                                                                         sampleTranspose);
+                                midiNote = baseNote + 12 + noteXpo;
 
                                 activeNotes[ch].active = TRUE;
                                 activeNotes[ch].startTickFP = currentTickFP;
@@ -954,6 +998,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                         if (delaySid >= 0 && delaySid < (int)conv->rawSampleCount &&
                             conv->rawSamples[delaySid].valid)
                         {
+                            int baseNote;
                             int midiNote;
                             int noteXpo;
 
@@ -981,9 +1026,14 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                 return 0;
                             }
 
-                            noteXpo = (delaySid >= 0 && delaySid < MOD2RMF_MAX_SAMPLES)
-                                        ? (int)sampleTranspose[delaySid] : 0;
-                            midiNote = (int)ci->note + 12 + noteXpo;
+                            baseNote = ((int)ci->note > 0)
+                                            ? (int)ci->note
+                                            : (int)chEffects[ch].delayedEvNote;
+                            noteXpo = mod2rmf_resolve_note_transpose(mod,
+                                                                     ci,
+                                                                     delaySid,
+                                                                     sampleTranspose);
+                            midiNote = baseNote + 12 + noteXpo;
 
                             activeNotes[ch].active = TRUE;
                             activeNotes[ch].startTickFP = currentTickFP;
