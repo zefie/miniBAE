@@ -12975,10 +12975,17 @@ BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document, 
 
             case BAE_EDITOR_COMPRESSION_DONT_CHANGE:
                 /* Original data may contain a modern codec */
-                if (sample->sourceCompressionType == (uint32_t)C_FLAC ||
+                if (
+#if USE_FLAC_DECODER == TRUE || USE_FLAC_ENCODER == TRUE                    
+                    sample->sourceCompressionType == (uint32_t)C_FLAC ||
+#endif
+#if USE_VORBIS_DECODER == TRUE || USE_VORBIS_ENCODER == TRUE                    
                     sample->sourceCompressionType == (uint32_t)C_VORBIS ||
-                    sample->sourceCompressionType == (uint32_t)C_OPUS
-                )
+#endif
+#if USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE
+                    sample->sourceCompressionType == (uint32_t)C_OPUS ||
+#endif
+                false)
                 {
                     reason |= BAEZMF_REASON_MODERN_CODEC;
                 }
@@ -13111,9 +13118,17 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
             }
 
             compressionType = (uint32_t)sampleInfo.compressionType;
-            if (compressionType == (uint32_t)C_FLAC ||
+            if (
+#if USE_FLAC_DECODER == TRUE || USE_FLAC_ENCODER == TRUE
+                compressionType == (uint32_t)C_FLAC ||
+#endif                
+#if USE_VORBIS_DECODER == TRUE || USE_VORBIS_ENCODER == TRUE
                 compressionType == (uint32_t)C_VORBIS ||
-                compressionType == (uint32_t)C_OPUS)
+#endif
+#if USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE
+                compressionType == (uint32_t)C_OPUS ||
+#endif
+            false)
             {
 #if defined(_DEBUG) && (_DEBUG != 0)
                 BAE_PRINTF("[BankRequiresZsb] TRIP reason=modern-codec instIndex=%u sndID=%u compressionType=0x%08X\n",

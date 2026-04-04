@@ -29,6 +29,7 @@ add_library(neobae STATIC
   neobae/src/BAE_Source/Common/X_API.c
   neobae/src/BAE_Source/Common/X_Decompress.c
   neobae/src/BAE_Source/Common/X_IMA.c
+  neobae/src/BAE_Source/Common/X_LZMA.c
   neobae/src/BAE_Source/Common/g711.c
   neobae/src/BAE_Source/Common/g721.c
   neobae/src/BAE_Source/Common/g723_24.c
@@ -49,6 +50,9 @@ target_include_directories(neobae
 target_compile_definitions(neobae
   PUBLIC
     X_PLATFORM=X_ANSI
+    USE_CREATION_API=1
+    USE_ZMF_SUPPORT=1
+    USE_LZMA_COMPRESSION=1
 )
 
 target_compile_options(neobae PRIVATE -w)
@@ -62,4 +66,9 @@ if(UNIX AND NOT APPLE)
   if(CMAKE_DL_LIBS)
     target_link_libraries(neobae PUBLIC ${CMAKE_DL_LIBS})
   endif()
+endif()
+
+find_library(LIBLZMA_LIBRARY lzma)
+if(LIBLZMA_LIBRARY)
+  target_link_libraries(neobae PUBLIC ${LIBLZMA_LIBRARY})
 endif()
