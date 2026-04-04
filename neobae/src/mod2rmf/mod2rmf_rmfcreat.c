@@ -53,6 +53,48 @@ static int mod2rmf_resolve_note_transpose(const struct xmp_module *mod,
     return noteXpo;
 }
 
+/* Read the raw row event directly from the module pattern/track tables.
+ * This preserves original tracker column intent (e.g. IT volume column)
+ * before libxmp frame processing mutates channel state. */
+static const struct xmp_event *mod2rmf_get_raw_row_event(const struct xmp_module *mod,
+                                                         int pattern,
+                                                         int row,
+                                                         uint32_t ch)
+{
+    struct xmp_pattern *pat;
+    struct xmp_track *trk;
+    int trackIndex;
+
+    if (!mod || !mod->xxp || !mod->xxt)
+    {
+        return NULL;
+    }
+    if (pattern < 0 || pattern >= mod->pat || row < 0 || ch >= (uint32_t)mod->chn)
+    {
+        return NULL;
+    }
+
+    pat = mod->xxp[pattern];
+    if (!pat || row >= pat->rows)
+    {
+        return NULL;
+    }
+
+    trackIndex = pat->index[ch];
+    if (trackIndex < 0 || trackIndex >= mod->trk)
+    {
+        return NULL;
+    }
+
+    trk = mod->xxt[trackIndex];
+    if (!trk || row >= trk->rows)
+    {
+        return NULL;
+    }
+
+    return &trk->event[row];
+}
+
 int mod2rmf_load_source_data(Mod2RmfConverter *conv, const char *sourcePath)
 {
     FILE *file;
@@ -453,6 +495,8 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
     struct xmp_frame_info fi;
     ActiveNote activeNotes[MOD2RMF_MAX_CHANNELS];
     ChannelEffectState chEffects[MOD2RMF_MAX_CHANNELS];
+    uint8_t v00CutArmed[MOD2RMF_MAX_CHANNELS];
+    uint16_t v00SilentRows[MOD2RMF_MAX_CHANNELS];
     uint8_t chLastVol[MOD2RMF_MAX_CHANNELS];
     uint8_t chLastPan[MOD2RMF_MAX_CHANNELS];
     uint16_t chLastBend[MOD2RMF_MAX_CHANNELS];
@@ -746,6 +790,8 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
 
     memset(activeNotes, 0, sizeof(activeNotes));
     memset(chEffects, 0, sizeof(chEffects));
+    memset(v00CutArmed, 0, sizeof(v00CutArmed));
+    memset(v00SilentRows, 0, sizeof(v00SilentRows));
     for (i = 0; i < MOD2RMF_MAX_CHANNELS; ++i)
     {
         chLastVol[i] = 0xFF;
@@ -835,13 +881,24 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
         for (ch = 0; ch < song->channelCount; ++ch)
         {
             const struct xmp_channel_info *ci;
+            const struct xmp_event *rowEvent;
             uint8_t evNote;
             uint8_t sampleNum;
             int sid;
             int program;
 
             ci = &fi.channel_info[ch];
-            evNote = ci->event.note;
+            rowEvent = &ci->event;
+            if (fi.frame == 0)
+            {
+                const struct xmp_event *rawEv;
+                rawEv = mod2rmf_get_raw_row_event(mod, fi.pattern, fi.row, ch);
+                if (rawEv)
+                {
+                    rowEvent = rawEv;
+                }
+            }
+            evNote = rowEvent->note;
             sampleNum = ci->sample;
             sid = (int)sampleNum; /* 0-based index into mod->xxs[] */
 
@@ -862,6 +919,16 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                 uint32_t preNoteCCIdx = song->ccCount;
                 uint32_t preNoteBendIdx = song->pitchBendCount;
                 uint8_t  preNoteProg  = activeNotes[ch].program;
+                bool hasRowVolumeCmd = FALSE;
+                uint8_t rowVolumeCmd64 = 0;
+                int itV00CutRows = (int)conv->itV00CutRows;
+                int itV00Cut = (itV00CutRows > 0) ? 1 : 0;
+
+                if (fi.frame == 0)
+                {
+                    hasRowVolumeCmd = mod2rmf_get_row_volume_command(rowEvent,
+                                                                     &rowVolumeCmd64);
+                }
 
                 {
                     uint8_t adjPan;
@@ -878,14 +945,19 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
 
                 /* Use row-start volume only; per-frame ci->volume is post-processed
                  * (envelope/fade/runtime), not the raw channel volume intent. */
-                if (fi.frame == 0 && ci->volume != chLastVol[ch])
+                if (fi.frame == 0)
                 {
                     uint8_t vol64;
-                    vol64 = (uint8_t)mod2rmf_clamp_int((int)ci->volume, 0, 64);
-                    chLastVol[ch] = vol64;
-                    (void)mod2rmf_song_model_append_cc_event(song, (uint16_t)ch, tick, 7,
-                                                    mod2rmf_vol_to_midi(vol64),
-                                                    activeNotes[ch].program);
+                    vol64 = hasRowVolumeCmd
+                              ? rowVolumeCmd64
+                              : (uint8_t)mod2rmf_clamp_int((int)ci->volume, 0, 64);
+                    if (vol64 != chLastVol[ch])
+                    {
+                        chLastVol[ch] = vol64;
+                        (void)mod2rmf_song_model_append_cc_event(song, (uint16_t)ch, tick, 7,
+                                                        mod2rmf_vol_to_midi(vol64),
+                                                        activeNotes[ch].program);
+                    }
                 }
                 if (activeNotes[ch].active)
                 {
@@ -910,9 +982,23 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                     memset(&chEffects[ch], 0, sizeof(chEffects[ch]));
 
                     /* Parse retrigger and note-delay effects from both effect columns. */
-                    mod2rmf_parse_row_effects(&ci->event, &retrigInterval, &noteDelayFrames);
+                    mod2rmf_parse_row_effects(rowEvent, &retrigInterval, &noteDelayFrames);
                     chEffects[ch].retrigInterval = retrigInterval;
                     chEffects[ch].noteDelayFrames = noteDelayFrames;
+
+                    /* Smart v00-cut arming: arm on explicit v00, disarm on
+                     * non-zero row volume or a fresh row note. */
+                    if (hasRowVolumeCmd && rowVolumeCmd64 == 0)
+                    {
+                        v00CutArmed[ch] = 1;
+                        v00SilentRows[ch] = 0;
+                    }
+                    else if ((hasRowVolumeCmd && rowVolumeCmd64 > 0) ||
+                             (evNote > 0 && evNote <= 120))
+                    {
+                        v00CutArmed[ch] = 0;
+                        v00SilentRows[ch] = 0;
+                    }
 
                     /* Key-off events are always processed immediately, even with delay. */
                     if (evNote == XMP_KEY_OFF || evNote == XMP_KEY_CUT || evNote == XMP_KEY_FADE)
@@ -926,6 +1012,35 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                             return 0;
                         }
                     }
+                    else if (itV00Cut && v00CutArmed[ch] && evNote == 0 && activeNotes[ch].active)
+                    {
+                        if (ci->volume == 0)
+                        {
+                            if (v00SilentRows[ch] < 0xFFFFu)
+                            {
+                                v00SilentRows[ch]++;
+                            }
+                        }
+                        else
+                        {
+                            v00CutArmed[ch] = 0;
+                            v00SilentRows[ch] = 0;
+                        }
+
+                        if (v00CutArmed[ch] && itV00CutRows > 0 && v00SilentRows[ch] >= (uint16_t)itV00CutRows)
+                        {
+                            if (!mod2rmf_flush_active_note(song, (uint16_t)ch, &activeNotes[ch], currentTickFP))
+                            {
+                                if (playerStarted) xmp_end_player(ctx);
+                                free(sampleToProgram);
+                                xmp_release_module(ctx);
+                                xmp_free_context(ctx);
+                                return 0;
+                            }
+                            v00CutArmed[ch] = 0;
+                            v00SilentRows[ch] = 0;
+                        }
+                    }
                     else if (evNote > 0 && evNote <= 120 && sid >= 0 && sid < (int)conv->rawSampleCount)
                     {
                         if (conv->rawSamples[sid].valid)
@@ -936,7 +1051,9 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                 chEffects[ch].hasDelayedNote = TRUE;
                                 chEffects[ch].delayedEvNote = evNote;
                                 chEffects[ch].delayedSid = sid;
-                                chEffects[ch].delayedVolume = (uint8_t)mod2rmf_clamp_int((int)ci->volume, 0, 64);
+                                chEffects[ch].delayedVolume = hasRowVolumeCmd
+                                                              ? rowVolumeCmd64
+                                                              : (uint8_t)mod2rmf_clamp_int((int)ci->volume, 0, 64);
                             }
                             else
                             {
@@ -980,7 +1097,9 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                 activeNotes[ch].active = TRUE;
                                 activeNotes[ch].startTickFP = currentTickFP;
                                 activeNotes[ch].note = (unsigned char)mod2rmf_clamp_int(midiNote, 0, 127);
-                                activeNotes[ch].velocity = mod2rmf_note_velocity_from_volume((uint8_t)mod2rmf_clamp_int((int)ci->volume, 0, 64));
+                                activeNotes[ch].velocity = mod2rmf_note_velocity_from_volume(hasRowVolumeCmd
+                                                                                               ? rowVolumeCmd64
+                                                                                               : (uint8_t)mod2rmf_clamp_int((int)ci->volume, 0, 64));
                                 activeNotes[ch].program = (uint8_t)program;
                                 activeNotes[ch].bendOffsetCents = (midiNote - (int)activeNotes[ch].note) * 100;
                                 chLastBend[ch] = 0xFFFFu;
@@ -1049,7 +1168,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                             activeNotes[ch].active = TRUE;
                             activeNotes[ch].startTickFP = currentTickFP;
                             activeNotes[ch].note = (unsigned char)mod2rmf_clamp_int(midiNote, 0, 127);
-                            activeNotes[ch].velocity = mod2rmf_note_velocity_from_volume((uint8_t)mod2rmf_clamp_int((int)ci->volume, 0, 64));
+                            activeNotes[ch].velocity = mod2rmf_note_velocity_from_volume(chEffects[ch].delayedVolume);
                             activeNotes[ch].program = (uint8_t)program;
                             activeNotes[ch].bendOffsetCents = (midiNote - (int)activeNotes[ch].note) * 100;
                             chLastBend[ch] = 0xFFFFu;
@@ -1277,6 +1396,7 @@ Mod2RmfConverter *mod2rmf_converter_create(void)
         memset(conv, 0, sizeof(*conv));
         conv->moduleBaseRateHz = MOD2RMF_SAMPLE_RATE;
         conv->isMod = FALSE;
+        conv->itV00CutRows = 6;
     }
     return conv;
 }
@@ -1425,7 +1545,10 @@ int mod2rmf_write_song_cc_events(Mod2RmfConverter *conv, const ModSongModel *son
         if (trackIndex == (uint16_t)0xFFFF) continue;
 
         /* Skip if this CC value was already emitted for this MIDI channel */
-        if (lastCC[midiCh][ev->cc] == (uint16_t)ev->value) continue;
+        if (lastCC[midiCh][ev->cc] == (uint16_t)ev->value)
+        {
+            continue;
+        }
         lastCC[midiCh][ev->cc] = (uint16_t)ev->value;
 
         (void)BAERmfEditorDocument_AddTrackCCEvent(conv->document,

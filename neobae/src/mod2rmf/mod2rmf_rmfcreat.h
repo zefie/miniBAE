@@ -17,6 +17,7 @@ typedef struct {
     Mod2RmfResamplerSettings resamplerSettings;
     bool forceOriginalSamples;
     uint8_t stereoSeparation;  /* 0=mono (center), 75=default, 100=hard L/R */
+    uint8_t itV00CutRows;      /* 0 disables; default 6 */
 } Mod2RmfConverter;
 
 

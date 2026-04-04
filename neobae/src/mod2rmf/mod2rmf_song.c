@@ -376,7 +376,7 @@ int mod2rmf_ensure_loop_pitch_bend_resets(ModSongModel *song)
 int mod2rmf_spread_channels_by_program(ModSongModel *song, bool isMod,
                                       uint8_t stereoSep)
 {
-    uint8_t virtualChanMap[MOD2RMF_MAX_CHANNELS][128];
+    uint8_t virtualChanMap[MOD2RMF_MAX_CHANNELS][MOD2RMF_MAX_SAMPLES];
     uint8_t originalChMapped[MOD2RMF_MAX_CHANNELS];
     uint8_t nextVirtualChan;
     uint32_t i;
@@ -401,7 +401,7 @@ int mod2rmf_spread_channels_by_program(ModSongModel *song, bool isMod,
         uint8_t ch = song->notes[i].sourceChannel;
         uint8_t prog = song->notes[i].program;
 
-        if (ch >= MOD2RMF_MAX_CHANNELS) continue;
+        if (ch >= MOD2RMF_MAX_CHANNELS || prog >= MOD2RMF_MAX_SAMPLES) continue;
 
         if (virtualChanMap[ch][prog] == 0xFF)
         {
@@ -431,7 +431,7 @@ int mod2rmf_spread_channels_by_program(ModSongModel *song, bool isMod,
     {
         uint8_t ch = song->ccEvents[i].sourceChannel;
         uint8_t prog = song->ccEvents[i].program;
-        if (ch < MOD2RMF_MAX_CHANNELS)
+        if (ch < MOD2RMF_MAX_CHANNELS && prog < MOD2RMF_MAX_SAMPLES)
         {
             if (virtualChanMap[ch][prog] == 0xFF)
             {
@@ -449,7 +449,7 @@ int mod2rmf_spread_channels_by_program(ModSongModel *song, bool isMod,
     {
         uint8_t ch = song->pitchBendEvents[i].sourceChannel;
         uint8_t prog = song->pitchBendEvents[i].program;
-        if (ch < MOD2RMF_MAX_CHANNELS)
+        if (ch < MOD2RMF_MAX_CHANNELS && prog < MOD2RMF_MAX_SAMPLES)
         {
             if (virtualChanMap[ch][prog] == 0xFF)
             {

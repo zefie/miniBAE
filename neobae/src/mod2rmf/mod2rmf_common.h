@@ -200,6 +200,8 @@ void mod2rmf_emulate_reverse_loop(ModRawSample *raw);
 void mod2rmf_parse_row_effects(const struct xmp_event *ev,
                               uint8_t *outRetrigInterval,
                               uint8_t *outDelayFrames);
+bool mod2rmf_get_row_volume_command(const struct xmp_event *ev,
+                                   uint8_t *outVol64);
 
 bool mod2rmf_row_has_tone_portamento(const struct xmp_event *ev);
 

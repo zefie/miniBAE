@@ -331,6 +331,40 @@ void mod2rmf_parse_row_effects(const struct xmp_event *ev,
     }
 }
 
+/* Decode explicit row volume-set commands (tracker volume column).
+ * Returns TRUE only when the row contains an absolute volume command.
+ * This allows callers to distinguish "v00" from "no volume command". */
+bool mod2rmf_get_row_volume_command(const struct xmp_event *ev,
+                                   uint8_t *outVol64)
+{
+    if (!ev || !outVol64)
+    {
+        return FALSE;
+    }
+
+    /* libxmp may map volume-column set to a tracker FX opcode. */
+    if (ev->fxt == MOD2RMF_FX_TRK_VOL)
+    {
+        *outVol64 = (uint8_t)mod2rmf_clamp_int((int)ev->fxp, 0, 64);
+        return TRUE;
+    }
+    if (ev->f2t == MOD2RMF_FX_TRK_VOL)
+    {
+        *outVol64 = (uint8_t)mod2rmf_clamp_int((int)ev->f2p, 0, 64);
+        return TRUE;
+    }
+
+    /* libxmp volume-column set values are encoded as 1..65 for tracker
+     * volumes 0..64, with 0 meaning "no volume command". */
+    if (ev->vol > 0 && ev->vol <= 65)
+    {
+        *outVol64 = (uint8_t)(ev->vol - 1u);
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
 /* Return TRUE if tone portamento (effect 3xx or 5xx) is active in either
  * effect column of this row.  When tone portamento is active the note in
  * the pattern is the slide TARGET; the sample must NOT be retriggered. */

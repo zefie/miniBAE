@@ -40,6 +40,7 @@ static void print_usage(const char *program_name)
             "  --resample-filter N   Interpolation: nearest|linear|cubic|sinc (default: sinc)\n"
             "  --filters             List available filter/resample options\n"
             "  --stereo-separation N Stereo width 0-100%% (0=mono, 75=default, 100=hard L/R)\n"
+            "  --it-v00-cut-rows N  Cut sustained note after N silent rows following explicit IT v00 (0=off, default: 6)\n"
             "  --spread              [Experimental] Spread instruments across MIDI channels\n"
             "  --tempomap            Reserved for future tempo-map handling\n"
             "  --ext-pitch           [ZMF] Allow pitch down to -96 semitones (vs default -24)\n"
@@ -91,6 +92,7 @@ int main(int argc, char *argv[])
     bool spreadChannels;
     bool useExtendedPitchRange;
     uint8_t stereoSeparation;
+    uint8_t itV00CutRows;
 
     sourcePath = NULL;
     destPath = NULL;
@@ -103,6 +105,7 @@ int main(int argc, char *argv[])
     spreadChannels = FALSE;
     useExtendedPitchRange = FALSE;
     stereoSeparation = 75;
+    itV00CutRows = 6;
     mod2rmf_song_model_init(&song);
 
     if (argc < 3)
@@ -246,6 +249,24 @@ int main(int argc, char *argv[])
             bitrateArgSeen = TRUE;
             continue;
         }
+        if (!strcmp(arg, "--it-v00-cut-rows"))
+        {
+            long rows;
+            if (argi + 1 >= argc)
+            {
+                fprintf(stderr, "Error: --it-v00-cut-rows requires an argument\n");
+                return 1;
+            }
+            ++argi;
+            rows = strtol(argv[argi], NULL, 10);
+            if (rows < 0 || rows > 255)
+            {
+                fprintf(stderr, "Error: --it-v00-cut-rows must be 0-255 (got '%s')\n", argv[argi]);
+                return 1;
+            }
+            itV00CutRows = (uint8_t)rows;
+            continue;
+        }
         if (!strcmp(arg, "--help") || !strcmp(arg, "-h"))
         {
             print_usage(argv[0]);
@@ -324,6 +345,7 @@ int main(int argc, char *argv[])
     conv->resamplerSettings = resamplerSettings;
     conv->forceOriginalSamples = forceOriginalSamples;
     conv->stereoSeparation = stereoSeparation;
+    conv->itV00CutRows = itV00CutRows;
 
     if (!mod2rmf_load_source_data(conv, sourcePath))
     {
