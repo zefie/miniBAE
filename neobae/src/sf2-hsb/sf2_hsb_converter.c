@@ -269,7 +269,7 @@ static void refine_loop_points_from_pcm(const uint8_t *pcmData,
 {
     uint32_t baseStart;
     uint32_t baseEnd;
-    uint32_t loopLength;
+    uint32_t loopLen;
     uint32_t bestStart;
     uint32_t bestEnd;
     uint64_t bestScore;
@@ -288,21 +288,26 @@ static void refine_loop_points_from_pcm(const uint8_t *pcmData,
         return;
     }
 
-    loopLength = baseEnd - baseStart;
+    loopLen = baseEnd - baseStart;
     bestStart = baseStart;
     bestEnd = baseEnd;
     bestScore = score_loop_boundary_mono(pcmData, frameCount, baseStart, baseEnd);
 
+    /* Test inclusive->exclusive interpretation mismatch (end - 1). */
     if (baseEnd > baseStart + 2) {
         uint64_t endMinusOneScore = score_loop_boundary_mono(pcmData, frameCount, baseStart, baseEnd - 1);
         if (endMinusOneScore < bestScore) {
             bestScore = endMinusOneScore;
+            bestStart = baseStart;
             bestEnd = baseEnd - 1;
         }
     }
 
+    /* Slide the whole loop (preserving length) within a window of +/-32 frames
+       to find the position where the loop seam discontinuity is minimised.
+       This covers byte-to-frame rounding errors from compressed source formats. */
     for (delta = -32; delta <= 32; ++delta) {
-        long long shiftedStartLL = (long long)baseStart + (long long)delta;
+        long long shiftedStartLL = (long long)baseStart + delta;
         uint32_t shiftedStart;
         uint32_t shiftedEnd;
         uint64_t score;
@@ -310,9 +315,8 @@ static void refine_loop_points_from_pcm(const uint8_t *pcmData,
         if (shiftedStartLL < 0) {
             continue;
         }
-
         shiftedStart = (uint32_t)shiftedStartLL;
-        shiftedEnd = shiftedStart + loopLength;
+        shiftedEnd = shiftedStart + loopLen;
         if (shiftedEnd > frameCount || shiftedEnd <= shiftedStart + 1) {
             continue;
         }
@@ -322,6 +326,16 @@ static void refine_loop_points_from_pcm(const uint8_t *pcmData,
             bestScore = score;
             bestStart = shiftedStart;
             bestEnd = shiftedEnd;
+        }
+
+        /* Also test end - 1 at this shifted position. */
+        if (shiftedEnd > shiftedStart + 2) {
+            score = score_loop_boundary_mono(pcmData, frameCount, shiftedStart, shiftedEnd - 1);
+            if (score < bestScore) {
+                bestScore = score;
+                bestStart = shiftedStart;
+                bestEnd = shiftedEnd - 1;
+            }
         }
     }
 
