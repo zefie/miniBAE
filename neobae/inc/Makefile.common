@@ -226,7 +226,7 @@ endif
 
 # default to ANSI
 ifeq ($(BAE_API),)
-	BAE_API		:= Ansi
+	BAE_API		:= Dummy
 endif
 
 ## Begin Easy API -> X_PLATFORM
@@ -234,6 +234,11 @@ endif
 ifeq ($(BAE_API),Ansi)
 	# No audio output
 	BAE_FLAGS += 	-DX_PLATFORM=X_ANSI
+	SRC       :=	src/BAE_Source/Platform/BAE_API_$(BAE_API).c
+endif
+ifeq ($(BAE_API),Dummy)
+	# No audio output, no pthreads
+	BAE_FLAGS += 	-DX_PLATFORM=X_DUMMY
 	SRC       :=	src/BAE_Source/Platform/BAE_API_$(BAE_API).c
 endif
 ifeq ($(BAE_API),WASM)
@@ -491,6 +496,12 @@ ifeq ($(MOD2RMF),1)
 	BAE_FLAGS += -DLIBXMP_STATIC=1 
 endif
 
+ifeq ($(SONGTOOL),1)
+	# songtool uses shared codec parsing/resolution helpers
+	SRC += src/mod2rmf/mod2rmf_encoder.c
+	INC_PATH += -Isrc/mod2rmf
+endif
+
 # Nested ifeq from hell!
 
 ifeq ($(BUILD_GUI),1)
@@ -565,8 +576,13 @@ else
 												SRC := src/mthc/mthc_decomp.c src/mthc/mthc_main.c
 											else
 												ifneq ($(WASM),1)
-													# playbae = libNeoBAE srcs + playbae.c
-													SRC += src/playbae/playbae.c
+													ifneq ($(SONGTOOL),1)
+														# playbae = libNeoBAE srcs + playbae.c
+														SRC += src/playbae/playbae.c
+													else
+														# libNeoBAE srcs + songtool.c
+														SRC += src/songtool/songtool.c
+													endif
 												endif
 											endif
 										endif
@@ -652,11 +668,6 @@ ifeq ($(BAESCRIPT),1)
 	endif
 endif
 
-
-ifeq ($(WASM),1)
-	INC_PATH	+= -I../../emsdk/upstream/emscripten/cache/sysroot/include
-	BAE_LIBS	+= -L../../emsdk/upstream/emscripten/cache/sysroot/lib
-endif
 OBJ_DIR 	:= $(BUILD_DIR)obj/
 # Create unique object names by including source directory info for conflicting files
 SRC_UNIQUE := $(SRC)
