@@ -53,7 +53,7 @@ target_include_directories(neobae
 
 target_compile_definitions(neobae
   PUBLIC
-    X_PLATFORM=X_ANSI
+    X_PLATFORM=X_DUMMY
     USE_CREATION_API=1
     USE_ZMF_SUPPORT=1
     USE_LZMA_COMPRESSION=1
