@@ -23,9 +23,10 @@
 static void print_usage(const char *program_name)
 {
     fprintf(stderr,
-            "Usage: %s [options] <source.rmf|source.zmf> <dest.rmf|dest.zmf>\n"
+            "Usage: %s [options] <source.rmf|source.zmf> [dest.rmf|dest.zmf]\n"
             "\n"
             "Options:\n"
+            "  --info               Show source info (title, song length, codecs)\n"
             "  --codec N|NAME        Recompress all samples to codec number/name\n"
             "                        (pcm, adpcm, mp3, vorbis, flac, opus, opus-rt)\n"
             "  --bitrate N           Target bitrate in kbps (or bps) for lossy codecs\n"
@@ -392,6 +393,87 @@ static int apply_compression_to_all_samples(BAERmfEditorDocument *document,
     return 1;
 }
 
+static void print_document_info(BAERmfEditorDocument const *document, const char *sourcePath)
+{
+    const char *title;
+    uint32_t sampleCount;
+    uint32_t songEndTick;
+    uint64_t songLengthMs;
+    uint32_t i;
+    int printedAnyCodec;
+
+    title = BAERmfEditorDocument_GetInfo(document, TITLE_INFO);
+    sampleCount = 0;
+    (void)BAERmfEditorDocument_GetSampleCount(document, &sampleCount);
+
+    songEndTick = get_song_end_tick(document);
+    songLengthMs = 0;
+    if (songEndTick > 0)
+    {
+        (void)song_ticks_to_milliseconds(document, songEndTick, &songLengthMs);
+    }
+
+    printf("Source: %s\n", sourcePath ? sourcePath : "(unknown)");
+    printf("Title: %s\n", (title && title[0]) ? title : "(none)");
+    printf("Song length: %llu ms (%.3f s)\n",
+           (unsigned long long)songLengthMs,
+           (double)songLengthMs / 1000.0);
+    printf("Samples: %u\n", (unsigned)sampleCount);
+    printf("Codecs: ");
+
+    if (sampleCount == 0)
+    {
+        printf("(none)\n");
+        return;
+    }
+
+    printedAnyCodec = 0;
+    for (i = 0; i < sampleCount; ++i)
+    {
+        char codecBuf[96];
+        int isUnique;
+        uint32_t j;
+
+        if (BAERmfEditorDocument_GetSampleCodecDescription(document, i, codecBuf, sizeof(codecBuf)) != BAE_NO_ERROR)
+        {
+            continue;
+        }
+
+        isUnique = 1;
+        for (j = 0; j < i; ++j)
+        {
+            char prevCodecBuf[96];
+            if (BAERmfEditorDocument_GetSampleCodecDescription(document, j, prevCodecBuf, sizeof(prevCodecBuf)) != BAE_NO_ERROR)
+            {
+                continue;
+            }
+            if (strcmp(codecBuf, prevCodecBuf) == 0)
+            {
+                isUnique = 0;
+                break;
+            }
+        }
+
+        if (!isUnique)
+        {
+            continue;
+        }
+
+        if (printedAnyCodec)
+        {
+            printf(", ");
+        }
+        printf("%s", codecBuf);
+        printedAnyCodec = 1;
+    }
+
+    if (!printedAnyCodec)
+    {
+        printf("(unknown)");
+    }
+    printf("\n");
+}
+
 int main(int argc, char *argv[])
 {
     const char *sourcePath;
@@ -401,6 +483,7 @@ int main(int argc, char *argv[])
     Mod2RmfEncoderSettings encoderSettings;
     BAERmfEditorCompressionType compressionType;
     int argi;
+    int doInfo;
     int doCompression;
     int doDisableLoop;
     int doSetLoop;
@@ -412,6 +495,7 @@ int main(int argc, char *argv[])
 
     sourcePath = NULL;
     destPath = NULL;
+    doInfo = 0;
     doCompression = 0;
     doDisableLoop = 0;
     doSetLoop = 0;
@@ -423,7 +507,7 @@ int main(int argc, char *argv[])
 
     mod2rmf_encoder_defaults(&encoderSettings);
 
-    if (argc < 3)
+    if (argc < 2)
     {
         print_usage(argv[0]);
         return 1;
@@ -442,6 +526,11 @@ int main(int argc, char *argv[])
         {
             mod2rmf_encoder_print_codecs();
             return 0;
+        }
+        if (!strcmp(arg, "--info"))
+        {
+            doInfo = 1;
+            continue;
         }
         if (!strcmp(arg, "--codec"))
         {
@@ -559,13 +648,19 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    if (!sourcePath || !destPath)
+    if (!sourcePath)
     {
         print_usage(argv[0]);
         return 1;
     }
 
-    if (!doCompression && !doSetLoop && !doDisableLoop)
+    if (!destPath && !doInfo)
+    {
+        print_usage(argv[0]);
+        return 1;
+    }
+
+    if (!doInfo && !doCompression && !doSetLoop && !doDisableLoop)
     {
         fprintf(stderr, "Error: no operation requested. Use --codec and/or --loop-ms/--disable-loop.\n");
         return 1;
@@ -605,6 +700,18 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Error: failed to load RMF/ZMF: %s\n", sourcePath);
         BAE_Cleanup();
         return 1;
+    }
+
+    if (doInfo)
+    {
+        print_document_info(document, sourcePath);
+    }
+
+    if (!doCompression && !doSetLoop && !doDisableLoop)
+    {
+        BAERmfEditorDocument_Delete(document);
+        BAE_Cleanup();
+        return 0;
     }
 
     if (doCompression)
