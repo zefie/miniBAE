@@ -166,7 +166,7 @@
 #endif
 
 #ifndef _DEBUG
-    #if (X_PLATFORM == X_WIN95) || (X_PLATFORM == X_WIN_HARDWARE) || (X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS) || (X_PLATFORM == X_ANSI) || (X_PLATFORM == X_SDL2) || (X_PLATFORM == X_SDL3)
+    #if (X_PLATFORM == X_WIN95) || (X_PLATFORM == X_WIN_HARDWARE) || (X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS) || (X_PLATFORM == X_ANSI) || (X_PLATFORM == X_DUMMY) || (X_PLATFORM == X_SDL2) || (X_PLATFORM == X_SDL3)
         #define BAE_PRINTF
     #elif __ANDROID__
         #define BAE_PRINTF(...)
@@ -203,7 +203,7 @@
         #define BAE_PRINTF		BAE_STDERR
     #endif
     
-    #if (X_PLATFORM == X_WIN95) || (X_PLATFORM == X_WIN_HARDWARE) || (X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS) || (X_PLATFORM == X_ANSI) || (X_PLATFORM == X_SDL2) || (X_PLATFORM == X_SDL3)
+    #if (X_PLATFORM == X_WIN95) || (X_PLATFORM == X_WIN_HARDWARE) || (X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS) || (X_PLATFORM == X_ANSI) || (X_PLATFORM == X_DUMMY) || (X_PLATFORM == X_SDL2) || (X_PLATFORM == X_SDL3)
         #ifdef ASSERT
             #define BAE_ASSERT(exp)     ASSERT(exp)
             #define BAE_VERIFY(exp)     ASSERT(exp)

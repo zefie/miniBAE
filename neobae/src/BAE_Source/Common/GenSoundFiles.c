@@ -188,20 +188,20 @@
 #include "X_Formats.h"
 #include "X_Assert.h"
 #include "GenSnd.h"
-#if USE_FLAC_DECODER != FALSE
+#if USE_FLAC_DECODER == TRUE
 #include "FLAC/stream_decoder.h"
 #endif
-#if USE_FLAC_ENCODER != FALSE
+#if USE_FLAC_ENCODER == TRUE
 #include "FLAC/stream_encoder.h"
 #endif
-#if USE_VORBIS_DECODER != FALSE || USE_VORBIS_ENCODER != FALSE
+#if USE_VORBIS_DECODER == TRUE || USE_VORBIS_ENCODER == TRUE
 #include <vorbis/codec.h>
 #include <vorbis/vorbisfile.h>
-#if USE_VORBIS_ENCODER != FALSE
+#if USE_VORBIS_ENCODER == TRUE
 #include <vorbis/vorbisenc.h>
 #endif
 #endif
-#if USE_OPUS_DECODER != FALSE
+#if USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE
 #include <opusfile.h>
 #include <opus/opus.h>
 #endif
@@ -214,7 +214,7 @@
     //                  rely on floating point. This needs to be changed in order to
     //                  read AIF files.
 #endif
-#if USE_MPEG_DECODER != FALSE
+#if USE_MPEG_DECODER == TRUE
     #include "XMPEG_BAE_API.h"
 #endif
 

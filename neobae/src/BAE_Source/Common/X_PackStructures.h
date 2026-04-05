@@ -72,7 +72,7 @@
 
 #ifndef X_PACK_FAST
 // controls to enable structure packing by 1 byte
-    #if (X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS) || (X_PLATFORM == X_ANDROID) || (X_PLATFORM == X_ANSI) || (X_PLATFORM == X_WIN95) || (X_PLATFORM == X_SDL2) || (X_PLATFORM == X_SDL3) || (X_PLATFORM == X_WASM) || (X_PLATFORM == X_FOOBAR2000_PLUGIN)
+    #if (X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS) || (X_PLATFORM == X_ANDROID) || (X_PLATFORM == X_ANSI) || (X_PLATFORM == X_DUMMY) || (X_PLATFORM == X_WIN95) || (X_PLATFORM == X_SDL2) || (X_PLATFORM == X_SDL3) || (X_PLATFORM == X_WASM) || (X_PLATFORM == X_FOOBAR2000_PLUGIN)
         
     #if (X_PLATFORM != X_ANDROID) 
         #pragma pack (1)

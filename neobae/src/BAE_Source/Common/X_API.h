@@ -318,6 +318,8 @@
 #define X_SDL3              19      // SDL3
 #define X_ANDROID           20      // Android
 #define X_FOOBAR2000_PLUGIN 21      // foobar2000 plugin
+#define X_WASM              22      // WebAssembly
+#define X_DUMMY             23      // Dummy platform for when mixer isn't needed
 
 // types for CPU_TYPE
 #define k68000              0
