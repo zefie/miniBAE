@@ -15,6 +15,7 @@
 #endif
 
 #define SF2HSB_VOLUME_RANGE 4096
+#define SF2HSB_MAX_PENDING_EXTS 512
 
 static void set_error(char *buf, size_t sz, const char *msg)
 {
@@ -64,6 +65,132 @@ static int32_t tc_to_us(int tc)
     if (us < 1000) us = 1000;
     if (us > 100000000) us = 100000000;
     return us;
+}
+
+static double tc_to_seconds(int tc)
+{
+    if (tc <= -12000) return 0.0;
+    if (tc >= 8000) return 100.0;
+    return pow(2.0, tc / 1200.0);
+}
+
+static int32_t seconds_to_us_clamped(double seconds)
+{
+    double micros;
+
+    if (!(seconds > 0.0)) {
+        return 0;
+    }
+
+    micros = seconds * 1000000.0;
+    if (micros >= 100000000.0) {
+        return 100000000;
+    }
+
+    return (int32_t)(micros + 0.5);
+}
+
+static double linear_amp_decay_time_to_lin_db_decay_time(double secondsToFullAtten)
+{
+    double targetDbLeastSquares = 70.0;
+    double targetDbInitialSlope = 140.0;
+    double ln10;
+    double kShort;
+    double kLong;
+    double tKnee;
+    double p;
+    double x;
+    double w;
+
+    if (secondsToFullAtten <= 0.0) return 0.0;
+
+    ln10 = 2.302585092994046;
+    kShort = targetDbInitialSlope / (20.0 / ln10);
+    kLong  = targetDbLeastSquares * ln10 / 45.0;
+    tKnee = 0.12;
+    p = 2.0;
+
+    x = secondsToFullAtten / tKnee;
+    w = 1.0 / (1.0 + pow(x, p));
+
+    return secondsToFullAtten * (w * kShort + (1.0 - w) * kLong);
+}
+
+static double approximate_linear_amp_decay_seconds(double convertedSeconds)
+{
+    double low;
+    double high;
+    int iteration;
+
+    if (!(convertedSeconds > 0.0)) {
+        return 0.0;
+    }
+
+    low = 0.0;
+    high = convertedSeconds;
+    while (linear_amp_decay_time_to_lin_db_decay_time(high) < convertedSeconds) {
+        low = high;
+        high *= 2.0;
+        if (high >= 60.0) {
+            break;
+        }
+    }
+
+    for (iteration = 0; iteration < 32; ++iteration) {
+        double mid = (low + high) * 0.5;
+        if (linear_amp_decay_time_to_lin_db_decay_time(mid) < convertedSeconds) {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+
+    return high;
+}
+
+static double resolve_attack_seconds_from_sf2_tc(int attackTc)
+{
+    double attackSeconds = tc_to_seconds(attackTc);
+
+    if (!(attackSeconds > 0.0)) {
+        return 0.0;
+    }
+    if (attackSeconds <= 0.050) {
+        return 0.0;
+    }
+    if (attackSeconds <= 0.200) {
+        return attackSeconds * 0.35;
+    }
+
+    return attackSeconds;
+}
+
+static double resolve_decay_seconds_from_sf2_tc(int decayTc, int32_t sustainLevel)
+{
+    double decaySeconds = tc_to_seconds(decayTc);
+
+    if (!(decaySeconds > 0.0)) {
+        return 0.0;
+    }
+    if (sustainLevel <= 4) {
+        return approximate_linear_amp_decay_seconds(decaySeconds);
+    }
+
+    return decaySeconds;
+}
+
+static double resolve_release_seconds_from_sf2_tc(int releaseTc, int32_t sustainLevel)
+{
+    double releaseSeconds = tc_to_seconds(releaseTc);
+
+    if (!(releaseSeconds > 0.0)) {
+        return 0.0;
+    }
+    if (sustainLevel <= 4) {
+        return approximate_linear_amp_decay_seconds(releaseSeconds);
+    }
+
+    return releaseSeconds;
 }
 
 static int32_t cb_to_level4096(int cb)
@@ -211,10 +338,10 @@ static void build_adsr_from_sf2(BAERmfEditorADSRInfo *adsr,
                                 int releaseTc)
 {
     uint32_t st = 0;
-    int32_t attackUs = tc_to_us(attackTc);
+    int32_t attackUs = seconds_to_us_clamped(resolve_attack_seconds_from_sf2_tc(attackTc));
     int32_t holdUs = tc_to_us(holdTc);
-    int32_t decayUs = tc_to_us(decayTc);
-    int32_t releaseUs = tc_to_us(releaseTc);
+    int32_t decayUs = seconds_to_us_clamped(resolve_decay_seconds_from_sf2_tc(decayTc, sustainLevel));
+    int32_t releaseUs = seconds_to_us_clamped(resolve_release_seconds_from_sf2_tc(releaseTc, sustainLevel));
     int32_t delayUs = tc_to_us(delayTc);    
 
     memset(adsr, 0, sizeof(*adsr));
@@ -344,6 +471,113 @@ typedef struct {
     uint32_t assetID;
 } CachedSampleAsset;
 
+typedef struct {
+    uint32_t instID;
+    SF2Zone zone;
+    const char *presetName;
+    int isDrumPreset;
+    int enableSampleAndHold;
+} PendingInstrumentExt;
+
+static int should_enable_sample_and_hold_for_zone(SF2Zone const *zone)
+{
+    int32_t sustainLevel;
+
+    if (!zone) {
+        return 0;
+    }
+
+    sustainLevel = cb_to_level4096(zone->volSustainCb);
+    return ((zone->sampleModes & 0x1) != 0) &&
+           (zone->volSustainCb <= 0 || sustainLevel > (SF2HSB_VOLUME_RANGE / 100));
+}
+
+static int prefer_zone_for_instrument_ext(SF2Zone const *candidate,
+                                          SF2Zone const *current)
+{
+    int32_t candidateSustain;
+    int32_t currentSustain;
+    double candidateHold;
+    double currentHold;
+    double candidateDecay;
+    double currentDecay;
+    double candidateRelease;
+    double currentRelease;
+
+    if (!candidate) {
+        return 0;
+    }
+    if (!current) {
+        return 1;
+    }
+
+    candidateSustain = cb_to_level4096(candidate->volSustainCb);
+    currentSustain = cb_to_level4096(current->volSustainCb);
+    if (candidateSustain != currentSustain) {
+        return candidateSustain > currentSustain;
+    }
+
+    candidateHold = tc_to_seconds(candidate->volHoldTc);
+    currentHold = tc_to_seconds(current->volHoldTc);
+    if (candidateHold != currentHold) {
+        return candidateHold > currentHold;
+    }
+
+    candidateDecay = resolve_decay_seconds_from_sf2_tc(candidate->volDecayTc, candidateSustain);
+    currentDecay = resolve_decay_seconds_from_sf2_tc(current->volDecayTc, currentSustain);
+    if (candidateDecay != currentDecay) {
+        return candidateDecay > currentDecay;
+    }
+
+    candidateRelease = resolve_release_seconds_from_sf2_tc(candidate->volReleaseTc, candidateSustain);
+    currentRelease = resolve_release_seconds_from_sf2_tc(current->volReleaseTc, currentSustain);
+    return candidateRelease > currentRelease;
+}
+
+static BAEResult stage_instrument_ext(PendingInstrumentExt *pendingExts,
+                                      uint32_t *pendingExtCount,
+                                      uint32_t maxPendingExts,
+                                      uint32_t instID,
+                                      SF2Zone const *zone,
+                                      const char *presetName,
+                                      int isDrumPreset)
+{
+    uint32_t i;
+    int enableSampleAndHold;
+
+    if (!pendingExts || !pendingExtCount || !zone) {
+        return BAE_PARAM_ERR;
+    }
+
+    enableSampleAndHold = should_enable_sample_and_hold_for_zone(zone);
+
+    for (i = 0; i < *pendingExtCount; ++i) {
+        if (pendingExts[i].instID != instID) {
+            continue;
+        }
+
+        if (prefer_zone_for_instrument_ext(zone, &pendingExts[i].zone)) {
+            pendingExts[i].zone = *zone;
+            pendingExts[i].presetName = presetName;
+            pendingExts[i].isDrumPreset = isDrumPreset;
+        }
+        pendingExts[i].enableSampleAndHold = pendingExts[i].enableSampleAndHold || enableSampleAndHold;
+        return BAE_NO_ERROR;
+    }
+
+    if (*pendingExtCount >= maxPendingExts) {
+        return BAE_MEMORY_ERR;
+    }
+
+    pendingExts[*pendingExtCount].instID = instID;
+    pendingExts[*pendingExtCount].zone = *zone;
+    pendingExts[*pendingExtCount].presetName = presetName;
+    pendingExts[*pendingExtCount].isDrumPreset = isDrumPreset;
+    pendingExts[*pendingExtCount].enableSampleAndHold = enableSampleAndHold;
+    (*pendingExtCount)++;
+    return BAE_NO_ERROR;
+}
+
 static int sample_cache_find(CachedSampleAsset const *cache,
                              uint32_t cacheCount,
                              int sampleIdx,
@@ -431,12 +665,13 @@ static BAEResult ensure_conductor_track(BAERmfEditorDocument *document)
 static BAEResult apply_ext_info_for_zone(BAERmfEditorDocument *document,
                                          uint32_t instID,
                                          SF2Zone const *zone,
-                                         int rootKey,
                                          const char *presetName,
-                                         int isDrumPreset)
+                                         int isDrumPreset,
+                                         int enableSampleAndHold)
 {
     BAEResult result;
     BAERmfEditorInstrumentExtInfo ext;
+    int32_t sustainLevel;
 
     memset(&ext, 0, sizeof(ext));
     result = BAERmfEditorDocument_GetInstrumentExtInfo(document, instID, &ext);
@@ -447,12 +682,17 @@ static BAEResult apply_ext_info_for_zone(BAERmfEditorDocument *document,
     ext.instID = instID;
     ext.displayName = (char *)presetName;
     ext.hasExtendedData = TRUE;
+    sustainLevel = cb_to_level4096(zone->volSustainCb);
     /*
     if (isDrumPreset) {
         ext.flags2 |= ZBF_playAtSampledFreq;
     }
     */
-    ext.flags1 |= ZBF_sampleAndHold;
+    if (enableSampleAndHold) {
+        ext.flags1 |= ZBF_sampleAndHold;
+    } else {
+        ext.flags1 &= (unsigned char)~ZBF_sampleAndHold;
+    }
     if ((zone->sampleModes & 0x1) != 0) {
         uint32_t reason = 0;
         if (BAERmfEditorDocument_RequiresZmf(document, &reason)) {
@@ -490,7 +730,7 @@ static BAEResult apply_ext_info_for_zone(BAERmfEditorDocument *document,
                         zone->volAttackTc,
                         zone->volHoldTc,
                         zone->volDecayTc,
-                        cb_to_level4096(zone->volSustainCb),
+                        sustainLevel,
                         zone->volReleaseTc);
 
     /* LFOs */
@@ -620,6 +860,8 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
     CachedSampleAsset *sampleCache;
     uint32_t sampleCacheCount;
     uint32_t sampleCacheCap;
+    PendingInstrumentExt pendingExts[SF2HSB_MAX_PENDING_EXTS];
+    uint32_t pendingExtCount;
 
     memset(&localReport, 0, sizeof(localReport));
     document = NULL;
@@ -688,6 +930,7 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
     sampleCache = NULL;
     sampleCacheCount = 0;
     sampleCacheCap = 0;
+    pendingExtCount = 0;
     firstDrumPreset = 0xFFFFu;
     secondDrumPreset = 0xFFFFu;
 
@@ -1051,9 +1294,15 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
                 return result;
             }
 
-            result = apply_ext_info_for_zone(document, zoneInstID, zone, rootKey, preset->name, isDrumPreset);
+            result = stage_instrument_ext(pendingExts,
+                                          &pendingExtCount,
+                                          SF2HSB_MAX_PENDING_EXTS,
+                                          zoneInstID,
+                                          zone,
+                                          preset->name,
+                                          isDrumPreset);
             if (result != BAE_NO_ERROR) {
-                set_error(errorBuffer, errorBufferSize, "Failed to set instrument ADSR/LFO extension data.");
+                set_error(errorBuffer, errorBufferSize, "Failed to stage instrument ADSR/LFO extension data.");
                 free(zones);
                 free(sampleCache);
                 BAERmfEditorDocument_Delete(document);
@@ -1065,6 +1314,22 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
         }
 
         free(zones);
+    }
+
+    for (i = 0; i < pendingExtCount; ++i) {
+        result = apply_ext_info_for_zone(document,
+                                         pendingExts[i].instID,
+                                         &pendingExts[i].zone,
+                                         pendingExts[i].presetName,
+                                         pendingExts[i].isDrumPreset,
+                                         pendingExts[i].enableSampleAndHold);
+        if (result != BAE_NO_ERROR) {
+            set_error(errorBuffer, errorBufferSize, "Failed to apply staged instrument ADSR/LFO extension data.");
+            free(sampleCache);
+            BAERmfEditorDocument_Delete(document);
+            SF2Bank_Free(sf2Ptr);
+            return result;
+        }
     }
 
     printf("Serializing authored document to HSB format...\n");
