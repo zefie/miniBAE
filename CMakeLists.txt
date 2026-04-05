@@ -1,5 +1,5 @@
 add_library(neobae STATIC
-  neobae/src/BAE_Source/Platform/BAE_API_Ansi.c
+  neobae/src/BAE_Source/Platform/BAE_API_Dummy.c
   neobae/src/BAE_Source/Common/DriverTools.c
   neobae/src/BAE_Source/Common/GenAudioStreams.c
   neobae/src/BAE_Source/Common/GenCache.c
