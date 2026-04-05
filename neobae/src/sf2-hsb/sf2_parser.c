@@ -239,10 +239,12 @@ static int parse_gens(SF2Gen **dst, uint32_t *dstCount,
 
 /* ---------- Public API ---------- */
 
-int SF2Bank_Load(const char *path, SF2Bank *bank, char *errorBuf, size_t errorBufSize)
+static int SF2Bank_LoadOwnedData(const uint8_t *sourceData,
+                                 size_t fileSize,
+                                 SF2Bank *bank,
+                                 char *errorBuf,
+                                 size_t errorBufSize)
 {
-    FILE    *fp;
-    size_t   fileSize;
     uint8_t *fileData;
     size_t   pdtaStart, pdtaRemaining;
     size_t   sdtaStart, sdtaRemaining;
@@ -251,36 +253,18 @@ int SF2Bank_Load(const char *path, SF2Bank *bank, char *errorBuf, size_t errorBu
 
     memset(bank, 0, sizeof(*bank));
 
-    fp = fopen(path, "rb");
-    if (!fp) {
-        set_error(errorBuf, errorBufSize, "Cannot open input file");
-        return -1;
-    }
-
-    fseek(fp, 0, SEEK_END);
-    fileSize = (size_t)ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-
     if (fileSize < 12) {
-        fclose(fp);
         set_error(errorBuf, errorBufSize, "File too small to be a valid SF2");
         return -1;
     }
 
     fileData = malloc(fileSize);
     if (!fileData) {
-        fclose(fp);
         set_error(errorBuf, errorBufSize, "Out of memory reading SF2");
         return -1;
     }
 
-    if (fread(fileData, 1, fileSize, fp) != fileSize) {
-        fclose(fp);
-        free(fileData);
-        set_error(errorBuf, errorBufSize, "Read error on SF2 file");
-        return -1;
-    }
-    fclose(fp);
+    memcpy(fileData, sourceData, fileSize);
 
     /* Verify RIFF sfbk header */
     if (!fcc_eq(fileData, "RIFF") || !fcc_eq(fileData + 8, "sfbk")) {
@@ -371,6 +355,61 @@ cleanup:
         return -1;
     }
     return 0;
+}
+
+int SF2Bank_Load(const char *path, SF2Bank *bank, char *errorBuf, size_t errorBufSize)
+{
+    FILE    *fp;
+    size_t   fileSize;
+    uint8_t *fileData;
+    int      result;
+
+    fp = fopen(path, "rb");
+    if (!fp) {
+        set_error(errorBuf, errorBufSize, "Cannot open input file");
+        return -1;
+    }
+
+    fseek(fp, 0, SEEK_END);
+    fileSize = (size_t)ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+
+    if (fileSize < 12) {
+        fclose(fp);
+        set_error(errorBuf, errorBufSize, "File too small to be a valid SF2");
+        return -1;
+    }
+
+    fileData = malloc(fileSize);
+    if (!fileData) {
+        fclose(fp);
+        set_error(errorBuf, errorBufSize, "Out of memory reading SF2");
+        return -1;
+    }
+
+    if (fread(fileData, 1, fileSize, fp) != fileSize) {
+        fclose(fp);
+        free(fileData);
+        set_error(errorBuf, errorBufSize, "Read error on SF2 file");
+        return -1;
+    }
+    fclose(fp);
+
+    result = SF2Bank_LoadOwnedData(fileData, fileSize, bank, errorBuf, errorBufSize);
+    free(fileData);
+    return result;
+}
+
+int SF2Bank_LoadMemory(const void *data, size_t dataSize,
+                       SF2Bank *bank,
+                       char *errorBuf, size_t errorBufSize)
+{
+    if (!data || !bank) {
+        set_error(errorBuf, errorBufSize, "Invalid in-memory SF2 input");
+        return -1;
+    }
+
+    return SF2Bank_LoadOwnedData((const uint8_t *)data, dataSize, bank, errorBuf, errorBufSize);
 }
 
 void SF2Bank_Free(SF2Bank *bank)

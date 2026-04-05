@@ -38,12 +38,16 @@ add_library(neobae STATIC
   neobae/src/BAE_Source/Common/sha1mini.c
   neobae/src/BAE_Source/Common/XFileTypes.c
   neobae/src/BAE_Source/Common/BAERmfEditor.c
+  neobae/src/sf2-hsb/hsb_writer.c
+  neobae/src/sf2-hsb/sf2_hsb_converter.c
+  neobae/src/sf2-hsb/sf2_parser.c
 )
 
 target_include_directories(neobae
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Common
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Platform
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/sf2-hsb
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/config
 )
 

@@ -459,15 +459,16 @@ static BAEResult apply_ext_info_for_zone(BAERmfEditorDocument *document,
     return BAERmfEditorDocument_SetInstrumentExtInfo(document, instID, &ext);
 }
 
-BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
-                                 const char *inputPath,
-                                 const char *outputPath,
-                                 const SF2HSBConvertOptions *options,
-                                 SF2HSBConvertReport *report,
-                                 char *errorBuffer,
-                                 size_t errorBufferSize)
+static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
+                                          SF2Bank *sf2Ptr,
+                                          const char *outputPath,
+                                          const SF2HSBConvertOptions *options,
+                                          SF2HSBConvertReport *report,
+                                          char *errorBuffer,
+                                          size_t errorBufferSize,
+                                          unsigned char **outBankData,
+                                          uint32_t *outBankSize)
 {
-    SF2Bank sf2;
     BAERmfEditorDocument *document;
     BAEBankToken bankToken;
     SF2HSBConvertOptions localOptions;
@@ -482,20 +483,21 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
     uint32_t sampleCacheCount;
     uint32_t sampleCacheCap;
 
-    memset(&sf2, 0, sizeof(sf2));
     memset(&localReport, 0, sizeof(localReport));
     document = NULL;
     bankToken = NULL;
     rmfData = NULL;
 
-    if (!mixer || !inputPath || !options) {
-        set_error(errorBuffer, errorBufferSize, "Invalid converter arguments.");
-        return BAE_PARAM_ERR;
+    if (outBankData) {
+        *outBankData = NULL;
+    }
+    if (outBankSize) {
+        *outBankSize = 0;
     }
 
-    if (!ends_with_ci(inputPath, ".sf2")) {
-        set_error(errorBuffer, errorBufferSize, "Input file must have .sf2 extension.");
-        return BAE_BAD_FILE;
+    if (!mixer || !sf2Ptr || !options) {
+        set_error(errorBuffer, errorBufferSize, "Invalid converter arguments.");
+        return BAE_PARAM_ERR;
     }
 
     localOptions = *options;
@@ -505,39 +507,31 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
         return BAE_PARAM_ERR;
     }
 
-    if (!localOptions.dryRun) {
-        if (!outputPath) {
-            set_error(errorBuffer, errorBufferSize, "Output path is required unless --dry-run is used.");
-            return BAE_PARAM_ERR;
-        }
+    if (!localOptions.dryRun && !outputPath && !(outBankData && outBankSize)) {
+        set_error(errorBuffer, errorBufferSize, "Either an output path or in-memory output buffer is required unless --dry-run is used.");
+        return BAE_PARAM_ERR;
+    }
+
+    if (!localOptions.dryRun && outputPath != NULL) {
         if (!ends_with_ci(outputPath, ".hsb") && !ends_with_ci(outputPath, ".zsb")) {
             set_error(errorBuffer, errorBufferSize, "Output file must end in .hsb or .zsb.");
             return BAE_PARAM_ERR;
         }
     }
 
-    {
-        char parseError[256];
-        parseError[0] = '\0';
-        if (SF2Bank_Load(inputPath, &sf2, parseError, sizeof(parseError)) < 0) {
-            set_error(errorBuffer, errorBufferSize, parseError[0] ? parseError : "Failed to parse SF2 file.");
-            return BAE_BAD_FILE;
-        }
-    }
-
-    localReport.presetCount = sf2.presetCount;
+    localReport.presetCount = sf2Ptr->presetCount;
 
     if (localOptions.dryRun) {
-        localReport.sampleCount = sf2.sampleCount;
+        localReport.sampleCount = sf2Ptr->sampleCount;
         if (report) *report = localReport;
-        SF2Bank_Free(&sf2);
+        SF2Bank_Free(sf2Ptr);
         return BAE_NO_ERROR;
     }
 
     document = BAERmfEditorDocument_New();
     if (!document) {
         set_error(errorBuffer, errorBufferSize, "Failed to create RMF authoring document.");
-        SF2Bank_Free(&sf2);
+        SF2Bank_Free(sf2Ptr);
         return BAE_MEMORY_ERR;
     }
 
@@ -549,7 +543,7 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
     if (result != BAE_NO_ERROR) {
         set_error(errorBuffer, errorBufferSize, "Failed to initialize document track state.");
         BAERmfEditorDocument_Delete(document);
-        SF2Bank_Free(&sf2);
+        SF2Bank_Free(sf2Ptr);
         return result;
     }
 
@@ -559,8 +553,8 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
     firstDrumPreset = 0xFFFFu;
     secondDrumPreset = 0xFFFFu;
 
-    for (i = 0; i < sf2.presetCount; ++i) {
-        SF2PresetHdr const *preset = &sf2.presets[i];
+    for (i = 0; i < sf2Ptr->presetCount; ++i) {
+        SF2PresetHdr const *preset = &sf2Ptr->presets[i];
         SF2Zone *zones = NULL;
         uint32_t zoneCount = 0;
         uint32_t outInstID;
@@ -581,7 +575,7 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
             continue;
         }
 
-        if (SF2Bank_GetPresetZones(&sf2, i, &zones, &zoneCount) < 0 || zoneCount == 0) {
+        if (SF2Bank_GetPresetZones(sf2Ptr, i, &zones, &zoneCount) < 0 || zoneCount == 0) {
             localReport.skippedCount++;
             free(zones);
             continue;
@@ -631,11 +625,11 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
             BAEResult cacheResult;
             int32_t finalStart, finalEnd, finalLoopStart, finalLoopEnd;
 
-            if (zone->sampleIdx < 0 || (uint32_t)zone->sampleIdx >= sf2.sampleCount) {
+            if (zone->sampleIdx < 0 || (uint32_t)zone->sampleIdx >= sf2Ptr->sampleCount) {
                 continue;
             }
 
-            sample = &sf2.samples[zone->sampleIdx];
+            sample = &sf2Ptr->samples[zone->sampleIdx];
 
             finalStart = (int32_t)sample->start + zone->startAddrsOffset + (zone->startAddrsCoarse * 32768);
             finalEnd = (int32_t)sample->end + zone->endAddrsOffset + (zone->endAddrsCoarse * 32768);
@@ -643,9 +637,9 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
             finalLoopEnd = (int32_t)sample->loopEnd + zone->endloopAddrsOffset + (zone->endloopAddrsCoarse * 32768);
 
             if (finalStart < 0) finalStart = 0;
-            if (finalStart * 2u > sf2.smplSize) finalStart = sf2.smplSize / 2u;
+            if (finalStart * 2u > sf2Ptr->smplSize) finalStart = sf2Ptr->smplSize / 2u;
             if (finalEnd < finalStart) finalEnd = finalStart;
-            if (finalEnd * 2u > sf2.smplSize) finalEnd = sf2.smplSize / 2u;
+            if (finalEnd * 2u > sf2Ptr->smplSize) finalEnd = sf2Ptr->smplSize / 2u;
             
             frameCount = (uint32_t)(finalEnd - finalStart);
             if (frameCount == 0) {
@@ -720,7 +714,7 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
                 free(zones);
                 free(sampleCache);
                 BAERmfEditorDocument_Delete(document);
-                SF2Bank_Free(&sf2);
+                SF2Bank_Free(sf2Ptr);
                 return result;
             }
 
@@ -730,7 +724,7 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
                 free(zones);
                 free(sampleCache);
                 BAERmfEditorDocument_Delete(document);
-                SF2Bank_Free(&sf2);
+                SF2Bank_Free(sf2Ptr);
                 return result;
             }
 
@@ -746,7 +740,7 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
                     free(zones);
                     free(sampleCache);
                     BAERmfEditorDocument_Delete(document);
-                    SF2Bank_Free(&sf2);
+                    SF2Bank_Free(sf2Ptr);
                     return result;
                 }
 
@@ -759,7 +753,7 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
                     free(zones);
                     free(sampleCache);
                     BAERmfEditorDocument_Delete(document);
-                    SF2Bank_Free(&sf2);
+                    SF2Bank_Free(sf2Ptr);
                     return result;
                 }
 
@@ -770,7 +764,7 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
                     free(zones);
                     free(sampleCache);
                     BAERmfEditorDocument_Delete(document);
-                    SF2Bank_Free(&sf2);
+                    SF2Bank_Free(sf2Ptr);
                     return result;
                 }
 
@@ -782,11 +776,11 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
                     free(zones);
                     free(sampleCache);
                     BAERmfEditorDocument_Delete(document);
-                    SF2Bank_Free(&sf2);
+                    SF2Bank_Free(sf2Ptr);
                     return result;
                 }
             } else {
-                pcmData = sf2.smplData + ((uint32_t)finalStart * 2u);
+                pcmData = sf2Ptr->smplData + ((uint32_t)finalStart * 2u);
                 result = BAERmfEditorDocument_ReplaceSampleFromPCM(document,
                                                                    sampleIndex,
                                                                    pcmData,
@@ -802,7 +796,7 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
                     free(zones);
                     free(sampleCache);
                     BAERmfEditorDocument_Delete(document);
-                    SF2Bank_Free(&sf2);
+                    SF2Bank_Free(sf2Ptr);
                     return result;
                 }
 
@@ -812,7 +806,7 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
                     free(zones);
                     free(sampleCache);
                     BAERmfEditorDocument_Delete(document);
-                    SF2Bank_Free(&sf2);
+                    SF2Bank_Free(sf2Ptr);
                     return result;
                 }
 
@@ -828,7 +822,7 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
                     free(zones);
                     free(sampleCache);
                     BAERmfEditorDocument_Delete(document);
-                    SF2Bank_Free(&sf2);
+                    SF2Bank_Free(sf2Ptr);
                     return cacheResult;
                 }
 
@@ -838,7 +832,7 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
                     free(zones);
                     free(sampleCache);
                     BAERmfEditorDocument_Delete(document);
-                    SF2Bank_Free(&sf2);
+                    SF2Bank_Free(sf2Ptr);
                     return BAE_TOO_MANY_SAMPLES;
                 }
 
@@ -848,7 +842,7 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
                     free(zones);
                     free(sampleCache);
                     BAERmfEditorDocument_Delete(document);
-                    SF2Bank_Free(&sf2);
+                    SF2Bank_Free(sf2Ptr);
                     return result;
                 }
             }
@@ -881,7 +875,7 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
                 free(zones);
                 free(sampleCache);
                 BAERmfEditorDocument_Delete(document);
-                SF2Bank_Free(&sf2);
+                SF2Bank_Free(sf2Ptr);
                 return result;
             }
 
@@ -891,7 +885,7 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
                 free(zones);
                 free(sampleCache);
                 BAERmfEditorDocument_Delete(document);
-                SF2Bank_Free(&sf2);
+                SF2Bank_Free(sf2Ptr);
                 return result;
             }
             } /* end per-key split loop */
@@ -910,7 +904,7 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
         set_error(errorBuffer, errorBufferSize, "Failed to serialize authored document.");
         free(sampleCache);
         BAERmfEditorDocument_Delete(document);
-        SF2Bank_Free(&sf2);
+        SF2Bank_Free(sf2Ptr);
         return result;
     }
 
@@ -921,31 +915,119 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
         free(sampleCache);
         BAERmfEditorDocument_Delete(document);
         XDisposePtr((XPTR)rmfData);
-        SF2Bank_Free(&sf2);
+        SF2Bank_Free(sf2Ptr);
         return result;
     }
 
-    printf("Saving serialized bank to output path...\n");
-    result = BAERmfEditorBank_SaveToFile(bankToken, (BAEPathName)outputPath);
-    if (result != BAE_NO_ERROR) {
-        set_error(errorBuffer, errorBufferSize, "Failed to save converted bank to output path.");
-        free(sampleCache);
-        BAEMixer_UnloadBank(mixer, bankToken);
-        BAERmfEditorDocument_Delete(document);
-        XDisposePtr((XPTR)rmfData);
-        SF2Bank_Free(&sf2);
-        return result;
+    if (outBankData && outBankSize) {
+        *outBankData = rmfData;
+        *outBankSize = rmfSize;
+        rmfData = NULL;
+    }
+    else {
+        printf("Saving serialized bank to output path...\n");
+        result = BAERmfEditorBank_SaveToFile(bankToken, (BAEPathName)outputPath);
+        if (result != BAE_NO_ERROR) {
+            set_error(errorBuffer, errorBufferSize, "Failed to save converted bank to output path.");
+            free(sampleCache);
+            BAEMixer_UnloadBank(mixer, bankToken);
+            BAERmfEditorDocument_Delete(document);
+            XDisposePtr((XPTR)rmfData);
+            SF2Bank_Free(sf2Ptr);
+            return result;
+        }
     }
 
     free(sampleCache);
     BAEMixer_UnloadBank(mixer, bankToken);
     BAERmfEditorDocument_Delete(document);
     XDisposePtr((XPTR)rmfData);
-    SF2Bank_Free(&sf2);
+    SF2Bank_Free(sf2Ptr);
 
     if (report) {
         *report = localReport;
     }
 
     return BAE_NO_ERROR;
+}
+
+BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
+                                 const char *inputPath,
+                                 const char *outputPath,
+                                 const SF2HSBConvertOptions *options,
+                                 SF2HSBConvertReport *report,
+                                 char *errorBuffer,
+                                 size_t errorBufferSize)
+{
+    SF2Bank sf2;
+
+    memset(&sf2, 0, sizeof(sf2));
+
+    if (!inputPath) {
+        set_error(errorBuffer, errorBufferSize, "Invalid converter arguments.");
+        return BAE_PARAM_ERR;
+    }
+
+    if (!ends_with_ci(inputPath, ".sf2")) {
+        set_error(errorBuffer, errorBufferSize, "Input file must have .sf2 extension.");
+        return BAE_BAD_FILE;
+    }
+
+    {
+        char parseError[256];
+        parseError[0] = '\0';
+        if (SF2Bank_Load(inputPath, &sf2, parseError, sizeof(parseError)) < 0) {
+            set_error(errorBuffer, errorBufferSize, parseError[0] ? parseError : "Failed to parse SF2 file.");
+            return BAE_BAD_FILE;
+        }
+    }
+
+    return SF2HSB_ConvertParsedBank(mixer,
+                                    &sf2,
+                                    outputPath,
+                                    options,
+                                    report,
+                                    errorBuffer,
+                                    errorBufferSize,
+                                    NULL,
+                                    NULL);
+}
+
+BAEResult SF2HSB_ConvertBankMemory(BAEMixer mixer,
+                                   const void *inputData,
+                                   size_t inputSize,
+                                   const SF2HSBConvertOptions *options,
+                                   SF2HSBConvertReport *report,
+                                   char *errorBuffer,
+                                   size_t errorBufferSize,
+                                   unsigned char **outBankData,
+                                   uint32_t *outBankSize)
+{
+    SF2Bank sf2;
+
+    memset(&sf2, 0, sizeof(sf2));
+
+    if (!inputData || inputSize == 0) {
+        set_error(errorBuffer, errorBufferSize, "Invalid in-memory SF2 input.");
+        return BAE_PARAM_ERR;
+    }
+
+    {
+        char parseError[256];
+        parseError[0] = '\0';
+        if (SF2Bank_LoadMemory(inputData, inputSize, &sf2, parseError, sizeof(parseError)) < 0) {
+            set_error(errorBuffer, errorBufferSize, parseError[0] ? parseError : "Failed to parse in-memory SF2 data.");
+            return BAE_BAD_FILE;
+        }
+    }
+
+    return SF2HSB_ConvertParsedBank(mixer,
+                                    &sf2,
+                                    NULL,
+                                    options,
+                                    report,
+                                    errorBuffer,
+                                    errorBufferSize,
+                                    outBankData,
+                                    outBankSize);
 }

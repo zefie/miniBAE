@@ -34,6 +34,18 @@ BAEResult SF2HSB_ConvertBankFile(BAEMixer mixer,
                                  char *errorBuffer,
                                  size_t errorBufferSize);
 
+/* Convert an SF2 bank already in memory into Beatnik bank bytes kept in memory.
+ * The returned data must be released with XDisposePtr when no longer needed. */
+BAEResult SF2HSB_ConvertBankMemory(BAEMixer mixer,
+                                   const void *inputData,
+                                   size_t inputSize,
+                                   const SF2HSBConvertOptions *options,
+                                   SF2HSBConvertReport *report,
+                                   char *errorBuffer,
+                                   size_t errorBufferSize,
+                                   unsigned char **outBankData,
+                                   uint32_t *outBankSize);
+
 #ifdef __cplusplus
 }
 #endif

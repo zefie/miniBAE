@@ -223,6 +223,12 @@ typedef struct {
 int SF2Bank_Load(const char *path, SF2Bank *bank,
                  char *errorBuf, size_t errorBufSize);
 
+/* Load an SF2 file from an in-memory buffer into *bank. Returns 0 on success, -1 on error.
+ * The input data is copied so the caller retains ownership of the source buffer. */
+int SF2Bank_LoadMemory(const void *data, size_t dataSize,
+                       SF2Bank *bank,
+                       char *errorBuf, size_t errorBufSize);
+
 /* Free all memory owned by *bank.  Safe to call on a zero-initialised struct. */
 void SF2Bank_Free(SF2Bank *bank);
 
