@@ -92,6 +92,116 @@ static int32_t pm_to_level4096(int pm)
     return (SF2HSB_VOLUME_RANGE * (1000 - clamped)) / 1000;
 }
 
+static int16_t rd_s16le(const uint8_t *p)
+{
+    return (int16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
+}
+
+static uint64_t score_loop_boundary_mono(const uint8_t *pcmData,
+                                         uint32_t frameCount,
+                                         uint32_t loopStart,
+                                         uint32_t loopEnd)
+{
+    uint32_t lastFrame;
+    uint32_t prevLastFrame;
+    uint32_t nextFrame;
+    int16_t first;
+    int16_t last;
+    int16_t prevLast;
+    int16_t next;
+    uint64_t ampJump;
+    long long slopeLeft;
+    long long slopeRight;
+    uint64_t slopeJump;
+
+    if (!pcmData || frameCount < 3 || loopEnd <= loopStart + 1 || loopEnd > frameCount) {
+        return (uint64_t)-1;
+    }
+
+    lastFrame = loopEnd - 1;
+    prevLastFrame = loopEnd - 2;
+    nextFrame = (loopStart + 1 < loopEnd) ? (loopStart + 1) : loopStart;
+
+    first = rd_s16le(pcmData + (loopStart * 2u));
+    last = rd_s16le(pcmData + (lastFrame * 2u));
+    prevLast = rd_s16le(pcmData + (prevLastFrame * 2u));
+    next = rd_s16le(pcmData + (nextFrame * 2u));
+
+    ampJump = (uint64_t)llabs((long long)last - (long long)first);
+    slopeLeft = (long long)last - (long long)prevLast;
+    slopeRight = (long long)next - (long long)first;
+    slopeJump = (uint64_t)llabs(slopeLeft - slopeRight);
+
+    return (ampJump * 4u) + slopeJump;
+}
+
+static void refine_loop_points_from_pcm(const uint8_t *pcmData,
+                                        uint32_t frameCount,
+                                        int32_t *ioLoopStart,
+                                        int32_t *ioLoopEnd)
+{
+    uint32_t baseStart;
+    uint32_t baseEnd;
+    uint32_t loopLength;
+    uint32_t bestStart;
+    uint32_t bestEnd;
+    uint64_t bestScore;
+    int delta;
+
+    if (!pcmData || !ioLoopStart || !ioLoopEnd) {
+        return;
+    }
+    if (*ioLoopStart < 0 || *ioLoopEnd <= *ioLoopStart || (uint32_t)*ioLoopEnd > frameCount || frameCount < 3) {
+        return;
+    }
+
+    baseStart = (uint32_t)*ioLoopStart;
+    baseEnd = (uint32_t)*ioLoopEnd;
+    if (baseEnd <= baseStart + 2) {
+        return;
+    }
+
+    loopLength = baseEnd - baseStart;
+    bestStart = baseStart;
+    bestEnd = baseEnd;
+    bestScore = score_loop_boundary_mono(pcmData, frameCount, baseStart, baseEnd);
+
+    if (baseEnd > baseStart + 2) {
+        uint64_t endMinusOneScore = score_loop_boundary_mono(pcmData, frameCount, baseStart, baseEnd - 1);
+        if (endMinusOneScore < bestScore) {
+            bestScore = endMinusOneScore;
+            bestEnd = baseEnd - 1;
+        }
+    }
+
+    for (delta = -32; delta <= 32; ++delta) {
+        long long shiftedStartLL = (long long)baseStart + (long long)delta;
+        uint32_t shiftedStart;
+        uint32_t shiftedEnd;
+        uint64_t score;
+
+        if (shiftedStartLL < 0) {
+            continue;
+        }
+
+        shiftedStart = (uint32_t)shiftedStartLL;
+        shiftedEnd = shiftedStart + loopLength;
+        if (shiftedEnd > frameCount || shiftedEnd <= shiftedStart + 1) {
+            continue;
+        }
+
+        score = score_loop_boundary_mono(pcmData, frameCount, shiftedStart, shiftedEnd);
+        if (score < bestScore) {
+            bestScore = score;
+            bestStart = shiftedStart;
+            bestEnd = shiftedEnd;
+        }
+    }
+
+    *ioLoopStart = (int32_t)bestStart;
+    *ioLoopEnd = (int32_t)bestEnd;
+}
+
 static void build_adsr_from_sf2(BAERmfEditorADSRInfo *adsr,
                                 int delayTc,
                                 int attackTc,
@@ -225,23 +335,35 @@ static uint32_t sf2_drum_note_to_inst_id(int drumKitSlot, int note)
 
 typedef struct {
     int sampleIdx;
+    uint32_t frameStart;
+    uint32_t frameCount;
     uint32_t sampleRateFixed;
     int rootKey;
+    uint32_t loopStart;
+    uint32_t loopEnd;
     uint32_t assetID;
 } CachedSampleAsset;
 
 static int sample_cache_find(CachedSampleAsset const *cache,
                              uint32_t cacheCount,
                              int sampleIdx,
+                             uint32_t frameStart,
+                             uint32_t frameCount,
                              uint32_t sampleRateFixed,
                              int rootKey,
+                             uint32_t loopStart,
+                             uint32_t loopEnd,
                              uint32_t *outAssetID)
 {
     uint32_t i;
     for (i = 0; i < cacheCount; ++i) {
         if (cache[i].sampleIdx == sampleIdx &&
+            cache[i].frameStart == frameStart &&
+            cache[i].frameCount == frameCount &&
             cache[i].sampleRateFixed == sampleRateFixed &&
-            cache[i].rootKey == rootKey) {
+            cache[i].rootKey == rootKey &&
+            cache[i].loopStart == loopStart &&
+            cache[i].loopEnd == loopEnd) {
             *outAssetID = cache[i].assetID;
             return 1;
         }
@@ -253,8 +375,12 @@ static BAEResult sample_cache_add(CachedSampleAsset **cache,
                                   uint32_t *cacheCount,
                                   uint32_t *cacheCap,
                                   int sampleIdx,
+                                  uint32_t frameStart,
+                                  uint32_t frameCount,
                                   uint32_t sampleRateFixed,
                                   int rootKey,
+                                  uint32_t loopStart,
+                                  uint32_t loopEnd,
                                   uint32_t assetID)
 {
     CachedSampleAsset *grown;
@@ -270,8 +396,12 @@ static BAEResult sample_cache_add(CachedSampleAsset **cache,
     }
 
     (*cache)[*cacheCount].sampleIdx = sampleIdx;
+    (*cache)[*cacheCount].frameStart = frameStart;
+    (*cache)[*cacheCount].frameCount = frameCount;
     (*cache)[*cacheCount].sampleRateFixed = sampleRateFixed;
     (*cache)[*cacheCount].rootKey = rootKey;
+    (*cache)[*cacheCount].loopStart = loopStart;
+    (*cache)[*cacheCount].loopEnd = loopEnd;
     (*cache)[*cacheCount].assetID = assetID;
     (*cacheCount)++;
 
@@ -323,6 +453,14 @@ static BAEResult apply_ext_info_for_zone(BAERmfEditorDocument *document,
     }
     */
     ext.flags1 |= ZBF_sampleAndHold;
+    if ((zone->sampleModes & 0x1) != 0) {
+        uint32_t reason = 0;
+        if (BAERmfEditorDocument_RequiresZmf(document, &reason)) {
+            ext.flags2 |= ZBF_advancedInterpolation;
+        } else {
+            ext.flags2 &= (unsigned char)~ZBF_advancedInterpolation;
+        }
+    }
     ext.midiRootKey = 60; /* Master root key should always be 60; individual splits handle their own rootKey */
     ext.panPlacement = (char)sf2_pan_to_inst_pan(zone->pan);
     ext.miscParameter2 = cb_to_split_volume(zone->initialAttenuation);
@@ -622,8 +760,10 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
             uint32_t assetID;
             uint32_t assetSampleIndex;
             const void *pcmData;
+            const uint8_t *pcmBytes;
             BAEResult cacheResult;
             int32_t finalStart, finalEnd, finalLoopStart, finalLoopEnd;
+            int32_t localLoopStart, localLoopEnd;
 
             if (zone->sampleIdx < 0 || (uint32_t)zone->sampleIdx >= sf2Ptr->sampleCount) {
                 continue;
@@ -645,6 +785,30 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
             if (frameCount == 0) {
                 continue;
             }
+
+            localLoopStart = (finalLoopStart > finalStart) ? (finalLoopStart - finalStart) : 0;
+            localLoopEnd = (finalLoopEnd > finalStart) ? (finalLoopEnd - finalStart) : 0;
+            if ((zone->sampleModes & 0x1) == 0 || localLoopEnd <= localLoopStart) {
+                localLoopStart = 0;
+                localLoopEnd = 0;
+            } else {
+                if ((uint32_t)localLoopEnd > frameCount) {
+                    localLoopEnd = (int32_t)frameCount;
+                }
+                if ((uint32_t)localLoopStart >= frameCount || localLoopEnd <= localLoopStart) {
+                    localLoopStart = 0;
+                    localLoopEnd = 0;
+                }
+            }
+
+            if (localLoopEnd > localLoopStart) {
+                pcmBytes = sf2Ptr->smplData + ((uint32_t)finalStart * 2u);
+                refine_loop_points_from_pcm(pcmBytes,
+                                            frameCount,
+                                            &localLoopStart,
+                                            &localLoopEnd);
+            }
+
             {
                 double baseRate = (double)sample->sampleRate;
                 double fineTuneRatio;
@@ -731,8 +895,12 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
             if (sample_cache_find(sampleCache,
                                   sampleCacheCount,
                                   zone->sampleIdx,
+                                  (uint32_t)finalStart,
+                                  frameCount,
                                   sampleRateFixed,
                                   rootKey,
+                                  (localLoopStart > 0) ? (uint32_t)localLoopStart : 0u,
+                                  (localLoopEnd > 0) ? (uint32_t)localLoopEnd : 0u,
                                   &assetID)) {
                 result = BAERmfEditorDocument_SetSampleAssetForSample(document, sampleIndex, assetID);
                 if (result != BAE_NO_ERROR) {
@@ -788,8 +956,8 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
                                                                    16,
                                                                    1,
                                                                    (BAE_UNSIGNED_FIXED)sampleRateFixed,
-                                                                   (finalLoopStart > finalStart) ? (finalLoopStart - finalStart) : 0,
-                                                                   (finalLoopEnd > finalStart) ? (finalLoopEnd - finalStart) : 0,
+                                                                   (localLoopStart > 0) ? (uint32_t)localLoopStart : 0u,
+                                                                   (localLoopEnd > 0) ? (uint32_t)localLoopEnd : 0u,
                                                                    &sampleInfo);
                 if (result != BAE_NO_ERROR) {
                     set_error(errorBuffer, errorBufferSize, "Failed to encode SF2 PCM into bank sample.");
@@ -814,8 +982,12 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
                                                &sampleCacheCount,
                                                &sampleCacheCap,
                                                zone->sampleIdx,
+                                               (uint32_t)finalStart,
+                                               frameCount,
                                                sampleRateFixed,
                                                rootKey,
+                                               (localLoopStart > 0) ? (uint32_t)localLoopStart : 0u,
+                                               (localLoopEnd > 0) ? (uint32_t)localLoopEnd : 0u,
                                                assetID);
                 if (cacheResult != BAE_NO_ERROR) {
                     set_error(errorBuffer, errorBufferSize, "Out of memory building sample cache.");
@@ -862,8 +1034,8 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
             editorSampleInfo.sampleInfo.channels = 1;
             editorSampleInfo.sampleInfo.waveFrames = frameCount;
             editorSampleInfo.sampleInfo.waveSize = frameCount * 2u;
-            editorSampleInfo.sampleInfo.startLoop = (finalLoopStart > finalStart) ? (finalLoopStart - finalStart) : 0;
-            editorSampleInfo.sampleInfo.endLoop = (finalLoopEnd > finalStart) ? (finalLoopEnd - finalStart) : 0;
+            editorSampleInfo.sampleInfo.startLoop = (localLoopStart > 0) ? (uint32_t)localLoopStart : 0u;
+            editorSampleInfo.sampleInfo.endLoop = (localLoopEnd > 0) ? (uint32_t)localLoopEnd : 0u;
             if (editorSampleInfo.sampleInfo.endLoop <= editorSampleInfo.sampleInfo.startLoop || (zone->sampleModes & 0x1) == 0) {
                 editorSampleInfo.sampleInfo.startLoop = 0;
                 editorSampleInfo.sampleInfo.endLoop = 0;
