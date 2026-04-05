@@ -8383,50 +8383,48 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
 #if USE_OPUS_ENCODER == TRUE && USE_OPUS_DECODER == TRUE
                 if (compType == C_OPUS && sample->opusUseRoundTripResampling)
                 {
-                    /* RT mode: PCM was fed to the encoder at its native sample rate
-                     * with no resampling.  XCreateSoundObjectFromData already stored
-                     * frameCount = src.waveFrames in the SND header.  Force it back
-                     * to the source frame count (Opus pre-skip can make the probed
-                     * decode slightly shorter).
-                     *
-                     * Loop points are in source sample-rate domain.  Clamp loopEnd
-                     * to encodedFrames (the actual Opus decode capacity) so that
-                     * XExpandOpus never silently clips them at playback time. */
-                    PV_ForceSndDecodedFrameCount(sndResource, writeWaveform.waveFrames);
-                    decodedFramesForRate = writeWaveform.waveFrames;
-                    if (encodedFrames > 0 && loopEnd > (int32_t)encodedFrames)
-                    {
-                        int32_t delta;
+                    /* RT mode: Opus pre-skip can make the decoded frame count
+                     * slightly shorter than the source.  Shift both loop
+                     * points uniformly by that difference so they stay
+                     * aligned with the decoded PCM while preserving the
+                     * exact loop length (no detuning). */
+                    int32_t shift;
 
-                        /* Preserve loop length when Opus decode capacity is
-                         * slightly shorter than source frames (pre-skip).
-                         * Clamping only loopEnd shrinks the cycle and can
-                         * audibly detune sustained notes. */
-                        delta = loopEnd - (int32_t)encodedFrames;
-                        loopEnd = (int32_t)encodedFrames;
-                        if (delta > 0)
+                    decodedFramesForRate = encodedFrames;
+                    PV_ForceSndDecodedFrameCount(sndResource, encodedFrames);
+                    shift = (int32_t)writeWaveform.waveFrames - (int32_t)encodedFrames;
+                    if (shift > 0)
+                    {
+                        if (loopStart >= shift)
                         {
-                            if (loopStart > delta)
-                            {
-                                loopStart -= delta;
-                            }
-                            else
-                            {
-                                loopStart = 0;
-                            }
+                            loopStart -= shift;
                         }
-                        if (loopStart >= loopEnd)
+                        else
                         {
                             loopStart = 0;
+                        }
+                        loopEnd -= shift;
+                        if (loopEnd < 0)
+                        {
                             loopEnd = 0;
                         }
                     }
+                    if (loopEnd > (int32_t)encodedFrames)
+                    {
+                        loopEnd = (int32_t)encodedFrames;
+                    }
+                    if (loopStart >= loopEnd)
+                    {
+                        loopStart = 0;
+                        loopEnd = 0;
+                    }
                     writeWaveform.startLoop = (uint32_t)loopStart;
                     writeWaveform.endLoop = (uint32_t)loopEnd;
-                    BAE_PRINTF("[RMF Save] Sample[%u] Opus RT: frameCount=%u encFrames=%u loop %u-%u\n",
+                    BAE_PRINTF("[RMF Save] Sample[%u] Opus RT: srcFrames=%u encFrames=%u shift=%d loop %u-%u\n",
                                (unsigned)index,
                                (unsigned)writeWaveform.waveFrames,
                                (unsigned)encodedFrames,
+                               (int)shift,
                                (unsigned)writeWaveform.startLoop,
                                (unsigned)writeWaveform.endLoop);
                 }

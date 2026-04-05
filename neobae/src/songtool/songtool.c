@@ -351,34 +351,34 @@ static int apply_compression_to_all_samples(BAERmfEditorDocument *document,
     applied = 0;
     for (i = 0; i < sampleCount; ++i)
     {
-        uint32_t assetID;
+        BAERmfEditorSampleInfo info;
         BAEResult result;
 
-        result = BAERmfEditorDocument_GetSampleAssetIDForSample(document, i, &assetID);
+        result = BAERmfEditorDocument_GetSampleInfo(document, i, &info);
         if (result != BAE_NO_ERROR)
         {
-            fprintf(stderr, "Warning: failed to get asset ID for sample %u (%d)\n",
+            fprintf(stderr, "Warning: failed to get sample info for sample %u (%d)\n",
                     (unsigned)i, (int)result);
             continue;
         }
 
-        result = BAERmfEditorDocument_SetSampleAssetCompression(document, assetID, compressionType);
-        if (result != BAE_NO_ERROR)
+        info.compressionType = compressionType;
+        if (is_opus_compression_type(compressionType))
         {
-            fprintf(stderr, "Warning: failed to set compression for sample %u (asset %u): %d\n",
-                    (unsigned)i, (unsigned)assetID, (int)result);
-            continue;
+            info.opusMode = BAE_EDITOR_OPUS_MODE_AUDIO;
+            info.opusRoundTripResample = useOpusRoundTrip ? TRUE : FALSE;
+        }
+        else
+        {
+            info.opusRoundTripResample = FALSE;
         }
 
-        if (useOpusRoundTrip && is_opus_compression_type(compressionType))
+        result = BAERmfEditorDocument_SetSampleInfo(document, i, &info);
+        if (result != BAE_NO_ERROR)
         {
-            BAERmfEditorSampleInfo info;
-            result = BAERmfEditorDocument_GetSampleInfo(document, i, &info);
-            if (result == BAE_NO_ERROR)
-            {
-                info.opusRoundTripResample = TRUE;
-                (void)BAERmfEditorDocument_SetSampleInfo(document, i, &info);
-            }
+            fprintf(stderr, "Warning: failed to set sample info for sample %u: %d\n",
+                    (unsigned)i, (int)result);
+            continue;
         }
 
         ++applied;
