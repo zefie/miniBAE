@@ -15,6 +15,11 @@
 #include <string.h>
 #include <time.h>
 #include <stdint.h>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 #include <X_API.h>
 #include <X_Assert.h>
 #include "BAE_API.h"
@@ -188,9 +193,20 @@ uint32_t BAE_GetFileLength(intptr_t ref)
 
 int BAE_SetFileLength(intptr_t ref, uint32_t newSize)
 {
-    /* Not supported in pure ANSI C */
-    (void)ref; (void)newSize;
-    return -1;
+    if (!ref) return -1;
+#ifdef _WIN32
+    {
+        int fd = _fileno((FILE *)ref);
+        if (fd < 0) return -1;
+        return (_chsize_s(fd, (int64_t)newSize) == 0) ? 0 : -1;
+    }
+#else
+    {
+        int fd = fileno((FILE *)ref);
+        if (fd < 0) return -1;
+        return (ftruncate(fd, (off_t)newSize) == 0) ? 0 : -1;
+    }
+#endif
 }
 
 /* ---- Audio card (no-op) ------------------------------------------------ */

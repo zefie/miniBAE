@@ -413,6 +413,8 @@
     #include "BAEBuildOptions_Danger.h"
 #elif X_PLATFORM == X_ANSI
     #include "BAEBuildOptions_ANSI.h"
+#elif X_PLATFORM == X_DUMMY
+    #include "BAEBuildOptions_Dummy.h"
 #elif X_PLATFORM == X_EPOC
     #include "BAEBuildOptions_EPOC.h"
 #elif X_PLATFORM == X_SDL2
