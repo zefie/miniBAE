@@ -240,6 +240,7 @@ typedef struct {
     ogg_int64_t granule_pos;
     ogg_int64_t packet_no;
     bool headers_queued;
+    bool prepended_preskip_silence; /* TRUE if preskip silence was prepended before real audio */
 } XOpusEncoder;
 
 static int PV_OpusMemBufAppend(XOpusMemBuf *buf, const unsigned char *bytes, uint32_t len)
@@ -494,10 +495,17 @@ static long PV_PushEncodedPacket(XOpusEncoder *enc, int packetBytes, XFILE outpu
     op.b_o_s = 0;
     op.e_o_s = endOfStream ? 1 : 0;
     /* Ogg Opus granule position tracks decoded sample count at 48 kHz.
-     * For EOS packets include pre-skip so op_pcm_total() reports the
-     * original input length rather than (input - preSkip). */
+     * For EOS packets:
+     *   - If preskip silence was prepended before the real audio, the
+     *     granule position already includes those preskip frames, so
+     *     op_pcm_total() = granule_pos - preskip = (preskip + N) - preskip = N.
+     *     Do NOT add preskip again.
+     *   - Otherwise (legacy no-padding path), add preskip to the granule
+     *     so that op_pcm_total() = (N + preskip) - preskip = N. */
     op.granulepos = endOfStream
-                        ? (enc->granule_pos + (ogg_int64_t)enc->preskip)
+                        ? (enc->prepended_preskip_silence
+                               ? enc->granule_pos
+                               : (enc->granule_pos + (ogg_int64_t)enc->preskip))
                         : enc->granule_pos;
     op.packetno = enc->packet_no++;
 
@@ -920,6 +928,11 @@ OPErr XEncodeOpusToMemory(GM_Waveform const *src, uint32_t bitrate, uint32_t mod
         if (buf.data) XDisposePtr((XPTR)buf.data);
         return MEMORY_ERR;
     }
+
+    /* No preskip priming — let the encoder's internal state handle
+     * convergence naturally.  The EOS granule path without prepended
+     * silence adds preskip to the final granule position so that
+     * op_pcm_total() = (N + preskip) - preskip = N. */
 
     f = 0;
     while (f < frames)

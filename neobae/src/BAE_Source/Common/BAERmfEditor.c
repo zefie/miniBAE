@@ -1143,6 +1143,228 @@ static BAEResult PV_ResampleWaveformLinear(GM_Waveform *waveform,
     return BAE_NO_ERROR;
 }
 
+static BAEResult PV_EnsureWaveformDataOwned(GM_Waveform *waveform, XPTR *ioWaveDataOwner)
+{
+    uint32_t bytes;
+    XPTR copy;
+
+    if (!waveform || !waveform->theWaveform || !ioWaveDataOwner)
+    {
+        return BAE_PARAM_ERR;
+    }
+
+    if (*ioWaveDataOwner == waveform->theWaveform)
+    {
+        return BAE_NO_ERROR;
+    }
+
+    bytes = waveform->waveFrames * waveform->channels * (uint32_t)(waveform->bitSize / 8);
+    if (bytes == 0)
+    {
+        return BAE_PARAM_ERR;
+    }
+
+    copy = XNewPtr((int32_t)bytes);
+    if (!copy)
+    {
+        return BAE_MEMORY_ERR;
+    }
+    XBlockMove(waveform->theWaveform, copy, (int32_t)bytes);
+
+    if (*ioWaveDataOwner)
+    {
+        XDisposePtr(*ioWaveDataOwner);
+    }
+    *ioWaveDataOwner = copy;
+    waveform->theWaveform = (signed char *)copy;
+    waveform->waveSize = (int32_t)bytes;
+    return BAE_NO_ERROR;
+}
+
+static BAEResult PV_ApplyOpusLoopSeamMicroFade(GM_Waveform *waveform,
+                                               XPTR *ioWaveDataOwner,
+                                               uint32_t sampleIndex)
+{
+    uint32_t loopStart;
+    uint32_t loopEnd;
+    uint32_t loopSpan;
+    uint32_t seamFrames;
+    uint32_t padFrames;
+    uint32_t maxDelta;
+    uint32_t i;
+    uint32_t ch;
+    uint32_t bytesPerFrame;
+    uint32_t newTotalFrames;
+    uint32_t newTotalBytes;
+    XPTR newData;
+
+    if (!waveform || !waveform->theWaveform || !ioWaveDataOwner)
+    {
+        return BAE_PARAM_ERR;
+    }
+    if ((waveform->bitSize != 8 && waveform->bitSize != 16) ||
+        (waveform->channels != 1 && waveform->channels != 2) ||
+        waveform->waveFrames < 64)
+    {
+        return BAE_NO_ERROR;
+    }
+
+    loopStart = waveform->startLoop;
+    loopEnd = waveform->endLoop;
+    if (loopEnd > waveform->waveFrames)
+    {
+        loopEnd = waveform->waveFrames;
+    }
+    if (loopEnd <= loopStart)
+    {
+        return BAE_NO_ERROR;
+    }
+    loopSpan = loopEnd - loopStart;
+    if (loopSpan < 64)
+    {
+        return BAE_NO_ERROR;
+    }
+
+    bytesPerFrame = (uint32_t)(waveform->bitSize / 8) * waveform->channels;
+
+    /* --- Step 1: Crossfade the tail of the loop toward the head ---------- */
+    maxDelta = 0;
+    if (waveform->bitSize == 16)
+    {
+        int16_t const *pcm16;
+        pcm16 = (int16_t const *)waveform->theWaveform;
+        for (ch = 0; ch < waveform->channels; ++ch)
+        {
+            int32_t tail = pcm16[((loopEnd - 1) * waveform->channels) + ch];
+            int32_t head = pcm16[(loopStart * waveform->channels) + ch];
+            uint32_t delta = (tail >= head) ? (uint32_t)(tail - head) : (uint32_t)(head - tail);
+            if (delta > maxDelta)
+            {
+                maxDelta = delta;
+            }
+        }
+    }
+    else
+    {
+        unsigned char const *pcm8;
+        pcm8 = (unsigned char const *)waveform->theWaveform;
+        for (ch = 0; ch < waveform->channels; ++ch)
+        {
+            int32_t tail = (int32_t)pcm8[((loopEnd - 1) * waveform->channels) + ch] - 128;
+            int32_t head = (int32_t)pcm8[(loopStart * waveform->channels) + ch] - 128;
+            uint32_t delta = (tail >= head) ? (uint32_t)(tail - head) : (uint32_t)(head - tail);
+            if (delta > maxDelta)
+            {
+                maxDelta = delta;
+            }
+        }
+    }
+
+    seamFrames = loopSpan / 64;
+    if (seamFrames < 64) seamFrames = 64;
+    if (seamFrames > 480) seamFrames = 480;
+    if (seamFrames >= loopSpan) seamFrames = loopSpan - 1;
+
+    /* --- Step 2: Append loop-start audio after loopEnd ------------------- *
+     * Opus MDCT uses a ~960 frame transform window.  The decoded output at
+     * loopEnd is influenced by audio AFTER loopEnd in the encoded stream.
+     * During playback the engine jumps back to loopStart, but the decoder saw
+     * whatever happened to follow loopEnd (silence, post-loop tail, etc.).
+     * By appending a copy of the loop-start region after loopEnd we give the
+     * encoder the same context the listener hears on loop restart, so the
+     * decoded values at loopEnd transition cleanly into loopStart. */
+    padFrames = 480;
+    if (padFrames > loopSpan) padFrames = loopSpan;
+
+    newTotalFrames = waveform->waveFrames + padFrames;
+    newTotalBytes = newTotalFrames * bytesPerFrame;
+    newData = XNewPtr((int32_t)newTotalBytes);
+    if (!newData)
+    {
+        return BAE_MEMORY_ERR;
+    }
+
+    /* Copy original PCM */
+    XBlockMove(waveform->theWaveform, newData, (int32_t)(waveform->waveFrames * bytesPerFrame));
+
+    /* Append loop-start content after the original data */
+    {
+        uint32_t srcOffset = loopStart * bytesPerFrame;
+        uint32_t dstOffset = waveform->waveFrames * bytesPerFrame;
+        XBlockMove((char *)waveform->theWaveform + srcOffset,
+                   (char *)newData + dstOffset,
+                   (int32_t)(padFrames * bytesPerFrame));
+    }
+
+    if (*ioWaveDataOwner)
+    {
+        XDisposePtr(*ioWaveDataOwner);
+    }
+    *ioWaveDataOwner = newData;
+    waveform->theWaveform = (signed char *)newData;
+    waveform->waveFrames = newTotalFrames;
+    waveform->waveSize = (int32_t)newTotalBytes;
+
+    /* Apply the crossfade on the owned buffer */
+    if (maxDelta >= (waveform->bitSize == 16 ? 2048U : 16U))
+    {
+        if (waveform->bitSize == 16)
+        {
+            int16_t *pcm16;
+            pcm16 = (int16_t *)waveform->theWaveform;
+            for (i = 0; i < seamFrames; ++i)
+            {
+                uint32_t tailFrame = (loopEnd - seamFrames) + i;
+                uint32_t headFrame = loopStart + i;
+                uint32_t wHead = i + 1;
+                uint32_t wTail = seamFrames - i;
+                uint32_t wSum = wHead + wTail;
+
+                for (ch = 0; ch < waveform->channels; ++ch)
+                {
+                    int32_t tailS = pcm16[(tailFrame * waveform->channels) + ch];
+                    int32_t headS = pcm16[(headFrame * waveform->channels) + ch];
+                    int32_t mixed = (tailS * (int32_t)wTail + headS * (int32_t)wHead) / (int32_t)wSum;
+                    if (mixed > 32767) mixed = 32767;
+                    if (mixed < -32768) mixed = -32768;
+                    pcm16[(tailFrame * waveform->channels) + ch] = (int16_t)mixed;
+                }
+            }
+        }
+        else
+        {
+            unsigned char *pcm8;
+            pcm8 = (unsigned char *)waveform->theWaveform;
+            for (i = 0; i < seamFrames; ++i)
+            {
+                uint32_t tailFrame = (loopEnd - seamFrames) + i;
+                uint32_t headFrame = loopStart + i;
+                uint32_t wHead = i + 1;
+                uint32_t wTail = seamFrames - i;
+                uint32_t wSum = wHead + wTail;
+
+                for (ch = 0; ch < waveform->channels; ++ch)
+                {
+                    int32_t tailS = (int32_t)pcm8[(tailFrame * waveform->channels) + ch] - 128;
+                    int32_t headS = (int32_t)pcm8[(headFrame * waveform->channels) + ch] - 128;
+                    int32_t mixed = (tailS * (int32_t)wTail + headS * (int32_t)wHead) / (int32_t)wSum;
+                    int32_t out = mixed + 128;
+                    if (out > 255) out = 255;
+                    if (out < 0) out = 0;
+                    pcm8[(tailFrame * waveform->channels) + ch] = (unsigned char)out;
+                }
+            }
+        }
+    }
+
+    BAE_PRINTF("[RMF Save] Sample[%u] Opus loop seam: crossfade=%u pad=%u delta=%u\n",
+               (unsigned)sampleIndex,
+               (unsigned)seamFrames,
+               (unsigned)padFrames,
+               (unsigned)maxDelta);
+    return BAE_NO_ERROR;
+}
+
 /* Some encoded SND variants can report unusual channel metadata at write time.
  * Always stamp loop points directly in the SND payload so split-specific loops
  * survive regardless of which helper path produced the resource blob. */
@@ -3913,10 +4135,11 @@ static int PV_CompareChannelStateEvents(void const *left, void const *right)
 }
 
 /* Reconcile imported note bank/program against a merged (format-1 style)
-   channel-state timeline across all tracks. Each track's notes are assigned
-   bank/program from that track's OWN PC/bank-select events only, so that
-   cross-track state from a conductor track does not contaminate other tracks
-   and break round-trip fidelity. */
+   channel-state timeline across all tracks.  Each track's notes prefer
+   bank/program from that track's OWN aux events so that round-trip fidelity
+   is preserved.  However, when a track has NO bank-select or program-change
+   events for a given channel, the global (cross-track) state is used instead
+   so that the classic MIDI pattern of "setup track + note track" works. */
 static BAEResult PV_ReconcileImportedMidiNotePrograms(BAERmfEditorDocument *document)
 {
     uint32_t eventCount;
@@ -3924,6 +4147,10 @@ static BAEResult PV_ReconcileImportedMidiNotePrograms(BAERmfEditorDocument *docu
     uint32_t trackCount;
     uint16_t *perTrackBank;     /* [trackCount * BAE_MAX_MIDI_CHANNELS] */
     unsigned char *perTrackProgram; /* [trackCount * BAE_MAX_MIDI_CHANNELS] */
+    unsigned char *trackHasBank;    /* [trackCount * BAE_MAX_MIDI_CHANNELS] — set when track has CC0/CC32 for ch */
+    unsigned char *trackHasProgram; /* [trackCount * BAE_MAX_MIDI_CHANNELS] — set when track has PC for ch */
+    uint16_t globalBank[BAE_MAX_MIDI_CHANNELS];
+    unsigned char globalProgram[BAE_MAX_MIDI_CHANNELS];
     PV_ChannelStateEvent *events;
 
     if (!document)
@@ -3973,15 +4200,23 @@ static BAEResult PV_ReconcileImportedMidiNotePrograms(BAERmfEditorDocument *docu
     /* Allocate per-track channel state arrays. */
     perTrackBank    = (uint16_t *)XNewPtr((int32_t)(trackCount * BAE_MAX_MIDI_CHANNELS * (int32_t)sizeof(uint16_t)));
     perTrackProgram = (unsigned char *)XNewPtr((int32_t)(trackCount * BAE_MAX_MIDI_CHANNELS));
-    if (!perTrackBank || !perTrackProgram)
+    trackHasBank    = (unsigned char *)XNewPtr((int32_t)(trackCount * BAE_MAX_MIDI_CHANNELS));
+    trackHasProgram = (unsigned char *)XNewPtr((int32_t)(trackCount * BAE_MAX_MIDI_CHANNELS));
+    if (!perTrackBank || !perTrackProgram || !trackHasBank || !trackHasProgram)
     {
         XDisposePtr(events);
         if (perTrackBank)    XDisposePtr(perTrackBank);
         if (perTrackProgram) XDisposePtr(perTrackProgram);
+        if (trackHasBank)    XDisposePtr(trackHasBank);
+        if (trackHasProgram) XDisposePtr(trackHasProgram);
         return BAE_MEMORY_ERR;
     }
     XSetMemory(perTrackBank,    (int32_t)(trackCount * BAE_MAX_MIDI_CHANNELS * (int32_t)sizeof(uint16_t)), 0);
     XSetMemory(perTrackProgram, (int32_t)(trackCount * BAE_MAX_MIDI_CHANNELS), 0);
+    XSetMemory(trackHasBank,    (int32_t)(trackCount * BAE_MAX_MIDI_CHANNELS), 0);
+    XSetMemory(trackHasProgram, (int32_t)(trackCount * BAE_MAX_MIDI_CHANNELS), 0);
+    XSetMemory(globalBank,      (int32_t)sizeof(globalBank), 0);
+    XSetMemory(globalProgram,   (int32_t)sizeof(globalProgram), 0);
 
     {
         uint32_t writeIndex;
@@ -4012,6 +4247,7 @@ static BAEResult PV_ReconcileImportedMidiNotePrograms(BAERmfEditorDocument *docu
                     ev->channel = (unsigned char)(aux->status & 0x0F);
                     ev->value = aux->data1;
                     ev->noteIndex = 0;
+                    trackHasProgram[trackIndex * BAE_MAX_MIDI_CHANNELS + ev->channel] = 1;
                 }
                 else if (eventType == CONTROL_CHANGE && aux->dataBytes >= 2 &&
                          (aux->data1 == BANK_MSB || aux->data1 == BANK_LSB))
@@ -4024,6 +4260,7 @@ static BAEResult PV_ReconcileImportedMidiNotePrograms(BAERmfEditorDocument *docu
                     ev->channel = (unsigned char)(aux->status & 0x0F);
                     ev->value = aux->data2;
                     ev->noteIndex = 0;
+                    trackHasBank[trackIndex * BAE_MAX_MIDI_CHANNELS + ev->channel] = 1;
                 }
             }
 
@@ -4050,6 +4287,8 @@ static BAEResult PV_ReconcileImportedMidiNotePrograms(BAERmfEditorDocument *docu
 
 #define PV_PTB(t, ch)  perTrackBank[(t) * BAE_MAX_MIDI_CHANNELS + (ch)]
 #define PV_PTP(t, ch)  perTrackProgram[(t) * BAE_MAX_MIDI_CHANNELS + (ch)]
+#define PV_THB(t, ch)  trackHasBank[(t) * BAE_MAX_MIDI_CHANNELS + (ch)]
+#define PV_THP(t, ch)  trackHasProgram[(t) * BAE_MAX_MIDI_CHANNELS + (ch)]
 
     {
         uint32_t i;
@@ -4067,14 +4306,17 @@ static BAEResult PV_ReconcileImportedMidiNotePrograms(BAERmfEditorDocument *docu
             if (ev->kind == 0)
             {
                 PV_PTB(ti, ch) = (uint16_t)((((uint16_t)ev->value) << 7) | (PV_PTB(ti, ch) & 0x7F));
+                globalBank[ch] = (uint16_t)((((uint16_t)ev->value) << 7) | (globalBank[ch] & 0x7F));
             }
             else if (ev->kind == 1)
             {
                 PV_PTB(ti, ch) = (uint16_t)((PV_PTB(ti, ch) & 0x3F80) | ((uint16_t)ev->value & 0x7F));
+                globalBank[ch] = (uint16_t)((globalBank[ch] & 0x3F80) | ((uint16_t)ev->value & 0x7F));
             }
             else if (ev->kind == 2)
             {
                 PV_PTP(ti, ch) = ev->value;
+                globalProgram[ch] = ev->value;
             }
             else if (ev->kind == 3)
             {
@@ -4090,8 +4332,12 @@ static BAEResult PV_ReconcileImportedMidiNotePrograms(BAERmfEditorDocument *docu
                     continue;
                 }
                 note = &track->notes[ev->noteIndex];
-                noteBank    = PV_PTB(ti, ch);
-                noteProgram = PV_PTP(ti, ch);
+
+                /* Use per-track state when the track has its own bank/program
+                   events for this channel; fall back to global state when
+                   the track has none (cross-track setup pattern). */
+                noteBank    = PV_THB(ti, ch) ? PV_PTB(ti, ch) : globalBank[ch];
+                noteProgram = PV_THP(ti, ch) ? PV_PTP(ti, ch) : globalProgram[ch];
 
                 /* Keep compatibility with same-tick setup that appears after the
                    note-on in the same track by scanning forward at the same tick. */
@@ -4100,11 +4346,18 @@ static BAEResult PV_ReconcileImportedMidiNotePrograms(BAERmfEditorDocument *docu
                     PV_ChannelStateEvent const *next;
 
                     next = &events[j];
-                    if (next->tick != ev->tick || next->trackIndex != ti)
+                    if (next->tick != ev->tick)
                     {
                         break;
                     }
                     if (next->channel != ch)
+                    {
+                        continue;
+                    }
+                    /* Accept same-tick bank/program from any track when this
+                       track has no events of its own for this channel, otherwise
+                       restrict to the same track. */
+                    if (PV_THB(ti, ch) && next->trackIndex != ti)
                     {
                         continue;
                     }
@@ -4130,9 +4383,13 @@ static BAEResult PV_ReconcileImportedMidiNotePrograms(BAERmfEditorDocument *docu
 
 #undef PV_PTB
 #undef PV_PTP
+#undef PV_THB
+#undef PV_THP
 
     XDisposePtr(perTrackBank);
     XDisposePtr(perTrackProgram);
+    XDisposePtr(trackHasBank);
+    XDisposePtr(trackHasProgram);
     XDisposePtr(events);
     return BAE_NO_ERROR;
 }
@@ -4487,7 +4744,7 @@ static BAEResult PV_LoadMidiTrackIntoDocument(BAERmfEditorDocument *document,
                             return result;
                         }
                     }
-                    else if (channel != track->channel)
+                    else if (channel != track->channel && data1 != BANK_MSB && data1 != BANK_LSB)
                     {
                         result = PV_AddAuxEventToTrack(track,
                                                        currentTick,
@@ -7116,7 +7373,26 @@ static BAEResult PV_BuildTrackData(BAERmfEditorTrack const *track,
             currentProgram[channel] = track->program;
         }
 
-        currentBank[channel] = track->bank;
+        /* Only advance currentBank to track->bank when we actually emitted
+           the bank value (or part of it).  When the initial bank emit was
+           suppressed because explicit aux events already carry it, leave
+           currentBank at 0 so the aux events update it when they are
+           processed in the event loop below. */
+        if (!explicitBankMsb[channel] && !explicitBankLsb[channel])
+        {
+            currentBank[channel] = track->bank;
+        }
+        else if (!explicitBankMsb[channel])
+        {
+            /* MSB emitted, LSB suppressed: track the MSB portion only */
+            currentBank[channel] = (uint16_t)((track->bank & 0x3F80));
+        }
+        else if (!explicitBankLsb[channel])
+        {
+            /* MSB suppressed, LSB emitted: track the LSB portion only */
+            currentBank[channel] = (uint16_t)((track->bank & 0x7F));
+        }
+        /* else: both suppressed — currentBank stays 0, aux events will set it */
     }
 
     if (eventCount)
@@ -7649,6 +7925,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
         bool sampleWasEncodedMpeg;
         uint32_t decodedFramesForRate;
         uint32_t decodedSampleRateForSnd;
+        uint32_t prePadWaveFrames;  /* waveFrames before Opus loop-context pad */
 
         sample = &document->samples[index];
         roundTripSourceRate = 0;
@@ -7658,6 +7935,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
         sampleWasEncodedMpeg = FALSE;
         decodedFramesForRate = 0;
         decodedSampleRateForSnd = 0;
+        prePadWaveFrames = 0;
 
         if (sample->instID != BAE_EDITOR_INST_ID_NONE)
         {
@@ -8323,6 +8601,83 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                                (unsigned)writeWaveform.waveFrames);
                 }
             }
+            /* Trim leading silence from Opus source PCM.  Many instrument
+             * samples start with a handful of zero frames.  Opus's transform
+             * codec smears the silence-to-audio transition, making the gap
+             * audibly wider than the original.  Removing leading zeros before
+             * encoding keeps the attack tight.  Loop points are shifted to
+             * compensate so they stay aligned with the trimmed PCM. */
+            if (compType == C_OPUS && writeWaveform.theWaveform &&
+                writeWaveform.waveFrames > 64 &&
+                (writeWaveform.bitSize == 8 || writeWaveform.bitSize == 16))
+            {
+                uint32_t trimFrames = 0;
+
+                if (writeWaveform.bitSize == 16)
+                {
+                    int16_t const *pcm16 = (int16_t const *)writeWaveform.theWaveform;
+                    while (trimFrames < writeWaveform.waveFrames)
+                    {
+                        uint32_t ch;
+                        bool allZero = TRUE;
+                        for (ch = 0; ch < writeWaveform.channels; ++ch)
+                        {
+                            if (pcm16[(trimFrames * writeWaveform.channels) + ch] != 0)
+                            {
+                                allZero = FALSE;
+                                break;
+                            }
+                        }
+                        if (!allZero) break;
+                        trimFrames++;
+                    }
+                }
+                else
+                {
+                    unsigned char const *pcm8 = (unsigned char const *)writeWaveform.theWaveform;
+                    while (trimFrames < writeWaveform.waveFrames)
+                    {
+                        uint32_t ch;
+                        bool allZero = TRUE;
+                        for (ch = 0; ch < writeWaveform.channels; ++ch)
+                        {
+                            if (pcm8[(trimFrames * writeWaveform.channels) + ch] != 128)
+                            {
+                                allZero = FALSE;
+                                break;
+                            }
+                        }
+                        if (!allZero) break;
+                        trimFrames++;
+                    }
+                }
+
+                if (trimFrames > 0 && trimFrames < writeWaveform.waveFrames - 32)
+                {
+                    uint32_t bytesPerFrame = (uint32_t)(writeWaveform.bitSize / 8) * writeWaveform.channels;
+                    writeWaveform.theWaveform = (signed char *)writeWaveform.theWaveform + (trimFrames * bytesPerFrame);
+                    writeWaveform.waveFrames -= trimFrames;
+                    writeWaveform.waveSize = (int32_t)(writeWaveform.waveFrames * bytesPerFrame);
+
+                    if (writeWaveform.startLoop >= trimFrames)
+                        writeWaveform.startLoop -= trimFrames;
+                    else
+                        writeWaveform.startLoop = 0;
+                    if (writeWaveform.endLoop >= trimFrames)
+                        writeWaveform.endLoop -= trimFrames;
+                    else
+                        writeWaveform.endLoop = 0;
+                    if (writeWaveform.startLoop >= writeWaveform.endLoop)
+                    {
+                        writeWaveform.startLoop = 0;
+                        writeWaveform.endLoop = 0;
+                    }
+
+                    BAE_PRINTF("[RMF Save] Sample[%u] trimmed %u leading silence frames for Opus\n",
+                               (unsigned)index, (unsigned)trimFrames);
+                }
+            }
+
             /* Round-trip: spoof the encoder input rate to 48000 so the PCM is
              * stored as a sped-up bitstream.  The real source rate is preserved
              * in the SND header and corrected after XCreateSoundObjectFromData. */
@@ -8332,6 +8687,20 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                 writeWaveform.sampledRate = (int32_t)(48000u << 16);
                 BAE_PRINTF("[RMF Save] Sample[%u] round-trip: spoofing encoder rate %uHz -> 48000Hz\n",
                            (unsigned)index, (unsigned)(roundTripSourceRate >> 16));
+            }
+
+            if (compType == C_OPUS)
+            {
+                prePadWaveFrames = writeWaveform.waveFrames;
+                result = PV_ApplyOpusLoopSeamMicroFade(&writeWaveform,
+                                                       &encodeWaveDataOwner,
+                                                       (uint32_t)index);
+                if (result != BAE_NO_ERROR)
+                {
+                    XDisposePtr((XPTR)sampleSndIDs);
+                    XDisposePtr((XPTR)sampleInstIDs);
+                    return result;
+                }
             }
 #endif
 
@@ -8373,6 +8742,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                 {
                     encodedFrames = writeWaveform.waveFrames;
                 }
+
                 if (decodedInfo.rate != 0)
                 {
                     decodedSampleRateForSnd = (uint32_t)decodedInfo.rate;
@@ -8442,7 +8812,16 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                      * points are always valid within the decoded buffer. */
                     if (compType != C_IMA4)
                     {
-                        PV_RemapLoopPointsToFrameCount(writeWaveform.waveFrames,
+                        uint32_t remapSourceFrames = writeWaveform.waveFrames;
+                        /* If the waveform was padded for Opus loop context,
+                         * use the pre-pad frame count for proportional remap
+                         * so loop points map correctly without the padding
+                         * skewing the ratio. */
+                        if (prePadWaveFrames > 0 && prePadWaveFrames < remapSourceFrames)
+                        {
+                            remapSourceFrames = prePadWaveFrames;
+                        }
+                        PV_RemapLoopPointsToFrameCount(remapSourceFrames,
                                                        encodedFrames,
                                                        &loopStart,
                                                        &loopEnd);
