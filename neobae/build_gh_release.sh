@@ -317,6 +317,30 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 20 ]; then
 	runcmd make -f Makefile.mthc_decomp clean
 fi
 
+if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 21 ]; then
+	export BITS=32
+	echo "Building Songtool (x32)..."
+	runcmd make clean
+	runcmd make -f mingw/Makefile.songtool "-j$(nproc)" all
+	signit "${BDIR}/songtool.exe" "${BDIR}/songtool_signed.exe"
+    mv "${BDIR}/songtool_signed.exe" "${BDIR}/songtool.exe"	
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x32.zip" -- songtool.exe liblzma*.dll
+	runcmd cd "${RDIR}" || exit 1
+	runcmd make -f mingw/Makefile.songtool clean
+fi
+
+if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 22 ]; then
+	export BITS=64
+	echo "Building Songtool (x64)..."
+	runcmd make clean
+	runcmd make -f mingw/Makefile.songtool "-j$(nproc)" all
+	signit "${BDIR}/songtool.exe" "${BDIR}/songtool_signed.exe"
+    mv "${BDIR}/songtool_signed.exe" "${BDIR}/songtool.exe"	
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- songtool.exe liblzma*.dll
+	runcmd cd "${RDIR}" || exit 1
+	runcmd make -f mingw/Makefile.songtool clean
+fi
+
 
 cd "${RDIR}" || exit 1
 ls -l "${ODIR}"
