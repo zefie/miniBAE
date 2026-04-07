@@ -3210,6 +3210,11 @@ BAEResult BAERmfEditorDocument_SetNoteInfo(BAERmfEditorDocument *document,
 BAEResult BAERmfEditorDocument_DeleteNote(BAERmfEditorDocument *document,
                                           uint16_t trackIndex,
                                           uint32_t noteIndex);
+/* Destructively trim MIDI data to boundaryTick.
+ * Removes notes/events at or after boundary, truncates overlapping notes,
+ * trims tempo events, and clamps track end-of-track ticks. */
+BAEResult BAERmfEditorDocument_TrimToTick(BAERmfEditorDocument *document,
+                                          uint32_t boundaryTick);
 BAEResult BAERmfEditorDocument_AddSampleFromFile(BAERmfEditorDocument *document,
                                                  BAEPathName filePath,
                                                  BAERmfEditorSampleSetup const *setup,

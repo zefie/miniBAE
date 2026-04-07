@@ -34,6 +34,7 @@ static void print_usage(const char *program_name)
             "  --loop-start-ms N     Optional MIDI loop start in milliseconds (default: 0)\n"
             "  --loop-count N        Loop count (-1=forever, default: -1)\n"
             "  --disable-loop        Disable MIDI loop markers\n"
+            "  --trim N              Trim MIDI timeline to N milliseconds\n"
             "  --codecs              List available codecs and bitrates\n"
             "  --help, -h            Show this help\n",
             program_name);
@@ -393,6 +394,12 @@ static int apply_compression_to_all_samples(BAERmfEditorDocument *document,
     return 1;
 }
 
+static int trim_document_to_tick(BAERmfEditorDocument *document,
+                                 uint32_t boundaryTick)
+{
+    return BAERmfEditorDocument_TrimToTick(document, boundaryTick) == BAE_NO_ERROR;
+}
+
 static void print_document_info(BAERmfEditorDocument const *document, const char *sourcePath)
 {
     const char *title;
@@ -488,8 +495,11 @@ int main(int argc, char *argv[])
     int doDisableLoop;
     int doSetLoop;
     int loopEndExplicit;
+    int doTrim;
+    int trimExplicit;
     uint64_t loopStartMs;
     uint64_t loopEndMs;
+    uint64_t trimMs;
     int32_t loopCount;
     int useOpusRoundTrip;
 
@@ -500,8 +510,11 @@ int main(int argc, char *argv[])
     doDisableLoop = 0;
     doSetLoop = 0;
     loopEndExplicit = 0;
+    doTrim = 0;
+    trimExplicit = 0;
     loopStartMs = 0;
     loopEndMs = 0;
+    trimMs = 0;
     loopCount = -1;
     useOpusRoundTrip = 0;
 
@@ -631,6 +644,27 @@ int main(int argc, char *argv[])
             doDisableLoop = 1;
             continue;
         }
+        if (!strcmp(arg, "--trim"))
+        {
+            char *end = NULL;
+            unsigned long long v;
+            if (argi + 1 >= argc)
+            {
+                fprintf(stderr, "Error: --trim requires an argument\n");
+                return 1;
+            }
+            ++argi;
+            v = strtoull(argv[argi], &end, 10);
+            if (end == argv[argi] || *end != '\0')
+            {
+                fprintf(stderr, "Error: invalid --trim value '%s'\n", argv[argi]);
+                return 1;
+            }
+            trimMs = (uint64_t)v;
+            trimExplicit = 1;
+            doTrim = 1;
+            continue;
+        }
 
         if (!sourcePath)
         {
@@ -660,9 +694,9 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    if (!doInfo && !doCompression && !doSetLoop && !doDisableLoop)
+    if (!doInfo && !doCompression && !doSetLoop && !doDisableLoop && !doTrim)
     {
-        fprintf(stderr, "Error: no operation requested. Use --codec and/or --loop-ms/--disable-loop.\n");
+        fprintf(stderr, "Error: no operation requested. Use --codec, --loop-*, --disable-loop, and/or --trim.\n");
         return 1;
     }
 
@@ -707,7 +741,7 @@ int main(int argc, char *argv[])
         print_document_info(document, sourcePath);
     }
 
-    if (!doCompression && !doSetLoop && !doDisableLoop)
+    if (!doCompression && !doSetLoop && !doDisableLoop && !doTrim)
     {
         BAERmfEditorDocument_Delete(document);
         BAE_Cleanup();
@@ -794,6 +828,40 @@ int main(int argc, char *argv[])
                 (unsigned long long)loopEndMs,
                 (unsigned)endTick,
                 (int)loopCount);
+    }
+
+    if (doTrim)
+    {
+        uint32_t trimTick;
+
+        if (!trimExplicit)
+        {
+            fprintf(stderr, "Error: --trim requires a value in milliseconds\n");
+            BAERmfEditorDocument_Delete(document);
+            BAE_Cleanup();
+            return 1;
+        }
+
+        if (!milliseconds_to_song_ticks(document, trimMs, &trimTick))
+        {
+            fprintf(stderr, "Error: failed to convert trim milliseconds to MIDI ticks\n");
+            BAERmfEditorDocument_Delete(document);
+            BAE_Cleanup();
+            return 1;
+        }
+
+        if (!trim_document_to_tick(document, trimTick))
+        {
+            fprintf(stderr, "Error: failed to trim MIDI timeline\n");
+            BAERmfEditorDocument_Delete(document);
+            BAE_Cleanup();
+            return 1;
+        }
+
+        fprintf(stderr,
+                "Trimmed MIDI timeline to %llu ms (%u ticks)\n",
+                (unsigned long long)trimMs,
+                (unsigned)trimTick);
     }
 
     result = BAERmfEditorDocument_SaveAsRmf(document, (BAEPathName)destPath);

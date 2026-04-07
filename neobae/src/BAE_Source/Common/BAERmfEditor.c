@@ -11423,6 +11423,181 @@ BAEResult BAERmfEditorDocument_DeleteNote(BAERmfEditorDocument *document,
     return BAE_NO_ERROR;
 }
 
+BAEResult BAERmfEditorDocument_TrimToTick(BAERmfEditorDocument *document,
+                                          uint32_t boundaryTick)
+{
+    uint32_t trackIndex;
+    bool changed;
+
+    if (!document)
+    {
+        return BAE_NULL_OBJECT;
+    }
+
+    changed = FALSE;
+    for (trackIndex = 0; trackIndex < document->trackCount; ++trackIndex)
+    {
+        BAERmfEditorTrack *track;
+        uint32_t readIndex;
+        uint32_t writeIndex;
+
+        track = &document->tracks[trackIndex];
+
+        writeIndex = 0;
+        for (readIndex = 0; readIndex < track->noteCount; ++readIndex)
+        {
+            BAERmfEditorNote note;
+            uint64_t noteEnd;
+
+            note = track->notes[readIndex];
+            if (note.startTick >= boundaryTick)
+            {
+                changed = TRUE;
+                continue;
+            }
+
+            noteEnd = (uint64_t)note.startTick + (uint64_t)note.durationTicks;
+            if (noteEnd > (uint64_t)boundaryTick)
+            {
+                note.durationTicks = boundaryTick - note.startTick;
+                changed = TRUE;
+                if (note.durationTicks == 0)
+                {
+                    continue;
+                }
+            }
+
+            if (writeIndex != readIndex)
+            {
+                track->notes[writeIndex] = note;
+            }
+            writeIndex++;
+        }
+        track->noteCount = writeIndex;
+
+        writeIndex = 0;
+        for (readIndex = 0; readIndex < track->ccEventCount; ++readIndex)
+        {
+            BAERmfEditorCCEvent event;
+
+            event = track->ccEvents[readIndex];
+            if (event.tick >= boundaryTick)
+            {
+                changed = TRUE;
+                continue;
+            }
+            if (writeIndex != readIndex)
+            {
+                track->ccEvents[writeIndex] = event;
+            }
+            writeIndex++;
+        }
+        track->ccEventCount = writeIndex;
+
+        writeIndex = 0;
+        for (readIndex = 0; readIndex < track->sysexEventCount; ++readIndex)
+        {
+            BAERmfEditorSysExEvent event;
+
+            event = track->sysexEvents[readIndex];
+            if (event.tick >= boundaryTick)
+            {
+                if (event.data)
+                {
+                    XDisposePtr(event.data);
+                }
+                changed = TRUE;
+                continue;
+            }
+            if (writeIndex != readIndex)
+            {
+                track->sysexEvents[writeIndex] = event;
+            }
+            writeIndex++;
+        }
+        track->sysexEventCount = writeIndex;
+
+        writeIndex = 0;
+        for (readIndex = 0; readIndex < track->auxEventCount; ++readIndex)
+        {
+            BAERmfEditorAuxEvent event;
+
+            event = track->auxEvents[readIndex];
+            if (event.tick >= boundaryTick)
+            {
+                changed = TRUE;
+                continue;
+            }
+            if (writeIndex != readIndex)
+            {
+                track->auxEvents[writeIndex] = event;
+            }
+            writeIndex++;
+        }
+        track->auxEventCount = writeIndex;
+
+        writeIndex = 0;
+        for (readIndex = 0; readIndex < track->metaEventCount; ++readIndex)
+        {
+            BAERmfEditorMetaEvent event;
+
+            event = track->metaEvents[readIndex];
+            if (event.tick >= boundaryTick)
+            {
+                if (event.data)
+                {
+                    XDisposePtr(event.data);
+                }
+                changed = TRUE;
+                continue;
+            }
+            if (writeIndex != readIndex)
+            {
+                track->metaEvents[writeIndex] = event;
+            }
+            writeIndex++;
+        }
+        track->metaEventCount = writeIndex;
+
+        if (track->endOfTrackTick > boundaryTick)
+        {
+            track->endOfTrackTick = boundaryTick;
+            changed = TRUE;
+        }
+    }
+
+    {
+        uint32_t readIndex;
+        uint32_t writeIndex;
+
+        writeIndex = 0;
+        for (readIndex = 0; readIndex < document->tempoEventCount; ++readIndex)
+        {
+            BAERmfEditorTempoEvent event;
+
+            event = document->tempoEvents[readIndex];
+            if (event.tick >= boundaryTick)
+            {
+                changed = TRUE;
+                continue;
+            }
+            if (writeIndex != readIndex)
+            {
+                document->tempoEvents[writeIndex] = event;
+            }
+            writeIndex++;
+        }
+        document->tempoEventCount = writeIndex;
+    }
+
+    if (changed)
+    {
+        PV_MarkDocumentDirty(document);
+    }
+
+    return BAE_NO_ERROR;
+}
+
 BAEResult BAERmfEditorDocument_AddSampleFromFile(BAERmfEditorDocument *document,
                                                  BAEPathName filePath,
                                                  BAERmfEditorSampleSetup const *setup,
