@@ -515,43 +515,71 @@ int mod2rmf_clamp_int(int v, int lo, int hi)
 
 void mod2rmf_compute_channel_map(const ChannelProfile profiles[],
                                 uint32_t trackerCount,
-                                ChannelMap *map)
+                                ChannelMap *map,
+                                bool avoidMidiChannel10)
 {
     uint32_t i;
-    uint8_t midiCh;
+    uint8_t preferredMidiChannels[16] = {
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+        10, 11, 12, 13, 14, 15
+    };
+    uint32_t preferredCount = 16u;
+    uint32_t directAssignCount;
+
+    if (avoidMidiChannel10)
+    {
+        /* Use all melodic-safe channels except MIDI ch10 (index 9). */
+        static const uint8_t noCh10[15] = {
+            0, 1, 2, 3, 4, 5, 6, 7, 8,
+            10, 11, 12, 13, 14, 15
+        };
+        preferredCount = 15u;
+        memcpy(preferredMidiChannels, noCh10, preferredCount * sizeof(uint8_t));
+    }
 
     memset(map, 0, sizeof(*map));
     /* Initialize all mappings to 0xFF (unmapped) */
     memset(map->trackerToMidi, 0xFF, sizeof(map->trackerToMidi));
 
-    /* Pass 1: Direct assignment for first min(trackerCount, 16) channels */
-    for (i = 0; i < trackerCount && i < MOD2RMF_MAX_MIDI_CHANNELS; ++i)
+    /* Pass 1: direct assignment to preferred MIDI channels. */
+    directAssignCount = trackerCount;
+    if (directAssignCount > preferredCount)
     {
-        map->trackerToMidi[i] = (uint8_t)i;
+        directAssignCount = preferredCount;
+    }
+
+    for (i = 0; i < directAssignCount; ++i)
+    {
+        uint8_t mappedMidi = preferredMidiChannels[i];
+        map->trackerToMidi[i] = mappedMidi;
         if (profiles[i].used)
         {
-            map->midiChannelUsed[i] = TRUE;
+            map->midiChannelUsed[mappedMidi] = TRUE;
         }
     }
 
-    /* Pass 2: Overflow assignment for channels 16+ */
-    for (i = MOD2RMF_MAX_MIDI_CHANNELS; i < trackerCount; ++i)
+    /* Pass 2: overflow assignment with overlap-minimizing reuse. */
+    for (i = directAssignCount; i < trackerCount; ++i)
     {
-        uint8_t bestMidi = 0;
+        uint8_t bestMidi = preferredMidiChannels[0];
         uint32_t bestScore = UINT32_MAX; /* lower = better */
         bool foundEmpty = FALSE;
+        uint32_t prefIdx;
 
         if (!profiles[i].used)
         {
             /* Unused tracker channel — map to ch 0 as placeholder */
-            map->trackerToMidi[i] = 0;
+            map->trackerToMidi[i] = preferredMidiChannels[0];
             continue;
         }
 
-        for (midiCh = 0; midiCh < MOD2RMF_MAX_MIDI_CHANNELS; ++midiCh)
+        for (prefIdx = 0; prefIdx < preferredCount; ++prefIdx)
         {
             ChannelProfile agg;
             uint32_t ovlap;
+            uint8_t midiCh;
+
+            midiCh = preferredMidiChannels[prefIdx];
 
             memset(&agg, 0, sizeof(agg));
 

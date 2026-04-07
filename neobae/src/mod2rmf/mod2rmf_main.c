@@ -40,7 +40,8 @@ static void print_usage(const char *program_name)
             "  --resample-filter N   Interpolation: nearest|linear|cubic|sinc (default: sinc)\n"
             "  --filters             List available filter/resample options\n"
             "  --stereo-separation N Stereo width 0-100%% (0=mono, 75=default, 100=hard L/R)\n"
-            "  --it-v00-cut-rows N  Cut sustained note after N silent rows following explicit IT v00 (0=off, default: 6)\n"
+            "  --it-v00-cut-rows N   Cut sustained note after N silent rows following explicit IT v00 (0=off, default: 6)\n"
+            "  --avoid-midi-ch10     Avoid mapping tracker channels to MIDI ch10 (useful for some SPC2IT outputs)\n"
             "  --spread              [Experimental] Spread instruments across MIDI channels\n"
             "  --tempomap            Reserved for future tempo-map handling\n"
             "  --ext-pitch           [ZMF] Allow pitch down to -96 semitones (vs default -24)\n"
@@ -91,6 +92,7 @@ int main(int argc, char *argv[])
     bool bitrateArgSeen;
     bool spreadChannels;
     bool useExtendedPitchRange;
+    bool avoidMidiChannel10;
     uint8_t stereoSeparation;
     uint8_t itV00CutRows;
 
@@ -104,6 +106,7 @@ int main(int argc, char *argv[])
     bitrateArgSeen = FALSE;
     spreadChannels = FALSE;
     useExtendedPitchRange = FALSE;
+    avoidMidiChannel10 = FALSE;
     stereoSeparation = 75;
     itV00CutRows = 6;
     mod2rmf_song_model_init(&song);
@@ -127,6 +130,11 @@ int main(int argc, char *argv[])
         if (!strcmp(arg, "--spread"))
         {
             spreadChannels = TRUE;
+            continue;
+        }
+        if (!strcmp(arg, "--avoid-midi-ch10"))
+        {
+            avoidMidiChannel10 = TRUE;
             continue;
         }
         if (!strcmp(arg, "--original"))
@@ -344,6 +352,7 @@ int main(int argc, char *argv[])
     useZmfContainer = is_zmf_path(destPath);    
     conv->resamplerSettings = resamplerSettings;
     conv->forceOriginalSamples = forceOriginalSamples;
+    conv->avoidMidiChannel10 = avoidMidiChannel10;
     conv->stereoSeparation = stereoSeparation;
     conv->itV00CutRows = itV00CutRows;
 
@@ -520,7 +529,10 @@ int main(int argc, char *argv[])
         ChannelProfile profiles[MOD2RMF_MAX_CHANNELS];
 
         mod2rmf_analyze_channel_usage(&song, profiles, song.channelCount);
-        mod2rmf_compute_channel_map(profiles, song.channelCount, &conv->channelMap);
+        mod2rmf_compute_channel_map(profiles,
+                        song.channelCount,
+                        &conv->channelMap,
+                        conv->avoidMidiChannel10);
 
         #ifdef _DEBUG
         {

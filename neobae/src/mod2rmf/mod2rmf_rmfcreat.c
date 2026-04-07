@@ -1110,6 +1110,26 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                     chLastBend[ch] = bend;
                                     (void)mod2rmf_song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend,
                                                                         activeNotes[ch].program);
+#ifdef _DEBUG
+                                    if (ch == 9u)
+                                    {
+                                        fprintf(stderr,
+                                                "[mod2rmf][dbg][srcch9] note-on tick=%u evNote=%u ciNote=%d sid=%d inst=%u base=%d xpo=%d midi=%d clamp=%u bendOff=%d ciBend=%d bend=0x%04X prog=%u\n",
+                                                (unsigned)tick,
+                                                (unsigned)evNote,
+                                                (int)ci->note,
+                                                sid,
+                                                (unsigned)ci->instrument,
+                                                baseNote,
+                                                noteXpo,
+                                                midiNote,
+                                                (unsigned)activeNotes[ch].note,
+                                                activeNotes[ch].bendOffsetCents,
+                                                (int)ci->pitchbend,
+                                                (unsigned)bend,
+                                                (unsigned)activeNotes[ch].program);
+                                    }
+#endif
                                 }
                             }
                         }
@@ -1179,6 +1199,27 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                 chLastBend[ch] = bend;
                                 (void)mod2rmf_song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend,
                                                                     activeNotes[ch].program);
+#ifdef _DEBUG
+                                if (ch == 9u)
+                                {
+                                    fprintf(stderr,
+                                            "[mod2rmf][dbg][srcch9] delayed-note tick=%u evNote=%u ciNote=%d sid=%d inst=%u base=%d xpo=%d midi=%d clamp=%u bendOff=%d ciBend=%d bend=0x%04X prog=%u delay=%u\n",
+                                            (unsigned)tick,
+                                            (unsigned)chEffects[ch].delayedEvNote,
+                                            (int)ci->note,
+                                            delaySid,
+                                            (unsigned)ci->instrument,
+                                            baseNote,
+                                            noteXpo,
+                                            midiNote,
+                                            (unsigned)activeNotes[ch].note,
+                                            activeNotes[ch].bendOffsetCents,
+                                            (int)ci->pitchbend,
+                                            (unsigned)bend,
+                                            (unsigned)activeNotes[ch].program,
+                                            (unsigned)chEffects[ch].noteDelayFrames);
+                                }
+#endif
                             }
                         }
                         chEffects[ch].hasDelayedNote = FALSE;
@@ -1573,6 +1614,22 @@ int mod2rmf_write_song_pitch_bend_events(Mod2RmfConverter *conv, const ModSongMo
         return 0;
     }
 
+#ifdef _DEBUG
+    {
+        uint32_t ch;
+        for (ch = 0; ch < song->channelCount; ++ch)
+        {
+            if (conv->channelMap.trackerToMidi[ch] == 9u)
+            {
+                fprintf(stderr,
+                        "[mod2rmf][dbg][ch10] tracker ch %u routes to MIDI ch10, track=%u\n",
+                        (unsigned)ch,
+                        (unsigned)conv->channelToTrackIndex[ch]);
+            }
+        }
+    }
+#endif
+
     /* 0xFFFF = not yet emitted */
     bool bendDedupReset = FALSE;
     memset(lastBend, 0xFF, sizeof(lastBend));
@@ -1627,6 +1684,18 @@ int mod2rmf_write_song_pitch_bend_events(Mod2RmfConverter *conv, const ModSongMo
                 if (nextEv->sourceChannel < song->channelCount &&
                     conv->channelMap.trackerToMidi[nextEv->sourceChannel] == midiCh)
                 {
+#ifdef _DEBUG
+                    if (midiCh == 9u)
+                    {
+                        fprintf(stderr,
+                                "[mod2rmf][dbg][ch10] supersede bend tick=%u srcCh=%u val=0x%04X by srcCh=%u val=0x%04X\n",
+                                (unsigned)ev->tick,
+                                (unsigned)ev->sourceChannel,
+                                (unsigned)ev->value,
+                                (unsigned)nextEv->sourceChannel,
+                                (unsigned)nextEv->value);
+                    }
+#endif
                     superseded = TRUE;
                     break;
                 }
@@ -1642,6 +1711,18 @@ int mod2rmf_write_song_pitch_bend_events(Mod2RmfConverter *conv, const ModSongMo
             continue;
         }
         lastBend[midiCh] = ev->value;
+
+    #ifdef _DEBUG
+        if (midiCh == 9u)
+        {
+            fprintf(stderr,
+                "[mod2rmf][dbg][ch10] emit bend tick=%u srcCh=%u track=%u val=0x%04X\n",
+                (unsigned)ev->tick,
+                (unsigned)ev->sourceChannel,
+                (unsigned)trackIndex,
+                (unsigned)ev->value);
+        }
+    #endif
 
         (void)BAERmfEditorDocument_AddTrackPitchBendEvent(conv->document,
                                                            trackIndex,
@@ -1708,13 +1789,32 @@ int mod2rmf_write_song_notes(Mod2RmfConverter *conv, const ModSongModel *song)
     {
         const ModNoteEvent *note;
         uint16_t trackIndex;
+        uint8_t midiCh;
 
         note = &song->notes[i];
+        if (note->sourceChannel >= song->channelCount)
+        {
+            continue;
+        }
+        midiCh = conv->channelMap.trackerToMidi[note->sourceChannel];
         trackIndex = conv->channelToTrackIndex[note->sourceChannel];
         if (trackIndex == (uint16_t)0xFFFF)
         {
             continue;
         }
+
+#ifdef _DEBUG
+        if (midiCh == 9u && note->startTick == 0u)
+        {
+            fprintf(stderr,
+                    "[mod2rmf][dbg][ch10] tick0 note srcCh=%u track=%u note=%u dur=%u prog=%u\n",
+                    (unsigned)note->sourceChannel,
+                    (unsigned)trackIndex,
+                    (unsigned)note->note,
+                    (unsigned)note->durationTicks,
+                    (unsigned)note->program);
+        }
+#endif
 
         (void)mod2rmf_add_programmed_note(conv,
                                   trackIndex,
@@ -1920,6 +2020,10 @@ int mod2rmf_setup_tracks(Mod2RmfConverter *conv, const ModSongModel *song, const
             BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex,   6, 0,
                                                  song->pitchBendRangeSemitones);         /* Data Entry */
             BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex,  38, 0, 0); /* Data LSB */
+            /* Null RPN selection so subsequent Data Entry does not accidentally
+             * modify bend range on synths with sticky parameter selection. */
+            BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 101, 0, 127); /* RPN Null MSB */
+            BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 100, 0, 127); /* RPN Null LSB */
 
             /* MIDI channel 10 (zero-based 9) defaults to percussion in many synths.
              * NRPN 5,0 with data 3 switches it to melodic playback. */
@@ -1928,6 +2032,24 @@ int mod2rmf_setup_tracks(Mod2RmfConverter *conv, const ModSongModel *song, const
                 BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 99, 0, 5); /* NRPN MSB */
                 BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 98, 0, 0); /* NRPN LSB */
                 BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex,  6, 0, 3); /* Data Entry MSB */
+                BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 38, 0, 0); /* Data Entry LSB */
+                BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 99, 0, 127); /* NRPN Null MSB */
+                BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 98, 0, 127); /* NRPN Null LSB */
+
+                /* Re-assert bend range after ch10 melodic-mode setup. Some devices
+                 * ignore NRPN select and may interpret CC6=3 as bend-range data. */
+                BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 101, 0, 0); /* RPN MSB */
+                BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 100, 0, 0); /* RPN LSB */
+                BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex,   6, 0,
+                                                     song->pitchBendRangeSemitones);         /* Data Entry */
+                BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex,  38, 0, 0); /* Data LSB */
+                BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 101, 0, 127); /* RPN Null MSB */
+                BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 100, 0, 127); /* RPN Null LSB */
+#ifdef _DEBUG
+                fprintf(stderr,
+                        "[mod2rmf][dbg][ch10] init melodic mode on track=%u at tick=0 (NRPN 5,0 -> 3)\n",
+                        (unsigned)trackIndex);
+#endif
             }
         }
     }
@@ -2046,7 +2168,10 @@ BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char
         ChannelProfile profiles[MOD2RMF_MAX_CHANNELS];
 
         mod2rmf_analyze_channel_usage(&song, profiles, song.channelCount);
-        mod2rmf_compute_channel_map(profiles, song.channelCount, &conv->channelMap);
+        mod2rmf_compute_channel_map(profiles,
+                        song.channelCount,
+                        &conv->channelMap,
+                        conv->avoidMidiChannel10);
 
         #ifdef _DEBUG
         {

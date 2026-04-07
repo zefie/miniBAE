@@ -215,7 +215,8 @@ unsigned char mod2rmf_note_velocity_from_volume(unsigned char vol64);
 int mod2rmf_clamp_int(int v, int lo, int hi);
 void mod2rmf_compute_channel_map(const ChannelProfile profiles[],
                                 uint32_t trackerCount,
-                                ChannelMap *map);
+                                ChannelMap *map,
+                                bool avoidMidiChannel10);
 bool mod2rmf_ranges_overlap(const ChannelProfile *a, const ChannelProfile *b);
 uint32_t mod2rmf_overlap_ticks(const ChannelProfile *a, const ChannelProfile *b);
 const char *mod2rmf_path_basename_ptr(const char *path);
