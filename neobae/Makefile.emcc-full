@@ -61,7 +61,7 @@ endif
 
 
 #/usr/share/emscripten/cache/sysroot/lib
-LIBS	:=  -lsndfile -lfluidsynth $(BAE_LIBS)
+LIBS	:=  -L../../emsdk/upstream/emscripten/cache/sysroot/lib -lsndfile -lfluidsynth $(BAE_LIBS)
 
 
 all: ${TARGET_JS} extra-files
