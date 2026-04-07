@@ -1575,6 +1575,10 @@ static bool PV_CanReuseSndResourceForSamples(BAERmfEditorSample const *left,
     {
         return FALSE;
     }
+    if (left->opusUseRoundTripResampling != right->opusUseRoundTripResampling)
+    {
+        return FALSE;
+    }
     /* For passthrough RMF samples, keep original shared SND topology even when
      * per-instrument root/loop interpretation differs. */
     if (left->targetCompressionType == BAE_EDITOR_COMPRESSION_DONT_CHANGE &&
@@ -8607,7 +8611,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
              * audibly wider than the original.  Removing leading zeros before
              * encoding keeps the attack tight.  Loop points are shifted to
              * compensate so they stay aligned with the trimmed PCM. */
-            if (compType == C_OPUS && writeWaveform.theWaveform &&
+            if (compType == C_OPUS && !sample->opusUseRoundTripResampling && writeWaveform.theWaveform &&
                 writeWaveform.waveFrames > 64 &&
                 (writeWaveform.bitSize == 8 || writeWaveform.bitSize == 16))
             {
@@ -8689,7 +8693,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                            (unsigned)index, (unsigned)(roundTripSourceRate >> 16));
             }
 
-            if (compType == C_OPUS)
+            if (compType == C_OPUS && !sample->opusUseRoundTripResampling)
             {
                 prePadWaveFrames = writeWaveform.waveFrames;
                 result = PV_ApplyOpusLoopSeamMicroFade(&writeWaveform,
@@ -12168,6 +12172,7 @@ BAEResult BAERmfEditorDocument_SetSampleAssetForSample(BAERmfEditorDocument *doc
     }
     sample->targetCompressionType = sourceCompression;
     sample->targetOpusMode = sourceAssetSample->targetOpusMode;
+    sample->opusUseRoundTripResampling = sourceAssetSample->opusUseRoundTripResampling;
 
     BAERmfEditorDocument_SetSampleAssetCompression(document, assetID, sourceCompression);
 
@@ -12754,6 +12759,7 @@ BAEResult BAERmfEditorDocument_PropagateReplacementToAsset(BAERmfEditorDocument 
         }
         dest->targetCompressionType = source->targetCompressionType;
         dest->targetOpusMode = source->targetOpusMode;
+        dest->opusUseRoundTripResampling = source->opusUseRoundTripResampling;
         dest->sourceCompressionType = source->sourceCompressionType;
         dest->sourceCompressionSubType = source->sourceCompressionSubType;
     }
@@ -13301,6 +13307,7 @@ static BAEResult PV_CopySampleEntry(BAERmfEditorDocument *dest,
     dstSample->sourceCompressionSubType = srcSample->sourceCompressionSubType;
     dstSample->targetCompressionType = srcSample->targetCompressionType;
     dstSample->targetOpusMode = srcSample->targetOpusMode;
+    dstSample->opusUseRoundTripResampling = srcSample->opusUseRoundTripResampling;
     dstSample->isBankAlias = srcSample->isBankAlias;
     dstSample->aliasBankToken = srcSample->aliasBankToken;
     dstSample->aliasSndResourceID = srcSample->aliasSndResourceID;

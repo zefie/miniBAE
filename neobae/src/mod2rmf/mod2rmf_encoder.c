@@ -284,8 +284,24 @@ int mod2rmf_encoder_apply(BAERmfEditorDocument *document,
             result = BAERmfEditorDocument_GetSampleInfo(document, i, &sInfo);
             if (result == BAE_NO_ERROR)
             {
+                sInfo.opusMode = BAE_EDITOR_OPUS_MODE_AUDIO;
                 sInfo.opusRoundTripResample = TRUE;
-                BAERmfEditorDocument_SetSampleInfo(document, i, &sInfo);
+                result = BAERmfEditorDocument_SetSampleInfo(document, i, &sInfo);
+                if (result != BAE_NO_ERROR)
+                {
+                    fprintf(stderr,
+                            "Warning: failed to apply Opus RT sample settings for sample %u: %d\n",
+                            (unsigned)i,
+                            (int)result);
+                    continue;
+                }
+            }
+            else
+            {
+                fprintf(stderr,
+                        "Warning: failed to read sample info for Opus RT sample %u: %d\n",
+                        (unsigned)i,
+                        (int)result);
             }
         }
 
