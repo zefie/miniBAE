@@ -1765,7 +1765,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
         }
         if (pSong->allowProgramChanges)
         {
-            if (MIDIChannel == PERCUSSION_CHANNEL)
+            if (MIDIChannel == PERCUSSION_CHANNEL && pSong->channelBankMode[MIDIChannel] != USE_NORM_BANK)
             {
                 // only change the percussion program if we're not in perc mode
                 if (pSong->defaultPercusionProgram > 0)
@@ -1894,7 +1894,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                 pSong->firstChannelBank[MIDIChannel] = pSong->channelBank[MIDIChannel];
             }
 
-            if (MIDIChannel == PERCUSSION_CHANNEL)
+            if (MIDIChannel == PERCUSSION_CHANNEL && pSong->channelBankMode[MIDIChannel] != USE_NORM_BANK)
             {
                 // only change the percussion program if we're not in perc mode
                 if (pSong->defaultPercusionProgram > 0)
@@ -2193,7 +2193,7 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                 }
                 else
                 {
-                    if (MIDIChannel == PERCUSSION_CHANNEL)
+                    if (MIDIChannel == PERCUSSION_CHANNEL && pSong->channelBankMode[MIDIChannel] != USE_NORM_BANK)
                     {
                         pSong->hasPercData = TRUE;
                     }
@@ -2236,7 +2236,7 @@ static void PV_ProcessPitchBend(GM_Song *pSong, int16_t MIDIChannel, int16_t cur
             // with the GM percussion set
             if (pSong->defaultPercusionProgram < 0) // in GM mode?
             {
-                if (MIDIChannel != PERCUSSION_CHANNEL)
+                if (MIDIChannel != PERCUSSION_CHANNEL || pSong->channelBankMode[MIDIChannel] == USE_NORM_BANK)
                 {
                     // change the current channel bends for new notes
                     pSong->channelBend[MIDIChannel] = SetChannelPitchBend(pSong, MIDIChannel,
@@ -3241,7 +3241,7 @@ void GM_GetPitchBend(GM_Song *pSong, int16_t channel, unsigned char *pLSB, unsig
     {
         *pLSB = 0;
         *pMSB = 0;
-        if ((pSong->defaultPercusionProgram < 0) && (channel != PERCUSSION_CHANNEL))
+        if ((pSong->defaultPercusionProgram < 0) && (channel != PERCUSSION_CHANNEL || pSong->channelBankMode[channel] == USE_NORM_BANK))
         {
             // Convert values from -8192 to 8192 to LSB & MSB values
             the_pitch_bend = pSong->channelBend[channel] + 8192;

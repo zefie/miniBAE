@@ -558,7 +558,10 @@ OPErr GM_PrerollSong(GM_Song *pSong, GM_SongCallbackProcPtr theCallbackProc,
                 XClearBit(&pSong->soloChannelMuted, count);
                 XSetBit(&pSong->allowPitchShift, count);
             }
-            XClearBit(&pSong->allowPitchShift, PERCUSSION_CHANNEL); // don't allow pitch changes on percussion
+            if (pSong->channelBankMode[PERCUSSION_CHANNEL] != USE_NORM_BANK)
+            {
+                XClearBit(&pSong->allowPitchShift, PERCUSSION_CHANNEL); // don't allow pitch changes on percussion
+            }
 
             pSong->velocityCurveType = DEFAULT_VELOCITY_CURVE;
 
@@ -939,7 +942,9 @@ OPErr GM_StartLiveSong(GM_Song *pSong, bool loadPatches, XBankToken bankToken)
                 XClearBit(&pSong->soloChannelMuted, count);
                 XSetBit(&pSong->allowPitchShift, count);
             }
-            XClearBit(&pSong->allowPitchShift, PERCUSSION_CHANNEL); // don't allow pitch changes on percussion
+            if (pSong->channelBankMode[PERCUSSION_CHANNEL] != USE_NORM_BANK) {
+                XClearBit(&pSong->allowPitchShift, PERCUSSION_CHANNEL); // don't allow pitch changes on percussion
+            }
 
             pSong->velocityCurveType = DEFAULT_VELOCITY_CURVE;
 
