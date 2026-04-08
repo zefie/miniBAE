@@ -474,6 +474,7 @@ class BeatnikPlayer {
             // If not RMI and we have a bank to load, load it first
             if (!isRMI && bankSource && !this._soundbankLoaded) {
                 await this.loadSoundbank(bankSource);
+                await new Promise(r => setTimeout(r, 100)); // Small delay to ensure bank is loaded before song
             }
 
             // Copy to WASM memory
