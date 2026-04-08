@@ -309,6 +309,7 @@ SRC		+=	src/BAE_Source/Common/DriverTools.c \
 			src/BAE_Source/Common/GenReverb.c \
 			src/BAE_Source/Common/GenReverbNew.c \
 			src/BAE_Source/Common/GenReverbNeo.c \
+			src/BAE_Source/Common/GenRingtone.c \
 			src/BAE_Source/Common/GenRMI.c \
 			src/BAE_Source/Common/GenSample.c \
 			src/BAE_Source/Common/GenSeq.c \
@@ -577,8 +578,13 @@ else
 											else
 												ifneq ($(WASM),1)
 													ifneq ($(SONGTOOL),1)
-														# playbae = libNeoBAE srcs + playbae.c
-														SRC += src/playbae/playbae.c
+															ifeq ($(RINGTONE2MID),1)
+																# libNeoBAE srcs + ringtone2mid.c
+																SRC += src/ringtone2mid/ringtone2mid.c
+															else
+																# playbae = libNeoBAE srcs + playbae.c
+																SRC += src/playbae/playbae.c
+															endif
 													else
 														# libNeoBAE srcs + songtool.c
 														SRC += src/songtool/songtool.c

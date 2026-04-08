@@ -159,6 +159,7 @@
 #include "X_Formats.h"
 #include "BAE_API.h"
 #include "X_Assert.h"
+#include "GenRingtone.h"
 #if USE_MTHC_SUPPORT == TRUE
 #include "../../mthc/mthc_decomp.h"
 #endif
@@ -11798,6 +11799,19 @@ BAEResult BAEMixer_LoadFromFile(BAEMixer mixer, BAEPathName filePath, BAELoadRes
         {
             sr = BAESong_LoadMidiFromFile(result->data.song, filePath, TRUE);
         }
+        else if (ftype == BAE_RINGTONE_IMY || ftype == BAE_RINGTONE_RNG || ftype == BAE_RINGTONE_RTX)
+        {
+            unsigned char *midiOut = NULL;
+            uint32_t midiOutSize = 0;
+
+            sr = BAERingtone_ConvertToMidiFromFile(filePath, ftype, &midiOut, &midiOutSize);
+            if (sr == BAE_NO_ERROR)
+            {
+                sr = BAESong_LoadMidiFromMemory(result->data.song, midiOut, midiOutSize, TRUE);
+            }
+            BAERingtone_FreeMidiBuffer(midiOut);
+            midiOut = NULL;
+        }
         else
         {
             // Default to standard MIDI for any remaining cases
@@ -12008,6 +12022,19 @@ BAEResult BAEMixer_LoadFromMemory(BAEMixer mixer, void const *pData, uint32_t da
         else if (ftype == BAE_MIDI_TYPE || ftype == BAE_RMI)
         {
             sr = BAESong_LoadMidiFromMemory(result->data.song, pData, dataSize, TRUE);
+        }
+        else if (ftype == BAE_RINGTONE_IMY || ftype == BAE_RINGTONE_RNG || ftype == BAE_RINGTONE_RTX)
+        {
+            unsigned char *midiOut = NULL;
+            uint32_t midiOutSize = 0;
+
+            sr = BAERingtone_ConvertToMidiFromMemory(pData, dataSize, ftype, &midiOut, &midiOutSize);
+            if (sr == BAE_NO_ERROR)
+            {
+                sr = BAESong_LoadMidiFromMemory(result->data.song, midiOut, midiOutSize, TRUE);
+            }
+            BAERingtone_FreeMidiBuffer(midiOut);
+            midiOut = NULL;
         }
         else
         {

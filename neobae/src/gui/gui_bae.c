@@ -7,6 +7,7 @@
 #include "gui_midi.h"    // For gui_midi_event_callback and midi output functions
 #include "gui_karaoke.h" // For karaoke functions
 #include "X_API.h"
+#include "GenRingtone.h"
 #if USE_SF2_SUPPORT
     #if _USING_FLUIDSYNTH
         #include "GenSF2_FluidSynth.h"
@@ -897,6 +898,20 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
     else if (ftype == BAE_MIDI_TYPE) 
     {
         sr = BAESong_LoadMidiFromFile(g_bae.song, (BAEPathName)path, TRUE);
+        g_bae.is_rmf_file = false;
+    }
+    else if (ftype == BAE_RINGTONE_IMY || ftype == BAE_RINGTONE_RNG || ftype == BAE_RINGTONE_RTX)
+    {
+        unsigned char *midiOut = NULL;
+        uint32_t midiOutSize = 0;
+
+        sr = BAERingtone_ConvertToMidiFromFile((BAEPathName)path, ftype, &midiOut, &midiOutSize);
+        if (sr == BAE_NO_ERROR)
+        {
+            sr = BAESong_LoadMidiFromMemory(g_bae.song, midiOut, midiOutSize, TRUE);
+        }
+        BAERingtone_FreeMidiBuffer(midiOut);
+        midiOut = NULL;
         g_bae.is_rmf_file = false;
     }
 

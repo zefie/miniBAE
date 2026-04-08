@@ -59,6 +59,8 @@ static uint32_t PV_ReadBigEndian32(const unsigned char *data);
 static BAEFileType PV_DetectRIFFType(const unsigned char *buffer, int32_t bufferSize);
 static BAEFileType PV_DetectOGGType(const unsigned char *buffer, int32_t bufferSize);
 static int PV_IsLikelyMPEGHeader(const unsigned char *header);
+static int PV_StartsWithNoCase(const unsigned char *data, int32_t length, const char *needle);
+static int PV_IsLikelyRTTTL(const unsigned char *data, int32_t length);
 
 /**
  * Read a 32-bit big-endian value from a buffer
@@ -259,6 +261,112 @@ static int PV_IsLikelyMPEGHeader(const unsigned char *header)
     return 0;
 }
 
+static int PV_StartsWithNoCase(const unsigned char *data, int32_t length, const char *needle)
+{
+    int32_t i;
+    if (!data || !needle)
+        return 0;
+
+    for (i = 0; needle[i] != '\0'; ++i)
+    {
+        char a;
+        char b;
+        if (i >= length)
+            return 0;
+        a = (char)data[i];
+        b = needle[i];
+        if (a >= 'A' && a <= 'Z')
+            a = (char)(a + ('a' - 'A'));
+        if (b >= 'A' && b <= 'Z')
+            b = (char)(b + ('a' - 'A'));
+        if (a != b)
+            return 0;
+    }
+    return 1;
+}
+
+/*
+ * Detect Nokia RTTTL / RTX plain-text ringtone format.
+ *
+ * The canonical structure is:
+ *   <title> : <defaults> : <note-list>
+ * where <defaults> contains comma-separated key=value pairs such as
+ *   d=16,o=5,b=120
+ * with single-letter keys (d/o/b/l/s) and decimal values.
+ *
+ * Detection strategy:
+ *  1. Confirm the probe window is clean ASCII (no binary control bytes).
+ *  2. Find the first colon (end of title).
+ *  3. After it, confirm at least one <letter>=<digits> token before the
+ *     second colon – this is the most distinctive structural marker.
+ *  4. Confirm a second colon exists (separates defaults from note list).
+ */
+static int PV_IsLikelyRTTTL(const unsigned char *data, int32_t length)
+{
+    int32_t i;
+    int32_t sample;
+    int32_t firstColon;
+    int32_t secondColon;
+    int hasKeyValue;
+    unsigned char c;
+
+    if (!data || length <= 0)
+        return 0;
+
+    sample = length < 512 ? length : 512;
+
+    /* 1. Reject any buffer that contains binary control bytes. */
+    for (i = 0; i < sample; ++i)
+    {
+        c = data[i];
+        if (c < 9 || (c > 13 && c < 32))
+            return 0;
+    }
+
+    /* 2. Locate the first colon (title separator). */
+    firstColon = -1;
+    for (i = 0; i < sample; ++i)
+    {
+        if (data[i] == ':')
+        {
+            firstColon = i;
+            break;
+        }
+    }
+    if (firstColon < 0)
+        return 0;
+
+    /* 3. Between first and second colon look for <letter>=<digit(s)>. */
+    hasKeyValue = 0;
+    secondColon = -1;
+    for (i = firstColon + 1; i + 2 < sample; ++i)
+    {
+        if (data[i] == ':')
+        {
+            secondColon = i;
+            break;
+        }
+        c = data[i];
+        /* key: single ASCII letter */
+        if (((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) &&
+            data[i + 1] == '=' &&
+            (data[i + 2] >= '0' && data[i + 2] <= '9'))
+        {
+            hasKeyValue = 1;
+        }
+    }
+
+    /* 4. Must have both structural markers. */
+    if (!hasKeyValue || secondColon < 0)
+        return 0;
+
+    /* A note list must begin after the second colon. */
+    if (secondColon + 1 >= sample)
+        return 0;
+
+    return 1;
+}
+
 /**
  * Determine file type by analyzing file path/extension
  * 
@@ -326,6 +434,12 @@ BAEFileType X_DetermineFileTypeByPath(const char *filePath)
         return BAE_RMF;
     else if (strcmp(extLower, ".rmi") == 0)
         return BAE_RMI;        
+    else if (strcmp(extLower, ".imy") == 0 || strcmp(extLower, ".emy") == 0)
+        return BAE_RINGTONE_IMY;
+    else if (strcmp(extLower, ".rng") == 0)
+        return BAE_RINGTONE_RNG;
+    else if (strcmp(extLower, ".rtx") == 0 || strcmp(extLower, ".rtttl") == 0)
+        return BAE_RINGTONE_RTX;
 #if USE_XMF_SUPPORT == TRUE
     else if (strcmp(extLower, ".xmf") == 0 || strcmp(extLower, ".mxmf") == 0)
         return BAE_XMF; // XMF files contain MIDI data
@@ -442,6 +556,15 @@ BAEFileType X_DetermineFileTypeByData(const unsigned char *data, int32_t length)
         return BAE_ADP_TYPE;
     }
 #endif    
+    /* Nokia Smart Messaging binary ringtone starts with 02 4A 3A. */
+    if (length >= 3 &&
+        data[0] == 0x02 &&
+        data[1] == 0x4A &&
+        data[2] == 0x3A)
+    {
+        return BAE_RINGTONE_RNG;
+    }
+
     // Read the first FOURCC
     fourcc = PV_ReadBigEndian32(data);
     // Skip leading null bytes (up to 1024 bytes)
@@ -537,6 +660,17 @@ BAEFileType X_DetermineFileTypeByData(const unsigned char *data, int32_t length)
             }
 #endif            
             break;
+    }
+
+    if (PV_StartsWithNoCase(data, length, "begin:imelody") ||
+        PV_StartsWithNoCase(data, length, "begin:emelody"))
+    {
+        return BAE_RINGTONE_IMY;
+    }
+
+    if (PV_IsLikelyRTTTL(data, length))
+    {
+        return BAE_RINGTONE_RTX;
     }
     
     return BAE_INVALID_TYPE;
@@ -636,6 +770,9 @@ const char *X_GetFileTypeString(BAEFileType fileType)
 #if USE_ADP_SUPPORT == TRUE
         case BAE_ADP_TYPE:      return "Nokia ADP (RotR2 G.722)";
 #endif
+    case BAE_RINGTONE_IMY:  return "iMelody";
+    case BAE_RINGTONE_RNG:  return "Nokia RNG";
+    case BAE_RINGTONE_RTX:  return "Nokia RTX/RTTTL";
         case BAE_GROOVOID:      return "Groovoid";
         case BAE_RAW_PCM:       return "Raw PCM";
         case BAE_INVALID_TYPE:  return "Unknown";
@@ -687,5 +824,11 @@ BAEFileType X_ConvertFileTypeString(const char *typeString)
     else if (strcmp(typeString, X_FILETYPE_ADP) == 0)
         return BAE_ADP_TYPE;
 #endif
+    else if (strcmp(typeString, "IMY") == 0 || strcmp(typeString, "iMelody") == 0)
+        return BAE_RINGTONE_IMY;
+    else if (strcmp(typeString, "RNG") == 0)
+        return BAE_RINGTONE_RNG;
+    else if (strcmp(typeString, "RTX") == 0 || strcmp(typeString, "RTTTL") == 0)
+        return BAE_RINGTONE_RTX;
     return BAE_INVALID_TYPE;
 }

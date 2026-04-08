@@ -236,6 +236,7 @@ static const char AUDIO_EXT_FILTER[] =
 #else
     ""
 #endif
+    "*.imy;*.rng;*.rtx;"
 #if USE_ZMF_SUPPORT == TRUE
     "*.zmf;";
 #else
@@ -300,7 +301,7 @@ static const char AUDIO_EXT_FILTER[] =
     return NULL;
 #elif defined(__APPLE__)
     static const char AUDIO_TYPE_LIST[] =
-        "\"mid\", \"midi\", \"kar\", \"rmi\", \"rmf\", \"zmf\""
+        "\"mid\", \"midi\", \"kar\", \"rmi\", \"rmf\", \"zmf\", \"imy\", \"rng\", \"rtx\""
 #if USE_FLAC_DECODER == TRUE
         ", \"flac\""
 #endif
@@ -346,7 +347,7 @@ static const char AUDIO_EXT_FILTER[] =
 #else
 /* Compile-time built extension list, Linux Style */
 static const char AUDIO_EXT_FILTER[] =
-    "*.mid *.midi *.kar *.rmi *.rmf "
+    "*.mid *.midi *.kar *.rmi *.rmf *.imy *.rng *.rtx "
 #if USE_ZMF_SUPPORT == TRUE
     "*.zmf "
 #else

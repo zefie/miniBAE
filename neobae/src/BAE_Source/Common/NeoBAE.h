@@ -322,6 +322,9 @@ extern "C"
 #if USE_ADP_SUPPORT == TRUE
         BAE_ADP_TYPE,
 #endif  
+        BAE_RINGTONE_IMY,
+        BAE_RINGTONE_RNG,
+        BAE_RINGTONE_RTX,
         BAE_RAW_PCM
     } BAEFileType;
 
@@ -2316,6 +2319,42 @@ extern "C"
     BAEResult BAESong_LoadMidiFromFile(BAESong song,
                                        BAEPathName filePath,
                                        BAE_BOOL ignoreBadInstruments);
+
+    // BAERingtone_ConvertToMidiFromMemory()
+    // ------------------------------------
+    // Converts supported ringtone payloads (iMelody/RTX/RNG) to a standard
+    // MIDI file image in memory.
+    //
+    // Caller owns *ppMidiOut and must free it with BAERingtone_FreeMidiBuffer.
+    BAEResult BAERingtone_ConvertToMidiFromMemory(void const *pData,
+                                                  uint32_t dataSize,
+                                                  BAEFileType fileType,
+                                                  unsigned char **ppMidiOut,
+                                                  uint32_t *pMidiSizeOut);
+
+    // BAERingtone_ConvertToMidiFromFile()
+    // ------------------------------------
+    // Converts ringtone file contents to standard MIDI image.
+    BAEResult BAERingtone_ConvertToMidiFromFile(BAEPathName filePath,
+                                                BAEFileType fileType,
+                                                unsigned char **ppMidiOut,
+                                                uint32_t *pMidiSizeOut);
+
+    // BAERingtone_SetIMYDefaultProgram()
+    // ------------------------------------
+    // Sets fallback GM program (0-127) used for iMelody when composer metadata
+    // does not provide an instrument mapping.
+    void BAERingtone_SetIMYDefaultProgram(int program);
+
+    // BAERingtone_GetIMYDefaultProgram()
+    // ------------------------------------
+    // Returns current fallback GM program used by iMelody conversion.
+    int BAERingtone_GetIMYDefaultProgram(void);
+
+    // BAERingtone_FreeMidiBuffer()
+    // ------------------------------------
+    // Releases buffers allocated by BAERingtone_ConvertToMidi*.
+    void BAERingtone_FreeMidiBuffer(unsigned char *pMidiData);
 
     // BAESong_LoadRmfFromMemory()
     // --------------------------------------

@@ -91,7 +91,7 @@ class HomeFragment : Fragment() {
         
         // Valid music file extensions
         private val AUDIO_EXTENSIONS = listOf("wav", "ogg", "flac", "au", "mp2", "mp3", "aif", "aiff", "adp")
-        private val SONG_EXTENSIONS = listOf("mid", "midi", "kar", "rmf", "zmf", "xmf", "mxmf", "rmi", "seq", "re", "mthc")
+        private val SONG_EXTENSIONS = listOf("mid", "midi", "kar", "rmf", "zmf", "xmf", "mxmf", "rmi", "seq", "re", "mthc", "imy", "emy", "rng", "rtx", "ott")
         
         // Valid sound bank file extensions
         val BANK_EXTENSIONS = setOf("sf2", "hsb", "zsb", "sf3", "sfo", "dls")

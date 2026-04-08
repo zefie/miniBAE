@@ -429,6 +429,7 @@ static void init_playFileString(void)
 {
    /* Build the human-friendly file type list at runtime (can't call strcat at file-scope). */
    strcpy(playFileString, "Play a file (MIDI, RMF, WAV, AIFF");
+   strcat(playFileString, ", iMelody/RTX/RNG");
 #if USE_ZMF_SUPPORT == TRUE
    strcat(playFileString, ", ZMF");
 #endif
