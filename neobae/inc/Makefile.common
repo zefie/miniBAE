@@ -71,6 +71,12 @@ ifeq ($(USE_SDL3),1)
 	USE_SDL2 := 0
 endif
 
+# Disable SDL backends if using raylib
+ifeq ($(USE_RAYLIB),1)
+	USE_SDL2 := 0
+	USE_SDL3 := 0
+endif
+
 # Likewise, Disable SDL3 if using SDL2
 ifeq ($(USE_SDL2),1)
 	USE_SDL3 := 0
@@ -260,8 +266,10 @@ ifeq ($(BAE_API),SDL3)
 	BAE_FLAGS += 	-DX_PLATFORM=X_SDL3
 	SRC       :=	src/BAE_Source/Platform/BAE_API_$(BAE_API).c
 endif
-
-
+ifeq ($(BAE_API),Raylib)
+	BAE_FLAGS += 	-DX_PLATFORM=X_RAYLIB -DUSE_RAYLIB=1
+	SRC       :=	src/BAE_Source/Platform/BAE_API_$(BAE_API).c
+endif
 # zefie has not tested these APIs
 ifeq ($(BAE_API),MacOSX)
 	BAE_FLAGS += 	-DX_PLATFORM=X_MACINTOSH
@@ -737,5 +745,8 @@ endef
 
 ifeq ($(USE_SDL3),1)
 	BAE_FLAGS += -D_USING_SDL3=1
+endif
+ifeq ($(USE_RAYLIB),1)
+	BAE_FLAGS += -D_USING_RAYLIB=1
 endif
 #### End Makefile.common

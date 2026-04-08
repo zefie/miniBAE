@@ -369,6 +369,8 @@ const char *BAE_GetFeatureString()
     const char *audio = "SDL2";
 #elif (X_PLATFORM == X_SDL3)
     const char *audio = "SDL3";
+#elif (X_PLATFORM == X_RAYLIB)
+    const char *audio = "raylib";
 #elif (X_PLATFORM == X_WIN95)
     const char *audio = "DirectSound";
 #else

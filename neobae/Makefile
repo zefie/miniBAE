@@ -1,4 +1,6 @@
-ifeq ($(USE_SDL3),1)
+ifeq ($(USE_RAYLIB),1)
+	BAE_API			:= Raylib
+else ifeq ($(USE_SDL3),1)
 	BAE_API			:= SDL3
 else
 	BAE_API			:= SDL2
@@ -44,7 +46,34 @@ ifneq ($(BAE_LIBS),)
 endif
 
 UNAME_S:=$(shell uname -s 2>/dev/null)
-ifeq ($(USE_SDL3),1)
+ifeq ($(USE_RAYLIB),1)
+# System raylib for Linux (dynamic) if pkg-config available
+ifneq (,$(findstring Linux,$(UNAME_S)))
+	RAYLIB_CFLAGS := $(shell pkg-config --cflags raylib 2>/dev/null)
+	RAYLIB_LIBS   := $(shell pkg-config --libs raylib 2>/dev/null)
+	ifneq ($(RAYLIB_LIBS),)
+		CFLAGS += $(RAYLIB_CFLAGS)
+		LIBS := $(RAYLIB_LIBS) $(filter-out -lraylib,$(LIBS))
+		ifneq (,$(findstring -static,$(ARCH)))
+			ARCH := $(filter-out -static,$(ARCH))
+			LDFLAGS := $(filter-out -static,$(LDFLAGS))
+		endif
+	else
+		CFLAGS += -I/usr/include
+		LIBS := -lraylib $(LIBS)
+	endif
+else
+	RAYLIB_CFLAGS := $(shell pkg-config --cflags raylib 2>/dev/null)
+	RAYLIB_LIBS   := $(shell pkg-config --libs raylib 2>/dev/null)
+	ifneq ($(RAYLIB_LIBS),)
+		CFLAGS += $(RAYLIB_CFLAGS)
+		LIBS := $(RAYLIB_LIBS) $(LIBS)
+	else
+		CFLAGS += -I/usr/include
+		LIBS := -lraylib $(LIBS)
+	endif
+endif
+else ifeq ($(USE_SDL3),1)
 # System SDL for Linux (dynamic) if pkg-config available
 ifneq (,$(findstring Linux,$(UNAME_S)))
 	SDL3_CFLAGS := $(shell pkg-config --cflags sdl3 2>/dev/null)

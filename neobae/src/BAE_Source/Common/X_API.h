@@ -320,6 +320,7 @@
 #define X_FOOBAR2000_PLUGIN 21      // foobar2000 plugin
 #define X_WASM              22      // WebAssembly
 #define X_DUMMY             23      // Dummy platform for when mixer isn't needed
+#define X_RAYLIB            24      // raylib audio backend
 
 // types for CPU_TYPE
 #define k68000              0
@@ -423,6 +424,8 @@
     #include "BAEBuildOptions_SDL2.h"
 #elif X_PLATFORM == X_SDL3
     #include "BAEBuildOptions_SDL3.h"
+#elif X_PLATFORM == X_RAYLIB
+    #include "BAEBuildOptions_Raylib.h"
 #elif X_PLATFORM == X_FOOBAR2000_PLUGIN
     #include "BAEBuildOptions_foobar2000.h"    
 #endif

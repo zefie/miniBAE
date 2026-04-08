@@ -74,19 +74,14 @@ void BAE_ReleaseMutex(BAE_Mutex mutex) {
 // Audio Hardware (stubs - we use JS audio)
 // ============================================
 
-int BAE_AquireAudioCard(void* context, uint32_t sampleRate,
-                        uint32_t channels, uint32_t bits) {
+// Alternate spelling used by zefie fork
+int BAE_AcquireAudioCard(void* context, uint32_t sampleRate,
+                         uint32_t channels, uint32_t bits) {
     (void)context;
     (void)sampleRate;
     (void)channels;
     (void)bits;
     return 0;  // Success
-}
-
-// Alternate spelling used by zefie fork
-int BAE_AcquireAudioCard(void* context, uint32_t sampleRate,
-                         uint32_t channels, uint32_t bits) {
-    return BAE_AquireAudioCard(context, sampleRate, channels, bits);
 }
 
 int BAE_ReleaseAudioCard(void* context) {
