@@ -158,7 +158,7 @@ LOCAL_SRC_FILES	:= \
 			../thirdparty/flac/src/libFLAC/ogg_helper.c \
 			../thirdparty/flac/src/libFLAC/ogg_mapping.c \
       		../thirdparty/flac/src/libFLAC/stream_encoder.c \
-			../thirdparty/flac/src/libFLAC/ogg_encoder_aspect.c \
+		  	../thirdparty/flac/src/libFLAC/ogg_encoder_aspect.c \
 			../thirdparty/lzma-26.00/C/Alloc.c \
 			../thirdparty/lzma-26.00/C/7zAlloc.c \
 			../thirdparty/lzma-26.00/C/7zStream.c \
@@ -179,7 +179,12 @@ LOCAL_SRC_FILES	:= \
 			../thirdparty/lzma-26.00/C/Lzma2Enc.c \
 			../thirdparty/lzma-26.00/C/Lzma2Dec.c \
 			../thirdparty/lzma-26.00/C/Xz.c \
-			../thirdparty/lzma-26.00/C/XzDec.c
+			../thirdparty/lzma-26.00/C/XzDec.c			
+
+PATCHES_SCRIPT := $(LOCAL_PATH)/../../../scripts/create_embedded_patches_h.py
+PATCHES_HSB := $(LOCAL_PATH)/../banks/patches111/patches111.hsb
+GEN_DIR := /tmp/androbae
+PATCHES_H := $(GEN_DIR)/BAEPatches.h
 
 # ndk-build doesn't reliably trigger custom prerequisite rules for generated
 # headers, so generate at parse time via $(shell ...).
@@ -299,10 +304,3 @@ include $(CLEAR_VARS)
 LOCAL_MODULE := opusfile
 LOCAL_SRC_FILES := $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_ABI)/libopus/lib/libopusfile.so
 include $(PREBUILT_SHARED_LIBRARY)
-
-# Import prebuilt opusfile .so
-include $(CLEAR_VARS)
-LOCAL_MODULE := lzma
-LOCAL_SRC_FILES := $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_ABI)/lzma/lib/liblzma.so
-include $(PREBUILT_SHARED_LIBRARY)
-
