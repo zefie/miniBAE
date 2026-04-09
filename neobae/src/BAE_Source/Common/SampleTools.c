@@ -2449,12 +2449,36 @@ XSoundFormat1*      header;
     OPErr       err;
     XSndHeader3 *snd;
     GM_Waveform pcmSrc;
+    XPTR        wordData;
 
         pcmSrc = src;
         if (pcmSrc.compressionType != (uint32_t)C_NONE)
         {
             XDisposePtr(intermediateData);
             return PARAM_ERR;
+        }
+
+        if (pcmSrc.bitSize != 16)
+        {
+            if (pcmSrc.bitSize != 8)
+            {
+                XDisposePtr(intermediateData);
+                return NOT_SETUP;
+            }
+
+            /* QOA expects 16-bit PCM; up-convert 8-bit samples first. */
+            wordData = XConvert8BitTo16Bit((unsigned char *)pcmSrc.theWaveform,
+                                           pcmSrc.waveFrames,
+                                           pcmSrc.channels);
+            XDisposePtr(intermediateData);
+            if (!wordData)
+            {
+                return MEMORY_ERR;
+            }
+            intermediateData = wordData;
+            pcmSrc.theWaveform = wordData;
+            pcmSrc.bitSize = 16;
+            pcmSrc.waveSize *= 2;
         }
 
         err = XEncodeQOAToMemory(&pcmSrc, &encodedData, &encodedBytes);
@@ -2475,16 +2499,16 @@ XSoundFormat1*      header;
         XPutShort(&snd->type, XThirdSoundFormat);
 
         XPutLong(&snd->sndBuffer.subType,      C_QOA);
-        XPutLong(&snd->sndBuffer.sampleRate,   src.sampledRate);
-        XPutLong(&snd->sndBuffer.frameCount,   src.waveFrames);
+        XPutLong(&snd->sndBuffer.sampleRate,   pcmSrc.sampledRate);
+        XPutLong(&snd->sndBuffer.frameCount,   pcmSrc.waveFrames);
         XPutLong(&snd->sndBuffer.encodedBytes, encodedBytes);
-        XPutLong(&snd->sndBuffer.decodedBytes, (uint32_t)(src.waveFrames * src.channels * (src.bitSize / 8)));
+        XPutLong(&snd->sndBuffer.decodedBytes, (uint32_t)(pcmSrc.waveFrames * pcmSrc.channels * (pcmSrc.bitSize / 8)));
         XPutLong(&snd->sndBuffer.blockBytes,   0);
         XPutLong(&snd->sndBuffer.startFrame,   0);
-        XPutLong(&snd->sndBuffer.loopStart[0], src.startLoop);
-        XPutLong(&snd->sndBuffer.loopEnd[0],   src.endLoop);
-        snd->sndBuffer.baseKey    = (unsigned char)src.baseMidiPitch;
-        snd->sndBuffer.channels   = (unsigned char)src.channels;
+        XPutLong(&snd->sndBuffer.loopStart[0], pcmSrc.startLoop);
+        XPutLong(&snd->sndBuffer.loopEnd[0],   pcmSrc.endLoop);
+        snd->sndBuffer.baseKey    = (unsigned char)pcmSrc.baseMidiPitch;
+        snd->sndBuffer.channels   = (unsigned char)pcmSrc.channels;
         snd->sndBuffer.bitSize    = 16;
         snd->sndBuffer.isEmbedded = TRUE;
         XBlockMove(encodedData, snd->sndBuffer.sampleArea, (int32_t)encodedBytes);
