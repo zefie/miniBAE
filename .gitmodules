@@ -25,3 +25,6 @@
 [submodule "neobae/src/thirdparty/qoa"]
 	path = neobae/src/thirdparty/qoa
 	url = https://github.com/phoboslab/qoa
+[submodule "neobae/src/thirdparty/libxmp"]
+	path = neobae/src/thirdparty/libxmp
+	url = https://github.com/libxmp/libxmp

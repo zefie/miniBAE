@@ -927,11 +927,17 @@ static int PV_RNGTempoCodeToBpm(uint32_t tempoCode)
 
 static int PV_RNGScaleToOctave(uint32_t scale)
 {
+    /* Spec Table 3.8-9:
+     * Scale-1 (A=440 Hz)  = 00 → A4  → octave 4
+     * Scale-2 (A=880 Hz)  = 01 → A5  → octave 5  (default)
+     * Scale-3 (A=1.76kHz) = 10 → A6  → octave 6
+     * Scale-4 (A=3.52kHz) = 11 → A7  → octave 7  */
     switch (scale)
     {
         case 0: return 4;
         case 1: return 5;
         case 2: return 6;
+        case 3: return 7;
         default: return 5;
     }
 }

@@ -22,7 +22,7 @@
                 "${workspaceFolder}/deps/win/SDL3_ttf/x86_64-w64-mingw32/include/**",
                 "${workspaceFolder}/deps/win/lame/x86_64-w64-mingw32/include/**",
                 "${workspaceFolder}/neobae/src/thirdparty/flac/src/share/win_utf8_io/**",
-                "${HOME}/dev/libxmp/include/**",
+                "${workspaceFolder}/neobae/src/thirdparty/libxmp/include/**",
                 "${workspaceFolder}/neobae/src/mod2rmf/**"
             ],
             "defines": [
