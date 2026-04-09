@@ -31,6 +31,6 @@ private:
     std::vector<uint32_t> m_sampleIndices;
     bool m_compressAll;
 
-    static const int CODEC_CHOICES_COUNT = 8;
+    static const int CODEC_CHOICES_COUNT = 9;
     static const int DEFAULT_CODEC = 6; // OPUS
 };

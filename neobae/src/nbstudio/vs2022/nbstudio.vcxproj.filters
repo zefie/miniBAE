@@ -216,6 +216,12 @@
     <ClCompile Include="..\..\mthc\mthc_decomp.c">
       <Filter>Source Files\MTHC Support</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\BAE_Source\Common\GenRingtone.c">
+      <Filter>Source Files\BAE Common</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\BAE_Source\Common\XQOAFiles.c">
+      <Filter>Source Files\BAE Common</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\BAE_Source\Common\NeoBAE.h">

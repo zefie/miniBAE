@@ -39,6 +39,9 @@ static std::pair<int, int> CompressionTypeToCodecBitrate(BAERmfEditorCompression
         case BAE_EDITOR_COMPRESSION_OPUS_160K:   return std::make_pair(opusRoundTrip ? 7 : 6, 9);
         case BAE_EDITOR_COMPRESSION_OPUS_192K:   return std::make_pair(opusRoundTrip ? 7 : 6, 10);
         case BAE_EDITOR_COMPRESSION_OPUS_256K:   return std::make_pair(opusRoundTrip ? 7 : 6, 11);
+#if USE_QOA_SUPPORT == TRUE
+        case BAE_EDITOR_COMPRESSION_QOA:         return std::make_pair(8, 0);
+#endif
         default:                                  return std::make_pair(6, 8);
     }
 }
@@ -77,6 +80,9 @@ BatchCompressDialog::BatchCompressDialog(wxWindow *parent,
     m_codecChoice->Append("FLAC");
     m_codecChoice->Append("OPUS");
     m_codecChoice->Append("OPUS (Round-Trip)");
+#if USE_QOA_SUPPORT == TRUE
+    m_codecChoice->Append("QOA");
+#endif
     {
         std::pair<int, int> sel = CompressionTypeToCodecBitrate(initialCompressionType, initialOpusRoundTrip);
         int codecSel = sel.first;
@@ -170,6 +176,9 @@ void BatchCompressDialog::UpdateBitrateChoice(int codecIdx)
     case 1: // RAW PCM
     case 2: // ADPCM
     case 5: // FLAC
+#if USE_QOA_SUPPORT == TRUE
+    case 8: // QOA
+#endif
         m_bitrateChoice->Append("---");
         m_bitrateChoice->SetSelection(0);
         m_bitrateChoice->Enable(false);
@@ -269,6 +278,9 @@ BAERmfEditorCompressionType BatchCompressDialog::GetSelectedCompressionType() co
         }
     }
     case 5: return BAE_EDITOR_COMPRESSION_FLAC;
+#if USE_QOA_SUPPORT == TRUE
+    case 8: return BAE_EDITOR_COMPRESSION_QOA;
+#endif
     case 7: // OPUS (Round-Trip) uses same Opus bitrate mapping
     case 6: // OPUS
     {
