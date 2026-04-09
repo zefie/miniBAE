@@ -1415,8 +1415,28 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
             "Copyright (C) 2004-2026 FluidSynth Team",
             "https://www.fluidsynth.org/",
 #endif
+#if USE_QOA_SUPPORT == TRUE
             "",
-            NULL};
+            "Quite OK Audio Codec (QOA)",
+            "Copyright (C) 2023 Dominic Szablewski",
+            "https://github.com/phoboslab/qoa",
+#endif
+#if USE_ADP_SUPPORT == TRUE
+            "",
+            "libg722",
+            "Copyright (c) 2014-2025 Sippy Software, Inc.",
+            "http://www.sippysoft.com",
+#endif
+#if USE_LZMA_COMPRESSION == TRUE
+             "",
+             "LZMA SDK",
+             "Copyright (C) 1999-2026 Igor Pavlov",
+             "https://www.7-zip.org/sdk.html",
+#endif
+
+            "",
+            NULL
+        };
         
         // Check if credits_page2 has any meaningful content (not just empty strings)
         bool has_credits_content = false;
