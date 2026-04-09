@@ -42,8 +42,19 @@ extern void SetAudioStreamPan(AudioStream stream, float pan);
 #include <X_Assert.h>
 
 #ifdef _WIN32
-#include <windows.h>
 #include <io.h>
+
+#ifndef __stdcall
+    #define __stdcall
+#endif
+
+#if defined(_MSC_VER)
+__declspec(dllimport) void __stdcall Sleep(unsigned long dwMilliseconds);
+__declspec(dllimport) unsigned long long __stdcall GetTickCount64(void);
+#else
+extern __attribute__((dllimport)) void __stdcall Sleep(unsigned long dwMilliseconds);
+extern __attribute__((dllimport)) unsigned long long __stdcall GetTickCount64(void);
+#endif
 #else
 #include <unistd.h>
 #include <sys/types.h>
@@ -59,6 +70,8 @@ static uint32_t g_bits = 16;
 static int32_t g_audioByteBufferSize = 0;
 static uint32_t g_framesPerSlice = 0;
 static uint64_t g_totalSamplesPlayed = 0;
+static uint8_t *g_sliceStatic = NULL;
+static size_t g_sliceStaticSize = 0;
 static int16_t g_unscaled_volume = 256;
 static int16_t g_balance = 0;
 static int g_muted = 0;
@@ -148,6 +161,16 @@ static void PV_ComputeSliceSizeFromEngine(void)
     g_framesPerSlice = frames;
     g_audioByteBufferSize = (int32_t)(frames * g_channels * (g_bits / 8));
     g_audioByteBufferSize = (g_audioByteBufferSize + 63) & ~63;
+
+    if (g_sliceStaticSize < (size_t)g_audioByteBufferSize)
+    {
+        free(g_sliceStatic);
+        g_sliceStatic = (uint8_t *)calloc(1, (size_t)g_audioByteBufferSize);
+        if (g_sliceStatic)
+        {
+            g_sliceStaticSize = (size_t)g_audioByteBufferSize;
+        }
+    }
 }
 
 static uint64_t PV_MonotonicMicros(void)
@@ -181,13 +204,14 @@ static void PV_PrepareSplitBuffers(int16_t **left, int16_t **right, uint32_t *ca
     }
 }
 
-static void raylib_audio_callback(void *bufferData, unsigned int frames)
+void raylib_audio_callback(void *bufferData, unsigned int frames)
 {
-    int32_t bufferByteLength;
     int sampleBytes;
     static int16_t *split_left = NULL;
     static int16_t *split_right = NULL;
     static uint32_t split_capacity = 0;
+    static int32_t sliceValidBytes = 0;
+    static int32_t sliceConsumedBytes = 0;
 
     if (!bufferData || frames == 0)
     {
@@ -200,87 +224,122 @@ static void raylib_audio_callback(void *bufferData, unsigned int frames)
         return;
     }
 
-    bufferByteLength = (int32_t)(frames * (uint32_t)sampleBytes);
+    int remaining = (int)(frames * (uint32_t)sampleBytes);
+    uint8_t *out = (uint8_t *)bufferData;
 
     if (g_muted)
     {
-        memset(bufferData, (g_bits == 8) ? 0x80 : 0, (size_t)bufferByteLength);
+        memset(bufferData, (g_bits == 8) ? 0x80 : 0, (size_t)remaining);
         return;
     }
 
-    BAE_BuildMixerSlice(g_threadContext, bufferData, bufferByteLength, (int32_t)frames);
-    g_totalSamplesPlayed += frames;
-
-    pthread_mutex_lock(&g_stateMutex);
-
-    if (g_pcm_rec_fp)
+    while (remaining > 0)
     {
-        size_t wrote = fwrite(bufferData, 1, (size_t)bufferByteLength, g_pcm_rec_fp);
-        if (wrote == (size_t)bufferByteLength)
+        int32_t sliceBytes = g_audioByteBufferSize;
+        if (sliceBytes <= 0 || !g_sliceStatic)
         {
-            g_pcm_rec_data_bytes += (uint64_t)wrote;
+            memset(out, (g_bits == 8) ? 0x80 : 0, (size_t)remaining);
+            g_totalSamplesPlayed += (uint64_t)(remaining / sampleBytes);
+            break;
         }
-    }
 
-    if (g_bits == 16)
-    {
-        int16_t *samples = (int16_t *)bufferData;
-        uint32_t frameIndex;
-
-        if (g_channels == 1)
+        /* If the previous slice has been fully consumed, generate a new one */
+        if (sliceConsumedBytes >= sliceValidBytes)
         {
-#if USE_FLAC_ENCODER == TRUE            
-            if (g_flac_recorder_callback)
+            int32_t sliceFrames = sliceBytes / sampleBytes;
+            if (sliceFrames <= 0)
             {
-                g_flac_recorder_callback(samples, samples, (int)frames);
+                memset(out, 0, (size_t)remaining);
+                break;
             }
+
+            BAE_BuildMixerSlice(g_threadContext, g_sliceStatic, sliceBytes, sliceFrames);
+
+            pthread_mutex_lock(&g_stateMutex);
+
+            if (g_pcm_rec_fp)
+            {
+                size_t wrote = fwrite(g_sliceStatic, 1, (size_t)sliceBytes, g_pcm_rec_fp);
+                if (wrote == (size_t)sliceBytes)
+                {
+                    g_pcm_rec_data_bytes += (uint64_t)wrote;
+                }
+            }
+
+            if (g_bits == 16)
+            {
+                int16_t *samples = (int16_t *)g_sliceStatic;
+
+                if (g_channels == 1)
+                {
+#if USE_FLAC_ENCODER == TRUE
+                    if (g_flac_recorder_callback)
+                    {
+                        g_flac_recorder_callback(samples, samples, (int)sliceFrames);
+                    }
 #endif
 #if USE_VORBIS_ENCODER == TRUE
-            if (g_vorbis_recorder_callback)
-            {
-                g_vorbis_recorder_callback(samples, samples, (int)frames);
-            }
+                    if (g_vorbis_recorder_callback)
+                    {
+                        g_vorbis_recorder_callback(samples, samples, (int)sliceFrames);
+                    }
 #endif
 #if USE_OPUS_ENCODER == TRUE
-            if (g_opus_recorder_callback)
-            {
-                g_opus_recorder_callback(samples, samples, (int)frames);
-            }
+                    if (g_opus_recorder_callback)
+                    {
+                        g_opus_recorder_callback(samples, samples, (int)sliceFrames);
+                    }
 #endif
-        }
-        else if (g_channels == 2)
-        {
-            PV_PrepareSplitBuffers(&split_left, &split_right, &split_capacity, frames);
-            if (split_left && split_right)
-            {
-                for (frameIndex = 0; frameIndex < frames; ++frameIndex)
-                {
-                    split_left[frameIndex] = samples[frameIndex * 2];
-                    split_right[frameIndex] = samples[frameIndex * 2 + 1];
                 }
-#if USE_FLAC_ENCODER == TRUE                
-                if (g_flac_recorder_callback)
+                else if (g_channels == 2)
                 {
-                    g_flac_recorder_callback(split_left, split_right, (int)frames);
-                }
-#endif                
+                    PV_PrepareSplitBuffers(&split_left, &split_right, &split_capacity, (uint32_t)sliceFrames);
+                    if (split_left && split_right)
+                    {
+                        int32_t frameIndex;
+                        for (frameIndex = 0; frameIndex < sliceFrames; ++frameIndex)
+                        {
+                            split_left[frameIndex] = samples[frameIndex * 2];
+                            split_right[frameIndex] = samples[frameIndex * 2 + 1];
+                        }
+#if USE_FLAC_ENCODER == TRUE
+                        if (g_flac_recorder_callback)
+                        {
+                            g_flac_recorder_callback(split_left, split_right, (int)sliceFrames);
+                        }
+#endif
 #if USE_VORBIS_ENCODER == TRUE
-                if (g_vorbis_recorder_callback)
-                {
-                    g_vorbis_recorder_callback(split_left, split_right, (int)frames);
-                }
+                        if (g_vorbis_recorder_callback)
+                        {
+                            g_vorbis_recorder_callback(split_left, split_right, (int)sliceFrames);
+                        }
 #endif
 #if USE_OPUS_ENCODER == TRUE
-                if (g_opus_recorder_callback)
-                {
-                    g_opus_recorder_callback(split_left, split_right, (int)frames);
-                }
+                        if (g_opus_recorder_callback)
+                        {
+                            g_opus_recorder_callback(split_left, split_right, (int)sliceFrames);
+                        }
 #endif
+                    }
+                }
             }
-        }
-    }
 
-    pthread_mutex_unlock(&g_stateMutex);
+            pthread_mutex_unlock(&g_stateMutex);
+
+            sliceValidBytes = sliceBytes;
+            sliceConsumedBytes = 0;
+        }
+
+        /* Copy from the current (possibly partially consumed) slice */
+        int32_t available = sliceValidBytes - sliceConsumedBytes;
+        int32_t toCopy = (available < remaining) ? available : remaining;
+
+        memcpy(out, g_sliceStatic + sliceConsumedBytes, (size_t)toCopy);
+        sliceConsumedBytes += toCopy;
+        out += toCopy;
+        remaining -= toCopy;
+        g_totalSamplesPlayed += (uint64_t)(toCopy / sampleBytes);
+    }
 }
 
 int BAE_Setup(void)
@@ -301,6 +360,9 @@ int BAE_Cleanup(void)
         CloseAudioDevice();
         g_initialized = 0;
     }
+    free(g_sliceStatic);
+    g_sliceStatic = NULL;
+    g_sliceStaticSize = 0;
     return 0;
 }
 
@@ -698,7 +760,7 @@ int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t chan
 
     SetAudioStreamVolume(g_audioStream, (float)g_unscaled_volume / 256.0f);
     SetAudioStreamPan(g_audioStream, (float)g_balance / 256.0f);
-    SetAudioStreamCallback(g_audioStream, raylib_audio_callback);
+    //SetAudioStreamCallback(g_audioStream, raylib_audio_callback);
     PlayAudioStream(g_audioStream);
     return 0;
 }
@@ -897,6 +959,7 @@ typedef struct
 int BAE_NewMutex(BAE_Mutex *lock, char *name, char *file, int lineno)
 {
     sPthreadMutex *mutex;
+    pthread_mutexattr_t attr;
     (void)name;
     (void)file;
     (void)lineno;
@@ -905,7 +968,10 @@ int BAE_NewMutex(BAE_Mutex *lock, char *name, char *file, int lineno)
     {
         return 0;
     }
-    pthread_mutex_init(&mutex->mutex, NULL);
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&mutex->mutex, &attr);
+    pthread_mutexattr_destroy(&attr);
     *lock = (BAE_Mutex)mutex;
     return 1;
 }
@@ -1032,4 +1098,9 @@ void BAE_PrintHexDump(void *address, int32_t length)
         BAE_PRINTF("%02X ", bytes[index]);
     }
     BAE_PRINTF("\n");
+}
+
+AudioStream BAE_GetAudioStream(void)
+{
+    return g_audioStream;
 }

@@ -1,0 +1,93 @@
+BAE_API := Raylib
+NOAUTO := 1
+EMBED_PATCHES := 1
+SF2_SUPPORT := 0
+MP3_DEC := 0
+MP3_ENC := 0
+OGG_SUPPORT := 1
+VORBIS_DEC := 0
+VORBIS_ENC := 0
+FLAC_DEC := 0
+FLAC_ENC := 0
+OPUS_DEC := 1
+OPUS_ENC := 0
+ZMF_SUPPORT := 1
+CREATION_API := 0
+RAYLIB_EXAMPLE := 1
+EMBED_PATCH_FILE := src/banks/nChippyBank/nChippyBank.hsb
+include inc/Makefile.common
+
+TARGET_BIN := raylib_example
+
+CC		?= gcc
+CXX		?= g++
+LD		:= $(CC)
+AR      	:= ar
+STRIP		:= strip
+
+OPTI            := -O2 -fPIC
+
+ifeq ($(DEBUG),1)
+    OPTI := -g -O0 -ggdb3 -fPIC
+endif
+
+# libopenmpt via pkg-config (optional)
+#OPENMPT_CFLAGS := $(shell pkg-config --cflags libopenmpt 2>/dev/null)
+#OPENMPT_LIBS := $(shell pkg-config --libs libopenmpt 2>/dev/null)
+
+CFLAGS  	:= $(ARCH) $(OPTI) $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
+ifneq ($(strip $(OPENMPT_LIBS)),)
+	CFLAGS += $(OPENMPT_CFLAGS) #-DMOD2RMF_USE_OPENMPT=1
+endif
+
+ifneq ($(BAE_FLAGS),)
+	CFLAGS	+= $(BAE_FLAGS)
+endif
+
+include inc/Makefile.versioning
+CFLAGS		+= -D_VERSION=\""$(VERSION)"\"
+
+
+LDFLAGS		:= $(OPTI)
+ifneq ($(BAE_LD_FLAGS),)
+	LDFLAGS += $(BAE_LD_FLAGS) 
+endif
+
+ifneq ($(DEBUG),1)
+	LDFLAGS += -s
+endif
+
+LIBS	= 	-lpthread -lm -ldl -lX11 -lXrandr -lXi -lXcursor -lXinerama -lXxf86vm
+ifneq ($(strip $(OPENMPT_LIBS)),)
+	LIBS += $(OPENMPT_LIBS)
+endif
+
+ifneq ($(BAE_LIBS),)
+	LIBS += $(BAE_LIBS)
+endif
+
+CXXFLAGS 	:= $(CFLAGS)
+# Use C++ linker if we have any C++ sources
+ifneq ($(filter %.cpp,$(SRC) $(SRC_BIN)),)
+    LD := $(CXX)
+    LIBS += -lstdc++
+endif
+
+all: $(TARGET_BIN)
+
+$(TARGET_BIN): ${OBJ_BIN}
+	@mkdir -p $(TARGET_OUT)
+	${LD} -o $(TARGET_OUT)${TARGET_BIN} ${LDFLAGS} ${OBJ_BIN} ${LIBS}
+
+# Generate rules for all unique source files
+ALL_SOURCES := $(sort $(SRC) $(SRC_BIN))
+$(foreach src,$(ALL_SOURCES),$(eval $(call make_obj_rule,$(src))))
+
+clean:
+	@rm -rf $(TARGET_OUT)
+	@rm -rf $(OBJ_DIR)
+	@rm -rf $(BUILD_DIR)
+	@rm -rf $(TEST_OUT_DIR)
+	@echo Cleaned!
+
+include inc/Makefile.tests

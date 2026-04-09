@@ -600,6 +600,13 @@ void BAE_SimulateAudioHardware(void *threadContext);
 int BAE_IsAudioEngaged(void);
 #endif
 
+#if X_PLATFORM == X_RAYLIB
+#include "raylib.h"
+AudioStream BAE_GetAudioStream(void);
+void raylib_audio_callback(void *bufferData, unsigned int frames);
+#endif
+
+
 #ifdef __cplusplus
     }
 #endif

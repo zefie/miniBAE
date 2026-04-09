@@ -1,4 +1,4 @@
-BAE_API := WinOS
+BAE_API := Dummy
 NOAUTO := 1
 EMBED_PATCHES := 0
 SF2_SUPPORT := 0

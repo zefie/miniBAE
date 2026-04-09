@@ -83,10 +83,34 @@
 #include <string.h>
 #if (!defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
 #ifdef _WIN32
-    #include <windows.h>
+#if X_PLATFORM == X_RAYLIB
+    #include "raylib.h"
+
+#else
+    typedef void *BAE_HMODULE;
+#if defined(_MSC_VER)
+    __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(BAE_HMODULE hModule, char *lpFilename, unsigned long nSize);
+#else
+    extern __attribute__((dllimport)) unsigned long __stdcall GetModuleFileNameA(BAE_HMODULE hModule, char *lpFilename, unsigned long nSize);
+#endif
+#endif
+
     static void get_executable_directory(char *buffer, size_t size) {
         if (buffer && size > 0) {
-            DWORD length = GetModuleFileNameA(NULL, buffer, (DWORD)size);
+#if X_PLATFORM == X_RAYLIB
+            const char *appDir = GetApplicationDirectory();
+            if (appDir && appDir[0]) {
+                strncpy(buffer, appDir, size - 1);
+                buffer[size - 1] = '\0';
+
+                // Normalize to directory path without trailing separator.
+                size_t len = strlen(buffer);
+                while (len > 0 && (buffer[len - 1] == '\\' || buffer[len - 1] == '/')) {
+                    buffer[--len] = '\0';
+                }
+            }
+#else
+            unsigned long length = GetModuleFileNameA(NULL, buffer, (unsigned long)size);
             if (length > 0 && length < size) {
                 char *lastSlash = strrchr(buffer, '\\');
                 if (lastSlash) {
@@ -95,6 +119,7 @@
             } else {
                 buffer[0] = '\0'; // Fallback to empty string on error
             }
+#endif
         }
     }
 #else
@@ -166,7 +191,7 @@
 #endif
 
 #ifndef _DEBUG
-    #if (X_PLATFORM == X_WIN95) || (X_PLATFORM == X_WIN_HARDWARE) || (X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS) || (X_PLATFORM == X_ANSI) || (X_PLATFORM == X_DUMMY) || (X_PLATFORM == X_SDL2) || (X_PLATFORM == X_SDL3) || (X_PLATFORM == X_RAYLIB)
+    #if (X_PLATFORM == X_WIN95) || (X_PLATFORM == X_WIN_HARDWARE) || (X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS) || (X_PLATFORM == X_ANSI) || (X_PLATFORM == X_DUMMY) || (X_PLATFORM == X_SDL2) || (X_PLATFORM == X_SDL3)
         #define BAE_PRINTF
     #elif __ANDROID__
         #define BAE_PRINTF(...)
@@ -203,7 +228,7 @@
         #define BAE_PRINTF		BAE_STDERR
     #endif
     
-    #if (X_PLATFORM == X_WIN95) || (X_PLATFORM == X_WIN_HARDWARE) || (X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS) || (X_PLATFORM == X_ANSI) || (X_PLATFORM == X_DUMMY) || (X_PLATFORM == X_SDL2) || (X_PLATFORM == X_SDL3) || (X_PLATFORM == X_RAYLIB)
+    #if (X_PLATFORM == X_WIN95) || (X_PLATFORM == X_WIN_HARDWARE) || (X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS) || (X_PLATFORM == X_ANSI) || (X_PLATFORM == X_DUMMY) || (X_PLATFORM == X_SDL2) || (X_PLATFORM == X_SDL3)
         #ifdef ASSERT
             #define BAE_ASSERT(exp)     ASSERT(exp)
             #define BAE_VERIFY(exp)     ASSERT(exp)

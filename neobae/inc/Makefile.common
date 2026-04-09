@@ -1,10 +1,10 @@
 # Built-in Patches (affects entire NeoBAE library)
 # Must be an HSB bank, leave empty to disable built-in patches completely
-EMBED_PATCH_FILE := src/banks/patches111/patches111.hsb
+EMBED_PATCH_FILE ?= src/banks/patches111/patches111.hsb
 
 # TTF Font (for zefidi GUI)
 # Not required but severely recommended
-EMBED_TTF_FONT := src/thirdparty/fonts/HelveticaNeue.ttf
+EMBED_TTF_FONT ?= src/thirdparty/fonts/HelveticaNeue.ttf
 
 ### It is probably best not to change anything below this line, unless absolutely necessary for your environment
 
@@ -584,18 +584,23 @@ else
 											ifeq ($(MIDDECOMP),1)
 												SRC := src/mthc/mthc_decomp.c src/mthc/mthc_main.c
 											else
-												ifneq ($(WASM),1)
-													ifneq ($(SONGTOOL),1)
-															ifeq ($(RINGTONE2MID),1)
-																# libNeoBAE srcs + ringtone2mid.c
-																SRC += src/ringtone2mid/ringtone2mid.c
-															else
-																# playbae = libNeoBAE srcs + playbae.c
-																SRC += src/playbae/playbae.c
-															endif
-													else
-														# libNeoBAE srcs + songtool.c
-														SRC += src/songtool/songtool.c
+												ifeq ($(RAYLIB_EXAMPLE),1)
+													SRC += src/raylib_example/audio_stream_callback.c
+													BAE_LIBS += -lraylib -lm
+												else
+													ifneq ($(WASM),1)
+														ifneq ($(SONGTOOL),1)
+																ifeq ($(RINGTONE2MID),1)
+																	# libNeoBAE srcs + ringtone2mid.c
+																	SRC += src/ringtone2mid/ringtone2mid.c
+																else
+																	# playbae = libNeoBAE srcs + playbae.c
+																	SRC += src/playbae/playbae.c
+																endif
+														else
+															# libNeoBAE srcs + songtool.c
+															SRC += src/songtool/songtool.c
+														endif
 													endif
 												endif
 											endif
