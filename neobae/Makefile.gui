@@ -1,6 +1,5 @@
 BAE_BUILT_IN_PATCHES	:= 1
 BAE_API			:= SDL3
-
 BUILD_GUI   	:= 1
 include inc/Makefile.common
 

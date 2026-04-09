@@ -40,6 +40,14 @@ ifneq ($(WASM),1)
 		MTHC_SUPPORT := 1
 		ADP_SUPPORT := 1
 		QOA_SUPPORT := 1
+		MP3_DEC := 1
+		MP3_ENC := 1
+		FLAC_DEC := 1
+		FLAC_ENC := 1
+		VORBIS_DEC := 1
+		VORBIS_ENC := 1
+		OPUS_DEC := 1
+		OPUS_ENC := 1
 		CREATION_API := 0
 	endif
 endif
@@ -55,7 +63,7 @@ endif
 
 ifeq ($(CREATION_API),1) 
 	# All of these are required for ZMF support
-	ifneq ($(CREATION_NO_CODECS),1)
+	ifeq ($(CREATION_NO_CODECS),1)
 		OGG_SUPPORT := 1
 		MP3_DEC := 1
 		MP3_ENC := 1
