@@ -1063,7 +1063,12 @@ static BAEResult PV_ParseRNGBinaryBuffer(const unsigned char *data,
                 return BAE_BAD_FILE;
             }
 
-            if (instr == 1)
+            if (instr == 0)
+            {
+                /* End-of-sequence marker / trailing null padding. Stop. */
+                break;
+            }
+            else if (instr == 1)
             {
                 uint32_t noteValue;
                 uint32_t durationCode;
