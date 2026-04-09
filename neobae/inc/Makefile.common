@@ -510,24 +510,30 @@ endif
 
 ifeq ($(LZMA_SUPPORT),1)
 	BAE_FLAGS += -DUSE_LZMA_COMPRESSION=1
+	BAE_FLAGS += -DZ7_ST
+	INC_PATH += -Isrc/thirdparty/lzma-26.00/C
 	SRC += src/BAE_Source/Common/X_LZMA.c
-	ifeq ($(XPHACK),1)
-		BAE_LIBS += -llzma.dll
-	else
-		ifeq ($(WINDOWS),1)
-			ifeq ($(BITS),32)
-				INC_PATH += -I../deps/win/LZMA-$(LZMA_VERS)/i686-w64-mingw32/include
-				BAE_LD_FLAGS += -L../deps/win/LZMA-$(LZMA_VERS)/i686-w64-mingw32/lib/
-				BAE_LIBS += ../deps/win/LZMA-$(LZMA_VERS)/i686-w64-mingw32/lib/liblzma-5.dll.a 
-			else
-				INC_PATH += -I../deps/win/LZMA-$(LZMA_VERS)/x86_64-w64-mingw32/include
-				BAE_LD_FLAGS += -L../deps/win/LZMA-$(LZMA_VERS)/x86_64-w64-mingw32/lib/
-				BAE_LIBS += ../deps/win/LZMA-$(LZMA_VERS)/x86_64-w64-mingw32/lib/liblzma-5.dll.a
-			endif	
-		else
-			BAE_LIBS += -llzma
-		endif
-	endif
+	SRC += src/thirdparty/lzma-26.00/C/Alloc.c
+	SRC += src/thirdparty/lzma-26.00/C/7zAlloc.c
+	SRC += src/thirdparty/lzma-26.00/C/7zCrc.c
+	SRC += src/thirdparty/lzma-26.00/C/7zCrcOpt.c
+	SRC += src/thirdparty/lzma-26.00/C/7zStream.c
+	SRC += src/thirdparty/lzma-26.00/C/XzCrc64.c
+	SRC += src/thirdparty/lzma-26.00/C/XzCrc64Opt.c
+	SRC += src/thirdparty/lzma-26.00/C/Sha256.c
+	SRC += src/thirdparty/lzma-26.00/C/Sha256Opt.c
+	SRC += src/thirdparty/lzma-26.00/C/CpuArch.c
+	SRC += src/thirdparty/lzma-26.00/C/Bra.c
+	SRC += src/thirdparty/lzma-26.00/C/Bra86.c
+	SRC += src/thirdparty/lzma-26.00/C/BraIA64.c
+	SRC += src/thirdparty/lzma-26.00/C/Delta.c
+	SRC += src/thirdparty/lzma-26.00/C/LzmaDec.c
+	SRC += src/thirdparty/lzma-26.00/C/Lzma2Dec.c
+	SRC += src/thirdparty/lzma-26.00/C/LzFind.c
+	SRC += src/thirdparty/lzma-26.00/C/LzmaEnc.c
+	SRC += src/thirdparty/lzma-26.00/C/Lzma2Enc.c
+	SRC += src/thirdparty/lzma-26.00/C/Xz.c
+	SRC += src/thirdparty/lzma-26.00/C/XzDec.c
 endif
 
 ifeq ($(MOD2RMF),1)

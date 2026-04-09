@@ -138,7 +138,7 @@ LOCAL_SRC_FILES	:= \
       		../thirdparty/libvorbis/lib/vorbisfile.c \
       		../thirdparty/libvorbis/lib/lpc.c \
       		../thirdparty/libvorbis/lib/window.c \
-		  	../thirdparty/libvorbis/lib/vorbisenc.c \
+			../thirdparty/libvorbis/lib/vorbisenc.c \
       		../thirdparty/flac/src/libFLAC/stream_decoder.c \
 			../thirdparty/flac/src/libFLAC/bitreader.c \
 			../thirdparty/flac/src/libFLAC/bitmath.c \
@@ -158,12 +158,28 @@ LOCAL_SRC_FILES	:= \
 			../thirdparty/flac/src/libFLAC/ogg_helper.c \
 			../thirdparty/flac/src/libFLAC/ogg_mapping.c \
       		../thirdparty/flac/src/libFLAC/stream_encoder.c \
-		  	../thirdparty/flac/src/libFLAC/ogg_encoder_aspect.c
-
-PATCHES_SCRIPT := $(LOCAL_PATH)/../../../scripts/create_embedded_patches_h.py
-PATCHES_HSB := $(LOCAL_PATH)/../banks/patches111/patches111.hsb
-GEN_DIR := /tmp/androbae
-PATCHES_H := $(GEN_DIR)/BAEPatches.h
+			../thirdparty/flac/src/libFLAC/ogg_encoder_aspect.c \
+			../thirdparty/lzma-26.00/C/Alloc.c \
+			../thirdparty/lzma-26.00/C/7zAlloc.c \
+			../thirdparty/lzma-26.00/C/7zStream.c \
+			../thirdparty/lzma-26.00/C/7zCrc.c \
+			../thirdparty/lzma-26.00/C/7zCrcOpt.c \
+			../thirdparty/lzma-26.00/C/XzCrc64.c \
+			../thirdparty/lzma-26.00/C/XzCrc64Opt.c \
+			../thirdparty/lzma-26.00/C/Sha256.c \
+			../thirdparty/lzma-26.00/C/Sha256Opt.c \
+			../thirdparty/lzma-26.00/C/CpuArch.c \
+			../thirdparty/lzma-26.00/C/Bra.c \
+			../thirdparty/lzma-26.00/C/Bra86.c \
+			../thirdparty/lzma-26.00/C/BraIA64.c \
+			../thirdparty/lzma-26.00/C/Delta.c \
+			../thirdparty/lzma-26.00/C/LzFind.c \
+			../thirdparty/lzma-26.00/C/LzmaEnc.c \
+			../thirdparty/lzma-26.00/C/LzmaDec.c \
+			../thirdparty/lzma-26.00/C/Lzma2Enc.c \
+			../thirdparty/lzma-26.00/C/Lzma2Dec.c \
+			../thirdparty/lzma-26.00/C/Xz.c \
+			../thirdparty/lzma-26.00/C/XzDec.c
 
 # ndk-build doesn't reliably trigger custom prerequisite rules for generated
 # headers, so generate at parse time via $(shell ...).
@@ -181,7 +197,7 @@ LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_
 LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_ABI)/sqlite3/include
 LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_ABI)/libopus/include
 LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_ABI)/libopus/include/opus
-LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_ABI)/lzma/include
+LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../thirdparty/lzma-26.00/C
 LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/config
 LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/libogg/include
 LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/libvorbis/include
@@ -202,7 +218,7 @@ LOCAL_CFLAGS := -std=c99 -O2 -D_VERSION=\"$(VERSION)\" \
 	-DBAE_FIX_SPAN_DC=1 -DBAE_CLASSIC_CHORUS=1 -DFLAC__NO_DLL \
 	-D_LOAD_BUILTIN_PATCHES_FOR_SF2=1 -DUSE_MTHC_SUPPORT=1 -DUSE_ADP_SUPPORT=1 \
 	-DUSE_RETRO_RINGTONE_SUPPORT=1 -DUSE_QOA_SUPPORT=1 -DUSE_RMI_SUPPORT=1 \
-	-DHAVE_CONFIG_H=1 -Wall -fsigned-char
+	-DHAVE_CONFIG_H=1 -Wall -fsigned-char -DZ7_ST
 
 ifeq ($(APP_OPTIM),debug)
     LOCAL_CFLAGS += -D_DEBUG=1
@@ -225,7 +241,7 @@ LOCAL_LDLIBS    += -lz
 
 
 # Link against prebuilt FluidSynth
-LOCAL_SHARED_LIBRARIES := fluidsynth sndfile ogg vorbis vorbisenc FLAC opus opusfile sqlite3 lzma
+LOCAL_SHARED_LIBRARIES := fluidsynth sndfile ogg vorbis vorbisenc FLAC opus opusfile sqlite3
 
 include $(BUILD_SHARED_LIBRARY)
 

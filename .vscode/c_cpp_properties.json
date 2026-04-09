@@ -16,7 +16,7 @@
                 "${workspaceFolder}/neobae/src/thirdparty/libogg/include/**",
                 "${workspaceFolder}/neobae/src/thirdparty/libvorbis/include/**",
                 "${workspaceFolder}/neobae/src/thirdparty/libvorbis/lib/**",
-                "${workspaceFolder}/deps/win/LZMA-5.8.2/x86_64-w64-mingw32/include/**",
+                "${workspaceFolder}/neobae/src/thirdparty/lzma-26.00/C/**",
                 "${workspaceFolder}/deps/win/FluidSynth/x86_64-w64-mingw32/include/**",
                 "${workspaceFolder}/deps/win/SDL3/x86_64-w64-mingw32/include/**",
                 "${workspaceFolder}/deps/win/SDL3_ttf/x86_64-w64-mingw32/include/**",

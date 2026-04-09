@@ -30,6 +30,9 @@
     <Filter Include="Source Files\MTHC Support">
       <UniqueIdentifier>{4d690885-1597-4b15-a133-a97cb06700ec}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\LZMA">
+      <UniqueIdentifier>{0c997b5b-2ed6-400b-adf8-b03b177ae31b}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <!-- RMF Editor -->
@@ -221,6 +224,69 @@
     </ClCompile>
     <ClCompile Include="..\..\BAE_Source\Common\XQOAFiles.c">
       <Filter>Source Files\BAE Common</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\thirdparty\lzma-26.00\C\7zAlloc.c">
+      <Filter>Source Files\LZMA</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\thirdparty\lzma-26.00\C\7zCrc.c">
+      <Filter>Source Files\LZMA</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\thirdparty\lzma-26.00\C\7zCrcOpt.c">
+      <Filter>Source Files\LZMA</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\thirdparty\lzma-26.00\C\7zStream.c">
+      <Filter>Source Files\LZMA</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\thirdparty\lzma-26.00\C\Alloc.c">
+      <Filter>Source Files\LZMA</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\thirdparty\lzma-26.00\C\Bra.c">
+      <Filter>Source Files\LZMA</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\thirdparty\lzma-26.00\C\Bra86.c">
+      <Filter>Source Files\LZMA</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\thirdparty\lzma-26.00\C\BraIA64.c">
+      <Filter>Source Files\LZMA</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\thirdparty\lzma-26.00\C\CpuArch.c">
+      <Filter>Source Files\LZMA</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\thirdparty\lzma-26.00\C\Delta.c">
+      <Filter>Source Files\LZMA</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\thirdparty\lzma-26.00\C\LzFind.c">
+      <Filter>Source Files\LZMA</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\thirdparty\lzma-26.00\C\Lzma2Dec.c">
+      <Filter>Source Files\LZMA</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\thirdparty\lzma-26.00\C\Lzma2Enc.c">
+      <Filter>Source Files\LZMA</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\thirdparty\lzma-26.00\C\LzmaDec.c">
+      <Filter>Source Files\LZMA</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\thirdparty\lzma-26.00\C\LzmaEnc.c">
+      <Filter>Source Files\LZMA</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\thirdparty\lzma-26.00\C\Sha256.c">
+      <Filter>Source Files\LZMA</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\thirdparty\lzma-26.00\C\Sha256Opt.c">
+      <Filter>Source Files\LZMA</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\thirdparty\lzma-26.00\C\Xz.c">
+      <Filter>Source Files\LZMA</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\thirdparty\lzma-26.00\C\XzCrc64.c">
+      <Filter>Source Files\LZMA</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\thirdparty\lzma-26.00\C\XzCrc64Opt.c">
+      <Filter>Source Files\LZMA</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\thirdparty\lzma-26.00\C\XzDec.c">
+      <Filter>Source Files\LZMA</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

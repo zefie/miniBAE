@@ -3,10 +3,10 @@
 **  X_LZMA.c
 **
 **  LZMA compression/decompression wrappers for miniBAE.
-**  Used by ZMF containers in place of LZSS for ECMI/CMID and CSND resources,
-**  and by NBS session files in place of zlib.
+**  Used by ZMF containers in place of LZSS for ECMI/CMID and CSND resources.
 **
-**  Requires liblzma (xz-utils).
+**  Uses bundled 7zip SDK (LZMA2 directly) for new payloads and keeps
+**  backward compatibility with legacy XZ-wrapped payloads.
 **
 **  2026.03.21  zefie  Created
 */
@@ -16,8 +16,132 @@
 
 #if USE_LZMA_COMPRESSION == TRUE
 
-#include <lzma.h>
 #include <string.h>
+
+#include "Alloc.h"
+#include "Lzma2Dec.h"
+#include "Lzma2Enc.h"
+#include "Xz.h"
+#include "XzCrc64.h"
+#include "7zCrc.h"
+
+#define ZMF_LZMA2_MAGIC_0 ((unsigned char)'Z')
+#define ZMF_LZMA2_MAGIC_1 ((unsigned char)'L')
+#define ZMF_LZMA2_MAGIC_2 ((unsigned char)'2')
+#define ZMF_LZMA2_MAGIC_3 ((unsigned char)'1')
+#define ZMF_LZMA2_HEADER_SIZE 5
+
+#define ZMF_LZMA2_CHUNK_UNPACK_MAX (1u << 16)
+
+static uint32_t PV_LZMA2PayloadBound(uint32_t srcBytes)
+{
+    uint64_t chunks;
+    uint64_t bound;
+
+    chunks = ((uint64_t)srcBytes + (uint64_t)ZMF_LZMA2_CHUNK_UNPACK_MAX - 1u) /
+             (uint64_t)ZMF_LZMA2_CHUNK_UNPACK_MAX;
+
+    /*
+     * Conservative bound for LZMA2 stream payload:
+     * - raw payload
+     * - per-chunk headers / fallbacks
+     * - end marker and extra slack
+     */
+    bound = (uint64_t)srcBytes + (chunks * 32u) + 512u;
+    if (bound > 0xFFFFFFFFu)
+    {
+        return 0xFFFFFFFFu;
+    }
+    return (uint32_t)bound;
+}
+
+static bool PV_IsZMFNativeLZMA2(const unsigned char *src, uint32_t srcBytes)
+{
+    if (!src || srcBytes < ZMF_LZMA2_HEADER_SIZE)
+    {
+        return FALSE;
+    }
+
+    return (src[0] == ZMF_LZMA2_MAGIC_0 &&
+            src[1] == ZMF_LZMA2_MAGIC_1 &&
+            src[2] == ZMF_LZMA2_MAGIC_2 &&
+            src[3] == ZMF_LZMA2_MAGIC_3) ? TRUE : FALSE;
+}
+
+static bool PV_IsXZStream(const unsigned char *src, uint32_t srcBytes)
+{
+    if (!src || srcBytes < XZ_SIG_SIZE)
+    {
+        return FALSE;
+    }
+
+    return (XMemCmp(src, XZ_SIG, XZ_SIG_SIZE) == 0) ? TRUE : FALSE;
+}
+
+static bool PV_DecodeNativeLZMA2(const unsigned char *src, uint32_t srcBytes,
+                                 unsigned char *dst, uint32_t dstBytes)
+{
+    SizeT srcLen;
+    SizeT dstLen;
+    ELzmaStatus status;
+    SRes res;
+    Byte prop;
+
+    if (!PV_IsZMFNativeLZMA2(src, srcBytes))
+    {
+        return FALSE;
+    }
+
+    prop = src[4];
+    srcLen = (SizeT)(srcBytes - ZMF_LZMA2_HEADER_SIZE);
+    dstLen = (SizeT)dstBytes;
+
+    res = Lzma2Decode(dst,
+                      &dstLen,
+                      src + ZMF_LZMA2_HEADER_SIZE,
+                      &srcLen,
+                      prop,
+                      LZMA_FINISH_END,
+                      &status,
+                      &g_Alloc);
+
+    return (res == SZ_OK &&
+            dstLen == (SizeT)dstBytes &&
+            status == LZMA_STATUS_FINISHED_WITH_MARK) ? TRUE : FALSE;
+}
+
+static bool PV_DecodeLegacyXZ(const unsigned char *src, uint32_t srcBytes,
+                              unsigned char *dst, uint32_t dstBytes)
+{
+    CXzUnpacker unpacker;
+    SizeT srcLen;
+    SizeT dstLen;
+    ECoderStatus status;
+    SRes res;
+    BoolInt finished;
+
+    if (!PV_IsXZStream(src, srcBytes))
+    {
+        return FALSE;
+    }
+
+    XzUnpacker_Construct(&unpacker, &g_Alloc);
+    XzUnpacker_Init(&unpacker);
+
+    srcLen = (SizeT)srcBytes;
+    dstLen = (SizeT)dstBytes;
+    res = XzUnpacker_CodeFull(&unpacker,
+                              dst,
+                              &dstLen,
+                              src,
+                              &srcLen,
+                              CODER_FINISH_END,
+                              &status);
+    finished = XzUnpacker_IsStreamWasFinished(&unpacker);
+    XzUnpacker_Free(&unpacker);
+
+    return (res == SZ_OK && finished && dstLen == (SizeT)dstBytes) ? TRUE : FALSE;
+}
 
 /* ---------- single-shot compress ---------- */
 
@@ -27,8 +151,12 @@
 int32_t LZMACompress(unsigned char *src, uint32_t srcBytes, unsigned char *dst,
                      XCompressStatusProc proc, void *procData)
 {
-    size_t      outPos;
-    lzma_ret    ret;
+    CLzma2EncProps props;
+    CLzma2EncHandle enc;
+    size_t outSize;
+    size_t outCap;
+    Byte prop;
+    SRes res;
 
     if (!src || !dst || srcBytes == 0)
     {
@@ -38,18 +166,54 @@ int32_t LZMACompress(unsigned char *src, uint32_t srcBytes, unsigned char *dst,
     (void)proc;
     (void)procData;
 
-    outPos = 0;
-    ret = lzma_easy_buffer_encode(LZMA_PRESET_DEFAULT,   /* preset 6 */
-                                  LZMA_CHECK_CRC64,
-                                  NULL,                   /* default allocator */
-                                  src, (size_t)srcBytes,
-                                  dst, &outPos,
-                                  lzma_stream_buffer_bound((size_t)srcBytes));
-    if (ret != LZMA_OK)
+    enc = Lzma2Enc_Create(&g_Alloc, &g_BigAlloc);
+    if (!enc)
     {
         return -1;
     }
-    return (int32_t)outPos;
+
+    Lzma2EncProps_Init(&props);
+    props.lzmaProps.numThreads = 1;
+    props.numTotalThreads = 1;
+
+    res = Lzma2Enc_SetProps(enc, &props);
+    if (res != SZ_OK)
+    {
+        Lzma2Enc_Destroy(enc);
+        return -1;
+    }
+
+    prop = Lzma2Enc_WriteProperties(enc);
+    outCap = (size_t)PV_LZMA2PayloadBound(srcBytes);
+    outSize = outCap;
+
+    res = Lzma2Enc_Encode2(enc,
+                           NULL,
+                           dst + ZMF_LZMA2_HEADER_SIZE,
+                           &outSize,
+                           NULL,
+                           src,
+                           (size_t)srcBytes,
+                           NULL);
+    if (res != SZ_OK)
+    {
+        Lzma2Enc_Destroy(enc);
+        return -1;
+    }
+
+    dst[0] = ZMF_LZMA2_MAGIC_0;
+    dst[1] = ZMF_LZMA2_MAGIC_1;
+    dst[2] = ZMF_LZMA2_MAGIC_2;
+    dst[3] = ZMF_LZMA2_MAGIC_3;
+    dst[4] = prop;
+
+    Lzma2Enc_Destroy(enc);
+
+    if (outSize > (size_t)0x7FFFFFFF - ZMF_LZMA2_HEADER_SIZE)
+    {
+        return -1;
+    }
+    return (int32_t)(outSize + ZMF_LZMA2_HEADER_SIZE);
 }
 
 /* ---------- delta + compress variants ---------- */
@@ -226,24 +390,21 @@ int32_t LZMACompressDeltaStereo16(int16_t *src, uint32_t srcBytes, unsigned char
 void LZMAUncompress(unsigned char *src, uint32_t srcBytes,
                     unsigned char *dst, uint32_t dstBytes)
 {
-    uint64_t    memlimit;
-    size_t      inPos;
-    size_t      outPos;
-
     if (!src || !dst || srcBytes == 0 || dstBytes == 0)
     {
         return;
     }
 
-    memlimit = UINT64_MAX;   /* no memory limit */
-    inPos  = 0;
-    outPos = 0;
-    lzma_ret ret = lzma_stream_buffer_decode(&memlimit,
-                              0,        /* flags */
-                              NULL,     /* default allocator */
-                              src, &inPos, (size_t)srcBytes,
-                              dst, &outPos, (size_t)dstBytes);
-    (void)ret;
+    CrcGenerateTable();
+    Crc64GenerateTable();
+    Sha256Prepare();
+
+    if (PV_DecodeNativeLZMA2(src, srcBytes, dst, dstBytes))
+    {
+        return;
+    }
+
+    (void)PV_DecodeLegacyXZ(src, srcBytes, dst, dstBytes);
 }
 
 /* ---------- delta + decompress variants ---------- */
@@ -280,7 +441,14 @@ void LZMAUncompressDeltaStereo16(unsigned char *src, uint32_t srcBytes,
 
 uint32_t LZMACompressBound(uint32_t srcBytes)
 {
-    return (uint32_t)lzma_stream_buffer_bound((size_t)srcBytes);
+    uint64_t bound;
+
+    bound = (uint64_t)PV_LZMA2PayloadBound(srcBytes) + (uint64_t)ZMF_LZMA2_HEADER_SIZE;
+    if (bound > 0xFFFFFFFFu)
+    {
+        return 0xFFFFFFFFu;
+    }
+    return (uint32_t)bound;
 }
 
 #endif /* USE_LZMA_COMPRESSION == TRUE */

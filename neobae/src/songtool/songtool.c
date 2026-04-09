@@ -43,7 +43,7 @@ static void print_usage(const char *program_name)
             "Usage: %s [options] <source.rmf|source.zmf> [dest.rmf|dest.zmf]\n"
             "\n"
             "Options:\n"
-            "  --info               Show source info (title, song length, codecs)\n"
+            "  --info               Show source info (title, song length, codecs, loop points)\n"
             "  --codec N|NAME        Recompress all samples to codec number/name\n"
             "                        (pcm, adpcm, alaw, ulaw, mp3, vorbis, flac, opus, qoa)\n"
             "  --sample-codec SPEC   Override one sample codec (repeatable)\n"
@@ -52,11 +52,11 @@ static void print_usage(const char *program_name)
             "                        Override all samples for one instrument (repeatable)\n"
             "                        SPEC: instID:codec[@bitrate], e.g. 0x200:qoa\n"
             "  --bitrate N           Target bitrate in kbps (or bps) for lossy codecs\n"
-            "  --loop-ms N           Set MIDI loop end point in milliseconds\n"
-            "  --loop-start-ms N     Optional MIDI loop start in milliseconds (default: 0)\n"
+            "  --loop-end N          Set MIDI loop end point (ms by default, or +N for ticks)\n"
+            "  --loop-start N        Optional MIDI loop start (ms by default, or +N for ticks, default: 0)\n"
             "  --loop-count N        Loop count (-1=forever, default: -1)\n"
             "  --disable-loop        Disable MIDI loop markers\n"
-            "  --trim N              Trim MIDI timeline to N milliseconds\n"
+            "  --trim N              Trim MIDI timeline to N (ms by default, or +N for ticks)\n"
             "  --codecs              List available codecs and bitrates\n"
             "  --help, -h            Show this help\n",
             program_name);
@@ -764,6 +764,13 @@ static void print_document_info(BAERmfEditorDocument const *document, const char
     uint64_t songLengthMs;
     uint32_t i;
     int printedAnyCodec;
+    bool loopEnabled;
+    uint32_t loopStartTick;
+    uint32_t loopEndTick;
+    int32_t loopCount;
+    uint64_t loopStartMs;
+    uint64_t loopEndMs;
+    BAEResult loopResult;
 
     title = BAERmfEditorDocument_GetInfo(document, TITLE_INFO);
     sampleCount = 0;
@@ -776,11 +783,49 @@ static void print_document_info(BAERmfEditorDocument const *document, const char
         (void)song_ticks_to_milliseconds(document, songEndTick, &songLengthMs);
     }
 
+    loopEnabled = FALSE;
+    loopStartTick = 0;
+    loopEndTick = 0;
+    loopCount = 0;
+    loopStartMs = 0;
+    loopEndMs = 0;
+    loopResult = BAERmfEditorDocument_GetMidiLoopMarkers(document,
+                                                          &loopEnabled,
+                                                          &loopStartTick,
+                                                          &loopEndTick,
+                                                          &loopCount);
+
     printf("Source: %s\n", sourcePath ? sourcePath : "(unknown)");
     printf("Title: %s\n", (title && title[0]) ? title : "(none)");
     printf("Song length: %llu ms (%.3f s)\n",
            (unsigned long long)songLengthMs,
            (double)songLengthMs / 1000.0);
+    
+    if (loopResult == BAE_NO_ERROR && loopEnabled)
+    {
+        if (song_ticks_to_milliseconds(document, loopStartTick, &loopStartMs) &&
+            song_ticks_to_milliseconds(document, loopEndTick, &loopEndMs))
+        {
+            printf("Loop: enabled, start=%llu ms (%u ticks), end=%llu ms (%u ticks), count=%d\n",
+                   (unsigned long long)loopStartMs,
+                   (unsigned)loopStartTick,
+                   (unsigned long long)loopEndMs,
+                   (unsigned)loopEndTick,
+                   (int)loopCount);
+        }
+        else
+        {
+            printf("Loop: enabled, start=%u ticks, end=%u ticks, count=%d\n",
+                   (unsigned)loopStartTick,
+                   (unsigned)loopEndTick,
+                   (int)loopCount);
+        }
+    }
+    else
+    {
+        printf("Loop: disabled\n");
+    }
+    
     printf("Samples: %u\n", (unsigned)sampleCount);
     if (sampleCount == 0)
     {
@@ -932,9 +977,12 @@ int main(int argc, char *argv[])
     int loopEndExplicit;
     int doTrim;
     int trimExplicit;
-    uint64_t loopStartMs;
-    uint64_t loopEndMs;
-    uint64_t trimMs;
+    uint64_t loopStartValue;
+    uint64_t loopEndValue;
+    uint64_t trimValue;
+    int loopStartIsTicks;
+    int loopEndIsTicks;
+    int trimIsTicks;
     int32_t loopCount;
     SongtoolSampleOverride sampleOverrides[SONGTOOL_MAX_SAMPLE_OVERRIDES];
     SongtoolInstrumentOverride instrumentOverrides[SONGTOOL_MAX_INSTRUMENT_OVERRIDES];
@@ -951,9 +999,12 @@ int main(int argc, char *argv[])
     loopEndExplicit = 0;
     doTrim = 0;
     trimExplicit = 0;
-    loopStartMs = 0;
-    loopEndMs = 0;
-    trimMs = 0;
+    loopStartValue = 0;
+    loopEndValue = 0;
+    trimValue = 0;
+    loopStartIsTicks = 0;
+    loopEndIsTicks = 0;
+    trimIsTicks = 0;
     loopCount = -1;
     sampleOverrideCount = 0;
     instrumentOverrideCount = 0;
@@ -1085,44 +1136,58 @@ int main(int argc, char *argv[])
             doCompression = 1;
             continue;
         }
-        if (!strcmp(arg, "--loop-ms"))
+        if (!strcmp(arg, "--loop-end"))
         {
             char *end = NULL;
             unsigned long long v;
+            const char *valStr;
             if (argi + 1 >= argc)
             {
-                fprintf(stderr, "Error: --loop-ms requires an argument\n");
+                fprintf(stderr, "Error: --loop-end requires an argument\n");
                 return 1;
             }
             ++argi;
-            v = strtoull(argv[argi], &end, 10);
-            if (end == argv[argi] || *end != '\0')
+            valStr = argv[argi];
+            if (valStr[0] == '+')
             {
-                fprintf(stderr, "Error: invalid --loop-ms value '%s'\n", argv[argi]);
+                loopEndIsTicks = 1;
+                valStr++;
+            }
+            v = strtoull(valStr, &end, 10);
+            if (end == valStr || *end != '\0')
+            {
+                fprintf(stderr, "Error: invalid --loop-end value '%s'\n", argv[argi]);
                 return 1;
             }
-            loopEndMs = (uint64_t)v;
+            loopEndValue = (uint64_t)v;
             loopEndExplicit = 1;
             doSetLoop = 1;
             continue;
         }
-        if (!strcmp(arg, "--loop-start-ms"))
+        if (!strcmp(arg, "--loop-start"))
         {
             char *end = NULL;
             unsigned long long v;
+            const char *valStr;
             if (argi + 1 >= argc)
             {
-                fprintf(stderr, "Error: --loop-start-ms requires an argument\n");
+                fprintf(stderr, "Error: --loop-start requires an argument\n");
                 return 1;
             }
             ++argi;
-            v = strtoull(argv[argi], &end, 10);
-            if (end == argv[argi] || *end != '\0')
+            valStr = argv[argi];
+            if (valStr[0] == '+')
             {
-                fprintf(stderr, "Error: invalid --loop-start-ms value '%s'\n", argv[argi]);
+                loopStartIsTicks = 1;
+                valStr++;
+            }
+            v = strtoull(valStr, &end, 10);
+            if (end == valStr || *end != '\0')
+            {
+                fprintf(stderr, "Error: invalid --loop-start value '%s'\n", argv[argi]);
                 return 1;
             }
-            loopStartMs = (uint64_t)v;
+            loopStartValue = (uint64_t)v;
             doSetLoop = 1;
             continue;
         }
@@ -1155,19 +1220,26 @@ int main(int argc, char *argv[])
         {
             char *end = NULL;
             unsigned long long v;
+            const char *valStr;
             if (argi + 1 >= argc)
             {
                 fprintf(stderr, "Error: --trim requires an argument\n");
                 return 1;
             }
             ++argi;
-            v = strtoull(argv[argi], &end, 10);
-            if (end == argv[argi] || *end != '\0')
+            valStr = argv[argi];
+            if (valStr[0] == '+')
+            {
+                trimIsTicks = 1;
+                valStr++;
+            }
+            v = strtoull(valStr, &end, 10);
+            if (end == valStr || *end != '\0')
             {
                 fprintf(stderr, "Error: invalid --trim value '%s'\n", argv[argi]);
                 return 1;
             }
-            trimMs = (uint64_t)v;
+            trimValue = (uint64_t)v;
             trimExplicit = 1;
             doTrim = 1;
             continue;
@@ -1213,12 +1285,15 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    if (doSetLoop && !doDisableLoop && loopEndExplicit && loopEndMs <= loopStartMs)
+    if (doSetLoop && !doDisableLoop && loopEndExplicit)
     {
-        fprintf(stderr, "Error: loop end must be greater than loop start (%llu <= %llu)\n",
-                (unsigned long long)loopEndMs,
-                (unsigned long long)loopStartMs);
-        return 1;
+        if ((loopEndIsTicks || loopStartIsTicks) ? (loopEndValue <= loopStartValue) : (loopEndValue <= loopStartValue))
+        {
+            fprintf(stderr, "Error: loop end must be greater than loop start (%llu <= %llu)\n",
+                    (unsigned long long)loopEndValue,
+                    (unsigned long long)loopStartValue);
+            return 1;
+        }
     }
 
     if (doCompression && requiresZmf && !is_zmf_path(destPath))
@@ -1304,29 +1379,49 @@ int main(int argc, char *argv[])
     {
         uint32_t startTick;
         uint32_t endTick;
+        uint64_t loopStartMs;
+        uint64_t loopEndMs;
 
-        if (!loopEndExplicit)
+        if (loopStartIsTicks)
         {
-            uint32_t songEndTick = get_song_end_tick(document);
-            if (songEndTick == 0 ||
-                !song_ticks_to_milliseconds(document, songEndTick, &loopEndMs))
+            startTick = (uint32_t)loopStartValue;
+        }
+        else
+        {
+            if (!milliseconds_to_song_ticks(document, loopStartValue, &startTick))
             {
-                fprintf(stderr, "Error: could not determine song length for default --loop-ms\n");
+                fprintf(stderr, "Error: failed to convert loop start milliseconds to MIDI ticks\n");
                 BAERmfEditorDocument_Delete(document);
                 BAE_Cleanup();
                 return 1;
             }
-            fprintf(stderr, "Loop end defaulting to song length: %llu ms\n",
-                    (unsigned long long)loopEndMs);
         }
 
-        if (!milliseconds_to_song_ticks(document, loopStartMs, &startTick) ||
-            !milliseconds_to_song_ticks(document, loopEndMs, &endTick))
+        if (loopEndIsTicks)
         {
-            fprintf(stderr, "Error: failed to convert loop milliseconds to MIDI ticks\n");
-            BAERmfEditorDocument_Delete(document);
-            BAE_Cleanup();
-            return 1;
+            endTick = (uint32_t)loopEndValue;
+        }
+        else if (loopEndExplicit)
+        {
+            if (!milliseconds_to_song_ticks(document, loopEndValue, &endTick))
+            {
+                fprintf(stderr, "Error: failed to convert loop end milliseconds to MIDI ticks\n");
+                BAERmfEditorDocument_Delete(document);
+                BAE_Cleanup();
+                return 1;
+            }
+        }
+        else
+        {
+            uint32_t songEndTick = get_song_end_tick(document);
+            if (songEndTick == 0)
+            {
+                fprintf(stderr, "Error: could not determine song length for default loop end\n");
+                BAERmfEditorDocument_Delete(document);
+                BAE_Cleanup();
+                return 1;
+            }
+            endTick = songEndTick;
         }
 
         if (endTick <= startTick)
@@ -1347,34 +1442,48 @@ int main(int argc, char *argv[])
             return 1;
         }
 
+        song_ticks_to_milliseconds(document, startTick, &loopStartMs);
+        song_ticks_to_milliseconds(document, endTick, &loopEndMs);
+
         fprintf(stderr,
-                "Loop markers set: start=%llu ms (%u ticks), end=%llu ms (%u ticks), count=%d\n",
-                (unsigned long long)loopStartMs,
+                "Loop markers set: start=%u ticks (%llu ms), end=%u ticks (%llu ms), count=%d\n",
                 (unsigned)startTick,
-                (unsigned long long)loopEndMs,
+                (unsigned long long)loopStartMs,
                 (unsigned)endTick,
+                (unsigned long long)loopEndMs,
                 (int)loopCount);
     }
 
     if (doTrim)
     {
         uint32_t trimTick;
+        uint64_t actualTrimMs;
 
         if (!trimExplicit)
         {
-            fprintf(stderr, "Error: --trim requires a value in milliseconds\n");
+            fprintf(stderr, "Error: --trim requires a value\n");
             BAERmfEditorDocument_Delete(document);
             BAE_Cleanup();
             return 1;
         }
 
-        if (!milliseconds_to_song_ticks(document, trimMs, &trimTick))
+        if (trimIsTicks)
         {
-            fprintf(stderr, "Error: failed to convert trim milliseconds to MIDI ticks\n");
-            BAERmfEditorDocument_Delete(document);
-            BAE_Cleanup();
-            return 1;
+            trimTick = (uint32_t)trimValue;
         }
+        else
+        {
+            if (!milliseconds_to_song_ticks(document, trimValue, &trimTick))
+            {
+                fprintf(stderr, "Error: failed to convert trim milliseconds to MIDI ticks\n");
+                BAERmfEditorDocument_Delete(document);
+                BAE_Cleanup();
+                return 1;
+            }
+        }
+
+        /* Convert to milliseconds to show actual result */
+        song_ticks_to_milliseconds(document, trimTick, &actualTrimMs);
 
         if (!trim_document_to_tick(document, trimTick))
         {
@@ -1384,10 +1493,26 @@ int main(int argc, char *argv[])
             return 1;
         }
 
-        fprintf(stderr,
-                "Trimmed MIDI timeline to %llu ms (%u ticks)\n",
-                (unsigned long long)trimMs,
-                (unsigned)trimTick);
+        if (trimIsTicks)
+        {
+            fprintf(stderr,
+                    "Trimmed MIDI timeline to %u ticks (%llu ms)\n",
+                    (unsigned)trimTick,
+                    (unsigned long long)actualTrimMs);
+        }
+        else
+        {
+            fprintf(stderr,
+                    "Trimmed MIDI timeline: requested=%llu ms, actual=%llu ms (%u ticks)\n",
+                    (unsigned long long)trimValue,
+                    (unsigned long long)actualTrimMs,
+                    (unsigned)trimTick);
+            
+            if (actualTrimMs != trimValue)
+            {
+                fprintf(stderr, "  (note: rounding precision loss due to MIDI tempo conversion)\n");
+            }
+        }
     }
 
     result = BAERmfEditorDocument_SaveAsRmf(document, (BAEPathName)destPath);
