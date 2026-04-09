@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <math.h>
 
 #include <NeoBAE.h>
 
@@ -22,6 +23,7 @@
 
 #define SONGTOOL_MAX_SAMPLE_OVERRIDES 4096
 #define SONGTOOL_MAX_INSTRUMENT_OVERRIDES 1024
+#define SONGTOOL_MAX_METADATA_EDITS 128
 
 typedef struct SongtoolSampleOverride
 {
@@ -36,6 +38,161 @@ typedef struct SongtoolInstrumentOverride
     Mod2RmfEncoderSettings settings;
     BAERmfEditorCompressionType compressionType;
 } SongtoolInstrumentOverride;
+
+typedef struct SongtoolMetadataField
+{
+    BAEInfoType type;
+    const char *name;
+    const char *label;
+} SongtoolMetadataField;
+
+typedef struct SongtoolMetadataEdit
+{
+    BAEInfoType type;
+    const char *value;
+    int clear;
+} SongtoolMetadataEdit;
+
+static SongtoolMetadataField const kSongtoolMetadataFields[] = {
+    { TITLE_INFO, "title", "Title" },
+    { PERFORMED_BY_INFO, "performed-by", "Performed By" },
+    { COMPOSER_INFO, "composer", "Composer" },
+    { COPYRIGHT_INFO, "copyright", "Copyright" },
+    { PUBLISHER_CONTACT_INFO, "publisher-contact", "Publisher Contact" },
+    { USE_OF_LICENSE_INFO, "use-of-license", "Use Of License" },
+    { LICENSED_TO_URL_INFO, "licensed-to-url", "Licensed To URL" },
+    { LICENSE_TERM_INFO, "license-term", "License Term" },
+    { EXPIRATION_DATE_INFO, "expiration-date", "Expiration Date" },
+    { COMPOSER_NOTES_INFO, "composer-notes", "Composer Notes" },
+    { INDEX_NUMBER_INFO, "index-number", "Index Number" },
+    { GENRE_INFO, "genre", "Genre" },
+    { SUB_GENRE_INFO, "sub-genre", "Sub-Genre" },
+    { TEMPO_DESCRIPTION_INFO, "tempo-description", "Tempo Description" },
+    { ORIGINAL_SOURCE_INFO, "original-source", "Original Source" }
+};
+
+static uint32_t songtool_metadata_field_count(void)
+{
+    return (uint32_t)(sizeof(kSongtoolMetadataFields) / sizeof(kSongtoolMetadataFields[0]));
+}
+
+static int songtool_str_equal_ignore_case(const char *a, const char *b)
+{
+    unsigned char ca;
+    unsigned char cb;
+
+    if (!a || !b)
+    {
+        return 0;
+    }
+
+    while (*a && *b)
+    {
+        ca = (unsigned char)*a;
+        cb = (unsigned char)*b;
+        if (ca >= 'A' && ca <= 'Z')
+        {
+            ca = (unsigned char)(ca - 'A' + 'a');
+        }
+        if (cb >= 'A' && cb <= 'Z')
+        {
+            cb = (unsigned char)(cb - 'A' + 'a');
+        }
+        if (ca != cb)
+        {
+            return 0;
+        }
+        ++a;
+        ++b;
+    }
+    return (*a == '\0' && *b == '\0') ? 1 : 0;
+}
+
+static int songtool_parse_metadata_field_name(const char *name,
+                                              BAEInfoType *outType,
+                                              const char **outLabel)
+{
+    uint32_t i;
+
+    if (!name || !outType)
+    {
+        return 0;
+    }
+
+    for (i = 0; i < songtool_metadata_field_count(); ++i)
+    {
+        if (songtool_str_equal_ignore_case(name, kSongtoolMetadataFields[i].name))
+        {
+            *outType = kSongtoolMetadataFields[i].type;
+            if (outLabel)
+            {
+                *outLabel = kSongtoolMetadataFields[i].label;
+            }
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static void print_metadata_field_names(void)
+{
+    uint32_t i;
+
+    fprintf(stderr, "Supported metadata fields:\n");
+    for (i = 0; i < songtool_metadata_field_count(); ++i)
+    {
+        fprintf(stderr, "  %s\n", kSongtoolMetadataFields[i].name);
+    }
+}
+
+static int apply_metadata_edits(BAERmfEditorDocument *document,
+                                SongtoolMetadataEdit const *edits,
+                                uint32_t editCount)
+{
+    uint32_t i;
+
+    if (!document || !edits)
+    {
+        return 0;
+    }
+
+    for (i = 0; i < editCount; ++i)
+    {
+        BAEResult result;
+        const char *value;
+        const char *label;
+        uint32_t j;
+
+        label = "Metadata";
+        for (j = 0; j < songtool_metadata_field_count(); ++j)
+        {
+            if (kSongtoolMetadataFields[j].type == edits[i].type)
+            {
+                label = kSongtoolMetadataFields[j].label;
+                break;
+            }
+        }
+
+        value = edits[i].clear ? "" : edits[i].value;
+        if (!value)
+        {
+            value = "";
+        }
+
+        result = BAERmfEditorDocument_SetInfo(document, edits[i].type, value);
+        if (result != BAE_NO_ERROR)
+        {
+            fprintf(stderr,
+                    "Error: failed to set metadata field %s (%d)\n",
+                    label,
+                    (int)result);
+            return 0;
+        }
+    }
+
+    return 1;
+}
 
 static void print_usage(const char *program_name)
 {
@@ -52,6 +209,10 @@ static void print_usage(const char *program_name)
             "                        Override all samples for one instrument (repeatable)\n"
             "                        SPEC: instID:codec[@bitrate], e.g. 0x200:qoa\n"
             "  --bitrate N           Target bitrate in kbps (or bps) for lossy codecs\n"
+            "  --gain DB             Apply gain (dB) to all sample split volumes (use with encoding, not after)\n"
+            "  --set-meta F=V        Set metadata field F to value V (repeatable)\n"
+            "  --clear-meta F        Clear metadata field F (repeatable)\n"
+            "  --list-meta           List supported metadata fields\n"
             "  --loop-end N          Set MIDI loop end point (ms by default, or +N for ticks)\n"
             "  --loop-start N        Optional MIDI loop start (ms by default, or +N for ticks, default: 0)\n"
             "  --loop-count N        Loop count (-1=forever, default: -1)\n"
@@ -124,6 +285,9 @@ static uint32_t microseconds_to_ticks(uint32_t microseconds,
 static int get_initial_tempo_us_per_quarter(BAERmfEditorDocument const *document,
                                             uint32_t *outTempo)
 {
+    uint32_t tempoEventCount;
+    uint32_t i;
+    int foundTickZeroTempo;
     uint32_t bpm;
     BAEResult result;
 
@@ -143,6 +307,32 @@ static int get_initial_tempo_us_per_quarter(BAERmfEditorDocument const *document
     if (*outTempo == 0)
     {
         *outTempo = 500000U;
+    }
+
+    /* Prefer explicit tempo events at tick 0 over document BPM, since
+     * document BPM can drift from actual map after destructive edits. */
+    tempoEventCount = 0;
+    (void)BAERmfEditorDocument_GetTempoEventCount(document, &tempoEventCount);
+    foundTickZeroTempo = 0;
+    for (i = 0; i < tempoEventCount; ++i)
+    {
+        uint32_t eventTick;
+        uint32_t eventTempo;
+
+        result = BAERmfEditorDocument_GetTempoEvent(document, i, &eventTick, &eventTempo);
+        if (result != BAE_NO_ERROR || eventTempo == 0)
+        {
+            continue;
+        }
+        if (eventTick == 0)
+        {
+            *outTempo = eventTempo;
+            foundTickZeroTempo = 1;
+        }
+        else if (foundTickZeroTempo)
+        {
+            break;
+        }
     }
 
     return 1;
@@ -750,15 +940,232 @@ static int apply_instrument_overrides(BAERmfEditorDocument *document,
     return 1;
 }
 
+static int apply_gain_to_all_samples(BAERmfEditorDocument *document,
+                                     double gainDb)
+{
+    uint32_t sampleCount;
+    uint32_t i;
+    uint32_t appliedSamples;
+    uint32_t skippedUnsupported;
+    double linearScale;
+
+    if (!document)
+    {
+        return 0;
+    }
+
+    sampleCount = 0;
+    if (BAERmfEditorDocument_GetSampleCount(document, &sampleCount) != BAE_NO_ERROR)
+    {
+        return 0;
+    }
+
+    linearScale = pow(10.0, gainDb / 20.0);
+    if (linearScale < 0.0)
+    {
+        linearScale = 0.0;
+    }
+
+    appliedSamples = 0;
+    skippedUnsupported = 0;
+    for (i = 0; i < sampleCount; ++i)
+    {
+        BAERmfEditorSampleInfo infoBefore;
+        BAERmfEditorSampleInfo infoAfter;
+        BAESampleInfo replacedInfo;
+        void const *waveData;
+        uint32_t frameCount;
+        uint16_t bitSize;
+        uint16_t channels;
+        BAE_UNSIGNED_FIXED sampledRate;
+        uint32_t sampleCountTotal;
+        uint32_t bytesPerSample;
+        uint32_t totalBytes;
+        uint8_t *scaledPcm;
+        uint32_t s;
+        BAEResult result;
+
+        result = BAERmfEditorDocument_GetSampleInfo(document, i, &infoBefore);
+        if (result != BAE_NO_ERROR)
+        {
+            fprintf(stderr, "Warning: failed to get sample info for sample %u (%d)\n",
+                    (unsigned)i, (int)result);
+            continue;
+        }
+
+        result = BAERmfEditorDocument_GetSampleWaveformData(document,
+                                                            i,
+                                                            &waveData,
+                                                            &frameCount,
+                                                            &bitSize,
+                                                            &channels,
+                                                            &sampledRate);
+        if (result != BAE_NO_ERROR)
+        {
+            fprintf(stderr, "Warning: failed to get waveform data for sample %u (%d)\n",
+                    (unsigned)i, (int)result);
+            continue;
+        }
+
+        if ((bitSize != 8 && bitSize != 16) || (channels != 1 && channels != 2) || frameCount == 0)
+        {
+            ++skippedUnsupported;
+            continue;
+        }
+
+        sampleCountTotal = frameCount * (uint32_t)channels;
+        bytesPerSample = (uint32_t)(bitSize / 8u);
+        totalBytes = sampleCountTotal * bytesPerSample;
+        if (sampleCountTotal == 0 || bytesPerSample == 0 || totalBytes / bytesPerSample != sampleCountTotal)
+        {
+            continue;
+        }
+
+        scaledPcm = (uint8_t *)malloc(totalBytes);
+        if (!scaledPcm)
+        {
+            fprintf(stderr, "Error: out of memory while applying gain\n");
+            return 0;
+        }
+
+        if (bitSize == 8)
+        {
+            uint8_t const *src = (uint8_t const *)waveData;
+            uint8_t *dst = (uint8_t *)scaledPcm;
+            for (s = 0; s < sampleCountTotal; ++s)
+            {
+                int centered = (int)src[s] - 128;
+                int scaled = (centered >= 0)
+                           ? (int)(centered * linearScale + 0.5)
+                           : (int)(centered * linearScale - 0.5);
+                int out = scaled + 128;
+                if (out < 0) out = 0;
+                if (out > 255) out = 255;
+                dst[s] = (uint8_t)out;
+            }
+        }
+        else
+        {
+            int16_t const *src = (int16_t const *)waveData;
+            int16_t *dst = (int16_t *)scaledPcm;
+            for (s = 0; s < sampleCountTotal; ++s)
+            {
+                int32_t out;
+                if (src[s] >= 0)
+                {
+                    out = (int32_t)(src[s] * linearScale + 0.5);
+                }
+                else
+                {
+                    out = (int32_t)(src[s] * linearScale - 0.5);
+                }
+                if (out < -32768) out = -32768;
+                if (out > 32767) out = 32767;
+                dst[s] = (int16_t)out;
+            }
+        }
+
+        result = BAERmfEditorDocument_ReplaceSampleFromPCM(document,
+                                                           i,
+                                                           scaledPcm,
+                                                           frameCount,
+                                                           bitSize,
+                                                           channels,
+                                                           sampledRate,
+                                                           infoBefore.sampleInfo.startLoop,
+                                                           infoBefore.sampleInfo.endLoop,
+                                                           &replacedInfo);
+        free(scaledPcm);
+
+        if (result != BAE_NO_ERROR)
+        {
+            fprintf(stderr, "Warning: failed to replace PCM for sample %u (%d)\n",
+                    (unsigned)i, (int)result);
+            continue;
+        }
+
+        /* ReplaceSampleFromPCM resets target compression to PCM.
+         * Restore the original per-sample encoding intent so save-time
+         * encoding still uses the user's codec settings. */
+        result = BAERmfEditorDocument_GetSampleInfo(document, i, &infoAfter);
+        if (result == BAE_NO_ERROR)
+        {
+            infoAfter.compressionType = infoBefore.compressionType;
+            infoAfter.opusMode = infoBefore.opusMode;
+            infoAfter.opusRoundTripResample = infoBefore.opusRoundTripResample;
+            (void)BAERmfEditorDocument_SetSampleInfo(document, i, &infoAfter);
+        }
+
+        ++appliedSamples;
+    }
+
+    fprintf(stderr,
+            "Gain: %+0.2f dB applied to %u/%u samples (%u skipped unsupported formats)\n",
+            gainDb,
+            (unsigned)appliedSamples,
+            (unsigned)sampleCount,
+            (unsigned)skippedUnsupported);
+    return 1;
+}
+
 static int trim_document_to_tick(BAERmfEditorDocument *document,
                                  uint32_t boundaryTick)
 {
     return BAERmfEditorDocument_TrimToTick(document, boundaryTick) == BAE_NO_ERROR;
 }
 
+static int add_trim_hard_stop_events(BAERmfEditorDocument *document,
+                                     uint32_t boundaryTick)
+{
+    uint16_t trackCount;
+    uint16_t trackIndex;
+    uint32_t stopTick;
+    BAEResult result;
+
+    if (!document)
+    {
+        return 0;
+    }
+
+    if (boundaryTick == 0)
+    {
+        return 1;
+    }
+
+    stopTick = boundaryTick - 1;
+    trackCount = 0;
+    result = BAERmfEditorDocument_GetTrackCount(document, &trackCount);
+    if (result != BAE_NO_ERROR)
+    {
+        return 0;
+    }
+
+    for (trackIndex = 0; trackIndex < trackCount; ++trackIndex)
+    {
+        /* Sustain off first, then all-notes-off and all-sound-off to ensure
+         * trim boundaries stop promptly even with held pedals or long releases. */
+        result = BAERmfEditorDocument_AddTrackCCEvent(document, trackIndex, 64, stopTick, 0);
+        if (result != BAE_NO_ERROR)
+        {
+            return 0;
+        }
+        result = BAERmfEditorDocument_AddTrackCCEvent(document, trackIndex, 123, stopTick, 0);
+        if (result != BAE_NO_ERROR)
+        {
+            return 0;
+        }
+        result = BAERmfEditorDocument_AddTrackCCEvent(document, trackIndex, 120, stopTick, 0);
+        if (result != BAE_NO_ERROR)
+        {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 static void print_document_info(BAERmfEditorDocument const *document, const char *sourcePath)
 {
-    const char *title;
     uint32_t sampleCount;
     uint32_t songEndTick;
     uint64_t songLengthMs;
@@ -772,7 +1179,6 @@ static void print_document_info(BAERmfEditorDocument const *document, const char
     uint64_t loopEndMs;
     BAEResult loopResult;
 
-    title = BAERmfEditorDocument_GetInfo(document, TITLE_INFO);
     sampleCount = 0;
     (void)BAERmfEditorDocument_GetSampleCount(document, &sampleCount);
 
@@ -796,7 +1202,26 @@ static void print_document_info(BAERmfEditorDocument const *document, const char
                                                           &loopCount);
 
     printf("Source: %s\n", sourcePath ? sourcePath : "(unknown)");
-    printf("Title: %s\n", (title && title[0]) ? title : "(none)");
+    {
+        int printedMetadata;
+        printedMetadata = 0;
+        for (i = 0; i < songtool_metadata_field_count(); ++i)
+        {
+            const char *value;
+
+            value = BAERmfEditorDocument_GetInfo(document, kSongtoolMetadataFields[i].type);
+            if (value && value[0])
+            {
+                printf("%s: %s\n", kSongtoolMetadataFields[i].label, value);
+                printedMetadata = 1;
+            }
+        }
+        if (!printedMetadata)
+        {
+            printf("Metadata: (none)\n");
+        }
+    }
+
     printf("Song length: %llu ms (%.3f s)\n",
            (unsigned long long)songLengthMs,
            (double)songLengthMs / 1000.0);
@@ -972,6 +1397,9 @@ int main(int argc, char *argv[])
     int argi;
     int doInfo;
     int doCompression;
+    int doGlobalCompression;
+    int doGain;
+    int doMetadataEdit;
     int doDisableLoop;
     int doSetLoop;
     int loopEndExplicit;
@@ -986,14 +1414,20 @@ int main(int argc, char *argv[])
     int32_t loopCount;
     SongtoolSampleOverride sampleOverrides[SONGTOOL_MAX_SAMPLE_OVERRIDES];
     SongtoolInstrumentOverride instrumentOverrides[SONGTOOL_MAX_INSTRUMENT_OVERRIDES];
+    SongtoolMetadataEdit metadataEdits[SONGTOOL_MAX_METADATA_EDITS];
     uint32_t sampleOverrideCount;
     uint32_t instrumentOverrideCount;
+    uint32_t metadataEditCount;
+    double gainDb;
     int requiresZmf;
 
     sourcePath = NULL;
     destPath = NULL;
     doInfo = 0;
     doCompression = 0;
+    doGlobalCompression = 0;
+    doGain = 0;
+    doMetadataEdit = 0;
     doDisableLoop = 0;
     doSetLoop = 0;
     loopEndExplicit = 0;
@@ -1008,6 +1442,8 @@ int main(int argc, char *argv[])
     loopCount = -1;
     sampleOverrideCount = 0;
     instrumentOverrideCount = 0;
+    metadataEditCount = 0;
+    gainDb = 0.0;
     requiresZmf = 0;
 
     mod2rmf_encoder_defaults(&encoderSettings);
@@ -1032,6 +1468,11 @@ int main(int argc, char *argv[])
             mod2rmf_encoder_print_codecs();
             return 0;
         }
+        if (!strcmp(arg, "--list-meta"))
+        {
+            print_metadata_field_names();
+            return 0;
+        }
         if (!strcmp(arg, "--info"))
         {
             doInfo = 1;
@@ -1052,6 +1493,7 @@ int main(int argc, char *argv[])
                 return 1;
             }
             doCompression = 1;
+            doGlobalCompression = 1;
             if (mod2rmf_encoder_requires_zmf(encoderSettings.codec))
             {
                 requiresZmf = 1;
@@ -1134,6 +1576,110 @@ int main(int argc, char *argv[])
                 return 1;
             }
             doCompression = 1;
+            continue;
+        }
+        if (!strcmp(arg, "--gain"))
+        {
+            char *end = NULL;
+            double v;
+
+            if (argi + 1 >= argc)
+            {
+                fprintf(stderr, "Error: --gain requires a value in dB\n");
+                return 1;
+            }
+            ++argi;
+            v = strtod(argv[argi], &end);
+            if (end == argv[argi] || *end != '\0')
+            {
+                fprintf(stderr, "Error: invalid --gain value '%s'\n", argv[argi]);
+                return 1;
+            }
+            gainDb = v;
+            doGain = 1;
+            continue;
+        }
+        if (!strcmp(arg, "--set-meta"))
+        {
+            const char *spec;
+            const char *equals;
+            char fieldName[64];
+            size_t fieldLen;
+            BAEInfoType infoType;
+
+            if (argi + 1 >= argc)
+            {
+                fprintf(stderr, "Error: --set-meta requires an argument\n");
+                return 1;
+            }
+            if (metadataEditCount >= SONGTOOL_MAX_METADATA_EDITS)
+            {
+                fprintf(stderr, "Error: too many metadata edits (max %d)\n", SONGTOOL_MAX_METADATA_EDITS);
+                return 1;
+            }
+
+            ++argi;
+            spec = argv[argi];
+            equals = strchr(spec, '=');
+            if (!equals)
+            {
+                fprintf(stderr, "Error: invalid --set-meta '%s' (expected field=value)\n", spec);
+                print_metadata_field_names();
+                return 1;
+            }
+
+            fieldLen = (size_t)(equals - spec);
+            if (fieldLen == 0 || fieldLen >= sizeof(fieldName))
+            {
+                fprintf(stderr, "Error: invalid metadata field in --set-meta '%s'\n", spec);
+                print_metadata_field_names();
+                return 1;
+            }
+            memcpy(fieldName, spec, fieldLen);
+            fieldName[fieldLen] = '\0';
+
+            if (!songtool_parse_metadata_field_name(fieldName, &infoType, NULL))
+            {
+                fprintf(stderr, "Error: unknown metadata field '%s'\n", fieldName);
+                print_metadata_field_names();
+                return 1;
+            }
+
+            metadataEdits[metadataEditCount].type = infoType;
+            metadataEdits[metadataEditCount].value = equals + 1;
+            metadataEdits[metadataEditCount].clear = 0;
+            ++metadataEditCount;
+            doMetadataEdit = 1;
+            continue;
+        }
+        if (!strcmp(arg, "--clear-meta"))
+        {
+            BAEInfoType infoType;
+
+            if (argi + 1 >= argc)
+            {
+                fprintf(stderr, "Error: --clear-meta requires a field name\n");
+                return 1;
+            }
+            if (metadataEditCount >= SONGTOOL_MAX_METADATA_EDITS)
+            {
+                fprintf(stderr, "Error: too many metadata edits (max %d)\n", SONGTOOL_MAX_METADATA_EDITS);
+                return 1;
+            }
+
+            ++argi;
+            if (!songtool_parse_metadata_field_name(argv[argi], &infoType, NULL))
+            {
+                fprintf(stderr, "Error: unknown metadata field '%s'\n", argv[argi]);
+                print_metadata_field_names();
+                return 1;
+            }
+
+            metadataEdits[metadataEditCount].type = infoType;
+            metadataEdits[metadataEditCount].value = "";
+            metadataEdits[metadataEditCount].clear = 1;
+            ++metadataEditCount;
+            doMetadataEdit = 1;
             continue;
         }
         if (!strcmp(arg, "--loop-end"))
@@ -1273,9 +1819,23 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    if (!doInfo && !doCompression && !doSetLoop && !doDisableLoop && !doTrim)
+    if (!destPath && (doCompression || doGain || doMetadataEdit || doSetLoop || doDisableLoop || doTrim))
     {
-        fprintf(stderr, "Error: no operation requested. Use --codec, --loop-*, --disable-loop, and/or --trim.\n");
+        fprintf(stderr, "Error: destination path is required for edit operations\n");
+        return 1;
+    }
+
+    if (!doInfo && !doCompression && !doGain && !doMetadataEdit && !doSetLoop && !doDisableLoop && !doTrim)
+    {
+        fprintf(stderr, "Error: no operation requested. Use --codec, --gain, --set-meta/--clear-meta, --loop-*, --disable-loop, and/or --trim.\n");
+        return 1;
+    }
+
+    if (doCompression && !doGlobalCompression &&
+        sampleOverrideCount == 0 && instrumentOverrideCount == 0)
+    {
+        fprintf(stderr,
+                "Error: --bitrate requires --codec, --sample-codec, or --instrument-codec\n");
         return 1;
     }
 
@@ -1323,23 +1883,37 @@ int main(int argc, char *argv[])
         print_document_info(document, sourcePath);
     }
 
-    if (!doCompression && !doSetLoop && !doDisableLoop && !doTrim)
+    if (!doCompression && !doGain && !doMetadataEdit && !doSetLoop && !doDisableLoop && !doTrim)
     {
         BAERmfEditorDocument_Delete(document);
         BAE_Cleanup();
         return 0;
     }
 
-    if (doCompression)
+    if (doGain)
     {
-        compressionType = mod2rmf_encoder_resolve(&encoderSettings);
-
-        if (!apply_compression_to_all_samples(document, compressionType))
+        if (!apply_gain_to_all_samples(document, gainDb))
         {
-            fprintf(stderr, "Error: sample recompression failed\n");
+            fprintf(stderr, "Error: failed to apply gain\n");
             BAERmfEditorDocument_Delete(document);
             BAE_Cleanup();
             return 1;
+        }
+    }
+
+    if (doCompression)
+    {
+        if (doGlobalCompression)
+        {
+            compressionType = mod2rmf_encoder_resolve(&encoderSettings);
+
+            if (!apply_compression_to_all_samples(document, compressionType))
+            {
+                fprintf(stderr, "Error: sample recompression failed\n");
+                BAERmfEditorDocument_Delete(document);
+                BAE_Cleanup();
+                return 1;
+            }
         }
 
         if (instrumentOverrideCount > 0 &&
@@ -1357,6 +1931,16 @@ int main(int argc, char *argv[])
             !apply_sample_overrides(document, sampleOverrides, sampleOverrideCount))
         {
             fprintf(stderr, "Error: per-sample compression overrides failed\n");
+            BAERmfEditorDocument_Delete(document);
+            BAE_Cleanup();
+            return 1;
+        }
+    }
+
+    if (doMetadataEdit)
+    {
+        if (!apply_metadata_edits(document, metadataEdits, metadataEditCount))
+        {
             BAERmfEditorDocument_Delete(document);
             BAE_Cleanup();
             return 1;
@@ -1457,7 +2041,13 @@ int main(int argc, char *argv[])
     if (doTrim)
     {
         uint32_t trimTick;
+        uint32_t postTrimEndTick;
         uint64_t actualTrimMs;
+        uint64_t postTrimMs;
+        bool loopEnabled;
+        uint32_t loopStartTick;
+        uint32_t loopEndTick;
+        int32_t loopCount;
 
         if (!trimExplicit)
         {
@@ -1493,20 +2083,72 @@ int main(int argc, char *argv[])
             return 1;
         }
 
+        if (!add_trim_hard_stop_events(document, trimTick))
+        {
+            fprintf(stderr, "Error: failed to add hard-stop events at trim boundary\n");
+            BAERmfEditorDocument_Delete(document);
+            BAE_Cleanup();
+            return 1;
+        }
+
+        /* A trimmed song should not accidentally remain longer in playback
+         * due to pre-existing MIDI loop markers. Preserve loops only when
+         * user explicitly set loop markers in this invocation. */
+        if (!doSetLoop)
+        {
+            loopEnabled = FALSE;
+            loopStartTick = 0;
+            loopEndTick = 0;
+            loopCount = 0;
+
+            result = BAERmfEditorDocument_GetMidiLoopMarkers(document,
+                                                             &loopEnabled,
+                                                             &loopStartTick,
+                                                             &loopEndTick,
+                                                             &loopCount);
+            if (result == BAE_NO_ERROR && loopEnabled)
+            {
+                result = BAERmfEditorDocument_SetMidiLoopMarkers(document, FALSE, 0, 0, 0);
+                if (result != BAE_NO_ERROR)
+                {
+                    fprintf(stderr, "Error: failed to clear MIDI loop markers after trim (%d)\n", (int)result);
+                    BAERmfEditorDocument_Delete(document);
+                    BAE_Cleanup();
+                    return 1;
+                }
+                fprintf(stderr,
+                        "Cleared MIDI loop markers after trim (start=%u, end=%u, count=%d)\n",
+                        (unsigned)loopStartTick,
+                        (unsigned)loopEndTick,
+                        (int)loopCount);
+            }
+        }
+
+        postTrimEndTick = get_song_end_tick(document);
+        postTrimMs = 0;
+        if (postTrimEndTick > 0)
+        {
+            (void)song_ticks_to_milliseconds(document, postTrimEndTick, &postTrimMs);
+        }
+
         if (trimIsTicks)
         {
             fprintf(stderr,
-                    "Trimmed MIDI timeline to %u ticks (%llu ms)\n",
+                    "Trimmed MIDI timeline to %u ticks (%llu ms), end now %u ticks (%llu ms)\n",
                     (unsigned)trimTick,
-                    (unsigned long long)actualTrimMs);
+                    (unsigned long long)actualTrimMs,
+                    (unsigned)postTrimEndTick,
+                    (unsigned long long)postTrimMs);
         }
         else
         {
             fprintf(stderr,
-                    "Trimmed MIDI timeline: requested=%llu ms, actual=%llu ms (%u ticks)\n",
+                    "Trimmed MIDI timeline: requested=%llu ms, actual=%llu ms (%u ticks), end now %u ticks (%llu ms)\n",
                     (unsigned long long)trimValue,
                     (unsigned long long)actualTrimMs,
-                    (unsigned)trimTick);
+                    (unsigned)trimTick,
+                    (unsigned)postTrimEndTick,
+                    (unsigned long long)postTrimMs);
             
             if (actualTrimMs != trimValue)
             {

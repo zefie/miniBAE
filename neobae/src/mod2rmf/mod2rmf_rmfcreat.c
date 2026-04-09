@@ -3,7 +3,125 @@
 #include "mod2rmf_song.h"
 #include "X_Formats.h"
 #include "X_Assert.h"
+#include <math.h>
 #include <xmp.h>
+
+#define MOD2RMF_DEFAULT_ROOT_SHIFT_ST 24u
+
+static unsigned char mod2rmf_shifted_root_key(unsigned char rootKey, uint8_t shiftSemitones)
+{
+    return (rootKey > shiftSemitones) ? (unsigned char)(rootKey - shiftSemitones) : 0;
+}
+
+static BAE_UNSIGNED_FIXED mod2rmf_compensated_sample_rate(uint32_t baseRateHz, uint8_t shiftSemitones)
+{
+    double rateScale;
+    double shiftedRate;
+
+    rateScale = pow(2.0, -((double)shiftSemitones / 12.0));
+    shiftedRate = (double)baseRateHz * rateScale;
+    if (shiftedRate < 1.0)
+    {
+        shiftedRate = 1.0;
+    }
+
+    return (BAE_UNSIGNED_FIXED)(shiftedRate * 65536.0 + 0.5);
+}
+
+static bool mod2rmf_is_it_family(const char *type)
+{
+    if (!type || !type[0])
+    {
+        return FALSE;
+    }
+
+    return (strstr(type, "Impulse Tracker") ||
+            strstr(type, "Compressed Impulse Tracker") ||
+            strstr(type, "OpenMPT") && strstr(type, "IT")) ? TRUE : FALSE;
+}
+
+bool mod2rmf_path_is_it(const char *path)
+{
+    const char *ext;
+
+    if (!path)
+    {
+        return FALSE;
+    }
+
+    ext = strrchr(path, '.');
+    if (!ext)
+    {
+        return FALSE;
+    }
+
+    return (!strcmp(ext, ".it") || !strcmp(ext, ".IT") ||
+            !strcmp(ext, ".itz") || !strcmp(ext, ".ITZ")) ? TRUE : FALSE;
+}
+
+static int mod2rmf_tracker_note_bias(const Mod2RmfConverter *conv)
+{
+    if (!conv)
+    {
+        return 12;
+    }
+
+    /* IT modules are 1 octave low in default mode; restore +12 there.
+     * Keep 0 bias when down-octave-range is enabled (extra root shift). */
+    if (conv->isIt && conv->rootShiftSemitones > MOD2RMF_DEFAULT_ROOT_SHIFT_ST)
+    {
+        return 0;
+    }
+
+    return 12;
+}
+
+static void mod2rmf_apply_sample_gain(ModRawSample *raw, double gainDb)
+{
+    double scale;
+    uint32_t i;
+
+    if (!raw || !raw->pcm8 || raw->frameCount == 0)
+    {
+        return;
+    }
+    if (gainDb > -0.0001 && gainDb < 0.0001)
+    {
+        return;
+    }
+
+    scale = pow(10.0, gainDb / 20.0);
+    for (i = 0; i < raw->frameCount; ++i)
+    {
+        int sampleU8;
+        int centered;
+        int scaled;
+
+        sampleU8 = (int)((uint8_t)raw->pcm8[i]);
+        centered = sampleU8 - 128;
+
+        if (centered >= 0)
+        {
+            scaled = (int)(centered * scale + 0.5);
+        }
+        else
+        {
+            scaled = (int)(centered * scale - 0.5);
+        }
+
+        sampleU8 = scaled + 128;
+        if (sampleU8 < 0)
+        {
+            sampleU8 = 0;
+        }
+        if (sampleU8 > 255)
+        {
+            sampleU8 = 255;
+        }
+
+        raw->pcm8[i] = (int8_t)sampleU8;
+    }
+}
 
 /* Resolve per-note transpose from the active instrument mapping.
  * Some formats (notably IT) can reuse the same sample across multiple
@@ -234,11 +352,9 @@ int mod2rmf_setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
         memset(&setup, 0, sizeof(setup));
         setup.program = playable->program;
         
-        /* BAE limits downward pitch shifts to -24 semitones from rootKey.
-         * To allow tracker modules to play extremely low notes (e.g. laugh samples),
-         * we virtually shift the rootKey down by 2 octaves (24 semitones) and 
-         * correspondingly divide the sample rate by 4 prior to saving. */
-        setup.rootKey = (playable->rootKey >= 24) ? (playable->rootKey - 24) : 0;
+        /* Lower the virtual root key to extend down-note range, while applying
+         * a matching sample-rate compensation so audible pitch stays unchanged. */
+        setup.rootKey = mod2rmf_shifted_root_key(playable->rootKey, conv->rootShiftSemitones);
         
         setup.lowKey = 0;
         setup.highKey = 127;
@@ -311,12 +427,8 @@ int mod2rmf_setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
                      double baseRate = playable->hasSampleRateOverride ? 
                                          (double)playable->sampleRateOverrideHz : 
                                          (double)conv->moduleBaseRateHz;
-                     /* Divide the physical baseRate by 4 to complement the -24 rootKey shift */
-                     sampledRate = (BAE_UNSIGNED_FIXED)((double)(baseRate / 4.0) * 65536.0 + 0.5);
-                     if (sampledRate < 65536u)
-                     {
-                         sampledRate = 65536u;
-                     }
+                     sampledRate = mod2rmf_compensated_sample_rate((uint32_t)(baseRate + 0.5),
+                                                                   conv->rootShiftSemitones);
 
                      result = BAERmfEditorDocument_ReplaceSampleFromPCM(conv->document,
                                                                         sampleIndex,
@@ -363,18 +475,8 @@ int mod2rmf_setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
                         continue;
                     }
 
-                    if (playable->hasSampleRateOverride)
-                    {
-                        sampledRate = (BAE_UNSIGNED_FIXED)((outRate / 4u) << 16);
-                    }
-                    else
-                    {
-                        sampledRate = (BAE_UNSIGNED_FIXED)((double)(outRate / 4.0) * 65536.0 + 0.5);
-                        if (sampledRate < 65536u)
-                        {
-                            sampledRate = 65536u;
-                        }
-                    }
+                    sampledRate = mod2rmf_compensated_sample_rate(outRate,
+                                                                  conv->rootShiftSemitones);
 
                     /* Scale loop end-points to the output frame domain so that
                      * ReplaceSampleFromPCM receives indices within the buffer.
@@ -546,8 +648,9 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
         mod2rmf_trim_copy_ascii(song->composerNotes, sizeof(song->composerNotes), mi.comment);
     }
 
-     conv->isMod = mod2rmf_is_mod_family(mod->type);
-     conv->moduleBaseRateHz = conv->isMod ? MOD2RMF_SAMPLE_RATE : 8363u;
+    conv->isMod = mod2rmf_is_mod_family(mod->type);
+    conv->isIt = conv->isIt || mod2rmf_is_it_family(mod->type);
+    conv->moduleBaseRateHz = conv->isMod ? MOD2RMF_SAMPLE_RATE : 8363u;
 
     song->channelCount = (mod->chn > MOD2RMF_MAX_CHANNELS) ? MOD2RMF_MAX_CHANNELS : (uint32_t)mod->chn;
     lastBpm = (mod->bpm > 0) ? (uint16_t)mod->bpm : 125u;
@@ -670,6 +773,8 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
             }
             raw->frameCount = outFrames;
         }
+
+        mod2rmf_apply_sample_gain(raw, conv->sampleGainDb);
 
         raw->loopStart = 0;
         raw->loopEnd = 0;
@@ -1092,7 +1197,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                                                          ci,
                                                                          sid,
                                                                          sampleTranspose);
-                                midiNote = baseNote + 12 + noteXpo;
+                                midiNote = baseNote + mod2rmf_tracker_note_bias(conv) + noteXpo;
 
                                 activeNotes[ch].active = TRUE;
                                 activeNotes[ch].startTickFP = currentTickFP;
@@ -1183,7 +1288,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                                                      ci,
                                                                      delaySid,
                                                                      sampleTranspose);
-                            midiNote = baseNote + 12 + noteXpo;
+                            midiNote = baseNote + mod2rmf_tracker_note_bias(conv) + noteXpo;
 
                             activeNotes[ch].active = TRUE;
                             activeNotes[ch].startTickFP = currentTickFP;
@@ -1335,7 +1440,8 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
          * ADSR so the engine produces smooth volume shaping instead of
          * relying on per-frame CC7 events.  The per-frame CC7 tracking
          * is correspondingly suppressed for enveloped channels. */
-        if (conv->rawSamples[i].hasEnvelope && conv->rawSamples[i].adsrStageCount > 0)
+        if (conv->rawSamples[i].hasEnvelope &&
+            conv->rawSamples[i].adsrStageCount > 0)
         {
             p->hasVolumeAdsr = TRUE;
             p->adsrStageCount = conv->rawSamples[i].adsrStageCount;
@@ -1437,6 +1543,8 @@ Mod2RmfConverter *mod2rmf_converter_create(void)
         memset(conv, 0, sizeof(*conv));
         conv->moduleBaseRateHz = MOD2RMF_SAMPLE_RATE;
         conv->isMod = FALSE;
+        conv->sampleGainDb = 0.0;
+        conv->rootShiftSemitones = MOD2RMF_DEFAULT_ROOT_SHIFT_ST;
         conv->itV00CutRows = 6;
     }
     return conv;
@@ -1531,11 +1639,8 @@ int mod2rmf_write_song_tempo_events(Mod2RmfConverter *conv, const ModSongModel *
 int mod2rmf_write_song_cc_events(Mod2RmfConverter *conv, const ModSongModel *song)
 {
     uint32_t i;
-    /* For deduplication: track the primary RMF track per MIDI channel,
-     * and the last emitted value per (midiCh, cc#) to avoid redundant events. */
-    uint16_t midiChPrimaryTrack[MOD2RMF_MAX_MIDI_CHANNELS];
-    /* Last emitted CC values: [midiCh][cc] — 0xFFFF = not yet emitted */
-    uint16_t lastCC[MOD2RMF_MAX_MIDI_CHANNELS][128];
+    /* Last emitted CC values: [source track][cc] — 0xFFFF = not yet emitted */
+    uint16_t lastCC[MOD2RMF_MAX_CHANNELS][128];
 
     if (!conv || !song)
     {
@@ -1545,23 +1650,9 @@ int mod2rmf_write_song_cc_events(Mod2RmfConverter *conv, const ModSongModel *son
     bool ccDedupReset = FALSE;
     memset(lastCC, 0xFF, sizeof(lastCC));
 
-    /* Find primary (first) RMF track for each MIDI channel */
-    memset(midiChPrimaryTrack, 0xFF, sizeof(midiChPrimaryTrack));
-    for (i = 0; i < song->channelCount; ++i)
-    {
-        uint8_t midiCh = conv->channelMap.trackerToMidi[i];
-        if (midiCh < MOD2RMF_MAX_MIDI_CHANNELS &&
-            midiChPrimaryTrack[midiCh] == (uint16_t)0xFFFF &&
-            conv->channelToTrackIndex[i] != (uint16_t)0xFFFF)
-        {
-            midiChPrimaryTrack[midiCh] = conv->channelToTrackIndex[i];
-        }
-    }
-
     for (i = 0; i < song->ccCount; ++i)
     {
         const ModCCEvent *ev;
-        uint8_t midiCh;
         uint16_t trackIndex;
 
         ev = &song->ccEvents[i];
@@ -1578,19 +1669,15 @@ int mod2rmf_write_song_cc_events(Mod2RmfConverter *conv, const ModSongModel *son
             ccDedupReset = TRUE;
         }
 
-        midiCh = conv->channelMap.trackerToMidi[ev->sourceChannel];
-        if (midiCh >= MOD2RMF_MAX_MIDI_CHANNELS) continue;
-
-        /* Route through the primary track for this MIDI channel */
-        trackIndex = midiChPrimaryTrack[midiCh];
+        trackIndex = conv->channelToTrackIndex[ev->sourceChannel];
         if (trackIndex == (uint16_t)0xFFFF) continue;
 
-        /* Skip if this CC value was already emitted for this MIDI channel */
-        if (lastCC[midiCh][ev->cc] == (uint16_t)ev->value)
+        /* Skip if this CC value was already emitted for this source track */
+        if (lastCC[ev->sourceChannel][ev->cc] == (uint16_t)ev->value)
         {
             continue;
         }
-        lastCC[midiCh][ev->cc] = (uint16_t)ev->value;
+        lastCC[ev->sourceChannel][ev->cc] = (uint16_t)ev->value;
 
         (void)BAERmfEditorDocument_AddTrackCCEvent(conv->document,
                                                    trackIndex,
@@ -1605,9 +1692,8 @@ int mod2rmf_write_song_cc_events(Mod2RmfConverter *conv, const ModSongModel *son
 int mod2rmf_write_song_pitch_bend_events(Mod2RmfConverter *conv, const ModSongModel *song)
 {
     uint32_t i;
-    /* Deduplication: primary track and last value per MIDI channel */
-    uint16_t midiChPrimaryTrack[MOD2RMF_MAX_MIDI_CHANNELS];
-    uint16_t lastBend[MOD2RMF_MAX_MIDI_CHANNELS];
+    /* Deduplication per source track */
+    uint16_t lastBend[MOD2RMF_MAX_CHANNELS];
 
     if (!conv || !song)
     {
@@ -1634,19 +1720,6 @@ int mod2rmf_write_song_pitch_bend_events(Mod2RmfConverter *conv, const ModSongMo
     bool bendDedupReset = FALSE;
     memset(lastBend, 0xFF, sizeof(lastBend));
 
-    /* Find primary (first) RMF track for each MIDI channel */
-    memset(midiChPrimaryTrack, 0xFF, sizeof(midiChPrimaryTrack));
-    for (i = 0; i < song->channelCount; ++i)
-    {
-        uint8_t midiCh = conv->channelMap.trackerToMidi[i];
-        if (midiCh < MOD2RMF_MAX_MIDI_CHANNELS &&
-            midiChPrimaryTrack[midiCh] == (uint16_t)0xFFFF &&
-            conv->channelToTrackIndex[i] != (uint16_t)0xFFFF)
-        {
-            midiChPrimaryTrack[midiCh] = conv->channelToTrackIndex[i];
-        }
-    }
-
     for (i = 0; i < song->pitchBendCount; ++i)
     {
         const ModPitchBendEvent *ev;
@@ -1669,8 +1742,7 @@ int mod2rmf_write_song_pitch_bend_events(Mod2RmfConverter *conv, const ModSongMo
         midiCh = conv->channelMap.trackerToMidi[ev->sourceChannel];
         if (midiCh >= MOD2RMF_MAX_MIDI_CHANNELS) continue;
 
-        /* Route through the primary track for this MIDI channel */
-        trackIndex = midiChPrimaryTrack[midiCh];
+        trackIndex = conv->channelToTrackIndex[ev->sourceChannel];
         if (trackIndex == (uint16_t)0xFFFF) continue;
 
         /* Look ahead to see if there's another bend for this MIDI channel at the same tick.
@@ -1706,11 +1778,11 @@ int mod2rmf_write_song_pitch_bend_events(Mod2RmfConverter *conv, const ModSongMo
             continue;
         }
 
-        /* Skip if bend value hasn't changed for this MIDI channel */
-        if (lastBend[midiCh] == ev->value) {
+        /* Skip if bend value hasn't changed for this source track */
+        if (lastBend[ev->sourceChannel] == ev->value) {
             continue;
         }
-        lastBend[midiCh] = ev->value;
+        lastBend[ev->sourceChannel] = ev->value;
 
     #ifdef _DEBUG
         if (midiCh == 9u)
@@ -1831,10 +1903,21 @@ int mod2rmf_write_song_notes(Mod2RmfConverter *conv, const ModSongModel *song)
 int mod2rmf_setup_instrument_ext(Mod2RmfConverter *conv, const ModSongModel *song, bool useZmfContainer)
 {
     uint32_t i;
+    uint8_t extraRootShiftSemitones;
+    int extMidiRootKey;
 
     if (!conv || !conv->document || !song)
     {
         return 0;
+    }
+
+    extraRootShiftSemitones = (conv->rootShiftSemitones > MOD2RMF_DEFAULT_ROOT_SHIFT_ST)
+                             ? (uint8_t)(conv->rootShiftSemitones - MOD2RMF_DEFAULT_ROOT_SHIFT_ST)
+                             : 0u;
+    extMidiRootKey = 60 - (int)extraRootShiftSemitones;
+    if (extMidiRootKey < 0)
+    {
+        extMidiRootKey = 0;
     }
 
     for (i = 0; i < song->playableCount; ++i)
@@ -1861,7 +1944,7 @@ int mod2rmf_setup_instrument_ext(Mod2RmfConverter *conv, const ModSongModel *son
             extInfo.instID = instID;
             extInfo.flags1 = MOD2RMF_ZBF_USE_SAMPLE_RATE;
             extInfo.flags2 = 0;
-            extInfo.midiRootKey = 60;
+            extInfo.midiRootKey = (uint8_t)extMidiRootKey;
             extInfo.miscParameter2 = 100;
             /* 2-stage ADSR: sustain at max, then immediate release to 0.
              * This activates the "new style" ADSR path in the engine,
@@ -1880,11 +1963,9 @@ int mod2rmf_setup_instrument_ext(Mod2RmfConverter *conv, const ModSongModel *son
 
         extInfo.instID = instID;
         extInfo.displayName = playable->displayName;
-        /* Always force root key to 60 (C-4).  GetInstrumentExtInfo may
-         * return a different default depending on the sample rate the
-         * engine inferred during ReplaceSampleFromPCM; that mismatch
-         * causes some S3M samples to play at the wrong pitch. */
-        extInfo.midiRootKey = 60;
+        /* Keep root-key deterministic for stable tuning, but allow extra
+         * down-octave range to shift this root key as well. */
+        extInfo.midiRootKey = (uint8_t)extMidiRootKey;
 
         /* Apply per-instrument pan placement from tracker sub-instrument */
         extInfo.panPlacement = playable->panPlacement;
@@ -2088,6 +2169,7 @@ BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char
     ModSongModel song;
     mod2rmf_song_model_init(&song);    
     mod2rmf_resampler_defaults(&resamplerSettings);
+    conv->isIt = mod2rmf_path_is_it(sourcePath);
 
     if (!mod2rmf_load_source_data(conv, sourcePath))
     {

@@ -10,12 +10,15 @@ typedef struct {
     uint32_t rawSampleCount;
     uint32_t moduleBaseRateHz;
     bool isMod;
+    bool isIt;
 
     BAERmfEditorDocument *document;
     uint16_t *channelToTrackIndex;
     ChannelMap channelMap;
     Mod2RmfResamplerSettings resamplerSettings;
     bool forceOriginalSamples;
+    double sampleGainDb;      /* global sample gain applied during source extraction */
+    uint8_t rootShiftSemitones; /* virtual root-key downshift for extra low-note range */
     bool avoidMidiChannel10;   /* map around MIDI ch10 (index 9) when requested */
     uint8_t stereoSeparation;  /* 0=mono (center), 75=default, 100=hard L/R */
     uint8_t itV00CutRows;      /* 0 disables; default 6 */
@@ -27,6 +30,7 @@ extern "C" {
 #endif
 
 BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char *sourcePath, bool useZmfContainer);
+bool mod2rmf_path_is_it(const char *path);
 
 #ifdef __cplusplus
 }

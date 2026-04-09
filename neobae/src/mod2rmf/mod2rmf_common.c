@@ -59,26 +59,183 @@ uint16_t mod2rmf_pitchbend_to_midi(int32_t xmpPitchbend,
     return (uint16_t)bend;
 }
 
-/* Map a libxmp instrument's amplitude envelope directly to BAE ADSR stages.
- * Each pair of consecutive envelope points becomes one LINEAR_RAMP stage,
- * preserving the multi-segment shape.  BAE supports up to 8 stages; with
- * sustain + terminate that leaves room for up to 6 envelope segments (7 points).
- *
- * Envelope x-coordinates are in ticks (one per tracker frame), converted
- * to microseconds via (2500/bpm)*1000.  y-coordinates are 0..64, scaled to
- * 0..VOLUME_RANGE for BAE. */
+static int32_t mod2rmf_env_level_from_xmp(uint32_t envY)
+{
+    return (int32_t)(envY * VOLUME_RANGE / 64u);
+}
+
+static uint32_t mod2rmf_env_delta_to_us(uint32_t deltaTicks, double usPerTick)
+{
+    return (uint32_t)(deltaTicks * usPerTick + 0.5);
+}
+
+static double mod2rmf_abs_double(double value)
+{
+    return (value < 0.0) ? -value : value;
+}
+
+static int mod2rmf_select_env_points(const struct xmp_envelope *aei,
+                                     int startIdx,
+                                     int endIdx,
+                                     int maxPoints,
+                                     int *selected)
+{
+    int totalPoints;
+    int count;
+    int i;
+    bool keep[XMP_MAX_ENV_POINTS];
+
+    if (!aei || !selected || maxPoints <= 0 || startIdx < 0 || endIdx < startIdx)
+    {
+        return 0;
+    }
+
+    totalPoints = endIdx - startIdx + 1;
+    if (totalPoints <= maxPoints)
+    {
+        for (i = 0; i < totalPoints; ++i)
+        {
+            selected[i] = startIdx + i;
+        }
+        return totalPoints;
+    }
+
+    memset(keep, 0, sizeof(keep));
+    keep[startIdx] = TRUE;
+    keep[endIdx] = TRUE;
+    count = 2;
+
+    while (count < maxPoints)
+    {
+        int segStart;
+        int bestIdx;
+        double bestError;
+
+        bestIdx = -1;
+        bestError = -1.0;
+        segStart = startIdx;
+
+        while (segStart < endIdx)
+        {
+            int segEnd;
+
+            segEnd = segStart + 1;
+            while (segEnd <= endIdx && !keep[segEnd])
+            {
+                ++segEnd;
+            }
+            if (segEnd > endIdx)
+            {
+                break;
+            }
+
+            if (segEnd - segStart > 1)
+            {
+                double x0 = (double)aei->data[segStart * 2];
+                double y0 = (double)aei->data[segStart * 2 + 1];
+                double x1 = (double)aei->data[segEnd * 2];
+                double y1 = (double)aei->data[segEnd * 2 + 1];
+
+                for (i = segStart + 1; i < segEnd; ++i)
+                {
+                    double xi = (double)aei->data[i * 2];
+                    double yi = (double)aei->data[i * 2 + 1];
+                    double interp;
+                    double error;
+
+                    if (x1 > x0)
+                    {
+                        interp = y0 + ((y1 - y0) * (xi - x0) / (x1 - x0));
+                    }
+                    else
+                    {
+                        interp = y0;
+                    }
+
+                    error = mod2rmf_abs_double(yi - interp);
+                    if (error > bestError)
+                    {
+                        bestError = error;
+                        bestIdx = i;
+                    }
+                }
+            }
+
+            segStart = segEnd;
+        }
+
+        if (bestIdx < 0)
+        {
+            break;
+        }
+
+        keep[bestIdx] = TRUE;
+        ++count;
+    }
+
+    count = 0;
+    for (i = startIdx; i <= endIdx; ++i)
+    {
+        if (keep[i])
+        {
+            selected[count++] = i;
+        }
+    }
+    return count;
+}
+
+static void mod2rmf_store_adsr_stage(ModRawSample *raw,
+                                     uint32_t stageIndex,
+                                     uint32_t envY,
+                                     uint32_t timeUs,
+                                     int32_t flags)
+{
+    raw->adsrStages[stageIndex].level = mod2rmf_env_level_from_xmp(envY);
+    raw->adsrStages[stageIndex].timeUs = (int32_t)timeUs;
+    raw->adsrStages[stageIndex].flags = flags;
+}
+
+static uint32_t mod2rmf_default_release_tail_us(const struct xmp_instrument *inst,
+                                                uint32_t envY,
+                                                double usPerTick)
+{
+    uint32_t releaseUs = 50000u;
+
+    if (inst && inst->rls > 0)
+    {
+        double releaseTicks = (envY > 0)
+                                ? ((double)envY * 1024.0 / (double)inst->rls)
+                                : 1.0;
+        releaseUs = (uint32_t)(releaseTicks * usPerTick + 0.5);
+    }
+
+    if (releaseUs > 10000000u)
+    {
+        releaseUs = 10000000u;
+    }
+    return releaseUs;
+}
+
+/* Map a libxmp instrument's amplitude envelope to BAE ADSR stages.
+ * We keep the most significant envelope points within BAE's 8-stage limit,
+ * preserve explicit tracker release segments, and only synthesize a release
+ * tail when the source envelope does not provide one. */
 void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
                                   uint32_t bpm,
                                   ModRawSample *raw)
 {
     const struct xmp_envelope *aei;
+    bool hasSustain;
+    bool needsTailToZero;
     int sustainIdx;
     int npt;
-    int idx;
-    double usPerTick; /* microseconds per envelope tick */
+    int selectedAttack[XMP_MAX_ENV_POINTS];
+    int selectedRelease[XMP_MAX_ENV_POINTS];
+    int attackPointCount;
+    int releasePointCount;
+    double usPerTick;
     uint32_t stage;
-    /* Max segments before sustain+terminate = 8-2 = 6, needing up to 7 points */
-    int maxSegments;
+    uint32_t lastEnvY;
 
     if (!inst || !raw)
     {
@@ -99,94 +256,222 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
 
     raw->hasEnvelope = TRUE;
     usPerTick = 2500000.0 / (double)(bpm > 0 ? bpm : 125);
+    lastEnvY = (uint32_t)aei->data[(npt - 1) * 2 + 1];
 
-    /* Find sustain point (or last point if no sustain flag). */
-    sustainIdx = (aei->flg & XMP_ENVELOPE_SUS) ? aei->sus : npt - 1;
-    if (sustainIdx < 0)
-    {
-        sustainIdx = 0;
-    }
-    if (sustainIdx >= npt)
+    sustainIdx = (aei->flg & XMP_ENVELOPE_SUS) ? aei->sus : -1;
+    hasSustain = (sustainIdx >= 0 && sustainIdx < npt - 1) ? TRUE : FALSE;
+    if (!hasSustain)
     {
         sustainIdx = npt - 1;
     }
+    needsTailToZero = (lastEnvY > 0u) ? TRUE : FALSE;
 
     #ifdef _DEBUG
     {
         int dbgIdx;
-        fprintf(stderr, "[mod2rmf]  ADSR extract: npt=%d flg=0x%02x sus=%d rls=%d usPerTick=%.1f\n",
-                npt, aei->flg, aei->sus, inst->rls, usPerTick);
+        fprintf(stderr, "[mod2rmf]  ADSR extract: npt=%d flg=0x%02x sus=%d hasSustain=%d rls=%d usPerTick=%.1f\n",
+                npt, aei->flg, aei->sus, hasSustain ? 1 : 0, inst->rls, usPerTick);
         for (dbgIdx = 0; dbgIdx < npt; ++dbgIdx)
         {
             fprintf(stderr, "    pt[%d]: X=%d Y=%d%s\n",
                     dbgIdx, aei->data[dbgIdx * 2], aei->data[dbgIdx * 2 + 1],
-                    (dbgIdx == sustainIdx) ? " <sustain>" : "");
+                    (hasSustain && dbgIdx == sustainIdx) ? " <sustain>" : "");
         }
     }
     #endif
 
-    /* Map each envelope segment (pair of consecutive points) up to and including
-     * the sustain point as a LINEAR_RAMP stage.  Reserve 2 stages for
-     * sustain-hold and terminate. */
-    maxSegments = MOD2RMF_MAX_ADSR_STAGES - 2;
     stage = 0;
 
-    /* If the first envelope point is not at Y=0 and X=0, insert an initial
-     * ramp to the first point's level (the envelope starts at pt[0] level). */
-    for (idx = 0; idx <= sustainIdx && (int)stage < maxSegments; ++idx)
+    if (hasSustain)
     {
-        uint32_t ptX = (uint32_t)aei->data[idx * 2];
-        uint32_t ptY = (uint32_t)aei->data[idx * 2 + 1];
-        uint32_t prevX = (idx > 0) ? (uint32_t)aei->data[(idx - 1) * 2] : 0;
-        uint32_t deltaX = ptX - prevX;
+        int reservedStages = 1 + (needsTailToZero ? 1 : 0);
+        int availablePointStages = MOD2RMF_MAX_ADSR_STAGES - reservedStages;
+        int attackDesired = sustainIdx + 1;
+        int releaseDesired = npt - sustainIdx - 1;
+        int attackMin = (sustainIdx > 0) ? 2 : 1;
+        int releaseMin = 1;
+        int attackMax;
+        int releaseMax;
 
-        raw->adsrStages[stage].level = (int32_t)(ptY * VOLUME_RANGE / 64u);
-        raw->adsrStages[stage].timeUs = (int32_t)(deltaX * usPerTick + 0.5);
-        raw->adsrStages[stage].flags = ADSR_LINEAR_RAMP_LONG;
-        stage++;
+        if (availablePointStages < attackMin + releaseMin)
+        {
+            availablePointStages = attackMin + releaseMin;
+        }
+
+        if (attackDesired + releaseDesired <= availablePointStages)
+        {
+            attackMax = attackDesired;
+            releaseMax = releaseDesired;
+        }
+        else
+        {
+            int totalDesired = attackDesired + releaseDesired;
+
+            attackMax = (attackDesired * availablePointStages + totalDesired / 2) / totalDesired;
+            if (attackMax < attackMin)
+            {
+                attackMax = attackMin;
+            }
+            if (attackMax > attackDesired)
+            {
+                attackMax = attackDesired;
+            }
+
+            releaseMax = availablePointStages - attackMax;
+            if (releaseMax < releaseMin)
+            {
+                releaseMax = releaseMin;
+                attackMax = availablePointStages - releaseMax;
+            }
+            if (releaseMax > releaseDesired)
+            {
+                releaseMax = releaseDesired;
+                attackMax = availablePointStages - releaseMax;
+            }
+            if (attackMax < attackMin)
+            {
+                attackMax = attackMin;
+            }
+        }
+
+        attackPointCount = mod2rmf_select_env_points(aei,
+                                                     0,
+                                                     sustainIdx,
+                                                     attackMax,
+                                                     selectedAttack);
+        releasePointCount = mod2rmf_select_env_points(aei,
+                                                      sustainIdx + 1,
+                                                      npt - 1,
+                                                      releaseMax,
+                                                      selectedRelease);
+
+        if (attackPointCount <= 0 || releasePointCount <= 0)
+        {
+            raw->hasEnvelope = FALSE;
+            raw->adsrStageCount = 0;
+            return;
+        }
+
+        {
+            uint32_t prevX = 0;
+            int i;
+
+            for (i = 0; i < attackPointCount && stage < MOD2RMF_MAX_ADSR_STAGES; ++i)
+            {
+                int pointIdx = selectedAttack[i];
+                uint32_t ptX = (uint32_t)aei->data[pointIdx * 2];
+                uint32_t ptY = (uint32_t)aei->data[pointIdx * 2 + 1];
+                uint32_t deltaX = (ptX > prevX) ? (ptX - prevX) : 0u;
+
+                mod2rmf_store_adsr_stage(raw,
+                                         stage++,
+                                         ptY,
+                                         mod2rmf_env_delta_to_us(deltaX, usPerTick),
+                                         ADSR_LINEAR_RAMP_LONG);
+                prevX = ptX;
+            }
+        }
+
+        mod2rmf_store_adsr_stage(raw,
+                                 stage++,
+                                 (uint32_t)aei->data[sustainIdx * 2 + 1],
+                                 0u,
+                                 ADSR_SUSTAIN_LONG);
+
+        {
+            uint32_t prevX = (uint32_t)aei->data[sustainIdx * 2];
+            int i;
+
+            for (i = 0; i < releasePointCount && stage < MOD2RMF_MAX_ADSR_STAGES; ++i)
+            {
+                int pointIdx = selectedRelease[i];
+                uint32_t ptX = (uint32_t)aei->data[pointIdx * 2];
+                uint32_t ptY = (uint32_t)aei->data[pointIdx * 2 + 1];
+                uint32_t deltaX = (ptX > prevX) ? (ptX - prevX) : 0u;
+                int32_t flags;
+
+                if (i == 0)
+                {
+                    flags = ADSR_RELEASE_LONG;
+                }
+                else if (!needsTailToZero && i == releasePointCount - 1)
+                {
+                    flags = ADSR_TERMINATE_LONG;
+                }
+                else
+                {
+                    flags = ADSR_LINEAR_RAMP_LONG;
+                }
+
+                mod2rmf_store_adsr_stage(raw,
+                                         stage++,
+                                         ptY,
+                                         mod2rmf_env_delta_to_us(deltaX, usPerTick),
+                                         flags);
+                prevX = ptX;
+            }
+        }
+
+        if (needsTailToZero && stage < MOD2RMF_MAX_ADSR_STAGES)
+        {
+            mod2rmf_store_adsr_stage(raw,
+                                     stage++,
+                                     0u,
+                                     mod2rmf_default_release_tail_us(inst, lastEnvY, usPerTick),
+                                     ADSR_TERMINATE_LONG);
+        }
     }
-
-    /* Sustain-hold stage at the sustain point's level */
+    else
     {
-        uint32_t susY = (uint32_t)aei->data[sustainIdx * 2 + 1];
-        raw->adsrStages[stage].level = (int32_t)(susY * VOLUME_RANGE / 64u);
-        raw->adsrStages[stage].timeUs = 0;
-        raw->adsrStages[stage].flags = ADSR_SUSTAIN_LONG;
-        stage++;
-    }
+        int availablePointStages = MOD2RMF_MAX_ADSR_STAGES - (needsTailToZero ? 1 : 0);
+        int i;
+        uint32_t prevX = 0;
 
-    /* Terminate/release stage */
-    {
-        uint32_t susY = (uint32_t)aei->data[sustainIdx * 2 + 1];
-        uint32_t releaseUs = 50000; /* 50ms default */
-
-        if (inst->rls > 0)
+        attackPointCount = mod2rmf_select_env_points(aei,
+                                                     0,
+                                                     npt - 1,
+                                                     availablePointStages,
+                                                     selectedAttack);
+        if (attackPointCount <= 0)
         {
-            /* rls is fadeout per tick (XM: 0..65535).  Time to fade from
-             * sustain amplitude to silence = susY / rls * 1024 ticks. */
-            double releaseTicks = (susY > 0)
-                                    ? ((double)susY * 1024.0 / (double)inst->rls)
-                                    : 1.0;
-            releaseUs = (uint32_t)(releaseTicks * usPerTick + 0.5);
-        }
-        else if (sustainIdx + 1 < npt)
-        {
-            uint32_t lastX = (uint32_t)aei->data[(npt - 1) * 2];
-            uint32_t susX = (uint32_t)aei->data[sustainIdx * 2];
-            releaseUs = (lastX > susX)
-                          ? (uint32_t)((lastX - susX) * usPerTick + 0.5)
-                          : 50000;
+            raw->hasEnvelope = FALSE;
+            raw->adsrStageCount = 0;
+            return;
         }
 
-        if (releaseUs > 10000000u) /* 10 second cap */
+        for (i = 0; i < attackPointCount && stage < MOD2RMF_MAX_ADSR_STAGES; ++i)
         {
-            releaseUs = 10000000u;
+            int pointIdx = selectedAttack[i];
+            uint32_t ptX = (uint32_t)aei->data[pointIdx * 2];
+            uint32_t ptY = (uint32_t)aei->data[pointIdx * 2 + 1];
+            uint32_t deltaX = (ptX > prevX) ? (ptX - prevX) : 0u;
+            int32_t flags;
+
+            if (!needsTailToZero && i == attackPointCount - 1)
+            {
+                flags = ADSR_TERMINATE_LONG;
+            }
+            else
+            {
+                flags = ADSR_LINEAR_RAMP_LONG;
+            }
+
+            mod2rmf_store_adsr_stage(raw,
+                                     stage++,
+                                     ptY,
+                                     mod2rmf_env_delta_to_us(deltaX, usPerTick),
+                                     flags);
+            prevX = ptX;
         }
 
-        raw->adsrStages[stage].level = 0;
-        raw->adsrStages[stage].timeUs = (int32_t)releaseUs;
-        raw->adsrStages[stage].flags = ADSR_TERMINATE_LONG;
-        stage++;
+        if (needsTailToZero && stage < MOD2RMF_MAX_ADSR_STAGES)
+        {
+            mod2rmf_store_adsr_stage(raw,
+                                     stage++,
+                                     0u,
+                                     mod2rmf_default_release_tail_us(inst, lastEnvY, usPerTick),
+                                     ADSR_TERMINATE_LONG);
+        }
     }
 
     raw->adsrStageCount = stage;
@@ -487,12 +772,13 @@ unsigned char mod2rmf_vol_to_midi(unsigned char vol64)
 {
     double linear;
     int midi;
+
     /* MOD volume 0..64 is linear amplitude.
      * MIDI volume (CC 7) is usually squared by the engine.
      * So we need to apply a square root curve to the MOD volume. */
     if (vol64 >= 64u) return 127u;
     if (vol64 == 0u) return 0u;
-    
+
     linear = (double)vol64 / 64.0;
     midi = (int)(sqrt(linear) * 127.0 + 0.5);
     if (midi > 127) midi = 127;

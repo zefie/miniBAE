@@ -7573,6 +7573,10 @@ static BAEResult PV_BuildTrackData(BAERmfEditorTrack const *track,
             uint32_t delta;
 
             event = &events[eventIndex];
+            if (track->endOfTrackTick > 0 && event->tick > track->endOfTrackTick)
+            {
+                break;
+            }
             delta = event->tick - previousTick;
             if (event->applyProgram)
             {
@@ -7774,6 +7778,10 @@ static BAEResult PV_BuildTrackData(BAERmfEditorTrack const *track,
     /* Place end-of-track at the original tick if it was later than the last event. */
     {
         uint32_t eotDelta = 0;
+        if (track->endOfTrackTick > 0 && previousTick > track->endOfTrackTick)
+        {
+            previousTick = track->endOfTrackTick;
+        }
         if (track->endOfTrackTick > previousTick)
         {
             eotDelta = track->endOfTrackTick - previousTick;
@@ -11450,6 +11458,95 @@ BAEResult BAERmfEditorDocument_DeleteNote(BAERmfEditorDocument *document,
     return BAE_NO_ERROR;
 }
 
+static BAEResult PV_AddTrimHardStopEventsToTrack(BAERmfEditorTrack *track,
+                                                 uint32_t stopTick)
+{
+    unsigned char usedChannels[16];
+    uint32_t i;
+
+    if (!track)
+    {
+        return BAE_PARAM_ERR;
+    }
+
+    XSetMemory(usedChannels, sizeof(usedChannels), 0);
+
+    if (track->channel < 16)
+    {
+        usedChannels[track->channel] = 1;
+    }
+
+    for (i = 0; i < track->noteCount; ++i)
+    {
+        if (track->notes[i].channel < 16)
+        {
+            usedChannels[track->notes[i].channel] = 1;
+        }
+    }
+
+    for (i = 0; i < track->auxEventCount; ++i)
+    {
+        unsigned char status;
+        unsigned char type;
+        unsigned char channel;
+
+        status = track->auxEvents[i].status;
+        type = (unsigned char)(status & 0xF0);
+        channel = (unsigned char)(status & 0x0F);
+
+        if ((type >= 0x80 && type <= 0xE0) && channel < 16)
+        {
+            usedChannels[channel] = 1;
+        }
+    }
+
+    for (i = 0; i < 16; ++i)
+    {
+        BAEResult result;
+        unsigned char status;
+
+        if (!usedChannels[i])
+        {
+            continue;
+        }
+
+        status = (unsigned char)(0xB0 | (unsigned char)i);
+
+        result = PV_AddAuxEventToTrack(track, stopTick, status, 64, 0, 2); /* sustain off */
+        if (result != BAE_NO_ERROR)
+        {
+            return result;
+        }
+        result = PV_AddAuxEventToTrack(track, stopTick, status, 66, 0, 2); /* sostenuto off */
+        if (result != BAE_NO_ERROR)
+        {
+            return result;
+        }
+        result = PV_AddAuxEventToTrack(track, stopTick, status, 67, 0, 2); /* soft pedal off */
+        if (result != BAE_NO_ERROR)
+        {
+            return result;
+        }
+        result = PV_AddAuxEventToTrack(track, stopTick, status, 123, 0, 2); /* all notes off */
+        if (result != BAE_NO_ERROR)
+        {
+            return result;
+        }
+        result = PV_AddAuxEventToTrack(track, stopTick, status, 120, 0, 2); /* all sound off */
+        if (result != BAE_NO_ERROR)
+        {
+            return result;
+        }
+        result = PV_AddAuxEventToTrack(track, stopTick, status, 121, 0, 2); /* reset all controllers */
+        if (result != BAE_NO_ERROR)
+        {
+            return result;
+        }
+    }
+
+    return BAE_NO_ERROR;
+}
+
 BAEResult BAERmfEditorDocument_TrimToTick(BAERmfEditorDocument *document,
                                           uint32_t boundaryTick)
 {
@@ -11586,7 +11683,19 @@ BAEResult BAERmfEditorDocument_TrimToTick(BAERmfEditorDocument *document,
         }
         track->metaEventCount = writeIndex;
 
-        if (track->endOfTrackTick > boundaryTick)
+        if (boundaryTick > 0)
+        {
+            BAEResult stopResult;
+
+            stopResult = PV_AddTrimHardStopEventsToTrack(track, boundaryTick - 1);
+            if (stopResult != BAE_NO_ERROR)
+            {
+                return stopResult;
+            }
+            changed = TRUE;
+        }
+
+        if (track->endOfTrackTick != boundaryTick)
         {
             track->endOfTrackTick = boundaryTick;
             changed = TRUE;

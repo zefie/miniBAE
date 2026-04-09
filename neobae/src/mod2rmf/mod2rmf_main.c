@@ -38,9 +38,11 @@ static void print_usage(const char *program_name)
             "  --amiga-filter NAME   Amiga hardware LPF sim: none|a500|a1200 (default: none)\n"
             "  --resample-rate HZ    Upsample/downsample samples to HZ (0=native, default: 0)\n"
             "  --resample-filter N   Interpolation: nearest|linear|cubic|sinc (default: sinc)\n"
+            "  --gain DB             Apply sample gain in dB before encoding (e.g. -3, +6)\n"
             "  --filters             List available filter/resample options\n"
             "  --stereo-separation N Stereo width 0-100%% (0=mono, 75=default, 100=hard L/R)\n"
             "  --it-v00-cut-rows N   Cut sustained note after N silent rows following explicit IT v00 (0=off, default: 6)\n"
+            "  --down-octave-range   Shift virtual sample root down one extra octave for more low-note range\n"
             "  --avoid-midi-ch10     Avoid mapping tracker channels to MIDI ch10 (useful for some SPC2IT outputs)\n"
             "  --spread              [Experimental] Spread instruments across MIDI channels\n"
             "  --tempomap            Reserved for future tempo-map handling\n"
@@ -93,6 +95,8 @@ int main(int argc, char *argv[])
     bool spreadChannels;
     bool useExtendedPitchRange;
     bool avoidMidiChannel10;
+    bool downOctaveRange;
+    double sampleGainDb;
     uint8_t stereoSeparation;
     uint8_t itV00CutRows;
 
@@ -107,11 +111,13 @@ int main(int argc, char *argv[])
     spreadChannels = FALSE;
     useExtendedPitchRange = FALSE;
     avoidMidiChannel10 = FALSE;
+    downOctaveRange = FALSE;
+    sampleGainDb = 0.0;
     stereoSeparation = 75;
     itV00CutRows = 6;
     mod2rmf_song_model_init(&song);
 
-    if (argc < 3)
+    if (argc < 2)
     {
         print_usage(argv[0]);
         return 1;
@@ -135,6 +141,11 @@ int main(int argc, char *argv[])
         if (!strcmp(arg, "--avoid-midi-ch10"))
         {
             avoidMidiChannel10 = TRUE;
+            continue;
+        }
+        if (!strcmp(arg, "--down-octave-range"))
+        {
+            downOctaveRange = TRUE;
             continue;
         }
         if (!strcmp(arg, "--original"))
@@ -204,6 +215,27 @@ int main(int argc, char *argv[])
                 fprintf(stderr, "Error: unknown resample filter '%s' (use --filters to list)\n", argv[argi]);
                 return 1;
             }
+            continue;
+        }
+        if (!strcmp(arg, "--gain"))
+        {
+            char *end;
+            double gain;
+
+            if (argi + 1 >= argc)
+            {
+                fprintf(stderr, "Error: --gain requires an argument\n");
+                return 1;
+            }
+            ++argi;
+            end = NULL;
+            gain = strtod(argv[argi], &end);
+            if (end == argv[argi] || *end != '\0' || !isfinite(gain))
+            {
+                fprintf(stderr, "Error: invalid gain '%s'\n", argv[argi]);
+                return 1;
+            }
+            sampleGainDb = gain;
             continue;
         }
         if (!strcmp(arg, "--stereo-separation"))
@@ -352,7 +384,14 @@ int main(int argc, char *argv[])
     useZmfContainer = is_zmf_path(destPath);    
     conv->resamplerSettings = resamplerSettings;
     conv->forceOriginalSamples = forceOriginalSamples;
+    conv->sampleGainDb = sampleGainDb;
+    conv->isIt = mod2rmf_path_is_it(sourcePath);
     conv->avoidMidiChannel10 = avoidMidiChannel10;
+    if (downOctaveRange)
+    {
+        /* Default is -24 st; this adds one octave (total -36 st). */
+        conv->rootShiftSemitones = (uint8_t)(conv->rootShiftSemitones + 12u);
+    }
     conv->stereoSeparation = stereoSeparation;
     conv->itV00CutRows = itV00CutRows;
 
