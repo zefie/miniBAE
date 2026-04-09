@@ -104,6 +104,8 @@ option(BAE_DISABLE_ADP_SUPPORT "Disable ADP support" OFF)
 option(BAE_DISABLE_CREATION_API "Disable Creation API support (alias for RMF editor APIs)" OFF)
 option(BAE_DISABLE_EMBED_PATCHES "Disable embedded built-in patches" OFF)
 option(BAE_DISABLE_EMBED_FONT "Disable embedded GUI font" OFF)
+option(BAE_DISABLE_RETRO_RINGTONE_SUPPORT "Disable retro mobile ringtone format support (IMY/EMY/RNG/RTX/RTTTL)" OFF)
+option(BAE_DISABLE_QOA_SUPPORT "Disable QOA codec support" OFF)
 option(BUILD_PLAYBAE "Build playbae when a non-Dummy/non-Ansi backend is selected" ON)
 option(BUILD_ZEFIDI "Build zefidi when SDL2/SDL3 backend and matching SDL_ttf are available" ON)
 option(BUILD_CLITOOLS "Build CLI tools (songtool, rmf2mid, mid2rmf, mid2rmi, sf2-hsb, mod2rmf, instdump, bankrecomp)" ON)
@@ -136,6 +138,8 @@ set(BAE_ENABLE_MTHC_SUPPORT ON)
 set(BAE_ENABLE_ADP_SUPPORT ON)
 set(BAE_ENABLE_EMBED_PATCHES ON)
 set(BAE_ENABLE_EMBED_FONT ON)
+set(BAE_ENABLE_RETRO_RINGTONE_SUPPORT ON)
+set(BAE_ENABLE_QOA_SUPPORT ON)
 
 if(BAE_DISABLE_RMF_EDITOR)
   set(BAE_ENABLE_RMF_EDITOR OFF)
@@ -192,6 +196,18 @@ endif()
 if(BAE_DISABLE_OPUS_DECODER)
   set(BAE_ENABLE_OPUS_DECODER OFF)
   message(STATUS "Disabling Opus decoder support")
+endif()
+if(BAE_DISABLE_RETRO_RINGTONE_SUPPORT)
+  set(BAE_ENABLE_RETRO_RINGTONE_SUPPORT OFF)
+  message(STATUS "Disabling retro mobile ringtone format support (IMY/EMY/RNG/RTX/RTTTL)")
+else()
+  message(STATUS "Enabling retro mobile ringtone format support (IMY/EMY/RNG/RTX/RTTTL)")
+endif()
+if (BAE_DISABLE_QOA_SUPPORT)
+  set(BAE_ENABLE_QOA_SUPPORT OFF)
+  message(STATUS "Disabling QOA codec support")
+else()
+  message(STATUS "Enabling QOA codec support")
 endif()
 if(BAE_DISABLE_KARAOKE)
   set(BAE_ENABLE_KARAOKE OFF)
@@ -514,6 +530,7 @@ if(BUILD_ZEFIDI)
     find_library(BAE_SDL2_TTF_LIBRARY NAMES SDL2_ttf)
     if(BAE_SDL2_TTF_INCLUDE_DIR AND BAE_SDL2_TTF_LIBRARY)
       set(BAE_SDL_TTF_AVAILABLE ON)
+      message(STATUS "SDL_ttf support found for SDL2 backend.")
     else()
       message(STATUS "BAE_PLATFORM=SDL2 selected, but SDL2_ttf headers/library were not found.")
     endif()
@@ -522,6 +539,7 @@ if(BUILD_ZEFIDI)
     find_library(BAE_SDL3_TTF_LIBRARY NAMES SDL3_ttf)
     if(BAE_SDL3_TTF_INCLUDE_DIR AND BAE_SDL3_TTF_LIBRARY)
       set(BAE_SDL_TTF_AVAILABLE ON)
+      message(STATUS "SDL_ttf support found for SDL3 backend.")
     else()
       message(STATUS "BAE_PLATFORM=SDL3 selected, but SDL3_ttf headers/library were not found.")
     endif()
@@ -614,6 +632,18 @@ if(BAE_ENABLE_ADP_SUPPORT)
   )
 endif()
 
+if(BAE_ENABLE_RETRO_RINGTONE_SUPPORT)
+  list(APPEND NEOBAE_SOURCES
+    neobae/src/BAE_Source/Common/GenRingtone.c
+  )
+endif()
+
+if(BAE_ENABLE_QOA_SUPPORT)
+  list(APPEND NEOBAE_SOURCES
+    neobae/src/BAE_Source/Common/XQOAFiles.c
+  )
+endif()
+
 if(BAE_ENABLE_BAESCRIPT)
   list(APPEND NEOBAE_SOURCES
     neobae/src/script/baescript.c
@@ -650,6 +680,7 @@ target_include_directories(neobae
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Common
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Platform
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/config
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/qoa
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/mod2rmf
 )
 

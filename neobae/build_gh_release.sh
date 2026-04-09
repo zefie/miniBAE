@@ -68,12 +68,12 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 2 ]; then
 	runcmd make -f mingw/Makefile "-j$(nproc)" all
     signit "${BDIR}/playbae.exe" "${BDIR}/playbae_signed.exe"
     mv "${BDIR}/playbae_signed.exe" "${BDIR}/playbae.exe"
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/playbae_win_sdl3_x32.zip" -- playbae.exe libfluidsynth*.dll SDL*.dll liblzma*.dll libmp3lame*.dll
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/clitools_win_x32.zip" -- playbae.exe libfluidsynth*.dll SDL*.dll liblzma*.dll libmp3lame*.dll
 	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/libNeoBAE_win_sdl3_x32.zip" -- *.dll *.lib *.a
-	runcmd zip -d "${ODIR}/playbae_win_sdl3_x32.zip" -- SDL2_ttf.dll SDL3_ttf.dll
+	runcmd zip -d "${ODIR}/clitools_win_x32.zip" -- SDL2_ttf.dll SDL3_ttf.dll
 	runcmd zip -d "${ODIR}/libNeoBAE_win_sdl3_x32.zip" -- SDL2_ttf.dll SDL3_ttf.dll
 	runcmd cd "${RDIR}" || exit 1
-	runcmd make -f Makefile.mingw clean
+	runcmd make -f mingw/Makefile clean
 fi
 
 if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 3 ]; then
@@ -84,12 +84,11 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 3 ]; then
 	runcmd make -f mingw/Makefile "-j$(nproc)" all
     signit "${BDIR}/playbae.exe" "${BDIR}/playbae_signed.exe"
     mv "${BDIR}/playbae_signed.exe" "${BDIR}/playbae.exe"
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/playbae_win_sdl3_x64.zip" -- playbae.exe libfluidsynth*.dll SDL*.dll liblzma*.dll libmp3lame*.dll
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/libNeoBAE_win_sdl3_x64.zip" -- *.dll *.lib *.a
-	runcmd zip -d "${ODIR}/playbae_win_sdl3_x64.zip" -- SDL2_ttf.dll SDL3_ttf.dll
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/clitools_win_x64.zip" -- playbae.exe libfluidsynth*.dll SDL*.dll liblzma*.dll libmp3lame*.dll
+	runcmd zip -d "${ODIR}/clitools_win_x64.zip" -- SDL2_ttf.dll SDL3_ttf.dll
 	runcmd zip -d "${ODIR}/libNeoBAE_win_sdl3_x64.zip" -- SDL2_ttf.dll SDL3_ttf.dll	
 	runcmd cd "${RDIR}" || exit 1
-	runcmd make -f Makefile.mingw clean
+	runcmd make -f mingw/Makefile clean
 fi
 
 if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 4 ]; then
@@ -341,6 +340,73 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 22 ]; then
 	runcmd make -f mingw/Makefile.songtool clean
 fi
 
+if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 23 ]; then
+	export BITS=32
+	echo "Building bankrecomp (x32)..."
+	runcmd make clean
+	runcmd make -f mingw/Makefile.bankrecomp "-j$(nproc)" all
+	signit "${BDIR}/bankrecomp.exe" "${BDIR}/bankrecomp_signed.exe"
+    mv "${BDIR}/bankrecomp_signed.exe" "${BDIR}/bankrecomp.exe"	
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x32.zip" -- bankrecomp.exe liblzma*.dll
+	runcmd cd "${RDIR}" || exit 1
+	runcmd make -f mingw/Makefile.bankrecomp clean
+fi
+
+if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 24 ]; then
+	export BITS=64
+	echo "Building bankrecomp (x64)..."
+	runcmd make clean
+	runcmd make -f mingw/Makefile.bankrecomp "-j$(nproc)" all
+	signit "${BDIR}/bankrecomp.exe" "${BDIR}/bankrecomp_signed.exe"
+    mv "${BDIR}/bankrecomp_signed.exe" "${BDIR}/bankrecomp.exe"	
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- bankrecomp.exe liblzma*.dll
+	runcmd cd "${RDIR}" || exit 1
+	runcmd make -f mingw/Makefile.bankrecomp clean
+fi
+
+if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 25 ]; then
+	export USE_SDL3=1
+	export BITS=32
+	echo "Building libNeoBAE API SDL3 x32..."
+	runcmd make clean
+	runcmd make -f mingw/Makefile "-j$(nproc)" CREATION_API=1 all
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/libNeoBAE_win_sdl3_x32.zip" -- *.dll *.lib *.a
+	runcmd cd "${RDIR}" || exit 1
+	runcmd make -f mingw/Makefile clean
+fi
+
+if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 26 ]; then
+	export USE_SDL3=1
+	export BITS=64
+	echo "Building libNeoBAE API SDL3 x64..."
+	runcmd make clean
+	runcmd make -f mingw/Makefile "-j$(nproc)" CREATION_API=1 all
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/libNeoBAE_win_sdl3_x64.zip" -- *.dll *.lib *.a
+	runcmd cd "${RDIR}" || exit 1
+	runcmd make -f mingw/Makefile clean
+fi
+
+if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 27 ]; then
+	export USE_SDL3=1
+	export BITS=32
+	echo "Building ringtone2mid SDL3 x32..."
+	runcmd make clean
+	runcmd make -f mingw/Makefile.ringtone2mid "-j$(nproc)" all
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- ringtone2mid.exe
+	runcmd cd "${RDIR}" || exit 1
+	runcmd make -f mingw/Makefile.ringtone2mid clean
+fi
+
+if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 28 ]; then
+	export USE_SDL3=1
+	export BITS=64
+	echo "Building ringtone2mid SDL3 x64..."
+	runcmd make clean
+	runcmd make -f mingw/Makefile.ringtone2mid "-j$(nproc)" all
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- ringtone2mid.exe
+	runcmd cd "${RDIR}" || exit 1
+	runcmd make -f mingw/Makefile.ringtone2mid clean
+fi
 
 cd "${RDIR}" || exit 1
 ls -l "${ODIR}"

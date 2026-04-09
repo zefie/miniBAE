@@ -105,6 +105,9 @@ static const CodecName codecNames[] = {
     { "vorbis",  MOD2RMF_CODEC_VORBIS  },
     { "flac",    MOD2RMF_CODEC_FLAC    },
     { "opus",    MOD2RMF_CODEC_OPUS    },
+#if USE_QOA_SUPPORT == TRUE
+    { "qoa",     MOD2RMF_CODEC_QOA     },
+#endif
 };
 
 /* ------------------------------------------------------------------ */
@@ -198,6 +201,11 @@ BAERmfEditorCompressionType mod2rmf_encoder_resolve(const Mod2RmfEncoderSettings
             br = settings->bitrateKbps ? settings->bitrateKbps : 48;
             return find_closest(opusBitrates, ARRAY_COUNT(opusBitrates), br);
 
+#if USE_QOA_SUPPORT == TRUE
+        case MOD2RMF_CODEC_QOA:
+            return BAE_EDITOR_COMPRESSION_QOA;
+#endif
+
         default:
             break;
     }
@@ -245,6 +253,10 @@ const char *mod2rmf_encoder_label(BAERmfEditorCompressionType ct)
         case BAE_EDITOR_COMPRESSION_OPUS_160K:   return "Opus 160 kbps";
         case BAE_EDITOR_COMPRESSION_OPUS_192K:   return "Opus 192 kbps";
         case BAE_EDITOR_COMPRESSION_OPUS_256K:   return "Opus 256 kbps";
+
+    #if USE_QOA_SUPPORT == TRUE
+        case BAE_EDITOR_COMPRESSION_QOA:         return "QOA";
+    #endif
 
         default: break;
     }
@@ -327,7 +339,11 @@ int mod2rmf_encoder_requires_zmf(Mod2RmfCodec codec)
 {
     return (codec == MOD2RMF_CODEC_VORBIS ||
             codec == MOD2RMF_CODEC_FLAC   ||
-            codec == MOD2RMF_CODEC_OPUS);
+            codec == MOD2RMF_CODEC_OPUS
+#if USE_QOA_SUPPORT == TRUE
+            || codec == MOD2RMF_CODEC_QOA
+#endif
+            );
 }
 
 void mod2rmf_encoder_print_codecs(void)
@@ -341,5 +357,8 @@ void mod2rmf_encoder_print_codecs(void)
     fprintf(stderr, "  5  vorbis     Ogg Vorbis   --bitrate: 32 48 64 80 96 128* 160 192 256\n");
     fprintf(stderr, "  6  flac       FLAC lossless\n");
     fprintf(stderr, "  7  opus       Ogg Opus (round-trip) --bitrate: 12 16 24 32 48* 64 80 96 128 160 192 256\n");
+#if USE_QOA_SUPPORT == TRUE
+    fprintf(stderr, "  8  qoa        Quite OK Audio (sample codec, no bitrate option)\n");
+#endif
     fprintf(stderr, "                * = default bitrate when --bitrate is omitted\n");
 }

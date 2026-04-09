@@ -3231,6 +3231,10 @@ static AudioFileType PV_TranslateEditorFileType(BAEFileType fileType)
         case BAE_OPUS_TYPE:
             return FILE_OPUS_TYPE;
 #endif
+#if USE_QOA_SUPPORT == TRUE
+        case BAE_QOA_TYPE:
+            return FILE_QOA_TYPE;
+#endif
         default:
             return FILE_INVALID_TYPE;
     }
@@ -3254,6 +3258,10 @@ static bool PV_IsEditorCompressedImportType(BAEFileType fileType)
 #endif
 #if USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE
         case BAE_OPUS_TYPE:
+            return TRUE;
+#endif
+#if USE_QOA_SUPPORT == TRUE
+        case BAE_QOA_TYPE:
             return TRUE;
 #endif
         default:
@@ -3294,6 +3302,10 @@ static bool PV_IsSupportedPassthroughCompression(SndCompressionType compressionT
         case C_OPUS:
             return TRUE;
 #endif
+#if USE_QOA_SUPPORT == TRUE
+        case C_QOA:
+            return TRUE;
+#endif
         default:
             return FALSE;
     }
@@ -3328,6 +3340,11 @@ static BAEResult PV_CompressionTypeFromEditorFileType(BAEFileType fileType,
         case BAE_OPUS_TYPE:
             *outCompressionType = C_OPUS;
             return BAE_NO_ERROR;
+#endif
+#if USE_QOA_SUPPORT == TRUE
+    case BAE_QOA_TYPE:
+        *outCompressionType = C_QOA;
+        return BAE_NO_ERROR;
 #endif
         default:
             break;
@@ -8382,6 +8399,12 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                     compSubType = CS_OPUS_256K;
                     break;
 #endif
+#if USE_QOA_SUPPORT == TRUE
+                case BAE_EDITOR_COMPRESSION_QOA:
+                    compType    = C_QOA;
+                    compSubType = CS_DEFAULT;
+                    break;
+#endif
                 case BAE_EDITOR_COMPRESSION_PCM:
                 default:
                     compType    = C_NONE;
@@ -12912,7 +12935,13 @@ BAEResult BAERmfEditorDocument_GetSampleCodecDescription(BAERmfEditorDocument co
         }
     }
 #endif
-#if USE_VORBIS_DECODER == TRUE || USE_VORBIS_ENCODER == TRUE || USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE
+#if USE_QOA_SUPPORT == TRUE
+    else if (sample->sourceCompressionType == (uint32_t)C_QOA)
+    {
+        PV_CopyStringBounded(outCodec, outCodecSize, "QOA");
+    }
+#endif
+#if USE_VORBIS_DECODER == TRUE || USE_VORBIS_ENCODER == TRUE || USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE || USE_QOA_SUPPORT == TRUE
     else
 #endif        
     {
@@ -13527,6 +13556,9 @@ BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document, 
             case BAE_EDITOR_COMPRESSION_OPUS_160K:
             case BAE_EDITOR_COMPRESSION_OPUS_192K:
             case BAE_EDITOR_COMPRESSION_OPUS_256K:
+#if USE_QOA_SUPPORT == TRUE
+            case BAE_EDITOR_COMPRESSION_QOA:
+#endif
                 if ((reason & BAEZMF_REASON_MODERN_CODEC) == 0)
                 {
                     reason |= BAEZMF_REASON_MODERN_CODEC;
@@ -13543,6 +13575,9 @@ BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document, 
 #endif
 #if USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE
                     sample->sourceCompressionType == (uint32_t)C_OPUS ||
+#endif
+#if USE_QOA_SUPPORT == TRUE
+                    sample->sourceCompressionType == (uint32_t)C_QOA ||
 #endif
                 false)
                 {
@@ -13686,6 +13721,9 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
 #endif
 #if USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE
                 compressionType == (uint32_t)C_OPUS ||
+#endif
+#if USE_QOA_SUPPORT == TRUE
+                compressionType == (uint32_t)C_QOA ||
 #endif
             false)
             {
@@ -17706,6 +17744,10 @@ static BAEResult PV_BankReEncodeSampleCore(XFILE bankFile,
             compType = C_OPUS; compSubType = CS_OPUS_192K; break;
         case BAE_EDITOR_COMPRESSION_OPUS_256K:
             compType = C_OPUS; compSubType = CS_OPUS_256K; break;
+#endif
+#if USE_QOA_SUPPORT == TRUE
+        case BAE_EDITOR_COMPRESSION_QOA:
+            compType = C_QOA; compSubType = CS_DEFAULT; break;
 #endif
         case BAE_EDITOR_COMPRESSION_PCM:
         default:

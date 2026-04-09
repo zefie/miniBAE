@@ -702,6 +702,11 @@ uint32_t          const decodingBytes = decodingFrames * bytesPerFrame;
         return XExpandOpus(src, startFrame, dst);
 #endif
 
+#if USE_QOA_SUPPORT == TRUE
+    case C_QOA:
+        return XExpandQOA(src, startFrame, dst);
+#endif
+
 #if X_PLATFORM == X_MACINTOSH_9
     case C_MACE3 :
     case C_MACE6 :
@@ -984,6 +989,13 @@ int32_t XGetSampleInfoFromSnd(XPTR pResource, SampleDataInfo *pOutInfo)
                         pOutInfo->bitSize = 16;
                         break;
 #endif            
+#if USE_QOA_SUPPORT == TRUE
+                    case C_QOA:
+                        pOutInfo->size = XGetLong(&header3->encodedBytes);
+                        pOutInfo->frames = XGetLong(&header3->frameCount);
+                        pOutInfo->bitSize = 16;
+                        break;
+#endif
                     default:
                         BAE_PRINTF("Unsupported codec %d\n", pOutInfo->compressionType);
                         BAE_ASSERT(FALSE);
@@ -1261,6 +1273,14 @@ uint32_t              roundTripSavedRate;  /* non-zero if XSOUND_OPUS_ROUNDTRIP_
             {
                 roundTripSavedRate = XGetLong(&header3->sampleRate);
             }
+            break;
+#endif
+#if USE_QOA_SUPPORT == TRUE
+        case C_QOA:
+            /* encodedBytes = QOA bitstream size; frameCount = decoded PCM frames */
+            info->size   = XGetLong(&header3->encodedBytes);
+            info->frames = XGetLong(&header3->frameCount);
+            info->bitSize = 16;
             break;
 #endif
         default:
@@ -2414,6 +2434,58 @@ XSoundFormat1*      header;
         snd->sndBuffer.baseKey    = (unsigned char)src.baseMidiPitch;
         snd->sndBuffer.channels   = (unsigned char)src.channels;
         snd->sndBuffer.bitSize    = (unsigned char)src.bitSize;
+        snd->sndBuffer.isEmbedded = TRUE;
+        XBlockMove(encodedData, snd->sndBuffer.sampleArea, (int32_t)encodedBytes);
+        XDisposePtr(encodedData);
+        return NO_ERR;
+    }
+#endif
+
+#if USE_QOA_SUPPORT == TRUE
+    case C_QOA:
+    {
+    XPTR        encodedData;
+    uint32_t    encodedBytes;
+    OPErr       err;
+    XSndHeader3 *snd;
+    GM_Waveform pcmSrc;
+
+        pcmSrc = src;
+        if (pcmSrc.compressionType != (uint32_t)C_NONE)
+        {
+            XDisposePtr(intermediateData);
+            return PARAM_ERR;
+        }
+
+        err = XEncodeQOAToMemory(&pcmSrc, &encodedData, &encodedBytes);
+        XDisposePtr(intermediateData);
+        if (err != NO_ERR || !encodedData)
+        {
+            return err != NO_ERR ? err : MEMORY_ERR;
+        }
+
+        *dst = XNewPtr((int32_t)(sizeof(XSndHeader3) + encodedBytes));
+        if (!*dst)
+        {
+            XDisposePtr(encodedData);
+            return MEMORY_ERR;
+        }
+        snd = (XSndHeader3 *)*dst;
+        XSetMemory(snd, sizeof(XSndHeader3), 0);
+        XPutShort(&snd->type, XThirdSoundFormat);
+
+        XPutLong(&snd->sndBuffer.subType,      C_QOA);
+        XPutLong(&snd->sndBuffer.sampleRate,   src.sampledRate);
+        XPutLong(&snd->sndBuffer.frameCount,   src.waveFrames);
+        XPutLong(&snd->sndBuffer.encodedBytes, encodedBytes);
+        XPutLong(&snd->sndBuffer.decodedBytes, (uint32_t)(src.waveFrames * src.channels * (src.bitSize / 8)));
+        XPutLong(&snd->sndBuffer.blockBytes,   0);
+        XPutLong(&snd->sndBuffer.startFrame,   0);
+        XPutLong(&snd->sndBuffer.loopStart[0], src.startLoop);
+        XPutLong(&snd->sndBuffer.loopEnd[0],   src.endLoop);
+        snd->sndBuffer.baseKey    = (unsigned char)src.baseMidiPitch;
+        snd->sndBuffer.channels   = (unsigned char)src.channels;
+        snd->sndBuffer.bitSize    = 16;
         snd->sndBuffer.isEmbedded = TRUE;
         XBlockMove(encodedData, snd->sndBuffer.sampleArea, (int32_t)encodedBytes);
         XDisposePtr(encodedData);

@@ -24,9 +24,23 @@
 /* ── Skip-programs list ─────────────────────────────────────────── */
 
 #define MAX_SKIP_PROGRAMS 256
+#define MAX_TARGET_INSTRUMENTS 1024
+#define MAX_TARGET_SAMPLES 4096
+#define MAX_TARGET_SNDS 4096
 
 static uint32_t skipPrograms[MAX_SKIP_PROGRAMS];
 static int      skipProgramCount = 0;
+static uint32_t targetInstruments[MAX_TARGET_INSTRUMENTS];
+static int      targetInstrumentCount = 0;
+
+typedef struct BankTargetSample
+{
+    uint32_t instrumentIndex;
+    uint32_t sampleIndex;
+} BankTargetSample;
+
+static BankTargetSample targetSamples[MAX_TARGET_SAMPLES];
+static int              targetSampleCount = 0;
 
 /* Parse a comma-separated list of program numbers into skipPrograms[]. */
 static void parseSkipPrograms(const char *str)
@@ -53,6 +67,175 @@ static int isSkippedProgram(uint32_t program)
     return 0;
 }
 
+static int addUniqueUint32(uint32_t *values, int *count, int maxCount, uint32_t value)
+{
+    int i;
+
+    if (!values || !count)
+    {
+        return 0;
+    }
+
+    for (i = 0; i < *count; ++i)
+    {
+        if (values[i] == value)
+        {
+            return 1;
+        }
+    }
+    if (*count >= maxCount)
+    {
+        return 0;
+    }
+    values[*count] = value;
+    ++(*count);
+    return 1;
+}
+
+static int addUniqueTargetSample(uint32_t instrumentIndex, uint32_t sampleIndex)
+{
+    int i;
+
+    for (i = 0; i < targetSampleCount; ++i)
+    {
+        if (targetSamples[i].instrumentIndex == instrumentIndex &&
+            targetSamples[i].sampleIndex == sampleIndex)
+        {
+            return 1;
+        }
+    }
+    if (targetSampleCount >= MAX_TARGET_SAMPLES)
+    {
+        return 0;
+    }
+    targetSamples[targetSampleCount].instrumentIndex = instrumentIndex;
+    targetSamples[targetSampleCount].sampleIndex = sampleIndex;
+    ++targetSampleCount;
+    return 1;
+}
+
+static int parseTargetInstruments(const char *str)
+{
+    const char *p;
+
+    if (!str)
+    {
+        return 0;
+    }
+
+    p = str;
+    while (*p)
+    {
+        char *end;
+        unsigned long value;
+
+        while (*p == ',' || *p == ' ')
+        {
+            ++p;
+        }
+        if (*p == '\0')
+        {
+            break;
+        }
+
+        value = strtoul(p, &end, 10);
+        if (end == p)
+        {
+            return 0;
+        }
+        if (!addUniqueUint32(targetInstruments,
+                             &targetInstrumentCount,
+                             MAX_TARGET_INSTRUMENTS,
+                             (uint32_t)value))
+        {
+            return 0;
+        }
+
+        p = end;
+        while (*p == ' ')
+        {
+            ++p;
+        }
+        if (*p == ',')
+        {
+            ++p;
+            continue;
+        }
+        if (*p != '\0')
+        {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static int parseTargetSamples(const char *str)
+{
+    const char *p;
+
+    if (!str)
+    {
+        return 0;
+    }
+
+    p = str;
+    while (*p)
+    {
+        char *endInstrument;
+        char *endSample;
+        unsigned long instrumentIndex;
+        unsigned long sampleIndex;
+
+        while (*p == ',' || *p == ' ')
+        {
+            ++p;
+        }
+        if (*p == '\0')
+        {
+            break;
+        }
+
+        instrumentIndex = strtoul(p, &endInstrument, 10);
+        if (endInstrument == p || *endInstrument != ':')
+        {
+            return 0;
+        }
+
+        sampleIndex = strtoul(endInstrument + 1, &endSample, 10);
+        if (endSample == endInstrument + 1)
+        {
+            return 0;
+        }
+        if (!addUniqueTargetSample((uint32_t)instrumentIndex, (uint32_t)sampleIndex))
+        {
+            return 0;
+        }
+
+        p = endSample;
+        while (*p == ' ')
+        {
+            ++p;
+        }
+        if (*p == ',')
+        {
+            ++p;
+            continue;
+        }
+        if (*p != '\0')
+        {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static int hasTargetFilters(void)
+{
+    return (targetInstrumentCount > 0 || targetSampleCount > 0);
+}
+
 /* ── Codec table ────────────────────────────────────────────────── */
 
 enum
@@ -65,7 +248,12 @@ enum
     CODEC_VORBIS        = 5,
     CODEC_FLAC          = 6,
     CODEC_OPUS          = 7,
+#if USE_QOA_SUPPORT == TRUE
+    CODEC_QOA           = 8,
+    CODEC_COUNT         = 9
+#else
     CODEC_COUNT         = 8
+#endif
 };
 
 static const char *codecNames[CODEC_COUNT] =
@@ -77,14 +265,23 @@ static const char *codecNames[CODEC_COUNT] =
     "MP3",
     "VORBIS",
     "FLAC",
+#if USE_QOA_SUPPORT == TRUE
+    "OPUS",
+    "QOA"
+#else
     "OPUS"
+#endif
 };
 
 /* Returns TRUE if the chosen codec requires ZSB (ZREZ) container */
 static int codecRequiresZsb(int codec)
 {
     return (codec == CODEC_VORBIS || codec == CODEC_FLAC ||
-            codec == CODEC_OPUS);
+            codec == CODEC_OPUS
+#if USE_QOA_SUPPORT == TRUE
+            || codec == CODEC_QOA
+#endif
+            );
 }
 
 /* ── Bitrate tables per codec ───────────────────────────────────── */
@@ -173,6 +370,9 @@ static const char *compressionName(XResourceType ct, uint32_t subType)
         case FOUR_CHAR('m','p','g','l'):            return "MP3 (256k)";
         case FOUR_CHAR('m','p','g','m'):            return "MP3 (320k)";
         case FOUR_CHAR('f','L','a','C'):            return "FLAC";
+    #if USE_QOA_SUPPORT == TRUE
+        case FOUR_CHAR('q','o','a','f'):            return "QOA";
+    #endif
         case FOUR_CHAR('O','g','g','V'):            base = "Vorbis"; break;
         case FOUR_CHAR('O','g','g','O'):            base = "Opus"; break;
         default:                                    return "Unknown";
@@ -276,12 +476,17 @@ static void storeCompressionSubType(XPTR sndData, int32_t sndSize,
 static void printHelp(const char *progName)
 {
     printf("Usage: %s [options] <input.hsb|zsb> <output.hsb|zsb>\n\n", progName);
-    printf("Recompresses all samples in a bank file to a target codec.\n\n");
+    printf("Recompresses samples in a bank file to a target codec.\n");
+    printf("Without target filters, all samples are processed.\n\n");
     printf("Options:\n");
     printf("  --codec N      Target codec number (see list below)\n");
     printf("  --bitrate N    Target bitrate in kbps (e.g. 128) or bps (e.g. 128000)\n");
     printf("  --minframes N  Skip recompression for samples with fewer than N frames\n");
     printf("  --skip P,P,... Skip recompression for listed program numbers\n");
+    printf("  --instrument I[,I...]\n");
+    printf("                 Recompress only listed bank instrument indices\n");
+    printf("  --sample I:S[,I:S...]\n");
+    printf("                 Recompress only listed instrument sample slots\n");
     printf("  --help         Show this help message\n\n");
     printf("Codecs:\n");
     printf("  %d  %-22s  (no bitrate option)\n", CODEC_PCM, codecNames[CODEC_PCM]);
@@ -295,8 +500,16 @@ static void printHelp(const char *progName)
     printf("  %d  %-22s  (no bitrate option, lossless)\n", CODEC_FLAC, codecNames[CODEC_FLAC]);
     printf("  %d  %-22s  bitrates: 12, 16, 24, 32, 48, 64, 80, 96, 128, 160, 192, 256 kbps\n",
            CODEC_OPUS, codecNames[CODEC_OPUS]);
+#if USE_QOA_SUPPORT == TRUE
+        printf("  %d  %-22s  (no bitrate option)\n", CODEC_QOA, codecNames[CODEC_QOA]);
+#endif
+#if USE_QOA_SUPPORT == TRUE
+    printf("\nNote: VORBIS, FLAC, OPUS, QOA codecs force ZSB (ZREZ) output format.\n");
+#else
     printf("\nNote: VORBIS, FLAC, OPUS codecs force ZSB (ZREZ) output format.\n");
+#endif
     printf("      Without --codec, the bank is resaved with original compression.\n");
+    printf("      Instrument/sample indices are the ones printed in the bank listing.\n");
 }
 
 /* ── Bitrate lookup ─────────────────────────────────────────────── */
@@ -403,6 +616,12 @@ static void getDefaultBitrate(int codec,
             *outComp = C_OPUS;
             *outSub = CS_OPUS_48K;
             break;
+#if USE_QOA_SUPPORT == TRUE
+        case CODEC_QOA:
+            *outComp = C_QOA;
+            *outSub = CS_DEFAULT;
+            break;
+#endif
         default:
             *outComp = C_NONE;
             *outSub = CS_DEFAULT;
@@ -672,6 +891,8 @@ int main(int argc, char *argv[])
     SndCompressionType targetComp;
     SndCompressionSubType targetSub;
     int doRecompress;
+    int instrumentTargetMatched[MAX_TARGET_INSTRUMENTS];
+    int sampleTargetMatched[MAX_TARGET_SAMPLES];
 
     /* Parse arguments */
     for (argIdx = 1; argIdx < argc; argIdx++)
@@ -723,6 +944,33 @@ int main(int argc, char *argv[])
             }
             parseSkipPrograms(argv[++argIdx]);
         }
+        else if (strcmp(argv[argIdx], "--instrument") == 0)
+        {
+            if (argIdx + 1 >= argc)
+            {
+                fprintf(stderr, "Error: --instrument requires a comma-separated list of indices\n");
+                return 1;
+            }
+            if (!parseTargetInstruments(argv[++argIdx]))
+            {
+                fprintf(stderr, "Error: invalid --instrument list '%s'\n", argv[argIdx]);
+                return 1;
+            }
+        }
+        else if (strcmp(argv[argIdx], "--sample") == 0)
+        {
+            if (argIdx + 1 >= argc)
+            {
+                fprintf(stderr, "Error: --sample requires I:S selectors\n");
+                return 1;
+            }
+            if (!parseTargetSamples(argv[++argIdx]))
+            {
+                fprintf(stderr, "Error: invalid --sample list '%s' (expected I:S[,I:S...])\n",
+                        argv[argIdx]);
+                return 1;
+            }
+        }
         else if (argv[argIdx][0] == '-')
         {
             fprintf(stderr, "Error: unknown option '%s'\n", argv[argIdx]);
@@ -756,6 +1004,12 @@ int main(int argc, char *argv[])
     targetComp = C_NONE;
     targetSub = CS_DEFAULT;
 
+    if (!doRecompress && hasTargetFilters())
+    {
+        fprintf(stderr, "Error: --instrument/--sample require --codec\n");
+        return 1;
+    }
+
     if (doRecompress)
     {
         if (bitrateKbps > 0 &&
@@ -776,7 +1030,11 @@ int main(int argc, char *argv[])
         /* Warn if bitrate was specified for a codec that doesn't use it */
         if (bitrateKbps > 0 &&
             (codec == CODEC_PCM || codec == CODEC_ADPCM || codec == CODEC_ALAW ||
-             codec == CODEC_ULAW || codec == CODEC_FLAC))
+             codec == CODEC_ULAW || codec == CODEC_FLAC
+#if USE_QOA_SUPPORT == TRUE
+             || codec == CODEC_QOA
+#endif
+             ))
         {
             fprintf(stderr, "Note: --bitrate is ignored for %s codec\n", codecNames[codec]);
         }
@@ -827,6 +1085,30 @@ int main(int argc, char *argv[])
             }
         }
         printf("\n");
+        if (targetInstrumentCount > 0)
+        {
+            int ti;
+
+            printf("Target instruments:");
+            for (ti = 0; ti < targetInstrumentCount; ++ti)
+            {
+                printf(" %u", targetInstruments[ti]);
+            }
+            printf("\n");
+        }
+        if (targetSampleCount > 0)
+        {
+            int ts;
+
+            printf("Target samples:");
+            for (ts = 0; ts < targetSampleCount; ++ts)
+            {
+                printf(" %u:%u",
+                       targetSamples[ts].instrumentIndex,
+                       targetSamples[ts].sampleIndex);
+            }
+            printf("\n");
+        }
         if (minFrames > 0)
         {
             printf("Minimum frames: %u (samples below this are kept as-is)\n", minFrames);
@@ -882,6 +1164,15 @@ int main(int argc, char *argv[])
 #define MAX_SKIP_SNDS 4096
     int32_t skipSndIDs[MAX_SKIP_SNDS];
     int     skipSndCount = 0;
+    int32_t selectedSndIDs[MAX_TARGET_SNDS];
+    int     selectedSndCount = 0;
+
+    XSetMemory(instrumentTargetMatched,
+               (int32_t)sizeof(instrumentTargetMatched),
+               0);
+    XSetMemory(sampleTargetMatched,
+               (int32_t)sizeof(sampleTargetMatched),
+               0);
 
     for (i = 0; i < instCount; i++)
     {
@@ -943,6 +1234,53 @@ int main(int argc, char *argv[])
                 if (!already)
                     skipSndIDs[skipSndCount++] = sampleInfo.sndResourceID;
             }
+
+            if (targetInstrumentCount > 0)
+            {
+                int ti;
+
+                for (ti = 0; ti < targetInstrumentCount; ++ti)
+                {
+                    if (targetInstruments[ti] == i)
+                    {
+                        instrumentTargetMatched[ti] = 1;
+                        if (!addUniqueUint32((uint32_t *)selectedSndIDs,
+                                             &selectedSndCount,
+                                             MAX_TARGET_SNDS,
+                                             (uint32_t)sampleInfo.sndResourceID))
+                        {
+                            fprintf(stderr, "Error: too many targeted SND resources\n");
+                            BAEMixer_Delete(mixer);
+                            return 1;
+                        }
+                        break;
+                    }
+                }
+            }
+
+            if (targetSampleCount > 0)
+            {
+                int ts;
+
+                for (ts = 0; ts < targetSampleCount; ++ts)
+                {
+                    if (targetSamples[ts].instrumentIndex == i &&
+                        targetSamples[ts].sampleIndex == s)
+                    {
+                        sampleTargetMatched[ts] = 1;
+                        if (!addUniqueUint32((uint32_t *)selectedSndIDs,
+                                             &selectedSndCount,
+                                             MAX_TARGET_SNDS,
+                                             (uint32_t)sampleInfo.sndResourceID))
+                        {
+                            fprintf(stderr, "Error: too many targeted SND resources\n");
+                            BAEMixer_Delete(mixer);
+                            return 1;
+                        }
+                        break;
+                    }
+                }
+            }
         }
 
         /* Show extended info summary */
@@ -959,6 +1297,35 @@ int main(int argc, char *argv[])
                        extInfo.LPF_lowpassAmount);
             }
         }
+    }
+
+    if (hasTargetFilters())
+    {
+        int ti;
+        int ts;
+
+        for (ti = 0; ti < targetInstrumentCount; ++ti)
+        {
+            if (!instrumentTargetMatched[ti])
+            {
+                fprintf(stderr, "Error: instrument index %u was not found in the bank\n",
+                        targetInstruments[ti]);
+                BAEMixer_Delete(mixer);
+                return 1;
+            }
+        }
+        for (ts = 0; ts < targetSampleCount; ++ts)
+        {
+            if (!sampleTargetMatched[ts])
+            {
+                fprintf(stderr, "Error: sample target %u:%u was not found in the bank\n",
+                        targetSamples[ts].instrumentIndex,
+                        targetSamples[ts].sampleIndex);
+                BAEMixer_Delete(mixer);
+                return 1;
+            }
+        }
+        printf("Selected SND resources: %d\n\n", selectedSndCount);
     }
 
     /* ── Save / Recompress ──────────────────────────────────────── */
@@ -1087,6 +1454,7 @@ int main(int argc, char *argv[])
                         XPTR newSnd;
                         int skipMinFrames = 0;
                         int skipProgram = 0;
+                        int skipTarget = 0;
 
                         /* Check --skip programs */
                         if (skipSndCount > 0)
@@ -1097,6 +1465,21 @@ int main(int argc, char *argv[])
                                 if (skipSndIDs[si] == (int32_t)resID)
                                 {
                                     skipProgram = 1;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (selectedSndCount > 0)
+                        {
+                            int si;
+
+                            skipTarget = 1;
+                            for (si = 0; si < selectedSndCount; ++si)
+                            {
+                                if (selectedSndIDs[si] == (int32_t)resID)
+                                {
+                                    skipTarget = 0;
                                     break;
                                 }
                             }
@@ -1123,7 +1506,7 @@ int main(int argc, char *argv[])
                         }
                         fflush(stdout);
 
-                        if (skipMinFrames || skipProgram)
+                        if (skipMinFrames || skipProgram || skipTarget)
                         {
                             newSnd = NULL;
                         }
@@ -1151,6 +1534,10 @@ int main(int argc, char *argv[])
                             if (skipProgram)
                             {
                                 printf(" SKIPPED (program excluded)\n");
+                            }
+                            else if (skipTarget)
+                            {
+                                printf(" SKIPPED (not targeted)\n");
                             }
                             else if (skipMinFrames)
                             {

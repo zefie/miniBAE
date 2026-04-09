@@ -232,11 +232,20 @@ static const char AUDIO_EXT_FILTER[] =
     ""
 #endif
 #if USE_XMF_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-    "*.xmf;*.mxmf;";
+    "*.xmf;*.mxmf;"
 #else
     ""
 #endif
+#if USE_RETRO_RINGTONE_SUPPORT == TRUE
     "*.imy;*.rng;*.rtx;"
+#else
+    ""    
+#endif
+#if USE_QOA_SUPPORT == TRUE
+    "*.qoa;"
+#else
+    ""
+#endif
 #if USE_ZMF_SUPPORT == TRUE
     "*.zmf;";
 #else

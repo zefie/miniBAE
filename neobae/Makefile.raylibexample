@@ -1,18 +1,9 @@
 BAE_API := Raylib
 NOAUTO := 1
 EMBED_PATCHES := 1
-SF2_SUPPORT := 0
-MP3_DEC := 0
-MP3_ENC := 0
 OGG_SUPPORT := 1
-VORBIS_DEC := 0
-VORBIS_ENC := 0
-FLAC_DEC := 0
-FLAC_ENC := 0
 OPUS_DEC := 1
-OPUS_ENC := 0
 ZMF_SUPPORT := 1
-CREATION_API := 0
 RAYLIB_EXAMPLE := 1
 EMBED_PATCH_FILE := src/banks/nChippyBank/nChippyBank.hsb
 include inc/Makefile.common

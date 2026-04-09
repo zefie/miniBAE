@@ -321,10 +321,15 @@ extern "C"
         BAE_RMI,
 #if USE_ADP_SUPPORT == TRUE
         BAE_ADP_TYPE,
-#endif  
+#endif
+#if USE_QOA_SUPPORT == TRUE
+        BAE_QOA_TYPE,
+#endif
+#if USE_RETRO_RINGTONE_SUPPORT == TRUE
         BAE_RINGTONE_IMY,
         BAE_RINGTONE_RNG,
         BAE_RINGTONE_RTX,
+#endif        
         BAE_RAW_PCM
     } BAEFileType;
 
@@ -3016,7 +3021,10 @@ typedef enum BAERmfEditorCompressionType
     BAE_EDITOR_COMPRESSION_OPUS_160K   = 31, /* Ogg Opus at 160 kbps */
     BAE_EDITOR_COMPRESSION_OPUS_192K   = 32, /* Ogg Opus at 192 kbps */
     BAE_EDITOR_COMPRESSION_ALAW        = 33, /* G.711 A-law */
-    BAE_EDITOR_COMPRESSION_ULAW        = 34  /* G.711 u-law */
+    BAE_EDITOR_COMPRESSION_ULAW        = 34, /* G.711 u-law */
+#if USE_QOA_SUPPORT == TRUE
+    BAE_EDITOR_COMPRESSION_QOA         = 35  /* Quite OK Audio (sample-only, ZMF required) */
+#endif
 } BAERmfEditorCompressionType;
 
 typedef enum BAERmfEditorMidiStorageType

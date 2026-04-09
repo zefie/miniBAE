@@ -1792,6 +1792,11 @@ BAEResult playFile(BAEMixer theMixer, char *parmFile, BAE_UNSIGNED_FIXED volume,
             playbae_printf("Playing Nokia ADP %s\n", parmFile);
             break;
 #endif
+#if USE_QOA_SUPPORT == TRUE
+         case BAE_QOA_TYPE:
+            playbae_printf("Playing Quite OK Audio Format %s\n", parmFile);
+            break;
+#endif
          default:
             playbae_printf("Playing sound %s\n", parmFile);
             break;

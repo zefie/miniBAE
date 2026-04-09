@@ -1,15 +1,10 @@
-BAE_API := Raylib
+BAE_API := Ansi
 NOAUTO := 1
-EMBED_PATCHES := 1
-OGG_SUPPORT := 1
-OPUS_DEC := 1
-ZMF_SUPPORT := 1
-RAYLIB_EXAMPLE := 1
-WINDOWS := 1
-EMBED_PATCH_FILE := src/banks/nChippyBank/nChippyBank.hsb
+RETRO_RINGTONE_SUPPORT := 1
+RINGTONE2MID := 1
 include inc/Makefile.common
 
-TARGET_BIN := raylib_example
+TARGET_BIN := ringtone2mid.exe
 
 ifeq ($(BITS),32)
     ARCH		:= -m32 -static
@@ -39,21 +34,12 @@ else
     CFLAGS  	:= $(ARCH) $(OPTI) $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
 endif
 
-# libopenmpt via pkg-config (optional)
-#OPENMPT_CFLAGS := $(shell pkg-config --cflags libopenmpt 2>/dev/null)
-#OPENMPT_LIBS := $(shell pkg-config --libs libopenmpt 2>/dev/null)
-
-CFLAGS  	:= $(ARCH) $(OPTI) $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
-ifneq ($(strip $(OPENMPT_LIBS)),)
-	CFLAGS += $(OPENMPT_CFLAGS) #-DMOD2RMF_USE_OPENMPT=1
-endif
-
 ifneq ($(BAE_FLAGS),)
 	CFLAGS	+= $(BAE_FLAGS)
 endif
 
 include inc/Makefile.versioning
-CFLAGS		+= -D_VERSION=\""$(VERSION)"\" -DNOGDI=1
+CFLAGS		+= -D_VERSION=\"$(VERSION)\"
 
 
 LDFLAGS		:= $(OPTI)
@@ -62,20 +48,16 @@ ifneq ($(BAE_LD_FLAGS),)
 endif
 
 ifneq ($(DEBUG),1)
-	LDFLAGS += -static
+	LDFLAGS += -s
 endif
 
-LIBS	= 	-lpthread -lm 
-ifneq ($(strip $(OPENMPT_LIBS)),)
-	LIBS += $(OPENMPT_LIBS)
-endif
+LIBS	= 	-lpthread -lm
 
 ifneq ($(BAE_LIBS),)
-	LIBS += $(BAE_LIBS) -lwinmm -lgdi32 -luser32 -lkernel32 -lopengl32
+	LIBS += $(BAE_LIBS)
 endif
 
 CXXFLAGS 	:= $(CFLAGS)
-# Use C++ linker if we have any C++ sources
 ifneq ($(filter %.cpp,$(SRC) $(SRC_BIN)),)
     LD := $(CXX)
     LIBS += -lstdc++
@@ -87,7 +69,6 @@ $(TARGET_BIN): ${OBJ_BIN}
 	@mkdir -p $(TARGET_OUT)
 	${LD} -o $(TARGET_OUT)${TARGET_BIN} ${LDFLAGS} ${OBJ_BIN} ${LIBS}
 
-# Generate rules for all unique source files
 ALL_SOURCES := $(sort $(SRC) $(SRC_BIN))
 $(foreach src,$(ALL_SOURCES),$(eval $(call make_obj_rule,$(src))))
 

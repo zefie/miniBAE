@@ -22,3 +22,6 @@
 [submodule "neobae/src/thirdparty/libg722"]
 	path = neobae/src/thirdparty/libg722
 	url = https://github.com/sippy/libg722
+[submodule "neobae/src/thirdparty/qoa"]
+	path = neobae/src/thirdparty/qoa
+	url = https://github.com/phoboslab/qoa

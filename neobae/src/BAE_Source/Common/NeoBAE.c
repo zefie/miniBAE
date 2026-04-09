@@ -1217,6 +1217,11 @@ AudioFileType BAE_TranslateBAEFileType(BAEFileType fileType)
         haeFileType = FILE_OPUS_TYPE;
         break;
 #endif
+#if USE_QOA_SUPPORT == TRUE
+    case BAE_QOA_TYPE:
+        haeFileType = FILE_QOA_TYPE;
+        break;
+#endif
     case BAE_AU_TYPE:
         haeFileType = FILE_AU_TYPE;
         break;
@@ -2268,7 +2273,7 @@ BAEResult BAEMixer_AddBankFromMemory(BAEMixer mixer, void *pAudioFile, uint32_t 
         if (newPatchFile)
         {
             /* Reject IREZ (classic HSB) banks that contain modern-codec samples.
-            ** Only ZREZ (ZSB) banks are permitted to embed FLAC, Vorbis, or Opus. */
+            ** Only ZREZ (ZSB) banks are permitted to embed FLAC, Vorbis, Opus, or QOA. */
             {
                 XFILERESOURCEMAP mapHdr;
                 XFileSetPosition(newPatchFile, 0L);
@@ -2278,7 +2283,7 @@ BAEResult BAEMixer_AddBankFromMemory(BAEMixer mixer, void *pAudioFile, uint32_t 
                     {
                         if (PV_XFileHasModernCodecSamples(newPatchFile))
                         {
-                            BAE_PRINTF("[Bank] IREZ bank rejected: contains FLAC/Vorbis/Opus sample(s) — upgrade to ZSB (.zsb)\n");
+                            BAE_PRINTF("[Bank] IREZ bank rejected: contains FLAC/Vorbis/Opus/QOA sample(s) — upgrade to ZSB (.zsb)\n");
                             XFileClose(newPatchFile);
                             return BAE_UNSUPPORTED_FORMAT;
                         }
@@ -2349,7 +2354,7 @@ BAEResult BAEMixer_AddBankFromFile(BAEMixer mixer, BAEPathName pAudioPathName, B
         if (newPatchFile)
         {
             /* Reject IREZ (classic HSB) banks that contain modern-codec samples.
-            ** Only ZREZ (ZSB) banks are permitted to embed FLAC, Vorbis, or Opus. */
+            ** Only ZREZ (ZSB) banks are permitted to embed FLAC, Vorbis, Opus, or QOA. */
             {
                 XFILERESOURCEMAP mapHdr;
                 XFileSetPosition(newPatchFile, 0L);
@@ -2359,7 +2364,7 @@ BAEResult BAEMixer_AddBankFromFile(BAEMixer mixer, BAEPathName pAudioPathName, B
                     {
                         if (PV_XFileHasModernCodecSamples(newPatchFile))
                         {
-                            BAE_PRINTF("[Bank] IREZ bank rejected: contains FLAC/Vorbis/Opus sample(s) — upgrade to ZSB (.zsb)\n");
+                            BAE_PRINTF("[Bank] IREZ bank rejected: contains FLAC/Vorbis/Opus/QOA sample(s) — upgrade to ZSB (.zsb)\n");
                             XFileClose(newPatchFile);
                             return BAE_UNSUPPORTED_FORMAT;
                         }
@@ -7997,7 +8002,7 @@ BAEResult BAESong_LoadMidiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL 
 // PV_XFileHasModernCodecSamples()
 // --------------------------------------
 // Scan an open XFILE resource map for any snd /csnd/esnd resource that uses
-// a "modern" codec (FLAC, Ogg Vorbis, or Ogg Opus).  Only Type 3 snd headers
+// a "modern" codec (FLAC, Ogg Vorbis, Ogg Opus, or QOA).  Only Type 3 snd headers
 // carry these codecs, so we only look there.
 //
 // These codec FourCC values are checked unconditionally regardless of which
@@ -8013,7 +8018,8 @@ static bool PV_XFileHasModernCodecSamples(XFILE fileRef)
     static const uint32_t modernCodecs[] = {
         0x664C6143UL,   // 'fLaC' = C_FLAC
         0x4F676756UL,   // 'OggV' = C_VORBIS
-        0x4F67674FUL    // 'OggO' = C_OPUS
+        0x4F67674FUL,   // 'OggO' = C_OPUS
+        0x716F6166UL    // 'qoaf' = C_QOA
     };
 
     for (int t = 0; t < 3; t++)
@@ -8034,7 +8040,7 @@ static bool PV_XFileHasModernCodecSamples(XFILE fileRef)
                     // Bytes 2-5: XSoundHeader3.subType (big-endian FourCC)
                     uint32_t subType = ((uint32_t)rb[2] << 24) | ((uint32_t)rb[3] << 16)
                                      | ((uint32_t)rb[4] <<  8) |  (uint32_t)rb[5];
-                    for (int c = 0; c < 3; c++)
+                    for (int c = 0; c < 4; c++)
                     {
                         if (subType == modernCodecs[c])
                         {
@@ -8103,7 +8109,7 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
             if (fileRef)
             {
                 // Reject IREZ (classic RMF) files that contain modern-codec samples.
-                // Only ZREZ (ZMF) files are permitted to embed FLAC, Vorbis, or Opus.
+                // Only ZREZ (ZMF) files are permitted to embed FLAC, Vorbis, Opus, or QOA.
                 {
                     XFILERESOURCEMAP mapHdr;
                     XFileSetPosition(fileRef, 0L);
@@ -8113,7 +8119,7 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
                         {
                             if (PV_XFileHasModernCodecSamples(fileRef))
                             {
-                                BAE_PRINTF("[RMF] IREZ file rejected: contains FLAC/Vorbis/Opus sample(s) — upgrade to ZMF (.zmf)\n");
+                                BAE_PRINTF("[RMF] IREZ file rejected: contains FLAC/Vorbis/Opus/QOA sample(s) — upgrade to ZMF (.zmf)\n");
                                 XFileClose(fileRef);
                                 BAE_ReleaseMutex(song->mLock);
                                 return BAE_UNSUPPORTED_FORMAT;
@@ -8352,7 +8358,7 @@ BAEResult BAESong_LoadRmfFromFile(BAESong song, BAEPathName filePath, int16_t so
         if (fileRef)
         {
             // Reject IREZ (classic RMF) files that contain modern-codec samples.
-            // Only ZREZ (ZMF) files are permitted to embed FLAC, Vorbis, or Opus.
+            // Only ZREZ (ZMF) files are permitted to embed FLAC, Vorbis, Opus, or QOA.
             {
                 XFILERESOURCEMAP mapHdr;
                 XFileSetPosition(fileRef, 0L);
@@ -8362,7 +8368,7 @@ BAEResult BAESong_LoadRmfFromFile(BAESong song, BAEPathName filePath, int16_t so
                     {
                         if (PV_XFileHasModernCodecSamples(fileRef))
                         {
-                            BAE_PRINTF("[RMF] IREZ file rejected: contains FLAC/Vorbis/Opus sample(s) — upgrade to ZMF (.zmf)\n");
+                            BAE_PRINTF("[RMF] IREZ file rejected: contains FLAC/Vorbis/Opus/QOA sample(s) — upgrade to ZMF (.zmf)\n");
                             XFileClose(fileRef);
                             BAE_ReleaseMutex(song->mLock);
                             return BAE_UNSUPPORTED_FORMAT;
@@ -11705,6 +11711,9 @@ BAEResult BAEMixer_LoadFromFile(BAEMixer mixer, BAEPathName filePath, BAELoadRes
 #if USE_ADP_SUPPORT == TRUE
         || ftype == BAE_ADP_TYPE
 #endif
+#if USE_QOA_SUPPORT == TRUE
+    || ftype == BAE_QOA_TYPE
+#endif
     )
     {
         isAudio = TRUE;
@@ -11948,6 +11957,9 @@ BAEResult BAEMixer_LoadFromMemory(BAEMixer mixer, void const *pData, uint32_t da
 #endif
 #if USE_OPUS_DECODER == TRUE
         || ftype == BAE_OPUS_TYPE
+#endif
+#if USE_QOA_SUPPORT == TRUE
+    || ftype == BAE_QOA_TYPE
 #endif
     #if USE_ADP_SUPPORT == TRUE
         || ftype == BAE_ADP_TYPE

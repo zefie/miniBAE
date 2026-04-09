@@ -890,6 +890,10 @@ typedef enum SndCompressionType
 #if USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE
     C_OPUS              = FOUR_CHAR('O','g','g','O'),   // 'OggO'   Ogg Opus audio
 #endif
+
+#if USE_QOA_SUPPORT == TRUE
+    C_QOA               = FOUR_CHAR('q','o','a','f'),   // 'qoaf'   Quite OK Audio
+#endif
                                                         // for all of these compression types
                                                         // the SndCompressionSubType (CS_DEFAULT)
                                                         // is CS_MPEG2.
@@ -1299,6 +1303,12 @@ OPErr XExpandOpus(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst)
  * On success allocates *outData (caller must XDisposePtr) and sets *outSize. */
 OPErr XEncodeOpusToMemory(GM_Waveform const *src, uint32_t bitrate, uint32_t mode,
                           XPTR *outData, uint32_t *outSize);
+#endif
+
+#if USE_QOA_SUPPORT == TRUE
+OPErr XExpandQOA(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst);
+OPErr XEncodeQOAToMemory(GM_Waveform const *src,
+                         XPTR *outData, uint32_t *outSize);
 #endif
 
 

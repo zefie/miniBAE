@@ -324,7 +324,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    /* Vorbis, FLAC and Opus require the ZMF container. */
+    /* Vorbis, FLAC, Opus and QOA require the ZMF container. */
     if (mod2rmf_encoder_requires_zmf(encSettings.codec) && !is_zmf_path(destPath))
     {
         fprintf(stderr,

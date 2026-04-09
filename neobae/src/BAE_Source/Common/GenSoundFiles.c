@@ -4732,6 +4732,80 @@ void GM_DisposeFileState(AudioFileType fileType, void *state)
 */
 }
 
+#if USE_QOA_SUPPORT == TRUE
+static GM_Waveform* PV_ReadIntoMemoryQOAFile(XFILE file, bool decodeData,
+                                              int32_t *pFormat, void **ppBlockPtr, uint32_t *pBlockSize, OPErr *pError)
+{
+    GM_Waveform *wave;
+    GM_Waveform src;
+    XPTR qoaData;
+    int32_t fileSize;
+    OPErr err;
+
+    if (!file || !pError)
+    {
+        if (pError)
+        {
+            *pError = PARAM_ERR;
+        }
+        return NULL;
+    }
+
+    if (pFormat) *pFormat = X_NONE;
+    if (ppBlockPtr) *ppBlockPtr = NULL;
+    if (pBlockSize) *pBlockSize = 0;
+
+    fileSize = XFileGetLength(file);
+    if (fileSize <= 0)
+    {
+        *pError = BAD_FILE;
+        return NULL;
+    }
+
+    qoaData = XNewPtr(fileSize);
+    if (!qoaData)
+    {
+        *pError = MEMORY_ERR;
+        return NULL;
+    }
+
+    XFileSetPosition(file, 0L);
+    if (XFileRead(file, qoaData, fileSize) != 0)
+    {
+        XDisposePtr(qoaData);
+        *pError = BAD_FILE;
+        return NULL;
+    }
+
+    wave = (GM_Waveform *)XNewPtr(sizeof(GM_Waveform));
+    if (!wave)
+    {
+        XDisposePtr(qoaData);
+        *pError = MEMORY_ERR;
+        return NULL;
+    }
+
+    XSetMemory(&src, sizeof(src), 0);
+    src.theWaveform = (signed char *)qoaData;
+    src.waveSize = (uint32_t)fileSize;
+    src.baseMidiPitch = 60;
+
+    err = XExpandQOA(&src, 0, wave);
+    XDisposePtr(qoaData);
+    if (err != NO_ERR)
+    {
+        XDisposePtr((XPTR)wave);
+        *pError = err;
+        return NULL;
+    }
+
+    (void)decodeData;
+    wave->currentFilePosition = 0;
+    *pError = NO_ERR;
+    return wave;
+}
+#endif
+
 // Read into memory a file
 GM_Waveform* GM_ReadFileIntoMemory(XFILENAME *filename, AudioFileType fileType,
                                     bool decodeData, OPErr *pErr)
@@ -4773,6 +4847,11 @@ GM_Waveform     *waveform;
     #if USE_OPUS_DECODER != FALSE
         case FILE_OPUS_TYPE:
             waveform = PV_ReadIntoMemoryOpusFile(file, decodeData, NULL, NULL, NULL, &err);
+            break;
+    #endif
+    #if USE_QOA_SUPPORT == TRUE
+        case FILE_QOA_TYPE:
+            waveform = PV_ReadIntoMemoryQOAFile(file, decodeData, NULL, NULL, NULL, &err);
             break;
     #endif
         default :
@@ -4834,6 +4913,11 @@ GM_Waveform     *waveform;
     #if USE_VORBIS_DECODER != FALSE
         case FILE_VORBIS_TYPE:
             waveform = PV_ReadIntoMemoryVorbisFile(file, decodeData, NULL, NULL, NULL, &err);
+            break;
+    #endif
+    #if USE_QOA_SUPPORT == TRUE
+        case FILE_QOA_TYPE:
+            waveform = PV_ReadIntoMemoryQOAFile(file, decodeData, NULL, NULL, NULL, &err);
             break;
     #endif
         default :
@@ -4901,6 +4985,11 @@ GM_Waveform*    pWave = NULL;
 #if USE_VORBIS_DECODER != FALSE
         case FILE_VORBIS_TYPE:
             pWave = PV_ReadIntoMemoryVorbisFile(file, FALSE, pFormat, ppBlockPtr, pBlockSize, &err);
+            break;
+#endif
+#if USE_QOA_SUPPORT == TRUE
+        case FILE_QOA_TYPE:
+            pWave = PV_ReadIntoMemoryQOAFile(file, FALSE, pFormat, ppBlockPtr, pBlockSize, &err);
             break;
 #endif
         default :

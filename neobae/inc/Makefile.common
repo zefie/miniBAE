@@ -39,6 +39,7 @@ ifneq ($(WASM),1)
 		LZMA_SUPPORT := 1
 		MTHC_SUPPORT := 1
 		ADP_SUPPORT := 1
+		QOA_SUPPORT := 1
 		CREATION_API := 0
 	endif
 endif
@@ -54,15 +55,18 @@ endif
 
 ifeq ($(CREATION_API),1) 
 	# All of these are required for ZMF support
-	OGG_SUPPORT := 1
-	MP3_DEC := 1
-	MP3_ENC := 1
-	FLAC_DEC := 1
-	FLAC_ENC := 1
-	VORBIS_DEC := 1
-	VORBIS_ENC := 1
-	OPUS_DEC := 1
-	OPUS_ENC := 1
+	ifneq ($(CREATION_NO_CODECS),1)
+		OGG_SUPPORT := 1
+		MP3_DEC := 1
+		MP3_ENC := 1
+		FLAC_DEC := 1
+		FLAC_ENC := 1
+		VORBIS_DEC := 1
+		VORBIS_ENC := 1
+		OPUS_DEC := 1
+		OPUS_ENC := 1
+		QOA_SUPPORT := 1
+	endif
 	ZMF_SUPPORT := 1
 endif
 
@@ -651,6 +655,13 @@ ifeq ($(ADP_SUPPORT),1)
 			src/thirdparty/libg722/g722_decode.c
 		BAE_FLAGS += -DUSE_ADP_SUPPORT=1
 	endif
+endif
+
+
+ifeq ($(QOA_SUPPORT),1)
+	BAE_FLAGS += -DUSE_QOA_SUPPORT=1
+	INC_PATH += -Isrc/thirdparty/qoa
+	SRC += src/BAE_Source/Common/XQOAFiles.c
 endif
 
 ifeq ($(KARAOKE),1)

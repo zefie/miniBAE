@@ -87,6 +87,7 @@ LOCAL_SRC_FILES	:= \
 			Common/GenSF2_FluidSynth.c \
 			Common/GenRMI.c \
       		Common/GenXMF.c \
+      		Common/GenRingtone.c \
 			Common/NeoBAE.c \
 			Common/NewNewLZSS.c \
 			Common/SampleTools.c \
@@ -103,6 +104,7 @@ LOCAL_SRC_FILES	:= \
 			Common/XFileTypes.c \
       		Common/XVorbisFiles.c \
 			Common/XOpusFiles.c \
+			Common/XQOAFiles.c \
 			../mthc/mthc_decomp.c \
 			../adp2wav/adp2wav_decode.c \
 			../thirdparty/libg722/g722_decode.c \
@@ -187,6 +189,7 @@ LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/flac/include
 LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/flac/src/libFLAC/include
 LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/libvorbis/lib
 LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/libg722
+LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/qoa
 LOCAL_C_INCLUDES	+= $(GEN_DIR)
 
 LOCAL_CFLAGS := -std=c99 -O2 -D_VERSION=\"$(VERSION)\" \
@@ -198,6 +201,7 @@ LOCAL_CFLAGS := -std=c99 -O2 -D_VERSION=\"$(VERSION)\" \
 	-DUSE_OPUS_DECODER=1 -DUSE_LZMA_COMPRESSION=1 -DUSE_ZMF_FORMAT=1 \
 	-DBAE_FIX_SPAN_DC=1 -DBAE_CLASSIC_CHORUS=1 -DFLAC__NO_DLL \
 	-D_LOAD_BUILTIN_PATCHES_FOR_SF2=1 -DUSE_MTHC_SUPPORT=1 -DUSE_ADP_SUPPORT=1 \
+	-DUSE_RETRO_RINGTONE_SUPPORT=1 -DUSE_QOA_SUPPORT=1 -DUSE_RMI_SUPPORT=1 \
 	-DHAVE_CONFIG_H=1 -Wall -fsigned-char
 
 ifeq ($(APP_OPTIM),debug)

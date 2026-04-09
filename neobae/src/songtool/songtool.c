@@ -21,6 +21,7 @@
 #include "mod2rmf_encoder.h"
 
 #define SONGTOOL_MAX_SAMPLE_OVERRIDES 4096
+#define SONGTOOL_MAX_INSTRUMENT_OVERRIDES 1024
 
 typedef struct SongtoolSampleOverride
 {
@@ -28,6 +29,13 @@ typedef struct SongtoolSampleOverride
     Mod2RmfEncoderSettings settings;
     BAERmfEditorCompressionType compressionType;
 } SongtoolSampleOverride;
+
+typedef struct SongtoolInstrumentOverride
+{
+    uint32_t instID;
+    Mod2RmfEncoderSettings settings;
+    BAERmfEditorCompressionType compressionType;
+} SongtoolInstrumentOverride;
 
 static void print_usage(const char *program_name)
 {
@@ -37,9 +45,12 @@ static void print_usage(const char *program_name)
             "Options:\n"
             "  --info               Show source info (title, song length, codecs)\n"
             "  --codec N|NAME        Recompress all samples to codec number/name\n"
-            "                        (pcm, adpcm, alaw, ulaw, mp3, vorbis, flac, opus)\n"
+            "                        (pcm, adpcm, alaw, ulaw, mp3, vorbis, flac, opus, qoa)\n"
             "  --sample-codec SPEC   Override one sample codec (repeatable)\n"
             "                        SPEC: index:codec[@bitrate], e.g. 3:opus@96\n"
+            "  --instrument-codec SPEC\n"
+            "                        Override all samples for one instrument (repeatable)\n"
+            "                        SPEC: instID:codec[@bitrate], e.g. 0x200:qoa\n"
             "  --bitrate N           Target bitrate in kbps (or bps) for lossy codecs\n"
             "  --loop-ms N           Set MIDI loop end point in milliseconds\n"
             "  --loop-start-ms N     Optional MIDI loop start in milliseconds (default: 0)\n"
@@ -485,6 +496,87 @@ static int parse_sample_codec_spec(const char *spec,
     return 1;
 }
 
+static int parse_instrument_codec_spec(const char *spec,
+                                       SongtoolInstrumentOverride *outOverride)
+{
+    const char *colon;
+    const char *at;
+    char instBuf[32];
+    char codecBuf[64];
+    char bitrateBuf[32];
+    char *end;
+    unsigned long instID;
+    size_t instLen;
+    size_t codecLen;
+
+    if (!spec || !outOverride)
+    {
+        return 0;
+    }
+
+    colon = strchr(spec, ':');
+    if (!colon)
+    {
+        return 0;
+    }
+
+    instLen = (size_t)(colon - spec);
+    if (instLen == 0 || instLen >= sizeof(instBuf))
+    {
+        return 0;
+    }
+    memcpy(instBuf, spec, instLen);
+    instBuf[instLen] = '\0';
+
+    instID = strtoul(instBuf, &end, 0);
+    if (end == instBuf || *end != '\0')
+    {
+        return 0;
+    }
+
+    at = strchr(colon + 1, '@');
+    if (at)
+    {
+        codecLen = (size_t)(at - (colon + 1));
+    }
+    else
+    {
+        codecLen = strlen(colon + 1);
+    }
+    if (codecLen == 0 || codecLen >= sizeof(codecBuf))
+    {
+        return 0;
+    }
+    memcpy(codecBuf, colon + 1, codecLen);
+    codecBuf[codecLen] = '\0';
+
+    mod2rmf_encoder_defaults(&outOverride->settings);
+    if (mod2rmf_encoder_parse_codec(codecBuf, &outOverride->settings.codec) != 0)
+    {
+        return 0;
+    }
+
+    if (at)
+    {
+        size_t bitrateLen = strlen(at + 1);
+        if (bitrateLen == 0 || bitrateLen >= sizeof(bitrateBuf))
+        {
+            return 0;
+        }
+        memcpy(bitrateBuf, at + 1, bitrateLen);
+        bitrateBuf[bitrateLen] = '\0';
+
+        if (mod2rmf_encoder_parse_bitrate(bitrateBuf, &outOverride->settings.bitrateKbps) != 0)
+        {
+            return 0;
+        }
+    }
+
+    outOverride->instID = (uint32_t)instID;
+    outOverride->compressionType = mod2rmf_encoder_resolve(&outOverride->settings);
+    return 1;
+}
+
 static int apply_sample_overrides(BAERmfEditorDocument *document,
                                   SongtoolSampleOverride const *overrides,
                                   uint32_t overrideCount)
@@ -562,6 +654,102 @@ static int apply_sample_overrides(BAERmfEditorDocument *document,
     return 1;
 }
 
+static int apply_instrument_overrides(BAERmfEditorDocument *document,
+                                      SongtoolInstrumentOverride const *overrides,
+                                      uint32_t overrideCount)
+{
+    uint32_t sampleCount;
+    uint32_t i;
+
+    if (!document || !overrides)
+    {
+        return 0;
+    }
+
+    sampleCount = 0;
+    if (BAERmfEditorDocument_GetSampleCount(document, &sampleCount) != BAE_NO_ERROR)
+    {
+        return 0;
+    }
+
+    for (i = 0; i < overrideCount; ++i)
+    {
+        uint32_t sampleIndex;
+        uint32_t appliedCount;
+
+        appliedCount = 0;
+        for (sampleIndex = 0; sampleIndex < sampleCount; ++sampleIndex)
+        {
+            uint32_t instID;
+            BAERmfEditorSampleInfo info;
+            BAEResult result;
+
+            result = BAERmfEditorDocument_GetInstIDForSample(document, sampleIndex, &instID);
+            if (result != BAE_NO_ERROR)
+            {
+                fprintf(stderr,
+                        "Error: failed to get instrument ID for sample %u (%d)\n",
+                        (unsigned)sampleIndex,
+                        (int)result);
+                return 0;
+            }
+            if (instID != overrides[i].instID)
+            {
+                continue;
+            }
+
+            result = BAERmfEditorDocument_GetSampleInfo(document, sampleIndex, &info);
+            if (result != BAE_NO_ERROR)
+            {
+                fprintf(stderr,
+                        "Error: failed to get sample info for sample %u (%d)\n",
+                        (unsigned)sampleIndex,
+                        (int)result);
+                return 0;
+            }
+
+            info.compressionType = overrides[i].compressionType;
+            if (is_opus_compression_type(overrides[i].compressionType))
+            {
+                info.opusMode = BAE_EDITOR_OPUS_MODE_AUDIO;
+                info.opusRoundTripResample = TRUE;
+            }
+            else
+            {
+                info.opusRoundTripResample = FALSE;
+            }
+
+            result = BAERmfEditorDocument_SetSampleInfo(document, sampleIndex, &info);
+            if (result != BAE_NO_ERROR)
+            {
+                fprintf(stderr,
+                        "Error: failed to set sample info for sample %u (%d)\n",
+                        (unsigned)sampleIndex,
+                        (int)result);
+                return 0;
+            }
+            ++appliedCount;
+        }
+
+        if (appliedCount == 0)
+        {
+            fprintf(stderr,
+                    "Error: instrument override target 0x%X matched no samples\n",
+                    (unsigned)overrides[i].instID);
+            return 0;
+        }
+
+        fprintf(stderr,
+                "Instrument 0x%X codec override: %s%s applied to %u sample(s)\n",
+                (unsigned)overrides[i].instID,
+                mod2rmf_encoder_label(overrides[i].compressionType),
+                is_opus_compression_type(overrides[i].compressionType) ? " (round-trip)" : "",
+                (unsigned)appliedCount);
+    }
+
+    return 1;
+}
+
 static int trim_document_to_tick(BAERmfEditorDocument *document,
                                  uint32_t boundaryTick)
 {
@@ -594,59 +782,138 @@ static void print_document_info(BAERmfEditorDocument const *document, const char
            (unsigned long long)songLengthMs,
            (double)songLengthMs / 1000.0);
     printf("Samples: %u\n", (unsigned)sampleCount);
-    printf("Codecs: ");
-
     if (sampleCount == 0)
     {
-        printf("(none)\n");
+        printf("Codecs: (none)\n");
         return;
     }
+    printf("Codecs:");
 
-    printedAnyCodec = 0;
-    for (i = 0; i < sampleCount; ++i)
     {
-        char codecBuf[96];
-        int isUnique;
+        char (*codecDescs)[96];
         uint32_t j;
+        uint32_t k;
 
-        if (BAERmfEditorDocument_GetSampleCodecDescription(document, i, codecBuf, sizeof(codecBuf)) != BAE_NO_ERROR)
+        codecDescs = (char (*)[96])malloc(sampleCount * sizeof(*codecDescs));
+        if (!codecDescs)
         {
-            continue;
+            printf("(out of memory)\n");
+            return;
         }
 
-        isUnique = 1;
-        for (j = 0; j < i; ++j)
+        for (i = 0; i < sampleCount; ++i)
         {
-            char prevCodecBuf[96];
-            if (BAERmfEditorDocument_GetSampleCodecDescription(document, j, prevCodecBuf, sizeof(prevCodecBuf)) != BAE_NO_ERROR)
+            if (BAERmfEditorDocument_GetSampleCodecDescription(document, i, codecDescs[i], 96) != BAE_NO_ERROR)
+            {
+                codecDescs[i][0] = '\0';
+            }
+        }
+
+        printf("\n");
+        printedAnyCodec = 0;
+        for (i = 0; i < sampleCount; ++i)
+        {
+            int alreadyPrinted;
+
+            if (codecDescs[i][0] == '\0')
             {
                 continue;
             }
-            if (strcmp(codecBuf, prevCodecBuf) == 0)
+
+            alreadyPrinted = 0;
+            for (j = 0; j < i; ++j)
             {
-                isUnique = 0;
-                break;
+                if (codecDescs[j][0] && strcmp(codecDescs[j], codecDescs[i]) == 0)
+                {
+                    alreadyPrinted = 1;
+                    break;
+                }
             }
+            if (alreadyPrinted)
+            {
+                continue;
+            }
+
+            printf("  %-24s: ", codecDescs[i]);
+            printedAnyCodec = 1;
+
+            {
+                int firstInGroup = 1;
+                for (k = 0; k < sampleCount; ++k)
+                {
+                    if (codecDescs[k][0] && strcmp(codecDescs[k], codecDescs[i]) == 0)
+                    {
+                        if (!firstInGroup)
+                        {
+                            printf(", ");
+                        }
+                        printf("%u", k);
+                        firstInGroup = 0;
+                    }
+                }
+            }
+            printf("\n");
         }
 
-        if (!isUnique)
+        if (!printedAnyCodec)
+        {
+            printf("  (unknown)\n");
+        }
+
+        free(codecDescs);
+    }
+
+    printf("Instruments:\n");
+    for (i = 0; i < sampleCount; ++i)
+    {
+        uint32_t instID;
+        uint32_t j;
+        int alreadyPrinted;
+        int firstInGroup;
+
+        if (BAERmfEditorDocument_GetInstIDForSample(document, i, &instID) != BAE_NO_ERROR)
         {
             continue;
         }
 
-        if (printedAnyCodec)
+        alreadyPrinted = 0;
+        for (j = 0; j < i; ++j)
         {
-            printf(", ");
-        }
-        printf("%s", codecBuf);
-        printedAnyCodec = 1;
-    }
+            uint32_t otherInstID;
 
-    if (!printedAnyCodec)
-    {
-        printf("(unknown)");
+            if (BAERmfEditorDocument_GetInstIDForSample(document, j, &otherInstID) == BAE_NO_ERROR &&
+                otherInstID == instID)
+            {
+                alreadyPrinted = 1;
+                break;
+            }
+        }
+        if (alreadyPrinted)
+        {
+            continue;
+        }
+
+        printf("  0x%X: ", (unsigned)instID);
+        firstInGroup = 1;
+        for (j = 0; j < sampleCount; ++j)
+        {
+            uint32_t otherInstID;
+
+            if (BAERmfEditorDocument_GetInstIDForSample(document, j, &otherInstID) != BAE_NO_ERROR ||
+                otherInstID != instID)
+            {
+                continue;
+            }
+
+            if (!firstInGroup)
+            {
+                printf(", ");
+            }
+            printf("%u", (unsigned)j);
+            firstInGroup = 0;
+        }
+        printf("\n");
     }
-    printf("\n");
 }
 
 int main(int argc, char *argv[])
@@ -670,7 +937,9 @@ int main(int argc, char *argv[])
     uint64_t trimMs;
     int32_t loopCount;
     SongtoolSampleOverride sampleOverrides[SONGTOOL_MAX_SAMPLE_OVERRIDES];
+    SongtoolInstrumentOverride instrumentOverrides[SONGTOOL_MAX_INSTRUMENT_OVERRIDES];
     uint32_t sampleOverrideCount;
+    uint32_t instrumentOverrideCount;
     int requiresZmf;
 
     sourcePath = NULL;
@@ -687,6 +956,7 @@ int main(int argc, char *argv[])
     trimMs = 0;
     loopCount = -1;
     sampleOverrideCount = 0;
+    instrumentOverrideCount = 0;
     requiresZmf = 0;
 
     mod2rmf_encoder_defaults(&encoderSettings);
@@ -764,6 +1034,38 @@ int main(int argc, char *argv[])
                 requiresZmf = 1;
             }
             ++sampleOverrideCount;
+            doCompression = 1;
+            continue;
+        }
+        if (!strcmp(arg, "--instrument-codec"))
+        {
+            if (argi + 1 >= argc)
+            {
+                fprintf(stderr, "Error: --instrument-codec requires an argument\n");
+                return 1;
+            }
+            if (instrumentOverrideCount >= SONGTOOL_MAX_INSTRUMENT_OVERRIDES)
+            {
+                fprintf(stderr, "Error: too many --instrument-codec entries (max %d)\n",
+                        SONGTOOL_MAX_INSTRUMENT_OVERRIDES);
+                return 1;
+            }
+            ++argi;
+            if (!parse_instrument_codec_spec(argv[argi],
+                                             &instrumentOverrides[instrumentOverrideCount]))
+            {
+                fprintf(stderr,
+                        "Error: invalid --instrument-codec '%s' (expected instID:codec[@bitrate])\n",
+                        argv[argi]);
+                mod2rmf_encoder_print_codecs();
+                return 1;
+            }
+            if (mod2rmf_encoder_requires_zmf(
+                    instrumentOverrides[instrumentOverrideCount].settings.codec))
+            {
+                requiresZmf = 1;
+            }
+            ++instrumentOverrideCount;
             doCompression = 1;
             continue;
         }
@@ -960,6 +1262,17 @@ int main(int argc, char *argv[])
         if (!apply_compression_to_all_samples(document, compressionType))
         {
             fprintf(stderr, "Error: sample recompression failed\n");
+            BAERmfEditorDocument_Delete(document);
+            BAE_Cleanup();
+            return 1;
+        }
+
+        if (instrumentOverrideCount > 0 &&
+            !apply_instrument_overrides(document,
+                                        instrumentOverrides,
+                                        instrumentOverrideCount))
+        {
+            fprintf(stderr, "Error: per-instrument compression overrides failed\n");
             BAERmfEditorDocument_Delete(document);
             BAE_Cleanup();
             return 1;

@@ -19,6 +19,7 @@
 **  - FLAC (.flac) - "fLaC" header
 **  - MP2/MP3 (.mp2/.mp3) - MPEG frame sync or ID3 tags
 **  - OGG (.ogg) - "OggS" header (Vorbis/FLAC only)
+**  - QOA (.qoa) - "qoaf" header (Quite OK Audio)
 **
 */
 /*****************************************************************************/
@@ -43,6 +44,7 @@
 #define BAE_FOURCC_AU       0x2E736E64  // ".snd" - Sun Audio
 #define BAE_FOURCC_FLAC     0x664C6143  // "fLaC" - Free Lossless Audio Codec
 #define BAE_FOURCC_OGGS     0x4F676753  // "OggS" - Ogg container
+#define BAE_FOURCC_QOA      0x716F6166  // "qoaf" - Quite OK Audio
 
 // RIFF/IFF subtype FOURCCs
 #define BAE_FOURCC_WAVE     0x57415645  // "WAVE" - RIFF Wave audio
@@ -425,6 +427,10 @@ BAEFileType X_DetermineFileTypeByPath(const char *filePath)
     else if (strcmp(extLower, ".opus") == 0)
         return BAE_OPUS_TYPE;
 #endif
+#if USE_QOA_SUPPORT == TRUE
+    else if (strcmp(extLower, ".qoa") == 0)
+        return BAE_QOA_TYPE;
+#endif
     // Check for MIDI/music file extensions
     else if (strcmp(extLower, ".mid") == 0 || strcmp(extLower, ".midi") == 0 || strcmp(extLower, ".kar") == 0)
         return BAE_MIDI_TYPE;
@@ -434,12 +440,14 @@ BAEFileType X_DetermineFileTypeByPath(const char *filePath)
         return BAE_RMF;
     else if (strcmp(extLower, ".rmi") == 0)
         return BAE_RMI;        
+#if USE_RETRO_RINGTONE_SUPPORT == TRUE        
     else if (strcmp(extLower, ".imy") == 0 || strcmp(extLower, ".emy") == 0)
         return BAE_RINGTONE_IMY;
     else if (strcmp(extLower, ".rng") == 0)
         return BAE_RINGTONE_RNG;
     else if (strcmp(extLower, ".rtx") == 0 || strcmp(extLower, ".rtttl") == 0)
         return BAE_RINGTONE_RTX;
+#endif        
 #if USE_XMF_SUPPORT == TRUE
     else if (strcmp(extLower, ".xmf") == 0 || strcmp(extLower, ".mxmf") == 0)
         return BAE_XMF; // XMF files contain MIDI data
@@ -556,6 +564,7 @@ BAEFileType X_DetermineFileTypeByData(const unsigned char *data, int32_t length)
         return BAE_ADP_TYPE;
     }
 #endif    
+#if USE_RETRO_RINGTONE_SUPPORT == TRUE
     /* Nokia Smart Messaging binary ringtone starts with 02 4A 3A. */
     if (length >= 3 &&
         data[0] == 0x02 &&
@@ -564,7 +573,7 @@ BAEFileType X_DetermineFileTypeByData(const unsigned char *data, int32_t length)
     {
         return BAE_RINGTONE_RNG;
     }
-
+#endif
     // Read the first FOURCC
     fourcc = PV_ReadBigEndian32(data);
     // Skip leading null bytes (up to 1024 bytes)
@@ -642,6 +651,10 @@ BAEFileType X_DetermineFileTypeByData(const unsigned char *data, int32_t length)
         case BAE_FOURCC_OGGS:
             return PV_DetectOGGType(data, length);
 #endif
+#if USE_QOA_SUPPORT == TRUE
+        case BAE_FOURCC_QOA:
+            return BAE_QOA_TYPE;
+#endif
 
         default:
  #if USE_MPEG_DECODER == TRUE
@@ -661,7 +674,7 @@ BAEFileType X_DetermineFileTypeByData(const unsigned char *data, int32_t length)
 #endif            
             break;
     }
-
+#if USE_RETRO_RINGTONE_SUPPORT == TRUE
     if (PV_StartsWithNoCase(data, length, "begin:imelody") ||
         PV_StartsWithNoCase(data, length, "begin:emelody"))
     {
@@ -672,7 +685,8 @@ BAEFileType X_DetermineFileTypeByData(const unsigned char *data, int32_t length)
     {
         return BAE_RINGTONE_RTX;
     }
-    
+#endif
+
     return BAE_INVALID_TYPE;
 }
 
@@ -764,15 +778,20 @@ const char *X_GetFileTypeString(BAEFileType fileType)
 #if USE_OPUS_DECODER == TRUE
         case BAE_OPUS_TYPE:     return "Opus";
 #endif
+#if USE_QOA_SUPPORT == TRUE
+        case BAE_QOA_TYPE:      return "QOA";
+#endif
 #if USE_MTHC_SUPPORT == TRUE
         case BAE_MTHC:          return "Nokia Compressed MIDI";
 #endif
 #if USE_ADP_SUPPORT == TRUE
         case BAE_ADP_TYPE:      return "Nokia ADP (RotR2 G.722)";
 #endif
-    case BAE_RINGTONE_IMY:  return "iMelody";
-    case BAE_RINGTONE_RNG:  return "Nokia RNG";
-    case BAE_RINGTONE_RTX:  return "Nokia RTX/RTTTL";
+#if USE_RETRO_RINGTONE_SUPPORT == TRUE
+        case BAE_RINGTONE_IMY:  return "iMelody";
+        case BAE_RINGTONE_RNG:  return "Nokia RNG";
+        case BAE_RINGTONE_RTX:  return "Nokia RTX/RTTTL";
+#endif    
         case BAE_GROOVOID:      return "Groovoid";
         case BAE_RAW_PCM:       return "Raw PCM";
         case BAE_INVALID_TYPE:  return "Unknown";
@@ -812,6 +831,10 @@ BAEFileType X_ConvertFileTypeString(const char *typeString)
     else if (strcmp(typeString, X_FILETYPE_OPUS) == 0)
         return BAE_OPUS_TYPE;
 #endif
+#if USE_QOA_SUPPORT == TRUE
+    else if (strcmp(typeString, "QOA") == 0 || strcmp(typeString, "qoaf") == 0)
+        return BAE_QOA_TYPE;
+#endif
 #if USE_VORBIS_DECODER == TRUE || USE_VORBIS_ENCODER == TRUE        
     else if (strcmp(typeString, X_FILETYPE_VORBIS) == 0)
         return BAE_VORBIS_TYPE;
@@ -824,11 +847,13 @@ BAEFileType X_ConvertFileTypeString(const char *typeString)
     else if (strcmp(typeString, X_FILETYPE_ADP) == 0)
         return BAE_ADP_TYPE;
 #endif
+#if USE_RETRO_RINGTONE_SUPPORT == TRUE
     else if (strcmp(typeString, "IMY") == 0 || strcmp(typeString, "iMelody") == 0)
         return BAE_RINGTONE_IMY;
     else if (strcmp(typeString, "RNG") == 0)
         return BAE_RINGTONE_RNG;
     else if (strcmp(typeString, "RTX") == 0 || strcmp(typeString, "RTTTL") == 0)
         return BAE_RINGTONE_RTX;
+#endif        
     return BAE_INVALID_TYPE;
 }
