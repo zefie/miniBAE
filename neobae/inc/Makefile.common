@@ -29,6 +29,8 @@ ifneq ($(WASM),1)
 		EMBED_PATCHES := 1
 		EMBED_FONT := 1
 		XMF_SUPPORT := 1
+		RMI_SUPPORT := 1
+		RETRO_RINGTONE_SUPPORT := 1
 		DISABLE_NOKIA := 0			    
 		DISABLE_BEATNIK_SF2_NRPN := 0
 		USE_BUILTIN_PATCHES_WITH_SF2 := 1
@@ -50,7 +52,7 @@ ifeq ($(NBSTUDIO),1)
 	CLASSIC_CHORUS := 1
 endif
 
-ifneq ($(filter 1,$(ZMF_SUPPORT) $(CREATION_API)),) 
+ifeq ($(CREATION_API),1) 
 	# All of these are required for ZMF support
 	OGG_SUPPORT := 1
 	MP3_DEC := 1
@@ -61,10 +63,14 @@ ifneq ($(filter 1,$(ZMF_SUPPORT) $(CREATION_API)),)
 	VORBIS_ENC := 1
 	OPUS_DEC := 1
 	OPUS_ENC := 1
+	ZMF_SUPPORT := 1
+endif
+
+ifeq ($(ZMF_SUPPORT),1)
 	LZMA_SUPPORT := 1
 	FIX_SPAN_DC := 1
 	CLASSIC_CHORUS := 1
-endif
+endif	
 
 # Disable SDL2 if using SDL3
 ifeq ($(USE_SDL3),1)
@@ -163,6 +169,14 @@ endif
 
 ifeq ($(ZMF_SUPPORT),1)
 	BAE_FLAGS += -DUSE_ZMF_SUPPORT=1
+endif
+
+ifeq ($(RMI_SUPPORT),1)
+	BAE_FLAGS += -DUSE_RMI_SUPPORT=1
+endif
+
+ifeq ($(RETRO_RINGTONE_SUPPORT),1)
+	BAE_FLAGS += -DUSE_RETRO_RINGTONE_SUPPORT=1
 endif
 
 ifneq ($(filter 1,$(FLAC_ENC) $(FLAC_DEC)),) 
@@ -317,8 +331,6 @@ SRC		+=	src/BAE_Source/Common/DriverTools.c \
 			src/BAE_Source/Common/GenReverb.c \
 			src/BAE_Source/Common/GenReverbNew.c \
 			src/BAE_Source/Common/GenReverbNeo.c \
-			src/BAE_Source/Common/GenRingtone.c \
-			src/BAE_Source/Common/GenRMI.c \
 			src/BAE_Source/Common/GenSample.c \
 			src/BAE_Source/Common/GenSeq.c \
 			src/BAE_Source/Common/GenSeqTools.c \
@@ -343,6 +355,14 @@ SRC		+=	src/BAE_Source/Common/DriverTools.c \
 			src/BAE_Source/Common/g72x.c \
 			src/BAE_Source/Common/sha1mini.c \
 			src/BAE_Source/Common/XFileTypes.c
+
+ifeq ($(RETRO_RINGTONE_SUPPORT),1)
+	SRC += src/BAE_Source/Common/GenRingtone.c
+endif
+
+ifeq ($(RMI_SUPPORT),1)
+	SRC += src/BAE_Source/Common/GenRMI.c
+endif
 
 ifeq ($(SF2_SUPPORT),1)
 	ifeq ($(USE_FLUIDSYNTH),1)

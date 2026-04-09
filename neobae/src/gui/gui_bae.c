@@ -217,7 +217,9 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
     if (g_bae.has_embedded_soundbank)
     {
         BAE_PRINTF("User overriding embedded bank with manual bank load\n");
+#if USE_RMI_SUPPORT == TRUE
         GM_ClearRMISoundbankFlag();
+#endif        
         g_bae.has_embedded_soundbank = false;
         // Clear stored bank so we don't try to restore later
         g_user_bank_stored = false;
@@ -684,9 +686,10 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
         BAE_PRINTF("Restoring user bank before loading new song: %s (%s)\n", g_user_bank_name, g_user_bank_path);
         
         // Clear the embedded soundbank flag
+#if USE_RMI_SUPPORT == TRUE        
         GM_ClearRMISoundbankFlag();
+#endif
         g_bae.has_embedded_soundbank = false;
-        
         // Reload the user's bank
         if (g_user_bank_path[0] != '\0')
         {
@@ -900,6 +903,7 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
         sr = BAESong_LoadMidiFromFile(g_bae.song, (BAEPathName)path, TRUE);
         g_bae.is_rmf_file = false;
     }
+#if USE_RETRO_RINGTONE_SUPPORT == TRUE
     else if (ftype == BAE_RINGTONE_IMY || ftype == BAE_RINGTONE_RNG || ftype == BAE_RINGTONE_RTX)
     {
         unsigned char *midiOut = NULL;
@@ -914,7 +918,7 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
         midiOut = NULL;
         g_bae.is_rmf_file = false;
     }
-
+#endif
     else
     {
         // Default to standard MIDI for any remaining cases (including detected MIDI_TYPE)
@@ -934,8 +938,11 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
     if (use_embedded_banks)
     {
+#if USE_RMI_SUPPORT == TRUE        
         bool has_embedded_bank = GM_LastRMIHadEmbeddedSoundbank();
-        
+#else
+        bool has_embedded_bank = false; // If we don't have explicit RMI support, assume no embedded bank to avoid accidental overrides
+#endif        
         if (has_embedded_bank)
         {
             // Store current user bank if not already stored

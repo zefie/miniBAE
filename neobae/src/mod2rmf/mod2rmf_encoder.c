@@ -99,11 +99,12 @@ typedef struct {
 static const CodecName codecNames[] = {
     { "pcm",     MOD2RMF_CODEC_PCM     },
     { "adpcm",   MOD2RMF_CODEC_ADPCM   },
+    { "alaw",    MOD2RMF_CODEC_ALAW    },
+    { "ulaw",    MOD2RMF_CODEC_ULAW    },
     { "mp3",     MOD2RMF_CODEC_MP3     },
     { "vorbis",  MOD2RMF_CODEC_VORBIS  },
     { "flac",    MOD2RMF_CODEC_FLAC    },
     { "opus",    MOD2RMF_CODEC_OPUS    },
-    { "opus-rt", MOD2RMF_CODEC_OPUS_RT },
 };
 
 /* ------------------------------------------------------------------ */
@@ -176,6 +177,12 @@ BAERmfEditorCompressionType mod2rmf_encoder_resolve(const Mod2RmfEncoderSettings
         case MOD2RMF_CODEC_ADPCM:
             return BAE_EDITOR_COMPRESSION_ADPCM;
 
+        case MOD2RMF_CODEC_ALAW:
+            return BAE_EDITOR_COMPRESSION_ALAW;
+
+        case MOD2RMF_CODEC_ULAW:
+            return BAE_EDITOR_COMPRESSION_ULAW;
+
         case MOD2RMF_CODEC_FLAC:
             return BAE_EDITOR_COMPRESSION_FLAC;
 
@@ -188,7 +195,6 @@ BAERmfEditorCompressionType mod2rmf_encoder_resolve(const Mod2RmfEncoderSettings
             return find_closest(vorbisBitrates, ARRAY_COUNT(vorbisBitrates), br);
 
         case MOD2RMF_CODEC_OPUS:
-        case MOD2RMF_CODEC_OPUS_RT:
             br = settings->bitrateKbps ? settings->bitrateKbps : 48;
             return find_closest(opusBitrates, ARRAY_COUNT(opusBitrates), br);
 
@@ -204,6 +210,8 @@ const char *mod2rmf_encoder_label(BAERmfEditorCompressionType ct)
     {
         case BAE_EDITOR_COMPRESSION_PCM:         return "PCM (uncompressed)";
         case BAE_EDITOR_COMPRESSION_ADPCM:       return "ADPCM";
+        case BAE_EDITOR_COMPRESSION_ALAW:        return "A-law";
+        case BAE_EDITOR_COMPRESSION_ULAW:        return "u-law";
         case BAE_EDITOR_COMPRESSION_FLAC:        return "FLAC (lossless)";
 
         case BAE_EDITOR_COMPRESSION_MP3_32K:     return "MP3 32 kbps";
@@ -255,7 +263,7 @@ int mod2rmf_encoder_apply(BAERmfEditorDocument *document,
     if (!document || !settings) return 0;
     if (ct == BAE_EDITOR_COMPRESSION_PCM) return 1;
 
-    usingOpusRoundTrip = (settings->codec == MOD2RMF_CODEC_OPUS_RT) ? TRUE : FALSE;
+    usingOpusRoundTrip = (settings->codec == MOD2RMF_CODEC_OPUS) ? TRUE : FALSE;
     sampleCount = 0;
     BAERmfEditorDocument_GetSampleCount(document, &sampleCount);
 
@@ -319,8 +327,7 @@ int mod2rmf_encoder_requires_zmf(Mod2RmfCodec codec)
 {
     return (codec == MOD2RMF_CODEC_VORBIS ||
             codec == MOD2RMF_CODEC_FLAC   ||
-            codec == MOD2RMF_CODEC_OPUS   ||
-            codec == MOD2RMF_CODEC_OPUS_RT);
+            codec == MOD2RMF_CODEC_OPUS);
 }
 
 void mod2rmf_encoder_print_codecs(void)
@@ -328,10 +335,11 @@ void mod2rmf_encoder_print_codecs(void)
     fprintf(stderr, "Available codecs (use number or name with --codec):\n");
     fprintf(stderr, "  0  pcm        Uncompressed PCM (default)\n");
     fprintf(stderr, "  1  adpcm      IMA ADPCM 4:1\n");
-    fprintf(stderr, "  2  mp3        MP3          --bitrate: 32 48 64 96 128* 192 256 320\n");
-    fprintf(stderr, "  3  vorbis     Ogg Vorbis   --bitrate: 32 48 64 80 96 128* 160 192 256\n");
-    fprintf(stderr, "  4  flac       FLAC lossless\n");
-    fprintf(stderr, "  5  opus       Ogg Opus     --bitrate: 12 16 24 32 48* 64 80 96 128 160 192 256\n");
-    fprintf(stderr, "  6  opus-rt    Opus (round-trip, preserves original sample rate)\n");
+    fprintf(stderr, "  2  alaw       G.711 A-law\n");
+    fprintf(stderr, "  3  ulaw       G.711 u-law\n");
+    fprintf(stderr, "  4  mp3        MP3          --bitrate: 32 48 64 96 128* 192 256 320\n");
+    fprintf(stderr, "  5  vorbis     Ogg Vorbis   --bitrate: 32 48 64 80 96 128* 160 192 256\n");
+    fprintf(stderr, "  6  flac       FLAC lossless\n");
+    fprintf(stderr, "  7  opus       Ogg Opus (round-trip) --bitrate: 12 16 24 32 48* 64 80 96 128 160 192 256\n");
     fprintf(stderr, "                * = default bitrate when --bitrate is omitted\n");
 }

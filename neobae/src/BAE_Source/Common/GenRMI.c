@@ -41,6 +41,8 @@
 #include "GenSF2_FluidSynth.h"
 #endif
 
+#if USE_RMI_SUPPORT == TRUE
+
 // Global flag to track if the last loaded RMI had an embedded soundbank
 static bool g_last_rmi_had_soundbank = FALSE;
 
@@ -670,3 +672,46 @@ void GM_ClearRMISoundbankFlag(void)
 {
     g_last_rmi_had_soundbank = FALSE;
 }
+
+#else
+
+OPErr GM_LoadRMIFromMemory(const unsigned char *buf, uint32_t len,
+                           unsigned char **outMidiData, uint32_t *outMidiLen,
+                           bool loadDLS)
+{
+    (void)buf;
+    (void)len;
+    (void)loadDLS;
+    if (outMidiData) *outMidiData = NULL;
+    if (outMidiLen) *outMidiLen = 0;
+    return BAD_FILE;
+}
+
+OPErr GM_LoadRMIFromFile(const char *path,
+                         unsigned char **outMidiData, uint32_t *outMidiLen,
+                         bool loadDLS)
+{
+    (void)path;
+    (void)loadDLS;
+    if (outMidiData) *outMidiData = NULL;
+    if (outMidiLen) *outMidiLen = 0;
+    return BAD_FILE;
+}
+
+bool GM_IsRMIFile(const unsigned char *buf, uint32_t len)
+{
+    (void)buf;
+    (void)len;
+    return FALSE;
+}
+
+bool GM_LastRMIHadEmbeddedSoundbank(void)
+{
+    return FALSE;
+}
+
+void GM_ClearRMISoundbankFlag(void)
+{
+}
+
+#endif

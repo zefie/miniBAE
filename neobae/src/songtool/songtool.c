@@ -20,6 +20,15 @@
 
 #include "mod2rmf_encoder.h"
 
+#define SONGTOOL_MAX_SAMPLE_OVERRIDES 4096
+
+typedef struct SongtoolSampleOverride
+{
+    uint32_t sampleIndex;
+    Mod2RmfEncoderSettings settings;
+    BAERmfEditorCompressionType compressionType;
+} SongtoolSampleOverride;
+
 static void print_usage(const char *program_name)
 {
     fprintf(stderr,
@@ -28,7 +37,9 @@ static void print_usage(const char *program_name)
             "Options:\n"
             "  --info               Show source info (title, song length, codecs)\n"
             "  --codec N|NAME        Recompress all samples to codec number/name\n"
-            "                        (pcm, adpcm, mp3, vorbis, flac, opus, opus-rt)\n"
+            "                        (pcm, adpcm, alaw, ulaw, mp3, vorbis, flac, opus)\n"
+            "  --sample-codec SPEC   Override one sample codec (repeatable)\n"
+            "                        SPEC: index:codec[@bitrate], e.g. 3:opus@96\n"
             "  --bitrate N           Target bitrate in kbps (or bps) for lossy codecs\n"
             "  --loop-ms N           Set MIDI loop end point in milliseconds\n"
             "  --loop-start-ms N     Optional MIDI loop start in milliseconds (default: 0)\n"
@@ -331,8 +342,7 @@ static int is_opus_compression_type(BAERmfEditorCompressionType ct)
 }
 
 static int apply_compression_to_all_samples(BAERmfEditorDocument *document,
-                                            BAERmfEditorCompressionType compressionType,
-                                            int useOpusRoundTrip)
+                                            BAERmfEditorCompressionType compressionType)
 {
     uint32_t sampleCount;
     uint32_t i;
@@ -367,7 +377,7 @@ static int apply_compression_to_all_samples(BAERmfEditorDocument *document,
         if (is_opus_compression_type(compressionType))
         {
             info.opusMode = BAE_EDITOR_OPUS_MODE_AUDIO;
-            info.opusRoundTripResample = useOpusRoundTrip ? TRUE : FALSE;
+            info.opusRoundTripResample = TRUE;
         }
         else
         {
@@ -388,9 +398,167 @@ static int apply_compression_to_all_samples(BAERmfEditorDocument *document,
     fprintf(stderr,
             "Compression: %s%s applied to %u/%u samples\n",
             mod2rmf_encoder_label(compressionType),
-            (useOpusRoundTrip && is_opus_compression_type(compressionType)) ? " (round-trip)" : "",
+            is_opus_compression_type(compressionType) ? " (round-trip)" : "",
             (unsigned)applied,
             (unsigned)sampleCount);
+    return 1;
+}
+
+static int parse_sample_codec_spec(const char *spec,
+                                   SongtoolSampleOverride *outOverride)
+{
+    const char *colon;
+    const char *at;
+    char indexBuf[32];
+    char codecBuf[64];
+    char bitrateBuf[32];
+    char *end;
+    unsigned long idx;
+    size_t indexLen;
+    size_t codecLen;
+
+    if (!spec || !outOverride)
+    {
+        return 0;
+    }
+
+    colon = strchr(spec, ':');
+    if (!colon)
+    {
+        return 0;
+    }
+
+    indexLen = (size_t)(colon - spec);
+    if (indexLen == 0 || indexLen >= sizeof(indexBuf))
+    {
+        return 0;
+    }
+    memcpy(indexBuf, spec, indexLen);
+    indexBuf[indexLen] = '\0';
+
+    idx = strtoul(indexBuf, &end, 10);
+    if (end == indexBuf || *end != '\0')
+    {
+        return 0;
+    }
+
+    at = strchr(colon + 1, '@');
+    if (at)
+    {
+        codecLen = (size_t)(at - (colon + 1));
+    }
+    else
+    {
+        codecLen = strlen(colon + 1);
+    }
+    if (codecLen == 0 || codecLen >= sizeof(codecBuf))
+    {
+        return 0;
+    }
+    memcpy(codecBuf, colon + 1, codecLen);
+    codecBuf[codecLen] = '\0';
+
+    mod2rmf_encoder_defaults(&outOverride->settings);
+    if (mod2rmf_encoder_parse_codec(codecBuf, &outOverride->settings.codec) != 0)
+    {
+        return 0;
+    }
+
+    if (at)
+    {
+        size_t bitrateLen = strlen(at + 1);
+        if (bitrateLen == 0 || bitrateLen >= sizeof(bitrateBuf))
+        {
+            return 0;
+        }
+        memcpy(bitrateBuf, at + 1, bitrateLen);
+        bitrateBuf[bitrateLen] = '\0';
+
+        if (mod2rmf_encoder_parse_bitrate(bitrateBuf, &outOverride->settings.bitrateKbps) != 0)
+        {
+            return 0;
+        }
+    }
+
+    outOverride->sampleIndex = (uint32_t)idx;
+    outOverride->compressionType = mod2rmf_encoder_resolve(&outOverride->settings);
+    return 1;
+}
+
+static int apply_sample_overrides(BAERmfEditorDocument *document,
+                                  SongtoolSampleOverride const *overrides,
+                                  uint32_t overrideCount)
+{
+    uint32_t i;
+    uint32_t sampleCount;
+
+    if (!document || !overrides)
+    {
+        return 0;
+    }
+
+    sampleCount = 0;
+    if (BAERmfEditorDocument_GetSampleCount(document, &sampleCount) != BAE_NO_ERROR)
+    {
+        return 0;
+    }
+
+    for (i = 0; i < overrideCount; ++i)
+    {
+        BAERmfEditorSampleInfo info;
+        BAEResult result;
+
+        if (overrides[i].sampleIndex >= sampleCount)
+        {
+            fprintf(stderr,
+                    "Error: sample index %u out of range (sample count: %u)\n",
+                    (unsigned)overrides[i].sampleIndex,
+                    (unsigned)sampleCount);
+            return 0;
+        }
+
+        result = BAERmfEditorDocument_GetSampleInfo(document,
+                                                    overrides[i].sampleIndex,
+                                                    &info);
+        if (result != BAE_NO_ERROR)
+        {
+            fprintf(stderr,
+                    "Error: failed to get sample info for sample %u (%d)\n",
+                    (unsigned)overrides[i].sampleIndex,
+                    (int)result);
+            return 0;
+        }
+
+        info.compressionType = overrides[i].compressionType;
+        if (is_opus_compression_type(overrides[i].compressionType))
+        {
+            info.opusMode = BAE_EDITOR_OPUS_MODE_AUDIO;
+            info.opusRoundTripResample = TRUE;
+        }
+        else
+        {
+            info.opusRoundTripResample = FALSE;
+        }
+
+        result = BAERmfEditorDocument_SetSampleInfo(document,
+                                                    overrides[i].sampleIndex,
+                                                    &info);
+        if (result != BAE_NO_ERROR)
+        {
+            fprintf(stderr,
+                    "Error: failed to set sample info for sample %u (%d)\n",
+                    (unsigned)overrides[i].sampleIndex,
+                    (int)result);
+            return 0;
+        }
+
+        fprintf(stderr,
+                "Sample %u codec override: %s%s\n",
+                (unsigned)overrides[i].sampleIndex,
+                mod2rmf_encoder_label(overrides[i].compressionType),
+                is_opus_compression_type(overrides[i].compressionType) ? " (round-trip)" : "");
+    }
+
     return 1;
 }
 
@@ -501,7 +669,9 @@ int main(int argc, char *argv[])
     uint64_t loopEndMs;
     uint64_t trimMs;
     int32_t loopCount;
-    int useOpusRoundTrip;
+    SongtoolSampleOverride sampleOverrides[SONGTOOL_MAX_SAMPLE_OVERRIDES];
+    uint32_t sampleOverrideCount;
+    int requiresZmf;
 
     sourcePath = NULL;
     destPath = NULL;
@@ -516,7 +686,8 @@ int main(int argc, char *argv[])
     loopEndMs = 0;
     trimMs = 0;
     loopCount = -1;
-    useOpusRoundTrip = 0;
+    sampleOverrideCount = 0;
+    requiresZmf = 0;
 
     mod2rmf_encoder_defaults(&encoderSettings);
 
@@ -559,6 +730,40 @@ int main(int argc, char *argv[])
                 mod2rmf_encoder_print_codecs();
                 return 1;
             }
+            doCompression = 1;
+            if (mod2rmf_encoder_requires_zmf(encoderSettings.codec))
+            {
+                requiresZmf = 1;
+            }
+            continue;
+        }
+        if (!strcmp(arg, "--sample-codec"))
+        {
+            if (argi + 1 >= argc)
+            {
+                fprintf(stderr, "Error: --sample-codec requires an argument\n");
+                return 1;
+            }
+            if (sampleOverrideCount >= SONGTOOL_MAX_SAMPLE_OVERRIDES)
+            {
+                fprintf(stderr, "Error: too many --sample-codec entries (max %d)\n",
+                        SONGTOOL_MAX_SAMPLE_OVERRIDES);
+                return 1;
+            }
+            ++argi;
+            if (!parse_sample_codec_spec(argv[argi], &sampleOverrides[sampleOverrideCount]))
+            {
+                fprintf(stderr,
+                        "Error: invalid --sample-codec '%s' (expected index:codec[@bitrate])\n",
+                        argv[argi]);
+                mod2rmf_encoder_print_codecs();
+                return 1;
+            }
+            if (mod2rmf_encoder_requires_zmf(sampleOverrides[sampleOverrideCount].settings.codec))
+            {
+                requiresZmf = 1;
+            }
+            ++sampleOverrideCount;
             doCompression = 1;
             continue;
         }
@@ -714,7 +919,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    if (doCompression && mod2rmf_encoder_requires_zmf(encoderSettings.codec) && !is_zmf_path(destPath))
+    if (doCompression && requiresZmf && !is_zmf_path(destPath))
     {
         fprintf(stderr,
                 "Error: selected codec requires ZMF container. Use a .zmf destination path.\n");
@@ -751,11 +956,19 @@ int main(int argc, char *argv[])
     if (doCompression)
     {
         compressionType = mod2rmf_encoder_resolve(&encoderSettings);
-        useOpusRoundTrip = (encoderSettings.codec == MOD2RMF_CODEC_OPUS_RT) ? 1 : 0;
 
-        if (!apply_compression_to_all_samples(document, compressionType, useOpusRoundTrip))
+        if (!apply_compression_to_all_samples(document, compressionType))
         {
             fprintf(stderr, "Error: sample recompression failed\n");
+            BAERmfEditorDocument_Delete(document);
+            BAE_Cleanup();
+            return 1;
+        }
+
+        if (sampleOverrideCount > 0 &&
+            !apply_sample_overrides(document, sampleOverrides, sampleOverrideCount))
+        {
+            fprintf(stderr, "Error: per-sample compression overrides failed\n");
             BAERmfEditorDocument_Delete(document);
             BAE_Cleanup();
             return 1;

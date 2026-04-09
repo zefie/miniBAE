@@ -3014,7 +3014,9 @@ typedef enum BAERmfEditorCompressionType
     BAE_EDITOR_COMPRESSION_OPUS_48K    = 23, /* Ogg Opus at 48 kbps */
     BAE_EDITOR_COMPRESSION_OPUS_80K    = 30, /* Ogg Opus at 80 kbps */
     BAE_EDITOR_COMPRESSION_OPUS_160K   = 31, /* Ogg Opus at 160 kbps */
-    BAE_EDITOR_COMPRESSION_OPUS_192K   = 32  /* Ogg Opus at 192 kbps */
+    BAE_EDITOR_COMPRESSION_OPUS_192K   = 32, /* Ogg Opus at 192 kbps */
+    BAE_EDITOR_COMPRESSION_ALAW        = 33, /* G.711 A-law */
+    BAE_EDITOR_COMPRESSION_ULAW        = 34  /* G.711 u-law */
 } BAERmfEditorCompressionType;
 
 typedef enum BAERmfEditorMidiStorageType
@@ -3703,6 +3705,12 @@ BAEResult BAERmfEditorBank_ReEncodeSampleFromPCMEx(BAEBankToken bankToken,
                                                     uint16_t bitSize,
                                                     uint16_t channels,
                                                     BAE_UNSIGNED_FIXED sampleRate);
+
+#if (X_PLATFORM == X_RAYLIB)
+#include "raylib.h"
+AudioStream BAE_GetAudioStream(void);
+void raylib_audio_callback(void *bufferData, unsigned int frames);
+#endif
 
 #ifdef __cplusplus
 } // extern "C"

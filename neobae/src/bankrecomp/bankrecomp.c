@@ -59,30 +59,32 @@ enum
 {
     CODEC_PCM           = 0,
     CODEC_ADPCM         = 1,
-    CODEC_MP3           = 2,
-    CODEC_VORBIS        = 3,
-    CODEC_FLAC          = 4,
-    CODEC_OPUS          = 5,
-    CODEC_OPUS_RT       = 6,
-    CODEC_COUNT         = 7
+    CODEC_ALAW          = 2,
+    CODEC_ULAW          = 3,
+    CODEC_MP3           = 4,
+    CODEC_VORBIS        = 5,
+    CODEC_FLAC          = 6,
+    CODEC_OPUS          = 7,
+    CODEC_COUNT         = 8
 };
 
 static const char *codecNames[CODEC_COUNT] =
 {
     "PCM",
     "ADPCM",
+    "A-law",
+    "u-law",
     "MP3",
     "VORBIS",
     "FLAC",
-    "OPUS",
-    "OPUS (Round-Trip)"
+    "OPUS"
 };
 
 /* Returns TRUE if the chosen codec requires ZSB (ZREZ) container */
 static int codecRequiresZsb(int codec)
 {
     return (codec == CODEC_VORBIS || codec == CODEC_FLAC ||
-            codec == CODEC_OPUS || codec == CODEC_OPUS_RT);
+            codec == CODEC_OPUS);
 }
 
 /* ── Bitrate tables per codec ───────────────────────────────────── */
@@ -284,6 +286,8 @@ static void printHelp(const char *progName)
     printf("Codecs:\n");
     printf("  %d  %-22s  (no bitrate option)\n", CODEC_PCM, codecNames[CODEC_PCM]);
     printf("  %d  %-22s  (no bitrate option)\n", CODEC_ADPCM, codecNames[CODEC_ADPCM]);
+        printf("  %d  %-22s  (no bitrate option)\n", CODEC_ALAW, codecNames[CODEC_ALAW]);
+        printf("  %d  %-22s  (no bitrate option)\n", CODEC_ULAW, codecNames[CODEC_ULAW]);
     printf("  %d  %-22s  bitrates: 32, 48, 64, 96, 128, 192, 256, 320 kbps\n",
            CODEC_MP3, codecNames[CODEC_MP3]);
     printf("  %d  %-22s  bitrates: 32, 48, 64, 80, 96, 128, 160, 192, 256 kbps\n",
@@ -291,8 +295,6 @@ static void printHelp(const char *progName)
     printf("  %d  %-22s  (no bitrate option, lossless)\n", CODEC_FLAC, codecNames[CODEC_FLAC]);
     printf("  %d  %-22s  bitrates: 12, 16, 24, 32, 48, 64, 80, 96, 128, 160, 192, 256 kbps\n",
            CODEC_OPUS, codecNames[CODEC_OPUS]);
-    printf("  %d  %-22s  bitrates: 12, 16, 24, 32, 48, 64, 80, 96, 128, 160, 192, 256 kbps\n",
-           CODEC_OPUS_RT, codecNames[CODEC_OPUS_RT]);
     printf("\nNote: VORBIS, FLAC, OPUS codecs force ZSB (ZREZ) output format.\n");
     printf("      Without --codec, the bank is resaved with original compression.\n");
 }
@@ -333,7 +335,6 @@ static int findBitrateEntry(int codec, uint32_t kbps,
             count = ARRAY_COUNT(vorbisBitrates);
             break;
         case CODEC_OPUS:
-        case CODEC_OPUS_RT:
             table = opusBitrates;
             count = ARRAY_COUNT(opusBitrates);
             break;
@@ -378,6 +379,14 @@ static void getDefaultBitrate(int codec,
             *outComp = C_IMA4;
             *outSub = CS_DEFAULT;
             break;
+        case CODEC_ALAW:
+            *outComp = C_ALAW;
+            *outSub = CS_DEFAULT;
+            break;
+        case CODEC_ULAW:
+            *outComp = C_ULAW;
+            *outSub = CS_DEFAULT;
+            break;
         case CODEC_MP3:
             *outComp = C_MPEG_128;
             *outSub = CS_MPEG2;
@@ -391,7 +400,6 @@ static void getDefaultBitrate(int codec,
             *outSub = CS_DEFAULT;
             break;
         case CODEC_OPUS:
-        case CODEC_OPUS_RT:
             *outComp = C_OPUS;
             *outSub = CS_OPUS_48K;
             break;
@@ -410,7 +418,6 @@ static void getDefaultBitrate(int codec,
 static XPTR recompressSnd(XPTR sndData, int32_t sndSize,
                           SndCompressionType targetComp,
                           SndCompressionSubType targetSub,
-                          int opusRoundTrip,
                           int32_t *outSize)
 {
     SampleDataInfo sampleInfo;
@@ -453,11 +460,9 @@ static XPTR recompressSnd(XPTR sndData, int32_t sndSize,
     waveform.compressionType = C_NONE;
     waveform.waveSize = sampleInfo.frames * sampleInfo.channels * (sampleInfo.bitSize / 8);
 
-    /* For Opus round-trip: spoof the rate to 48kHz so the encoder skips
-     * resampling and preserves the original sample values.  For standard
-     * Opus the encoder genuinely resamples to 48kHz, so leave the rate
-     * as-is. */
-    if (targetComp == C_OPUS && opusRoundTrip)
+    /* Opus is round-trip-only in this tool: spoof 48kHz so encoder keeps
+     * original sample-domain timing, then restore source rate metadata. */
+    if (targetComp == C_OPUS)
     {
         waveform.sampledRate = (XFIXED)(48000U << 16);
     }
@@ -524,7 +529,7 @@ static XPTR recompressSnd(XPTR sndData, int32_t sndSize,
         isMpeg = (((uint32_t)targetComp & 0xFFFFFF00U) == FOUR_CHAR('m','p','g','\0'))
                  || (targetComp == (SndCompressionType)C_VORBIS);
 
-        if (targetComp == C_OPUS && opusRoundTrip)
+        if (targetComp == C_OPUS)
         {
             /* RT mode: PCM was fed to the encoder at its native rate with no
              * resampling.  Force frameCount back to source frame count (Opus
@@ -755,7 +760,7 @@ int main(int argc, char *argv[])
     {
         if (bitrateKbps > 0 &&
             (codec == CODEC_MP3 || codec == CODEC_VORBIS ||
-             codec == CODEC_OPUS || codec == CODEC_OPUS_RT))
+             codec == CODEC_OPUS))
         {
             if (findBitrateEntry(codec, bitrateKbps, &targetComp, &targetSub) != 0)
             {
@@ -770,7 +775,8 @@ int main(int argc, char *argv[])
 
         /* Warn if bitrate was specified for a codec that doesn't use it */
         if (bitrateKbps > 0 &&
-            (codec == CODEC_PCM || codec == CODEC_ADPCM || codec == CODEC_FLAC))
+            (codec == CODEC_PCM || codec == CODEC_ADPCM || codec == CODEC_ALAW ||
+             codec == CODEC_ULAW || codec == CODEC_FLAC))
         {
             fprintf(stderr, "Note: --bitrate is ignored for %s codec\n", codecNames[codec]);
         }
@@ -797,7 +803,7 @@ int main(int argc, char *argv[])
     {
         printf("Recompression target: %s", codecNames[codec]);
         if (codec == CODEC_MP3 || codec == CODEC_VORBIS ||
-            codec == CODEC_OPUS || codec == CODEC_OPUS_RT)
+            codec == CODEC_OPUS)
         {
             /* Find the actual kbps we're using */
             const BitrateEntry *table = NULL;
@@ -806,8 +812,7 @@ int main(int argc, char *argv[])
             {
                 case CODEC_MP3: table = mp3Bitrates; count = ARRAY_COUNT(mp3Bitrates); break;
                 case CODEC_VORBIS: table = vorbisBitrates; count = ARRAY_COUNT(vorbisBitrates); break;
-                case CODEC_OPUS:
-                case CODEC_OPUS_RT: table = opusBitrates; count = ARRAY_COUNT(opusBitrates); break;
+                case CODEC_OPUS: table = opusBitrates; count = ARRAY_COUNT(opusBitrates); break;
             }
             if (table)
             {
@@ -1126,7 +1131,6 @@ int main(int argc, char *argv[])
                         {
                             newSnd = recompressSnd(resData, resSize,
                                                   targetComp, targetSub,
-                                                  (codec == CODEC_OPUS_RT),
                                                   &newSize);
                         }
                         if (newSnd)

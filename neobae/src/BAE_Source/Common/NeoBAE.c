@@ -7527,7 +7527,7 @@ BAEResult BAESong_LoadMidiFromMemory(BAESong song, void const *pMidiData, uint32
             }
         }
 #endif        
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_RMI_SUPPORT == TRUE
         // Check if this is an RMI file and extract MIDI + DLS
         if (GM_IsRMIFile((const unsigned char *)pMidiData, midiSize))
         {
@@ -7670,6 +7670,9 @@ BAEResult BAESong_LoadRmiFromMemory(BAESong song, void const *pRmiData, uint32_t
         
         if (pRmiData)
         {
+
+
+#if USE_RMI_SUPPORT == TRUE
             // Check if this is an RMI file and extract MIDI + optional DLS
             if (GM_IsRMIFile((const unsigned char *)pRmiData, rmiSize))
             {
@@ -7700,8 +7703,9 @@ BAEResult BAESong_LoadRmiFromMemory(BAESong song, void const *pRmiData, uint32_t
                     BAE_PRINTF("[BAE] Failed to parse RMI file (error %d)\n", theErr);
                     theErr = BAD_FILE;
                 }
-            }
+            }            
             else
+#endif            
             {
                 BAE_PRINTF("[BAE] Data is not RMI format\n");
                 theErr = BAD_FILE;
@@ -7783,6 +7787,7 @@ BAEResult BAESong_LoadRmiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL i
         if (pMidiData)
         {
             // Check if this is an RMI file and extract MIDI + optional DLS
+#if USE_RMI_SUPPORT == TRUE
             if (GM_IsRMIFile((const unsigned char *)pMidiData, midiSize))
             {
                 BAE_PRINTF("[BAE] Detected RMI file format, useEmbeddedBank=%d\n", useEmbeddedBank);
@@ -7815,6 +7820,7 @@ BAEResult BAESong_LoadRmiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL i
                 }
             }
             else
+#endif            
             {
                 XDisposePtr(pMidiData);
                 BAE_PRINTF("[BAE] File is not RMI format\n");
@@ -11801,6 +11807,7 @@ BAEResult BAEMixer_LoadFromFile(BAEMixer mixer, BAEPathName filePath, BAELoadRes
         {
             sr = BAESong_LoadMidiFromFile(result->data.song, filePath, TRUE);
         }
+#if USE_RETRO_RINGTONE_SUPPORT == TRUE           
         else if (ftype == BAE_RINGTONE_IMY || ftype == BAE_RINGTONE_RNG || ftype == BAE_RINGTONE_RTX)
         {
             unsigned char *midiOut = NULL;
@@ -11814,6 +11821,7 @@ BAEResult BAEMixer_LoadFromFile(BAEMixer mixer, BAEPathName filePath, BAELoadRes
             BAERingtone_FreeMidiBuffer(midiOut);
             midiOut = NULL;
         }
+#endif        
         else
         {
             // Default to standard MIDI for any remaining cases
@@ -12025,6 +12033,7 @@ BAEResult BAEMixer_LoadFromMemory(BAEMixer mixer, void const *pData, uint32_t da
         {
             sr = BAESong_LoadMidiFromMemory(result->data.song, pData, dataSize, TRUE);
         }
+#if USE_RETRO_RINGTONE_SUPPORT == TRUE        
         else if (ftype == BAE_RINGTONE_IMY || ftype == BAE_RINGTONE_RNG || ftype == BAE_RINGTONE_RTX)
         {
             unsigned char *midiOut = NULL;
@@ -12038,6 +12047,7 @@ BAEResult BAEMixer_LoadFromMemory(BAEMixer mixer, void const *pData, uint32_t da
             BAERingtone_FreeMidiBuffer(midiOut);
             midiOut = NULL;
         }
+#endif        
         else
         {
             // Default to standard MIDI for any remaining cases

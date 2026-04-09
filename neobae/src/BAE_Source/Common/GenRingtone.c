@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if USE_RETRO_RINGTONE_SUPPORT == TRUE
+
 #define RINGTONE_PPQ 96
 #define RINGTONE_DEFAULT_OCTAVE 5
 #define RINGTONE_DEFAULT_DURATION 4
@@ -1319,3 +1321,48 @@ void BAERingtone_FreeMidiBuffer(unsigned char *pMidiData)
 {
     free(pMidiData);
 }
+
+#else
+
+BAEResult BAERingtone_ConvertToMidiFromMemory(void const *pData,
+                                              uint32_t dataSize,
+                                              BAEFileType fileType,
+                                              unsigned char **ppMidiOut,
+                                              uint32_t *pMidiSizeOut)
+{
+    (void)pData;
+    (void)dataSize;
+    (void)fileType;
+    if (ppMidiOut) *ppMidiOut = NULL;
+    if (pMidiSizeOut) *pMidiSizeOut = 0;
+    return BAE_UNSUPPORTED_FORMAT;
+}
+
+BAEResult BAERingtone_ConvertToMidiFromFile(BAEPathName filePath,
+                                            BAEFileType fileType,
+                                            unsigned char **ppMidiOut,
+                                            uint32_t *pMidiSizeOut)
+{
+    (void)filePath;
+    (void)fileType;
+    if (ppMidiOut) *ppMidiOut = NULL;
+    if (pMidiSizeOut) *pMidiSizeOut = 0;
+    return BAE_UNSUPPORTED_FORMAT;
+}
+
+void BAERingtone_SetIMYDefaultProgram(int program)
+{
+    (void)program;
+}
+
+int BAERingtone_GetIMYDefaultProgram(void)
+{
+    return 73;
+}
+
+void BAERingtone_FreeMidiBuffer(unsigned char *pMidiData)
+{
+    (void)pMidiData;
+}
+
+#endif

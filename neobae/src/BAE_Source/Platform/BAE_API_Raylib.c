@@ -8,35 +8,7 @@
 #include <limits.h>
 #include <time.h>
 #include <pthread.h>
-#if defined(__has_include)
-    #if __has_include(<raylib.h>)
-        #include <raylib.h>
-        #define BAE_HAVE_RAYLIB_HEADER 1
-    #endif
-#endif
-#ifndef BAE_HAVE_RAYLIB_HEADER
-typedef void (*AudioCallback)(void *bufferData, unsigned int frames);
-typedef struct rAudioBuffer rAudioBuffer;
-typedef struct rAudioProcessor rAudioProcessor;
-typedef struct AudioStream {
-    rAudioBuffer *buffer;
-    rAudioProcessor *processor;
-    unsigned int sampleRate;
-    unsigned int sampleSize;
-    unsigned int channels;
-} AudioStream;
-extern void InitAudioDevice(void);
-extern void CloseAudioDevice(void);
-extern bool IsAudioDeviceReady(void);
-extern AudioStream LoadAudioStream(unsigned int sampleRate, unsigned int sampleSize, unsigned int channels);
-extern void UnloadAudioStream(AudioStream stream);
-extern void PlayAudioStream(AudioStream stream);
-extern void StopAudioStream(AudioStream stream);
-extern void SetAudioStreamBufferSizeDefault(int size);
-extern void SetAudioStreamCallback(AudioStream stream, AudioCallback callback);
-extern void SetAudioStreamVolume(AudioStream stream, float volume);
-extern void SetAudioStreamPan(AudioStream stream, float pan);
-#endif
+#include <raylib.h>
 #include "BAE_API.h"
 #include <X_API.h>
 #include <X_Assert.h>

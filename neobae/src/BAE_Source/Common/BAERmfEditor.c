@@ -17633,6 +17633,14 @@ static BAEResult PV_BankReEncodeSampleCore(XFILE bankFile,
             compType = C_IMA4;
             compSubType = CS_DEFAULT;
             break;
+        case BAE_EDITOR_COMPRESSION_ALAW:
+            compType = C_ALAW;
+            compSubType = CS_DEFAULT;
+            break;
+        case BAE_EDITOR_COMPRESSION_ULAW:
+            compType = C_ULAW;
+            compSubType = CS_DEFAULT;
+            break;
         case BAE_EDITOR_COMPRESSION_MP3_32K:
             compType = C_MPEG_32;  compSubType = CS_MPEG2; sampleWasEncodedMpeg = TRUE; break;
         case BAE_EDITOR_COMPRESSION_MP3_48K:

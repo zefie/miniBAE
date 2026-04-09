@@ -83,21 +83,15 @@
 #include <string.h>
 #if (!defined(__ANDROID__) && !defined(__EMSCRIPTEN__))
 #ifdef _WIN32
-#if X_PLATFORM == X_RAYLIB
-    #include "raylib.h"
-
-#else
-    typedef void *BAE_HMODULE;
-#if defined(_MSC_VER)
-    __declspec(dllimport) unsigned long __stdcall GetModuleFileNameA(BAE_HMODULE hModule, char *lpFilename, unsigned long nSize);
-#else
-    extern __attribute__((dllimport)) unsigned long __stdcall GetModuleFileNameA(BAE_HMODULE hModule, char *lpFilename, unsigned long nSize);
-#endif
-#endif
+    #if (X_PLATFORM == X_RAYLIB)
+        #include "raylib.h"
+    #else
+        #include <windows.h>
+    #endif
 
     static void get_executable_directory(char *buffer, size_t size) {
         if (buffer && size > 0) {
-#if X_PLATFORM == X_RAYLIB
+#if (X_PLATFORM == X_RAYLIB)
             const char *appDir = GetApplicationDirectory();
             if (appDir && appDir[0]) {
                 strncpy(buffer, appDir, size - 1);
