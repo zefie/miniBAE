@@ -869,8 +869,12 @@ const char *BAE_WASM_GetFeatureString(void) {
  */
 EMSCRIPTEN_KEEPALIVE
 int BAE_WASM_HasEmbeddedSoundbank(void) {
+#if USE_RMI_SUPPORT == TRUE
     extern bool GM_LastRMIHadEmbeddedSoundbank(void);
     return GM_LastRMIHadEmbeddedSoundbank() ? 1 : 0;
+#else
+    return 0;
+#endif
 }
 
 /*

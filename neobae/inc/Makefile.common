@@ -219,7 +219,7 @@ ifneq ($(filter 1,$(OPUS_DEC) $(OPUS_ENC)),)
 			BAE_LIBS 	+= -lopusfile.dll $(BAE_LIBS)
 		endif
 	else
-		BAE_LIBS 	:= -lopus $(BAE_LIBS)
+		BAE_LIBS 	+= -lopus $(BAE_LIBS)
 		ifeq ($(OPUS_DEC),1)
 			BAE_LIBS 	+= -lopusfile $(BAE_LIBS)
 		endif
@@ -236,15 +236,15 @@ ifneq ($(filter 1,$(VORBIS_DEC) $(VORBIS_ENC)),)
 	INC_PATH	+= -Isrc/thirdparty/libvorbis/include -Isrc/thirdparty/libvorbis/lib
 	ifneq ($(filter 1,$(VORBIS_ENC)),)
 		ifeq ($(XPHACK),1)
-			BAE_LIBS := -lvorbisenc.dll $(BAE_LIBS)
+			BAE_LIBS += -lvorbisenc.dll $(BAE_LIBS)
 		else
-			BAE_LIBS := -lvorbisenc $(BAE_LIBS)
+			BAE_LIBS += -lvorbisenc $(BAE_LIBS)
 		endif
 	endif
 	ifeq ($(XPHACK),1)
-		BAE_LIBS := -lvorbisfile.dll -lvorbis.dll $(BAE_LIBS)
+		BAE_LIBS += -lvorbisfile.dll -lvorbis.dll $(BAE_LIBS)
 	else
-		BAE_LIBS := -lvorbisfile -lvorbis $(BAE_LIBS)
+		BAE_LIBS += -lvorbisfile -lvorbis $(BAE_LIBS)
 	endif
 endif
 
