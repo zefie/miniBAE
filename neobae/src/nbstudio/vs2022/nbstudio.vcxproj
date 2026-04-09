@@ -147,7 +147,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <AdditionalDependencies>wxmsw33u_core.lib;
-wxbase33u.lib;libmp3lame.lib;FLAC.lib;vorbisfile.lib;vorbisenc.lib;vorbis.lib;opus.lib;opusfile.lib;dsound.lib;ogg.lib;dxguid.lib;winmm.lib;comctl32.lib;rpcrt4.lib;wsock32.lib;zlib.lib;lzma.lib;libxmp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+wxbase33u.lib;libmp3lame.lib;FLAC.lib;vorbisfile.lib;vorbisenc.lib;vorbis.lib;opus.lib;opusfile.lib;dsound.lib;ogg.lib;dxguid.lib;winmm.lib;comctl32.lib;rpcrt4.lib;wsock32.lib;zlib.lib;libxmp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(ProjectDir)vcpkg_installed\x64-windows\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
     </Link>
@@ -176,7 +176,7 @@ wxbase33u.lib;libmp3lame.lib;FLAC.lib;vorbisfile.lib;vorbisenc.lib;vorbis.lib;op
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>wxbase33ud.lib;wxmsw33ud_core.lib;libmp3lame.lib;FLAC.lib;vorbisfile.lib;vorbisenc.lib;vorbis.lib;opus.lib;opusfile.lib;dsound.lib;ogg.lib;dxguid.lib;winmm.lib;comctl32.lib;rpcrt4.lib;wsock32.lib;zlibd.lib;lzma.lib;libxmp.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>wxbase33ud.lib;wxmsw33ud_core.lib;libmp3lame.lib;FLAC.lib;vorbisfile.lib;vorbisenc.lib;vorbis.lib;opus.lib;opusfile.lib;dsound.lib;ogg.lib;dxguid.lib;winmm.lib;comctl32.lib;rpcrt4.lib;wsock32.lib;zlibd.lib;libxmp.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(ProjectDir)vcpkg_installed\x64-windows\debug\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>

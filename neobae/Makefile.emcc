@@ -61,7 +61,7 @@ else
 	endif
 endif
 
-LIBS	= 	-lpthread  -lvorbis -logg -lvorbisenc -lvorbisfile -lFLAC -lopus -lopusfile -lsndfile -llzma
+LIBS	= 	-lpthread  -lvorbis -logg -lvorbisenc -lvorbisfile -lFLAC -lopus -lopusfile -lsndfile
 
 all: ${TARGET_JS} extra-files
 

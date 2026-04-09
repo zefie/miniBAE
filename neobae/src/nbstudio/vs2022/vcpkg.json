@@ -8,7 +8,6 @@
     "mp3lame",
     "wxwidgets",
     "zlib",
-    "liblzma",
     "libxmp"
   ]
 }

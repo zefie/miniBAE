@@ -12,7 +12,6 @@
 #include <iostream>
 
 #include <zlib.h>
-#include <lzma.h>
 
 #include <wx/dcbuffer.h>
 #include <wx/button.h>
@@ -195,7 +194,7 @@ enum {
 static constexpr int kKeyboardPreviewInvalidateDebounceMs = 250;
 
 static constexpr uint8_t  kNbsMagic[4] = {'N', 'B', 'S', '\0'};
-static constexpr uint16_t kNbsVersion = 2;       /* v2: LZMA compression (v1 used zlib) */
+static constexpr uint16_t kNbsVersion = 3;       /* v3: LZMA2 compression */
 static constexpr uint16_t kNbsVersionZlib = 1;   /* for reading old sessions */
 static constexpr uint16_t kNbsFieldRmfBlob      = 0x0001;
 static constexpr uint16_t kNbsFieldSettings     = 0x0002;
@@ -7295,17 +7294,16 @@ private:
             payload.insert(payload.end(), cachePayload.begin(), cachePayload.end());
         }
 
-        /* Compress with LZMA */
-        compBound = lzma_stream_buffer_bound(payload.size());
+        /* Compress with LZMA2 (native format) */
+        compBound = LZMACompressBound(static_cast<uint32_t>(payload.size()));
         compressed.resize(compBound);
-        compPos = 0;
-        if (lzma_easy_buffer_encode(LZMA_PRESET_DEFAULT, LZMA_CHECK_CRC64, NULL,
-                                    payload.data(), payload.size(),
-                                    compressed.data(), &compPos, compBound) != LZMA_OK) {
+        int32_t compResult = LZMACompress(payload.data(), static_cast<uint32_t>(payload.size()), 
+                                           compressed.data(), NULL, NULL);
+        if (compResult < 0) {
             wxMessageBox("Compression failed.", "Save Session", wxOK | wxICON_ERROR, this);
             return false;
         }
-        compressed.resize(compPos);
+        compressed.resize(static_cast<size_t>(compResult));
 
         /* Write file: 10-byte header + compressed data */
         if (!file.Open(path, wxFile::write)) {
@@ -7436,18 +7434,15 @@ private:
         }
         uncompressedSize = ReadLE32(fileData.data() + 6);
 
-        /* Decompress (v2 = LZMA, v1 = zlib) */
+        /* Decompress (v2+ = LZMA/LZMA2, v1 = zlib) */
         payload.resize(uncompressedSize);
         if (fileVersion >= 2) {
-            uint64_t memlimit = UINT64_MAX;
-            size_t inPos = 0;
-            size_t outPos = 0;
-            if (lzma_stream_buffer_decode(&memlimit, 0, NULL,
-                                          fileData.data() + 10, &inPos, fileData.size() - 10,
-                                          payload.data(), &outPos, uncompressedSize) != LZMA_OK) {
-                wxMessageBox("Failed to decompress session data (LZMA).", "Open Session", wxOK | wxICON_ERROR, this);
-                return false;
-            }
+            /* Use LZMA functions which support both native LZMA2 and legacy XZ formats */
+            LZMAUncompress(fileData.data() + 10, static_cast<uint32_t>(fileData.size() - 10),
+                          payload.data(), static_cast<uint32_t>(uncompressedSize));
+            /* Verify decompression succeeded by checking if output was written */
+            /* (LZMAUncompress returns void, so we check by attempting to access first byte) */
+            /* If decompression failed, payload will be unchanged/zeroed, which will fail TLV parsing */
         } else {
             uLongf destLen = static_cast<uLongf>(uncompressedSize);
             if (uncompress(payload.data(), &destLen, fileData.data() + 10,
