@@ -68,10 +68,8 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 2 ]; then
 	runcmd make -f mingw/Makefile "-j$(nproc)" all
     signit "${BDIR}/playbae.exe" "${BDIR}/playbae_signed.exe"
     mv "${BDIR}/playbae_signed.exe" "${BDIR}/playbae.exe"
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/clitools_win_x32.zip" -- playbae.exe libfluidsynth*.dll SDL*.dll liblzma*.dll libmp3lame*.dll
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/libNeoBAE_win_sdl3_x32.zip" -- *.dll *.lib *.a
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/clitools_win_x32.zip" -- playbae.exe libfluidsynth*.dll SDL*.dll
 	runcmd zip -d "${ODIR}/clitools_win_x32.zip" -- SDL2_ttf.dll SDL3_ttf.dll
-	runcmd zip -d "${ODIR}/libNeoBAE_win_sdl3_x32.zip" -- SDL2_ttf.dll SDL3_ttf.dll
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f mingw/Makefile clean
 fi
@@ -84,9 +82,8 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 3 ]; then
 	runcmd make -f mingw/Makefile "-j$(nproc)" all
     signit "${BDIR}/playbae.exe" "${BDIR}/playbae_signed.exe"
     mv "${BDIR}/playbae_signed.exe" "${BDIR}/playbae.exe"
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/clitools_win_x64.zip" -- playbae.exe libfluidsynth*.dll SDL*.dll liblzma*.dll libmp3lame*.dll
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/clitools_win_x64.zip" -- playbae.exe libfluidsynth*.dll SDL*.dll
 	runcmd zip -d "${ODIR}/clitools_win_x64.zip" -- SDL2_ttf.dll SDL3_ttf.dll
-	runcmd zip -d "${ODIR}/libNeoBAE_win_sdl3_x64.zip" -- SDL2_ttf.dll SDL3_ttf.dll	
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f mingw/Makefile clean
 fi
@@ -101,7 +98,7 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 4 ]; then
     mv "${BDIR}/zefidi_signed.exe" "${BDIR}/zefidi.exe"
 	signit "${BDIR}/RegisterFiletypes.exe" "${BDIR}/RegisterFiletypes_signed.exe"
 	mv "${BDIR}/RegisterFiletypes_signed.exe" "${BDIR}/RegisterFiletypes.exe"
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/zefidi_win_sdl3_x32.zip" -- zefidi.exe RegisterFiletypes.exe libfluidsynth*.dll SDL*.dll liblzma*.dll libmp3lame*.dll
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/zefidi_win_sdl3_x32.zip" -- zefidi.exe RegisterFiletypes.exe libfluidsynth*.dll SDL*.dll
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f mingw/Makefile.gui clean
 fi
@@ -116,7 +113,7 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 5 ]; then
     mv "${BDIR}/zefidi_signed.exe" "${BDIR}/zefidi.exe"
 	signit "${BDIR}/RegisterFiletypes.exe" "${BDIR}/RegisterFiletypes_signed.exe"
 	mv "${BDIR}/RegisterFiletypes_signed.exe" "${BDIR}/RegisterFiletypes.exe"	
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/zefidi_win_sdl3_x64.zip" -- zefidi.exe RegisterFiletypes.exe libfluidsynth*.dll SDL*.dll liblzma*.dll libmp3lame*.dll
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9 "${ODIR}/zefidi_win_sdl3_x64.zip" -- zefidi.exe RegisterFiletypes.exe libfluidsynth*.dll SDL*.dll
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f mingw/Makefile.gui clean
 fi
@@ -227,7 +224,7 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 13 ]; then
 	runcmd make -f mingw/Makefile.mod2rmf "-j$(nproc)" all
 	signit "${BDIR}/mod2rmf.exe" "${BDIR}/mod2rmf_signed.exe"
     mv "${BDIR}/mod2rmf_signed.exe" "${BDIR}/mod2rmf.exe"	
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x32.zip" -- mod2rmf.exe liblzma*.dll libmp3lame*.dll
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x32.zip" -- mod2rmf.exe
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f mingw/Makefile.mod2rmf clean
 fi
@@ -239,7 +236,7 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 14 ]; then
 	runcmd make -f mingw/Makefile.mod2rmf "-j$(nproc)" all
 	signit "${BDIR}/mod2rmf.exe" "${BDIR}/mod2rmf_signed.exe"
     mv "${BDIR}/mod2rmf_signed.exe" "${BDIR}/mod2rmf.exe"	
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- mod2rmf.exe liblzma*.dll libmp3lame*.dll
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- mod2rmf.exe
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f mingw/Makefile.mod2rmf clean
 fi
@@ -251,7 +248,7 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 15 ]; then
 	runcmd make -f mingw/Makefile.instdump "-j$(nproc)" all
 	signit "${BDIR}/rmf-instdump.exe" "${BDIR}/rmf-instdump_signed.exe"
     mv "${BDIR}/rmf-instdump_signed.exe" "${BDIR}/rmf-instdump.exe"	
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x32.zip" -- rmf-instdump.exe liblzma*.dll
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x32.zip" -- rmf-instdump.exe
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f mingw/Makefile.instdump clean
 fi
@@ -263,7 +260,7 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 16 ]; then
 	runcmd make -f mingw/Makefile.instdump "-j$(nproc)" all
 	signit "${BDIR}/rmf-instdump.exe" "${BDIR}/rmf-instdump_signed.exe"
     mv "${BDIR}/rmf-instdump_signed.exe" "${BDIR}/rmf-instdump.exe"	
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- rmf-instdump.exe liblzma*.dll
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- rmf-instdump.exe
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f mingw/Makefile.instdump clean
 fi
@@ -323,7 +320,7 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 21 ]; then
 	runcmd make -f mingw/Makefile.songtool "-j$(nproc)" all
 	signit "${BDIR}/songtool.exe" "${BDIR}/songtool_signed.exe"
     mv "${BDIR}/songtool_signed.exe" "${BDIR}/songtool.exe"	
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x32.zip" -- songtool.exe liblzma*.dll
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x32.zip" -- songtool.exe
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f mingw/Makefile.songtool clean
 fi
@@ -335,7 +332,7 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 22 ]; then
 	runcmd make -f mingw/Makefile.songtool "-j$(nproc)" all
 	signit "${BDIR}/songtool.exe" "${BDIR}/songtool_signed.exe"
     mv "${BDIR}/songtool_signed.exe" "${BDIR}/songtool.exe"	
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- songtool.exe liblzma*.dll
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- songtool.exe
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f mingw/Makefile.songtool clean
 fi
@@ -347,7 +344,7 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 23 ]; then
 	runcmd make -f mingw/Makefile.bankrecomp "-j$(nproc)" all
 	signit "${BDIR}/bankrecomp.exe" "${BDIR}/bankrecomp_signed.exe"
     mv "${BDIR}/bankrecomp_signed.exe" "${BDIR}/bankrecomp.exe"	
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x32.zip" -- bankrecomp.exe liblzma*.dll
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x32.zip" -- bankrecomp.exe
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f mingw/Makefile.bankrecomp clean
 fi
@@ -359,7 +356,7 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 24 ]; then
 	runcmd make -f mingw/Makefile.bankrecomp "-j$(nproc)" all
 	signit "${BDIR}/bankrecomp.exe" "${BDIR}/bankrecomp_signed.exe"
     mv "${BDIR}/bankrecomp_signed.exe" "${BDIR}/bankrecomp.exe"	
-	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- bankrecomp.exe liblzma*.dll
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- bankrecomp.exe
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f mingw/Makefile.bankrecomp clean
 fi
@@ -406,6 +403,28 @@ if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 28 ]; then
 	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- ringtone2mid.exe
 	runcmd cd "${RDIR}" || exit 1
 	runcmd make -f mingw/Makefile.ringtone2mid clean
+fi
+
+if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 29 ]; then
+	export USE_SDL3=1
+	export BITS=32
+	echo "Building sf2-to-hsb x32..."
+	runcmd make clean
+	runcmd make -f mingw/Makefile.sf2-hsb "-j$(nproc)" all
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- sf2-to-hsb.exe
+	runcmd cd "${RDIR}" || exit 1
+	runcmd make -f mingw/Makefile.sf2-hsb clean
+fi
+
+if [ -z "${SKIPTO}" ] || [ "${SKIPTO}" -le 30 ]; then
+	export USE_SDL3=1
+	export BITS=64
+	echo "Building sf2-to-hsb SDL3 x64..."
+	runcmd make clean
+	runcmd make -f mingw/Makefile.sf2-hsb "-j$(nproc)" all
+	runcmd cd "${BDIR}" || exit 1 && runcmd zip -9u "${ODIR}/clitools_win_x64.zip" -- sf2-to-hsb.exe
+	runcmd cd "${RDIR}" || exit 1
+	runcmd make -f mingw/Makefile.sf2-hsb clean
 fi
 
 cd "${RDIR}" || exit 1

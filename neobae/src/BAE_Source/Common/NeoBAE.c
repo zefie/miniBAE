@@ -410,6 +410,50 @@ const char *BAE_GetFeatureString()
     }
 #endif
 
+#if USE_MTHC_SUPPORT == TRUE
+    const char *mthc = "Nokia Compressed MIDI (MThc) Support";
+    if (mthc && mthc[0])
+    {
+        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", mthc);
+        first = FALSE;
+    }
+#endif
+
+#if USE_ADP_SUPPORT == TRUE
+    const char *adp = "Nokia ADP Support";
+    if (adp && adp[0])
+    {
+        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", adp);
+        first = FALSE;
+    }
+#endif
+
+#if USE_RETRO_RINGTONE_SUPPORT == TRUE
+    const char *rtx = "Nokia Monophonic Ringtone Support";
+    if (rtx && rtx[0])
+    {
+        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", rtx);
+        first = FALSE;
+    }
+#endif
+
+#if USE_RMI_SUPPORT == TRUE
+    const char *rmi = "RMI File Support";
+    if (rmi && rmi[0])
+    {
+        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", rmi);
+        first = FALSE;
+    }
+#endif
+
+#if USE_QOA_SUPPORT == TRUE
+    const char *qoa = "QOA (Quite OK Audio) Support";
+    if (qoa && qoa[0])
+    {
+        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", qoa);
+        first = FALSE;
+    }
+#endif  
 
     // SF2 support
 #if _USING_FLUIDSYNTH == TRUE
@@ -555,24 +599,6 @@ const char *BAE_GetFeatureString()
         snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", opus);
         first = FALSE;
     }
-
-#if USE_MTHC_SUPPORT == TRUE
-    const char *mthc = "Nokia Compressed MIDI (MThc) Support";
-    if (mthc && mthc[0])
-    {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", mthc);
-        first = FALSE;
-    }
-#endif
-
-#if USE_ADP_SUPPORT == TRUE
-    const char *adp = "Nokia ADP Support";
-    if (adp && adp[0])
-    {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", adp);
-        first = FALSE;
-    }
-#endif
 
     // If nothing was added, return an empty string
     if (featBuf[0] == '\0')

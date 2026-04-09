@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.10)
 project(NeoBAE LANGUAGES C CXX)
 
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
 if(POLICY CMP0003)
   cmake_policy(SET CMP0003 NEW)
 endif()
@@ -120,6 +122,7 @@ set(BAE_EMBED_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/banks/patches11
 option(BUILD_PLAYBAE "Build playbae when a non-Dummy/non-Ansi backend is selected" ON)
 option(BUILD_ZEFIDI "Build zefidi when SDL2/SDL3 backend and matching SDL_ttf are available" ON)
 option(BUILD_CLITOOLS "Build CLI tools (songtool, rmf2mid, mid2rmf, mid2rmi, sf2-hsb, mod2rmf, instdump, bankrecomp)" ON)
+option(BUILD_NBSTUDIO "Build NeoBAE Studio (RMF/ZMF editor) when wxWidgets is found" ON)
 set(CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING "Build type (Debug, Release, RelWithDebInfo, MinSizeRel)" FORCE)
 
 # Internal compatibility booleans: keep existing logic in terms of ENABLE vars.
@@ -288,18 +291,17 @@ if(BAE_ENABLE_EMBED_PATCHES)
 endif()
 
 # FluidSynth probe and gating for SF2/XMF behavior from Makefile.common.
-find_path(BAE_FLUIDSYNTH_INCLUDE_DIR fluidsynth.h PATH_SUFFIXES fluidsynth)
-find_library(BAE_FLUIDSYNTH_LIBRARY NAMES fluidsynth)
-if(PKG_CONFIG_FOUND)
-  pkg_check_modules(PC_FLUIDSYNTH QUIET fluidsynth)
-  if(NOT BAE_FLUIDSYNTH_INCLUDE_DIR AND PC_FLUIDSYNTH_FOUND)
-    set(BAE_FLUIDSYNTH_INCLUDE_DIR ${PC_FLUIDSYNTH_INCLUDE_DIRS})
-  endif()
-  if(NOT BAE_FLUIDSYNTH_LIBRARY AND PC_FLUIDSYNTH_FOUND)
-    find_library(BAE_FLUIDSYNTH_LIBRARY NAMES fluidsynth HINTS ${PC_FLUIDSYNTH_LIBRARY_DIRS})
-  endif()
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(FLUIDSYNTH REQUIRED fluidsynth)
+if (FLUIDSYNTH_FOUND)
+  set(BAE_FLUIDSYNTH_INCLUDE_DIR ${FLUIDSYNTH_INCLUDE_DIRS})
+  set(BAE_FLUIDSYNTH_LIBRARY ${FLUIDSYNTH_LIBRARIES})
+  set(BAE_FLUIDSYNTH_AVAILABLE ON)
+else()
+  message(STATUS "FluidSynth not found via pkg-config.")
+  set(BAE_FLUIDSYNTH_AVAILABLE OFF)
 endif()
-set(BAE_FLUIDSYNTH_AVAILABLE OFF)
+
 if(BAE_FLUIDSYNTH_INCLUDE_DIR AND BAE_FLUIDSYNTH_LIBRARY)
   set(BAE_FLUIDSYNTH_AVAILABLE ON)
 endif()
@@ -1052,6 +1054,7 @@ endif()
 target_compile_definitions(neobae
   PUBLIC
     X_PLATFORM=${BAE_X_PLATFORM_DEFINE}
+    FLAC__NO_DLL=1
     USE_ZMF_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_ZMF}>,1,0>
     USE_ZMF_FORMAT=$<IF:$<BOOL:${BAE_ENABLE_ZMF}>,1,0>
     USE_LZMA_COMPRESSION=$<IF:$<BOOL:${BAE_ENABLE_LZMA}>,1,0>
@@ -1086,7 +1089,8 @@ target_compile_definitions(neobae
     USE_ADP_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_ADP_SUPPORT}>,1,0>
     SUPPORT_KARAOKE=$<IF:$<BOOL:${BAE_ENABLE_KARAOKE}>,1,0>
     SUPPORT_BAESCRIPT=$<IF:$<BOOL:${BAE_ENABLE_BAESCRIPT}>,1,0>
-    SUPPORT_PLAYLIST=$<IF:$<BOOL:${BAE_ENABLE_PLAYLIST}>,1,0>    
+    SUPPORT_PLAYLIST=$<IF:$<BOOL:${BAE_ENABLE_PLAYLIST}>,1,0>
+    USE_RETRO_RINGTONE_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_RETRO_RINGTONE_SUPPORT}>,1,0>
 )
 
 target_compile_options(neobae PRIVATE -w)
@@ -1178,6 +1182,7 @@ if(BUILD_CLITOOLS)
     neobae/src/songtool/songtool.c
     neobae/src/mod2rmf/mod2rmf_encoder.c
   )
+
   target_link_libraries(songtool PRIVATE neobae)
 
   add_executable(rmf2mid neobae/src/rmf2mid/rmf2mid.c)
@@ -1185,6 +1190,21 @@ if(BUILD_CLITOOLS)
 
   add_executable(mid2rmf neobae/src/mid2rmf/mid2rmf.c)
   target_link_libraries(mid2rmf PRIVATE neobae)
+
+  add_executable(adp2wav 
+    neobae/src/thirdparty/libg722/g722_decode.c
+    neobae/src/adp2wav/adp2wav_decode.c
+    neobae/src/adp2wav/adp2wav_main.c
+  )
+  target_link_libraries(adp2wav PRIVATE m)
+
+  add_executable(mthc_decomp
+    neobae/src/mthc/mthc_decomp.c
+    neobae/src/mthc/mthc_main.c
+  )
+
+  add_executable(ringtone2mid neobae/src/ringtone2mid/ringtone2mid.c)
+  target_link_libraries(ringtone2mid PRIVATE neobae)
 
   add_executable(mid2rmi neobae/src/mid2rmi/mid2rmi.c)
   target_link_libraries(mid2rmi PRIVATE neobae)
@@ -1205,9 +1225,8 @@ if(BUILD_CLITOOLS)
   target_link_libraries(sf2_hsb PRIVATE neobae)
   set_target_properties(sf2_hsb PROPERTIES OUTPUT_NAME sf2-hsb)
 
-  find_path(LIBXMP_INCLUDE_DIR xmp.h)
-  find_library(LIBXMP_LIBRARY NAMES xmp)
-  if(LIBXMP_INCLUDE_DIR AND LIBXMP_LIBRARY)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libxmp/include/xmp.h" AND
+     EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libxmp/src/lite/lite-player.c")
     add_executable(mod2rmf
       neobae/src/mod2rmf/mod2rmf_main.c
       neobae/src/mod2rmf/mod2rmf_common.c
@@ -1215,13 +1234,117 @@ if(BUILD_CLITOOLS)
       neobae/src/mod2rmf/mod2rmf_resampler.c
       neobae/src/mod2rmf/mod2rmf_rmfcreat.c
       neobae/src/mod2rmf/mod2rmf_song.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-virtual.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-format.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-period.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-player.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-read_event.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-misc.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-dataio.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-lfo.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-scan.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-control.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-filter.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-effects.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-mixer.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-mix_all.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-load_helpers.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-load.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-filetype.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-hio.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-smix.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-memio.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-rng.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-win32.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-flow.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-common.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-itsex.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-sample.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-xm_load.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-mod_load.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-s3m_load.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-it_load.c
     )
     target_include_directories(mod2rmf PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/mod2rmf
-      ${LIBXMP_INCLUDE_DIR}
+      ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libxmp/src
+      ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libxmp/include
     )
-    target_link_libraries(mod2rmf PRIVATE neobae ${LIBXMP_LIBRARY})
+    target_compile_definitions(mod2rmf PRIVATE LIBXMP_STATIC=1 LIBXMP_CORE_PLAYER=1 LIBXMP_BUILD=1)
+    target_link_libraries(mod2rmf PRIVATE neobae)
   else()
-    message(STATUS "Skipping mod2rmf (libxmp not found).")
+    message(STATUS "Skipping mod2rmf (bundled libxmp-lite sources not found).")
+  endif()
+endif()
+
+if(BUILD_NBSTUDIO)
+  find_package(wxWidgets COMPONENTS core base QUIET)
+  if(wxWidgets_FOUND)
+    add_executable(nbstudio
+      neobae/src/nbstudio/editor_main.cpp
+      neobae/src/nbstudio/editor_bank.cpp
+      neobae/src/nbstudio/editor_instrument_ext_dialog.cpp
+      neobae/src/nbstudio/editor_metadata_dialog.cpp
+      neobae/src/nbstudio/editor_pianoroll_panel.cpp
+      neobae/src/nbstudio/batch_compress_dialog.cpp
+      neobae/src/mod2rmf/mod2rmf_common.c
+      neobae/src/mod2rmf/mod2rmf_encoder.c
+      neobae/src/mod2rmf/mod2rmf_resampler.c
+      neobae/src/mod2rmf/mod2rmf_rmfcreat.c
+      neobae/src/mod2rmf/mod2rmf_song.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-virtual.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-format.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-period.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-player.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-read_event.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-misc.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-dataio.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-lfo.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-scan.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-control.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-filter.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-effects.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-mixer.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-mix_all.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-load_helpers.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-load.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-filetype.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-hio.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-smix.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-memio.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-rng.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-win32.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-flow.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-common.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-itsex.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-sample.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-xm_load.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-mod_load.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-s3m_load.c
+      neobae/src/thirdparty/libxmp/src/lite/lite-it_load.c      
+    )
+    target_include_directories(nbstudio PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/nbstudio
+      ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libxmp/include
+      ${wxWidgets_INCLUDE_DIRS}
+    )
+    target_compile_definitions(nbstudio PRIVATE LIBXMP_STATIC=1 LIBXMP_CORE_PLAYER=1 LIBXMP_BUILD=1 ${wxWidgets_DEFINITIONS} WXMAKINGDLL_BASE=1 WXMAKINGDLL_CORE=1)
+    target_compile_options(nbstudio PRIVATE ${wxWidgets_CXX_FLAGS})
+    target_link_libraries(nbstudio PRIVATE neobae ${wxWidgets_LIBRARIES})
+    find_package(ZLIB QUIET)
+    if(ZLIB_FOUND)
+      target_link_libraries(nbstudio PRIVATE ZLIB::ZLIB)
+    endif()
+    if(UNIX AND NOT APPLE)
+      find_package(PkgConfig REQUIRED)
+      pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
+      pkg_check_modules(GLIB REQUIRED glib-2.0)
+      target_include_directories(nbstudio PRIVATE ${GTK3_INCLUDE_DIRS} ${GLIB_INCLUDE_DIRS})
+      target_compile_options(nbstudio PRIVATE ${GTK3_CFLAGS_OTHER} ${GLIB_CFLAGS_OTHER})
+      target_link_libraries(nbstudio PRIVATE ${GTK3_LIBRARIES} ${GLIB_LIBRARIES})
+    endif()
+    message(STATUS "Building nbstudio with wxWidgets ${wxWidgets_VERSION_STRING}.")
+  else()
+    message(STATUS "Skipping BUILD_NBSTUDIO (wxWidgets not found).")
   endif()
 endif()

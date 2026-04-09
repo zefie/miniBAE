@@ -388,7 +388,7 @@ struct BankEditorPanel {
     std::map<std::pair<uint32_t,uint32_t>, AppliedCodecInfo> appliedCodecs;
 };
 
-static constexpr BAERmfEditorSndStorageType kBankOriginalStorageSentinel =
+static const BAERmfEditorSndStorageType kBankOriginalStorageSentinel =
     (BAERmfEditorSndStorageType)0x7FFF;
 static constexpr int kBankOpusRoundTripStorageFlag = 0x4000;
 

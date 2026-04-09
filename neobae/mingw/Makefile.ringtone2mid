@@ -48,7 +48,7 @@ ifneq ($(BAE_LD_FLAGS),)
 endif
 
 ifneq ($(DEBUG),1)
-	LDFLAGS += -s
+	LDFLAGS += -static
 endif
 
 LIBS	= 	-lpthread -lm

@@ -709,8 +709,38 @@ ifeq ($(MOD2RMF),1)
 	# libNeoBAE srcs + split mod2rmf sources
 	SRC += src/mod2rmf/mod2rmf_common.c src/mod2rmf/mod2rmf_encoder.c src/mod2rmf/mod2rmf_resampler.c src/mod2rmf/mod2rmf_rmfcreat.c src/mod2rmf/mod2rmf_song.c
 	INC_PATH += -Isrc/mod2rmf
-	BAE_LIBS += -lxmp
-	BAE_FLAGS += -DLIBXMP_STATIC=1 
+	INC_PATH += -Isrc/thirdparty/libxmp/include
+	BAE_FLAGS += -DLIBXMP_STATIC=1 -DLIBXMP_CORE_PLAYER=1
+	SRC += src/thirdparty/libxmp/src/lite/lite-virtual.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-format.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-period.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-player.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-read_event.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-misc.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-dataio.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-lfo.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-scan.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-control.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-filter.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-effects.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-mixer.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-mix_all.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-load_helpers.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-load.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-filetype.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-hio.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-smix.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-memio.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-rng.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-win32.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-flow.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-common.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-itsex.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-sample.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-xm_load.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-mod_load.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-s3m_load.c
+	SRC += src/thirdparty/libxmp/src/lite/lite-it_load.c
 endif
 
 ifeq ($(SONGTOOL),1)

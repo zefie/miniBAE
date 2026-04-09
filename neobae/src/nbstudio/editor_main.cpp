@@ -211,7 +211,7 @@ static constexpr uint16_t kNbsFieldBankSampleSndCache = 0x000C; /* Original raw 
 static constexpr uint8_t  kNbsBankFlagIsOverlay = 0x01;    /* Blob is overlay; load built-in first */
 static constexpr uint8_t  kNbsDirtyFlagSongModified = 0x01;
 static constexpr uint8_t  kNbsDirtyFlagBankModified = 0x02;
-static constexpr BAERmfEditorSndStorageType kBankOriginalStorageSentinel =
+static const BAERmfEditorSndStorageType kBankOriginalStorageSentinel =
     (BAERmfEditorSndStorageType)0x7FFF;
 static constexpr int kBankOpusRoundTripStorageFlag = 0x4000;
 
@@ -234,11 +234,11 @@ struct NbsSessionSettings {
 };
 #pragma pack(pop)
 
-static bool isSupportedModule(char const *ext) {
-    if (!ext) {
+static bool isSupportedModule(wxString const &ext) {
+    if (ext.IsEmpty()) {
         return false;
     }
-    std::string extLower = wxString(ext).Lower().ToStdString();
+    std::string extLower = ext.Lower().ToStdString();
     static const std::set<std::string> supportedExtensions = {
         "mod", "s3m", "xm", "it", "mtm", "stm", "669", "far", "ult", "amf",
         "dbm", "imf", "liq", "med", "mgt", "okt", "ptm", "xmf"
@@ -12101,7 +12101,9 @@ public:
             }
             if (darkMode) {
                 /* wxWidgets 3.3+: enable dark mode for all controls and title bar. */
+#if wxCHECK_VERSION(3, 3, 0)
                 MSWEnableDarkMode();
+#endif
             }
         }
 #endif // __WXMSW__
