@@ -604,18 +604,24 @@ static void getDefaultBitrate(int codec,
             *outComp = C_MPEG_128;
             *outSub = CS_MPEG2;
             break;
+#if USE_VORBIS_ENCODER == TRUE            
         case CODEC_VORBIS:
             *outComp = C_VORBIS;
             *outSub = CS_VORBIS_128K;
             break;
+#endif
+#if USE_FLAC_ENCODER == TRUE            
         case CODEC_FLAC:
             *outComp = C_FLAC;
             *outSub = CS_DEFAULT;
             break;
+#endif
+#if USE_OPUS_ENCODER == TRUE            
         case CODEC_OPUS:
             *outComp = C_OPUS;
             *outSub = CS_OPUS_48K;
             break;
+#endif            
 #if USE_QOA_SUPPORT == TRUE
         case CODEC_QOA:
             *outComp = C_QOA;
