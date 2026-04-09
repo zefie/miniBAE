@@ -193,13 +193,8 @@ ifeq ($(RETRO_RINGTONE_SUPPORT),1)
 endif
 
 ifneq ($(filter 1,$(FLAC_ENC) $(FLAC_DEC)),) 
-	INC_PATH	+= -Isrc/thirdparty/flac/include -Isrc/thirdparty/flac/src/libFLAC/include
-	ifeq ($(XPHACK),1)
-		BAE_LIBS += -lFLAC.dll -lpthread $(BAE_LIBS)
-	else
-		BAE_LIBS += -lFLAC -lpthread $(BAE_LIBS)
-	endif
-	BAE_FLAGS += -DHAVE_STDINT_H=1 -DHAVE_INTTYPES_H=1 -DSIZE_T_MAX=SIZE_MAX
+	INC_PATH	+= -Isrc/thirdparty/flac/include -Isrc/thirdparty/flac/src/libFLAC/include -Isrc/thirdparty/flac/src
+	BAE_FLAGS += -DHAVE_CONFIG_H=1 -DHAVE_STDINT_H=1 -DHAVE_INTTYPES_H=1 -DSIZE_T_MAX=SIZE_MAX
 	ifeq ($(OGG_SUPPORT),1)
 		BAE_FLAGS += -DFLAC__HAS_OGG=1
 	else
@@ -219,20 +214,15 @@ endif
 
 ifneq ($(filter 1,$(OPUS_DEC) $(OPUS_ENC)),)
 	INC_PATH	+= -Isrc/thirdparty/opus/include
+	INC_PATH	+= -Isrc/thirdparty/opus/celt
+	INC_PATH	+= -Isrc/thirdparty/opus/silk
+	INC_PATH	+= -Isrc/thirdparty/opus/silk/float
+	INC_PATH	+= -Isrc/thirdparty/opus/src
 	ifeq ($(OPUS_DEC),1)
 		INC_PATH	+= -Isrc/thirdparty/opusfile/include
+		INC_PATH	+= -Isrc/thirdparty/opusfile/src
 	endif
-	ifeq ($(XPHACK),1)
-		BAE_LIBS 	+= -lopus.dll $(BAE_LIBS)
-		ifeq ($(OPUS_DEC),1)
-			BAE_LIBS 	+= -lopusfile.dll $(BAE_LIBS)
-		endif
-	else
-		BAE_LIBS 	+= -lopus $(BAE_LIBS)
-		ifeq ($(OPUS_DEC),1)
-			BAE_LIBS 	+= -lopusfile $(BAE_LIBS)
-		endif
-	endif
+	BAE_FLAGS += -DVAR_ARRAYS=1 -DOPUS_BUILD=1
 	ifeq ($(OPUS_DEC),1)
 		BAE_FLAGS += -DUSE_OPUS_DECODER=1
 	endif
@@ -243,18 +233,6 @@ endif
 
 ifneq ($(filter 1,$(VORBIS_DEC) $(VORBIS_ENC)),) 
 	INC_PATH	+= -Isrc/thirdparty/libvorbis/include -Isrc/thirdparty/libvorbis/lib
-	ifneq ($(filter 1,$(VORBIS_ENC)),)
-		ifeq ($(XPHACK),1)
-			BAE_LIBS += -lvorbisenc.dll $(BAE_LIBS)
-		else
-			BAE_LIBS += -lvorbisenc $(BAE_LIBS)
-		endif
-	endif
-	ifeq ($(XPHACK),1)
-		BAE_LIBS += -lvorbisfile.dll -lvorbis.dll $(BAE_LIBS)
-	else
-		BAE_LIBS += -lvorbisfile -lvorbis $(BAE_LIBS)
-	endif
 endif
 
 # default to ANSI
@@ -437,54 +415,107 @@ endif
 
 # Optional MP3 encoder integration
 # Enable with make MP3_ENC=1 (or set in environment)
-# Default to using LAME (MIT-like/GPL licensed) instead of the Helix hmp3
-# to avoid problematic licensing. This compiles the bundled LAME sources
-# and provides an adapter that implements the legacy MPG_Encode* API.
 ifeq ($(MP3_ENC),1)
-	ifeq ($(WINDOWS),1)					
-		ifeq ($(BITS),32)
-			INC_PATH += -I../deps/win/lame/i686-w64-mingw32/include
-			BAE_LD_FLAGS += -L../deps/win/lame/i686-w64-mingw32/lib/
-			BAE_LIBS += ../deps/win/lame/i686-w64-mingw32/lib/libmp3lame-0.dll.a
-		else
-			INC_PATH += -I../deps/win/lame/x86_64-w64-mingw32/include
-			BAE_LD_FLAGS += -L../deps/win/lame/x86_64-w64-mingw32/lib/
-			BAE_LIBS += ../deps/win/lame/x86_64-w64-mingw32/lib/libmp3lame-0.dll.a
-		endif			
-	else		
-		INC_PATH += $(shell pkg-config --cflags libmp3lame 2>/dev/null)
-		LAME_LIBS := $(shell pkg-config --libs libmp3lame 2>/dev/null)
-		ifneq ($(LAME_LIBS),)
-			BAE_LIBS += $(LAME_LIBS)
-		else
-			BAE_LIBS += -lmp3lame
-		endif
-	endif
-
+	INC_PATH += -Isrc/thirdparty/lame-3.100-slim/include
+	INC_PATH += -Isrc/thirdparty/lame-3.100-slim/libmp3lame
+	INC_PATH += -Isrc/thirdparty/lame-3.100-slim/mpglib
+	BAE_FLAGS += -DHAVE_CONFIG_H=1 -DHAVE_STDINT_H=1 -DHAVE_INTTYPES_H=1
 	BAE_FLAGS += -DUSE_MPEG_ENCODER=1 -DUSE_LAME_ENCODER=1
 	SRC += src/BAE_MPEG_Source_II/XMPEG_lame_encoder.cpp
+	SRC += src/thirdparty/lame-3.100-slim/libmp3lame/VbrTag.c
+	SRC += src/thirdparty/lame-3.100-slim/libmp3lame/bitstream.c
+	SRC += src/thirdparty/lame-3.100-slim/libmp3lame/encoder.c
+	SRC += src/thirdparty/lame-3.100-slim/libmp3lame/fft.c
+	SRC += src/thirdparty/lame-3.100-slim/libmp3lame/gain_analysis.c
+	SRC += src/thirdparty/lame-3.100-slim/libmp3lame/id3tag.c
+	SRC += src/thirdparty/lame-3.100-slim/libmp3lame/lame.c
+	SRC += src/thirdparty/lame-3.100-slim/libmp3lame/newmdct.c
+	SRC += src/thirdparty/lame-3.100-slim/libmp3lame/presets.c
+	SRC += src/thirdparty/lame-3.100-slim/libmp3lame/psymodel.c
+	SRC += src/thirdparty/lame-3.100-slim/libmp3lame/quantize.c
+	SRC += src/thirdparty/lame-3.100-slim/libmp3lame/quantize_pvt.c
+	SRC += src/thirdparty/lame-3.100-slim/libmp3lame/reservoir.c
+	SRC += src/thirdparty/lame-3.100-slim/libmp3lame/set_get.c
+	SRC += src/thirdparty/lame-3.100-slim/libmp3lame/tables.c
+	SRC += src/thirdparty/lame-3.100-slim/libmp3lame/takehiro.c
+	SRC += src/thirdparty/lame-3.100-slim/libmp3lame/util.c
+	SRC += src/thirdparty/lame-3.100-slim/libmp3lame/vbrquantize.c
+	SRC += src/thirdparty/lame-3.100-slim/libmp3lame/version.c
+	SRC += src/thirdparty/lame-3.100-slim/libmp3lame/mpglib_interface.c
+endif
+
+# Add FLAC decoder source files
+ifneq ($(filter 1,$(FLAC_DEC) $(FLAC_ENC)),)
+	ifeq ($(FLAC_ENC),1)
+		SRC += src/thirdparty/flac/src/libFLAC/stream_encoder.c
+	endif
+	SRC += src/thirdparty/flac/src/libFLAC/bitmath.c
+	SRC += src/thirdparty/flac/src/libFLAC/bitreader.c
+	SRC += src/thirdparty/flac/src/libFLAC/bitwriter.c
+	SRC += src/thirdparty/flac/src/libFLAC/cpu.c
+	SRC += src/thirdparty/flac/src/libFLAC/crc.c
+	SRC += src/thirdparty/flac/src/libFLAC/fixed.c
+	SRC += src/thirdparty/flac/src/libFLAC/float.c
+	SRC += src/thirdparty/flac/src/libFLAC/format.c
+	SRC += src/thirdparty/flac/src/libFLAC/lpc.c
+	SRC += src/thirdparty/flac/src/libFLAC/md5.c
+	SRC += src/thirdparty/flac/src/libFLAC/memory.c
+	SRC += src/thirdparty/flac/src/libFLAC/metadata_iterators.c
+	SRC += src/thirdparty/flac/src/libFLAC/metadata_object.c
+	SRC += src/thirdparty/flac/src/libFLAC/stream_decoder.c
+	SRC += src/thirdparty/flac/src/libFLAC/stream_encoder_framing.c
+	SRC += src/thirdparty/flac/src/libFLAC/window.c
+	ifeq ($(OGG_SUPPORT),1)
+		SRC += src/thirdparty/flac/src/libFLAC/ogg_decoder_aspect.c
+		SRC += src/thirdparty/flac/src/libFLAC/ogg_encoder_aspect.c
+		SRC += src/thirdparty/flac/src/libFLAC/ogg_helper.c
+		SRC += src/thirdparty/flac/src/libFLAC/ogg_mapping.c
+	endif
 endif
 
 # Add FLAC decoder source files
 ifeq ($(FLAC_DEC),1)
 	BAE_FLAGS += -DUSE_FLAC_DECODER=1
-	# Use shared library instead of compiling sources
 endif
 
-# Add FLAC encoder source files  
+# Add FLAC encoder source files
 ifeq ($(FLAC_ENC),1)
 	BAE_FLAGS += -DUSE_FLAC_ENCODER=1
-	# Use shared library instead of compiling sources
 endif
 
 # Add libogg source files
 ifeq ($(OGG_SUPPORT),1)
+	SRC += src/thirdparty/libogg/src/bitwise.c
+	SRC += src/thirdparty/libogg/src/framing.c
 	BAE_FLAGS += -DUSE_OGG_FORMAT=1
-	# Use shared library instead of compiling sources
 endif
 
 # Add libvorbis decoder source files
 ifneq ($(filter 1,$(VORBIS_DEC) $(VORBIS_ENC)),) 
+	SRC += src/thirdparty/libvorbis/lib/mdct.c
+	SRC += src/thirdparty/libvorbis/lib/smallft.c
+	SRC += src/thirdparty/libvorbis/lib/block.c
+	SRC += src/thirdparty/libvorbis/lib/envelope.c
+	SRC += src/thirdparty/libvorbis/lib/window.c
+	SRC += src/thirdparty/libvorbis/lib/lsp.c
+	SRC += src/thirdparty/libvorbis/lib/lpc.c
+	SRC += src/thirdparty/libvorbis/lib/analysis.c
+	SRC += src/thirdparty/libvorbis/lib/synthesis.c
+	SRC += src/thirdparty/libvorbis/lib/psy.c
+	SRC += src/thirdparty/libvorbis/lib/info.c
+	SRC += src/thirdparty/libvorbis/lib/floor1.c
+	SRC += src/thirdparty/libvorbis/lib/floor0.c
+	SRC += src/thirdparty/libvorbis/lib/res0.c
+	SRC += src/thirdparty/libvorbis/lib/mapping0.c
+	SRC += src/thirdparty/libvorbis/lib/registry.c
+	SRC += src/thirdparty/libvorbis/lib/codebook.c
+	SRC += src/thirdparty/libvorbis/lib/sharedbook.c
+	SRC += src/thirdparty/libvorbis/lib/lookup.c
+	SRC += src/thirdparty/libvorbis/lib/bitrate.c
+	SRC += src/thirdparty/libvorbis/lib/vorbisfile.c
+	ifneq ($(filter 1,$(VORBIS_ENC)),)
+		SRC += src/thirdparty/libvorbis/lib/vorbisenc.c
+	endif
 	SRC += src/BAE_Source/Common/XVorbisFiles.c
 	ifeq ($(VORBIS_DEC),1)
 		BAE_FLAGS += -DUSE_VORBIS_DECODER=1
@@ -496,16 +527,154 @@ endif
 
 ifneq ($(filter 1,$(OPUS_DEC) $(OPUS_ENC)),)
 	SRC += src/BAE_Source/Common/XOpusFiles.c
+	SRC += src/thirdparty/opus/src/opus.c
+	SRC += src/thirdparty/opus/src/opus_decoder.c
+	SRC += src/thirdparty/opus/src/opus_encoder.c
+	SRC += src/thirdparty/opus/src/extensions.c
+	SRC += src/thirdparty/opus/src/opus_multistream.c
+	SRC += src/thirdparty/opus/src/opus_multistream_encoder.c
+	SRC += src/thirdparty/opus/src/opus_multistream_decoder.c
+	SRC += src/thirdparty/opus/src/repacketizer.c
+	SRC += src/thirdparty/opus/src/opus_projection_encoder.c
+	SRC += src/thirdparty/opus/src/opus_projection_decoder.c
+	SRC += src/thirdparty/opus/src/mapping_matrix.c
+	SRC += src/thirdparty/opus/src/analysis.c
+	SRC += src/thirdparty/opus/src/mlp.c
+	SRC += src/thirdparty/opus/src/mlp_data.c
+	SRC += src/thirdparty/opus/celt/bands.c
+	SRC += src/thirdparty/opus/celt/celt.c
+	SRC += src/thirdparty/opus/celt/celt_encoder.c
+	SRC += src/thirdparty/opus/celt/celt_decoder.c
+	SRC += src/thirdparty/opus/celt/cwrs.c
+	SRC += src/thirdparty/opus/celt/entcode.c
+	SRC += src/thirdparty/opus/celt/entdec.c
+	SRC += src/thirdparty/opus/celt/entenc.c
+	SRC += src/thirdparty/opus/celt/kiss_fft.c
+	SRC += src/thirdparty/opus/celt/laplace.c
+	SRC += src/thirdparty/opus/celt/mathops.c
+	SRC += src/thirdparty/opus/celt/mdct.c
+	SRC += src/thirdparty/opus/celt/modes.c
+	SRC += src/thirdparty/opus/celt/pitch.c
+	SRC += src/thirdparty/opus/celt/celt_lpc.c
+	SRC += src/thirdparty/opus/celt/quant_bands.c
+	SRC += src/thirdparty/opus/celt/rate.c
+	SRC += src/thirdparty/opus/celt/vq.c
+	SRC += src/thirdparty/opus/silk/CNG.c
+	SRC += src/thirdparty/opus/silk/code_signs.c
+	SRC += src/thirdparty/opus/silk/init_decoder.c
+	SRC += src/thirdparty/opus/silk/decode_core.c
+	SRC += src/thirdparty/opus/silk/decode_frame.c
+	SRC += src/thirdparty/opus/silk/decode_parameters.c
+	SRC += src/thirdparty/opus/silk/decode_indices.c
+	SRC += src/thirdparty/opus/silk/decode_pulses.c
+	SRC += src/thirdparty/opus/silk/decoder_set_fs.c
+	SRC += src/thirdparty/opus/silk/dec_API.c
+	SRC += src/thirdparty/opus/silk/enc_API.c
+	SRC += src/thirdparty/opus/silk/encode_indices.c
+	SRC += src/thirdparty/opus/silk/encode_pulses.c
+	SRC += src/thirdparty/opus/silk/gain_quant.c
+	SRC += src/thirdparty/opus/silk/interpolate.c
+	SRC += src/thirdparty/opus/silk/LP_variable_cutoff.c
+	SRC += src/thirdparty/opus/silk/NLSF_decode.c
+	SRC += src/thirdparty/opus/silk/NSQ.c
+	SRC += src/thirdparty/opus/silk/NSQ_del_dec.c
+	SRC += src/thirdparty/opus/silk/PLC.c
+	SRC += src/thirdparty/opus/silk/shell_coder.c
+	SRC += src/thirdparty/opus/silk/tables_gain.c
+	SRC += src/thirdparty/opus/silk/tables_LTP.c
+	SRC += src/thirdparty/opus/silk/tables_NLSF_CB_NB_MB.c
+	SRC += src/thirdparty/opus/silk/tables_NLSF_CB_WB.c
+	SRC += src/thirdparty/opus/silk/tables_other.c
+	SRC += src/thirdparty/opus/silk/tables_pitch_lag.c
+	SRC += src/thirdparty/opus/silk/tables_pulses_per_block.c
+	SRC += src/thirdparty/opus/silk/VAD.c
+	SRC += src/thirdparty/opus/silk/control_audio_bandwidth.c
+	SRC += src/thirdparty/opus/silk/quant_LTP_gains.c
+	SRC += src/thirdparty/opus/silk/VQ_WMat_EC.c
+	SRC += src/thirdparty/opus/silk/HP_variable_cutoff.c
+	SRC += src/thirdparty/opus/silk/NLSF_encode.c
+	SRC += src/thirdparty/opus/silk/NLSF_VQ.c
+	SRC += src/thirdparty/opus/silk/NLSF_unpack.c
+	SRC += src/thirdparty/opus/silk/NLSF_del_dec_quant.c
+	SRC += src/thirdparty/opus/silk/process_NLSFs.c
+	SRC += src/thirdparty/opus/silk/stereo_LR_to_MS.c
+	SRC += src/thirdparty/opus/silk/stereo_MS_to_LR.c
+	SRC += src/thirdparty/opus/silk/check_control_input.c
+	SRC += src/thirdparty/opus/silk/control_SNR.c
+	SRC += src/thirdparty/opus/silk/init_encoder.c
+	SRC += src/thirdparty/opus/silk/control_codec.c
+	SRC += src/thirdparty/opus/silk/A2NLSF.c
+	SRC += src/thirdparty/opus/silk/ana_filt_bank_1.c
+	SRC += src/thirdparty/opus/silk/biquad_alt.c
+	SRC += src/thirdparty/opus/silk/bwexpander_32.c
+	SRC += src/thirdparty/opus/silk/bwexpander.c
+	SRC += src/thirdparty/opus/silk/debug.c
+	SRC += src/thirdparty/opus/silk/decode_pitch.c
+	SRC += src/thirdparty/opus/silk/inner_prod_aligned.c
+	SRC += src/thirdparty/opus/silk/lin2log.c
+	SRC += src/thirdparty/opus/silk/log2lin.c
+	SRC += src/thirdparty/opus/silk/LPC_analysis_filter.c
+	SRC += src/thirdparty/opus/silk/LPC_inv_pred_gain.c
+	SRC += src/thirdparty/opus/silk/table_LSF_cos.c
+	SRC += src/thirdparty/opus/silk/NLSF2A.c
+	SRC += src/thirdparty/opus/silk/NLSF_stabilize.c
+	SRC += src/thirdparty/opus/silk/NLSF_VQ_weights_laroia.c
+	SRC += src/thirdparty/opus/silk/pitch_est_tables.c
+	SRC += src/thirdparty/opus/silk/resampler.c
+	SRC += src/thirdparty/opus/silk/resampler_down2_3.c
+	SRC += src/thirdparty/opus/silk/resampler_down2.c
+	SRC += src/thirdparty/opus/silk/resampler_private_AR2.c
+	SRC += src/thirdparty/opus/silk/resampler_private_down_FIR.c
+	SRC += src/thirdparty/opus/silk/resampler_private_IIR_FIR.c
+	SRC += src/thirdparty/opus/silk/resampler_private_up2_HQ.c
+	SRC += src/thirdparty/opus/silk/resampler_rom.c
+	SRC += src/thirdparty/opus/silk/sigm_Q15.c
+	SRC += src/thirdparty/opus/silk/sort.c
+	SRC += src/thirdparty/opus/silk/sum_sqr_shift.c
+	SRC += src/thirdparty/opus/silk/stereo_decode_pred.c
+	SRC += src/thirdparty/opus/silk/stereo_encode_pred.c
+	SRC += src/thirdparty/opus/silk/stereo_find_predictor.c
+	SRC += src/thirdparty/opus/silk/stereo_quant_pred.c
+	SRC += src/thirdparty/opus/silk/LPC_fit.c
+	SRC += src/thirdparty/opus/silk/float/apply_sine_window_FLP.c
+	SRC += src/thirdparty/opus/silk/float/corrMatrix_FLP.c
+	SRC += src/thirdparty/opus/silk/float/encode_frame_FLP.c
+	SRC += src/thirdparty/opus/silk/float/find_LPC_FLP.c
+	SRC += src/thirdparty/opus/silk/float/find_LTP_FLP.c
+	SRC += src/thirdparty/opus/silk/float/find_pitch_lags_FLP.c
+	SRC += src/thirdparty/opus/silk/float/find_pred_coefs_FLP.c
+	SRC += src/thirdparty/opus/silk/float/LPC_analysis_filter_FLP.c
+	SRC += src/thirdparty/opus/silk/float/LTP_analysis_filter_FLP.c
+	SRC += src/thirdparty/opus/silk/float/LTP_scale_ctrl_FLP.c
+	SRC += src/thirdparty/opus/silk/float/noise_shape_analysis_FLP.c
+	SRC += src/thirdparty/opus/silk/float/process_gains_FLP.c
+	SRC += src/thirdparty/opus/silk/float/regularize_correlations_FLP.c
+	SRC += src/thirdparty/opus/silk/float/residual_energy_FLP.c
+	SRC += src/thirdparty/opus/silk/float/warped_autocorrelation_FLP.c
+	SRC += src/thirdparty/opus/silk/float/wrappers_FLP.c
+	SRC += src/thirdparty/opus/silk/float/autocorrelation_FLP.c
+	SRC += src/thirdparty/opus/silk/float/burg_modified_FLP.c
+	SRC += src/thirdparty/opus/silk/float/bwexpander_FLP.c
+	SRC += src/thirdparty/opus/silk/float/energy_FLP.c
+	SRC += src/thirdparty/opus/silk/float/inner_product_FLP.c
+	SRC += src/thirdparty/opus/silk/float/k2a_FLP.c
+	SRC += src/thirdparty/opus/silk/float/LPC_inv_pred_gain_FLP.c
+	SRC += src/thirdparty/opus/silk/float/pitch_analysis_core_FLP.c
+	SRC += src/thirdparty/opus/silk/float/scale_copy_vector_FLP.c
+	SRC += src/thirdparty/opus/silk/float/scale_vector_FLP.c
+	SRC += src/thirdparty/opus/silk/float/schur_FLP.c
+	SRC += src/thirdparty/opus/silk/float/sort_FLP.c
+	ifeq ($(OPUS_DEC),1)
+		SRC += src/thirdparty/opusfile/src/info.c
+		SRC += src/thirdparty/opusfile/src/internal.c
+		SRC += src/thirdparty/opusfile/src/opusfile.c
+		SRC += src/thirdparty/opusfile/src/stream.c
+	endif
 endif
 
 ifeq ($(OGG_SUPPORT),1)
 	INC_PATH	+= -Isrc/thirdparty/libogg/include
 	BAE_FLAGS	+= -DSUPPORT_OGG_FORMAT=1
-	ifeq ($(XPHACK),1)
-		BAE_LIBS 	+= -logg.dll
-	else
-		BAE_LIBS 	+= -logg
-	endif
 endif
 
 ifeq ($(LZMA_SUPPORT),1)
@@ -734,16 +903,18 @@ ifeq ($(BAESCRIPT),1)
 endif
 
 OBJ_DIR 	:= $(BUILD_DIR)obj/
-# Create unique object names by including source directory info for conflicting files
-SRC_UNIQUE := $(SRC)
-SRC_UNIQUE := $(subst src/thirdparty/flac/src/libFLAC/lpc.c,src/thirdparty/flac/src/libFLAC/flac_lpc.c,$(SRC_UNIQUE))
+# Create unique object names for conflicting basenames across third-party trees.
+define uniq_obj_src
+$(subst src/thirdparty/opus/celt/mdct.c,src/thirdparty/opus/celt/opus_mdct.c,$(subst src/thirdparty/flac/src/libFLAC/lpc.c,src/thirdparty/flac/src/libFLAC/flac_lpc.c,$(subst src/thirdparty/flac/src/libFLAC/window.c,src/thirdparty/flac/src/libFLAC/flac_window.c,$(subst src/thirdparty/libvorbis/lib/lpc.c,src/thirdparty/libvorbis/lib/vorbis_lpc.c,$(subst src/thirdparty/libvorbis/lib/window.c,src/thirdparty/libvorbis/lib/vorbis_window.c,$(subst src/thirdparty/opus/src/analysis.c,src/thirdparty/opus/src/opus_analysis.c,$(subst src/thirdparty/opusfile/src/info.c,src/thirdparty/opusfile/src/opusfile_info.c,$(subst src/thirdparty/opusfile/src/stream.c,src/thirdparty/opusfile/src/opusfile_stream.c,$(1)))))))))
+endef
 
-SRC_BIN_UNIQUE := $(SRC)
-SRC_BIN_UNIQUE := $(subst src/thirdparty/flac/src/libFLAC/lpc.c,src/thirdparty/flac/src/libFLAC/flac_lpc.c,$(SRC_BIN_UNIQUE))
-SRC_BIN_UNIQUE := $(subst src/thirdparty/flac/src/libFLAC/window.c,src/thirdparty/flac/src/libFLAC/flac_window.c,$(SRC_BIN_UNIQUE))
-SRC_BIN_UNIQUE := $(subst src/thirdparty/libvorbis/lib/lpc.c,src/thirdparty/libvorbis/lib/vorbis_lpc.c,$(SRC_BIN_UNIQUE))
-SRC_BIN_UNIQUE := $(subst src/thirdparty/libvorbis/lib/window.c,src/thirdparty/libvorbis/lib/vorbis_window.c,$(SRC_BIN_UNIQUE))
-OBJ_BIN 	:= $(addprefix $(OBJ_DIR),$(addsuffix .o,$(notdir $(basename ${SRC_BIN_UNIQUE}))))
+define obj_name_from_src
+$(notdir $(basename $(call uniq_obj_src,$(1))))
+endef
+
+SRC_UNIQUE := $(foreach s,$(SRC),$(call uniq_obj_src,$(s)))
+SRC_BIN_UNIQUE := $(foreach s,$(SRC),$(call uniq_obj_src,$(s)))
+OBJ_BIN 	:= $(addprefix $(OBJ_DIR),$(addsuffix .o,$(notdir $(basename $(SRC_BIN_UNIQUE)))))
 
 ifeq ($(BUILD_GUI),1)
 
@@ -788,7 +959,7 @@ endif
 # Rules for compiling source files to object files
 # Create a function to map source files to object files with unique names for conflicts
 define make_obj_rule
-$(OBJ_DIR)$(basename $(notdir $(subst src/thirdparty/flac/src/libFLAC/lpc.c,flac_lpc.c,$(subst src/thirdparty/flac/src/libFLAC/window.c,flac_window.c,$(subst src/thirdparty/libvorbis/lib/lpc.c,vorbis_lpc.c,$(subst src/thirdparty/libvorbis/lib/window.c,vorbis_window.c,$(1))))))).o: $(1)
+$(OBJ_DIR)$(call obj_name_from_src,$(1)).o: $(1)
 	@echo @compile $$<
 	@mkdir -p $(OBJ_DIR)
 	$(SILENT)$(if $(filter %.cpp,$(1)),${CXX} -c ${CXXFLAGS},${CC} -c ${CFLAGS}) $$< -o $$@

@@ -254,7 +254,7 @@ static int load_insts(const char *path, InstEntry **outEntries, int *outCount)
     int capacity = 32;
     InstEntry *entries;
 
-    XConvertPathToXFILENAME(path, &name);
+    XConvertPathToXFILENAME((void *)path, &name);
     fileRef = XFileOpenResource(&name, TRUE);
     if (!fileRef) {
         fprintf(stderr, "Cannot open: %s\n", path);

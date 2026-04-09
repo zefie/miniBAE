@@ -40,7 +40,7 @@ static std::pair<int, int> CompressionTypeToCodecBitrate(BAERmfEditorCompression
         case BAE_EDITOR_COMPRESSION_OPUS_192K:   return std::make_pair(opusRoundTrip ? 7 : 6, 10);
         case BAE_EDITOR_COMPRESSION_OPUS_256K:   return std::make_pair(opusRoundTrip ? 7 : 6, 11);
 #if USE_QOA_SUPPORT == TRUE
-        case BAE_EDITOR_COMPRESSION_QOA:         return std::make_pair(8, 0);
+    case BAE_EDITOR_COMPRESSION_QOA:         return std::make_pair(8, 0);
 #endif
         default:                                  return std::make_pair(6, 8);
     }
@@ -86,7 +86,7 @@ BatchCompressDialog::BatchCompressDialog(wxWindow *parent,
     {
         std::pair<int, int> sel = CompressionTypeToCodecBitrate(initialCompressionType, initialOpusRoundTrip);
         int codecSel = sel.first;
-        if (codecSel < 0 || codecSel >= CODEC_CHOICES_COUNT)
+        if (codecSel < 0 || codecSel >= (int)m_codecChoice->GetCount())
         {
             codecSel = DEFAULT_CODEC;
         }

@@ -17,7 +17,15 @@
 #include <math.h>
 #include <new>
 
+#if defined(__has_include)
+#if __has_include(<lame/lame.h>)
 #include <lame/lame.h>
+#else
+#include <lame.h>
+#endif
+#else
+#include <lame.h>
+#endif
 
 #define MAX_BITSTREAM_SIZE 8192
 #define LAME_DECODER_PRIMING_SAMPLES 529U

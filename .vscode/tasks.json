@@ -8,7 +8,7 @@
       "options": {
         "cwd": "${workspaceFolder}/neobae"
       },
-      "args": ["-f", "Makefile.gui-mingw", "clean"],
+      "args": ["clean"],
       "problemMatcher": []
     },
     {
@@ -27,7 +27,7 @@
       "options": {
         "cwd": "${workspaceFolder}/neobae"
       },
-      "args": ["-f", "Makefile.gui-mingw", "-j20"],
+      "args": ["-f", "mingw/Makefile.gui", "-j20"],
       "group": {
         "kind": "build",
         "isDefault": true
@@ -42,7 +42,7 @@
       "options": {
         "cwd": "${workspaceFolder}/neobae"
       },
-      "args": ["-f", "Makefile.gui-mingw", "DEBUG=1", "-j20"],
+      "args": ["-f", "mingw/Makefile.gui", "DEBUG=1", "-j20"],
       "group": {
         "kind": "build",
       },
@@ -56,7 +56,7 @@
       "options": {
         "cwd": "${workspaceFolder}/neobae"
       },
-      "args": ["-f", "Makefile.gui-mingw", "DEBUG=1", "LDEBUG=1","-j20"],
+      "args": ["-f", "mingw/Makefile.gui", "DEBUG=1", "LDEBUG=1","-j20"],
       "group": {
         "kind": "build",
       },
@@ -64,7 +64,7 @@
       "problemMatcher": "$gcc"
     },
     {
-      "label": "Build NeoBAE Studio (RMF Editor)",
+      "label": "Build NeoBAE Studio (Linux)",
       "type": "shell",
       "command": "make",
       "options": {

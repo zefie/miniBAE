@@ -76,6 +76,16 @@ endif()
 add_compile_definitions(_VERSION="${BAE_VERSION}")
 message(STATUS "NeoBAE build version: ${BAE_VERSION}")
 
+option(DEBUG "Enable debuggable build (zefidi debug console, gdb debugging)" OFF)
+
+if (NOT DEBUG)
+  add_compile_options(-O2)
+else()
+  message(STATUS "Debug build: enabling debug symbols and disabling optimizations")
+  add_compile_options(-g -O0 -ggdb3 -fPIC -D_DEBUG=1)
+endif()  
+
+
 option(BAE_DISABLE_RMF_EDITOR "Disable BAERmfEditor (Creation API) support" OFF)
 option(BAE_DISABLE_SF2_CONVERTER "Disable SF2 converter support" OFF)
 option(BAE_DISABLE_ZMF "Disable ZMF support" OFF)
@@ -106,9 +116,11 @@ option(BAE_DISABLE_EMBED_PATCHES "Disable embedded built-in patches" OFF)
 option(BAE_DISABLE_EMBED_FONT "Disable embedded GUI font" OFF)
 option(BAE_DISABLE_RETRO_RINGTONE_SUPPORT "Disable retro mobile ringtone format support (IMY/EMY/RNG/RTX/RTTTL)" OFF)
 option(BAE_DISABLE_QOA_SUPPORT "Disable QOA codec support" OFF)
+set(BAE_EMBED_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/banks/patches111/patches111.hsb" CACHE FILEPATH "HSB bank file to embed as built-in patches (empty disables embedding)")
 option(BUILD_PLAYBAE "Build playbae when a non-Dummy/non-Ansi backend is selected" ON)
 option(BUILD_ZEFIDI "Build zefidi when SDL2/SDL3 backend and matching SDL_ttf are available" ON)
 option(BUILD_CLITOOLS "Build CLI tools (songtool, rmf2mid, mid2rmf, mid2rmi, sf2-hsb, mod2rmf, instdump, bankrecomp)" ON)
+set(CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING "Build type (Debug, Release, RelWithDebInfo, MinSizeRel)" FORCE)
 
 # Internal compatibility booleans: keep existing logic in terms of ENABLE vars.
 set(BAE_ENABLE_RMF_EDITOR ON)
@@ -258,6 +270,23 @@ if(BAE_DISABLE_EMBED_FONT)
   set(BAE_ENABLE_EMBED_FONT OFF)
 endif()
 
+set(BAE_EMBED_PATCHES_EFFECTIVE OFF)
+if(BAE_ENABLE_EMBED_PATCHES)
+  if(BAE_EMBED_PATCH_FILE STREQUAL "")
+    message(STATUS "Disabling built-in embedded patches: BAE_EMBED_PATCH_FILE is empty")
+  elseif(NOT EXISTS "${BAE_EMBED_PATCH_FILE}")
+    message(STATUS "Disabling built-in embedded patches: bank file not found at '${BAE_EMBED_PATCH_FILE}'")
+  else()
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(NOT Python3_Interpreter_FOUND)
+      message(STATUS "Disabling built-in embedded patches: Python3 interpreter not found")
+    else()
+      set(BAE_EMBED_PATCHES_EFFECTIVE ON)
+      message(STATUS "Enabling built-in embedded patches from '${BAE_EMBED_PATCH_FILE}'")
+    endif()
+  endif()
+endif()
+
 # FluidSynth probe and gating for SF2/XMF behavior from Makefile.common.
 find_path(BAE_FLUIDSYNTH_INCLUDE_DIR fluidsynth.h PATH_SUFFIXES fluidsynth)
 find_library(BAE_FLUIDSYNTH_LIBRARY NAMES fluidsynth)
@@ -310,14 +339,15 @@ if(PKG_CONFIG_FOUND)
 endif()
 
 set(BAE_MP3_ENCODER_AVAILABLE OFF)
-if(BAE_LAME_WRAPPER_AVAILABLE AND BAE_LAME_INCLUDE_DIR AND BAE_LAME_LIBRARY)
+if(BAE_LAME_WRAPPER_AVAILABLE AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/lame-3.100-slim/include/lame.h" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/lame-3.100-slim/libmp3lame/lame.c")
   set(BAE_MP3_ENCODER_AVAILABLE ON)
 endif()
 
-find_path(BAE_FLAC_INCLUDE_DIR FLAC/all.h)
-find_library(BAE_FLAC_LIBRARY NAMES FLAC)
 set(BAE_FLAC_AVAILABLE OFF)
-if(BAE_FLAC_INCLUDE_DIR AND BAE_FLAC_LIBRARY)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/flac/include/FLAC/all.h" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/flac/src/libFLAC/stream_decoder.c")
   set(BAE_FLAC_AVAILABLE ON)
 endif()
 
@@ -327,116 +357,93 @@ find_library(BAE_VORBISFILE_LIBRARY NAMES vorbisfile)
 find_library(BAE_VORBISENC_LIBRARY NAMES vorbisenc)
 set(BAE_VORBIS_DECODER_AVAILABLE OFF)
 set(BAE_VORBIS_ENCODER_AVAILABLE OFF)
-if(BAE_VORBIS_INCLUDE_DIR AND BAE_VORBIS_LIBRARY AND BAE_VORBISFILE_LIBRARY)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libvorbis/lib/info.c" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libvorbis/lib/vorbisfile.c" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libogg/src/framing.c")
   set(BAE_VORBIS_DECODER_AVAILABLE ON)
-  if(BAE_VORBISENC_LIBRARY)
-    set(BAE_VORBIS_ENCODER_AVAILABLE ON)
-  endif()
+  set(BAE_VORBIS_ENCODER_AVAILABLE ON)
 endif()
 
-find_path(BAE_OPUS_INCLUDE_DIR opus/opus.h)
-find_library(BAE_OPUS_LIBRARY NAMES opus)
-find_path(BAE_OPUSFILE_INCLUDE_DIR NAMES opusfile.h opus/opusfile.h)
-find_library(BAE_OPUSFILE_LIBRARY NAMES opusfile)
-if(PKG_CONFIG_FOUND)
-  pkg_check_modules(PC_OPUS QUIET opus)
-  pkg_check_modules(PC_OPUSFILE QUIET opusfile)
-  pkg_check_modules(PC_OGG QUIET ogg)
-
-  if(NOT BAE_OPUS_INCLUDE_DIR AND PC_OPUS_FOUND)
-    set(BAE_OPUS_INCLUDE_DIR ${PC_OPUS_INCLUDE_DIRS})
-  endif()
-  if(NOT BAE_OPUS_LIBRARY AND PC_OPUS_FOUND)
-    find_library(BAE_OPUS_LIBRARY NAMES opus HINTS ${PC_OPUS_LIBRARY_DIRS})
-  endif()
-
-  if(NOT BAE_OPUSFILE_INCLUDE_DIR AND PC_OPUSFILE_FOUND)
-    set(BAE_OPUSFILE_INCLUDE_DIR ${PC_OPUSFILE_INCLUDE_DIRS})
-  endif()
-  if(NOT BAE_OPUSFILE_LIBRARY AND PC_OPUSFILE_FOUND)
-    find_library(BAE_OPUSFILE_LIBRARY NAMES opusfile HINTS ${PC_OPUSFILE_LIBRARY_DIRS})
-  endif()
-
-  if(NOT BAE_OGG_INCLUDE_DIR AND PC_OGG_FOUND)
-    set(BAE_OGG_INCLUDE_DIR ${PC_OGG_INCLUDE_DIRS})
-  endif()
-  if(NOT BAE_OGG_LIBRARY AND PC_OGG_FOUND)
-    find_library(BAE_OGG_LIBRARY NAMES ogg HINTS ${PC_OGG_LIBRARY_DIRS})
-  endif()
-endif()
 set(BAE_OPUS_ENCODER_AVAILABLE OFF)
 set(BAE_OPUS_DECODER_AVAILABLE OFF)
-if(BAE_OPUS_INCLUDE_DIR AND BAE_OPUS_LIBRARY)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opus/include/opus.h" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opus/src/opus.c" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opus/celt/celt_encoder.c" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opus/silk/enc_API.c")
   set(BAE_OPUS_ENCODER_AVAILABLE ON)
 endif()
-if(BAE_OPUS_INCLUDE_DIR AND BAE_OPUSFILE_INCLUDE_DIR AND BAE_OPUS_LIBRARY AND BAE_OPUSFILE_LIBRARY)
+if(BAE_OPUS_ENCODER_AVAILABLE AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opusfile/include/opusfile.h" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opusfile/src/opusfile.c" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opusfile/src/info.c")
   set(BAE_OPUS_DECODER_AVAILABLE ON)
 endif()
 
 find_path(BAE_OGG_INCLUDE_DIR ogg/ogg.h)
 find_library(BAE_OGG_LIBRARY NAMES ogg)
 set(BAE_OGG_AVAILABLE OFF)
-if(BAE_OGG_INCLUDE_DIR AND BAE_OGG_LIBRARY)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libogg/src/framing.c" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libogg/src/bitwise.c")
   set(BAE_OGG_AVAILABLE ON)
 endif()
 
 # Auto-disable codec toggles when required external dependencies are missing.
 if(BAE_ENABLE_FLAC_DECODER AND NOT BAE_FLAC_AVAILABLE)
   set(BAE_ENABLE_FLAC_DECODER OFF)
-  message(STATUS "Disabling FLAC decoder: external libFLAC not found")
+  message(STATUS "Disabling FLAC decoder: bundled libFLAC sources not found (did you forget to submodule update --init --recursive?)")
 else()
   if(BAE_ENABLE_FLAC_DECODER)
-    message(STATUS "Enabling FLAC decoder: external libFLAC found")
+    message(STATUS "Enabling FLAC decoder: using bundled libFLAC sources")
   endif()
 endif()
 if(BAE_ENABLE_MP3_ENCODER AND NOT BAE_MP3_ENCODER_AVAILABLE)
   set(BAE_ENABLE_MP3_ENCODER OFF)
-  message(STATUS "Disabling MP3 encoder: LAME wrapper source or external libmp3lame not found")
+  message(STATUS "Disabling MP3 encoder: bundled LAME sources not found")
 else()
   if(BAE_ENABLE_MP3_ENCODER)
-    message(STATUS "Enabling MP3 encoder: LAME wrapper source and external libmp3lame found")
+    message(STATUS "Enabling MP3 encoder: using bundled LAME sources")
   endif()
 endif()
 if(BAE_ENABLE_FLAC_ENCODER AND NOT BAE_FLAC_AVAILABLE)
   set(BAE_ENABLE_FLAC_ENCODER OFF)
-  message(STATUS "Disabling FLAC encoder: external libFLAC not found")
+  message(STATUS "Disabling FLAC encoder: bundled libFLAC sources not found (did you forget to submodule update --init --recursive?)")
 else()
   if(BAE_ENABLE_FLAC_ENCODER)
-    message(STATUS "Enabling FLAC encoder: external libFLAC found")
+    message(STATUS "Enabling FLAC encoder: using bundled libFLAC sources")
   endif()
 endif()
 
 if(BAE_ENABLE_VORBIS_DECODER AND (NOT BAE_VORBIS_DECODER_AVAILABLE OR NOT BAE_OGG_AVAILABLE))
   set(BAE_ENABLE_VORBIS_DECODER OFF)
-  message(STATUS "Disabling Vorbis decoder: external libvorbis/libvorbisfile/libogg not found")
+  message(STATUS "Disabling Vorbis decoder: bundled Vorbis/Ogg sources not found (did you forget to submodule update --init --recursive?)")
 else()
   if(BAE_ENABLE_VORBIS_DECODER)
-    message(STATUS "Enabling Vorbis decoder: external libvorbis/libvorbisfile/libogg found")
+    message(STATUS "Enabling Vorbis decoder: using bundled Vorbis/Ogg sources")
   endif()
 endif()
 if(BAE_ENABLE_VORBIS_ENCODER AND (NOT BAE_VORBIS_ENCODER_AVAILABLE OR NOT BAE_OGG_AVAILABLE))
   set(BAE_ENABLE_VORBIS_ENCODER OFF)
-  message(STATUS "Disabling Vorbis encoder: external libvorbisenc/libvorbis/libvorbisfile/libogg not found")
+  message(STATUS "Disabling Vorbis encoder: bundled Vorbis/Ogg sources not found (did you forget to submodule update --init --recursive?)")
 else()
   if(BAE_ENABLE_VORBIS_ENCODER)
-    message(STATUS "Enabling Vorbis encoder: external libvorbisenc/libvorbis/libvorbisfile/libogg found")
+    message(STATUS "Enabling Vorbis encoder: using bundled Vorbis/Ogg sources")
   endif()
 endif()
 
 if(BAE_ENABLE_OPUS_DECODER AND (NOT BAE_OPUS_DECODER_AVAILABLE OR NOT BAE_OGG_AVAILABLE))
   set(BAE_ENABLE_OPUS_DECODER OFF)
-  message(STATUS "Disabling Opus decoder: external libopus/libopusfile/libogg not found")
+  message(STATUS "Disabling Opus decoder: bundled Opus/Opusfile/Ogg sources not found (did you forget to submodule update --init --recursive?)")
 else()
   if(BAE_ENABLE_OPUS_DECODER)
-    message(STATUS "Enabling Opus decoder: external libopus/libopusfile/libogg found")
+    message(STATUS "Enabling Opus decoder: using bundled Opus/Opusfile/Ogg sources")
   endif()
 endif()
 if(BAE_ENABLE_OPUS_ENCODER AND (NOT BAE_OPUS_ENCODER_AVAILABLE OR NOT BAE_OGG_AVAILABLE))
   set(BAE_ENABLE_OPUS_ENCODER OFF)
-  message(STATUS "Disabling Opus encoder: external libopus/libogg not found")
+  message(STATUS "Disabling Opus encoder: bundled Opus/Ogg sources not found")
 else()
   if(BAE_ENABLE_OPUS_ENCODER)
-    message(STATUS "Enabling Opus encoder: external libopus/libogg found")
+    message(STATUS "Enabling Opus encoder: using bundled Opus/Ogg sources")
   endif()
 endif()
 
@@ -598,7 +605,30 @@ set(NEOBAE_SOURCES
 )
 
 if(BAE_ENABLE_LZMA)
-  list(APPEND NEOBAE_SOURCES neobae/src/BAE_Source/Common/X_LZMA.c)
+  list(APPEND NEOBAE_SOURCES 
+  neobae/src/BAE_Source/Common/X_LZMA.c
+  neobae/src/thirdparty/lzma-26.00/C/Alloc.c
+	neobae/src/thirdparty/lzma-26.00/C/7zAlloc.c
+	neobae/src/thirdparty/lzma-26.00/C/7zCrc.c
+	neobae/src/thirdparty/lzma-26.00/C/7zCrcOpt.c
+	neobae/src/thirdparty/lzma-26.00/C/7zStream.c
+	neobae/src/thirdparty/lzma-26.00/C/XzCrc64.c
+	neobae/src/thirdparty/lzma-26.00/C/XzCrc64Opt.c
+	neobae/src/thirdparty/lzma-26.00/C/Sha256.c
+	neobae/src/thirdparty/lzma-26.00/C/Sha256Opt.c
+	neobae/src/thirdparty/lzma-26.00/C/CpuArch.c
+	neobae/src/thirdparty/lzma-26.00/C/Bra.c
+	neobae/src/thirdparty/lzma-26.00/C/Bra86.c
+	neobae/src/thirdparty/lzma-26.00/C/BraIA64.c
+	neobae/src/thirdparty/lzma-26.00/C/Delta.c
+	neobae/src/thirdparty/lzma-26.00/C/LzmaDec.c
+	neobae/src/thirdparty/lzma-26.00/C/Lzma2Dec.c
+	neobae/src/thirdparty/lzma-26.00/C/LzFind.c
+	neobae/src/thirdparty/lzma-26.00/C/LzmaEnc.c
+	neobae/src/thirdparty/lzma-26.00/C/Lzma2Enc.c
+	neobae/src/thirdparty/lzma-26.00/C/Xz.c
+	neobae/src/thirdparty/lzma-26.00/C/XzDec.c
+)
 endif()
 
 if(BAE_ENABLE_RMF_EDITOR)
@@ -663,17 +693,270 @@ endif()
 
 if(BAE_ENABLE_MP3_ENCODER)
   list(APPEND NEOBAE_SOURCES neobae/src/BAE_MPEG_Source_II/XMPEG_lame_encoder.cpp)
+  list(APPEND NEOBAE_SOURCES
+    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/VbrTag.c
+    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/bitstream.c
+    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/encoder.c
+    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/fft.c
+    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/gain_analysis.c
+    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/id3tag.c
+    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/lame.c
+    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/newmdct.c
+    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/presets.c
+    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/psymodel.c
+    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/quantize.c
+    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/quantize_pvt.c
+    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/reservoir.c
+    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/set_get.c
+    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/tables.c
+    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/takehiro.c
+    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/util.c
+    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/vbrquantize.c
+    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/version.c
+    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/mpglib_interface.c
+  )
+endif()
+
+if(BAE_ENABLE_FLAC_ENCODER OR BAE_ENABLE_FLAC_DECODER OR BAE_ENABLE_VORBIS_ENCODER OR BAE_ENABLE_VORBIS_DECODER OR BAE_ENABLE_OPUS_ENCODER OR BAE_ENABLE_OPUS_DECODER)
+  list(APPEND NEOBAE_SOURCES
+    neobae/src/thirdparty/libogg/src/bitwise.c
+    neobae/src/thirdparty/libogg/src/framing.c
+  )
+endif()
+
+if(BAE_ENABLE_FLAC_ENCODER OR BAE_ENABLE_FLAC_DECODER)
+  list(APPEND NEOBAE_SOURCES
+    neobae/src/thirdparty/flac/src/libFLAC/bitmath.c
+    neobae/src/thirdparty/flac/src/libFLAC/bitreader.c
+    neobae/src/thirdparty/flac/src/libFLAC/bitwriter.c
+    neobae/src/thirdparty/flac/src/libFLAC/cpu.c
+    neobae/src/thirdparty/flac/src/libFLAC/crc.c
+    neobae/src/thirdparty/flac/src/libFLAC/fixed.c
+    neobae/src/thirdparty/flac/src/libFLAC/float.c
+    neobae/src/thirdparty/flac/src/libFLAC/format.c
+    neobae/src/thirdparty/flac/src/libFLAC/lpc.c
+    neobae/src/thirdparty/flac/src/libFLAC/md5.c
+    neobae/src/thirdparty/flac/src/libFLAC/memory.c
+    neobae/src/thirdparty/flac/src/libFLAC/metadata_iterators.c
+    neobae/src/thirdparty/flac/src/libFLAC/metadata_object.c
+    neobae/src/thirdparty/flac/src/libFLAC/stream_decoder.c
+    neobae/src/thirdparty/flac/src/libFLAC/stream_encoder.c
+    neobae/src/thirdparty/flac/src/libFLAC/stream_encoder_framing.c
+    neobae/src/thirdparty/flac/src/libFLAC/window.c
+    neobae/src/thirdparty/flac/src/libFLAC/ogg_decoder_aspect.c
+    neobae/src/thirdparty/flac/src/libFLAC/ogg_encoder_aspect.c
+    neobae/src/thirdparty/flac/src/libFLAC/ogg_helper.c
+    neobae/src/thirdparty/flac/src/libFLAC/ogg_mapping.c
+  )
+  if(WIN32)
+    list(APPEND NEOBAE_SOURCES neobae/src/thirdparty/flac/src/share/win_utf8_io/win_utf8_io.c)
+  endif()
 endif()
 
 if(BAE_ENABLE_VORBIS_ENCODER OR BAE_ENABLE_VORBIS_DECODER)
+  list(APPEND NEOBAE_SOURCES
+    neobae/src/thirdparty/libvorbis/lib/mdct.c
+    neobae/src/thirdparty/libvorbis/lib/smallft.c
+    neobae/src/thirdparty/libvorbis/lib/block.c
+    neobae/src/thirdparty/libvorbis/lib/envelope.c
+    neobae/src/thirdparty/libvorbis/lib/window.c
+    neobae/src/thirdparty/libvorbis/lib/lsp.c
+    neobae/src/thirdparty/libvorbis/lib/lpc.c
+    neobae/src/thirdparty/libvorbis/lib/analysis.c
+    neobae/src/thirdparty/libvorbis/lib/synthesis.c
+    neobae/src/thirdparty/libvorbis/lib/psy.c
+    neobae/src/thirdparty/libvorbis/lib/info.c
+    neobae/src/thirdparty/libvorbis/lib/floor1.c
+    neobae/src/thirdparty/libvorbis/lib/floor0.c
+    neobae/src/thirdparty/libvorbis/lib/res0.c
+    neobae/src/thirdparty/libvorbis/lib/mapping0.c
+    neobae/src/thirdparty/libvorbis/lib/registry.c
+    neobae/src/thirdparty/libvorbis/lib/codebook.c
+    neobae/src/thirdparty/libvorbis/lib/sharedbook.c
+    neobae/src/thirdparty/libvorbis/lib/lookup.c
+    neobae/src/thirdparty/libvorbis/lib/bitrate.c
+    neobae/src/thirdparty/libvorbis/lib/vorbisfile.c
+  )
+  if(BAE_ENABLE_VORBIS_ENCODER)
+    list(APPEND NEOBAE_SOURCES neobae/src/thirdparty/libvorbis/lib/vorbisenc.c)
+  endif()
   list(APPEND NEOBAE_SOURCES neobae/src/BAE_Source/Common/XVorbisFiles.c)
 endif()
 
 if(BAE_ENABLE_OPUS_ENCODER OR BAE_ENABLE_OPUS_DECODER)
-  list(APPEND NEOBAE_SOURCES neobae/src/BAE_Source/Common/XOpusFiles.c)
+  list(APPEND NEOBAE_SOURCES
+    neobae/src/BAE_Source/Common/XOpusFiles.c
+    neobae/src/thirdparty/opus/src/opus.c
+    neobae/src/thirdparty/opus/src/opus_decoder.c
+    neobae/src/thirdparty/opus/src/opus_encoder.c
+    neobae/src/thirdparty/opus/src/extensions.c
+    neobae/src/thirdparty/opus/src/opus_multistream.c
+    neobae/src/thirdparty/opus/src/opus_multistream_encoder.c
+    neobae/src/thirdparty/opus/src/opus_multistream_decoder.c
+    neobae/src/thirdparty/opus/src/repacketizer.c
+    neobae/src/thirdparty/opus/src/opus_projection_encoder.c
+    neobae/src/thirdparty/opus/src/opus_projection_decoder.c
+    neobae/src/thirdparty/opus/src/mapping_matrix.c
+    neobae/src/thirdparty/opus/src/analysis.c
+    neobae/src/thirdparty/opus/src/mlp.c
+    neobae/src/thirdparty/opus/src/mlp_data.c
+    neobae/src/thirdparty/opus/celt/bands.c
+    neobae/src/thirdparty/opus/celt/celt.c
+    neobae/src/thirdparty/opus/celt/celt_encoder.c
+    neobae/src/thirdparty/opus/celt/celt_decoder.c
+    neobae/src/thirdparty/opus/celt/cwrs.c
+    neobae/src/thirdparty/opus/celt/entcode.c
+    neobae/src/thirdparty/opus/celt/entdec.c
+    neobae/src/thirdparty/opus/celt/entenc.c
+    neobae/src/thirdparty/opus/celt/kiss_fft.c
+    neobae/src/thirdparty/opus/celt/laplace.c
+    neobae/src/thirdparty/opus/celt/mathops.c
+    neobae/src/thirdparty/opus/celt/mdct.c
+    neobae/src/thirdparty/opus/celt/modes.c
+    neobae/src/thirdparty/opus/celt/pitch.c
+    neobae/src/thirdparty/opus/celt/celt_lpc.c
+    neobae/src/thirdparty/opus/celt/quant_bands.c
+    neobae/src/thirdparty/opus/celt/rate.c
+    neobae/src/thirdparty/opus/celt/vq.c
+    neobae/src/thirdparty/opus/silk/CNG.c
+    neobae/src/thirdparty/opus/silk/code_signs.c
+    neobae/src/thirdparty/opus/silk/init_decoder.c
+    neobae/src/thirdparty/opus/silk/decode_core.c
+    neobae/src/thirdparty/opus/silk/decode_frame.c
+    neobae/src/thirdparty/opus/silk/decode_parameters.c
+    neobae/src/thirdparty/opus/silk/decode_indices.c
+    neobae/src/thirdparty/opus/silk/decode_pulses.c
+    neobae/src/thirdparty/opus/silk/decoder_set_fs.c
+    neobae/src/thirdparty/opus/silk/dec_API.c
+    neobae/src/thirdparty/opus/silk/enc_API.c
+    neobae/src/thirdparty/opus/silk/encode_indices.c
+    neobae/src/thirdparty/opus/silk/encode_pulses.c
+    neobae/src/thirdparty/opus/silk/gain_quant.c
+    neobae/src/thirdparty/opus/silk/interpolate.c
+    neobae/src/thirdparty/opus/silk/LP_variable_cutoff.c
+    neobae/src/thirdparty/opus/silk/NLSF_decode.c
+    neobae/src/thirdparty/opus/silk/NSQ.c
+    neobae/src/thirdparty/opus/silk/NSQ_del_dec.c
+    neobae/src/thirdparty/opus/silk/PLC.c
+    neobae/src/thirdparty/opus/silk/shell_coder.c
+    neobae/src/thirdparty/opus/silk/tables_gain.c
+    neobae/src/thirdparty/opus/silk/tables_LTP.c
+    neobae/src/thirdparty/opus/silk/tables_NLSF_CB_NB_MB.c
+    neobae/src/thirdparty/opus/silk/tables_NLSF_CB_WB.c
+    neobae/src/thirdparty/opus/silk/tables_other.c
+    neobae/src/thirdparty/opus/silk/tables_pitch_lag.c
+    neobae/src/thirdparty/opus/silk/tables_pulses_per_block.c
+    neobae/src/thirdparty/opus/silk/VAD.c
+    neobae/src/thirdparty/opus/silk/control_audio_bandwidth.c
+    neobae/src/thirdparty/opus/silk/quant_LTP_gains.c
+    neobae/src/thirdparty/opus/silk/VQ_WMat_EC.c
+    neobae/src/thirdparty/opus/silk/HP_variable_cutoff.c
+    neobae/src/thirdparty/opus/silk/NLSF_encode.c
+    neobae/src/thirdparty/opus/silk/NLSF_VQ.c
+    neobae/src/thirdparty/opus/silk/NLSF_unpack.c
+    neobae/src/thirdparty/opus/silk/NLSF_del_dec_quant.c
+    neobae/src/thirdparty/opus/silk/process_NLSFs.c
+    neobae/src/thirdparty/opus/silk/stereo_LR_to_MS.c
+    neobae/src/thirdparty/opus/silk/stereo_MS_to_LR.c
+    neobae/src/thirdparty/opus/silk/check_control_input.c
+    neobae/src/thirdparty/opus/silk/control_SNR.c
+    neobae/src/thirdparty/opus/silk/init_encoder.c
+    neobae/src/thirdparty/opus/silk/control_codec.c
+    neobae/src/thirdparty/opus/silk/A2NLSF.c
+    neobae/src/thirdparty/opus/silk/ana_filt_bank_1.c
+    neobae/src/thirdparty/opus/silk/biquad_alt.c
+    neobae/src/thirdparty/opus/silk/bwexpander_32.c
+    neobae/src/thirdparty/opus/silk/bwexpander.c
+    neobae/src/thirdparty/opus/silk/debug.c
+    neobae/src/thirdparty/opus/silk/decode_pitch.c
+    neobae/src/thirdparty/opus/silk/inner_prod_aligned.c
+    neobae/src/thirdparty/opus/silk/lin2log.c
+    neobae/src/thirdparty/opus/silk/log2lin.c
+    neobae/src/thirdparty/opus/silk/LPC_analysis_filter.c
+    neobae/src/thirdparty/opus/silk/LPC_inv_pred_gain.c
+    neobae/src/thirdparty/opus/silk/table_LSF_cos.c
+    neobae/src/thirdparty/opus/silk/NLSF2A.c
+    neobae/src/thirdparty/opus/silk/NLSF_stabilize.c
+    neobae/src/thirdparty/opus/silk/NLSF_VQ_weights_laroia.c
+    neobae/src/thirdparty/opus/silk/pitch_est_tables.c
+    neobae/src/thirdparty/opus/silk/resampler.c
+    neobae/src/thirdparty/opus/silk/resampler_down2_3.c
+    neobae/src/thirdparty/opus/silk/resampler_down2.c
+    neobae/src/thirdparty/opus/silk/resampler_private_AR2.c
+    neobae/src/thirdparty/opus/silk/resampler_private_down_FIR.c
+    neobae/src/thirdparty/opus/silk/resampler_private_IIR_FIR.c
+    neobae/src/thirdparty/opus/silk/resampler_private_up2_HQ.c
+    neobae/src/thirdparty/opus/silk/resampler_rom.c
+    neobae/src/thirdparty/opus/silk/sigm_Q15.c
+    neobae/src/thirdparty/opus/silk/sort.c
+    neobae/src/thirdparty/opus/silk/sum_sqr_shift.c
+    neobae/src/thirdparty/opus/silk/stereo_decode_pred.c
+    neobae/src/thirdparty/opus/silk/stereo_encode_pred.c
+    neobae/src/thirdparty/opus/silk/stereo_find_predictor.c
+    neobae/src/thirdparty/opus/silk/stereo_quant_pred.c
+    neobae/src/thirdparty/opus/silk/LPC_fit.c
+    neobae/src/thirdparty/opus/silk/float/apply_sine_window_FLP.c
+    neobae/src/thirdparty/opus/silk/float/corrMatrix_FLP.c
+    neobae/src/thirdparty/opus/silk/float/encode_frame_FLP.c
+    neobae/src/thirdparty/opus/silk/float/find_LPC_FLP.c
+    neobae/src/thirdparty/opus/silk/float/find_LTP_FLP.c
+    neobae/src/thirdparty/opus/silk/float/find_pitch_lags_FLP.c
+    neobae/src/thirdparty/opus/silk/float/find_pred_coefs_FLP.c
+    neobae/src/thirdparty/opus/silk/float/LPC_analysis_filter_FLP.c
+    neobae/src/thirdparty/opus/silk/float/LTP_analysis_filter_FLP.c
+    neobae/src/thirdparty/opus/silk/float/LTP_scale_ctrl_FLP.c
+    neobae/src/thirdparty/opus/silk/float/noise_shape_analysis_FLP.c
+    neobae/src/thirdparty/opus/silk/float/process_gains_FLP.c
+    neobae/src/thirdparty/opus/silk/float/regularize_correlations_FLP.c
+    neobae/src/thirdparty/opus/silk/float/residual_energy_FLP.c
+    neobae/src/thirdparty/opus/silk/float/warped_autocorrelation_FLP.c
+    neobae/src/thirdparty/opus/silk/float/wrappers_FLP.c
+    neobae/src/thirdparty/opus/silk/float/autocorrelation_FLP.c
+    neobae/src/thirdparty/opus/silk/float/burg_modified_FLP.c
+    neobae/src/thirdparty/opus/silk/float/bwexpander_FLP.c
+    neobae/src/thirdparty/opus/silk/float/energy_FLP.c
+    neobae/src/thirdparty/opus/silk/float/inner_product_FLP.c
+    neobae/src/thirdparty/opus/silk/float/k2a_FLP.c
+    neobae/src/thirdparty/opus/silk/float/LPC_inv_pred_gain_FLP.c
+    neobae/src/thirdparty/opus/silk/float/pitch_analysis_core_FLP.c
+    neobae/src/thirdparty/opus/silk/float/scale_copy_vector_FLP.c
+    neobae/src/thirdparty/opus/silk/float/scale_vector_FLP.c
+    neobae/src/thirdparty/opus/silk/float/schur_FLP.c
+    neobae/src/thirdparty/opus/silk/float/sort_FLP.c
+  )
+  if(BAE_ENABLE_OPUS_DECODER)
+    list(APPEND NEOBAE_SOURCES
+      neobae/src/thirdparty/opusfile/src/info.c
+      neobae/src/thirdparty/opusfile/src/internal.c
+      neobae/src/thirdparty/opusfile/src/opusfile.c
+      neobae/src/thirdparty/opusfile/src/stream.c
+    )
+  endif()
+endif()
+
+if (DEBUG)
+  list(APPEND NEOBAE_SOURCES
+      neobae/src/BAE_Source/Common/X_DebugCallback.c
+  )
 endif()
 
 add_library(neobae STATIC ${NEOBAE_SOURCES})
+
+if(BAE_EMBED_PATCHES_EFFECTIVE)
+  set(BAE_EMBED_PATCH_HEADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+  set(BAE_EMBED_PATCH_HEADER "${BAE_EMBED_PATCH_HEADER_DIR}/BAEPatches.h")
+  add_custom_command(
+    OUTPUT ${BAE_EMBED_PATCH_HEADER}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${BAE_EMBED_PATCH_HEADER_DIR}
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/create_embedded_patches_h.py ${BAE_EMBED_PATCH_FILE} ${BAE_EMBED_PATCH_HEADER}
+    DEPENDS ${BAE_EMBED_PATCH_FILE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/create_embedded_patches_h.py
+    VERBATIM
+    COMMENT "Embedding built-in patch bank into BAEPatches.h"
+  )
+  add_custom_target(neobae_embedded_patches DEPENDS ${BAE_EMBED_PATCH_HEADER})
+  add_dependencies(neobae neobae_embedded_patches)
+  target_include_directories(neobae PRIVATE ${BAE_EMBED_PATCH_HEADER_DIR})
+endif()
 
 target_include_directories(neobae
   PUBLIC
@@ -681,6 +964,7 @@ target_include_directories(neobae
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Platform
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/config
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/qoa
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/lzma-26.00/C
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/mod2rmf
 )
 
@@ -688,8 +972,12 @@ if(BAE_ENABLE_MP3_ENCODER OR BAE_ENABLE_MP3_DECODER)
   target_include_directories(neobae PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_MPEG_Source_II)
 endif()
 
-if(BAE_ENABLE_MP3_ENCODER AND BAE_LAME_INCLUDE_DIR)
-  target_include_directories(neobae PUBLIC ${BAE_LAME_INCLUDE_DIR})
+if(BAE_ENABLE_MP3_ENCODER)
+  target_include_directories(neobae PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/lame-3.100-slim/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/lame-3.100-slim/libmp3lame
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/lame-3.100-slim/mpglib
+  )
 endif()
 
 if(BAE_ENABLE_MP3_DECODER)
@@ -700,16 +988,15 @@ if(BAE_ENABLE_FLAC_ENCODER OR BAE_ENABLE_FLAC_DECODER)
   target_include_directories(neobae PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/flac/include
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/flac/src/libFLAC/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/flac/src
   )
-  if(BAE_FLAC_INCLUDE_DIR)
-    target_include_directories(neobae PUBLIC ${BAE_FLAC_INCLUDE_DIR})
-  endif()
 endif()
 
 if(BAE_ENABLE_VORBIS_ENCODER OR BAE_ENABLE_VORBIS_DECODER)
   target_include_directories(neobae PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libvorbis/include
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libvorbis/lib
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libogg/include
   )
   if(BAE_VORBIS_INCLUDE_DIR)
     target_include_directories(neobae PUBLIC ${BAE_VORBIS_INCLUDE_DIR})
@@ -717,17 +1004,20 @@ if(BAE_ENABLE_VORBIS_ENCODER OR BAE_ENABLE_VORBIS_DECODER)
 endif()
 
 if(BAE_ENABLE_OPUS_ENCODER OR BAE_ENABLE_OPUS_DECODER)
-  target_include_directories(neobae PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opus/include)
-  if(BAE_OPUS_INCLUDE_DIR)
-    target_include_directories(neobae PUBLIC ${BAE_OPUS_INCLUDE_DIR})
-  endif()
+  target_include_directories(neobae BEFORE PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opus/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opus/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opus/celt
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opus/silk
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opus/silk/float
+  )
 endif()
 
 if(BAE_ENABLE_OPUS_DECODER)
-  target_include_directories(neobae PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opusfile/include)
-  if(BAE_OPUSFILE_INCLUDE_DIR)
-    target_include_directories(neobae PUBLIC ${BAE_OPUSFILE_INCLUDE_DIR})
-  endif()
+  target_include_directories(neobae BEFORE PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opusfile/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opusfile/src
+  )
 endif()
 
 if(BAE_ENABLE_FLAC_ENCODER OR BAE_ENABLE_FLAC_DECODER OR BAE_ENABLE_VORBIS_ENCODER OR BAE_ENABLE_VORBIS_DECODER OR BAE_ENABLE_OPUS_ENCODER OR BAE_ENABLE_OPUS_DECODER)
@@ -765,6 +1055,7 @@ target_compile_definitions(neobae
     USE_ZMF_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_ZMF}>,1,0>
     USE_ZMF_FORMAT=$<IF:$<BOOL:${BAE_ENABLE_ZMF}>,1,0>
     USE_LZMA_COMPRESSION=$<IF:$<BOOL:${BAE_ENABLE_LZMA}>,1,0>
+    Z7_ST=$<IF:$<BOOL:${BAE_ENABLE_LZMA}>,1,0>
     USE_MPEG_ENCODER=$<IF:$<BOOL:${BAE_ENABLE_MP3_ENCODER}>,1,0>
     USE_MPEG_DECODER=$<IF:$<BOOL:${BAE_ENABLE_MP3_DECODER}>,1,0>
     USE_FLAC_ENCODER=$<IF:$<BOOL:${BAE_ENABLE_FLAC_ENCODER}>,1,0>
@@ -773,8 +1064,13 @@ target_compile_definitions(neobae
     USE_VORBIS_DECODER=$<IF:$<BOOL:${BAE_ENABLE_VORBIS_DECODER}>,1,0>
     USE_OPUS_ENCODER=$<IF:$<BOOL:${BAE_ENABLE_OPUS_ENCODER}>,1,0>
     USE_OPUS_DECODER=$<IF:$<BOOL:${BAE_ENABLE_OPUS_DECODER}>,1,0>
+    OPUS_BUILD=$<IF:$<BOOL:$<OR:$<BOOL:${BAE_ENABLE_OPUS_ENCODER}>,$<BOOL:${BAE_ENABLE_OPUS_DECODER}>>>,1,0>
+    VAR_ARRAYS=$<IF:$<BOOL:$<OR:$<BOOL:${BAE_ENABLE_OPUS_ENCODER}>,$<BOOL:${BAE_ENABLE_OPUS_DECODER}>>>,1,0>
     USE_MINIMP3_WRAPPER=$<IF:$<BOOL:${BAE_ENABLE_MP3_DECODER}>,1,0>
     USE_LAME_ENCODER=$<IF:$<BOOL:${BAE_ENABLE_MP3_ENCODER}>,1,0>
+    HAVE_CONFIG_H=$<IF:$<BOOL:$<OR:$<BOOL:${BAE_ENABLE_MP3_ENCODER}>,$<BOOL:${BAE_ENABLE_FLAC_ENCODER}>,$<BOOL:${BAE_ENABLE_FLAC_DECODER}>>>,1,0>
+    HAVE_STDINT_H=$<IF:$<BOOL:$<OR:$<BOOL:${BAE_ENABLE_MP3_ENCODER}>,$<BOOL:${BAE_ENABLE_FLAC_ENCODER}>,$<BOOL:${BAE_ENABLE_FLAC_DECODER}>>>,1,0>
+    HAVE_INTTYPES_H=$<IF:$<BOOL:$<OR:$<BOOL:${BAE_ENABLE_MP3_ENCODER}>,$<BOOL:${BAE_ENABLE_FLAC_ENCODER}>,$<BOOL:${BAE_ENABLE_FLAC_DECODER}>>>,1,0>
     USE_OGG_FORMAT=$<IF:$<BOOL:$<OR:$<BOOL:${BAE_ENABLE_FLAC_ENCODER}>,$<BOOL:${BAE_ENABLE_FLAC_DECODER}>,$<BOOL:${BAE_ENABLE_VORBIS_ENCODER}>,$<BOOL:${BAE_ENABLE_VORBIS_DECODER}>,$<BOOL:${BAE_ENABLE_OPUS_ENCODER}>,$<BOOL:${BAE_ENABLE_OPUS_DECODER}>>>,1,0>
     SUPPORT_OGG_FORMAT=$<IF:$<BOOL:$<OR:$<BOOL:${BAE_ENABLE_FLAC_ENCODER}>,$<BOOL:${BAE_ENABLE_FLAC_DECODER}>,$<BOOL:${BAE_ENABLE_VORBIS_ENCODER}>,$<BOOL:${BAE_ENABLE_VORBIS_DECODER}>,$<BOOL:${BAE_ENABLE_OPUS_ENCODER}>,$<BOOL:${BAE_ENABLE_OPUS_DECODER}>>>,1,0>
     USE_SF2_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_SF2_SUPPORT}>,1,0>
@@ -782,14 +1078,15 @@ target_compile_definitions(neobae
     USE_XMF_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_XMF_SUPPORT}>,1,0>
     DISABLE_NOKIA_PATCH=$<IF:$<BOOL:$<NOT:$<BOOL:${BAE_ENABLE_NOKIA_PATCH}>>>,1,0>
     DISABLE_BEATNIK_SF2_NRPN=$<IF:$<BOOL:$<NOT:$<BOOL:${BAE_ENABLE_BEATNIK_SF2_NRPN}>>>,1,0>
-    _LOAD_BUILTIN_PATCHES_FOR_SF2=$<IF:$<BOOL:${BAE_ENABLE_BUILTIN_PATCHES_WITH_SF2}>,1,0>
+    _BUILT_IN_PATCHES=$<IF:$<BOOL:${BAE_EMBED_PATCHES_EFFECTIVE}>,1,0>
+    _LOAD_BUILTIN_PATCHES_FOR_SF2=$<IF:$<BOOL:$<AND:$<BOOL:${BAE_EMBED_PATCHES_EFFECTIVE}>,$<BOOL:${BAE_ENABLE_BUILTIN_PATCHES_WITH_SF2}>>>,1,0>
     BAE_FIX_SPAN_DC=$<IF:$<BOOL:${BAE_ENABLE_FIX_SPAN_DC}>,1,0>
     BAE_CLASSIC_CHORUS=$<IF:$<BOOL:${BAE_ENABLE_CLASSIC_CHORUS}>,1,0>
     USE_MTHC_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_MTHC_SUPPORT}>,1,0>
     USE_ADP_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_ADP_SUPPORT}>,1,0>
     SUPPORT_KARAOKE=$<IF:$<BOOL:${BAE_ENABLE_KARAOKE}>,1,0>
     SUPPORT_BAESCRIPT=$<IF:$<BOOL:${BAE_ENABLE_BAESCRIPT}>,1,0>
-    SUPPORT_PLAYLIST=$<IF:$<BOOL:${BAE_ENABLE_PLAYLIST}>,1,0>
+    SUPPORT_PLAYLIST=$<IF:$<BOOL:${BAE_ENABLE_PLAYLIST}>,1,0>    
 )
 
 target_compile_options(neobae PRIVATE -w)
@@ -805,38 +1102,12 @@ if(UNIX AND NOT APPLE)
   endif()
 endif()
 
-if(BAE_ENABLE_MP3_ENCODER)
-  target_link_libraries(neobae PUBLIC ${BAE_LAME_LIBRARY})
-endif()
-
 if(BAE_ENABLE_SF2_SUPPORT AND BAE_ENABLE_FLUIDSYNTH)
   target_link_libraries(neobae PUBLIC ${BAE_FLUIDSYNTH_LIBRARY})
 endif()
 
 if(BAE_ENABLE_XMF_SUPPORT)
   target_link_libraries(neobae PUBLIC z)
-endif()
-
-if(BAE_ENABLE_FLAC_ENCODER OR BAE_ENABLE_FLAC_DECODER)
-  target_link_libraries(neobae PUBLIC ${BAE_FLAC_LIBRARY})
-endif()
-
-if(BAE_ENABLE_VORBIS_ENCODER OR BAE_ENABLE_VORBIS_DECODER)
-  target_link_libraries(neobae PUBLIC ${BAE_VORBIS_LIBRARY} ${BAE_VORBISFILE_LIBRARY})
-  if(BAE_ENABLE_VORBIS_ENCODER)
-    target_link_libraries(neobae PUBLIC ${BAE_VORBISENC_LIBRARY})
-  endif()
-endif()
-
-if(BAE_ENABLE_OPUS_ENCODER OR BAE_ENABLE_OPUS_DECODER)
-  target_link_libraries(neobae PUBLIC ${BAE_OPUS_LIBRARY})
-  if(BAE_ENABLE_OPUS_DECODER)
-    target_link_libraries(neobae PUBLIC ${BAE_OPUSFILE_LIBRARY})
-  endif()
-endif()
-
-if(BAE_ENABLE_FLAC_ENCODER OR BAE_ENABLE_FLAC_DECODER OR BAE_ENABLE_VORBIS_ENCODER OR BAE_ENABLE_VORBIS_DECODER OR BAE_ENABLE_OPUS_ENCODER OR BAE_ENABLE_OPUS_DECODER)
-  target_link_libraries(neobae PUBLIC ${BAE_OGG_LIBRARY})
 endif()
 
 if(BAE_ENABLE_LZMA)
@@ -876,6 +1147,9 @@ if(BUILD_ZEFIDI)
       neobae/src/gui/gui_panels.c
       neobae/src/gui/gui_main.c
     )
+    if (DEBUG)
+      list(APPEND ZEFIDI_SOURCES neobae/src/gui/gui_debug_console.c)
+    endif()    
     if(BAE_ENABLE_KARAOKE)
       list(APPEND ZEFIDI_SOURCES neobae/src/gui/gui_karaoke.c)
     endif()
@@ -899,7 +1173,6 @@ if(BUILD_ZEFIDI)
     message(STATUS "Skipping BUILD_ZEFIDI because matching SDL and SDL_ttf were not found for selected BAE_PLATFORM.")
   endif()
 endif()
-
 if(BUILD_CLITOOLS)
   add_executable(songtool 
     neobae/src/songtool/songtool.c
