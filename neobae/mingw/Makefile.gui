@@ -15,26 +15,43 @@ else
 	CROSS := x86_64-w64-mingw32-
 endif
 
-ARCH		?= -static
-CC			?= $(CROSS)gcc
-CXX			?= $(CROSS)g++
-# Use C++ linker if we have any C++ sources
+ifeq ($(BITS),32)
+    ARCH		:= -static
+    CC		:= i686-w64-mingw32-gcc
+    CXX		:= i686-w64-mingw32-g++
 ifneq ($(filter %.cpp,$(SRC) $(SRC_BIN)),)
 LD			:= $(CXX)
 else
 LD			:= $(CC)
 endif
-AR      	:= $(CROSS)ar
-STRIP      	:= $(CROSS)strip
-DLLTOOL		:= $(CROSS)dlltool
-WINDRES		:= $(CROSS)windres
-
-OPTI            := -O2 -fPIC
-ifeq ($(LDEBUG),1)
-    OPTI := -g -O0 -ggdb3 -fPIC
+    AR      	:= i686-w64-mingw32-ar
+    STRIP      	:= i686-w64-mingw32-strip
+    DLLTOOL		:= i686-w64-mingw32-dlltool
+	WINDRES		:= i686-w64-mingw32-windres
+    OPTI            := -O2 -fPIC
+    ifeq ($(LDEBUG),1)
+        OPTI := -g -O0 -ggdb3 -fPIC
+    endif 
+    CFLAGS  	:= $(ARCH) $(OPTI) $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value -DEMBED_FONT_TTF
+else
+    ARCH		:= -static
+    CC		:= x86_64-w64-mingw32-gcc
+    CXX		:= x86_64-w64-mingw32-g++
+ifneq ($(filter %.cpp,$(SRC) $(SRC_BIN)),)
+LD			:= $(CXX)
+else
+LD			:= $(CC)
 endif
-CFLAGS  	:= $(ARCH) $(OPTI) $(INC_PATH) -D_THREAD_SAFE -DEMBED_FONT_TTF -Wno-unused-value
-
+    AR      	:= x86_64-w64-mingw32-ar
+    STRIP      	:= x86_64-w64-mingw32-strip
+    DLLTOOL		:= x86_64-w64-mingw32-dlltool
+	WINDRES		:= x86_64-w64-mingw32-windres
+    OPTI            := -O2 -fPIC
+    ifeq ($(LDEBUG),1)
+        OPTI := -g -O0 -ggdb3 -fPIC
+    endif 
+    CFLAGS  	:= $(ARCH) $(OPTI) $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value -DEMBED_FONT_TTF
+endif
 
 
 ifneq ($(ENABLE_MIDI_HW),)

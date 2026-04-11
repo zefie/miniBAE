@@ -343,23 +343,140 @@ static void refine_loop_points_from_pcm(const uint8_t *pcmData,
     *ioLoopEnd = (int32_t)bestEnd;
 }
 
+/* Add an 8-segment piecewise linear attack approximation to an ADSR stage array.
+ * SF2 volume attack is convex in amplitude (fast initial rise, slowing near peak),
+ * modelled as level(t) = peak * (1 - exp(-4*t/T)), normalised so segment 8 = peak.
+ * Falls back to a single linear segment when there are fewer than 8 free slots
+ * or the attack time is too short to bother subdividing.
+ * Returns the new stage index.
+ */
+static uint32_t adsr_push_attack_piecewise(BAERmfEditorADSRInfo *adsr,
+                                           uint32_t st,
+                                           int32_t targetLevel,
+                                           int32_t attackUs)
+{
+    static const int N = 8;
+    static const double k = 4.0;
+    int i;
+    if (attackUs <= 0) {
+        if (st < BAE_EDITOR_MAX_ADSR_STAGES) {
+            adsr->stages[st].level = targetLevel;
+            adsr->stages[st].time = 0;
+            adsr->stages[st].flags = FCC('L','I','N','E');
+            st++;
+        }
+        return st;
+    }
+    if ((int32_t)(st + (uint32_t)N) > BAE_EDITOR_MAX_ADSR_STAGES || attackUs < N * 1000) {
+        /* Not enough room or attack too short: single linear ramp */
+        if (st < BAE_EDITOR_MAX_ADSR_STAGES) {
+            adsr->stages[st].level = targetLevel;
+            adsr->stages[st].time = attackUs;
+            adsr->stages[st].flags = FCC('L','I','N','E');
+            st++;
+        }
+        return st;
+    }
+    {
+        /* Normalisation constant so that i==N yields exactly targetLevel */
+        double norm = 1.0 - exp(-k);
+        int32_t segTime = attackUs / N;
+        int32_t lastTime = attackUs - segTime * (N - 1);
+        for (i = 1; i <= N; i++) {
+            double t = (double)i / (double)N;
+            int32_t level = (i == N) ? targetLevel
+                          : (int32_t)((double)targetLevel * (1.0 - exp(-k * t)) / norm + 0.5);
+            int32_t time  = (i == N) ? lastTime : segTime;
+            adsr->stages[st].level = level;
+            adsr->stages[st].time  = time;
+            adsr->stages[st].flags = FCC('L','I','N','E');
+            st++;
+        }
+    }
+    return st;
+}
+
+/* Add an 8-segment piecewise linear decay/release approximation to an ADSR stage array.
+ * SF2 decay/release is exponential (fast initial drop, slower approach to target),
+ * modelled as level(t) = endLevel + range * exp(-4*t/T).
+ * The last segment always carries finalFlags (LINE for decay, LAST for release).
+ * Falls back to a single linear segment when there are fewer than 8 free slots
+ * or the decay time is too short.
+ * Returns the new stage index.
+ */
+static uint32_t adsr_push_decay_piecewise(BAERmfEditorADSRInfo *adsr,
+                                          uint32_t st,
+                                          int32_t startLevel,
+                                          int32_t endLevel,
+                                          int32_t decayUs,
+                                          int32_t finalFlags)
+{
+    static const int N = 8;
+    static const double k = 4.0;
+    int i;
+    if (decayUs <= 0) {
+        if (st < BAE_EDITOR_MAX_ADSR_STAGES) {
+            adsr->stages[st].level = endLevel;
+            adsr->stages[st].time = 0;
+            adsr->stages[st].flags = finalFlags;
+            st++;
+        }
+        return st;
+    }
+    if ((int32_t)(st + (uint32_t)N) > BAE_EDITOR_MAX_ADSR_STAGES || decayUs < N * 1000) {
+        /* Not enough room or decay too short: single linear ramp */
+        if (st < BAE_EDITOR_MAX_ADSR_STAGES) {
+            adsr->stages[st].level = endLevel;
+            adsr->stages[st].time = decayUs;
+            adsr->stages[st].flags = finalFlags;
+            st++;
+        }
+        return st;
+    }
+    {
+        int32_t range    = startLevel - endLevel;
+        int32_t segTime  = decayUs / N;
+        int32_t lastTime = decayUs - segTime * (N - 1);
+        for (i = 1; i <= N; i++) {
+            double t = (double)i / (double)N;
+            int32_t level = (i == N) ? endLevel
+                          : (int32_t)((double)endLevel + (double)range * exp(-k * t) + 0.5);
+            int32_t time  = (i == N) ? lastTime : segTime;
+            int32_t flags = (i == N) ? finalFlags : FCC('L','I','N','E');
+            adsr->stages[st].level = level;
+            adsr->stages[st].time  = time;
+            adsr->stages[st].flags = flags;
+            st++;
+        }
+    }
+    return st;
+}
+
+/* Build BAE ADSR stages from SF2 envelope parameters.
+ * extAdsr: when non-zero, use 8-segment piecewise linear approximation for
+ *          attack, decay, and release to emulate the SF2 exponential curves.
+ *          Requires --extended-adsr / --ext-adsr CLI flag (implies ZSB output).
+ *          When zero, single linear segments are used (classic HSB behaviour).
+ */
 static void build_adsr_from_sf2(BAERmfEditorADSRInfo *adsr,
                                 int delayTc,
                                 int attackTc,
                                 int holdTc,
                                 int decayTc,
                                 int32_t sustainLevel,
-                                int releaseTc)
+                                int releaseTc,
+                                int extAdsr)
 {
     uint32_t st = 0;
     int32_t attackUs = seconds_to_us_clamped(resolve_attack_seconds_from_sf2_tc(attackTc));
     int32_t holdUs = tc_to_us(holdTc);
     int32_t decayUs = seconds_to_us_clamped(resolve_decay_seconds_from_sf2_tc(decayTc, sustainLevel));
     int32_t releaseUs = seconds_to_us_clamped(resolve_release_seconds_from_sf2_tc(releaseTc, sustainLevel));
-    int32_t delayUs = tc_to_us(delayTc);    
+    int32_t delayUs = tc_to_us(delayTc);
 
     memset(adsr, 0, sizeof(*adsr));
 
+    /* Delay: always a single linear stage (delay is linear in SF2 too) */
     if (delayUs > 0 && st < BAE_EDITOR_MAX_ADSR_STAGES) {
         adsr->stages[st].level = 0;
         adsr->stages[st].time = delayUs;
@@ -367,13 +484,19 @@ static void build_adsr_from_sf2(BAERmfEditorADSRInfo *adsr,
         st++;
     }
 
-    if (st < BAE_EDITOR_MAX_ADSR_STAGES) {
-        adsr->stages[st].level = SF2HSB_VOLUME_RANGE;
-        adsr->stages[st].time = attackUs;
-        adsr->stages[st].flags = FCC('L','I','N','E');
-        st++;
+    /* Attack */
+    if (extAdsr) {
+        st = adsr_push_attack_piecewise(adsr, st, SF2HSB_VOLUME_RANGE, attackUs);
+    } else {
+        if (st < BAE_EDITOR_MAX_ADSR_STAGES) {
+            adsr->stages[st].level = SF2HSB_VOLUME_RANGE;
+            adsr->stages[st].time = attackUs;
+            adsr->stages[st].flags = FCC('L','I','N','E');
+            st++;
+        }
     }
 
+    /* Hold: always a single flat stage */
     if (holdUs > 0 && st < BAE_EDITOR_MAX_ADSR_STAGES) {
         adsr->stages[st].level = SF2HSB_VOLUME_RANGE;
         adsr->stages[st].time = holdUs;
@@ -381,13 +504,19 @@ static void build_adsr_from_sf2(BAERmfEditorADSRInfo *adsr,
         st++;
     }
 
-    if (st < BAE_EDITOR_MAX_ADSR_STAGES) {
-        adsr->stages[st].level = sustainLevel;
-        adsr->stages[st].time = decayUs;
-        adsr->stages[st].flags = FCC('L','I','N','E');
-        st++;
+    /* Decay */
+    if (extAdsr) {
+        st = adsr_push_decay_piecewise(adsr, st, SF2HSB_VOLUME_RANGE, sustainLevel, decayUs, FCC('L','I','N','E'));
+    } else {
+        if (st < BAE_EDITOR_MAX_ADSR_STAGES) {
+            adsr->stages[st].level = sustainLevel;
+            adsr->stages[st].time = decayUs;
+            adsr->stages[st].flags = FCC('L','I','N','E');
+            st++;
+        }
     }
 
+    /* Sustain hold point */
     if (st < BAE_EDITOR_MAX_ADSR_STAGES) {
         adsr->stages[st].level = sustainLevel;
         adsr->stages[st].time = 0;
@@ -398,11 +527,17 @@ static void build_adsr_from_sf2(BAERmfEditorADSRInfo *adsr,
     if (releaseUs < 1000) {
         releaseUs = 1000;
     }
-    if (st < BAE_EDITOR_MAX_ADSR_STAGES) {
-        adsr->stages[st].level = 0;
-        adsr->stages[st].time = releaseUs;
-        adsr->stages[st].flags = FCC('L','A','S','T');
-        st++;
+
+    /* Release */
+    if (extAdsr) {
+        st = adsr_push_decay_piecewise(adsr, st, sustainLevel, 0, releaseUs, FCC('L','A','S','T'));
+    } else {
+        if (st < BAE_EDITOR_MAX_ADSR_STAGES) {
+            adsr->stages[st].level = 0;
+            adsr->stages[st].time = releaseUs;
+            adsr->stages[st].flags = FCC('L','A','S','T');
+            st++;
+        }
     }
 
     adsr->stageCount = st;
@@ -681,7 +816,8 @@ static BAEResult apply_ext_info_for_zone(BAERmfEditorDocument *document,
                                          SF2Zone const *zone,
                                          const char *presetName,
                                          int isDrumPreset,
-                                         int enableSampleAndHold)
+                                         int enableSampleAndHold,
+                                         int extAdsr)
 {
     BAEResult result;
     BAERmfEditorInstrumentExtInfo ext;
@@ -745,7 +881,8 @@ static BAEResult apply_ext_info_for_zone(BAERmfEditorDocument *document,
                         zone->volHoldTc,
                         zone->volDecayTc,
                         sustainLevel,
-                        zone->volReleaseTc);
+                        zone->volReleaseTc,
+                        extAdsr);
 
     /* LFOs */
     ext.lfoCount = 0;
@@ -826,7 +963,8 @@ static BAEResult apply_ext_info_for_zone(BAERmfEditorDocument *document,
                             zone->modHoldTc,
                             zone->modDecayTc,
                             pm_to_level4096(zone->modSustainPm),
-                            zone->modReleaseTc);
+                            zone->modReleaseTc,
+                            extAdsr);
     }
 
     if (zone->modEnvToFilterCents != 0 && ext.lfoCount < BAE_EDITOR_MAX_LFOS) {
@@ -845,7 +983,8 @@ static BAEResult apply_ext_info_for_zone(BAERmfEditorDocument *document,
                             zone->modHoldTc,
                             zone->modDecayTc,
                             pm_to_level4096(zone->modSustainPm),
-                            zone->modReleaseTc);
+                            zone->modReleaseTc,
+                            extAdsr);
     }
 
     return BAERmfEditorDocument_SetInstrumentExtInfo(document, instID, &ext);
@@ -876,6 +1015,7 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
     uint32_t sampleCacheCap;
     PendingInstrumentExt pendingExts[SF2HSB_MAX_PENDING_EXTS];
     uint32_t pendingExtCount;
+    int outputIsZsb;
 
     memset(&localReport, 0, sizeof(localReport));
     document = NULL;
@@ -895,6 +1035,14 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
     }
 
     localOptions = *options;
+
+    if (localOptions.extendedAdsr && localOptions.forceHsb) {
+        set_error(errorBuffer, errorBufferSize, "--extended-adsr cannot be used with --force-hsb.");
+        return BAE_PARAM_ERR;
+    }
+    if (localOptions.extendedAdsr) {
+        localOptions.forceZsb = 1;
+    }
 
     if (localOptions.forceHsb && localOptions.forceZsb) {
         set_error(errorBuffer, errorBufferSize, "--force-hsb and --force-zsb cannot be used together.");
@@ -945,8 +1093,32 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
     sampleCacheCount = 0;
     sampleCacheCap = 0;
     pendingExtCount = 0;
+    outputIsZsb = 0;
     firstDrumPreset = 0xFFFFu;
     secondDrumPreset = 0xFFFFu;
+
+    if (localOptions.forceZsb) {
+        outputIsZsb = 1;
+    } else if (localOptions.forceHsb) {
+        outputIsZsb = 0;
+    } else if (outputPath && ends_with_ci(outputPath, ".zsb")) {
+        outputIsZsb = 1;
+    }
+
+    if (!localOptions.dryRun && outputPath != NULL) {
+        if (outputIsZsb && ends_with_ci(outputPath, ".hsb")) {
+            set_error(errorBuffer, errorBufferSize, "Selected ZSB output cannot be written to a .hsb path.");
+            BAERmfEditorDocument_Delete(document);
+            SF2Bank_Free(sf2Ptr);
+            return BAE_PARAM_ERR;
+        }
+        if (!outputIsZsb && ends_with_ci(outputPath, ".zsb")) {
+            set_error(errorBuffer, errorBufferSize, "Selected HSB output cannot be written to a .zsb path.");
+            BAERmfEditorDocument_Delete(document);
+            SF2Bank_Free(sf2Ptr);
+            return BAE_PARAM_ERR;
+        }
+    }
 
     for (i = 0; i < sf2Ptr->presetCount; ++i) {
         SF2PresetHdr const *preset = &sf2Ptr->presets[i];
@@ -1336,7 +1508,8 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
                                          &pendingExts[i].zone,
                                          pendingExts[i].presetName,
                                          pendingExts[i].isDrumPreset,
-                                         pendingExts[i].enableSampleAndHold);
+                                         pendingExts[i].enableSampleAndHold,
+                                         localOptions.extendedAdsr);
         if (result != BAE_NO_ERROR) {
             set_error(errorBuffer, errorBufferSize, "Failed to apply staged instrument ADSR/LFO extension data.");
             free(sampleCache);
@@ -1346,9 +1519,9 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
         }
     }
 
-    printf("Serializing authored document to HSB format...\n");
+    printf("Serializing authored document to %s format...\n", outputIsZsb ? "ZSB" : "HSB");
     result = BAERmfEditorDocument_SaveAsRmfToMemory(document,
-                                                    FALSE,
+                                                    outputIsZsb ? TRUE : FALSE,
                                                     &rmfData,
                                                     &rmfSize);
     if (result != BAE_NO_ERROR) {

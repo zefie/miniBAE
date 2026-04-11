@@ -1208,7 +1208,28 @@ static void PV_ADSRModule(GM_ADSR *a, bool sustaining)
 #endif
     // BAE_PRINTF("currentLevel = %ld\n", (int32_t)a->currentLevel);
     a->currentTime = currentTime;
-    a->currentPosition = index & 7; // protect against runaway indexes
+
+    // Preserve retro 8-stage wrap behaviour for legacy RMF/HSB envelopes,
+    // while allowing extended ZMF/ZSB envelopes to use the full ADSR_STAGES range.
+    if ((ADSR_STAGES > 8) &&
+        (a->ADSRFlags[8] == 0) &&
+        (a->ADSRTime[8] == 0) &&
+        (a->ADSRLevel[8] == 0))
+    {
+        a->currentPosition = (unsigned char)(index & 7);
+    }
+    else
+    {
+        if (index < 0)
+        {
+            index = 0;
+        }
+        else if (index >= ADSR_STAGES)
+        {
+            index = ADSR_STAGES - 1;
+        }
+        a->currentPosition = (unsigned char)index;
+    }
 }
 
 static INLINE int32_t PV_GetWaveShape(int32_t where, int32_t what_kind)

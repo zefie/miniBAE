@@ -474,7 +474,7 @@ typedef struct BAERmfEditorSample
 
 /* ---------- Extended instrument data (ADSR, LFO, LPF, curves) ---------- */
 
-#define EDITOR_MAX_ADSR_STAGES 8  /* matches ADSR_STAGES from GenSnd.h */
+#define EDITOR_MAX_ADSR_STAGES 32  /* matches ADSR_STAGES from GenSnd.h; RMF/HSB capped at 8 at write time */
 #define EDITOR_MAX_LFOS        6  /* matches MAX_LFOS */
 #define EDITOR_MAX_CURVES      4  /* matches MAX_CURVES */
 
@@ -13604,6 +13604,9 @@ void BAEZMFReasonCodeToString(uint32_t reason, char *outBuffer, uint32_t bufferS
     if (reason & BAEZMF_REASON_PANFIX)
         APPEND("Panfix song flag enabled; ");
 
+    if (reason & BAEZMF_REASON_EXTENDED_ADSR)
+        APPEND("Extended ADSR envelope (>8 stages); ");
+
     if (reason & BAEZMF_REASON_EXTENDED_PITCH_RANGE)
         APPEND("Extended pitch range enabled; ");
 
@@ -13700,10 +13703,30 @@ BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document, 
     for (i = 0; i < document->instrumentExtCount; ++i)
     {
         BAERmfEditorInstrumentExt const *ext = &document->instrumentExts[i];
+        uint32_t lfoIdx;
 
         if (TEST_FLAG_VALUE(ext->flags2, ZBF_advancedInterpolation) && (reason & BAEZMF_REASON_CUBIC_INTERPOLATION) == 0)
         {            
             reason |= BAEZMF_REASON_CUBIC_INTERPOLATION;
+        }
+
+        if ((reason & BAEZMF_REASON_EXTENDED_ADSR) == 0)
+        {
+            if (ext->volumeADSR.stageCount > BAE_RMF_MAX_ADSR_STAGES)
+            {
+                reason |= BAEZMF_REASON_EXTENDED_ADSR;
+            }
+            else
+            {
+                for (lfoIdx = 0; lfoIdx < ext->lfoCount; lfoIdx++)
+                {
+                    if (ext->lfos[lfoIdx].adsr.stageCount > BAE_RMF_MAX_ADSR_STAGES)
+                    {
+                        reason |= BAEZMF_REASON_EXTENDED_ADSR;
+                        break;
+                    }
+                }
+            }
         }
     }
     int32_t engineFlags;
@@ -13762,6 +13785,10 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
 
         if (BAERmfEditorBank_GetInstrumentExtInfo(bankToken, instrumentIndex, &extInfo) == BAE_NO_ERROR)
         {
+            if (extInfo.hasExtendedData && extInfo.volumeADSR.stageCount > BAE_RMF_MAX_ADSR_STAGES)
+            {
+                reason |= BAEZMF_REASON_EXTENDED_ADSR;
+            }
             if (extInfo.hasExtendedData && TEST_FLAG_VALUE(extInfo.flags2, ZBF_advancedInterpolation))
             {
 #if defined(_DEBUG) && (_DEBUG != 0)

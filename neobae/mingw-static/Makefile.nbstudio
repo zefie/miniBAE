@@ -26,8 +26,6 @@
 #   otherwise include/lib paths are derived from WX_PREFIX.
 #
 # Notes:
-#   - SDL3.dll and (when USE_FLUIDSYNTH=1) libfluidsynth-3.dll are still
-#     linked as DLL import libs.
 #   - liblzma SDK, libxmp-lite, libg722, and RtMidi are compiled from
 #     in-tree src/thirdparty/ sources.
 #   - No SDL3_ttf required (wxWidgets handles the UI).

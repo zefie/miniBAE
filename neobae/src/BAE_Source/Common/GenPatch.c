@@ -535,7 +535,7 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                                 pCurve->tieTo = PV_TranslateFromFileToMemoryID(XGetLong(pUnit) & 0x5F5F5F5F);
                                 pUnit += 4;
                                 unitSubCount = *pUnit++;
-                                if (unitSubCount > ADSR_STAGES)
+                                if (unitSubCount >= MAX_CURVES)  /* array is MAX_CURVES entries + 1 extra slot */
                                 {
                                     goto bailoninstrument;
                                 }

@@ -18,6 +18,7 @@ typedef struct {
     int strict;
     int forceHsb;
     int forceZsb;
+    int extendedAdsr;  /* --extended-adsr / --ext-adsr: 8-segment exponential curve approx; forces ZSB */
 } SF2HSBConvertOptions;
 
 typedef struct {

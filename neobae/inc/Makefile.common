@@ -446,9 +446,7 @@ endif
 
 # Add FLAC decoder source files
 ifneq ($(filter 1,$(FLAC_DEC) $(FLAC_ENC)),)
-	ifeq ($(FLAC_ENC),1)
-		SRC += src/thirdparty/flac/src/libFLAC/stream_encoder.c
-	endif
+	SRC += src/thirdparty/flac/src/libFLAC/stream_encoder.c
 	SRC += src/thirdparty/flac/src/libFLAC/bitmath.c
 	SRC += src/thirdparty/flac/src/libFLAC/bitreader.c
 	SRC += src/thirdparty/flac/src/libFLAC/bitwriter.c

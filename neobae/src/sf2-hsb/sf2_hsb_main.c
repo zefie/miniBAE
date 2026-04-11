@@ -16,6 +16,9 @@ static void print_usage(const char *programName)
     printf("  --strict       Fail fast on conversion warnings\n");
     printf("  --force-hsb    Force .hsb output\n");
     printf("  --force-zsb    Force .zsb output\n");
+    printf("  --extended-adsr / --ext-adsr\n");
+    printf("                 Approximate SF2 exponential ADSR curves with 8-segment\n");
+    printf("                 piecewise linear interpolation.  Implies --force-zsb.\n");
     printf("  -h, --help     Show this help\n");
 }
 
@@ -45,6 +48,8 @@ int main(int argc, char **argv)
             options.forceHsb = 1;
         } else if (strcmp(argv[i], "--force-zsb") == 0) {
             options.forceZsb = 1;
+        } else if (strcmp(argv[i], "--extended-adsr") == 0 || strcmp(argv[i], "--ext-adsr") == 0) {
+            options.extendedAdsr = 1;
         } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
             return 0;

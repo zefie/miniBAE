@@ -733,7 +733,7 @@ typedef int32_t UNIT_TYPE;
         ADSR_GOTO_CONDITIONAL_LONG = FOUR_CHAR('G', 'O', 'S', 'T'), //  'GOST'
         ADSR_RELEASE_LONG = FOUR_CHAR('R', 'E', 'L', 'S'),          //  'RELS'
 
-        ADSR_STAGES = 8, // max number of ADSR stages
+        ADSR_STAGES = 32, // max number of ADSR stages (ZMF/ZSB uses up to 32; RMF/HSB limited to 8 at serialization)
 
 #if USE_MEMORY_OPTS == 1
         // small footprint translations. These represent the larger file based tags.

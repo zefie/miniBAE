@@ -3086,7 +3086,8 @@ typedef struct BAERmfEditorSampleAssetInfo
  * Valid instIDs are small non-negative integers (0..~511); 0xFFFFFFFF is never a real ID. */
 #define BAE_EDITOR_INST_ID_NONE    0xFFFFFFFFu
 
-#define BAE_EDITOR_MAX_ADSR_STAGES 8
+#define BAE_EDITOR_MAX_ADSR_STAGES 32
+#define BAE_RMF_MAX_ADSR_STAGES     8  /* hard limit for RMF/HSB format; > 8 stages forces ZMF/ZSB */
 #define BAE_EDITOR_MAX_LFOS        6
 #define BAE_EDITOR_MAX_CURVES      4
 
@@ -3441,6 +3442,7 @@ enum BAEZMFReasonCode
     BAEZMF_REASON_EXTENDED_PITCH_RANGE = 8,
     BAEZMF_REASON_CLASSIC_CHORUS = 16,
     BAEZMF_REASON_PANFIX = 32,
+    BAEZMF_REASON_EXTENDED_ADSR = 64,  /* any instrument has > 8 ADSR stages */
     BAEZMF_ALREADY_ZMF = 0x40000000u,
     BAEZMF_REASON_OTHER = 0x80000000u
 };
