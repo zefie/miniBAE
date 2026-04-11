@@ -125,4 +125,4 @@ NeoBAE (zefie's modifications) is licensed under GPL-3.0.
 
 Original Beatnik miniBAE code remains under BSD-3-Clause.
 
-See [LICENSE](LICENSE) and [NOTICE](NOTICE) for details.
+See [LICENSE](LICENSE), [LICENSE.BSD](LICENSE.BSD), and [NOTICE](NOTICE) for details.
