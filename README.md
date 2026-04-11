@@ -1,176 +1,128 @@
 # NeoBAE
 
-A cross-platform audio engine and music player supporting multiple audio formats including MIDI, RMF, WAV, AIFF, AU, FLAC, and more.
+NeoBAE is a modernized continuation of miniBAE, the Beatnik Audio Engine. It combines the original real-time software synthesizer and compact audio engine with newer codecs, updated platform support, authoring tools, and multiple frontends for playback, conversion, and editing.
 
-## About & History
+The project can be used as an embeddable audio engine, a command-line player and converter, a GUI player, a web target, and an RMF/ZMF authoring environment. For the original historical and technical background, see [miniBAE_README.md](miniBAE_README.md).
 
-[miniBAE](miniBAE_README.md) (Beatnik Audio Engine, mini edition) is a mature, well-tested audio engine for embedded applications and small footprint environments. The engine has been used in everything from set-top boxes like Microsoft's WebTV to programming languages like Java, as well as several mobile phones, and has found its way into dozens of games and applications over its lifetime.
+## Overview
 
-Originally created by Steve Hales and Jim Nitchals at Halestorm/Igor Labs, miniBAE evolved through several companies including Beatnik and Danger. The audio engine powered everything from web browser plugins to mobile devices, demonstrating its versatility and reliability.
+- Real-time software synthesis with Beatnik-style banks, General MIDI playback, karaoke support, and live MIDI interaction.
+- Multi-format playback and conversion across classic Beatnik formats, standard audio formats, retro ringtone formats, and modern codecs.
+- Cross-platform targets for Linux, Windows, Android, WebAssembly, and macOS (via [Homebrew](https://brew.sh)).
+- Multiple frontends ranging from the `playbae` CLI to the `zefidi` GUI and `nbstudio` editor.
+- Modular build flags for trimming features or enabling optional integrations such as FluidSynth-backed SoundFont and DLS support.
+- [BAEScript](neobae/src/script/BAEScript_ReadMe.md) for manipulating songs without modification to the source file.
+- Designed with a high emphasis on preserving retro compatibility while adding new features.
 
-When Beatnik ended business in December 2009, the source code was released under a BSD license. A big thanks to [Steve Hales](https://github.com/heyigor/miniBAE) for not letting this valuable piece of technology disappear.
+## Supported Formats
 
-NeoBAE is the modernization of miniBAE, with added features such as [FluidSynth](https://github.com/zefie/FluidSynth) support, 64-bit code, and more.
+### Song and container formats
 
-## Features
+- MIDI: `.mid`, `.midi`
+- Karaoke MIDI: `.kar` with lyrics processing
+- RMI: `.rmi` including RMI files with embedded DLS and SF2 when built with FluidSynth support
+- RMF: `.rmf` for classic Beatnik Rich Music Format content
+- ZMF: `.zmf` for RMF-style content with modern feature support
+- XMF and MXMF: `.xmf`, `.mxmf` mobileBAE formats, with full DLS support when built with FluidSynth support
+- MTHC: Nokia Compressed MIDI format
+- MOD: import and conversion tooling via `mod2rmf`
 
-- **Multi-format audio support**: MIDI, RMF (Rich Music Format), WAV, AIFF, AU, FLAC, OGG Vorbis, MP2, MP3
-- **Multiple Soundbanks**: Experience your favorite MIDIs with several Beatnik HSB (HeadSpace Bank), and additional SoundFont 2/3 support
-- **Real-time synthesis**: Built-in software synthesizer with General MIDI support
-- **Cross-platform**: Runs on Linux, Windows, macOS, and can be compiled to WebAssembly
-- **Command-line player**: `playbae` - a versatile audio file player
-- **GUI application**: `zefidi` - a graphical interface with playlist support
-- **Android App**: `NeoBAE for Android`
-- **WebAssembly API**: Bring Beatnik back to the web with modern WebAssembly
-- **Hardware MIDI support**: MIDI input/output on supported platforms (GUI Only)
-- **Audio export**: Convert MIDI files to audio formats like WAV, MP3, FLAC, and Vorbis
-- **Low latency**: Designed for real-time audio applications
-- **Embeddable**: Can be integrated into other applications
-- **Modular Build System**: Can be slimmed down to its core, to restore the original minimal footprint
-- **Portable Design**: Easily add new and unique platform support
+### Retro ringtone formats
 
-## Building
+- iMelody: `.imy`, `.emy`
+- Nokia binary ringtone: `.rng`
+- RTTTL and RTX: `.rtttl`, `.rtx`
 
-All compilation has been tested on Debian Linux 11+ and Windows via MinGW cross-compilation.
+### Audio and sample formats
 
-### Linux (SDL3)
+- PCM and uncompressed audio: `.wav`, `.aif`, `.aiff`, `.au`
+- MPEG audio: `.mp2`, `.mp3`
+- FLAC: `.flac`
+- Ogg Vorbis: `.ogg`, `.oga`
+- Opus: `.opus` and Ogg Opus content
+- Quite OK Audio: `.qoa`
+- ADP / ADPCM content: `.adp`
+
+### Banks and instrument formats
+
+- NeoBAE banks: `.hsb`, `.zsb`
+- SoundFont: `.sf2`, `.sf3`, `.sfo` when built with FluidSynth support
+- DLS: `.dls` when built with FluidSynth support
+
+## Applications
+
+- `playbae`: primary command-line player, renderer, and export tool for NeoBAE-supported content.
+- `zefidi`: GUI player with playlists, visualization, channel controls, export features, and hardware MIDI integration where supported.
+- `nbstudio`: RMF/ZMF/HSB/ZSB editor for instrument management, sample authoring, preview, and modern codec workflows. NBStudio is currently in early access and considered alpha quality.
+- WebAssembly build: browser-targeted engine output for custom web players and interactive tools.
+- Android app: mobile frontend under `neobae/src/NeoBAEDroid` for NeoBAE-based playback on Android.
+- `libNeoBAE`: embeddable library output for integrating the engine into other applications.
+
+### CLI tools
+
+- `rmfinfo`: inspect RMF and ZMF structure, headers, and metadata.
+- `rmf-instdump`: inspect instrument definition information from RMF and ZMF content.
+- `mid2rmf`: convert MIDI into RMF and ZMF.
+- `rmf2mid`: convert RMF back to MIDI.
+- `mid2rmi`: wrap MIDI and Soundbank into RMI.
+- `mod2rmf`: convert MOD tracker content into RMF and ZMF workflows.
+- `ringtone2mid`: convert retro ringtone formats into MIDI.
+- `adp2wav`: decode ADP audio into WAV.
+- `songtool`: RMF and ZMF multitool: get song info, recompress samples, set loop points, apply gain, and more.
+- `sf2-to-hsb`: convert SoundFont banks into NeoBAE HSB and ZSB banks.
+- `bankrecomp`: recompress bank sample resources.
+- `mthc_decomp`: convert Nokia Compressed MIDI into standard MIDI.
+
+## Quick Start
+
+All build artifacts are generated from the `neobae/` tree.
+
+### Linux
 
 ```bash
-# Install dependencies
-apt-get update
-apt-get install libc6-dev libsdl3-dev
-
-# Build
 cd neobae
 make clean
-make -j$(nproc)
-
-# Run
+make USE_SDL3=1 -j$(nproc)
 ./bin/playbae -h
 ```
 
-### Windows (MinGW cross-compile)
+### GUI build
 
 ```bash
-# Install MinGW toolchain
-apt-get install binutils-mingw-w64-x86_64 g++-mingw-w64-x86_64 gcc-mingw-w64-x86_64
-
-# Build with SDL3 support
-cd neobae
-make clean
-make -f Makefile.mingw USE_SDL3=1 -j$(nproc)
-```
-
-### GUI Application
-
-```bash
-# Linux
-apt-get install libsdl3-dev libsdl3-ttf-dev
 cd neobae
 make clean
 make -f Makefile.gui -j$(nproc)
-
-# Windows
-cd neobae
-make clean
-make -f Makefile.gui-mingw -j$(nproc)
 ```
 
-### WebAssembly (Emscripten)
+### WebAssembly build
 
 ```bash
-apt-get install emscripten
 cd neobae
 make clean
 make -f Makefile.emcc -j$(nproc)
 ```
 
-For detailed build instructions, including slim builds, see [HowToBuild.md](HowToBuild.md).
+For platform-specific prerequisites, Windows cross-compilation, debug builds, and optional feature flags, see [HowToBuild.md](HowToBuild.md).
 
-## Usage
+## Project Layout
 
-### Command Line Player
+- `neobae/`: build system, frontends, CLI tools, banks, main sources, and examples.
+  - `src/BAE_Source/Common/`: core synthesis, mixers, loaders, and shared engine code.
+  - `src/BAE_Source/Platform/`: platform abstractions and audio backend glue.
+  - `src/NeoBAEDroid/`: Android application source.
+- `content/`: sample media for playback and format testing.
 
-```bash
-# Play a MIDI file
-./bin/playbae song.mid
+## Additional Reading
 
-# Export MIDI to WAV
-./bin/playbae input.mid -o output.wav 
-
-# Export to MP3 with custom bitrate
-./bin/playbae input.mid -o output.mp3 -b 192
-
-# Show karaoke lyrics (for supported files)
-./bin/playbae song.mid -k
-
-# Play with custom sample rate
-./bin/playbae audio.wav -r 48000
-```
-
-### GUI Application
-
-The GUI provides an intuitive interface for:
-- Loading and playing audio files
-- Managing playlists
-- Real-time audio visualization
-- MIDI channel control and muting
-- Audio export functionality (WAV/FLAC/MP3/Vorbis)
-- Hardware MIDI device integration
-  - Hardware input support - play the beatnik synth your way
-  - Utilitizes [RtMidi](https://github.com/thestk/rtmidi) for ultra low latency input
-  - Record incoming MIDI events - to MIDI! (or WAV/FLAC/MP3)
-  - Also supports MIDI Output
-- Cross-platform: Runs on any device SDL3 does
-- Dark mode support (Default for Linux, on Windows it will default to your theme settings (10/11))
-
-### WebAssembly
-
-A brand new WebAssembly API for the NeoBAE engine is available thanks to [webcd](https://github.com/charlie3684)!
-
-The new API can be used to build your own player, but a sample of webcd's Music Studio is included to demonstrate the WebAssembly's capabilities.
-
-## Supported Formats
-
-| Format | Extensions | Notes |
-|--------|------------|-------|
-| MIDI | `.mid`, `.midi` | Standard MIDI files |
-| RMF | `.rmf` | Rich Music Format (Beatnik's proprietary format) |
-| ZMF | `.zmf` | zefie MIDI File (Spinoff of RMF with modern features) |
-| Audio | `.wav`, `.aiff`, `.au` | Uncompressed audio |
-| Compressed | `.mp2`, `.mp3`, `.flac`, `.ogg` | Various compressed formats |
-
-## NeoBAE Studio
-
-**NeoBAE Studio** is a powerful MIDI/RMF/ZMF editor for creating and authoring music files. It provides an intuitive interface for composing, editing instruments, and managing audio resources.
-
-⚠️ **Alpha Stage**: NeoBAE Studio is currently in active development. While core functionality is available, expect ongoing improvements, potential bugs, and API changes. Please report issues and provide feedback to help shape its future.
-
-**Features:**
-- Create and edit RMF (Rich Music Format) and ZMF (zefie MIDI File) files
-- Instrument and bank management
-- Modern codec support (FLAC, Vorbis, Opus) via ZMF
-- Real-time preview and playback
-- Cross-platform support
-
-## Architecture
-
-NeoBAE consists of several key components:
-
-- **Audio Engine**: Core synthesis and playback engine
-- **Platform Layer**: Abstraction for different operating systems
-- **Format Handlers**: Support for various audio/music file formats
-- **Applications**: Command-line and GUI frontends
-- **Library**: libNeoBAE for use in your own application
+- [miniBAE_README.md](miniBAE_README.md): original background, historical context, and legacy overview.
+- [HowToBuild.md](HowToBuild.md): detailed build instructions and feature configuration notes.
+- [BAEScript_ReadMe.md](neobae/src/script/BAEScript_ReadMe.md): contains BAEScript documentation.
+- [ACKNOWLEDGEMENTS](neobae/ACKNOWLEDGEMENTS): contributors and third-party credits.
 
 ## License
 
-NeoBAE is released under the BSD 3-Clause License, like the original miniBAE. See [LICENSE](LICENSE) for details.
+NeoBAE (zefie's modifications) is licensed under GPL-3.0.
 
-## Contributing
+Original Beatnik miniBAE code remains under BSD-3-Clause.
 
-This project welcomes contributions! Whether it's bug fixes, new features, or platform support, feel free to submit pull requests.
-
-## Acknowledgments
-
-See [ACKNOWLEDGEMENTS](neobae/ACKNOWLEDGEMENTS) for the complete list of contributors who made this project possible.
+See [LICENSE](LICENSE) and [NOTICE](NOTICE) for details.

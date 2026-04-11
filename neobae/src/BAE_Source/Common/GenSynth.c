@@ -28,6 +28,10 @@
     NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
     SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
+/*
+    Additional modifications © 2021-2026 zefie
+    Licensed under the GNU General Public License v3.0 or later.
+*/
 /*****************************************************************************/
 /*
 ** "GenSynth.c"

@@ -32,6 +32,10 @@
 **						in HAE_WriteFile, add fflush() before fwrite() to workaround VC++ stdio shortcoming
 */
 /*****************************************************************************/
+/*
+    Additional modifications © 2021-2026 zefie
+    Licensed under the GNU General Public License v3.0 or later.
+*/
 
 #include <stdio.h>
 #include <unistd.h>
