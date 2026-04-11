@@ -476,8 +476,10 @@ static void build_adsr_from_sf2(BAERmfEditorADSRInfo *adsr,
 
     memset(adsr, 0, sizeof(*adsr));
 
+    const int maxAdsrStages = (extAdsr) ? BAE_EDITOR_MAX_ADSR_STAGES : 8;
+
     /* Delay: always a single linear stage (delay is linear in SF2 too) */
-    if (delayUs > 0 && st < BAE_EDITOR_MAX_ADSR_STAGES) {
+    if (delayUs > 0 && st < maxAdsrStages) {
         adsr->stages[st].level = 0;
         adsr->stages[st].time = delayUs;
         adsr->stages[st].flags = FCC('L','I','N','E');
@@ -488,7 +490,7 @@ static void build_adsr_from_sf2(BAERmfEditorADSRInfo *adsr,
     if (extAdsr) {
         st = adsr_push_attack_piecewise(adsr, st, SF2HSB_VOLUME_RANGE, attackUs);
     } else {
-        if (st < BAE_EDITOR_MAX_ADSR_STAGES) {
+        if (st < maxAdsrStages) {
             adsr->stages[st].level = SF2HSB_VOLUME_RANGE;
             adsr->stages[st].time = attackUs;
             adsr->stages[st].flags = FCC('L','I','N','E');
@@ -497,7 +499,7 @@ static void build_adsr_from_sf2(BAERmfEditorADSRInfo *adsr,
     }
 
     /* Hold: always a single flat stage */
-    if (holdUs > 0 && st < BAE_EDITOR_MAX_ADSR_STAGES) {
+    if (holdUs > 0 && st < maxAdsrStages) {
         adsr->stages[st].level = SF2HSB_VOLUME_RANGE;
         adsr->stages[st].time = holdUs;
         adsr->stages[st].flags = FCC('L','I','N','E');
@@ -508,7 +510,7 @@ static void build_adsr_from_sf2(BAERmfEditorADSRInfo *adsr,
     if (extAdsr) {
         st = adsr_push_decay_piecewise(adsr, st, SF2HSB_VOLUME_RANGE, sustainLevel, decayUs, FCC('L','I','N','E'));
     } else {
-        if (st < BAE_EDITOR_MAX_ADSR_STAGES) {
+        if (st < maxAdsrStages) {
             adsr->stages[st].level = sustainLevel;
             adsr->stages[st].time = decayUs;
             adsr->stages[st].flags = FCC('L','I','N','E');
@@ -517,7 +519,7 @@ static void build_adsr_from_sf2(BAERmfEditorADSRInfo *adsr,
     }
 
     /* Sustain hold point */
-    if (st < BAE_EDITOR_MAX_ADSR_STAGES) {
+    if (st < maxAdsrStages) {
         adsr->stages[st].level = sustainLevel;
         adsr->stages[st].time = 0;
         adsr->stages[st].flags = FCC('S','U','S','T');
@@ -532,7 +534,7 @@ static void build_adsr_from_sf2(BAERmfEditorADSRInfo *adsr,
     if (extAdsr) {
         st = adsr_push_decay_piecewise(adsr, st, sustainLevel, 0, releaseUs, FCC('L','A','S','T'));
     } else {
-        if (st < BAE_EDITOR_MAX_ADSR_STAGES) {
+        if (st < maxAdsrStages) {
             adsr->stages[st].level = 0;
             adsr->stages[st].time = releaseUs;
             adsr->stages[st].flags = FCC('L','A','S','T');
