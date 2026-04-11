@@ -1598,23 +1598,29 @@ private:
             m_adsrGraph->SetMinSize(wxSize(-1, 84));
             box->Add(m_adsrGraph, 0, wxEXPAND | wxLEFT | wxRIGHT, 4);
 
+            /* Scrolled window for ADSR stages */
+            wxScrolledWindow *adsrScrollWin = new wxScrolledWindow(box->GetStaticBox(), wxID_ANY, wxDefaultPosition, 
+                                                                    wxSize(-1, 150), wxVSCROLL | wxBORDER_SIMPLE);
+            adsrScrollWin->SetScrollRate(0, 25);
+            wxBoxSizer *adsrScrollSizer = new wxBoxSizer(wxVERTICAL);
+
             wxFlexGridSizer *grid = new wxFlexGridSizer(0, 4, 2, 6);
-            grid->Add(new wxStaticText(box->GetStaticBox(), wxID_ANY, "#"), 0, wxALIGN_CENTER);
-            grid->Add(new wxStaticText(box->GetStaticBox(), wxID_ANY, "Level"), 0, wxALIGN_CENTER);
-            grid->Add(new wxStaticText(box->GetStaticBox(), wxID_ANY, "Time (s)"), 0, wxALIGN_CENTER);
-            grid->Add(new wxStaticText(box->GetStaticBox(), wxID_ANY, "Type"), 0, wxALIGN_CENTER);
+            grid->Add(new wxStaticText(adsrScrollWin, wxID_ANY, "#"), 0, wxALIGN_CENTER);
+            grid->Add(new wxStaticText(adsrScrollWin, wxID_ANY, "Level"), 0, wxALIGN_CENTER);
+            grid->Add(new wxStaticText(adsrScrollWin, wxID_ANY, "Time (s)"), 0, wxALIGN_CENTER);
+            grid->Add(new wxStaticText(adsrScrollWin, wxID_ANY, "Type"), 0, wxALIGN_CENTER);
 
             for (int i = 0; i < BAE_EDITOR_MAX_ADSR_STAGES; i++) {
-                m_adsrRowLabels[i] = new wxStaticText(box->GetStaticBox(), wxID_ANY, wxString::Format("%d", i));
+                m_adsrRowLabels[i] = new wxStaticText(adsrScrollWin, wxID_ANY, wxString::Format("%d", i));
                 grid->Add(m_adsrRowLabels[i], 0, wxALIGN_CENTER_VERTICAL);
-                m_adsrLevel[i] = new wxSpinCtrl(box->GetStaticBox(), wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(80, -1),
+                m_adsrLevel[i] = new wxSpinCtrl(adsrScrollWin, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(80, -1),
                                                 wxSP_ARROW_KEYS, -1000000, 1000000, 0);
                 grid->Add(m_adsrLevel[i], 0);
-                m_adsrTime[i] = new wxSpinCtrlDouble(box->GetStaticBox(), wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(100, -1),
+                m_adsrTime[i] = new wxSpinCtrlDouble(adsrScrollWin, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(100, -1),
                                                      wxSP_ARROW_KEYS, -16.0, 16.0, 0.0, 0.001);
                 m_adsrTime[i]->SetDigits(3);
                 grid->Add(m_adsrTime[i], 0);
-                m_adsrFlags[i] = new wxChoice(box->GetStaticBox(), wxID_ANY);
+                m_adsrFlags[i] = new wxChoice(adsrScrollWin, wxID_ANY);
                 FillChoice(m_adsrFlags[i], kADSRFlagLabels, kADSRFlagCount);
                 m_adsrFlags[i]->SetSelection(0);
                 grid->Add(m_adsrFlags[i], 0);
@@ -1628,9 +1634,12 @@ private:
                 m_adsrTime[i]->Show(false);
                 m_adsrFlags[i]->Show(false);
             }
-            box->Add(grid, 0, wxALL, 4);
+            adsrScrollSizer->Add(grid, 0, wxALL, 4);
+            adsrScrollWin->SetSizer(adsrScrollSizer);
+            adsrScrollWin->SetClientSize(wxSize(-1, 150));
+            box->Add(adsrScrollWin, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 4);
 
-            m_adsrStageSpin->Bind(wxEVT_SPINCTRL, [this, box](wxCommandEvent &) {
+            m_adsrStageSpin->Bind(wxEVT_SPINCTRL, [this, box, adsrScrollWin](wxCommandEvent &) {
                 int count = m_adsrStageSpin->GetValue();
                 for (int i = 0; i < BAE_EDITOR_MAX_ADSR_STAGES; i++) {
                     bool vis = (i < count);
@@ -1639,6 +1648,7 @@ private:
                     m_adsrTime[i]->Show(vis);
                     m_adsrFlags[i]->Show(vis);
                 }
+                adsrScrollWin->Layout();
                 box->GetStaticBox()->GetParent()->Layout();
                 RefreshADSRGraph();
                 NotifyParameterChanged();
@@ -1701,23 +1711,29 @@ private:
             m_lfoAdsrGraph->SetMinSize(wxSize(-1, 72));
             lfoBox->Add(m_lfoAdsrGraph, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 4);
 
+            /* Scrolled window for LFO Envelope stages */
+            wxScrolledWindow *lfoAdsrScrollWin = new wxScrolledWindow(lfoBox->GetStaticBox(), wxID_ANY, wxDefaultPosition,
+                                                                      wxSize(-1, 150), wxVSCROLL | wxBORDER_SIMPLE);
+            lfoAdsrScrollWin->SetScrollRate(0, 25);
+            wxBoxSizer *lfoAdsrScrollSizer = new wxBoxSizer(wxVERTICAL);
+
             wxFlexGridSizer *lfoAdsrGrid = new wxFlexGridSizer(0, 4, 2, 6);
-            lfoAdsrGrid->Add(new wxStaticText(lfoBox->GetStaticBox(), wxID_ANY, "#"), 0, wxALIGN_CENTER);
-            lfoAdsrGrid->Add(new wxStaticText(lfoBox->GetStaticBox(), wxID_ANY, "Level"), 0, wxALIGN_CENTER);
-            lfoAdsrGrid->Add(new wxStaticText(lfoBox->GetStaticBox(), wxID_ANY, "Time (s)"), 0, wxALIGN_CENTER);
-            lfoAdsrGrid->Add(new wxStaticText(lfoBox->GetStaticBox(), wxID_ANY, "Type"), 0, wxALIGN_CENTER);
+            lfoAdsrGrid->Add(new wxStaticText(lfoAdsrScrollWin, wxID_ANY, "#"), 0, wxALIGN_CENTER);
+            lfoAdsrGrid->Add(new wxStaticText(lfoAdsrScrollWin, wxID_ANY, "Level"), 0, wxALIGN_CENTER);
+            lfoAdsrGrid->Add(new wxStaticText(lfoAdsrScrollWin, wxID_ANY, "Time (s)"), 0, wxALIGN_CENTER);
+            lfoAdsrGrid->Add(new wxStaticText(lfoAdsrScrollWin, wxID_ANY, "Type"), 0, wxALIGN_CENTER);
 
             for (int i = 0; i < BAE_EDITOR_MAX_ADSR_STAGES; i++) {
-                m_lfoAdsrRowLabels[i] = new wxStaticText(lfoBox->GetStaticBox(), wxID_ANY, wxString::Format("%d", i));
+                m_lfoAdsrRowLabels[i] = new wxStaticText(lfoAdsrScrollWin, wxID_ANY, wxString::Format("%d", i));
                 lfoAdsrGrid->Add(m_lfoAdsrRowLabels[i], 0, wxALIGN_CENTER_VERTICAL);
-                m_lfoAdsrLevel[i] = new wxSpinCtrl(lfoBox->GetStaticBox(), wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(80, -1),
+                m_lfoAdsrLevel[i] = new wxSpinCtrl(lfoAdsrScrollWin, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(80, -1),
                                                    wxSP_ARROW_KEYS, -1000000, 1000000, 0);
                 lfoAdsrGrid->Add(m_lfoAdsrLevel[i], 0);
-                m_lfoAdsrTime[i] = new wxSpinCtrlDouble(lfoBox->GetStaticBox(), wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(100, -1),
+                m_lfoAdsrTime[i] = new wxSpinCtrlDouble(lfoAdsrScrollWin, wxID_ANY, wxEmptyString, wxDefaultPosition, wxSize(100, -1),
                                                         wxSP_ARROW_KEYS, -16.0, 16.0, 0.0, 0.001);
                 m_lfoAdsrTime[i]->SetDigits(3);
                 lfoAdsrGrid->Add(m_lfoAdsrTime[i], 0);
-                m_lfoAdsrFlags[i] = new wxChoice(lfoBox->GetStaticBox(), wxID_ANY);
+                m_lfoAdsrFlags[i] = new wxChoice(lfoAdsrScrollWin, wxID_ANY);
                 FillChoice(m_lfoAdsrFlags[i], kADSRFlagLabels, kADSRFlagCount);
                 m_lfoAdsrFlags[i]->SetSelection(0);
                 lfoAdsrGrid->Add(m_lfoAdsrFlags[i], 0);
@@ -1731,9 +1747,12 @@ private:
                 m_lfoAdsrTime[i]->Show(false);
                 m_lfoAdsrFlags[i]->Show(false);
             }
-            lfoBox->Add(lfoAdsrGrid, 0, wxLEFT | wxRIGHT | wxBOTTOM, 4);
+            lfoAdsrScrollSizer->Add(lfoAdsrGrid, 0, wxALL, 4);
+            lfoAdsrScrollWin->SetSizer(lfoAdsrScrollSizer);
+            lfoAdsrScrollWin->SetClientSize(wxSize(-1, 150));
+            lfoBox->Add(lfoAdsrScrollWin, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 4);
 
-            m_lfoAdsrStageSpin->Bind(wxEVT_SPINCTRL, [this, lfoBox](wxCommandEvent &) {
+            m_lfoAdsrStageSpin->Bind(wxEVT_SPINCTRL, [this, lfoBox, lfoAdsrScrollWin](wxCommandEvent &) {
                 int count = m_lfoAdsrStageSpin->GetValue();
                 for (int i = 0; i < BAE_EDITOR_MAX_ADSR_STAGES; i++) {
                     bool vis = (i < count);
@@ -1742,6 +1761,7 @@ private:
                     m_lfoAdsrTime[i]->Show(vis);
                     m_lfoAdsrFlags[i]->Show(vis);
                 }
+                lfoAdsrScrollWin->Layout();
                 lfoBox->GetStaticBox()->GetParent()->Layout();
                 SaveLFOFromUI(m_currentLfoIndex);
                 RefreshLFOEnvelopeGraph();
@@ -1884,13 +1904,12 @@ public:
         {
             BAERmfEditorCompressionType effectiveComp = data.compressionType;
             auto [codecIdx, bitrateIdx] = CompressionTypeToCodecBitrate(effectiveComp);
-            if (codecIdx == 6 && data.opusRoundTripResample) codecIdx = 7;
             m_codecChoice->SetSelection(codecIdx);
             m_codecChoice->SetString(0, data.hasOriginalData ? "Original" : "Don't Change");
             UpdateBitrateChoice(codecIdx, bitrateIdx);
             if (m_opusModeChoice) {
                 m_opusModeChoice->SetSelection(data.opusMode == BAE_EDITOR_OPUS_MODE_VOICE ? 1 : 0);
-                m_opusModeChoice->Enable(codecIdx == 6 || codecIdx == 7);
+                m_opusModeChoice->Enable(codecIdx == 6);
             }
         }
 
@@ -1931,7 +1950,7 @@ public:
         int codecIdx = m_codecChoice->GetSelection();
         int bitrateIdx = m_bitrateChoice->IsEnabled() ? m_bitrateChoice->GetSelection() : 0;
         data.compressionType = CodecBitrateToCompressionType(codecIdx, bitrateIdx);
-        data.opusRoundTripResample = (codecIdx == 7);
+        data.opusRoundTripResample = (codecIdx == 6);
         data.opusMode = (m_opusModeChoice->GetSelection() == 1) ?
             BAE_EDITOR_OPUS_MODE_VOICE : BAE_EDITOR_OPUS_MODE_AUDIO;
 
@@ -2203,7 +2222,9 @@ public:
                     default: return BAE_EDITOR_COMPRESSION_VORBIS_128K;
                 }
             case 5: return BAE_EDITOR_COMPRESSION_FLAC;
-            case 7:
+#if USE_QOA_SUPPORT == TRUE
+            case 7: return BAE_EDITOR_COMPRESSION_QOA;
+#endif
             case 6:
                 switch (bitrate) {
                     case 0: return BAE_EDITOR_COMPRESSION_OPUS_12K;
@@ -2351,7 +2372,6 @@ private:
                 chooseIndex((int)m_bitrateChoice->GetCount(), 0);
                 m_bitrateChoice->Enable(true);
                 break;
-            case 7:
             case 6:
                 for (auto s : {"12k","16k","24k","32k","48k","64k","80k","96k","128k","160k","192k","256k"})
                     m_bitrateChoice->Append(s);
@@ -2422,8 +2442,10 @@ private:
             m_codecChoice->Append("MP3");
             m_codecChoice->Append("VORBIS");
             m_codecChoice->Append("FLAC");
-            m_codecChoice->Append("OPUS");
             m_codecChoice->Append("OPUS (Round-Trip)");
+#if USE_QOA_SUPPORT == TRUE
+            m_codecChoice->Append("QOA");
+#endif
             row->Add(m_codecChoice, 0);
             row->Add(new wxStaticText(this, wxID_ANY, "Bitrate"), 0, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT, 8);
             m_bitrateChoice = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxSize(130, -1));
@@ -2451,7 +2473,7 @@ private:
 
                 UpdateBitrateChoice(selectedCodec, previousBitrate);
                 if (m_opusModeChoice) {
-                    m_opusModeChoice->Enable(selectedCodec == 6 || selectedCodec == 7);
+                    m_opusModeChoice->Enable(selectedCodec == 6);
                 }
                 NotifyParameterChanged();
             });

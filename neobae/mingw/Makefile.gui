@@ -15,9 +15,9 @@ else
 	CROSS := x86_64-w64-mingw32-
 endif
 
-ARCH		:= -static
-CC			:= $(CROSS)gcc
-CXX			:= $(CROSS)g++
+ARCH		?= -static
+CC			?= $(CROSS)gcc
+CXX			?= $(CROSS)g++
 # Use C++ linker if we have any C++ sources
 ifneq ($(filter %.cpp,$(SRC) $(SRC_BIN)),)
 LD			:= $(CXX)

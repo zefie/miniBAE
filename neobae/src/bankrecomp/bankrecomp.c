@@ -487,6 +487,7 @@ static void printHelp(const char *progName)
     printf("                 Recompress only listed bank instrument indices\n");
     printf("  --sample I:S[,I:S...]\n");
     printf("                 Recompress only listed instrument sample slots\n");
+    printf("  --sndstorage T Storage type for recompressed samples: SND, CSND, or ESND\n");
     printf("  --help         Show this help message\n\n");
     printf("Codecs:\n");
     printf("  %d  %-22s  (no bitrate option)\n", CODEC_PCM, codecNames[CODEC_PCM]);
@@ -510,6 +511,46 @@ static void printHelp(const char *progName)
 #endif
     printf("      Without --codec, the bank is resaved with original compression.\n");
     printf("      Instrument/sample indices are the ones printed in the bank listing.\n");
+}
+
+static const char *sndStorageName(XResourceType sndType)
+{
+    switch (sndType)
+    {
+        case ID_SND:
+            return "SND";
+        case ID_CSND:
+            return "CSND";
+        case ID_ESND:
+            return "ESND";
+        default:
+            return "SND";
+    }
+}
+
+static int parseSndStorageType(const char *str, XResourceType *outType)
+{
+    if (!str || !outType)
+    {
+        return 0;
+    }
+
+    if (strcasecmp(str, "SND") == 0)
+    {
+        *outType = ID_SND;
+        return 1;
+    }
+    if (strcasecmp(str, "CSND") == 0)
+    {
+        *outType = ID_CSND;
+        return 1;
+    }
+    if (strcasecmp(str, "ESND") == 0)
+    {
+        *outType = ID_ESND;
+        return 1;
+    }
+    return 0;
 }
 
 /* ── Bitrate lookup ─────────────────────────────────────────────── */
@@ -899,6 +940,7 @@ int main(int argc, char *argv[])
     int doRecompress;
     int instrumentTargetMatched[MAX_TARGET_INSTRUMENTS];
     int sampleTargetMatched[MAX_TARGET_SAMPLES];
+    XResourceType sndStorageType = ID_SND;
 
     /* Parse arguments */
     for (argIdx = 1; argIdx < argc; argIdx++)
@@ -977,6 +1019,20 @@ int main(int argc, char *argv[])
                 return 1;
             }
         }
+        else if (strcmp(argv[argIdx], "--sndstorage") == 0)
+        {
+            if (argIdx + 1 >= argc)
+            {
+                fprintf(stderr, "Error: --sndstorage requires a value: SND, CSND, or ESND\n");
+                return 1;
+            }
+            if (!parseSndStorageType(argv[++argIdx], &sndStorageType))
+            {
+                fprintf(stderr, "Error: invalid --sndstorage value '%s' (expected SND, CSND, or ESND)\n",
+                        argv[argIdx]);
+                return 1;
+            }
+        }
         else if (argv[argIdx][0] == '-')
         {
             fprintf(stderr, "Error: unknown option '%s'\n", argv[argIdx]);
@@ -1013,6 +1069,12 @@ int main(int argc, char *argv[])
     if (!doRecompress && hasTargetFilters())
     {
         fprintf(stderr, "Error: --instrument/--sample require --codec\n");
+        return 1;
+    }
+
+    if (!doRecompress && sndStorageType != ID_SND)
+    {
+        fprintf(stderr, "Error: --sndstorage requires --codec\n");
         return 1;
     }
 
@@ -1091,6 +1153,7 @@ int main(int argc, char *argv[])
             }
         }
         printf("\n");
+        printf("Recompressed SND storage: %s\n", sndStorageName(sndStorageType));
         if (targetInstrumentCount > 0)
         {
             int ti;
@@ -1524,8 +1587,8 @@ int main(int argc, char *argv[])
                         }
                         if (newSnd)
                         {
-                            /* Write recompressed SND as ID_SND (canonical type) */
-                            XAddFileResource(outFile, ID_SND, resID, resName,
+                            /* Write recompressed SND using requested storage type. */
+                            XAddFileResource(outFile, sndStorageType, resID, resName,
                                              newSnd, newSize);
                             XDisposePtr(newSnd);
                             sndRecompressed++;

@@ -1,0 +1,823 @@
+# neobae/mingw-static/Makefile.nbstudio
+#
+# Standalone NeoBAE Studio build for Windows (llvm-mingw / MinGW cross-compilation).
+# External codec libraries are linked as pre-built static libraries.
+# liblzma SDK and libxmp-lite are compiled from in-tree sources.
+#
+# Usage (from neobae/ directory):
+#   make -f mingw-static/Makefile.nbstudio [BITS=64|32] [DEBUG=1] ...
+#
+# Required pre-built static libraries, searched under
+# /opt/llvm-mingw/$(TARGET)/lib by default.
+# Override per-library *_DIR variables on the command line if needed:
+#
+#   libFLAC.a       FLAC_DIR
+#   libogg.a        OGG_DIR
+#   libvorbis.a     VORBIS_DIR
+#   libvorbisenc.a  VORBIS_DIR
+#   libvorbisfile.a VORBIS_DIR
+#   libopus.a       OPUS_DIR
+#   libopusfile.a   OPUSFILE_DIR
+#   libmp3lame.a    LAME_DIR
+#
+# wxWidgets:
+#   WX_PREFIX defaults to $(LLVM_MINGW_PREFIX).
+#   Set WX_CONFIG to a working wx-config for the target if available;
+#   otherwise include/lib paths are derived from WX_PREFIX.
+#
+# Notes:
+#   - SDL3.dll and (when USE_FLUIDSYNTH=1) libfluidsynth-3.dll are still
+#     linked as DLL import libs.
+#   - liblzma SDK, libxmp-lite, libg722, and RtMidi are compiled from
+#     in-tree src/thirdparty/ sources.
+#   - No SDL3_ttf required (wxWidgets handles the UI).
+
+# ============================================================
+# Feature flags (NOAUTO=1: only what nbstudio needs is turned on)
+# ============================================================
+BAE_API              := SDL3
+WINDOWS              := 1
+NOAUTO               := 1
+NBSTUDIO             := 1
+CREATION_API         := 1
+ZMF_SUPPORT          := 1
+LZMA_SUPPORT         := 1
+FIX_SPAN_DC          := 1
+CLASSIC_CHORUS       := 1
+MOD2RMF              := 1
+MTHC_SUPPORT         := 1
+RETRO_RINGTONE_SUPPORT := 1
+EMBED_PATCHES        := 1
+ADP_SUPPORT          := 0
+QOA_SUPPORT          := 1
+SF2_SUPPORT          := 0
+USE_FLUIDSYNTH       := 0
+XMF_SUPPORT          := 0
+RMI_SUPPORT          := 1
+MP3_DEC              := 1
+MP3_ENC              := 1
+FLAC_DEC             := 1
+FLAC_ENC             := 1
+VORBIS_DEC           := 1
+VORBIS_ENC           := 1
+OPUS_DEC             := 1
+OPUS_ENC             := 1
+OGG_SUPPORT          := 1
+
+# Hardware MIDI for nbstudio
+ifneq ($(NOAUTO),1)
+ENABLE_MIDI_HW       := 1
+endif
+ENABLE_MIDI_HW       ?= 1
+
+# ============================================================
+# Arch / cross-compiler
+# ============================================================
+ifeq ($(BITS),32)
+TARGET ?= i686-w64-mingw32
+else
+TARGET ?= x86_64-w64-mingw32
+endif
+
+ARCH    ?= -static
+CC      ?= $(TARGET)-gcc
+CXX     ?= $(TARGET)-g++
+LD      := $(CXX)
+AR      := $(TARGET)-ar
+STRIP   := $(TARGET)-strip
+WINDRES := $(TARGET)-windres
+
+# ============================================================
+# External dependency prefix
+# ============================================================
+DEPS_DIR          ?= ../deps/win
+LLVM_MINGW_PREFIX ?= /opt/llvm-mingw/$(TARGET)
+
+# SDL3 (audio backend — no SDL3_ttf needed for nbstudio)
+SDL3_DIR          ?= $(LLVM_MINGW_PREFIX)
+
+# FluidSynth (DLL import lib)
+FLUIDSYNTH_DIR    ?= $(LLVM_MINGW_PREFIX)
+
+# Static codec libraries
+FLAC_DIR          ?= $(LLVM_MINGW_PREFIX)
+OGG_DIR           ?= $(LLVM_MINGW_PREFIX)
+VORBIS_DIR        ?= $(LLVM_MINGW_PREFIX)
+OPUS_DIR          ?= $(LLVM_MINGW_PREFIX)
+OPUSFILE_DIR      ?= $(LLVM_MINGW_PREFIX)
+LAME_DIR          ?= $(LLVM_MINGW_PREFIX)
+
+# wxWidgets — try a target-prefixed wx-config first, fall back to WX_PREFIX paths
+WX_PREFIX         ?= $(LLVM_MINGW_PREFIX)
+WX_CONFIG         ?= $(TARGET)-wx-config
+WX_CXXFLAGS       := $(shell $(WX_CONFIG) --cxxflags --static 2>/dev/null)
+WX_LIBS           := $(shell $(WX_CONFIG) --libs all --static 2>/dev/null)
+ifeq ($(WX_LIBS),)
+  # wx-config not available — fall back to manual paths
+  WX_VER          ?= 3.3
+  WX_CXXFLAGS      = -I$(WX_PREFIX)/include/wx-$(WX_VER) \
+                     -I$(WX_PREFIX)/lib/wx/include/msw-unicode-static-$(WX_VER) \
+                     -D__WXMSW__ -DwxUSE_GUI=1 -DFLAC__NO_DLL=1
+  WX_LIBS          = -L$(WX_PREFIX)/lib \
+                     -lwx_mswu-$(WX_VER)-Windows \
+                     -lgdiplus
+endif
+
+# OpenMP (FluidSynth dependency — DLL on llvm-mingw)
+OMP_LIB_DIR       ?= /opt/llvm-mingw/lib
+OMP_LINK_LIB      ?= -l:libomp.dll.a
+
+# ============================================================
+# Versioning (inlined from inc/Makefile.versioning)
+# ============================================================
+COMMIT     := $(shell git rev-parse --short HEAD 2>/dev/null)
+DIRTY      := $(shell git status --porcelain 2>/dev/null | head -n 1)
+TAG_COMMIT := $(shell git rev-list --abbrev-commit --tags --max-count=1 2>/dev/null)
+TAG        := $(shell git describe --abbrev=0 --tags $(TAG_COMMIT) 2>/dev/null || true)
+DATE       := $(shell git log -1 --format=%cd --date=format:"%Y%m%d" 2>/dev/null)
+
+ifeq ($(COMMIT),)
+  ifeq ($(DATE),)
+    DATE := $(shell date +%Y%m%d)
+  endif
+  VERSION := $(DATE)
+else
+  ifneq ($(TAG),)
+    ifeq ($(COMMIT),$(TAG_COMMIT))
+      VERSION := $(TAG:v%=%)
+    else
+      VERSION := git-$(COMMIT)
+    endif
+  else
+    VERSION := git-$(COMMIT)
+  endif
+  ifneq ($(DIRTY),)
+    VERSION := $(VERSION)-dirty
+  endif
+endif
+
+# ============================================================
+# Directory layout
+# ============================================================
+BUILD_DIR    := build/
+TEST_OUT_DIR := tests/
+TARGET_OUT   := bin/
+OBJ_DIR      := $(BUILD_DIR)obj/
+BAE_FLAGS    :=
+BAE_LD_FLAGS :=
+BAE_LIBS     :=
+.DEFAULT_GOAL := all
+
+# ============================================================
+# Target names
+# ============================================================
+TARGET_BIN      := nbstudio
+TARGET_BIN_FULL := $(TARGET_BIN).exe
+
+# ============================================================
+# Embedded patch bank
+# ============================================================
+EMBED_PATCH_FILE ?= src/banks/patches111/patches111.hsb
+
+# ============================================================
+# Verbose flag
+# ============================================================
+ifneq ($(filter 1,$(VERBOSE) $(V)),)
+SILENT :=
+else
+SILENT := @
+endif
+
+# ============================================================
+# Feature cascade
+# ============================================================
+ifeq ($(SF2_SUPPORT),1)
+USE_FLUIDSYNTH := 1
+endif
+
+ifneq ($(USE_FLUIDSYNTH),1)
+XMF_SUPPORT := 0
+endif
+
+ifeq ($(ZMF_SUPPORT),1)
+LZMA_SUPPORT   := 1
+FIX_SPAN_DC    := 1
+CLASSIC_CHORUS := 1
+endif
+
+ifeq ($(CREATION_API),1)
+OGG_SUPPORT := 1
+endif
+
+ifneq ($(OGG_SUPPORT),1)
+ifneq ($(filter 1,$(VORBIS_ENC) $(VORBIS_DEC) $(FLAC_DEC) $(FLAC_ENC) $(OPUS_DEC) $(OPUS_ENC)),)
+OGG_SUPPORT := 1
+endif
+endif
+
+# ============================================================
+# Source files
+# ============================================================
+
+# Platform audio API (SDL3)
+SRC := src/BAE_Source/Platform/BAE_API_SDL3.c
+
+# Core libNeoBAE
+SRC += \
+	src/BAE_Source/Common/DriverTools.c \
+	src/BAE_Source/Common/GenAudioStreams.c \
+	src/BAE_Source/Common/GenCache.c \
+	src/BAE_Source/Common/GenChorus.c \
+	src/BAE_Source/Common/GenFiltersReverbU3232.c \
+	src/BAE_Source/Common/GenInterp2ReverbU3232.c \
+	src/BAE_Source/Common/GenOutput.c \
+	src/BAE_Source/Common/GenPatch.c \
+	src/BAE_Source/Common/GenReverb.c \
+	src/BAE_Source/Common/GenReverbNew.c \
+	src/BAE_Source/Common/GenReverbNeo.c \
+	src/BAE_Source/Common/GenSample.c \
+	src/BAE_Source/Common/GenSeq.c \
+	src/BAE_Source/Common/GenSeqTools.c \
+	src/BAE_Source/Common/GenSetup.c \
+	src/BAE_Source/Common/GenSong.c \
+	src/BAE_Source/Common/GenSoundFiles.c \
+	src/BAE_Source/Common/GenSynth.c \
+	src/BAE_Source/Common/GenSynthFiltersSimple.c \
+	src/BAE_Source/Common/GenSynthFiltersU3232.c \
+	src/BAE_Source/Common/GenSynthInterp2Simple.c \
+	src/BAE_Source/Common/GenSynthInterp2U3232.c \
+	src/BAE_Source/Common/NeoBAE.c \
+	src/BAE_Source/Common/NewNewLZSS.c \
+	src/BAE_Source/Common/SampleTools.c \
+	src/BAE_Source/Common/X_API.c \
+	src/BAE_Source/Common/X_Decompress.c \
+	src/BAE_Source/Common/X_IMA.c \
+	src/BAE_Source/Common/g711.c \
+	src/BAE_Source/Common/g721.c \
+	src/BAE_Source/Common/g723_24.c \
+	src/BAE_Source/Common/g723_40.c \
+	src/BAE_Source/Common/g72x.c \
+	src/BAE_Source/Common/sha1mini.c \
+	src/BAE_Source/Common/XFileTypes.c
+
+ifeq ($(RETRO_RINGTONE_SUPPORT),1)
+SRC += src/BAE_Source/Common/GenRingtone.c
+endif
+
+ifeq ($(RMI_SUPPORT),1)
+SRC += src/BAE_Source/Common/GenRMI.c
+endif
+
+ifeq ($(XMF_SUPPORT),1)
+SRC += src/BAE_Source/Common/GenXMF.c
+endif
+
+ifeq ($(SF2_SUPPORT),1)
+ifeq ($(USE_FLUIDSYNTH),1)
+SRC += src/BAE_Source/Common/GenSF2_FluidSynth.c
+endif
+endif
+
+ifeq ($(CREATION_API),1)
+SRC += src/BAE_Source/Common/BAERmfEditor.c
+endif
+
+# MP3
+ifeq ($(MP3_DEC),1)
+SRC += src/BAE_MPEG_Source_II/XMPEG_minimp3_wrapper.c
+endif
+
+ifneq ($(filter 1,$(MP3_ENC) $(MP3_DEC)),)
+SRC += src/BAE_MPEG_Source_II/XMPEGFilesSun.c
+endif
+
+ifeq ($(MP3_ENC),1)
+SRC += src/BAE_MPEG_Source_II/XMPEG_lame_encoder.cpp
+endif
+
+# Vorbis wrapper — links external libvorbis*.a
+ifneq ($(filter 1,$(VORBIS_DEC) $(VORBIS_ENC)),)
+SRC += src/BAE_Source/Common/XVorbisFiles.c
+endif
+
+# Opus wrapper — links external libopus.a / libopusfile.a
+ifneq ($(filter 1,$(OPUS_DEC) $(OPUS_ENC)),)
+SRC += src/BAE_Source/Common/XOpusFiles.c
+endif
+
+# QOA (header-only)
+ifeq ($(QOA_SUPPORT),1)
+SRC += src/BAE_Source/Common/XQOAFiles.c
+endif
+
+# LZMA — in-tree 7-Zip SDK sources
+ifeq ($(LZMA_SUPPORT),1)
+SRC += src/BAE_Source/Common/X_LZMA.c
+SRC += src/thirdparty/lzma-26.00/C/Alloc.c
+SRC += src/thirdparty/lzma-26.00/C/7zAlloc.c
+SRC += src/thirdparty/lzma-26.00/C/7zCrc.c
+SRC += src/thirdparty/lzma-26.00/C/7zCrcOpt.c
+SRC += src/thirdparty/lzma-26.00/C/7zStream.c
+SRC += src/thirdparty/lzma-26.00/C/XzCrc64.c
+SRC += src/thirdparty/lzma-26.00/C/XzCrc64Opt.c
+SRC += src/thirdparty/lzma-26.00/C/Sha256.c
+SRC += src/thirdparty/lzma-26.00/C/Sha256Opt.c
+SRC += src/thirdparty/lzma-26.00/C/CpuArch.c
+SRC += src/thirdparty/lzma-26.00/C/Bra.c
+SRC += src/thirdparty/lzma-26.00/C/Bra86.c
+SRC += src/thirdparty/lzma-26.00/C/BraIA64.c
+SRC += src/thirdparty/lzma-26.00/C/Delta.c
+SRC += src/thirdparty/lzma-26.00/C/LzmaDec.c
+SRC += src/thirdparty/lzma-26.00/C/Lzma2Dec.c
+SRC += src/thirdparty/lzma-26.00/C/LzFind.c
+SRC += src/thirdparty/lzma-26.00/C/LzmaEnc.c
+SRC += src/thirdparty/lzma-26.00/C/Lzma2Enc.c
+SRC += src/thirdparty/lzma-26.00/C/Xz.c
+SRC += src/thirdparty/lzma-26.00/C/XzDec.c
+endif
+
+# MTHC decompressor
+ifeq ($(MTHC_SUPPORT),1)
+SRC += src/mthc/mthc_decomp.c
+endif
+
+# G.722 ADPCM — single in-tree file, no MinGW package
+ifeq ($(ADP_SUPPORT),1)
+SRC += src/adp2wav/adp2wav_decode.c \
+       src/thirdparty/libg722/g722_decode.c
+endif
+
+# MOD2RMF + libxmp-lite — in-tree sources
+ifeq ($(MOD2RMF),1)
+SRC += src/mod2rmf/mod2rmf_common.c \
+       src/mod2rmf/mod2rmf_encoder.c \
+       src/mod2rmf/mod2rmf_resampler.c \
+       src/mod2rmf/mod2rmf_rmfcreat.c \
+       src/mod2rmf/mod2rmf_song.c
+SRC += src/thirdparty/libxmp/src/lite/lite-virtual.c \
+       src/thirdparty/libxmp/src/lite/lite-format.c \
+       src/thirdparty/libxmp/src/lite/lite-period.c \
+       src/thirdparty/libxmp/src/lite/lite-player.c \
+       src/thirdparty/libxmp/src/lite/lite-read_event.c \
+       src/thirdparty/libxmp/src/lite/lite-misc.c \
+       src/thirdparty/libxmp/src/lite/lite-dataio.c \
+       src/thirdparty/libxmp/src/lite/lite-lfo.c \
+       src/thirdparty/libxmp/src/lite/lite-scan.c \
+       src/thirdparty/libxmp/src/lite/lite-control.c \
+       src/thirdparty/libxmp/src/lite/lite-filter.c \
+       src/thirdparty/libxmp/src/lite/lite-effects.c \
+       src/thirdparty/libxmp/src/lite/lite-mixer.c \
+       src/thirdparty/libxmp/src/lite/lite-mix_all.c \
+       src/thirdparty/libxmp/src/lite/lite-load_helpers.c \
+       src/thirdparty/libxmp/src/lite/lite-load.c \
+       src/thirdparty/libxmp/src/lite/lite-filetype.c \
+       src/thirdparty/libxmp/src/lite/lite-hio.c \
+       src/thirdparty/libxmp/src/lite/lite-smix.c \
+       src/thirdparty/libxmp/src/lite/lite-memio.c \
+       src/thirdparty/libxmp/src/lite/lite-rng.c \
+       src/thirdparty/libxmp/src/lite/lite-win32.c \
+       src/thirdparty/libxmp/src/lite/lite-flow.c \
+       src/thirdparty/libxmp/src/lite/lite-common.c \
+       src/thirdparty/libxmp/src/lite/lite-itsex.c \
+       src/thirdparty/libxmp/src/lite/lite-sample.c \
+       src/thirdparty/libxmp/src/lite/lite-xm_load.c \
+       src/thirdparty/libxmp/src/lite/lite-mod_load.c \
+       src/thirdparty/libxmp/src/lite/lite-s3m_load.c \
+       src/thirdparty/libxmp/src/lite/lite-it_load.c
+endif
+
+# RtMidi MIDI hardware input — in-tree sources
+ifneq ($(ENABLE_MIDI_HW),)
+SRC += src/thirdparty/rtmidi/rtmidi_c.cpp \
+       src/thirdparty/rtmidi/RtMidi.cpp
+endif
+
+# Debug helper
+ifeq ($(DEBUG),1)
+SRC += src/BAE_Source/Common/X_DebugCallback.c
+endif
+
+# NeoBAE Studio UI sources
+SRC += src/nbstudio/editor_main.cpp \
+       src/nbstudio/editor_bank.cpp \
+       src/nbstudio/editor_instrument_ext_dialog.cpp \
+       src/nbstudio/editor_metadata_dialog.cpp \
+       src/nbstudio/editor_pianoroll_panel.cpp \
+       src/nbstudio/batch_compress_dialog.cpp
+
+# ============================================================
+# BAE compile flags
+# ============================================================
+BAE_FLAGS += -DX_PLATFORM=X_SDL3 -D_USING_SDL3=1
+
+ifeq ($(FIX_SPAN_DC),1)
+BAE_FLAGS += -DBAE_FIX_SPAN_DC=1
+endif
+
+ifeq ($(CLASSIC_CHORUS),1)
+BAE_FLAGS += -DBAE_CLASSIC_CHORUS=1
+endif
+
+ifeq ($(ZMF_SUPPORT),1)
+BAE_FLAGS += -DUSE_ZMF_SUPPORT=1
+endif
+
+ifeq ($(CREATION_API),1)
+BAE_FLAGS += -DCREATION_API=1
+endif
+
+ifeq ($(RMI_SUPPORT),1)
+BAE_FLAGS += -DUSE_RMI_SUPPORT=1
+endif
+
+ifeq ($(RETRO_RINGTONE_SUPPORT),1)
+BAE_FLAGS += -DUSE_RETRO_RINGTONE_SUPPORT=1
+endif
+
+ifeq ($(SF2_SUPPORT),1)
+BAE_FLAGS += -DUSE_SF2_SUPPORT=1
+ifeq ($(USE_FLUIDSYNTH),1)
+BAE_FLAGS += -D_USING_FLUIDSYNTH=1
+endif
+endif
+
+ifeq ($(XMF_SUPPORT),1)
+BAE_FLAGS += -DUSE_XMF_SUPPORT=1
+endif
+
+ifeq ($(OGG_SUPPORT),1)
+BAE_FLAGS += -DUSE_OGG_FORMAT=1 -DSUPPORT_OGG_FORMAT=1
+endif
+
+ifeq ($(MP3_DEC),1)
+BAE_FLAGS += -DUSE_MINIMP3_WRAPPER=1 -DUSE_MPEG_DECODER=1
+endif
+
+ifeq ($(MP3_ENC),1)
+BAE_FLAGS += -DUSE_MPEG_ENCODER=1 -DUSE_LAME_ENCODER=1
+endif
+
+ifneq ($(filter 1,$(FLAC_DEC) $(FLAC_ENC)),)
+BAE_FLAGS += -DFLAC__NO_DLL
+ifeq ($(OGG_SUPPORT),1)
+BAE_FLAGS += -DFLAC__HAS_OGG=1
+else
+BAE_FLAGS += -DFLAC__HAS_OGG=0
+endif
+endif
+
+ifeq ($(FLAC_DEC),1)
+BAE_FLAGS += -DUSE_FLAC_DECODER=1
+endif
+
+ifeq ($(FLAC_ENC),1)
+BAE_FLAGS += -DUSE_FLAC_ENCODER=1
+endif
+
+ifeq ($(VORBIS_DEC),1)
+BAE_FLAGS += -DUSE_VORBIS_DECODER=1
+endif
+
+ifeq ($(VORBIS_ENC),1)
+BAE_FLAGS += -DUSE_VORBIS_ENCODER=1
+endif
+
+ifeq ($(OPUS_DEC),1)
+BAE_FLAGS += -DUSE_OPUS_DECODER=1
+endif
+
+ifeq ($(OPUS_ENC),1)
+BAE_FLAGS += -DUSE_OPUS_ENCODER=1
+endif
+
+ifeq ($(LZMA_SUPPORT),1)
+BAE_FLAGS += -DUSE_LZMA_COMPRESSION=1 -DZ7_ST
+endif
+
+ifeq ($(MTHC_SUPPORT),1)
+BAE_FLAGS += -DUSE_MTHC_SUPPORT=1
+endif
+
+ifeq ($(ADP_SUPPORT),1)
+BAE_FLAGS += -DUSE_ADP_SUPPORT=1
+endif
+
+ifeq ($(QOA_SUPPORT),1)
+BAE_FLAGS += -DUSE_QOA_SUPPORT=1
+endif
+
+ifeq ($(MOD2RMF),1)
+BAE_FLAGS += -DLIBXMP_STATIC=1 -DLIBXMP_CORE_PLAYER=1
+endif
+
+ifneq ($(ENABLE_MIDI_HW),)
+BAE_FLAGS += -D__WINDOWS_MM__ -DSUPPORT_MIDI_HW=1
+endif
+
+ifeq ($(DEBUG),1)
+BAE_FLAGS += -D_DEBUG=1 -Wall -Wno-unused-function
+endif
+
+# Embedded patches header generation
+ifeq ($(EMBED_PATCHES),1)
+ifdef EMBED_PATCH_FILE
+BAE_FLAGS += -D_BUILT_IN_PATCHES=1 -I$(OBJ_DIR)
+EMBED_PATCH_HEADER := $(OBJ_DIR)BAEPatches.h
+$(EMBED_PATCH_HEADER): $(EMBED_PATCH_FILE) ../scripts/create_embedded_patches_h.py
+	@echo @embed $<
+	@mkdir -p $(dir $(EMBED_PATCH_HEADER))
+	@python3 ../scripts/create_embedded_patches_h.py $(EMBED_PATCH_FILE) $(EMBED_PATCH_HEADER)
+ifeq ($(USE_BUILTIN_PATCHES_WITH_SF2),1)
+BAE_FLAGS += -D_LOAD_BUILTIN_PATCHES_FOR_SF2=1
+endif
+endif
+endif
+
+# ============================================================
+# Include paths
+# ============================================================
+INC_PATH := -Isrc/BAE_Source/Common
+INC_PATH += -Isrc/BAE_Source/Platform
+INC_PATH += -Isrc/thirdparty/config
+
+ifneq ($(filter 1,$(MP3_ENC) $(MP3_DEC)),)
+INC_PATH += -Isrc/BAE_MPEG_Source_II
+endif
+
+ifeq ($(MP3_DEC),1)
+INC_PATH += -Isrc/thirdparty/minimp3
+endif
+
+ifeq ($(MP3_ENC),1)
+INC_PATH += -I$(LAME_DIR)/include
+endif
+
+ifneq ($(ENABLE_MIDI_HW),)
+INC_PATH += -Isrc/thirdparty/rtmidi
+endif
+
+ifeq ($(MOD2RMF),1)
+INC_PATH += -Isrc/mod2rmf
+INC_PATH += -Isrc/thirdparty/libxmp/include
+endif
+
+ifeq ($(BITS),32)
+INC_PATH += -I/mingw32/include -I/usr/i686-w64-mingw32/include
+else
+INC_PATH += -I/mingw64/include -I/usr/x86_64-w64-mingw32/include
+endif
+
+ifneq ($(filter 1,$(FLAC_DEC) $(FLAC_ENC)),)
+INC_PATH += -I$(FLAC_DIR)/include
+endif
+
+ifeq ($(OGG_SUPPORT),1)
+INC_PATH += -I$(OGG_DIR)/include
+endif
+
+ifneq ($(filter 1,$(VORBIS_DEC) $(VORBIS_ENC)),)
+INC_PATH += -I$(VORBIS_DIR)/include
+endif
+
+ifneq ($(filter 1,$(OPUS_DEC) $(OPUS_ENC)),)
+INC_PATH += -I$(OPUS_DIR)/include
+ifeq ($(OPUS_DEC),1)
+INC_PATH += -I$(OPUSFILE_DIR)/include
+endif
+endif
+
+ifeq ($(LZMA_SUPPORT),1)
+INC_PATH += -Isrc/thirdparty/lzma-26.00/C
+endif
+
+ifeq ($(QOA_SUPPORT),1)
+INC_PATH += -Isrc/thirdparty/qoa
+endif
+
+# SDL3 audio headers
+INC_PATH += -I$(SDL3_DIR)/include -I$(SDL3_DIR)/include/SDL3
+
+ifeq ($(USE_FLUIDSYNTH),1)
+INC_PATH += -I$(FLUIDSYNTH_DIR)/include
+endif
+
+# ============================================================
+# Object file list  (flat object names under OBJ_DIR)
+# ============================================================
+OBJ_BIN := $(addprefix $(OBJ_DIR),$(addsuffix .o,$(notdir $(basename $(SRC)))))
+RC_OBJ  := $(OBJ_DIR)editor_res.o
+OBJ_BIN += $(RC_OBJ)
+
+# ============================================================
+# Compiler / linker
+# ============================================================
+OPTI := -O2 -fPIC
+ifeq ($(LDEBUG),1)
+OPTI := -g -O0 -ggdb3 -fPIC
+endif
+
+CFLAGS   := $(ARCH) $(OPTI) $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value -DFLAC__NO_DLL
+CFLAGS   += $(BAE_FLAGS) -Wno-pragma-pack
+CFLAGS   += -D_VERSION=\"$(VERSION)\"
+ifneq ($(TARGET),)
+    CFLAGS += -I/opt/lvmm-mingw/$(TARGET)/include \
+        -I/opt/lvmm-mingw/generic-w64-mingw32/include \
+        -I/opt/llvm-mingw/generic-w64-mingw32/include/opus
+endif
+CXXFLAGS := $(CFLAGS) $(WX_CXXFLAGS) -UWXUSINGDLL
+
+LDFLAGS  := $(ARCH) $(OPTI)
+ifneq ($(LDEBUG),1)
+LDFLAGS += -s
+endif
+
+# SDL3 link dir
+LDFLAGS += -L$(SDL3_DIR)/lib
+
+# FluidSynth
+ifeq ($(USE_FLUIDSYNTH),1)
+LDFLAGS += -L$(FLUIDSYNTH_DIR)/lib
+endif
+
+# Codec lib search paths
+ifneq ($(filter 1,$(FLAC_DEC) $(FLAC_ENC)),)
+LDFLAGS += -L$(FLAC_DIR)/lib
+endif
+
+ifeq ($(OGG_SUPPORT),1)
+LDFLAGS += -L$(OGG_DIR)/lib
+endif
+
+ifneq ($(filter 1,$(VORBIS_DEC) $(VORBIS_ENC)),)
+LDFLAGS += -L$(VORBIS_DIR)/lib
+endif
+
+ifneq ($(filter 1,$(OPUS_DEC) $(OPUS_ENC)),)
+LDFLAGS += -L$(OPUS_DIR)/lib
+ifeq ($(OPUS_DEC),1)
+LDFLAGS += -L$(OPUSFILE_DIR)/lib
+endif
+endif
+
+ifeq ($(MP3_ENC),1)
+LDFLAGS += -L$(LAME_DIR)/lib
+endif
+
+ifeq ($(BITS),32)
+LDFLAGS += -L/mingw32/lib -L/usr/i686-w64-mingw32/lib
+else
+LDFLAGS += -L/mingw64/lib -L/usr/x86_64-w64-mingw32/lib
+endif
+
+LDFLAGS += -L$(OMP_LIB_DIR)
+
+# ============================================================
+# Library list
+# ============================================================
+FLAC_LINK_LIB    ?= -lFLAC
+SNDFILE_LINK_LIB ?= -lsndfile
+MPG123_LINK_LIB  ?= -lmpg123
+
+LIBS := \
+	-lmingw32 \
+	-lSDL3
+
+ifeq ($(USE_FLUIDSYNTH),1)
+LIBS += $(FLUIDSYNTH_DIR)/lib/libfluidsynth-3.a
+endif
+
+# Static codec group
+STATIC_CODEC_LIBS :=
+
+ifneq ($(filter 1,$(FLAC_DEC) $(FLAC_ENC)),)
+STATIC_CODEC_LIBS += $(FLAC_LINK_LIB)
+endif
+
+ifeq ($(OGG_SUPPORT),1)
+STATIC_CODEC_LIBS += -logg
+endif
+
+ifneq ($(filter 1,$(VORBIS_DEC) $(VORBIS_ENC)),)
+ifeq ($(VORBIS_ENC),1)
+STATIC_CODEC_LIBS += -lvorbisenc
+endif
+STATIC_CODEC_LIBS += -lvorbisfile -lvorbis
+endif
+
+ifneq ($(filter 1,$(OPUS_DEC) $(OPUS_ENC)),)
+ifeq ($(OPUS_DEC),1)
+STATIC_CODEC_LIBS += -lopusfile
+endif
+STATIC_CODEC_LIBS += -lopus
+endif
+
+ifeq ($(MP3_ENC),1)
+STATIC_CODEC_LIBS += -lmp3lame
+endif
+
+ifeq ($(XMF_SUPPORT),1)
+STATIC_CODEC_LIBS += -lzs
+endif
+
+ifneq ($(STATIC_CODEC_LIBS),)
+LIBS += -Wl,--start-group $(STATIC_CODEC_LIBS) -Wl,--end-group
+endif
+
+# Windows system libraries
+LIBS += \
+	-lwinmm \
+	-lversion \
+	-lsetupapi \
+	-lshlwapi \
+	-lgdi32 \
+	-lgdiplus \
+	-lmsimg32 \
+	-limm32 \
+	-lole32 \
+	-loleaut32 \
+	-luuid \
+	-lcomdlg32 \
+	-lcomctl32 \
+	-luxtheme \
+	-loleacc \
+	-lwinspool \
+	-lzs \
+	-lstdc++
+
+# Static runtime deps + wxWidgets
+WX_VER_NODOT := $(subst .,,$(WX_VER))
+LIBS += \
+	-lwxpng-$(WX_VER) \
+    -lwxzlib-$(WX_VER) \
+	-lfreetype \
+	-lpng \
+	-lbrotlidec \
+	-lbrotlicommon \
+	-lharfbuzz \
+	$(OMP_LINK_LIB) \
+	-lwinpthread \
+	$(SNDFILE_LINK_LIB) \
+	-logg \
+	$(FLAC_LINK_LIB) \
+	-lvorbis \
+	-lvorbisenc \
+	$(MPG123_LINK_LIB) \
+	-lopus
+
+LIBS += $(WX_LIBS)
+
+# ============================================================
+# Embedded asset prerequisites
+# ============================================================
+ifdef EMBED_PATCH_HEADER
+$(OBJ_DIR)NeoBAE.o: $(EMBED_PATCH_HEADER)
+endif
+
+# ============================================================
+# Build targets
+# ============================================================
+all: $(TARGET_BIN_FULL)
+
+$(TARGET_BIN_FULL): $(OBJ_BIN)
+	@mkdir -p $(TARGET_OUT)Banks
+	$(SHELL) src/banks/copy.sh $(TARGET_OUT)Banks
+	$(LD) -o $(TARGET_OUT)$(TARGET_BIN_FULL) $(LDFLAGS) \
+	    -Wl,--subsystem,windows \
+	    $(OBJ_BIN) $(LIBS)
+	@if [ "$(USE_FLUIDSYNTH)" = "1" ]; then \
+	    cp $(FLUIDSYNTH_DIR)/bin/libfluidsynth-3.dll $(TARGET_OUT) 2>/dev/null || true; \
+	    cp $(FLUIDSYNTH_DIR)/bin/sndfile.dll $(TARGET_OUT) 2>/dev/null || true; \
+	fi
+	@cp $(SDL3_DIR)/bin/SDL3.dll $(TARGET_OUT) 2>/dev/null || true
+
+pack: $(TARGET_BIN_FULL)
+	cat $(TARGET_OUT)$(TARGET_BIN_FULL) | gzip -9c > $(TARGET_OUT)nbstudio_win_static.gz
+
+# ============================================================# Resource compilation
+# ============================================================
+$(RC_OBJ): src/nbstudio/editor.rc
+	@echo @windres $<
+	@mkdir -p $(OBJ_DIR)
+	$(SILENT)$(WINDRES) $(INC_PATH) -I/opt/llvm-mingw/generic-w64-mingw32/include/wx-3.3 $< -o $@
+
+# ============================================================# Per-file compilation rules  (flat object names)
+# ============================================================
+define make_obj_rule
+$(OBJ_DIR)$(notdir $(basename $(1))).o: $(1)
+	@echo @compile $$<
+	@mkdir -p $(OBJ_DIR)
+	$(SILENT)$(if $(filter %.cpp,$(1)),$(CXX) -c $(CXXFLAGS),$(CC) -c $(CFLAGS)) $$< -o $$@
+endef
+
+ALL_SOURCES := $(sort $(SRC))
+$(foreach src,$(ALL_SOURCES),$(eval $(call make_obj_rule,$(src))))
+
+# ============================================================
+# clean
+# ============================================================
+clean:
+	@rm -rf $(TARGET_OUT)
+	@rm -rf $(OBJ_DIR)
+	@rm -rf $(BUILD_DIR)
+	@rm -rf $(TEST_OUT_DIR)
+	@echo Cleaned!

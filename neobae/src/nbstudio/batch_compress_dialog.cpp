@@ -27,20 +27,20 @@ static std::pair<int, int> CompressionTypeToCodecBitrate(BAERmfEditorCompression
         case BAE_EDITOR_COMPRESSION_VORBIS_192K: return std::make_pair(4, 7);
         case BAE_EDITOR_COMPRESSION_VORBIS_256K: return std::make_pair(4, 8);
         case BAE_EDITOR_COMPRESSION_FLAC:        return std::make_pair(5, 0);
-        case BAE_EDITOR_COMPRESSION_OPUS_12K:    return std::make_pair(opusRoundTrip ? 7 : 6, 0);
-        case BAE_EDITOR_COMPRESSION_OPUS_16K:    return std::make_pair(opusRoundTrip ? 7 : 6, 1);
-        case BAE_EDITOR_COMPRESSION_OPUS_24K:    return std::make_pair(opusRoundTrip ? 7 : 6, 2);
-        case BAE_EDITOR_COMPRESSION_OPUS_32K:    return std::make_pair(opusRoundTrip ? 7 : 6, 3);
-        case BAE_EDITOR_COMPRESSION_OPUS_48K:    return std::make_pair(opusRoundTrip ? 7 : 6, 4);
-        case BAE_EDITOR_COMPRESSION_OPUS_64K:    return std::make_pair(opusRoundTrip ? 7 : 6, 5);
-        case BAE_EDITOR_COMPRESSION_OPUS_80K:    return std::make_pair(opusRoundTrip ? 7 : 6, 6);
-        case BAE_EDITOR_COMPRESSION_OPUS_96K:    return std::make_pair(opusRoundTrip ? 7 : 6, 7);
-        case BAE_EDITOR_COMPRESSION_OPUS_128K:   return std::make_pair(opusRoundTrip ? 7 : 6, 8);
-        case BAE_EDITOR_COMPRESSION_OPUS_160K:   return std::make_pair(opusRoundTrip ? 7 : 6, 9);
-        case BAE_EDITOR_COMPRESSION_OPUS_192K:   return std::make_pair(opusRoundTrip ? 7 : 6, 10);
-        case BAE_EDITOR_COMPRESSION_OPUS_256K:   return std::make_pair(opusRoundTrip ? 7 : 6, 11);
+        case BAE_EDITOR_COMPRESSION_OPUS_12K:    return std::make_pair(6, 0);
+        case BAE_EDITOR_COMPRESSION_OPUS_16K:    return std::make_pair(6, 1);
+        case BAE_EDITOR_COMPRESSION_OPUS_24K:    return std::make_pair(6, 2);
+        case BAE_EDITOR_COMPRESSION_OPUS_32K:    return std::make_pair(6, 3);
+        case BAE_EDITOR_COMPRESSION_OPUS_48K:    return std::make_pair(6, 4);
+        case BAE_EDITOR_COMPRESSION_OPUS_64K:    return std::make_pair(6, 5);
+        case BAE_EDITOR_COMPRESSION_OPUS_80K:    return std::make_pair(6, 6);
+        case BAE_EDITOR_COMPRESSION_OPUS_96K:    return std::make_pair(6, 7);
+        case BAE_EDITOR_COMPRESSION_OPUS_128K:   return std::make_pair(6, 8);
+        case BAE_EDITOR_COMPRESSION_OPUS_160K:   return std::make_pair(6, 9);
+        case BAE_EDITOR_COMPRESSION_OPUS_192K:   return std::make_pair(6, 10);
+        case BAE_EDITOR_COMPRESSION_OPUS_256K:   return std::make_pair(6, 11);
 #if USE_QOA_SUPPORT == TRUE
-    case BAE_EDITOR_COMPRESSION_QOA:         return std::make_pair(8, 0);
+    case BAE_EDITOR_COMPRESSION_QOA:         return std::make_pair(7, 0);
 #endif
         default:                                  return std::make_pair(6, 8);
     }
@@ -78,7 +78,6 @@ BatchCompressDialog::BatchCompressDialog(wxWindow *parent,
     m_codecChoice->Append("MP3");
     m_codecChoice->Append("VORBIS");
     m_codecChoice->Append("FLAC");
-    m_codecChoice->Append("OPUS");
     m_codecChoice->Append("OPUS (Round-Trip)");
 #if USE_QOA_SUPPORT == TRUE
     m_codecChoice->Append("QOA");
@@ -131,7 +130,7 @@ BatchCompressDialog::BatchCompressDialog(wxWindow *parent,
         }
         m_opusModeChoice->SetSelection(modeSel);
     }
-    m_opusModeChoice->Enable(m_codecChoice->GetSelection() == 6 || m_codecChoice->GetSelection() == 7);
+    m_opusModeChoice->Enable(m_codecChoice->GetSelection() == 6);
     opusModeSizer->Add(opusModeLabel, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
     opusModeSizer->Add(m_opusModeChoice, 1, wxALL | wxEXPAND, 5);
     mainSizer->Add(opusModeSizer, 0, wxEXPAND | wxLEFT | wxRIGHT, 10);
@@ -162,7 +161,7 @@ void BatchCompressDialog::OnCodecSelected(wxCommandEvent &event)
     UpdateBitrateChoice(codecIdx);
     if (m_opusModeChoice)
     {
-        m_opusModeChoice->Enable(codecIdx == 6 || codecIdx == 7);
+        m_opusModeChoice->Enable(codecIdx == 6);
     }
 }
 
@@ -177,7 +176,7 @@ void BatchCompressDialog::UpdateBitrateChoice(int codecIdx)
     case 2: // ADPCM
     case 5: // FLAC
 #if USE_QOA_SUPPORT == TRUE
-    case 8: // QOA
+    case 7: // QOA
 #endif
         m_bitrateChoice->Append("---");
         m_bitrateChoice->SetSelection(0);
@@ -211,8 +210,7 @@ void BatchCompressDialog::UpdateBitrateChoice(int codecIdx)
         m_bitrateChoice->Enable(true);
         break;
 
-    case 7: // OPUS (Round-Trip)
-    case 6: // OPUS
+    case 6: // OPUS (Round-Trip)
         m_bitrateChoice->Append("12k");
         m_bitrateChoice->Append("16k");
         m_bitrateChoice->Append("24k");
@@ -278,11 +276,7 @@ BAERmfEditorCompressionType BatchCompressDialog::GetSelectedCompressionType() co
         }
     }
     case 5: return BAE_EDITOR_COMPRESSION_FLAC;
-#if USE_QOA_SUPPORT == TRUE
-    case 8: return BAE_EDITOR_COMPRESSION_QOA;
-#endif
-    case 7: // OPUS (Round-Trip) uses same Opus bitrate mapping
-    case 6: // OPUS
+    case 6: // OPUS (Round-Trip)
     {
         switch (bitrateIdx)
         {
@@ -301,6 +295,9 @@ BAERmfEditorCompressionType BatchCompressDialog::GetSelectedCompressionType() co
         default: return BAE_EDITOR_COMPRESSION_OPUS_128K;
         }
     }
+#if USE_QOA_SUPPORT == TRUE
+    case 7: return BAE_EDITOR_COMPRESSION_QOA;
+#endif
     default: return BAE_EDITOR_COMPRESSION_DONT_CHANGE;
     }
 }
@@ -325,5 +322,5 @@ bool BatchCompressDialog::GetSelectedOpusRoundTrip() const
     {
         return false;
     }
-    return m_codecChoice->GetSelection() == 7;
+    return m_codecChoice->GetSelection() == 6;
 }

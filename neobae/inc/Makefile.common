@@ -793,8 +793,8 @@ else
 							SRC += src/mod2rmf/mod2rmf_main.c
 						else
 							ifeq ($(BANKRECOMP),1)
-								# libNeoBAE srcs + bankrecomp.c
-								SRC += src/bankrecomp/bankrecomp.c
+								# libNeoBAE srcs + bankrecomp_api.c
+								SRC += src/bankrecomp/bankrecomp_api.c
 							else
 								ifeq ($(SF2_TO_HSB),1)
 									# libNeoBAE srcs + sf2-hsb
