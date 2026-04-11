@@ -7070,7 +7070,9 @@ BAESong BAESong_New(BAEMixer mixer)
                     song->mID = OBJECT_ID;
                     if (song->pSong)
                     {
-                        memset(song->pSong->channelActiveNotes, 0, sizeof(song->pSong->channelActiveNotes));
+                        for (int _c = 0; _c < 16; _c++)
+                            for (int _n = 0; _n < 128; _n++)
+                                song->pSong->channelActiveNotes[_c][_n] = 0;
 #if USE_SF2_SUPPORT == TRUE
                         memset(song->pSong->lastThreeControl, 0, sizeof(song->pSong->lastThreeControl));
 #endif
@@ -8723,7 +8725,8 @@ BAEResult BAESong_MuteChannel(BAESong song, uint16_t channel)
     {
         BAE_AcquireMutex(song->mLock);
         GM_MuteChannel(song->pSong, channel);
-        memset(song->pSong->channelActiveNotes[channel], 0, sizeof(song->pSong->channelActiveNotes[channel]));
+        for (int _n = 0; _n < 128; _n++)
+            song->pSong->channelActiveNotes[channel][_n] = 0;
         BAE_ReleaseMutex(song->mLock);
     }
     else
@@ -8871,7 +8874,8 @@ BAEResult BAESong_GetActiveNotes(BAESong song, unsigned char channel, unsigned c
             BAE_AcquireMutex(song->mLock);
             if (song->pSong)
             {
-                memcpy(outNotes, song->pSong->channelActiveNotes[channel], 128);
+                for (int _n = 0; _n < 128; _n++)
+                    outNotes[_n] = song->pSong->channelActiveNotes[channel][_n];
             }
             else
             {

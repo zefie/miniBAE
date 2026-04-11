@@ -3682,13 +3682,14 @@ int main(int argc, char *argv[])
 #else
                 SDL_SetRenderClipRect(R, NULL);
 #endif
-                // Advance stripe animation only every other frame to slow it down
-                static int g_progress_frame_counter = 0;
-                g_progress_frame_counter++;
-                // Advance more slowly: 1 unit every N frames (keeps frame rate unchanged)
-                const int advanceInterval = 3; // increase to slow the perceived scroll speed
-                if ((g_progress_frame_counter % advanceInterval) == 0)
+                // Advance stripe animation based on elapsed time, not frame count,
+                // so speed is consistent regardless of compiler or frame rate.
+                static Uint32 g_progress_last_advance_ms = 0;
+                const Uint32 stripe_advance_interval_ms = 50; // ms per 1-pixel step
+                Uint32 now_stripe = SDL_GetTicks();
+                if (now_stripe - g_progress_last_advance_ms >= stripe_advance_interval_ms)
                 {
+                    g_progress_last_advance_ms = now_stripe;
                     // Reverse scrolling direction by subtracting a single unit
                     g_progress_stripe_offset = (g_progress_stripe_offset - 1) % (stripeStep);
                     if (g_progress_stripe_offset < 0)
@@ -4351,7 +4352,11 @@ int main(int argc, char *argv[])
                     }
                 }
             }
-            memcpy(g_keyboard_active_notes, merged_notes, sizeof(g_keyboard_active_notes));
+            // Normalize velocity bytes into bool: memcpy would bypass bool conversion
+            // and leave raw velocity bytes in place. Clang reads bool as bit 0 only,
+            // so an even velocity like 100 (0x64) would appear as false. Normalize explicitly.
+            for (int _n = 0; _n < BAE_MAX_NOTES; _n++)
+                g_keyboard_active_notes[_n] = (merged_notes[_n] != 0);
             // Build a quick lookup of notes triggered by typed (qwerty) keys so
             // we can render them with the highlight color instead of the
             // accent color used for incoming MIDI/engine activity.

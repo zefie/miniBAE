@@ -1277,8 +1277,9 @@ typedef int32_t UNIT_TYPE;
         int16_t channelStereoPosition[MAX_CHANNELS];       // current channel stereo position
 
         // Realtime note activity tracking for GUI virtual keyboard.
-        // Stores current velocity (>0) for active notes per channel; 0 means off.
-        unsigned char channelActiveNotes[16][128];
+        // Written by the audio/sequencer thread, read by the GUI thread.
+        // volatile prevents the compiler from caching reads across thread boundaries.
+        volatile unsigned char channelActiveNotes[16][128];
 
         // mute controls for tracks, channels, and solos
         // NOTE: Do not access these directly. Use XSetBit & XClearBit & XTestBit
