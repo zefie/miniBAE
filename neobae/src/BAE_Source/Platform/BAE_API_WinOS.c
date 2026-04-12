@@ -381,65 +381,20 @@ static void PV_DirectSoundRelease(void)
 
 static BOOL PV_IsDX5OrHigher()
 {
-    BOOL                    isOK                = FALSE;
-    HRESULT                 result;
-
-    LPDIRECTDRAW            pDDraw              = NULL;
-    DDSURFACEDESC           desc;
-    LPDIRECTDRAWSURFACE     pSurf               = NULL;
-    LPDIRECTDRAWSURFACE3    pSurf3              = NULL;
-
-    result = CoInitialize(NULL);
-    if (FAILED(result))
-        return FALSE;
-
-    result = CoCreateInstance(&CLSID_DirectDraw,
-                              NULL,
-                              CLSCTX_INPROC_SERVER,
-                              &IID_IDirectDraw,
-                              (LPVOID)&pDDraw);
-    if (FAILED(result))
-        goto theEnd;
-
-    //  BoundsChecker doesn't like this, but it's what is called for by MS.
-    //      NULL means 'active display driver'... Seach not for this, but
-    //      IDirectDraw2_Initialize in MSDN or online...
-    result = IDirectDraw_Initialize(pDDraw, NULL);
-    if (FAILED(result))
-        goto theEnd;
-
-    ZeroMemory(&desc, sizeof(desc));
-    desc.dwSize         = sizeof(desc);
-    desc.dwFlags        = DDSD_CAPS;
-    desc.ddsCaps.dwCaps = DDSCAPS_PRIMARYSURFACE;
-
-    result = IDirectDraw_SetCooperativeLevel(pDDraw, NULL, DDSCL_NORMAL);
-    if (FAILED(result))
-        goto theEnd;
-
-    result = IDirectDraw_CreateSurface(pDDraw, &desc, &pSurf, NULL);
-    if (FAILED(result))
-        goto theEnd;
-    
-    result = IDirectDrawSurface_QueryInterface(pSurf,
-                                               &IID_IDirectDrawSurface3,
-                                               (LPVOID *) &pSurf3);
-    if (FAILED(result))
-        goto theEnd;
-    else
-        isOK = TRUE;
-    
-    
-theEnd:
-    if (pSurf3)
-        result = IDirectDrawSurface3_Release(pSurf3);
-    if (pSurf)
-        result = IDirectDrawSurface_Release(pSurf);
-    if (pDDraw)
-        result = IDirectDraw_Release(pDDraw);
-    CoUninitialize();
-
-    return isOK;
+    // this is probably unneeded since this code won't compile anymore on older OSes,
+    // but just to be sure, we'll check for the DirectSoundCreate function in dsound.dll
+    HMODULE hDSoundDLL; 
+    hDSoundDLL = LoadLibrary("dsound.dll");
+    if (hDSoundDLL)
+    {
+        FARPROC pDirectSoundCreate = GetProcAddress(hDSoundDLL, "DirectSoundCreate");
+        FreeLibrary(hDSoundDLL);
+        if (pDirectSoundCreate)
+        {
+            return TRUE;
+        }
+    }    
+    return FALSE;
 }
 
 static BOOL PV_DirectSoundCreate(void)

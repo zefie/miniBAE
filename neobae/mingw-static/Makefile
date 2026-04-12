@@ -1,11 +1,11 @@
-# neobae/mingw-static/Makefile.gui
+# neobae/mingw-static/Makefile
 #
-# Standalone GUI build for Windows (MinGW cross-compilation).
+# Standalone CLI build for Windows (MinGW cross-compilation).
 # Codec libraries are linked as external pre-built static libraries rather
 # than compiled from the embedded source trees, except where noted below.
 #
 # Usage (from neobae/ directory):
-#   make -f mingw-static/Makefile.gui [BITS=64|32] [DEBUG=1] [NOAUTO=1] ...
+#   make -f mingw-static/Makefile [BITS=64|32] [DEBUG=1] [NOAUTO=1] ...
 #
 # Required pre-built static libraries are searched under
 # /opt/llvm-mingw/$(TARGET)/lib by default.
@@ -19,25 +19,19 @@
 #   libopus.a          OPUS_DIR
 #   libopusfile.a      OPUSFILE_DIR
 #   libmp3lame.a       LAME_DIR
-#
-# Notes:
-#   - SDL3.dll, SDL3_ttf.dll and (when USE_FLUIDSYNTH=1) libfluidsynth-3.dll are
-#     still linked as DLL import libs from ../deps/win/, as in the non-static build.
-#   - minimp3 (header-only), qoa (header-only), liblzma SDK, libg722, and RtMidi
-#     are compiled from the in-tree src/thirdparty/ sources.
 
 # ============================================================
 # Feature flags  (all on by default; NOAUTO=1 to suppress)
 # ============================================================
 BAE_BUILT_IN_PATCHES := 1
-BAE_API              := SDL3
-BUILD_GUI            := 1
+BAE_API              := WinOS
+
 WINDOWS              := 1
 
 ifneq ($(NOAUTO),1)
-ENABLE_MIDI_HW           := 1
+ENABLE_MIDI_HW           := 0
 ZMF_SUPPORT              := 1
-KARAOKE                  := 1
+KARAOKE                  := 0
 BAESCRIPT                := 1
 PLAYLIST                 := 1
 SF2_SUPPORT              := 1
@@ -89,14 +83,8 @@ WINDRES := $(TARGET)-windres
 # ============================================================
 # External dependency base directory
 # ============================================================
-DEPS_DIR ?= ../deps/win
-
 # Default external static library prefix for codec dependencies.
-LLVM_MINGW_PREFIX ?= /opt/llvm-mingw/$(TARGET)
-
-# SDL3 and SDL3_ttf (DLL import libs — same as the regular mingw GUI build)
-SDL3_DIR         ?= $(LLVM_MINGW_PREFIX)
-SDL3_TTF_DIR     ?= $(LLVM_MINGW_PREFIX)
+LLVM_MINGW_PREFIX ?= $(TOOLCHAIN_PREFIX)/$(TARGET)
 
 # FluidSynth (DLL import lib)
 FLUIDSYNTH_DIR   ?= $(LLVM_MINGW_PREFIX)
@@ -127,7 +115,7 @@ BAE_LIBS     :=
 # Target names
 # ============================================================
 TARGET_LIB  := libNeoBAE
-TARGET_BIN  := zefidi
+TARGET_BIN  := playbae
 TARGET_NAME := $(TARGET_BIN)
 TARGET_BIN_FULL := $(TARGET_BIN).exe
 TEST_BIN    := $(TARGET_OUT)$(TARGET_BIN)
@@ -138,7 +126,6 @@ SOURCE_DIR  := $(CURDIR)
 # Embedded asset paths
 # ============================================================
 EMBED_PATCH_FILE ?= src/banks/patches111/patches111.hsb
-EMBED_TTF_FONT   ?= src/thirdparty/fonts/HelveticaNeue.ttf
 
 # ============================================================
 # Verbose flag
@@ -198,7 +185,9 @@ endif
 # ============================================================
 
 # Platform API
-SRC := src/BAE_Source/Platform/BAE_API_SDL3.c
+SRC := src/BAE_Source/Platform/BAE_API_WinOS.c \
+	src/BAE_Source/Platform/BAE_API_WinOS_Capture.c \
+	src/BAE_Source/Platform/BAE_API_WinOS_Thread.c
 
 # Core libNeoBAE
 SRC += \
@@ -236,7 +225,8 @@ SRC += \
 	src/BAE_Source/Common/g723_40.c \
 	src/BAE_Source/Common/g72x.c \
 	src/BAE_Source/Common/sha1mini.c \
-	src/BAE_Source/Common/XFileTypes.c
+	src/BAE_Source/Common/XFileTypes.c \
+	src/playbae/playbae.c
 
 ifeq ($(RETRO_RINGTONE_SUPPORT),1)
 SRC += src/BAE_Source/Common/GenRingtone.c
@@ -339,44 +329,6 @@ endif
 # Debug helpers
 ifeq ($(DEBUG),1)
 SRC += src/BAE_Source/Common/X_DebugCallback.c
-endif
-
-# GUI sources
-SRC += \
-	src/gui/gui_theme.c \
-	src/gui/gui_widgets.c \
-	src/gui/gui_text.c \
-	src/gui/gui_midi_vkbd.c \
-	src/gui/gui_export.c \
-	src/gui/gui_dialogs.c \
-	src/gui/gui_bae.c \
-	src/gui/gui_settings.c \
-	src/gui/gui_panels.c \
-	src/gui/gui_main.c
-
-ifeq ($(DEBUG),1)
-SRC += src/gui/gui_debug_console.c
-endif
-
-ifeq ($(KARAOKE),1)
-SRC += src/gui/gui_karaoke.c
-endif
-
-# RtMidi hardware MIDI support — compiled from in-tree sources
-ifneq ($(ENABLE_MIDI_HW),)
-SRC += src/gui/gui_midi_hw.c \
-       src/gui/gui_midi_hw_input.c \
-       src/gui/gui_midi_hw_output.c \
-       src/thirdparty/rtmidi/rtmidi_c.cpp \
-       src/thirdparty/rtmidi/RtMidi.cpp
-endif
-
-ifeq ($(PLAYLIST),1)
-SRC += src/gui/gui_playlist.c
-endif
-
-ifeq ($(BAESCRIPT),1)
-SRC += src/gui/gui_script_editor.c
 endif
 
 # ============================================================
@@ -501,27 +453,10 @@ BAE_FLAGS += -DOUTPUT_TO_LOGFILE=1
 endif
 
 # Platform / GUI defines (always on for this makefile)
-BAE_FLAGS += -DX_PLATFORM=X_SDL3 -D_USING_SDL3=1
-BAE_FLAGS += -D_ZEFI_GUI=1
-
-ifneq ($(ENABLE_MIDI_HW),)
-BAE_FLAGS += -D__WINDOWS_MM__ -DSUPPORT_MIDI_HW=1
-endif
+BAE_FLAGS += -DX_PLATFORM=X_WIN95
 
 ifeq ($(DEBUG),1)
 BAE_FLAGS += -D_DEBUG=1 -Wall -Wno-unused-function
-endif
-
-# Embedded font header generation
-ifeq ($(EMBED_FONT),1)
-ifdef EMBED_TTF_FONT
-BAE_FLAGS += -DEMBED_TTF_FONT -I$(OBJ_DIR)
-EMBED_FONT_HEADER := $(OBJ_DIR)embedded_font.h
-$(EMBED_FONT_HEADER): $(EMBED_TTF_FONT) ../scripts/create_embedded_font_h.py
-	@echo @embed $<
-	@mkdir -p $(dir $(EMBED_FONT_HEADER))
-	@python3 ../scripts/create_embedded_font_h.py $(EMBED_TTF_FONT) $(EMBED_FONT_HEADER)
-endif
 endif
 
 # Embedded patches header generation
@@ -595,10 +530,6 @@ ifeq ($(BAESCRIPT),1)
 INC_PATH += -Isrc/script
 endif
 
-# SDL3 includes
-INC_PATH += -I$(SDL3_DIR)/include -I$(SDL3_DIR)/include/SDL3
-INC_PATH += -I$(SDL3_TTF_DIR)/include
-
 ifeq ($(USE_FLUIDSYNTH),1)
 INC_PATH += -I$(FLUIDSYNTH_DIR)/include
 endif
@@ -637,9 +568,6 @@ ifneq ($(LDEBUG),1)
 LDFLAGS += -s
 endif
 
-# SDL3 link dirs
-LDFLAGS += -L$(SDL3_DIR)/lib -L$(SDL3_TTF_DIR)/lib
-
 # FluidSynth (DLL import lib)
 ifeq ($(USE_FLUIDSYNTH),1)
 LDFLAGS += -L$(FLUIDSYNTH_DIR)/lib
@@ -669,13 +597,7 @@ ifeq ($(MP3_ENC),1)
 LDFLAGS += -L$(LAME_DIR)/lib
 endif
 
-ifeq ($(BITS),32)
-LDFLAGS += -L/mingw32/lib -L/usr/i686-w64-mingw32/lib
-else
-LDFLAGS += -L/mingw64/lib -L/usr/x86_64-w64-mingw32/lib
-endif
-
-OMP_LIB_DIR ?= /opt/llvm-mingw/lib
+OMP_LIB_DIR ?= $(TOOLCHAIN_PREFIX)/$(TARGET)/lib
 LDFLAGS += -L$(OMP_LIB_DIR)
 
 # ---- Library list ----
@@ -686,9 +608,7 @@ MPG123_LINK_LIB  ?= -lmpg123
 OMP_LINK_LIB     ?= -l:libomp.dll.a
 
 LIBS := \
-	-lmingw32 \
-	-lSDL3 \
-	-lSDL3_ttf
+	-lmingw32
 
 ifeq ($(USE_FLUIDSYNTH),1)
 LIBS += $(FLUIDSYNTH_DIR)/lib/libfluidsynth-3.a
@@ -733,42 +653,27 @@ endif
 
 # Windows system libraries and C++ runtime
 LIBS += \
-	-lwinmm \
-	-lversion \
-	-lsetupapi \
-	-lshlwapi \
-	-lgdi32 \
-	-limm32 \
-	-lole32 \
-	-loleaut32 \
 	-luuid \
-	-lcomdlg32 \
-	-lstdc++
+	-lstdc++ \
+	-lshlwapi \
+	-lwinmm \
+	-ldsound \
+	-ldxguid \
+	-lole32
+
 
 # Static deps
 LIBS += \
-    -lfreetype \
-    -lpng \
-    -lbrotlidec \
-    -lbrotlicommon \
-    -lharfbuzz \
 	$(OMP_LINK_LIB) \
     -lwinpthread \
 	$(SNDFILE_LINK_LIB) \
-    -logg \
 	$(FLAC_LINK_LIB) \
-    -lvorbis \
-    -lvorbisenc \
-	$(MPG123_LINK_LIB) \
-    -lopus
+	$(MPG123_LINK_LIB)
+
 
 # ============================================================
 # Embedded asset order-only prerequisites
 # ============================================================
-ifdef EMBED_FONT_HEADER
-$(OBJ_DIR)gui_main.o: $(EMBED_FONT_HEADER)
-endif
-
 ifdef EMBED_PATCH_HEADER
 $(OBJ_DIR)NeoBAE.o: $(EMBED_PATCH_HEADER)
 endif
@@ -776,47 +681,13 @@ endif
 # ============================================================
 # Build targets
 # ============================================================
-all: $(TARGET_LIB).a $(TARGET_LIB).dll $(TARGET_BIN_FULL) $(TARGET_OUT)RegisterFiletypes.exe
+all: $(TARGET_BIN)
 
-$(OBJ_DIR)winreg_filetypes.o:
-	$(CC) $(CFLAGS) -DUNICODE -D_UNICODE -c src/gui/winreg_filetypes.c -o $(OBJ_DIR)winreg_filetypes.o
-
-$(TARGET_OUT)RegisterFiletypes.exe: $(OBJ_DIR)winreg_filetypes.o
-	@mkdir -p $(TARGET_OUT)
-	$(WINDRES) src/gui/winreg_filetypes.rc $(OBJ_DIR)winreg_filetypes_res.o; \
-	$(LD) -o $(TARGET_OUT)RegisterFiletypes.exe $(LDFLAGS) \
-	    $(OBJ_DIR)winreg_filetypes.o $(OBJ_DIR)winreg_filetypes_res.o \
-	    -Wl,--subsystem,windows -lshlwapi -lgdi32 -lcomctl32
-
-$(TARGET_LIB).a: $(OBJ_BIN)
-	@mkdir -p $(TARGET_OUT)
-	$(AR) rcs $(TARGET_OUT)$(TARGET_LIB).a $(OBJ_BIN)
-
-$(TARGET_LIB).dll: $(OBJ_BIN)
-	@mkdir -p $(TARGET_OUT)
-	$(CC) -shared $(LDFLAGS) $(OBJ_BIN) \
-	    -Wl,--subsystem,windows \
-	    -o $(TARGET_OUT)$(TARGET_LIB).dll \
-	    -Wl,--out-implib,$(TARGET_OUT)$(TARGET_LIB).dll.a \
-	    -Wl,--export-all-symbols -Wl,--enable-auto-image-base \
-	    -lstdc++ $(LIBS)
-	@cp -f $(TARGET_OUT)$(TARGET_LIB).dll.a $(TARGET_OUT)$(TARGET_LIB).lib 2>/dev/null || true
-	@if [ "$(USE_FLUIDSYNTH)" = "1" ]; then \
-	    cp $(FLUIDSYNTH_DIR)/bin/libfluidsynth-3.dll $(TARGET_OUT) 2>/dev/null || true; \
-	    cp $(FLUIDSYNTH_DIR)/bin/sndfile.dll $(TARGET_OUT) 2>/dev/null || true; \
-	fi
-	@cp $(SDL3_DIR)/bin/SDL3.dll $(TARGET_OUT) 2>/dev/null || true
-	@cp $(SDL3_TTF_DIR)/bin/SDL3_ttf.dll $(TARGET_OUT) 2>/dev/null || true
-
-$(TARGET_BIN_FULL): $(OBJ_BIN) $(TARGET_LIB).dll
+$(TARGET_BIN): ${OBJ_BIN}
 	@mkdir -p $(TARGET_OUT)Banks
 	$(SHELL) src/banks/copy.sh $(TARGET_OUT)Banks
-	$(WINDRES) src/gui/zefidi.rc $(OBJ_DIR)zefidi.o; \
-	$(LD) -o $(TARGET_OUT)$(TARGET_BIN_FULL) $(LDFLAGS) $(OBJ_BIN) \
-	    $(OBJ_DIR)zefidi.o -Wl,--subsystem,windows -L./bin -lNeoBAE $(LIBS)
-
-pack: $(TARGET_BIN_FULL)
-	cat $(TARGET_OUT)$(TARGET_BIN_FULL) | gzip -9c > $(TARGET_OUT)zefidi_win_static.gz
+	@cp -f $(TOOLCHAIN_PREFIX)/$(TARGET)/bin/libomp.dll $(TARGET_OUT)/libomp.dll 2>/dev/null || true
+	${LD} -o $(TARGET_OUT)${TARGET_BIN} ${LDFLAGS} ${OBJ_BIN} ${LIBS}
 
 # ============================================================
 # Per-file compilation rules  (flattened object names under OBJ_DIR)
