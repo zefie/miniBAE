@@ -723,28 +723,32 @@ int SF2Bank_GetPresetZones(const SF2Bank *bank, uint32_t presetIdx,
                 if (z.hiVel > pHiVel) z.hiVel = pHiVel;
                 if (z.loVel > z.hiVel) continue;
 
-                int local_has_gen[60] = {0};
                 for (gj = pgenStart; gj < pgenEnd && gj < bank->pgenCount; ++gj) {
                     uint16_t oper = bank->pgens[gj].oper;
                     if (oper != SF2_GEN_INSTRUMENT && oper != SF2_GEN_KEY_RANGE && oper != SF2_GEN_VEL_RANGE) {
                         apply_gen_relative(&z, oper, (int16_t)bank->pgens[gj].amount);
-                        if (oper < 60) {
-                            local_has_gen[oper] = 1;
-                        }
                     }
                 }
                 if (hasPresetGlobal) {
                     for (gj = presetGlobalGenStart; gj < presetGlobalGenEnd && gj < bank->pgenCount; ++gj) {
                         uint16_t oper = bank->pgens[gj].oper;
-                        if (oper < 60 && !local_has_gen[oper]) {
+                        if (oper != SF2_GEN_INSTRUMENT && oper != SF2_GEN_KEY_RANGE && oper != SF2_GEN_VEL_RANGE) {
                             apply_gen_relative(&z, oper, (int16_t)bank->pgens[gj].amount);
                         }
                     }
                 }
 
-                if (nZones < maxZones) {
-                    zones[nZones++] = z;
+                if (nZones >= maxZones) {
+                    uint32_t newMax = (maxZones < 64u) ? 64u : (maxZones * 2u);
+                    SF2Zone *grown = (SF2Zone *)realloc(zones, newMax * sizeof(SF2Zone));
+                    if (!grown) {
+                        free(zones);
+                        return -1;
+                    }
+                    zones = grown;
+                    maxZones = newMax;
                 }
+                zones[nZones++] = z;
             }
         }
     }

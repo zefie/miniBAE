@@ -24,6 +24,7 @@
 #include <stdint.h>
 
 #include <NeoBAE.h>
+#include "mod2rmf_encoder.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -36,6 +37,10 @@ typedef struct {
     int forceHsb;
     int forceZsb;
     int extendedAdsr;  /* --extended-adsr / --ext-adsr: 8-segment exponential curve approx; forces ZSB */
+    int conflateStereo;/* --conflate-stereo: merge linked SF2 L/R mono pairs into one stereo sample */
+    int attnDiv;       /* --attn-div N: centibel divisor for initialAttenuation->volume mapping.
+                        * 200 = SF2 spec-correct (default); 400 = legacy compressed range. */
+    Mod2RmfEncoderSettings encoderSettings;  /* --codec/--encoding + optional --bitrate */
 } SF2HSBConvertOptions;
 
 typedef struct {
