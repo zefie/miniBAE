@@ -1761,23 +1761,21 @@ static int16_t PV_ConvertPatchBank(GM_Song *pSong, int16_t thePatch, int16_t the
 // Process midi program change
 static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTrack, int16_t program)
 {
-    if (PV_IsMuted(pSong, MIDIChannel, currentTrack) == FALSE)
-    {        
-        if (pSong->channelLSB[MIDIChannel] == 6 && (program == 124 || program == 125)) {
-            pSong->isNokiaVibrationChannel[MIDIChannel] = TRUE;
-            BAE_PRINTF("ProcessProgramChange Debug: Channel %d is set to Nokia Vibration (LSB=6, Program %d)\n", MIDIChannel, program);
-        }
-        if (pSong->allowProgramChanges)
+    if (pSong->channelLSB[MIDIChannel] == 6 && (program == 124 || program == 125)) {
+        pSong->isNokiaVibrationChannel[MIDIChannel] = TRUE;
+        BAE_PRINTF("ProcessProgramChange Debug: Channel %d is set to Nokia Vibration (LSB=6, Program %d)\n", MIDIChannel, program);
+    }
+    if (pSong->allowProgramChanges)
+    {
+        if (MIDIChannel == PERCUSSION_CHANNEL && pSong->channelBankMode[MIDIChannel] != USE_NORM_BANK)
         {
-            if (MIDIChannel == PERCUSSION_CHANNEL && pSong->channelBankMode[MIDIChannel] != USE_NORM_BANK)
+            // only change the percussion program if we're not in perc mode
+            if (pSong->defaultPercusionProgram > 0)
             {
-                // only change the percussion program if we're not in perc mode
-                if (pSong->defaultPercusionProgram > 0)
-                {
-                    program = pSong->defaultPercusionProgram;
-                }
+                program = pSong->defaultPercusionProgram;
             }
-            pSong->channelProgram[MIDIChannel] = program;
+        }
+        pSong->channelProgram[MIDIChannel] = program;
             
 #if USE_SF2_SUPPORT == TRUE
 
@@ -1881,69 +1879,68 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                 BAE_PRINTF("ProcessProgramChange Debug: Channel %d is using an RMF Instrument (instID=%d, bank=%d, program=%d)\n", MIDIChannel, thePatch, bankId, progId);
             }
 #endif
-        }
+    }
 
 
-        if (pSong->AnalyzeMode != SCAN_NORMAL)
+    if (pSong->AnalyzeMode != SCAN_NORMAL)
+    {
+        // if analyzing, note the program or the channel
+        if (pSong->allowProgramChanges == FALSE)
         {
-            // if analyzing, note the program or the channel
-            if (pSong->allowProgramChanges == FALSE)
-            {
-                program = MIDIChannel;
-            }
-
-            if (pSong->firstChannelProgram[MIDIChannel] == -1)
-            { // first time only
-                pSong->firstChannelProgram[MIDIChannel] = program;
-                pSong->firstChannelBank[MIDIChannel] = pSong->channelBank[MIDIChannel];
-            }
-
-            if (MIDIChannel == PERCUSSION_CHANNEL && pSong->channelBankMode[MIDIChannel] != USE_NORM_BANK)
-            {
-                // only change the percussion program if we're not in perc mode
-                if (pSong->defaultPercusionProgram > 0)
-                {
-                    program = pSong->defaultPercusionProgram;
-                }
-            }
-            pSong->channelProgram[MIDIChannel] = program;
-#if 0 && USE_CREATION_API == TRUE
-            if (pSong->AnalyzeMode == SCAN_FIND_PATCHES)
-            {
-                // move data over. instrPtrLoc - 1 + 4
-                // not caring how big the file is, we move total size - 4 up 4
-                // this will always work 
-                // plus it moves the 
-                if ((long)(pSong->pPatchInfo->instrPtrLoc - pSong->pPatchInfo->bankPtrLoc) > 3) 
-                {
-                    PV_InsertBankSelect(pSong,MIDIChannel,currentTrack);
-                    pSong->pPatchInfo->streamIncrement = 4;
-                } 
-                else
-                {
-                    pSong->pPatchInfo->streamIncrement = 0;
-                }
-                PV_AddInstrumentEntry(pSong,currentTrack,MIDIChannel,program,pSong->channelBank[MIDIChannel]);
-            }
-            if (pSong->AnalyzeMode == SCAN_COUNT_PATCHES)
-            {
-                // this is a total hack. but what else to do? figure out if the most recent
-                // event was a bank change event by comparing pointers! 3 is the distance
-                // between the pointers if the delta time was very small. Since we write dt 0
-                // between controller and pgm when modifying the file, this will at least
-                // find our handiwork
-                if ((long)(pSong->pPatchInfo->instrPtrLoc - pSong->pPatchInfo->bankPtrLoc) > 3)
-                {
-                    pSong->pPatchInfo->instrCount++;
-                }
-                pSong->pPatchInfo->bankPtrLoc = 0;
-                if ((*(pSong->pPatchInfo->instrPtrLoc - 1) & 0xF0) != 0xC0)
-                {
-                    pSong->pPatchInfo->rsCount++;
-                }
-            }
-#endif // USE_CREATION_API
+            program = MIDIChannel;
         }
+
+        if (pSong->firstChannelProgram[MIDIChannel] == -1)
+        { // first time only
+            pSong->firstChannelProgram[MIDIChannel] = program;
+            pSong->firstChannelBank[MIDIChannel] = pSong->channelBank[MIDIChannel];
+        }
+
+        if (MIDIChannel == PERCUSSION_CHANNEL && pSong->channelBankMode[MIDIChannel] != USE_NORM_BANK)
+        {
+            // only change the percussion program if we're not in perc mode
+            if (pSong->defaultPercusionProgram > 0)
+            {
+                program = pSong->defaultPercusionProgram;
+            }
+        }
+        pSong->channelProgram[MIDIChannel] = program;
+#if 0 && USE_CREATION_API == TRUE
+        if (pSong->AnalyzeMode == SCAN_FIND_PATCHES)
+        {
+            // move data over. instrPtrLoc - 1 + 4
+            // not caring how big the file is, we move total size - 4 up 4
+            // this will always work 
+            // plus it moves the 
+            if ((long)(pSong->pPatchInfo->instrPtrLoc - pSong->pPatchInfo->bankPtrLoc) > 3) 
+            {
+                PV_InsertBankSelect(pSong,MIDIChannel,currentTrack);
+                pSong->pPatchInfo->streamIncrement = 4;
+            } 
+            else
+            {
+                pSong->pPatchInfo->streamIncrement = 0;
+            }
+            PV_AddInstrumentEntry(pSong,currentTrack,MIDIChannel,program,pSong->channelBank[MIDIChannel]);
+        }
+        if (pSong->AnalyzeMode == SCAN_COUNT_PATCHES)
+        {
+            // this is a total hack. but what else to do? figure out if the most recent
+            // event was a bank change event by comparing pointers! 3 is the distance
+            // between the pointers if the delta time was very small. Since we write dt 0
+            // between controller and pgm when modifying the file, this will at least
+            // find our handiwork
+            if ((long)(pSong->pPatchInfo->instrPtrLoc - pSong->pPatchInfo->bankPtrLoc) > 3)
+            {
+                pSong->pPatchInfo->instrCount++;
+            }
+            pSong->pPatchInfo->bankPtrLoc = 0;
+            if ((*(pSong->pPatchInfo->instrPtrLoc - 1) & 0xF0) != 0xC0)
+            {
+                pSong->pPatchInfo->rsCount++;
+            }
+        }
+#endif // USE_CREATION_API
     }
 }
 
@@ -2224,35 +2221,32 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
 // Process pitch bend
 static void PV_ProcessPitchBend(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTrack, unsigned char valueMSB, unsigned char valueLSB)
 {
-    if (PV_IsMuted(pSong, MIDIChannel, currentTrack) == FALSE)
-    {
 #if USE_SF2_SUPPORT == TRUE
-        // If SF2 is active for this song, send pitch bend to SF2
-        if (GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2)
-        {
-            GM_SF2_ProcessPitchBend(pSong, MIDIChannel, valueMSB, valueLSB);
-        }
+    // If SF2 is active for this song, send pitch bend to SF2
+    if (GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2)
+    {
+        GM_SF2_ProcessPitchBend(pSong, MIDIChannel, valueMSB, valueLSB);
+    }
 #endif
         
-        if ((pSong->AnalyzeMode == SCAN_NORMAL) || (pSong->AnalyzeMode == SCAN_DETERMINE_LENGTH))
+    if ((pSong->AnalyzeMode == SCAN_NORMAL) || (pSong->AnalyzeMode == SCAN_DETERMINE_LENGTH))
+    {
+        // This solves (!) a bug with pitch bend. I don't know what it is right now. You can't pitch percussion at all
+        // with the GM percussion set
+        if (pSong->defaultPercusionProgram < 0) // in GM mode?
         {
-            // This solves (!) a bug with pitch bend. I don't know what it is right now. You can't pitch percussion at all
-            // with the GM percussion set
-            if (pSong->defaultPercusionProgram < 0) // in GM mode?
-            {
-                if (MIDIChannel != PERCUSSION_CHANNEL || pSong->channelBankMode[MIDIChannel] == USE_NORM_BANK)
-                {
-                    // change the current channel bends for new notes
-                    pSong->channelBend[MIDIChannel] = SetChannelPitchBend(pSong, MIDIChannel,
-                                                                          pSong->channelPitchBendRange[MIDIChannel], valueMSB, valueLSB);
-                }
-            }
-            else
+            if (MIDIChannel != PERCUSSION_CHANNEL || pSong->channelBankMode[MIDIChannel] == USE_NORM_BANK)
             {
                 // change the current channel bends for new notes
                 pSong->channelBend[MIDIChannel] = SetChannelPitchBend(pSong, MIDIChannel,
                                                                       pSong->channelPitchBendRange[MIDIChannel], valueMSB, valueLSB);
             }
+        }
+        else
+        {
+            // change the current channel bends for new notes
+            pSong->channelBend[MIDIChannel] = SetChannelPitchBend(pSong, MIDIChannel,
+                                                                  pSong->channelPitchBendRange[MIDIChannel], valueMSB, valueLSB);
         }
     }
 }
@@ -2355,69 +2349,67 @@ void PV_ProcessController(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTr
     unsigned char valueLSB, valueMSB;
     int16_t valueB;
 
-    if (PV_IsMuted(pSong, MIDIChannel, currentTrack) == FALSE)
-    {
 #if USE_SF2_SUPPORT == TRUE
-        if (GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2)
-        {
-            if (pSong->songFlags & SONG_FLAG_IS_RMF) {
-                if (controller == 0 && (value == 1 || value == 2)) {
-                    // if we are an RMF file and just set a bank MSB of 1 or 2, we are now in RMF mode for this channel
-                    pSong->channelType[MIDIChannel] = CHANNEL_TYPE_RMF;
-                } else if (pSong->lastThreeControl[MIDIChannel][0].control == 0 &&
-                        (pSong->lastThreeControl[MIDIChannel][0].value == 0 ||
-                            pSong->lastThreeControl[MIDIChannel][0].value == 127)) {
-                    // if we just set a bank MSB of 0/128, we are now in GM mode for this channel
-                    pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
-                }
+    if (GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2)
+    {
+        if (pSong->songFlags & SONG_FLAG_IS_RMF) {
+            if (controller == 0 && (value == 1 || value == 2)) {
+                // if we are an RMF file and just set a bank MSB of 1 or 2, we are now in RMF mode for this channel
+                pSong->channelType[MIDIChannel] = CHANNEL_TYPE_RMF;
+            } else if (pSong->lastThreeControl[MIDIChannel][0].control == 0 &&
+                    (pSong->lastThreeControl[MIDIChannel][0].value == 0 ||
+                        pSong->lastThreeControl[MIDIChannel][0].value == 127)) {
+                // if we just set a bank MSB of 0/128, we are now in GM mode for this channel
+                pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
             }
+        }
 #if DISABLE_BEATNIK_SF2_NRPN != TRUE
-            pSong->lastThreeControl[MIDIChannel][2] = pSong->lastThreeControl[MIDIChannel][1];
-            pSong->lastThreeControl[MIDIChannel][1] = pSong->lastThreeControl[MIDIChannel][0];
-            pSong->lastThreeControl[MIDIChannel][0].control = controller;
-            pSong->lastThreeControl[MIDIChannel][0].value = (uint16_t)value;
+        pSong->lastThreeControl[MIDIChannel][2] = pSong->lastThreeControl[MIDIChannel][1];
+        pSong->lastThreeControl[MIDIChannel][1] = pSong->lastThreeControl[MIDIChannel][0];
+        pSong->lastThreeControl[MIDIChannel][0].control = controller;
+        pSong->lastThreeControl[MIDIChannel][0].value = (uint16_t)value;
 
-            // check for Beatnik NRPN 
-            if (pSong->lastThreeControl[MIDIChannel][2].control == 99 &&
-                pSong->lastThreeControl[MIDIChannel][2].value == 5 &&
-                pSong->lastThreeControl[MIDIChannel][1].control == 98 &&
-                pSong->lastThreeControl[MIDIChannel][1].value == 0 &&
-                pSong->lastThreeControl[MIDIChannel][0].control == 6 &&
-                pSong->lastThreeControl[MIDIChannel][0].value == 2)
-            {
-                pSong->channelBankMode[MIDIChannel] = USE_GM_PERC_BANK;
-                PV_SF2_SetBankPreset(pSong, MIDIChannel, 128, 0);
-                BAE_PRINTF("Set channel %i to bank %i via Beatnik NRPN\n", MIDIChannel, 128);
-            } else {
-                if  (pSong->lastThreeControl[MIDIChannel][0].control != 99 &&
-                     pSong->lastThreeControl[MIDIChannel][0].control != 98 && 
-                     pSong->lastThreeControl[MIDIChannel][1].control != 98
-                    ) {
-                        if (pSong->lastThreeControl[MIDIChannel][1].control == 6 &&
-                            pSong->lastThreeControl[MIDIChannel][1].value == 2 &&
-                            controller == 0) {
-                                // we just set NRPN mode and the MIDI is trying to reset the MSB again, ignore it
-                                BAE_PRINTF("Ignoring control %i directly after NRPN on channel %i\n", controller, MIDIChannel);                                
-                            } else
-#endif
-                            {
-                                // send to SF2
-                                if (pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF) {
-                                    GM_SF2_ProcessController(pSong, MIDIChannel, controller, value);
-                                }
-                            }                        
-#if DISABLE_BEATNIK_SF2_NRPN != TRUE
-                      }
-#endif                      
-            }
-            // returning here breaks rolled MIDI in SF2 mode!!!
-            //if (pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF) {
-            //    return;
-            //}
-        }    
-#endif
-        switch (controller)
+        // check for Beatnik NRPN 
+        if (pSong->lastThreeControl[MIDIChannel][2].control == 99 &&
+            pSong->lastThreeControl[MIDIChannel][2].value == 5 &&
+            pSong->lastThreeControl[MIDIChannel][1].control == 98 &&
+            pSong->lastThreeControl[MIDIChannel][1].value == 0 &&
+            pSong->lastThreeControl[MIDIChannel][0].control == 6 &&
+            pSong->lastThreeControl[MIDIChannel][0].value == 2)
         {
+            pSong->channelBankMode[MIDIChannel] = USE_GM_PERC_BANK;
+            PV_SF2_SetBankPreset(pSong, MIDIChannel, 128, 0);
+            BAE_PRINTF("Set channel %i to bank %i via Beatnik NRPN\n", MIDIChannel, 128);
+        } else {
+            if  (pSong->lastThreeControl[MIDIChannel][0].control != 99 &&
+                 pSong->lastThreeControl[MIDIChannel][0].control != 98 && 
+                 pSong->lastThreeControl[MIDIChannel][1].control != 98
+                ) {
+                    if (pSong->lastThreeControl[MIDIChannel][1].control == 6 &&
+                        pSong->lastThreeControl[MIDIChannel][1].value == 2 &&
+                        controller == 0) {
+                            // we just set NRPN mode and the MIDI is trying to reset the MSB again, ignore it
+                            BAE_PRINTF("Ignoring control %i directly after NRPN on channel %i\n", controller, MIDIChannel);                                
+                        } else
+#endif
+                        {
+                            // send to SF2
+                            if (pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF) {
+                                GM_SF2_ProcessController(pSong, MIDIChannel, controller, value);
+                            }
+                        }                        
+#if DISABLE_BEATNIK_SF2_NRPN != TRUE
+                  }
+#endif                      
+        }
+        // returning here breaks rolled MIDI in SF2 mode!!!
+        //if (pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF) {
+        //    return;
+        //}
+    }    
+#endif
+    switch (controller)
+    {
             
         case B_BANK_LSB: // bank select LSB. This is GS.
 #if DISABLE_NOKIA_PATCH != TRUE
@@ -2659,7 +2651,6 @@ void PV_ProcessController(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTr
             //          case 126:   // mono mode on
             //          case 127:   // poly mode on
             //              break;
-        }
     }
 
     if (pSong->AnalyzeMode == SCAN_NORMAL)

@@ -1876,16 +1876,6 @@ void GM_SF2_ProcessController(GM_Song* pSong, int16_t channel, int16_t controlle
         return;
     }
 
-    // Check if channel is muted for non-critical controllers
-    if (PV_SF2_CheckChannelMuted(pSong, channel))
-    {
-        // Allow certain controllers even when muted (sustain pedal, all notes off, etc.)
-        if (controller != 64 && controller != 120 && controller != 123)
-        {
-            return;
-        }
-    }
-    
     // Intercept volume (7) and expression (11) to update per-channel scaling
     if (controller == 7 || controller == 11)
     {
@@ -1918,12 +1908,6 @@ void GM_SF2_ProcessPitchBend(GM_Song* pSong, int16_t channel, int16_t bendMSB, i
     // Only apply pitch bend during normal playback to avoid scan/preroll phases
     // leaving channels in a bent state.
     if (pSong->AnalyzeMode != SCAN_NORMAL)
-    {
-        return;
-    }
-    
-    // Check if channel is muted
-    if (PV_SF2_CheckChannelMuted(pSong, channel))
     {
         return;
     }
