@@ -1783,6 +1783,10 @@ typedef int32_t UNIT_TYPE;
     int32_t GM_GetMasterVolume(void);
     void GM_SetGlobalVolume(int32_t theVolume);
     int32_t GM_GetGlobalVolume(void);
+    // Set output gain as a percent (100 = normal, >100 = overdrive). Scales scaleBackAmount,
+    // which controls MIDI voice amplitude. Capped by the per-frame peak limiter.
+    void GM_SetOutputGain(int32_t gainPct);
+    int32_t GM_GetOutputGain(void);
 
 // This is an active voice reference that represents a valid/active voice.
 // Used in various functions that need to return and reference a voice.

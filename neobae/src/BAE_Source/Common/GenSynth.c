@@ -830,6 +830,10 @@ void PV_CalcScaleBack(void)
 #if 1
     pMixer->scaleBackAmount = PV_L2(pMixer->mixLevel);
     pMixer->scaleBackAmount = (int16_t)(((int32_t)pMixer->scaleBackAmount * HSB_MAX_OUTPUT_SCALE_NUM) / HSB_MAX_OUTPUT_SCALE_DEN);
+    /* Apply user-set output gain (100 = normal, >100 = overdrive). Capped by the
+     * per-frame peak limiter, so extreme values just bring the limiter into play. */
+    if (pMixer->outputGainPct != 100)
+        pMixer->scaleBackAmount = (int32_t)((int64_t)pMixer->scaleBackAmount * pMixer->outputGainPct / 100);
 #else
     int noteScale;
     int32_t scaleSize;

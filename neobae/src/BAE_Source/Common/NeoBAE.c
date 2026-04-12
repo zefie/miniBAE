@@ -3057,6 +3057,26 @@ BAEResult BAEMixer_GetGlobalVolume(BAEMixer mixer, BAE_UNSIGNED_FIXED *outVolume
     return BAE_TranslateOPErr(err);
 }
 
+// BAEMixer_SetOutputGain()
+// ------------------------------------
+// Sets output gain as a percent (100 = normal, >100 = overdrive). Affects scaleBackAmount,
+// which controls MIDI voice amplitude directly.
+//
+BAEResult BAEMixer_SetOutputGain(BAEMixer mixer, int32_t gainPct)
+{
+    if (!mixer) return BAE_TranslateOPErr(NULL_OBJECT);
+    GM_SetOutputGain(gainPct);
+    return BAE_NO_ERROR;
+}
+
+BAEResult BAEMixer_GetOutputGain(BAEMixer mixer, int32_t *outGainPct)
+{
+    if (!mixer) return BAE_TranslateOPErr(NULL_OBJECT);
+    if (!outGainPct) return BAE_TranslateOPErr(PARAM_ERR);
+    *outGainPct = GM_GetOutputGain();
+    return BAE_NO_ERROR;
+}
+
 // BAEMixer_SetHardwareVolume()
 // ------------------------------------
 //

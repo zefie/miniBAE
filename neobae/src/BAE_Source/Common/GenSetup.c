@@ -464,6 +464,27 @@ int32_t GM_GetGlobalVolume(void)
     }
 }
 
+// GM_SetOutputGain / GM_GetOutputGain
+// Set output gain percent (100 = normal, >100 = overdrive). Recalculates scaleBackAmount,
+// which scales MIDI voice amplitudes directly. Any clipping is handled by the per-frame
+// peak limiter in PV_ApplyOutputLimiter.
+void GM_SetOutputGain(int32_t gainPct)
+{
+    if (MusicGlobals)
+    {
+        if (gainPct < 0) gainPct = 0;
+        MusicGlobals->outputGainPct = gainPct;
+        PV_CalcScaleBack();
+    }
+}
+
+int32_t GM_GetOutputGain(void)
+{
+    if (MusicGlobals)
+        return MusicGlobals->outputGainPct;
+    return 100;
+}
+
 
 // Return the number of microseconds of real time that will be generated when calling
 // BAE_BuildMixerSlice.
@@ -619,6 +640,7 @@ OPErr GM_InitGeneralSound(void *threadContext, Rate theRate, TerpMode theTerp, A
             pMixer->MasterVolume = MAX_MASTER_VOLUME;
             pMixer->globalVolume = MAX_MASTER_VOLUME;
             pMixer->effectsVolume = MAX_MASTER_VOLUME * 2 * 4;
+            pMixer->outputGainPct = 100;
 
             // set control loops
             PV_SetSampleSliceSize(pMixer, theRate);

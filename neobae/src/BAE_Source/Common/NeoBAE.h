@@ -1065,6 +1065,16 @@ extern "C"
     BAEResult BAEMixer_GetGlobalVolume(BAEMixer mixer,
                                        BAE_UNSIGNED_FIXED *outVolume);
 
+    // BAEMixer_SetOutputGain()
+    // ------------------------------------
+    // Sets the output gain as a percent (100 = normal, >100 = overdrive).
+    // This scales scaleBackAmount, which directly controls MIDI voice amplitudes.
+    // Unlike SetMasterVolume/SetGlobalVolume, this affects the MIDI synthesis path.
+    // Any resulting clipping is handled by the per-frame peak limiter.
+    //
+    BAEResult BAEMixer_SetOutputGain(BAEMixer mixer, int32_t gainPct);
+    BAEResult BAEMixer_GetOutputGain(BAEMixer mixer, int32_t *outGainPct);
+
     // BAEMixer_SetHardwareVolume()
     // ------------------------------------
     // Sets the hardware-based final output volume of the audio output device

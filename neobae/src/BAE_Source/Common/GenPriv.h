@@ -689,6 +689,7 @@ struct GM_Mixer
 
     int16_t              effectsVolume;                  // volume multiplier of all effects
     int32_t             scaleBackAmount;
+    int32_t             outputGainPct;          // user-set output gain percent (100 = normal, >100 = overdrive)
     int16_t              routeBus;
 
     int16_t              MaxNotes;
