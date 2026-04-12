@@ -1,12 +1,7 @@
 BAE_API := Dummy
 NOAUTO := 1
-MP3_ENC := 1
-OGG_SUPPORT := 1
-VORBIS_ENC := 1
-FLAC_ENC := 1
 ZMF_SUPPORT := 1
 CREATION_API := 1
-QOA_SUPPORT := 1
 WINDOWS := 1
 SONGTOOL := 1
 include inc/Makefile.common
@@ -40,7 +35,6 @@ else
     endif 
     CFLAGS  	:= $(ARCH) $(OPTI) $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value 
 endif
-
 
 ifneq ($(BAE_FLAGS),)
 	CFLAGS	+= $(BAE_FLAGS)

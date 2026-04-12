@@ -10073,6 +10073,14 @@ BAEResult BAERmfEditorDocument_SetMidiLoopMarkers(BAERmfEditorDocument *document
     {
         return result;
     }
+
+    /* Loop marker meta events must be <= track end tick for normal track
+     * serialization path; otherwise they are skipped during write. */
+    if (track->endOfTrackTick < endTick)
+    {
+        track->endOfTrackTick = endTick;
+    }
+
     PV_MarkDocumentDirty(document);
     return BAE_NO_ERROR;
 }
