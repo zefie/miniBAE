@@ -648,6 +648,7 @@ endif()
 
 if(BAE_ENABLE_SF2_CONVERTER)
   list(APPEND NEOBAE_SOURCES
+    neobae/src/mod2rmf/mod2rmf_encoder.c
     neobae/src/sf2-hsb/hsb_writer.c
     neobae/src/sf2-hsb/sf2_hsb_converter.c
     neobae/src/sf2-hsb/sf2_parser.c
@@ -1030,6 +1031,13 @@ if(BAE_ENABLE_OPUS_DECODER)
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opusfile/src
   )
 endif()
+
+if(BAE_ENABLE_SF2_CONVERTER)
+  target_include_directories(neobae PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/mod2rmf
+  )
+endif()
+
 
 if(BAE_ENABLE_FLAC_ENCODER OR BAE_ENABLE_FLAC_DECODER OR BAE_ENABLE_VORBIS_ENCODER OR BAE_ENABLE_VORBIS_DECODER OR BAE_ENABLE_OPUS_ENCODER OR BAE_ENABLE_OPUS_DECODER)
   target_include_directories(neobae PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libogg/include)
