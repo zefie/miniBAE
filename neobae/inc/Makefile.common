@@ -372,7 +372,6 @@ ifeq ($(SF2_SUPPORT),1)
 		else
 			ifneq ($(XPHACK),1)
 				ifneq ($(WASM),1)
-					UNAME_S:=$(shell uname -s 2>/dev/null)
 					# System FluidSynth for Linux (dynamic) if pkg-config available
 					FLUIDSYNTH_CFLAGS := $(shell pkg-config --cflags fluidsynth 2>/dev/null)
 					FLUIDSYNTH_LIBS   := $(shell pkg-config --libs fluidsynth 2>/dev/null)
@@ -394,6 +393,44 @@ ifeq ($(SF2_SUPPORT),1)
 		endif
 	endif
 endif
+
+ifeq ($(USE_SDL2),1)
+	SDL_CFLAGS := $(shell pkg-config --cflags SDL2 2>/dev/null)
+	SDL_LIBS   := $(shell pkg-config --libs SDL2 2>/dev/null)
+	ifneq ($(SDL_LIBS),)
+		BAE_FLAGS += $(SDL_CFLAGS)
+		# Prepend pkg-config libs; they already have -lfluidsynth and any needed deps
+		BAE_LIBS := $(SDL_LIBS) $(filter-out -lSDL2,$(BAE_LIBS))
+		ifneq (,$(findstring -static,$(ARCH)))
+			ARCH := $(filter-out -static,$(ARCH))
+			LDFLAGS := $(filter-out -static,$(LDFLAGS))
+		endif
+	else
+		# Fallback minimal guess
+		BAE_FLAGS += -I/usr/include/SDL2
+		BAE_LIBS += -lSDL2 $(BAE_LIBS)
+	endif
+endif
+
+
+ifeq ($(USE_SDL3),1)
+	SDL_CFLAGS := $(shell pkg-config --cflags SDL3 2>/dev/null)
+	SDL_LIBS   := $(shell pkg-config --libs SDL3 2>/dev/null)
+	ifneq ($(SDL_LIBS),)
+		BAE_FLAGS += $(SDL_CFLAGS)
+		# Prepend pkg-config libs; they already have -lfluidsynth and any needed deps
+		BAE_LIBS := $(SDL_LIBS) $(filter-out -lSDL3,$(BAE_LIBS))
+		ifneq (,$(findstring -static,$(ARCH)))
+			ARCH := $(filter-out -static,$(ARCH))
+			LDFLAGS := $(filter-out -static,$(LDFLAGS))
+		endif
+	else
+		# Fallback minimal guess
+		BAE_FLAGS += -I/usr/include/SDL2
+		BAE_LIBS += -lSDL3 $(BAE_LIBS)
+	endif
+endif
+
 
 ifeq ($(MP3_DEC),1)
 	# Enable minimp3 wrapper for MPG_* API (decoder only)
@@ -832,8 +869,13 @@ else
 																	# libNeoBAE srcs + ringtone2mid.c
 																	SRC += src/ringtone2mid/ringtone2mid.c
 																else
-																	# playbae = libNeoBAE srcs + playbae.c
-																	SRC += src/playbae/playbae.c
+																	ifeq ($(NEOBAE_TUI),1)
+																		# neobae-tui = libNeoBAE srcs + neobae_tui.c
+																		SRC += src/playbae/neobae_tui.c
+																	else
+																		# playbae = libNeoBAE srcs + playbae.c
+																		SRC += src/playbae/playbae.c
+																	endif
 																endif
 														else
 															# libNeoBAE srcs + songtool.c

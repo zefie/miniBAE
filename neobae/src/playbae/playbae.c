@@ -327,7 +327,7 @@ static const char usageMain[] =
 #ifdef SUPPORT_KARAOKE
     "                 -k  {enable karaoke lyric display}\n"
 #endif
-    "                 -l  {loop count (0 = infinite)}\n"
+    "                 -l  {loop count (default: 0)}\n"
     "                 -v  {master volume %% (default: 100)}\n"
     "                 -vc {velocity curve 0-4 (default: engine)}\n"
     "                 -t  {max duration in seconds (0 = no limit)}\n"
@@ -597,9 +597,6 @@ static BAEResult prime_encoder(BAEMixer mixer, BAESong song)
  *   Set velocity curve + callbacks (before Start) → BAESong_Start
  *   → set volume, reverb, loops, mutes (after Start)
  *
- * No BAESong_Preroll here — Preroll is a GUI-only concern for an
- * already-running engine context; it interferes with fresh CLI playback.
- *
  * All song types (MIDI, RMF, XMF, RMI, ringtone) use this single path.
  * ========================================================================= */
 
@@ -626,6 +623,7 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
     }
 #endif
 
+    BAESong_Preroll(song);
     /* Start playback (volume, loops, reverb, mutes applied after, like original) */
     BAEResult err = BAESong_Start(song, 0);
     if (err != BAE_NO_ERROR) {
