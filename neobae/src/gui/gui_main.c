@@ -456,6 +456,13 @@ static int g_vu_peak_right = 0;
 static Uint32 g_vu_peak_hold_until = 0; // universal peak hold timeout (ms)
 // Visual gain applied to raw sample amplitudes (linear multiplier)
 static float g_vu_gain = 6.0f;
+static bool g_vu_waveform_mode = false; // false=RMS loudness, true=waveform sample mode
+static float g_vu_fps_estimate = 60.0f;
+static Uint32 g_vu_last_frame_tick = 0;
+#define VU_SCOPE_BUF_MAX 2048
+static int16_t g_scope_buf_l[VU_SCOPE_BUF_MAX];
+static int16_t g_scope_buf_r[VU_SCOPE_BUF_MAX];
+static int g_scope_buf_count = 0;
 
 // VU smoothing configuration
 // MAIN_VU_ALPHA: lower = smoother (slower response). CHANNEL_VU_ALPHA: higher = more responsive.
@@ -5982,6 +5989,24 @@ int main(int argc, char *argv[])
             int meterH = 12; // each meter height
             int spacing = 6;
             int vuY = statusPanel.y + statusPanel.h - pad_local - btnH_local - 12 - (meterH + spacing) * 2 + 3;
+            Rect vuToggleRect = {vuX, vuY - 10, metersW, meterH * 2 + spacing + 20};
+
+            {
+                Uint32 nowTick = SDL_GetTicks();
+                if (g_vu_last_frame_tick != 0 && nowTick > g_vu_last_frame_tick)
+                {
+                    float dt_ms = (float)(nowTick - g_vu_last_frame_tick);
+                    float instFps = 1000.0f / dt_ms;
+                    // Smooth FPS estimate for stable waveform window sizing.
+                    g_vu_fps_estimate = g_vu_fps_estimate * 0.90f + instFps * 0.10f;
+                }
+                g_vu_last_frame_tick = nowTick;
+            }
+
+            if (ui_mclick && !modal_block && point_in(ui_mx, ui_my, vuToggleRect))
+            {
+                g_vu_waveform_mode = !g_vu_waveform_mode;
+            }
 
             // stacked meters (reuse existing sampling logic)
             // Avoid pulling frames from the mixer for VU sampling while we're
@@ -5994,14 +6019,57 @@ int main(int argc, char *argv[])
     if (!g_exporting && g_bae.mixer)
 #endif
             {
-                short sL = 0, sR = 0, out = 0;
-                if (BAEMixer_GetAudioSampleFrame(g_bae.mixer, &sL, &sR, &out) == BAE_NO_ERROR)
+                static int16_t vuLeftBuf[16384];
+                static int16_t vuRightBuf[16384];
+                int16_t out = 0;
+                if (BAEMixer_GetAudioSampleFrame(g_bae.mixer, vuLeftBuf, vuRightBuf, &out) == BAE_NO_ERROR)
                 {
-                    // VU sampling: use the single-sample snapshot returned above to
-                    // update smoothed VU levels. The PCM writer handles bulk
-                    // captures elsewhere.
-                    float rawL = fabsf((float)sL) / 32768.0f * g_vu_gain;
-                    float rawR = fabsf((float)sR) / 32768.0f * g_vu_gain;
+                    const int bufCount = (int)(sizeof(vuLeftBuf) / sizeof(vuLeftBuf[0]));
+                    int sampleIndex = 0;
+                    if (out > 0 && out < (int16_t)bufCount)
+                    {
+                        sampleIndex = out / 2;
+                    }
+
+                    float rawL = 0.0f;
+                    float rawR = 0.0f;
+                    if (g_vu_waveform_mode)
+                    {
+                        // Oscilloscope mode: snapshot only the freshly-written samples
+                        // (index 0..sampleIndex) so the renderer can stretch them across
+                        // the full width without old zero-padding on the left.
+                        int snapCount = sampleIndex + 1;
+                        if (snapCount > VU_SCOPE_BUF_MAX) snapCount = VU_SCOPE_BUF_MAX;
+                        if (snapCount < 1) snapCount = 1;
+                        memcpy(g_scope_buf_l, vuLeftBuf, (size_t)snapCount * sizeof(int16_t));
+                        memcpy(g_scope_buf_r, vuRightBuf, (size_t)snapCount * sizeof(int16_t));
+                        g_scope_buf_count = snapCount;
+                        rawL = 0.0f;
+                        rawR = 0.0f;
+                    }
+                    else
+                    {
+                        // RMS mode: track loudness instead of waveform phase.
+                        const int rmsWindow = 512;
+                        float sumSqL = 0.0f;
+                        float sumSqR = 0.0f;
+                        for (int i = 0; i < rmsWindow; ++i)
+                        {
+                            int idx = sampleIndex - i;
+                            if (idx < 0)
+                                idx += bufCount;
+
+                            float nL = (float)vuLeftBuf[idx] / 32768.0f;
+                            float nR = (float)vuRightBuf[idx] / 32768.0f;
+                            sumSqL += nL * nL;
+                            sumSqR += nR * nR;
+                        }
+                        float rmsL = sqrtf(sumSqL / (float)rmsWindow);
+                        float rmsR = sqrtf(sumSqR / (float)rmsWindow);
+                        rawL = rmsL * g_vu_gain;
+                        rawR = rmsR * g_vu_gain;
+                    }
+
                     float fL = sqrtf(MIN(1.0f, rawL));
                     float fR = sqrtf(MIN(1.0f, rawR));
                     const float alpha = MAIN_VU_ALPHA;
@@ -6067,104 +6135,204 @@ int main(int argc, char *argv[])
     } while (0)
             SDL_Color trackBg = g_panel_bg;
             trackBg.a = 220;
-            draw_rect(R, (Rect){vuX, vuY, metersW, meterH}, trackBg);
-            draw_frame(R, (Rect){vuX, vuY, metersW, meterH}, g_panel_border);
-            int leftFill = (int)(g_vu_left_level * (metersW - 6));
-            if (leftFill < 0)
-                leftFill = 0;
-            if (leftFill > metersW - 6)
-                leftFill = metersW - 6;
-            // Draw a left-to-right gradient fill (green -> yellow -> red) for the left meter
-            int innerX = vuX + 3;
-            int innerW = metersW - 6;
-            int innerY = vuY + 3;
-            int innerH = meterH - 6;
-            if (leftFill > 0)
+            if (g_vu_waveform_mode)
             {
-                for (int xoff = 0; xoff < leftFill; ++xoff)
+                // Waveform mode: one beveled stereo scope panel replaces L/R bars and labels.
+                Rect scope = {vuX + 15, vuY - 13, metersW, meterH * 2 + spacing + 20};
+                SDL_Color outerBg = g_bg_color;
+                outerBg.a = 240;
+                draw_rect(R, scope, outerBg);
+                draw_frame(R, scope, g_panel_border);
+
+                Rect inner = {scope.x + 2, scope.y + 2, scope.w - 4, scope.h - 4};
+                SDL_Color innerBg = g_panel_bg;
+                innerBg.a = 230;
+                draw_rect(R, inner, innerBg);
+
+                // Bevel effect (top/left highlight, bottom/right shadow)
+                SDL_Color bevelHi = (SDL_Color){255, 255, 255, 70};
+                SDL_Color bevelLo = (SDL_Color){0, 0, 0, 90};
+                // Inset/pressed look: dark top-left, light bottom-right.
+                draw_rect(R, (Rect){inner.x, inner.y, inner.w, 1}, bevelLo);
+                draw_rect(R, (Rect){inner.x, inner.y, 1, inner.h}, bevelLo);
+                draw_rect(R, (Rect){inner.x, inner.y + inner.h - 1, inner.w, 1}, bevelHi);
+                draw_rect(R, (Rect){inner.x + inner.w - 1, inner.y, 1, inner.h}, bevelHi);
+
+                int halfH = inner.h / 2;
+                int midL = inner.y + (halfH / 2);
+                int midR = inner.y + halfH + (halfH / 2);
+                SDL_Color centerLine = g_panel_border;
+                centerLine.a = 120;
+                draw_rect(R, (Rect){inner.x + 1, midL, inner.w - 2, 1}, centerLine);
+                draw_rect(R, (Rect){inner.x + 1, midR, inner.w - 2, 1}, centerLine);
+
+                SDL_Color colL = g_highlight_color; // primary/intent
+                SDL_Color colR = g_accent_color;    // secondary
+
+                if (g_scope_buf_count > 0)
                 {
-                    float frac = (float)xoff / (float)(innerW > 0 ? innerW : 1); // 0..1 left->right
-                    SDL_Color col;
-                    if (frac < 0.5f)
-                    { // green -> yellow
-                        float p = frac / 0.5f;
-                        col.r = (Uint8)(g_highlight_color.r * p + 20 * (1.0f - p));
-                        col.g = (Uint8)(200 * (1.0f - (1.0f - p) * 0.2f));
-                        col.b = 20;
-                    }
-                    else
-                    { // yellow -> red
-                        float p = (frac - 0.5f) / 0.5f;
-                        col.r = (Uint8)(200 + (55 * p));
-                        col.g = (Uint8)(200 * (1.0f - p));
-                        col.b = 20;
-                    }
-                    SDL_SetRenderDrawColor(R, col.r, col.g, col.b, 255);
+                    int drawW = inner.w - 2;
+                    // Map all g_scope_buf_count samples (oldest=left, newest=right) across drawW pixels.
+                    float samplesPerPixel = (float)g_scope_buf_count / (float)(drawW > 0 ? drawW : 1);
+
+                    int ampRange = (halfH / 2) - 1;
+                    if (ampRange < 1)
+                        ampRange = 1;
+
+                    for (int x = 0; x < drawW; ++x)
+                    {
+                        // Map pixel column directly to a sample bucket — no ring wrapping.
+                        int iStart = (int)((float)x * samplesPerPixel);
+                        int iEnd   = (int)((float)(x + 1) * samplesPerPixel) + 1;
+                        if (iEnd > g_scope_buf_count) iEnd = g_scope_buf_count;
+                        if (iStart >= iEnd) iStart = iEnd > 0 ? iEnd - 1 : 0;
+
+                        float minL = 1.0f, maxL = -1.0f;
+                        float minR = 1.0f, maxR = -1.0f;
+                        for (int s = iStart; s < iEnd; ++s)
+                        {
+                            float sL = (float)g_scope_buf_l[s] / 32768.0f * g_vu_gain;
+                            float sR = (float)g_scope_buf_r[s] / 32768.0f * g_vu_gain;
+                            if (sL < minL) minL = sL;
+                            if (sL > maxL) maxL = sL;
+                            if (sR < minR) minR = sR;
+                            if (sR > maxR) maxR = sR;
+                        }
+                        // Handle empty bucket (silence).
+                        if (minL > maxL) { minL = 0.0f; maxL = 0.0f; }
+                        if (minR > maxR) { minR = 0.0f; maxR = 0.0f; }
+                        // Clamp to [-1, 1].
+                        if (minL < -1.0f) minL = -1.0f; if (maxL > 1.0f) maxL = 1.0f;
+                        if (minR < -1.0f) minR = -1.0f; if (maxR > 1.0f) maxR = 1.0f;
+
+                        // Positive sample → above center; negative → below.
+                        int yLMin = midL - (int)(maxL * (float)ampRange);
+                        int yLMax = midL - (int)(minL * (float)ampRange);
+                        int yRMin = midR - (int)(maxR * (float)ampRange);
+                        int yRMax = midR - (int)(minR * (float)ampRange);
+                        // Clamp to respective half-panels.
+                        if (yLMin < inner.y + 1)          yLMin = inner.y + 1;
+                        if (yLMax > inner.y + halfH - 1)   yLMax = inner.y + halfH - 1;
+                        if (yRMin < inner.y + halfH + 1)   yRMin = inner.y + halfH + 1;
+                        if (yRMax > inner.y + inner.h - 2) yRMax = inner.y + inner.h - 2;
+
+                        int px = inner.x + 1 + x;
+                        SDL_SetRenderDrawColor(R, colL.r, colL.g, colL.b, 220);
 #if defined(USE_SDL2)
-                    SDL_RenderDrawLine(R, innerX + xoff, innerY, innerX + xoff, innerY + innerH - 1);
+                        SDL_RenderDrawLine(R, px, yLMin, px, yLMax);
 #else
-                    SDL_RenderLine(R, innerX + xoff, innerY, innerX + xoff, innerY + innerH - 1);
+                        SDL_RenderLine(R, px, yLMin, px, yLMax);
 #endif
+                        SDL_SetRenderDrawColor(R, colR.r, colR.g, colR.b, 210);
+#if defined(USE_SDL2)
+                        SDL_RenderDrawLine(R, px, yRMin, px, yRMax);
+#else
+                        SDL_RenderLine(R, px, yRMin, px, yRMax);
+#endif
+                    }
                 }
             }
-            int pL = vuX + 3 + (int)((g_vu_peak_left / 100.0f) * (metersW - 6));
-            if (pL < vuX + 3)
-                pL = vuX + 3;
-            if (pL > vuX + 3 + metersW - 6)
-                pL = vuX + 3 + metersW - 6;
-            // Draw white-ish peak marker similar to per-channel meters
-            draw_rect(R, (Rect){pL - 1, vuY + 1, 2, meterH - 2}, (SDL_Color){255, 255, 255, 200});
-            int vuY2 = vuY + meterH + spacing;
-            draw_rect(R, (Rect){vuX, vuY2, metersW, meterH}, trackBg);
-            draw_frame(R, (Rect){vuX, vuY2, metersW, meterH}, g_panel_border);
-            int rightFill = (int)(g_vu_right_level * (metersW - 6));
-            if (rightFill < 0)
-                rightFill = 0;
-            if (rightFill > metersW - 6)
-                rightFill = metersW - 6;
-            // Right meter gradient (same mapping as left)
-            int innerX2 = vuX + 3;
-            int innerW2 = metersW - 6;
-            int innerY2 = vuY2 + 3;
-            int innerH2 = meterH - 6;
-            if (rightFill > 0)
+            else
             {
-                for (int xoff = 0; xoff < rightFill; ++xoff)
+                draw_rect(R, (Rect){vuX, vuY, metersW, meterH}, trackBg);
+                draw_frame(R, (Rect){vuX, vuY, metersW, meterH}, g_panel_border);
+                int leftFill = (int)(g_vu_left_level * (metersW - 6));
+                if (leftFill < 0)
+                    leftFill = 0;
+                if (leftFill > metersW - 6)
+                    leftFill = metersW - 6;
+                // Draw a left-to-right gradient fill (green -> yellow -> red) for the left meter
+                int innerX = vuX + 3;
+                int innerW = metersW - 6;
+                int innerY = vuY + 3;
+                int innerH = meterH - 6;
+                if (leftFill > 0)
                 {
-                    float frac = (float)xoff / (float)(innerW2 > 0 ? innerW2 : 1);
-                    SDL_Color col;
-                    if (frac < 0.5f)
+                    for (int xoff = 0; xoff < leftFill; ++xoff)
                     {
-                        float p = frac / 0.5f;
-                        col.r = (Uint8)(g_highlight_color.r * p + 20 * (1.0f - p));
-                        col.g = (Uint8)(200 * (1.0f - (1.0f - p) * 0.2f));
-                        col.b = 20;
-                    }
-                    else
-                    {
-                        float p = (frac - 0.5f) / 0.5f;
-                        col.r = (Uint8)(200 + (55 * p));
-                        col.g = (Uint8)(200 * (1.0f - p));
-                        col.b = 20;
-                    }
-                    SDL_SetRenderDrawColor(R, col.r, col.g, col.b, 255);
+                        float frac = (float)xoff / (float)(innerW > 0 ? innerW : 1); // 0..1 left->right
+                        SDL_Color col;
+                        if (frac < 0.5f)
+                        { // green -> yellow
+                            float p = frac / 0.5f;
+                            col.r = (Uint8)(g_highlight_color.r * p + 20 * (1.0f - p));
+                            col.g = (Uint8)(200 * (1.0f - (1.0f - p) * 0.2f));
+                            col.b = 20;
+                        }
+                        else
+                        { // yellow -> red
+                            float p = (frac - 0.5f) / 0.5f;
+                            col.r = (Uint8)(200 + (55 * p));
+                            col.g = (Uint8)(200 * (1.0f - p));
+                            col.b = 20;
+                        }
+                        SDL_SetRenderDrawColor(R, col.r, col.g, col.b, 255);
 #if defined(USE_SDL2)
-                    SDL_RenderDrawLine(R, innerX2 + xoff, innerY2, innerX2 + xoff, innerY2 + innerH2 - 1);
+                        SDL_RenderDrawLine(R, innerX + xoff, innerY, innerX + xoff, innerY + innerH - 1);
 #else
-                    SDL_RenderLine(R, innerX2 + xoff, innerY2, innerX2 + xoff, innerY2 + innerH2 - 1);
+                        SDL_RenderLine(R, innerX + xoff, innerY, innerX + xoff, innerY + innerH - 1);
 #endif
+                    }
                 }
+                int pL = vuX + 3 + (int)((g_vu_peak_left / 100.0f) * (metersW - 6));
+                if (pL < vuX + 3)
+                    pL = vuX + 3;
+                if (pL > vuX + 3 + metersW - 6)
+                    pL = vuX + 3 + metersW - 6;
+                // Draw white-ish peak marker similar to per-channel meters
+                draw_rect(R, (Rect){pL - 1, vuY + 1, 2, meterH - 2}, (SDL_Color){255, 255, 255, 200});
+                int vuY2 = vuY + meterH + spacing;
+                draw_rect(R, (Rect){vuX, vuY2, metersW, meterH}, trackBg);
+                draw_frame(R, (Rect){vuX, vuY2, metersW, meterH}, g_panel_border);
+                int rightFill = (int)(g_vu_right_level * (metersW - 6));
+                if (rightFill < 0)
+                    rightFill = 0;
+                if (rightFill > metersW - 6)
+                    rightFill = metersW - 6;
+                // Right meter gradient (same mapping as left)
+                int innerX2 = vuX + 3;
+                int innerW2 = metersW - 6;
+                int innerY2 = vuY2 + 3;
+                int innerH2 = meterH - 6;
+                if (rightFill > 0)
+                {
+                    for (int xoff = 0; xoff < rightFill; ++xoff)
+                    {
+                        float frac = (float)xoff / (float)(innerW2 > 0 ? innerW2 : 1);
+                        SDL_Color col;
+                        if (frac < 0.5f)
+                        {
+                            float p = frac / 0.5f;
+                            col.r = (Uint8)(g_highlight_color.r * p + 20 * (1.0f - p));
+                            col.g = (Uint8)(200 * (1.0f - (1.0f - p) * 0.2f));
+                            col.b = 20;
+                        }
+                        else
+                        {
+                            float p = (frac - 0.5f) / 0.5f;
+                            col.r = (Uint8)(200 + (55 * p));
+                            col.g = (Uint8)(200 * (1.0f - p));
+                            col.b = 20;
+                        }
+                        SDL_SetRenderDrawColor(R, col.r, col.g, col.b, 255);
+#if defined(USE_SDL2)
+                        SDL_RenderDrawLine(R, innerX2 + xoff, innerY2, innerX2 + xoff, innerY2 + innerH2 - 1);
+#else
+                        SDL_RenderLine(R, innerX2 + xoff, innerY2, innerX2 + xoff, innerY2 + innerH2 - 1);
+#endif
+                    }
+                }
+                int pR = vuX + 3 + (int)((g_vu_peak_right / 100.0f) * (metersW - 6));
+                if (pR < vuX + 3)
+                    pR = vuX + 3;
+                if (pR > vuX + 3 + metersW - 6)
+                    pR = vuX + 3 + metersW - 6;
+                draw_rect(R, (Rect){pR - 1, vuY2 + 1, 2, meterH - 2}, (SDL_Color){255, 255, 255, 200});
+                int labelX = vuX + metersW + 6;
+                SDL_Color labelCol = g_text_color;
+                draw_text(R, labelX, vuY - 3, "L", labelCol);
+                draw_text(R, labelX, vuY2 - 3, "R", labelCol);
             }
-            int pR = vuX + 3 + (int)((g_vu_peak_right / 100.0f) * (metersW - 6));
-            if (pR < vuX + 3)
-                pR = vuX + 3;
-            if (pR > vuX + 3 + metersW - 6)
-                pR = vuX + 3 + metersW - 6;
-            draw_rect(R, (Rect){pR - 1, vuY2 + 1, 2, meterH - 2}, (SDL_Color){255, 255, 255, 200});
-            int labelX = vuX + metersW + 6;
-            SDL_Color labelCol = g_text_color;
-            draw_text(R, labelX, vuY - 3, "L", labelCol);
-            draw_text(R, labelX, vuY2 - 3, "R", labelCol);
 #undef METER_COLOR_FROM_LEVEL
         }
 

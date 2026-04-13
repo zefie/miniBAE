@@ -35,11 +35,20 @@ fi
 # directories with the built libraries and executables. Now build the release package.
 rm -rf out/
 mkdir -p out/
+if [ "${1}" == "--clean" ]; then
+    echo " *** Cleaning build directories..."
+    rm -rf build-*-w64-mingw32
+fi
+
 for t in aarch64 armv7 x86_64 i686; do
     DEST="neobae-suite_windows_${t}_${VERSION}"
     cd "build-${t}-w64-mingw32/bin"
     echo " *** Packaging ${DEST}.zip..."
     zip -9 "../../out/${DEST}.zip" *.*
     cd "../.."
-    rm -rf "build-${t}-w64-mingw32"
 done
+
+if [ "${1}" == "--clean" ]; then
+    echo " *** Cleaning build directories..."
+    rm -rf build-*-w64-mingw32
+fi
