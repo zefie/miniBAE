@@ -162,7 +162,7 @@ static void rmf_info_load_container_version(void)
     const char *kind;
 
     g_rmf_container_version[0] = '\0';
-    if (!g_bae.loaded_path || !g_bae.loaded_path[0])
+    if (!g_bae.loaded_path[0])
     {
         return;
     }
@@ -264,7 +264,7 @@ static const char AUDIO_EXT_FILTER[] =
     ""
 #endif
 #if USE_ZMF_SUPPORT == TRUE
-    "*.zmf;";
+    "*.zmf;"
 #else
     ""
 #endif

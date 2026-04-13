@@ -689,7 +689,14 @@ extern "C"
     typedef void (*GM_AudioOutputCallbackPtr)(void *threadContext, void *samples, int32_t sampleSize, int32_t channels, uint32_t lengthInFrames);
 
 #define X_PACK_FAST
+#if defined(__clang__)
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wpragma-pack"
+#endif
 #include "X_PackStructures.h"
+#if defined(__clang__)
+    #pragma clang diagnostic pop
+#endif
 
 #if USE_SF2_SUPPORT == TRUE
 #define CHANNEL_TYPE_GM 1
@@ -1342,7 +1349,14 @@ typedef int32_t UNIT_TYPE;
     };
     typedef struct GM_Song GM_Song;
 
+#if defined(__clang__)
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wpragma-pack"
+#endif
 #include "X_UnpackStructures.h"
+#if defined(__clang__)
+    #pragma clang diagnostic pop
+#endif
 
     // Functions
 

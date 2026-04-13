@@ -477,7 +477,14 @@ enum
 
 
 #define X_PACK_FAST
+#if defined(__clang__)
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wpragma-pack"
+#endif
 #include "X_PackStructures.h"
+#if defined(__clang__)
+    #pragma clang diagnostic pop
+#endif
 
 // Mode in which a GM_Voice is currently being used
 typedef enum 
@@ -792,7 +799,14 @@ typedef struct GM_Mixer GM_Mixer;
 // support for historical reasons
 #define MusicVars   GM_Mixer
 
+#if defined(__clang__)
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wpragma-pack"
+#endif
 #include "X_UnpackStructures.h"
+#if defined(__clang__)
+    #pragma clang diagnostic pop
+#endif
 
 #ifdef __cplusplus
     extern "C" {

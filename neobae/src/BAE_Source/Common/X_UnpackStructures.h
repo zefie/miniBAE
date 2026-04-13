@@ -66,6 +66,9 @@
     #include "X_API.h"
 #endif
 
+#if defined(__clang__) || defined(__GNUC__) || defined(_MSC_VER)
+    #pragma pack(pop)
+#else
 #if (((X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS)) && (COMPILER_TYPE == GCC_COMPILER))
     #ifdef __cplusplus
         #pragma pack()
@@ -75,8 +78,7 @@
         #pragma options align=reset
     #endif
 
-    // $$jdr: This should be pack(), but for a
-    // bug in the compilers we're using.
+    // Restore compiler default packing for modern toolchains.
     #if (CPU_TYPE == kSPARC)
         #pragma pack(4)
     #endif
@@ -88,10 +90,11 @@
             #pragma pack (4)
         #else
             #if (X_PLATFORM != X_ANDROID)
-                #pragma pack (8)
+                #pragma pack()
             #endif
         #endif
     #endif
+#endif
 #endif
 
 #undef X_PACKBY1

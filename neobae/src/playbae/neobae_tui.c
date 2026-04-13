@@ -17,11 +17,22 @@
 #include <math.h>
 #include <ncurses.h>
 
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 #include <NeoBAE.h>
 #include <X_Formats.h>
 #include <BAE_API.h>
+#include "bankinfo.h"
 #ifdef SUPPORT_BAESCRIPT
 #include "baescript.h"
+#endif
+
+#if USE_SF2_SUPPORT == TRUE
+#  if _USING_FLUIDSYNTH == TRUE
+#    include "GenSF2_FluidSynth.h"
+#  endif
 #endif
 
 #ifdef main
@@ -34,6 +45,10 @@
 
 static volatile int gInterrupt = 0;
 static int gVolumePct = 100;
+static int gFadeOut = 1;
+static int gWriteToFile = 0;
+static BAEFileType gWriteToFileType = BAE_WAVE_TYPE;
+static int gMP3BitrateKbps = 128;
 
 #ifdef SUPPORT_KARAOKE
 static int  gKaraokeEnabled = 1;
@@ -63,6 +78,8 @@ typedef struct {
     int sampleRate;
     uint32_t totalMs;
     char currentPath[PATH_MAX];
+    char lastPath[PATH_MAX];
+    unsigned int timeLimitSec;
 } PlayerState;
 
 typedef struct {
@@ -85,6 +102,21 @@ typedef struct {
     int mono;
     int twoPoint;
     int maxVoices;
+    unsigned int loopCount;
+    unsigned int timeLimitSec;
+    int reverbType;
+    int disableFadeOut;
+    int showVelocityList;
+    int showReverbList;
+    int showExtra;
+    int showVersion;
+    int showRmfInfo;
+    int streamWav;
+    int streamAiff;
+    char muteChannels[128];
+    char exportFile[PATH_MAX];
+    char rmfInfoFile[PATH_MAX];
+    char streamFile[PATH_MAX];
     int showHelp;
     char file[PATH_MAX];
     char bank[PATH_MAX];
@@ -101,11 +133,25 @@ static const char *kUsage =
     "Options:\n"
     "  -f <file>   Input song/audio file\n"
     "  -p <bank>   Load patches bank (hsb/zsb/sf2/dls depending on build)\n"
+    "  -o <file>   Export to wav/mp3/flac/ogg/opus (non-curses path)\n"
+    "  -b <kbps>   Export bitrate kbps for mp3/ogg/opus (default 128)\n"
+    "  -l <count>  Loop count (default 0)\n"
+    "  -t <sec>    Max duration seconds (0 = no limit)\n"
+    "  -mc <list>  Mute MIDI channels 1-16 (comma-separated)\n"
+    "  -rv <0-11>  Reverb type (default 7)\n"
+    "  -nf         Disable fade-out on stop\n"
     "  -v <pct>    Master volume percent (0-400, default 100)\n"
     "  -mr <hz>    Mixer sample rate in Hz (default 44100)\n"
     "  -ns         Mono output\n"
     "  -2p         2-point interpolation\n"
     "  -mv <n>     Max MIDI voices (default 64)\n"
+    "  -sw <file>  Stream WAV file\n"
+    "  -sa <file>  Stream AIFF file\n"
+    "  -i <file>   Show RMF metadata and exit\n"
+    "  -cl         List velocity curves and exit\n"
+    "  -rl         List reverb types and exit\n"
+    "  -x          Show extra flags and exit\n"
+    "  --version   Show version/features and exit\n"
     "  --script <file>  Load BAEScript and apply directives during playback\n"
     "  -k          Enable karaoke lyric display\n"
     "  -dk         Disable karaoke lyric display\n"
@@ -152,6 +198,7 @@ static void options_init(TuiOptions *opt)
     opt->volumePct = 100;
     opt->sampleRate = 44100;
     opt->maxVoices = 64;
+    opt->reverbType = 7;
 }
 
 static int options_parse(int argc, char **argv, TuiOptions *opt)
@@ -165,6 +212,18 @@ static int options_parse(int argc, char **argv, TuiOptions *opt)
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
             opt->showHelp = 1;
             return 1;
+        } else if (strcmp(argv[i], "--version") == 0) {
+            opt->showVersion = 1;
+            return 1;
+        } else if (strcmp(argv[i], "-cl") == 0) {
+            opt->showVelocityList = 1;
+            return 1;
+        } else if (strcmp(argv[i], "-rl") == 0) {
+            opt->showReverbList = 1;
+            return 1;
+        } else if (strcmp(argv[i], "-x") == 0) {
+            opt->showExtra = 1;
+            return 1;
         } else if (strcmp(argv[i], "-q") == 0) {
             opt->quiet = 1;
             opt->verbose = 0;
@@ -177,10 +236,41 @@ static int options_parse(int argc, char **argv, TuiOptions *opt)
             opt->karaoke = 0;
         } else if (strcmp(argv[i], "-f") == 0) {
             if (!parse_arg_value(argc, argv, &i, opt->file, sizeof(opt->file))) return 0;
+        } else if (strcmp(argv[i], "-o") == 0) {
+            if (!parse_arg_value(argc, argv, &i, opt->exportFile, sizeof(opt->exportFile))) return 0;
         } else if (strcmp(argv[i], "-p") == 0) {
             if (!parse_arg_value(argc, argv, &i, opt->bank, sizeof(opt->bank))) return 0;
+        } else if (strcmp(argv[i], "-sw") == 0) {
+            if (!parse_arg_value(argc, argv, &i, opt->streamFile, sizeof(opt->streamFile))) return 0;
+            opt->streamWav = 1;
+        } else if (strcmp(argv[i], "-sa") == 0) {
+            if (!parse_arg_value(argc, argv, &i, opt->streamFile, sizeof(opt->streamFile))) return 0;
+            opt->streamAiff = 1;
+        } else if (strcmp(argv[i], "-i") == 0) {
+            if (!parse_arg_value(argc, argv, &i, opt->rmfInfoFile, sizeof(opt->rmfInfoFile))) return 0;
+            opt->showRmfInfo = 1;
+            return 1;
         } else if (strcmp(argv[i], "--script") == 0) {
             if (!parse_arg_value(argc, argv, &i, opt->script, sizeof(opt->script))) return 0;
+        } else if (strcmp(argv[i], "-l") == 0) {
+            if (!parse_arg_value(argc, argv, &i, tmp, sizeof(tmp))) return 0;
+            opt->loopCount = (unsigned int)atoi(tmp);
+        } else if (strcmp(argv[i], "-t") == 0) {
+            if (!parse_arg_value(argc, argv, &i, tmp, sizeof(tmp))) return 0;
+            opt->timeLimitSec = (unsigned int)atoi(tmp);
+        } else if (strcmp(argv[i], "-mc") == 0) {
+            if (!parse_arg_value(argc, argv, &i, opt->muteChannels, sizeof(opt->muteChannels))) return 0;
+        } else if (strcmp(argv[i], "-rv") == 0) {
+            if (!parse_arg_value(argc, argv, &i, tmp, sizeof(tmp))) return 0;
+            opt->reverbType = atoi(tmp);
+            if (opt->reverbType < 0 || opt->reverbType > 11) opt->reverbType = 7;
+        } else if (strcmp(argv[i], "-nf") == 0) {
+            opt->disableFadeOut = 1;
+        } else if (strcmp(argv[i], "-b") == 0) {
+            if (!parse_arg_value(argc, argv, &i, tmp, sizeof(tmp))) return 0;
+            gMP3BitrateKbps = atoi(tmp);
+            if (gMP3BitrateKbps < 16) gMP3BitrateKbps = 16;
+            if (gMP3BitrateKbps > 640) gMP3BitrateKbps = 640;
         } else if (strcmp(argv[i], "-v") == 0) {
             if (!parse_arg_value(argc, argv, &i, tmp, sizeof(tmp))) return 0;
             opt->volumePct = atoi(tmp);
@@ -212,9 +302,13 @@ static int options_parse(int argc, char **argv, TuiOptions *opt)
 
 static uint64_t now_us(void)
 {
+#if defined(_WIN32)
+    return (uint64_t)GetTickCount64() * 1000ull;
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000ull + (uint64_t)ts.tv_nsec / 1000ull;
+#endif
 }
 
 static BAE_UNSIGNED_FIXED volume_pct_to_fixed(int pct)
@@ -251,6 +345,104 @@ static const char *BAE_GetErrorString(BAEResult err)
     default:                         return "Unknown error";
     }
 }
+
+static int is_file_extension(const char *path, const char *ext)
+{
+    size_t lp;
+    size_t le;
+    if (!path || !ext) return 0;
+    lp = strlen(path);
+    le = strlen(ext);
+    if (le > lp) return 0;
+    return strcasecmp(path + lp - le, ext) == 0;
+}
+
+static void mute_channels(BAESong song, const char *list, UiState *ui)
+{
+    char copy[128];
+    char *tok;
+    if (!list || !list[0] || !song) return;
+
+    strncpy(copy, list, sizeof(copy) - 1);
+    copy[sizeof(copy) - 1] = '\0';
+    tok = strtok(copy, ",");
+    while (tok) {
+        int ch = atoi(tok);
+        if (ch >= 1 && ch <= 16) {
+            BAESong_MuteChannel(song, ch - 1);
+            if (ui) ui->channelMuted[ch - 1] = 1;
+        }
+        tok = strtok(NULL, ",");
+    }
+}
+
+static const char *rmf_info_label(BAEInfoType t)
+{
+    switch (t) {
+    case TITLE_INFO:             return "Title";
+    case PERFORMED_BY_INFO:      return "Performed By";
+    case COMPOSER_INFO:          return "Composer";
+    case COPYRIGHT_INFO:         return "Copyright";
+    case PUBLISHER_CONTACT_INFO: return "Publisher";
+    case USE_OF_LICENSE_INFO:    return "Use Of License";
+    case LICENSED_TO_URL_INFO:   return "Licensed URL";
+    case LICENSE_TERM_INFO:      return "License Term";
+    case EXPIRATION_DATE_INFO:   return "Expiration";
+    case COMPOSER_NOTES_INFO:    return "Composer Notes";
+    case INDEX_NUMBER_INFO:      return "Index Number";
+    case GENRE_INFO:             return "Genre";
+    case SUB_GENRE_INFO:         return "Sub-Genre";
+    case TEMPO_DESCRIPTION_INFO: return "Tempo";
+    case ORIGINAL_SOURCE_INFO:   return "Source";
+    default:                     return "Unknown";
+    }
+}
+
+static void print_rmf_info(const char *path)
+{
+    char buf[256];
+    BAEInfoType it;
+    fprintf(stdout, "RMF Metadata: %s\n", path);
+    for (it = TITLE_INFO; it <= ORIGINAL_SOURCE_INFO; it = (BAEInfoType)(it + 1)) {
+        if (BAEUtil_GetRmfSongInfoFromFile((BAEPathName)path, 0, it,
+                buf, sizeof(buf) - 1) == BAE_NO_ERROR) {
+            fprintf(stdout, "  %s: %s\n", rmf_info_label(it), buf);
+        }
+    }
+}
+
+static const char *kReverbList =
+    "Valid Reverb Types (-rv):\n"
+    "  0  Default\n"
+    "  1  None\n"
+    "  2  Igor's Closet\n"
+    "  3  Igor's Garage\n"
+    "  4  Igor's Acoustic Lab\n"
+    "  5  Igor's Cavern\n"
+    "  6  Igor's Dungeon\n"
+    "  7  Small reflections\n"
+    "  8  Early reflections\n"
+    "  9  Basement\n"
+    "  10 Banquet hall\n"
+    "  11 Catacombs\n";
+
+static const char *kVelocityList =
+    "Valid Velocity Curves (-vc):\n"
+    "  0  Default S Curve\n"
+    "  1  Peaky S Curve\n"
+    "  2  WebTV Curve\n"
+    "  3  2x Exponential\n"
+    "  4  2x Linear\n";
+
+static const char *kExtraFlags =
+    "Extra flags:\n"
+    "  -mr <hz>   Sample rate\n"
+    "  -ns        Mono output\n"
+    "  -2p        2-point interpolation\n"
+    "  -mv <n>    Max MIDI voices\n"
+    "  -sw <file> Stream WAV\n"
+    "  -sa <file> Stream AIFF\n"
+    "  -i <file>  Show RMF metadata\n";
 
 #ifdef SUPPORT_KARAOKE
 static void karaoke_clear_buffers(void)
@@ -450,12 +642,12 @@ static void player_reset_channel_mutes(PlayerState *ps, UiState *ui)
 static void player_stop(PlayerState *ps, UiState *ui)
 {
     if (ps->song) {
-        BAESong_Stop(ps->song, FALSE);
+        BAESong_Stop(ps->song, gFadeOut);
         BAESong_Delete(ps->song);
         ps->song = NULL;
     }
     if (ps->sound) {
-        BAESound_Stop(ps->sound, FALSE);
+        BAESound_Stop(ps->sound, gFadeOut);
         BAESound_Delete(ps->sound);
         ps->sound = NULL;
     }
@@ -463,7 +655,7 @@ static void player_stop(PlayerState *ps, UiState *ui)
     ps->paused = 0;
     ps->sampleRate = 0;
     ps->totalMs = 0;
-    ps->currentPath[0] = '\0';
+    ps->timeLimitSec = 0;
     ui->vuLeftLevel = 0.0f;
     ui->vuRightLevel = 0.0f;
     ui->vuPeakLeft = 0;
@@ -506,7 +698,7 @@ static BAEResult load_song_from_file(BAEMixer mixer, BAESong song, const char *p
 }
 
 static BAEResult player_load_and_start(PlayerState *ps, UiState *ui,
-    const char *path, char *outMsg, size_t outMsgSize)
+    const char *path, const TuiOptions *opt, char *outMsg, size_t outMsgSize)
 {
     BAEFileType ftype;
     BAEResult err;
@@ -535,6 +727,9 @@ static BAEResult player_load_and_start(PlayerState *ps, UiState *ui,
         }
 
         BAESound_SetVolume(ps->sound, volume_pct_to_fixed(gVolumePct));
+        if (opt && opt->loopCount > 0) {
+            BAESound_SetLoopCount(ps->sound, opt->loopCount);
+        }
         err = BAESound_Start(ps->sound, 0, BAE_FIXED_1, 0);
         if (err != BAE_NO_ERROR) {
             snprintf(outMsg, outMsgSize, "start failed: %s", BAE_GetErrorString(err));
@@ -600,14 +795,25 @@ static BAEResult player_load_and_start(PlayerState *ps, UiState *ui,
 
         BAESong_SetLoops(ps->song, 0);
         BAESong_SetVolume(ps->song, volume_pct_to_fixed(gVolumePct));
+        if (opt) {
+            BAEMixer_SetDefaultReverb(ps->mixer, (BAEReverbType)opt->reverbType);
+            if (opt->loopCount > 0) {
+                BAESong_SetLoops(ps->song, opt->loopCount);
+            }
+            mute_channels(ps->song, opt->muteChannels, ui);
+        }
         BAESong_GetMicrosecondLength(ps->song, &lenUs);
         ps->totalMs = lenUs / 1000;
         ps->kind = TRACK_SONG;
         player_reset_channel_mutes(ps, ui);
+        if (opt) mute_channels(ps->song, opt->muteChannels, ui);
     }
 
     strncpy(ps->currentPath, path, sizeof(ps->currentPath) - 1);
     ps->currentPath[sizeof(ps->currentPath) - 1] = '\0';
+    strncpy(ps->lastPath, path, sizeof(ps->lastPath) - 1);
+    ps->lastPath[sizeof(ps->lastPath) - 1] = '\0';
+    ps->timeLimitSec = opt ? opt->timeLimitSec : 0;
     ps->paused = 0;
 
     snprintf(outMsg, outMsgSize, "playing %s", path);
@@ -709,6 +915,16 @@ static int player_is_done(PlayerState *ps)
         return done ? 1 : 0;
     }
     return 1;
+}
+
+static BAEResult player_restart(PlayerState *ps, UiState *ui, const TuiOptions *opt,
+    char *outMsg, size_t outMsgSize)
+{
+    if (!ps->lastPath[0]) {
+        snprintf(outMsg, outMsgSize, "no previous track to restart");
+        return BAE_BAD_FILE;
+    }
+    return player_load_and_start(ps, ui, ps->lastPath, opt, outMsg, outMsgSize);
 }
 
 static void ui_update_vu(PlayerState *ps, UiState *ui)
@@ -819,7 +1035,7 @@ static void render_ui(UiState *ui, PlayerState *ps)
         mvprintw(2, 0, "State: idle");
     } else {
         const char *kind = (ps->kind == TRACK_SONG) ? "song" : "audio";
-        const char *st = ps->paused ? "paused" : "playing";
+        const char *st = player_is_done(ps) ? "finished" : (ps->paused ? "paused" : "playing");
         mvprintw(2, 0, "State: %s (%s) | Pos %s / %s | Vol %d%%",
             st, kind, posA, posB, gVolumePct);
     }
@@ -860,8 +1076,8 @@ static void render_ui(UiState *ui, PlayerState *ps)
 #endif
 
     mvprintw(h - 1, 0,
-        "space pause/resume  s stop  <-/-> seek  +/- volume  %.*s",
-        w - 58 > 0 ? w - 58 : 0, ui->status);
+        "space pause/resume  s stop  r restart  <-/-> seek  +/- volume  %.*s",
+        w - 69 > 0 ? w - 69 : 0, ui->status);
 
     refresh();
 }
@@ -892,6 +1108,7 @@ static void print_help_overlay(void)
     mvprintw(y++, 2, "q, ESC            quit");
     mvprintw(y++, 2, "Space             pause/resume");
     mvprintw(y++, 2, "s                 stop current track");
+    mvprintw(y++, 2, "r                 restart current/last track");
     mvprintw(y++, 2, "Left/Right        seek -/+5 seconds");
     mvprintw(y++, 2, "+/-               volume up/down");
     mvprintw(y++, 2, "Up/Down, j/k      select MIDI channel");
@@ -906,6 +1123,205 @@ static void print_help_overlay(void)
     nodelay(stdscr, TRUE);
 }
 
+static int load_bank(BAEMixer mixer, const char *path, BAEBankToken *tokenOut)
+{
+    const char *ext;
+    BAEResult err;
+
+    BAEMixer_UnloadBanks(mixer);
+    ext = strrchr(path, '.');
+
+#if USE_SF2_SUPPORT == TRUE
+    if (ext && (strcasecmp(ext, ".sf2") == 0
+#if USE_VORBIS_DECODER == TRUE
+        || strcasecmp(ext, ".sf3") == 0 || strcasecmp(ext, ".sfo") == 0
+#endif
+#if _USING_FLUIDSYNTH == TRUE
+        || strcasecmp(ext, ".dls") == 0
+#endif
+    )) {
+        GM_UnloadSF2Soundfont();
+        GM_SetMixerSF2Mode(FALSE);
+        if (GM_LoadSF2Soundfont(path) != NO_ERR) {
+            return 0;
+        }
+        GM_SetMixerSF2Mode(TRUE);
+        if (tokenOut) *tokenOut = 0;
+        return 1;
+    }
+#endif
+
+    err = BAEMixer_AddBankFromFile(mixer, (BAEPathName)path, tokenOut);
+    return (err == BAE_NO_ERROR) ? 1 : 0;
+}
+
+static BAEResult configure_export(BAEMixer mixer, const TuiOptions *opt)
+{
+    BAEResult err;
+    const char *out = opt->exportFile;
+
+    if (!out[0]) return BAE_NO_ERROR;
+
+    if (is_file_extension(out, ".mp3") || is_file_extension(out, ".mp2") || is_file_extension(out, ".mpg")) {
+#if defined(USE_MPEG_ENCODER) && (USE_MPEG_ENCODER != 0)
+        static const struct { int rate; BAECompressionType ct; } mp3Map[] = {
+            {32,BAE_COMPRESSION_MPEG_32},{40,BAE_COMPRESSION_MPEG_40},
+            {48,BAE_COMPRESSION_MPEG_48},{56,BAE_COMPRESSION_MPEG_56},
+            {64,BAE_COMPRESSION_MPEG_64},{80,BAE_COMPRESSION_MPEG_80},
+            {96,BAE_COMPRESSION_MPEG_96},{112,BAE_COMPRESSION_MPEG_112},
+            {128,BAE_COMPRESSION_MPEG_128},{160,BAE_COMPRESSION_MPEG_160},
+            {192,BAE_COMPRESSION_MPEG_192},{224,BAE_COMPRESSION_MPEG_224},
+            {256,BAE_COMPRESSION_MPEG_256},{320,BAE_COMPRESSION_MPEG_320}
+        };
+        BAECompressionType cType = BAE_COMPRESSION_MPEG_128;
+        int req = gMP3BitrateKbps;
+        int best = 100000;
+        size_t i;
+
+        if (req < 32) req = 32;
+        if (req > 320) req = 320;
+        for (i = 0; i < sizeof(mp3Map) / sizeof(mp3Map[0]); i++) {
+            int d = abs(mp3Map[i].rate - req);
+            if (d < best) {
+                best = d;
+                cType = mp3Map[i].ct;
+            }
+        }
+        err = BAEMixer_StartOutputToFile(mixer, (BAEPathName)out, BAE_MPEG_TYPE, cType);
+        if (err != BAE_NO_ERROR) return err;
+        gWriteToFile = 1;
+        gWriteToFileType = BAE_MPEG_TYPE;
+        return BAE_NO_ERROR;
+#else
+        return BAE_UNSUPPORTED_FORMAT;
+#endif
+    }
+
+    if (is_file_extension(out, ".flac")) {
+#if defined(USE_FLAC_ENCODER) && (USE_FLAC_ENCODER != 0)
+        err = BAEMixer_StartOutputToFile(mixer, (BAEPathName)out, BAE_FLAC_TYPE, BAE_COMPRESSION_LOSSLESS);
+        if (err != BAE_NO_ERROR) return err;
+        gWriteToFile = 1;
+        gWriteToFileType = BAE_FLAC_TYPE;
+        return BAE_NO_ERROR;
+#else
+        return BAE_UNSUPPORTED_FORMAT;
+#endif
+    }
+
+    if (is_file_extension(out, ".ogg")) {
+#if defined(USE_VORBIS_ENCODER) && (USE_VORBIS_ENCODER != 0)
+        err = BAEMixer_StartOutputToFile(mixer, (BAEPathName)out, BAE_VORBIS_TYPE, BAE_COMPRESSION_VORBIS_256);
+        if (err != BAE_NO_ERROR) return err;
+        gWriteToFile = 1;
+        gWriteToFileType = BAE_VORBIS_TYPE;
+        return BAE_NO_ERROR;
+#else
+        return BAE_UNSUPPORTED_FORMAT;
+#endif
+    }
+
+    if (is_file_extension(out, ".opus")) {
+#if defined(USE_OPUS_ENCODER) && (USE_OPUS_ENCODER != 0)
+        static const struct { int rate; BAECompressionType ct; } opusMap[] = {
+            {16,BAE_COMPRESSION_OPUS_16},{32,BAE_COMPRESSION_OPUS_32},
+            {64,BAE_COMPRESSION_OPUS_64},{96,BAE_COMPRESSION_OPUS_96},
+            {128,BAE_COMPRESSION_OPUS_128},{256,BAE_COMPRESSION_OPUS_256}
+        };
+        BAECompressionType cType = BAE_COMPRESSION_OPUS_128;
+        int req = gMP3BitrateKbps;
+        int best = 100000;
+        size_t i;
+
+        if (req < 16) req = 16;
+        if (req > 320) req = 320;
+        for (i = 0; i < sizeof(opusMap) / sizeof(opusMap[0]); i++) {
+            int d = abs(opusMap[i].rate - req);
+            if (d < best) {
+                best = d;
+                cType = opusMap[i].ct;
+            }
+        }
+        err = BAEMixer_StartOutputToFile(mixer, (BAEPathName)out, BAE_OPUS_TYPE, cType);
+        if (err != BAE_NO_ERROR) return err;
+        gWriteToFile = 1;
+        gWriteToFileType = BAE_OPUS_TYPE;
+        return BAE_NO_ERROR;
+#else
+        return BAE_UNSUPPORTED_FORMAT;
+#endif
+    }
+
+    err = BAEMixer_StartOutputToFile(mixer, (BAEPathName)out, BAE_WAVE_TYPE, BAE_COMPRESSION_NONE);
+    if (err != BAE_NO_ERROR) return err;
+    gWriteToFile = 1;
+    gWriteToFileType = BAE_WAVE_TYPE;
+    return BAE_NO_ERROR;
+}
+
+static void finalize_export(BAEMixer mixer)
+{
+    if (!gWriteToFile) return;
+#if defined(USE_MPEG_ENCODER) && (USE_MPEG_ENCODER != 0)
+    if (gWriteToFileType == BAE_MPEG_TYPE) {
+        uint32_t lastSamples = 0;
+        uint32_t stableCount = 0;
+        while (stableCount < 8) {
+            BAEMixer_ServiceAudioOutputToFile(mixer);
+            BAE_WaitMicroseconds(11000);
+            {
+                uint32_t cur = BAE_GetDeviceSamplesPlayedPosition();
+                if (cur == lastSamples) stableCount++;
+                else {
+                    stableCount = 0;
+                    lastSamples = cur;
+                }
+            }
+        }
+    }
+#endif
+    BAEMixer_StopOutputToFile();
+    gWriteToFile = 0;
+}
+
+static BAEResult play_streamed(BAEMixer mixer, const char *fileName, BAEFileType ftype)
+{
+    BAEStream stream;
+    BAEResult err;
+    BAE_BOOL done = FALSE;
+
+    stream = BAEStream_New(mixer);
+    if (!stream) return BAE_MEMORY_ERR;
+
+    err = BAEStream_SetupFile(stream, (BAEPathName)fileName, ftype,
+        BAE_MIN_STREAM_BUFFER_SIZE, FALSE);
+    if (err != BAE_NO_ERROR) {
+        BAEStream_Delete(stream);
+        return err;
+    }
+
+    BAEStream_SetVolume(stream, volume_pct_to_fixed(gVolumePct));
+    err = BAEStream_Start(stream);
+    if (err != BAE_NO_ERROR) {
+        BAEStream_Delete(stream);
+        return err;
+    }
+
+    while (!done && !gInterrupt) {
+        BAEMixer_ServiceStreams(mixer);
+        BAEStream_IsDone(stream, &done);
+        if (gWriteToFile) {
+            BAEMixer_ServiceAudioOutputToFile(mixer);
+        } else {
+            BAE_WaitMicroseconds(12000);
+        }
+    }
+
+    BAEStream_Stop(stream, gFadeOut);
+    BAEStream_Delete(stream);
+    return BAE_NO_ERROR;
+}
+
 int main(int argc, char **argv)
 {
     BAEResult err;
@@ -915,6 +1331,8 @@ int main(int argc, char **argv)
     BAEBankToken bankToken = 0;
     uint64_t lastRender = 0;
     char msg[256];
+    int doneNotified = 0;
+    int usedNcurses = 0;
 #ifdef SUPPORT_BAESCRIPT
     BAEScript_Context *script = NULL;
     uint32_t scriptLenMs = 0;
@@ -933,7 +1351,35 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    if (opt.file[0] == '\0') {
+    if (opt.showVersion) {
+#ifdef _VERSION
+        const char *appVersion = _VERSION;
+#else
+        const char *appVersion = "unknown";
+#endif
+        fprintf(stdout, "neobae-tui version: %s\n", appVersion);
+        fprintf(stdout, "features: %s\n", BAE_GetFeatureString());
+        return 0;
+    }
+
+    if (opt.showVelocityList) {
+        fprintf(stdout, "%s", kVelocityList);
+        return 0;
+    }
+    if (opt.showReverbList) {
+        fprintf(stdout, "%s", kReverbList);
+        return 0;
+    }
+    if (opt.showExtra) {
+        fprintf(stdout, "%s", kExtraFlags);
+        return 0;
+    }
+    if (opt.showRmfInfo) {
+        print_rmf_info(opt.rmfInfoFile);
+        return 0;
+    }
+
+    if (opt.file[0] == '\0' && !opt.streamWav && !opt.streamAiff) {
         fprintf(stderr, "%s", kUsage);
         return 1;
     }
@@ -952,6 +1398,7 @@ int main(int argc, char **argv)
     }
 
     gVolumePct = opt.volumePct;
+    gFadeOut = opt.disableFadeOut ? 0 : 1;
 #ifdef SUPPORT_KARAOKE
     gKaraokeEnabled = opt.karaoke ? 1 : 0;
 #endif
@@ -990,10 +1437,8 @@ int main(int argc, char **argv)
     apply_output_gain(ps.mixer);
 
     if (opt.bank[0]) {
-        err = BAEMixer_AddBankFromFile(ps.mixer, (BAEPathName)opt.bank, &bankToken);
-        if (err != BAE_NO_ERROR) {
-            fprintf(stderr, "neobae-tui: failed loading bank '%s' (%d: %s)\n",
-                opt.bank, err, BAE_GetErrorString(err));
+        if (!load_bank(ps.mixer, opt.bank, &bankToken)) {
+            fprintf(stderr, "neobae-tui: failed loading bank '%s'\n", opt.bank);
             BAEMixer_Delete(ps.mixer);
             return 1;
         }
@@ -1011,10 +1456,27 @@ int main(int argc, char **argv)
 #endif
     }
 
+    err = configure_export(ps.mixer, &opt);
+    if (err != BAE_NO_ERROR) {
+        fprintf(stderr, "neobae-tui: failed to start export '%s' (%d: %s)\n",
+            opt.exportFile, err, BAE_GetErrorString(err));
+        BAEMixer_Delete(ps.mixer);
+        return 1;
+    }
+
+    if (opt.streamWav || opt.streamAiff) {
+        err = play_streamed(ps.mixer, opt.streamFile,
+            opt.streamWav ? BAE_WAVE_TYPE : BAE_AIFF_TYPE);
+        finalize_export(ps.mixer);
+        BAEMixer_Delete(ps.mixer);
+        return (err == BAE_NO_ERROR) ? 0 : 1;
+    }
+
     ui.selectedChannel = 0;
 
-    if (player_load_and_start(&ps, &ui, opt.file, msg, sizeof(msg)) != BAE_NO_ERROR) {
+    if (player_load_and_start(&ps, &ui, opt.file, &opt, msg, sizeof(msg)) != BAE_NO_ERROR) {
         fprintf(stderr, "neobae-tui: %s\n", msg);
+        finalize_export(ps.mixer);
         BAEMixer_Delete(ps.mixer);
 #ifdef SUPPORT_BAESCRIPT
         if (script) BAEScript_Free(script);
@@ -1026,13 +1488,41 @@ int main(int argc, char **argv)
 #ifdef SUPPORT_BAESCRIPT
     if (script && ps.song) {
         BAEScript_SetSong(script, ps.song);
-        BAEScript_SetExporting(script, FALSE);
+        BAEScript_SetExporting(script, gWriteToFile ? TRUE : FALSE);
         scriptLenMs = ps.totalMs;
         BAEScript_Tick(script, 0, scriptLenMs);
     }
 #endif
 
+    if (gWriteToFile) {
+        while (!gInterrupt && !player_is_done(&ps)) {
+            BAEMixer_ServiceStreams(ps.mixer);
+            BAEMixer_ServiceAudioOutputToFile(ps.mixer);
+
+            if (ps.timeLimitSec > 0 && player_position_ms(&ps) >= ps.timeLimitSec * 1000u) {
+                if (ps.song) BAESong_Stop(ps.song, gFadeOut);
+                if (ps.sound) BAESound_Stop(ps.sound, gFadeOut);
+            }
+
+#ifdef SUPPORT_BAESCRIPT
+            if (script && ps.song) {
+                uint32_t posMs = player_position_ms(&ps);
+                BAEScript_Tick(script, posMs, scriptLenMs);
+            }
+#endif
+        }
+
+        finalize_export(ps.mixer);
+        player_stop(&ps, &ui);
+#ifdef SUPPORT_BAESCRIPT
+        if (script) BAEScript_Free(script);
+#endif
+        BAEMixer_Delete(ps.mixer);
+        return 0;
+    }
+
     init_ncurses();
+    usedNcurses = 1;
 
     while (!gInterrupt) {
         int key;
@@ -1049,6 +1539,17 @@ int main(int argc, char **argv)
             gKaraokeAwaitLive = 0;
         }
 #endif
+
+        if (ps.kind != TRACK_NONE && player_is_done(&ps) && !doneNotified) {
+            ui_set_status(&ui, "playback finished: press r to restart");
+            doneNotified = 1;
+        }
+
+        if (ps.kind != TRACK_NONE && ps.timeLimitSec > 0 &&
+            player_position_ms(&ps) >= ps.timeLimitSec * 1000u) {
+            if (ps.song) BAESong_Stop(ps.song, gFadeOut);
+            if (ps.sound) BAESound_Stop(ps.sound, gFadeOut);
+        }
 
     #ifdef SUPPORT_BAESCRIPT
         if (script && ps.song) {
@@ -1078,6 +1579,22 @@ int main(int argc, char **argv)
             } else if (key == 's') {
                 player_stop(&ps, &ui);
                 ui_set_status(&ui, "stopped");
+                doneNotified = 0;
+            } else if (key == 'r' || key == 'R') {
+                if (player_restart(&ps, &ui, &opt, msg, sizeof(msg)) == BAE_NO_ERROR) {
+                    ui_set_status(&ui, "%s", msg);
+                    doneNotified = 0;
+#ifdef SUPPORT_BAESCRIPT
+                    if (script && ps.song) {
+                        BAEScript_SetSong(script, ps.song);
+                        BAEScript_SetExporting(script, FALSE);
+                        scriptLenMs = ps.totalMs;
+                        BAEScript_Tick(script, 0, scriptLenMs);
+                    }
+#endif
+                } else {
+                    ui_set_status(&ui, "%s", msg);
+                }
             } else if (key == KEY_LEFT) {
                 player_seek(&ps, -5);
             } else if (key == KEY_RIGHT) {
@@ -1101,8 +1618,9 @@ int main(int argc, char **argv)
         BAE_WaitMicroseconds(12000);
     }
 
-    endwin();
+    if (usedNcurses) endwin();
     player_stop(&ps, &ui);
+    finalize_export(ps.mixer);
 #ifdef SUPPORT_BAESCRIPT
     if (script) BAEScript_Free(script);
 #endif

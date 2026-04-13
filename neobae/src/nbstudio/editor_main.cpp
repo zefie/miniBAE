@@ -86,14 +86,12 @@ extern "C" {
 
 namespace {
 
-#ifdef __WXMSW__
 #ifdef GIT_VERSION
     constexpr char const* kVersionString = VERSION " (" STR(GIT_VERSION) ")";
+#elif defined(_VERSION)
+    constexpr char const* kVersionString = VERSION " (" _VERSION ")";
 #else
     constexpr char const* kVersionString = VERSION;
-#endif // GIT_VERSION    
-#else
-    constexpr char const* kVersionString = VERSION " (" _VERSION ")";
 #endif
 
 // IsOpusCompressionType is now defined in editor_instrument_ext_dialog.h
@@ -6770,7 +6768,7 @@ private:
         return wxString::Format("%s | %s", prefix, BuildStatusContextString());
     }
 
-    void SetStatusText(wxString const &text, int number = 0) {
+    void SetStatusText(wxString const &text, int number = 0) override {
         if (number != 0) {
             return;
         }

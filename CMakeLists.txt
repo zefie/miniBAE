@@ -1,6 +1,14 @@
 cmake_minimum_required(VERSION 3.10)
 project(NeoBAE LANGUAGES C CXX)
 
+set(NEOBAE_RC_ENABLED OFF)
+include(CheckLanguage)
+check_language(RC)
+if(CMAKE_RC_COMPILER)
+  enable_language(RC)
+  set(NEOBAE_RC_ENABLED ON)
+endif()
+
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 if(POLICY CMP0003)
@@ -79,6 +87,14 @@ add_compile_definitions(_VERSION="${BAE_VERSION}")
 message(STATUS "NeoBAE build version: ${BAE_VERSION}")
 
 option(DEBUG "Enable debuggable build (zefidi debug console, gdb debugging)" OFF)
+option(NEOBAE_STATIC "Enable static linking for NeoBAE apps and dependencies (best support on MinGW)" OFF)
+option(NEOBAE_BUILD_VCLIB "Build an additional MSVC-style import library for libneobae.dll using dlltool" OFF)
+if(NEOBAE_STATIC AND NOT DEFINED CACHE{NEOBAE_EXTERNAL_CODECS})
+  set(NEOBAE_EXTERNAL_CODECS ON CACHE BOOL "Use external system libraries for codecs when available instead of bundled sources (FLAC, LAME, Vorbis, Opus, Ogg)" FORCE)
+endif()
+if(NEOBAE_STATIC AND NOT DEFINED CACHE{NEOBAE_SHARED_LIBNEOBAE})
+  set(NEOBAE_SHARED_LIBNEOBAE ON CACHE BOOL "Build libneobae as shared (DLL/.so) while keeping static dependency preference" FORCE)
+endif()
 
 if (NOT DEBUG)
   add_compile_options(-O2)
@@ -86,6 +102,22 @@ else()
   message(STATUS "Debug build: enabling debug symbols and disabling optimizations")
   add_compile_options(-g -O0 -ggdb3 -fPIC -D_DEBUG=1)
 endif()  
+
+if(NEOBAE_STATIC)
+  message(STATUS "NEOBAE_STATIC enabled: preferring static linkage for apps and dependencies")
+  if(MINGW)
+    # Prefer static archives first when resolving libraries in MinGW static mode.
+    set(CMAKE_FIND_LIBRARY_SUFFIXES ".a" ".lib")
+    # Prevent executable import libraries like libzefidi.dll.a in static app builds.
+    set(CMAKE_EXECUTABLE_ENABLE_EXPORTS OFF)
+    if(NEOBAE_SHARED_LIBNEOBAE)
+      # Keep static runtime libs but avoid global -static so shared libneobae can link.
+      add_link_options(-static-libgcc $<$<LINK_LANGUAGE:CXX>:-static-libstdc++>)
+    else()
+      add_link_options(-static -static-libgcc $<$<LINK_LANGUAGE:CXX>:-static-libstdc++>)
+    endif()
+  endif()
+endif()
 
 
 option(BAE_DISABLE_RMF_EDITOR "Disable BAERmfEditor (Creation API) support" OFF)
@@ -118,9 +150,10 @@ option(BAE_DISABLE_EMBED_PATCHES "Disable embedded built-in patches" OFF)
 option(BAE_DISABLE_EMBED_FONT "Disable embedded GUI font" OFF)
 option(BAE_DISABLE_RETRO_RINGTONE_SUPPORT "Disable retro mobile ringtone format support (IMY/EMY/RNG/RTX/RTTTL)" OFF)
 option(BAE_DISABLE_QOA_SUPPORT "Disable QOA codec support" OFF)
+option(BAE_DISABLE_RMI_SUPPORT "Disable RMI support" OFF)
 set(BAE_EMBED_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/banks/patches111/patches111.hsb" CACHE FILEPATH "HSB bank file to embed as built-in patches (empty disables embedding)")
 option(BUILD_PLAYBAE "Build playbae when a non-Dummy/non-Ansi backend is selected" ON)
-option(BUILD_PLAYBAE_TUI "Build Linux ncurses textual GUI variant of playbae" OFF)
+option(BUILD_NEOBAE_TUI "Build ncurses textual GUI variant of playbae" ON)
 option(BUILD_ZEFIDI "Build zefidi when SDL2/SDL3 backend and matching SDL_ttf are available" ON)
 option(BUILD_CLITOOLS "Build CLI tools (songtool, rmf2mid, mid2rmf, mid2rmi, sf2-hsb, mod2rmf, instdump, bankrecomp)" ON)
 option(BUILD_NBSTUDIO "Build NeoBAE Studio (RMF/ZMF editor) when wxWidgets is found" ON)
@@ -156,6 +189,7 @@ set(BAE_ENABLE_EMBED_PATCHES ON)
 set(BAE_ENABLE_EMBED_FONT ON)
 set(BAE_ENABLE_RETRO_RINGTONE_SUPPORT ON)
 set(BAE_ENABLE_QOA_SUPPORT ON)
+set(BAE_ENABLE_RMI_SUPPORT ON)
 
 if(BAE_DISABLE_RMF_EDITOR)
   set(BAE_ENABLE_RMF_EDITOR OFF)
@@ -272,6 +306,9 @@ if(BAE_DISABLE_EMBED_PATCHES)
 endif()
 if(BAE_DISABLE_EMBED_FONT)
   set(BAE_ENABLE_EMBED_FONT OFF)
+endif()
+if(BAE_DISABLE_RMI_SUPPORT)
+  set(BAE_ENABLE_RMI_SUPPORT OFF)
 endif()
 
 set(BAE_EMBED_PATCHES_EFFECTIVE OFF)
@@ -498,7 +535,11 @@ elseif(BAE_PLATFORM STREQUAL "Raylib")
   set(BAE_PLATFORM_SOURCE neobae/src/BAE_Source/Platform/BAE_API_Raylib.c)
   set(BAE_X_PLATFORM_DEFINE X_RAYLIB)
 elseif(BAE_PLATFORM STREQUAL "WinOS")
-  set(BAE_PLATFORM_SOURCE neobae/src/BAE_Source/Platform/BAE_API_WinOS.c)
+  set(BAE_PLATFORM_SOURCE 
+    neobae/src/BAE_Source/Platform/BAE_API_WinOS.c
+    neobae/src/BAE_Source/Platform/BAE_API_WinOS_Capture.c
+    neobae/src/BAE_Source/Platform/BAE_API_WinOS_Thread.c
+  )
   set(BAE_X_PLATFORM_DEFINE X_WIN95)
 elseif(BAE_PLATFORM STREQUAL "Ansi")
   set(BAE_PLATFORM_SOURCE neobae/src/BAE_Source/Platform/BAE_API_Ansi.c)
@@ -542,8 +583,14 @@ elseif(BAE_PLATFORM STREQUAL "SDL3")
 endif()
 
 set(BAE_SDL_TTF_AVAILABLE OFF)
+set(ZEFIDI_SDL_BACKEND_AVAILABLE OFF)
+set(ZEFIDI_SDL_VERSION "")
+set(ZEFIDI_SDL_INCLUDE_DIR "")
+set(ZEFIDI_SDL_LIBRARY "")
+set(ZEFIDI_SDL_TTF_INCLUDE_DIR "")
+set(ZEFIDI_SDL_TTF_LIBRARY "")
 if(BUILD_ZEFIDI)
-   message(STATUS "Checking for SDL_ttf support for zefidi...")
+  message(STATUS "Checking for SDL support for zefidi...")
   if(BAE_PLATFORM STREQUAL "SDL2")
     find_path(BAE_SDL2_TTF_INCLUDE_DIR SDL2/SDL_ttf.h)
     find_library(BAE_SDL2_TTF_LIBRARY NAMES SDL2_ttf)
@@ -563,10 +610,78 @@ if(BUILD_ZEFIDI)
       message(STATUS "BAE_PLATFORM=SDL3 selected, but SDL3_ttf headers/library were not found.")
     endif()
   endif()
+
+  if(NOT BAE_SDL3_INCLUDE_DIR)
+    find_path(BAE_SDL3_INCLUDE_DIR SDL3/SDL.h)
+  endif()
+  if(NOT BAE_SDL3_LIBRARY)
+    find_library(BAE_SDL3_LIBRARY NAMES SDL3)
+  endif()
+  if(NOT BAE_SDL3_TTF_INCLUDE_DIR)
+    find_path(BAE_SDL3_TTF_INCLUDE_DIR SDL3_ttf/SDL_ttf.h)
+  endif()
+  if(NOT BAE_SDL3_TTF_LIBRARY)
+    find_library(BAE_SDL3_TTF_LIBRARY NAMES SDL3_ttf)
+  endif()
+
+  if(NOT BAE_SDL2_INCLUDE_DIR)
+    find_path(BAE_SDL2_INCLUDE_DIR SDL2/SDL.h)
+  endif()
+  if(NOT BAE_SDL2_LIBRARY)
+    find_library(BAE_SDL2_LIBRARY NAMES SDL2)
+  endif()
+  if(NOT BAE_SDL2_TTF_INCLUDE_DIR)
+    find_path(BAE_SDL2_TTF_INCLUDE_DIR SDL2/SDL_ttf.h)
+  endif()
+  if(NOT BAE_SDL2_TTF_LIBRARY)
+    find_library(BAE_SDL2_TTF_LIBRARY NAMES SDL2_ttf)
+  endif()
+
+  if(BAE_PLATFORM STREQUAL "SDL3"
+      AND BAE_SDL3_INCLUDE_DIR AND BAE_SDL3_LIBRARY
+      AND BAE_SDL3_TTF_INCLUDE_DIR AND BAE_SDL3_TTF_LIBRARY)
+    set(ZEFIDI_SDL_BACKEND_AVAILABLE ON)
+    set(ZEFIDI_SDL_VERSION "SDL3")
+    set(ZEFIDI_SDL_INCLUDE_DIR ${BAE_SDL3_INCLUDE_DIR})
+    set(ZEFIDI_SDL_LIBRARY ${BAE_SDL3_LIBRARY})
+    set(ZEFIDI_SDL_TTF_INCLUDE_DIR ${BAE_SDL3_TTF_INCLUDE_DIR})
+    set(ZEFIDI_SDL_TTF_LIBRARY ${BAE_SDL3_TTF_LIBRARY})
+  elseif(BAE_PLATFORM STREQUAL "SDL2"
+      AND BAE_SDL2_INCLUDE_DIR AND BAE_SDL2_LIBRARY
+      AND BAE_SDL2_TTF_INCLUDE_DIR AND BAE_SDL2_TTF_LIBRARY)
+    set(ZEFIDI_SDL_BACKEND_AVAILABLE ON)
+    set(ZEFIDI_SDL_VERSION "SDL2")
+    set(ZEFIDI_SDL_INCLUDE_DIR ${BAE_SDL2_INCLUDE_DIR})
+    set(ZEFIDI_SDL_LIBRARY ${BAE_SDL2_LIBRARY})
+    set(ZEFIDI_SDL_TTF_INCLUDE_DIR ${BAE_SDL2_TTF_INCLUDE_DIR})
+    set(ZEFIDI_SDL_TTF_LIBRARY ${BAE_SDL2_TTF_LIBRARY})
+  elseif(BAE_SDL3_INCLUDE_DIR AND BAE_SDL3_LIBRARY
+      AND BAE_SDL3_TTF_INCLUDE_DIR AND BAE_SDL3_TTF_LIBRARY)
+    set(ZEFIDI_SDL_BACKEND_AVAILABLE ON)
+    set(ZEFIDI_SDL_VERSION "SDL3")
+    set(ZEFIDI_SDL_INCLUDE_DIR ${BAE_SDL3_INCLUDE_DIR})
+    set(ZEFIDI_SDL_LIBRARY ${BAE_SDL3_LIBRARY})
+    set(ZEFIDI_SDL_TTF_INCLUDE_DIR ${BAE_SDL3_TTF_INCLUDE_DIR})
+    set(ZEFIDI_SDL_TTF_LIBRARY ${BAE_SDL3_TTF_LIBRARY})
+  elseif(BAE_SDL2_INCLUDE_DIR AND BAE_SDL2_LIBRARY
+      AND BAE_SDL2_TTF_INCLUDE_DIR AND BAE_SDL2_TTF_LIBRARY)
+    set(ZEFIDI_SDL_BACKEND_AVAILABLE ON)
+    set(ZEFIDI_SDL_VERSION "SDL2")
+    set(ZEFIDI_SDL_INCLUDE_DIR ${BAE_SDL2_INCLUDE_DIR})
+    set(ZEFIDI_SDL_LIBRARY ${BAE_SDL2_LIBRARY})
+    set(ZEFIDI_SDL_TTF_INCLUDE_DIR ${BAE_SDL2_TTF_INCLUDE_DIR})
+    set(ZEFIDI_SDL_TTF_LIBRARY ${BAE_SDL2_TTF_LIBRARY})
+  endif()
+
+  if(ZEFIDI_SDL_BACKEND_AVAILABLE)
+    message(STATUS "zefidi will use ${ZEFIDI_SDL_VERSION} independently of BAE_PLATFORM=${BAE_PLATFORM}.")
+  else()
+    message(STATUS "No usable SDL2/SDL3 + SDL_ttf combination was found for zefidi.")
+  endif()
 endif()
 
 set(BAE_ZEFIDI_AVAILABLE OFF)
-if(BAE_SDL_BACKEND_AVAILABLE AND BAE_SDL_TTF_AVAILABLE)
+if(ZEFIDI_SDL_BACKEND_AVAILABLE)
   set(BAE_ZEFIDI_AVAILABLE ON)
 endif()
 
@@ -706,91 +821,99 @@ endif()
 
 if(BAE_ENABLE_MP3_ENCODER)
   list(APPEND NEOBAE_SOURCES neobae/src/BAE_MPEG_Source_II/XMPEG_lame_encoder.cpp)
-  list(APPEND NEOBAE_SOURCES
-    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/VbrTag.c
-    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/bitstream.c
-    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/encoder.c
-    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/fft.c
-    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/gain_analysis.c
-    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/id3tag.c
-    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/lame.c
-    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/newmdct.c
-    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/presets.c
-    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/psymodel.c
-    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/quantize.c
-    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/quantize_pvt.c
-    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/reservoir.c
-    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/set_get.c
-    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/tables.c
-    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/takehiro.c
-    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/util.c
-    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/vbrquantize.c
-    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/version.c
-    neobae/src/thirdparty/lame-3.100-slim/libmp3lame/mpglib_interface.c
-  )
+  if (NOT NEOBAE_EXTERNAL_CODECS)
+    list(APPEND NEOBAE_SOURCES
+      neobae/src/thirdparty/lame-3.100-slim/libmp3lame/VbrTag.c
+      neobae/src/thirdparty/lame-3.100-slim/libmp3lame/bitstream.c
+      neobae/src/thirdparty/lame-3.100-slim/libmp3lame/encoder.c
+      neobae/src/thirdparty/lame-3.100-slim/libmp3lame/fft.c
+      neobae/src/thirdparty/lame-3.100-slim/libmp3lame/gain_analysis.c
+      neobae/src/thirdparty/lame-3.100-slim/libmp3lame/id3tag.c
+      neobae/src/thirdparty/lame-3.100-slim/libmp3lame/lame.c
+      neobae/src/thirdparty/lame-3.100-slim/libmp3lame/newmdct.c
+      neobae/src/thirdparty/lame-3.100-slim/libmp3lame/presets.c
+      neobae/src/thirdparty/lame-3.100-slim/libmp3lame/psymodel.c
+      neobae/src/thirdparty/lame-3.100-slim/libmp3lame/quantize.c
+      neobae/src/thirdparty/lame-3.100-slim/libmp3lame/quantize_pvt.c
+      neobae/src/thirdparty/lame-3.100-slim/libmp3lame/reservoir.c
+      neobae/src/thirdparty/lame-3.100-slim/libmp3lame/set_get.c
+      neobae/src/thirdparty/lame-3.100-slim/libmp3lame/tables.c
+      neobae/src/thirdparty/lame-3.100-slim/libmp3lame/takehiro.c
+      neobae/src/thirdparty/lame-3.100-slim/libmp3lame/util.c
+      neobae/src/thirdparty/lame-3.100-slim/libmp3lame/vbrquantize.c
+      neobae/src/thirdparty/lame-3.100-slim/libmp3lame/version.c
+      neobae/src/thirdparty/lame-3.100-slim/libmp3lame/mpglib_interface.c
+    )
+  endif()
 endif()
 
 if(BAE_ENABLE_FLAC_ENCODER OR BAE_ENABLE_FLAC_DECODER OR BAE_ENABLE_VORBIS_ENCODER OR BAE_ENABLE_VORBIS_DECODER OR BAE_ENABLE_OPUS_ENCODER OR BAE_ENABLE_OPUS_DECODER)
-  list(APPEND NEOBAE_SOURCES
-    neobae/src/thirdparty/libogg/src/bitwise.c
-    neobae/src/thirdparty/libogg/src/framing.c
-  )
+  if (NOT NEOBAE_EXTERNAL_CODECS)
+    list(APPEND NEOBAE_SOURCES
+      neobae/src/thirdparty/libogg/src/bitwise.c
+      neobae/src/thirdparty/libogg/src/framing.c
+    )
+  endif()
 endif()
 
 if(BAE_ENABLE_FLAC_ENCODER OR BAE_ENABLE_FLAC_DECODER)
-  list(APPEND NEOBAE_SOURCES
-    neobae/src/thirdparty/flac/src/libFLAC/bitmath.c
-    neobae/src/thirdparty/flac/src/libFLAC/bitreader.c
-    neobae/src/thirdparty/flac/src/libFLAC/bitwriter.c
-    neobae/src/thirdparty/flac/src/libFLAC/cpu.c
-    neobae/src/thirdparty/flac/src/libFLAC/crc.c
-    neobae/src/thirdparty/flac/src/libFLAC/fixed.c
-    neobae/src/thirdparty/flac/src/libFLAC/float.c
-    neobae/src/thirdparty/flac/src/libFLAC/format.c
-    neobae/src/thirdparty/flac/src/libFLAC/lpc.c
-    neobae/src/thirdparty/flac/src/libFLAC/md5.c
-    neobae/src/thirdparty/flac/src/libFLAC/memory.c
-    neobae/src/thirdparty/flac/src/libFLAC/metadata_iterators.c
-    neobae/src/thirdparty/flac/src/libFLAC/metadata_object.c
-    neobae/src/thirdparty/flac/src/libFLAC/stream_decoder.c
-    neobae/src/thirdparty/flac/src/libFLAC/stream_encoder.c
-    neobae/src/thirdparty/flac/src/libFLAC/stream_encoder_framing.c
-    neobae/src/thirdparty/flac/src/libFLAC/window.c
-    neobae/src/thirdparty/flac/src/libFLAC/ogg_decoder_aspect.c
-    neobae/src/thirdparty/flac/src/libFLAC/ogg_encoder_aspect.c
-    neobae/src/thirdparty/flac/src/libFLAC/ogg_helper.c
-    neobae/src/thirdparty/flac/src/libFLAC/ogg_mapping.c
-  )
-  if(WIN32)
-    list(APPEND NEOBAE_SOURCES neobae/src/thirdparty/flac/src/share/win_utf8_io/win_utf8_io.c)
+  if (NOT NEOBAE_EXTERNAL_CODECS)
+    list(APPEND NEOBAE_SOURCES
+      neobae/src/thirdparty/flac/src/libFLAC/bitmath.c
+      neobae/src/thirdparty/flac/src/libFLAC/bitreader.c
+      neobae/src/thirdparty/flac/src/libFLAC/bitwriter.c
+      neobae/src/thirdparty/flac/src/libFLAC/cpu.c
+      neobae/src/thirdparty/flac/src/libFLAC/crc.c
+      neobae/src/thirdparty/flac/src/libFLAC/fixed.c
+      neobae/src/thirdparty/flac/src/libFLAC/float.c
+      neobae/src/thirdparty/flac/src/libFLAC/format.c
+      neobae/src/thirdparty/flac/src/libFLAC/lpc.c
+      neobae/src/thirdparty/flac/src/libFLAC/md5.c
+      neobae/src/thirdparty/flac/src/libFLAC/memory.c
+      neobae/src/thirdparty/flac/src/libFLAC/metadata_iterators.c
+      neobae/src/thirdparty/flac/src/libFLAC/metadata_object.c
+      neobae/src/thirdparty/flac/src/libFLAC/stream_decoder.c
+      neobae/src/thirdparty/flac/src/libFLAC/stream_encoder.c
+      neobae/src/thirdparty/flac/src/libFLAC/stream_encoder_framing.c
+      neobae/src/thirdparty/flac/src/libFLAC/window.c
+      neobae/src/thirdparty/flac/src/libFLAC/ogg_decoder_aspect.c
+      neobae/src/thirdparty/flac/src/libFLAC/ogg_encoder_aspect.c
+      neobae/src/thirdparty/flac/src/libFLAC/ogg_helper.c
+      neobae/src/thirdparty/flac/src/libFLAC/ogg_mapping.c
+    )
+    if(WIN32)
+      list(APPEND NEOBAE_SOURCES neobae/src/thirdparty/flac/src/share/win_utf8_io/win_utf8_io.c)
+    endif()
   endif()
 endif()
 
 if(BAE_ENABLE_VORBIS_ENCODER OR BAE_ENABLE_VORBIS_DECODER)
-  list(APPEND NEOBAE_SOURCES
-    neobae/src/thirdparty/libvorbis/lib/mdct.c
-    neobae/src/thirdparty/libvorbis/lib/smallft.c
-    neobae/src/thirdparty/libvorbis/lib/block.c
-    neobae/src/thirdparty/libvorbis/lib/envelope.c
-    neobae/src/thirdparty/libvorbis/lib/window.c
-    neobae/src/thirdparty/libvorbis/lib/lsp.c
-    neobae/src/thirdparty/libvorbis/lib/lpc.c
-    neobae/src/thirdparty/libvorbis/lib/analysis.c
-    neobae/src/thirdparty/libvorbis/lib/synthesis.c
-    neobae/src/thirdparty/libvorbis/lib/psy.c
-    neobae/src/thirdparty/libvorbis/lib/info.c
-    neobae/src/thirdparty/libvorbis/lib/floor1.c
-    neobae/src/thirdparty/libvorbis/lib/floor0.c
-    neobae/src/thirdparty/libvorbis/lib/res0.c
-    neobae/src/thirdparty/libvorbis/lib/mapping0.c
-    neobae/src/thirdparty/libvorbis/lib/registry.c
-    neobae/src/thirdparty/libvorbis/lib/codebook.c
-    neobae/src/thirdparty/libvorbis/lib/sharedbook.c
-    neobae/src/thirdparty/libvorbis/lib/lookup.c
-    neobae/src/thirdparty/libvorbis/lib/bitrate.c
-    neobae/src/thirdparty/libvorbis/lib/vorbisfile.c
-  )
-  if(BAE_ENABLE_VORBIS_ENCODER)
+  if (NEOBAE_EXTERNAL_CODECS)
+    list(APPEND NEOBAE_SOURCES
+      neobae/src/thirdparty/libvorbis/lib/mdct.c
+      neobae/src/thirdparty/libvorbis/lib/smallft.c
+      neobae/src/thirdparty/libvorbis/lib/block.c
+      neobae/src/thirdparty/libvorbis/lib/envelope.c
+      neobae/src/thirdparty/libvorbis/lib/window.c
+      neobae/src/thirdparty/libvorbis/lib/lsp.c
+      neobae/src/thirdparty/libvorbis/lib/lpc.c
+      neobae/src/thirdparty/libvorbis/lib/analysis.c
+      neobae/src/thirdparty/libvorbis/lib/synthesis.c
+      neobae/src/thirdparty/libvorbis/lib/psy.c
+      neobae/src/thirdparty/libvorbis/lib/info.c
+      neobae/src/thirdparty/libvorbis/lib/floor1.c
+      neobae/src/thirdparty/libvorbis/lib/floor0.c
+      neobae/src/thirdparty/libvorbis/lib/res0.c
+      neobae/src/thirdparty/libvorbis/lib/mapping0.c
+      neobae/src/thirdparty/libvorbis/lib/registry.c
+      neobae/src/thirdparty/libvorbis/lib/codebook.c
+      neobae/src/thirdparty/libvorbis/lib/sharedbook.c
+      neobae/src/thirdparty/libvorbis/lib/lookup.c
+      neobae/src/thirdparty/libvorbis/lib/bitrate.c
+      neobae/src/thirdparty/libvorbis/lib/vorbisfile.c
+    )
+  endif()
+  if(BAE_ENABLE_VORBIS_ENCODER AND NEOBAE_EXTERNAL_CODECS)
     list(APPEND NEOBAE_SOURCES neobae/src/thirdparty/libvorbis/lib/vorbisenc.c)
   endif()
   list(APPEND NEOBAE_SOURCES neobae/src/BAE_Source/Common/XVorbisFiles.c)
@@ -799,145 +922,149 @@ endif()
 if(BAE_ENABLE_OPUS_ENCODER OR BAE_ENABLE_OPUS_DECODER)
   list(APPEND NEOBAE_SOURCES
     neobae/src/BAE_Source/Common/XOpusFiles.c
-    neobae/src/thirdparty/opus/src/opus.c
-    neobae/src/thirdparty/opus/src/opus_decoder.c
-    neobae/src/thirdparty/opus/src/opus_encoder.c
-    neobae/src/thirdparty/opus/src/extensions.c
-    neobae/src/thirdparty/opus/src/opus_multistream.c
-    neobae/src/thirdparty/opus/src/opus_multistream_encoder.c
-    neobae/src/thirdparty/opus/src/opus_multistream_decoder.c
-    neobae/src/thirdparty/opus/src/repacketizer.c
-    neobae/src/thirdparty/opus/src/opus_projection_encoder.c
-    neobae/src/thirdparty/opus/src/opus_projection_decoder.c
-    neobae/src/thirdparty/opus/src/mapping_matrix.c
-    neobae/src/thirdparty/opus/src/analysis.c
-    neobae/src/thirdparty/opus/src/mlp.c
-    neobae/src/thirdparty/opus/src/mlp_data.c
-    neobae/src/thirdparty/opus/celt/bands.c
-    neobae/src/thirdparty/opus/celt/celt.c
-    neobae/src/thirdparty/opus/celt/celt_encoder.c
-    neobae/src/thirdparty/opus/celt/celt_decoder.c
-    neobae/src/thirdparty/opus/celt/cwrs.c
-    neobae/src/thirdparty/opus/celt/entcode.c
-    neobae/src/thirdparty/opus/celt/entdec.c
-    neobae/src/thirdparty/opus/celt/entenc.c
-    neobae/src/thirdparty/opus/celt/kiss_fft.c
-    neobae/src/thirdparty/opus/celt/laplace.c
-    neobae/src/thirdparty/opus/celt/mathops.c
-    neobae/src/thirdparty/opus/celt/mdct.c
-    neobae/src/thirdparty/opus/celt/modes.c
-    neobae/src/thirdparty/opus/celt/pitch.c
-    neobae/src/thirdparty/opus/celt/celt_lpc.c
-    neobae/src/thirdparty/opus/celt/quant_bands.c
-    neobae/src/thirdparty/opus/celt/rate.c
-    neobae/src/thirdparty/opus/celt/vq.c
-    neobae/src/thirdparty/opus/silk/CNG.c
-    neobae/src/thirdparty/opus/silk/code_signs.c
-    neobae/src/thirdparty/opus/silk/init_decoder.c
-    neobae/src/thirdparty/opus/silk/decode_core.c
-    neobae/src/thirdparty/opus/silk/decode_frame.c
-    neobae/src/thirdparty/opus/silk/decode_parameters.c
-    neobae/src/thirdparty/opus/silk/decode_indices.c
-    neobae/src/thirdparty/opus/silk/decode_pulses.c
-    neobae/src/thirdparty/opus/silk/decoder_set_fs.c
-    neobae/src/thirdparty/opus/silk/dec_API.c
-    neobae/src/thirdparty/opus/silk/enc_API.c
-    neobae/src/thirdparty/opus/silk/encode_indices.c
-    neobae/src/thirdparty/opus/silk/encode_pulses.c
-    neobae/src/thirdparty/opus/silk/gain_quant.c
-    neobae/src/thirdparty/opus/silk/interpolate.c
-    neobae/src/thirdparty/opus/silk/LP_variable_cutoff.c
-    neobae/src/thirdparty/opus/silk/NLSF_decode.c
-    neobae/src/thirdparty/opus/silk/NSQ.c
-    neobae/src/thirdparty/opus/silk/NSQ_del_dec.c
-    neobae/src/thirdparty/opus/silk/PLC.c
-    neobae/src/thirdparty/opus/silk/shell_coder.c
-    neobae/src/thirdparty/opus/silk/tables_gain.c
-    neobae/src/thirdparty/opus/silk/tables_LTP.c
-    neobae/src/thirdparty/opus/silk/tables_NLSF_CB_NB_MB.c
-    neobae/src/thirdparty/opus/silk/tables_NLSF_CB_WB.c
-    neobae/src/thirdparty/opus/silk/tables_other.c
-    neobae/src/thirdparty/opus/silk/tables_pitch_lag.c
-    neobae/src/thirdparty/opus/silk/tables_pulses_per_block.c
-    neobae/src/thirdparty/opus/silk/VAD.c
-    neobae/src/thirdparty/opus/silk/control_audio_bandwidth.c
-    neobae/src/thirdparty/opus/silk/quant_LTP_gains.c
-    neobae/src/thirdparty/opus/silk/VQ_WMat_EC.c
-    neobae/src/thirdparty/opus/silk/HP_variable_cutoff.c
-    neobae/src/thirdparty/opus/silk/NLSF_encode.c
-    neobae/src/thirdparty/opus/silk/NLSF_VQ.c
-    neobae/src/thirdparty/opus/silk/NLSF_unpack.c
-    neobae/src/thirdparty/opus/silk/NLSF_del_dec_quant.c
-    neobae/src/thirdparty/opus/silk/process_NLSFs.c
-    neobae/src/thirdparty/opus/silk/stereo_LR_to_MS.c
-    neobae/src/thirdparty/opus/silk/stereo_MS_to_LR.c
-    neobae/src/thirdparty/opus/silk/check_control_input.c
-    neobae/src/thirdparty/opus/silk/control_SNR.c
-    neobae/src/thirdparty/opus/silk/init_encoder.c
-    neobae/src/thirdparty/opus/silk/control_codec.c
-    neobae/src/thirdparty/opus/silk/A2NLSF.c
-    neobae/src/thirdparty/opus/silk/ana_filt_bank_1.c
-    neobae/src/thirdparty/opus/silk/biquad_alt.c
-    neobae/src/thirdparty/opus/silk/bwexpander_32.c
-    neobae/src/thirdparty/opus/silk/bwexpander.c
-    neobae/src/thirdparty/opus/silk/debug.c
-    neobae/src/thirdparty/opus/silk/decode_pitch.c
-    neobae/src/thirdparty/opus/silk/inner_prod_aligned.c
-    neobae/src/thirdparty/opus/silk/lin2log.c
-    neobae/src/thirdparty/opus/silk/log2lin.c
-    neobae/src/thirdparty/opus/silk/LPC_analysis_filter.c
-    neobae/src/thirdparty/opus/silk/LPC_inv_pred_gain.c
-    neobae/src/thirdparty/opus/silk/table_LSF_cos.c
-    neobae/src/thirdparty/opus/silk/NLSF2A.c
-    neobae/src/thirdparty/opus/silk/NLSF_stabilize.c
-    neobae/src/thirdparty/opus/silk/NLSF_VQ_weights_laroia.c
-    neobae/src/thirdparty/opus/silk/pitch_est_tables.c
-    neobae/src/thirdparty/opus/silk/resampler.c
-    neobae/src/thirdparty/opus/silk/resampler_down2_3.c
-    neobae/src/thirdparty/opus/silk/resampler_down2.c
-    neobae/src/thirdparty/opus/silk/resampler_private_AR2.c
-    neobae/src/thirdparty/opus/silk/resampler_private_down_FIR.c
-    neobae/src/thirdparty/opus/silk/resampler_private_IIR_FIR.c
-    neobae/src/thirdparty/opus/silk/resampler_private_up2_HQ.c
-    neobae/src/thirdparty/opus/silk/resampler_rom.c
-    neobae/src/thirdparty/opus/silk/sigm_Q15.c
-    neobae/src/thirdparty/opus/silk/sort.c
-    neobae/src/thirdparty/opus/silk/sum_sqr_shift.c
-    neobae/src/thirdparty/opus/silk/stereo_decode_pred.c
-    neobae/src/thirdparty/opus/silk/stereo_encode_pred.c
-    neobae/src/thirdparty/opus/silk/stereo_find_predictor.c
-    neobae/src/thirdparty/opus/silk/stereo_quant_pred.c
-    neobae/src/thirdparty/opus/silk/LPC_fit.c
-    neobae/src/thirdparty/opus/silk/float/apply_sine_window_FLP.c
-    neobae/src/thirdparty/opus/silk/float/corrMatrix_FLP.c
-    neobae/src/thirdparty/opus/silk/float/encode_frame_FLP.c
-    neobae/src/thirdparty/opus/silk/float/find_LPC_FLP.c
-    neobae/src/thirdparty/opus/silk/float/find_LTP_FLP.c
-    neobae/src/thirdparty/opus/silk/float/find_pitch_lags_FLP.c
-    neobae/src/thirdparty/opus/silk/float/find_pred_coefs_FLP.c
-    neobae/src/thirdparty/opus/silk/float/LPC_analysis_filter_FLP.c
-    neobae/src/thirdparty/opus/silk/float/LTP_analysis_filter_FLP.c
-    neobae/src/thirdparty/opus/silk/float/LTP_scale_ctrl_FLP.c
-    neobae/src/thirdparty/opus/silk/float/noise_shape_analysis_FLP.c
-    neobae/src/thirdparty/opus/silk/float/process_gains_FLP.c
-    neobae/src/thirdparty/opus/silk/float/regularize_correlations_FLP.c
-    neobae/src/thirdparty/opus/silk/float/residual_energy_FLP.c
-    neobae/src/thirdparty/opus/silk/float/warped_autocorrelation_FLP.c
-    neobae/src/thirdparty/opus/silk/float/wrappers_FLP.c
-    neobae/src/thirdparty/opus/silk/float/autocorrelation_FLP.c
-    neobae/src/thirdparty/opus/silk/float/burg_modified_FLP.c
-    neobae/src/thirdparty/opus/silk/float/bwexpander_FLP.c
-    neobae/src/thirdparty/opus/silk/float/energy_FLP.c
-    neobae/src/thirdparty/opus/silk/float/inner_product_FLP.c
-    neobae/src/thirdparty/opus/silk/float/k2a_FLP.c
-    neobae/src/thirdparty/opus/silk/float/LPC_inv_pred_gain_FLP.c
-    neobae/src/thirdparty/opus/silk/float/pitch_analysis_core_FLP.c
-    neobae/src/thirdparty/opus/silk/float/scale_copy_vector_FLP.c
-    neobae/src/thirdparty/opus/silk/float/scale_vector_FLP.c
-    neobae/src/thirdparty/opus/silk/float/schur_FLP.c
-    neobae/src/thirdparty/opus/silk/float/sort_FLP.c
   )
-  if(BAE_ENABLE_OPUS_DECODER)
+  if (NOT NEOBAE_EXTERNAL_CODECS)
+    list(APPEND NEOBAE_SOURCES
+      neobae/src/thirdparty/opus/src/opus.c
+      neobae/src/thirdparty/opus/src/opus_decoder.c
+      neobae/src/thirdparty/opus/src/opus_encoder.c
+      neobae/src/thirdparty/opus/src/extensions.c
+      neobae/src/thirdparty/opus/src/opus_multistream.c
+      neobae/src/thirdparty/opus/src/opus_multistream_encoder.c
+      neobae/src/thirdparty/opus/src/opus_multistream_decoder.c
+      neobae/src/thirdparty/opus/src/repacketizer.c
+      neobae/src/thirdparty/opus/src/opus_projection_encoder.c
+      neobae/src/thirdparty/opus/src/opus_projection_decoder.c
+      neobae/src/thirdparty/opus/src/mapping_matrix.c
+      neobae/src/thirdparty/opus/src/analysis.c
+      neobae/src/thirdparty/opus/src/mlp.c
+      neobae/src/thirdparty/opus/src/mlp_data.c
+      neobae/src/thirdparty/opus/celt/bands.c
+      neobae/src/thirdparty/opus/celt/celt.c
+      neobae/src/thirdparty/opus/celt/celt_encoder.c
+      neobae/src/thirdparty/opus/celt/celt_decoder.c
+      neobae/src/thirdparty/opus/celt/cwrs.c
+      neobae/src/thirdparty/opus/celt/entcode.c
+      neobae/src/thirdparty/opus/celt/entdec.c
+      neobae/src/thirdparty/opus/celt/entenc.c
+      neobae/src/thirdparty/opus/celt/kiss_fft.c
+      neobae/src/thirdparty/opus/celt/laplace.c
+      neobae/src/thirdparty/opus/celt/mathops.c
+      neobae/src/thirdparty/opus/celt/mdct.c
+      neobae/src/thirdparty/opus/celt/modes.c
+      neobae/src/thirdparty/opus/celt/pitch.c
+      neobae/src/thirdparty/opus/celt/celt_lpc.c
+      neobae/src/thirdparty/opus/celt/quant_bands.c
+      neobae/src/thirdparty/opus/celt/rate.c
+      neobae/src/thirdparty/opus/celt/vq.c
+      neobae/src/thirdparty/opus/silk/CNG.c
+      neobae/src/thirdparty/opus/silk/code_signs.c
+      neobae/src/thirdparty/opus/silk/init_decoder.c
+      neobae/src/thirdparty/opus/silk/decode_core.c
+      neobae/src/thirdparty/opus/silk/decode_frame.c
+      neobae/src/thirdparty/opus/silk/decode_parameters.c
+      neobae/src/thirdparty/opus/silk/decode_indices.c
+      neobae/src/thirdparty/opus/silk/decode_pulses.c
+      neobae/src/thirdparty/opus/silk/decoder_set_fs.c
+      neobae/src/thirdparty/opus/silk/dec_API.c
+      neobae/src/thirdparty/opus/silk/enc_API.c
+      neobae/src/thirdparty/opus/silk/encode_indices.c
+      neobae/src/thirdparty/opus/silk/encode_pulses.c
+      neobae/src/thirdparty/opus/silk/gain_quant.c
+      neobae/src/thirdparty/opus/silk/interpolate.c
+      neobae/src/thirdparty/opus/silk/LP_variable_cutoff.c
+      neobae/src/thirdparty/opus/silk/NLSF_decode.c
+      neobae/src/thirdparty/opus/silk/NSQ.c
+      neobae/src/thirdparty/opus/silk/NSQ_del_dec.c
+      neobae/src/thirdparty/opus/silk/PLC.c
+      neobae/src/thirdparty/opus/silk/shell_coder.c
+      neobae/src/thirdparty/opus/silk/tables_gain.c
+      neobae/src/thirdparty/opus/silk/tables_LTP.c
+      neobae/src/thirdparty/opus/silk/tables_NLSF_CB_NB_MB.c
+      neobae/src/thirdparty/opus/silk/tables_NLSF_CB_WB.c
+      neobae/src/thirdparty/opus/silk/tables_other.c
+      neobae/src/thirdparty/opus/silk/tables_pitch_lag.c
+      neobae/src/thirdparty/opus/silk/tables_pulses_per_block.c
+      neobae/src/thirdparty/opus/silk/VAD.c
+      neobae/src/thirdparty/opus/silk/control_audio_bandwidth.c
+      neobae/src/thirdparty/opus/silk/quant_LTP_gains.c
+      neobae/src/thirdparty/opus/silk/VQ_WMat_EC.c
+      neobae/src/thirdparty/opus/silk/HP_variable_cutoff.c
+      neobae/src/thirdparty/opus/silk/NLSF_encode.c
+      neobae/src/thirdparty/opus/silk/NLSF_VQ.c
+      neobae/src/thirdparty/opus/silk/NLSF_unpack.c
+      neobae/src/thirdparty/opus/silk/NLSF_del_dec_quant.c
+      neobae/src/thirdparty/opus/silk/process_NLSFs.c
+      neobae/src/thirdparty/opus/silk/stereo_LR_to_MS.c
+      neobae/src/thirdparty/opus/silk/stereo_MS_to_LR.c
+      neobae/src/thirdparty/opus/silk/check_control_input.c
+      neobae/src/thirdparty/opus/silk/control_SNR.c
+      neobae/src/thirdparty/opus/silk/init_encoder.c
+      neobae/src/thirdparty/opus/silk/control_codec.c
+      neobae/src/thirdparty/opus/silk/A2NLSF.c
+      neobae/src/thirdparty/opus/silk/ana_filt_bank_1.c
+      neobae/src/thirdparty/opus/silk/biquad_alt.c
+      neobae/src/thirdparty/opus/silk/bwexpander_32.c
+      neobae/src/thirdparty/opus/silk/bwexpander.c
+      neobae/src/thirdparty/opus/silk/debug.c
+      neobae/src/thirdparty/opus/silk/decode_pitch.c
+      neobae/src/thirdparty/opus/silk/inner_prod_aligned.c
+      neobae/src/thirdparty/opus/silk/lin2log.c
+      neobae/src/thirdparty/opus/silk/log2lin.c
+      neobae/src/thirdparty/opus/silk/LPC_analysis_filter.c
+      neobae/src/thirdparty/opus/silk/LPC_inv_pred_gain.c
+      neobae/src/thirdparty/opus/silk/table_LSF_cos.c
+      neobae/src/thirdparty/opus/silk/NLSF2A.c
+      neobae/src/thirdparty/opus/silk/NLSF_stabilize.c
+      neobae/src/thirdparty/opus/silk/NLSF_VQ_weights_laroia.c
+      neobae/src/thirdparty/opus/silk/pitch_est_tables.c
+      neobae/src/thirdparty/opus/silk/resampler.c
+      neobae/src/thirdparty/opus/silk/resampler_down2_3.c
+      neobae/src/thirdparty/opus/silk/resampler_down2.c
+      neobae/src/thirdparty/opus/silk/resampler_private_AR2.c
+      neobae/src/thirdparty/opus/silk/resampler_private_down_FIR.c
+      neobae/src/thirdparty/opus/silk/resampler_private_IIR_FIR.c
+      neobae/src/thirdparty/opus/silk/resampler_private_up2_HQ.c
+      neobae/src/thirdparty/opus/silk/resampler_rom.c
+      neobae/src/thirdparty/opus/silk/sigm_Q15.c
+      neobae/src/thirdparty/opus/silk/sort.c
+      neobae/src/thirdparty/opus/silk/sum_sqr_shift.c
+      neobae/src/thirdparty/opus/silk/stereo_decode_pred.c
+      neobae/src/thirdparty/opus/silk/stereo_encode_pred.c
+      neobae/src/thirdparty/opus/silk/stereo_find_predictor.c
+      neobae/src/thirdparty/opus/silk/stereo_quant_pred.c
+      neobae/src/thirdparty/opus/silk/LPC_fit.c
+      neobae/src/thirdparty/opus/silk/float/apply_sine_window_FLP.c
+      neobae/src/thirdparty/opus/silk/float/corrMatrix_FLP.c
+      neobae/src/thirdparty/opus/silk/float/encode_frame_FLP.c
+      neobae/src/thirdparty/opus/silk/float/find_LPC_FLP.c
+      neobae/src/thirdparty/opus/silk/float/find_LTP_FLP.c
+      neobae/src/thirdparty/opus/silk/float/find_pitch_lags_FLP.c
+      neobae/src/thirdparty/opus/silk/float/find_pred_coefs_FLP.c
+      neobae/src/thirdparty/opus/silk/float/LPC_analysis_filter_FLP.c
+      neobae/src/thirdparty/opus/silk/float/LTP_analysis_filter_FLP.c
+      neobae/src/thirdparty/opus/silk/float/LTP_scale_ctrl_FLP.c
+      neobae/src/thirdparty/opus/silk/float/noise_shape_analysis_FLP.c
+      neobae/src/thirdparty/opus/silk/float/process_gains_FLP.c
+      neobae/src/thirdparty/opus/silk/float/regularize_correlations_FLP.c
+      neobae/src/thirdparty/opus/silk/float/residual_energy_FLP.c
+      neobae/src/thirdparty/opus/silk/float/warped_autocorrelation_FLP.c
+      neobae/src/thirdparty/opus/silk/float/wrappers_FLP.c
+      neobae/src/thirdparty/opus/silk/float/autocorrelation_FLP.c
+      neobae/src/thirdparty/opus/silk/float/burg_modified_FLP.c
+      neobae/src/thirdparty/opus/silk/float/bwexpander_FLP.c
+      neobae/src/thirdparty/opus/silk/float/energy_FLP.c
+      neobae/src/thirdparty/opus/silk/float/inner_product_FLP.c
+      neobae/src/thirdparty/opus/silk/float/k2a_FLP.c
+      neobae/src/thirdparty/opus/silk/float/LPC_inv_pred_gain_FLP.c
+      neobae/src/thirdparty/opus/silk/float/pitch_analysis_core_FLP.c
+      neobae/src/thirdparty/opus/silk/float/scale_copy_vector_FLP.c
+      neobae/src/thirdparty/opus/silk/float/scale_vector_FLP.c
+      neobae/src/thirdparty/opus/silk/float/schur_FLP.c
+      neobae/src/thirdparty/opus/silk/float/sort_FLP.c
+  )
+  endif()
+  if(BAE_ENABLE_OPUS_DECODER AND NOT NEOBAE_EXTERNAL_CODECS)
     list(APPEND NEOBAE_SOURCES
       neobae/src/thirdparty/opusfile/src/info.c
       neobae/src/thirdparty/opusfile/src/internal.c
@@ -953,7 +1080,102 @@ if (DEBUG)
   )
 endif()
 
-add_library(neobae STATIC ${NEOBAE_SOURCES})
+if(NEOBAE_SHARED_LIBNEOBAE)
+  add_library(neobae SHARED ${NEOBAE_SOURCES})
+else()
+  add_library(neobae STATIC ${NEOBAE_SOURCES})
+endif()
+
+set(NEOBAE_DLL_DEF_FILE "")
+set(NEOBAE_VCLIB_OUTPUT "")
+
+set(NEOBAE_DEP_LINK_VISIBILITY PUBLIC)
+if(NEOBAE_STATIC AND NEOBAE_SHARED_LIBNEOBAE)
+  # Build a self-contained libneobae.dll and avoid propagating dependency libs to consumers.
+  set(NEOBAE_DEP_LINK_VISIBILITY PRIVATE)
+endif()
+
+set(NEOBAE_STATIC_DEP_LINK_PREFIX "")
+set(NEOBAE_STATIC_DEP_LINK_SUFFIX "")
+set(NEOBAE_WINPTHREAD_LINK_ITEM winpthread)
+if(NEOBAE_STATIC AND NEOBAE_SHARED_LIBNEOBAE AND MINGW)
+  # Force static resolution for third-party -l<name> dependencies.
+  set(NEOBAE_STATIC_DEP_LINK_PREFIX "-Wl,-Bstatic")
+  set(NEOBAE_STATIC_DEP_LINK_SUFFIX "-Wl,-Bdynamic")
+
+  execute_process(
+    COMMAND ${CMAKE_C_COMPILER} -print-file-name=libwinpthread.a
+    OUTPUT_VARIABLE NEOBAE_WINPTHREAD_STATIC_ARCHIVE
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+  if(NEOBAE_WINPTHREAD_STATIC_ARCHIVE AND
+     NOT NEOBAE_WINPTHREAD_STATIC_ARCHIVE STREQUAL "libwinpthread.a" AND
+     EXISTS "${NEOBAE_WINPTHREAD_STATIC_ARCHIVE}")
+    set(NEOBAE_WINPTHREAD_LINK_ITEM "${NEOBAE_WINPTHREAD_STATIC_ARCHIVE}")
+  endif()
+endif()
+
+if(NEOBAE_STATIC AND NEOBAE_SHARED_LIBNEOBAE AND MINGW)
+  # Prefer static archives when resolving -l<name> while linking libneobae.dll.
+  # This keeps dependency code inside libneobae.dll instead of importing sibling DLLs.
+  set_target_properties(neobae PROPERTIES
+    LINK_SEARCH_START_STATIC ON
+    LINK_SEARCH_END_STATIC ON
+  )
+endif()
+
+if(NEOBAE_SHARED_LIBNEOBAE AND MINGW)
+  # Export symbols automatically for MinGW shared builds.
+  set(NEOBAE_DLL_DEF_FILE "${CMAKE_CURRENT_BINARY_DIR}/bin/libneobae.def")
+  set_target_properties(neobae PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+  target_link_options(neobae PRIVATE
+    -Wl,--export-all-symbols
+    -Wl,--output-def,${NEOBAE_DLL_DEF_FILE}
+  )
+
+  if(NEOBAE_BUILD_VCLIB)
+    set(NEOBAE_DLLTOOL "${CMAKE_DLLTOOL}")
+    if(NOT NEOBAE_DLLTOOL)
+      execute_process(
+        COMMAND ${CMAKE_C_COMPILER} -print-prog-name=dlltool
+        OUTPUT_VARIABLE NEOBAE_DLLTOOL_CANDIDATE
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+      )
+      if(NEOBAE_DLLTOOL_CANDIDATE AND NOT NEOBAE_DLLTOOL_CANDIDATE STREQUAL "dlltool")
+        set(NEOBAE_DLLTOOL "${NEOBAE_DLLTOOL_CANDIDATE}")
+      endif()
+    endif()
+    if(NOT NEOBAE_DLLTOOL)
+      find_program(NEOBAE_DLLTOOL NAMES dlltool llvm-dlltool)
+    endif()
+
+    if(NEOBAE_DLLTOOL)
+      set(NEOBAE_VCLIB_OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/bin/libneobae.lib")
+      add_custom_command(
+        OUTPUT ${NEOBAE_VCLIB_OUTPUT}
+        COMMAND ${CMAKE_COMMAND} -E rm -f ${NEOBAE_VCLIB_OUTPUT}
+        COMMAND ${NEOBAE_DLLTOOL} -d ${NEOBAE_DLL_DEF_FILE} -D $<TARGET_FILE_NAME:neobae> -l ${NEOBAE_VCLIB_OUTPUT}
+        DEPENDS neobae ${NEOBAE_DLL_DEF_FILE}
+        VERBATIM
+        COMMENT "Generating MSVC-style import library for libneobae.dll"
+      )
+      add_custom_target(neobae_vclib ALL DEPENDS ${NEOBAE_VCLIB_OUTPUT})
+      add_dependencies(neobae_vclib neobae)
+    else()
+      message(WARNING "NEOBAE_BUILD_VCLIB is ON, but no dlltool executable was found. libneobae.lib will not be generated.")
+    endif()
+  endif()
+endif()
+
+if(NEOBAE_BUILD_VCLIB AND NOT (NEOBAE_SHARED_LIBNEOBAE AND MINGW))
+  message(STATUS "NEOBAE_BUILD_VCLIB is only used for MinGW shared libneobae.dll builds.")
+endif()
+
+if(NEOBAE_STATIC)
+  target_compile_definitions(neobae PUBLIC NEOBAE_STATIC=1)
+endif()
 
 if(BAE_EMBED_PATCHES_EFFECTIVE)
   set(BAE_EMBED_PATCH_HEADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -1061,13 +1283,67 @@ endif()
 
 if(BAE_PLATFORM STREQUAL "SDL2" AND BAE_SDL_BACKEND_AVAILABLE)
   target_include_directories(neobae PUBLIC ${BAE_SDL2_INCLUDE_DIR})
-  target_link_libraries(neobae PUBLIC ${BAE_SDL2_LIBRARY})
+  target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${BAE_SDL2_LIBRARY})
 endif()
 
 if(BAE_PLATFORM STREQUAL "SDL3" AND BAE_SDL_BACKEND_AVAILABLE)
   target_include_directories(neobae PUBLIC ${BAE_SDL3_INCLUDE_DIR})
-  target_link_libraries(neobae PUBLIC ${BAE_SDL3_LIBRARY})
+  target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${BAE_SDL3_LIBRARY})
 endif()
+
+if(NEOBAE_STATIC AND MINGW)
+  # Keep the core/static-neobae dependency set aligned with mingw-static non-GUI makefiles.
+  target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY}
+    mingw32
+    winmm
+    winmm
+    shlwapi
+    ole32
+    uuid
+    dsound
+    dxguid
+  )
+  if(BAE_SDL_BACKEND_AVAILABLE)
+    target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY}
+      version
+      setupapi
+      imm32
+      cfgmgr32  
+    )
+  endif()
+  if(BAE_ENABLE_XMF_SUPPORT)
+    target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} zs ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
+  endif()  
+  if(BAE_ENABLE_SF2_SUPPORT AND BAE_ENABLE_FLUIDSYNTH)
+    target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} sndfile mpg123 ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
+  endif()
+endif()
+
+
+
+if(BAE_ENABLE_FLAC_ENCODER OR BAE_ENABLE_FLAC_DECODER)
+  target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} FLAC ogg ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
+endif()
+
+if(BAE_ENABLE_VORBIS_ENCODER OR BAE_ENABLE_VORBIS_DECODER)
+  target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} vorbis vorbisfile ogg ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
+  if(BAE_ENABLE_VORBIS_ENCODER)
+    target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} vorbisenc ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
+  endif()
+endif()
+
+if(BAE_ENABLE_OPUS_ENCODER OR BAE_ENABLE_OPUS_DECODER)
+  target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} opus ogg ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
+  if(BAE_ENABLE_OPUS_DECODER)
+    target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} opusfile ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
+  endif()
+endif()
+
+if(BAE_ENABLE_MP3_ENCODER)
+  target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} mp3lame ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
+endif()
+
+
 
 target_compile_definitions(neobae
   PUBLIC
@@ -1109,27 +1385,34 @@ target_compile_definitions(neobae
     SUPPORT_BAESCRIPT=$<IF:$<BOOL:${BAE_ENABLE_BAESCRIPT}>,1,0>
     SUPPORT_PLAYLIST=$<IF:$<BOOL:${BAE_ENABLE_PLAYLIST}>,1,0>
     USE_RETRO_RINGTONE_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_RETRO_RINGTONE_SUPPORT}>,1,0>
+    USE_QOA_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_QOA_SUPPORT}>,1,0>
+    USE_RMI_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_RMI_SUPPORT}>,1,0>
 )
 
 target_compile_options(neobae PRIVATE -w)
 target_compile_features(neobae PUBLIC c_std_99)
 
-find_package(Threads REQUIRED)
-target_link_libraries(neobae PUBLIC Threads::Threads)
+if(MINGW)
+  # On MinGW use winpthread directly; Threads::Threads can map to -lpthread and cause unused-link warnings.
+  target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_WINPTHREAD_LINK_ITEM})
+else()
+  find_package(Threads REQUIRED)
+  target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} Threads::Threads)
+endif()
 
 if(UNIX AND NOT APPLE)
-  target_link_libraries(neobae PUBLIC m)
+  target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} m)
   if(CMAKE_DL_LIBS)
-    target_link_libraries(neobae PUBLIC ${CMAKE_DL_LIBS})
+    target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${CMAKE_DL_LIBS})
   endif()
 endif()
 
 if(BAE_ENABLE_SF2_SUPPORT AND BAE_ENABLE_FLUIDSYNTH)
-  target_link_libraries(neobae PUBLIC ${BAE_FLUIDSYNTH_LIBRARY})
+  target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} ${BAE_FLUIDSYNTH_LIBRARY} ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
 endif()
 
-if(BAE_ENABLE_XMF_SUPPORT)
-  target_link_libraries(neobae PUBLIC z)
+if(NOT NEOBAE_STATIC AND BAE_ENABLE_XMF_SUPPORT)
+  target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} z ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
 endif()
 
 if(BAE_ENABLE_LZMA)
@@ -1142,7 +1425,7 @@ if(BAE_ENABLE_LZMA)
     if(WIN32)
       target_compile_definitions(neobae PRIVATE LZMA_API_STATIC)
     endif()
-    target_link_libraries(neobae PUBLIC ${LIBLZMA_LIBRARY})
+    target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} ${LIBLZMA_LIBRARY} ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
   endif()
 endif()
 
@@ -1155,17 +1438,111 @@ if(BUILD_PLAYBAE)
   endif()
 endif()
 
-if(BUILD_PLAYBAE_TUI)
-  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    find_package(Curses QUIET)
-    if(CURSES_FOUND)
+if(BUILD_NEOBAE_TUI)
+  set(BAE_TUI_CURSES_USABLE OFF)
+  set(BAE_TUI_USE_IMPORTED_CURSES OFF)
+  unset(BAE_TUI_CURSES_LINK_LIBS)
+  unset(BAE_TUI_CURSES_INCLUDE_PATHS)
+
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR MINGW OR MSVC)
+
+    if(MINGW OR MSVC)
+      set(_BAE_NCURSESW_HINTS)
+      set(_BAE_MINGW_TRIPLET "")
+      if(CMAKE_C_COMPILER_TARGET)
+        set(_BAE_MINGW_TRIPLET "${CMAKE_C_COMPILER_TARGET}")
+      elseif(CMAKE_C_COMPILER MATCHES "/([^/]+-w64-mingw32)-clang(\\+\\+)?$")
+        set(_BAE_MINGW_TRIPLET "${CMAKE_MATCH_1}")
+      elseif(CMAKE_C_COMPILER MATCHES "/([^/]+-w64-mingw32)/bin/")
+        set(_BAE_MINGW_TRIPLET "${CMAKE_MATCH_1}")
+      endif()
+
+      if(NOT _BAE_MINGW_TRIPLET STREQUAL "")
+        list(APPEND _BAE_NCURSESW_HINTS
+          "/opt/llvm-mingw/${_BAE_MINGW_TRIPLET}"
+          "${CMAKE_SYSROOT}"
+        )
+      endif()
+      list(APPEND _BAE_NCURSESW_HINTS
+        "/opt/llvm-mingw/x86_64-w64-mingw32"
+        "/opt/llvm-mingw/i686-w64-mingw32"
+        "/opt/llvm-mingw/aarch64-w64-mingw32"
+        "/opt/llvm-mingw/armv7-w64-mingw32"
+      )
+      list(APPEND _BAE_NCURSESW_HINTS "/opt/llvm-mingw/generic-w64-mingw32")
+
+      find_path(BAE_NCURSESW_INCLUDE_DIR
+        NAMES ncursesw/curses.h curses.h
+        HINTS ${_BAE_NCURSESW_HINTS}
+        PATH_SUFFIXES include include/ncursesw
+      )
+      find_library(BAE_NCURSESW_LIBRARY
+        NAMES ncursesw ncursesw_g cursesw pdcurses curses
+        HINTS ${_BAE_NCURSESW_HINTS}
+        PATH_SUFFIXES lib
+      )
+      unset(_BAE_MINGW_TRIPLET)
+      unset(_BAE_NCURSESW_HINTS)
+      if(BAE_NCURSESW_LIBRARY)
+        set(BAE_TUI_CURSES_USABLE ON)
+        set(BAE_TUI_CURSES_LINK_LIBS ${BAE_NCURSESW_LIBRARY})
+        set(_BAE_TUI_NCURSES_INC_CANDIDATES)
+        if(BAE_NCURSESW_INCLUDE_DIR)
+          list(APPEND _BAE_TUI_NCURSES_INC_CANDIDATES ${BAE_NCURSESW_INCLUDE_DIR})
+          if(EXISTS "${BAE_NCURSESW_INCLUDE_DIR}/ncursesw/curses.h")
+            list(APPEND _BAE_TUI_NCURSES_INC_CANDIDATES "${BAE_NCURSESW_INCLUDE_DIR}/ncursesw")
+          endif()
+        endif()
+        if(EXISTS "/opt/llvm-mingw/generic-w64-mingw32/include/ncursesw/curses.h")
+          list(APPEND _BAE_TUI_NCURSES_INC_CANDIDATES "/opt/llvm-mingw/generic-w64-mingw32/include/ncursesw")
+        endif()
+        if(_BAE_TUI_NCURSES_INC_CANDIDATES)
+          list(REMOVE_DUPLICATES _BAE_TUI_NCURSES_INC_CANDIDATES)
+          set(BAE_TUI_CURSES_INCLUDE_PATHS ${_BAE_TUI_NCURSES_INC_CANDIDATES})
+        endif()
+        unset(_BAE_TUI_NCURSES_INC_CANDIDATES)
+      endif()
+    endif()
+
+    if(NOT BAE_TUI_CURSES_USABLE)
+      find_package(Curses QUIET)
+      if(CURSES_FOUND)
+        if(TARGET Curses::Curses)
+          set(BAE_TUI_CURSES_USABLE ON)
+          set(BAE_TUI_USE_IMPORTED_CURSES ON)
+        elseif(CURSES_LIBRARIES)
+          set(BAE_TUI_CURSES_USABLE ON)
+          set(BAE_TUI_CURSES_LINK_LIBS ${CURSES_LIBRARIES})
+          if(CURSES_INCLUDE_DIRS)
+            set(BAE_TUI_CURSES_INCLUDE_PATHS ${CURSES_INCLUDE_DIRS})
+          elseif(CURSES_INCLUDE_DIR)
+            set(BAE_TUI_CURSES_INCLUDE_PATHS ${CURSES_INCLUDE_DIR})
+          endif()
+        endif()
+      endif()
+    endif()
+    
+    if(BAE_TUI_CURSES_USABLE)
       add_executable(neobae-tui neobae/src/playbae/neobae_tui.c)
-      target_link_libraries(neobae-tui PRIVATE neobae Curses::Curses)
+      target_compile_options(neobae-tui PRIVATE -DNCURSES_STATIC)
+      target_link_libraries(neobae-tui PRIVATE neobae)
+      if(BAE_TUI_USE_IMPORTED_CURSES)
+        target_link_libraries(neobae-tui PRIVATE Curses::Curses)
+      else()
+        if(BAE_TUI_CURSES_INCLUDE_PATHS)
+          target_include_directories(neobae-tui PRIVATE ${BAE_TUI_CURSES_INCLUDE_PATHS})
+        endif()
+        target_link_libraries(neobae-tui PRIVATE ${BAE_TUI_CURSES_LINK_LIBS})
+      endif()
     else()
-      message(STATUS "Skipping BUILD_PLAYBAE_TUI because Curses was not found.")
+      if(MINGW OR MSVC)
+        message(STATUS "Skipping BUILD_NEOBAE_TUI because neither Curses nor ncursesw was found for this toolchain.")
+      else()
+        message(STATUS "Skipping BUILD_NEOBAE_TUI because Curses was not found.")
+      endif()
     endif()
   else()
-    message(STATUS "Skipping BUILD_PLAYBAE_TUI because it is currently Linux-only.")
+    message(STATUS "Skipping BUILD_NEOBAE_TUI because this platform is unsupported.")
   endif()
 endif()
 
@@ -1183,6 +1560,7 @@ if(BUILD_ZEFIDI)
       neobae/src/gui/gui_panels.c
       neobae/src/gui/gui_main.c
     )
+
     if (DEBUG)
       list(APPEND ZEFIDI_SOURCES neobae/src/gui/gui_debug_console.c)
     endif()    
@@ -1195,18 +1573,64 @@ if(BUILD_ZEFIDI)
     if(BAE_ENABLE_BAESCRIPT)
       list(APPEND ZEFIDI_SOURCES neobae/src/gui/gui_script_editor.c)
     endif()
-    add_executable(zefidi ${ZEFIDI_SOURCES})
+    if((MINGW OR MSVC) AND NEOBAE_RC_ENABLED)
+      list(APPEND ZEFIDI_SOURCES neobae/src/gui/zefidi.rc)
+    endif()
+    if(MINGW OR MSVC)
+      add_executable(zefidi WIN32 ${ZEFIDI_SOURCES})
+    else()
+      add_executable(zefidi ${ZEFIDI_SOURCES})
+    endif()
     target_compile_definitions(zefidi PRIVATE _ZEFI_GUI=1)
-    target_link_libraries(zefidi PRIVATE neobae)
-    if(BAE_PLATFORM STREQUAL "SDL2")
-      target_include_directories(zefidi PRIVATE ${BAE_SDL2_TTF_INCLUDE_DIR})
-      target_link_libraries(zefidi PRIVATE ${BAE_SDL2_TTF_LIBRARY})
-    elseif(BAE_PLATFORM STREQUAL "SDL3")
-      target_include_directories(zefidi PRIVATE ${BAE_SDL3_TTF_INCLUDE_DIR})
-      target_link_libraries(zefidi PRIVATE ${BAE_SDL3_TTF_LIBRARY})
+    if(ZEFIDI_SDL_VERSION STREQUAL "SDL2")
+      target_compile_definitions(zefidi PRIVATE USE_SDL2=1)
+    endif()
+    target_include_directories(zefidi PRIVATE ${ZEFIDI_SDL_INCLUDE_DIR} ${ZEFIDI_SDL_TTF_INCLUDE_DIR})
+    target_link_libraries(zefidi PRIVATE neobae ${ZEFIDI_SDL_LIBRARY} ${ZEFIDI_SDL_TTF_LIBRARY})
+
+    if(NEOBAE_STATIC AND MINGW)
+      target_link_libraries(zefidi PRIVATE
+        winmm
+        version
+        setupapi
+        imm32
+        cfgmgr32
+        gdi32
+        oleaut32
+        comdlg32
+        comctl32
+        freetype
+        png
+        brotlidec
+        brotlicommon
+        harfbuzz
+        zs 
+      )
+      if(BAE_ENABLE_SF2_SUPPORT AND BAE_ENABLE_FLUIDSYNTH)
+        target_link_libraries(zefidi PRIVATE sndfile)
+      endif()
+    endif()
+
+    if(MINGW OR MSVC)
+      add_executable(RegisterFileTypesToZefidi WIN32
+        neobae/src/gui/winreg_filetypes.c
+      )
+      if(NEOBAE_RC_ENABLED)
+        target_sources(RegisterFileTypesToZefidi PRIVATE neobae/src/gui/winreg_filetypes.rc)
+      endif()
+      if(MINGW)
+        target_link_libraries(RegisterFileTypesToZefidi PRIVATE
+          user32
+          gdi32
+          advapi32
+          comctl32
+          shlwapi
+          shell32
+        )
+      endif()
     endif()
   else()
-    message(STATUS "Skipping BUILD_ZEFIDI because matching SDL and SDL_ttf were not found for selected BAE_PLATFORM.")
+    message(STATUS "Skipping BUILD_ZEFIDI because no usable SDL2/SDL3 + SDL_ttf combination was found.")
   endif()
 endif()
 if(BUILD_CLITOOLS)
@@ -1312,70 +1736,118 @@ endif()
 if(BUILD_NBSTUDIO)
   find_package(wxWidgets COMPONENTS core base QUIET)
   if(wxWidgets_FOUND)
-    add_executable(nbstudio
-      neobae/src/nbstudio/editor_main.cpp
-      neobae/src/nbstudio/editor_bank.cpp
-      neobae/src/nbstudio/editor_instrument_ext_dialog.cpp
-      neobae/src/nbstudio/editor_metadata_dialog.cpp
-      neobae/src/nbstudio/editor_pianoroll_panel.cpp
-      neobae/src/nbstudio/batch_compress_dialog.cpp
-      neobae/src/mod2rmf/mod2rmf_common.c
-      neobae/src/mod2rmf/mod2rmf_encoder.c
-      neobae/src/mod2rmf/mod2rmf_resampler.c
-      neobae/src/mod2rmf/mod2rmf_rmfcreat.c
-      neobae/src/mod2rmf/mod2rmf_song.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-virtual.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-format.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-period.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-player.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-read_event.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-misc.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-dataio.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-lfo.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-scan.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-control.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-filter.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-effects.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-mixer.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-mix_all.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-load_helpers.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-load.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-filetype.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-hio.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-smix.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-memio.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-rng.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-win32.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-flow.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-common.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-itsex.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-sample.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-xm_load.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-mod_load.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-s3m_load.c
-      neobae/src/thirdparty/libxmp/src/lite/lite-it_load.c      
-    )
-    target_include_directories(nbstudio PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/nbstudio
-      ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libxmp/include
-      ${wxWidgets_INCLUDE_DIRS}
-    )
-    target_compile_definitions(nbstudio PRIVATE LIBXMP_STATIC=1 LIBXMP_CORE_PLAYER=1 LIBXMP_BUILD=1 ${wxWidgets_DEFINITIONS} WXMAKINGDLL_BASE=1 WXMAKINGDLL_CORE=1)
-    target_compile_options(nbstudio PRIVATE ${wxWidgets_CXX_FLAGS})
-    target_link_libraries(nbstudio PRIVATE neobae ${wxWidgets_LIBRARIES})
-    find_package(ZLIB QUIET)
-    if(ZLIB_FOUND)
-      target_link_libraries(nbstudio PRIVATE ZLIB::ZLIB)
+    set(BAE_WXWIDGETS_LINKABLE ON)
+    if(NEOBAE_STATIC AND MINGW)
+      set(_wx_missing_libs "")
+      set(_wx_resolved_libs "")
+      foreach(_wxlib IN LISTS wxWidgets_LIBRARIES)
+        if(IS_ABSOLUTE "${_wxlib}" AND NOT EXISTS "${_wxlib}")
+          get_filename_component(_wxlib_dir "${_wxlib}" DIRECTORY)
+          get_filename_component(_wxlib_name "${_wxlib}" NAME)
+          if(_wxlib_name MATCHES "^libwx_mswu.*\\.a$" AND EXISTS "${_wxlib_dir}/libwx_mswu-3.3-Windows.a")
+            message(STATUS "Using wxWidgets Windows static archive fallback: ${_wxlib_dir}/libwx_mswu-3.3-Windows.a")
+            list(APPEND _wx_resolved_libs "${_wxlib_dir}/libwx_mswu-3.3-Windows.a")
+          else()
+            list(APPEND _wx_resolved_libs "${_wxlib}")
+            list(APPEND _wx_missing_libs "${_wxlib}")
+          endif()
+        else()
+          list(APPEND _wx_resolved_libs "${_wxlib}")
+        endif()
+      endforeach()
+      set(wxWidgets_LIBRARIES ${_wx_resolved_libs})
+      if(_wx_missing_libs)
+        set(BAE_WXWIDGETS_LINKABLE OFF)
+        message(STATUS "Skipping BUILD_NBSTUDIO: missing wxWidgets static libraries for this MinGW target: ${_wx_missing_libs}")
+      endif()
     endif()
-    if(UNIX AND NOT APPLE)
-      find_package(PkgConfig REQUIRED)
-      pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
-      pkg_check_modules(GLIB REQUIRED glib-2.0)
-      target_include_directories(nbstudio PRIVATE ${GTK3_INCLUDE_DIRS} ${GLIB_INCLUDE_DIRS})
-      target_compile_options(nbstudio PRIVATE ${GTK3_CFLAGS_OTHER} ${GLIB_CFLAGS_OTHER})
-      target_link_libraries(nbstudio PRIVATE ${GTK3_LIBRARIES} ${GLIB_LIBRARIES})
+
+    if(BAE_WXWIDGETS_LINKABLE)
+      set(NBSTUDIO_SOURCES 
+          neobae/src/nbstudio/editor_main.cpp
+          neobae/src/nbstudio/editor_bank.cpp
+          neobae/src/nbstudio/editor_instrument_ext_dialog.cpp
+          neobae/src/nbstudio/editor_metadata_dialog.cpp
+          neobae/src/nbstudio/editor_pianoroll_panel.cpp
+          neobae/src/nbstudio/batch_compress_dialog.cpp
+          neobae/src/mod2rmf/mod2rmf_common.c
+          neobae/src/mod2rmf/mod2rmf_encoder.c
+          neobae/src/mod2rmf/mod2rmf_resampler.c
+          neobae/src/mod2rmf/mod2rmf_rmfcreat.c
+          neobae/src/mod2rmf/mod2rmf_song.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-virtual.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-format.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-period.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-player.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-read_event.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-misc.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-dataio.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-lfo.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-scan.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-control.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-filter.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-effects.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-mixer.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-mix_all.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-load_helpers.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-load.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-filetype.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-hio.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-smix.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-memio.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-rng.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-win32.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-flow.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-common.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-itsex.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-sample.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-xm_load.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-mod_load.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-s3m_load.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-it_load.c          
+      )
+      if((MINGW OR MSVC) AND NEOBAE_RC_ENABLED)
+        list(APPEND NBSTUDIO_SOURCES neobae/src/nbstudio/editor.rc)
+      endif()
+      if(MINGW OR MSVC)
+        add_executable(nbstudio WIN32 ${NBSTUDIO_SOURCES})
+      else()
+        add_executable(nbstudio ${NBSTUDIO_SOURCES})
+      endif()
+      target_include_directories(nbstudio PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/nbstudio
+        ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libxmp/include
+        ${wxWidgets_INCLUDE_DIRS}
+      )
+      set(_wx_cxx_flags ${wxWidgets_CXX_FLAGS})
+      set(_wx_link_libs ${wxWidgets_LIBRARIES})
+      if(MINGW)
+        if(_wx_cxx_flags)
+          separate_arguments(_wx_cxx_flags_list NATIVE_COMMAND "${_wx_cxx_flags}")
+          list(FILTER _wx_cxx_flags_list EXCLUDE REGEX "^-l(pthread|winpthread|winpthreads)$|^-pthread$")
+          set(_wx_cxx_flags ${_wx_cxx_flags_list})
+        endif()
+        if(_wx_link_libs)
+          list(FILTER _wx_link_libs EXCLUDE REGEX "^-l(pthread|winpthread|winpthreads)$|^-pthread$|^pthread$")
+        endif()
+      endif()
+      target_compile_definitions(nbstudio PRIVATE LIBXMP_STATIC=1 LIBXMP_CORE_PLAYER=1 LIBXMP_BUILD=1 ${wxWidgets_DEFINITIONS} WXMAKINGDLL_BASE=1 WXMAKINGDLL_CORE=1)
+      target_compile_options(nbstudio PRIVATE ${_wx_cxx_flags})
+      target_link_libraries(nbstudio PRIVATE neobae ${_wx_link_libs} zs)
+      find_package(ZLIB QUIET)
+      if(ZLIB_FOUND)
+        target_link_libraries(nbstudio PRIVATE ZLIB::ZLIB)
+      endif()
+      if(UNIX AND NOT APPLE)
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
+        pkg_check_modules(GLIB REQUIRED glib-2.0)
+        target_include_directories(nbstudio PRIVATE ${GTK3_INCLUDE_DIRS} ${GLIB_INCLUDE_DIRS})
+        target_compile_options(nbstudio PRIVATE ${GTK3_CFLAGS_OTHER} ${GLIB_CFLAGS_OTHER})
+        target_link_libraries(nbstudio PRIVATE ${GTK3_LIBRARIES} ${GLIB_LIBRARIES})
+      endif()
+      message(STATUS "Building nbstudio with wxWidgets ${wxWidgets_VERSION_STRING}.")
     endif()
-    message(STATUS "Building nbstudio with wxWidgets ${wxWidgets_VERSION_STRING}.")
   else()
     message(STATUS "Skipping BUILD_NBSTUDIO (wxWidgets not found).")
   endif()

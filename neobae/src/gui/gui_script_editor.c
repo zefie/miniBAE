@@ -425,6 +425,43 @@ static void insert_text(const char *txt, int len)
     g_script_dirty = true;
 }
 
+static void normalize_crlf_inplace(char *buf, int *len)
+{
+    if (!buf || !len || *len <= 0) return;
+    int r = 0;
+    int w = 0;
+    int n = *len;
+    while (r < n) {
+        char c = buf[r++];
+        if (c == '\r') {
+            if (r < n && buf[r] == '\n') {
+                continue;
+            }
+            c = '\n';
+        }
+        buf[w++] = c;
+    }
+    buf[w] = '\0';
+    *len = w;
+}
+
+static void insert_text_normalized(const char *txt, int len)
+{
+    if (!txt || len <= 0) return;
+    if (!memchr(txt, '\r', (size_t)len)) {
+        insert_text(txt, len);
+        return;
+    }
+
+    char *tmp = (char *)malloc((size_t)len + 1u);
+    if (!tmp) return;
+    memcpy(tmp, txt, (size_t)len);
+    tmp[len] = '\0';
+    normalize_crlf_inplace(tmp, &len);
+    insert_text(tmp, len);
+    free(tmp);
+}
+
 static void insert_char(char c)
 {
     insert_text(&c, 1);
@@ -1030,6 +1067,7 @@ void script_editor_restore_state(const char *path, const char *text, bool enable
                 int n = (int)fread(g_text, 1, (size_t)sz, f);
                 g_text[n] = '\0';
                 g_text_len = n;
+                normalize_crlf_inplace(g_text, &g_text_len);
             }
             fclose(f);
             snprintf(g_loaded_path, sizeof(g_loaded_path), "%s", path);
@@ -1040,6 +1078,7 @@ void script_editor_restore_state(const char *path, const char *text, bool enable
             memcpy(g_text, text, len);
             g_text[len] = '\0';
             g_text_len = len;
+            normalize_crlf_inplace(g_text, &g_text_len);
             g_loaded_path[0] = '\0';
         }
     } else if (text && text[0]) {
@@ -1048,6 +1087,7 @@ void script_editor_restore_state(const char *path, const char *text, bool enable
         memcpy(g_text, text, len);
         g_text[len] = '\0';
         g_text_len = len;
+        normalize_crlf_inplace(g_text, &g_text_len);
         g_loaded_path[0] = '\0';
     }
     g_cursor = 0;
@@ -1074,6 +1114,7 @@ static void script_load_file(const char *path)
     fclose(f);
     g_text[n] = '\0';
     g_text_len = n;
+    normalize_crlf_inplace(g_text, &g_text_len);
     g_cursor = 0;
     g_sel_anchor = -1;
     g_scroll_y = 0;
@@ -1360,7 +1401,7 @@ bool script_editor_handle_event(SDL_Event *event)
 #else
     if (event->type == SDL_EVENT_TEXT_INPUT) {
 #endif
-        insert_text(event->text.text, (int)strlen(event->text.text));
+        insert_text_normalized(event->text.text, (int)strlen(event->text.text));
         cursor_reset_blink();
         ensure_cursor_visible(win_h);
         return true;
@@ -1406,7 +1447,7 @@ bool script_editor_handle_event(SDL_Event *event)
             if (key == SDLK_V) {
                 char *clip = SDL_GetClipboardText();
                 if (clip && clip[0]) {
-                    insert_text(clip, (int)strlen(clip));
+                    insert_text_normalized(clip, (int)strlen(clip));
                     ensure_cursor_visible(win_h);
                 }
                 SDL_free(clip);

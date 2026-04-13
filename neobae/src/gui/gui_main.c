@@ -440,6 +440,7 @@ void karaoke_commit_line(uint32_t time_us, const char *line);
 static int g_total_play_ms = 0;
 static int g_last_engine_pos_ms = 0;
 static uint32_t g_last_play_tick_ms = 0;
+static uint32_t g_progress_display_tick_ms = 0;
 
 // Progress bar stripe animation state
 static int g_progress_stripe_offset = 0;
@@ -2234,8 +2235,37 @@ int main(int argc, char *argv[])
         lastTick = now;
         if (playing)
         {
-            progress = bae_get_pos_ms();
+            const int engine_progress_ms = bae_get_pos_ms();
             duration = bae_get_len_ms();
+
+            if (g_progress_display_tick_ms == 0)
+            {
+                progress = engine_progress_ms;
+                g_progress_display_tick_ms = now;
+            }
+            else
+            {
+                uint32_t step_ms = now - g_progress_display_tick_ms;
+                if (step_ms > 250)
+                    step_ms = 250;
+                progress += (int)step_ms;
+                g_progress_display_tick_ms = now;
+
+                // Keep display smooth, but snap back on larger drift/seek/loop jumps.
+                if (abs(engine_progress_ms - progress) > 120 || engine_progress_ms < (g_last_engine_pos_ms - 50))
+                    progress = engine_progress_ms;
+            }
+
+            if (progress < 0)
+                progress = 0;
+            if (duration > 0 && progress > duration)
+                progress = duration;
+
+            g_last_engine_pos_ms = engine_progress_ms;
+        }
+        else
+        {
+            g_progress_display_tick_ms = 0;
         }
         if (!g_exporting) {
             BAEMixer_Idle(g_bae.mixer); // ensure processing if needed
@@ -3608,7 +3638,6 @@ int main(int argc, char *argv[])
         draw_frame(R, bar, panelBorder);
         if (duration != bae_get_len_ms())
             duration = bae_get_len_ms();
-        progress = playing ? bae_get_pos_ms() : progress;
         float pct = (duration > 0) ? (float)progress / duration : 0.f;
         if (pct < 0)
             pct = 0;
@@ -3907,6 +3936,7 @@ int main(int argc, char *argv[])
             g_total_play_ms = 0;
             g_last_engine_pos_ms = 0;
             g_last_play_tick_ms = 0;
+            g_progress_display_tick_ms = 0;
             // Clear visible virtual keyboard notes on Stop (use live song fallback)
             if (g_show_virtual_keyboard)
             {
@@ -5087,6 +5117,7 @@ int main(int argc, char *argv[])
                 g_total_play_ms = 0;
                 g_last_engine_pos_ms = 0;
                 g_last_play_tick_ms = 0;
+                g_progress_display_tick_ms = 0;
                 // Also stop export if active
                 if (g_exporting)
                 {

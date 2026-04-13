@@ -201,7 +201,14 @@
 #endif
 
 #undef X_PACK_FAST
+#if defined(__clang__)
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wpragma-pack"
+#endif
 #include "X_PackStructures.h"
+#if defined(__clang__)
+    #pragma clang diagnostic pop
+#endif
 
 #include <stdint.h>
 /* Instrument and Song structures
@@ -857,7 +864,14 @@ typedef struct X_PACKBY1
     XSoundHeader3   sndBuffer;
 } XSndHeader3;
 
+#if defined(__clang__)
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wpragma-pack"
+#endif
 #include "X_UnpackStructures.h"
+#if defined(__clang__)
+    #pragma clang diagnostic pop
+#endif
 
 // These are the list of compression types BAE supports.
 typedef enum SndCompressionType

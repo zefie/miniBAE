@@ -2214,7 +2214,7 @@ BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char
         BAE_STDERR("Error: failed to build song model\n");
         mod2rmf_song_model_dispose(&song);
         mod2rmf_converter_delete(conv);
-        return BAE_INVALID_TYPE;
+        return BAE_BAD_FILE_TYPE;
     }
 
     if (!mod2rmf_ensure_loop_cc_resets(&song))

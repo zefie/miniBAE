@@ -5,6 +5,7 @@ out/
 */out/
 build/
 */build/
+build-*/
 gen/
 */gen/
 tests/

@@ -73,6 +73,10 @@
 #undef X_BF_4
 #undef X_BF_5
 
+#if defined(__clang__) || defined(__GNUC__) || defined(_MSC_VER)
+    #pragma pack(push)
+#endif
+
 
 #ifndef X_PACK_FAST
 // controls to enable structure packing by 1 byte
