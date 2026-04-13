@@ -393,44 +393,43 @@ ifeq ($(SF2_SUPPORT),1)
 		endif
 	endif
 endif
-
-ifeq ($(USE_SDL2),1)
-	SDL_CFLAGS := $(shell pkg-config --cflags SDL2 2>/dev/null)
-	SDL_LIBS   := $(shell pkg-config --libs SDL2 2>/dev/null)
-	ifneq ($(SDL_LIBS),)
-		BAE_FLAGS += $(SDL_CFLAGS)
-		# Prepend pkg-config libs; they already have -lfluidsynth and any needed deps
-		BAE_LIBS := $(SDL_LIBS) $(filter-out -lSDL2,$(BAE_LIBS))
-		ifneq (,$(findstring -static,$(ARCH)))
-			ARCH := $(filter-out -static,$(ARCH))
-			LDFLAGS := $(filter-out -static,$(LDFLAGS))
+ifneq ($(WINDOWS),1)
+	ifeq ($(USE_SDL2),1)
+		SDL_CFLAGS := $(shell pkg-config --cflags SDL2 2>/dev/null)
+		SDL_LIBS   := $(shell pkg-config --libs SDL2 2>/dev/null)
+		ifneq ($(SDL_LIBS),)
+			BAE_FLAGS += $(SDL_CFLAGS)
+			# Prepend pkg-config libs; they already have -lfluidsynth and any needed deps
+			BAE_LIBS := $(SDL_LIBS) $(filter-out -lSDL2,$(BAE_LIBS))
+			ifneq (,$(findstring -static,$(ARCH)))
+				ARCH := $(filter-out -static,$(ARCH))
+				LDFLAGS := $(filter-out -static,$(LDFLAGS))
+			endif
+		else
+			# Fallback minimal guess
+			BAE_FLAGS += -I/usr/include/SDL2
+			BAE_LIBS += -lSDL2 $(BAE_LIBS)
 		endif
-	else
-		# Fallback minimal guess
-		BAE_FLAGS += -I/usr/include/SDL2
-		BAE_LIBS += -lSDL2 $(BAE_LIBS)
+	endif
+
+	ifeq ($(USE_SDL3),1)
+		SDL_CFLAGS := $(shell pkg-config --cflags SDL3 2>/dev/null)
+		SDL_LIBS   := $(shell pkg-config --libs SDL3 2>/dev/null)
+		ifneq ($(SDL_LIBS),)
+			BAE_FLAGS += $(SDL_CFLAGS)
+			# Prepend pkg-config libs; they already have -lfluidsynth and any needed deps
+			BAE_LIBS := $(SDL_LIBS) $(filter-out -lSDL3,$(BAE_LIBS))
+			ifneq (,$(findstring -static,$(ARCH)))
+				ARCH := $(filter-out -static,$(ARCH))
+				LDFLAGS := $(filter-out -static,$(LDFLAGS))
+			endif
+		else
+			# Fallback minimal guess
+			BAE_FLAGS += -I/usr/include/SDL2
+			BAE_LIBS += -lSDL3 $(BAE_LIBS)
+		endif
 	endif
 endif
-
-
-ifeq ($(USE_SDL3),1)
-	SDL_CFLAGS := $(shell pkg-config --cflags SDL3 2>/dev/null)
-	SDL_LIBS   := $(shell pkg-config --libs SDL3 2>/dev/null)
-	ifneq ($(SDL_LIBS),)
-		BAE_FLAGS += $(SDL_CFLAGS)
-		# Prepend pkg-config libs; they already have -lfluidsynth and any needed deps
-		BAE_LIBS := $(SDL_LIBS) $(filter-out -lSDL3,$(BAE_LIBS))
-		ifneq (,$(findstring -static,$(ARCH)))
-			ARCH := $(filter-out -static,$(ARCH))
-			LDFLAGS := $(filter-out -static,$(LDFLAGS))
-		endif
-	else
-		# Fallback minimal guess
-		BAE_FLAGS += -I/usr/include/SDL2
-		BAE_LIBS += -lSDL3 $(BAE_LIBS)
-	endif
-endif
-
 
 ifeq ($(MP3_DEC),1)
 	# Enable minimp3 wrapper for MPG_* API (decoder only)

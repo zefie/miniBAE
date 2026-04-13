@@ -70,7 +70,7 @@
       "options": {
         "cwd": "${workspaceFolder}/neobae"
       },
-      "args": ["-f", "Makefile.rmfeditor-wx", "DEBUG=1", "-j20"],
+      "args": ["-f", "Makefile.nbstudio", "DEBUG=1", "-j20"],
       "group": {
         "kind": "build",
       },
