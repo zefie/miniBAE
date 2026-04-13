@@ -349,6 +349,7 @@ struct BankEditorPanel {
     std::function<void(int)> stopCallback;
     std::function<void()> invalidateCallback;
     std::function<void(BAERmfEditorInstrumentExtInfo const *)> dirtyParamsCallback;
+    std::function<bool(uint32_t, BAERmfEditorInstrumentExtInfo *)> pendingEditLookupCallback;
     std::function<bool(uint16_t, wxString &)> sourceCodecCallback;
     std::function<void(uint32_t)> cloneToSongCallback;
     std::function<void(uint32_t)> aliasToSongCallback;
@@ -403,7 +404,178 @@ struct BankEditorPanel {
         bool opusRoundTrip;
     };
     std::map<std::pair<uint32_t,uint32_t>, AppliedCodecInfo> appliedCodecs;
+
+    struct CachedSndMetadata {
+        uint32_t sampleRate = 0;
+        uint32_t frameCount = 0;
+        int16_t bitDepth = 0;
+        int16_t channels = 0;
+        uint32_t loopStart = 0;
+        uint32_t loopEnd = 0;
+        XResourceType compressionType = 0;
+        uint32_t compressionSubType = 0;
+        BAERmfEditorSndStorageType sndStorageType = BAE_EDITOR_SND_STORAGE_ESND;
+        bool opusRoundTripResample = false;
+    };
+    std::unordered_map<uint16_t, CachedSndMetadata> sndMetadataCache;
 };
+
+static bool GetPendingInstrumentEdit(BankEditorPanel *bp,
+                                     uint32_t instrumentIndex,
+                                     BAERmfEditorInstrumentExtInfo *outInfo)
+{
+    if (!bp || !outInfo || !bp->pendingEditLookupCallback) {
+        return false;
+    }
+    return bp->pendingEditLookupCallback(instrumentIndex, outInfo);
+}
+
+static void ApplyPendingSampleOverride(BAERmfEditorBankSampleInfo *sampleInfo,
+                                       BAERmfEditorInstrumentExtInfo const *pendingInfo,
+                                       uint32_t sampleIndex)
+{
+    if (!sampleInfo || !pendingInfo || pendingInfo->hasSampleOverride == FALSE ||
+        pendingInfo->sampleOverrideIndex != sampleIndex) {
+        return;
+    }
+
+    sampleInfo->rootKey = pendingInfo->sampleRootKey;
+    sampleInfo->lowKey = pendingInfo->sampleLowKey;
+    sampleInfo->highKey = pendingInfo->sampleHighKey;
+    sampleInfo->splitVolume = pendingInfo->sampleSplitVolume;
+    sampleInfo->sampleRate = pendingInfo->sampleRate;
+    sampleInfo->loopStart = pendingInfo->sampleLoopStart;
+    sampleInfo->loopEnd = pendingInfo->sampleLoopEnd;
+}
+
+static void CacheSndMetadata(BankEditorPanel *bp,
+                             BAERmfEditorBankSampleInfo const &sampleInfo)
+{
+    if (!bp || sampleInfo.sndResourceID == 0) {
+        return;
+    }
+
+    BankEditorPanel::CachedSndMetadata metadata;
+    metadata.sampleRate = sampleInfo.sampleRate;
+    metadata.frameCount = sampleInfo.frameCount;
+    metadata.bitDepth = sampleInfo.bitDepth;
+    metadata.channels = sampleInfo.channels;
+    metadata.loopStart = sampleInfo.loopStart;
+    metadata.loopEnd = sampleInfo.loopEnd;
+    metadata.compressionType = sampleInfo.compressionType;
+    metadata.compressionSubType = sampleInfo.compressionSubType;
+    metadata.sndStorageType = sampleInfo.sndStorageType;
+    metadata.opusRoundTripResample = sampleInfo.opusRoundTripResample;
+    bp->sndMetadataCache[sampleInfo.sndResourceID] = metadata;
+}
+
+static bool GetInstrumentSampleListInfoFast(BankEditorPanel *bp,
+                                            uint32_t instrumentIndex,
+                                            uint32_t sampleIndex,
+                                            BAERmfEditorBankSampleInfo *outInfo)
+{
+    enum
+    {
+        kInstHeaderMinSize = 14
+    };
+    XFILE bankFile;
+    XPTR instData;
+    XLongResourceID instID;
+    int32_t instSize;
+    char rawName[256];
+    InstrumentResource *inst;
+    KeySplit split;
+    int16_t splitCount;
+    int16_t baseRootKey;
+    int16_t baseVolume;
+    bool useSoundModifierAsRootKey;
+    int16_t miscParam1;
+
+    if (!bp || !bp->bankToken || !outInfo) {
+        return false;
+    }
+    XSetMemory(outInfo, (int32_t)sizeof(*outInfo), 0);
+
+    bankFile = (XFILE)bp->bankToken;
+    rawName[0] = 0;
+    instData = XGetIndexedFileResource(bankFile, ID_INST, &instID,
+                                       (int32_t)instrumentIndex, rawName, &instSize);
+    if (!instData || instSize < kInstHeaderMinSize) {
+        if (instData) {
+            XDisposePtr(instData);
+        }
+        return false;
+    }
+
+    inst = (InstrumentResource *)instData;
+    splitCount = (int16_t)XGetShort(&inst->keySplitCount);
+    if (splitCount < 0) {
+        splitCount = 0;
+    }
+    if ((splitCount > 0 && sampleIndex >= (uint32_t)splitCount) ||
+        (splitCount == 0 && sampleIndex != 0)) {
+        XDisposePtr(instData);
+        return false;
+    }
+
+    outInfo->instID = (uint32_t)instID;
+    outInfo->sampleIndex = sampleIndex;
+    baseRootKey = (int16_t)XGetShort(&inst->midiRootKey);
+    baseVolume = (int16_t)XGetShort(&inst->miscParameter2);
+    useSoundModifierAsRootKey = TEST_FLAG_VALUE(inst->flags2, ZBF_useSoundModifierAsRootKey);
+    miscParam1 = (int16_t)XGetShort(&inst->miscParameter1);
+
+    if (splitCount > 0) {
+        XGetKeySplitFromPtr(inst, (int16_t)sampleIndex, &split);
+        outInfo->sndResourceID = split.sndResourceID;
+        outInfo->lowKey = (unsigned char)split.lowMidi;
+        outInfo->highKey = (unsigned char)split.highMidi;
+        outInfo->splitVolume = split.miscParameter2;
+        if (useSoundModifierAsRootKey) {
+            int16_t splitRoot = split.miscParameter1;
+            if (split.lowMidi == split.highMidi && splitRoot == 0) {
+                splitRoot = (int16_t)split.lowMidi;
+            }
+            if (splitRoot < 0 || splitRoot > 127) {
+                splitRoot = baseRootKey;
+            }
+            outInfo->rootKey = (unsigned char)splitRoot;
+        } else {
+            outInfo->rootKey = (unsigned char)baseRootKey;
+        }
+    } else {
+        outInfo->sndResourceID = (XShortResourceID)XGetShort(&inst->sndResourceID);
+        outInfo->lowKey = 0;
+        outInfo->highKey = 127;
+        outInfo->splitVolume = baseVolume;
+        if (useSoundModifierAsRootKey) {
+            if (miscParam1 > 0 && miscParam1 <= 127) {
+                outInfo->rootKey = (unsigned char)miscParam1;
+            } else {
+                outInfo->rootKey = (unsigned char)baseRootKey;
+            }
+        } else {
+            outInfo->rootKey = (unsigned char)baseRootKey;
+        }
+    }
+
+    XDisposePtr(instData);
+
+    auto cached = bp->sndMetadataCache.find(outInfo->sndResourceID);
+    if (cached != bp->sndMetadataCache.end()) {
+        outInfo->sampleRate = cached->second.sampleRate;
+        outInfo->frameCount = cached->second.frameCount;
+        outInfo->bitDepth = cached->second.bitDepth;
+        outInfo->channels = cached->second.channels;
+        outInfo->loopStart = cached->second.loopStart;
+        outInfo->loopEnd = cached->second.loopEnd;
+        outInfo->compressionType = cached->second.compressionType;
+        outInfo->compressionSubType = cached->second.compressionSubType;
+        outInfo->sndStorageType = cached->second.sndStorageType;
+        outInfo->opusRoundTripResample = cached->second.opusRoundTripResample;
+    }
+    return true;
+}
 
 static const BAERmfEditorSndStorageType kBankOriginalStorageSentinel =
     (BAERmfEditorSndStorageType)0x7FFF;
@@ -503,7 +675,7 @@ static bool CollectInstrumentSndRefsFast(BankEditorPanel *bp,
     return true;
 }
 static void StopBankKeyboardPreview(BankEditorPanel *bp);
-static void ApplyDirtyParams(BankEditorPanel *bp, bool commitSampleReEncode);
+static void ApplyDirtyParams(BankEditorPanel *bp);
 static void StopAllBankNotes(BankEditorPanel *bp);
 static void RefreshSampleListRow(BankEditorPanel *bp, uint32_t instrumentIndex, uint32_t sampleIndex);
 
@@ -525,13 +697,8 @@ static void InvalidateBankPreviewCache(BankEditorPanel *bp)
 
 /* Read current InstrumentParamsPanel state into dirty overlay and
  * notify the host so subsequent preview notes hear the edits. */
-static void ApplyDirtyParams(BankEditorPanel *bp, bool commitSampleReEncode)
+static void ApplyDirtyParams(BankEditorPanel *bp)
 {
-    BAERmfEditorCompressionType refreshPreferredCompression = BAE_EDITOR_COMPRESSION_DONT_CHANGE;
-    BAERmfEditorOpusMode refreshPreferredOpusMode = BAE_EDITOR_OPUS_MODE_AUDIO;
-    bool refreshPreferredOpusRoundTrip = false;
-    bool refreshWaveformForCodecUiChange = false;
-
     if (!bp->hasInstrument || !bp->instParamsPanel) return;
 
     bp->dirtyExtInfo = bp->currentExtInfo;
@@ -542,21 +709,14 @@ static void ApplyDirtyParams(BankEditorPanel *bp, bool commitSampleReEncode)
     if (bp->hasSampleSelection && bp->sampleParamsPanel) {
         SampleParamsPanelData sData;
         bp->sampleParamsPanel->SaveToData(sData);
-
-        if (!bp->hasLastUiCodecState ||
-            bp->lastUiCompressionType != sData.compressionType ||
-            bp->lastUiStorageType != sData.sndStorageType ||
-            bp->lastUiOpusRoundTrip != sData.opusRoundTripResample) {
-            refreshWaveformForCodecUiChange = !commitSampleReEncode;
-        }
         bp->lastUiCompressionType = sData.compressionType;
         bp->lastUiStorageType = sData.sndStorageType;
         bp->lastUiOpusRoundTrip = sData.opusRoundTripResample;
         bp->hasLastUiCodecState = true;
 
-        /* Pass codec intent to the callback — it will handle re-encoding from the
-         * original PCM cache so we never compress already-compressed data. */
-        if (commitSampleReEncode && bp->sampleParamsPanel && bp->sampleParamsPanel->GetCodecSelection() == 0) {
+        /* Stage codec intent for later save/export. Preview paths consume this
+         * intent by generating a minimal preview song on demand. */
+        if (bp->sampleParamsPanel && bp->sampleParamsPanel->GetCodecSelection() == 0) {
             auto it = bp->appliedCodecs.find({bp->currentInstrumentIndex, bp->currentSampleIndex});
             bool wasChanged = (it != bp->appliedCodecs.end());
             
@@ -578,8 +738,7 @@ static void ApplyDirtyParams(BankEditorPanel *bp, bool commitSampleReEncode)
             if (sData.opusRoundTripResample) {
                 storageWithFlags |= kBankOpusRoundTripStorageFlag;
             }
-            bp->dirtyExtInfo.sampleTargetCompression =
-                commitSampleReEncode ? sData.compressionType : BAE_EDITOR_COMPRESSION_DONT_CHANGE;
+            bp->dirtyExtInfo.sampleTargetCompression = sData.compressionType;
             bp->dirtyExtInfo.sampleTargetStorageType  = (BAERmfEditorSndStorageType)storageWithFlags;
         }
         bp->dirtyExtInfo.sampleTargetOpusMode     = sData.opusMode;
@@ -593,10 +752,7 @@ static void ApplyDirtyParams(BankEditorPanel *bp, bool commitSampleReEncode)
         bp->dirtyExtInfo.sampleRate = sData.sampleRate;
         bp->dirtyExtInfo.sampleLoopStart = sData.loopStart;
         bp->dirtyExtInfo.sampleLoopEnd = sData.loopEnd;
-        if (commitSampleReEncode && bp->sampleParamsPanel && bp->sampleParamsPanel->GetCodecSelection() != 0) {
-            refreshPreferredCompression = sData.compressionType;
-            refreshPreferredOpusMode = sData.opusMode;
-            refreshPreferredOpusRoundTrip = sData.opusRoundTripResample;
+        if (bp->sampleParamsPanel && bp->sampleParamsPanel->GetCodecSelection() != 0) {
             /* Remember this codec so navigating away and back preserves it */
             bp->appliedCodecs[{bp->currentInstrumentIndex, bp->currentSampleIndex}] = {
                 sData.compressionType, sData.opusMode, sData.opusRoundTripResample
@@ -611,39 +767,17 @@ static void ApplyDirtyParams(BankEditorPanel *bp, bool commitSampleReEncode)
         bp->hasLastUiCodecState = false;
     }
 
-    /* Remember whether a re-encode was requested so we can refresh the panel below. */
-    bool wantsReEncode = commitSampleReEncode && bp->hasSampleSelection &&
-                         (bp->dirtyExtInfo.sampleTargetCompression != BAE_EDITOR_COMPRESSION_DONT_CHANGE ||
-                          bp->dirtyExtInfo.sampleTargetStorageType == kBankOriginalStorageSentinel);
-
     if (bp->dirtyParamsCallback) {
         bp->dirtyParamsCallback(&bp->dirtyExtInfo);
     }
 
-    /* After the callback the bank has been re-encoded (if requested).  Refresh
-     * the sample panel so the codec description and storage-type controls show
-     * the new values and the dropdown resets to "Don't Change". */
-    if (wantsReEncode && bp->hasSampleSelection) {
-        ShowSampleDetail(bp,
-                         bp->currentInstrumentIndex,
-                         bp->currentSampleIndex,
-                         refreshPreferredCompression,
-                         refreshPreferredOpusMode,
-                         refreshPreferredOpusRoundTrip);
-    }
-
-    /* Refresh the sample list row so columns (key range, root key, rate)
-     * immediately reflect the stored values after a successful write. */
+    /* Refresh the sample list row so columns immediately reflect the staged
+     * values even though the bank token itself is not rewritten yet. */
     if (bp->hasSampleSelection) {
         RefreshSampleListRow(bp, bp->currentInstrumentIndex, bp->currentSampleIndex);
-        if (!wantsReEncode && refreshWaveformForCodecUiChange) {
-            RefreshWaveform(bp);
-        }
     }
 
-    /* Tear down the preview song so the next note forces a full
-     * instrument reload + patch cycle (matching instrument dialog
-     * behaviour where the entire RMF/ZMF is regenerated). */
+    /* Tear down preview state so the next note picks up staged edits. */
     if (bp->invalidateCallback) {
         bp->invalidateCallback();
     }
@@ -1090,6 +1224,8 @@ static void PopulateSampleTree(BankEditorPanel *bp)
 static void PopulateSampleList(BankEditorPanel *bp, uint32_t instrumentIndex)
 {
     uint32_t sampleCount = 0;
+    BAERmfEditorInstrumentExtInfo pendingExtInfo;
+    bool hasPendingEdit = false;
 
     bp->sampleList->DeleteAllItems();
 
@@ -1101,10 +1237,15 @@ static void PopulateSampleList(BankEditorPanel *bp, uint32_t instrumentIndex)
         return;
     }
 
+    hasPendingEdit = GetPendingInstrumentEdit(bp, instrumentIndex, &pendingExtInfo);
+
     for (uint32_t s = 0; s < sampleCount; ++s) {
         BAERmfEditorBankSampleInfo sampleInfo;
-        if (BAERmfEditorBank_GetInstrumentSampleInfo(bp->bankToken, instrumentIndex, s, &sampleInfo) != BAE_NO_ERROR) {
+        if (!GetInstrumentSampleListInfoFast(bp, instrumentIndex, s, &sampleInfo)) {
             continue;
+        }
+        if (hasPendingEdit) {
+            ApplyPendingSampleOverride(&sampleInfo, &pendingExtInfo, s);
         }
 
         wxString sndLabel = wxString::Format("SND %d", static_cast<int>(sampleInfo.sndResourceID));
@@ -1112,15 +1253,19 @@ static void PopulateSampleList(BankEditorPanel *bp, uint32_t instrumentIndex)
         wxString rootKey = (sampleInfo.rootKey == 0)
             ? wxString("60 (default)")
             : wxString::Format("%u", sampleInfo.rootKey);
-        wxString rate = wxString::Format("%u Hz", sampleInfo.sampleRate);
-        wxString frames = wxString::Format("%u", sampleInfo.frameCount);
-        wxString codec = CompressionTypeName((uint32_t)sampleInfo.compressionType,
-                             sampleInfo.compressionSubType,
-                             sampleInfo.opusRoundTripResample ? true : false,
-                             sampleInfo.bitDepth);
-        wxString bits = wxString::Format("%d-bit %s",
-                                         sampleInfo.bitDepth,
-                                         sampleInfo.channels == 2 ? "stereo" : "mono");
+        wxString rate = sampleInfo.sampleRate ? wxString::Format("%u Hz", sampleInfo.sampleRate) : wxString("-");
+        wxString frames = sampleInfo.frameCount ? wxString::Format("%u", sampleInfo.frameCount) : wxString("-");
+        wxString codec = sampleInfo.compressionType ?
+            wxString::FromUTF8(CompressionTypeName((uint32_t)sampleInfo.compressionType,
+                                                   sampleInfo.compressionSubType,
+                                                   sampleInfo.opusRoundTripResample ? true : false,
+                                                   sampleInfo.bitDepth)) :
+            wxString("-");
+        wxString bits = sampleInfo.bitDepth ?
+            wxString::Format("%d-bit %s",
+                             sampleInfo.bitDepth,
+                             sampleInfo.channels == 2 ? "stereo" : "mono") :
+            wxString("-");
 
         long idx = bp->sampleList->InsertItem(bp->sampleList->GetItemCount(), sndLabel);
         bp->sampleList->SetItem(idx, 1, keyRange);
@@ -1135,11 +1280,19 @@ static void PopulateSampleList(BankEditorPanel *bp, uint32_t instrumentIndex)
 /* Refresh the columns of a single row in the sample list after edits. */
 static void RefreshSampleListRow(BankEditorPanel *bp, uint32_t instrumentIndex, uint32_t sampleIndex)
 {
+    BAERmfEditorInstrumentExtInfo pendingExtInfo;
+    bool hasPendingEdit = false;
+
     if (!bp->bankToken || !bp->sampleList) return;
 
     BAERmfEditorBankSampleInfo sampleInfo;
-    if (BAERmfEditorBank_GetInstrumentSampleInfo(bp->bankToken, instrumentIndex, sampleIndex, &sampleInfo) != BAE_NO_ERROR) {
+    if (!GetInstrumentSampleListInfoFast(bp, instrumentIndex, sampleIndex, &sampleInfo)) {
         return;
+    }
+
+    hasPendingEdit = GetPendingInstrumentEdit(bp, instrumentIndex, &pendingExtInfo);
+    if (hasPendingEdit) {
+        ApplyPendingSampleOverride(&sampleInfo, &pendingExtInfo, sampleIndex);
     }
 
     long row = static_cast<long>(sampleIndex);
@@ -1149,15 +1302,19 @@ static void RefreshSampleListRow(BankEditorPanel *bp, uint32_t instrumentIndex, 
     wxString rootKey = (sampleInfo.rootKey == 0)
         ? wxString("60 (default)")
         : wxString::Format("%u", sampleInfo.rootKey);
-    wxString rate = wxString::Format("%u Hz", sampleInfo.sampleRate);
-    wxString bits = wxString::Format("%d-bit %s",
-                                     sampleInfo.bitDepth,
-                                     sampleInfo.channels == 2 ? "stereo" : "mono");
-    wxString codec = CompressionTypeName((uint32_t)sampleInfo.compressionType,
-                                         sampleInfo.compressionSubType,
-                                         sampleInfo.opusRoundTripResample ? true : false,
-                                         sampleInfo.bitDepth);
-    wxString frames = wxString::Format("%u", sampleInfo.frameCount);
+    wxString rate = sampleInfo.sampleRate ? wxString::Format("%u Hz", sampleInfo.sampleRate) : wxString("-");
+    wxString bits = sampleInfo.bitDepth ?
+        wxString::Format("%d-bit %s",
+                         sampleInfo.bitDepth,
+                         sampleInfo.channels == 2 ? "stereo" : "mono") :
+        wxString("-");
+    wxString codec = sampleInfo.compressionType ?
+        wxString::FromUTF8(CompressionTypeName((uint32_t)sampleInfo.compressionType,
+                                               sampleInfo.compressionSubType,
+                                               sampleInfo.opusRoundTripResample ? true : false,
+                                               sampleInfo.bitDepth)) :
+        wxString("-");
+    wxString frames = sampleInfo.frameCount ? wxString::Format("%u", sampleInfo.frameCount) : wxString("-");
 
     bp->sampleList->SetItem(row, 1, keyRange);
     bp->sampleList->SetItem(row, 2, rootKey);
@@ -1175,6 +1332,7 @@ static void ShowInstrumentDetail(BankEditorPanel *bp, uint32_t instrumentIndex)
 {
     BAERmfEditorInstrumentExtInfo extInfo;
     BAERmfEditorBankInstrumentInfo instInfo;
+    BAERmfEditorInstrumentExtInfo pendingExtInfo;
 
     if (!bp->bankToken) {
         bp->instHeaderLabel->SetLabel("No bank loaded.");
@@ -1223,6 +1381,11 @@ static void ShowInstrumentDetail(BankEditorPanel *bp, uint32_t instrumentIndex)
     } else {
         memset(&bp->currentExtInfo, 0, sizeof(bp->currentExtInfo));
         extInfo = bp->currentExtInfo;
+    }
+
+    if (GetPendingInstrumentEdit(bp, instrumentIndex, &pendingExtInfo)) {
+        bp->currentExtInfo = pendingExtInfo;
+        bp->hasDirtyExtInfo = true;
     }
 
     /* Use flags from instInfo (bank API provides them separately) */
@@ -1321,6 +1484,8 @@ static void ShowSampleDetail(BankEditorPanel *bp,
                              bool preferredOpusRoundTrip)
 {
     BAERmfEditorBankSampleInfo sampleInfo;
+    BAERmfEditorInstrumentExtInfo pendingExtInfo;
+    bool hasPendingEdit;
 
     StopBankKeyboardPreview(bp);
 
@@ -1343,6 +1508,13 @@ static void ShowSampleDetail(BankEditorPanel *bp,
         }
         return;
     }
+
+    hasPendingEdit = GetPendingInstrumentEdit(bp, instrumentIndex, &pendingExtInfo);
+    if (hasPendingEdit) {
+        ApplyPendingSampleOverride(&sampleInfo, &pendingExtInfo, sampleIndex);
+    }
+
+    CacheSndMetadata(bp, sampleInfo);
 
     bp->currentSampleIndex = sampleIndex;
     bp->currentSampleInfo = sampleInfo;
@@ -1389,6 +1561,14 @@ static void ShowSampleDetail(BankEditorPanel *bp,
         if (preferredCompression != BAE_EDITOR_COMPRESSION_DONT_CHANGE) {
             data.compressionType = preferredCompression;
             data.opusRoundTripResample = preferredOpusRoundTrip;
+        } else if (hasPendingEdit && pendingExtInfo.hasSampleOverride != FALSE &&
+                   pendingExtInfo.sampleOverrideIndex == sampleIndex &&
+                   (pendingExtInfo.sampleTargetCompression != BAE_EDITOR_COMPRESSION_DONT_CHANGE ||
+                    pendingExtInfo.sampleTargetStorageType == kBankOriginalStorageSentinel)) {
+            data.compressionType = pendingExtInfo.sampleTargetCompression;
+            data.opusRoundTripResample =
+                ((((int)pendingExtInfo.sampleTargetStorageType) & kBankOpusRoundTripStorageFlag) != 0);
+            preferredOpusMode = pendingExtInfo.sampleTargetOpusMode;
         } else {
             auto key = std::make_pair(instrumentIndex, sampleIndex);
             auto it = bp->appliedCodecs.find(key);
@@ -1419,6 +1599,8 @@ static void ShowSampleDetail(BankEditorPanel *bp,
         bp->sampleParamsPanel->Show();
     }
 
+    RefreshSampleListRow(bp, instrumentIndex, sampleIndex);
+
     RefreshWaveform(bp);
     bp->samplesPage->Layout();
     bp->detailNotebook->SetSelection(1);  /* Switch to Samples tab */
@@ -1433,7 +1615,7 @@ static void OnInstrumentSelected(BankEditorPanel *bp, wxTreeEvent &event)
     wxTreeItemId item = event.GetItem();
 
     if (bp->hasInstrument && bp->hasPendingEdits) {
-        ApplyDirtyParams(bp, false);
+        ApplyDirtyParams(bp);
     }
     bp->hasPendingEdits = false;
     if (!item.IsOk()) {
@@ -1471,7 +1653,7 @@ static void OnSampleSelected(BankEditorPanel *bp, wxListEvent &event)
         return;
     }
     if (bp->hasSampleSelection && bp->hasPendingEdits) {
-        ApplyDirtyParams(bp, false);
+        ApplyDirtyParams(bp);
     }
     bp->hasPendingEdits = false;
     long sel = event.GetIndex();
@@ -2052,7 +2234,7 @@ BankEditorPanel *CreateBankEditorPanel(wxWindow *parent)
         rightSizer->Add(btnSizer, 0, wxLEFT | wxRIGHT | wxTOP, 5);
 
         bp->applyBtn->Bind(wxEVT_BUTTON, [bp](wxCommandEvent &) {
-            ApplyDirtyParams(bp, true);
+            ApplyDirtyParams(bp);
         });
         bp->stopAllBtn->Bind(wxEVT_BUTTON, [bp](wxCommandEvent &) {
             StopAllBankNotes(bp);
@@ -2171,6 +2353,7 @@ void BankEditorPanel_LoadBank(BankEditorPanel *panel,
     panel->hasPendingEdits = false;
     panel->hasLastUiCodecState = false;
     panel->appliedCodecs.clear();
+    panel->sndMetadataCache.clear();
     if (panel->dirtyParamsCallback) panel->dirtyParamsCallback(nullptr);
     PopulateInstrumentTree(panel);
     PopulateSampleTree(panel);
@@ -2202,6 +2385,7 @@ void BankEditorPanel_Clear(BankEditorPanel *panel)
     panel->hasPendingEdits = false;
     panel->hasLastUiCodecState = false;
     panel->appliedCodecs.clear();
+    panel->sndMetadataCache.clear();
     if (panel->dirtyParamsCallback) panel->dirtyParamsCallback(nullptr);
     panel->instrumentTree->DeleteAllItems();
     panel->instrumentTree->AddRoot("Instruments");
@@ -2234,6 +2418,16 @@ void BankEditorPanel_SetPreviewCallbacks(
     panel->stopCallback = std::move(stopCallback);
     panel->invalidateCallback = std::move(invalidateCallback);
     panel->dirtyParamsCallback = std::move(dirtyParamsCallback);
+}
+
+void BankEditorPanel_SetPendingEditLookupCallback(
+    BankEditorPanel *panel,
+    std::function<bool(uint32_t instrumentIndex, BAERmfEditorInstrumentExtInfo *outInfo)> pendingEditLookupCallback)
+{
+    if (!panel) {
+        return;
+    }
+    panel->pendingEditLookupCallback = std::move(pendingEditLookupCallback);
 }
 
 void BankEditorPanel_SetSourceCodecCallback(

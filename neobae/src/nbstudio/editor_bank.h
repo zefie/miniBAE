@@ -71,6 +71,12 @@ void BankEditorPanel_SetPreviewCallbacks(
     std::function<void()> invalidateCallback,
     std::function<void(BAERmfEditorInstrumentExtInfo const *info)> dirtyParamsCallback);
 
+/* Optional callback that returns staged, not-yet-committed edits for an
+ * instrument so the panel can restore them without forcing a bank rewrite. */
+void BankEditorPanel_SetPendingEditLookupCallback(
+    BankEditorPanel *panel,
+    std::function<bool(uint32_t instrumentIndex, BAERmfEditorInstrumentExtInfo *outInfo)> pendingEditLookupCallback);
+
 /* Optional callback to provide source codec text from cached original SND.
  * Returns true and fills outCodecDescription when a cached source exists. */
 void BankEditorPanel_SetSourceCodecCallback(
