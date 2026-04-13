@@ -1996,34 +1996,63 @@ int main(int argc, char *argv[])
 #else
                 int sc = e.key.scancode;
 #endif
+                if (sc < 0 || sc >= 512)
+                {
+                    break;
+                }
+
+                // Always process key release for tracked scancodes, even if current
+                // key symbol mapping differs (layout/modifier differences under some builds).
+                if (!isDown && g_keyboard_pressed_note[sc] != -1)
+                {
+                    int heldMidi = g_keyboard_pressed_note[sc];
+                    g_keyboard_pressed_note[sc] = -1;
+
+                    BAESong target = g_bae.song ? g_bae.song : g_live_song;
+                    if (target)
+                        BAESong_NoteOff(target, (unsigned char)g_keyboard_channel, (unsigned char)heldMidi, 0, 0);
+#ifdef SUPPORT_MIDI_HW
+                    if (g_midi_output_enabled)
+                    {
+                        unsigned char mmsg[3];
+                        mmsg[0] = (unsigned char)(0x80 | (g_keyboard_channel & 0x0F));
+                        mmsg[1] = (unsigned char)heldMidi;
+                        mmsg[2] = 0;
+                        midi_output_send(mmsg, 3);
+                    }
+#endif
+                    g_keyboard_active_notes_by_channel[g_keyboard_channel][heldMidi] = 0;
+                    break;
+                }
+
                 int note = -1;
-                if (sym == SDLK_A)
+                if (sc == SDL_SCANCODE_A)
                     note = 0; // C
-                else if (sym == SDLK_W)
+                else if (sc == SDL_SCANCODE_W)
                     note = 1; // C#
-                else if (sym == SDLK_S)
+                else if (sc == SDL_SCANCODE_S)
                     note = 2; // D
-                else if (sym == SDLK_E)
+                else if (sc == SDL_SCANCODE_E)
                     note = 3; // D#
-                else if (sym == SDLK_D)
+                else if (sc == SDL_SCANCODE_D)
                     note = 4; // E
-                else if (sym == SDLK_F)
+                else if (sc == SDL_SCANCODE_F)
                     note = 5; // F
-                else if (sym == SDLK_T)
+                else if (sc == SDL_SCANCODE_T)
                     note = 6; // F#
-                else if (sym == SDLK_G)
+                else if (sc == SDL_SCANCODE_G)
                     note = 7; // G
-                else if (sym == SDLK_Y)
+                else if (sc == SDL_SCANCODE_Y)
                     note = 8; // G#
-                else if (sym == SDLK_H)
+                else if (sc == SDL_SCANCODE_H)
                     note = 9; // A
-                else if (sym == SDLK_U)
+                else if (sc == SDL_SCANCODE_U)
                     note = 10; // A#
-                else if (sym == SDLK_J)
+                else if (sc == SDL_SCANCODE_J)
                     note = 11; // B
-                else if (sym == SDLK_K)
+                else if (sc == SDL_SCANCODE_K)
                     note = 12; // C (next octave)
-                else if (sym == SDLK_O)
+                else if (sc == SDL_SCANCODE_O)
                     note = 13; // C#
 
                 if (note != -1)
@@ -2088,32 +2117,6 @@ int main(int argc, char *argv[])
                                     g_channel_peak_level[ch] = lvl;
                                     g_channel_peak_hold_until[ch] = SDL_GetTicks() + g_channel_peak_hold_ms;
                                 }
-                            }
-                        }
-                    }
-                    else
-                    {
-                        // Key up: send note off if we had recorded it
-                        if (g_keyboard_pressed_note[sc] != -1)
-                        {
-                            int heldMidi = g_keyboard_pressed_note[sc];
-                            g_keyboard_pressed_note[sc] = -1;
-                            if (keyboard_visible_for_typing)
-                            {
-                                BAESong target = g_bae.song ? g_bae.song : g_live_song;
-                                if (target)
-                                    BAESong_NoteOff(target, (unsigned char)g_keyboard_channel, (unsigned char)heldMidi, 0, 0);
-#ifdef SUPPORT_MIDI_HW
-                                if (g_midi_output_enabled)
-                                {
-                                    unsigned char mmsg[3];
-                                    mmsg[0] = (unsigned char)(0x80 | (g_keyboard_channel & 0x0F));
-                                    mmsg[1] = (unsigned char)heldMidi;
-                                    mmsg[2] = 0;
-                                    midi_output_send(mmsg, 3);
-                                }
-#endif
-                                g_keyboard_active_notes_by_channel[g_keyboard_channel][heldMidi] = 0;
                             }
                         }
                     }
@@ -3770,19 +3773,22 @@ int main(int argc, char *argv[])
             last_drag_progress = -1;
         }
 
-        // Time display (add milliseconds to current position)
+        // Time display with fixed milliseconds for both current and total.
         int prog_ms = progress % 1000;
         int prog_sec = (progress / 1000) % 60;
         int prog_min = (progress / 1000) / 60;
         char pbuf[64];
         snprintf(pbuf, sizeof(pbuf), "%02d:%02d.%03d", prog_min, prog_sec, prog_ms);
+        int dur_ms = duration % 1000;
+        int dur_sec = (duration / 1000) % 60;
+        int dur_min = (duration / 1000) / 60;
         char dbuf[64];
-        snprintf(dbuf, sizeof(dbuf), "%02d:%02d", (duration / 1000) / 60, (duration / 1000) % 60);
+        snprintf(dbuf, sizeof(dbuf), "%02d:%02d.%03d", dur_min, dur_sec, dur_ms);
 
         int pbuf_w = 0, pbuf_h = 0;
-        measure_text(pbuf, &pbuf_w, &pbuf_h);
         int dbuf_w = 0, dbuf_h = 0;
-        measure_text(dbuf, &dbuf_w, &dbuf_h);
+        measure_text("00:00.000", &pbuf_w, &pbuf_h);
+        measure_text("00:00.000", &dbuf_w, &dbuf_h);
         int time_y = 191; // moved up 3px from 194
         int pbuf_x = 680;
         // Clickable region just around current time text

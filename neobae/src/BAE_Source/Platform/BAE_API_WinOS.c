@@ -231,6 +231,10 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
+#if USE_MPEG_ENCODER != FALSE
+#include "XMPEG_BAE_API.h"
+#endif
+
 #include "BAE_API.h"
 #include "X_Assert.h"
 
@@ -262,6 +266,287 @@ static BAEDeviceID          g_currentDeviceID = BAE_WAVEOUT;
 static uint32_t        g_memory_buoy = 0;          // amount of memory allocated at this moment
 static uint32_t        g_memory_buoy_max = 0;
 
+// Format of output buffer.
+static WAVEFORMATEX    g_waveFormat;
+
+// Recorder/export state for WinOS backend (mirrors SDL2/SDL3 behavior).
+static CRITICAL_SECTION g_recorder_cs;
+static int              g_recorder_cs_init = FALSE;
+
+static FILE            *g_pcm_rec_fp = NULL;
+static uint64_t         g_pcm_rec_data_bytes = 0;
+static uint32_t         g_pcm_rec_channels = 0;
+static uint32_t         g_pcm_rec_sample_rate = 0;
+static uint32_t         g_pcm_rec_bits = 0;
+
+typedef void (*FlacRecorderCallback)(int16_t *left, int16_t *right, int frames);
+typedef void (*VorbisRecorderCallback)(int16_t *left, int16_t *right, int frames);
+typedef void (*OpusRecorderCallback)(int16_t *left, int16_t *right, int frames);
+
+static FlacRecorderCallback   g_flac_recorder_callback = NULL;
+static VorbisRecorderCallback g_vorbis_recorder_callback = NULL;
+static OpusRecorderCallback   g_opus_recorder_callback = NULL;
+
+static int16_t *g_rec_left = NULL;
+static int16_t *g_rec_right = NULL;
+static uint32_t g_rec_tmp_frames = 0;
+
+static int      g_mp3_rec_active = FALSE;
+static FILE    *g_mp3_rec_pcm_fp = NULL;
+static char     g_mp3_rec_path[1024] = {0};
+static char     g_mp3_rec_tmp_path[1060] = {0};
+static uint32_t g_mp3_rec_channels = 0;
+static uint32_t g_mp3_rec_sample_rate = 0;
+static uint32_t g_mp3_rec_bits = 0;
+static uint32_t g_mp3_rec_bitrate = 0;
+
+typedef struct WinOSMP3RefillCtx
+{
+    FILE    *in;
+    uint32_t channels;
+    uint32_t bits;
+    uint32_t framesPerCall;
+} WinOSMP3RefillCtx;
+
+static void PV_InitRecorderLock(void)
+{
+    if (!g_recorder_cs_init)
+    {
+        InitializeCriticalSection(&g_recorder_cs);
+        g_recorder_cs_init = TRUE;
+    }
+}
+
+static void PV_RecorderLock(void)
+{
+    if (g_recorder_cs_init)
+    {
+        EnterCriticalSection(&g_recorder_cs);
+    }
+}
+
+static void PV_RecorderUnlock(void)
+{
+    if (g_recorder_cs_init)
+    {
+        LeaveCriticalSection(&g_recorder_cs);
+    }
+}
+
+static int PV_WriteWavHeader(FILE *f, uint32_t channels, uint32_t sample_rate, uint32_t bits, uint64_t data_bytes)
+{
+    uint32_t byte_rate;
+    uint16_t block_align;
+    uint32_t chunk_size;
+    uint32_t subchunk1_size;
+    uint16_t audio_format;
+    uint16_t num_channels;
+    uint32_t sr;
+    uint16_t bits_per_sample;
+    uint32_t data_size_32;
+
+    if (!f)
+    {
+        return FALSE;
+    }
+
+    byte_rate = sample_rate * channels * (bits / 8);
+    block_align = (uint16_t)(channels * (bits / 8));
+    chunk_size = (uint32_t)(36 + data_bytes);
+    subchunk1_size = 16;
+    audio_format = 1;
+    num_channels = (uint16_t)channels;
+    sr = sample_rate;
+    bits_per_sample = (uint16_t)bits;
+    data_size_32 = (uint32_t)data_bytes;
+
+    fwrite("RIFF", 1, 4, f);
+    fwrite(&chunk_size, 4, 1, f);
+    fwrite("WAVE", 1, 4, f);
+    fwrite("fmt ", 1, 4, f);
+    fwrite(&subchunk1_size, 4, 1, f);
+    fwrite(&audio_format, 2, 1, f);
+    fwrite(&num_channels, 2, 1, f);
+    fwrite(&sr, 4, 1, f);
+    fwrite(&byte_rate, 4, 1, f);
+    fwrite(&block_align, 2, 1, f);
+    fwrite(&bits_per_sample, 2, 1, f);
+    fwrite("data", 1, 4, f);
+    fwrite(&data_size_32, 4, 1, f);
+    return TRUE;
+}
+
+static int PV_EnsureSplitBuffers(uint32_t frames)
+{
+    int16_t *nl;
+    int16_t *nr;
+    if (frames <= g_rec_tmp_frames)
+    {
+        return TRUE;
+    }
+    nl = (int16_t *)realloc(g_rec_left, frames * sizeof(int16_t));
+    nr = (int16_t *)realloc(g_rec_right, frames * sizeof(int16_t));
+    if (!nl || !nr)
+    {
+        if (nl)
+        {
+            g_rec_left = nl;
+        }
+        if (nr)
+        {
+            g_rec_right = nr;
+        }
+        return FALSE;
+    }
+    g_rec_left = nl;
+    g_rec_right = nr;
+    g_rec_tmp_frames = frames;
+    return TRUE;
+}
+
+static void PV_ProcessGeneratedAudio(const void *buffer, int32_t bytes)
+{
+    int sample_bytes;
+    uint32_t frames;
+    const int16_t *samples;
+    uint32_t i;
+
+    if (!buffer || bytes <= 0)
+    {
+        return;
+    }
+
+    PV_RecorderLock();
+
+    if (g_pcm_rec_fp)
+    {
+        size_t wrote;
+        wrote = fwrite(buffer, 1, (size_t)bytes, g_pcm_rec_fp);
+        if (wrote == (size_t)bytes)
+        {
+            g_pcm_rec_data_bytes += (uint64_t)wrote;
+        }
+    }
+
+    if (g_mp3_rec_active && g_mp3_rec_pcm_fp)
+    {
+        (void)fwrite(buffer, 1, (size_t)bytes, g_mp3_rec_pcm_fp);
+    }
+
+    sample_bytes = (int)(g_waveFormat.nChannels * (g_waveFormat.wBitsPerSample / 8));
+    if (sample_bytes <= 0)
+    {
+        PV_RecorderUnlock();
+        return;
+    }
+
+    if (g_waveFormat.wBitsPerSample != 16)
+    {
+        PV_RecorderUnlock();
+        return;
+    }
+
+    frames = (uint32_t)(bytes / sample_bytes);
+    samples = (const int16_t *)buffer;
+
+    if ((g_flac_recorder_callback || g_vorbis_recorder_callback || g_opus_recorder_callback) && frames > 0)
+    {
+        if (g_waveFormat.nChannels == 1)
+        {
+            if (g_flac_recorder_callback)
+            {
+                g_flac_recorder_callback((int16_t *)samples, (int16_t *)samples, (int)frames);
+            }
+            if (g_vorbis_recorder_callback)
+            {
+                g_vorbis_recorder_callback((int16_t *)samples, (int16_t *)samples, (int)frames);
+            }
+            if (g_opus_recorder_callback)
+            {
+                g_opus_recorder_callback((int16_t *)samples, (int16_t *)samples, (int)frames);
+            }
+        }
+        else if (g_waveFormat.nChannels == 2)
+        {
+            if (PV_EnsureSplitBuffers(frames))
+            {
+                for (i = 0; i < frames; i++)
+                {
+                    g_rec_left[i] = samples[i * 2];
+                    g_rec_right[i] = samples[i * 2 + 1];
+                }
+                if (g_flac_recorder_callback)
+                {
+                    g_flac_recorder_callback(g_rec_left, g_rec_right, (int)frames);
+                }
+                if (g_vorbis_recorder_callback)
+                {
+                    g_vorbis_recorder_callback(g_rec_left, g_rec_right, (int)frames);
+                }
+                if (g_opus_recorder_callback)
+                {
+                    g_opus_recorder_callback(g_rec_left, g_rec_right, (int)frames);
+                }
+            }
+        }
+    }
+
+    PV_RecorderUnlock();
+}
+
+#if USE_MPEG_ENCODER != FALSE
+static bool PV_MP3RefillFromTemp(void *buffer, void *userRef)
+{
+    WinOSMP3RefillCtx *ctx;
+    size_t samples_needed;
+    size_t got;
+
+    ctx = (WinOSMP3RefillCtx *)userRef;
+    if (!ctx || !ctx->in || !buffer)
+    {
+        return FALSE;
+    }
+
+    samples_needed = (size_t)ctx->framesPerCall * (size_t)ctx->channels;
+
+    if (ctx->bits == 16)
+    {
+        got = fread(buffer, sizeof(int16_t), samples_needed, ctx->in);
+        if (got < samples_needed)
+        {
+            memset(((int16_t *)buffer) + got, 0, (samples_needed - got) * sizeof(int16_t));
+            return (got > 0) ? TRUE : FALSE;
+        }
+        return TRUE;
+    }
+    else if (ctx->bits == 8)
+    {
+        size_t i;
+        unsigned char *tmp8;
+        int16_t *dst16;
+        tmp8 = (unsigned char *)malloc(samples_needed);
+        if (!tmp8)
+        {
+            return FALSE;
+        }
+        got = fread(tmp8, 1, samples_needed, ctx->in);
+        dst16 = (int16_t *)buffer;
+        for (i = 0; i < got; i++)
+        {
+            dst16[i] = (int16_t)(((int)tmp8[i] - 128) << 8);
+        }
+        if (got < samples_needed)
+        {
+            memset(dst16 + got, 0, (samples_needed - got) * sizeof(int16_t));
+        }
+        free(tmp8);
+        return (got > 0) ? TRUE : FALSE;
+    }
+
+    return FALSE;
+}
+#endif
+
 static int16_t            g_balance = 0;              // balance scale -256 to 256 (left to right)
 static int16_t            g_unscaled_volume = 256;    // hardware volume in BAE scale
 
@@ -277,9 +562,6 @@ static int32_t                 g_activeDoubleBuffer;
 
 // $$kk: 05.06.98: made lastPos a global variable
 static int32_t                 g_lastPos;
-
-// Format of output buffer
-static WAVEFORMATEX         g_waveFormat;
 
 // How many audio frames to generate at one time 
 #define BAE_DIRECTSOUND_FRAMES_PER_BLOCK    8
@@ -1164,6 +1446,7 @@ static void PV_AudioWaveOutFrameThread(void* threadContext)
                 // Generate one frame audio
                 BAE_BuildMixerSlice(threadContext, pFillBuffer, g_audioByteBufferSize,
                                                             g_audioFramesToGenerate);
+                    PV_ProcessGeneratedAudio(pFillBuffer, g_audioByteBufferSize);
                 pFillBuffer += g_audioByteBufferSize;
 
                 if (g_shutDownDoubleBuffer)
@@ -1355,6 +1638,7 @@ static void PV_AudioDirectSoundFrameThread(void* threadContext)
                     // Generate new audio samples, putting the directly
                     // into the output buffer.
                     BAE_BuildMixerSlice(threadContext, pFillBuffer, g_audioByteBufferSize, g_audioFramesToGenerate);
+                    PV_ProcessGeneratedAudio(pFillBuffer, g_audioByteBufferSize);
 
                     // I am incrementing g_lastPos right after the write operation
                     // to lessen the chance of a device open/close messing us up in the wait loop.
@@ -2367,6 +2651,291 @@ void BAE_GetDeviceName(int32_t deviceID, char *cName, uint32_t cNameLength)
         }
         *cName = 0;
     }
+}
+
+int BAE_Platform_PCMRecorder_Start(const char *path, uint32_t channels, uint32_t sample_rate, uint32_t bits)
+{
+    FILE *f;
+
+    if (!path)
+    {
+        return -1;
+    }
+
+    PV_InitRecorderLock();
+    PV_RecorderLock();
+
+    if (g_pcm_rec_fp)
+    {
+        PV_RecorderUnlock();
+        return -1;
+    }
+
+    f = fopen(path, "wb+");
+    if (!f)
+    {
+        PV_RecorderUnlock();
+        return -1;
+    }
+
+    g_pcm_rec_fp = f;
+    g_pcm_rec_channels = channels;
+    g_pcm_rec_sample_rate = sample_rate;
+    g_pcm_rec_bits = bits;
+    g_pcm_rec_data_bytes = 0;
+    PV_WriteWavHeader(g_pcm_rec_fp, channels, sample_rate, bits, 0);
+    fflush(g_pcm_rec_fp);
+
+    PV_RecorderUnlock();
+    return 0;
+}
+
+void BAE_Platform_PCMRecorder_Stop(void)
+{
+    FILE *f;
+    uint32_t ch;
+    uint32_t sr;
+    uint32_t bits;
+    uint64_t bytes;
+
+    PV_InitRecorderLock();
+    PV_RecorderLock();
+
+    f = g_pcm_rec_fp;
+    ch = g_pcm_rec_channels;
+    sr = g_pcm_rec_sample_rate;
+    bits = g_pcm_rec_bits;
+    bytes = g_pcm_rec_data_bytes;
+
+    g_pcm_rec_fp = NULL;
+    g_pcm_rec_channels = 0;
+    g_pcm_rec_sample_rate = 0;
+    g_pcm_rec_bits = 0;
+    g_pcm_rec_data_bytes = 0;
+
+    PV_RecorderUnlock();
+
+    if (!f)
+    {
+        return;
+    }
+
+    fseek(f, 0, SEEK_SET);
+    PV_WriteWavHeader(f, ch, sr, bits, bytes);
+    fflush(f);
+    fclose(f);
+}
+
+void BAE_Platform_SetFlacRecorderCallback(void (*callback)(int16_t *left, int16_t *right, int frames))
+{
+    PV_InitRecorderLock();
+    PV_RecorderLock();
+    g_flac_recorder_callback = (FlacRecorderCallback)callback;
+    PV_RecorderUnlock();
+}
+
+void BAE_Platform_ClearFlacRecorderCallback(void)
+{
+    PV_InitRecorderLock();
+    PV_RecorderLock();
+    g_flac_recorder_callback = NULL;
+    PV_RecorderUnlock();
+}
+
+void BAE_Platform_SetVorbisRecorderCallback(void (*callback)(int16_t *left, int16_t *right, int frames))
+{
+    PV_InitRecorderLock();
+    PV_RecorderLock();
+    g_vorbis_recorder_callback = (VorbisRecorderCallback)callback;
+    PV_RecorderUnlock();
+}
+
+void BAE_Platform_ClearVorbisRecorderCallback(void)
+{
+    PV_InitRecorderLock();
+    PV_RecorderLock();
+    g_vorbis_recorder_callback = NULL;
+    PV_RecorderUnlock();
+}
+
+void BAE_Platform_SetOpusRecorderCallback(void (*callback)(int16_t *left, int16_t *right, int frames))
+{
+    PV_InitRecorderLock();
+    PV_RecorderLock();
+    g_opus_recorder_callback = (OpusRecorderCallback)callback;
+    PV_RecorderUnlock();
+}
+
+void BAE_Platform_ClearOpusRecorderCallback(void)
+{
+    PV_InitRecorderLock();
+    PV_RecorderLock();
+    g_opus_recorder_callback = NULL;
+    PV_RecorderUnlock();
+}
+
+int BAE_Platform_MP3Recorder_Start(const char *path, uint32_t channels, uint32_t sample_rate, uint32_t bits, uint32_t bitrate)
+{
+    FILE *tmp;
+
+    if (!path)
+    {
+        return -1;
+    }
+
+    PV_InitRecorderLock();
+    PV_RecorderLock();
+
+    if (g_mp3_rec_active)
+    {
+        PV_RecorderUnlock();
+        return -1;
+    }
+
+    snprintf(g_mp3_rec_path, sizeof(g_mp3_rec_path), "%s", path);
+    snprintf(g_mp3_rec_tmp_path, sizeof(g_mp3_rec_tmp_path), "%s.pcm.tmp", path);
+
+    tmp = fopen(g_mp3_rec_tmp_path, "wb+");
+    if (!tmp)
+    {
+        g_mp3_rec_path[0] = '\0';
+        g_mp3_rec_tmp_path[0] = '\0';
+        PV_RecorderUnlock();
+        return -1;
+    }
+
+    g_mp3_rec_pcm_fp = tmp;
+    g_mp3_rec_channels = channels;
+    g_mp3_rec_sample_rate = sample_rate;
+    g_mp3_rec_bits = bits;
+    g_mp3_rec_bitrate = bitrate;
+    g_mp3_rec_active = TRUE;
+
+    PV_RecorderUnlock();
+    return 0;
+}
+
+void BAE_Platform_MP3Recorder_Stop(void)
+{
+    FILE *tmp;
+    char out_path[1024];
+    char tmp_path[1060];
+    uint32_t channels;
+    uint32_t sample_rate;
+    uint32_t bits;
+    uint32_t bitrate;
+
+    PV_InitRecorderLock();
+    PV_RecorderLock();
+
+    if (!g_mp3_rec_active)
+    {
+        PV_RecorderUnlock();
+        return;
+    }
+
+    g_mp3_rec_active = FALSE;
+    tmp = g_mp3_rec_pcm_fp;
+    g_mp3_rec_pcm_fp = NULL;
+
+    snprintf(out_path, sizeof(out_path), "%s", g_mp3_rec_path);
+    snprintf(tmp_path, sizeof(tmp_path), "%s", g_mp3_rec_tmp_path);
+    channels = g_mp3_rec_channels;
+    sample_rate = g_mp3_rec_sample_rate;
+    bits = g_mp3_rec_bits;
+    bitrate = g_mp3_rec_bitrate;
+
+    g_mp3_rec_path[0] = '\0';
+    g_mp3_rec_tmp_path[0] = '\0';
+    g_mp3_rec_channels = 0;
+    g_mp3_rec_sample_rate = 0;
+    g_mp3_rec_bits = 0;
+    g_mp3_rec_bitrate = 0;
+
+    PV_RecorderUnlock();
+
+    if (tmp)
+    {
+        fflush(tmp);
+        fclose(tmp);
+    }
+
+#if USE_MPEG_ENCODER != FALSE
+    {
+        WinOSMP3RefillCtx refill;
+        void *enc;
+        XPTR pcm_buf;
+        XFILENAME xfOut;
+        XFILE out;
+        XPTR bitbuf;
+        uint32_t bitsz;
+        bool last;
+
+        refill.in = fopen(tmp_path, "rb");
+        if (!refill.in)
+        {
+            remove(tmp_path);
+            return;
+        }
+
+        refill.channels = channels;
+        refill.bits = bits;
+        refill.framesPerCall = 1152;
+
+        pcm_buf = XNewPtr(refill.framesPerCall * channels * sizeof(int16_t));
+        if (!pcm_buf)
+        {
+            fclose(refill.in);
+            remove(tmp_path);
+            return;
+        }
+
+        XConvertPathToXFILENAME((void *)out_path, &xfOut);
+        out = XFileOpenForWrite(&xfOut, TRUE);
+        if (!out)
+        {
+            XDisposePtr(pcm_buf);
+            fclose(refill.in);
+            remove(tmp_path);
+            return;
+        }
+
+        enc = MPG_EncodeNewStream(bitrate, sample_rate, channels, pcm_buf, refill.framesPerCall);
+        if (!enc)
+        {
+            XFileClose(out);
+            XDisposePtr(pcm_buf);
+            fclose(refill.in);
+            remove(tmp_path);
+            return;
+        }
+
+        MPG_EncodeSetRefillCallback(enc, PV_MP3RefillFromTemp, &refill);
+
+        for (;;)
+        {
+            bitbuf = NULL;
+            bitsz = 0;
+            last = FALSE;
+            (void)MPG_EncodeProcess(enc, &bitbuf, &bitsz, &last);
+            if (bitbuf && bitsz)
+            {
+                XFileWrite(out, bitbuf, (int32_t)bitsz);
+            }
+            if (last && bitsz == 0)
+            {
+                break;
+            }
+        }
+
+        MPG_EncodeFreeStream(enc);
+        XFileClose(out);
+        XDisposePtr(pcm_buf);
+        fclose(refill.in);
+    }
+#endif
+
+    remove(tmp_path);
 }
 
 int BAE_NewMutex(BAE_Mutex* lock, char *name, char *file, int lineno)

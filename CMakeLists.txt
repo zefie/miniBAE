@@ -155,6 +155,7 @@ set(BAE_EMBED_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/banks/patches11
 option(BUILD_PLAYBAE "Build playbae when a non-Dummy/non-Ansi backend is selected" ON)
 option(BUILD_NEOBAE_TUI "Build ncurses textual GUI variant of playbae" ON)
 option(BUILD_ZEFIDI "Build zefidi when SDL2/SDL3 backend and matching SDL_ttf are available" ON)
+option(ENABLE_MIDI_HW "Enable hardware MIDI I/O in zefidi via RtMidi" OFF)
 option(BUILD_CLITOOLS "Build CLI tools (songtool, rmf2mid, mid2rmf, mid2rmi, sf2-hsb, mod2rmf, instdump, bankrecomp)" ON)
 option(BUILD_NBSTUDIO "Build NeoBAE Studio (RMF/ZMF editor) when wxWidgets is found" ON)
 set(CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING "Build type (Debug, Release, RelWithDebInfo, MinSizeRel)" FORCE)
@@ -1548,6 +1549,7 @@ endif()
 
 if(BUILD_ZEFIDI)
   if(BAE_ZEFIDI_AVAILABLE)
+    set(ZEFIDI_ENABLE_MIDI_HW OFF)
     set(ZEFIDI_SOURCES
       neobae/src/gui/gui_theme.c
       neobae/src/gui/gui_widgets.c
@@ -1560,6 +1562,23 @@ if(BUILD_ZEFIDI)
       neobae/src/gui/gui_panels.c
       neobae/src/gui/gui_main.c
     )
+
+    if(ENABLE_MIDI_HW)
+      if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/rtmidi/rtmidi_c.h" AND
+         EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/rtmidi/rtmidi_c.cpp" AND
+         EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/rtmidi/RtMidi.cpp")
+        set(ZEFIDI_ENABLE_MIDI_HW ON)
+        list(APPEND ZEFIDI_SOURCES
+          neobae/src/gui/gui_midi_hw.c
+          neobae/src/gui/gui_midi_hw_input.c
+          neobae/src/gui/gui_midi_hw_output.c
+          neobae/src/thirdparty/rtmidi/rtmidi_c.cpp
+          neobae/src/thirdparty/rtmidi/RtMidi.cpp
+        )
+      else()
+        message(STATUS "ENABLE_MIDI_HW requested, but RtMidi sources are missing; building zefidi without MIDI hardware support.")
+      endif()
+    endif()
 
     if (DEBUG)
       list(APPEND ZEFIDI_SOURCES neobae/src/gui/gui_debug_console.c)
@@ -1585,6 +1604,33 @@ if(BUILD_ZEFIDI)
     if(ZEFIDI_SDL_VERSION STREQUAL "SDL2")
       target_compile_definitions(zefidi PRIVATE USE_SDL2=1)
     endif()
+
+    if(ZEFIDI_ENABLE_MIDI_HW)
+      target_compile_definitions(zefidi PRIVATE SUPPORT_MIDI_HW=1)
+      target_include_directories(zefidi PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/rtmidi)
+
+      if(WIN32)
+        target_compile_definitions(zefidi PRIVATE __WINDOWS_MM__)
+        target_link_libraries(zefidi PRIVATE winmm)
+      elseif(APPLE)
+        target_compile_definitions(zefidi PRIVATE __MACOSX_CORE__)
+        target_link_libraries(zefidi PRIVATE
+          "-framework CoreServices"
+          "-framework CoreAudio"
+          "-framework CoreMIDI"
+          "-framework CoreFoundation"
+        )
+      elseif(UNIX)
+        find_library(BAE_ALSA_LIBRARY NAMES asound)
+        if(BAE_ALSA_LIBRARY)
+          target_compile_definitions(zefidi PRIVATE __LINUX_ALSA__)
+          target_link_libraries(zefidi PRIVATE ${BAE_ALSA_LIBRARY})
+        else()
+          message(STATUS "ENABLE_MIDI_HW set, but ALSA library was not found; RtMidi ALSA backend will be unavailable.")
+        endif()
+      endif()
+    endif()
+
     target_include_directories(zefidi PRIVATE ${ZEFIDI_SDL_INCLUDE_DIR} ${ZEFIDI_SDL_TTF_INCLUDE_DIR})
     target_link_libraries(zefidi PRIVATE neobae ${ZEFIDI_SDL_LIBRARY} ${ZEFIDI_SDL_TTF_LIBRARY})
 
