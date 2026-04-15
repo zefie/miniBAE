@@ -152,6 +152,7 @@ option(BAE_DISABLE_RETRO_RINGTONE_SUPPORT "Disable retro mobile ringtone format 
 option(BAE_DISABLE_QOA_SUPPORT "Disable QOA codec support" OFF)
 option(BAE_DISABLE_RMI_SUPPORT "Disable RMI support" OFF)
 set(BAE_EMBED_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/banks/patches111/patches111.hsb" CACHE FILEPATH "HSB bank file to embed as built-in patches (empty disables embedding)")
+set(BAE_EMBED_TTF_FILE "src/thirdparty/fonts/HelveticaNeue.ttf" CACHE FILEPATH "TTF font file to embed for zefidi GUI use (empty disables embedding)")
 option(BUILD_PLAYBAE "Build playbae when a non-Dummy/non-Ansi backend is selected" ON)
 option(BUILD_NEOBAE_TUI "Build ncurses textual GUI variant of playbae" ON)
 option(BUILD_ZEFIDI "Build zefidi when SDL2/SDL3 backend and matching SDL_ttf are available" ON)
@@ -1549,6 +1550,42 @@ endif()
 
 if(BUILD_ZEFIDI)
   if(BAE_ZEFIDI_AVAILABLE)
+    set(BAE_EMBED_FONT_EFFECTIVE OFF)
+    unset(BAE_EMBED_TTF_FILE_RESOLVED)
+
+    if(BAE_ENABLE_EMBED_FONT)
+      if(BAE_EMBED_TTF_FILE STREQUAL "")
+        message(STATUS "Disabling zefidi embedded font: BAE_EMBED_TTF_FILE is empty")
+      else()
+        set(_BAE_EMBED_TTF_CANDIDATE "${BAE_EMBED_TTF_FILE}")
+        if(NOT IS_ABSOLUTE "${_BAE_EMBED_TTF_CANDIDATE}")
+          set(_BAE_EMBED_TTF_CANDIDATE "${CMAKE_CURRENT_SOURCE_DIR}/${BAE_EMBED_TTF_FILE}")
+        endif()
+        if(EXISTS "${_BAE_EMBED_TTF_CANDIDATE}")
+          set(BAE_EMBED_TTF_FILE_RESOLVED "${_BAE_EMBED_TTF_CANDIDATE}")
+        else()
+          set(_BAE_EMBED_TTF_ALT "${CMAKE_CURRENT_SOURCE_DIR}/neobae/${BAE_EMBED_TTF_FILE}")
+          if(EXISTS "${_BAE_EMBED_TTF_ALT}")
+            set(BAE_EMBED_TTF_FILE_RESOLVED "${_BAE_EMBED_TTF_ALT}")
+          else()
+            message(STATUS "Disabling zefidi embedded font: TTF file not found at '${BAE_EMBED_TTF_FILE}'")
+          endif()
+          unset(_BAE_EMBED_TTF_ALT)
+        endif()
+        unset(_BAE_EMBED_TTF_CANDIDATE)
+      endif()
+
+      if(BAE_EMBED_TTF_FILE_RESOLVED)
+        find_package(Python3 COMPONENTS Interpreter QUIET)
+        if(NOT Python3_Interpreter_FOUND)
+          message(STATUS "Disabling zefidi embedded font: Python3 interpreter not found")
+        else()
+          set(BAE_EMBED_FONT_EFFECTIVE ON)
+          message(STATUS "Enabling zefidi embedded font from '${BAE_EMBED_TTF_FILE_RESOLVED}'")
+        endif()
+      endif()
+    endif()
+
     set(ZEFIDI_ENABLE_MIDI_HW OFF)
     set(ZEFIDI_SOURCES
       neobae/src/gui/gui_theme.c
@@ -1600,6 +1637,24 @@ if(BUILD_ZEFIDI)
     else()
       add_executable(zefidi ${ZEFIDI_SOURCES})
     endif()
+
+    if(BAE_EMBED_FONT_EFFECTIVE)
+      set(BAE_EMBED_FONT_HEADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+      set(BAE_EMBED_FONT_HEADER "${BAE_EMBED_FONT_HEADER_DIR}/embedded_font.h")
+      add_custom_command(
+        OUTPUT ${BAE_EMBED_FONT_HEADER}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${BAE_EMBED_FONT_HEADER_DIR}
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/create_embedded_font_h.py ${BAE_EMBED_TTF_FILE_RESOLVED} ${BAE_EMBED_FONT_HEADER}
+        DEPENDS ${BAE_EMBED_TTF_FILE_RESOLVED} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/create_embedded_font_h.py
+        VERBATIM
+        COMMENT "Embedding zefidi TTF font into embedded_font.h"
+      )
+      add_custom_target(zefidi_embedded_font DEPENDS ${BAE_EMBED_FONT_HEADER})
+      add_dependencies(zefidi zefidi_embedded_font)
+      target_compile_definitions(zefidi PRIVATE EMBED_TTF_FONT=1)
+      target_include_directories(zefidi PRIVATE ${BAE_EMBED_FONT_HEADER_DIR})
+    endif()
+
     target_compile_definitions(zefidi PRIVATE _ZEFI_GUI=1)
     if(ZEFIDI_SDL_VERSION STREQUAL "SDL2")
       target_compile_definitions(zefidi PRIVATE USE_SDL2=1)
