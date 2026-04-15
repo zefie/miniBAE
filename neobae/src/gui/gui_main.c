@@ -6159,8 +6159,8 @@ int main(int argc, char *argv[])
                 draw_rect(R, (Rect){inner.x + inner.w - 1, inner.y, 1, inner.h}, bevelHi);
 
                 int halfH = inner.h / 2;
-                int midL = inner.y + (halfH / 2);
-                int midR = inner.y + halfH + (halfH / 2);
+                int midL = inner.y + halfH - (halfH / 8);
+                int midR = inner.y + halfH + (halfH / 8);
                 SDL_Color centerLine = g_panel_border;
                 centerLine.a = 120;
                 draw_rect(R, (Rect){inner.x + 1, midL, inner.w - 2, 1}, centerLine);
@@ -6187,47 +6187,53 @@ int main(int argc, char *argv[])
                         if (iEnd > g_scope_buf_count) iEnd = g_scope_buf_count;
                         if (iStart >= iEnd) iStart = iEnd > 0 ? iEnd - 1 : 0;
 
-                        float minL = 1.0f, maxL = -1.0f;
-                        float minR = 1.0f, maxR = -1.0f;
+                        // Use one representative point per column to avoid solid min/max fills.
+                        float sumL = 0.0f;
+                        float sumR = 0.0f;
+                        int count = iEnd - iStart;
+                        if (count < 1)
+                            count = 1;
                         for (int s = iStart; s < iEnd; ++s)
                         {
                             float sL = (float)g_scope_buf_l[s] / 32768.0f * g_vu_gain;
                             float sR = (float)g_scope_buf_r[s] / 32768.0f * g_vu_gain;
-                            if (sL < minL) minL = sL;
-                            if (sL > maxL) maxL = sL;
-                            if (sR < minR) minR = sR;
-                            if (sR > maxR) maxR = sR;
+                            sumL += sL;
+                            sumR += sR;
                         }
-                        // Handle empty bucket (silence).
-                        if (minL > maxL) { minL = 0.0f; maxL = 0.0f; }
-                        if (minR > maxR) { minR = 0.0f; maxR = 0.0f; }
+
+                        float avgL = sumL / (float)count;
+                        float avgR = sumR / (float)count;
                         // Clamp to [-1, 1].
-                        if (minL < -1.0f) minL = -1.0f; if (maxL > 1.0f) maxL = 1.0f;
-                        if (minR < -1.0f) minR = -1.0f; if (maxR > 1.0f) maxR = 1.0f;
+                        if (avgL < -1.0f) avgL = -1.0f;
+                        if (avgL > 1.0f) avgL = 1.0f;
+                        if (avgR < -1.0f) avgR = -1.0f;
+                        if (avgR > 1.0f) avgR = 1.0f;
 
                         // Positive sample → above center; negative → below.
-                        int yLMin = midL - (int)(maxL * (float)ampRange);
-                        int yLMax = midL - (int)(minL * (float)ampRange);
-                        int yRMin = midR - (int)(maxR * (float)ampRange);
-                        int yRMax = midR - (int)(minR * (float)ampRange);
+                        int yL = midL - (int)(avgL * (float)ampRange);
+                        int yR = midR - (int)(avgR * (float)ampRange);
                         // Clamp to respective half-panels.
-                        if (yLMin < inner.y + 1)          yLMin = inner.y + 1;
-                        if (yLMax > inner.y + halfH - 1)   yLMax = inner.y + halfH - 1;
-                        if (yRMin < inner.y + halfH + 1)   yRMin = inner.y + halfH + 1;
-                        if (yRMax > inner.y + inner.h - 2) yRMax = inner.y + inner.h - 2;
+                        if (yL < inner.y + 1)
+                            yL = inner.y + 1;
+                        if (yL > inner.y + halfH - 1)
+                            yL = inner.y + halfH - 1;
+                        if (yR < inner.y + halfH + 1)
+                            yR = inner.y + halfH + 1;
+                        if (yR > inner.y + inner.h - 2)
+                            yR = inner.y + inner.h - 2;
 
                         int px = inner.x + 1 + x;
                         SDL_SetRenderDrawColor(R, colL.r, colL.g, colL.b, 220);
 #if defined(USE_SDL2)
-                        SDL_RenderDrawLine(R, px, yLMin, px, yLMax);
+                        SDL_RenderDrawPoint(R, px, yL);
 #else
-                        SDL_RenderLine(R, px, yLMin, px, yLMax);
+                        SDL_RenderPoint(R, px, yL);
 #endif
                         SDL_SetRenderDrawColor(R, colR.r, colR.g, colR.b, 210);
 #if defined(USE_SDL2)
-                        SDL_RenderDrawLine(R, px, yRMin, px, yRMax);
+                        SDL_RenderDrawPoint(R, px, yR);
 #else
-                        SDL_RenderLine(R, px, yRMin, px, yRMax);
+                        SDL_RenderPoint(R, px, yR);
 #endif
                     }
                 }
