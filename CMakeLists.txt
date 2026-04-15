@@ -159,6 +159,7 @@ option(BUILD_ZEFIDI "Build zefidi when SDL2/SDL3 backend and matching SDL_ttf ar
 option(ENABLE_MIDI_HW "Enable hardware MIDI I/O in zefidi via RtMidi" OFF)
 option(BUILD_CLITOOLS "Build CLI tools (songtool, rmf2mid, mid2rmf, mid2rmi, sf2-hsb, mod2rmf, instdump, bankrecomp)" ON)
 option(BUILD_NBSTUDIO "Build NeoBAE Studio (RMF/ZMF editor) when wxWidgets is found" ON)
+option(BUILD_RAYLIB_PLAYER "Build the raylib-based mini GUI player" ON)
 set(CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING "Build type (Debug, Release, RelWithDebInfo, MinSizeRel)" FORCE)
 
 # Internal compatibility booleans: keep existing logic in terms of ENABLE vars.
@@ -1734,6 +1735,113 @@ if(BUILD_ZEFIDI)
     message(STATUS "Skipping BUILD_ZEFIDI because no usable SDL2/SDL3 + SDL_ttf combination was found.")
   endif()
 endif()
+
+if(BUILD_RAYLIB_PLAYER)
+  find_package(raylib QUIET)
+
+  set(BAE_RAYLIB_AVAILABLE OFF)
+  unset(BAE_RAYLIB_INCLUDE_DIR)
+  unset(BAE_RAYLIB_LIBRARY)
+
+  if(TARGET raylib)
+    set(BAE_RAYLIB_AVAILABLE ON)
+  else()
+    find_path(BAE_RAYLIB_INCLUDE_DIR raylib.h)
+    find_library(BAE_RAYLIB_LIBRARY NAMES raylib)
+    if(BAE_RAYLIB_INCLUDE_DIR AND BAE_RAYLIB_LIBRARY)
+      set(BAE_RAYLIB_AVAILABLE ON)
+    endif()
+  endif()
+
+  if(BAE_RAYLIB_AVAILABLE)
+    add_executable(raylib_player neobae/src/raylibplayer/main.c)
+    target_link_libraries(raylib_player PRIVATE neobae)
+
+    if(BAE_ENABLE_EMBED_FONT)
+      set(BAE_RAYLIB_EMBED_FONT_HEADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+      set(BAE_RAYLIB_EMBED_FONT_HEADER "${BAE_RAYLIB_EMBED_FONT_HEADER_DIR}/embedded_font.h")
+
+      if(TARGET zefidi_embedded_font)
+        add_dependencies(raylib_player zefidi_embedded_font)
+        target_compile_definitions(raylib_player PRIVATE EMBED_TTF_FONT=1)
+        target_include_directories(raylib_player PRIVATE ${BAE_RAYLIB_EMBED_FONT_HEADER_DIR})
+      else()
+        set(BAE_RAYLIB_EMBED_FONT_EFFECTIVE OFF)
+        unset(BAE_RAYLIB_EMBED_TTF_FILE_RESOLVED)
+
+        if(BAE_EMBED_TTF_FILE STREQUAL "")
+          message(STATUS "Disabling raylib_player embedded font: BAE_EMBED_TTF_FILE is empty")
+        else()
+          set(_BAE_RAYLIB_EMBED_TTF_CANDIDATE "${BAE_EMBED_TTF_FILE}")
+          if(NOT IS_ABSOLUTE "${_BAE_RAYLIB_EMBED_TTF_CANDIDATE}")
+            set(_BAE_RAYLIB_EMBED_TTF_CANDIDATE "${CMAKE_CURRENT_SOURCE_DIR}/${BAE_EMBED_TTF_FILE}")
+          endif()
+          if(EXISTS "${_BAE_RAYLIB_EMBED_TTF_CANDIDATE}")
+            set(BAE_RAYLIB_EMBED_TTF_FILE_RESOLVED "${_BAE_RAYLIB_EMBED_TTF_CANDIDATE}")
+          else()
+            set(_BAE_RAYLIB_EMBED_TTF_ALT "${CMAKE_CURRENT_SOURCE_DIR}/neobae/${BAE_EMBED_TTF_FILE}")
+            if(EXISTS "${_BAE_RAYLIB_EMBED_TTF_ALT}")
+              set(BAE_RAYLIB_EMBED_TTF_FILE_RESOLVED "${_BAE_RAYLIB_EMBED_TTF_ALT}")
+            else()
+              message(STATUS "Disabling raylib_player embedded font: TTF file not found at '${BAE_EMBED_TTF_FILE}'")
+            endif()
+            unset(_BAE_RAYLIB_EMBED_TTF_ALT)
+          endif()
+          unset(_BAE_RAYLIB_EMBED_TTF_CANDIDATE)
+        endif()
+
+        if(BAE_RAYLIB_EMBED_TTF_FILE_RESOLVED)
+          find_package(Python3 COMPONENTS Interpreter QUIET)
+          if(NOT Python3_Interpreter_FOUND)
+            message(STATUS "Disabling raylib_player embedded font: Python3 interpreter not found")
+          else()
+            set(BAE_RAYLIB_EMBED_FONT_EFFECTIVE ON)
+            message(STATUS "Enabling raylib_player embedded font from '${BAE_RAYLIB_EMBED_TTF_FILE_RESOLVED}'")
+          endif()
+        endif()
+
+        if(BAE_RAYLIB_EMBED_FONT_EFFECTIVE)
+          add_custom_command(
+            OUTPUT ${BAE_RAYLIB_EMBED_FONT_HEADER}
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${BAE_RAYLIB_EMBED_FONT_HEADER_DIR}
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/create_embedded_font_h.py ${BAE_RAYLIB_EMBED_TTF_FILE_RESOLVED} ${BAE_RAYLIB_EMBED_FONT_HEADER}
+            DEPENDS ${BAE_RAYLIB_EMBED_TTF_FILE_RESOLVED} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/create_embedded_font_h.py
+            VERBATIM
+            COMMENT "Embedding raylib_player TTF font into embedded_font.h"
+          )
+          add_custom_target(raylib_player_embedded_font DEPENDS ${BAE_RAYLIB_EMBED_FONT_HEADER})
+          add_dependencies(raylib_player raylib_player_embedded_font)
+          target_compile_definitions(raylib_player PRIVATE EMBED_TTF_FONT=1)
+          target_include_directories(raylib_player PRIVATE ${BAE_RAYLIB_EMBED_FONT_HEADER_DIR})
+        endif()
+      endif()
+    endif()
+
+    if(TARGET raylib)
+      target_link_libraries(raylib_player PRIVATE raylib winmm)
+    else()
+      target_include_directories(raylib_player PRIVATE ${BAE_RAYLIB_INCLUDE_DIR})
+      target_link_libraries(raylib_player PRIVATE ${BAE_RAYLIB_LIBRARY})
+      if(UNIX AND NOT APPLE)
+        target_link_libraries(raylib_player PRIVATE m pthread dl)
+      endif()
+      if(APPLE)
+        target_link_libraries(raylib_player PRIVATE
+          "-framework IOKit"
+          "-framework Cocoa"
+          "-framework OpenGL"
+        )
+      endif()
+    endif()
+
+    if(WIN32)
+      set_target_properties(raylib_player PROPERTIES WIN32_EXECUTABLE TRUE)
+    endif()
+  else()
+    message(STATUS "Skipping BUILD_RAYLIB_PLAYER because raylib was not found.")
+  endif()
+endif()
+
 if(BUILD_CLITOOLS)
   add_executable(songtool 
     neobae/src/songtool/songtool.c
