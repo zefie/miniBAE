@@ -349,7 +349,7 @@ static int append_segment_repeats(SampleBuffer *out,
     }
 
     segLen = end - start;
-    reps = (size_t)block->count + 1;
+    reps = (size_t)block->count;
     for (r = 0; r < reps; ++r)
     {
         size_t i;
