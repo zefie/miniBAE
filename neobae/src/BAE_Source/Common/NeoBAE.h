@@ -167,9 +167,9 @@ extern "C"
         BAE_REVERB_TYPE_13,    // Neo Hall (Neo reverb)
         BAE_REVERB_TYPE_14,    // Neo Cavern (Neo reverb)        
         BAE_REVERB_TYPE_15,    // Neo Dungeon (Neo reverb)
-        BAE_REVERB_TYPE_16,    // Neo Reserved (Neo reverb)
-        BAE_REVERB_TYPE_17,    // Neo Tap Delay (Neo reverb)
-        BAE_REVERB_TYPE_18,    // Custom (Neo reverb)
+        BAE_REVERB_TYPE_16,    // Neo SC55-style (Neo reverb)
+        BAE_REVERB_TYPE_17,    // Neo Nokia (Neo reverb)
+        BAE_REVERB_TYPE_18,    // Neo Tap Delay (Neo reverb)
         BAE_REVERB_TYPE_COUNT
     } BAEReverbType;
 

@@ -289,15 +289,23 @@ void GetNeoReverbPresetParams(int reverbType, int *combCount, int *delaysMs, int
             *lowpass = 64;
             *mix = 160;
             break;
-        case REVERB_TYPE_16: // Nokia-style
+        case REVERB_TYPE_16: // SC55-style
+            *combCount = 4;
+            delaysMs[0] = 40; delaysMs[1] = 56; delaysMs[2] = 79; delaysMs[3] = 122;
+            feedback[0] = 116; feedback[1] = 101; feedback[2] = 127; feedback[3] = 122;
+            gain[0] = 127; gain[1] = 127; gain[2] = 127; gain[3] = 127;
+            *lowpass = 17;
+            *mix = 152;
+            break;
+        case REVERB_TYPE_17: // Nokia-style
             *combCount = 4;
             delaysMs[0] = 16; delaysMs[1] = 14; delaysMs[2] = 25; delaysMs[3] = 20;
             feedback[0] = 127; feedback[1] = 127; feedback[2] = 127; feedback[3] = 127;
             gain[0] = 142; gain[1] = 136; gain[2] = 130; gain[3] = 254;
             *lowpass = 127;
             *mix = 110;
-            break;
-        case REVERB_TYPE_17: // Tap delay - doesn't use custom reverb params
+            break;            
+        case REVERB_TYPE_18: // Tap delay - doesn't use custom reverb params
             *combCount = 4;
             *lowpass = 13107; // ~0.20
             *mix = 104;
@@ -805,16 +813,17 @@ void RunNeoReverb(int32_t *sourceP, int32_t *destP, int numFrames)
         case REVERB_TYPE_13:  // Neo Hall (uses Custom preset)
         case REVERB_TYPE_14:  // Neo Cavern (uses Custom preset)
         case REVERB_TYPE_15:  // Neo Dungeon (uses Custom preset)
-        case REVERB_TYPE_16:  // Neo Reserved (uses Custom preset)
+        case REVERB_TYPE_16:  // Neo SC55-style (uses Custom preset)
+        case REVERB_TYPE_17:  // Neo Nokia (uses Custom preset)
             PV_ProcessNeoCustomReverb(sourceP, destP, numFrames);
             break;
             
-        case REVERB_TYPE_17:  // Neo Tap Delay
+        case REVERB_TYPE_18:  // Neo Tap Delay
             PV_ProcessNeoTapReverb(sourceP, destP, numFrames);
             break;
             
         default:
-            if (params->mReverbMode >= REVERB_TYPE_18)
+            if (params->mReverbMode > REVERB_TYPE_18)
             {
                 // Treat unknown custom modes as Custom reverb
                 PV_ProcessNeoCustomReverb(sourceP, destP, numFrames);
