@@ -41,6 +41,7 @@
 #define SONGTOOL_MAX_SAMPLE_OVERRIDES 4096
 #define SONGTOOL_MAX_INSTRUMENT_OVERRIDES 1024
 #define SONGTOOL_MAX_METADATA_EDITS 128
+#define SONGTOOL_MAX_RESAMPLE_TARGETS 4096
 
 typedef struct SongtoolSampleOverride
 {
@@ -69,6 +70,12 @@ typedef struct SongtoolMetadataEdit
     const char *value;
     int clear;
 } SongtoolMetadataEdit;
+
+typedef struct SongtoolResampleTarget
+{
+    uint32_t sampleIndex;
+    uint32_t rateHz;
+} SongtoolResampleTarget;
 
 static SongtoolMetadataField const kSongtoolMetadataFields[] = {
     { TITLE_INFO, "title", "Title" },
@@ -227,6 +234,8 @@ static void print_usage(const char *program_name)
             "                        SPEC: instID:codec[@bitrate], e.g. 0x200:qoa\n"
             "  --bitrate N           Target bitrate in kbps (or bps) for lossy codecs\n"
             "  --gain DB             Apply gain (dB) to all sample split volumes (use with encoding, not after)\n"
+            "  --resample SPEC       Resample samples to a target rate in Hz\n"
+            "                        SPEC: rate (all), or index:rate (repeatable), e.g. 48000 or 3:32000\n"
             "  --set-meta F=V        Set metadata field F to value V (repeatable)\n"
             "  --clear-meta F        Clear metadata field F (repeatable)\n"
             "  --list-meta           List supported metadata fields\n"
@@ -1125,6 +1134,464 @@ static int apply_gain_to_all_samples(BAERmfEditorDocument *document,
     return 1;
 }
 
+static int parse_sample_rate_hz(const char *text, uint32_t *outRateHz)
+{
+    char *end = NULL;
+    unsigned long value;
+
+    if (!text || !outRateHz)
+    {
+        return 0;
+    }
+
+    value = strtoul(text, &end, 10);
+    if (end == text || *end != '\0' || value == 0 || value > 65535UL)
+    {
+        return 0;
+    }
+
+    *outRateHz = (uint32_t)value;
+    return 1;
+}
+
+static int parse_resample_spec(const char *spec,
+                               uint32_t *outSampleIndex,
+                               uint32_t *outRateHz,
+                               int *outHasSampleIndex)
+{
+    const char *colon;
+    char indexBuf[32];
+    char rateBuf[32];
+    size_t indexLen;
+    size_t rateLen;
+    char *end = NULL;
+    unsigned long indexValue;
+
+    if (!spec || !outRateHz || !outHasSampleIndex)
+    {
+        return 0;
+    }
+
+    colon = strchr(spec, ':');
+    if (!colon)
+    {
+        *outHasSampleIndex = 0;
+        return parse_sample_rate_hz(spec, outRateHz);
+    }
+
+    indexLen = (size_t)(colon - spec);
+    rateLen = strlen(colon + 1);
+    if (indexLen == 0 || indexLen >= sizeof(indexBuf) ||
+        rateLen == 0 || rateLen >= sizeof(rateBuf))
+    {
+        return 0;
+    }
+
+    memcpy(indexBuf, spec, indexLen);
+    indexBuf[indexLen] = '\0';
+    memcpy(rateBuf, colon + 1, rateLen);
+    rateBuf[rateLen] = '\0';
+
+    indexValue = strtoul(indexBuf, &end, 10);
+    if (end == indexBuf || *end != '\0')
+    {
+        return 0;
+    }
+
+    if (!parse_sample_rate_hz(rateBuf, outRateHz))
+    {
+        return 0;
+    }
+
+    *outHasSampleIndex = 1;
+    if (outSampleIndex)
+    {
+        *outSampleIndex = (uint32_t)indexValue;
+    }
+    return 1;
+}
+
+static int resample_one_sample(BAERmfEditorDocument *document,
+                               uint32_t sampleIndex,
+                               uint32_t targetRateHz,
+                               int *outApplied,
+                               int *outUnsupported)
+{
+    BAERmfEditorSampleInfo infoBefore;
+    BAERmfEditorSampleInfo infoAfter;
+    BAESampleInfo replacedInfo;
+    void const *waveData;
+    uint32_t frameCount;
+    uint16_t bitSize;
+    uint16_t channels;
+    BAE_UNSIGNED_FIXED sampledRate;
+    uint32_t sourceRateHz;
+    uint32_t newFrameCount;
+    uint32_t bytesPerSample;
+    uint32_t totalSamples;
+    uint32_t totalBytes;
+    uint8_t *resampled;
+    uint32_t outFrame;
+    uint32_t c;
+    uint32_t originalStartLoop;
+    uint32_t originalEndLoop;
+    uint32_t startLoop;
+    uint32_t endLoop;
+    BAEResult result;
+
+    if (!document)
+    {
+        return 0;
+    }
+    if (outApplied)
+    {
+        *outApplied = 0;
+    }
+    if (outUnsupported)
+    {
+        *outUnsupported = 0;
+    }
+
+    result = BAERmfEditorDocument_GetSampleInfo(document, sampleIndex, &infoBefore);
+    if (result != BAE_NO_ERROR)
+    {
+        fprintf(stderr,
+                "Warning: failed to get sample info for sample %u (%d)\n",
+                (unsigned)sampleIndex,
+                (int)result);
+        return 1;
+    }
+
+    result = BAERmfEditorDocument_GetSampleWaveformData(document,
+                                                        sampleIndex,
+                                                        &waveData,
+                                                        &frameCount,
+                                                        &bitSize,
+                                                        &channels,
+                                                        &sampledRate);
+    if (result != BAE_NO_ERROR)
+    {
+        fprintf(stderr,
+                "Warning: failed to get waveform data for sample %u (%d)\n",
+                (unsigned)sampleIndex,
+                (int)result);
+        return 1;
+    }
+
+    if ((bitSize != 8 && bitSize != 16) || (channels != 1 && channels != 2) || frameCount == 0)
+    {
+        if (outUnsupported)
+        {
+            *outUnsupported = 1;
+        }
+        return 1;
+    }
+
+    sourceRateHz = (uint32_t)((sampledRate + 32768u) >> 16);
+    if (sourceRateHz == 0 || sourceRateHz == targetRateHz)
+    {
+        return 1;
+    }
+
+    newFrameCount = (uint32_t)((((uint64_t)frameCount * (uint64_t)targetRateHz) +
+                                 ((uint64_t)sourceRateHz / 2u)) /
+                                (uint64_t)sourceRateHz);
+    if (newFrameCount == 0)
+    {
+        newFrameCount = 1;
+    }
+
+    bytesPerSample = (uint32_t)(bitSize / 8u);
+    totalSamples = newFrameCount * (uint32_t)channels;
+    totalBytes = totalSamples * bytesPerSample;
+    if (bytesPerSample == 0 || totalSamples == 0 || totalBytes / bytesPerSample != totalSamples)
+    {
+        fprintf(stderr,
+                "Warning: resample size overflow for sample %u\n",
+                (unsigned)sampleIndex);
+        return 1;
+    }
+
+    resampled = (uint8_t *)malloc(totalBytes);
+    if (!resampled)
+    {
+        fprintf(stderr, "Error: out of memory while resampling\n");
+        return 0;
+    }
+
+    if (bitSize == 8)
+    {
+        uint8_t const *src = (uint8_t const *)waveData;
+        uint8_t *dst = (uint8_t *)resampled;
+
+        for (outFrame = 0; outFrame < newFrameCount; ++outFrame)
+        {
+            uint64_t posQ16;
+            uint32_t srcIndex;
+            uint32_t frac;
+
+            if (newFrameCount <= 1 || frameCount <= 1)
+            {
+                srcIndex = 0;
+                frac = 0;
+            }
+            else
+            {
+                posQ16 = ((uint64_t)outFrame * (uint64_t)(frameCount - 1u) << 16u) /
+                         (uint64_t)(newFrameCount - 1u);
+                srcIndex = (uint32_t)(posQ16 >> 16u);
+                frac = (uint32_t)(posQ16 & 0xFFFFu);
+            }
+
+            for (c = 0; c < (uint32_t)channels; ++c)
+            {
+                uint32_t srcA = srcIndex;
+                uint32_t srcB = (srcIndex + 1u < frameCount) ? (srcIndex + 1u) : srcIndex;
+                int32_t a = (int32_t)src[srcA * (uint32_t)channels + c] - 128;
+                int32_t b = (int32_t)src[srcB * (uint32_t)channels + c] - 128;
+                int32_t mixed = (int32_t)((((int64_t)a * (int64_t)(65536u - frac)) +
+                                           ((int64_t)b * (int64_t)frac) +
+                                           32768) >> 16);
+                int32_t out = mixed + 128;
+                if (out < 0) out = 0;
+                if (out > 255) out = 255;
+                dst[outFrame * (uint32_t)channels + c] = (uint8_t)out;
+            }
+        }
+    }
+    else
+    {
+        int16_t const *src = (int16_t const *)waveData;
+        int16_t *dst = (int16_t *)resampled;
+
+        for (outFrame = 0; outFrame < newFrameCount; ++outFrame)
+        {
+            uint64_t posQ16;
+            uint32_t srcIndex;
+            uint32_t frac;
+
+            if (newFrameCount <= 1 || frameCount <= 1)
+            {
+                srcIndex = 0;
+                frac = 0;
+            }
+            else
+            {
+                posQ16 = ((uint64_t)outFrame * (uint64_t)(frameCount - 1u) << 16u) /
+                         (uint64_t)(newFrameCount - 1u);
+                srcIndex = (uint32_t)(posQ16 >> 16u);
+                frac = (uint32_t)(posQ16 & 0xFFFFu);
+            }
+
+            for (c = 0; c < (uint32_t)channels; ++c)
+            {
+                uint32_t srcA = srcIndex;
+                uint32_t srcB = (srcIndex + 1u < frameCount) ? (srcIndex + 1u) : srcIndex;
+                int32_t a = (int32_t)src[srcA * (uint32_t)channels + c];
+                int32_t b = (int32_t)src[srcB * (uint32_t)channels + c];
+                int32_t mixed = (int32_t)((((int64_t)a * (int64_t)(65536u - frac)) +
+                                           ((int64_t)b * (int64_t)frac) +
+                                           32768) >> 16);
+                if (mixed < -32768) mixed = -32768;
+                if (mixed > 32767) mixed = 32767;
+                dst[outFrame * (uint32_t)channels + c] = (int16_t)mixed;
+            }
+        }
+    }
+
+    originalStartLoop = infoBefore.sampleInfo.startLoop;
+    originalEndLoop = infoBefore.sampleInfo.endLoop;
+    startLoop = originalStartLoop;
+    endLoop = originalEndLoop;
+    if (startLoop > frameCount)
+    {
+        startLoop = frameCount;
+    }
+    if (endLoop > frameCount)
+    {
+        endLoop = frameCount;
+    }
+    if (frameCount > 0)
+    {
+        startLoop = (uint32_t)((((uint64_t)startLoop * (uint64_t)newFrameCount) +
+                                ((uint64_t)frameCount / 2u)) /
+                               (uint64_t)frameCount);
+        endLoop = (uint32_t)((((uint64_t)endLoop * (uint64_t)newFrameCount) +
+                              ((uint64_t)frameCount / 2u)) /
+                             (uint64_t)frameCount);
+    }
+
+    if (startLoop > newFrameCount)
+    {
+        startLoop = newFrameCount;
+    }
+    if (endLoop > newFrameCount)
+    {
+        endLoop = newFrameCount;
+    }
+
+    /* Preserve a valid non-empty loop when source had one, even after heavy
+     * downsampling where rounded points may collapse to the same frame. */
+    if (originalEndLoop > originalStartLoop && endLoop <= startLoop)
+    {
+        if (startLoop < newFrameCount)
+        {
+            endLoop = startLoop + 1u;
+        }
+        else if (newFrameCount > 0)
+        {
+            startLoop = newFrameCount - 1u;
+            endLoop = newFrameCount;
+        }
+    }
+
+    result = BAERmfEditorDocument_ReplaceSampleFromPCM(document,
+                                                       sampleIndex,
+                                                       resampled,
+                                                       newFrameCount,
+                                                       bitSize,
+                                                       channels,
+                                                       (BAE_UNSIGNED_FIXED)(targetRateHz << 16u),
+                                                       startLoop,
+                                                       endLoop,
+                                                       &replacedInfo);
+    free(resampled);
+
+    if (result != BAE_NO_ERROR)
+    {
+        fprintf(stderr,
+                "Warning: failed to replace PCM for sample %u (%d)\n",
+                (unsigned)sampleIndex,
+                (int)result);
+        return 1;
+    }
+
+    result = BAERmfEditorDocument_GetSampleInfo(document, sampleIndex, &infoAfter);
+    if (result == BAE_NO_ERROR)
+    {
+        infoAfter.compressionType = infoBefore.compressionType;
+        infoAfter.opusMode = infoBefore.opusMode;
+        infoAfter.opusRoundTripResample = infoBefore.opusRoundTripResample;
+        (void)BAERmfEditorDocument_SetSampleInfo(document, sampleIndex, &infoAfter);
+    }
+
+    if (outApplied)
+    {
+        *outApplied = 1;
+    }
+    return 1;
+}
+
+static int apply_resample_to_all_samples(BAERmfEditorDocument *document,
+                                         uint32_t rateHz)
+{
+    uint32_t sampleCount;
+    uint32_t i;
+    uint32_t applied;
+    uint32_t skippedUnsupported;
+
+    if (!document)
+    {
+        return 0;
+    }
+
+    sampleCount = 0;
+    if (BAERmfEditorDocument_GetSampleCount(document, &sampleCount) != BAE_NO_ERROR)
+    {
+        return 0;
+    }
+
+    applied = 0;
+    skippedUnsupported = 0;
+    for (i = 0; i < sampleCount; ++i)
+    {
+        int sampleApplied;
+        int sampleUnsupported;
+
+        if (!resample_one_sample(document, i, rateHz, &sampleApplied, &sampleUnsupported))
+        {
+            return 0;
+        }
+        if (sampleApplied)
+        {
+            ++applied;
+        }
+        if (sampleUnsupported)
+        {
+            ++skippedUnsupported;
+        }
+    }
+
+    fprintf(stderr,
+            "Resample: %u Hz applied to %u/%u samples (%u skipped unsupported formats)\n",
+            (unsigned)rateHz,
+            (unsigned)applied,
+            (unsigned)sampleCount,
+            (unsigned)skippedUnsupported);
+    return 1;
+}
+
+static int apply_resample_targets(BAERmfEditorDocument *document,
+                                  SongtoolResampleTarget const *targets,
+                                  uint32_t targetCount)
+{
+    uint32_t sampleCount;
+    uint32_t i;
+
+    if (!document || !targets)
+    {
+        return 0;
+    }
+
+    sampleCount = 0;
+    if (BAERmfEditorDocument_GetSampleCount(document, &sampleCount) != BAE_NO_ERROR)
+    {
+        return 0;
+    }
+
+    for (i = 0; i < targetCount; ++i)
+    {
+        int sampleApplied;
+        int sampleUnsupported;
+
+        if (targets[i].sampleIndex >= sampleCount)
+        {
+            fprintf(stderr,
+                    "Error: sample index %u out of range (sample count: %u)\n",
+                    (unsigned)targets[i].sampleIndex,
+                    (unsigned)sampleCount);
+            return 0;
+        }
+
+        if (!resample_one_sample(document,
+                                 targets[i].sampleIndex,
+                                 targets[i].rateHz,
+                                 &sampleApplied,
+                                 &sampleUnsupported))
+        {
+            return 0;
+        }
+
+        if (sampleUnsupported)
+        {
+            fprintf(stderr,
+                    "Warning: sample %u not resampled (unsupported waveform format)\n",
+                    (unsigned)targets[i].sampleIndex);
+            continue;
+        }
+
+        if (sampleApplied)
+        {
+            fprintf(stderr,
+                    "Sample %u resampled to %u Hz\n",
+                    (unsigned)targets[i].sampleIndex,
+                    (unsigned)targets[i].rateHz);
+        }
+    }
+
+    return 1;
+}
+
 static int trim_document_to_tick(BAERmfEditorDocument *document,
                                  uint32_t boundaryTick)
 {
@@ -1188,6 +1655,7 @@ static void print_document_info(BAERmfEditorDocument const *document, const char
     uint64_t songLengthMs;
     uint32_t i;
     int printedAnyCodec;
+    int printedAnyRate;
     bool loopEnabled;
     uint32_t loopStartTick;
     uint32_t loopEndTick;
@@ -1271,9 +1739,114 @@ static void print_document_info(BAERmfEditorDocument const *document, const char
     printf("Samples: %u\n", (unsigned)sampleCount);
     if (sampleCount == 0)
     {
+        printf("Sample rates: (none)\n");
         printf("Codecs: (none)\n");
         return;
     }
+
+    printf("Sample rates:\n");
+    {
+        uint32_t *sampleRates;
+        uint8_t *rateValid;
+        uint32_t j;
+        uint32_t k;
+
+        sampleRates = (uint32_t *)malloc(sampleCount * sizeof(*sampleRates));
+        rateValid = (uint8_t *)malloc(sampleCount * sizeof(*rateValid));
+        if (!sampleRates || !rateValid)
+        {
+            printf("  (out of memory)\n");
+        }
+        else
+        {
+            for (i = 0; i < sampleCount; ++i)
+            {
+                void const *waveData;
+                uint32_t frameCount;
+                uint16_t bitSize;
+                uint16_t channels;
+                BAE_UNSIGNED_FIXED sampledRate;
+
+                if (BAERmfEditorDocument_GetSampleWaveformData(document,
+                                                                i,
+                                                                &waveData,
+                                                                &frameCount,
+                                                                &bitSize,
+                                                                &channels,
+                                                                &sampledRate) == BAE_NO_ERROR)
+                {
+                    sampleRates[i] = (uint32_t)((sampledRate + 32768u) >> 16u);
+                    rateValid[i] = (sampleRates[i] > 0) ? 1u : 0u;
+                }
+                else
+                {
+                    sampleRates[i] = 0;
+                    rateValid[i] = 0;
+                }
+            }
+
+            printedAnyRate = 0;
+            for (i = 0; i < sampleCount; ++i)
+            {
+                int alreadyPrinted;
+
+                if (!rateValid[i])
+                {
+                    continue;
+                }
+
+                alreadyPrinted = 0;
+                for (j = 0; j < i; ++j)
+                {
+                    if (rateValid[j] && sampleRates[j] == sampleRates[i])
+                    {
+                        alreadyPrinted = 1;
+                        break;
+                    }
+                }
+                if (alreadyPrinted)
+                {
+                    continue;
+                }
+
+                printf("  %u Hz: ", (unsigned)sampleRates[i]);
+                printedAnyRate = 1;
+
+                {
+                    int firstInGroup;
+                    firstInGroup = 1;
+                    for (k = 0; k < sampleCount; ++k)
+                    {
+                        if (rateValid[k] && sampleRates[k] == sampleRates[i])
+                        {
+                            if (!firstInGroup)
+                            {
+                                printf(", ");
+                            }
+                            printf("%u", (unsigned)k);
+                            firstInGroup = 0;
+                        }
+                    }
+                }
+                printf("\n");
+            }
+
+            if (!printedAnyRate)
+            {
+                printf("  (unknown)\n");
+            }
+        }
+
+        if (sampleRates)
+        {
+            free(sampleRates);
+        }
+        if (rateValid)
+        {
+            free(rateValid);
+        }
+    }
+
     printf("Codecs:");
 
     {
@@ -1416,6 +1989,8 @@ int main(int argc, char *argv[])
     int doCompression;
     int doGlobalCompression;
     int doGain;
+    int doResample;
+    int doGlobalResample;
     int doMetadataEdit;
     int doDisableLoop;
     int doSetLoop;
@@ -1432,10 +2007,13 @@ int main(int argc, char *argv[])
     SongtoolSampleOverride sampleOverrides[SONGTOOL_MAX_SAMPLE_OVERRIDES];
     SongtoolInstrumentOverride instrumentOverrides[SONGTOOL_MAX_INSTRUMENT_OVERRIDES];
     SongtoolMetadataEdit metadataEdits[SONGTOOL_MAX_METADATA_EDITS];
+    SongtoolResampleTarget resampleTargets[SONGTOOL_MAX_RESAMPLE_TARGETS];
     uint32_t sampleOverrideCount;
     uint32_t instrumentOverrideCount;
     uint32_t metadataEditCount;
+    uint32_t resampleTargetCount;
     double gainDb;
+    uint32_t globalResampleRateHz;
     int requiresZmf;
 
     sourcePath = NULL;
@@ -1444,6 +2022,8 @@ int main(int argc, char *argv[])
     doCompression = 0;
     doGlobalCompression = 0;
     doGain = 0;
+    doResample = 0;
+    doGlobalResample = 0;
     doMetadataEdit = 0;
     doDisableLoop = 0;
     doSetLoop = 0;
@@ -1460,7 +2040,9 @@ int main(int argc, char *argv[])
     sampleOverrideCount = 0;
     instrumentOverrideCount = 0;
     metadataEditCount = 0;
+    resampleTargetCount = 0;
     gainDb = 0.0;
+    globalResampleRateHz = 0;
     requiresZmf = 0;
 
     mod2rmf_encoder_defaults(&encoderSettings);
@@ -1614,6 +2196,48 @@ int main(int argc, char *argv[])
             }
             gainDb = v;
             doGain = 1;
+            continue;
+        }
+        if (!strcmp(arg, "--resample"))
+        {
+            uint32_t sampleIndex;
+            uint32_t rateHz;
+            int hasSampleIndex;
+
+            if (argi + 1 >= argc)
+            {
+                fprintf(stderr, "Error: --resample requires an argument\n");
+                return 1;
+            }
+            ++argi;
+
+            if (!parse_resample_spec(argv[argi], &sampleIndex, &rateHz, &hasSampleIndex))
+            {
+                fprintf(stderr,
+                        "Error: invalid --resample '%s' (expected rate or index:rate)\n",
+                        argv[argi]);
+                return 1;
+            }
+
+            if (hasSampleIndex)
+            {
+                if (resampleTargetCount >= SONGTOOL_MAX_RESAMPLE_TARGETS)
+                {
+                    fprintf(stderr, "Error: too many --resample index:rate entries (max %d)\n",
+                            SONGTOOL_MAX_RESAMPLE_TARGETS);
+                    return 1;
+                }
+                resampleTargets[resampleTargetCount].sampleIndex = sampleIndex;
+                resampleTargets[resampleTargetCount].rateHz = rateHz;
+                ++resampleTargetCount;
+            }
+            else
+            {
+                doGlobalResample = 1;
+                globalResampleRateHz = rateHz;
+            }
+
+            doResample = 1;
             continue;
         }
         if (!strcmp(arg, "--set-meta"))
@@ -1836,15 +2460,15 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    if (!destPath && (doCompression || doGain || doMetadataEdit || doSetLoop || doDisableLoop || doTrim))
+    if (!destPath && (doCompression || doGain || doResample || doMetadataEdit || doSetLoop || doDisableLoop || doTrim))
     {
         fprintf(stderr, "Error: destination path is required for edit operations\n");
         return 1;
     }
 
-    if (!doInfo && !doCompression && !doGain && !doMetadataEdit && !doSetLoop && !doDisableLoop && !doTrim)
+    if (!doInfo && !doCompression && !doGain && !doResample && !doMetadataEdit && !doSetLoop && !doDisableLoop && !doTrim)
     {
-        fprintf(stderr, "Error: no operation requested. Use --codec, --gain, --set-meta/--clear-meta, --loop-*, --disable-loop, and/or --trim.\n");
+        fprintf(stderr, "Error: no operation requested. Use --codec, --gain, --resample, --set-meta/--clear-meta, --loop-*, --disable-loop, and/or --trim.\n");
         return 1;
     }
 
@@ -1900,7 +2524,7 @@ int main(int argc, char *argv[])
         print_document_info(document, sourcePath);
     }
 
-    if (!doCompression && !doGain && !doMetadataEdit && !doSetLoop && !doDisableLoop && !doTrim)
+    if (!doCompression && !doGain && !doResample && !doMetadataEdit && !doSetLoop && !doDisableLoop && !doTrim)
     {
         BAERmfEditorDocument_Delete(document);
         BAE_Cleanup();
@@ -1912,6 +2536,26 @@ int main(int argc, char *argv[])
         if (!apply_gain_to_all_samples(document, gainDb))
         {
             fprintf(stderr, "Error: failed to apply gain\n");
+            BAERmfEditorDocument_Delete(document);
+            BAE_Cleanup();
+            return 1;
+        }
+    }
+
+    if (doResample)
+    {
+        if (doGlobalResample && !apply_resample_to_all_samples(document, globalResampleRateHz))
+        {
+            fprintf(stderr, "Error: global resample failed\n");
+            BAERmfEditorDocument_Delete(document);
+            BAE_Cleanup();
+            return 1;
+        }
+
+        if (resampleTargetCount > 0 &&
+            !apply_resample_targets(document, resampleTargets, resampleTargetCount))
+        {
+            fprintf(stderr, "Error: per-sample resample failed\n");
             BAERmfEditorDocument_Delete(document);
             BAE_Cleanup();
             return 1;
