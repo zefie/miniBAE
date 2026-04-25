@@ -728,10 +728,12 @@ static int parseOverride(const char *str)
 
 static void printHelp(const char *progName)
 {
-    printf("Usage: %s [options] <input.hsb|zsb> <output.hsb|zsb>\n\n", progName);
+    printf("Usage: %s [options] <input.hsb|zsb> [output.hsb|zsb]\n\n", progName);
     printf("Recompresses bank samples and/or applies gain through BAERmfEditor API.\n");
-    printf("Without target filters, all samples are processed.\n\n");
+    printf("Without target filters, all samples are processed.\n");
+    printf("Use --info with only an input file to inspect a bank without saving.\n\n");
     printf("Options:\n");
+    printf("  --info         Show bank instrument/sample info and exit\n");
     printf("  --codec N      Target codec number (see list below)\n");
     printf("  --bitrate N    Target bitrate in kbps (e.g. 128) or bps (e.g. 128000)\n");
     printf("  --sgain DB     Apply sample gain in dB before compression (e.g. -3.0, 6.0)\n");
@@ -1065,6 +1067,7 @@ int main(int argc, char *argv[])
     BAEResult result;
     const char *inputPath = NULL;
     const char *outputPath = NULL;
+    int doInfo = 0;
     int codec = -1;
     uint32_t bitrateKbps = 0;
     uint32_t chosenBitrate = 0;
@@ -1096,6 +1099,10 @@ int main(int argc, char *argv[])
         {
             printHelp(argv[0]);
             return 0;
+        }
+        else if (strcmp(argv[argIdx], "--info") == 0)
+        {
+            doInfo = 1;
         }
         else if (strcmp(argv[argIdx], "--codec") == 0)
         {
@@ -1254,15 +1261,28 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (!inputPath || !outputPath)
+    if (!inputPath || (!outputPath && !doInfo))
     {
-        fprintf(stderr, "Error: input and output file paths required.\n");
+        if (doInfo)
+        {
+            fprintf(stderr, "Error: input file path required.\n");
+        }
+        else
+        {
+            fprintf(stderr, "Error: input and output file paths required.\n");
+        }
         fprintf(stderr, "Use --help for usage information.\n");
         return 1;
     }
 
     doProcess = (codec >= 0 || hasSampleGain || hasInstrumentGain || hasSndStorage ||
                  sndOverrideCount > 0);
+
+    if (doInfo && (doProcess || hasTargetFilters() || minFrames > 0 || skipProgramCount > 0))
+    {
+        fprintf(stderr, "Error: --info is standalone and cannot be combined with processing/filter options.\n");
+        return 1;
+    }
 
     if (!doProcess && hasTargetFilters())
     {
@@ -1862,6 +1882,12 @@ int main(int argc, char *argv[])
              instrumentGainCount,
                skippedCount);
     }
+
+        if (doInfo)
+        {
+                BAEMixer_Delete(mixer);
+                return 0;
+        }
 
     printf("Saving bank to: %s\n", outputPath);
     result = BAERmfEditorBank_SaveToFile(bankToken, (BAEPathName)outputPath);
