@@ -695,6 +695,7 @@ endif()
 
 set(NEOBAE_SOURCES
   ${BAE_PLATFORM_SOURCE}
+  neobae/src/BAE_Source/Common/BAE_Override.c
   neobae/src/BAE_Source/Common/DriverTools.c
   neobae/src/BAE_Source/Common/GenAudioStreams.c
   neobae/src/BAE_Source/Common/GenCache.c
@@ -732,6 +733,7 @@ set(NEOBAE_SOURCES
   neobae/src/BAE_Source/Common/g72x.c
   neobae/src/BAE_Source/Common/sha1mini.c
   neobae/src/BAE_Source/Common/XFileTypes.c
+  neobae/src/BAE_Source/Common/X_DebugCallback.c
 )
 
 if(BAE_ENABLE_LZMA)
@@ -1077,11 +1079,6 @@ if(BAE_ENABLE_OPUS_ENCODER OR BAE_ENABLE_OPUS_DECODER)
   endif()
 endif()
 
-if (DEBUG)
-  list(APPEND NEOBAE_SOURCES
-      neobae/src/BAE_Source/Common/X_DebugCallback.c
-  )
-endif()
 
 if(NEOBAE_SHARED_LIBNEOBAE)
   add_library(neobae SHARED ${NEOBAE_SOURCES})

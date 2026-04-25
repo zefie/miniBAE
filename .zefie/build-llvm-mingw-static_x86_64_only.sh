@@ -6,9 +6,9 @@ TAG_COMMIT=$(git rev-list --abbrev-commit --tags --max-count=1 2>/dev/null)
 TAG=$(git describe --abbrev=0 --tags "$TAG_COMMIT" 2>/dev/null || true)
 DATE=$(git log -1 --format=%cd --date=format:"%Y%m%d" 2>/dev/null)
 
-checkexit() {
-	if [ ${1} != 0 ]; then
-		exit ${1}
+function checkexit() {
+	if [ "$1" != 0 ]; then
+		exit "$1"
 	fi
 }
 
@@ -63,11 +63,11 @@ cmake .. \
     -DCMAKE_RC_COMPILER="${RC}" \
     -DCMAKE_INSTALL_PREFIX="${TOOLCHAIN_PREFIX}/${TARGET}" \
     -DCMAKE_BUILD_TYPE=Release \
-    -DNEOBAE_STATIC=1 -DBAE_PLATFORM=WinOS -DNEOBAE_BUILD_VCLIB=1 -DENABLE_MIDI_HW=1
-checkexit $?
+    -DNEOBAE_STATIC=1 -DBAE_PLATFORM=WinOS -DNEOBAE_BUILD_VCLIB=1 -DENABLE_MIDI_HW=1 "${@}"
+checkexit "$?"
 
 cmake --build . --config Release -- -j$(nproc)
-checkexit $?
+checkexit "$?"
 
 popd
 
@@ -79,8 +79,6 @@ if [ "${1}" == "--clean" ]; then
     echo " *** Cleaning build directories..."
     rm -rf build-*-w64-mingw32
 fi
-
-checkexit "${QUEUE_EXIT}";
 
 DEST="neobae-suite_windows_x86_64_${VERSION}"
 cd "build-x86_64-w64-mingw32/bin"
