@@ -19444,3 +19444,78 @@ BAEResult BAERmfEditorBank_ReEncodeSampleFromMutablePCMEx(BAEBankToken bankToken
                                      compressionType, sndStorageType, opusMode,
                                      opusRoundTripResample);
 }
+
+BAEResult BAERmfEditorDocument_GetFileVersion(BAEPathName filePath, int32_t *outVersion)
+{
+    XFILENAME name;
+    XFILE fileRef;
+    XFILERESOURCEMAP map;
+
+    if (!filePath || !outVersion)
+    {
+        return BAE_PARAM_ERR;
+    }
+
+    XConvertPathToXFILENAME(filePath, &name);
+    fileRef = XFileOpenResource(&name, TRUE);
+    if (!fileRef)
+    {
+        return BAE_FILE_NOT_FOUND;
+    }
+
+    if (XFileSetPosition(fileRef, 0L) != 0 ||
+        XFileRead(fileRef, &map, (int32_t)sizeof(XFILERESOURCEMAP)) != 0)
+    {
+        XFileClose(fileRef);
+        return BAE_FILE_IO_ERROR;
+    }
+    XFileClose(fileRef);
+
+    if (!XFILERESOURCE_ID_IS_VALID(XGetLong(&map.mapID)))
+    {
+        return BAE_BAD_FILE;
+    }
+
+    *outVersion = (int32_t)XGetLong(&map.version);
+    return BAE_NO_ERROR;
+}
+
+BAEResult BAERmfEditorDocument_UpgradeFile(BAEPathName srcPath,
+                                           BAEPathName dstPath,
+                                           int32_t *outFromVersion)
+{
+    BAERmfEditorDocument *document;
+    int32_t fromVersion;
+    BAEResult result;
+
+    if (!srcPath || !dstPath)
+    {
+        return BAE_PARAM_ERR;
+    }
+
+    result = BAERmfEditorDocument_GetFileVersion(srcPath, &fromVersion);
+    if (result != BAE_NO_ERROR)
+    {
+        return result;
+    }
+
+    if (outFromVersion)
+    {
+        *outFromVersion = fromVersion;
+    }
+
+    if (fromVersion == XFILERESOURCE_VERSION_ZMF)
+    {
+        return BAE_ALREADY_EXISTS;
+    }
+
+    document = BAERmfEditorDocument_LoadFromFile(srcPath);
+    if (!document)
+    {
+        return BAE_BAD_FILE;
+    }
+
+    result = BAERmfEditorDocument_SaveAsRmf(document, dstPath);
+    BAERmfEditorDocument_Delete(document);
+    return result;
+}

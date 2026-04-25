@@ -225,8 +225,10 @@ static void print_usage(const char *program_name)
             "\n"
             "Options:\n"
             "  --info               Show source info (title, song length, codecs, loop points)\n"
+            "  --upgrade             Upgrade file to the current ZMF format version (standalone)\n"
             "  --codec N|NAME        Recompress all samples to codec number/name\n"
             "                        (pcm, adpcm, alaw, ulaw, mp3, vorbis, flac, opus, qoa)\n"
+            "  --sndstorage T        Set all sample storage containers: ESND, CSND, or SND\n"
             "  --sample-codec SPEC   Override one sample codec (repeatable)\n"
             "                        SPEC: index:codec[@bitrate], e.g. 3:opus@96\n"
             "  --instrument-codec SPEC\n"
@@ -566,6 +568,98 @@ static int is_opus_compression_type(BAERmfEditorCompressionType ct)
             break;
     }
     return 0;
+}
+
+static int parse_snd_storage_type(const char *str, BAERmfEditorSndStorageType *outType)
+{
+    if (!str || !outType)
+    {
+        return 0;
+    }
+
+    if (songtool_str_equal_ignore_case(str, "SND"))
+    {
+        *outType = BAE_EDITOR_SND_STORAGE_SND;
+        return 1;
+    }
+    if (songtool_str_equal_ignore_case(str, "CSND"))
+    {
+        *outType = BAE_EDITOR_SND_STORAGE_CSND;
+        return 1;
+    }
+    if (songtool_str_equal_ignore_case(str, "ESND"))
+    {
+        *outType = BAE_EDITOR_SND_STORAGE_ESND;
+        return 1;
+    }
+
+    return 0;
+}
+
+static const char *songtool_snd_storage_name(BAERmfEditorSndStorageType storageType)
+{
+    switch (storageType)
+    {
+        case BAE_EDITOR_SND_STORAGE_SND:
+            return "SND";
+        case BAE_EDITOR_SND_STORAGE_CSND:
+            return "CSND";
+        case BAE_EDITOR_SND_STORAGE_ESND:
+        default:
+            return "ESND";
+    }
+}
+
+static int apply_storage_to_all_samples(BAERmfEditorDocument *document,
+                                        BAERmfEditorSndStorageType storageType)
+{
+    uint32_t sampleCount;
+    uint32_t i;
+    uint32_t applied;
+
+    if (!document)
+    {
+        return 0;
+    }
+
+    sampleCount = 0;
+    if (BAERmfEditorDocument_GetSampleCount(document, &sampleCount) != BAE_NO_ERROR)
+    {
+        return 0;
+    }
+
+    applied = 0;
+    for (i = 0; i < sampleCount; ++i)
+    {
+        BAERmfEditorSampleInfo info;
+        BAEResult result;
+
+        result = BAERmfEditorDocument_GetSampleInfo(document, i, &info);
+        if (result != BAE_NO_ERROR)
+        {
+            fprintf(stderr, "Warning: failed to get sample info for sample %u (%d)\n",
+                    (unsigned)i, (int)result);
+            continue;
+        }
+
+        info.sndStorageType = storageType;
+        result = BAERmfEditorDocument_SetSampleInfo(document, i, &info);
+        if (result != BAE_NO_ERROR)
+        {
+            fprintf(stderr, "Warning: failed to set sample storage for sample %u: %d\n",
+                    (unsigned)i, (int)result);
+            continue;
+        }
+
+        ++applied;
+    }
+
+    fprintf(stderr,
+            "Storage: %s applied to %u/%u samples\n",
+            songtool_snd_storage_name(storageType),
+            (unsigned)applied,
+            (unsigned)sampleCount);
+    return 1;
 }
 
 static int apply_compression_to_all_samples(BAERmfEditorDocument *document,
@@ -1988,6 +2082,7 @@ int main(int argc, char *argv[])
     int doInfo;
     int doCompression;
     int doGlobalCompression;
+    int doStorage;
     int doGain;
     int doResample;
     int doGlobalResample;
@@ -1995,6 +2090,7 @@ int main(int argc, char *argv[])
     int doDisableLoop;
     int doSetLoop;
     int loopEndExplicit;
+    int doUpgrade;
     int doTrim;
     int trimExplicit;
     uint64_t loopStartValue;
@@ -2015,12 +2111,14 @@ int main(int argc, char *argv[])
     double gainDb;
     uint32_t globalResampleRateHz;
     int requiresZmf;
+    BAERmfEditorSndStorageType storageType;
 
     sourcePath = NULL;
     destPath = NULL;
     doInfo = 0;
     doCompression = 0;
     doGlobalCompression = 0;
+    doStorage = 0;
     doGain = 0;
     doResample = 0;
     doGlobalResample = 0;
@@ -2030,6 +2128,7 @@ int main(int argc, char *argv[])
     loopEndExplicit = 0;
     doTrim = 0;
     trimExplicit = 0;
+    doUpgrade = 0;
     loopStartValue = 0;
     loopEndValue = 0;
     trimValue = 0;
@@ -2044,6 +2143,7 @@ int main(int argc, char *argv[])
     gainDb = 0.0;
     globalResampleRateHz = 0;
     requiresZmf = 0;
+    storageType = BAE_EDITOR_SND_STORAGE_ESND;
 
     mod2rmf_encoder_defaults(&encoderSettings);
 
@@ -2075,6 +2175,30 @@ int main(int argc, char *argv[])
         if (!strcmp(arg, "--info"))
         {
             doInfo = 1;
+            continue;
+        }
+        if (!strcmp(arg, "--upgrade"))
+        {
+            doUpgrade = 1;
+            continue;
+        }
+        if (!strcmp(arg, "--sndstorage"))
+        {
+            if (argi + 1 >= argc)
+            {
+                fprintf(stderr, "Error: %s requires a value: ESND, CSND, or SND\n", arg);
+                return 1;
+            }
+            ++argi;
+            if (!parse_snd_storage_type(argv[argi], &storageType))
+            {
+                fprintf(stderr,
+                        "Error: invalid %s value '%s' (expected ESND, CSND, or SND)\n",
+                        arg,
+                        argv[argi]);
+                return 1;
+            }
+            doStorage = 1;
             continue;
         }
         if (!strcmp(arg, "--codec"))
@@ -2460,15 +2584,21 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    if (!destPath && (doCompression || doGain || doResample || doMetadataEdit || doSetLoop || doDisableLoop || doTrim))
+    if (!destPath && (doUpgrade || doCompression || doStorage || doGain || doResample || doMetadataEdit || doSetLoop || doDisableLoop || doTrim))
     {
         fprintf(stderr, "Error: destination path is required for edit operations\n");
         return 1;
     }
 
-    if (!doInfo && !doCompression && !doGain && !doResample && !doMetadataEdit && !doSetLoop && !doDisableLoop && !doTrim)
+    if (!doInfo && !doUpgrade && !doCompression && !doStorage && !doGain && !doResample && !doMetadataEdit && !doSetLoop && !doDisableLoop && !doTrim)
     {
-        fprintf(stderr, "Error: no operation requested. Use --codec, --gain, --resample, --set-meta/--clear-meta, --loop-*, --disable-loop, and/or --trim.\n");
+        fprintf(stderr, "Error: no operation requested. Use --upgrade, --codec, --sndstorage, --gain, --resample, --set-meta/--clear-meta, --loop-*, --disable-loop, and/or --trim.\n");
+        return 1;
+    }
+
+    if (doUpgrade && (doCompression || doStorage || doGain || doResample || doMetadataEdit || doSetLoop || doDisableLoop || doTrim))
+    {
+        fprintf(stderr, "Error: --upgrade cannot be combined with other edit operations\n");
         return 1;
     }
 
@@ -2511,6 +2641,44 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    if (doUpgrade)
+    {
+        int32_t fromVersion;
+        int i;
+
+        result = BAERmfEditorDocument_UpgradeFile((BAEPathName)sourcePath,
+                                                  (BAEPathName)destPath,
+                                                  &fromVersion);
+        if (result == BAE_ALREADY_EXISTS)
+        {
+            fprintf(stderr, "This file is already v%d, this tool can upgrade ", (int)fromVersion);
+            for (i = 1; i < XFILERESOURCE_VERSION_ZMF; ++i)
+            {
+                if (i > 1)
+                {
+                    fprintf(stderr, ", ");
+                }
+                fprintf(stderr, "v%d", i);
+            }
+            fprintf(stderr, " to v%d\n", XFILERESOURCE_VERSION_ZMF);
+            BAE_Cleanup();
+            return 1;
+        }
+        if (result != BAE_NO_ERROR)
+        {
+            fprintf(stderr, "Error: upgrade failed (%d): %s\n", (int)result, sourcePath);
+            BAE_Cleanup();
+            return 1;
+        }
+        fprintf(stdout, "Upgraded v%d to v%d: %s -> %s\n",
+                (int)fromVersion,
+                XFILERESOURCE_VERSION_ZMF,
+                sourcePath,
+                destPath);
+        BAE_Cleanup();
+        return 0;
+    }
+
     document = BAERmfEditorDocument_LoadFromFile((BAEPathName)sourcePath);
     if (!document)
     {
@@ -2524,11 +2692,22 @@ int main(int argc, char *argv[])
         print_document_info(document, sourcePath);
     }
 
-    if (!doCompression && !doGain && !doResample && !doMetadataEdit && !doSetLoop && !doDisableLoop && !doTrim)
+    if (!doCompression && !doStorage && !doGain && !doResample && !doMetadataEdit && !doSetLoop && !doDisableLoop && !doTrim && !doUpgrade)
     {
         BAERmfEditorDocument_Delete(document);
         BAE_Cleanup();
         return 0;
+    }
+
+    if (doStorage)
+    {
+        if (!apply_storage_to_all_samples(document, storageType))
+        {
+            fprintf(stderr, "Error: failed to apply sample storage type\n");
+            BAERmfEditorDocument_Delete(document);
+            BAE_Cleanup();
+            return 1;
+        }
     }
 
     if (doGain)

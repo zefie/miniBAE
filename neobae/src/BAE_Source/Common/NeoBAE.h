@@ -3446,6 +3446,20 @@ BAEResult BAERmfEditorDocument_Validate(BAERmfEditorDocument *document);
 BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document, uint32_t *outReason);
 BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReason);
 
+/* Read the resource-map header of an RMF/ZMF file and return its format version.
+    outVersion receives the raw version field (e.g. XFILERESOURCE_VERSION_ZMF = 5).
+    Returns BAE_PARAM_ERR, BAE_FILE_NOT_FOUND, BAE_FILE_IO_ERROR, or BAE_BAD_FILE on failure. */
+BAEResult BAERmfEditorDocument_GetFileVersion(BAEPathName filePath, int32_t *outVersion);
+
+/* Upgrade a ZMF/RMF file to the current format version and save it to dstPath.
+    If outFromVersion is non-NULL it receives the original file version on return.
+    Returns BAE_NO_ERROR on successful upgrade, BAE_ALREADY_EXISTS if the file is
+    already at the current version (dstPath is not written in that case), or another
+    BAEResult error code on failure. */
+BAEResult BAERmfEditorDocument_UpgradeFile(BAEPathName srcPath,
+                                                         BAEPathName dstPath,
+                                                         int32_t *outFromVersion);
+
 
 #if USE_ZMF_SUPPORT == TRUE
 enum BAEZMFReasonCode
