@@ -10,13 +10,13 @@
 # The variable CVF_VERSION must be set before calling configure_file().
 
 
-set(PACKAGE_VERSION "2.5.3")
+set(PACKAGE_VERSION "2.5.4")
 
 if(PACKAGE_VERSION VERSION_LESS PACKAGE_FIND_VERSION)
   set(PACKAGE_VERSION_COMPATIBLE FALSE)
 else()
 
-  if("2.5.3" MATCHES "^([0-9]+)\\.([0-9]+)")
+  if("2.5.4" MATCHES "^([0-9]+)\\.([0-9]+)")
     set(CVF_VERSION_MAJOR "${CMAKE_MATCH_1}")
     set(CVF_VERSION_MINOR "${CMAKE_MATCH_2}")
 
@@ -27,7 +27,7 @@ else()
       string(REGEX REPLACE "^0+" "" CVF_VERSION_MINOR "${CVF_VERSION_MINOR}")
     endif()
   else()
-    set(CVF_VERSION_MAJOR "2.5.3")
+    set(CVF_VERSION_MAJOR "2.5.4")
     set(CVF_VERSION_MINOR "")
   endif()
 
