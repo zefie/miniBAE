@@ -3606,6 +3606,23 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
                                                     uint32_t sampleIndex,
                                                     BAERmfEditorBankSampleInfo const *info);
 
+/* Scale the splitVolume field of every split (or header miscParameter2 for
+ * non-split instruments) by 'scalar' (0.0=silence, 1.0=unchanged, 2.0=double),
+ * clamped to 0-800. Does one INST load + one bank rebuild regardless of split count.
+ * Use this for igain instead of calling SetInstrumentSampleInfo per split. */
+BAEResult BAERmfEditorBank_ScaleAllSplitVolumes(BAEBankToken bankToken,
+                                                uint32_t instrumentIndex,
+                                                double scalar);
+
+/* Batch SND write support for --sgain.
+ * BeginBatchSnd: enter batch mode; all subsequent PV_BankReplaceSndResourceInPlace
+ *   calls accumulate replacements rather than rebuilding the bank.
+ * CommitBatchSnd: flush all pending replacements in a single bank rebuild.
+ * AbortBatchSnd: discard pending replacements and exit batch mode (on error). */
+BAEResult BAERmfEditorBank_BeginBatchSnd(BAEBankToken bankToken);
+BAEResult BAERmfEditorBank_CommitBatchSnd(BAEBankToken bankToken);
+void      BAERmfEditorBank_AbortBatchSnd(BAEBankToken bankToken);
+
 /* Set only the SND resource reference for a sample slot within an instrument.
  * Unlike BAERmfEditorBank_SetInstrumentSampleInfo, this does not rewrite SND
  * waveform metadata (sample rate/loop/etc). */
@@ -3729,6 +3746,21 @@ BAEResult BAERmfEditorBank_ReEncodeSampleFromPCMEx(BAEBankToken bankToken,
                                                     uint16_t bitSize,
                                                     uint16_t channels,
                                                     BAE_UNSIGNED_FIXED sampleRate);
+
+/* Fast path for callers that already own mutable PCM memory and do not need
+ * an internal defensive copy before encode. The buffer may be modified in place. */
+BAEResult BAERmfEditorBank_ReEncodeSampleFromMutablePCMEx(BAEBankToken bankToken,
+                                                           uint32_t instrumentIndex,
+                                                           uint32_t sampleIndex,
+                                                           BAERmfEditorCompressionType compressionType,
+                                                           BAERmfEditorSndStorageType sndStorageType,
+                                                           BAERmfEditorOpusMode opusMode,
+                                                           bool opusRoundTripResample,
+                                                           void *mutablePcm,
+                                                           uint32_t frameCount,
+                                                           uint16_t bitSize,
+                                                           uint16_t channels,
+                                                           BAE_UNSIGNED_FIXED sampleRate);
 
 #if (X_PLATFORM == X_RAYLIB)
 #include "raylib.h"

@@ -1877,7 +1877,7 @@ if(BUILD_CLITOOLS)
   add_executable(instdump neobae/src/rmfinfo/instdump.c)
   target_link_libraries(instdump PRIVATE neobae)
 
-  add_executable(bankrecomp neobae/src/bankrecomp/bankrecomp.c)
+  add_executable(bankrecomp neobae/src/bankrecomp/bankrecomp_api.c)
   target_link_libraries(bankrecomp PRIVATE neobae)
 
   add_executable(sf2_hsb

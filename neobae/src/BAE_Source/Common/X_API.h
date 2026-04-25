@@ -655,6 +655,18 @@ struct XFILERESOURCECACHE
 };
 typedef struct XFILERESOURCECACHE       XFILERESOURCECACHE;
 
+/* Pending SND replacement entry used for batch-mode sgain */
+#define XFILE_MAX_PENDING_SND   4096
+
+struct XFilePendingSnd
+{
+    int32_t             oldType;    /* XResourceType stored as int32 to avoid forward decl issues */
+    int32_t             newType;
+    int16_t             sndID;
+    char                name[256];
+    void               *data;       /* owned; freed on commit or abort */
+    int32_t             size;
+};
 
 struct XFILENAME
 {
@@ -682,6 +694,12 @@ struct XFILENAME
                                         // file
     XFILE_CACHED_ITEM   memoryCacheEntry;
     XFILERESOURCECACHE  *pCache;        // if file has been cached this will point to it
+
+    /* Batch SND write support: when pendingSndBatch != NULL, SND replacements
+       are accumulated instead of flushing the bank on each encode */
+    struct XFilePendingSnd *pendingSndBatch;  /* heap array, NULL when not in batch mode */
+    int32_t             pendingSndCount;
+    int32_t             pendingSndCapacity;
 };
 typedef struct XFILENAME    XFILENAME;
 // XFILE was historically a 32-bit integer used to hold a pointer. This broke on 64-bit builds.

@@ -13,6 +13,7 @@
 #include <string.h>
 #include <strings.h>
 #include <stdint.h>
+#include <math.h>
 #include <NeoBAE.h>
 #include <BAE_API.h>
 
@@ -474,17 +475,19 @@ static const char *compressionName(XResourceType ct, uint32_t subType)
 static void printHelp(const char *progName)
 {
     printf("Usage: %s [options] <input.hsb|zsb> <output.hsb|zsb>\n\n", progName);
-    printf("Recompresses bank samples through BAERmfEditor API.\n");
+    printf("Recompresses bank samples and/or applies gain through BAERmfEditor API.\n");
     printf("Without target filters, all samples are processed.\n\n");
     printf("Options:\n");
     printf("  --codec N      Target codec number (see list below)\n");
     printf("  --bitrate N    Target bitrate in kbps (e.g. 128) or bps (e.g. 128000)\n");
+    printf("  --sgain DB     Apply sample gain in dB before compression (e.g. -3.0, 6.0)\n");
+    printf("  --igain SCALE  Multiply each instrument split's volume by SCALE (0.0-2.0, 1.0 = unchanged)\n");
     printf("  --minframes N  Skip recompression for samples with fewer than N frames\n");
     printf("  --skip P,P,... Skip recompression for listed program numbers\n");
     printf("  --instrument I[,I...]\n");
-    printf("                 Recompress only listed bank instrument indices\n");
+    printf("                 Process only listed bank instrument indices\n");
     printf("  --sample I:S[,I:S...]\n");
-    printf("                 Recompress only listed instrument sample slots\n");
+    printf("                 Process only listed instrument sample slots\n");
     printf("  --sndstorage T Output storage for recompressed samples: ESND, CSND, SND\n");
     printf("  --help         Show this help message\n\n");
     printf("Codecs:\n");
@@ -505,7 +508,171 @@ static void printHelp(const char *progName)
 #else
     printf("\nNote: VORBIS, FLAC, OPUS codecs force ZSB (ZREZ) output format.\n");
 #endif
-    printf("      Without --codec, the bank is resaved with original compression.\n");
+    printf("      Without --codec/--sgain/--igain, the bank is resaved unchanged.\n");
+}
+
+static int applyPcmGainInPlace(void *pcmData,
+                               uint32_t frameCount,
+                               uint16_t channels,
+                               uint16_t bitSize,
+                               double linearGain)
+{
+    uint32_t totalSamples;
+    uint32_t i;
+
+    if (!pcmData)
+    {
+        return 0;
+    }
+    if ((bitSize != 8 && bitSize != 16) ||
+        (channels != 1 && channels != 2) ||
+        frameCount == 0)
+    {
+        return 0;
+    }
+
+    totalSamples = frameCount * (uint32_t)channels;
+
+    if (bitSize == 8)
+    {
+        uint8_t *data = (uint8_t *)pcmData;
+        for (i = 0; i < totalSamples; ++i)
+        {
+            int centered = (int)data[i] - 128;
+            int scaled = (centered >= 0)
+                       ? (int)(centered * linearGain + 0.5)
+                       : (int)(centered * linearGain - 0.5);
+            int out = scaled + 128;
+            if (out < 0)
+            {
+                out = 0;
+            }
+            if (out > 255)
+            {
+                out = 255;
+            }
+            data[i] = (uint8_t)out;
+        }
+    }
+    else
+    {
+        int16_t *data = (int16_t *)pcmData;
+        for (i = 0; i < totalSamples; ++i)
+        {
+            int32_t scaled;
+            if (data[i] >= 0)
+            {
+                scaled = (int32_t)(data[i] * linearGain + 0.5);
+            }
+            else
+            {
+                scaled = (int32_t)(data[i] * linearGain - 0.5);
+            }
+            if (scaled < -32768)
+            {
+                scaled = -32768;
+            }
+            if (scaled > 32767)
+            {
+                scaled = 32767;
+            }
+            data[i] = (int16_t)scaled;
+        }
+    }
+
+    return 1;
+}
+
+static int inferCompressionFromSampleInfo(const BAERmfEditorBankSampleInfo *sampleInfo,
+                                          BAERmfEditorCompressionType *outCompression)
+{
+    if (!sampleInfo || !outCompression)
+    {
+        return 0;
+    }
+
+    switch ((uint32_t)sampleInfo->compressionType)
+    {
+        case 0:
+        case FOUR_CHAR('n','o','n','e'):
+            *outCompression = BAE_EDITOR_COMPRESSION_PCM;
+            return 1;
+        case FOUR_CHAR('i','m','a','4'):
+        case FOUR_CHAR('i','m','a','W'):
+            *outCompression = BAE_EDITOR_COMPRESSION_ADPCM;
+            return 1;
+        case FOUR_CHAR('u','l','a','w'):
+            *outCompression = BAE_EDITOR_COMPRESSION_ULAW;
+            return 1;
+        case FOUR_CHAR('a','l','a','w'):
+            *outCompression = BAE_EDITOR_COMPRESSION_ALAW;
+            return 1;
+        case FOUR_CHAR('f','L','a','C'):
+            *outCompression = BAE_EDITOR_COMPRESSION_FLAC;
+            return 1;
+#if USE_QOA_SUPPORT == TRUE
+        case FOUR_CHAR('q','o','a','f'):
+            *outCompression = BAE_EDITOR_COMPRESSION_QOA;
+            return 1;
+#endif
+        case FOUR_CHAR('m','p','g','n'):
+            *outCompression = BAE_EDITOR_COMPRESSION_MP3_32K;
+            return 1;
+        case FOUR_CHAR('m','p','g','b'):
+            *outCompression = BAE_EDITOR_COMPRESSION_MP3_48K;
+            return 1;
+        case FOUR_CHAR('m','p','g','d'):
+            *outCompression = BAE_EDITOR_COMPRESSION_MP3_64K;
+            return 1;
+        case FOUR_CHAR('m','p','g','f'):
+            *outCompression = BAE_EDITOR_COMPRESSION_MP3_96K;
+            return 1;
+        case FOUR_CHAR('m','p','g','h'):
+            *outCompression = BAE_EDITOR_COMPRESSION_MP3_128K;
+            return 1;
+        case FOUR_CHAR('m','p','g','j'):
+            *outCompression = BAE_EDITOR_COMPRESSION_MP3_192K;
+            return 1;
+        case FOUR_CHAR('m','p','g','l'):
+            *outCompression = BAE_EDITOR_COMPRESSION_MP3_256K;
+            return 1;
+        case FOUR_CHAR('m','p','g','m'):
+            *outCompression = BAE_EDITOR_COMPRESSION_MP3_320K;
+            return 1;
+        case FOUR_CHAR('O','g','g','V'):
+            switch ((uint32_t)sampleInfo->compressionSubType)
+            {
+                case FOUR_CHAR('v','0','3','2'): *outCompression = BAE_EDITOR_COMPRESSION_VORBIS_32K;  return 1;
+                case FOUR_CHAR('v','0','4','8'): *outCompression = BAE_EDITOR_COMPRESSION_VORBIS_48K;  return 1;
+                case FOUR_CHAR('v','0','6','4'): *outCompression = BAE_EDITOR_COMPRESSION_VORBIS_64K;  return 1;
+                case FOUR_CHAR('v','0','8','0'): *outCompression = BAE_EDITOR_COMPRESSION_VORBIS_80K;  return 1;
+                case FOUR_CHAR('v','0','9','6'): *outCompression = BAE_EDITOR_COMPRESSION_VORBIS_96K;  return 1;
+                case FOUR_CHAR('v','1','2','8'): *outCompression = BAE_EDITOR_COMPRESSION_VORBIS_128K; return 1;
+                case FOUR_CHAR('v','1','6','0'): *outCompression = BAE_EDITOR_COMPRESSION_VORBIS_160K; return 1;
+                case FOUR_CHAR('v','1','9','2'): *outCompression = BAE_EDITOR_COMPRESSION_VORBIS_192K; return 1;
+                case FOUR_CHAR('v','2','5','6'): *outCompression = BAE_EDITOR_COMPRESSION_VORBIS_256K; return 1;
+                default: return 0;
+            }
+        case FOUR_CHAR('O','g','g','O'):
+            switch ((uint32_t)sampleInfo->compressionSubType)
+            {
+                case FOUR_CHAR('o','0','1','2'): *outCompression = BAE_EDITOR_COMPRESSION_OPUS_12K;  return 1;
+                case FOUR_CHAR('o','0','1','6'): *outCompression = BAE_EDITOR_COMPRESSION_OPUS_16K;  return 1;
+                case FOUR_CHAR('o','0','2','4'): *outCompression = BAE_EDITOR_COMPRESSION_OPUS_24K;  return 1;
+                case FOUR_CHAR('o','0','3','2'): *outCompression = BAE_EDITOR_COMPRESSION_OPUS_32K;  return 1;
+                case FOUR_CHAR('o','0','4','8'): *outCompression = BAE_EDITOR_COMPRESSION_OPUS_48K;  return 1;
+                case FOUR_CHAR('o','0','6','4'): *outCompression = BAE_EDITOR_COMPRESSION_OPUS_64K;  return 1;
+                case FOUR_CHAR('o','0','8','0'): *outCompression = BAE_EDITOR_COMPRESSION_OPUS_80K;  return 1;
+                case FOUR_CHAR('o','0','9','6'): *outCompression = BAE_EDITOR_COMPRESSION_OPUS_96K;  return 1;
+                case FOUR_CHAR('o','1','2','8'): *outCompression = BAE_EDITOR_COMPRESSION_OPUS_128K; return 1;
+                case FOUR_CHAR('o','1','6','0'): *outCompression = BAE_EDITOR_COMPRESSION_OPUS_160K; return 1;
+                case FOUR_CHAR('o','1','9','2'): *outCompression = BAE_EDITOR_COMPRESSION_OPUS_192K; return 1;
+                case FOUR_CHAR('o','2','5','6'): *outCompression = BAE_EDITOR_COMPRESSION_OPUS_256K; return 1;
+                default: return 0;
+            }
+        default:
+            return 0;
+    }
 }
 
 static BAERmfEditorCompressionType chooseClosestBitrate(const CompressionEntry *table,
@@ -646,10 +813,15 @@ int main(int argc, char *argv[])
     uint32_t bitrateKbps = 0;
     uint32_t chosenBitrate = 0;
     uint32_t minFrames = 0;
+    int hasSampleGain = 0;
+    double sampleGainDb = 0.0;
+    double sampleGainLinear = 1.0;
+    int hasInstrumentGain = 0;
+    double instrumentGainPercent = 1.0;
     BAERmfEditorCompressionType targetCompression = BAE_EDITOR_COMPRESSION_DONT_CHANGE;
     BAERmfEditorSndStorageType sndStorageType = BAE_EDITOR_SND_STORAGE_ESND;
     BAERmfEditorOpusMode opusMode = BAE_EDITOR_OPUS_MODE_AUDIO;
-    int doRecompress;
+    int doProcess;
     uint32_t instCount;
     uint32_t i;
     int argIdx;
@@ -659,6 +831,7 @@ int main(int argc, char *argv[])
     int processedSndCount;
     uint32_t reencodedCount;
     uint32_t skippedCount;
+    uint32_t instrumentGainCount;
 
     for (argIdx = 1; argIdx < argc; ++argIdx)
     {
@@ -689,6 +862,42 @@ int main(int argc, char *argv[])
                 return 1;
             }
             bitrateKbps = parseBitrate(argv[++argIdx]);
+        }
+        else if (strcmp(argv[argIdx], "--sgain") == 0)
+        {
+            char *end;
+
+            if (argIdx + 1 >= argc)
+            {
+                fprintf(stderr, "Error: --sgain requires a number argument (dB)\n");
+                return 1;
+            }
+
+            sampleGainDb = strtod(argv[++argIdx], &end);
+            if (end == argv[argIdx] || *end != '\0')
+            {
+                fprintf(stderr, "Error: invalid --sgain value '%s'\n", argv[argIdx]);
+                return 1;
+            }
+            hasSampleGain = 1;
+        }
+        else if (strcmp(argv[argIdx], "--igain") == 0)
+        {
+            char *end;
+
+            if (argIdx + 1 >= argc)
+            {
+                fprintf(stderr, "Error: --igain requires a number argument (percent scalar)\n");
+                return 1;
+            }
+
+            instrumentGainPercent = strtod(argv[++argIdx], &end);
+            if (end == argv[argIdx] || *end != '\0')
+            {
+                fprintf(stderr, "Error: invalid --igain value '%s'\n", argv[argIdx]);
+                return 1;
+            }
+            hasInstrumentGain = 1;
         }
         else if (strcmp(argv[argIdx], "--minframes") == 0)
         {
@@ -775,20 +984,50 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    doRecompress = (codec >= 0);
+    doProcess = (codec >= 0 || hasSampleGain || hasInstrumentGain);
 
-    if (!doRecompress && hasTargetFilters())
+    if (!doProcess && hasTargetFilters())
     {
-        fprintf(stderr, "Error: --instrument/--sample require --codec\n");
+        fprintf(stderr, "Error: --instrument/--sample require --codec, --sgain, or --igain\n");
         return 1;
     }
-    if (!doRecompress && sndStorageType != BAE_EDITOR_SND_STORAGE_ESND)
+    if (minFrames > 0 && !(codec >= 0 || hasSampleGain))
+    {
+        fprintf(stderr, "Error: --minframes requires --codec or --sgain\n");
+        return 1;
+    }
+    if (skipProgramCount > 0 && !doProcess)
+    {
+        fprintf(stderr, "Error: --skip requires --codec, --sgain, or --igain\n");
+        return 1;
+    }
+    if (codec < 0 && sndStorageType != BAE_EDITOR_SND_STORAGE_ESND)
     {
         fprintf(stderr, "Error: --sndstorage requires --codec\n");
         return 1;
     }
 
-    if (doRecompress)
+    if (hasSampleGain)
+    {
+        sampleGainLinear = pow(10.0, sampleGainDb / 20.0);
+        if (sampleGainLinear < 0.0)
+        {
+            sampleGainLinear = 0.0;
+        }
+    }
+    if (hasInstrumentGain)
+    {
+        if (instrumentGainPercent < 0.0)
+        {
+            instrumentGainPercent = 0.0;
+        }
+        if (instrumentGainPercent > 2.0)
+        {
+            instrumentGainPercent = 2.0;
+        }
+    }
+
+    if (codec >= 0)
     {
         if (!resolveTargetCompression(codec, bitrateKbps, &targetCompression, &chosenBitrate))
         {
@@ -819,6 +1058,14 @@ int main(int argc, char *argv[])
         }
         printf("\n");
         printf("Recompressed SND storage: %s\n", sndStorageName(sndStorageType));
+    }
+    if (hasSampleGain)
+    {
+        printf("Sample gain: %+0.2f dB (x%.6f)\n", sampleGainDb, sampleGainLinear);
+    }
+    if (hasInstrumentGain)
+    {
+        printf("Instrument gain: x%.3f (scalar)\n", instrumentGainPercent);
     }
 
     mixer = BAEMixer_New();
@@ -862,6 +1109,20 @@ int main(int argc, char *argv[])
     processedSndCount = 0;
     reencodedCount = 0;
     skippedCount = 0;
+    instrumentGainCount = 0;
+
+    /* For sgain (and codec recompression), enable batch SND mode so all re-encodes
+       are queued and committed in a single bank rebuild after the loops. */
+    if (hasSampleGain || codec >= 0)
+    {
+        result = BAERmfEditorBank_BeginBatchSnd(bankToken);
+        if (result != BAE_NO_ERROR)
+        {
+            fprintf(stderr, "Error: BeginBatchSnd failed (%d)\n", (int)result);
+            BAEMixer_Delete(mixer);
+            return 1;
+        }
+    }
 
     for (i = 0; i < instCount; ++i)
     {
@@ -891,6 +1152,9 @@ int main(int argc, char *argv[])
             continue;
         }
 
+        /* When only igain is active, show condensed sample lines (SndID + Vol only) */
+        int igainOnlyMode = (hasInstrumentGain && !hasSampleGain && codec < 0);
+
         for (s = 0; s < sampleCount; ++s)
         {
             BAERmfEditorBankSampleInfo sampleInfo;
@@ -900,6 +1164,7 @@ int main(int argc, char *argv[])
             int skipReason = 0;
             int sharedAlready = 0;
             int si;
+            int sampleDataActive;
 
             result = BAERmfEditorBank_GetInstrumentSampleInfo(bankToken, i, s, &sampleInfo);
             if (result != BAE_NO_ERROR)
@@ -908,20 +1173,35 @@ int main(int argc, char *argv[])
                 continue;
             }
 
-            printf("      Sample[%u]: SndID=%d Keys=%u-%u Root=%u Rate=%uHz "
-                   "Frames=%u %dbit %dch Loop=%u-%u Codec=%s\n",
-                   s,
-                   (int)sampleInfo.sndResourceID,
-                   sampleInfo.lowKey,
-                   sampleInfo.highKey,
-                   sampleInfo.rootKey,
-                   sampleInfo.sampleRate,
-                   sampleInfo.frameCount,
-                   sampleInfo.bitDepth,
-                   sampleInfo.channels,
-                   sampleInfo.loopStart,
-                   sampleInfo.loopEnd,
-                   compressionName(sampleInfo.compressionType, sampleInfo.compressionSubType));
+            if (igainOnlyMode)
+            {
+                int16_t origVol = sampleInfo.splitVolume ? sampleInfo.splitVolume : 100;
+                int32_t newVol = (int32_t)(origVol * instrumentGainPercent + 0.5);
+                if (newVol < 0) newVol = 0;
+                if (newVol > 800) newVol = 800;
+                printf("      Sample[%u]: SndID=%d Vol=%d->%d/800\n",
+                       s,
+                       (int)sampleInfo.sndResourceID,
+                       (int)origVol,
+                       (int)newVol);
+            }
+            else
+            {
+                printf("      Sample[%u]: SndID=%d Keys=%u-%u Root=%u Rate=%uHz "
+                       "Frames=%u %dbit %dch Loop=%u-%u Codec=%s\n",
+                       s,
+                       (int)sampleInfo.sndResourceID,
+                       sampleInfo.lowKey,
+                       sampleInfo.highKey,
+                       sampleInfo.rootKey,
+                       sampleInfo.sampleRate,
+                       sampleInfo.frameCount,
+                       sampleInfo.bitDepth,
+                       sampleInfo.channels,
+                       sampleInfo.loopStart,
+                       sampleInfo.loopEnd,
+                       compressionName(sampleInfo.compressionType, sampleInfo.compressionSubType));
+            }
 
             if (isTargetInstrument(i, &instrumentMatchIdx))
             {
@@ -932,7 +1212,7 @@ int main(int argc, char *argv[])
                 sampleTargetMatched[sampleMatchIdx] = 1;
             }
 
-            if (!doRecompress)
+            if (!doProcess)
             {
                 continue;
             }
@@ -940,6 +1220,14 @@ int main(int argc, char *argv[])
             targetHit = !hasTargetFilters() ||
                         isTargetInstrument(i, NULL) ||
                         isTargetSample(i, s, NULL);
+
+            /* igain is applied per-instrument below (after the sample loop), not per-split */
+
+            sampleDataActive = (codec >= 0 || hasSampleGain);
+            if (!sampleDataActive)
+            {
+                continue;
+            }
 
             if (skipProgramCount > 0 && isSkippedProgram(instInfo.program))
             {
@@ -990,12 +1278,94 @@ int main(int argc, char *argv[])
                 continue;
             }
 
-            result = BAERmfEditorBank_ReEncodeSample(bankToken,
-                                                     i,
-                                                     s,
-                                                     targetCompression,
-                                                     sndStorageType,
-                                                     opusMode);
+            if (hasSampleGain)
+            {
+                void *waveData;
+                uint32_t frameCount;
+                uint16_t bitSize;
+                uint16_t channels;
+                BAE_UNSIGNED_FIXED sampleRate;
+                BAERmfEditorCompressionType sampleCompression;
+                BAERmfEditorSndStorageType sampleStorage;
+                bool sampleOpusRoundTrip;
+
+                waveData = NULL;
+                frameCount = 0;
+                bitSize = 0;
+                channels = 0;
+                sampleRate = 0;
+
+                result = BAERmfEditorBank_GetSampleWaveformData(bankToken,
+                                                                 i,
+                                                                 s,
+                                                                 &waveData,
+                                                                 &frameCount,
+                                                                 &bitSize,
+                                                                 &channels,
+                                                                 &sampleRate);
+                if (result != BAE_NO_ERROR || !waveData)
+                {
+                    ++skippedCount;
+                    printf("        SKIPPED (decode failed: %d)\n", (int)result);
+                    continue;
+                }
+
+                if (!applyPcmGainInPlace(waveData,
+                                         frameCount,
+                                         channels,
+                                         bitSize,
+                                         sampleGainLinear))
+                {
+                    BAERmfEditorBank_FreeWaveformData(waveData);
+                    ++skippedCount;
+                    printf("        SKIPPED (gain unsupported for %dbit/%dch sample)\n",
+                           (int)bitSize,
+                           (int)channels);
+                    continue;
+                }
+
+                if (codec >= 0)
+                {
+                    sampleCompression = targetCompression;
+                    sampleStorage = sndStorageType;
+                }
+                else
+                {
+                    if (!inferCompressionFromSampleInfo(&sampleInfo, &sampleCompression))
+                    {
+                        BAERmfEditorBank_FreeWaveformData(waveData);
+                        ++skippedCount;
+                        printf("        SKIPPED (cannot infer original compression)\n");
+                        continue;
+                    }
+                    sampleStorage = sampleInfo.sndStorageType;
+                }
+
+                sampleOpusRoundTrip = sampleInfo.opusRoundTripResample;
+
+                result = BAERmfEditorBank_ReEncodeSampleFromMutablePCMEx(bankToken,
+                                                                          i,
+                                                                          s,
+                                                                          sampleCompression,
+                                                                          sampleStorage,
+                                                                          opusMode,
+                                                                          sampleOpusRoundTrip,
+                                                                          waveData,
+                                                                          frameCount,
+                                                                          bitSize,
+                                                                          channels,
+                                                                          sampleRate);
+                BAERmfEditorBank_FreeWaveformData(waveData);
+            }
+            else
+            {
+                result = BAERmfEditorBank_ReEncodeSample(bankToken,
+                                                         i,
+                                                         s,
+                                                         targetCompression,
+                                                         sndStorageType,
+                                                         opusMode);
+            }
             if (result != BAE_NO_ERROR)
             {
                 ++skippedCount;
@@ -1009,12 +1379,45 @@ int main(int argc, char *argv[])
                                  (uint32_t)sampleInfo.sndResourceID))
             {
                 fprintf(stderr, "Error: too many processed SND IDs\n");
+                BAERmfEditorBank_AbortBatchSnd(bankToken);
                 BAEMixer_Delete(mixer);
                 return 1;
             }
 
             ++reencodedCount;
             printf("        OK\n");
+        }
+
+        /* Apply igain to all splits of this instrument in a single rebuild */
+        if (hasInstrumentGain && doProcess &&
+            !(skipProgramCount > 0 && isSkippedProgram(instInfo.program)))
+        {
+            int instTargetHit = !hasTargetFilters() || isTargetInstrument(i, NULL);
+            if (instTargetHit)
+            {
+                result = BAERmfEditorBank_ScaleAllSplitVolumes(bankToken, i, instrumentGainPercent);
+                if (result == BAE_NO_ERROR)
+                {
+                    instrumentGainCount += (int)sampleCount;
+                }
+                else
+                {
+                    ++skippedCount;
+                    printf("  SKIPPED instrument %u igain (failed: %d)\n", i, (int)result);
+                }
+            }
+        }
+    }
+
+    /* Commit all queued SND replacements in a single bank rebuild */
+    if (hasSampleGain || codec >= 0)
+    {
+        result = BAERmfEditorBank_CommitBatchSnd(bankToken);
+        if (result != BAE_NO_ERROR)
+        {
+            fprintf(stderr, "Error: CommitBatchSnd failed (%d)\n", (int)result);
+            BAEMixer_Delete(mixer);
+            return 1;
         }
     }
 
@@ -1046,10 +1449,11 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (doRecompress)
+    if (doProcess)
     {
-        printf("\nRe-encode complete: %u samples recompressed, %u skipped\n",
+         printf("\nProcessing complete: %u samples updated, %u instrument slots gain-adjusted, %u skipped\n",
                reencodedCount,
+             instrumentGainCount,
                skippedCount);
     }
 

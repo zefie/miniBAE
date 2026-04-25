@@ -14905,6 +14905,582 @@ BAEResult BAERmfEditorBank_GetInstrumentExtInfo(BAEBankToken bankToken,
     return BAE_NO_ERROR;
 }
 
+/* Fast in-place INST update: skips SND/CSND/ESND iteration and rebuilds only INST resources.
+   This is ~100x faster than PV_BankReplaceResource for metadata-only changes since we avoid
+   copying non-INST resources (which are expensive). */
+static BAEResult PV_BankReplaceInstResourceInPlace(XFILE bankFile,
+                                                   XLongResourceID instID,
+                                                   char const *pascalName,
+                                                   XPTR instData,
+                                                   int32_t instSize)
+{
+    XFILERESOURCEMAP map;
+    int32_t resourceID;
+    XFILE outFile;
+    int32_t instIndex = 0;
+    int32_t instCount = 0;
+    XPTR packedData;
+    int32_t packedSize;
+    bool replaced;
+
+    if (XFileSetPosition(bankFile, 0L) != 0 ||
+        XFileRead(bankFile, &map, (int32_t)sizeof(XFILERESOURCEMAP)) != 0)
+    {
+        return BAE_BAD_FILE;
+    }
+    resourceID = (int32_t)XGetLong(&map.mapID);
+    if (!XFILERESOURCE_ID_IS_VALID(resourceID))
+    {
+        return BAE_BAD_FILE;
+    }
+
+    outFile = XFileOpenVirtualResource(resourceID);
+    if (!outFile)
+    {
+        return BAE_MEMORY_ERR;
+    }
+
+    /* Only iterate INST resources (skip SND/CSND/ESND/etc) */
+    instCount = XCountFileResourcesOfType(bankFile, ID_INST);
+    replaced = FALSE;
+    for (instIndex = 0; instIndex < instCount; ++instIndex)
+    {
+        XLongResourceID resID;
+        int32_t resSize;
+        XPTR resData;
+        char resName[256];
+
+        resName[0] = 0;
+        resData = XGetIndexedFileResource(bankFile,
+                                          ID_INST,
+                                          &resID,
+                                          instIndex,
+                                          resName,
+                                          &resSize);
+        if (!resData)
+        {
+            continue;
+        }
+
+        if (resID == instID)
+        {
+            if (!replaced)
+            {
+                char const *replaceName = pascalName ? pascalName : resName;
+                if (XAddFileResource(outFile,
+                                     ID_INST,
+                                     instID,
+                                     replaceName,
+                                     instData,
+                                     instSize) != 0)
+                {
+                    XDisposePtr(resData);
+                    XFileClose(outFile);
+                    return BAE_FILE_IO_ERROR;
+                }
+                replaced = TRUE;
+            }
+            XDisposePtr(resData);
+            continue;
+        }
+
+        /* Copy unchanged INST resources */
+        if (XAddFileResource(outFile, ID_INST, resID, resName, resData, resSize) != 0)
+        {
+            XDisposePtr(resData);
+            XFileClose(outFile);
+            return BAE_FILE_IO_ERROR;
+        }
+        XDisposePtr(resData);
+    }
+
+    if (!replaced)
+    {
+        if (XAddFileResource(outFile,
+                             ID_INST,
+                             instID,
+                             pascalName,
+                             instData,
+                             instSize) != 0)
+        {
+            XFileClose(outFile);
+            return BAE_FILE_IO_ERROR;
+        }
+    }
+
+    if (XCleanResourceFile(outFile) == FALSE)
+    {
+        XFileClose(outFile);
+        return BAE_FILE_IO_ERROR;
+    }
+
+    packedData = NULL;
+    packedSize = 0;
+    if (XFileGetMemoryFileAsData(outFile, &packedData, &packedSize) != 0 ||
+        !packedData || packedSize <= 0)
+    {
+        XFileClose(outFile);
+        if (packedData)
+        {
+            XDisposePtr(packedData);
+        }
+        return BAE_FILE_IO_ERROR;
+    }
+    XFileClose(outFile);
+
+    if (bankFile->pCache)
+    {
+        XDisposePtr(bankFile->pCache);
+        bankFile->pCache = NULL;
+    }
+    if (bankFile->pResourceData && bankFile->ownsResourceData)
+    {
+        XDisposePtr(bankFile->pResourceData);
+    }
+
+    bankFile->pResourceData = packedData;
+    bankFile->resMemLength = packedSize;
+    bankFile->resMemOffset = 0;
+    bankFile->ownsResourceData = TRUE;
+    bankFile->resizeResourceData = TRUE;
+    bankFile->readOnly = FALSE;
+    bankFile->allowMemCopy = TRUE;
+    return BAE_NO_ERROR;
+}
+
+/* Fast in-place SND update: skips INST/ALIAS/BANK/etc iteration and rebuilds only SND/CSND/ESND.
+   This is ~100x faster than PV_BankReplaceResource for sgain since we avoid copying
+   non-audio resources (especially large INST resources). 
+   Handles type changes (e.g., SND -> CSND) just like PV_BankReplaceResourceEx.
+   When the bank is in batch mode (pendingSndBatch != NULL), the replacement is
+   queued and no rebuild occurs until BAERmfEditorBank_CommitBatchSnd is called. */
+static BAEResult PV_BankReplaceSndResourceInPlace(XFILE bankFile,
+                                                  XResourceType oldSndType,
+                                                  XResourceType newSndType,
+                                                  XShortResourceID sndID,
+                                                  char const *pascalName,
+                                                  XPTR sndData,
+                                                  int32_t sndSize)
+{
+    static const XResourceType sndTypes[] = { ID_SND, ID_CSND, ID_ESND, 0 };
+    XFILERESOURCEMAP map;
+    int32_t resourceID;
+    XFILE outFile;
+    XPTR packedData;
+    int32_t packedSize;
+    bool replaced;
+    int typeIdx;
+
+    /* Batch mode: queue the replacement instead of rebuilding now */
+    if (bankFile->pendingSndBatch != NULL)
+    {
+        struct XFilePendingSnd *entry;
+        XPTR dataCopy;
+
+        /* Grow the array if needed */
+        if (bankFile->pendingSndCount >= bankFile->pendingSndCapacity)
+        {
+            int32_t newCap = bankFile->pendingSndCapacity ? bankFile->pendingSndCapacity * 2 : 64;
+            struct XFilePendingSnd *newArr = (struct XFilePendingSnd *)XNewPtr(
+                (int32_t)(newCap * (int32_t)sizeof(struct XFilePendingSnd)));
+            if (!newArr)
+            {
+                return BAE_MEMORY_ERR;
+            }
+            if (bankFile->pendingSndBatch)
+            {
+                XBlockMove(bankFile->pendingSndBatch, newArr,
+                           bankFile->pendingSndCount * (int32_t)sizeof(struct XFilePendingSnd));
+                XDisposePtr(bankFile->pendingSndBatch);
+            }
+            bankFile->pendingSndBatch = newArr;
+            bankFile->pendingSndCapacity = newCap;
+        }
+
+        /* Copy the SND data so the caller can free their copy */
+        dataCopy = XNewPtr(sndSize);
+        if (!dataCopy)
+        {
+            return BAE_MEMORY_ERR;
+        }
+        XBlockMove(sndData, dataCopy, sndSize);
+
+        entry = &bankFile->pendingSndBatch[bankFile->pendingSndCount++];
+        entry->oldType = (int32_t)oldSndType;
+        entry->newType = (int32_t)newSndType;
+        entry->sndID   = (int16_t)sndID;
+        entry->data    = dataCopy;
+        entry->size    = sndSize;
+        entry->name[0] = 0;
+        if (pascalName)
+        {
+            int32_t i;
+            for (i = 0; i < 255 && pascalName[i]; ++i)
+            {
+                entry->name[i] = pascalName[i];
+            }
+            entry->name[i] = 0;
+        }
+        return BAE_NO_ERROR;
+    }
+
+    if (XFileSetPosition(bankFile, 0L) != 0 ||
+        XFileRead(bankFile, &map, (int32_t)sizeof(XFILERESOURCEMAP)) != 0)
+    {
+        return BAE_BAD_FILE;
+    }
+    resourceID = (int32_t)XGetLong(&map.mapID);
+    if (!XFILERESOURCE_ID_IS_VALID(resourceID))
+    {
+        return BAE_BAD_FILE;
+    }
+
+    outFile = XFileOpenVirtualResource(resourceID);
+    if (!outFile)
+    {
+        return BAE_MEMORY_ERR;
+    }
+
+    /* Only iterate SND/CSND/ESND resources (skip INST/ALIAS/BANK/etc) */
+    replaced = FALSE;
+    for (typeIdx = 0; sndTypes[typeIdx] != 0; ++typeIdx)
+    {
+        XResourceType resType = sndTypes[typeIdx];
+        int32_t resCount = XCountFileResourcesOfType(bankFile, resType);
+        int32_t resIndex;
+
+        for (resIndex = 0; resIndex < resCount; ++resIndex)
+        {
+            XLongResourceID resID;
+            int32_t resSize;
+            XPTR resData;
+            char resName[256];
+
+            resName[0] = 0;
+            resData = XGetIndexedFileResource(bankFile,
+                                              resType,
+                                              &resID,
+                                              resIndex,
+                                              resName,
+                                              &resSize);
+            if (!resData)
+            {
+                continue;
+            }
+
+            if (resType == oldSndType && resID == sndID)
+            {
+                if (!replaced)
+                {
+                    char const *replaceName = pascalName ? pascalName : resName;
+                    /* Use newSndType to allow type changes (SND->CSND, etc) */
+                    if (XAddFileResource(outFile,
+                                         newSndType,
+                                         sndID,
+                                         replaceName,
+                                         sndData,
+                                         sndSize) != 0)
+                    {
+                        XDisposePtr(resData);
+                        XFileClose(outFile);
+                        return BAE_FILE_IO_ERROR;
+                    }
+                    replaced = TRUE;
+                }
+                XDisposePtr(resData);
+                continue;
+            }
+
+            if (XAddFileResource(outFile, resType, resID, resName, resData, resSize) != 0)
+            {
+                XDisposePtr(resData);
+                XFileClose(outFile);
+                return BAE_FILE_IO_ERROR;
+            }
+            XDisposePtr(resData);
+        }
+    }
+
+    if (!replaced)
+    {
+        if (XAddFileResource(outFile,
+                             newSndType,
+                             sndID,
+                             pascalName,
+                             sndData,
+                             sndSize) != 0)
+        {
+            XFileClose(outFile);
+            return BAE_FILE_IO_ERROR;
+        }
+    }
+
+    /* Copy all non-SND resources directly without iterating them individually */
+    static const XResourceType nonSndTypes[] = {
+        ID_INST, ID_ALIAS, ID_BANK, ID_SONG, ID_MIDI, ID_MIDI_OLD, ID_CMID,
+        ID_EMID, ID_ECMI, ID_RMF, ID_TEXT, ID_VERS, 0
+    };
+    for (typeIdx = 0; nonSndTypes[typeIdx] != 0; ++typeIdx)
+    {
+        XResourceType resType = nonSndTypes[typeIdx];
+        int32_t resCount = XCountFileResourcesOfType(bankFile, resType);
+        int32_t resIndex;
+
+        for (resIndex = 0; resIndex < resCount; ++resIndex)
+        {
+            XLongResourceID resID;
+            int32_t resSize;
+            XPTR resData;
+            char resName[256];
+
+            resName[0] = 0;
+            resData = XGetIndexedFileResource(bankFile,
+                                              resType,
+                                              &resID,
+                                              resIndex,
+                                              resName,
+                                              &resSize);
+            if (!resData)
+            {
+                continue;
+            }
+
+            if (XAddFileResource(outFile, resType, resID, resName, resData, resSize) != 0)
+            {
+                XDisposePtr(resData);
+                XFileClose(outFile);
+                return BAE_FILE_IO_ERROR;
+            }
+            XDisposePtr(resData);
+        }
+    }
+
+    if (XCleanResourceFile(outFile) == FALSE)
+    {
+        XFileClose(outFile);
+        return BAE_FILE_IO_ERROR;
+    }
+
+    packedData = NULL;
+    packedSize = 0;
+    if (XFileGetMemoryFileAsData(outFile, &packedData, &packedSize) != 0 ||
+        !packedData || packedSize <= 0)
+    {
+        XFileClose(outFile);
+        if (packedData)
+        {
+            XDisposePtr(packedData);
+        }
+        return BAE_FILE_IO_ERROR;
+    }
+    XFileClose(outFile);
+
+    if (bankFile->pCache)
+    {
+        XDisposePtr(bankFile->pCache);
+        bankFile->pCache = NULL;
+    }
+    if (bankFile->pResourceData && bankFile->ownsResourceData)
+    {
+        XDisposePtr(bankFile->pResourceData);
+    }
+
+    bankFile->pResourceData = packedData;
+    bankFile->resMemLength = packedSize;
+    bankFile->resMemOffset = 0;
+    bankFile->ownsResourceData = TRUE;
+    bankFile->resizeResourceData = TRUE;
+    bankFile->readOnly = FALSE;
+    bankFile->allowMemCopy = TRUE;
+    return BAE_NO_ERROR;
+}
+
+/* Fast in-place SND update: skips INST/ALIAS/BANK/etc iteration and rebuilds only SND/CSND/ESND.
+   This is ~100x faster than PV_BankReplaceResource for sgain since we avoid copying
+   non-audio resources (especially large INST resources). */
+/* Batch SND replacement: replaces multiple SND/CSND/ESND resources in a single
+   bank rebuild. This is the key optimization for sgain — encode all samples first,
+   then commit once instead of once per sample. */
+typedef struct
+{
+    XResourceType   oldType;
+    XResourceType   newType;
+    XShortResourceID sndID;
+    char            name[256];
+    XPTR            data;
+    int32_t         size;
+} PV_SndReplacement;
+
+static BAEResult PV_BankReplaceMultipleSndResources(XFILE bankFile,
+                                                     PV_SndReplacement const *replacements,
+                                                     int32_t replacementCount)
+{
+    static const XResourceType sndTypes[] = { ID_SND, ID_CSND, ID_ESND, 0 };
+    static const XResourceType nonSndTypes[] = {
+        ID_INST, ID_ALIAS, ID_BANK, ID_SONG, ID_MIDI, ID_MIDI_OLD, ID_CMID,
+        ID_EMID, ID_ECMI, ID_RMF, ID_TEXT, ID_VERS, 0
+    };
+    XFILERESOURCEMAP map;
+    int32_t resourceID;
+    XFILE outFile;
+    XPTR packedData;
+    int32_t packedSize;
+    int typeIdx;
+    int32_t ri;
+
+    if (!bankFile || !replacements || replacementCount <= 0)
+    {
+        return BAE_PARAM_ERR;
+    }
+
+    if (XFileSetPosition(bankFile, 0L) != 0 ||
+        XFileRead(bankFile, &map, (int32_t)sizeof(XFILERESOURCEMAP)) != 0)
+    {
+        return BAE_BAD_FILE;
+    }
+    resourceID = (int32_t)XGetLong(&map.mapID);
+    if (!XFILERESOURCE_ID_IS_VALID(resourceID))
+    {
+        return BAE_BAD_FILE;
+    }
+
+    outFile = XFileOpenVirtualResource(resourceID);
+    if (!outFile)
+    {
+        return BAE_MEMORY_ERR;
+    }
+
+    /* Walk SND resources; for each one check if it's in the replacement list */
+    for (typeIdx = 0; sndTypes[typeIdx] != 0; ++typeIdx)
+    {
+        XResourceType resType = sndTypes[typeIdx];
+        int32_t resCount = XCountFileResourcesOfType(bankFile, resType);
+        int32_t resIndex;
+
+        for (resIndex = 0; resIndex < resCount; ++resIndex)
+        {
+            XLongResourceID resID;
+            int32_t resSize;
+            XPTR resData;
+            char resName[256];
+            PV_SndReplacement const *match = NULL;
+
+            resName[0] = 0;
+            resData = XGetIndexedFileResource(bankFile, resType, &resID,
+                                              resIndex, resName, &resSize);
+            if (!resData)
+            {
+                continue;
+            }
+
+            /* Check if this resource is being replaced */
+            for (ri = 0; ri < replacementCount; ++ri)
+            {
+                if (replacements[ri].oldType == resType &&
+                    (XLongResourceID)replacements[ri].sndID == resID)
+                {
+                    match = &replacements[ri];
+                    break;
+                }
+            }
+
+            if (match)
+            {
+                char const *useName = match->name[0] ? match->name : resName;
+                if (XAddFileResource(outFile, match->newType, resID,
+                                     useName, match->data, match->size) != 0)
+                {
+                    XDisposePtr(resData);
+                    XFileClose(outFile);
+                    return BAE_FILE_IO_ERROR;
+                }
+            }
+            else
+            {
+                if (XAddFileResource(outFile, resType, resID, resName,
+                                     resData, resSize) != 0)
+                {
+                    XDisposePtr(resData);
+                    XFileClose(outFile);
+                    return BAE_FILE_IO_ERROR;
+                }
+            }
+            XDisposePtr(resData);
+        }
+    }
+
+    /* Copy all non-SND resources unchanged */
+    for (typeIdx = 0; nonSndTypes[typeIdx] != 0; ++typeIdx)
+    {
+        XResourceType resType = nonSndTypes[typeIdx];
+        int32_t resCount = XCountFileResourcesOfType(bankFile, resType);
+        int32_t resIndex;
+
+        for (resIndex = 0; resIndex < resCount; ++resIndex)
+        {
+            XLongResourceID resID;
+            int32_t resSize;
+            XPTR resData;
+            char resName[256];
+
+            resName[0] = 0;
+            resData = XGetIndexedFileResource(bankFile, resType, &resID,
+                                              resIndex, resName, &resSize);
+            if (!resData)
+            {
+                continue;
+            }
+            if (XAddFileResource(outFile, resType, resID, resName,
+                                 resData, resSize) != 0)
+            {
+                XDisposePtr(resData);
+                XFileClose(outFile);
+                return BAE_FILE_IO_ERROR;
+            }
+            XDisposePtr(resData);
+        }
+    }
+
+    if (XCleanResourceFile(outFile) == FALSE)
+    {
+        XFileClose(outFile);
+        return BAE_FILE_IO_ERROR;
+    }
+
+    packedData = NULL;
+    packedSize = 0;
+    if (XFileGetMemoryFileAsData(outFile, &packedData, &packedSize) != 0 ||
+        !packedData || packedSize <= 0)
+    {
+        XFileClose(outFile);
+        if (packedData)
+        {
+            XDisposePtr(packedData);
+        }
+        return BAE_FILE_IO_ERROR;
+    }
+    XFileClose(outFile);
+
+    if (bankFile->pCache)
+    {
+        XDisposePtr(bankFile->pCache);
+        bankFile->pCache = NULL;
+    }
+    if (bankFile->pResourceData && bankFile->ownsResourceData)
+    {
+        XDisposePtr(bankFile->pResourceData);
+    }
+
+    bankFile->pResourceData = packedData;
+    bankFile->resMemLength = packedSize;
+    bankFile->resMemOffset = 0;
+    bankFile->ownsResourceData = TRUE;
+    bankFile->resizeResourceData = TRUE;
+    bankFile->readOnly = FALSE;
+    bankFile->allowMemCopy = TRUE;
+    return BAE_NO_ERROR;
+}
+
 static BAEResult PV_BankReplaceResource(XFILE bankFile,
                                         XResourceType type,
                                         XLongResourceID id,
@@ -15549,6 +16125,197 @@ BAEResult BAERmfEditorBank_SetInstrumentExtInfo(BAEBankToken bankToken,
     return replaceResult;
 }
 
+BAEResult BAERmfEditorBank_BeginBatchSnd(BAEBankToken bankToken)
+{
+    XFILE bankFile;
+
+    if (!bankToken)
+    {
+        return BAE_PARAM_ERR;
+    }
+    bankFile = (XFILE)bankToken;
+    if (bankFile->pendingSndBatch != NULL)
+    {
+        return BAE_PARAM_ERR; /* already in batch mode */
+    }
+
+    /* Allocate initial capacity — will grow as needed in PV_BankReplaceSndResourceInPlace */
+    bankFile->pendingSndBatch = (struct XFilePendingSnd *)XNewPtr(
+        64 * (int32_t)sizeof(struct XFilePendingSnd));
+    if (!bankFile->pendingSndBatch)
+    {
+        return BAE_MEMORY_ERR;
+    }
+    bankFile->pendingSndCount = 0;
+    bankFile->pendingSndCapacity = 64;
+    return BAE_NO_ERROR;
+}
+
+BAEResult BAERmfEditorBank_CommitBatchSnd(BAEBankToken bankToken)
+{
+    XFILE bankFile;
+    PV_SndReplacement *replacements;
+    int32_t i;
+    BAEResult result;
+
+    if (!bankToken)
+    {
+        return BAE_PARAM_ERR;
+    }
+    bankFile = (XFILE)bankToken;
+    if (!bankFile->pendingSndBatch || bankFile->pendingSndCount == 0)
+    {
+        /* Nothing to flush; just clear batch mode */
+        if (bankFile->pendingSndBatch)
+        {
+            XDisposePtr(bankFile->pendingSndBatch);
+            bankFile->pendingSndBatch = NULL;
+        }
+        bankFile->pendingSndCount = 0;
+        bankFile->pendingSndCapacity = 0;
+        return BAE_NO_ERROR;
+    }
+
+    /* Build PV_SndReplacement array from pending list */
+    replacements = (PV_SndReplacement *)XNewPtr(
+        bankFile->pendingSndCount * (int32_t)sizeof(PV_SndReplacement));
+    if (!replacements)
+    {
+        return BAE_MEMORY_ERR;
+    }
+    for (i = 0; i < bankFile->pendingSndCount; ++i)
+    {
+        struct XFilePendingSnd *p = &bankFile->pendingSndBatch[i];
+        replacements[i].oldType = (XResourceType)p->oldType;
+        replacements[i].newType = (XResourceType)p->newType;
+        replacements[i].sndID   = (XShortResourceID)p->sndID;
+        replacements[i].data    = p->data;
+        replacements[i].size    = p->size;
+        XBlockMove(p->name, replacements[i].name, 256);
+    }
+
+    result = PV_BankReplaceMultipleSndResources(bankFile, replacements,
+                                                bankFile->pendingSndCount);
+
+    /* Free pending data */
+    for (i = 0; i < bankFile->pendingSndCount; ++i)
+    {
+        XDisposePtr(bankFile->pendingSndBatch[i].data);
+    }
+    XDisposePtr(bankFile->pendingSndBatch);
+    bankFile->pendingSndBatch = NULL;
+    bankFile->pendingSndCount = 0;
+    bankFile->pendingSndCapacity = 0;
+    XDisposePtr(replacements);
+    return result;
+}
+
+void BAERmfEditorBank_AbortBatchSnd(BAEBankToken bankToken)
+{
+    XFILE bankFile;
+    int32_t i;
+
+    if (!bankToken)
+    {
+        return;
+    }
+    bankFile = (XFILE)bankToken;
+    if (!bankFile->pendingSndBatch)
+    {
+        return;
+    }
+    for (i = 0; i < bankFile->pendingSndCount; ++i)
+    {
+        XDisposePtr(bankFile->pendingSndBatch[i].data);
+    }
+    XDisposePtr(bankFile->pendingSndBatch);
+    bankFile->pendingSndBatch = NULL;
+    bankFile->pendingSndCount = 0;
+    bankFile->pendingSndCapacity = 0;
+}
+
+BAEResult BAERmfEditorBank_ScaleAllSplitVolumes(BAEBankToken bankToken,
+                                                uint32_t instrumentIndex,
+                                                double scalar)
+{
+    enum
+    {
+        kInstHeaderMinSize = 14,
+        kInstKeySplitSize = 8
+    };
+    XFILE bankFile;
+    XPTR instData;
+    XLongResourceID instID;
+    int32_t instSize;
+    char instName[256];
+    int16_t splitCount;
+    int32_t s;
+
+    if (!bankToken)
+    {
+        return BAE_PARAM_ERR;
+    }
+    bankFile = (XFILE)bankToken;
+
+    instName[0] = 0;
+    instData = XGetIndexedFileResource(bankFile, ID_INST, &instID,
+                                       (int32_t)instrumentIndex, instName, &instSize);
+    if (!instData)
+    {
+        return BAE_BAD_FILE;
+    }
+    if (instSize < kInstHeaderMinSize)
+    {
+        XDisposePtr(instData);
+        return BAE_BAD_FILE;
+    }
+
+    splitCount = (int16_t)XGetShort((unsigned char *)instData + 12);
+    if (splitCount < 0)
+    {
+        splitCount = 0;
+    }
+
+    if (splitCount > 0)
+    {
+        /* Scale every split's miscParameter2 (volume) by scalar */
+        for (s = 0; s < splitCount; ++s)
+        {
+            unsigned char *splitPtr = (unsigned char *)instData + 14 + (s * kInstKeySplitSize);
+            int16_t curVol = (int16_t)XGetShort(splitPtr + 6);
+            /* 0 means default (100) */
+            if (curVol == 0) curVol = 100;
+            {
+                int32_t scaled = (int32_t)(curVol * scalar + 0.5);
+                if (scaled < 0) scaled = 0;
+                if (scaled > 800) scaled = 800;
+                /* Store 0 to mean default only when exactly 100 */
+                XPutShort(splitPtr + 6, (uint16_t)(scaled == 100 ? 0 : scaled));
+            }
+        }
+    }
+    else
+    {
+        /* Non-split instrument: scale header miscParameter2 */
+        int16_t curVol = (int16_t)XGetShort((unsigned char *)instData + 10);
+        if (curVol == 0) curVol = 100;
+        {
+            int32_t scaled = (int32_t)(curVol * scalar + 0.5);
+            if (scaled < 0) scaled = 0;
+            if (scaled > 800) scaled = 800;
+            XPutShort((unsigned char *)instData + 10, (uint16_t)(scaled == 100 ? 0 : scaled));
+        }
+    }
+
+    /* One rebuild for the whole instrument */
+    {
+        BAEResult r = PV_BankReplaceInstResourceInPlace(bankFile, instID, instName,
+                                                        instData, instSize);
+        XDisposePtr(instData);
+        return r;
+    }
+}
+
 BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
                                                     uint32_t instrumentIndex,
                                                     uint32_t sampleIndex,
@@ -15576,6 +16343,8 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
     int32_t sndWrappedSize;
     BAEResult result;
     BAEResult replaceResult;
+    BAERmfEditorBankSampleInfo currentInfo;
+    int needsSndHeaderUpdate;
 
     if (!bankToken || !info)
     {
@@ -15670,6 +16439,36 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
         }
     }
 
+    /* Check early if this is a metadata-only edit (splitVolume/rootKey only, no SND changes) */
+    needsSndHeaderUpdate = 1;
+    XSetMemory(&currentInfo, (int32_t)sizeof(currentInfo), 0);
+    if (BAERmfEditorBank_GetInstrumentSampleInfo(bankToken,
+                                                 instrumentIndex,
+                                                 sampleIndex,
+                                                 &currentInfo) == BAE_NO_ERROR)
+    {
+        if (currentInfo.sampleRate == info->sampleRate &&
+            currentInfo.loopStart == info->loopStart &&
+            currentInfo.loopEnd == info->loopEnd)
+        {
+            needsSndHeaderUpdate = 0;
+        }
+    }
+
+    /* Use fast in-place INST-only update when no SND changes needed.
+       This is ~100x faster than the full resource replacement. */
+    if (!needsSndHeaderUpdate)
+    {
+        result = PV_BankReplaceInstResourceInPlace(bankFile,
+                                                   instID,
+                                                   instName,
+                                                   instData,
+                                                   instSize);
+        XDisposePtr(instData);
+        return result;
+    }
+
+    /* Full resource replacement when SND data might need updating */
     result = PV_BankReplaceResource(bankFile,
                                     ID_INST,
                                     instID,
@@ -15682,6 +16481,12 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
         return result;
     }
     XDisposePtr(instData);
+
+    /* Process SND header updates if needed */
+    if (!needsSndHeaderUpdate)
+    {
+        return BAE_NO_ERROR;
+    }
 
     sndName[0] = 0;
     result = PV_BankFindSndResource(bankFile,
@@ -17792,6 +18597,7 @@ static BAEResult PV_BankReEncodeSampleCore(XFILE bankFile,
     XPTR oldSndPlain;
     int32_t oldSndPlainSize;
     bool oldSndPlainOwned;
+    bool needInspectOldSndHeader;
     SampleDataInfo oldSndInfo;
     int16_t preservedBaseKey;
     char sndName[256];
@@ -17823,6 +18629,7 @@ static BAEResult PV_BankReEncodeSampleCore(XFILE bankFile,
     oldSndPlain = NULL;
     oldSndPlainSize = 0;
     oldSndPlainOwned = FALSE;
+    needInspectOldSndHeader = FALSE;
     XSetMemory(&oldSndInfo, (int32_t)sizeof(oldSndInfo), 0);
     preservedBaseKey = (int16_t)pSampleInfo->rootKey;
     compType = C_NONE;
@@ -17930,25 +18737,33 @@ static BAEResult PV_BankReEncodeSampleCore(XFILE bankFile,
         return result;
     }
 
-    oldSndPlain = oldSndRawData;
-    oldSndPlainSize = oldSndRawSize;
-    if (oldSndType == ID_CSND)
+    if (preservedBaseKey < 0 || preservedBaseKey > 127)
     {
-        oldSndPlain = XDecompressPtr(oldSndRawData, (uint32_t)oldSndRawSize, FALSE);
-        oldSndPlainSize = oldSndPlain ? XGetPtrSize(oldSndPlain) : 0;
-        oldSndPlainOwned = TRUE;
-    }
-    else if (oldSndType == ID_ESND)
-    {
-        XDecryptData(oldSndPlain, (uint32_t)oldSndPlainSize);
+        needInspectOldSndHeader = TRUE;
     }
 
-    if (oldSndPlain && oldSndPlainSize > 0)
+    if (needInspectOldSndHeader)
     {
-        if (XGetSampleInfoFromSnd(oldSndPlain, &oldSndInfo) == 0 &&
-            oldSndInfo.baseKey >= 0 && oldSndInfo.baseKey <= 127)
+        oldSndPlain = oldSndRawData;
+        oldSndPlainSize = oldSndRawSize;
+        if (oldSndType == ID_CSND)
         {
-            preservedBaseKey = oldSndInfo.baseKey;
+            oldSndPlain = XDecompressPtr(oldSndRawData, (uint32_t)oldSndRawSize, FALSE);
+            oldSndPlainSize = oldSndPlain ? XGetPtrSize(oldSndPlain) : 0;
+            oldSndPlainOwned = TRUE;
+        }
+        else if (oldSndType == ID_ESND)
+        {
+            XDecryptData(oldSndPlain, (uint32_t)oldSndPlainSize);
+        }
+
+        if (oldSndPlain && oldSndPlainSize > 0)
+        {
+            if (XGetSampleInfoFromSnd(oldSndPlain, &oldSndInfo) == 0 &&
+                oldSndInfo.baseKey >= 0 && oldSndInfo.baseKey <= 127)
+            {
+                preservedBaseKey = oldSndInfo.baseKey;
+            }
         }
     }
 
@@ -18260,19 +19075,11 @@ static BAEResult PV_BankReEncodeSampleCore(XFILE bankFile,
         return result;
     }
 
-    /* Replace the SND resource in the bank (handles container type change) */
-    if (oldSndType == newSndType)
-    {
-        result = PV_BankReplaceResource(bankFile, newSndType,
-                                        (XLongResourceID)pSampleInfo->sndResourceID,
-                                        sndName, wrappedSnd, wrappedSndSize);
-    }
-    else
-    {
-        result = PV_BankReplaceResourceEx(bankFile, oldSndType, newSndType,
-                                          (XLongResourceID)pSampleInfo->sndResourceID,
-                                          sndName, wrappedSnd, wrappedSndSize);
-    }
+    /* Replace the SND resource in the bank using the fast SND-only path
+       (handles container type change if oldSndType != newSndType) */
+    result = PV_BankReplaceSndResourceInPlace(bankFile, oldSndType, newSndType,
+                                              (XShortResourceID)pSampleInfo->sndResourceID,
+                                              sndName, wrappedSnd, wrappedSndSize);
     XDisposePtr(wrappedSnd);
     return result;
 }
@@ -18415,4 +19222,44 @@ BAEResult BAERmfEditorBank_ReEncodeSampleFromPCMEx(BAEBankToken bankToken,
                                        opusRoundTripResample);
     XDisposePtr(pcmCopy);
     return result;
+}
+
+BAEResult BAERmfEditorBank_ReEncodeSampleFromMutablePCMEx(BAEBankToken bankToken,
+                                                           uint32_t instrumentIndex,
+                                                           uint32_t sampleIndex,
+                                                           BAERmfEditorCompressionType compressionType,
+                                                           BAERmfEditorSndStorageType sndStorageType,
+                                                           BAERmfEditorOpusMode opusMode,
+                                                           bool opusRoundTripResample,
+                                                           void *mutablePcm,
+                                                           uint32_t frameCount,
+                                                           uint16_t bitSize,
+                                                           uint16_t channels,
+                                                           BAE_UNSIGNED_FIXED sampleRate)
+{
+    XFILE bankFile;
+    BAERmfEditorBankSampleInfo sampleInfo;
+    BAEResult result;
+
+    if (!bankToken || !mutablePcm || frameCount == 0 || bitSize == 0 || channels == 0)
+    {
+        return BAE_PARAM_ERR;
+    }
+    if (compressionType == BAE_EDITOR_COMPRESSION_DONT_CHANGE)
+    {
+        return BAE_NO_ERROR;
+    }
+
+    bankFile = (XFILE)bankToken;
+
+    result = BAERmfEditorBank_GetInstrumentSampleInfo(bankToken, instrumentIndex, sampleIndex, &sampleInfo);
+    if (result != BAE_NO_ERROR)
+    {
+        return result;
+    }
+
+    return PV_BankReEncodeSampleCore(bankFile, &sampleInfo,
+                                     mutablePcm, frameCount, bitSize, channels, sampleRate,
+                                     compressionType, sndStorageType, opusMode,
+                                     opusRoundTripResample);
 }
