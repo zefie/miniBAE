@@ -21,6 +21,7 @@
 #define MAX_TARGET_INSTRUMENTS 1024
 #define MAX_TARGET_SAMPLES 4096
 #define MAX_TARGET_SNDS 4096
+#define MAX_OVERRIDES 4096
 #define ARRAY_COUNT(a) (sizeof(a) / sizeof((a)[0]))
 
 typedef struct BankTargetSample
@@ -28,6 +29,13 @@ typedef struct BankTargetSample
     uint32_t instrumentIndex;
     uint32_t sampleIndex;
 } BankTargetSample;
+
+typedef struct SndOverride
+{
+    uint32_t sndID;
+    int      codec;    /* -1 = not set */
+    uint32_t bitrate;  /* 0  = not set */
+} SndOverride;
 
 enum
 {
@@ -113,6 +121,8 @@ static uint32_t targetInstruments[MAX_TARGET_INSTRUMENTS];
 static int targetInstrumentCount = 0;
 static BankTargetSample targetSamples[MAX_TARGET_SAMPLES];
 static int targetSampleCount = 0;
+static SndOverride sndOverrides[MAX_OVERRIDES];
+static int sndOverrideCount = 0;
 
 static void parseSkipPrograms(const char *str)
 {
@@ -472,6 +482,250 @@ static const char *compressionName(XResourceType ct, uint32_t subType)
     return base;
 }
 
+static int addOrUpdateOverride(uint32_t sndID, int codec, uint32_t bitrate)
+{
+    int i;
+
+    for (i = 0; i < sndOverrideCount; ++i)
+    {
+        if (sndOverrides[i].sndID == sndID)
+        {
+            if (codec >= 0)    sndOverrides[i].codec   = codec;
+            if (bitrate > 0)   sndOverrides[i].bitrate = bitrate;
+            return 1;
+        }
+    }
+    if (sndOverrideCount >= MAX_OVERRIDES)
+    {
+        return 0;
+    }
+    sndOverrides[sndOverrideCount].sndID   = sndID;
+    sndOverrides[sndOverrideCount].codec   = codec;
+    sndOverrides[sndOverrideCount].bitrate = bitrate;
+    ++sndOverrideCount;
+    return 1;
+}
+
+static const SndOverride *findSndOverride(uint32_t sndID)
+{
+    int i;
+
+    for (i = 0; i < sndOverrideCount; ++i)
+    {
+        if (sndOverrides[i].sndID == sndID)
+        {
+            return &sndOverrides[i];
+        }
+    }
+    return NULL;
+}
+
+/* Parse "sndID:codecID[:bitrate]" from the command line */
+static int parseOverrideCli(const char *str)
+{
+    char *end1, *end2, *end3;
+    unsigned long sndID, codecID;
+    uint32_t bitrate = 0;
+
+    sndID = strtoul(str, &end1, 10);
+    if (end1 == str || *end1 != ':')
+    {
+        return 0;
+    }
+    codecID = strtoul(end1 + 1, &end2, 10);
+    if (end2 == end1 + 1)
+    {
+        return 0;
+    }
+    if (*end2 == ':')
+    {
+        unsigned long br = strtoul(end2 + 1, &end3, 10);
+        if (end3 == end2 + 1 || *end3 != '\0')
+        {
+            return 0;
+        }
+        bitrate = parseBitrate(end2 + 1);
+    }
+    else if (*end2 != '\0')
+    {
+        return 0;
+    }
+    if ((int)codecID < 0 || (int)codecID >= CODEC_COUNT)
+    {
+        fprintf(stderr, "Error: invalid codec %lu in override for SndID %lu\n", codecID, sndID);
+        return 0;
+    }
+    return addOrUpdateOverride((uint32_t)sndID, (int)codecID, bitrate);
+}
+
+/* Parse a simple INI file:
+ *   [sndID]
+ *   codec=N
+ *   bitrate=N
+ */
+static int parseOverrideFile(const char *path)
+{
+    FILE *f;
+    char line[512];
+    uint32_t curSndID = 0;
+    int curCodec = -1;
+    uint32_t curBitrate = 0;
+    int inSection = 0;
+
+    f = fopen(path, "r");
+    if (!f)
+    {
+        fprintf(stderr, "Error: cannot open override file '%s'\n", path);
+        return 0;
+    }
+
+    while (fgets(line, (int)sizeof(line), f))
+    {
+        char *p = line;
+        size_t len;
+
+        /* Trim leading whitespace */
+        while (*p == ' ' || *p == '\t') ++p;
+        /* Trim trailing whitespace/newline */
+        len = strlen(p);
+        while (len > 0 && (p[len-1] == '\n' || p[len-1] == '\r' ||
+                           p[len-1] == ' '  || p[len-1] == '\t'))
+        {
+            p[--len] = '\0';
+        }
+
+        if (*p == '\0' || *p == ';' || *p == '#')
+        {
+            continue;
+        }
+
+        if (*p == '[')
+        {
+            char *close;
+            char *end;
+
+            /* Commit previous section */
+            if (inSection && curCodec >= 0)
+            {
+                if (!addOrUpdateOverride(curSndID, curCodec, curBitrate))
+                {
+                    fprintf(stderr, "Warning: too many overrides, skipping SndID %u\n", curSndID);
+                }
+            }
+
+            close = strchr(p + 1, ']');
+            if (!close)
+            {
+                fprintf(stderr, "Error: malformed section in override file: %s\n", p);
+                fclose(f);
+                return 0;
+            }
+            *close = '\0';
+            curSndID  = (uint32_t)strtoul(p + 1, &end, 10);
+            curCodec  = -1;
+            curBitrate = 0;
+            inSection = 1;
+        }
+        else if (inSection)
+        {
+            char *eq = strchr(p, '=');
+            char *key, *val;
+            size_t klen;
+
+            if (!eq)
+            {
+                continue;
+            }
+            *eq = '\0';
+            key  = p;
+            val  = eq + 1;
+
+            /* Trim key trailing whitespace */
+            klen = strlen(key);
+            while (klen > 0 && (key[klen-1] == ' ' || key[klen-1] == '\t'))
+            {
+                key[--klen] = '\0';
+            }
+            /* Trim val leading whitespace */
+            while (*val == ' ' || *val == '\t') ++val;
+
+            if (strcasecmp(key, "codec") == 0)
+            {
+                int c = atoi(val);
+                if (c < 0 || c >= CODEC_COUNT)
+                {
+                    fprintf(stderr, "Warning: invalid codec %d for SndID %u in override file\n",
+                            c, curSndID);
+                }
+                else
+                {
+                    curCodec = c;
+                }
+            }
+            else if (strcasecmp(key, "bitrate") == 0)
+            {
+                curBitrate = parseBitrate(val);
+            }
+        }
+    }
+
+    /* Commit last section */
+    if (inSection && curCodec >= 0)
+    {
+        if (!addOrUpdateOverride(curSndID, curCodec, curBitrate))
+        {
+            fprintf(stderr, "Warning: too many overrides, skipping SndID %u\n", curSndID);
+        }
+    }
+
+    fclose(f);
+    return 1;
+}
+
+/* Dispatch: "help" → print format docs; string with ':' -> CLI format; else -> file */
+static int parseOverride(const char *str)
+{
+    if (strcmp(str, "help") == 0)
+    {
+        printf("--override help\n\n");
+        printf("Override the codec (and optional bitrate) for specific SND resource IDs.\n");
+        printf("Can be specified multiple times on the command line or via an INI file.\n\n");
+        printf("CLI format:  --override sndID:codecID[:bitrate]\n");
+        printf("  Example:   --override 23:4        (SndID 23 -> MP3 default bitrate)\n");
+        printf("  Example:   --override 24:0        (SndID 24 -> PCM)\n");
+        printf("  Example:   --override 26:7:80     (SndID 26 -> Opus 80 kbps)\n\n");
+        printf("File format: --override overrides.ini   (or .txt)\n\n");
+        printf("  INI syntax:\n");
+        printf("    [sndID]\n");
+        printf("    codec=N\n");
+        printf("    bitrate=N   ; optional\n\n");
+        printf("  Example overrides.ini:\n");
+        printf("    [23]\n");
+        printf("    codec=4\n\n");
+        printf("    [24]\n");
+        printf("    codec=0\n\n");
+        printf("    [26]\n");
+        printf("    codec=7\n");
+        printf("    bitrate=80\n\n");
+        printf("Codec numbers match --codec values (see --help for the full list).\n");
+        return -1; /* sentinel: printed help, caller should exit 0 */
+    }
+
+    /* Decide: if the string contains ':' treat as CLI sndID:codec[:bitrate] */
+    if (strchr(str, ':'))
+    {
+        if (!parseOverrideCli(str))
+        {
+            fprintf(stderr, "Error: invalid --override value '%s' (expected sndID:codecID[:bitrate])\n", str);
+            return 0;
+        }
+        return 1;
+    }
+
+    /* Otherwise treat as a file path */
+    return parseOverrideFile(str) ? 1 : 0;
+}
+
 static void printHelp(const char *progName)
 {
     printf("Usage: %s [options] <input.hsb|zsb> <output.hsb|zsb>\n\n", progName);
@@ -488,7 +742,9 @@ static void printHelp(const char *progName)
     printf("                 Process only listed bank instrument indices\n");
     printf("  --sample I:S[,I:S...]\n");
     printf("                 Process only listed instrument sample slots\n");
-    printf("  --sndstorage T Output storage for recompressed samples: ESND, CSND, SND\n");
+    printf("  --sndstorage T Output storage for processed samples: ESND, CSND, SND\n");
+    printf("  --override V   Per-SND codec override: sndID:codecID[:bitrate], file.ini,\n");
+    printf("                 or 'help' for full format documentation\n");
     printf("  --help         Show this help message\n\n");
     printf("Codecs:\n");
     printf("  %d  %-22s  (no bitrate option)\n", CODEC_PCM, codecNames[CODEC_PCM]);
@@ -817,6 +1073,7 @@ int main(int argc, char *argv[])
     double sampleGainDb = 0.0;
     double sampleGainLinear = 1.0;
     int hasInstrumentGain = 0;
+    int hasSndStorage = 0;
     double instrumentGainPercent = 1.0;
     BAERmfEditorCompressionType targetCompression = BAE_EDITOR_COMPRESSION_DONT_CHANGE;
     BAERmfEditorSndStorageType sndStorageType = BAE_EDITOR_SND_STORAGE_ESND;
@@ -955,6 +1212,26 @@ int main(int argc, char *argv[])
                 fprintf(stderr, "Error: invalid --sndstorage value '%s' (expected ESND, CSND, or SND)\n", argv[argIdx]);
                 return 1;
             }
+            hasSndStorage = 1;
+        }
+        else if (strcmp(argv[argIdx], "--override") == 0)
+        {
+            int r;
+
+            if (argIdx + 1 >= argc)
+            {
+                fprintf(stderr, "Error: --override requires a value (try --override help)\n");
+                return 1;
+            }
+            r = parseOverride(argv[++argIdx]);
+            if (r == -1)
+            {
+                return 0; /* help was printed */
+            }
+            if (!r)
+            {
+                return 1;
+            }
         }
         else if (argv[argIdx][0] == '-')
         {
@@ -984,16 +1261,17 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    doProcess = (codec >= 0 || hasSampleGain || hasInstrumentGain);
+    doProcess = (codec >= 0 || hasSampleGain || hasInstrumentGain || hasSndStorage ||
+                 sndOverrideCount > 0);
 
     if (!doProcess && hasTargetFilters())
     {
         fprintf(stderr, "Error: --instrument/--sample require --codec, --sgain, or --igain\n");
         return 1;
     }
-    if (minFrames > 0 && !(codec >= 0 || hasSampleGain))
+    if (minFrames > 0 && !(codec >= 0 || hasSampleGain || hasSndStorage))
     {
-        fprintf(stderr, "Error: --minframes requires --codec or --sgain\n");
+        fprintf(stderr, "Error: --minframes requires --codec, --sgain, or --sndstorage\n");
         return 1;
     }
     if (skipProgramCount > 0 && !doProcess)
@@ -1001,12 +1279,6 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Error: --skip requires --codec, --sgain, or --igain\n");
         return 1;
     }
-    if (codec < 0 && sndStorageType != BAE_EDITOR_SND_STORAGE_ESND)
-    {
-        fprintf(stderr, "Error: --sndstorage requires --codec\n");
-        return 1;
-    }
-
     if (hasSampleGain)
     {
         sampleGainLinear = pow(10.0, sampleGainDb / 20.0);
@@ -1057,6 +1329,9 @@ int main(int argc, char *argv[])
             printf(" @ %u kbps", chosenBitrate);
         }
         printf("\n");
+    }
+    if (codec >= 0 || hasSndStorage)
+    {
         printf("Recompressed SND storage: %s\n", sndStorageName(sndStorageType));
     }
     if (hasSampleGain)
@@ -1066,6 +1341,36 @@ int main(int argc, char *argv[])
     if (hasInstrumentGain)
     {
         printf("Instrument gain: x%.3f (scalar)\n", instrumentGainPercent);
+    }
+    if (sndOverrideCount > 0)
+    {
+        int oi;
+        size_t outLen = outputPath ? strlen(outputPath) : 0;
+        int outIsHsb = (outLen >= 4 && strcasecmp(outputPath + outLen - 4, ".hsb") == 0);
+
+        printf("SND overrides: %d entries\n", sndOverrideCount);
+        for (oi = 0; oi < sndOverrideCount; ++oi)
+        {
+            printf("  SndID %-6u -> codec %d (%s)",
+                   sndOverrides[oi].sndID,
+                   sndOverrides[oi].codec,
+                   (sndOverrides[oi].codec >= 0 && sndOverrides[oi].codec < CODEC_COUNT)
+                       ? codecNames[sndOverrides[oi].codec] : "?");
+            if (sndOverrides[oi].bitrate > 0)
+            {
+                printf(" @ %u kbps", sndOverrides[oi].bitrate);
+            }
+            printf("\n");
+
+            if (outIsHsb && sndOverrides[oi].codec >= 0 && codecRequiresZsb(sndOverrides[oi].codec))
+            {
+                fprintf(stderr,
+                        "Error: override for SndID %u uses %s codec which requires ZSB output.\n"
+                        "       Please use a .zsb output extension.\n",
+                        sndOverrides[oi].sndID, codecNames[sndOverrides[oi].codec]);
+                return 1;
+            }
+        }
     }
 
     mixer = BAEMixer_New();
@@ -1111,9 +1416,9 @@ int main(int argc, char *argv[])
     skippedCount = 0;
     instrumentGainCount = 0;
 
-    /* For sgain (and codec recompression), enable batch SND mode so all re-encodes
+    /* For sample processing (codec/sgain/sndstorage), enable batch SND mode so all re-encodes
        are queued and committed in a single bank rebuild after the loops. */
-    if (hasSampleGain || codec >= 0)
+    if (hasSampleGain || codec >= 0 || hasSndStorage || sndOverrideCount > 0)
     {
         result = BAERmfEditorBank_BeginBatchSnd(bankToken);
         if (result != BAE_NO_ERROR)
@@ -1165,6 +1470,10 @@ int main(int argc, char *argv[])
             int sharedAlready = 0;
             int si;
             int sampleDataActive;
+            int effectiveCodec;
+            uint32_t effectiveBitrate;
+            BAERmfEditorCompressionType effectiveCompression;
+            uint32_t effectiveChosenBitrate;
 
             result = BAERmfEditorBank_GetInstrumentSampleInfo(bankToken, i, s, &sampleInfo);
             if (result != BAE_NO_ERROR)
@@ -1223,7 +1532,35 @@ int main(int argc, char *argv[])
 
             /* igain is applied per-instrument below (after the sample loop), not per-split */
 
-            sampleDataActive = (codec >= 0 || hasSampleGain);
+            /* Per-SND effective codec/bitrate: --override wins over global --codec */
+            {
+                const SndOverride *ovr = findSndOverride((uint32_t)sampleInfo.sndResourceID);
+                if (ovr && ovr->codec >= 0)
+                {
+                    effectiveCodec   = ovr->codec;
+                    effectiveBitrate = (ovr->bitrate > 0) ? ovr->bitrate : bitrateKbps;
+                    if (!resolveTargetCompression(effectiveCodec, effectiveBitrate,
+                                                  &effectiveCompression, &effectiveChosenBitrate))
+                    {
+                        effectiveCodec = codec;
+                        effectiveBitrate = bitrateKbps;
+                        effectiveCompression = targetCompression;
+                        effectiveChosenBitrate = chosenBitrate;
+                        fprintf(stderr, "Warning: override codec resolve failed for SndID %u, "
+                                        "falling back to global codec\n",
+                                sampleInfo.sndResourceID);
+                    }
+                }
+                else
+                {
+                    effectiveCodec         = codec;
+                    effectiveBitrate       = bitrateKbps;
+                    effectiveCompression   = targetCompression;
+                    effectiveChosenBitrate = chosenBitrate;
+                }
+            }
+
+            sampleDataActive = (effectiveCodec >= 0 || hasSampleGain || hasSndStorage);
             if (!sampleDataActive)
             {
                 continue;
@@ -1240,6 +1577,10 @@ int main(int argc, char *argv[])
             else if (minFrames > 0 && sampleInfo.frameCount < minFrames)
             {
                 skipReason = 3;
+            }
+            else if ((int32_t)sampleInfo.sndResourceID <= 0)
+            {
+                skipReason = 5;
             }
 
             for (si = 0; si < processedSndCount; ++si)
@@ -1271,8 +1612,16 @@ int main(int argc, char *argv[])
                         printf("        SKIPPED (frames < %u)\n", minFrames);
                         break;
                     case 4:
+                    case 5:
                     default:
-                        printf("        SKIPPED (shared SndID already processed)\n");
+                        if (skipReason == 4)
+                        {
+                            printf("        SKIPPED (shared SndID already processed)\n");
+                        }
+                        else
+                        {
+                            printf("        SKIPPED (no backing SndID/resource)\n");
+                        }
                         break;
                 }
                 continue;
@@ -1324,9 +1673,9 @@ int main(int argc, char *argv[])
                     continue;
                 }
 
-                if (codec >= 0)
+                if (effectiveCodec >= 0)
                 {
-                    sampleCompression = targetCompression;
+                    sampleCompression = effectiveCompression;
                     sampleStorage = sndStorageType;
                 }
                 else
@@ -1338,7 +1687,7 @@ int main(int argc, char *argv[])
                         printf("        SKIPPED (cannot infer original compression)\n");
                         continue;
                     }
-                    sampleStorage = sampleInfo.sndStorageType;
+                    sampleStorage = hasSndStorage ? sndStorageType : sampleInfo.sndStorageType;
                 }
 
                 sampleOpusRoundTrip = sampleInfo.opusRoundTripResample;
@@ -1359,11 +1708,68 @@ int main(int argc, char *argv[])
             }
             else
             {
+                BAERmfEditorCompressionType sampleCompression;
+                BAERmfEditorSndStorageType sampleStorage;
+
+                if (effectiveCodec < 0 && hasSndStorage)
+                {
+                    result = BAERmfEditorBank_SetSampleSndStorageType(bankToken,
+                                                                      i,
+                                                                      s,
+                                                                      sndStorageType);
+                    if (result != BAE_NO_ERROR)
+                    {
+                        ++skippedCount;
+                        if (result == BAE_COMPRESSION_INEFFECTIVE)
+                        {
+                            int32_t origBytes = (int32_t)(sampleInfo.frameCount *
+                                                           sampleInfo.channels *
+                                                           (sampleInfo.bitDepth / 8));
+                            printf("        SKIPPED (CSND compression ineffective: compressed >= original (%d bytes))\n",
+                                   origBytes);
+                        }
+                        else
+                            printf("        SKIPPED (set storage failed: %d)\n", (int)result);
+                        continue;
+                    }
+
+                    if (!addUniqueUint32(processedSndIDs,
+                                         &processedSndCount,
+                                         MAX_TARGET_SNDS,
+                                         (uint32_t)sampleInfo.sndResourceID))
+                    {
+                        fprintf(stderr, "Error: too many processed SND IDs\n");
+                        BAERmfEditorBank_AbortBatchSnd(bankToken);
+                        BAEMixer_Delete(mixer);
+                        return 1;
+                    }
+
+                    ++reencodedCount;
+                    printf("        OK\n");
+                    continue;
+                }
+
+                if (effectiveCodec >= 0)
+                {
+                    sampleCompression = effectiveCompression;
+                    sampleStorage = sndStorageType;
+                }
+                else
+                {
+                    if (!inferCompressionFromSampleInfo(&sampleInfo, &sampleCompression))
+                    {
+                        ++skippedCount;
+                        printf("        SKIPPED (cannot infer original compression)\n");
+                        continue;
+                    }
+                    sampleStorage = hasSndStorage ? sndStorageType : sampleInfo.sndStorageType;
+                }
+
                 result = BAERmfEditorBank_ReEncodeSample(bankToken,
                                                          i,
                                                          s,
-                                                         targetCompression,
-                                                         sndStorageType,
+                                                         sampleCompression,
+                                                         sampleStorage,
                                                          opusMode);
             }
             if (result != BAE_NO_ERROR)
@@ -1410,7 +1816,7 @@ int main(int argc, char *argv[])
     }
 
     /* Commit all queued SND replacements in a single bank rebuild */
-    if (hasSampleGain || codec >= 0)
+    if (hasSampleGain || codec >= 0 || hasSndStorage || sndOverrideCount > 0)
     {
         result = BAERmfEditorBank_CommitBatchSnd(bankToken);
         if (result != BAE_NO_ERROR)

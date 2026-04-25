@@ -31,6 +31,8 @@ fi
 
 # Build the project
 /opt/llvm-mingw/wrapper.sh --cmake -DNEOBAE_STATIC=1 -DBAE_PLATFORM=WinOS -DNEOBAE_BUILD_VCLIB=1 -DENABLE_MIDI_HW=1
+QUEUE_EXIT=$?
+
 # we now have build-aarch64-w64-mingw32, build-armv7-w64-mingw32, build-x86_64-w64-mingw32, and build-i686-w64-mingw32
 # directories with the built libraries and executables. Now build the release package.
 rm -rf out/
@@ -38,6 +40,10 @@ mkdir -p out/
 if [ "${1}" == "--clean" ]; then
     echo " *** Cleaning build directories..."
     rm -rf build-*-w64-mingw32
+fi
+
+if [ "${QUEUE_EXIT}" != 0 ]; then
+	exit "${QUEUE_EXIT}"
 fi
 
 for t in aarch64 armv7 x86_64 i686; do

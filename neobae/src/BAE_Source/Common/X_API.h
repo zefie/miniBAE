@@ -723,13 +723,16 @@ typedef struct XBankToken XBankToken;
 #define XFILERESOURCE_ID_IS_VALID(id) \
     ((id) == XFILERESOURCE_ID || (id) == XFILERESOURCE_ZMF_ID)
 
-// Resource file version numbers: RMF uses 1 (original), ZMF uses 4 (current)
+// Resource file version numbers: RMF uses 1 (original), ZMF uses 5 (current)
 #define XFILERESOURCE_VERSION_RMF   1
 
 // v2: LZMA via XZ container
 // v3: ZSNG and ZINS compression
 // v4: LZMA2 w/o XZ container
-#define XFILERESOURCE_VERSION_ZMF   4
+// v5: ZINS v2 typed entries (allows packing INST and ALIS together)
+//     ZBNK typed block for BANK and MIDI resources
+//     ZSHD packed SND/CSND/ESND headers with payload references
+#define XFILERESOURCE_VERSION_ZMF   5
 
 // Return the correct version number for a given mapID
 #define XFILERESOURCE_VERSION_FOR_ID(id) \

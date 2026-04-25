@@ -259,6 +259,7 @@ extern "C"
         BAE_RESOURCE_NOT_FOUND,
         BAE_NULL_OBJECT,
         BAE_ALREADY_EXISTS,
+        BAE_COMPRESSION_INEFFECTIVE,  /* CSND compression produced output >= input size */
 
         BAE_ERROR_COUNT,
         FORCE_32BIT_BAERESULT = 0x7FFFFFFF // Force 32-bit enum size for 64-bit compatibility
@@ -3630,6 +3631,14 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleSndID(BAEBankToken bankToken,
                                                      uint32_t instrumentIndex,
                                                      uint32_t sampleIndex,
                                                      XShortResourceID sndResourceID);
+
+/* Convert a sample's backing resource between SND/CSND/ESND by rewrapping
+ * container data (including CSND compression/encryption handling) without
+ * PCM decode/re-encode. */
+BAEResult BAERmfEditorBank_SetSampleSndStorageType(BAEBankToken bankToken,
+                                                   uint32_t instrumentIndex,
+                                                   uint32_t sampleIndex,
+                                                   BAERmfEditorSndStorageType sndStorageType);
 
 /* Ensure a bank instrument has at least desiredSampleCount sample slots.
  * For non-split instruments this converts the instrument to key-split mode when

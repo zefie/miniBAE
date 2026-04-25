@@ -15008,6 +15008,50 @@ static BAEResult PV_BankReplaceInstResourceInPlace(XFILE bankFile,
         }
     }
 
+    /* Copy all non-INST resources (SND/CSND/ESND/ALIAS/BANK/etc.) verbatim */
+    {
+        static const XResourceType nonInstTypes[] = {
+            ID_SND, ID_CSND, ID_ESND, ID_ALIAS, ID_BANK,
+            ID_SONG, ID_MIDI, ID_MIDI_OLD, ID_CMID,
+            ID_EMID, ID_ECMI, ID_RMF, ID_TEXT, ID_VERS, 0
+        };
+        int niIdx;
+        for (niIdx = 0; nonInstTypes[niIdx] != 0; ++niIdx)
+        {
+            XResourceType resType = nonInstTypes[niIdx];
+            int32_t resCount = XCountFileResourcesOfType(bankFile, resType);
+            int32_t resIndex;
+
+            for (resIndex = 0; resIndex < resCount; ++resIndex)
+            {
+                XLongResourceID resID;
+                int32_t resSize;
+                XPTR resData;
+                char resName[256];
+
+                resName[0] = 0;
+                resData = XGetIndexedFileResource(bankFile,
+                                                  resType,
+                                                  &resID,
+                                                  resIndex,
+                                                  resName,
+                                                  &resSize);
+                if (!resData)
+                {
+                    continue;
+                }
+
+                if (XAddFileResource(outFile, resType, resID, resName, resData, resSize) != 0)
+                {
+                    XDisposePtr(resData);
+                    XFileClose(outFile);
+                    return BAE_FILE_IO_ERROR;
+                }
+                XDisposePtr(resData);
+            }
+        }
+    }
+
     if (XCleanResourceFile(outFile) == FALSE)
     {
         XFileClose(outFile);
@@ -15784,7 +15828,7 @@ static BAEResult PV_BankRewrapSndForType(XFILE bankFile,
             {
                 XDisposePtr(wrapped);
             }
-            return BAE_BAD_FILE;
+            return BAE_COMPRESSION_INEFFECTIVE;
         }
         *outWrapped = wrapped;
         *outWrappedSize = wrappedSize;
@@ -16635,6 +16679,143 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleSndID(BAEBankToken bankToken,
         XDisposePtr(instData);
         return result;
     }
+}
+
+BAEResult BAERmfEditorBank_SetSampleSndStorageType(BAEBankToken bankToken,
+                                                    uint32_t instrumentIndex,
+                                                    uint32_t sampleIndex,
+                                                    BAERmfEditorSndStorageType sndStorageType)
+{
+    XFILE bankFile;
+    BAERmfEditorBankSampleInfo sampleInfo;
+    XResourceType oldType;
+    XResourceType newType;
+    XPTR sndRawData;
+    int32_t sndRawSize;
+    XPTR sndPlain;
+    int32_t sndPlainSize;
+    XPTR sndWrapped;
+    int32_t sndWrappedSize;
+    char resName[256];
+    BAEResult result;
+
+    if (!bankToken)
+    {
+        return BAE_PARAM_ERR;
+    }
+
+    bankFile = (XFILE)bankToken;
+
+    /* Resolve current sample metadata to locate the backing SND resource. */
+    if (BAERmfEditorBank_GetInstrumentSampleInfo(bankToken,
+                                                 instrumentIndex,
+                                                 sampleIndex,
+                                                 &sampleInfo) != BAE_NO_ERROR)
+    {
+        return BAE_BAD_FILE;
+    }
+
+    switch (sampleInfo.sndStorageType)
+    {
+        case BAE_EDITOR_SND_STORAGE_CSND:
+            oldType = ID_CSND;
+            break;
+        case BAE_EDITOR_SND_STORAGE_SND:
+            oldType = ID_SND;
+            break;
+        case BAE_EDITOR_SND_STORAGE_ESND:
+        default:
+            oldType = ID_ESND;
+            break;
+    }
+
+    switch (sndStorageType)
+    {
+        case BAE_EDITOR_SND_STORAGE_CSND:
+            newType = ID_CSND;
+            break;
+        case BAE_EDITOR_SND_STORAGE_SND:
+            newType = ID_SND;
+            break;
+        case BAE_EDITOR_SND_STORAGE_ESND:
+        default:
+            newType = ID_ESND;
+            break;
+    }
+
+    if (oldType == newType)
+    {
+        return BAE_NO_ERROR;
+    }
+
+    /* Load existing payload, decode container wrapper, then rewrap for target type.
+       This avoids PCM decode/re-encode while still honoring CSND compression/encryption. */
+    resName[0] = 0;
+    result = PV_BankFindSndResource(bankFile,
+                                    (XShortResourceID)sampleInfo.sndResourceID,
+                                    &oldType,
+                                    &sndRawData,
+                                    &sndRawSize,
+                                    resName);
+    if (result != BAE_NO_ERROR)
+    {
+        return result;
+    }
+
+    sndPlain = sndRawData;
+    sndPlainSize = sndRawSize;
+    {
+        int16_t soundFormat = 0;
+        if (sndPlain && sndPlainSize >= 2)
+        {
+            soundFormat = (int16_t)XGetShort(sndPlain);
+        }
+
+        /* Some loaders return already-rebuilt plain SND data even for CSND/ESND
+           entries. Only unwrap when data does not already look like SND. */
+        if (!(soundFormat == 1 || soundFormat == 2 || soundFormat == 3))
+        {
+            if (oldType == ID_CSND)
+            {
+                XPTR decompressed = XDecompressPtr(sndRawData, (uint32_t)sndRawSize, FALSE);
+                XDisposePtr(sndRawData);
+                sndPlain = decompressed;
+                if (!sndPlain)
+                {
+                    return BAE_BAD_FILE;
+                }
+                sndPlainSize = XGetPtrSize(sndPlain);
+            }
+            else if (oldType == ID_ESND)
+            {
+                XDecryptData(sndPlain, (uint32_t)sndPlainSize);
+            }
+        }
+    }
+
+    sndWrapped = NULL;
+    sndWrappedSize = 0;
+    result = PV_BankRewrapSndForType(bankFile,
+                                     newType,
+                                     sndPlain,
+                                     sndPlainSize,
+                                     &sndWrapped,
+                                     &sndWrappedSize);
+    XDisposePtr(sndPlain);
+    if (result != BAE_NO_ERROR)
+    {
+        return result;
+    }
+
+    result = PV_BankReplaceSndResourceInPlace(bankFile,
+                                              oldType,
+                                              newType,
+                                              (XShortResourceID)sampleInfo.sndResourceID,
+                                              resName,
+                                              sndWrapped,
+                                              sndWrappedSize);
+    XDisposePtr(sndWrapped);
+    return result;
 }
 
 static BAEResult PV_BankDeleteResource(XFILE bankFile,

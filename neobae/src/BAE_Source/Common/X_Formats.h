@@ -241,8 +241,10 @@ enum
  
     ID_ALIAS    =   FOUR_CHAR('A','L','I','S'), //  'ALIS'      // alias link resource
 
-    ID_ZINS     =   FOUR_CHAR('Z','I','N','S'), //  'ZINS'      // ZMF v3 packed INST block
+    ID_ZINS     =   FOUR_CHAR('Z','I','N','S'), //  'ZINS'      // ZMF packed INST/ALIS block (v1=INST only, v2=typed entries, v5=ALIS)
     ID_ZSNG     =   FOUR_CHAR('Z','S','N','G'), //  'ZSNG'      // ZMF v3 packed SONG block
+    ID_ZBNK     =   FOUR_CHAR('Z','B','N','K'), //  'ZBNK'      // ZMF v5 packed BANK/MIDI block (typed entries)
+    ID_ZSHD     =   FOUR_CHAR('Z','S','H','D'), //  'ZSHD'      // ZMF v5 packed SND/CSND/ESND headers (typed entries)
  
     ID_VERS     =   FOUR_CHAR('V','E','R','S'), //  'VERS'      // version ID
     ID_TEXT     =   FOUR_CHAR('T','E','X','T'), //  'TEXT'      // text
