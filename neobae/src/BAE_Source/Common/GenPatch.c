@@ -315,6 +315,36 @@ static void (*smod_functions[])(unsigned char *pSample, int32_t length, int32_t 
 
 // Private Functions
 
+static bool PV_IsZsbBankToken(XBankToken bankToken)
+{
+    XFILE fileRef;
+    XFILERESOURCEMAP map;
+    int32_t savedPos;
+
+    if (!bankToken.xFile)
+    {
+        return FALSE;
+    }
+
+    fileRef = bankToken.xFile;
+    savedPos = XFileGetPosition(fileRef);
+    if (savedPos < 0)
+    {
+        return FALSE;
+    }
+    if (XFileSetPosition(fileRef, 0L) != 0)
+    {
+        return FALSE;
+    }
+    if (XFileRead(fileRef, (XPTR)&map, (int32_t)sizeof(XFILERESOURCEMAP)) != 0)
+    {
+        (void)XFileSetPosition(fileRef, savedPos);
+        return FALSE;
+    }
+    (void)XFileSetPosition(fileRef, savedPos);
+    return (XGetLong(&map.mapID) == XFILERESOURCE_ZMF_ID) ? TRUE : FALSE;
+}
+
 
 /******************************************************************************
 **
@@ -767,6 +797,7 @@ static GM_Instrument * PV_CreateInstrumentFromResource(GM_Instrument *theMaster,
                 theI->useSampleRate = theMaster->useSampleRate;
                 theI->sampleAndHold = theMaster->sampleAndHold;
                 theI->minLoopSize = theMaster->minLoopSize;
+                theI->sourceIsZsb = theMaster->sourceIsZsb;
             }
             else
             {
@@ -780,6 +811,7 @@ static GM_Instrument * PV_CreateInstrumentFromResource(GM_Instrument *theMaster,
                 theI->useSampleRate = FALSE;
                 theI->sampleAndHold = FALSE;
                 theI->minLoopSize = (unsigned char)MIN_LOOP_SIZE_RMF;
+                theI->sourceIsZsb = PV_IsZsbBankToken(bankToken);
             }
             theI->u.w.bitSize = sndInfo->bitSize;
             theI->u.w.channels = sndInfo->channels;
@@ -883,6 +915,7 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                 if (theI)
                 {
                     theI->u.w.theWaveform = (signed char *)theSound;
+                    theI->sourceIsZsb = PV_IsZsbBankToken(bankToken);
                     theI->disableSndLooping = TEST_FLAG_VALUE(header.flags1, ZBF_disableSndLooping);
                     theI->playAtSampledFreq = TEST_FLAG_VALUE(header.flags2, ZBF_playAtSampledFreq);
                     theI->doKeymapSplit = FALSE;
@@ -954,6 +987,7 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
             {
                 theI->disableSndLooping = TEST_FLAG_VALUE(header.flags1, ZBF_disableSndLooping);
                 theI->doKeymapSplit = TRUE;
+                theI->sourceIsZsb = PV_IsZsbBankToken(bankToken);
                 theI->notPolyphonic = TEST_FLAG_VALUE(header.flags2, ZBF_notPolyphonic);
 #if REVERB_USED != REVERB_DISABLED
                 theI->avoidReverb = TEST_FLAG_VALUE(header.flags1, ZBF_avoidReverb);

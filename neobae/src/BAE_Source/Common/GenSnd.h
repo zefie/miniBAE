@@ -1062,6 +1062,7 @@ typedef int32_t UNIT_TYPE;
         bool sampleAndHold;
         bool useSampleRate; // factor in sample rate into pitch calculation
         bool advancedInterpolation; // sample flagged for higher-resolution interpolation
+        bool sourceIsZsb; // TRUE when instrument sample data comes from a ZREZ (.zsb) bank
         bool sampleOffsetStartEnabled; // if TRUE, start note at sampleOffsetStartFrames
         unsigned char minLoopSize; // minimum loop size for this instrument source (RMF/ZMF)
 

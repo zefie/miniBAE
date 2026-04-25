@@ -103,6 +103,39 @@
     else\
         Zn = 0;
 
+static inline int32_t PV_FilterStepNoResonance(int32_t sample,
+                                               int32_t Xn,
+                                               int32_t Z1,
+                                               int32_t *z1value)
+{
+    sample = (sample * Xn + (*z1value) * Z1) >> 16;
+    *z1value = sample - (sample >> 9);
+    return sample;
+}
+
+static inline int32_t PV_FilterStepWithResonance(int32_t sample,
+                                                 int32_t Xn,
+                                                 int32_t Z1,
+                                                 int32_t Zn,
+                                                 int16_t *z,
+                                                 int32_t *zIndex,
+                                                 int32_t *z1value,
+                                                 int32_t *previousFreq,
+                                                 int32_t lpfFrequency,
+                                                 int32_t slewShift)
+{
+    int32_t zIndex1;
+
+    *previousFreq += (lpfFrequency - *previousFreq) >> slewShift;
+    zIndex1 = *zIndex - (*previousFreq >> 8);
+
+    sample = (sample * Xn + (*z1value) * Z1 + z[zIndex1 & MAXRESONANCE] * Zn) >> 16;
+    z[(*zIndex) & MAXRESONANCE] = (int16_t)sample;
+    (*zIndex)++;
+    *z1value = sample - (sample >> 9);
+    return sample;
+}
+
 
 
 void PV_ServeU3232FilterPartialBuffer (GM_Voice *this_voice, bool looping)
@@ -125,10 +158,10 @@ void PV_ServeU3232FilterPartialBuffer (GM_Voice *this_voice, bool looping)
     int32_t                   a;
 
     register int16_t          *z;
-    register int32_t          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
+    int32_t                   Z1value, zIndex2, Xn, Z1, Zn, sample;
 
 #if REVERB_USED == VARIABLE_REVERB
-    if (this_voice->reverbLevel > 1 || this_voice->chorusLevel > 1)
+    if ((this_voice->reverbLevel > 1 || this_voice->chorusLevel > 1) && this_voice->channels == 1)
     {
         PV_ServeU3232FilterPartialBufferNewReverb (this_voice, looping); 
         return;
@@ -165,49 +198,120 @@ void PV_ServeU3232FilterPartialBuffer (GM_Voice *this_voice, bool looping)
     }
 
     {
-        if (this_voice->LPF_resonance == 0)
+        if (this_voice->channels == 1)
         {
-            for (a = MusicGlobals->Four_Loop; a > 0; --a)
+            if (this_voice->LPF_resonance == 0)
             {
-                for (inner = 0; inner < 4; inner++)
+                for (a = MusicGlobals->Four_Loop; a > 0; --a)
                 {
-                    THE_CHECK_U3232(unsigned char *);
-                    b = source[cur_wave_i];
-                    c = source[cur_wave_i+1];
-                    sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
-                    sample = (sample * Xn + Z1value * Z1) >> 16;
-                    Z1value = sample - (sample >> 9);   // remove DC bias
-                    *destL += sample * amplitudeL;
-                    destL++;
-                    ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
+                    for (inner = 0; inner < 4; inner++)
+                    {
+                        THE_CHECK_U3232(unsigned char *);
+                        b = source[cur_wave_i];
+                        c = source[cur_wave_i+1];
+                        sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
+                        sample = PV_FilterStepNoResonance(sample, Xn, Z1, &Z1value);
+                        *destL += sample * amplitudeL;
+                        destL++;
+                        ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
+                    }
+                    amplitudeL += amplitudeLincrement;
                 }
-                amplitudeL += amplitudeLincrement;
+            }
+            else
+            {
+                for (a = MusicGlobals->Four_Loop; a > 0; --a)
+                {
+                    for (inner = 0; inner < 4; inner++)
+                    {
+                        THE_CHECK_U3232(unsigned char *);
+                        b = source[cur_wave_i];
+                        c = source[cur_wave_i+1];
+                        sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
+                        sample = PV_FilterStepWithResonance(sample,
+                                                            Xn,
+                                                            Z1,
+                                                            Zn,
+                                                            z,
+                                                            &zIndex2,
+                                                            &Z1value,
+                                                            &this_voice->previous_zFrequency,
+                                                            this_voice->LPF_frequency,
+                                                            5);
+                        *destL += sample * amplitudeL;
+                        destL++;
+                        ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
+                    }
+                    amplitudeL += amplitudeLincrement;
+                }
             }
         }
         else
         {
+            int16_t *zRight = this_voice->zRight;
+            int32_t zIndexRight = this_voice->zIndexRight;
+            int32_t Z1valueRight = this_voice->Z1valueRight;
+            unsigned char *calculated_source;
+            int32_t sampleRight;
+
+            if (this_voice->previous_zFrequencyRight == 0)
+            {
+                this_voice->previous_zFrequencyRight = this_voice->LPF_frequency;
+            }
+
             for (a = MusicGlobals->Four_Loop; a > 0; --a)
             {
-                this_voice->previous_zFrequency += (this_voice->LPF_frequency - this_voice->previous_zFrequency) >> 5;
-                zIndex1 = zIndex2 - (this_voice->previous_zFrequency >> 8);
-
                 for (inner = 0; inner < 4; inner++)
                 {
                     THE_CHECK_U3232(unsigned char *);
-                    b = source[cur_wave_i];
-                    c = source[cur_wave_i+1];
+                    calculated_source = source + cur_wave_i * 2;
+
+                    b = calculated_source[0];
+                    c = calculated_source[2];
                     sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
-                    sample = (sample * Xn + Z1value * Z1 + z[zIndex1 & MAXRESONANCE] * Zn) >> 16;
-                    zIndex1++;
-                    z[zIndex2 & MAXRESONANCE] = (int16_t)sample;
-                    zIndex2++;
-                    Z1value = sample - (sample >> 9);
-                    *destL += sample * amplitudeL;
+
+                    b = calculated_source[1];
+                    c = calculated_source[3];
+                    sampleRight = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
+
+                    if (this_voice->LPF_resonance == 0)
+                    {
+                        sample = PV_FilterStepNoResonance(sample, Xn, Z1, &Z1value);
+                        sampleRight = PV_FilterStepNoResonance(sampleRight, Xn, Z1, &Z1valueRight);
+                    }
+                    else
+                    {
+                        sample = PV_FilterStepWithResonance(sample,
+                                                            Xn,
+                                                            Z1,
+                                                            Zn,
+                                                            z,
+                                                            &zIndex2,
+                                                            &Z1value,
+                                                            &this_voice->previous_zFrequency,
+                                                            this_voice->LPF_frequency,
+                                                            5);
+                        sampleRight = PV_FilterStepWithResonance(sampleRight,
+                                                                 Xn,
+                                                                 Z1,
+                                                                 Zn,
+                                                                 zRight,
+                                                                 &zIndexRight,
+                                                                 &Z1valueRight,
+                                                                 &this_voice->previous_zFrequencyRight,
+                                                                 this_voice->LPF_frequency,
+                                                                 5);
+                    }
+
+                    *destL += ((sample + sampleRight) >> 1) * amplitudeL;
                     destL++;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
                 }
                 amplitudeL += amplitudeLincrement;
             }
+
+            this_voice->zIndexRight = zIndexRight;
+            this_voice->Z1valueRight = Z1valueRight;
         }
     }
     this_voice->Z1value = Z1value;
@@ -238,16 +342,10 @@ void PV_ServeU3232StereoFilterPartialBuffer (GM_Voice *this_voice, bool looping)
     int32_t                   ampValueL, ampValueR;
     int32_t                   a;
     register int16_t          *z;
-    register int32_t          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
-
-    if (this_voice->channels > 1) 
-    {
-        PV_ServeU3232StereoPartialBuffer (this_voice, looping); 
-        return; 
-    }
+    int32_t                   Z1value, zIndex2, Xn, Z1, Zn, sample;
 
 #if REVERB_USED == VARIABLE_REVERB
-    if (this_voice->reverbLevel > 1 || this_voice->chorusLevel > 1)
+    if ((this_voice->reverbLevel > 1 || this_voice->chorusLevel > 1) && this_voice->channels == 1)
     { 
         PV_ServeU3232StereoFilterPartialBufferNewReverb (this_voice, looping); 
         return; 
@@ -287,53 +385,126 @@ void PV_ServeU3232StereoFilterPartialBuffer (GM_Voice *this_voice, bool looping)
     }
 
     {
-        if (this_voice->LPF_resonance == 0)
+        if (this_voice->channels == 1)
         {
-            for (a = MusicGlobals->Four_Loop; a > 0; --a)
+            if (this_voice->LPF_resonance == 0)
             {
-                for (inner = 0; inner < 4; inner++)
+                for (a = MusicGlobals->Four_Loop; a > 0; --a)
                 {
-                    THE_CHECK_U3232(unsigned char *);
-                    b = source[cur_wave_i];
-                    c = source[cur_wave_i+1];
-                    sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
-                    sample = (sample * Xn + Z1value * Z1) >> 16;
-                    Z1value = sample - (sample >> 9);
-                    destL[0] += sample * amplitudeL;
-                    destL[1] += sample * amplitudeR;
-                    destL += 2;
-                    ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
+                    for (inner = 0; inner < 4; inner++)
+                    {
+                        THE_CHECK_U3232(unsigned char *);
+                        b = source[cur_wave_i];
+                        c = source[cur_wave_i+1];
+                        sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
+                        sample = PV_FilterStepNoResonance(sample, Xn, Z1, &Z1value);
+                        destL[0] += sample * amplitudeL;
+                        destL[1] += sample * amplitudeR;
+                        destL += 2;
+                        ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
+                    }
+                    amplitudeL += amplitudeLincrement;
+                    amplitudeR += amplitudeRincrement;
                 }
-                amplitudeL += amplitudeLincrement;
-                amplitudeR += amplitudeRincrement;
+            }
+            else
+            {
+                for (a = MusicGlobals->Four_Loop; a > 0; --a)
+                {
+                    for (inner = 0; inner < 4; inner++)
+                    {
+                        THE_CHECK_U3232(unsigned char *);
+                        b = source[cur_wave_i];
+                        c = source[cur_wave_i+1];
+                        sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
+                        sample = PV_FilterStepWithResonance(sample,
+                                                            Xn,
+                                                            Z1,
+                                                            Zn,
+                                                            z,
+                                                            &zIndex2,
+                                                            &Z1value,
+                                                            &this_voice->previous_zFrequency,
+                                                            this_voice->LPF_frequency,
+                                                            3);
+                        destL[0] += sample * amplitudeL;
+                        destL[1] += sample * amplitudeR;
+                        destL += 2;
+                        ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
+                    }
+                    amplitudeL += amplitudeLincrement;
+                    amplitudeR += amplitudeRincrement;
+                }
             }
         }
         else
         {
+            int16_t *zRight = this_voice->zRight;
+            int32_t zIndexRight = this_voice->zIndexRight;
+            int32_t Z1valueRight = this_voice->Z1valueRight;
+            unsigned char *calculated_source;
+            int32_t sampleRight;
+
+            if (this_voice->previous_zFrequencyRight == 0)
+            {
+                this_voice->previous_zFrequencyRight = this_voice->LPF_frequency;
+            }
+
             for (a = MusicGlobals->Four_Loop; a > 0; --a)
             {
-                zIndex1 = zIndex2 - (this_voice->previous_zFrequency >> 8);
-                this_voice->previous_zFrequency += (this_voice->LPF_frequency - this_voice->previous_zFrequency) >> 3;
-
                 for (inner = 0; inner < 4; inner++)
                 {
                     THE_CHECK_U3232(unsigned char *);
-                    b = source[cur_wave_i];
-                    c = source[cur_wave_i+1];
+                    calculated_source = source + cur_wave_i * 2;
+
+                    b = calculated_source[0];
+                    c = calculated_source[2];
                     sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
-                    sample = (sample * Xn + Z1value * Z1 + z[zIndex1 & MAXRESONANCE] * Zn) >> 16;
-                    zIndex1++;
-                    z[zIndex2 & MAXRESONANCE] = (int16_t)sample;
-                    zIndex2++;
-                    Z1value = sample - (sample >> 9);
+
+                    b = calculated_source[1];
+                    c = calculated_source[3];
+                    sampleRight = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
+
+                    if (this_voice->LPF_resonance == 0)
+                    {
+                        sample = PV_FilterStepNoResonance(sample, Xn, Z1, &Z1value);
+                        sampleRight = PV_FilterStepNoResonance(sampleRight, Xn, Z1, &Z1valueRight);
+                    }
+                    else
+                    {
+                        sample = PV_FilterStepWithResonance(sample,
+                                                            Xn,
+                                                            Z1,
+                                                            Zn,
+                                                            z,
+                                                            &zIndex2,
+                                                            &Z1value,
+                                                            &this_voice->previous_zFrequency,
+                                                            this_voice->LPF_frequency,
+                                                            3);
+                        sampleRight = PV_FilterStepWithResonance(sampleRight,
+                                                                 Xn,
+                                                                 Z1,
+                                                                 Zn,
+                                                                 zRight,
+                                                                 &zIndexRight,
+                                                                 &Z1valueRight,
+                                                                 &this_voice->previous_zFrequencyRight,
+                                                                 this_voice->LPF_frequency,
+                                                                 3);
+                    }
+
                     destL[0] += sample * amplitudeL;
-                    destL[1] += sample * amplitudeR;
+                    destL[1] += sampleRight * amplitudeR;
                     destL += 2;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
                 }
                 amplitudeL += amplitudeLincrement;
                 amplitudeR += amplitudeRincrement;
             }
+
+            this_voice->zIndexRight = zIndexRight;
+            this_voice->Z1valueRight = Z1valueRight;
         }
     }
     this_voice->Z1value = Z1value;
@@ -366,16 +537,10 @@ void PV_ServeU3232FilterFullBuffer(GM_Voice *this_voice)
     int32_t                   a;
 
     register int16_t          *z;
-    register int32_t          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
+    int32_t                   Z1value, zIndex2, Xn, Z1, Zn, sample;
 
-    // We can't filter stereo samples, so bail on this.
-    if (this_voice->channels > 1) 
-    {
-        PV_ServeU3232PartialBuffer (this_voice, FALSE); 
-        return; 
-    }
 #if REVERB_USED == VARIABLE_REVERB
-    if (this_voice->reverbLevel > 1 || this_voice->chorusLevel > 1)
+    if ((this_voice->reverbLevel > 1 || this_voice->chorusLevel > 1) && this_voice->channels == 1)
     {
         PV_ServeU3232FilterFullBufferNewReverb (this_voice); 
         return;
@@ -402,47 +567,117 @@ void PV_ServeU3232FilterFullBuffer(GM_Voice *this_voice)
     wave_increment = PV_GetWavePitchU3232(this_voice->NotePitch);
 
     {
-        if (this_voice->LPF_resonance == 0)
+        if (this_voice->channels == 1)
         {
-            for (a = MusicGlobals->Four_Loop; a > 0; --a)
+            if (this_voice->LPF_resonance == 0)
             {
-                for (inner = 0; inner < 4; inner++)
+                for (a = MusicGlobals->Four_Loop; a > 0; --a)
                 {
-                    b = source[cur_wave_i];
-                    c = source[cur_wave_i+1];
-                    sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
-                    sample = (sample * Xn + Z1value * Z1) >> 16;
-                    Z1value = sample - (sample >> 9);   // remove DC bias
-                    *destL += sample * amplitudeL;
-                    destL++;
-                    ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
+                    for (inner = 0; inner < 4; inner++)
+                    {
+                        b = source[cur_wave_i];
+                        c = source[cur_wave_i+1];
+                        sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
+                        sample = PV_FilterStepNoResonance(sample, Xn, Z1, &Z1value);
+                        *destL += sample * amplitudeL;
+                        destL++;
+                        ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
+                    }
+                    amplitudeL += amplitudeLincrement;
                 }
-                amplitudeL += amplitudeLincrement;
+            }
+            else
+            {
+                for (a = MusicGlobals->Four_Loop; a > 0; --a)
+                {
+                    for (inner = 0; inner < 4; inner++)
+                    {
+                        b = source[cur_wave_i];
+                        c = source[cur_wave_i+1];
+                        sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
+                        sample = PV_FilterStepWithResonance(sample,
+                                                            Xn,
+                                                            Z1,
+                                                            Zn,
+                                                            z,
+                                                            &zIndex2,
+                                                            &Z1value,
+                                                            &this_voice->previous_zFrequency,
+                                                            this_voice->LPF_frequency,
+                                                            5);
+                        *destL += sample * amplitudeL;
+                        destL++;
+                        ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
+                    }
+                    amplitudeL += amplitudeLincrement;
+                }
             }
         }
         else
         {
+            int16_t *zRight = this_voice->zRight;
+            int32_t zIndexRight = this_voice->zIndexRight;
+            int32_t Z1valueRight = this_voice->Z1valueRight;
+            unsigned char *calculated_source;
+            int32_t sampleRight;
+
+            if (this_voice->previous_zFrequencyRight == 0)
+            {
+                this_voice->previous_zFrequencyRight = this_voice->LPF_frequency;
+            }
+
             for (a = MusicGlobals->Four_Loop; a > 0; --a)
             {
-                this_voice->previous_zFrequency += (this_voice->LPF_frequency - this_voice->previous_zFrequency) >> 5;
-                zIndex1 = zIndex2 - (this_voice->previous_zFrequency >> 8);
-
                 for (inner = 0; inner < 4; inner++)
                 {
-                    b = source[cur_wave_i];
-                    c = source[cur_wave_i+1];
+                    calculated_source = source + cur_wave_i * 2;
+
+                    b = calculated_source[0];
+                    c = calculated_source[2];
                     sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
-                    sample = (sample * Xn + Z1value * Z1 + z[zIndex1 & MAXRESONANCE] * Zn) >> 16;
-                    zIndex1++;
-                    z[zIndex2 & MAXRESONANCE] = (int16_t)sample;
-                    zIndex2++;
-                    Z1value = sample - (sample >> 9);
-                    *destL += sample * amplitudeL;
+
+                    b = calculated_source[1];
+                    c = calculated_source[3];
+                    sampleRight = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
+
+                    if (this_voice->LPF_resonance == 0)
+                    {
+                        sample = PV_FilterStepNoResonance(sample, Xn, Z1, &Z1value);
+                        sampleRight = PV_FilterStepNoResonance(sampleRight, Xn, Z1, &Z1valueRight);
+                    }
+                    else
+                    {
+                        sample = PV_FilterStepWithResonance(sample,
+                                                            Xn,
+                                                            Z1,
+                                                            Zn,
+                                                            z,
+                                                            &zIndex2,
+                                                            &Z1value,
+                                                            &this_voice->previous_zFrequency,
+                                                            this_voice->LPF_frequency,
+                                                            5);
+                        sampleRight = PV_FilterStepWithResonance(sampleRight,
+                                                                 Xn,
+                                                                 Z1,
+                                                                 Zn,
+                                                                 zRight,
+                                                                 &zIndexRight,
+                                                                 &Z1valueRight,
+                                                                 &this_voice->previous_zFrequencyRight,
+                                                                 this_voice->LPF_frequency,
+                                                                 5);
+                    }
+
+                    *destL += ((sample + sampleRight) >> 1) * amplitudeL;
                     destL++;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
                 }
                 amplitudeL += amplitudeLincrement;
             }
+
+            this_voice->zIndexRight = zIndexRight;
+            this_voice->Z1valueRight = Z1valueRight;
         }
     }
     this_voice->Z1value = Z1value;
@@ -473,15 +708,10 @@ void PV_ServeU3232StereoFilterFullBuffer (GM_Voice *this_voice)
     int32_t                   a;
 
     register int16_t          *z;
-    register int32_t          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
+    int32_t                   Z1value, zIndex2, Xn, Z1, Zn, sample;
 
-    if (this_voice->channels > 1) 
-    {
-        PV_ServeU3232StereoPartialBuffer (this_voice, FALSE); 
-        return; 
-    }
 #if REVERB_USED == VARIABLE_REVERB
-    if (this_voice->reverbLevel > 1 || this_voice->chorusLevel > 1)
+    if ((this_voice->reverbLevel > 1 || this_voice->chorusLevel > 1) && this_voice->channels == 1)
     {
         PV_ServeU3232StereoFilterFullBufferNewReverb (this_voice); 
         return;
@@ -511,51 +741,123 @@ void PV_ServeU3232StereoFilterFullBuffer (GM_Voice *this_voice)
     wave_increment = PV_GetWavePitchU3232(this_voice->NotePitch);
 
     {
-        if (this_voice->LPF_resonance == 0)
+        if (this_voice->channels == 1)
         {
-            for (a = MusicGlobals->Four_Loop; a > 0; --a)
+            if (this_voice->LPF_resonance == 0)
             {
-                for (inner = 0; inner < 4; inner++)
+                for (a = MusicGlobals->Four_Loop; a > 0; --a)
                 {
-                    b = source[cur_wave_i];
-                    c = source[cur_wave_i+1];
-                    sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
-                    sample = (sample * Xn + Z1value * Z1) >> 16;
-                    Z1value = sample - (sample >> 9);
-                    destL[0] += sample * amplitudeL;
-                    destL[1] += sample * amplitudeR;
-                    destL += 2;
-                    ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
+                    for (inner = 0; inner < 4; inner++)
+                    {
+                        b = source[cur_wave_i];
+                        c = source[cur_wave_i+1];
+                        sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
+                        sample = PV_FilterStepNoResonance(sample, Xn, Z1, &Z1value);
+                        destL[0] += sample * amplitudeL;
+                        destL[1] += sample * amplitudeR;
+                        destL += 2;
+                        ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
+                    }
+                    amplitudeL += amplitudeLincrement;
+                    amplitudeR += amplitudeRincrement;
                 }
-                amplitudeL += amplitudeLincrement;
-                amplitudeR += amplitudeRincrement;
+            }
+            else
+            {
+                for (a = MusicGlobals->Four_Loop; a > 0; --a)
+                {
+                    for (inner = 0; inner < 4; inner++)
+                    {
+                        b = source[cur_wave_i];
+                        c = source[cur_wave_i+1];
+                        sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
+                        sample = PV_FilterStepWithResonance(sample,
+                                                            Xn,
+                                                            Z1,
+                                                            Zn,
+                                                            z,
+                                                            &zIndex2,
+                                                            &Z1value,
+                                                            &this_voice->previous_zFrequency,
+                                                            this_voice->LPF_frequency,
+                                                            3);
+                        destL[0] += sample * amplitudeL;
+                        destL[1] += sample * amplitudeR;
+                        destL += 2;
+                        ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
+                    }
+                    amplitudeL += amplitudeLincrement;
+                    amplitudeR += amplitudeRincrement;
+                }
             }
         }
         else
         {
+            int16_t *zRight = this_voice->zRight;
+            int32_t zIndexRight = this_voice->zIndexRight;
+            int32_t Z1valueRight = this_voice->Z1valueRight;
+            unsigned char *calculated_source;
+            int32_t sampleRight;
+
+            if (this_voice->previous_zFrequencyRight == 0)
+            {
+                this_voice->previous_zFrequencyRight = this_voice->LPF_frequency;
+            }
+
             for (a = MusicGlobals->Four_Loop; a > 0; --a)
             {
-                zIndex1 = zIndex2 - (this_voice->previous_zFrequency >> 8);
-                this_voice->previous_zFrequency += (this_voice->LPF_frequency - this_voice->previous_zFrequency) >> 3;
-
                 for (inner = 0; inner < 4; inner++)
                 {
-                    b = source[cur_wave_i];
-                    c = source[cur_wave_i+1];
+                    calculated_source = source + cur_wave_i * 2;
+
+                    b = calculated_source[0];
+                    c = calculated_source[2];
                     sample = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
-                    sample = (sample * Xn + Z1value * Z1 + z[zIndex1 & MAXRESONANCE] * Zn) >> 16;
-                    zIndex1++;
-                    z[zIndex2 & MAXRESONANCE] = (int16_t)sample;
-                    zIndex2++;
-                    Z1value = sample - (sample >> 9);
+
+                    b = calculated_source[1];
+                    c = calculated_source[3];
+                    sampleRight = ((((int32_t)(cur_wave_f >> 16) * (int32_t)(c-b)) >> 16) + b - 0x80) << 2;
+
+                    if (this_voice->LPF_resonance == 0)
+                    {
+                        sample = PV_FilterStepNoResonance(sample, Xn, Z1, &Z1value);
+                        sampleRight = PV_FilterStepNoResonance(sampleRight, Xn, Z1, &Z1valueRight);
+                    }
+                    else
+                    {
+                        sample = PV_FilterStepWithResonance(sample,
+                                                            Xn,
+                                                            Z1,
+                                                            Zn,
+                                                            z,
+                                                            &zIndex2,
+                                                            &Z1value,
+                                                            &this_voice->previous_zFrequency,
+                                                            this_voice->LPF_frequency,
+                                                            3);
+                        sampleRight = PV_FilterStepWithResonance(sampleRight,
+                                                                 Xn,
+                                                                 Z1,
+                                                                 Zn,
+                                                                 zRight,
+                                                                 &zIndexRight,
+                                                                 &Z1valueRight,
+                                                                 &this_voice->previous_zFrequencyRight,
+                                                                 this_voice->LPF_frequency,
+                                                                 3);
+                    }
+
                     destL[0] += sample * amplitudeL;
-                    destL[1] += sample * amplitudeR;
+                    destL[1] += sampleRight * amplitudeR;
                     destL += 2;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
                 }
                 amplitudeL += amplitudeLincrement;
                 amplitudeR += amplitudeRincrement;
             }
+
+            this_voice->zIndexRight = zIndexRight;
+            this_voice->Z1valueRight = Z1valueRight;
         }
     }
     this_voice->Z1value = Z1value;
@@ -594,15 +896,10 @@ void PV_ServeU3232FilterPartialBuffer16 (GM_Voice *this_voice, bool looping)
     int32_t                   a;
 
     register int16_t          *z;
-    register int32_t          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
+    int32_t                   Z1value, zIndex2, Xn, Z1, Zn, sample;
 
-    if (this_voice->channels > 1) 
-    { 
-        PV_ServeU3232PartialBuffer16 (this_voice, looping); 
-        return; 
-    }
 #if REVERB_USED == VARIABLE_REVERB
-    if (this_voice->reverbLevel > 1 || this_voice->chorusLevel > 1)
+    if ((this_voice->reverbLevel > 1 || this_voice->chorusLevel > 1) && this_voice->channels == 1)
     {
         PV_ServeU3232FilterPartialBufferNewReverb16 (this_voice, looping); 
         return;
@@ -636,49 +933,120 @@ void PV_ServeU3232FilterPartialBuffer16 (GM_Voice *this_voice, bool looping)
     }
 
     {
-        if (this_voice->LPF_resonance == 0)
+        if (this_voice->channels == 1)
         {
-            for (a = MusicGlobals->Four_Loop; a > 0; --a)
+            if (this_voice->LPF_resonance == 0)
             {
-                for (inner = 0; inner < 4; inner++)
+                for (a = MusicGlobals->Four_Loop; a > 0; --a)
                 {
-                    THE_CHECK_U3232(int16_t *);       // is in the mail
-                    b = source[cur_wave_i];
-                    c = source[cur_wave_i+1];
-                    sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
-                    sample = (sample * Xn + Z1value * Z1) >> 16;
-                    Z1value = sample - (sample >> 9);   // remove DC bias
-                    *destL += (sample * amplitudeL) >> 2;
-                    destL++;
-                    ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
+                    for (inner = 0; inner < 4; inner++)
+                    {
+                        THE_CHECK_U3232(int16_t *);
+                        b = source[cur_wave_i];
+                        c = source[cur_wave_i+1];
+                        sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
+                        sample = PV_FilterStepNoResonance(sample, Xn, Z1, &Z1value);
+                        *destL += (sample * amplitudeL) >> 2;
+                        destL++;
+                        ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
+                    }
+                    amplitudeL += amplitudeLincrement;
                 }
-                amplitudeL += amplitudeLincrement;
+            }
+            else
+            {
+                for (a = MusicGlobals->Four_Loop; a > 0; --a)
+                {
+                    for (inner = 0; inner < 4; inner++)
+                    {
+                        THE_CHECK_U3232(int16_t *);
+                        b = source[cur_wave_i];
+                        c = source[cur_wave_i+1];
+                        sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
+                        sample = PV_FilterStepWithResonance(sample,
+                                                            Xn,
+                                                            Z1,
+                                                            Zn,
+                                                            z,
+                                                            &zIndex2,
+                                                            &Z1value,
+                                                            &this_voice->previous_zFrequency,
+                                                            this_voice->LPF_frequency,
+                                                            5);
+                        *destL += (sample * amplitudeL) >> 2;
+                        destL++;
+                        ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
+                    }
+                    amplitudeL += amplitudeLincrement;
+                }
             }
         }
         else
         {
+            int16_t *zRight = this_voice->zRight;
+            int32_t zIndexRight = this_voice->zIndexRight;
+            int32_t Z1valueRight = this_voice->Z1valueRight;
+            int16_t *calculated_source;
+            int32_t sampleRight;
+
+            if (this_voice->previous_zFrequencyRight == 0)
+            {
+                this_voice->previous_zFrequencyRight = this_voice->LPF_frequency;
+            }
+
             for (a = MusicGlobals->Four_Loop; a > 0; --a)
             {
-                this_voice->previous_zFrequency += (this_voice->LPF_frequency - this_voice->previous_zFrequency) >> 5;
-                zIndex1 = zIndex2 - (this_voice->previous_zFrequency >> 8);
-
                 for (inner = 0; inner < 4; inner++)
                 {
-                    THE_CHECK_U3232(int16_t *);       // is in the mail
-                    b = source[cur_wave_i];
-                    c = source[cur_wave_i+1];
+                    THE_CHECK_U3232(int16_t *);
+                    calculated_source = source + cur_wave_i * 2;
+
+                    b = calculated_source[0];
+                    c = calculated_source[2];
                     sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
-                    sample = (sample * Xn + Z1value * Z1 + z[zIndex1 & MAXRESONANCE] * Zn) >> 16;
-                    zIndex1++;
-                    z[zIndex2 & MAXRESONANCE] = (int16_t)sample;
-                    zIndex2++;
-                    Z1value = sample - (sample >> 9);
-                    *destL += (sample * amplitudeL) >> 2;
+
+                    b = calculated_source[1];
+                    c = calculated_source[3];
+                    sampleRight = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
+
+                    if (this_voice->LPF_resonance == 0)
+                    {
+                        sample = PV_FilterStepNoResonance(sample, Xn, Z1, &Z1value);
+                        sampleRight = PV_FilterStepNoResonance(sampleRight, Xn, Z1, &Z1valueRight);
+                    }
+                    else
+                    {
+                        sample = PV_FilterStepWithResonance(sample,
+                                                            Xn,
+                                                            Z1,
+                                                            Zn,
+                                                            z,
+                                                            &zIndex2,
+                                                            &Z1value,
+                                                            &this_voice->previous_zFrequency,
+                                                            this_voice->LPF_frequency,
+                                                            5);
+                        sampleRight = PV_FilterStepWithResonance(sampleRight,
+                                                                 Xn,
+                                                                 Z1,
+                                                                 Zn,
+                                                                 zRight,
+                                                                 &zIndexRight,
+                                                                 &Z1valueRight,
+                                                                 &this_voice->previous_zFrequencyRight,
+                                                                 this_voice->LPF_frequency,
+                                                                 5);
+                    }
+
+                    *destL += (((sample + sampleRight) >> 1) * amplitudeL) >> 2;
                     destL++;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
                 }
                 amplitudeL += amplitudeLincrement;
             }
+
+            this_voice->zIndexRight = zIndexRight;
+            this_voice->Z1valueRight = Z1valueRight;
         }
     }
     this_voice->Z1value = Z1value;
@@ -713,15 +1081,10 @@ void PV_ServeU3232StereoFilterPartialBuffer16 (GM_Voice *this_voice, bool loopin
     int32_t                   a;
 
     register int16_t          *z;
-    register int32_t          Z1value, zIndex1, zIndex2, Xn, Z1, Zn, sample;
+    int32_t                   Z1value, zIndex2, Xn, Z1, Zn, sample;
 
-    if (this_voice->channels > 1) 
-    { 
-        PV_ServeU3232StereoPartialBuffer16 (this_voice, looping); 
-        return; 
-    }
 #if REVERB_USED == VARIABLE_REVERB
-    if (this_voice->reverbLevel > 1 || this_voice->chorusLevel > 1)
+    if ((this_voice->reverbLevel > 1 || this_voice->chorusLevel > 1) && this_voice->channels == 1)
     {
         PV_ServeU3232StereoFilterPartialBufferNewReverb16 (this_voice, looping); 
         return;
@@ -758,53 +1121,126 @@ void PV_ServeU3232StereoFilterPartialBuffer16 (GM_Voice *this_voice, bool loopin
     }
 
     {
-        if (this_voice->LPF_resonance == 0)
+        if (this_voice->channels == 1)
         {
-            for (a = MusicGlobals->Four_Loop; a > 0; --a)
+            if (this_voice->LPF_resonance == 0)
             {
-                for (inner = 0; inner < 4; inner++)
+                for (a = MusicGlobals->Four_Loop; a > 0; --a)
                 {
-                    THE_CHECK_U3232(int16_t *);       // is in the mail
-                    b = source[cur_wave_i];
-                    c = source[cur_wave_i+1];
-                    sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
-                    sample = (sample * Xn + Z1value * Z1) >> 16;
-                    Z1value = sample - (sample >> 9);
-                    destL[0] += (sample * amplitudeL) >> 2;
-                    destL[1] += (sample * amplitudeR) >> 2;
-                    destL += 2;
-                    ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
+                    for (inner = 0; inner < 4; inner++)
+                    {
+                        THE_CHECK_U3232(int16_t *);
+                        b = source[cur_wave_i];
+                        c = source[cur_wave_i+1];
+                        sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
+                        sample = PV_FilterStepNoResonance(sample, Xn, Z1, &Z1value);
+                        destL[0] += (sample * amplitudeL) >> 2;
+                        destL[1] += (sample * amplitudeR) >> 2;
+                        destL += 2;
+                        ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
+                    }
+                    amplitudeL += amplitudeLincrement;
+                    amplitudeR += amplitudeRincrement;
                 }
-                amplitudeL += amplitudeLincrement;
-                amplitudeR += amplitudeRincrement;
+            }
+            else
+            {
+                for (a = MusicGlobals->Four_Loop; a > 0; --a)
+                {
+                    for (inner = 0; inner < 4; inner++)
+                    {
+                        THE_CHECK_U3232(int16_t *);
+                        b = source[cur_wave_i];
+                        c = source[cur_wave_i+1];
+                        sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
+                        sample = PV_FilterStepWithResonance(sample,
+                                                            Xn,
+                                                            Z1,
+                                                            Zn,
+                                                            z,
+                                                            &zIndex2,
+                                                            &Z1value,
+                                                            &this_voice->previous_zFrequency,
+                                                            this_voice->LPF_frequency,
+                                                            3);
+                        destL[0] += (sample * amplitudeL) >> 2;
+                        destL[1] += (sample * amplitudeR) >> 2;
+                        destL += 2;
+                        ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
+                    }
+                    amplitudeL += amplitudeLincrement;
+                    amplitudeR += amplitudeRincrement;
+                }
             }
         }
         else
         {
+            int16_t *zRight = this_voice->zRight;
+            int32_t zIndexRight = this_voice->zIndexRight;
+            int32_t Z1valueRight = this_voice->Z1valueRight;
+            int16_t *calculated_source;
+            int32_t sampleRight;
+
+            if (this_voice->previous_zFrequencyRight == 0)
+            {
+                this_voice->previous_zFrequencyRight = this_voice->LPF_frequency;
+            }
+
             for (a = MusicGlobals->Four_Loop; a > 0; --a)
             {
-                zIndex1 = zIndex2 - (this_voice->previous_zFrequency >> 8);
-                this_voice->previous_zFrequency += (this_voice->LPF_frequency - this_voice->previous_zFrequency) >> 3;
-
                 for (inner = 0; inner < 4; inner++)
                 {
                     THE_CHECK_U3232(int16_t *);
-                    b = source[cur_wave_i];
-                    c = source[cur_wave_i+1];
+                    calculated_source = source + cur_wave_i * 2;
+
+                    b = calculated_source[0];
+                    c = calculated_source[2];
                     sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
-                    sample = (sample * Xn + Z1value * Z1 + z[zIndex1 & MAXRESONANCE] * Zn) >> 16;
-                    zIndex1++;
-                    z[zIndex2 & MAXRESONANCE] = (int16_t)sample;
-                    zIndex2++;
-                    Z1value = sample - (sample >> 9);
+
+                    b = calculated_source[1];
+                    c = calculated_source[3];
+                    sampleRight = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
+
+                    if (this_voice->LPF_resonance == 0)
+                    {
+                        sample = PV_FilterStepNoResonance(sample, Xn, Z1, &Z1value);
+                        sampleRight = PV_FilterStepNoResonance(sampleRight, Xn, Z1, &Z1valueRight);
+                    }
+                    else
+                    {
+                        sample = PV_FilterStepWithResonance(sample,
+                                                            Xn,
+                                                            Z1,
+                                                            Zn,
+                                                            z,
+                                                            &zIndex2,
+                                                            &Z1value,
+                                                            &this_voice->previous_zFrequency,
+                                                            this_voice->LPF_frequency,
+                                                            3);
+                        sampleRight = PV_FilterStepWithResonance(sampleRight,
+                                                                 Xn,
+                                                                 Z1,
+                                                                 Zn,
+                                                                 zRight,
+                                                                 &zIndexRight,
+                                                                 &Z1valueRight,
+                                                                 &this_voice->previous_zFrequencyRight,
+                                                                 this_voice->LPF_frequency,
+                                                                 3);
+                    }
+
                     destL[0] += (sample * amplitudeL) >> 2;
-                    destL[1] += (sample * amplitudeR) >> 2;
+                    destL[1] += (sampleRight * amplitudeR) >> 2;
                     destL += 2;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
                 }
                 amplitudeL += amplitudeLincrement;
                 amplitudeR += amplitudeRincrement;
             }
+
+            this_voice->zIndexRight = zIndexRight;
+            this_voice->Z1valueRight = Z1valueRight;
         }
     }
     this_voice->Z1value = Z1value;

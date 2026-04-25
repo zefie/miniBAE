@@ -1614,6 +1614,8 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
     register int32_t n, i, value;
     GM_LFO *rec;
     GM_Mixer *pMixer;
+    bool allowStereoSourceFilter;
+    bool shouldUseVoiceFilter;
 
     pMixer = MusicGlobals;
 
@@ -1893,6 +1895,14 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
     {
         loopend = 0;
     }
+    allowStereoSourceFilter =
+        (pVoice->channels == 1) ||
+        ((pVoice->channels > 1) && pVoice->pSong &&
+         ((pVoice->pSong->engineConfigFlags & SONG_CONFIG_CONTAINER_IS_ZMF) ||
+          (pVoice->pInstrument && pVoice->pInstrument->sourceIsZsb)));
+    shouldUseVoiceFilter =
+        ((pVoice->LPF_lowpassAmount != 0) || (pVoice->LPF_resonance != 0)) &&
+        allowStereoSourceFilter;
     // if our current sample position, because of pitch changes, might exceed the end point;
     // if that is the case, and we are not looping, limit it to the end.
     if (loopend == 0 && start > end)
@@ -1988,7 +1998,7 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
             if (end <= start + size)
             {
             PARTIAL:
-                if (((pVoice->LPF_lowpassAmount != 0) || (pVoice->LPF_resonance != 0)) && (pVoice->channels == 1))
+                if (shouldUseVoiceFilter)
                 {
                     if (pVoice->bitSize == 16)
                     {
@@ -2013,7 +2023,7 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
             }
             else
             {
-                if (((pVoice->LPF_lowpassAmount != 0) || (pVoice->LPF_resonance != 0)) && (pVoice->channels == 1))
+                if (shouldUseVoiceFilter)
                 {
                     if (pVoice->bitSize == 16)
                     {
@@ -2042,7 +2052,7 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
         LOOPING:
             if (loopend > (start + size))
             {
-                if (((pVoice->LPF_lowpassAmount != 0) || (pVoice->LPF_resonance != 0)) && (pVoice->channels == 1))
+                if (shouldUseVoiceFilter)
                 {
                     if (pVoice->bitSize == 16)
                     {
@@ -2067,7 +2077,7 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
             }
             else
             {
-                if (((pVoice->LPF_lowpassAmount != 0) || (pVoice->LPF_resonance != 0)) && (pVoice->channels == 1))
+                if (shouldUseVoiceFilter)
                 {
                     if (pVoice->bitSize == 16)
                     {

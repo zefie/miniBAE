@@ -612,6 +612,8 @@ struct GM_Voice
 #endif
     int16_t                  z[MAXRESONANCE+1];
     int32_t                 zIndex, Z1value, previous_zFrequency;
+    int16_t                  zRight[MAXRESONANCE+1];
+    int32_t                 zIndexRight, Z1valueRight, previous_zFrequencyRight;
     int32_t                 LPF_lowpassAmount, LPF_frequency, LPF_resonance;
     int32_t                 LPF_base_lowpassAmount, LPF_base_frequency, LPF_base_resonance;
 //  int32_t                 s1Left, s2Left, s3Left, s4Left, s5Left, s6Left; // for INTERP3 mode only
