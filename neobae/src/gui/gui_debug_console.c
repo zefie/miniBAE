@@ -39,7 +39,7 @@
 extern void BAE_SetDebugOutputCallback(void (*callback)(const char *message));
 
 // Internal append function that does the real work
-static void debug_console_append_internal(const char *message);
+static void debug_message_internal(const char *message);
 
 // Configuration
 #define DEBUG_BUFFER_SIZE (256 * 1024)  // 256KB circular buffer
@@ -123,10 +123,10 @@ void debug_console_init(void)
     g_filter_focused = false;
     
     // Register callback with BAE library
-    BAE_SetDebugOutputCallback(debug_console_append_internal);
+    BAE_SetDebugOutputCallback(debug_message_internal);
     
     // Add initial message
-    debug_console_append_internal("=== Debug Console Initialized ===\n");
+    debug_message_internal("=== Debug Console Initialized ===\n");
 }
 
 // Cleanup debug console
@@ -312,7 +312,7 @@ static void clear_console(void)
 }
 
 // Internal append function (the real implementation)
-static void debug_console_append_internal(const char *message)
+static void debug_message_internal(const char *message)
 {
     if (!message || !g_debug_mutex) return;
     

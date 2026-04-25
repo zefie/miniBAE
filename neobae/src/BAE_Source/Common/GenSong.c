@@ -588,8 +588,8 @@ OPErr GM_PrerollSong(GM_Song *pSong, GM_SongCallbackProcPtr theCallbackProc,
                 }
                 pSong->maxSongVoices = MAX_VOICES - pSong->maxEffectVoices;
 
-                // BAE_PRINTF("audio::max voices from all songs %d\n", PV_GetMaxVoicesPlayingFromAllSongs());
-                // BAE_PRINTF("audio::mix level from all songs %d\n", PV_GetMixLevelPlayingFromAllSongs());
+                // debug_message("audio::max voices from all songs %d\n", PV_GetMaxVoicesPlayingFromAllSongs());
+                // debug_message("audio::mix level from all songs %d\n", PV_GetMixLevelPlayingFromAllSongs());
 
                 GM_GetSystemVoices(&sMaxSong, &sMixLevel, &sMaxEffect);
                 // if the mix level for all currently playing songs is not 0, then reconfigure mix level only up
@@ -604,8 +604,8 @@ OPErr GM_PrerollSong(GM_Song *pSong, GM_SongCallbackProcPtr theCallbackProc,
                     }
                 }
 
-                // BAE_PRINTF("audio::Song mix %d midi %d pcm %d\n", pSong->mixLevel, pSong->maxSongVoices, pSong->maxEffectVoices);
-                // BAE_PRINTF("audio::Mixer mix %d midi %d pcm %d\n", sMixLevel, sMaxSong, sMaxEffect);
+                // debug_message("audio::Song mix %d midi %d pcm %d\n", pSong->mixLevel, pSong->maxSongVoices, pSong->maxEffectVoices);
+                // debug_message("audio::Mixer mix %d midi %d pcm %d\n", sMixLevel, sMaxSong, sMaxEffect);
                 useEmbeddedMixerSettings = TRUE; // force a reconfigure
             }
             // reconfigure global mixer settings if desired
@@ -615,7 +615,7 @@ OPErr GM_PrerollSong(GM_Song *pSong, GM_SongCallbackProcPtr theCallbackProc,
                                                pSong->mixLevel,
                                                pSong->maxEffectVoices);
                 GM_GetSystemVoices(&sMaxSong, &sMixLevel, &sMaxEffect);
-                // BAE_PRINTF("audio::mixer settings: mix %d midi %d pcm %d\n", sMixLevel, sMaxSong, sMaxEffect);
+                // debug_message("audio::mixer settings: mix %d midi %d pcm %d\n", sMixLevel, sMaxSong, sMaxEffect);
             }
             // allocate song song, but don't play sequencer
             pSong->songPaused = TRUE;

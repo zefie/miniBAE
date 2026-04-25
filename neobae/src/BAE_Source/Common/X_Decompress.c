@@ -630,14 +630,14 @@ void XDecryptData(void *pData, uint32_t size)
         R = INIT_R;
         pByte = (unsigned char *)pData;
         pEnd = pByte + size;
-//      BAE_PRINTF("s = 0x%lx e = 0x%lx sz = 0x%lx\n", (int32_t)pByte, (int32_t)pEnd, (int32_t)size);
+//      debug_message("s = 0x%lx e = 0x%lx sz = 0x%lx\n", (int32_t)pByte, (int32_t)pEnd, (int32_t)size);
         while (pByte < pEnd)
         {
             *pByte = PV_Decrypt(&R, *pByte);
             pByte++;
         }
     }
-//  BAE_PRINTF("crc1 = %lx crc2 = %lx\n", crc1, crc2);
+//  debug_message("crc1 = %lx crc2 = %lx\n", crc1, crc2);
 }
 
 

@@ -2314,7 +2314,7 @@ BAEResult BAEMixer_AddBankFromMemory(BAEMixer mixer, void *pAudioFile, uint32_t 
                     {
                         if (PV_XFileHasModernCodecSamples(newPatchFile))
                         {
-                            BAE_PRINTF("[Bank] IREZ bank rejected: contains FLAC/Vorbis/Opus/QOA sample(s) — upgrade to ZSB (.zsb)\n");
+                            debug_message("[Bank] IREZ bank rejected: contains FLAC/Vorbis/Opus/QOA sample(s) — upgrade to ZSB (.zsb)\n");
                             XFileClose(newPatchFile);
                             return BAE_UNSUPPORTED_FORMAT;
                         }
@@ -2395,7 +2395,7 @@ BAEResult BAEMixer_AddBankFromFile(BAEMixer mixer, BAEPathName pAudioPathName, B
                     {
                         if (PV_XFileHasModernCodecSamples(newPatchFile))
                         {
-                            BAE_PRINTF("[Bank] IREZ bank rejected: contains FLAC/Vorbis/Opus/QOA sample(s) — upgrade to ZSB (.zsb)\n");
+                            debug_message("[Bank] IREZ bank rejected: contains FLAC/Vorbis/Opus/QOA sample(s) — upgrade to ZSB (.zsb)\n");
                             XFileClose(newPatchFile);
                             return BAE_UNSUPPORTED_FORMAT;
                         }
@@ -3875,17 +3875,17 @@ BAEResult BAEMixer_StartOutputToFile(BAEMixer theMixer,
                                                       (uint32_t)(mWritingDataBlockSize / (sizeof(short) * channels)));
                 if (mWritingEncoder)
                 {
-                    BAE_PRINTF("audio: MPG_EncodeNewStream ok ch=");
+                    debug_message("audio: MPG_EncodeNewStream ok ch=");
                     char tmp[16];
                     XLongToStr(tmp, (int32_t)channels);
-                    BAE_PRINTF(tmp);
-                    BAE_PRINTF(" framesPerCall=");
+                    debug_message(tmp);
+                    debug_message(" framesPerCall=");
                     XLongToStr(tmp, (int32_t)(mWritingDataBlockSize / (sizeof(short) * channels)));
-                    BAE_PRINTF(tmp);
-                    BAE_PRINTF(" rate=");
+                    debug_message(tmp);
+                    debug_message(" rate=");
                     XLongToStr(tmp, (int32_t)GM_ConvertFromOutputRateToRate((Rate)theRate));
-                    BAE_PRINTF(tmp);
-                    BAE_PRINTF("\n");
+                    debug_message(tmp);
+                    debug_message("\n");
                     // Prime first PCM buffer so first service call has audio content
                     PV_RefillMPEGEncodeBuffer(mWritingDataBlock, theMixer);
 
@@ -4149,15 +4149,15 @@ void BAEMixer_StopOutputToFile(void)
         {
 #if USE_MPEG_ENCODER == TRUE
         case BAE_MPEG_TYPE:
-            BAE_PRINTF("audio: BAEMixer_StopOutputToFile freeing mWritingEncoder=%p\n", mWritingEncoder);
+            debug_message("audio: BAEMixer_StopOutputToFile freeing mWritingEncoder=%p\n", mWritingEncoder);
             MPG_EncodeFreeStream(mWritingEncoder);
             mWritingEncoder = NULL;
-            BAE_PRINTF("audio: BAEMixer_StopOutputToFile mWritingEncoder now NULL\n");
+            debug_message("audio: BAEMixer_StopOutputToFile mWritingEncoder now NULL\n");
             break;
 #endif
 #if USE_VORBIS_ENCODER == TRUE
         case BAE_VORBIS_TYPE:
-            BAE_PRINTF("audio: BAEMixer_StopOutputToFile freeing vorbis encoder=%p\n", mWritingEncoder);
+            debug_message("audio: BAEMixer_StopOutputToFile freeing vorbis encoder=%p\n", mWritingEncoder);
             if (mWritingEncoder)
             {
                 extern void XCloseVorbisEncoder(void *encoder_handle);
@@ -4170,7 +4170,7 @@ void BAEMixer_StopOutputToFile(void)
 #endif
 #if USE_OPUS_ENCODER == TRUE
         case BAE_OPUS_TYPE:
-            BAE_PRINTF("audio: BAEMixer_StopOutputToFile freeing opus encoder=%p\n", mWritingEncoder);
+            debug_message("audio: BAEMixer_StopOutputToFile freeing opus encoder=%p\n", mWritingEncoder);
             if (mWritingEncoder)
             {
                 extern long XFlushOpusEncoder(void *encoder_handle, XFILE output_file);
@@ -4330,7 +4330,7 @@ BAEResult BAEMixer_ServiceAudioOutputToFile(BAEMixer theMixer)
                     bool isDone = FALSE;
                     if (!mWritingEncoder)
                     {
-                        BAE_PRINTF("audio: MPEG encode service called with NULL encoder (encoder not built?) aborting export.\n");
+                        debug_message("audio: MPEG encode service called with NULL encoder (encoder not built?) aborting export.\n");
                         // Gracefully abort: close file and reset state
                         mWriteToFileType = 0; // invalid
                         XFileClose((XFILE)mWritingToFileReference);
@@ -4351,16 +4351,16 @@ BAEResult BAEMixer_ServiceAudioOutputToFile(BAEMixer theMixer)
                         // Do NOT free stream here unless encoder signals done explicitly
                         if (isDone)
                         {
-                            BAE_PRINTF("audio: MPG_EncodeProcess signaled done, freeing encoder %p\n", mWritingEncoder);
+                            debug_message("audio: MPG_EncodeProcess signaled done, freeing encoder %p\n", mWritingEncoder);
                             if (mWritingEncoder)
                             {
                                 MPG_EncodeFreeStream(mWritingEncoder);
                                 mWritingEncoder = NULL;
-                                BAE_PRINTF("audio: encoder freed, mWritingEncoder=NULL\n");
+                                debug_message("audio: encoder freed, mWritingEncoder=NULL\n");
                             }
                             else
                             {
-                                BAE_PRINTF("audio: encoder already NULL when done signaled\n");
+                                debug_message("audio: encoder already NULL when done signaled\n");
                             }
                         }
                     }
@@ -4418,7 +4418,7 @@ BAEResult BAEMixer_ServiceAudioOutputToFile(BAEMixer theMixer)
                         static int warned = 0;
                         if (!warned)
                         {
-                            BAE_PRINTF("FLAC accumulation buffer full (>10 minutes), export will be truncated\n");
+                            debug_message("FLAC accumulation buffer full (>10 minutes), export will be truncated\n");
                             warned = 1;
                         }
                     }
@@ -4597,7 +4597,7 @@ BAEResult BAESound_Delete(BAESound sound)
     }
     else
     {
-        BAE_PRINTF("audio: BAESound_Delete invalid object\n");
+        debug_message("audio: BAESound_Delete invalid object\n");
         err = NULL_OBJECT;
     }
     return BAE_TranslateOPErr(err);
@@ -4687,7 +4687,7 @@ static void PV_BAESound_Unload(BAESound sound)
 
     while (GM_IsSampleProcessing(voice))
     {
-        //      BAE_PRINTF("BAE:deleting sound...\n");
+        //      debug_message("BAE:deleting sound...\n");
         XWaitMicroseconds(BAE_GetSliceTimeInMicroseconds());
     }
 
@@ -4696,7 +4696,7 @@ static void PV_BAESound_Unload(BAESound sound)
         GM_FreeWaveform(sound->pWave);
         sound->pWave = NULL;
     }
-    //  BAE_PRINTF("BAE:deleting sound done\n");
+    //  debug_message("BAE:deleting sound done\n");
 }
 
 // BAESound_Unload()
@@ -5212,7 +5212,7 @@ static void PV_DefaultSoundDoneCallback(void *reference)
                 }
                 else
                 {
-                    BAE_PRINTF("audio:sound not in mixer list, no callback\n");
+                    debug_message("audio:sound not in mixer list, no callback\n");
                 }
             }
         }
@@ -5224,7 +5224,7 @@ static void PV_DefaultSoundDoneCallback(void *reference)
     }
     else
     {
-        BAE_PRINTF("audio:sound no longer valid, no callback\n");
+        debug_message("audio:sound no longer valid, no callback\n");
     }
 }
 
@@ -7589,7 +7589,7 @@ BAEResult BAESong_LoadMidiFromMemory(BAESong song, void const *pMidiData, uint32
         // Check if this is an RMI file and extract MIDI + DLS
         if (GM_IsRMIFile((const unsigned char *)pMidiData, midiSize))
         {
-            BAE_PRINTF("[BAE] Detected RMI file format\n");
+            debug_message("[BAE] Detected RMI file format\n");
             BAEMixer_UnloadBanks(song->mixer);
             theErr = GM_LoadRMIFromMemory((const unsigned char *)pMidiData, midiSize,
                                           &extractedMidi, &extractedMidiLen, TRUE);
@@ -7601,7 +7601,7 @@ BAEResult BAESong_LoadMidiFromMemory(BAESong song, void const *pMidiData, uint32
             }
             else
             {
-                BAE_PRINTF("[BAE] Failed to parse RMI file (error %d)\n", theErr);
+                debug_message("[BAE] Failed to parse RMI file (error %d)\n", theErr);
                 BAE_ReleaseMutex(song->mLock);
                 return BAE_TranslateOPErr(theErr);
             }
@@ -7734,7 +7734,7 @@ BAEResult BAESong_LoadRmiFromMemory(BAESong song, void const *pRmiData, uint32_t
             // Check if this is an RMI file and extract MIDI + optional DLS
             if (GM_IsRMIFile((const unsigned char *)pRmiData, rmiSize))
             {
-                BAE_PRINTF("[BAE] Detected RMI file format, useEmbeddedBank=%d\n", useEmbeddedBank);
+                debug_message("[BAE] Detected RMI file format, useEmbeddedBank=%d\n", useEmbeddedBank);
                 
                 // Load RMI and extract MIDI, optionally loading embedded DLS
                 theErr = GM_LoadRMIFromMemory((const unsigned char *)pRmiData, rmiSize,
@@ -7748,7 +7748,7 @@ BAEResult BAESong_LoadRmiFromMemory(BAESong song, void const *pRmiData, uint32_t
                         song->mHasEmbeddedBank = TRUE;
                     }
 #endif
-                    BAE_PRINTF("[BAE] RMI processing complete, extracted %u bytes of MIDI\n", extractedMidiLen);
+                    debug_message("[BAE] RMI processing complete, extracted %u bytes of MIDI\n", extractedMidiLen);
                     
                     // Now load the extracted MIDI data using LoadMidiFromMemory
                     BAE_ReleaseMutex(song->mLock);
@@ -7762,14 +7762,14 @@ BAEResult BAESong_LoadRmiFromMemory(BAESong song, void const *pRmiData, uint32_t
                 }
                 else
                 {
-                    BAE_PRINTF("[BAE] Failed to parse RMI file (error %d)\n", theErr);
+                    debug_message("[BAE] Failed to parse RMI file (error %d)\n", theErr);
                     theErr = BAD_FILE;
                 }
             }            
             else
 #endif            
             {
-                BAE_PRINTF("[BAE] Data is not RMI format\n");
+                debug_message("[BAE] Data is not RMI format\n");
                 theErr = BAD_FILE;
             }
         }
@@ -7852,7 +7852,7 @@ BAEResult BAESong_LoadRmiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL i
 #if USE_RMI_SUPPORT == TRUE
             if (GM_IsRMIFile((const unsigned char *)pMidiData, midiSize))
             {
-                BAE_PRINTF("[BAE] Detected RMI file format, useEmbeddedBank=%d\n", useEmbeddedBank);
+                debug_message("[BAE] Detected RMI file format, useEmbeddedBank=%d\n", useEmbeddedBank);
                 
                 // Load RMI and extract MIDI, optionally loading embedded DLS
                 theErr = GM_LoadRMIFromMemory((const unsigned char *)pMidiData, midiSize,
@@ -7867,7 +7867,7 @@ BAEResult BAESong_LoadRmiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL i
                         song->mHasEmbeddedBank = TRUE;
                     }
 #endif
-                    BAE_PRINTF("[BAE] RMI processing complete, extracted %u bytes of MIDI\n", extractedMidiLen);
+                    debug_message("[BAE] RMI processing complete, extracted %u bytes of MIDI\n", extractedMidiLen);
                     
                     // Now load the extracted MIDI data using LoadMidiFromMemory
                     BAE_ReleaseMutex(song->mLock);
@@ -7877,7 +7877,7 @@ BAEResult BAESong_LoadRmiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL i
                 }
                 else
                 {
-                    BAE_PRINTF("[BAE] Failed to parse RMI file (error %d)\n", theErr);
+                    debug_message("[BAE] Failed to parse RMI file (error %d)\n", theErr);
                     theErr = BAD_FILE;
                 }
             }
@@ -7885,7 +7885,7 @@ BAEResult BAESong_LoadRmiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL i
 #endif            
             {
                 XDisposePtr(pMidiData);
-                BAE_PRINTF("[BAE] File is not RMI format\n");
+                debug_message("[BAE] File is not RMI format\n");
                 theErr = BAD_FILE;
             }
         }
@@ -7953,7 +7953,7 @@ BAEResult BAESong_LoadMidiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL 
 
                 if (!pMidiData || midiSize < 14 || memcmp(pMidiData, "MThd", 4) != 0)
                 {
-                    BAE_PRINTF("[BAE] MThc decode invalid MIDI in BAESong_LoadMidiFromFile (len=%u, header=%02X %02X %02X %02X)\n",
+                    debug_message("[BAE] MThc decode invalid MIDI in BAESong_LoadMidiFromFile (len=%u, header=%02X %02X %02X %02X)\n",
                                (unsigned int)((midiSize > 0) ? midiSize : 0),
                                (unsigned int)(midiSize > 0 ? ((unsigned char *)pMidiData)[0] : 0),
                                (unsigned int)(midiSize > 1 ? ((unsigned char *)pMidiData)[1] : 0),
@@ -7969,7 +7969,7 @@ BAEResult BAESong_LoadMidiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL 
             }
             else
             {
-                BAE_PRINTF("[BAE] MThc decompress failed in BAESong_LoadMidiFromFile\n");
+                debug_message("[BAE] MThc decompress failed in BAESong_LoadMidiFromFile\n");
                 XDisposePtr(pMidiData);
                 pMidiData = NULL;
                 theErr = BAD_FILE;
@@ -8177,7 +8177,7 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
                         {
                             if (PV_XFileHasModernCodecSamples(fileRef))
                             {
-                                BAE_PRINTF("[RMF] IREZ file rejected: contains FLAC/Vorbis/Opus/QOA sample(s) — upgrade to ZMF (.zmf)\n");
+                                debug_message("[RMF] IREZ file rejected: contains FLAC/Vorbis/Opus/QOA sample(s) — upgrade to ZMF (.zmf)\n");
                                 XFileClose(fileRef);
                                 BAE_ReleaseMutex(song->mLock);
                                 return BAE_UNSUPPORTED_FORMAT;
@@ -8192,14 +8192,14 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
                 {
 #if _DEBUG
                     int32_t songCount = XCountFileResourcesOfType(fileRef, ID_SONG);
-                    BAE_PRINTF("[RMF] RMF contains %ld SONG resource(s); requested songIndex=%d\n", (long)songCount, (int)songIndex);
+                    debug_message("[RMF] RMF contains %ld SONG resource(s); requested songIndex=%d\n", (long)songCount, (int)songIndex);
 #endif
                 }
                 pXSong = (SongResource *)XGetIndexedFileResource(fileRef, ID_SONG, &theID, songIndex, NULL, &size);
                 if (pXSong)
                 {
                     PV_TagSongResourceContainerType(pXSong, isZmfContainer);
-                    BAE_PRINTF("[RMF] Primary path: XGetIndexedFileResource succeeded, pXSong=%p\n", pXSong);
+                    debug_message("[RMF] Primary path: XGetIndexedFileResource succeeded, pXSong=%p\n", pXSong);
                     if (song->pSong)
                     {
                         PV_BAESong_Unload(song);
@@ -8228,16 +8228,16 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
                             uint32_t totalInst = 0;
                             memset(instBuf, 0, sizeof(instBuf));
                             BAEUtil_GetRmfInstrumentListFromMemory(pRMFData, rmfSize, songIndex, instBuf, MAX_INSTRUMENTS, &totalInst);
-                            BAE_PRINTF("pSong = %p\n", pSong);
-                            BAE_PRINTF("instBuf[0] = %d\n", instBuf[0]);
+                            debug_message("pSong = %p\n", pSong);
+                            debug_message("instBuf[0] = %d\n", instBuf[0]);
                             pSong->RMFInstrumentIDs[0] = totalInst; // Store count first
                             for (uint32_t i = 1; i <= totalInst; i++)
                             {
                                 pSong->RMFInstrumentIDs[i] = instBuf[i-1];
                             }
-                            BAE_PRINTF("Found %u Instruments in RMF (stored=%u)\n", totalInst, (unsigned)XMIN(totalInst, MAX_INSTRUMENTS));
+                            debug_message("Found %u Instruments in RMF (stored=%u)\n", totalInst, (unsigned)XMIN(totalInst, MAX_INSTRUMENTS));
                             for (uint32_t i = 1; i <= totalInst; i++) {
-                                BAE_PRINTF("    %u - INST: %u\n", i, pSong->RMFInstrumentIDs[i]);
+                                debug_message("    %u - INST: %u\n", i, pSong->RMFInstrumentIDs[i]);
                             }
                             pSong->songFlags = SONG_FLAG_IS_RMF;                      
     #endif
@@ -8267,7 +8267,7 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
                 else
                 {
                     theErr = RESOURCE_NOT_FOUND;
-                    BAE_PRINTF("[RMF] Primary path failed: XGetIndexedFileResource returned NULL for songIndex=%d\n", songIndex);
+                    debug_message("[RMF] Primary path failed: XGetIndexedFileResource returned NULL for songIndex=%d\n", songIndex);
                     // Fallback attempt: direct memory scan if primary lookup failed.
                     SongResource *fallbackSong = PV_FallbackFindSongInRMFMemory(pRMFData, rmfSize, songIndex, &theID, &size);
                     if (fallbackSong)
@@ -8296,18 +8296,18 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
                                 uint32_t instBuf[MAX_INSTRUMENTS];
                                 uint32_t totalInst = 0;
                                 BAEUtil_GetRmfInstrumentListFromMemory(pRMFData, rmfSize, songIndex, instBuf, MAX_INSTRUMENTS, &totalInst);
-                                BAE_PRINTF("[FALLBACK] pSong = %p\n", pSong);
+                                debug_message("[FALLBACK] pSong = %p\n", pSong);
                                 pSong->RMFInstrumentIDs[0] = totalInst;
                                 for (uint32_t i = 1; i <= totalInst; i++)
                                 {
                                     pSong->RMFInstrumentIDs[i] = instBuf[i-1];
                                 }
-                                BAE_PRINTF("[FALLBACK] Found %u Instruments in RMF (stored=%u)\n", totalInst, (unsigned)XMIN(totalInst, MAX_INSTRUMENTS));
+                                debug_message("[FALLBACK] Found %u Instruments in RMF (stored=%u)\n", totalInst, (unsigned)XMIN(totalInst, MAX_INSTRUMENTS));
                                 for (uint32_t i = 1; i <= totalInst; i++) {
-                                    BAE_PRINTF("[FALLBACK]     %u - INST: %u\n", i, pSong->RMFInstrumentIDs[i]);
+                                    debug_message("[FALLBACK]     %u - INST: %u\n", i, pSong->RMFInstrumentIDs[i]);
                                 }
                                 pSong->songFlags = SONG_FLAG_IS_RMF;
-                                BAE_PRINTF("[FALLBACK] Set songFlags=0x%X, RMFInstrumentIDs[0]=%u\n", pSong->songFlags, pSong->RMFInstrumentIDs[0]);
+                                debug_message("[FALLBACK] Set songFlags=0x%X, RMFInstrumentIDs[0]=%u\n", pSong->songFlags, pSong->RMFInstrumentIDs[0]);
 #endif
                                 GM_SetDisposeSongDataWhenDoneFlag(pSong, TRUE);
                                 GM_SetSongLoopFlag(pSong, FALSE);
@@ -8426,7 +8426,7 @@ BAEResult BAESong_LoadRmfFromFile(BAESong song, BAEPathName filePath, int16_t so
                     {
                         if (PV_XFileHasModernCodecSamples(fileRef))
                         {
-                            BAE_PRINTF("[RMF] IREZ file rejected: contains FLAC/Vorbis/Opus/QOA sample(s) — upgrade to ZMF (.zmf)\n");
+                            debug_message("[RMF] IREZ file rejected: contains FLAC/Vorbis/Opus/QOA sample(s) — upgrade to ZMF (.zmf)\n");
                             XFileClose(fileRef);
                             BAE_ReleaseMutex(song->mLock);
                             return BAE_UNSUPPORTED_FORMAT;
@@ -8445,7 +8445,7 @@ BAEResult BAESong_LoadRmfFromFile(BAESong song, BAEPathName filePath, int16_t so
                 {
 #if _DEBUG
                     int32_t songCount = XCountFileResourcesOfType(fileRef, ID_SONG);
-                    BAE_PRINTF("[RMF] RMF contains %ld SONG resource(s); requested songIndex=%d\n", (long)songCount, (int)songIndex);
+                    debug_message("[RMF] RMF contains %ld SONG resource(s); requested songIndex=%d\n", (long)songCount, (int)songIndex);
 #endif
                 }
                 if (song->pSong)
@@ -8475,16 +8475,16 @@ BAEResult BAESong_LoadRmfFromFile(BAESong song, BAEPathName filePath, int16_t so
                         uint32_t totalInst = 0;
                         uint32_t fileSize = (uint32_t)XFileGetLength(fileRef);
                         BAEUtil_GetRmfInstrumentList(fileRef, fileSize, songIndex, instBuf, MAX_INSTRUMENTS, &totalInst);
-                        BAE_PRINTF("pSong = %p\n", pSong);
-                        BAE_PRINTF("instBuf[0] = %d\n", instBuf[0]);
+                        debug_message("pSong = %p\n", pSong);
+                        debug_message("instBuf[0] = %d\n", instBuf[0]);
                         pSong->RMFInstrumentIDs[0] = totalInst; // Store count first
                         for (uint32_t i = 1; i <= totalInst; i++)
                         {
                             pSong->RMFInstrumentIDs[i] = instBuf[i-1];
                         }
-                        BAE_PRINTF("Found %u Instruments in RMF (stored=%u)\n", totalInst, (unsigned)XMIN(totalInst, MAX_INSTRUMENTS));
+                        debug_message("Found %u Instruments in RMF (stored=%u)\n", totalInst, (unsigned)XMIN(totalInst, MAX_INSTRUMENTS));
                         for (uint32_t i = 1; i <= totalInst; i++) {
-                            BAE_PRINTF("    %u - INST: %u\n", i, pSong->RMFInstrumentIDs[i]);
+                            debug_message("    %u - INST: %u\n", i, pSong->RMFInstrumentIDs[i]);
                         }
                         pSong->songFlags = SONG_FLAG_IS_RMF;                      
 #endif
@@ -9042,7 +9042,7 @@ static void PV_PatchInstrumentEnvelopes(GM_Instrument *theI,
         pLFO->where_to_feed = PV_TranslateFromFileToMemoryID(
             (uint32_t)info->lfos[i].destination);
 #if DEBUG
-        BAE_PRINTF("  lfo[%d] dest=0x%x->%d period=%d shape=0x%x dc=%d level=%d adsr.stages=%u\n",
+        debug_message("  lfo[%d] dest=0x%x->%d period=%d shape=0x%x dc=%d level=%d adsr.stages=%u\n",
                    (int)i, (unsigned)info->lfos[i].destination, (int)pLFO->where_to_feed,
                    (int)info->lfos[i].period, (unsigned)info->lfos[i].waveShape,
                    (int)info->lfos[i].DC_feed, (int)info->lfos[i].level,
@@ -9196,7 +9196,7 @@ BAEResult BAESong_PatchLoadedInstrumentExtInfo(BAESong song,
                     theI->miscParameter2 = (int16_t)info->sampleSplitVolume;
                 }
             }
-            BAE_PRINTF("PatchExtInfo: sampleOverride idx=%u rootKey=%u rate=%u loop=%u-%u lowKey=%u highKey=%u splitVol=%d smod=%d\n",
+            debug_message("PatchExtInfo: sampleOverride idx=%u rootKey=%u rate=%u loop=%u-%u lowKey=%u highKey=%u splitVol=%d smod=%d\n",
                        idx, (unsigned)info->sampleRootKey, info->sampleRate,
                        info->sampleLoopStart, info->sampleLoopEnd,
                        (unsigned)info->sampleLowKey, (unsigned)info->sampleHighKey,
@@ -9851,7 +9851,7 @@ BAEResult BAESong_InjectMidiMessage(BAESong song, const unsigned char *message, 
         }
         if (length > dump_len)
             strncat(hexdump, "...", sizeof(hexdump) - strlen(hexdump) - 1);
-        BAE_PRINTF("BAE-INJECT: time=%u %s (len=%d) hex=%s\n", time, desc, (int)length, hexdump);
+        debug_message("BAE-INJECT: time=%u %s (len=%d) hex=%s\n", time, desc, (int)length, hexdump);
     }
 #endif
     // If the GM_Song has a registered raw MIDI event callback, call it directly.
@@ -10521,7 +10521,7 @@ BAEResult BAESong_SetLoops(BAESong song, int16_t numLoops)
         BAE_AcquireMutex(song->mLock);
         if (numLoops >= 0)
         {
-            BAE_PRINTF("[SetLoops] Setting song loop count to %d\n", numLoops);
+            debug_message("[SetLoops] Setting song loop count to %d\n", numLoops);
             GM_SetSongLoopMax(song->pSong, numLoops);
             GM_SetSongLoopFlag(song->pSong, (numLoops) ? TRUE : FALSE);
             GM_SetSongMetaLoopFlag(song->pSong, (numLoops) ? TRUE : FALSE);
@@ -12006,7 +12006,7 @@ BAEResult BAEMixer_LoadFromMemory(BAEMixer mixer, void const *pData, uint32_t da
     }
     result->fileType = ftype;
     
-    BAE_PRINTF("[BAEMixer_LoadFromMemory] Detected file type: %s\n", X_GetFileTypeString(ftype));
+    debug_message("[BAEMixer_LoadFromMemory] Detected file type: %s\n", X_GetFileTypeString(ftype));
     
     if (ftype == BAE_INVALID_TYPE)
     {

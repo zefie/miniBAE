@@ -527,12 +527,12 @@ void PV_ServeU3232FullBuffer16 (GM_Voice *this_voice)
     }
 #endif
     amplitude = this_voice->lastAmplitudeL;
-    //BAE_PRINTF("f0, amp = %ld n = %ld nve = %ld\n", (int32_t)amplitude, (int32_t)this_voice->NoteVolume,
+    //debug_message("f0, amp = %ld n = %ld nve = %ld\n", (int32_t)amplitude, (int32_t)this_voice->NoteVolume,
     //                                              (int32_t)this_voice->NoteVolumeEnvelope);
     amplitudeAdjust = (this_voice->NoteVolume * this_voice->NoteVolumeEnvelope) >> VOLUME_PRECISION_SCALAR;
     amplitudeAdjust = (amplitudeAdjust - amplitude) / MusicGlobals->Four_Loop >> 4;
     amplitude = amplitude >> 4;
-    //BAE_PRINTF("f1, amp = %ld aa = %ld\n", (int32_t)amplitude, (int32_t)amplitudeAdjust);
+    //debug_message("f1, amp = %ld aa = %ld\n", (int32_t)amplitude, (int32_t)amplitudeAdjust);
 
     dest = &MusicGlobals->songBufferDry[0];
     source = (int16_t *) this_voice->NotePtr;
@@ -666,7 +666,7 @@ void PV_ServeU3232PartialBuffer16 (GM_Voice *this_voice, bool looping)
     amplitudeAdjust = (this_voice->NoteVolume * this_voice->NoteVolumeEnvelope) >> VOLUME_PRECISION_SCALAR;
     amplitudeAdjust = (amplitudeAdjust - amplitude) / MusicGlobals->Four_Loop >> 4;
     amplitude = amplitude >> 4;
-    //BAE_PRINTF("p,amp = %ld\n", (int32_t)amplitude);
+    //debug_message("p,amp = %ld\n", (int32_t)amplitude);
     dest = &MusicGlobals->songBufferDry[0];
     cur_wave_i = this_voice->samplePosition.i;
     cur_wave_f = this_voice->samplePosition.f;

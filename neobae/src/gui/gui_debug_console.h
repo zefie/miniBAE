@@ -30,7 +30,7 @@ void debug_console_init(void);
 // Cleanup debug console system
 void debug_console_shutdown(void);
 
-// Note: debug_console_append() is provided by X_DebugCallback.c in the library
+// Note: debug_message() is provided by X_DebugCallback.c in the library
 // The GUI registers its internal implementation via BAE_SetDebugOutputCallback()
 
 // Toggle debug console window visibility

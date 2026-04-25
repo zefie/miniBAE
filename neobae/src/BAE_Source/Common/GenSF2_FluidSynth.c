@@ -103,10 +103,10 @@ static void pv_fluidsynth_log_filter(int level, const char* message, void* data)
     {
         return; // ignore
     }
-    // Print via BAE_PRINTF to preserve other logs in debug mode
+    // Print via debug_message to preserve other logs in debug mode
     if (message)
     {
-        BAE_PRINTF("fluidsynth: %s", message);
+        debug_message("fluidsynth: %s", message);
     }
 }
 
@@ -398,7 +398,7 @@ static bool PV_SF2_AllInstrumentsAreRMFEmbedded(GM_Song* pSong)
     
     // Check if there are any USED instruments that aren't loaded (would need SF2)
     // Strategy: Check all channels that have been programmed
-    BAE_PRINTF("[SF2-RMF] Checking RMF for non-embedded instruments...\n");
+    debug_message("[SF2-RMF] Checking RMF for non-embedded instruments...\n");
     for (int channel = 0; channel < MAX_CHANNELS; channel++)
     {
         // Skip channels that have never been programmed
@@ -415,7 +415,7 @@ static bool PV_SF2_AllInstrumentsAreRMFEmbedded(GM_Song* pSong)
         // This is often a default value on channels that may not actually play notes
         if (program == 0 && allLoadedEmbedded)
         {
-            //BAE_PRINTF("[SF2-RMF] Channel %d uses program 0 (bank 0 program 0) - skipping (default value)\n", channel);
+            //debug_message("[SF2-RMF] Channel %d uses program 0 (bank 0 program 0) - skipping (default value)\n", channel);
             continue;
         }
         
@@ -437,13 +437,13 @@ static bool PV_SF2_AllInstrumentsAreRMFEmbedded(GM_Song* pSong)
             // If programmed but not loaded and not embedded, SF2 must provide it
             if (!isEmbedded)
             {
-                BAE_PRINTF("[SF2-RMF] Channel %d program %d is not RMF-embedded - SF2 needed\n", 
+                debug_message("[SF2-RMF] Channel %d program %d is not RMF-embedded - SF2 needed\n", 
                            channel, program);
                 return FALSE;
             }
             else
             {
-                BAE_PRINTF("[SF2-RMF] Channel %d program %d is RMF-embedded\n",
+                debug_message("[SF2-RMF] Channel %d program %d is RMF-embedded\n",
                            channel, program);
             }
         }
@@ -451,7 +451,7 @@ static bool PV_SF2_AllInstrumentsAreRMFEmbedded(GM_Song* pSong)
     
     if (allLoadedEmbedded)
     {
-        BAE_PRINTF("[SF2-RMF] All %d loaded instruments are RMF-embedded (out of %u declared in RMF)\n",
+        debug_message("[SF2-RMF] All %d loaded instruments are RMF-embedded (out of %u declared in RMF)\n",
                    loadedCount, rmfInstCount);
     }
     
@@ -480,7 +480,7 @@ void GM_SF2_CheckAndDisableSF2ForRMFEmbedded(GM_Song* pSong)
     // Check if this song has all instruments embedded in RMF
     if (PV_SF2_AllInstrumentsAreRMFEmbedded(pSong))
     {
-        BAE_PRINTF("[SF2-RMF] RMF detected to use solely embedded instruments - disabling SF2 mode for this song\n");
+        debug_message("[SF2-RMF] RMF detected to use solely embedded instruments - disabling SF2 mode for this song\n");
         // Disable SF2 for this specific song
         pSong->songFlags &= ~SONG_FLAG_USE_SF2;
         GM_EnableSF2ForSong(pSong, FALSE);
@@ -637,7 +637,7 @@ static void PV_SF2_ResyncSongStateToSynth(GM_Song* pSong)
         {
             expr = 127;
         }
-        BAE_PRINTF("[SF2-Resync] Ch %d: Vol=%d Expr=%d Pan=%d Mod=%d Sustain=%d\n",
+        debug_message("[SF2-Resync] Ch %d: Vol=%d Expr=%d Pan=%d Mod=%d Sustain=%d\n",
                    ch, vol, expr, pan, mod, pSong->channelSustain[ch] ? 127 : 0);
         fluid_synth_cc(g_fluidsynth_synth, ch, 7, vol);
         fluid_synth_cc(g_fluidsynth_synth, ch, 11, expr);
@@ -695,7 +695,7 @@ static fluid_sfloader_t *g_mem_sf_loader = NULL; // persistent loader with callb
 static void *fs_mem_open(const char *filename) {
     (void)filename; // unused
     if (!g_mem_sf_data || g_mem_sf_size == 0) {
-        BAE_PRINTF("[FluidMem] fs_mem_open: no buffer set (filename=%s)\n", filename ? filename : "(null)");
+        debug_message("[FluidMem] fs_mem_open: no buffer set (filename=%s)\n", filename ? filename : "(null)");
         return NULL;
     }
     fs_mem_stream_t *s = (fs_mem_stream_t *)malloc(sizeof(fs_mem_stream_t));
@@ -703,7 +703,7 @@ static void *fs_mem_open(const char *filename) {
     s->data = g_mem_sf_data;
     s->size = g_mem_sf_size;
     s->pos = 0;
-    BAE_PRINTF("[FluidMem] fs_mem_open: %zu bytes (filename=%s)\n", s->size, filename ? filename : "(null)");
+    debug_message("[FluidMem] fs_mem_open: %zu bytes (filename=%s)\n", s->size, filename ? filename : "(null)");
     return s;
 }
 
@@ -809,7 +809,7 @@ OPErr GM_LoadSF2SoundfontFromMemory(const unsigned char *data, size_t size) {
     }
 
     // Debug: Print first 16 bytes of the buffer
-    BAE_PRINTF("[FluidMem] Loading %zu bytes from memory", size);
+    debug_message("[FluidMem] Loading %zu bytes from memory", size);
     
     // Detect container type
     bool isRIFF = (size >= 12 && data[0]=='R' && data[1]=='I' && data[2]=='F' && data[3]=='F');
@@ -833,7 +833,7 @@ OPErr GM_LoadSF2SoundfontFromMemory(const unsigned char *data, size_t size) {
         char tempPath[MAX_PATH];
         DWORD len = GetTempPathA(MAX_PATH, tempPath);
         if (len == 0 || len > MAX_PATH) {
-            BAE_PRINTF("[FluidMem] Failed to get TEMP path for DLS temp file\n");
+            debug_message("[FluidMem] Failed to get TEMP path for DLS temp file\n");
             return 1;
         }
 
@@ -859,13 +859,13 @@ OPErr GM_LoadSF2SoundfontFromMemory(const unsigned char *data, size_t size) {
 #endif
 
         if (fd < 0) {
-            BAE_PRINTF("[FluidMem] Failed to create temporary file for DLS load (%s)\n", tmpl);
+            debug_message("[FluidMem] Failed to create temporary file for DLS load (%s)\n", tmpl);
             return GENERAL_BAD;
         }
         ssize_t written = 0;
         while ((size_t)written < size) {
             ssize_t w = write(fd, data + written, size - (size_t)written);
-            if (w <= 0) { close(fd); unlink(tmpl); BAE_PRINTF("[FluidMem] Failed to write to temporary file for DLS load\n"); return GENERAL_BAD; }
+            if (w <= 0) { close(fd); unlink(tmpl); debug_message("[FluidMem] Failed to write to temporary file for DLS load\n"); return GENERAL_BAD; }
             written += w;
         }
 #if _WIN32
@@ -888,7 +888,7 @@ OPErr GM_LoadSF2SoundfontFromMemory(const unsigned char *data, size_t size) {
             g_temp_sf_path[sizeof(g_temp_sf_path)-1] = '\0';
             g_temp_sf_is_tempfile = TRUE;
         } else {
-            BAE_PRINTF("[FluidMem] Failed to load temp DLS file into FluidSynth\n");
+            debug_message("[FluidMem] Failed to load temp DLS file into FluidSynth\n");
             unlink(tmpl);
         }
         return perr;
@@ -916,7 +916,7 @@ OPErr GM_LoadSF2SoundfontFromMemory(const unsigned char *data, size_t size) {
         );
         // Add our loader to the synth
         fluid_synth_add_sfloader(g_fluidsynth_synth, g_mem_sf_loader);
-        BAE_PRINTF("[FluidMem] defsfloader registered\n");
+        debug_message("[FluidMem] defsfloader registered\n");
     }
 
     // Unload any existing font first
@@ -962,7 +962,7 @@ OPErr GM_LoadSF2Soundfont(const char* sf2_path)
     // Try to open the file and read first 16 bytes
     FILE *sf2_file = fopen(sf2_path, "rb");
     if (!sf2_file) {
-        BAE_PRINTF("[FluidMem] Failed to open SF2 file: %s\n", sf2_path);
+        debug_message("[FluidMem] Failed to open SF2 file: %s\n", sf2_path);
         return BAD_FILE;
     }
     unsigned char sf2_header[16] = {0};
@@ -970,7 +970,7 @@ OPErr GM_LoadSF2Soundfont(const char* sf2_path)
     fclose(sf2_file);
     if (bytes_read < 16) 
     {
-        BAE_PRINTF("[FluidMem] Could not read 16 bytes from SF2 file: %s\n", sf2_path);
+        debug_message("[FluidMem] Could not read 16 bytes from SF2 file: %s\n", sf2_path);
         return BAD_FILE;
     }
 
@@ -1017,7 +1017,7 @@ OPErr GM_LoadSF2SoundfontAsXMFOverlay(const unsigned char *data, size_t size) {
         return PARAM_ERR;
     }
 
-    BAE_PRINTF("[XMF] Loading embedded bank as overlay (%zu bytes)\n", size);
+    debug_message("[XMF] Loading embedded bank as overlay (%zu bytes)\n", size);
     
     // Detect container type
     bool isRIFF = (size >= 12 && data[0]=='R' && data[1]=='I' && data[2]=='F' && data[3]=='F');
@@ -1038,7 +1038,7 @@ OPErr GM_LoadSF2SoundfontAsXMFOverlay(const unsigned char *data, size_t size) {
         char tempPath[MAX_PATH];
         DWORD len = GetTempPathA(MAX_PATH, tempPath);
         if (len == 0 || len > MAX_PATH) {
-            BAE_PRINTF("[XMF] Failed to get TEMP path for XMF DLS overlay\n");
+            debug_message("[XMF] Failed to get TEMP path for XMF DLS overlay\n");
             return GENERAL_BAD;
         }
         snprintf(tmpl, sizeof(tmpl), "%sneobae_xmf_dls_XXXXXX", tempPath);
@@ -1059,13 +1059,13 @@ OPErr GM_LoadSF2SoundfontAsXMFOverlay(const unsigned char *data, size_t size) {
 #endif
 
         if (fd < 0) {
-            BAE_PRINTF("[XMF] Failed to create temporary file for XMF DLS overlay (%s)\n", tmpl);
+            debug_message("[XMF] Failed to create temporary file for XMF DLS overlay (%s)\n", tmpl);
             return GENERAL_BAD;
         }
         ssize_t written = 0;
         while ((size_t)written < size) {
             ssize_t w = write(fd, data + written, size - (size_t)written);
-            if (w <= 0) { close(fd); unlink(tmpl); BAE_PRINTF("[XMF] Failed to write to temp XMF DLS file\n"); return GENERAL_BAD; }
+            if (w <= 0) { close(fd); unlink(tmpl); debug_message("[XMF] Failed to write to temp XMF DLS file\n"); return GENERAL_BAD; }
             written += w;
         }
 #if _WIN32
@@ -1088,7 +1088,7 @@ OPErr GM_LoadSF2SoundfontAsXMFOverlay(const unsigned char *data, size_t size) {
         g_suppress_not_sf2_error = FALSE;
         
         if (g_fluidsynth_xmf_overlay_id == FLUID_FAILED) {
-            BAE_PRINTF("[XMF] Failed to load XMF DLS overlay from temp file\n");
+            debug_message("[XMF] Failed to load XMF DLS overlay from temp file\n");
             unlink(tmpl);
             return GENERAL_BAD;
         }
@@ -1117,7 +1117,7 @@ OPErr GM_LoadSF2SoundfontAsXMFOverlay(const unsigned char *data, size_t size) {
         // Bank 121 presets stay at bank 121 - we'll alias bank 0 requests to check bank 121 first
 #if _DEBUG
         if (g_fluidsynth_xmf_overlay_bank_offset > 0) {
-            BAE_PRINTF("[XMF] XMF DLS overlay has bank 0 presets, will apply bank offset +%d\n", 
+            debug_message("[XMF] XMF DLS overlay has bank 0 presets, will apply bank offset +%d\n", 
                        g_fluidsynth_xmf_overlay_bank_offset);
         } else {
             // Debug: Dump all presets in the loaded soundfont
@@ -1130,15 +1130,15 @@ OPErr GM_LoadSF2SoundfontAsXMFOverlay(const unsigned char *data, size_t size) {
                         int bank = fluid_preset_get_banknum(p);
                         int prog = fluid_preset_get_num(p);
                         const char* name = fluid_preset_get_name(p);
-                        BAE_PRINTF("[XMF]  Bank %d, Program %d: %s\n", bank, prog, name ? name : "(null)");
+                        debug_message("[XMF]  Bank %d, Program %d: %s\n", bank, prog, name ? name : "(null)");
                     }
                 } else {
-                    BAE_PRINTF("[XMF] Could not get sfont for sfid=%d\n", g_fluidsynth_xmf_overlay_id);
+                    debug_message("[XMF] Could not get sfont for sfid=%d\n", g_fluidsynth_xmf_overlay_id);
                 }
             }
         }
 
-        BAE_PRINTF("[XMF] XMF DLS overlay loaded successfully (id=%d)\n", g_fluidsynth_xmf_overlay_id);
+        debug_message("[XMF] XMF DLS overlay loaded successfully (id=%d)\n", g_fluidsynth_xmf_overlay_id);
 #endif
         return NO_ERR;
     }
@@ -1164,7 +1164,7 @@ OPErr GM_LoadSF2SoundfontAsXMFOverlay(const unsigned char *data, size_t size) {
             fs_mem_close
         );
         fluid_synth_add_sfloader(g_fluidsynth_synth, g_mem_sf_loader);
-        BAE_PRINTF("[XMF] defsfloader registered\n");
+        debug_message("[XMF] defsfloader registered\n");
     }
 
     // Load as XMF overlay (FALSE = do not reset presets, allows overlay behavior)
@@ -1194,21 +1194,21 @@ OPErr GM_LoadSF2SoundfontAsXMFOverlay(const unsigned char *data, size_t size) {
     // Apply bank offset if bank 0 presets exist (offset to bank 2 in HSB mode)
     g_fluidsynth_xmf_overlay_bank_offset = hasBank0Presets ? 2 : 0;
     if (g_fluidsynth_xmf_overlay_bank_offset > 0) {
-        BAE_PRINTF("[XMF] XMF SF2 overlay has bank 0 presets, will apply bank offset +%d\n", 
+        debug_message("[XMF] XMF SF2 overlay has bank 0 presets, will apply bank offset +%d\n", 
                    g_fluidsynth_xmf_overlay_bank_offset);
     }
     
 #if _DEBUG
     // Debug: Show all loaded soundfonts and their order
     int sfcount = fluid_synth_sfcount(g_fluidsynth_synth);
-    BAE_PRINTF("[XMF] XMF SF2 overlay loaded successfully (id=%d), total soundfonts loaded: %d\n", 
+    debug_message("[XMF] XMF SF2 overlay loaded successfully (id=%d), total soundfonts loaded: %d\n", 
                g_fluidsynth_xmf_overlay_id, sfcount);
     for (int i = 0; i < sfcount; i++) {
         fluid_sfont_t* sf = fluid_synth_get_sfont(g_fluidsynth_synth, i);
         if (sf) {
             const char* name = fluid_sfont_get_name(sf);
             int id = fluid_sfont_get_id(sf);
-            BAE_PRINTF("[XMF]   Soundfont #%d: id=%d name='%s'\n", i, id, name ? name : "(null)");
+            debug_message("[XMF]   Soundfont #%d: id=%d name='%s'\n", i, id, name ? name : "(null)");
         }
     }
 #endif
@@ -1223,7 +1223,7 @@ void GM_UnloadXMFOverlaySoundFont(void)
 #if USE_XMF_SUPPORT == TRUE
     if (g_fluidsynth_synth && g_fluidsynth_xmf_overlay_id >= 0)
     {
-        BAE_PRINTF("[XMF] Unloading XMF overlay soundfont (id=%d)\n", g_fluidsynth_xmf_overlay_id);
+        debug_message("[XMF] Unloading XMF overlay soundfont (id=%d)\n", g_fluidsynth_xmf_overlay_id);
         
         // Kill all notes before unloading
         GM_ResetSF2();
@@ -1550,7 +1550,7 @@ void GM_SF2_ProcessNoteOn(GM_Song* pSong, int16_t channel, int16_t note, int16_t
     PV_SF2_LockSynth();
     fluid_preset_t* preset = fluid_synth_get_channel_preset(g_fluidsynth_synth, channel);
     if (!preset) {
-        BAE_PRINTF("[SF2 NoteOn] Channel %d has NO PRESET selected!\n", channel);
+        debug_message("[SF2 NoteOn] Channel %d has NO PRESET selected!\n", channel);
     }
 
     fluid_synth_noteon(g_fluidsynth_synth, channel, note, scaledVelocity);
@@ -1613,17 +1613,17 @@ void GM_SF2_SetChannelBankAndProgram(int16_t channel, int16_t bank, int16_t prog
     if (g_fluidsynth_xmf_overlay_id >= 0 && g_hasBank121Presets && bank == 0) {
         if (PV_SF2_PresetExistsInSoundFont(g_fluidsynth_xmf_overlay_id, 121, program)) {
             adjustedBank = 121;
-            BAE_PRINTF("[SF2 Direct] Aliasing bank 0 → bank 121 for channel %d program %d\n", channel, program);
+            debug_message("[SF2 Direct] Aliasing bank 0 → bank 121 for channel %d program %d\n", channel, program);
         }
     }
     
-    BAE_PRINTF("[SF2 Direct] Setting channel %d to bank %d (adjusted: %d) program %d\n", 
+    debug_message("[SF2 Direct] Setting channel %d to bank %d (adjusted: %d) program %d\n", 
                channel, bank, adjustedBank, program);
     
     // If we have an XMF overlay, explicitly select from it to avoid conflicts with base soundfont
     if (g_fluidsynth_xmf_overlay_id >= 0) {
         fluid_synth_program_select(g_fluidsynth_synth, channel, g_fluidsynth_xmf_overlay_id, adjustedBank, program);
-        BAE_PRINTF("[SF2 Direct] Using program_select with XMF overlay (sfid=%d)\n", g_fluidsynth_xmf_overlay_id);
+        debug_message("[SF2 Direct] Using program_select with XMF overlay (sfid=%d)\n", g_fluidsynth_xmf_overlay_id);
     } else {
         // No overlay, use standard bank select + program change
         fluid_synth_bank_select(g_fluidsynth_synth, channel, adjustedBank);
@@ -1639,7 +1639,7 @@ void GM_SF2_ProcessProgramChange(GM_Song* pSong, int16_t channel, int32_t progra
     {
         return;
     }
-    BAE_PRINTF("[SF2 ProcessProgramChange] Raw Request: program: %i, channel %i\n", program, channel);    
+    debug_message("[SF2 ProcessProgramChange] Raw Request: program: %i, channel %i\n", program, channel);    
     // Convert program ID to MIDI bank/program
     // NeoBAE uses: instrument = (bank * 128) + program + note
     // For percussion: bank = (bank * 2) + 1, note is included
@@ -1725,7 +1725,7 @@ void GM_SF2_ProcessProgramChange(GM_Song* pSong, int16_t channel, int32_t progra
     // Best behavior is to give the channel no preset at all.
     if (midiBank == 121 && (midiProgram == 124 || midiProgram == 125))
     {
-        BAE_PRINTF("[SF2 ProcessProgramChange] Denying preset request %i:%i on channel %d (unsetting program)\n", midiBank, midiProgram, channel);
+        debug_message("[SF2 ProcessProgramChange] Denying preset request %i:%i on channel %d (unsetting program)\n", midiBank, midiProgram, channel);
         fluid_synth_all_sounds_off(g_fluidsynth_synth, channel);
         fluid_synth_all_notes_off(g_fluidsynth_synth, channel);
         fluid_synth_unset_program(g_fluidsynth_synth, channel);
@@ -1745,21 +1745,21 @@ void GM_SF2_ProcessProgramChange(GM_Song* pSong, int16_t channel, int32_t progra
         // Alias bank 0 → bank 121 if overlay has bank 121 presets
         if (g_hasBank121Presets && useBank == 0 && PV_SF2_PresetExistsInSoundFont(g_fluidsynth_xmf_overlay_id, 121, useProg)) {
             overlayBank = 121;
-            BAE_PRINTF("[SF2 ProcessProgramChange] Aliasing bank 0 → bank 121 for overlay preset\n");
+            debug_message("[SF2 ProcessProgramChange] Aliasing bank 0 → bank 121 for overlay preset\n");
         }
         
         if (overlayBank >= 0 && PV_SF2_PresetExistsInSoundFont(g_fluidsynth_xmf_overlay_id, overlayBank, useProg)) {
-            BAE_PRINTF("[SF2 ProcessProgramChange] Using XMF overlay preset: requested bank %d -> overlay bank %d prog %d on channel %d\n", 
+            debug_message("[SF2 ProcessProgramChange] Using XMF overlay preset: requested bank %d -> overlay bank %d prog %d on channel %d\n", 
                        useBank, overlayBank, useProg, channel);
             // Use program_select to explicitly select from the XMF overlay soundfont
             // This avoids ambiguity if the base soundfont also has the same bank/program
             fluid_synth_program_select(g_fluidsynth_synth, channel, g_fluidsynth_xmf_overlay_id, overlayBank, useProg);
-            BAE_PRINTF("[SF2 ProcessProgramChange] Called fluid_synth_program_select(sfid=%d, bank=%d, prog=%d)\n", 
+            debug_message("[SF2 ProcessProgramChange] Called fluid_synth_program_select(sfid=%d, bank=%d, prog=%d)\n", 
                        g_fluidsynth_xmf_overlay_id, overlayBank, useProg);            
             PV_SF2_UnlockSynth();
             return;
         } else {
-            BAE_PRINTF("[SF2 ProcessProgramChange] XMF overlay check: requested bank %d -> overlay bank %d (offset=%d) prog %d - not found or invalid\n",
+            debug_message("[SF2 ProcessProgramChange] XMF overlay check: requested bank %d -> overlay bank %d (offset=%d) prog %d - not found or invalid\n",
                        useBank, overlayBank, g_fluidsynth_xmf_overlay_bank_offset, useProg);
         }
     }
@@ -1767,7 +1767,7 @@ void GM_SF2_ProcessProgramChange(GM_Song* pSong, int16_t channel, int32_t progra
     // Alias bank 121 -> bank 0 if bank 121 preset doesn't exist but bank 0 does
     // This handles MIDI files that request bank 121 but the soundfont only has bank 0
     if (useBank == 121 && !PV_SF2_PresetExists(121, useProg) && PV_SF2_PresetExists(0, useProg)) {
-        BAE_PRINTF("[SF2 ProcessProgramChange] Aliasing bank 121 prog %d -> bank 0 prog %d (121:%d not found)\n", useProg, useProg, useProg);
+        debug_message("[SF2 ProcessProgramChange] Aliasing bank 121 prog %d -> bank 0 prog %d (121:%d not found)\n", useProg, useProg, useProg);
         useBank = 0;
     }
 
@@ -1779,7 +1779,7 @@ void GM_SF2_ProcessProgramChange(GM_Song* pSong, int16_t channel, int32_t progra
         // This is the standard GM fallback: if variation is missing, use standard instrument
         if (!percIntent && useBank != 0) {
             if (PV_SF2_PresetExists(0, useProg)) {
-                BAE_PRINTF("[SF2 ProcessProgramChange] Fallback: bank %d prog %d not found; using bank 0 prog %d\n", useBank, useProg, useProg);
+                debug_message("[SF2 ProcessProgramChange] Fallback: bank %d prog %d not found; using bank 0 prog %d\n", useBank, useProg, useProg);
                 useBank = 0;
                 found = TRUE;
             }
@@ -1811,7 +1811,7 @@ void GM_SF2_ProcessProgramChange(GM_Song* pSong, int16_t channel, int32_t progra
                 // leave as found
             }
             if (fbBank >= 0) {
-                BAE_PRINTF("[SF2 ProcessProgramChange] Fallback: no preset for bank %d:%d; selecting %d:%d\n", useBank, useProg, fbBank, fbProg);
+                debug_message("[SF2 ProcessProgramChange] Fallback: no preset for bank %d:%d; selecting %d:%d\n", useBank, useProg, fbBank, fbProg);
                 useBank = fbBank; useProg = fbProg;
             }
         }
@@ -1829,7 +1829,7 @@ void GM_SF2_ProcessProgramChange(GM_Song* pSong, int16_t channel, int32_t progra
             // try DLS percussion bank
             drumBank = 120;
             if (!PV_SF2_PresetExists(drumBank, 0)) {        
-                BAE_PRINTF("[SF2 ProcessProgramChange] No drum kit preset 128:0 or 120:0 found; unsetting program on percussion channel %d\n", channel);
+                debug_message("[SF2 ProcessProgramChange] No drum kit preset 128:0 or 120:0 found; unsetting program on percussion channel %d\n", channel);
                 fluid_synth_all_sounds_off(g_fluidsynth_synth, channel);
                 fluid_synth_all_notes_off(g_fluidsynth_synth, channel);
                 fluid_synth_unset_program(g_fluidsynth_synth, channel);
@@ -1842,7 +1842,7 @@ void GM_SF2_ProcessProgramChange(GM_Song* pSong, int16_t channel, int32_t progra
     // Send MIDI program change event to FluidSynth
     fluid_synth_bank_select(g_fluidsynth_synth, channel, useBank);
     fluid_synth_program_change(g_fluidsynth_synth, channel, useProg);
-    BAE_PRINTF("[SF2 ProcessProgramChange] Final Interpretation: midiBank: %i, midiProgram: %i, channel: %i\n", useBank, useProg, channel);
+    debug_message("[SF2 ProcessProgramChange] Final Interpretation: midiBank: %i, midiProgram: %i, channel: %i\n", useBank, useProg, channel);
 
     PV_SF2_UnlockSynth();
 }
@@ -2587,7 +2587,7 @@ static void PV_SF2_SetValidDefaultProgramsForAllChannels(void)
     // Fallbacks if preferred banks not found
     if (foundMelodicBank < 0 && firstBank >= 0) { foundMelodicBank = firstBank; foundMelodicProg = firstProg; }
 
-    BAE_PRINTF("[FluidMem] Default presets: melodic bank=%d prog=%d, drums bank=%d prog=%d (first=%d:%d)\n",
+    debug_message("[FluidMem] Default presets: melodic bank=%d prog=%d, drums bank=%d prog=%d (first=%d:%d)\n",
                foundMelodicBank, foundMelodicProg, foundDrumBank, foundDrumProg, firstBank, firstProg);
 
     // Apply per-channel defaults

@@ -251,33 +251,33 @@ static BAEFileType PV_DetectOGGType(const unsigned char *buffer, int32_t bufferS
  */
 static int PV_IsLikelyMPEGHeader(const unsigned char *header)
 {
-    BAE_PRINTF("[FileType] Checking MPEG header: %02X %02X %02X %02X\n", 
+    debug_message("[FileType] Checking MPEG header: %02X %02X %02X %02X\n", 
                header[0], header[1], header[2], header[3]);
     
     // Check for ID3v2 tag
     if (header[0] == 'I' && header[1] == 'D' && header[2] == '3')
     {
-        BAE_PRINTF("[FileType] Detected ID3v2 tag\n");
+        debug_message("[FileType] Detected ID3v2 tag\n");
         return 1;
     }
     
     // Check for specific MPEG pattern: FF F3 40 CC
     if (header[0] == 0xFF && header[1] == 0xF3 && header[2] == 0x40 && header[3] == 0xCC)
     {
-        BAE_PRINTF("[FileType] Detected specific MPEG pattern FF F3 40 CC\n");
+        debug_message("[FileType] Detected specific MPEG pattern FF F3 40 CC\n");
         return 1;
     }
         
     // Check for MPEG frame sync pattern (11 bits of 1s: 0xFFE)
     if (header[0] == 0xFF && (header[1] & 0xE0) == 0xE0)
     {
-        BAE_PRINTF("[FileType] Found MPEG frame sync pattern\n");
+        debug_message("[FileType] Found MPEG frame sync pattern\n");
         // Additional validation: check for valid MPEG version and layer
         unsigned char version = (header[1] >> 3) & 0x03;
         unsigned char layer = (header[1] >> 1) & 0x03;
         unsigned char bitrate = (header[2] >> 4) & 0x0F;
         
-        BAE_PRINTF("[FileType] MPEG validation - version: %02X, layer: %02X, bitrate: %02X\n", 
+        debug_message("[FileType] MPEG validation - version: %02X, layer: %02X, bitrate: %02X\n", 
                    version, layer, bitrate);
         
         // Version should not be 01 (reserved)
@@ -285,16 +285,16 @@ static int PV_IsLikelyMPEGHeader(const unsigned char *header)
         // Bitrate should not be 0000 (free) or 1111 (reserved)
         if (version != 0x01 && layer != 0x00 && bitrate != 0x00 && bitrate != 0x0F)
         {
-            BAE_PRINTF("[FileType] MPEG validation passed\n");
+            debug_message("[FileType] MPEG validation passed\n");
             return 1;
         }
         else
         {
-            BAE_PRINTF("[FileType] MPEG validation failed\n");
+            debug_message("[FileType] MPEG validation failed\n");
         }
     }
     
-    BAE_PRINTF("[FileType] No MPEG pattern detected\n");
+    debug_message("[FileType] No MPEG pattern detected\n");
     return 0;
 }
 
@@ -419,11 +419,11 @@ BAEFileType X_DetermineFileTypeByPath(const char *filePath)
     const char *ext = strrchr(filePath, '.');
     if (!ext)
     {
-        BAE_PRINTF("[FileType] No extension found in path\n");
+        debug_message("[FileType] No extension found in path\n");
         return BAE_INVALID_TYPE;
     }
     
-    BAE_PRINTF("[FileType] Found extension: %s\n", ext);
+    debug_message("[FileType] Found extension: %s\n", ext);
     
     // Convert extension to lowercase for comparison
     char extLower[16] = {0};
@@ -502,11 +502,11 @@ BAEFileType X_DetermineFileType(const char *filePath)
     if (filePath == NULL)
         return BAE_INVALID_TYPE;
     
-    BAE_PRINTF("[FileType] Detecting type for: %s\n", filePath);
+    debug_message("[FileType] Detecting type for: %s\n", filePath);
     
     // Try extension-based detection first (fast)
     BAEFileType result = X_DetermineFileTypeByPath(filePath);
-    BAE_PRINTF("[FileType] Extension-based detection result: %s\n", X_GetFileTypeString(result));
+    debug_message("[FileType] Extension-based detection result: %s\n", X_GetFileTypeString(result));
     
     // If extension-based detection failed, try content-based detection
     if (result == BAE_INVALID_TYPE)
@@ -557,18 +557,18 @@ BAEFileType X_DetermineFileType(const char *filePath)
             if (bytesRead >= 4)
             {
                 result = X_DetermineFileTypeByData(buffer, bytesRead);
-                BAE_PRINTF("[FileType] Content-based detection result: %s\n", X_GetFileTypeString(result));
+                debug_message("[FileType] Content-based detection result: %s\n", X_GetFileTypeString(result));
             }
             else
             {
-                BAE_PRINTF("[FileType] Failed to read enough data for content detection\n");
+                debug_message("[FileType] Failed to read enough data for content detection\n");
             }
             
             XFileClose(fileRef);
         }
         else
         {
-            BAE_PRINTF("[FileType] Failed to open file for content detection\n");
+            debug_message("[FileType] Failed to open file for content detection\n");
         }
     }
     
@@ -590,7 +590,7 @@ BAEFileType X_DetermineFileTypeByData(const unsigned char *data, int32_t length)
     
     if (data == NULL || length < 4)
     {
-        BAE_PRINTF("[FileType] Invalid data buffer or insufficient length (%d bytes)\n", length);
+        debug_message("[FileType] Invalid data buffer or insufficient length (%d bytes)\n", length);
         return BAE_INVALID_TYPE;
     }
 #if USE_ADP_SUPPORT == TRUE
@@ -633,11 +633,11 @@ BAEFileType X_DetermineFileTypeByData(const unsigned char *data, int32_t length)
         // If we still have no valid FOURCC, give up
         if (fourcc == 0)
         {
-            BAE_PRINTF("[FileType] No valid FOURCC found in first 1024 bytes\n");
+            debug_message("[FileType] No valid FOURCC found in first 1024 bytes\n");
             return BAE_INVALID_TYPE;
         }
         
-        BAE_PRINTF("[FileType] Found non-zero FOURCC at offset %d: 0x%08X\n", offset, fourcc);
+        debug_message("[FileType] Found non-zero FOURCC at offset %d: 0x%08X\n", offset, fourcc);
     }
         
     // Check primary magic signatures

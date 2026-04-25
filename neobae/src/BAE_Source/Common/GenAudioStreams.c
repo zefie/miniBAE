@@ -214,7 +214,7 @@
 **                  extra data to be played at the end of the file.
 **  2/15/2001   sh  Initialized pStream in GM_AudioStreamSetup.
 **  3/30/2001   sh  Added conditionals for REVERB_DISABLED
-**  6/4/2001    sh  Added BAE_PRINTF debug settings.
+**  6/4/2001    sh  Added debug_message debug settings.
 */
 /***************************************************************************/
 
@@ -632,10 +632,10 @@ static void PV_AudioBufferCallback(void *context, XPTR pWhichBufferFinished, int
     if (pStream)
     {
         #if DEBUG_STREAMS && 0
-            BAE_PRINTF("Playback Pos %ld Length %ld\r", pStream->streamPlaybackPosition, *pBufferSize_IN_OUT);
+            debug_message("Playback Pos %ld Length %ld\r", pStream->streamPlaybackPosition, *pBufferSize_IN_OUT);
         #endif
         #if DEBUG_STREAMS && 0
-            BAE_PRINTF("buffer done %p size %ld", (void*)pWhichBufferFinished, *pBufferSize_IN_OUT);
+            debug_message("buffer done %p size %ld", (void*)pWhichBufferFinished, *pBufferSize_IN_OUT);
         #endif
         pStream->streamPlaybackPosition += *pBufferSize_IN_OUT;
 
@@ -663,12 +663,12 @@ static void PV_AudioBufferCallback(void *context, XPTR pWhichBufferFinished, int
         {
             default:
                 #if DEBUG_STREAMS
-                BAE_PRINTF("Bad case in PV_AudioBufferCallback");
+                debug_message("Bad case in PV_AudioBufferCallback");
                 #endif
                 break;
             case STREAM_MODE_STOP_STREAM:
                 #if DEBUG_STREAMS
-                BAE_PRINTF("PV_AudioBufferCallback::STREAM_MODE_STOP_STREAM");
+                debug_message("PV_AudioBufferCallback::STREAM_MODE_STOP_STREAM");
                 #endif
                 pStream->streamMode = STREAM_MODE_INTERRUPT_ACTIVE | STREAM_MODE_FREE_STREAM;       // end
                 pStream->streamShuttingDown = TRUE;
@@ -677,7 +677,7 @@ static void PV_AudioBufferCallback(void *context, XPTR pWhichBufferFinished, int
             // buffer 1 ends playback
             case STREAM_MODE_START_BUFFER_1:    // start buffer 2 playing
                 #if DEBUG_STREAMS
-                BAE_PRINTF("PV_AudioBufferCallback::STREAM_MODE_START_BUFFER_1");
+                debug_message("PV_AudioBufferCallback::STREAM_MODE_START_BUFFER_1");
                 #endif
                 if (pStream->streamFirstTime)
                 {
@@ -692,7 +692,7 @@ static void PV_AudioBufferCallback(void *context, XPTR pWhichBufferFinished, int
                 {
                     pStream->streamShuttingDown = TRUE;
                     #if DEBUG_STREAMS
-                    BAE_PRINTF("    End of BUFFER_1");
+                    debug_message("    End of BUFFER_1");
                     #endif
                     if (pStream->streamLength2)
                     {
@@ -711,14 +711,14 @@ static void PV_AudioBufferCallback(void *context, XPTR pWhichBufferFinished, int
             // buffer 2 ends playback
             case STREAM_MODE_START_BUFFER_2:
                 #if DEBUG_STREAMS
-                BAE_PRINTF("PV_AudioBufferCallback::STREAM_MODE_START_BUFFER_2");
+                debug_message("PV_AudioBufferCallback::STREAM_MODE_START_BUFFER_2");
                 #endif
                 *pBufferSize_IN_OUT = pStream->streamLength1;
                 if (pStream->streamShuttingDown)
                 {
                     pStream->streamShuttingDown = TRUE;
                     #if DEBUG_STREAMS
-                    BAE_PRINTF("    End of BUFFER_2");
+                    debug_message("    End of BUFFER_2");
                     #endif
                     if (pStream->streamLength1)
                     {
@@ -1033,7 +1033,7 @@ static OPErr PV_FileStreamCallback(void *context, GM_StreamMessage message, GM_S
             break;
         case STREAM_CREATE:
             #if DEBUG_STREAMS
-            BAE_PRINTF("PV_FileStreamCallback::STREAM_CREATE\r");
+            debug_message("PV_FileStreamCallback::STREAM_CREATE\r");
             #endif
             pStream = (GM_AudioStream *)pAS->streamReference;
             pASInfo = (GM_AudioStreamFileInfo *)pAS->userReference;
@@ -1097,7 +1097,7 @@ static OPErr PV_FileStreamCallback(void *context, GM_StreamMessage message, GM_S
             break;
         case STREAM_DESTROY:
             #if DEBUG_STREAMS
-            BAE_PRINTF("PV_FileStreamCallback::STREAM_DESTROY\r");
+            debug_message("PV_FileStreamCallback::STREAM_DESTROY\r");
             #endif
             pASInfo = (GM_AudioStreamFileInfo *)pAS->userReference;
 
@@ -1191,7 +1191,7 @@ static OPErr PV_FileStreamCallback(void *context, GM_StreamMessage message, GM_S
                                                             &fileSize);
 
                 #if DEBUG_STREAMS && 1
-                    BAE_PRINTF("STREAM_GET_DATA::frames %ld outputBufferSize %ld fileSize %ld", pAS->dataLength, outputBufferSize, fileSize);
+                    debug_message("STREAM_GET_DATA::frames %ld outputBufferSize %ld fileSize %ld", pAS->dataLength, outputBufferSize, fileSize);
                 #endif
                 // NOTE: we are incrementing the file position by the buffer size rather
                 // than the file size because our units are in audio bytes.
@@ -1443,7 +1443,7 @@ STREAM_REFERENCE GM_AudioStreamSetup(void *threadContext, void *userReference, G
     theErr = NO_ERR;
     pStream = NULL;
     #if DEBUG_STREAMS
-        BAE_PRINTF("StreamSetup: Starting.\n");
+        debug_message("StreamSetup: Starting.\n");
     #endif
     if (MusicGlobals->MaxEffects)
     {
@@ -1525,18 +1525,18 @@ STREAM_REFERENCE GM_AudioStreamSetup(void *threadContext, void *userReference, G
                         ssData.channelSize = channelSize;
                         ssData.sampleRate = sampleRate;
                         #if DEBUG_STREAMS
-                            BAE_PRINTF("StreamSetup: Call callback with GET_DATA\n");
+                            debug_message("StreamSetup: Call callback with GET_DATA\n");
                         #endif
                         theErr = (*pProc)(threadContext, STREAM_GET_DATA, &ssData);
 
 #if DEBUG_STREAMS
                         if( theErr)
                         {
-                            BAE_PRINTF("StreamSetup: Return from 1st callback with an error\n");
+                            debug_message("StreamSetup: Return from 1st callback with an error\n");
                         }
                         else
                         {
-                            BAE_PRINTF("StreamSetup: Return 1st from callback o.k.\n");
+                            debug_message("StreamSetup: Return 1st from callback o.k.\n");
                         }
 #endif
                         pStream->streamLength1 = ssData.dataLength;         // just in case it changes
@@ -1645,11 +1645,11 @@ STREAM_REFERENCE GM_AudioStreamSetup(void *threadContext, void *userReference, G
 #if DEBUG_STREAMS
     if (theErr)
     {
-        BAE_PRINTF("Exiting stream create with an error.\n");
+        debug_message("Exiting stream create with an error.\n");
     }
     else
     {
-        BAE_PRINTF("Exiting stream create NO error.\n");
+        debug_message("Exiting stream create NO error.\n");
     }
 #endif
     if (pStream)
@@ -2673,13 +2673,13 @@ void GM_AudioStreamService(void *threadContext)
                 {
                     default:
                         #if DEBUG_STREAMS
-                            BAE_PRINTF("Bad case in GM_AudioStreamService");
+                            debug_message("Bad case in GM_AudioStreamService");
                         #endif
                         break;
 
                     case STREAM_MODE_FREE_STREAM:
                         #if DEBUG_STREAMS
-                            BAE_PRINTF("GM_AudioStreamService::STREAM_MODE_FREE_STREAM");
+                            debug_message("GM_AudioStreamService::STREAM_MODE_FREE_STREAM");
                         #endif
 // stream stays in engine until all samples played.
                         if ((pStream->playbackReference == DEAD_VOICE) || 
@@ -2739,7 +2739,7 @@ void GM_AudioStreamService(void *threadContext)
                         break;
                     case STREAM_MODE_DEAD:  // first buffer failed to fill
                         #if DEBUG_STREAMS
-                            BAE_PRINTF("GM_AudioStreamService::STREAM_MODE_DEAD");
+                            debug_message("GM_AudioStreamService::STREAM_MODE_DEAD");
                         #endif
                         ssData.dataLength = pStream->streamOrgLength1;
                         ssData.pData = pStream->pStreamData1;
@@ -2753,7 +2753,7 @@ void GM_AudioStreamService(void *threadContext)
                         if (pStream->startupStatus != NO_ERR)
                         {
                             #if DEBUG_STREAMS
-                                BAE_PRINTF("    STOP!");
+                                debug_message("    STOP!");
                             #endif
                             pStream->streamShuttingDown = TRUE;
                             pStream->streamLength2 = 0;
@@ -2827,7 +2827,7 @@ void GM_AudioStreamService(void *threadContext)
                         break;
                     case STREAM_MODE_START_BUFFER_2:        // read buffer 1 into memory
                         #if DEBUG_STREAMS
-                            BAE_PRINTF("GM_AudioStreamService::STREAM_MODE_START_BUFFER_2");
+                            debug_message("GM_AudioStreamService::STREAM_MODE_START_BUFFER_2");
                         #endif
                         if (pStream->streamShuttingDown == FALSE)
                         {
@@ -2844,7 +2844,7 @@ void GM_AudioStreamService(void *threadContext)
                             if (pStream->startupStatus != NO_ERR)
                             {
                                 #if DEBUG_STREAMS
-                                    BAE_PRINTF("    STOP!");
+                                    debug_message("    STOP!");
                                 #endif
                                 pStream->streamShuttingDown = TRUE;
                                 pStream->streamLength2 = 0;
@@ -2880,12 +2880,12 @@ void GM_AudioStreamService(void *threadContext)
                             }
                         }
                         #if DEBUG_STREAMS && 0
-                            BAE_PRINTF("B1-> %ld len %ld", pStream->streamPlaybackPosition, pStream->streamLength1);
+                            debug_message("B1-> %ld len %ld", pStream->streamPlaybackPosition, pStream->streamLength1);
                         #endif
                         break;
                     case STREAM_MODE_START_BUFFER_1:        // read buffer 2 into memory
                         #if DEBUG_STREAMS
-                            BAE_PRINTF("GM_AudioStreamService::STREAM_MODE_START_BUFFER_1");
+                            debug_message("GM_AudioStreamService::STREAM_MODE_START_BUFFER_1");
                         #endif
                         if (pStream->streamShuttingDown == FALSE)
                         {
@@ -2901,7 +2901,7 @@ void GM_AudioStreamService(void *threadContext)
                             if (pStream->startupStatus != NO_ERR)
                             {
                                 #if DEBUG_STREAMS
-                                    BAE_PRINTF("    STOP!");
+                                    debug_message("    STOP!");
                                 #endif
                                 pStream->streamShuttingDown = TRUE;
                                 pStream->streamLength1 = 0;
@@ -2937,7 +2937,7 @@ void GM_AudioStreamService(void *threadContext)
                             }
                         }
                         #if DEBUG_STREAMS && 0
-                            BAE_PRINTF("B2-> %ld len %ld", pStream->streamPlaybackPosition, pStream->streamLength2);
+                            debug_message("B2-> %ld len %ld", pStream->streamPlaybackPosition, pStream->streamLength2);
                         #endif
                         break;
                 }

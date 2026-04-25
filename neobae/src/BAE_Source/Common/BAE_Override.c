@@ -11,23 +11,6 @@
 
 #define BAE_OVERRIDE_SHA1_HEX_LEN 40
 
-#if defined(_ZEFI_GUI) && defined(_DEBUG)
-extern void debug_console_append(const char *message);
-
-static void PV_OverrideLog(const char *fmt, ...)
-{
-    char message[1024];
-    va_list args;
-
-    va_start(args, fmt);
-    vsnprintf(message, sizeof(message), fmt, args);
-    va_end(args);
-    debug_console_append(message);
-}
-#else
-#define PV_OverrideLog(...) BAE_PRINTF(__VA_ARGS__)
-#endif
-
 static void PV_DigestToHex(const unsigned char digest[20], char outHex[BAE_OVERRIDE_SHA1_HEX_LEN + 1])
 {
     static const char hexDigits[] = "0123456789abcdef";
@@ -93,7 +76,7 @@ static uint32_t PV_MergeOverrideFlags(uint32_t currentFlags, uint32_t overrideFl
         currentFlags |= SONG_CONFIG_CONTAINER_IS_ZMF;
     }
     currentFlags &= SONG_CONFIG_VALID_BITS_MASK;
-    PV_OverrideLog("[BAE Override] Merged override flags: 0x%08X\n", (unsigned)currentFlags);
+    debug_message("[BAE Override] Merged override flags: 0x%08X\n", (unsigned)currentFlags);
     return currentFlags;
 }
 
@@ -130,10 +113,10 @@ uint32_t BAE_OverrideFromFile(const void *filePath, uint32_t currentFlags)
     }
     if (sha1mini_file_hex((const char *)filePath, sha1Hex) == 0)
     {
-        PV_OverrideLog("[BAE Override] SHA1 failed for %s\n", (const char *)filePath);
+        debug_message("[BAE Override] SHA1 failed for %s\n", (const char *)filePath);
         return currentFlags;
     }
-    PV_OverrideLog("[BAE Override] SHA1 %s  %s\n", sha1Hex, (const char *)filePath);
+    debug_message("[BAE Override] SHA1 %s  %s\n", sha1Hex, (const char *)filePath);
     return BAE_Override(currentFlags, sha1Hex);
 }
 
@@ -162,7 +145,7 @@ void BAE_OverrideSongFromFile(struct GM_Song *song, const void *filePath)
     mergedFlags = BAE_OverrideFromFile(filePath, (uint32_t)song->engineConfigFlags);
     if (mergedFlags != (uint32_t)song->engineConfigFlags)
     {
-        PV_OverrideLog("[Override] Applied runtime flags 0x%08X -> 0x%08X for %s\n",
+        debug_message("[Override] Applied runtime flags 0x%08X -> 0x%08X for %s\n",
                    (unsigned)song->engineConfigFlags,
                    (unsigned)mergedFlags,
                    (const char *)filePath);
@@ -181,7 +164,7 @@ void BAE_OverrideSongFromData(struct GM_Song *song, const void *data, uint32_t d
     mergedFlags = BAE_OverrideFromData(data, dataSize, (uint32_t)song->engineConfigFlags);
     if (mergedFlags != (uint32_t)song->engineConfigFlags)
     {
-        PV_OverrideLog("[Override] Applied runtime flags 0x%08X -> 0x%08X from memory blob\n",
+        debug_message("[Override] Applied runtime flags 0x%08X -> 0x%08X from memory blob\n",
                    (unsigned)song->engineConfigFlags,
                    (unsigned)mergedFlags);
         song->engineConfigFlags = (int32_t)mergedFlags;

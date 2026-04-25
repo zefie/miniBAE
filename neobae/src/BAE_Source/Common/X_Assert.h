@@ -72,7 +72,7 @@
 
 #ifndef X_Assert_H
 #define X_Assert_H
-
+void debug_message(const char *format, ...);
 
 #include "X_API.h"
 #include <stdio.h>
@@ -206,7 +206,6 @@
         #ifdef __cplusplus
         extern "C" {
         #endif
-        void debug_console_append(const char *message);
         #ifdef __cplusplus
         }
         #endif
@@ -216,7 +215,7 @@
             do {                                     \
                 char _dbg_buf[1024];                \
                 snprintf(_dbg_buf, sizeof(_dbg_buf), __VA_ARGS__); \
-                debug_console_append(_dbg_buf);     \
+                debug_message(_dbg_buf);     \
                 BAE_STDERR(__VA_ARGS__);            \
             } while (0)
     #elif __EMSCRIPTEN__

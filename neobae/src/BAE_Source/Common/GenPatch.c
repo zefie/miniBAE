@@ -222,7 +222,7 @@
 **                  and translated sustain tag flags out.
 **  12/12/2000  sh  Changed GM_LoadSongInstruments to call GM_ResetTempoToDefault 
 **                  after pre scanning midi file.
-**  5/29/2001   sh  Added new debugging system with BAE_PRINTF
+**  5/29/2001   sh  Added new debugging system with debug_message
 **  7/5/2001    sh  Enabled use of GM_IsInstrumentRangeUsed in PV_GetInstrument
 **  2/22/2002   sh  Fixed bug in GM_IsInstrumentUsed, in which the testing of the bits
 **                  didn't match the setting of the bits. Yerg, the pain.
@@ -387,7 +387,7 @@ static void PV_ProcessSampleWithSMOD(void *pSample,
             }
         }
         //Can only get here if it's not in the cache...
-        BAE_PRINTF("Something is wrong with sample cache. Can't find sample.\n");
+        debug_message("Something is wrong with sample cache. Can't find sample.\n");
     }
 //  int16_t   sampleIndex;
 //
@@ -970,7 +970,7 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                 if (pErr && *pErr == NO_ERR)
                 {
                     *pErr = BAD_INSTRUMENT;
-                    BAE_PRINTF("[PV_GetInstrument] Instrument %ld sample load failed (snd=%d) err=%d\n", (long)theID, (int)theSampleID, (int)*pErr);
+                    debug_message("[PV_GetInstrument] Instrument %ld sample load failed (snd=%d) err=%d\n", (long)theID, (int)theSampleID, (int)*pErr);
                 }
             }
             if (!theI && cacheRefAdded && sndInfo)
@@ -1064,7 +1064,7 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                         }
                         else if (pErr && *pErr != NO_ERR)
                         {
-                            BAE_PRINTF("[PV_GetInstrument] Instrument %ld split %d load failed snd=%d err=%d\n",
+                            debug_message("[PV_GetInstrument] Instrument %ld split %d load failed snd=%d err=%d\n",
                                       (long)theID, (int)count, (int)theXSplit.sndResourceID, (int)*pErr);
                         }
                     }
@@ -1212,7 +1212,7 @@ OPErr GM_LoadInstrument(GM_Song *pSong,
                 {
                     pSong->instrumentData[instrument] = theI;
                 }
-                BAE_PRINTF("[GM_LoadInstrument]: Instrument %d loaded successfully, refCount=%d, stored=%s\n", 
+                debug_message("[GM_LoadInstrument]: Instrument %d loaded successfully, refCount=%d, stored=%s\n", 
                           instrument, theI->usageReferenceCount, 
                           pSong->instrumentData[instrument] ? "yes" : "no");
             }
@@ -1450,7 +1450,7 @@ OPErr GM_LoadSongInstruments(GM_Song *theSong,
                     GM_SetUsedInstrument(theSong, DEFAULT_PATCH, -1L, TRUE);        // load the entire piano
                 }
             #if DEBUG_DISPLAY_PATCHES
-                BAE_PRINTF("[GM_LoadSongInstruments] Loading instruments:\n");
+                debug_message("[GM_LoadSongInstruments] Loading instruments:\n");
             #endif
                 instCount = 0;
                 for (count = 0; count < MAX_INSTRUMENTS*MAX_BANKS; count++)
@@ -1485,14 +1485,14 @@ OPErr GM_LoadSongInstruments(GM_Song *theSong,
                                 if (realInstrument > MAX_INSTRUMENTS)
                                 {
                                 #if DEBUG_DISPLAY_PATCHES
-                                    BAE_PRINTF("Failed loading extra bank instrument %d, falling back to GM.\n", realInstrument);
+                                    debug_message("Failed loading extra bank instrument %d, falling back to GM.\n", realInstrument);
                                 #endif
                                     fallbackInstrument = (realInstrument % MAX_INSTRUMENTS);
                                     fallbackInstrument += ((realInstrument / MAX_INSTRUMENTS) & 1) * MAX_INSTRUMENTS;
                                     realInstrument = fallbackInstrument;
                                 
                                 #if DEBUG_DISPLAY_PATCHES
-                                    BAE_PRINTF("Trying to load instrument %d\n", realInstrument);
+                                    debug_message("Trying to load instrument %d\n", realInstrument);
                                 #endif
                                     // 2000.05.19 AER   If the instrument had
                                     //                  already been loaded, we
@@ -1620,7 +1620,7 @@ void GM_SetUsedInstrument(GM_Song *pSong, XLongResourceID thePatch, int16_t theK
     if (pSong && pSong->pUsedPatchList)
     {
     #if DEBUG_DISPLAY_PATCHES
-    //  BAE_PRINTF("Set used INST %ld\n", thePatch);
+    //  debug_message("Set used INST %ld\n", thePatch);
     #endif
         if (theKey != -1)
         {
@@ -1793,7 +1793,7 @@ bool GM_IsInstrumentRangeUsed(GM_Song *pSong, XLongResourceID thePatch, int16_t 
     }
 
 #if DEBUG_DISPLAY_PATCHES
-    BAE_PRINTF("[GM_IsInstrumentRangeUsed] Testing INST %d - key range (%d to %d) = %s\n", (int32_t)thePatch,
+    debug_message("[GM_IsInstrumentRangeUsed] Testing INST %d - key range (%d to %d) = %s\n", (int32_t)thePatch,
                                                                             (int32_t)theLowKey,
                                                                             (int32_t)theHighKey,
                                                                             (used) ? "VALID" : "FAILED");

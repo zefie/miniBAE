@@ -1160,7 +1160,7 @@ void GM_SetReverbType(ReverbMode reverbMode)
     {
         if (MusicGlobals->reverbBuffer)
         {
-            BAE_PRINTF("[SetReverbType] Setting reverb type to %d\n", reverbMode);
+            debug_message("[SetReverbType] Setting reverb type to %d\n", reverbMode);
             switch (reverbMode)
             {
                 case REVERB_NO_CHANGE:  // no change

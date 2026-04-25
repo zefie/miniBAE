@@ -3461,6 +3461,8 @@ BAEResult BAERmfEditorDocument_UpgradeFile(BAEPathName srcPath,
                                                          int32_t *outFromVersion);
 
 
+void BAE_SetDebugOutputCallback(void (*callback)(const char *message));
+
 #if USE_ZMF_SUPPORT == TRUE
 enum BAEZMFReasonCode
 {

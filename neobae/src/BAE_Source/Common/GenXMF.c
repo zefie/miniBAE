@@ -30,7 +30,7 @@
 #include <limits.h>
 // zlib for MXMF packed content
 
-#include "X_Assert.h" // BAE_PRINTF
+#include "X_Assert.h" // debug_message
 // LZSS API (declared in NewNewLZSS.c)
 void LZSSUncompress(unsigned char* src, uint32_t srcBytes,
                     unsigned char* dst, uint32_t dstBytes);
@@ -277,7 +277,7 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
     if (nodeLen == 0) return FALSE;
     if (start > len || nodeLen > (len - start)) return FALSE;
     uint32_t nodeEnd = start + nodeLen;
-    BAE_PRINTF("[XMF1] node@%u len=%u items=%u headerLen=%u\n", start, nodeLen, itemCount, headerLen);
+    debug_message("[XMF1] node@%u len=%u items=%u headerLen=%u\n", start, nodeLen, itemCount, headerLen);
 
     // Header: metadataLen + metadata, unpackersLen + unpackers
     uint32_t headerStart = *pos;
@@ -317,7 +317,7 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
     *pos = headerEnd;
     // We don't parse unpackers in detail; presence means packed content
     bool isPacked = (unpackersLen > 0) ? TRUE : FALSE;
-    BAE_PRINTF("[XMF1] header %u..%u metaLen=%u unpackersLen=%u isPacked=%d rfTypeHint=%d rfIdHint=%d\n",
+    debug_message("[XMF1] header %u..%u metaLen=%u unpackersLen=%u isPacked=%d rfTypeHint=%d rfIdHint=%d\n",
                headerStart, headerEnd, metadataLen, unpackersLen, (int)isPacked, rfType, rfId);
 
     if (itemCount == 0)
@@ -330,7 +330,7 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
         uint32_t refType = 0;
         if (!PV_ReadVLQ(bytes, len, pos, &refType)) return FALSE;
         if (refType == 0) refType = 1; // Some files omit and imply inline; be permissive
-        BAE_PRINTF("[XMF1] refType=%u\n", refType);
+        debug_message("[XMF1] refType=%u\n", refType);
         const unsigned char *content = NULL;
         uint32_t contentLen = 0;
         if (refType == 1)
@@ -339,7 +339,7 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
             if (*pos > nodeEnd) return FALSE;
             content = bytes + *pos;
             contentLen = nodeEnd - *pos;
-            BAE_PRINTF("[XMF1] file: inline contentLen=%u rfType=%d rfId=%d first4=%02X %02X %02X %02X\n",
+            debug_message("[XMF1] file: inline contentLen=%u rfType=%d rfId=%d first4=%02X %02X %02X %02X\n",
                        contentLen, rfType, rfId,
                        (contentLen>=1?content[0]:0),(contentLen>=2?content[1]:0),(contentLen>=3?content[2]:0),(contentLen>=4?content[3]:0));
         }
@@ -352,7 +352,7 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
             if (off > len || blen > (len - off)) return FALSE;
             content = bytes + off;
             contentLen = blen;
-            BAE_PRINTF("[XMF1] file: inFileResource off=%u len=%u rfType=%d rfId=%d first4=%02X %02X %02X %02X\n",
+            debug_message("[XMF1] file: inFileResource off=%u len=%u rfType=%d rfId=%d first4=%02X %02X %02X %02X\n",
                        off, blen, rfType, rfId,
                        (blen>=1?content[0]:0),(blen>=2?content[1]:0),(blen>=3?content[2]:0),(blen>=4?content[3]:0));
         }
@@ -363,7 +363,7 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
             if (!PV_ReadVLQ(bytes, len, pos, &nOff)) return FALSE;
             if (nOff >= len) return FALSE;
             uint32_t cpos = nOff;
-            BAE_PRINTF("[XMF1] file: inFileNode -> recurse at off=%u\n", nOff);
+            debug_message("[XMF1] file: inFileNode -> recurse at off=%u\n", nOff);
             bool ok = PV_ParseXMF1Node(bytes, len, &cpos, outMidi, outMidiLen, outRmf, outRmfLen, bankLoaded);
             // Move to end of current node content regardless
             *pos = nodeEnd;
@@ -382,7 +382,7 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
         unsigned char *inflated = NULL; uint32_t inflatedLen = 0;
         if (isPacked && contentLen >= 4)
         {
-            BAE_PRINTF("[XMF1] content marked packed; trying inflate...\n");
+            debug_message("[XMF1] content marked packed; trying inflate...\n");
             if (!PV_InflateFromOffset(content, contentLen, 0, &inflated, &inflatedLen))
             {
                 (void)PV_InflateRawFromOffset(content, contentLen, 0, &inflated, &inflatedLen);
@@ -398,7 +398,7 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
             if (inflated)
             {
                 payload = inflated; payloadLen = inflatedLen;
-                BAE_PRINTF("[XMF1] inflate -> %u bytes\n", payloadLen);
+                debug_message("[XMF1] inflate -> %u bytes\n", payloadLen);
             }
             else
             {
@@ -414,7 +414,7 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
                         PV_InflateRawFromOffset(cpy, contentLen, 2, &inflated, &inflatedLen))
                     {
                         payload = inflated; payloadLen = inflatedLen;
-                        BAE_PRINTF("[XMF1] decrypt+inflate -> %u bytes\n", payloadLen);
+                        debug_message("[XMF1] decrypt+inflate -> %u bytes\n", payloadLen);
                     }
                     XDisposePtr(cpy);
                 }
@@ -557,7 +557,7 @@ static bool PV_TryParseXMF1(const unsigned char *bytes, uint32_t len,
     if (rootOffset >= len) return FALSE;
 
     pos = rootOffset;
-    BAE_PRINTF("[XMF] Parsing XMF_1.00, root node @%u, fileLen(VLQ)=%u, metaTableLen=%u\n", rootOffset, fileLen, metaTableLen);
+    debug_message("[XMF] Parsing XMF_1.00, root node @%u, fileLen(VLQ)=%u, metaTableLen=%u\n", rootOffset, fileLen, metaTableLen);
     bool ok = PV_ParseXMF1Node(bytes, len, &pos, outMidi, outMidiLen, outRmf, outRmfLen, bankLoaded);
     return ok && ((outMidi && *outMidi) || (outRmf && *outRmf));
 }
@@ -643,7 +643,7 @@ static bool PV_InflateFromOffset(const unsigned char *buf, uint32_t len, uint32_
     else
     {
 #if MXMF_LOG_INFLATE_FAILURES
-        BAE_PRINTF("[MXMF] inflate failed at input offset=%u (zret=%d)\n", offset, zret);
+        debug_message("[MXMF] inflate failed at input offset=%u (zret=%d)\n", offset, zret);
 #endif
         ok = FALSE;
         break;
@@ -663,7 +663,7 @@ static bool PV_InflateFromOffset(const unsigned char *buf, uint32_t len, uint32_
     }
     inflateEnd(&zs);
     if (ok) {
-        BAE_PRINTF("[MXMF] inflated stream at offset=%u -> %u bytes\n", offset, *outLen);
+        debug_message("[MXMF] inflated stream at offset=%u -> %u bytes\n", offset, *outLen);
     }
     return ok;
 #else
@@ -741,7 +741,7 @@ static bool PV_InflateRawFromOffset(const unsigned char *buf, uint32_t len, uint
     else
     {
 #if MXMF_LOG_INFLATE_FAILURES
-        BAE_PRINTF("[MXMF] inflate RAW failed at input offset=%u (zret=%d)\n", offset, zret);
+        debug_message("[MXMF] inflate RAW failed at input offset=%u (zret=%d)\n", offset, zret);
 #endif
         ok = FALSE;
         break;
@@ -761,7 +761,7 @@ static bool PV_InflateRawFromOffset(const unsigned char *buf, uint32_t len, uint
     }
     inflateEnd(&zs);
     if (ok) {
-        BAE_PRINTF("[MXMF] inflated RAW stream at offset=%u -> %u bytes\n", offset, *outLen);
+        debug_message("[MXMF] inflated RAW stream at offset=%u -> %u bytes\n", offset, *outLen);
     }
     return ok;
 #else
@@ -893,14 +893,14 @@ static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ule
         if (PV_InflateFromOffset(bytes, ulen, i, &out, &outLen))
         {
             foundStreams++;
-            BAE_PRINTF("[MXMF] zlib stream #%u at file+%u, inflated=%u bytes\n", foundStreams, i, outLen);
+            debug_message("[MXMF] zlib stream #%u at file+%u, inflated=%u bytes\n", foundStreams, i, outLen);
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
             // Try bank from inflated blob
             if (bankLoaded && *bankLoaded == FALSE)
             {
                 if (PV_TryLoadBankFromBlob(out, outLen) == TRUE)
                 {
-                    BAE_PRINTF("[MXMF] bank loaded from inflated stream #%u\n", foundStreams);
+                    debug_message("[MXMF] bank loaded from inflated stream #%u\n", foundStreams);
                     *bankLoaded = TRUE;
                 }
             }
@@ -916,7 +916,7 @@ static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ule
                 XDisposePtr(out);
                 foundMidi = copy;
                 foundMidiLen = copyLen;
-                BAE_PRINTF("[MXMF] found SMF in inflated stream (offset %d, len %u)\n", off, copyLen);
+                debug_message("[MXMF] found SMF in inflated stream (offset %d, len %u)\n", off, copyLen);
                 // If we already loaded a bank, we can stop scanning now
                 if (bankLoaded && *bankLoaded == TRUE) { goto done_scan; }
                 // Otherwise keep scanning for a bank
@@ -932,7 +932,7 @@ static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ule
                 XDisposePtr(out);
                 foundRmf = copy;
                 foundRmfLen = copyLen;
-                BAE_PRINTF("[MXMF] found RMF in inflated stream (offset %d, len %u)\n", roff, copyLen);
+                debug_message("[MXMF] found RMF in inflated stream (offset %d, len %u)\n", roff, copyLen);
                 if (bankLoaded && *bankLoaded == TRUE) { goto done_scan; }
                 continue;
             }
@@ -948,7 +948,7 @@ static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ule
                     XDisposePtr(out);
                     foundMidi = copy;
                     foundMidiLen = rmidLen;
-                    BAE_PRINTF("[MXMF] found RMID->SMF in inflated stream (len %u)\n", rmidLen);
+                    debug_message("[MXMF] found RMID->SMF in inflated stream (len %u)\n", rmidLen);
                     if (bankLoaded && *bankLoaded == TRUE) { goto done_scan; }
                     continue;
                 }
@@ -970,13 +970,13 @@ static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ule
             if (PV_InflateFromOffset(cpy, win, 0, &dout, &dlen))
             {
                 foundStreams++;
-                BAE_PRINTF("[MXMF] zlib(decrypted) stream #%u at file+%u, inflated=%u bytes\n", foundStreams, i, dlen);
+                debug_message("[MXMF] zlib(decrypted) stream #%u at file+%u, inflated=%u bytes\n", foundStreams, i, dlen);
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
                 if (bankLoaded && *bankLoaded == FALSE)
                 {
                     if (PV_TryLoadBankFromBlob(dout, dlen) == TRUE)
                     {
-                        BAE_PRINTF("[MXMF] bank loaded from decrypted inflated stream #%u\n", foundStreams);
+                        debug_message("[MXMF] bank loaded from decrypted inflated stream #%u\n", foundStreams);
                         *bankLoaded = TRUE;
                     }
                 }
@@ -992,7 +992,7 @@ static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ule
                     XDisposePtr(cpy);
                     foundMidi = copy;
                     foundMidiLen = copyLen;
-                    BAE_PRINTF("[MXMF] found SMF in decrypted inflated stream (offset %d, len %u)\n", off, copyLen);
+                    debug_message("[MXMF] found SMF in decrypted inflated stream (offset %d, len %u)\n", off, copyLen);
                     if (bankLoaded && *bankLoaded == TRUE) { goto done_scan; }
                     continue;
                 }
@@ -1007,7 +1007,7 @@ static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ule
                     XDisposePtr(cpy);
                     foundRmf = copy;
                     foundRmfLen = copyLen;
-                    BAE_PRINTF("[MXMF] found RMF in decrypted inflated stream (offset %d, len %u)\n", roff, copyLen);
+                    debug_message("[MXMF] found RMF in decrypted inflated stream (offset %d, len %u)\n", roff, copyLen);
                     if (bankLoaded && *bankLoaded == TRUE) { goto done_scan; }
                     continue;
                 }
@@ -1023,7 +1023,7 @@ static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ule
                         XDisposePtr(cpy);
                         foundMidi = copy;
                         foundMidiLen = rmidLen;
-                        BAE_PRINTF("[MXMF] found RMID->SMF in decrypted inflated stream (len %u)\n", rmidLen);
+                        debug_message("[MXMF] found RMID->SMF in decrypted inflated stream (len %u)\n", rmidLen);
                         if (bankLoaded && *bankLoaded == TRUE) { goto done_scan; }
                         continue;
                     }
@@ -1052,7 +1052,7 @@ done_scan:
                 {
                     if (PV_TryLoadBankFromBlob(rdout, rdlen) == TRUE)
                     {
-                        BAE_PRINTF("[MXMF] bank loaded from RAW inflated stream\n");
+                        debug_message("[MXMF] bank loaded from RAW inflated stream\n");
                         *bankLoaded = TRUE;
                     }
                 }
@@ -1066,7 +1066,7 @@ done_scan:
                     XBlockMove(rdout + off, copy, copyLen);
                     XDisposePtr(rdout);
                     foundMidi = copy; foundMidiLen = copyLen;
-                    BAE_PRINTF("[MXMF] found SMF in RAW inflated stream (offset %d, len %u)\n", off, copyLen);
+                    debug_message("[MXMF] found SMF in RAW inflated stream (offset %d, len %u)\n", off, copyLen);
                     if (!bankLoaded || *bankLoaded == FALSE) continue;
                     break;
                 }
@@ -1079,7 +1079,7 @@ done_scan:
                     XBlockMove(rdout + roff2, copy, copyLen);
                     XDisposePtr(rdout);
                     foundRmf = copy; foundRmfLen = copyLen;
-                    BAE_PRINTF("[MXMF] found RMF in RAW inflated stream (offset %d, len %u)\n", roff2, copyLen);
+                    debug_message("[MXMF] found RMF in RAW inflated stream (offset %d, len %u)\n", roff2, copyLen);
                     if (!bankLoaded || *bankLoaded == FALSE) continue;
                     break;
                 }
@@ -1129,7 +1129,7 @@ static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
             bool isDLS = (type[0] == 'D' && type[1] == 'L' && type[2] == 'S' && type[3] == ' ');
             bool isSF2 = (type[0] == 's' && type[1] == 'f' && type[2] == 'b' && type[3] == 'k');
             if (!(isDLS || isSF2)) { i += (8 + sz) - 1; continue; }
-            BAE_PRINTF("[XMF] RIFF at +%u type=%.4s size=%u (isDLS=%d isSF2=%d)\n", i, type, sz, (int)isDLS, (int)isSF2);
+            debug_message("[XMF] RIFF at +%u type=%.4s size=%u (isDLS=%d isSF2=%d)\n", i, type, sz, (int)isDLS, (int)isSF2);
             bool hasWvpl = FALSE;
 #if _DEBUG
             uint32_t waveCount = 0;
@@ -1147,7 +1147,7 @@ static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
             const uint32_t totalBytes = 8 + sz;
             if (isDLS && (!hasWvpl && totalBytes < 32u * 1024u)) {
 #if _DEBUG
-                BAE_PRINTF("[XMF] skipping tiny DLS (bytes=%u, hasWvpl=%d, wave tags=%u)\n", totalBytes, (int)hasWvpl, waveCount);
+                debug_message("[XMF] skipping tiny DLS (bytes=%u, hasWvpl=%d, wave tags=%u)\n", totalBytes, (int)hasWvpl, waveCount);
 #endif
                 i += (8 + sz) - 1; continue;
             }
@@ -1160,7 +1160,7 @@ static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
         }
     }
     if (candCount == 0) {
-        BAE_PRINTF("[XMF] no RIFF bank found in blob of %u bytes\n", len);
+        debug_message("[XMF] no RIFF bank found in blob of %u bytes\n", len);
         return FALSE;
     }
     // Sort by score desc
@@ -1171,10 +1171,10 @@ static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
         }
         if (best != a) { cand_t tmp = cands[a]; cands[a] = cands[best]; cands[best] = tmp; }
     }
-    BAE_PRINTF("[XMF] trying %d bank candidate(s)\n", candCount);
+    debug_message("[XMF] trying %d bank candidate(s)\n", candCount);
     for (int idx = 0; idx < candCount; ++idx) {
         cand_t *c = &cands[idx];
-        BAE_PRINTF("[XMF] attempting overlay load #%d @+%u bytes=%u%s\n", idx+1, c->off, c->bytes,
+        debug_message("[XMF] attempting overlay load #%d @+%u bytes=%u%s\n", idx+1, c->off, c->bytes,
                    (c->isDLS? (c->hasWvpl? ", DLS wvpl=YES" : ", DLS wvpl=NO") : ", SF2"));
         // Use overlay loading to preserve base soundfont and only override instruments in XMF
         OPErr r = GM_LoadSF2SoundfontAsXMFOverlay(buf + c->off, (size_t)c->bytes);
@@ -1182,17 +1182,17 @@ static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
             int presetCount = 0;
             bool okPresets = GM_SF2_CurrentFontHasAnyPreset(&presetCount);
             if (okPresets) {
-                BAE_PRINTF("[XMF] bank overlay succeeded on candidate #%d (presets>0)\n", idx+1);
+                debug_message("[XMF] bank overlay succeeded on candidate #%d (presets>0)\n", idx+1);
                 return TRUE;
             } else {
-                BAE_PRINTF("[XMF] bank candidate #%d loaded but no presets found (count=%d) — trying next...\n", idx+1, presetCount);
+                debug_message("[XMF] bank candidate #%d loaded but no presets found (count=%d) — trying next...\n", idx+1, presetCount);
                 GM_UnloadXMFOverlaySoundFont();
             }
         } else {
-            BAE_PRINTF("[XMF] bank overlay load failed on candidate #%d (result=%d), trying next...\n", idx+1, r);
+            debug_message("[XMF] bank overlay load failed on candidate #%d (result=%d), trying next...\n", idx+1, r);
         }
     }
-    BAE_PRINTF("[XMF] all bank candidates failed to load\n");
+    debug_message("[XMF] all bank candidates failed to load\n");
     return FALSE;
 #else
     (void)buf; (void)len; return FALSE;
@@ -1246,7 +1246,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
     // MXMF (XMF 2.00) fast path: detect and try to extract packed content
     if (ulen >= 8 && memcmp(bytes, "XMF_2.00", 8) == 0)
     {
-        BAE_PRINTF("[XMF] Detected XMF_2.00 (MXMF), size=%u\n", ulen);
+        debug_message("[XMF] Detected XMF_2.00 (MXMF), size=%u\n", ulen);
         const unsigned char *mid=NULL; uint32_t midLen=0;
         const unsigned char *rmf=NULL; uint32_t rmfLen=0;
         bool bankLoaded = FALSE;
@@ -1255,12 +1255,12 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
             BAEResult lerr;
             if (mid && midLen)
             {
-                BAE_PRINTF("[XMF] Packed scan yielded SMF len=%u (bankLoaded=%d)\n", midLen, (int)bankLoaded);
+                debug_message("[XMF] Packed scan yielded SMF len=%u (bankLoaded=%d)\n", midLen, (int)bankLoaded);
                 lerr = BAESong_LoadMidiFromMemory(song, (void const *)mid, (uint32_t)midLen, ignoreBadInstruments);
             }
             else if (rmf && rmfLen)
             {
-                BAE_PRINTF("[XMF] Packed scan yielded RMF len=%u (bankLoaded=%d)\n", rmfLen, (int)bankLoaded);
+                debug_message("[XMF] Packed scan yielded RMF len=%u (bankLoaded=%d)\n", rmfLen, (int)bankLoaded);
                 lerr = BAESong_LoadRmfFromMemory(song, (void *)rmf, (uint32_t)rmfLen, 0, ignoreBadInstruments);
             }
             else
@@ -1270,7 +1270,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
             // If we didn't find/load a bank during the packed scan, try scanning the raw file as a fallback
             if (bankLoaded == FALSE)
             {
-                BAE_PRINTF("[XMF] No bank loaded from packed content; scanning raw container for RIFF bank...\n");
+                debug_message("[XMF] No bank loaded from packed content; scanning raw container for RIFF bank...\n");
                 PV_TryLoadBankFromBlob(bytes, ulen);
             }
             // Free inflated buffers (loaders make their own copy)
@@ -1292,12 +1292,12 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
             BAEResult lerr = BAE_BAD_FILE;
             if (mid && midLen)
             {
-                BAE_PRINTF("[XMF] Parsed XMF_1.00 -> SMF len=%u (bankLoaded=%d)\n", midLen, (int)bankLoaded);
+                debug_message("[XMF] Parsed XMF_1.00 -> SMF len=%u (bankLoaded=%d)\n", midLen, (int)bankLoaded);
                 lerr = BAESong_LoadMidiFromMemory(song, (void const *)mid, (uint32_t)midLen, ignoreBadInstruments);
             }
             else if (rmf && rmfLen)
             {
-                BAE_PRINTF("[XMF] Parsed XMF_1.00 -> RMF len=%u (bankLoaded=%d)\n", rmfLen, (int)bankLoaded);
+                debug_message("[XMF] Parsed XMF_1.00 -> RMF len=%u (bankLoaded=%d)\n", rmfLen, (int)bankLoaded);
                 lerr = BAESong_LoadRmfFromMemory(song, (void *)rmf, (uint32_t)rmfLen, 0, ignoreBadInstruments);
             }
             if (mid) XDisposePtr((XPTR)mid);
@@ -1305,7 +1305,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
             // If no bank was loaded during parse, scan the raw file for a RIFF bank as fallback
             if (bankLoaded == FALSE)
             {
-                BAE_PRINTF("[XMF] No bank loaded during XMF_1.00 parse; scanning raw container for RIFF bank...\n");
+                debug_message("[XMF] No bank loaded during XMF_1.00 parse; scanning raw container for RIFF bank...\n");
                 PV_TryLoadBankFromBlob(bytes, ulen);
             }
             return lerr;
@@ -1346,25 +1346,25 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
             }
         }
         // Fall through to heuristics if still no content
-        BAE_PRINTF("[XMF] XMF_1.00 parse didn't yield content; falling back to heuristics\n");
+        debug_message("[XMF] XMF_1.00 parse didn't yield content; falling back to heuristics\n");
     }
 
     int smf_off = PV_FindSignature(bytes, ulen, smf_sig);
     if (smf_off >= 0)
     {
-        BAE_PRINTF("[XMF] Found SMF header at +%d in container (size=%u)\n", smf_off, ulen);
+        debug_message("[XMF] Found SMF header at +%d in container (size=%u)\n", smf_off, ulen);
         const char *bankHdr = "Bank Files";
         int bankHdrOff = PV_FindBytes(bytes, ulen, bankHdr, (uint32_t)strlen(bankHdr));
         if (bankHdrOff >= 0)
         {
             uint32_t bankStart = (uint32_t)bankHdrOff + (uint32_t)strlen(bankHdr);
-            BAE_PRINTF("[XMF] 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
+            debug_message("[XMF] 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
             if (bankStart < ulen)
                 PV_TryLoadBankFromBlob(bytes + bankStart, ulen - bankStart);
         }
         else
         {
-            BAE_PRINTF("[XMF] No 'Bank Files' header; scanning entire container for RIFF bank\n");
+            debug_message("[XMF] No 'Bank Files' header; scanning entire container for RIFF bank\n");
             PV_TryLoadBankFromBlob(bytes, ulen);
         }
         BAEResult lerr = BAESong_LoadMidiFromMemory(song, (void const *)(bytes + smf_off), (uint32_t)(ulen - (uint32_t)smf_off), ignoreBadInstruments);
@@ -1374,19 +1374,19 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
     int rmf_off = PV_FindSignature(bytes, ulen, rmf_sig);
     if (rmf_off >= 0)
     {
-        BAE_PRINTF("[XMF] Found RMF header at +%d in container (size=%u)\n", rmf_off, ulen);
+        debug_message("[XMF] Found RMF header at +%d in container (size=%u)\n", rmf_off, ulen);
         const char *bankHdr = "Bank Files";
         int bankHdrOff = PV_FindBytes(bytes, ulen, bankHdr, (uint32_t)strlen(bankHdr));
         if (bankHdrOff >= 0)
         {
             uint32_t bankStart = (uint32_t)bankHdrOff + (uint32_t)strlen(bankHdr);
-            BAE_PRINTF("[XMF] 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
+            debug_message("[XMF] 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
             if (bankStart < ulen)
                 PV_TryLoadBankFromBlob(bytes + bankStart, ulen - bankStart);
         }
         else
         {
-            BAE_PRINTF("[XMF] No 'Bank Files' header; scanning entire container for RIFF bank\n");
+            debug_message("[XMF] No 'Bank Files' header; scanning entire container for RIFF bank\n");
             PV_TryLoadBankFromBlob(bytes, ulen);
         }
         BAEResult lerr = BAESong_LoadRmfFromMemory(song, (void *)(bytes + rmf_off), (uint32_t)(ulen - (uint32_t)rmf_off), 0, ignoreBadInstruments);
@@ -1396,19 +1396,19 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
     const unsigned char *rmidSmf = NULL; uint32_t rmidLen = 0;
     if (PV_ExtractRMIDToSMF(bytes, ulen, &rmidSmf, &rmidLen))
     {
-        BAE_PRINTF("[XMF] Found RIFF/RMID -> SMF len=%u in container\n", rmidLen);
+        debug_message("[XMF] Found RIFF/RMID -> SMF len=%u in container\n", rmidLen);
         const char *bankHdr = "Bank Files";
         int bankHdrOff = PV_FindBytes(bytes, ulen, bankHdr, (uint32_t)strlen(bankHdr));
         if (bankHdrOff >= 0)
         {
             uint32_t bankStart = (uint32_t)bankHdrOff + (uint32_t)strlen(bankHdr);
-            BAE_PRINTF("[XMF] 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
+            debug_message("[XMF] 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
             if (bankStart < ulen)
                 PV_TryLoadBankFromBlob(bytes + bankStart, ulen - bankStart);
         }
         else
         {
-            BAE_PRINTF("[XMF] No 'Bank Files' header; scanning entire container for RIFF bank\n");
+            debug_message("[XMF] No 'Bank Files' header; scanning entire container for RIFF bank\n");
             PV_TryLoadBankFromBlob(bytes, ulen);
         }
         BAEResult lerr = BAESong_LoadMidiFromMemory(song, (void const *)rmidSmf, rmidLen, ignoreBadInstruments);
@@ -1423,7 +1423,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
     {
         uint32_t midiStart = (uint32_t)midiHdrOff + (uint32_t)strlen(midiHdr);
         uint32_t midiEnd = (bankHdrOff > midiHdrOff && bankHdrOff >= 0) ? (uint32_t)bankHdrOff : ulen;
-        BAE_PRINTF("[XMF] 'MIDI Files' header at +%d -> region %u..%u\n", midiHdrOff, midiStart, midiEnd);
+        debug_message("[XMF] 'MIDI Files' header at +%d -> region %u..%u\n", midiHdrOff, midiStart, midiEnd);
         if (midiStart < midiEnd && midiEnd <= ulen)
         {
             const unsigned char *m = bytes + midiStart;
@@ -1431,11 +1431,11 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
             int roff = PV_FindSignature(m, mlen, smf_sig);
             if (roff >= 0)
             {
-                BAE_PRINTF("[XMF] Found SMF at +%d in MIDI region (len=%u)\n", roff, (uint32_t)(mlen - (uint32_t)roff));
+                debug_message("[XMF] Found SMF at +%d in MIDI region (len=%u)\n", roff, (uint32_t)(mlen - (uint32_t)roff));
                 if (bankHdrOff >= 0)
                 {
                     uint32_t bankStart = (uint32_t)bankHdrOff + (uint32_t)strlen(bankHdr);
-                    BAE_PRINTF("[XMF] 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
+                    debug_message("[XMF] 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
                     if (bankStart < ulen)
                         PV_TryLoadBankFromBlob(bytes + bankStart, ulen - bankStart);
                 }
@@ -1445,11 +1445,11 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
             const unsigned char *smf2=NULL; uint32_t slen2=0;
             if (PV_ExtractRMIDToSMF(m, mlen, &smf2, &slen2))
             {
-                BAE_PRINTF("[XMF] Found RMID->SMF in MIDI region (len=%u)\n", slen2);
+                debug_message("[XMF] Found RMID->SMF in MIDI region (len=%u)\n", slen2);
                 if (bankHdrOff >= 0)
                 {
                     uint32_t bankStart = (uint32_t)bankHdrOff + (uint32_t)strlen(bankHdr);
-                    BAE_PRINTF("[XMF] 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
+                    debug_message("[XMF] 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
                     if (bankStart < ulen)
                         PV_TryLoadBankFromBlob(bytes + bankStart, ulen - bankStart);
                 }
@@ -1459,11 +1459,11 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
             int irez = PV_FindSignature(m, mlen, rmf_sig);
             if (irez >= 0)
             {
-                BAE_PRINTF("[XMF] Found RMF at +%d in MIDI region (len=%u)\n", irez, (uint32_t)(mlen - (uint32_t)irez));
+                debug_message("[XMF] Found RMF at +%d in MIDI region (len=%u)\n", irez, (uint32_t)(mlen - (uint32_t)irez));
                 if (bankHdrOff >= 0)
                 {
                     uint32_t bankStart = (uint32_t)bankHdrOff + (uint32_t)strlen(bankHdr);
-                    BAE_PRINTF("[XMF] 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
+                    debug_message("[XMF] 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
                     if (bankStart < ulen)
                         PV_TryLoadBankFromBlob(bytes + bankStart, ulen - bankStart);
                 }
@@ -1480,11 +1480,11 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
                 int droff = PV_FindSignature(mcpy, mlen, smf_sig);
                 if (droff >= 0)
                 {
-                    BAE_PRINTF("[XMF] (dec-region) Found SMF at +%d in MIDI region (len=%u)\n", droff, (uint32_t)(mlen - (uint32_t)droff));
+                    debug_message("[XMF] (dec-region) Found SMF at +%d in MIDI region (len=%u)\n", droff, (uint32_t)(mlen - (uint32_t)droff));
                     if (bankHdrOff >= 0)
                     {
                         uint32_t bankStart = (uint32_t)bankHdrOff + (uint32_t)strlen(bankHdr);
-                        BAE_PRINTF("[XMF] (dec-region) 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
+                        debug_message("[XMF] (dec-region) 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
                         if (bankStart < ulen)
                             PV_TryLoadBankFromBlob(bytes + bankStart, ulen - bankStart);
                     }
@@ -1495,11 +1495,11 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
                 const unsigned char *dsmf2=NULL; uint32_t dslen2=0;
                 if (PV_ExtractRMIDToSMF(mcpy, mlen, &dsmf2, &dslen2))
                 {
-                    BAE_PRINTF("[XMF] (dec-region) Found RMID->SMF in MIDI region (len=%u)\n", dslen2);
+                    debug_message("[XMF] (dec-region) Found RMID->SMF in MIDI region (len=%u)\n", dslen2);
                     if (bankHdrOff >= 0)
                     {
                         uint32_t bankStart = (uint32_t)bankHdrOff + (uint32_t)strlen(bankHdr);
-                        BAE_PRINTF("[XMF] (dec-region) 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
+                        debug_message("[XMF] (dec-region) 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
                         if (bankStart < ulen)
                             PV_TryLoadBankFromBlob(bytes + bankStart, ulen - bankStart);
                     }
@@ -1510,11 +1510,11 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
                 int direz = PV_FindSignature(mcpy, mlen, rmf_sig);
                 if (direz >= 0)
                 {
-                    BAE_PRINTF("[XMF] (dec-region) Found RMF at +%d in MIDI region (len=%u)\n", direz, (uint32_t)(mlen - (uint32_t)direz));
+                    debug_message("[XMF] (dec-region) Found RMF at +%d in MIDI region (len=%u)\n", direz, (uint32_t)(mlen - (uint32_t)direz));
                     if (bankHdrOff >= 0)
                     {
                         uint32_t bankStart = (uint32_t)bankHdrOff + (uint32_t)strlen(bankHdr);
-                        BAE_PRINTF("[XMF] (dec-region) 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
+                        debug_message("[XMF] (dec-region) 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
                         if (bankStart < ulen)
                             PV_TryLoadBankFromBlob(bytes + bankStart, ulen - bankStart);
                     }
@@ -1535,11 +1535,11 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
                         int woff = PV_FindSignature(dwin, dlen, smf_sig);
                         if (woff >= 0)
                         {
-                            BAE_PRINTF("[XMF] (dec-scan) Found SMF with decrypt start @+%u (woff=%d, outLen=%u)\n", so, woff, dlen - (uint32_t)woff);
+                            debug_message("[XMF] (dec-scan) Found SMF with decrypt start @+%u (woff=%d, outLen=%u)\n", so, woff, dlen - (uint32_t)woff);
                             if (bankHdrOff >= 0)
                             {
                                 uint32_t bankStart = (uint32_t)bankHdrOff + (uint32_t)strlen(bankHdr);
-                                BAE_PRINTF("[XMF] (dec-scan) 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
+                                debug_message("[XMF] (dec-scan) 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
                                 if (bankStart < ulen)
                                     PV_TryLoadBankFromBlob(bytes + bankStart, ulen - bankStart);
                             }
@@ -1551,11 +1551,11 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
                         int wrez = PV_FindSignature(dwin, dlen, rmf_sig);
                         if (wrez >= 0)
                         {
-                            BAE_PRINTF("[XMF] (dec-scan) Found RMF with decrypt start @+%u (wrez=%d, outLen=%u)\n", so, wrez, dlen - (uint32_t)wrez);
+                            debug_message("[XMF] (dec-scan) Found RMF with decrypt start @+%u (wrez=%d, outLen=%u)\n", so, wrez, dlen - (uint32_t)wrez);
                             if (bankHdrOff >= 0)
                             {
                                 uint32_t bankStart = (uint32_t)bankHdrOff + (uint32_t)strlen(bankHdr);
-                                BAE_PRINTF("[XMF] (dec-scan) 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
+                                debug_message("[XMF] (dec-scan) 'Bank Files' header at +%d -> scanning bank region start=%u\n", bankHdrOff, bankStart);
                                 if (bankStart < ulen)
                                     PV_TryLoadBankFromBlob(bytes + bankStart, ulen - bankStart);
                             }
@@ -1584,7 +1584,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
                             int off = PV_FindSignature(out, outLen, smf_sig);
                             if (off >= 0)
                             {
-                                BAE_PRINTF("[XMF] (inflate) Found SMF in region stream (roff=%u, len=%u)\n", i, outLen - (uint32_t)off);
+                                debug_message("[XMF] (inflate) Found SMF in region stream (roff=%u, len=%u)\n", i, outLen - (uint32_t)off);
                                 if (bankHdrOff >= 0)
                                 {
                                     uint32_t bankStart = (uint32_t)bankHdrOff + (uint32_t)strlen(bankHdr);
@@ -1597,7 +1597,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
                             int roff = PV_FindSignature(out, outLen, rmf_sig);
                             if (roff >= 0)
                             {
-                                BAE_PRINTF("[XMF] (inflate) Found RMF in region stream (roff=%u, len=%u)\n", i, outLen - (uint32_t)roff);
+                                debug_message("[XMF] (inflate) Found RMF in region stream (roff=%u, len=%u)\n", i, outLen - (uint32_t)roff);
                                 if (bankHdrOff >= 0)
                                 {
                                     uint32_t bankStart = (uint32_t)bankHdrOff + (uint32_t)strlen(bankHdr);
@@ -1610,7 +1610,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
                             const unsigned char *smfRMID=NULL; uint32_t smfRMIDLen=0;
                             if (PV_ExtractRMIDToSMF(out, outLen, &smfRMID, &smfRMIDLen))
                             {
-                                BAE_PRINTF("[XMF] (inflate) Found RMID->SMF in region stream (len=%u)\n", smfRMIDLen);
+                                debug_message("[XMF] (inflate) Found RMID->SMF in region stream (len=%u)\n", smfRMIDLen);
                                 if (bankHdrOff >= 0)
                                 {
                                     uint32_t bankStart = (uint32_t)bankHdrOff + (uint32_t)strlen(bankHdr);
@@ -1634,7 +1634,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
                             int off = PV_FindSignature(rdout, rdlen, smf_sig);
                             if (off >= 0)
                             {
-                                BAE_PRINTF("[XMF] (inflate-raw) Found SMF in region (start=%u, len=%u)\n", roff, rdlen - (uint32_t)off);
+                                debug_message("[XMF] (inflate-raw) Found SMF in region (start=%u, len=%u)\n", roff, rdlen - (uint32_t)off);
                                 if (bankHdrOff >= 0)
                                 {
                                     uint32_t bankStart = (uint32_t)bankHdrOff + (uint32_t)strlen(bankHdr);
@@ -1647,7 +1647,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
                             int rmr = PV_FindSignature(rdout, rdlen, rmf_sig);
                             if (rmr >= 0)
                             {
-                                BAE_PRINTF("[XMF] (inflate-raw) Found RMF in region (start=%u, len=%u)\n", roff, rdlen - (uint32_t)rmr);
+                                debug_message("[XMF] (inflate-raw) Found RMF in region (start=%u, len=%u)\n", roff, rdlen - (uint32_t)rmr);
                                 if (bankHdrOff >= 0)
                                 {
                                     uint32_t bankStart = (uint32_t)bankHdrOff + (uint32_t)strlen(bankHdr);
@@ -1660,7 +1660,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
                             const unsigned char *rmidSmf2=NULL; uint32_t rmidLen2=0;
                             if (PV_ExtractRMIDToSMF(rdout, rdlen, &rmidSmf2, &rmidLen2))
                             {
-                                BAE_PRINTF("[XMF] (inflate-raw) Found RMID->SMF in region (len=%u)\n", rmidLen2);
+                                debug_message("[XMF] (inflate-raw) Found RMID->SMF in region (len=%u)\n", rmidLen2);
                                 if (bankHdrOff >= 0)
                                 {
                                     uint32_t bankStart = (uint32_t)bankHdrOff + (uint32_t)strlen(bankHdr);
@@ -1682,7 +1682,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
                     {
                         if (pm && pmLen)
                         {
-                            BAE_PRINTF("[XMF] (lzss) Found SMF in region at loff=%u len=%u\n", loff, pmLen);
+                            debug_message("[XMF] (lzss) Found SMF in region at loff=%u len=%u\n", loff, pmLen);
                             if (bankHdrOff >= 0)
                             {
                                 uint32_t bankStart = (uint32_t)bankHdrOff + (uint32_t)strlen(bankHdr);
@@ -1694,7 +1694,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
                         }
                         if (pr && prLen)
                         {
-                            BAE_PRINTF("[XMF] (lzss) Found RMF in region at loff=%u len=%u\n", loff, prLen);
+                            debug_message("[XMF] (lzss) Found RMF in region at loff=%u len=%u\n", loff, prLen);
                             if (bankHdrOff >= 0)
                             {
                                 uint32_t bankStart = (uint32_t)bankHdrOff + (uint32_t)strlen(bankHdr);
@@ -1714,7 +1714,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
 
     // If we fall through to here, try a whole-file decrypt fallback (XMF v1 encrypted files)
     // We'll decrypt a copy of the container and re-run the same heuristics.
-    BAE_PRINTF("[XMF] Plain scan failed; attempting XMF v1 decrypt fallback...\n");
+    debug_message("[XMF] Plain scan failed; attempting XMF v1 decrypt fallback...\n");
     unsigned char *dec = (unsigned char *)XNewPtr(ulen);
     if (dec)
     {
@@ -1725,18 +1725,18 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
         int d_smf_off = PV_FindSignature(dec, ulen, smf_sig);
         if (d_smf_off >= 0)
         {
-            BAE_PRINTF("[XMF] Decrypt yielded SMF header at +%d (size=%u)\n", d_smf_off, ulen);
+            debug_message("[XMF] Decrypt yielded SMF header at +%d (size=%u)\n", d_smf_off, ulen);
             int d_bankHdrOff = PV_FindBytes(dec, ulen, bankHdr, (uint32_t)strlen(bankHdr));
             if (d_bankHdrOff >= 0)
             {
                 uint32_t bankStart = (uint32_t)d_bankHdrOff + (uint32_t)strlen(bankHdr);
-                BAE_PRINTF("[XMF] (dec) 'Bank Files' header at +%d -> scanning bank region start=%u\n", d_bankHdrOff, bankStart);
+                debug_message("[XMF] (dec) 'Bank Files' header at +%d -> scanning bank region start=%u\n", d_bankHdrOff, bankStart);
                 if (bankStart < ulen)
                     PV_TryLoadBankFromBlob(dec + bankStart, ulen - bankStart);
             }
             else
             {
-                BAE_PRINTF("[XMF] (dec) No 'Bank Files' header; scanning entire container for RIFF bank\n");
+                debug_message("[XMF] (dec) No 'Bank Files' header; scanning entire container for RIFF bank\n");
                 PV_TryLoadBankFromBlob(dec, ulen);
             }
             BAEResult lerr = BAESong_LoadMidiFromMemory(song, (void const *)(dec + d_smf_off), (uint32_t)(ulen - (uint32_t)d_smf_off), ignoreBadInstruments);
@@ -1748,18 +1748,18 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
         int d_rmf_off = PV_FindSignature(dec, ulen, rmf_sig);
         if (d_rmf_off >= 0)
         {
-            BAE_PRINTF("[XMF] Decrypt yielded RMF header at +%d (size=%u)\n", d_rmf_off, ulen);
+            debug_message("[XMF] Decrypt yielded RMF header at +%d (size=%u)\n", d_rmf_off, ulen);
             int d_bankHdrOff = PV_FindBytes(dec, ulen, bankHdr, (uint32_t)strlen(bankHdr));
             if (d_bankHdrOff >= 0)
             {
                 uint32_t bankStart = (uint32_t)d_bankHdrOff + (uint32_t)strlen(bankHdr);
-                BAE_PRINTF("[XMF] (dec) 'Bank Files' header at +%d -> scanning bank region start=%u\n", d_bankHdrOff, bankStart);
+                debug_message("[XMF] (dec) 'Bank Files' header at +%d -> scanning bank region start=%u\n", d_bankHdrOff, bankStart);
                 if (bankStart < ulen)
                     PV_TryLoadBankFromBlob(dec + bankStart, ulen - bankStart);
             }
             else
             {
-                BAE_PRINTF("[XMF] (dec) No 'Bank Files' header; scanning entire container for RIFF bank\n");
+                debug_message("[XMF] (dec) No 'Bank Files' header; scanning entire container for RIFF bank\n");
                 PV_TryLoadBankFromBlob(dec, ulen);
             }
             BAEResult lerr = BAESong_LoadRmfFromMemory(song, (void *)(dec + d_rmf_off), (uint32_t)(ulen - (uint32_t)d_rmf_off), 0, ignoreBadInstruments);
@@ -1771,18 +1771,18 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
         const unsigned char *d_rmidSmf = NULL; uint32_t d_rmidLen = 0;
         if (PV_ExtractRMIDToSMF(dec, ulen, &d_rmidSmf, &d_rmidLen))
         {
-            BAE_PRINTF("[XMF] Decrypt yielded RMID->SMF len=%u in container\n", d_rmidLen);
+            debug_message("[XMF] Decrypt yielded RMID->SMF len=%u in container\n", d_rmidLen);
             int d_bankHdrOff = PV_FindBytes(dec, ulen, bankHdr, (uint32_t)strlen(bankHdr));
             if (d_bankHdrOff >= 0)
             {
                 uint32_t bankStart = (uint32_t)d_bankHdrOff + (uint32_t)strlen(bankHdr);
-                BAE_PRINTF("[XMF] (dec) 'Bank Files' header at +%d -> scanning bank region start=%u\n", d_bankHdrOff, bankStart);
+                debug_message("[XMF] (dec) 'Bank Files' header at +%d -> scanning bank region start=%u\n", d_bankHdrOff, bankStart);
                 if (bankStart < ulen)
                     PV_TryLoadBankFromBlob(dec + bankStart, ulen - bankStart);
             }
             else
             {
-                BAE_PRINTF("[XMF] (dec) No 'Bank Files' header; scanning entire container for RIFF bank\n");
+                debug_message("[XMF] (dec) No 'Bank Files' header; scanning entire container for RIFF bank\n");
                 PV_TryLoadBankFromBlob(dec, ulen);
             }
             BAEResult lerr = BAESong_LoadMidiFromMemory(song, (void const *)d_rmidSmf, d_rmidLen, ignoreBadInstruments);
@@ -1797,7 +1797,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
         {
             uint32_t midiStart = (uint32_t)d_midiHdrOff + (uint32_t)strlen(midiHdr);
             uint32_t midiEnd = (d_bankHdrOff2 > d_midiHdrOff && d_bankHdrOff2 >= 0) ? (uint32_t)d_bankHdrOff2 : ulen;
-            BAE_PRINTF("[XMF] (dec) 'MIDI Files' header at +%d -> region %u..%u\n", d_midiHdrOff, midiStart, midiEnd);
+            debug_message("[XMF] (dec) 'MIDI Files' header at +%d -> region %u..%u\n", d_midiHdrOff, midiStart, midiEnd);
             if (midiStart < midiEnd && midiEnd <= ulen)
             {
                 const unsigned char *m = dec + midiStart;
@@ -1805,11 +1805,11 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
                 int roff2 = PV_FindSignature(m, mlen, smf_sig);
                 if (roff2 >= 0)
                 {
-                    BAE_PRINTF("[XMF] (dec) Found SMF at +%d in MIDI region (len=%u)\n", roff2, (uint32_t)(mlen - (uint32_t)roff2));
+                    debug_message("[XMF] (dec) Found SMF at +%d in MIDI region (len=%u)\n", roff2, (uint32_t)(mlen - (uint32_t)roff2));
                     if (d_bankHdrOff2 >= 0)
                     {
                         uint32_t bankStart = (uint32_t)d_bankHdrOff2 + (uint32_t)strlen(bankHdr);
-                        BAE_PRINTF("[XMF] (dec) 'Bank Files' header at +%d -> scanning bank region start=%u\n", d_bankHdrOff2, bankStart);
+                        debug_message("[XMF] (dec) 'Bank Files' header at +%d -> scanning bank region start=%u\n", d_bankHdrOff2, bankStart);
                         if (bankStart < ulen)
                             PV_TryLoadBankFromBlob(dec + bankStart, ulen - bankStart);
                     }
@@ -1820,11 +1820,11 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
                 const unsigned char *smf2=NULL; uint32_t slen2=0;
                 if (PV_ExtractRMIDToSMF(m, mlen, &smf2, &slen2))
                 {
-                    BAE_PRINTF("[XMF] (dec) Found RMID->SMF in MIDI region (len=%u)\n", slen2);
+                    debug_message("[XMF] (dec) Found RMID->SMF in MIDI region (len=%u)\n", slen2);
                     if (d_bankHdrOff2 >= 0)
                     {
                         uint32_t bankStart = (uint32_t)d_bankHdrOff2 + (uint32_t)strlen(bankHdr);
-                        BAE_PRINTF("[XMF] (dec) 'Bank Files' header at +%d -> scanning bank region start=%u\n", d_bankHdrOff2, bankStart);
+                        debug_message("[XMF] (dec) 'Bank Files' header at +%d -> scanning bank region start=%u\n", d_bankHdrOff2, bankStart);
                         if (bankStart < ulen)
                             PV_TryLoadBankFromBlob(dec + bankStart, ulen - bankStart);
                     }
@@ -1835,11 +1835,11 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
                 int irez2 = PV_FindSignature(m, mlen, rmf_sig);
                 if (irez2 >= 0)
                 {
-                    BAE_PRINTF("[XMF] (dec) Found RMF at +%d in MIDI region (len=%u)\n", irez2, (uint32_t)(mlen - (uint32_t)irez2));
+                    debug_message("[XMF] (dec) Found RMF at +%d in MIDI region (len=%u)\n", irez2, (uint32_t)(mlen - (uint32_t)irez2));
                     if (d_bankHdrOff2 >= 0)
                     {
                         uint32_t bankStart = (uint32_t)d_bankHdrOff2 + (uint32_t)strlen(bankHdr);
-                        BAE_PRINTF("[XMF] (dec) 'Bank Files' header at +%d -> scanning bank region start=%u\n", d_bankHdrOff2, bankStart);
+                        debug_message("[XMF] (dec) 'Bank Files' header at +%d -> scanning bank region start=%u\n", d_bankHdrOff2, bankStart);
                         if (bankStart < ulen)
                             PV_TryLoadBankFromBlob(dec + bankStart, ulen - bankStart);
                     }
@@ -1852,7 +1852,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
         // No luck after decrypt
         XDisposePtr(dec);
     }
-    BAE_PRINTF("[XMF] Decrypt fallback failed to locate content; unsupported XMF variant\n");
+    debug_message("[XMF] Decrypt fallback failed to locate content; unsupported XMF variant\n");
     return BAE_BAD_FILE;
 }
 

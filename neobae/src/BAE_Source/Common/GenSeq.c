@@ -354,7 +354,7 @@
 **                  still in there about samples being left about.
 **  4/27/2001   se  Placed a better limiter on scanning midi data in PV_ConfigureMusic
 **                  so that is can go wild without crashing.
-**  5/29/2001   sh  Added new debugging system with BAE_PRINTF
+**  5/29/2001   sh  Added new debugging system with debug_message
 **  11/7/2002   sh  Put all access to GM_Mixer's Q_MIDIEvent queue structure
 **                  under a mutex lock, so there's no collisions. Added some more
 **                  detailed debugging spew for the Danger platform.
@@ -594,7 +594,7 @@ OPErr PV_ConfigureMusic(GM_Song *pSong)
     pSong->currentLineLength = 0;
     pSong->lyricsHaveNewlines = FALSE;
     // DEBUG: begin MIDI parse of song sequenceData
-    //BAE_PRINTF("DEBUG: PV_ConfigureMusic: sequenceData=%p size=%u\n", pSong ? pSong->sequenceData : NULL, pSong ? (unsigned)pSong->sequenceDataSize : 0);
+    //debug_message("DEBUG: PV_ConfigureMusic: sequenceData=%p size=%u\n", pSong ? pSong->sequenceData : NULL, pSong ? (unsigned)pSong->sequenceDataSize : 0);
     PV_ConfigureInstruments(pSong);
     pMidiStream = (unsigned char *)pSong->sequenceData;
     lengthToMidiEnd = pSong->sequenceDataSize;
@@ -610,7 +610,7 @@ OPErr PV_ConfigureMusic(GM_Song *pSong)
             if (XGetLong(pMidiStream) == ID_MTHD)
             {
                 safe = TRUE;
-                //BAE_PRINTF("DEBUG: PV_ConfigureMusic: Found 'MThd' at offset %ld (remaining=%u)\n", (long)(pSong->sequenceDataSize - lengthToMidiEnd), (unsigned)lengthToMidiEnd);
+                //debug_message("DEBUG: PV_ConfigureMusic: Found 'MThd' at offset %ld (remaining=%u)\n", (long)(pSong->sequenceDataSize - lengthToMidiEnd), (unsigned)lengthToMidiEnd);
                 break;
             }
             pMidiStream++;
@@ -621,7 +621,7 @@ OPErr PV_ConfigureMusic(GM_Song *pSong)
             uint16_t midiFormat = XGetShort(&pMidiStream[8]);
             uint16_t declaredTracks = XGetShort(&pMidiStream[10]);
             uint16_t ticksPerQN = XGetShort(&pMidiStream[12]);
-            //BAE_PRINTF("DEBUG: PV_ConfigureMusic: Header format=%u declaredTracks=%u ticksPerQN=%u\n", (unsigned)midiFormat, (unsigned)declaredTracks, (unsigned)ticksPerQN);
+            //debug_message("DEBUG: PV_ConfigureMusic: Header format=%u declaredTracks=%u ticksPerQN=%u\n", (unsigned)midiFormat, (unsigned)declaredTracks, (unsigned)ticksPerQN);
             if (midiFormat < 2) // only support format 0 and 1 midi files
             {
                 realtracks = declaredTracks; // get real tracks and compare with tracks found to determine if corrupt
@@ -638,7 +638,7 @@ OPErr PV_ConfigureMusic(GM_Song *pSong)
                     if (XGetLong(pMidiStream) == ID_MTRK)
                     {
                         safe = TRUE;
-                        //BAE_PRINTF("DEBUG: PV_ConfigureMusic: Found first 'MTrk' at offset %ld (remaining=%u)\n", (long)(pSong->sequenceDataSize - lengthToMidiEnd), (unsigned)lengthToMidiEnd);
+                        //debug_message("DEBUG: PV_ConfigureMusic: Found first 'MTrk' at offset %ld (remaining=%u)\n", (long)(pSong->sequenceDataSize - lengthToMidiEnd), (unsigned)lengthToMidiEnd);
                         break;
                     }
                     pMidiStream++;
@@ -657,7 +657,7 @@ OPErr PV_ConfigureMusic(GM_Song *pSong)
                         trackLength = (trackLength << 8) + *pMidiStream++;
                         trackLength = (trackLength << 8) + *pMidiStream++;
                         trackLength = (trackLength << 8) + *pMidiStream++;
-                        //BAE_PRINTF("DEBUG: PV_ConfigureMusic: Track %u length=%u bytes (absOffset=%ld)\n", (unsigned)numtracks, (unsigned)trackLength, (long)(pSong->sequenceDataSize - lengthToMidiEnd));
+                        //debug_message("DEBUG: PV_ConfigureMusic: Track %u length=%u bytes (absOffset=%ld)\n", (unsigned)numtracks, (unsigned)trackLength, (long)(pSong->sequenceDataSize - lengthToMidiEnd));
 
                         pSong->ptrack[numtracks] = pMidiStream;
                         pSong->trackstart[numtracks] = pMidiStream;
@@ -670,7 +670,7 @@ OPErr PV_ConfigureMusic(GM_Song *pSong)
                         if (pMidiStream > pMidiEndStream)
                         {
                             // track length must be corrupted! we jumped past the end of our file!
-                            BAE_PRINTF("ERROR: PV_ConfigureMusic: Track %u overruns file (trackLength=%u remaining=%u)\n", (unsigned)numtracks, (unsigned)trackLength, (unsigned)(pMidiEndStream - (pMidiStream - trackLength)));
+                            debug_message("ERROR: PV_ConfigureMusic: Track %u overruns file (trackLength=%u remaining=%u)\n", (unsigned)numtracks, (unsigned)trackLength, (unsigned)(pMidiEndStream - (pMidiStream - trackLength)));
                             numtracks = 0;
                             break;
                         }
@@ -678,7 +678,7 @@ OPErr PV_ConfigureMusic(GM_Song *pSong)
                         // ok before we go on, we need to check for a valid Midi end track
                         if ((pMidiStream[-2] != 0x2F) && (pMidiStream[-1] != 0x00))
                         { // no end track marker
-                            BAE_PRINTF("ERROR: PV_ConfigureMusic: Track %u missing end-of-track meta (last2=%02X %02X)\n", (unsigned)numtracks, (unsigned)pMidiStream[-2], (unsigned)pMidiStream[-1]);
+                            debug_message("ERROR: PV_ConfigureMusic: Track %u missing end-of-track meta (last2=%02X %02X)\n", (unsigned)numtracks, (unsigned)pMidiStream[-2], (unsigned)pMidiStream[-1]);
                             numtracks = 0;
                             break;
                         }
@@ -687,7 +687,7 @@ OPErr PV_ConfigureMusic(GM_Song *pSong)
                     if (numtracks == realtracks) // do real tracks match number of found tracks (or we stopped early in lenient mode)?
                     {
                         theErr = NO_ERR; // all is well in midi land
-                        //BAE_PRINTF("DEBUG: PV_ConfigureMusic: Parsed %u tracks successfully.\n", (unsigned)numtracks);
+                        //debug_message("DEBUG: PV_ConfigureMusic: Parsed %u tracks successfully.\n", (unsigned)numtracks);
                     }
                     else
                     {
@@ -695,34 +695,34 @@ OPErr PV_ConfigureMusic(GM_Song *pSong)
                         if (realtracks > MAX_TRACKS)
                         {
                             theErr = MAX_TRACKS_EXCEEDED;
-                            BAE_PRINTF("ERROR: PV_ConfigureMusic: Declared tracks %u exceeds MAX_TRACKS %u\n", (unsigned)realtracks, (unsigned)MAX_TRACKS);
+                            debug_message("ERROR: PV_ConfigureMusic: Declared tracks %u exceeds MAX_TRACKS %u\n", (unsigned)realtracks, (unsigned)MAX_TRACKS);
                         }
                         else if (numtracks > realtracks && numtracks <= MAX_TRACKS)
                         {
                             // Parse extras and succeed.
-                            BAE_PRINTF("WARN: PV_ConfigureMusic: Declared %u tracks but found %u. Parsing %u extra track(s).\n", (unsigned)realtracks, (unsigned)numtracks, (unsigned)(numtracks - realtracks));
+                            debug_message("WARN: PV_ConfigureMusic: Declared %u tracks but found %u. Parsing %u extra track(s).\n", (unsigned)realtracks, (unsigned)numtracks, (unsigned)(numtracks - realtracks));
                             realtracks = numtracks;
                             theErr = NO_ERR;
                         }
                         else
                         {
-                            BAE_PRINTF("ERROR: PV_ConfigureMusic: Declared %u tracks but parsed %u tracks\n", (unsigned)realtracks, (unsigned)numtracks);
+                            debug_message("ERROR: PV_ConfigureMusic: Declared %u tracks but parsed %u tracks\n", (unsigned)realtracks, (unsigned)numtracks);
                         }
                     }
                 }
                 else
                 {
-                    BAE_PRINTF("ERROR: PV_ConfigureMusic: Could not locate any 'MTrk' chunk after header\n");
+                    debug_message("ERROR: PV_ConfigureMusic: Could not locate any 'MTrk' chunk after header\n");
                 }
             }
             else
             {
-                BAE_PRINTF("ERROR: PV_ConfigureMusic: Unsupported MIDI format %u (only 0/1 supported)\n", (unsigned)midiFormat);
+                debug_message("ERROR: PV_ConfigureMusic: Unsupported MIDI format %u (only 0/1 supported)\n", (unsigned)midiFormat);
             }
         }
         else
         {
-            BAE_PRINTF("ERROR: PV_ConfigureMusic: Could not locate 'MThd' header within initial scan window (%u bytes)\n", (unsigned)pSong->sequenceDataSize);
+            debug_message("ERROR: PV_ConfigureMusic: Could not locate 'MThd' header within initial scan window (%u bytes)\n", (unsigned)pSong->sequenceDataSize);
         }
     }
     return theErr;
@@ -1763,7 +1763,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
 {
     if (pSong->channelLSB[MIDIChannel] == 6 && (program == 124 || program == 125)) {
         pSong->isNokiaVibrationChannel[MIDIChannel] = TRUE;
-        BAE_PRINTF("ProcessProgramChange Debug: Channel %d is set to Nokia Vibration (LSB=6, Program %d)\n", MIDIChannel, program);
+        debug_message("ProcessProgramChange Debug: Channel %d is set to Nokia Vibration (LSB=6, Program %d)\n", MIDIChannel, program);
     }
     if (pSong->allowProgramChanges)
     {
@@ -1851,7 +1851,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                         pSong->channelType[MIDIChannel] = CHANNEL_TYPE_SF2;
                         // Directly set the bank and program in FluidSynth (bypass conversion logic)
                         GM_SF2_SetChannelBankAndProgram(MIDIChannel, overlayBank, thePatch);
-                        BAE_PRINTF("ProcessProgramChange Debug: Channel %d routed to XMF overlay (bank=%d prog=%d)\n", MIDIChannel, overlayBank, thePatch);
+                        debug_message("ProcessProgramChange Debug: Channel %d routed to XMF overlay (bank=%d prog=%d)\n", MIDIChannel, overlayBank, thePatch);
                     } else {
                         // HSB mode without overlay match - use native synthesis
                         pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
@@ -1864,7 +1864,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                     // If SF2 is active for this song, send program change to SF2
                     pSong->channelType[MIDIChannel] = CHANNEL_TYPE_SF2;
                     int32_t combinedProgram = (theBank * 128) + thePatch;
-                    BAE_PRINTF("ProcessProgramChange Debug: Channel %d is using SF2 Instrument (bank=%d prog=%d)\n", MIDIChannel, theBank, thePatch);
+                    debug_message("ProcessProgramChange Debug: Channel %d is using SF2 Instrument (bank=%d prog=%d)\n", MIDIChannel, theBank, thePatch);
                     GM_SF2_ProcessProgramChange(pSong, MIDIChannel, combinedProgram);
                 }
                 else
@@ -1876,7 +1876,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                 uint32_t bankId, progId = 0, noteId = 0;
                 int16_t thePatch = PV_ConvertPatchBank(pSong, program, MIDIChannel);                        
                 TranslateInstrumentToBankProgram(thePatch, &bankId, &progId, &noteId);          
-                BAE_PRINTF("ProcessProgramChange Debug: Channel %d is using an RMF Instrument (instID=%d, bank=%d, program=%d)\n", MIDIChannel, thePatch, bankId, progId);
+                debug_message("ProcessProgramChange Debug: Channel %d is using an RMF Instrument (instID=%d, bank=%d, program=%d)\n", MIDIChannel, thePatch, bankId, progId);
             }
 #endif
     }
@@ -2111,7 +2111,7 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                     // warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
                     //                   pSong->channelType[MIDIChannel] = CHANNEL_TYPE_RMF;
                     if (MIDIChannel < 0 || MIDIChannel >= MAX_CHANNELS) {
-                        BAE_PRINTF("Invalid MIDIChannel index: %d\n", MIDIChannel);
+                        debug_message("Invalid MIDIChannel index: %d\n", MIDIChannel);
                         return;
                     }
                     uint32_t bankId = 0, progId = 0, noteId = 0;
@@ -2171,7 +2171,7 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                 {
                     thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
                     PV_StartMIDINote(pSong, thePatch, MIDIChannel, currentTrack, note, volume);
-                    //BAE_PRINTF("ProcessNoteOn Debug: Channel %d is using RMF Instrument (note=%d)\n", MIDIChannel, note);
+                    //debug_message("ProcessNoteOn Debug: Channel %d is using RMF Instrument (note=%d)\n", MIDIChannel, note);
                 }
             }
             else
@@ -2379,7 +2379,7 @@ void PV_ProcessController(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTr
         {
             pSong->channelBankMode[MIDIChannel] = USE_GM_PERC_BANK;
             PV_SF2_SetBankPreset(pSong, MIDIChannel, 128, 0);
-            BAE_PRINTF("Set channel %i to bank %i via Beatnik NRPN\n", MIDIChannel, 128);
+            debug_message("Set channel %i to bank %i via Beatnik NRPN\n", MIDIChannel, 128);
         } else {
             if  (pSong->lastThreeControl[MIDIChannel][0].control != 99 &&
                  pSong->lastThreeControl[MIDIChannel][0].control != 98 && 
@@ -2389,7 +2389,7 @@ void PV_ProcessController(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTr
                         pSong->lastThreeControl[MIDIChannel][1].value == 2 &&
                         controller == 0) {
                             // we just set NRPN mode and the MIDI is trying to reset the MSB again, ignore it
-                            BAE_PRINTF("Ignoring control %i directly after NRPN on channel %i\n", controller, MIDIChannel);                                
+                            debug_message("Ignoring control %i directly after NRPN on channel %i\n", controller, MIDIChannel);                                
                         } else
 #endif
                         {
@@ -2418,7 +2418,7 @@ void PV_ProcessController(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTr
                     case 5:
                         pSong->channelBank[MIDIChannel] = 1;
                         pSong->channelRawBank[MIDIChannel] = 0;
-                        BAE_PRINTF("Nokia Patch Applied: Changing Bank %i to 1 on channel %d\n", pSong->channelBank[MIDIChannel], MIDIChannel);
+                        debug_message("Nokia Patch Applied: Changing Bank %i to 1 on channel %d\n", pSong->channelBank[MIDIChannel], MIDIChannel);
                         break;
                     default:
                         break;
@@ -2430,7 +2430,7 @@ void PV_ProcessController(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTr
                     case 5:
                         pSong->channelBank[MIDIChannel] = 1;
                         pSong->channelRawBank[MIDIChannel] = 1;
-                        BAE_PRINTF("Nokia Patch Applied: Changing Bank %i to 1 on channel %d\n", pSong->channelBank[MIDIChannel], MIDIChannel);
+                        debug_message("Nokia Patch Applied: Changing Bank %i to 1 on channel %d\n", pSong->channelBank[MIDIChannel], MIDIChannel);
                         break;
                     default:
                         break;
@@ -2776,7 +2776,7 @@ void DumpMIDIQueue(GM_Mixer *pMixer)
 {
     Q_MIDIEvent *pEvent, *pTail = pMixer->pTail;
 
-    BAE_PRINTF("MIDI Queue:\n");
+    debug_message("MIDI Queue:\n");
     while (pTail != pMixer->pHead)
     {
         pEvent = pTail++;
@@ -2787,12 +2787,12 @@ void DumpMIDIQueue(GM_Mixer *pMixer)
         }
         if (pEvent->status == Q_MIDI_READY)
         {
-            BAE_PRINTF("timestamp %d\n", pEvent->timeStamp);
+            debug_message("timestamp %d\n", pEvent->timeStamp);
         }
         else
-            BAE_PRINTF("event status %d\n", pEvent->status);
+            debug_message("event status %d\n", pEvent->status);
     }
-    BAE_PRINTF("\n");
+    debug_message("\n");
 }
 
 #endif
@@ -2850,7 +2850,7 @@ static Q_MIDIEvent *PV_GetNextReadOnlyQueueEvent(uint32_t ticks)
 #ifdef QUEUE_DEBUG
     if (pMixer->pHead != pMixer->pTail)
     {
-        BAE_PRINTF("NeoBAE::PV_GetNextReadOnlyQueueEvent: head: %p tail: %p\n",
+        debug_message("NeoBAE::PV_GetNextReadOnlyQueueEvent: head: %p tail: %p\n",
                    pMixer->pHead, pMixer->pTail);
     }
 #endif
@@ -2883,7 +2883,7 @@ static Q_MIDIEvent *PV_GetNextReadOnlyQueueEvent(uint32_t ticks)
         else if (pEvent->status == Q_MIDI_DEAD) // we hit a used event
         {
 #ifdef QUEUE_DEBUG
-            BAE_PRINTF("NeoBAE::hit used event %p\n", pEvent);
+            debug_message("NeoBAE::hit used event %p\n", pEvent);
 #endif
             if (first)
             {
@@ -2901,8 +2901,8 @@ static Q_MIDIEvent *PV_GetNextReadOnlyQueueEvent(uint32_t ticks)
 #ifdef QUEUE_DEBUG
     if (pAvailableEvent)
     {
-        BAE_PRINTF("\tgot event %p from queue.  tail now %p\n", pAvailableEvent, pMixer->pTail);
-        BAE_PRINTF(!first ? "\tno ready events!\n"
+        debug_message("\tgot event %p from queue.  tail now %p\n", pAvailableEvent, pMixer->pTail);
+        debug_message(!first ? "\tno ready events!\n"
                           : "\tqueue empty\n");
     }
 #endif
@@ -2928,7 +2928,7 @@ static Q_MIDIEvent *PV_GetNextStorableQueueEvent(uint32_t externalTimeStamp)
         BAE_AcquireMutex(pMixer->queueLock);
         pHead = pMixer->pHead; // get current write event pointer
 #ifdef QUEUE_DEBUG
-        BAE_PRINTF("NeoBAE::PV_GetNextStorableQueueEvent head: %p tail: %p\n",
+        debug_message("NeoBAE::PV_GetNextStorableQueueEvent head: %p tail: %p\n",
                    (void *)pMixer->pHead, (void *)pMixer->pTail);
 #endif
         count = 0;
@@ -2940,7 +2940,7 @@ static Q_MIDIEvent *PV_GetNextStorableQueueEvent(uint32_t externalTimeStamp)
 // we've locked, so complain, and flush the current buffer so we
 // can write this new event
 #ifdef QUEUE_DEBUG
-                BAE_PRINTF("NeoBAE::PV_GetNextStorableQueueEvent LOCKED!\n");
+                debug_message("NeoBAE::PV_GetNextStorableQueueEvent LOCKED!\n");
 #endif
                 PV_CleanQueueWithoutLock(pMixer);
 
@@ -2957,7 +2957,7 @@ static Q_MIDIEvent *PV_GetNextStorableQueueEvent(uint32_t externalTimeStamp)
                 //          perhaps just doing pEvent = NULL will work, but it needs to be studied.
                 pHead = &pMixer->theExternalMidiQueue[0];
 #ifdef QUEUE_DEBUG
-                BAE_PRINTF("NeoBAE::PV_GetNextStorableQueueEvent WRAP!\n");
+                debug_message("NeoBAE::PV_GetNextStorableQueueEvent WRAP!\n");
 #endif
             }
             //  BAE_ASSERT(pEvent->status == Q_MIDI_DEAD);  // head of queue MUST be available!
@@ -2973,7 +2973,7 @@ static Q_MIDIEvent *PV_GetNextStorableQueueEvent(uint32_t externalTimeStamp)
         BAE_ReleaseMutex(pMixer->queueLock);
     }
 #ifdef QUEUE_DEBUG
-    BAE_PRINTF(pStoredEvent ? "\tput event %p on queue. Head now %p\n" : "QUEUE FULL!\n",
+    debug_message(pStoredEvent ? "\tput event %p on queue. Head now %p\n" : "QUEUE FULL!\n",
                (void *)pStoredEvent, (void *)pMixer->pHead);
 #endif
     return pStoredEvent;
@@ -3283,7 +3283,7 @@ static void PV_ProcessExternalMIDIQueue(GM_Song *pSong)
         {
             static prevTicks = 0;
             unsigned long usecs = XMicroseconds();
-            BAE_PRINTF("slice delta: %d usecs\n", usecs - prevTicks);
+            debug_message("slice delta: %d usecs\n", usecs - prevTicks);
             prevTicks = usecs;
         }
 #endif
@@ -3294,7 +3294,7 @@ static void PV_ProcessExternalMIDIQueue(GM_Song *pSong)
             PV_KillQueueEvent(pEvent); // free up event
 
 #ifdef QUEUE_DEBUG
-            BAE_PRINTF("midi event 0x%x t %ld\n", event.command, event.timeStamp);
+            debug_message("midi event 0x%x t %ld\n", event.command, event.timeStamp);
 #endif
             if (event.pSong) // if the event needs to be in a specific song
             {                // use it
@@ -3339,15 +3339,15 @@ static void PV_ProcessExternalMIDIQueue(GM_Song *pSong)
                     if (event.byte1 == 123)
                     {
                         int n;
-                        BAE_PRINTF("INPUT LOG:\n");
+                        debug_message("INPUT LOG:\n");
                         for (n = 0; n < iqindex; n++)
                             printf("%s", imsgQueue[n].s);
-                        BAE_PRINTF("\n");
+                        debug_message("\n");
                         iqindex = 0;
-                        BAE_PRINTF("OUTPUT LOG:\n");
+                        debug_message("OUTPUT LOG:\n");
                         for (n = 0; n < qindex; n++)
                             printf("%s", msgQueue[n].s);
-                        BAE_PRINTF("\n");
+                        debug_message("\n");
                         qindex = 0;
                     }
 #endif
@@ -3724,7 +3724,7 @@ static bool PV_ProcessMetaMarkerEvents(GM_Song *pSong, char *markerText, long ma
                 // Limit markerLength for debug output to prevent buffer issues
 #if _DEBUG
                 long debugLength = (markerLength > 256) ? 256 : markerLength;
-                BAE_PRINTF("Loop Start found: %.*s\n", (int)debugLength, markerText);
+                debug_message("Loop Start found: %.*s\n", (int)debugLength, markerText);
 #endif
                 count = -1;                        // loop forever
                 if (pSong->loopbackSaved == FALSE) // only allow one save
@@ -3755,7 +3755,7 @@ static bool PV_ProcessMetaMarkerEvents(GM_Song *pSong, char *markerText, long ma
                 // Limit markerLength for debug output to prevent buffer issues
 #if _DEBUG                
                 long debugLength = (markerLength > 256) ? 256 : markerLength;
-                BAE_PRINTF("Loop End found: %.*s\n", (int)debugLength, markerText);
+                debug_message("Loop End found: %.*s\n", (int)debugLength, markerText);
 #endif
                 if (pSong->loopbackSaved) // have we saved a position?
                 {
@@ -4069,7 +4069,7 @@ OPErr PV_ProcessMidiSequencerSlice(void *threadContext, GM_Song *pSong)
                         XDisposePtr((XPTR)allocated);
                     }
                 }
-                //                  BAE_PRINTF("lyric event: %s\n", (char *)cbPtr);
+                //                  debug_message("lyric event: %s\n", (char *)cbPtr);
                 goto SkipMeta;
 #endif
             // Cue point event

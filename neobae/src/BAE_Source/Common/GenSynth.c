@@ -854,7 +854,7 @@ void PV_CalcScaleBack(void)
     pMixer->scaleBackAmount = (scaleSize * MAX_MASTER_VOLUME) / noteScale;
 #endif
 #if 0
-    BAE_PRINTF("scaleback %ld mixLevel %d maxNotes %d\n", 
+    debug_message("scaleback %ld mixLevel %d maxNotes %d\n", 
                                                 pMixer->scaleBackAmount, pMixer->mixLevel, 
                                                 pMixer->MaxNotes + pMixer->MaxEffects);
 #endif
@@ -1035,7 +1035,7 @@ U3232 PV_GetWavePitchU3232(XFIXED notePitch)
 
     increment.i = pitch >> 16L;             // the 16.0
     increment.f = (pitch & 0xFFFFL) << 16L; // the 0.16
-    // BAE_PRINTF("i = %ld f = %ld\n", increment.i, increment.f);
+    // debug_message("i = %ld f = %ld\n", increment.i, increment.f);
     return increment;
 
 #else
@@ -1047,7 +1047,7 @@ U3232 PV_GetWavePitchU3232(XFIXED notePitch)
 
     increment.i = (U32)(int32_t)pitch;
     increment.f = (U32)(int32_t)((pitch - (UFLOAT)(int32_t)increment.i) * (65536.0 * 65536 / 2)) * 2;
-    // BAE_PRINTF("i = %ld f = %ld\n", increment.i, increment.f);
+    // debug_message("i = %ld f = %ld\n", increment.i, increment.f);
     return increment;
 #endif
 }
@@ -1214,7 +1214,7 @@ static void PV_ADSRModule(GM_ADSR *a, bool sustaining)
             break;
     }
 #endif
-    // BAE_PRINTF("currentLevel = %ld\n", (int32_t)a->currentLevel);
+    // debug_message("currentLevel = %ld\n", (int32_t)a->currentLevel);
     a->currentTime = currentTime;
 
     // Preserve retro 8-stage wrap behaviour for legacy RMF/HSB envelopes,
@@ -1859,17 +1859,17 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
     // now reduce the current volume by the sustainDecayLevel which is fixed point
     pVoice->NoteVolumeEnvelope = (int16_t)XFixedMultiply(pVoice->volumeADSRRecord.currentLevel,
                                                        pVoice->volumeADSRRecord.sustainingDecayLevel);
-    // BAE_PRINTF("cl = %ld sdl = %ld\n", (int32_t)pVoice->volumeADSRRecord.currentLevel,
+    // debug_message("cl = %ld sdl = %ld\n", (int32_t)pVoice->volumeADSRRecord.currentLevel,
     //                                   (int32_t)pVoice->volumeADSRRecord.sustainingDecayLevel);
-    // BAE_PRINTF("nve = %ld\n", (int32_t)pVoice->NoteVolumeEnvelope);
+    // debug_message("nve = %ld\n", (int32_t)pVoice->NoteVolumeEnvelope);
 
     pVoice->NoteVolumeEnvelopeBeforeLFO = pVoice->NoteVolumeEnvelope;
-    // BAE_PRINTF("2;NoteVolumeEnvelopeBeforeLFO = %ld\n", (int32_t)pVoice->NoteVolumeEnvelopeBeforeLFO);
+    // debug_message("2;NoteVolumeEnvelopeBeforeLFO = %ld\n", (int32_t)pVoice->NoteVolumeEnvelopeBeforeLFO);
     if (pVoice->volumeLFOValue >= 0) // don't handle volume LFO values less than zero.
     {
         pVoice->NoteVolumeEnvelope = (int16_t)((pVoice->NoteVolumeEnvelope * pVoice->volumeLFOValue) >> 12L);
     }
-    // BAE_PRINTF("3;NoteVolumeEnvelope = %ld\n", (int32_t)pVoice->NoteVolumeEnvelope);
+    // debug_message("3;NoteVolumeEnvelope = %ld\n", (int32_t)pVoice->NoteVolumeEnvelope);
 
     // now modify the pVoice->NoteVolumeEnvelope to zero, if this voice doesn't match
     // the current audio route
@@ -1909,7 +1909,7 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
     {
         start = end;
     }
-    // BAE_PRINTF("start %ld end %ld size %ld loopend %ld\n", start, end, size, loopend);
+    // debug_message("start %ld end %ld size %ld loopend %ld\n", start, end, size, loopend);
     //  At end of loop, continue loop?
     if ((loopend) && (start + size > loopend))
     {
@@ -3415,7 +3415,7 @@ void PV_StartMIDINote(GM_Song *pSong, int16_t the_instrument,
                     }
                     else
                     {
-                        BAE_PRINTF("bad sample in instrument %d split %d\n", the_instrument, (int)count);
+                        debug_message("bad sample in instrument %d split %d\n", the_instrument, (int)count);
                     }
                 }
                 k++;
@@ -3434,11 +3434,11 @@ void PV_StartMIDINote(GM_Song *pSong, int16_t the_instrument,
     }
     else
     {
-        BAE_PRINTF("trying to play unloaded instrument %d\n", the_instrument);
+        debug_message("trying to play unloaded instrument %d\n", the_instrument);
     }
     if (pInstrument == NULL)
     {
-        BAE_PRINTF("instrument %d not found on track %d channel %d note %d!\n",
+        debug_message("instrument %d not found on track %d channel %d note %d!\n",
                    the_instrument, the_track, the_channel, notePitch);
         return;
     }
@@ -3897,7 +3897,7 @@ void PV_StopMIDINote(GM_Song *pSong, int16_t the_instrument, int16_t the_channel
     GM_Voice *pNoteToKill;
 
     pMixer = GM_GetCurrentMixer();
-    // BAE_PRINTF("NoteOff i %d c %d p %d\n", the_instrument, the_channel, notePitch);
+    // debug_message("NoteOff i %d c %d p %d\n", the_instrument, the_channel, notePitch);
     pNoteToKill = NULL;
     youngestTime = 0; // min time
     for (count = 0; count < pMixer->MaxNotes; count++)
@@ -4276,20 +4276,20 @@ void GM_DisplayVoiceData(void)
         pVoice = &pMixer->NoteEntry[count];
         if (pVoice->voiceMode != VOICE_UNUSED)
         {
-            BAE_PRINTF("### Voice %d\n", count);
-            BAE_PRINTF("    voiceMode %d\n", pVoice->voiceMode);
-            BAE_PRINTF("    voiceStartTimeStamp %d\n", pVoice->voiceStartTimeStamp);
-            BAE_PRINTF("    pSong %p\n", pVoice->pSong);
-            BAE_PRINTF("    pInstrument %p\n", pVoice->pInstrument);
-            BAE_PRINTF("    NoteChannel %d\n", pVoice->NoteChannel);
-            BAE_PRINTF("    NoteMIDIPitch %d\n", pVoice->NoteMIDIPitch);
-            BAE_PRINTF("    sustainMode %d\n", pVoice->sustainMode);
-            BAE_PRINTF("    NoteVolumeEnvelope %d\n", pVoice->NoteVolumeEnvelope);
-            BAE_PRINTF("    NoteVolume %d\n", pVoice->NoteVolume);
-            BAE_PRINTF("    NoteMIDIVolume %d\n", pVoice->NoteMIDIVolume);
-            BAE_PRINTF("    NoteProgram %d\n", pVoice->NoteProgram);
-            BAE_PRINTF("    volumeADSRRecord.sustainingDecayLevel %i\n", pVoice->volumeADSRRecord.sustainingDecayLevel);
-            BAE_PRINTF("###\n");
+            debug_message("### Voice %d\n", count);
+            debug_message("    voiceMode %d\n", pVoice->voiceMode);
+            debug_message("    voiceStartTimeStamp %d\n", pVoice->voiceStartTimeStamp);
+            debug_message("    pSong %p\n", pVoice->pSong);
+            debug_message("    pInstrument %p\n", pVoice->pInstrument);
+            debug_message("    NoteChannel %d\n", pVoice->NoteChannel);
+            debug_message("    NoteMIDIPitch %d\n", pVoice->NoteMIDIPitch);
+            debug_message("    sustainMode %d\n", pVoice->sustainMode);
+            debug_message("    NoteVolumeEnvelope %d\n", pVoice->NoteVolumeEnvelope);
+            debug_message("    NoteVolume %d\n", pVoice->NoteVolume);
+            debug_message("    NoteMIDIVolume %d\n", pVoice->NoteMIDIVolume);
+            debug_message("    NoteProgram %d\n", pVoice->NoteProgram);
+            debug_message("    volumeADSRRecord.sustainingDecayLevel %i\n", pVoice->volumeADSRRecord.sustainingDecayLevel);
+            debug_message("###\n");
         }
     }
 }

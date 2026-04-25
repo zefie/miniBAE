@@ -390,7 +390,7 @@
 **                  Fixed declaration of XDuplicateMemory
 **  5/2/2001    sh  Added cool Mac trick to XConvertPathToXFILENAME to convert unix/dos
 **                  paths to Mac FSSpec. Also handles relative paths.
-**  5/29/2001   sh  Added new debugging system with BAE_PRINTF
+**  5/29/2001   sh  Added new debugging system with debug_message
 **  7-16-2001   dcm Added uint32_t XSwapShortInLong(uint32_t value) to swap shorts in long
 **  8/28/2001       Fixed massive memory leak in XGetAndDetachResource when using memory files.
 **                  Was duplicating resource when it was not required.
@@ -3107,7 +3107,7 @@ static bool XValidateMemblockHeader(XPTR data, const char *context)
     
     XPI_Memblock *mb = (XPI_Memblock *)XIsOurMemoryPtr(data);
     if (!mb) {
-        BAE_PRINTF("[MEM CORRUPTION] %s: XIsOurMemoryPtr returned NULL for data=%p\n", context, data);
+        debug_message("[MEM CORRUPTION] %s: XIsOurMemoryPtr returned NULL for data=%p\n", context, data);
         BAE_ASSERT(FALSE);
         return false;
     }
@@ -3115,10 +3115,10 @@ static bool XValidateMemblockHeader(XPTR data, const char *context)
     uint32_t id1 = XGetLong(&mb->blockID_one);
     uint32_t id2 = XGetLong(&mb->blockID_two);
     if (id1 != XPI_BLOCK_1_ID || id2 != XPI_BLOCK_2_ID) {
-        BAE_PRINTF("[MEM CORRUPTION] %s: header corrupted at data=%p mb=%p\n", context, data, mb);
-        BAE_PRINTF("  expected id1=0x%08X got=0x%08X\n", XPI_BLOCK_1_ID, id1);
-        BAE_PRINTF("  expected id2=0x%08X got=0x%08X\n", XPI_BLOCK_2_ID, id2);
-        BAE_PRINTF("  blockSize=%d\n", mb->blockSize);
+        debug_message("[MEM CORRUPTION] %s: header corrupted at data=%p mb=%p\n", context, data, mb);
+        debug_message("  expected id1=0x%08X got=0x%08X\n", XPI_BLOCK_1_ID, id1);
+        debug_message("  expected id2=0x%08X got=0x%08X\n", XPI_BLOCK_2_ID, id2);
+        debug_message("  blockSize=%d\n", mb->blockSize);
         BAE_ASSERT(FALSE);
         return false;
     }
@@ -3147,7 +3147,7 @@ XPI_Memblock * XIsOurMemoryPtr(XPTR data)
                 pBlockReturn = pBlock;
             } else {
                 // Debug: print details about the failed pointer check
-                BAE_PRINTF("[MEM CHECK FAILED] XIsOurMemoryPtr: pointer %p is not a valid block header\n", data);
+                debug_message("[MEM CHECK FAILED] XIsOurMemoryPtr: pointer %p is not a valid block header\n", data);
                 BAE_ASSERT(FALSE);
             }
         }
@@ -3197,7 +3197,7 @@ int32_t        const currentSize = ptr ? XGetPtrSize(ptr) : 0;
             newMb->blockSize = size;
             return (XPTR)(newMb + 1);
         } else {
-            BAE_PRINTF("[MEM REALLOC FAILED] XResizePtr: realloc failed for ptr=%p size=%d\n", ptr, size);
+            debug_message("[MEM REALLOC FAILED] XResizePtr: realloc failed for ptr=%p size=%d\n", ptr, size);
             // fall back to the old way
             
             XPTR        newPtr;
@@ -4647,14 +4647,14 @@ static XFILE_CACHED_ITEM * PV_XGetNamedCacheEntry(XFILE fileRef, XResourceType r
                             else
                             {
                                 err = -4;
-                                BAE_PRINTF("Next offset is bad\n");
+                                debug_message("Next offset is bad\n");
                                 break;
                             }
                         }
                         else
                         {
                             err = -3;
-                            BAE_PRINTF("Can't set next position\n");
+                            debug_message("Can't set next position\n");
                             break;
                         }
                     }
@@ -4786,14 +4786,14 @@ char *  XGetResourceNameOnly(XFILE fileRef, XResourceType resourceType, XLongRes
                             else
                             {
                                 err = -4;
-                                BAE_PRINTF("Next offset is bad\n");
+                                debug_message("Next offset is bad\n");
                                 break;
                             }
                         }
                         else
                         {
                             err = -3;
-                            BAE_PRINTF("Can't set next position\n");
+                            debug_message("Can't set next position\n");
                             break;
                         }
                     }
@@ -4880,7 +4880,7 @@ int32_t XReadPartialFileResource(XFILE fileRef, XResourceType resourceType, XLon
                     if (pData == NULL)
                     {
                         err = -2;
-                        BAE_PRINTF("Out of memory; can't allocate resource\n");
+                        debug_message("Out of memory; can't allocate resource\n");
                     }
                 }
                 else
@@ -4893,7 +4893,7 @@ int32_t XReadPartialFileResource(XFILE fileRef, XResourceType resourceType, XLon
                     else
                     {
                         err = -2;
-                        BAE_PRINTF("Out of memory; can't allocate resource\n");
+                        debug_message("Out of memory; can't allocate resource\n");
                     }
                 }
             }
@@ -4951,7 +4951,7 @@ int32_t XReadPartialFileResource(XFILE fileRef, XResourceType resourceType, XLon
                                             else
                                             {
                                                 err = -2;
-                                                BAE_PRINTF("Out of memory; can't allocate resource\n");
+                                                debug_message("Out of memory; can't allocate resource\n");
                                             }
                                         }
                                         else
@@ -4965,7 +4965,7 @@ int32_t XReadPartialFileResource(XFILE fileRef, XResourceType resourceType, XLon
                                             else
                                             {
                                                 err = -2;
-                                                BAE_PRINTF("Out of memory; can't allocate resource\n");
+                                                debug_message("Out of memory; can't allocate resource\n");
                                                 break;
                                             }
                                         }
@@ -4975,14 +4975,14 @@ int32_t XReadPartialFileResource(XFILE fileRef, XResourceType resourceType, XLon
                             else
                             {
                                 err = -4;
-                                BAE_PRINTF("Next offset is bad\n");
+                                debug_message("Next offset is bad\n");
                                 break;
                             }
                         }
                         else
                         {
                             err = -3;
-                            BAE_PRINTF("Can't set next position\n");
+                            debug_message("Can't set next position\n");
                             break;
                         }
                     }
@@ -5024,7 +5024,7 @@ XPTR XGetFileResource(XFILE fileRef, XResourceType resourceType, XLongResourceID
 #if DEBUG_PRINT_RESOURCE
     XPutLong(tempPascalName, resourceType);
     tempPascalName[4] = 0;
-    BAE_PRINTF("GetResource %s %ld is ", tempPascalName, resourceID);
+    debug_message("GetResource %s %ld is ", tempPascalName, resourceID);
 #endif
     tempPascalName[0] = 0;
     pReference = fileRef;
@@ -5068,7 +5068,7 @@ XPTR XGetFileResource(XFILE fileRef, XResourceType resourceType, XLongResourceID
                     else
                     {
                         err = -2;
-                        BAE_PRINTF("Out of memory; can't allocate resource\n");
+                        debug_message("Out of memory; can't allocate resource\n");
                     }
                 }
                 else
@@ -5085,7 +5085,7 @@ XPTR XGetFileResource(XFILE fileRef, XResourceType resourceType, XLongResourceID
                     else
                     {
                         err = -2;
-                        BAE_PRINTF("Out of memory; can't allocate resource\n");
+                        debug_message("Out of memory; can't allocate resource\n");
                     }
                 }
             }
@@ -5093,7 +5093,7 @@ XPTR XGetFileResource(XFILE fileRef, XResourceType resourceType, XLongResourceID
             {
                 err = -1;   // can't find it
 #if DEBUG_PRINT_RESOURCE                
-                BAE_PRINTF("Can't find it\n");
+                debug_message("Can't find it\n");
 #endif                
             }
         }
@@ -5150,7 +5150,7 @@ XPTR XGetFileResource(XFILE fileRef, XResourceType resourceType, XLongResourceID
                                             else
                                             {
                                                 err = -2;
-                                                BAE_PRINTF("Out of memory; can't allocate resource\n");
+                                                debug_message("Out of memory; can't allocate resource\n");
                                             }
                                         }
                                         else
@@ -5168,7 +5168,7 @@ XPTR XGetFileResource(XFILE fileRef, XResourceType resourceType, XLongResourceID
                                             else
                                             {
                                                 err = -2;
-                                                BAE_PRINTF("Out of memory; can't allocate resource\n");
+                                                debug_message("Out of memory; can't allocate resource\n");
                                                 break;
                                             }
                                         }
@@ -5178,14 +5178,14 @@ XPTR XGetFileResource(XFILE fileRef, XResourceType resourceType, XLongResourceID
                             else
                             {
                                 err = -4;
-                                BAE_PRINTF("Next offset is bad\n");
+                                debug_message("Next offset is bad\n");
                                 break;
                             }
                         }
                         else
                         {
                             err = -3;
-                            BAE_PRINTF("Can't set next position\n");
+                            debug_message("Can't set next position\n");
                             break;
                         }
                     }
@@ -5239,7 +5239,7 @@ XPTR XGetFileResource(XFILE fileRef, XResourceType resourceType, XLongResourceID
         }
     }
 #if DEBUG_PRINT_RESOURCE
-    BAE_PRINTF((pData) ? "OK\n" : "BAD\n");
+    debug_message((pData) ? "OK\n" : "BAD\n");
 #endif
     return pData;
 }
@@ -5503,20 +5503,20 @@ XFILERESOURCECACHE * XCreateAccessCache(XFILE fileRef)
         int32_t namePos = XFileGetPosition(fileRef);
         unsigned char nameLen = 0;
         if (XFileRead(fileRef, &nameLen, 1) != 0) { 
-            BAE_PRINTF("[XCreateAccessCache] FAIL: XFileRead(nameLen) failed at resource %d\n", count+1);
+            debug_message("[XCreateAccessCache] FAIL: XFileRead(nameLen) failed at resource %d\n", count+1);
             XDisposePtr(newCache); return NULL; 
         }
         if (nameLen > 0)
         {
             // skip remainder of name
             if (XFileSetPositionRelative(fileRef, nameLen) != 0) { 
-                BAE_PRINTF("[XCreateAccessCache] FAIL: XFileSetPositionRelative(nameLen=%d) failed at resource %d\n", nameLen, count+1);
+                debug_message("[XCreateAccessCache] FAIL: XFileSetPositionRelative(nameLen=%d) failed at resource %d\n", nameLen, count+1);
                 XDisposePtr(newCache); return NULL; 
             }
         }
         // length
         if (XFileRead(fileRef, &data, (int32_t)sizeof(int32_t)) != 0) { 
-            BAE_PRINTF("[XCreateAccessCache] FAIL: XFileRead(resourceLength) failed at resource %d\n", count+1);
+            debug_message("[XCreateAccessCache] FAIL: XFileRead(resourceLength) failed at resource %d\n", count+1);
             XDisposePtr(newCache); return NULL; 
         }
         item->resourceLength = (int32_t)XGetLong(&data);
@@ -5526,7 +5526,7 @@ XFILERESOURCECACHE * XCreateAccessCache(XFILE fileRef)
         if (count < total - 1)
         {
             if (XFileSetPositionRelative(fileRef, item->resourceLength) != 0) { 
-                BAE_PRINTF("[XCreateAccessCache] FAIL: XFileSetPositionRelative(resourceLength=%d) failed at resource %d\n", item->resourceLength, count+1);
+                debug_message("[XCreateAccessCache] FAIL: XFileSetPositionRelative(resourceLength=%d) failed at resource %d\n", item->resourceLength, count+1);
                 XDisposePtr(newCache); return NULL; 
             }
         }
@@ -5538,7 +5538,7 @@ XFILERESOURCECACHE * XCreateAccessCache(XFILE fileRef)
         XDisposePtr(pReference->pCache);
     }
     pReference->pCache = newCache;
-    BAE_PRINTF("[XCreateAccessCache] SUCCESS: Cache created with %d resources\n", total);
+    debug_message("[XCreateAccessCache] SUCCESS: Cache created with %d resources\n", total);
     return newCache;
 }
 
@@ -5658,14 +5658,14 @@ deleteanyways:
                             else
                             {
                                 err = -4;
-                                BAE_PRINTF("Next offset is bad\n");
+                                debug_message("Next offset is bad\n");
                                 break;
                             }
                         }
                         else
                         {
                             err = -3;
-                            BAE_PRINTF("Can't set next position\n");
+                            debug_message("Can't set next position\n");
                             break;
                         }
                     }
@@ -5772,14 +5772,14 @@ int32_t XCountFileResourcesOfType(XFILE fileRef, XResourceType theType)
                                 else
                                 {
                                     err = -4;
-                                    BAE_PRINTF("Next offset is bad\n");
+                                    debug_message("Next offset is bad\n");
                                     break;
                                 }
                             }
                             else
                             {
                                 err = -3;
-                                BAE_PRINTF("Can't set next position\n");
+                                debug_message("Can't set next position\n");
                                 break;
                             }
                         }
@@ -5964,14 +5964,14 @@ int32_t XGetUniqueFileResourceID(XFILE fileRef, XResourceType resourceType, XLon
                                 else
                                 {
                                     err = -4;
-                                    BAE_PRINTF("Next offset is bad\n");
+                                    debug_message("Next offset is bad\n");
                                     break;
                                 }
                             }
                             else
                             {
                                 err = -3;
-                                BAE_PRINTF("Can't set next position\n");
+                                debug_message("Can't set next position\n");
                                 break;
                             }
                         }
@@ -6408,7 +6408,7 @@ XPTR XGetNamedResource(XResourceType resourceType, void *cName, int32_t *pReturn
                                 else
                                 {
                                     err = -4;
-                                    BAE_PRINTF("Next offset is bad\n");
+                                    debug_message("Next offset is bad\n");
                                     break;
                                 }
                             }

@@ -169,7 +169,7 @@ static bool PV_FindSoundbankInRMI(const unsigned char *buf, uint32_t len,
     uint32_t riffSize = PV_ReadLE32(&buf[4]);
     uint32_t riffEnd = 8 + riffSize;
     
-    BAE_PRINTF("[RMI] Searching for nested soundbank within RIFF RMID (size: %u bytes)...\n", 
+    debug_message("[RMI] Searching for nested soundbank within RIFF RMID (size: %u bytes)...\n", 
                riffSize);
     
     // Start scanning after the RMID type identifier at offset 12
@@ -191,20 +191,20 @@ static bool PV_FindSoundbankInRMI(const unsigned char *buf, uint32_t len,
             if (PV_MatchFourCC(&chunk[8], "sfbk"))
             {
                 isSF2 = TRUE;
-                BAE_PRINTF("[RMI] Found embedded SF2/SF3 at offset %u, size %u bytes\n", 
+                debug_message("[RMI] Found embedded SF2/SF3 at offset %u, size %u bytes\n", 
                            i, 8 + chunkSize);
             }
             // Check if this is DLS
             else if (PV_MatchFourCC(&chunk[8], "DLS "))
             {
                 isSF2 = FALSE;
-                BAE_PRINTF("[RMI] Found embedded DLS at offset %u, size %u bytes\n", 
+                debug_message("[RMI] Found embedded DLS at offset %u, size %u bytes\n", 
                            i, 8 + chunkSize);
             }
             else
             {
                 // Not a recognized soundbank, skip it
-                BAE_PRINTF("[RMI] Found RIFF chunk at offset %u but not a soundbank (type: %.4s)\n",
+                debug_message("[RMI] Found RIFF chunk at offset %u but not a soundbank (type: %.4s)\n",
                            i, &chunk[8]);
                 // Continue searching
                 i += 8 + chunkSize;
@@ -224,7 +224,7 @@ static bool PV_FindSoundbankInRMI(const unsigned char *buf, uint32_t len,
         if (i & 1) i++;
     }
     
-    BAE_PRINTF("[RMI] No embedded soundbank found in RIFF RMID\n");
+    debug_message("[RMI] No embedded soundbank found in RIFF RMID\n");
     return FALSE;
 }
 
@@ -279,16 +279,16 @@ static void PV_ParseRMIInfo(const unsigned char *buf, uint32_t len, RMIInfo *inf
                 if (offset <= 127)  // Valid range per spec
                 {
                     if (info) info->bankOffset = (int16_t)offset;
-                    BAE_PRINTF("[RMI] Bank Offset (DBNK): %u\n", offset);
+                    debug_message("[RMI] Bank Offset (DBNK): %u\n", offset);
                 }
                 else
                 {
-                    BAE_PRINTF("[RMI] Invalid DBNK value %u (must be 0-127)\n", offset);
+                    debug_message("[RMI] Invalid DBNK value %u (must be 0-127)\n", offset);
                 }
             }
             else
             {
-                BAE_PRINTF("[RMI] Invalid DBNK chunk size %u (expected 2)\n", chunkSize);
+                debug_message("[RMI] Invalid DBNK chunk size %u (expected 2)\n", chunkSize);
             }
         }
         else if (PV_MatchFourCC(chunk, "IENC"))
@@ -302,7 +302,7 @@ static void PV_ParseRMIInfo(const unsigned char *buf, uint32_t len, RMIInfo *inf
                     info->encoding[chunkSize] = '\0';
                     info->hasEncoding = TRUE;
                 }
-                BAE_PRINTF("[RMI] Text Encoding (IENC): %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
+                debug_message("[RMI] Text Encoding (IENC): %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
             }
         }
         else if (PV_MatchFourCC(chunk, "MENC"))
@@ -315,64 +315,64 @@ static void PV_ParseRMIInfo(const unsigned char *buf, uint32_t len, RMIInfo *inf
                     XBlockMove(&chunk[8], info->midiEncoding, chunkSize);
                     info->midiEncoding[chunkSize] = '\0';
                 }
-                BAE_PRINTF("[RMI] MIDI Encoding (MENC): %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
+                debug_message("[RMI] MIDI Encoding (MENC): %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
             }
         }
         // Standard INFO tags (null-terminated strings)
         else if (PV_MatchFourCC(chunk, "INAM"))
         {
             // Title
-            BAE_PRINTF("[RMI] Title: %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
+            debug_message("[RMI] Title: %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
         }
         else if (PV_MatchFourCC(chunk, "IART"))
         {
             // Artist
-            BAE_PRINTF("[RMI] Artist: %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
+            debug_message("[RMI] Artist: %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
         }
         else if (PV_MatchFourCC(chunk, "ICOP"))
         {
             // Copyright
-            BAE_PRINTF("[RMI] Copyright: %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
+            debug_message("[RMI] Copyright: %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
         }
         else if (PV_MatchFourCC(chunk, "ICRD"))
         {
             // Creation date
-            BAE_PRINTF("[RMI] Date: %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
+            debug_message("[RMI] Date: %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
         }
         else if (PV_MatchFourCC(chunk, "IPRD") || PV_MatchFourCC(chunk, "IALB"))
         {
             // Album (IALB preferred over IPRD per spec)
-            BAE_PRINTF("[RMI] Album: %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
+            debug_message("[RMI] Album: %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
         }
         else if (PV_MatchFourCC(chunk, "ICMT"))
         {
             // Comments
-            BAE_PRINTF("[RMI] Comment: %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
+            debug_message("[RMI] Comment: %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
         }
         else if (PV_MatchFourCC(chunk, "ISBJ"))
         {
             // Subject/Description
-            BAE_PRINTF("[RMI] Subject: %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
+            debug_message("[RMI] Subject: %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
         }
         else if (PV_MatchFourCC(chunk, "IGNR"))
         {
             // Genre
-            BAE_PRINTF("[RMI] Genre: %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
+            debug_message("[RMI] Genre: %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
         }
         else if (PV_MatchFourCC(chunk, "IENG"))
         {
             // Engineer (soundfont creator)
-            BAE_PRINTF("[RMI] Engineer: %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
+            debug_message("[RMI] Engineer: %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
         }
         else if (PV_MatchFourCC(chunk, "ISFT"))
         {
             // Software
-            BAE_PRINTF("[RMI] Software: %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
+            debug_message("[RMI] Software: %.*s\n", (int)chunkSize, (const char *)(chunk + 8));
         }
         else if (PV_MatchFourCC(chunk, "IPIC"))
         {
             // Picture/album art (binary data)
-            BAE_PRINTF("[RMI] Picture: %u bytes\n", chunkSize);
+            debug_message("[RMI] Picture: %u bytes\n", chunkSize);
         }
         
         // Move to next chunk (word-aligned)
@@ -412,29 +412,29 @@ OPErr GM_LoadRMIFromMemory(const unsigned char *buf, uint32_t len,
         return PARAM_ERR;
     }
     
-    BAE_PRINTF("[RMI] Parsing RMI file, size=%u bytes\n", len);
+    debug_message("[RMI] Parsing RMI file, size=%u bytes\n", len);
     
     // Extract MIDI data from 'data' chunk
     if (!PV_ExtractRMIDToSMF(buf, len, &midiData, &midiLen))
     {
-        BAE_PRINTF("[RMI] Failed to extract MIDI data from RMI file\n");
+        debug_message("[RMI] Failed to extract MIDI data from RMI file\n");
         return BAD_FILE;
     }
     
     if (!midiData || midiLen == 0)
     {
-        BAE_PRINTF("[RMI] No MIDI data found in RMI file\n");
+        debug_message("[RMI] No MIDI data found in RMI file\n");
         return BAD_FILE;
     }
     
     // Verify MIDI header
     if (midiLen < 4 || !PV_MatchFourCC(midiData, "MThd"))
     {
-        BAE_PRINTF("[RMI] Invalid MIDI data (missing MThd header)\n");
+        debug_message("[RMI] Invalid MIDI data (missing MThd header)\n");
         return BAD_FILE;
     }
     
-    BAE_PRINTF("[RMI] Extracted MIDI data: %u bytes\n", midiLen);
+    debug_message("[RMI] Extracted MIDI data: %u bytes\n", midiLen);
     
     // Allocate a copy of the MIDI data for the caller
     unsigned char *midiCopy = (unsigned char *)XNewPtr(midiLen);
@@ -467,7 +467,7 @@ OPErr GM_LoadRMIFromMemory(const unsigned char *buf, uint32_t len,
             // Check if this is an INFO list
             if (PV_MatchFourCC(&chunk[8], "INFO"))
             {
-                BAE_PRINTF("[RMI] Found INFO chunk\n");
+                debug_message("[RMI] Found INFO chunk\n");
                 PV_ParseRMIInfo(&chunk[12], chunkSize - 4, &rmiInfo);
             }
         }
@@ -478,7 +478,7 @@ OPErr GM_LoadRMIFromMemory(const unsigned char *buf, uint32_t len,
     }
     
     // Look for and load embedded soundbank (SF2/SF3/DLS) if requested
-    BAE_PRINTF("[RMI] loadDLS parameter = %d\n", loadDLS);
+    debug_message("[RMI] loadDLS parameter = %d\n", loadDLS);
     if (loadDLS)
     {
         const unsigned char *bankData = NULL;
@@ -488,13 +488,13 @@ OPErr GM_LoadRMIFromMemory(const unsigned char *buf, uint32_t len,
         // Reset flag at start
         g_last_rmi_had_soundbank = FALSE;
         
-        BAE_PRINTF("[RMI] Searching for embedded soundbank...\n");
+        debug_message("[RMI] Searching for embedded soundbank...\n");
         if (PV_FindSoundbankInRMI(buf, len, &bankData, &bankLen, &isSF2))
         {
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
 #if _DEBUG
             const char *bankType = isSF2 ? "SF2/SF3" : "DLS";
-            BAE_PRINTF("[RMI] Loading embedded %s soundbank...\n", bankType);
+            debug_message("[RMI] Loading embedded %s soundbank...\n", bankType);
 #endif            
             // Determine bank offset according to SF2 RMIDI spec:
             // - If DBNK specified: use that value
@@ -510,16 +510,16 @@ OPErr GM_LoadRMIFromMemory(const unsigned char *buf, uint32_t len,
             if (bankOffset < 0) bankOffset = 0;
             if (bankOffset > 127) bankOffset = 127;
             
-            BAE_PRINTF("[RMI] Using bank offset: %d\n", bankOffset);
+            debug_message("[RMI] Using bank offset: %d\n", bankOffset);
             
             // Unload any existing soundfont first
             if (GM_SF2_IsActive())
             {
-                BAE_PRINTF("[RMI] Unloading existing soundfont before loading embedded one\n");
+                debug_message("[RMI] Unloading existing soundfont before loading embedded one\n");
                 GM_UnloadSF2Soundfont();
             }            
             
-            BAE_PRINTF("[RMI] Loading from memory at offset %p, size %u\n", 
+            debug_message("[RMI] Loading from memory at offset %p, size %u\n", 
                        (void*)bankData, bankLen);
             
             OPErr err = GM_LoadSF2SoundfontFromMemory(bankData, (size_t)bankLen);
@@ -532,7 +532,7 @@ OPErr GM_LoadRMIFromMemory(const unsigned char *buf, uint32_t len,
                 if (hasPresets)
                 {
 #if _DEBUG                    
-                    BAE_PRINTF("[RMI] %s soundbank loaded successfully (%d presets)\n", 
+                    debug_message("[RMI] %s soundbank loaded successfully (%d presets)\n", 
                                bankType, presetCount);
 #endif                    
                     // Set flag to indicate embedded soundbank was loaded
@@ -543,7 +543,7 @@ OPErr GM_LoadRMIFromMemory(const unsigned char *buf, uint32_t len,
                     // except drum banks (bank 128)
                     if (bankOffset != 0)
                     {
-                        BAE_PRINTF("[RMI] Applying bank offset %d to presets...\n", bankOffset);
+                        debug_message("[RMI] Applying bank offset %d to presets...\n", bankOffset);
                         // Note: Bank offset adjustment would be done in FluidSynth layer
                         // For now, just log it - actual implementation would need
                         // FluidSynth API to adjust preset bank numbers
@@ -553,7 +553,7 @@ OPErr GM_LoadRMIFromMemory(const unsigned char *buf, uint32_t len,
                 else
                 {
 #if _DEBUG                     
-                    BAE_PRINTF("[RMI] %s soundbank loaded but has no presets\n", bankType);
+                    debug_message("[RMI] %s soundbank loaded but has no presets\n", bankType);
 #endif
                     GM_UnloadSF2Soundfont();
                 }
@@ -561,19 +561,19 @@ OPErr GM_LoadRMIFromMemory(const unsigned char *buf, uint32_t len,
             else
             {
 #if _DEBUG 
-                BAE_PRINTF("[RMI] Failed to load %s soundbank (error %d)\n", bankType, err);
+                debug_message("[RMI] Failed to load %s soundbank (error %d)\n", bankType, err);
 #endif
                 // Return error so caller can handle fallback (e.g., restore user bank)
                 return err;
             }
 #else
-            BAE_PRINTF("[RMI] Soundbank support not compiled in (FluidSynth required)\n");
+            debug_message("[RMI] Soundbank support not compiled in (FluidSynth required)\n");
 #endif
         }
         else
         {
             // No embedded soundbank - per spec, use offset 0 (use main soundfont)
-            BAE_PRINTF("[RMI] No embedded soundbank found, using main soundfont\n");
+            debug_message("[RMI] No embedded soundbank found, using main soundfont\n");
         }
     }
     
@@ -635,7 +635,7 @@ OPErr GM_LoadRMIFromFile(const char *path,
 
     if (!fileData)
     {
-        BAE_PRINTF("[RMI] Failed to read file: %s\n", path);
+        debug_message("[RMI] Failed to read file: %s\n", path);
         return BAD_FILE;
     }
     

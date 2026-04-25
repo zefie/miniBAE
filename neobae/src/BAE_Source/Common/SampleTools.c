@@ -235,7 +235,7 @@ static void * PV_GetSoundHeaderPtr(XPTR pRes, int16_t  *pEncode)
 
         pSndFormat = (char *)pRes;
         soundFormat = XGetShort(pSndFormat);
-        BAE_PRINTF("[PV_GetSoundHeaderPtr] soundFormat=%d (0x%04x)\n",
+        debug_message("[PV_GetSoundHeaderPtr] soundFormat=%d (0x%04x)\n",
                    (int)soundFormat, (unsigned)soundFormat & 0xFFFF);
         switch (soundFormat)
         {
@@ -1001,7 +1001,7 @@ int32_t XGetSampleInfoFromSnd(XPTR pResource, SampleDataInfo *pOutInfo)
                         break;
 #endif
                     default:
-                        BAE_PRINTF("Unsupported codec %d\n", pOutInfo->compressionType);
+                        debug_message("Unsupported codec %d\n", pOutInfo->compressionType);
                         BAE_ASSERT(FALSE);
                         err = -3;
                         break;
@@ -1213,7 +1213,7 @@ uint32_t              roundTripSavedRate;  /* non-zero if XSOUND_OPUS_ROUNDTRIP_
         info->baseKey = header3->baseKey;
         info->compressionType = XGetLong(&header3->subType);
         info->sndFlags = header3->reserved2[0];
-        BAE_PRINTF("[XGetSamplePtrFromSnd] Type3: rate=0x%08lx baseKey=%d ch=%d bits=%d frames=%lu subType=%ld\n",
+        debug_message("[XGetSamplePtrFromSnd] Type3: rate=0x%08lx baseKey=%d ch=%d bits=%d frames=%lu subType=%ld\n",
                    (unsigned long)info->rate, (int)info->baseKey,
                    (int)info->channels, (int)info->bitSize,
                    (unsigned long)info->frames, (long)info->compressionType);
@@ -1288,7 +1288,7 @@ uint32_t              roundTripSavedRate;  /* non-zero if XSOUND_OPUS_ROUNDTRIP_
             break;
 #endif
         default:
-            BAE_PRINTF("Unsupported codec %d\n", info->compressionType);
+            debug_message("Unsupported codec %d\n", info->compressionType);
             BAE_ASSERT(FALSE);
             return NULL;
         }
