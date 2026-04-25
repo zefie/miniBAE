@@ -22,6 +22,7 @@
  */
 
 #include "NeoBAE.h"
+#include "BAE_Override.h"
 #include "X_API.h"
 #include "BAE_API.h"
 #include "GenXMF.h"
@@ -1222,8 +1223,13 @@ BAEResult BAESong_LoadXmfFromFile(BAESong song, BAEPathName filePath, BAE_BOOL i
 
     const void *bytes = (const unsigned char *)data;
     uint32_t ulen = (uint32_t)size;
+    BAEResult result = BAESong_LoadXmfFromMemory(song, bytes, ulen, ignoreBadInstruments);
 
-    return BAESong_LoadXmfFromMemory(song, bytes, ulen, ignoreBadInstruments);
+    if (result == BAE_NO_ERROR)
+    {
+        BAE_OverrideBAESongFromFile(song, filePath);
+    }
+    return result;
 }
 
 BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ulen, BAE_BOOL ignoreBadInstruments)

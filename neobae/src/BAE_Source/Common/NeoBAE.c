@@ -162,6 +162,7 @@
 #include "GenRMI.h"
 #include "X_Formats.h"
 #include "BAE_API.h"
+#include "BAE_Override.h"
 #include "X_Assert.h"
 #include "GenRingtone.h"
 #if USE_MTHC_SUPPORT == TRUE
@@ -7752,6 +7753,10 @@ BAEResult BAESong_LoadRmiFromMemory(BAESong song, void const *pRmiData, uint32_t
                     // Now load the extracted MIDI data using LoadMidiFromMemory
                     BAE_ReleaseMutex(song->mLock);
                     BAEResult result = BAESong_LoadMidiFromMemory(song, extractedMidi, extractedMidiLen, ignoreBadInstruments);
+                    if (result == BAE_NO_ERROR && song->pSong)
+                    {
+                        BAE_OverrideSongFromData(song->pSong, pRmiData, rmiSize);
+                    }
                     XDisposePtr(extractedMidi); // Clean up extracted MIDI
                     return result;
                 }
@@ -8014,6 +8019,7 @@ BAEResult BAESong_LoadMidiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL 
                         GM_SetSongLoopFlag(pSong, FALSE);               // don't loop song
                         GM_SetVelocityCurveType(pSong, (VelocityCurveType)g_defaultVelocityCurve);
                         song->pSong = pSong;                            // preserve for use later
+                        BAE_OverrideSongFromFile(pSong, filePath);
 #if USE_SF2_SUPPORT == TRUE
                         if (GM_SF2_IsActive()) { GM_EnableSF2ForSong(song->pSong, TRUE); }
 #endif
@@ -8487,6 +8493,7 @@ BAEResult BAESong_LoadRmfFromFile(BAESong song, BAEPathName filePath, int16_t so
                         GM_SetSongLoopFlag(pSong, FALSE);               // don't loop song
                         GM_SetVelocityCurveType(pSong, (VelocityCurveType)g_defaultVelocityCurve);
                         song->pSong = pSong;                            // preserve for use later
+                        BAE_OverrideSongFromFile(pSong, filePath);
                         
 #if USE_SF2_SUPPORT == TRUE
                         if (GM_SF2_IsActive()) { GM_EnableSF2ForSong(song->pSong, TRUE); }
@@ -10250,6 +10257,16 @@ static void PV_RestoreSongEngineConfig(BAESong song)
         song->mHasSavedFixSpanDC = FALSE;
     }
 #endif
+}
+
+void BAE_OverrideBAESongFromFile(void *songObject, const void *filePath)
+{
+    BAESong song = (BAESong)songObject;
+
+    if (!song || song->mID != OBJECT_ID || !song->pSong || !filePath)
+        return;
+
+    BAE_OverrideSongFromFile(song->pSong, filePath);
 }
 
 //

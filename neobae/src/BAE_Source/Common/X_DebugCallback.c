@@ -22,9 +22,10 @@
 
 #include <stdarg.h>
 #include <stdio.h>
+#include "X_Assert.h"
 
 // Function pointer for debug output callback
-static void (*g_debug_output_callback)(const char *message) = NULL;
+static void (*g_debug_output_callback)(const char *message) = BAE_PRINTF;
 
 // Set the debug output callback (called by GUI on init)
 void BAE_SetDebugOutputCallback(void (*callback)(const char *message))
