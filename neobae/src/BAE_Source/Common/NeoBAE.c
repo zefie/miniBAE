@@ -12147,6 +12147,10 @@ BAEResult BAEMixer_LoadFromMemory(BAEMixer mixer, void const *pData, uint32_t da
             return sr;
         }
 
+        // Apply hash-based runtime overrides (same as file-based load paths).
+        // Android always loads from memory, so this is the only place to hook in.
+        BAE_OverrideSongFromData(result->data.song->pSong, pData, dataSize);
+
         result->type = BAE_LOAD_TYPE_SONG;
         result->result = BAE_NO_ERROR;
         return BAE_NO_ERROR;
