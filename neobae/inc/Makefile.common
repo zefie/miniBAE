@@ -168,11 +168,11 @@ ifneq ($(filter 1,$(MP3_ENC) $(MP3_DEC)),)
 endif
 
 ifeq ($(MP3_DEC),1)
-INC_PATH	+= -Isrc/thirdparty/minimp3
+	INC_PATH	+= -Isrc/thirdparty/minimp3
 endif
 
 ifeq ($(ENABLE_MIDI_HW),1)
-INC_PATH	+= -Isrc/thirdparty/rtmidi
+	INC_PATH	+= -Isrc/thirdparty/rtmidi
 endif
 
 ifeq ($(DISABLE_NOKIA),1)
@@ -357,7 +357,8 @@ SRC		+=	src/BAE_Source/Common/DriverTools.c \
 			src/BAE_Source/Common/g72x.c \
 			src/BAE_Source/Common/BAE_Override.c \
 			src/BAE_Source/Common/sha1mini.c \
-			src/BAE_Source/Common/XFileTypes.c
+			src/BAE_Source/Common/XFileTypes.c \
+			src/BAE_Source/Common/X_DebugCallback.c
 
 ifeq ($(RETRO_RINGTONE_SUPPORT),1)
 	SRC += src/BAE_Source/Common/GenRingtone.c
@@ -916,7 +917,6 @@ else
 			endif
 		endif
 	endif
-endif
 
 ifeq ($(MTHC_SUPPORT),1)
 	ifneq ($(MIDDECOMP),1)
