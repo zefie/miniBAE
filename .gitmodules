@@ -28,3 +28,7 @@
 [submodule "neobae/src/thirdparty/libxmp"]
 	path = neobae/src/thirdparty/libxmp
 	url = https://github.com/libxmp/libxmp
+[submodule "neobae/src/thirdparty/imgui"]
+	path = neobae/src/thirdparty/imgui
+	url = https://github.com/ocornut/imgui
+	branch = docking

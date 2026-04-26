@@ -1,266 +1,123 @@
-# miniBAE Development Guidelines
+# NeoBAE Copilot Instructions
 
-## Architecture Overview
+Purpose: keep changes small, correct, and project-aware.
 
-miniBAE is a cross-platform audio engine with these core components:
+## 1) Working Style (Karpathy Logic Adapted)
 
-- **Audio Engine**: Core synthesis and playback in `src/BAE_Source/Common/`
-- **Platform Layer**: OS abstraction in `src/BAE_Source/Platform/` 
-- **Format Handlers**: Support for MIDI, RMF, ZMF, WAV, AIFF, AU, FLAC, OGG VORBIS, MP3
-- **Optional Formats**: SoundFont 2.0, SoundFont 3.0, DLS, XMF, MXMF
-- **Applications**: `playbae` (CLI) and `zefidi` (GUI) frontends
-- **Sample Cache**: Efficient memory management for audio samples
-- **Android App**: at `src/miniBAEDroid`
+### Think First
+- State assumptions before coding.
+- If requirements are ambiguous, ask concise clarifying questions.
+- Surface tradeoffs instead of silently choosing one path.
+- Prefer the simplest viable fix over clever abstractions.
 
-## Build System
+### Simplicity First
+- Implement only what was requested.
+- Avoid speculative features, generic frameworks, or premature abstractions.
+- Keep code and diffs as small as possible while fully solving the task.
 
-### Key Make Variables
-- `USE_SDL=1`: Enable SDL2 audio output
-- `DEBUG=1`: Enable debug output in builds (playbae: stderr, zefidi: zefidi.log)
-- `LDEBUG=1`: Disable optimizations and don't strip for proper gdb debugging
-- `NOAUTO=1`: Manual control of features (disable auto-enabling)
-- `MP3_DEC=1/MP3_ENC=1`: MP3 support
-- `FLAC_DEC=1/FLAC_ENC=1`: FLAC support  
-- `VORBIS_DEC=1/VORBIS_ENC=1`: OGG Vorbis support
-- `OPUS_DEC=1/OPUS_ENC=1`: Opus support
-- `SF2_SUPPORT=1`: SoundFont 2.0 support
-    - `USE_FLUIDSYNTH=1`: FluidSynth SF2 with DLS support, required for `XMF_SUPPORT=1` 
-- `XMF_SUPPORT=1`: Support for XMF files (requires FluidSynth)
-- `ZMF_SUPPORT=1`: Support for ZMF files with modern codecs (FLAC, Vorbis, Opus)
-- `KARAOKE=1`: MIDI karaoke lyrics support
+### Surgical Changes
+- Touch only files and lines required for the request.
+- Match existing local style and patterns.
+- Do not refactor unrelated code unless explicitly asked.
+- If you notice unrelated issues, mention them briefly instead of changing them.
 
-### XMF and MXMF Support
-- Requires `USE_FLUIDSYNTH=1`, due to DLS requirement
-- XMF: Extended MIDI with DLS samples
-- MXMF: Beatnik's proprietary format with DLS samples
-- Loader in `src/BAE_Source/Common/GenXMF.c`
+### Goal-Driven Execution
+- Translate requests into explicit success criteria.
+- For multi-step work, define short verify points per step.
+- Validate behavior after edits whenever feasible.
+- If validation cannot be run, state exactly what was not verified.
 
-## RMF Editor
-- Does not currently support XMF/MXMF
-- Does not support SoundFont 2.0 or DLS instruments
-- Focused on RMF/ZMF authoring with support for modern codecs
-- Editor code in `src/rmfeditor_wx/`
+## 2) NeoBAE Project Context
 
-### Build Commands
-```bash
-# Linux SDL2 build
-make clean && make -j$(nproc)
+### Project Overview
+- Project Name: NeoBAE (formerly miniBAE)
+- Focus: Audio engine, RMF/ZMF format handling, and related tools.
 
-# Windows MinGW cross-compile  
-make -f Makefile.mingw USE_SDL=1 -j$(nproc)
+### Architecture Snapshot
+- Core audio engine lives under `neobae/src/BAE_Source/Common/`.
+- Platform abstractions live under `neobae/src/BAE_Source/Platform/`.
+- Main frontends include CLI/player tools and GUI paths under `neobae/src/gui/`.
+- RMF editor code path is `neobae/src/rmfeditor_wx/`.
 
-# Windows MinGW GUI cross-compile  
-make -f Makefile.gui-mingw -j$(nproc)
+### Audio/Engine Facts
+- Mixer uses high-precision intermediate buffers and hard saturation at final 16-bit output (no soft limiter).
+- Many timing/rate values are 16.16 fixed-point; be careful with raw Hz vs fixed-point conversions.
+- Manual memory APIs (`XNewPtr` / `XDisposePtr`) are common; check ownership and cleanup on new paths.
+- Current voice cap is high (`MAX_VOICES`/`BAE_MAX_VOICES` mapped to 1024 on this branch).
 
-# GUI application
-make -f Makefile.gui -j$(nproc)
+### Format Handling Facts
+- Detection is extension-first with content-signature fallback (`src/BAE_Source/Common/XFileTypes.c`).
+- RMF/HSB and ZMF/ZSB share structure but differ by resource-map header and codec policy:
+  - RMF/HSB header: `IREZ`
+  - ZMF/ZSB header: `ZREZ`
+- IREZ containers with modern codecs (FLAC/Vorbis/Opus) are invalid in runtime load paths; ZREZ is required.
+- In RMF/HSB and ZMF/ZSB work, verify header, sample subtype, and fixed-point sample-rate handling.
 
-# WebAssembly
-make -f Makefile.emcc -j$(nproc)
+### Known Quirks
+- FluidSynth DLS path may log `Not a SoundFont file`; this is expected noise, not a fatal signal by itself.
+- RMF playback/save bugs often involve file-type routing, stale resource reuse, split root-key flags, or sample-rate normalization.
+- RMF editor is strong for playback/integration tasks but has limited full DAW-style authoring primitives.
 
-# When debugging
-make DEBUG=1 -j$(nproc)
+## 3) Execution Rules for This Repository
 
-# When debugging crashes
-make DEBUG=1 LDEBUG=1 -j$(nproc)
+- Do not run builds by default. The user handles builds manually (often external/docker).
+- Only run build or compile commands if the user explicitly asks in that turn.
+- Prefer focused static checks, code inspection, and targeted validations that do not require full project builds.
+- When changing serialization/format code, preserve backward compatibility unless the request says otherwise.
+- When creating new features, backward compatibility is the main priority, regardless of user prompt. If the feature cannot be implemented in a backward-compatible way, ask for clarification on how to proceed.
+- Always use preprocessor conditionals to gate new and existing features, even if the user does not explicitly ask for it. This is to preserve the ability to turn off new features if they cause issues, and customizable builds.
+- When updating `neobae/inc/Makefile.common`, also update `CMakeLists.txt` files to keep build systems in sync. This includes new source files, new preprocessor definitions, and new build targets.
 
-# When debugging XMF or MXMF files (requires FluidSynth)
-make DEBUG=1 USE_FLUIDSYNTH=1 -j$(nproc)
+## 4) Editing Checklist
 
-# Building the RMF Editor
-make -f Makefile.rmfeditor-wx -j$(nproc)
+Before edits:
+- Confirm assumptions and scope.
+- Identify exact files/symbols to touch.
 
-# Debugging with playbae (XMF)
-bin/playbae -f ../content/xmf/midnightsoul.xmf -t 3 2>&1
-```
+During edits:
+- Keep diffs minimal and request-focused.
+- Preserve API behavior unless change is requested.
 
-### FluidSynth Quirks
-- When loading a DLS, it will always report `fluidsynth: error: Not a SoundFont file`, we must ignore that "error".
+After edits:
+- Re-scan impacted call paths.
+- Validate edge cases relevant to the change.
+- Report what was verified vs not verified.
 
-### Platform Support
-- **Linux**: SDL2/SDL3, ALSA/JACK (GUI)
-- **Windows**: MinGW, DirectSound/SDL2/SDL3, WinMM MIDI (zefidi GUI)
-- **macOS**: Native audio (TODO)
-- **WebAssembly**: Emscripten
+## 5) Memory Usage
 
-## RMF and ZMF Reference
+- Consult `/memories/repo/` notes for prior discoveries before deep investigations.
+- Reuse known findings for RMF/ZMF, mixer behavior, codec handling, and editor quirks.
+- Add concise new repository memory notes for non-obvious bugs, architectural constraints, or recurring gotchas discovered during work.
 
-### Container IDs and Detection
-- **RMF** uses the `IREZ` resource-map header (`XFILERESOURCE_ID`)
-- **ZMF (Zefie Music Format)** uses the `ZREZ` resource-map header (`XFILERESOURCE_ZMF_ID`)
-- Content-based detection in `src/BAE_Source/Common/XFileTypes.c` recognizes both `IREZ` and `ZREZ`
-- Tooling in `src/rmfinfo/rmfinfo.c` also treats both headers as valid RMF-family containers
+## 6) Creating NeoBAE Editor
+- The editor is a separate executable with its own code path under `neobae/src/nbeditor/`.
+- It shares core engine and format handling code but has its own UI and integration logic.
+- When implementing editor features, ensure they do not regress existing RMF/HSB or ZMF/ZSB playback functionality. Use preprocessor conditionals to gate editor-specific code.
+- The editor should be a master window that contains subwindows, docking, and a flexible UI layout.
+- The editor will NOT contain a MIDI editor or piano roll at launch. Focus on core RMF/HSB and ZMF/ZSB editing features first, such as resource management, sample editing, and instrument manipulation. MIDI editing can be considered for future iterations.
+- Use images in `.github/nbeditor_reference_images/` as visual references for the editor's intended UI design and layout. These images are not strict requirements but should guide the overall look and feel of the editor. Do not apply excessive "eye-candy" despite the reference images; prioritize a clean and functional UI that matches the spirit of the references without overcomplicating the design.
 
-### RMF Structure (High-Level)
-- Resource files start with `XFILERESOURCEMAP` (`mapID`, `version`, `totalResources`)
-- Resources are stored as linked entries (`nextentry`, `resourceType`, `resourceID`, name, length, payload)
-- Common resources for authored songs:
-    - `ID_SONG`: song object metadata and MIDI relationship
-    - `ID_INST`: instrument definitions, splits, and synthesis parameters
-    - `ID_SND` / `ID_CSND` / `ID_ESND`: sample payloads (raw or encoded)
-    - `ID_BANK`: bank metadata where applicable
-
-### ZMF Compatibility Rules
-- ZMF keeps RMF resource structure, but is used when samples rely on modern codecs
-- Runtime load path rejects **IREZ** files containing FLAC/Vorbis/Opus sample subtypes with `BAE_UNSUPPORTED_FORMAT`
-- Editor save logic chooses header by extension:
-    - `.zmf` -> `ZREZ`
-    - anything else (including `.rmf`) -> `IREZ`
-- `BAERmfEditorDocument_RequiresZmf()` forces ZMF workflows when document samples target or preserve FLAC/Vorbis/Opus
-
-## Engine Quirks and Gotchas
-
-### Build and Flags
-- Keep `clean` separate from parallel build (`make clean && make -j$(nproc)`), do not combine `clean` with `-j` target chains
-- `ZMF_SUPPORT=1` cascades codec support (OGG, MP3, FLAC, Vorbis, Opus; decode and encode)
-- `SF2_SUPPORT=1` forces `USE_FLUIDSYNTH=1`; if FluidSynth is off, `XMF_SUPPORT` is disabled
-- `USE_SDL2` and `USE_SDL3` are mutually exclusive in `inc/Makefile.common`
-
-### Runtime and Platform Behavior
-- FluidSynth DLS load path logs `Not a SoundFont file`; this message is expected and should not be treated as fatal
-- On Linux/WSL systems without `/dev/snd/seq`, ALSA-enabled GUI MIDI device access can segfault
-- `zefidi` file dialogs rely on `zenity`, `kdialog`, or `yad`; missing tools can break Open/Load/Export/Record actions
-
-### Audio Engine and Data Handling
-- Mixer pipeline uses high-precision intermediate buffers and hard saturation on final 16-bit output (no soft limiter)
-- Many timing/rate values in RMF and engine internals are fixed-point (16.16); treat raw Hz and fixed values carefully in tooling
-- Memory APIs are manual (`XNewPtr`/`XDisposePtr`); leaked `XPTR` blocks are a common failure mode in new code
-
-## Debugging Fast-Path
-
-1. Start with `make DEBUG=1` for verbose logs; use `make DEBUG=1 LDEBUG=1` for symbolized crash debugging.
-2. For RMF/ZMF load failures, verify the header first (`IREZ` vs `ZREZ`) using `rmfinfo`.
-3. If an RMF with modern codecs fails to load, re-save as `.zmf` so the container header is `ZREZ`.
-4. When debugging DLS/SF2 behavior with FluidSynth, ignore the expected `Not a SoundFont file` noise and focus on subsequent errors.
-
-## Code Patterns
-
-### Memory Management
-```c
-// Allocate memory
-XPTR data = XNewPtr(size);
-if (!data) return MEMORY_ERR;
-
-// Free memory  
-XDisposePtr(data);
-```
-
-### Error Handling
-```c
-OPErr result = some_function();
-if (result != NO_ERR) {
-    // Handle error
-    return result;
-}
-```
-
-### Fixed-Point Arithmetic
-```c
-// Convert float to 16.16 fixed point
-XFIXED fixed = (XFIXED)(float_value * 65536.0f);
-
-// Convert back to float
-float float_value = (float)fixed / 65536.0f;
-```
-
-### Conditional Compilation
-```c
-#if USE_SF2_SUPPORT == TRUE
-// SF2-specific code
-#endif
-
-#if USE_DLS_SUPPORT == TRUE
-// DLS-specific code
-#endif
-
-#ifdef _ZEFI_GUI
-// GUI-specific code  
-#endif
-```
-
-### Structure Alignment
-```c
-// Force 8-byte alignment for performance
-struct GM_Instrument {
-    // ... fields ...
-} __attribute__((aligned(8)));
-```
-
-## Audio Format Support
-
-### MIDI Processing
-- Real-time synthesis with wavetable instruments
-- ADSR envelopes, LFOs, filters
-- Support for General MIDI, SoundFont 2.0
-- Karaoke lyrics via meta events
-
-### Sample Cache System
-- Efficient memory management for audio samples
-- Reference counting for shared samples
-- Cache hit/miss tracking
-
-### Platform Audio Output
-- SDL2 for cross-platform compatibility
-- Hardware MIDI input/output (GUI)
-- Real-time audio mixing and effects
-
-## Integration Points
-
-### External Libraries
-- **SDL2**: Cross-platform audio/video
-- **FLAC/Ogg/Vorbis**: Audio codecs
-- **RtMidi**: Hardware MIDI support
-- **LAME**: MP3 encoding
-
-### File Formats
-- **MIDI**: Standard MIDI files (.mid)
-- **RMF**: Beatnik Rich Music Format (.rmf)  
-- **Audio**: WAV, AIFF, AU, FLAC, OGG, MP3
-- **Banks**: SoundFont 2.0 (.sf2), DLS (.dls), HSB patches
-
-## Development Workflow
-
-### Adding New Features
-1. Check `inc/Makefile.common` for build flags
-2. Add conditional compilation blocks
-3. Update platform-specific code if needed
-4. Test across supported platforms
-
-### Debugging Audio Issues
-1. Enable debug builds: `make DEBUG=1`
-2. Check debug output in `playbae` with verbose flags
-3. Use `GM_GetRealtimeAudioInformation()` for voice status
-4. Verify sample cache usage with memory tools
-
-### Debugging crashes
-1. Enable debug builds: `make DEBUG=1 LDEBUG=1`
-2. Run playbae with gdb: `gdb --args bin/playbae -f /mnt/d/Music/MIDI/Mario/kart-credits.mid -t 3`
-
-### Testing
-- Test with various audio formats and sample rates
-- Verify cross-platform compatibility
-- Check memory usage with `BAE_GetSizeOfMemoryUsed()`
-- Test real-time performance and latency
-
-## Common Pitfalls
-
-### Memory Leaks
-- Always free `XPTR` allocations with `XDisposePtr()`
-- Check reference counting in sample cache
-- Use debug builds to track allocations
-
-### Platform Differences
-- Audio output APIs vary by platform
-- File path handling differs (Unix vs Windows)
-- Threading models may differ
-
-### Performance Issues
-- Fixed-point math for real-time audio
-- Avoid allocations during audio processing
-- Use appropriate interpolation modes
-- Monitor voice usage and CPU load
-
-### Build Configuration
-- Many features are optional - check which are enabled
-- Some codecs require external libraries
-- Cross-compilation has specific requirements
+## 7) NBEditor Implementation Notes (2026-04)
+- UI stack for the new editor path is Dear ImGui + SDL3 renderer backend. Do not add wxWidgets dependencies to nbeditor.
+- Keep nbstudio and nbeditor build targets separate during migration. Do not replace nbstudio wiring until explicitly requested.
+- nbeditor initial scope is MVP only:
+  - Player window
+  - Sample List window
+  - Instrument List window
+  - Context menu wiring is intentionally deferred
+- Use compile-time gates for all nbeditor slices and windows:
+  - `NBEDITOR`
+  - `NBEDITOR_MVP`
+  - `NBEDITOR_PLAYER_WINDOW`
+  - `NBEDITOR_SAMPLE_LIST_WINDOW`
+  - `NBEDITOR_INSTRUMENT_LIST_WINDOW`
+- Build parity requirement:
+  - Any `neobae/inc/Makefile.common` source/define changes for nbeditor must be mirrored in `CMakeLists.txt` nbeditor target wiring.
+- Current MVP data flow expectations:
+  - Transport/engine controls should use NeoBAE APIs directly (`BAEMixer_*`, `BAESong_*`).
+  - Sample/Instrument list population should come from `BAERmfEditorDocument_*` APIs when a document is loaded.
+- UX direction for player window:
+  - Simple rectangular controls over ornamental skins.
+  - Linear volume slider (not circular dial).
+  - 16 channel mute checkboxes and voice meter are required in MVP.
+  - Any oscilloscope should stay lightweight and optional-looking (small panel).

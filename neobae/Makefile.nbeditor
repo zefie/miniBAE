@@ -1,0 +1,96 @@
+BAE_API := SDL3
+USE_SDL3 := 1
+NOAUTO := 1
+EMBED_PATCHES := 1
+MOD2RMF := 1
+MTHC_SUPPORT := 1
+RETRO_RINGTONE_SUPPORT := 1
+CREATION_API := 1
+NBEDITOR := 1
+include inc/Makefile.common
+
+TARGET_BIN := nbeditor
+TARGET_BIN_FULL := $(TARGET_BIN)
+ifeq ($(WINDOWS),1)
+TARGET_BIN_FULL := $(TARGET_BIN).exe
+endif
+
+CC      ?= gcc
+CXX     ?= g++
+LD      := $(CC)
+AR      := ar
+STRIP   := strip
+
+OPTI := -O2 -fPIC
+
+ifeq ($(DEBUG),1)
+    OPTI := -g -O0 -ggdb3 -fPIC
+endif
+
+CFLAGS := $(ARCH) $(OPTI) $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value $(EXTRA_CFLAGS)
+
+ifneq ($(BAE_FLAGS),)
+    CFLAGS += $(BAE_FLAGS)
+endif
+
+include inc/Makefile.versioning
+CFLAGS += -D_VERSION=\"$(VERSION)\"
+
+LDFLAGS := $(OPTI)
+ifneq ($(BAE_LD_FLAGS),)
+    LDFLAGS += $(BAE_LD_FLAGS)
+endif
+
+ifneq ($(DEBUG),1)
+    LDFLAGS += -s
+endif
+
+LIBS = -lpthread -lm -lSDL3
+
+ifeq ($(WINDOWS),1)
+    LIBS += -limm32 -lwinmm -lsetupapi -lcfgmgr32 -lversion
+endif
+
+ifneq ($(BAE_LIBS),)
+    LIBS += $(BAE_LIBS)
+endif
+
+CXXFLAGS := $(CFLAGS)
+# Use C++ linker if we have any C++ sources
+ifneq ($(filter %.cpp,$(SRC) $(SRC_BIN)),)
+    LD := $(CXX)
+    LIBS += -lstdc++
+endif
+
+ifeq ($(WINDOWS),1)
+    WINDRES ?= $(if $(TARGET),$(TARGET)-windres,windres)
+    RC_WX_INCLUDE ?= -I/opt/llvm-mingw/generic-w64-mingw32/include/wx-3.3
+    RC_OBJ := $(OBJ_DIR)nbeditor_res.o
+    OBJ_BIN += $(RC_OBJ)
+endif
+
+all: $(TARGET_BIN_FULL)
+
+$(TARGET_BIN_FULL): ${OBJ_BIN}
+	@mkdir -p $(TARGET_OUT)
+    ${LD} -o $(TARGET_OUT)${TARGET_BIN_FULL} ${LDFLAGS} ${OBJ_BIN} ${LIBS}
+
+ifeq ($(WINDOWS),1)
+$(RC_OBJ): src/nbeditor/editor.rc
+	@echo @windres $<
+	@mkdir -p $(OBJ_DIR)
+	$(SILENT)$(WINDRES) $(INC_PATH) $(RC_WX_INCLUDE) $< -o $@
+endif
+
+# Generate rules for all unique source files
+ALL_SOURCES := $(sort $(SRC) $(SRC_BIN))
+$(foreach src,$(ALL_SOURCES),$(eval $(call make_obj_rule,$(src))))
+
+clean:
+	@rm -rf $(TARGET_OUT)
+	@rm -rf $(OBJ_DIR)
+	@rm -rf $(BUILD_DIR)
+	@rm -rf $(TEST_OUT_DIR)
+	@echo Cleaned!
+
+include inc/Makefile.tests

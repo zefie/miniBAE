@@ -1060,8 +1060,8 @@ int main(int argc, char **argv)
         ClearBackground((Color){10, 14, 24, 255});
 
         DrawRectangleGradientV(0, 0, sw, sh, (Color){11, 18, 35, 255}, (Color){27, 17, 34, 255});
-        DrawCircleGradient(sw - 120, 90, 180.0f, (Color){48, 173, 255, 80}, (Color){48, 173, 255, 0});
-        DrawCircleGradient(70, sh - 40, 240.0f, (Color){255, 132, 62, 65}, (Color){255, 132, 62, 0});
+        DrawCircleGradient((Vector2){(float)(sw - 120), 90.0f}, 180.0f, (Color){48, 173, 255, 80}, (Color){48, 173, 255, 0});
+        DrawCircleGradient((Vector2){70.0f, (float)(sh - 40)}, 240.0f, (Color){255, 132, 62, 65}, (Color){255, 132, 62, 0});
 
         DrawRectangleRounded(shell, 0.05f, 8, (Color){17, 22, 35, 232});
         DrawRectangleRoundedLines(shell, 0.05f, 8, (Color){70, 89, 124, 170});

@@ -159,6 +159,7 @@ option(BUILD_ZEFIDI "Build zefidi when SDL2/SDL3 backend and matching SDL_ttf ar
 option(ENABLE_MIDI_HW "Enable hardware MIDI I/O in zefidi via RtMidi" OFF)
 option(BUILD_CLITOOLS "Build CLI tools (songtool, rmf2mid, mid2rmf, mid2rmi, sf2-hsb, mod2rmf, instdump, bankrecomp)" ON)
 option(BUILD_NBSTUDIO "Build NeoBAE Studio (RMF/ZMF editor) when wxWidgets is found" ON)
+option(BUILD_NBEDITOR "Build NeoBAE Editor (Dear ImGui + SDL3)" ON)
 option(BUILD_RAYLIB_PLAYER "Build the raylib-based mini GUI player" ON)
 set(CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING "Build type (Debug, Release, RelWithDebInfo, MinSizeRel)" FORCE)
 
@@ -2056,5 +2057,119 @@ if(BUILD_NBSTUDIO)
     endif()
   else()
     message(STATUS "Skipping BUILD_NBSTUDIO (wxWidgets not found).")
+  endif()
+endif()
+
+if(BUILD_NBEDITOR)
+  if(NOT BAE_SDL3_INCLUDE_DIR)
+    find_path(BAE_SDL3_INCLUDE_DIR SDL3/SDL.h)
+  endif()
+  if(NOT BAE_SDL3_LIBRARY)
+    find_library(BAE_SDL3_LIBRARY NAMES SDL3)
+  endif()
+
+  set(NBEDITOR_LIBXMP_LITE_AVAILABLE OFF)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libxmp/include/xmp.h" AND
+     EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libxmp/src/lite/lite-player.c")
+    set(NBEDITOR_LIBXMP_LITE_AVAILABLE ON)
+  endif()
+
+  if(BAE_SDL3_INCLUDE_DIR AND BAE_SDL3_LIBRARY)
+    set(NBEDITOR_MAIN ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/nbeditor/nbeditor_main.cpp)
+    set(NBEDITOR_RC ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/nbeditor/editor.rc)
+    set(NBEDITOR_IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/imgui)
+
+    if(EXISTS ${NBEDITOR_MAIN} AND EXISTS ${NBEDITOR_IMGUI_DIR}/imgui.cpp)
+      set(NBEDITOR_SOURCES
+        ${NBEDITOR_MAIN}
+        ${NBEDITOR_IMGUI_DIR}/imgui.cpp
+        ${NBEDITOR_IMGUI_DIR}/imgui_draw.cpp
+        ${NBEDITOR_IMGUI_DIR}/imgui_tables.cpp
+        ${NBEDITOR_IMGUI_DIR}/imgui_widgets.cpp
+        ${NBEDITOR_IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
+        ${NBEDITOR_IMGUI_DIR}/backends/imgui_impl_sdlrenderer3.cpp
+      )
+      if(NBEDITOR_LIBXMP_LITE_AVAILABLE)
+        list(APPEND NBEDITOR_SOURCES
+          neobae/src/mod2rmf/mod2rmf_common.c
+          neobae/src/mod2rmf/mod2rmf_encoder.c
+          neobae/src/mod2rmf/mod2rmf_resampler.c
+          neobae/src/mod2rmf/mod2rmf_rmfcreat.c
+          neobae/src/mod2rmf/mod2rmf_song.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-virtual.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-format.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-period.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-player.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-read_event.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-misc.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-dataio.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-lfo.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-scan.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-control.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-filter.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-effects.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-mixer.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-mix_all.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-load_helpers.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-load.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-filetype.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-hio.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-smix.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-memio.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-rng.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-win32.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-flow.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-common.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-itsex.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-sample.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-xm_load.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-mod_load.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-s3m_load.c
+          neobae/src/thirdparty/libxmp/src/lite/lite-it_load.c
+        )
+      endif()
+      if(WIN32 AND EXISTS ${NBEDITOR_RC})
+        list(APPEND NBEDITOR_SOURCES ${NBEDITOR_RC})
+      endif()
+
+      add_executable(nbeditor ${NBEDITOR_SOURCES})
+      target_include_directories(nbeditor PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/nbeditor
+        ${NBEDITOR_IMGUI_DIR}
+        ${NBEDITOR_IMGUI_DIR}/backends
+        ${BAE_SDL3_INCLUDE_DIR}
+      )
+      if(NBEDITOR_LIBXMP_LITE_AVAILABLE)
+        target_include_directories(nbeditor PRIVATE
+          ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/mod2rmf
+          ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libxmp/src
+          ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libxmp/include
+        )
+      endif()
+      target_compile_definitions(nbeditor PRIVATE
+        NBEDITOR=1
+        NBEDITOR_MVP=1
+        NBEDITOR_PLAYER_WINDOW=1
+        NBEDITOR_SAMPLE_LIST_WINDOW=1
+        NBEDITOR_INSTRUMENT_LIST_WINDOW=1
+      )
+      if(NBEDITOR_LIBXMP_LITE_AVAILABLE)
+        target_compile_definitions(nbeditor PRIVATE LIBXMP_STATIC=1 LIBXMP_CORE_PLAYER=1 LIBXMP_BUILD=1)
+      endif()
+      target_link_libraries(nbeditor PRIVATE neobae ${BAE_SDL3_LIBRARY})
+      if(WIN32)
+        target_link_libraries(nbeditor PRIVATE imm32 winmm setupapi cfgmgr32 version)
+      endif()
+      if(NBEDITOR_LIBXMP_LITE_AVAILABLE)
+        message(STATUS "nbeditor: libxmp-lite module loading enabled.")
+      else()
+        message(STATUS "nbeditor: libxmp-lite not found, module loading disabled.")
+      endif()
+      message(STATUS "Building nbeditor with SDL3 + Dear ImGui.")
+    else()
+      message(STATUS "Skipping BUILD_NBEDITOR (nbeditor/imgui sources not present in workspace).")
+    endif()
+  else()
+    message(STATUS "Skipping BUILD_NBEDITOR (SDL3 headers/library not found).")
   endif()
 endif()

@@ -36,3 +36,5 @@ neobae/src/NeoBAEDroid/app/NeoBAEDroid.app.main.iml
 neobae/src/NeoBAEDroid/.kotlin/
 neobae/src/NeoBAEDroid/app/NeoBAEDroid.app.androidTest.iml
 neobae/src/NeoBAEDroid/app/NeoBAEDroid.app.unitTest.iml
+
+.github/nbeditor_reference_images/

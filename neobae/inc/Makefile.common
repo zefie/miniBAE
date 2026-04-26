@@ -62,6 +62,17 @@ ifeq ($(NBSTUDIO),1)
 	CLASSIC_CHORUS := 1
 endif
 
+ifeq ($(NBEDITOR),1)
+	# NBEditor requires ZMF support
+	# and the creation API
+	ZMF_SUPPORT := 1
+	CREATION_API := 1
+	FIX_SPAN_DC := 1
+	CLASSIC_CHORUS := 1
+	BAE_FLAGS += -DNBEDITOR=1 -DNBEDITOR_MVP=1 -DNBEDITOR_PLAYER_WINDOW=1 -DNBEDITOR_SAMPLE_LIST_WINDOW=1 -DNBEDITOR_INSTRUMENT_LIST_WINDOW=1
+	INC_PATH += -Isrc/thirdparty/imgui -Isrc/thirdparty/imgui/backends
+endif
+
 ifeq ($(CREATION_API),1) 
 	# All of these are required for ZMF support
 	ifneq ($(CREATION_NO_CODECS),1)
@@ -745,7 +756,7 @@ ifeq ($(MOD2RMF),1)
 	SRC += src/mod2rmf/mod2rmf_common.c src/mod2rmf/mod2rmf_encoder.c src/mod2rmf/mod2rmf_resampler.c src/mod2rmf/mod2rmf_rmfcreat.c src/mod2rmf/mod2rmf_song.c
 	INC_PATH += -Isrc/mod2rmf
 	INC_PATH += -Isrc/thirdparty/libxmp/include
-	BAE_FLAGS += -DLIBXMP_STATIC=1 -DLIBXMP_CORE_PLAYER=1
+	BAE_FLAGS += -DLIBXMP_STATIC=1 -DLIBXMP_CORE_PLAYER=1 -DLIBXMP_BUILD=1
 	SRC += src/thirdparty/libxmp/src/lite/lite-virtual.c
 	SRC += src/thirdparty/libxmp/src/lite/lite-format.c
 	SRC += src/thirdparty/libxmp/src/lite/lite-period.c
@@ -852,34 +863,45 @@ else
 											BAE_LIBS += -lz $(shell pkg-config --libs gtk+-3.0) $(shell pkg-config --libs glib-2.0)
 										endif
 									else
-										ifeq ($(ADP2WAV),1)
-											# adp2wav with third-party G.722 decoder
-											SRC := src/adp2wav/adp2wav_main.c src/adp2wav/adp2wav_decode.c src/thirdparty/libg722/g722_decode.c
+										ifeq ($(NBEDITOR),1)
+											SRC += src/nbeditor/nbeditor_main.cpp \
+												src/thirdparty/imgui/imgui.cpp \
+												src/thirdparty/imgui/imgui_draw.cpp \
+												src/thirdparty/imgui/imgui_tables.cpp \
+												src/thirdparty/imgui/imgui_widgets.cpp \
+												src/thirdparty/imgui/backends/imgui_impl_sdl3.cpp \
+												src/thirdparty/imgui/backends/imgui_impl_sdlrenderer3.cpp
 										else
-											ifeq ($(MIDDECOMP),1)
-												SRC := src/mthc/mthc_decomp.c src/mthc/mthc_main.c
+											ifeq ($(ADP2WAV),1)
+												# adp2wav with third-party G.722 decoder
+												SRC := src/adp2wav/adp2wav_main.c src/adp2wav/adp2wav_decode.c src/thirdparty/libg722/g722_decode.c
 											else
-												ifeq ($(RAYLIB_EXAMPLE),1)
-													SRC += src/raylib_example/audio_stream_callback.c
-													BAE_LIBS += -lraylib -lm
+												ifeq ($(MIDDECOMP),1)
+													SRC := src/mthc/mthc_decomp.c src/mthc/mthc_main.c
 												else
-													ifneq ($(WASM),1)
-														ifneq ($(SONGTOOL),1)
-																ifeq ($(RINGTONE2MID),1)
-																	# libNeoBAE srcs + ringtone2mid.c
-																	SRC += src/ringtone2mid/ringtone2mid.c
-																else
-																	ifeq ($(NEOBAE_TUI),1)
-																		# neobae-tui = libNeoBAE srcs + neobae_tui.c
-																		SRC += src/playbae/neobae_tui.c
+													ifeq ($(RAYLIB_EXAMPLE),1)
+														SRC += src/raylib_example/audio_stream_callback.c
+														BAE_LIBS += -lraylib -lm
+													else
+														ifneq ($(WASM),1)
+															ifneq ($(SONGTOOL),1)
+																	ifeq ($(RINGTONE2MID),1)
+																		# libNeoBAE srcs + ringtone2mid.c
+																		SRC += src/ringtone2mid/ringtone2mid.c
 																	else
-																		# playbae = libNeoBAE srcs + playbae.c
-																		SRC += src/playbae/playbae.c
+																		ifeq ($(NEOBAE_TUI),1)
+																			# neobae-tui = libNeoBAE srcs + neobae_tui.c
+																			SRC += src/playbae/neobae_tui.c
+																		else
+																			# playbae = libNeoBAE srcs + playbae.c
+																			SRC += src/playbae/playbae.c
+																		endif
 																	endif
+																else
+																	# libNeoBAE srcs + songtool.c
+																	SRC += src/songtool/songtool.c
 																endif
-														else
-															# libNeoBAE srcs + songtool.c
-															SRC += src/songtool/songtool.c
+															endif
 														endif
 													endif
 												endif
