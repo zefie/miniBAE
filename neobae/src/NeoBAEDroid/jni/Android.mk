@@ -62,6 +62,7 @@ include $(CLEAR_VARS)
 
 LOCAL_MODULE    := NeoBAE
 LOCAL_SRC_FILES	:= \
+			Common/BAE_Override.c \
 			Common/DriverTools.c \
 			Common/GenAudioStreams.c \
 			Common/GenCache.c \
@@ -105,6 +106,7 @@ LOCAL_SRC_FILES	:= \
       		Common/XVorbisFiles.c \
 			Common/XOpusFiles.c \
 			Common/XQOAFiles.c \
+			Common/X_DebugCallback.c \
 			../mthc/mthc_decomp.c \
 			../adp2wav/adp2wav_decode.c \
 			../thirdparty/libg722/g722_decode.c \
