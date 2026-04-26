@@ -73,6 +73,16 @@ import androidx.lifecycle.lifecycleScope
 import kotlin.math.roundToInt
 import java.io.IOException
 
+private val BUILT_IN_REVERB_OPTIONS = listOf(
+    "None", "Igor's Closet", "Igor's Garage", "Igor's Acoustic Lab",
+    "Igor's Cavern", "Igor's Dungeon", "Small Reflections",
+    "Early Reflections", "Basement", "Banquet Hall", "Catacombs",
+    "Neo Room", "Neo Hall", "Neo Cavern", "Neo Dungeon", "Neo ROMpler", "Neo Nokia", "Neo Tap Delay"
+)
+
+private val CUSTOM_REVERB_TYPE: Int
+    get() = BUILT_IN_REVERB_OPTIONS.size + 1
+
 class HomeFragment : Fragment() {
 
     companion object {
@@ -915,7 +925,7 @@ class HomeFragment : Fragment() {
                             if (Mixer.getMixer() != null) {
                                 Mixer.setDefaultReverb(value)
 
-                                if (value == 18) {
+                                if (value == CUSTOM_REVERB_TYPE) {
                                     val active = getActiveCustomReverbPresetName(requireContext())
                                     if (!active.isNullOrEmpty()) {
                                         loadCustomReverbPreset(requireContext(), active)?.let { preset ->
@@ -1292,7 +1302,7 @@ class HomeFragment : Fragment() {
                                         // Re-apply Neo Reverb custom parameters after mixer recreation.
                                         val prefs = ctx.getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
                                         val currentReverb = prefs.getInt("default_reverb", reverbType.value)
-                                        if (currentReverb == 18) {
+                                        if (currentReverb == CUSTOM_REVERB_TYPE) {
                                             val active = getActiveCustomReverbPresetName(ctx)
                                             if (!active.isNullOrEmpty()) {
                                                 loadCustomReverbPreset(ctx, active)?.let { preset ->
@@ -1824,7 +1834,7 @@ class HomeFragment : Fragment() {
                 val velocityCurvePref = prefs.getInt("velocity_curve", 1)
                 Mixer.setDefaultReverb(reverbType)
 
-                if (reverbType == 18) {
+                if (reverbType == CUSTOM_REVERB_TYPE) {
                     val active = getActiveCustomReverbPresetName(requireContext())
                     if (!active.isNullOrEmpty()) {
                         loadCustomReverbPreset(requireContext(), active)?.let { preset ->
@@ -2484,7 +2494,7 @@ class HomeFragment : Fragment() {
                                     Mixer.setClassicChorus(classicChorus.value)
                                     val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
                                     val currentReverb = prefs.getInt("default_reverb", reverbType.value)
-                                    if (currentReverb == 18) {
+                                    if (currentReverb == CUSTOM_REVERB_TYPE) {
                                         val active = getActiveCustomReverbPresetName(requireContext())
                                         if (!active.isNullOrEmpty()) {
                                             loadCustomReverbPreset(requireContext(), active)?.let { preset ->
@@ -2653,7 +2663,7 @@ class HomeFragment : Fragment() {
                                 Mixer.setClassicChorus(classicChorus.value)
                                 val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
                                 val currentReverb = prefs.getInt("default_reverb", reverbType.value)
-                                if (currentReverb == 18) {
+                                if (currentReverb == CUSTOM_REVERB_TYPE) {
                                     val active = getActiveCustomReverbPresetName(requireContext())
                                     if (!active.isNullOrEmpty()) {
                                         loadCustomReverbPreset(requireContext(), active)?.let { preset ->
@@ -5808,13 +5818,7 @@ fun SettingsScreenContent(
     onCustomReverbSync: () -> Unit
 ) {
     val context = LocalContext.current
-    val builtInReverbOptions = listOf(
-        "None", "Igor's Closet", "Igor's Garage", "Igor's Acoustic Lab",
-        "Igor's Cavern", "Igor's Dungeon", "Small Reflections",
-        "Early Reflections", "Basement", "Banquet Hall", "Catacombs",
-        "Neo Room", "Neo Hall", "Neo Cavern", "Neo Dungeon", "Neo Nokia", "Neo Tap Delay"
-    )
-
+    val builtInReverbOptions = BUILT_IN_REVERB_OPTIONS
     var presetNames by remember { mutableStateOf(loadCustomReverbPresetNames(context)) }
     var activePresetName by remember { mutableStateOf(getActiveCustomReverbPresetName(context)) }
     var showSavePresetDialog by remember { mutableStateOf(false) }
@@ -5833,7 +5837,7 @@ fun SettingsScreenContent(
                 presetNames = loadCustomReverbPresetNames(context)
                 activePresetName = preset.name
                 setActiveCustomReverbPresetName(context, preset.name)
-                onReverbChange(18)
+                onReverbChange(CUSTOM_REVERB_TYPE)
                 applyCustomReverbPresetToEngine(context, preset)
                 onCustomReverbSync()
                 Toast.makeText(context, "Imported preset: ${preset.name}", Toast.LENGTH_SHORT).show()
@@ -5868,7 +5872,7 @@ fun SettingsScreenContent(
     val reverbOptions = remember(presetNames) { builtInReverbOptions + listOf("Custom") + presetNames }
 
     val selectedReverbLabel = when {
-        reverbType == 18 -> {
+        reverbType == CUSTOM_REVERB_TYPE -> {
             val ap = activePresetName
             if (ap != null && presetNames.contains(ap)) ap else "Custom"
         }
@@ -5879,7 +5883,7 @@ fun SettingsScreenContent(
         val preset = loadCustomReverbPreset(context, name) ?: return
         setActiveCustomReverbPresetName(context, name)
         activePresetName = name
-        onReverbChange(18)
+        onReverbChange(CUSTOM_REVERB_TYPE)
         applyCustomReverbPresetToEngine(context, preset)
         onCustomReverbSync()
     }
@@ -6086,7 +6090,7 @@ fun SettingsScreenContent(
                                     }
                                     index == customEntryIndex -> {
                                         clearActivePreset()
-                                        onReverbChange(18)
+                                        onReverbChange(CUSTOM_REVERB_TYPE)
                                         applyDefaultCustomReverbToEngine(context)
                                         onCustomReverbSync()
                                     }
@@ -6561,7 +6565,7 @@ fun SettingsScreenContent(
                                         }
                                         index == customEntryIndex -> {
                                             clearActivePreset()
-                                            onReverbChange(18)
+                                            onReverbChange(CUSTOM_REVERB_TYPE)
                                             applyDefaultCustomReverbToEngine(context)
                                             onCustomReverbSync()
                                         }
@@ -7108,7 +7112,7 @@ fun SettingsScreenContent(
                         saveCustomReverbPreset(context, preset)
                         presetNames = loadCustomReverbPresetNames(context)
                         activePresetName = name
-                        onReverbChange(18)
+                        onReverbChange(CUSTOM_REVERB_TYPE)
                         onCustomReverbSync()
                     }
                     showSavePresetDialog = false
@@ -7132,7 +7136,7 @@ fun SettingsScreenContent(
                         deleteCustomReverbPreset(context, name)
                         presetNames = loadCustomReverbPresetNames(context)
                         clearActivePreset()
-                        onReverbChange(18)
+                        onReverbChange(CUSTOM_REVERB_TYPE)
                         onCustomReverbSync()
                     }
                     showDeletePresetDialog = false

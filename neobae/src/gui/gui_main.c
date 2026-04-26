@@ -3388,7 +3388,7 @@ int main(int argc, char *argv[])
                 extern int g_preset_name_cursor;
                 
                 // If we're on an existing custom preset, populate the text field with its name
-                if (reverbType > BAE_REVERB_TYPE_18)
+                if (reverbType > BAE_REVERB_TYPE_19)
                 {
                     const char *current_name = get_reverb_name(reverbType - 1);
                     if (current_name)
@@ -3411,8 +3411,8 @@ int main(int argc, char *argv[])
             Rect deleteBtn = {saveBtn.x + saveBtn.w + spacing, btnY, 20, 20};
             bool overDelete = custom_controls_enabled && point_in(ui_mx, ui_my, deleteBtn);
             // Only allow delete when a saved custom preset (after "Custom") is selected.
-            // "Custom" itself is BAE_REVERB_TYPE_18.
-            bool can_delete_preset = (reverbType > BAE_REVERB_TYPE_18);
+            // "Custom" itself is BAE_REVERB_TYPE_19.
+            bool can_delete_preset = (reverbType > BAE_REVERB_TYPE_19);
             SDL_Color delete_bg = (overDelete && can_delete_preset) ? g_button_hover : g_button_base;
             if (!custom_controls_enabled || !can_delete_preset)
             {
@@ -7006,7 +7006,7 @@ int main(int argc, char *argv[])
                 }
 
                 // Reset to "Custom" default
-                reverbType = BAE_REVERB_TYPE_18;
+                reverbType = BAE_REVERB_TYPE_19;
                 bae_set_reverb(reverbType);
                 if (g_current_bank_path[0] != '\0')
                 {

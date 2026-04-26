@@ -170,6 +170,7 @@ extern "C"
         BAE_REVERB_TYPE_16,    // Neo SC55-style (Neo reverb)
         BAE_REVERB_TYPE_17,    // Neo Nokia (Neo reverb)
         BAE_REVERB_TYPE_18,    // Neo Tap Delay (Neo reverb)
+        BAE_REVERB_TYPE_19,     // Custom (Neo reverb)
         BAE_REVERB_TYPE_COUNT
     } BAEReverbType;
 

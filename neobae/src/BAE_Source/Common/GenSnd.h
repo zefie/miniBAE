@@ -503,12 +503,13 @@ extern "C"
         REVERB_TYPE_13,       // Neo Hall (Neo reverb)
         REVERB_TYPE_14,       // Neo Cavern (Neo reverb)
         REVERB_TYPE_15,       // Neo Dungeon (Neo reverb)
-        REVERB_TYPE_16,       // Neo Reserved (Neo reverb)
-        REVERB_TYPE_17,       // Neo Tap Delay (Neo reverb)
-        REVERB_TYPE_18        // Neo Custom
+        REVERB_TYPE_16,       // Neo SC-55 (Neo reverb)
+        REVERB_TYPE_17,       // Neo Nokia (Neo reverb)
+        REVERB_TYPE_18,       // Neo Tap Delay (Neo reverb)
+        REVERB_TYPE_19        // Custom
     };
     typedef char ReverbMode;
-#define MAX_REVERB_TYPES 19
+#define MAX_REVERB_TYPES 20
 
     typedef void (*GM_ReverbProc)(ReverbMode which);
 

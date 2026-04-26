@@ -1048,7 +1048,8 @@ static const ReverbMode translateInternal[] = {
     REVERB_TYPE_15,
     REVERB_TYPE_16,
     REVERB_TYPE_17,
-    REVERB_TYPE_18};
+    REVERB_TYPE_18,
+    REVERB_TYPE_19};
 static const BAEReverbType translateExternal[] = {
     BAE_REVERB_NO_CHANGE,
     BAE_REVERB_TYPE_1,
@@ -1068,7 +1069,8 @@ static const BAEReverbType translateExternal[] = {
     BAE_REVERB_TYPE_15,
     BAE_REVERB_TYPE_16,
     BAE_REVERB_TYPE_17,
-    BAE_REVERB_TYPE_18};
+    BAE_REVERB_TYPE_18,
+    BAE_REVERB_TYPE_19};
 // translate reverb types from BAEReverbType to ReverbMode
 ReverbMode BAE_TranslateFromBAEReverb(BAEReverbType igorVerb)
 {
