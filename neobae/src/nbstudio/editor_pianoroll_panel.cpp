@@ -673,6 +673,9 @@ public:
         
         SetBackgroundStyle(wxBG_STYLE_PAINT);
         SetScrollRate(16, 16);
+        // This panel draws sticky overlays (ruler/gutter). Disable physical
+        // blit scrolling so wxWidgets does not copy stale pixels while panning.
+        EnableScrolling(false, false);
         Bind(wxEVT_PAINT, &PianoRollPanel::OnPaint, this);
         Bind(wxEVT_LEFT_DOWN, &PianoRollPanel::OnLeftDown, this);
         Bind(wxEVT_LEFT_UP, &PianoRollPanel::OnLeftUp, this);
@@ -686,6 +689,9 @@ public:
         Bind(wxEVT_SCROLLWIN_LINEDOWN, &PianoRollPanel::OnScrollWin, this);
         Bind(wxEVT_SCROLLWIN_PAGEUP, &PianoRollPanel::OnScrollWin, this);
         Bind(wxEVT_SCROLLWIN_PAGEDOWN, &PianoRollPanel::OnScrollWin, this);
+        Bind(wxEVT_SCROLLWIN_THUMBRELEASE, &PianoRollPanel::OnScrollWin, this);
+        Bind(wxEVT_SCROLLWIN_TOP, &PianoRollPanel::OnScrollWin, this);
+        Bind(wxEVT_SCROLLWIN_BOTTOM, &PianoRollPanel::OnScrollWin, this);
         Bind(wxEVT_CHAR_HOOK, &PianoRollPanel::OnCharHook, this);
         Bind(wxEVT_MENU, &PianoRollPanel::OnEditSelectedItem, this, ID_PianoRollEdit);
         Bind(wxEVT_MENU, &PianoRollPanel::OnDeleteSelectedItem, this, ID_PianoRollDelete);
@@ -5053,6 +5059,8 @@ private:
         int newTop = currentTop - (steps * kNoteHeight * 3);
         newTop = std::clamp(newTop, 0, maxTop);
         Scroll(viewUnitsX, newTop / scrollPixelsY);
+        m_cacheDirty = true;
+        Refresh(false);
     }
 
     void OnScrollWin(wxScrollWinEvent &event) {
@@ -5062,6 +5070,8 @@ private:
                 m_autoFollowChangedCallback(false);
             }
         }
+        m_cacheDirty = true;
+        Refresh(false);
         event.Skip();
     }
 
