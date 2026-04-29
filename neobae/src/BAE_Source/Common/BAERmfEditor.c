@@ -7638,6 +7638,9 @@ static BAEResult PV_BuildTrackData(BAERmfEditorTrack const *track,
                         XDisposePtr(events);
                         return result;
                     }
+                    /* CC0 consumed the delta; all subsequent injected events at the
+                       same tick (CC32, PC) must use delta=0. */
+                    delta = 0;
                     if (bankLsb != 0 || prevBankLsb != 0)
                     {
                         result = PV_ByteBufferAppendVLQ(trackData, 0);
@@ -7664,7 +7667,6 @@ static BAEResult PV_BuildTrackData(BAERmfEditorTrack const *track,
                             XDisposePtr(events);
                             return result;
                         }
-                        delta = 0;
                     }
                     currentBank[eventChannel] = event->bank;
                 }
@@ -18340,13 +18342,15 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBankToInstID(
 
 static BAEResult PV_WriteRmfDocumentToResourceFile(BAERmfEditorDocument *document,
                                                    XFILE fileRef,
-                                                   int32_t resourceID)
+                                                   int32_t resourceID,
+                                                   bool preserveOriginalMidi)
 {
     XLongResourceID midiID;
     ByteBuffer midiData;
     char midiName[256];
     BAEResult result;
     bool isZmf;
+    BAERmfEditorResourceEntry const *originalMidiEntry;
 
     if (!document || !fileRef)
     {
@@ -18354,6 +18358,13 @@ static BAEResult PV_WriteRmfDocumentToResourceFile(BAERmfEditorDocument *documen
     }
 
     isZmf = (resourceID == XFILERESOURCE_ZMF_ID) ? TRUE : FALSE;
+    originalMidiEntry = NULL;
+    if (preserveOriginalMidi && document->loadedFromRmf && document->originalObjectResourceID != 0)
+    {
+        originalMidiEntry = PV_FindOriginalResourceByTypeAndID(document,
+                                                               document->originalMidiType,
+                                                               document->originalObjectResourceID);
+    }
 
     debug_message("[RMF Save] Starting save, trackCount=%u, format=%s\n", document->trackCount, isZmf ? "ZMF" : "RMF");
     result = BAERmfEditorDocument_Validate(document);
@@ -18364,14 +18375,17 @@ static BAEResult PV_WriteRmfDocumentToResourceFile(BAERmfEditorDocument *documen
     }
     
     XSetMemory(&midiData, sizeof(midiData), 0);
-    result = PV_BuildMidiFile(document, &midiData);
-    debug_message("[RMF Save] BuildMidiFile result=%d, size=%u\n", (int)result, midiData.size);
-    if (result != BAE_NO_ERROR)
+    if (!originalMidiEntry)
     {
-        PV_ByteBufferDispose(&midiData);
-        return result;
+        result = PV_BuildMidiFile(document, &midiData);
+        debug_message("[RMF Save] BuildMidiFile result=%d, size=%u\n", (int)result, midiData.size);
+        if (result != BAE_NO_ERROR)
+        {
+            PV_ByteBufferDispose(&midiData);
+            return result;
+        }
+        PV_DebugReportMidiRoundTripDiff(document, &midiData);
     }
-    PV_DebugReportMidiRoundTripDiff(document, &midiData);
     result = PV_EnsureResourceFileReady(fileRef, resourceID);
     debug_message("[RMF Save] EnsureResourceFileReady result=%d\n", (int)result);
     if (result != BAE_NO_ERROR)
@@ -18420,11 +18434,7 @@ static BAEResult PV_WriteRmfDocumentToResourceFile(BAERmfEditorDocument *documen
             char midiPascalName[256];
             XPTR encodedMidi;
             int32_t encodedMidiSize;
-            BAERmfEditorResourceEntry const *originalMidiEntry;
 
-            originalMidiEntry = PV_FindOriginalResourceByTypeAndID(document,
-                                                                   document->originalMidiType,
-                                                                   document->originalObjectResourceID);
             if (originalMidiEntry && originalMidiEntry->pascalName[0])
             {
                 XBlockMove(originalMidiEntry->pascalName, midiPascalName, 256);
@@ -18433,6 +18443,21 @@ static BAEResult PV_WriteRmfDocumentToResourceFile(BAERmfEditorDocument *documen
             {
                 PV_CreatePascalName(document->info[TITLE_INFO] ? document->info[TITLE_INFO] : "Song", midiPascalName);
             }
+
+            if (originalMidiEntry && originalMidiEntry->data && originalMidiEntry->size > 0)
+            {
+                if (XAddFileResource(fileRef,
+                                     originalMidiEntry->type,
+                                     document->originalObjectResourceID,
+                                     midiPascalName,
+                                     originalMidiEntry->data,
+                                     originalMidiEntry->size) != 0)
+                {
+                    PV_ByteBufferDispose(&midiData);
+                    return BAE_FILE_IO_ERROR;
+                }
+            }
+            else
             {
                 XResourceType usedMidiType;
                 result = PV_EncodeMidiForStorageType(document->midiStorageType,
@@ -18567,7 +18592,7 @@ BAEResult BAERmfEditorDocument_SaveAsRmfToMemory(BAERmfEditorDocument *document,
         return BAE_FILE_IO_ERROR;
     }
 
-    result = PV_WriteRmfDocumentToResourceFile(document, fileRef, resourceID);
+    result = PV_WriteRmfDocumentToResourceFile(document, fileRef, resourceID, FALSE);
     if (result != BAE_NO_ERROR)
     {
         XFileClose(fileRef);
@@ -18629,6 +18654,88 @@ BAEResult BAERmfEditorDocument_SaveAsRmf(BAERmfEditorDocument *document,
     {
         return result;
     }
+
+    XConvertPathToXFILENAME(filePath, &name);
+    fileRef = XFileOpenForWrite(&name, TRUE);
+    if (!fileRef)
+    {
+        XDisposePtr((XPTR)rmfData);
+        return BAE_FILE_IO_ERROR;
+    }
+
+    if (XFileSetLength(fileRef, 0) != 0 ||
+        XFileSetPosition(fileRef, 0L) != 0 ||
+        XFileWrite(fileRef, rmfData, (int32_t)rmfSize) != 0)
+    {
+        XFileClose(fileRef);
+        XDisposePtr((XPTR)rmfData);
+        return BAE_FILE_IO_ERROR;
+    }
+
+    XFileClose(fileRef);
+    XDisposePtr((XPTR)rmfData);
+    return BAE_NO_ERROR;
+}
+
+BAEResult BAERmfEditorDocument_SaveAsRmfPreserveMidi(BAERmfEditorDocument *document,
+                                                     BAEPathName filePath)
+{
+    unsigned char *rmfData;
+    uint32_t rmfSize;
+    XFILENAME name;
+    XFILE fileRef;
+    BAEResult result;
+    bool useZmfContainer;
+    const char *ext;
+    XPTR data;
+    int32_t size;
+
+    if (!document || !filePath)
+    {
+        return BAE_PARAM_ERR;
+    }
+
+    ext = strrchr(filePath, '.');
+    if (ext && (strcmp(ext, ".zmf") == 0 || strcmp(ext, ".ZMF") == 0))
+    {
+        useZmfContainer = TRUE;
+    }
+    else
+    {
+        useZmfContainer = FALSE;
+    }
+
+    fileRef = XFileOpenVirtualResource(useZmfContainer ? XFILERESOURCE_ZMF_ID : XFILERESOURCE_ID);
+    if (!fileRef)
+    {
+        return BAE_FILE_IO_ERROR;
+    }
+
+    result = PV_WriteRmfDocumentToResourceFile(document,
+                                               fileRef,
+                                               useZmfContainer ? XFILERESOURCE_ZMF_ID : XFILERESOURCE_ID,
+                                               TRUE);
+    if (result != BAE_NO_ERROR)
+    {
+        XFileClose(fileRef);
+        return result;
+    }
+
+    data = NULL;
+    size = 0;
+    if (XFileGetMemoryFileAsData(fileRef, &data, &size) != 0 || !data || size <= 0)
+    {
+        XFileClose(fileRef);
+        if (data)
+        {
+            XDisposePtr(data);
+        }
+        return BAE_FILE_IO_ERROR;
+    }
+    XFileClose(fileRef);
+
+    rmfData = (unsigned char *)data;
+    rmfSize = (uint32_t)size;
 
     XConvertPathToXFILENAME(filePath, &name);
     fileRef = XFileOpenForWrite(&name, TRUE);

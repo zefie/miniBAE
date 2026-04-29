@@ -29,6 +29,18 @@ android {
         }
     }
 
+    flavorDimensions "distribution"
+    productFlavors {
+        apk {
+            dimension "distribution"
+            buildConfigField "boolean", "USE_MANAGE_EXTERNAL_STORAGE", "true"
+        }
+        play {
+            dimension "distribution"
+            buildConfigField "boolean", "USE_MANAGE_EXTERNAL_STORAGE", "false"
+        }
+    }
+
     externalNativeBuild {
         ndkBuild {
             path file('../jni/Android.mk')

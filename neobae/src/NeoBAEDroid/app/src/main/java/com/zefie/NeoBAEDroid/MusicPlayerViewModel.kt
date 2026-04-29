@@ -1,6 +1,8 @@
 package com.zefie.NeoBAEDroid
 
 import android.content.Context
+import android.net.Uri
+import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.compose.runtime.Stable
@@ -8,6 +10,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import com.zefie.NeoBAEDroid.SafUriRegistry
 import com.zefie.NeoBAEDroid.database.SQLiteHelper
 import com.zefie.NeoBAEDroid.database.FileEntity
 import kotlinx.coroutines.Dispatchers
@@ -16,6 +19,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.regex.Pattern
 
 enum class SortMode {
     NAME_ASC,
@@ -425,6 +429,11 @@ class MusicPlayerViewModel : ViewModel() {
     fun searchFilesInDatabase(query: String, currentPath: String?, limit: Int = 1000) {
         android.util.Log.d("MusicPlayerViewModel", "searchFilesInDatabase: query='$query', path='$currentPath', limit=$limit, db=${database != null}")
         
+        if (isSafPath(currentPath)) {
+            searchSafFiles(query, currentPath, limit)
+            return
+        }
+
         if (query.isEmpty()) {
             _searchResults.value = emptyList()
             return
@@ -486,6 +495,11 @@ class MusicPlayerViewModel : ViewModel() {
     fun getAllFilesInDatabase(currentPath: String?, limit: Int = 1000) {
         android.util.Log.d("MusicPlayerViewModel", "getAllFilesInDatabase: path='$currentPath', limit=$limit, db=${database != null}")
         
+        if (isSafPath(currentPath)) {
+            getAllSafFiles(currentPath, limit)
+            return
+        }
+
         if (database == null) {
             android.util.Log.w("MusicPlayerViewModel", "Database not initialized!")
             _searchResults.value = emptyList()
@@ -537,7 +551,132 @@ class MusicPlayerViewModel : ViewModel() {
             }
         }
     }
-    
+
+    private fun isSafPath(path: String?): Boolean {
+        return path?.startsWith("content://") == true
+    }
+
+    private fun normalizeSafUriString(uriString: String): String {
+        return uriString.trim().trimEnd('/')
+    }
+
+    private fun getSafDocumentFile(uriString: String): DocumentFile? {
+        val uri = try { Uri.parse(normalizeSafUriString(uriString)) } catch (_: Exception) { null } ?: return null
+        return DocumentFile.fromTreeUri(appContext!!, uri) ?: DocumentFile.fromSingleUri(appContext!!, uri)
+    }
+
+    private fun sanitizeFilename(name: String): String {
+        return name.replace(Regex("[^A-Za-z0-9._-]"), "_")
+    }
+
+    private fun getSafCacheFile(uri: Uri, displayName: String): File {
+        val safeName = sanitizeFilename(displayName)
+        val cacheFolder = File(appContext!!.cacheDir, "safsearch")
+        if (!cacheFolder.exists()) cacheFolder.mkdirs()
+        return File(cacheFolder, "${uri.hashCode()}_$safeName")
+    }
+
+    private suspend fun collectSafSearchFiles(root: DocumentFile, query: String?, recursive: Boolean, validExtensions: Set<String>, limit: Int): List<PlaylistItem> {
+        val results = mutableListOf<PlaylistItem>()
+        root.listFiles().forEach { item ->
+            if (item.isDirectory) {
+                if (recursive) {
+                    results += collectSafSearchFiles(item, query, true, validExtensions, limit - results.size)
+                    if (results.size >= limit) return@forEach
+                }
+            } else {
+                val name = item.name ?: return@forEach
+                val extension = name.substringAfterLast('.', "").lowercase()
+                if (extension !in validExtensions) return@forEach
+                if (!query.isNullOrEmpty() && !name.contains(query, ignoreCase = true)) return@forEach
+
+                val cacheFile = getSafCacheFile(item.uri, name)
+                SafUriRegistry.register(cacheFile.absolutePath, item.uri)
+                if (!cacheFile.exists()) {
+                    try {
+                        appContext?.contentResolver?.openInputStream(item.uri)?.use { input ->
+                            cacheFile.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                    } catch (_: Exception) {
+                    }
+                }
+
+                results.add(
+                    PlaylistItem(
+                        file = cacheFile,
+                        uri = item.uri,
+                        title = name,
+                        path = item.uri.toString(),
+                        durationMs = 0,
+                        isFolder = false
+                    )
+                )
+                if (results.size >= limit) return@forEach
+            }
+        }
+        return results
+    }
+
+    fun searchSafFiles(query: String, currentPath: String?, limit: Int = 1000) {
+        if (appContext == null) {
+            _searchResults.value = emptyList()
+            return
+        }
+
+        val path = currentPath ?: ""
+        val doc = getSafDocumentFile(path)
+        if (doc == null || !doc.isDirectory) {
+            _searchResults.value = emptyList()
+            return
+        }
+
+        isSearching = true
+        viewModelScope.launch {
+            try {
+                val results = withContext(Dispatchers.IO) {
+                    val validExtensions = appContext?.let { HomeFragment.getMusicExtensions(it) } ?: emptySet()
+                    collectSafSearchFiles(doc, query, true, validExtensions, limit)
+                }
+                _searchResults.value = results
+            } catch (e: Exception) {
+                _searchResults.value = emptyList()
+            } finally {
+                isSearching = false
+            }
+        }
+    }
+
+    fun getAllSafFiles(currentPath: String?, limit: Int = 1000) {
+        if (appContext == null) {
+            _searchResults.value = emptyList()
+            return
+        }
+
+        val path = currentPath ?: ""
+        val doc = getSafDocumentFile(path)
+        if (doc == null || !doc.isDirectory) {
+            _searchResults.value = emptyList()
+            return
+        }
+
+        isSearching = true
+        viewModelScope.launch {
+            try {
+                val results = withContext(Dispatchers.IO) {
+                    val validExtensions = appContext?.let { HomeFragment.getMusicExtensions(it) } ?: emptySet()
+                    collectSafSearchFiles(doc, null, true, validExtensions, limit)
+                }
+                _searchResults.value = results
+            } catch (e: Exception) {
+                _searchResults.value = emptyList()
+            } finally {
+                isSearching = false
+            }
+        }
+    }
+
     // Build/rebuild the file index for the specified directory and its subdirectories
     fun rebuildIndex(rootPath: String, onComplete: (Int, Int, Long) -> Unit) {
         viewModelScope.launch {

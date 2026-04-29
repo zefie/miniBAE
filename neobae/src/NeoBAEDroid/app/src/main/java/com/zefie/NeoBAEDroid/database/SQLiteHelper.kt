@@ -7,12 +7,21 @@ import java.security.MessageDigest
 
 class SQLiteHelper private constructor(private val context: Context) {
     private val dbDir: File
-    private val openDatabases = mutableMapOf<String, Long>() // path -> dbPtr
-    
+private val openDatabases = mutableMapOf<String, Long>() // normalized path -> dbPtr
+
     init {
         // Ensure database directory exists
         dbDir = File(context.filesDir, "indexes")
         dbDir.mkdirs()
+    }
+
+    private fun normalizePath(path: String?): String? {
+        if (path == null) return null
+        return try {
+            File(path).canonicalPath
+        } catch (_: Exception) {
+            File(path).absolutePath
+        }
     }
     
     companion object {
@@ -30,21 +39,22 @@ class SQLiteHelper private constructor(private val context: Context) {
      * Get or create a database for the specified directory path
      */
     private fun getOrCreateDatabase(indexPath: String): Long {
+        val normalizedIndexPath = normalizePath(indexPath) ?: indexPath
         // Check if already open
-        openDatabases[indexPath]?.let { return it }
+        openDatabases[normalizedIndexPath]?.let { return it }
         
         // Create database file based on path hash
-        val dbName = "index_${pathToHash(indexPath)}.db"
+        val dbName = "index_${pathToHash(normalizedIndexPath)}.db"
         val dbFile = File(dbDir, dbName)
         
         // Libraries already loaded in MainActivity
         val dbPtr = nativeOpen(dbFile.absolutePath)
         if (dbPtr != 0L) {
             createTables(dbPtr)
-            openDatabases[indexPath] = dbPtr
+            openDatabases[normalizedIndexPath] = dbPtr
             
             // Store the indexed path in metadata
-            saveIndexMetadata(dbPtr, indexPath)
+            saveIndexMetadata(dbPtr, normalizedIndexPath)
         } else {
             Log.e("SQLiteHelper", "Failed to open database at: ${dbFile.absolutePath}")
         }
@@ -65,6 +75,7 @@ class SQLiteHelper private constructor(private val context: Context) {
      * Find the closest parent directory that has an index
      */
     private fun findParentIndex(searchPath: String): String? {
+        val normalizedSearchPath = normalizePath(searchPath) ?: searchPath
         // List all database files
         val dbFiles = dbDir.listFiles { _, name -> name.startsWith("index_") && name.endsWith(".db") }
         
@@ -82,10 +93,13 @@ class SQLiteHelper private constructor(private val context: Context) {
                 Log.d("SQLiteHelper", "  Checking db: ${dbFile.name}, indexPath=$indexPath")
                 nativeClose(dbPtr)
                 
-                if (indexPath != null && searchPath.startsWith(indexPath) && indexPath.length > closestParentLength) {
-                    closestParent = indexPath
-                    closestParentLength = indexPath.length
-                    Log.d("SQLiteHelper", "  -> New closest parent: $indexPath")
+                if (indexPath != null) {
+                    val normalizedIndexPath = normalizePath(indexPath) ?: indexPath
+                    if (normalizedSearchPath.startsWith(normalizedIndexPath) && normalizedIndexPath.length > closestParentLength) {
+                        closestParent = normalizedIndexPath
+                        closestParentLength = normalizedIndexPath.length
+                        Log.d("SQLiteHelper", "  -> New closest parent: $normalizedIndexPath")
+                    }
                 }
             }
         }
@@ -98,8 +112,9 @@ class SQLiteHelper private constructor(private val context: Context) {
      * Save metadata about which path this database indexes
      */
     private fun saveIndexMetadata(dbPtr: Long, indexPath: String) {
+        val normalizedIndexPath = normalizePath(indexPath) ?: indexPath
         nativeExecute(dbPtr, "CREATE TABLE IF NOT EXISTS index_metadata (key TEXT PRIMARY KEY, value TEXT)")
-        nativeExecute(dbPtr, "INSERT OR REPLACE INTO index_metadata (key, value) VALUES ('indexed_path', '$indexPath')")
+        nativeExecute(dbPtr, "INSERT OR REPLACE INTO index_metadata (key, value) VALUES ('indexed_path', '$normalizedIndexPath')")
     }
     
     /**

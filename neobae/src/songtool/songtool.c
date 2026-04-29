@@ -2112,6 +2112,7 @@ int main(int argc, char *argv[])
     uint32_t globalResampleRateHz;
     int requiresZmf;
     BAERmfEditorSndStorageType storageType;
+    int preserveMidi;
 
     sourcePath = NULL;
     destPath = NULL;
@@ -2144,6 +2145,7 @@ int main(int argc, char *argv[])
     globalResampleRateHz = 0;
     requiresZmf = 0;
     storageType = BAE_EDITOR_SND_STORAGE_ESND;
+    preserveMidi = 0;
 
     mod2rmf_encoder_defaults(&encoderSettings);
 
@@ -2596,6 +2598,8 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    preserveMidi = !doSetLoop && !doDisableLoop && !doTrim;
+
     if (doUpgrade && (doCompression || doStorage || doGain || doResample || doMetadataEdit || doSetLoop || doDisableLoop || doTrim))
     {
         fprintf(stderr, "Error: --upgrade cannot be combined with other edit operations\n");
@@ -2931,9 +2935,8 @@ int main(int argc, char *argv[])
             return 1;
         }
 
-        /* A trimmed song should not accidentally remain longer in playback
-         * due to pre-existing MIDI loop markers. Preserve loops only when
-         * user explicitly set loop markers in this invocation. */
+        /* Preserve existing MIDI loop markers when a trim does not
+         * invalidate them, to avoid touching the MIDI portion unnecessarily. */
         if (!doSetLoop)
         {
             loopEnabled = FALSE;
@@ -2948,19 +2951,30 @@ int main(int argc, char *argv[])
                                                              &loopCount);
             if (result == BAE_NO_ERROR && loopEnabled)
             {
-                result = BAERmfEditorDocument_SetMidiLoopMarkers(document, FALSE, 0, 0, 0);
-                if (result != BAE_NO_ERROR)
+                if (loopStartTick >= trimTick || loopEndTick > trimTick || loopEndTick <= loopStartTick)
                 {
-                    fprintf(stderr, "Error: failed to clear MIDI loop markers after trim (%d)\n", (int)result);
-                    BAERmfEditorDocument_Delete(document);
-                    BAE_Cleanup();
-                    return 1;
+                    result = BAERmfEditorDocument_SetMidiLoopMarkers(document, FALSE, 0, 0, 0);
+                    if (result != BAE_NO_ERROR)
+                    {
+                        fprintf(stderr, "Error: failed to clear MIDI loop markers after trim (%d)\n", (int)result);
+                        BAERmfEditorDocument_Delete(document);
+                        BAE_Cleanup();
+                        return 1;
+                    }
+                    fprintf(stderr,
+                            "Cleared MIDI loop markers after trim (start=%u, end=%u, count=%d)\n",
+                            (unsigned)loopStartTick,
+                            (unsigned)loopEndTick,
+                            (int)loopCount);
                 }
-                fprintf(stderr,
-                        "Cleared MIDI loop markers after trim (start=%u, end=%u, count=%d)\n",
-                        (unsigned)loopStartTick,
-                        (unsigned)loopEndTick,
-                        (int)loopCount);
+                else
+                {
+                    fprintf(stderr,
+                            "Preserved MIDI loop markers after trim (start=%u, end=%u, count=%d)\n",
+                            (unsigned)loopStartTick,
+                            (unsigned)loopEndTick,
+                            (int)loopCount);
+                }
             }
         }
 
@@ -2997,7 +3011,14 @@ int main(int argc, char *argv[])
         }
     }
 
-    result = BAERmfEditorDocument_SaveAsRmf(document, (BAEPathName)destPath);
+    if (preserveMidi)
+    {
+        result = BAERmfEditorDocument_SaveAsRmfPreserveMidi(document, (BAEPathName)destPath);
+    }
+    else
+    {
+        result = BAERmfEditorDocument_SaveAsRmf(document, (BAEPathName)destPath);
+    }
     if (result != BAE_NO_ERROR)
     {
         fprintf(stderr, "Error: save failed (%d): %s\n", (int)result, destPath);

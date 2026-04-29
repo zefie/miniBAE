@@ -24,6 +24,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var importFavoritesLauncher: androidx.activity.result.ActivityResultLauncher<Array<String>>
     private lateinit var exportFavoritesLauncher: androidx.activity.result.ActivityResultLauncher<String>
     private lateinit var permissionLauncher: androidx.activity.result.ActivityResultLauncher<Array<String>>
+    private var bankFolderPickerMode = false
     var pendingBankReload = false
     var pendingBankReloadResume = false
     var pendingBankReloadPositionMs = 0
@@ -168,9 +169,14 @@ class MainActivity : AppCompatActivity() {
             uri?.let {
                 val fragment = supportFragmentManager.findFragmentById(R.id.fragment_container)
                 if (fragment is HomeFragment) {
-                    fragment.onFolderPicked(it)
+                    if (bankFolderPickerMode) {
+                        fragment.onBankFolderPicked(it)
+                    } else {
+                        fragment.onFolderPicked(it)
+                    }
                 }
             }
+            bankFolderPickerMode = false
         }
         
         openFileLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -243,6 +249,12 @@ class MainActivity : AppCompatActivity() {
     }
     
     fun requestFolderPicker() {
+        bankFolderPickerMode = false
+        openFolderLauncher.launch(null)
+    }
+
+    fun requestBankFolderPicker() {
+        bankFolderPickerMode = true
         openFolderLauncher.launch(null)
     }
     

@@ -134,6 +134,8 @@ class HomeFragment : Fragment() {
 
     private var mixerIdleJob: Job? = null
     private var pickedFolderUri: Uri? = null
+    private var pickedBankFolderUri: Uri? = null
+    private val safUriMap = mutableMapOf<String, Uri>()
     private lateinit var viewModel: MusicPlayerViewModel
     private var isAppInForeground = mutableStateOf(true)
     private var pendingExternalUri: Uri? = null
@@ -344,8 +346,28 @@ class HomeFragment : Fragment() {
             val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
             prefs.edit().putString("lastFolderUri", uri.toString()).apply()
         } catch (_: Exception) { }
+        // Load the selected SAF folder immediately.
+        viewModel.currentFolderPath = uri.toString()
+        safUriMap.clear()
+        loadFolderContentsSaf(uri.toString())
     }
-    
+
+    fun onBankFolderPicked(uri: Uri) {
+        pickedBankFolderUri = uri
+        Toast.makeText(this.requireContext(), "Bank folder selected: $uri", Toast.LENGTH_SHORT).show()
+        try {
+            val takeFlags = (android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            requireContext().contentResolver.takePersistableUriPermission(uri, takeFlags)
+        } catch (_: Exception) { }
+        try {
+            val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+            prefs.edit().putString("last_bank_browser_path", uri.toString()).apply()
+        } catch (_: Exception) { }
+        bankBrowserPath.value = uri.toString()
+        bankBrowserLoading.value = false
+        loadBankFolderContentsSaf(uri.toString())
+    }
+
     fun onFilePicked(uri: Uri) {
         try {
             var displayName: String? = null
@@ -1033,8 +1055,8 @@ class HomeFragment : Fragment() {
                                 }
                             } catch (_: Exception) {}
                         },
-                        onRefreshStorage = { 
-                            checkStoragePermissions()
+                        onRefreshStorage = {
+                            ensureStorageAccess()
                             viewModel.currentFolderPath?.let { path ->
                                 loadFolderContents(path)
                             } ?: loadFolderContents("/")
@@ -1055,13 +1077,16 @@ class HomeFragment : Fragment() {
                         bankBrowserFiles = bankBrowserFiles,
                         bankBrowserLoading = bankBrowserLoading.value,
                         onBrowseBanks = {
-                            checkStoragePermissions()
-                            // Load last bank browser path from preferences (separate from main browser)
-                            val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
-                            val startPath = prefs.getString("last_bank_browser_path", "/") ?: "/"
-                            bankBrowserPath.value = startPath
-                            navigateToBankFolder(startPath)
-                            showBankBrowser.value = true
+                            // For SAF builds, bank browsing needs its own folder picker and extension set.
+                            if (!BuildConfig.USE_MANAGE_EXTERNAL_STORAGE && pickedBankFolderUri == null) {
+                                (activity as? MainActivity)?.requestBankFolderPicker()
+                            } else {
+                                val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                                val startPath = prefs.getString("last_bank_browser_path", "/") ?: "/"
+                                bankBrowserPath.value = startPath
+                                navigateToBankFolder(startPath)
+                                showBankBrowser.value = true
+                            }
                         },
                         onBankBrowserNavigate = { path ->
                             navigateToBankFolder(path)
@@ -1132,6 +1157,8 @@ class HomeFragment : Fragment() {
     }
     
     private fun playFileFromBrowser(file: File) {
+        val resolvedFile = resolveSafFileIfNeeded(file)
+
         // Determine the source list based on current screen.
         // This is our "virtual playlist" for Next/Previous.
         val sourceList = when (viewModel.currentScreen) {
@@ -1161,15 +1188,15 @@ class HomeFragment : Fragment() {
         // Still update the virtual playlist to match where they tapped from,
         // then bring them to the full page player.
         val currentPath = viewModel.getCurrentItem()?.file?.absolutePath
-        if (currentPath != null && currentPath == file.absolutePath) {
+        if (currentPath != null && currentPath == resolvedFile.absolutePath) {
             val nextItems = sourceList.toMutableList()
-            if (nextItems.none { it.file.absolutePath == file.absolutePath }) {
-                nextItems.add(PlaylistItem(file))
+            if (nextItems.none { it.file.absolutePath == resolvedFile.absolutePath }) {
+                nextItems.add(PlaylistItem(resolvedFile))
             }
             viewModel.replacePlaylistPreservingCurrent(nextItems)
 
             // Ensure title/index reflect the currently loaded file.
-            val idx = viewModel.playlist.indexOfFirst { it.file.absolutePath == file.absolutePath }
+            val idx = viewModel.playlist.indexOfFirst { it.file.absolutePath == resolvedFile.absolutePath }
             if (idx >= 0) {
                 viewModel.playAtIndex(idx)
             }
@@ -1185,16 +1212,16 @@ class HomeFragment : Fragment() {
         viewModel.addAllToPlaylist(sourceList)
         
         // Find the index of the clicked file in the playlist
-        val index = viewModel.playlist.indexOfFirst { it.file.absolutePath == file.absolutePath }
+        val index = viewModel.playlist.indexOfFirst { it.file.absolutePath == resolvedFile.absolutePath }
         if (index >= 0) {
             viewModel.playAtIndex(index)
-            startPlayback(file)
+            startPlayback(resolvedFile)
         } else {
             // Fallback: if file not found, just play it as a single item
-            val item = PlaylistItem(file)
+            val item = PlaylistItem(resolvedFile)
             viewModel.addToPlaylist(item)
             viewModel.playAtIndex(viewModel.playlist.size - 1)
-            startPlayback(file)
+            startPlayback(resolvedFile)
         }
     }
     
@@ -1972,6 +1999,11 @@ class HomeFragment : Fragment() {
     }
     
     private fun addAllMidiInDirectory() {
+        if (!BuildConfig.USE_MANAGE_EXTERNAL_STORAGE) {
+            addAllMidiInDirectorySaf()
+            return
+        }
+
         val currentPath = viewModel.currentFolderPath ?: return
         val currentDir = File(currentPath)
         if (!currentDir.exists() || !currentDir.isDirectory) return
@@ -1996,6 +2028,11 @@ class HomeFragment : Fragment() {
     }
     
     private fun addAllMidiRecursively() {
+        if (!BuildConfig.USE_MANAGE_EXTERNAL_STORAGE) {
+            addAllMidiRecursivelySaf()
+            return
+        }
+
         val currentPath = viewModel.currentFolderPath ?: return
         val currentDir = File(currentPath)
         if (!currentDir.exists() || !currentDir.isDirectory) return
@@ -2033,6 +2070,11 @@ class HomeFragment : Fragment() {
     }
     
     private fun loadFolderContents(path: String) {
+        if (!BuildConfig.USE_MANAGE_EXTERNAL_STORAGE) {
+            loadFolderContentsSaf(path)
+            return
+        }
+
         // Check permissions before loading folder contents
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (!Environment.isExternalStorageManager()) {
@@ -2238,14 +2280,287 @@ class HomeFragment : Fragment() {
         // Handle special refresh button
         if (path == "/" && viewModel.currentFolderPath == "/") {
             // Refresh storage list
-            checkStoragePermissions()
+            ensureStorageAccess()
             loadFolderContents("/")
         } else {
             loadFolderContents(path)
         }
     }
-    
+
+    private fun ensureStorageAccess() {
+        if (BuildConfig.USE_MANAGE_EXTERNAL_STORAGE) {
+            checkStoragePermissions()
+        } else {
+            if (pickedFolderUri == null) {
+                (activity as? MainActivity)?.requestFolderPicker()
+            } else {
+                loadFolderContentsSaf(pickedFolderUri.toString())
+            }
+        }
+    }
+
+    private fun loadFolderContentsSaf(path: String) {
+        val folderUriString = when {
+            path == "/" -> pickedFolderUri?.toString()
+            path.startsWith("content://") -> path
+            else -> pickedFolderUri?.toString()
+        }
+
+        if (folderUriString == null) {
+            (activity as? MainActivity)?.requestFolderPicker()
+            return
+        }
+
+        val folderDoc = getSafDocumentFile(folderUriString)
+        if (folderDoc == null || !folderDoc.isDirectory) {
+            activity?.runOnUiThread {
+                loadingState?.value = false
+                Toast.makeText(requireContext(), "Unable to open SAF folder", Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
+
+        loadingState?.value = true
+        Thread {
+            try {
+                val validExtensions = getMusicExtensions(requireContext())
+                val items = folderDoc.listFiles()
+                    .sortedBy { (it.name ?: "").lowercase() }
+                    .mapNotNull { buildPlaylistItemForDocumentFile(it, validExtensions) }
+
+                activity?.runOnUiThread {
+                    if (::viewModel.isInitialized) {
+                        viewModel.folderFiles.clear()
+                        viewModel.folderFiles.addAll(items)
+                        viewModel.currentFolderPath = folderUriString
+                        viewModel.invalidateSearchCache()
+                        val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                        prefs.edit().putString("current_folder_path", folderUriString).apply()
+                    }
+                    loadingState?.value = false
+                }
+            } catch (ex: Exception) {
+                activity?.runOnUiThread {
+                    loadingState?.value = false
+                    Toast.makeText(requireContext(), "Error loading SAF folder: ${ex.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }.start()
+    }
+
+    private fun buildPlaylistItemForDocumentFile(doc: DocumentFile, validExtensions: Set<String>): PlaylistItem? {
+        val name = doc.name ?: return null
+        if (doc.isDirectory) {
+            val placeholder = File(requireContext().cacheDir, "saf_folder_${doc.uri.hashCode()}")
+            return PlaylistItem(
+                file = placeholder,
+                uri = doc.uri,
+                title = name,
+                path = doc.uri.toString(),
+                isFolder = true
+            )
+        }
+
+        val extension = name.substringAfterLast('.', "").lowercase()
+        if (extension !in validExtensions) return null
+
+        val cacheFile = safCacheFileForUri(doc.uri, name)
+        safUriMap[cacheFile.absolutePath] = doc.uri
+        return PlaylistItem(
+            file = cacheFile,
+            uri = doc.uri,
+            title = name,
+            path = doc.uri.toString(),
+            isFolder = false
+        )
+    }
+
+    private fun normalizeSafUriString(uriString: String): String {
+        return uriString.trim().trimEnd('/')
+    }
+
+    private fun getSafParentPath(uriString: String): String? {
+        val normalized = normalizeSafUriString(uriString)
+        val uri = try { Uri.parse(normalized) } catch (_: Exception) { null } ?: return null
+        if (uri.scheme != "content") return null
+
+        val segments = uri.pathSegments
+        if (segments.size < 2) return null
+        if (segments.size == 2 && segments[0] == "tree") return null
+
+        val documentIndex = segments.indexOf("document")
+        if (documentIndex < 0 || documentIndex + 1 >= segments.size) return null
+
+        val treeId = Uri.decode(segments[1])
+        val documentId = Uri.decode(segments[documentIndex + 1])
+        val documentParts = documentId.split('/')
+        if (documentParts.size <= 1) {
+            return "content://${uri.authority}/tree/${Uri.encode(treeId)}"
+        }
+
+        val parentDocumentId = documentParts.dropLast(1).joinToString("/")
+        return if (parentDocumentId == treeId) {
+            "content://${uri.authority}/tree/${Uri.encode(treeId)}"
+        } else {
+            "content://${uri.authority}/tree/${Uri.encode(segments[1])}/document/${Uri.encode(parentDocumentId)}"
+        }
+    }
+
+    private fun getSafDocumentFile(uriString: String): DocumentFile? {
+        val uri = try { Uri.parse(normalizeSafUriString(uriString)) } catch (_: Exception) { null } ?: return null
+        return DocumentFile.fromTreeUri(requireContext(), uri)
+            ?: DocumentFile.fromSingleUri(requireContext(), uri)
+    }
+
+    private fun safCacheFileForUri(uri: Uri, displayName: String): File {
+        val safeName = sanitizeFilename(displayName)
+        val cacheFolder = File(requireContext().cacheDir, "safcache")
+        if (!cacheFolder.exists()) cacheFolder.mkdirs()
+        return File(cacheFolder, "${uri.hashCode()}_$safeName")
+    }
+
+    private fun sanitizeFilename(name: String): String {
+        return name.replace(Regex("[^A-Za-z0-9._-]"), "_")
+    }
+
+    private fun resolveSafFileIfNeeded(file: File): File {
+        if (file.exists()) return file
+        val uri = safUriMap[file.absolutePath] ?: SafUriRegistry.getUri(file.absolutePath) ?: return file
+        return copyUriToCache(uri, file) ?: file
+    }
+
+    private fun copyUriToCache(uri: Uri, targetFile: File): File? {
+        return try {
+            targetFile.parentFile?.let { if (!it.exists()) it.mkdirs() }
+            requireContext().contentResolver.openInputStream(uri)?.use { input ->
+                targetFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            targetFile
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun collectSafMusicFiles(root: DocumentFile, recursive: Boolean, validExtensions: Set<String>): List<File> {
+        val results = mutableListOf<File>()
+        root.listFiles().forEach { item ->
+            if (item.isDirectory) {
+                if (recursive) {
+                    results += collectSafMusicFiles(item, true, validExtensions)
+                }
+            } else {
+                val name = item.name ?: return@forEach
+                val extension = name.substringAfterLast('.', "").lowercase()
+                if (extension in validExtensions) {
+                    val cacheFile = safCacheFileForUri(item.uri, name)
+                    safUriMap[cacheFile.absolutePath] = item.uri
+                    if (!cacheFile.exists()) {
+                        copyUriToCache(item.uri, cacheFile)
+                    }
+                    results.add(cacheFile)
+                }
+            }
+        }
+        return results
+    }
+
+    private fun addAllMidiInDirectorySaf() {
+        val currentPath = viewModel.currentFolderPath ?: return
+        val folderDoc = getSafDocumentFile(currentPath)
+        if (folderDoc == null || !folderDoc.isDirectory) {
+            Toast.makeText(requireContext(), "No SAF folder selected", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val validExtensions = getMusicExtensions(requireContext())
+        val midiFiles = collectSafMusicFiles(folderDoc, false, validExtensions)
+        if (midiFiles.isEmpty()) {
+            Toast.makeText(requireContext(), "No MIDI files found in this SAF folder", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        midiFiles.forEach { file ->
+            if (!viewModel.playlist.any { it.file.absolutePath == file.absolutePath }) {
+                viewModel.addToPlaylist(PlaylistItem(file))
+            }
+        }
+        Toast.makeText(requireContext(), "Added ${midiFiles.size} files to playlist", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun addAllMidiRecursivelySaf() {
+        val currentPath = viewModel.currentFolderPath ?: return
+        val folderDoc = getSafDocumentFile(currentPath)
+        if (folderDoc == null || !folderDoc.isDirectory) {
+            Toast.makeText(requireContext(), "No SAF folder selected", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val validExtensions = getMusicExtensions(requireContext())
+        val midiFiles = collectSafMusicFiles(folderDoc, true, validExtensions)
+        if (midiFiles.isEmpty()) {
+            Toast.makeText(requireContext(), "No MIDI files found in this SAF folder", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        midiFiles.forEach { file ->
+            if (!viewModel.playlist.any { it.file.absolutePath == file.absolutePath }) {
+                viewModel.addToPlaylist(PlaylistItem(file))
+            }
+        }
+        Toast.makeText(requireContext(), "Added ${midiFiles.size} files to playlist (recursive scan)", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun loadBankFolderContentsSaf(path: String) {
+        val folderUriString = when {
+            path == "/" -> pickedBankFolderUri?.toString()
+            path.startsWith("content://") -> path
+            else -> pickedBankFolderUri?.toString()
+        }
+
+        if (folderUriString == null) {
+            (activity as? MainActivity)?.requestBankFolderPicker()
+            return
+        }
+
+        val folderDoc = getSafDocumentFile(folderUriString)
+        if (folderDoc == null || !folderDoc.isDirectory) {
+            activity?.runOnUiThread {
+                bankBrowserLoading.value = false
+                Toast.makeText(requireContext(), "Unable to open SAF bank folder", Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
+
+        bankBrowserLoading.value = true
+        Thread {
+            try {
+                val items = folderDoc.listFiles()
+                    .sortedBy { (it.name ?: "").lowercase() }
+                    .mapNotNull { buildPlaylistItemForDocumentFile(it, BANK_EXTENSIONS) }
+
+                activity?.runOnUiThread {
+                    bankBrowserFiles.clear()
+                    bankBrowserFiles.addAll(items)
+                    bankBrowserPath.value = folderUriString
+                    bankBrowserLoading.value = false
+                }
+            } catch (ex: Exception) {
+                activity?.runOnUiThread {
+                    bankBrowserLoading.value = false
+                    Toast.makeText(requireContext(), "Error loading SAF bank folder: ${ex.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }.start()
+    }
+
     private fun navigateToBankFolder(path: String) {
+        if (!BuildConfig.USE_MANAGE_EXTERNAL_STORAGE) {
+            loadBankFolderContentsSaf(path)
+            return
+        }
+
         bankBrowserLoading.value = true
         Thread {
             try {
@@ -4890,8 +5205,11 @@ fun HomeScreenContent(
                     ) {
                     // Show parent directory ".." option
                     viewModel.currentFolderPath?.let { currentPath ->
-                        val file = File(currentPath)
-                        val parentPath = file.parent
+                        val parentPath = if (currentPath.startsWith("content://")) {
+                            getSafParentPath(currentPath)
+                        } else {
+                            File(currentPath).parent
+                        }
                         // Show parent unless we're already at root or parent is null
                         if (parentPath != null && currentPath != "/") {
                             item(key = "parent:$parentPath") {
@@ -5059,7 +5377,16 @@ fun SearchScreenContent(
     
     // Trigger search when query changes or when showing all results
     // IMPORTANT: Wait for database to be ready before searching
-    LaunchedEffect(viewModel.searchQuery, searchResultLimit, viewModel.isDatabaseReady) {
+    LaunchedEffect(viewModel.searchQuery, searchResultLimit, viewModel.isDatabaseReady, viewModel.currentFolderPath) {
+        if (viewModel.currentFolderPath?.startsWith("content://") == true) {
+            if (viewModel.searchQuery.isNotEmpty()) {
+                viewModel.searchSafFiles(viewModel.searchQuery, viewModel.currentFolderPath, searchResultLimit)
+            } else {
+                viewModel.getAllSafFiles(viewModel.currentFolderPath, searchResultLimit)
+            }
+            return@LaunchedEffect
+        }
+
         // Only search if database is initialized
         if (!viewModel.isDatabaseReady) {
             return@LaunchedEffect
