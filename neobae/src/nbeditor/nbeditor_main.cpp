@@ -25,6 +25,15 @@ namespace
 struct SampleRow
 {
     uint32_t index = 0;
+    uint32_t instrument_index = 0;
+    uint32_t split_index = 0;
+    uint32_t snd_resource_id = 0;
+    uint32_t sample_rate_hz = 44100;
+    uint32_t frame_count = 0;
+    uint32_t loop_start = 0;
+    uint32_t loop_end = 0;
+    int bit_depth = 16;
+    int channels = 1;
     bool is_custom = false;
     int bank = 0;
     int program = 0;
@@ -50,6 +59,12 @@ struct InstrumentFilterOption
     int bank = -1;
     int category = -1; // -1 all, 0 melodic, 1 percussion
     std::string label;
+};
+
+struct SampleCodecOption
+{
+    BAERmfEditorCompressionType type;
+    const char *label;
 };
 
 static std::string MakeBankCategoryLabel(int bank, int category)
@@ -108,6 +123,178 @@ static BAERate RateFromHz(int hz)
     default:
         return BAE_RATE_44K;
     }
+}
+
+static bool IsOpusCompressionType(BAERmfEditorCompressionType compression_type)
+{
+    switch (compression_type)
+    {
+    case BAE_EDITOR_COMPRESSION_OPUS_12K:
+    case BAE_EDITOR_COMPRESSION_OPUS_16K:
+    case BAE_EDITOR_COMPRESSION_OPUS_24K:
+    case BAE_EDITOR_COMPRESSION_OPUS_32K:
+    case BAE_EDITOR_COMPRESSION_OPUS_48K:
+    case BAE_EDITOR_COMPRESSION_OPUS_64K:
+    case BAE_EDITOR_COMPRESSION_OPUS_80K:
+    case BAE_EDITOR_COMPRESSION_OPUS_96K:
+    case BAE_EDITOR_COMPRESSION_OPUS_128K:
+    case BAE_EDITOR_COMPRESSION_OPUS_160K:
+    case BAE_EDITOR_COMPRESSION_OPUS_192K:
+    case BAE_EDITOR_COMPRESSION_OPUS_256K:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static BAERmfEditorCompressionType BankCompressionFromCodec(uint32_t compression_type,
+                                                            uint32_t compression_sub_type)
+{
+    switch (compression_type)
+    {
+    case 0:
+    case FOUR_CHAR('n', 'o', 'n', 'e'):
+        return BAE_EDITOR_COMPRESSION_PCM;
+    case FOUR_CHAR('i', 'm', 'a', '4'):
+    case FOUR_CHAR('i', 'm', 'a', 'W'):
+    case FOUR_CHAR('i', 'm', 'a', '3'):
+        return BAE_EDITOR_COMPRESSION_ADPCM;
+    case FOUR_CHAR('f', 'L', 'a', 'C'):
+    case FOUR_CHAR('F', 'L', 'A', 'C'):
+        return BAE_EDITOR_COMPRESSION_FLAC;
+    case FOUR_CHAR('m', 'p', 'g', 'n'):
+        return BAE_EDITOR_COMPRESSION_MP3_32K;
+    case FOUR_CHAR('m', 'p', 'g', 'b'):
+        return BAE_EDITOR_COMPRESSION_MP3_48K;
+    case FOUR_CHAR('m', 'p', 'g', 'd'):
+        return BAE_EDITOR_COMPRESSION_MP3_64K;
+    case FOUR_CHAR('m', 'p', 'g', 'f'):
+        return BAE_EDITOR_COMPRESSION_MP3_96K;
+    case FOUR_CHAR('m', 'p', 'g', 'h'):
+        return BAE_EDITOR_COMPRESSION_MP3_128K;
+    case FOUR_CHAR('m', 'p', 'g', 'j'):
+        return BAE_EDITOR_COMPRESSION_MP3_192K;
+    case FOUR_CHAR('m', 'p', 'g', 'l'):
+        return BAE_EDITOR_COMPRESSION_MP3_256K;
+    case FOUR_CHAR('m', 'p', 'g', 'm'):
+        return BAE_EDITOR_COMPRESSION_MP3_320K;
+    case FOUR_CHAR('O', 'g', 'g', 'V'):
+    case FOUR_CHAR('V', 'O', 'R', 'B'):
+        switch (compression_sub_type)
+        {
+        case FOUR_CHAR('v', '0', '3', '2'):
+            return BAE_EDITOR_COMPRESSION_VORBIS_32K;
+        case FOUR_CHAR('v', '0', '4', '8'):
+            return BAE_EDITOR_COMPRESSION_VORBIS_48K;
+        case FOUR_CHAR('v', '0', '6', '4'):
+            return BAE_EDITOR_COMPRESSION_VORBIS_64K;
+        case FOUR_CHAR('v', '0', '8', '0'):
+            return BAE_EDITOR_COMPRESSION_VORBIS_80K;
+        case FOUR_CHAR('v', '0', '9', '6'):
+            return BAE_EDITOR_COMPRESSION_VORBIS_96K;
+        case FOUR_CHAR('v', '1', '2', '8'):
+            return BAE_EDITOR_COMPRESSION_VORBIS_128K;
+        case FOUR_CHAR('v', '1', '6', '0'):
+            return BAE_EDITOR_COMPRESSION_VORBIS_160K;
+        case FOUR_CHAR('v', '1', '9', '2'):
+            return BAE_EDITOR_COMPRESSION_VORBIS_192K;
+        case FOUR_CHAR('v', '2', '5', '6'):
+            return BAE_EDITOR_COMPRESSION_VORBIS_256K;
+        default:
+            return BAE_EDITOR_COMPRESSION_VORBIS_128K;
+        }
+    case FOUR_CHAR('O', 'g', 'g', 'O'):
+    case FOUR_CHAR('O', 'P', 'U', 'S'):
+        switch (compression_sub_type)
+        {
+        case FOUR_CHAR('o', '0', '1', '2'):
+            return BAE_EDITOR_COMPRESSION_OPUS_12K;
+        case FOUR_CHAR('o', '0', '1', '6'):
+            return BAE_EDITOR_COMPRESSION_OPUS_16K;
+        case FOUR_CHAR('o', '0', '2', '4'):
+            return BAE_EDITOR_COMPRESSION_OPUS_24K;
+        case FOUR_CHAR('o', '0', '3', '2'):
+            return BAE_EDITOR_COMPRESSION_OPUS_32K;
+        case FOUR_CHAR('o', '0', '4', '8'):
+            return BAE_EDITOR_COMPRESSION_OPUS_48K;
+        case FOUR_CHAR('o', '0', '6', '4'):
+            return BAE_EDITOR_COMPRESSION_OPUS_64K;
+        case FOUR_CHAR('o', '0', '8', '0'):
+            return BAE_EDITOR_COMPRESSION_OPUS_80K;
+        case FOUR_CHAR('o', '0', '9', '6'):
+            return BAE_EDITOR_COMPRESSION_OPUS_96K;
+        case FOUR_CHAR('o', '1', '2', '8'):
+            return BAE_EDITOR_COMPRESSION_OPUS_128K;
+        case FOUR_CHAR('o', '1', '6', '0'):
+            return BAE_EDITOR_COMPRESSION_OPUS_160K;
+        case FOUR_CHAR('o', '1', '9', '2'):
+            return BAE_EDITOR_COMPRESSION_OPUS_192K;
+        case FOUR_CHAR('o', '2', '5', '6'):
+            return BAE_EDITOR_COMPRESSION_OPUS_256K;
+        default:
+            return BAE_EDITOR_COMPRESSION_OPUS_48K;
+        }
+    default:
+        return BAE_EDITOR_COMPRESSION_PCM;
+    }
+}
+
+static const SampleCodecOption *GetSampleCodecOptions(size_t *out_count)
+{
+    static const SampleCodecOption options[] = {
+        {BAE_EDITOR_COMPRESSION_DONT_CHANGE, "No Recompression"},
+        {BAE_EDITOR_COMPRESSION_PCM, "PCM"},
+        {BAE_EDITOR_COMPRESSION_ADPCM, "ADPCM"},
+        {BAE_EDITOR_COMPRESSION_FLAC, "FLAC"},
+        {BAE_EDITOR_COMPRESSION_MP3_32K, "MP3 32k"},
+        {BAE_EDITOR_COMPRESSION_MP3_48K, "MP3 48k"},
+        {BAE_EDITOR_COMPRESSION_MP3_64K, "MP3 64k"},
+        {BAE_EDITOR_COMPRESSION_MP3_96K, "MP3 96k"},
+        {BAE_EDITOR_COMPRESSION_MP3_128K, "MP3 128k"},
+        {BAE_EDITOR_COMPRESSION_MP3_192K, "MP3 192k"},
+        {BAE_EDITOR_COMPRESSION_MP3_256K, "MP3 256k"},
+        {BAE_EDITOR_COMPRESSION_MP3_320K, "MP3 320k"},
+        {BAE_EDITOR_COMPRESSION_VORBIS_32K, "Vorbis 32k"},
+        {BAE_EDITOR_COMPRESSION_VORBIS_48K, "Vorbis 48k"},
+        {BAE_EDITOR_COMPRESSION_VORBIS_64K, "Vorbis 64k"},
+        {BAE_EDITOR_COMPRESSION_VORBIS_80K, "Vorbis 80k"},
+        {BAE_EDITOR_COMPRESSION_VORBIS_96K, "Vorbis 96k"},
+        {BAE_EDITOR_COMPRESSION_VORBIS_128K, "Vorbis 128k"},
+        {BAE_EDITOR_COMPRESSION_VORBIS_160K, "Vorbis 160k"},
+        {BAE_EDITOR_COMPRESSION_VORBIS_192K, "Vorbis 192k"},
+        {BAE_EDITOR_COMPRESSION_VORBIS_256K, "Vorbis 256k"},
+        {BAE_EDITOR_COMPRESSION_OPUS_12K, "Opus 12k"},
+        {BAE_EDITOR_COMPRESSION_OPUS_16K, "Opus 16k"},
+        {BAE_EDITOR_COMPRESSION_OPUS_24K, "Opus 24k"},
+        {BAE_EDITOR_COMPRESSION_OPUS_32K, "Opus 32k"},
+        {BAE_EDITOR_COMPRESSION_OPUS_48K, "Opus 48k"},
+        {BAE_EDITOR_COMPRESSION_OPUS_64K, "Opus 64k"},
+        {BAE_EDITOR_COMPRESSION_OPUS_80K, "Opus 80k"},
+        {BAE_EDITOR_COMPRESSION_OPUS_96K, "Opus 96k"},
+        {BAE_EDITOR_COMPRESSION_OPUS_128K, "Opus 128k"},
+        {BAE_EDITOR_COMPRESSION_OPUS_160K, "Opus 160k"},
+        {BAE_EDITOR_COMPRESSION_OPUS_192K, "Opus 192k"},
+        {BAE_EDITOR_COMPRESSION_OPUS_256K, "Opus 256k"},
+    };
+    if (out_count)
+    {
+        *out_count = SDL_arraysize(options);
+    }
+    return options;
+}
+
+static const char *GetSampleCodecLabel(BAERmfEditorCompressionType type)
+{
+    size_t option_count = 0;
+    const SampleCodecOption *options = GetSampleCodecOptions(&option_count);
+    for (size_t i = 0; i < option_count; ++i)
+    {
+        if (options[i].type == type)
+        {
+            return options[i].label;
+        }
+    }
+    return "Unknown";
 }
 
 static bool IsModuleExtension(const std::string &ext)
@@ -174,6 +361,12 @@ public:
 
     void Shutdown()
     {
+        if (m_sample_editor_preview_sound)
+        {
+            BAESound_Stop(m_sample_editor_preview_sound, FALSE);
+            BAESound_Delete(m_sample_editor_preview_sound);
+            m_sample_editor_preview_sound = nullptr;
+        }
         if (m_preview_song)
         {
             BAESong_Stop(m_preview_song, FALSE);
@@ -221,6 +414,9 @@ public:
         DrawDockspace();
         DrawPlayerWindow();
         DrawLibraryWindow();
+#if NBEDITOR_MVP
+        DrawSampleEditorDialog();
+#endif
     }
 
 private:
@@ -413,10 +609,25 @@ private:
         }
         BAESong_Preroll(new_preview);
 
+        BAESound new_sample_preview = BAESound_New(new_mixer);
+        if (!new_sample_preview)
+        {
+            BAESong_Delete(new_preview);
+            BAEMixer_Close(new_mixer);
+            SetStatus("BAESound_New for sample preview failed");
+            return false;
+        }
+
         if (m_preview_song)
         {
             BAESong_Stop(m_preview_song, FALSE);
             BAESong_Delete(m_preview_song);
+        }
+        if (m_sample_editor_preview_sound)
+        {
+            BAESound_Stop(m_sample_editor_preview_sound, FALSE);
+            BAESound_Delete(m_sample_editor_preview_sound);
+            m_sample_editor_preview_sound = nullptr;
         }
         if (m_song)
         {
@@ -431,6 +642,7 @@ private:
 
         m_mixer = new_mixer;
         m_preview_song = new_preview;
+    m_sample_editor_preview_sound = new_sample_preview;
 
         if (!LoadActiveBankIntoMixer())
         {
@@ -1076,6 +1288,15 @@ private:
 
                 SampleRow sample_row;
                 sample_row.index = sample_row_index++;
+                sample_row.instrument_index = inst_idx;
+                sample_row.split_index = split_idx;
+                sample_row.snd_resource_id = static_cast<uint32_t>(sample_info.sndResourceID);
+                sample_row.sample_rate_hz = sample_info.sampleRate;
+                sample_row.frame_count = sample_info.frameCount;
+                sample_row.loop_start = sample_info.loopStart;
+                sample_row.loop_end = sample_info.loopEnd;
+                sample_row.bit_depth = static_cast<int>(sample_info.bitDepth);
+                sample_row.channels = static_cast<int>(sample_info.channels);
                 sample_row.is_custom = false;
                 sample_row.bank = static_cast<int>(inst_info.bank);
                 sample_row.program = static_cast<int>(inst_info.program);
@@ -1774,9 +1995,724 @@ private:
                                               0);
                 }
             }
+
+#if NBEDITOR_MVP
+            if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+            {
+                m_selected_sample = static_cast<int>(i);
+                OpenSampleEditorForSelection();
+            }
+
+            char popup_id[64];
+            std::snprintf(popup_id, sizeof(popup_id), "sample_ctx_%zu", i);
+            if (ImGui::BeginPopupContextItem(popup_id, ImGuiPopupFlags_MouseButtonRight))
+            {
+                if (ImGui::MenuItem("Open Sample Editor"))
+                {
+                    m_selected_sample = static_cast<int>(i);
+                    OpenSampleEditorForSelection();
+                }
+                ImGui::EndPopup();
+            }
+#endif
         }
 
     }
+
+#if NBEDITOR_MVP
+    void OpenSampleEditorForSelection()
+    {
+        if (!m_bank_token || m_selected_sample < 0 || m_selected_sample >= static_cast<int>(m_samples.size()))
+        {
+            return;
+        }
+
+        const SampleRow &sample = m_samples[static_cast<size_t>(m_selected_sample)];
+        m_sample_editor_sample_row = m_selected_sample;
+        m_sample_editor_sample_name = sample.name;
+        m_sample_editor_preview_needs_reencode = false;
+        m_sample_editor_preview_note = sample.root_key;
+        m_sample_editor_playing = false;
+        m_sample_editor_play_started_ms = 0;
+        m_sample_editor_playhead_frame = 0;
+        m_sample_editor_loop_dirty = false;
+        m_sample_editor_drag_loop_marker = 0;
+        m_sample_editor_wave_min.clear();
+        m_sample_editor_wave_max.clear();
+        m_sample_editor_cached_pcm.clear();
+        m_sample_editor_original_pcm.clear();
+
+        BAERmfEditorBankSampleInfo info;
+        std::memset(&info, 0, sizeof(info));
+        if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
+                                                     sample.instrument_index,
+                                                     sample.split_index,
+                                                     &info) != BAE_NO_ERROR)
+        {
+            SetStatus("Sample editor: failed to read sample info");
+            return;
+        }
+
+        m_sample_editor_loop_start = info.loopStart;
+        m_sample_editor_loop_end = info.loopEnd;
+        m_sample_editor_frame_count = info.frameCount;
+        m_sample_editor_sample_rate_hz = info.sampleRate;
+        m_sample_editor_channels = info.channels;
+        m_sample_editor_bit_depth = info.bitDepth;
+        m_sample_editor_snd_storage_type = info.sndStorageType;
+        m_sample_editor_opus_mode = BAE_EDITOR_OPUS_MODE_AUDIO;
+
+        const BAERmfEditorCompressionType detected = BankCompressionFromCodec(info.compressionType,
+                                                                              info.compressionSubType);
+        m_sample_editor_codec_type = detected;
+
+        size_t option_count = 0;
+        const SampleCodecOption *options = GetSampleCodecOptions(&option_count);
+        m_sample_editor_codec_index = 0; // No Recompression default
+        for (size_t i = 0; i < option_count; ++i)
+        {
+            if (options[i].type == BAE_EDITOR_COMPRESSION_DONT_CHANGE)
+            {
+                m_sample_editor_codec_index = static_cast<int>(i);
+                break;
+            }
+        }
+
+        void *wave_data = nullptr;
+        uint32_t frame_count = 0;
+        uint16_t bit_size = 0;
+        uint16_t channels = 0;
+        BAE_UNSIGNED_FIXED sample_rate = 0;
+        if (BAERmfEditorBank_GetSampleWaveformData(m_bank_token,
+                                                   sample.instrument_index,
+                                                   sample.split_index,
+                                                   &wave_data,
+                                                   &frame_count,
+                                                   &bit_size,
+                                                   &channels,
+                                                   &sample_rate) != BAE_NO_ERROR ||
+            !wave_data || frame_count == 0)
+        {
+            if (wave_data)
+            {
+                BAERmfEditorBank_FreeWaveformData(wave_data);
+            }
+            SetStatus("Sample editor: waveform decode failed");
+            return;
+        }
+
+        const uint32_t bytes_per_sample = static_cast<uint32_t>((bit_size / 8u) * channels);
+        const uint32_t pcm_size = frame_count * bytes_per_sample;
+        m_sample_editor_cached_pcm.resize(pcm_size);
+        std::memcpy(m_sample_editor_cached_pcm.data(), wave_data, pcm_size);
+        m_sample_editor_cached_frame_count = frame_count;
+        m_sample_editor_cached_bit_size = bit_size;
+        m_sample_editor_cached_channels = channels;
+        m_sample_editor_cached_sample_rate = sample_rate;
+        m_sample_editor_original_pcm = m_sample_editor_cached_pcm;
+        m_sample_editor_original_frame_count = m_sample_editor_cached_frame_count;
+        m_sample_editor_original_bit_size = m_sample_editor_cached_bit_size;
+        m_sample_editor_original_channels = m_sample_editor_cached_channels;
+        m_sample_editor_original_sample_rate = m_sample_editor_cached_sample_rate;
+        m_sample_editor_original_codec_type = m_sample_editor_codec_type;
+        m_sample_editor_original_snd_storage_type = m_sample_editor_snd_storage_type;
+        m_sample_editor_original_opus_mode = m_sample_editor_opus_mode;
+
+        const int bins = std::max(1, static_cast<int>(std::min<uint32_t>(frame_count, 2048u)));
+        m_sample_editor_wave_min.assign(static_cast<size_t>(bins), 0.0f);
+        m_sample_editor_wave_max.assign(static_cast<size_t>(bins), 0.0f);
+        for (int bin = 0; bin < bins; ++bin)
+        {
+            const uint32_t begin = static_cast<uint32_t>((static_cast<uint64_t>(bin) * frame_count) / static_cast<uint64_t>(bins));
+            uint32_t end = static_cast<uint32_t>((static_cast<uint64_t>(bin + 1) * frame_count) / static_cast<uint64_t>(bins));
+            if (end <= begin)
+            {
+                end = std::min<uint32_t>(frame_count, begin + 1u);
+            }
+            float min_v = 1.0f;
+            float max_v = -1.0f;
+
+            if (bit_size == 16)
+            {
+                const int16_t *pcm16 = static_cast<const int16_t *>(wave_data);
+                for (uint32_t frame = begin; frame < end; ++frame)
+                {
+                    float mono = 0.0f;
+                    for (uint16_t ch = 0; ch < channels; ++ch)
+                    {
+                        const int16_t sample_value = pcm16[(frame * channels) + ch];
+                        mono += static_cast<float>(sample_value) / 32768.0f;
+                    }
+                    mono /= static_cast<float>(std::max<uint16_t>(channels, 1));
+                    min_v = std::min(min_v, mono);
+                    max_v = std::max(max_v, mono);
+                }
+            }
+            else
+            {
+                const uint8_t *pcm8 = static_cast<const uint8_t *>(wave_data);
+                for (uint32_t frame = begin; frame < end; ++frame)
+                {
+                    float mono = 0.0f;
+                    for (uint16_t ch = 0; ch < channels; ++ch)
+                    {
+                        const int sample_value = static_cast<int>(pcm8[(frame * channels) + ch]);
+                        mono += (static_cast<float>(sample_value) - 128.0f) / 128.0f;
+                    }
+                    mono /= static_cast<float>(std::max<uint16_t>(channels, 1));
+                    min_v = std::min(min_v, mono);
+                    max_v = std::max(max_v, mono);
+                }
+            }
+
+            m_sample_editor_wave_min[static_cast<size_t>(bin)] = min_v;
+            m_sample_editor_wave_max[static_cast<size_t>(bin)] = max_v;
+        }
+
+        BAERmfEditorBank_FreeWaveformData(wave_data);
+        m_sample_editor_open = true;
+    }
+
+    bool ApplySampleEditorEncodingToBank()
+    {
+        if (!m_bank_token || m_sample_editor_sample_row < 0 ||
+            m_sample_editor_sample_row >= static_cast<int>(m_samples.size()) ||
+            m_sample_editor_cached_pcm.empty())
+        {
+            return false;
+        }
+
+        const SampleRow &sample = m_samples[static_cast<size_t>(m_sample_editor_sample_row)];
+        size_t option_count = 0;
+        const SampleCodecOption *options = GetSampleCodecOptions(&option_count);
+        if (m_sample_editor_codec_index < 0 || m_sample_editor_codec_index >= static_cast<int>(option_count))
+        {
+            return false;
+        }
+
+        const BAERmfEditorCompressionType target = options[static_cast<size_t>(m_sample_editor_codec_index)].type;
+        const bool use_opus_roundtrip = IsOpusCompressionType(target);
+        if (target == BAE_EDITOR_COMPRESSION_DONT_CHANGE)
+        {
+            if (m_sample_editor_original_pcm.empty())
+            {
+                SetStatus("Original sample not cached");
+                return false;
+            }
+
+            const BAERmfEditorCompressionType restore_codec = m_sample_editor_original_codec_type;
+            const bool restore_opus_roundtrip = IsOpusCompressionType(restore_codec);
+            const BAEResult restore_result = BAERmfEditorBank_ReEncodeSampleFromPCMEx(
+                m_bank_token,
+                sample.instrument_index,
+                sample.split_index,
+                restore_codec,
+                m_sample_editor_original_snd_storage_type,
+                m_sample_editor_original_opus_mode,
+                restore_opus_roundtrip,
+                m_sample_editor_original_pcm.data(),
+                m_sample_editor_original_frame_count,
+                m_sample_editor_original_bit_size,
+                m_sample_editor_original_channels,
+                m_sample_editor_original_sample_rate);
+
+            if (restore_result != BAE_NO_ERROR)
+            {
+                SetStatus(std::string("Original restore failed: ") + FormatBAEError(restore_result));
+                return false;
+            }
+
+            m_sample_editor_codec_type = restore_codec;
+            m_sample_editor_snd_storage_type = m_sample_editor_original_snd_storage_type;
+            m_sample_editor_opus_mode = m_sample_editor_original_opus_mode;
+            m_sample_editor_preview_needs_reencode = false;
+            SetStatus("Sample restored to original encoding");
+        }
+        else
+        {
+            const BAEResult result = BAERmfEditorBank_ReEncodeSampleFromPCMEx(
+                m_bank_token,
+                sample.instrument_index,
+                sample.split_index,
+                target,
+                m_sample_editor_snd_storage_type,
+                m_sample_editor_opus_mode,
+                use_opus_roundtrip,
+                m_sample_editor_cached_pcm.data(),
+                m_sample_editor_cached_frame_count,
+                m_sample_editor_cached_bit_size,
+                m_sample_editor_cached_channels,
+                m_sample_editor_cached_sample_rate);
+
+            if (result != BAE_NO_ERROR)
+            {
+                SetStatus(std::string("Sample encode failed: ") + FormatBAEError(result));
+                return false;
+            }
+
+            m_sample_editor_codec_type = target;
+        }
+
+        BAERmfEditorBankSampleInfo updated_info;
+        std::memset(&updated_info, 0, sizeof(updated_info));
+        if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
+                                                     sample.instrument_index,
+                                                     sample.split_index,
+                                                     &updated_info) == BAE_NO_ERROR)
+        {
+            const uint32_t max_frame = (updated_info.frameCount > 0) ? (updated_info.frameCount - 1u) : 0u;
+            const uint32_t loop_start = std::min<uint32_t>(m_sample_editor_loop_start, max_frame);
+            uint32_t loop_end = std::min<uint32_t>(m_sample_editor_loop_end, updated_info.frameCount);
+            if (loop_end < loop_start)
+            {
+                loop_end = loop_start;
+            }
+
+            updated_info.loopStart = loop_start;
+            updated_info.loopEnd = loop_end;
+            const BAEResult loop_result = BAERmfEditorBank_SetInstrumentSampleInfo(m_bank_token,
+                                                                                    sample.instrument_index,
+                                                                                    sample.split_index,
+                                                                                    &updated_info);
+            if (loop_result != BAE_NO_ERROR)
+            {
+                SetStatus(std::string("Loop update failed: ") + FormatBAEError(loop_result));
+                return false;
+            }
+
+            m_sample_editor_loop_start = loop_start;
+            m_sample_editor_loop_end = loop_end;
+            m_sample_editor_frame_count = updated_info.frameCount;
+        }
+
+        void *wave_data = nullptr;
+        uint32_t frame_count = 0;
+        uint16_t bit_size = 0;
+        uint16_t channels = 0;
+        BAE_UNSIGNED_FIXED sample_rate = 0;
+        const BAEResult waveform_result = BAERmfEditorBank_GetSampleWaveformData(m_bank_token,
+                                                                                  sample.instrument_index,
+                                                                                  sample.split_index,
+                                                                                  &wave_data,
+                                                                                  &frame_count,
+                                                                                  &bit_size,
+                                                                                  &channels,
+                                                                                  &sample_rate);
+        if (waveform_result == BAE_NO_ERROR && wave_data && frame_count > 0)
+        {
+            const uint32_t bytes_per_sample = static_cast<uint32_t>((bit_size / 8u) * channels);
+            const uint32_t pcm_size = frame_count * bytes_per_sample;
+            m_sample_editor_cached_pcm.resize(pcm_size);
+            std::memcpy(m_sample_editor_cached_pcm.data(), wave_data, pcm_size);
+            m_sample_editor_cached_frame_count = frame_count;
+            m_sample_editor_cached_bit_size = bit_size;
+            m_sample_editor_cached_channels = channels;
+            m_sample_editor_cached_sample_rate = sample_rate;
+            BAERmfEditorBank_FreeWaveformData(wave_data);
+        }
+        else if (wave_data)
+        {
+            BAERmfEditorBank_FreeWaveformData(wave_data);
+        }
+
+        m_sample_editor_preview_needs_reencode = false;
+        m_sample_editor_loop_dirty = false;
+        RefreshListsFromBank();
+        return true;
+    }
+
+    void StopSampleEditorPreview()
+    {
+        if (!m_sample_editor_playing)
+        {
+            return;
+        }
+        if (m_sample_editor_preview_sound)
+        {
+            BAESound_Stop(m_sample_editor_preview_sound, FALSE);
+        }
+        m_sample_editor_playing = false;
+    }
+
+    void DrawSampleEditorWaveform()
+    {
+        ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
+        ImVec2 canvas_size = ImVec2(ImGui::GetContentRegionAvail().x, 220.0f);
+        if (canvas_size.x < 180.0f)
+        {
+            canvas_size.x = 180.0f;
+        }
+
+        ImDrawList *draw = ImGui::GetWindowDrawList();
+        draw->AddRectFilled(canvas_pos,
+                            ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y),
+                            IM_COL32(18, 20, 30, 255),
+                            4.0f);
+        draw->AddRect(canvas_pos,
+                      ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y),
+                      IM_COL32(84, 104, 128, 255),
+                      4.0f,
+                      0,
+                      1.2f);
+
+        if (m_sample_editor_frame_count > 0)
+        {
+            const float loop_x0 = canvas_pos.x + (canvas_size.x * (static_cast<float>(m_sample_editor_loop_start) / static_cast<float>(m_sample_editor_frame_count)));
+            const float loop_x1 = canvas_pos.x + (canvas_size.x * (static_cast<float>(m_sample_editor_loop_end) / static_cast<float>(m_sample_editor_frame_count)));
+            if (m_sample_editor_loop_end > m_sample_editor_loop_start)
+            {
+                draw->AddRectFilled(ImVec2(loop_x0, canvas_pos.y),
+                                    ImVec2(loop_x1, canvas_pos.y + canvas_size.y),
+                                    IM_COL32(74, 180, 136, 56));
+                draw->AddLine(ImVec2(loop_x0, canvas_pos.y), ImVec2(loop_x0, canvas_pos.y + canvas_size.y), IM_COL32(124, 244, 194, 168), 1.5f);
+                draw->AddLine(ImVec2(loop_x1, canvas_pos.y), ImVec2(loop_x1, canvas_pos.y + canvas_size.y), IM_COL32(124, 244, 194, 168), 1.5f);
+            }
+        }
+
+        const float center_y = canvas_pos.y + (canvas_size.y * 0.5f);
+        draw->AddLine(ImVec2(canvas_pos.x, center_y), ImVec2(canvas_pos.x + canvas_size.x, center_y), IM_COL32(66, 84, 105, 255), 1.0f);
+
+        const size_t bins = std::min(m_sample_editor_wave_min.size(), m_sample_editor_wave_max.size());
+        for (size_t i = 0; i < bins; ++i)
+        {
+            const float x0 = canvas_pos.x + (canvas_size.x * (static_cast<float>(i) / static_cast<float>(std::max<size_t>(bins, 1))));
+            float x1 = canvas_pos.x + (canvas_size.x * (static_cast<float>(i + 1) / static_cast<float>(std::max<size_t>(bins, 1))));
+            if (x1 <= x0)
+            {
+                x1 = x0 + 1.0f;
+            }
+            const float y0 = center_y - (m_sample_editor_wave_max[i] * (canvas_size.y * 0.45f));
+            const float y1 = center_y - (m_sample_editor_wave_min[i] * (canvas_size.y * 0.45f));
+            draw->AddRectFilled(ImVec2(x0, std::min(y0, y1)),
+                                ImVec2(x1, std::max(y0, y1)),
+                                IM_COL32(108, 186, 246, 255));
+        }
+
+        if (m_sample_editor_frame_count > 0)
+        {
+            const float play_x = canvas_pos.x + (canvas_size.x * (static_cast<float>(m_sample_editor_playhead_frame) / static_cast<float>(m_sample_editor_frame_count)));
+            draw->AddLine(ImVec2(play_x, canvas_pos.y),
+                          ImVec2(play_x, canvas_pos.y + canvas_size.y),
+                          IM_COL32(255, 238, 138, 255),
+                          2.0f);
+        }
+
+        ImGui::SetCursorScreenPos(canvas_pos);
+        ImGui::InvisibleButton("##SampleWaveformCanvas", canvas_size);
+
+        if (m_sample_editor_frame_count > 0)
+        {
+            const float loop_x0 = canvas_pos.x + (canvas_size.x * (static_cast<float>(m_sample_editor_loop_start) / static_cast<float>(m_sample_editor_frame_count)));
+            const float loop_x1 = canvas_pos.x + (canvas_size.x * (static_cast<float>(m_sample_editor_loop_end) / static_cast<float>(m_sample_editor_frame_count)));
+
+            const ImVec2 mouse = ImGui::GetIO().MousePos;
+            if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+            {
+                const float dist_start = std::fabs(mouse.x - loop_x0);
+                const float dist_end = std::fabs(mouse.x - loop_x1);
+                if (dist_start <= 8.0f || dist_end <= 8.0f)
+                {
+                    m_sample_editor_drag_loop_marker = (dist_start <= dist_end) ? 1 : 2;
+                }
+            }
+
+            if (!ImGui::IsMouseDown(ImGuiMouseButton_Left))
+            {
+                m_sample_editor_drag_loop_marker = 0;
+            }
+
+            if (m_sample_editor_drag_loop_marker != 0 && ImGui::IsMouseDown(ImGuiMouseButton_Left))
+            {
+                float t = (mouse.x - canvas_pos.x) / std::max(canvas_size.x, 1.0f);
+                t = std::clamp(t, 0.0f, 1.0f);
+                const uint32_t frame = static_cast<uint32_t>(t * static_cast<float>(m_sample_editor_frame_count));
+
+                if (m_sample_editor_drag_loop_marker == 1)
+                {
+                    const uint32_t new_start = std::min<uint32_t>(frame, m_sample_editor_loop_end);
+                    if (new_start != m_sample_editor_loop_start)
+                    {
+                        m_sample_editor_loop_start = new_start;
+                        m_sample_editor_loop_dirty = true;
+                    }
+                }
+                else
+                {
+                    const uint32_t new_end = std::max<uint32_t>(frame, m_sample_editor_loop_start);
+                    if (new_end != m_sample_editor_loop_end)
+                    {
+                        m_sample_editor_loop_end = new_end;
+                        m_sample_editor_loop_dirty = true;
+                    }
+                }
+            }
+        }
+    }
+
+    void DrawSampleEditorDialog()
+    {
+        if (!m_sample_editor_open)
+        {
+            return;
+        }
+
+        bool open = m_sample_editor_open;
+        ImGui::SetNextWindowSize(ImVec2(900.0f, 620.0f), ImGuiCond_FirstUseEver);
+        if (!ImGui::Begin("Sample Editor", &open, ImGuiWindowFlags_NoCollapse))
+        {
+            ImGui::End();
+            if (!open && m_sample_editor_open)
+            {
+                StopSampleEditorPreview();
+            }
+            m_sample_editor_open = open;
+            return;
+        }
+
+        if (m_sample_editor_sample_row >= 0 && m_sample_editor_sample_row < static_cast<int>(m_samples.size()))
+        {
+            const SampleRow &sample = m_samples[static_cast<size_t>(m_sample_editor_sample_row)];
+            ImGui::Text("%s", m_sample_editor_sample_name.c_str());
+            ImGui::Text("B%dP%03d  root:%d  range:%d-%d", sample.bank, sample.program, sample.root_key, sample.low_key, sample.high_key);
+            ImGui::Text("%u Hz  %d-bit  %dch  frames:%u", m_sample_editor_sample_rate_hz, m_sample_editor_bit_depth, m_sample_editor_channels, m_sample_editor_frame_count);
+            ImGui::Text("Current Codec: %s", GetSampleCodecLabel(m_sample_editor_codec_type));
+        }
+        ImGui::Separator();
+
+        size_t option_count = 0;
+        const SampleCodecOption *options = GetSampleCodecOptions(&option_count);
+        if (m_sample_editor_codec_index < 0 || m_sample_editor_codec_index >= static_cast<int>(option_count))
+        {
+            m_sample_editor_codec_index = 0;
+        }
+
+        ImGui::SetNextItemWidth(220.0f);
+        if (ImGui::BeginCombo("Compression", options[static_cast<size_t>(m_sample_editor_codec_index)].label))
+        {
+            for (size_t i = 0; i < option_count; ++i)
+            {
+                const bool selected = (m_sample_editor_codec_index == static_cast<int>(i));
+                if (ImGui::Selectable(options[i].label, selected))
+                {
+                    m_sample_editor_codec_index = static_cast<int>(i);
+                    m_sample_editor_preview_needs_reencode = true;
+                }
+                if (selected)
+                {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        ImGui::SameLine();
+        static const char *storage_labels[] = {"ESND", "CSND", "SND"};
+        int storage_index = std::clamp(static_cast<int>(m_sample_editor_snd_storage_type), 0, 2);
+        ImGui::SetNextItemWidth(120.0f);
+        if (ImGui::Combo("Storage", &storage_index, storage_labels, IM_ARRAYSIZE(storage_labels)))
+        {
+            m_sample_editor_snd_storage_type = static_cast<BAERmfEditorSndStorageType>(storage_index);
+            m_sample_editor_preview_needs_reencode = true;
+        }
+
+        ImGui::SameLine();
+        static const char *opus_mode_labels[] = {"Opus Audio", "Opus Voice"};
+        int opus_mode = std::clamp(static_cast<int>(m_sample_editor_opus_mode), 0, 1);
+        ImGui::SetNextItemWidth(130.0f);
+        if (ImGui::Combo("Opus Mode", &opus_mode, opus_mode_labels, IM_ARRAYSIZE(opus_mode_labels)))
+        {
+            m_sample_editor_opus_mode = static_cast<BAERmfEditorOpusMode>(opus_mode);
+            m_sample_editor_preview_needs_reencode = true;
+        }
+
+        if (ImGui::Button("Apply Compression"))
+        {
+            ApplySampleEditorEncodingToBank();
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Save"))
+        {
+            bool applied_ok = true;
+            if (m_sample_editor_preview_needs_reencode || m_sample_editor_loop_dirty)
+            {
+                applied_ok = ApplySampleEditorEncodingToBank();
+            }
+
+            if (applied_ok)
+            {
+                if (m_loaded_bank_path.empty())
+                {
+                    SetStatus("Bank updated in memory (no file path to save)");
+                }
+                else
+                {
+                    const BAEResult save_result = BAERmfEditorBank_SaveToFile(m_bank_token,
+                                                                              const_cast<char *>(m_loaded_bank_path.c_str()));
+                    if (save_result == BAE_NO_ERROR)
+                    {
+                        SetStatus(std::string("Bank saved: ") + FileNameFromPath(m_loaded_bank_path));
+                    }
+                    else
+                    {
+                        SetStatus(std::string("Bank save failed: ") + FormatBAEError(save_result));
+                    }
+                }
+            }
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Play"))
+        {
+            if (m_sample_editor_preview_needs_reencode)
+            {
+                (void)ApplySampleEditorEncodingToBank();
+            }
+
+            if (m_sample_editor_cached_frame_count > 0 &&
+                !m_sample_editor_cached_pcm.empty() &&
+                m_sample_editor_preview_sound)
+            {
+                BAESound_Stop(m_sample_editor_preview_sound, FALSE);
+
+                const uint32_t loop_start = std::min<uint32_t>(m_sample_editor_loop_start, m_sample_editor_cached_frame_count);
+                const uint32_t loop_end = std::min<uint32_t>(m_sample_editor_loop_end, m_sample_editor_cached_frame_count);
+
+                BAEResult result = BAESound_LoadCustomSample(
+                    m_sample_editor_preview_sound,
+                    m_sample_editor_cached_pcm.data(),
+                    m_sample_editor_cached_frame_count,
+                    m_sample_editor_cached_bit_size,
+                    m_sample_editor_cached_channels,
+                    m_sample_editor_cached_sample_rate,
+                    loop_start,
+                    loop_end);
+
+                if (result == BAE_NO_ERROR)
+                {
+                    (void)BAESound_SetLoopCount(m_sample_editor_preview_sound, 0);
+                    result = BAESound_Start(m_sample_editor_preview_sound,
+                                            0,
+                                            LONG_TO_UNSIGNED_FIXED(1),
+                                            0);
+                }
+
+                if (result == BAE_NO_ERROR)
+                {
+                    m_sample_editor_play_started_ms = SDL_GetTicks();
+                    m_sample_editor_playhead_frame = 0;
+                    m_sample_editor_playing = true;
+                    SetStatus("Sample previewing raw PCM at native rate");
+                }
+                else
+                {
+                    m_sample_editor_playing = false;
+                    SetStatus(std::string("Sample preview failed: ") + FormatBAEError(result));
+                }
+            }
+        }
+
+        ImGui::SameLine();
+        if (ImGui::Button("Stop"))
+        {
+            StopSampleEditorPreview();
+            m_sample_editor_playhead_frame = 0;
+        }
+
+        uint32_t loop_start_input = m_sample_editor_loop_start;
+        uint32_t loop_end_input = m_sample_editor_loop_end;
+        ImGui::SetNextItemWidth(160.0f);
+        if (ImGui::InputScalar("Loop Start", ImGuiDataType_U32, &loop_start_input))
+        {
+            const uint32_t max_frame = (m_sample_editor_frame_count > 0) ? (m_sample_editor_frame_count - 1u) : 0u;
+            loop_start_input = std::min<uint32_t>(loop_start_input, max_frame);
+            if (loop_start_input > m_sample_editor_loop_end)
+            {
+                m_sample_editor_loop_end = loop_start_input;
+            }
+            if (loop_start_input != m_sample_editor_loop_start)
+            {
+                m_sample_editor_loop_start = loop_start_input;
+                m_sample_editor_loop_dirty = true;
+            }
+        }
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(160.0f);
+        if (ImGui::InputScalar("Loop End", ImGuiDataType_U32, &loop_end_input))
+        {
+            loop_end_input = std::min<uint32_t>(loop_end_input, m_sample_editor_frame_count);
+            if (loop_end_input < m_sample_editor_loop_start)
+            {
+                m_sample_editor_loop_start = loop_end_input;
+            }
+            if (loop_end_input != m_sample_editor_loop_end)
+            {
+                m_sample_editor_loop_end = loop_end_input;
+                m_sample_editor_loop_dirty = true;
+            }
+        }
+        if (m_sample_editor_loop_dirty)
+        {
+            ImGui::SameLine();
+            ImGui::TextUnformatted("(loop changed)");
+        }
+
+        if (m_sample_editor_playing)
+        {
+            if (m_sample_editor_preview_sound)
+            {
+                BAE_BOOL is_done = FALSE;
+                if (BAESound_IsDone(m_sample_editor_preview_sound, &is_done) == BAE_NO_ERROR && is_done)
+                {
+                    m_sample_editor_playing = false;
+                }
+            }
+
+            const uint32_t elapsed_ms = SDL_GetTicks() - m_sample_editor_play_started_ms;
+            const uint32_t native_hz = UNSIGNED_FIXED_TO_LONG_ROUNDED(m_sample_editor_cached_sample_rate);
+            const uint64_t elapsed_frames = (static_cast<uint64_t>(elapsed_ms) * static_cast<uint64_t>(std::max<uint32_t>(native_hz, 1))) / 1000ull;
+            if (m_sample_editor_frame_count > 0)
+            {
+                if (m_sample_editor_loop_end > m_sample_editor_loop_start && m_sample_editor_loop_end <= m_sample_editor_frame_count)
+                {
+                    if (elapsed_frames < m_sample_editor_loop_end)
+                    {
+                        m_sample_editor_playhead_frame = static_cast<uint32_t>(elapsed_frames);
+                    }
+                    else
+                    {
+                        const uint32_t loop_len = m_sample_editor_loop_end - m_sample_editor_loop_start;
+                        const uint32_t loop_pos = static_cast<uint32_t>((elapsed_frames - m_sample_editor_loop_start) % std::max<uint32_t>(loop_len, 1));
+                        m_sample_editor_playhead_frame = m_sample_editor_loop_start + loop_pos;
+                    }
+                }
+                else
+                {
+                    m_sample_editor_playhead_frame = static_cast<uint32_t>(std::min<uint64_t>(elapsed_frames, m_sample_editor_frame_count));
+                    if (elapsed_frames >= m_sample_editor_frame_count)
+                    {
+                        StopSampleEditorPreview();
+                    }
+                }
+            }
+        }
+
+        DrawSampleEditorWaveform();
+
+        if (ImGui::Button("Close"))
+        {
+            StopSampleEditorPreview();
+            open = false;
+        }
+
+        ImGui::End();
+        if (!open && m_sample_editor_open)
+        {
+            StopSampleEditorPreview();
+        }
+        m_sample_editor_open = open;
+    }
+#endif
 
     void DrawInstrumentListWindow()
     {
@@ -1925,6 +2861,45 @@ private:
     std::array<float, 128> m_scope_history = {};
     int m_scope_write_index = 0;
     uint32_t m_seek_min_us = 0;
+
+#if NBEDITOR_MVP
+    bool m_sample_editor_open = false;
+    int m_sample_editor_sample_row = -1;
+    bool m_sample_editor_preview_needs_reencode = false;
+    bool m_sample_editor_playing = false;
+    int m_sample_editor_preview_note = 60;
+    uint32_t m_sample_editor_play_started_ms = 0;
+    uint32_t m_sample_editor_playhead_frame = 0;
+    uint32_t m_sample_editor_frame_count = 0;
+    uint32_t m_sample_editor_sample_rate_hz = 44100;
+    uint32_t m_sample_editor_loop_start = 0;
+    uint32_t m_sample_editor_loop_end = 0;
+    int m_sample_editor_channels = 1;
+    int m_sample_editor_bit_depth = 16;
+    int m_sample_editor_codec_index = 0;
+    BAERmfEditorCompressionType m_sample_editor_codec_type = BAE_EDITOR_COMPRESSION_PCM;
+    BAERmfEditorSndStorageType m_sample_editor_snd_storage_type = BAE_EDITOR_SND_STORAGE_ESND;
+    BAERmfEditorOpusMode m_sample_editor_opus_mode = BAE_EDITOR_OPUS_MODE_AUDIO;
+    std::string m_sample_editor_sample_name;
+    std::vector<float> m_sample_editor_wave_min;
+    std::vector<float> m_sample_editor_wave_max;
+    std::vector<unsigned char> m_sample_editor_cached_pcm;
+    uint32_t m_sample_editor_cached_frame_count = 0;
+    uint16_t m_sample_editor_cached_bit_size = 0;
+    uint16_t m_sample_editor_cached_channels = 0;
+    BAE_UNSIGNED_FIXED m_sample_editor_cached_sample_rate = 0;
+    std::vector<unsigned char> m_sample_editor_original_pcm;
+    uint32_t m_sample_editor_original_frame_count = 0;
+    uint16_t m_sample_editor_original_bit_size = 0;
+    uint16_t m_sample_editor_original_channels = 0;
+    BAE_UNSIGNED_FIXED m_sample_editor_original_sample_rate = 0;
+    BAERmfEditorCompressionType m_sample_editor_original_codec_type = BAE_EDITOR_COMPRESSION_PCM;
+    BAERmfEditorSndStorageType m_sample_editor_original_snd_storage_type = BAE_EDITOR_SND_STORAGE_ESND;
+    BAERmfEditorOpusMode m_sample_editor_original_opus_mode = BAE_EDITOR_OPUS_MODE_AUDIO;
+    bool m_sample_editor_loop_dirty = false;
+    int m_sample_editor_drag_loop_marker = 0;
+    BAESound m_sample_editor_preview_sound = nullptr;
+#endif
 
     char m_status[256] = {0};
     char m_path_input[1024] = {0};
