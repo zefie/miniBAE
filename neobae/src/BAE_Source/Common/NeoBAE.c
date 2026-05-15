@@ -178,6 +178,220 @@
 #if USE_XMF_SUPPORT == TRUE
 #include "GenXMF.h"
 #endif
+
+#ifndef BAE_DISABLE_ROLLED_MIDI_DETECTION
+#define BAE_DISABLE_ROLLED_MIDI_DETECTION FALSE
+#endif
+
+static uint16_t PV_ReadBigEndianU16(const unsigned char *data)
+{
+    return (uint16_t)(((uint16_t)data[0] << 8) | (uint16_t)data[1]);
+}
+
+static uint32_t PV_ReadBigEndianU32(const unsigned char *data)
+{
+    return ((uint32_t)data[0] << 24)
+         | ((uint32_t)data[1] << 16)
+         | ((uint32_t)data[2] << 8)
+         | (uint32_t)data[3];
+}
+
+static BAE_BOOL PV_ReadMidiVariableLength(const unsigned char **ppData,
+                                          const unsigned char *end,
+                                          uint32_t *outValue)
+{
+    const unsigned char *data;
+    uint32_t value;
+    int count;
+
+    if ((ppData == NULL) || (*ppData == NULL) || (outValue == NULL))
+    {
+        return FALSE;
+    }
+
+    data = *ppData;
+    value = 0;
+
+    for (count = 0; count < 4; count++)
+    {
+        unsigned char byteValue;
+
+        if (data >= end)
+        {
+            return FALSE;
+        }
+        byteValue = *data++;
+        value = (value << 7) | (uint32_t)(byteValue & 0x7F);
+        if ((byteValue & 0x80) == 0)
+        {
+            *ppData = data;
+            *outValue = value;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static BAE_BOOL PV_IsRolledMIDISequence(const GM_Song *pSong)
+{
+#if BAE_DISABLE_ROLLED_MIDI_DETECTION != TRUE
+    const unsigned char *data;
+    const unsigned char *end;
+    const unsigned char *trackData;
+    const unsigned char *trackEnd;
+    uint32_t headerLength;
+    uint16_t trackCount;
+    uint16_t trackIndex;
+
+    if ((pSong == NULL) || (pSong->seqType != SEQ_MIDI) || (pSong->sequenceData == NULL) || (pSong->sequenceDataSize < 14))
+    {
+        return FALSE;
+    }
+
+    data = (const unsigned char *)pSong->sequenceData;
+    end = data + pSong->sequenceDataSize;
+
+    if (memcmp(data, "MThd", 4) != 0)
+    {
+        return FALSE;
+    }
+
+    headerLength = PV_ReadBigEndianU32(data + 4);
+    if ((headerLength < 6) || ((size_t)(end - data) < (size_t)(8 + headerLength)))
+    {
+        return FALSE;
+    }
+
+    trackCount = PV_ReadBigEndianU16(data + 10);
+    data += 8 + headerLength;
+
+    for (trackIndex = 0; trackIndex < trackCount; trackIndex++)
+    {
+        unsigned char runningStatus;
+
+        if ((size_t)(end - data) < 8)
+        {
+            return FALSE;
+        }
+        if (memcmp(data, "MTrk", 4) != 0)
+        {
+            return FALSE;
+        }
+
+        trackData = data + 8;
+        trackEnd = trackData + PV_ReadBigEndianU32(data + 4);
+        if ((trackEnd < trackData) || (trackEnd > end))
+        {
+            return FALSE;
+        }
+
+        runningStatus = 0;
+        while (trackData < trackEnd)
+        {
+            uint32_t deltaTime;
+            unsigned char status;
+
+            if (PV_ReadMidiVariableLength(&trackData, trackEnd, &deltaTime) == FALSE)
+            {
+                return FALSE;
+            }
+
+            if (trackData >= trackEnd)
+            {
+                break;
+            }
+
+            status = *trackData++;
+            if ((status & 0x80) == 0)
+            {
+                if (runningStatus == 0)
+                {
+                    return FALSE;
+                }
+                trackData--;
+                status = runningStatus;
+            }
+            else if ((status < 0xF0) || (status == 0xF0) || (status == 0xF7))
+            {
+                runningStatus = status;
+            }
+
+            if (status == 0xFF)
+            {
+                uint32_t metaLength;
+
+                if ((trackData >= trackEnd) || (PV_ReadMidiVariableLength(&trackData, trackEnd, &metaLength) == FALSE))
+                {
+                    return FALSE;
+                }
+                if ((size_t)(trackEnd - trackData) < metaLength)
+                {
+                    return FALSE;
+                }
+                trackData += metaLength;
+                continue;
+            }
+
+            if ((status == 0xF0) || (status == 0xF7))
+            {
+                uint32_t sysexLength;
+
+                if (PV_ReadMidiVariableLength(&trackData, trackEnd, &sysexLength) == FALSE)
+                {
+                    return FALSE;
+                }
+                if ((size_t)(trackEnd - trackData) < sysexLength)
+                {
+                    return FALSE;
+                }
+                trackData += sysexLength;
+                continue;
+            }
+
+            switch (status & 0xF0)
+            {
+            case 0x80:
+            case 0x90:
+            case 0xA0:
+            case 0xE0:
+                if ((size_t)(trackEnd - trackData) < 2)
+                {
+                    return FALSE;
+                }
+                trackData += 2;
+                break;
+
+            case 0xB0:
+                if ((size_t)(trackEnd - trackData) < 2)
+                {
+                    return FALSE;
+                }
+                if ((trackData[0] == 86) || (trackData[0] == 87))
+                {
+                    return TRUE;
+                }
+                trackData += 2;
+                break;
+
+            case 0xC0:
+            case 0xD0:
+                if ((size_t)(trackEnd - trackData) < 1)
+                {
+                    return FALSE;
+                }
+                trackData += 1;
+                break;
+
+            default:
+                return FALSE;
+            }
+        }
+
+        data = trackEnd;
+    }
+#endif
+    return FALSE;
+}
 #endif
 
 #if USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE
@@ -10789,6 +11003,39 @@ BAEResult BAESong_AreMidiEventsPending(BAESong song, BAE_BOOL *outPending)
                     // none there, so see if this is a midi file playing via the sequencer
                     *outPending = ((BAE_BOOL)GM_IsSongDone(song->pSong) ? FALSE : TRUE);
                 }
+            }
+        }
+        else
+        {
+            err = PARAM_ERR;
+        }
+        BAE_ReleaseMutex(song->mLock);
+    }
+    else
+    {
+        err = NULL_OBJECT;
+    }
+    return BAE_TranslateOPErr(err);
+}
+
+// BAESong_IsRolledMIDI()
+// --------------------------------------
+// returns TRUE if the loaded MIDI uses Beatnik/WebTV loop-driven track rolling
+//
+BAEResult BAESong_IsRolledMIDI(BAESong song, BAE_BOOL *outIsRolled)
+{
+    OPErr err;
+
+    err = NO_ERR;
+    if ((song) && (song->mID == OBJECT_ID))
+    {
+        BAE_AcquireMutex(song->mLock);
+        if (outIsRolled)
+        {
+            *outIsRolled = FALSE;
+            if (song->pSong)
+            {
+                *outIsRolled = PV_IsRolledMIDISequence(song->pSong);
             }
         }
         else

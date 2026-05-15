@@ -2501,9 +2501,10 @@ extern "C"
     // BAESong_IsRolledMIDI()
     // --------------------------------------
     // Upon return, the BAE_BOOL pointed at by parameter outIsRolled will indicate
-    // whether this song uses a "rolled" MIDI format (no dominant master track).
-    // In rolled MIDI files, tracks are more evenly distributed in terms of content,
-    // allowing the BAE engine to play one track at a time for special playback modes.
+    // whether this song uses the Beatnik/WebTV-style rolled MIDI loop system.
+    // This currently detects Standard MIDI files that embed per-loop track mute/
+    // unmute control changes (CC 86/87), which the BAE engine uses to rotate which
+    // track is audible on each loop pass. Non-MIDI songs return FALSE.
     //
     BAEResult BAESong_IsRolledMIDI(BAESong song,
                                    BAE_BOOL *outIsRolled);
