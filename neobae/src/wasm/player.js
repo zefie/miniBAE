@@ -821,7 +821,7 @@ class NeoBAEPlayer {
 
         try {
             // Track if we were playing so we can resume after loading
-            const wasPlaying = this.player && this.player.isPlaying();
+            const wasPlaying = this.player && this.player.isPlaying;
             
             // Stop current playback
             if (wasPlaying) {
@@ -874,7 +874,7 @@ class NeoBAEPlayer {
 
         try {
             // Track if we were playing so we can resume after loading
-            const wasPlaying = this.player && this.player.isPlaying();
+            const wasPlaying = this.player && this.player.isPlaying;
             
             // Stop current playback
             if (wasPlaying) {
