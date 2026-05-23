@@ -803,7 +803,18 @@ static const int16_t L2Levels[] =
 
 static int16_t PV_L2(int16_t maxVoice)
 {
-    return L2Levels[maxVoice - 1];
+    int16_t clampedVoice;
+
+    clampedVoice = maxVoice;
+    if (clampedVoice < 1)
+    {
+        clampedVoice = 1;
+    }
+    if (clampedVoice > (int16_t)(sizeof(L2Levels) / sizeof(L2Levels[0])))
+    {
+        clampedVoice = (int16_t)(sizeof(L2Levels) / sizeof(L2Levels[0]));
+    }
+    return L2Levels[clampedVoice - 1];
 }
 
 // Native HSB engine output cap. 128/256 == 50% maximum level.
