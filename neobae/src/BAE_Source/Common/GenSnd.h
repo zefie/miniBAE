@@ -1182,6 +1182,15 @@ typedef int32_t UNIT_TYPE;
         uint32_t lyricLineBreakThreshold; // Threshold in microseconds for line breaks
         uint32_t currentLineLength;      // Current line length for word wrapping
         bool lyricsHaveNewlines;     // TRUE if MIDI lyrics contain explicit newlines
+    #if SUPPORT_KARAOKE
+        // Karaoke source selection/detection for files carrying multiple lyric tracks/languages.
+        int16_t primaryLyricTrack;      // -1 until a lyric source track is selected
+        uint8_t primaryLyricMetaType;   // 0x01 (generic text karaoke) or 0x05 (true lyric)
+        uint16_t lyricTrackCount;       // number of unique lyric-bearing tracks observed
+        bool lyricTrackSeen[MAX_TRACKS];
+        bool multipleLyricTracksDetected;
+        bool lyricTrackNoticePrinted;
+    #endif
 
         // Optional raw MIDI event callback (mirroring/export). If set, this will be
         // called with the raw MIDI bytes for any MIDI event processed for this song.

@@ -380,6 +380,12 @@
 #include "NeoBAE.h"
 #endif
 
+#if SUPPORT_KARAOKE
+#ifndef BAE_KARAOKE_SINGLE_TRACK_FILTER
+#define BAE_KARAOKE_SINGLE_TRACK_FILTER 1
+#endif
+#endif
+
 #if ((defined(QUEUE_DEBUG) || defined(EVENT_DEBUG)) && X_PLATFORM != X_WIN95 && X_PLATFORM != X_WIN_HARDWARE && X_PLATFORM != X_IOS && X_PLATFORM != X_MACINTOSH)
 #error Cannot use MIDI debugging code on non-windows platform!
 #endif
@@ -593,6 +599,14 @@ OPErr PV_ConfigureMusic(GM_Song *pSong)
     pSong->lastLyricTimeUs = 0;
     pSong->currentLineLength = 0;
     pSong->lyricsHaveNewlines = FALSE;
+#if SUPPORT_KARAOKE
+    pSong->primaryLyricTrack = -1;
+    pSong->primaryLyricMetaType = 0;
+    pSong->lyricTrackCount = 0;
+    pSong->multipleLyricTracksDetected = FALSE;
+    pSong->lyricTrackNoticePrinted = FALSE;
+    XSetMemory((char *)pSong->lyricTrackSeen, sizeof(pSong->lyricTrackSeen), 0);
+#endif
     // DEBUG: begin MIDI parse of song sequenceData
     //debug_message("DEBUG: PV_ConfigureMusic: sequenceData=%p size=%u\n", pSong ? pSong->sequenceData : NULL, pSong ? (unsigned)pSong->sequenceDataSize : 0);
     PV_ConfigureInstruments(pSong);
@@ -3958,8 +3972,9 @@ OPErr PV_ProcessMidiSequencerSlice(void *threadContext, GM_Song *pSong)
                     if (pSong->lyricCallbackPtr)
                     {
                         bool invoke = FALSE;
+                        bool switchedToTrueLyricTrack = FALSE;
                         const char *lyricStr = (const char *)cbPtr; /* NUL terminated */
-                        if (midi_byte == 0x05 && !pSong->seenGenericTextLyric)
+                        if (midi_byte == 0x05)
                         {
                             pSong->seenTrueLyric = TRUE;
                             pSong->seenLyricMeta = TRUE;
@@ -4006,9 +4021,59 @@ OPErr PV_ProcessMidiSequencerSlice(void *threadContext, GM_Song *pSong)
                                 invoke = TRUE;
                             }
                         }
+#if SUPPORT_KARAOKE && BAE_KARAOKE_SINGLE_TRACK_FILTER
+                        if (invoke && lyricStr && lyricStr[0])
+                        {
+                            int16_t lyricTrack = (int16_t)currentTrack;
+                            if (lyricTrack >= 0 && lyricTrack < MAX_TRACKS)
+                            {
+                                if (pSong->lyricTrackSeen[lyricTrack] == FALSE)
+                                {
+                                    pSong->lyricTrackSeen[lyricTrack] = TRUE;
+                                    pSong->lyricTrackCount++;
+                                    if (pSong->lyricTrackCount > 1)
+                                    {
+                                        pSong->multipleLyricTracksDetected = TRUE;
+                                        if (pSong->lyricTrackNoticePrinted == FALSE)
+                                        {
+                                            debug_message("Karaoke: detected %u lyric tracks in MIDI; selecting a single stream to avoid mixed-language output.\n", (unsigned)pSong->lyricTrackCount);
+                                            pSong->lyricTrackNoticePrinted = TRUE;
+                                        }
+                                    }
+                                }
+
+                                if (pSong->primaryLyricTrack < 0)
+                                {
+                                    pSong->primaryLyricTrack = lyricTrack;
+                                    pSong->primaryLyricMetaType = midi_byte;
+                                }
+                                else if (midi_byte == 0x05 && pSong->primaryLyricMetaType != 0x05)
+                                {
+                                    // Promote true lyric meta over generic text karaoke when both exist.
+                                    pSong->primaryLyricTrack = lyricTrack;
+                                    pSong->primaryLyricMetaType = 0x05;
+                                    pSong->lastLyric[0] = '\0';
+                                    pSong->lastLyricTimestamp = 0;
+                                    pSong->currentLineLength = 0;
+                                    switchedToTrueLyricTrack = TRUE;
+                                }
+
+                                if (pSong->primaryLyricTrack != lyricTrack)
+                                {
+                                    invoke = FALSE;
+                                }
+                            }
+                        }
+#endif
                         if (invoke && lyricStr && lyricStr[0])
                         {
                             uint32_t lyrTimeUs = (uint32_t)pSong->songMicroseconds;
+
+                            if (switchedToTrueLyricTrack)
+                            {
+                                char empty[1] = {'\0'};
+                                pSong->lyricCallbackPtr(pSong, empty, lyrTimeUs, pSong->lyricCallbackReference);
+                            }
                             
                             // Deduplicate: skip if this exact lyric was just sent at the same timestamp
                             // (Some MIDI files have duplicate lyric events written consecutively)
