@@ -2377,6 +2377,23 @@ extern "C"
     // Releases buffers allocated by BAERingtone_ConvertToMidi*.
     void BAERingtone_FreeMidiBuffer(unsigned char *pMidiData);
 
+    // BAEUtil_UnrollRolledMidiFromMemory()
+    // ------------------------------------
+    // Expands Beatnik/WebTV rolled MIDI loop playback into a linear MIDI file.
+    // The function strips roll control controllers (CC 85/86/87), appends each
+    // loop pass in detected playback order, and can optionally split output into
+    // per-instrument tracks.
+    //
+    // Caller owns *ppMidiOut and must free it with BAERingtone_FreeMidiBuffer.
+    // outWasRolled may be NULL.
+#define BAE_UNROLL_MIDI_OPTION_SPLIT_INSTRUMENTS 0x0001
+    BAEResult BAEUtil_UnrollRolledMidiFromMemory(void const *pMidiData,
+                                                 uint32_t midiSize,
+                                                 uint32_t options,
+                                                 unsigned char **ppMidiOut,
+                                                 uint32_t *pMidiSizeOut,
+                                                 BAE_BOOL *outWasRolled);
+
     // BAESong_LoadRmfFromMemory()
     // --------------------------------------
     // was BAERmfSong::LoadFromMemory()

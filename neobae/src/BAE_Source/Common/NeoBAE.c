@@ -183,6 +183,11 @@
 #define BAE_DISABLE_ROLLED_MIDI_DETECTION FALSE
 #endif
 
+#if BAE_DISABLE_ROLLED_MIDI_DETECTION == TRUE
+#undef BAE_DISABLE_ROLLED_MIDI_DETECTION
+#define BAE_DISABLE_ROLLED_MIDI_DETECTION FALSE
+#endif
+
 static uint16_t PV_ReadBigEndianU16(const unsigned char *data)
 {
     return (uint16_t)(((uint16_t)data[0] << 8) | (uint16_t)data[1]);
@@ -232,25 +237,55 @@ static BAE_BOOL PV_ReadMidiVariableLength(const unsigned char **ppData,
     return FALSE;
 }
 
-static BAE_BOOL PV_IsRolledMIDISequence(const GM_Song *pSong)
+static const unsigned char *PV_FindMThdStart(const unsigned char *data,
+                                             uint32_t size,
+                                             uint32_t *outRemainingSize)
 {
-#if BAE_DISABLE_ROLLED_MIDI_DETECTION != TRUE
+    uint32_t i;
+
+    if ((data == NULL) || (size < 14))
+    {
+        return NULL;
+    }
+    for (i = 0; i + 4 <= size; i++)
+    {
+        if ((data[i] == 'M') && (data[i + 1] == 'T') && (data[i + 2] == 'h') && (data[i + 3] == 'd'))
+        {
+            if (outRemainingSize)
+            {
+                *outRemainingSize = size - i;
+            }
+            return data + i;
+        }
+    }
+    return NULL;
+}
+
+static BAE_BOOL PV_IsRolledMIDIBytes(const unsigned char *rawData, uint32_t rawSize)
+{
+#if 1
     const unsigned char *data;
     const unsigned char *end;
-    const unsigned char *trackData;
-    const unsigned char *trackEnd;
+    uint32_t size;
     uint32_t headerLength;
     uint16_t trackCount;
     uint16_t trackIndex;
+    uint32_t muteEvents;
+    uint32_t loopEvents;
+    uint32_t distinctMuteValues;
+    unsigned char seenMuteValue[128];
+    uint16_t tracksWithMute;
+    uint16_t tracksWithNotes;
+    uint32_t minNoteEnd;
+    uint32_t maxNoteEnd;
 
-    if ((pSong == NULL) || (pSong->seqType != SEQ_MIDI) || (pSong->sequenceData == NULL) || (pSong->sequenceDataSize < 14))
+    data = PV_FindMThdStart(rawData, rawSize, &size);
+    if ((data == NULL) || (size < 14))
     {
         return FALSE;
     }
 
-    data = (const unsigned char *)pSong->sequenceData;
-    end = data + pSong->sequenceDataSize;
-
+    end = data + size;
     if (memcmp(data, "MThd", 4) != 0)
     {
         return FALSE;
@@ -265,9 +300,24 @@ static BAE_BOOL PV_IsRolledMIDISequence(const GM_Song *pSong)
     trackCount = PV_ReadBigEndianU16(data + 10);
     data += 8 + headerLength;
 
+    muteEvents = 0;
+    loopEvents = 0;
+    distinctMuteValues = 0;
+    XSetMemory(seenMuteValue, sizeof(seenMuteValue), 0);
+    tracksWithMute = 0;
+    tracksWithNotes = 0;
+    minNoteEnd = 0xFFFFFFFFUL;
+    maxNoteEnd = 0;
+
     for (trackIndex = 0; trackIndex < trackCount; trackIndex++)
     {
+        const unsigned char *trackData;
+        const unsigned char *trackEnd;
         unsigned char runningStatus;
+        uint32_t absTick;
+        uint32_t noteEndTick;
+        BAE_BOOL trackHasMute;
+        BAE_BOOL trackHasNotes;
 
         if ((size_t)(end - data) < 8)
         {
@@ -286,6 +336,11 @@ static BAE_BOOL PV_IsRolledMIDISequence(const GM_Song *pSong)
         }
 
         runningStatus = 0;
+        absTick = 0;
+        noteEndTick = 0;
+        trackHasMute = FALSE;
+        trackHasNotes = FALSE;
+
         while (trackData < trackEnd)
         {
             uint32_t deltaTime;
@@ -295,6 +350,7 @@ static BAE_BOOL PV_IsRolledMIDISequence(const GM_Song *pSong)
             {
                 return FALSE;
             }
+            absTick += deltaTime;
 
             if (trackData >= trackEnd)
             {
@@ -319,7 +375,6 @@ static BAE_BOOL PV_IsRolledMIDISequence(const GM_Song *pSong)
             if (status == 0xFF)
             {
                 uint32_t metaLength;
-
                 if ((trackData >= trackEnd) || (PV_ReadMidiVariableLength(&trackData, trackEnd, &metaLength) == FALSE))
                 {
                     return FALSE;
@@ -335,7 +390,6 @@ static BAE_BOOL PV_IsRolledMIDISequence(const GM_Song *pSong)
             if ((status == 0xF0) || (status == 0xF7))
             {
                 uint32_t sysexLength;
-
                 if (PV_ReadMidiVariableLength(&trackData, trackEnd, &sysexLength) == FALSE)
                 {
                     return FALSE;
@@ -345,6 +399,31 @@ static BAE_BOOL PV_IsRolledMIDISequence(const GM_Song *pSong)
                     return FALSE;
                 }
                 trackData += sysexLength;
+                continue;
+            }
+
+            if ((status >= 0xF1) && (status <= 0xFE))
+            {
+                uint32_t sysLen;
+
+                switch (status)
+                {
+                case 0xF1:
+                case 0xF3:
+                    sysLen = 1;
+                    break;
+                case 0xF2:
+                    sysLen = 2;
+                    break;
+                default:
+                    sysLen = 0;
+                    break;
+                }
+                if ((size_t)(trackEnd - trackData) < sysLen)
+                {
+                    return FALSE;
+                }
+                trackData += sysLen;
                 continue;
             }
 
@@ -358,6 +437,13 @@ static BAE_BOOL PV_IsRolledMIDISequence(const GM_Song *pSong)
                 {
                     return FALSE;
                 }
+                if (((status & 0xF0) == 0x80) ||
+                    (((status & 0xF0) == 0x90) && (trackData[1] > 0)) ||
+                    (((status & 0xF0) == 0x90) && (trackData[1] == 0)))
+                {
+                    trackHasNotes = TRUE;
+                    noteEndTick = absTick;
+                }
                 trackData += 2;
                 break;
 
@@ -368,7 +454,20 @@ static BAE_BOOL PV_IsRolledMIDISequence(const GM_Song *pSong)
                 }
                 if ((trackData[0] == 86) || (trackData[0] == 87))
                 {
-                    return TRUE;
+                    muteEvents++;
+                    trackHasMute = TRUE;
+                    if (trackData[1] < 128)
+                    {
+                        if (seenMuteValue[trackData[1]] == 0)
+                        {
+                            seenMuteValue[trackData[1]] = 1;
+                            distinctMuteValues++;
+                        }
+                    }
+                }
+                else if (trackData[0] == 85)
+                {
+                    loopEvents++;
                 }
                 trackData += 2;
                 break;
@@ -387,12 +486,1193 @@ static BAE_BOOL PV_IsRolledMIDISequence(const GM_Song *pSong)
             }
         }
 
+        if (trackHasNotes)
+        {
+            tracksWithNotes++;
+            if (noteEndTick < minNoteEnd)
+            {
+                minNoteEnd = noteEndTick;
+            }
+            if (noteEndTick > maxNoteEnd)
+            {
+                maxNoteEnd = noteEndTick;
+            }
+        }
+        if (trackHasMute)
+        {
+            tracksWithMute++;
+        }
+
         data = trackEnd;
     }
+
+    if ((loopEvents > 0) && (muteEvents > 0) && (distinctMuteValues >= 3) && (tracksWithMute >= 4))
+    {
+        return TRUE;
+    }
+
+    if ((muteEvents >= 16) && (distinctMuteValues >= 3) && (tracksWithMute >= 4))
+    {
+        return TRUE;
+    }
+
+    if ((muteEvents >= 2) && (tracksWithNotes >= 2))
+    {
+        uint32_t span;
+        span = (maxNoteEnd >= minNoteEnd) ? (maxNoteEnd - minNoteEnd) : 0;
+        if ((span <= 2) && ((distinctMuteValues >= 2) || (tracksWithMute >= 2)))
+        {
+            return TRUE;
+        }
+    }
+
+    debug_message("[BAE] Rolled detect metrics: mute=%u loop=%u distinctMuteVals=%u tracksWithMute=%u tracksWithNotes=%u noteSpan=%u\n",
+                  muteEvents,
+                  loopEvents,
+                  distinctMuteValues,
+                  (unsigned)tracksWithMute,
+                  (unsigned)tracksWithNotes,
+                  (unsigned)((maxNoteEnd >= minNoteEnd) ? (maxNoteEnd - minNoteEnd) : 0));
+#else
+    (void)rawData;
+    (void)rawSize;
 #endif
     return FALSE;
 }
+
+static BAE_BOOL PV_IsRolledMIDIRawControllerScan(const unsigned char *rawData, uint32_t rawSize)
+{
+    uint32_t i;
+    uint32_t cc85;
+    uint32_t cc86_87;
+    uint32_t distinctMuteValues;
+    unsigned char seenMuteValue[128];
+
+    if ((rawData == NULL) || (rawSize < 3))
+    {
+        return FALSE;
+    }
+
+    XSetMemory(seenMuteValue, sizeof(seenMuteValue), 0);
+    cc85 = 0;
+    cc86_87 = 0;
+    distinctMuteValues = 0;
+
+    for (i = 0; i + 2 < rawSize; i++)
+    {
+        unsigned char st;
+        st = rawData[i];
+        if ((st >= 0xB0) && (st <= 0xBF))
+        {
+            unsigned char cc;
+            unsigned char val;
+
+            cc = rawData[i + 1];
+            val = rawData[i + 2];
+            if (cc == 85)
+            {
+                cc85++;
+            }
+            else if ((cc == 86) || (cc == 87))
+            {
+                cc86_87++;
+                if ((val < 128) && (seenMuteValue[val] == 0))
+                {
+                    seenMuteValue[val] = 1;
+                    distinctMuteValues++;
+                }
+            }
+        }
+    }
+
+    if ((cc86_87 >= 16) && (distinctMuteValues >= 3))
+    {
+        return TRUE;
+    }
+    if ((cc85 > 0) && (cc86_87 >= 4) && (distinctMuteValues >= 2))
+    {
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static BAE_BOOL PV_IsRolledMIDISequence(const GM_Song *pSong)
+{
+#if BAE_DISABLE_ROLLED_MIDI_DETECTION != TRUE
+    if ((pSong == NULL) || (pSong->seqType != SEQ_MIDI) || (pSong->sequenceData == NULL) || (pSong->sequenceDataSize < 14))
+    {
+        return FALSE;
+    }
+    return PV_IsRolledMIDIBytes((const unsigned char *)pSong->sequenceData,
+                                (uint32_t)pSong->sequenceDataSize);
 #endif
+    return FALSE;
+}
+
+static BAE_BOOL PV_IsRolledMIDIMemory(const void *pMidiData, uint32_t midiSize)
+{
+    if (PV_IsRolledMIDIBytes((const unsigned char *)pMidiData, midiSize))
+    {
+        return TRUE;
+    }
+    return PV_IsRolledMIDIRawControllerScan((const unsigned char *)pMidiData, midiSize);
+}
+#endif
+
+#ifndef BAE_ENABLE_ROLLED_MIDI_UNROLL
+#define BAE_ENABLE_ROLLED_MIDI_UNROLL TRUE
+#endif
+
+#if BAE_ENABLE_ROLLED_MIDI_UNROLL == TRUE
+
+#define PV_UNROLL_EVENT_META 0
+#define PV_UNROLL_EVENT_SYSEX 1
+#define PV_UNROLL_EVENT_MIDI 2
+#define PV_UNROLL_MAX_PASSES 1024
+
+typedef struct PV_UnrollParsedEvent
+{
+    uint64_t tick;
+    uint32_t seq;
+    uint16_t trackIndex;
+    uint8_t kind;
+    uint8_t status;
+    uint8_t metaType;
+    uint8_t midiDataLen;
+    unsigned char midiData[2];
+    const unsigned char *payload;
+    uint32_t payloadLen;
+} PV_UnrollParsedEvent;
+
+typedef struct PV_UnrollEventArray
+{
+    PV_UnrollParsedEvent *items;
+    uint32_t count;
+    uint32_t capacity;
+} PV_UnrollEventArray;
+
+typedef struct PV_UnrollOutputTrack
+{
+    PV_UnrollParsedEvent *events;
+    uint32_t eventCount;
+    uint32_t eventCapacity;
+} PV_UnrollOutputTrack;
+
+typedef struct PV_UnrollKey
+{
+    uint8_t channel;
+    uint8_t bankMSB;
+    uint8_t bankLSB;
+    uint8_t program;
+    int16_t drumNote;
+} PV_UnrollKey;
+
+typedef struct PV_UnrollKeyTrack
+{
+    PV_UnrollKey key;
+    PV_UnrollOutputTrack track;
+} PV_UnrollKeyTrack;
+
+typedef struct PV_UnrollKeyTrackArray
+{
+    PV_UnrollKeyTrack *items;
+    uint32_t count;
+    uint32_t capacity;
+} PV_UnrollKeyTrackArray;
+
+typedef struct PV_UnrollByteBuffer
+{
+    unsigned char *data;
+    uint32_t size;
+    uint32_t capacity;
+} PV_UnrollByteBuffer;
+
+static uint16_t PV_UnrollReadBE16(const unsigned char *data)
+{
+    return (uint16_t)(((uint16_t)data[0] << 8) | (uint16_t)data[1]);
+}
+
+static uint32_t PV_UnrollReadBE32(const unsigned char *data)
+{
+    return ((uint32_t)data[0] << 24)
+         | ((uint32_t)data[1] << 16)
+         | ((uint32_t)data[2] << 8)
+         | (uint32_t)data[3];
+}
+
+static void PV_UnrollWriteBE16(unsigned char *data, uint16_t value)
+{
+    data[0] = (unsigned char)((value >> 8) & 0xFF);
+    data[1] = (unsigned char)(value & 0xFF);
+}
+
+static void PV_UnrollWriteBE32(unsigned char *data, uint32_t value)
+{
+    data[0] = (unsigned char)((value >> 24) & 0xFF);
+    data[1] = (unsigned char)((value >> 16) & 0xFF);
+    data[2] = (unsigned char)((value >> 8) & 0xFF);
+    data[3] = (unsigned char)(value & 0xFF);
+}
+
+static BAE_BOOL PV_UnrollReadVLQ(const unsigned char **ppData, const unsigned char *end, uint32_t *outValue)
+{
+    uint32_t value;
+    int count;
+    const unsigned char *data;
+
+    if ((ppData == NULL) || (*ppData == NULL) || (outValue == NULL))
+    {
+        return FALSE;
+    }
+    value = 0;
+    data = *ppData;
+    for (count = 0; count < 4; count++)
+    {
+        unsigned char b;
+        if (data >= end)
+        {
+            return FALSE;
+        }
+        b = *data++;
+        value = (value << 7) | (uint32_t)(b & 0x7F);
+        if ((b & 0x80) == 0)
+        {
+            *ppData = data;
+            *outValue = value;
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static uint32_t PV_UnrollWriteVLQ(unsigned char out[4], uint32_t value)
+{
+    unsigned char tmp[4];
+    uint32_t count;
+
+    count = 0;
+    tmp[count++] = (unsigned char)(value & 0x7F);
+    value >>= 7;
+    while (value && count < 4)
+    {
+        tmp[count++] = (unsigned char)(0x80 | (value & 0x7F));
+        value >>= 7;
+    }
+    {
+        uint32_t i;
+        for (i = 0; i < count; i++)
+        {
+            out[i] = tmp[count - 1 - i];
+        }
+    }
+    return count;
+}
+
+static BAE_BOOL PV_UnrollEnsureEvents(PV_UnrollEventArray *arr, uint32_t needed)
+{
+    if (arr->capacity < needed)
+    {
+        uint32_t newCap;
+        PV_UnrollParsedEvent *newItems;
+
+        newCap = arr->capacity ? arr->capacity * 2 : 1024;
+        if (newCap < needed)
+        {
+            newCap = needed;
+        }
+        newItems = (PV_UnrollParsedEvent *)realloc(arr->items, (size_t)newCap * sizeof(PV_UnrollParsedEvent));
+        if (newItems == NULL)
+        {
+            return FALSE;
+        }
+        arr->items = newItems;
+        arr->capacity = newCap;
+    }
+    return TRUE;
+}
+
+static BAE_BOOL PV_UnrollAppendEvent(PV_UnrollEventArray *arr, const PV_UnrollParsedEvent *event)
+{
+    if (PV_UnrollEnsureEvents(arr, arr->count + 1) == FALSE)
+    {
+        return FALSE;
+    }
+    arr->items[arr->count++] = *event;
+    return TRUE;
+}
+
+static int PV_UnrollEventCompare(const void *a, const void *b)
+{
+    const PV_UnrollParsedEvent *ea;
+    const PV_UnrollParsedEvent *eb;
+    ea = (const PV_UnrollParsedEvent *)a;
+    eb = (const PV_UnrollParsedEvent *)b;
+    if (ea->tick < eb->tick)
+    {
+        return -1;
+    }
+    if (ea->tick > eb->tick)
+    {
+        return 1;
+    }
+    if (ea->trackIndex < eb->trackIndex)
+    {
+        return -1;
+    }
+    if (ea->trackIndex > eb->trackIndex)
+    {
+        return 1;
+    }
+    if (ea->seq < eb->seq)
+    {
+        return -1;
+    }
+    if (ea->seq > eb->seq)
+    {
+        return 1;
+    }
+    return 0;
+}
+
+static BAE_BOOL PV_UnrollIsMetaOnce(uint8_t metaType)
+{
+    return (metaType == 0x00) || (metaType == 0x02) || (metaType == 0x03) || (metaType == 0x04);
+}
+
+static BAE_BOOL PV_UnrollIsNoteEvent(const PV_UnrollParsedEvent *event)
+{
+    uint8_t type;
+    if (event->kind != PV_UNROLL_EVENT_MIDI)
+    {
+        return FALSE;
+    }
+    type = (uint8_t)(event->status & 0xF0);
+    return (type == 0x80) || (type == 0x90);
+}
+
+static BAE_BOOL PV_UnrollParseSMF(const unsigned char *midiData,
+                                  uint32_t midiSize,
+                                  PV_UnrollEventArray *events,
+                                  uint16_t *outDivision,
+                                  uint16_t *outTrackCount,
+                                  uint32_t *outSongLength,
+                                  BAE_BOOL *outHasRoll,
+                                  uint8_t *outMaxLoopCount,
+                                  uint8_t *outMaxRollIndex)
+{
+    const unsigned char *data;
+    const unsigned char *end;
+    uint32_t headerLength;
+    uint16_t trackCount;
+    uint32_t maxTick;
+    BAE_BOOL hasRoll;
+    uint8_t maxLoopCount;
+    uint8_t maxRollIndex;
+    uint16_t trackIndex;
+
+    if ((midiData == NULL) || (midiSize < 14) || (events == NULL) || (outDivision == NULL) || (outTrackCount == NULL) ||
+        (outSongLength == NULL) || (outHasRoll == NULL) || (outMaxLoopCount == NULL) || (outMaxRollIndex == NULL))
+    {
+        return FALSE;
+    }
+
+    data = midiData;
+    end = midiData + midiSize;
+    if ((size_t)(end - data) < 14)
+    {
+        return FALSE;
+    }
+    if (memcmp(data, "MThd", 4) != 0)
+    {
+        return FALSE;
+    }
+    headerLength = PV_UnrollReadBE32(data + 4);
+    if ((headerLength < 6) || ((size_t)(end - data) < (size_t)(8 + headerLength)))
+    {
+        return FALSE;
+    }
+
+    if ((PV_UnrollReadBE16(data + 12) & 0x8000) != 0)
+    {
+        return FALSE;
+    }
+
+    *outDivision = PV_UnrollReadBE16(data + 12);
+    trackCount = PV_UnrollReadBE16(data + 10);
+    *outTrackCount = trackCount;
+
+    data += 8 + headerLength;
+    maxTick = 0;
+    hasRoll = FALSE;
+    maxLoopCount = 0;
+    maxRollIndex = 0;
+
+    for (trackIndex = 0; trackIndex < trackCount; trackIndex++)
+    {
+        const unsigned char *trackData;
+        const unsigned char *trackEnd;
+        uint32_t trackLen;
+        uint32_t absTick;
+        uint32_t seq;
+        unsigned char runningStatus;
+
+        if ((size_t)(end - data) < 8)
+        {
+            return FALSE;
+        }
+        if (memcmp(data, "MTrk", 4) != 0)
+        {
+            return FALSE;
+        }
+        trackLen = PV_UnrollReadBE32(data + 4);
+        trackData = data + 8;
+        trackEnd = trackData + trackLen;
+        if ((trackEnd < trackData) || (trackEnd > end))
+        {
+            return FALSE;
+        }
+
+        absTick = 0;
+        seq = 0;
+        runningStatus = 0;
+
+        while (trackData < trackEnd)
+        {
+            uint32_t delta;
+            PV_UnrollParsedEvent ev;
+            unsigned char status;
+
+            if (PV_UnrollReadVLQ(&trackData, trackEnd, &delta) == FALSE)
+            {
+                return FALSE;
+            }
+            absTick += delta;
+            if (absTick > maxTick)
+            {
+                maxTick = absTick;
+            }
+            if (trackData >= trackEnd)
+            {
+                return FALSE;
+            }
+
+            status = *trackData++;
+            if ((status & 0x80) == 0)
+            {
+                if (runningStatus == 0)
+                {
+                    return FALSE;
+                }
+                trackData--;
+                status = runningStatus;
+            }
+            else if ((status < 0xF0) || (status == 0xF0) || (status == 0xF7))
+            {
+                runningStatus = status;
+            }
+
+            ev.tick = absTick;
+            ev.seq = seq++;
+            ev.trackIndex = trackIndex;
+            ev.status = status;
+            ev.metaType = 0;
+            ev.midiDataLen = 0;
+            ev.midiData[0] = 0;
+            ev.midiData[1] = 0;
+            ev.payload = NULL;
+            ev.payloadLen = 0;
+
+            if (status == 0xFF)
+            {
+                uint32_t metaLen;
+                if (trackData >= trackEnd)
+                {
+                    return FALSE;
+                }
+                ev.kind = PV_UNROLL_EVENT_META;
+                ev.metaType = *trackData++;
+                if (PV_UnrollReadVLQ(&trackData, trackEnd, &metaLen) == FALSE)
+                {
+                    return FALSE;
+                }
+                if ((size_t)(trackEnd - trackData) < metaLen)
+                {
+                    return FALSE;
+                }
+                ev.payload = trackData;
+                ev.payloadLen = metaLen;
+                trackData += metaLen;
+                runningStatus = 0;
+
+                if (ev.metaType == 0x2F)
+                {
+                    continue;
+                }
+                if (PV_UnrollAppendEvent(events, &ev) == FALSE)
+                {
+                    return FALSE;
+                }
+                continue;
+            }
+
+            if ((status == 0xF0) || (status == 0xF7))
+            {
+                uint32_t sysexLen;
+                if (PV_UnrollReadVLQ(&trackData, trackEnd, &sysexLen) == FALSE)
+                {
+                    return FALSE;
+                }
+                if ((size_t)(trackEnd - trackData) < sysexLen)
+                {
+                    return FALSE;
+                }
+                ev.kind = PV_UNROLL_EVENT_SYSEX;
+                ev.payload = trackData;
+                ev.payloadLen = sysexLen;
+                trackData += sysexLen;
+                runningStatus = 0;
+                if (PV_UnrollAppendEvent(events, &ev) == FALSE)
+                {
+                    return FALSE;
+                }
+                continue;
+            }
+
+            ev.kind = PV_UNROLL_EVENT_MIDI;
+            switch (status & 0xF0)
+            {
+            case 0x80:
+            case 0x90:
+            case 0xA0:
+            case 0xB0:
+            case 0xE0:
+                if ((size_t)(trackEnd - trackData) < 2)
+                {
+                    return FALSE;
+                }
+                ev.midiDataLen = 2;
+                ev.midiData[0] = trackData[0];
+                ev.midiData[1] = trackData[1];
+                trackData += 2;
+                break;
+            case 0xC0:
+            case 0xD0:
+                if ((size_t)(trackEnd - trackData) < 1)
+                {
+                    return FALSE;
+                }
+                ev.midiDataLen = 1;
+                ev.midiData[0] = trackData[0];
+                trackData += 1;
+                break;
+            default:
+                return FALSE;
+            }
+
+            if (((ev.status & 0xF0) == 0xB0) && (ev.midiDataLen == 2))
+            {
+                if (ev.midiData[0] == 85)
+                {
+                    hasRoll = TRUE;
+                    if (ev.midiData[1] > maxLoopCount)
+                    {
+                        maxLoopCount = ev.midiData[1];
+                    }
+                }
+                else if ((ev.midiData[0] == 86) || (ev.midiData[0] == 87))
+                {
+                    hasRoll = TRUE;
+                    if (ev.midiData[1] > maxRollIndex)
+                    {
+                        maxRollIndex = ev.midiData[1];
+                    }
+                }
+            }
+
+            if (PV_UnrollAppendEvent(events, &ev) == FALSE)
+            {
+                return FALSE;
+            }
+        }
+        data = trackEnd;
+    }
+
+    *outSongLength = maxTick;
+    *outHasRoll = hasRoll;
+    *outMaxLoopCount = maxLoopCount;
+    *outMaxRollIndex = maxRollIndex;
+    return TRUE;
+}
+
+static BAE_BOOL PV_UnrollEnsureTrackEvents(PV_UnrollOutputTrack *track, uint32_t needed)
+{
+    if (track->eventCapacity < needed)
+    {
+        uint32_t newCap;
+        PV_UnrollParsedEvent *newEvents;
+
+        newCap = track->eventCapacity ? track->eventCapacity * 2 : 512;
+        if (newCap < needed)
+        {
+            newCap = needed;
+        }
+        newEvents = (PV_UnrollParsedEvent *)realloc(track->events, (size_t)newCap * sizeof(PV_UnrollParsedEvent));
+        if (newEvents == NULL)
+        {
+            return FALSE;
+        }
+        track->events = newEvents;
+        track->eventCapacity = newCap;
+    }
+    return TRUE;
+}
+
+static BAE_BOOL PV_UnrollAppendTrackEvent(PV_UnrollOutputTrack *track, const PV_UnrollParsedEvent *event)
+{
+    if (PV_UnrollEnsureTrackEvents(track, track->eventCount + 1) == FALSE)
+    {
+        return FALSE;
+    }
+    track->events[track->eventCount++] = *event;
+    return TRUE;
+}
+
+static int PV_UnrollFindOrAddKeyTrack(PV_UnrollKeyTrackArray *groups, const PV_UnrollKey *key)
+{
+    uint32_t i;
+    for (i = 0; i < groups->count; i++)
+    {
+        if ((groups->items[i].key.channel == key->channel) &&
+            (groups->items[i].key.bankMSB == key->bankMSB) &&
+            (groups->items[i].key.bankLSB == key->bankLSB) &&
+            (groups->items[i].key.program == key->program) &&
+            (groups->items[i].key.drumNote == key->drumNote))
+        {
+            return (int)i;
+        }
+    }
+
+    if (groups->count >= groups->capacity)
+    {
+        uint32_t newCap;
+        PV_UnrollKeyTrack *newItems;
+        newCap = groups->capacity ? groups->capacity * 2 : 32;
+        newItems = (PV_UnrollKeyTrack *)realloc(groups->items, (size_t)newCap * sizeof(PV_UnrollKeyTrack));
+        if (newItems == NULL)
+        {
+            return -1;
+        }
+        groups->items = newItems;
+        groups->capacity = newCap;
+    }
+
+    groups->items[groups->count].key = *key;
+    groups->items[groups->count].track.events = NULL;
+    groups->items[groups->count].track.eventCount = 0;
+    groups->items[groups->count].track.eventCapacity = 0;
+    groups->count++;
+    return (int)(groups->count - 1);
+}
+
+static BAE_BOOL PV_UnrollSplitByInstrument(const PV_UnrollOutputTrack *singleTrack,
+                                           PV_UnrollOutputTrack *conductorTrack,
+                                           PV_UnrollKeyTrackArray *groups)
+{
+    uint32_t i;
+    uint8_t bankMSB[16];
+    uint8_t bankLSB[16];
+    uint8_t program[16];
+
+    for (i = 0; i < 16; i++)
+    {
+        bankMSB[i] = 0;
+        bankLSB[i] = 0;
+        program[i] = 0;
+    }
+
+    for (i = 0; i < singleTrack->eventCount; i++)
+    {
+        const PV_UnrollParsedEvent *ev;
+        ev = &singleTrack->events[i];
+        if (ev->kind != PV_UNROLL_EVENT_MIDI)
+        {
+            if (PV_UnrollAppendTrackEvent(conductorTrack, ev) == FALSE)
+            {
+                return FALSE;
+            }
+            continue;
+        }
+
+        {
+            uint8_t channel;
+            uint8_t type;
+            PV_UnrollKey key;
+            int groupIndex;
+
+            channel = (uint8_t)(ev->status & 0x0F);
+            type = (uint8_t)(ev->status & 0xF0);
+
+            if ((type == 0xB0) && (ev->midiDataLen == 2))
+            {
+                if (ev->midiData[0] == 0)
+                {
+                    bankMSB[channel] = ev->midiData[1];
+                }
+                else if (ev->midiData[0] == 32)
+                {
+                    bankLSB[channel] = ev->midiData[1];
+                }
+            }
+            else if ((type == 0xC0) && (ev->midiDataLen == 1))
+            {
+                program[channel] = ev->midiData[0];
+            }
+
+            key.channel = channel;
+            key.bankMSB = bankMSB[channel];
+            key.bankLSB = bankLSB[channel];
+            key.program = program[channel];
+            key.drumNote = -1;
+            if ((channel == 9) && ((type == 0x80) || (type == 0x90)) && (ev->midiDataLen >= 1))
+            {
+                key.drumNote = (int16_t)ev->midiData[0];
+            }
+
+            groupIndex = PV_UnrollFindOrAddKeyTrack(groups, &key);
+            if (groupIndex < 0)
+            {
+                return FALSE;
+            }
+            if (PV_UnrollAppendTrackEvent(&groups->items[groupIndex].track, ev) == FALSE)
+            {
+                return FALSE;
+            }
+        }
+    }
+    return TRUE;
+}
+
+static BAE_BOOL PV_UnrollByteBufferEnsure(PV_UnrollByteBuffer *out, uint32_t needed)
+{
+    if (out->capacity < needed)
+    {
+        uint32_t newCap;
+        unsigned char *newData;
+        newCap = out->capacity ? out->capacity * 2 : 4096;
+        if (newCap < needed)
+        {
+            newCap = needed;
+        }
+        newData = (unsigned char *)realloc(out->data, newCap);
+        if (newData == NULL)
+        {
+            return FALSE;
+        }
+        out->data = newData;
+        out->capacity = newCap;
+    }
+    return TRUE;
+}
+
+static BAE_BOOL PV_UnrollByteBufferWrite(PV_UnrollByteBuffer *out, const void *data, uint32_t size)
+{
+    if (PV_UnrollByteBufferEnsure(out, out->size + size) == FALSE)
+    {
+        return FALSE;
+    }
+    XBlockMove(data, out->data + out->size, size);
+    out->size += size;
+    return TRUE;
+}
+
+static BAE_BOOL PV_UnrollWriteTrackBytes(const PV_UnrollOutputTrack *track, PV_UnrollByteBuffer *out)
+{
+    PV_UnrollByteBuffer trackData;
+    uint32_t i;
+    uint64_t lastTick;
+    unsigned char trackHeader[8];
+    unsigned char eot[4];
+
+    trackData.data = NULL;
+    trackData.size = 0;
+    trackData.capacity = 0;
+    lastTick = 0;
+
+    for (i = 0; i < track->eventCount; i++)
+    {
+        const PV_UnrollParsedEvent *ev;
+        unsigned char vlq[4];
+        uint64_t delta64;
+        uint32_t delta;
+        uint32_t vlqLen;
+
+        ev = &track->events[i];
+        if (ev->tick < lastTick)
+        {
+            free(trackData.data);
+            return FALSE;
+        }
+        delta64 = ev->tick - lastTick;
+        if (delta64 > 0x0FFFFFFFUL)
+        {
+            free(trackData.data);
+            return FALSE;
+        }
+        delta = (uint32_t)delta64;
+        lastTick = ev->tick;
+
+        vlqLen = PV_UnrollWriteVLQ(vlq, delta);
+        if (PV_UnrollByteBufferWrite(&trackData, vlq, vlqLen) == FALSE)
+        {
+            free(trackData.data);
+            return FALSE;
+        }
+
+        if (ev->kind == PV_UNROLL_EVENT_META)
+        {
+            unsigned char marker[2];
+            unsigned char lenVLQ[4];
+            uint32_t lenLen;
+            marker[0] = 0xFF;
+            marker[1] = ev->metaType;
+            lenLen = PV_UnrollWriteVLQ(lenVLQ, ev->payloadLen);
+            if ((PV_UnrollByteBufferWrite(&trackData, marker, 2) == FALSE) ||
+                (PV_UnrollByteBufferWrite(&trackData, lenVLQ, lenLen) == FALSE) ||
+                (PV_UnrollByteBufferWrite(&trackData, ev->payload, ev->payloadLen) == FALSE))
+            {
+                free(trackData.data);
+                return FALSE;
+            }
+        }
+        else if (ev->kind == PV_UNROLL_EVENT_SYSEX)
+        {
+            unsigned char status;
+            unsigned char lenVLQ[4];
+            uint32_t lenLen;
+            status = ev->status;
+            lenLen = PV_UnrollWriteVLQ(lenVLQ, ev->payloadLen);
+            if ((PV_UnrollByteBufferWrite(&trackData, &status, 1) == FALSE) ||
+                (PV_UnrollByteBufferWrite(&trackData, lenVLQ, lenLen) == FALSE) ||
+                (PV_UnrollByteBufferWrite(&trackData, ev->payload, ev->payloadLen) == FALSE))
+            {
+                free(trackData.data);
+                return FALSE;
+            }
+        }
+        else
+        {
+            if ((PV_UnrollByteBufferWrite(&trackData, &ev->status, 1) == FALSE) ||
+                (PV_UnrollByteBufferWrite(&trackData, ev->midiData, ev->midiDataLen) == FALSE))
+            {
+                free(trackData.data);
+                return FALSE;
+            }
+        }
+    }
+
+    eot[0] = 0x00;
+    eot[1] = 0xFF;
+    eot[2] = 0x2F;
+    eot[3] = 0x00;
+    if (PV_UnrollByteBufferWrite(&trackData, eot, 4) == FALSE)
+    {
+        free(trackData.data);
+        return FALSE;
+    }
+
+    XBlockMove("MTrk", trackHeader, 4);
+    PV_UnrollWriteBE32(trackHeader + 4, trackData.size);
+    if ((PV_UnrollByteBufferWrite(out, trackHeader, 8) == FALSE) ||
+        (PV_UnrollByteBufferWrite(out, trackData.data, trackData.size) == FALSE))
+    {
+        free(trackData.data);
+        return FALSE;
+    }
+
+    free(trackData.data);
+    return TRUE;
+}
+
+static BAE_BOOL PV_UnrollBuildSMF(uint16_t division,
+                                  const PV_UnrollOutputTrack *tracks,
+                                  uint16_t trackCount,
+                                  unsigned char **ppOut,
+                                  uint32_t *pOutSize)
+{
+    PV_UnrollByteBuffer out;
+    unsigned char header[14];
+    uint16_t i;
+    unsigned char *finalCopy;
+
+    out.data = NULL;
+    out.size = 0;
+    out.capacity = 0;
+
+    XBlockMove("MThd", header, 4);
+    PV_UnrollWriteBE32(header + 4, 6);
+    PV_UnrollWriteBE16(header + 8, (trackCount == 1) ? 0 : 1);
+    PV_UnrollWriteBE16(header + 10, trackCount);
+    PV_UnrollWriteBE16(header + 12, division);
+    if (PV_UnrollByteBufferWrite(&out, header, 14) == FALSE)
+    {
+        free(out.data);
+        return FALSE;
+    }
+
+    for (i = 0; i < trackCount; i++)
+    {
+        if (PV_UnrollWriteTrackBytes(&tracks[i], &out) == FALSE)
+        {
+            free(out.data);
+            return FALSE;
+        }
+    }
+
+    finalCopy = (unsigned char *)XNewPtr(out.size);
+    if (finalCopy == NULL)
+    {
+        free(out.data);
+        return FALSE;
+    }
+    XBlockMove(out.data, finalCopy, out.size);
+    *ppOut = finalCopy;
+    *pOutSize = out.size;
+    free(out.data);
+    return TRUE;
+}
+
+static void PV_UnrollFreeTracks(PV_UnrollOutputTrack *tracks, uint16_t trackCount)
+{
+    uint16_t i;
+    for (i = 0; i < trackCount; i++)
+    {
+        free(tracks[i].events);
+        tracks[i].events = NULL;
+        tracks[i].eventCount = 0;
+        tracks[i].eventCapacity = 0;
+    }
+}
+
+static BAEResult PV_UnrollRolledMidi(const unsigned char *midiData,
+                                     uint32_t midiSize,
+                                     uint32_t options,
+                                     unsigned char **ppMidiOut,
+                                     uint32_t *pMidiSizeOut,
+                                     BAE_BOOL *outWasRolled)
+{
+    const unsigned char *smfData;
+    uint32_t smfSize;
+    PV_UnrollEventArray parsed;
+    uint16_t division;
+    uint16_t trackCount;
+    uint32_t songLength;
+    BAE_BOOL hasRoll;
+    uint8_t maxLoopCount;
+    uint8_t maxRollIndex;
+    uint32_t totalPasses;
+    uint32_t passIndex;
+    BAE_BOOL *mutedTracks;
+    PV_UnrollOutputTrack singleTrack;
+    BAEResult result;
+    uint32_t i;
+
+    if ((midiData == NULL) || (ppMidiOut == NULL) || (pMidiSizeOut == NULL))
+    {
+        return BAE_PARAM_ERR;
+    }
+
+    smfData = PV_FindMThdStart(midiData, midiSize, &smfSize);
+    if (smfData == NULL)
+    {
+        return BAE_BAD_FILE;
+    }
+
+    *ppMidiOut = NULL;
+    *pMidiSizeOut = 0;
+    if (outWasRolled)
+    {
+        *outWasRolled = FALSE;
+    }
+
+    parsed.items = NULL;
+    parsed.count = 0;
+    parsed.capacity = 0;
+    if (PV_UnrollParseSMF(smfData, smfSize, &parsed, &division, &trackCount, &songLength, &hasRoll, &maxLoopCount, &maxRollIndex) == FALSE)
+    {
+        free(parsed.items);
+        return BAE_BAD_FILE;
+    }
+    if (parsed.count)
+    {
+        qsort(parsed.items, parsed.count, sizeof(PV_UnrollParsedEvent), PV_UnrollEventCompare);
+    }
+
+    if (maxLoopCount > 0)
+    {
+        totalPasses = (uint32_t)maxLoopCount + 1;
+    }
+    else if (hasRoll)
+    {
+        totalPasses = (uint32_t)maxRollIndex + 1;
+    }
+    else
+    {
+        totalPasses = 1;
+    }
+    if (totalPasses == 0)
+    {
+        totalPasses = 1;
+    }
+    if (totalPasses > PV_UNROLL_MAX_PASSES)
+    {
+        free(parsed.items);
+        return BAE_BAD_FILE;
+    }
+    if (outWasRolled)
+    {
+        *outWasRolled = hasRoll;
+    }
+
+    mutedTracks = (BAE_BOOL *)calloc(trackCount ? trackCount : 1, sizeof(BAE_BOOL));
+    if (mutedTracks == NULL)
+    {
+        free(parsed.items);
+        return BAE_MEMORY_ERR;
+    }
+
+    singleTrack.events = NULL;
+    singleTrack.eventCount = 0;
+    singleTrack.eventCapacity = 0;
+    result = BAE_NO_ERROR;
+
+    for (passIndex = 0; passIndex < totalPasses; passIndex++)
+    {
+        uint64_t passOffset;
+        passOffset = (uint64_t)passIndex * (uint64_t)songLength;
+        for (i = 0; i < parsed.count; i++)
+        {
+            PV_UnrollParsedEvent outEvent;
+            const PV_UnrollParsedEvent *ev;
+            ev = &parsed.items[i];
+
+            if (ev->kind == PV_UNROLL_EVENT_META)
+            {
+                if ((passIndex > 0) && PV_UnrollIsMetaOnce(ev->metaType))
+                {
+                    continue;
+                }
+            }
+            else if ((ev->kind == PV_UNROLL_EVENT_MIDI) && ((ev->status & 0xF0) == 0xB0) && (ev->midiDataLen == 2))
+            {
+                if (ev->midiData[0] == 86)
+                {
+                    if (passIndex == (uint32_t)ev->midiData[1])
+                    {
+                        mutedTracks[ev->trackIndex] = TRUE;
+                    }
+                    continue;
+                }
+                if (ev->midiData[0] == 87)
+                {
+                    if (passIndex == (uint32_t)ev->midiData[1])
+                    {
+                        mutedTracks[ev->trackIndex] = FALSE;
+                    }
+                    continue;
+                }
+                if (ev->midiData[0] == 85)
+                {
+                    continue;
+                }
+            }
+
+            if (PV_UnrollIsNoteEvent(ev) && mutedTracks[ev->trackIndex])
+            {
+                continue;
+            }
+
+            outEvent = *ev;
+            outEvent.tick = passOffset + ev->tick;
+            if (PV_UnrollAppendTrackEvent(&singleTrack, &outEvent) == FALSE)
+            {
+                result = BAE_MEMORY_ERR;
+                goto unroll_cleanup;
+            }
+        }
+    }
+
+    if ((options & BAE_UNROLL_MIDI_OPTION_SPLIT_INSTRUMENTS) != 0)
+    {
+        PV_UnrollOutputTrack conductor;
+        PV_UnrollKeyTrackArray groups;
+        PV_UnrollOutputTrack *outTracks;
+        uint16_t outTrackCount;
+
+        conductor.events = NULL;
+        conductor.eventCount = 0;
+        conductor.eventCapacity = 0;
+        groups.items = NULL;
+        groups.count = 0;
+        groups.capacity = 0;
+
+        if (PV_UnrollSplitByInstrument(&singleTrack, &conductor, &groups) == FALSE)
+        {
+            result = BAE_MEMORY_ERR;
+            free(groups.items);
+            free(conductor.events);
+            goto unroll_cleanup;
+        }
+
+        outTrackCount = (uint16_t)(1 + groups.count);
+        outTracks = (PV_UnrollOutputTrack *)calloc(outTrackCount, sizeof(PV_UnrollOutputTrack));
+        if (outTracks == NULL)
+        {
+            result = BAE_MEMORY_ERR;
+            free(conductor.events);
+            for (i = 0; i < groups.count; i++)
+            {
+                free(groups.items[i].track.events);
+            }
+            free(groups.items);
+            goto unroll_cleanup;
+        }
+
+        outTracks[0] = conductor;
+        for (i = 0; i < groups.count; i++)
+        {
+            outTracks[i + 1] = groups.items[i].track;
+        }
+
+        if (PV_UnrollBuildSMF(division, outTracks, outTrackCount, ppMidiOut, pMidiSizeOut) == FALSE)
+        {
+            result = BAE_MEMORY_ERR;
+        }
+
+        PV_UnrollFreeTracks(outTracks, outTrackCount);
+        free(outTracks);
+        free(groups.items);
+        if (result != BAE_NO_ERROR)
+        {
+            goto unroll_cleanup;
+        }
+    }
+    else
+    {
+        if (PV_UnrollBuildSMF(division, &singleTrack, 1, ppMidiOut, pMidiSizeOut) == FALSE)
+        {
+            result = BAE_MEMORY_ERR;
+            goto unroll_cleanup;
+        }
+    }
+
+unroll_cleanup:
+    free(parsed.items);
+    free(mutedTracks);
+    free(singleTrack.events);
+    return result;
+}
+
+#endif // BAE_ENABLE_ROLLED_MIDI_UNROLL
 
 #if USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE
 #include <opus/opus.h>
@@ -7776,7 +9056,7 @@ BAEResult BAESong_LoadMidiFromMemory(BAESong song, void const *pMidiData, uint32
     unsigned char *decodedMthcMidi = NULL;
     uint32_t decodedMthcMidiLen = 0;
 #endif
-    bool wasRMI = FALSE;
+    BAE_BOOL ownsMidiData = FALSE;
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
     uint32_t extractedMidiLen = 0;
 #endif
@@ -7811,9 +9091,9 @@ BAEResult BAESong_LoadMidiFromMemory(BAESong song, void const *pMidiData, uint32
                                           &extractedMidi, &extractedMidiLen, TRUE);
             if (theErr == NO_ERR && extractedMidi)
             {
-                wasRMI = TRUE;
                 pMidiData = extractedMidi;
                 midiSize = extractedMidiLen;
+                ownsMidiData = TRUE;
             }
             else
             {
@@ -7826,8 +9106,62 @@ BAEResult BAESong_LoadMidiFromMemory(BAESong song, void const *pMidiData, uint32
 #endif
         {
             pMidiData = XDuplicateMemory((XPTRC)pMidiData, (uint32_t)midiSize);
+            if (pMidiData)
+            {
+                ownsMidiData = TRUE;
+            }
         }
-        
+
+#if BAE_ENABLE_ROLLED_MIDI_UNROLL == TRUE
+        if (pMidiData && midiSize)
+        {
+            BAE_BOOL preLoadRolled;
+            preLoadRolled = PV_IsRolledMIDIMemory(pMidiData, midiSize);
+            debug_message("[BAE] Rolled MIDI pre-load detect: %s (size=%u)\n",
+                          preLoadRolled ? "yes" : "no",
+                          midiSize);
+            if (preLoadRolled)
+            {
+                unsigned char *unrolledMidi = NULL;
+                uint32_t unrolledMidiSize = 0;
+                BAE_BOOL wasRolledNow = FALSE;
+                BAEResult unrollResult;
+
+                unrollResult = BAEUtil_UnrollRolledMidiFromMemory(pMidiData,
+                                                                  midiSize,
+                                                                  0,
+                                                                  &unrolledMidi,
+                                                                  &unrolledMidiSize,
+                                                                  &wasRolledNow);
+                if ((unrollResult == BAE_NO_ERROR) && wasRolledNow && unrolledMidi && unrolledMidiSize)
+                {
+                    debug_message("[BAE] Unrolled Beatnik rolled MIDI at load-time (%u -> %u bytes)\n",
+                                  midiSize,
+                                  unrolledMidiSize);
+                    if (ownsMidiData)
+                    {
+                        XDisposePtr((XPTR)pMidiData);
+                    }
+                    pMidiData = unrolledMidi;
+                    midiSize = unrolledMidiSize;
+                    ownsMidiData = TRUE;
+                }
+                else
+                {
+                    debug_message("[BAE] Rolled MIDI pre-load unroll skipped/failed (res=%d wasRolled=%d out=%p outSize=%u)\n",
+                                  (int)unrollResult,
+                                  (int)wasRolledNow,
+                                  (void *)unrolledMidi,
+                                  unrolledMidiSize);
+                    if (unrolledMidi)
+                    {
+                        XDisposePtr(unrolledMidi);
+                    }
+                }
+            }
+        }
+#endif
+
         // Note: extractedMidi is already allocated, don't duplicate again
         if (pMidiData && midiSize)
         {
@@ -7850,7 +9184,7 @@ BAEResult BAESong_LoadMidiFromMemory(BAESong song, void const *pMidiData, uint32
                     if (GM_SF2_IsActive()) {
                         GM_ResetSF2();
                     }
-#endif                     
+#endif
                     pSong = GM_LoadSong(song->mixer->pMixer,
                                         NULL,
                                         song,
@@ -7865,6 +9199,76 @@ BAEResult BAESong_LoadMidiFromMemory(BAESong song, void const *pMidiData, uint32
                                         &theErr);
                     if (pSong)
                     {
+#if BAE_ENABLE_ROLLED_MIDI_UNROLL == TRUE
+                        {
+                            BAE_BOOL postLoadRolled;
+
+                            postLoadRolled = PV_IsRolledMIDISequence(pSong);
+                            debug_message("[BAE] Rolled MIDI post-load detect: %s (seqSize=%u)\n",
+                                          postLoadRolled ? "yes" : "no",
+                                          (uint32_t)pSong->sequenceDataSize);
+                            if (postLoadRolled)
+                            {
+                                unsigned char *unrolledMidi = NULL;
+                                uint32_t unrolledMidiSize = 0;
+                                BAE_BOOL wasRolledNow = FALSE;
+                                BAEResult unrollResult;
+
+                                unrollResult = BAEUtil_UnrollRolledMidiFromMemory(pSong->sequenceData,
+                                                                                  (uint32_t)pSong->sequenceDataSize,
+                                                                                  0,
+                                                                                  &unrolledMidi,
+                                                                                  &unrolledMidiSize,
+                                                                                  &wasRolledNow);
+                                if ((unrollResult == BAE_NO_ERROR) && wasRolledNow && unrolledMidi && unrolledMidiSize)
+                                {
+                                    GM_Song *pReloadedSong;
+
+                                    pReloadedSong = GM_LoadSong(song->mixer->pMixer,
+                                                                NULL,
+                                                                song,
+                                                                theID,
+                                                                (void *)pXSong,
+                                                                (void *)unrolledMidi,
+                                                                (int32_t)unrolledMidiSize,
+                                                                NULL,
+                                                                TRUE,
+                                                                ignoreBadInstruments,
+                                                                CreateBankToken(),
+                                                                &theErr);
+                                    if (pReloadedSong)
+                                    {
+                                        debug_message("[BAE] Unrolled Beatnik rolled MIDI after load (%u -> %u bytes)\n",
+                                                      (uint32_t)pSong->sequenceDataSize,
+                                                      unrolledMidiSize);
+                                        GM_SetDisposeSongDataWhenDoneFlag(pReloadedSong, TRUE);
+                                        GM_SetSongLoopFlag(pReloadedSong, FALSE);
+                                        GM_SetVelocityCurveType(pReloadedSong, (VelocityCurveType)g_defaultVelocityCurve);
+                                        GM_FreeSong(song, pSong);
+                                        pSong = pReloadedSong;
+                                    }
+                                    else
+                                    {
+                                        debug_message("[BAE] Rolled MIDI post-load reload failed (res=%d); keeping original load\n", (int)theErr);
+                                        XDisposePtr(unrolledMidi);
+                                    }
+                                }
+                                else
+                                {
+                                    debug_message("[BAE] Rolled MIDI post-load unroll skipped/failed (res=%d wasRolled=%d out=%p outSize=%u)\n",
+                                                  (int)unrollResult,
+                                                  (int)wasRolledNow,
+                                                  (void *)unrolledMidi,
+                                                  unrolledMidiSize);
+                                    if (unrolledMidi)
+                                    {
+                                        XDisposePtr(unrolledMidi);
+                                    }
+                                }
+                            }
+                        }
+#endif
+
                         // things are cool
                         GM_SetDisposeSongDataWhenDoneFlag(pSong, TRUE); // dispose of midi data
                         GM_SetSongLoopFlag(pSong, FALSE);               // don't loop song
@@ -7910,9 +9314,9 @@ BAEResult BAESong_LoadMidiFromMemory(BAESong song, void const *pMidiData, uint32
         }
         
         // Clean up RMI extraction if it was used
-        if (wasRMI && extractedMidi && theErr != NO_ERR)
+        if (ownsMidiData && pMidiData && theErr != NO_ERR)
         {
-            XDisposePtr(extractedMidi);
+            XDisposePtr((XPTR)pMidiData);
         }
 #if USE_MTHC_SUPPORT == TRUE        
         if (decodedMthcMidi)
@@ -8128,149 +9532,70 @@ BAEResult BAESong_LoadMidiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL 
 {
     XFILENAME name;
     XPTR pMidiData;
-    SongResource *pXSong;
     int32_t midiSize;
-    OPErr theErr;
-    XShortResourceID theID;
-    GM_Song *pSong;
-    int16_t soundVoices, midiVoices, mixLevel;
-    theErr = NO_ERR;
-    if ((song) && (song->mID == OBJECT_ID))
+
+    if ((song == NULL) || (song->mID != OBJECT_ID) || (filePath == NULL))
     {
+        return BAE_TranslateOPErr(NULL_OBJECT);
+    }
+
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_XMF_SUPPORT == TRUE
-        if (GM_SF2_HasXmfEmbeddedBank())
-        {
-            GM_UnloadXMFOverlaySoundFont();
-        }
-#endif        
-        BAE_AcquireMutex(song->mLock);
-        XConvertPathToXFILENAME(filePath, &name);
-        pMidiData = PV_GetFileAsData(&name, &midiSize);
-
-#if USE_MTHC_SUPPORT == TRUE
-        /* Transparent MThc support for file-based MIDI load. */
-        if (pMidiData && midiSize >= 4 && memcmp(pMidiData, "MThc", 4) == 0)
-        {
-            unsigned char *decodedMthcMidi = NULL;
-            uint32_t decodedMthcMidiLen = 0;
-
-            if (mthc_decompress_memory((unsigned char const *)pMidiData,
-                                       (uint32_t)midiSize,
-                                       &decodedMthcMidi,
-                                       &decodedMthcMidiLen) == 0)
-            {
-                XPTR midiCopy = XDuplicateMemory((XPTRC)decodedMthcMidi, decodedMthcMidiLen);
-                free(decodedMthcMidi);
-                decodedMthcMidi = NULL;
-
-                XDisposePtr(pMidiData);
-                pMidiData = midiCopy;
-                midiSize = (int32_t)decodedMthcMidiLen;
-
-                if (!pMidiData || midiSize < 14 || memcmp(pMidiData, "MThd", 4) != 0)
-                {
-                    debug_message("[BAE] MThc decode invalid MIDI in BAESong_LoadMidiFromFile (len=%u, header=%02X %02X %02X %02X)\n",
-                               (unsigned int)((midiSize > 0) ? midiSize : 0),
-                               (unsigned int)(midiSize > 0 ? ((unsigned char *)pMidiData)[0] : 0),
-                               (unsigned int)(midiSize > 1 ? ((unsigned char *)pMidiData)[1] : 0),
-                               (unsigned int)(midiSize > 2 ? ((unsigned char *)pMidiData)[2] : 0),
-                               (unsigned int)(midiSize > 3 ? ((unsigned char *)pMidiData)[3] : 0));
-                    if (pMidiData)
-                    {
-                        XDisposePtr(pMidiData);
-                        pMidiData = NULL;
-                    }
-                    theErr = BAD_FILE;
-                }
-            }
-            else
-            {
-                debug_message("[BAE] MThc decompress failed in BAESong_LoadMidiFromFile\n");
-                XDisposePtr(pMidiData);
-                pMidiData = NULL;
-                theErr = BAD_FILE;
-            }
-        }
+    if (GM_SF2_HasXmfEmbeddedBank())
+    {
+        GM_UnloadXMFOverlaySoundFont();
+    }
 #endif
-        
+
+    XConvertPathToXFILENAME(filePath, &name);
+    pMidiData = PV_GetFileAsData(&name, &midiSize);
+    if ((pMidiData == NULL) || (midiSize <= 0))
+    {
         if (pMidiData)
         {
-            theID = midiSongCount++; // runtime midi ID
-            BAEMixer_GetMidiVoices(song->mixer, &midiVoices);
-            BAEMixer_GetMixLevel(song->mixer, &mixLevel);
-            BAEMixer_GetSoundVoices(song->mixer, &soundVoices);
-            pXSong = XNewSongPtr(SONG_TYPE_SMS,
-                                 theID,
-                                 midiVoices,
-                                 mixLevel,
-                                 soundVoices,
-                                 BAE_REVERB_TYPE_1);
+            XDisposePtr(pMidiData);
+        }
+        return BAE_TranslateOPErr(BAD_FILE);
+    }
 
-            if (pXSong)
-            {
-                if (song->pSong)
-                {                    
-                    PV_BAESong_Unload(song);
-#if USE_SF2_SUPPORT == TRUE
-                    if (GM_SF2_IsActive()) {
-                        GM_ResetSF2();
-                    }
-#endif                    
-                    pSong = GM_LoadSong(song->mixer->pMixer,
-                                        NULL,
-                                        song,
-                                        theID,
-                                        (void *)pXSong,
-                                        pMidiData,
-                                        midiSize,
-                                        NULL, // no callback
-                                        TRUE, // load instruments
-                                        ignoreBadInstruments,
-                                        CreateBankToken(),
-                                        &theErr);
-                    if (pSong)
-                    {
-                        // things are cool
-                        GM_SetDisposeSongDataWhenDoneFlag(pSong, TRUE); // dispose of midi data
-                        GM_SetSongLoopFlag(pSong, FALSE);               // don't loop song
-                        GM_SetVelocityCurveType(pSong, (VelocityCurveType)g_defaultVelocityCurve);
-                        song->pSong = pSong;                            // preserve for use later
-                        BAE_OverrideSongFromFile(pSong, filePath);
-#if USE_SF2_SUPPORT == TRUE
-                        if (GM_SF2_IsActive()) { GM_EnableSF2ForSong(song->pSong, TRUE); }
-#endif
-                    }
-                    else
-                    {
-                        // need to re-initialize
-                        PV_BAESong_InitLiveSong(song, FALSE);
-                        theErr = BAD_FILE;
-                        XDisposePtr(pMidiData);
-                    }
-                }
-                else
-                {
-                    theErr = (OPErr)BAE_GENERAL_BAD; // a BAESong must always have a pSong...
-                }
-                XDisposePtr(pXSong);
-            }
-            else
-            {
-                XDisposePtr(pMidiData);
-                theErr = MEMORY_ERR;
-            }
+#if USE_MTHC_SUPPORT == TRUE
+    if (midiSize >= 4 && memcmp(pMidiData, "MThc", 4) == 0)
+    {
+        unsigned char *decodedMthcMidi = NULL;
+        uint32_t decodedMthcMidiLen = 0;
+
+        if (mthc_decompress_memory((unsigned char const *)pMidiData,
+                                   (uint32_t)midiSize,
+                                   &decodedMthcMidi,
+                                   &decodedMthcMidiLen) == 0)
+        {
+            XPTR midiCopy = XDuplicateMemory((XPTRC)decodedMthcMidi, decodedMthcMidiLen);
+            free(decodedMthcMidi);
+            XDisposePtr(pMidiData);
+            pMidiData = midiCopy;
+            midiSize = (int32_t)decodedMthcMidiLen;
         }
         else
         {
-            theErr = BAD_FILE;
+            XDisposePtr(pMidiData);
+            return BAE_TranslateOPErr(BAD_FILE);
         }
-        BAE_ReleaseMutex(song->mLock);
     }
-    else
+#endif
+
     {
-        theErr = NULL_OBJECT;
+        BAEResult result;
+
+        result = BAESong_LoadMidiFromMemory(song,
+                                            (void const *)pMidiData,
+                                            (uint32_t)midiSize,
+                                            ignoreBadInstruments);
+        XDisposePtr(pMidiData);
+        if (result == BAE_NO_ERROR)
+        {
+            BAE_OverrideBAESongFromFile(song, filePath);
+        }
+        return result;
     }
-    return BAE_TranslateOPErr(theErr);
 }
 
 // PV_XFileHasModernCodecSamples()
@@ -11049,6 +12374,40 @@ BAEResult BAESong_IsRolledMIDI(BAESong song, BAE_BOOL *outIsRolled)
         err = NULL_OBJECT;
     }
     return BAE_TranslateOPErr(err);
+}
+
+BAEResult BAEUtil_UnrollRolledMidiFromMemory(void const *pMidiData,
+                                             uint32_t midiSize,
+                                             uint32_t options,
+                                             unsigned char **ppMidiOut,
+                                             uint32_t *pMidiSizeOut,
+                                             BAE_BOOL *outWasRolled)
+{
+#if BAE_ENABLE_ROLLED_MIDI_UNROLL == TRUE
+    return PV_UnrollRolledMidi((const unsigned char *)pMidiData,
+                               midiSize,
+                               options,
+                               ppMidiOut,
+                               pMidiSizeOut,
+                               outWasRolled);
+#else
+    (void)pMidiData;
+    (void)midiSize;
+    (void)options;
+    if (ppMidiOut)
+    {
+        *ppMidiOut = NULL;
+    }
+    if (pMidiSizeOut)
+    {
+        *pMidiSizeOut = 0;
+    }
+    if (outWasRolled)
+    {
+        *outWasRolled = FALSE;
+    }
+    return BAE_UNSUPPORTED;
+#endif
 }
 
 // BAESong_SetMasterTempo()
