@@ -488,8 +488,10 @@ class BeatnikPlayer {
             // Check if this is an RMI file (which might have embedded soundbank)
             const isRMI = this._isRMIFile(data);
             
-            // If not RMI and we have a bank to load, load it first
-            if (!isRMI && bankSource && !this._soundbankLoaded) {
+            // Ensure a bank is present before song load/preroll when an external
+            // bank source is available. RMI files without embedded banks need
+            // this just like plain MIDI.
+            if (bankSource && !this._soundbankLoaded) {
                 await this.loadSoundbank(bankSource);
                 await new Promise(r => setTimeout(r, 100)); // Small delay to ensure bank is loaded before song
             }

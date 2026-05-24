@@ -28,7 +28,7 @@
 
 #include "X_API.h"
 
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_RMI_SUPPORT == TRUE
 
 /**
  * GM_LoadRMIFromMemory
@@ -76,6 +76,6 @@ bool GM_LastRMIHadEmbeddedSoundbank(void);
  */
 void GM_ClearRMISoundbankFlag(void);
 
-#endif // USE_FULL_RMF_SUPPORT || USE_CREATION_API
+#endif // USE_RMI_SUPPORT == TRUE
 
 #endif // GEN_RMI_H

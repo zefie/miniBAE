@@ -9191,7 +9191,7 @@ BAEResult BAESong_LoadMidiFromMemory(BAESong song, void const *pMidiData, uint32
     uint32_t decodedMthcMidiLen = 0;
 #endif
     BAE_BOOL ownsMidiData = FALSE;
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_RMI_SUPPORT == TRUE
     uint32_t extractedMidiLen = 0;
 #endif
 
@@ -9215,12 +9215,11 @@ BAEResult BAESong_LoadMidiFromMemory(BAESong song, void const *pMidiData, uint32
             }
         }
 #endif        
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_RMI_SUPPORT == TRUE
+#if USE_RMI_SUPPORT == TRUE
         // Check if this is an RMI file and extract MIDI + DLS
         if (GM_IsRMIFile((const unsigned char *)pMidiData, midiSize))
         {
             debug_message("[BAE] Detected RMI file format\n");
-            BAEMixer_UnloadBanks(song->mixer);
             theErr = GM_LoadRMIFromMemory((const unsigned char *)pMidiData, midiSize,
                                           &extractedMidi, &extractedMidiLen, TRUE);
             if (theErr == NO_ERR && extractedMidi)
@@ -9468,7 +9467,7 @@ BAEResult BAESong_LoadMidiFromMemory(BAESong song, void const *pMidiData, uint32
 }
 
 
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_RMI_SUPPORT == TRUE
 BAEResult BAESong_LoadRmiFromMemory(BAESong song, void const *pRmiData, uint32_t rmiSize, BAE_BOOL ignoreBadInstruments, BAE_BOOL useEmbeddedBank)
 {
     OPErr theErr;
@@ -9484,7 +9483,6 @@ BAEResult BAESong_LoadRmiFromMemory(BAESong song, void const *pRmiData, uint32_t
         {
 
 
-#if USE_RMI_SUPPORT == TRUE
             // Check if this is an RMI file and extract MIDI + optional DLS
             if (GM_IsRMIFile((const unsigned char *)pRmiData, rmiSize))
             {
@@ -9520,8 +9518,7 @@ BAEResult BAESong_LoadRmiFromMemory(BAESong song, void const *pRmiData, uint32_t
                     theErr = BAD_FILE;
                 }
             }            
-            else
-#endif            
+            else         
             {
                 debug_message("[BAE] Data is not RMI format\n");
                 theErr = BAD_FILE;

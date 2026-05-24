@@ -292,6 +292,7 @@ static int isRmfFile(const uint8_t* data, int length) {
 EMSCRIPTEN_KEEPALIVE
 int BAE_WASM_LoadSong(const uint8_t* data, int length) {
     BAEResult err;
+    int loadedRmi = 0;
 
     BAE_PRINTF("[BAE] LoadSong: data=%p, length=%d\n", (void*)data, length);
 
@@ -322,8 +323,13 @@ int BAE_WASM_LoadSong(const uint8_t* data, int length) {
 
     switch (ftype) {
         case BAE_RMI:
+            loadedRmi = 1;
             BAE_PRINTF("[BAE] LoadSong: Detected RMI file, loading...\n");
-            err = BAESong_LoadRmfFromMemory(gCurrentSong, (void*)data, (unsigned long)length, 0, TRUE);
+#if USE_RMI_SUPPORT == TRUE
+            err = BAESong_LoadRmiFromMemory(gCurrentSong, (void*)data, (unsigned long)length, TRUE, TRUE);
+#else
+            err = BAESong_LoadMidiFromMemory(gCurrentSong, (void*)data, (unsigned long)length, TRUE);
+#endif
             break;
         case BAE_RMF:
             BAE_PRINTF("[BAE] LoadSong: Detected RMF file, loading...\n");
@@ -356,6 +362,21 @@ int BAE_WASM_LoadSong(const uint8_t* data, int length) {
         gCurrentSong = NULL;
         return (int)err;
     }
+
+#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_SF2 == TRUE
+    if (loadedRmi && !BAESong_HasEmbeddedBank(gCurrentSong)) {
+        BAEBankToken fallbackToken = NULL;
+        BAEResult bankErr;
+
+        BAE_PRINTF("[BAE] LoadSong: RMI has no embedded bank, loading built-in fallback bank\n");
+        bankErr = BAEMixer_LoadBuiltinBank(gMixer, &fallbackToken);
+        if (bankErr == BAE_NO_ERROR && fallbackToken != NULL) {
+            BAEMixer_SendBankToBack(gMixer, fallbackToken);
+        } else {
+            BAE_PRINTF("[BAE] LoadSong: WARNING - Built-in fallback bank load failed (%d)\n", (int)bankErr);
+        }
+    }
+#endif
 
 #ifdef SUPPORT_KARAOKE
     // Reset lyric state and suppress lyrics during preroll
