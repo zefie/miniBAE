@@ -26,6 +26,11 @@ public class Song
 	private static native int _setSongVelocityCurve(long songReference, int curve);
 	private static native boolean _isSF2Song(long songReference);
 	private static native boolean _hasEmbeddedBank(long songReference);
+	private native int _loadScriptFromString(long songReference, String source);
+	private native void _clearScript(long songReference);
+	private native int _tickScript(long songReference, int timestampMs, int lengthMs, boolean exporting);
+	private native void _resetScriptExporterOptions(long songReference);
+	private native int _getScriptExporterLoopCount(long songReference);
 	private static native int _muteChannel(long songReference, int channel);
 	private static native int _unmuteChannel(long songReference, int channel);
 	private static native byte[] _getChannelMuteStatus(long songReference);
@@ -38,6 +43,7 @@ public class Song
 	}
 
 	private long mCallbackHandle = 0;
+	private String mLoadedScriptSource = null;
 
 	public void setMetaEventListener(MetaEventListener listener) {
 		if (mCallbackHandle != 0) {
@@ -95,6 +101,9 @@ public class Song
 
 	public void stop(boolean deleteSong)
 	{
+		if (deleteSong) {
+			clearScript();
+		}
 		if (mCallbackHandle != 0) {
 			_cleanupMetaEventCallback(mCallbackHandle);
 			mCallbackHandle = 0;
@@ -139,6 +148,48 @@ public class Song
 	
 	// Loop control
 	public int setLoops(int numLoops){ return _setSongLoops(mReference, numLoops); }
+
+	public int loadScriptFromString(String source)
+	{
+		if (source == null || source.trim().isEmpty()) {
+			clearScript();
+			return 0;
+		}
+		if (source.equals(mLoadedScriptSource)) {
+			return 0;
+		}
+		int r = _loadScriptFromString(mReference, source);
+		if (r == 0) {
+			mLoadedScriptSource = source;
+		}
+		return r;
+	}
+
+	public void clearScript()
+	{
+		if (mLoadedScriptSource == null) {
+			return;
+		}
+		_clearScript(mReference);
+		mLoadedScriptSource = null;
+	}
+
+	public int tickScript(int timestampMs, int lengthMs, boolean exporting)
+	{
+		if (timestampMs < 0) timestampMs = 0;
+		if (lengthMs < 0) lengthMs = 0;
+		return _tickScript(mReference, timestampMs, lengthMs, exporting);
+	}
+
+	public void resetScriptExporterOptions()
+	{
+		_resetScriptExporterOptions(mReference);
+	}
+
+	public int getScriptExporterLoopCount()
+	{
+		return _getScriptExporterLoopCount(mReference);
+	}
 
 	public int setVelocityCurve(int curve) { return _setSongVelocityCurve(mReference, curve); }
 	public boolean isSF2Song() { return _isSF2Song(mReference); }

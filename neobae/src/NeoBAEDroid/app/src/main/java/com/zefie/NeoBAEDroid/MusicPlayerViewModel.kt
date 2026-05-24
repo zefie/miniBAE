@@ -143,6 +143,7 @@ class MusicPlayerViewModel : ViewModel() {
     var currentFolderPath: String?
         get() = _currentFolderPath.value
         set(value) {
+            if (_currentFolderPath.value == value) return
             _currentFolderPath.value = value
             checkIfCurrentPathIndexed()
         }
@@ -573,7 +574,9 @@ class MusicPlayerViewModel : ViewModel() {
         val safeName = sanitizeFilename(displayName)
         val cacheFolder = File(appContext!!.cacheDir, "safsearch")
         if (!cacheFolder.exists()) cacheFolder.mkdirs()
-        return File(cacheFolder, "${uri.hashCode()}_$safeName")
+        val perUriFolder = File(cacheFolder, uri.hashCode().toString())
+        if (!perUriFolder.exists()) perUriFolder.mkdirs()
+        return File(perUriFolder, safeName)
     }
 
     private suspend fun collectSafSearchFiles(root: DocumentFile, query: String?, recursive: Boolean, validExtensions: Set<String>, limit: Int): List<PlaylistItem> {

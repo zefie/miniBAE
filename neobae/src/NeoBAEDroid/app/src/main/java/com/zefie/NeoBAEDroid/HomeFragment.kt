@@ -83,6 +83,69 @@ private val BUILT_IN_REVERB_OPTIONS = listOf(
 private val CUSTOM_REVERB_TYPE: Int
     get() = BUILT_IN_REVERB_OPTIONS.size + 1
 
+private fun getSafParentPath(uriString: String): String? {
+    val normalized = uriString.trim().trimEnd('/')
+    val uri = try { Uri.parse(normalized) } catch (_: Exception) { null } ?: return null
+    if (uri.scheme != "content") return null
+
+    val segments = uri.pathSegments
+    if (segments.size < 2) return null
+    if (segments.size == 2 && segments[0] == "tree") return null
+
+    val documentIndex = segments.indexOf("document")
+    if (documentIndex < 0 || documentIndex + 1 >= segments.size) return null
+
+    val treeId = Uri.decode(segments[1])
+    val documentId = Uri.decode(segments[documentIndex + 1])
+    val documentParts = documentId.split('/')
+    if (documentParts.size <= 1) {
+        return "content://${uri.authority}/tree/${Uri.encode(treeId)}"
+    }
+
+    val parentDocumentId = documentParts.dropLast(1).joinToString("/")
+    return if (parentDocumentId == treeId) {
+        "content://${uri.authority}/tree/${Uri.encode(treeId)}"
+    } else {
+        "content://${uri.authority}/tree/${Uri.encode(segments[1])}/document/${Uri.encode(parentDocumentId)}"
+    }
+}
+
+private fun sanitizeFolderPathForCurrentVariant(path: String?): String {
+    val normalized = path?.trim().orEmpty()
+    val isSafPath = normalized.startsWith("content://")
+
+    return if (BuildConfig.USE_MANAGE_EXTERNAL_STORAGE) {
+        // MANAGE_EXTERNAL_STORAGE builds cannot browse SAF document URIs.
+        if (normalized.isEmpty() || isSafPath) "/sdcard" else normalized
+    } else {
+        // SAF builds should always start from a SAF root when possible.
+        if (normalized.isEmpty()) "/" else normalized
+    }
+}
+
+private fun getDisplayPath(path: String?): String {
+    val raw = path?.trim().orEmpty()
+    if (raw.isEmpty()) return "No folder selected"
+    if (!raw.startsWith("content://")) return raw
+
+    val uri = try { Uri.parse(raw) } catch (_: Exception) { null } ?: return raw
+    val segments = uri.pathSegments
+    val documentIndex = segments.indexOf("document")
+    if (documentIndex >= 0 && documentIndex + 1 < segments.size) {
+        return Uri.decode(segments[documentIndex + 1])
+    }
+    if (segments.size >= 2 && segments[0] == "tree") {
+        return Uri.decode(segments[1])
+    }
+    return Uri.decode(uri.lastPathSegment ?: raw)
+}
+
+private fun getDisplayFolderName(path: String?): String {
+    val display = getDisplayPath(path)
+    if (display == "No folder selected") return display
+    return display.substringAfterLast('/').substringAfterLast(':').ifBlank { display }
+}
+
 class HomeFragment : Fragment() {
 
     companion object {
@@ -198,6 +261,9 @@ class HomeFragment : Fragment() {
     private var reverbType = mutableStateOf(1)
     // velocityCurve is now in companion object
     private var exportCodec = mutableStateOf(2) // Default to OGG
+    private var baeScriptEnabled = mutableStateOf(false)
+    private var baeScriptSource = mutableStateOf("")
+    private var baeScriptNeedsReload = true
     private var searchResultLimit = mutableStateOf(1000) // Default to 1000
     private var enabledExtensions = mutableStateOf<Set<String>>(emptySet())
     
@@ -655,6 +721,9 @@ class HomeFragment : Fragment() {
                     fixPanLfoBias.value = prefs.getBoolean("fix_pan_lfo_bias", true)
                     classicChorus.value = prefs.getBoolean("classic_chorus", false)
                     exportCodec.value = prefs.getInt("export_codec", 2) // Default to OGG
+                    baeScriptEnabled.value = prefs.getBoolean("baescript_enabled", false)
+                    baeScriptSource.value = prefs.getString("baescript_source", "") ?: ""
+                    baeScriptNeedsReload = true
                     enabledExtensions.value = getMusicExtensions(requireContext())
                     
                     // Initialize bank name
@@ -682,9 +751,13 @@ class HomeFragment : Fragment() {
                     
                     // Set default folder to /sdcard if none exists
                     if (viewModel.currentFolderPath == null) {
-                        val savedPath = prefs.getString("current_folder_path", "/sdcard")
+                        val rawSavedPath = prefs.getString("current_folder_path", "/sdcard")
+                        val savedPath = sanitizeFolderPathForCurrentVariant(rawSavedPath)
                         viewModel.currentFolderPath = savedPath
-                        loadFolderContents(savedPath ?: "/sdcard")
+                        if (savedPath != rawSavedPath) {
+                            prefs.edit().putString("current_folder_path", savedPath).apply()
+                        }
+                        loadFolderContents(savedPath)
                     }
                     
                     if (viewModel.favorites.isEmpty()) {
@@ -716,7 +789,11 @@ class HomeFragment : Fragment() {
 
                 LaunchedEffect(pickedFolderUri) {
                     if (pickedFolderUri != null) {
-                        loadFolderIntoPlaylist()
+                        if (!BuildConfig.USE_MANAGE_EXTERNAL_STORAGE) {
+                            loadFolderContentsSaf(pickedFolderUri.toString())
+                        } else {
+                            loadFolderIntoPlaylist()
+                        }
                     }
                 }
 
@@ -734,6 +811,8 @@ class HomeFragment : Fragment() {
                             viewModel.currentPositionMs = pos
                             if (len > 0) viewModel.totalDurationMs = len
 
+                            tickSongScript(currentSong, pos, len, false)
+
                             // Keep system notification progress in sync without spamming updates.
                             // Key case: when audio loops internally, position jumps back to ~0 but
                             // the system UI will keep showing the old (near-end) position unless we
@@ -745,9 +824,7 @@ class HomeFragment : Fragment() {
                             if (wrappedBackwards || periodicUpdate) {
                                 val currentItem = viewModel.getCurrentItem()
                                 if (currentItem != null && (viewModel.isPlaying || viewModel.currentTitle != "No song loaded")) {
-                                    val folderName = viewModel.currentFolderPath?.let { path ->
-                                        File(path).name
-                                    } ?: "Unknown Folder"
+                                    val folderName = getDisplayFolderName(viewModel.currentFolderPath)
 
                                     (activity as? MainActivity)?.updateServiceNotification(
                                         title = viewModel.currentTitle,
@@ -835,9 +912,7 @@ class HomeFragment : Fragment() {
                 LaunchedEffect(viewModel.isPlaying, viewModel.currentTitle, viewModel.currentIndex, viewModel.totalDurationMs) {
                     val currentItem = viewModel.getCurrentItem()
                     if (currentItem != null && (viewModel.isPlaying || viewModel.currentTitle != "No song loaded")) {
-                        val folderName = viewModel.currentFolderPath?.let { path ->
-                            File(path).name
-                        } ?: "Unknown Folder"
+                        val folderName = getDisplayFolderName(viewModel.currentFolderPath)
                         
                         val fileExt = currentItem.file.extension
                         
@@ -936,6 +1011,8 @@ class HomeFragment : Fragment() {
                         fixPanLfoBias = fixPanLfoBias.value,
                         classicChorus = classicChorus.value,
                         exportCodec = exportCodec.value,
+                        baeScriptEnabled = baeScriptEnabled.value,
+                        baeScriptSource = baeScriptSource.value,
                         searchResultLimit = searchResultLimit.value,
                         enabledExtensions = enabledExtensions.value,
                         onLoadBuiltin = {
@@ -995,6 +1072,23 @@ class HomeFragment : Fragment() {
                             exportCodec.value = value
                             val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
                             prefs.edit().putInt("export_codec", value).apply()
+                        },
+                        onBaeScriptEnabledChange = { enabled ->
+                            baeScriptEnabled.value = enabled
+                            val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                            prefs.edit().putBoolean("baescript_enabled", enabled).apply()
+                            if (!enabled) {
+                                currentSong?.clearScript()
+                                baeScriptNeedsReload = true
+                            } else {
+                                baeScriptNeedsReload = true
+                            }
+                        },
+                        onBaeScriptSourceChange = { source ->
+                            baeScriptSource.value = source
+                            baeScriptNeedsReload = true
+                            val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                            prefs.edit().putString("baescript_source", source).apply()
                         },
                         onSearchLimitChange = { value ->
                             searchResultLimit.value = value
@@ -1104,6 +1198,13 @@ class HomeFragment : Fragment() {
     }
     
     private fun loadFolderIntoPlaylist() {
+        if (!BuildConfig.USE_MANAGE_EXTERNAL_STORAGE) {
+            pickedFolderUri?.let { uri ->
+                loadFolderContentsSaf(uri.toString())
+            }
+            return
+        }
+
         loadingState?.value = true
         Thread {
             try {
@@ -1176,7 +1277,7 @@ class HomeFragment : Fragment() {
             }
             else -> {
                 val folderPath = viewModel.currentFolderPath ?: "/"
-                val folderName = runCatching { File(folderPath).name }.getOrDefault("")
+                val folderName = getDisplayFolderName(folderPath)
                 val displayName = if (folderName.isNotBlank()) folderName else folderPath
                 viewModel.playlistModeLabel = "Folder ($displayName)"
                 // HOME: exclude folders and any special (non-song) items.
@@ -1459,6 +1560,11 @@ class HomeFragment : Fragment() {
                                     } catch (_: Exception) {}
                                 }, 250)
                             }
+
+                            if (baeScriptEnabled.value && ensureSongScriptLoaded(song)) {
+                                tickSongScript(song, 0, song.getLengthMs(), false)
+                            }
+
                             val loopCount = if (viewModel.repeatMode == RepeatMode.SONG) 32767 else 0
                             song.setLoops(loopCount)                                          
 
@@ -1466,7 +1572,8 @@ class HomeFragment : Fragment() {
                             applyMidiChannelMuteState(song)
 
                             viewModel.isPlaying = true
-                            viewModel.currentTitle = file.nameWithoutExtension
+                            val currentItemTitle = viewModel.getCurrentItem()?.takeIf { it.file.absolutePath == file.absolutePath }?.title
+                            viewModel.currentTitle = currentItemTitle ?: file.nameWithoutExtension
                             currentLoadedFilePath = file.absolutePath
                         } else {
                             viewModel.isPlaying = false
@@ -1489,7 +1596,8 @@ class HomeFragment : Fragment() {
                         if (r == 0) {
                             sound.setLoops(loopCount)
                             viewModel.isPlaying = true
-                            viewModel.currentTitle = file.nameWithoutExtension
+                            val currentItemTitle = viewModel.getCurrentItem()?.takeIf { it.file.absolutePath == file.absolutePath }?.title
+                            viewModel.currentTitle = currentItemTitle ?: file.nameWithoutExtension
                             android.util.Log.d("HomeFragment", "Started ${loadResult.fileTypeString} sound: ${file.name}")
                             currentLoadedFilePath = file.absolutePath
                         } else {
@@ -1513,6 +1621,37 @@ class HomeFragment : Fragment() {
             viewModel.isPlaying = false
             Toast.makeText(requireContext(), "Playback error: ${ex.localizedMessage}", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun ensureSongScriptLoaded(song: Song?): Boolean {
+        if (song == null) return false
+        if (!baeScriptEnabled.value) {
+            return false
+        }
+
+        val source = baeScriptSource.value
+        if (source.isBlank()) {
+            song.clearScript()
+            return false
+        }
+
+        if (!baeScriptNeedsReload) {
+            return true
+        }
+
+        val r = song.loadScriptFromString(source)
+        if (r != 0) {
+            android.util.Log.w("HomeFragment", "BAEScript load failed (err=$r)")
+            return false
+        }
+        baeScriptNeedsReload = false
+        return true
+    }
+
+    private fun tickSongScript(song: Song?, timestampMs: Int, lengthMs: Int, exporting: Boolean) {
+        if (song == null) return
+        if (!baeScriptEnabled.value || baeScriptSource.value.isBlank()) return
+        song.tickScript(timestampMs, lengthMs, exporting)
     }
 
     private fun applyVolume() {
@@ -1661,9 +1800,7 @@ class HomeFragment : Fragment() {
         // Push an immediate MediaSession/notification update so the system seek bar doesn't get stuck.
         val currentItem = viewModel.getCurrentItem()
         if (currentItem != null) {
-            val folderName = viewModel.currentFolderPath?.let { path ->
-                File(path).name
-            } ?: "Unknown Folder"
+            val folderName = getDisplayFolderName(viewModel.currentFolderPath)
 
             (activity as? MainActivity)?.updateServiceNotification(
                 title = viewModel.currentTitle,
@@ -2075,6 +2212,13 @@ class HomeFragment : Fragment() {
             return
         }
 
+        val safePath = sanitizeFolderPathForCurrentVariant(path)
+        if (safePath != path) {
+            viewModel.currentFolderPath = safePath
+            val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+            prefs.edit().putString("current_folder_path", safePath).apply()
+        }
+
         // Check permissions before loading folder contents
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             if (!Environment.isExternalStorageManager()) {
@@ -2095,7 +2239,7 @@ class HomeFragment : Fragment() {
         Thread {
             try {
                 // Redirect /storage to / since /storage can't be listed
-                val actualPath = if (path == "/storage") "/" else path
+                val actualPath = if (safePath == "/storage") "/" else safePath
                 
                 // Special handling for root directory - show storage options
                 if (actualPath == "/") {
@@ -2416,7 +2560,9 @@ class HomeFragment : Fragment() {
         val safeName = sanitizeFilename(displayName)
         val cacheFolder = File(requireContext().cacheDir, "safcache")
         if (!cacheFolder.exists()) cacheFolder.mkdirs()
-        return File(cacheFolder, "${uri.hashCode()}_$safeName")
+        val perUriFolder = File(cacheFolder, uri.hashCode().toString())
+        if (!perUriFolder.exists()) perUriFolder.mkdirs()
+        return File(perUriFolder, safeName)
     }
 
     private fun sanitizeFilename(name: String): String {
@@ -2443,8 +2589,8 @@ class HomeFragment : Fragment() {
         }
     }
 
-    private fun collectSafMusicFiles(root: DocumentFile, recursive: Boolean, validExtensions: Set<String>): List<File> {
-        val results = mutableListOf<File>()
+    private fun collectSafMusicFiles(root: DocumentFile, recursive: Boolean, validExtensions: Set<String>): List<PlaylistItem> {
+        val results = mutableListOf<PlaylistItem>()
         root.listFiles().forEach { item ->
             if (item.isDirectory) {
                 if (recursive) {
@@ -2459,7 +2605,15 @@ class HomeFragment : Fragment() {
                     if (!cacheFile.exists()) {
                         copyUriToCache(item.uri, cacheFile)
                     }
-                    results.add(cacheFile)
+                    results.add(
+                        PlaylistItem(
+                            file = cacheFile,
+                            uri = item.uri,
+                            title = name,
+                            path = item.uri.toString(),
+                            isFolder = false
+                        )
+                    )
                 }
             }
         }
@@ -2481,9 +2635,9 @@ class HomeFragment : Fragment() {
             return
         }
 
-        midiFiles.forEach { file ->
-            if (!viewModel.playlist.any { it.file.absolutePath == file.absolutePath }) {
-                viewModel.addToPlaylist(PlaylistItem(file))
+        midiFiles.forEach { item ->
+            if (!viewModel.playlist.any { it.file.absolutePath == item.file.absolutePath }) {
+                viewModel.addToPlaylist(item)
             }
         }
         Toast.makeText(requireContext(), "Added ${midiFiles.size} files to playlist", Toast.LENGTH_SHORT).show()
@@ -2504,9 +2658,9 @@ class HomeFragment : Fragment() {
             return
         }
 
-        midiFiles.forEach { file ->
-            if (!viewModel.playlist.any { it.file.absolutePath == file.absolutePath }) {
-                viewModel.addToPlaylist(PlaylistItem(file))
+        midiFiles.forEach { item ->
+            if (!viewModel.playlist.any { it.file.absolutePath == item.file.absolutePath }) {
+                viewModel.addToPlaylist(item)
             }
         }
         Toast.makeText(requireContext(), "Added ${midiFiles.size} files to playlist (recursive scan)", Toast.LENGTH_SHORT).show()
@@ -3147,6 +3301,10 @@ class HomeFragment : Fragment() {
                 // Save current playback state
                 val wasPlaying = viewModel.isPlaying
                 val savedPosition = currentSong?.getPositionMs() ?: 0
+                val restoreLoopCount = if (viewModel.repeatMode == RepeatMode.SONG) 32767 else 0
+                var exportTargetLoops = 0
+                var exportLoopsDone = 0
+                var exportLastPosMs = 0
                 
                 android.util.Log.d("HomeFragment", "Saved playback state: wasPlaying=$wasPlaying, position=$savedPosition ms")
                 
@@ -3178,6 +3336,20 @@ class HomeFragment : Fragment() {
                         val startResult = currentSong?.start() ?: -1
                         if (startResult != 0) {
                             throw Exception("Failed to start song for export (err=$startResult)")
+                        }
+
+                        // Export should be one-shot; avoid engine loop-mode keeping isDone=false.
+                        currentSong?.setLoops(0)
+
+                        val exportSong = currentSong
+                        if (ensureSongScriptLoaded(exportSong)) {
+                            exportSong?.resetScriptExporterOptions()
+                            tickSongScript(exportSong, 0, lengthMs, true)
+                            val scriptLoopCount = exportSong?.getScriptExporterLoopCount() ?: -1
+                            if (scriptLoopCount > 0) {
+                                exportTargetLoops = scriptLoopCount
+                                exportSong?.setLoops(30000)
+                            }
                         }
 
                         // Reapply MIDI channel mutes after restarting song for export
@@ -3251,10 +3423,21 @@ class HomeFragment : Fragment() {
                                 
                                 // Check if song is done (end of MIDI events reached)
                                 isDone = currentSong?.isDone() ?: false
+
+                                val positionMs = currentSong?.getPositionMs() ?: 0
+                                tickSongScript(currentSong, positionMs, lengthMs, true)
+
+                                if (exportTargetLoops > 0 && exportLastPosMs > 0 && positionMs + 1000 < exportLastPosMs) {
+                                    exportLoopsDone++
+                                    android.util.Log.d("HomeFragment", "Export loop wrap detected ($exportLoopsDone/$exportTargetLoops)")
+                                    if (exportLoopsDone >= exportTargetLoops) {
+                                        currentSong?.stop(false)
+                                    }
+                                }
+                                exportLastPosMs = positionMs
                                 
                                 // Update progress every 5% to avoid excessive UI updates
                                 if (lengthMs > 0) {
-                                    val positionMs = currentSong?.getPositionMs() ?: 0
                                     val progressPercent = ((positionMs * 100) / lengthMs).coerceIn(0, 100)
                                     
                                     if (progressPercent >= lastProgressPercent + 5) {
@@ -3326,11 +3509,15 @@ class HomeFragment : Fragment() {
                                 currentSong?.seekToMs(savedPosition)
                                 viewModel.currentPositionMs = savedPosition
                                 currentSong?.start()
+                                currentSong?.setLoops(restoreLoopCount)
                                 viewModel.isPlaying = true
                             }
                         } catch (e: Exception) {
                             android.util.Log.e("HomeFragment", "Error restoring playback: ${e.message}")
                         }
+                    } else {
+                        // Preserve repeat-mode behavior for the next manual play.
+                        currentSong?.setLoops(restoreLoopCount)
                     }
                 }
                 
@@ -3436,6 +3623,8 @@ fun NewMusicPlayerScreen(
     fixPanLfoBias: Boolean,
     classicChorus: Boolean,
     exportCodec: Int,
+    baeScriptEnabled: Boolean,
+    baeScriptSource: String,
     searchResultLimit: Int,
     enabledExtensions: Set<String>,
     onLoadBuiltin: () -> Unit,
@@ -3444,6 +3633,8 @@ fun NewMusicPlayerScreen(
     onFixPanLfoChange: (Boolean) -> Unit,
     onClassicChorusChange: (Boolean) -> Unit,
     onExportCodecChange: (Int) -> Unit,
+    onBaeScriptEnabledChange: (Boolean) -> Unit,
+    onBaeScriptSourceChange: (String) -> Unit,
     onSearchLimitChange: (Int) -> Unit,
     onExtensionEnabledChange: (String, Boolean) -> Unit,
     onExportRequest: (String, Int) -> Unit,
@@ -3507,7 +3698,7 @@ fun NewMusicPlayerScreen(
                         } else {
                             when (viewModel.currentScreen) {
                                 NavigationScreen.HOME -> {
-                                    viewModel.currentFolderPath ?: "No folder selected"
+                                    getDisplayPath(viewModel.currentFolderPath)
                                 }
                                 NavigationScreen.SEARCH -> {
                                     val searchResults by viewModel.searchResults.collectAsState()
@@ -3754,9 +3945,7 @@ fun NewMusicPlayerScreen(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
-                                    val folderName = viewModel.currentFolderPath?.let { path ->
-                                        File(path).name
-                                    } ?: "Unknown"
+                                    val folderName = getDisplayFolderName(viewModel.currentFolderPath)
                                     Text(
                                         text = folderName,
                                         fontSize = 12.sp,
@@ -3913,6 +4102,8 @@ fun NewMusicPlayerScreen(
                     fixPanLfoBias = fixPanLfoBias,
                     classicChorus = classicChorus,
                     exportCodec = exportCodec,
+                    baeScriptEnabled = baeScriptEnabled,
+                    baeScriptSource = baeScriptSource,
                     searchResultLimit = searchResultLimit,
                     onLoadBuiltin = onLoadBuiltin,
                     onReverbChange = onReverbChange,
@@ -3921,6 +4112,8 @@ fun NewMusicPlayerScreen(
                     onClassicChorusChange = onClassicChorusChange,
                     onVolumeChange = onVolumeChange,
                     onExportCodecChange = onExportCodecChange,
+                    onBaeScriptEnabledChange = onBaeScriptEnabledChange,
+                    onBaeScriptSourceChange = onBaeScriptSourceChange,
                     onSearchLimitChange = onSearchLimitChange,
                     onOpenFileTypes = { onNavigate(NavigationScreen.FILE_TYPES) },
                     onBrowseBanks = onBrowseBanks,
@@ -4275,7 +4468,7 @@ private fun PortraitPlayerLayout(
             // Export button (disabled when repeat mode is SONG to prevent infinite looping)
             currentItem?.let { item ->
                 val isSoundFile = HomeFragment.isSoundExtension(item.file.extension)
-                val isExportEnabled = viewModel.repeatMode != RepeatMode.SONG && !isSoundFile
+                val isExportEnabled = !isSoundFile
                 IconButton(
                     onClick = {
                         val extension = when (exportCodec) {
@@ -4768,7 +4961,7 @@ private fun LandscapePlayerLayout(
             // Export button
             currentItem?.let { item ->
                 val isSoundFile = HomeFragment.isSoundExtension(item.file.extension)
-                val isExportEnabled = viewModel.repeatMode != RepeatMode.SONG && !isSoundFile
+                val isExportEnabled = !isSoundFile
                 IconButton(
                     onClick = {
                         val extension = when (exportCodec) {
@@ -6130,6 +6323,8 @@ fun SettingsScreenContent(
     fixPanLfoBias: Boolean,
     classicChorus: Boolean,
     exportCodec: Int,
+    baeScriptEnabled: Boolean,
+    baeScriptSource: String,
     searchResultLimit: Int,
     onLoadBuiltin: () -> Unit,
     onReverbChange: (Int) -> Unit,
@@ -6138,6 +6333,8 @@ fun SettingsScreenContent(
     onClassicChorusChange: (Boolean) -> Unit,
     onVolumeChange: (Int) -> Unit,
     onExportCodecChange: (Int) -> Unit,
+    onBaeScriptEnabledChange: (Boolean) -> Unit,
+    onBaeScriptSourceChange: (String) -> Unit,
     onSearchLimitChange: (Int) -> Unit,
     onOpenFileTypes: () -> Unit,
     onBrowseBanks: () -> Unit,
@@ -6192,6 +6389,55 @@ fun SettingsScreenContent(
             Toast.makeText(context, "Exported preset: ${preset.name}", Toast.LENGTH_SHORT).show()
         } catch (_: Exception) {
             Toast.makeText(context, "Failed to export .neoreverb", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val importBaeScriptLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        try {
+            val name = DocumentFile.fromSingleUri(context, uri)?.name
+                ?: uri.lastPathSegment
+                ?: ""
+            if (!name.lowercase().endsWith(".bscript")) {
+                Toast.makeText(context, "Please select a .bscript file", Toast.LENGTH_SHORT).show()
+                return@rememberLauncherForActivityResult
+            }
+
+            val script = context.contentResolver.openInputStream(uri)
+                ?.use { it.readBytes().toString(Charsets.UTF_8) }
+
+            if (script != null) {
+                onBaeScriptSourceChange(script)
+                Toast.makeText(context, "BAEScript loaded", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(context, "Failed to read BAEScript", Toast.LENGTH_SHORT).show()
+            }
+        } catch (_: Exception) {
+            Toast.makeText(context, "Failed to import BAEScript", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    val exportBaeScriptLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("text/plain")
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        try {
+            val name = DocumentFile.fromSingleUri(context, uri)?.name
+                ?: uri.lastPathSegment
+                ?: ""
+            if (!name.lowercase().endsWith(".bscript")) {
+                Toast.makeText(context, "File must use .bscript extension", Toast.LENGTH_SHORT).show()
+                return@rememberLauncherForActivityResult
+            }
+
+            context.contentResolver.openOutputStream(uri)?.use {
+                it.write(baeScriptSource.toByteArray(Charsets.UTF_8))
+            }
+            Toast.makeText(context, "BAEScript exported", Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) {
+            Toast.makeText(context, "Failed to export BAEScript", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -6594,6 +6840,76 @@ fun SettingsScreenContent(
         }
             }
             
+            Spacer(modifier = Modifier.height(16.dp))
+
+        // BAEScript entry (full width in landscape)
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = 4.dp,
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.Code,
+                        contentDescription = null,
+                        tint = MaterialTheme.colors.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "BAEScript",
+                        style = MaterialTheme.typography.h6,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colors.primary,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Switch(
+                        checked = baeScriptEnabled,
+                        onCheckedChange = onBaeScriptEnabledChange
+                    )
+                }
+
+                OutlinedTextField(
+                    value = baeScriptSource,
+                    onValueChange = onBaeScriptSourceChange,
+                    enabled = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(160.dp),
+                    label = { Text("Script") },
+                    placeholder = { Text("on.script { exporter.loopcount = 2 }") },
+                    singleLine = false
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = { importBaeScriptLauncher.launch(arrayOf("text/plain", "application/octet-stream")) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Filled.GetApp, contentDescription = "Load BAEScript")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Load")
+                    }
+                    OutlinedButton(
+                        onClick = { exportBaeScriptLauncher.launch("script.bscript") },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Filled.Publish, contentDescription = "Save BAEScript")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Save")
+                    }
+                }
+            }
+        }
+
             Spacer(modifier = Modifier.height(16.dp))
 
         // File Types entry (full width in landscape)
@@ -7084,6 +7400,76 @@ fun SettingsScreenContent(
                 }
             }
             
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // BAEScript section
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                elevation = 4.dp,
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.Code,
+                            contentDescription = null,
+                            tint = MaterialTheme.colors.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "BAEScript",
+                            style = MaterialTheme.typography.h6,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colors.primary,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Switch(
+                            checked = baeScriptEnabled,
+                            onCheckedChange = onBaeScriptEnabledChange
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = baeScriptSource,
+                        onValueChange = onBaeScriptSourceChange,
+                        enabled = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(160.dp),
+                        label = { Text("Script") },
+                        placeholder = { Text("on.script { exporter.loopcount = 2 }") },
+                        singleLine = false
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedButton(
+                            onClick = { importBaeScriptLauncher.launch(arrayOf("text/plain", "application/octet-stream")) },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Filled.GetApp, contentDescription = "Load BAEScript")
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Load")
+                        }
+                        OutlinedButton(
+                            onClick = { exportBaeScriptLauncher.launch("script.bscript") },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Filled.Publish, contentDescription = "Save BAEScript")
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Save")
+                        }
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
 
             // File Types entry

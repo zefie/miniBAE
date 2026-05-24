@@ -107,6 +107,10 @@ LOCAL_SRC_FILES	:= \
 			Common/XOpusFiles.c \
 			Common/XQOAFiles.c \
 			Common/X_DebugCallback.c \
+			../script/baescript.c \
+			../script/baescript_lexer.c \
+			../script/baescript_parser.c \
+			../script/baescript_vm.c \
 			../mthc/mthc_decomp.c \
 			../adp2wav/adp2wav_decode.c \
 			../thirdparty/libg722/g722_decode.c \
@@ -213,6 +217,7 @@ LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/flac/src/libFLAC/include
 LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/libvorbis/lib
 LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/libg722
 LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/qoa
+LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../script
 LOCAL_C_INCLUDES	+= $(GEN_DIR)
 
 LOCAL_CFLAGS := -std=c99 -O2 -D_VERSION=\"$(VERSION)\" \

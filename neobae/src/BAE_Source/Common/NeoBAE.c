@@ -178,6 +178,7 @@
 #if USE_XMF_SUPPORT == TRUE
 #include "GenXMF.h"
 #endif
+#endif
 
 #ifndef BAE_DISABLE_ROLLED_MIDI_DETECTION
 #define BAE_DISABLE_ROLLED_MIDI_DETECTION FALSE
@@ -617,7 +618,6 @@ static BAE_BOOL PV_IsRolledMIDIMemory(const void *pMidiData, uint32_t midiSize)
     }
     return PV_IsRolledMIDIRawControllerScan((const unsigned char *)pMidiData, midiSize);
 }
-#endif
 
 #ifndef BAE_ENABLE_ROLLED_MIDI_UNROLL
 #define BAE_ENABLE_ROLLED_MIDI_UNROLL TRUE

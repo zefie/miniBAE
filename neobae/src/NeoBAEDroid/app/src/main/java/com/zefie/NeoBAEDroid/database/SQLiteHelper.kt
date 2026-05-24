@@ -7,7 +7,15 @@ import java.security.MessageDigest
 
 class SQLiteHelper private constructor(private val context: Context) {
     private val dbDir: File
-private val openDatabases = mutableMapOf<String, Long>() // normalized path -> dbPtr
+    private val openDatabases = mutableMapOf<String, Long>() // normalized path -> dbPtr
+    private val parentIndexCache = object : LinkedHashMap<String, String?>(256, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, String?>): Boolean {
+            return size > 256
+        }
+    }
+    private var indexedRootsCache: List<String> = emptyList()
+    private var indexedRootsCacheStampMs: Long = 0
+    private var indexedRootsCacheDbCount: Int = -1
 
     init {
         // Ensure database directory exists
@@ -17,11 +25,64 @@ private val openDatabases = mutableMapOf<String, Long>() // normalized path -> d
 
     private fun normalizePath(path: String?): String? {
         if (path == null) return null
+
+        val raw = path.trim().trimEnd('/')
+        if (raw.startsWith("content://")) return raw
+        // Backward compatibility for earlier malformed normalization like "/content:/..."
+        if (raw.startsWith("/content:/")) return "content://" + raw.removePrefix("/content:/")
+
         return try {
-            File(path).canonicalPath
+            File(raw).canonicalPath
         } catch (_: Exception) {
-            File(path).absolutePath
+            File(raw).absolutePath
         }
+    }
+
+    private fun invalidateIndexCaches() {
+        parentIndexCache.clear()
+        indexedRootsCache = emptyList()
+        indexedRootsCacheStampMs = 0
+        indexedRootsCacheDbCount = -1
+    }
+
+    private fun getIndexedRoots(forceRefresh: Boolean = false): List<String> {
+        val now = System.currentTimeMillis()
+        val dbFiles = dbDir.listFiles { _, name -> name.startsWith("index_") && name.endsWith(".db") }
+        val dbCount = dbFiles?.size ?: 0
+
+        val cacheFresh = !forceRefresh &&
+            indexedRootsCache.isNotEmpty() &&
+            indexedRootsCacheDbCount == dbCount &&
+            (now - indexedRootsCacheStampMs) < 5000
+
+        if (cacheFresh) {
+            return indexedRootsCache
+        }
+
+        if (dbFiles == null || dbFiles.isEmpty()) {
+            indexedRootsCache = emptyList()
+            indexedRootsCacheDbCount = 0
+            indexedRootsCacheStampMs = now
+            return indexedRootsCache
+        }
+
+        val roots = mutableListOf<String>()
+        dbFiles.forEach { dbFile ->
+            val dbPtr = nativeOpen(dbFile.absolutePath)
+            if (dbPtr != 0L) {
+                val indexPath = getIndexMetadata(dbPtr)
+                nativeClose(dbPtr)
+                if (!indexPath.isNullOrBlank()) {
+                    val normalized = normalizePath(indexPath) ?: indexPath
+                    roots.add(normalized)
+                }
+            }
+        }
+
+        indexedRootsCache = roots.distinct()
+        indexedRootsCacheDbCount = dbCount
+        indexedRootsCacheStampMs = now
+        return indexedRootsCache
     }
     
     companion object {
@@ -55,6 +116,7 @@ private val openDatabases = mutableMapOf<String, Long>() // normalized path -> d
             
             // Store the indexed path in metadata
             saveIndexMetadata(dbPtr, normalizedIndexPath)
+            invalidateIndexCaches()
         } else {
             Log.e("SQLiteHelper", "Failed to open database at: ${dbFile.absolutePath}")
         }
@@ -76,35 +138,25 @@ private val openDatabases = mutableMapOf<String, Long>() // normalized path -> d
      */
     private fun findParentIndex(searchPath: String): String? {
         val normalizedSearchPath = normalizePath(searchPath) ?: searchPath
-        // List all database files
-        val dbFiles = dbDir.listFiles { _, name -> name.startsWith("index_") && name.endsWith(".db") }
-        
-        Log.d("SQLiteHelper", "findParentIndex: searching for '$searchPath', found ${dbFiles?.size ?: 0} db files in ${dbDir.absolutePath}")
-        
-        if (dbFiles == null || dbFiles.isEmpty()) return null
+        parentIndexCache[normalizedSearchPath]?.let { return it }
+
+        val roots = getIndexedRoots()
+        if (roots.isEmpty()) {
+            parentIndexCache[normalizedSearchPath] = null
+            return null
+        }
         
         var closestParent: String? = null
         var closestParentLength = 0
-        
-        dbFiles.forEach { dbFile ->
-            val dbPtr = nativeOpen(dbFile.absolutePath)
-            if (dbPtr != 0L) {
-                val indexPath = getIndexMetadata(dbPtr)
-                Log.d("SQLiteHelper", "  Checking db: ${dbFile.name}, indexPath=$indexPath")
-                nativeClose(dbPtr)
-                
-                if (indexPath != null) {
-                    val normalizedIndexPath = normalizePath(indexPath) ?: indexPath
-                    if (normalizedSearchPath.startsWith(normalizedIndexPath) && normalizedIndexPath.length > closestParentLength) {
-                        closestParent = normalizedIndexPath
-                        closestParentLength = normalizedIndexPath.length
-                        Log.d("SQLiteHelper", "  -> New closest parent: $normalizedIndexPath")
-                    }
-                }
+
+        roots.forEach { normalizedIndexPath ->
+            if (normalizedSearchPath.startsWith(normalizedIndexPath) && normalizedIndexPath.length > closestParentLength) {
+                closestParent = normalizedIndexPath
+                closestParentLength = normalizedIndexPath.length
             }
         }
-        
-        Log.d("SQLiteHelper", "findParentIndex: result=$closestParent")
+
+        parentIndexCache[normalizedSearchPath] = closestParent
         return closestParent
     }
     
@@ -295,20 +347,8 @@ private val openDatabases = mutableMapOf<String, Long>() // normalized path -> d
      * Check if a path exactly matches an existing database (not just a parent)
      */
     fun hasExactIndexForPath(searchPath: String): Boolean {
-        val dbFiles = dbDir.listFiles { _, name -> name.startsWith("index_") && name.endsWith(".db") }
-        if (dbFiles == null || dbFiles.isEmpty()) return false
-        
-        dbFiles.forEach { dbFile ->
-            val dbPtr = nativeOpen(dbFile.absolutePath)
-            if (dbPtr != 0L) {
-                val indexPath = getIndexMetadata(dbPtr)
-                nativeClose(dbPtr)
-                if (indexPath == searchPath) {
-                    return true
-                }
-            }
-        }
-        return false
+        val normalized = normalizePath(searchPath) ?: searchPath
+        return getIndexedRoots().any { it == normalized }
     }
     
     /**
@@ -326,7 +366,7 @@ private val openDatabases = mutableMapOf<String, Long>() // normalized path -> d
         val dbFile = File(dbDir, dbName)
         
         Log.d("SQLiteHelper", "deleteDatabase: Attempting to delete ${dbFile.absolutePath}")
-        return if (dbFile.exists()) {
+        val deleted = if (dbFile.exists()) {
             val deleted = dbFile.delete()
             Log.d("SQLiteHelper", "deleteDatabase: deleted=$deleted")
             deleted
@@ -334,6 +374,11 @@ private val openDatabases = mutableMapOf<String, Long>() // normalized path -> d
             Log.d("SQLiteHelper", "deleteDatabase: File does not exist")
             false
         }
+
+        if (deleted) {
+            invalidateIndexCaches()
+        }
+        return deleted
     }
     
     /**
