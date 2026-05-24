@@ -272,6 +272,8 @@ static BAE_BOOL PV_IsRolledMIDIBytes(const unsigned char *rawData, uint32_t rawS
     uint16_t trackCount;
     uint16_t trackIndex;
     uint32_t muteEvents;
+    uint32_t muteSetEvents;
+    uint32_t muteClearEvents;
     uint32_t loopEvents;
     uint32_t distinctMuteValues;
     unsigned char seenMuteValue[128];
@@ -302,6 +304,8 @@ static BAE_BOOL PV_IsRolledMIDIBytes(const unsigned char *rawData, uint32_t rawS
     data += 8 + headerLength;
 
     muteEvents = 0;
+    muteSetEvents = 0;
+    muteClearEvents = 0;
     loopEvents = 0;
     distinctMuteValues = 0;
     XSetMemory(seenMuteValue, sizeof(seenMuteValue), 0);
@@ -368,7 +372,7 @@ static BAE_BOOL PV_IsRolledMIDIBytes(const unsigned char *rawData, uint32_t rawS
                 trackData--;
                 status = runningStatus;
             }
-            else if ((status < 0xF0) || (status == 0xF0) || (status == 0xF7))
+            else if (status < 0xF0)
             {
                 runningStatus = status;
             }
@@ -376,7 +380,13 @@ static BAE_BOOL PV_IsRolledMIDIBytes(const unsigned char *rawData, uint32_t rawS
             if (status == 0xFF)
             {
                 uint32_t metaLength;
-                if ((trackData >= trackEnd) || (PV_ReadMidiVariableLength(&trackData, trackEnd, &metaLength) == FALSE))
+                if (trackData >= trackEnd)
+                {
+                    return FALSE;
+                }
+                /* Skip meta type byte before reading meta payload length. */
+                trackData++;
+                if (PV_ReadMidiVariableLength(&trackData, trackEnd, &metaLength) == FALSE)
                 {
                     return FALSE;
                 }
@@ -385,6 +395,7 @@ static BAE_BOOL PV_IsRolledMIDIBytes(const unsigned char *rawData, uint32_t rawS
                     return FALSE;
                 }
                 trackData += metaLength;
+                runningStatus = 0;
                 continue;
             }
 
@@ -400,6 +411,7 @@ static BAE_BOOL PV_IsRolledMIDIBytes(const unsigned char *rawData, uint32_t rawS
                     return FALSE;
                 }
                 trackData += sysexLength;
+                runningStatus = 0;
                 continue;
             }
 
@@ -425,6 +437,7 @@ static BAE_BOOL PV_IsRolledMIDIBytes(const unsigned char *rawData, uint32_t rawS
                     return FALSE;
                 }
                 trackData += sysLen;
+                runningStatus = 0;
                 continue;
             }
 
@@ -456,6 +469,14 @@ static BAE_BOOL PV_IsRolledMIDIBytes(const unsigned char *rawData, uint32_t rawS
                 if ((trackData[0] == 86) || (trackData[0] == 87))
                 {
                     muteEvents++;
+                    if (trackData[0] == 86)
+                    {
+                        muteSetEvents++;
+                    }
+                    else
+                    {
+                        muteClearEvents++;
+                    }
                     trackHasMute = TRUE;
                     if (trackData[1] < 128)
                     {
@@ -507,28 +528,20 @@ static BAE_BOOL PV_IsRolledMIDIBytes(const unsigned char *rawData, uint32_t rawS
         data = trackEnd;
     }
 
-    if ((loopEvents > 0) && (muteEvents > 0) && (distinctMuteValues >= 3) && (tracksWithMute >= 4))
+    if ((muteSetEvents > 0) && (muteClearEvents > 0) && (loopEvents > 0) && (distinctMuteValues >= 3) && (tracksWithMute >= 4))
     {
         return TRUE;
     }
 
-    if ((muteEvents >= 16) && (distinctMuteValues >= 3) && (tracksWithMute >= 4))
+    if ((muteSetEvents > 0) && (muteClearEvents > 0) && (muteEvents >= 16) && (distinctMuteValues >= 3) && (tracksWithMute >= 4))
     {
         return TRUE;
     }
 
-    if ((muteEvents >= 2) && (tracksWithNotes >= 2))
-    {
-        uint32_t span;
-        span = (maxNoteEnd >= minNoteEnd) ? (maxNoteEnd - minNoteEnd) : 0;
-        if ((span <= 2) && ((distinctMuteValues >= 2) || (tracksWithMute >= 2)))
-        {
-            return TRUE;
-        }
-    }
-
-    debug_message("[BAE] Rolled detect metrics: mute=%u loop=%u distinctMuteVals=%u tracksWithMute=%u tracksWithNotes=%u noteSpan=%u\n",
+    debug_message("[BAE] Rolled detect metrics: mute=%u set=%u clear=%u loop=%u distinctMuteVals=%u tracksWithMute=%u tracksWithNotes=%u noteSpan=%u\n",
                   muteEvents,
+                  muteSetEvents,
+                  muteClearEvents,
                   loopEvents,
                   distinctMuteValues,
                   (unsigned)tracksWithMute,
@@ -612,10 +625,15 @@ static BAE_BOOL PV_IsRolledMIDISequence(const GM_Song *pSong)
 
 static BAE_BOOL PV_IsRolledMIDIMemory(const void *pMidiData, uint32_t midiSize)
 {
-    if (PV_IsRolledMIDIBytes((const unsigned char *)pMidiData, midiSize))
+    uint32_t smfSize;
+    const unsigned char *smfData;
+
+    smfData = PV_FindMThdStart((const unsigned char *)pMidiData, midiSize, &smfSize);
+    if ((smfData != NULL) && (smfSize >= 14))
     {
-        return TRUE;
+        return PV_IsRolledMIDIBytes((const unsigned char *)pMidiData, midiSize);
     }
+
     return PV_IsRolledMIDIRawControllerScan((const unsigned char *)pMidiData, midiSize);
 }
 
