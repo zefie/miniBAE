@@ -1200,12 +1200,19 @@ static BAE_BOOL PV_UnrollSplitByInstrument(const PV_UnrollOutputTrack *singleTra
     uint8_t bankMSB[16];
     uint8_t bankLSB[16];
     uint8_t program[16];
+    int16_t noteGroupStack[16][128][32];
+    uint8_t noteGroupDepth[16][128];
 
     for (i = 0; i < 16; i++)
     {
+        uint32_t n;
         bankMSB[i] = 0;
         bankLSB[i] = 0;
         program[i] = 0;
+        for (n = 0; n < 128; n++)
+        {
+            noteGroupDepth[i][n] = 0;
+        }
     }
 
     for (i = 0; i < singleTrack->eventCount; i++)
@@ -1226,9 +1233,15 @@ static BAE_BOOL PV_UnrollSplitByInstrument(const PV_UnrollOutputTrack *singleTra
             uint8_t type;
             PV_UnrollKey key;
             int groupIndex;
+            BAE_BOOL isNoteOn;
+            BAE_BOOL isNoteOff;
+            uint8_t noteValue;
 
             channel = (uint8_t)(ev->status & 0x0F);
             type = (uint8_t)(ev->status & 0xF0);
+            isNoteOn = FALSE;
+            isNoteOff = FALSE;
+            noteValue = 0;
 
             if ((type == 0xB0) && (ev->midiDataLen == 2))
             {
@@ -1246,6 +1259,13 @@ static BAE_BOOL PV_UnrollSplitByInstrument(const PV_UnrollOutputTrack *singleTra
                 program[channel] = ev->midiData[0];
             }
 
+            if (((type == 0x90) || (type == 0x80)) && (ev->midiDataLen >= 2))
+            {
+                noteValue = ev->midiData[0];
+                isNoteOn = (type == 0x90) && (ev->midiData[1] != 0);
+                isNoteOff = (type == 0x80) || ((type == 0x90) && (ev->midiData[1] == 0));
+            }
+
             key.channel = channel;
             key.bankMSB = bankMSB[channel];
             key.bankLSB = bankLSB[channel];
@@ -1256,14 +1276,110 @@ static BAE_BOOL PV_UnrollSplitByInstrument(const PV_UnrollOutputTrack *singleTra
                 key.drumNote = (int16_t)ev->midiData[0];
             }
 
-            groupIndex = PV_UnrollFindOrAddKeyTrack(groups, &key);
-            if (groupIndex < 0)
+            if (isNoteOn)
             {
-                return FALSE;
+                groupIndex = PV_UnrollFindOrAddKeyTrack(groups, &key);
+                if (groupIndex < 0)
+                {
+                    return FALSE;
+                }
+                if (PV_UnrollAppendTrackEvent(&groups->items[groupIndex].track, ev) == FALSE)
+                {
+                    return FALSE;
+                }
+
+                if (noteGroupDepth[channel][noteValue] < 32)
+                {
+                    noteGroupStack[channel][noteValue][noteGroupDepth[channel][noteValue]] = (int16_t)groupIndex;
+                    noteGroupDepth[channel][noteValue]++;
+                }
+                else
+                {
+                    noteGroupStack[channel][noteValue][31] = (int16_t)groupIndex;
+                }
+                continue;
             }
-            if (PV_UnrollAppendTrackEvent(&groups->items[groupIndex].track, ev) == FALSE)
+
+            if (isNoteOff)
             {
-                return FALSE;
+                if (noteGroupDepth[channel][noteValue] > 0)
+                {
+                    noteGroupDepth[channel][noteValue]--;
+                    groupIndex = noteGroupStack[channel][noteValue][noteGroupDepth[channel][noteValue]];
+                }
+                else
+                {
+                    groupIndex = -1;
+                }
+
+                if (groupIndex < 0)
+                {
+                    groupIndex = PV_UnrollFindOrAddKeyTrack(groups, &key);
+                    if (groupIndex < 0)
+                    {
+                        return FALSE;
+                    }
+                }
+
+                if (PV_UnrollAppendTrackEvent(&groups->items[groupIndex].track, ev) == FALSE)
+                {
+                    return FALSE;
+                }
+                continue;
+            }
+
+            {
+                int activeGroupList[256];
+                int activeCount;
+                uint32_t n;
+                int k;
+                int candidate;
+                BAE_BOOL already;
+
+                activeCount = 0;
+                for (n = 0; n < 128; n++)
+                {
+                    if (noteGroupDepth[channel][n] > 0)
+                    {
+                        candidate = noteGroupStack[channel][n][noteGroupDepth[channel][n] - 1];
+                        already = FALSE;
+                        for (k = 0; k < activeCount; k++)
+                        {
+                            if (activeGroupList[k] == candidate)
+                            {
+                                already = TRUE;
+                                break;
+                            }
+                        }
+                        if (!already && (activeCount < 256))
+                        {
+                            activeGroupList[activeCount++] = candidate;
+                        }
+                    }
+                }
+
+                if (activeCount == 0)
+                {
+                    groupIndex = PV_UnrollFindOrAddKeyTrack(groups, &key);
+                    if (groupIndex < 0)
+                    {
+                        return FALSE;
+                    }
+                    if (PV_UnrollAppendTrackEvent(&groups->items[groupIndex].track, ev) == FALSE)
+                    {
+                        return FALSE;
+                    }
+                }
+                else
+                {
+                    for (k = 0; k < activeCount; k++)
+                    {
+                        if (PV_UnrollAppendTrackEvent(&groups->items[activeGroupList[k]].track, ev) == FALSE)
+                        {
+                            return FALSE;
+                        }
+                    }
+                }
             }
         }
     }
@@ -9147,7 +9263,7 @@ BAEResult BAESong_LoadMidiFromMemory(BAESong song, void const *pMidiData, uint32
 
                 unrollResult = BAEUtil_UnrollRolledMidiFromMemory(pMidiData,
                                                                   midiSize,
-                                                                  0,
+                                                                  BAE_UNROLL_MIDI_OPTION_SPLIT_INSTRUMENTS,
                                                                   &unrolledMidi,
                                                                   &unrolledMidiSize,
                                                                   &wasRolledNow);
@@ -9234,7 +9350,7 @@ BAEResult BAESong_LoadMidiFromMemory(BAESong song, void const *pMidiData, uint32
 
                                 unrollResult = BAEUtil_UnrollRolledMidiFromMemory(pSong->sequenceData,
                                                                                   (uint32_t)pSong->sequenceDataSize,
-                                                                                  0,
+                                                                                  BAE_UNROLL_MIDI_OPTION_SPLIT_INSTRUMENTS,
                                                                                   &unrolledMidi,
                                                                                   &unrolledMidiSize,
                                                                                   &wasRolledNow);
