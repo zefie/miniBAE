@@ -22,6 +22,7 @@
 #include "gui_theme.h"
 #include "gui_midi.h"
 #include "gui_bae.h"
+#include "gui_script_editor.h"
 #include "NeoBAE.h"
 #include "GenPriv.h"
 #include "BAE_API.h"
@@ -80,6 +81,9 @@ int g_export_stable_loops = 0;
 static const uint32_t EXPORT_MPEG_STABLE_THRESHOLD = 8; // matches playbae heuristic
 bool g_export_realtime_mode = false;
 bool g_export_using_live_song = false;
+static unsigned int g_export_target_loops = 0;
+static unsigned int g_export_loops_done = 0;
+static uint32_t g_export_last_song_pos_us = 0;
 
 // Export tick callback for script engine synchronization
 static ExportTickFn g_export_tick_fn = NULL;
@@ -293,6 +297,8 @@ extern void karaoke_suspend(bool suspend);
 
 bool bae_start_export(const char *output_file, int export_type, int compression)
 {
+    int script_export_loopcount = -1;
+
     if (!g_bae.song_loaded || g_bae.is_audio_file)
     {
         set_status_message("Cannot export: No MIDI/RMF loaded");
@@ -383,10 +389,28 @@ bool bae_start_export(const char *output_file, int export_type, int compression)
         g_bae.is_playing = true;
     }
 
+    // Export defaults to one-shot; finite looping is handled externally.
+    g_export_target_loops = 0;
+    g_export_loops_done = 0;
+    g_export_last_song_pos_us = 0;
+    BAESong_SetLoops(g_bae.song, 0);
+
     // Tick the script engine before any audio is rendered so a script
     // seek (e.g. midi.position = X) takes effect before priming.
+    #ifdef SUPPORT_BAESCRIPT
+    script_editor_reset_exporter_options();
+    #endif
     if (g_export_tick_fn)
         g_export_tick_fn(g_export_tick_ud);
+
+#ifdef SUPPORT_BAESCRIPT
+    if (script_editor_get_exporter_loopcount(&script_export_loopcount)) {
+        if (script_export_loopcount > 0) {
+            g_export_target_loops = (unsigned int)script_export_loopcount;
+            BAESong_SetLoops(g_bae.song, 30000);
+        }
+    }
+#endif
 
     // Give the song a moment to settle and process initial MIDI events
     // This helps prevent note dropping at the beginning of the export
@@ -502,6 +526,8 @@ bool bae_start_export(const char *output_file, int export_type, int compression)
 #if USE_MPEG_ENCODER != FALSE
 bool bae_start_mpeg_export(const char *output_file, int codec_index)
 {
+    int script_export_loopcount = -1;
+
     if (!g_bae.song_loaded || g_bae.is_audio_file)
     {
         set_status_message("Cannot export: No MIDI/RMF loaded");
@@ -606,10 +632,28 @@ bool bae_start_mpeg_export(const char *output_file, int codec_index)
 
     g_bae.is_playing = true;
 
+    // Export defaults to one-shot; finite looping is handled externally.
+    g_export_target_loops = 0;
+    g_export_loops_done = 0;
+    g_export_last_song_pos_us = 0;
+    BAESong_SetLoops(g_bae.song, 0);
+
     // Tick the script engine before any audio is rendered so a script
     // seek (e.g. midi.position = X) takes effect before priming.
+    #ifdef SUPPORT_BAESCRIPT
+    script_editor_reset_exporter_options();
+    #endif
     if (g_export_tick_fn)
         g_export_tick_fn(g_export_tick_ud);
+
+#ifdef SUPPORT_BAESCRIPT
+    if (script_editor_get_exporter_loopcount(&script_export_loopcount)) {
+        if (script_export_loopcount > 0) {
+            g_export_target_loops = (unsigned int)script_export_loopcount;
+            BAESong_SetLoops(g_bae.song, 30000);
+        }
+    }
+#endif
 
     // Prime the encoder/mixer (like playbae does) to ensure events are processed
     for (int prime = 0; prime < 8; ++prime)
@@ -976,6 +1020,22 @@ static void *export_thread_proc(void *param)
         uint32_t current_pos = 0;
         BAESong_GetMicrosecondPosition(g_bae.song, &current_pos);
         BAESong_IsDone(g_bae.song, &is_done);
+
+        if (g_export_target_loops > 0 && g_export_last_song_pos_us > 0)
+        {
+            if (current_pos < g_export_last_song_pos_us &&
+                (g_export_last_song_pos_us - current_pos) > 1000000U)
+            {
+                g_export_loops_done++;
+                BAE_PRINTF("Export loop wrap detected (%u/%u)\n",
+                    g_export_loops_done, g_export_target_loops);
+                if (g_export_loops_done >= g_export_target_loops)
+                {
+                    BAESong_Stop(g_bae.song, FALSE);
+                }
+            }
+        }
+        g_export_last_song_pos_us = current_pos;
 
         // Tick the script engine so it can react to position changes
         // during non-realtime export (otherwise it only ticks per GUI frame)

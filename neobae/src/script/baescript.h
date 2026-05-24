@@ -65,6 +65,7 @@
  *   mixer.reset();                    // restore default mixer values
  *   abs(x), min(a,b), max(a,b), clamp(x,lo,hi)
  *   midi.stop();                      // stop playback and export
+ *   exporter.loopcount = 2;           // export-only song loop count override
  *   print("hello");                   // debug output
  *   print(expression);                // print numeric or string values
  *
@@ -79,6 +80,10 @@
 
 #include <NeoBAE.h>
 #include <stdint.h>
+
+#ifndef BAESCRIPT_EXPORTER_LOOPCOUNT
+#define BAESCRIPT_EXPORTER_LOOPCOUNT TRUE
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -135,6 +140,19 @@ void BAEScript_SetSong(BAEScript_Context *ctx, BAESong song);
  * Set the exporting flag so scripts can query midi.exporting.
  */
 void BAEScript_SetExporting(BAEScript_Context *ctx, int exporting);
+
+#if BAESCRIPT_EXPORTER_LOOPCOUNT == TRUE
+/**
+ * Clear exporter-scoped script options (e.g. exporter.loopcount).
+ */
+void BAEScript_ResetExporterOptions(BAEScript_Context *ctx);
+
+/**
+ * Get exporter.loopcount if the script set it this export pass.
+ * Returns non-zero when a value is available.
+ */
+int BAEScript_GetExporterLoopCount(BAEScript_Context *ctx, int *outLoopCount);
+#endif
 
 /**
  * Execute one tick of the script.  Call this once per playback

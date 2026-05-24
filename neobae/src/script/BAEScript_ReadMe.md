@@ -197,6 +197,10 @@ Command:
 
 - `mixer.reset()`
 
+## `exporter` properties (only used when exporting)
+
+- `exporter.loopcount` (Sets the number of loops when exporting)
+
 ## Execution Model and Important Behavior
 
 BAEScript runs every tick, not once.
@@ -273,6 +277,14 @@ for (i = 0; i < 4; i++) {
     ch[i].reverb = 40;
     ch[i].chorus = 24;
 }
+```
+
+### Repeat the song once when exporting
+
+```javascript
+on.script({
+    exporter.loopcount = 2;
+});
 ```
 
 ## Error Handling and Limits

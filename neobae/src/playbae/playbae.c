@@ -604,6 +604,7 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
     BAE_UNSIGNED_FIXED volume, unsigned int timeLimitSec, unsigned int loopCount,
     BAEReverbType reverbType, char *muteChannels)
 {
+    unsigned int effectiveLoopCount = loopCount;
     /* Velocity curve must be set before Start (same as original PlayMidi) */
     if (gVelocityCurve >= 0) {
         BAESong_SetVelocityCurve(song, gVelocityCurve);
@@ -641,31 +642,51 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
     if (muteChannels && muteChannels[0])
         MuteChannels(song, muteChannels);
 
-    /* BAESong_SetLoops(song, N) has a known engine bug: it sets both loopSong=TRUE and
-     * songMaxLoopCount=N, but the sequencer re-loops forever when loopSong=TRUE even after
-     * songMaxLoopCount is exhausted (the max count is meant for controller 86/87 mute markers).
-     * Fix: if loopCount > 0, tell the engine to loop indefinitely (large value keeps loopSong=TRUE
-     * so IsDone stays FALSE), and stop externally when we detect N wrap-arounds via position
-     * tracking. loopCount == 0 keeps the default one-shot behaviour (loopSong=FALSE). */
-    if (loopCount > 0)
-        BAESong_SetLoops(song, 30000); /* effectively infinite; we stop it ourselves */
-    else
-        BAESong_SetLoops(song, 0); /* one-shot, loopSong=FALSE, IsDone fires when done */
+    /* Export defaults to one-shot; BAEScript may re-enable looping with exporter.loopcount. */
+    if (gWriteToFile) {
+        BAESong_SetLoops(song, 0);
+        effectiveLoopCount = 0;
+    } else {
+        /* BAESong_SetLoops(song, N) has a known engine bug: it sets both loopSong=TRUE and
+         * songMaxLoopCount=N, but the sequencer re-loops forever when loopSong=TRUE even after
+         * songMaxLoopCount is exhausted (the max count is meant for controller 86/87 mute markers).
+         * Fix: if loopCount > 0, tell the engine to loop indefinitely (large value keeps loopSong=TRUE
+         * so IsDone stays FALSE), and stop externally when we detect N wrap-arounds via position
+         * tracking. loopCount == 0 keeps the default one-shot behaviour (loopSong=FALSE). */
+        if (loopCount > 0)
+            BAESong_SetLoops(song, 30000); /* effectively infinite; we stop it ourselves */
+        else
+            BAESong_SetLoops(song, 0); /* one-shot, loopSong=FALSE, IsDone fires when done */
+    }
 
 #ifdef SUPPORT_BAESCRIPT
     uint32_t scriptLenMs = 0;
     if (gScript) {
         BAEScript_SetSong(gScript, song);
         BAEScript_SetExporting(gScript, gWriteToFile);
+#if BAESCRIPT_EXPORTER_LOOPCOUNT == TRUE
+        if (gWriteToFile)
+            BAEScript_ResetExporterOptions(gScript);
+#endif
         BAESong_GetMicrosecondLength(song, &scriptLenMs);
         scriptLenMs /= 1000;
         BAEScript_Tick(gScript, 0, scriptLenMs);
+
+#if BAESCRIPT_EXPORTER_LOOPCOUNT == TRUE
+        if (gWriteToFile) {
+            int scriptLoopCount = 0;
+            if (BAEScript_GetExporterLoopCount(gScript, &scriptLoopCount)) {
+                BAESong_SetLoops(song, (int16_t)scriptLoopCount);
+                effectiveLoopCount = (unsigned int)scriptLoopCount;
+            }
+        }
+#endif
     }
 #endif
 
     playbae_printf("Reverb: %d\n", (int)reverbType);
-    if (loopCount > 0)
-        playbae_printf("Will loop %u time(s)\n", loopCount);
+    if (effectiveLoopCount > 0)
+        playbae_printf("Will loop %u time(s)\n", effectiveLoopCount);
     if (timeLimitSec > 0)
         playbae_printf("Time limit: %u sec\n", timeLimitSec);
 
@@ -707,9 +728,9 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
         /* Detect loop wrap-around via position going backwards by >1 second */
         if (posMs < lastPos && (lastPos - posMs) > 1000) {
             cumulative += lastPos;
-            if (loopCount > 0) {
+            if (effectiveLoopCount > 0) {
                 loopsDone++;
-                if (loopsDone >= loopCount)
+                if (loopsDone >= effectiveLoopCount)
                     BAESong_Stop(song, gFadeOut);
             }
         }

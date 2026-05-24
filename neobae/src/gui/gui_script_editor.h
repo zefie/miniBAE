@@ -52,6 +52,12 @@ void script_editor_render(void);
 // Tick the script engine (call from playback loop when enabled)
 void script_editor_tick(void);
 
+// Reset exporter-scoped script options before starting an export pass.
+void script_editor_reset_exporter_options(void);
+
+// Read exporter.loopcount if set by script; returns true when defined.
+bool script_editor_get_exporter_loopcount(int *outLoopCount);
+
 // Check if script processing is enabled
 bool script_editor_is_enabled(void);
 

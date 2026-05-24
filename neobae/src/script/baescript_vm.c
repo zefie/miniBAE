@@ -110,6 +110,7 @@ static const char *HELP_TEXT =
     "    mixer.classicchorus    Classic chorus mode (0/1, default 0)\n"
     "    mixer.stereodcpanfix   Stereo pan DC fix (0/1, default 1)\n"
     "    mixer.reset()          Restore mixer defaults (volume=100, classicchorus=0, stereodcpanfix=1)\n"
+    "    exporter.loopcount     Export-time BAESong loop count override\n"
     "    midi.stop()            Stop playback and export\n"
     "\n"
     "  Events:\n"
@@ -484,6 +485,14 @@ int32_t BAEScript_Eval(BAEScript_Context *ctx, BAEScript_Node *node)
             }
             return 0;
 
+        case NODE_EXPORTER_PROP:
+            if (node->data.exporter_prop == EXPORTERPROP_LOOPCOUNT) {
+                if (!ctx->exporter_loopcount_set)
+                    return 0;
+                return ctx->exporter_loopcount;
+            }
+            return 0;
+
         case NODE_NOTE_ON: {
             int ch   = (int)BAEScript_Eval(ctx, node->data.note_cmd.channel);
             int note = (int)BAEScript_Eval(ctx, node->data.note_cmd.note);
@@ -673,6 +682,21 @@ void BAEScript_Exec(BAEScript_Context *ctx, BAEScript_Node *node)
                     /* read-only */
                     break;
             }
+            break;
+        }
+
+        case NODE_EXPORTER_PROP_SET: {
+#if BAESCRIPT_EXPORTER_LOOPCOUNT == TRUE
+            int32_t v = BAEScript_Eval(ctx, node->data.exporter_prop_set.value);
+            if (node->data.exporter_prop_set.prop == EXPORTERPROP_LOOPCOUNT) {
+                if (!ctx->exporter_loopcount_set) {
+                    if (v < 0) v = 0;
+                    if (v > 32767) v = 32767;
+                    ctx->exporter_loopcount = (int)v;
+                    ctx->exporter_loopcount_set = 1;
+                }
+            }
+#endif
             break;
         }
 

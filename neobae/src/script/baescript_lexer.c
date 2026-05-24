@@ -170,6 +170,7 @@ BAEScript_Token BAEScript_Lexer_Next(BAEScript_Lexer *lex)
         if (strcmp(buf, "ch")    == 0) return make_tok(TOK_CH,    line, col);
         if (strcmp(buf, "midi")  == 0) return make_tok(TOK_MIDI,  line, col);
         if (strcmp(buf, "mixer") == 0) return make_tok(TOK_MIXER, line, col);
+        if (strcmp(buf, "exporter") == 0) return make_tok(TOK_EXPORTER, line, col);
 
         BAEScript_Token t = make_tok(TOK_IDENT, line, col);
         strncpy(t.value.str, buf, sizeof(t.value.str) - 1);

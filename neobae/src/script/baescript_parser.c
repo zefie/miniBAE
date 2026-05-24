@@ -40,11 +40,12 @@
  *   mul_expr    = unary    (("*" | "/" | "%") unary)*
  *   unary       = ("!" | "-") unary | primary
  *   primary     = NUMBER | STRING | "true" | "false" | chProp
- *               | midiProp | IDENT | "(" expr ")"
+ *               | midiProp | mixerProp | exporterProp | IDENT | "(" expr ")"
  *               | noteOn | noteOff
  *   chProp      = "ch" "[" expr "]" "." PROP
  *   midiProp    = "midi" "." ("timestamp" | "position" | "ticks" | "length" | "exporting" | "volume" | "tempo" | "tempobpm" | "transpose")
  *   mixerProp   = "mixer" "." ("volume" | "classicchorus" | "stereodcpanfix" | "reverbtype")
+ *   exporterProp= "exporter" "." "loopcount"
  *   midiStop    = "midi" "." "stop" "(" ")" ";"
  *   midiAllOff  = "midi" "." "allnotesoff" "(" ")" ";"
  *   mixerReset  = "mixer" "." "reset" "(" ")" ";"
@@ -265,6 +266,26 @@ static BAEScript_Node *parse_midi_access(Parser *p)
     return n;
 }
 
+/* exporter.prop */
+static BAEScript_Node *parse_exporter_access(Parser *p)
+{
+    int line = p->current.line;
+    parser_expect(p, TOK_DOT, "Expected '.' after 'exporter'");
+    BAEScript_Token tok = parser_advance(p);
+    BAEScript_ExporterProp ep = EXPORTERPROP_LOOPCOUNT;
+
+    if (tok.type == TOK_IDENT) {
+        if (strcmp(tok.value.str, "loopcount") != 0)
+            parser_error(p, "Expected exporter property: loopcount");
+    } else {
+        parser_error(p, "Expected exporter property name");
+    }
+
+    BAEScript_Node *n = new_node(NODE_EXPORTER_PROP, line);
+    n->data.exporter_prop = ep;
+    return n;
+}
+
 /* noteOn(ch, note, vel)  or  noteOff(ch, note, vel) */
 static BAEScript_Node *parse_note_cmd(Parser *p, BAEScript_NodeType type)
 {
@@ -333,6 +354,12 @@ static BAEScript_Node *parse_primary(Parser *p)
     if (parser_check(p, TOK_MIXER)) {
         parser_advance(p);
         return parse_mixer_access(p);
+    }
+
+    /* exporter.prop */
+    if (parser_check(p, TOK_EXPORTER)) {
+        parser_advance(p);
+        return parse_exporter_access(p);
     }
 
     /* identifier (variable or noteOn/noteOff) */
@@ -839,6 +866,28 @@ static BAEScript_Node *parse_statement(Parser *p)
         }
     }
 
+    /* exporter.loopcount = expr; */
+    if (parser_check(p, TOK_EXPORTER)) {
+        int line = p->current.line;
+        parser_advance(p); /* consume 'exporter' */
+        BAEScript_Node *rd = parse_exporter_access(p);
+        BAEScript_ExporterProp ep = rd->data.exporter_prop;
+        if (parser_match(p, TOK_ASSIGN)) {
+            BAEScript_Node *val = parse_expr(p);
+            parser_expect(p, TOK_SEMICOLON, "Expected ';'");
+            BAEScript_Node *n = new_node(NODE_EXPORTER_PROP_SET, line);
+            n->data.exporter_prop_set.prop  = ep;
+            n->data.exporter_prop_set.value = val;
+            free(rd);
+            return n;
+        } else {
+            parser_expect(p, TOK_SEMICOLON, "Expected ';'");
+            BAEScript_Node *n = new_node(NODE_EXPR_STMT, line);
+            n->data.expr = rd;
+            return n;
+        }
+    }
+
     /* ch[expr].prop = expr; */
     if (parser_check(p, TOK_CH)) {
         /* Could be either read (expression statement) or write (assignment).
@@ -1000,6 +1049,10 @@ void BAEScript_FreeNode(BAEScript_Node *node)
             BAEScript_FreeNode(node->data.mixer_prop_set.value);
             break;
 
+        case NODE_EXPORTER_PROP_SET:
+            BAEScript_FreeNode(node->data.exporter_prop_set.value);
+            break;
+
         case NODE_EVENT_DECL:
             BAEScript_FreeNode(node->data.event_decl.body);
             break;
@@ -1014,6 +1067,7 @@ void BAEScript_FreeNode(BAEScript_Node *node)
         case NODE_IDENT:
         case NODE_MIDI_PROP:
         case NODE_MIXER_PROP:
+        case NODE_EXPORTER_PROP:
         case NODE_MIDI_STOP:
         case NODE_MIDI_ALL_NOTES_OFF:
         case NODE_MIXER_RESET:

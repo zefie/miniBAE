@@ -1,0 +1,3 @@
+on.script({
+    exporter.loopcount = 2;
+});

@@ -141,6 +141,24 @@ void BAEScript_SetExporting(BAEScript_Context *ctx, int exporting)
     if (ctx) ctx->exporting = exporting;
 }
 
+#if BAESCRIPT_EXPORTER_LOOPCOUNT == TRUE
+void BAEScript_ResetExporterOptions(BAEScript_Context *ctx)
+{
+    if (!ctx) return;
+    ctx->exporter_loopcount = 0;
+    ctx->exporter_loopcount_set = 0;
+    /* Export may reuse the same bound song; allow on.script to fire again. */
+    ctx->script_event_fired = 0;
+}
+
+int BAEScript_GetExporterLoopCount(BAEScript_Context *ctx, int *outLoopCount)
+{
+    if (!ctx || !outLoopCount || !ctx->exporter_loopcount_set) return 0;
+    *outLoopCount = ctx->exporter_loopcount;
+    return 1;
+}
+#endif
+
 /* ── Execute one tick ──────────────────────────────────────────────── */
 
 void BAEScript_Tick(BAEScript_Context *ctx,

@@ -1300,6 +1300,25 @@ void script_editor_tick(void)
     BAEScript_Tick(g_script_ctx, pos_ms, len_ms);
 }
 
+void script_editor_reset_exporter_options(void)
+{
+    if (!g_script_ctx) return;
+#if BAESCRIPT_EXPORTER_LOOPCOUNT == TRUE
+    BAEScript_ResetExporterOptions(g_script_ctx);
+#endif
+}
+
+bool script_editor_get_exporter_loopcount(int *outLoopCount)
+{
+    if (!g_script_enabled || !g_script_ctx || !outLoopCount) return false;
+#if BAESCRIPT_EXPORTER_LOOPCOUNT == TRUE
+    return BAEScript_GetExporterLoopCount(g_script_ctx, outLoopCount) ? true : false;
+#else
+    (void)outLoopCount;
+    return false;
+#endif
+}
+
 /* ── Event handling ────────────────────────────────────────────────── */
 
 bool script_editor_handle_event(SDL_Event *event)

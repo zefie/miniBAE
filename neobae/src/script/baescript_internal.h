@@ -56,6 +56,7 @@ typedef enum {
     TOK_CH,             /* ch                               */
     TOK_MIDI,           /* midi                             */
     TOK_MIXER,          /* mixer                            */
+    TOK_EXPORTER,       /* exporter                         */
 
     /* operators */
     TOK_PLUS,           /* +  */
@@ -141,6 +142,8 @@ typedef enum {
     NODE_MIDI_PROP_SET,     /* midi.property = expr (write)     */
     NODE_MIXER_PROP,        /* mixer.property (read)            */
     NODE_MIXER_PROP_SET,    /* mixer.property = expr (write)    */
+    NODE_EXPORTER_PROP,     /* exporter.property (read)         */
+    NODE_EXPORTER_PROP_SET, /* exporter.property = expr (write) */
     NODE_MIXER_RESET,       /* mixer.reset()                    */
     NODE_NOTE_ON,           /* noteOn(ch, note, vel)            */
     NODE_NOTE_OFF,          /* noteOff(ch, note, vel)           */
@@ -194,6 +197,10 @@ typedef enum {
     MIXERPROP_REVERBTYPE,
     MIXERPROP_VOICES,
 } BAEScript_MixerProp;
+
+typedef enum {
+    EXPORTERPROP_LOOPCOUNT,
+} BAEScript_ExporterProp;
 
 typedef enum {
     FUNC_ABS,
@@ -263,6 +270,12 @@ struct BAEScript_Node {
         /* NODE_MIXER_PROP_SET (write) */
         struct { BAEScript_MixerProp prop; BAEScript_Node *value; } mixer_prop_set;
 
+        /* NODE_EXPORTER_PROP */
+        BAEScript_ExporterProp exporter_prop;
+
+        /* NODE_EXPORTER_PROP_SET (write) */
+        struct { BAEScript_ExporterProp prop; BAEScript_Node *value; } exporter_prop_set;
+
         /* NODE_NOTE_ON / NODE_NOTE_OFF */
         struct { BAEScript_Node *channel; BAEScript_Node *note; BAEScript_Node *velocity; } note_cmd;
 
@@ -314,6 +327,8 @@ struct BAEScript_Context {
     uint32_t          prev_tick_pos;
     int               self_seek_this_tick;
     int               last_self_seek;
+    int               exporter_loopcount;
+    int               exporter_loopcount_set;
 };
 
 /* Evaluate a node tree; returns the result as int32_t */
