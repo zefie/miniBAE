@@ -1772,6 +1772,67 @@ void PV_FreePatchInfo(GM_Song *pSong)
 
 static int16_t PV_ConvertPatchBank(GM_Song *pSong, int16_t thePatch, int16_t theChannel);
 
+// Returns TRUE when a requested patch should be rendered by RMF/ZMF built-in content
+// (embedded instrument or explicit song remap/override), even if SF2 mode is active.
+static bool PV_ShouldUseRMFInstrumentForPatch(GM_Song *pSong, int16_t patch)
+{
+    XLongResourceID remapped;
+    uint32_t bankId, progId, noteId;
+
+    if (!pSong || !(pSong->songFlags & SONG_FLAG_IS_RMF))
+    {
+        return FALSE;
+    }
+    if (patch < 0 || patch >= (MAX_INSTRUMENTS * MAX_BANKS))
+    {
+        return FALSE;
+    }
+
+    remapped = (XLongResourceID)patch;
+    if (GM_GetSongInstrumentRemap(pSong, (XLongResourceID)patch, &remapped) != NO_ERR)
+    {
+        remapped = (XLongResourceID)patch;
+    }
+
+    // Explicit song remap/alias means this patch is an RMF override target.
+    if ((int16_t)remapped != patch)
+    {
+        return TRUE;
+    }
+
+    // If either direct or remapped slot is loaded natively, prefer RMF path.
+    if (pSong->instrumentData[patch] != NULL)
+    {
+        return TRUE;
+    }
+    if (remapped >= 0 && remapped < (MAX_INSTRUMENTS * MAX_BANKS) && pSong->instrumentData[remapped] != NULL)
+    {
+        return TRUE;
+    }
+
+    // Keep legacy compatibility: bank 1/2 requests are RMF banks.
+    bankId = 0;
+    progId = 0;
+    noteId = 0;
+    TranslateInstrumentToBankProgram((uint32_t)patch, &bankId, &progId, &noteId);
+    if (bankId == 1 || bankId == 2)
+    {
+        return TRUE;
+    }
+
+    // RMF declared instrument list can contain the original or resolved patch IDs.
+    for (uint32_t i = 1; i <= pSong->RMFInstrumentIDs[0]; i++)
+    {
+        if (pSong->RMFInstrumentIDs[i] == (uint32_t)patch ||
+            pSong->RMFInstrumentIDs[i] == (uint32_t)remapped)
+        {
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
 // Process midi program change
 static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTrack, int16_t program)
 {
@@ -1795,25 +1856,8 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
 
 
             if (pSong->songFlags & SONG_FLAG_IS_RMF) {
-                uint32_t bankId, progId = 0, noteId = 0;
                 int16_t thePatch = PV_ConvertPatchBank(pSong, program, MIDIChannel);                      
-                bool foundPatch = FALSE;
-                for (uint32_t i = 1; i <= pSong->RMFInstrumentIDs[0]; i++)
-                {
-                    if (pSong->RMFInstrumentIDs[i] == thePatch || pSong->RMFInstrumentIDs[i] == progId)
-                    {
-                        foundPatch = TRUE;
-                        break;
-                    }
-                    for (uint32_t j = 0; j < MAX_CHANNELS; j++) {
-                        if (pSong->channelProgram[MIDIChannel] == pSong->RMFInstrumentIDs[i]) {
-                            foundPatch = TRUE;
-                            break;
-                        }
-                    }
-                }
-
-                if (foundPatch || bankId == 1 || bankId == 2 || thePatch >= 128) {
+                if (PV_ShouldUseRMFInstrumentForPatch(pSong, thePatch)) {
                     pSong->channelType[MIDIChannel] = CHANNEL_TYPE_RMF;
                 } else {
                     pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
@@ -2130,31 +2174,9 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                     }
                     uint32_t bankId = 0, progId = 0, noteId = 0;
                     if (pSong->songFlags & SONG_FLAG_IS_RMF) {
-                        int16_t thePatch = PV_ConvertPatchBank(pSong, note, MIDIChannel);
+                        int16_t thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
                         TranslateInstrumentToBankProgram(thePatch, &bankId, &progId, &noteId);                        
-                        bool foundPatch = FALSE;
-                        for (uint32_t i = 1; i <= pSong->RMFInstrumentIDs[0]; i++)
-                        {
-                            if (pSong->RMFInstrumentIDs[i] == thePatch || pSong->RMFInstrumentIDs[i] == progId)
-                            {
-                                foundPatch = TRUE;
-                                break;
-                            }
-                            for (uint32_t j = 0; j < MAX_CHANNELS; j++) {
-                                if (pSong->channelProgram[MIDIChannel] == pSong->RMFInstrumentIDs[i]) {
-                                    foundPatch = TRUE;
-                                    break;
-                                }
-                            }
-                        }
-                        if (!foundPatch && ((thePatch >=  384 && thePatch < 512) || (thePatch >= 640 && thePatch < 768)))
-                        {
-                            // The patch ID matches a known beatnik percussion instrument
-                            // either MSB 1 or 2
-                            foundPatch = TRUE;
-                        }
-
-                        if (foundPatch || bankId == 1 || bankId == 2) {
+                        if (PV_ShouldUseRMFInstrumentForPatch(pSong, thePatch)) {
                             pSong->channelType[MIDIChannel] = CHANNEL_TYPE_RMF;
                         } else {
                             pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
