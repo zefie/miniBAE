@@ -1269,7 +1269,7 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
             draw_text(R, dlg.x + pad, y, renderer, g_text_color);
             y += 18;
         }
-        draw_text(R, dlg.x + pad, y, "(C) 2026 Zefie Networks", g_text_color);
+        draw_text(R, dlg.x + pad, y, "(C) 2021-2026 Zefie Networks", g_text_color);
         y += 18;
         const char *urls[] = {"https://www.soundmusicsys.com/", "https://github.com/zefie/NeoBAE/", NULL};
         for (int i = 0; urls[i]; ++i)

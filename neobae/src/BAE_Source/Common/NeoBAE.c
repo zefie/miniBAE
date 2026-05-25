@@ -180,6 +180,18 @@
 #endif
 #endif
 
+#if USE_VORBIS_DECODER == TRUE || USE_VORBIS_ENCODER == TRUE
+#include "vorbis/codec.h"
+#endif
+
+#if USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE
+#include "opus/opus.h"
+#endif
+
+#if USE_MPEG_ENCODER == TRUE
+#include <lame/lame.h>
+#endif
+
 #ifndef BAE_DISABLE_ROLLED_MIDI_DETECTION
 #define BAE_DISABLE_ROLLED_MIDI_DETECTION FALSE
 #endif
@@ -2006,6 +2018,12 @@ const char *BAE_GetFeatureString()
     const char *audio = "raylib";
 #elif (X_PLATFORM == X_WIN95)
     const char *audio = "DirectSound";
+#elif (X_PLATFORM == X_DUMMY)
+    const char *audio = "None (Dummy)";
+#elif (X_PLATFORM == X_ANDROID)
+    const char *audio = "Android Subsystem";    
+#elif (X_PLATFORM == X_FOOBAR2000_PLUGIN)
+    const char *audio = "Foobar2000";
 #else
     const char *audio = NULL;
 #endif
@@ -2025,68 +2043,116 @@ const char *BAE_GetFeatureString()
     }
 #endif
 
-#if USE_XMF_SUPPORT == TRUE
-    const char *xmf = "XMF Support";
-    if (xmf && xmf[0])
+#if SUPPORT_KARAOKE == TRUE
+    const char *karaoke = "Karaoke Support";
+#else
+    const char *karaoke = "No Karaoke Support";
+#endif
+    if (karaoke && karaoke[0])
     {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", xmf);
+        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", karaoke);
         first = FALSE;
     }
-#endif
-
-#if USE_ZMF_SUPPORT == TRUE
-    const char *zmf = "ZMF Support";
-    if (zmf && zmf[0])
-    {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", zmf);
-        first = FALSE;
-    }
-#endif
-
-#if USE_MTHC_SUPPORT == TRUE
-    const char *mthc = "Nokia Compressed MIDI (MThc) Support";
-    if (mthc && mthc[0])
-    {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", mthc);
-        first = FALSE;
-    }
-#endif
-
-#if USE_ADP_SUPPORT == TRUE
-    const char *adp = "Nokia ADP Support";
-    if (adp && adp[0])
-    {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", adp);
-        first = FALSE;
-    }
-#endif
-
-#if USE_RETRO_RINGTONE_SUPPORT == TRUE
-    const char *rtx = "Nokia Monophonic Ringtone Support";
-    if (rtx && rtx[0])
-    {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", rtx);
-        first = FALSE;
-    }
-#endif
 
 #if USE_RMI_SUPPORT == TRUE
-    const char *rmi = "RMI File Support";
+    const char *rmi = "RMI Support";
+#else
+    const char *rmi = "No RMI Support";    
+#endif
     if (rmi && rmi[0])
     {
         snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", rmi);
         first = FALSE;
     }
+        
+#if USE_XMF_SUPPORT == TRUE
+    const char *xmf = "XMF Support";
+#else
+    const char *xmf = "No XMF Support";    
 #endif
+
+    if (xmf && xmf[0])
+    {
+        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", xmf);
+        first = FALSE;
+    }
+
+#if USE_ZMF_SUPPORT == TRUE
+    const char *zmf = "ZMF Support";
+#else
+    const char *zmf = "No ZMF Support";
+#endif    
+    if (zmf && zmf[0])
+    {
+        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", zmf);
+        first = FALSE;
+    }
+
+
+#if USE_MTHC_SUPPORT == TRUE
+    const char *mthc = "Compressed MIDI (MThc)";
+#else
+    const char *mthc = NULL;
+#endif
+
+#if USE_ADP_SUPPORT == TRUE
+    const char *adp = "ADP";
+#else
+    const char *adp = NULL;
+#endif
+
+#if USE_RETRO_RINGTONE_SUPPORT == TRUE
+    const char *rtx = "Monophonic Ringtones";
+#else
+    const char *rtx = NULL;
+#endif
+
+#if DISABLE_NOKIA_PATCH == FALSE
+    const char *nokia_patch = "Mute Ring Instrument";
+#else
+    const char *nokia_patch = NULL;
+#endif
+
+if ((rtx && rtx[0]) || (adp && adp[0]) || (mthc && mthc[0]) || (nokia_patch && nokia_patch[0])) {
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", "Nokia Features (");
+}
+if (rtx && rtx[0])
+{
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : "", rtx);
+    first = FALSE;
+}
+
+if (adp && adp[0])
+{
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : (rtx && rtx[0]) ? ", " : "", adp);
+    first = FALSE;
+}
+
+if (mthc && mthc[0])
+{
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : (rtx && rtx[0]) || (adp && adp[0]) ? ", " : "", mthc);
+    first = FALSE;
+}
+
+if (nokia_patch && nokia_patch[0])
+{
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : (rtx && rtx[0]) || (adp && adp[0]) || (mthc && mthc[0]) ? ", " : "", nokia_patch);
+    first = FALSE;
+}
+
+snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", (rtx && rtx[0]) || (adp && adp[0]) || (mthc && mthc[0]) || (nokia_patch && nokia_patch[0]) ? ")" : "", "");
+
 
 #if USE_QOA_SUPPORT == TRUE
     const char *qoa = "QOA (Quite OK Audio) Support";
+#else
+    const char *qoa = "No QOA (Quite OK Audio) Support";
+#endif    
     if (qoa && qoa[0])
     {
         snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", qoa);
         first = FALSE;
     }
-#endif  
 
     // SF2 support
 #if _USING_FLUIDSYNTH == TRUE
@@ -2121,22 +2187,6 @@ const char *BAE_GetFeatureString()
         first = FALSE;
     }
 
-#if SUPPORT_KARAOKE == TRUE
-    const char *karaoke = "Karaoke Support";
-    if (karaoke && karaoke[0])
-    {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", karaoke);
-        first = FALSE;
-    }
-#else
-    const char *karaoke = "No Karaoke Support";
-    if (karaoke && karaoke[0])
-    {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", karaoke);
-        first = FALSE;
-    }
-#endif
-
     // Playlist support
 #if _ZEFI_GUI == TRUE
 #if SUPPORT_PLAYLIST == TRUE
@@ -2166,11 +2216,15 @@ const char *BAE_GetFeatureString()
     // MP3 support
 
 #if USE_MPEG_DECODER == TRUE && USE_MPEG_ENCODER == TRUE
-    const char *mp3 = "Full MP3 Support";
+    const char *lame_version = get_lame_version();
+    static char mp3[64];
+    snprintf(mp3, sizeof(mp3), "Full MP3 Support (LAME v%s)", lame_version);
 #elif USE_MPEG_DECODER == TRUE && USE_MPEG_ENCODER != TRUE
     const char *mp3 = "MP3 Decoder Support";
 #elif USE_MPEG_DECODER != TRUE && USE_MPEG_ENCODER == TRUE
-    const char *mp3 = "MP3 Encoder Support";
+    const char *lame_version = get_lame_version();
+    static char mp3[64];
+    snprintf(mp3, sizeof(mp3), "MP3 Encoder Support (LAME v%s)", lame_version);
 #else
     const char *mp3 = "No MP3 Support";
 #endif
@@ -2183,11 +2237,14 @@ const char *BAE_GetFeatureString()
 
     // FLAC support
 #if USE_FLAC_DECODER == TRUE && USE_FLAC_ENCODER == TRUE
-    const char *flac = "Full FLAC Support";
+    static char flac[64];
+    snprintf(flac, sizeof(flac), "Full FLAC Support (v%s)", FLAC__VERSION_STRING );
 #elif USE_FLAC_DECODER == TRUE && USE_FLAC_ENCODER != TRUE
-    const char *flac = "FLAC Decoder Support";
+    static char flac[64];
+    snprintf(flac, sizeof(flac), "FLAC Decoder Support (v%s)", FLAC__VERSION_STRING);
 #elif USE_FLAC_DECODER != TRUE && USE_FLAC_ENCODER == TRUE
-    const char *flac = "FLAC Encoder Support";
+    static char flac[64];
+    snprintf(flac, sizeof(flac), "FLAC Encoder Support (v%s)", FLAC__VERSION_STRING);
 #else
     const char *flac = "No FLAC Support";
 #endif
@@ -2199,11 +2256,23 @@ const char *BAE_GetFeatureString()
 
     // Vorbis support
 #if USE_VORBIS_DECODER == TRUE && USE_VORBIS_ENCODER == TRUE
-    const char *vorbis = "Full Vorbis Support";
+    const char *vorbis_version_full = vorbis_version_string();
+    const char *vorbis_p = strrchr(vorbis_version_full, ' ');
+    const char *vorbis_version = vorbis_p ? vorbis_p + 1 : vorbis_version_full;
+    static char vorbis[64];
+    snprintf(vorbis, sizeof(vorbis), "Full Vorbis Support (v%s)", vorbis_version);
 #elif USE_VORBIS_DECODER == TRUE && USE_VORBIS_ENCODER != TRUE
-    const char *vorbis = "Vorbis Decoder Support";
+    const char *vorbis_version_full = vorbis_version_string();
+    const char *vorbis_p = strrchr(vorbis_version_full, ' ');
+    const char *vorbis_version = vorbis_p ? vorbis_p + 1 : vorbis_version_full;
+    static char vorbis[64];
+    snprintf(vorbis, sizeof(vorbis), "Vorbis Decoder Support (v%s)", vorbis_version);
 #elif USE_VORBIS_DECODER != TRUE && USE_VORBIS_ENCODER == TRUE
-    const char *vorbis = "Vorbis Encoder Support";
+    const char *vorbis_version_full = vorbis_version_string();
+    const char *vorbis_p = strrchr(vorbis_version_full, ' ');
+    const char *vorbis_version = vorbis_p ? vorbis_p + 1 : vorbis_version_full;
+    static char vorbis[64];
+    snprintf(vorbis, sizeof(vorbis), "Vorbis Encoder Support (v%s)", vorbis_version);
 #else
     const char *vorbis = "No Vorbis Support";
 #endif
@@ -2219,11 +2288,23 @@ const char *BAE_GetFeatureString()
 
     // Opus support
 #if USE_OPUS_DECODER == TRUE && USE_OPUS_ENCODER == TRUE
-    const char *opus = "Full Opus Support";
+    const char *opus_version_full = opus_get_version_string();
+    const char *opus_p = strrchr(opus_version_full, ' ');
+    const char *opus_version = opus_p ? opus_p + 1 : opus_version_full;
+    static char opus[64];
+    snprintf(opus, sizeof(opus), "Full Opus Support (v%s)", opus_version);
 #elif USE_OPUS_DECODER == TRUE && USE_OPUS_ENCODER != TRUE
-    const char *opus = "Opus Decoder Support";
+    const char *opus_version_full = opus_get_version_string();
+    const char *opus_p = strrchr(opus_version_full, ' ');
+    const char *opus_version = opus_p ? opus_p + 1 : opus_version_full;
+    static char opus[64];
+    snprintf(opus, sizeof(opus), "Opus Decoder Support (v%s)", opus_version);
 #elif USE_OPUS_DECODER != TRUE && USE_OPUS_ENCODER == TRUE
-    const char *opus = "Opus Encoder Support";
+    const char *opus_version_full = opus_get_version_string();
+    const char *opus_p = strrchr(opus_version_full, ' ');
+    const char *opus_version = opus_p ? opus_p + 1 : opus_version_full;
+    static char opus[64];
+    snprintf(opus, sizeof(opus), "Opus Encoder Support (v%s)", opus_version);
 #else
     const char *opus = "No Opus Support";
 #endif
@@ -2241,7 +2322,7 @@ const char *BAE_GetFeatureString()
 }
 
 const char *BAE_GetCurrentCPUArchitecture()
-{ // Get current architecture, detects many architectures. Coded by Freak. Modified to append -SDL when built for SDL2.
+{ // Get current architecture, detects many architectures. Coded by Freak.
   // Append suffix at compile time without allocating new memory.
 #if defined(__x86_64__) || defined(_M_X64)
     return "x86_64";
