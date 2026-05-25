@@ -473,7 +473,7 @@ int midi_service_thread_fn(void *unused)
 {
     (void)unused;
     // Avoid CPU spin: short sleep when idle
-    const Uint32 idle_sleep_ms = 2;
+    const Uint32 idle_sleep_ms = 1;
     while (!g_midi_service_quit)
     {
         if (!(g_midi_input_enabled))

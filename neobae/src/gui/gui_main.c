@@ -2277,10 +2277,6 @@ int main(int argc, char *argv[])
         {
             g_progress_display_tick_ms = 0;
         }
-        if (!g_exporting) {
-            BAEMixer_Idle(g_bae.mixer); // ensure processing if needed
-            bae_update_channel_mutes(ch_enable);
-        }
 #ifdef SUPPORT_MIDI_HW
         // Publish current channel enables to the MIDI thread (plain byte store is fine)
         for (int _ci = 0; _ci < BAE_MAX_MIDI_CHANNELS; ++_ci)
@@ -2508,6 +2504,12 @@ int main(int argc, char *argv[])
 #undef FORWARD_OUT
             }
 #endif
+        }
+
+        if (!g_exporting) {
+            // Run the mixer after MIDI input is queued so short notes are processed in the same frame.
+            BAEMixer_Idle(g_bae.mixer);
+            bae_update_channel_mutes(ch_enable);
         }
 
         // Check for end-of-playback to update UI state correctly. We removed the
