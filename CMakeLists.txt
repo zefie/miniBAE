@@ -151,6 +151,7 @@ option(BAE_DISABLE_EMBED_FONT "Disable embedded GUI font" OFF)
 option(BAE_DISABLE_RETRO_RINGTONE_SUPPORT "Disable retro mobile ringtone format support (IMY/EMY/RNG/RTX/RTTTL)" OFF)
 option(BAE_DISABLE_QOA_SUPPORT "Disable QOA codec support" OFF)
 option(BAE_DISABLE_RMI_SUPPORT "Disable RMI support" OFF)
+option(BAE_DISABLE_ROLLED_MIDI_UNROLLING "Disable unrolling of rolled MIDI files" OFF)
 set(BAE_EMBED_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/banks/patches111/patches111.hsb" CACHE FILEPATH "HSB bank file to embed as built-in patches (empty disables embedding)")
 set(BAE_EMBED_TTF_FILE "src/thirdparty/fonts/HelveticaNeue.ttf" CACHE FILEPATH "TTF font file to embed for zefidi GUI use (empty disables embedding)")
 option(BUILD_PLAYBAE "Build playbae when a non-Dummy/non-Ansi backend is selected" ON)
@@ -194,7 +195,7 @@ set(BAE_ENABLE_EMBED_FONT ON)
 set(BAE_ENABLE_RETRO_RINGTONE_SUPPORT ON)
 set(BAE_ENABLE_QOA_SUPPORT ON)
 set(BAE_ENABLE_RMI_SUPPORT ON)
-
+set(BAE_ENABLE_ROLLED_MIDI_UNROLL ON)
 if(BAE_DISABLE_RMF_EDITOR)
   set(BAE_ENABLE_RMF_EDITOR OFF)
   message(STATUS "Disabling RMF/ZMF Creation API Support")
@@ -313,6 +314,9 @@ if(BAE_DISABLE_EMBED_FONT)
 endif()
 if(BAE_DISABLE_RMI_SUPPORT)
   set(BAE_ENABLE_RMI_SUPPORT OFF)
+endif()
+if(BAE_DISABLE_ROLLED_MIDI_UNROLL)
+  set(BAE_ENABLE_ROLLED_MIDI_UNROLL OFF)
 endif()
 
 set(BAE_EMBED_PATCHES_EFFECTIVE OFF)
@@ -1388,6 +1392,7 @@ target_compile_definitions(neobae
     USE_RETRO_RINGTONE_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_RETRO_RINGTONE_SUPPORT}>,1,0>
     USE_QOA_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_QOA_SUPPORT}>,1,0>
     USE_RMI_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_RMI_SUPPORT}>,1,0>
+    BAE_ENABLE_ROLLED_MIDI_UNROLL=$<IF:$<BOOL:${BAE_ENABLE_ROLLED_MIDI_UNROLL}>,1,0>
 )
 
 target_compile_options(neobae PRIVATE -w)

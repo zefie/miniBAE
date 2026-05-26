@@ -43,6 +43,18 @@
 #define SONGTOOL_MAX_METADATA_EDITS 128
 #define SONGTOOL_MAX_RESAMPLE_TARGETS 4096
 
+#ifndef SONGTOOL_ENABLE_MIDI_EXPORT
+#define SONGTOOL_ENABLE_MIDI_EXPORT 1
+#endif
+
+#ifndef SONGTOOL_ENABLE_ROLLED_MIDI_UNROLL
+#if defined(BAE_ENABLE_ROLLED_MIDI_UNROLL)
+#define SONGTOOL_ENABLE_ROLLED_MIDI_UNROLL BAE_ENABLE_ROLLED_MIDI_UNROLL
+#else
+#define SONGTOOL_ENABLE_ROLLED_MIDI_UNROLL 0
+#endif
+#endif
+
 typedef struct SongtoolSampleOverride
 {
     uint32_t sampleIndex;
@@ -221,7 +233,7 @@ static int apply_metadata_edits(BAERmfEditorDocument *document,
 static void print_usage(const char *program_name)
 {
     fprintf(stderr,
-            "Usage: %s [options] <source.rmf|source.zmf> [dest.rmf|dest.zmf]\n"
+            "Usage: %s [options] <source.rmf|source.zmf> [dest.rmf|dest.zmf|dest.mid]\n"
             "\n"
             "Options:\n"
             "  --info               Show source info (title, song length, codecs, loop points)\n"
@@ -246,6 +258,7 @@ static void print_usage(const char *program_name)
             "  --loop-count N        Loop count (-1=forever, default: -1)\n"
             "  --disable-loop        Disable MIDI loop markers\n"
             "  --trim N              Trim MIDI timeline to N (ms by default, or +N for ticks)\n"
+            "  --unroll              Expand Beatnik/WebTV rolled MIDI loop playback to linear MIDI\n"
             "  --codecs              List available codecs and bitrates\n"
             "  --help, -h            Show this help\n",
             program_name);
@@ -274,6 +287,273 @@ static int is_zmf_path(const char *path)
     ext = strrchr(path, '.');
     return (ext && (!strcmp(ext, ".zmf") || !strcmp(ext, ".ZMF"))) ? 1 : 0;
 }
+
+static int is_midi_path(const char *path)
+{
+    const char *ext;
+
+    if (!path)
+    {
+        return 0;
+    }
+
+    ext = strrchr(path, '.');
+    if (!ext)
+    {
+        return 0;
+    }
+
+    if (songtool_str_equal_ignore_case(ext, ".mid") ||
+        songtool_str_equal_ignore_case(ext, ".midi"))
+    {
+        return 1;
+    }
+
+    return 0;
+}
+
+static int read_file_bytes(const char *path, unsigned char **outData, uint32_t *outSize)
+{
+    FILE *f;
+    long fileSize;
+    unsigned char *data;
+    size_t bytesRead;
+
+    if (!path || !outData || !outSize)
+    {
+        return 0;
+    }
+
+    *outData = NULL;
+    *outSize = 0;
+
+    f = fopen(path, "rb");
+    if (!f)
+    {
+        return 0;
+    }
+
+    if (fseek(f, 0, SEEK_END) != 0)
+    {
+        fclose(f);
+        return 0;
+    }
+
+    fileSize = ftell(f);
+    if (fileSize <= 0)
+    {
+        fclose(f);
+        return 0;
+    }
+    if ((uint64_t)fileSize > 0xFFFFFFFFULL)
+    {
+        fclose(f);
+        return 0;
+    }
+
+    if (fseek(f, 0, SEEK_SET) != 0)
+    {
+        fclose(f);
+        return 0;
+    }
+
+    data = (unsigned char *)malloc((size_t)fileSize);
+    if (!data)
+    {
+        fclose(f);
+        return 0;
+    }
+
+    bytesRead = fread(data, 1, (size_t)fileSize, f);
+    fclose(f);
+    if (bytesRead != (size_t)fileSize)
+    {
+        free(data);
+        return 0;
+    }
+
+    *outData = data;
+    *outSize = (uint32_t)fileSize;
+    return 1;
+}
+
+static int write_file_bytes(const char *path, unsigned char const *data, uint32_t size)
+{
+    FILE *f;
+    size_t bytesWritten;
+
+    if (!path || !data || size == 0)
+    {
+        return 0;
+    }
+
+    f = fopen(path, "wb");
+    if (!f)
+    {
+        return 0;
+    }
+
+    bytesWritten = fwrite(data, 1, (size_t)size, f);
+    fclose(f);
+    return (bytesWritten == (size_t)size) ? 1 : 0;
+}
+
+static int build_temp_midi_path(const char *destPath, char *outPath, size_t outPathSize)
+{
+    int written;
+
+    if (!destPath || !outPath || outPathSize == 0)
+    {
+        return 0;
+    }
+
+    written = snprintf(outPath,
+                       outPathSize,
+                       "%s.songtool-unroll.tmp.mid",
+                       destPath);
+    if (written <= 0 || (size_t)written >= outPathSize)
+    {
+        return 0;
+    }
+
+    return 1;
+}
+
+#if SONGTOOL_ENABLE_ROLLED_MIDI_UNROLL == 1
+static int unroll_midi_file_in_place(const char *path)
+{
+    unsigned char *srcMidi;
+    uint32_t srcMidiSize;
+    unsigned char *unrolledMidi;
+    uint32_t unrolledMidiSize;
+    BAE_BOOL wasRolled;
+    BAEResult result;
+
+    srcMidi = NULL;
+    srcMidiSize = 0;
+    unrolledMidi = NULL;
+    unrolledMidiSize = 0;
+    wasRolled = FALSE;
+
+    if (!path)
+    {
+        return 0;
+    }
+
+    if (!read_file_bytes(path, &srcMidi, &srcMidiSize))
+    {
+        fprintf(stderr, "Error: failed to read MIDI output for unroll: %s\n", path);
+        return 0;
+    }
+
+    result = BAEUtil_UnrollRolledMidiFromMemory(srcMidi,
+                                                srcMidiSize,
+                                                BAE_UNROLL_MIDI_OPTION_SPLIT_INSTRUMENTS,
+                                                &unrolledMidi,
+                                                &unrolledMidiSize,
+                                                &wasRolled);
+    free(srcMidi);
+
+    if (result != BAE_NO_ERROR)
+    {
+        fprintf(stderr, "Error: MIDI unroll failed (%d)\n", (int)result);
+        if (unrolledMidi)
+        {
+            BAERingtone_FreeMidiBuffer(unrolledMidi);
+        }
+        return 0;
+    }
+
+    if (!wasRolled || !unrolledMidi || unrolledMidiSize == 0)
+    {
+        if (unrolledMidi)
+        {
+            BAERingtone_FreeMidiBuffer(unrolledMidi);
+        }
+        fprintf(stderr, "Error: --unroll requested but no rolled MIDI loop controls were detected\n");
+        return 0;
+    }
+
+    if (!write_file_bytes(path, unrolledMidi, unrolledMidiSize))
+    {
+        fprintf(stderr, "Error: failed to write unrolled MIDI: %s\n", path);
+        BAERingtone_FreeMidiBuffer(unrolledMidi);
+        return 0;
+    }
+
+    fprintf(stderr,
+            "Unroll: expanded rolled MIDI (%u -> %u bytes)\n",
+            (unsigned)srcMidiSize,
+            (unsigned)unrolledMidiSize);
+    BAERingtone_FreeMidiBuffer(unrolledMidi);
+    return 1;
+}
+
+static int apply_unroll_to_document(BAERmfEditorDocument **ioDocument,
+                                    const char *destPath)
+{
+    BAERmfEditorDocument *document;
+    BAERmfEditorDocument *unrolledDocument;
+    BAEResult result;
+    char tempMidiPath[4096];
+
+    if (!ioDocument || !*ioDocument || !destPath)
+    {
+        return 0;
+    }
+
+    document = *ioDocument;
+    unrolledDocument = NULL;
+
+    if (!BAERmfEditorDocument_CanSaveAsMidi(document))
+    {
+        fprintf(stderr,
+                "Error: cannot apply --unroll because this document cannot be represented as standard MIDI\n");
+        return 0;
+    }
+
+    if (!build_temp_midi_path(destPath, tempMidiPath, sizeof(tempMidiPath)))
+    {
+        fprintf(stderr, "Error: failed to build temporary path for MIDI unroll\n");
+        return 0;
+    }
+
+    result = BAERmfEditorDocument_SaveAsMidi(document, (BAEPathName)tempMidiPath);
+    if (result != BAE_NO_ERROR)
+    {
+        fprintf(stderr, "Error: failed to create temporary MIDI for unroll (%d)\n", (int)result);
+        return 0;
+    }
+
+    if (!unroll_midi_file_in_place(tempMidiPath))
+    {
+        remove(tempMidiPath);
+        return 0;
+    }
+
+    unrolledDocument = BAERmfEditorDocument_LoadFromFile((BAEPathName)tempMidiPath);
+    remove(tempMidiPath);
+    if (!unrolledDocument)
+    {
+        fprintf(stderr, "Error: failed to reload unrolled MIDI into editor document\n");
+        return 0;
+    }
+
+    result = BAERmfEditorDocument_CopySamplesFrom(unrolledDocument, document);
+    if (result != BAE_NO_ERROR)
+    {
+        fprintf(stderr,
+                "Error: failed to copy RMF/ZMF samples after MIDI unroll (%d)\n",
+                (int)result);
+        BAERmfEditorDocument_Delete(unrolledDocument);
+        return 0;
+    }
+
+    BAERmfEditorDocument_Delete(document);
+    *ioDocument = unrolledDocument;
+    return 1;
+}
+#endif
 
 static uint32_t clamp_u64_to_u32(uint64_t v)
 {
@@ -2113,6 +2393,8 @@ int main(int argc, char *argv[])
     int requiresZmf;
     BAERmfEditorSndStorageType storageType;
     int preserveMidi;
+    int doUnroll;
+    int outputAsMidi;
 
     sourcePath = NULL;
     destPath = NULL;
@@ -2146,6 +2428,8 @@ int main(int argc, char *argv[])
     requiresZmf = 0;
     storageType = BAE_EDITOR_SND_STORAGE_ESND;
     preserveMidi = 0;
+    doUnroll = 0;
+    outputAsMidi = 0;
 
     mod2rmf_encoder_defaults(&encoderSettings);
 
@@ -2557,6 +2841,11 @@ int main(int argc, char *argv[])
             doTrim = 1;
             continue;
         }
+        if (!strcmp(arg, "--unroll"))
+        {
+            doUnroll = 1;
+            continue;
+        }
 
         if (!sourcePath)
         {
@@ -2586,21 +2875,41 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    if (!destPath && (doUpgrade || doCompression || doStorage || doGain || doResample || doMetadataEdit || doSetLoop || doDisableLoop || doTrim))
+    if (!destPath && (doUpgrade || doCompression || doStorage || doGain || doResample || doMetadataEdit || doSetLoop || doDisableLoop || doTrim || doUnroll))
     {
         fprintf(stderr, "Error: destination path is required for edit operations\n");
         return 1;
     }
 
-    if (!doInfo && !doUpgrade && !doCompression && !doStorage && !doGain && !doResample && !doMetadataEdit && !doSetLoop && !doDisableLoop && !doTrim)
+    if (!doInfo && !doUpgrade && !doCompression && !doStorage && !doGain && !doResample && !doMetadataEdit && !doSetLoop && !doDisableLoop && !doTrim && !doUnroll)
     {
-        fprintf(stderr, "Error: no operation requested. Use --upgrade, --codec, --sndstorage, --gain, --resample, --set-meta/--clear-meta, --loop-*, --disable-loop, and/or --trim.\n");
+        fprintf(stderr, "Error: no operation requested. Use --upgrade, --codec, --sndstorage, --gain, --resample, --set-meta/--clear-meta, --loop-*, --disable-loop, --trim, and/or --unroll.\n");
         return 1;
     }
 
-    preserveMidi = !doSetLoop && !doDisableLoop && !doTrim;
+    if (destPath)
+    {
+        outputAsMidi = is_midi_path(destPath);
+    }
 
-    if (doUpgrade && (doCompression || doStorage || doGain || doResample || doMetadataEdit || doSetLoop || doDisableLoop || doTrim))
+#if SONGTOOL_ENABLE_MIDI_EXPORT == 0
+    if (outputAsMidi)
+    {
+        fprintf(stderr, "Error: MIDI output is disabled in this build\n");
+        return 1;
+    }
+#endif
+
+    preserveMidi = !doSetLoop && !doDisableLoop && !doTrim && !doUnroll;
+
+    if (outputAsMidi && (doUpgrade || doCompression || doStorage || doGain || doResample || doMetadataEdit))
+    {
+        fprintf(stderr,
+                "Error: .mid output only supports MIDI-only operations (--loop-*, --disable-loop, --trim, --unroll)\n");
+        return 1;
+    }
+
+    if (doUpgrade && (doCompression || doStorage || doGain || doResample || doMetadataEdit || doSetLoop || doDisableLoop || doTrim || doUnroll))
     {
         fprintf(stderr, "Error: --upgrade cannot be combined with other edit operations\n");
         return 1;
@@ -2696,7 +3005,7 @@ int main(int argc, char *argv[])
         print_document_info(document, sourcePath);
     }
 
-    if (!doCompression && !doStorage && !doGain && !doResample && !doMetadataEdit && !doSetLoop && !doDisableLoop && !doTrim && !doUpgrade)
+    if (!doCompression && !doStorage && !doGain && !doResample && !doMetadataEdit && !doSetLoop && !doDisableLoop && !doTrim && !doUnroll && !doUpgrade)
     {
         BAERmfEditorDocument_Delete(document);
         BAE_Cleanup();
@@ -3011,7 +3320,74 @@ int main(int argc, char *argv[])
         }
     }
 
-    if (preserveMidi)
+#if SONGTOOL_ENABLE_ROLLED_MIDI_UNROLL == 1
+    if (doUnroll && !outputAsMidi)
+    {
+        if (!apply_unroll_to_document(&document, destPath))
+        {
+            BAERmfEditorDocument_Delete(document);
+            BAE_Cleanup();
+            return 1;
+        }
+    }
+#else
+    if (doUnroll)
+    {
+        fprintf(stderr, "Error: --unroll is disabled in this build\n");
+        BAERmfEditorDocument_Delete(document);
+        BAE_Cleanup();
+        return 1;
+    }
+#endif
+
+    if (outputAsMidi)
+    {
+#if SONGTOOL_ENABLE_MIDI_EXPORT == 1
+        if (!BAERmfEditorDocument_CanSaveAsMidi(document))
+        {
+            fprintf(stderr,
+                    "Error: document contains RMF/ZMF resources that cannot be represented in standard MIDI\n");
+            BAERmfEditorDocument_Delete(document);
+            BAE_Cleanup();
+            return 1;
+        }
+
+        result = BAERmfEditorDocument_SaveAsMidi(document, (BAEPathName)destPath);
+        if (result != BAE_NO_ERROR)
+        {
+            fprintf(stderr, "Error: MIDI save failed (%d): %s\n", (int)result, destPath);
+            BAERmfEditorDocument_Delete(document);
+            BAE_Cleanup();
+            return 1;
+        }
+
+#if SONGTOOL_ENABLE_ROLLED_MIDI_UNROLL == 1
+        if (doUnroll)
+        {
+            if (!unroll_midi_file_in_place(destPath))
+            {
+                BAERmfEditorDocument_Delete(document);
+                BAE_Cleanup();
+                return 1;
+            }
+        }
+#else
+        if (doUnroll)
+        {
+            fprintf(stderr, "Error: --unroll is disabled in this build\n");
+            BAERmfEditorDocument_Delete(document);
+            BAE_Cleanup();
+            return 1;
+        }
+#endif
+#else
+        fprintf(stderr, "Error: MIDI output is disabled in this build\n");
+        BAERmfEditorDocument_Delete(document);
+        BAE_Cleanup();
+        return 1;
+#endif
+    }
+    else if (preserveMidi)
     {
         result = BAERmfEditorDocument_SaveAsRmfPreserveMidi(document, (BAEPathName)destPath);
     }
