@@ -407,3 +407,163 @@ JNIEXPORT jint JNICALL Java_com_zefie_neobaemc_audio_Sound__1setSoundPositionFra
 
 JNIEXPORT jint JNICALL Java_com_zefie_neobaemc_audio_Sound__1setSoundLoops(JNIEnv *e, jclass c, jlong ref, jint n)
 { (void)e; (void)c; return ref ? (jint)BAESound_SetLoopCount((BAESound)(intptr_t)ref, (uint32_t)n) : -1; }
+
+/* ============================ Vorbis encoder ============================ */
+/*
+ * Encode interleaved S16LE PCM into an in-memory Ogg/Vorbis stream.
+ *
+ * Used by the server-side cache transcoder: NeoBAE renders the original
+ * download to PCM, we encode the PCM to Vorbis once, and the cached Ogg
+ * blob is what gets streamed to clients (and decoded by vanilla
+ * Minecraft's STB Vorbis on the receiving end).
+ */
+#include <vorbis/vorbisenc.h>
+
+JNIEXPORT jbyteArray JNICALL Java_com_zefie_neobaemc_audio_Mixer__1encodePcmToVorbis(
+        JNIEnv *env, jclass cls,
+        jbyteArray jpcm, jint sampleRate, jint channels, jfloat quality)
+{
+    (void)cls;
+    if (!jpcm || sampleRate <= 0 || channels < 1 || channels > 2) return NULL;
+    if (quality < -0.1f) quality = -0.1f;
+    if (quality > 1.0f)  quality = 1.0f;
+
+    jsize pcmBytes = (*env)->GetArrayLength(env, jpcm);
+    jsize totalFrames = pcmBytes / (jsize)(2 * channels);
+    if (totalFrames <= 0) return NULL;
+
+    jbyte *pcmRaw = (*env)->GetByteArrayElements(env, jpcm, NULL);
+    if (!pcmRaw) return NULL;
+    const int16_t *pcm = (const int16_t *)pcmRaw;
+
+    vorbis_info      vi;
+    vorbis_comment   vc;
+    vorbis_dsp_state vd;
+    vorbis_block     vb;
+    ogg_stream_state os;
+    ogg_page         og;
+    ogg_packet       op;
+
+    vorbis_info_init(&vi);
+    if (vorbis_encode_init_vbr(&vi, channels, sampleRate, quality) != 0) {
+        vorbis_info_clear(&vi);
+        (*env)->ReleaseByteArrayElements(env, jpcm, pcmRaw, JNI_ABORT);
+        return NULL;
+    }
+    vorbis_comment_init(&vc);
+    vorbis_comment_add_tag(&vc, "ENCODER", "NeoBAE-MC/libvorbis");
+
+    vorbis_analysis_init(&vd, &vi);
+    vorbis_block_init(&vd, &vb);
+
+    /* Use a deterministic stream serial so repeated encodes of the same
+     * source are bit-identical (helps with cache hashing if we ever care). */
+    ogg_stream_init(&os, 0xBAEDF00D);
+
+    /* Buffer that grows as we emit Ogg pages. Start at ~64 KB; doubled on demand. */
+    size_t outCap = 64 * 1024;
+    size_t outLen = 0;
+    unsigned char *out = (unsigned char *)malloc(outCap);
+    if (!out) goto fail_after_streams;
+
+#define APPEND(buf, n) do {                                       \
+        if (outLen + (size_t)(n) > outCap) {                      \
+            while (outLen + (size_t)(n) > outCap) outCap *= 2;    \
+            unsigned char *nb = (unsigned char *)realloc(out, outCap); \
+            if (!nb) goto fail_after_buffer;                      \
+            out = nb;                                             \
+        }                                                         \
+        memcpy(out + outLen, (buf), (n));                         \
+        outLen += (size_t)(n);                                    \
+    } while (0)
+
+    /* Headers (id, comment, codebooks). All three pages must be flushed before audio. */
+    {
+        ogg_packet hdr, hdrComm, hdrCode;
+        vorbis_analysis_headerout(&vd, &vc, &hdr, &hdrComm, &hdrCode);
+        ogg_stream_packetin(&os, &hdr);
+        ogg_stream_packetin(&os, &hdrComm);
+        ogg_stream_packetin(&os, &hdrCode);
+        while (ogg_stream_flush(&os, &og)) {
+            APPEND(og.header, og.header_len);
+            APPEND(og.body,   og.body_len);
+        }
+    }
+
+    /* Feed PCM in chunks. 1024 frames per call is a typical libvorbis chunk size. */
+    const jsize CHUNK = 1024;
+    jsize frameCursor = 0;
+    while (frameCursor < totalFrames) {
+        jsize n = totalFrames - frameCursor;
+        if (n > CHUNK) n = CHUNK;
+        float **buffer = vorbis_analysis_buffer(&vd, (int)n);
+        if (channels == 1) {
+            for (jsize i = 0; i < n; i++) {
+                buffer[0][i] = pcm[frameCursor + i] / 32768.0f;
+            }
+        } else { /* stereo */
+            for (jsize i = 0; i < n; i++) {
+                buffer[0][i] = pcm[(frameCursor + i) * 2    ] / 32768.0f;
+                buffer[1][i] = pcm[(frameCursor + i) * 2 + 1] / 32768.0f;
+            }
+        }
+        vorbis_analysis_wrote(&vd, (int)n);
+        frameCursor += n;
+
+        while (vorbis_analysis_blockout(&vd, &vb) == 1) {
+            vorbis_analysis(&vb, NULL);
+            vorbis_bitrate_addblock(&vb);
+            while (vorbis_bitrate_flushpacket(&vd, &op)) {
+                ogg_stream_packetin(&os, &op);
+                while (ogg_stream_pageout(&os, &og)) {
+                    APPEND(og.header, og.header_len);
+                    APPEND(og.body,   og.body_len);
+                }
+            }
+        }
+    }
+
+    /* End-of-stream marker: tell vorbis we're done, flush the rest. */
+    vorbis_analysis_wrote(&vd, 0);
+    while (vorbis_analysis_blockout(&vd, &vb) == 1) {
+        vorbis_analysis(&vb, NULL);
+        vorbis_bitrate_addblock(&vb);
+        while (vorbis_bitrate_flushpacket(&vd, &op)) {
+            ogg_stream_packetin(&os, &op);
+            while (ogg_stream_pageout(&os, &og)) {
+                APPEND(og.header, og.header_len);
+                APPEND(og.body,   og.body_len);
+            }
+        }
+    }
+    while (ogg_stream_flush(&os, &og)) {
+        APPEND(og.header, og.header_len);
+        APPEND(og.body,   og.body_len);
+    }
+#undef APPEND
+
+    ogg_stream_clear(&os);
+    vorbis_block_clear(&vb);
+    vorbis_dsp_clear(&vd);
+    vorbis_comment_clear(&vc);
+    vorbis_info_clear(&vi);
+    (*env)->ReleaseByteArrayElements(env, jpcm, pcmRaw, JNI_ABORT);
+
+    jbyteArray result = (*env)->NewByteArray(env, (jsize)outLen);
+    if (result) {
+        (*env)->SetByteArrayRegion(env, result, 0, (jsize)outLen, (const jbyte *)out);
+    }
+    free(out);
+    return result;
+
+fail_after_buffer:
+    free(out);
+fail_after_streams:
+    ogg_stream_clear(&os);
+    vorbis_block_clear(&vb);
+    vorbis_dsp_clear(&vd);
+    vorbis_comment_clear(&vc);
+    vorbis_info_clear(&vi);
+    (*env)->ReleaseByteArrayElements(env, jpcm, pcmRaw, JNI_ABORT);
+    return NULL;
+}

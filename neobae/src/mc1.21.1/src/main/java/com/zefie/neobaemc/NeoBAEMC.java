@@ -3,6 +3,7 @@ package com.zefie.neobaemc;
 import com.mojang.logging.LogUtils;
 import com.zefie.neobaemc.audio.NativeLoader;
 import com.zefie.neobaemc.etched.EtchedIntegration;
+import com.zefie.neobaemc.net.NetworkBindings;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import org.slf4j.Logger;
@@ -34,5 +35,6 @@ public class NeoBAEMC {
         }
 
         EtchedIntegration.init(modBus);
+        NetworkBindings.register(modBus);
     }
 }

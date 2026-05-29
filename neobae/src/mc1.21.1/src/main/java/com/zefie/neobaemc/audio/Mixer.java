@@ -46,6 +46,12 @@ public class Mixer {
     private static native int  _determineFileTypeByData(byte[] data, int length);
     private static native int  _loadFromMemory(long mixerReference, byte[] data, LoadResult result);
 
+    /**
+     * Encode interleaved S16LE PCM into an Ogg/Vorbis blob (in-memory).
+     * Returns the encoded bytes, or {@code null} on encoder failure.
+     */
+    private static native byte[] _encodePcmToVorbis(byte[] pcmS16LE, int sampleRate, int channels, float quality);
+
     // -- Pull-mode rendering (new — for Minecraft sound integration) ---------
     /**
      * Render {@code sampleFrames} stereo 16-bit PCM frames into {@code out}
@@ -121,6 +127,19 @@ public class Mixer {
         if (mMixer == null || data == null || result == null) return -1;
         result.setMixer(mMixer);
         return _loadFromMemory(mMixer.mReference, data, result);
+    }
+
+    /**
+     * Encode 16-bit signed little-endian interleaved PCM to an Ogg/Vorbis
+     * blob. {@code quality} is libvorbis's VBR quality (-0.1 .. 1.0); 0.4
+     * is a sensible default for music (~128 kbps stereo).
+     *
+     * @return the encoded ogg bytes, or {@code null} on failure.
+     */
+    public static byte[] encodePcmToVorbis(byte[] pcmS16LE, int sampleRate, int channels, float quality) {
+        if (pcmS16LE == null || pcmS16LE.length == 0) return null;
+        if (channels < 1 || channels > 2) return null;
+        return _encodePcmToVorbis(pcmS16LE, sampleRate, channels, quality);
     }
 
     /** Render PCM into {@code out}. See {@link #_renderSamples}. */
