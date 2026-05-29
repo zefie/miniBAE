@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.zefie.neobaemc.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "AbstractOnlineSoundInstanceMixin"
+  ],
+  "mixins": [
+    "EtchingMenuMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

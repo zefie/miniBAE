@@ -37,4 +37,8 @@ neobae/src/NeoBAEDroid/.kotlin/
 neobae/src/NeoBAEDroid/app/NeoBAEDroid.app.androidTest.iml
 neobae/src/NeoBAEDroid/app/NeoBAEDroid.app.unitTest.iml
 
+neobae/src/mc1.21.1/libs/
+neobae/src/mc1.21.1/native/cmake-build-host/
+neobae/src/mc1.21.1/native/cmake-build-mingw-x86_64/
+
 .github/nbeditor_reference_images/

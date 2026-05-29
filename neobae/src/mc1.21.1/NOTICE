@@ -1,0 +1,21 @@
+NeoBAE for Minecraft
+====================
+
+This work is a Minecraft mod that integrates the NeoBAE / miniBAE audio
+engine with the Etched mod by Humble Abode / jackson / Ocelot / Farcr.
+
+Contains:
+
+  * Source code targeting Etched's public API
+    (gg.moonflower.etched.api.*) — Etched is © 2021 Moonflower Studio,
+    licensed under GPL-3.0-only.
+    https://github.com/jacksonhardaway/etched
+
+  * Compiled bindings into the NeoBAE / miniBAE engine, which is itself
+    BSD-3-Clause licensed and lives in the parent repository
+    (../../../). See ../../../LICENSE.
+
+No textures, models, sounds, translations, or other assets from Etched
+are bundled in this mod. Players are expected to install Etched
+separately (it is declared as a hard dependency in neoforge.mods.toml).
+Etched's non-code resources are All Rights Reserved by Moonflower Studio.

@@ -1,0 +1,147 @@
+plugins {
+    id 'net.neoforged.moddev' version '1.0.21'
+    id 'java'
+}
+
+version = project.mod_version
+group   = project.mod_group_id
+
+base {
+    archivesName = project.mod_id
+}
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(project.java_version as int)
+
+neoForge {
+    version = project.neo_version
+
+    parchment {
+        mappingsVersion = '2024.07.28'
+        minecraftVersion = '1.21'
+    }
+
+    runs {
+        client {
+            client()
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
+        server {
+            server()
+            programArgument '--nogui'
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
+        data {
+            data()
+            programArguments.addAll(
+                    '--mod', project.mod_id,
+                    '--all',
+                    '--output', file('src/generated/resources/').absolutePath,
+                    '--existing', file('src/main/resources/').absolutePath
+            )
+        }
+    }
+
+    mods {
+        "${mod_id}" {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+repositories {
+    mavenCentral()
+    // Etched isn't published to a public Maven; the easiest way to pull a
+    // dev jar of it is via JitPack, which builds straight from the GitHub
+    // repo. Pin to a tag/commit so reproducible builds keep working.
+    maven { url 'https://jitpack.io' }
+    // Fallback for a locally-built Etched: `./gradlew publishToMavenLocal`
+    // inside the Etched repo, then this picks it up.
+    mavenLocal()
+}
+
+dependencies {
+    // NeoForge is provided by the moddev plugin.
+    //
+    // Etched 5.0.1 (NeoForge 1.21.1). Pick ONE of the following:
+    //
+    //   a) JitPack (builds from the GitHub repo on demand):
+    //        compileOnly 'com.github.jacksonhardaway:etched:5.0.1'
+    //        runtimeOnly 'com.github.jacksonhardaway:etched:5.0.1'
+    //
+    //   b) Local jar (drop etched-5.0.x.jar into ./libs/ first):
+            compileOnly fileTree(dir: 'libs', include: ['etched-*.jar'])
+            runtimeOnly fileTree(dir: 'libs', include: ['etched-*.jar'])
+    //
+    //   c) Maven Local (after `./gradlew publishToMavenLocal` in the Etched repo):
+    //        compileOnly 'gg.moonflower:etched:5.0.1'
+    //        runtimeOnly 'gg.moonflower:etched:5.0.1'
+    //
+    // Uncomment exactly one pair. Option (b) is the most reliable today.
+    // compileOnly files('libs/etched-5.0.1.jar')
+    // runtimeOnly files('libs/etched-5.0.1.jar')
+
+    // Mixin annotations. NeoForge ships sponge-mixin at runtime; declaring
+    // it compileOnly + annotationProcessor here is what makes @Mixin / @Inject
+    // resolve in your IDE and produce a refmap during the build.
+    // Mixin annotations. NeoForge 1.20.5+ ships sponge-mixin at runtime and
+    // uses Mojang-named mappings, so we DO NOT run the Mixin annotation
+    // processor (it only knows SRG/notch obf and would fail to validate
+    // Mojang-named @Inject targets). Mixin resolves targets fine at runtime
+    // without a refmap on NeoForge.
+    compileOnly 'org.spongepowered:mixin:0.8.7'
+}
+
+sourceSets.main.resources.srcDir 'src/generated/resources'
+
+// ----------------------------------------------------------------------------
+// Native library packaging
+//
+// Run `./build_native.sh <triplet>` (see native/) to produce libs under
+// native/build/<os>-<arch>/ and place them at:
+//   src/main/resources/natives/<os>/<arch>/<libname>
+// They are then loaded at runtime by NativeLoader.
+// ----------------------------------------------------------------------------
+processResources {
+    var replaceProperties = [
+        minecraft_version: minecraft_version,
+        minecraft_version_range: minecraft_version_range,
+        neo_version: neo_version,
+        neo_version_range: neo_version_range,
+        loader_version_range: loader_version_range,
+        mod_id: mod_id,
+        mod_name: mod_name,
+        mod_license: mod_license,
+        mod_version: mod_version,
+        mod_authors: mod_authors,
+        mod_description: mod_description,
+    ]
+    inputs.properties(replaceProperties)
+    filesMatching(['META-INF/neoforge.mods.toml', 'pack.mcmeta']) {
+        expand replaceProperties
+    }
+
+    from('native/build') {
+        into 'natives'
+        include '**/*.so'
+        include '**/*.dll'
+        include '**/*.dylib'
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = (project.java_version as int)
+}
+
+jar {
+    manifest {
+        attributes([
+                'Specification-Title'     : project.mod_id,
+                'Specification-Vendor'    : project.mod_authors,
+                'Specification-Version'   : '1',
+                'Implementation-Title'    : project.mod_name,
+                'Implementation-Version'  : project.version,
+                'Implementation-Vendor'   : project.mod_authors
+        ])
+    }
+}

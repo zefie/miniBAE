@@ -1779,6 +1779,10 @@ static bool PV_ShouldUseRMFInstrumentForPatch(GM_Song *pSong, int16_t patch)
     XLongResourceID remapped;
     uint32_t bankId, progId, noteId;
 
+#if USE_SF2_SUPPORT != TRUE    
+    return TRUE;
+#else
+
     if (!pSong || !(pSong->songFlags & SONG_FLAG_IS_RMF))
     {
         return FALSE;
@@ -1831,6 +1835,7 @@ static bool PV_ShouldUseRMFInstrumentForPatch(GM_Song *pSong, int16_t patch)
     }
 
     return FALSE;
+#endif    
 }
 
 // Process midi program change

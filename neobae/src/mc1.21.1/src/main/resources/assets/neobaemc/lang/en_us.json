@@ -1,0 +1,5 @@
+{
+  "neobaemc.engine.loaded": "NeoBAE engine ready",
+  "neobaemc.engine.failed": "NeoBAE native library failed to load: %s",
+  "neobaemc.engine.missing_etched": "NeoBAE requires the Etched mod"
+}
