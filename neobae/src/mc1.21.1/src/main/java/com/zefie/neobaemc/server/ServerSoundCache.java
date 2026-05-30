@@ -94,6 +94,37 @@ public final class ServerSoundCache {
         inFlight.clear();
     }
 
+    /**
+     * Evict any cached transcode for {@code url}. Used by the
+     * {@link com.zefie.neobaemc.net.SoundCacheClearPayload sneak+use}
+     * gesture so corrupted/partial caches can be re-fetched without
+     * shutting the server down.
+     *
+     * @return {@code true} if a cache file was found and deleted (or an
+     *         in-flight entry was cancelled), {@code false} otherwise.
+     */
+    public static boolean clearCache(String url) {
+        if (cacheDir == null || url == null || url.isEmpty()) return false;
+        // Drop any in-flight resolve so the next request re-downloads.
+        boolean wasInFlight = inFlight.remove(url) != null;
+        Path target = cacheDir.resolve(sha1(url) + ".ogg");
+        boolean deleted = false;
+        try {
+            deleted = Files.deleteIfExists(target);
+        } catch (IOException e) {
+            NeoBAEMC.LOGGER.warn("NeoBAE: could not delete cache file {}", target, e);
+        }
+        // Also nuke a stray .tmp from a crashed transcode, if any.
+        try {
+            Files.deleteIfExists(target.resolveSibling(target.getFileName() + ".tmp"));
+        } catch (IOException ignored) {}
+        if (deleted || wasInFlight) {
+            NeoBAEMC.LOGGER.info("NeoBAE: cleared cache for {}", url);
+            return true;
+        }
+        return false;
+    }
+
     /** Handler for {@link com.zefie.neobaemc.net.SoundRequestPayload} on the server. */
     public static void handleRequest(int streamId, String url, ServerPlayer player) {
         if (cacheDir == null) {

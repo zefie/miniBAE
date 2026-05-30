@@ -47,6 +47,11 @@ public final class NetworkBindings {
                 SoundErrorPayload.TYPE,
                 SoundErrorPayload.CODEC,
                 NetworkBindings::handleSoundError);
+
+        registrar.playToServer(
+                SoundCacheClearPayload.TYPE,
+                SoundCacheClearPayload.CODEC,
+                NetworkBindings::handleSoundCacheClear);
     }
 
     // ---- handlers --------------------------------------------------------
@@ -68,6 +73,20 @@ public final class NetworkBindings {
 
     private static void handleSoundError(SoundErrorPayload payload, IPayloadContext ctx) {
         ClientStreamRegistry.onError(payload.streamId(), payload.message());
+    }
+
+    private static void handleSoundCacheClear(SoundCacheClearPayload payload, IPayloadContext ctx) {
+        // Player must be holding *some* item — we don't try to verify it's the
+        // specific disc; even if they swapped slots between the gesture and the
+        // packet arriving, evicting the cache they asked about is harmless.
+        ctx.enqueueWork(() -> {
+            int cleared = 0;
+            for (String url : payload.urls()) {
+                if (ServerSoundCache.clearCache(url)) cleared++;
+            }
+            NeoBAEMC.LOGGER.info("NeoBAE: {} cleared {}/{} cache entries via sneak+use",
+                    ctx.player().getGameProfile().getName(), cleared, payload.urls().size());
+        });
     }
 
     // ---- server lifecycle ------------------------------------------------
