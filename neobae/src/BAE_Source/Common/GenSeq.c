@@ -1845,6 +1845,12 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
         pSong->isNokiaVibrationChannel[MIDIChannel] = TRUE;
         debug_message("ProcessProgramChange Debug: Channel %d is set to Nokia Vibration (LSB=6, Program %d)\n", MIDIChannel, program);
     }
+#if USE_J2ME_PATCH    
+    if (pSong->channelRawBank[MIDIChannel] == 120 && pSong->channelLSB[MIDIChannel] != 5) {
+        pSong->channelBankMode[MIDIChannel] = USE_GM_PERC_BANK;
+        debug_message("ProcessProgramChange Debug: Channel %d is set to Percussion (MSB=120, LSB=%d)\n", MIDIChannel, pSong->channelLSB[MIDIChannel]);
+    }
+#endif    
     if (pSong->allowProgramChanges)
     {
         if (MIDIChannel == PERCUSSION_CHANNEL && pSong->channelBankMode[MIDIChannel] != USE_NORM_BANK)

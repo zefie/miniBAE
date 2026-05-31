@@ -151,6 +151,7 @@ option(BAE_DISABLE_EMBED_FONT "Disable embedded GUI font" OFF)
 option(BAE_DISABLE_RETRO_RINGTONE_SUPPORT "Disable retro mobile ringtone format support (IMY/EMY/RNG/RTX/RTTTL)" OFF)
 option(BAE_DISABLE_QOA_SUPPORT "Disable QOA codec support" OFF)
 option(BAE_DISABLE_RMI_SUPPORT "Disable RMI support" OFF)
+option(BAE_DISABLE_J2ME_PATCH "Disable J2ME percussion bank patch (maps bank 120 for percussion intent)" OFF)
 option(BAE_DISABLE_ROLLED_MIDI_UNROLLING "Disable unrolling of rolled MIDI files" OFF)
 set(BAE_EMBED_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/banks/patches111/patches111.hsb" CACHE FILEPATH "HSB bank file to embed as built-in patches (empty disables embedding)")
 set(BAE_EMBED_TTF_FILE "src/thirdparty/fonts/HelveticaNeue.ttf" CACHE FILEPATH "TTF font file to embed for zefidi GUI use (empty disables embedding)")
@@ -195,7 +196,14 @@ set(BAE_ENABLE_EMBED_FONT ON)
 set(BAE_ENABLE_RETRO_RINGTONE_SUPPORT ON)
 set(BAE_ENABLE_QOA_SUPPORT ON)
 set(BAE_ENABLE_RMI_SUPPORT ON)
+set(BAE_ENABLE_J2ME_PATCH ON)
 set(BAE_ENABLE_ROLLED_MIDI_UNROLL ON)
+if(BAE_DISABLE_J2ME_PATCH)
+  set(BAE_ENABLE_J2ME_PATCH OFF)
+  message(STATUS "Disabling J2ME percussion bank patch (maps bank 120 for percussion intent)")
+else()
+  message(STATUS "Enabling J2ME percussion bank patch (maps bank 120 for percussion intent)")
+endif()
 if(BAE_DISABLE_RMF_EDITOR)
   set(BAE_ENABLE_RMF_EDITOR OFF)
   message(STATUS "Disabling RMF/ZMF Creation API Support")
@@ -1392,6 +1400,7 @@ target_compile_definitions(neobae
     USE_RETRO_RINGTONE_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_RETRO_RINGTONE_SUPPORT}>,1,0>
     USE_QOA_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_QOA_SUPPORT}>,1,0>
     USE_RMI_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_RMI_SUPPORT}>,1,0>
+    USE_J2ME_PATCH=$<IF:$<BOOL:${BAE_ENABLE_J2ME_PATCH}>,1,0>
     BAE_ENABLE_ROLLED_MIDI_UNROLL=$<IF:$<BOOL:${BAE_ENABLE_ROLLED_MIDI_UNROLL}>,1,0>
 )
 

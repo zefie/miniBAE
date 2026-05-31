@@ -1736,6 +1736,21 @@ void GM_SF2_ProcessProgramChange(GM_Song* pSong, int16_t channel, int32_t progra
     // Validate bank/program exist in current font; apply fallback if not
     int useBank = midiBank;
     int useProg = midiProgram;
+
+#if USE_J2ME_PATCH
+    if ((useBank * 2) == 128 || (useBank * 2) == 120) {
+        pSong->channelBankMode[channel] = USE_GM_PERC_BANK;
+        if (g_fluidsynth_soundfont_is_dls) {
+            useBank = 120;  // DLS percussion bank
+        } else {
+            useBank = 128;
+        }
+    }
+#endif    
+
+    if (pSong->channelBankMode[channel] == USE_GM_PERC_BANK) {
+        fluid_synth_set_channel_type(g_fluidsynth_synth, channel, CHANNEL_TYPE_DRUM);
+    }
     
     // First priority: Check if preset exists in XMF overlay (if loaded)
     // Apply bank offset: if overlay has bank 0 presets, HSB requests them as bank 2
@@ -1772,7 +1787,7 @@ void GM_SF2_ProcessProgramChange(GM_Song* pSong, int16_t channel, int32_t progra
     }
 
     if (!PV_SF2_PresetExists(useBank, useProg)) {
-        bool percIntent = (channel == BAE_PERCUSSION_CHANNEL) || (useBank == 128 || (g_fluidsynth_soundfont_is_dls && useBank == 120));
+        bool percIntent = (channel == BAE_PERCUSSION_CHANNEL) || (useBank == 128 || useBank == 120);
         bool found = FALSE;
 
         // 1. Try fallback to Bank 0 (Capital Tone) with same program
@@ -1821,7 +1836,7 @@ void GM_SF2_ProcessProgramChange(GM_Song* pSong, int16_t channel, int32_t progra
 
     // If this soundfont has no canonical drum kit preset, don't load any bank for channel 10.
     // (Avoid incorrectly falling back to melodic bank 0 on the percussion channel.)
-    if (channel == BAE_PERCUSSION_CHANNEL)
+    if (channel == BAE_PERCUSSION_CHANNEL || pSong->channelBankMode[channel] == USE_GM_PERC_BANK)
     {
         int drumBank = 128;
         if (!PV_SF2_PresetExists(drumBank, 0))

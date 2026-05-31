@@ -48,6 +48,7 @@ ifneq ($(WASM),1)
 		VORBIS_ENC := 1
 		OPUS_DEC := 1
 		OPUS_ENC := 1
+		J2ME_PATCH := 1
 		CREATION_NO_CODECS := 0
 		CREATION_API := 0
 	endif
@@ -197,6 +198,10 @@ endif
 
 ifeq ($(RMI_SUPPORT),1)
 	BAE_FLAGS += -DUSE_RMI_SUPPORT=1
+endif
+
+ifeq ($(J2ME_PATCH),1)
+	BAE_FLAGS += -DUSE_J2ME_PATCH=1
 endif
 
 ifeq ($(RETRO_RINGTONE_SUPPORT),1)
