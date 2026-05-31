@@ -1834,6 +1834,10 @@ unroll_cleanup:
 #include "BAEPatches.h"
 #endif
 
+#if USE_FLAC_ENCODER != TRUE && USE_FLAC_DECODER == TRUE
+#include "FLAC/stream_decoder.h"
+#endif
+
 #if USE_FLAC_ENCODER == TRUE
 #include "FLAC/stream_encoder.h"
 // Forward declaration of FLAC encoding function from GenSoundFiles.c
