@@ -1751,7 +1751,7 @@ void GM_SF2_ProcessProgramChange(GM_Song* pSong, int16_t channel, int32_t progra
     if (pSong->channelBankMode[channel] == USE_GM_PERC_BANK) {
         fluid_synth_set_channel_type(g_fluidsynth_synth, channel, CHANNEL_TYPE_DRUM);
     }
-    
+
     // First priority: Check if preset exists in XMF overlay (if loaded)
     // Apply bank offset: if overlay has bank 0 presets, HSB requests them as bank 2
     if (g_fluidsynth_xmf_overlay_id >= 0) {
@@ -2243,6 +2243,20 @@ bool GM_SF2_CurrentFontHasAnyPreset(int *outPresetCount)
     
     if (outPresetCount) *outPresetCount = count;
     return (count > 0) ? TRUE : FALSE;
+}
+
+void GM_SF2_SetChannelMode(int16_t channel, int16_t mode)
+{
+    if (!g_fluidsynth_synth)
+        return;
+
+    PV_SF2_LockSynth();
+    if (mode == USE_GM_PERC_BANK) {
+        fluid_synth_set_channel_type(g_fluidsynth_synth, channel, CHANNEL_TYPE_DRUM);
+    } else {
+        fluid_synth_set_channel_type(g_fluidsynth_synth, channel, CHANNEL_TYPE_MELODIC);
+    }
+    PV_SF2_UnlockSynth();
 }
 
 void PV_SF2_SetBankPreset(GM_Song* pSong, int16_t channel, int16_t bank, int16_t preset) 

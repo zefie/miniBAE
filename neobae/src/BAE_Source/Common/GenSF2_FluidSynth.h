@@ -138,6 +138,8 @@ bool GM_SF2_HasXmfEmbeddedBank();
 bool GM_SF2_XmfOverlayHasPreset(int bank, int program);
 void GM_SF2_SetChannelBankAndProgram(int16_t channel, int16_t bank, int16_t program);
 bool GM_SF2_isDLS(void);
+
+void GM_SF2_SetChannelMode(int16_t channel, int16_t mode);
 #endif // USE_SF2_SUPPORT
 
 #ifdef __cplusplus

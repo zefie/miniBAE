@@ -2101,6 +2101,91 @@ static int16_t PV_DetermineInstrumentToUse(GM_Song *pSong, int16_t midiNote, int
     return thePatch;
 }
 
+static int16_t PV_RolandGSPartToChannel(unsigned char partAddress)
+{
+    if (partAddress == 0x10)
+    {
+        return PERCUSSION_CHANNEL;
+    }
+    if (partAddress >= 0x11 && partAddress <= 0x19)
+    {
+        return (int16_t)(partAddress - 0x11);
+    }
+    if (partAddress >= 0x1A && partAddress <= 0x1F)
+    {
+        return (int16_t)(partAddress - 0x10);
+    }
+    return -1;
+}
+
+static void PV_ProcessRolandPartAssignSysEx(GM_Song *pSong, const unsigned char *message, int32_t length)
+{
+    int16_t MIDIChannel;
+    int16_t bankMode;
+
+    if (!pSong || !message || length < 11)
+    {
+        return;
+    }
+    if (message[0] != 0xF0 || message[length - 1] != 0xF7)
+    {
+        return;
+    }
+    if (message[1] != 0x41 || message[3] != 0x42 || message[4] != 0x12)
+    {
+        return;
+    }
+    if (message[5] != 0x40 || message[7] != 0x15)
+    {
+        return;
+    }
+
+    MIDIChannel = PV_RolandGSPartToChannel(message[6]);
+    if (MIDIChannel < 0 || MIDIChannel >= MAX_CHANNELS)
+    {
+        return;
+    }
+
+    switch (message[8])
+    {
+    case 0x00:
+        bankMode = (MIDIChannel == PERCUSSION_CHANNEL) ? USE_NORM_BANK : USE_GM_DEFAULT;
+        break;
+    case 0x01:
+    case 0x02:
+        bankMode = USE_GM_PERC_BANK;
+        break;
+    default:
+        return;
+    }
+
+    if (pSong->channelBankMode[MIDIChannel] == bankMode)
+    {
+        return;
+    }
+
+    pSong->channelBankMode[MIDIChannel] = bankMode;
+
+#if USE_SF2_SUPPORT == TRUE
+    if ((GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2) &&
+        pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF)
+    {
+        GM_SF2_SetChannelMode(MIDIChannel, bankMode);
+        if (bankMode == USE_GM_PERC_BANK)
+        {
+            PV_SF2_SetBankPreset(pSong, MIDIChannel, GM_SF2_isDLS() ? 120 : 128, 0);
+        }
+        else
+        {
+            int32_t combinedProgram;
+
+            combinedProgram = PV_ConvertPatchBank(pSong, pSong->channelProgram[MIDIChannel], MIDIChannel);
+            GM_SF2_ProcessProgramChange(pSong, MIDIChannel, combinedProgram);
+        }
+    }
+#endif
+}
+
 // Process note off
 static void PV_ProcessNoteOff(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTrack, int16_t note, int16_t volume)
 {
@@ -4365,9 +4450,29 @@ OPErr PV_ProcessMidiSequencerSlice(void *threadContext, GM_Song *pSong)
                 // For sysex, pass the full sysex message (0xF0 ... data ... 0xF7)
                 if (midi_byte == 0xF0 && value > 0)
                 {
-                    // Build a simple buffer on stack if size reasonable
-                    int sendLen = (int)value + 1;                          // include initial 0xF0
-                    unsigned char *syx = (unsigned char *)midi_stream - 1; // points to 0xF0
+                    unsigned char stackSyx[256];
+                    unsigned char *syx;
+                    int sendLen;
+                    bool disposeSyx;
+
+                    sendLen = (int)value + 1; // include initial 0xF0
+                    syx = stackSyx;
+                    disposeSyx = FALSE;
+                    if (sendLen > (int)sizeof(stackSyx))
+                    {
+                        syx = (unsigned char *)XNewPtr((long)sendLen);
+                        if (syx == NULL)
+                        {
+                            midi_stream += value; // skip sysex if we can't build the full message
+                            break;
+                        }
+                        disposeSyx = TRUE;
+                    }
+
+                    syx[0] = 0xF0;
+                    XBlockMove((XPTR)midi_stream, (XPTR)(syx + 1), value);
+
+                    PV_ProcessRolandPartAssignSysEx(pSong, syx, (int32_t)sendLen);
                     PV_CallMidiEventCallback(threadContext, pSong, syx, sendLen);
 
 #if USE_SF2_SUPPORT == TRUE
@@ -4378,6 +4483,11 @@ OPErr PV_ProcessMidiSequencerSlice(void *threadContext, GM_Song *pSong)
                         GM_SF2_ProcessSysEx(pSong, syx, (int32_t)sendLen);
                     }
 #endif
+
+                    if (disposeSyx)
+                    {
+                        XDisposePtr(syx);
+                    }
                 }
                 midi_stream += value; // skip sysex
                 break;
