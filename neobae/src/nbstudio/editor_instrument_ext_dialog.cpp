@@ -778,7 +778,7 @@ private:
             uint32_t instID = 0;
             if (BAERmfEditorDocument_GetSampleInfo(m_document, i, &info) != BAE_NO_ERROR) continue;
             BAERmfEditorDocument_GetInstIDForSample(m_document, i, &instID);
-            if ((primaryInstID != 0 && instID == primaryInstID) ||
+            if ((primaryInstID != 0 && instID == primaryInstID && info.program == primaryInfo.program) ||
                 (primaryInstID == 0 && info.program == primaryInfo.program)) {
                 EditedSample edited;
                 edited.displayName = SanitizeDisplayName(info.displayName ? wxString::FromUTF8(info.displayName) : wxString());

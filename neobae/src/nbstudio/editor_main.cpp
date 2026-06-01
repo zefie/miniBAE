@@ -7290,6 +7290,9 @@ private:
         }
         storedBankDisplayName = GetBankDisplayName();
 
+        /* Build TLV payload: serialized document blob */
+        AppendLE16(payload, kNbsFieldRmfBlob);
+        AppendLE32(payload, static_cast<uint32_t>(rmfBlob.size()));
         payload.insert(payload.end(), rmfBlob.begin(), rmfBlob.end());
 
         /* Build TLV payload: settings */
@@ -11260,6 +11263,7 @@ private:
         BAERmfEditorSampleSetup setup;
         BAESampleInfo info;
         uint32_t newSampleIndex;
+        uint32_t newInstID;
         uint32_t sampleCount;
         bool usedPrograms[128];
         long defaultProgram;
@@ -11318,6 +11322,9 @@ private:
             return;
         }
 
+        newInstID = 512u + static_cast<uint32_t>(program);
+        (void)BAERmfEditorDocument_SetSampleInstID(m_document, newSampleIndex, newInstID);
+
         PopulateSampleList();
         SelectTreeItemForSample(newSampleIndex);
         SetStatusText(wxString::Format("Created empty instrument at program %d", static_cast<int>(program)), 0);
@@ -11327,6 +11334,7 @@ private:
         BAERmfEditorSampleSetup setup;
         BAESampleInfo info;
         uint32_t newSampleIndex;
+        uint32_t newInstID;
         uint32_t sampleCount;
         bool usedPrograms[128];
         long defaultProgram;
@@ -11383,6 +11391,9 @@ private:
             wxMessageBox("Failed to create new instrument.", "Embedded Instruments", wxOK | wxICON_ERROR, this);
             return;
         }
+
+        newInstID = 512u + static_cast<uint32_t>(program);
+        (void)BAERmfEditorDocument_SetSampleInstID(m_document, newSampleIndex, newInstID);
 
         PopulateSampleList();
         SelectTreeItemForSample(newSampleIndex);
@@ -12081,6 +12092,13 @@ private:
                         ok = false;
                         break;
                     }
+
+                    if (instID != 0 &&
+                        BAERmfEditorDocument_SetSampleInstID(m_document, newIdx, instID) != BAE_NO_ERROR) {
+                        ok = false;
+                        break;
+                    }
+
                     sampleIndices[i] = newIdx;
                 }
 
@@ -12152,6 +12170,12 @@ private:
                 info.opusMode = editedSamples[i].opusMode;
                 info.opusRoundTripResample = editedSamples[i].opusRoundTripResample ? TRUE : FALSE;
                 if (BAERmfEditorDocument_SetSampleInfo(m_document, sampleIndices[i], &info) != BAE_NO_ERROR) {
+                    ok = false;
+                    break;
+                }
+
+                if (instID != 0 &&
+                    BAERmfEditorDocument_SetSampleInstID(m_document, sampleIndices[i], instID) != BAE_NO_ERROR) {
                     ok = false;
                     break;
                 }
