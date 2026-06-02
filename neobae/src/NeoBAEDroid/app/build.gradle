@@ -34,13 +34,13 @@ android {
         apk {
             dimension "distribution"
             buildConfigField "boolean", "USE_MANAGE_EXTERNAL_STORAGE", "true"
-            applicationIdSuffix ".full"
-            resValue "string", "app_name", "NeoBAE Full"
+            applicationIdSuffix ".NoSAF"
+            resValue "string", "app_name", "NeoBAE"
         }
         play {
             dimension "distribution"
             buildConfigField "boolean", "USE_MANAGE_EXTERNAL_STORAGE", "false"
-            resValue "string", "app_name", "NeoBAE Lite"
+            resValue "string", "app_name", "NeoBAE"
         }
     }
 
