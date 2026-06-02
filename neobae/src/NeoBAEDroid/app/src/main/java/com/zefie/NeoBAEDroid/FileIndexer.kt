@@ -1,6 +1,8 @@
 package com.zefie.NeoBAEDroid
 
 import android.content.Context
+import android.net.Uri
+import android.provider.DocumentsContract
 import com.zefie.NeoBAEDroid.database.SQLiteHelper
 import com.zefie.NeoBAEDroid.database.FileEntity
 import kotlinx.coroutines.*
@@ -19,6 +21,10 @@ data class IndexingProgress(
 class FileIndexer(private val context: Context) {
     private val database = SQLiteHelper.getInstance(context)
     private fun getValidExtensions(): Set<String> = HomeFragment.getMusicExtensions(context)
+
+    private fun isSafPath(path: String): Boolean {
+        return path.startsWith("content://")
+    }
     
     private val _progress = MutableStateFlow(IndexingProgress())
     val progress: StateFlow<IndexingProgress> = _progress
@@ -43,13 +49,17 @@ class FileIndexer(private val context: Context) {
             
             // Clear existing index for this path
             database.clearAll(rootPath)
-            
-            // Start indexing from specified root
-            val root = File(rootPath)
-            if (root.exists() && root.isDirectory) {
-                android.util.Log.i("FileIndexer", "Indexing directory: ${root.absolutePath}")
-                val validExtensions = getValidExtensions()
-                indexDirectory(root, validExtensions)
+
+            val validExtensions = getValidExtensions()
+            if (isSafPath(rootPath)) {
+                indexSafTree(rootPath, validExtensions)
+            } else {
+                // Start indexing from specified root
+                val root = File(rootPath)
+                if (root.exists() && root.isDirectory) {
+                    android.util.Log.i("FileIndexer", "Indexing directory: ${root.absolutePath}")
+                    indexDirectory(root, validExtensions)
+                }
             }
             
             _progress.value = _progress.value.copy(isIndexing = false)
@@ -71,6 +81,11 @@ class FileIndexer(private val context: Context) {
         if (_progress.value.isIndexing) {
             return@withContext
         }
+
+        if (isSafPath(rootPath)) {
+            rebuildIndex(rootPath)
+            return@withContext
+        }
         
         try {
             _progress.value = IndexingProgress(isIndexing = true)
@@ -86,6 +101,127 @@ class FileIndexer(private val context: Context) {
             _progress.value = IndexingProgress(isIndexing = false)
             throw e
         }
+    }
+
+    private suspend fun indexSafTree(rootUriString: String, validExtensions: Set<String>) {
+        val rootUri = try { Uri.parse(rootUriString) } catch (_: Exception) { null } ?: return
+        val authority = rootUri.authority ?: return
+
+        val treeDocId = try { DocumentsContract.getTreeDocumentId(rootUri) } catch (_: Exception) { null } ?: return
+        val rootDocId = try {
+            if (DocumentsContract.isDocumentUri(context, rootUri)) {
+                DocumentsContract.getDocumentId(rootUri)
+            } else {
+                treeDocId
+            }
+        } catch (_: Exception) {
+            treeDocId
+        }
+
+        val treeUri = DocumentsContract.buildTreeDocumentUri(authority, treeDocId)
+
+        val queue = ArrayDeque<String>()
+        queue.add(rootDocId)
+
+        val batch = mutableListOf<FileEntity>()
+        val batchSize = 100
+
+        var filesIndexed = 0
+        var foldersScanned = 0
+        var totalSize = 0L
+
+        while (queue.isNotEmpty()) {
+            val currentDocId = queue.removeFirst()
+            val currentDocUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, currentDocId)
+            val currentPath = currentDocUri.toString()
+
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, currentDocId)
+            val projection = arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+                DocumentsContract.Document.COLUMN_SIZE,
+                DocumentsContract.Document.COLUMN_LAST_MODIFIED
+            )
+
+            _progress.value = _progress.value.copy(
+                currentPath = currentPath,
+                filesIndexed = filesIndexed,
+                foldersScanned = foldersScanned,
+                totalSize = totalSize
+            )
+
+            try {
+                context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                    foldersScanned++
+
+                    val idCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                    val nameCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                    val mimeCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                    val sizeCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
+                    val modifiedCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+
+                    while (cursor.moveToNext()) {
+                        val childDocId = cursor.getString(idCol) ?: continue
+                        val name = cursor.getString(nameCol) ?: continue
+                        val mimeType = cursor.getString(mimeCol) ?: ""
+
+                        if (mimeType == DocumentsContract.Document.MIME_TYPE_DIR) {
+                            queue.add(childDocId)
+                            continue
+                        }
+
+                        val extension = name.substringAfterLast('.', "").lowercase()
+                        if (extension !in validExtensions) continue
+
+                        val childUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId)
+                        val size = if (sizeCol >= 0 && !cursor.isNull(sizeCol)) cursor.getLong(sizeCol) else 0L
+                        val lastModified = if (modifiedCol >= 0 && !cursor.isNull(modifiedCol)) {
+                            cursor.getLong(modifiedCol)
+                        } else {
+                            System.currentTimeMillis()
+                        }
+
+                        batch.add(
+                            FileEntity(
+                                path = childUri.toString(),
+                                filename = name.substringBeforeLast('.', name),
+                                extension = extension,
+                                parent_path = currentPath,
+                                size = size,
+                                last_modified = lastModified
+                            )
+                        )
+
+                        filesIndexed++
+                        totalSize += size
+
+                        if (batch.size >= batchSize) {
+                            database.insertFiles(currentIndexPath, batch.toList())
+                            batch.clear()
+                        }
+
+                        if (filesIndexed % 500 == 0) {
+                            yield()
+                        }
+                    }
+                }
+            } catch (_: SecurityException) {
+                continue
+            } catch (_: Exception) {
+                continue
+            }
+        }
+
+        if (batch.isNotEmpty()) {
+            database.insertFiles(currentIndexPath, batch)
+        }
+
+        _progress.value = _progress.value.copy(
+            filesIndexed = filesIndexed,
+            foldersScanned = foldersScanned,
+            totalSize = totalSize
+        )
     }
     
     /**

@@ -79,7 +79,6 @@ android {
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.1'
     implementation 'org.jetbrains.kotlin:kotlin-stdlib:2.3.0'
-    implementation 'com.google.android.material:material:1.13.0'
     implementation 'androidx.media:media:1.7.1'
 
     // Jetpack Compose core dependencies via BOM (removes explicit versions to avoid resolution mismatch)

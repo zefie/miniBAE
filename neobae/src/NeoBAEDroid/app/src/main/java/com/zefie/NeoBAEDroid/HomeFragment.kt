@@ -1132,12 +1132,7 @@ class HomeFragment : Fragment() {
                             (activity as? MainActivity)?.requestFavoritesExport()
                         },
                         onNavigate = { screen ->
-                            val target = if (isPlaySafVariant() && screen == NavigationScreen.SEARCH) {
-                                NavigationScreen.HOME
-                            } else {
-                                screen
-                            }
-                            viewModel.currentScreen = target
+                            viewModel.currentScreen = screen
                         },
                         onShufflePlay = {
                             shuffleAndPlay()
@@ -4011,7 +4006,7 @@ fun NewMusicPlayerScreen(
     onBankBrowserSelect: (File) -> Unit,
     onBankBrowserClose: () -> Unit
 ) {
-    val searchEnabled = BuildConfig.USE_MANAGE_EXTERNAL_STORAGE
+    val searchEnabled = true
     val favoritesEnabled = true
 
     LaunchedEffect(searchEnabled, viewModel.currentScreen) {
@@ -5103,6 +5098,8 @@ private fun PortraitPlayerLayout(
             Spacer(modifier = Modifier.height(24.dp))
             
             // Playback controls
+            val hasPrevious = viewModel.hasPrevious()
+            val hasNext = viewModel.hasNext()
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
@@ -5110,12 +5107,13 @@ private fun PortraitPlayerLayout(
             ) {
                 IconButton(
                     onClick = onPrevious,
+                    enabled = hasPrevious,
                     modifier = Modifier.size(56.dp)
                 ) {
                     Icon(
                         Icons.Filled.SkipPrevious,
                         contentDescription = "Previous",
-                        tint = MaterialTheme.colors.onBackground,
+                        tint = if (hasPrevious) MaterialTheme.colors.onBackground else MaterialTheme.colors.onBackground.copy(alpha = 0.3f),
                         modifier = Modifier.size(48.dp)
                     )
                 }
@@ -5136,12 +5134,13 @@ private fun PortraitPlayerLayout(
                 
                 IconButton(
                     onClick = onNext,
+                    enabled = hasNext,
                     modifier = Modifier.size(56.dp)
                 ) {
                     Icon(
                         Icons.Filled.SkipNext,
                         contentDescription = "Next",
-                        tint = MaterialTheme.colors.onBackground,
+                        tint = if (hasNext) MaterialTheme.colors.onBackground else MaterialTheme.colors.onBackground.copy(alpha = 0.3f),
                         modifier = Modifier.size(48.dp)
                     )
                 }
@@ -5506,6 +5505,8 @@ private fun LandscapePlayerLayout(
                 }
                 
                 // Playback controls
+                val hasPrevious = viewModel.hasPrevious()
+                val hasNext = viewModel.hasNext()
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.Center,
@@ -5513,12 +5514,13 @@ private fun LandscapePlayerLayout(
                 ) {
                     IconButton(
                         onClick = onPrevious,
+                        enabled = hasPrevious,
                         modifier = Modifier.size(48.dp)
                     ) {
                         Icon(
                             Icons.Filled.SkipPrevious,
                             contentDescription = "Previous",
-                            tint = MaterialTheme.colors.onBackground,
+                            tint = if (hasPrevious) MaterialTheme.colors.onBackground else MaterialTheme.colors.onBackground.copy(alpha = 0.3f),
                             modifier = Modifier.size(40.dp)
                         )
                     }
@@ -5543,12 +5545,13 @@ private fun LandscapePlayerLayout(
                     
                     IconButton(
                         onClick = onNext,
+                        enabled = hasNext,
                         modifier = Modifier.size(48.dp)
                     ) {
                         Icon(
                             Icons.Filled.SkipNext,
                             contentDescription = "Next",
-                            tint = MaterialTheme.colors.onBackground,
+                            tint = if (hasNext) MaterialTheme.colors.onBackground else MaterialTheme.colors.onBackground.copy(alpha = 0.3f),
                             modifier = Modifier.size(40.dp)
                         )
                     }
@@ -6004,6 +6007,9 @@ fun SearchScreenContent(
     val sortedSearchResults by remember {
         derivedStateOf { sortPlaylistItems(searchResults, viewModel.searchSortMode) }
     }
+    val indexingDisplayPath by remember(indexingProgress.currentPath) {
+        mutableStateOf(getDisplayPath(indexingProgress.currentPath))
+    }
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
@@ -6031,15 +6037,6 @@ fun SearchScreenContent(
     // Trigger search when query changes or when showing all results
     // IMPORTANT: Wait for database to be ready before searching
     LaunchedEffect(viewModel.searchQuery, searchResultLimit, viewModel.isDatabaseReady, viewModel.currentFolderPath) {
-        if (viewModel.currentFolderPath?.startsWith("content://") == true) {
-            if (viewModel.searchQuery.isNotEmpty()) {
-                viewModel.searchSafFiles(viewModel.searchQuery, viewModel.currentFolderPath, searchResultLimit)
-            } else {
-                viewModel.getAllSafFiles(viewModel.currentFolderPath, searchResultLimit)
-            }
-            return@LaunchedEffect
-        }
-
         // Only search if database is initialized
         if (!viewModel.isDatabaseReady) {
             return@LaunchedEffect
@@ -6056,6 +6053,7 @@ fun SearchScreenContent(
     Column(modifier = Modifier.fillMaxSize()) {
         // Check if current path is indexed
         val isCurrentPathIndexed = viewModel.isCurrentPathIndexed
+        val isSafCurrentPath = viewModel.currentFolderPath?.startsWith("content://") == true
         
         if (isLandscape) {
             // Landscape: horizontal layout
@@ -6164,6 +6162,35 @@ fun SearchScreenContent(
                 }
             }
         }
+
+        val showSafIndexingNotice = isSafCurrentPath &&
+            (indexingProgress.isIndexing || viewModel.indexedFileCount == 0 || !isCurrentPathIndexed)
+
+        if (showSafIndexingNotice) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                backgroundColor = MaterialTheme.colors.surface.copy(alpha = 0.7f)
+            ) {
+                Row(
+                    modifier = Modifier.padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Filled.Info,
+                        contentDescription = null,
+                        tint = Color.Gray,
+                        modifier = Modifier.padding(end = 12.dp)
+                    )
+                    Text(
+                        "SAF indexing can take some time, especially for large folders.",
+                        fontSize = 13.sp,
+                        color = Color.Gray
+                    )
+                }
+            }
+        }
         
         // Search results
         when {
@@ -6176,10 +6203,11 @@ fun SearchScreenContent(
                         Text("Building file index...", color = Color.Gray)
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            indexingProgress.currentPath.takeLast(50),
+                            indexingDisplayPath,
                             fontSize = 10.sp,
                             color = Color.Gray,
-                            maxLines = 2
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }

@@ -429,11 +429,6 @@ class MusicPlayerViewModel : ViewModel() {
     // Database-backed search (instant results)
     fun searchFilesInDatabase(query: String, currentPath: String?, limit: Int = 1000) {
         android.util.Log.d("MusicPlayerViewModel", "searchFilesInDatabase: query='$query', path='$currentPath', limit=$limit, db=${database != null}")
-        
-        if (isSafPath(currentPath)) {
-            searchSafFiles(query, currentPath, limit)
-            return
-        }
 
         if (query.isEmpty()) {
             _searchResults.value = emptyList()
@@ -470,15 +465,7 @@ class MusicPlayerViewModel : ViewModel() {
                         }
                         
                         // Convert entities to PlaylistItems
-                        entities.map { entity ->
-                            PlaylistItem(
-                                file = File(entity.path),
-                                title = entity.filename,
-                                path = entity.path,
-                                durationMs = 0,
-                                isFolder = false
-                            )
-                        }
+                        entities.map { entity -> mapEntityToPlaylistItem(entity) }
                     } else {
                         emptyList()
                     }
@@ -495,11 +482,6 @@ class MusicPlayerViewModel : ViewModel() {
     // Get all files in database (for showing all results when search is empty)
     fun getAllFilesInDatabase(currentPath: String?, limit: Int = 1000) {
         android.util.Log.d("MusicPlayerViewModel", "getAllFilesInDatabase: path='$currentPath', limit=$limit, db=${database != null}")
-        
-        if (isSafPath(currentPath)) {
-            getAllSafFiles(currentPath, limit)
-            return
-        }
 
         if (database == null) {
             android.util.Log.w("MusicPlayerViewModel", "Database not initialized!")
@@ -531,15 +513,7 @@ class MusicPlayerViewModel : ViewModel() {
                         }
                         
                         // Convert entities to PlaylistItems
-                        entities.map { entity ->
-                            PlaylistItem(
-                                file = File(entity.path),
-                                title = entity.filename,
-                                path = entity.path,
-                                durationMs = 0,
-                                isFolder = false
-                            )
-                        }
+                        entities.map { entity -> mapEntityToPlaylistItem(entity) }
                     } else {
                         emptyList()
                     }
@@ -577,6 +551,39 @@ class MusicPlayerViewModel : ViewModel() {
         val perUriFolder = File(cacheFolder, uri.hashCode().toString())
         if (!perUriFolder.exists()) perUriFolder.mkdirs()
         return File(perUriFolder, safeName)
+    }
+
+    private fun mapEntityToPlaylistItem(entity: FileEntity): PlaylistItem {
+        if (isSafPath(entity.path)) {
+            val uri = try { Uri.parse(entity.path) } catch (_: Exception) { null }
+            if (uri != null) {
+                val displayName = if (entity.extension.isNotBlank()) {
+                    "${entity.filename}.${entity.extension}"
+                } else {
+                    entity.filename
+                }
+                val cacheFile = getSafCacheFile(uri, displayName)
+                SafUriRegistry.register(cacheFile.absolutePath, uri)
+                return PlaylistItem(
+                    file = cacheFile,
+                    uri = uri,
+                    title = displayName,
+                    path = entity.path,
+                    durationMs = 0,
+                    isFolder = false,
+                    sizeBytes = entity.size
+                )
+            }
+        }
+
+        return PlaylistItem(
+            file = File(entity.path),
+            title = entity.filename,
+            path = entity.path,
+            durationMs = 0,
+            isFolder = false,
+            sizeBytes = entity.size
+        )
     }
 
     private suspend fun collectSafSearchFiles(root: DocumentFile, query: String?, recursive: Boolean, validExtensions: Set<String>, limit: Int): List<PlaylistItem> {
