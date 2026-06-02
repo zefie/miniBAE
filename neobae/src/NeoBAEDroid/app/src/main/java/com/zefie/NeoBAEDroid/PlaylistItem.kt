@@ -10,5 +10,6 @@ data class PlaylistItem(
     val path: String = uri?.toString() ?: file.absolutePath,
     val id: Long = path.hashCode().toLong(),
     val durationMs: Int = 0, // Will be populated when available
-    var isFolder: Boolean = file.isDirectory
+    var isFolder: Boolean = file.isDirectory,
+    val sizeBytes: Long = -1L
 )

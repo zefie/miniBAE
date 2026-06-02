@@ -18,6 +18,7 @@ import android.net.Uri
 import android.app.Activity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.rememberLauncherForActivityResult
+import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -69,6 +70,7 @@ import com.zefie.NeoBAE.Song
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.lifecycle.lifecycleScope
 import kotlin.math.roundToInt
 import java.io.IOException
@@ -144,6 +146,86 @@ private fun getDisplayFolderName(path: String?): String {
     val display = getDisplayPath(path)
     if (display == "No folder selected") return display
     return display.substringAfterLast('/').substringAfterLast(':').ifBlank { display }
+}
+
+private fun isPlaySafVariant(): Boolean {
+    return !BuildConfig.USE_MANAGE_EXTERNAL_STORAGE
+}
+
+private fun getSafTreeRootUriString(uriString: String): String? {
+    val normalized = uriString.trim().trimEnd('/')
+    val uri = try { Uri.parse(normalized) } catch (_: Exception) { null } ?: return null
+    if (uri.scheme != "content") return null
+
+    val segments = uri.pathSegments
+    if (segments.size < 2) return null
+
+    val treeIndex = segments.indexOf("tree")
+    if (treeIndex < 0 || treeIndex + 1 >= segments.size) return null
+    return "content://${uri.authority}/tree/${Uri.encode(Uri.decode(segments[treeIndex + 1]))}"
+}
+
+private fun buildFavoritePlaylistItem(context: Context, path: String): PlaylistItem? {
+    val normalized = path.trim().trimEnd('/')
+    if (normalized.startsWith("content://")) {
+        val uri = try { Uri.parse(normalized) } catch (_: Exception) { null } ?: return null
+        val doc = DocumentFile.fromSingleUri(context, uri)
+            ?: DocumentFile.fromTreeUri(context, uri)
+            ?: return null
+        if (doc.isDirectory) return null
+
+        val displayName = doc.name ?: uri.lastPathSegment?.substringAfterLast('/') ?: return null
+        val cacheFile = safCacheFileForUri(context, uri, displayName)
+        SafUriRegistry.register(cacheFile.absolutePath, uri)
+        return PlaylistItem(
+            file = cacheFile,
+            uri = uri,
+            title = displayName,
+            path = uri.toString(),
+            isFolder = false
+        )
+    }
+
+    val file = File(normalized)
+    return if (file.exists() && !file.isDirectory) PlaylistItem(file) else null
+}
+
+private fun safCacheFileForUri(context: Context, uri: Uri, displayName: String): File {
+    val safeName = displayName.replace(Regex("[^A-Za-z0-9._-]"), "_")
+    val cacheFolder = File(context.cacheDir, "safcache")
+    if (!cacheFolder.exists()) cacheFolder.mkdirs()
+    val perUriFolder = File(cacheFolder, uri.hashCode().toString())
+    if (!perUriFolder.exists()) perUriFolder.mkdirs()
+    return File(perUriFolder, safeName)
+}
+
+private data class PersistedSafFolderEntry(
+    val uri: Uri,
+    val label: String
+)
+
+private fun getPersistedSafFolderEntries(context: Context): List<PersistedSafFolderEntry> {
+    return context.contentResolver.persistedUriPermissions
+        .asSequence()
+        .filter { it.isReadPermission && it.uri.scheme == "content" }
+        .mapNotNull { permission ->
+            val uri = permission.uri
+            val document = DocumentFile.fromTreeUri(context, uri) ?: return@mapNotNull null
+            val label = document.name ?: getDisplayFolderName(uri.toString())
+            PersistedSafFolderEntry(uri, label)
+        }
+        .distinctBy { it.uri.toString() }
+        .sortedBy { it.label.lowercase() }
+        .toList()
+}
+
+private fun pruneUnavailableFavorites(context: Context, favorites: MutableList<String>) {
+    val kept = favorites.filter { path ->
+        buildFavoritePlaylistItem(context, path) != null
+    }
+    if (kept.size == favorites.size) return
+    favorites.clear()
+    favorites.addAll(kept)
 }
 
 class HomeFragment : Fragment() {
@@ -431,6 +513,7 @@ class HomeFragment : Fragment() {
         } catch (_: Exception) { }
         bankBrowserPath.value = uri.toString()
         bankBrowserLoading.value = false
+        showBankBrowser.value = true
         loadBankFolderContentsSaf(uri.toString())
     }
 
@@ -559,6 +642,10 @@ class HomeFragment : Fragment() {
                 pendingExternalUri = uri
             }
         }
+
+        if (isPlaySafVariant() && ::viewModel.isInitialized) {
+            pruneUnavailableFavorites(requireContext(), viewModel.favorites)
+        }
     }
     
     override fun onPause() {
@@ -614,7 +701,9 @@ class HomeFragment : Fragment() {
             if (json != null && json.isNotEmpty()) {
                 val paths = json.split("|||")
                 viewModel.favorites.clear()
-                viewModel.favorites.addAll(paths.filter { File(it).exists() })
+                viewModel.favorites.addAll(paths)
+                pruneUnavailableFavorites(requireContext(), viewModel.favorites)
+                saveFavorites()
             }
         } catch (ex: Exception) {
             android.util.Log.e("HomeFragment", "Failed to load favorites: ${ex.message}")
@@ -634,21 +723,54 @@ class HomeFragment : Fragment() {
                     return@launch
                 }
 
-                val imported = requireContext().contentResolver.openInputStream(uri)?.use { input ->
-                    FavoritesMbaeXml.readFrom(input)
-                } ?: emptyList()
+                val (rawPaths, pathType) = requireContext().contentResolver.openInputStream(uri)?.use { input ->
+                    withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        FavoritesMbaeXml.readFromWithType(input)
+                    }
+                } ?: Pair(emptyList<String>(), null)
+
+                // Determine if conversion is needed.
+                // pathType "saf" → file was created by the Lite/SAF build (content:// URIs).
+                // pathType "raw" or null → file was created by the Full build (filesystem paths).
+                val isSafBuild = isPlaySafVariant()
+                val fileIsSafFormat = pathType == "saf"
+
+                val converted: List<String> = withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    when {
+                        isSafBuild && !fileIsSafFormat -> {
+                            // Full → Lite: try to resolve each filesystem path to a SAF content:// URI.
+                            convertRawPathsToSaf(requireContext(), rawPaths)
+                        }
+                        !isSafBuild && fileIsSafFormat -> {
+                            // Lite → Full: try to resolve each content:// URI to a real filesystem path.
+                            convertSafPathsToRaw(rawPaths)
+                        }
+                        else -> rawPaths // Same format — no conversion needed.
+                    }
+                }
+
+                val convertedCount = converted.size
+                val originalCount = rawPaths.size
 
                 requireActivity().runOnUiThread {
                     viewModel.favorites.clear()
-                    // Keep existing behavior: only store favorites that exist as files.
-                    viewModel.favorites.addAll(imported.filter { File(it).exists() })
+                    viewModel.favorites.addAll(converted)
+                    pruneUnavailableFavorites(requireContext(), viewModel.favorites)
                     saveFavorites()
                     syncVirtualPlaylistToFavoritesOrder()
                     if (navigateToFavorites) {
                         viewModel.showFullPlayer = false
                         viewModel.currentScreen = NavigationScreen.FAVORITES
                     }
-                    Toast.makeText(requireContext(), "Imported ${viewModel.favorites.size} favorites", Toast.LENGTH_SHORT).show()
+                    val msg = when {
+                        convertedCount == 0 && originalCount > 0 ->
+                            "Imported 0 of $originalCount favorites (none could be resolved in this build)"
+                        convertedCount < originalCount ->
+                            "Imported ${viewModel.favorites.size} favorites (${ originalCount - convertedCount} could not be resolved)"
+                        else ->
+                            "Imported ${viewModel.favorites.size} favorites"
+                    }
+                    Toast.makeText(requireContext(), msg, Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
                 android.util.Log.e("HomeFragment", "Failed to import favorites: ${e.message}")
@@ -663,8 +785,10 @@ class HomeFragment : Fragment() {
         android.util.Log.d("HomeFragment", "Exporting favorites to: $uri")
         lifecycleScope.launch {
             try {
+                // Tag with the path type so the other build can detect and convert on import.
+                val pathType = if (isPlaySafVariant()) "saf" else "raw"
                 requireContext().contentResolver.openOutputStream(uri)?.use { output ->
-                    FavoritesMbaeXml.writeCompressedTo(output, viewModel.favorites.toList())
+                    FavoritesMbaeXml.writeCompressedTo(output, viewModel.favorites.toList(), pathType)
                 } ?: throw IOException("Unable to open output stream")
 
                 requireActivity().runOnUiThread {
@@ -692,6 +816,27 @@ class HomeFragment : Fragment() {
                     }
                 }
                 // Don't set these on startup - they'll be set when mixer is created
+            } catch (_: Exception) { }
+        }
+
+        if (!BuildConfig.USE_MANAGE_EXTERNAL_STORAGE && pickedBankFolderUri == null) {
+            try {
+                val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                val lastBankUriString = prefs.getString("last_bank_browser_path", null)
+                if (!lastBankUriString.isNullOrBlank() && lastBankUriString.startsWith("content://")) {
+                    val lastBankUri = Uri.parse(lastBankUriString)
+                    val savedTreeRoot = getSafTreeRootUriString(lastBankUriString)
+                    val hasPerm = requireContext().contentResolver.persistedUriPermissions.any { perm ->
+                        val permUri = perm.uri.toString().trimEnd('/')
+                        val permTreeRoot = getSafTreeRootUriString(permUri)
+                        (permUri == lastBankUriString.trimEnd('/')) ||
+                            (savedTreeRoot != null && permTreeRoot != null && savedTreeRoot == permTreeRoot)
+                    }
+                    if (hasPerm) {
+                        pickedBankFolderUri = lastBankUri
+                        bankBrowserPath.value = lastBankUri.toString()
+                    }
+                }
             } catch (_: Exception) { }
         }
         
@@ -987,7 +1132,12 @@ class HomeFragment : Fragment() {
                             (activity as? MainActivity)?.requestFavoritesExport()
                         },
                         onNavigate = { screen ->
-                            viewModel.currentScreen = screen
+                            val target = if (isPlaySafVariant() && screen == NavigationScreen.SEARCH) {
+                                NavigationScreen.HOME
+                            } else {
+                                screen
+                            }
+                            viewModel.currentScreen = target
                         },
                         onShufflePlay = {
                             shuffleAndPlay()
@@ -1171,9 +1321,15 @@ class HomeFragment : Fragment() {
                         bankBrowserFiles = bankBrowserFiles,
                         bankBrowserLoading = bankBrowserLoading.value,
                         onBrowseBanks = {
-                            // For SAF builds, bank browsing needs its own folder picker and extension set.
-                            if (!BuildConfig.USE_MANAGE_EXTERNAL_STORAGE && pickedBankFolderUri == null) {
-                                (activity as? MainActivity)?.requestBankFolderPicker()
+                            if (!BuildConfig.USE_MANAGE_EXTERNAL_STORAGE) {
+                                if (pickedBankFolderUri == null) {
+                                    (activity as? MainActivity)?.requestBankFolderPicker()
+                                } else {
+                                    val startPath = bankBrowserPath.value.ifBlank { pickedBankFolderUri!!.toString() }
+                                    bankBrowserPath.value = startPath
+                                    navigateToBankFolder(startPath)
+                                    showBankBrowser.value = true
+                                }
                             } else {
                                 val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
                                 val startPath = prefs.getString("last_bank_browser_path", "/") ?: "/"
@@ -1181,6 +1337,9 @@ class HomeFragment : Fragment() {
                                 navigateToBankFolder(startPath)
                                 showBankBrowser.value = true
                             }
+                        },
+                        onPickBankFolder = {
+                            (activity as? MainActivity)?.requestBankFolderPicker()
                         },
                         onBankBrowserNavigate = { path ->
                             navigateToBankFolder(path)
@@ -1248,13 +1407,13 @@ class HomeFragment : Fragment() {
     private fun playNext() {
         if (viewModel.hasNext()) {
             viewModel.playNext()
-            viewModel.getCurrentItem()?.let { startPlayback(it.file) }
+            viewModel.getCurrentItem()?.let { startPlayback(resolveSafFileIfNeeded(it.file)) }
         }
     }
     
     private fun playPrevious() {
         viewModel.playPrevious()
-        viewModel.getCurrentItem()?.let { startPlayback(it.file) }
+        viewModel.getCurrentItem()?.let { startPlayback(resolveSafFileIfNeeded(it.file)) }
     }
     
     private fun playFileFromBrowser(file: File) {
@@ -1271,8 +1430,7 @@ class HomeFragment : Fragment() {
             NavigationScreen.FAVORITES -> {
                 viewModel.playlistModeLabel = "Favorites"
                 viewModel.favorites.mapNotNull { path ->
-                    val f = File(path)
-                    if (f.exists() && !f.isDirectory) PlaylistItem(f) else null
+                    buildFavoritePlaylistItem(requireContext(), path)
                 }
             }
             else -> {
@@ -2431,13 +2589,13 @@ class HomeFragment : Fragment() {
         }
     }
 
-    private fun ensureStorageAccess() {
+    private fun ensureStorageAccess(loadIfReady: Boolean = false) {
         if (BuildConfig.USE_MANAGE_EXTERNAL_STORAGE) {
             checkStoragePermissions()
         } else {
             if (pickedFolderUri == null) {
                 (activity as? MainActivity)?.requestFolderPicker()
-            } else {
+            } else if (loadIfReady) {
                 loadFolderContentsSaf(pickedFolderUri.toString())
             }
         }
@@ -2468,9 +2626,8 @@ class HomeFragment : Fragment() {
         Thread {
             try {
                 val validExtensions = getMusicExtensions(requireContext())
-                val items = folderDoc.listFiles()
-                    .sortedBy { (it.name ?: "").lowercase() }
-                    .mapNotNull { buildPlaylistItemForDocumentFile(it, validExtensions) }
+                val items = listSafChildrenFast(requireContext(), folderUriString, validExtensions)
+                    .sortedWith(compareBy({ !it.isFolder }, { it.title.lowercase() }))
 
                 activity?.runOnUiThread {
                     if (::viewModel.isInitialized) {
@@ -2490,6 +2647,83 @@ class HomeFragment : Fragment() {
                 }
             }
         }.start()
+    }
+
+    /**
+     * Fast SAF child listing using a single batched ContentResolver cursor query instead of
+     * DocumentFile.listFiles() which makes one IPC call per child.
+     * Falls back to DocumentFile enumeration if the cursor approach fails.
+     */
+    private fun listSafChildrenFast(
+        context: Context,
+        folderUriString: String,
+        validExtensions: Set<String>
+    ): List<PlaylistItem> {
+        val folderUri = try { Uri.parse(folderUriString) } catch (_: Exception) { null }
+            ?: return emptyList()
+
+        try {
+            val treeDocId = DocumentsContract.getTreeDocumentId(folderUri)
+            val docId = if (DocumentsContract.isDocumentUri(context, folderUri))
+                DocumentsContract.getDocumentId(folderUri)
+            else
+                treeDocId
+            val treeUri = DocumentsContract.buildTreeDocumentUri(folderUri.authority!!, treeDocId)
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
+
+            val projection = arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+                DocumentsContract.Document.COLUMN_SIZE
+            )
+
+            val results = mutableListOf<PlaylistItem>()
+            context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val nameCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val mimeCol = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                val sizeCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
+
+                while (cursor.moveToNext()) {
+                    val childDocId = cursor.getString(idCol) ?: continue
+                    val name = cursor.getString(nameCol) ?: continue
+                    val mimeType = cursor.getString(mimeCol) ?: ""
+                    val isDir = mimeType == DocumentsContract.Document.MIME_TYPE_DIR
+                    val sizeBytes = if (sizeCol >= 0 && !cursor.isNull(sizeCol)) cursor.getLong(sizeCol) else -1L
+                    val childUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, childDocId)
+
+                    if (isDir) {
+                        val placeholder = File(context.cacheDir, "saf_folder_${childUri.hashCode()}")
+                        results.add(PlaylistItem(
+                            file = placeholder,
+                            uri = childUri,
+                            title = name,
+                            path = childUri.toString(),
+                            isFolder = true
+                        ))
+                    } else {
+                        val ext = name.substringAfterLast('.', "").lowercase()
+                        if (ext !in validExtensions) continue
+                        val cacheFile = safCacheFileForUri(childUri, name)
+                        safUriMap[cacheFile.absolutePath] = childUri
+                        results.add(PlaylistItem(
+                            file = cacheFile,
+                            uri = childUri,
+                            title = name,
+                            path = childUri.toString(),
+                            isFolder = false,
+                            sizeBytes = sizeBytes
+                        ))
+                    }
+                }
+            }
+            return results
+        } catch (_: Exception) {
+            // Fall back to DocumentFile API if the fast path fails
+            val folderDoc = getSafDocumentFile(folderUriString) ?: return emptyList()
+            return folderDoc.listFiles().mapNotNull { buildPlaylistItemForDocumentFile(it, validExtensions) }
+        }
     }
 
     private fun buildPlaylistItemForDocumentFile(doc: DocumentFile, validExtensions: Set<String>): PlaylistItem? {
@@ -2515,7 +2749,8 @@ class HomeFragment : Fragment() {
             uri = doc.uri,
             title = name,
             path = doc.uri.toString(),
-            isFolder = false
+            isFolder = false,
+            sizeBytes = doc.length()
         )
     }
 
@@ -2587,6 +2822,112 @@ class HomeFragment : Fragment() {
         } catch (_: Exception) {
             null
         }
+    }
+
+    /**
+     * Convert Full-build filesystem paths to SAF content:// URIs by searching the SAF-granted trees.
+     * Each path is matched against all files found under persisted-permission folder trees.
+     * Only paths whose filename is found inside a granted tree are kept.
+     */
+    private fun convertRawPathsToSaf(context: Context, rawPaths: List<String>): List<String> {
+        if (rawPaths.isEmpty()) return emptyList()
+        val results = mutableListOf<String>()
+        val validExtensions = getMusicExtensions(context)
+
+        // Build a map of filename → content URI by scanning all granted trees.
+        val nameToUri = mutableMapOf<String, Uri>()
+        context.contentResolver.persistedUriPermissions
+            .filter { it.isReadPermission && it.uri.scheme == "content" }
+            .forEach { perm ->
+                val treeDoc = DocumentFile.fromTreeUri(context, perm.uri) ?: return@forEach
+                collectDocumentFileNames(context, treeDoc, validExtensions, nameToUri)
+            }
+
+        for (path in rawPaths) {
+            val filename = File(path).name
+            val uri = nameToUri[filename]
+            if (uri != null) {
+                results.add(uri.toString())
+            } else {
+                android.util.Log.d("HomeFragment", "convertRawPathsToSaf: no SAF match for $filename")
+            }
+        }
+        return results
+    }
+
+    /** Recursively scans a DocumentFile tree and populates filename → URI map. */
+    private fun collectDocumentFileNames(
+        context: Context,
+        parent: DocumentFile,
+        validExtensions: Set<String>,
+        out: MutableMap<String, Uri>
+    ) {
+        try {
+            val childUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+                parent.uri,
+                DocumentsContract.getDocumentId(parent.uri)
+            )
+            val projection = arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE
+            )
+            context.contentResolver.query(childUri, projection, null, null, null)?.use { cursor ->
+                val idCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                val nameCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val mimeCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+                while (cursor.moveToNext()) {
+                    val docId = cursor.getString(idCol) ?: continue
+                    val name = cursor.getString(nameCol) ?: continue
+                    val mime = cursor.getString(mimeCol) ?: continue
+                    val docUri = DocumentsContract.buildDocumentUriUsingTree(parent.uri, docId)
+                    if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                        val subDoc = DocumentFile.fromTreeUri(context, docUri) ?: continue
+                        collectDocumentFileNames(context, subDoc, validExtensions, out)
+                    } else {
+                        val ext = name.substringAfterLast('.', "").lowercase()
+                        if (ext in validExtensions) {
+                            out.putIfAbsent(name, docUri)
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) { /* skip inaccessible trees */ }
+    }
+
+    /**
+     * Convert SAF content:// URI paths to filesystem paths (for use in the Full build).
+     * Only URIs whose physical path can be determined and exists on disk are kept.
+     */
+    private fun convertSafPathsToRaw(safPaths: List<String>): List<String> {
+        val results = mutableListOf<String>()
+        for (uriString in safPaths) {
+            if (!uriString.startsWith("content://")) {
+                results.add(uriString) // Already a raw path, keep as-is.
+                continue
+            }
+            try {
+                val uri = Uri.parse(uriString)
+                // Try to extract the document ID path component and map to /storage/...
+                val docId = DocumentsContract.getDocumentId(uri)
+                // docId often looks like "primary:Music/song.mid" or "SDCARD:path/file.mid"
+                val colonIdx = docId.indexOf(':')
+                if (colonIdx >= 0) {
+                    val volume = docId.substring(0, colonIdx).lowercase()
+                    val relativePath = docId.substring(colonIdx + 1)
+                    val candidate = when (volume) {
+                        "primary" -> File("/storage/emulated/0/$relativePath")
+                        else -> File("/storage/$volume/$relativePath")
+                    }
+                    if (candidate.exists() && candidate.isFile) {
+                        results.add(candidate.absolutePath)
+                        continue
+                    }
+                }
+                android.util.Log.d("HomeFragment", "convertSafPathsToRaw: could not resolve $uriString")
+            } catch (_: Exception) { }
+        }
+        return results
     }
 
     private fun collectSafMusicFiles(root: DocumentFile, recursive: Boolean, validExtensions: Set<String>): List<PlaylistItem> {
@@ -2690,9 +3031,8 @@ class HomeFragment : Fragment() {
         bankBrowserLoading.value = true
         Thread {
             try {
-                val items = folderDoc.listFiles()
-                    .sortedBy { (it.name ?: "").lowercase() }
-                    .mapNotNull { buildPlaylistItemForDocumentFile(it, BANK_EXTENSIONS) }
+                val items = listSafChildrenFast(requireContext(), folderUriString, BANK_EXTENSIONS)
+                    .sortedWith(compareBy({ !it.isFolder }, { it.title.lowercase() }))
 
                 activity?.runOnUiThread {
                     bankBrowserFiles.clear()
@@ -2873,7 +3213,20 @@ class HomeFragment : Fragment() {
             return
         }
 
-        val bankBytes = runCatching { file.length() }.getOrDefault(0L)
+        val resolvedFile = resolveSafFileIfNeeded(file)
+        if (!resolvedFile.exists() || !resolvedFile.isFile) {
+            showBankBrowser.value = false
+            postToMain {
+                isLoadingBank.value = false
+                context?.let {
+                    Toast.makeText(it, "Unable to access selected bank file", Toast.LENGTH_SHORT).show()
+                }
+            }
+            bankSwapInProgress.set(false)
+            return
+        }
+
+        val bankBytes = runCatching { resolvedFile.length() }.getOrDefault(0L)
         if (bankBytes >= BANK_SIZE_LIMIT_BYTES) {
             showBankBrowser.value = false
             postToMain {
@@ -2913,16 +3266,20 @@ class HomeFragment : Fragment() {
         Thread {
             var loadStatus = -1
             try {
-                val originalName = file.name
+                val originalName = resolvedFile.name
                 val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
                 
                 // Save the parent directory for next time the bank browser is opened
-                val parentPath = file.parent ?: "/sdcard"
+                val parentPath = if (!BuildConfig.USE_MANAGE_EXTERNAL_STORAGE) {
+                    bankBrowserPath.value
+                } else {
+                    resolvedFile.parent ?: "/sdcard"
+                }
                 prefs.edit().putString("last_bank_browser_path", parentPath).apply()
                 
                 // If mixer doesn't exist, just save the path for lazy loading
                 if (Mixer.getMixer() == null) {
-                    prefs.edit().putString("last_bank_path", file.absolutePath).apply()
+                    prefs.edit().putString("last_bank_path", resolvedFile.absolutePath).apply()
                     postToMain {
                         currentBankName.value = originalName
                         isLoadingBank.value = false
@@ -2932,7 +3289,7 @@ class HomeFragment : Fragment() {
                 }
                 
                 // Mixer exists, load bank now
-                val isHsbTarget = file.extension.equals("hsb", ignoreCase = true) || file.extension.equals("zsb", ignoreCase = true)
+                val isHsbTarget = resolvedFile.extension.equals("hsb", ignoreCase = true) || resolvedFile.extension.equals("zsb", ignoreCase = true)
 
                 // HSB bank swapping requires a full mixer teardown/reopen on Android.
                 // Only do this when a Song is active (banks don't affect Sound playback).
@@ -3002,11 +3359,11 @@ class HomeFragment : Fragment() {
                 }
 
                 // Avoid OOM on large SF2/DLS banks: load by path (native loads from disk)
-                val r = Mixer.addBankFromFile(file.absolutePath)
+                val r = Mixer.addBankFromFile(resolvedFile.absolutePath)
                 loadStatus = r
                 
                 if (r == 0) {
-                    prefs.edit().putString("last_bank_path", file.absolutePath).apply()
+                    prefs.edit().putString("last_bank_path", resolvedFile.absolutePath).apply()
                     
                     postToMain {
                         currentBankName.value = originalName
@@ -3649,10 +4006,30 @@ fun NewMusicPlayerScreen(
     bankBrowserFiles: List<PlaylistItem>,
     bankBrowserLoading: Boolean,
     onBrowseBanks: () -> Unit,
+    onPickBankFolder: () -> Unit,
     onBankBrowserNavigate: (String) -> Unit,
     onBankBrowserSelect: (File) -> Unit,
     onBankBrowserClose: () -> Unit
 ) {
+    val searchEnabled = BuildConfig.USE_MANAGE_EXTERNAL_STORAGE
+    val favoritesEnabled = true
+
+    LaunchedEffect(searchEnabled, viewModel.currentScreen) {
+        if (!searchEnabled &&
+            viewModel.currentScreen == NavigationScreen.SEARCH
+        ) {
+            onNavigate(NavigationScreen.HOME)
+        }
+    }
+
+    val activeScreen = if (!searchEnabled &&
+        viewModel.currentScreen == NavigationScreen.SEARCH
+    ) {
+        NavigationScreen.HOME
+    } else {
+        viewModel.currentScreen
+    }
+
     // State for delete confirmation dialog
     var showDeleteDialog by remember { mutableStateOf(false) }
     var deleteTargetPath by remember { mutableStateOf<String?>(null) }
@@ -3674,7 +4051,7 @@ fun NewMusicPlayerScreen(
                         } else if (viewModel.showFullPlayer) {
                             "Now Playing"
                         } else {
-                            when (viewModel.currentScreen) {
+                            when (activeScreen) {
                                 NavigationScreen.HOME -> "Home"
                                 NavigationScreen.SEARCH -> "Search"
                                 NavigationScreen.FAVORITES -> "Favorites"
@@ -3691,12 +4068,12 @@ fun NewMusicPlayerScreen(
                         
                         // Dynamic subtitle based on current screen or bank browser
                         val subtitleText = if (showBankBrowser) {
-                            "Choose a sound bank"
+                            getDisplayPath(bankBrowserPath)
                         } else if (viewModel.showFullPlayer) {
                             val label = viewModel.playlistModeLabel
                             "Playlist: $label"
                         } else {
-                            when (viewModel.currentScreen) {
+                            when (activeScreen) {
                                 NavigationScreen.HOME -> {
                                     getDisplayPath(viewModel.currentFolderPath)
                                 }
@@ -3731,6 +4108,15 @@ fun NewMusicPlayerScreen(
                 actions = {
                     // Close button for Bank Browser
                     if (showBankBrowser) {
+                        if (!BuildConfig.USE_MANAGE_EXTERNAL_STORAGE) {
+                            IconButton(onClick = onPickBankFolder, enabled = !isLoadingBank) {
+                                Icon(
+                                    Icons.Filled.FolderOpen,
+                                    contentDescription = "Choose Folder",
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
                         IconButton(onClick = onBankBrowserClose, enabled = !isLoadingBank) {
                             Icon(
                                 Icons.Filled.Close,
@@ -3740,7 +4126,7 @@ fun NewMusicPlayerScreen(
                         }
                     }
                     // Close button for File Types page
-                    else if (!viewModel.showFullPlayer && viewModel.currentScreen == NavigationScreen.FILE_TYPES) {
+                    else if (!viewModel.showFullPlayer && activeScreen == NavigationScreen.FILE_TYPES) {
                         IconButton(onClick = { onNavigate(NavigationScreen.SETTINGS) }, enabled = !isLoadingBank) {
                             Icon(
                                 Icons.Filled.Close,
@@ -3750,7 +4136,7 @@ fun NewMusicPlayerScreen(
                         }
                     }
                     // Close button for Custom Reverb page
-                    else if (!viewModel.showFullPlayer && viewModel.currentScreen == NavigationScreen.CUSTOM_REVERB) {
+                    else if (!viewModel.showFullPlayer && activeScreen == NavigationScreen.CUSTOM_REVERB) {
                         IconButton(onClick = { onNavigate(NavigationScreen.SETTINGS) }, enabled = !isLoadingBank) {
                             Icon(
                                 Icons.Filled.Close,
@@ -3760,7 +4146,7 @@ fun NewMusicPlayerScreen(
                         }
                     }
                     // Build Index button for Search screen
-                    else if (!viewModel.showFullPlayer && viewModel.currentScreen == NavigationScreen.SEARCH) {
+                    else if (searchEnabled && !viewModel.showFullPlayer && activeScreen == NavigationScreen.SEARCH) {
                         val indexingProgress by viewModel.getIndexingProgress()?.collectAsState() ?: remember { mutableStateOf(IndexingProgress()) }
 
                         // Sort icon (left of trash can)
@@ -3837,7 +4223,7 @@ fun NewMusicPlayerScreen(
                     }
 
                     // Import/Export buttons for Favorites screen
-                    else if (!viewModel.showFullPlayer && viewModel.currentScreen == NavigationScreen.FAVORITES) {
+                    else if (favoritesEnabled && !viewModel.showFullPlayer && activeScreen == NavigationScreen.FAVORITES) {
                         IconButton(
                             onClick = onImportFavorites,
                             enabled = !isLoadingBank
@@ -3860,7 +4246,7 @@ fun NewMusicPlayerScreen(
                     }
 
                     // Sort button for Home screen (placed where Search has the reindex control)
-                    else if (!viewModel.showFullPlayer && viewModel.currentScreen == NavigationScreen.HOME) {
+                    else if (!viewModel.showFullPlayer && activeScreen == NavigationScreen.HOME) {
                         IconButton(
                             onClick = {
                                 viewModel.cycleHomeSortMode()
@@ -4001,7 +4387,7 @@ fun NewMusicPlayerScreen(
                 ) {
                     BottomNavigationItem(
                         icon = { Icon(Icons.Filled.Home, contentDescription = "Home") },
-                        selected = !viewModel.showFullPlayer && viewModel.currentScreen == NavigationScreen.HOME,
+                        selected = !viewModel.showFullPlayer && activeScreen == NavigationScreen.HOME,
                         onClick = { 
                             viewModel.showFullPlayer = false
                             onNavigate(NavigationScreen.HOME)
@@ -4010,31 +4396,35 @@ fun NewMusicPlayerScreen(
                         selectedContentColor = MaterialTheme.colors.primary,
                         unselectedContentColor = Color.Gray
                     )
-                    BottomNavigationItem(
-                        icon = { Icon(Icons.Filled.Search, contentDescription = "Search") },
-                        selected = !viewModel.showFullPlayer && viewModel.currentScreen == NavigationScreen.SEARCH,
-                        onClick = {
-                            viewModel.showFullPlayer = false
-                            onNavigate(NavigationScreen.SEARCH)
-                        },
-                        enabled = !isLoadingBank,
-                        selectedContentColor = MaterialTheme.colors.primary,
-                        unselectedContentColor = Color.Gray
-                    )
-                    BottomNavigationItem(
-                        icon = { Icon(Icons.Filled.Favorite, contentDescription = "Favorites") },
-                        selected = !viewModel.showFullPlayer && viewModel.currentScreen == NavigationScreen.FAVORITES,
-                        onClick = {
-                            viewModel.showFullPlayer = false
-                            onNavigate(NavigationScreen.FAVORITES)
-                        },
-                        enabled = !isLoadingBank,
-                        selectedContentColor = MaterialTheme.colors.primary,
-                        unselectedContentColor = Color.Gray
-                    )
+                    if (searchEnabled) {
+                        BottomNavigationItem(
+                            icon = { Icon(Icons.Filled.Search, contentDescription = "Search") },
+                            selected = !viewModel.showFullPlayer && activeScreen == NavigationScreen.SEARCH,
+                            onClick = {
+                                viewModel.showFullPlayer = false
+                                onNavigate(NavigationScreen.SEARCH)
+                            },
+                            enabled = !isLoadingBank,
+                            selectedContentColor = MaterialTheme.colors.primary,
+                            unselectedContentColor = Color.Gray
+                        )
+                    }
+                    if (favoritesEnabled) {
+                        BottomNavigationItem(
+                            icon = { Icon(Icons.Filled.Favorite, contentDescription = "Favorites") },
+                            selected = !viewModel.showFullPlayer && activeScreen == NavigationScreen.FAVORITES,
+                            onClick = {
+                                viewModel.showFullPlayer = false
+                                onNavigate(NavigationScreen.FAVORITES)
+                            },
+                            enabled = !isLoadingBank,
+                            selectedContentColor = MaterialTheme.colors.primary,
+                            unselectedContentColor = Color.Gray
+                        )
+                    }
                     BottomNavigationItem(
                         icon = { Icon(Icons.Filled.Settings, contentDescription = "Settings") },
-                        selected = !viewModel.showFullPlayer && (viewModel.currentScreen == NavigationScreen.SETTINGS || viewModel.currentScreen == NavigationScreen.FILE_TYPES),
+                        selected = !viewModel.showFullPlayer && (activeScreen == NavigationScreen.SETTINGS || activeScreen == NavigationScreen.FILE_TYPES),
                         onClick = {
                             viewModel.showFullPlayer = false
                             onNavigate(NavigationScreen.SETTINGS)
@@ -4055,12 +4445,13 @@ fun NewMusicPlayerScreen(
                     .padding(paddingValues)
                     .background(MaterialTheme.colors.background)
             ) {
-                when (viewModel.currentScreen) {
+                when (activeScreen) {
                 NavigationScreen.HOME -> HomeScreenContent(
                     viewModel = viewModel,
                     loading = loading,
                     onPlaylistItemClick = onPlaylistItemClick,
                     onToggleFavorite = onToggleFavorite,
+                    showFavorites = favoritesEnabled,
                     onAddFolder = onAddFolder,
                     onShufflePlay = onShufflePlay,
                     onNavigateToFolder = onNavigateToFolder,
@@ -4073,6 +4464,7 @@ fun NewMusicPlayerScreen(
                     viewModel = viewModel,
                     onPlaylistItemClick = onPlaylistItemClick,
                     onToggleFavorite = onToggleFavorite,
+                    showFavorites = favoritesEnabled,
                     onAddToPlaylist = onAddToPlaylist,
                     searchResultLimit = searchResultLimit
                 )
@@ -4105,6 +4497,7 @@ fun NewMusicPlayerScreen(
                     baeScriptEnabled = baeScriptEnabled,
                     baeScriptSource = baeScriptSource,
                     searchResultLimit = searchResultLimit,
+                    showSearchFeatures = searchEnabled,
                     onLoadBuiltin = onLoadBuiltin,
                     onReverbChange = onReverbChange,
                     onCurveChange = onCurveChange,
@@ -4124,7 +4517,19 @@ fun NewMusicPlayerScreen(
                             Toast.makeText(context, "Please start playback first to access custom reverb settings", Toast.LENGTH_SHORT).show()
                         }
                     },
-                    onCustomReverbSync = { viewModel.bumpCustomReverbSync() }
+                    onCustomReverbSync = { viewModel.bumpCustomReverbSync() },
+                    onAddFolder = onAddFolder,
+                    onRemovePersistedFolder = { folderUri ->
+                        val uri = Uri.parse(folderUri)
+                        runCatching {
+                            context.contentResolver.releasePersistableUriPermission(
+                                uri,
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                            )
+                        }
+                        pruneUnavailableFavorites(context, viewModel.favorites)
+                        saveFavorites(context, viewModel.favorites)
+                    }
                 )
                 NavigationScreen.FILE_TYPES -> FileTypesScreenContent(
                     enabledExtensions = enabledExtensions,
@@ -4151,6 +4556,7 @@ fun NewMusicPlayerScreen(
                 onDrag = onDrag,
                 onVolumeChange = onVolumeChange,
                 onToggleFavorite = onToggleFavorite,
+                showFavorites = favoritesEnabled,
                 exportCodec = exportCodec,
                 onExportRequest = onExportRequest,
                 getMidiChannelMuteStatus = getMidiChannelMuteStatus,
@@ -4202,6 +4608,8 @@ fun NewMusicPlayerScreen(
                     onNavigate = onBankBrowserNavigate,
                     onSelectBank = onBankBrowserSelect,
                     onLoadBuiltin = onLoadBuiltin,
+                    showPickFolderAction = !BuildConfig.USE_MANAGE_EXTERNAL_STORAGE,
+                    onPickFolder = onPickBankFolder,
                     onClose = onBankBrowserClose
                 )
             }
@@ -4353,6 +4761,7 @@ fun FullPlayerScreen(
     onDrag: (Int) -> Unit,
     onVolumeChange: (Int) -> Unit,
     onToggleFavorite: (String) -> Unit,
+    showFavorites: Boolean,
     exportCodec: Int,
     onExportRequest: (String, Int) -> Unit,
     getMidiChannelMuteStatus: () -> BooleanArray?,
@@ -4390,6 +4799,7 @@ fun FullPlayerScreen(
             onDrag = onDrag,
             onVolumeChange = onVolumeChange,
             onToggleFavorite = onToggleFavorite,
+            showFavorites = showFavorites,
             exportCodec = exportCodec,
             onExportRequest = onExportRequest,
             getMidiChannelMuteStatus = getMidiChannelMuteStatus,
@@ -4412,6 +4822,7 @@ fun FullPlayerScreen(
             onDrag = onDrag,
             onVolumeChange = onVolumeChange,
             onToggleFavorite = onToggleFavorite,
+            showFavorites = showFavorites,
             exportCodec = exportCodec,
             onExportRequest = onExportRequest,
             getMidiChannelMuteStatus = getMidiChannelMuteStatus,
@@ -4437,6 +4848,7 @@ private fun PortraitPlayerLayout(
     onDrag: (Int) -> Unit,
     onVolumeChange: (Int) -> Unit,
     onToggleFavorite: (String) -> Unit,
+    showFavorites: Boolean,
     exportCodec: Int,
     onExportRequest: (String, Int) -> Unit,
     getMidiChannelMuteStatus: () -> BooleanArray?,
@@ -4496,14 +4908,16 @@ private fun PortraitPlayerLayout(
             }
             
             // Favorite button
-            currentItem?.let { item ->
-                val isFavorite = viewModel.isFavorite(item.path)
-                IconButton(onClick = { onToggleFavorite(item.path) }) {
-                    Icon(
-                        if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                        contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
-                        tint = if (isFavorite) MaterialTheme.colors.primary else MaterialTheme.colors.onBackground
-                    )
+            if (showFavorites) {
+                currentItem?.let { item ->
+                    val isFavorite = viewModel.isFavorite(item.path)
+                    IconButton(onClick = { onToggleFavorite(item.path) }) {
+                        Icon(
+                            if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                            contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                            tint = if (isFavorite) MaterialTheme.colors.primary else MaterialTheme.colors.onBackground
+                        )
+                    }
                 }
             }
         }
@@ -4931,6 +5345,7 @@ private fun LandscapePlayerLayout(
     onDrag: (Int) -> Unit,
     onVolumeChange: (Int) -> Unit,
     onToggleFavorite: (String) -> Unit,
+    showFavorites: Boolean,
     exportCodec: Int,
     onExportRequest: (String, Int) -> Unit,
     getMidiChannelMuteStatus: () -> BooleanArray?,
@@ -4989,14 +5404,16 @@ private fun LandscapePlayerLayout(
             }
             
             // Favorite button
-            currentItem?.let { item ->
-                val isFavorite = viewModel.isFavorite(item.path)
-                IconButton(onClick = { onToggleFavorite(item.path) }) {
-                    Icon(
-                        if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                        contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
-                        tint = if (isFavorite) MaterialTheme.colors.primary else MaterialTheme.colors.onBackground
-                    )
+            if (showFavorites) {
+                currentItem?.let { item ->
+                    val isFavorite = viewModel.isFavorite(item.path)
+                    IconButton(onClick = { onToggleFavorite(item.path) }) {
+                        Icon(
+                            if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                            contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                            tint = if (isFavorite) MaterialTheme.colors.primary else MaterialTheme.colors.onBackground
+                        )
+                    }
                 }
             }
         }
@@ -5297,6 +5714,7 @@ fun HomeScreenContent(
     loading: Boolean,
     onPlaylistItemClick: (File) -> Unit,
     onToggleFavorite: (String) -> Unit,
+    showFavorites: Boolean,
     onAddFolder: () -> Unit,
     onShufflePlay: () -> Unit,
     onNavigateToFolder: (String) -> Unit,
@@ -5308,6 +5726,12 @@ fun HomeScreenContent(
     val listState = rememberLazyListState()
     var refreshing by remember { mutableStateOf(false) }
     val refreshScope = rememberCoroutineScope()
+
+    // Scroll to top whenever the displayed folder changes.
+    LaunchedEffect(viewModel.currentFolderPath) {
+        listState.scrollToItem(0)
+    }
+
     val pullRefreshState = rememberPullRefreshState(
         refreshing = refreshing,
         onRefresh = {
@@ -5344,6 +5768,7 @@ fun HomeScreenContent(
         derivedStateOf { viewModel.getCurrentItem()?.file?.absolutePath }
     }
     val isPlaying by remember { derivedStateOf { viewModel.isPlaying } }
+    val showSelectFolderRow = !BuildConfig.USE_MANAGE_EXTERNAL_STORAGE
 
     // If a song is playing and the user changes sort, jump to the current song in the list.
     LaunchedEffect(viewModel.homeSortMode) {
@@ -5357,7 +5782,7 @@ fun HomeScreenContent(
 
         val currentFolderPath = viewModel.currentFolderPath
         val hasParentItem = currentFolderPath != null && currentFolderPath != "/" && File(currentFolderPath).parent != null
-        val baseOffset = (if (hasParentItem) 1 else 0) + folderAndSpecialItems.size
+        val baseOffset = (if (showSelectFolderRow) 1 else 0) + (if (hasParentItem) 1 else 0) + folderAndSpecialItems.size
         listState.animateScrollToItem((baseOffset + idxInSongs).coerceAtLeast(0))
     }
     
@@ -5396,6 +5821,39 @@ fun HomeScreenContent(
                         ,
                         state = listState
                     ) {
+                    if (showSelectFolderRow) {
+                        item(key = "select_folder") {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onAddFolder() },
+                                color = Color.Transparent
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Filled.FolderOpen,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colors.primary,
+                                        modifier = Modifier.size(40.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(
+                                        text = "Select Folder",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colors.onBackground
+                                    )
+                                }
+                            }
+                            Divider(color = Color.Gray.copy(alpha = 0.2f))
+                        }
+                    }
+
                     // Show parent directory ".." option
                     viewModel.currentFolderPath?.let { currentPath ->
                         val parentPath = if (currentPath.startsWith("content://")) {
@@ -5507,6 +5965,7 @@ fun HomeScreenContent(
                                 isFavorite = favoritesSet.contains(item.path),
                                 isCurrent = (currentLoadedPath != null && currentLoadedPath == item.file.absolutePath),
                                 isPlaying = isPlaying,
+                                showFavoriteButton = showFavorites,
                                 onClick = { onPlaylistItemClick(item.file) },
                                 onToggleFavorite = { onToggleFavorite(item.path) },
                                 onAddToPlaylist = { onAddToPlaylist(item.file) }
@@ -5534,6 +5993,7 @@ fun SearchScreenContent(
     viewModel: MusicPlayerViewModel,
     onPlaylistItemClick: (File) -> Unit,
     onToggleFavorite: (String) -> Unit,
+    showFavorites: Boolean,
     onAddToPlaylist: (File) -> Unit,
     searchResultLimit: Int
 ) {
@@ -5762,6 +6222,7 @@ fun SearchScreenContent(
                                 isFavorite = viewModel.isFavorite(item.path),
                                 isCurrent = (currentLoadedPath != null && currentLoadedPath == item.file.absolutePath),
                                 isPlaying = isPlaying,
+                                showFavoriteButton = showFavorites,
                                 onClick = { onPlaylistItemClick(item.file) },
                                 onToggleFavorite = { onToggleFavorite(item.path) },
                                 onAddToPlaylist = { onAddToPlaylist(item.file) }
@@ -5800,6 +6261,7 @@ fun SearchScreenContent(
                             isFavorite = viewModel.isFavorite(item.path),
                             isCurrent = (currentLoadedPath != null && currentLoadedPath == item.file.absolutePath),
                             isPlaying = isPlaying,
+                            showFavoriteButton = showFavorites,
                             onClick = { onPlaylistItemClick(item.file) },
                             onToggleFavorite = { onToggleFavorite(item.path) },
                             onAddToPlaylist = { onAddToPlaylist(item.file) }
@@ -5823,15 +6285,11 @@ fun FavoritesScreenContent(
     onMoveFavorite: (from: Int, to: Int) -> Unit,
     onReorderFinished: () -> Unit
 ) {
+    val context = LocalContext.current
+
     // Keep the list clean so indices match and drag-reorder stays consistent.
     LaunchedEffect(Unit) {
-        val missing = viewModel.favorites.filter { path ->
-            val f = File(path)
-            !f.exists() || f.isDirectory
-        }
-        if (missing.isNotEmpty()) {
-            viewModel.favorites.removeAll(missing)
-        }
+        pruneUnavailableFavorites(context, viewModel.favorites)
     }
 
     val itemHeights = remember { mutableStateMapOf<String, Int>() }
@@ -5856,8 +6314,8 @@ fun FavoritesScreenContent(
                     items = viewModel.favorites,
                     key = { _, path -> path }
                 ) { index, path ->
-                    val file = remember(path) { File(path) }
-                    val item = remember(path) { PlaylistItem(file) }
+                    val item = remember(path) { buildFavoritePlaylistItem(context, path) }
+                    if (item == null) return@itemsIndexed
                     val isDragging = draggingIndex == index
                     val isCurrent = viewModel.getCurrentItem()?.file?.absolutePath == item.file.absolutePath
                     val isPlaying = viewModel.isPlaying
@@ -6117,7 +6575,7 @@ private fun sortPlaylistItems(items: List<PlaylistItem>, sortMode: SortMode): Li
     if (items.size <= 1) return items
 
     fun safeSize(item: PlaylistItem): Long {
-        return runCatching { item.file.length() }.getOrDefault(-1L)
+        return resolvePlaylistItemSize(item)
     }
 
     return when (sortMode) {
@@ -6168,12 +6626,18 @@ private fun SortModeIcon(sortMode: SortMode) {
 
 private const val BANK_SIZE_LIMIT_BYTES: Long = 4L * 1024L * 1024L * 1024L
 
+private fun resolvePlaylistItemSize(item: PlaylistItem): Long {
+    if (item.sizeBytes >= 0L) return item.sizeBytes
+    return runCatching { item.file.length() }.getOrDefault(-1L)
+}
+
 @Composable
 fun FolderSongListItem(
     item: PlaylistItem,
     isFavorite: Boolean,
     isCurrent: Boolean = false,
     isPlaying: Boolean = false,
+    showFavoriteButton: Boolean = true,
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit,
     onAddToPlaylist: () -> Unit
@@ -6232,7 +6696,7 @@ fun FolderSongListItem(
                     .clickable(onClick = onClick)
             ) {
                 val fileSizeBytes = remember(item.path) {
-                    runCatching { item.file.length() }.getOrDefault(-1L)
+                    resolvePlaylistItemSize(item)
                 }
                 val fileSizeText = remember(fileSizeBytes) {
                     if (fileSizeBytes > 0L) formatFileSize(fileSizeBytes) else ""
@@ -6272,13 +6736,15 @@ fun FolderSongListItem(
                 }
             }
             
-            // Favorite button
-            IconButton(onClick = onToggleFavorite) {
-                Icon(
-                    if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                    contentDescription = "Favorite",
-                    tint = if (isFavorite) MaterialTheme.colors.primary else Color.Gray
-                )
+            if (showFavoriteButton) {
+                // Favorite button
+                IconButton(onClick = onToggleFavorite) {
+                    Icon(
+                        if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                        contentDescription = "Favorite",
+                        tint = if (isFavorite) MaterialTheme.colors.primary else Color.Gray
+                    )
+                }
             }
         }
     }
@@ -6326,6 +6792,7 @@ fun SettingsScreenContent(
     baeScriptEnabled: Boolean,
     baeScriptSource: String,
     searchResultLimit: Int,
+    showSearchFeatures: Boolean,
     onLoadBuiltin: () -> Unit,
     onReverbChange: (Int) -> Unit,
     onCurveChange: (Int) -> Unit,
@@ -6339,7 +6806,9 @@ fun SettingsScreenContent(
     onOpenFileTypes: () -> Unit,
     onBrowseBanks: () -> Unit,
     onOpenCustomReverb: () -> Unit,
-    onCustomReverbSync: () -> Unit
+    onCustomReverbSync: () -> Unit,
+    onAddFolder: () -> Unit,
+    onRemovePersistedFolder: (String) -> Unit
 ) {
     val context = LocalContext.current
     val builtInReverbOptions = BUILT_IN_REVERB_OPTIONS
@@ -6348,6 +6817,146 @@ fun SettingsScreenContent(
     var showSavePresetDialog by remember { mutableStateOf(false) }
     var savePresetName by remember { mutableStateOf(activePresetName ?: "") }
     var showDeletePresetDialog by remember { mutableStateOf(false) }
+    var showFolderManagerDialog by remember { mutableStateOf(false) }
+    var folderManagerRefreshTick by remember { mutableStateOf(0) }
+    val persistedFolderEntries = remember(folderManagerRefreshTick) { getPersistedSafFolderEntries(context) }
+
+    @Composable
+    fun FolderAccessManagerDialog() {
+        if (!showFolderManagerDialog) return
+
+        AlertDialog(
+            onDismissRequest = { showFolderManagerDialog = false },
+            title = { Text("Manage Folder Access") },
+            text = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 420.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        text = "These folders have persisted access. Removing one revokes access and clears any favorites from that folder.",
+                        style = MaterialTheme.typography.body2,
+                        color = MaterialTheme.colors.onSurface.copy(alpha = 0.7f)
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    if (persistedFolderEntries.isEmpty()) {
+                        Text(
+                            text = "No persisted folders yet.",
+                            style = MaterialTheme.typography.body2,
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.7f)
+                        )
+                    } else {
+                        persistedFolderEntries.forEach { entry ->
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 8.dp),
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colors.surface
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text(
+                                        text = entry.label,
+                                        style = MaterialTheme.typography.body1.copy(fontWeight = FontWeight.SemiBold),
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = entry.uri.toString(),
+                                        style = MaterialTheme.typography.caption,
+                                        color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    TextButton(
+                                        onClick = {
+                                            onRemovePersistedFolder(entry.uri.toString())
+                                            folderManagerRefreshTick++
+                                        }
+                                    ) {
+                                        Text("Forget")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showFolderManagerDialog = false }) {
+                    Text("Close")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = onAddFolder) {
+                    Text("Add Folder")
+                }
+            }
+        )
+    }
+
+    @Composable
+    fun FolderAccessManagerCard() {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = 4.dp,
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                ) {
+                    Icon(
+                        Icons.Filled.FolderOpen,
+                        contentDescription = null,
+                        tint = MaterialTheme.colors.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Folder Access",
+                        style = MaterialTheme.typography.h6,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colors.primary
+                    )
+                }
+
+                Text(
+                    text = "Review persisted folders and revoke access when you no longer need it.",
+                    style = MaterialTheme.typography.caption,
+                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f)
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = { showFolderManagerDialog = true },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Filled.Folder, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Manage")
+                    }
+                    Button(
+                        onClick = onAddFolder,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Add Folder")
+                    }
+                }
+            }
+        }
+    }
 
     val importNeoReverbLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -6958,76 +7567,82 @@ fun SettingsScreenContent(
         }
 
         Spacer(modifier = Modifier.height(16.dp))
-        
-        // Search Result Limit Section (full width in landscape)
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = 4.dp,
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(bottom = 12.dp)
-                ) {
-                    Icon(
-                        Icons.Filled.Search,
-                        contentDescription = null,
-                        tint = MaterialTheme.colors.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Search Result Limit",
-                        style = MaterialTheme.typography.h6,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colors.primary
-                    )
-                }
-                
-                Box {
-                    OutlinedButton(
-                        onClick = { searchLimitExpanded = true },
-                        modifier = Modifier.fillMaxWidth()
+
+        FolderAccessManagerCard()
+
+        if (showSearchFeatures) {
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Search Result Limit Section (full width in landscape)
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                elevation = 4.dp,
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(bottom = 12.dp)
                     ) {
-                        Text(
-                            text = searchLimitOptions.find { it.first == searchResultLimit }?.second ?: "1,000",
-                            modifier = Modifier.weight(1f)
+                        Icon(
+                            Icons.Filled.Search,
+                            contentDescription = null,
+                            tint = MaterialTheme.colors.primary,
+                            modifier = Modifier.size(24.dp)
                         )
-                        Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Search Result Limit",
+                            style = MaterialTheme.typography.h6,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colors.primary
+                        )
                     }
-                    DropdownMenu(
-                        expanded = searchLimitExpanded,
-                        onDismissRequest = { searchLimitExpanded = false }
-                    ) {
-                        searchLimitOptions.forEach { (value, label) ->
-                            DropdownMenuItem(onClick = {
-                                if (value == -1) {
-                                    // Show warning for unlimited
-                                    showUnlimitedWarning = true
-                                    searchLimitExpanded = false
-                                } else {
-                                    onSearchLimitChange(value)
-                                    searchLimitExpanded = false
+
+                    Box {
+                        OutlinedButton(
+                            onClick = { searchLimitExpanded = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = searchLimitOptions.find { it.first == searchResultLimit }?.second ?: "1,000",
+                                modifier = Modifier.weight(1f)
+                            )
+                            Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+                        }
+                        DropdownMenu(
+                            expanded = searchLimitExpanded,
+                            onDismissRequest = { searchLimitExpanded = false }
+                        ) {
+                            searchLimitOptions.forEach { (value, label) ->
+                                DropdownMenuItem(onClick = {
+                                    if (value == -1) {
+                                        // Show warning for unlimited
+                                        showUnlimitedWarning = true
+                                        searchLimitExpanded = false
+                                    } else {
+                                        onSearchLimitChange(value)
+                                        searchLimitExpanded = false
+                                    }
+                                }) {
+                                    Text(label)
                                 }
-                            }) {
-                                Text(label)
                             }
                         }
                     }
+
+                    Text(
+                        text = "Maximum number of search results to display. Lower limits improve performance.",
+                        style = MaterialTheme.typography.caption,
+                        color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(top = 8.dp)
+                    )
                 }
-                
-                Text(
-                    text = "Maximum number of search results to display. Lower limits improve performance.",
-                    style = MaterialTheme.typography.caption,
-                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
-                    modifier = Modifier.padding(top = 8.dp)
-                )
             }
         }
         
         // Warning dialog for unlimited option
-        if (showUnlimitedWarning) {
+        if (showSearchFeatures && showUnlimitedWarning) {
             androidx.compose.material.AlertDialog(
                 onDismissRequest = { showUnlimitedWarning = false },
                 title = { Text("Warning") },
@@ -7518,77 +8133,83 @@ fun SettingsScreenContent(
             }
 
             Spacer(modifier = Modifier.height(16.dp))
-            
-            // Search Result Limit Section
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                elevation = 4.dp,
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(bottom = 12.dp)
-                    ) {
-                        Icon(
-                            Icons.Filled.Search,
-                            contentDescription = null,
-                            tint = MaterialTheme.colors.primary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Search Result Limit",
-                            style = MaterialTheme.typography.h6,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colors.primary
-                        )
-                    }
-                    
-                    Box {
-                        OutlinedButton(
-                            onClick = { searchLimitExpanded = true },
-                            modifier = Modifier.fillMaxWidth()
+
+            FolderAccessManagerCard()
+
+            if (showSearchFeatures) {
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Search Result Limit Section
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    elevation = 4.dp,
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(bottom = 12.dp)
                         ) {
-                            Text(
-                                text = searchLimitOptions.find { it.first == searchResultLimit }?.second ?: "1,000",
-                                modifier = Modifier.weight(1f)
+                            Icon(
+                                Icons.Filled.Search,
+                                contentDescription = null,
+                                tint = MaterialTheme.colors.primary,
+                                modifier = Modifier.size(24.dp)
                             )
-                            Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Search Result Limit",
+                                style = MaterialTheme.typography.h6,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colors.primary
+                            )
                         }
-                        DropdownMenu(
-                            expanded = searchLimitExpanded,
-                            onDismissRequest = { searchLimitExpanded = false }
-                        ) {
-                            searchLimitOptions.forEach { (value, label) ->
-                                DropdownMenuItem(onClick = {
-                                    if (value == -1) {
-                                        // Show warning for unlimited
-                                        showUnlimitedWarning = true
-                                        searchLimitExpanded = false
-                                    } else {
-                                        onSearchLimitChange(value)
-                                        searchLimitExpanded = false
+
+                        Box {
+                            OutlinedButton(
+                                onClick = { searchLimitExpanded = true },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = searchLimitOptions.find { it.first == searchResultLimit }?.second ?: "1,000",
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+                            }
+                            DropdownMenu(
+                                expanded = searchLimitExpanded,
+                                onDismissRequest = { searchLimitExpanded = false }
+                            ) {
+                                searchLimitOptions.forEach { (value, label) ->
+                                    DropdownMenuItem(onClick = {
+                                        if (value == -1) {
+                                            // Show warning for unlimited
+                                            showUnlimitedWarning = true
+                                            searchLimitExpanded = false
+                                        } else {
+                                            onSearchLimitChange(value)
+                                            searchLimitExpanded = false
+                                        }
+                                    }) {
+                                        Text(label)
                                     }
-                                }) {
-                                    Text(label)
                                 }
                             }
                         }
+
+                        Text(
+                            text = "Maximum number of search results to display. Lower limits improve performance.",
+                            style = MaterialTheme.typography.caption,
+                            color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
                     }
-                    
-                    Text(
-                        text = "Maximum number of search results to display. Lower limits improve performance.",
-                        style = MaterialTheme.typography.caption,
-                        color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
-                        modifier = Modifier.padding(top = 8.dp)
-                    )
                 }
             }
         }
         
         // Warning dialog for unlimited option (outside if/else)
-        if (showUnlimitedWarning) {
+        if (showSearchFeatures && showUnlimitedWarning) {
             androidx.compose.material.AlertDialog(
                 onDismissRequest = { showUnlimitedWarning = false },
                 title = { Text("Warning") },
@@ -7732,18 +8353,30 @@ fun SettingsScreenContent(
                 val baeVersion = remember { Mixer.getVersion() ?: "Unknown" }
                 val baeCompileInfo = remember { Mixer.getCompileInfo() ?: "Unknown" }
                 val baeFeatures = remember { Mixer.getFeatureString() ?: "" }
+                val appTitle = remember(context) {
+                    runCatching { context.applicationInfo.loadLabel(context.packageManager).toString() }
+                        .getOrElse { "NeoBAE" }
+                }
                 
                 Text(
-                    text = "NeoBAE for Android",
+                    text = appTitle,
                     style = MaterialTheme.typography.body1,
                     fontWeight = FontWeight.SemiBold
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "A cross-platform audio engine for MIDI playback",
-                    style = MaterialTheme.typography.body2,
-                    color = Color.Gray
-                )
+                if (isPlaySafVariant()) {
+                    Text(
+                        text = "Lite version with limited storage access for Play Store compliance",
+                        style = MaterialTheme.typography.body2,
+                        color = Color.Gray
+                    )
+                } else {
+                    Text(
+                        text = "Full version with broad storage access for full feature access",
+                        style = MaterialTheme.typography.body2,
+                        color = Color.Gray
+                    )
+                }
                 
                 if (baeVersion.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(12.dp))
@@ -7860,6 +8493,8 @@ fun SettingsScreenContent(
             }
         )
     }
+
+    FolderAccessManagerDialog()
 }
 
 @Composable
@@ -7968,7 +8603,9 @@ fun FileTypesScreenContent(
                     }
                 }
             }
+
         }
+
     }
 }
 
@@ -7980,6 +8617,8 @@ fun BankBrowserScreen(
     onNavigate: (String) -> Unit,
     onSelectBank: (File) -> Unit,
     onLoadBuiltin: () -> Unit,
+    showPickFolderAction: Boolean,
+    onPickFolder: () -> Unit,
     onClose: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
@@ -8003,7 +8642,7 @@ fun BankBrowserScreen(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = currentPath,
+                    text = getDisplayPath(currentPath),
                     style = MaterialTheme.typography.caption,
                     color = MaterialTheme.colors.onSurface.copy(alpha = 0.7f),
                     maxLines = 1,
@@ -8021,6 +8660,39 @@ fun BankBrowserScreen(
             }
             files.isEmpty() -> {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    if (showPickFolderAction) {
+                        item {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onPickFolder() },
+                                color = MaterialTheme.colors.primary.copy(alpha = 0.06f)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Filled.FolderOpen,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colors.primary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(
+                                        text = "Choose Different Folder",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colors.onBackground
+                                    )
+                                }
+                            }
+                            Divider(color = Color.Gray.copy(alpha = 0.2f))
+                        }
+                    }
+
                     // Built-in Patches option at the top
                     item {
                         Surface(
@@ -8129,6 +8801,39 @@ fun BankBrowserScreen(
             }
             else -> {
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
+                    if (showPickFolderAction) {
+                        item {
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onPickFolder() },
+                                color = MaterialTheme.colors.primary.copy(alpha = 0.06f)
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        Icons.Filled.FolderOpen,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colors.primary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(
+                                        text = "Choose Different Folder",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colors.onBackground
+                                    )
+                                }
+                            }
+                            Divider(color = Color.Gray.copy(alpha = 0.2f))
+                        }
+                    }
+
                     // Built-in Patches option at the top
                     item {
                         Surface(
@@ -8246,7 +8951,7 @@ fun BankBrowserScreen(
                     
                     // Show bank files
                     itemsIndexed(files.filter { !it.isFolder }) { _, item ->
-                        val fileSizeBytes = runCatching { item.file.length() }.getOrDefault(0L)
+                        val fileSizeBytes = resolvePlaylistItemSize(item).coerceAtLeast(0L)
                         val isTooLarge = fileSizeBytes >= BANK_SIZE_LIMIT_BYTES
                         val disabledColor = MaterialTheme.colors.onBackground.copy(alpha = 0.38f)
                         val primaryTextColor = if (isTooLarge) disabledColor else MaterialTheme.colors.onBackground

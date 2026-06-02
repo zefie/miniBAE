@@ -13,11 +13,18 @@ object FavoritesMbaeXml {
     private const val VERSION = "1"
 
     fun writeTo(output: OutputStream, favorites: List<String>) {
+        writeTo(output, favorites, null)
+    }
+
+    fun writeTo(output: OutputStream, favorites: List<String>, pathType: String?) {
         val serializer = Xml.newSerializer()
         serializer.setOutput(output, "UTF-8")
         serializer.startDocument("UTF-8", true)
         serializer.startTag(null, ROOT)
         serializer.attribute(null, "version", VERSION)
+        if (pathType != null) {
+            serializer.attribute(null, "pathType", pathType)
+        }
 
         favorites.forEach { path ->
             serializer.startTag(null, "favorite")
@@ -30,10 +37,27 @@ object FavoritesMbaeXml {
         serializer.flush()
     }
 
-    fun writeCompressedTo(output: OutputStream, favorites: List<String>) {
+    fun writeCompressedTo(output: OutputStream, favorites: List<String>, pathType: String? = null) {
         // GZIP the XML payload, but keep the .mbae extension.
         GZIPOutputStream(output).use { gz ->
-            writeTo(gz, favorites)
+            writeTo(gz, favorites, pathType)
+        }
+    }
+
+    /** Returns the list of favorite paths AND the pathType attribute from the root element (or null). */
+    fun readFromWithType(input: InputStream): Pair<List<String>, String?> {
+        val buffered = if (input.markSupported()) input else BufferedInputStream(input)
+        buffered.mark(2)
+        val b1 = buffered.read()
+        val b2 = buffered.read()
+        buffered.reset()
+
+        return if (b1 == 0x1f && b2 == 0x8b) {
+            GZIPInputStream(buffered).use { gz ->
+                readXmlFromWithType(gz)
+            }
+        } else {
+            readXmlFromWithType(buffered)
         }
     }
 
@@ -47,25 +71,29 @@ object FavoritesMbaeXml {
 
         return if (b1 == 0x1f && b2 == 0x8b) {
             GZIPInputStream(buffered).use { gz ->
-                readXmlFrom(gz)
+                readXmlFromWithType(gz).first
             }
         } else {
-            readXmlFrom(buffered)
+            readXmlFromWithType(buffered).first
         }
     }
 
-    private fun readXmlFrom(input: InputStream): List<String> {
+    private fun readXmlFromWithType(input: InputStream): Pair<List<String>, String?> {
         val parser = Xml.newPullParser()
         parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
         parser.setInput(input, "UTF-8")
 
         val favorites = ArrayList<String>()
         val seen = HashSet<String>()
+        var pathType: String? = null
 
         var eventType = parser.eventType
         while (eventType != XmlPullParser.END_DOCUMENT) {
             if (eventType == XmlPullParser.START_TAG) {
                 when (parser.name) {
+                    ROOT -> {
+                        pathType = parser.getAttributeValue(null, "pathType")
+                    }
                     "favorite" -> {
                         val pathAttr = parser.getAttributeValue(null, "path")
                         val pathText = pathAttr ?: readText(parser)
@@ -79,7 +107,7 @@ object FavoritesMbaeXml {
             eventType = parser.next()
         }
 
-        return favorites
+        return Pair(favorites, pathType)
     }
 
     private fun readText(parser: XmlPullParser): String? {
