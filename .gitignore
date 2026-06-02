@@ -31,6 +31,8 @@ neobae/src/rmfeditor_wx/vs2022/nbstudio/x86/
 neobae/src/NeoBAEDroid/NeoBAEDroid.iws
 neobae/src/NeoBAEDroid/NeoBAEDroid.ipr
 neobae/src/NeoBAEDroid/app/release/
+neobae/src/NeoBAEDroid/app/play/
+neobae/src/NeoBAEDroid/app/apk/
 neobae/src/NeoBAEDroid/app/NeoBAEDroid.app.iml
 neobae/src/NeoBAEDroid/app/NeoBAEDroid.app.main.iml
 neobae/src/NeoBAEDroid/.kotlin/
