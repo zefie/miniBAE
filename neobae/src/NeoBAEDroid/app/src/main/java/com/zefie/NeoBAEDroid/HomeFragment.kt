@@ -8394,13 +8394,13 @@ fun SettingsScreenContent(
                 Spacer(modifier = Modifier.height(4.dp))
                 if (isPlaySafVariant()) {
                     Text(
-                        text = "Lite version with limited storage access for Play Store compliance",
+                        text = "A multimedia engine with MIDI Synth and more, Play Store version.",
                         style = MaterialTheme.typography.body2,
                         color = Color.Gray
                     )
                 } else {
                     Text(
-                        text = "Full version with broad storage access for full feature access",
+                        text = "A multimedia engine with MIDI Synth and more, OSS version.",
                         style = MaterialTheme.typography.body2,
                         color = Color.Gray
                     )
