@@ -7594,9 +7594,10 @@ fun SettingsScreenContent(
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        FolderAccessManagerCard()
+        if (!BuildConfig.USE_MANAGE_EXTERNAL_STORAGE) {
+            Spacer(modifier = Modifier.height(16.dp))
+            FolderAccessManagerCard()
+        }
 
         if (showSearchFeatures) {
             Spacer(modifier = Modifier.height(16.dp))
@@ -8160,9 +8161,10 @@ fun SettingsScreenContent(
                 }
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            FolderAccessManagerCard()
+            if (!BuildConfig.USE_MANAGE_EXTERNAL_STORAGE) {
+                Spacer(modifier = Modifier.height(16.dp))
+                FolderAccessManagerCard()
+            }
 
             if (showSearchFeatures) {
                 Spacer(modifier = Modifier.height(16.dp))
