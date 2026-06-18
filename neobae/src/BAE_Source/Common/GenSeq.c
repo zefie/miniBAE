@@ -544,6 +544,32 @@ void PV_ConfigureInstruments(GM_Song *theSong)
     theSong->omniModeOn = TRUE;
     PV_ResetControlers(theSong, -1, TRUE);
 
+#if USE_SF2_SUPPORT == TRUE
+    // Initialize channel types based on song configuration.
+    // At this point, SF2 may not be enabled for this song yet (that happens later),
+    // but we can check if SF2 is globally active to determine initial routing.
+    // This ensures notes are routed correctly even if no program change has occurred first.
+    for (count = 0; count < MAX_CHANNELS; count++)
+    {
+        if (theSong->songFlags & SONG_FLAG_IS_RMF)
+        {
+            // RMF song - initially route to RMF, will be overridden per-channel during playback
+            // based on whether each patch is actually a custom RMF instrument
+            theSong->channelType[count] = CHANNEL_TYPE_RMF;
+        }
+        else if (GM_SF2_IsActive())
+        {
+            // Non-RMF song with SF2 available
+            theSong->channelType[count] = CHANNEL_TYPE_SF2;
+        }
+        else
+        {
+            // Non-RMF song without SF2
+            theSong->channelType[count] = CHANNEL_TYPE_GM;
+        }
+    }
+#endif
+
     for (count = 0; count < MAX_CHANNELS; count++)
     {
         if (theSong->firstChannelProgram[count] != -1)
@@ -1804,16 +1830,6 @@ static bool PV_ShouldUseRMFInstrumentForPatch(GM_Song *pSong, int16_t patch)
         return TRUE;
     }
 
-    // If either direct or remapped slot is loaded natively, prefer RMF path.
-    if (pSong->instrumentData[patch] != NULL)
-    {
-        return TRUE;
-    }
-    if (remapped >= 0 && remapped < (MAX_INSTRUMENTS * MAX_BANKS) && pSong->instrumentData[remapped] != NULL)
-    {
-        return TRUE;
-    }
-
     // Keep legacy compatibility: bank 1/2 requests are RMF banks.
     bankId = 0;
     progId = 0;
@@ -1824,16 +1840,21 @@ static bool PV_ShouldUseRMFInstrumentForPatch(GM_Song *pSong, int16_t patch)
         return TRUE;
     }
 
-    // RMF declared instrument list can contain the original or resolved patch IDs.
+    // Check if this patch has a custom instrument in the RMF file.
+    // RMFInstrumentIDs contains flat indices (bank*128 + program) of instruments
+    // that have INST resources in the RMF. If a patch is in this list, it's a custom RMF instrument.
+    // Only use RMF for patches that are actually in the RMF file, allowing SF2 to handle
+    // standard patches that weren't customized.
     for (uint32_t i = 1; i <= pSong->RMFInstrumentIDs[0]; i++)
     {
-        if (pSong->RMFInstrumentIDs[i] == (uint32_t)patch ||
-            pSong->RMFInstrumentIDs[i] == (uint32_t)remapped)
+        if (pSong->RMFInstrumentIDs[i] == (uint32_t)patch)
         {
             return TRUE;
         }
     }
 
+    // Patch is not in RMFInstrumentIDs, so it doesn't have a custom version in the RMF.
+    // Let SF2 handle it if available.
     return FALSE;
 #endif    
 }
