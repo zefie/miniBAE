@@ -3,6 +3,9 @@ RDIR="$(realpath "$(pwd)")"
 BDIR="${RDIR}/bin"
 ODIR="${RDIR}/out"
 
+mkdir -p "${BDIR}"
+mkdir -p "${ODIR}"
+
 SILENT=1
 
 if [ -n "$1" ]; then
