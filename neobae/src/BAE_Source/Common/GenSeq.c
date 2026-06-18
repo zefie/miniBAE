@@ -1847,10 +1847,12 @@ static bool PV_ShouldUseRMFInstrumentForPatch(GM_Song *pSong, int16_t patch)
     // standard patches that weren't customized.
     for (uint32_t i = 1; i <= pSong->RMFInstrumentIDs[0]; i++)
     {
-        if (pSong->RMFInstrumentIDs[i] == (uint32_t)patch)
+        if (pSong->RMFInstrumentIDs[i] == (uint32_t)patch ||
+            pSong->RMFInstrumentIDs[i] == (uint32_t)remapped)
         {
             return TRUE;
         }
+        debug_message("Debug: Checking patch %d against RMFInstrumentID %d (remapped %d)\n", patch, pSong->RMFInstrumentIDs[i], remapped);
     }
 
     // Patch is not in RMFInstrumentIDs, so it doesn't have a custom version in the RMF.

@@ -10111,7 +10111,7 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
 }
 
 // Forward declaration
-// Enumerate INST resource IDs in an RMF/IREZ image. If pOutInstruments is non-NULL, up to maxInstruments
+// Enumerate INST resource IDs in an RMF/ZMF resource image. If pOutInstruments is non-NULL, up to maxInstruments
 // IDs are written into that array. pOutNumInstruments always receives the total number of INST resources
 // discovered (may be > maxInstruments causing truncation). Pass pOutInstruments=NULL to just count.
 BAEResult BAEUtil_GetRmfInstrumentList(void *pRMFData, uint32_t rmfSize, int16_t songIndex,
@@ -13138,10 +13138,119 @@ BAEResult BAEUtil_GetRmfSongInfoFromFile(BAEPathName filePath, int16_t songIndex
 }
 
 #if USE_SF2_SUPPORT == TRUE
+static uint16_t PV_RmfListReadBE16(unsigned char const *p)
+{
+    return (uint16_t)(((uint16_t)p[0] << 8) | (uint16_t)p[1]);
+}
+
+static uint32_t PV_RmfListReadBE32(unsigned char const *p)
+{
+    return ((uint32_t)p[0] << 24) |
+           ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] << 8) |
+           (uint32_t)p[3];
+}
+
+#if USE_ZMF_SUPPORT == TRUE
+static void PV_RmfListAppendInstrument(uint32_t instId,
+                                       uint32_t *pOutInstruments,
+                                       uint32_t maxInstruments,
+                                       uint32_t *pInstrumentCount)
+{
+    if (pOutInstruments && *pInstrumentCount < maxInstruments)
+    {
+        pOutInstruments[*pInstrumentCount] = instId;
+    }
+    (*pInstrumentCount)++;
+}
+
+static void PV_RmfListAppendZinsInstEntries(XPTR decodedBlock,
+                                            int32_t decodedSize,
+                                            uint32_t *pOutInstruments,
+                                            uint32_t maxInstruments,
+                                            uint32_t *pInstrumentCount)
+{
+    unsigned char *p;
+    unsigned char *end;
+    uint32_t version;
+    uint32_t count;
+
+    if (!decodedBlock || decodedSize < 12 || !pInstrumentCount)
+    {
+        return;
+    }
+
+    p = (unsigned char *)decodedBlock;
+    end = p + decodedSize;
+
+    if (PV_RmfListReadBE32(p) != (uint32_t)FOUR_CHAR('Z', 'I', 'N', 'S'))
+    {
+        return;
+    }
+
+    version = PV_RmfListReadBE32(p + 4);
+    if (version != 1u && version != 2u)
+    {
+        return;
+    }
+
+    count = PV_RmfListReadBE32(p + 8);
+    p += 12;
+
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        uint32_t type = (uint32_t)ID_INST;
+        uint32_t id;
+        uint16_t nameLen;
+        uint32_t dataLen;
+
+        if (version >= 2u)
+        {
+            if (p + 4 > end)
+            {
+                return;
+            }
+            type = PV_RmfListReadBE32(p);
+            p += 4;
+        }
+
+        if (p + 10 > end)
+        {
+            return;
+        }
+
+        id = PV_RmfListReadBE32(p);
+        p += 4;
+        nameLen = PV_RmfListReadBE16(p);
+        p += 2;
+        dataLen = PV_RmfListReadBE32(p);
+        p += 4;
+
+        if (p + nameLen > end)
+        {
+            return;
+        }
+        p += nameLen;
+
+        if (p + dataLen > end)
+        {
+            return;
+        }
+
+        if ((XResourceType)type == ID_INST)
+        {
+            PV_RmfListAppendInstrument(id, pOutInstruments, maxInstruments, pInstrumentCount);
+        }
+
+        p += dataLen;
+    }
+}
+#endif
+
 // BAEUtil_GetRmfInstrumentListFromMemory()
 // --------------------------------------
 //
-// Gets the list of instruments used by the RMF from memory buffer
+// Gets the list of instruments used by the RMF/ZMF from memory buffer
 BAEResult BAEUtil_GetRmfInstrumentListFromMemory(void const *pRMFData, uint32_t rmfSize, int16_t songIndex,
                                        uint32_t *pOutInstruments, uint32_t maxInstruments,
                                        uint32_t *pOutNumInstruments)
@@ -13151,7 +13260,11 @@ BAEResult BAEUtil_GetRmfInstrumentListFromMemory(void const *pRMFData, uint32_t 
 
     const char *rmfData = (const char *)pRMFData;
 
-    if (memcmp(rmfData, "IREZ", 4) != 0) {
+    if (memcmp(rmfData, "IREZ", 4) != 0 
+#if USE_ZMF_SUPPORT == TRUE
+    && memcmp(rmfData, "ZREZ", 4) != 0
+#endif
+    ) {
         return BAE_PARAM_ERR;
     }
 
@@ -13160,26 +13273,46 @@ BAEResult BAEUtil_GetRmfInstrumentListFromMemory(void const *pRMFData, uint32_t 
     uint32_t instrumentCount = 0;
     size_t offset = 12;
 
-    // big-endian 32-bit reader (avoid sign extension)
-#define READ_BE32(p) (((uint32_t)(uint8_t)(p)[0] << 24) | ((uint32_t)(uint8_t)(p)[1] << 16) | ((uint32_t)(uint8_t)(p)[2] << 8) | (uint32_t)(uint8_t)(p)[3])
     for (uint32_t i = 0; i < numResources && offset + 13 <= rmfSize; i++) {
         if (offset + 13 > rmfSize) break;
-        uint32_t nextOffset = READ_BE32(&rmfData[offset]);
+        uint32_t nextOffset = PV_RmfListReadBE32((unsigned char const *)&rmfData[offset]);
         char type[5]; memcpy(type, &rmfData[offset + 4], 4); type[4] = '\0';
-        uint32_t id = READ_BE32(&rmfData[offset + 8]);
+        uint32_t id = PV_RmfListReadBE32((unsigned char const *)&rmfData[offset + 8]);
         uint8_t nameLen = (uint8_t)rmfData[offset + 12];
         size_t bodyLenOffset = offset + 13 + nameLen;
         if (nameLen >= headerMaxLen || bodyLenOffset + 4 > rmfSize) break;
-        uint32_t bodyLen = READ_BE32(&rmfData[bodyLenOffset]); (void)bodyLen;
+        uint32_t bodyLen = PV_RmfListReadBE32((unsigned char const *)&rmfData[bodyLenOffset]);
+        unsigned char *bodyPtr = (unsigned char *)&rmfData[bodyLenOffset + 4];
         if (type[0]=='I' && type[1]=='N' && type[2]=='S' && type[3]=='T') {
             if (pOutInstruments && instrumentCount < maxInstruments) pOutInstruments[instrumentCount] = id;
             instrumentCount++;
         }
+#if USE_ZMF_SUPPORT == TRUE
+        if (type[0]=='Z' && type[1]=='I' && type[2]=='N' && type[3]=='S') {
+            XPTR decodedBlock = NULL;
+
+            if (bodyLenOffset + 4 + bodyLen > rmfSize)
+            {
+                break;
+            }
+
+            decodedBlock = XDecompressPtr(bodyPtr, bodyLen, TRUE);
+            if (decodedBlock)
+            {
+                int32_t decodedSize = XGetPtrSize(decodedBlock);
+                PV_RmfListAppendZinsInstEntries(decodedBlock,
+                                                decodedSize,
+                                                pOutInstruments,
+                                                maxInstruments,
+                                                &instrumentCount);
+                XDisposePtr(decodedBlock);
+            }
+        }
+#endif
         if (nextOffset == 0xFFFFFFFF) break;
         if (nextOffset <= offset || nextOffset > rmfSize) break;
         offset = nextOffset;
     }
-#undef READ_BE32
 
     *pOutNumInstruments = instrumentCount; // total discovered (may exceed maxInstruments)
     return BAE_NO_ERROR;
@@ -13188,7 +13321,7 @@ BAEResult BAEUtil_GetRmfInstrumentListFromMemory(void const *pRMFData, uint32_t 
 // BAEUtil_GetRmfInstrumentList()
 // --------------------------------------
 //
-// Gets the list of instruments used by the RMF
+// Gets the list of instruments used by the RMF/ZMF
 BAEResult BAEUtil_GetRmfInstrumentList(void *pRMFData, uint32_t rmfSize, int16_t songIndex,
                                        uint32_t *pOutInstruments, uint32_t maxInstruments,
                                        uint32_t *pOutNumInstruments)
