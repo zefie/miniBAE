@@ -3818,12 +3818,35 @@ class HomeFragment : Fragment() {
                         
                         android.util.Log.d("HomeFragment", "Export loop completed after $iterCount iterations, isDone=$isDone")
                         
-                        // Drain period: service a few more times to capture trailing audio
+                        // Drain period: capture trailing reverb/audio tail, but never indefinitely.
                         android.util.Log.d("HomeFragment", "Draining export buffer...")
                         exportStatus.value = "Exporting audio... waiting for reverb tail"
-                        while (Mixer.isAudioTailActive()) {
-                            Mixer.getMixer()?.serviceOutputToFile()
+                        var silentConsecutive = 0
+                        val requiredSilentChecks = 4
+                        val maxDrainLoops = 300
+                        var drainLoops = 0
+                        while (drainLoops < maxDrainLoops) {
+                            val serviceResult = Mixer.getMixer()?.serviceOutputToFile() ?: -1
+                            if (serviceResult != 0) {
+                                android.util.Log.w("HomeFragment", "Tail drain serviceOutputToFile error: $serviceResult")
+                                break
+                            }
+
+                            if (Mixer.isAudioTailActive()) {
+                                silentConsecutive = 0
+                            } else {
+                                silentConsecutive++
+                                if (silentConsecutive >= requiredSilentChecks) {
+                                    android.util.Log.d("HomeFragment", "Tail drain completed after ${drainLoops + 1} iterations")
+                                    break
+                                }
+                            }
+
                             Thread.sleep(2)
+                            drainLoops++
+                        }
+                        if (drainLoops >= maxDrainLoops) {
+                            android.util.Log.w("HomeFragment", "Tail drain reached safety limit ($maxDrainLoops iterations)")
                         }
                         
                         android.util.Log.d("HomeFragment", "Export playback completed")
