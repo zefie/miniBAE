@@ -3773,7 +3773,11 @@ class HomeFragment : Fragment() {
                         android.util.Log.d("HomeFragment", "Export pipeline primed after ${primeCount + 8} service calls")
                         
                         activity?.runOnUiThread {
-                            exportStatus.value = "Exporting audio... 0%"
+                            exportStatus.value = if (exportTargetLoops > 0) {
+                                "Exporting 1/$exportTargetLoops... 0%"
+                            } else {
+                                "Exporting audio... 0%"
+                            }
                         }
                         
                         // Service the export loop - check BAESong_IsDone(), not position
@@ -3796,8 +3800,9 @@ class HomeFragment : Fragment() {
                                 isDone = currentSong?.isDone() ?: false
 
                                 val positionMs = currentSong?.getPositionMs() ?: 0
+                                val didWrap = exportLastPosMs > 0 && positionMs < exportLastPosMs && (exportLastPosMs - positionMs) > exportWrapThresholdMs
 
-                                if (exportLastPosMs > 0 && positionMs < exportLastPosMs && (exportLastPosMs - positionMs) > exportWrapThresholdMs) {
+                                if (didWrap) {
                                     exportCumulativeMs += exportLastPosMs.toLong()
                                 }
 
@@ -3805,9 +3810,16 @@ class HomeFragment : Fragment() {
                                 val totalPositionMs = totalPositionMsLong.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
                                 tickSongScript(currentSong, totalPositionMs, lengthMs, true)
 
-                                if (exportTargetLoops > 0 && exportLastPosMs > 0 && positionMs < exportLastPosMs && (exportLastPosMs - positionMs) > exportWrapThresholdMs) {
+                                if (exportTargetLoops > 0 && didWrap) {
                                     exportLoopsDone++
                                     android.util.Log.d("HomeFragment", "Export loop wrap detected ($exportLoopsDone/$exportTargetLoops)")
+                                    lastProgressPercent = 0
+
+                                    val nextLoop = (exportLoopsDone + 1).coerceAtMost(exportTargetLoops)
+                                    activity?.runOnUiThread {
+                                        exportStatus.value = "Exporting $nextLoop/$exportTargetLoops... 0%"
+                                    }
+
                                     if (exportLoopsDone >= exportTargetLoops) {
                                         currentSong?.stop(false)
                                     }
@@ -3831,7 +3843,12 @@ class HomeFragment : Fragment() {
                                     if (progressPercent >= lastProgressPercent + 5) {
                                         lastProgressPercent = progressPercent
                                         activity?.runOnUiThread {
-                                            exportStatus.value = "Exporting audio... $progressPercent%"
+                                            if (exportTargetLoops > 0) {
+                                                val currentLoop = (exportLoopsDone + 1).coerceAtMost(exportTargetLoops)
+                                                exportStatus.value = "Exporting $currentLoop/$exportTargetLoops... $progressPercent%"
+                                            } else {
+                                                exportStatus.value = "Exporting audio... $progressPercent%"
+                                            }
                                         }
                                     }
                                 }
