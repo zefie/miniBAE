@@ -7587,7 +7587,7 @@ fun SettingsScreenContent(
                         .fillMaxWidth()
                         .height(160.dp),
                     label = { Text("Script") },
-                    placeholder = { Text("on.script { exporter.loopcount = 2 }") },
+                    placeholder = { Text("on.script ({ exporter.loopcount = 2; });") },
                     singleLine = false
                 )
 
