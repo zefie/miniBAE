@@ -3670,6 +3670,12 @@ class HomeFragment : Fragment() {
                 var exportTargetLoops = 0
                 var exportLoopsDone = 0
                 var exportLastPosMs = 0
+                var exportCumulativeMs = 0L
+                val exportWrapThresholdMs = if (lengthMs > 0) {
+                    (lengthMs / 4).coerceIn(100, 1000)
+                } else {
+                    1000
+                }
                 
                 android.util.Log.d("HomeFragment", "Saved playback state: wasPlaying=$wasPlaying, position=$savedPosition ms")
                 
@@ -3790,15 +3796,32 @@ class HomeFragment : Fragment() {
                                 isDone = currentSong?.isDone() ?: false
 
                                 val positionMs = currentSong?.getPositionMs() ?: 0
-                                tickSongScript(currentSong, positionMs, lengthMs, true)
 
-                                if (exportTargetLoops > 0 && exportLastPosMs > 0 && positionMs + 1000 < exportLastPosMs) {
+                                if (exportLastPosMs > 0 && positionMs < exportLastPosMs && (exportLastPosMs - positionMs) > exportWrapThresholdMs) {
+                                    exportCumulativeMs += exportLastPosMs.toLong()
+                                }
+
+                                val totalPositionMsLong = exportCumulativeMs + positionMs.toLong()
+                                val totalPositionMs = totalPositionMsLong.coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()
+                                tickSongScript(currentSong, totalPositionMs, lengthMs, true)
+
+                                if (exportTargetLoops > 0 && exportLastPosMs > 0 && positionMs < exportLastPosMs && (exportLastPosMs - positionMs) > exportWrapThresholdMs) {
                                     exportLoopsDone++
                                     android.util.Log.d("HomeFragment", "Export loop wrap detected ($exportLoopsDone/$exportTargetLoops)")
                                     if (exportLoopsDone >= exportTargetLoops) {
                                         currentSong?.stop(false)
                                     }
                                 }
+
+                                if (exportTargetLoops > 0) {
+                                    val expectedTotalMs = lengthMs.toLong() * (exportTargetLoops.toLong() + 1L)
+                                    val runawaySlackMs = maxOf(2000L, (lengthMs / 2).toLong())
+                                    if (totalPositionMsLong > expectedTotalMs + runawaySlackMs) {
+                                        android.util.Log.w("HomeFragment", "Export loop runaway guard triggered at ${totalPositionMsLong}ms (target loops=$exportTargetLoops)")
+                                        currentSong?.stop(false)
+                                    }
+                                }
+
                                 exportLastPosMs = positionMs
                                 
                                 // Update progress every 5% to avoid excessive UI updates
@@ -7073,8 +7096,9 @@ fun SettingsScreenContent(
             val name = DocumentFile.fromSingleUri(context, uri)?.name
                 ?: uri.lastPathSegment
                 ?: ""
-            if (!name.lowercase().endsWith(".bscript")) {
-                Toast.makeText(context, "Please select a .bscript file", Toast.LENGTH_SHORT).show()
+            val lowerName = name.lowercase()
+            if (!lowerName.endsWith(".bscript") && !lowerName.endsWith(".txt")) {
+                Toast.makeText(context, "Please select a .bscript (or .txt) file", Toast.LENGTH_SHORT).show()
                 return@rememberLauncherForActivityResult
             }
 
@@ -7093,18 +7117,10 @@ fun SettingsScreenContent(
     }
 
     val exportBaeScriptLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("text/plain")
+        contract = ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         try {
-            val name = DocumentFile.fromSingleUri(context, uri)?.name
-                ?: uri.lastPathSegment
-                ?: ""
-            if (!name.lowercase().endsWith(".bscript")) {
-                Toast.makeText(context, "File must use .bscript extension", Toast.LENGTH_SHORT).show()
-                return@rememberLauncherForActivityResult
-            }
-
             context.contentResolver.openOutputStream(uri)?.use {
                 it.write(baeScriptSource.toByteArray(Charsets.UTF_8))
             }
