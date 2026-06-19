@@ -321,6 +321,10 @@ class HomeFragment : Fragment() {
         get() = (activity as? MainActivity)?.currentSong
         
     private fun setCurrentSong(song: Song?) {
+        val previousSong = (activity as? MainActivity)?.currentSong
+        if (previousSong !== song && baeScriptBoundSong === previousSong) {
+            baeScriptBoundSong = null
+        }
         karaokeHandler.reset()
         val ext = viewModel.getCurrentItem()?.file?.extension?.lowercase() ?: ""
         karaokeHandler.setFileExtension(ext)
@@ -346,6 +350,7 @@ class HomeFragment : Fragment() {
     private var baeScriptEnabled = mutableStateOf(false)
     private var baeScriptSource = mutableStateOf("")
     private var baeScriptNeedsReload = true
+    private var baeScriptBoundSong: Song? = null
     private var searchResultLimit = mutableStateOf(1000) // Default to 1000
     private var enabledExtensions = mutableStateOf<Set<String>>(emptySet())
     
@@ -1224,6 +1229,7 @@ class HomeFragment : Fragment() {
                             prefs.edit().putBoolean("baescript_enabled", enabled).apply()
                             if (!enabled) {
                                 currentSong?.clearScript()
+                                baeScriptBoundSong = null
                                 baeScriptNeedsReload = true
                             } else {
                                 baeScriptNeedsReload = true
@@ -1779,16 +1785,22 @@ class HomeFragment : Fragment() {
     private fun ensureSongScriptLoaded(song: Song?): Boolean {
         if (song == null) return false
         if (!baeScriptEnabled.value) {
+            if (baeScriptBoundSong === song) {
+                baeScriptBoundSong = null
+            }
             return false
         }
 
         val source = baeScriptSource.value
         if (source.isBlank()) {
             song.clearScript()
+            if (baeScriptBoundSong === song) {
+                baeScriptBoundSong = null
+            }
             return false
         }
 
-        if (!baeScriptNeedsReload) {
+        if (!baeScriptNeedsReload && baeScriptBoundSong === song) {
             return true
         }
 
@@ -1798,6 +1810,7 @@ class HomeFragment : Fragment() {
             return false
         }
         baeScriptNeedsReload = false
+        baeScriptBoundSong = song
         return true
     }
 

@@ -167,9 +167,6 @@ public class Song
 
 	public void clearScript()
 	{
-		if (mLoadedScriptSource == null) {
-			return;
-		}
 		_clearScript(mReference);
 		mLoadedScriptSource = null;
 	}
