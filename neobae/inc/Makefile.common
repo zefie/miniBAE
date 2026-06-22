@@ -877,6 +877,7 @@ else
 												src/thirdparty/imgui/imgui_widgets.cpp \
 												src/thirdparty/imgui/backends/imgui_impl_sdl3.cpp \
 												src/thirdparty/imgui/backends/imgui_impl_sdlrenderer3.cpp
+											INC_PATH += -Isrc/thirdparty/imgui -Isrc/thirdparty/imgui/backends
 										else
 											ifeq ($(ADP2WAV),1)
 												# adp2wav with third-party G.722 decoder
