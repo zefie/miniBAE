@@ -31,6 +31,7 @@
 #include <string.h>
 #include "X_Assert.h"
 #include "gui_midi_hw.h"
+#include "gui_settings.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -88,6 +89,18 @@ static uint32_t g_export_last_song_pos_us = 0;
 // Export tick callback for script engine synchronization
 static ExportTickFn g_export_tick_fn = NULL;
 static void *g_export_tick_ud = NULL;
+
+static void apply_current_eq_state(void)
+{
+    if (g_bae.mixer) {
+        BAEMixer_SetEQEnabled(g_bae.mixer, g_eq_enabled ? TRUE : FALSE);
+        if (g_eq_enabled) {
+            for (int i = 0; i < 5; i++) {
+                BAEMixer_SetEQGain(g_bae.mixer, i, g_eq_gains[i]);
+            }
+        }
+    }
+}
 
 void bae_signal_export_stop(void)
 {
@@ -342,6 +355,9 @@ bool bae_start_export(const char *output_file, int export_type, int compression)
         set_status_message(msg);
         return false;
     }
+
+    // Re-apply EQ settings as StartOutputToFile re-initializes the mixer
+    apply_current_eq_state();
 
     // Auto-start path: preroll then start
     BAESong_Stop(g_bae.song, FALSE);
@@ -609,6 +625,9 @@ bool bae_start_mpeg_export(const char *output_file, int codec_index)
         return false;
     }
 
+    // Re-apply EQ settings as StartOutputToFile re-initializes the mixer
+    apply_current_eq_state();
+
     // Start the song to drive export
     BAESong_Stop(g_bae.song, FALSE);
 #if SUPPORT_MIDI_HW == TRUE
@@ -850,6 +869,11 @@ void bae_stop_wav_export()
             if (reacquire_result != BAE_NO_ERROR)
             {
                 BAE_PRINTF("Warning: Could not re-engage audio hardware after export (%d)\n", reacquire_result);
+            }
+            else
+            {
+                // Re-apply EQ settings as hardware re-engagement may have reset the mixer state
+                apply_current_eq_state();
             }
         }
 

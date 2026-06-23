@@ -24,6 +24,7 @@
 #include "gui_theme.h"
 #include "gui_panels.h"
 #include "gui_bae.h"
+#include "gui_settings.h"
 #include "NeoBAE.h"
 #include "BAE_API.h"
 #include <stdio.h>
@@ -39,6 +40,7 @@ char g_rmf_container_version[64];
 
 bool g_show_about_dialog = false;
 int g_about_page = 0;
+bool g_show_eq_dialog = false;
 
 #ifdef _WIN32
 #include <windows.h>
@@ -1631,6 +1633,292 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
     // avoid immediate close when the About button (outside the dialog) is clicked.
 }
 
+void render_eq_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool mdown, int window_h)
+{
+    if (!g_show_eq_dialog)
+        return;
+
+    extern bool g_show_preset_name_dialog;
+    extern bool g_show_preset_delete_confirm_dialog;
+    bool sub_dialog_active = g_show_preset_name_dialog || g_show_preset_delete_confirm_dialog;
+
+    int input_mx = sub_dialog_active ? -1 : mx;
+    int input_my = sub_dialog_active ? -1 : my;
+    bool input_mclick = sub_dialog_active ? false : mclick;
+    bool input_mdown = sub_dialog_active ? false : mdown;
+
+    static bool initialized = false;
+    static bool preset_dropdown_open = false;
+
+    const int eq_preset_gains[7][5] = {
+        {0, 0, 0, 0, 0},        // Flat
+        {8, 4, 0, 0, 0},        // Bass Boost
+        {4, 2, 0, 2, 4},        // Acoustic
+        {6, 2, -2, 2, 6},       // Rock
+        {-2, 4, 6, 4, -2},      // Pop
+        {6, 4, 0, 2, 4},        // Classical
+        {-4, 0, 6, 4, -2}       // Vocal
+    };
+
+    if (!initialized && g_bae.mixer)
+    {
+        BAE_BOOL eq_on = FALSE;
+        BAEMixer_GetEQEnabled(g_bae.mixer, &eq_on);
+        g_eq_enabled = eq_on ? true : false;
+
+        for (int i = 0; i < 5; i++)
+        {
+            float g = 0.0f;
+            BAEMixer_GetEQGain(g_bae.mixer, i, &g);
+            g_eq_gains[i] = g;
+        }
+
+        if (g_selected_eq_preset < 0 || g_selected_eq_preset >= get_eq_preset_count())
+        {
+            g_selected_eq_preset = 7; // Custom
+        }
+        initialized = true;
+    }
+
+    // Dim background
+    SDL_Color dim = g_is_dark_mode ? (SDL_Color){0, 0, 0, 160} : (SDL_Color){0, 0, 0, 120};
+    draw_rect(R, (Rect){0, 0, WINDOW_W, window_h}, dim);
+
+    // Dialog dimensions
+    int dlgW = 400;
+    int dlgH = 370;
+    int pad = 10;
+    Rect dlg = {(WINDOW_W - dlgW) / 2, (window_h - dlgH) / 2, dlgW, dlgH};
+
+    SDL_Color dlgBg = g_panel_bg;
+    dlgBg.a = 250;
+    SDL_Color dlgFrame = g_panel_border;
+
+    draw_rect(R, dlg, dlgBg);
+    draw_frame(R, dlg, dlgFrame);
+
+    // Title
+    draw_text(R, dlg.x + pad, dlg.y + 8, "Equalizer Settings", g_header_color);
+
+    // Close button
+    Rect closeBtn = {dlg.x + dlg.w - 22, dlg.y + 6, 16, 16};
+    bool overClose = point_in(input_mx, input_my, closeBtn);
+    SDL_Color close_bg = overClose ? g_button_hover : g_button_base;
+    SDL_Color close_txt = g_button_text;
+    if (sub_dialog_active)
+    {
+        close_bg.a = 120;
+        close_txt.a = 120;
+    }
+    draw_rect(R, closeBtn, close_bg);
+    draw_frame(R, closeBtn, g_button_border);
+    draw_text(R, closeBtn.x + 4, closeBtn.y - 1, "X", close_txt);
+
+    if (input_mclick && overClose)
+    {
+        g_show_eq_dialog = false;
+        initialized = false;
+        preset_dropdown_open = false;
+        return;
+    }
+
+    // Enable/Disable EQ toggle
+    bool old_enabled = g_eq_enabled;
+    ui_toggle(R, (Rect){dlg.x + 20, dlg.y + 48, 18, 18}, &g_eq_enabled, "Enable EQ", input_mx, input_my, input_mclick);
+    if (g_eq_enabled != old_enabled)
+    {
+        if (g_bae.mixer)
+        {
+            BAEMixer_SetEQEnabled(g_bae.mixer, g_eq_enabled ? TRUE : FALSE);
+            save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, g_bae.current_reverb_type, g_bae.loop_enabled_gui);
+        }
+    }
+
+    // Preset dropdown and save/delete buttons
+    Rect dropdownRect = {dlg.x + dlg.w - 180, dlg.y + 45, 110, 24};
+    SDL_Color lblCol = g_eq_enabled ? g_text_color : (SDL_Color){g_text_color.r, g_text_color.g, g_text_color.b, 120};
+    draw_text(R, dropdownRect.x - 60, dropdownRect.y + 4, "Preset:", lblCol);
+
+    Rect saveBtn = {dlg.x + dlg.w - 65, dlg.y + 47, 20, 20};
+    Rect deleteBtn = {dlg.x + dlg.w - 40, dlg.y + 47, 20, 20};
+
+    bool overSave = g_eq_enabled && !preset_dropdown_open && point_in(input_mx, input_my, saveBtn);
+    bool overDelete = g_eq_enabled && !preset_dropdown_open && point_in(input_mx, input_my, deleteBtn);
+    bool can_delete = (g_selected_eq_preset >= 8); // Only custom presets (8+) can be deleted
+
+    SDL_Color save_bg = overSave ? g_button_hover : g_button_base;
+    SDL_Color delete_bg = (overDelete && can_delete) ? g_button_hover : g_button_base;
+
+    if (!g_eq_enabled)
+    {
+        save_bg.a = 120;
+        delete_bg.a = 120;
+    }
+    else if (!can_delete)
+    {
+        delete_bg.a = 120;
+    }
+
+    draw_rect(R, saveBtn, save_bg);
+    draw_frame(R, saveBtn, g_button_border);
+    SDL_Color btn_txt = g_button_text;
+    if (!g_eq_enabled) btn_txt.a = 120;
+    draw_text(R, saveBtn.x + 5, saveBtn.y + 2, "+", btn_txt);
+
+    draw_rect(R, deleteBtn, delete_bg);
+    draw_frame(R, deleteBtn, g_button_border);
+    SDL_Color del_txt = g_button_text;
+    if (!g_eq_enabled || !can_delete) del_txt.a = 120;
+    draw_text(R, deleteBtn.x + 6, deleteBtn.y + 2, "-", del_txt);
+
+    if (input_mclick && g_eq_enabled && !preset_dropdown_open)
+    {
+        if (overSave)
+        {
+            extern bool g_show_preset_name_dialog;
+            extern char g_preset_name_input[64];
+            extern int g_preset_name_cursor;
+            
+            g_preset_dialog_is_eq = true;
+            if (g_selected_eq_preset >= 8)
+            {
+                const char *current_name = get_eq_preset_name(g_selected_eq_preset);
+                if (current_name)
+                {
+                    safe_strncpy(g_preset_name_input, current_name, sizeof(g_preset_name_input) - 1);
+                    g_preset_name_cursor = strlen(g_preset_name_input);
+                }
+            }
+            else
+            {
+                memset(g_preset_name_input, 0, sizeof(g_preset_name_input));
+                g_preset_name_cursor = 0;
+            }
+            g_show_preset_name_dialog = true;
+        }
+        else if (overDelete && can_delete)
+        {
+            extern bool g_show_preset_delete_confirm_dialog;
+            extern char g_preset_delete_name[64];
+            
+            g_preset_dialog_is_eq = true;
+            g_show_preset_delete_confirm_dialog = true;
+            const char *preset_name = get_eq_preset_name(g_selected_eq_preset);
+            safe_strncpy(g_preset_delete_name, preset_name, sizeof(g_preset_delete_name) - 1);
+            g_preset_delete_name[sizeof(g_preset_delete_name) - 1] = '\0';
+        }
+    }
+
+    int old_preset = g_selected_eq_preset;
+    // Disable preset dropdown selection if EQ is disabled
+    int dd_mx = g_eq_enabled ? input_mx : -1;
+    int dd_my = g_eq_enabled ? input_my : -1;
+    bool dd_mdown = g_eq_enabled ? input_mdown : false;
+    bool dd_mclick = g_eq_enabled ? input_mclick : false;
+
+    // Sliders layout
+    const char *band_labels[] = {
+        "100 Hz (Bass):",
+        "300 Hz (Low Mid):",
+        "1 kHz (Mid):",
+        "3 kHz (High Mid):",
+        "10 kHz (Treble):"
+    };
+
+    int startY = dlg.y + 90;
+    int labelX = dlg.x + 20;
+    int sliderX = dlg.x + 150;
+    int sliderW = dlg.w - 170 - 60;
+    int sliderH = 14;
+
+    int check_mx = g_eq_enabled && !preset_dropdown_open ? input_mx : -1;
+    int check_my = g_eq_enabled && !preset_dropdown_open ? input_my : -1;
+    bool check_mdown = g_eq_enabled && !preset_dropdown_open ? input_mdown : false;
+    bool check_mclick = g_eq_enabled && !preset_dropdown_open ? input_mclick : false;
+
+    for (int i = 0; i < 5; i++)
+    {
+        int y = startY + i * 50;
+
+        // Label
+        draw_text(R, labelX, y + 2, band_labels[i], lblCol);
+
+        // Slider
+        Rect sliderRect = {sliderX, y, sliderW, sliderH};
+        int val_int = (int)g_eq_gains[i];
+        int old_val = val_int;
+        ui_slider(R, sliderRect, &val_int, -12, 12, check_mx, check_my, check_mdown, check_mclick);
+        g_eq_gains[i] = (float)val_int;
+
+        if (val_int != old_val)
+        {
+            if (g_bae.mixer)
+            {
+                BAEMixer_SetEQGain(g_bae.mixer, i, g_eq_gains[i]);
+            }
+            g_selected_eq_preset = 7; // Custom
+            g_current_custom_eq_preset[0] = '\0';
+            save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, g_bae.current_reverb_type, g_bae.loop_enabled_gui);
+        }
+
+        // Value text
+        char valBuf[32];
+        snprintf(valBuf, sizeof(valBuf), "%+d dB", val_int);
+        draw_text(R, sliderX + sliderW + 8, y + 2, valBuf, lblCol);
+    }
+
+    // Render dropdown last so it draws on top of sliders
+    int total_presets = get_eq_preset_count();
+    const char **eq_preset_names = (const char **)malloc(sizeof(char *) * (size_t)total_presets);
+    if (eq_preset_names)
+    {
+        for (int i = 0; i < total_presets; i++)
+        {
+            eq_preset_names[i] = get_eq_preset_name(i);
+        }
+
+        bool dropdown_changed = ui_dropdown(R, dropdownRect, &g_selected_eq_preset, eq_preset_names, total_presets, &preset_dropdown_open, dd_mx, dd_my, dd_mdown, dd_mclick);
+        if (dropdown_changed && g_selected_eq_preset != old_preset)
+        {
+            if (g_selected_eq_preset < 7)
+            {
+                for (int i = 0; i < 5; i++)
+                {
+                    g_eq_gains[i] = (float)eq_preset_gains[g_selected_eq_preset][i];
+                    if (g_bae.mixer)
+                    {
+                        BAEMixer_SetEQGain(g_bae.mixer, i, g_eq_gains[i]);
+                    }
+                }
+                g_current_custom_eq_preset[0] = '\0';
+                save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, g_bae.current_reverb_type, g_bae.loop_enabled_gui);
+            }
+            else if (g_selected_eq_preset == 7)
+            {
+                g_current_custom_eq_preset[0] = '\0';
+                save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, g_bae.current_reverb_type, g_bae.loop_enabled_gui);
+            }
+            else
+            {
+                int custom_idx = g_selected_eq_preset - 8;
+                if (custom_idx >= 0 && custom_idx < g_custom_eq_preset_count)
+                {
+                    load_custom_eq_preset(g_custom_eq_presets[custom_idx].name);
+                }
+                save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, g_bae.current_reverb_type, g_bae.loop_enabled_gui);
+            }
+        }
+        free(eq_preset_names);
+    }
+
+    if (sub_dialog_active)
+    {
+        SDL_Color sub_dim = {0, 0, 0, 160};
+        draw_rect(R, dlg, sub_dim);
+        draw_frame(R, dlg, g_panel_border);
+    }
+}
+
 // Dialog initialization
 void dialogs_init(void)
 {
@@ -1638,6 +1926,7 @@ void dialogs_init(void)
     g_rmf_info_loaded = false;
     g_show_about_dialog = false;
     g_about_page = 0;
+    g_show_eq_dialog = false;
     ui_clear_tooltip(&g_bank_tooltip_visible);
     ui_clear_tooltip(&g_file_tooltip_visible);
     ui_clear_tooltip(&g_loop_tooltip_visible);
@@ -1650,9 +1939,33 @@ void dialogs_cleanup(void)
 {
     g_show_rmf_info_dialog = false;
     g_show_about_dialog = false;
+    g_show_eq_dialog = false;
     ui_clear_tooltip(&g_bank_tooltip_visible);
     ui_clear_tooltip(&g_file_tooltip_visible);
     ui_clear_tooltip(&g_loop_tooltip_visible);
     ui_clear_tooltip(&g_program_tooltip_visible);
     ui_clear_tooltip(&g_bank_tooltip_visible);
+}
+
+int get_eq_preset_count(void)
+{
+    extern int g_custom_eq_preset_count;
+    return 8 + g_custom_eq_preset_count;
+}
+
+const char *get_eq_preset_name(int idx)
+{
+    static const char *eq_standard_names[] = {
+        "Flat", "Bass Boost", "Acoustic", "Rock", "Pop", "Classical", "Vocal", "Custom"
+    };
+    if (idx < 0) return "?";
+    if (idx < 8) return eq_standard_names[idx];
+    
+    extern int g_custom_eq_preset_count;
+    extern CustomEQPreset *g_custom_eq_presets;
+    if (idx < 8 + g_custom_eq_preset_count && g_custom_eq_presets)
+    {
+        return g_custom_eq_presets[idx - 8].name;
+    }
+    return "?";
 }

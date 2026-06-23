@@ -67,6 +67,11 @@ typedef struct
     bool has_classic_chorus;
     bool classic_chorus_enabled;
 #endif
+    bool has_eq;
+    bool eq_enabled;
+    float eq_gains[5];
+    bool has_eq_preset;
+    char eq_preset_name[64];
 } Settings;
 
 // Custom reverb preset structure
@@ -81,6 +86,13 @@ typedef struct
     int mix;     // 0-255 (wet/dry mix)
 } CustomReverbPreset;
 
+// Custom EQ preset structure
+typedef struct
+{
+    char name[64];
+    float gains[5];
+} CustomEQPreset;
+
 // Custom reverb preset list
 extern CustomReverbPreset *g_custom_reverb_presets;
 extern int g_custom_reverb_preset_count;
@@ -90,6 +102,15 @@ extern int g_current_custom_reverb_comb_count;
 extern int g_current_custom_reverb_delays[NEO_CUSTOM_MAX_COMBS];
 extern int g_current_custom_reverb_feedback[NEO_CUSTOM_MAX_COMBS];
 extern int g_current_custom_reverb_gain[NEO_CUSTOM_MAX_COMBS];
+
+// Custom EQ preset list
+extern CustomEQPreset *g_custom_eq_presets;
+extern int g_custom_eq_preset_count;
+extern char g_current_custom_eq_preset[64];
+extern int g_selected_eq_preset;
+extern bool g_preset_dialog_is_eq;
+extern bool g_eq_enabled;
+extern float g_eq_gains[5];
 
 // Settings dialog state
 extern bool g_show_settings_dialog;
@@ -130,10 +151,16 @@ void delete_custom_reverb_preset(const char *name);
 void load_custom_reverb_preset_list(void);
 int get_custom_reverb_preset_index(const char *name);
 
+void save_custom_eq_preset(const char *name);
+void load_custom_eq_preset(const char *name);
+void delete_custom_eq_preset(const char *name);
+void load_custom_eq_preset_list(void);
+int get_custom_eq_preset_index(const char *name);
+
 // .neoreverb XML import/export helpers
 bool export_custom_reverb_neoreverb(const char *preset_name, const char *path);
 bool import_custom_reverb_neoreverb(const char *path, char *out_preset_name, size_t out_preset_name_size);
-void render_preset_name_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool mdown, int window_h);
+void render_preset_name_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool mdown, int window_h, int *reverbType);
 void render_preset_delete_confirm_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool mdown, int window_h);
 
 // Settings application functions

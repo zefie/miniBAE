@@ -3607,6 +3607,69 @@ BAEResult BAEMixer_GetDefaultReverb(BAEMixer mixer, BAEReverbType *pOutResult)
 #endif
 }
 
+BAEResult BAEMixer_SetEQEnabled(BAEMixer mixer, BAE_BOOL enabled)
+{
+    if (mixer && mixer->pMixer)
+    {
+        BAE_AcquireMutex(mixer->mLock);
+        if (mixer->pMixer->eq.enabled != (enabled ? true : false))
+        {
+            mixer->pMixer->eq.enabled = (enabled ? true : false);
+            if (mixer->pMixer->eq.enabled)
+            {
+                PV_ClearEQState(mixer->pMixer);
+                PV_UpdateEQCoefficients(mixer->pMixer);
+            }
+        }
+        BAE_ReleaseMutex(mixer->mLock);
+        return BAE_NO_ERROR;
+    }
+    return BAE_PARAM_ERR;
+}
+
+BAEResult BAEMixer_GetEQEnabled(BAEMixer mixer, BAE_BOOL *pOutEnabled)
+{
+    if (mixer && mixer->pMixer && pOutEnabled)
+    {
+        BAE_AcquireMutex(mixer->mLock);
+        *pOutEnabled = mixer->pMixer->eq.enabled ? TRUE : FALSE;
+        BAE_ReleaseMutex(mixer->mLock);
+        return BAE_NO_ERROR;
+    }
+    return BAE_PARAM_ERR;
+}
+
+BAEResult BAEMixer_SetEQGain(BAEMixer mixer, uint32_t bandIndex, float gaindB)
+{
+    if (mixer && mixer->pMixer && bandIndex < BAE_EQ_BANDS)
+    {
+        if (gaindB < -12.0f) gaindB = -12.0f;
+        if (gaindB > 12.0f) gaindB = 12.0f;
+        
+        BAE_AcquireMutex(mixer->mLock);
+        if (mixer->pMixer->eq.gains[bandIndex] != gaindB)
+        {
+            mixer->pMixer->eq.gains[bandIndex] = gaindB;
+            PV_UpdateEQCoefficients(mixer->pMixer);
+        }
+        BAE_ReleaseMutex(mixer->mLock);
+        return BAE_NO_ERROR;
+    }
+    return BAE_PARAM_ERR;
+}
+
+BAEResult BAEMixer_GetEQGain(BAEMixer mixer, uint32_t bandIndex, float *pOutGaindB)
+{
+    if (mixer && mixer->pMixer && bandIndex < BAE_EQ_BANDS && pOutGaindB)
+    {
+        BAE_AcquireMutex(mixer->mLock);
+        *pOutGaindB = mixer->pMixer->eq.gains[bandIndex];
+        BAE_ReleaseMutex(mixer->mLock);
+        return BAE_NO_ERROR;
+    }
+    return BAE_PARAM_ERR;
+}
+
 // BAEMixer_IsOpen()
 // ------------------------------------
 //

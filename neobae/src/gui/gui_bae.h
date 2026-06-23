@@ -178,4 +178,6 @@ void update_bank_program_for_channel(void);
 // Rate conversion
 // BAERate map_rate_from_hz(int hz);  // TODO: Define if needed
 
+void gui_apply_eq_from_settings(void);
+
 #endif // GUI_BAE_H

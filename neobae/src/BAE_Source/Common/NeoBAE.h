@@ -691,6 +691,12 @@ extern "C"
     BAEResult BAEMixer_SetDefaultReverb(BAEMixer mixer, BAEReverbType verb);
     BAEResult BAEMixer_GetDefaultReverb(BAEMixer mixer, BAEReverbType *pOutResult);
 
+    // 5-band EQ API
+    BAEResult BAEMixer_SetEQEnabled(BAEMixer mixer, BAE_BOOL enabled);
+    BAEResult BAEMixer_GetEQEnabled(BAEMixer mixer, BAE_BOOL *pOutEnabled);
+    BAEResult BAEMixer_SetEQGain(BAEMixer mixer, uint32_t bandIndex, float gaindB);
+    BAEResult BAEMixer_GetEQGain(BAEMixer mixer, uint32_t bandIndex, float *pOutGaindB);
+
     // BAEMixer_IsOpen()
     // ------------------------------------
     // Upon return, parameter outIsOpen will point to a BAE_BOOL indicating whether

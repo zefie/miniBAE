@@ -352,6 +352,7 @@
 #include "X_Assert.h"
 #include "X_Formats.h"
 #include <stdint.h>
+#include <math.h>
 #if USE_SF2_SUPPORT == TRUE
 #if _USING_FLUIDSYNTH == TRUE
 #include "GenSF2_FluidSynth.h"
@@ -902,6 +903,185 @@ static void PV_ApplyOutputLimiter(GM_Mixer *pMixer)
         for (i = 0; i < samples; i++)
         {
             buffer[i] = (int32_t)(((int64_t)buffer[i] * gain) >> 16);
+        }
+    }
+}
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+void PV_UpdateEQCoefficients(GM_Mixer *pMixer)
+{
+    if (!pMixer) return;
+    
+    uint32_t sr = pMixer->outputRate;
+    if (sr == 0) sr = 44100;
+    
+    pMixer->eq.sampleRate = sr;
+    
+    double center_frequencies[BAE_EQ_BANDS] = {100.0, 300.0, 1000.0, 3000.0, 10000.0};
+    double nyquist = (double)sr * 0.5;
+    
+    for (int band = 0; band < BAE_EQ_BANDS; band++)
+    {
+        double fc = center_frequencies[band];
+        if (fc >= nyquist)
+        {
+            fc = nyquist * 0.95;
+        }
+        
+        float gaindB = pMixer->eq.gains[band];
+        if (gaindB < -12.0f) gaindB = -12.0f;
+        if (gaindB > 12.0f) gaindB = 12.0f;
+        pMixer->eq.gains[band] = gaindB;
+        
+        double A = pow(10.0, (double)gaindB / 40.0);
+        double omega0 = 2.0 * M_PI * fc / (double)sr;
+        double cosw0 = cos(omega0);
+        double sinw0 = sin(omega0);
+        
+        double b0 = 0.0, b1 = 0.0, b2 = 0.0, a0 = 1.0, a1 = 0.0, a2 = 0.0;
+        
+        if (band == 0)
+        {
+            // Low Shelf
+            double alpha = sinw0 / 2.0 * sqrt(2.0); // S = 1
+            b0 = A * ((A + 1.0) - (A - 1.0) * cosw0 + 2.0 * sqrt(A) * alpha);
+            b1 = 2.0 * A * ((A - 1.0) - (A + 1.0) * cosw0);
+            b2 = A * ((A + 1.0) - (A - 1.0) * cosw0 - 2.0 * sqrt(A) * alpha);
+            a0 = (A + 1.0) + (A - 1.0) * cosw0 + 2.0 * sqrt(A) * alpha;
+            a1 = -2.0 * ((A - 1.0) + (A + 1.0) * cosw0);
+            a2 = (A + 1.0) + (A - 1.0) * cosw0 - 2.0 * sqrt(A) * alpha;
+        }
+        else if (band == BAE_EQ_BANDS - 1)
+        {
+            // High Shelf
+            double alpha = sinw0 / 2.0 * sqrt(2.0); // S = 1
+            b0 = A * ((A + 1.0) + (A - 1.0) * cosw0 + 2.0 * sqrt(A) * alpha);
+            b1 = -2.0 * A * ((A - 1.0) + (A + 1.0) * cosw0);
+            b2 = A * ((A + 1.0) + (A - 1.0) * cosw0 - 2.0 * sqrt(A) * alpha);
+            a0 = (A + 1.0) - (A - 1.0) * cosw0 + 2.0 * sqrt(A) * alpha;
+            a1 = 2.0 * ((A - 1.0) - (A + 1.0) * cosw0);
+            a2 = (A + 1.0) - (A - 1.0) * cosw0 - 2.0 * sqrt(A) * alpha;
+        }
+        else
+        {
+            // Peaking EQ
+            double Q = 1.0;
+            double alpha = sinw0 / (2.0 * Q);
+            b0 = 1.0 + alpha * A;
+            b1 = -2.0 * cosw0;
+            b2 = 1.0 - alpha * A;
+            a0 = 1.0 + alpha / A;
+            a1 = -2.0 * cosw0;
+            a2 = 1.0 - alpha / A;
+        }
+        
+        double inv_a0 = 1.0 / a0;
+        double nb0 = b0 * inv_a0;
+        double nb1 = b1 * inv_a0;
+        double nb2 = b2 * inv_a0;
+        double na1 = a1 * inv_a0;
+        double na2 = a2 * inv_a0;
+        
+        for (int ch = 0; ch < 2; ch++)
+        {
+            pMixer->eq.channels[ch].filters[band].b0 = nb0;
+            pMixer->eq.channels[ch].filters[band].b1 = nb1;
+            pMixer->eq.channels[ch].filters[band].b2 = nb2;
+            pMixer->eq.channels[ch].filters[band].a1 = na1;
+            pMixer->eq.channels[ch].filters[band].a2 = na2;
+        }
+    }
+}
+
+void PV_ClearEQState(GM_Mixer *pMixer)
+{
+    if (!pMixer) return;
+    for (int ch = 0; ch < 2; ch++)
+    {
+        for (int band = 0; band < BAE_EQ_BANDS; band++)
+        {
+            pMixer->eq.channels[ch].filters[band].x1 = 0.0;
+            pMixer->eq.channels[ch].filters[band].x2 = 0.0;
+            pMixer->eq.channels[ch].filters[band].y1 = 0.0;
+            pMixer->eq.channels[ch].filters[band].y2 = 0.0;
+        }
+    }
+}
+
+void PV_ApplyEQ(GM_Mixer *pMixer)
+{
+    if (!pMixer || !pMixer->eq.enabled) return;
+    
+    if (pMixer->eq.sampleRate != pMixer->outputRate)
+    {
+        PV_UpdateEQCoefficients(pMixer);
+    }
+    
+    int32_t *buffer = pMixer->songBufferDry;
+    int32_t frames = pMixer->One_Loop;
+    bool stereo = pMixer->generateStereoOutput;
+    
+    if (stereo)
+    {
+        for (int32_t i = 0; i < frames; i++)
+        {
+            double left = (double)buffer[i * 2];
+            double right = (double)buffer[i * 2 + 1];
+            
+            for (int band = 0; band < BAE_EQ_BANDS; band++)
+            {
+                BAEBiquad *f = &pMixer->eq.channels[0].filters[band];
+                double out = f->b0 * left + f->b1 * f->x1 + f->b2 * f->x2 - f->a1 * f->y1 - f->a2 * f->y2;
+                f->x2 = f->x1;
+                f->x1 = left;
+                f->y2 = f->y1;
+                f->y1 = out;
+                left = out;
+            }
+            
+            for (int band = 0; band < BAE_EQ_BANDS; band++)
+            {
+                BAEBiquad *f = &pMixer->eq.channels[1].filters[band];
+                double out = f->b0 * right + f->b1 * f->x1 + f->b2 * f->x2 - f->a1 * f->y1 - f->a2 * f->y2;
+                f->x2 = f->x1;
+                f->x1 = right;
+                f->y2 = f->y1;
+                f->y1 = out;
+                right = out;
+            }
+            
+            if (left > 2147483647.0) left = 2147483647.0;
+            else if (left < -2147483648.0) left = -2147483648.0;
+            buffer[i * 2] = (int32_t)left;
+            
+            if (right > 2147483647.0) right = 2147483647.0;
+            else if (right < -2147483648.0) right = -2147483648.0;
+            buffer[i * 2 + 1] = (int32_t)right;
+        }
+    }
+    else
+    {
+        for (int32_t i = 0; i < frames; i++)
+        {
+            double mono = (double)buffer[i];
+            
+            for (int band = 0; band < BAE_EQ_BANDS; band++)
+            {
+                BAEBiquad *f = &pMixer->eq.channels[0].filters[band];
+                double out = f->b0 * mono + f->b1 * f->x1 + f->b2 * f->x2 - f->a1 * f->y1 - f->a2 * f->y2;
+                f->x2 = f->x1;
+                f->x1 = mono;
+                f->y2 = f->y1;
+                f->y1 = out;
+                mono = out;
+            }
+            
+            if (mono > 2147483647.0) mono = 2147483647.0;
+            else if (mono < -2147483648.0) mono = -2147483648.0;
+            buffer[i] = (int32_t)mono;
         }
     }
 }
@@ -3047,6 +3227,9 @@ void PV_ProcessSampleFrame(void *threadContext, void *destinationSamples)
         {
             PV_ClearMixBuffers(pMixer->generateStereoOutput);
         }
+
+        // Apply EQ to final mix buffer
+        PV_ApplyEQ(pMixer);
 
         // Limit the raw mix bus before global volume so the limiter
         // never interacts with the volume slider.

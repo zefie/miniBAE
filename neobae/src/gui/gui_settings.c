@@ -28,6 +28,7 @@
 #include "gui_common.h"
 #include "gui_midi.h"
 #include "gui_playlist.h"
+#include "gui_panels.h"
 #include "GenPriv.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -200,6 +201,42 @@ Settings load_settings(void)
             settings.has_classic_chorus = true;
         }
 #endif
+        else if (strncmp(line, "eq_enabled=", 11) == 0)
+        {
+            settings.eq_enabled = (atoi(line + 11) != 0);
+            settings.has_eq = true;
+        }
+        else if (strncmp(line, "eq_gain_0=", 10) == 0)
+        {
+            settings.eq_gains[0] = (float)atof(line + 10);
+            settings.has_eq = true;
+        }
+        else if (strncmp(line, "eq_gain_1=", 10) == 0)
+        {
+            settings.eq_gains[1] = (float)atof(line + 10);
+            settings.has_eq = true;
+        }
+        else if (strncmp(line, "eq_gain_2=", 10) == 0)
+        {
+            settings.eq_gains[2] = (float)atof(line + 10);
+            settings.has_eq = true;
+        }
+        else if (strncmp(line, "eq_gain_3=", 10) == 0)
+        {
+            settings.eq_gains[3] = (float)atof(line + 10);
+            settings.has_eq = true;
+        }
+        else if (strncmp(line, "eq_gain_4=", 10) == 0)
+        {
+            settings.eq_gains[4] = (float)atof(line + 10);
+            settings.has_eq = true;
+        }
+        else if (strncmp(line, "eq_preset=", 10) == 0)
+        {
+            safe_strncpy(settings.eq_preset_name, line + 10, sizeof(settings.eq_preset_name) - 1);
+            settings.eq_preset_name[sizeof(settings.eq_preset_name) - 1] = '\0';
+            settings.has_eq_preset = true;
+        }
     }
     fclose(f);
 
@@ -254,8 +291,8 @@ void save_settings(const char *last_bank_path, int reverb_type, bool loop_enable
         content = (char *)malloc(content_size + 1);
         if (content)
         {
-            fread(content, 1, content_size, f_read);
-            content[content_size] = '\0';
+            size_t bytes_read = fread(content, 1, content_size, f_read);
+            content[bytes_read] = '\0';
         }
         fclose(f_read);
     }
@@ -281,6 +318,31 @@ void save_settings(const char *last_bank_path, int reverb_type, bool loop_enable
 #if BAE_CLASSIC_CHORUS
         fprintf(f, "classic_chorus_enabled=%d\n", g_classic_chorus_enabled ? 1 : 0);
 #endif
+        if (g_bae.mixer)
+        {
+            BAE_BOOL eq_on = FALSE;
+            BAEMixer_GetEQEnabled(g_bae.mixer, &eq_on);
+            fprintf(f, "eq_enabled=%d\n", eq_on ? 1 : 0);
+            for (int i = 0; i < 5; i++)
+            {
+                float gain = 0.0f;
+                BAEMixer_GetEQGain(g_bae.mixer, i, &gain);
+                fprintf(f, "eq_gain_%d=%f\n", i, gain);
+            }
+            if (g_selected_eq_preset < 7)
+            {
+                const char *std_names[] = {"Flat", "Bass Boost", "Acoustic", "Rock", "Pop", "Classical", "Vocal"};
+                fprintf(f, "eq_preset=%s\n", std_names[g_selected_eq_preset]);
+            }
+            else if (g_selected_eq_preset == 7)
+            {
+                fprintf(f, "eq_preset=Custom\n");
+            }
+            else
+            {
+                fprintf(f, "eq_preset=%s\n", g_current_custom_eq_preset);
+            }
+        }
 #if SUPPORT_PLAYLIST == TRUE
         fprintf(f, "shuffle_enabled=%d\n", g_playlist.shuffle_enabled ? 1 : 0);
         fprintf(f, "repeat_mode=%d\n", g_playlist.repeat_mode);
@@ -303,8 +365,9 @@ void save_settings(const char *last_bank_path, int reverb_type, bool loop_enable
         {
             fprintf(f, "custom_reverb_preset=%s\n", g_current_custom_reverb_preset);
         }
+#endif
         
-        // Preserve existing custom reverb preset data
+        // Preserve existing custom reverb and custom EQ preset data
         if (content)
         {
             char *read_ptr = content;
@@ -323,6 +386,7 @@ void save_settings(const char *last_bank_path, int reverb_type, bool loop_enable
                 line_buf[i] = '\0';
                 if (*read_ptr == '\n') read_ptr++;
                 
+#if USE_NEO_EFFECTS
                 // Only write lines that start with custom_reverb_%d_
                 if (line_buf[0] && strncmp(line_buf, "custom_reverb_", 14) == 0)
                 {
@@ -333,9 +397,18 @@ void save_settings(const char *last_bank_path, int reverb_type, bool loop_enable
                         fprintf(f, "%s\n", line_buf);
                     }
                 }
+                else
+#endif
+                if (line_buf[0] && strncmp(line_buf, "custom_eq_", 10) == 0)
+                {
+                    char *underscore = strchr(line_buf + 10, '_');
+                    if (underscore && line_buf[10] >= '0' && line_buf[10] <= '9')
+                    {
+                        fprintf(f, "%s\n", line_buf);
+                    }
+                }
             }
         }
-#endif
 
         if (content) free(content);
         fclose(f);
@@ -369,8 +442,8 @@ void save_full_settings(const Settings *settings)
         content = (char *)malloc(content_size + 1);
         if (content)
         {
-            fread(content, 1, content_size, f_read);
-            content[content_size] = '\0';
+            size_t bytes_read = fread(content, 1, content_size, f_read);
+            content[bytes_read] = '\0';
         }
         fclose(f_read);
     }
@@ -455,9 +528,28 @@ void save_full_settings(const Settings *settings)
             fprintf(f, "classic_chorus_enabled=%d\n", settings->classic_chorus_enabled ? 1 : 0);
         }
 #endif
+        if (settings->has_eq)
+        {
+            fprintf(f, "eq_enabled=%d\n", settings->eq_enabled ? 1 : 0);
+            for (int i = 0; i < 5; i++)
+            {
+                fprintf(f, "eq_gain_%d=%f\n", i, settings->eq_gains[i]);
+            }
+        }
+        if (settings->has_eq_preset && settings->eq_preset_name[0])
+        {
+            fprintf(f, "eq_preset=%s\n", settings->eq_preset_name);
+        }
         
 #if USE_NEO_EFFECTS
-        // Preserve existing custom reverb preset data
+        // Save current custom reverb preset name if one is loaded
+        if (settings->has_custom_reverb_preset && settings->custom_reverb_preset_name[0])
+        {
+            fprintf(f, "custom_reverb_preset=%s\n", settings->custom_reverb_preset_name);
+        }
+#endif
+        
+        // Preserve existing custom reverb and custom EQ preset data
         if (content)
         {
             char *read_ptr = content;
@@ -476,6 +568,7 @@ void save_full_settings(const Settings *settings)
                 line_buf[i] = '\0';
                 if (*read_ptr == '\n') read_ptr++;
                 
+#if USE_NEO_EFFECTS
                 // Only write lines that start with custom_reverb_%d_
                 if (line_buf[0] && strncmp(line_buf, "custom_reverb_", 14) == 0)
                 {
@@ -486,9 +579,18 @@ void save_full_settings(const Settings *settings)
                         fprintf(f, "%s\n", line_buf);
                     }
                 }
+                else
+#endif
+                if (line_buf[0] && strncmp(line_buf, "custom_eq_", 10) == 0)
+                {
+                    char *underscore = strchr(line_buf + 10, '_');
+                    if (underscore && line_buf[10] >= '0' && line_buf[10] <= '9')
+                    {
+                        fprintf(f, "%s\n", line_buf);
+                    }
+                }
             }
         }
-#endif
         
         if (content) free(content);
         fclose(f);
@@ -1588,6 +1690,11 @@ void settings_init(void)
 #if BAE_CLASSIC_CHORUS
     g_classic_chorus_enabled = false;
 #endif
+    g_selected_eq_preset = 0;
+    g_current_custom_eq_preset[0] = '\0';
+    g_preset_dialog_is_eq = false;
+    g_eq_enabled = false;
+    for (int i = 0; i < 5; i++) g_eq_gains[i] = 0.0f;
 }
 
 void settings_cleanup(void)
@@ -1603,6 +1710,14 @@ void settings_cleanup(void)
         g_custom_reverb_presets = NULL;
     }
     g_custom_reverb_preset_count = 0;
+    
+    // Free custom EQ preset list
+    if (g_custom_eq_presets)
+    {
+        free(g_custom_eq_presets);
+        g_custom_eq_presets = NULL;
+    }
+    g_custom_eq_preset_count = 0;
 }
 
 // Custom reverb preset management
@@ -1616,6 +1731,15 @@ int g_current_custom_reverb_comb_count = 0; // 0 means "not yet synced"
 int g_current_custom_reverb_delays[NEO_CUSTOM_MAX_COMBS] = {0};
 int g_current_custom_reverb_feedback[NEO_CUSTOM_MAX_COMBS] = {0};
 int g_current_custom_reverb_gain[NEO_CUSTOM_MAX_COMBS] = {127, 127, 127, 127};
+
+// Custom EQ preset management
+CustomEQPreset *g_custom_eq_presets = NULL;
+int g_custom_eq_preset_count = 0;
+char g_current_custom_eq_preset[64] = {0};
+int g_selected_eq_preset = 0;
+bool g_preset_dialog_is_eq = false;
+bool g_eq_enabled = false;
+float g_eq_gains[5] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 
 #if USE_NEO_EFFECTS
 static void ensure_current_custom_reverb_state_synced_from_engine(void)
@@ -1893,8 +2017,8 @@ void save_custom_reverb_preset(const char *name)
         content = (char *)malloc(content_size + 1);
         if (content)
         {
-            fread(content, 1, content_size, f);
-            content[content_size] = '\0';
+            size_t bytes_read = fread(content, 1, content_size, f);
+            content[bytes_read] = '\0';
         }
         fclose(f);
     }
@@ -2338,8 +2462,8 @@ void delete_custom_reverb_preset(const char *name)
         content = (char *)malloc(content_size + 1);
         if (content)
         {
-            fread(content, 1, content_size, f);
-            content[content_size] = '\0';
+            size_t bytes_read = fread(content, 1, content_size, f);
+            content[bytes_read] = '\0';
         }
         fclose(f);
     }
@@ -2439,8 +2563,9 @@ void delete_custom_reverb_preset(const char *name)
     load_custom_reverb_preset_list();
 }
 
-void render_preset_name_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool mdown, int window_h)
+void render_preset_name_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool mdown, int window_h, int *reverbType)
 {
+    extern bool g_show_eq_dialog;
     if (!g_show_preset_name_dialog) return;
     
     int dlg_w = 300;
@@ -2497,7 +2622,24 @@ void render_preset_name_dialog(SDL_Renderer *R, int mx, int my, bool mclick, boo
     {
         if (overOk && g_preset_name_input[0])
         {
-            save_custom_reverb_preset(g_preset_name_input);
+            if (g_show_eq_dialog)
+            {
+                save_custom_eq_preset(g_preset_name_input);
+            }
+            else
+            {
+                save_custom_reverb_preset(g_preset_name_input);
+                int preset_list_idx = get_custom_reverb_preset_index(g_preset_name_input);
+                if (preset_list_idx >= 0 && reverbType)
+                {
+                    load_custom_reverb_preset(g_preset_name_input);
+                    extern int g_custom_reverb_preset_count;
+                    int base_count = get_reverb_count() - g_custom_reverb_preset_count;
+                    *reverbType = base_count + preset_list_idx + 1;
+                    bae_set_reverb(*reverbType);
+                    save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, g_bae.loop_enabled_gui);
+                }
+            }
             g_show_preset_name_dialog = false;
             memset(g_preset_name_input, 0, sizeof(g_preset_name_input));
             g_preset_name_cursor = 0;
@@ -2573,4 +2715,501 @@ void render_preset_delete_confirm_dialog(SDL_Renderer *R, int mx, int my, bool m
             memset(g_preset_delete_name, 0, sizeof(g_preset_delete_name));
         }
     }
+}
+
+void load_custom_eq_preset_list(void)
+{
+    // Free existing presets
+    if (g_custom_eq_presets)
+    {
+        free(g_custom_eq_presets);
+        g_custom_eq_presets = NULL;
+    }
+    g_custom_eq_preset_count = 0;
+
+    char exe_dir[512];
+    get_executable_directory(exe_dir, sizeof(exe_dir));
+
+    char settings_path[768];
+#ifdef _WIN32
+    snprintf(settings_path, sizeof(settings_path), "%s\\zefidi.ini", exe_dir);
+#else
+    snprintf(settings_path, sizeof(settings_path), "%s/zefidi.ini", exe_dir);
+#endif
+
+    FILE *f = fopen(settings_path, "r");
+    if (!f) return;
+
+    // First pass: find maximum numeric preset index present in custom_eq_%d_* keys
+    int max_idx = -1;
+    char line[512];
+    while (fgets(line, sizeof(line), f))
+    {
+        // Strip newline and carriage return
+        char *nl = strchr(line, '\n');
+        if (nl) *nl = '\0';
+        char *cr = strchr(line, '\r');
+        if (cr) *cr = '\0';
+
+        if (strncmp(line, "custom_eq_", 10) != 0)
+            continue;
+
+        const char *p = line + 10;
+        if (!(*p >= '0' && *p <= '9'))
+            continue;
+
+        int idx = 0;
+        while (*p >= '0' && *p <= '9')
+        {
+            idx = idx * 10 + (*p - '0');
+            p++;
+        }
+        if (*p != '_')
+            continue;
+
+        if (idx > max_idx)
+            max_idx = idx;
+    }
+
+    if (max_idx < 0)
+    {
+        fclose(f);
+        return;
+    }
+
+    // Temporary dense array by numeric index; later compact to g_custom_eq_presets
+    CustomEQPreset *tmp = (CustomEQPreset *)calloc((size_t)max_idx + 1, sizeof(CustomEQPreset));
+    if (!tmp)
+    {
+        fclose(f);
+        return;
+    }
+
+    for (int i = 0; i <= max_idx; i++)
+    {
+        for (int j = 0; j < 5; j++)
+        {
+            tmp[i].gains[j] = 0.0f;
+        }
+    }
+
+    // Second pass: parse values
+    rewind(f);
+    while (fgets(line, sizeof(line), f))
+    {
+        // Strip newline and carriage return
+        char *nl = strchr(line, '\n');
+        if (nl) *nl = '\0';
+        char *cr = strchr(line, '\r');
+        if (cr) *cr = '\0';
+
+        if (strncmp(line, "custom_eq_", 10) != 0)
+            continue;
+
+        const char *p = line + 10;
+        if (!(*p >= '0' && *p <= '9'))
+            continue;
+
+        int idx = 0;
+        while (*p >= '0' && *p <= '9')
+        {
+            idx = idx * 10 + (*p - '0');
+            p++;
+        }
+        if (*p != '_' || idx < 0 || idx > max_idx)
+            continue;
+
+        p++; // skip '_'
+        const char *eq = strchr(p, '=');
+        if (!eq)
+            continue;
+
+        char key[64];
+        size_t key_len = (size_t)(eq - p);
+        if (key_len >= sizeof(key))
+            key_len = sizeof(key) - 1;
+        memcpy(key, p, key_len);
+        key[key_len] = '\0';
+
+        const char *value = eq + 1;
+
+        if (strcmp(key, "name") == 0)
+        {
+            safe_strncpy(tmp[idx].name, value, sizeof(tmp[idx].name) - 1);
+            tmp[idx].name[sizeof(tmp[idx].name) - 1] = '\0';
+        }
+        else if (strncmp(key, "gain_", 5) == 0)
+        {
+            int band = atoi(key + 5);
+            if (band >= 0 && band < 5)
+                tmp[idx].gains[band] = (float)atof(value);
+        }
+    }
+
+    fclose(f);
+
+    // Compact: only presets with a name count as valid presets
+    int count = 0;
+    for (int i = 0; i <= max_idx; i++)
+    {
+        if (tmp[i].name[0])
+            count++;
+    }
+
+    if (count == 0)
+    {
+        free(tmp);
+        return;
+    }
+
+    int capped_count = (count > 65) ? 65 : count;
+
+    g_custom_eq_presets = (CustomEQPreset *)malloc(sizeof(CustomEQPreset) * (size_t)capped_count);
+    if (!g_custom_eq_presets)
+    {
+        free(tmp);
+        return;
+    }
+
+    int out = 0;
+    for (int i = 0; i <= max_idx; i++)
+    {
+        if (!tmp[i].name[0])
+            continue;
+        if (out >= capped_count)
+            break;
+        g_custom_eq_presets[out++] = tmp[i];
+    }
+    g_custom_eq_preset_count = out;
+    free(tmp);
+}
+
+int get_custom_eq_preset_index(const char *name)
+{
+    if (!name || !g_custom_eq_presets) return -1;
+    
+    for (int i = 0; i < g_custom_eq_preset_count; i++)
+    {
+        if (strcmp(g_custom_eq_presets[i].name, name) == 0)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+void save_custom_eq_preset(const char *name)
+{
+    if (!name || !name[0]) return;
+
+    extern void set_status_message(const char *msg);
+    
+    // Read all existing content
+    char exe_dir[512];
+    get_executable_directory(exe_dir, sizeof(exe_dir));
+    
+    char settings_path[768];
+#ifdef _WIN32
+    snprintf(settings_path, sizeof(settings_path), "%s\\zefidi.ini", exe_dir);
+#else
+    snprintf(settings_path, sizeof(settings_path), "%s/zefidi.ini", exe_dir);
+#endif
+    
+    // Read existing content to preserve settings and find max index
+    char *content = NULL;
+    size_t content_size = 0;
+    FILE *f = fopen(settings_path, "r");
+    if (f)
+    {
+        fseek(f, 0, SEEK_END);
+        content_size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        content = (char *)malloc(content_size + 1);
+        if (content)
+        {
+            size_t bytes_read = fread(content, 1, content_size, f);
+            content[bytes_read] = '\0';
+        }
+        fclose(f);
+    }
+    
+    // Find existing preset index by name, or allocate next available
+    int preset_idx = -1;
+    int max_idx = -1;
+    
+    if (content)
+    {
+        char *scan_ptr = content;
+        char line_buf[512];
+
+        while (*scan_ptr)
+        {
+            int i = 0;
+            while (*scan_ptr && *scan_ptr != '\n' && i < (int)sizeof(line_buf) - 1)
+            {
+                if (*scan_ptr != '\r')
+                    line_buf[i++] = *scan_ptr;
+                scan_ptr++;
+            }
+            line_buf[i] = '\0';
+            if (*scan_ptr == '\n') scan_ptr++;
+
+            if (strncmp(line_buf, "custom_eq_", 10) != 0)
+                continue;
+
+            const char *p = line_buf + 10;
+            if (!(*p >= '0' && *p <= '9'))
+                continue;
+
+            int idx = 0;
+            while (*p >= '0' && *p <= '9')
+            {
+                idx = idx * 10 + (*p - '0');
+                p++;
+            }
+            if (*p != '_')
+                continue;
+
+            if (idx > max_idx)
+                max_idx = idx;
+
+            p++; // skip '_'
+            if (strncmp(p, "name=", 5) == 0)
+            {
+                const char *val = p + 5;
+                if (val[0] && strcmp(val, name) == 0)
+                {
+                    preset_idx = idx;
+                }
+            }
+        }
+    }
+    
+    if (preset_idx < 0)
+    {
+        if (g_custom_eq_preset_count >= 65)
+        {
+            set_status_message("Too many custom EQ presets (max 65)");
+            if (content) free(content);
+            return;
+        }
+        preset_idx = max_idx + 1;
+    }
+    
+    // Rewrite file, excluding old preset data for this index
+    f = fopen(settings_path, "w");
+    if (!f)
+    {
+        if (content) free(content);
+        return;
+    }
+    
+    if (content)
+    {
+        char prefix[64];
+        snprintf(prefix, sizeof(prefix), "custom_eq_%d_", preset_idx);
+        int prefix_len = strlen(prefix);
+        
+        char *write_ptr = content;
+        char line_buf[512];
+        
+        while (*write_ptr)
+        {
+            int i = 0;
+            while (*write_ptr && *write_ptr != '\n' && i < sizeof(line_buf) - 1)
+            {
+                if (*write_ptr != '\r')
+                    line_buf[i++] = *write_ptr;
+                write_ptr++;
+            }
+            line_buf[i] = '\0';
+            if (*write_ptr == '\n') write_ptr++;
+            
+            if (line_buf[0] && strncmp(line_buf, prefix, prefix_len) != 0)
+            {
+                fprintf(f, "%s\n", line_buf);
+            }
+        }
+        free(content);
+    }
+    
+    // Append new preset data
+    fprintf(f, "custom_eq_%d_name=%s\n", preset_idx, name);
+    for (int i = 0; i < 5; i++)
+    {
+        float gain = 0.0f;
+        if (g_bae.mixer)
+        {
+            BAEMixer_GetEQGain(g_bae.mixer, i, &gain);
+        }
+        fprintf(f, "custom_eq_%d_gain_%d=%f\n", preset_idx, i, gain);
+    }
+    
+    fclose(f);
+    
+    // Update current preset name
+    safe_strncpy(g_current_custom_eq_preset, name, sizeof(g_current_custom_eq_preset) - 1);
+    g_current_custom_eq_preset[sizeof(g_current_custom_eq_preset) - 1] = '\0';
+    
+    // Reload preset list
+    load_custom_eq_preset_list();
+
+    // Set active EQ preset to the saved custom preset
+    int custom_idx = get_custom_eq_preset_index(name);
+    if (custom_idx >= 0)
+    {
+        g_selected_eq_preset = 8 + custom_idx;
+    }
+    save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, g_bae.current_reverb_type, g_bae.loop_enabled_gui);
+}
+
+void load_custom_eq_preset(const char *name)
+{
+    if (!name || !name[0]) return;
+    
+    int idx = get_custom_eq_preset_index(name);
+    if (idx < 0) return;
+    
+    CustomEQPreset *preset = &g_custom_eq_presets[idx];
+
+    for (int i = 0; i < 5; i++)
+    {
+        g_eq_gains[i] = preset->gains[i];
+        if (g_bae.mixer)
+        {
+            BAEMixer_SetEQGain(g_bae.mixer, i, preset->gains[i]);
+        }
+    }
+    
+    // Update current preset name
+    safe_strncpy(g_current_custom_eq_preset, name, sizeof(g_current_custom_eq_preset) - 1);
+    g_current_custom_eq_preset[sizeof(g_current_custom_eq_preset) - 1] = '\0';
+}
+
+void delete_custom_eq_preset(const char *name)
+{
+    if (!name || !name[0]) return;
+
+    int preset_file_idx = -1;
+    
+    char exe_dir[512];
+    get_executable_directory(exe_dir, sizeof(exe_dir));
+    
+    char settings_path[768];
+#ifdef _WIN32
+    snprintf(settings_path, sizeof(settings_path), "%s\\zefidi.ini", exe_dir);
+#else
+    snprintf(settings_path, sizeof(settings_path), "%s/zefidi.ini", exe_dir);
+#endif
+    
+    // Read existing content
+    char *content = NULL;
+    size_t content_size = 0;
+    FILE *f = fopen(settings_path, "r");
+    if (f)
+    {
+        fseek(f, 0, SEEK_END);
+        content_size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        content = (char *)malloc(content_size + 1);
+        if (content)
+        {
+            size_t bytes_read = fread(content, 1, content_size, f);
+            content[bytes_read] = '\0';
+        }
+        fclose(f);
+    }
+
+    if (!content) return;
+
+    // Scan for matching name to discover numeric index
+    {
+        char *scan_ptr = content;
+        char line_buf[512];
+        while (*scan_ptr)
+        {
+            int i = 0;
+            while (*scan_ptr && *scan_ptr != '\n' && i < (int)sizeof(line_buf) - 1)
+            {
+                if (*scan_ptr != '\r')
+                    line_buf[i++] = *scan_ptr;
+                scan_ptr++;
+            }
+            line_buf[i] = '\0';
+            if (*scan_ptr == '\n') scan_ptr++;
+
+            if (strncmp(line_buf, "custom_eq_", 10) == 0)
+            {
+                const char *p = line_buf + 10;
+                if (*p >= '0' && *p <= '9')
+                {
+                    int idx = 0;
+                    while (*p >= '0' && *p <= '9')
+                    {
+                        idx = idx * 10 + (*p - '0');
+                        p++;
+                    }
+                    if (*p == '_' && strncmp(p + 1, "name=", 5) == 0)
+                    {
+                        const char *val = p + 1 + 5;
+                        if (strcmp(val, name) == 0)
+                        {
+                            preset_file_idx = idx;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (preset_file_idx < 0)
+    {
+        free(content);
+        return;
+    }
+    
+    // Rewrite file, skipping lines for this preset index
+    f = fopen(settings_path, "w");
+    if (!f)
+    {
+        free(content);
+        return;
+    }
+    
+    char prefix[64];
+    snprintf(prefix, sizeof(prefix), "custom_eq_%d_", preset_file_idx);
+    int prefix_len = strlen(prefix);
+
+    char *write_ptr = content;
+    char line_buf[512];
+    while (*write_ptr)
+    {
+        int i = 0;
+        while (*write_ptr && *write_ptr != '\n' && i < (int)sizeof(line_buf) - 1)
+        {
+            if (*write_ptr != '\r')
+                line_buf[i++] = *write_ptr;
+            write_ptr++;
+        }
+        line_buf[i] = '\0';
+        if (*write_ptr == '\n') write_ptr++;
+
+        if (line_buf[0] && strncmp(line_buf, prefix, prefix_len) != 0)
+        {
+            fprintf(f, "%s\n", line_buf);
+        }
+    }
+
+    free(content);
+    fclose(f);
+    
+    // Clear current preset name if we just deleted it
+    if (strcmp(g_current_custom_eq_preset, name) == 0)
+    {
+        g_current_custom_eq_preset[0] = '\0';
+    }
+    
+    // Reload preset list
+    load_custom_eq_preset_list();
 }

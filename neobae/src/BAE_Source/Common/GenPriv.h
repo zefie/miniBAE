@@ -682,6 +682,26 @@ typedef struct Q_MIDIEvent Q_MIDIEvent;
 typedef void            (*InnerLoop)(GM_Voice *pVoice);
 typedef void            (*InnerLoop2)(GM_Voice *pVoice, bool looping);
 
+#ifndef BAE_EQ_BANDS
+#define BAE_EQ_BANDS 5
+#endif
+
+typedef struct {
+    double b0, b1, b2, a1, a2;
+    double x1, x2, y1, y2;
+} BAEBiquad;
+
+typedef struct {
+    BAEBiquad filters[BAE_EQ_BANDS];
+} BAEChannelEQ;
+
+typedef struct {
+    BAEChannelEQ channels[2];
+    float gains[BAE_EQ_BANDS];
+    bool enabled;
+    uint32_t sampleRate;
+} BAEEQState;
+
 // tried to 8 byte align structure (7/17/97)
 struct GM_Mixer
 {
@@ -795,6 +815,7 @@ struct GM_Mixer
     int32_t             LPfilterL, LPfilterR;   // used for fixed verb
     int32_t             LPfilterLz, LPfilterRz;
 #endif
+    BAEEQState          eq;
 };
 typedef struct GM_Mixer GM_Mixer;
 
@@ -1277,6 +1298,11 @@ void PV_CleanExternalQueue(GM_Mixer *pMixer);
 // process 11 ms worth of sample data
 void PV_ProcessSampleFrame(void *threadContext, void *destSampleData);
 void PV_ProcessSequencerEvents(void *threadContext);
+
+// EQ functions
+void PV_UpdateEQCoefficients(GM_Mixer *pMixer);
+void PV_ClearEQState(GM_Mixer *pMixer);
+void PV_ApplyEQ(GM_Mixer *pMixer);
 
 OPErr PV_ProcessMidiSequencerSlice(void *threadContext, GM_Song *pSong);
 

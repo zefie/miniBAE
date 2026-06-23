@@ -62,6 +62,7 @@
 
 #ifdef _WIN32
 #define stricmp _stricmp
+#include <windows.h>
 #else
 #define stricmp strcasecmp
 #endif
@@ -79,6 +80,8 @@ static BAEFileType   gWriteToFileType = BAE_WAVE_TYPE;
 static int           gMP3BitrateKbps = 128;
 static int           gVelocityCurve  = -1; /* -1 = engine default */
 static int           gVolumePct      = 100; /* raw user volume percent, for overdrive */
+static int           gEqEnabled      = 0;
+static float         gEqGains[5]     = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 
 /* Position display: update every N idle calls (~15 ms each) */
 static int           gPosCounter  = 0;
@@ -337,6 +340,9 @@ static const char usageMain[] =
     "                 -q  {quiet mode}\n"
     "                 -b  {MP3/Vorbis/Opus export bitrate kbps (default: 128)}\n"
     "                 -h  {this help}\n"
+    "                 -eq {enable 5-band EQ (flat)}\n"
+    "                 -eqg {custom EQ gains g1,g2,g3,g4,g5 (e.g. 1.2,0,0,-2.5,1.0)}\n"
+    "                 --eqp {EQ preset name (e.g. \"Bass Boost\" or custom zefidi.ini preset)}\n"
 #ifdef SUPPORT_BAESCRIPT
     "                 --script {BAEScript file}\n"
 #endif
@@ -600,6 +606,15 @@ static BAEResult prime_encoder(BAEMixer mixer, BAESong song)
  * All song types (MIDI, RMF, XMF, RMI, ringtone) use this single path.
  * ========================================================================= */
 
+static int gHasCustomReverb = 0;
+static BAEReverbType gCustomReverbType = BAE_REVERB_TYPE_1;
+static int gCustomReverbCombCount = 4;
+static int gCustomReverbDelays[4] = {0};
+static int gCustomReverbFeedback[4] = {0};
+static int gCustomReverbGain[4] = {127, 127, 127, 127};
+static int gCustomReverbLowpass = 64;
+static int gCustomReverbMix = 255;
+
 static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
     BAE_UNSIGNED_FIXED volume, unsigned int timeLimitSec, unsigned int loopCount,
     BAEReverbType reverbType, char *muteChannels)
@@ -638,7 +653,23 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
 
     /* Apply settings after Start (matches original PlayMidi/PlayRMF order) */
     BAESong_SetVolume(song, volume);
-    BAEMixer_SetDefaultReverb(mixer, reverbType);
+    if (gHasCustomReverb) {
+        /* BAEMixer_SetDefaultReverb isn't strictly necessary if we are overriding the params,
+           but we do it to set the base type. Custom presets use BAE_REVERB_TYPE_CUSTOM (12).
+           However, in NeoBAE, setting the custom parameters overrides the defaults. */
+        BAEMixer_SetDefaultReverb(mixer, gCustomReverbType);
+        
+        SetNeoCustomReverbCombCount(gCustomReverbCombCount);
+        for (int i = 0; i < 4; i++) {
+            SetNeoCustomReverbCombDelay(i, gCustomReverbDelays[i]);
+            SetNeoCustomReverbCombFeedback(i, gCustomReverbFeedback[i]);
+            SetNeoCustomReverbCombGain(i, gCustomReverbGain[i]);
+        }
+        SetNeoCustomReverbLowpass(gCustomReverbLowpass);
+        SetNeoReverbMix(gCustomReverbMix);
+    } else {
+        BAEMixer_SetDefaultReverb(mixer, reverbType);
+    }
     if (muteChannels && muteChannels[0])
         MuteChannels(song, muteChannels);
 
@@ -993,6 +1024,188 @@ static BAEResult PV_PlayFile(BAEMixer mixer, const char *path,
 }
 
 /* =========================================================================
+ * EQ Helpers
+ * ========================================================================= */
+static void apply_eq_state(BAEMixer mixer)
+{
+    if (mixer) {
+        BAEMixer_SetEQEnabled(mixer, gEqEnabled ? TRUE : FALSE);
+        if (gEqEnabled) {
+            for (int i = 0; i < 5; i++) {
+                BAEMixer_SetEQGain(mixer, i, gEqGains[i]);
+            }
+        }
+    }
+}
+
+static int load_eq_preset(const char *name, float *gains)
+{
+    /* Standard presets */
+    const char *std_names[] = {"Flat", "Bass Boost", "Acoustic", "Rock", "Pop", "Classical", "Vocal"};
+    const float std_gains[][5] = {
+        {0, 0, 0, 0, 0},        // Flat
+        {8, 4, 0, 0, 0},        // Bass Boost
+        {6, 3, 0, 3, 6},        // Acoustic
+        {6, 3, -2, 4, 6},       // Rock
+        {-2, 2, 4, 2, -2},      // Pop
+        {4, 3, 0, 3, 4},        // Classical
+        {-2, -1, 4, 3, 0}       // Vocal
+    };
+    
+    for (int i = 0; i < 7; i++) {
+        if (stricmp(name, std_names[i]) == 0) {
+            for (int j = 0; j < 5; j++) gains[j] = std_gains[i][j];
+            return 1;
+        }
+    }
+    
+    /* Attempt to load from zefidi.ini */
+    char iniPath[1024] = {0};
+#ifdef _WIN32
+    GetModuleFileNameA(NULL, iniPath, sizeof(iniPath));
+    char *slash = strrchr(iniPath, '\\');
+    if (slash) *slash = '\0';
+    strcat(iniPath, "\\zefidi.ini");
+#else
+    strcpy(iniPath, "zefidi.ini");
+#endif
+    
+    FILE *f = fopen(iniPath, "r");
+    if (!f) return 0;
+    
+    char line[512];
+    int found_idx = -1;
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "custom_eq_", 10) == 0) {
+            char *p = line + 10;
+            int idx = atoi(p);
+            char *pname = strstr(p, "_name=");
+            if (pname) {
+                pname += 6;
+                char *nl = strchr(pname, '\n'); if (nl) *nl = '\0';
+                nl = strchr(pname, '\r'); if (nl) *nl = '\0';
+                if (stricmp(name, pname) == 0) {
+                    found_idx = idx;
+                    break;
+                }
+            }
+        }
+    }
+    
+    if (found_idx >= 0) {
+        rewind(f);
+        char prefix[64];
+        sprintf(prefix, "custom_eq_%d_", found_idx);
+        int prefix_len = strlen(prefix);
+        
+        int found_gains = 0;
+        while (fgets(line, sizeof(line), f)) {
+            char *nl = strchr(line, '\n'); if (nl) *nl = '\0';
+            nl = strchr(line, '\r'); if (nl) *nl = '\0';
+            
+            if (strncmp(line, prefix, prefix_len) == 0) {
+                char *key = line + prefix_len;
+                char *val = strchr(key, '=');
+                if (val) {
+                    *val = '\0';
+                    val++;
+                    if (strncmp(key, "gain_", 5) == 0) {
+                        int band = atoi(key + 5);
+                        if (band >= 0 && band < 5) {
+                            gains[band] = atof(val);
+                            found_gains++;
+                        }
+                    }
+                }
+            }
+        }
+        fclose(f);
+        return (found_gains > 0) ? 1 : 0;
+    }
+    fclose(f);
+    return 0;
+}
+
+static int load_reverb_preset(const char *name)
+{
+    /* Attempt to load from zefidi.ini */
+    char iniPath[1024] = {0};
+#ifdef _WIN32
+    GetModuleFileNameA(NULL, iniPath, sizeof(iniPath));
+    char *slash = strrchr(iniPath, '\\');
+    if (slash) *slash = '\0';
+    strcat(iniPath, "\\zefidi.ini");
+#else
+    strcpy(iniPath, "zefidi.ini");
+#endif
+    
+    FILE *f = fopen(iniPath, "r");
+    if (!f) return 0;
+    
+    char line[512];
+    int found_idx = -1;
+    while (fgets(line, sizeof(line), f)) {
+        if (strncmp(line, "custom_reverb_", 14) == 0) {
+            char *p = line + 14;
+            int idx = atoi(p);
+            char *pname = strstr(p, "_name=");
+            if (pname) {
+                pname += 6;
+                char *nl = strchr(pname, '\n'); if (nl) *nl = '\0';
+                nl = strchr(pname, '\r'); if (nl) *nl = '\0';
+                if (stricmp(name, pname) == 0) {
+                    found_idx = idx;
+                    break;
+                }
+            }
+        }
+    }
+    
+    if (found_idx >= 0) {
+        rewind(f);
+        char prefix[64];
+        sprintf(prefix, "custom_reverb_%d_", found_idx);
+        int prefix_len = strlen(prefix);
+        
+        while (fgets(line, sizeof(line), f)) {
+            char *nl = strchr(line, '\n'); if (nl) *nl = '\0';
+            nl = strchr(line, '\r'); if (nl) *nl = '\0';
+            if (strncmp(line, prefix, prefix_len) == 0) {
+                char *key = line + prefix_len;
+                char *val = strchr(key, '=');
+                if (val) {
+                    *val = '\0';
+                    val++;
+                    if (strcmp(key, "comb_count") == 0) {
+                        gCustomReverbCombCount = atoi(val);
+                    } else if (strncmp(key, "delay_", 6) == 0) {
+                        int i = atoi(key + 6);
+                        if (i >= 0 && i < 4) gCustomReverbDelays[i] = atoi(val);
+                    } else if (strncmp(key, "feedback_", 9) == 0) {
+                        int i = atoi(key + 9);
+                        if (i >= 0 && i < 4) gCustomReverbFeedback[i] = atoi(val);
+                    } else if (strncmp(key, "gain_", 5) == 0) {
+                        int i = atoi(key + 5);
+                        if (i >= 0 && i < 4) gCustomReverbGain[i] = atoi(val);
+                    } else if (strcmp(key, "lowpass") == 0) {
+                        gCustomReverbLowpass = atoi(val);
+                    } else if (strcmp(key, "mix") == 0) {
+                        gCustomReverbMix = atoi(val);
+                    } else if (strcmp(key, "type") == 0) {
+                        gCustomReverbType = (BAEReverbType)atoi(val);
+                    }
+                }
+            }
+        }
+        gHasCustomReverb = 1;
+        fclose(f);
+        return 1;
+    }
+    fclose(f);
+    return 0;
+}
+
+/* =========================================================================
  * PV_LoadBank – mirrors bae_load_bank() from gui_bae.c
  * ========================================================================= */
 
@@ -1100,6 +1313,34 @@ int main(int argc, char *argv[])
         }
     }
 
+    /* ---- Parse EQ flags ---- */
+    if (PV_ParseCommands(argc, argv, "-eq", 0, NULL)) {
+        gEqEnabled = 1;
+    }
+    char eqTmpBuf[1024] = {0};
+    if (PV_ParseCommands(argc, argv, "-eqg", 1, eqTmpBuf)) {
+        float g1, g2, g3, g4, g5;
+        if (sscanf(eqTmpBuf, "%f,%f,%f,%f,%f", &g1, &g2, &g3, &g4, &g5) == 5) {
+            gEqGains[0] = g1; gEqGains[1] = g2; gEqGains[2] = g3; gEqGains[3] = g4; gEqGains[4] = g5;
+            gEqEnabled = 1;
+        } else {
+            playbae_printf("playbae: Invalid format for -eqg. Use g1,g2,g3,g4,g5\n");
+            return 1;
+        }
+    }
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--eqp") == 0 && i+1 < argc) {
+            if (load_eq_preset(argv[i+1], gEqGains)) {
+                gEqEnabled = 1;
+                playbae_printf("Loaded EQ preset: %s\n", argv[i+1]);
+            } else {
+                playbae_printf("playbae: EQ preset not found: %s\n", argv[i+1]);
+                return 1;
+            }
+            break;
+        }
+    }
+
     /* ---- Parse -vc (velocity curve) ---- */
     char tmpBuf[1024] = {0};
     if (PV_ParseCommands(argc, argv, "-vc", 1, tmpBuf)) {
@@ -1160,6 +1401,11 @@ int main(int argc, char *argv[])
         if (rv < 0 || rv > 11) { playbae_printf("Invalid reverb %d (0-11). Using 7.\n", rv); rv = 7; }
         reverbType = (BAEReverbType)rv;
     }
+    if (PV_ParseCommands(argc, argv, "--rvp", 1, tmpBuf)) {
+        if (!load_reverb_preset(tmpBuf)) {
+            playbae_printf("playbae: Custom reverb preset '%s' not found in zefidi.ini.\n", tmpBuf);
+        }
+    }
 
     /* ---- Create mixer (mirrors bae_init in gui_bae.c) ---- */
     BAEMixer mixer = BAEMixer_New();
@@ -1194,6 +1440,7 @@ int main(int argc, char *argv[])
     }
 
     BAEMixer_SetAudioTask(mixer, PV_AudioTask, (void *)mixer);
+    apply_eq_state(mixer);
 
     /* ---- Output gain (applies for all volume, not just overdrive) ---- */
     apply_output_gain(mixer);
@@ -1281,16 +1528,17 @@ int main(int argc, char *argv[])
                 {128,BAE_COMPRESSION_MPEG_128},{160,BAE_COMPRESSION_MPEG_160},
                 {192,BAE_COMPRESSION_MPEG_192},{224,BAE_COMPRESSION_MPEG_224},
                 {256,BAE_COMPRESSION_MPEG_256},{320,BAE_COMPRESSION_MPEG_320}};
-            BAECompressionType cType = BAE_COMPRESSION_MPEG_128;
+            BAECompressionType compType = BAE_COMPRESSION_MPEG_128;
             int best = 100000;
             for (size_t i = 0; i < sizeof(mp3Map)/sizeof(mp3Map[0]); i++) {
                 int d = abs(mp3Map[i].rate - totalReq);
-                if (d < best) { best = d; cType = mp3Map[i].ct; }
+                if (d < best) { best = d; compType = mp3Map[i].ct; }
             }
             BAEAudioModifiers modsTmp; BAEMixer_GetModifiers(mixer, &modsTmp);
             int ch = (modsTmp & BAE_USE_STEREO) ? 2 : 1;
             err = BAEMixer_StartOutputToFile(mixer, (BAEPathName)parmFile,
-                BAE_MPEG_TYPE, cType);
+                BAE_MPEG_TYPE, compType);
+            apply_eq_state(mixer);
             if (err) { playbae_printf("Error %d starting MP3 export: %s\n", err, parmFile); BAEMixer_Delete(mixer); return 1; }
             gWriteToFile = 1; gWriteToFileType = BAE_MPEG_TYPE;
 #ifdef SUPPORT_KARAOKE
@@ -1306,6 +1554,7 @@ int main(int argc, char *argv[])
 #if defined(USE_FLAC_ENCODER) && (USE_FLAC_ENCODER != 0)
             err = BAEMixer_StartOutputToFile(mixer, (BAEPathName)parmFile,
                 BAE_FLAC_TYPE, BAE_COMPRESSION_LOSSLESS);
+            apply_eq_state(mixer);
             if (err) { playbae_printf("Error %d starting FLAC export: %s\n", err, parmFile); BAEMixer_Delete(mixer); return 1; }
             gWriteToFile = 1; gWriteToFileType = BAE_FLAC_TYPE;
             playbae_printf("Writing FLAC to %s\n", parmFile);
@@ -1317,6 +1566,7 @@ int main(int argc, char *argv[])
 #if defined(USE_VORBIS_ENCODER) && (USE_VORBIS_ENCODER != 0)
             err = BAEMixer_StartOutputToFile(mixer, (BAEPathName)parmFile,
                 BAE_VORBIS_TYPE, BAE_COMPRESSION_VORBIS_256);
+            apply_eq_state(mixer);
             if (err) { playbae_printf("Error %d starting Ogg Vorbis export: %s\n", err, parmFile); BAEMixer_Delete(mixer); return 1; }
             gWriteToFile = 1; gWriteToFileType = BAE_VORBIS_TYPE;
             playbae_printf("Writing Ogg Vorbis to %s\n", parmFile);
@@ -1333,14 +1583,15 @@ int main(int argc, char *argv[])
                 {16,BAE_COMPRESSION_OPUS_16},{32,BAE_COMPRESSION_OPUS_32},
                 {64,BAE_COMPRESSION_OPUS_64},{96,BAE_COMPRESSION_OPUS_96},
                 {128,BAE_COMPRESSION_OPUS_128},{256,BAE_COMPRESSION_OPUS_256}};
-            BAECompressionType cType = BAE_COMPRESSION_OPUS_128;
+            BAECompressionType compType = BAE_COMPRESSION_OPUS_128;
             int best = 100000;
             for (size_t i = 0; i < sizeof(opusMap)/sizeof(opusMap[0]); i++) {
                 int d = abs(opusMap[i].rate - totalReq);
-                if (d < best) { best = d; cType = opusMap[i].ct; }
+                if (d < best) { best = d; compType = opusMap[i].ct; }
             }
             err = BAEMixer_StartOutputToFile(mixer, (BAEPathName)parmFile,
-                BAE_OPUS_TYPE, cType);
+                BAE_OPUS_TYPE, compType);
+            apply_eq_state(mixer);
             if (err) { playbae_printf("Error %d starting Opus export: %s\n", err, parmFile); BAEMixer_Delete(mixer); return 1; }
             gWriteToFile = 1; gWriteToFileType = BAE_OPUS_TYPE;
             playbae_printf("Writing Ogg Opus (%d kbps) to %s\n", totalReq, parmFile);
@@ -1352,6 +1603,7 @@ int main(int argc, char *argv[])
             /* Default: WAV */
             err = BAEMixer_StartOutputToFile(mixer, (BAEPathName)parmFile,
                 BAE_WAVE_TYPE, BAE_COMPRESSION_NONE);
+            apply_eq_state(mixer);
             if (err) { playbae_printf("Error %d writing WAV: %s\n", err, parmFile); BAEMixer_Delete(mixer); return 1; }
             gWriteToFile = 1; gWriteToFileType = BAE_WAVE_TYPE;
 #ifdef SUPPORT_KARAOKE

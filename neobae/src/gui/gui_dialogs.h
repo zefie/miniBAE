@@ -61,6 +61,11 @@ char *save_neoreverb_dialog(const char *default_name);
 // Dialog rendering functions
 void render_rmf_info_dialog(SDL_Renderer *R, int mx, int my, bool mclick);
 void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick);
+void render_eq_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool mdown, int window_h);
+int get_eq_preset_count(void);
+const char *get_eq_preset_name(int idx);
+
+extern bool g_show_eq_dialog;
 
 // Dialog system initialization/cleanup
 void dialogs_init(void);

@@ -632,6 +632,7 @@ bool recreate_mixer_and_restore(int sampleRateHz, int reverbType,
     }
     BAEMixer_SetAudioTask(g_bae.mixer, gui_audio_task, g_bae.mixer);
     BAEMixer_ReengageAudio(g_bae.mixer);
+    gui_apply_eq_from_settings();
     // reverbType may be a UI index beyond BAE_REVERB_TYPE_COUNT when using custom presets
     bae_set_reverb(reverbType);
     BAEMixer_SetMasterVolume(g_bae.mixer, FLOAT_TO_UNSIGNED_FIXED(g_last_requested_master_volume));
@@ -1028,6 +1029,46 @@ int main(int argc, char *argv[])
         }
     }
 #endif
+
+    // Load custom EQ presets
+    load_custom_eq_preset_list();
+
+    // Apply saved active EQ preset and set selected index
+    g_selected_eq_preset = 7; // Default to Custom
+    g_current_custom_eq_preset[0] = '\0';
+    if (settings.has_eq_preset && settings.eq_preset_name[0])
+    {
+        // Check if it's one of the standard presets
+        const char *eq_standard_names[] = {
+            "Flat", "Bass Boost", "Acoustic", "Rock", "Pop", "Classical", "Vocal"
+        };
+        bool found_std = false;
+        for (int i = 0; i < 7; i++)
+        {
+            if (strcmp(settings.eq_preset_name, eq_standard_names[i]) == 0)
+            {
+                g_selected_eq_preset = i;
+                found_std = true;
+                break;
+            }
+        }
+        if (!found_std)
+        {
+            if (strcmp(settings.eq_preset_name, "Custom") == 0)
+            {
+                g_selected_eq_preset = 7;
+            }
+            else
+            {
+                int preset_list_idx = get_custom_eq_preset_index(settings.eq_preset_name);
+                if (preset_list_idx >= 0)
+                {
+                    load_custom_eq_preset(settings.eq_preset_name);
+                    g_selected_eq_preset = 8 + preset_list_idx;
+                }
+            }
+        }
+    }
 
     char exe_dir[512];
     get_executable_directory(exe_dir, sizeof(exe_dir));
@@ -1838,7 +1879,6 @@ int main(int argc, char *argv[])
             case SDL_EVENT_TEXT_INPUT:
 #endif
             {
-#if USE_NEO_EFFECTS
                 extern bool g_show_preset_name_dialog;
                 extern char g_preset_name_input[64];
                 extern int g_preset_name_cursor;
@@ -1861,7 +1901,6 @@ int main(int argc, char *argv[])
                     }
                     break; // don't route text input to global shortcuts
                 }
-#endif
             }
             break;
 #if defined(USE_SDL2)
@@ -1881,7 +1920,7 @@ int main(int argc, char *argv[])
 #endif
                 
                 // Handle text input for preset name dialog
-#if USE_NEO_EFFECTS
+                // Handle text input for preset name dialog
                 extern bool g_show_preset_name_dialog;
                 extern char g_preset_name_input[64];
                 extern int g_preset_name_cursor;
@@ -1897,23 +1936,41 @@ int main(int argc, char *argv[])
                     {
                         if (len > 0)
                         {
-                            save_custom_reverb_preset(g_preset_name_input);
-
-                            // After saving, switch to the new/updated preset and load it immediately
+                            extern bool g_show_eq_dialog;
+                            if (g_show_eq_dialog)
                             {
-                                int preset_list_idx = get_custom_reverb_preset_index(g_preset_name_input);
+                                save_custom_eq_preset(g_preset_name_input);
+                                
+                                int preset_list_idx = get_custom_eq_preset_index(g_preset_name_input);
                                 if (preset_list_idx >= 0)
                                 {
-                                    load_custom_reverb_preset(g_preset_name_input);
-                                    extern int g_custom_reverb_preset_count;
-                                    int base_count = get_reverb_count() - g_custom_reverb_preset_count;
-                                    reverbType = base_count + preset_list_idx + 1; // UI index is 1-based
-                                    bae_set_reverb(reverbType);
-                                    if (g_current_bank_path[0] != '\0')
+                                    load_custom_eq_preset(g_preset_name_input);
+                                    g_selected_eq_preset = 8 + preset_list_idx;
+                                    save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, reverbType, loopPlay);
+                                }
+                            }
+                            else
+                            {
+#if USE_NEO_EFFECTS
+                                save_custom_reverb_preset(g_preset_name_input);
+
+                                // After saving, switch to the new/updated preset and load it immediately
+                                {
+                                    int preset_list_idx = get_custom_reverb_preset_index(g_preset_name_input);
+                                    if (preset_list_idx >= 0)
                                     {
-                                        save_settings(g_current_bank_path, reverbType, loopPlay);
+                                        load_custom_reverb_preset(g_preset_name_input);
+                                        extern int g_custom_reverb_preset_count;
+                                        int base_count = get_reverb_count() - g_custom_reverb_preset_count;
+                                        reverbType = base_count + preset_list_idx + 1; // UI index is 1-based
+                                        bae_set_reverb(reverbType);
+                                        if (g_current_bank_path[0] != '\0')
+                                        {
+                                            save_settings(g_current_bank_path, reverbType, loopPlay);
+                                        }
                                     }
                                 }
+#endif
                             }
 
                             g_show_preset_name_dialog = false;
@@ -1929,7 +1986,35 @@ int main(int argc, char *argv[])
                     }
                     break; // Don't process other keyboard shortcuts when dialog is open
                 }
-#endif
+
+                extern bool g_show_preset_delete_confirm_dialog;
+                if (g_show_preset_delete_confirm_dialog && isDown)
+                {
+                    extern bool g_preset_delete_confirmed;
+                    extern char g_preset_delete_name[64];
+                    if (sym == SDLK_RETURN || sym == SDLK_KP_ENTER)
+                    {
+                        g_preset_delete_confirmed = true;
+                        g_show_preset_delete_confirm_dialog = false;
+                    }
+                    else if (sym == SDLK_ESCAPE)
+                    {
+                        g_show_preset_delete_confirm_dialog = false;
+                        g_preset_delete_confirmed = false;
+                        memset(g_preset_delete_name, 0, sizeof(g_preset_delete_name));
+                    }
+                    break; // Don't process other keyboard shortcuts when delete confirm is open
+                }
+
+                extern bool g_show_eq_dialog;
+                if (g_show_eq_dialog && isDown)
+                {
+                    if (sym == SDLK_ESCAPE)
+                    {
+                        g_show_eq_dialog = false;
+                    }
+                    break; // Don't process other keyboard shortcuts when EQ dialog is open
+                }
                 
                 // Initialize mapping table once
                 if (!g_keyboard_map_initialized)
@@ -2660,7 +2745,6 @@ int main(int argc, char *argv[])
 #endif
         SDL_RenderClear(R);
 
-#if USE_NEO_EFFECTS
         // Toggle SDL text input based on the preset name dialog state.
         // (Use SDL_EVENT_TEXT_INPUT so uppercase works.)
         {
@@ -2685,7 +2769,6 @@ int main(int argc, char *argv[])
                 s_preset_name_text_input_active = false;
             }
         }
-#endif
 
         // Clear tooltips each frame
         ui_clear_tooltip(&g_program_tooltip_visible);
@@ -2770,8 +2853,9 @@ int main(int argc, char *argv[])
         // Block background interactions when a modal is active or when exporting.
         // Exporting will dim and lock most UI, but the Stop button remains active.
         extern bool g_show_preset_delete_confirm_dialog;
-        bool modal_block = g_show_settings_dialog || g_show_about_dialog || (g_show_rmf_info_dialog && g_bae.is_rmf_file) || g_exporting || g_show_custom_reverb_dialog || g_show_preset_name_dialog || g_show_preset_delete_confirm_dialog; // block when any modal/dialog open or export in progress
-        bool modal_block_transport = g_show_settings_dialog || g_show_about_dialog || (g_show_rmf_info_dialog && g_bae.is_rmf_file) || g_exporting || g_show_preset_name_dialog || g_show_preset_delete_confirm_dialog; // Custom reverb dialog doesn't block transport controls
+        extern bool g_show_eq_dialog;
+        bool modal_block = g_show_settings_dialog || g_show_about_dialog || (g_show_rmf_info_dialog && g_bae.is_rmf_file) || g_exporting || g_show_custom_reverb_dialog || g_show_preset_name_dialog || g_show_preset_delete_confirm_dialog || g_show_eq_dialog; // block when any modal/dialog open or export in progress
+        bool modal_block_transport = g_show_settings_dialog || g_show_about_dialog || (g_show_rmf_info_dialog && g_bae.is_rmf_file) || g_exporting || g_show_preset_name_dialog || g_show_preset_delete_confirm_dialog || g_show_eq_dialog; // Custom reverb dialog doesn't block transport controls
         // When a modal is active we fully swallow background hover/drag/click by using off-screen, inert inputs
         int ui_mx = mx, ui_my = my;
         bool ui_mdown = mdown;
@@ -3388,6 +3472,9 @@ int main(int argc, char *argv[])
                 extern bool g_show_preset_name_dialog;
                 extern char g_preset_name_input[64];
                 extern int g_preset_name_cursor;
+                extern bool g_preset_dialog_is_eq;
+                
+                g_preset_dialog_is_eq = false;
                 
                 // If we're on an existing custom preset, populate the text field with its name
                 if (reverbType > BAE_REVERB_TYPE_19)
@@ -3449,6 +3536,9 @@ int main(int argc, char *argv[])
                 const char *preset_name = get_reverb_name(reverbType - 1);
                 extern bool g_show_preset_delete_confirm_dialog;
                 extern char g_preset_delete_name[64];
+                extern bool g_preset_dialog_is_eq;
+                
+                g_preset_dialog_is_eq = false;
                 g_show_preset_delete_confirm_dialog = true;
                 safe_strncpy(g_preset_delete_name, preset_name, sizeof(g_preset_delete_name) - 1);
                 g_preset_delete_name[sizeof(g_preset_delete_name) - 1] = '\0';
@@ -3585,6 +3675,28 @@ int main(int argc, char *argv[])
         draw_text(R, vtxt_x, vtxt_y, vbuf, labelCol);
         /* Volume value is now non-interactive; clicking the percent label no longer resets to 100% */
 
+        // EQ Button
+        Rect eqBtn = {687, 123, 60, 20};
+        bool eq_button_enabled = !g_reverbDropdownOpen && !modal_block;
+        bool overEQ = eq_button_enabled && point_in(ui_mx, ui_my, eqBtn);
+        SDL_Color eq_btn_bg = overEQ ? g_button_hover : g_button_base;
+        if (!eq_button_enabled)
+        {
+            eq_btn_bg.a = 180;
+        }
+        draw_rect(R, eqBtn, eq_btn_bg);
+        draw_frame(R, eqBtn, g_button_border);
+        SDL_Color eq_txt_col = g_button_text;
+        if (!eq_button_enabled)
+        {
+            eq_txt_col.a = 180;
+        }
+        draw_text(R, eqBtn.x + 10, eqBtn.y + 3, "EQ...", eq_txt_col);
+        if (overEQ && ui_mclick)
+        {
+            g_show_eq_dialog = true;
+        }
+
 #ifdef SUPPORT_MIDI_HW
         // If MIDI input is enabled, paint a semi-transparent overlay over the control panel to dim it
         if (g_midi_input_enabled)
@@ -3602,6 +3714,10 @@ int main(int argc, char *argv[])
                       volume_enabled ? ui_mx : -1, volume_enabled ? ui_my : -1,
                       volume_enabled ? ui_mdown : false, volume_enabled ? ui_mclick : false);
             draw_text(R, vtxt_x, vtxt_y, vbuf, labelCol);
+            // Also redraw EQ button on top so it remains active/visible
+            draw_rect(R, eqBtn, eq_btn_bg);
+            draw_frame(R, eqBtn, g_button_border);
+            draw_text(R, eqBtn.x + 10, eqBtn.y + 3, "EQ...", eq_txt_col);
             // Draw the external MIDI notice in the bottom-right of the control panel
             const char *notice = "External MIDI Input Enabled";
             int n_w = 0, n_h = 0;
@@ -3627,6 +3743,10 @@ int main(int argc, char *argv[])
                       audio_volume_enabled ? ui_mx : -1, audio_volume_enabled ? ui_my : -1,
                       audio_volume_enabled ? ui_mdown : false, audio_volume_enabled ? ui_mclick : false);
             draw_text(R, vtxt_x, vtxt_y, vbuf, labelCol);
+            // Also redraw EQ button on top so it remains active/visible
+            draw_rect(R, eqBtn, eq_btn_bg);
+            draw_frame(R, eqBtn, g_button_border);
+            draw_text(R, eqBtn.x + 10, eqBtn.y + 3, "EQ...", eq_txt_col);
             // Draw a notice in the bottom-right of the control panel
             const char *notice = "Audio File";
             int n_w = 0, n_h = 0;
@@ -6981,12 +7101,18 @@ int main(int argc, char *argv[])
         {
             render_custom_reverb_dialog(R, mx, my, mclick, mdown, g_window_h);
         }
+#endif
         
-        // Preset name input dialog (must render on top of custom reverb dialog)
+        if (g_show_eq_dialog)
+        {
+            render_eq_dialog(R, mx, my, mclick, mdown, g_window_h);
+        }
+
+        // Preset name input dialog (must render on top of custom reverb/EQ dialogs)
         extern bool g_show_preset_name_dialog;
         if (g_show_preset_name_dialog)
         {
-            render_preset_name_dialog(R, mx, my, mclick, mdown, g_window_h);
+            render_preset_name_dialog(R, mx, my, mclick, mdown, g_window_h, &reverbType);
         }
 
         // Delete confirmation dialog (must render on top of everything)
@@ -7004,22 +7130,36 @@ int main(int argc, char *argv[])
             {
                 if (g_preset_delete_name[0])
                 {
-                    delete_custom_reverb_preset(g_preset_delete_name);
-                }
+                    extern bool g_show_eq_dialog;
+                    if (g_show_eq_dialog)
+                    {
+                        delete_custom_eq_preset(g_preset_delete_name);
+                        
+                        // Reset to "Custom" default (index 7)
+                        g_selected_eq_preset = 7;
+                        g_current_custom_eq_preset[0] = '\0';
+                        save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, reverbType, loopPlay);
+                    }
+                    else
+                    {
+#if USE_NEO_EFFECTS
+                        delete_custom_reverb_preset(g_preset_delete_name);
 
-                // Reset to "Custom" default
-                reverbType = BAE_REVERB_TYPE_19;
-                bae_set_reverb(reverbType);
-                if (g_current_bank_path[0] != '\0')
-                {
-                    save_settings(g_current_bank_path, reverbType, loopPlay);
+                        // Reset to "Custom" default
+                        reverbType = BAE_REVERB_TYPE_19;
+                        bae_set_reverb(reverbType);
+                        if (g_current_bank_path[0] != '\0')
+                        {
+                            save_settings(g_current_bank_path, reverbType, loopPlay);
+                        }
+#endif
+                    }
                 }
 
                 g_preset_delete_confirmed = false;
                 memset(g_preset_delete_name, 0, sizeof(g_preset_delete_name));
             }
         }
-#endif
 
         if (g_show_about_dialog)
         {

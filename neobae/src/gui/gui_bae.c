@@ -566,6 +566,8 @@ bool bae_init(int sampleRateHz)
         return false;
     }
 
+    gui_apply_eq_from_settings();
+
     BAE_PRINTF("BAE initialized: %d Hz\n", sampleRateHz);
 
     return true;
@@ -1829,4 +1831,20 @@ const char *get_bank_friendly_name()
         }
     }
     return NULL; // Return NULL if no bank loaded or no friendly name found
+}
+
+void gui_apply_eq_from_settings(void)
+{
+    if (g_bae.mixer)
+    {
+        Settings settings = load_settings();
+        if (settings.has_eq)
+        {
+            BAEMixer_SetEQEnabled(g_bae.mixer, settings.eq_enabled ? TRUE : FALSE);
+            for (int i = 0; i < 5; i++)
+            {
+                BAEMixer_SetEQGain(g_bae.mixer, i, settings.eq_gains[i]);
+            }
+        }
+    }
 }
