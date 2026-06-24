@@ -47,3 +47,5 @@ neobae/src/mc1.21.1/native/cmake-build-mingw-x86_64/
 
 .github/nbeditor_reference_images/
 .Clairvoyance/
+
+imgui.ini

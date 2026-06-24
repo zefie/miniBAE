@@ -1,11 +1,17 @@
-EMBED_PATCHES	:= 1
-BAE_API			:= SDL3
-BUILD_GUI   	:= 1
-WINDOWS 		:= 1
-ifneq ($(NOAUTO),1)
-ENABLE_MIDI_HW	:= 1
-endif
+BAE_BUILT_IN_PATCHES	:= 1
+WINDOWS := 1
+BAE_API := SDL3
+USE_SDL3 := 1
+NOAUTO := 1
+EMBED_PATCHES := 1
+MOD2RMF := 1
+MTHC_SUPPORT := 1
+RETRO_RINGTONE_SUPPORT := 1
+CREATION_API := 1
+NBEDITOR := 1
 include inc/Makefile.common
+TARGET_NAME := nbeditor
+
 TARGET_BIN		:= $(TARGET_NAME).exe
 SOURCE_DIR = $(CURDIR)
 
@@ -90,7 +96,6 @@ endif
 LIBS = \
 	-lmingw32 \
 	-lSDL3.dll \
-	-lSDL3_ttf.dll \
 	-lwinmm \
 	-lole32 \
 	-lcomdlg32
@@ -99,15 +104,7 @@ ifneq ($(BAE_LIBS),)
 	LIBS += $(BAE_LIBS)
 endif	
 
-all: $(TARGET_LIB).a ${TARGET_LIB}.dll $(TARGET_BIN) $(TARGET_OUT)RegisterFiletypes.exe
-
-$(OBJ_DIR)winreg_filetypes.o:
-	$(CC) $(CFLAGS) -DUNICODE -D_UNICODE -c src/gui/winreg_filetypes.c -o $(OBJ_DIR)winreg_filetypes.o
-
-$(TARGET_OUT)RegisterFiletypes.exe: $(OBJ_DIR)winreg_filetypes.o
-	@mkdir -p $(TARGET_OUT)
-	${WINDRES} src/gui/winreg_filetypes.rc $(OBJ_DIR)winreg_filetypes_res.o; \
-	${LD} -o $(TARGET_OUT)RegisterFiletypes.exe ${LDFLAGS} $(OBJ_DIR)winreg_filetypes.o $(OBJ_DIR)winreg_filetypes_res.o -Wl,--subsystem,windows -lshlwapi -lgdi32 -lcomctl32
+all: $(TARGET_LIB).a ${TARGET_LIB}.dll $(TARGET_BIN)
 
 $(TARGET_LIB).a: $(OBJ_BIN)
 	@mkdir -p $(TARGET_OUT)
