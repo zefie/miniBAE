@@ -34,7 +34,7 @@
 #include <stdlib.h>
 
 #if USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE
-#include <opus/opus.h>
+#include <opus.h>
 #include <ogg/ogg.h>
 #endif
 

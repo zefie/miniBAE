@@ -207,7 +207,7 @@
 #endif
 #if USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE
 #include <opusfile.h>
-#include <opus/opus.h>
+#include <opus.h>
 #endif
 #include <stdint.h>
 #include <limits.h>

@@ -185,11 +185,11 @@
 #endif
 
 #if USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE
-#include "opus/opus.h"
+#include <opus.h>
 #endif
 
 #if USE_MPEG_ENCODER == TRUE
-#include <lame/lame.h>
+#include <lame.h>
 #endif
 
 #ifndef BAE_DISABLE_ROLLED_MIDI_DETECTION
@@ -1821,7 +1821,7 @@ unroll_cleanup:
 #endif // BAE_ENABLE_ROLLED_MIDI_UNROLL
 
 #if USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE
-#include <opus/opus.h>
+#include <opus.h>
 #include <ogg/ogg.h>
 #endif
 
