@@ -102,6 +102,11 @@ public class Mixer
 	// Settings & utility JNI methods
 	private static native int _setDefaultReverb(long reference, int reverbType);
 	private static native int _getActiveVoiceCount(long reference);
+	// EQ JNI methods
+	private static native void _setEQEnabled(long reference, boolean enabled);
+	private static native boolean _getEQEnabled(long reference);
+	private static native void _setEQGain(long reference, int bandIndex, float gain);
+	private static native float _getEQGain(long reference, int bandIndex);
 	// Custom Neo reverb parameter JNI methods
 	private static native void _setNeoCustomReverbCombCount(long reference, int combCount);
 	private static native int _getNeoCustomReverbCombCount(long reference);
@@ -143,6 +148,12 @@ public class Mixer
 
 	public static int setDefaultReverb(int reverbType){ if(mMixer==null) return -1; return _setDefaultReverb(mMixer.mReference, reverbType); }
 	public static int getActiveVoiceCount(){ if(mMixer==null) return 0; return _getActiveVoiceCount(mMixer.mReference); }
+
+	// EQ Helpers
+	public static void setEQEnabled(boolean enabled){ if(mMixer==null) return; _setEQEnabled(mMixer.mReference, enabled); }
+	public static boolean getEQEnabled(){ if(mMixer==null) return false; return _getEQEnabled(mMixer.mReference); }
+	public static void setEQGain(int bandIndex, float gain){ if(mMixer==null) return; _setEQGain(mMixer.mReference, bandIndex, gain); }
+	public static float getEQGain(int bandIndex){ if(mMixer==null) return 0.0f; return _getEQGain(mMixer.mReference, bandIndex); }
 
 	// Custom Neo reverb parameter helpers
 	public static void setNeoCustomReverbCombCount(int combCount){ if(mMixer==null) return; _setNeoCustomReverbCombCount(mMixer.mReference, combCount); }

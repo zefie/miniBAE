@@ -131,6 +131,10 @@ class MusicPlayerViewModel : ViewModel() {
     var customReverbSyncSerial by mutableStateOf(0)
     fun bumpCustomReverbSync() { customReverbSyncSerial++ }
 
+    // Custom EQ UI sync
+    var customEQSyncSerial by mutableStateOf(0)
+    fun bumpCustomEQSync() { customEQSyncSerial++ }
+
     // Tracks which list the current playlist came from (shown in the full player top bar)
     // Expected values: "Folder", "Search", "Favorites".
     var playlistModeLabel by mutableStateOf("Folder")

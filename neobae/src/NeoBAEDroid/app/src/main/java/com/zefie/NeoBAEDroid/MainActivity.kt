@@ -396,6 +396,14 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
+            val eqEnabled = prefs.getBoolean("eq_enabled", false)
+            Mixer.setEQEnabled(eqEnabled)
+            if (eqEnabled) {
+                for (i in 0 until 5) {
+                    Mixer.setEQGain(i, prefs.getFloat("eq_band_$i", 0f))
+                }
+            }
+
             viewModel.isPlaying = false
 
             if (loadResult.isSong) {
@@ -446,6 +454,13 @@ class MainActivity : AppCompatActivity() {
                         } else {
                             val lp = prefs.getInt("custom_reverb_lowpass", 64).coerceIn(0, 127)
                             Mixer.setNeoCustomReverbLowpass(lp)
+                        }
+                    }
+                    val eqEnabled = prefs.getBoolean("eq_enabled", false)
+                    Mixer.setEQEnabled(eqEnabled)
+                    if (eqEnabled) {
+                        for (i in 0 until 5) {
+                            Mixer.setEQGain(i, prefs.getFloat("eq_band_$i", 0f))
                         }
                     }
                 } catch (_: Exception) {

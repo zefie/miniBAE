@@ -282,6 +282,59 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1getNeoReverbMix
 	return (jint)GetNeoReverbMix();
 }
 
+/* EQ JNI wrappers */
+JNIEXPORT void JNICALL Java_com_zefie_NeoBAE_Mixer__1setEQEnabled
+	(JNIEnv* env, jclass clazz, jlong reference, jboolean enabled)
+{
+	(void)env;
+	(void)clazz;
+	BAEMixer mixer = (BAEMixer)(intptr_t)reference;
+	if (mixer) {
+		BAEMixer_SetEQEnabled(mixer, enabled ? TRUE : FALSE);
+	}
+}
+
+JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Mixer__1getEQEnabled
+	(JNIEnv* env, jclass clazz, jlong reference)
+{
+	(void)env;
+	(void)clazz;
+	BAEMixer mixer = (BAEMixer)(intptr_t)reference;
+	if (mixer) {
+		BAE_BOOL enabled = FALSE;
+		if (BAEMixer_GetEQEnabled(mixer, &enabled) == BAE_NO_ERROR) {
+			return enabled ? JNI_TRUE : JNI_FALSE;
+		}
+	}
+	return JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL Java_com_zefie_NeoBAE_Mixer__1setEQGain
+	(JNIEnv* env, jclass clazz, jlong reference, jint bandIndex, jfloat gain)
+{
+	(void)env;
+	(void)clazz;
+	BAEMixer mixer = (BAEMixer)(intptr_t)reference;
+	if (mixer) {
+		BAEMixer_SetEQGain(mixer, (uint32_t)bandIndex, (float)gain);
+	}
+}
+
+JNIEXPORT jfloat JNICALL Java_com_zefie_NeoBAE_Mixer__1getEQGain
+	(JNIEnv* env, jclass clazz, jlong reference, jint bandIndex)
+{
+	(void)env;
+	(void)clazz;
+	BAEMixer mixer = (BAEMixer)(intptr_t)reference;
+	if (mixer) {
+		float gain = 0.0f;
+		if (BAEMixer_GetEQGain(mixer, (uint32_t)bandIndex, &gain) == BAE_NO_ERROR) {
+			return (jfloat)gain;
+		}
+	}
+	return 0.0f;
+}
+
 /*
  * Class:     com_zefie_NeoBAE_Mixer
  * Method:    _getNeoReverbPresetParams

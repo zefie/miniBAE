@@ -51,6 +51,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
@@ -1706,6 +1707,27 @@ class HomeFragment : Fragment() {
                             
                             
                             Mixer.setDefaultReverb(reverbType.value)
+                            if (reverbType.value == 18) {
+                                val activeReverb = getActiveCustomReverbPresetName(requireContext())
+                                if (!activeReverb.isNullOrEmpty()) {
+                                    loadCustomReverbPreset(requireContext(), activeReverb)?.let { preset ->
+                                        applyCustomReverbPresetToEngine(requireContext(), preset)
+                                    }
+                                } else {
+                                    val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                                    val lp = prefs.getInt("custom_reverb_lowpass", 64).coerceIn(0, 127)
+                                    Mixer.setNeoCustomReverbLowpass(lp)
+                                }
+                            }
+                            
+                            val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                            val eqEnabledPrefs = prefs.getBoolean("eq_enabled", false)
+                            Mixer.setEQEnabled(eqEnabledPrefs)
+                            if (eqEnabledPrefs) {
+                                for (i in 0 until 5) {
+                                    Mixer.setEQGain(i, prefs.getFloat("eq_band_$i", 0f))
+                                }
+                            }
                             if (song.hasEmbeddedBank()) {
                                 currentBankName.value = "Embedded Bank"
                             }
@@ -2173,6 +2195,15 @@ class HomeFragment : Fragment() {
                     } else {
                         val lp = prefs.getInt("custom_reverb_lowpass", 64).coerceIn(0, 127)
                         Mixer.setNeoCustomReverbLowpass(lp)
+                    }
+                }
+
+                // Restore EQ settings
+                val eqEnabledPrefs = prefs.getBoolean("eq_enabled", false)
+                Mixer.setEQEnabled(eqEnabledPrefs)
+                if (eqEnabledPrefs) {
+                    for (i in 0 until 5) {
+                        Mixer.setEQGain(i, prefs.getFloat("eq_band_$i", 0f))
                     }
                 }
 
@@ -4589,6 +4620,8 @@ fun NewMusicPlayerScreen(
                         }
                     },
                     onCustomReverbSync = { viewModel.bumpCustomReverbSync() },
+                    customEQSyncSerial = viewModel.customEQSyncSerial,
+                    onCustomEQSync = { viewModel.bumpCustomEQSync() },
                     onAddFolder = onAddFolder,
                     onRemovePersistedFolder = { folderUri ->
                         val uri = Uri.parse(folderUri)
@@ -4632,7 +4665,11 @@ fun NewMusicPlayerScreen(
                 onExportRequest = onExportRequest,
                 getMidiChannelMuteStatus = getMidiChannelMuteStatus,
                 onSetMidiChannelMuted = onSetMidiChannelMuted,
-                onRepeatModeChange = onRepeatModeChange
+                onRepeatModeChange = onRepeatModeChange,
+                onNavigateToSettings = { 
+                    viewModel.showFullPlayer = false
+                    onNavigate(NavigationScreen.SETTINGS)
+                }
             )
         }
         
@@ -4837,7 +4874,8 @@ fun FullPlayerScreen(
     onExportRequest: (String, Int) -> Unit,
     getMidiChannelMuteStatus: () -> BooleanArray?,
     onSetMidiChannelMuted: (Int, Boolean) -> Unit,
-    onRepeatModeChange: () -> Unit
+    onRepeatModeChange: () -> Unit,
+    onNavigateToSettings: () -> Unit
 ) {
     val currentPositionMs = viewModel.currentPositionMs
     val totalDurationMs = viewModel.totalDurationMs
@@ -4875,7 +4913,8 @@ fun FullPlayerScreen(
             onExportRequest = onExportRequest,
             getMidiChannelMuteStatus = getMidiChannelMuteStatus,
             onSetMidiChannelMuted = onSetMidiChannelMuted,
-            onRepeatModeChange = onRepeatModeChange
+            onRepeatModeChange = onRepeatModeChange,
+            onNavigateToSettings = onNavigateToSettings
         )
     } else {
         PortraitPlayerLayout(
@@ -4898,7 +4937,8 @@ fun FullPlayerScreen(
             onExportRequest = onExportRequest,
             getMidiChannelMuteStatus = getMidiChannelMuteStatus,
             onSetMidiChannelMuted = onSetMidiChannelMuted,
-            onRepeatModeChange = onRepeatModeChange
+            onRepeatModeChange = onRepeatModeChange,
+            onNavigateToSettings = onNavigateToSettings
         )
     }
 }
@@ -4924,7 +4964,8 @@ private fun PortraitPlayerLayout(
     onExportRequest: (String, Int) -> Unit,
     getMidiChannelMuteStatus: () -> BooleanArray?,
     onSetMidiChannelMuted: (Int, Boolean) -> Unit,
-    onRepeatModeChange: () -> Unit
+    onRepeatModeChange: () -> Unit,
+    onNavigateToSettings: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -4947,6 +4988,15 @@ private fun PortraitPlayerLayout(
                 )
             }
             Spacer(modifier = Modifier.weight(1f))
+            
+            // EQ button
+            IconButton(onClick = onNavigateToSettings) {
+                Icon(
+                    Icons.Filled.Tune,
+                    contentDescription = "Equalizer",
+                    tint = MaterialTheme.colors.onBackground
+                )
+            }
             
             // Export button (disabled when repeat mode is SONG to prevent infinite looping)
             currentItem?.let { item ->
@@ -5425,7 +5475,8 @@ private fun LandscapePlayerLayout(
     onExportRequest: (String, Int) -> Unit,
     getMidiChannelMuteStatus: () -> BooleanArray?,
     onSetMidiChannelMuted: (Int, Boolean) -> Unit,
-    onRepeatModeChange: () -> Unit
+    onRepeatModeChange: () -> Unit,
+    onNavigateToSettings: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -5447,6 +5498,15 @@ private fun LandscapePlayerLayout(
                 )
             }
             Spacer(modifier = Modifier.weight(1f))
+            
+            // EQ button
+            IconButton(onClick = onNavigateToSettings) {
+                Icon(
+                    Icons.Filled.Tune,
+                    contentDescription = "Equalizer",
+                    tint = MaterialTheme.colors.onBackground
+                )
+            }
             
             // Export button
             currentItem?.let { item ->
@@ -6911,6 +6971,8 @@ fun SettingsScreenContent(
     onBrowseBanks: () -> Unit,
     onOpenCustomReverb: () -> Unit,
     onCustomReverbSync: () -> Unit,
+    customEQSyncSerial: Int,
+    onCustomEQSync: () -> Unit,
     onAddFolder: () -> Unit,
     onRemovePersistedFolder: (String) -> Unit
 ) {
@@ -6924,6 +6986,24 @@ fun SettingsScreenContent(
     var showFolderManagerDialog by remember { mutableStateOf(false) }
     var folderManagerRefreshTick by remember { mutableStateOf(0) }
     val persistedFolderEntries = remember(folderManagerRefreshTick) { getPersistedSafFolderEntries(context) }
+
+    // EQ State
+    val prefs = context.getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+    var eqEnabled by remember(customEQSyncSerial) { mutableStateOf(prefs.getBoolean("eq_enabled", false)) }
+    val eqGains = remember(customEQSyncSerial) {
+        androidx.compose.runtime.mutableStateListOf(
+            prefs.getFloat("eq_band_0", 0f),
+            prefs.getFloat("eq_band_1", 0f),
+            prefs.getFloat("eq_band_2", 0f),
+            prefs.getFloat("eq_band_3", 0f),
+            prefs.getFloat("eq_band_4", 0f)
+        )
+    }
+    var eqExpanded by remember { mutableStateOf(false) }
+    var showSaveEQDialog by remember { mutableStateOf(false) }
+    var saveEQName by remember { mutableStateOf("") }
+    var activeEQName by remember { mutableStateOf(getActiveCustomEQPresetName(context)) }
+    var eqPresetNames by remember { mutableStateOf(loadCustomEQPresetNames(context)) }
 
     @Composable
     fun FolderAccessManagerDialog() {
@@ -7000,6 +7080,44 @@ fun SettingsScreenContent(
             dismissButton = {
                 TextButton(onClick = onAddFolder) {
                     Text("Add Folder")
+                }
+            }
+        )
+    }
+
+    if (showSaveEQDialog) {
+        AlertDialog(
+            onDismissRequest = { showSaveEQDialog = false },
+            title = { Text("Save EQ Preset") },
+            text = {
+                OutlinedTextField(
+                    value = saveEQName,
+                    onValueChange = { saveEQName = it },
+                    label = { Text("Preset Name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val name = saveEQName.trim()
+                        if (name.isNotEmpty()) {
+                            val preset = CustomEQPreset(name, eqGains.toFloatArray())
+                            saveCustomEQPreset(context, preset)
+                            eqPresetNames = loadCustomEQPresetNames(context)
+                            activeEQName = name
+                            setActiveCustomEQPresetName(context, name)
+                        }
+                        showSaveEQDialog = false
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSaveEQDialog = false }) {
+                    Text("Cancel")
                 }
             }
         )
@@ -7196,6 +7314,213 @@ fun SettingsScreenContent(
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     
+    @Composable
+    fun EqualizerCard() {
+        // Equalizer Section
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = 4.dp,
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        Icons.Filled.Tune,
+                        contentDescription = null,
+                        tint = MaterialTheme.colors.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "5-Band Equalizer",
+                        style = MaterialTheme.typography.h6,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colors.primary,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Switch(
+                        checked = eqEnabled,
+                        onCheckedChange = {
+                            eqEnabled = it
+                            context.getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                                .edit().putBoolean("eq_enabled", it).apply()
+                            Mixer.setEQEnabled(it)
+                        }
+                    )
+                }
+                
+                if (eqEnabled) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    
+                    // Dropdown for EQ Presets
+                    val eqOptions = listOf("None") + BUILT_IN_EQ_PRESETS.keys.toList() + eqPresetNames
+                    val currentEqLabel = activeEQName ?: "None"
+                    
+                    Box {
+                        OutlinedButton(
+                            onClick = { eqExpanded = true },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = currentEqLabel,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Icon(Icons.Filled.ArrowDropDown, contentDescription = null)
+                        }
+                        DropdownMenu(
+                            expanded = eqExpanded,
+                            onDismissRequest = { eqExpanded = false }
+                        ) {
+                            eqOptions.forEach { option ->
+                                DropdownMenuItem(onClick = {
+                                    if (option == "None") {
+                                        activeEQName = null
+                                        setActiveCustomEQPresetName(context, null)
+                                        for (i in 0 until 5) {
+                                            eqGains[i] = 0f
+                                            Mixer.setEQGain(i, 0f)
+                                            context.getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                                                .edit().putFloat("eq_band_$i", 0f).apply()
+                                        }
+                                    } else if (BUILT_IN_EQ_PRESETS.containsKey(option)) {
+                                        activeEQName = option
+                                        setActiveCustomEQPresetName(context, option)
+                                        val presetGains = BUILT_IN_EQ_PRESETS[option]!!
+                                        for (i in 0 until 5) {
+                                            eqGains[i] = presetGains[i]
+                                            Mixer.setEQGain(i, presetGains[i])
+                                            context.getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                                                .edit().putFloat("eq_band_$i", presetGains[i]).apply()
+                                        }
+                                    } else {
+                                        // Custom preset
+                                        loadCustomEQPreset(context, option)?.let { p ->
+                                            activeEQName = option
+                                            setActiveCustomEQPresetName(context, option)
+                                            for (i in 0 until 5) {
+                                                eqGains[i] = p.gains[i]
+                                                Mixer.setEQGain(i, p.gains[i])
+                                                context.getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                                                    .edit().putFloat("eq_band_$i", p.gains[i]).apply()
+                                            }
+                                        }
+                                    }
+                                    eqExpanded = false
+                                }) {
+                                    Text(option)
+                                }
+                            }
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    if (isLandscape) {
+                        // Sliders (Horizontal)
+                        val labels = listOf("60Hz", "230Hz", "910Hz", "3.6kHz", "14kHz")
+                        for (i in 0 until 5) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                Text(labels[i], modifier = Modifier.width(50.dp), style = MaterialTheme.typography.caption)
+                                Slider(
+                                    value = eqGains[i],
+                                    onValueChange = { 
+                                        eqGains[i] = it
+                                        Mixer.setEQGain(i, it)
+                                    },
+                                    onValueChangeFinished = {
+                                        activeEQName = null
+                                        setActiveCustomEQPresetName(context, null)
+                                        context.getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                                            .edit().putFloat("eq_band_$i", eqGains[i]).apply()
+                                    },
+                                    valueRange = -12f..12f,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Text(
+                                    String.format("%.1f dB", eqGains[i]),
+                                    modifier = Modifier.width(50.dp),
+                                    style = MaterialTheme.typography.caption,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.End
+                                )
+                            }
+                        }
+                    } else {
+                        // Sliders (Vertical)
+                        val labels = listOf("60Hz", "230Hz", "910Hz", "3.6kHz", "14kHz")
+                        Row(
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp)
+                        ) {
+                            for (i in 0 until 5) {
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    Text(
+                                        String.format("%+.1f", eqGains[i]),
+                                        style = MaterialTheme.typography.caption,
+                                        modifier = Modifier.padding(bottom = 8.dp)
+                                    )
+                                    Box(
+                                        modifier = Modifier.width(48.dp).height(240.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Slider(
+                                            value = eqGains[i],
+                                            onValueChange = { 
+                                                eqGains[i] = it
+                                                Mixer.setEQGain(i, it)
+                                            },
+                                            onValueChangeFinished = {
+                                                activeEQName = null
+                                                setActiveCustomEQPresetName(context, null)
+                                                context.getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                                                    .edit().putFloat("eq_band_$i", eqGains[i]).apply()
+                                            },
+                                            valueRange = -12f..12f,
+                                            modifier = Modifier
+                                                .requiredWidth(240.dp)
+                                                .rotate(-90f)
+                                        )
+                                    }
+                                    Text(
+                                        labels[i],
+                                        style = MaterialTheme.typography.caption,
+                                        modifier = Modifier.padding(top = 8.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Custom preset actions
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(onClick = {
+                            saveEQName = activeEQName ?: ""
+                            showSaveEQDialog = true
+                        }, modifier = Modifier.weight(1f)) {
+                            Text("Save Preset")
+                        }
+                        val canDelete = activeEQName != null && eqPresetNames.contains(activeEQName)
+                        OutlinedButton(
+                            onClick = {
+                                if (canDelete) {
+                                    activeEQName?.let { deleteCustomEQPreset(context, it) }
+                                    activeEQName = null
+                                    setActiveCustomEQPresetName(context, null)
+                                    eqPresetNames = loadCustomEQPresetNames(context)
+                                }
+                            },
+                            enabled = canDelete
+                        ) {
+                            Text("Delete")
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -7305,6 +7630,8 @@ fun SettingsScreenContent(
                 }
             }
             
+            Spacer(modifier = Modifier.height(16.dp))
+            EqualizerCard()
             Spacer(modifier = Modifier.height(16.dp))
             
             // Row 1: Reverb and Velocity Curve
@@ -7868,6 +8195,10 @@ fun SettingsScreenContent(
                     )
                 }
             }
+            
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            EqualizerCard()
             
             Spacer(modifier = Modifier.height(16.dp))
             
