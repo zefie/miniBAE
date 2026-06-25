@@ -3098,6 +3098,7 @@ typedef struct BAERmfEditorSampleInfo
     unsigned char highKey;
     int16_t splitVolume;     /* per-split volume (miscParameter2), 0 = use default (100) */
     BAESampleInfo sampleInfo;
+    uint32_t sampleSize;
     BAERmfEditorCompressionType compressionType; /* target compression for saving */
     BAE_BOOL hasOriginalData;                    /* TRUE if DONT_CHANGE is available */
     BAERmfEditorSndStorageType sndStorageType;   /* file-level container type (esnd/csnd/snd) */

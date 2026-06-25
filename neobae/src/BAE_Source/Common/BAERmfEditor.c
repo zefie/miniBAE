@@ -12063,7 +12063,7 @@ BAEResult BAERmfEditorDocument_GetSampleInfo(BAERmfEditorDocument const *documen
         return BAE_PARAM_ERR;
     }
     sample = &document->samples[sampleIndex];
-    outSampleInfo->displayName = sample->displayName;
+    outSampleInfo->displayName = (sample->displayName && sample->displayName[0] != '\0') ? sample->displayName : "";
     outSampleInfo->sourcePath = sample->sourcePath;
     outSampleInfo->program = sample->program;
     outSampleInfo->rootKey = sample->rootKey;
@@ -12071,6 +12071,7 @@ BAEResult BAERmfEditorDocument_GetSampleInfo(BAERmfEditorDocument const *documen
     outSampleInfo->highKey = sample->highKey;
     outSampleInfo->splitVolume = sample->splitVolume;
     outSampleInfo->sampleInfo = sample->sampleInfo;
+    outSampleInfo->sampleSize = (uint32_t)sample->originalSndSize;
     outSampleInfo->compressionType = sample->targetCompressionType;
     outSampleInfo->hasOriginalData = (sample->originalSndData != NULL) ? TRUE : FALSE;
     outSampleInfo->opusMode = sample->targetOpusMode;
