@@ -303,7 +303,7 @@ static bool IsModuleExtension(const std::string &ext)
            ext == "mtm" || ext == "stm" || ext == "669" || ext == "far" ||
            ext == "ult" || ext == "amf" || ext == "dbm" || ext == "imf" ||
            ext == "liq" || ext == "med" || ext == "mgt" || ext == "okt" ||
-           ext == "ptm" || ext == "xmf";
+           ext == "ptm";
 }
 
 static bool IsBankExtension(const std::string &ext)
