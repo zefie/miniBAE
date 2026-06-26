@@ -1101,6 +1101,7 @@ void bae_set_volume(int volPct)
         double soundMultiplierBase = 3.0;
         double soundMultiplier = soundMultiplierBase * (1.0 + (double)volPct / 100.0);
         double soundGain = engineGain * soundMultiplier;
+        soundGain *= 0.25;
         if (soundGain < 0.0)
             soundGain = 0.0;
         BAESound_SetVolume(g_bae.sound, FLOAT_TO_UNSIGNED_FIXED(soundGain));
