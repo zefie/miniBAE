@@ -3396,7 +3396,7 @@ int main(int argc, char *argv[])
 
         // Show "Customize", "+" and "-" buttons when Custom reverb or user preset is selected (below the dropdown)
 #if USE_NEO_EFFECTS
-        g_custom_reverb_button_visible = (reverbType >= BAE_REVERB_TYPE_12 && reverbType != BAE_REVERB_TYPE_17);
+        g_custom_reverb_button_visible = (reverbType >= BAE_REVERB_TYPE_12 && reverbType != BAE_REVERB_TYPE_18);
         if (g_custom_reverb_button_visible && reverb_enabled)
         {
             // When the dropdown list is open, don't allow clicks on the buttons underneath it.

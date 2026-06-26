@@ -7687,8 +7687,8 @@ fun SettingsScreenContent(
                                         clearActivePreset()
                                         val selectedReverbType = index + 1
                                         onReverbChange(selectedReverbType)
-                                        // For Neo presets (REVERB_TYPE_13-16), load their values into custom reverb for editing
-                                        if (selectedReverbType in 13..16) {
+                                        // For Neo presets (REVERB_TYPE_13-17), load their values into custom reverb for editing
+                                        if (selectedReverbType in 13..17) {
                                             val preset = getNeoReverbPreset(context, selectedReverbType, option)
                                             applyCustomReverbPresetToEngine(context, preset)
                                             onCustomReverbSync()
@@ -7715,7 +7715,7 @@ fun SettingsScreenContent(
                     }
                 }
 
-                if (reverbType >= 12 && reverbType != 17) {
+                if (reverbType >= 12 && reverbType != 18) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                         OutlinedButton(onClick = onOpenCustomReverb, modifier = Modifier.weight(1f)) {
