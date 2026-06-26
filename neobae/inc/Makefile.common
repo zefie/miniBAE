@@ -51,6 +51,7 @@ ifneq ($(WASM),1)
 		J2ME_PATCH := 1
 		CREATION_NO_CODECS := 0
 		CREATION_API := 0
+		UNROLL_MIDI :=1
 	endif
 endif
 
@@ -206,6 +207,10 @@ endif
 
 ifeq ($(RETRO_RINGTONE_SUPPORT),1)
 	BAE_FLAGS += -DUSE_RETRO_RINGTONE_SUPPORT=1
+endif
+
+ifeq ($(UNROLL_MIDI),1)
+	BAE_FLAGS += -DBAE_ENABLE_ROLLED_MIDI_UNROLL=1
 endif
 
 ifneq ($(filter 1,$(FLAC_ENC) $(FLAC_DEC)),) 
