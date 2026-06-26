@@ -2343,7 +2343,7 @@ int main(int argc, char *argv[])
                 uint32_t step_ms = now - g_progress_display_tick_ms;
                 if (step_ms > 250)
                     step_ms = 250;
-                progress += (int)step_ms;
+                progress += (int)((double)step_ms * ((double)tempo / 100.0));
                 g_progress_display_tick_ms = now;
 
                 // Keep display smooth, but snap back on larger drift/seek/loop jumps.
@@ -3336,31 +3336,6 @@ int main(int argc, char *argv[])
             {
                 tempo = newTempo;
                 bae_set_tempo(tempo);
-                // Get original song duration from BAE and calculate tempo-adjusted duration
-                // Higher tempo = shorter duration, lower tempo = longer duration
-                // Formula: adjusted_duration = original_duration * (100 / tempo_percent)
-                if (g_bae.song)
-                {
-                    uint32_t original_length_us = 0;
-                    BAESong_GetMicrosecondLength(g_bae.song, &original_length_us);
-                    int original_duration_ms = (int)(original_length_us / 1000UL);
-                    int old_duration = duration;
-                    duration = (int)((double)original_duration_ms * (100.0 / (double)tempo));
-                    g_bae.song_length_us = duration * 1000UL;
-                    // Calculate progress bar position based on percentage through song
-                    // without seeking BAE - preserve relative position
-                    if (old_duration > 0)
-                    {
-                        float percent_through = (float)progress / (float)old_duration;
-                        progress = (int)(percent_through * duration);
-                    }
-                }
-                if (g_bae.preserve_position_on_next_start && g_bae.preserved_start_position_us)
-                {
-                    uint32_t us = g_bae.preserved_start_position_us;
-                    uint32_t newus = (uint32_t)((double)us * (100.0 / (double)tempo));
-                    g_bae.preserved_start_position_us = newus;
-                }
             }
         }
 
@@ -7323,34 +7298,6 @@ int main(int argc, char *argv[])
             {
                 duration = bae_get_len_ms();
                 g_last_engine_pos_ms = bae_get_pos_ms();
-            }
-            else
-            {
-                // Get original song duration from BAE and calculate tempo-adjusted duration
-                // Higher tempo = shorter duration, lower tempo = longer duration
-                // Formula: adjusted_duration = original_duration * (100 / tempo_percent)
-                if (g_bae.song)
-                {
-                    uint32_t original_length_us = 0;
-                    BAESong_GetMicrosecondLength(g_bae.song, &original_length_us);
-                    int original_duration_ms = (int)(original_length_us / 1000UL);
-                    int old_duration = duration;
-                    duration = (int)((double)original_duration_ms * (100.0 / (double)tempo));
-                    g_bae.song_length_us = duration * 1000UL;
-                    // Calculate progress bar position based on percentage through song
-                    // without seeking BAE - preserve relative position
-                    if (old_duration > 0)
-                    {
-                        float percent_through = (float)progress / (float)old_duration;
-                        progress = (int)(percent_through * duration);
-                    }
-                }
-                if (g_bae.preserve_position_on_next_start && g_bae.preserved_start_position_us)
-                {
-                    uint32_t us = g_bae.preserved_start_position_us;
-                    uint32_t newus = (uint32_t)((double)us * (100.0 / (double)tempo));
-                    g_bae.preserved_start_position_us = newus;
-                }
             }
             lastTempo = tempo;
         }

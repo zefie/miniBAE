@@ -259,35 +259,6 @@ bool ui_adjust_tempo(int mx, int my, int delta, bool playback_controls_enabled_l
     {
         *tempo_ptr = nt;
         bae_set_tempo(*tempo_ptr);
-        if (g_bae.song)
-        {
-            uint32_t original_length_us = 0;
-            BAESong_GetMicrosecondLength(g_bae.song, &original_length_us);
-            int original_duration_ms = (int)(original_length_us / 1000UL);
-            int old_duration = (duration_out ? *duration_out : (int)(g_bae.song_length_us / 1000UL));
-            int new_duration = (int)((double)original_duration_ms * (100.0 / (double)(tempo_ptr ? *tempo_ptr : 100)));
-            if (duration_out)
-                *duration_out = new_duration;
-            else
-                ; // caller didn't supply duration_out; nothing to update locally
-            g_bae.song_length_us = (uint32_t)(new_duration * 1000UL);
-            if (old_duration > 0)
-            {
-                int current_progress = (progress_out ? *progress_out : 0);
-                float percent_through = (float)current_progress / (float)old_duration;
-                int newprog = (int)(percent_through * new_duration);
-                if (progress_out)
-                    *progress_out = newprog;
-                else
-                    ; // caller didn't supply progress_out; nothing to update
-            }
-        }
-        if (g_bae.preserve_position_on_next_start && g_bae.preserved_start_position_us)
-        {
-            uint32_t us = g_bae.preserved_start_position_us;
-            uint32_t newus = (uint32_t)((double)us * (100.0 / (double)(tempo_ptr ? *tempo_ptr : 100)));
-            g_bae.preserved_start_position_us = newus;
-        }
     }
     return true;
 }

@@ -1205,7 +1205,18 @@ void bae_seek_ms(int ms)
     g_midi_output_suppressed_during_seek = true;
 #endif
 
-    BAESong_SetMicrosecondPosition(g_bae.song, us);
+    uint32_t totalTicks = 0;
+    if (BAESong_GetTickLength(g_bae.song, &totalTicks) == BAE_NO_ERROR &&
+        totalTicks > 0 && g_bae.song_length_us > 0)
+    {
+        double percent = (double)us / (double)g_bae.song_length_us;
+        uint32_t targetTick = (uint32_t)(percent * (double)totalTicks);
+        BAESong_SetTickPosition(g_bae.song, targetTick);
+    }
+    else
+    {
+        BAESong_SetMicrosecondPosition(g_bae.song, us);
+    }
 
 #ifdef SUPPORT_MIDI_HW
     g_midi_output_suppressed_during_seek = false;
@@ -1269,6 +1280,16 @@ int bae_get_pos_ms(void)
 
     if (!g_bae.song)
         return 0;
+
+    uint32_t currentTicks = 0;
+    uint32_t totalTicks = 0;
+    if (BAESong_GetTickPosition(g_bae.song, &currentTicks) == BAE_NO_ERROR &&
+        BAESong_GetTickLength(g_bae.song, &totalTicks) == BAE_NO_ERROR &&
+        totalTicks > 0 && g_bae.song_length_us > 0)
+    {
+        double percent = (double)currentTicks / (double)totalTicks;
+        return (int)((double)g_bae.song_length_us * percent / 1000.0);
+    }
 
     uint32_t us = 0;
     BAESong_GetMicrosecondPosition(g_bae.song, &us);
