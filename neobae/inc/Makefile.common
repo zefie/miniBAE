@@ -296,13 +296,17 @@ ifeq ($(BAE_API),Raylib)
 	BAE_FLAGS += 	-DX_PLATFORM=X_RAYLIB -DUSE_RAYLIB=1
 	SRC       :=	src/BAE_Source/Platform/BAE_API_$(BAE_API).c
 endif
-# zefie has not tested these APIs
-ifeq ($(BAE_API),MacOSX)
-	BAE_FLAGS += 	-DX_PLATFORM=X_MACINTOSH
-	SRC       :=	src/BAE_Source/Platform/BAE_API_$(BAE_API).c
-endif
 ifeq ($(BAE_API),Android)
 	BAE_FLAGS += 	-DX_PLATFORM=X_ANDROID
+	SRC       :=	src/BAE_Source/Platform/BAE_API_$(BAE_API).c
+endif
+# zefie has not tested these APIs
+ifeq ($(BAE_API),foobar2000)
+	BAE_FLAGS += 	-DX_PLATFORM=X_FOOBAR2000_PLUGIN
+	SRC       :=	src/BAE_Source/Platform/BAE_API_$(BAE_API).c
+endif
+ifeq ($(BAE_API),MacOSX)
+	BAE_FLAGS += 	-DX_PLATFORM=X_MACINTOSH
 	SRC       :=	src/BAE_Source/Platform/BAE_API_$(BAE_API).c
 endif
 ifeq ($(BAE_API),IOS)

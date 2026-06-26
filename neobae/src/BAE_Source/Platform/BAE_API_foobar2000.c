@@ -381,11 +381,14 @@ int BAE_SetFileLength(intptr_t ref, uint32_t newSize)
 int      BAE_GetAudioBufferCount(void)     { return 1; }
 int32_t  BAE_GetAudioByteBufferSize(void)  { return g_audioByteBufferSize; }
 
+
+/*
 uint32_t BAE_GetSliceTimeInMicroseconds(void)
 {
     if (!g_sampleRate || !g_framesPerSlice) return 11000;
     return (uint32_t)((uint64_t)g_framesPerSlice * 1000000ULL / g_sampleRate);
 }
+*/
 
 // ---------------------------------------------------------------------------
 // Audio card acquire / release  (no real device - foobar2000 owns output)
