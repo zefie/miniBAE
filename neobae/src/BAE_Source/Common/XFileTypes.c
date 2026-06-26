@@ -160,26 +160,26 @@ static BAEFileType PV_DetectOGGType(const unsigned char *buffer, int32_t bufferS
     // The actual codec data starts after the OGG page header
     // We need to find the first page with audio data
     
-    int offset = 4; // Skip "OggS"
+    int offset = 0; // Start at the beginning of the page ("OggS")
     
     while (offset + 27 < bufferSize) // Minimum OGG page header size
     {
         // Skip OGG page header fields to get to the payload
-        int segmentCount = buffer[offset + 22];
+        int segmentCount = buffer[offset + 26];
         
-        if (segmentCount > 255 || offset + 27 + segmentCount >= bufferSize)
+        if (offset + 27 + segmentCount >= bufferSize)
             break;
             
         // Skip to segment table
-        offset += 27;
+        int segmentTableOffset = offset + 27;
         
         // Calculate payload offset by summing segment lengths
-        int payloadOffset = offset + segmentCount;
+        int payloadOffset = segmentTableOffset + segmentCount;
         int payloadSize = 0;
         
-        for (int i = 0; i < segmentCount && offset + i < bufferSize; i++)
+        for (int i = 0; i < segmentCount && segmentTableOffset + i < bufferSize; i++)
         {
-            payloadSize += buffer[offset + i];
+            payloadSize += buffer[segmentTableOffset + i];
         }
         
         if (payloadOffset + 8 <= bufferSize)

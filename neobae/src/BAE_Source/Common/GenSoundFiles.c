@@ -234,30 +234,22 @@ static size_t PV_VorbisReadFunc(void *ptr, size_t size, size_t nmemb, void *data
 {
     XFILE file = (XFILE)datasource;
     size_t bytes_to_read = size * nmemb;
-    int32_t err;
+    int32_t pos_before;
+    int32_t pos_after;
+    int32_t bytes_read;
     
     if (bytes_to_read == 0) return 0;
     
-    /* Cap the requested size to the remaining bytes to allow partial/EOF reads */
-    {
-        int32_t file_len = XFileGetLength(file);
-        int32_t file_pos = XFileGetPosition(file);
-        if (file_len >= 0 && file_pos >= 0) {
-            int32_t remaining = file_len - file_pos;
-            if (remaining <= 0) return 0; /* EOF */
-            if ((uint64_t)bytes_to_read > (uint64_t)remaining) {
-                bytes_to_read = (size_t)remaining;
-            }
-        }
-    }
+    pos_before = XFileGetPosition(file);
+    if (pos_before < 0) return 0;
     
-    err = XFileRead(file, ptr, (int32_t)bytes_to_read);
-    if (err != 0) {
-        return 0; /* Error reading */
-    }
+    XFileRead(file, ptr, (int32_t)bytes_to_read);
     
-    /* Return number of 'items' read as fread would */
-    return bytes_to_read / size;
+    pos_after = XFileGetPosition(file);
+    if (pos_after < pos_before) return 0;
+    
+    bytes_read = pos_after - pos_before;
+    return bytes_read / size;
 }
 
 static int PV_VorbisSeekFunc(void *datasource, ogg_int64_t offset, int whence)
@@ -302,29 +294,20 @@ static long PV_VorbisTellFunc(void *datasource)
 static int PV_OpusReadFunc(void *stream, unsigned char *ptr, int nbytes)
 {
     XFILE file = (XFILE)stream;
-    int32_t err;
+    int32_t pos_before;
+    int32_t pos_after;
     
     if (nbytes == 0) return 0;
     
-    /* Cap the requested size to the remaining bytes to allow partial/EOF reads */
-    {
-        int32_t file_len = XFileGetLength(file);
-        int32_t file_pos = XFileGetPosition(file);
-        if (file_len >= 0 && file_pos >= 0) {
-            int32_t remaining = file_len - file_pos;
-            if (remaining <= 0) return 0; /* EOF */
-            if (nbytes > remaining) {
-                nbytes = remaining;
-            }
-        }
-    }
+    pos_before = XFileGetPosition(file);
+    if (pos_before < 0) return 0;
     
-    err = XFileRead(file, ptr, nbytes);
-    if (err != 0) {
-        return 0; /* Error reading */
-    }
+    XFileRead(file, ptr, nbytes);
     
-    return nbytes;
+    pos_after = XFileGetPosition(file);
+    if (pos_after < pos_before) return 0;
+    
+    return pos_after - pos_before;
 }
 
 static int PV_OpusSeekFunc(void *stream, opus_int64 offset, int whence)
@@ -3645,8 +3628,8 @@ static GM_Waveform* PV_ReadIntoMemoryOpusFile(XFILE file, bool decodeData,
         // Decode in chunks — if expected_size==0 we loop until op_read returns 0
         while (expected_size == 0 ? 1 : (total_read < expected_size)) {
             uint32_t readChunk = capacity - total_read;
-            if (readChunk > 4096) {
-                readChunk = 4096;
+            if (readChunk > 65536) {
+                readChunk = 65536;
             }
             
             if (capacity - total_read < readChunk) {
@@ -3670,7 +3653,7 @@ static GM_Waveform* PV_ReadIntoMemoryOpusFile(XFILE file, bool decodeData,
             
             bytes_read = op_read(of,
                                 (opus_int16*)((char*)wave->theWaveform + total_read),
-                                (int)(readChunk / (wave->channels * 2)), // samples per channel
+                                (int)(readChunk / 2), // total values (16-bit samples)
                                 NULL);
 
             if (bytes_read == 0) {
@@ -4919,6 +4902,11 @@ GM_Waveform     *waveform;
             waveform = PV_ReadIntoMemoryVorbisFile(file, decodeData, NULL, NULL, NULL, &err);
             break;
     #endif
+    #if USE_OPUS_DECODER != FALSE
+        case FILE_OPUS_TYPE:
+            waveform = PV_ReadIntoMemoryOpusFile(file, decodeData, NULL, NULL, NULL, &err);
+            break;
+    #endif
     #if USE_QOA_SUPPORT == TRUE
         case FILE_QOA_TYPE:
             waveform = PV_ReadIntoMemoryQOAFile(file, decodeData, NULL, NULL, NULL, &err);
@@ -4989,6 +4977,11 @@ GM_Waveform*    pWave = NULL;
 #if USE_VORBIS_DECODER != FALSE
         case FILE_VORBIS_TYPE:
             pWave = PV_ReadIntoMemoryVorbisFile(file, FALSE, pFormat, ppBlockPtr, pBlockSize, &err);
+            break;
+#endif
+#if USE_OPUS_DECODER != FALSE
+        case FILE_OPUS_TYPE:
+            pWave = PV_ReadIntoMemoryOpusFile(file, FALSE, pFormat, ppBlockPtr, pBlockSize, &err);
             break;
 #endif
 #if USE_QOA_SUPPORT == TRUE

@@ -55,17 +55,20 @@ typedef struct {
 static int opus_read_func(void *stream, unsigned char *ptr, int nbytes)
 {
     XFILE file = (XFILE)stream;
-    int32_t err;
+    int32_t pos_before;
+    int32_t pos_after;
 
     if (nbytes == 0) return 0;
 
-    /* XFileRead returns 0 on success, -1 on failure */
-    err = XFileRead(file, ptr, nbytes);
-    if (err == 0) {
-        return nbytes; /* Success - return number of bytes read */
-    } else {
-        return 0; /* EOF or error */
-    }
+    pos_before = XFileGetPosition(file);
+    if (pos_before < 0) return 0;
+
+    XFileRead(file, ptr, nbytes);
+    
+    pos_after = XFileGetPosition(file);
+    if (pos_after < pos_before) return 0;
+
+    return pos_after - pos_before;
 }
 
 static int opus_seek_func(void *stream, opus_int64 offset, int whence)
