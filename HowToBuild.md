@@ -46,13 +46,52 @@ If you do not use git submodules, place third-party sources in these folders:
 - [Opusfile](https://www.opus-codec.org/downloads/) -> `neobae/src/thirdparty/opusfile`
 - [RtMidi](https://github.com/thestk/rtmidi) -> `neobae/src/thirdparty/rtmidi`
 - [libg722](https://github.com/sippy/libg722) -> `neobae/src/thirdparty/libg722`
+- [libxmp](https://github.com/libxmp/libxmp) -> `neobae/src/thirdparty/libxmp`
 - Linux only: modified [FluidSynth](https://github.com/zefie/fluidsynth) -> `neobae/src/thirdparty/fluidsynth`
 
 Notes:
 
 - If you use `NOAUTO=1`, you only need third-party code for the features you enable.
 
-## Quick start
+# Compiling NeoBAE
+
+## cmake
+
+The current recommended way to build the NeoBAE suite is with `cmake`.
+
+### Linux
+```bash
+sudo apt-get update
+sudo apt-get install -y wx3.2-headers libsdl3-dev
+cd neobae
+mkdir build
+cmake -B build .
+cmake --build build --parallel $(nproc)
+./build/bin/playbae -h
+```
+### Windows
+
+I highly recommend building in my [docker toolchain](https://hub.docker.com/repository/docker/zefie/llvm-mingw)
+
+To build just for x86_64:
+```bash
+cd neobae
+docker run --rm -it -v ./:/src zefie/llvm-mingw:latest .zefie/build-llvm-mingw-static_x86_64_only.sh
+```
+This will generate a zip in the `neobae/out` folder.
+
+To build for all archs:
+```bash
+cd neobae
+docker run --rm -it -v ./:/src zefie/llvm-mingw:latest .zefie/build-llvm-mingw-static.sh
+```
+
+This will generate 4 zips in the `neobae/out` folder, one pertaining to each architechure.
+
+
+## Legacy Makefiles
+
+NeoBAE can still be built in seperate parts using the legacy Makefiles.
 
 ### Linux: playbae (SDL3)
 
@@ -275,6 +314,9 @@ make NOAUTO=1 ...
 - `MTHC_SUPPORT=1`: Nokia compressed MIDI (MThc)
 - `ADP_SUPPORT=1`: Nokia ADP G.722
 - `PLAYLIST=1`: GUI playlist support
+- `J2ME_PATCH`: Patch for J2ME alternate drum channel
+- `RETRO_RINGTONE_SUPPORT`: RTTTL, RNG, and RTX support
+- `UNROLL_MIDI`: Unroll rolled MIDIs (eg `DialingWebTV.mid`)
 
 ### Synth/audio backend flags
 
