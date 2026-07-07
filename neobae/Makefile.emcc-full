@@ -25,7 +25,7 @@ RMI_SUPPORT 	:= 1
 J2ME_PATCH		:= 1
 
 TARGET_JS	:= engine.js
-PACK_FILENAME	:= miniBAE_WASM_FluidSynth.tar.gz
+PACK_FILENAME	:= NeoBAE_WASM_FluidSynth.tar.gz
 
 include inc/Makefile.common
 

@@ -19,7 +19,7 @@ RMI_SUPPORT		:= 1
 J2ME_PATCH		:= 1
 
 TARGET_JS	:= engine.js
-PACK_FILENAME	:= miniBAE_WASM.tar.gz
+PACK_FILENAME	:= NeoBAE_WASM.tar.gz
 EM_SYSROOT := /home/zefie/dev/emsdk/upstream/emscripten/cache/sysroot
 
 include inc/Makefile.common
@@ -63,7 +63,8 @@ else
 	endif
 endif
 
-LIBS	= 	-lpthread  -lvorbis -logg -lvorbisenc -lvorbisfile -lFLAC -lopus -lopusfile -lsndfile
+LIBS	= 	-lpthread $(BAE_LIBS)
+# -lvorbis -logg -lvorbisenc -lvorbisfile -lFLAC -lopus -lopusfile -lsndfile
 
 all: ${TARGET_JS} extra-files
 
