@@ -35,11 +35,11 @@ export NOAUTO=1
 export SF2_SUPPORT=0
 export USING_FLUIDSYNTH=0
 export MP3_DEC=1
-echo "Building Enscripten WebAssembly (miniBAE Only)..."
+echo "Building Enscripten WebAssembly (NeoBAE Only)..."
 runcmd make clean
 runcmd make -f Makefile.emcc "-j$(nproc)" all
 runcmd make -f Makefile.emcc pack
-install_file "${BDIR}/miniBAE_WASM.tar.gz" "${ODIR}/miniBAE_WASM.tar.gz"
+install_file "${BDIR}/NeoBAE_WASM.tar.gz" "${ODIR}/NeoBAE_WASM.tar.gz"
 runcmd make -f Makefile.emcc clean
 
 export USE_SDL=0
@@ -48,10 +48,10 @@ export SF2_SUPPORT=1
 export USING_FLUIDSYNTH=1
 export MP3_DEC=1
 export XMF_SUPPORT=1
-echo "Building Enscripten WebAssembly (miniBAE & FluidSynth)..."
+echo "Building Enscripten WebAssembly (NeoBAE & FluidSynth)..."
 runcmd make clean
 runcmd make -f Makefile.emcc-full "-j$(nproc)" all
 runcmd make -f Makefile.emcc-full pack
-install_file "${BDIR}/miniBAE_WASM_FluidSynth.tar.gz" "${ODIR}/miniBAE_WASM_FluidSynth.tar.gz"
+install_file "${BDIR}/NeoBAE_WASM_FluidSynth.tar.gz" "${ODIR}/NeoBAE_WASM_FluidSynth.tar.gz"
 runcmd make -f Makefile.emcc-full clean
 
