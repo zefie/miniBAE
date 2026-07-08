@@ -2569,9 +2569,28 @@ class HomeFragment : Fragment() {
                 
                 val folder = File(actualPath)
                 if (!folder.exists() || !folder.isDirectory) {
+                    // Try to find closest ancestor directory that exists
+                    var resolvedPath = actualPath
+                    while (resolvedPath != "/" && resolvedPath.isNotEmpty()) {
+                        val f = File(resolvedPath)
+                        if (f.exists() && f.isDirectory) {
+                            break
+                        }
+                        resolvedPath = File(resolvedPath).parent ?: "/"
+                    }
+
+                    val contextRef = context
                     activity?.runOnUiThread {
                         loadingState?.value = false
-                        Toast.makeText(requireContext(), "Invalid folder: $actualPath", Toast.LENGTH_SHORT).show()
+                        if (contextRef != null) {
+                            Toast.makeText(contextRef, "Folder not found: $actualPath. Falling back to: $resolvedPath", Toast.LENGTH_SHORT).show()
+                            if (::viewModel.isInitialized) {
+                                viewModel.currentFolderPath = resolvedPath
+                                val prefs = contextRef.getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                                prefs.edit().putString("current_folder_path", resolvedPath).apply()
+                            }
+                            loadFolderContents(resolvedPath)
+                        }
                     }
                     return@Thread
                 }
@@ -2656,7 +2675,31 @@ class HomeFragment : Fragment() {
         if (folderDoc == null || !folderDoc.isDirectory) {
             activity?.runOnUiThread {
                 loadingState?.value = false
-                Toast.makeText(requireContext(), "Unable to open SAF folder", Toast.LENGTH_SHORT).show()
+                val contextRef = context
+                if (contextRef != null) {
+                    val parentPath = getSafParentPath(folderUriString)
+                    if (parentPath != null && parentPath != folderUriString && parentPath != "/") {
+                        Toast.makeText(contextRef, "Folder not found. Falling back to parent.", Toast.LENGTH_SHORT).show()
+                        if (::viewModel.isInitialized) {
+                            viewModel.currentFolderPath = parentPath
+                            val prefs = contextRef.getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                            prefs.edit().putString("current_folder_path", parentPath).apply()
+                        }
+                        loadFolderContentsSaf(parentPath)
+                    } else {
+                        Toast.makeText(contextRef, "Unable to open folder. Please select a folder.", Toast.LENGTH_SHORT).show()
+                        if (::viewModel.isInitialized) {
+                            viewModel.currentFolderPath = null
+                            viewModel.folderFiles.clear()
+                            pickedFolderUri = null
+                            val prefs = contextRef.getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                            prefs.edit()
+                                .remove("current_folder_path")
+                                .remove("lastFolderUri")
+                                .apply()
+                        }
+                    }
+                }
             }
             return
         }
