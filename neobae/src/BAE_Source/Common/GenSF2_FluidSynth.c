@@ -274,6 +274,7 @@ OPErr GM_InitializeSF2(void)
     fluid_settings_setnum(g_fluidsynth_settings, "synth.gain", g_fluidsynth_master_volume);
     fluid_settings_setint(g_fluidsynth_settings, "synth.audio-channels", 1);  // Sets the number of stereo channel pairs. So 1 is actually 2 channels (a stereo pair).
     fluid_settings_setint(g_fluidsynth_settings, "synth.reverb.active", 0);
+    fluid_settings_setint(g_fluidsynth_settings, "synth.chorus.active", 0);
     
     // Create FluidSynth synthesizer
     g_fluidsynth_synth = new_fluid_synth(g_fluidsynth_settings);
@@ -2304,13 +2305,9 @@ void GM_SF2_SilenceSong(GM_Song* pSong)
     // Clear FluidSynth's internal effects buffers that can cause lingering audio.
     // This is much lighter than full reinitialization but should clear reverb/chorus tails.
     
-    // Temporarily disable effects to clear their buffers
-    fluid_synth_reverb_on(g_fluidsynth_synth, -1, 0);  // Turn off reverb for all fx groups
-    fluid_synth_chorus_on(g_fluidsynth_synth, -1, 0);  // Turn off chorus for all fx groups
-    
-    // Re-enable effects (they'll start with clean buffers)
-    fluid_synth_reverb_on(g_fluidsynth_synth, -1, 1);  // Turn reverb back on
-    fluid_synth_chorus_on(g_fluidsynth_synth, -1, 1);  // Turn chorus back on
+    // Ensure FluidSynth's internal effects remain completely disabled
+    fluid_synth_reverb_on(g_fluidsynth_synth, -1, 0);  // Keep reverb off for all fx groups
+    fluid_synth_chorus_on(g_fluidsynth_synth, -1, 0);  // Keep chorus off for all fx groups
     
     // Ensure any (legacy) voices allocated before FluidSynth activation enter release
     GM_EndSongNotes(pSong);
