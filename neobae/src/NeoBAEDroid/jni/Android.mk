@@ -189,12 +189,12 @@ LOCAL_SRC_FILES	:= \
 
 PATCHES_SCRIPT := $(LOCAL_PATH)/../../../scripts/create_embedded_patches_h.py
 PATCHES_HSB := $(LOCAL_PATH)/../banks/patches111/patches111.hsb
-GEN_DIR := /tmp/androbae
+GEN_DIR := $(LOCAL_PATH)/../build/gen
 PATCHES_H := $(GEN_DIR)/BAEPatches.h
 
 # ndk-build doesn't reliably trigger custom prerequisite rules for generated
 # headers, so generate at parse time via $(shell ...).
-BAE_GEN := $(shell mkdir -p "$(GEN_DIR)" && python3 "$(PATCHES_SCRIPT)" "$(PATCHES_HSB)" "$(PATCHES_H)")
+BAE_GEN := $(shell python3 "$(PATCHES_SCRIPT)" "$(PATCHES_HSB)" "$(PATCHES_H)")
 
 
 LOCAL_LDFLAGS += -Wl,-z,max-page-size=16384
