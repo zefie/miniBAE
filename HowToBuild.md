@@ -88,10 +88,9 @@ docker run --rm -it -v ./:/src zefie/llvm-mingw:latest .zefie/build-llvm-mingw-s
 
 This will generate 4 zips in the `neobae/out` folder, one pertaining to each architechure.
 
-
 ## Legacy Makefiles
 
-NeoBAE can still be built in seperate parts using the legacy Makefiles.
+Some parts of NeoBAE can still be built, in seperate parts, using the legacy Makefiles.
 
 ### Linux: playbae (SDL3)
 
@@ -117,24 +116,7 @@ make -f Makefile.gui -j$(nproc)
 ./bin/zefidi
 ```
 
-### Windows cross-compile from Linux/WSL: playbae (DirectSound)
-
-```bash
-sudo apt-get update
-sudo apt-get install -y binutils-mingw-w64-x86_64 g++-mingw-w64-x86_64 \
-  g++-mingw-w64-x86_64-posix g++-mingw-w64-x86_64-win32 gcc-mingw-w64-base \
-  gcc-mingw-w64-x86_64 gcc-mingw-w64-x86_64-posix \
-  gcc-mingw-w64-x86_64-posix-runtime gcc-mingw-w64-x86_64-win32 \
-  gcc-mingw-w64-x86_64-win32-runtime mingw-w64-common mingw-w64-x86_64-dev \
-  libz-mingw-w64-dev
-cd neobae
-make clean
-make -f mingw/Makefile -j$(nproc)
-```
-
 Output executable is in `neobae/bin/`.
-
-## Linux builds
 
 ### Optional but recommended: build FluidSynth from source
 
@@ -208,43 +190,9 @@ You must install the corresponding development packages for ALSA and/or JACK.
 - `zefidi` looks for `zenity`, then `kdialog`, then `yad` for file dialogs.
 - Without one of those tools, `Open`, `Load Bank`, `Export`, and `Record` may not work.
 
-## Windows builds (cross-compile on Linux/WSL)
+### NeoBAE Studio
 
-### playbae via MinGW
-
-- DirectSound build:
-
-```bash
-cd neobae
-make clean
-make -f mingw/Makefile -j$(nproc)
-```
-
-- SDL3 build:
-
-```bash
-cd neobae
-make clean
-make -f mingw/Makefile USE_SDL3=1 -j$(nproc)
-```
-
-### zefidi GUI via MinGW
-
-```bash
-cd neobae
-make clean
-make -f mingw/Makefile.gui -j$(nproc)
-```
-
-Notes:
-
-- MinGW GUI dependencies for SDL are bundled in this repository.
-- Hardware MIDI support is enabled for MinGW GUI builds.
-- Copy outputs from `neobae/bin/` to Windows to run.
-
-## NeoBAE Studio (RMF editor)
-
-### Linux
+### Linux 
 
 ```bash
 sudo apt-get update
@@ -256,8 +204,7 @@ make clean
 make -f Makefile.nbstudio -j$(nproc)
 ```
 
-### Windows (Visual Studio)
-
+### Windows (Visual Studio, unsupported)
 - Open `neobae/src/nbstudio/vs2022/nbstudio.vsxproj`.
 - In Developer PowerShell, within the `neobae/src/nbstudio/vs2022` folder, run `vcpkg install --triplet x64-windows`.
 - Build in Visual Studio.
