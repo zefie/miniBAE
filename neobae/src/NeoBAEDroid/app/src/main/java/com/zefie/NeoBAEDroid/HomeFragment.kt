@@ -80,7 +80,7 @@ private val BUILT_IN_REVERB_OPTIONS = listOf(
     "None", "Igor's Closet", "Igor's Garage", "Igor's Acoustic Lab",
     "Igor's Cavern", "Igor's Dungeon", "Small Reflections",
     "Early Reflections", "Basement", "Banquet Hall", "Catacombs",
-    "Neo Room", "Neo Hall", "Neo Cavern", "Neo Dungeon", "Neo ROMpler", "Neo Nokia", "Neo Tap Delay"
+    "Neo Room", "Neo Hall", "Neo Cavern", "Neo Dungeon", "Neo Nokia", "MobileBAE", "Neo Tap Delay"
 )
 
 private val CUSTOM_REVERB_TYPE: Int
@@ -8314,7 +8314,7 @@ fun SettingsScreenContent(
                         }
                     }
 
-                    if (reverbType >= 12 && reverbType != 17) {
+                    if (reverbType >= 12 && reverbType != 17 && reverbType != 18) {
                         Spacer(modifier = Modifier.height(8.dp))
                         Column(modifier = Modifier.fillMaxWidth()) {
                             // Keep the small action buttons in one row for portrait.

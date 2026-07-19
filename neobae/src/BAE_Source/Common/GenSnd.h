@@ -503,8 +503,8 @@ extern "C"
         REVERB_TYPE_13,       // Neo Hall (Neo reverb)
         REVERB_TYPE_14,       // Neo Cavern (Neo reverb)
         REVERB_TYPE_15,       // Neo Dungeon (Neo reverb)
-        REVERB_TYPE_16,       // Neo SC-55 (Neo reverb)
-        REVERB_TYPE_17,       // Neo Nokia (Neo reverb)
+        REVERB_TYPE_16,       // Neo Nokia (Neo reverb)
+        REVERB_TYPE_17,       // MobileBAE (Neo reverb)
         REVERB_TYPE_18,       // Neo Tap Delay (Neo reverb)
         REVERB_TYPE_19        // Custom
     };

@@ -1398,7 +1398,7 @@ int main(int argc, char *argv[])
     }
     if (PV_ParseCommands(argc, argv, "-rv", 1, tmpBuf)) {
         int rv = atoi(tmpBuf);
-        if (rv < 0 || rv > 11) { playbae_printf("Invalid reverb %d (0-11). Using 7.\n", rv); rv = 7; }
+        if (rv < 0 || rv > 18) { playbae_printf("Invalid reverb %d (0-18). Using 7.\n", rv); rv = 7; }
         reverbType = (BAEReverbType)rv;
     }
     if (PV_ParseCommands(argc, argv, "--rvp", 1, tmpBuf)) {

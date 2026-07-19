@@ -738,6 +738,13 @@ static void PV_RunStereoNeoReverb(ReverbMode which)
 }
 #endif
 
+#if USE_NEO_EFFECTS == TRUE
+static void PV_RunStereoMobileReverb(ReverbMode which)
+{
+    CheckMobileReverbType();
+    RunMobileReverb(MusicGlobals->songBufferReverb, MusicGlobals->songBufferDry, MusicGlobals->One_Loop);
+}
+#endif
 
 // This table must not be in ROM, because the function pointers are set at runtime.
 // This table matches the ReverbMode index but the first two ReverbMode's
@@ -930,13 +937,13 @@ static GM_ReverbConfigure verbTypes[MAX_REVERB_TYPES] =
         NULL,
         PV_RunStereoNeoReverb
     },
-    {   // MT-32 Tap Delay (Neo reverb)
+    {   // MobileBAE (Neo reverb)
         REVERB_TYPE_17,
         0,                              // No threshold - always enabled when selected
         TRUE,                           // fixed (uses separate buffer system)
         0,                              // Uses own buffer allocation
         NULL,
-        PV_RunStereoNeoReverb
+        PV_RunStereoMobileReverb
     },
     {   // MT-32 Tap Delay (Neo reverb)
         REVERB_TYPE_18,

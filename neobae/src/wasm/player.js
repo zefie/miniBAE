@@ -38,7 +38,7 @@ class NeoBAEPlayer {
         const fileName = urlParams.get('file') !== null ? urlParams.get('file') : this.default_media_file;
         const customBank = urlParams.get('bank');
         
-        // Parse and sanity check reverb (0-11 based on available types)
+        // Parse and sanity check reverb (0-18 based on available types)
         const customReverb = urlParams.get('reverb') !== null ? parseInt(urlParams.get('reverb')) : this.default_reverb;
         
         // Parse and sanity check transpose (-12 to 12 semitones)
@@ -1190,7 +1190,7 @@ class NeoBAEPlayer {
                     
                     <div style="margin-bottom: 12px;">
                         <strong style="color: #dcdcaa;">reverb</strong>
-                        <div style="margin-left: 16px; color: #aaa;">Reverb type (0-11)</div>
+                        <div style="margin-left: 16px; color: #aaa;">Reverb type (0-18)</div>
                         <div style="margin-left: 16px; font-family: monospace; font-size: 11px; color: #ce9178;">?reverb=${this.default_reverb}</div>
                     </div>
                     

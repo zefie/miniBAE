@@ -718,14 +718,14 @@ class BeatnikPlayer {
     }
 
     /**
-     * Reverb type (0-11)
+     * Reverb type (0-18)
      */
     get reverbType() {
         return this._reverbType;
     }
 
     set reverbType(value) {
-        this._reverbType = Math.max(0, Math.min(11, Math.floor(value)));
+        this._reverbType = Math.max(0, Math.min(18, Math.floor(value)));
         if (this._wasmModule) {
             this._wasmModule._BAE_WASM_SetReverbType(this._reverbType);
         }
@@ -1242,6 +1242,14 @@ BeatnikPlayer.REVERB_EARLY_REFLECTIONS = 7;
 BeatnikPlayer.REVERB_BASEMENT = 8;
 BeatnikPlayer.REVERB_BANQUET_HALL = 9;
 BeatnikPlayer.REVERB_CATACOMBS = 10;
+BeatnikPlayer.REVERB_NEO_ROOM = 11;
+BeatnikPlayer.REVERB_NEO_HALL = 12;
+BeatnikPlayer.REVERB_NEO_CAVERN = 13;
+BeatnikPlayer.REVERB_NEO_DUNGEON = 14;
+BeatnikPlayer.REVERB_NEO_NOKIA = 15;
+BeatnikPlayer.REVERB_MOBILEBAE = 16;
+BeatnikPlayer.REVERB_NEO_TAP_DELAY = 17;
+BeatnikPlayer.REVERB_CUSTOM = 18;
 
 // Export for module systems
 if (typeof module !== 'undefined' && module.exports) {

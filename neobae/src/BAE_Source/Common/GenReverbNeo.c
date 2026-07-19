@@ -43,6 +43,7 @@
 #include "BAE_API.h"
 #include "X_API.h"
 #include <stdint.h>
+#include <math.h>
 
 #if USE_NEO_EFFECTS     // Conditionally compile this file
 
@@ -113,6 +114,35 @@
 static const int32_t neo_tap_delays[] = {4410, 8820, 13230, 17640};
 static const int32_t neo_tap_gains[] = {XFIXED_1, 52428, 39321, 26214};  // Descending gains
 
+
+// ==============================================================================
+// MobileBAE Types
+// ==============================================================================
+#define MOBILE_DELAY_LENGTH 8192
+#define MOBILE_TYPE_SCALE 0x00010000
+#define MOBILE_REVERB_TIME 85197
+
+typedef struct {
+    int16_t inputDelay[MOBILE_DELAY_LENGTH];
+    int16_t comb[6][MOBILE_DELAY_LENGTH];
+    int inputIndex[8];
+    int combRead[6];
+    int combWrite[6];
+    int combFeedback[6];
+    int16_t early[256];
+    int16_t stereoL[512];
+    int16_t stereoR[512];
+    int sampleRate;
+    int wetSmoothingGain;
+    int16_t wetSmoothingState;
+    int earlyRead;
+    int earlyWrite;
+    int stereoRead;
+    int stereoWrite;
+    bool initialized;
+} MobileReverbState;
+
+static MobileReverbState gMobileReverb;
 
 // Global reverb parameters
 typedef struct NeoReverbParams
@@ -396,6 +426,23 @@ bool BAENeoReverb_IsActive(void)
             if (params->mCustomBuffer[ci][idx1] != 0 || params->mCustomBuffer[ci][idx2] != 0)
                 return TRUE;
         }
+    }
+
+    // Check MobileBAE reverb tail
+    if (gMobileReverb.initialized)
+    {
+        // Use a threshold to prevent hanging on near-silent IIR limit cycles
+        if (gMobileReverb.wetSmoothingState > 4 || gMobileReverb.wetSmoothingState < -4)
+            return TRUE;
+        
+        int sRead = gMobileReverb.stereoRead;
+        int idx1 = (sRead - 1) & 0x1FF;
+        int idx2 = (sRead - 2) & 0x1FF;
+        if (gMobileReverb.stereoL[idx1] > 4 || gMobileReverb.stereoL[idx1] < -4 ||
+            gMobileReverb.stereoL[idx2] > 4 || gMobileReverb.stereoL[idx2] < -4 ||
+            gMobileReverb.stereoR[idx1] > 4 || gMobileReverb.stereoR[idx1] < -4 ||
+            gMobileReverb.stereoR[idx2] > 4 || gMobileReverb.stereoR[idx2] < -4)
+            return TRUE;
     }
 
     return FALSE;
@@ -1045,6 +1092,150 @@ int GetNeoReverbMix(void)
     NeoReverbParams* params = GetNeoReverbParams();
     // Convert fixed-point gain back to extended level (0-255)
     return (int)((params->mWetGain * 128) / NEO_COEFF_MULTIPLY);
+}
+
+// ==============================================================================
+// MobileBAE Reverb (Ported from Effects.java)
+// ==============================================================================
+
+static const int MOBILE_COMB_RATIO[] = {0x596, 0x642, 0x74B, 0x828, 0x93C, 0xA19};
+static const int MOBILE_INPUT_RATIO[] = {0x31C, 0x3FE, 0x441, 0x527, 0x5BF, 0x77A, 0x1F9};
+static const int MOBILE_DIFFUSION_GAIN[] = {
+    0x0001F39C, 0x0001575E, 0x000138A5, 0x0000EA31, 0x0000C6E6, 0x00008630, 0x0000C000
+};
+static const int MOBILE_SMOOTHING[] = {
+    0x10000, 0xD439, 0xCA7F, 0xBB64, 0xAC08, 0x9DF4, 0x91AA, 0x86A8, 0x7CEE, 0x747B, 0x6CCD
+};
+
+static INLINE int32_t mobile_mulShift(int32_t a, int32_t b, int shift) {
+    // Java uses 32-bit signed multiply which wraps on overflow. We must replicate this exactly for 1:1 behavior.
+    int32_t prod = (int32_t)((uint32_t)a * (uint32_t)b);
+    return prod >> shift;
+}
+
+static INLINE int32_t mobile_fixedMul16_16(int32_t a, int32_t b) {
+    return (int32_t)(((int64_t)a * b) >> 16);
+}
+
+static INLINE int32_t mobile_fixedDiv16_16(int32_t a, int32_t b) {
+    return (int32_t)((((int64_t)a) << 16) / b);
+}
+
+static INLINE int mobile_delayIndex(int sampleRate, int ratio) {
+    int delayBase = mobile_fixedMul16_16(ratio, MOBILE_TYPE_SCALE);
+    int samples = (int)(((int64_t)sampleRate * delayBase) >> 16);
+    return (MOBILE_DELAY_LENGTH - samples) & (MOBILE_DELAY_LENGTH - 1);
+}
+
+static int mobile_smoothingGain(int sampleRate) {
+    if (sampleRate <= 8000) return 0xD439;
+    if (sampleRate >= 48000) return 0x6666;
+    int pos = (sampleRate - 8000) / 4000;
+    int rem = (sampleRate - 8000) % 4000;
+    int a = MOBILE_SMOOTHING[pos + 1];
+    int b = (pos + 2 < (sizeof(MOBILE_SMOOTHING)/sizeof(MOBILE_SMOOTHING[0]))) ? MOBILE_SMOOTHING[pos + 2] : 0x6666;
+    return a + mobile_fixedMul16_16(b - a, (rem << 16) / 4000);
+}
+
+void CheckMobileReverbType(void) {
+    int sampleRate;
+    if (MusicGlobals && MusicGlobals->outputRate) {
+        sampleRate = MusicGlobals->outputRate;
+    } else {
+        sampleRate = 44100;
+    }
+
+    if (!gMobileReverb.initialized || gMobileReverb.sampleRate != sampleRate) {
+        gMobileReverb.sampleRate = sampleRate;
+        for (int i = 0; i < 7; i++) {
+            gMobileReverb.inputIndex[i] = mobile_delayIndex(sampleRate, MOBILE_INPUT_RATIO[i]);
+        }
+        gMobileReverb.inputIndex[7] = 0;
+
+        for (int i = 0; i < 6; i++) {
+            int delayBase = mobile_fixedMul16_16(MOBILE_COMB_RATIO[i], MOBILE_TYPE_SCALE);
+            gMobileReverb.combRead[i] = mobile_delayIndex(sampleRate, MOBILE_COMB_RATIO[i]);
+            int value = mobile_fixedDiv16_16(delayBase, MOBILE_REVERB_TIME);
+            
+            // Java: -exp10Q16(-3 * value)
+            // exp10Q16(x) = 10^(x / 65536.0) * 65536
+            double x = -3.0 * (double)value / 65536.0;
+            double expVal = pow(10.0, x) * 65536.0;
+            gMobileReverb.combFeedback[i] = (int)-expVal;
+        }
+
+        gMobileReverb.earlyRead = (256 - (int)(((int64_t)sampleRate * 0x0126) >> 16)) & 0xFF;
+        gMobileReverb.stereoRead = (512 - (int)(((int64_t)sampleRate * 456) >> 16)) & 0x1FF;
+        gMobileReverb.wetSmoothingGain = mobile_smoothingGain(sampleRate);
+        gMobileReverb.initialized = true;
+    }
+}
+
+static void addStereoWet(int32_t *stereoMix, int wet) {
+    int oldL = gMobileReverb.stereoL[gMobileReverb.stereoRead];
+    int oldR = gMobileReverb.stereoR[gMobileReverb.stereoRead];
+    int deltaL = mobile_mulShift(26214, wet - oldL, 16);
+    int deltaR = mobile_mulShift(26214, oldR - wet, 16);
+    
+    gMobileReverb.stereoL[gMobileReverb.stereoWrite] = (int16_t)(wet + deltaL);
+    gMobileReverb.stereoR[gMobileReverb.stereoWrite] = (int16_t)(wet + deltaR);
+    
+    int32_t outL = oldL + deltaL;
+    int32_t outR = oldR + deltaR;
+    
+    // Apply the master Neo Reverb mix level
+    NeoReverbParams* params = GetNeoReverbParams();
+    outL = PV_MulQ16_Round(outL, params->mWetGain);
+    outR = PV_MulQ16_Round(outR, params->mWetGain);
+    
+    // Add to stereo output
+    // The Java original uses << 10, but miniBAE's mix headroom is different.
+    // Shift << 8 tames the hotness (-12dB) and integrates better with the dry mix.
+    stereoMix[0] += outL << 8;
+    stereoMix[1] += outR << 8;
+    
+    gMobileReverb.stereoRead = (gMobileReverb.stereoRead + 1) & 0x1FF;
+    gMobileReverb.stereoWrite = (gMobileReverb.stereoWrite + 1) & 0x1FF;
+}
+
+void RunMobileReverb(int32_t *sourceP, int32_t *destP, int numFrames) {
+    for (int frame = 0; frame < numFrames; frame++) {
+        // sourceP is already >> (NEO_INPUTSHIFT+1) from PV_ScaleReverbSend
+        // Wait, no. RunMobileReverb takes songBufferReverb directly.
+        // Let's use the same shifting as MobileBAE: >> 11
+        gMobileReverb.inputDelay[gMobileReverb.inputIndex[7]] = (int16_t)(sourceP[frame] >> 11);
+        
+        int diffusionSum = 0;
+        for (int i = 0; i < 6; i++) {
+            diffusionSum += mobile_mulShift(MOBILE_DIFFUSION_GAIN[i], gMobileReverb.inputDelay[gMobileReverb.inputIndex[i]], 16);
+        }
+        int combFeed = mobile_mulShift(MOBILE_DIFFUSION_GAIN[6], gMobileReverb.inputDelay[gMobileReverb.inputIndex[6]], 16);
+        
+        for (int i = 0; i < 8; i++) {
+            gMobileReverb.inputIndex[i] = (gMobileReverb.inputIndex[i] + 1) & (MOBILE_DELAY_LENGTH - 1);
+        }
+
+        int combSum = 0;
+        for (int i = 0; i < 6; i++) {
+            int old = gMobileReverb.comb[i][gMobileReverb.combRead[i]];
+            gMobileReverb.comb[i][gMobileReverb.combWrite[i]] = (int16_t)(combFeed + mobile_mulShift(gMobileReverb.combFeedback[i], old, 16));
+            gMobileReverb.combRead[i] = (gMobileReverb.combRead[i] + 1) & (MOBILE_DELAY_LENGTH - 1);
+            gMobileReverb.combWrite[i] = (gMobileReverb.combWrite[i] + 1) & (MOBILE_DELAY_LENGTH - 1);
+            combSum += old;
+        }
+
+        int earlyOld = gMobileReverb.early[gMobileReverb.earlyRead];
+        int earlyValue = mobile_mulShift(22937, combSum - 2 * earlyOld, 15);
+        gMobileReverb.early[gMobileReverb.earlyWrite] = (int16_t)((combSum + earlyValue) >> 1);
+        
+        gMobileReverb.earlyRead = (gMobileReverb.earlyRead + 1) & 0xFF;
+        gMobileReverb.earlyWrite = (gMobileReverb.earlyWrite + 1) & 0xFF;
+        
+        int target = diffusionSum + earlyValue + 2 * earlyOld;
+        gMobileReverb.wetSmoothingState = (int16_t)(gMobileReverb.wetSmoothingState + mobile_mulShift(gMobileReverb.wetSmoothingGain, target - gMobileReverb.wetSmoothingState, 16));
+        
+        addStereoWet(&destP[frame * 2], gMobileReverb.wetSmoothingState);
+    }
 }
 
 #endif  // USE_NEO_EFFECTS

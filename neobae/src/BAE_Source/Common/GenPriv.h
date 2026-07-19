@@ -938,6 +938,8 @@ bool       InitNeoReverb(void);
 void        ShutdownNeoReverb(void);
 bool       CheckNeoReverbType(void);
 void        RunNeoReverb(int32_t *sourceP, int32_t *destP, int numFrames);
+void        CheckMobileReverbType(void);
+void        RunMobileReverb(int32_t *sourceP, int32_t *destP, int numFrames);
 void        SetNeoReverbMix(int wetLevel);
 int         GetNeoReverbMix(void);
 void        SetNeoReverbTime(int reverbTime);
