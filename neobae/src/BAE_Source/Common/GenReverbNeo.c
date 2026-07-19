@@ -1113,6 +1113,12 @@ static INLINE int32_t mobile_mulShift(int32_t a, int32_t b, int shift) {
     return prod >> shift;
 }
 
+static INLINE int16_t mobile_clamp16(int32_t val) {
+    if (val > 32767) return 32767;
+    if (val < -32768) return -32768;
+    return (int16_t)val;
+}
+
 static INLINE int32_t mobile_fixedMul16_16(int32_t a, int32_t b) {
     return (int32_t)(((int64_t)a * b) >> 16);
 }
@@ -1177,8 +1183,8 @@ static void addStereoWet(int32_t *stereoMix, int wet) {
     int deltaL = mobile_mulShift(26214, wet - oldL, 16);
     int deltaR = mobile_mulShift(26214, oldR - wet, 16);
     
-    gMobileReverb.stereoL[gMobileReverb.stereoWrite] = (int16_t)(wet + deltaL);
-    gMobileReverb.stereoR[gMobileReverb.stereoWrite] = (int16_t)(wet + deltaR);
+    gMobileReverb.stereoL[gMobileReverb.stereoWrite] = mobile_clamp16(wet + deltaL);
+    gMobileReverb.stereoR[gMobileReverb.stereoWrite] = mobile_clamp16(wet + deltaR);
     
     int32_t outL = oldL + deltaL;
     int32_t outR = oldR + deltaR;
@@ -1190,9 +1196,9 @@ static void addStereoWet(int32_t *stereoMix, int wet) {
     
     // Add to stereo output
     // The Java original uses << 10, but miniBAE's mix headroom is different.
-    // Shift << 8 tames the hotness (-12dB) and integrates better with the dry mix.
-    stereoMix[0] += outL << 8;
-    stereoMix[1] += outR << 8;
+    // Shift << 9 tames the hotness (-6dB) and integrates better with the dry mix.
+    stereoMix[0] += outL << 9;
+    stereoMix[1] += outR << 9;
     
     gMobileReverb.stereoRead = (gMobileReverb.stereoRead + 1) & 0x1FF;
     gMobileReverb.stereoWrite = (gMobileReverb.stereoWrite + 1) & 0x1FF;
@@ -1203,7 +1209,7 @@ void RunMobileReverb(int32_t *sourceP, int32_t *destP, int numFrames) {
         // sourceP is already >> (NEO_INPUTSHIFT+1) from PV_ScaleReverbSend
         // Wait, no. RunMobileReverb takes songBufferReverb directly.
         // Let's use the same shifting as MobileBAE: >> 11
-        gMobileReverb.inputDelay[gMobileReverb.inputIndex[7]] = (int16_t)(sourceP[frame] >> 11);
+        gMobileReverb.inputDelay[gMobileReverb.inputIndex[7]] = mobile_clamp16(sourceP[frame] >> 11);
         
         int diffusionSum = 0;
         for (int i = 0; i < 6; i++) {
@@ -1218,7 +1224,7 @@ void RunMobileReverb(int32_t *sourceP, int32_t *destP, int numFrames) {
         int combSum = 0;
         for (int i = 0; i < 6; i++) {
             int old = gMobileReverb.comb[i][gMobileReverb.combRead[i]];
-            gMobileReverb.comb[i][gMobileReverb.combWrite[i]] = (int16_t)(combFeed + mobile_mulShift(gMobileReverb.combFeedback[i], old, 16));
+            gMobileReverb.comb[i][gMobileReverb.combWrite[i]] = mobile_clamp16(combFeed + mobile_mulShift(gMobileReverb.combFeedback[i], old, 16));
             gMobileReverb.combRead[i] = (gMobileReverb.combRead[i] + 1) & (MOBILE_DELAY_LENGTH - 1);
             gMobileReverb.combWrite[i] = (gMobileReverb.combWrite[i] + 1) & (MOBILE_DELAY_LENGTH - 1);
             combSum += old;
@@ -1226,13 +1232,13 @@ void RunMobileReverb(int32_t *sourceP, int32_t *destP, int numFrames) {
 
         int earlyOld = gMobileReverb.early[gMobileReverb.earlyRead];
         int earlyValue = mobile_mulShift(22937, combSum - 2 * earlyOld, 15);
-        gMobileReverb.early[gMobileReverb.earlyWrite] = (int16_t)((combSum + earlyValue) >> 1);
+        gMobileReverb.early[gMobileReverb.earlyWrite] = mobile_clamp16((combSum + earlyValue) >> 1);
         
         gMobileReverb.earlyRead = (gMobileReverb.earlyRead + 1) & 0xFF;
         gMobileReverb.earlyWrite = (gMobileReverb.earlyWrite + 1) & 0xFF;
         
         int target = diffusionSum + earlyValue + 2 * earlyOld;
-        gMobileReverb.wetSmoothingState = (int16_t)(gMobileReverb.wetSmoothingState + mobile_mulShift(gMobileReverb.wetSmoothingGain, target - gMobileReverb.wetSmoothingState, 16));
+        gMobileReverb.wetSmoothingState = mobile_clamp16(gMobileReverb.wetSmoothingState + mobile_mulShift(gMobileReverb.wetSmoothingGain, target - gMobileReverb.wetSmoothingState, 16));
         
         addStereoWet(&destP[frame * 2], gMobileReverb.wetSmoothingState);
     }
