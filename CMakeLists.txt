@@ -198,6 +198,7 @@ set(BAE_ENABLE_QOA_SUPPORT ON)
 set(BAE_ENABLE_RMI_SUPPORT ON)
 set(BAE_ENABLE_J2ME_PATCH ON)
 set(BAE_ENABLE_ROLLED_MIDI_UNROLL ON)
+set(BAE_ENABLE_ADX_SUPPORT ON)
 if(BAE_DISABLE_J2ME_PATCH)
   set(BAE_ENABLE_J2ME_PATCH OFF)
   message(STATUS "Disabling J2ME percussion bank patch (maps bank 120 for percussion intent)")
@@ -325,6 +326,12 @@ if(BAE_DISABLE_RMI_SUPPORT)
 endif()
 if(BAE_DISABLE_ROLLED_MIDI_UNROLL)
   set(BAE_ENABLE_ROLLED_MIDI_UNROLL OFF)
+endif()
+if(BAE_DISABLE_ADX_SUPPORT)
+  set(BAE_ENABLE_ADX_SUPPORT OFF)
+  message(STATUS "Disabling ADX support")
+else()
+  message(STATUS "Enabling ADX support")
 endif()
 
 set(BAE_EMBED_PATCHES_EFFECTIVE OFF)
@@ -748,6 +755,12 @@ set(NEOBAE_SOURCES
   neobae/src/BAE_Source/Common/XFileTypes.c
   neobae/src/BAE_Source/Common/X_DebugCallback.c
 )
+
+if (BAE_ENABLE_ADX_SUPPORT)
+  list(APPEND NEOBAE_SOURCES
+    neobae/src/BAE_Source/Common/XADXFiles.c
+  )
+endif()
 
 if(BAE_ENABLE_LZMA)
   list(APPEND NEOBAE_SOURCES 
@@ -1397,6 +1410,7 @@ target_compile_definitions(neobae
     BAE_CLASSIC_CHORUS=$<IF:$<BOOL:${BAE_ENABLE_CLASSIC_CHORUS}>,1,0>
     USE_MTHC_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_MTHC_SUPPORT}>,1,0>
     USE_ADP_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_ADP_SUPPORT}>,1,0>
+    USE_ADX_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_ADX_SUPPORT}>,1,0>
     SUPPORT_KARAOKE=$<IF:$<BOOL:${BAE_ENABLE_KARAOKE}>,1,0>
     SUPPORT_BAESCRIPT=$<IF:$<BOOL:${BAE_ENABLE_BAESCRIPT}>,1,0>
     SUPPORT_PLAYLIST=$<IF:$<BOOL:${BAE_ENABLE_PLAYLIST}>,1,0>

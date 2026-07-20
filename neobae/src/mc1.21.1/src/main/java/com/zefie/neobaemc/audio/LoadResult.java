@@ -50,6 +50,7 @@ public class LoadResult {
             case Mixer.BAE_MTHC        -> "Nokia Compressed MIDI";
             case Mixer.BAE_ADP_TYPE    -> "Nokia ADP";
             case Mixer.BAE_RAW_PCM     -> "Raw PCM";
+            case Mixer.BAE_ADX_TYPE    -> "CRI ADX";
             default -> "Unknown";
         };
     }

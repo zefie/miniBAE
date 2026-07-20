@@ -328,6 +328,9 @@ extern "C"
 #if USE_ADP_SUPPORT == TRUE
         BAE_ADP_TYPE,
 #endif
+#if USE_ADX_SUPPORT == TRUE
+        BAE_ADX_TYPE,
+#endif
 #if USE_QOA_SUPPORT == TRUE
         BAE_QOA_TYPE,
 #endif

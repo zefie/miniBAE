@@ -167,4 +167,5 @@ public class Mixer {
     public static final int BAE_RMI         = 13;
     public static final int BAE_ADP_TYPE    = 14;
     public static final int BAE_RAW_PCM     = 15;
+    public static final int BAE_ADX_TYPE    = 16;
 }

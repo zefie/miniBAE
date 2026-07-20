@@ -786,6 +786,9 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
 #if USE_ADP_SUPPORT == TRUE
         || ftype == BAE_ADP_TYPE
 #endif
+#if USE_ADX_SUPPORT == TRUE
+        || ftype == BAE_ADX_TYPE
+#endif
 #if USE_QOA_SUPPORT == TRUE
         || ftype == BAE_QOA_TYPE
 #endif

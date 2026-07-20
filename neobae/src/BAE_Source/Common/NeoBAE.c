@@ -6655,7 +6655,14 @@ BAEResult BAESound_LoadMemorySample(BAESound sound, void *pMemoryFile, uint32_t 
             sound->pWave = PV_ReadADPIntoMemoryFromMemory(pMemoryFile, memoryFileSize, &theErr);
         }
         else
-#endif        
+#endif
+#if USE_ADX_SUPPORT == TRUE
+        if (fileType == BAE_ADX_TYPE)
+        {
+            sound->pWave = PV_ReadADXIntoMemoryFromMemory(pMemoryFile, memoryFileSize, &theErr);
+        }
+        else
+#endif
         {
             type = BAE_TranslateBAEFileType(fileType);
             if (type != FILE_INVALID_TYPE)
@@ -6724,8 +6731,17 @@ BAEResult BAESound_LoadFileSample(BAESound sound, BAEPathName filePath, BAEFileT
             }
         }
 #endif
-
-
+#if USE_ADX_SUPPORT == TRUE
+        if (fileType == BAE_ADX_TYPE)
+        {
+            int32_t xFileSize = 0;
+            fileData = PV_GetFileAsData(&theFile, &xFileSize);
+            if (fileData && xFileSize > 0)
+            {
+                sound->pWave = PV_ReadADXIntoMemoryFromMemory(fileData, (uint32_t)xFileSize, &theErr);
+            }
+        }
+#endif
         if (sound->pWave == NULL && theErr == NO_ERR)
         {
             type = BAE_TranslateBAEFileType(fileType);
@@ -13802,8 +13818,11 @@ BAEResult BAEMixer_LoadFromFile(BAEMixer mixer, BAEPathName filePath, BAELoadRes
 #if USE_ADP_SUPPORT == TRUE
         || ftype == BAE_ADP_TYPE
 #endif
+#if USE_ADX_SUPPORT == TRUE
+        || ftype == BAE_ADX_TYPE
+#endif
 #if USE_QOA_SUPPORT == TRUE
-    || ftype == BAE_QOA_TYPE
+        || ftype == BAE_QOA_TYPE
 #endif
     )
     {
@@ -14050,11 +14069,14 @@ BAEResult BAEMixer_LoadFromMemory(BAEMixer mixer, void const *pData, uint32_t da
         || ftype == BAE_OPUS_TYPE
 #endif
 #if USE_QOA_SUPPORT == TRUE
-    || ftype == BAE_QOA_TYPE
+        || ftype == BAE_QOA_TYPE
 #endif
-    #if USE_ADP_SUPPORT == TRUE
+#if USE_ADP_SUPPORT == TRUE
         || ftype == BAE_ADP_TYPE
-    #endif
+#endif
+#if USE_ADX_SUPPORT == TRUE
+        || ftype == BAE_ADX_TYPE
+#endif
     )
     {
         isAudio = TRUE;

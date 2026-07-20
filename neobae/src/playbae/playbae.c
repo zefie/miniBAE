@@ -320,6 +320,9 @@ static void init_playFileString(void)
 #if USE_ADP_SUPPORT == TRUE
     strcat(gPlayFileString, ", Nokia ADP");
 #endif
+#if USE_ADX_SUPPORT == TRUE
+    strcat(gPlayFileString, ", CRI ADX");
+#endif
     strcat(gPlayFileString, ")");
 }
 
@@ -920,6 +923,9 @@ static BAEResult PV_PlayFile(BAEMixer mixer, const char *path,
 #if USE_ADP_SUPPORT == TRUE
     case BAE_ADP_TYPE:     isAudio = 1; break;
 #endif
+#if USE_ADX_SUPPORT == TRUE
+    case BAE_ADX_TYPE:     isAudio = 1; break;
+#endif
 #if USE_QOA_SUPPORT == TRUE
     case BAE_QOA_TYPE:     isAudio = 1; break;
 #endif
@@ -947,6 +953,9 @@ static BAEResult PV_PlayFile(BAEMixer mixer, const char *path,
 #endif
 #if USE_ADP_SUPPORT == TRUE
         case BAE_ADP_TYPE:     typeName = "Nokia ADP";    break;
+#endif
+#if USE_ADX_SUPPORT == TRUE
+        case BAE_ADX_TYPE:     typeName = "CRI ADX";      break;
 #endif
         default: break;
         }

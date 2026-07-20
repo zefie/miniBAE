@@ -52,6 +52,7 @@ ifneq ($(WASM),1)
 		CREATION_NO_CODECS := 0
 		CREATION_API := 0
 		UNROLL_MIDI :=1
+		ADX_SUPPORT := 1
 	endif
 endif
 
@@ -374,6 +375,11 @@ SRC		+=	src/BAE_Source/Common/DriverTools.c \
 
 ifeq ($(RETRO_RINGTONE_SUPPORT),1)
 	SRC += src/BAE_Source/Common/GenRingtone.c
+endif
+
+ifeq ($(ADX_SUPPORT),1)
+	SRC += src/BAE_Source/Common/XADXFiles.c
+	BAE_FLAGS += -DUSE_ADX_SUPPORT=1 
 endif
 
 ifeq ($(RMI_SUPPORT),1)

@@ -1331,11 +1331,13 @@ OPErr XEncodeQOAToMemory(GM_Waveform const *src,
                          XPTR *outData, uint32_t *outSize);
 #endif
 
+#if USE_ADX_SUPPORT == TRUE
+OPErr XExpandADX(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst);
+GM_Waveform *PV_ReadADXIntoMemoryFromMemory(void *pMemoryFile, uint32_t memoryFileSize, OPErr *pErr);
+#endif
 
 #ifdef __cplusplus
     }
 #endif
 
 #endif  // X_FORMATS
-
-

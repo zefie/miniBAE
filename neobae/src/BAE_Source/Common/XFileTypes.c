@@ -443,6 +443,10 @@ BAEFileType X_DetermineFileTypeByPath(const char *filePath)
     else if (strcmp(extLower, ".adp") == 0)
         return BAE_ADP_TYPE;
 #endif
+#if USE_ADX_SUPPORT == TRUE
+    else if (strcmp(extLower, ".adx") == 0)
+        return BAE_ADX_TYPE;
+#endif
     else if (strcmp(extLower, ".aif") == 0 || strcmp(extLower, ".aiff") == 0)
         return BAE_AIFF_TYPE;
     else if (strcmp(extLower, ".au") == 0)
@@ -598,7 +602,13 @@ BAEFileType X_DetermineFileTypeByData(const unsigned char *data, int32_t length)
     {
         return BAE_ADP_TYPE;
     }
-#endif    
+#endif
+#if USE_ADX_SUPPORT == TRUE
+    if (length >= 6 && data[0] == 0x80 && data[1] == 0x00)
+    {
+        return BAE_ADX_TYPE;
+    }
+#endif
 #if USE_RETRO_RINGTONE_SUPPORT == TRUE
     /* Nokia Smart Messaging binary ringtone starts with 02 4A 3A. */
     if (length >= 3 &&
@@ -821,6 +831,9 @@ const char *X_GetFileTypeString(BAEFileType fileType)
 #endif
 #if USE_ADP_SUPPORT == TRUE
         case BAE_ADP_TYPE:      return "Nokia ADP (RotR2 G.722)";
+#endif
+#if USE_ADX_SUPPORT == TRUE
+        case BAE_ADX_TYPE:      return "CRI ADX";
 #endif
 #if USE_RETRO_RINGTONE_SUPPORT == TRUE
         case BAE_RINGTONE_IMY:  return "iMelody";

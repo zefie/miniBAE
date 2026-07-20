@@ -246,7 +246,7 @@ class HomeFragment : Fragment() {
         private const val KEY_SEARCH_SORT_MODE = "search_sort_mode"
         
         // Valid music file extensions
-        private val AUDIO_EXTENSIONS = listOf("wav", "ogg", "flac", "au", "mp2", "mp3", "aif", "aiff", "adp", "qoa")
+        private val AUDIO_EXTENSIONS = listOf("wav", "ogg", "opus", "flac", "au", "mp2", "mp3", "aif", "aiff", "adp", "qoa", "adx")
         private val SONG_EXTENSIONS = listOf("mid", "midi", "kar", "rmf", "zmf", "xmf", "mxmf", "rmi", "seq", "re", "mthc", "imy", "emy", "rng", "rtx", "ott")
         
         // Valid sound bank file extensions

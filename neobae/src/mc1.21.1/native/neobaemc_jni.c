@@ -45,7 +45,8 @@ enum {
     NB_JT_MTHC    = 12,
     NB_JT_RMI     = 13,
     NB_JT_ADP     = 14,
-    NB_JT_RAW_PCM = 15
+    NB_JT_RAW_PCM = 15,
+    NB_JT_ADX     = 16
 };
 
 static jint nb_translate_filetype(BAEFileType ft)
@@ -78,6 +79,7 @@ static jint nb_translate_filetype(BAEFileType ft)
 #if USE_ADP_SUPPORT == TRUE
         case BAE_ADP_TYPE:     return NB_JT_ADP;
 #endif
+        case BAE_ADX_TYPE:     return NB_JT_ADX;
         case BAE_RAW_PCM:      return NB_JT_RAW_PCM;
         default:               return NB_JT_INVALID;
     }

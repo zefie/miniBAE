@@ -125,6 +125,19 @@
                 <data android:host="*" />
                 <data android:pathPattern=".*\\.Nbae" />
             </intent-filter>
+
+            <!-- ADX -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:host="*" />
+                <data android:pathPattern=".*\\.adx" />
+                <data android:pathPattern=".*\\.Adx" />
+                <data android:pathPattern=".*\\.ADX" />
+            </intent-filter>            
         </activity>
         
         <service android:name=".MediaPlaybackService"
