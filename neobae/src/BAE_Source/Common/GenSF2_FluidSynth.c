@@ -1869,10 +1869,10 @@ void GM_SF2_ProcessController(GM_Song* pSong, int16_t channel, int16_t controlle
     {
         return;
     }
-    
-    if (pSong->AnalyzeMode != SCAN_NORMAL) {
-        return;
-    }
+
+    // Keep SF2-side controller state in sync even during preroll/scan modes so
+    // CC-derived effect sends are accurate once playback enters SCAN_NORMAL.
+    // We only block forwarding to FluidSynth while not in SCAN_NORMAL.
     // Intercept reverb (91) and chorus (93) to track levels for NeoBAE effects engine
     if (controller == 91 || controller == 93)
     {
@@ -1907,6 +1907,10 @@ void GM_SF2_ProcessController(GM_Song* pSong, int16_t channel, int16_t controlle
                 info->channelExpression[channel] = value;
             }
         }
+    }
+
+    if (pSong->AnalyzeMode != SCAN_NORMAL) {
+        return;
     }
     
     PV_SF2_LockSynth();
@@ -2048,6 +2052,7 @@ void GM_SF2_RenderAudioSlice(GM_Song* pSong, int32_t* mixBuffer, int32_t* reverb
     
     // Apply per-channel volume/expression: we post-scale the rendered buffer per frame
     float channelScales[BAE_MAX_MIDI_CHANNELS];
+    float channelSendWeights[BAE_MAX_MIDI_CHANNELS];
     GM_SF2Info* info = (GM_SF2Info*)pSong->sf2Info;
     for(int c = 0; c < BAE_MAX_MIDI_CHANNELS; c++)
     {
@@ -2057,6 +2062,32 @@ void GM_SF2_RenderAudioSlice(GM_Song* pSong, int32_t* mixBuffer, int32_t* reverb
             vol = (info->channelVolume[c] / 127.0f) * (info->channelExpression[c] / 127.0f);
         }
         channelScales[c] = vol;
+
+        // Activity-aware send weighting: only channels that are currently active
+        // (or recently active) contribute meaningfully to shared FX sends.
+        // This avoids averaging toward a fixed default from inactive channels.
+        {
+            ChannelActivity* activity = &g_channel_activity[c];
+            float activityWeight = 0.0f;
+
+            if (activity->activeNotes > 0)
+            {
+                float noteWeight = (float)activity->activeNotes / 4.0f;
+                if (noteWeight > 1.0f)
+                {
+                    noteWeight = 1.0f;
+                }
+                activityWeight = noteWeight;
+            }
+            else if (activity->lastActivity > 0)
+            {
+                // Preserve a small decaying send contribution for release tails.
+                float decayTime = (float)activity->lastActivity / 86.0f;
+                activityWeight = 0.15f * expf(-decayTime * 2.0f);
+            }
+
+            channelSendWeights[c] = vol * activityWeight;
+        }
     }
     
     // Get reverb and chorus levels (default to 0 if no info)
@@ -2070,7 +2101,7 @@ void GM_SF2_RenderAudioSlice(GM_Song* pSong, int32_t* mixBuffer, int32_t* reverb
     
     // Convert float to int32 and mix with existing buffer (including reverb/chorus sends)
     PV_SF2_ConvertFloatToInt32(g_fluidsynth_mix_buffer, mixBuffer, reverbBuffer, chorusBuffer,
-                               frameCount, songScale, channelScales, reverbLevels, chorusLevels);
+                               frameCount, songScale, channelSendWeights, reverbLevels, chorusLevels);
 }
 
 // FluidSynth channel management (respects NeoBAE mute/solo states)
