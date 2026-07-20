@@ -37,6 +37,9 @@
 // Settings dialog state
 bool g_show_settings_dialog = false;
 
+bool g_midi_input_device_dd_open = false;
+bool g_midi_output_device_dd_open = false;
+
 // MIDI device enumeration dirty flag — set true to force re-enumeration
 static bool g_midi_device_list_dirty = true;
 
@@ -60,7 +63,13 @@ bool g_classic_chorus_enabled = false;
 extern bool g_show_virtual_keyboard;
 extern int g_exportCodecIndex;
 extern int g_window_h;
-
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+    #if USE_NATIVE_DLS == TRUE
+        bool g_use_fluidsynth_for_dls = false;
+    #else
+        bool g_use_fluidsynth_for_dls = true;
+    #endif
+#endif
 Settings load_settings(void)
 {
     Settings settings = {0};
@@ -129,6 +138,11 @@ Settings load_settings(void)
         {
             settings.show_keyboard = (atoi(line + 14) != 0);
             settings.has_show_keyboard = true;
+        }
+        else if (strncmp(line, "use_fluidsynth_for_dls=", 23) == 0)
+        {
+            settings.use_fluidsynth_for_dls = (atoi(line + 23) != 0);
+            settings.has_use_fluidsynth_for_dls = true;
         }
         else if (strncmp(line, "disable_webtv_progress_bar=", 27) == 0)
         {
@@ -310,6 +324,9 @@ void save_settings(const char *last_bank_path, int reverb_type, bool loop_enable
         fprintf(f, "stereo_output=%d\n", g_stereo_output ? 1 : 0);
         fprintf(f, "sample_rate=%d\n", g_sample_rate_hz);
         fprintf(f, "show_keyboard=%d\n", g_show_virtual_keyboard ? 1 : 0);
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_NATIVE_DLS == TRUE
+        fprintf(f, "use_fluidsynth_for_dls=%d\n", g_use_fluidsynth_for_dls ? 1 : 0);
+#endif
         fprintf(f, "disable_webtv_progress_bar=%d\n", g_disable_webtv_progress_bar ? 1 : 0);
         fprintf(f, "export_codec_index=%d\n", g_exportCodecIndex);
 #if BAE_FIX_SPAN_DC
@@ -479,6 +496,12 @@ void save_full_settings(const Settings *settings)
         {
             fprintf(f, "show_keyboard=%d\n", settings->show_keyboard ? 1 : 0);
         }
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+        if (settings->has_use_fluidsynth_for_dls)
+        {
+            fprintf(f, "use_fluidsynth_for_dls=%d\n", settings->use_fluidsynth_for_dls ? 1 : 0);
+        }
+#endif        
         if (settings->has_webtv)
         {
             fprintf(f, "disable_webtv_progress_bar=%d\n", settings->disable_webtv_progress_bar ? 1 : 0);
@@ -651,6 +674,12 @@ void apply_settings_to_ui(const Settings *settings, int *transpose, int *tempo, 
     {
         g_show_virtual_keyboard = settings->show_keyboard;
     }
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+    if (settings->has_use_fluidsynth_for_dls)
+    {
+        g_use_fluidsynth_for_dls = settings->use_fluidsynth_for_dls;
+    }
+#endif
     if (settings->has_export_codec)
     {
         g_exportCodecIndex = settings->export_codec_index;
@@ -1323,8 +1352,16 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
     // Note: ui_dropdown_two_column handles the button click internally, so we don't handle clicks here
 #endif
     // Right column controls (checkboxes)
+    bool rightColumnCheckboxesEnabled = !(g_volumeCurveDropdownOpen || g_sampleRateDropdownOpen || g_exportDropdownOpen || g_midi_input_device_dd_open || g_midi_output_device_dd_open || g_midiRecordFormatDropdownOpen);
+
     Rect kbRect = {rightX, dlg.y + 36, 18, 18};
-    if (ui_toggle(R, kbRect, &g_show_virtual_keyboard, "Show Virtual Keyboard", mx, my, mclick))
+    if (!rightColumnCheckboxesEnabled)
+    {
+        bool over = point_in(mx, my, kbRect);
+        draw_custom_checkbox(R, kbRect, g_show_virtual_keyboard, over);
+        draw_text(R, kbRect.x + kbRect.w + 6, kbRect.y + 2, "Show Virtual Keyboard", g_text_color);
+    }
+    else if (ui_toggle(R, kbRect, &g_show_virtual_keyboard, "Show Virtual Keyboard", mx, my, mclick))
     {
         save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, *loopPlay);
         if (!g_show_virtual_keyboard)
@@ -1333,7 +1370,13 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
 
     Rect playlistRect = {rightX, dlg.y + 72, 18, 18};
 #if SUPPORT_PLAYLIST == TRUE
-    if (ui_toggle(R, playlistRect, &g_playlist.enabled, "Enable Playlist", mx, my, mclick))
+    if (!rightColumnCheckboxesEnabled)
+    {
+        bool over = point_in(mx, my, playlistRect);
+        draw_custom_checkbox(R, playlistRect, g_playlist.enabled, over);
+        draw_text(R, playlistRect.x + playlistRect.w + 6, playlistRect.y + 2, "Enable Playlist", g_text_color);
+    }
+    else if (ui_toggle(R, playlistRect, &g_playlist.enabled, "Enable Playlist", mx, my, mclick))
     {
         save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, *loopPlay);
     }
@@ -1345,7 +1388,13 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
 
     Rect wtvRect = {rightX, dlg.y + 108, 18, 18};
     bool webtv_enabled = !g_disable_webtv_progress_bar;
-    if (ui_toggle(R, wtvRect, &webtv_enabled, "WebTV Style Bar", mx, my, mclick))
+    if (!rightColumnCheckboxesEnabled)
+    {
+        bool over = point_in(mx, my, wtvRect);
+        draw_custom_checkbox(R, wtvRect, webtv_enabled, over);
+        draw_text(R, wtvRect.x + wtvRect.w + 6, wtvRect.y + 2, "WebTV Style Bar", g_text_color);
+    }
+    else if (ui_toggle(R, wtvRect, &webtv_enabled, "WebTV Style Bar", mx, my, mclick))
     {
         g_disable_webtv_progress_bar = !webtv_enabled;
         save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, *loopPlay);
@@ -1353,7 +1402,13 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
 
 #if BAE_FIX_SPAN_DC
     Rect panfixRect = {rightX, dlg.y + 144, 18, 18};
-    if (ui_toggle(R, panfixRect, &g_panfix_enabled, "Fix Pan LFO Bias", mx, my, mclick))
+    if (!rightColumnCheckboxesEnabled)
+    {
+        bool over = point_in(mx, my, panfixRect);
+        draw_custom_checkbox(R, panfixRect, g_panfix_enabled, over);
+        draw_text(R, panfixRect.x + panfixRect.w + 6, panfixRect.y + 2, "Fix Pan LFO Bias", g_text_color);
+    }
+    else if (ui_toggle(R, panfixRect, &g_panfix_enabled, "Fix Pan LFO Bias", mx, my, mclick))
     {
         BAE_SetSpanDCFix(g_panfix_enabled ? TRUE : FALSE);
         save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, *loopPlay);
@@ -1362,10 +1417,37 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
 
 #if BAE_CLASSIC_CHORUS
     Rect chorusRect = {rightX, dlg.y + 180, 18, 18};
-    if (ui_toggle(R, chorusRect, &g_classic_chorus_enabled, "Classic Chorus Order", mx, my, mclick))
+    if (!rightColumnCheckboxesEnabled)
+    {
+        bool over = point_in(mx, my, chorusRect);
+        draw_custom_checkbox(R, chorusRect, g_classic_chorus_enabled, over);
+        draw_text(R, chorusRect.x + chorusRect.w + 6, chorusRect.y + 2, "Classic Chorus Order", g_text_color);
+    }
+    else if (ui_toggle(R, chorusRect, &g_classic_chorus_enabled, "Classic Chorus Order", mx, my, mclick))
     {
         BAE_SetClassicChorus(g_classic_chorus_enabled ? TRUE : FALSE);
         save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, *loopPlay);
+    }
+#endif
+
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_NATIVE_DLS == TRUE
+    Rect fsDlsRect = {leftX, dlg.y + 144, 18, 18};
+    if (!rightColumnCheckboxesEnabled)
+    {
+        bool over = point_in(mx, my, fsDlsRect);
+        draw_custom_checkbox(R, fsDlsRect, g_use_fluidsynth_for_dls, over);
+        draw_text(R, fsDlsRect.x + fsDlsRect.w + 6, fsDlsRect.y + 2, "Use FluidSynth for DLS", g_text_color);
+    }
+    else if (ui_toggle(R, fsDlsRect, &g_use_fluidsynth_for_dls, "Use FluidSynth for DLS", mx, my, mclick))
+    {
+        save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, *loopPlay);
+        if (g_current_bank_path[0])
+        {
+            if (!load_bank(g_current_bank_path, *playing, *transpose, *tempo, *volume, *loopPlay, *reverbType, ch_enable, false))
+            {
+                set_status_message("Failed to reload bank");
+            }
+        }
     }
 #endif
 

@@ -42,6 +42,7 @@
 #include <BAE_API.h>
 #include <GenSnd.h>
 #include "bankinfo.h"
+#include "GenDLS_MobileBAE.h"
 
 #ifdef SUPPORT_BAESCRIPT
 #include "baescript.h"
@@ -82,6 +83,13 @@ static int           gVelocityCurve  = -1; /* -1 = engine default */
 static int           gVolumePct      = 100; /* raw user volume percent, for overdrive */
 static int           gEqEnabled      = 0;
 static float         gEqGains[5]     = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+    #if USE_NATIVE_DLS == TRUE
+        static int           gUseSF2Mode     = 0;
+    #else
+        static int           gUseSF2Mode     = 1;
+    #endif
+#endif
 
 /* Position display: update every N idle calls (~15 ms each) */
 static int           gPosCounter  = 0;
@@ -327,8 +335,17 @@ static void init_playFileString(void)
 }
 
 static const char usageMain[] =
+#if USE_SF2_SUPPORT == TRUE
+    "USAGE:  playbae  -p  {patches.hsb/zsb/sf2/sf3/dls}\n"
+#elif USE_NATIVE_DLS == TRUE
+    "USAGE:  playbae  -p  {patches.hsb/zsb/dls}\n"
+#else
     "USAGE:  playbae  -p  {patches.hsb/zsb}\n"
+#endif
     "                 -f  {%s}\n"
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_NATIVE_DLS == TRUE
+    "                 -fs {use FluidSynth for DLS instead of native DLS system}\n"
+#endif
     "                 -o  {output file (wav/mp3/flac/ogg/opus)}\n"
 #ifdef SUPPORT_KARAOKE
     "                 -k  {enable karaoke lyric display}\n"
@@ -338,7 +355,7 @@ static const char usageMain[] =
     "                 -vc {velocity curve 0-4 (default: engine)}\n"
     "                 -t  {max duration in seconds (0 = no limit)}\n"
     "                 -mc {MIDI channels to mute, 1-16, comma-separated}\n"
-    "                 -rv {reverb type 0-11 (default: 7)}\n"
+    "                 -rv {reverb type 0-18 (default: 7)}\n"
     "                 -nf {disable fade-out on stop}\n"
     "                 -q  {quiet mode}\n"
     "                 -b  {MP3/Vorbis/Opus export bitrate kbps (default: 128)}\n"
@@ -383,7 +400,14 @@ static const char reverbList[] =
     "   8   Early reflections (variable)\n"
     "   9   Basement (variable)\n"
     "   10  Banquet hall (variable)\n"
-    "   11  Catacombs (variable)\n";
+    "   11  Catacombs (variable)\n"
+    "   12  Neo Room (Neo reverb)\n"
+    "   13  Neo Hall (Neo reverb)\n"
+    "   14  Neo Cavern (Neo reverb)\n"
+    "   15  Neo Dungeon (Neo reverb)\n"
+    "   16  Neo Nokia (Neo reverb)\n"
+    "   17  MobileBAE\n"
+    "   18  Neo Tap Delay (Neo reverb)\n";
 
 static const char velocityList[] =
     "Valid Velocity Curves (-vc):\n"
@@ -1223,6 +1247,10 @@ static int PV_LoadBank(BAEMixer mixer, const char *path, BAEBankToken *tokenOut)
     const char *ext = strrchr(path, '.');
 
     BAEMixer_UnloadBanks(mixer);
+#if USE_NATIVE_DLS == TRUE
+    GM_SetMixerDLSMode(FALSE);
+    BAEMixer_UnloadDLSBank(mixer);
+#endif
 
 #if USE_SF2_SUPPORT == TRUE
     if (ext && (stricmp(ext, ".sf2") == 0
@@ -1230,7 +1258,7 @@ static int PV_LoadBank(BAEMixer mixer, const char *path, BAEBankToken *tokenOut)
         || stricmp(ext, ".sf3") == 0 || stricmp(ext, ".sfo") == 0
 #endif
 #if _USING_FLUIDSYNTH == TRUE
-        || stricmp(ext, ".dls") == 0
+        || (stricmp(ext, ".dls") == 0 && gUseSF2Mode == 1)
 #endif
     )) {
         GM_UnloadSF2Soundfont();
@@ -1247,6 +1275,28 @@ static int PV_LoadBank(BAEMixer mixer, const char *path, BAEBankToken *tokenOut)
         }
         GM_SetMixerSF2Mode(TRUE);
         if (gVelocityCurve < 0) gVelocityCurve = 1; /* peaky default for SF2 */
+        if (tokenOut) *tokenOut = 0;
+        return 1;
+    }
+#endif
+
+#if USE_NATIVE_DLS == TRUE
+    if (ext && strcasecmp(ext, ".dls") == 0 && !gUseSF2Mode) {
+        // Load DLS bank
+#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_DLS == TRUE
+        BAEBankToken builtin_token = 0;
+        if (BAEMixer_LoadBuiltinBank(mixer, &builtin_token) == BAE_NO_ERROR && builtin_token)
+        {
+            BAEMixer_SendBankToBack(mixer, builtin_token);
+        }
+#endif    
+        BAEResult dls_result = BAEMixer_LoadDLSBank(mixer, path);
+        if (dls_result != BAE_NO_ERROR)
+        {
+            BAE_PRINTF("DLS bank load failed: %d %s\n", dls_result, path);
+            return 0;
+        }
+        GM_SetMixerDLSMode(TRUE);
         if (tokenOut) *tokenOut = 0;
         return 1;
     }
@@ -1398,6 +1448,10 @@ int main(int argc, char *argv[])
     if (PV_ParseCommands(argc, argv, "-t",  1, tmpBuf)) timeLimitSec = (unsigned)atoi(tmpBuf);
     if (PV_ParseCommands(argc, argv, "-mc", 1, tmpBuf))
         strncpy(muteChannels, tmpBuf, sizeof(muteChannels)-1);
+
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_NATIVE_DLS == TRUE
+    if (PV_ParseCommands(argc, argv, "-fs", 0, NULL)) gUseSF2Mode = 1;
+#endif
     if (PV_ParseCommands(argc, argv, "-nf", 0, NULL))   gFadeOut = 0;
     if (PV_ParseCommands(argc, argv, "-v",  1, tmpBuf)) {
         gVolumePct = atoi(tmpBuf);

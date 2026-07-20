@@ -20,11 +20,16 @@
 #include "GenSF2_FluidSynth.h"
 #endif
 
+#if USE_NATIVE_DLS == TRUE
+#include "GenDLS_MobileBAE.h"
+#endif
+
 //http://developer.android.com/training/articles/perf-jni.html
 
 // Cache the most-recently loaded bank's friendly name so Java callers that
 // don't track native bank tokens can still query a human-friendly string.
 static char g_lastBankFriendly[256] = "";
+static BAE_BOOL g_useFluidSynthForDLS = FALSE;
 
 JavaVM* gJavaVM = NULL;
 
@@ -380,8 +385,12 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromFile
 	GM_UnloadSF2Soundfont();
 	GM_SetMixerSF2Mode(FALSE);
 	
-	if (ext && (strcasecmp(ext, ".sf2") == 0 || strcasecmp(ext, ".dls") == 0 || 
-	            strcasecmp(ext, ".sf3") == 0 || strcasecmp(ext, ".sfo") == 0))
+	if (ext && (
+		strcasecmp(ext, ".sf2") == 0 ||
+		strcasecmp(ext, ".sf3") == 0 ||
+		strcasecmp(ext, ".sfo") == 0 ||
+		(strcasecmp(ext, ".dls") == 0 && g_useFluidSynthForDLS)
+	))
 	{
 		
 #if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_SF2 == TRUE
@@ -513,17 +522,26 @@ JNIEXPORT jstring JNICALL Java_com_zefie_NeoBAE_Mixer__1getBankFriendlyName
 		while(read_total < asset_len && (r = AAsset_read(asset, mem + read_total, (size_t)(asset_len - read_total))) > 0){ read_total += r; }
 		AAsset_close(asset);
 	BAEMixer_UnloadBanks(mixer);
+#if USE_NATIVE_DLS == TRUE
+	GM_SetMixerDLSMode(FALSE);
+	BAEMixer_UnloadDLSBank(mixer);
+#endif
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
 	GM_UnloadSF2Soundfont();
 	GM_SetMixerSF2Mode(FALSE);
 	
 	// Check for SF2/DLS format by magic bytes
 	bool isSF2 = FALSE;
+	bool isDLS = FALSE;
 	if (read_total >= 12) {
+		if ((mem[8] == 'D' && mem[9] == 'L' && mem[10] == 'S' && mem[11] == ' ')) {
+			isDLS = TRUE;
+		}
 		if (mem[0] == 'R' && mem[1] == 'I' && mem[2] == 'F' && mem[3] == 'F') {
 			if ((mem[8] == 's' && mem[9] == 'f' && mem[10] == 'b' && mem[11] == 'k') ||
-			    (mem[8] == 'D' && mem[9] == 'L' && mem[10] == 'S' && mem[11] == ' ')) {
+			    (isDLS && g_useFluidSynthForDLS)) {
 				isSF2 = TRUE;
+				isDLS = FALSE; // treat as SF2 if using FluidSynth for DLS
 			}
 		}
 	}
@@ -539,16 +557,33 @@ JNIEXPORT jstring JNICALL Java_com_zefie_NeoBAE_Mixer__1getBankFriendlyName
 		free(mem);
 		(*env)->ReleaseStringUTFChars(env, assetName, aname);
 		if (err != NO_ERR) {
-			__android_log_print(ANDROID_LOG_ERROR, "NeoBAE", "SF2 asset load failed: %d", err);
+			__android_log_print(ANDROID_LOG_ERROR, "NeoBAE", "FluidSynth asset load failed: %d", err);
 			return (jint)err;
 		}
 		GM_SetMixerSF2Mode(TRUE);
 		strncpy(g_lastBankFriendly, aname, sizeof(g_lastBankFriendly)-1);
 		g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
-		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "SF2 asset loaded: %s", aname);
+		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "FluidSynth asset loaded: %s", aname);
 		return 0;
 	}
 #endif
+#if USE_NATIVE_DLS == TRUE
+	if (isDLS && !g_useFluidSynthForDLS) {
+		BAEResult dlsResult = BAEMixer_LoadDLSBankFromMemory(mixer, (void*)mem, (uint32_t)read_total);
+		free(mem);
+		(*env)->ReleaseStringUTFChars(env, assetName, aname);
+		if (dlsResult != BAE_NO_ERROR) {
+			__android_log_print(ANDROID_LOG_ERROR, "NeoBAE", "DLS asset load failed: %d", dlsResult);
+			return (jint)dlsResult;
+		}
+		GM_SetMixerDLSMode(TRUE);
+		strncpy(g_lastBankFriendly, aname, sizeof(g_lastBankFriendly)-1);
+		g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
+		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "DLS asset loaded: %s", aname);
+		return 0;
+	}
+#endif
+
 		BAEBankToken token = 0;
 		BAEResult br = BAEMixer_AddBankFromMemory(mixer, (void*)mem, (uint32_t)read_total, &token);
 		if(br == BAE_NO_ERROR){
@@ -589,6 +624,10 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemory
 	__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "addBankFromMemory: len=%d bytes", (int)len);
 
 	BAEMixer_UnloadBanks(mixer);
+#if USE_NATIVE_DLS == TRUE
+	GM_SetMixerDLSMode(FALSE);
+	BAEMixer_UnloadDLSBank(mixer);
+#endif
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
 	__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "SF2 support is enabled");
 	GM_UnloadSF2Soundfont();
@@ -600,13 +639,14 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemory
 	bool isSF2 = FALSE;
 	if (len >= 12) {
 		unsigned char *ubytes = (unsigned char*)bytes;
+		bool isDLS = (ubytes[8] == 'D' && ubytes[9] == 'L' && ubytes[10] == 'S' && ubytes[11] == ' ');
 		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Magic bytes: %02X %02X %02X %02X ... %02X %02X %02X %02X",
 			ubytes[0], ubytes[1], ubytes[2], ubytes[3], ubytes[8], ubytes[9], ubytes[10], ubytes[11]);
 		if (ubytes[0] == 'R' && ubytes[1] == 'I' && ubytes[2] == 'F' && ubytes[3] == 'F') {
 			if ((ubytes[8] == 's' && ubytes[9] == 'f' && ubytes[10] == 'b' && ubytes[11] == 'k') ||
-			    (ubytes[8] == 'D' && ubytes[9] == 'L' && ubytes[10] == 'S' && ubytes[11] == ' ')) {
+			    (isDLS && g_useFluidSynthForDLS)) {
 				isSF2 = TRUE;
-				__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Detected SF2/DLS format");
+				__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Detected FluidSynth-handled bank format");
 			}
 		}
 	}
@@ -635,6 +675,26 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemory
 	}
 #else
 	__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "SF2 support is NOT enabled - USE_SF2_SUPPORT=%d _USING_FLUIDSYNTH=%d", USE_SF2_SUPPORT, _USING_FLUIDSYNTH);
+#endif
+
+#if USE_NATIVE_DLS == TRUE
+	if (!g_useFluidSynthForDLS && len >= 12) {
+		unsigned char *ubytes = (unsigned char*)bytes;
+		if (ubytes[0] == 'R' && ubytes[1] == 'I' && ubytes[2] == 'F' && ubytes[3] == 'F' &&
+			ubytes[8] == 'D' && ubytes[9] == 'L' && ubytes[10] == 'S' && ubytes[11] == ' ') {
+			BAEResult dlsResult = BAEMixer_LoadDLSBankFromMemory(mixer, (void*)bytes, (uint32_t)len);
+			(*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
+			if (dlsResult != BAE_NO_ERROR) {
+				__android_log_print(ANDROID_LOG_ERROR, "NeoBAE", "DLS bank load from memory failed: %d", dlsResult);
+				return (jint)dlsResult;
+			}
+			GM_SetMixerDLSMode(TRUE);
+			strncpy(g_lastBankFriendly, "DLS Bank", sizeof(g_lastBankFriendly)-1);
+			g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
+			__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "DLS bank loaded from memory");
+			return 0;
+		}
+	}
 #endif
 
 	BAEBankToken token = 0;
@@ -672,6 +732,10 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemoryWithFilena
 	__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "addBankFromMemoryWithFilename: len=%d bytes", (int)len);
 
 	BAEMixer_UnloadBanks(mixer);
+#if USE_NATIVE_DLS == TRUE
+	GM_SetMixerDLSMode(FALSE);
+	BAEMixer_UnloadDLSBank(mixer);
+#endif
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
 	__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "SF2 support is enabled");
 	GM_UnloadSF2Soundfont();
@@ -683,13 +747,14 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemoryWithFilena
 	bool isSF2 = FALSE;
 	if (len >= 12) {
 		unsigned char *ubytes = (unsigned char*)bytes;
+		bool isDLS = (ubytes[8] == 'D' && ubytes[9] == 'L' && ubytes[10] == 'S' && ubytes[11] == ' ');
 		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Magic bytes: %02X %02X %02X %02X ... %02X %02X %02X %02X",
 			ubytes[0], ubytes[1], ubytes[2], ubytes[3], ubytes[8], ubytes[9], ubytes[10], ubytes[11]);
 		if (ubytes[0] == 'R' && ubytes[1] == 'I' && ubytes[2] == 'F' && ubytes[3] == 'F') {
 			if ((ubytes[8] == 's' && ubytes[9] == 'f' && ubytes[10] == 'b' && ubytes[11] == 'k') ||
-			    (ubytes[8] == 'D' && ubytes[9] == 'L' && ubytes[10] == 'S' && ubytes[11] == ' ')) {
+			    (isDLS && g_useFluidSynthForDLS)) {
 				isSF2 = TRUE;
-				__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Detected SF2/DLS format");
+				__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Detected FluidSynth-handled bank format");
 			}
 		}
 	}
@@ -731,6 +796,38 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemoryWithFilena
 	}
 #else
 	__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "SF2 support is NOT enabled - USE_SF2_SUPPORT=%d _USING_FLUIDSYNTH=%d", USE_SF2_SUPPORT, _USING_FLUIDSYNTH);
+#endif
+
+#if USE_NATIVE_DLS == TRUE
+	if (!g_useFluidSynthForDLS && len >= 12) {
+		unsigned char *ubytes = (unsigned char*)bytes;
+		if (ubytes[0] == 'R' && ubytes[1] == 'I' && ubytes[2] == 'F' && ubytes[3] == 'F' &&
+			ubytes[8] == 'D' && ubytes[9] == 'L' && ubytes[10] == 'S' && ubytes[11] == ' ') {
+			BAEResult dlsResult = BAEMixer_LoadDLSBankFromMemory(mixer, (void*)bytes, (uint32_t)len);
+			(*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
+			if (dlsResult != BAE_NO_ERROR) {
+				__android_log_print(ANDROID_LOG_ERROR, "NeoBAE", "DLS bank load from memory failed: %d", dlsResult);
+				return (jint)dlsResult;
+			}
+			GM_SetMixerDLSMode(TRUE);
+			if (filename) {
+				const char *fname = (*env)->GetStringUTFChars(env, filename, NULL);
+				if (fname) {
+					strncpy(g_lastBankFriendly, fname, sizeof(g_lastBankFriendly)-1);
+					g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
+					(*env)->ReleaseStringUTFChars(env, filename, fname);
+				} else {
+					strncpy(g_lastBankFriendly, "DLS Bank", sizeof(g_lastBankFriendly)-1);
+					g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
+				}
+			} else {
+				strncpy(g_lastBankFriendly, "DLS Bank", sizeof(g_lastBankFriendly)-1);
+				g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
+			}
+			__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "DLS bank loaded from memory: %s", g_lastBankFriendly);
+			return 0;
+		}
+	}
 #endif
 
 	BAEBankToken token = 0;
@@ -829,5 +926,22 @@ JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Mixer__1getClassicChorus
 	BAE_BOOL enabled = FALSE;
 	BAE_GetClassicChorus(&enabled);
 	return (jboolean)(enabled ? JNI_TRUE : JNI_FALSE);
+}
+
+JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1setUseFluidSynthForDLS
+	(JNIEnv* env, jclass clazz, jboolean enable)
+{
+	(void)env;
+	(void)clazz;
+	g_useFluidSynthForDLS = enable ? TRUE : FALSE;
+	return (jint)BAE_NO_ERROR;
+}
+
+JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Mixer__1getUseFluidSynthForDLS
+	(JNIEnv* env, jclass clazz)
+{
+	(void)env;
+	(void)clazz;
+	return (jboolean)(g_useFluidSynthForDLS ? JNI_TRUE : JNI_FALSE);
 }
 

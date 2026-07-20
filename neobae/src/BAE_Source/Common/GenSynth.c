@@ -349,14 +349,17 @@
 #include "GenSnd.h"
 #include "GenPriv.h"
 #include "BAE_API.h"
+#if USE_NATIVE_DLS == TRUE
+    #include "GenDLS_MobileBAE.h"
+#endif
 #include "X_Assert.h"
 #include "X_Formats.h"
 #include <stdint.h>
 #include <math.h>
 #if USE_SF2_SUPPORT == TRUE
-#if _USING_FLUIDSYNTH == TRUE
-#include "GenSF2_FluidSynth.h"
-#endif
+    #if _USING_FLUIDSYNTH == TRUE
+        #include "GenSF2_FluidSynth.h"
+    #endif
 #endif
 
 // the only global. Our current mixer pointer.
@@ -2483,20 +2486,26 @@ INLINE static void PV_ServeInstruments(void)
         }
     }
 
-#if USE_SF2_SUPPORT == TRUE
     // Reverb disabled: mix SF2 output directly into dry buffer (no effects)
     {
         int si;
         for (si = 0; si < MAX_SONGS; ++si)
         {
             GM_Song *song = pMixer->pSongsToPlay[si];
+#if USE_SF2_SUPPORT == TRUE
             if (song && (GM_IsSF2Song(song) || GM_SF2_HasXmfEmbeddedBank()))
             {
                 GM_SF2_RenderAudioSlice(song, (int32_t *)pMixer->songBufferDry, NULL, NULL, pMixer->One_Loop);
             }
+#endif
+#if USE_NATIVE_DLS == TRUE
+            if (song && GM_IsDLSSong(song))
+            {
+                GM_DLS_RenderAudioSlice(song, (int32_t *)pMixer->songBufferDry, NULL, NULL, pMixer->One_Loop);
+            }
+#endif           
         }
     }
-#endif
 }
 #else
 // Process active sample voices
@@ -2519,13 +2528,14 @@ INLINE static void PV_ServeInstruments(void)
                 PV_ServeThisInstrument(pVoice);
             }
         }
-#if USE_SF2_SUPPORT == TRUE
+
         // Mix SF2 voices before chorus/reverb so they get processed by effects
         {
             int si;
             for (si = 0; si < MAX_SONGS; ++si)
             {
                 GM_Song *song = pMixer->pSongsToPlay[si];
+#if USE_SF2_SUPPORT == TRUE
                 if (song && (GM_IsSF2Song(song) || GM_SF2_HasXmfEmbeddedBank()))
                 {
                     GM_SF2_RenderAudioSlice(song, (int32_t *)pMixer->songBufferDry, 
@@ -2533,9 +2543,18 @@ INLINE static void PV_ServeInstruments(void)
                                            (int32_t *)pMixer->songBufferChorus,
                                            pMixer->One_Loop);
                 }
+#endif
+#if USE_NATIVE_DLS == TRUE
+                if (song && GM_IsDLSSong(song))
+                {
+                    GM_DLS_RenderAudioSlice(song, (int32_t *)pMixer->songBufferDry, 
+                                           (int32_t *)pMixer->songBufferReverb,
+                                           (int32_t *)pMixer->songBufferChorus,
+                                           pMixer->One_Loop);
+                }
+#endif                
             }
         }
-#endif
 #if BAE_CLASSIC_CHORUS && USE_NEW_EFFECTS
         // Classic mode: reverb before chorus (pre-4/19/2000 Beatnik ordering)
         if (pMixer->classicChorus)
@@ -2569,13 +2588,14 @@ INLINE static void PV_ServeInstruments(void)
                 }
             }
         }
-#if USE_SF2_SUPPORT == TRUE
+        
         // Mix SF2 output with reverb-enabled voices before reverb stage
         {
             int si;
             for (si = 0; si < MAX_SONGS; ++si)
             {
                 GM_Song *song = pMixer->pSongsToPlay[si];
+#if USE_SF2_SUPPORT == TRUE
                 if (song && (GM_IsSF2Song(song) || GM_SF2_HasXmfEmbeddedBank()))
                 {
                     GM_SF2_RenderAudioSlice(song, (int32_t *)pMixer->songBufferDry,
@@ -2583,9 +2603,18 @@ INLINE static void PV_ServeInstruments(void)
                                            (int32_t *)pMixer->songBufferChorus,
                                            pMixer->One_Loop);
                 }
+#endif
+#if USE_NATIVE_DLS == TRUE
+                if (song && GM_IsDLSSong(song))
+                {
+                    GM_DLS_RenderAudioSlice(song, (int32_t *)pMixer->songBufferDry, 
+                                           (int32_t *)pMixer->songBufferReverb,
+                                           (int32_t *)pMixer->songBufferChorus,
+                                           pMixer->One_Loop);
+                }
+#endif                
             }
         }
-#endif
 #if BAE_CLASSIC_CHORUS && USE_NEW_EFFECTS
         // Classic mode: no chorus in fixed reverb path (pre-4/19/2000 behavior)
         if (pMixer->classicChorus)
@@ -4220,12 +4249,22 @@ static void PV_EndNotes(GM_Song *pSong, int16_t useChannel, XLongResourceID useI
 void GM_EndSongNotes(GM_Song *pSong)
 {
     PV_EndNotes(pSong, -1, -1, FALSE);
+#if USE_NATIVE_DLS == TRUE
+    if (pSong && GM_IsDLSSong(pSong)) {
+        GM_DLS_AllNotesOff(pSong, -1, false);
+    }
+#endif
 }
 
 // stop notes for a song and channel passed. This will put the note into release mode.
 void GM_EndSongChannelNotes(GM_Song *pSong, int16_t channel)
 {
     PV_EndNotes(pSong, channel, -1, FALSE);
+#if USE_NATIVE_DLS == TRUE
+    if (pSong && GM_IsDLSSong(pSong)) {
+        GM_DLS_AllNotesOff(pSong, channel, false);
+    }
+#endif
 }
 
 // Stop just midi notes. Note: This does not kill the notes anymore. It just puts them into release mode.
@@ -4239,6 +4278,11 @@ void GM_EndAllNotes(void)
 void GM_KillSongNotes(GM_Song *pSong)
 {
     PV_EndNotes(pSong, -1, -1, TRUE);
+#if USE_NATIVE_DLS == TRUE
+    if (pSong && GM_IsDLSSong(pSong)) {
+        GM_DLS_AllNotesOff(pSong, -1, true);
+    }
+#endif
 }
 
 // kills notes that use a particular instrument. The instrument passed is the combined bank/program

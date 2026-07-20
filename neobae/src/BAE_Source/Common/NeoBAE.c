@@ -159,6 +159,9 @@
 #include "X_API.h"
 #include "GenSnd.h"
 #include "GenPriv.h"
+#if USE_NATIVE_DLS == TRUE
+#include "GenDLS_MobileBAE.h"
+#endif
 #include "GenRMI.h"
 #include "X_Formats.h"
 #include "BAE_API.h"
@@ -4308,6 +4311,88 @@ BAEResult BAEMixer_UnloadBank(BAEMixer mixer, BAEBankToken token)
     return BAE_TranslateOPErr(err);
 }
 
+#if USE_NATIVE_DLS == TRUE
+BAEResult BAEMixer_LoadDLSBankFromMemory(BAEMixer mixer, void* pMemory, uint32_t memorySize)
+{
+    BAEResult err;
+    if (mixer && mixer->pMixer)
+    {
+        OPErr opErr = GM_LoadDLSFromMemory(mixer->pMixer, pMemory, memorySize);
+        err = BAE_TranslateOPErr(opErr);
+    }
+    else
+    {
+        err = BAE_NULL_OBJECT;
+    }
+    return err;
+}
+
+BAEResult BAEMixer_LoadDLSBank(BAEMixer mixer, const char* filePath)
+{
+    BAEResult err;
+    if (mixer && mixer->pMixer)
+    {
+        void *pAudioFile = NULL;
+        uint32_t fileSize = 0;
+
+        XFILENAME xfile;
+        XConvertNativeFileToXFILENAME((void*)filePath, &xfile);
+        err = BAE_TranslateOPErr(XGetFileAsData(&xfile, &pAudioFile, (int32_t*)&fileSize));
+        if (err == NO_ERR)
+        {
+            err = BAEMixer_LoadDLSBankFromMemory(mixer, pAudioFile, fileSize);
+            XDisposePtr(pAudioFile);
+        }
+    }
+    else
+    {
+        err = BAE_NULL_OBJECT;
+    }
+    return err;
+}
+
+BAEResult BAEMixer_UnloadDLSBank(BAEMixer mixer)
+{
+    if (mixer && mixer->pMixer)
+    {
+        GM_Mixer *pMixer = mixer->pMixer;
+
+        // DLS and built-in banks are mutually exclusive render paths.
+        // When unloading DLS, force channels back to GM routing so
+        // subsequent built-in bank playback does not stay latched to DLS.
+#if USE_SF2_SUPPORT == TRUE
+        for (int songIndex = 0; songIndex < MAX_SONGS; ++songIndex)
+        {
+            GM_Song *song = pMixer->pSongsToPlay[songIndex];
+            if (!song)
+            {
+                continue;
+            }
+
+            for (int ch = 0; ch < MAX_CHANNELS; ++ch)
+            {
+                if (song->channelType[ch] == CHANNEL_TYPE_DLS)
+                {
+                    song->channelType[ch] = CHANNEL_TYPE_GM;
+                }
+            }
+        }
+#endif
+
+        pMixer->isDLS = false;
+        if (pMixer->pDLSSynth) {
+            if (pMixer->pDLSSynth->banks[0]) {
+                GM_UnloadDLSBank(pMixer->pDLSSynth->banks[0]);
+                pMixer->pDLSSynth->banks[0] = NULL;
+            }
+            GM_FinisDLSSynth(pMixer->pDLSSynth);
+            pMixer->pDLSSynth = NULL;
+        }
+    }
+    return BAE_NO_ERROR;
+}
+#endif
+
 BAEResult BAEMixer_UnloadBanks(BAEMixer mixer)
 {
     BAEResult err;
@@ -5063,6 +5148,9 @@ BAEResult BAEMixer_GetRealtimeStatus(BAEMixer mixer, BAEAudioInfo *pStatus)
                 pStatus->voicesActive += GM_SF2_GetActiveVoiceCount();
             }
 #endif            
+#if USE_NATIVE_DLS == TRUE
+            pStatus->voicesActive += GM_DLS_GetActiveVoiceCount(mixer->pMixer);
+#endif
         }
     }
     else
@@ -10055,6 +10143,7 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
                             GM_ResetSF2();
                         }
 #endif                         
+                        XBankToken songBankToken = CreateBankToken();
                         pSong = GM_LoadSong(song->mixer->pMixer,
                                             NULL,
                                             song,
@@ -10063,9 +10152,9 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
                                             NULL,
                                             0L,
                                             NULL, // no callback
-                                            TRUE, // load instruments
+                                            FALSE, // load after RMF metadata is attached
                                             ignoreBadInstruments,
-                                            CreateBankToken(),
+                                            songBankToken,
                                             &theErr);
                         if (pSong)
                         {
@@ -10088,6 +10177,15 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
                             }
                             pSong->songFlags = SONG_FLAG_IS_RMF;                      
     #endif
+                            theErr = GM_LoadSongInstruments(pSong, NULL, songBankToken, TRUE);
+                            if (theErr != NO_ERR)
+                            {
+                                GM_FreeSong(NULL, pSong);
+                                pSong = NULL;
+                            }
+                        }
+                        if (pSong)
+                        {
                             // things are cool
                             GM_SetDisposeSongDataWhenDoneFlag(pSong, TRUE); // dispose of midi data
                             GM_SetSongLoopFlag(pSong, FALSE);               // don't loop song
@@ -10125,6 +10223,7 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
                         if (song->pSong)
                         {
                             PV_BAESong_Unload(song);
+                            XBankToken songBankToken = CreateBankToken();
                             pSong = GM_LoadSong(song->mixer->pMixer,
                                                 NULL,
                                                 song,
@@ -10133,9 +10232,9 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
                                                 NULL,
                                                 0L,
                                                 NULL, // no callback
-                                                TRUE, // load instruments
+                                                FALSE, // load after RMF metadata is attached
                                                 ignoreBadInstruments,
-                                                CreateBankToken(),
+                                                songBankToken,
                                                 &theErr);
                             if (pSong)
                             {
@@ -10156,6 +10255,15 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
                                 pSong->songFlags = SONG_FLAG_IS_RMF;
                                 debug_message("[FALLBACK] Set songFlags=0x%X, RMFInstrumentIDs[0]=%u\n", pSong->songFlags, pSong->RMFInstrumentIDs[0]);
 #endif
+                                theErr = GM_LoadSongInstruments(pSong, NULL, songBankToken, TRUE);
+                                if (theErr != NO_ERR)
+                                {
+                                    GM_FreeSong(NULL, pSong);
+                                    pSong = NULL;
+                                }
+                            }
+                            if (pSong)
+                            {
                                 GM_SetDisposeSongDataWhenDoneFlag(pSong, TRUE);
                                 GM_SetSongLoopFlag(pSong, FALSE);
                                 GM_SetVelocityCurveType(pSong, (VelocityCurveType)g_defaultVelocityCurve);
@@ -10303,6 +10411,7 @@ BAEResult BAESong_LoadRmfFromFile(BAESong song, BAEPathName filePath, int16_t so
                         GM_ResetSF2();
                     }
 #endif                    
+                    XBankToken songBankToken = CreateBankToken();
                     pSong = GM_LoadSong(song->mixer->pMixer,
                                         NULL,
                                         song,
@@ -10311,9 +10420,9 @@ BAEResult BAESong_LoadRmfFromFile(BAESong song, BAEPathName filePath, int16_t so
                                         NULL,
                                         0L,
                                         NULL, // no callback
-                                        TRUE, // load instruments
+                                        FALSE, // load after RMF metadata is attached
                                         ignoreBadInstruments,
-                                        CreateBankToken(),
+                                        songBankToken,
                                         &theErr);
                     if (pSong)
                     {
@@ -10335,6 +10444,15 @@ BAEResult BAESong_LoadRmfFromFile(BAESong song, BAEPathName filePath, int16_t so
                         }
                         pSong->songFlags = SONG_FLAG_IS_RMF;                      
 #endif
+                        theErr = GM_LoadSongInstruments(pSong, NULL, songBankToken, TRUE);
+                        if (theErr != NO_ERR)
+                        {
+                            GM_FreeSong(NULL, pSong);
+                            pSong = NULL;
+                        }
+                    }
+                    if (pSong)
+                    {
                         // things are cool
                         GM_SetDisposeSongDataWhenDoneFlag(pSong, TRUE); // dispose of midi data
                         GM_SetSongLoopFlag(pSong, FALSE);               // don't loop song

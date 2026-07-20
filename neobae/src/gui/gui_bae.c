@@ -34,6 +34,9 @@
         #endif
     #endif
 #endif
+#if USE_NATIVE_DLS == TRUE
+    #include "GenDLS_MobileBAE.h"
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -69,6 +72,7 @@ static char g_user_bank_path[1024] = {0};
 static char g_user_bank_name[256] = {0};
 
 // External keyboard-related globals (defined in gui_midi_vkbd.c)
+extern bool g_use_fluidsynth_for_dls;
 extern bool g_show_virtual_keyboard;
 extern int g_keyboard_channel;
 extern int g_keyboard_mouse_note;
@@ -160,6 +164,10 @@ static bool restore_bank_for_song_load(const char *bank_path, const char *bank_n
         GM_UnloadSF2Soundfont();
         GM_SetMixerSF2Mode(FALSE);
 #endif
+#if USE_NATIVE_DLS == TRUE
+        GM_SetMixerDLSMode(FALSE);
+        BAEMixer_UnloadDLSBank(g_bae.mixer);
+#endif
 
         BAEBankToken builtin_token = 0;
         BAEResult br = BAEMixer_LoadBuiltinBank(g_bae.mixer, &builtin_token);
@@ -228,9 +236,25 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
     if (!path)
         return false;
 
+#ifdef SUPPORT_MIDI_HW
+    bool midi_was_enabled_for_swap = false;
+    int midi_restore_api = -1;
+    int midi_restore_port = -1;
+    if (g_midi_input_enabled && !g_in_bank_load_recreate)
+    {
+        midi_was_enabled_for_swap = true;
+        if (g_midi_input_device_index >= 0 && g_midi_input_device_index < g_midi_input_device_count)
+        {
+            midi_restore_api = g_midi_device_api[g_midi_input_device_index];
+            midi_restore_port = g_midi_device_port[g_midi_input_device_index];
+        }
+        midi_service_stop();
+        midi_input_shutdown();
+    }
+#endif
+
     // If user is manually loading a bank while an RMI embedded bank is active,
     // clear the embedded bank state so we don't restore the old bank later
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
     if (g_bae.has_embedded_soundbank)
     {
         BAE_PRINTF("User overriding embedded bank with manual bank load\n");
@@ -243,7 +267,6 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
         g_user_bank_path[0] = '\0';
         g_user_bank_name[0] = '\0';
     }
-#endif
 
     // Store current song info before bank change
     bool had_song = g_bae.song_loaded;
@@ -273,6 +296,10 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
     g_bae.bank_loaded = false;
 #if USE_SF2_SUPPORT == TRUE
     GM_UnloadSF2Soundfont();
+#endif
+#if USE_NATIVE_DLS == TRUE
+    GM_SetMixerDLSMode(FALSE);
+    BAEMixer_UnloadDLSBank(g_bae.mixer);
 #endif
 
 #ifdef _BUILT_IN_PATCHES
@@ -325,7 +352,7 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
         else
         {
             BAE_PRINTF("Failed loading built-in bank (%d)\n", br);
-            return false;
+            goto load_bank_fail;
         }
     }
     else
@@ -335,7 +362,7 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
         if (!bae_load_bank(path))
         {
             BAE_PRINTF("Failed to load bank: %s\n", path);
-            return false;
+            goto load_bank_fail;
         }
 
         // SF2/SF3/SFO/DLS may use a built-in fallback bank internally,
@@ -346,13 +373,9 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
         if (ext)
         {
             if (strcasecmp(ext, ".sf2") == 0
-#if USE_VORBIS_DECODER == TRUE
                 || strcasecmp(ext, ".sf3") == 0
                 || strcasecmp(ext, ".sfo") == 0
-#endif
-#if _USING_FLUIDSYNTH == TRUE
                 || strcasecmp(ext, ".dls") == 0
-#endif
             )
             {
                 prefer_filename_label = true;
@@ -463,7 +486,39 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
         }
     }
 
+#ifdef SUPPORT_MIDI_HW
+    if (midi_was_enabled_for_swap && g_midi_input_enabled && !g_midi_service_thread)
+    {
+        if (midi_restore_api >= 0 && midi_restore_port >= 0)
+        {
+            midi_input_init("zefidi", midi_restore_api, midi_restore_port);
+        }
+        else
+        {
+            midi_input_init("zefidi", -1, -1);
+        }
+        midi_service_start();
+    }
+#endif
+
     return true;
+
+load_bank_fail:
+#ifdef SUPPORT_MIDI_HW
+    if (midi_was_enabled_for_swap && g_midi_input_enabled && !g_midi_service_thread)
+    {
+        if (midi_restore_api >= 0 && midi_restore_port >= 0)
+        {
+            midi_input_init("zefidi", midi_restore_api, midi_restore_port);
+        }
+        else
+        {
+            midi_input_init("zefidi", -1, -1);
+        }
+        midi_service_start();
+    }
+#endif
+    return false;
 }
 
 bool load_bank_simple(const char *path, bool save_to_settings, int reverb_type, bool loop_enabled)
@@ -627,18 +682,18 @@ bool bae_load_bank(const char *bank_path)
     const char *ext = strrchr(bank_path, '.');
 
     BAEMixer_UnloadBanks(g_bae.mixer);
-
+#if USE_NATIVE_DLS == TRUE
+    GM_SetMixerDLSMode(FALSE);
+    BAEMixer_UnloadDLSBank(g_bae.mixer);
+#endif
 #if USE_SF2_SUPPORT == TRUE
     GM_UnloadSF2Soundfont();
     GM_SetMixerSF2Mode(FALSE);
     g_bae.bank_token = 0;
     // Check if this is an SF2 file
     if (ext && (strcasecmp(ext, ".sf2") == 0    
-#if _USING_FLUIDSYNTH == TRUE
-    || strcasecmp(ext, ".dls") == 0
-#endif    
-#if USE_VORBIS_DECODER == TRUE
-    || (strcasecmp(ext, ".sf3") == 0 || strcasecmp(ext, ".sfo") == 0)
+#if USE_VORBIS_DECODER == TRUE && _USING_FLUIDSYNTH == TRUE
+    || (strcasecmp(ext, ".sf3") == 0 || strcasecmp(ext, ".sfo") == 0 || (strcasecmp(ext, ".dls") == 0 && g_use_fluidsynth_for_dls))
 #endif
     ))
     {
@@ -657,6 +712,28 @@ bool bae_load_bank(const char *bank_path)
             return false;
         }
         GM_SetMixerSF2Mode(TRUE);
+        // Mark as loaded
+        g_bae.bank_loaded = true;
+        return true;
+    }
+#endif
+#if USE_NATIVE_DLS == TRUE
+    if (ext && strcasecmp(ext, ".dls") == 0 && !g_use_fluidsynth_for_dls) {
+        // Load DLS bank
+#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_DLS == TRUE
+        BAEBankToken builtin_token = 0;
+        if (BAEMixer_LoadBuiltinBank(g_bae.mixer, &builtin_token) == BAE_NO_ERROR && builtin_token)
+        {
+            BAEMixer_SendBankToBack(g_bae.mixer, builtin_token);
+        }
+#endif    
+        BAEResult dls_result = BAEMixer_LoadDLSBank(g_bae.mixer, bank_path);
+        if (dls_result != BAE_NO_ERROR)
+        {
+            BAE_PRINTF("DLS bank load failed: %d %s\n", dls_result, bank_path);
+            return false;
+        }
+        GM_SetMixerDLSMode(TRUE);
         // Mark as loaded
         g_bae.bank_loaded = true;
         return true;

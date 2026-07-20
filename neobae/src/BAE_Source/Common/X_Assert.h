@@ -72,7 +72,13 @@
 
 #ifndef X_Assert_H
 #define X_Assert_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 void debug_message(const char *format, ...);
+#ifdef __cplusplus
+}
+#endif
 
 #include "X_API.h"
 #include <stdio.h>

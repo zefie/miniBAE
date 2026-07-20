@@ -211,6 +211,9 @@
 #include "GenSnd.h"
 #include "GenPriv.h"
 #include "X_Assert.h"
+#if USE_NATIVE_DLS == TRUE
+#include "GenDLS_MobileBAE.h"
+#endif
 #include <stdint.h>
 #if USE_SF2_SUPPORT == TRUE
 #if _USING_FLUIDSYNTH == TRUE
@@ -317,6 +320,11 @@ void GM_MergeExternalSong(void *theExternalSong, XShortResourceID theSongID, GM_
             maps = XGetShort(&songSMS->remapCount);
             PV_SetTempo(theSong, XGetShort(&songSMS->songTempo));
             theSong->songVolume = XGetSongVolume((SongResource *)theExternalSong);
+#if USE_SF2_SUPPORT == TRUE
+            theSong->songFlags = 0;
+            theSong->RMFInstrumentIDs[0] = 0;
+#endif
+            theSong->engineConfigFlags = 0;
 
             // Load instruments
             if (maps)
@@ -345,6 +353,10 @@ void GM_MergeExternalSong(void *theExternalSong, XShortResourceID theSongID, GM_
             theSong->ignoreBadInstruments = TRUE;
             PV_SetTempo(theSong, XGetShort(&songRMF->songTempo));
             theSong->songVolume = XGetSongVolume((SongResource *)theExternalSong);
+#if USE_SF2_SUPPORT == TRUE
+            theSong->songFlags = 0;
+            theSong->RMFInstrumentIDs[0] = 0;
+#endif
             // Read per-song engine config flags from unused[0]
             // Only trust flags if this is a ZMF container; old RMF files may have garbage
             theSong->engineConfigFlags = (uint32_t)XGetLong(&songRMF->unused[SONG_CONFIG_UNUSED_INDEX]);
@@ -526,6 +538,13 @@ OPErr GM_PrerollSong(GM_Song *pSong, GM_SongCallbackProcPtr theCallbackProc,
     theErr = NO_ERR;
     if (pSong)
     {
+#if USE_NATIVE_DLS == TRUE
+        if (GM_IsDLSSong(pSong))
+        {
+            // Prevent stale channel/program bindings from prior songs causing silent note-ons.
+            GM_DLS_ResetForSong(pSong);
+        }
+#endif
         // preroll song prior to start
         pSong->AnalyzeMode = SCAN_NORMAL;
         pSong->songEndCallbackPtr = theCallbackProc;

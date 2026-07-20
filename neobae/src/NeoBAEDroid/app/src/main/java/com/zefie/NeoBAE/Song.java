@@ -25,6 +25,7 @@ public class Song
 	private static native int _setSongLoops(long songReference, int numLoops);
 	private static native int _setSongVelocityCurve(long songReference, int curve);
 	private static native boolean _isSF2Song(long songReference);
+	private static native boolean _isDLSSong(long songReference);	
 	private static native boolean _hasEmbeddedBank(long songReference);
 	private native int _loadScriptFromString(long songReference, String source);
 	private native void _clearScript(long songReference);
@@ -190,6 +191,7 @@ public class Song
 
 	public int setVelocityCurve(int curve) { return _setSongVelocityCurve(mReference, curve); }
 	public boolean isSF2Song() { return _isSF2Song(mReference); }
+	public boolean isDLSSong() { return _isDLSSong(mReference); }
 	public boolean hasEmbeddedBank() { return _hasEmbeddedBank(mReference); }
 
 	// MIDI channel mute controls (0..15)

@@ -859,6 +859,27 @@ extern "C"
                                          uint32_t fileSize,
                                          BAEBankToken *outToken);
 
+    // BAEMixer_LoadDLSBank()
+    // ------------------------------------
+    // Load a DLS bank from file into the new native DLS engine
+    //
+    BAEResult BAEMixer_LoadDLSBank(BAEMixer mixer,
+                                   const char* filePath);
+
+    // BAEMixer_LoadDLSBankFromMemory()
+    // ------------------------------------
+    // Load a DLS bank from memory into the new native DLS engine
+    //
+    BAEResult BAEMixer_LoadDLSBankFromMemory(BAEMixer mixer,
+                                             void* pMemory,
+                                             uint32_t memorySize);
+
+    // BAEMixer_UnloadDLSBank()
+    // ------------------------------------
+    // Unload the active DLS bank
+    //
+    BAEResult BAEMixer_UnloadDLSBank(BAEMixer mixer);
+
     // BAEMixer_UnloadBank()
     // ------------------------------------
     // Causes the indicated BAEMixer to close the instrument bank indicated by 'token'.

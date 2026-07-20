@@ -34,6 +34,7 @@ ifneq ($(WASM),1)
 		DISABLE_NOKIA := 0			    
 		DISABLE_BEATNIK_SF2_NRPN := 0
 		USE_BUILTIN_PATCHES_WITH_SF2 := 1
+		USE_BUILTIN_PATCHES_WITH_DLS := 1
 		FIX_SPAN_DC := 1
 		CLASSIC_CHORUS := 1
 		LZMA_SUPPORT := 1
@@ -53,6 +54,7 @@ ifneq ($(WASM),1)
 		CREATION_API := 0
 		UNROLL_MIDI :=1
 		ADX_SUPPORT := 1
+		NATIVE_DLS := 1
 	endif
 endif
 
@@ -115,8 +117,8 @@ ifeq ($(USE_SDL2),1)
 	USE_SDL3 := 0
 endif
 
-# We only support FluidSynth for SF2 now
-ifeq ($(SF2_SUPPORT),1)
+# Enable SoundFont (SF2) support via FluidSynth overlay. Set this to TRUE to enable.
+ifeq ($(USE_SF2_SUPPORT),1)
 	USE_FLUIDSYNTH := 1
 endif
 
@@ -380,6 +382,10 @@ endif
 ifeq ($(ADX_SUPPORT),1)
 	SRC += src/BAE_Source/Common/XADXFiles.c
 	BAE_FLAGS += -DUSE_ADX_SUPPORT=1 
+
+ifeq ($(NATIVE_DLS),1)
+	BAE_FLAGS += -DUSE_NATIVE_DLS=1
+	SRC += src/BAE_Source/Common/GenDLS_MobileBAE.c
 endif
 
 ifeq ($(RMI_SUPPORT),1)
@@ -1065,6 +1071,10 @@ $(OBJ_DIR)NeoBAE.o: $(EMBED_PATCH_HEADER)
 ifeq ($(USE_BUILTIN_PATCHES_WITH_SF2),1)
 BAE_FLAGS += -D_LOAD_BUILTIN_PATCHES_FOR_SF2=1
 endif # USE_BUILTIN_PATCHES_WITH_SF2
+
+ifeq ($(USE_BUILTIN_PATCHES_WITH_DLS),1)
+BAE_FLAGS += -D_LOAD_BUILTIN_PATCHES_FOR_DLS=1
+endif # USE_BUILTIN_PATCHES_WITH_DLS
 
 endif # EMBED_PATCH_FILE
 endif

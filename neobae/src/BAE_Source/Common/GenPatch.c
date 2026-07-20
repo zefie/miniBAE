@@ -238,6 +238,9 @@
 #include "X_API.h"
 #include "X_Formats.h"
 #include "GenSnd.h"
+#if USE_NATIVE_DLS == TRUE
+#include "GenDLS_MobileBAE.h"
+#endif
 #include "GenPriv.h"
 #include "X_Assert.h"
 #include "GenCache.h"
@@ -344,7 +347,6 @@ static bool PV_IsZsbBankToken(XBankToken bankToken)
     (void)XFileSetPosition(fileRef, savedPos);
     return (XGetLong(&map.mapID) == XFILERESOURCE_ZMF_ID) ? TRUE : FALSE;
 }
-
 
 /******************************************************************************
 **
@@ -1192,6 +1194,22 @@ OPErr GM_LoadInstrument(GM_Song *pSong,
             // use cached instrument, if its not there, then load it
             if (theI == NULL)
             {
+#if USE_NATIVE_DLS == TRUE                
+                if (GM_IsDLSSong(pSong)) {
+                    // SF2-style behavior: keep wavetable instruments available in the
+                    // background for fallback, but never use DLS stubs.
+                    instrumentLoaded = TRUE;
+                    theErr = NO_ERR;
+                    theI = PV_GetInstrument(GM_GetCurrentMixer(), pSong, instrument, bankToken, NULL, 0, &theErr);
+
+                    // If the preset is not present in HSB, keep this non-fatal so
+                    // DLS/RMF can still provide playback.
+                    if (!theI && (theErr == BAD_INSTRUMENT || theErr == RESOURCE_NOT_FOUND || theErr == BAD_SAMPLE))
+                    {
+                        theErr = NO_ERR;
+                    }
+                }
+#endif                
                 if (!instrumentLoaded)
                 {
                     // Reset error code for HSB loading attempt
@@ -1215,6 +1233,11 @@ OPErr GM_LoadInstrument(GM_Song *pSong,
                 debug_message("[GM_LoadInstrument]: Instrument %d loaded successfully, refCount=%d, stored=%s\n", 
                           instrument, theI->usageReferenceCount, 
                           pSong->instrumentData[instrument] ? "yes" : "no");
+            }
+            else if (theErr == NO_ERR)
+            {
+                // Valid no-op for Native DLS instruments that do not use wavetable objects.
+                return NO_ERR;
             }
             else
             {

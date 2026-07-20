@@ -264,10 +264,22 @@ void PV_ServeU3232PartialBufferNewReverb (GM_Voice *this_voice, bool looping)
     {
         wave_adjust = this_voice->NoteLoopEnd - this_voice->NoteLoopPtr;
         end_wave = this_voice->NoteLoopEnd - this_voice->NotePtr;
+        if (this_voice->channels == 2)
+        {
+            wave_adjust >>= 1;
+            end_wave >>= 1;
+        }
     }
     else
     {
-        end_wave = this_voice->NotePtrEnd - this_voice->NotePtr - 1;
+        if (this_voice->channels == 2)
+        {
+            end_wave = ((this_voice->NotePtrEnd - this_voice->NotePtr) >> 1) - 1;
+        }
+        else
+        {
+            end_wave = this_voice->NotePtrEnd - this_voice->NotePtr - 1;
+        }
     }
 
     {
@@ -556,6 +568,43 @@ void PV_ServeU3232StereoPartialBufferNewReverb (GM_Voice *this_voice, bool loopi
     register int32_t          amplitudeR;
     register int32_t          amplitudeLincrement, amplitudeRincrement;
     register int32_t          amplitudeReverb, amplitudeChorus;
+    U32                      totalFrames;
+
+    if ((this_voice == NULL) || (this_voice->NotePtr == NULL) || (this_voice->NotePtrEnd == NULL) ||
+        (this_voice->NotePtrEnd <= this_voice->NotePtr))
+    {
+        if (this_voice)
+        {
+            this_voice->voiceMode = VOICE_UNUSED;
+        }
+        return;
+    }
+
+    if (this_voice->channels == 2)
+    {
+        totalFrames = (U32)((this_voice->NotePtrEnd - this_voice->NotePtr) >> 1);
+    }
+    else
+    {
+        totalFrames = (U32)(this_voice->NotePtrEnd - this_voice->NotePtr);
+    }
+
+    if (totalFrames < 2)
+    {
+        this_voice->voiceMode = VOICE_UNUSED;
+        return;
+    }
+
+    if (looping)
+    {
+        if ((this_voice->NoteLoopPtr == NULL) || (this_voice->NoteLoopEnd == NULL) ||
+            (this_voice->NoteLoopPtr < this_voice->NotePtr) ||
+            (this_voice->NoteLoopEnd > this_voice->NotePtrEnd) ||
+            (this_voice->NoteLoopEnd <= this_voice->NoteLoopPtr))
+        {
+            looping = FALSE;
+        }
+    }
 
     PV_CalculateStereoVolume(this_voice, &ampValueL, &ampValueR);
     amplitudeL = this_voice->lastAmplitudeL;
@@ -570,16 +619,41 @@ void PV_ServeU3232StereoPartialBufferNewReverb (GM_Voice *this_voice, bool loopi
     cur_wave_i = this_voice->samplePosition.i;
     cur_wave_f = this_voice->samplePosition.f;
 
+    if (cur_wave_i >= (totalFrames - 1))
+    {
+        if (looping)
+        {
+            cur_wave_i %= (totalFrames - 1);
+        }
+        else
+        {
+            this_voice->voiceMode = VOICE_UNUSED;
+            return;
+        }
+    }
+
     wave_increment = PV_GetWavePitchU3232(this_voice->NotePitch);
 
     if (looping)
     {
         wave_adjust = this_voice->NoteLoopEnd - this_voice->NoteLoopPtr;
         end_wave = this_voice->NoteLoopEnd - this_voice->NotePtr;
+        if (this_voice->channels == 2)
+        {
+            wave_adjust >>= 1;
+            end_wave >>= 1;
+        }
     }
     else
     {
-        end_wave = this_voice->NotePtrEnd - this_voice->NotePtr - 1;
+        if (this_voice->channels == 2)
+        {
+            end_wave = ((this_voice->NotePtrEnd - this_voice->NotePtr) >> 1) - 1;
+        }
+        else
+        {
+            end_wave = this_voice->NotePtrEnd - this_voice->NotePtr - 1;
+        }
     }
 
     {
@@ -639,9 +713,9 @@ void PV_ServeU3232StereoPartialBufferNewReverb (GM_Voice *this_voice, bool loopi
         }
         else
         {   // Stereo 8 bit instrument
-            int32_t loopStartIdx = (int32_t)(this_voice->NoteLoopPtr - this_voice->NotePtr);
-            int32_t loopEndIdx = (int32_t)(this_voice->NoteLoopEnd - this_voice->NotePtr);
-            int32_t totalFrames = (int32_t)(this_voice->NotePtrEnd - this_voice->NotePtr);
+            int32_t loopStartIdx = (int32_t)((this_voice->NoteLoopPtr - this_voice->NotePtr) >> 1);
+            int32_t loopEndIdx = (int32_t)((this_voice->NoteLoopEnd - this_voice->NotePtr) >> 1);
+            int32_t totalFrames = (int32_t)((this_voice->NotePtrEnd - this_voice->NotePtr) >> 1);
 
             for (a = MusicGlobals->Four_Loop; a > 0; --a)
             {
@@ -694,14 +768,19 @@ void PV_ServeU3232StereoPartialBufferNewReverb (GM_Voice *this_voice, bool loopi
                     }
                     else
                     {
+                        U32 next_wave_i = cur_wave_i + 1;
+                        if (looping && (next_wave_i >= end_wave))
+                        {
+                            next_wave_i -= wave_adjust;
+                        }
                         b = source[cur_wave_i * 2];
-                        c = source[cur_wave_i * 2 + 2];
+                        c = source[next_wave_i * 2];
                         sample = (((int32_t)(cur_wave_f >> 16) * (int32_t)(c - b)) >> 16) + b - 0x80;
                         destL[0] += sample * amplitudeL;
                         *destReverb += sample * amplitudeReverb;
                         *destChorus += sample * amplitudeChorus;
                         b = source[cur_wave_i * 2 + 1];
-                        c = source[cur_wave_i * 2 + 3];
+                        c = source[next_wave_i * 2 + 1];
                         sample = (((int32_t)(cur_wave_f >> 16) * (int32_t)(c - b)) >> 16) + b - 0x80;
                         destL[1] += sample * amplitudeR;
                         *destReverb += sample * amplitudeReverb;
@@ -998,23 +1077,28 @@ void PV_ServeU3232PartialBuffer16NewReverb (GM_Voice *this_voice, bool looping)
                     }
 #else
                     THE_CHECK_U3232(int16_t *);
-                    b = source[cur_wave_i];
-                    c = source[cur_wave_i+1];
-                    sample = (((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b;
+            int32_t loopStartIdx = (int32_t)((this_voice->NoteLoopPtr - this_voice->NotePtr) >> 1);
+            int32_t loopEndIdx = (int32_t)((this_voice->NoteLoopEnd - this_voice->NotePtr) >> 1);
+            int32_t totalFrames = (int32_t)((this_voice->NotePtrEnd - this_voice->NotePtr) >> 1);
                     dest[0] += (sample * amplitude) >> 4;
                     destReverb[0] += (sample * amplitudeReverb) >> 4;
                     destChorus[0] += (sample * amplitudeChorus) >> 4;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
                             
                     THE_CHECK_U3232(int16_t *);
-                    b = source[cur_wave_i];
-                    c = source[cur_wave_i+1];
+                                U32 next_wave_i = cur_wave_i + 1;
+                                if (looping && (next_wave_i >= end_wave))
+                                {
+                                    next_wave_i -= wave_adjust;
+                                }
+                                b = source[cur_wave_i * 2];
+                                c = source[next_wave_i * 2];
                     sample = (((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b;
                     dest[1] += (sample * amplitude) >> 4;
                     destReverb[1] += (sample * amplitudeReverb) >> 4;
                     destChorus[1] += (sample * amplitudeChorus) >> 4;
                     ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
-
+                                c = source[next_wave_i * 2 + 1];
                     THE_CHECK_U3232(int16_t *);
                     b = source[cur_wave_i];
                     c = source[cur_wave_i+1];

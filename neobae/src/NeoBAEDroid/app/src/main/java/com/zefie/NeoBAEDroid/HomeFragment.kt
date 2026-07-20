@@ -238,6 +238,8 @@ class HomeFragment : Fragment() {
         var fixPanLfoBias = mutableStateOf(true)
         // Classic chorus ordering (off by default)
         var classicChorus = mutableStateOf(false)
+        // Route DLS banks through FluidSynth instead of native DLS loader (off by default)
+        var useFluidSynthForDLS = mutableStateOf(false)
 
         private const val PREF_NAME = "NeoBAE_prefs"
         private const val KEY_ENABLE_AUDIO_FILES = "enable_audio_files"
@@ -871,6 +873,7 @@ class HomeFragment : Fragment() {
                     velocityCurve.value = prefs.getInt("velocity_curve", 1) // Default to 2nd option
                     fixPanLfoBias.value = prefs.getBoolean("fix_pan_lfo_bias", true)
                     classicChorus.value = prefs.getBoolean("classic_chorus", false)
+                    useFluidSynthForDLS.value = prefs.getBoolean("use_fluidsynth_for_dls", false)
                     exportCodec.value = prefs.getInt("export_codec", 2) // Default to OGG
                     baeScriptEnabled.value = prefs.getBoolean("baescript_enabled", false)
                     baeScriptSource.value = prefs.getString("baescript_source", "") ?: ""
@@ -1161,6 +1164,7 @@ class HomeFragment : Fragment() {
                         velocityCurve = velocityCurve.value,
                         fixPanLfoBias = fixPanLfoBias.value,
                         classicChorus = classicChorus.value,
+                        useFluidSynthForDLS = useFluidSynthForDLS.value,
                         exportCodec = exportCodec.value,
                         baeScriptEnabled = baeScriptEnabled.value,
                         baeScriptSource = baeScriptSource.value,
@@ -1197,7 +1201,7 @@ class HomeFragment : Fragment() {
                             // Persist the preference and apply it to the active song if present.
                             try {
                                 currentSong?.let { song ->
-                                    if (song.isSF2Song()) {
+                                    if (song.isSF2Song() || song.isDLSSong()) {
                                         song.setVelocityCurve(0)
                                     } else {
                                         song.setVelocityCurve(value)
@@ -1218,6 +1222,12 @@ class HomeFragment : Fragment() {
                             Mixer.setClassicChorus(enabled)
                             val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
                             prefs.edit().putBoolean("classic_chorus", enabled).apply()
+                        },
+                        onUseFluidSynthForDLSChange = { enabled ->
+                            useFluidSynthForDLS.value = enabled
+                            Mixer.setUseFluidSynthForDLS(enabled)
+                            val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                            prefs.edit().putBoolean("use_fluidsynth_for_dls", enabled).apply()
                         },
                         onExportCodecChange = { value ->
                             exportCodec.value = value
@@ -1587,6 +1597,7 @@ class HomeFragment : Fragment() {
                                         Mixer.setDefaultReverb(reverbType.value)
                                         Mixer.setSpanDCFix(fixPanLfoBias.value)
                                         Mixer.setClassicChorus(classicChorus.value)
+                                        Mixer.setUseFluidSynthForDLS(useFluidSynthForDLS.value)
                                         // Re-apply Neo Reverb custom parameters after mixer recreation.
                                         val prefs = ctx.getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
                                         val currentReverb = prefs.getInt("default_reverb", reverbType.value)
@@ -1695,7 +1706,7 @@ class HomeFragment : Fragment() {
                         applyVolume()
                         
                         // Apply velocity curve
-                        if (song.isSF2Song()) {
+                        if (song.isSF2Song() || song.isDLSSong()) {
                             song.setVelocityCurve(0)
                         } else {
                             song.setVelocityCurve(velocityCurve.value)
@@ -1851,7 +1862,7 @@ class HomeFragment : Fragment() {
         // Android-only: HSB banks are noticeably quieter than SF2. Use a post-mix output gain boost
         // (implemented in the native Android audio callback) so we are not dependent on master-volume
         // clamping/normalization inside the engine.
-        val shouldBoostHsb = isHsbBank && (currentSong != null) && (currentSong?.isSF2Song() == false)
+        val shouldBoostHsb = isHsbBank && (currentSong != null) && (currentSong?.isSF2Song() == false) && (currentSong?.isDLSSong() == false)
         Mixer.setAndroidHsbBoostEnabled(shouldBoostHsb)
         Mixer.setGlobalVolumePercent(basePercent)
     }
@@ -2216,10 +2227,14 @@ class HomeFragment : Fragment() {
                 val classicChorusPref = prefs.getBoolean("classic_chorus", false)
                 HomeFragment.classicChorus.value = classicChorusPref
                 Mixer.setClassicChorus(classicChorusPref)
+                // Restore FluidSynth-for-DLS setting
+                val useFluidSynthForDLSPref = prefs.getBoolean("use_fluidsynth_for_dls", false)
+                HomeFragment.useFluidSynthForDLS.value = useFluidSynthForDLSPref
+                Mixer.setUseFluidSynthForDLS(useFluidSynthForDLSPref)
                 // If we have an active song, apply the curve immediately.
                 try {
                     currentSong?.let { song ->
-                        if (song.isSF2Song()) {
+                        if (song.isSF2Song() || song.isDLSSong()) {
                             song.setVelocityCurve(0)
                         } else {
                             song.setVelocityCurve(velocityCurvePref)
@@ -3400,6 +3415,7 @@ class HomeFragment : Fragment() {
                                     Mixer.setDefaultReverb(reverbType.value)
                                     Mixer.setSpanDCFix(fixPanLfoBias.value)
                                     Mixer.setClassicChorus(classicChorus.value)
+                                    Mixer.setUseFluidSynthForDLS(useFluidSynthForDLS.value)
                                     val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
                                     val currentReverb = prefs.getInt("default_reverb", reverbType.value)
                                     if (currentReverb == CUSTOM_REVERB_TYPE) {
@@ -3569,6 +3585,7 @@ class HomeFragment : Fragment() {
                                 Mixer.setDefaultReverb(reverbType.value)
                                 Mixer.setSpanDCFix(fixPanLfoBias.value)
                                 Mixer.setClassicChorus(classicChorus.value)
+                                Mixer.setUseFluidSynthForDLS(useFluidSynthForDLS.value)
                                 val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
                                 val currentReverb = prefs.getInt("default_reverb", reverbType.value)
                                 if (currentReverb == CUSTOM_REVERB_TYPE) {
@@ -4124,6 +4141,7 @@ fun NewMusicPlayerScreen(
     velocityCurve: Int,
     fixPanLfoBias: Boolean,
     classicChorus: Boolean,
+    useFluidSynthForDLS: Boolean,
     exportCodec: Int,
     baeScriptEnabled: Boolean,
     baeScriptSource: String,
@@ -4134,6 +4152,7 @@ fun NewMusicPlayerScreen(
     onCurveChange: (Int) -> Unit,
     onFixPanLfoChange: (Boolean) -> Unit,
     onClassicChorusChange: (Boolean) -> Unit,
+    onUseFluidSynthForDLSChange: (Boolean) -> Unit,
     onExportCodecChange: (Int) -> Unit,
     onBaeScriptEnabledChange: (Boolean) -> Unit,
     onBaeScriptSourceChange: (String) -> Unit,
@@ -4638,6 +4657,7 @@ fun NewMusicPlayerScreen(
                     velocityCurve = velocityCurve,
                     fixPanLfoBias = fixPanLfoBias,
                     classicChorus = classicChorus,
+                    useFluidSynthForDLS = useFluidSynthForDLS,
                     exportCodec = exportCodec,
                     baeScriptEnabled = baeScriptEnabled,
                     baeScriptSource = baeScriptSource,
@@ -4648,6 +4668,7 @@ fun NewMusicPlayerScreen(
                     onCurveChange = onCurveChange,
                     onFixPanLfoChange = onFixPanLfoChange,
                     onClassicChorusChange = onClassicChorusChange,
+                    onUseFluidSynthForDLSChange = onUseFluidSynthForDLSChange,
                     onVolumeChange = onVolumeChange,
                     onExportCodecChange = onExportCodecChange,
                     onBaeScriptEnabledChange = onBaeScriptEnabledChange,
@@ -6995,6 +7016,7 @@ fun SettingsScreenContent(
     velocityCurve: Int,
     fixPanLfoBias: Boolean,
     classicChorus: Boolean,
+    useFluidSynthForDLS: Boolean,
     exportCodec: Int,
     baeScriptEnabled: Boolean,
     baeScriptSource: String,
@@ -7005,6 +7027,7 @@ fun SettingsScreenContent(
     onCurveChange: (Int) -> Unit,
     onFixPanLfoChange: (Boolean) -> Unit,
     onClassicChorusChange: (Boolean) -> Unit,
+    onUseFluidSynthForDLSChange: (Boolean) -> Unit,
     onVolumeChange: (Int) -> Unit,
     onExportCodecChange: (Int) -> Unit,
     onBaeScriptEnabledChange: (Boolean) -> Unit,
@@ -8795,6 +8818,48 @@ fun SettingsScreenContent(
             }
         }
         
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = 4.dp,
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onUseFluidSynthForDLSChange(!useFluidSynthForDLS) },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Filled.Tune,
+                        contentDescription = null,
+                        tint = MaterialTheme.colors.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Use FluidSynth for DLS",
+                        style = MaterialTheme.typography.h6,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colors.primary,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Checkbox(
+                        checked = useFluidSynthForDLS,
+                        onCheckedChange = { onUseFluidSynthForDLSChange(it) }
+                    )
+                }
+                Text(
+                    text = "When enabled, DLS banks are handled by FluidSynth. When disabled, DLS uses the native NeoBAE DLS loader.",
+                    style = MaterialTheme.typography.caption,
+                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
         
         // About Section (same for both orientations)

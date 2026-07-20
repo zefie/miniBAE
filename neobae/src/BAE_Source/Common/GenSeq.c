@@ -371,6 +371,9 @@
 #include "GenCache.h"
 #include "GenPriv.h"
 #include "X_Formats.h"
+#if USE_NATIVE_DLS == TRUE
+#include "GenDLS_MobileBAE.h"
+#endif
 #include "BAE_API.h"
 #include "X_Assert.h"
 #if USE_SF2_SUPPORT == TRUE
@@ -1230,6 +1233,59 @@ void GM_GetRealtimeChannelLevels(float left[16], float right[16])
     }
 #endif // USE_SF2_SUPPORT
 
+#if USE_NATIVE_DLS == TRUE
+    // Process native DLS voices and overwrite channels that have active DLS output
+    if (pMixer->pDLSSynth) {
+        DLS_Synth *dlsSynth = (DLS_Synth *)pMixer->pDLSSynth;
+        double dlsSumL[16] = {0}, dlsSumR[16] = {0};
+        int dlsCounts[16] = {0};
+
+        for (int i = 0; i < 256; ++i) {
+            DLS_Voice *v = &dlsSynth->voices[i];
+            if (!v->active) {
+                continue;
+            }
+            int ch = v->channel;
+            if (ch < 0 || ch >= 16) {
+                continue;
+            }
+
+            double aL = (double)v->lastLeftSample;
+            double aR = (double)v->lastRightSample;
+            if (aL < 0.0) {
+                aL = -aL;
+            }
+            if (aR < 0.0) {
+                aR = -aR;
+            }
+            dlsSumL[ch] += aL * aL;
+            dlsSumR[ch] += aR * aR;
+            dlsCounts[ch]++;
+        }
+
+        double dlsMaxVal = 1e-12;
+        double dlsRmsL[16], dlsRmsR[16];
+        for (int ch = 0; ch < 16; ++ch) {
+            if (dlsCounts[ch] > 0) {
+                dlsRmsL[ch] = sqrt(dlsSumL[ch] / (double)dlsCounts[ch]);
+                dlsRmsR[ch] = sqrt(dlsSumR[ch] / (double)dlsCounts[ch]);
+                if (dlsRmsL[ch] > dlsMaxVal) dlsMaxVal = dlsRmsL[ch];
+                if (dlsRmsR[ch] > dlsMaxVal) dlsMaxVal = dlsRmsR[ch];
+            } else {
+                dlsRmsL[ch] = 0.0;
+                dlsRmsR[ch] = 0.0;
+            }
+        }
+
+        for (int ch = 0; ch < 16; ++ch) {
+            if (dlsCounts[ch] > 0) {
+                left[ch] = (float)(dlsRmsL[ch] / dlsMaxVal);
+                right[ch] = (float)(dlsRmsR[ch] / dlsMaxVal);
+            }
+        }
+    }
+#endif
+
     // Final clamp
     for (int ch = 0; ch < 16; ++ch) {
         if (left[ch] < 0.f) left[ch] = 0.f; else if (left[ch] > 1.f) left[ch] = 1.f;
@@ -1951,7 +2007,9 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                 }
                 else
 #endif
-                if (GM_IsSF2Song(pSong))
+                if (0) {}
+#if USE_SF2_SUPPORT == TRUE
+                else if (GM_IsSF2Song(pSong))
                 {
                     // If SF2 is active for this song, send program change to SF2
                     pSong->channelType[MIDIChannel] = CHANNEL_TYPE_SF2;
@@ -1959,6 +2017,24 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                     debug_message("ProcessProgramChange Debug: Channel %d is using SF2 Instrument (bank=%d prog=%d)\n", MIDIChannel, theBank, thePatch);
                     GM_SF2_ProcessProgramChange(pSong, MIDIChannel, combinedProgram);
                 }
+#endif
+#if USE_NATIVE_DLS == TRUE
+                else if (GM_IsDLSSong(pSong))
+                {
+                    // Native DLS path with SF2-style fallback: DLS when preset exists,
+                    // otherwise fall back to built-in wavetable (GM).
+                    int32_t combinedProgram = (theBank * 128) + thePatch;
+                    GM_DLS_ProcessProgramChange(pSong, MIDIChannel, combinedProgram);
+                    if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)thePatch))
+                    {
+                        pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
+                    }
+                    else
+                    {
+                        pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
+                    }
+                }
+#endif
                 else
                 {
                     // HSB mode without overlay - use native synthesis
@@ -2227,15 +2303,25 @@ static void PV_ProcessNoteOff(GM_Song *pSong, int16_t MIDIChannel, int16_t curre
                 note += pSong->songPitchShift;
             }
             
+            if (0) {}
 #if USE_SF2_SUPPORT == TRUE
             // If SF2 is active for this song OR channel is routed to SF2, route to SF2 instead
-            if ((GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2) && pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF)
+            else if ((GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2) && pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF)
             {
                 GM_SF2_ProcessNoteOff(pSong, MIDIChannel, note, volume);
             }
 #endif
-            thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
-            PV_StopMIDINote(pSong, thePatch, MIDIChannel, currentTrack, note);
+#if USE_NATIVE_DLS == TRUE
+            else if ((GM_IsDLSSong(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_DLS) && pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF)
+            {
+                GM_DLS_ProcessNoteOff(pSong, MIDIChannel, note, volume);
+            }
+#endif
+            else
+            {
+                thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
+                PV_StopMIDINote(pSong, thePatch, MIDIChannel, currentTrack, note);
+            }
         }
         else
         {
@@ -2279,10 +2365,10 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                 {
                     note += pSong->songPitchShift;
                 }
+                if (0) {}
 #if USE_SF2_SUPPORT == TRUE
-
                 // If SF2 is active for this song OR channel is routed to SF2, route to SF2 synthesis
-                if (GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2)
+                else if (GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2)
                 {
                     // adding this pleases the compiler
                     // warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
@@ -2323,6 +2409,62 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                 }
                 else
 #endif
+#if USE_NATIVE_DLS == TRUE
+                if ((GM_IsDLSSong(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_DLS) &&
+                    pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF)
+                {
+                    if (pSong->songFlags & SONG_FLAG_IS_RMF)
+                    {
+                        int16_t rmfPatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
+                        if (PV_ShouldUseRMFInstrumentForPatch(pSong, rmfPatch))
+                        {
+                            pSong->channelType[MIDIChannel] = CHANNEL_TYPE_RMF;
+                        }
+                        else
+                        {
+                            int16_t checkProgram = pSong->channelProgram[MIDIChannel];
+                            if (checkProgram < 0) { checkProgram = 0; }
+                            if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)checkProgram))
+                            {
+                                pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
+                            }
+                            else
+                            {
+                                pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        int16_t checkProgram = pSong->channelProgram[MIDIChannel];
+                        if (checkProgram < 0) { checkProgram = 0; }
+                        if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)checkProgram))
+                        {
+                            pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
+                        }
+                        else
+                        {
+                            pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
+                        }
+                    }
+
+                    if (pSong->channelType[MIDIChannel] == CHANNEL_TYPE_RMF)
+                    {
+                        thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
+                        PV_StartMIDINote(pSong, thePatch, MIDIChannel, currentTrack, note, volume);
+                    }
+                    else if (pSong->channelType[MIDIChannel] == CHANNEL_TYPE_DLS)
+                    {
+                        GM_DLS_ProcessNoteOn(pSong, MIDIChannel, note, volume);
+                    }
+                    else
+                    {
+                        thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
+                        PV_StartMIDINote(pSong, thePatch, MIDIChannel, currentTrack, note, volume);
+                    }
+                }
+                else
+#endif                
                 {
                     thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
                     PV_StartMIDINote(pSong, thePatch, MIDIChannel, currentTrack, note, volume);
@@ -2376,11 +2518,21 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
 // Process pitch bend
 static void PV_ProcessPitchBend(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTrack, unsigned char valueMSB, unsigned char valueLSB)
 {
+    if (0) {}
 #if USE_SF2_SUPPORT == TRUE
     // If SF2 is active for this song, send pitch bend to SF2
-    if (GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2)
+    else if (GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2)
     {
         GM_SF2_ProcessPitchBend(pSong, MIDIChannel, valueMSB, valueLSB);
+    }
+    else
+#endif
+#if USE_DLS_SUPPORT == TRUE
+    if ((GM_IsDLSSong(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_DLS) &&
+        pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF)
+    {
+        uint16_t bend = (valueMSB << 7) | valueLSB;
+        GM_DLS_ProcessPitchBend(pSong, MIDIChannel, bend);
     }
 #endif
         
@@ -2504,8 +2656,9 @@ void PV_ProcessController(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTr
     unsigned char valueLSB, valueMSB;
     int16_t valueB;
 
+    if (0) {}
 #if USE_SF2_SUPPORT == TRUE
-    if (GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2)
+    else if (GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2)
     {
         if (pSong->songFlags & SONG_FLAG_IS_RMF) {
             if (controller == 0 && (value == 1 || value == 2)) {
@@ -2561,8 +2714,16 @@ void PV_ProcessController(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTr
         //if (pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF) {
         //    return;
         //}
-    }    
+    }
+    else
 #endif
+#if USE_NATIVE_DLS == TRUE
+    if ((GM_IsDLSSong(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_DLS) &&
+        pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF)
+    {
+        GM_DLS_ProcessController(pSong, MIDIChannel, controller, value);
+    }
+#endif    
     switch (controller)
     {
             
@@ -3534,6 +3695,35 @@ static void PV_ProcessExternalMIDIQueue(GM_Song *pSong)
             }
                 PV_ProcessPitchBend(pSong, event.midiChannel, -1, event.byte1, event.byte2);
                 break;
+            case B_POLY_AFTERTOUCH:
+            {
+                unsigned char msg[3];
+                msg[0] = (unsigned char)(0xA0 | (event.midiChannel & 0x0F));
+                msg[1] = event.byte1;
+                msg[2] = event.byte2;
+                PV_CallMidiEventCallback(NULL, pSong, msg, 3);
+            }
+#if USE_DLS_SUPPORT == TRUE
+                if (GM_IsDLSSong(pSong) || pSong->channelType[event.midiChannel] == CHANNEL_TYPE_DLS)
+                {
+                    GM_DLS_ProcessKeyPressure(pSong, event.midiChannel, event.byte1, event.byte2);
+                }
+#endif
+                break;
+            case B_CHANNEL_AFTERTOUCH:
+            {
+                unsigned char msg[2];
+                msg[0] = (unsigned char)(0xD0 | (event.midiChannel & 0x0F));
+                msg[1] = event.byte1;
+                PV_CallMidiEventCallback(NULL, pSong, msg, 2);
+            }
+#if USE_DLS_SUPPORT == TRUE
+                if (GM_IsDLSSong(pSong) || pSong->channelType[event.midiChannel] == CHANNEL_TYPE_DLS)
+                {
+                    GM_DLS_ProcessChannelPressure(pSong, event.midiChannel, event.byte1);
+                }
+#endif
+                break;
             }
         }
     }
@@ -4455,10 +4645,38 @@ OPErr PV_ProcessMidiSequencerSlice(void *threadContext, GM_Song *pSong)
                 PV_ProcessPitchBend(pSong, MIDIChannel, (int16_t)currentTrack, valueMSB, valueLSB);
                 break;
             case 0xA0:            // ��  Key Pressure
-                midi_stream += 2; // note, key pressure
+                valueMSB = *midi_stream++;
+                valueLSB = *midi_stream++;
+                {
+                    unsigned char msg[3];
+                    msg[0] = (unsigned char)(0xA0 | (MIDIChannel & 0x0F));
+                    msg[1] = (unsigned char)valueMSB;
+                    msg[2] = (unsigned char)valueLSB;
+                    PV_CallMidiEventCallback(threadContext, pSong, msg, 3);
+                }
+#if USE_DLS_SUPPORT == TRUE
+                if ((GM_IsDLSSong(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_DLS) &&
+                    pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF)
+                {
+                    GM_DLS_ProcessKeyPressure(pSong, MIDIChannel, (uint16_t)valueMSB, (uint16_t)valueLSB);
+                }
+#endif
                 break;
             case 0xD0: // �� ChannelPressure
-                midi_stream++;
+                value = *midi_stream++;
+                {
+                    unsigned char msg[2];
+                    msg[0] = (unsigned char)(0xD0 | (MIDIChannel & 0x0F));
+                    msg[1] = (unsigned char)value;
+                    PV_CallMidiEventCallback(threadContext, pSong, msg, 2);
+                }
+#if USE_DLS_SUPPORT == TRUE
+                if ((GM_IsDLSSong(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_DLS) &&
+                    pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF)
+                {
+                    GM_DLS_ProcessChannelPressure(pSong, MIDIChannel, (uint16_t)value);
+                }
+#endif
                 break;
             case 0xF7: // �� System Exclusive
             case 0xF0: // �� System Exclusive
@@ -4724,6 +4942,13 @@ void GM_MuteChannel(GM_Song *pSong, short int channel)
         {
             // For SF2 songs, aggressively silence and also end legacy voices to ensure engine note-offs
             GM_SF2_AllNotesOffChannel(pSong, channel);
+        }
+#endif
+#if USE_NATIVE_DLS == TRUE
+        if (GM_IsDLSSong(pSong) || pSong->channelType[channel] == CHANNEL_TYPE_DLS)
+        {
+            // DLS voices are managed outside legacy NoteEntry, so explicitly stop the DLS channel.
+            GM_DLS_AllNotesOff(pSong, channel, true);
         }
 #endif
         if (pSong)

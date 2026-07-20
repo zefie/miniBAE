@@ -375,8 +375,8 @@ class MainActivity : AppCompatActivity() {
             val isHsbBank = lastBankPath == "__builtin__" || (lastBankPath?.endsWith(".hsb", ignoreCase = true) == true)
 
             // Android-only: boost output 2x in HSB mode (HSB banks are quieter).
-            // Keep SF2 (fluidsynth) behavior unchanged.
-            val shouldBoostHsb = isHsbBank && loadResult.isSong && (loadResult.song?.isSF2Song() == false)
+            // Keep SF2/DLS (fluidsynth) behavior unchanged.
+            val shouldBoostHsb = isHsbBank && loadResult.isSong && (loadResult.song?.isSF2Song() == false) && (loadResult.song?.isDLSSong() == false)
             Mixer.setAndroidHsbBoostEnabled(shouldBoostHsb)
 
             Mixer.setMasterVolumePercent(volumePercent)
@@ -419,7 +419,7 @@ class MainActivity : AppCompatActivity() {
                 currentSound = null
 
                 // Match HomeFragment behavior: SF2 songs force curve 0
-                if (song.isSF2Song()) {
+                if (song.isSF2Song() || song.isDLSSong()) {
                     song.setVelocityCurve(0)
                 } else {
                     song.setVelocityCurve(velocityCurve)

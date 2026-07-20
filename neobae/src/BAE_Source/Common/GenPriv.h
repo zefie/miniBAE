@@ -762,6 +762,8 @@ struct GM_Mixer
 #if USE_SF2_SUPPORT == TRUE
     bool               isSF2;
 #endif
+    bool               isDLS;
+    struct DLS_Synth*  pDLSSynth;
 
 // MIDI Interpreter variables
     GM_Song             *pSongsToPlay[MAX_SONGS];       // number of songs to play at once

@@ -82,8 +82,8 @@ bool g_midi_input_enabled = false;         // enable external MIDI input keyboar
 bool g_midi_output_enabled = false;        // enable external MIDI output
 int g_midi_input_device_index = 0;         // selected input device index
 int g_midi_output_device_index = 0;        // selected output device index
-bool g_midi_input_device_dd_open = false;  // dropdown open state
-bool g_midi_output_device_dd_open = false; // dropdown open state for output
+extern bool g_midi_input_device_dd_open;  // dropdown open state
+extern bool g_midi_output_device_dd_open; // dropdown open state for output
 int g_midi_input_device_count = 0;         // cached input device count
 int g_midi_output_device_count = 0;        // cached output device count
 
