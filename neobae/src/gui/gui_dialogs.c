@@ -265,6 +265,16 @@ static const char AUDIO_EXT_FILTER[] =
 #else
     ""
 #endif
+#if USE_ADP_SUPPORT == TRUE
+    "*.adp;"
+#else
+    ""
+#endif
+#if USE_ADX_SUPPORT == TRUE
+    "*.adx;"
+#else
+    ""
+#endif
 #if USE_ZMF_SUPPORT == TRUE
     "*.zmf;"
 #else

@@ -2158,6 +2158,17 @@ snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", (
         first = FALSE;
     }
 
+#if USE_ADX_SUPPORT == TRUE
+    const char *adx = "CRI ADX Support";
+#else
+    const char *adx = NULL;
+#endif    
+    if (adx && adx[0])
+    {
+        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", adx);
+        first = FALSE;
+    }
+
     // SF2 support
 #if _USING_FLUIDSYNTH == TRUE
     char *sf2supp = NULL;
