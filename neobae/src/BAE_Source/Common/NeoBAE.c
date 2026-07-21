@@ -2922,6 +2922,15 @@ bool BAESong_IsSF2Song(BAESong song)
         return FALSE;
     return GM_IsSF2Song(song->pSong);
 }
+#endif
+
+#if USE_NATIVE_DLS == TRUE
+bool BAESong_IsDLSSong(BAESong song)
+{
+    if (!song || !song->pSong)
+        return FALSE;
+    return GM_IsDLSSong(song->pSong);
+}
 #endif 
 
 // Translate from BAEResult to OPErr

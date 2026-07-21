@@ -85,6 +85,7 @@ LOCAL_SRC_FILES	:= \
 			Common/GenSynthFiltersU3232.c \
 			Common/GenSynthInterp2Simple.c \
 			Common/GenSynthInterp2U3232.c \
+			Common/GenDLS_MobileBAE.c \
 			Common/GenSF2_FluidSynth.c \
 			Common/GenRMI.c \
       		Common/GenXMF.c \
@@ -102,6 +103,7 @@ LOCAL_SRC_FILES	:= \
 			Common/g723_40.c \
 			Common/g72x.c \
 			Common/sha1mini.c \
+			Common/XADXFiles.c \
 			Common/XFileTypes.c \
       		Common/XVorbisFiles.c \
 			Common/XOpusFiles.c \
@@ -228,10 +230,11 @@ LOCAL_CFLAGS := -std=c99 -O2 -D_VERSION=\"$(VERSION)\" \
 	-DUSE_XMF_SUPPORT=1 -DUSE_HIGHLEVEL_FILE_API=1 -DSUPPORT_KARAOKE=1 \
 	-DUSE_OPUS_DECODER=1 -DUSE_LZMA_COMPRESSION=1 -DUSE_ZMF_FORMAT=1 \
 	-DBAE_FIX_SPAN_DC=1 -DBAE_CLASSIC_CHORUS=1 -DFLAC__NO_DLL \
-	-D_LOAD_BUILTIN_PATCHES_FOR_SF2=1 -DUSE_MTHC_SUPPORT=1 -DUSE_ADP_SUPPORT=1 \
+	-D_LOAD_BUILTIN_PATCHES_FOR_SF2=1 -D_LOAD_BUILTIN_PATCHES_FOR_DLS=1 \
+	-DUSE_MTHC_SUPPORT=1 -DUSE_ADP_SUPPORT=1 -DUSE_NATIVE_DLS=1 \
 	-DUSE_RETRO_RINGTONE_SUPPORT=1 -DUSE_QOA_SUPPORT=1 -DUSE_RMI_SUPPORT=1 \
 	-DBAE_ENABLE_ROLLED_MIDI_UNROLL=1 -DUSE_J2ME_PATCH=1 \
-	-DHAVE_CONFIG_H=1 -Wall -fsigned-char -DZ7_ST
+	-DHAVE_CONFIG_H=1 -Wall -fsigned-char -DZ7_ST -DUSE_ADX_SUPPORT=1
 
 ifeq ($(APP_OPTIM),debug)
     LOCAL_CFLAGS += -D_DEBUG=1

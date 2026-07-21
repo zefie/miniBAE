@@ -2909,6 +2909,10 @@ extern "C"
     bool BAESong_IsSF2Song(BAESong song);
 #endif
 
+#if USE_NATIVE_DLS == TRUE
+    bool BAESong_IsDLSSong(BAESong song);
+#endif
+
 // Content-based file type detection functions
 BAEFileType X_DetermineFileType(const char *filePath);
 BAEFileType X_DetermineFileTypeByPath(const char *filePath);

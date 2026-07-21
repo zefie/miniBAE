@@ -360,3 +360,12 @@ JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Song__1isSF2Song(JNIEnv* env, j
     bool isSF2 = BAESong_IsSF2Song(song);
     return (isSF2) ? JNI_TRUE : JNI_FALSE;
 }
+
+// Check if song is Native DLS
+JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Song__1isDLSSong(JNIEnv* env, jclass clazz, jlong songRef){
+    (void)env; (void)clazz;
+    if(songRef == 0){ return JNI_FALSE; }
+    BAESong song = (BAESong)(intptr_t)songRef;
+    bool isDLS = BAESong_IsDLSSong(song);
+    return (isDLS) ? JNI_TRUE : JNI_FALSE;
+}

@@ -569,6 +569,11 @@ JNIEXPORT jstring JNICALL Java_com_zefie_NeoBAE_Mixer__1getBankFriendlyName
 #endif
 #if USE_NATIVE_DLS == TRUE
 	if (isDLS && !g_useFluidSynthForDLS) {
+		#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_DLS == TRUE
+        	BAEBankToken token = NULL;
+        	BAEMixer_LoadBuiltinBank(mixer, token);
+			BAEMixer_SendBankToBack(mixer, token);
+		#endif
 		BAEResult dlsResult = BAEMixer_LoadDLSBankFromMemory(mixer, (void*)mem, (uint32_t)read_total);
 		free(mem);
 		(*env)->ReleaseStringUTFChars(env, assetName, aname);
@@ -678,7 +683,7 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemory
 #endif
 
 #if USE_NATIVE_DLS == TRUE
-	if (!g_useFluidSynthForDLS && len >= 12) {
+	if (isDLS && !g_useFluidSynthForDLS && len >= 12) {
 		unsigned char *ubytes = (unsigned char*)bytes;
 		if (ubytes[0] == 'R' && ubytes[1] == 'I' && ubytes[2] == 'F' && ubytes[3] == 'F' &&
 			ubytes[8] == 'D' && ubytes[9] == 'L' && ubytes[10] == 'S' && ubytes[11] == ' ') {
