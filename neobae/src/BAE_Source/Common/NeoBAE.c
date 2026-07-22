@@ -2172,6 +2172,17 @@ snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", (
         first = FALSE;
     }
 
+#if USE_NATIVE_DLS == TRUE
+    const char *native_dls = "Native DLS Support";
+#else
+    const char *native_dls = NULL;
+#endif    
+    if (native_dls && native_dls[0])
+    {
+        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", native_dls);
+        first = FALSE;
+    }
+
     // SF2 support
 #if _USING_FLUIDSYNTH == TRUE
     char *sf2supp = NULL;
