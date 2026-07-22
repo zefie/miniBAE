@@ -379,8 +379,13 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromFile
 	
 	// Check if this is an SF2/DLS file (requires FluidSynth)
 	const char *ext = strrchr(cpath, '.');
+	bool isDLS = (ext && (strcasecmp(ext, ".dls") == 0));
 	
 	BAEMixer_UnloadBanks(mixer);
+#if USE_NATIVE_DLS == TRUE
+	GM_SetMixerDLSMode(FALSE);
+	BAEMixer_UnloadDLSBank(mixer);
+#endif
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
 	GM_UnloadSF2Soundfont();
 	GM_SetMixerSF2Mode(FALSE);
@@ -389,7 +394,7 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromFile
 		strcasecmp(ext, ".sf2") == 0 ||
 		strcasecmp(ext, ".sf3") == 0 ||
 		strcasecmp(ext, ".sfo") == 0 ||
-		(strcasecmp(ext, ".dls") == 0 && g_useFluidSynthForDLS)
+		(isDLS && g_useFluidSynthForDLS)
 	))
 	{
 		
@@ -415,6 +420,37 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromFile
 		strncpy(g_lastBankFriendly, base, sizeof(g_lastBankFriendly)-1);
 		g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
 		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "SF2 bank loaded: %s", cpath);
+		(*env)->ReleaseStringUTFChars(env, path, cpath);
+		return 0;
+	}
+#endif
+
+#if USE_NATIVE_DLS == TRUE
+	if (isDLS && !g_useFluidSynthForDLS)
+	{
+#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_DLS == TRUE
+		BAEBankToken token = NULL;
+		BAEMixer_LoadBuiltinBank(mixer, token);
+		BAEMixer_SendBankToBack(mixer, token);
+#endif
+		BAEResult dlsResult = BAEMixer_LoadDLSBank(mixer, cpath);
+		if (dlsResult != BAE_NO_ERROR)
+		{
+			(*env)->ReleaseStringUTFChars(env, path, cpath);
+			__android_log_print(ANDROID_LOG_ERROR, "NeoBAE", "Native DLS bank load failed: %d", dlsResult);
+			return (jint)dlsResult;
+		}
+
+		GM_SetMixerDLSMode(TRUE);
+
+		const char *base = cpath;
+		for (const char *p = cpath; *p; ++p) {
+			if (*p == '/' || *p == '\\') base = p + 1;
+		}
+		strncpy(g_lastBankFriendly, base, sizeof(g_lastBankFriendly)-1);
+		g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
+
+		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Native DLS bank loaded: %s", cpath);
 		(*env)->ReleaseStringUTFChars(env, path, cpath);
 		return 0;
 	}
@@ -621,6 +657,7 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemory
 	BAEMixer mixer = (BAEMixer)(intptr_t)reference;
 	if(!mixer) return -1;
 	if(!data) return (jint)BAE_PARAM_ERR;
+	bool isDLS = FALSE;
 
 	jsize len = (*env)->GetArrayLength(env, data);
 	jbyte *bytes = (*env)->GetByteArrayElements(env, data, NULL);
@@ -644,7 +681,7 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemory
 	bool isSF2 = FALSE;
 	if (len >= 12) {
 		unsigned char *ubytes = (unsigned char*)bytes;
-		bool isDLS = (ubytes[8] == 'D' && ubytes[9] == 'L' && ubytes[10] == 'S' && ubytes[11] == ' ');
+		isDLS = (ubytes[8] == 'D' && ubytes[9] == 'L' && ubytes[10] == 'S' && ubytes[11] == ' ');
 		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Magic bytes: %02X %02X %02X %02X ... %02X %02X %02X %02X",
 			ubytes[0], ubytes[1], ubytes[2], ubytes[3], ubytes[8], ubytes[9], ubytes[10], ubytes[11]);
 		if (ubytes[0] == 'R' && ubytes[1] == 'I' && ubytes[2] == 'F' && ubytes[3] == 'F') {

@@ -4,9 +4,22 @@ import android.content.res.AssetManager;
 
 public class Sound
 {
+    // Keep BAESound playback slightly below prior loudness to better match song output.
+    private static final int SOUND_GAIN_TRIM_NUM = 9;
+    private static final int SOUND_GAIN_TRIM_DEN = 10;
+
     private long mReference;
     private ByteBuffer mFile;
     Mixer mMixer;
+
+    private static int applyGainTrim(int fixedVolume)
+    {
+        if (fixedVolume <= 0) return 0;
+        long trimmed = (fixedVolume * (long)SOUND_GAIN_TRIM_NUM) / (long)SOUND_GAIN_TRIM_DEN;
+        if (trimmed <= 0) return 0;
+        if (trimmed > Integer.MAX_VALUE) return Integer.MAX_VALUE;
+        return (int)trimmed;
+    }
 
     private native long _newNativeSound(long mixerReference);
     private native int _loadSound(long soundReference, ByteBuffer fileData);
@@ -67,19 +80,16 @@ public class Sound
     
     public int start(int sampleFrames)
     {
-        // Get current boosted volume to pass to native start method
+        // Use current Sound volume. If native reports 0/unset, fall back to unity.
         int currentVolume = _getSoundVolume(mReference);
-        if (currentVolume == 0 || currentVolume == 0x10000) {
-            // If volume hasn't been set yet (0) or is still default (0x10000), use 100% boosted
-            double engineGain = 1.0;
-            double soundMultiplier = 2.5 * (1.0 + 1.0);
-            double soundGain = engineGain * soundMultiplier;
-            currentVolume = (int)(soundGain * 65536L);
+        if (currentVolume <= 0) {
+            currentVolume = 0x10000;
         }
-        int r = _startSound(mReference, sampleFrames, currentVolume);
+        int startVolume = applyGainTrim(currentVolume);
+        int r = _startSound(mReference, sampleFrames, startVolume);
         // Apply volume again immediately after starting to ensure it persists
-        if (r == 0 && currentVolume != 0) {
-            _setSoundVolume(mReference, currentVolume);
+        if (r == 0 && startVolume != 0) {
+            _setSoundVolume(mReference, startVolume);
         }
         return r;
     }
@@ -113,13 +123,19 @@ public class Sound
         if(percent<0) percent=0; if(percent>100) percent=100;
         // 16.16 fixed where 1.0 == 65536. Map 0..100% -> 0..1.0.
         int fixed = (int)((percent * 65536L) / 100L);
+        fixed = applyGainTrim(fixed);
         return _setSoundVolume(mReference, fixed);
     }
     
     public int getVolumePercent(){ 
         int fixed = _getSoundVolume(mReference); // fixed 16.16
         if(fixed <= 0) return 0;
-        return (int)((fixed * 100L) / 65536L); 
+        // Undo internal trim so UI/user-facing percent remains intuitive.
+        long untrimmed = (fixed * (long)SOUND_GAIN_TRIM_DEN) / (long)SOUND_GAIN_TRIM_NUM;
+        int percent = (int)((untrimmed * 100L) / 65536L);
+        if (percent < 0) percent = 0;
+        if (percent > 100) percent = 100;
+        return percent;
     }
     
     public int getPositionMs() {

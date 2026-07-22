@@ -1964,9 +1964,9 @@ void GM_DLS_ProcessNoteOn(GM_Song* pSong, uint16_t channel, uint16_t note, uint1
         return;
     }
 
-    debug_message("DLS Synth: bank=%d:%d selector=%d program=%d -> instrument bank=%d:%d program=%d\n",
-                  ch->bankMsb, ch->bankLsb, ch->selectedBankSelector, ch->program,
-                  inst->bankMsb, inst->bankLsb, inst->program);
+//    debug_message("DLS Synth: bank=%d:%d selector=%d program=%d -> instrument bank=%d:%d program=%d\n",
+//                  ch->bankMsb, ch->bankLsb, ch->selectedBankSelector, ch->program,
+//                  inst->bankMsb, inst->bankLsb, inst->program);
     
     /* Apply percussion key alias for drum banks to find region,
        but keep original note for voice initialization and pitch */
@@ -1987,8 +1987,8 @@ void GM_DLS_ProcessNoteOn(GM_Song* pSong, uint16_t channel, uint16_t note, uint1
         return;
     }
     
-    debug_message("DLS Synth: region found: keyLow=%d keyHigh=%d velLow=%d velHigh=%d tableIndex=%d\n",
-                  region->keyLow, region->keyHigh, region->velocityLow, region->velocityHigh, region->tableIndex);
+//    debug_message("DLS Synth: region found: keyLow=%d keyHigh=%d velLow=%d velHigh=%d tableIndex=%d\n",
+//                  region->keyLow, region->keyHigh, region->velocityLow, region->velocityHigh, region->tableIndex);
     
     DLS_Wave* wave = NULL;
     if (inst->parentBank && region->tableIndex >= 0 && region->tableIndex < inst->parentBank->waveCount) {

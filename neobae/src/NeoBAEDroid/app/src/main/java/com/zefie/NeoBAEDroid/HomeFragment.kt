@@ -1228,6 +1228,7 @@ class HomeFragment : Fragment() {
                             Mixer.setUseFluidSynthForDLS(enabled)
                             val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
                             prefs.edit().putBoolean("use_fluidsynth_for_dls", enabled).apply()
+                            hotSwapDlsBankEngineIfNeeded()
                         },
                         onExportCodecChange = { value ->
                             exportCodec.value = value
@@ -1742,10 +1743,10 @@ class HomeFragment : Fragment() {
                             if (song.hasEmbeddedBank()) {
                                 currentBankName.value = "Embedded Bank"
                             }
-                            if (song.isSF2Song()) {
+                            if (song.isSF2Song() || song.isDLSSong()) {
                                 song.pause()
                                 song.seekToMs(0)
-                                // Workaround for Fluidsynth drop: call start() again after 250ms
+                                // Workaround for synth startup drop: resume after a short delay.
                                 android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                                     try {
                                         song.resume()
@@ -2290,6 +2291,21 @@ class HomeFragment : Fragment() {
         } catch (_: Throwable) {
             -1
         }
+    }
+
+    private fun hotSwapDlsBankEngineIfNeeded() {
+        val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+        val lastBankPath = prefs.getString("last_bank_path", null) ?: return
+
+        if (lastBankPath == "__builtin__") return
+        if (!lastBankPath.endsWith(".dls", ignoreCase = true)) return
+        if (Mixer.getMixer() == null) return
+
+        val dlsFile = File(lastBankPath)
+        if (!dlsFile.exists() || !dlsFile.isFile) return
+
+        // Reuse the existing bank swap flow so playback pause/reload behavior matches manual bank loads.
+        loadBankFromFile(dlsFile)
     }
     
     private fun getMusicDir(): File? {
