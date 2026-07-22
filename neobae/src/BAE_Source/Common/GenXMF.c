@@ -1142,25 +1142,32 @@ static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
 {
 #if (USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE) || USE_NATIVE_DLS == TRUE
     static int s_packedBankProbeDepth = 0;
+
+    if (!buf || len < 8)
+    {
+        return FALSE;
+    }
+
+    // XMF v1/v2 may store bank payloads in compressed resources.
+    // Probe packed streams once before RIFF scanning, and guard recursion.
+    if (s_packedBankProbeDepth == 0)
+    {
+        s_packedBankProbeDepth++;
+        if (PV_TryLoadBankFromPackedBlob(buf, len) == TRUE)
+        {
+            s_packedBankProbeDepth--;
+            return TRUE;
+        }
+        s_packedBankProbeDepth--;
+    }
+
     // Collect RIFF SF2/DLS candidates and try them in priority order
     typedef struct { uint32_t off, bytes; bool isDLS, hasWvpl; uint64_t score; } cand_t;
     cand_t cands[16];
     int candCount = 0;
-    for (uint32_t i = 0; i + 1 <= len; ++i)
+    for (uint32_t i = 0; i + 8 <= len; ++i)
     {
         if (buf[i] == 'R' && buf[i+1] == 'I' && buf[i+2] == 'F' && buf[i+3] == 'F')
-        // XMF v1 often stores bank payloads in compressed resource blobs.
-        // If plain RIFF scan fails, probe deflate streams and retry on inflated output.
-        if (s_packedBankProbeDepth == 0)
-        {
-            s_packedBankProbeDepth++;
-            if (PV_TryLoadBankFromPackedBlob(buf, len) == TRUE)
-            {
-                s_packedBankProbeDepth--;
-                return TRUE;
-            }
-            s_packedBankProbeDepth--;
-        }
         {
             uint32_t sz = (uint32_t)buf[i+4] | ((uint32_t)buf[i+5] << 8) | ((uint32_t)buf[i+6] << 16) | ((uint32_t)buf[i+7] << 24);
             if (sz > (len - i - 8)) { continue; }
