@@ -1872,6 +1872,13 @@ static bool PV_ShouldUseRMFInstrumentForPatch(GM_Song *pSong, int16_t patch)
         return FALSE;
     }
 
+    // If this exact patch slot is loaded in the song, prefer RMF/native playback.
+    // This prevents DLS fallback aliases from taking over when a real RMF INST exists.
+    if (pSong->instrumentData[patch] != NULL)
+    {
+        return TRUE;
+    }
+
     remapped = (XLongResourceID)patch;
     if (GM_GetSongInstrumentRemap(pSong, (XLongResourceID)patch, &remapped) != NO_ERR)
     {
@@ -2016,7 +2023,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                     {
                         int32_t combinedProgram = (theBank * 128) + thePatch;
                         GM_DLS_ProcessProgramChange(pSong, MIDIChannel, combinedProgram);
-                        if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)thePatch))
+                        if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)combinedProgram))
                         {
                             pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
                             routedToDLS = TRUE;
@@ -2040,7 +2047,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                     // otherwise fall back to built-in wavetable (GM).
                     int32_t combinedProgram = (theBank * 128) + thePatch;
                     GM_DLS_ProcessProgramChange(pSong, MIDIChannel, combinedProgram);
-                    if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)thePatch))
+                    if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)combinedProgram))
                     {
                         pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
                     }
@@ -2443,7 +2450,7 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                         {
                             int16_t checkProgram = pSong->channelProgram[MIDIChannel];
                             if (checkProgram < 0) { checkProgram = 0; }
-                            if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)checkProgram))
+                            if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)PV_ConvertPatchBank(pSong, checkProgram, MIDIChannel)))
                             {
                                 pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
                             }
@@ -2457,7 +2464,7 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                     {
                         int16_t checkProgram = pSong->channelProgram[MIDIChannel];
                         if (checkProgram < 0) { checkProgram = 0; }
-                        if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)checkProgram))
+                        if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)PV_ConvertPatchBank(pSong, checkProgram, MIDIChannel)))
                         {
                             pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
                         }

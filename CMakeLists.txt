@@ -399,10 +399,6 @@ if(BAE_ENABLE_SF2_SUPPORT AND NOT BAE_ENABLE_FLUIDSYNTH)
   set(BAE_ENABLE_SF2_SUPPORT OFF)
   message(STATUS "Disabling SF2 support because FluidSynth is unavailable/disabled")
 endif()
-if(BAE_ENABLE_XMF_SUPPORT AND NOT BAE_ENABLE_FLUIDSYNTH)
-  set(BAE_ENABLE_XMF_SUPPORT OFF)
-  message(STATUS "Disabling XMF support because FluidSynth is unavailable/disabled")
-endif()
 
 # External codec dependency probes (system libs).
 set(BAE_LAME_WRAPPER_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_MPEG_Source_II/XMPEG_lame_encoder.cpp")

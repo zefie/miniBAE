@@ -9804,7 +9804,7 @@ BAEResult BAESong_LoadRmiFromMemory(BAESong song, void const *pRmiData, uint32_t
                 
                 if (theErr == NO_ERR && extractedMidi)
                 {
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_RMI_SUPPORT == TRUE
                     if (useEmbeddedBank && GM_LastRMIHadEmbeddedSoundbank())
                     {
                         song->mHasEmbeddedBank = TRUE;
@@ -9825,7 +9825,6 @@ BAEResult BAESong_LoadRmiFromMemory(BAESong song, void const *pRmiData, uint32_t
                 else
                 {
                     debug_message("[BAE] Failed to parse RMI file (error %d)\n", theErr);
-                    theErr = BAD_FILE;
                 }
             }            
             else         
@@ -9922,7 +9921,7 @@ BAEResult BAESong_LoadRmiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL i
                 
                 if (theErr == NO_ERR && extractedMidi)
                 {
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_RMI_SUPPORT == TRUE
                     if (useEmbeddedBank && GM_LastRMIHadEmbeddedSoundbank())
                     {
                         song->mHasEmbeddedBank = TRUE;
@@ -9939,7 +9938,6 @@ BAEResult BAESong_LoadRmiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL i
                 else
                 {
                     debug_message("[BAE] Failed to parse RMI file (error %d)\n", theErr);
-                    theErr = BAD_FILE;
                 }
             }
             else
@@ -10206,7 +10204,7 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
                         if (pSong)
                         {
                             // things are cool
-    #if USE_SF2_SUPPORT == TRUE
+#if USE_SF2_SUPPORT == TRUE
                             uint32_t instBuf[MAX_INSTRUMENTS];
                             uint32_t totalInst = 0;
                             memset(instBuf, 0, sizeof(instBuf));
@@ -10222,8 +10220,10 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
                             for (uint32_t i = 1; i <= totalInst; i++) {
                                 debug_message("    %u - INST: %u\n", i, pSong->RMFInstrumentIDs[i]);
                             }
-                            pSong->songFlags = SONG_FLAG_IS_RMF;                      
-    #endif
+#else
+                            pSong->RMFInstrumentIDs[0] = 0;
+#endif
+                            pSong->songFlags = SONG_FLAG_IS_RMF;
                             theErr = GM_LoadSongInstruments(pSong, NULL, songBankToken, TRUE);
                             if (theErr != NO_ERR)
                             {
@@ -10299,9 +10299,11 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
                                 for (uint32_t i = 1; i <= totalInst; i++) {
                                     debug_message("[FALLBACK]     %u - INST: %u\n", i, pSong->RMFInstrumentIDs[i]);
                                 }
-                                pSong->songFlags = SONG_FLAG_IS_RMF;
                                 debug_message("[FALLBACK] Set songFlags=0x%X, RMFInstrumentIDs[0]=%u\n", pSong->songFlags, pSong->RMFInstrumentIDs[0]);
+#else
+                                pSong->RMFInstrumentIDs[0] = 0;
 #endif
+                                pSong->songFlags = SONG_FLAG_IS_RMF;
                                 theErr = GM_LoadSongInstruments(pSong, NULL, songBankToken, TRUE);
                                 if (theErr != NO_ERR)
                                 {
@@ -10489,8 +10491,10 @@ BAEResult BAESong_LoadRmfFromFile(BAESong song, BAEPathName filePath, int16_t so
                         for (uint32_t i = 1; i <= totalInst; i++) {
                             debug_message("    %u - INST: %u\n", i, pSong->RMFInstrumentIDs[i]);
                         }
-                        pSong->songFlags = SONG_FLAG_IS_RMF;                      
+#else
+                        pSong->RMFInstrumentIDs[0] = 0;
 #endif
+                        pSong->songFlags = SONG_FLAG_IS_RMF;
                         theErr = GM_LoadSongInstruments(pSong, NULL, songBankToken, TRUE);
                         if (theErr != NO_ERR)
                         {

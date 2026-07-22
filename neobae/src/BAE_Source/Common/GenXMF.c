@@ -165,6 +165,7 @@ static bool PV_InflateFromOffset(const unsigned char *buf, uint32_t len, uint32_
                                   unsigned char **outBuf, uint32_t *outLen);
 static bool PV_InflateRawFromOffset(const unsigned char *buf, uint32_t len, uint32_t offset,
                                      unsigned char **outBuf, uint32_t *outLen);
+static bool PV_TryLoadBankFromPackedBlob(const unsigned char *buf, uint32_t len);
 
 // Forward prototype for LZSS probe (defined later)
 static bool PV_ProbeLZSS(const unsigned char *bytes, uint32_t ulen, uint32_t offset,
@@ -480,7 +481,7 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
         }
 
         // Try to load a bank first if we don't have one yet
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if (USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE) || USE_NATIVE_DLS == TRUE
         if (bankLoaded && *bankLoaded == FALSE)
         {
             if (PV_TryLoadBankFromBlob(payload, payloadLen) == TRUE)
@@ -499,7 +500,7 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
 
         if (preferBank)
         {
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if (USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE) || USE_NATIVE_DLS == TRUE
             if (bankLoaded && *bankLoaded == FALSE)
             {
                 if (PV_TryLoadBankFromBlob(payload, payloadLen) == TRUE) { *bankLoaded = TRUE; }
@@ -919,7 +920,7 @@ static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ule
         {
             foundStreams++;
             debug_message("[MXMF] zlib stream #%u at file+%u, inflated=%u bytes\n", foundStreams, i, outLen);
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if (USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE) || USE_NATIVE_DLS == TRUE
             // Try bank from inflated blob
             if (bankLoaded && *bankLoaded == FALSE)
             {
@@ -996,7 +997,7 @@ static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ule
             {
                 foundStreams++;
                 debug_message("[MXMF] zlib(decrypted) stream #%u at file+%u, inflated=%u bytes\n", foundStreams, i, dlen);
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if (USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE) || USE_NATIVE_DLS == TRUE
                 if (bankLoaded && *bankLoaded == FALSE)
                 {
                     if (PV_TryLoadBankFromBlob(dout, dlen) == TRUE)
@@ -1072,7 +1073,7 @@ done_scan:
             unsigned char *rdout = NULL; uint32_t rdlen = 0;
             if (PV_InflateRawFromOffset(bytes, ulen, roff, &rdout, &rdlen))
             {
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if (USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE) || USE_NATIVE_DLS == TRUE
                 if (bankLoaded && *bankLoaded == FALSE)
                 {
                     if (PV_TryLoadBankFromBlob(rdout, rdlen) == TRUE)
@@ -1140,13 +1141,26 @@ fail_scan:
 static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
 {
 #if (USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE) || USE_NATIVE_DLS == TRUE
+    static int s_packedBankProbeDepth = 0;
     // Collect RIFF SF2/DLS candidates and try them in priority order
     typedef struct { uint32_t off, bytes; bool isDLS, hasWvpl; uint64_t score; } cand_t;
     cand_t cands[16];
     int candCount = 0;
-    for (uint32_t i = 0; i + 12 <= len; ++i)
+    for (uint32_t i = 0; i + 1 <= len; ++i)
     {
         if (buf[i] == 'R' && buf[i+1] == 'I' && buf[i+2] == 'F' && buf[i+3] == 'F')
+        // XMF v1 often stores bank payloads in compressed resource blobs.
+        // If plain RIFF scan fails, probe deflate streams and retry on inflated output.
+        if (s_packedBankProbeDepth == 0)
+        {
+            s_packedBankProbeDepth++;
+            if (PV_TryLoadBankFromPackedBlob(buf, len) == TRUE)
+            {
+                s_packedBankProbeDepth--;
+                return TRUE;
+            }
+            s_packedBankProbeDepth--;
+        }
         {
             uint32_t sz = (uint32_t)buf[i+4] | ((uint32_t)buf[i+5] << 8) | ((uint32_t)buf[i+6] << 16) | ((uint32_t)buf[i+7] << 24);
             if (sz > (len - i - 8)) { continue; }
@@ -1185,7 +1199,7 @@ static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
         }
     }
     if (candCount == 0) {
-        debug_message("[XMF] no RIFF bank found in blob of %u bytes\n", len);
+        debug_message("[XMF] no RIFF bank found in blob of %u bytes\n");
         return FALSE;
     }
     // Sort by score desc
@@ -1260,6 +1274,72 @@ static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
     return FALSE;
 #else
     (void)buf; (void)len; return FALSE;
+#endif
+}
+
+static bool PV_TryLoadBankFromPackedBlob(const unsigned char *buf, uint32_t len)
+{
+#if (USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE) || USE_NATIVE_DLS == TRUE
+    if (!buf || len < 8)
+    {
+        return FALSE;
+    }
+
+    // First pass: zlib/gzip-headered streams.
+    for (uint32_t i = 0; i + 2 < len; ++i)
+    {
+        bool z = (buf[i] == 0x78) ? TRUE : FALSE;
+        bool gz = (!z && i + 1 < len && buf[i] == 0x1f && buf[i+1] == 0x8b) ? TRUE : FALSE;
+        if (!z && !gz)
+        {
+            continue;
+        }
+        if (z && !PV_IsLikelyZlibHeader(buf, len, i))
+        {
+            continue;
+        }
+
+        unsigned char *out = NULL;
+        uint32_t outLen = 0;
+        if (PV_InflateFromOffset(buf, len, i, &out, &outLen) == TRUE)
+        {
+            bool loaded = PV_TryLoadBankFromBlob(out, outLen);
+            XDisposePtr(out);
+            if (loaded)
+            {
+                debug_message("[XMF] bank loaded from packed zlib stream @+%u\n", i);
+                return TRUE;
+            }
+        }
+    }
+
+    // Second pass: coarse raw-deflate probes for files without zlib headers.
+    {
+        const uint32_t step = (len <= 4096) ? 32u : ((len < 65536) ? 128u : 512u);
+        uint32_t tries = 0;
+        const uint32_t maxTries = 256;
+        for (uint32_t i = 0; i + 8 < len && tries < maxTries; i += step, ++tries)
+        {
+            unsigned char *out = NULL;
+            uint32_t outLen = 0;
+            if (PV_InflateRawFromOffset(buf, len, i, &out, &outLen) == TRUE)
+            {
+                bool loaded = PV_TryLoadBankFromBlob(out, outLen);
+                XDisposePtr(out);
+                if (loaded)
+                {
+                    debug_message("[XMF] bank loaded from packed RAW-deflate stream @+%u\n", i);
+                    return TRUE;
+                }
+            }
+        }
+    }
+
+    return FALSE;
+#else
+    (void)buf;
+    (void)len;
+    return FALSE;
 #endif
 }
 

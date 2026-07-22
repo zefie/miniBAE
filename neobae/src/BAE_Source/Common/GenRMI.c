@@ -58,6 +58,10 @@
 #include "GenSF2_FluidSynth.h"
 #endif
 
+#if USE_NATIVE_DLS == TRUE
+#include "GenDLS_MobileBAE.h"
+#endif
+
 #if USE_RMI_SUPPORT == TRUE
 
 // Global flag to track if the last loaded RMI had an embedded soundbank
@@ -491,84 +495,115 @@ OPErr GM_LoadRMIFromMemory(const unsigned char *buf, uint32_t len,
         debug_message("[RMI] Searching for embedded soundbank...\n");
         if (PV_FindSoundbankInRMI(buf, len, &bankData, &bankLen, &isSF2))
         {
+            if (isSF2)
+            {
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
 #if _DEBUG
-            const char *bankType = isSF2 ? "SF2/SF3" : "DLS";
-            debug_message("[RMI] Loading embedded %s soundbank...\n", bankType);
-#endif            
-            // Determine bank offset according to SF2 RMIDI spec:
-            // - If DBNK specified: use that value
-            // - If no embedded bank: offset is 0 (ignored anyway)
-            // - If embedded bank but no DBNK: default is 1
-            int16_t bankOffset = rmiInfo.bankOffset;
-            if (bankOffset < 0)  // Not specified in DBNK
-            {
-                bankOffset = 1;  // Default per SF2 RMIDI spec
-            }
-            
-            // Clamp to valid range (0-127)
-            if (bankOffset < 0) bankOffset = 0;
-            if (bankOffset > 127) bankOffset = 127;
-            
-            debug_message("[RMI] Using bank offset: %d\n", bankOffset);
-            
-            // Unload any existing soundfont first
-            if (GM_SF2_IsActive())
-            {
-                debug_message("[RMI] Unloading existing soundfont before loading embedded one\n");
-                GM_UnloadSF2Soundfont();
-            }            
-            
-            debug_message("[RMI] Loading from memory at offset %p, size %u\n", 
-                       (void*)bankData, bankLen);
-            
-            OPErr err = GM_LoadSF2SoundfontFromMemory(bankData, (size_t)bankLen);
-            if (err == NO_ERR)
-            {
-                // Verify the bank loaded successfully with presets
-                int presetCount = 0;
-                bool hasPresets = GM_SF2_CurrentFontHasAnyPreset(&presetCount);
-                
-                if (hasPresets)
-                {
-#if _DEBUG                    
-                    debug_message("[RMI] %s soundbank loaded successfully (%d presets)\n", 
-                               bankType, presetCount);
-#endif                    
-                    // Set flag to indicate embedded soundbank was loaded
-                    g_last_rmi_had_soundbank = TRUE;
-                    
-                    // Apply bank offset if non-zero
-                    // According to SF2 RMIDI spec, add bankOffset to all preset banks
-                    // except drum banks (bank 128)
-                    if (bankOffset != 0)
-                    {
-                        debug_message("[RMI] Applying bank offset %d to presets...\n", bankOffset);
-                        // Note: Bank offset adjustment would be done in FluidSynth layer
-                        // For now, just log it - actual implementation would need
-                        // FluidSynth API to adjust preset bank numbers
-                        // This is a TODO for future enhancement
-                    }
-                }                
-                else
-                {
-#if _DEBUG                     
-                    debug_message("[RMI] %s soundbank loaded but has no presets\n", bankType);
+                const char *bankType = "SF2/SF3";
+                debug_message("[RMI] Loading embedded %s soundbank...\n", bankType);
 #endif
+                // Determine bank offset according to SF2 RMIDI spec:
+                // - If DBNK specified: use that value
+                // - If no embedded bank: offset is 0 (ignored anyway)
+                // - If embedded bank but no DBNK: default is 1
+                int16_t bankOffset = rmiInfo.bankOffset;
+                if (bankOffset < 0)  // Not specified in DBNK
+                {
+                    bankOffset = 1;  // Default per SF2 RMIDI spec
+                }
+
+                // Clamp to valid range (0-127)
+                if (bankOffset < 0) bankOffset = 0;
+                if (bankOffset > 127) bankOffset = 127;
+
+                debug_message("[RMI] Using bank offset: %d\n", bankOffset);
+
+                // Unload any existing soundfont first
+                if (GM_SF2_IsActive())
+                {
+                    debug_message("[RMI] Unloading existing soundfont before loading embedded one\n");
                     GM_UnloadSF2Soundfont();
                 }
+
+                debug_message("[RMI] Loading from memory at offset %p, size %u\n",
+                              (void*)bankData, bankLen);
+
+                OPErr err = GM_LoadSF2SoundfontFromMemory(bankData, (size_t)bankLen);
+                if (err == NO_ERR)
+                {
+                    // Verify the bank loaded successfully with presets
+                    int presetCount = 0;
+                    bool hasPresets = GM_SF2_CurrentFontHasAnyPreset(&presetCount);
+
+                    if (hasPresets)
+                    {
+#if _DEBUG
+                        debug_message("[RMI] %s soundbank loaded successfully (%d presets)\n",
+                                      bankType, presetCount);
+#endif
+                        // Set flag to indicate embedded soundbank was loaded
+                        g_last_rmi_had_soundbank = TRUE;
+
+                        // Apply bank offset if non-zero
+                        // According to SF2 RMIDI spec, add bankOffset to all preset banks
+                        // except drum banks (bank 128)
+                        if (bankOffset != 0)
+                        {
+                            debug_message("[RMI] Applying bank offset %d to presets...\n", bankOffset);
+                            // Note: Bank offset adjustment would be done in FluidSynth layer
+                            // For now, just log it - actual implementation would need
+                            // FluidSynth API to adjust preset bank numbers
+                            // This is a TODO for future enhancement
+                        }
+                    }
+                    else
+                    {
+#if _DEBUG
+                        debug_message("[RMI] %s soundbank loaded but has no presets\n", bankType);
+#endif
+                        GM_UnloadSF2Soundfont();
+                    }
+                }
+                else
+                {
+#if _DEBUG
+                    debug_message("[RMI] Failed to load %s soundbank (error %d)\n", bankType, err);
+#endif
+                    // Return error so caller can handle fallback (e.g., restore user bank)
+                    return err;
+                }
+#else
+                debug_message("[RMI] Embedded SF2/SF3 found but FluidSynth support is not compiled in\n");
+                return UNSUPPORTED_HARDWARE;
+#endif
             }
             else
             {
-#if _DEBUG 
-                debug_message("[RMI] Failed to load %s soundbank (error %d)\n", bankType, err);
-#endif
-                // Return error so caller can handle fallback (e.g., restore user bank)
-                return err;
-            }
+#if USE_NATIVE_DLS == TRUE
+                GM_Mixer *pMixer = GM_GetCurrentMixer();
+                if (!pMixer)
+                {
+                    debug_message("[RMI] Embedded DLS found but no active mixer is available\n");
+                    return NOT_SETUP;
+                }
+
+                {
+                    OPErr err = GM_LoadDLSFromMemory(pMixer, bankData, bankLen);
+                    if (err == NO_ERR)
+                    {
+                        g_last_rmi_had_soundbank = TRUE;
+                        debug_message("[RMI] Embedded DLS soundbank loaded successfully via native DLS\n");
+                    }
+                    else
+                    {
+                        debug_message("[RMI] Failed to load embedded DLS soundbank (error %d)\n", err);
+                        return err;
+                    }
+                }
 #else
-            debug_message("[RMI] Soundbank support not compiled in (FluidSynth required)\n");
+                debug_message("[RMI] Embedded DLS found but native DLS support is not compiled in; continuing with current bank\n");
 #endif
+            }
         }
         else
         {

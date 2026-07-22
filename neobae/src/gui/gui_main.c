@@ -1362,7 +1362,7 @@ int main(int argc, char *argv[])
                         if (!is_bank_file) {
                             is_bank_file = _stricmp(ext, ".sfo") == 0;
                         }
-#if _USING_FLUIDSYNTH == TRUE                        
+#if _USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE                  
                         if (!is_bank_file) {
                             is_bank_file = _stricmp(ext, ".dls") == 0;
                         }
@@ -1380,7 +1380,7 @@ int main(int argc, char *argv[])
                             is_bank_file = strcasecmp(ext, ".sf3") == 0;
                         if (!is_bank_file)
                             is_bank_file = strcasecmp(ext, ".sfo") == 0;
-#if _USING_FLUIDSYNTH == TRUE                        
+#if _USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE                       
                         if (!is_bank_file)
                             is_bank_file = strcasecmp(ext, ".dls") == 0;
                 
@@ -1737,7 +1737,7 @@ int main(int argc, char *argv[])
                             is_bank_file = _stricmp(ext, ".sf3") == 0;
                         if (!is_bank_file)
                             is_bank_file = _stricmp(ext, ".sfo") == 0;
-#if _USING_FLUIDSYNTH == TRUE
+#if _USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE 
                         if (!is_bank_file)
                             is_bank_file = _stricmp(ext, ".dls") == 0;
 #endif
@@ -1754,7 +1754,7 @@ int main(int argc, char *argv[])
                             is_bank_file = strcasecmp(ext, ".sf3") == 0;
                         if (!is_bank_file)
                             is_bank_file = strcasecmp(ext, ".sfo") == 0;
-#if _USING_FLUIDSYNTH == TRUE
+#if _USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE 
                         if (!is_bank_file)
                             is_bank_file = strcasecmp(ext, ".dls") == 0;
 #endif
@@ -6537,6 +6537,8 @@ int main(int argc, char *argv[])
                     "Bank Files (*.hsb;*.zsb;*.sf2)\0*.hsb;*.zsb;*.sf2\0HSB/ZSB Banks\0*.hsb;*.zsb\0SF2 SoundFonts\0*.sf2\0All Files\0*.*\0"
         #endif
     #endif
+#elif USE_NATIVE_DLS == TRUE
+                    "Bank Files (*.hsb;*.zsb;*.sf2;*.dls)\0*.hsb;*.zsb;*.dls\0HSB/ZSB Banks\0*.hsb;*.zsb\0DLS Banks\0*.dls\0All Files\0*.*\0"
 #else
                     "Bank Files (*.hsb;*.zsb)\0*.hsb;*.zsb\0HSB/ZSB Banks\0*.hsb;*.zsb\0All Files\0*.*\0"
 #endif
@@ -6556,7 +6558,7 @@ int main(int argc, char *argv[])
 #if USE_VORBIS_DECODER == TRUE
                         ", \"sf3\", \"sfo\""
 #endif
-#if _USING_FLUIDSYNTH == TRUE
+#if _USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE
                         ", \"dls\""
 #endif
 #endif
@@ -6599,6 +6601,10 @@ int main(int argc, char *argv[])
             "yad --file-selection --title='Load Patch Bank' --file-filter='Bank Files | *.hsb *.zsb *.sf2' 2>/dev/null",
         #endif
     #endif
+#elif USE_NATIVE_DLS == TRUE
+            "zenity --file-selection --title='Load Patch Bank' --file-filter='Bank Files | *.hsb *.zsb *.dls' 2>/dev/null",
+            "kdialog --getopenfilename . '*.hsb *.zsb *.dls' 2>/dev/null",
+            "yad --file-selection --title='Load Patch Bank' --file-filter='Bank Files | *.hsb *.zsb *.dls' 2>/dev/null",
 #else
             "zenity --file-selection --title='Load Patch Bank' --file-filter='Bank Files | *.hsb *.zsb' 2>/dev/null",
             "kdialog --getopenfilename . '*.hsb *.zsb' 2>/dev/null",
@@ -6626,7 +6632,7 @@ int main(int argc, char *argv[])
                         || (l > 4 && strcasecmp(fileBuf + l - 4, ".sf3") == 0)
                         || (l > 4 && strcasecmp(fileBuf + l - 4, ".sfo") == 0)
 #endif                        
-#if _USING_FLUIDSYNTH == TRUE
+#if _USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE
                         || (l > 4 && strcasecmp(fileBuf + l - 4, ".dls") == 0)
 #endif
 #endif
@@ -6646,6 +6652,8 @@ int main(int argc, char *argv[])
                         BAE_PRINTF("Not a bank file (.hsb, .zsb, or .sf2): %s\n", fileBuf);
         #endif
     #endif
+#elif USE_NATIVE_DLS == TRUE
+                        BAE_PRINTF("Not a bank file (.hsb, .zsb, or .dls): %s\n", fileBuf);
 #else
                         BAE_PRINTF("Not a bank file (.hsb or .zsb): %s\n", fileBuf);
 #endif

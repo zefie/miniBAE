@@ -66,13 +66,11 @@ bool g_classic_chorus_enabled = false;
 extern bool g_show_virtual_keyboard;
 extern int g_exportCodecIndex;
 extern int g_window_h;
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-    #if USE_NATIVE_DLS == TRUE
-        bool g_use_fluidsynth_for_dls = false;
-    #else
-        bool g_use_fluidsynth_for_dls = true;
-    #endif
+bool g_use_fluidsynth_for_dls = false;
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_NATIVE_DLS == FALSE
+    g_use_fluidsynth_for_dls = true;
 #endif
+
 Settings load_settings(void)
 {
     Settings settings = {0};

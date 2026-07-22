@@ -81,12 +81,10 @@ static int           gVelocityCurve  = -1; /* -1 = engine default */
 static int           gVolumePct      = 100; /* raw user volume percent, for overdrive */
 static int           gEqEnabled      = 0;
 static float         gEqGains[5]     = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-    #if USE_NATIVE_DLS == TRUE
-        static int           gUseSF2Mode     = 0;
-    #else
-        static int           gUseSF2Mode     = 1;
-    #endif
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_NATIVE_DLS == FALSE
+    static int           gUseSF2Mode     = 1;
+#else
+    static int           gUseSF2Mode     = 0;
 #endif
 
 /* Position display: update every N idle calls (~15 ms each) */
@@ -1016,9 +1014,9 @@ static BAEResult PV_PlayFile(BAEMixer mixer, const char *path,
         err = BAESong_LoadXmfFromFile(song, (BAEPathName)path, TRUE);
     }
 #endif
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_RMI_SUPPORT == TRUE
+#if USE_RMI_SUPPORT == TRUE
     else if (ftype == BAE_RMI) {
-        playbae_printf("Playing RMI (MIDI+DLS): %s\n", path);
+        playbae_printf("Playing RMI: %s\n", path);
         err = BAESong_LoadRmiFromFile(song, (BAEPathName)path, TRUE, TRUE);
     }
 #endif

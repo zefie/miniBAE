@@ -35,8 +35,12 @@ runtest() {
 for f in Makefile.gui Makefile Makefile.clang; do
     # basic
     runtest make -f ${f}
-    # XMF
+    # XMF + FluidSynth
     runtest make -f ${f} SF2_SUPPORT=1 XMF_SUPPORT=1
+    # XMF + Native DLS (No FluidSynth)
+    runtest make -f ${f} SF2_SUPPORT=1 NATIVE_DLS=1
+    # XMF + Native DLS + FluidSynth
+    runtest make -f ${f} SF2_SUPPORT=1 NATIVE_DLS=1 XMF_SUPPORT=1
     # mp3dec
     runtest make -f ${f} MP3_DEC=1
     # mp3enc
@@ -69,6 +73,10 @@ for f in Makefile.gui Makefile Makefile.clang; do
     runtest make -f ${f} ZMF_SUPPORT=1
     # RMI Support
     runtest make -f ${f} RMI_SUPPORT=1
+    # RMI Support (with Native DLS)
+    runtest make -f ${f} RMI_SUPPORT=1 NATIVE_DLS=1
+    # RMI Support (with FluidSynth)
+    runtest make -f ${f} RMI_SUPPORT=1 SF2_SUPPORT=1
     # Retro Ringtone Support
     runtest make -f ${f} RETRO_RINGTONE_SUPPORT=1
     if [ "$(echo "${f}" | grep "gui" -c)" -eq 1 ]; then

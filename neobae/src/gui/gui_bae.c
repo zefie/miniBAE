@@ -25,10 +25,10 @@
 #include "gui_karaoke.h" // For karaoke functions
 #include "X_API.h"
 #include "GenRingtone.h"
+#if USE_RMI_SUPPORT == TRUE
+    #include "GenRMI.h"
+#endif
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-    #if USE_RMI_SUPPORT == TRUE
-        #include "GenRMI.h"
-    #endif
     #include "GenSF2_FluidSynth.h"
 #endif
 #if USE_NATIVE_DLS == TRUE
@@ -260,7 +260,7 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
     if (g_bae.has_embedded_soundbank)
     {
         BAE_PRINTF("User overriding embedded bank with manual bank load\n");
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_RMI_SUPPORT == TRUE
+#if USE_RMI_SUPPORT == TRUE
         GM_ClearRMISoundbankFlag();
 #endif        
         g_bae.has_embedded_soundbank = false;
@@ -777,21 +777,30 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
     if (!g_bae.mixer || !path)
         return false;
 
-    // Restore user's bank BEFORE loading new song if we had an embedded bank previously
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-    if (g_user_bank_stored)
+    // Restore user's bank BEFORE loading new song if we had an embedded bank previously.
+    // This must run for both FluidSynth and native-DLS embedded RMI banks.
+#if USE_RMI_SUPPORT == TRUE
+    if (g_bae.has_embedded_soundbank)
     {
-        BAE_PRINTF("Restoring user bank before loading new song: %s (%s)\n", g_user_bank_name, g_user_bank_path);
-        
         // Clear the embedded soundbank flag
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_RMI_SUPPORT == TRUE
         GM_ClearRMISoundbankFlag();
+
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+        GM_UnloadSF2Soundfont();
+        GM_SetMixerSF2Mode(FALSE);
 #endif
+#if USE_NATIVE_DLS == TRUE
+        GM_SetMixerDLSMode(FALSE);
+        BAEMixer_UnloadDLSBank(g_bae.mixer);
+#endif
+
         g_bae.has_embedded_soundbank = false;
-        // Reload the user's bank
-        if (g_user_bank_path[0] != '\0')
+
+        // Reload the user's previous bank if we captured one.
+        if (g_user_bank_stored)
         {
-            if (restore_bank_for_song_load(g_user_bank_path, g_user_bank_name))
+            BAE_PRINTF("Restoring user bank before loading new song: %s (%s)\n", g_user_bank_name, g_user_bank_path);
+            if (g_user_bank_path[0] != '\0' && restore_bank_for_song_load(g_user_bank_path, g_user_bank_name))
             {
                 BAE_PRINTF("Restored user bank successfully\n");
             }
@@ -799,12 +808,12 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
             {
                 BAE_PRINTF("Warning: Failed to restore user bank\n");
             }
+
+            // Clear stored bank after restoration attempt
+            g_user_bank_stored = false;
+            g_user_bank_path[0] = '\0';
+            g_user_bank_name[0] = '\0';
         }
-        
-        // Clear stored bank after restoration
-        g_user_bank_stored = false;
-        g_user_bank_path[0] = '\0';
-        g_user_bank_name[0] = '\0';
     }
 #endif
 
@@ -965,7 +974,7 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
         g_bae.is_rmf_file = false;
     }
 #endif
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_RMI_SUPPORT == TRUE
+#if USE_RMI_SUPPORT == TRUE
     else if (ftype == BAE_RMI)
     {
         // Store current bank info before attempting RMI load in case embedded DLS fails
@@ -980,8 +989,10 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
         }
         sr = BAESong_LoadRmiFromFile(g_bae.song, (BAEPathName)path, TRUE, (bool)use_embedded_banks);
         
-        // If RMI load failed and we requested embedded banks, restore user bank and retry without embedded bank
-        if (sr != BAE_NO_ERROR && use_embedded_banks && had_bank_before && temp_bank_path[0] != '\0')
+        // If RMI load failed and we requested embedded banks, restore user bank and retry without embedded bank.
+        // Do not retry when embedded bank is explicitly unsupported (e.g. embedded SF2 without FluidSynth),
+        // because that should fail the whole file load instead of silently playing with a different bank.
+        if (sr != BAE_NO_ERROR && sr != BAE_UNSUPPORTED_HARDWARE && use_embedded_banks && had_bank_before && temp_bank_path[0] != '\0')
         {
             BAE_PRINTF("RMI load with embedded bank failed (error %d), restoring previous bank and retrying: %s\n", sr, temp_bank_name);
             if (restore_bank_for_song_load(temp_bank_path, temp_bank_name))
@@ -1041,14 +1052,10 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
     }
 
     // Check if this MIDI file has an embedded soundbank (RMI format)
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_RMI_SUPPORT == TRUE
     if (use_embedded_banks)
     {
-#if USE_RMI_SUPPORT == TRUE        
         bool has_embedded_bank = GM_LastRMIHadEmbeddedSoundbank();
-#else
-        bool has_embedded_bank = false; // If we don't have explicit RMI support, assume no embedded bank to avoid accidental overrides
-#endif        
         if (has_embedded_bank)
         {
             // Store current user bank if not already stored

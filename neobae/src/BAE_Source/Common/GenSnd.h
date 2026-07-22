@@ -1112,14 +1112,13 @@ typedef int32_t UNIT_TYPE;
         SEQ_MIDI = 0, // sequenceData is a MIDI formatted stream
     } SequenceType;
 
-#if USE_SF2_SUPPORT == TRUE
     // Song flags for SF2 integration
     enum
     {
         SONG_FLAG_USE_SF2 = 0x00000001,  // Song should use SF2 for rendering
-        SONG_FLAG_IS_RMF  = 0x00000002   // Song is in RMF format
+        SONG_FLAG_USE_DLS = 0x00000002,  // Song should use DLS for rendering
+        SONG_FLAG_IS_RMF  = 0x00000004   // Song is in RMF format
     };
-#endif
 #if DISABLE_BEATNIK_SF2_NRPN != TRUE
     typedef struct LastControlEntry {
         int16_t control;
@@ -1345,16 +1344,16 @@ typedef int32_t UNIT_TYPE;
 #endif
 #if USE_SF2_SUPPORT == TRUE
         // SF2 integration support
-        unsigned char channelType[MAX_CHANNELS];
         void *sf2Info;             // Pointer to GM_SF2Info structure when SF2 is active
         bool isSF2Song;               // TRUE if this song uses SF2 instruments
+#endif
+        unsigned char channelType[MAX_CHANNELS];
         uint32_t songFlags;                // Song flags including SONG_FLAG_USE_SF2 and SONG_FLAG_IS_RMF
         uint32_t RMFInstrumentIDs[MAX_INSTRUMENTS+1];
         unsigned char channelBankMSB[MAX_CHANNELS];  // Bank MSB values for SF2 program changes
         unsigned char channelBankLSB[MAX_CHANNELS];  // Bank LSB values for SF2 program changes
 #if DISABLE_BEATNIK_SF2_NRPN != TRUE
         LastControlEntry lastThreeControl[MAX_CHANNELS][4];
-#endif
 #endif
     };
     typedef struct GM_Song GM_Song;
