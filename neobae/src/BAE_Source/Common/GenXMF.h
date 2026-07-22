@@ -25,11 +25,11 @@
 
 #include "NeoBAE.h"
 
-#if USE_XMF_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
 
 // Loads the indicated BAESong from an XMF/MXMF container. Extracts the
 // embedded Standard MIDI File and, if present, an embedded SF2/DLS bank to
-// drive playback via the FluidSynth backend.
+// drive playback via the selected backend (native DLS or FluidSynth for DLS).
 BAEResult BAESong_LoadXmfFromMemory(BAESong song,
                                   const void *data,
                                   uint32_t ulen,
@@ -40,4 +40,10 @@ BAEResult BAESong_LoadXmfFromFile(BAESong song,
                                   BAEPathName filePath,
                                   BAE_BOOL ignoreBadInstruments);
 
-#endif // USE_XMF_SUPPORT && _USING_FLUIDSYNTH
+// Controls how embedded DLS banks inside XMF/MXMF containers are loaded.
+// FALSE: use native DLS loader/synth (when compiled in)
+// TRUE: use FluidSynth overlay path for DLS content
+void GM_XMF_SetUseFluidSynthForDLS(BAE_BOOL enable);
+BAE_BOOL GM_XMF_GetUseFluidSynthForDLS(void);
+
+#endif // USE_XMF_SUPPORT && (_USING_FLUIDSYNTH || USE_NATIVE_DLS)

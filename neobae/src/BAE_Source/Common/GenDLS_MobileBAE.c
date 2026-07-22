@@ -1276,6 +1276,76 @@ OPErr GM_LoadDLSFromMemory(struct GM_Mixer* pMixer, const void* pMemory, uint32_
     return NO_ERR;
 }
 
+OPErr GM_LoadDLSAsXMFOverlayFromMemory(struct GM_Mixer* pMixer, const void* pMemory, uint32_t memorySize)
+{
+    DLS_Bank* bank = NULL;
+    OPErr err;
+
+    if (!pMixer || !pMemory || memorySize == 0) {
+        return PARAM_ERR;
+    }
+
+    err = GM_LoadDLSBankFromMemory((void*)pMemory, memorySize, &bank);
+    if (err != NO_ERR) {
+        return err;
+    }
+
+    if (!pMixer->pDLSSynth) {
+        err = GM_InitDLSSynth(&pMixer->pDLSSynth, pMixer->outputRate);
+        if (err != NO_ERR) {
+            GM_UnloadDLSBank(bank);
+            return err;
+        }
+    }
+
+    if (pMixer->pDLSSynth->banks[1]) {
+        GM_UnloadDLSBank(pMixer->pDLSSynth->banks[1]);
+        pMixer->pDLSSynth->banks[1] = NULL;
+    }
+
+    pMixer->pDLSSynth->banks[1] = bank;
+
+    /* Overlay changes program resolution priority; force channel/program cache rebuild. */
+    for (int i = 0; i < 256; i++) {
+        pMixer->pDLSSynth->voices[i].active = false;
+    }
+    for (int ch = 0; ch < 16; ch++) {
+        DLS_ChannelState* channelState = &pMixer->pDLSSynth->channels[ch];
+        channelState->selectedInstrument = NULL;
+        channelState->selectedBankSelector = 0;
+        channelState->programSelected = false;
+    }
+
+    pMixer->isDLS = true;
+    return NO_ERR;
+}
+
+void GM_UnloadXMFDLSOverlay(struct GM_Mixer* pMixer)
+{
+    if (!pMixer || !pMixer->pDLSSynth) {
+        return;
+    }
+
+    if (pMixer->pDLSSynth->banks[1]) {
+        GM_UnloadDLSBank(pMixer->pDLSSynth->banks[1]);
+        pMixer->pDLSSynth->banks[1] = NULL;
+    }
+
+    for (int i = 0; i < 256; i++) {
+        pMixer->pDLSSynth->voices[i].active = false;
+    }
+    for (int ch = 0; ch < 16; ch++) {
+        DLS_ChannelState* channelState = &pMixer->pDLSSynth->channels[ch];
+        channelState->selectedInstrument = NULL;
+        channelState->selectedBankSelector = 0;
+        channelState->programSelected = false;
+    }
+
+    if (!pMixer->pDLSSynth->banks[0]) {
+        pMixer->isDLS = false;
+    }
+}
+
 void GM_UnloadDLSBank(DLS_Bank* pBank) {
     if (!pBank) return;
     
@@ -1435,9 +1505,20 @@ static DLS_Instrument* DLS_Bank_FindMidiInstrument(DLS_Bank* bank, int32_t bankI
 }
 
 static DLS_Instrument* DLS_Synth_FindInstrument(DLS_Synth* synth, int32_t bankId, int32_t program) {
-    DLS_Bank* bank = synth->banks[0];
-    if (!bank) return NULL;
-    return DLS_Bank_FindMidiInstrument(bank, bankId, program);
+    DLS_Instrument* inst = NULL;
+
+    if (synth->banks[1]) {
+        inst = DLS_Bank_FindMidiInstrument(synth->banks[1], bankId, program);
+        if (inst) {
+            return inst;
+        }
+    }
+
+    if (synth->banks[0]) {
+        return DLS_Bank_FindMidiInstrument(synth->banks[0], bankId, program);
+    }
+
+    return NULL;
 }
 
 static DLS_Region* DLS_Synth_FindRegion(DLS_Instrument* inst, int32_t key, int32_t velocity) {
@@ -2021,7 +2102,7 @@ void GM_DLS_ProcessNoteOff(GM_Song* pSong, uint16_t channel, uint16_t note, uint
     int32_t bankSelector = ch->programSelected ? ch->selectedBankSelector : DLS_ChannelBankSelector(ch);
     DLS_Bank* aliasBank = (ch->selectedInstrument && ch->selectedInstrument->parentBank)
         ? ch->selectedInstrument->parentBank
-        : synth->banks[0];
+        : (synth->banks[1] ? synth->banks[1] : synth->banks[0]);
     if (((bankSelector & 0x3F80) == (120 << 7)) &&
         aliasBank && aliasBank->hasPercussionKeyAliases) {
         int32_t aliasedNote = aliasBank->percussionKeyAliases[note & 0x7F] & 0x7F;

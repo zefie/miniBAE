@@ -250,7 +250,7 @@ static const char AUDIO_EXT_FILTER[] =
 #else
     ""
 #endif
-#if USE_XMF_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
     "*.xmf;*.mxmf;"
 #else
     ""
@@ -305,7 +305,7 @@ static const char AUDIO_EXT_FILTER[] =
         APPEND_STR(pattern);
     }
     APPEND_STR("MIDI Files"); APPEND_STR("*.mid;*.midi;*.kar;*.rmi");
-#if USE_XMF_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
     APPEND_STR("XMF Files"); APPEND_STR("*.xmf;*.mxmf");
 #endif
     APPEND_STR("RMF Files"); APPEND_STR("*.rmf");
@@ -352,7 +352,7 @@ static const char AUDIO_EXT_FILTER[] =
 #if USE_OPUS_DECODER == TRUE && SUPPORT_OGG_FORMAT == TRUE
         ", \"opus\""
 #endif
-#if USE_XMF_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
         ", \"xmf\", \"mxmf\""
 #endif
         ", \"wav\", \"aif\", \"aiff\", \"au\"";
@@ -411,7 +411,7 @@ static const char AUDIO_EXT_FILTER[] =
 #else
     ""
 #endif
-#if USE_XMF_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
     "*.xmf *.mxmf";
 #else
     ""

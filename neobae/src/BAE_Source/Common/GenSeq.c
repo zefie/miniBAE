@@ -2009,11 +2009,28 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
 #if USE_SF2_SUPPORT == TRUE
                 else if (GM_IsSF2Song(pSong))
                 {
-                    // If SF2 is active for this song, send program change to SF2
-                    pSong->channelType[MIDIChannel] = CHANNEL_TYPE_SF2;
-                    int32_t combinedProgram = (theBank * 128) + thePatch;
-                    debug_message("ProcessProgramChange Debug: Channel %d is using SF2 Instrument (bank=%d prog=%d)\n", MIDIChannel, theBank, thePatch);
-                    GM_SF2_ProcessProgramChange(pSong, MIDIChannel, combinedProgram);
+                    bool routedToDLS = FALSE;
+#if USE_NATIVE_DLS == TRUE
+                    // Mixed mode: if native DLS is active and has this program, route channel to DLS.
+                    if (GM_IsDLSSong(pSong))
+                    {
+                        int32_t combinedProgram = (theBank * 128) + thePatch;
+                        GM_DLS_ProcessProgramChange(pSong, MIDIChannel, combinedProgram);
+                        if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)thePatch))
+                        {
+                            pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
+                            routedToDLS = TRUE;
+                        }
+                    }
+#endif
+                    if (!routedToDLS)
+                    {
+                        // If SF2 is active for this song, send program change to SF2
+                        pSong->channelType[MIDIChannel] = CHANNEL_TYPE_SF2;
+                        int32_t combinedProgram = (theBank * 128) + thePatch;
+                        debug_message("ProcessProgramChange Debug: Channel %d is using SF2 Instrument (bank=%d prog=%d)\n", MIDIChannel, theBank, thePatch);
+                        GM_SF2_ProcessProgramChange(pSong, MIDIChannel, combinedProgram);
+                    }
                 }
 #endif
 #if USE_NATIVE_DLS == TRUE
@@ -2265,6 +2282,7 @@ static void PV_ProcessRolandPartAssignSysEx(GM_Song *pSong, const unsigned char 
 
 #if USE_SF2_SUPPORT == TRUE
     if ((GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2) &&
+        pSong->channelType[MIDIChannel] != CHANNEL_TYPE_DLS &&
         pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF)
     {
         GM_SF2_SetChannelMode(MIDIChannel, bankMode);
@@ -2304,13 +2322,15 @@ static void PV_ProcessNoteOff(GM_Song *pSong, int16_t MIDIChannel, int16_t curre
             if (0) {}
 #if USE_SF2_SUPPORT == TRUE
             // If SF2 is active for this song OR channel is routed to SF2, route to SF2 instead
-            else if ((GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2) && pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF)
+            else if ((GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2) &&
+                     pSong->channelType[MIDIChannel] != CHANNEL_TYPE_DLS &&
+                     pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF)
             {
                 GM_SF2_ProcessNoteOff(pSong, MIDIChannel, note, volume);
             }
 #endif
 #if USE_NATIVE_DLS == TRUE
-            else if ((GM_IsDLSSong(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_DLS) && pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF)
+            else if (pSong->channelType[MIDIChannel] == CHANNEL_TYPE_DLS && pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF)
             {
                 GM_DLS_ProcessNoteOff(pSong, MIDIChannel, note, volume);
             }
@@ -2366,7 +2386,8 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                 if (0) {}
 #if USE_SF2_SUPPORT == TRUE
                 // If SF2 is active for this song OR channel is routed to SF2, route to SF2 synthesis
-                else if (GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2)
+                else if ((GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2) &&
+                         pSong->channelType[MIDIChannel] != CHANNEL_TYPE_DLS)
                 {
                     // adding this pleases the compiler
                     // warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
@@ -2519,7 +2540,8 @@ static void PV_ProcessPitchBend(GM_Song *pSong, int16_t MIDIChannel, int16_t cur
     if (0) {}
 #if USE_SF2_SUPPORT == TRUE
     // If SF2 is active for this song, send pitch bend to SF2
-    else if (GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2)
+    else if ((GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2) &&
+             pSong->channelType[MIDIChannel] != CHANNEL_TYPE_DLS)
     {
         GM_SF2_ProcessPitchBend(pSong, MIDIChannel, valueMSB, valueLSB);
     }
@@ -2656,7 +2678,8 @@ void PV_ProcessController(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTr
 
     if (0) {}
 #if USE_SF2_SUPPORT == TRUE
-    else if (GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2)
+    else if ((GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2) &&
+             pSong->channelType[MIDIChannel] != CHANNEL_TYPE_DLS)
     {
         if (pSong->songFlags & SONG_FLAG_IS_RMF) {
             if (controller == 0 && (value == 1 || value == 2)) {

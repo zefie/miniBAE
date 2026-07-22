@@ -152,6 +152,8 @@ struct DLS_Bank {
 // Parser Public API
 OPErr GM_LoadDLSBankFromMemory(void* pMemory, uint32_t memorySize, DLS_Bank** ppBank);
 OPErr GM_LoadDLSFromMemory(struct GM_Mixer* pMixer, const void* pMemory, uint32_t memorySize);
+OPErr GM_LoadDLSAsXMFOverlayFromMemory(struct GM_Mixer* pMixer, const void* pMemory, uint32_t memorySize);
+void GM_UnloadXMFDLSOverlay(struct GM_Mixer* pMixer);
 void GM_UnloadDLSBank(DLS_Bank* pBank);
 
 // Synth Public API

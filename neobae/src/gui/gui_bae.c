@@ -958,6 +958,9 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
 #if USE_XMF_SUPPORT == TRUE
     else if (ftype == BAE_XMF)
     {
+#if (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE) && USE_SF2_SUPPORT == TRUE && USE_NATIVE_DLS == TRUE
+        GM_XMF_SetUseFluidSynthForDLS(g_use_fluidsynth_for_dls ? TRUE : FALSE);
+#endif
         sr = BAESong_LoadXmfFromFile(g_bae.song, (BAEPathName)path, TRUE);
         g_bae.is_rmf_file = false;
     }

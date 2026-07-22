@@ -2924,6 +2924,18 @@ bool BAESong_IsSF2Song(BAESong song)
 }
 #endif
 
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+BAEResult BAESong_EnableSF2(BAESong song, BAE_BOOL enable)
+{
+    if (!song || !song->pSong)
+    {
+        return BAE_NULL_OBJECT;
+    }
+
+    return BAE_TranslateOPErr(GM_EnableSF2ForSong(song->pSong, enable ? TRUE : FALSE));
+}
+#endif
+
 #if USE_NATIVE_DLS == TRUE
 bool BAESong_IsDLSSong(BAESong song)
 {
@@ -4334,6 +4346,32 @@ BAEResult BAEMixer_LoadDLSBankFromMemory(BAEMixer mixer, void* pMemory, uint32_t
         err = BAE_NULL_OBJECT;
     }
     return err;
+}
+
+BAEResult BAEMixer_LoadDLSBankAsXMFOverlayFromMemory(BAEMixer mixer, void* pMemory, uint32_t memorySize)
+{
+    BAEResult err;
+    if (mixer && mixer->pMixer)
+    {
+        OPErr opErr = GM_LoadDLSAsXMFOverlayFromMemory(mixer->pMixer, pMemory, memorySize);
+        err = BAE_TranslateOPErr(opErr);
+    }
+    else
+    {
+        err = BAE_NULL_OBJECT;
+    }
+    return err;
+}
+
+BAEResult BAEMixer_UnloadXMFDLSOverlayBank(BAEMixer mixer)
+{
+    if (!(mixer && mixer->pMixer))
+    {
+        return BAE_NULL_OBJECT;
+    }
+
+    GM_UnloadXMFDLSOverlay(mixer->pMixer);
+    return BAE_NO_ERROR;
 }
 
 BAEResult BAEMixer_LoadDLSBank(BAEMixer mixer, const char* filePath)

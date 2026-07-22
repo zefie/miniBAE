@@ -874,6 +874,21 @@ extern "C"
                                              void* pMemory,
                                              uint32_t memorySize);
 
+    // BAEMixer_LoadDLSBankAsXMFOverlayFromMemory()
+    // ------------------------------------
+    // Load an embedded XMF DLS bank as an overlay in the native DLS engine.
+    // This preserves the main DLS bank and gives embedded instruments priority.
+    //
+    BAEResult BAEMixer_LoadDLSBankAsXMFOverlayFromMemory(BAEMixer mixer,
+                                                         void* pMemory,
+                                                         uint32_t memorySize);
+
+    // BAEMixer_UnloadXMFDLSOverlayBank()
+    // ------------------------------------
+    // Unload only the embedded XMF DLS overlay bank, preserving the main bank.
+    //
+    BAEResult BAEMixer_UnloadXMFDLSOverlayBank(BAEMixer mixer);
+
     // BAEMixer_UnloadDLSBank()
     // ------------------------------------
     // Unload the active DLS bank
@@ -2907,6 +2922,10 @@ extern "C"
 
 #if USE_SF2_SUPPORT == TRUE
     bool BAESong_IsSF2Song(BAESong song);
+#endif
+
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+    BAEResult BAESong_EnableSF2(BAESong song, BAE_BOOL enable);
 #endif
 
 #if USE_NATIVE_DLS == TRUE

@@ -24,6 +24,10 @@
 #include "GenDLS_MobileBAE.h"
 #endif
 
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+#include "GenXMF.h"
+#endif
+
 //http://developer.android.com/training/articles/perf-jni.html
 
 // Cache the most-recently loaded bank's friendly name so Java callers that
@@ -980,6 +984,9 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1setUseFluidSynthForDLS
 	(void)env;
 	(void)clazz;
 	g_useFluidSynthForDLS = enable ? TRUE : FALSE;
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+	GM_XMF_SetUseFluidSynthForDLS(g_useFluidSynthForDLS);
+#endif
 	return (jint)BAE_NO_ERROR;
 }
 

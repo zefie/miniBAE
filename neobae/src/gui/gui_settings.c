@@ -30,6 +30,9 @@
 #include "gui_playlist.h"
 #include "gui_panels.h"
 #include "GenPriv.h"
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+#include "GenXMF.h"
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -681,6 +684,9 @@ void apply_settings_to_ui(const Settings *settings, int *transpose, int *tempo, 
     {
         g_use_fluidsynth_for_dls = settings->use_fluidsynth_for_dls;
     }
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+    GM_XMF_SetUseFluidSynthForDLS(g_use_fluidsynth_for_dls ? TRUE : FALSE);
+#endif
 #endif
     if (settings->has_export_codec)
     {
@@ -1442,6 +1448,9 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
     }
     else if (ui_toggle(R, fsDlsRect, &g_use_fluidsynth_for_dls, "Use FluidSynth for DLS", mx, my, mclick))
     {
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+        GM_XMF_SetUseFluidSynthForDLS(g_use_fluidsynth_for_dls ? TRUE : FALSE);
+#endif
         save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, *loopPlay);
         if (g_current_bank_path[0])
         {

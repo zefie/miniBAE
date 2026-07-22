@@ -48,13 +48,11 @@
 #include "baescript.h"
 #endif
 
-#if USE_SF2_SUPPORT == TRUE
-#  if _USING_FLUIDSYNTH == TRUE
-#    include "GenSF2_FluidSynth.h"
-#    if USE_XMF_SUPPORT == TRUE
-#      include "GenXMF.h"
-#    endif
-#  endif
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#  include "GenSF2_FluidSynth.h"
+#endif
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+#  include "GenXMF.h"
 #endif
 
 #ifdef main
@@ -310,7 +308,7 @@ static void init_playFileString(void)
 #if USE_ZMF_SUPPORT == TRUE
     strcat(gPlayFileString, ", ZMF");
 #endif
-#if USE_XMF_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
     strcat(gPlayFileString, ", XMF/MXMF");
 #endif
 #if USE_MPEG_DECODER == TRUE
@@ -1012,7 +1010,7 @@ static BAEResult PV_PlayFile(BAEMixer mixer, const char *path,
         if (!gWriteToFile) print_rmf_info(path);
         err = BAESong_LoadRmfFromFile(song, (BAEPathName)path, 0, TRUE);
     }
-#if USE_XMF_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
     else if (ftype == BAE_XMF) {
         playbae_printf("Playing XMF: %s\n", path);
         err = BAESong_LoadXmfFromFile(song, (BAEPathName)path, TRUE);
@@ -1452,6 +1450,17 @@ int main(int argc, char *argv[])
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_NATIVE_DLS == TRUE
     if (PV_ParseCommands(argc, argv, "-fs", 0, NULL)) gUseSF2Mode = 1;
 #endif
+
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_NATIVE_DLS == TRUE
+    GM_XMF_SetUseFluidSynthForDLS(gUseSF2Mode ? TRUE : FALSE);
+#elif _USING_FLUIDSYNTH == TRUE
+    GM_XMF_SetUseFluidSynthForDLS(TRUE);
+#else
+    GM_XMF_SetUseFluidSynthForDLS(FALSE);
+#endif
+#endif
+
     if (PV_ParseCommands(argc, argv, "-nf", 0, NULL))   gFadeOut = 0;
     if (PV_ParseCommands(argc, argv, "-v",  1, tmpBuf)) {
         gVolumePct = atoi(tmpBuf);

@@ -35,9 +35,34 @@
 void LZSSUncompress(unsigned char* src, uint32_t srcBytes,
                     unsigned char* dst, uint32_t dstBytes);
 
-#if USE_XMF_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
 #include <zlib.h>
+
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
 #include "GenSF2_FluidSynth.h"
+#endif
+
+#if USE_NATIVE_DLS == TRUE
+#include "GenDLS_MobileBAE.h"
+#endif
+
+static BAESong g_xmfBankLoadSong = NULL;
+
+#if USE_NATIVE_DLS == TRUE
+static BAE_BOOL g_xmfUseFluidSynthForDLS = FALSE;
+#else
+static BAE_BOOL g_xmfUseFluidSynthForDLS = TRUE;
+#endif
+
+void GM_XMF_SetUseFluidSynthForDLS(BAE_BOOL enable)
+{
+    g_xmfUseFluidSynthForDLS = enable ? TRUE : FALSE;
+}
+
+BAE_BOOL GM_XMF_GetUseFluidSynthForDLS(void)
+{
+    return g_xmfUseFluidSynthForDLS ? TRUE : FALSE;
+}
 
 // Control verbose inflate failure logging during MXMF packed scans
 #ifndef MXMF_LOG_INFLATE_FAILURES
@@ -566,7 +591,7 @@ static bool PV_TryParseXMF1(const unsigned char *bytes, uint32_t len,
 static bool PV_InflateFromOffset(const unsigned char *buf, uint32_t len, uint32_t offset,
                                   unsigned char **outBuf, uint32_t *outLen)
 {
-#if USE_XMF_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
     if (!buf || offset >= len || !outBuf || !outLen) return FALSE;
     // Quick header sanity: accept zlib (0x78 ..), or gzip (0x1f 0x8b)
     if (len < 2 || offset > (len - 2)) return FALSE;
@@ -676,7 +701,7 @@ static bool PV_InflateFromOffset(const unsigned char *buf, uint32_t len, uint32_
 static bool PV_InflateRawFromOffset(const unsigned char *buf, uint32_t len, uint32_t offset,
                                      unsigned char **outBuf, uint32_t *outLen)
 {
-#if USE_XMF_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
     if (!buf || offset >= len || !outBuf || !outLen) return FALSE;
     z_stream zs;
     memset(&zs, 0, sizeof(zs));
@@ -1114,7 +1139,7 @@ fail_scan:
 
 static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
 {
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if (USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE) || USE_NATIVE_DLS == TRUE
     // Collect RIFF SF2/DLS candidates and try them in priority order
     typedef struct { uint32_t off, bytes; bool isDLS, hasWvpl; uint64_t score; } cand_t;
     cand_t cands[16];
@@ -1174,23 +1199,62 @@ static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
     debug_message("[XMF] trying %d bank candidate(s)\n", candCount);
     for (int idx = 0; idx < candCount; ++idx) {
         cand_t *c = &cands[idx];
-        debug_message("[XMF] attempting overlay load #%d @+%u bytes=%u%s\n", idx+1, c->off, c->bytes,
+        debug_message("[XMF] attempting bank load #%d @+%u bytes=%u%s\n", idx+1, c->off, c->bytes,
                    (c->isDLS? (c->hasWvpl? ", DLS wvpl=YES" : ", DLS wvpl=NO") : ", SF2"));
-        // Use overlay loading to preserve base soundfont and only override instruments in XMF
-        OPErr r = GM_LoadSF2SoundfontAsXMFOverlay(buf + c->off, (size_t)c->bytes);
-        if (r == NO_ERR) {
-            int presetCount = 0;
-            bool okPresets = GM_SF2_CurrentFontHasAnyPreset(&presetCount);
-            if (okPresets) {
-                debug_message("[XMF] bank overlay succeeded on candidate #%d (presets>0)\n", idx+1);
-                return TRUE;
-            } else {
-                debug_message("[XMF] bank candidate #%d loaded but no presets found (count=%d) — trying next...\n", idx+1, presetCount);
+
+#if USE_NATIVE_DLS == TRUE
+        if (c->isDLS && !GM_XMF_GetUseFluidSynthForDLS()) {
+            BAEMixer mixer = NULL;
+            if (g_xmfBankLoadSong && BAESong_GetMixer(g_xmfBankLoadSong, &mixer) == BAE_NO_ERROR && mixer) {
+                BAEMixer_UnloadXMFDLSOverlayBank(mixer);
+
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
                 GM_UnloadXMFOverlaySoundFont();
+                GM_SetMixerSF2Mode(FALSE);
+#endif
+
+                if (BAEMixer_LoadDLSBankAsXMFOverlayFromMemory(mixer, (void *)(buf + c->off), c->bytes) == BAE_NO_ERROR) {
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+                    if (g_xmfBankLoadSong)
+                    {
+                        (void)BAESong_EnableSF2(g_xmfBankLoadSong, FALSE);
+                    }
+#endif
+                    GM_SetMixerDLSMode(TRUE);
+                    debug_message("[XMF] native DLS load succeeded on candidate #%d\n", idx+1);
+                    return TRUE;
+                }
+                debug_message("[XMF] native DLS load failed on candidate #%d, trying next...\n", idx+1);
+            } else {
+                debug_message("[XMF] no mixer available for native DLS candidate #%d\n", idx+1);
             }
-        } else {
-            debug_message("[XMF] bank overlay load failed on candidate #%d (result=%d), trying next...\n", idx+1, r);
+            continue;
         }
+#endif
+
+    #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+        // Use overlay loading to preserve base soundfont and only override instruments in XMF
+        {
+            OPErr r = GM_LoadSF2SoundfontAsXMFOverlay(buf + c->off, (size_t)c->bytes);
+            if (r == NO_ERR) {
+                int presetCount = 0;
+                bool okPresets = GM_SF2_CurrentFontHasAnyPreset(&presetCount);
+                if (okPresets) {
+                    debug_message("[XMF] bank overlay succeeded on candidate #%d (presets>0)\n", idx+1);
+                    return TRUE;
+                } else {
+                    debug_message("[XMF] bank candidate #%d loaded but no presets found (count=%d) - trying next...\n", idx+1, presetCount);
+                    GM_UnloadXMFOverlaySoundFont();
+                }
+            } else {
+                debug_message("[XMF] bank overlay load failed on candidate #%d (result=%d), trying next...\n", idx+1, r);
+            }
+        }
+#else
+        if (!c->isDLS) {
+            debug_message("[XMF] skipping SF2 candidate #%d (FluidSynth not available)\n", idx+1);
+        }
+#endif
     }
     debug_message("[XMF] all bank candidates failed to load\n");
     return FALSE;
@@ -1203,6 +1267,16 @@ BAEResult BAESong_LoadXmfFromFile(BAESong song, BAEPathName filePath, BAE_BOOL i
 {
     if (!(song))
         return BAE_NULL_OBJECT;
+
+#if USE_NATIVE_DLS == TRUE
+    {
+        BAEMixer mixer = NULL;
+        if (BAESong_GetMixer(song, &mixer) == BAE_NO_ERROR && mixer)
+        {
+            BAEMixer_UnloadXMFDLSOverlayBank(mixer);
+        }
+    }
+#endif
         
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_XMF_SUPPORT == TRUE
     if (GM_SF2_HasXmfEmbeddedBank())
@@ -1238,6 +1312,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
         return BAE_NULL_OBJECT;
     if (!data || ulen == 0)
         return BAE_BAD_FILE;
+    g_xmfBankLoadSong = song;
     const unsigned char *bytes = (const unsigned char *)data;
 
     const char smf_sig[4] = {'M','T','h','d'};
@@ -1856,4 +1931,4 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
     return BAE_BAD_FILE;
 }
 
-#endif // USE_XMF_SUPPORT && _USING_FLUIDSYNTH
+#endif // USE_XMF_SUPPORT && (_USING_FLUIDSYNTH || USE_NATIVE_DLS)
