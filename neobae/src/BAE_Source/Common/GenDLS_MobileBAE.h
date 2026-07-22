@@ -48,11 +48,15 @@ struct DLS_Articulation {
     int32_t lfoStartDelay;
     int32_t vibratoFrequency;
     int32_t vibratoStartDelay;
+    int32_t eg1Delay;
     int32_t eg1Attack;
+    int32_t eg1Hold;
     int32_t eg1Decay;
     int32_t eg1Sustain;
     int32_t eg1Release;
+    int32_t eg2Delay;
     int32_t eg2Attack;
+    int32_t eg2Hold;
     int32_t eg2Decay;
     int32_t eg2Sustain;
     int32_t eg2Release;
@@ -75,6 +79,7 @@ struct DLS_SampleInfo {
     int32_t attenuation;
     int32_t loopStart;
     int32_t loopEndInclusive;
+    bool loopUntilRelease;
 };
 
 struct DLS_Wave {
@@ -169,19 +174,22 @@ void GM_DLS_ResetForSong(GM_Song* pSong);
 #define DLS_EG2_FULL 0xFFFF
 
 struct DLS_Envelope {
+    int32_t delayMicros;
     int32_t attackMicros;
+    int32_t holdMicros;
     int32_t decayMicros;
     int32_t attackTicks;
     int32_t decayTicks;
-    int32_t releaseTicks;
+    int32_t releaseMicros;
+    int32_t activeReleaseMicros;
     int32_t sustain;
     bool eg1;
     int64_t eg1Sustain;
     int32_t decayMultiplier;
-    int32_t releaseMultiplier;
-    int32_t stage; // 0: attack, 1: decay, 2: sustain, 3: release, 4: off
+    int32_t activeReleaseMultiplier;
+    int32_t stage; // 0: delay, 1: attack, 2: hold, 3: decay, 4: sustain, 5: release, 6: finished, 7: shutdown
     int32_t tickIndex;
-    int32_t releaseStart;
+    int32_t shutdownStart;
     int32_t current;
     int64_t eg1Current;
     bool finished;
@@ -268,6 +276,7 @@ struct DLS_Voice {
     int64_t loopStart;
     int64_t loopEnd;
     bool looping;
+    bool loopUntilRelease;
     
     int32_t controlBlockFrames;
     

@@ -229,40 +229,81 @@ static int32_t dls_lfo_next(DLS_Lfo* lfo, int32_t frames) {
 // ----------------------------------------------------------------------------
 // ENVELOPE
 // ----------------------------------------------------------------------------
-static void dls_env_init(DLS_Envelope* env, int32_t attackMicros, int32_t decayMicros, int32_t sustainQ16, int32_t releaseMicros, bool eg1, int32_t sampleRate) {
+enum {
+    DLS_ENV_DELAY = 0,
+    DLS_ENV_ATTACK = 1,
+    DLS_ENV_HOLD = 2,
+    DLS_ENV_DECAY = 3,
+    DLS_ENV_SUSTAIN = 4,
+    DLS_ENV_RELEASE = 5,
+    DLS_ENV_FINISHED = 6,
+    DLS_ENV_SHUTDOWN = 7
+};
+
+#define DLS_FORCED_FADE_MICROS 20000
+
+static int32_t dls_env_eg2_ramp_step(int32_t elapsedMicros, int32_t durationMicros)
+{
+    if (durationMicros <= 0)
+    {
+        return DLS_EG2_FULL;
+    }
+    {
+        int32_t divisor = durationMicros >> 2;
+        int64_t step;
+        if (divisor <= 0)
+        {
+            return DLS_EG2_FULL;
+        }
+        step = ((((int64_t)elapsedMicros) << 6) / divisor) << 8;
+        return step >= DLS_EG2_FULL ? DLS_EG2_FULL : (int32_t)step;
+    }
+}
+
+static void dls_env_init(DLS_Envelope* env, int32_t delayMicros, int32_t attackMicros, int32_t holdMicros,
+                         int32_t decayMicros, int32_t sustainQ16, int32_t releaseMicros,
+                         bool eg1, int32_t sampleRate) {
     (void)sampleRate;
+    env->delayMicros = dls_clamp(delayMicros, 0, 40000000);
     env->attackMicros = dls_clamp(attackMicros, 0, 40000000);
+    env->holdMicros = dls_clamp(holdMicros, 0, 40000000);
     env->decayMicros = dls_clamp(decayMicros, 0, 40000000);
     env->attackTicks = dls_micros_to_control_ticks(env->attackMicros);
     env->decayTicks = dls_micros_to_control_ticks(env->decayMicros);
-    env->releaseTicks = dls_micros_to_control_ticks(dls_clamp(releaseMicros, 0, 40000000));
+    env->releaseMicros = dls_clamp(releaseMicros, 0, 40000000);
+    env->activeReleaseMicros = env->releaseMicros;
     env->sustain = eg1 ? dls_clamp(sustainQ16, 0, 0x10000)
                        : (int32_t)(((int64_t)DLS_EG2_FULL * dls_clamp(sustainQ16, 0, 0x10000)) >> 16);
     env->eg1 = eg1;
     env->eg1Sustain = dls_eg1_sustain_target(sustainQ16);
     env->decayMultiplier = dls_eg1_multiplier(env->decayMicros);
-    env->releaseMultiplier = dls_eg1_multiplier(releaseMicros);
-    env->current = (!eg1 && env->attackTicks == 0) ? DLS_EG2_FULL : 0;
+    env->activeReleaseMultiplier = dls_eg1_multiplier(env->releaseMicros);
+    env->current = 0;
     env->eg1Current = 0;
-    env->stage = (!eg1 && env->attackTicks == 0) ? (env->decayTicks == 0 ? 2 : 1) : 0;
+    env->stage = env->delayMicros == 0 ? DLS_ENV_ATTACK : DLS_ENV_DELAY;
     env->tickIndex = 0;
-    env->releaseStart = 0;
+    env->shutdownStart = 0;
     env->finished = false;
 }
 
-static void dls_env_release(DLS_Envelope* env) {
-    if (env->stage != 3 && !env->finished) {
-        env->releaseStart = env->current;
-        if (env->eg1) {
-            // EG1: tickIndex always resets to 0 (Java behavior)
-            env->tickIndex = 0;
-        } else {
-            // EG2: Java sets tickIndex proportionally so release sweeps from current toward 0
-            // at rate EG2_FULL/releaseTicks, taking current/EG2_FULL * releaseTicks ticks total.
-            // Initial tickIndex = (EG2_FULL - current) * releaseTicks / EG2_FULL
-            env->tickIndex = (int32_t)(((int64_t)(DLS_EG2_FULL - env->current) * env->releaseTicks) >> 16);
-        }
-        env->stage = 3;
+static void dls_env_release(DLS_Envelope* env, int32_t durationMicros) {
+    if (!env->finished && env->stage != DLS_ENV_SHUTDOWN) {
+        env->activeReleaseMicros = dls_clamp(durationMicros, 0, 40000000);
+        env->activeReleaseMultiplier = dls_eg1_multiplier(env->activeReleaseMicros);
+        env->tickIndex = env->eg1 ? 0 : (int32_t)(((int64_t)(DLS_EG2_FULL - env->current) * env->activeReleaseMicros) >> 16);
+        env->stage = DLS_ENV_RELEASE;
+    }
+}
+
+static void dls_env_shutdown(DLS_Envelope* env)
+{
+    if (!env->finished)
+    {
+        env->activeReleaseMicros = DLS_FORCED_FADE_MICROS;
+        env->activeReleaseMultiplier = dls_eg1_multiplier(DLS_FORCED_FADE_MICROS);
+        env->shutdownStart = env->current;
+        env->tickIndex = 0;
+        env->stage = DLS_ENV_SHUTDOWN;
     }
 }
 
@@ -270,40 +311,67 @@ static int32_t dls_env_next_eg1(DLS_Envelope* env);
 
 static int32_t dls_env_next_linear(DLS_Envelope* env) {
     if (env->finished) return 0;
-    if (env->stage == 0) {
-        int32_t denom = env->attackTicks > 0 ? env->attackTicks : 1;
-        int64_t val = (int64_t)env->tickIndex++ * DLS_EG2_FULL / denom;
-        env->current = val < DLS_EG2_FULL ? (int32_t)val : DLS_EG2_FULL;
-        if (env->tickIndex >= env->attackTicks) {
-            env->stage = env->decayTicks == 0 ? 2 : 1;
-            env->tickIndex = 0;
+    if (env->stage == DLS_ENV_DELAY) {
+        env->current = 0;
+        if (env->tickIndex >= env->delayMicros) {
+            env->stage = DLS_ENV_ATTACK;
+            env->tickIndex = 10000;
+        } else {
+            env->tickIndex += 10000;
+        }
+    } else if (env->stage == DLS_ENV_ATTACK) {
+        int32_t step;
+        if (env->attackTicks == 0) {
             env->current = DLS_EG2_FULL;
+            env->stage = env->holdMicros == 0 ? (env->decayTicks == 0 ? DLS_ENV_SUSTAIN : DLS_ENV_DECAY) : DLS_ENV_HOLD;
+            env->tickIndex = 0;
+            return dls_env_next_linear(env);
         }
-    } else if (env->stage == 1) {
-        // Java: decays from EG2_FULL toward 0 at rate EG2_FULL/decayTicks, stops at sustain
-        // This means decay takes decayTicks * (EG2_FULL - sustain) / EG2_FULL time to reach sustain
-        int32_t denom = env->decayTicks > 0 ? env->decayTicks : 1;
-        env->current = DLS_EG2_FULL - (int32_t)(((int64_t)DLS_EG2_FULL * env->tickIndex++) / denom);
+        step = dls_env_eg2_ramp_step(env->tickIndex, env->attackMicros);
+        env->current = step;
+        if (step >= DLS_EG2_FULL) {
+            env->stage = env->holdMicros == 0 ? (env->decayTicks == 0 ? DLS_ENV_SUSTAIN : DLS_ENV_DECAY) : DLS_ENV_HOLD;
+            env->tickIndex = env->holdMicros == 0 ? 0 : 10000;
+            env->current = DLS_EG2_FULL;
+        } else {
+            env->tickIndex += 10000;
+        }
+    } else if (env->stage == DLS_ENV_HOLD) {
+        env->current = DLS_EG2_FULL;
+        if (env->tickIndex >= env->holdMicros) {
+            env->stage = env->decayTicks == 0 ? DLS_ENV_SUSTAIN : DLS_ENV_DECAY;
+            env->tickIndex = 10000;
+        } else {
+            env->tickIndex += 10000;
+        }
+    } else if (env->stage == DLS_ENV_DECAY) {
+        env->current = DLS_EG2_FULL - dls_env_eg2_ramp_step(env->tickIndex, env->decayMicros);
         if (env->current <= env->sustain) {
-            env->stage = 2;
+            env->stage = DLS_ENV_SUSTAIN;
             env->current = env->sustain;
+        } else {
+            env->tickIndex += 10000;
         }
-    } else if (env->stage == 2) {
+    } else if (env->stage == DLS_ENV_SUSTAIN) {
         env->current = env->sustain;
-    } else if (env->stage == 3) {
-        // Java: current = EG2_FULL - (tickIndex * EG2_FULL / releaseTicks)
-        // tickIndex was set proportionally in release(), so we decay from current to 0
-        // at rate EG2_FULL/releaseTicks (same as Java)
-        if (env->releaseTicks == 0) {
+    } else if (env->stage == DLS_ENV_RELEASE) {
+        int32_t step = dls_env_eg2_ramp_step(env->tickIndex, env->activeReleaseMicros);
+        env->current = DLS_EG2_FULL - step;
+        if (step >= DLS_EG2_FULL) {
             env->current = 0;
             env->finished = true;
         } else {
-            int64_t step = ((int64_t)DLS_EG2_FULL * env->tickIndex++) / env->releaseTicks;
-            env->current = DLS_EG2_FULL - (int32_t)step;
-            if (env->current <= 0) {
-                env->current = 0;
-                env->finished = true;
-            }
+            env->tickIndex += 10000;
+        }
+    } else if (env->stage == DLS_ENV_SHUTDOWN) {
+        int32_t remaining = DLS_EG2_FULL - dls_env_eg2_ramp_step(env->tickIndex, DLS_FORCED_FADE_MICROS);
+        env->current = DLS_FP_MUL(env->shutdownStart, remaining);
+        if (env->current <= 0 || remaining <= 0) {
+            env->current = 0;
+            env->finished = true;
+            env->stage = DLS_ENV_FINISHED;
+        } else {
+            env->tickIndex += 10000;
         }
     }
     return dls_clamp(env->current, 0, DLS_EG2_FULL);
@@ -312,9 +380,18 @@ static int32_t dls_env_next_linear(DLS_Envelope* env) {
 static int32_t dls_env_next_eg1(DLS_Envelope* env) {
     if (env->finished) return 0;
     int32_t output = 0;
-    if (env->stage == 0) {
+    if (env->stage == DLS_ENV_DELAY) {
+        env->eg1Current = 0;
+        output = 0;
+        if (env->tickIndex >= env->delayMicros) {
+            env->stage = DLS_ENV_ATTACK;
+            env->tickIndex = 10000;
+        } else {
+            env->tickIndex += 10000;
+        }
+    } else if (env->stage == DLS_ENV_ATTACK) {
         if (env->attackMicros == 0) {
-            env->stage = env->decayMicros == 0 ? 2 : 1;
+            env->stage = env->holdMicros == 0 ? (env->decayMicros == 0 ? DLS_ENV_SUSTAIN : DLS_ENV_DECAY) : DLS_ENV_HOLD;
             env->tickIndex = 0;
             env->eg1Current = DLS_EG1_FULL;
             return dls_env_next_eg1(env);
@@ -322,7 +399,7 @@ static int32_t dls_env_next_eg1(DLS_Envelope* env) {
         int32_t denom = (env->attackMicros >> 2) > 0 ? (env->attackMicros >> 2) : 1;
         int64_t level = (((int64_t)env->tickIndex << 6) / denom) << 8;
         if (level >= 0xFFFFLL) {
-            env->stage = env->decayMicros == 0 ? 2 : 1;
+            env->stage = env->holdMicros == 0 ? (env->decayMicros == 0 ? DLS_ENV_SUSTAIN : DLS_ENV_DECAY) : DLS_ENV_HOLD;
             env->tickIndex = 10000;
             env->eg1Current = DLS_EG1_FULL;
             output = dls_eg1_level(env->eg1Current);
@@ -331,32 +408,41 @@ static int32_t dls_env_next_eg1(DLS_Envelope* env) {
             output = dls_eg1_level(env->eg1Current);
             env->tickIndex += 10000;
         }
-    } else if (env->stage == 1) {
+    } else if (env->stage == DLS_ENV_HOLD) {
+        env->eg1Current = DLS_EG1_FULL;
+        output = dls_eg1_level(env->eg1Current);
+        if (env->tickIndex >= env->holdMicros) {
+            env->stage = env->decayMicros == 0 ? DLS_ENV_SUSTAIN : DLS_ENV_DECAY;
+            env->tickIndex = 0;
+        } else {
+            env->tickIndex += 10000;
+        }
+    } else if (env->stage == DLS_ENV_DECAY) {
         output = dls_eg1_level(env->eg1Current);
         env->eg1Current = (env->eg1Current * env->decayMultiplier) >> 16;
         if (env->eg1Current <= env->eg1Sustain) {
-            env->stage = 2;
+            env->stage = DLS_ENV_SUSTAIN;
             env->eg1Current = env->eg1Sustain;
         }
-    } else if (env->stage == 2) {
+    } else if (env->stage == DLS_ENV_SUSTAIN) {
         env->eg1Current = env->eg1Sustain;
         output = dls_eg1_level(env->eg1Current);
-    } else if (env->stage == 3) {
-        if (env->releaseTicks == 0) {
+    } else if (env->stage == DLS_ENV_RELEASE || env->stage == DLS_ENV_SHUTDOWN) {
+        if (env->activeReleaseMicros == 0) {
             env->eg1Current = 0;
             output = 0;
         } else {
             output = dls_eg1_level(env->eg1Current);
-            env->eg1Current = (env->eg1Current * env->releaseMultiplier) >> 16;
+            env->eg1Current = (env->eg1Current * env->activeReleaseMultiplier) >> 16;
         }
     } else {
         env->eg1Current = 0;
         output = 0;
     }
     env->current = output;
-    if (env->stage > 0 && output == 0) {
+    if (env->stage > DLS_ENV_ATTACK && output == 0) {
         env->finished = true;
-        env->stage = 4;
+        env->stage = DLS_ENV_FINISHED;
     }
     return output;
 }
@@ -579,12 +665,21 @@ static OPErr DLS_Parse_Wave_Data(const uint8_t* chunk_start, const uint8_t* chun
                 wave->sample.fineTuneCents = (int16_t)read_le16(body + 6);
                 wave->sample.attenuation = (int32_t)read_le32(body + 8);
                 uint32_t cSampleLoops = read_le32(body + 16);
+                wave->sample.loopMode = DLS_LOOP_NONE;
+                wave->sample.loopStart = 0;
+                wave->sample.loopEndInclusive = -1;
+                wave->sample.loopUntilRelease = false;
                 if (cSampleLoops > 0 && chunk_size >= 20 + cSampleLoops * 16) {
                     const uint8_t* loop = body + 20;
                     uint32_t loopType = read_le32(loop + 4);
-                    wave->sample.loopStart = read_le32(loop + 8);
-                    wave->sample.loopEndInclusive = wave->sample.loopStart + read_le32(loop + 12) - 1;
-                    wave->sample.loopMode = loopType == 0 ? DLS_LOOP_FORWARD : DLS_LOOP_NONE;
+                    uint32_t loopStart = read_le32(loop + 8);
+                    uint32_t loopLength = read_le32(loop + 12);
+                    if (loopLength != 0) {
+                        wave->sample.loopStart = loopStart;
+                        wave->sample.loopEndInclusive = (int32_t)(loopStart + loopLength - 1);
+                        wave->sample.loopMode = DLS_LOOP_FORWARD;
+                        wave->sample.loopUntilRelease = (loopType == 1);
+                    }
                 }
             }
         } else if (id == read_chunk_id((const uint8_t*)"smpl") && chunk_size >= 36) {
@@ -599,6 +694,7 @@ static OPErr DLS_Parse_Wave_Data(const uint8_t* chunk_start, const uint8_t* chun
                     wave->sample.loopMode = loopType == 0 ? DLS_LOOP_FORWARD : DLS_LOOP_NONE;
                     wave->sample.loopStart = loopStart;
                     wave->sample.loopEndInclusive = loopEnd;
+                    wave->sample.loopUntilRelease = false;
                 }
             }
         } else if (id == read_chunk_id((const uint8_t*)"inst") && chunk_size >= 7) {
@@ -697,11 +793,15 @@ static void DLS_InitArticulation(DLS_Articulation* art) {
     art->lfoStartDelay = 10000;
     art->vibratoFrequency = 200000;
     art->vibratoStartDelay = 10000;
+    art->eg1Delay = INT32_MIN;
     art->eg1Attack = INT32_MIN;
+    art->eg1Hold = INT32_MIN;
     art->eg1Decay = INT32_MIN;
     art->eg1Sustain = 0x10000;
     art->eg1Release = INT32_MIN;
+    art->eg2Delay = INT32_MIN;
     art->eg2Attack = INT32_MIN;
+    art->eg2Hold = INT32_MIN;
     art->eg2Decay = INT32_MIN;
     art->eg2Sustain = 0x10000;
     art->eg2Release = INT32_MIN;
@@ -725,11 +825,15 @@ static void DLS_ApplyDirectConnection(DLS_Articulation* art, const DLS_Connectio
         case 0x105: art->lfoStartDelay = dls_timecent_to_micros(connection->scale); break;
         case 0x114: art->vibratoFrequency = dls_plus_lfo_period(connection->scale); break;
         case 0x115: art->vibratoStartDelay = dls_timecent_to_micros(connection->scale); break;
+        case 0x20B: art->eg1Delay = connection->scale; break;
         case 0x206: art->eg1Attack = connection->scale; break;
+        case 0x20C: art->eg1Hold = connection->scale; break;
         case 0x207: art->eg1Decay = connection->scale; break;
         case 0x209: art->eg1Release = connection->scale; break;
         case 0x20A: art->eg1Sustain = connection->scale / 1000; break;
+        case 0x30F: art->eg2Delay = connection->scale; break;
         case 0x30A: art->eg2Attack = connection->scale; break;
+        case 0x310: art->eg2Hold = connection->scale; break;
         case 0x30B: art->eg2Decay = connection->scale; break;
         case 0x30D: art->eg2Release = connection->scale; break;
         case 0x30E: art->eg2Sustain = connection->scale / 1000; break;
@@ -795,6 +899,7 @@ static OPErr DLS_Parse_Region(const uint8_t* start, const uint8_t* end, bool lev
     region->velocityHigh = 127;
     region->tableIndex = -1;
     region->sample.loopMode = DLS_LOOP_NONE;
+    region->sample.loopUntilRelease = false;
     
     const uint8_t* p = start;
     while (p + 8 <= end) {
@@ -821,12 +926,21 @@ static OPErr DLS_Parse_Region(const uint8_t* start, const uint8_t* end, bool lev
                 region->sample.fineTuneCents = (int16_t)read_le16(body + 6);
                 region->sample.attenuation = (int32_t)read_le32(body + 8);
                 uint32_t cSampleLoops = read_le32(body + 16);
+                region->sample.loopMode = DLS_LOOP_NONE;
+                region->sample.loopStart = 0;
+                region->sample.loopEndInclusive = -1;
+                region->sample.loopUntilRelease = false;
                 if (cSampleLoops > 0 && size >= 20 + cSampleLoops * 16) {
                     const uint8_t* loop = body + 20;
                     uint32_t loopType = read_le32(loop + 4);
-                    region->sample.loopStart = read_le32(loop + 8);
-                    region->sample.loopEndInclusive = region->sample.loopStart + read_le32(loop + 12) - 1;
-                    region->sample.loopMode = loopType == 0 ? DLS_LOOP_FORWARD : DLS_LOOP_NONE;
+                    uint32_t loopStart = read_le32(loop + 8);
+                    uint32_t loopLength = read_le32(loop + 12);
+                    if (loopLength != 0) {
+                        region->sample.loopStart = loopStart;
+                        region->sample.loopEndInclusive = (int32_t)(loopStart + loopLength - 1);
+                        region->sample.loopMode = DLS_LOOP_FORWARD;
+                        region->sample.loopUntilRelease = (loopType == 1);
+                    }
                 }
             }
         } else if (id == CHUNK_LIST && size >= 4 && (read_chunk_id(body) == CHUNK_LART || read_chunk_id(body) == read_chunk_id((const uint8_t*)"lar2"))) {
@@ -1783,6 +1897,7 @@ static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t v
     v->baseChorusSend = art->chorus;
 
     v->looping = sample->loopMode == DLS_LOOP_FORWARD;
+    v->loopUntilRelease = sample->loopUntilRelease;
     v->loopStart = (int64_t)sample->loopStart << 16;
     v->loopEnd = (int64_t)(sample->loopEndInclusive + 1) << 16;
     if (v->loopStart < 0 || v->loopEnd <= v->loopStart || v->loopEnd > ((int64_t)wave->frames << 16)) {
@@ -1795,10 +1910,14 @@ static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t v
         v->baseGainQ16 = DLS_FP_MUL(v->baseGainQ16, dls_exp10_q16(noteGainAttenuation / 200));
     }
     
+    int32_t eg1Delay = dls_timecent_to_micros(art->eg1Delay);
     int32_t eg1Attack = dls_timecent_to_micros(art->eg1Attack);
+    int32_t eg1Hold = dls_timecent_to_micros(art->eg1Hold);
     int32_t eg1Decay = dls_timecent_to_micros(art->eg1Decay);
     int32_t eg1Release = dls_timecent_to_micros(art->eg1Release);
+    int32_t eg2Delay = dls_timecent_to_micros(art->eg2Delay);
     int32_t eg2Attack = dls_timecent_to_micros(art->eg2Attack);
+    int32_t eg2Hold = dls_timecent_to_micros(art->eg2Hold);
     int32_t eg2Decay = dls_timecent_to_micros(art->eg2Decay);
     int32_t eg2Release = dls_timecent_to_micros(art->eg2Release);
 
@@ -1806,14 +1925,22 @@ static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t v
         const DLS_Connection* connection = &art->runtimeConnections[i];
         int32_t value = dls_note_on_connection_value_q16(connection, key, velocity, unityNote, ch);
         if (value == 0) continue;
-        if (connection->destination == 0x206) {
+        if (connection->destination == 0x20B) {
+            eg1Delay = dls_modulated_time_micros(eg1Delay, value);
+        } else if (connection->destination == 0x206) {
             eg1Attack = dls_modulated_time_micros(eg1Attack, value);
+        } else if (connection->destination == 0x20C) {
+            eg1Hold = dls_modulated_time_micros(eg1Hold, value);
         } else if (connection->destination == 0x207) {
             eg1Decay = dls_modulated_time_micros(eg1Decay, value);
         } else if (connection->destination == 0x209) {
             eg1Release = dls_modulated_time_micros(eg1Release, value);
+        } else if (connection->destination == 0x30F) {
+            eg2Delay = dls_modulated_time_micros(eg2Delay, value);
         } else if (connection->destination == 0x30A) {
             eg2Attack = dls_modulated_time_micros(eg2Attack, value);
+        } else if (connection->destination == 0x310) {
+            eg2Hold = dls_modulated_time_micros(eg2Hold, value);
         } else if (connection->destination == 0x30B) {
             eg2Decay = dls_modulated_time_micros(eg2Decay, value);
         } else if (connection->destination == 0x30D) {
@@ -1831,8 +1958,10 @@ static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t v
     v->baseIncrement = dls_pitch_cents_to_increment(pitchCentsQ16, sampleRate, wave->sampleRate);
     if (v->baseIncrement < 1) v->baseIncrement = 1;
 
-    dls_env_init(&v->envelope, eg1Attack, eg1Decay, art->eg1Sustain, eg1Release, true, sampleRate);
-    dls_env_init(&v->eg2Envelope, eg2Attack, eg2Decay, art->eg2Sustain, eg2Release, false, sampleRate);
+    dls_env_init(&v->envelope, eg1Delay, eg1Attack, eg1Hold, eg1Decay,
+                 art->eg1Sustain, eg1Release, true, sampleRate);
+    dls_env_init(&v->eg2Envelope, eg2Delay, eg2Attack, eg2Hold, eg2Decay,
+                 art->eg2Sustain, eg2Release, false, sampleRate);
     dls_lfo_init(&v->vibratoLfo, art->vibratoFrequency, art->vibratoStartDelay, sampleRate);
     dls_lfo_init(&v->modulationLfo, art->lfoFrequency, art->lfoStartDelay, sampleRate);
     
@@ -1920,8 +2049,8 @@ static void dls_voice_fast_kill(DLS_Voice* v) {
     if (!v || !v->active) return;
     v->keyHeld = false;
     v->sustainSnapshot = false;
-    dls_env_release(&v->envelope);
-    dls_env_release(&v->eg2Envelope);
+    dls_env_shutdown(&v->envelope);
+    dls_env_shutdown(&v->eg2Envelope);
     v->controlFramesUntilTick = 0;
 }
 
@@ -2297,8 +2426,8 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
                 DLS_ChannelState* ch = v->channelState;
                 v->sustainSnapshot = ch->sustain;
                 if (!v->keyHeld && !v->sustainSnapshot) {
-                    dls_env_release(&v->envelope);
-                    dls_env_release(&v->eg2Envelope);
+                    dls_env_release(&v->envelope, v->envelope.releaseMicros);
+                    dls_env_release(&v->eg2Envelope, v->eg2Envelope.releaseMicros);
                 }
 
                 int32_t env1 = dls_env_next(&v->envelope, v->controlBlockFrames);
@@ -2404,8 +2533,13 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
             // Advance position
             v->position += v->currentIncrement;
             if (v->looping && v->position >= v->loopEnd) {
-                v->position = v->loopStart + (v->position - v->loopEnd);
-            } else if (!v->looping && v->position >= ((int64_t)v->wave->frames << 16)) {
+                if (!v->loopUntilRelease || v->keyHeld || v->sustainSnapshot) {
+                    v->position = v->loopStart + (v->position - v->loopEnd);
+                } else {
+                    v->looping = false;
+                }
+            }
+            if (!v->looping && v->position >= ((int64_t)v->wave->frames << 16)) {
                 v->active = false;
             }
             
