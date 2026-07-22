@@ -376,12 +376,10 @@
 #endif
 #include "BAE_API.h"
 #include "X_Assert.h"
-#if USE_SF2_SUPPORT == TRUE
-#if _USING_FLUIDSYNTH == TRUE
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
 #include "GenSF2_FluidSynth.h"
 #endif
 #include "NeoBAE.h"
-#endif
 
 #if SUPPORT_KARAOKE
 #ifndef BAE_KARAOKE_SINGLE_TRACK_FILTER

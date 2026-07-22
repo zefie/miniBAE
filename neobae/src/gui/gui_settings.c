@@ -139,11 +139,13 @@ Settings load_settings(void)
             settings.show_keyboard = (atoi(line + 14) != 0);
             settings.has_show_keyboard = true;
         }
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
         else if (strncmp(line, "use_fluidsynth_for_dls=", 23) == 0)
         {
             settings.use_fluidsynth_for_dls = (atoi(line + 23) != 0);
             settings.has_use_fluidsynth_for_dls = true;
         }
+#endif
         else if (strncmp(line, "disable_webtv_progress_bar=", 27) == 0)
         {
             settings.disable_webtv_progress_bar = (atoi(line + 27) != 0);

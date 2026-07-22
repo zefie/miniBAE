@@ -118,14 +118,17 @@ ifeq ($(USE_SDL2),1)
 endif
 
 # Enable SoundFont (SF2) support via FluidSynth overlay. Set this to TRUE to enable.
-ifeq ($(USE_SF2_SUPPORT),1)
+ifeq ($(SF2_SUPPORT),1)
 	USE_FLUIDSYNTH := 1
 endif
 
-# In case we support other synths again
+# FluidSynth, or Native DLS, is required for XMF
 ifneq ($(USE_FLUIDSYNTH),1)
-	XMF_SUPPORT := 0
+	ifneq ($(NATIVE_DLS),1)
+ 	   XMF_SUPPORT := 0
+	endif
 endif
+
 
 # Force OGG support if VORBIS is chosen
 ifneq ($(OGG_SUPPORT),1)
@@ -381,11 +384,12 @@ endif
 
 ifeq ($(ADX_SUPPORT),1)
 	SRC += src/BAE_Source/Common/XADXFiles.c
-	BAE_FLAGS += -DUSE_ADX_SUPPORT=1 
+	BAE_FLAGS += -DUSE_ADX_SUPPORT=1
+endif
 
 ifeq ($(NATIVE_DLS),1)
-	BAE_FLAGS += -DUSE_NATIVE_DLS=1
 	SRC += src/BAE_Source/Common/GenDLS_MobileBAE.c
+	BAE_FLAGS += -DUSE_NATIVE_DLS=1
 endif
 
 ifeq ($(RMI_SUPPORT),1)
@@ -1052,7 +1056,7 @@ $(EMBED_FONT_HEADER): $(EMBED_TTF_FONT) ../scripts/create_embedded_font_h.py
 
 $(OBJ_DIR)gui_main.o: $(EMBED_FONT_HEADER)
 endif # EMBED_FONT_HEADER
-endif
+endif # EMBED_FONT
 
 endif # BUILD_GUI
 
@@ -1077,7 +1081,7 @@ BAE_FLAGS += -D_LOAD_BUILTIN_PATCHES_FOR_DLS=1
 endif # USE_BUILTIN_PATCHES_WITH_DLS
 
 endif # EMBED_PATCH_FILE
-endif
+endif # EMBED_PATCHES
 
 # Rules for compiling source files to object files
 # Create a function to map source files to object files with unique names for conflicts

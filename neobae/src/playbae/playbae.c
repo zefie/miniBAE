@@ -1018,7 +1018,7 @@ static BAEResult PV_PlayFile(BAEMixer mixer, const char *path,
         err = BAESong_LoadXmfFromFile(song, (BAEPathName)path, TRUE);
     }
 #endif
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_RMI_SUPPORT == TRUE
     else if (ftype == BAE_RMI) {
         playbae_printf("Playing RMI (MIDI+DLS): %s\n", path);
         err = BAESong_LoadRmiFromFile(song, (BAEPathName)path, TRUE, TRUE);

@@ -14005,7 +14005,7 @@ BAEResult BAEMixer_LoadFromFile(BAEMixer mixer, BAEPathName filePath, BAELoadRes
         {
             sr = BAESong_LoadRmfFromFile(result->data.song, filePath, 0, TRUE);
         }
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_RMI_SUPPORT == TRUE
         else if (ftype == BAE_RMI)
         {
             sr = BAESong_LoadRmiFromFile(result->data.song, filePath, 0, TRUE);
@@ -14258,7 +14258,7 @@ BAEResult BAEMixer_LoadFromMemory(BAEMixer mixer, void const *pData, uint32_t da
         {
             sr = BAESong_LoadRmfFromMemory(result->data.song, pData, dataSize, 0, TRUE);
         }
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_RMI_SUPPORT == TRUE
         else if (ftype == BAE_RMI)
         {
             sr = BAESong_LoadRmiFromMemory(result->data.song, pData, dataSize, TRUE, TRUE);

@@ -25,17 +25,19 @@
 #include "gui_karaoke.h" // For karaoke functions
 #include "X_API.h"
 #include "GenRingtone.h"
-#if USE_SF2_SUPPORT
-    #if _USING_FLUIDSYNTH
-        #include "GenSF2_FluidSynth.h"
-        #include "GenRMI.h"  // For RMI embedded soundbank detection
-        #if USE_XMF_SUPPORT
-            #include "GenXMF.h"
-        #endif
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+    #if USE_RMI_SUPPORT == TRUE
+        #include "GenRMI.h"
     #endif
+    #include "GenSF2_FluidSynth.h"
 #endif
 #if USE_NATIVE_DLS == TRUE
     #include "GenDLS_MobileBAE.h"
+#endif
+#if _USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE
+    #if USE_XMF_SUPPORT == TRUE
+        #include "GenXMF.h"
+    #endif
 #endif
 #include <stdio.h>
 #include <stdlib.h>
@@ -258,7 +260,7 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
     if (g_bae.has_embedded_soundbank)
     {
         BAE_PRINTF("User overriding embedded bank with manual bank load\n");
-#if USE_RMI_SUPPORT == TRUE
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_RMI_SUPPORT == TRUE
         GM_ClearRMISoundbankFlag();
 #endif        
         g_bae.has_embedded_soundbank = false;
@@ -782,7 +784,7 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
         BAE_PRINTF("Restoring user bank before loading new song: %s (%s)\n", g_user_bank_name, g_user_bank_path);
         
         // Clear the embedded soundbank flag
-#if USE_RMI_SUPPORT == TRUE        
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_RMI_SUPPORT == TRUE
         GM_ClearRMISoundbankFlag();
 #endif
         g_bae.has_embedded_soundbank = false;
@@ -960,7 +962,7 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
         g_bae.is_rmf_file = false;
     }
 #endif
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_RMI_SUPPORT == TRUE
     else if (ftype == BAE_RMI)
     {
         // Store current bank info before attempting RMI load in case embedded DLS fails
@@ -973,7 +975,6 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
             safe_strncpy(temp_bank_path, g_current_bank_path, sizeof(temp_bank_path) - 1);
             safe_strncpy(temp_bank_name, g_bae.bank_name, sizeof(temp_bank_name) - 1);
         }
-        
         sr = BAESong_LoadRmiFromFile(g_bae.song, (BAEPathName)path, TRUE, (bool)use_embedded_banks);
         
         // If RMI load failed and we requested embedded banks, restore user bank and retry without embedded bank
