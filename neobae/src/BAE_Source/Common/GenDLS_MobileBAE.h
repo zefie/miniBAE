@@ -165,6 +165,7 @@ void GM_UnloadDLSBank(DLS_Bank* pBank);
 OPErr GM_InitDLSSynth(DLS_Synth** ppSynth, int32_t sampleRate);
 void GM_FinisDLSSynth(DLS_Synth* pSynth);
 bool GM_IsDLSSong(GM_Song* pSong);
+bool GM_DLS_HasXmfEmbeddedBank(struct GM_Mixer* pMixer);
 uint16_t GM_DLS_GetActiveVoiceCount(struct GM_Mixer* pMixer);
 GM_Instrument* GM_DLS_CreateInstrumentStub(int32_t instrument);
 void GM_DLS_ResetForSong(GM_Song* pSong);

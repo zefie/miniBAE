@@ -1520,6 +1520,14 @@ bool GM_IsDLSSong(GM_Song* pSong) {
     return false;
 }
 
+bool GM_DLS_HasXmfEmbeddedBank(struct GM_Mixer* pMixer)
+{
+    if (!pMixer || !pMixer->pDLSSynth) {
+        return false;
+    }
+    return (((DLS_Synth*)pMixer->pDLSSynth)->banks[1] != NULL);
+}
+
 uint16_t GM_DLS_GetActiveVoiceCount(struct GM_Mixer* pMixer) {
     if (!pMixer || !pMixer->pDLSSynth) return 0;
     DLS_Synth* synth = (DLS_Synth*)pMixer->pDLSSynth;
