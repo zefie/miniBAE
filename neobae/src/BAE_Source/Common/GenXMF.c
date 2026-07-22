@@ -56,7 +56,36 @@ static BAE_BOOL g_xmfUseFluidSynthForDLS = TRUE;
 
 void GM_XMF_SetUseFluidSynthForDLS(BAE_BOOL enable)
 {
-    g_xmfUseFluidSynthForDLS = enable ? TRUE : FALSE;
+    BAE_BOOL newMode = enable ? TRUE : FALSE;
+
+    if (g_xmfUseFluidSynthForDLS == newMode)
+    {
+        return;
+    }
+
+    g_xmfUseFluidSynthForDLS = newMode;
+
+#if USE_NATIVE_DLS == TRUE
+    if (newMode == TRUE && g_xmfBankLoadSong)
+    {
+        BAEMixer mixer = NULL;
+        if (BAESong_GetMixer(g_xmfBankLoadSong, &mixer) == BAE_NO_ERROR && mixer)
+        {
+            if (BAEMixer_UnloadXMFDLSOverlayBank(mixer) == BAE_NO_ERROR)
+            {
+                debug_message("[XMF] Toggle to FluidSynth: unloaded native DLS XMF overlay\n");
+            }
+        }
+    }
+#endif
+
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+    if (newMode == FALSE && GM_SF2_HasXmfEmbeddedBank())
+    {
+        GM_UnloadXMFOverlaySoundFont();
+        debug_message("[XMF] Toggle to native DLS: unloaded FluidSynth XMF overlay\n");
+    }
+#endif
 }
 
 BAE_BOOL GM_XMF_GetUseFluidSynthForDLS(void)
