@@ -658,12 +658,20 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemory
 	if(!mixer) return -1;
 	if(!data) return (jint)BAE_PARAM_ERR;
 	bool isDLS = FALSE;
+	unsigned char *ubytes = NULL;
 
 	jsize len = (*env)->GetArrayLength(env, data);
 	jbyte *bytes = (*env)->GetByteArrayElements(env, data, NULL);
 	if(!bytes) return (jint)BAE_MEMORY_ERR;
 
 	__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "addBankFromMemory: len=%d bytes", (int)len);
+
+	if (len >= 12) {
+		ubytes = (unsigned char*)bytes;
+		isDLS = (ubytes[8] == 'D' && ubytes[9] == 'L' && ubytes[10] == 'S' && ubytes[11] == ' ');
+		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Magic bytes: %02X %02X %02X %02X ... %02X %02X %02X %02X",
+			ubytes[0], ubytes[1], ubytes[2], ubytes[3], ubytes[8], ubytes[9], ubytes[10], ubytes[11]);
+	}
 
 	BAEMixer_UnloadBanks(mixer);
 #if USE_NATIVE_DLS == TRUE
@@ -679,11 +687,7 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemory
 	// SF2 starts with "RIFF....sfbk" (offset 0 and 8)
 	// DLS starts with "RIFF....DLS " (offset 0 and 8)
 	bool isSF2 = FALSE;
-	if (len >= 12) {
-		unsigned char *ubytes = (unsigned char*)bytes;
-		isDLS = (ubytes[8] == 'D' && ubytes[9] == 'L' && ubytes[10] == 'S' && ubytes[11] == ' ');
-		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Magic bytes: %02X %02X %02X %02X ... %02X %02X %02X %02X",
-			ubytes[0], ubytes[1], ubytes[2], ubytes[3], ubytes[8], ubytes[9], ubytes[10], ubytes[11]);
+	if (ubytes) {
 		if (ubytes[0] == 'R' && ubytes[1] == 'I' && ubytes[2] == 'F' && ubytes[3] == 'F') {
 			if ((ubytes[8] == 's' && ubytes[9] == 'f' && ubytes[10] == 'b' && ubytes[11] == 'k') ||
 			    (isDLS && g_useFluidSynthForDLS)) {

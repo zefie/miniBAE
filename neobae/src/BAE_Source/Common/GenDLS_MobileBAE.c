@@ -2224,7 +2224,6 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
                 dls_env_next(&v->eg2Envelope, v->controlBlockFrames);
                 dls_lfo_next(&v->vibratoLfo, v->controlBlockFrames);
                 dls_lfo_next(&v->modulationLfo, v->controlBlockFrames);
-                
                 if (v->envelope.finished) {
                     v->active = false;
                     continue;
@@ -2237,22 +2236,21 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
                 int32_t panOffset = v->basePanOffset;
                 int32_t reverbSend = v->baseReverbSend;
                 int32_t chorusSend = v->baseChorusSend;
-                
-                     dls_apply_runtime_connections(v->articulation, v, &runtimePitch, &gainAttenuation,
-                                                                 &panOffset, &reverbSend, &chorusSend,
-                                                                 &filterCutoffDelta, &filterResonanceDelta);
+                dls_apply_runtime_connections(v->articulation, v, &runtimePitch, &gainAttenuation,
+                                              &panOffset, &reverbSend, &chorusSend,
+                                              &filterCutoffDelta, &filterResonanceDelta);
 
-                    /* Fallback: if DLS-specific bend state never moved, consume legacy channel bend
-                       (8.8 semitone units) so pitch wheel still affects DLS voices. */
-                    if (ch->pitchBend == 0x2000 && v->channel >= 0 && v->channel < MAX_CHANNELS && pSong) {
-                        int32_t legacyBend = (int32_t)pSong->channelBend[v->channel];
-                        if (legacyBend != 0) {
-                            runtimePitch += (legacyBend << 8); /* 8.8 -> 16.16 semitone */
-                        }
+                /* Fallback: if DLS-specific bend state never moved, consume legacy channel bend
+                   (8.8 semitone units) so pitch wheel still affects DLS voices. */
+                if (ch->pitchBend == 0x2000 && v->channel >= 0 && v->channel < MAX_CHANNELS && pSong) {
+                    int32_t legacyBend = (int32_t)pSong->channelBend[v->channel];
+                    if (legacyBend != 0) {
+                        runtimePitch += (legacyBend << 8); /* 8.8 -> 16.16 semitone */
                     }
+                }
                 
                 if (v->filterEnabled) {
-                        dls_filter_update(&v->filter, filterCutoffDelta, filterResonanceDelta);
+                    dls_filter_update(&v->filter, filterCutoffDelta, filterResonanceDelta);
                 }
                 
                 int32_t gainQ16 = v->baseGainQ16;
@@ -2347,6 +2345,7 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
                     v->reverbSend = v->targetReverbSend;
                     v->chorusSend = v->targetChorusSend;
                 }
+
             }
             
             // Mix - keep in int64_t to avoid precision loss from intermediate int32_t cast
