@@ -43,6 +43,10 @@
 #include <ctype.h>
 #include <errno.h>
 
+#if USE_NATIVE_DLS == TRUE
+extern bool g_use_fluidsynth_for_dls;
+#endif
+
 /* Single, unconditional definition of the remembered user master volume
     intent. Declared extern in headers and other modules so all translation
     units reference this one symbol regardless of build flags. */
@@ -695,6 +699,9 @@ bool bae_load_bank(const char *bank_path)
 #if USE_VORBIS_DECODER == TRUE && _USING_FLUIDSYNTH == TRUE
     || (strcasecmp(ext, ".sf3") == 0 || strcasecmp(ext, ".sfo") == 0)
 #endif
+#if USE_NATIVE_DLS == TRUE
+    || (strcasecmp(ext, ".dls") == 0 && g_use_fluidsynth_for_dls)
+#endif
     ))
     {
         // Load SF2 bank
@@ -718,7 +725,7 @@ bool bae_load_bank(const char *bank_path)
     }
 #endif
 #if USE_NATIVE_DLS == TRUE
-    if (ext && strcasecmp(ext, ".dls") == 0) {
+    if (ext && strcasecmp(ext, ".dls") == 0 && !g_use_fluidsynth_for_dls) {
         // Load DLS bank
 #if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_DLS == TRUE
         BAEBankToken builtin_token = 0;
