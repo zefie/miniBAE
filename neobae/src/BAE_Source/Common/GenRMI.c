@@ -544,6 +544,13 @@ OPErr GM_LoadRMIFromMemory(const unsigned char *buf, uint32_t len,
                         // Set flag to indicate embedded soundbank was loaded
                         g_last_rmi_had_soundbank = TRUE;
 
+#if USE_NATIVE_DLS == TRUE
+                        // Embedded SF2/SF3 should take precedence over any previously loaded
+                        // native DLS bank for this song load path.
+                        GM_SetMixerDLSMode(FALSE);
+                        debug_message("[RMI] Disabled native DLS mode to prioritize embedded SF2/SF3 playback\n");
+#endif
+
                         // Apply bank offset if non-zero
                         // According to SF2 RMIDI spec, add bankOffset to all preset banks
                         // except drum banks (bank 128)
