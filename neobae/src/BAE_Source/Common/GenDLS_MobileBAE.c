@@ -1602,20 +1602,82 @@ static DLS_Instrument* DLS_Bank_FindAlias(DLS_Bank* bank, uint32_t selector) {
     return NULL;
 }
 
+static DLS_Instrument* DLS_Bank_FindSelectorOrAlias(DLS_Bank* bank, uint32_t selector)
+{
+    DLS_Instrument* inst = DLS_Bank_FindSelector(bank, selector);
+    if (inst) {
+        return inst;
+    }
+    return DLS_Bank_FindAlias(bank, selector);
+}
+
 static DLS_Instrument* DLS_Bank_FindMidiInstrument(DLS_Bank* bank, int32_t bankId, int32_t program) {
     int32_t bankMsb = (bankId >> 7) & 0x7F;
     int32_t bankLsb = bankId & 0x7F;
+    int32_t rawBank;
     uint32_t selector = DLS_Selector(bankMsb, bankLsb, program);
-    DLS_Instrument* inst = DLS_Bank_FindSelector(bank, selector);
+    DLS_Instrument* inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
     if (inst) return inst;
-    inst = DLS_Bank_FindAlias(bank, selector);
-    if (inst) return inst;
+
+    /* SF2-style conservative aliasing: translate selector topology explicitly. */
+
+    /* GM-style MSB 0/127 often maps to melodic family 121 in DLS banks. */
+    if (bankMsb == 0 || bankMsb == 127) {
+        selector = DLS_Selector(121, bankLsb, program);
+        inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
+        if (inst) return inst;
+
+        if (bankLsb > 0) {
+            selector = DLS_Selector(121, 0, program);
+            inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
+            if (inst) return inst;
+        }
+    }
+
+    /* HSB-family to raw selector conversion for banks authored outside 120/121 layout. */
+    if (bankMsb == 120 || bankMsb == 121) {
+        int32_t altRawBank;
+        DLS_Instrument* altInst = NULL;
+        bool wantDrum = (bankMsb == 120) ? true : false;
+
+        rawBank = (bankLsb << 1) | ((bankMsb == 120) ? 1 : 0);
+        selector = DLS_Selector((rawBank >> 7) & 0x7F, rawBank & 0x7F, program);
+        inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
+
+        /* Probe sibling topology (parity-swapped raw bank). Some DLS sets encode
+           120/121 family opposite to our default parity mapping. */
+        altRawBank = rawBank ^ 1;
+        selector = DLS_Selector((altRawBank >> 7) & 0x7F, altRawBank & 0x7F, program);
+        altInst = DLS_Bank_FindSelectorOrAlias(bank, selector);
+
+        if (wantDrum) {
+            if (inst && inst->drum) return inst;
+            if (altInst && altInst->drum) return altInst;
+            if (inst) return inst;
+            if (altInst) return altInst;
+        } else {
+            if (inst && !inst->drum) return inst;
+            if (altInst && !altInst->drum) return altInst;
+            if (inst) return inst;
+            if (altInst) return altInst;
+        }
+
+        if (bankMsb == 120) {
+            selector = DLS_Selector((rawBank >> 7) & 0x7F, rawBank & 0x7F, 0);
+            inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
+            if (inst) return inst;
+
+            selector = DLS_Selector((altRawBank >> 7) & 0x7F, altRawBank & 0x7F, 0);
+            inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
+            if (inst) return inst;
+        }
+    }
 
     if ((bankId & 0x3F80) == (121 << 7)) {
         if (bankLsb == 0) return NULL;
         selector = DLS_Selector(121, 0, program);
-        inst = DLS_Bank_FindSelector(bank, selector);
-        return inst ? inst : DLS_Bank_FindAlias(bank, selector);
+        inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
+        if (inst) return inst;
     }
 
     if (bankMsb == 120 && bankLsb == 0 && (program & 0x7F) == 0) {
@@ -1866,7 +1928,33 @@ static int32_t DLS_ChannelBankSelector(const DLS_ChannelState* ch) {
 }
 
 static void dls_program_change(DLS_Synth* synth, DLS_ChannelState* ch, int32_t program) {
+    int32_t encodedBank;
+
     if (!synth || !ch) return;
+
+    /* GenSeq can pass a combined value: (hsbBank * 128) + program.
+       Decode that bank hint here so native DLS resolves the same overlay bank
+       choices that SF2/FluidSynth does. */
+    encodedBank = (program >> 7) & 0x3FFF;
+    if (encodedBank > 0)
+    {
+        int32_t msbHint = (encodedBank >> 7) & 0x7F;
+        int32_t lsbHint = encodedBank & 0x7F;
+
+        if (msbHint == 120 || msbHint == 121)
+        {
+            /* Already in selector form (MSB/LSB). */
+            ch->bankMsb = msbHint;
+            ch->bankLsb = lsbHint;
+        }
+        else
+        {
+            /* HSB convention: even banks melodic, odd banks percussion. */
+            ch->bankMsb = (encodedBank & 1) ? 120 : 121;
+            ch->bankLsb = (encodedBank >> 1) & 0x7F;
+        }
+    }
+
     ch->program = program & 0x7F;
     ch->selectedBankSelector = DLS_ChannelBankSelector(ch);
     ch->selectedInstrument = DLS_Synth_FindInstrument(synth, ch->selectedBankSelector, ch->program);
@@ -2320,6 +2408,9 @@ void GM_DLS_ProcessController(GM_Song* pSong, uint16_t channel, uint16_t control
         ch->sustain = value >= 64;
     } else if (controller == 121) {
         dls_channel_reset_controllers(ch);
+        ch->selectedInstrument = NULL;
+        ch->selectedBankSelector = 0;
+        ch->programSelected = false;
     } else if (controller == 120) {
         GM_DLS_AllNotesOff(pSong, channel, true);
     } else if (controller == 123 || (controller >= 124 && controller <= 127)) {
@@ -2327,8 +2418,14 @@ void GM_DLS_ProcessController(GM_Song* pSong, uint16_t channel, uint16_t control
     } else if (controller == 0) {
         ch->bankMsb = value & 0x7F;
         ch->bankLsb = 0;
+        ch->selectedInstrument = NULL;
+        ch->selectedBankSelector = 0;
+        ch->programSelected = false;
     } else if (controller == 32) {
         ch->bankLsb = value & 0x7F;
+        ch->selectedInstrument = NULL;
+        ch->selectedBankSelector = 0;
+        ch->programSelected = false;
     } else if (controller == 1) {
         ch->modulation = value & 0x7F;
     } else if (controller == 33) {

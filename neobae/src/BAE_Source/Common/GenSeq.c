@@ -1922,6 +1922,37 @@ static bool PV_ShouldUseRMFInstrumentForPatch(GM_Song *pSong, int16_t patch)
 #endif    
 }
 
+#if USE_NATIVE_DLS == TRUE
+/* Keep native DLS channel bank state aligned with GenSeq's HSB bank math.
+   This is required for multi-bank XMF overlays because DLS bank lookup is
+   driven by CC0/CC32 state on the channel. */
+static void PV_DLS_ApplyHSBBankSelect(GM_Song *pSong, int16_t MIDIChannel, int32_t hsbBank)
+{
+    int32_t midiBank;
+    uint16_t bankMsb;
+
+    if (!pSong)
+    {
+        return;
+    }
+
+    if (hsbBank < 0)
+    {
+        hsbBank = 0;
+    }
+
+    midiBank = hsbBank / 2;
+    if (midiBank < 0)
+    {
+        midiBank = 0;
+    }
+
+    bankMsb = (uint16_t)((hsbBank & 1) ? 120 : 121);
+    GM_DLS_ProcessController(pSong, (uint16_t)MIDIChannel, B_BANK_MSB, bankMsb);
+    GM_DLS_ProcessController(pSong, (uint16_t)MIDIChannel, B_BANK_LSB, (uint16_t)(midiBank & 0x7F));
+}
+#endif
+
 // Process midi program change
 static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTrack, int16_t program)
 {
@@ -2022,6 +2053,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                     if (GM_IsDLSSong(pSong))
                     {
                         int32_t combinedProgram = (theBank * 128) + thePatch;
+                        PV_DLS_ApplyHSBBankSelect(pSong, MIDIChannel, theBank);
                         GM_DLS_ProcessProgramChange(pSong, MIDIChannel, combinedProgram);
                         if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)combinedProgram))
                         {
@@ -2046,6 +2078,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                     // Native DLS path with SF2-style fallback: DLS when preset exists,
                     // otherwise fall back to built-in wavetable (GM).
                     int32_t combinedProgram = (theBank * 128) + thePatch;
+                    PV_DLS_ApplyHSBBankSelect(pSong, MIDIChannel, theBank);
                     GM_DLS_ProcessProgramChange(pSong, MIDIChannel, combinedProgram);
                     if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)combinedProgram))
                     {
@@ -2785,16 +2818,22 @@ void PV_ProcessController(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTr
             break;
         case B_BANK_MSB: // bank select MSB.
             pSong->channelRawBank[MIDIChannel] = (unsigned char)value;
-#if USE_SF2_SUPPORT == TRUE
-            if (!GM_IsSF2Song(pSong) && !GM_SF2_HasXmfEmbeddedBank()) {
-#endif          
-                if (value > (MAX_BANKS / 2))
-                { // if we're selecting outside of our range, default to 0
-                    value = 0;
-                }
-#if USE_SF2_SUPPORT == TRUE
-            }
+            /* Clamp legacy GM bank range only when neither SF2 nor native DLS is handling banks.
+               Native DLS XMF overlays can legitimately use higher MSB values for multi-bank sets. */
+#if USE_NATIVE_DLS == TRUE
+            if (!GM_IsDLSSong(pSong) && !GM_DLS_HasXmfEmbeddedBank(pSong->pMixer))
 #endif
+            {
+#if USE_SF2_SUPPORT == TRUE
+                if (!GM_IsSF2Song(pSong) && !GM_SF2_HasXmfEmbeddedBank())
+#endif
+                {
+                    if (value > (MAX_BANKS / 2))
+                    { // if we're selecting outside of our legacy GM range, default to 0
+                        value = 0;
+                    }
+                }
+            }
             pSong->channelBank[MIDIChannel] = (signed char)value;
             break;
 
