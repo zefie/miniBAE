@@ -381,7 +381,8 @@ ifeq ($(RETRO_RINGTONE_SUPPORT),1)
 endif
 
 ifeq ($(ADX_SUPPORT),1)
-	SRC += src/BAE_Source/Common/XADXFiles.c
+	SRC += src/BAE_Source/Common/XADXFiles.c \
+		src/adx2wav/adx2wav_decode.c
 	BAE_FLAGS += -DUSE_ADX_SUPPORT=1
 endif
 
@@ -900,7 +901,10 @@ else
 												src/thirdparty/imgui/backends/imgui_impl_sdlrenderer3.cpp
 											INC_PATH += -Isrc/thirdparty/imgui -Isrc/thirdparty/imgui/backends
 										else
-											ifeq ($(ADP2WAV),1)
+											ifeq ($(ADX2WAV),1)
+												SRC := src/adx2wav/adx2wav_main.c src/adx2wav/adx2wav_decode.c
+											else
+												ifeq ($(ADP2WAV),1)
 												# adp2wav with third-party G.722 decoder
 												SRC := src/adp2wav/adp2wav_main.c src/adp2wav/adp2wav_decode.c src/thirdparty/libg722/g722_decode.c
 											else
@@ -935,6 +939,7 @@ else
 												endif
 											endif
 										endif
+										endif
 									endif
 								endif
 							endif
@@ -948,17 +953,21 @@ else
 ifeq ($(MTHC_SUPPORT),1)
 	ifneq ($(MIDDECOMP),1)
 		ifneq ($(ADP2WAV),1)
-			SRC += src/mthc/mthc_decomp.c
-			BAE_FLAGS += -DUSE_MTHC_SUPPORT=1
+			ifneq ($(ADX2WAV),1)
+				SRC += src/mthc/mthc_decomp.c
+				BAE_FLAGS += -DUSE_MTHC_SUPPORT=1
+			endif
 		endif
 	endif
 endif
 
 ifeq ($(ADP_SUPPORT),1)
 	ifneq ($(ADP2WAV),1)
-		SRC += src/adp2wav/adp2wav_decode.c \
-			src/thirdparty/libg722/g722_decode.c
-		BAE_FLAGS += -DUSE_ADP_SUPPORT=1
+		ifneq ($(ADX2WAV),1)
+			SRC += src/adp2wav/adp2wav_decode.c \
+				src/thirdparty/libg722/g722_decode.c
+			BAE_FLAGS += -DUSE_ADP_SUPPORT=1
+		endif
 	endif
 endif
 

@@ -104,6 +104,7 @@ LOCAL_SRC_FILES	:= \
 			Common/g72x.c \
 			Common/sha1mini.c \
 			Common/XADXFiles.c \
+			../adx2wav/adx2wav_decode.c \
 			Common/XFileTypes.c \
       		Common/XVorbisFiles.c \
 			Common/XOpusFiles.c \

@@ -818,6 +818,7 @@ set(NEOBAE_SOURCES
 if (BAE_ENABLE_ADX_SUPPORT)
   list(APPEND NEOBAE_SOURCES
     neobae/src/BAE_Source/Common/XADXFiles.c
+    neobae/src/adx2wav/adx2wav_decode.c
   )
 endif()
 
@@ -1286,6 +1287,7 @@ target_include_directories(neobae
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Common
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Platform
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/adx2wav
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/config
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/qoa
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/lzma-26.00/C
@@ -1851,6 +1853,12 @@ if(BUILD_CLITOOLS)
     neobae/src/adp2wav/adp2wav_main.c
   )
   target_link_libraries(adp2wav PRIVATE m)
+
+  add_executable(adx2wav
+    neobae/src/adx2wav/adx2wav_decode.c
+    neobae/src/adx2wav/adx2wav_main.c
+  )
+  target_link_libraries(adx2wav PRIVATE m)
 
   add_executable(mthc_decomp
     neobae/src/mthc/mthc_decomp.c

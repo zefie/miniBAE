@@ -406,7 +406,7 @@ static const char reverbList[] =
     "   18  Neo Tap Delay (Neo reverb)\n";
 
 static const char velocityList[] =
-    "Valid Velocity Curves (-vc):\n"
+    "Valid Velocity Curves (HSB/ZSB Only) (-vc):\n"
     "   0   Default S Curve\n"
     "   1   Peaky S Curve\n"
     "   2   WebTV Curve\n"
