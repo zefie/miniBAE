@@ -126,3 +126,5 @@ NeoBAE (zefie's modifications) is licensed under GPL-3.0.
 Original Beatnik miniBAE code remains under BSD-3-Clause.
 
 See [LICENSE](LICENSE), [LICENSE.BSD](LICENSE.BSD), and [NOTICE](NOTICE) for details.
+
+Native DLS support uses code ported from [RetroDLS](https://github.com/Magstic/RetroDLS), used under MIT license, copyright (c) 2026 Magstic

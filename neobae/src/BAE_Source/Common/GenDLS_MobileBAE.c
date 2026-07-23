@@ -4,6 +4,10 @@
 #include "GenDLS_MobileBAE_Tables.h"
 #include "X_Assert.h"
 
+#if USE_MPEG_DECODER == TRUE
+#include "XMPEG_BAE_API.h"
+#endif
+
 void GM_SetMixerDLSMode(bool isDLS) 
 {
     GM_Mixer* pMixer = GM_GetCurrentMixer();
@@ -620,6 +624,75 @@ static int32_t decode_ima_nibble(int32_t predictor, int32_t index, int32_t nibbl
     return dls_clamp(result, -32768, 32767);
 }
 
+static OPErr dls_decode_mpeg_wave(const uint8_t* encoded, uint32_t encodedBytes, DLS_Wave* wave) {
+#if USE_MPEG_DECODER != FALSE
+    if (!encoded || encodedBytes == 0 || !wave) return BAD_FILE_TYPE;
+
+    OPErr err = NO_ERR;
+    XMPEGDecodedData* stream = XOpenMPEGStreamFromMemory((XPTR)encoded, encodedBytes, &err);
+    if (!stream || err != NO_ERR) return BAD_FILE_TYPE;
+
+    if (stream->channels != 1 && stream->channels != 2) {
+        XCloseMPEGStream(stream);
+        return BAD_FILE_TYPE;
+    }
+
+    uint64_t decodeBytes64 = (uint64_t)stream->maxFrameBuffers * (uint64_t)stream->frameBufferSize;
+    if (decodeBytes64 == 0 || decodeBytes64 > INT32_MAX) {
+        XCloseMPEGStream(stream);
+        return BAD_FILE_TYPE;
+    }
+
+    uint32_t decodeBytes = (uint32_t)decodeBytes64;
+    signed char* decoded = (signed char*)XNewPtr(decodeBytes);
+    if (!decoded) {
+        XCloseMPEGStream(stream);
+        return MEMORY_ERR;
+    }
+
+    signed char* writePtr = decoded;
+    for (uint32_t count = 0; count < stream->maxFrameBuffers; count++) {
+        bool done = FALSE;
+        err = XFillMPEGStreamBuffer(stream, writePtr, &done);
+        if (err != NO_ERR || done) {
+            break;
+        }
+        writePtr += stream->frameBufferSize;
+    }
+
+    uint32_t usefulBytes = (uint32_t)(writePtr - decoded);
+    if (err != NO_ERR || usefulBytes == 0) {
+        XDisposePtr((XPTR)decoded);
+        XCloseMPEGStream(stream);
+        return BAD_FILE_TYPE;
+    }
+
+    wave->channels = stream->channels;
+    wave->sampleRate = stream->sampleRate;
+    wave->bitsPerSample = 16;
+    wave->frames = usefulBytes / (wave->channels * 2);
+    wave->pcm = (int16_t*)XNewPtr((wave->frames + 1) * wave->channels * sizeof(int16_t));
+    if (!wave->pcm) {
+        XDisposePtr((XPTR)decoded);
+        XCloseMPEGStream(stream);
+        return MEMORY_ERR;
+    }
+
+    for (uint32_t i = 0, p = 0; i < wave->frames * wave->channels; i++, p += 2) {
+        wave->pcm[i] = (int16_t)((decoded[p] & 0xFF) | (decoded[p + 1] << 8));
+    }
+
+    XDisposePtr((XPTR)decoded);
+    XCloseMPEGStream(stream);
+    return NO_ERR;
+#else
+    (void)encoded;
+    (void)encodedBytes;
+    (void)wave;
+    return BAD_FILE_TYPE;
+#endif
+}
+
 static OPErr DLS_Parse_Wave_Data(const uint8_t* chunk_start, const uint8_t* chunk_end, uint32_t index, DLS_Wave* wave) {
     wave->index = index;
     wave->sample.present = false;
@@ -650,6 +723,13 @@ static OPErr DLS_Parse_Wave_Data(const uint8_t* chunk_start, const uint8_t* chun
                 wave->sampleRate = read_le32(body + 4);
                 wave->blockAlign = read_le16(body + 12);
                 wave->bitsPerSample = read_le16(body + 14);
+                if (wave->formatTag == 85) {
+                    /* WAVE_FORMAT_MPEGLAYER3: require cbSize=12 and decode to 16-bit PCM. */
+                    if (chunk_size < 30 || read_le16(body + 16) != 12) {
+                        return BAD_FILE_TYPE;
+                    }
+                    wave->bitsPerSample = 16;
+                }
             }
         } else if (id == CHUNK_DATA) {
             pcm_data = body;
@@ -780,6 +860,11 @@ static OPErr DLS_Parse_Wave_Data(const uint8_t* chunk_start, const uint8_t* chun
                         }
                     }
                 }
+            }
+        } else if (wave->formatTag == 85) { // MPEG Layer audio
+            OPErr decodeErr = dls_decode_mpeg_wave(pcm_data, pcm_size, wave);
+            if (decodeErr != NO_ERR) {
+                return decodeErr;
             }
         }
     }
@@ -2198,42 +2283,46 @@ static int32_t dls_find_recyclable_voice(DLS_Synth* synth, int32_t newChannel) {
     return -1;
 }
 
-static int32_t dls_find_sustained_released_voice(DLS_Synth* synth) {
-    int32_t candidate = -1;
-    int64_t oldest = INT64_MAX;
+static int32_t dls_find_held_percussion_voice(DLS_Synth* synth, int32_t newChannel) {
+    static const int32_t kVoiceStealOrder[16] = {15, 14, 13, 12, 11, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9};
 
-    for (int i = 0; i < 256; i++) {
-        DLS_Voice* voice = &synth->voices[i];
-        if (voice->active && !voice->keyHeld && voice->sustainSnapshot && voice->startSerial < oldest) {
-            candidate = i;
-            oldest = voice->startSerial;
+    for (int ord = 0; ord < 16; ord++) {
+        int32_t channel = kVoiceStealOrder[ord];
+        if (newChannel != 9 && channel == 9) continue;
+
+        int32_t candidate = -1;
+        int64_t priority = INT64_MAX;
+        for (int i = 0; i < 256; i++) {
+            DLS_Voice* voice = &synth->voices[i];
+            if (channel == 9 && voice->channel == channel && voice->keyHeld && voice->startSerial < priority) {
+                candidate = i;
+                priority = voice->startSerial;
+            }
         }
+        if (candidate >= 0) return candidate;
     }
-    return candidate;
+    return -1;
 }
 
 static int32_t dls_find_active_voice_by_priority(DLS_Synth* synth, int32_t newChannel) {
     static const int32_t kVoiceStealOrder[16] = {15, 14, 13, 12, 11, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9};
 
-    int32_t candidate = -1;
     for (int ord = 0; ord < 16; ord++) {
         int32_t channel = kVoiceStealOrder[ord];
         if (newChannel != 9 && channel == 9) continue;
 
-        int32_t channelCandidate = -1;
-        int64_t oldest = INT64_MAX;
+        int32_t candidate = -1;
+        int64_t priority = INT64_MAX;
         for (int i = 0; i < 256; i++) {
             DLS_Voice* voice = &synth->voices[i];
-            if (voice->active && voice->channel == channel && voice->startSerial < oldest) {
-                channelCandidate = i;
-                oldest = voice->startSerial;
+            if (voice->active && voice->channel == channel && voice->startSerial < priority) {
+                candidate = i;
+                priority = voice->startSerial;
             }
         }
-        if (channelCandidate >= 0) {
-            candidate = channelCandidate;
-        }
+        if (candidate >= 0) return candidate;
     }
-    return candidate;
+    return -1;
 }
 
 static int32_t dls_select_voice_index_for_note_on(DLS_Synth* synth, int32_t newChannel) {
@@ -2243,11 +2332,16 @@ static int32_t dls_select_voice_index_for_note_on(DLS_Synth* synth, int32_t newC
     idx = dls_find_recyclable_voice(synth, newChannel);
     if (idx >= 0) return idx;
 
-    idx = dls_find_sustained_released_voice(synth);
+    idx = dls_find_held_percussion_voice(synth, newChannel);
     if (idx >= 0) return idx;
 
     idx = dls_find_active_voice_by_priority(synth, newChannel);
-    return idx >= 0 ? idx : 0;
+    return idx;
+}
+
+static int32_t dls_channel_coarse_semitones(const DLS_ChannelState* ch) {
+    if (!ch) return 0;
+    return ((int16_t)((ch->rpnValues[2] & 0x3FFF) - 0x2000)) >> 7;
 }
 
 void GM_DLS_ProcessNoteOn(GM_Song* pSong, uint16_t channel, uint16_t note, uint16_t velocity) {
@@ -2279,17 +2373,23 @@ void GM_DLS_ProcessNoteOn(GM_Song* pSong, uint16_t channel, uint16_t note, uint1
     
     /* Apply percussion key alias for drum banks to find region,
        but keep original note for voice initialization and pitch */
-    int32_t playNote = note;
+    int32_t voiceNote = note;
     if (((ch->selectedBankSelector & 0x3F80) == (120 << 7)) &&
         inst->parentBank && inst->parentBank->hasPercussionKeyAliases) {
         int32_t aliasedNote = inst->parentBank->percussionKeyAliases[note & 0x7F] & 0x7F;
         if (aliasedNote != note) {
             debug_message("DLS Synth: percussion key alias key %d -> %d for region lookup\n", note, aliasedNote);
         }
-        playNote = aliasedNote;
+        voiceNote = aliasedNote;
+    }
+
+    int32_t regionKey = voiceNote;
+    if (!(((ch->selectedBankSelector & 0x3F80) == (120 << 7)) &&
+          inst->parentBank && inst->parentBank->hasPercussionKeyAliases)) {
+        regionKey = dls_clamp(voiceNote + dls_channel_coarse_semitones(ch), 0, 127);
     }
     
-    DLS_Region* region = DLS_Synth_FindRegion(inst, playNote, velocity);
+    DLS_Region* region = DLS_Synth_FindRegion(inst, regionKey, velocity);
     if (!region) {
         debug_message("DLS Synth: no region for instrument=%d:%d:%d key=%d velocity=%d\n",
                       inst->bankMsb, inst->bankLsb, inst->program, note, velocity);
@@ -2310,13 +2410,16 @@ void GM_DLS_ProcessNoteOn(GM_Song* pSong, uint16_t channel, uint16_t note, uint1
         return;
     }
 
-    dls_kill_exclusive_voices(synth, channel, playNote, region);
+    dls_kill_exclusive_voices(synth, channel, voiceNote, region);
     
     int32_t voiceIdx = dls_select_voice_index_for_note_on(synth, channel);
+    if (voiceIdx < 0) {
+        return;
+    }
     
     DLS_Voice* v = &synth->voices[voiceIdx];
     /* Pass the aliased key to voice init so pitch is calculated correctly */
-    dls_voice_init(v, channel, playNote, velocity, region, wave, ch, synth->sampleRate);
+    dls_voice_init(v, channel, voiceNote, velocity, region, wave, ch, synth->sampleRate);
     v->startSerial = synth->nextVoiceSerial++;
 }
 
