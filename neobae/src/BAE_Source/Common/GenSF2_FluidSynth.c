@@ -72,7 +72,6 @@ static fluid_settings_t* g_fluidsynth_settings = NULL;
 static fluid_synth_t* g_fluidsynth_synth = NULL;
 static BAE_Mutex g_fluidsynth_mutex = NULL;
 static int g_fluidsynth_soundfont_id = -1;
-static int g_fluidsynth_base_soundfont_id = -1;  // Base GM soundfont (e.g., user-loaded SF2)
 static bool g_fluidsynth_initialized = FALSE;
 static bool g_fluidsynth_mono_mode = FALSE;
 static float g_fluidsynth_master_volume = 0.5f;
@@ -926,8 +925,6 @@ OPErr GM_LoadSF2SoundfontFromMemory(const unsigned char *data, size_t size) {
     }
 
     g_fluidsynth_soundfont_id = sfid;
-    // Track this as the base soundfont (not an XMF overlay)
-    g_fluidsynth_base_soundfont_id = g_fluidsynth_soundfont_id;
     
     strncpy(g_fluidsynth_sf2_path, "__memory__", sizeof(g_fluidsynth_sf2_path) - 1);
     g_fluidsynth_sf2_path[sizeof(g_fluidsynth_sf2_path) - 1] = '\0';
@@ -983,9 +980,6 @@ OPErr GM_LoadSF2Soundfont(const char* sf2_path)
         return GENERAL_BAD;
     }
     
-    // Track this as the base soundfont (not an XMF overlay)
-    g_fluidsynth_base_soundfont_id = g_fluidsynth_soundfont_id;
-    
     // Store path
     strncpy(g_fluidsynth_sf2_path, sf2_path, sizeof(g_fluidsynth_sf2_path) - 1);
     g_fluidsynth_sf2_path[sizeof(g_fluidsynth_sf2_path) - 1] = '\0';
@@ -1021,7 +1015,6 @@ void GM_UnloadSF2Soundfont(void)
         fluid_synth_sfunload(g_fluidsynth_synth, g_fluidsynth_soundfont_id, TRUE);
         PV_SF2_UnlockSynth();
         g_fluidsynth_soundfont_id = -1;
-        g_fluidsynth_base_soundfont_id = -1;
         
         // Clear the unloading flag
         g_fluidsynth_unloading = FALSE;

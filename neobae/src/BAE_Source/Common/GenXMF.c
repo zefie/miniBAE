@@ -18,7 +18,7 @@
  /*
  * GenXMF.c
  *
- * Minimal XMF/MXMF loader: extract embedded SMF and optional bank (SF2/DLS)
+ * Minimal XMF/MXMF loader: extract embedded SMF and optional bank (DLS)
  */
 
 #include "NeoBAE.h"
@@ -265,7 +265,7 @@ static void PV_ParseXMF1Metadata(const unsigned char *bytes, uint32_t len, uint3
     }
 }
 
-// Parse a node recursively, extracting inline resources (SMF/RMF/RMID) and trying to load SF2/DLS banks
+// Parse a node recursively, extracting inline resources (SMF/RMF/RMID) and trying to load DLS banks
 static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t *pos,
                               const unsigned char **outMidi, uint32_t *outMidiLen,
                               const unsigned char **outRmf, uint32_t *outRmfLen,
@@ -1129,7 +1129,7 @@ static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
         s_packedBankProbeDepth--;
     }
 
-    // Collect RIFF SF2/DLS candidates and try them in priority order
+    // Collect RIFF DLS candidates and try them in priority order
     typedef struct { uint32_t off, bytes; bool isDLS, hasWvpl; uint64_t score; } cand_t;
     cand_t cands[16];
     int candCount = 0;
@@ -1141,9 +1141,8 @@ static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
             if (sz > (len - i - 8)) { continue; }
             const unsigned char *type = &buf[i+8];
             bool isDLS = (type[0] == 'D' && type[1] == 'L' && type[2] == 'S' && type[3] == ' ');
-            bool isSF2 = (type[0] == 's' && type[1] == 'f' && type[2] == 'b' && type[3] == 'k');
-            if (!(isDLS || isSF2)) { i += (8 + sz) - 1; continue; }
-            debug_message("[XMF] RIFF at +%u type=%.4s size=%u (isDLS=%d isSF2=%d)\n", i, type, sz, (int)isDLS, (int)isSF2);
+            if (!isDLS) { i += (8 + sz) - 1; continue; }
+            debug_message("[XMF] RIFF at +%u type=%.4s size=%u (isDLS=%d)\n", i, type, sz, (int)isDLS);
             bool hasWvpl = FALSE;
 #if _DEBUG
             uint32_t waveCount = 0;
@@ -1189,13 +1188,7 @@ static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
     for (int idx = 0; idx < candCount; ++idx) {
         cand_t *c = &cands[idx];
         debug_message("[XMF] attempting bank load #%d @+%u bytes=%u%s\n", idx+1, c->off, c->bytes,
-                   (c->isDLS? (c->hasWvpl? ", DLS wvpl=YES" : ", DLS wvpl=NO") : ", SF2"));
-
-
-        if (!c->isDLS) {
-            debug_message("[XMF] skipping non-DLS candidate #%d (XMF forced to native DLS)\n", idx+1);
-            continue;
-        }
+                   (c->hasWvpl? ", DLS wvpl=YES" : ", DLS wvpl=NO"));
 
         {
             BAEMixer mixer = NULL;
@@ -1213,12 +1206,6 @@ static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
             }
             continue;
         }
-
-
-        if (!c->isDLS) {
-            debug_message("[XMF] skipping SF2 candidate #%d (FluidSynth not available)\n", idx+1);
-        }
-
     }
     debug_message("[XMF] all bank candidates failed to load\n");
     return FALSE;
@@ -1946,4 +1933,4 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
     return BAE_BAD_FILE;
 }
 
-#endif // USE_XMF_SUPPORT && (_USING_FLUIDSYNTH || USE_NATIVE_DLS)
+#endif // USE_XMF_SUPPORT && USE_NATIVE_DLS
