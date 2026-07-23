@@ -2179,6 +2179,7 @@ class HomeFragment : Fragment() {
     private fun ensureMixerExists(): Boolean {
         // Check if mixer exists, recreate if needed
         if (Mixer.getMixer() == null) {
+            val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", android.content.Context.MODE_PRIVATE)
             val status = Mixer.create(requireActivity().assets, 44100, 2, 64, 8, 64)
             if (status != 0) {
                 Toast.makeText(requireContext(), "Failed to recreate mixer: $status", Toast.LENGTH_SHORT).show()
@@ -2187,13 +2188,17 @@ class HomeFragment : Fragment() {
             
             // Set cache dir
             Mixer.setNativeCacheDir(requireContext().cacheDir.absolutePath)
+
+            // Apply DLS backend preference before restoring any saved bank.
+            val useFluidSynthForDLSPref = prefs.getBoolean("use_fluidsynth_for_dls", false)
+            HomeFragment.useFluidSynthForDLS.value = useFluidSynthForDLSPref
+            Mixer.setUseFluidSynthForDLS(useFluidSynthForDLSPref)
             
             // Restore bank settings
             ensureBankIsLoaded()
             
             // Restore reverb and velocity curve settings
             try {
-                val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", android.content.Context.MODE_PRIVATE)
                 val reverbType = prefs.getInt("default_reverb", 1)
                 val velocityCurvePref = prefs.getInt("velocity_curve", 1)
                 Mixer.setDefaultReverb(reverbType)
@@ -2228,10 +2233,6 @@ class HomeFragment : Fragment() {
                 val classicChorusPref = prefs.getBoolean("classic_chorus", false)
                 HomeFragment.classicChorus.value = classicChorusPref
                 Mixer.setClassicChorus(classicChorusPref)
-                // Restore FluidSynth-for-DLS setting
-                val useFluidSynthForDLSPref = prefs.getBoolean("use_fluidsynth_for_dls", false)
-                HomeFragment.useFluidSynthForDLS.value = useFluidSynthForDLSPref
-                Mixer.setUseFluidSynthForDLS(useFluidSynthForDLSPref)
                 // If we have an active song, apply the curve immediately.
                 try {
                     currentSong?.let { song ->

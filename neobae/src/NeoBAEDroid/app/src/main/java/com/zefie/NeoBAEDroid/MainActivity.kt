@@ -340,6 +340,11 @@ class MainActivity : AppCompatActivity() {
                     return
                 }
                 Mixer.setNativeCacheDir(cacheDir.absolutePath)
+                try {
+                    val prefs = getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                    Mixer.setUseFluidSynthForDLS(prefs.getBoolean("use_fluidsynth_for_dls", false))
+                } catch (_: Exception) {
+                }
             }
 
             // During bank swaps, HomeFragment pauses playback and suspends the audio output thread
