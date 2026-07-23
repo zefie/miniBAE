@@ -91,6 +91,10 @@
     #endif
 #endif
 
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+#include "GenXMF.h"
+#endif
+
 int g_thread_ch_enabled[BAE_MAX_MIDI_CHANNELS] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 /* Forward-declare dialog renderer from gui_dialogs.c to avoid including the
     full header (which defines globals that conflict with this file's statics). */
@@ -939,6 +943,16 @@ int main(int argc, char *argv[])
     {
         g_show_virtual_keyboard = settings.show_keyboard;
     }
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+    extern bool g_use_fluidsynth_for_dls;
+    if (settings.has_use_fluidsynth_for_dls)
+    {
+        g_use_fluidsynth_for_dls = settings.use_fluidsynth_for_dls;
+    }
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+    GM_XMF_SetUseFluidSynthForDLS(g_use_fluidsynth_for_dls ? TRUE : FALSE);
+#endif
+#endif
     if (settings.has_export_codec)
     {
         g_exportCodecIndex = settings.export_codec_index;
@@ -7376,6 +7390,12 @@ int main(int argc, char *argv[])
             current_settings.has_script_text = false;
         }
 #endif
+
+    #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+        extern bool g_use_fluidsynth_for_dls;
+        current_settings.has_use_fluidsynth_for_dls = true;
+        current_settings.use_fluidsynth_for_dls = g_use_fluidsynth_for_dls;
+    #endif
 
         save_full_settings(&current_settings);
     }
