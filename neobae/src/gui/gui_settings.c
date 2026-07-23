@@ -802,8 +802,8 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
     // Left column controls (stacked)
     // Volume Curve selector
     draw_text(R, leftX, dlg.y + 36, "Vol. Curve (HSB):", g_text_color);
-    const char *volumeCurveNames[] = {"NeoBAE S Curve", "Peaky S Curve", "WebTV Curve", "2x Exponential", "2x Linear"};
-    int vcCount = 5;
+    const char *volumeCurveNames[] = {"NeoBAE S Curve", "Peaky S Curve", "WebTV Curve", "2x Exponential", "2x Linear", "No Curve"};
+    int vcCount = 6;
     bool volumeCurveEnabled = !g_midiRecordFormatDropdownOpen;
     SDL_Color dd_bg = g_button_base;
     SDL_Color dd_txt = g_button_text;
@@ -1016,6 +1016,10 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
             }
 #if USE_SF2_SUPPORT == TRUE
             if (!BAESong_IsSF2Song(g_live_song))
+#elif USE_NATIVE_DLS == TRUE
+            if (!BAESong_IsDLSSong(g_live_song))
+#elif USE_SF2_SUPPORT == TRUE && USE_NATIVE_DLS == TRUE
+            if (!BAESong_IsSF2Song(g_live_song) && !BAESong_IsDLSSong(g_live_song))
 #endif            
             {            
                 BAESong_SetVelocityCurve(g_live_song, g_volume_curve);
@@ -1732,9 +1736,19 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
             {
                 g_volume_curve = i;
                 g_volumeCurveDropdownOpen = false;
+                BAESong theSong = NULL;
+                if (g_live_song) {
+                    theSong = g_live_song;
+                } else if (g_bae.song) {
+                    theSong = g_bae.song;
+                }
 #if USE_SF2_SUPPORT == TRUE
-                if (!BAESong_IsSF2Song(g_bae.song))
-#endif                
+                if (theSong && !BAESong_IsSF2Song(theSong))
+#elif USE_NATIVE_DLS == TRUE
+                if (theSong && !BAESong_IsDLSSong(theSong))
+#elif USE_SF2_SUPPORT == TRUE && USE_NATIVE_DLS == TRUE
+                if (theSong && !BAESong_IsSF2Song(theSong) && !BAESong_IsDLSSong(theSong))
+#endif  
                 {
                     BAE_SetDefaultVelocityCurve(g_volume_curve);
                     if (g_bae.song && !g_bae.is_audio_file)

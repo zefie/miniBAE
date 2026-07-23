@@ -348,7 +348,7 @@ static const char usageMain[] =
 #endif
     "                 -l  {loop count (default: 0)}\n"
     "                 -v  {master volume %% (default: 100)}\n"
-    "                 -vc {velocity curve 0-4 (default: engine)}\n"
+    "                 -vc {velocity curve 0-5 (default: engine (0), none for SF2/DLS)}\n"
     "                 -t  {max duration in seconds (0 = no limit)}\n"
     "                 -mc {MIDI channels to mute, 1-16, comma-separated}\n"
     "                 -rv {reverb type 0-18 (default: 7)}\n"
@@ -411,7 +411,8 @@ static const char velocityList[] =
     "   1   Peaky S Curve\n"
     "   2   WebTV Curve\n"
     "   3   2x Exponential\n"
-    "   4   2x Linear\n";
+    "   4   2x Linear\n"
+    "   5   No Curve\n";
 
 /* =========================================================================
  * RMF metadata display
@@ -1270,7 +1271,7 @@ static int PV_LoadBank(BAEMixer mixer, const char *path, BAEBankToken *tokenOut)
             return 0;
         }
         GM_SetMixerSF2Mode(TRUE);
-        if (gVelocityCurve < 0) gVelocityCurve = 1; /* peaky default for SF2 */
+        gVelocityCurve = 5; /* No Curve for SF2 */
         if (tokenOut) *tokenOut = 0;
         return 1;
     }
@@ -1293,6 +1294,7 @@ static int PV_LoadBank(BAEMixer mixer, const char *path, BAEBankToken *tokenOut)
             return 0;
         }
         GM_SetMixerDLSMode(TRUE);
+        gVelocityCurve = 5; /* No Curve for DLS */
         if (tokenOut) *tokenOut = 0;
         return 1;
     }
@@ -1400,8 +1402,8 @@ int main(int argc, char *argv[])
     char tmpBuf[1024] = {0};
     if (PV_ParseCommands(argc, argv, "-vc", 1, tmpBuf)) {
         gVelocityCurve = atoi(tmpBuf);
-        if (gVelocityCurve < 0 || gVelocityCurve > 4) {
-            playbae_printf("Invalid velocity curve %d (0-4), using 0.\n", gVelocityCurve);
+        if (gVelocityCurve < 0 || gVelocityCurve > 5) {
+            playbae_printf("Invalid velocity curve %d (0-5), using 0.\n", gVelocityCurve);
             gVelocityCurve = 0;
         }
         BAE_SetDefaultVelocityCurve(gVelocityCurve);

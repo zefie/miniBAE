@@ -418,9 +418,9 @@ class MainActivity : AppCompatActivity() {
                 currentSong = song
                 currentSound = null
 
-                // Match HomeFragment behavior: SF2 songs force curve 0
+                // Match HomeFragment behavior: SF2/DLS songs force no curve (5)
                 if (song.isSF2Song() || song.isDLSSong()) {
-                    song.setVelocityCurve(0)
+                    song.setVelocityCurve(5)
                 } else {
                     song.setVelocityCurve(velocityCurve)
                 }

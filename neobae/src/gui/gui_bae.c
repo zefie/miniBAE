@@ -1541,10 +1541,19 @@ bool bae_play(bool *playing)
                     Settings settings = load_settings();
 #if USE_SF2_SUPPORT == TRUE
                     bool isSF2Song = BAESong_IsSF2Song(g_bae.song);
+#endif
+#if USE_NATIVE_DLS == TRUE
+                    bool isDLSSong = BAESong_IsDLSSong(g_bae.song);
+#endif
+#if USE_SF2_SUPPORT == TRUE
                     if (isSF2Song) {
-                        BAESong_SetVelocityCurve(g_bae.song, 1); // Perky for SF2
-                    }
-                    else
+                        BAESong_SetVelocityCurve(g_bae.song, 5); // No curve for SF2
+                    } else
+#endif
+#if USE_NATIVE_DLS == TRUE
+                    if (isDLSSong) {
+                        BAESong_SetVelocityCurve(g_bae.song, 5); // No curve for DLS
+                    } else
 #endif
                     {
                         BAESong_SetVelocityCurve(g_bae.song, settings.volume_curve);

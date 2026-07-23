@@ -739,7 +739,9 @@ static uint32_t PV_GetLFOAdjustedTimeInMicroseconds(void)
 // given a midi volume, translate it via a table to a new value
 int32_t PV_ModifyVelocityFromCurve(GM_Song *pSong, int32_t volume)
 {
-    volume = 127L - (volume & 0x7FL); // restrict to 0-127 and reverse
+    int32_t sourceVelocity = volume & 0x7FL;
+
+    volume = 127L - sourceVelocity; // restrict to 0-127 and reverse for lookup tables
     switch (pSong->velocityCurveType)
     {
     default: // just in case its out of range
@@ -757,6 +759,9 @@ int32_t PV_ModifyVelocityFromCurve(GM_Song *pSong, int32_t volume)
         break;
     case 4: // two times linear
         volume = volumeScaleTwoTimes[volume];
+        break;
+    case 5: // null/passthrough (no curve shaping)
+        volume = sourceVelocity;
         break;
     }
     return volume;

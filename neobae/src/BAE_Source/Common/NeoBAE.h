@@ -1913,15 +1913,16 @@ extern "C"
     // BAESong_SetVelocityCurve()
     // --------------------------------------
     // Sets the velocity curve shaping used when translating incoming MIDI note
-    // velocities into internal amplitude. Valid values are currently 0..4 and map
-    // to legacy engine tables (0=default S curve, 1=peaky S, 2=subtle, 3=exp, 4=linear).
+    // velocities into internal amplitude. Valid values are currently 0..5 and map
+    // to legacy engine tables (0=default S curve, 1=peaky S, 2=subtle, 3=exp, 4=linear,
+    // 5=null/passthrough).
     // Out-of-range values are clamped into this range.
     // This directly updates the underlying GM_Song (pSong->velocityCurveType).
     // --------------------------------------
     BAEResult BAESong_SetVelocityCurve(BAESong song, int curveType);
 
     // Global default velocity curve control (applies to subsequently created/loaded songs)
-    BAEResult BAE_SetDefaultVelocityCurve(int curveType); // clamps 0..4
+    BAEResult BAE_SetDefaultVelocityCurve(int curveType); // clamps 0..5
     BAEResult BAE_GetDefaultVelocityCurve(int *outCurveType);
 
     // STEREO_PAN LFO DC fix control (runtime toggle for BAE_FIX_SPAN_DC)

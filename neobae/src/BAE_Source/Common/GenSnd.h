@@ -554,7 +554,8 @@ extern "C"
         VELOCITY_CURVE_2,     // more peaky S curve
         VELOCITY_CURVE_3,     // inward curve centered around 95 (used for WebTV)
         VELOCITY_CURVE_4,     // two time exponential
-        VELOCITY_CURVE_5      // two times linear
+        VELOCITY_CURVE_5,     // two times linear
+        VELOCITY_CURVE_6      // null/passthrough (no curve shaping)
     };
     typedef unsigned char VelocityCurveType;
 
@@ -1203,7 +1204,7 @@ typedef int32_t UNIT_TYPE;
         // these pointers are NULL until used, then they are allocated
         GM_ControlCallbackPtr controllerCallback; // called during playback with controller info
 
-        VelocityCurveType velocityCurveType; // which curve to use. (Range is 0 to 4)
+        VelocityCurveType velocityCurveType; // which curve to use. (Range is 0 to 5)
 
         ScanMode AnalyzeMode;       // analyze mode (Byte)
         bool ignoreBadInstruments; // allow bad patches. Don't fail because it can't load

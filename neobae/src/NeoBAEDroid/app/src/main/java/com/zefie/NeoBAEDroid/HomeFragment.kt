@@ -232,8 +232,8 @@ private fun pruneUnavailableFavorites(context: Context, favorites: MutableList<S
 class HomeFragment : Fragment() {
 
     companion object {
-        // Default to the 2nd option ("Peaky S Curve" in the UI)
-        var velocityCurve = mutableStateOf(1)
+        // Default to the 2nd option ("NeoBAE S Curve" in the UI)
+        var velocityCurve = mutableStateOf(0)
         // Fix Pan LFO DC bias (on by default)
         var fixPanLfoBias = mutableStateOf(true)
         // Classic chorus ordering (off by default)
@@ -1202,7 +1202,7 @@ class HomeFragment : Fragment() {
                             try {
                                 currentSong?.let { song ->
                                     if (song.isSF2Song() || song.isDLSSong()) {
-                                        song.setVelocityCurve(0)
+                                        song.setVelocityCurve(5)
                                     } else {
                                         song.setVelocityCurve(value)
                                     }
@@ -1708,7 +1708,7 @@ class HomeFragment : Fragment() {
                         
                         // Apply velocity curve
                         if (song.isSF2Song() || song.isDLSSong()) {
-                            song.setVelocityCurve(0)
+                            song.setVelocityCurve(5)
                         } else {
                             song.setVelocityCurve(velocityCurve.value)
                         }
@@ -2236,7 +2236,7 @@ class HomeFragment : Fragment() {
                 try {
                     currentSong?.let { song ->
                         if (song.isSF2Song() || song.isDLSSong()) {
-                            song.setVelocityCurve(0)
+                            song.setVelocityCurve(5)
                         } else {
                             song.setVelocityCurve(velocityCurvePref)
                         }
@@ -7372,7 +7372,7 @@ fun SettingsScreenContent(
         activePresetName = null
     }
     
-    val curveOptions = listOf("Beatnik Default", "Peaky S Curve", "WebTV Curve", "2x Exponential", "2x Linear")
+    val curveOptions = listOf("NeoBAE S Curve", "Peaky S Curve", "WebTV Curve", "2x Exponential", "2x Linear", "No Curve")
     val exportCodecOptions = listOf("WAV", "OGG", "FLAC")
     val searchLimitOptions = listOf(
         250 to "250",

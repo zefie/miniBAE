@@ -3027,15 +3027,15 @@ AudioFileType BAE_TranslateBAEFileType(BAEFileType fileType)
 // ------------------------------------------------------------------
 // BAEMixer Functions
 // ------------------------------------------------------------------
-// Global default velocity curve (0..4). Applied to songs when they are created or loaded.
+// Global default velocity curve (0..5). Applied to songs when they are created or loaded.
 static int g_defaultVelocityCurve = 0;
 
 BAEResult BAE_SetDefaultVelocityCurve(int curveType)
 {
     if (curveType < 0)
         curveType = 0;
-    if (curveType > 4)
-        curveType = 4;
+    if (curveType > 5)
+        curveType = 5;
     g_defaultVelocityCurve = curveType;
     return BAE_NO_ERROR;
 }
@@ -10604,8 +10604,8 @@ BAEResult BAESong_SetVelocityCurve(BAESong song, int curveType)
     {
         if (curveType < 0)
             curveType = 0;
-        if (curveType > 4)
-            curveType = 4; // engine currently supports 0..4
+        if (curveType > 5)
+            curveType = 5; // engine currently supports 0..5
         BAE_AcquireMutex(song->mLock);
         if (song->pSong)
         {
