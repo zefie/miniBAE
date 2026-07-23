@@ -57,16 +57,19 @@ FileType supportedTypes[] = {
     { _T(".midi"), 102, _T("MIDI Sequence") },
     { _T(".kar"),  103, _T("MIDI Karaoke") },
     { _T(".rmf"),  104, _T("Rich Music Format") },
-    { _T(".rmi"),  105, _T("RIFF MIDI") },
-    { _T(".xmf"),  106, _T("Extensible Music Format") },
-    { _T(".mxmf"), 107, _T("Mobile XMF") },
-    { _T(".zmf"),  115, _T("zefie MIDI File") },
+    { _T(".rmi"),  105, _T("RIFF MIDI Sequence") },
+    { _T(".xmf"),  106, _T("eXtensible Music Format") },
+    { _T(".mxmf"), 107, _T("Mobile eXtensible Music Format") },
+    { _T(".zmf"),  115, _T("zefie Media File") },
     { _T(".wav"),  108, _T("PCM WAV Audio") },
+    { _T(".adp"),  101, _T("Nokia ADP Audio") }, // needs icon
+    { _T(".adx"),  101, _T("CRI ADX Audio") }, // needs icon
     { _T(".au"),   109, _T("Sun Audio") },
-    { _T(".aiff"), 110, _T("AIFF Audio") },
-    { _T(".aif"),  110, _T("AIFF Audio") },
+    { _T(".aiff"), 110, _T("Audio Interchange File Format") },
+    { _T(".aif"),  110, _T("Audio Interchange File Format") },
     { _T(".flac"), 111, _T("FLAC Audio") },
-    { _T(".ogg"),  112, _T("Ogg Vorbis") },
+    { _T(".ogg"),  112, _T("Ogg Vorbis Audio") },
+    { _T(".opus"), 101, _T("Opus Audio") }, // needs icon
     { _T(".mp2"),  113, _T("MPEG-2 Audio") },
     { _T(".mp3"),  114, _T("MPEG-3 Audio") }
 };
