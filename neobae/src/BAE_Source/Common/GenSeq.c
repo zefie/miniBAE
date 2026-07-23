@@ -2845,6 +2845,11 @@ void PV_ProcessController(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTr
 #endif          
             break;
         case B_BANK_MSB: // bank select MSB.
+#if USE_NATIVE_DLS == TRUE
+            if (GM_IsDLSSong(pSong) && MIDIChannel == PERCUSSION_CHANNEL && value == 127) {
+                value = 0;
+            }
+#endif
             pSong->channelRawBank[MIDIChannel] = (unsigned char)value;
             /* Clamp legacy GM bank range only when neither SF2 nor native DLS is handling banks.
                Native DLS XMF overlays can legitimately use higher MSB values for multi-bank sets. */

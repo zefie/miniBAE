@@ -1621,8 +1621,8 @@ static DLS_Instrument* DLS_Bank_FindMidiInstrument(DLS_Bank* bank, int32_t bankI
 
     /* SF2-style conservative aliasing: translate selector topology explicitly. */
 
-    /* GM-style MSB 0/127 often maps to melodic family 121 in DLS banks. */
-    if (bankMsb == 0 || bankMsb == 127) {
+    /* GM-style MSB 0 often maps to melodic family 121 in DLS banks. */
+    if (bankMsb == 0) {
         selector = DLS_Selector(121, bankLsb, program);
         inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
         if (inst) return inst;
@@ -2696,19 +2696,21 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
             }
         }
         
+        static int DLS_GAIN_FACTOR = 7;
+        
         // Dry mix = 50% (32/64). Keep wet paths proportionally below dry for headroom.
-        int64_t mixedLeft = (int64_t)pBuffer[f * 2] + ((32 * leftOut) >> 6);
-        int64_t mixedRight = (int64_t)pBuffer[f * 2 + 1] + ((32 * rightOut) >> 6);
+        int64_t mixedLeft = (int64_t)pBuffer[f * 2] + ((32 * leftOut) >> DLS_GAIN_FACTOR);
+        int64_t mixedRight = (int64_t)pBuffer[f * 2 + 1] + ((32 * rightOut) >> DLS_GAIN_FACTOR);
         pBuffer[f * 2] = (int32_t)(mixedLeft > INT32_MAX ? INT32_MAX : (mixedLeft < INT32_MIN ? INT32_MIN : mixedLeft));
         pBuffer[f * 2 + 1] = (int32_t)(mixedRight > INT32_MAX ? INT32_MAX : (mixedRight < INT32_MIN ? INT32_MIN : mixedRight));
         if (pReverbBuffer) {
             // Write mono reverb send (matching SF2's format: one mono sample per frame)
-            int64_t mixedReverb = (int64_t)pReverbBuffer[f] + ((20 * revOut) >> 6);
+            int64_t mixedReverb = (int64_t)pReverbBuffer[f] + ((20 * revOut) >> DLS_GAIN_FACTOR);
             pReverbBuffer[f] = (int32_t)(mixedReverb > INT32_MAX ? INT32_MAX : (mixedReverb < INT32_MIN ? INT32_MIN : mixedReverb));
         }
         if (pChorusBuffer) {
             // Write mono chorus send (matching SF2's format: one mono sample per frame)
-            int64_t mixedChorus = (int64_t)pChorusBuffer[f] + ((20 * choOut) >> 6);
+            int64_t mixedChorus = (int64_t)pChorusBuffer[f] + ((20 * choOut) >> DLS_GAIN_FACTOR);
             pChorusBuffer[f] = (int32_t)(mixedChorus > INT32_MAX ? INT32_MAX : (mixedChorus < INT32_MIN ? INT32_MIN : mixedChorus));
         }
     }
