@@ -157,7 +157,6 @@ option(BAE_DISABLE_ROLLED_MIDI_UNROLLING "Disable unrolling of rolled MIDI files
 set(BAE_EMBED_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/banks/patches111/patches111.hsb" CACHE FILEPATH "HSB bank file to embed as built-in patches (empty disables embedding)")
 set(BAE_EMBED_TTF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/fonts/HelveticaNeue.ttf" CACHE FILEPATH "TTF font file to embed for zefidi GUI use (empty disables embedding)")
 option(BUILD_PLAYBAE "Build playbae when a non-Dummy/non-Ansi backend is selected" ON)
-option(BUILD_NEOBAE_TUI "Build ncurses textual GUI variant of playbae" ON)
 option(BUILD_ZEFIDI "Build zefidi when SDL2/SDL3 backend and matching SDL_ttf are available" ON)
 option(ENABLE_MIDI_HW "Enable hardware MIDI I/O in zefidi via RtMidi" OFF)
 option(BUILD_CLITOOLS "Build CLI tools (songtool, rmf2mid, mid2rmf, mid2rmi, sf2-hsb, mod2rmf, instdump, bankrecomp)" ON)
@@ -1533,114 +1532,6 @@ if(BUILD_PLAYBAE)
     target_link_libraries(playbae PRIVATE neobae)
   else()
     message(STATUS "Skipping BUILD_PLAYBAE because BAE_PLATFORM is Dummy or Ansi.")
-  endif()
-endif()
-
-if(BUILD_NEOBAE_TUI)
-  set(BAE_TUI_CURSES_USABLE OFF)
-  set(BAE_TUI_USE_IMPORTED_CURSES OFF)
-  unset(BAE_TUI_CURSES_LINK_LIBS)
-  unset(BAE_TUI_CURSES_INCLUDE_PATHS)
-
-  if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR MINGW OR MSVC)
-
-    if(MINGW OR MSVC)
-      set(_BAE_NCURSESW_HINTS)
-      set(_BAE_MINGW_TRIPLET "")
-      if(CMAKE_C_COMPILER_TARGET)
-        set(_BAE_MINGW_TRIPLET "${CMAKE_C_COMPILER_TARGET}")
-      elseif(CMAKE_C_COMPILER MATCHES "/([^/]+-w64-mingw32)-clang(\\+\\+)?$")
-        set(_BAE_MINGW_TRIPLET "${CMAKE_MATCH_1}")
-      elseif(CMAKE_C_COMPILER MATCHES "/([^/]+-w64-mingw32)/bin/")
-        set(_BAE_MINGW_TRIPLET "${CMAKE_MATCH_1}")
-      endif()
-
-      if(NOT _BAE_MINGW_TRIPLET STREQUAL "")
-        list(APPEND _BAE_NCURSESW_HINTS
-          "/opt/llvm-mingw/${_BAE_MINGW_TRIPLET}"
-          "${CMAKE_SYSROOT}"
-        )
-      endif()
-      list(APPEND _BAE_NCURSESW_HINTS
-        "/opt/llvm-mingw/x86_64-w64-mingw32"
-        "/opt/llvm-mingw/i686-w64-mingw32"
-        "/opt/llvm-mingw/aarch64-w64-mingw32"
-        "/opt/llvm-mingw/armv7-w64-mingw32"
-      )
-      list(APPEND _BAE_NCURSESW_HINTS "/opt/llvm-mingw/generic-w64-mingw32")
-
-      find_path(BAE_NCURSESW_INCLUDE_DIR
-        NAMES ncursesw/curses.h curses.h
-        HINTS ${_BAE_NCURSESW_HINTS}
-        PATH_SUFFIXES include include/ncursesw
-      )
-      find_library(BAE_NCURSESW_LIBRARY
-        NAMES ncursesw ncursesw_g cursesw pdcurses curses
-        HINTS ${_BAE_NCURSESW_HINTS}
-        PATH_SUFFIXES lib
-      )
-      unset(_BAE_MINGW_TRIPLET)
-      unset(_BAE_NCURSESW_HINTS)
-      if(BAE_NCURSESW_LIBRARY)
-        set(BAE_TUI_CURSES_USABLE ON)
-        set(BAE_TUI_CURSES_LINK_LIBS ${BAE_NCURSESW_LIBRARY})
-        set(_BAE_TUI_NCURSES_INC_CANDIDATES)
-        if(BAE_NCURSESW_INCLUDE_DIR)
-          list(APPEND _BAE_TUI_NCURSES_INC_CANDIDATES ${BAE_NCURSESW_INCLUDE_DIR})
-          if(EXISTS "${BAE_NCURSESW_INCLUDE_DIR}/ncursesw/curses.h")
-            list(APPEND _BAE_TUI_NCURSES_INC_CANDIDATES "${BAE_NCURSESW_INCLUDE_DIR}/ncursesw")
-          endif()
-        endif()
-        if(EXISTS "/opt/llvm-mingw/generic-w64-mingw32/include/ncursesw/curses.h")
-          list(APPEND _BAE_TUI_NCURSES_INC_CANDIDATES "/opt/llvm-mingw/generic-w64-mingw32/include/ncursesw")
-        endif()
-        if(_BAE_TUI_NCURSES_INC_CANDIDATES)
-          list(REMOVE_DUPLICATES _BAE_TUI_NCURSES_INC_CANDIDATES)
-          set(BAE_TUI_CURSES_INCLUDE_PATHS ${_BAE_TUI_NCURSES_INC_CANDIDATES})
-        endif()
-        unset(_BAE_TUI_NCURSES_INC_CANDIDATES)
-      endif()
-    endif()
-
-    if(NOT BAE_TUI_CURSES_USABLE)
-      find_package(Curses QUIET)
-      if(CURSES_FOUND)
-        if(TARGET Curses::Curses)
-          set(BAE_TUI_CURSES_USABLE ON)
-          set(BAE_TUI_USE_IMPORTED_CURSES ON)
-        elseif(CURSES_LIBRARIES)
-          set(BAE_TUI_CURSES_USABLE ON)
-          set(BAE_TUI_CURSES_LINK_LIBS ${CURSES_LIBRARIES})
-          if(CURSES_INCLUDE_DIRS)
-            set(BAE_TUI_CURSES_INCLUDE_PATHS ${CURSES_INCLUDE_DIRS})
-          elseif(CURSES_INCLUDE_DIR)
-            set(BAE_TUI_CURSES_INCLUDE_PATHS ${CURSES_INCLUDE_DIR})
-          endif()
-        endif()
-      endif()
-    endif()
-    
-    if(BAE_TUI_CURSES_USABLE)
-      add_executable(neobae-tui neobae/src/playbae/neobae_tui.c)
-      target_compile_options(neobae-tui PRIVATE -DNCURSES_STATIC)
-      target_link_libraries(neobae-tui PRIVATE neobae)
-      if(BAE_TUI_USE_IMPORTED_CURSES)
-        target_link_libraries(neobae-tui PRIVATE Curses::Curses)
-      else()
-        if(BAE_TUI_CURSES_INCLUDE_PATHS)
-          target_include_directories(neobae-tui PRIVATE ${BAE_TUI_CURSES_INCLUDE_PATHS})
-        endif()
-        target_link_libraries(neobae-tui PRIVATE ${BAE_TUI_CURSES_LINK_LIBS})
-      endif()
-    else()
-      if(MINGW OR MSVC)
-        message(STATUS "Skipping BUILD_NEOBAE_TUI because neither Curses nor ncursesw was found for this toolchain.")
-      else()
-        message(STATUS "Skipping BUILD_NEOBAE_TUI because Curses was not found.")
-      endif()
-    endif()
-  else()
-    message(STATUS "Skipping BUILD_NEOBAE_TUI because this platform is unsupported.")
   endif()
 endif()
 
