@@ -1872,13 +1872,6 @@ static bool PV_ShouldUseRMFInstrumentForPatch(GM_Song *pSong, int16_t patch)
         return FALSE;
     }
 
-    // If this exact patch slot is loaded in the song, prefer RMF/native playback.
-    // This prevents DLS fallback aliases from taking over when a real RMF INST exists.
-    if (pSong->instrumentData[patch] != NULL)
-    {
-        return TRUE;
-    }
-
     remapped = (XLongResourceID)patch;
     if (GM_GetSongInstrumentRemap(pSong, (XLongResourceID)patch, &remapped) != NO_ERR)
     {
@@ -2497,8 +2490,7 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                 else
 #endif
 #if USE_NATIVE_DLS == TRUE
-                if ((GM_IsDLSSong(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_DLS) &&
-                    pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF)
+                if (GM_IsDLSSong(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_DLS)
                 {
                     if (pSong->songFlags & SONG_FLAG_IS_RMF)
                     {
