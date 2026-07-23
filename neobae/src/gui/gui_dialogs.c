@@ -229,6 +229,36 @@ char *open_file_dialog(void)
 {
 #ifdef _WIN32
 /* Compile-time built extension list, Windows Style*/
+
+static const char ALL_EXT_FILTER[] =
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+    "*.xmf;*.mxmf;"
+#else
+    ""
+#endif
+#if USE_RETRO_RINGTONE_SUPPORT == TRUE
+    "*.imy;*.rng;*.rtx;"
+#else
+    ""    
+#endif
+#if USE_ZMF_SUPPORT == TRUE
+    "*.zmf;"
+#else
+    ""
+#endif
+#if SUPPORT_KARAOKE == TRUE
+    "*.kar;"
+#else
+    ""
+#endif
+#if USE_RMI_SUPPORT == TRUE
+    "*.rmi;"
+#else
+    ""
+#endif
+
+"";
+
 static const char AUDIO_EXT_FILTER[] =    
 #if USE_FLAC_DECODER == TRUE
     "*.flac;"
@@ -250,16 +280,6 @@ static const char AUDIO_EXT_FILTER[] =
 #else
     ""
 #endif
-#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
-    "*.xmf;*.mxmf;"
-#else
-    ""
-#endif
-#if USE_RETRO_RINGTONE_SUPPORT == TRUE
-    "*.imy;*.rng;*.rtx;"
-#else
-    ""    
-#endif
 #if USE_QOA_SUPPORT == TRUE
     "*.qoa;"
 #else
@@ -272,11 +292,6 @@ static const char AUDIO_EXT_FILTER[] =
 #endif
 #if USE_ADX_SUPPORT == TRUE
     "*.adx;"
-#else
-    ""
-#endif
-#if USE_ZMF_SUPPORT == TRUE
-    "*.zmf;"
 #else
     ""
 #endif
@@ -300,7 +315,7 @@ static const char AUDIO_EXT_FILTER[] =
     {
         char pattern[512];
         /* include the always-available patterns plus the compiled-in ones */
-        snprintf(pattern, sizeof(pattern), "*.mid;*.midi;*.kar;*.rmi;*.rmf;%s", AUDIO_EXT_FILTER);
+        snprintf(pattern, sizeof(pattern), "*.mid;*.midi;*.rmf;%s%s", ALL_EXT_FILTER, AUDIO_EXT_FILTER);
         /* Remove possible duplicate separators if AUDIO_EXT_FILTER is empty */
         APPEND_STR(pattern);
     }
@@ -339,9 +354,21 @@ static const char AUDIO_EXT_FILTER[] =
     return NULL;
 #elif defined(__APPLE__)
     static const char AUDIO_TYPE_LIST[] =
-        "\"mid\", \"midi\", \"kar\", \"rmi\", \"rmf\", \"zmf\", \"imy\", \"rng\", \"rtx\""
+        "\"mid\", \"midi\", \"rmf\", "
 #if USE_FLAC_DECODER == TRUE
         ", \"flac\""
+#endif
+#if USE_RMI_SUPPORT == TRUE
+        ", \"rmi\""
+#endif
+#if SUPPORT_KARAOKE == TRUE
+        ", \"kar\""
+#endif
+#if USE_ZMF_SUPPORT == TRUE
+        ", \"zmf\""
+#endif
+#if USE_RETRO_RINGTONE_SUPPORT == TRUE
+        ", \"imy\", \"rng\", \"rtx\""
 #endif
 #if USE_MPEG_DECODER == TRUE
         ", \"mp2\", \"mp3\""
@@ -384,13 +411,36 @@ static const char AUDIO_EXT_FILTER[] =
     return NULL;
 #else
 /* Compile-time built extension list, Linux Style */
-static const char AUDIO_EXT_FILTER[] =
-    "*.mid *.midi *.kar *.rmi *.rmf *.imy *.rng *.rtx "
+static const char ALL_EXT_FILTER[] =
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+    "*.xmf *.mxmf "
+#else
+    ""
+#endif
+#if USE_RETRO_RINGTONE_SUPPORT == TRUE
+    "*.imy *.rng *.rtx "
+#else
+    ""    
+#endif
 #if USE_ZMF_SUPPORT == TRUE
     "*.zmf "
 #else
     ""
-#endif    
+#endif
+#if SUPPORT_KARAOKE == TRUE
+    "*.kar "
+#else
+    ""
+#endif
+#if USE_RMI_SUPPORT == TRUE
+    "*.rmi "
+#else
+    ""
+#endif
+
+"";
+
+static const char AUDIO_EXT_FILTER[] =    
 #if USE_FLAC_DECODER == TRUE
     "*.flac "
 #else
@@ -407,12 +457,22 @@ static const char AUDIO_EXT_FILTER[] =
     ""
 #endif
 #if USE_OPUS_DECODER == TRUE && SUPPORT_OGG_FORMAT == TRUE
-    "*.opus  "
+    "*.opus "
 #else
     ""
 #endif
-#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
-    "*.xmf *.mxmf";
+#if USE_QOA_SUPPORT == TRUE
+    "*.qoa "
+#else
+    ""
+#endif
+#if USE_ADP_SUPPORT == TRUE
+    "*.adp "
+#else
+    ""
+#endif
+#if USE_ADX_SUPPORT == TRUE
+    "*.adx "
 #else
     ""
 #endif
@@ -422,8 +482,8 @@ static const char AUDIO_EXT_FILTER[] =
          AUDIO_EXT_FILTER on Unix is a space-separated list like "*.flac *.mp3 ...". */
      char cmd_zenity[1024];
      char cmd_kdialog[1024];
-     snprintf(cmd_zenity, sizeof(cmd_zenity), "zenity --file-selection --title='Open Media File' --file-filter='Supported Files | %s' --file-filter='All Files | *' 2>/dev/null", AUDIO_EXT_FILTER);
-     snprintf(cmd_kdialog, sizeof(cmd_kdialog), "kdialog --getopenfilename . '%s' 2>/dev/null", AUDIO_EXT_FILTER);
+     snprintf(cmd_zenity, sizeof(cmd_zenity), "zenity --file-selection --title='Open Media File' --file-filter='Supported Files | %s %s' --file-filter='All Files | *' 2>/dev/null", AUDIO_EXT_FILTER, ALL_EXT_FILTER);
+     snprintf(cmd_kdialog, sizeof(cmd_kdialog), "kdialog --getopenfilename . '%s %s' 2>/dev/null", AUDIO_EXT_FILTER, ALL_EXT_FILTER);
      const char *cmds[] = { cmd_zenity, cmd_kdialog, "yad --file-selection --title='Open Media File' 2>/dev/null", NULL };
     for (int i = 0; cmds[i]; ++i)
     {
