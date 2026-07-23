@@ -2091,14 +2091,6 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                             pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
                             routedToDLS = TRUE;
                         }
-                        else if (GM_DLS_HasXmfEmbeddedBank(pSong->pMixer))
-                        {
-                            // Keep XMF embedded-bank channels on native DLS even when
-                            // the SF2 main bank is active; embedded path must not fall
-                            // back into FluidSynth routing.
-                            pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
-                            routedToDLS = TRUE;
-                        }
                     }
 #endif
                     if (!routedToDLS)

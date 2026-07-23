@@ -1653,8 +1653,9 @@ static DLS_Instrument* DLS_Bank_FindMidiInstrument(DLS_Bank* bank, int32_t bankI
         if (wantDrum) {
             if (inst && inst->drum) return inst;
             if (altInst && altInst->drum) return altInst;
-            if (inst) return inst;
-            if (altInst) return altInst;
+            /* Do not substitute melodic instruments for percussion requests;
+               let upper layers fall back when no actual drum mapping exists. */
+            return NULL;
         } else {
             if (inst && !inst->drum) return inst;
             if (altInst && !altInst->drum) return altInst;
@@ -1665,11 +1666,13 @@ static DLS_Instrument* DLS_Bank_FindMidiInstrument(DLS_Bank* bank, int32_t bankI
         if (bankMsb == 120) {
             selector = DLS_Selector((rawBank >> 7) & 0x7F, rawBank & 0x7F, 0);
             inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
-            if (inst) return inst;
+            if (inst && inst->drum) return inst;
 
             selector = DLS_Selector((altRawBank >> 7) & 0x7F, altRawBank & 0x7F, 0);
             inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
-            if (inst) return inst;
+            if (inst && inst->drum) return inst;
+
+            return NULL;
         }
     }
 
