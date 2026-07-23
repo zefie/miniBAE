@@ -949,9 +949,6 @@ int main(int argc, char *argv[])
     {
         g_use_fluidsynth_for_dls = settings.use_fluidsynth_for_dls;
     }
-#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
-    GM_XMF_SetUseFluidSynthForDLS(g_use_fluidsynth_for_dls ? TRUE : FALSE);
-#endif
 #endif
     if (settings.has_export_codec)
     {

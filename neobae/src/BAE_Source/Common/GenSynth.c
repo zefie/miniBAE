@@ -2493,7 +2493,7 @@ INLINE static void PV_ServeInstruments(void)
         {
             GM_Song *song = pMixer->pSongsToPlay[si];
 #if USE_SF2_SUPPORT == TRUE
-            if (song && (GM_IsSF2Song(song) || GM_SF2_HasXmfEmbeddedBank()))
+            if (song && GM_IsSF2Song(song))
             {
                 GM_SF2_RenderAudioSlice(song, (int32_t *)pMixer->songBufferDry, NULL, NULL, pMixer->One_Loop);
             }
@@ -2536,7 +2536,7 @@ INLINE static void PV_ServeInstruments(void)
             {
                 GM_Song *song = pMixer->pSongsToPlay[si];
 #if USE_SF2_SUPPORT == TRUE
-                if (song && (GM_IsSF2Song(song) || GM_SF2_HasXmfEmbeddedBank()))
+                if (song && GM_IsSF2Song(song))
                 {
                     GM_SF2_RenderAudioSlice(song, (int32_t *)pMixer->songBufferDry, 
                                            (int32_t *)pMixer->songBufferReverb,
@@ -2596,7 +2596,7 @@ INLINE static void PV_ServeInstruments(void)
             {
                 GM_Song *song = pMixer->pSongsToPlay[si];
 #if USE_SF2_SUPPORT == TRUE
-                if (song && (GM_IsSF2Song(song) || GM_SF2_HasXmfEmbeddedBank()))
+                if (song && GM_IsSF2Song(song))
                 {
                     GM_SF2_RenderAudioSlice(song, (int32_t *)pMixer->songBufferDry,
                                            (int32_t *)pMixer->songBufferReverb,

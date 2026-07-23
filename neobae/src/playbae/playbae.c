@@ -1449,16 +1449,6 @@ int main(int argc, char *argv[])
     if (PV_ParseCommands(argc, argv, "-fs", 0, NULL)) gUseSF2Mode = 1;
 #endif
 
-#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_NATIVE_DLS == TRUE
-    GM_XMF_SetUseFluidSynthForDLS(gUseSF2Mode ? TRUE : FALSE);
-#elif _USING_FLUIDSYNTH == TRUE
-    GM_XMF_SetUseFluidSynthForDLS(TRUE);
-#else
-    GM_XMF_SetUseFluidSynthForDLS(FALSE);
-#endif
-#endif
-
     if (PV_ParseCommands(argc, argv, "-nf", 0, NULL))   gFadeOut = 0;
     if (PV_ParseCommands(argc, argv, "-v",  1, tmpBuf)) {
         gVolumePct = atoi(tmpBuf);

@@ -1930,6 +1930,8 @@ static void PV_DLS_ApplyHSBBankSelect(GM_Song *pSong, int16_t MIDIChannel, int32
 {
     int32_t midiBank;
     uint16_t bankMsb;
+    uint16_t bankLsb;
+    uint16_t rawMsb;
 
     if (!pSong)
     {
@@ -1947,9 +1949,68 @@ static void PV_DLS_ApplyHSBBankSelect(GM_Song *pSong, int16_t MIDIChannel, int32
         midiBank = 0;
     }
 
-    bankMsb = (uint16_t)((hsbBank & 1) ? 120 : 121);
+    rawMsb = (uint16_t)((uint8_t)pSong->channelRawBank[MIDIChannel]);
+
+    /* If the MIDI stream selected a DLS-style bank directly (MSB 120/121),
+       preserve its explicit MSB/LSB pair. Otherwise keep legacy HSB -> DLS
+       mapping for classic banks. */
+    if (rawMsb == 120 || rawMsb == 121)
+    {
+        bankMsb = rawMsb;
+        bankLsb = (uint16_t)((uint8_t)pSong->channelLSB[MIDIChannel] & 0x7F);
+    }
+    else
+    {
+        bankMsb = (uint16_t)((hsbBank & 1) ? 120 : 121);
+        bankLsb = (uint16_t)(midiBank & 0x7F);
+    }
+
     GM_DLS_ProcessController(pSong, (uint16_t)MIDIChannel, B_BANK_MSB, bankMsb);
-    GM_DLS_ProcessController(pSong, (uint16_t)MIDIChannel, B_BANK_LSB, (uint16_t)(midiBank & 0x7F));
+    GM_DLS_ProcessController(pSong, (uint16_t)MIDIChannel, B_BANK_LSB, bankLsb);
+}
+
+/* Program lookup helper for native DLS in mixed SF2+DLS mode.
+   It honors the requested selector first, then (for XMF embedded banks only)
+   retries with LSB 0 when direct-bank selectors miss. */
+static bool PV_DLS_TryProgramWithXmfFallback(GM_Song *pSong, int16_t MIDIChannel, int32_t hsbBank, int32_t program)
+{
+    uint16_t rawMsb;
+
+    if (!pSong)
+    {
+        return FALSE;
+    }
+
+    PV_DLS_ApplyHSBBankSelect(pSong, MIDIChannel, hsbBank);
+    GM_DLS_ProcessProgramChange(pSong, MIDIChannel, (uint16_t)(program & 0x7F));
+    if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)(program & 0x7F)))
+    {
+        return TRUE;
+    }
+
+    if (!GM_DLS_HasXmfEmbeddedBank(pSong->pMixer))
+    {
+        return FALSE;
+    }
+
+    rawMsb = (uint16_t)((uint8_t)pSong->channelRawBank[MIDIChannel]);
+    if ((rawMsb == 120 || rawMsb == 121) && ((uint8_t)pSong->channelLSB[MIDIChannel] != 0))
+    {
+        GM_DLS_ProcessController(pSong, (uint16_t)MIDIChannel, B_BANK_MSB, rawMsb);
+        GM_DLS_ProcessController(pSong, (uint16_t)MIDIChannel, B_BANK_LSB, 0);
+        GM_DLS_ProcessProgramChange(pSong, MIDIChannel, (uint16_t)(program & 0x7F));
+        if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)(program & 0x7F)))
+        {
+            debug_message("DLS XMF fallback: Channel %d used %u:0 for program %d (requested LSB=%d)\n",
+                          MIDIChannel,
+                          rawMsb,
+                          (int)(program & 0x7F),
+                          (int)((uint8_t)pSong->channelLSB[MIDIChannel]));
+            return TRUE;
+        }
+    }
+
+    return FALSE;
 }
 #endif
 
@@ -2017,46 +2078,24 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                         break;
                 }
                 
-                // Check if XMF overlay has this preset (only in HSB mode)
-                // In SF2 mode, the overlay is already part of the soundfont stack
-#if USE_XMF_SUPPORT == TRUE
-                if (GM_SF2_HasXmfEmbeddedBank())
-                {
-                    if (GM_IsSF2Song(pSong))
-                    {
-                        // If SF2 is active for this song, send program change to SF2
-                        pSong->channelType[MIDIChannel] = CHANNEL_TYPE_SF2;
-                        int32_t combinedProgram = (theBank * 128) + thePatch;
-                        GM_SF2_ProcessProgramChange(pSong, MIDIChannel, combinedProgram);
-                    }
-                    int32_t overlayBank = theBank / 2;  // Convert back to MIDI bank for overlay check
-                    if (GM_SF2_XmfOverlayHasPreset(overlayBank, thePatch)) {
-                        // Route this channel to FluidSynth overlay
-                        pSong->channelType[MIDIChannel] = CHANNEL_TYPE_SF2;
-                        // Directly set the bank and program in FluidSynth (bypass conversion logic)
-                        GM_SF2_SetChannelBankAndProgram(MIDIChannel, overlayBank, thePatch);
-                        debug_message("ProcessProgramChange Debug: Channel %d routed to XMF overlay (bank=%d prog=%d)\n", MIDIChannel, overlayBank, thePatch);
-                    } else {
-                        // HSB mode without overlay match - use native synthesis
-                        pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
-                    }
-                }
-                else
-#endif
-                if (0) {}
 #if USE_SF2_SUPPORT == TRUE
-                else if (GM_IsSF2Song(pSong))
+                if (GM_IsSF2Song(pSong))
                 {
                     bool routedToDLS = FALSE;
 #if USE_NATIVE_DLS == TRUE
                     // Mixed mode: if native DLS is active and has this program, route channel to DLS.
                     if (GM_IsDLSSong(pSong))
                     {
-                        int32_t combinedProgram = (theBank * 128) + thePatch;
-                        PV_DLS_ApplyHSBBankSelect(pSong, MIDIChannel, theBank);
-                        GM_DLS_ProcessProgramChange(pSong, MIDIChannel, combinedProgram);
-                        if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)combinedProgram))
+                        if (PV_DLS_TryProgramWithXmfFallback(pSong, MIDIChannel, theBank, thePatch))
                         {
+                            pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
+                            routedToDLS = TRUE;
+                        }
+                        else if (GM_DLS_HasXmfEmbeddedBank(pSong->pMixer))
+                        {
+                            // Keep XMF embedded-bank channels on native DLS even when
+                            // the SF2 main bank is active; embedded path must not fall
+                            // back into FluidSynth routing.
                             pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
                             routedToDLS = TRUE;
                         }
@@ -2077,10 +2116,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                 {
                     // Native DLS path with SF2-style fallback: DLS when preset exists,
                     // otherwise fall back to built-in wavetable (GM).
-                    int32_t combinedProgram = (theBank * 128) + thePatch;
-                    PV_DLS_ApplyHSBBankSelect(pSong, MIDIChannel, theBank);
-                    GM_DLS_ProcessProgramChange(pSong, MIDIChannel, combinedProgram);
-                    if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)combinedProgram))
+                    if (PV_DLS_TryProgramWithXmfFallback(pSong, MIDIChannel, theBank, thePatch))
                     {
                         pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
                     }
@@ -2825,7 +2861,7 @@ void PV_ProcessController(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTr
 #endif
             {
 #if USE_SF2_SUPPORT == TRUE
-                if (!GM_IsSF2Song(pSong) && !GM_SF2_HasXmfEmbeddedBank())
+                if (!GM_IsSF2Song(pSong))
 #endif
                 {
                     if (value > (MAX_BANKS / 2))
@@ -4786,7 +4822,7 @@ OPErr PV_ProcessMidiSequencerSlice(void *threadContext, GM_Song *pSong)
 #if USE_SF2_SUPPORT == TRUE
                     // FluidSynth CLI applies SysEx from MIDI files (GM reset, MTS tuning, etc.).
                     // Forward SysEx during SF2 playback so synthesis matches.
-                    if (GM_IsSF2Song(pSong) || GM_SF2_HasXmfEmbeddedBank())
+                    if (GM_IsSF2Song(pSong))
                     {
                         GM_SF2_ProcessSysEx(pSong, syx, (int32_t)sendLen);
                     }

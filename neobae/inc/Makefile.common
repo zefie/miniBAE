@@ -122,11 +122,9 @@ ifeq ($(SF2_SUPPORT),1)
 	USE_FLUIDSYNTH := 1
 endif
 
-# FluidSynth, or Native DLS, is required for XMF
-ifneq ($(USE_FLUIDSYNTH),1)
-	ifneq ($(NATIVE_DLS),1)
- 	   XMF_SUPPORT := 0
-	endif
+# Native DLS is required for XMF
+ifneq ($(NATIVE_DLS),1)
+   XMF_SUPPORT := 0
 endif
 
 

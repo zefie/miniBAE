@@ -33,8 +33,6 @@
 #endif
 #if USE_NATIVE_DLS == TRUE
     #include "GenDLS_MobileBAE.h"
-#endif
-#if _USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE
     #if USE_XMF_SUPPORT == TRUE
         #include "GenXMF.h"
     #endif
@@ -695,7 +693,7 @@ bool bae_load_bank(const char *bank_path)
     // Check if this is an SF2 file
     if (ext && (strcasecmp(ext, ".sf2") == 0    
 #if USE_VORBIS_DECODER == TRUE && _USING_FLUIDSYNTH == TRUE
-    || (strcasecmp(ext, ".sf3") == 0 || strcasecmp(ext, ".sfo") == 0 || (strcasecmp(ext, ".dls") == 0 && g_use_fluidsynth_for_dls))
+    || (strcasecmp(ext, ".sf3") == 0 || strcasecmp(ext, ".sfo") == 0)
 #endif
     ))
     {
@@ -720,7 +718,7 @@ bool bae_load_bank(const char *bank_path)
     }
 #endif
 #if USE_NATIVE_DLS == TRUE
-    if (ext && strcasecmp(ext, ".dls") == 0 && !g_use_fluidsynth_for_dls) {
+    if (ext && strcasecmp(ext, ".dls") == 0) {
         // Load DLS bank
 #if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_DLS == TRUE
         BAEBankToken builtin_token = 0;
@@ -967,9 +965,6 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
 #if USE_XMF_SUPPORT == TRUE
     else if (ftype == BAE_XMF)
     {
-#if (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE) && USE_SF2_SUPPORT == TRUE && USE_NATIVE_DLS == TRUE
-        GM_XMF_SetUseFluidSynthForDLS(g_use_fluidsynth_for_dls ? TRUE : FALSE);
-#endif
         sr = BAESong_LoadXmfFromFile(g_bae.song, (BAEPathName)path, TRUE);
         g_bae.is_rmf_file = false;
     }

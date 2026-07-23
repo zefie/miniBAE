@@ -74,10 +74,6 @@ OPErr GM_LoadSF2SoundfontFromMemory(const unsigned char *data, size_t size);
 OPErr GM_LoadSF2Soundfont(const char* sf2_path);
 void GM_UnloadSF2Soundfont(void);
 
-// XMF overlay soundfont management
-OPErr GM_LoadSF2SoundfontAsXMFOverlay(const unsigned char *data, size_t size);
-void GM_UnloadXMFOverlaySoundFont(void);
-
 bool is_libinstpatch_loaded(void);
 
 // Check if a song should use FluidSynth rendering
@@ -134,9 +130,6 @@ void PV_SF2_SetBankPreset(GM_Song* pSong, int16_t channel, int16_t bank, int16_t
 // Query whether the currently loaded soundfont exposes any presets at all.
 // Optionally returns the counted number of presets.
 bool GM_SF2_CurrentFontHasAnyPreset(int *outPresetCount);
-bool GM_SF2_HasXmfEmbeddedBank();
-bool GM_SF2_XmfOverlayHasPreset(int bank, int program);
-void GM_SF2_SetChannelBankAndProgram(int16_t channel, int16_t bank, int16_t program);
 bool GM_SF2_isDLS(void);
 
 void GM_SF2_SetChannelMode(int16_t channel, int16_t mode);

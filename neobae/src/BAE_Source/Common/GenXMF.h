@@ -40,10 +40,4 @@ BAEResult BAESong_LoadXmfFromFile(BAESong song,
                                   BAEPathName filePath,
                                   BAE_BOOL ignoreBadInstruments);
 
-// Controls how embedded DLS banks inside XMF/MXMF containers are loaded.
-// FALSE: use native DLS loader/synth (when compiled in)
-// TRUE: use FluidSynth overlay path for DLS content
-void GM_XMF_SetUseFluidSynthForDLS(BAE_BOOL enable);
-BAE_BOOL GM_XMF_GetUseFluidSynthForDLS(void);
-
 #endif // USE_XMF_SUPPORT && (_USING_FLUIDSYNTH || USE_NATIVE_DLS)

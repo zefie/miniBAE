@@ -9882,12 +9882,6 @@ BAEResult BAESong_LoadRmiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL i
             }
         }
     #endif
-    #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE 
-        if (GM_SF2_HasXmfEmbeddedBank())
-        {
-            GM_UnloadXMFOverlaySoundFont();
-        }
-    #endif
 #endif        
         BAE_AcquireMutex(song->mLock);
         XConvertPathToXFILENAME(filePath, &name);
@@ -10009,12 +10003,6 @@ BAEResult BAESong_LoadMidiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL 
             {
                 BAEMixer_UnloadXMFDLSOverlayBank(mixer);
             }
-        }
-    #endif
-    #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-        if (GM_SF2_HasXmfEmbeddedBank())
-        {
-            GM_UnloadXMFOverlaySoundFont();
         }
     #endif
 #endif
@@ -10451,12 +10439,6 @@ BAEResult BAESong_LoadRmfFromFile(BAESong song, BAEPathName filePath, int16_t so
             {
                 BAEMixer_UnloadXMFDLSOverlayBank(mixer);
             }
-        }
-    #endif
-    #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_XMF_SUPPORT == TRUE
-        if (GM_SF2_HasXmfEmbeddedBank())
-        {
-            GM_UnloadXMFOverlaySoundFont();
         }
     #endif
 #endif        

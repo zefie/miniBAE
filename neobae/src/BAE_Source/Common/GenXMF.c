@@ -35,63 +35,12 @@
 void LZSSUncompress(unsigned char* src, uint32_t srcBytes,
                     unsigned char* dst, uint32_t dstBytes);
 
-#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+#if USE_XMF_SUPPORT == TRUE && USE_NATIVE_DLS == TRUE
 #include <zlib.h>
-
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-#include "GenSF2_FluidSynth.h"
-#endif
-
-#if USE_NATIVE_DLS == TRUE
 #include "GenDLS_MobileBAE.h"
-#endif
+
 
 static BAESong g_xmfBankLoadSong = NULL;
-
-#if USE_NATIVE_DLS == TRUE
-static BAE_BOOL g_xmfUseFluidSynthForDLS = FALSE;
-#else
-static BAE_BOOL g_xmfUseFluidSynthForDLS = TRUE;
-#endif
-
-void GM_XMF_SetUseFluidSynthForDLS(BAE_BOOL enable)
-{
-    BAE_BOOL newMode = enable ? TRUE : FALSE;
-
-    if (g_xmfUseFluidSynthForDLS == newMode)
-    {
-        return;
-    }
-
-    g_xmfUseFluidSynthForDLS = newMode;
-
-#if USE_NATIVE_DLS == TRUE
-    if (newMode == TRUE && g_xmfBankLoadSong)
-    {
-        BAEMixer mixer = NULL;
-        if (BAESong_GetMixer(g_xmfBankLoadSong, &mixer) == BAE_NO_ERROR && mixer)
-        {
-            if (BAEMixer_UnloadXMFDLSOverlayBank(mixer) == BAE_NO_ERROR)
-            {
-                debug_message("[XMF] Toggle to FluidSynth: unloaded native DLS XMF overlay\n");
-            }
-        }
-    }
-#endif
-
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-    if (newMode == FALSE && GM_SF2_HasXmfEmbeddedBank())
-    {
-        GM_UnloadXMFOverlaySoundFont();
-        debug_message("[XMF] Toggle to native DLS: unloaded FluidSynth XMF overlay\n");
-    }
-#endif
-}
-
-BAE_BOOL GM_XMF_GetUseFluidSynthForDLS(void)
-{
-    return g_xmfUseFluidSynthForDLS ? TRUE : FALSE;
-}
 
 // Control verbose inflate failure logging during MXMF packed scans
 #ifndef MXMF_LOG_INFLATE_FAILURES
@@ -510,7 +459,7 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
         }
 
         // Try to load a bank first if we don't have one yet
-#if (USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE) || USE_NATIVE_DLS == TRUE
+
         if (bankLoaded && *bankLoaded == FALSE)
         {
             if (PV_TryLoadBankFromBlob(payload, payloadLen) == TRUE)
@@ -518,23 +467,20 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
                 *bankLoaded = TRUE;
             }
         }
-#endif
 
         // Try based on resourceFormat when available, else heuristic
         const unsigned char *smfRMID=NULL; uint32_t smfRMIDLen=0;
-    bool preferBank = FALSE;
+        bool preferBank = FALSE;
         if (rfType == 0) { // standard
             if (rfId == 2 || rfId == 3 || rfId == 4 || rfId == 5) preferBank = TRUE; // DLS
         }
 
         if (preferBank)
         {
-#if (USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE) || USE_NATIVE_DLS == TRUE
             if (bankLoaded && *bankLoaded == FALSE)
             {
                 if (PV_TryLoadBankFromBlob(payload, payloadLen) == TRUE) { *bankLoaded = TRUE; }
             }
-#endif
         }
 
         if (PV_ExtractRMIDToSMF(payload, payloadLen, &smfRMID, &smfRMIDLen))
@@ -621,7 +567,7 @@ static bool PV_TryParseXMF1(const unsigned char *bytes, uint32_t len,
 static bool PV_InflateFromOffset(const unsigned char *buf, uint32_t len, uint32_t offset,
                                   unsigned char **outBuf, uint32_t *outLen)
 {
-#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+
     if (!buf || offset >= len || !outBuf || !outLen) return FALSE;
     // Quick header sanity: accept zlib (0x78 ..), or gzip (0x1f 0x8b)
     if (len < 2 || offset > (len - 2)) return FALSE;
@@ -721,17 +667,14 @@ static bool PV_InflateFromOffset(const unsigned char *buf, uint32_t len, uint32_
         debug_message("[MXMF] inflated stream at offset=%u -> %u bytes\n", offset, *outLen);
     }
     return ok;
-#else
     (void)buf; (void)len; (void)offset; (void)outBuf; (void)outLen;
     return FALSE;
-#endif
 }
 
 // Try to inflate a raw DEFLATE stream (no zlib/gzip header) starting at offset.
 static bool PV_InflateRawFromOffset(const unsigned char *buf, uint32_t len, uint32_t offset,
                                      unsigned char **outBuf, uint32_t *outLen)
 {
-#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
     if (!buf || offset >= len || !outBuf || !outLen) return FALSE;
     z_stream zs;
     memset(&zs, 0, sizeof(zs));
@@ -819,10 +762,6 @@ static bool PV_InflateRawFromOffset(const unsigned char *buf, uint32_t len, uint
         debug_message("[MXMF] inflated RAW stream at offset=%u -> %u bytes\n", offset, *outLen);
     }
     return ok;
-#else
-    (void)buf; (void)len; (void)offset; (void)outBuf; (void)outLen;
-    return FALSE;
-#endif
 }
 
 // Compute SMF total length from an in-memory buffer starting at 'MThd'
@@ -949,7 +888,7 @@ static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ule
         {
             foundStreams++;
             debug_message("[MXMF] zlib stream #%u at file+%u, inflated=%u bytes\n", foundStreams, i, outLen);
-#if (USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE) || USE_NATIVE_DLS == TRUE
+
             // Try bank from inflated blob
             if (bankLoaded && *bankLoaded == FALSE)
             {
@@ -959,7 +898,7 @@ static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ule
                     *bankLoaded = TRUE;
                 }
             }
-#endif
+
             // Try MIDI or RMF from inflated blob
             int off = PV_FindSignature(out, outLen, smf_sig);
             if (off >= 0 && !foundMidi)
@@ -1026,7 +965,7 @@ static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ule
             {
                 foundStreams++;
                 debug_message("[MXMF] zlib(decrypted) stream #%u at file+%u, inflated=%u bytes\n", foundStreams, i, dlen);
-#if (USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE) || USE_NATIVE_DLS == TRUE
+
                 if (bankLoaded && *bankLoaded == FALSE)
                 {
                     if (PV_TryLoadBankFromBlob(dout, dlen) == TRUE)
@@ -1035,7 +974,7 @@ static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ule
                         *bankLoaded = TRUE;
                     }
                 }
-#endif
+
                 int off = PV_FindSignature(dout, dlen, smf_sig);
                 if (off >= 0 && !foundMidi)
                 {
@@ -1102,7 +1041,7 @@ done_scan:
             unsigned char *rdout = NULL; uint32_t rdlen = 0;
             if (PV_InflateRawFromOffset(bytes, ulen, roff, &rdout, &rdlen))
             {
-#if (USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE) || USE_NATIVE_DLS == TRUE
+
                 if (bankLoaded && *bankLoaded == FALSE)
                 {
                     if (PV_TryLoadBankFromBlob(rdout, rdlen) == TRUE)
@@ -1111,7 +1050,7 @@ done_scan:
                         *bankLoaded = TRUE;
                     }
                 }
-#endif
+
                 int off = PV_FindSignature(rdout, rdlen, smf_sig);
                 if (off >= 0 && !foundMidi)
                 {
@@ -1169,7 +1108,7 @@ fail_scan:
 
 static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
 {
-#if (USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE) || USE_NATIVE_DLS == TRUE
+
     static int s_packedBankProbeDepth = 0;
 
     if (!buf || len < 8)
@@ -1252,24 +1191,18 @@ static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
         debug_message("[XMF] attempting bank load #%d @+%u bytes=%u%s\n", idx+1, c->off, c->bytes,
                    (c->isDLS? (c->hasWvpl? ", DLS wvpl=YES" : ", DLS wvpl=NO") : ", SF2"));
 
-#if USE_NATIVE_DLS == TRUE
-        if (c->isDLS && !GM_XMF_GetUseFluidSynthForDLS()) {
+
+        if (!c->isDLS) {
+            debug_message("[XMF] skipping non-DLS candidate #%d (XMF forced to native DLS)\n", idx+1);
+            continue;
+        }
+
+        {
             BAEMixer mixer = NULL;
             if (g_xmfBankLoadSong && BAESong_GetMixer(g_xmfBankLoadSong, &mixer) == BAE_NO_ERROR && mixer) {
                 BAEMixer_UnloadXMFDLSOverlayBank(mixer);
 
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-                GM_UnloadXMFOverlaySoundFont();
-                GM_SetMixerSF2Mode(FALSE);
-#endif
-
                 if (BAEMixer_LoadDLSBankAsXMFOverlayFromMemory(mixer, (void *)(buf + c->off), c->bytes) == BAE_NO_ERROR) {
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-                    if (g_xmfBankLoadSong)
-                    {
-                        (void)BAESong_EnableSF2(g_xmfBankLoadSong, FALSE);
-                    }
-#endif
                     GM_SetMixerDLSMode(TRUE);
                     debug_message("[XMF] native DLS load succeeded on candidate #%d\n", idx+1);
                     return TRUE;
@@ -1280,42 +1213,19 @@ static bool PV_TryLoadBankFromBlob(const unsigned char *buf, uint32_t len)
             }
             continue;
         }
-#endif
 
-    #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-        // Use overlay loading to preserve base soundfont and only override instruments in XMF
-        {
-            OPErr r = GM_LoadSF2SoundfontAsXMFOverlay(buf + c->off, (size_t)c->bytes);
-            if (r == NO_ERR) {
-                int presetCount = 0;
-                bool okPresets = GM_SF2_CurrentFontHasAnyPreset(&presetCount);
-                if (okPresets) {
-                    debug_message("[XMF] bank overlay succeeded on candidate #%d (presets>0)\n", idx+1);
-                    return TRUE;
-                } else {
-                    debug_message("[XMF] bank candidate #%d loaded but no presets found (count=%d) - trying next...\n", idx+1, presetCount);
-                    GM_UnloadXMFOverlaySoundFont();
-                }
-            } else {
-                debug_message("[XMF] bank overlay load failed on candidate #%d (result=%d), trying next...\n", idx+1, r);
-            }
-        }
-#else
+
         if (!c->isDLS) {
             debug_message("[XMF] skipping SF2 candidate #%d (FluidSynth not available)\n", idx+1);
         }
-#endif
+
     }
     debug_message("[XMF] all bank candidates failed to load\n");
     return FALSE;
-#else
-    (void)buf; (void)len; return FALSE;
-#endif
 }
 
 static bool PV_TryLoadBankFromPackedBlob(const unsigned char *buf, uint32_t len)
 {
-#if (USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE) || USE_NATIVE_DLS == TRUE
     if (!buf || len < 8)
     {
         return FALSE;
@@ -1372,11 +1282,6 @@ static bool PV_TryLoadBankFromPackedBlob(const unsigned char *buf, uint32_t len)
     }
 
     return FALSE;
-#else
-    (void)buf;
-    (void)len;
-    return FALSE;
-#endif
 }
 
 BAEResult BAESong_LoadXmfFromFile(BAESong song, BAEPathName filePath, BAE_BOOL ignoreBadInstruments)
@@ -1394,12 +1299,6 @@ BAEResult BAESong_LoadXmfFromFile(BAESong song, BAEPathName filePath, BAE_BOOL i
     }
 #endif
         
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_XMF_SUPPORT == TRUE
-    if (GM_SF2_HasXmfEmbeddedBank())
-    {
-        GM_UnloadXMFOverlaySoundFont();
-    }
-#endif        
     XFILENAME name;
     XConvertPathToXFILENAME(filePath, &name);
 
