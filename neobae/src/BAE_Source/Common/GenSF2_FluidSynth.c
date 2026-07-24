@@ -2036,8 +2036,8 @@ static void PV_SF2_ConvertFloatToInt32(float* input, int32_t* output, int32_t* r
     {
         // Average by active channel weight, then normalize by 128 (>> 7)
         // Apply 0.5x factor to reduce intensity for SF2's richer sound
-        reverbScale = (weightedReverb / totalWeight) / 128.0f * 1.0f;
-        chorusScale = (weightedChorus / totalWeight) / 128.0f * 1.0f;
+        reverbScale = (weightedReverb / totalWeight) / 128.0f;
+        chorusScale = (weightedChorus / totalWeight) / 128.0f;
     }
 
     if (g_fluidsynth_mono_mode)
@@ -2062,14 +2062,15 @@ static void PV_SF2_ConvertFloatToInt32(float* input, int32_t* output, int32_t* r
             
             // Mix into reverb and chorus buffers if they exist
             // Use the scaled sample directly (reverb is a percentage of the dry signal)
+            // Apply 20/128 wet mix factor to match DLS reverb send level
             if (reverbOutput && reverbScale > 0.0f)
             {
-                int32_t reverbSample = (int32_t)(intSample * reverbScale);
+                int32_t reverbSample = (int32_t)(intSample * reverbScale * 20.0f / 64.0f);
                 reverbOutput[frame] += reverbSample;
             }
             if (chorusOutput && chorusScale > 0.0f)
             {
-                int32_t chorusSample = (int32_t)(intSample * chorusScale);
+                int32_t chorusSample = (int32_t)(intSample * chorusScale * 20.0f / 64.0f);
                 chorusOutput[frame] += chorusSample;
             }
         }
@@ -2093,15 +2094,16 @@ static void PV_SF2_ConvertFloatToInt32(float* input, int32_t* output, int32_t* r
             
             // Mix into reverb and chorus buffers if they exist (stereo interleaved)
             // Use the scaled samples directly (reverb/chorus are percentages of the dry signal)
+            // Apply 20/128 wet mix factor to match DLS reverb send level
             if (reverbOutput && reverbScale > 0.0f)
             {
                 int32_t monoSend = (leftInt / 2) + (rightInt / 2);
-                reverbOutput[frame] += (int32_t)(monoSend * reverbScale);
+                reverbOutput[frame] += (int32_t)(monoSend * reverbScale * 20.0f / 64.0f);
             }
             if (chorusOutput && chorusScale > 0.0f)
             {
                 int32_t monoSend = (leftInt / 2) + (rightInt / 2);
-                chorusOutput[frame] += (int32_t)(monoSend * chorusScale);
+                chorusOutput[frame] += (int32_t)(monoSend * chorusScale * 20.0f / 64.0f);
             }
         }
     }
