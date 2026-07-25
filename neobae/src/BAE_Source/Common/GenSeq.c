@@ -2020,6 +2020,8 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
         debug_message("ProcessProgramChange Debug: Channel %d is set to Percussion (MSB=120, LSB=%d)\n", MIDIChannel, pSong->channelLSB[MIDIChannel]);
     }
 #endif 
+
+
     if (pSong->allowProgramChanges)
     {
         if (MIDIChannel == PERCUSSION_CHANNEL && pSong->channelBankMode[MIDIChannel] != USE_NORM_BANK)
@@ -2077,7 +2079,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                     bool routedToDLS = FALSE;
 #if USE_NATIVE_DLS == TRUE
                     // Mixed mode: if native DLS is active and has this program, route channel to DLS.
-                    if (GM_IsDLSSong(pSong))
+                    if (GM_IsDLSSong(pSong) || GM_DLS_HasXmfEmbeddedBank(pSong->pMixer))
                     {
                         if (PV_DLS_TryProgramWithXmfFallback(pSong, MIDIChannel, theBank, thePatch))
                         {
@@ -2091,22 +2093,30 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                         // If SF2 is active for this song, send program change to SF2
                         pSong->channelType[MIDIChannel] = CHANNEL_TYPE_SF2;
                         int32_t combinedProgram = (theBank * 128) + thePatch;
-                        debug_message("ProcessProgramChange Debug: Channel %d is using SF2 Instrument (bank=%d prog=%d)\n", MIDIChannel, theBank, thePatch);
+                        debug_message("ProcessProgramChange Debug: Channel %d is using a SF2 Instrument (bank=%d prog=%d)\n", MIDIChannel, theBank, thePatch);
                         GM_SF2_ProcessProgramChange(pSong, MIDIChannel, combinedProgram);
                     }
                 }
 #endif
 #if USE_NATIVE_DLS == TRUE
-                else if (GM_IsDLSSong(pSong))
+                else if (GM_IsDLSSong(pSong) || GM_DLS_HasXmfEmbeddedBank(pSong->pMixer))
                 {
-                    // Native DLS path with SF2-style fallback: DLS when preset exists,
-                    // otherwise fall back to built-in wavetable (GM).
+                    // Native DLS or XMF overlay path: use DLS when the preset exists,
+                    // otherwise fall back to the loaded HSB bank.
                     if (PV_DLS_TryProgramWithXmfFallback(pSong, MIDIChannel, theBank, thePatch))
                     {
                         pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
+                        debug_message("ProcessProgramChange Debug: Channel %d is using a DLS Instrument (bank=%d prog=%d)\n", MIDIChannel, theBank, thePatch);
                     }
                     else
                     {
+                        uint16_t rawMsb = (uint16_t)((uint8_t)pSong->channelRawBank[MIDIChannel]);
+
+                        if (rawMsb == 120 || rawMsb == 121)
+                        {
+                            int16_t hsbBank = (int16_t)((uint8_t)pSong->channelLSB[MIDIChannel]);
+                            pSong->channelBank[MIDIChannel] = (signed char)(hsbBank < (MAX_BANKS / 2) ? hsbBank : 0);
+                        }
                         pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
                     }
                 }
@@ -2120,7 +2130,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                 uint32_t bankId, progId = 0, noteId = 0;
                 int16_t thePatch = PV_ConvertPatchBank(pSong, program, MIDIChannel);                        
                 TranslateInstrumentToBankProgram(thePatch, &bankId, &progId, &noteId);          
-                debug_message("ProcessProgramChange Debug: Channel %d is using an RMF Instrument (instID=%d, bank=%d, program=%d)\n", MIDIChannel, thePatch, bankId, progId);
+                debug_message("ProcessProgramChange Debug: Channel %d is using a RMF Instrument (instID=%d, bank=%d, program=%d)\n", MIDIChannel, thePatch, bankId, progId);
             }
 #endif
     }
