@@ -2444,9 +2444,10 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                 {
                     note += pSong->songPitchShift;
                 }
+                if (0) {}
 #if USE_SF2_SUPPORT == TRUE
                 // If SF2 is active for this song OR channel is routed to SF2, route to SF2 synthesis
-                if ((GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2) &&
+                else if ((GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2) &&
                          pSong->channelType[MIDIChannel] != CHANNEL_TYPE_DLS)
                 {
                     // adding this pleases the compiler
@@ -2528,13 +2529,17 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
 
                     if (pSong->channelType[MIDIChannel] == CHANNEL_TYPE_RMF)
                     {
-                        volume = (int16_t)((float)volume * 0.85f); // RMF seems to be louder, so turn it down a bit
                         thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
                         PV_StartMIDINote(pSong, thePatch, MIDIChannel, currentTrack, note, volume);
                     }
-                    else
+                    else if (pSong->channelType[MIDIChannel] == CHANNEL_TYPE_DLS)
                     {
                         GM_DLS_ProcessNoteOn(pSong, MIDIChannel, note, volume);
+                    }
+                    else
+                    {
+                        thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
+                        PV_StartMIDINote(pSong, thePatch, MIDIChannel, currentTrack, note, volume);
                     }
                 }
                 else
