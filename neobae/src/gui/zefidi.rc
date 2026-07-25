@@ -16,6 +16,11 @@
 113 ICON "../icons/BAEFileType_MP2.ico"
 114 ICON "../icons/BAEFileType_MP3.ico"
 115 ICON "../icons/BAEFileType_ZMF.ico"
+116 ICON "../icons/BAEFileType_ADP.ico"
+117 ICON "../icons/BAEFileType_ADX.ico"
+118 ICON "../icons/BAEFileType_OPUS.ico"
+199 ICON "../icons/BAEFile.ico"
+
 
 
 // Version information
