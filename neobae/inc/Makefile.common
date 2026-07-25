@@ -106,6 +106,11 @@ ifeq ($(USE_SDL3),1)
 	USE_SDL2 := 0
 endif
 
+# LDEBUG (Low-level Debug) implies normal debug
+ifeq ($(LDEBUG),1)
+	DEBUG := 1
+endif
+
 # Disable SDL backends if using raylib
 ifeq ($(USE_RAYLIB),1)
 	USE_SDL2 := 0
@@ -324,7 +329,6 @@ endif
 ifeq ($(DEBUG),1)
 	BAE_FLAGS +=    -D_DEBUG=1 -Wall -Wno-unused-function
 endif
-
 
 ifeq ($(SF2_SUPPORT),1)
 	BAE_FLAGS += -DUSE_SF2_SUPPORT=1

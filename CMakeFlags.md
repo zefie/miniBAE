@@ -15,7 +15,8 @@ cmake --build build
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `DEBUG` | `OFF` | Enable debuggable build (zefidi debug console, gdb debugging). Adds `-g -O0 -ggdb3 -fPIC -D_DEBUG=1`. When `OFF`, adds `-O2`. |
+| `DEBUG` | `OFF` | Enable debug build (zefidi debug console). Enables debug output from the NeoBAE engine. |
+| `LDEBUG` | `OFF` | Enable full debug build (zefidi debug console, gdb debugging). Disables compile-time optimizations and retains debug symbols. |
 | `NEOBAE_STATIC` | `OFF` | Enable static linking for NeoBAE apps and dependencies (best support on MinGW). When enabled and `NEOBAE_EXTERNAL_CODECS` is not already set, it is forced `ON`. When enabled and `NEOBAE_SHARED_LIBNEOBAE` is not already set, it is forced `ON`. On MinGW, sets static suffixes and link options. |
 | `NEOBAE_BUILD_VCLIB` | `OFF` | Build an additional MSVC-style import library for `libneobae.dll` using `dlltool`. Only meaningful for MinGW shared `libneobae.dll` builds. |
 | `CMAKE_BUILD_TYPE` | (empty) | Build type: `Debug`, `Release`, `RelWithDebInfo`, `MinSizeRel`. |

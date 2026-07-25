@@ -18,7 +18,7 @@ STRIP		:= strip
 
 OPTI            := -O2 -fPIC
 
-ifeq ($(DEBUG),1)
+ifeq ($(LDEBUG),1)
     OPTI := -g -O0 -ggdb3 -fPIC
 endif
 
@@ -27,6 +27,11 @@ endif
 #OPENMPT_LIBS := $(shell pkg-config --libs libopenmpt 2>/dev/null)
 
 CFLAGS  	:= $(ARCH) $(OPTI) $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value
+
+ifeq ($(LDEBUG),1)
+    CFLAGS  	+= -D_FULL_DEBUG=1
+endif
+
 ifneq ($(strip $(OPENMPT_LIBS)),)
 	CFLAGS += $(OPENMPT_CFLAGS) #-DMOD2RMF_USE_OPENMPT=1
 endif

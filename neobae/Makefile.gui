@@ -21,6 +21,9 @@ ifeq ($(LDEBUG),1)
 endif
 CFLAGS  	:= $(ARCH) $(OPTI) $(INC_PATH) -D_THREAD_SAFE -Wno-unused-value 
 
+ifeq ($(LDEBUG),1)
+    CFLAGS  	+= -D_FULL_DEBUG=1
+endif
 
 
 

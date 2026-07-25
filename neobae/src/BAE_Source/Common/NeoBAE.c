@@ -2052,49 +2052,27 @@ const char *BAE_GetFeatureString()
 
 #if SUPPORT_KARAOKE == TRUE
     const char *karaoke = "Karaoke Support";
-#else
-    const char *karaoke = "No Karaoke Support";
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", karaoke);
+    first = FALSE;
 #endif
-    if (karaoke && karaoke[0])
-    {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", karaoke);
-        first = FALSE;
-    }
 
 #if USE_RMI_SUPPORT == TRUE
     const char *rmi = "RMI Support";
-#else
-    const char *rmi = "No RMI Support";    
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", rmi);
+    first = FALSE;
 #endif
-    if (rmi && rmi[0])
-    {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", rmi);
-        first = FALSE;
-    }
         
 #if USE_XMF_SUPPORT == TRUE
     const char *xmf = "XMF Support";
-#else
-    const char *xmf = "No XMF Support";    
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", xmf);
+    first = FALSE;
 #endif
-
-    if (xmf && xmf[0])
-    {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", xmf);
-        first = FALSE;
-    }
 
 #if USE_ZMF_SUPPORT == TRUE
     const char *zmf = "ZMF Support";
-#else
-    const char *zmf = "No ZMF Support";
-#endif    
-    if (zmf && zmf[0])
-    {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", zmf);
-        first = FALSE;
-    }
-
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", zmf);
+    first = FALSE;
+#endif
 
 #if USE_MTHC_SUPPORT == TRUE
     const char *mthc = "Compressed MIDI (MThc)";
@@ -2152,39 +2130,25 @@ snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", (
 
 #if USE_QOA_SUPPORT == TRUE
     const char *qoa = "QOA (Quite OK Audio) Support";
-#else
-    const char *qoa = "No QOA (Quite OK Audio) Support";
-#endif    
-    if (qoa && qoa[0])
-    {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", qoa);
-        first = FALSE;
-    }
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", qoa);
+    first = FALSE;
+#endif
 
 #if USE_ADX_SUPPORT == TRUE
     const char *adx = "CRI ADX Support";
-#else
-    const char *adx = NULL;
-#endif    
-    if (adx && adx[0])
-    {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", adx);
-        first = FALSE;
-    }
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", adx);
+    first = FALSE;
+#endif
 
 #if USE_NATIVE_DLS == TRUE
     const char *native_dls = "Native DLS Support";
-#else
-    const char *native_dls = NULL;
-#endif    
-    if (native_dls && native_dls[0])
-    {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", native_dls);
-        first = FALSE;
-    }
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", native_dls);
+    first = FALSE;
+#endif
+
 
     // SF2 support
-#if _USING_FLUIDSYNTH == TRUE
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
     char *sf2supp = NULL;
     if (is_libinstpatch_loaded()) {
         sf2supp = (char *)"SF2/SF3/SFO/DLS (libinstpatch) Support";
@@ -2200,47 +2164,29 @@ snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", (
 #endif
 
 #if USE_SF2_SUPPORT == TRUE
-#if _USING_FLUIDSYNTH == TRUE
-    // FluidSynth
-    if (sf2supp && sf2supp[0]) {
+    #if _USING_FLUIDSYNTH == TRUE
         static char sf2supp_buf[64];
         snprintf(sf2supp_buf, sizeof(sf2supp_buf), "%s (FluidSynth v%s)", sf2supp, fluid_version_str());
-        sf2supp = sf2supp_buf;
-    }
-#endif
-#endif
-
-    if (sf2supp && sf2supp[0])
-    {
         snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", sf2supp);
         first = FALSE;
-    }
+    #endif
+#endif
 
     // Playlist support
 #if _ZEFI_GUI == TRUE
-#if SUPPORT_PLAYLIST == TRUE
-    const char *playlist = "Playlist Support";
-#else
-    const char *playlist = NULL;
-#endif
-    if (playlist && playlist[0])
-    {
+    #if SUPPORT_PLAYLIST == TRUE
+        const char *playlist = "Playlist Support";
         snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", playlist);
         first = FALSE;
-    }
+    #endif
 
-    // MIDI hardware
-#if SUPPORT_MIDI_HW == TRUE
-    const char *midi = "MIDI Hardware Support";
-#else
-    const char *midi = "No MIDI Hardware Support";
-#endif
-    if (midi && midi[0])
-    {
+        // MIDI hardware
+    #if SUPPORT_MIDI_HW == TRUE
+        const char *midi = "MIDI Hardware Support";
         snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", midi);
         first = FALSE;
-    }
-#endif
+    #endif
+#endif // _ZEFI_GUI == TRUE
 
     // MP3 support
 
