@@ -28,11 +28,11 @@ private const val KEY_EQ_ENABLED = "eq_enabled"
 val BUILT_IN_EQ_PRESETS = mapOf(
     "Flat" to floatArrayOf(0f, 0f, 0f, 0f, 0f),
     "Bass Boost" to floatArrayOf(8f, 4f, 0f, 0f, 0f),
-    "Acoustic" to floatArrayOf(6f, 3f, 0f, 3f, 6f),
-    "Rock" to floatArrayOf(6f, 3f, -2f, 4f, 6f),
-    "Pop" to floatArrayOf(-2f, 2f, 4f, 2f, -2f),
-    "Classical" to floatArrayOf(0f, 0f, 0f, 4f, 4f),
-    "Vocal" to floatArrayOf(-2f, -4f, 4f, 6f, 4f)
+    "Acoustic" to floatArrayOf(4f, 2f, 0f, 2f, 4f),
+    "Rock" to floatArrayOf(6f, 2f, -2f, 2f, 6f),
+    "Pop" to floatArrayOf(-2f, 4f, 6f, 4f, -2f),
+    "Classical" to floatArrayOf(6f, 4f, 0f, 2f, 4f),
+    "Vocal" to floatArrayOf(-4f, 0f, 6f, 4f, -2f)
 )
 
 data class CustomEQPreset(
