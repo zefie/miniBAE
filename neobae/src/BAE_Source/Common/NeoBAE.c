@@ -2254,15 +2254,12 @@ snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", (
     const char *lame_version = get_lame_version();
     static char mp3[64];
     snprintf(mp3, sizeof(mp3), "MP3 Encoder Support (LAME v%s)", lame_version);
-#else
-    const char *mp3 = "No MP3 Support";
 #endif
 
-    if (mp3 && mp3[0])
-    {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", mp3);
-        first = FALSE;
-    }
+#if USE_MPEG_DECODER == TRUE || USE_MPEG_ENCODER == TRUE
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", mp3);
+    first = FALSE;
+#endif
 
     // FLAC support
 #if USE_FLAC_DECODER == TRUE && USE_FLAC_ENCODER == TRUE
@@ -2274,14 +2271,12 @@ snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", (
 #elif USE_FLAC_DECODER != TRUE && USE_FLAC_ENCODER == TRUE
     static char flac[64];
     snprintf(flac, sizeof(flac), "FLAC Encoder Support (v%s)", FLAC__VERSION_STRING);
-#else
-    const char *flac = "No FLAC Support";
 #endif
-    if (flac && flac[0])
-    {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", flac);
-        first = FALSE;
-    }
+
+#if USE_FLAC_DECODER == TRUE || USE_FLAC_ENCODER == TRUE
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", flac);
+    first = FALSE;
+#endif
 
     // Vorbis support
 #if USE_VORBIS_DECODER == TRUE && USE_VORBIS_ENCODER == TRUE
@@ -2302,14 +2297,12 @@ snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", (
     const char *vorbis_version = vorbis_p ? vorbis_p + 1 : vorbis_version_full;
     static char vorbis[64];
     snprintf(vorbis, sizeof(vorbis), "Vorbis Encoder Support (v%s)", vorbis_version);
-#else
-    const char *vorbis = "No Vorbis Support";
 #endif
-    if (vorbis && vorbis[0])
-    {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", vorbis);
-        first = FALSE;
-    }
+
+#if USE_VORBIS_DECODER == TRUE || USE_VORBIS_ENCODER == TRUE
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", vorbis);
+    first = FALSE;
+#endif
 
     // If nothing was added, return an empty string
     if (featBuf[0] == '\0')
@@ -2334,14 +2327,12 @@ snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", (
     const char *opus_version = opus_p ? opus_p + 1 : opus_version_full;
     static char opus[64];
     snprintf(opus, sizeof(opus), "Opus Encoder Support (v%s)", opus_version);
-#else
-    const char *opus = "No Opus Support";
 #endif
-    if (opus && opus[0])
-    {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", opus);
-        first = FALSE;
-    }
+
+#if USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", opus);
+    first = FALSE;
+#endif
 
     // If nothing was added, return an empty string
     if (featBuf[0] == '\0')
@@ -4396,7 +4387,7 @@ BAEResult BAEMixer_LoadDLSBank(BAEMixer mixer, const char* filePath)
         XFILENAME xfile;
         XConvertNativeFileToXFILENAME((void*)filePath, &xfile);
         err = BAE_TranslateOPErr(XGetFileAsData(&xfile, &pAudioFile, (int32_t*)&fileSize));
-        if (err == NO_ERR)
+        if (err == BAE_NO_ERROR)
         {
             err = BAEMixer_LoadDLSBankFromMemory(mixer, pAudioFile, fileSize);
             XDisposePtr(pAudioFile);

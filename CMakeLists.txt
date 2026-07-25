@@ -89,6 +89,7 @@ message(STATUS "NeoBAE build version: ${BAE_VERSION}")
 option(DEBUG "Enable debuggable build (zefidi debug console, gdb debugging)" OFF)
 option(NEOBAE_STATIC "Enable static linking for NeoBAE apps and dependencies (best support on MinGW)" OFF)
 option(NEOBAE_BUILD_VCLIB "Build an additional MSVC-style import library for libneobae.dll using dlltool" OFF)
+option(NEOBAE_EXTERNAL_CODECS "Use external system libraries for codecs when available instead of bundled sources (FLAC, LAME, Vorbis, Opus, Ogg)" OFF)
 if(NEOBAE_STATIC AND NOT DEFINED CACHE{NEOBAE_EXTERNAL_CODECS})
   set(NEOBAE_EXTERNAL_CODECS ON CACHE BOOL "Use external system libraries for codecs when available instead of bundled sources (FLAC, LAME, Vorbis, Opus, Ogg)" FORCE)
 endif()
@@ -984,7 +985,7 @@ if(BAE_ENABLE_FLAC_ENCODER OR BAE_ENABLE_FLAC_DECODER)
 endif()
 
 if(BAE_ENABLE_VORBIS_ENCODER OR BAE_ENABLE_VORBIS_DECODER)
-  if (NEOBAE_EXTERNAL_CODECS)
+  if (NOT NEOBAE_EXTERNAL_CODECS)
     list(APPEND NEOBAE_SOURCES
       neobae/src/thirdparty/libvorbis/lib/mdct.c
       neobae/src/thirdparty/libvorbis/lib/smallft.c
@@ -1009,7 +1010,7 @@ if(BAE_ENABLE_VORBIS_ENCODER OR BAE_ENABLE_VORBIS_DECODER)
       neobae/src/thirdparty/libvorbis/lib/vorbisfile.c
     )
   endif()
-  if(BAE_ENABLE_VORBIS_ENCODER AND NEOBAE_EXTERNAL_CODECS)
+  if(BAE_ENABLE_VORBIS_ENCODER AND NOT NEOBAE_EXTERNAL_CODECS)
     list(APPEND NEOBAE_SOURCES neobae/src/thirdparty/libvorbis/lib/vorbisenc.c)
   endif()
   list(APPEND NEOBAE_SOURCES neobae/src/BAE_Source/Common/XVorbisFiles.c)
@@ -1416,25 +1417,25 @@ endif()
 
 
 
-if(BAE_ENABLE_FLAC_ENCODER OR BAE_ENABLE_FLAC_DECODER)
+if((BAE_ENABLE_FLAC_ENCODER OR BAE_ENABLE_FLAC_DECODER) AND NEOBAE_EXTERNAL_CODECS)
   target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} FLAC ogg ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
 endif()
 
-if(BAE_ENABLE_VORBIS_ENCODER OR BAE_ENABLE_VORBIS_DECODER)
+if((BAE_ENABLE_VORBIS_ENCODER OR BAE_ENABLE_VORBIS_DECODER) AND NEOBAE_EXTERNAL_CODECS)
   target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} vorbis vorbisfile ogg ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
-  if(BAE_ENABLE_VORBIS_ENCODER)
+  if(BAE_ENABLE_VORBIS_ENCODER AND NEOBAE_EXTERNAL_CODECS)
     target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} vorbisenc ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
   endif()
 endif()
 
-if(BAE_ENABLE_OPUS_ENCODER OR BAE_ENABLE_OPUS_DECODER)
+if((BAE_ENABLE_OPUS_ENCODER OR BAE_ENABLE_OPUS_DECODER) AND NEOBAE_EXTERNAL_CODECS)
   target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} opus ogg ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
-  if(BAE_ENABLE_OPUS_DECODER)
+  if(BAE_ENABLE_OPUS_DECODER AND NEOBAE_EXTERNAL_CODECS)
     target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} opusfile ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
   endif()
 endif()
 
-if(BAE_ENABLE_MP3_ENCODER)
+if(BAE_ENABLE_MP3_ENCODER AND NEOBAE_EXTERNAL_CODECS)
   target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} mp3lame ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
 endif()
 
@@ -2175,4 +2176,9 @@ if(BUILD_NBEDITOR)
   else()
     message(STATUS "Skipping BUILD_NBEDITOR (SDL3 headers/library not found).")
   endif()
+endif()
+
+include(CTest)
+if(BUILD_TESTING)
+  include(cmake/cmake_tests.cmake)
 endif()

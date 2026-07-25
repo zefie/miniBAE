@@ -955,12 +955,18 @@ void script_editor_shutdown(void)
     g_undo_pos = 0;
 }
 
-void script_editor_toggle(void)
+void script_editor_hide(void)
 {
-    if (g_se_visible)
-        script_editor_hide();
-    else
-        script_editor_show();
+    if (!g_se_visible) return;
+    if (g_se_window) {
+        SDL_HideWindow(g_se_window);
+#if defined(USE_SDL2)
+        SDL_StopTextInput();
+#else
+        SDL_StopTextInput(g_se_window);
+#endif
+    }
+    g_se_visible = false;
 }
 
 void script_editor_show(void)
@@ -1014,18 +1020,12 @@ void script_editor_show(void)
 #endif
 }
 
-void script_editor_hide(void)
+void script_editor_toggle(void)
 {
-    if (!g_se_visible) return;
-    if (g_se_window) {
-        SDL_HideWindow(g_se_window);
-#if defined(USE_SDL2)
-        SDL_StopTextInput();
-#else
-        SDL_StopTextInput(g_se_window);
-#endif
-    }
-    g_se_visible = false;
+    if (g_se_visible)
+        script_editor_hide();
+    else
+        script_editor_show();
 }
 
 bool script_editor_is_visible(void)
@@ -1281,12 +1281,6 @@ static void do_save_dialog(void)
 }
 #endif
 
-static void export_tick_adapter(void *userdata)
-{
-    (void)userdata;
-    script_editor_tick();
-}
-
 void script_editor_tick(void)
 {
     if (!g_script_enabled || !g_script_ctx) return;
@@ -1298,6 +1292,12 @@ void script_editor_tick(void)
     BAEScript_SetSong(g_script_ctx, g_bae.song);
     BAEScript_SetExporting(g_script_ctx, g_exporting ? 1 : 0);
     BAEScript_Tick(g_script_ctx, pos_ms, len_ms);
+}
+
+static void export_tick_adapter(void *userdata)
+{
+    (void)userdata;
+    script_editor_tick();
 }
 
 void script_editor_reset_exporter_options(void)

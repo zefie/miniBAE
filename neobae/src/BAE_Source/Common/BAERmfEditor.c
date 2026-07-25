@@ -13023,10 +13023,10 @@ BAEResult BAERmfEditorDocument_GetSampleCodecDescription(BAERmfEditorDocument co
                 PV_CopyStringBounded(outCodec, outCodecSize, "Ogg Vorbis");
                 break;
         }
-    }
+    } else
 #endif    
 #if USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE
-    else if (sample->sourceCompressionType == (uint32_t)C_OPUS)
+    if (sample->sourceCompressionType == (uint32_t)C_OPUS)
     {
         const char *rt = (sample->opusUseRoundTripResampling) ? " RT" : "";
         switch ((SndCompressionSubType)sample->sourceCompressionSubType)
@@ -13077,11 +13077,8 @@ BAEResult BAERmfEditorDocument_GetSampleCodecDescription(BAERmfEditorDocument co
     if (sample->sourceCompressionType == (uint32_t)C_QOA)
     {
         PV_CopyStringBounded(outCodec, outCodecSize, "QOA");
-    }
+    } else
 #endif
-#if USE_VORBIS_DECODER == TRUE || USE_VORBIS_ENCODER == TRUE || USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE || USE_QOA_SUPPORT == TRUE
-    else
-#endif        
     {
         if ((sample->sourceCompressionType == (uint32_t)C_NONE || sample->sourceCompressionType == 0)
             && (bitSize == 8 || bitSize == 16))

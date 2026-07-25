@@ -9,6 +9,7 @@ build-*/
 gen/
 */gen/
 tests/
+Testing/
 */tests/
 */__pycache__/
 

@@ -35,7 +35,7 @@ runtest() {
 for f in Makefile.gui Makefile Makefile.clang; do
     # basic
     runtest make -f ${f}
-    # XMF + FluidSynth
+    # XMF + SF2 (FluidSynth)
     runtest make -f ${f} SF2_SUPPORT=1 XMF_SUPPORT=1
     # XMF + Native DLS (No FluidSynth)
     runtest make -f ${f} SF2_SUPPORT=1 NATIVE_DLS=1

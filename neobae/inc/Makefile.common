@@ -331,9 +331,11 @@ ifeq ($(SF2_SUPPORT),1)
 endif
 
 ifeq ($(XMF_SUPPORT),1)
-	BAE_FLAGS += -DUSE_XMF_SUPPORT=1
-	SRC += src/BAE_Source/Common/GenXMF.c
-	BAE_LIBS += -lz
+	ifeq ($(NATIVE_DLS),1)
+		BAE_FLAGS += -DUSE_XMF_SUPPORT=1
+		SRC += src/BAE_Source/Common/GenXMF.c
+		BAE_LIBS += -lz
+	endif
 endif
 
 
