@@ -160,7 +160,7 @@ static bool restore_bank_for_song_load(const char *bank_path, const char *bank_n
     if (!g_bae.mixer || !bank_path || !bank_path[0])
         return false;
 
-#ifdef _BUILT_IN_PATCHES
+#if _BUILT_IN_PATCHES == TRUE
     if (strcmp(bank_path, "__builtin__") == 0)
     {
         BAEMixer_UnloadBanks(g_bae.mixer);
@@ -240,7 +240,7 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
     if (!path)
         return false;
 
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
     bool midi_was_enabled_for_swap = false;
     int midi_restore_api = -1;
     int midi_restore_port = -1;
@@ -306,7 +306,7 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
     BAEMixer_UnloadDLSBank(g_bae.mixer);
 #endif
 
-#ifdef _BUILT_IN_PATCHES
+#if _BUILT_IN_PATCHES == TRUE
     if (strcmp(path, "__builtin__") == 0)
     {
 
@@ -336,7 +336,7 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
             // Update MSB/Program values for the current channel after loading a new bank
             update_bank_program_for_channel();
 
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
             // If external MIDI input is enabled, recreate mixer so live MIDI
             // continues to route into the new mixer with the new bank.
             if (g_midi_input_enabled && !g_in_bank_load_recreate)
@@ -430,7 +430,7 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
                                  // MIDI routing is attached to a fresh mixer instance with the new
                                  // bank loaded. Protect with a guard to avoid infinite recursion
                                  // because recreate_mixer_and_restore itself calls load_bank.
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
         if (g_midi_input_enabled && !g_in_bank_load_recreate)
 #else
     if (!g_in_bank_load_recreate)
@@ -442,7 +442,7 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
                                        transpose, tempo, volume, loop_enabled, ch_enable);
             g_in_bank_load_recreate = false;
         }
-#ifdef _BUILT_IN_PATCHES
+#if _BUILT_IN_PATCHES == TRUE
     }
 #endif
 
@@ -490,7 +490,7 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
         }
     }
 
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
     if (midi_was_enabled_for_swap && g_midi_input_enabled && !g_midi_service_thread)
     {
         if (midi_restore_api >= 0 && midi_restore_port >= 0)
@@ -508,7 +508,7 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
     return true;
 
 load_bank_fail:
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
     if (midi_was_enabled_for_swap && g_midi_input_enabled && !g_midi_service_thread)
     {
         if (midi_restore_api >= 0 && midi_restore_port >= 0)
@@ -538,7 +538,7 @@ bool load_bank_simple(const char *path, bool save_to_settings, int reverb_type, 
 
         // Try traditional auto bank discovery
         const char *autoBanks[] = {
-#ifdef _BUILT_IN_PATCHES
+#if _BUILT_IN_PATCHES == TRUE
             "__builtin__",
 #endif
             "patches.hsb", "patches.zsb", "npatches.hsb", NULL};
@@ -667,8 +667,8 @@ void bae_shutdown(void)
     // Clean up FluidSynth after the mixer is closed (audio callback stopped).
     // GM_CleanupSF2 shuts down FluidSynth's internal threads; without this call
     // those threads continue running past process teardown and cause a crash on exit.
-#if USE_SF2_SUPPORT
-#if _USING_FLUIDSYNTH
+#if USE_SF2_SUPPORT == TRUE
+#if _USING_FLUIDSYNTH == TRUE
     GM_CleanupSF2();
 #endif
 #endif
@@ -686,10 +686,13 @@ bool bae_load_bank(const char *bank_path)
     const char *ext = strrchr(bank_path, '.');
 
     BAEMixer_UnloadBanks(g_bae.mixer);
+
 #if USE_NATIVE_DLS == TRUE
     GM_SetMixerDLSMode(FALSE);
     BAEMixer_UnloadDLSBank(g_bae.mixer);
 #endif
+
+
 #if USE_SF2_SUPPORT == TRUE
     GM_UnloadSF2Soundfont();
     GM_SetMixerSF2Mode(FALSE);
@@ -723,7 +726,9 @@ bool bae_load_bank(const char *bank_path)
         g_bae.bank_loaded = true;
         return true;
     }
-#endif
+#endif // USE_SF2_SUPPORT == TRUE
+
+
 #if USE_NATIVE_DLS == TRUE
     if (ext && strcasecmp(ext, ".dls") == 0 && !g_use_fluidsynth_for_dls) {
         // Load DLS bank
@@ -745,7 +750,7 @@ bool bae_load_bank(const char *bank_path)
         g_bae.bank_loaded = true;
         return true;
     }
-#endif
+#endif // USE_NATIVE_DLS == TRUE
 
     // Load the bank (HSB format)
     BAEResult result = BAEMixer_AddBankFromFile(g_bae.mixer, (BAEPathName)bank_path, &g_bae.bank_token);
@@ -826,7 +831,7 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
     if (g_bae.song)
     {
         BAESong_Stop(g_bae.song, FALSE);
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
         // Clear any existing callbacks before deleting to prevent stale events
         BAESong_SetMetaEventCallback(g_bae.song, NULL, NULL);
         // Clear lyric callback if it exists
@@ -1106,7 +1111,7 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
         if (g_bae.song)
             BAESong_SetVolume(g_bae.song, FLOAT_TO_UNSIGNED_FIXED(stored));            
 
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
         if (g_bae.mixer && !g_master_muted_for_midi_out)
 #else
         if (g_bae.mixer)
@@ -1116,7 +1121,7 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
         }
     }
 
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
     // Prepare karaoke capture
     karaoke_reset();
     if (g_karaoke_enabled && g_bae.song)
@@ -1131,7 +1136,7 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
     }
 #endif
 
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
     // If MIDI Output already enabled, register engine MIDI event callback so events are forwarded
     if (g_midi_output_enabled && g_bae.song)
     {
@@ -1215,7 +1220,7 @@ void bae_set_volume(int volPct)
     }
 
     // Also adjust master volume unless globally muted for MIDI Out
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
     if (g_bae.mixer && !g_master_muted_for_midi_out)
 #else
     if (g_bae.mixer)
@@ -1294,7 +1299,7 @@ void bae_seek_ms(int ms)
 
     uint32_t us = (uint32_t)ms * 1000UL;
 
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
     // Suppress MIDI output during seeking to avoid sending events prematurely
     g_midi_output_suppressed_during_seek = true;
 #endif
@@ -1312,7 +1317,7 @@ void bae_seek_ms(int ms)
         BAESong_SetMicrosecondPosition(g_bae.song, us);
     }
 
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
     g_midi_output_suppressed_during_seek = false;
 #endif
 
@@ -1327,7 +1332,7 @@ void bae_seek_ms(int ms)
         BAE_PRINTF("User seek while finished: preserving start position %u us\n", us);
     }
 
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
     // When seeking, ensure external MIDI devices are silenced to avoid hanging notes
     if (g_midi_output_enabled)
     {
@@ -1537,11 +1542,11 @@ bool bae_play(bool *playing)
                 if (startPosUs == 0)
                 {
                     // Standard start from beginning: position then preroll
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                     g_midi_output_suppressed_during_seek = true;
 #endif
                     BAESong_SetMicrosecondPosition(g_bae.song, 0);
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                     g_midi_output_suppressed_during_seek = false;
 #endif
                     BAESong_Preroll(g_bae.song);
@@ -1569,7 +1574,7 @@ bool bae_play(bool *playing)
                 else
                 {
                     // For resume, preroll from start (engine needs initial setup) then seek to desired position AFTER preroll
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                     g_midi_output_suppressed_during_seek = true;
 #endif
                     BAESong_SetMicrosecondPosition(g_bae.song, 0);
@@ -1577,7 +1582,7 @@ bool bae_play(bool *playing)
                     Settings settings = load_settings();
                     BAESong_SetVelocityCurve(g_bae.song, settings.volume_curve);
                     BAESong_SetMicrosecondPosition(g_bae.song, startPosUs);
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                     g_midi_output_suppressed_during_seek = false;
 #endif
                 }
@@ -1589,7 +1594,7 @@ bool bae_play(bool *playing)
                 {
                     BAE_PRINTF("BAESong_Start failed (%d) for '%s' (will try preroll+restart)\n", sr, g_bae.loaded_path);
                     // Try a safety preroll + rewind then attempt once more
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                     g_midi_output_suppressed_during_seek = true;
 #endif
                     BAESong_SetMicrosecondPosition(g_bae.song, 0);
@@ -1598,7 +1603,7 @@ bool bae_play(bool *playing)
                     {
                         BAESong_SetMicrosecondPosition(g_bae.song, startPosUs);
                     }
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                     g_midi_output_suppressed_during_seek = false;
 #endif
                     sr = BAESong_Start(g_bae.song, 0);
@@ -1649,7 +1654,7 @@ bool bae_play(bool *playing)
         {
             BAESong_Pause(g_bae.song);
             // Ensure external MIDI devices are silenced on pause
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
             if (g_midi_output_enabled)
             {
                 midi_output_send_all_notes_off();
@@ -1719,17 +1724,17 @@ void bae_stop(bool *playing, int *progress)
                 BAEMixer_Idle(g_bae.mixer);
             }
         }
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
         if (g_midi_output_enabled)
         {
             midi_output_send_all_notes_off();
         }
 #endif
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
         g_midi_output_suppressed_during_seek = true;
 #endif
         BAESong_SetMicrosecondPosition(g_bae.song, 0);
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
         g_midi_output_suppressed_during_seek = false;
 #endif
         *playing = false;
@@ -1894,7 +1899,7 @@ bool bae_get_bank_name(char *name, size_t name_size)
 
 void bae_enable_midi_callback(void)
 {
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
     if (g_bae.song && g_midi_output_enabled)
 #else
     if (g_bae.song)
@@ -1907,7 +1912,7 @@ void bae_enable_midi_callback(void)
 
 void bae_disable_midi_callback(void)
 {
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
     if (g_bae.song && g_midi_output_enabled)
 #else
     if (g_bae.song)
@@ -1917,7 +1922,7 @@ void bae_disable_midi_callback(void)
     }
 }
 
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
 void bae_set_master_muted_for_midi_out(bool muted)
 {
     g_master_muted_for_midi_out = muted;

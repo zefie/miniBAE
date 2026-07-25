@@ -20,17 +20,17 @@ The project can be used as an embeddable audio engine, a command-line player and
 
 - MIDI: `.mid`, `.midi`
 - Karaoke MIDI: `.kar` with lyrics processing
-- RMI: `.rmi` including RMI files with embedded DLS and SF2 when built with FluidSynth support
+- RMI: `.rmi` including RMI files with embedded DLS when built with Native DLS, and SF2 support when built with FluidSynth support
 - RMF: `.rmf` for classic Beatnik Rich Music Format content
-- ZMF: `.zmf` for RMF-style content with modern feature support
-- XMF and MXMF: `.xmf`, `.mxmf` mobileBAE formats, with full DLS support when built with FluidSynth support
-- MTHC: Nokia Compressed MIDI format
-- MOD: import and conversion tooling via `mod2rmf`
+- ZMF: `.zmf` for RMF-style content with modern feature and codec support
+- XMF and MXMF: `.xmf`, `.mxmf` mobileBAE formats, with full DLS support when built with Native DLS support
+- MTHC: Nokia Compressed MIDI format (sometimes `.re`)
+- MOD: import and conversion tooling via `mod2rmf`, powered by [libxmp](https://github.com/libxmp/libxmp)
 
 ### Retro ringtone formats
 
 - iMelody: `.imy`, `.emy`
-- Nokia binary ringtone: `.rng`
+- Nokia binary ringtone: `.rng` (version 1)
 - RTTTL and RTX: `.rtttl`, `.rtx`
 
 ### Audio and sample formats
@@ -42,12 +42,13 @@ The project can be used as an embeddable audio engine, a command-line player and
 - Opus: `.opus` and Ogg Opus content
 - Quite OK Audio: `.qoa`
 - ADP / ADPCM content: `.adp`
+- CRI ADX: `.adx`
 
 ### Banks and instrument formats
 
 - NeoBAE banks: `.hsb`, `.zsb`
 - SoundFont: `.sf2`, `.sf3`, `.sfo` when built with FluidSynth support
-- DLS: `.dls` when built with FluidSynth support
+- DLS: `.dls` when built with Native DLS support
 
 ## Applications
 
@@ -62,15 +63,16 @@ The project can be used as an embeddable audio engine, a command-line player and
 
 - `rmfinfo`: inspect RMF and ZMF structure, headers, and metadata.
 - `rmf-instdump`: inspect instrument definition information from RMF and ZMF content.
-- `mid2rmf`: convert MIDI into RMF and ZMF.
-- `rmf2mid`: convert RMF back to MIDI.
+- `mid2rmf`: Convert MIDI into RMF or ZMF.
+- `rmf2mid`: Extract MIDI from RMF and ZMF.
 - `mid2rmi`: wrap MIDI and Soundbank into RMI.
-- `mod2rmf`: convert MOD tracker content into RMF and ZMF workflows.
+- `mod2rmf`: convert MOD tracker content into RMF or ZMF.
 - `ringtone2mid`: convert retro ringtone formats into MIDI.
-- `adp2wav`: decode ADP audio into WAV.
+- `adp2wav`: decode Nokia ADP audio into WAV.
+- `adx2wav`: decode CRI ADX audio into WAV.
 - `songtool`: RMF and ZMF multitool: get song info, recompress samples, set loop points, apply gain, and more.
 - `sf2-to-hsb`: convert SoundFont banks into NeoBAE HSB and ZSB banks.
-- `bankrecomp`: recompress bank sample resources.
+- `bankrecomp`: Re-compress HSB/ZSB bank sample resources.
 - `mthc_decomp`: convert Nokia Compressed MIDI into standard MIDI.
 
 ## Quick Start

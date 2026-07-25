@@ -238,6 +238,8 @@ macOS build instructions are not yet documented in this guide.
 
 ## Modular build system (advanced)
 
+The information below pertains to the old Makefile build system. For cmake flags, see [CMakeFlags.md](CMakeFlags.md)
+
 To disable auto-enabled features and fully control options:
 
 ```bash
@@ -260,6 +262,7 @@ make NOAUTO=1 ...
 - `XMF_SUPPORT=1`: `.xmf` and `.mxmf` support
 - `MTHC_SUPPORT=1`: Nokia compressed MIDI (MThc)
 - `ADP_SUPPORT=1`: Nokia ADP G.722
+- `ADX_SUPPORT=1`: CRI ADX
 - `PLAYLIST=1`: GUI playlist support
 - `J2ME_PATCH`: Patch for J2ME alternate drum channel
 - `RETRO_RINGTONE_SUPPORT`: RTTTL, RNG, and RTX support

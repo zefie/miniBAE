@@ -6643,10 +6643,11 @@ int main(int argc, char *argv[])
                         || (l > 4 && strcasecmp(fileBuf + l - 4, ".sf3") == 0)
                         || (l > 4 && strcasecmp(fileBuf + l - 4, ".sfo") == 0)
 #endif                        
+#endif
 #if _USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE
                         || (l > 4 && strcasecmp(fileBuf + l - 4, ".dls") == 0)
 #endif
-#endif
+
                     )
                     {
                         load_bank(fileBuf, playing, transpose, tempo, volume, loopPlay, reverbType, ch_enable, true);

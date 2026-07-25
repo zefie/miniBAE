@@ -894,7 +894,7 @@ void playlist_render(SDL_Renderer *R, Rect panel_rect, int mx, int my, bool mdow
     // Always render playlist (no visibility check)
     
     // Check if MIDI input is enabled or exporting - if so, disable all interactions and dim colors
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
     bool midi_disabled = g_midi_input_enabled || g_exporting;
 #else
     bool midi_disabled = g_exporting;

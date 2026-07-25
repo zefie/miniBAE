@@ -18,7 +18,7 @@
 #ifndef GUI_SCRIPT_EDITOR_H
 #define GUI_SCRIPT_EDITOR_H
 
-#ifdef SUPPORT_BAESCRIPT
+#if SUPPORT_BAESCRIPT == TRUE
 
 #include <stdbool.h>
 #if defined(USE_SDL2)

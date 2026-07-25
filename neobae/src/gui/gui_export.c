@@ -195,7 +195,7 @@ const int g_exportCompressionCount = 1; // only WAV
 #endif
 
 bool g_midiRecordFormatDropdownOpen = false;
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
 // MIDI-record format dropdown (visible when MIDI-in is enabled)
 int g_midiRecordFormatIndex = 0; // 0 = MIDI, 1 = WAV, 2..n = MP3 bitrates
 const char *g_midiRecordFormatNames[] = {
@@ -303,7 +303,7 @@ extern bool g_midi_input_enabled;
 extern void pcm_wav_finalize(void);
 #endif
 
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
 // External karaoke suspend function
 extern void karaoke_suspend(bool suspend);
 #endif
@@ -413,13 +413,13 @@ bool bae_start_export(const char *output_file, int export_type, int compression)
 
     // Tick the script engine before any audio is rendered so a script
     // seek (e.g. midi.position = X) takes effect before priming.
-    #ifdef SUPPORT_BAESCRIPT
+#if SUPPORT_BAESCRIPT == TRUE
     script_editor_reset_exporter_options();
-    #endif
+#endif
     if (g_export_tick_fn)
         g_export_tick_fn(g_export_tick_ud);
 
-#ifdef SUPPORT_BAESCRIPT
+#if SUPPORT_BAESCRIPT == TRUE
     if (script_editor_get_exporter_loopcount(&script_export_loopcount)) {
         if (script_export_loopcount > 0) {
             g_export_target_loops = (unsigned int)script_export_loopcount;
@@ -482,7 +482,7 @@ bool bae_start_export(const char *output_file, int export_type, int compression)
     g_export_realtime_mode = true;
     // Note: this function previously only supported WAV via StartOutputToFile call above.
     // If StartOutputToFile was called with MPEG elsewhere, g_export_file_type will be set there.
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
     // Ensure virtual keyboard is reset and any held note is released when export starts
     if (g_show_virtual_keyboard)
     {
@@ -498,7 +498,7 @@ bool bae_start_export(const char *output_file, int export_type, int compression)
         memset(g_keyboard_active_notes, 0, sizeof(g_keyboard_active_notes));
     }
 #endif
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
     karaoke_suspend(true); // disable karaoke during export
 #endif
     g_export_progress = 0; // reset (unused for display)
@@ -659,13 +659,13 @@ bool bae_start_mpeg_export(const char *output_file, int codec_index)
 
     // Tick the script engine before any audio is rendered so a script
     // seek (e.g. midi.position = X) takes effect before priming.
-    #ifdef SUPPORT_BAESCRIPT
+#if SUPPORT_BAESCRIPT == TRUE
     script_editor_reset_exporter_options();
-    #endif
+#endif
     if (g_export_tick_fn)
         g_export_tick_fn(g_export_tick_ud);
 
-#ifdef SUPPORT_BAESCRIPT
+#if SUPPORT_BAESCRIPT == TRUE
     if (script_editor_get_exporter_loopcount(&script_export_loopcount)) {
         if (script_export_loopcount > 0) {
             g_export_target_loops = (unsigned int)script_export_loopcount;
@@ -710,7 +710,7 @@ bool bae_start_mpeg_export(const char *output_file, int codec_index)
     g_export_file_type = outType;
     g_export_realtime_mode = false; // MPEG export typically runs at full speed
 
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
     // Reset virtual keyboard
     if (g_show_virtual_keyboard)
     {
@@ -726,7 +726,7 @@ bool bae_start_mpeg_export(const char *output_file, int codec_index)
     }
 #endif
 
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
     karaoke_suspend(true); // disable karaoke during export
 #endif
 
@@ -909,7 +909,7 @@ void bae_stop_wav_export()
         g_export_thread_should_stop = false;
         g_export_thread_finished = false;
         
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
         karaoke_suspend(false); // re-enable karaoke after export
 #endif
         g_export_realtime_mode = false;
@@ -923,7 +923,7 @@ void bae_stop_wav_export()
 
 void bae_service_wav_export()
 {
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
     // If using our PCM WAV recorder, service that path separately
     if (g_pcm_wav_recording)
     {

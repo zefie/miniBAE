@@ -44,7 +44,7 @@
 #include "bankinfo.h"
 #include "GenDLS_MobileBAE.h"
 
-#ifdef SUPPORT_BAESCRIPT
+#if SUPPORT_BAESCRIPT == TRUE
 #include "baescript.h"
 #endif
 
@@ -91,7 +91,7 @@ static float         gEqGains[5]     = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 static int           gPosCounter  = 0;
 static int           gPosInterval = 10; /* ~150 ms between updates */
 
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
 #include <ctype.h>
 static int  gKaraokeEnabled = 0;
 static char gKaraokeCurrent[256]  = {0};
@@ -197,7 +197,7 @@ static void cli_meta_callback(void *ctx, struct GM_Song *song, char type,
 }
 #endif /* SUPPORT_KARAOKE */
 
-#ifdef SUPPORT_BAESCRIPT
+#if SUPPORT_BAESCRIPT == TRUE
 static BAEScript_Context *gScript = NULL;
 #endif
 
@@ -343,7 +343,7 @@ static const char usageMain[] =
     "                 -fs {use FluidSynth for DLS instead of native DLS system}\n"
 #endif
     "                 -o  {output file (wav/mp3/flac/ogg/opus)}\n"
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
     "                 -k  {enable karaoke lyric display}\n"
 #endif
     "                 -l  {loop count (default: 0)}\n"
@@ -359,7 +359,7 @@ static const char usageMain[] =
     "                 -eq {enable 5-band EQ (flat)}\n"
     "                 -eqg {custom EQ gains g1,g2,g3,g4,g5 (e.g. 1.2,0,0,-2.5,1.0)}\n"
     "                 --eqp {EQ preset name (e.g. \"Bass Boost\" or custom zefidi.ini preset)}\n"
-#ifdef SUPPORT_BAESCRIPT
+#if SUPPORT_BAESCRIPT == TRUE
     "                 --script {BAEScript file}\n"
 #endif
 #if BAE_FIX_SPAN_DC
@@ -601,7 +601,7 @@ static void apply_output_gain(BAEMixer mixer)
  * MIDI sequencer events schedule voices.  Mirrors gui_bae.c pattern.
  * ========================================================================= */
 
-#ifdef USE_MPEG_ENCODER
+#if USE_MPEG_ENCODER == TRUE
 static BAEResult prime_encoder(BAEMixer mixer, BAESong song)
 {
     for (int i = 0; i < 8; i++) {
@@ -655,7 +655,7 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
     }
 #endif
 
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
     cli_karaoke_reset();
     if (!gWriteToFile && gKaraokeEnabled) {
         if (BAESong_SetLyricCallback(song, cli_lyric_callback, NULL) != BAE_NO_ERROR)
@@ -714,7 +714,7 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
             BAESong_SetLoops(song, 0); /* one-shot, loopSong=FALSE, IsDone fires when done */
     }
 
-#ifdef SUPPORT_BAESCRIPT
+#if SUPPORT_BAESCRIPT == TRUE
     uint32_t scriptLenMs = 0;
     if (gScript) {
         BAEScript_SetSong(gScript, song);
@@ -745,7 +745,7 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
     if (timeLimitSec > 0)
         playbae_printf("Time limit: %u sec\n", timeLimitSec);
 
-#ifdef USE_MPEG_ENCODER
+#if USE_MPEG_ENCODER == TRUE
     if (gWriteToFile) {
         BAEResult perr = prime_encoder(mixer, song);
         if (perr != BAE_NO_ERROR) {
@@ -794,7 +794,7 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
         uint32_t totalMs = cumulative + posMs;
         display_song_position(posMs, totalMs);
 
-#ifdef SUPPORT_BAESCRIPT
+#if SUPPORT_BAESCRIPT == TRUE
         if (gScript) BAEScript_Tick(gScript, totalMs, scriptLenMs);
 #endif
 
@@ -1344,7 +1344,7 @@ int main(int argc, char *argv[])
     if (PV_ParseCommands(argc, argv, "-x",  0, NULL)) { playbae_printf(usageExtra);   return 0; }
 
     /* ---- Parse --script ---- */
-#ifdef SUPPORT_BAESCRIPT
+#if SUPPORT_BAESCRIPT == TRUE
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--script") == 0 && i+1 < argc) {
             gScript = BAEScript_LoadFile(argv[i+1]);
@@ -1409,7 +1409,7 @@ int main(int argc, char *argv[])
         BAE_SetDefaultVelocityCurve(gVelocityCurve);
     }
 
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
     if (PV_ParseCommands(argc, argv, "-k", 0, NULL)) gKaraokeEnabled = 1;
 #endif
 
@@ -1545,7 +1545,7 @@ int main(int argc, char *argv[])
             playbae_printf("Bank: %s\n", parmFile);
         }
     } else {
-#ifdef _BUILT_IN_PATCHES
+#if _BUILT_IN_PATCHES == TRUE
         err = BAEMixer_LoadBuiltinBank(mixer, &bankToken);
         if (err == BAE_NO_ERROR) {
             char friendly[128] = {0};
@@ -1603,7 +1603,7 @@ int main(int argc, char *argv[])
             apply_eq_state(mixer);
             if (err) { playbae_printf("Error %d starting MP3 export: %s\n", err, parmFile); BAEMixer_Delete(mixer); return 1; }
             gWriteToFile = 1; gWriteToFileType = BAE_MPEG_TYPE;
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
             gKaraokeEnabled = 0;
 #endif
             playbae_printf("Writing MP3 (CBR %d kbps, %s) to %s\n",
@@ -1668,7 +1668,7 @@ int main(int argc, char *argv[])
             apply_eq_state(mixer);
             if (err) { playbae_printf("Error %d writing WAV: %s\n", err, parmFile); BAEMixer_Delete(mixer); return 1; }
             gWriteToFile = 1; gWriteToFileType = BAE_WAVE_TYPE;
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
             gKaraokeEnabled = 0;
 #endif
             playbae_printf("Writing WAV to %s\n", parmFile);
@@ -1763,7 +1763,7 @@ int main(int argc, char *argv[])
     GM_CleanupSF2();
 #endif
 
-#ifdef SUPPORT_BAESCRIPT
+#if SUPPORT_BAESCRIPT == TRUE
     if (gScript) { BAEScript_Free(gScript); gScript = NULL; }
 #endif
 

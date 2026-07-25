@@ -13071,10 +13071,10 @@ BAEResult BAERmfEditorDocument_GetSampleCodecDescription(BAERmfEditorDocument co
                 snprintf(outCodec, outCodecSize, "Ogg Opus%s", rt);
                 break;
         }
-    }
+    } else
 #endif
 #if USE_QOA_SUPPORT == TRUE
-    else if (sample->sourceCompressionType == (uint32_t)C_QOA)
+    if (sample->sourceCompressionType == (uint32_t)C_QOA)
     {
         PV_CopyStringBounded(outCodec, outCodecSize, "QOA");
     }

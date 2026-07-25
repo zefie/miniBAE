@@ -4418,7 +4418,6 @@ BAEResult BAEMixer_UnloadDLSBank(BAEMixer mixer)
         // DLS and built-in banks are mutually exclusive render paths.
         // When unloading DLS, force channels back to GM routing so
         // subsequent built-in bank playback does not stay latched to DLS.
-#if USE_SF2_SUPPORT == TRUE
         for (int songIndex = 0; songIndex < MAX_SONGS; ++songIndex)
         {
             GM_Song *song = pMixer->pSongsToPlay[songIndex];
@@ -4435,9 +4434,11 @@ BAEResult BAEMixer_UnloadDLSBank(BAEMixer mixer)
                 }
             }
         }
-#endif
 
         pMixer->isDLS = false;
+#if USE_SF2_SUPPORT == TRUE
+        pMixer->isSF2 = false;
+#endif
         if (pMixer->pDLSSynth) {
             if (pMixer->pDLSSynth->banks[0]) {
                 GM_UnloadDLSBank(pMixer->pDLSSynth->banks[0]);
@@ -11984,7 +11985,7 @@ static void PV_BAESong_SetMetaEventCallback(BAESong song, GM_SongMetaCallbackPro
 {
     GM_SetSongMetaEventCallback(song->pSong, pCallback, callbackReference);
 }
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
 static void PV_BAESong_SetLyricCallback(BAESong song, GM_SongLyricCallbackProcPtr pCallback, void *callbackReference)
 {
     if (song && song->pSong)
@@ -12011,7 +12012,7 @@ BAEResult BAESong_SetMetaEventCallback(BAESong song, GM_SongMetaCallbackProcPtr 
     }
     return BAE_TranslateOPErr(err);
 }
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
 BAEResult BAESong_SetLyricCallback(BAESong song, GM_SongLyricCallbackProcPtr pCallback, void *callbackReference)
 {
     OPErr err = NO_ERR;
