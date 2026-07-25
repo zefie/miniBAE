@@ -122,7 +122,7 @@ endif()
 
 option(BAE_DISABLE_RMF_EDITOR "Disable BAERmfEditor (Creation API) support" OFF)
 option(BAE_DISABLE_SF2_CONVERTER "Disable SF2->HSB converter support" OFF)
-option(BAE_DISABLE_ZMF "Disable ZMF support" OFF)
+option(BAE_DISABLE_ZMF_SUPPORT "Disable ZMF support" OFF)
 option(BAE_DISABLE_LZMA "Disable LZMA compression support" OFF)
 option(BAE_DISABLE_MP3_ENCODER "Disable MP3 encoder support" OFF)
 option(BAE_DISABLE_MP3_DECODER "Disable MP3 decoder support" OFF)
@@ -169,7 +169,7 @@ set(CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING "Build type (Debug, Rele
 # Internal compatibility booleans: keep existing logic in terms of ENABLE vars.
 set(BAE_ENABLE_RMF_EDITOR ON)
 set(BAE_ENABLE_SF2_CONVERTER ON)
-set(BAE_ENABLE_ZMF ON)
+set(BAE_ENABLE_ZMF_SUPPORT ON)
 set(BAE_ENABLE_LZMA ON)
 set(BAE_ENABLE_MP3_ENCODER ON)
 set(BAE_ENABLE_MP3_DECODER ON)
@@ -220,8 +220,8 @@ if(BAE_DISABLE_SF2_CONVERTER)
 else()
   message(STATUS "Enabling SF2->HSB Converter Support")
 endif()
-if(BAE_DISABLE_ZMF)
-  set(BAE_ENABLE_ZMF OFF)
+if(BAE_DISABLE_ZMF_SUPPORT)
+  set(BAE_ENABLE_ZMF_SUPPORT OFF)
   message(STATUS "Disabling ZMF Support")
 else()
   message(STATUS "Enabling ZMF Support")    
@@ -414,38 +414,38 @@ if(BAE_ENABLE_XMF_SUPPORT AND NOT BAE_ENABLE_NATIVE_DLS)
   message(STATUS "Disabling XMF support: Native DLS is disabled")
 endif()
 
-if (BAE_ENABLE_ZMF AND NOT BAE_ENABLE_LZMA)
-  set(BAE_ENABLE_ZMF OFF)
+if (BAE_ENABLE_ZMF_SUPPORT AND NOT BAE_ENABLE_LZMA)
+  set(BAE_ENABLE_ZMF_SUPPORT OFF)
   message(STATUS "Disabling ZMF support: LZMA is disabled")
 endif()
 
-if (BAE_ENABLE_ZMF AND NOT BAE_ENABLE_VORBIS_DECODER)
-  set(BAE_ENABLE_ZMF OFF)
+if (BAE_ENABLE_ZMF_SUPPORT AND NOT BAE_ENABLE_VORBIS_DECODER)
+  set(BAE_ENABLE_ZMF_SUPPORT OFF)
   message(STATUS "Disabling ZMF support: Vorbis is disabled")
 endif()
 
-if (BAE_ENABLE_ZMF AND NOT BAE_ENABLE_OPUS_DECODER)
-  set(BAE_ENABLE_ZMF OFF)
+if (BAE_ENABLE_ZMF_SUPPORT AND NOT BAE_ENABLE_OPUS_DECODER)
+  set(BAE_ENABLE_ZMF_SUPPORT OFF)
   message(STATUS "Disabling ZMF support: Opus is disabled")
 endif()
 
-if (BAE_ENABLE_ZMF AND NOT BAE_ENABLE_FLAC_DECODER)
-  set(BAE_ENABLE_ZMF OFF)
+if (BAE_ENABLE_ZMF_SUPPORT AND NOT BAE_ENABLE_FLAC_DECODER)
+  set(BAE_ENABLE_ZMF_SUPPORT OFF)
   message(STATUS "Disabling ZMF support: FLAC is disabled")
 endif()
 
-if (BAE_ENABLE_ZMF AND NOT BAE_ENABLE_QOA_SUPPORT)
-  set(BAE_ENABLE_ZMF OFF)
+if (BAE_ENABLE_ZMF_SUPPORT AND NOT BAE_ENABLE_QOA_SUPPORT)
+  set(BAE_ENABLE_ZMF_SUPPORT OFF)
   message(STATUS "Disabling ZMF support: QOA is disabled")
 endif()
 
-if (BAE_ENABLE_ZMF AND NOT BAE_ENABLE_CLASSIC_CHORUS)
-  set(BAE_ENABLE_ZMF OFF)
+if (BAE_ENABLE_ZMF_SUPPORT AND NOT BAE_ENABLE_CLASSIC_CHORUS)
+  set(BAE_ENABLE_ZMF_SUPPORT OFF)
   message(STATUS "Disabling ZMF support: Classic Chorus is disabled")
 endif()
 
-if (BAE_ENABLE_ZMF AND NOT BAE_ENABLE_FIX_SPAN_DC)
-  set(BAE_ENABLE_ZMF OFF)
+if (BAE_ENABLE_ZMF_SUPPORT AND NOT BAE_ENABLE_FIX_SPAN_DC)
+  set(BAE_ENABLE_ZMF_SUPPORT OFF)
   message(STATUS "Disabling ZMF support: PAN Fix is disabled")
 endif()
 
@@ -1444,7 +1444,7 @@ target_compile_definitions(neobae
   PUBLIC
     X_PLATFORM=${BAE_X_PLATFORM_DEFINE}
     FLAC__NO_DLL=1
-    USE_ZMF_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_ZMF}>,1,0>
+    USE_ZMF_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_ZMF_SUPPORT}>,1,0>
     USE_LZMA_COMPRESSION=$<IF:$<BOOL:${BAE_ENABLE_LZMA}>,1,0>
     Z7_ST=$<IF:$<BOOL:${BAE_ENABLE_LZMA}>,1,0>
     USE_MPEG_ENCODER=$<IF:$<BOOL:${BAE_ENABLE_MP3_ENCODER}>,1,0>

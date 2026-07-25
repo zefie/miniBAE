@@ -76,7 +76,7 @@ All feature flags default to `OFF` (feature enabled). Set to `ON` to disable.
 | `BAE_DISABLE_VORBIS_DECODER` | Disable Vorbis decoder support. Also disables ZMF support. |
 | `BAE_DISABLE_VORBIS_ENCODER` | Disable Vorbis encoder support. |
 | `BAE_DISABLE_XMF_SUPPORT` | Disable XMF support. |
-| `BAE_DISABLE_ZMF` | Disable ZMF support. |
+| `BAE_DISABLE_ZMF_SUPPORT` | Disable ZMF support. |
 
 ## Dependency Constraints
 
@@ -137,7 +137,7 @@ cmake -B build \
   -DBAE_DISABLE_VORBIS_ENCODER=ON \
   -DBAE_DISABLE_OPUS_DECODER=ON \
   -DBAE_DISABLE_OPUS_ENCODER=ON \
-  -DBAE_DISABLE_ZMF=ON \
+  -DBAE_DISABLE_ZMF_SUPPORT=ON \
   -DBAE_DISABLE_SF2_SUPPORT=ON \
   -DBAE_DISABLE_FLUIDSYNTH=ON \
   -DBAE_DISABLE_PLAYLIST=ON \
