@@ -1075,11 +1075,11 @@ static int load_eq_preset(const char *name, float *gains)
     const float std_gains[][5] = {
         {0, 0, 0, 0, 0},        // Flat
         {8, 4, 0, 0, 0},        // Bass Boost
-        {6, 3, 0, 3, 6},        // Acoustic
-        {6, 3, -2, 4, 6},       // Rock
-        {-2, 2, 4, 2, -2},      // Pop
-        {4, 3, 0, 3, 4},        // Classical
-        {-2, -1, 4, 3, 0}       // Vocal
+        {4, 2, 0, 2, 4},        // Acoustic
+        {6, 2, -2, 2, 6},       // Rock
+        {-2, 4, 6, 4, -2},      // Pop
+        {6, 4, 0, 2, 4},        // Classical
+        {-4, 0, 6, 4, -2}       // Vocal
     };
     
     for (int i = 0; i < 7; i++) {
