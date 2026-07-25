@@ -73,100 +73,106 @@
 #undef X_BF_4
 #undef X_BF_5
 
-#if defined(__clang__) || defined(__GNUC__) || defined(_MSC_VER)
-    #pragma pack(push)
+#if defined(_MSC_VER)
+    #define X_PACKBY1
+    #pragma pack(push, 1)
+#elif defined(__GNUC__) || defined(__clang__)
+    #define X_PACKBY1 __attribute__((packed))
+#else
+    #define X_PACKBY1
 #endif
 
-
-#ifndef X_PACK_FAST
-// controls to enable structure packing by 1 byte
-    #if (X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS) || (X_PLATFORM == X_ANDROID) || (X_PLATFORM == X_ANSI) || (X_PLATFORM == X_DUMMY) || (X_PLATFORM == X_WIN95) || (X_PLATFORM == X_SDL2) || (X_PLATFORM == X_SDL3) || (X_PLATFORM == X_WASM) || (X_PLATFORM == X_FOOBAR2000_PLUGIN) || (X_PLATFORM == X_RAYLIB)
-        
-    #if (X_PLATFORM != X_ANDROID) 
-        #pragma pack (1)
-    #endif
-
-        // This define is used when declaring the structures. Some compilers, like GCC
-        // need to use '__attribute__ ((packed))' at each structure to pack by a byte.
-	#if (COMPILER_TYPE == GCC_COMPILER) || (__MINGW32__)
-	    #define X_PACKBY1 __attribute__((packed,aligned(__alignof__(short))))
-	#else
-	    #define X_PACKBY1   __attribute__ ((packed))
-	#endif
-        #define X_BF_1  :1
-        #define X_BF_2  :2
-        #define X_BF_3  :3
-        #define X_BF_4  :4
-        #define X_BF_5  :5
-
-        #ifdef __cplusplus
-            // gcc++ bug
-            #pragma pack(1)
-        #endif
-    #else
-        #if CPU_TYPE == kRISC
-            #pragma options align=mac68k
-        #endif
-
-        #if ((CPU_TYPE == k80X86) || (CPU_TYPE == kSPARC) || (CPU_TYPE == kARM)) && (X_PLATFORM != X_ANDROID)
+#ifndef _MSC_VER
+    #ifndef X_PACK_FAST
+    // controls to enable structure packing by 1 byte
+        #if (X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS) || (X_PLATFORM == X_ANDROID) || (X_PLATFORM == X_ANSI) || (X_PLATFORM == X_DUMMY) || (X_PLATFORM == X_WIN95) || (X_PLATFORM == X_SDL2) || (X_PLATFORM == X_SDL3) || (X_PLATFORM == X_WASM) || (X_PLATFORM == X_FOOBAR2000_PLUGIN) || (X_PLATFORM == X_RAYLIB)
+            
+        #if (X_PLATFORM != X_ANDROID) 
             #pragma pack (1)
         #endif
 
-        #error unknown X_PLATFORM type
+            // This define is used when declaring the structures. Some compilers, like GCC
+            // need to use '__attribute__ ((packed))' at each structure to pack by a byte.
+        #if (COMPILER_TYPE == GCC_COMPILER) || (__MINGW32__)
+            #define X_PACKBY1 __attribute__((packed,aligned(__alignof__(short))))
+        #else
+            #define X_PACKBY1   __attribute__ ((packed))
+        #endif
+            #define X_BF_1  :1
+            #define X_BF_2  :2
+            #define X_BF_3  :3
+            #define X_BF_4  :4
+            #define X_BF_5  :5
 
-        // This define is used when declaring the structures. Some compilers, like GCC
-        // need to use '__attribute__ ((packed))' at each structure to pack by a byte.
+            #ifdef __cplusplus
+                // gcc++ bug
+                #pragma pack(1)
+            #endif
+        #else
+            #if CPU_TYPE == kRISC
+                #pragma options align=mac68k
+            #endif
 
-	#if (COMPILER_TYPE == GCC_COMPILER) || (__MINGW32__) || (X_PLATFORM == X_ANDROID)
-	   #define X_PACKBY1 __attribute__((packed,aligned(__alignof__(short))))
-	#else
-	   #define X_PACKBY1
-	#endif
+            #if ((CPU_TYPE == k80X86) || (CPU_TYPE == kSPARC) || (CPU_TYPE == kARM)) && (X_PLATFORM != X_ANDROID)
+                #pragma pack (1)
+            #endif
+
+            #error unknown X_PLATFORM type
+
+            // This define is used when declaring the structures. Some compilers, like GCC
+            // need to use '__attribute__ ((packed))' at each structure to pack by a byte.
+
+        #if (COMPILER_TYPE == GCC_COMPILER) || (__MINGW32__) || (X_PLATFORM == X_ANDROID)
+        #define X_PACKBY1 __attribute__((packed,aligned(__alignof__(short))))
+        #else
+        #define X_PACKBY1
+        #endif
+
+            #define X_BF_1
+            #define X_BF_2
+            #define X_BF_3
+            #define X_BF_4
+            #define X_BF_5
+        #endif
+
+    #else
+    // controls to enable structure packing by 4/8 bytes.
+        #if X_PLATFORM == X_BE
+            #pragma pack (4)
+        #endif
+        #if (((X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS)) && (COMPILER_TYPE == GCC_COMPILER))
+            #pragma pack (4)
+        #else
+            #if CPU_TYPE == kRISC
+                #pragma options align=power
+            #endif
+            /* Change pack(8) to pack(4) for SPARC.             -Liang */
+            #if (CPU_TYPE == kSPARC)
+                #pragma pack (4)
+            #endif
+            /* $$kk: pack(4) for solaris x86 */
+
+            #if (CPU_TYPE == k80X86 || CPU_TYPE == kARM)
+                #if (X_PLATFORM == X_SOLARIS)
+                    #pragma pack (4)
+                #else
+                    #if (X_PLATFORM != X_ANDROID)
+                        #pragma pack (8)
+                    #endif
+                #endif
+            #endif
+        #endif
 
         #define X_BF_1
         #define X_BF_2
         #define X_BF_3
         #define X_BF_4
         #define X_BF_5
-    #endif
-
-#else
-// controls to enable structure packing by 4/8 bytes.
-    #if X_PLATFORM == X_BE
-        #pragma pack (4)
-    #endif
-    #if (((X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS)) && (COMPILER_TYPE == GCC_COMPILER))
-        #pragma pack (4)
-    #else
-        #if CPU_TYPE == kRISC
-            #pragma options align=power
+        #if (COMPILER_TYPE == GCC_COMPILER) || (__MINGW32__) || (X_PLATFORM == X_ANDROID)
+        #define X_PACKBY1 __attribute__ ((packed))
+        #else
+        #define X_PACKBY1
         #endif
-        /* Change pack(8) to pack(4) for SPARC.             -Liang */
-        #if (CPU_TYPE == kSPARC)
-            #pragma pack (4)
-        #endif
-        /* $$kk: pack(4) for solaris x86 */
 
-        #if (CPU_TYPE == k80X86 || CPU_TYPE == kARM)
-            #if (X_PLATFORM == X_SOLARIS)
-                #pragma pack (4)
-            #else
-                #if (X_PLATFORM != X_ANDROID)
-                    #pragma pack (8)
-                #endif
-            #endif
-        #endif
     #endif
-
-    #define X_BF_1
-    #define X_BF_2
-    #define X_BF_3
-    #define X_BF_4
-    #define X_BF_5
-    #if (COMPILER_TYPE == GCC_COMPILER) || (__MINGW32__) || (X_PLATFORM == X_ANDROID)
-	   #define X_PACKBY1 __attribute__ ((packed))
-    #else
-	   #define X_PACKBY1
-    #endif
-
 #endif
