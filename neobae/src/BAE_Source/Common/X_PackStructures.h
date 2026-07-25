@@ -73,11 +73,11 @@
 #undef X_BF_4
 #undef X_BF_5
 
-#if defined(_MSC_VER)
-    #define X_PACKBY1
+#if defined(__GNUC__) || defined(__clang__) || defined(_MSC_VER)
     #pragma pack(push, 1)
-#elif defined(__GNUC__) || defined(__clang__)
-    #define X_PACKBY1 __attribute__((packed))
+    #if defined(_MSC_VER)
+        #define X_PACKBY1
+    #endif
 #else
     #define X_PACKBY1
 #endif
@@ -87,17 +87,17 @@
     // controls to enable structure packing by 1 byte
         #if (X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS) || (X_PLATFORM == X_ANDROID) || (X_PLATFORM == X_ANSI) || (X_PLATFORM == X_DUMMY) || (X_PLATFORM == X_WIN95) || (X_PLATFORM == X_SDL2) || (X_PLATFORM == X_SDL3) || (X_PLATFORM == X_WASM) || (X_PLATFORM == X_FOOBAR2000_PLUGIN) || (X_PLATFORM == X_RAYLIB)
             
-        #if (X_PLATFORM != X_ANDROID) 
-            #pragma pack (1)
-        #endif
+            #if (X_PLATFORM != X_ANDROID) 
+                #pragma pack (1)
+            #endif
 
-            // This define is used when declaring the structures. Some compilers, like GCC
-            // need to use '__attribute__ ((packed))' at each structure to pack by a byte.
-        #if (COMPILER_TYPE == GCC_COMPILER) || (__MINGW32__)
-            #define X_PACKBY1 __attribute__((packed,aligned(__alignof__(short))))
-        #else
-            #define X_PACKBY1   __attribute__ ((packed))
-        #endif
+                // This define is used when declaring the structures. Some compilers, like GCC
+                // need to use '__attribute__ ((packed))' at each structure to pack by a byte.
+            #if (COMPILER_TYPE == GCC_COMPILER) || (__MINGW32__)
+                #define X_PACKBY1 __attribute__((packed,aligned(__alignof__(short))))
+            #else
+                #define X_PACKBY1 __attribute__ ((packed))
+            #endif
             #define X_BF_1  :1
             #define X_BF_2  :2
             #define X_BF_3  :3
@@ -168,10 +168,12 @@
         #define X_BF_3
         #define X_BF_4
         #define X_BF_5
-        #if (COMPILER_TYPE == GCC_COMPILER) || (__MINGW32__) || (X_PLATFORM == X_ANDROID)
-        #define X_PACKBY1 __attribute__ ((packed))
+        #if ((COMPILER_TYPE == GCC_COMPILER) || (__MINGW32__) || (X_PLATFORM == X_ANDROID))
+            #ifndef X_PACKBY1
+                #define X_PACKBY1 __attribute__ ((packed))
+            #endif
         #else
-        #define X_PACKBY1
+            #define X_PACKBY1
         #endif
 
     #endif
