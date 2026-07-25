@@ -1740,7 +1740,8 @@ static DLS_Instrument* DLS_Bank_FindSelectorOrAlias(DLS_Bank* bank, uint32_t sel
     return DLS_Bank_FindAlias(bank, selector);
 }
 
-static DLS_Instrument* DLS_Bank_FindMidiInstrument(DLS_Bank* bank, int32_t bankId, int32_t program) {
+static DLS_Instrument* DLS_Bank_FindMidiInstrument(DLS_Bank* bank, int32_t bankId, int32_t program,
+                                                   bool allowDrumProgramFallback) {
     int32_t bankMsb = (bankId >> 7) & 0x7F;
     int32_t bankLsb = bankId & 0x7F;
     int32_t rawBank;
@@ -1785,10 +1786,12 @@ static DLS_Instrument* DLS_Bank_FindMidiInstrument(DLS_Bank* bank, int32_t bankI
             if (inst && inst->drum) return inst;
             if (altInst && altInst->drum) return altInst;
 
+            if (!allowDrumProgramFallback) return NULL;
+
             for (fallbackProgram = 0; fallbackProgram < 128; fallbackProgram++) {
                 selector = DLS_Selector(bankMsb, bankLsb, fallbackProgram);
                 inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
-                if (inst && inst->drum) return inst;
+                if (inst) return inst;
 
                 selector = DLS_Selector((rawBank >> 7) & 0x7F, rawBank & 0x7F, fallbackProgram);
                 inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
@@ -1828,14 +1831,28 @@ static DLS_Instrument* DLS_Synth_FindInstrument(DLS_Synth* synth, int32_t bankId
     DLS_Instrument* inst = NULL;
 
     if (synth->banks[1]) {
-        inst = DLS_Bank_FindMidiInstrument(synth->banks[1], bankId, program);
+        inst = DLS_Bank_FindMidiInstrument(synth->banks[1], bankId, program, false);
         if (inst) {
             return inst;
         }
     }
 
     if (synth->banks[0]) {
-        return DLS_Bank_FindMidiInstrument(synth->banks[0], bankId, program);
+        inst = DLS_Bank_FindMidiInstrument(synth->banks[0], bankId, program, false);
+        if (inst) {
+            return inst;
+        }
+    }
+
+    if (synth->banks[1]) {
+        inst = DLS_Bank_FindMidiInstrument(synth->banks[1], bankId, program, true);
+        if (inst) {
+            return inst;
+        }
+    }
+
+    if (synth->banks[0]) {
+        return DLS_Bank_FindMidiInstrument(synth->banks[0], bankId, program, true);
     }
 
     return NULL;
