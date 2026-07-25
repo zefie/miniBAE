@@ -609,6 +609,7 @@ struct BAERmfEditorDocument
     uint32_t debugOriginalMidiDataSize;
     bool loadedFromRmf;
     bool isPristine;
+    bool loopMarkersOnlyDirty;
     BAERmfEditorInstrumentExt *instrumentExts;
     uint32_t instrumentExtCount;
     uint32_t instrumentExtCapacity;
@@ -1822,6 +1823,7 @@ static void PV_MarkDocumentDirty(BAERmfEditorDocument *document)
     if (document)
     {
         document->isPristine = FALSE;
+        document->loopMarkersOnlyDirty = FALSE;
     }
 }
 
@@ -4037,6 +4039,8 @@ static BAERmfEditorActiveNote *PV_PopActiveNote(BAERmfEditorActiveNote **head,
 {
     BAERmfEditorActiveNote *current;
     BAERmfEditorActiveNote *previous;
+    BAERmfEditorActiveNote *oldestMatch;
+    BAERmfEditorActiveNote *oldestMatchPrevious;
 
     if (!head)
     {
@@ -4044,25 +4048,32 @@ static BAERmfEditorActiveNote *PV_PopActiveNote(BAERmfEditorActiveNote **head,
     }
     previous = NULL;
     current = *head;
+    oldestMatch = NULL;
+    oldestMatchPrevious = NULL;
     while (current)
     {
         if (current->channel == channel && current->note == note)
         {
-            if (previous)
-            {
-                previous->next = current->next;
-            }
-            else
-            {
-                *head = current->next;
-            }
-            current->next = NULL;
-            return current;
+            oldestMatch = current;
+            oldestMatchPrevious = previous;
         }
         previous = current;
         current = current->next;
     }
-    return NULL;
+    if (!oldestMatch)
+    {
+        return NULL;
+    }
+    if (oldestMatchPrevious)
+    {
+        oldestMatchPrevious->next = oldestMatch->next;
+    }
+    else
+    {
+        *head = oldestMatch->next;
+    }
+    oldestMatch->next = NULL;
+    return oldestMatch;
 }
 
 static void PV_DisposeActiveNotes(BAERmfEditorActiveNote **head)
@@ -7044,6 +7055,113 @@ static BAEResult PV_AppendMetaEvent(ByteBuffer *buffer, uint32_t delta, unsigned
     return PV_ByteBufferAppend(buffer, data, length);
 }
 
+static BAEResult PV_CompactMidiRunningStatus(ByteBuffer *trackData)
+{
+    uint32_t readOffset;
+    uint32_t writeOffset;
+    unsigned char runningStatus;
+
+    if (!trackData || (!trackData->data && trackData->size > 0))
+    {
+        return BAE_PARAM_ERR;
+    }
+
+    readOffset = 0;
+    writeOffset = 0;
+    runningStatus = 0;
+    while (readOffset < trackData->size)
+    {
+        unsigned char status;
+        uint32_t length;
+        uint32_t lengthOffset;
+        uint32_t dataBytes;
+
+        do
+        {
+            unsigned char deltaByte;
+
+            deltaByte = trackData->data[readOffset++];
+            trackData->data[writeOffset++] = deltaByte;
+            if (!(deltaByte & 0x80))
+            {
+                break;
+            }
+        } while (readOffset < trackData->size);
+        if (readOffset >= trackData->size)
+        {
+            return BAE_BAD_FILE;
+        }
+
+        status = trackData->data[readOffset++];
+        if (status >= 0x80 && status < 0xF0)
+        {
+            if (status != runningStatus)
+            {
+                trackData->data[writeOffset++] = status;
+                runningStatus = status;
+            }
+            dataBytes = ((status & 0xF0) == PROGRAM_CHANGE ||
+                         (status & 0xF0) == CHANNEL_AFTERTOUCH) ? 1 : 2;
+            if (readOffset + dataBytes > trackData->size)
+            {
+                return BAE_BAD_FILE;
+            }
+            while (dataBytes-- > 0)
+            {
+                trackData->data[writeOffset++] = trackData->data[readOffset++];
+            }
+            continue;
+        }
+
+        trackData->data[writeOffset++] = status;
+        runningStatus = 0;
+        if (status == 0xFF)
+        {
+            if (readOffset >= trackData->size)
+            {
+                return BAE_BAD_FILE;
+            }
+            trackData->data[writeOffset++] = trackData->data[readOffset++];
+        }
+        else if (status != 0xF0 && status != 0xF7)
+        {
+            return BAE_BAD_FILE;
+        }
+
+        length = 0;
+        lengthOffset = readOffset;
+        do
+        {
+            unsigned char lengthByte;
+
+            if (readOffset >= trackData->size)
+            {
+                return BAE_BAD_FILE;
+            }
+            lengthByte = trackData->data[readOffset++];
+            length = (length << 7) | (uint32_t)(lengthByte & 0x7F);
+            if (!(lengthByte & 0x80))
+            {
+                break;
+            }
+        } while (TRUE);
+        if (readOffset + length > trackData->size)
+        {
+            return BAE_BAD_FILE;
+        }
+        while (lengthOffset < readOffset)
+        {
+            trackData->data[writeOffset++] = trackData->data[lengthOffset++];
+        }
+        while (length-- > 0)
+        {
+            trackData->data[writeOffset++] = trackData->data[readOffset++];
+        }
+    }
+    trackData->size = writeOffset;
+    return BAE_NO_ERROR;
+}
+
 static BAEResult PV_BuildTempoTrack(BAERmfEditorDocument *document, ByteBuffer *trackData)
 {
     uint32_t eventIndex;
@@ -7819,6 +7937,7 @@ static BAEResult PV_BuildMidiFile(BAERmfEditorDocument *document, ByteBuffer *ou
     uint16_t trackCount;
     bool useTrack0AsConductor;
     bool hasTempoMetaInTracks;
+    bool addTempoTrack;
 
     XSetMemory(&tempoTrack, sizeof(tempoTrack), 0);
     XSetMemory(&trackData, sizeof(trackData), 0);
@@ -7832,6 +7951,8 @@ static BAEResult PV_BuildMidiFile(BAERmfEditorDocument *document, ByteBuffer *ou
             break;
         }
     }
+    addTempoTrack = (!useTrack0AsConductor && !hasTempoMetaInTracks &&
+                     !(document->debugOriginalMidiData && document->tempoEventCount == 0)) ? TRUE : FALSE;
     result = PV_ByteBufferAppend(output, "MThd", 4);
     if (result != BAE_NO_ERROR)
     {
@@ -7847,7 +7968,7 @@ static BAEResult PV_BuildMidiFile(BAERmfEditorDocument *document, ByteBuffer *ou
     {
         return result;
     }
-    trackCount = (uint16_t)(document->trackCount + ((!useTrack0AsConductor && !hasTempoMetaInTracks) ? 1 : 0));
+    trackCount = (uint16_t)(document->trackCount + (addTempoTrack ? 1 : 0));
     result = PV_ByteBufferAppendBE16(output, trackCount);
     if (result != BAE_NO_ERROR)
     {
@@ -7858,7 +7979,7 @@ static BAEResult PV_BuildMidiFile(BAERmfEditorDocument *document, ByteBuffer *ou
     {
         return result;
     }
-    if (!useTrack0AsConductor && !hasTempoMetaInTracks)
+    if (addTempoTrack)
     {
         result = PV_BuildTempoTrack(document, &tempoTrack);
         if (result != BAE_NO_ERROR)
@@ -7897,6 +8018,12 @@ static BAEResult PV_BuildMidiFile(BAERmfEditorDocument *document, ByteBuffer *ou
             PV_ByteBufferDispose(&trackData);
             return result;
         }
+        result = PV_CompactMidiRunningStatus(&trackData);
+        if (result != BAE_NO_ERROR)
+        {
+            PV_ByteBufferDispose(&trackData);
+            return result;
+        }
         result = PV_ByteBufferAppend(output, "MTrk", 4);
         if (result == BAE_NO_ERROR)
         {
@@ -7913,6 +8040,98 @@ static BAEResult PV_BuildMidiFile(BAERmfEditorDocument *document, ByteBuffer *ou
         }
     }
     return BAE_NO_ERROR;
+}
+
+static BAEResult PV_BuildMidiWithAppendedLoopTrack(BAERmfEditorDocument const *document,
+                                                    ByteBuffer *output)
+{
+    ByteBuffer trackData;
+    BAEResult result;
+    bool enabled;
+    uint32_t startTick;
+    uint32_t endTick;
+    int32_t loopCount;
+    uint16_t trackCount;
+    char loopStartText[32];
+    char const *startText;
+
+    if (!document || !output || !document->debugOriginalMidiData ||
+        document->debugOriginalMidiDataSize < 14)
+    {
+        return BAE_PARAM_ERR;
+    }
+
+    enabled = FALSE;
+    startTick = 0;
+    endTick = 0;
+    loopCount = -1;
+    result = BAERmfEditorDocument_GetMidiLoopMarkers(document,
+                                                      &enabled,
+                                                      &startTick,
+                                                      &endTick,
+                                                      &loopCount);
+    if (result != BAE_NO_ERROR || !enabled)
+    {
+        return (result != BAE_NO_ERROR) ? result : BAE_PARAM_ERR;
+    }
+
+    trackCount = PV_ReadBE16(document->debugOriginalMidiData + 10);
+    if (trackCount == 0xFFFF)
+    {
+        return BAE_PARAM_ERR;
+    }
+
+    XSetMemory(&trackData, sizeof(trackData), 0);
+    startText = "loopstart";
+    if (loopCount > 0)
+    {
+        if (loopCount > 99)
+        {
+            loopCount = 99;
+        }
+        XSetMemory(loopStartText, (int32_t)sizeof(loopStartText), 0);
+        sprintf(loopStartText, "loopstart=%ld", (long)loopCount);
+        startText = loopStartText;
+    }
+    result = PV_AppendMetaEvent(&trackData,
+                                startTick,
+                                0x06,
+                                startText,
+                                (uint32_t)strlen(startText));
+    if (result == BAE_NO_ERROR)
+    {
+        result = PV_AppendMetaEvent(&trackData,
+                                    endTick - startTick,
+                                    0x06,
+                                    "loopend",
+                                    7);
+    }
+    if (result == BAE_NO_ERROR)
+    {
+        result = PV_AppendMetaEvent(&trackData, 0, 0x2F, NULL, 0);
+    }
+    if (result == BAE_NO_ERROR)
+    {
+        result = PV_ByteBufferAppend(output,
+                                     document->debugOriginalMidiData,
+                                     document->debugOriginalMidiDataSize);
+    }
+    if (result == BAE_NO_ERROR)
+    {
+        output->data[10] = (unsigned char)((trackCount + 1) >> 8);
+        output->data[11] = (unsigned char)((trackCount + 1) & 0xFF);
+        result = PV_ByteBufferAppend(output, "MTrk", 4);
+    }
+    if (result == BAE_NO_ERROR)
+    {
+        result = PV_ByteBufferAppendBE32(output, trackData.size);
+    }
+    if (result == BAE_NO_ERROR)
+    {
+        result = PV_ByteBufferAppend(output, trackData.data, trackData.size);
+    }
+    PV_ByteBufferDispose(&trackData);
+    return result;
 }
 
 static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fileRef, bool isZmf)
@@ -10007,6 +10226,7 @@ BAEResult BAERmfEditorDocument_SetMidiLoopMarkers(BAERmfEditorDocument *document
     uint16_t trackIndex;
     BAEResult result;
     BAERmfEditorTrack *track;
+    bool canPreserveOriginalMidi;
     char loopStartText[32];
     char const *startText;
     char const *endText;
@@ -10018,6 +10238,35 @@ BAEResult BAERmfEditorDocument_SetMidiLoopMarkers(BAERmfEditorDocument *document
     if (enabled && endTick <= startTick)
     {
         return BAE_PARAM_ERR;
+    }
+
+    canPreserveOriginalMidi = document->loopMarkersOnlyDirty;
+    if (!canPreserveOriginalMidi && enabled && document->isPristine &&
+        document->debugOriginalMidiData && document->debugOriginalMidiDataSize >= 14 &&
+        PV_ReadBE16(document->debugOriginalMidiData + 8) == 1)
+    {
+        bool hasOriginalLoopMarker;
+
+        hasOriginalLoopMarker = FALSE;
+        for (trackIndex = 0; trackIndex < document->trackCount && !hasOriginalLoopMarker; ++trackIndex)
+        {
+            uint32_t metaIndex;
+
+            for (metaIndex = 0; metaIndex < document->tracks[trackIndex].metaEventCount; ++metaIndex)
+            {
+                BAERmfEditorMetaEvent const *event;
+
+                event = &document->tracks[trackIndex].metaEvents[metaIndex];
+                if (event->type == 0x06 &&
+                    (PV_IsLoopStartMarkerText(event->data, event->size, NULL) ||
+                     PV_IsLoopEndMarkerText(event->data, event->size)))
+                {
+                    hasOriginalLoopMarker = TRUE;
+                    break;
+                }
+            }
+        }
+        canPreserveOriginalMidi = hasOriginalLoopMarker ? FALSE : TRUE;
     }
 
     for (trackIndex = 0; trackIndex < document->trackCount; ++trackIndex)
@@ -10083,7 +10332,15 @@ BAEResult BAERmfEditorDocument_SetMidiLoopMarkers(BAERmfEditorDocument *document
         track->endOfTrackTick = endTick;
     }
 
-    PV_MarkDocumentDirty(document);
+    if (canPreserveOriginalMidi)
+    {
+        document->isPristine = FALSE;
+        document->loopMarkersOnlyDirty = TRUE;
+    }
+    else
+    {
+        PV_MarkDocumentDirty(document);
+    }
     return BAE_NO_ERROR;
 }
 
@@ -18811,7 +19068,14 @@ BAEResult BAERmfEditorDocument_SaveAsMidi(BAERmfEditorDocument *document,
         return result;
     }
     XSetMemory(&midiData, sizeof(midiData), 0);
-    result = PV_BuildMidiFile(document, &midiData);
+    if (document->loopMarkersOnlyDirty)
+    {
+        result = PV_BuildMidiWithAppendedLoopTrack(document, &midiData);
+    }
+    else
+    {
+        result = PV_BuildMidiFile(document, &midiData);
+    }
     if (result != BAE_NO_ERROR)
     {
         PV_ByteBufferDispose(&midiData);
