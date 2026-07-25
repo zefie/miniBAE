@@ -2019,7 +2019,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
         pSong->channelBankMode[MIDIChannel] = USE_GM_PERC_BANK;
         debug_message("ProcessProgramChange Debug: Channel %d is set to Percussion (MSB=120, LSB=%d)\n", MIDIChannel, pSong->channelLSB[MIDIChannel]);
     }
-#endif    
+#endif 
     if (pSong->allowProgramChanges)
     {
         if (MIDIChannel == PERCUSSION_CHANNEL && pSong->channelBankMode[MIDIChannel] != USE_NORM_BANK)

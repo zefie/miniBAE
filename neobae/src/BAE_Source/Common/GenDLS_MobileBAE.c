@@ -1780,28 +1780,32 @@ static DLS_Instrument* DLS_Bank_FindMidiInstrument(DLS_Bank* bank, int32_t bankI
         altInst = DLS_Bank_FindSelectorOrAlias(bank, selector);
 
         if (wantDrum) {
+            int32_t fallbackProgram;
+
             if (inst && inst->drum) return inst;
             if (altInst && altInst->drum) return altInst;
-            /* Do not substitute melodic instruments for percussion requests;
-               let upper layers fall back when no actual drum mapping exists. */
+
+            for (fallbackProgram = 0; fallbackProgram < 128; fallbackProgram++) {
+                selector = DLS_Selector(bankMsb, bankLsb, fallbackProgram);
+                inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
+                if (inst && inst->drum) return inst;
+
+                selector = DLS_Selector((rawBank >> 7) & 0x7F, rawBank & 0x7F, fallbackProgram);
+                inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
+                if (inst && inst->drum) return inst;
+
+                selector = DLS_Selector((altRawBank >> 7) & 0x7F, altRawBank & 0x7F, fallbackProgram);
+                altInst = DLS_Bank_FindSelectorOrAlias(bank, selector);
+                if (altInst && altInst->drum) return altInst;
+            }
+
+            /* Do not substitute melodic instruments for percussion requests. */
             return NULL;
         } else {
             if (inst && !inst->drum) return inst;
             if (altInst && !altInst->drum) return altInst;
             if (inst) return inst;
             if (altInst) return altInst;
-        }
-
-        if (bankMsb == 120) {
-            selector = DLS_Selector((rawBank >> 7) & 0x7F, rawBank & 0x7F, 0);
-            inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
-            if (inst && inst->drum) return inst;
-
-            selector = DLS_Selector((altRawBank >> 7) & 0x7F, altRawBank & 0x7F, 0);
-            inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
-            if (inst && inst->drum) return inst;
-
-            return NULL;
         }
     }
 
