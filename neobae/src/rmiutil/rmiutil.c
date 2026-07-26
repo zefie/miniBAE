@@ -18,20 +18,27 @@
 
 /****************************************************************************
  *
- * mid2rmi.c
+ * rmiutil.c
  *
- * Advanced MIDI -> RMI (RIFF RMID) converter with embedded soundbank.
+ * RMID (RIFF RMID) utility: create RMID files from MIDI + soundbank,
+ * and extract MIDI + embedded bank from existing RMID files.
  *
  * Usage:
- *   mid2rmi <input.mid> <bank.dls|bank.sf2> <output.rmi>
+ *   rmiutil mid2rmi <input.mid> <bank.dls|bank.sf2> <output.rmi>
+ *   rmiutil extract <input.rmi> [output_dir]
  *
- * Behavior:
+ * mid2rmi behavior:
  *  - Parses the MIDI file to detect which instruments are actually used
  *    (bank select + program changes observed at note-on time).
  *  - Extracts only the required instruments and the referenced waves
  *    and writes a minimal DLS/SF2.
  *  - Embeds the (minimal) bank as a nested RIFF chunk inside a RIFF RMID.
  *
+ * extract behavior:
+ *  - Parses the RMID file to find the MIDI data chunk and any embedded
+ *    soundbank RIFF chunk (DLS or SF2).
+ *  - Writes the MIDI to <basename>.mid and the bank to <basename>.dls or
+ *    <basename>.sf2 in the output directory.
  *
  ****************************************************************************/
 
@@ -40,8 +47,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <errno.h>
-
-#include <X_API.h>
+#include <libgen.h>
 
 // -----------------------------
 // Small helpers
@@ -403,45 +409,8 @@ static int scan_midi_used_instruments(const uint8_t *midi, size_t midiLen, UsedI
 }
 
 // -----------------------------
-// DLS trimming
+// RIFF child scanner
 // -----------------------------
-
-typedef struct
-{
-	uint32_t offset;  // offset inside wvpl payload (after listType)
-	uint32_t size;    // total bytes including chunk header
-} WaveEntry;
-
-typedef struct
-{
-	WaveEntry *items;
-	size_t count;
-	size_t cap;
-} WaveEntryList;
-
-static void wave_list_free(WaveEntryList *l)
-{
-	if (!l) return;
-	free(l->items);
-	l->items = NULL;
-	l->count = 0;
-	l->cap = 0;
-}
-
-static int wave_list_push(WaveEntryList *l, WaveEntry e)
-{
-	if (!l) return 0;
-	if (l->count == l->cap)
-	{
-		size_t nc = l->cap ? l->cap * 2 : 64;
-		WaveEntry *p = (WaveEntry *)realloc(l->items, nc * sizeof(WaveEntry));
-		if (!p) return 0;
-		l->items = p;
-		l->cap = nc;
-	}
-	l->items[l->count++] = e;
-	return 1;
-}
 
 static int parse_riff_children(const uint8_t *buf, size_t len, size_t start, size_t end,
 							   const uint8_t **outChunk, uint32_t *outChunkSize,
@@ -482,6 +451,47 @@ static int parse_riff_children(const uint8_t *buf, size_t len, size_t start, siz
 		if (i & 1) i++; // word align
 	}
 	return 0;
+}
+
+// -----------------------------
+// DLS trimming
+// -----------------------------
+
+typedef struct
+{
+	uint32_t offset;  // offset inside wvpl payload (after listType)
+	uint32_t size;    // total bytes including chunk header
+} WaveEntry;
+
+typedef struct
+{
+	WaveEntry *items;
+	size_t count;
+	size_t cap;
+} WaveEntryList;
+
+static void wave_list_free(WaveEntryList *l)
+{
+	if (!l) return;
+	free(l->items);
+	l->items = NULL;
+	l->count = 0;
+	l->cap = 0;
+}
+
+static int wave_list_push(WaveEntryList *l, WaveEntry e)
+{
+	if (!l) return 0;
+	if (l->count == l->cap)
+	{
+		size_t nc = l->cap ? l->cap * 2 : 64;
+		WaveEntry *p = (WaveEntry *)realloc(l->items, nc * sizeof(WaveEntry));
+		if (!p) return 0;
+		l->items = p;
+		l->cap = nc;
+	}
+	l->items[l->count++] = e;
+	return 1;
 }
 
 static int dls_parse_ptbl(const uint8_t *ptblChunk, uint32_t ptblTotal, uint32_t **outOffsets, uint32_t *outCount)
@@ -784,24 +794,30 @@ static int dls_trim_minimal(const uint8_t *dls, size_t dlsLen, const UsedInstLis
 				}
 				if (matched)
 				{
-					if (needInsCount == needInsCap)
+				if (needInsCount == needInsCap)
+				{
+					size_t nc = needInsCap ? needInsCap * 2 : 32;
+					const uint8_t **tmpPtr = (const uint8_t **)realloc(needInsPtr, nc * sizeof(uint8_t *));
+					if (!tmpPtr)
 					{
-						size_t nc = needInsCap ? needInsCap * 2 : 32;
-						const uint8_t **np = (const uint8_t **)realloc(needInsPtr, nc * sizeof(uint8_t *));
-						uint32_t *ns = (uint32_t *)realloc(needInsSize, nc * sizeof(uint32_t));
-						if (!np || !ns)
-						{
-							free(np); free(ns);
-							free(ptblOffsets);
-							wave_list_free(&waves);
-							free(needInsPtr); free(needInsSize);
-							free(neededTableIdx);
-							return 0;
-						}
-						needInsPtr = np;
-						needInsSize = ns;
-						needInsCap = nc;
+						free(needInsPtr); free(needInsSize);
+						free(ptblOffsets); wave_list_free(&waves);
+						free(neededTableIdx);
+						return 0;
 					}
+					uint32_t *tmpSize = (uint32_t *)realloc(needInsSize, nc * sizeof(uint32_t));
+					if (!tmpSize)
+					{
+						free(needInsSize);
+						free(ptblOffsets); wave_list_free(&waves);
+						free(tmpPtr);
+						free(neededTableIdx);
+						return 0;
+					}
+					needInsPtr = tmpPtr;
+					needInsSize = tmpSize;
+					needInsCap = nc;
+				}
 					needInsPtr[needInsCount] = c;
 					needInsSize[needInsCount] = (uint32_t)total;
 					needInsCount++;
@@ -2004,17 +2020,178 @@ static int build_rmid_with_bank(const uint8_t *midi, size_t midiLen, const uint8
 	return 1;
 }
 
-static void print_usage(const char *argv0)
+// -----------------------------
+// RMID extraction
+// -----------------------------
+
+static const char *get_file_ext(const char *path)
 {
-	printf("mid2rmi - Advanced MIDI -> RMI converter\n");
-	printf("Usage: %s <input.mid> <bank.dls|bank.sf2> <output.rmi>\n", argv0);
+	const char *dot = strrchr(path, '.');
+	if (!dot || dot == path) return "";
+	return dot;
 }
 
-int main(int argc, char **argv)
+static int rmid_extract(const char *rmiPath, const char *outDir)
+{
+	uint8_t *rmi = NULL;
+	size_t rmiLen = 0;
+	if (!read_file_all(rmiPath, &rmi, &rmiLen)) return 0;
+
+	if (rmiLen < 12 || !fourcc_eq(rmi, "RIFF") || !fourcc_eq(rmi + 8, "RMID"))
+	{
+		fprintf(stderr, "Error: '%s' is not a valid RIFF RMID file\n", rmiPath);
+		free(rmi);
+		return 0;
+	}
+
+	uint32_t riffSize = read_le32(rmi + 4);
+	size_t riffEnd = 8 + (size_t)riffSize;
+	if (riffEnd > rmiLen) riffEnd = rmiLen;
+
+	// Find the data chunk (MIDI)
+	const uint8_t *dataChunk = NULL;
+	uint32_t dataTotal = 0;
+	if (!parse_riff_children(rmi, rmiLen, 12, riffEnd, &dataChunk, &dataTotal, "data", NULL))
+	{
+		fprintf(stderr, "Error: RMID missing 'data' chunk\n");
+		free(rmi);
+		return 0;
+	}
+
+	uint32_t midiLen = read_le32(dataChunk + 4);
+	const uint8_t *midiData = dataChunk + 8;
+
+	// Derive base output name from input filename
+	const char *base = strrchr(rmiPath, '/');
+	if (!base) base = strrchr(rmiPath, '\\');
+	if (!base) base = rmiPath;
+	else base++; // skip slash
+
+	// Strip extension to get basename, then add our output extensions
+	char nameBuf[4096];
+	{
+		const char *ext = get_file_ext(base);
+		size_t nameLen = (size_t)(ext - base);
+		if (nameLen >= sizeof(nameBuf)) nameLen = sizeof(nameBuf) - 1;
+		memcpy(nameBuf, base, nameLen);
+		nameBuf[nameLen] = '\0';
+	}
+
+	char midiOutPath[8192];
+	if (outDir && outDir[0])
+	{
+		snprintf(midiOutPath, sizeof(midiOutPath), "%s/%s.mid", outDir, nameBuf);
+	}
+	else
+	{
+		snprintf(midiOutPath, sizeof(midiOutPath), "%s.mid", nameBuf);
+	}
+
+	// Write MIDI
+	if (!write_file_all(midiOutPath, midiData, (size_t)midiLen))
+	{
+		free(rmi);
+		return 0;
+	}
+	fprintf(stderr, "Extracted MIDI: %s (%u bytes)\n", midiOutPath, midiLen);
+
+	// Look for an embedded bank RIFF chunk after the data chunk
+	const uint8_t *bankChunk = NULL;
+	uint32_t bankTotal = 0;
+
+	// Find the data chunk again to know where it ends in RMID space
+	size_t dataStart = (size_t)(dataChunk - rmi);
+	size_t dataEnd = dataStart + dataTotal;
+	if (dataEnd & 1) dataEnd++; // word align
+
+	// Scan remaining top-level children for a DLS or sfbk RIFF/LIST
+	size_t pos = dataEnd;
+	while (pos + 8 <= riffEnd)
+	{
+		const uint8_t *c = rmi + pos;
+		uint32_t csz = read_le32(c + 4);
+		size_t ctotal = 8 + (size_t)csz;
+		if (pos + ctotal > riffEnd) break;
+
+		if ((fourcc_eq(c, "RIFF") || fourcc_eq(c, "LIST")) && csz >= 4)
+		{
+			const uint8_t *formType = c + 8;
+			if (fourcc_eq(formType, "DLS ") || fourcc_eq(formType, "sfbk"))
+			{
+				bankChunk = c;
+				bankTotal = (uint32_t)ctotal;
+				break;
+			}
+		}
+
+		pos += ctotal;
+		if (pos & 1) pos++;
+	}
+
+	if (bankChunk && bankTotal >= 12)
+	{
+		const char *ext = NULL;
+		const uint8_t *formType = bankChunk + 8;
+		if (fourcc_eq(formType, "DLS "))
+			ext = ".dls";
+		else if (fourcc_eq(formType, "sfbk"))
+			ext = ".sf2";
+
+		if (ext)
+		{
+			char fullBankPath[8192];
+			if (outDir && outDir[0])
+				snprintf(fullBankPath, sizeof(fullBankPath), "%s/%s%s", outDir, nameBuf, ext);
+			else
+				snprintf(fullBankPath, sizeof(fullBankPath), "%s%s", nameBuf, ext);
+			if (!write_file_all(fullBankPath, bankChunk, (size_t)bankTotal))
+			{
+				free(rmi);
+				return 0;
+			}
+			fprintf(stderr, "Extracted bank: %s (%u bytes)\n", fullBankPath, bankTotal);
+		}
+		else
+		{
+			fprintf(stderr, "Warning: unrecognized embedded bank type, skipping\n");
+		}
+	}
+	else
+	{
+		fprintf(stderr, "No embedded soundbank found in RMID\n");
+	}
+
+	free(rmi);
+	return 1;
+}
+
+// -----------------------------
+// CLI
+// -----------------------------
+
+static void print_usage(const char *argv0)
+{
+	printf("rmiutil - RMID utility (create and extract RMID files)\n");
+	printf("\n");
+	printf("Usage:\n");
+	printf("  %s mid2rmi <input.mid> <bank.dls|bank.sf2> <output.rmi>\n", argv0);
+	printf("  %s extract <input.rmi> [output_dir]\n", argv0);
+	printf("\n");
+	printf("mid2rmi:\n");
+	printf("  Parse MIDI for used instruments, trim bank to only required\n");
+	printf("  instruments/waves, and embed both into a RIFF RMID file.\n");
+	printf("\n");
+	printf("extract:\n");
+	printf("  Extract MIDI (.mid) and embedded soundbank (.dls or .sf2)\n");
+	printf("  from a RIFF RMID file. Outputs to current directory or\n");
+	printf("  specified output_dir.\n");
+}
+
+static int cmd_mid2rmi(int argc, char **argv)
 {
 	if (argc != 4)
 	{
-		print_usage(argv[0]);
+		fprintf(stderr, "Usage: rmiutil mid2rmi <input.mid> <bank.dls|bank.sf2> <output.rmi>\n");
 		return 1;
 	}
 
@@ -2047,9 +2224,9 @@ int main(int argc, char **argv)
 	uint8_t *embedBank = NULL;
 	size_t embedBankLen = 0;
 
-	bool isRIFF = (bankLen >= 12 && fourcc_eq(bank, "RIFF"));
-	bool isDLS = (isRIFF && fourcc_eq(bank + 8, "DLS "));
-	bool isSF2 = (isRIFF && fourcc_eq(bank + 8, "sfbk"));
+	int isRIFF = (bankLen >= 12 && fourcc_eq(bank, "RIFF"));
+	int isDLS = (isRIFF && fourcc_eq(bank + 8, "DLS "));
+	int isSF2 = (isRIFF && fourcc_eq(bank + 8, "sfbk"));
 
 	if (isDLS)
 	{
@@ -2067,7 +2244,7 @@ int main(int argc, char **argv)
 			memcpy(embedBank, bank, bankLen);
 			embedBankLen = bankLen;
 		}
-        fprintf(stderr, "Original bank: DLS %zu bytes\n", bankLen);
+		fprintf(stderr, "Original bank: DLS %zu bytes\n", bankLen);
 		fprintf(stderr, "Embedded bank: DLS (trimmed) %zu bytes\n", embedBankLen);
 	}
 	else if (isSF2)
@@ -2086,7 +2263,7 @@ int main(int argc, char **argv)
 			memcpy(embedBank, bank, bankLen);
 			embedBankLen = bankLen;
 		}
-        fprintf(stderr, "Original bank: SF2 %zu bytes\n", bankLen);
+		fprintf(stderr, "Original bank: SF2 %zu bytes\n", bankLen);
 		fprintf(stderr, "Embedded bank: SF2 (trimmed) %zu bytes\n", embedBankLen);
 	}
 	else
@@ -2122,3 +2299,49 @@ int main(int argc, char **argv)
 	return 0;
 }
 
+static int cmd_extract(int argc, char **argv)
+{
+	if (argc < 2 || argc > 3)
+	{
+		fprintf(stderr, "Usage: rmiutil extract <input.rmi> [output_dir]\n");
+		return 1;
+	}
+
+	const char *rmiPath = argv[1];
+	const char *outDir = (argc >= 3) ? argv[2] : NULL;
+
+	if (!rmid_extract(rmiPath, outDir)) return 1;
+
+	return 0;
+}
+
+int main(int argc, char **argv)
+{
+	if (argc < 2)
+	{
+		print_usage(argv[0]);
+		return 1;
+	}
+
+	const char *cmd = argv[1];
+
+	if (strcmp(cmd, "mid2rmi") == 0)
+	{
+		return cmd_mid2rmi(argc - 1, argv + 1);
+	}
+	else if (strcmp(cmd, "extract") == 0)
+	{
+		return cmd_extract(argc - 1, argv + 1);
+	}
+	else if (strcmp(cmd, "--help") == 0 || strcmp(cmd, "-h") == 0)
+	{
+		print_usage(argv[0]);
+		return 0;
+	}
+	else
+	{
+		fprintf(stderr, "Unknown command: %s\n", cmd);
+		print_usage(argv[0]);
+		return 1;
+	}
+}

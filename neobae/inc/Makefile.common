@@ -865,17 +865,17 @@ else
 					# libNeoBAE srcs + mid2rmf.c
 					SRC += src/mid2rmf/mid2rmf.c
 				else
-				ifeq ($(MID2RMI),1)
-					# libNeoBAE srcs + mid2rmi.c
-					SRC += src/mid2rmi/mid2rmi.c
+				ifeq ($(RMIUTIL),1)
+					# rmiutil.c
+					SRC := src/rmiutil/rmiutil.c
 				else
 					ifeq ($(RMFIFY),1)
 						# libNeoBAE srcs + rmfify.c
 						SRC += src/rmfify/rmfify.c
 					else
 						ifeq ($(XMFUTIL),1)
-							# libNeoBAE srcs + xmfutil.c
-							SRC += src/xmfutil/xmfutil.c
+							# xmfutil.c
+							SRC := src/xmfutil/xmfutil.c
 							BAE_LIBS += -lz
 						else
 							ifeq ($(MOD2RMF_APP),1)
@@ -971,19 +971,29 @@ ifeq ($(MTHC_SUPPORT),1)
 	ifneq ($(MIDDECOMP),1)
 		ifneq ($(ADP2WAV),1)
 			ifneq ($(ADX2WAV),1)
-				SRC += src/mthc/mthc_decomp.c
-				BAE_FLAGS += -DUSE_MTHC_SUPPORT=1
+			  ifneq ($(RMIUTIL),1)
+			    ifneq ($(XMFUTIL),1)
+					SRC += src/mthc/mthc_decomp.c
+					BAE_FLAGS += -DUSE_MTHC_SUPPORT=1
+				endif
+			  endif
 			endif
 		endif
 	endif
 endif
 
 ifeq ($(ADP_SUPPORT),1)
-	ifneq ($(ADP2WAV),1)
-		ifneq ($(ADX2WAV),1)
-			SRC += src/adp2wav/adp2wav_decode.c \
-				src/thirdparty/libg722/g722_decode.c
-			BAE_FLAGS += -DUSE_ADP_SUPPORT=1
+	ifneq ($(MIDDECOMP),1)
+		ifneq ($(ADP2WAV),1)
+			ifneq ($(ADX2WAV),1)
+			  ifneq ($(RMIUTIL),1)
+			    ifneq ($(XMFUTIL),1)
+					SRC += src/adp2wav/adp2wav_decode.c \
+						src/thirdparty/libg722/g722_decode.c
+					BAE_FLAGS += -DUSE_ADP_SUPPORT=1
+				endif
+			  endif
+			endif
 		endif
 	endif
 endif

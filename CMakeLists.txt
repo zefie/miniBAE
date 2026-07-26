@@ -1891,8 +1891,8 @@ if(BUILD_CLITOOLS)
   add_executable(ringtone2mid neobae/src/ringtone2mid/ringtone2mid.c)
   target_link_libraries(ringtone2mid PRIVATE neobae)
 
-  add_executable(mid2rmi neobae/src/mid2rmi/mid2rmi.c)
-  target_link_libraries(mid2rmi PRIVATE neobae)
+  add_executable(rmiutil neobae/src/rmiutil/rmiutil.c)
+  target_link_libraries(rmiutil PRIVATE)
 
   add_executable(instdump neobae/src/rmfinfo/instdump.c)
   target_link_libraries(instdump PRIVATE neobae)

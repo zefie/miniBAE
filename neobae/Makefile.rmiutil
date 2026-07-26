@@ -2,10 +2,10 @@ BAE_API := Ansi
 NOAUTO := 1
 MTHC_SUPPORT := 1
 RETRO_RINGTONE_SUPPORT := 1
-MID2RMI := 1
+RMIUTIL := 1
 include inc/Makefile.common
 
-TARGET_BIN := mid2rmi
+TARGET_BIN := rmiutil
 
 CC		:= gcc
 CXX		:= g++
