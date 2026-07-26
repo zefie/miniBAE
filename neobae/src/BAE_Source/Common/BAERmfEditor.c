@@ -18130,7 +18130,11 @@ BAEResult BAERmfEditorBank_SaveToFile(BAEBankToken bankToken,
     ext = strrchr(filePath, '.');
     if (ext && (strcmp(ext, ".zsb") == 0 || strcmp(ext, ".ZSB") == 0))
     {
+#if USE_ZMF_SUPPORT == TRUE
         overrideResourceID = XFILERESOURCE_ZMF_ID;
+#else
+        return BAE_UNSUPPORTED_FORMAT;
+#endif
     }
     else if (ext && (strcmp(ext, ".hsb") == 0 || strcmp(ext, ".HSB") == 0))
     {
@@ -19588,6 +19592,14 @@ BAEResult BAERmfEditorDocument_SaveAsRmfToMemory(BAERmfEditorDocument *document,
 
     *outData = NULL;
     *outSize = 0;
+
+#if USE_ZMF_SUPPORT != TRUE
+    if (useZmfContainer)
+    {
+        return BAE_UNSUPPORTED_FORMAT;
+    }
+#endif
+
     resourceID = useZmfContainer ? XFILERESOURCE_ZMF_ID : XFILERESOURCE_ID;
 
     fileRef = XFileOpenVirtualResource(resourceID);
@@ -19641,7 +19653,11 @@ BAEResult BAERmfEditorDocument_SaveAsRmf(BAERmfEditorDocument *document,
     ext = strrchr(filePath, '.');
     if (ext && (strcmp(ext, ".zmf") == 0 || strcmp(ext, ".ZMF") == 0))
     {
+#if USE_ZMF_SUPPORT == TRUE
         useZmfContainer = TRUE;
+#else
+        return BAE_UNSUPPORTED_FORMAT;
+#endif
     }
     else
     {
@@ -19702,7 +19718,11 @@ BAEResult BAERmfEditorDocument_SaveAsRmfPreserveMidi(BAERmfEditorDocument *docum
     ext = strrchr(filePath, '.');
     if (ext && (strcmp(ext, ".zmf") == 0 || strcmp(ext, ".ZMF") == 0))
     {
+#if USE_ZMF_SUPPORT == TRUE
         useZmfContainer = TRUE;
+#else
+        return BAE_UNSUPPORTED_FORMAT;
+#endif
     }
     else
     {
