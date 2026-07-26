@@ -3,10 +3,11 @@ NOAUTO := 1
 MHTC_SUPPORT := 1
 RETRO_RINGTONE_SUPPORT := 1
 CREATION_API := 1
-RMFIFY := 1
+ZMF_SUPPORT := 1
+RMFUTIL := 1
 include inc/Makefile.common
 
-TARGET_BIN := rmfify
+TARGET_BIN := rmfutil
 
 CC		:= gcc
 CXX		:= g++

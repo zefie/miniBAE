@@ -27,7 +27,7 @@ typedef unsigned char bool;
 static void print_usage(const char *prog)
 {
     fprintf(stderr,
-        "xmfutil — XMF/MXMF file creation and extraction\n"
+        "xmfutil - XMF/MXMF file creation and extraction\n"
         "\n"
         "Usage:\n"
         "  Create XMF v1:   %s create v1  <midi.mid> <bank.dls> [output.xmf]\n"
@@ -37,11 +37,7 @@ static void print_usage(const char *prog)
         "Options:\n"
         "  -q               Quiet mode\n"
         "  -z LEVEL         Zlib compression level (0-9, 0=no compression, default: 6)\n"
-        "\n"
-        "Both v1 and v2 use VLQ-encoded tree nodes per XMF Meta File Format.\n"
-        "v2 adds XmfFileTypeID=2 / XmfFileTypeRevisionID=1 after the magic.\n"
-        "DLS (Mobile DLS for v2) before MIDI, v2 word-aligned payloads, zlib via\n"
-        "Standard UnpackerID 0x01 per RP-040.\n",
+        "\n",
         prog, prog, prog);
 }
 

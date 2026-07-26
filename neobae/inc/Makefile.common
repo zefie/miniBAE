@@ -861,17 +861,13 @@ else
 				# libNeoBAE srcs + rmf2mid.c
 				SRC += src/rmf2mid/rmf2mid.c
 			else
-				ifeq ($(MID2RMF),1)
-					# libNeoBAE srcs + mid2rmf.c
-					SRC += src/mid2rmf/mid2rmf.c
-				else
 				ifeq ($(RMIUTIL),1)
 					# rmiutil.c
 					SRC := src/rmiutil/rmiutil.c
 				else
-					ifeq ($(RMFIFY),1)
-						# libNeoBAE srcs + rmfify.c
-						SRC += src/rmfify/rmfify.c
+					ifeq ($(RMFUTIL),1)
+						# libNeoBAE srcs + rmfutil.c
+						SRC += src/rmfutil/rmfutil.c
 					else
 						ifeq ($(XMFUTIL),1)
 							# xmfutil.c
@@ -958,7 +954,6 @@ else
 										endif
 									endif
 								endif
-							endif
 						endif
 					endif
 				endif
@@ -1000,9 +995,13 @@ endif
 
 
 ifeq ($(QOA_SUPPORT),1)
-	BAE_FLAGS += -DUSE_QOA_SUPPORT=1
-	INC_PATH += -Isrc/thirdparty/qoa
-	SRC += src/BAE_Source/Common/XQOAFiles.c
+	ifneq ($(XMFUTIL),1)
+		ifneq ($(RMIUTIL),1)
+			BAE_FLAGS += -DUSE_QOA_SUPPORT=1
+			INC_PATH += -Isrc/thirdparty/qoa
+			SRC += src/BAE_Source/Common/XQOAFiles.c
+		endif
+	endif
 endif
 
 ifeq ($(KARAOKE),1)
