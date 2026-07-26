@@ -1223,11 +1223,19 @@ static BAEResult apply_ext_info_for_zone(BAERmfEditorDocument *document,
     }
     if ((zone->sampleModes & 0x1) != 0) {
         uint32_t reason = 0;
-        if (BAERmfEditorDocument_RequiresZmf(document, &reason)) {
+        bool requiresZmf = BAERmfEditorDocument_RequiresZmf(document, &reason);
+#if USE_ZMF_SUPPORT == TRUE
+        if (requiresZmf) {
             ext.flags2 |= ZBF_advancedInterpolation;
-        } else {
+        } else
+        {
             ext.flags2 &= (unsigned char)~ZBF_advancedInterpolation;
         }
+#else
+        if (requiresZmf) {
+            return BAE_UNSUPPORTED_FORMAT;
+        }
+#endif
     }
     ext.midiRootKey = 60; /* Master root key should always be 60; individual splits handle their own rootKey */
     ext.panPlacement = (char)sf2_pan_to_inst_pan(avgPan);

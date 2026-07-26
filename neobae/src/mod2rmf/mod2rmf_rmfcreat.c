@@ -1508,7 +1508,7 @@ int mod2rmf_save_document(Mod2RmfConverter *conv, const char *destPath)
     useZmfContainer = (ext && (!strcmp(ext, ".zmf") || !strcmp(ext, ".ZMF"))) ? TRUE : FALSE;
     uint32_t reason;
     requiresZmf = BAERmfEditorDocument_RequiresZmf(conv->document, &reason);
-
+#if USE_ZMF_SUPPORT == TRUE
     if (requiresZmf && !useZmfContainer)
     {
         char reasonBuf[256];
@@ -1520,7 +1520,15 @@ int mod2rmf_save_document(Mod2RmfConverter *conv, const char *destPath)
                 reasonBuf);
         return 0;
     }
-
+#else
+    if (requiresZmf)
+    {
+        fprintf(stderr,
+                "[mod2rmf] Error: document requires ZMF format but ZMF support is not compiled in.\n"
+                "[mod2rmf] Please re-compile with ZMF support to be able to support this document.\n");
+        return 0;
+    }
+#endif
     rmfData = NULL;
     rmfSize = 0;
     result = BAERmfEditorDocument_SaveAsRmfToMemory(conv->document,

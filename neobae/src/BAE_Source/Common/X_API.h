@@ -719,9 +719,14 @@ typedef struct XBankToken XBankToken;
 #define XFILECACHE_ID           FOUR_CHAR('C','A','C','H')  // CACH
 #define XFILETRASH_ID           FOUR_CHAR('T','R','S','H')  // TRSH
 
-// Check if a mapID is a valid resource file (either IREZ or ZREZ)
+// Check if a mapID is a valid resource file (IREZ always; ZREZ only when USE_ZMF_SUPPORT)
+#if USE_ZMF_SUPPORT == TRUE
 #define XFILERESOURCE_ID_IS_VALID(id) \
     ((id) == XFILERESOURCE_ID || (id) == XFILERESOURCE_ZMF_ID)
+#else
+#define XFILERESOURCE_ID_IS_VALID(id) \
+    ((id) == XFILERESOURCE_ID)
+#endif
 
 // Resource file version numbers: RMF uses 1 (original), ZMF uses 5 (current)
 #define XFILERESOURCE_VERSION_RMF   1
@@ -739,8 +744,13 @@ typedef struct XBankToken XBankToken;
     (((id) == XFILERESOURCE_ZMF_ID) ? XFILERESOURCE_VERSION_ZMF : XFILERESOURCE_VERSION_RMF)
 
 // Check if a version number is recognised
+#if USE_ZMF_SUPPORT == TRUE
 #define XFILERESOURCE_VERSION_IS_VALID(ver) \
     ((ver) >= 0 && (ver) <= XFILERESOURCE_VERSION_ZMF)
+#else
+#define XFILERESOURCE_VERSION_IS_VALID(ver) \
+    ((ver) >= 0 && (ver) <= XFILERESOURCE_VERSION_RMF)
+#endif
 
 struct XFILERESOURCEMAP
 {

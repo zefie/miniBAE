@@ -10125,7 +10125,14 @@ BAEResult BAESong_LoadRmfFromMemory(BAESong song, void const *pRMFData, uint32_t
                         }
                         else if (XGetLong(&mapHdr.mapID) == XFILERESOURCE_ZMF_ID)
                         {
+#if USE_ZMF_SUPPORT == TRUE
                             isZmfContainer = TRUE;
+#else
+                            debug_message("[RMF] ZREZ (ZMF) file rejected: ZMF support is not compiled in\n");
+                            XFileClose(fileRef);
+                            BAE_ReleaseMutex(song->mLock);
+                            return BAE_UNSUPPORTED_FORMAT;
+#endif
                         }
                     }
                 }
@@ -10404,7 +10411,14 @@ BAEResult BAESong_LoadRmfFromFile(BAESong song, BAEPathName filePath, int16_t so
                     }
                     else if (XGetLong(&mapHdr.mapID) == XFILERESOURCE_ZMF_ID)
                     {
+#if USE_ZMF_SUPPORT == TRUE
                         isZmfContainer = TRUE;
+#else
+                        debug_message("[RMF] ZREZ (ZMF) file rejected: ZMF support is not compiled in\n");
+                        XFileClose(fileRef);
+                        BAE_ReleaseMutex(song->mLock);
+                        return BAE_UNSUPPORTED_FORMAT;
+#endif
                     }
                 }
             }

@@ -473,10 +473,17 @@ BAEFileType X_DetermineFileTypeByPath(const char *filePath)
     // Check for MIDI/music file extensions
     else if (strcmp(extLower, ".mid") == 0 || strcmp(extLower, ".midi") == 0 || strcmp(extLower, ".kar") == 0)
         return BAE_MIDI_TYPE;
+#if USE_ZMF_SUPPORT == TRUE
     else if (strcmp(extLower, ".rmf") == 0 || strcmp(extLower, ".zmf") == 0)
         return BAE_RMF;
     else if (strcmp(extLower, ".hsb") == 0 || strcmp(extLower, ".zsb") == 0)
         return BAE_RMF;
+#else
+    else if (strcmp(extLower, ".rmf") == 0)
+        return BAE_RMF;
+    else if (strcmp(extLower, ".hsb") == 0)
+        return BAE_RMF;
+#endif
     else if (strcmp(extLower, ".rmi") == 0)
         return BAE_RMI;        
 #if USE_RETRO_RINGTONE_SUPPORT == TRUE        

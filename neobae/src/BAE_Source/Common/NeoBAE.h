@@ -3539,16 +3539,15 @@ BAEResult BAERmfEditorDocument_UpgradeFile(BAEPathName srcPath,
 
 void BAE_SetDebugOutputCallback(void (*callback)(const char *message));
 
-#if USE_ZMF_SUPPORT == TRUE
 enum BAEZMFReasonCode
 {
     BAEZMF_REASON_NONE = 0,
-    BAEZMF_REASON_LOOP_TOO_SHORT = 1,
-    BAEZMF_REASON_MODERN_CODEC = 2,
+    BAEZMF_REASON_LOOP_TOO_SHORT = 1, /* A sample's loop length is less than 20 samples (unsupported in RMF) */
+    BAEZMF_REASON_MODERN_CODEC = 2, /* A sample is using a modern codec not compatible with RMF */
     BAEZMF_REASON_CUBIC_INTERPOLATION = 4,
     BAEZMF_REASON_EXTENDED_PITCH_RANGE = 8,
-    BAEZMF_REASON_CLASSIC_CHORUS = 16,
-    BAEZMF_REASON_PANFIX = 32,
+    BAEZMF_REASON_CLASSIC_CHORUS = 16, /* song is flagged to use the classic chorus ordering */
+    BAEZMF_REASON_PANFIX = 32, /* song is flagged to use the pan fix */
     BAEZMF_REASON_EXTENDED_ADSR = 64,  /* any instrument has > 8 ADSR stages */
     BAEZMF_ALREADY_ZMF = 0x40000000u,
     BAEZMF_REASON_OTHER = 0x80000000u
@@ -3557,8 +3556,6 @@ enum BAEZMFReasonCode
 typedef enum BAEZMFReasonCode BAEZMFReasonCode;
 
 void BAEZMFReasonCodeToString(uint32_t reason, char *outBuffer, uint32_t bufferSize);
-
-#endif
 
 
 

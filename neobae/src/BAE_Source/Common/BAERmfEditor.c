@@ -13826,7 +13826,10 @@ BAEResult BAERmfEditorDocument_Validate(BAERmfEditorDocument *document)
 }
 
 
-#if USE_ZMF_SUPPORT == TRUE
+// begin ZMF requirements checking
+// we leave these enabled even if ZMF support is not compiled in, to allow detection of potential ZMF requirements
+// and to prevent saving RMF with ZMF features (ZMF required + no ZMF Support = fail)
+
 void BAEZMFReasonCodeToString(uint32_t reason, char *outBuffer, uint32_t bufferSize)
 {
     outBuffer[0] = '\0';
@@ -14135,26 +14138,8 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
     *outReason = reason;
     return (reason != BAEZMF_REASON_NONE) ? TRUE : FALSE;
 }
-#else
-BAE_BOOL BAERmfEditorBank_RequiresZmf(BAERmfEditorDocument const *document, uint32_t *outReason)
-{
-    (void)document;
-    if (outReason)
-    {
-        *outReason = 0;
-    }
-    return FALSE;
-}
-BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReason)
-{
-    (void)bankToken;
-    if (outReason)
-    {
-        *outReason = 0;
-    }
-    return FALSE;
-}
-#endif
+
+// end ZMF Requirements detection
 
 /* ---------- Bank instrument enumeration and cloning ---------- */
 
