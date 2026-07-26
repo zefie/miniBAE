@@ -237,7 +237,8 @@ static void print_usage(const char *program_name)
             "\n"
             "Options:\n"
             "  --info               Show source info (title, song length, codecs, loop points)\n"
-            "  --upgrade             Upgrade file to the current ZMF format version (standalone)\n"
+            "  --upgrade             Upgrade file to the current ZMF format version, or\n"
+            "                        convert standard MIDI (.mid) to RMF/ZMF (standalone)\n"
             "  --codec N|NAME        Recompress all samples to codec number/name\n"
             "                        (pcm, adpcm, alaw, ulaw, mp3, vorbis, flac, opus, qoa)\n"
             "  --sndstorage T        Set all sample storage containers: ESND, CSND, or SND\n"
@@ -2956,40 +2957,69 @@ int main(int argc, char *argv[])
 
     if (doUpgrade)
     {
-        int32_t fromVersion;
-        int i;
+        if (is_midi_path(sourcePath))
+        {
+            BAERmfEditorDocument *midiDoc;
 
-        result = BAERmfEditorDocument_UpgradeFile((BAEPathName)sourcePath,
-                                                  (BAEPathName)destPath,
-                                                  &fromVersion);
-        if (result == BAE_ALREADY_EXISTS)
-        {
-            fprintf(stderr, "This file is already v%d, this tool can upgrade ", (int)fromVersion);
-            for (i = 1; i < XFILERESOURCE_VERSION_ZMF; ++i)
+            midiDoc = BAERmfEditorDocument_LoadFromFile((BAEPathName)sourcePath);
+            if (!midiDoc)
             {
-                if (i > 1)
-                {
-                    fprintf(stderr, ", ");
-                }
-                fprintf(stderr, "v%d", i);
+                fprintf(stderr, "Error: failed to load MIDI: %s\n", sourcePath);
+                BAE_Cleanup();
+                return 1;
             }
-            fprintf(stderr, " to v%d\n", XFILERESOURCE_VERSION_ZMF);
+            result = BAERmfEditorDocument_SaveAsRmfPreserveMidi(midiDoc,
+                                                                 (BAEPathName)destPath);
+            BAERmfEditorDocument_Delete(midiDoc);
+            if (result != BAE_NO_ERROR)
+            {
+                fprintf(stderr, "Error: MIDI to RMF/ZMF conversion failed (%d): %s\n",
+                        (int)result, destPath);
+                BAE_Cleanup();
+                return 1;
+            }
+            fprintf(stdout, "Converted MIDI to RMF/ZMF: %s -> %s\n",
+                    sourcePath, destPath);
             BAE_Cleanup();
-            return 1;
+            return 0;
         }
-        if (result != BAE_NO_ERROR)
+
         {
-            fprintf(stderr, "Error: upgrade failed (%d): %s\n", (int)result, sourcePath);
+            int32_t fromVersion;
+            int i;
+
+            result = BAERmfEditorDocument_UpgradeFile((BAEPathName)sourcePath,
+                                                      (BAEPathName)destPath,
+                                                      &fromVersion);
+            if (result == BAE_ALREADY_EXISTS)
+            {
+                fprintf(stderr, "This file is already v%d, this tool can upgrade ", (int)fromVersion);
+                for (i = 1; i < XFILERESOURCE_VERSION_ZMF; ++i)
+                {
+                    if (i > 1)
+                    {
+                        fprintf(stderr, ", ");
+                    }
+                    fprintf(stderr, "v%d", i);
+                }
+                fprintf(stderr, " to v%d\n", XFILERESOURCE_VERSION_ZMF);
+                BAE_Cleanup();
+                return 1;
+            }
+            if (result != BAE_NO_ERROR)
+            {
+                fprintf(stderr, "Error: upgrade failed (%d): %s\n", (int)result, sourcePath);
+                BAE_Cleanup();
+                return 1;
+            }
+            fprintf(stdout, "Upgraded v%d to v%d: %s -> %s\n",
+                    (int)fromVersion,
+                    XFILERESOURCE_VERSION_ZMF,
+                    sourcePath,
+                    destPath);
             BAE_Cleanup();
-            return 1;
+            return 0;
         }
-        fprintf(stdout, "Upgraded v%d to v%d: %s -> %s\n",
-                (int)fromVersion,
-                XFILERESOURCE_VERSION_ZMF,
-                sourcePath,
-                destPath);
-        BAE_Cleanup();
-        return 0;
     }
 
     document = BAERmfEditorDocument_LoadFromFile((BAEPathName)sourcePath);

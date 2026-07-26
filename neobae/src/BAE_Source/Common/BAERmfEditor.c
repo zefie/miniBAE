@@ -7017,14 +7017,6 @@ static int PV_CompareMidiEvents(void const *left, void const *right)
     {
         return 1;
     }
-    if (a->order < b->order)
-    {
-        return -1;
-    }
-    if (a->order > b->order)
-    {
-        return 1;
-    }
     return 0;
 }
 
