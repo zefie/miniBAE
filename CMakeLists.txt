@@ -1853,32 +1853,40 @@ if(BUILD_CLITOOLS)
   add_executable(mid2rmf neobae/src/mid2rmf/mid2rmf.c)
   target_link_libraries(mid2rmf PRIVATE neobae)
 
-  add_executable(adp2wav 
-    neobae/src/thirdparty/libg722/g722_decode.c
-    neobae/src/adp2wav/adp2wav_decode.c
-    neobae/src/adp2wav/adp2wav_main.c
-  )
-  target_link_libraries(adp2wav PRIVATE m)
+  if (BAE_ENABLE_ADP_SUPPORT)
+    add_executable(adp2wav 
+      neobae/src/thirdparty/libg722/g722_decode.c
+      neobae/src/adp2wav/adp2wav_decode.c
+      neobae/src/adp2wav/adp2wav_main.c
+    )
+    target_link_libraries(adp2wav PRIVATE m)
+  endif()
 
-  add_executable(adx2wav
-    neobae/src/adx2wav/adx2wav_decode.c
-    neobae/src/adx2wav/adx2wav_main.c
-  )
-  target_link_libraries(adx2wav PRIVATE m)
+  if (BAE_ENABLE_ADX_SUPPORT)
+    add_executable(adx2wav
+      neobae/src/adx2wav/adx2wav_decode.c
+      neobae/src/adx2wav/adx2wav_main.c
+    )
+    target_link_libraries(adx2wav PRIVATE m)
+  endif()
 
   add_executable(rmfify
     neobae/src/rmfify/rmfify.c
-  )
-  target_link_libraries(rmfify PRIVATE neobae m)
-
-  add_executable(mthc_decomp
-    neobae/src/mthc/mthc_decomp.c
-    neobae/src/mthc/mthc_main.c
   )
 
   target_include_directories(rmfify PRIVATE
       ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Common
   )
+  target_link_libraries(rmfify PRIVATE neobae m)
+
+  if (BAE_ENABLE_MTHC_SUPPORT)
+    add_executable(mthc_decomp
+      neobae/src/mthc/mthc_decomp.c
+      neobae/src/mthc/mthc_main.c
+    )
+    target_link_libraries(mthc_decomp PRIVATE neobae m)
+  endif()
+
 
   add_executable(ringtone2mid neobae/src/ringtone2mid/ringtone2mid.c)
   target_link_libraries(ringtone2mid PRIVATE neobae)
@@ -1901,6 +1909,11 @@ if(BUILD_CLITOOLS)
   target_include_directories(sf2_hsb PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/sf2-hsb)
   target_link_libraries(sf2_hsb PRIVATE neobae)
   set_target_properties(sf2_hsb PROPERTIES OUTPUT_NAME sf2-hsb)
+
+  if(BAE_ENABLE_XMF_SUPPORT)
+    add_executable(xmfutil neobae/src/xmfutil/xmfutil.c)
+    target_link_libraries(xmfutil PRIVATE z)
+  endif()
 
   if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libxmp/include/xmp.h" AND
      EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libxmp/src/lite/lite-player.c")
