@@ -1847,11 +1847,13 @@ if(BUILD_CLITOOLS)
 
   target_link_libraries(songtool PRIVATE neobae)
 
-  add_executable(rmf2mid neobae/src/rmf2mid/rmf2mid.c)
-  target_link_libraries(rmf2mid PRIVATE neobae)
-
-  add_executable(mid2rmf neobae/src/mid2rmf/mid2rmf.c)
-  target_link_libraries(mid2rmf PRIVATE neobae)
+  add_executable(rmfutil
+    neobae/src/rmfutil/rmfutil.c
+  )
+  target_include_directories(rmfutil PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Common
+  )
+  target_link_libraries(rmfutil PRIVATE neobae m)
 
   if (BAE_ENABLE_ADP_SUPPORT)
     add_executable(adp2wav 
@@ -1869,15 +1871,6 @@ if(BUILD_CLITOOLS)
     )
     target_link_libraries(adx2wav PRIVATE m)
   endif()
-
-  add_executable(rmfify
-    neobae/src/rmfify/rmfify.c
-  )
-
-  target_include_directories(rmfify PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Common
-  )
-  target_link_libraries(rmfify PRIVATE neobae m)
 
   if (BAE_ENABLE_MTHC_SUPPORT)
     add_executable(mthc_decomp

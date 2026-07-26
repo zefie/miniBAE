@@ -10,7 +10,7 @@
 
   Configurations: Debug|x64, Release|x64
 
-  Audio API: SDL3 (X_PLATFORM=X_SDL3) — matches Makefile.nbstudio
+  Audio API: SDL3 (X_PLATFORM=X_SDL3) - matches Makefile.nbstudio
 -->
 <Project DefaultTargets="Build" ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <!-- ================================================================
@@ -117,7 +117,7 @@
     </PreBuildEvent>
   </ItemDefinitionGroup>
   <!-- ================================================================
-       Compiler / Linker settings — shared across all files
+       Compiler / Linker settings - shared across all files
        ================================================================ -->
   <!-- RELEASE settings -->
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -289,7 +289,7 @@ wxbase33u.lib;libmp3lame.lib;FLAC.lib;vorbisfile.lib;vorbisenc.lib;vorbis.lib;op
     </ClCompile>
     <ClCompile Include="..\..\BAE_Source\Common\NeoBAE.c">
       <CompileAs>CompileAsC</CompileAs>
-      <!-- NeoBAE.c needs $(IntDir) for generated BAEPatches.h — provided via
+      <!-- NeoBAE.c needs $(IntDir) for generated BAEPatches.h - provided via
            global include path $(ProjectDir)generated -->
     </ClCompile>
     <ClCompile Include="..\..\BAE_Source\Common\NewNewLZSS.c">
@@ -422,7 +422,7 @@ wxbase33u.lib;libmp3lame.lib;FLAC.lib;vorbisfile.lib;vorbisenc.lib;vorbis.lib;op
       <CompileAs>CompileAsC</CompileAs>
 </ClCompile>
     <!-- ====================================================================
-         LAME mp3lame — built from bundled source (no external lib needed)
+         LAME mp3lame - built from bundled source (no external lib needed)
          All LAME files use $(ProjectDir)generated\config.h (=configMS.h)
          placed first in the include path via the global $(ProjectDir)generated.
          ==================================================================== -->

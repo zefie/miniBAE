@@ -15,7 +15,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* hsb_writer.h — Build and serialise IREZ/ZREZ (HSB/ZSB) resource files.
+/* hsb_writer.h - Build and serialise IREZ/ZREZ (HSB/ZSB) resource files.
  *
  * The resource container used by miniBAE is a minimalist big-endian record
  * store.  We build the entire file in memory, then flush it once.

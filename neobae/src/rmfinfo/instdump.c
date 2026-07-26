@@ -16,7 +16,7 @@
  */
 
 /****************************************************************************
- * instdump.c — Dump INST resources from two RMF files and show differences
+ * instdump.c - Dump INST resources from two RMF files and show differences
  *
  * Usage: instdump <original.rmf> <saved.rmf>
  *

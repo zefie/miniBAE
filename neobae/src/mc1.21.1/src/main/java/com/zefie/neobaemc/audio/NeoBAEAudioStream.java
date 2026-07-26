@@ -20,7 +20,7 @@ import java.nio.ByteOrder;
  */
 public final class NeoBAEAudioStream implements AudioStream {
 
-    /** Stereo 16-bit signed little-endian PCM at 44.1 kHz — matches the renderer. */
+    /** Stereo 16-bit signed little-endian PCM at 44.1 kHz - matches the renderer. */
     public static final AudioFormat FORMAT =
             new AudioFormat(NeoBAERenderer.SAMPLE_RATE, 16, NeoBAERenderer.CHANNELS, true, false);
 

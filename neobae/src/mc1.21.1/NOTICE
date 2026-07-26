@@ -7,7 +7,7 @@ engine with the Etched mod by Humble Abode / jackson / Ocelot / Farcr.
 Contains:
 
   * Source code targeting Etched's public API
-    (gg.moonflower.etched.api.*) — Etched is © 2021 Moonflower Studio,
+    (gg.moonflower.etched.api.*) - Etched is © 2021 Moonflower Studio,
     licensed under GPL-3.0-only.
     https://github.com/jacksonhardaway/etched
 

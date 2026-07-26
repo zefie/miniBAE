@@ -472,7 +472,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    /* Same for pitch bend — engine keeps bend state across loop-back. */
+    /* Same for pitch bend - engine keeps bend state across loop-back. */
     if (!mod2rmf_ensure_loop_pitch_bend_resets(&song))
     {
         fprintf(stderr, "Error: loop pitch bend reset failed\n");

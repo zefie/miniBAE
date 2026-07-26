@@ -42,7 +42,7 @@ import java.util.concurrent.CompletionException;
  * <p>If NeoBAE is loaded but fails to recognise the downloaded data, the
  * stream resolves to {@link EmptyAudioStream#INSTANCE} (the same fallback
  * Etched uses for unrecoverable decode errors). We do NOT fall back to
- * Etched's original chain on a per-track basis — when NeoBAE is loaded it
+ * Etched's original chain on a per-track basis - when NeoBAE is loaded it
  * "owns" the decode path. This keeps the mixin simple and predictable; if
  * you need Etched's decoder back, remove this mod.</p>
  */
@@ -64,12 +64,12 @@ public abstract class AbstractOnlineSoundInstanceMixin {
             NeoBAEMC.LOGGER.debug("NeoBAE skip: sound is {} not OnlineSound", sound.getClass().getName());
             return;
         }
-        // Local sound events (etched://soundevent) — leave to Etched's original code path
+        // Local sound events (etched://soundevent) - leave to Etched's original code path
         if (TrackData.isLocalSound(onlineSound.getURL())) {
             NeoBAEMC.LOGGER.debug("NeoBAE skip: local sound {}", onlineSound.getURL());
             return;
         }
-        // Native engine not loaded — pass through to Etched
+        // Native engine not loaded - pass through to Etched
         if (!NeoBAEAudioStream.engineAvailable()) {
             NeoBAEMC.LOGGER.warn("NeoBAE skip: engine unavailable, passing {} to Etched's decoder chain",
                     onlineSound.getURL());
@@ -131,7 +131,7 @@ public abstract class AbstractOnlineSoundInstanceMixin {
             ClientPacketListener conn = mc.getConnection();
             if (conn == null) return false;
             // Singleplayer also uses an integrated server, which DOES register
-            // our channel — so we use the streamed path there too. That keeps
+            // our channel - so we use the streamed path there too. That keeps
             // the disc save/share path consistent with multiplayer.
             return NetworkRegistry.hasChannel(conn, SoundRequestPayload.TYPE.id());
         } catch (Throwable t) {
@@ -169,7 +169,7 @@ public abstract class AbstractOnlineSoundInstanceMixin {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 // JOrbisAudioStream's constructor blocks reading the Ogg
-                // identification packet — which is exactly what we want; it
+                // identification packet - which is exactly what we want; it
                 // will block on the pipe until the first chunks arrive.
                 AudioStream raw = new JOrbisAudioStream(pending.getInputStream());
                 AudioStream wrapped = onlineSound instanceof gg.moonflower.etched.api.sound.SoundStreamModifier mod

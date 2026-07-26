@@ -3,7 +3,7 @@ package com.zefie.neobaemc.audio;
 /**
  * Java wrapper around the NeoBAE mixer.
  *
- * <p>Adapted from the NeoBAEDroid Mixer.java — the AssetManager-only paths are
+ * <p>Adapted from the NeoBAEDroid Mixer.java - the AssetManager-only paths are
  * removed; everything goes through file paths or {@code byte[]} buffers
  * suitable for the desktop / Minecraft environment.
  *
@@ -52,7 +52,7 @@ public class Mixer {
      */
     private static native byte[] _encodePcmToVorbis(byte[] pcmS16LE, int sampleRate, int channels, float quality);
 
-    // -- Pull-mode rendering (new — for Minecraft sound integration) ---------
+    // -- Pull-mode rendering (new - for Minecraft sound integration) ---------
     /**
      * Render {@code sampleFrames} stereo 16-bit PCM frames into {@code out}
      * (interleaved L,R,L,R...). The byte buffer must be at least

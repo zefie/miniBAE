@@ -3632,7 +3632,7 @@ static GM_Waveform* PV_ReadIntoMemoryOpusFile(XFILE file, bool decodeData,
             return NULL;
         }
 
-        // Decode in chunks — if expected_size==0 we loop until op_read returns 0
+        // Decode in chunks - if expected_size==0 we loop until op_read returns 0
         while (expected_size == 0 ? 1 : (total_read < expected_size)) {
             uint32_t readChunk = capacity - total_read;
             if (readChunk > 65536) {

@@ -949,7 +949,7 @@ OPErr XEncodeOpusToMemory(GM_Waveform const *src, uint32_t bitrate, uint32_t mod
         return MEMORY_ERR;
     }
 
-    /* No preskip priming — let the encoder's internal state handle
+    /* No preskip priming - let the encoder's internal state handle
      * convergence naturally.  The EOS granule path without prepended
      * silence adds preskip to the final granule position so that
      * op_pcm_total() = (N + preskip) - preskip = N. */

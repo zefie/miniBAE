@@ -16,7 +16,7 @@
  */
 
 /****************************************************************************
- * gui_script_editor.c — Real-time BAEScript editor window for zefidi
+ * gui_script_editor.c - Real-time BAEScript editor window for zefidi
  *
  * Provides a separate SDL window with syntax-highlighted text editing,
  * live linting, and a toggle to enable/disable script processing during
@@ -186,7 +186,7 @@ static void script_stop_cb(void *userdata)
         bae_signal_export_stop();
         return;
     }
-    // Normal playback — replicate the full bae_stop behavior
+    // Normal playback - replicate the full bae_stop behavior
     if (g_bae.is_audio_file && g_bae.sound) {
         BAESound_Stop(g_bae.sound, FALSE);
     } else if (g_bae.song) {
@@ -1406,7 +1406,7 @@ bool script_editor_handle_event(SDL_Event *event)
             script_editor_hide();
             return true;
         }
-        /* Main window close — hide ourselves */
+        /* Main window close - hide ourselves */
         script_editor_hide();
         return false;
     }
@@ -1606,7 +1606,7 @@ bool script_editor_handle_event(SDL_Event *event)
             }
         }
 
-        /* Click in console header — Clear button */
+        /* Click in console header - Clear button */
         if (g_console_h > 0 && my >= win_h - g_console_h - SE_LINT_BAR_H
             && my < win_h - g_console_h - SE_LINT_BAR_H + 22) {
             int tw_clr, th_clr;
@@ -1619,7 +1619,7 @@ bool script_editor_handle_event(SDL_Event *event)
             }
         }
 
-        /* Click in editor area — set cursor */
+        /* Click in editor area - set cursor */
         if (my >= SE_TOOLBAR_H && my < win_h - g_console_h - SE_LINT_BAR_H) {
 #if defined(USE_SDL2)
             bool shift = (SDL_GetModState() & KMOD_SHIFT) != 0;

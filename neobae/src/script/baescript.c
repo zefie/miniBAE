@@ -16,7 +16,7 @@
  */
 
 /****************************************************************************
- * baescript.c — Public API for BAEScript
+ * baescript.c - Public API for BAEScript
  *
  * Provides LoadFile / LoadString / SetSong / Tick / Free.
  ****************************************************************************/

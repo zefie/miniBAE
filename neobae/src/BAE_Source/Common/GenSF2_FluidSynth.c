@@ -2053,7 +2053,7 @@ static void PV_SF2_ConvertFloatToInt32(float* input, int32_t* output, int32_t* r
             // Mix stereo to mono (average L+R)
             float mono = (leftSample + rightSample) * 0.5f;
             
-            // Convert to 32-bit fixed point (no clamp needed — int32 provides
+            // Convert to 32-bit fixed point (no clamp needed - int32 provides
             // ~128x headroom above 1.0 and the output limiter handles peaks)
             int32_t intSample = (int32_t)(mono * kScale);
             
@@ -2085,7 +2085,7 @@ static void PV_SF2_ConvertFloatToInt32(float* input, int32_t* output, int32_t* r
             float rightSample = input[frame * 2 + 1] * globalScale;
             
             // Convert to 32-bit fixed point and add to existing buffer
-            // (no clamp needed — int32 provides ~128x headroom above 1.0
+            // (no clamp needed - int32 provides ~128x headroom above 1.0
             // and the output limiter handles peaks)
             int32_t leftInt = (int32_t)(leftSample * kScale);
             int32_t rightInt = (int32_t)(rightSample * kScale);

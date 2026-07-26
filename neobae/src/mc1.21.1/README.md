@@ -1,4 +1,4 @@
-# NeoBAE for Minecraft — NeoForge 1.21.1
+# NeoBAE for Minecraft - NeoForge 1.21.1
 
 A drop-in **decoder upgrade** for the [Etched](https://modrinth.com/mod/etched)
 mod. When this mod is installed alongside Etched, it transparently replaces
@@ -18,7 +18,7 @@ native decoder, adding support for:
 | **AIFF / AU**   | no           | **yes**  |
 | **MTHC** (Nokia compressed MIDI) | no | **yes** |
 
-You still use Etched's etching table, Etched's discs, Etched's UI — there are
+You still use Etched's etching table, Etched's discs, Etched's UI - there are
 no new items, blocks, or recipes from this mod. Drop it in and the new
 formats just start working.
 
@@ -42,7 +42,7 @@ loaded successfully, our injection takes over the entire decoder path:
    `SoundEngine` via a `NeoBAEAudioStream`.
 
 If the native library fails to load, the mixin does nothing and Etched's
-original decoder runs — the worst case is "this mod silently does nothing".
+original decoder runs - the worst case is "this mod silently does nothing".
 
 ## Building
 
@@ -81,7 +81,7 @@ Pick one and uncomment the corresponding pair of lines in `build.gradle`'s
 - **Maven Local:** run `./gradlew publishToMavenLocal` inside an Etched
   checkout, then enable the `gg.moonflower:etched:5.0.1` lines.
 
-These are `compileOnly + runtimeOnly`, not `implementation` — we never ship
+These are `compileOnly + runtimeOnly`, not `implementation` - we never ship
 Etched's classes in our jar.
 
 ### 3. Build the mod

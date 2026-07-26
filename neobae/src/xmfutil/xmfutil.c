@@ -1,5 +1,5 @@
 /*
- * xmfutil — XMF/MXMF creation and extraction tool
+ * xmfutil - XMF/MXMF creation and extraction tool
  * © 2026 zefie
  *
  * 1) Create XMF v1 (XMF_1.00) from MIDI + DLS

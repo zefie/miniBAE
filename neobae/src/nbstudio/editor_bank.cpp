@@ -150,10 +150,10 @@ static const char *CompressionTypeName(uint32_t ct, uint32_t subType,
         /* FLAC */
         case FOUR_CHAR('f','L','a','C'):            return "FLAC";
         case FOUR_CHAR('F','L','A','C'):            return "FLAC";
-        /* Vorbis — check sub-type for bitrate */
+        /* Vorbis - check sub-type for bitrate */
         case FOUR_CHAR('O','g','g','V'):            base = "Vorbis"; break;
         case FOUR_CHAR('V','O','R','B'):            base = "Vorbis"; break;
-        /* Opus — check sub-type for bitrate */
+        /* Opus - check sub-type for bitrate */
         case FOUR_CHAR('O','g','g','O'):            base = opusRoundTrip ? "Opus RT" : "Opus"; break;
         case FOUR_CHAR('O','P','U','S'):            base = opusRoundTrip ? "Opus RT" : "Opus"; break;
         /* MPEG (MP3) - various bitrates */
@@ -189,7 +189,7 @@ static const char *CompressionTypeName(uint32_t ct, uint32_t subType,
         }
     }
 
-    /* If we reached here, base is set for Vorbis/Opus — append bitrate if available */
+    /* If we reached here, base is set for Vorbis/Opus - append bitrate if available */
     bitrate = CompressionSubTypeBitrate(subType);
     if (bitrate)
     {
@@ -729,7 +729,7 @@ static void ApplyDirtyParams(BankEditorPanel *bp)
                 bp->dirtyExtInfo.sampleTargetStorageType = (BAERmfEditorSndStorageType)sData.sndStorageType;
             }
             
-            /* User chose "Original" — forget any previously applied codec */
+            /* User chose "Original" - forget any previously applied codec */
             if (wasChanged) {
                 bp->appliedCodecs.erase(it);
             }
@@ -1080,7 +1080,7 @@ static void PopulateInstrumentTree(BankEditorPanel *bp)
             bp->instrumentTree->Expand(g.node);
         }
     }
-    /* Scroll back to top — on Windows, Expand() can auto-scroll to the
+    /* Scroll back to top - on Windows, Expand() can auto-scroll to the
      * last expanded node, leaving the view near the bottom of the tree. */
     bp->instrumentTree->EnsureVisible(root);
 
@@ -1359,7 +1359,7 @@ static void ShowInstrumentDetail(BankEditorPanel *bp, uint32_t instrumentIndex)
         bp->dirtyParamsCallback(nullptr);
     }
 
-    /* Clear sample panel — no sample is selected for the new instrument yet */
+    /* Clear sample panel - no sample is selected for the new instrument yet */
     FreeCachedWaveform(bp);
     bp->sampleHeaderLabel->SetLabel("Select a sample from the list to view details.");
     if (bp->sampleParamsPanel) {
@@ -1746,7 +1746,7 @@ static void OnInstrumentContextMenu(BankEditorPanel *bp, wxTreeEvent &event)
                     groupInstIDBase = (fid / 128u) * 128u;
                 }
             } else {
-                /* Empty group — derive base from label by checking which range is empty */
+                /* Empty group - derive base from label by checking which range is empty */
                 wxString label = bp->instrumentTree->GetItemText(item);
                 if      (label.Contains("GM Melodic"))         groupInstIDBase = 0;
                 else if (label.Contains("GM Percussion"))      groupInstIDBase = 128;
@@ -2004,7 +2004,7 @@ static void OnGlobalSampleSelected(BankEditorPanel *bp, wxTreeEvent &event)
         return;
     }
     if (!dynamic_cast<BankSampleItemData *>(bp->sampleTree->GetItemData(item))) {
-        /* Root node selected — clear both right-hand panels */
+        /* Root node selected - clear both right-hand panels */
         bp->hasInstrument = false;
         bp->hasSampleSelection = false;
         bp->instHeaderLabel->SetLabel("Select an instrument to view details.");
@@ -2222,7 +2222,7 @@ BankEditorPanel *CreateBankEditorPanel(wxWindow *parent)
 
     rightSizer->Add(bp->detailNotebook, 1, wxEXPAND);
 
-    /* Apply / Stop All Notes buttons — visible for both tabs */
+    /* Apply / Stop All Notes buttons - visible for both tabs */
     {
         wxBoxSizer *btnSizer = new wxBoxSizer(wxHORIZONTAL);
         bp->applyBtn = new wxButton(rightPanel, wxID_ANY, "Apply");

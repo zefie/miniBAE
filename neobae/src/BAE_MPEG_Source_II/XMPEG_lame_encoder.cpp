@@ -112,7 +112,7 @@ extern "C" void * MPG_EncodeNewStream(uint32_t encodeRate /* bits/sec total */, 
     /* Default quality / fast mode */
     lame_set_quality(gf, 5);
 
-    /* Disable the Xing/Info VBR header frame — it decodes as silence and
+    /* Disable the Xing/Info VBR header frame - it decodes as silence and
      * shifts all audio forward by one extra MP3 frame (~1152 samples). */
     lame_set_bWriteVbrTag(gf, 0);
     /* Keep output stream payload-only for embedded sample blobs. */

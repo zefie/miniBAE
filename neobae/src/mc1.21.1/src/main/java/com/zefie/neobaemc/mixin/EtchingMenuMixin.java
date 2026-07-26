@@ -48,10 +48,10 @@ public abstract class EtchingMenuMixin {
             // Au / SND
             "audio/basic",
             "audio/au",
-            // ZMF (RMF with modern codecs) — rarely has a registered MIME
+            // ZMF (RMF with modern codecs) - rarely has a registered MIME
             "audio/zmf",
             "audio/x-zmf",
-            // Generic octet-stream / unknown — NeoBAE will sniff the bytes
+            // Generic octet-stream / unknown - NeoBAE will sniff the bytes
             "application/octet-stream",
             "binary/octet-stream"
     );

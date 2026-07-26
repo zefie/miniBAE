@@ -4517,7 +4517,7 @@ private:
 
             nodeHit = HitTestAutomationNode(logicalPoint, &automationNodeHit);
             if (!(nodeHit || HitTestAutomation(logicalPoint, &automationHit))) {
-                /* Right-click on empty piano roll background — show paste menu */
+                /* Right-click on empty piano roll background - show paste menu */
                 wxMenu bgMenu;
                 bgMenu.Append(ID_PianoRollPaste, "Paste\tCtrl+V");
                 bgMenu.Enable(ID_PianoRollPaste, !GetClipboard().empty());
@@ -4644,7 +4644,7 @@ private:
                     DragMode mode = GetDragModeForPoint(noteRect, logicalPoint);
                     SetCursor((mode == DragMode::ResizeLeft || mode == DragMode::ResizeRight)
                               ? wxCursor(wxCURSOR_SIZEWE) : wxCursor(wxCURSOR_HAND));
-                    /* Note hover — clear any automation hover */
+                    /* Note hover - clear any automation hover */
                     previousHoverLane = m_hoverAutomationLane;
                     if (previousHoverLane >= 0) {
                         m_hoverAutomationLane = -1;

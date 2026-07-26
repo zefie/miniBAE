@@ -43,7 +43,7 @@ bool g_show_settings_dialog = false;
 bool g_midi_input_device_dd_open = false;
 bool g_midi_output_device_dd_open = false;
 
-// MIDI device enumeration dirty flag — set true to force re-enumeration
+// MIDI device enumeration dirty flag - set true to force re-enumeration
 static bool g_midi_device_list_dirty = true;
 
 // Volume curve settings

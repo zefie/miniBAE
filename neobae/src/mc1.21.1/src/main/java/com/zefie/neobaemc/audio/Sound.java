@@ -2,7 +2,7 @@ package com.zefie.neobaemc.audio;
 
 /**
  * Wrapper around a NeoBAE sound (one-shot audio file: WAV/MP3/OGG/FLAC/AIFF/AU).
- * Adapted from NeoBAEDroid's Sound.java — the AssetManager loader is removed;
+ * Adapted from NeoBAEDroid's Sound.java - the AssetManager loader is removed;
  * sounds load from byte[] or file path.
  */
 public class Sound {

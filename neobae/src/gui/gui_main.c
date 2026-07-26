@@ -438,7 +438,7 @@ char *get_absolute_path(const char *path)
 void karaoke_commit_line(uint32_t time_us, const char *line);
 #endif
 
-// Total playtime globals (ms) tracked across the session — used by transport UI
+// Total playtime globals (ms) tracked across the session - used by transport UI
 // This timer accumulates actual wall-clock playback time while transport is
 // running, so engine timeline jumps (loop markers/seeks) do not skew totals.
 static int g_total_play_ms = 0;
@@ -476,7 +476,7 @@ static const float CHANNEL_VU_ALPHA = 0.85f; // per-channel VU very responsive
 // Activity/decay tuning for the activity-driven channel VU path
 static const float CHANNEL_ACTIVITY_DECAY = 0.60f; // lower -> faster decay (more responsive)
 
-// Dialog state (defined in gui_dialogs.c) — reference via externs so both
+// Dialog state (defined in gui_dialogs.c) - reference via externs so both
 // translation units share the same state and rendering functions.
 extern bool g_show_rmf_info_dialog;
 extern bool g_rmf_info_loaded;
@@ -2162,7 +2162,7 @@ int main(int argc, char *argv[])
                 {
                     // While exporting we want to disable the virtual keyboard so
                     // user key presses don't affect the export audio. Preserve
-                    // other keys like Escape—only ignore piano mapping here.
+                    // other keys like Escape-only ignore piano mapping here.
                     if (g_exporting)
                     {
                         break;
@@ -3119,7 +3119,7 @@ int main(int argc, char *argv[])
 #endif
                 }
             }
-            // Channel peak markers intentionally removed — we only draw the realtime fill.
+            // Channel peak markers intentionally removed - we only draw the realtime fill.
             // Decay the realtime meter value gradually (small additional smoothing pass)
             // But skip this extra decay when MIDI input is active, since the MIDI service thread
             // manages VU levels directly and this interferes with that.
@@ -6289,7 +6289,7 @@ int main(int argc, char *argv[])
 
                     for (int x = 0; x < drawW; ++x)
                     {
-                        // Map pixel column directly to a sample bucket — no ring wrapping.
+                        // Map pixel column directly to a sample bucket - no ring wrapping.
                         int iStart = (int)((float)x * samplesPerPixel);
                         int iEnd   = (int)((float)(x + 1) * samplesPerPixel) + 1;
                         if (iEnd > g_scope_buf_count) iEnd = g_scope_buf_count;

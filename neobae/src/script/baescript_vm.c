@@ -16,7 +16,7 @@
  */
 
 /****************************************************************************
- * baescript_vm.c — Tree-walking interpreter for BAEScript
+ * baescript_vm.c - Tree-walking interpreter for BAEScript
  *
  * Evaluates the AST produced by the parser.  Channel property writes
  * call through to the BAE API immediately.
@@ -653,7 +653,7 @@ void BAEScript_Exec(BAEScript_Context *ctx, BAEScript_Node *node)
                 if (ctx->song)
                     BAESong_SetTranspose(ctx->song, v);
             }
-            /* MIDI_PROP_LENGTH, MIDI_PROP_EXPORTING are read-only — silently ignore writes */
+            /* MIDI_PROP_LENGTH, MIDI_PROP_EXPORTING are read-only - silently ignore writes */
             break;
         }
 
@@ -718,7 +718,7 @@ void BAEScript_Exec(BAEScript_Context *ctx, BAEScript_Node *node)
             break;
 
         default:
-            /* Expression nodes used as statements — just evaluate */
+            /* Expression nodes used as statements - just evaluate */
             BAEScript_Eval(ctx, node);
             break;
     }

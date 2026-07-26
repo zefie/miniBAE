@@ -40,7 +40,7 @@ import java.util.concurrent.Executors;
  *       {@code CHUNK_SIZE}-byte chunks via {@link SoundChunkPayload}.</li>
  * </ol>
  *
- * <p>The original URL only has to be reachable once — after the server has
+ * <p>The original URL only has to be reachable once - after the server has
  * transcoded it the world save owns a permanent copy.</p>
  *
  * <p>Concurrent requests for the same URL are coalesced into a single
@@ -57,7 +57,7 @@ public final class ServerSoundCache {
     /** Hard cap on the source download (raw, pre-transcode). */
     private static final int MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024;
 
-    /** Dedicated thread pool — downloads + Vorbis encode are blocking and CPU-heavy. */
+    /** Dedicated thread pool - downloads + Vorbis encode are blocking and CPU-heavy. */
     private static final ExecutorService EXECUTOR =
             Executors.newFixedThreadPool(Math.max(1, Runtime.getRuntime().availableProcessors() / 4),
                     r -> {
@@ -172,7 +172,7 @@ public final class ServerSoundCache {
             throw new RuntimeException("NeoBAE did not recognise or could not transcode " + url);
         }
         try {
-            // Write atomically — temp file + move — so a crash mid-write can't poison the cache.
+            // Write atomically - temp file + move - so a crash mid-write can't poison the cache.
             Path tmp = target.resolveSibling(target.getFileName() + ".tmp");
             Files.write(tmp, ogg);
             Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);

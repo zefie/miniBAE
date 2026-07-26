@@ -16,7 +16,7 @@
  */
 
 /****************************************************************************
- * baescript.h — BAEScript: a lightweight JavaScript-like scripting engine
+ * baescript.h - BAEScript: a lightweight JavaScript-like scripting engine
  *              for real-time MIDI manipulation in NeoBAE.
  *
  * The script runs once per playback tick (~15 ms).  Channel properties

@@ -2,7 +2,7 @@ package com.zefie.neobaemc.audio;
 
 /**
  * Wrapper around a NeoBAE song (MIDI/RMF/XMF/RMI/etc.).
- * Adapted from NeoBAEDroid's Song.java (script + meta-event hooks removed —
+ * Adapted from NeoBAEDroid's Song.java (script + meta-event hooks removed -
  * they are not used by the Minecraft music-disc flow).
  */
 public class Song {

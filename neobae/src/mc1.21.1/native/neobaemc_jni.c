@@ -1,5 +1,5 @@
 /*
- * NeoBAE for Minecraft — JNI shim
+ * NeoBAE for Minecraft - JNI shim
  *
  * Exports the JNI symbols expected by com.zefie.neobaemc.audio.{Mixer,Song,Sound,LoadResult}.
  *

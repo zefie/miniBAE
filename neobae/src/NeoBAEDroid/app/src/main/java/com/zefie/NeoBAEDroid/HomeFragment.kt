@@ -753,7 +753,7 @@ class HomeFragment : Fragment() {
                             // Lite → Full: try to resolve each content:// URI to a real filesystem path.
                             convertSafPathsToRaw(rawPaths)
                         }
-                        else -> rawPaths // Same format — no conversion needed.
+                        else -> rawPaths // Same format - no conversion needed.
                     }
                 }
 

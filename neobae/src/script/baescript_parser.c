@@ -16,7 +16,7 @@
  */
 
 /****************************************************************************
- * baescript_parser.c — Recursive-descent parser for BAEScript
+ * baescript_parser.c - Recursive-descent parser for BAEScript
  *
  * Grammar (simplified):
  *   program     = statement*
@@ -803,7 +803,7 @@ static BAEScript_Node *parse_statement(Parser *p)
                     return new_node(NODE_MIDI_ALL_NOTES_OFF, line);
                 }
             }
-            /* Not stop — rewind and fall through to property parsing */
+            /* Not stop - rewind and fall through to property parsing */
             p->lex     = saved_lex;
             p->current = saved_cur;
         }
@@ -844,7 +844,7 @@ static BAEScript_Node *parse_statement(Parser *p)
                     return new_node(NODE_MIXER_RESET, line);
                 }
             }
-            /* Not reset — rewind and parse as property access */
+            /* Not reset - rewind and parse as property access */
             p->lex     = saved_lex;
             p->current = saved_cur;
         }
@@ -921,7 +921,7 @@ static BAEScript_Node *parse_statement(Parser *p)
         }
     }
 
-    /* identifier — could be assignment (x = ...) or expression statement or noteOn/noteOff */
+    /* identifier - could be assignment (x = ...) or expression statement or noteOn/noteOff */
     if (parser_check(p, TOK_IDENT)) {
         /* peek ahead: IDENT '=' => assignment */
         BAEScript_Lexer saved_lex = p->lex;
@@ -938,7 +938,7 @@ static BAEScript_Node *parse_statement(Parser *p)
             return n;
         }
 
-        /* Not an assignment — rewind and parse as expression statement */
+        /* Not an assignment - rewind and parse as expression statement */
         p->lex     = saved_lex;
         p->current = saved_cur;
         BAEScript_Node *expr = parse_expr(p);
@@ -1072,7 +1072,7 @@ void BAEScript_FreeNode(BAEScript_Node *node)
         case NODE_MIDI_ALL_NOTES_OFF:
         case NODE_MIXER_RESET:
         case NODE_HELP:
-            /* leaf nodes — nothing to free */
+            /* leaf nodes - nothing to free */
             break;
     }
     free(node);

@@ -1937,7 +1937,7 @@ private:
         m_pendingUndoState = UndoDocumentState();
         m_pendingUndoLabel.clear();
         m_hasPendingUndo = false;
-        /* Do NOT overwrite m_cleanStateHash here — it must reflect the
+        /* Do NOT overwrite m_cleanStateHash here - it must reflect the
          * last-saved state so that MarkDocumentDirty() can detect when
          * the document has been restored to its original state. */
         InvalidatePianoRollPreviewSong();
@@ -2084,7 +2084,7 @@ private:
                 return false;
             }
         }
-        /* User chose No, or save succeeded — discard is OK */
+        /* User chose No, or save succeeded - discard is OK */
         m_bankHasUnsavedChanges = false;
         m_bankModifiedHintFromSession = false;
         UpdateStatusBar();
@@ -3410,7 +3410,7 @@ private:
         /* The non-dialog path reuses a cached song, so a fresh
          * Preroll/Start/Seek cycle is needed to pick up any program
          * changes.  The dialog path keeps the song alive via a long
-         * looped MIDI track — no restart needed. */
+         * looped MIDI track - no restart needed. */
         if (!hasDialogOverrides) {
             BAESong_Preroll(m_keyboardPreviewSong);
             BAESong_Start(m_keyboardPreviewSong, 0);
@@ -7732,7 +7732,7 @@ private:
 
         /* Restore bank from session */
         if (!bankBlob.empty()) {
-            /* Blob present — restore bank from embedded data */
+            /* Blob present - restore bank from embedded data */
             StopPlayback(true);
             BAEMixer_UnloadBanks(m_playbackMixer);
             m_bankToken = nullptr;
@@ -7771,7 +7771,7 @@ private:
                     BankEditorPanel_LoadBank(m_bankEditorPanel, m_bankToken, utf8.data());
                 }
             } else {
-                /* Blob load failed — fallback to built-in as the only bank. */
+                /* Blob load failed - fallback to built-in as the only bank. */
 #ifdef _BUILT_IN_PATCHES
                 BAEResult bankResult = BAEMixer_LoadBuiltinBank(m_playbackMixer, &m_bankToken);
                 if (bankResult == BAE_NO_ERROR) {
@@ -9673,7 +9673,7 @@ private:
         }
 
         // If displayInstID differs from the real instID, the user right-clicked an alias
-        // node — remove only the alias entry, not the underlying INST resource.
+        // node - remove only the alias entry, not the underlying INST resource.
         if (displayInstID != info.instID) {
             if (BAERmfEditorBank_DeleteAlias(m_bankToken, displayInstID) != BAE_NO_ERROR) {
                 wxMessageBox(wxString::Format("Failed to delete alias for instrument slot %u.",
@@ -9690,7 +9690,7 @@ private:
             return;
         }
 
-        // Real instrument — delete the INST resource (and any aliases pointing to it).
+        // Real instrument - delete the INST resource (and any aliases pointing to it).
         if (BAERmfEditorBank_DeleteInstrument(m_bankToken, instrumentIndex) != BAE_NO_ERROR) {
             wxMessageBox(wxString::Format("Failed to delete bank instrument B%u P%u.",
                                           static_cast<unsigned>(info.bank),

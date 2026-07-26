@@ -16,7 +16,7 @@
  */
 
 /****************************************************************************
- * baescript_lexer.c — Tokenizer for BAEScript
+ * baescript_lexer.c - Tokenizer for BAEScript
  ****************************************************************************/
 
 #include "baescript_internal.h"

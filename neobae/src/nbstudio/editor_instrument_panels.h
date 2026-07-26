@@ -748,7 +748,7 @@ public:
         : wxPanel(parent, wxID_ANY, wxDefaultPosition, wxSize(600, 60), wxBORDER_SIMPLE),
           m_noteOn(std::move(noteOnCallback)),
           m_noteOff(std::move(noteOffCallback)),
-          m_baseNote(36),  /* C2 — scroll to reach 0-127 */
+          m_baseNote(36),  /* C2 - scroll to reach 0-127 */
                     m_octaves(4),
                     m_pressedKey(-1),
                     m_noteIsOn(false),
@@ -2136,7 +2136,7 @@ public:
         if (m_deleteSampleBtn) m_deleteSampleBtn->Show(canDelete);
         if (m_replaceBtn) m_replaceBtn->Show(canReplace);
         if (m_exportBtn) m_exportBtn->Show(canExport);
-        /* Codec/storage/action rows — hide entirely for read-only view */
+        /* Codec/storage/action rows - hide entirely for read-only view */
         wxSizer *parentSizer = GetSizer();
         if (parentSizer) {
             if (m_codecRow) parentSizer->Show(m_codecRow, canNew || canReplace);

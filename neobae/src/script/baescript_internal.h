@@ -16,7 +16,7 @@
  */
 
 /****************************************************************************
- * baescript_internal.h — Shared internal types for BAEScript
+ * baescript_internal.h - Shared internal types for BAEScript
  ****************************************************************************/
 
 #ifndef BAESCRIPT_INTERNAL_H
@@ -33,7 +33,7 @@ extern "C" {
 #endif
 
 /*====================================================================
- *  LEXER — Tokens
+ *  LEXER - Tokens
  *====================================================================*/
 
 typedef enum {
@@ -116,7 +116,7 @@ BAEScript_Token   BAEScript_Lexer_Next(BAEScript_Lexer *lex);
 BAEScript_Token   BAEScript_Lexer_Peek(BAEScript_Lexer *lex);
 
 /*====================================================================
- *  PARSER — AST nodes
+ *  PARSER - AST nodes
  *====================================================================*/
 
 typedef enum {
@@ -294,7 +294,7 @@ BAEScript_Node *BAEScript_Parse(const char *source);
 void BAEScript_FreeNode(BAEScript_Node *node);
 
 /*====================================================================
- *  VM — Interpreter state (the opaque context)
+ *  VM - Interpreter state (the opaque context)
  *====================================================================*/
 
 #define BAESCRIPT_MAX_VARS 256

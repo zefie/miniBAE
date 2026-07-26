@@ -625,7 +625,7 @@ int midi_service_thread_fn(void *unused)
                     }
                     else
                     {
-                        // Velocity 0 Note On == Note Off — always deliver to engine
+                        // Velocity 0 Note On == Note Off - always deliver to engine
                         BAESong_NoteOff(target, (unsigned char)mch, note, 0, 0);
                         unsigned char out[3] = {(unsigned char)(0x80 | (mch & 0x0F)), note, 0};
                         FORWARD_OUT_T(out, 3);

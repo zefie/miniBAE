@@ -15,7 +15,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* sf2_hsb_converter.h — SF2 -> HSB/ZSB conversion using BAE authoring APIs. */
+/* sf2_hsb_converter.h - SF2 -> HSB/ZSB conversion using BAE authoring APIs. */
 
 #ifndef SF2_HSB_CONVERTER_H
 #define SF2_HSB_CONVERTER_H

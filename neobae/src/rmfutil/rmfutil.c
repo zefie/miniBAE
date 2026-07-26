@@ -17,7 +17,7 @@
 
 /****************************************************************************
  *
- * rmfutil.c — Universal RMF/ZMF manipulation tool
+ * rmfutil.c - Universal RMF/ZMF manipulation tool
  *
  * Usage: rmfutil <command> [options...]
  *
@@ -105,7 +105,7 @@ static const char *bool_text(int value)
 }
 
 /*****************************************************************************
- * extract — RMF/ZMF to MIDI
+ * extract - RMF/ZMF to MIDI
  *****************************************************************************/
 
 static int cmd_extract(const char *input_rmf, const char *output_mid)
@@ -229,7 +229,7 @@ static int cmd_extract(const char *input_rmf, const char *output_mid)
 }
 
 /*****************************************************************************
- * create — song + optional bank -> RMF/ZMF
+ * create - song + optional bank -> RMF/ZMF
  *****************************************************************************/
 
 static int cmd_create(int argc, char *argv[])
@@ -470,7 +470,7 @@ static int cmd_create(int argc, char *argv[])
 }
 
 /*****************************************************************************
- * dump — extract MIDI + all samples as WAV
+ * dump - extract MIDI + all samples as WAV
  *****************************************************************************/
 
 static int write_wav_pcm16(const char *path,
@@ -813,7 +813,7 @@ static int cmd_dump(const char *input_rmf, const char *output_dir)
 }
 
 /*****************************************************************************
- * info — RMF/ZMF file inspection (was rmfinfo)
+ * info - RMF/ZMF file inspection (was rmfinfo)
  *****************************************************************************/
 
 typedef enum {
@@ -1603,7 +1603,7 @@ static int cmd_info(const char *filename, OutputFormat output_format)
 static void print_usage(const char *prog)
 {
     fprintf(stderr,
-            "rmfutil — Universal RMF/ZMF manipulation tool\n"
+            "rmfutil - Universal RMF/ZMF manipulation tool\n"
             "\n"
             "Usage: %s <command> [options...]\n"
             "\n"
@@ -1628,7 +1628,7 @@ static void print_usage(const char *prog)
 static void print_create_usage(const char *prog)
 {
     fprintf(stderr,
-            "rmfutil create — embed a bank's instruments into a song and save as RMF/ZMF\n"
+            "rmfutil create - embed a bank's instruments into a song and save as RMF/ZMF\n"
             "\n"
             "Usage: %s create [<bank.hsb|bank.zsb>|-] <song.mid|song.rmf> [output.rmf] [-q]\n"
             "\n"

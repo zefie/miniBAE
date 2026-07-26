@@ -1664,7 +1664,7 @@ int mod2rmf_write_song_tempo_events(Mod2RmfConverter *conv, const ModSongModel *
 int mod2rmf_write_song_cc_events(Mod2RmfConverter *conv, const ModSongModel *song)
 {
     uint32_t i;
-    /* Last emitted CC values: [source track][cc] — 0xFFFF = not yet emitted */
+    /* Last emitted CC values: [source track][cc] - 0xFFFF = not yet emitted */
     uint16_t lastCC[MOD2RMF_MAX_CHANNELS][128];
 
     if (!conv || !song)
@@ -2115,7 +2115,7 @@ int mod2rmf_setup_tracks(Mod2RmfConverter *conv, const ModSongModel *song, const
                                    0);
 
         /* Per-MIDI-channel initialization (pitch bend range, ch10 melodic mode)
-         * — only emit once per MIDI channel even if multiple tracks share it. */
+         * - only emit once per MIDI channel even if multiple tracks share it. */
         if (!midiChInitialized[setup.channel])
         {
             midiChInitialized[setup.channel] = TRUE;
@@ -2233,7 +2233,7 @@ BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char
         return BAE_MEMORY_ERR;
     }
 
-    /* Same for pitch bend — engine keeps bend state across loop-back. */
+    /* Same for pitch bend - engine keeps bend state across loop-back. */
     if (!mod2rmf_ensure_loop_pitch_bend_resets(&song))
     {
         fprintf(stderr, "Error: loop pitch bend reset failed\n");

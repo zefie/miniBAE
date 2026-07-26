@@ -65,7 +65,7 @@ public final class NetworkBindings {
     }
 
     private static void handleSoundChunk(SoundChunkPayload payload, IPayloadContext ctx) {
-        // Run on the network thread on purpose — the registry pipe is
+        // Run on the network thread on purpose - the registry pipe is
         // designed for concurrent writes and we don't want to block the
         // main render thread on large audio buffers.
         ClientStreamRegistry.onChunk(payload.streamId(), payload.totalSize(), payload.data());
@@ -76,7 +76,7 @@ public final class NetworkBindings {
     }
 
     private static void handleSoundCacheClear(SoundCacheClearPayload payload, IPayloadContext ctx) {
-        // Player must be holding *some* item — we don't try to verify it's the
+        // Player must be holding *some* item - we don't try to verify it's the
         // specific disc; even if they swapped slots between the gesture and the
         // packet arriving, evicting the cache they asked about is harmless.
         ctx.enqueueWork(() -> {

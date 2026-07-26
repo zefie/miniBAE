@@ -15,7 +15,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* sf2_parser.h — Lightweight SoundFont 2 (SF2) RIFF parser.
+/* sf2_parser.h - Lightweight SoundFont 2 (SF2) RIFF parser.
  *
  * Parses the SF2 pdta and sdta LIST chunks into in-memory tables.
  * No external library dependencies; only standard C + math.
@@ -132,7 +132,7 @@ typedef struct {
  * SF2 signed-16 semantics (timecents, centibels, cent-Hz, etc.).
  */
 typedef struct {
-    /* Articulation — key/vel range */
+    /* Articulation - key/vel range */
     int loKey;          /* 0–127; -1 = unspecified (global) */
     int hiKey;
     int loVel;

@@ -15,7 +15,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* hsb_writer.c — IREZ/ZREZ resource file serialiser */
+/* hsb_writer.c - IREZ/ZREZ resource file serialiser */
 
 #include "hsb_writer.h"
 

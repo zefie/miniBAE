@@ -21,8 +21,8 @@ Full text: https://www.gnu.org/licenses/gpl-3.0.txt
 WHY GPL?
 --------
 This subproject hard-depends on Etched (https://github.com/jacksonhardaway/etched)
-which is GPL-3.0-only. The combined work — Etched plus the NeoBAE-Etched
-bridge classes here — is therefore distributed under the GPL.
+which is GPL-3.0-only. The combined work - Etched plus the NeoBAE-Etched
+bridge classes here - is therefore distributed under the GPL.
 
 The underlying NeoBAE / miniBAE audio engine in the parent repository
 remains under its original BSD-3-Clause license. Only the Minecraft

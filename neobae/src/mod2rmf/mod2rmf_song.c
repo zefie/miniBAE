@@ -257,7 +257,7 @@ int mod2rmf_ensure_loop_cc_resets(ModSongModel *song)
         /* Only insert a reset if:
          * 1. The channel has CC7 events (otherwise engine default applies)
          * 2. No explicit CC7 already exists at loopStartTick
-         * 3. The CC7 at loopEnd differs from CC7 at loopStart — meaning the
+         * 3. The CC7 at loopEnd differs from CC7 at loopStart - meaning the
          *    engine will have the wrong volume when it loops back */
         if (hasCC7 && !hasCC7AtLoopStart && cc7AtLoopEnd != cc7AtLoopStart)
         {

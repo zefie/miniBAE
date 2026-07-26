@@ -3889,7 +3889,7 @@ static BAEResult PV_ReadWholeFile(BAEPathName filePath, unsigned char **outData,
 /* Scan forward from peekOffset over events at the same tick (zero-delta VLQs),
    updating *bank and *program with the final values seen for the given channel.
    This is used when a NoteOn is parsed before a same-tick Program Change or
-   Bank Select — a common authoring pattern where the instrument is set just
+   Bank Select - a common authoring pattern where the instrument is set just
    after the first note at the same tick. */
 static void PV_PeekSameTickBankProgram(unsigned char const *trackData,
                                        uint32_t trackSize,
@@ -4184,8 +4184,8 @@ static BAEResult PV_ReconcileImportedMidiNotePrograms(BAERmfEditorDocument *docu
     uint32_t trackCount;
     uint16_t *perTrackBank;     /* [trackCount * BAE_MAX_MIDI_CHANNELS] */
     unsigned char *perTrackProgram; /* [trackCount * BAE_MAX_MIDI_CHANNELS] */
-    unsigned char *trackHasBank;    /* [trackCount * BAE_MAX_MIDI_CHANNELS] — set when track has CC0/CC32 for ch */
-    unsigned char *trackHasProgram; /* [trackCount * BAE_MAX_MIDI_CHANNELS] — set when track has PC for ch */
+    unsigned char *trackHasBank;    /* [trackCount * BAE_MAX_MIDI_CHANNELS] - set when track has CC0/CC32 for ch */
+    unsigned char *trackHasProgram; /* [trackCount * BAE_MAX_MIDI_CHANNELS] - set when track has PC for ch */
     uint16_t globalBank[BAE_MAX_MIDI_CHANNELS];
     unsigned char globalProgram[BAE_MAX_MIDI_CHANNELS];
     PV_ChannelStateEvent *events;
@@ -5678,7 +5678,7 @@ static void PV_ParseExtendedInstData(XPTR instData, int32_t instSize, BAERmfEdit
                 break;
 
             default:
-                /* Unknown unit type — can't safely skip (unknown size), bail */
+                /* Unknown unit type - can't safely skip (unknown size), bail */
                 goto bail;
         }
     }
@@ -6010,7 +6010,7 @@ static void PV_LoadEmbeddedSamplesFromRmf(BAERmfEditorDocument *document, XFILE 
                     {
                         /* Single-key split with unset root key: infer from split key.
                          * rootKey=60 is a valid explicit value (sample pitched at middle C)
-                         * and must NOT be overridden — doing so would break instruments
+                         * and must NOT be overridden - doing so would break instruments
                          * where all splits share the same root key for transposition. */
                         splitRoot = (int16_t)split.lowMidi;
                     }
@@ -7528,7 +7528,7 @@ static BAEResult PV_BuildTrackData(BAERmfEditorTrack const *track,
             /* MSB suppressed, LSB emitted: track the LSB portion only */
             currentBank[channel] = (uint16_t)((track->bank & 0x7F));
         }
-        /* else: both suppressed — currentBank stays 0, aux events will set it */
+        /* else: both suppressed - currentBank stays 0, aux events will set it */
     }
 
     if (eventCount)
@@ -9061,7 +9061,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                      * are zero-padded silence at the tail.  Remapping loop
                      * points into that enlarged domain would stretch the loop
                      * region to include the padding, lowering the perceived
-                     * pitch.  Skip the remap for IMA4 — the original loop
+                     * pitch.  Skip the remap for IMA4 - the original loop
                      * points are always valid within the decoded buffer. */
                     if (compType != C_IMA4)
                     {
@@ -9518,7 +9518,7 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                     writeFlags1 = extForInst->flags1;
                     writeFlags2 = extForInst->flags2;
                 }
-                /* Force ZBF_useSampleRate for Opus — see multi-split comment above. */
+                /* Force ZBF_useSampleRate for Opus - see multi-split comment above. */
                 if (PV_IsOpusCompression(leaderSample->targetCompressionType))
                 {
                     writeFlags1 |= ZBF_useSampleRate;
@@ -10990,7 +10990,7 @@ BAEResult BAERmfEditorDocument_SetTrackInfo(BAERmfEditorDocument *document,
         /* Remove bank select (CC0/CC32) and program change aux events that
            target the old channel. This forces PV_BuildTrackData to use the
            auto-insertion path (applyProgram=1) which reads bank/program from
-           the note fields — already updated above. Without this, stale aux
+           the note fields - already updated above. Without this, stale aux
            events would override the per-note values, and partial coverage
            (e.g. program change without bank select) would leave the bank
            stuck at its old value. */
@@ -11042,7 +11042,7 @@ BAEResult BAERmfEditorDocument_SetTrackInfo(BAERmfEditorDocument *document,
 
     /* Ensure volume (CC7) and pan (CC10) settings are reflected as CC events
        so they appear in the MIDI output during preview and export. Add a CC7
-       at tick 0 only when no CC7 event already exists at tick 0 — never
+       at tick 0 only when no CC7 event already exists at tick 0 - never
        overwrite an existing CC7 at any tick. */
     ccEvent = PV_FindTrackCCEventAtTick(track, 7, 0);
     if (!ccEvent)
@@ -13499,7 +13499,7 @@ BAEResult BAERmfEditorDocument_GetInstrumentExtInfo(BAERmfEditorDocument const *
     ext = PV_FindInstrumentExt((BAERmfEditorDocument *)document, (XLongResourceID)instID);
     if (!ext)
     {
-        /* No ext data stored — return defaults.
+        /* No ext data stored - return defaults.
          * flags1/flags2 must match what PV_AddSampleResources uses when no
          * ext record exists, otherwise the INST resource written during
          * preview serialisation loses ZBF_useSampleRate and the engine
@@ -14940,7 +14940,7 @@ BAEResult BAERmfEditorBank_GetInstrumentSampleInfo(BAEBankToken bankToken,
 
     outInfo->sndResourceID = sndID;
 
-    /* Get SND resource info — try snd, csnd, esnd in order */
+    /* Get SND resource info - try snd, csnd, esnd in order */
     {
         int32_t sndSize;
         static const XResourceType sndTypes[] = { ID_SND, ID_CSND, ID_ESND, 0 };
@@ -15561,7 +15561,7 @@ static BAEResult PV_BankReplaceSndResourceInPlace(XFILE bankFile,
    This is ~100x faster than PV_BankReplaceResource for sgain since we avoid copying
    non-audio resources (especially large INST resources). */
 /* Batch SND replacement: replaces multiple SND/CSND/ESND resources in a single
-   bank rebuild. This is the key optimization for sgain — encode all samples first,
+   bank rebuild. This is the key optimization for sgain - encode all samples first,
    then commit once instead of once per sample. */
 typedef struct
 {
@@ -16401,7 +16401,7 @@ BAEResult BAERmfEditorBank_BeginBatchSnd(BAEBankToken bankToken)
         return BAE_PARAM_ERR; /* already in batch mode */
     }
 
-    /* Allocate initial capacity — will grow as needed in PV_BankReplaceSndResourceInPlace */
+    /* Allocate initial capacity - will grow as needed in PV_BankReplaceSndResourceInPlace */
     bankFile->pendingSndBatch = (struct XFilePendingSnd *)XNewPtr(
         64 * (int32_t)sizeof(struct XFilePendingSnd));
     if (!bankFile->pendingSndBatch)
@@ -16668,7 +16668,7 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
         }
         else
         {
-            /* Write to the shared midiRootKey — this affects all splits,
+            /* Write to the shared midiRootKey - this affects all splits,
              * which is correct because the format has no per-split root
              * key in this mode. */
             XPutShort((unsigned char *)instData + 2, (uint16_t)info->rootKey);
@@ -17220,7 +17220,7 @@ BAEResult BAERmfEditorBank_DeleteInstrument(BAEBankToken bankToken,
             {
                 if (newCount == 0)
                 {
-                    // No aliases left — remove the ID_ALIAS resource entirely
+                    // No aliases left - remove the ID_ALIAS resource entirely
                     PV_BankDeleteResource(bankFile, ID_ALIAS, DEFAULT_RESOURCE_ALIAS_ID);
                 }
                 else
@@ -18101,7 +18101,7 @@ static BAEResult PV_BankSaveToMemory(BAEBankToken bankToken,
     return BAE_NO_ERROR;
 }
 
-/* Public wrapper — preserves source bank format (no override). */
+/* Public wrapper - preserves source bank format (no override). */
 BAEResult BAERmfEditorBank_SaveToMemory(BAEBankToken bankToken,
                                         unsigned char **outData,
                                         uint32_t *outSize)
@@ -19898,7 +19898,7 @@ BAEResult BAERmfEditorDocument_DebugReportMidiRoundTripDiff(BAERmfEditorDocument
 }
 
 /* Core encode-and-replace logic shared by BAERmfEditorBank_ReEncodeSample and
-   BAERmfEditorBank_ReEncodeSampleFromPCM.  waveData is borrowed — caller owns it. */
+   BAERmfEditorBank_ReEncodeSampleFromPCM.  waveData is borrowed - caller owns it. */
 static BAEResult PV_BankReEncodeSampleCore(XFILE bankFile,
                                             BAERmfEditorBankSampleInfo *pSampleInfo,
                                             void *waveData,

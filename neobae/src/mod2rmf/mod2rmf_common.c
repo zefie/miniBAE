@@ -871,7 +871,7 @@ void mod2rmf_compute_channel_map(const ChannelProfile profiles[],
 
         if (!profiles[i].used)
         {
-            /* Unused tracker channel — map to ch 0 as placeholder */
+            /* Unused tracker channel - map to ch 0 as placeholder */
             map->trackerToMidi[i] = preferredMidiChannels[0];
             continue;
         }
@@ -888,7 +888,7 @@ void mod2rmf_compute_channel_map(const ChannelProfile profiles[],
 
             if (!map->midiChannelUsed[midiCh])
             {
-                /* Empty MIDI channel — best possible choice */
+                /* Empty MIDI channel - best possible choice */
                 bestMidi = midiCh;
                 foundEmpty = TRUE;
                 break;

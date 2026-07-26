@@ -1,9 +1,9 @@
 #
-# NeoBAE for Minecraft — native CMake build
+# NeoBAE for Minecraft - native CMake build
 #
 # Builds libNeoBAE.{so,dll,dylib} containing:
 #   * BAE_Source/Common/*  (engine)
-#   * BAE_API_Dummy.c       (pull-mode platform backend — no native audio thread)
+#   * BAE_API_Dummy.c       (pull-mode platform backend - no native audio thread)
 #   * neobaemc_jni.c        (JNI shim for com.zefie.neobaemc.audio.*)
 #   * bundled thirdparty codecs (libogg, libvorbis, libflac, lzma, libg722, minimp3)
 #

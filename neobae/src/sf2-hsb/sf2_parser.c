@@ -15,7 +15,7 @@
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
 
-/* sf2_parser.c — SoundFont 2 RIFF parser implementation */
+/* sf2_parser.c - SoundFont 2 RIFF parser implementation */
 
 #include "sf2_parser.h"
 

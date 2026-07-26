@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class ClientStreamRegistry {
 
-    /** ~6 MB — enough to buffer a typical music disc end-to-end if the decoder is slow. */
+    /** ~6 MB - enough to buffer a typical music disc end-to-end if the decoder is slow. */
     private static final int PIPE_CAPACITY = 6 * 1024 * 1024;
 
     private static final AtomicInteger NEXT_ID = new AtomicInteger(1);
