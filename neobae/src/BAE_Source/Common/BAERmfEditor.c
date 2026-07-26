@@ -19506,6 +19506,13 @@ static BAEResult PV_WriteRmfDocumentToResourceFile(BAERmfEditorDocument *documen
             PV_ByteBufferDispose(&midiData);
             return result;
         }
+        result = PV_AddRequiredAliases(document, fileRef, isZmf);
+        debug_message("[RMF Save] loadedFromRmf AddRequiredAliases result=%d\n", (int)result);
+        if (result != BAE_NO_ERROR)
+        {
+            PV_ByteBufferDispose(&midiData);
+            return result;
+        }
         if (XCleanResourceFile(fileRef) == FALSE)
         {
             PV_ByteBufferDispose(&midiData);
