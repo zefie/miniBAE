@@ -1866,9 +1866,18 @@ if(BUILD_CLITOOLS)
   )
   target_link_libraries(adx2wav PRIVATE m)
 
+  add_executable(rmfify
+    neobae/src/rmfify/rmfify.c
+  )
+  target_link_libraries(rmfify PRIVATE neobae m)
+
   add_executable(mthc_decomp
     neobae/src/mthc/mthc_decomp.c
     neobae/src/mthc/mthc_main.c
+  )
+
+  target_include_directories(rmfify PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Common
   )
 
   add_executable(ringtone2mid neobae/src/ringtone2mid/ringtone2mid.c)

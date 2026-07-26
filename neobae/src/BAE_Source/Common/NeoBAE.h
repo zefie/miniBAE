@@ -3631,6 +3631,35 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBankToInstID(
     uint32_t targetInstID,
     unsigned char targetProgram);
 
+#define BAE_RMF_EDITOR_MAX_CLONE_MAPPINGS 256
+
+typedef struct BAERmfEditorCloneUsedMapping
+{
+    uint16_t sourceBank;
+    unsigned char sourceProgram;
+    unsigned char isPercussion;
+    uint32_t requestedInstID;
+    uint32_t resolvedInstID;
+    uint32_t targetInstID;
+    uint32_t sampleCount;
+    char resolvedName[256];
+} BAERmfEditorCloneUsedMapping;
+
+typedef struct BAERmfEditorCloneUsedResult
+{
+    uint32_t pitchedCount;
+    uint32_t percussionCount;
+    uint32_t mappingCount;
+    BAERmfEditorCloneUsedMapping mappings[BAE_RMF_EDITOR_MAX_CLONE_MAPPINGS];
+} BAERmfEditorCloneUsedResult;
+
+/* Clone every bank instrument referenced by the document and remap those
+ * references to the embedded instrument namespace. */
+BAEResult BAERmfEditorDocument_CloneUsedInstrumentsFromBank(
+    BAERmfEditorDocument *document,
+    BAEBankToken bankToken,
+    BAERmfEditorCloneUsedResult *outResult);
+
 /* Query whether a sample is a bank alias (pointer to bank SND, no embedded data). */
 BAEResult BAERmfEditorDocument_IsSampleBankAlias(BAERmfEditorDocument const *document,
                                                   uint32_t sampleIndex,

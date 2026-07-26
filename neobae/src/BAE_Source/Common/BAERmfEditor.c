@@ -690,39 +690,6 @@ static void PV_NoteSampleAssetID(BAERmfEditorDocument *document, uint32_t assetI
     }
 }
 
-/* Search for an existing sample that was cloned from the same bank SND resource.
- * Returns the matching sample's sampleAssetID, or 0 if not found.
- * Two samples are considered duplicates when they have identical originalSndData blobs.
- * excludeIndex is skipped (pass sampleCount to skip none). */
-static uint32_t PV_FindClonedAssetForBankSnd(BAERmfEditorDocument const *document,
-                                              XPTR sndData,
-                                              int32_t sndSize,
-                                              uint32_t excludeIndex)
-{
-    uint32_t i;
-
-    if (!document || !sndData || sndSize <= 0)
-    {
-        return 0;
-    }
-    for (i = 0; i < document->sampleCount; ++i)
-    {
-        BAERmfEditorSample const *s;
-        if (i == excludeIndex)
-        {
-            continue;
-        }
-        s = &document->samples[i];
-        if (s->originalSndData &&
-            s->originalSndSize == sndSize &&
-            XMemCmp(s->originalSndData, sndData, (int32_t)sndSize) == 0)
-        {
-            return s->sampleAssetID;
-        }
-    }
-    return 0;
-}
-
 static BAERmfEditorSample *PV_FindFirstSampleForAsset(BAERmfEditorDocument *document, uint32_t assetID)
 {
     uint32_t i;
@@ -1751,6 +1718,7 @@ static void PV_FreeTrackSysExEvents(BAERmfEditorTrack *track);
 static BAEResult PV_PopulateSongResourceInfoFromDocument(BAERmfEditorDocument const *document,
                                                          SongResource_Info *songInfo,
                                                          XLongResourceID midiResourceID);
+static BAEResult PV_AddRequiredAliases(BAERmfEditorDocument *document, XFILE fileRef, bool isZmf);
 static BAERmfEditorResourceEntry const *PV_FindOriginalResourceByTypeAndID(BAERmfEditorDocument const *document,
                                                                             XResourceType type,
                                                                             XLongResourceID id);
@@ -2930,6 +2898,25 @@ static int PV_CompareCCEvents(void const *left, void const *right)
         return 1;
     }
     return 0;
+}
+
+static BAERmfEditorCCEvent *PV_FindTrackCCEventAtTick(BAERmfEditorTrack *track, unsigned char cc, uint32_t atTick)
+{
+    uint32_t index;
+
+    if (!track)
+    {
+        return NULL;
+    }
+    for (index = 0; index < track->ccEventCount; ++index)
+    {
+        if (track->ccEvents[index].cc == cc &&
+            track->ccEvents[index].tick == atTick)
+        {
+            return &track->ccEvents[index];
+        }
+    }
+    return NULL;
 }
 
 static BAERmfEditorCCEvent *PV_FindTrackCCEvent(BAERmfEditorTrack *track, unsigned char cc, uint32_t eventIndex, uint32_t *outActualIndex)
@@ -7574,7 +7561,7 @@ static BAEResult PV_BuildTrackData(BAERmfEditorTrack const *track,
             noteOn->blobSize = 0;
             noteOn->bank = note->bank;
             noteOn->program = note->program;
-            noteOn->applyProgram = 1;
+            noteOn->applyProgram = (explicitBankMsb[note->channel] || explicitBankLsb[note->channel] || explicitProgram[note->channel]) ? 0 : 1;
 
             noteOff->tick = note->startTick + note->durationTicks;
             noteOff->sequence = note->noteOffOrder;
@@ -11054,14 +11041,11 @@ BAEResult BAERmfEditorDocument_SetTrackInfo(BAERmfEditorDocument *document,
     track->transpose = trackInfo->transpose;
 
     /* Ensure volume (CC7) and pan (CC10) settings are reflected as CC events
-       so they appear in the MIDI output during preview and export. If an event
-       already exists, update it in place; otherwise create one at tick 0. */
-    ccEvent = PV_FindTrackCCEvent(track, 7, 0, NULL);
-    if (ccEvent)
-    {
-        ccEvent->value = trackInfo->volume;
-    }
-    else
+       so they appear in the MIDI output during preview and export. Add a CC7
+       at tick 0 only when no CC7 event already exists at tick 0 — never
+       overwrite an existing CC7 at any tick. */
+    ccEvent = PV_FindTrackCCEventAtTick(track, 7, 0);
+    if (!ccEvent)
     {
         result = PV_AddCCEventToTrack(track, 0, 7, trackInfo->volume, 0);
         if (result != BAE_NO_ERROR)
@@ -11069,12 +11053,8 @@ BAEResult BAERmfEditorDocument_SetTrackInfo(BAERmfEditorDocument *document,
             return result;
         }
     }
-    ccEvent = PV_FindTrackCCEvent(track, 10, 0, NULL);
-    if (ccEvent)
-    {
-        ccEvent->value = trackInfo->pan;
-    }
-    else
+    ccEvent = PV_FindTrackCCEventAtTick(track, 10, 0);
+    if (!ccEvent)
     {
         result = PV_AddCCEventToTrack(track, 0, 10, trackInfo->pan, 0);
         if (result != BAE_NO_ERROR)
@@ -11367,29 +11347,32 @@ static BAEResult PV_RemapTrackInstrumentReferences(BAERmfEditorTrack *track,
 
             if (eventType == CONTROL_CHANGE && aux->dataBytes >= 2)
             {
-                if (sourceBank != targetBank && (remapChannelMask & (uint16_t)(1u << channel)) != 0)
-                {
-                    if (aux->data1 == BANK_MSB && aux->data2 == (unsigned char)((sourceBank >> 7) & 0x7F))
-                    {
-                        aux->data2 = (unsigned char)((targetBank >> 7) & 0x7F);
-                        changed = TRUE;
-                    }
-                    else if (aux->data1 == BANK_LSB && aux->data2 == (unsigned char)(sourceBank & 0x7F))
-                    {
-                        aux->data2 = (unsigned char)(targetBank & 0x7F);
-                        changed = TRUE;
-                    }
-                }
+                unsigned char sourceData2;
 
+                sourceData2 = aux->data2;
                 if (aux->data1 == BANK_MSB)
                 {
-                    currentBank[channel] = (uint16_t)((((uint16_t)aux->data2) << 7) | (currentBank[channel] & 0x7F));
+                    currentBank[channel] = (uint16_t)((((uint16_t)sourceData2) << 7) | (currentBank[channel] & 0x7F));
                     lastBankMsbIndex[channel] = refs[i].index;
                 }
                 else if (aux->data1 == BANK_LSB)
                 {
-                    currentBank[channel] = (uint16_t)((currentBank[channel] & 0x3F80) | ((uint16_t)aux->data2 & 0x7F));
+                    currentBank[channel] = (uint16_t)((currentBank[channel] & 0x3F80) | ((uint16_t)sourceData2 & 0x7F));
                     lastBankLsbIndex[channel] = refs[i].index;
+                }
+
+                if (sourceBank != targetBank && (remapChannelMask & (uint16_t)(1u << channel)) != 0)
+                {
+                    if (aux->data1 == BANK_MSB && sourceData2 == (unsigned char)((sourceBank >> 7) & 0x7F))
+                    {
+                        aux->data2 = (unsigned char)((targetBank >> 7) & 0x7F);
+                        changed = TRUE;
+                    }
+                    else if (aux->data1 == BANK_LSB && sourceData2 == (unsigned char)(sourceBank & 0x7F))
+                    {
+                        aux->data2 = (unsigned char)(targetBank & 0x7F);
+                        changed = TRUE;
+                    }
                 }
             }
             else if (eventType == PROGRAM_CHANGE && aux->dataBytes >= 1)
@@ -11443,11 +11426,7 @@ static BAEResult PV_RemapTrackInstrumentReferences(BAERmfEditorTrack *track,
                                 return insertResult;
                             }
                             changed = TRUE;
-                            restartScan = TRUE;
-                            break;
                         }
-
-                        currentBank[channel] = targetBank;
                     }
                 }
             }
@@ -11471,6 +11450,7 @@ BAEResult BAERmfEditorDocument_RemapInstrumentReferences(BAERmfEditorDocument *d
 {
     uint32_t trackIndex;
     bool changed;
+    uint16_t documentRemapChannelMask;
 
     if (!document || sourceBank > 16383 || targetBank > 16383 || sourceProgram >= 128 || targetProgram >= 128)
     {
@@ -11482,31 +11462,35 @@ BAEResult BAERmfEditorDocument_RemapInstrumentReferences(BAERmfEditorDocument *d
     }
 
     changed = FALSE;
+    documentRemapChannelMask = 0;
+    for (trackIndex = 0; trackIndex < document->trackCount; ++trackIndex)
+    {
+        BAERmfEditorTrack const *track;
+        uint32_t noteIndex;
+
+        track = &document->tracks[trackIndex];
+        if (track->bank == sourceBank && track->program == sourceProgram)
+        {
+            documentRemapChannelMask |= (uint16_t)(1u << (track->channel & 0x0F));
+        }
+        for (noteIndex = 0; noteIndex < track->noteCount; ++noteIndex)
+        {
+            BAERmfEditorNote const *note = &track->notes[noteIndex];
+            if (note->bank == sourceBank && note->program == sourceProgram)
+            {
+                documentRemapChannelMask |= (uint16_t)(1u << (note->channel & 0x0F));
+            }
+        }
+    }
+
     for (trackIndex = 0; trackIndex < document->trackCount; ++trackIndex)
     {
         BAERmfEditorTrack *track;
         uint32_t noteIndex;
         bool trackChanged;
-        uint16_t remapChannelMask;
         BAEResult remapResult;
 
         track = &document->tracks[trackIndex];
-        remapChannelMask = 0;
-
-        if (track->bank == sourceBank && track->program == sourceProgram)
-        {
-            remapChannelMask |= (uint16_t)(1u << (track->channel & 0x0F));
-        }
-        for (noteIndex = 0; noteIndex < track->noteCount; ++noteIndex)
-        {
-            BAERmfEditorNote const *note;
-
-            note = &track->notes[noteIndex];
-            if (note->bank == sourceBank && note->program == sourceProgram)
-            {
-                remapChannelMask |= (uint16_t)(1u << (note->channel & 0x0F));
-            }
-        }
 
         if (track->bank == sourceBank && track->program == sourceProgram)
         {
@@ -11534,7 +11518,7 @@ BAEResult BAERmfEditorDocument_RemapInstrumentReferences(BAERmfEditorDocument *d
                                                         sourceProgram,
                                                         targetBank,
                                                         targetProgram,
-                                                        remapChannelMask,
+                                                        documentRemapChannelMask,
                                                         &trackChanged);
         if (remapResult != BAE_NO_ERROR)
         {
@@ -14275,12 +14259,14 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBank(BAERmfEditorDocument *doc
     bool useSoundModifierAsRootKey;
     int16_t instMiscParam1;
     XLongResourceID targetInstID;
+    uint32_t initialSampleCount;
 
     if (!document || !bankToken)
     {
         return BAE_PARAM_ERR;
     }
     bankFile = (XFILE)bankToken;
+    initialSampleCount = document->sampleCount;
 
     rawName[0] = 0;
     instData = XGetIndexedFileResource(bankFile, ID_INST, &instID,
@@ -14340,7 +14326,7 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBank(BAERmfEditorDocument *doc
             }
             else
             {
-                splitRootForLoad = 0;
+                splitRootForLoad = PV_ClampMidi7Bit(baseRootKey);
             }
 
             sampleName[0] = 0;
@@ -14361,15 +14347,17 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBank(BAERmfEditorDocument *doc
             {
                 debug_message("[CloneFromBank] INST ID=%ld split=%d failed to load sndID=%d\n",
                            (long)instID, (int)splitIndex, (int)split.sndResourceID);
+                while (document->sampleCount > initialSampleCount)
+                {
+                    BAERmfEditorDocument_DeleteSample(document, document->sampleCount - 1);
+                }
+                XDisposePtr(instData);
+                return BAE_BAD_FILE;
             }
             else
             {
                 BAERmfEditorSample *newSample = &document->samples[document->sampleCount - 1];
-                uint32_t sharedAsset = PV_FindClonedAssetForBankSnd(document,
-                                                                    newSample->originalSndData,
-                                                                    newSample->originalSndSize,
-                                                                    document->sampleCount - 1);
-                newSample->sampleAssetID = sharedAsset ? sharedAsset : PV_AllocateSampleAssetID(document);
+                newSample->sampleAssetID = PV_AllocateSampleAssetID(document);
                 newSample->splitVolume = split.miscParameter2;
             }
         }
@@ -14385,7 +14373,7 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBank(BAERmfEditorDocument *doc
         }
         else
         {
-            nonSplitRootForLoad = 0;
+            nonSplitRootForLoad = PV_ClampMidi7Bit(baseRootKey);
         }
 
         sampleName[0] = 0;
@@ -14412,11 +14400,7 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBank(BAERmfEditorDocument *doc
         else
         {
             BAERmfEditorSample *newSample = &document->samples[document->sampleCount - 1];
-            uint32_t sharedAsset = PV_FindClonedAssetForBankSnd(document,
-                                                                newSample->originalSndData,
-                                                                newSample->originalSndSize,
-                                                                document->sampleCount - 1);
-            newSample->sampleAssetID = sharedAsset ? sharedAsset : PV_AllocateSampleAssetID(document);
+            newSample->sampleAssetID = PV_AllocateSampleAssetID(document);
             newSample->splitVolume = (int16_t)XGetShort(&inst->miscParameter2);
         }
     }
@@ -14538,7 +14522,7 @@ BAEResult BAERmfEditorDocument_AliasInstrumentFromBank(BAERmfEditorDocument *doc
             }
             else
             {
-                splitRootForLoad = 0;
+                splitRootForLoad = PV_ClampMidi7Bit(baseRootKey);
             }
 
             sampleName[0] = 0;
@@ -14578,7 +14562,7 @@ BAEResult BAERmfEditorDocument_AliasInstrumentFromBank(BAERmfEditorDocument *doc
         }
         else
         {
-            nonSplitRootForLoad = 0;
+            nonSplitRootForLoad = PV_ClampMidi7Bit(baseRootKey);
         }
 
         sampleName[0] = 0;
@@ -18416,12 +18400,14 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBankToInstID(
     int16_t splitIndex;
     bool useSoundModifierAsRootKey;
     int16_t instMiscParam1;
+    uint32_t initialSampleCount;
 
     if (!document || !bankToken)
     {
         return BAE_PARAM_ERR;
     }
     bankFile = (XFILE)bankToken;
+    initialSampleCount = document->sampleCount;
 
     rawName[0] = 0;
     instData = XGetIndexedFileResource(bankFile, ID_INST, &instID,
@@ -18478,7 +18464,7 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBankToInstID(
             }
             else
             {
-                splitRootForLoad = 0;
+                splitRootForLoad = PV_ClampMidi7Bit(baseRootKey);
             }
 
             sampleName[0] = 0;
@@ -18499,15 +18485,17 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBankToInstID(
             {
                 debug_message("[CloneToInstID] INST ID=%ld split=%d failed to load sndID=%d\n",
                            (long)instID, (int)splitIndex, (int)split.sndResourceID);
+                while (document->sampleCount > initialSampleCount)
+                {
+                    BAERmfEditorDocument_DeleteSample(document, document->sampleCount - 1);
+                }
+                XDisposePtr(instData);
+                return BAE_BAD_FILE;
             }
             else
             {
                 BAERmfEditorSample *newSample = &document->samples[document->sampleCount - 1];
-                uint32_t sharedAsset = PV_FindClonedAssetForBankSnd(document,
-                                                                    newSample->originalSndData,
-                                                                    newSample->originalSndSize,
-                                                                    document->sampleCount - 1);
-                newSample->sampleAssetID = sharedAsset ? sharedAsset : PV_AllocateSampleAssetID(document);
+                newSample->sampleAssetID = PV_AllocateSampleAssetID(document);
                 newSample->splitVolume = split.miscParameter2;
             }
         }
@@ -18523,7 +18511,7 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBankToInstID(
         }
         else
         {
-            nonSplitRootForLoad = 0;
+            nonSplitRootForLoad = PV_ClampMidi7Bit(baseRootKey);
         }
 
         sampleName[0] = 0;
@@ -18550,11 +18538,7 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBankToInstID(
         else
         {
             BAERmfEditorSample *newSample = &document->samples[document->sampleCount - 1];
-            uint32_t sharedAsset = PV_FindClonedAssetForBankSnd(document,
-                                                                newSample->originalSndData,
-                                                                newSample->originalSndSize,
-                                                                document->sampleCount - 1);
-            newSample->sampleAssetID = sharedAsset ? sharedAsset : PV_AllocateSampleAssetID(document);
+            newSample->sampleAssetID = PV_AllocateSampleAssetID(document);
             newSample->splitVolume = (int16_t)XGetShort(&inst->miscParameter2);
         }
     }
@@ -18584,6 +18568,789 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBankToInstID(
     }
 
     XDisposePtr(instData);
+    return BAE_NO_ERROR;
+}
+
+typedef struct PV_UsedInstrumentPair
+{
+    uint16_t bank;
+    unsigned char program;
+} PV_UsedInstrumentPair;
+
+typedef struct PV_UsedPercussion
+{
+    uint16_t bank;
+    unsigned char note;
+} PV_UsedPercussion;
+
+static bool PV_AddUsedInstrumentPair(PV_UsedInstrumentPair *pairs,
+                                     uint32_t *pairCount,
+                                     uint32_t pairCapacity,
+                                     uint16_t bank,
+                                     unsigned char program)
+{
+    uint32_t pairIndex;
+
+    for (pairIndex = 0; pairIndex < *pairCount; ++pairIndex)
+    {
+        if (pairs[pairIndex].bank == bank && pairs[pairIndex].program == program)
+        {
+            return TRUE;
+        }
+    }
+    if (*pairCount >= pairCapacity)
+    {
+        return FALSE;
+    }
+    pairs[*pairCount].bank = bank;
+    pairs[*pairCount].program = program;
+    (*pairCount)++;
+    return TRUE;
+}
+
+static int PV_CompareUsedInstrumentPairs(void const *left, void const *right)
+{
+    PV_UsedInstrumentPair const *leftPair = (PV_UsedInstrumentPair const *)left;
+    PV_UsedInstrumentPair const *rightPair = (PV_UsedInstrumentPair const *)right;
+
+    if (leftPair->bank != rightPair->bank)
+    {
+        return leftPair->bank < rightPair->bank ? -1 : 1;
+    }
+    if (leftPair->program != rightPair->program)
+    {
+        return leftPair->program < rightPair->program ? -1 : 1;
+    }
+    return 0;
+}
+
+static bool PV_AddUsedPercussion(PV_UsedPercussion *entries,
+                                 uint32_t *entryCount,
+                                 uint32_t entryCapacity,
+                                 uint16_t bank,
+                                 unsigned char note)
+{
+    uint32_t entryIndex;
+
+    for (entryIndex = 0; entryIndex < *entryCount; ++entryIndex)
+    {
+        if (entries[entryIndex].bank == bank && entries[entryIndex].note == note)
+        {
+            return TRUE;
+        }
+    }
+    if (*entryCount >= entryCapacity)
+    {
+        return FALSE;
+    }
+    entries[*entryCount].bank = bank;
+    entries[*entryCount].note = note;
+    (*entryCount)++;
+    return TRUE;
+}
+
+static void PV_RemapPercussionNoteReferences(BAERmfEditorDocument *document,
+                                              uint16_t sourceBank,
+                                              unsigned char sourceNote,
+                                              uint16_t targetBank,
+                                              unsigned char targetProgram)
+{
+    uint32_t trackIndex;
+
+    for (trackIndex = 0; trackIndex < document->trackCount; ++trackIndex)
+    {
+        BAERmfEditorTrack *track = &document->tracks[trackIndex];
+        uint32_t noteIndex;
+
+        for (noteIndex = 0; noteIndex < track->noteCount; ++noteIndex)
+        {
+            BAERmfEditorNote *note = &track->notes[noteIndex];
+            if (note->channel == 9 && note->bank == sourceBank && note->note == sourceNote)
+            {
+                note->bank = targetBank;
+                note->program = targetProgram;
+            }
+        }
+    }
+}
+
+static void PV_RemapPitchedNoteReferences(BAERmfEditorDocument *document,
+                                           uint16_t sourceBank,
+                                           unsigned char sourceProgram,
+                                           uint16_t targetBank,
+                                           unsigned char targetProgram)
+{
+    uint32_t trackIndex;
+
+    for (trackIndex = 0; trackIndex < document->trackCount; ++trackIndex)
+    {
+        BAERmfEditorTrack *track = &document->tracks[trackIndex];
+        uint32_t noteIndex;
+
+        for (noteIndex = 0; noteIndex < track->noteCount; ++noteIndex)
+        {
+            BAERmfEditorNote *note = &track->notes[noteIndex];
+            if (note->channel != 9 && note->bank == sourceBank && note->program == sourceProgram)
+            {
+                note->bank = targetBank;
+                note->program = targetProgram;
+            }
+        }
+    }
+}
+
+static BAEResult PV_EnableMelodicPercussionChannel(BAERmfEditorDocument *document)
+{
+    static const unsigned char kNrpnSetup[][2] = {
+        {99, 5}, {98, 0}, {6, 3}, {38, 0}, {99, 127}, {98, 127}
+    };
+    uint32_t trackIndex;
+
+    for (trackIndex = 0; trackIndex < document->trackCount; ++trackIndex)
+    {
+        BAERmfEditorTrack *track = &document->tracks[trackIndex];
+        uint32_t noteIndex;
+        uint32_t eventIndex;
+        uint32_t setupIndex;
+        bool hasPercussionNotes = FALSE;
+
+        for (noteIndex = 0; noteIndex < track->noteCount; ++noteIndex)
+        {
+            if (track->notes[noteIndex].channel == 9)
+            {
+                hasPercussionNotes = TRUE;
+                break;
+            }
+        }
+        if (!hasPercussionNotes)
+        {
+            continue;
+        }
+
+        for (noteIndex = 0; noteIndex < track->noteCount; ++noteIndex)
+        {
+            track->notes[noteIndex].noteOnOrder += 6;
+            track->notes[noteIndex].noteOffOrder += 6;
+        }
+        for (eventIndex = 0; eventIndex < track->ccEventCount; ++eventIndex)
+        {
+            track->ccEvents[eventIndex].eventOrder += 6;
+        }
+        for (eventIndex = 0; eventIndex < track->sysexEventCount; ++eventIndex)
+        {
+            track->sysexEvents[eventIndex].eventOrder += 6;
+        }
+        for (eventIndex = 0; eventIndex < track->auxEventCount; ++eventIndex)
+        {
+            track->auxEvents[eventIndex].eventOrder += 6;
+        }
+        for (eventIndex = 0; eventIndex < track->metaEventCount; ++eventIndex)
+        {
+            track->metaEvents[eventIndex].eventOrder += 6;
+        }
+        track->nextEventOrder += 6;
+
+        for (setupIndex = 0; setupIndex < sizeof(kNrpnSetup) / sizeof(kNrpnSetup[0]); ++setupIndex)
+        {
+            BAEResult result = PV_AddAuxEventToTrack(track,
+                                                      0,
+                                                      (unsigned char)(CONTROL_CHANGE | 9),
+                                                      kNrpnSetup[setupIndex][0],
+                                                      kNrpnSetup[setupIndex][1],
+                                                      2);
+            if (result != BAE_NO_ERROR)
+            {
+                return result;
+            }
+            track->auxEvents[track->auxEventCount - 1].eventOrder = setupIndex;
+        }
+    }
+    return BAE_NO_ERROR;
+}
+
+static uint16_t PV_BankGroupFromInternalBank(uint16_t internalBank)
+{
+    return internalBank >= 128 ? (uint16_t)((internalBank >> 7) & 0x7F) : internalBank;
+}
+
+static void PV_RemoveDocumentInstrumentAuxEvents(BAERmfEditorDocument *document)
+{
+    uint32_t trackIndex;
+
+    for (trackIndex = 0; trackIndex < document->trackCount; ++trackIndex)
+    {
+        BAERmfEditorTrack *track = &document->tracks[trackIndex];
+        uint32_t readIndex;
+        uint32_t writeIndex = 0;
+
+        for (readIndex = 0; readIndex < track->auxEventCount; ++readIndex)
+        {
+            BAERmfEditorAuxEvent const *event = &track->auxEvents[readIndex];
+            unsigned char eventType = (unsigned char)(event->status & 0xF0);
+            bool isInstrumentState = eventType == PROGRAM_CHANGE ||
+                (eventType == CONTROL_CHANGE && event->dataBytes >= 2 &&
+                 (event->data1 == BANK_MSB || event->data1 == BANK_LSB));
+
+            if (isInstrumentState)
+            {
+                continue;
+            }
+            if (writeIndex != readIndex)
+            {
+                track->auxEvents[writeIndex] = track->auxEvents[readIndex];
+            }
+            writeIndex++;
+        }
+        track->auxEventCount = writeIndex;
+    }
+}
+
+static void PV_SynchronizeTrackInstrumentDefaults(BAERmfEditorDocument *document)
+{
+    uint32_t trackIndex;
+
+    for (trackIndex = 0; trackIndex < document->trackCount; ++trackIndex)
+    {
+        BAERmfEditorTrack *track = &document->tracks[trackIndex];
+        uint32_t noteIndex;
+        BAERmfEditorNote const *firstNote = NULL;
+
+        for (noteIndex = 0; noteIndex < track->noteCount; ++noteIndex)
+        {
+            BAERmfEditorNote const *note = &track->notes[noteIndex];
+            if (!firstNote || note->startTick < firstNote->startTick ||
+                (note->startTick == firstNote->startTick && note->noteOnOrder < firstNote->noteOnOrder))
+            {
+                firstNote = note;
+            }
+        }
+        if (firstNote)
+        {
+            track->channel = firstNote->channel;
+            if (firstNote->channel == 9)
+            {
+                track->bank = 0;
+                track->program = 0;
+            }
+            else
+            {
+                track->bank = firstNote->bank;
+                track->program = firstNote->program;
+            }
+        }
+        else
+        {
+            track->bank = 0;
+            track->program = 0;
+        }
+    }
+}
+
+static BAEResult PV_VerifyEmbeddedOnlyInstrumentReferences(BAERmfEditorDocument const *document,
+                                                           uint16_t embeddedBank)
+{
+    uint32_t trackIndex;
+
+    for (trackIndex = 0; trackIndex < document->trackCount; ++trackIndex)
+    {
+        BAERmfEditorTrack const *track = &document->tracks[trackIndex];
+        uint32_t noteIndex;
+
+        for (noteIndex = 0; noteIndex < track->noteCount; ++noteIndex)
+        {
+            if (track->notes[noteIndex].bank != embeddedBank)
+            {
+                debug_message("[CloneUsed] Unmapped note track=%u note=%u bank=%u program=%u\n",
+                              (unsigned)trackIndex,
+                              (unsigned)noteIndex,
+                              (unsigned)track->notes[noteIndex].bank,
+                              (unsigned)track->notes[noteIndex].program);
+                return BAE_BAD_FILE;
+            }
+        }
+    }
+    return BAE_NO_ERROR;
+}
+
+static BAEResult PV_VerifyClonedInstrument(BAERmfEditorDocument const *document,
+                                           BAEBankToken bankToken,
+                                           uint32_t instrumentIndex,
+                                           uint32_t targetInstID,
+                                           uint32_t firstSampleIndex,
+                                           uint32_t *outSampleCount)
+{
+    uint32_t sourceSampleCount;
+    uint32_t sampleOffset;
+
+    sourceSampleCount = 0;
+    if (BAERmfEditorBank_GetInstrumentSampleCount(bankToken,
+                                                   instrumentIndex,
+                                                   &sourceSampleCount) != BAE_NO_ERROR ||
+        sourceSampleCount == 0 ||
+        document->sampleCount != firstSampleIndex + sourceSampleCount)
+    {
+        return BAE_BAD_FILE;
+    }
+
+    for (sampleOffset = 0; sampleOffset < sourceSampleCount; ++sampleOffset)
+    {
+        BAERmfEditorBankSampleInfo sourceSample;
+        BAERmfEditorSample const *clonedSample = &document->samples[firstSampleIndex + sampleOffset];
+
+        if (BAERmfEditorBank_GetInstrumentSampleInfo(bankToken,
+                                                      instrumentIndex,
+                                                      sampleOffset,
+                                                      &sourceSample) != BAE_NO_ERROR ||
+            clonedSample->instID != targetInstID ||
+            clonedSample->rootKey != sourceSample.rootKey ||
+            clonedSample->lowKey != sourceSample.lowKey ||
+            clonedSample->highKey != sourceSample.highKey ||
+            clonedSample->splitVolume != sourceSample.splitVolume)
+        {
+            return BAE_BAD_FILE;
+        }
+    }
+    if (outSampleCount)
+    {
+        *outSampleCount = sourceSampleCount;
+    }
+    return BAE_NO_ERROR;
+}
+
+static void PV_AddCloneUsedMapping(BAERmfEditorCloneUsedResult *outResult,
+                                   uint16_t sourceBank,
+                                   unsigned char sourceProgram,
+                                   bool isPercussion,
+                                   uint32_t requestedInstID,
+                                   uint32_t resolvedInstID,
+                                   uint32_t targetInstID,
+                                   uint32_t sampleCount,
+                                   char const *resolvedName)
+{
+    BAERmfEditorCloneUsedMapping *mapping;
+
+    if (!outResult || outResult->mappingCount >= BAE_RMF_EDITOR_MAX_CLONE_MAPPINGS)
+    {
+        return;
+    }
+    mapping = &outResult->mappings[outResult->mappingCount++];
+    mapping->sourceBank = sourceBank;
+    mapping->sourceProgram = sourceProgram;
+    mapping->isPercussion = isPercussion ? 1 : 0;
+    mapping->requestedInstID = requestedInstID;
+    mapping->resolvedInstID = resolvedInstID;
+    mapping->targetInstID = targetInstID;
+    mapping->sampleCount = sampleCount;
+    XStrCpy(mapping->resolvedName, resolvedName ? resolvedName : "");
+}
+
+BAEResult BAERmfEditorDocument_CloneUsedInstrumentsFromBank(
+    BAERmfEditorDocument *document,
+    BAEBankToken bankToken,
+    BAERmfEditorCloneUsedResult *outResult)
+{
+    enum { kMaximumPitchedInstruments = 128 };
+    static const uint16_t kClonedInstrumentBank = (2u << 7);
+    PV_UsedInstrumentPair pitchedPairs[kMaximumPitchedInstruments];
+    PV_UsedPercussion usedPercussion[kMaximumPitchedInstruments];
+    uint32_t clonedPercussionInstIDs[kMaximumPitchedInstruments];
+    unsigned char clonedPercussionPrograms[kMaximumPitchedInstruments];
+    uint32_t clonedPercussionSampleCounts[kMaximumPitchedInstruments];
+    uint32_t pitchedPairCount;
+    uint32_t usedPercussionCount;
+    uint32_t clonedPitchedCount;
+    uint32_t clonedPercussionCount;
+    uint16_t trackCount;
+    uint16_t trackIndex;
+    BAEResult result;
+
+    if (!document || !bankToken)
+    {
+        return BAE_PARAM_ERR;
+    }
+    if (outResult)
+    {
+        XSetMemory(outResult, sizeof(*outResult), 0);
+    }
+    pitchedPairCount = 0;
+    usedPercussionCount = 0;
+    clonedPitchedCount = 0;
+    clonedPercussionCount = 0;
+    trackCount = 0;
+    result = BAERmfEditorDocument_GetTrackCount(document, &trackCount);
+    if (result != BAE_NO_ERROR)
+    {
+        return result;
+    }
+
+    for (trackIndex = 0; trackIndex < trackCount; ++trackIndex)
+    {
+        uint32_t noteCount;
+        uint32_t noteIndex;
+
+        noteCount = 0;
+        if (BAERmfEditorDocument_GetNoteCount(document, trackIndex, &noteCount) != BAE_NO_ERROR)
+        {
+            continue;
+        }
+        for (noteIndex = 0; noteIndex < noteCount; ++noteIndex)
+        {
+            BAERmfEditorNoteInfo noteInfo;
+            if (BAERmfEditorDocument_GetNoteInfo(document, trackIndex, noteIndex, &noteInfo) != BAE_NO_ERROR)
+            {
+                continue;
+            }
+            if (noteInfo.channel == 9)
+            {
+                if (!PV_AddUsedPercussion(usedPercussion,
+                                          &usedPercussionCount,
+                                          kMaximumPitchedInstruments,
+                                          noteInfo.bank,
+                                          noteInfo.note))
+                {
+                    return BAE_PARAM_ERR;
+                }
+            }
+            else if (!PV_AddUsedInstrumentPair(pitchedPairs,
+                                               &pitchedPairCount,
+                                               kMaximumPitchedInstruments,
+                                               noteInfo.bank,
+                                               noteInfo.program))
+            {
+                return BAE_PARAM_ERR;
+            }
+        }
+    }
+
+    qsort(pitchedPairs, pitchedPairCount, sizeof(pitchedPairs[0]), PV_CompareUsedInstrumentPairs);
+    PV_RemoveDocumentInstrumentAuxEvents(document);
+    for (uint32_t pairIndex = 0; pairIndex < pitchedPairCount; ++pairIndex)
+    {
+        PV_UsedInstrumentPair const *pair = &pitchedPairs[pairIndex];
+        uint32_t instrumentCount;
+        uint32_t instrumentIndex;
+        uint32_t expectedInstID;
+        uint32_t resolvedInstID;
+        uint32_t firstSampleIndex;
+        uint32_t clonedSampleCount;
+        BAERmfEditorBankInstrumentInfo sourceInfo;
+        bool found;
+
+        instrumentCount = 0;
+        expectedInstID = ((uint32_t)PV_BankGroupFromInternalBank(pair->bank) * 256u) + pair->program;
+        resolvedInstID = expectedInstID;
+        found = FALSE;
+        result = BAERmfEditorBank_GetInstrumentCount(bankToken, &instrumentCount);
+        if (result != BAE_NO_ERROR)
+        {
+            return result;
+        }
+        for (instrumentIndex = 0; instrumentIndex < instrumentCount; ++instrumentIndex)
+        {
+            BAERmfEditorBankInstrumentInfo info;
+            if (BAERmfEditorBank_GetInstrumentInfo(bankToken, instrumentIndex, &info) == BAE_NO_ERROR &&
+                info.instID == expectedInstID)
+            {
+                found = TRUE;
+                break;
+            }
+        }
+        if (!found)
+        {
+            if (BAERmfEditorBank_ResolveInstID(bankToken,
+                                               expectedInstID,
+                                               &resolvedInstID,
+                                               &instrumentIndex) != BAE_NO_ERROR)
+            {
+                debug_message("[CloneUsed] Missing pitched INST=%u for bank=%u program=%u\n",
+                              (unsigned)expectedInstID,
+                              (unsigned)pair->bank,
+                              (unsigned)pair->program);
+                return BAE_BAD_FILE;
+            }
+        }
+        if (BAERmfEditorBank_GetInstrumentInfo(bankToken,
+                                                instrumentIndex,
+                                                &sourceInfo) != BAE_NO_ERROR)
+        {
+            return BAE_BAD_FILE;
+        }
+        if (found)
+        {
+            resolvedInstID = sourceInfo.instID;
+        }
+        if (sourceInfo.instID != resolvedInstID)
+        {
+            return BAE_BAD_FILE;
+        }
+
+        firstSampleIndex = document->sampleCount;
+        result = BAERmfEditorDocument_CloneInstrumentFromBank(document,
+                                                               bankToken,
+                                                               instrumentIndex,
+                                                               (unsigned char)clonedPitchedCount);
+        if (result != BAE_NO_ERROR)
+        {
+            return result;
+        }
+        result = PV_VerifyClonedInstrument(document,
+                                           bankToken,
+                                           instrumentIndex,
+                                           512u + clonedPitchedCount,
+                                           firstSampleIndex,
+                                           &clonedSampleCount);
+        if (result != BAE_NO_ERROR)
+        {
+            return result;
+        }
+        PV_AddCloneUsedMapping(outResult,
+                               pair->bank,
+                               pair->program,
+                               FALSE,
+                               expectedInstID,
+                               resolvedInstID,
+                               512u + clonedPitchedCount,
+                               clonedSampleCount,
+                               sourceInfo.name);
+        debug_message("[CloneUsed] source bank=%u program=%u INST=%u instIndex=%u -> target INST=%u program=%u\n",
+                      (unsigned)pair->bank,
+                      (unsigned)pair->program,
+                      (unsigned)expectedInstID,
+                      (unsigned)instrumentIndex,
+                      (unsigned)(512u + clonedPitchedCount),
+                      (unsigned)clonedPitchedCount);
+        PV_RemapPitchedNoteReferences(document,
+                                      pair->bank,
+                                      pair->program,
+                                      kClonedInstrumentBank,
+                                      (unsigned char)clonedPitchedCount);
+        clonedPitchedCount++;
+    }
+
+    if (outResult)
+    {
+        outResult->pitchedCount = clonedPitchedCount;
+    }
+
+    for (uint32_t percussionIndex = 0; percussionIndex < usedPercussionCount; ++percussionIndex)
+    {
+        PV_UsedPercussion const *percussion = &usedPercussion[percussionIndex];
+        uint32_t note = percussion->note;
+        uint32_t requestedInstID;
+        uint32_t instrumentIndex;
+        uint32_t resolvedInstID;
+        uint32_t firstSampleIndex;
+        uint32_t clonedSampleCount;
+        uint32_t clonedIndex;
+        unsigned char targetProgram;
+        BAERmfEditorBankInstrumentInfo sourceInfo;
+
+        requestedInstID = ((uint32_t)PV_BankGroupFromInternalBank(percussion->bank) * 256u) + 128u + note;
+        if (BAERmfEditorBank_ResolveInstID(bankToken,
+                                           requestedInstID,
+                                           &resolvedInstID,
+                                           &instrumentIndex) != BAE_NO_ERROR)
+        {
+            debug_message("[CloneUsed] Missing percussion INST=%u for note=%u\n",
+                          (unsigned)requestedInstID,
+                          (unsigned)note);
+            return BAE_BAD_FILE;
+        }
+        if (BAERmfEditorBank_GetInstrumentInfo(bankToken,
+                                                instrumentIndex,
+                                                &sourceInfo) != BAE_NO_ERROR ||
+            sourceInfo.instID != resolvedInstID)
+        {
+            return BAE_BAD_FILE;
+        }
+        for (clonedIndex = 0; clonedIndex < clonedPercussionCount; ++clonedIndex)
+        {
+            if (clonedPercussionInstIDs[clonedIndex] == resolvedInstID)
+            {
+                break;
+            }
+        }
+        if (clonedIndex < clonedPercussionCount)
+        {
+            targetProgram = clonedPercussionPrograms[clonedIndex];
+            clonedSampleCount = clonedPercussionSampleCounts[clonedIndex];
+        }
+        else
+        {
+            if (clonedPitchedCount + clonedPercussionCount >= 128)
+            {
+                return BAE_PARAM_ERR;
+            }
+            targetProgram = (unsigned char)(clonedPitchedCount + clonedPercussionCount);
+            firstSampleIndex = document->sampleCount;
+            result = BAERmfEditorDocument_CloneInstrumentFromBankToInstID(document,
+                                                                          bankToken,
+                                                                          instrumentIndex,
+                                                                          512u + targetProgram,
+                                                                          targetProgram);
+            if (result != BAE_NO_ERROR)
+            {
+                return result;
+            }
+            result = PV_VerifyClonedInstrument(document,
+                                               bankToken,
+                                               instrumentIndex,
+                                               512u + targetProgram,
+                                               firstSampleIndex,
+                                               &clonedSampleCount);
+            if (result != BAE_NO_ERROR)
+            {
+                return result;
+            }
+            clonedPercussionInstIDs[clonedPercussionCount] = resolvedInstID;
+            clonedPercussionPrograms[clonedPercussionCount] = targetProgram;
+            clonedPercussionSampleCounts[clonedPercussionCount] = clonedSampleCount;
+            clonedPercussionCount++;
+        }
+        PV_RemapPercussionNoteReferences(document,
+                                          percussion->bank,
+                                          (unsigned char)note,
+                                          kClonedInstrumentBank,
+                                          targetProgram);
+        PV_AddCloneUsedMapping(outResult,
+                               percussion->bank,
+                               (unsigned char)note,
+                               TRUE,
+                               requestedInstID,
+                               resolvedInstID,
+                               512u + targetProgram,
+                               clonedSampleCount,
+                               sourceInfo.name);
+    }
+
+    if (outResult)
+    {
+        outResult->percussionCount = clonedPercussionCount;
+    }
+    PV_SynchronizeTrackInstrumentDefaults(document);
+    return PV_VerifyEmbeddedOnlyInstrumentReferences(document, kClonedInstrumentBank);
+}
+
+static BAEResult PV_AddRequiredAliases(BAERmfEditorDocument *document, XFILE fileRef, bool isZmf)
+{
+    uint32_t sampleIndex;
+    uint32_t maxProgram;
+    uint32_t percussionAliasCount;
+    uint32_t pitchedAliasCount;
+    uint32_t aliasCount;
+    uint32_t aliasBytes;
+    XPTR aliasBlob;
+    uint32_t w;
+    uint32_t trackIndex;
+    unsigned char percussionTargetPrograms[128];
+    unsigned char percussionUsedNotes[128];
+    uint32_t percussionNoteCount;
+
+    if (!document || !fileRef)
+    {
+        return BAE_PARAM_ERR;
+    }
+
+    maxProgram = 0;
+    for (sampleIndex = 0; sampleIndex < document->sampleCount; ++sampleIndex)
+    {
+        BAERmfEditorSample const *sample = &document->samples[sampleIndex];
+        if (sample->instID != BAE_EDITOR_INST_ID_NONE && sample->instID >= 512)
+        {
+            uint32_t program = (uint32_t)(sample->instID - 512);
+            if (program > maxProgram)
+            {
+                maxProgram = program;
+            }
+        }
+    }
+
+    if (maxProgram == 0)
+    {
+        return BAE_NO_ERROR;
+    }
+
+    XSetMemory(percussionTargetPrograms, (int32_t)sizeof(percussionTargetPrograms), 0);
+    XSetMemory(percussionUsedNotes, (int32_t)sizeof(percussionUsedNotes), 0);
+    percussionNoteCount = 0;
+
+    for (trackIndex = 0; trackIndex < document->trackCount; ++trackIndex)
+    {
+        BAERmfEditorTrack const *track = &document->tracks[trackIndex];
+        uint32_t noteIndex;
+
+        for (noteIndex = 0; noteIndex < track->noteCount; ++noteIndex)
+        {
+            BAERmfEditorNote const *note = &track->notes[noteIndex];
+            if (note->channel == 9 && note->note < 128)
+            {
+                if (!percussionUsedNotes[note->note])
+                {
+                    percussionUsedNotes[note->note] = 1;
+                    percussionTargetPrograms[note->note] = note->program;
+                    ++percussionNoteCount;
+                }
+            }
+        }
+    }
+
+    pitchedAliasCount = maxProgram + 1;
+    percussionAliasCount = percussionNoteCount;
+    aliasCount = pitchedAliasCount + percussionAliasCount;
+    aliasBytes = 8 + (aliasCount * 8);
+    aliasBlob = XNewPtr((int32_t)aliasBytes);
+    if (!aliasBlob)
+    {
+        return BAE_MEMORY_ERR;
+    }
+    XSetMemory(aliasBlob, (int32_t)aliasBytes, 0);
+
+    XPutLong(&((unsigned char *)aliasBlob)[0], ALIAS_ID_RESOURCE_VERSION);
+    XPutLong(&((unsigned char *)aliasBlob)[4], aliasCount);
+
+    w = 0;
+
+    for (; w < pitchedAliasCount; ++w)
+    {
+        uint32_t offset = (uint32_t)(8 + (w * 8));
+        XPutLong(&((unsigned char *)aliasBlob)[offset],     (uint32_t)w);
+        XPutLong(&((unsigned char *)aliasBlob)[offset + 4], 512u + w);
+    }
+
+    {
+        uint32_t percussionNoteIndex;
+
+        for (percussionNoteIndex = 0; percussionNoteIndex < 128; ++percussionNoteIndex)
+        {
+            uint32_t offset;
+
+            if (!percussionUsedNotes[percussionNoteIndex])
+            {
+                continue;
+            }
+
+            offset = (uint32_t)(8 + (w * 8));
+            XPutLong(&((unsigned char *)aliasBlob)[offset],
+                     ((uint32_t)(2u * 2u + 1u) * 128u) + percussionNoteIndex);
+            XPutLong(&((unsigned char *)aliasBlob)[offset + 4],
+                     512u + (uint32_t)percussionTargetPrograms[percussionNoteIndex]);
+            ++w;
+        }
+    }
+
+    {
+        char pascalName[256];
+        PV_CreatePascalName("EmbeddedInstrumentAliases", pascalName);
+        if (XAddFileResource(fileRef, ID_ALIAS, (XLongResourceID)DEFAULT_RESOURCE_ALIAS_ID, pascalName, aliasBlob, (int32_t)aliasBytes) != 0)
+        {
+            XDisposePtr(aliasBlob);
+            return BAE_FILE_IO_ERROR;
+        }
+    }
+
+    XDisposePtr(aliasBlob);
+    debug_message("[RMF Save] Added %u alias entries (%u pitched, %u percussion)\n",
+                  aliasCount, pitchedAliasCount, percussionAliasCount);
     return BAE_NO_ERROR;
 }
 
@@ -18795,6 +19562,11 @@ static BAEResult PV_WriteRmfDocumentToResourceFile(BAERmfEditorDocument *documen
     }
     result = PV_AddSampleResources(document, fileRef, isZmf);
     debug_message("[RMF Save] AddSampleResources result=%d, sampleCount=%u\n", (int)result, document->sampleCount);
+    if (result == BAE_NO_ERROR)
+    {
+        result = PV_AddRequiredAliases(document, fileRef, isZmf);
+        debug_message("[RMF Save] AddRequiredAliases result=%d\n", (int)result);
+    }
     if (result == BAE_NO_ERROR)
     {
         result = PV_AddSongResource(document, fileRef, midiID);

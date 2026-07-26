@@ -10707,38 +10707,8 @@ private:
     }
 
     void OnCloneAllUsedFromBank(wxCommandEvent &) {
-          /* Editor stores banks as 14-bit values (MSB<<7 | LSB). We want MIDI bank MSB=2,
-              so internal target bank must be 2<<7. */
-          static const uint16_t kClonedInstrumentBank = (2u << 7);
-
-        struct SourcePair {
-            uint16_t bank;
-            unsigned char program;
-        };
-        struct ClonePlan {
-            uint16_t sourceBank;
-            unsigned char sourceProgram;
-            uint32_t instrumentIndex;
-            unsigned char targetProgram;
-        };
-        struct PercClonePlan {
-            unsigned char note;            /* MIDI note number on channel 9 */
-            uint32_t instrumentIndex;      /* index of the source INST in the bank */
-            uint32_t targetInstID;         /* 640 + note */
-        };
-
-        std::unordered_map<uint32_t, SourcePair> usedPairs;
-        std::unordered_map<uint32_t, uint32_t> bankInstByPair;
-        std::unordered_map<uint32_t, uint32_t> instIdToIdx; /* INST ID -> bank instrument index */
-        std::vector<ClonePlan> plans;
-        std::vector<PercClonePlan> percPlans;
-        std::set<unsigned char> usedPercNotes;             /* unique note numbers on channel 9 */
-        std::set<uint32_t> percSourceBankProgKeys;         /* bank/program keys from channel 9 tracks */
-        uint16_t trackCount;
-        char friendlyBuf[128];
-        wxString bankLabel;
-        uint32_t availableInstCount;
-        uint32_t nextProgram;
+        BAERmfEditorCloneUsedResult cloneResult;
+        BAEResult result;
 
         if (!m_document) {
             wxMessageBox("Open or create a document first.", "Clone All Used Instruments", wxOK | wxICON_INFORMATION, this);
@@ -10752,281 +10722,44 @@ private:
             wxMessageBox("No active bank loaded. Load a bank first.", "Clone All Used Instruments", wxOK | wxICON_INFORMATION, this);
             return;
         }
-
-        availableInstCount = 0;
-        if (BAERmfEditorBank_GetInstrumentCount(m_bankToken, &availableInstCount) != BAE_NO_ERROR || availableInstCount == 0) {
-            wxMessageBox("No instruments found in the active bank.", "Clone All Used Instruments", wxOK | wxICON_INFORMATION, this);
+        if (wxMessageBox("Clone all referenced instruments from the active bank and remap the song?",
+                         "Clone All Used Instruments",
+                         wxYES_NO | wxICON_QUESTION,
+                         this) != wxYES) {
             return;
-        }
-
-        if (BAE_GetBankFriendlyName(m_playbackMixer, m_bankToken, friendlyBuf, sizeof(friendlyBuf)) == BAE_NO_ERROR) {
-            bankLabel = wxString::FromUTF8(friendlyBuf);
-        }
-
-        /* Build lookup tables from bank instruments. */
-        for (uint32_t i = 0; i < availableInstCount; ++i) {
-            BAERmfEditorBankInstrumentInfo info;
-            uint32_t key;
-
-            if (BAERmfEditorBank_GetInstrumentInfo(m_bankToken, i, &info) != BAE_NO_ERROR) {
-                continue;
-            }
-            key = (static_cast<uint32_t>(info.bank) << 8) | static_cast<uint32_t>(info.program);
-            if (bankInstByPair.find(key) == bankInstByPair.end()) {
-                bankInstByPair[key] = i;
-            }
-            if (instIdToIdx.find(info.instID) == instIdToIdx.end()) {
-                instIdToIdx[info.instID] = i;
-            }
-        }
-
-        /* Gather pitched bank/program pairs and percussion notes from the MIDI data. */
-        trackCount = 0;
-        BAERmfEditorDocument_GetTrackCount(m_document, &trackCount);
-        for (uint16_t trackIndex = 0; trackIndex < trackCount; ++trackIndex) {
-            BAERmfEditorTrackInfo trackInfo;
-            uint32_t noteCount;
-            bool isPercTrack = false;
-
-            if (BAERmfEditorDocument_GetTrackInfo(m_document, trackIndex, &trackInfo) == BAE_NO_ERROR) {
-                isPercTrack = (trackInfo.channel == 9);
-                uint32_t key = (static_cast<uint32_t>(trackInfo.bank) << 8) | static_cast<uint32_t>(trackInfo.program);
-                if (isPercTrack) {
-                    percSourceBankProgKeys.insert(key);
-                } else {
-                    usedPairs.emplace(key, SourcePair{trackInfo.bank, trackInfo.program});
-                }
-            }
-
-            noteCount = 0;
-            if (BAERmfEditorDocument_GetNoteCount(m_document, trackIndex, &noteCount) != BAE_NO_ERROR) {
-                continue;
-            }
-            for (uint32_t noteIndex = 0; noteIndex < noteCount; ++noteIndex) {
-                BAERmfEditorNoteInfo noteInfo;
-
-                if (BAERmfEditorDocument_GetNoteInfo(m_document, trackIndex, noteIndex, &noteInfo) != BAE_NO_ERROR) {
-                    continue;
-                }
-                if (noteInfo.channel == 9) {
-                    usedPercNotes.insert(noteInfo.note);
-                    uint32_t key = (static_cast<uint32_t>(noteInfo.bank) << 8) | static_cast<uint32_t>(noteInfo.program);
-                    percSourceBankProgKeys.insert(key);
-                } else {
-                    uint32_t key = (static_cast<uint32_t>(noteInfo.bank) << 8) | static_cast<uint32_t>(noteInfo.program);
-                    usedPairs.emplace(key, SourcePair{noteInfo.bank, noteInfo.program});
-                }
-            }
-        }
-
-        if (usedPairs.empty() && usedPercNotes.empty()) {
-            wxMessageBox("No instrument references were found in the current document.", "Clone All Used Instruments", wxOK | wxICON_INFORMATION, this);
-            return;
-        }
-
-        /* ---- Build pitched clone plans (with alias resolution) ---- */
-        nextProgram = 0;
-        {
-            std::vector<uint32_t> sortedKeys;
-            sortedKeys.reserve(usedPairs.size());
-            for (auto const &entry : usedPairs) {
-                sortedKeys.push_back(entry.first);
-            }
-            std::sort(sortedKeys.begin(), sortedKeys.end());
-
-            for (uint32_t key : sortedKeys) {
-                auto bankIt = bankInstByPair.find(key);
-                if (bankIt == bankInstByPair.end()) {
-                    /* Direct lookup failed — try alias resolution.
-                     * Compute the expected INST ID for this bank/program pair.
-                     * Editor internal bank = (MSB<<7)|LSB. For pitched channels:
-                     * internalBankIndex = MSB * 2; instID = internalBankIndex * 128 + program. */
-                    SourcePair const &sp = usedPairs[key];
-                    uint16_t midiMSB = (sp.bank >> 7) & 0x7F;
-                    uint32_t expectedInstID = static_cast<uint32_t>(midiMSB) * 256u + static_cast<uint32_t>(sp.program);
-                    uint32_t resolvedInstID = 0;
-                    uint32_t resolvedIdx = 0;
-                    if (BAERmfEditorBank_ResolveInstID(m_bankToken, expectedInstID,
-                                                       &resolvedInstID, &resolvedIdx) == BAE_NO_ERROR) {
-                        bankIt = instIdToIdx.find(resolvedInstID);
-                        if (bankIt == instIdToIdx.end()) {
-                            continue; /* alias target not found in our index */
-                        }
-                        /* Use the resolved index. bankIt now points to the real INST. */
-                    } else {
-                        continue; /* no match, no alias */
-                    }
-                }
-                if (nextProgram >= 128) {
-                    wxMessageBox("Clone-all supports up to 128 deterministic pitched slots (INST 512-639).",
-                                 "Clone All Used Instruments",
-                                 wxOK | wxICON_ERROR,
-                                 this);
-                    return;
-                }
-
-                plans.push_back(ClonePlan{
-                    usedPairs[key].bank,
-                    usedPairs[key].program,
-                    bankIt->second,
-                    static_cast<unsigned char>(nextProgram)
-                });
-                ++nextProgram;
-            }
-        }
-
-        /* ---- Build percussion clone plans ---- */
-        for (unsigned char percNote : usedPercNotes) {
-            /* For GM Default mode on bank 0: percussion INST ID = 128 + note.
-             * For higher banks: (MSB*2+1)*128 + note. We assume bank 0 for now
-             * since that's the standard case; the bank select for channel 9 is
-             * typically 0. */
-            uint32_t percInstID = 128u + static_cast<uint32_t>(percNote);
-            uint32_t resolvedInstID = percInstID;
-            uint32_t bankIdx = 0;
-
-            /* Direct lookup first. */
-            auto directIt = instIdToIdx.find(percInstID);
-            if (directIt != instIdToIdx.end()) {
-                bankIdx = directIt->second;
-            } else {
-                /* Try alias resolution. */
-                if (BAERmfEditorBank_ResolveInstID(m_bankToken, percInstID,
-                                                   &resolvedInstID, &bankIdx) != BAE_NO_ERROR) {
-                    continue; /* percussion instrument not available in bank */
-                }
-            }
-            /* Target: user percussion bank (bank index 5) = 640 + note. */
-            percPlans.push_back(PercClonePlan{
-                percNote,
-                bankIdx,
-                640u + static_cast<uint32_t>(percNote)
-            });
-        }
-
-        if (plans.empty() && percPlans.empty()) {
-            wxString msg = "No used bank/program pairs matched instruments in the active bank.";
-            if (!bankLabel.empty()) {
-                msg += "\nActive bank: ";
-                msg += bankLabel;
-            }
-            wxMessageBox(msg, "Clone All Used Instruments", wxOK | wxICON_INFORMATION, this);
-            return;
-        }
-
-        {
-            wxString confirmMsg = wxString::Format("Clone and remap %u pitched + %u percussion instrument(s)",
-                                                   static_cast<unsigned>(plans.size()),
-                                                   static_cast<unsigned>(percPlans.size()));
-            if (!bankLabel.empty()) {
-                confirmMsg += wxString::Format(" from bank '%s'", bankLabel);
-            }
-            confirmMsg += "?";
-            if (wxMessageBox(confirmMsg,
-                             "Clone All Used Instruments",
-                             wxYES_NO | wxICON_QUESTION,
-                             this) != wxYES) {
-                return;
-            }
         }
 
         BeginUndoAction("Clone All Used Instruments");
-
-        /* ---- Execute pitched clones and remaps ---- */
-        for (ClonePlan const &plan : plans) {
-            BAEResult cloneResult;
-            BAEResult remapResult;
-
-            cloneResult = BAERmfEditorDocument_CloneInstrumentFromBank(m_document,
-                                                                        m_bankToken,
-                                                                        plan.instrumentIndex,
-                                                                        plan.targetProgram);
-            if (cloneResult != BAE_NO_ERROR) {
-                CancelUndoAction();
-                wxMessageBox(wxString::Format("Failed to clone pitched source %u:%u from bank.",
-                                              static_cast<unsigned>(plan.sourceBank),
-                                              static_cast<unsigned>(plan.sourceProgram)),
-                             "Clone All Used Instruments",
-                             wxOK | wxICON_ERROR,
-                             this);
-                return;
-            }
-
-            remapResult = BAERmfEditorDocument_RemapInstrumentReferences(m_document,
-                                                                          plan.sourceBank,
-                                                                          plan.sourceProgram,
-                                                                          kClonedInstrumentBank,
-                                                                          plan.targetProgram);
-            if (remapResult != BAE_NO_ERROR) {
-                CancelUndoAction();
-                wxMessageBox(wxString::Format("Failed to remap source %u:%u to %u:%u.",
-                                              static_cast<unsigned>(plan.sourceBank),
-                                              static_cast<unsigned>(plan.sourceProgram),
-                                              static_cast<unsigned>(DisplayBankFromInternal(kClonedInstrumentBank)),
-                                              static_cast<unsigned>(plan.targetProgram)),
-                             "Clone All Used Instruments",
-                             wxOK | wxICON_ERROR,
-                             this);
-                return;
-            }
+        result = BAERmfEditorDocument_CloneUsedInstrumentsFromBank(m_document,
+                                                                   m_bankToken,
+                                                                   &cloneResult);
+        if (result != BAE_NO_ERROR) {
+            CancelUndoAction();
+            wxMessageBox(wxString::Format("Failed to clone used instruments from bank (error %d).",
+                                          static_cast<int>(result)),
+                         "Clone All Used Instruments",
+                         wxOK | wxICON_ERROR,
+                         this);
+            return;
         }
-
-        /* ---- Execute percussion clones ---- */
-        for (PercClonePlan const &pp : percPlans) {
-            BAEResult cloneResult;
-
-            cloneResult = BAERmfEditorDocument_CloneInstrumentFromBankToInstID(
-                m_document,
-                m_bankToken,
-                pp.instrumentIndex,
-                pp.targetInstID,
-                pp.note);
-            if (cloneResult != BAE_NO_ERROR) {
-#if _DEBUG                
-                printf("[CloneAll] Failed to clone percussion note %d (INST %u -> %u)\n",
-                           (int)pp.note, 128u + (unsigned)pp.note, (unsigned)pp.targetInstID);
-                /* Non-fatal: skip this drum sound and continue. */
-#endif
-            }
+        if (cloneResult.pitchedCount == 0 && cloneResult.percussionCount == 0) {
+            CancelUndoAction();
+            wxMessageBox("No used instrument references matched the active bank.",
+                         "Clone All Used Instruments",
+                         wxOK | wxICON_INFORMATION,
+                         this);
+            return;
         }
-
-        /* ---- Remap percussion track banks ----
-         * For any channel-9 bank/program pairs that weren't already remapped by
-         * the pitched phase, remap the bank to kClonedInstrumentBank (keep program). */
-        for (uint32_t percKey : percSourceBankProgKeys) {
-            uint16_t percBank = static_cast<uint16_t>((percKey >> 8) & 0xFFFF);
-            unsigned char percProg = static_cast<unsigned char>(percKey & 0xFF);
-            if (percBank == kClonedInstrumentBank) {
-                continue; /* already in the target bank */
-            }
-            /* Check if this pair was already remapped by the pitched phase. */
-            bool alreadyRemapped = false;
-            for (ClonePlan const &plan : plans) {
-                if (plan.sourceBank == percBank && plan.sourceProgram == percProg) {
-                    alreadyRemapped = true;
-                    break;
-                }
-            }
-            if (!alreadyRemapped) {
-                BAERmfEditorDocument_RemapInstrumentReferences(m_document,
-                                                               percBank,
-                                                               percProg,
-                                                               kClonedInstrumentBank,
-                                                               percProg);
-            }
-        }
-
         CommitUndoAction("Clone All Used Instruments");
 
         PopulateSampleList();
         StopKeyboardPreview();
         PianoRollPanel_RefreshFromDocument(m_pianoRoll, false);
         InvalidatePianoRollPreviewSong();
-        unsigned totalCloned = static_cast<unsigned>(plans.size() + percPlans.size());
         SetStatusText(wxString::Format("Cloned and remapped %u instrument(s) (%u pitched, %u percussion)",
-                                       totalCloned,
-                                       static_cast<unsigned>(plans.size()),
-                                       static_cast<unsigned>(percPlans.size())), 0);
+                                       static_cast<unsigned>(cloneResult.pitchedCount + cloneResult.percussionCount),
+                                       static_cast<unsigned>(cloneResult.pitchedCount),
+                                       static_cast<unsigned>(cloneResult.percussionCount)), 0);
     }
 
     void OnAliasFromBank(wxCommandEvent &) {
