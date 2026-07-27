@@ -1844,6 +1844,114 @@ void GM_DLS_ResetForSong(GM_Song* pSong)
     synth->nextVoiceSerial = 0;
 }
 
+static DLS_Instrument* DLS_Bank_FindSelector(DLS_Bank* bank, uint32_t selector);
+
+/* SP-MIDI 1.0b Figure 6: each entry lists all program numbers in one
+   instrument group, terminated by -1.  When searching for a group match,
+   every member is tried in priority order (first = canonical target). */
+static const int8_t g_spmidi_melodic_groups[][16] = {
+    {0,1,2,3,4,5,6,7,-1},           /* Piano → 0 Acoustic Grand */
+    {8,9,10,11,13,14,15,16,46,47,99,109,-1}, /* Chromatic Perc → 12 Vibraphone */
+    {17,18,19,20,21,22,23,24,110,-1}, /* Organ → 17 Drawbar */
+    {25,26,27,28,29,30,31,32,105,106,107,108,-1}, /* Guitar → 28 Clean */
+    {33,34,35,36,37,38,39,40,-1},     /* Bass → 34 Finger */
+    {41,42,43,44,111,-1},             /* Strings → 41 Violin */
+    {45,49,50,51,52,-1},              /* Ensemble → 49 String Ens1 */
+    {48,56,113,114,115,116,117,118,119,-1}, /* Percussive → 115 SteelDrums */
+    {53,54,55,89,91,92,93,94,95,96,97,98,100,101,102,103,104,-1}, /* Pad/Synth → 90 WarmPad */
+    {57,58,59,60,61,62,63,64,-1},     /* Brass → 57 Trumpet */
+    {65,66,67,68,69,70,71,72,112,-1}, /* Reed → 67 TenorSax */
+    {73,74,75,76,77,78,79,80,-1},     /* Pipe → 74 Flute */
+    {81,82,83,84,85,86,87,88,-1},     /* Synth Lead → 82 Saw */
+    {-1}                              /* sentinel */
+};
+
+static const int8_t g_spmidi_percussion_groups[][16] = {
+    {36,35,-1},       /* Bass Drum → 36 */
+    {40,38,39,-1},    /* Snare → 40 */
+    {42,44,71,80,-1}, /* Closed HH → 42 */
+    {46,55,-1},       /* Open HH → 46 */
+    {49,57,-1},       /* Crash → 49 */
+    {50,47,48,-1},    /* High Tom → 50 */
+    {45,41,43,-1},    /* Low Tom → 45 */
+    {51,52,53,59,-1}, /* Ride → 51 */
+    {54,-1},          /* Tambourine → 54 */
+    {62,60,65,78,-1}, /* Mute Hi Conga → 62 */
+    {64,61,63,66,79,-1}, /* Low Conga → 64 */
+    {70,69,-1},       /* Maracas → 70 */
+    {75,37,56,-1},    /* Claves → 75 */
+    {67,68,-1},       /* Agogo → 67 */
+    {72,-1},          /* Long Whistle → 72 */
+    {73,-1},          /* Short Guiro → 73 */
+    {74,-1},          /* Long Guiro → 74 */
+    {76,77,-1},       /* Wood Block → 76 */
+    {81,-1},          /* Open Triangle → 81 */
+    {-1}              /* sentinel */
+};
+
+/* SP-MIDI 1.0b Figure 7: percussion key remap.  Each group's first
+   member is the minimum-sound target that replaces all later members.
+   Returns the input key unchanged if no remap group is found. */
+static int32_t DLS_SPMIDI_RemapPercussionKey(int32_t key) {
+    if (key < 24 || key > 127) return key;
+    for (int32_t g = 0; g_spmidi_percussion_groups[g][0] != -1; g++) {
+        for (int32_t m = 1; g_spmidi_percussion_groups[g][m] != -1; m++) {
+            if (g_spmidi_percussion_groups[g][m] == key) {
+                return g_spmidi_percussion_groups[g][0];
+            }
+        }
+    }
+    return key;
+}
+
+/* Search each SP-MIDI group for the requested program; if found, iterate
+   the group's members and return the first program that exists in the bank. */
+static int32_t DLS_SPMIDI_RemapProgram(DLS_Bank* bank, int32_t bankMsb, int32_t program) {
+    DLS_Instrument* inst;
+    uint32_t selector;
+    int32_t candidate;
+
+    if (bankMsb == 121) {
+        if (program < 0 || program > 127) return program;
+        for (int32_t g = 0; g_spmidi_melodic_groups[g][0] != -1; g++) {
+            bool inGroup = false;
+            for (int32_t m = 0; g_spmidi_melodic_groups[g][m] != -1; m++) {
+                if (g_spmidi_melodic_groups[g][m] == program) { inGroup = true; break; }
+            }
+            if (!inGroup) continue;
+            for (int32_t m = 0; g_spmidi_melodic_groups[g][m] != -1; m++) {
+                candidate = g_spmidi_melodic_groups[g][m];
+                selector = DLS_Selector(121, 0, candidate);
+                inst = DLS_Bank_FindSelector(bank, selector);
+                if (inst) return candidate;
+            }
+            return program;
+        }
+        return program;
+    }
+
+    if (bankMsb == 120) {
+        if (program < 24 || program > 127) return program;
+        for (int32_t g = 0; g_spmidi_percussion_groups[g][0] != -1; g++) {
+            bool inGroup = false;
+            for (int32_t m = 0; g_spmidi_percussion_groups[g][m] != -1; m++) {
+                if (g_spmidi_percussion_groups[g][m] == program) { inGroup = true; break; }
+            }
+            if (!inGroup) continue;
+            for (int32_t m = 0; g_spmidi_percussion_groups[g][m] != -1; m++) {
+                candidate = g_spmidi_percussion_groups[g][m];
+                selector = DLS_Selector(120, 0, candidate);
+                inst = DLS_Bank_FindSelector(bank, selector);
+                if (inst) return candidate;
+            }
+            return program;
+        }
+        return program;
+    }
+
+    return program;
+}
+
 static DLS_Instrument* DLS_Bank_FindSelector(DLS_Bank* bank, uint32_t selector) {
     for (uint32_t i = 0; i < bank->instrumentCount; i++) {
         DLS_Instrument* inst = &bank->instruments[i];
@@ -1942,6 +2050,22 @@ static DLS_Instrument* DLS_Bank_FindMidiInstrument(DLS_Bank* bank, int32_t bankI
         }
     }
 
+    /* Non-quirks (SP-MIDI compliant): remap missing instruments per
+       SP-MIDI 1.0b Figures 6-7.  Applied before the dead-end early
+       returns below so remapping works for the standard 121:0 and
+       120:0 families as well. */
+    if (!g_use_mobilebae_quirks) {
+        int32_t spRemap = DLS_SPMIDI_RemapProgram(bank, bankMsb, program);
+        if (spRemap != program) {
+            selector = DLS_Selector(bankMsb, bankLsb, spRemap);
+            inst = DLS_Bank_FindSelector(bank, selector);
+            if (inst) {
+                debug_message("DLS Synth: SP-MIDI remap program %d -> %d\n", program, spRemap);
+                return inst;
+            }
+        }
+    }
+
     if ((bankId & 0x3F80) == (121 << 7)) {
         if (bankLsb == 0) return NULL;
         selector = DLS_Selector(121, 0, program);
@@ -1953,8 +2077,7 @@ static DLS_Instrument* DLS_Bank_FindMidiInstrument(DLS_Bank* bank, int32_t bankI
         return NULL;
     }
 
-    selector = DLS_Selector(120, 0, 0);
-    return DLS_Bank_FindSelector(bank, selector);
+    return NULL;
 }
 
 static DLS_Instrument* DLS_Synth_FindInstrument(DLS_Synth* synth, int32_t bankId, int32_t program) {
@@ -2654,13 +2777,25 @@ void GM_DLS_ProcessNoteOn(GM_Song* pSong, uint16_t channel, uint16_t note, uint1
     /* Apply percussion key alias for drum banks to find region,
        but keep original note for voice initialization and pitch */
     int32_t voiceNote = note;
-    if (((ch->selectedBankSelector & 0x3F80) == (120 << 7)) &&
-        inst->parentBank && inst->parentBank->hasPercussionKeyAliases) {
-        int32_t aliasedNote = inst->parentBank->percussionKeyAliases[note & 0x7F] & 0x7F;
-        if (aliasedNote != note) {
-            debug_message("DLS Synth: percussion key alias key %d -> %d for region lookup\n", note, aliasedNote);
+    if ((ch->selectedBankSelector & 0x3F80) == (120 << 7)) {
+        if (inst->parentBank && inst->parentBank->hasPercussionKeyAliases) {
+            int32_t aliasedNote = inst->parentBank->percussionKeyAliases[note & 0x7F] & 0x7F;
+            if (aliasedNote != note) {
+                debug_message("DLS Synth: percussion key alias key %d -> %d for region lookup\n", note, aliasedNote);
+            }
+            voiceNote = aliasedNote;
+        } else if (!g_use_mobilebae_quirks) {
+            /* SP-MIDI percussion key remap (Figure 7): when the DLS bank
+               has no PGAL key aliases, remap drum keys by group at note-on
+               time.  This is only the region-lookup key — the voice still
+               uses the original note for pitch. */
+            int32_t spRemap = DLS_SPMIDI_RemapPercussionKey(note & 0x7F);
+            if (spRemap != (int32_t)(note & 0x7F)) {
+                debug_message("DLS Synth: SP-MIDI perc key alias %d -> %d for region lookup\n",
+                              note & 0x7F, spRemap);
+                voiceNote = spRemap;
+            }
         }
-        voiceNote = aliasedNote;
     }
 
     int32_t regionKey = voiceNote;
@@ -2714,13 +2849,19 @@ void GM_DLS_ProcessNoteOff(GM_Song* pSong, uint16_t channel, uint16_t note, uint
     DLS_Bank* aliasBank = (ch->selectedInstrument && ch->selectedInstrument->parentBank)
         ? ch->selectedInstrument->parentBank
         : (synth->banks[1] ? synth->banks[1] : synth->banks[0]);
-    if (((bankSelector & 0x3F80) == (120 << 7)) &&
-        aliasBank && aliasBank->hasPercussionKeyAliases) {
-        int32_t aliasedNote = aliasBank->percussionKeyAliases[note & 0x7F] & 0x7F;
-        if (aliasedNote != note) {
-            debug_message("DLS Synth: note-off percussion key alias key %d -> %d\n", note, aliasedNote);
+    if ((bankSelector & 0x3F80) == (120 << 7)) {
+        if (aliasBank && aliasBank->hasPercussionKeyAliases) {
+            int32_t aliasedNote = aliasBank->percussionKeyAliases[note & 0x7F] & 0x7F;
+            if (aliasedNote != note) {
+                debug_message("DLS Synth: note-off percussion key alias key %d -> %d\n", note, aliasedNote);
+            }
+            matchNote = aliasedNote;
+        } else if (!g_use_mobilebae_quirks) {
+            int32_t spRemap = DLS_SPMIDI_RemapPercussionKey(note & 0x7F);
+            if (spRemap != (int32_t)(note & 0x7F)) {
+                matchNote = spRemap;
+            }
         }
-        matchNote = aliasedNote;
     }
     
     for (int i = 0; i < 256; i++) {
@@ -2762,6 +2903,18 @@ bool GM_DLS_HasProgram(GM_Song* pSong, uint16_t channel, uint16_t program)
     DLS_ChannelState* ch = &synth->channels[channel & 0x0F];
 
     dls_program_change(synth, ch, program);
+
+    /* Quirks mode: always claim program exists for GM/DLS bank families
+       (MSB 0/120/121) so the channel stays on the DLS render path.
+       Non-GM bank requests (e.g. MSB 1-119, 122-127) fall through to
+       the normal HSB bank.  Missing GM instruments produce silence. */
+    if (g_use_mobilebae_quirks) {
+        int32_t msb = ch->bankMsb & 0x7F;
+        if (msb == 0 || msb == 120 || msb == 121) {
+            return TRUE;
+        }
+    }
+
     return (ch->selectedInstrument != NULL) ? TRUE : FALSE;
 }
 
