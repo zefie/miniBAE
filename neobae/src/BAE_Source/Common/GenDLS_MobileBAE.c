@@ -2070,7 +2070,7 @@ static DLS_Instrument* DLS_Bank_FindMidiInstrument(DLS_Bank* bank, int32_t bankI
         bool bankHasProgram = false;
         for (uint32_t i = 0; i < bank->instrumentCount; i++) {
             DLS_Instrument* chk = &bank->instruments[i];
-            if (chk->program == program && (bankMsb == 120 ? chk->drum : !chk->drum)) {
+            if (chk->program == program && chk->bankMsb == bankMsb) {
                 bankHasProgram = true;
                 break;
             }
@@ -2957,17 +2957,6 @@ bool GM_DLS_HasProgram(GM_Song* pSong, uint16_t channel, uint16_t program)
     DLS_ChannelState* ch = &synth->channels[channel & 0x0F];
 
     dls_program_change(synth, ch, program);
-
-    /* Quirks mode: always claim program exists for GM/DLS bank families
-       (MSB 0/120/121) so the channel stays on the DLS render path.
-       Non-GM bank requests (e.g. MSB 1-119, 122-127) fall through to
-        the normal HSB bank.  Missing GM instruments produce silence. */
-    if (dls_bank_quirks(ch->selectedInstrument ? ch->selectedInstrument->parentBank : NULL)) {
-        int32_t msb = ch->bankMsb & 0x7F;
-        if (msb == 0 || msb == 120 || msb == 121) {
-            return TRUE;
-        }
-    }
 
     return (ch->selectedInstrument != NULL) ? TRUE : FALSE;
 }
