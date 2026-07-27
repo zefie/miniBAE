@@ -63,7 +63,15 @@ void GM_SetMixerDLSMode(bool isDLS)
 
 bool g_use_mobilebae_quirks = true;
 
-static void DLS_ApplyDirectConnection(DLS_Articulation* art, const DLS_Connection* connection);
+static bool dls_bank_quirks(const DLS_Bank* bank) {
+    return g_use_mobilebae_quirks || (bank && bank->forceQuirks);
+}
+
+static bool dls_bank_spmidi(const DLS_Bank* bank) {
+    return !g_use_mobilebae_quirks && !(bank && bank->forceQuirks);
+}
+
+static void DLS_ApplyDirectConnection(DLS_Articulation* art, const DLS_Connection* connection, bool quirks);
 static void dls_refresh_current_synth_for_mode(void);
 
 void GM_DLS_SetMobileBAEQuirks(bool useQuirks) 
@@ -189,8 +197,8 @@ static int32_t dls_exp10_q16(int32_t x) {
     return dls_pitch_cents_to_ratio_q16((int32_t)cents);
 }
 
-static int32_t dls_pan_scale_q16(int32_t pan) {
-    if (g_use_mobilebae_quirks) {
+static int32_t dls_pan_scale_q16(int32_t pan, bool quirks) {
+    if (quirks) {
         int32_t index = (((500 * (dls_clamp(pan, -0x10000, 0x10000) + 0x10000)) >> 16) & 0xFFFF) >> 1;
         if (index < 0) index = 0;
         if (index >= (int32_t)(sizeof(MOBILEBAE_PAN_TABLE) / sizeof(MOBILEBAE_PAN_TABLE[0]))) {
@@ -379,7 +387,7 @@ static void dls_env_shutdown(DLS_Envelope* env)
     if (!env->finished)
     {
         int32_t fadeMicros;
-        if (g_use_mobilebae_quirks) {
+        if (env->forceQuirks) {
             fadeMicros = DLS_FORCED_FADE_MICROS;
         } else {
             fadeMicros = env->shutdownMicros > 0 ? env->shutdownMicros : DLS_FORCED_FADE_MICROS;
@@ -450,7 +458,7 @@ static int32_t dls_env_next_linear(DLS_Envelope* env) {
         }
     } else if (env->stage == DLS_ENV_SHUTDOWN) {
         int32_t fadeMicros;
-        if (g_use_mobilebae_quirks) {
+        if (env->forceQuirks) {
             fadeMicros = DLS_FORCED_FADE_MICROS;
         } else {
             fadeMicros = env->shutdownMicros > 0 ? env->shutdownMicros : DLS_FORCED_FADE_MICROS;
@@ -994,7 +1002,7 @@ static void dls_rebuild_articulation_for_mode(DLS_Articulation* art)
     art->runtimeConnections = savedConnections;
     art->connectionCount = savedCount;
     for (uint16_t i = 0; i < savedCount; i++) {
-        DLS_ApplyDirectConnection(art, &savedConnections[i]);
+        DLS_ApplyDirectConnection(art, &savedConnections[i], g_use_mobilebae_quirks);
     }
 }
 
@@ -1032,10 +1040,10 @@ static void dls_refresh_current_synth_for_mode(void)
     }
 }
 
-static void DLS_ApplyDirectConnection(DLS_Articulation* art, const DLS_Connection* connection) {
+static void DLS_ApplyDirectConnection(DLS_Articulation* art, const DLS_Connection* connection, bool quirks) {
     if (connection->source != 0) return;
 
-    if (g_use_mobilebae_quirks) {
+    if (quirks) {
         switch (connection->destination) {
             case 3: art->pitch = connection->scale / 100; break;
             case 4:
@@ -1120,7 +1128,7 @@ static OPErr DLS_Parse_ArticulationChunk(const uint8_t* body, uint32_t size, DLS
             connection->destination = read_le16(p + 4);
             connection->transform = read_le16(p + 6);
             connection->scale = (int32_t)read_le32(p + 8);
-            DLS_ApplyDirectConnection(art, connection);
+            DLS_ApplyDirectConnection(art, connection, g_use_mobilebae_quirks);
         }
         art->runtimeConnections = connections;
         art->connectionCount = new_count;
@@ -1662,6 +1670,7 @@ OPErr GM_LoadDLSAsXMFOverlayFromMemory(struct GM_Mixer* pMixer, const void* pMem
     if (err != NO_ERR) {
         return err;
     }
+    bank->forceQuirks = true;
 
     if (!pMixer->pDLSSynth) {
         err = GM_InitDLSSynth(&pMixer->pDLSSynth, pMixer->outputRate);
@@ -2056,8 +2065,8 @@ static DLS_Instrument* DLS_Bank_FindMidiInstrument(DLS_Bank* bank, int32_t bankI
        been exhausted for the 120/121 bank families.  Only remap when
        no instrument with the requested program exists in the bank at
        any selector — otherwise the bank has the instrument and a
-       different encoding strategy should be found upstream. */
-    if (!g_use_mobilebae_quirks) {
+       different encoding strategy should be found upstream.      */
+    if (dls_bank_spmidi(bank)) {
         bool bankHasProgram = false;
         for (uint32_t i = 0; i < bank->instrumentCount; i++) {
             DLS_Instrument* chk = &bank->instruments[i];
@@ -2218,7 +2227,9 @@ static int32_t dls_note_on_connection_value_q16(const DLS_Connection* connection
         return 0;
     }
 
-    if (!g_use_mobilebae_quirks && (connection->transform & 0x8000)) {
+    bool quirks = ch && ch->selectedInstrument ? dls_bank_quirks(ch->selectedInstrument->parentBank) : g_use_mobilebae_quirks;
+
+    if (!quirks && (connection->transform & 0x8000)) {
         source = velocity;
     } else if (connection->transform & 0x8000) {
         source = 127 - source;
@@ -2231,7 +2242,7 @@ static int32_t dls_note_on_connection_value_q16(const DLS_Connection* connection
         if (type == 0) {
             source <<= 9;
         } else if (type == 1) {
-            if (g_use_mobilebae_quirks) {
+            if (quirks) {
                 source = source == 127 ? 0x10000 : -5 * dls_log10_q16(((127 - source) << 16) / 127) / 12;
             } else {
                 source = -5 * dls_log10_q16(((source) << 16) / 127) / 12;
@@ -2268,7 +2279,8 @@ static void dls_apply_note_on_connections(const DLS_Articulation* art, int32_t k
         dls_apply_note_on_connection(&art->runtimeConnections[i], key, velocity, unityNote, ch,
                                      pitch, gainAttenuation, panOffset);
     }
-    if (g_use_mobilebae_quirks) {
+    bool quirks = dls_bank_quirks(ch->selectedInstrument->parentBank);
+    if (quirks) {
         for (uint32_t i = 0; i < g_dls_default_connections_count; i++) {
             if (!dls_has_connection(art, &g_dls_default_connections[i])) {
                 dls_apply_note_on_connection(&g_dls_default_connections[i], key, velocity, unityNote, ch,
@@ -2343,7 +2355,8 @@ static void dls_apply_runtime_connections(const DLS_Articulation* art, const DLS
         dls_apply_runtime_connection(&art->runtimeConnections[i], voice, runtimePitch, gainAttenuation,
                                      panOffset, reverbSend, chorusSend, filterCutoffDelta, filterResonanceDelta);
     }
-    if (g_use_mobilebae_quirks) {
+    bool quirks = dls_bank_quirks(voice->parentBank);
+    if (quirks) {
         for (uint32_t i = 0; i < g_dls_default_connections_count; i++) {
             if (!dls_has_connection(art, &g_dls_default_connections[i])) {
                 dls_apply_runtime_connection(&g_dls_default_connections[i], voice, runtimePitch, gainAttenuation,
@@ -2447,6 +2460,7 @@ static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t v
     v->wave = wave;
     v->articulation = &region->articulation;
     v->channelState = ch;
+    v->parentBank = ch->selectedInstrument ? ch->selectedInstrument->parentBank : NULL;
     
     DLS_Articulation* art = &region->articulation;
     v->connectionCount = art->connectionCount;
@@ -2534,7 +2548,9 @@ static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t v
                  art->eg1Sustain, eg1Release, true, sampleRate);
     dls_env_init(&v->eg2Envelope, eg2Delay, eg2Attack, eg2Hold, eg2Decay,
                  art->eg2Sustain, eg2Release, false, sampleRate);
-    if (!g_use_mobilebae_quirks) {
+    v->envelope.forceQuirks = dls_bank_quirks(v->parentBank);
+    v->eg2Envelope.forceQuirks = dls_bank_quirks(v->parentBank);
+    if (!v->envelope.forceQuirks) {
         v->envelope.shutdownMicros = art->eg1Shutdown > 0 ? dls_timecent_to_micros(art->eg1Shutdown) : DLS_FORCED_FADE_MICROS;
         v->eg2Envelope.shutdownMicros = art->eg2Shutdown > 0 ? dls_timecent_to_micros(art->eg2Shutdown) : DLS_FORCED_FADE_MICROS;
     } else {
@@ -2579,7 +2595,8 @@ static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t v
         }
 
         int32_t gainQ16 = v->baseGainQ16;
-        if (g_use_mobilebae_quirks) {
+        bool voiceQuirks = dls_bank_quirks(v->parentBank);
+        if (voiceQuirks) {
             if (gainAttenuation < 0) {
                 gainQ16 = DLS_FP_MUL(gainQ16, dls_exp10_q16(gainAttenuation / 20));
             }
@@ -2589,8 +2606,8 @@ static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t v
         gainQ16 = DLS_FP_MUL(gainQ16, env1);
 
         panOffset = dls_clamp(panOffset, -0x10000, 0x10000);
-        v->targetLeftGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(-panOffset));
-        v->targetRightGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(panOffset));
+        v->targetLeftGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(-panOffset, voiceQuirks));
+        v->targetRightGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(panOffset, voiceQuirks));
 
         if (reverbSend == 0 && ch->reverb > 0) {
             reverbSend = (ch->reverb & 0x7F) << 9;
@@ -2645,7 +2662,8 @@ static void dls_kill_exclusive_voices(DLS_Synth* synth, int32_t channel, int32_t
         DLS_Voice* voice = &synth->voices[i];
         if (!voice->active) continue;
 
-        if (g_use_mobilebae_quirks) {
+        bool voiceQuirks = dls_bank_quirks(voice->parentBank);
+        if (voiceQuirks) {
             if (voice->channel != channel) continue;
         }
 
@@ -2670,7 +2688,8 @@ static int32_t dls_find_free_voice_index(DLS_Synth* synth) {
 static int32_t dls_find_recyclable_voice(DLS_Synth* synth, int32_t newChannel) {
     static const int32_t kQuirksVoiceStealOrder[16] = {15, 14, 13, 12, 11, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9};
     static const int32_t kSpecVoiceStealOrder[16] = {9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15};
-    const int32_t* order = g_use_mobilebae_quirks ? kQuirksVoiceStealOrder : kSpecVoiceStealOrder;
+    bool useQuirks = dls_bank_quirks(synth->banks[0]) || dls_bank_quirks(synth->banks[1]);
+    const int32_t* order = useQuirks ? kQuirksVoiceStealOrder : kSpecVoiceStealOrder;
 
     for (int ord = 0; ord < 16; ord++) {
         int32_t channel = order[ord];
@@ -2691,7 +2710,8 @@ static int32_t dls_find_recyclable_voice(DLS_Synth* synth, int32_t newChannel) {
 static int32_t dls_find_held_percussion_voice(DLS_Synth* synth, int32_t newChannel) {
     static const int32_t kQuirksVoiceStealOrder[16] = {15, 14, 13, 12, 11, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9};
     static const int32_t kSpecVoiceStealOrder[16] = {9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15};
-    const int32_t* order = g_use_mobilebae_quirks ? kQuirksVoiceStealOrder : kSpecVoiceStealOrder;
+    bool useQuirks = dls_bank_quirks(synth->banks[0]) || dls_bank_quirks(synth->banks[1]);
+    const int32_t* order = useQuirks ? kQuirksVoiceStealOrder : kSpecVoiceStealOrder;
 
     for (int ord = 0; ord < 16; ord++) {
         int32_t channel = order[ord];
@@ -2701,7 +2721,7 @@ static int32_t dls_find_held_percussion_voice(DLS_Synth* synth, int32_t newChann
         int64_t priority = INT64_MAX;
         for (int i = 0; i < 256; i++) {
             DLS_Voice* voice = &synth->voices[i];
-            if (g_use_mobilebae_quirks) {
+            if (useQuirks) {
                 if (channel == 9 && voice->channel == channel && voice->keyHeld && voice->startSerial < priority) {
                     candidate = i;
                     priority = voice->startSerial;
@@ -2721,7 +2741,8 @@ static int32_t dls_find_held_percussion_voice(DLS_Synth* synth, int32_t newChann
 static int32_t dls_find_active_voice_by_priority(DLS_Synth* synth, int32_t newChannel) {
     static const int32_t kQuirksVoiceStealOrder[16] = {15, 14, 13, 12, 11, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9};
     static const int32_t kSpecVoiceStealOrder[16] = {9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15};
-    const int32_t* order = g_use_mobilebae_quirks ? kQuirksVoiceStealOrder : kSpecVoiceStealOrder;
+    bool useQuirks = dls_bank_quirks(synth->banks[0]) || dls_bank_quirks(synth->banks[1]);
+    const int32_t* order = useQuirks ? kQuirksVoiceStealOrder : kSpecVoiceStealOrder;
 
     for (int ord = 0; ord < 16; ord++) {
         int32_t channel = order[ord];
@@ -2797,7 +2818,7 @@ void GM_DLS_ProcessNoteOn(GM_Song* pSong, uint16_t channel, uint16_t note, uint1
                 debug_message("DLS Synth: percussion key alias key %d -> %d for region lookup\n", note, aliasedNote);
             }
             voiceNote = aliasedNote;
-        } else if (!g_use_mobilebae_quirks && inst->parentBank) {
+        } else if (dls_bank_spmidi(inst->parentBank)) {
             /* SP-MIDI percussion key remap (Figure 7): only remap when the
                bank has no PGAL key aliases AND no region exists for the
                original note.  This avoids overriding real instrument regions
@@ -2874,7 +2895,7 @@ void GM_DLS_ProcessNoteOff(GM_Song* pSong, uint16_t channel, uint16_t note, uint
                 debug_message("DLS Synth: note-off percussion key alias key %d -> %d\n", note, aliasedNote);
             }
             matchNote = aliasedNote;
-        } else if (!g_use_mobilebae_quirks) {
+        } else if (dls_bank_spmidi(aliasBank)) {
             /* SP-MIDI percussion key remap: try the original note first,
                fall back to the remapped key only if no voice matches.
                This mirrors the note-on behaviour where remap only fires
@@ -2940,8 +2961,8 @@ bool GM_DLS_HasProgram(GM_Song* pSong, uint16_t channel, uint16_t program)
     /* Quirks mode: always claim program exists for GM/DLS bank families
        (MSB 0/120/121) so the channel stays on the DLS render path.
        Non-GM bank requests (e.g. MSB 1-119, 122-127) fall through to
-       the normal HSB bank.  Missing GM instruments produce silence. */
-    if (g_use_mobilebae_quirks) {
+        the normal HSB bank.  Missing GM instruments produce silence. */
+    if (dls_bank_quirks(ch->selectedInstrument ? ch->selectedInstrument->parentBank : NULL)) {
         int32_t msb = ch->bankMsb & 0x7F;
         if (msb == 0 || msb == 120 || msb == 121) {
             return TRUE;
@@ -3141,7 +3162,8 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
                 }
                 
                 int32_t gainQ16 = v->baseGainQ16;
-                if (g_use_mobilebae_quirks) {
+                bool voiceQuirks = dls_bank_quirks(v->parentBank);
+                if (voiceQuirks) {
                     if (gainAttenuation < 0) {
                         gainQ16 = DLS_FP_MUL(gainQ16, dls_exp10_q16(gainAttenuation / 20));
                     }
@@ -3157,8 +3179,8 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
                     v->reverbSend = v->targetReverbSend;
                     v->chorusSend = v->targetChorusSend;
                 }
-                v->targetLeftGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(-panOffset));
-                v->targetRightGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(panOffset));
+                v->targetLeftGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(-panOffset, voiceQuirks));
+                v->targetRightGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(panOffset, voiceQuirks));
                 
                 // If articulation has no explicit reverb/chorus, apply channel-level CC#91/93 values
                 // This allows reverbs 8+ (which read from songBufferReverb) to process DLS audio
@@ -3190,7 +3212,7 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
                     debug_message("DLS Control: voice=%lld env=%d gain=%d atten=%d vol=%d expr=%d pan=%d panL=%d panR=%d left=%d right=%d\n",
                                   v->startSerial, env1, gainQ16, gainAttenuation, ch->volume,
                                   ch->expression, panOffset,
-                                  dls_pan_scale_q16(-panOffset), dls_pan_scale_q16(panOffset),
+                                  dls_pan_scale_q16(-panOffset, voiceQuirks), dls_pan_scale_q16(panOffset, voiceQuirks),
                                   v->targetLeftGain, v->targetRightGain);
                 }
                 

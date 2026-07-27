@@ -137,6 +137,7 @@ struct DLS_ProgramAlias {
 
 struct DLS_Bank {
     bool isDLSM;
+    bool forceQuirks;
     bool selectorRawModeActive;
     bool selectorImplicitModeSeen;
     uint32_t declaredInstrumentCount;
@@ -192,12 +193,13 @@ struct DLS_Envelope {
     int64_t eg1Sustain;
     int32_t decayMultiplier;
     int32_t activeReleaseMultiplier;
-    int32_t stage; // 0: delay, 1: attack, 2: hold, 3: decay, 4: sustain, 5: release, 6: finished, 7: shutdown
+    int32_t stage;
     int32_t tickIndex;
     int32_t shutdownStart;
     int32_t current;
     int64_t eg1Current;
     bool finished;
+    bool forceQuirks;
 };
 
 struct DLS_Lfo {
@@ -268,6 +270,7 @@ struct DLS_Voice {
     DLS_Wave* wave;
     DLS_Articulation* articulation;
     DLS_ChannelState* channelState;
+    DLS_Bank* parentBank;
     
     uint16_t connectionCount;
     DLS_Connection* runtimeConnections;
