@@ -530,6 +530,7 @@ void ShutdownNeoReverb(void)
     NeoReverbParams* params = GetNeoReverbParams();
     
     params->mIsInitialized = FALSE;
+    gMobileReverb.initialized = FALSE;
     
     // Deallocate tap buffer
     if (params->mTapBuffer)
@@ -1152,6 +1153,18 @@ void CheckMobileReverbType(void) {
     }
 
     if (!gMobileReverb.initialized || gMobileReverb.sampleRate != sampleRate) {
+        // Clear all delay buffers when the sample rate changes. Stale audio
+        // data from a different rate will have the wrong time-base and cause
+        // stretched/smeared tails when the rate switches back up.
+        XSetMemory(gMobileReverb.inputDelay, sizeof(gMobileReverb.inputDelay), 0);
+        for (int i = 0; i < 6; i++) {
+            XSetMemory(gMobileReverb.comb[i], sizeof(gMobileReverb.comb[i]), 0);
+        }
+        XSetMemory(gMobileReverb.early, sizeof(gMobileReverb.early), 0);
+        XSetMemory(gMobileReverb.stereoL, sizeof(gMobileReverb.stereoL), 0);
+        XSetMemory(gMobileReverb.stereoR, sizeof(gMobileReverb.stereoR), 0);
+        gMobileReverb.wetSmoothingState = 0;
+
         gMobileReverb.sampleRate = sampleRate;
         for (int i = 0; i < 7; i++) {
             gMobileReverb.inputIndex[i] = mobile_delayIndex(sampleRate, MOBILE_INPUT_RATIO[i]);
@@ -1161,6 +1174,9 @@ void CheckMobileReverbType(void) {
         for (int i = 0; i < 6; i++) {
             int delayBase = mobile_fixedMul16_16(MOBILE_COMB_RATIO[i], MOBILE_TYPE_SCALE);
             gMobileReverb.combRead[i] = mobile_delayIndex(sampleRate, MOBILE_COMB_RATIO[i]);
+            // Reset write position to match the delay relationship so the comb
+            // filter reverb character is consistent regardless of prior rate.
+            gMobileReverb.combWrite[i] = 0;
             int value = mobile_fixedDiv16_16(delayBase, MOBILE_REVERB_TIME);
             
             // Java: -exp10Q16(-3 * value)
@@ -1170,8 +1186,36 @@ void CheckMobileReverbType(void) {
             gMobileReverb.combFeedback[i] = (int)-expVal;
         }
 
+        // Scale comb feedback by sample rate ratio to maintain the same decay
+        // time in milliseconds. The comb filter runs at per-sample rate, so at
+        // lower sample rates the same feedback per sample produces a slower decay,
+        // making the reverb sound longer and deeper. Raising feedback to the
+        // power (44100/rate) compensates for the reduced number of iterations
+        // per second, keeping the decay envelope constant.
+        // For efficiency, use a simple linear approximation when the rate is
+        // within a reasonable range of 44100 Hz.
+        {
+            int refRate = 44100;
+            if (sampleRate != refRate && sampleRate > 0)
+            {
+                double scale = (double)refRate / (double)sampleRate;
+                for (int i = 0; i < 6; i++)
+                {
+                    // combFeedback is negative Q16.16 (e.g., -6554 = -0.1).
+                    // Convert to positive absolute value, apply power scaling,
+                    // then restore the negative sign.
+                    double feedbackRef = (double)(-gMobileReverb.combFeedback[i]) / 65536.0;
+                    if (feedbackRef <= 0.0 || feedbackRef >= 1.0) continue;
+                    double feedbackAbs = pow(feedbackRef, scale);
+                    gMobileReverb.combFeedback[i] = -(int)(feedbackAbs * 65536.0);
+                }
+            }
+        }
+
         gMobileReverb.earlyRead = (256 - (int)(((int64_t)sampleRate * 0x0126) >> 16)) & 0xFF;
+        gMobileReverb.earlyWrite = 0;
         gMobileReverb.stereoRead = (512 - (int)(((int64_t)sampleRate * 456) >> 16)) & 0x1FF;
+        gMobileReverb.stereoWrite = 0;
         gMobileReverb.wetSmoothingGain = mobile_smoothingGain(sampleRate);
         gMobileReverb.initialized = true;
     }

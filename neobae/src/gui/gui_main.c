@@ -609,6 +609,13 @@ bool recreate_mixer_and_restore(int sampleRateHz, int reverbType,
     }
     if (g_bae.mixer)
     {
+        // Clear reverb buffers before teardown to avoid stale delay lines
+        // causing artifacts when the new mixer initializes at a different rate.
+        GM_CleanupReverb();
+        ShutdownNewReverb();
+#if USE_NEO_EFFECTS == TRUE
+        ShutdownNeoReverb();
+#endif   
         BAEMixer_Close(g_bae.mixer);
         BAEMixer_Delete(g_bae.mixer);
         g_bae.mixer = NULL;
