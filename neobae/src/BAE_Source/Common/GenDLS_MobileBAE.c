@@ -1782,8 +1782,8 @@ OPErr GM_InitDLSSynth(DLS_Synth** ppSynth, int32_t sampleRate) {
 }
 
 bool GM_IsDLSSong(GM_Song* pSong) {
-    if (pSong && pSong->pMixer) {
-        return pSong->pMixer->isDLS;
+    if (pSong) {
+        return pSong->isDLSSong;
     }
     return false;
 }

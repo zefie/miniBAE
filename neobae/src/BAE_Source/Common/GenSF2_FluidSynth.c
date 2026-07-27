@@ -111,6 +111,13 @@ static int g_activity_frame_counter = 0;
 static float* g_fluidsynth_mix_buffer = NULL;
 static int32_t g_fluidsynth_mix_buffer_frames = 0;
 
+// Resampling buffer: FluidSynth always renders at 44100 Hz internally
+// to avoid pitch shifting at non-44100 sample rates. The output is then
+// downsampled to the mixer's sample rate.
+static float* g_fluidsynth_resample_buffer = NULL;
+static int32_t g_fluidsynth_resample_buffer_frames = 0;
+#define FLUIDSYNTH_INTERNAL_RATE 44100
+
 // Private function prototypes
 static bool PV_SF2_CheckChannelMuted(GM_Song* pSong, int16_t channel);
 static void PV_SF2_ConvertFloatToInt32(float* input, int32_t* output, int32_t* reverbOutput, int32_t* chorusOutput, 
@@ -118,6 +125,8 @@ static void PV_SF2_ConvertFloatToInt32(float* input, int32_t* output, int32_t* r
                                         const uint8_t *reverbLevels, const uint8_t *chorusLevels);
 static void PV_SF2_AllocateMixBuffer(int32_t frameCount);
 static void PV_SF2_FreeMixBuffer(void);
+static void PV_SF2_AllocateResampleBuffer(int32_t frameCount);
+static void PV_SF2_FreeResampleBuffer(void);
 static void PV_SF2_InitializeChannelActivity(void);
 static void PV_SF2_UpdateChannelActivity(int16_t channel, int16_t velocity, bool noteOn);
 static void PV_SF2_DecayChannelActivity(void);
@@ -253,6 +262,10 @@ OPErr GM_InitializeSF2(void)
         g_fluidsynth_mono_mode = !pMixer->generateStereoOutput;
     }
     
+    // FluidSynth always runs at 44100 Hz internally to avoid pitch shifting.
+    // Resampling to the mixer's sample rate is handled in GM_SF2_RenderAudioSlice.
+    float fsSampleRate = (float)FLUIDSYNTH_INTERNAL_RATE;
+    
     // Create FluidSynth settings
     g_fluidsynth_settings = new_fluid_settings();
     if (!g_fluidsynth_settings)
@@ -261,7 +274,7 @@ OPErr GM_InitializeSF2(void)
     }
     
     // Configure FluidSynth settings
-    fluid_settings_setnum(g_fluidsynth_settings, "synth.sample-rate", g_fluidsynth_sample_rate);
+    fluid_settings_setnum(g_fluidsynth_settings, "synth.sample-rate", fsSampleRate);
     fluid_settings_setint(g_fluidsynth_settings, "synth.polyphony", BAE_MAX_VOICES);
     fluid_settings_setint(g_fluidsynth_settings, "synth.midi-channels", BAE_MAX_MIDI_CHANNELS);
     fluid_settings_setnum(g_fluidsynth_settings, "synth.gain", g_fluidsynth_master_volume);
@@ -314,6 +327,7 @@ void GM_CleanupSF2(void)
     }
     
     PV_SF2_FreeMixBuffer();
+    PV_SF2_FreeResampleBuffer();
     GM_UnloadSF2Soundfont();
     
     if (g_fluidsynth_synth)
@@ -1645,19 +1659,40 @@ void GM_SF2_RenderAudioSlice(GM_Song* pSong, int32_t* mixBuffer, int32_t* reverb
     // Update channel activity decay
     PV_SF2_DecayChannelActivity();
     
-    // Allocate mix buffer if needed
-    PV_SF2_AllocateMixBuffer(frameCount);
-    if (!g_fluidsynth_mix_buffer)
+    // Get mixer sample rate for resampling decisions
+    GM_Mixer* pMixer = GM_GetCurrentMixer();
+    uint32_t mixerRate = g_fluidsynth_sample_rate;  // actual mixer rate we cached
+
+    // FluidSynth always renders at 44100 Hz internally to avoid pitch shifting.
+    // When the mixer rate differs, we render at 44100 and downsample via linear interpolation.
+    int32_t fsFrames = frameCount;
+    
+    if (mixerRate != FLUIDSYNTH_INTERNAL_RATE)
     {
-        return;
+        // Calculate how many 44100 Hz input frames produce `frameCount` output frames
+        // at the mixer's rate: input_frames = output_frames * (44100 / mixerRate)
+        fsFrames = (int32_t)((int64_t)frameCount * FLUIDSYNTH_INTERNAL_RATE / mixerRate) + 1;
+        PV_SF2_AllocateMixBuffer(fsFrames);
+        if (!g_fluidsynth_mix_buffer)
+        {
+            return;
+        }
+    }
+    else
+    {
+        PV_SF2_AllocateMixBuffer(frameCount);
+        if (!g_fluidsynth_mix_buffer)
+        {
+            return;
+        }
     }
     
     // Clear the float buffer (always stereo now)
-    memset(g_fluidsynth_mix_buffer, 0, frameCount * 2 * sizeof(float));
+    memset(g_fluidsynth_mix_buffer, 0, fsFrames * 2 * sizeof(float));
 
     // Render FluidSynth audio (always stereo - we simulate mono in conversion)
     PV_SF2_LockSynth();
-    fluid_synth_write_float(g_fluidsynth_synth, frameCount,
+    fluid_synth_write_float(g_fluidsynth_synth, fsFrames,
                            g_fluidsynth_mix_buffer, 0, 2,
                            g_fluidsynth_mix_buffer, 1, 2);
     PV_SF2_UnlockSynth();
@@ -1666,7 +1701,7 @@ void GM_SF2_RenderAudioSlice(GM_Song* pSong, int32_t* mixBuffer, int32_t* reverb
     // This tames the signal at the source so the downstream volume controls
     // and output stage all work cleanly.
     {
-        int32_t totalSamples = frameCount * 2;
+        int32_t totalSamples = fsFrames * 2;
         float peak = 0.0f;
         for (int32_t s = 0; s < totalSamples; s++)
         {
@@ -1686,8 +1721,6 @@ void GM_SF2_RenderAudioSlice(GM_Song* pSong, int32_t* mixBuffer, int32_t* reverb
 
     // Apply song volume scaling
     float songScale = 1.0f;
-    GM_Mixer* pMixer = GM_GetCurrentMixer();
-    if (pMixer)
     {
         int32_t fv = pSong->songVolume;
         if (fv >= 0 && fv <= MAX_SONG_VOLUME)
@@ -1695,7 +1728,6 @@ void GM_SF2_RenderAudioSlice(GM_Song* pSong, int32_t* mixBuffer, int32_t* reverb
             songScale *= (float)fv / 127.0f;
         }
     }
-    
     // Apply per-channel volume/expression: we post-scale the rendered buffer per frame
     float channelScales[BAE_MAX_MIDI_CHANNELS];
     float channelSendWeights[BAE_MAX_MIDI_CHANNELS];
@@ -1745,9 +1777,47 @@ void GM_SF2_RenderAudioSlice(GM_Song* pSong, int32_t* mixBuffer, int32_t* reverb
         chorusLevels[c] = info ? info->channelChorus[c] : 0;
     }
     
+    // When the mixer rate differs from FluidSynth's internal 44100 Hz,
+    // downsample via linear interpolation before converting to int32.
+    float* finalBuffer = g_fluidsynth_mix_buffer;
+    int32_t  finalFrames = fsFrames;
+    
+    if (mixerRate != FLUIDSYNTH_INTERNAL_RATE)
+    {
+        PV_SF2_AllocateResampleBuffer(frameCount);
+        if (!g_fluidsynth_resample_buffer)
+        {
+            return;
+        }
+        
+        // Linear interpolation downsample: resample from 44100 Hz to mixerRate
+        double ratio = (double)FLUIDSYNTH_INTERNAL_RATE / (double)mixerRate;
+        
+        for (int32_t outFrame = 0; outFrame < frameCount; outFrame++)
+        {
+            double srcIndex = (double)outFrame * ratio;
+            int32_t srcFrame = (int32_t)srcIndex;
+            double frac = srcIndex - (double)srcFrame;
+            
+            int32_t nextFrame = srcFrame + 1;
+            if (nextFrame >= fsFrames) nextFrame = fsFrames - 1;
+            
+            // Interpolate left channel
+            g_fluidsynth_resample_buffer[outFrame * 2] =
+                g_fluidsynth_mix_buffer[srcFrame * 2] * (float)(1.0 - frac) +
+                g_fluidsynth_mix_buffer[nextFrame * 2] * (float)frac;
+            // Interpolate right channel
+            g_fluidsynth_resample_buffer[outFrame * 2 + 1] =
+                g_fluidsynth_mix_buffer[srcFrame * 2 + 1] * (float)(1.0 - frac) +
+                g_fluidsynth_mix_buffer[nextFrame * 2 + 1] * (float)frac;
+        }
+        finalBuffer = g_fluidsynth_resample_buffer;
+        finalFrames = frameCount;
+    }
+    
     // Convert float to int32 and mix with existing buffer (including reverb/chorus sends)
-    PV_SF2_ConvertFloatToInt32(g_fluidsynth_mix_buffer, mixBuffer, reverbBuffer, chorusBuffer,
-                               frameCount, songScale, channelSendWeights, reverbLevels, chorusLevels);
+    PV_SF2_ConvertFloatToInt32(finalBuffer, mixBuffer, reverbBuffer, chorusBuffer,
+                               finalFrames, songScale, channelSendWeights, reverbLevels, chorusLevels);
 }
 
 // FluidSynth channel management (respects NeoBAE mute/solo states)
@@ -1830,37 +1900,14 @@ void GM_SF2_SetSampleRate(int32_t sampleRate)
 {
     if (!g_fluidsynth_initialized)
     {
-        // Just store the sample rate for later initialization
         g_fluidsynth_sample_rate = sampleRate;
         return;
     }
 
+    // Only update the cached mixer sample rate used for the resampling ratio.
+    // FluidSynth always runs at 44100 Hz internally to avoid pitch shifting.
+    // Resampling to the mixer's rate happens in GM_SF2_RenderAudioSlice.
     g_fluidsynth_sample_rate = sampleRate;
-    
-    // FluidSynth requires recreating the synth to change sample rate
-    // Store current state
-    char currentSF2Path[256];
-    strncpy(currentSF2Path, g_fluidsynth_sf2_path, sizeof(currentSF2Path) - 1);
-    currentSF2Path[sizeof(currentSF2Path) - 1] = '\0';
-    
-    // Cleanup current synth
-    GM_UnloadSF2Soundfont();
-    if (g_fluidsynth_synth)
-    {
-        delete_fluid_synth(g_fluidsynth_synth);
-        g_fluidsynth_synth = NULL;
-    }
-    
-    // Update settings
-    fluid_settings_setnum(g_fluidsynth_settings, "synth.sample-rate", sampleRate);
-    
-    // Recreate synth with new settings
-    g_fluidsynth_synth = new_fluid_synth(g_fluidsynth_settings);
-    if (g_fluidsynth_synth && currentSF2Path[0] != '\0')
-    {
-        // Reload soundfont
-        GM_LoadSF2Soundfont(currentSF2Path);
-    }
 }
 
 void GM_SF2_KillAllNotes(void) 
@@ -2132,6 +2179,34 @@ static void PV_SF2_FreeMixBuffer(void)
         XDisposePtr(g_fluidsynth_mix_buffer);
         g_fluidsynth_mix_buffer = NULL;
         g_fluidsynth_mix_buffer_frames = 0;
+    }
+}
+
+static void PV_SF2_AllocateResampleBuffer(int32_t frameCount)
+{
+    if (g_fluidsynth_resample_buffer_frames < frameCount)
+    {
+        if (g_fluidsynth_resample_buffer)
+        {
+            XDisposePtr(g_fluidsynth_resample_buffer);
+            g_fluidsynth_resample_buffer = NULL;
+            g_fluidsynth_resample_buffer_frames = 0;
+        }
+        g_fluidsynth_resample_buffer = (float*)XNewPtr(frameCount * 2 * sizeof(float));
+        if (g_fluidsynth_resample_buffer)
+        {
+            g_fluidsynth_resample_buffer_frames = frameCount;
+        }
+    }
+}
+
+static void PV_SF2_FreeResampleBuffer(void)
+{
+    if (g_fluidsynth_resample_buffer)
+    {
+        XDisposePtr(g_fluidsynth_resample_buffer);
+        g_fluidsynth_resample_buffer = NULL;
+        g_fluidsynth_resample_buffer_frames = 0;
     }
 }
 

@@ -1348,6 +1348,9 @@ typedef int32_t UNIT_TYPE;
         void *sf2Info;             // Pointer to GM_SF2Info structure when SF2 is active
         bool isSF2Song;               // TRUE if this song uses SF2 instruments
 #endif
+#if USE_NATIVE_DLS == TRUE
+        bool isDLSSong;               // TRUE if this song uses DLS instruments (cached from pMixer->isDLS to avoid use-after-free)
+#endif
         unsigned char channelType[MAX_CHANNELS];
         uint32_t songFlags;                // Song flags including SONG_FLAG_USE_SF2 and SONG_FLAG_IS_RMF
         uint32_t RMFInstrumentIDs[MAX_INSTRUMENTS+1];

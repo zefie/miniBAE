@@ -539,8 +539,9 @@ OPErr GM_PrerollSong(GM_Song *pSong, GM_SongCallbackProcPtr theCallbackProc,
     if (pSong)
     {
 #if USE_NATIVE_DLS == TRUE
-        if (GM_IsDLSSong(pSong))
+        if (pSong->pMixer && pSong->pMixer->isDLS)
         {
+            pSong->isDLSSong = TRUE;
             // Prevent stale channel/program bindings from prior songs causing silent note-ons.
             GM_DLS_ResetForSong(pSong);
         }
@@ -1292,6 +1293,8 @@ OPErr GM_FreeSong(void *threadContext, GM_Song *pSong)
                     XDisposePtr(midiData);
                 }
                 XDisposePtr((XPTR)pSong->controllerCallback);
+
+                pSong->pMixer = NULL;
 
 #if 0 && USE_CREATION_API == TRUE
                 if (pSong->pPatchInfo)

@@ -2517,6 +2517,18 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                             {
                                 pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
                             }
+                            else if (GM_DLS_GetMobileBAEQuirks() || GM_DLS_HasXmfEmbeddedBank(pSong->pMixer))
+                            {
+                                int32_t msb = (uint8_t)pSong->channelRawBank[MIDIChannel];
+                                if (msb == 0 || msb == 120 || msb == 121)
+                                {
+                                    pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
+                                }
+                                else
+                                {
+                                    pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
+                                }
+                            }
                             else
                             {
                                 pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;

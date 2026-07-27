@@ -601,6 +601,12 @@ bool recreate_mixer_and_restore(int sampleRateHz, int reverbType,
         BAESound_Delete(g_bae.sound);
         g_bae.sound = NULL;
     }
+    if (g_live_song)
+    {
+        BAESong_Stop(g_live_song, FALSE);
+        BAESong_Delete(g_live_song);
+        g_live_song = NULL;
+    }
     if (g_bae.mixer)
     {
         BAEMixer_Close(g_bae.mixer);
@@ -649,16 +655,7 @@ bool recreate_mixer_and_restore(int sampleRateHz, int reverbType,
     bae_set_reverb(reverbType);
     BAEMixer_SetMasterVolume(g_bae.mixer, FLOAT_TO_UNSIGNED_FIXED(g_last_requested_master_volume));
 
-    // Ensure the lightweight live song is recreated so external MIDI
-    // input continues to route into the new mixer. If a previous
-    // g_live_song exists it referenced the old mixer and must be
-    // deleted before creating a new one bound to the new mixer.
-    if (g_live_song)
-    {
-        BAESong_Stop(g_live_song, FALSE);
-        BAESong_Delete(g_live_song);
-        g_live_song = NULL;
-    }
+    // Create a new live song bound to the new mixer for external MIDI input.
     g_live_song = BAESong_New(g_bae.mixer);
     if (g_live_song)
     {
