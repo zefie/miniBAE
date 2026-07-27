@@ -348,7 +348,7 @@ static const char usageMain[] =
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
     "                 -fs {use FluidSynth for DLS instead of native DLS system}\n"
 #endif
-    "                 -dlscompat {enable Native DLS compatibility mode, disabling MobileBAE quirks (ignored if using FluidSynth)}\n"
+    "                 -dlscompat {Enable compatibility mode to broaden support for DLS banks. Do not use if you desire authentic MobileBAE behavior. (ignored if using FluidSynth)}\n"
 #endif
     "                 -o  {output file (wav/mp3/flac/ogg/opus)}\n"
 #if SUPPORT_KARAOKE == TRUE

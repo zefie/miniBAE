@@ -8946,7 +8946,7 @@ fun SettingsScreenContent(
                     )
                 }
                 Text(
-                    text = "When enabled, disables MobileBAE-specific quirks. Only applies when using the native DLS loader.",
+                    text = "Enable compatibility mode to broaden support for DLS banks. Disable for authentic MobileBAE behavior. Only applies when using the native DLS loader.",
                     style = MaterialTheme.typography.caption,
                     color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
                     modifier = Modifier.padding(top = 4.dp)

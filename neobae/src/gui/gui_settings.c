@@ -1517,7 +1517,7 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
         Rect compatDlsFullRect = {leftX, dlg.y + 166, 280, 24};
         if (point_in(mx, my, compatDlsFullRect))
         {
-            const char *tooltip_text = "Checking this will disable MobileBAE quirks";
+            const char *tooltip_text = "Enable compatibility mode to broaden support for DLS banks. Disable for authentic MobileBAE behavior.";
             int text_w = 0, text_h = 0;
             measure_text(tooltip_text, &text_w, &text_h);
             int tooltip_w = text_w + 8;
