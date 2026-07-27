@@ -17,10 +17,6 @@
                 "${workspaceFolder}/neobae/src/thirdparty/libvorbis/include/**",
                 "${workspaceFolder}/neobae/src/thirdparty/libvorbis/lib/**",
                 "${workspaceFolder}/neobae/src/thirdparty/lzma-26.00/C/**",
-                "${workspaceFolder}/deps/win/FluidSynth/x86_64-w64-mingw32/include/**",
-                "${workspaceFolder}/deps/win/SDL3/x86_64-w64-mingw32/include/**",
-                "${workspaceFolder}/deps/win/SDL3_ttf/x86_64-w64-mingw32/include/**",
-                "${workspaceFolder}/deps/win/lame/x86_64-w64-mingw32/include/**",
                 "${workspaceFolder}/neobae/src/thirdparty/flac/src/share/win_utf8_io/**",
                 "${workspaceFolder}/neobae/src/thirdparty/libxmp/include/**",
                 "${workspaceFolder}/neobae/src/thirdparty/lame-3.100-slim/include/**",
@@ -47,6 +43,7 @@
                 "USE_XMF_SUPPORT=1",
                 "_BUILT_IN_PATCHES=1",
                 "_LOAD_BUILTIN_PATCHES_FOR_SF2=1",
+                "_LOAD_BUILTIN_PATCHES_FOR_DLS=1",
                 "USE_NEO_EFFECTS=1",
                 "USE_OPUS_DECODER=1",
                 "USE_OPUS_ENCODER=1",
@@ -57,7 +54,7 @@
                 "USE_QOA_SUPPORT=1",
                 "USE_RMI_SUPPORT=1",
                 "USE_NATIVE_DLS=1",
-                "USE_WMA_SUPPORT=1"
+                "USE_J2ME_PATCH=1"
             ],
             "compilerPath": "/usr/bin/x86_64-w64-mingw32-gcc",
             "intelliSenseMode": "linux-gcc-x64",
