@@ -30,7 +30,7 @@
 */
 /*
     Additional modifications © 2021-2026 zefie
-    Licensed under the GNU General Public License v3.0 or later.
+    Licensed under the GNU Lesser General Public License v3.0 or later.
 */
 /*****************************************************************************/
 /*
@@ -70,10 +70,6 @@
     #pragma clang diagnostic push
     #pragma clang diagnostic ignored "-Wpragma-pack"
     #pragma clang diagnostic ignored "-Wignored-pragmas"
-#elif defined(__GNUC__)
-    #pragma GCC diagnostic push
-    #pragma GCC diagnostic ignored "-Wpragma-pack"
-    #pragma GCC diagnostic ignored "-Wignored-pragmas"
 #endif
 
 #if defined(__clang__) || defined(__GNUC__) || defined(_MSC_VER)

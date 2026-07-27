@@ -123,7 +123,7 @@ For platform-specific prerequisites, Windows cross-compilation, debug builds, an
 
 ## License
 
-NeoBAE (zefie's modifications) is licensed under GPL-3.0.
+NeoBAE (zefie's modifications) is licensed under LGPL-3.0.
 
 Original Beatnik miniBAE code remains under BSD-3-Clause.
 
