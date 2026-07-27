@@ -1887,9 +1887,6 @@ if(BUILD_CLITOOLS)
   add_executable(rmiutil neobae/src/rmiutil/rmiutil.c)
   target_link_libraries(rmiutil PRIVATE)
 
-  add_executable(instdump neobae/src/rmfinfo/instdump.c)
-  target_link_libraries(instdump PRIVATE neobae)
-
   add_executable(bankrecomp neobae/src/bankrecomp/bankrecomp_api.c)
   target_link_libraries(bankrecomp PRIVATE neobae)
 
