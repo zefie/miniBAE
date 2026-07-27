@@ -1512,13 +1512,6 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
     {
         save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, *loopPlay);
         GM_DLS_SetMobileBAEQuirks(g_use_dls_compatiblity_mode ? false : true); // inverted
-        if (g_current_bank_path[0])
-        {
-            if (!load_bank(g_current_bank_path, *playing, *transpose, *tempo, *volume, *loopPlay, *reverbType, ch_enable, false))
-            {
-                set_status_message("Failed to reload bank");
-            }
-        }
     }
     {
         Rect compatDlsFullRect = {leftX, dlg.y + 166, 280, 24};

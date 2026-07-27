@@ -1002,13 +1002,16 @@ static void dls_refresh_current_synth_for_mode(void)
 {
     GM_Mixer* mixer = GM_GetCurrentMixer();
     DLS_Synth* synth;
+    bool savedQuirks;
 
     if (!mixer || !mixer->pDLSSynth) return;
     synth = mixer->pDLSSynth;
+    savedQuirks = g_use_mobilebae_quirks;
 
     for (int bankIndex = 0; bankIndex < 2; bankIndex++) {
         DLS_Bank* bank = synth->banks[bankIndex];
         if (!bank) continue;
+        g_use_mobilebae_quirks = (bankIndex == 1) ? true : savedQuirks;
         for (uint32_t i = 0; i < bank->instrumentCount; i++) {
             DLS_Instrument* instrument = &bank->instruments[i];
             dls_rebuild_articulation_for_mode(&instrument->articulation);
@@ -1017,6 +1020,7 @@ static void dls_refresh_current_synth_for_mode(void)
             }
         }
     }
+    g_use_mobilebae_quirks = savedQuirks;
 
     for (int i = 0; i < 256; i++) {
         synth->voices[i].active = false;
@@ -1645,12 +1649,16 @@ OPErr GM_LoadDLSAsXMFOverlayFromMemory(struct GM_Mixer* pMixer, const void* pMem
 {
     DLS_Bank* bank = NULL;
     OPErr err;
+    bool savedQuirks;
 
     if (!pMixer || !pMemory || memorySize == 0) {
         return PARAM_ERR;
     }
 
+    savedQuirks = g_use_mobilebae_quirks;
+    g_use_mobilebae_quirks = true;
     err = GM_LoadDLSBankFromMemory((void*)pMemory, memorySize, &bank);
+    g_use_mobilebae_quirks = savedQuirks;
     if (err != NO_ERR) {
         return err;
     }
