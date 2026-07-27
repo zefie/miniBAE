@@ -2040,28 +2040,41 @@ static DLS_Instrument* DLS_Bank_FindMidiInstrument(DLS_Bank* bank, int32_t bankI
                 if (altInst && altInst->drum) return altInst;
             }
 
-            /* Do not substitute melodic instruments for percussion requests. */
-            return NULL;
+            /* Do not substitute melodic instruments for percussion requests.
+               Fall through to SP-MIDI remap below as last resort. */
         } else {
             if (inst && !inst->drum) return inst;
             if (altInst && !altInst->drum) return altInst;
             if (inst) return inst;
             if (altInst) return altInst;
+            /* Fall through to SP-MIDI remap below as last resort. */
         }
     }
 
     /* Non-quirks (SP-MIDI compliant): remap missing instruments per
-       SP-MIDI 1.0b Figures 6-7.  Applied before the dead-end early
-       returns below so remapping works for the standard 121:0 and
-       120:0 families as well. */
+       SP-MIDI 1.0b Figures 6-7 when all other lookup strategies have
+       been exhausted for the 120/121 bank families.  Only remap when
+       no instrument with the requested program exists in the bank at
+       any selector — otherwise the bank has the instrument and a
+       different encoding strategy should be found upstream. */
     if (!g_use_mobilebae_quirks) {
-        int32_t spRemap = DLS_SPMIDI_RemapProgram(bank, bankMsb, program);
-        if (spRemap != program) {
-            selector = DLS_Selector(bankMsb, bankLsb, spRemap);
-            inst = DLS_Bank_FindSelector(bank, selector);
-            if (inst) {
-                debug_message("DLS Synth: SP-MIDI remap program %d -> %d\n", program, spRemap);
-                return inst;
+        bool bankHasProgram = false;
+        for (uint32_t i = 0; i < bank->instrumentCount; i++) {
+            DLS_Instrument* chk = &bank->instruments[i];
+            if (chk->program == program && (bankMsb == 120 ? chk->drum : !chk->drum)) {
+                bankHasProgram = true;
+                break;
+            }
+        }
+        if (!bankHasProgram) {
+            int32_t spRemap = DLS_SPMIDI_RemapProgram(bank, bankMsb, program);
+            if (spRemap != program) {
+                selector = DLS_Selector(bankMsb, bankLsb, spRemap);
+                inst = DLS_Bank_FindSelector(bank, selector);
+                if (inst) {
+                    debug_message("DLS Synth: SP-MIDI remap program %d -> %d\n", program, spRemap);
+                    return inst;
+                }
             }
         }
     }
@@ -2784,16 +2797,21 @@ void GM_DLS_ProcessNoteOn(GM_Song* pSong, uint16_t channel, uint16_t note, uint1
                 debug_message("DLS Synth: percussion key alias key %d -> %d for region lookup\n", note, aliasedNote);
             }
             voiceNote = aliasedNote;
-        } else if (!g_use_mobilebae_quirks) {
-            /* SP-MIDI percussion key remap (Figure 7): when the DLS bank
-               has no PGAL key aliases, remap drum keys by group at note-on
-               time.  This is only the region-lookup key — the voice still
-               uses the original note for pitch. */
+        } else if (!g_use_mobilebae_quirks && inst->parentBank) {
+            /* SP-MIDI percussion key remap (Figure 7): only remap when the
+               bank has no PGAL key aliases AND no region exists for the
+               original note.  This avoids overriding real instrument regions
+               that happen to share a key with a group-defined non-canonical
+               member. */
             int32_t spRemap = DLS_SPMIDI_RemapPercussionKey(note & 0x7F);
             if (spRemap != (int32_t)(note & 0x7F)) {
-                debug_message("DLS Synth: SP-MIDI perc key alias %d -> %d for region lookup\n",
-                              note & 0x7F, spRemap);
-                voiceNote = spRemap;
+                int32_t clampedNote = dls_clamp(note + dls_channel_coarse_semitones(ch), 0, 127);
+                DLS_Region* origRegion = DLS_Synth_FindRegion(inst, clampedNote, velocity);
+                if (!origRegion) {
+                    debug_message("DLS Synth: SP-MIDI perc key alias %d -> %d for region lookup\n",
+                                  note & 0x7F, spRemap);
+                    voiceNote = spRemap;
+                }
             }
         }
     }
@@ -2857,13 +2875,28 @@ void GM_DLS_ProcessNoteOff(GM_Song* pSong, uint16_t channel, uint16_t note, uint
             }
             matchNote = aliasedNote;
         } else if (!g_use_mobilebae_quirks) {
+            /* SP-MIDI percussion key remap: try the original note first,
+               fall back to the remapped key only if no voice matches.
+               This mirrors the note-on behaviour where remap only fires
+               after the original note's region is confirmed missing. */
             int32_t spRemap = DLS_SPMIDI_RemapPercussionKey(note & 0x7F);
             if (spRemap != (int32_t)(note & 0x7F)) {
-                matchNote = spRemap;
+                int32_t altNote = spRemap;
+                bool origFound = false;
+                for (int i = 0; i < 256; i++) {
+                    DLS_Voice* v = &synth->voices[i];
+                    if (v->active && v->channel == channel && v->key == note) {
+                        origFound = true;
+                        break;
+                    }
+                }
+                if (!origFound) {
+                    matchNote = altNote;
+                }
             }
         }
     }
-    
+
     for (int i = 0; i < 256; i++) {
         DLS_Voice* v = &synth->voices[i];
         if (v->active && v->channel == channel && v->key == matchNote) {
