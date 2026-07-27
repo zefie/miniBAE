@@ -2397,7 +2397,25 @@ static void PV_ProcessNoteOff(GM_Song *pSong, int16_t MIDIChannel, int16_t curre
                      pSong->channelType[MIDIChannel] != CHANNEL_TYPE_DLS &&
                      pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF)
             {
+#if USE_NATIVE_DLS == TRUE
+                if (GM_DLS_HasXmfEmbeddedBank(pSong->pMixer))
+                {
+                    int16_t checkPatch = pSong->channelProgram[MIDIChannel];
+                    if (checkPatch < 0) checkPatch = 0;
+                    if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)PV_ConvertPatchBank(pSong, checkPatch, MIDIChannel)))
+                    {
+                        pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
+                    }
+                }
+                if (pSong->channelType[MIDIChannel] == CHANNEL_TYPE_DLS)
+                {
+                    GM_DLS_ProcessNoteOff(pSong, MIDIChannel, note, volume);
+                }
+                else
+#endif
+                {
                 GM_SF2_ProcessNoteOff(pSong, MIDIChannel, note, volume);
+                }
             }
 #endif
 #if USE_NATIVE_DLS == TRUE
@@ -2460,6 +2478,25 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                 else if ((GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2) &&
                          pSong->channelType[MIDIChannel] != CHANNEL_TYPE_DLS)
                 {
+#if USE_NATIVE_DLS == TRUE
+                    /* When an XMF embedded DLS bank is present but this channel
+                       hasn't had a program change yet, try routing to DLS.  This
+                       handles XMF files where notes arrive before program changes. */
+                    if (GM_DLS_HasXmfEmbeddedBank(pSong->pMixer))
+                    {
+                        int16_t checkPatch = pSong->channelProgram[MIDIChannel];
+                        if (checkPatch < 0) checkPatch = 0;
+                        if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)PV_ConvertPatchBank(pSong, checkPatch, MIDIChannel)))
+                        {
+                            pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
+                        }
+                    }
+                    if (pSong->channelType[MIDIChannel] == CHANNEL_TYPE_DLS)
+                    {
+                        GM_DLS_ProcessNoteOn(pSong, MIDIChannel, note, volume);
+                        return;
+                    }
+#endif
                     // adding this pleases the compiler
                     // warning: writing 1 byte into a region of size 0 [-Wstringop-overflow=]
                     //                   pSong->channelType[MIDIChannel] = CHANNEL_TYPE_RMF;
