@@ -1849,7 +1849,7 @@ static DLS_Instrument* DLS_Bank_FindSelector(DLS_Bank* bank, uint32_t selector);
 /* SP-MIDI 1.0b Figure 6: each entry lists all program numbers in one
    instrument group, terminated by -1.  When searching for a group match,
    every member is tried in priority order (first = canonical target). */
-static const int8_t g_spmidi_melodic_groups[][16] = {
+static const int8_t g_spmidi_melodic_groups[][18] = {
     {0,1,2,3,4,5,6,7,-1},           /* Piano → 0 Acoustic Grand */
     {8,9,10,11,13,14,15,16,46,47,99,109,-1}, /* Chromatic Perc → 12 Vibraphone */
     {17,18,19,20,21,22,23,24,110,-1}, /* Organ → 17 Drawbar */
