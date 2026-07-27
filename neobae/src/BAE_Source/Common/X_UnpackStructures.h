@@ -66,6 +66,16 @@
     #include "X_API.h"
 #endif
 
+#if defined(__clang__)
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wpragma-pack"
+    #pragma clang diagnostic ignored "-Wignored-pragmas"
+#elif defined(__GNUC__)
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wpragma-pack"
+    #pragma GCC diagnostic ignored "-Wignored-pragmas"
+#endif
+
 #if defined(__clang__) || defined(__GNUC__) || defined(_MSC_VER)
     #pragma pack(pop)
 #else
@@ -95,6 +105,12 @@
         #endif
     #endif
 #endif
+#endif
+
+#if defined(__clang__)
+    #pragma clang diagnostic pop
+#elif defined(__GNUC__)
+    #pragma GCC diagnostic pop
 #endif
 
 #undef X_PACKBY1

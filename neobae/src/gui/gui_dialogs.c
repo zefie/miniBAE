@@ -85,6 +85,10 @@ bool g_program_tooltip_visible = false;
 Rect g_program_tooltip_rect;
 char g_program_tooltip_text[520];
 
+bool g_dls_compat_tooltip_visible = false;
+Rect g_dls_compat_tooltip_rect;
+char g_dls_compat_tooltip_text[520];
+
 // External references
 extern bool g_exporting;
 extern bool g_exportDropdownOpen;

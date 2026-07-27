@@ -37,6 +37,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if USE_NATIVE_DLS == TRUE
+    #include "GenDLS_MobileBAE.h"
+    bool g_use_dls_compatiblity_mode = false;
+#endif
+
+extern bool g_dls_compat_tooltip_visible;
+extern Rect g_dls_compat_tooltip_rect;
+extern char g_dls_compat_tooltip_text[520];
+
 // Settings dialog state
 bool g_show_settings_dialog = false;
 
@@ -147,6 +156,13 @@ Settings load_settings(void)
         {
             settings.use_fluidsynth_for_dls = (atoi(line + 23) != 0);
             settings.has_use_fluidsynth_for_dls = true;
+        }
+#endif
+#if USE_NATIVE_DLS == TRUE
+        else if (strncmp(line, "dls_compatibility_mode=", 23) == 0)
+        {
+            settings.dls_compatibility_mode = (atoi(line + 23) != 0);
+            settings.has_dls_compatibility_mode = true;
         }
 #endif
         else if (strncmp(line, "disable_webtv_progress_bar=", 27) == 0)
@@ -329,8 +345,11 @@ void save_settings(const char *last_bank_path, int reverb_type, bool loop_enable
         fprintf(f, "stereo_output=%d\n", g_stereo_output ? 1 : 0);
         fprintf(f, "sample_rate=%d\n", g_sample_rate_hz);
         fprintf(f, "show_keyboard=%d\n", g_show_virtual_keyboard ? 1 : 0);
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_NATIVE_DLS == TRUE
+#if USE_NATIVE_DLS == TRUE
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
         fprintf(f, "use_fluidsynth_for_dls=%d\n", g_use_fluidsynth_for_dls ? 1 : 0);
+#endif
+        fprintf(f, "dls_compatibility_mode=%d\n", g_use_dls_compatiblity_mode ? 1 : 0);
 #endif
         fprintf(f, "disable_webtv_progress_bar=%d\n", g_disable_webtv_progress_bar ? 1 : 0);
         fprintf(f, "export_codec_index=%d\n", g_exportCodecIndex);
@@ -506,7 +525,13 @@ void save_full_settings(const Settings *settings)
         {
             fprintf(f, "use_fluidsynth_for_dls=%d\n", settings->use_fluidsynth_for_dls ? 1 : 0);
         }
-#endif        
+#endif
+#if USE_NATIVE_DLS == TRUE
+        if (settings->has_dls_compatibility_mode)
+        {
+            fprintf(f, "dls_compatibility_mode=%d\n", settings->dls_compatibility_mode ? 1 : 0);
+        }
+#endif
         if (settings->has_webtv)
         {
             fprintf(f, "disable_webtv_progress_bar=%d\n", settings->disable_webtv_progress_bar ? 1 : 0);
@@ -679,10 +704,21 @@ void apply_settings_to_ui(const Settings *settings, int *transpose, int *tempo, 
     {
         g_show_virtual_keyboard = settings->show_keyboard;
     }
+#if USE_NATIVE_DLS == TRUE
+    if (settings->has_dls_compatibility_mode)
+    {
+        g_use_dls_compatiblity_mode = settings->dls_compatibility_mode;
+        GM_DLS_SetMobileBAEQuirks(g_use_dls_compatiblity_mode ? false : true); // inverted
+    }
+#endif
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
     if (settings->has_use_fluidsynth_for_dls)
     {
         g_use_fluidsynth_for_dls = settings->use_fluidsynth_for_dls;
+        #if USE_NATIVE_DLS == TRUE
+            g_use_dls_compatiblity_mode = false;
+            GM_DLS_SetMobileBAEQuirks(true);
+        #endif
     }
 #endif
     if (settings->has_export_codec)
@@ -1409,7 +1445,7 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
         save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, *loopPlay);
     }
 
-#if BAE_FIX_SPAN_DC
+#if BAE_FIX_SPAN_DC == TRUE
     Rect panfixRect = {rightX, dlg.y + 144, 18, 18};
     if (!rightColumnCheckboxesEnabled)
     {
@@ -1424,7 +1460,7 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
     }
 #endif
 
-#if BAE_CLASSIC_CHORUS
+#if BAE_CLASSIC_CHORUS == TRUE
     Rect chorusRect = {rightX, dlg.y + 180, 18, 18};
     if (!rightColumnCheckboxesEnabled)
     {
@@ -1449,6 +1485,11 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
     }
     else if (ui_toggle(R, fsDlsRect, &g_use_fluidsynth_for_dls, "Use FluidSynth for DLS", mx, my, mclick))
     {
+        if (g_use_fluidsynth_for_dls)
+        {
+            g_use_dls_compatiblity_mode = false;
+            GM_DLS_SetMobileBAEQuirks(true);
+        }
         save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, *loopPlay);
         if (g_current_bank_path[0])
         {
@@ -1459,7 +1500,48 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
         }
     }
 #endif
-
+#if USE_NATIVE_DLS == TRUE
+    Rect compatDlsRect = {leftX, dlg.y + 166, 18, 18};
+    if (!rightColumnCheckboxesEnabled || g_use_fluidsynth_for_dls)
+    {
+        bool over = point_in(mx, my, compatDlsRect);
+        draw_custom_checkbox(R, compatDlsRect, g_use_dls_compatiblity_mode, over);
+        draw_text(R, compatDlsRect.x + compatDlsRect.w + 6, compatDlsRect.y + 2, "DLS Compatibility Mode", g_text_color);
+    }
+    else if (ui_toggle(R, compatDlsRect, &g_use_dls_compatiblity_mode, "DLS Compatibility Mode", mx, my, mclick))
+    {
+        save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, *loopPlay);
+        GM_DLS_SetMobileBAEQuirks(g_use_dls_compatiblity_mode ? false : true); // inverted
+        if (g_current_bank_path[0])
+        {
+            if (!load_bank(g_current_bank_path, *playing, *transpose, *tempo, *volume, *loopPlay, *reverbType, ch_enable, false))
+            {
+                set_status_message("Failed to reload bank");
+            }
+        }
+    }
+    {
+        Rect compatDlsFullRect = {leftX, dlg.y + 166, 280, 24};
+        if (point_in(mx, my, compatDlsFullRect))
+        {
+            const char *tooltip_text = "Checking this will disable MobileBAE quirks";
+            int text_w = 0, text_h = 0;
+            measure_text(tooltip_text, &text_w, &text_h);
+            int tooltip_w = text_w + 8;
+            int tooltip_h = text_h + 8;
+            if (tooltip_w > 500)
+                tooltip_w = 500;
+            int tooltip_x = mx + 10;
+            int tooltip_y = my - 30;
+            if (tooltip_x + tooltip_w > WINDOW_W - 4)
+                tooltip_x = WINDOW_W - tooltip_w - 4;
+            if (tooltip_y < 4)
+                tooltip_y = my + 25;
+            ui_set_tooltip((Rect){tooltip_x, tooltip_y, tooltip_w, tooltip_h}, tooltip_text,
+                           &g_dls_compat_tooltip_visible, &g_dls_compat_tooltip_rect, g_dls_compat_tooltip_text, sizeof(g_dls_compat_tooltip_text));
+        }
+    }
+#endif
     // MIDI channel selector removed from Settings dialog - channel is now controlled in the virtual keyboard dialog
 
     // Footer info removed (moved to About dialog)
@@ -1774,6 +1856,11 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
     // Discard clicks outside dialog (after dropdown so it doesn't immediately close on open)
     if (mclick && !point_in(mx, my, dlg))
     { /* swallow */
+    }
+
+    if (g_dls_compat_tooltip_visible)
+    {
+        ui_draw_tooltip(R, g_dls_compat_tooltip_rect, g_dls_compat_tooltip_text, true, true);
     }
 }
 

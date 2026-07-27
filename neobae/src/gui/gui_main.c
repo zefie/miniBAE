@@ -95,6 +95,10 @@
 #include "GenXMF.h"
 #endif
 
+#if USE_NATIVE_DLS == TRUE
+#include "GenDLS_MobileBAE.h"
+#endif
+
 int g_thread_ch_enabled[BAE_MAX_MIDI_CHANNELS] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 /* Forward-declare dialog renderer from gui_dialogs.c to avoid including the
     full header (which defines globals that conflict with this file's statics). */
@@ -512,6 +516,10 @@ extern char g_program_tooltip_text[520];
 extern bool g_bank_tooltip_visible;
 extern Rect g_bank_tooltip_rect;
 extern char g_bank_tooltip_text[520];
+
+extern bool g_dls_compat_tooltip_visible;
+extern Rect g_dls_compat_tooltip_rect;
+extern char g_dls_compat_tooltip_text[520];
 
 // Map integer Hz to BAERate enum (subset offered in UI)
 static BAERate map_rate_from_hz(int hz)
@@ -943,11 +951,24 @@ int main(int argc, char *argv[])
     {
         g_show_virtual_keyboard = settings.show_keyboard;
     }
+#if USE_NATIVE_DLS == TRUE
+    extern bool g_use_dls_compatiblity_mode;
+    if (settings.has_dls_compatibility_mode)
+    {
+        g_use_dls_compatiblity_mode = settings.dls_compatibility_mode;
+    }
+#endif    
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
     extern bool g_use_fluidsynth_for_dls;
     if (settings.has_use_fluidsynth_for_dls)
     {
         g_use_fluidsynth_for_dls = settings.use_fluidsynth_for_dls;
+#if USE_NATIVE_DLS == TRUE
+        if (g_use_fluidsynth_for_dls)
+        {
+            g_use_dls_compatiblity_mode = false;
+        }
+#endif
     }
 #endif
     if (settings.has_export_codec)
@@ -1163,6 +1184,9 @@ int main(int argc, char *argv[])
     bae_set_transpose(transpose);
     bae_set_loop(loopPlay);
     bae_set_reverb(reverbType);
+#if USE_NATIVE_DLS == TRUE
+    GM_DLS_SetMobileBAEQuirks(g_use_dls_compatiblity_mode ? false : true); // inverted
+#endif
 
     // Load bank (use saved bank if available, otherwise fallback)
     if (settings.has_bank && strlen(settings.bank_path) > 0)
@@ -1226,6 +1250,7 @@ int main(int argc, char *argv[])
             safe_strncpy(g_current_bank_path, settings.bank_path, sizeof(g_current_bank_path) - 1);
             g_current_bank_path[sizeof(g_current_bank_path) - 1] = '\0';
         }
+
     }
     else
     {
@@ -2785,6 +2810,7 @@ int main(int argc, char *argv[])
         ui_clear_tooltip(&g_program_tooltip_visible);
         ui_clear_tooltip(&g_bank_tooltip_visible);
         ui_clear_tooltip(&g_reverb_tooltip_visible);
+        ui_clear_tooltip(&g_dls_compat_tooltip_visible);
 
         // Colors driven by theme globals
         SDL_Color labelCol = g_text_color;
@@ -7393,6 +7419,12 @@ int main(int argc, char *argv[])
         extern bool g_use_fluidsynth_for_dls;
         current_settings.has_use_fluidsynth_for_dls = true;
         current_settings.use_fluidsynth_for_dls = g_use_fluidsynth_for_dls;
+    #endif
+
+    #if USE_NATIVE_DLS == TRUE
+        extern bool g_use_dls_compatiblity_mode;
+        current_settings.has_dls_compatibility_mode = true;
+        current_settings.dls_compatibility_mode = g_use_dls_compatiblity_mode;
     #endif
 
         save_full_settings(&current_settings);

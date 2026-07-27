@@ -55,6 +55,11 @@
 #  include "GenXMF.h"
 #endif
 
+#if USE_NATIVE_DLS == TRUE
+    #include "GenDLS_MobileBAE.h"
+    static int gDLSCompatibilityMode = 0;
+#endif
+
 #ifdef main
 #undef main
 #endif
@@ -339,8 +344,11 @@ static const char usageMain[] =
     "USAGE:  playbae  -p  {patches.hsb/zsb}\n"
 #endif
     "                 -f  {%s}\n"
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_NATIVE_DLS == TRUE
+#if USE_NATIVE_DLS == TRUE
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
     "                 -fs {use FluidSynth for DLS instead of native DLS system}\n"
+#endif
+    "                 -dlscompat {enable Native DLS compatibility mode, disabling MobileBAE quirks (ignored if using FluidSynth)}\n"
 #endif
     "                 -o  {output file (wav/mp3/flac/ogg/opus)}\n"
 #if SUPPORT_KARAOKE == TRUE
@@ -1447,10 +1455,20 @@ int main(int argc, char *argv[])
     if (PV_ParseCommands(argc, argv, "-mc", 1, tmpBuf))
         strncpy(muteChannels, tmpBuf, sizeof(muteChannels)-1);
 
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_NATIVE_DLS == TRUE
-    if (PV_ParseCommands(argc, argv, "-fs", 0, NULL)) gUseSF2Mode = 1;
+#if USE_NATIVE_DLS == TRUE
+    if (PV_ParseCommands(argc, argv, "-dlscompat", 0, NULL)) gDLSCompatibilityMode = 1;
+    GM_DLS_SetMobileBAEQuirks(gDLSCompatibilityMode ? false : true); // invert
 #endif
 
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_NATIVE_DLS == TRUE
+    if (PV_ParseCommands(argc, argv, "-fs", 0, NULL)) {
+        gUseSF2Mode = 1;
+        #if USE_NATIVE_DLS == TRUE        
+            gDLSCompatibilityMode = 0;
+            GM_DLS_SetMobileBAEQuirks(true);
+        #endif
+    }
+#endif
     if (PV_ParseCommands(argc, argv, "-nf", 0, NULL))   gFadeOut = 0;
     if (PV_ParseCommands(argc, argv, "-v",  1, tmpBuf)) {
         gVolumePct = atoi(tmpBuf);

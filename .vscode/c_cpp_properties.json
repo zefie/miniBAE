@@ -55,7 +55,8 @@
                 "USE_ADP_SUPPORT=1",
                 "USE_RETRO_RINGTONE_SUPPORT=1",
                 "USE_QOA_SUPPORT=1",
-                "USE_RMI_SUPPORT=1"
+                "USE_RMI_SUPPORT=1",
+                "USE_NATIVE_DLS=1"
             ],
             "compilerPath": "/usr/bin/x86_64-w64-mingw32-gcc",
             "intelliSenseMode": "linux-gcc-x64",

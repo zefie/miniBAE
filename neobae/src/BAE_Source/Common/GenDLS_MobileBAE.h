@@ -60,6 +60,8 @@ struct DLS_Articulation {
     int32_t eg2Decay;
     int32_t eg2Sustain;
     int32_t eg2Release;
+    int32_t eg1Shutdown;
+    int32_t eg2Shutdown;
     int32_t pitch;
     int32_t pan;
     int32_t chorus;
@@ -183,6 +185,8 @@ struct DLS_Envelope {
     int32_t decayTicks;
     int32_t releaseMicros;
     int32_t activeReleaseMicros;
+    int32_t shutdownMicros;
+    int32_t activeShutdownMicros;
     int32_t sustain;
     bool eg1;
     int64_t eg1Sustain;
@@ -342,7 +346,8 @@ void GM_DLS_ProcessController(GM_Song* pSong, uint16_t channel, uint16_t control
 void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbBuffer, int32_t* pChorusBuffer, uint32_t frames);
 void GM_DLS_AllNotesOff(GM_Song* pSong, int16_t channel, bool immediate);
 bool GM_DLS_HasProgram(GM_Song* pSong, uint16_t channel, uint16_t program);
-
+void GM_DLS_SetMobileBAEQuirks(bool useQuirks);
+bool GM_DLS_GetMobileBAEQuirks();
 #ifdef __cplusplus
 }
 #endif

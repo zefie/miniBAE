@@ -995,3 +995,30 @@ JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Mixer__1getUseFluidSynthForDLS
 	return (jboolean)(g_useFluidSynthForDLS ? JNI_TRUE : JNI_FALSE);
 }
 
+JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1setDLSCompatibilityMode
+	(JNIEnv* env, jclass clazz, jboolean enable)
+{
+	(void)env;
+	(void)clazz;
+#if USE_NATIVE_DLS == TRUE
+	GM_DLS_SetMobileBAEQuirks(enable ? FALSE : TRUE); // inverted: compat mode disables quirks
+	return (jint)BAE_NO_ERROR;
+#else
+	return (jint)BAE_ERROR_FEATURE_UNAVAIL;
+#endif
+}
+
+JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Mixer__1getDLSCompatibilityMode
+	(JNIEnv* env, jclass clazz)
+{
+	(void)env;
+	(void)clazz;
+#if USE_NATIVE_DLS == TRUE
+	BAE_BOOL quirks = TRUE;
+	GM_DLS_GetMobileBAEQuirks(&quirks);
+	return (jboolean)(quirks ? JNI_FALSE : JNI_TRUE); // inverted: compat mode = quirks disabled
+#else
+	return (jboolean)JNI_FALSE;
+#endif
+}
+

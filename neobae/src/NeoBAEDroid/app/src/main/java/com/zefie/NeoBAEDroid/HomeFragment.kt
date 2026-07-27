@@ -240,6 +240,8 @@ class HomeFragment : Fragment() {
         var classicChorus = mutableStateOf(false)
         // Route DLS banks through FluidSynth instead of native DLS loader (off by default)
         var useFluidSynthForDLS = mutableStateOf(false)
+        // Native DLS compatibility mode (disables MobileBAE quirks, off by default)
+        var dlsCompatibilityMode = mutableStateOf(false)
 
         private const val PREF_NAME = "NeoBAE_prefs"
         private const val KEY_ENABLE_AUDIO_FILES = "enable_audio_files"
@@ -874,6 +876,7 @@ class HomeFragment : Fragment() {
                     fixPanLfoBias.value = prefs.getBoolean("fix_pan_lfo_bias", true)
                     classicChorus.value = prefs.getBoolean("classic_chorus", false)
                     useFluidSynthForDLS.value = prefs.getBoolean("use_fluidsynth_for_dls", false)
+                    dlsCompatibilityMode.value = prefs.getBoolean("dls_compatibility_mode", false)
                     exportCodec.value = prefs.getInt("export_codec", 2) // Default to OGG
                     baeScriptEnabled.value = prefs.getBoolean("baescript_enabled", false)
                     baeScriptSource.value = prefs.getString("baescript_source", "") ?: ""
@@ -1165,6 +1168,7 @@ class HomeFragment : Fragment() {
                         fixPanLfoBias = fixPanLfoBias.value,
                         classicChorus = classicChorus.value,
                         useFluidSynthForDLS = useFluidSynthForDLS.value,
+                        dlsCompatibilityMode = dlsCompatibilityMode.value,
                         exportCodec = exportCodec.value,
                         baeScriptEnabled = baeScriptEnabled.value,
                         baeScriptSource = baeScriptSource.value,
@@ -1228,7 +1232,18 @@ class HomeFragment : Fragment() {
                             Mixer.setUseFluidSynthForDLS(enabled)
                             val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
                             prefs.edit().putBoolean("use_fluidsynth_for_dls", enabled).apply()
+                            if (enabled) {
+                                dlsCompatibilityMode.value = false
+                                Mixer.setDLSCompatibilityMode(false)
+                                prefs.edit().putBoolean("dls_compatibility_mode", false).apply()
+                            }
                             hotSwapDlsBankEngineIfNeeded()
+                        },
+                        onDLSCompatibilityModeChange = { enabled ->
+                            dlsCompatibilityMode.value = enabled
+                            Mixer.setDLSCompatibilityMode(enabled)
+                            val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                            prefs.edit().putBoolean("dls_compatibility_mode", enabled).apply()
                         },
                         onExportCodecChange = { value ->
                             exportCodec.value = value
@@ -1599,6 +1614,7 @@ class HomeFragment : Fragment() {
                                         Mixer.setSpanDCFix(fixPanLfoBias.value)
                                         Mixer.setClassicChorus(classicChorus.value)
                                         Mixer.setUseFluidSynthForDLS(useFluidSynthForDLS.value)
+                                        Mixer.setDLSCompatibilityMode(dlsCompatibilityMode.value)
                                         // Re-apply Neo Reverb custom parameters after mixer recreation.
                                         val prefs = ctx.getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
                                         val currentReverb = prefs.getInt("default_reverb", reverbType.value)
@@ -2193,6 +2209,9 @@ class HomeFragment : Fragment() {
             val useFluidSynthForDLSPref = prefs.getBoolean("use_fluidsynth_for_dls", false)
             HomeFragment.useFluidSynthForDLS.value = useFluidSynthForDLSPref
             Mixer.setUseFluidSynthForDLS(useFluidSynthForDLSPref)
+            val dlsCompatModePref = prefs.getBoolean("dls_compatibility_mode", false)
+            HomeFragment.dlsCompatibilityMode.value = dlsCompatModePref
+            Mixer.setDLSCompatibilityMode(dlsCompatModePref)
             
             // Restore bank settings
             ensureBankIsLoaded()
@@ -3433,6 +3452,7 @@ class HomeFragment : Fragment() {
                                     Mixer.setSpanDCFix(fixPanLfoBias.value)
                                     Mixer.setClassicChorus(classicChorus.value)
                                     Mixer.setUseFluidSynthForDLS(useFluidSynthForDLS.value)
+                                    Mixer.setDLSCompatibilityMode(dlsCompatibilityMode.value)
                                     val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
                                     val currentReverb = prefs.getInt("default_reverb", reverbType.value)
                                     if (currentReverb == CUSTOM_REVERB_TYPE) {
@@ -3603,6 +3623,7 @@ class HomeFragment : Fragment() {
                                 Mixer.setSpanDCFix(fixPanLfoBias.value)
                                 Mixer.setClassicChorus(classicChorus.value)
                                 Mixer.setUseFluidSynthForDLS(useFluidSynthForDLS.value)
+                                Mixer.setDLSCompatibilityMode(dlsCompatibilityMode.value)
                                 val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
                                 val currentReverb = prefs.getInt("default_reverb", reverbType.value)
                                 if (currentReverb == CUSTOM_REVERB_TYPE) {
@@ -4159,6 +4180,7 @@ fun NewMusicPlayerScreen(
     fixPanLfoBias: Boolean,
     classicChorus: Boolean,
     useFluidSynthForDLS: Boolean,
+    dlsCompatibilityMode: Boolean,
     exportCodec: Int,
     baeScriptEnabled: Boolean,
     baeScriptSource: String,
@@ -4170,6 +4192,7 @@ fun NewMusicPlayerScreen(
     onFixPanLfoChange: (Boolean) -> Unit,
     onClassicChorusChange: (Boolean) -> Unit,
     onUseFluidSynthForDLSChange: (Boolean) -> Unit,
+    onDLSCompatibilityModeChange: (Boolean) -> Unit,
     onExportCodecChange: (Int) -> Unit,
     onBaeScriptEnabledChange: (Boolean) -> Unit,
     onBaeScriptSourceChange: (String) -> Unit,
@@ -4675,6 +4698,7 @@ fun NewMusicPlayerScreen(
                     fixPanLfoBias = fixPanLfoBias,
                     classicChorus = classicChorus,
                     useFluidSynthForDLS = useFluidSynthForDLS,
+                    dlsCompatibilityMode = dlsCompatibilityMode,
                     exportCodec = exportCodec,
                     baeScriptEnabled = baeScriptEnabled,
                     baeScriptSource = baeScriptSource,
@@ -4686,6 +4710,12 @@ fun NewMusicPlayerScreen(
                     onFixPanLfoChange = onFixPanLfoChange,
                     onClassicChorusChange = onClassicChorusChange,
                     onUseFluidSynthForDLSChange = onUseFluidSynthForDLSChange,
+                    onDLSCompatibilityModeChange = { enabled ->
+                        HomeFragment.dlsCompatibilityMode.value = enabled
+                        Mixer.setDLSCompatibilityMode(enabled)
+                        context.getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                            .edit().putBoolean("dls_compatibility_mode", enabled).apply()
+                    },
                     onVolumeChange = onVolumeChange,
                     onExportCodecChange = onExportCodecChange,
                     onBaeScriptEnabledChange = onBaeScriptEnabledChange,
@@ -7034,6 +7064,7 @@ fun SettingsScreenContent(
     fixPanLfoBias: Boolean,
     classicChorus: Boolean,
     useFluidSynthForDLS: Boolean,
+    dlsCompatibilityMode: Boolean,
     exportCodec: Int,
     baeScriptEnabled: Boolean,
     baeScriptSource: String,
@@ -7045,6 +7076,7 @@ fun SettingsScreenContent(
     onFixPanLfoChange: (Boolean) -> Unit,
     onClassicChorusChange: (Boolean) -> Unit,
     onUseFluidSynthForDLSChange: (Boolean) -> Unit,
+    onDLSCompatibilityModeChange: (Boolean) -> Unit,
     onVolumeChange: (Int) -> Unit,
     onExportCodecChange: (Int) -> Unit,
     onBaeScriptEnabledChange: (Boolean) -> Unit,
@@ -8878,7 +8910,52 @@ fun SettingsScreenContent(
         }
 
         Spacer(modifier = Modifier.height(16.dp))
-        
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = 4.dp,
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = !useFluidSynthForDLS) {
+                            onDLSCompatibilityModeChange(!dlsCompatibilityMode)
+                        },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Filled.Tune,
+                        contentDescription = null,
+                        tint = if (useFluidSynthForDLS) MaterialTheme.colors.onSurface.copy(alpha = 0.3f) else MaterialTheme.colors.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "DLS Compatibility Mode",
+                        style = MaterialTheme.typography.h6,
+                        fontWeight = FontWeight.Bold,
+                        color = if (useFluidSynthForDLS) MaterialTheme.colors.onSurface.copy(alpha = 0.3f) else MaterialTheme.colors.primary,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Checkbox(
+                        checked = dlsCompatibilityMode,
+                        enabled = !useFluidSynthForDLS,
+                        onCheckedChange = { onDLSCompatibilityModeChange(it) }
+                    )
+                }
+                Text(
+                    text = "When enabled, disables MobileBAE-specific quirks. Only applies when using the native DLS loader.",
+                    style = MaterialTheme.typography.caption,
+                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         // About Section (same for both orientations)
         Card(
             modifier = Modifier.fillMaxWidth(),

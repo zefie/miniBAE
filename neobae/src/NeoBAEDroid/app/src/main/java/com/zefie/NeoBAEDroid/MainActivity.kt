@@ -343,6 +343,7 @@ class MainActivity : AppCompatActivity() {
                 try {
                     val prefs = getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
                     Mixer.setUseFluidSynthForDLS(prefs.getBoolean("use_fluidsynth_for_dls", false))
+                    Mixer.setDLSCompatibilityMode(prefs.getBoolean("dls_compatibility_mode", false))
                 } catch (_: Exception) {
                 }
             }

@@ -61,6 +61,22 @@ void GM_SetMixerDLSMode(bool isDLS)
     }
 }
 
+bool g_use_mobilebae_quirks = true;
+
+static void DLS_ApplyDirectConnection(DLS_Articulation* art, const DLS_Connection* connection);
+static void dls_refresh_current_synth_for_mode(void);
+
+void GM_DLS_SetMobileBAEQuirks(bool useQuirks) 
+{
+    g_use_mobilebae_quirks = useQuirks;
+    dls_refresh_current_synth_for_mode();
+}
+
+bool GM_DLS_GetMobileBAEQuirks() 
+{
+    return g_use_mobilebae_quirks;
+}
+
 // ============================================================================
 // DLS MATH AND RENDER HELPERS
 // ============================================================================
@@ -174,12 +190,27 @@ static int32_t dls_exp10_q16(int32_t x) {
 }
 
 static int32_t dls_pan_scale_q16(int32_t pan) {
-    int32_t index = (((500 * (dls_clamp(pan, -0x10000, 0x10000) + 0x10000)) >> 16) & 0xFFFF) >> 1;
-    if (index < 0) index = 0;
-    if (index >= (int32_t)(sizeof(MOBILEBAE_PAN_TABLE) / sizeof(MOBILEBAE_PAN_TABLE[0]))) {
-        index = (int32_t)(sizeof(MOBILEBAE_PAN_TABLE) / sizeof(MOBILEBAE_PAN_TABLE[0])) - 1;
+    if (g_use_mobilebae_quirks) {
+        int32_t index = (((500 * (dls_clamp(pan, -0x10000, 0x10000) + 0x10000)) >> 16) & 0xFFFF) >> 1;
+        if (index < 0) index = 0;
+        if (index >= (int32_t)(sizeof(MOBILEBAE_PAN_TABLE) / sizeof(MOBILEBAE_PAN_TABLE[0]))) {
+            index = (int32_t)(sizeof(MOBILEBAE_PAN_TABLE) / sizeof(MOBILEBAE_PAN_TABLE[0])) - 1;
+        }
+        return MOBILEBAE_PAN_TABLE[index];
+    } else {
+        /* DLS v2.2 pan law: Left  = 20*log10(cos(pi/2 * (PAN+50%)))
+                             Right = 20*log10(sin(pi/2 * (PAN+50%)))
+           pan is [-0x10000, 0x10000], and we're computing the scale factor for
+           one channel. When pan == 0 (center), both channels are 0.707 (-3dB).
+           We use the same MOBILEBAE_PAN_TABLE as an empirical approximation
+           of the equal-power pan curve with the correct DLS v2.2 scaling. */
+        int32_t index = (((508 * (dls_clamp(pan, -0x10000, 0x10000) + 0x10000)) >> 16) & 0xFFFF) >> 1;
+        if (index < 0) index = 0;
+        if (index >= (int32_t)(sizeof(MOBILEBAE_PAN_TABLE) / sizeof(MOBILEBAE_PAN_TABLE[0]))) {
+            index = (int32_t)(sizeof(MOBILEBAE_PAN_TABLE) / sizeof(MOBILEBAE_PAN_TABLE[0])) - 1;
+        }
+        return MOBILEBAE_PAN_TABLE[index];
     }
-    return MOBILEBAE_PAN_TABLE[index];
 }
 
 static int32_t dls_timecent_to_micros(int32_t scale) {
@@ -347,8 +378,14 @@ static void dls_env_shutdown(DLS_Envelope* env)
 {
     if (!env->finished)
     {
-        env->activeReleaseMicros = DLS_FORCED_FADE_MICROS;
-        env->activeReleaseMultiplier = dls_eg1_multiplier(DLS_FORCED_FADE_MICROS);
+        int32_t fadeMicros;
+        if (g_use_mobilebae_quirks) {
+            fadeMicros = DLS_FORCED_FADE_MICROS;
+        } else {
+            fadeMicros = env->shutdownMicros > 0 ? env->shutdownMicros : DLS_FORCED_FADE_MICROS;
+        }
+        env->activeReleaseMicros = fadeMicros;
+        env->activeReleaseMultiplier = dls_eg1_multiplier(fadeMicros);
         env->shutdownStart = env->current;
         env->tickIndex = 0;
         env->stage = DLS_ENV_SHUTDOWN;
@@ -412,7 +449,13 @@ static int32_t dls_env_next_linear(DLS_Envelope* env) {
             env->tickIndex += 10000;
         }
     } else if (env->stage == DLS_ENV_SHUTDOWN) {
-        int32_t remaining = DLS_EG2_FULL - dls_env_eg2_ramp_step(env->tickIndex, DLS_FORCED_FADE_MICROS);
+        int32_t fadeMicros;
+        if (g_use_mobilebae_quirks) {
+            fadeMicros = DLS_FORCED_FADE_MICROS;
+        } else {
+            fadeMicros = env->shutdownMicros > 0 ? env->shutdownMicros : DLS_FORCED_FADE_MICROS;
+        }
+        int32_t remaining = DLS_EG2_FULL - dls_env_eg2_ramp_step(env->tickIndex, fadeMicros);
         env->current = DLS_FP_MUL(env->shutdownStart, remaining);
         if (env->current <= 0 || remaining <= 0) {
             env->current = 0;
@@ -928,48 +971,127 @@ static void DLS_InitArticulation(DLS_Articulation* art) {
     art->eg1Decay = INT32_MIN;
     art->eg1Sustain = 0x10000;
     art->eg1Release = INT32_MIN;
+    art->eg1Shutdown = INT32_MIN;
     art->eg2Delay = INT32_MIN;
     art->eg2Attack = INT32_MIN;
     art->eg2Hold = INT32_MIN;
     art->eg2Decay = INT32_MIN;
     art->eg2Sustain = 0x10000;
     art->eg2Release = INT32_MIN;
+    art->eg2Shutdown = INT32_MIN;
     art->filterCutoff = FILTER_DISABLED_CUTOFF;
+}
+
+static void dls_rebuild_articulation_for_mode(DLS_Articulation* art)
+{
+    DLS_Connection* savedConnections;
+    uint16_t savedCount;
+
+    if (!art) return;
+    savedConnections = art->runtimeConnections;
+    savedCount = art->connectionCount;
+    DLS_InitArticulation(art);
+    art->runtimeConnections = savedConnections;
+    art->connectionCount = savedCount;
+    for (uint16_t i = 0; i < savedCount; i++) {
+        DLS_ApplyDirectConnection(art, &savedConnections[i]);
+    }
+}
+
+static void dls_refresh_current_synth_for_mode(void)
+{
+    GM_Mixer* mixer = GM_GetCurrentMixer();
+    DLS_Synth* synth;
+
+    if (!mixer || !mixer->pDLSSynth) return;
+    synth = mixer->pDLSSynth;
+
+    for (int bankIndex = 0; bankIndex < 2; bankIndex++) {
+        DLS_Bank* bank = synth->banks[bankIndex];
+        if (!bank) continue;
+        for (uint32_t i = 0; i < bank->instrumentCount; i++) {
+            DLS_Instrument* instrument = &bank->instruments[i];
+            dls_rebuild_articulation_for_mode(&instrument->articulation);
+            for (uint32_t j = 0; j < instrument->regionCount; j++) {
+                dls_rebuild_articulation_for_mode(&instrument->regions[j].articulation);
+            }
+        }
+    }
+
+    for (int i = 0; i < 256; i++) {
+        synth->voices[i].active = false;
+    }
+    for (int channel = 0; channel < 16; channel++) {
+        synth->channels[channel].selectedInstrument = NULL;
+        synth->channels[channel].selectedBankSelector = 0;
+        synth->channels[channel].programSelected = false;
+    }
 }
 
 static void DLS_ApplyDirectConnection(DLS_Articulation* art, const DLS_Connection* connection) {
     if (connection->source != 0) return;
 
-    switch (connection->destination) {
-        case 3: art->pitch = connection->scale / 100; break;
-        case 4:
-            art->pan = connection->scale / 500;
-            debug_message("DLS Articulation: direct pan source=%u control=%u transform=0x%04X scale=%d pan=%d\n",
-                          connection->source, connection->control, connection->transform,
-                          connection->scale, art->pan);
-            break;
-        case 0x80: art->chorus = connection->scale / 1000; break;
-        case 0x81: art->reverb = connection->scale / 1000; break;
-        case 0x104: art->lfoFrequency = dls_plus_lfo_period(connection->scale); break;
-        case 0x105: art->lfoStartDelay = dls_timecent_to_micros(connection->scale); break;
-        case 0x114: art->vibratoFrequency = dls_plus_lfo_period(connection->scale); break;
-        case 0x115: art->vibratoStartDelay = dls_timecent_to_micros(connection->scale); break;
-        case 0x20B: art->eg1Delay = connection->scale; break;
-        case 0x206: art->eg1Attack = connection->scale; break;
-        case 0x20C: art->eg1Hold = connection->scale; break;
-        case 0x207: art->eg1Decay = connection->scale; break;
-        case 0x209: art->eg1Release = connection->scale; break;
-        case 0x20A: art->eg1Sustain = connection->scale / 1000; break;
-        case 0x30F: art->eg2Delay = connection->scale; break;
-        case 0x30A: art->eg2Attack = connection->scale; break;
-        case 0x310: art->eg2Hold = connection->scale; break;
-        case 0x30B: art->eg2Decay = connection->scale; break;
-        case 0x30D: art->eg2Release = connection->scale; break;
-        case 0x30E: art->eg2Sustain = connection->scale / 1000; break;
-        case 0x500:
-            art->filterCutoff = connection->scale == 0x7FFFFFFF ? FILTER_DISABLED_CUTOFF : connection->scale / 100;
-            break;
-        case 0x501: art->filterResonance = connection->scale / 10; break;
+    if (g_use_mobilebae_quirks) {
+        switch (connection->destination) {
+            case 3: art->pitch = connection->scale / 100; break;
+            case 4:
+                art->pan = connection->scale / 500;
+                debug_message("DLS Articulation: direct pan source=%u control=%u transform=0x%04X scale=%d pan=%d\n",
+                              connection->source, connection->control, connection->transform,
+                              connection->scale, art->pan);
+                break;
+            case 0x80: art->chorus = connection->scale / 1000; break;
+            case 0x81: art->reverb = connection->scale / 1000; break;
+            case 0x104: art->lfoFrequency = dls_plus_lfo_period(connection->scale); break;
+            case 0x105: art->lfoStartDelay = dls_timecent_to_micros(connection->scale); break;
+            case 0x114: art->vibratoFrequency = dls_plus_lfo_period(connection->scale); break;
+            case 0x115: art->vibratoStartDelay = dls_timecent_to_micros(connection->scale); break;
+            case 0x20B: art->eg1Delay = connection->scale; break;
+            case 0x206: art->eg1Attack = connection->scale; break;
+            case 0x20C: art->eg1Hold = connection->scale; break;
+            case 0x207: art->eg1Decay = connection->scale; break;
+            case 0x209: art->eg1Release = connection->scale; break;
+            case 0x20A: art->eg1Sustain = connection->scale / 1000; break;
+            case 0x30F: art->eg2Delay = connection->scale; break;
+            case 0x30A: art->eg2Attack = connection->scale; break;
+            case 0x310: art->eg2Hold = connection->scale; break;
+            case 0x30B: art->eg2Decay = connection->scale; break;
+            case 0x30D: art->eg2Release = connection->scale; break;
+            case 0x30E: art->eg2Sustain = connection->scale / 1000; break;
+            case 0x500:
+                art->filterCutoff = connection->scale == 0x7FFFFFFF ? FILTER_DISABLED_CUTOFF : connection->scale / 100;
+                break;
+            case 0x501: art->filterResonance = connection->scale / 10; break;
+        }
+    } else {
+        switch (connection->destination) {
+            case 3: art->pitch = connection->scale / 100; break;
+            case 4: art->pan = connection->scale / 500; break;
+            case 0x80: art->chorus = connection->scale / 1000; break;
+            case 0x81: art->reverb = connection->scale / 1000; break;
+            case 0x104: art->lfoFrequency = dls_plus_lfo_period(connection->scale); break;
+            case 0x105: art->lfoStartDelay = dls_timecent_to_micros(connection->scale); break;
+            case 0x114: art->vibratoFrequency = dls_plus_lfo_period(connection->scale); break;
+            case 0x115: art->vibratoStartDelay = dls_timecent_to_micros(connection->scale); break;
+            case 0x20B: art->eg1Delay = connection->scale; break;
+            case 0x206: art->eg1Attack = connection->scale; break;
+            case 0x20C: art->eg1Hold = connection->scale; break;
+            case 0x207: art->eg1Decay = connection->scale; break;
+            case 0x209: art->eg1Release = connection->scale; break;
+            case 0x20A: art->eg1Sustain = connection->scale / 1000; break;
+            case 0x20D: art->eg1Shutdown = connection->scale; break;
+            case 0x30F: art->eg2Delay = connection->scale; break;
+            case 0x30A: art->eg2Attack = connection->scale; break;
+            case 0x310: art->eg2Hold = connection->scale; break;
+            case 0x30B: art->eg2Decay = connection->scale; break;
+            case 0x30D: art->eg2Release = connection->scale; break;
+            case 0x30E: art->eg2Sustain = connection->scale / 1000; break;
+            case 0x311: art->eg2Shutdown = connection->scale; break;
+            case 0x500:
+                art->filterCutoff = connection->scale == 0x7FFFFFFF ? FILTER_DISABLED_CUTOFF : connection->scale / 100;
+                break;
+            case 0x501: art->filterResonance = connection->scale / 10; break;
+        }
     }
 }
 
@@ -1882,6 +2004,38 @@ static const DLS_Connection g_dls_default_connections[] = {
     { 0xDD, 0,   0x80, 0x0000,  65536000 }
 };
 
+/* DLS v2.2 default connections per MMA RP-025/Amd2 Tables 5-6.
+   These replace the Level 1 defaults when MobileBAE quirks are disabled.
+   Only connections identical in function to the DLS1 defaults are included,
+   matching the same (source, control, destination) topology but with
+   DLS v2.2-correct default scale values for CC10 pan (50.8%) and
+   DLS v2.2 additional destinations (EG delay, hold, shutdown). */
+static const DLS_Connection g_dlsv2_default_connections[] = {
+    /* Key Number to Pitch: 12800 cents (same as DLS1) */
+    { 3,    0,     3, 0x0000,  838860800 },
+    /* Velocity to Gain: Concave, Inverted, -48 dB (matches quirks behavior;
+       DLS2 spec says -96 dB but -48 dB prevents drums from vanishing at
+       sub-127 velocities with DLS banks authored for this engine.) */
+    { 2,    0,     1, 0x8400,  -31457280 },
+    /* Pitch Wheel + RPN0 to Pitch: 12800 cents (same as DLS1) */
+    { 6, 0x100,     3, 0x4000,  838860800 },
+    /* CC7 to Gain: Concave, Inverted, -96 dB (same as DLS1) */
+    { 0x87, 0,      1, 0x8400,  -62914560 },
+    /* CC11 to Gain: Concave, Inverted, -96 dB (same as DLS1) */
+    { 0x8B, 0,      1, 0x8400,  -62914560 },
+    /* RPN1 to Pitch: 100 cents (same as DLS1) */
+    { 0x101, 0,     3, 0x4000,   6553600 },
+    /* CC10 to Pan: DLS2 uses 50.8% instead of DLS1's 50% */
+    { 0x8A, 0,      4, 0x4000,  33292288 },
+    /* CC91 to Reverb Send (same as DLS1) */
+    { 0xDB, 0,   0x81, 0x0000,  65536000 },
+    /* CC93 to Chorus Send (same as DLS1) */
+    { 0xDD, 0,   0x80, 0x0000,  65536000 },
+};
+
+static const size_t g_dlsv2_default_connections_count = sizeof(g_dlsv2_default_connections) / sizeof(g_dlsv2_default_connections[0]);
+static const size_t g_dls_default_connections_count = sizeof(g_dls_default_connections) / sizeof(g_dls_default_connections[0]);
+
 static bool dls_connection_matches(const DLS_Connection* a, const DLS_Connection* b) {
     return a->source == b->source && a->control == b->control && a->destination == b->destination;
 }
@@ -1920,7 +2074,11 @@ static int32_t dls_note_on_connection_value_q16(const DLS_Connection* connection
         return 0;
     }
 
-    if (connection->transform & 0x8000) source = 127 - source;
+    if (!g_use_mobilebae_quirks && (connection->transform & 0x8000)) {
+        source = velocity;
+    } else if (connection->transform & 0x8000) {
+        source = 127 - source;
+    }
     if (connection->transform & 0x4000) {
         source = (source << 17) / 128 - 0x10000;
     } else {
@@ -1929,8 +2087,11 @@ static int32_t dls_note_on_connection_value_q16(const DLS_Connection* connection
         if (type == 0) {
             source <<= 9;
         } else if (type == 1) {
-            source = source == 127 ? 0x10000
-                : -5 * dls_log10_q16(((127 - source) << 16) / 127) / 12;
+            if (g_use_mobilebae_quirks) {
+                source = source == 127 ? 0x10000 : -5 * dls_log10_q16(((127 - source) << 16) / 127) / 12;
+            } else {
+                source = -5 * dls_log10_q16(((source) << 16) / 127) / 12;
+            }
         } else {
             return 0;
         }
@@ -1963,10 +2124,19 @@ static void dls_apply_note_on_connections(const DLS_Articulation* art, int32_t k
         dls_apply_note_on_connection(&art->runtimeConnections[i], key, velocity, unityNote, ch,
                                      pitch, gainAttenuation, panOffset);
     }
-    for (uint32_t i = 0; i < sizeof(g_dls_default_connections) / sizeof(g_dls_default_connections[0]); i++) {
-        if (!dls_has_connection(art, &g_dls_default_connections[i])) {
-            dls_apply_note_on_connection(&g_dls_default_connections[i], key, velocity, unityNote, ch,
-                                         pitch, gainAttenuation, panOffset);
+    if (g_use_mobilebae_quirks) {
+        for (uint32_t i = 0; i < g_dls_default_connections_count; i++) {
+            if (!dls_has_connection(art, &g_dls_default_connections[i])) {
+                dls_apply_note_on_connection(&g_dls_default_connections[i], key, velocity, unityNote, ch,
+                                             pitch, gainAttenuation, panOffset);
+            }
+        }
+    } else {
+        for (uint32_t i = 0; i < g_dlsv2_default_connections_count; i++) {
+            if (!dls_has_connection(art, &g_dlsv2_default_connections[i])) {
+                dls_apply_note_on_connection(&g_dlsv2_default_connections[i], key, velocity, unityNote, ch,
+                                             pitch, gainAttenuation, panOffset);
+            }
         }
     }
 }
@@ -2029,10 +2199,19 @@ static void dls_apply_runtime_connections(const DLS_Articulation* art, const DLS
         dls_apply_runtime_connection(&art->runtimeConnections[i], voice, runtimePitch, gainAttenuation,
                                      panOffset, reverbSend, chorusSend, filterCutoffDelta, filterResonanceDelta);
     }
-    for (uint32_t i = 0; i < sizeof(g_dls_default_connections) / sizeof(g_dls_default_connections[0]); i++) {
-        if (!dls_has_connection(art, &g_dls_default_connections[i])) {
-            dls_apply_runtime_connection(&g_dls_default_connections[i], voice, runtimePitch, gainAttenuation,
-                                         panOffset, reverbSend, chorusSend, filterCutoffDelta, filterResonanceDelta);
+    if (g_use_mobilebae_quirks) {
+        for (uint32_t i = 0; i < g_dls_default_connections_count; i++) {
+            if (!dls_has_connection(art, &g_dls_default_connections[i])) {
+                dls_apply_runtime_connection(&g_dls_default_connections[i], voice, runtimePitch, gainAttenuation,
+                                             panOffset, reverbSend, chorusSend, filterCutoffDelta, filterResonanceDelta);
+            }
+        }
+    } else {
+        for (uint32_t i = 0; i < g_dlsv2_default_connections_count; i++) {
+            if (!dls_has_connection(art, &g_dlsv2_default_connections[i])) {
+                dls_apply_runtime_connection(&g_dlsv2_default_connections[i], voice, runtimePitch, gainAttenuation,
+                                             panOffset, reverbSend, chorusSend, filterCutoffDelta, filterResonanceDelta);
+            }
         }
     }
 }
@@ -2211,6 +2390,13 @@ static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t v
                  art->eg1Sustain, eg1Release, true, sampleRate);
     dls_env_init(&v->eg2Envelope, eg2Delay, eg2Attack, eg2Hold, eg2Decay,
                  art->eg2Sustain, eg2Release, false, sampleRate);
+    if (!g_use_mobilebae_quirks) {
+        v->envelope.shutdownMicros = art->eg1Shutdown > 0 ? dls_timecent_to_micros(art->eg1Shutdown) : DLS_FORCED_FADE_MICROS;
+        v->eg2Envelope.shutdownMicros = art->eg2Shutdown > 0 ? dls_timecent_to_micros(art->eg2Shutdown) : DLS_FORCED_FADE_MICROS;
+    } else {
+        v->envelope.shutdownMicros = DLS_FORCED_FADE_MICROS;
+        v->eg2Envelope.shutdownMicros = DLS_FORCED_FADE_MICROS;
+    }
     dls_lfo_init(&v->vibratoLfo, art->vibratoFrequency, art->vibratoStartDelay, sampleRate);
     dls_lfo_init(&v->modulationLfo, art->lfoFrequency, art->lfoStartDelay, sampleRate);
     
@@ -2249,7 +2435,11 @@ static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t v
         }
 
         int32_t gainQ16 = v->baseGainQ16;
-        if (gainAttenuation < 0) {
+        if (g_use_mobilebae_quirks) {
+            if (gainAttenuation < 0) {
+                gainQ16 = DLS_FP_MUL(gainQ16, dls_exp10_q16(gainAttenuation / 20));
+            }
+        } else if (gainAttenuation != 0) {
             gainQ16 = DLS_FP_MUL(gainQ16, dls_exp10_q16(gainAttenuation / 20));
         }
         gainQ16 = DLS_FP_MUL(gainQ16, env1);
@@ -2309,7 +2499,11 @@ static void dls_kill_exclusive_voices(DLS_Synth* synth, int32_t channel, int32_t
     int32_t exclusiveClass = region->keyGroup & 0x0F;
     for (int i = 0; i < 256; i++) {
         DLS_Voice* voice = &synth->voices[i];
-        if (!voice->active || voice->channel != channel) continue;
+        if (!voice->active) continue;
+
+        if (g_use_mobilebae_quirks) {
+            if (voice->channel != channel) continue;
+        }
 
         bool sameRegionKey = ((region->options & 0x10) != 0) &&
                              (voice->key == key) &&
@@ -2330,10 +2524,12 @@ static int32_t dls_find_free_voice_index(DLS_Synth* synth) {
 }
 
 static int32_t dls_find_recyclable_voice(DLS_Synth* synth, int32_t newChannel) {
-    static const int32_t kVoiceStealOrder[16] = {15, 14, 13, 12, 11, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9};
+    static const int32_t kQuirksVoiceStealOrder[16] = {15, 14, 13, 12, 11, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9};
+    static const int32_t kSpecVoiceStealOrder[16] = {9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15};
+    const int32_t* order = g_use_mobilebae_quirks ? kQuirksVoiceStealOrder : kSpecVoiceStealOrder;
 
     for (int ord = 0; ord < 16; ord++) {
-        int32_t channel = kVoiceStealOrder[ord];
+        int32_t channel = order[ord];
         if (newChannel != 9 && channel == 9) continue;
 
         int32_t candidate = -1;
@@ -2349,19 +2545,28 @@ static int32_t dls_find_recyclable_voice(DLS_Synth* synth, int32_t newChannel) {
 }
 
 static int32_t dls_find_held_percussion_voice(DLS_Synth* synth, int32_t newChannel) {
-    static const int32_t kVoiceStealOrder[16] = {15, 14, 13, 12, 11, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9};
+    static const int32_t kQuirksVoiceStealOrder[16] = {15, 14, 13, 12, 11, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9};
+    static const int32_t kSpecVoiceStealOrder[16] = {9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15};
+    const int32_t* order = g_use_mobilebae_quirks ? kQuirksVoiceStealOrder : kSpecVoiceStealOrder;
 
     for (int ord = 0; ord < 16; ord++) {
-        int32_t channel = kVoiceStealOrder[ord];
+        int32_t channel = order[ord];
         if (newChannel != 9 && channel == 9) continue;
 
         int32_t candidate = -1;
         int64_t priority = INT64_MAX;
         for (int i = 0; i < 256; i++) {
             DLS_Voice* voice = &synth->voices[i];
-            if (channel == 9 && voice->channel == channel && voice->keyHeld && voice->startSerial < priority) {
-                candidate = i;
-                priority = voice->startSerial;
+            if (g_use_mobilebae_quirks) {
+                if (channel == 9 && voice->channel == channel && voice->keyHeld && voice->startSerial < priority) {
+                    candidate = i;
+                    priority = voice->startSerial;
+                }
+            } else {
+                if (voice->channel == channel && voice->keyHeld && voice->startSerial < priority) {
+                    candidate = i;
+                    priority = voice->startSerial;
+                }
             }
         }
         if (candidate >= 0) return candidate;
@@ -2370,10 +2575,12 @@ static int32_t dls_find_held_percussion_voice(DLS_Synth* synth, int32_t newChann
 }
 
 static int32_t dls_find_active_voice_by_priority(DLS_Synth* synth, int32_t newChannel) {
-    static const int32_t kVoiceStealOrder[16] = {15, 14, 13, 12, 11, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9};
+    static const int32_t kQuirksVoiceStealOrder[16] = {15, 14, 13, 12, 11, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9};
+    static const int32_t kSpecVoiceStealOrder[16] = {9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15};
+    const int32_t* order = g_use_mobilebae_quirks ? kQuirksVoiceStealOrder : kSpecVoiceStealOrder;
 
     for (int ord = 0; ord < 16; ord++) {
-        int32_t channel = kVoiceStealOrder[ord];
+        int32_t channel = order[ord];
         if (newChannel != 9 && channel == 9) continue;
 
         int32_t candidate = -1;
@@ -2740,7 +2947,11 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
                 }
                 
                 int32_t gainQ16 = v->baseGainQ16;
-                if (gainAttenuation < 0) {
+                if (g_use_mobilebae_quirks) {
+                    if (gainAttenuation < 0) {
+                        gainQ16 = DLS_FP_MUL(gainQ16, dls_exp10_q16(gainAttenuation / 20));
+                    }
+                } else if (gainAttenuation != 0) {
                     gainQ16 = DLS_FP_MUL(gainQ16, dls_exp10_q16(gainAttenuation / 20));
                 }
                 gainQ16 = DLS_FP_MUL(gainQ16, env1);

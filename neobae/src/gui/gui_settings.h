@@ -76,6 +76,10 @@ typedef struct
     float eq_gains[5];
     bool has_eq_preset;
     char eq_preset_name[64];
+#if USE_NATIVE_DLS == TRUE
+    bool has_dls_compatibility_mode;
+    bool dls_compatibility_mode;
+#endif
 } Settings;
 
 // Custom reverb preset structure

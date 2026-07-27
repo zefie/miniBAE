@@ -140,6 +140,8 @@ public class Mixer
 	private static native boolean _getClassicChorus();
 	private static native int _setUseFluidSynthForDLS(boolean enable);
 	private static native boolean _getUseFluidSynthForDLS();
+	private static native int _setDLSCompatibilityMode(boolean enable);
+	private static native boolean _getDLSCompatibilityMode();
 	private static native int _determineFileTypeByData(byte[] data, int length);
 	private static native int _loadFromMemory(long mixerReference, byte[] data, LoadResult result);
 	
@@ -216,6 +218,8 @@ public class Mixer
 	public static boolean getClassicChorus(){ return _getClassicChorus(); }
 	public static int setUseFluidSynthForDLS(boolean enable){ return _setUseFluidSynthForDLS(enable); }
 	public static boolean getUseFluidSynthForDLS(){ return _getUseFluidSynthForDLS(); }
+	public static int setDLSCompatibilityMode(boolean enable){ return _setDLSCompatibilityMode(enable); }
+	public static boolean getDLSCompatibilityMode(){ return _getDLSCompatibilityMode(); }
 	
 	// Determine file type from raw data (returns BAEFileType constant)
 	public static int determineFileTypeByData(byte[] data, int length) {
