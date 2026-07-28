@@ -1,0 +1,62 @@
+#include <windows.h>
+
+// Application icon - using ID 101 to match the code
+101 ICON "@ICONS_DIR@/neobae.ico"
+102 ICON "@ICONS_DIR@/BAEFileType_MIDI.ico"
+103 ICON "@ICONS_DIR@/BAEFileType_KAR.ico"
+104 ICON "@ICONS_DIR@/BAEFileType_RMF.ico"
+105 ICON "@ICONS_DIR@/BAEFileType_RMI.ico"
+106 ICON "@ICONS_DIR@/BAEFileType_XMF.ico"
+107 ICON "@ICONS_DIR@/BAEFileType_MXMF.ico"
+108 ICON "@ICONS_DIR@/BAEFileType_WAV.ico"
+109 ICON "@ICONS_DIR@/BAEFileType_AU.ico"
+110 ICON "@ICONS_DIR@/BAEFileType_AIFF.ico"
+111 ICON "@ICONS_DIR@/BAEFileType_FLAC.ico"
+112 ICON "@ICONS_DIR@/BAEFileType_OGG.ico"
+113 ICON "@ICONS_DIR@/BAEFileType_MP2.ico"
+114 ICON "@ICONS_DIR@/BAEFileType_MP3.ico"
+115 ICON "@ICONS_DIR@/BAEFileType_ZMF.ico"
+116 ICON "@ICONS_DIR@/BAEFileType_ADP.ico"
+117 ICON "@ICONS_DIR@/BAEFileType_ADX.ico"
+118 ICON "@ICONS_DIR@/BAEFileType_OPUS.ico"
+199 ICON "@ICONS_DIR@/BAEFile.ico"
+
+1 VERSIONINFO
+FILEVERSION     @VERSION_MAJOR@,@VERSION_MINOR@,@VERSION_PATCH@,@VERSION_TWEAK@
+PRODUCTVERSION  @VERSION_MAJOR@,@VERSION_MINOR@,@VERSION_PATCH@,@VERSION_TWEAK@
+FILEFLAGSMASK   0x3fL
+#if _DEBUG == TRUE && GIT_DIRTY == TRUE
+FILEFLAGS       0x3L
+#elif _DEBUG == TRUE
+FILEFLAGS       0x1L
+#elif GIT_DIRTY == TRUE
+FILEFLAGS       0x2L
+#else
+FILEFLAGS       0x0L
+#endif
+FILEOS          0x40004L
+FILETYPE        0x2L
+FILESUBTYPE     0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904E4"
+        BEGIN
+            VALUE "CompanyName", "@PROJECT_COMPANY@"
+            VALUE "FileDescription", "@PROJECT_DESCRIPTION@"
+            VALUE "FileVersion", "@PROJECT_VERSION@"
+            VALUE "ProductName", "@PROJECT_DESCRIPTION@"
+            VALUE "ProductVersion", "@PROJECT_VERSION@"
+            VALUE "InternalName", "@ORIGINAL_FILENAME@"
+            VALUE "LegalCopyright", "Copyright (C) @VERSION_MINOR@ zefie Networks"
+            VALUE "OriginalFilename", "@ORIGINAL_FILENAME@"
+            VALUE "GitCommit", "@GIT_COMMIT@"
+            VALUE "GitBranch", "@GIT_BRANCH@"
+        END
+    END
+
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x0409, 0x04E4
+    END
+END

@@ -68,6 +68,7 @@ if(BAE_GIT_COMMIT STREQUAL "")
     string(TIMESTAMP BAE_GIT_DATE "%Y%m%d")
   endif()
   set(BAE_VERSION "${BAE_GIT_DATE}")
+  set(BAE_GIT_DIRTY ON)
 else()
   if(NOT BAE_GIT_TAG STREQUAL "")
     if(BAE_GIT_COMMIT STREQUAL BAE_GIT_TAG_COMMIT)
@@ -80,11 +81,65 @@ else()
   endif()
   if(NOT BAE_GIT_STATUS STREQUAL "")
     set(BAE_VERSION "${BAE_VERSION}-dirty")
+    set(BAE_GIT_DIRTY ON)
   endif()
 endif()
 
 add_compile_definitions(_VERSION="${BAE_VERSION}")
 message(STATUS "NeoBAE build version: ${BAE_VERSION}")
+
+string(TIMESTAMP BAE_BUILD_YEAR "%Y")
+string(TIMESTAMP BAE_BUILD_MONTH "%m")
+string(TIMESTAMP BAE_BUILD_DAY "%d")
+
+if((MINGW OR MSVC) AND NEOBAE_RC_ENABLED)
+  set(VERSION_MAJOR 2)
+  set(VERSION_MINOR "${BAE_BUILD_YEAR}")
+  set(VERSION_PATCH "${BAE_BUILD_MONTH}")
+  set(VERSION_TWEAK "${BAE_BUILD_DAY}")
+  set(PROJECT_VERSION "${BAE_VERSION}")
+  set(PROJECT_COMPANY "zefie")
+  set(GIT_COMMIT "${BAE_GIT_COMMIT}")
+  set(GIT_BRANCH "${BAE_GIT_BRANCH}")
+  execute_process(
+    COMMAND ${GIT_EXECUTABLE} rev-parse --abbrev-ref HEAD
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    OUTPUT_VARIABLE BAE_GIT_BRANCH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+  )
+
+  set(VERSION_RC_IN "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Common/version.rc.in")
+  set(VERSION_ICO_RC_IN "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Common/version_ico.rc.in")
+  set(VERSION_ZEFIDI_RC_IN "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Common/version_zefidi.rc.in")
+
+
+  function(neobae_configure_rc TARGET OUTPUT_VAR IN_FILE)
+    set(options)
+    set(oneValueArgs DESCRIPTION ORIGINAL_FILENAME ICON)
+    set(multiValueArgs)
+
+    cmake_parse_arguments(NB "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
+
+    # Required fields
+    set(PROJECT_DESCRIPTION "${NB_DESCRIPTION}")
+    set(ORIGINAL_FILENAME "${NB_ORIGINAL_FILENAME}")
+
+    set(ICONS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/neobae/icons")
+    # Optional icon
+    if(NB_ICON)
+        set(PROJECT_ICON "${NB_ICON}")
+    else()
+        set(PROJECT_ICON "neobae.ico")
+    endif()
+
+    set(OUT_RC "${CMAKE_CURRENT_BINARY_DIR}/${TARGET}-version.rc")
+
+    configure_file("${IN_FILE}" "${OUT_RC}" @ONLY)
+
+    set(${OUTPUT_VAR} "${OUT_RC}" PARENT_SCOPE)
+  endfunction()
+endif()
 
 option(DEBUG "Enable debuggable build (zefidi debug console, gdb debugging)" OFF)
 option(NEOBAE_STATIC "Enable static linking for NeoBAE apps and dependencies (best support on MinGW)" OFF)
@@ -107,7 +162,7 @@ else()
   else()
     add_compile_options(-D_DEBUG=1)
   endif()
-endif()  
+endif()
 
 if(NEOBAE_STATIC)
   message(STATUS "NEOBAE_STATIC enabled: preferring static linkage for apps and dependencies")
@@ -1173,6 +1228,11 @@ else()
   add_library(neobae STATIC ${NEOBAE_SOURCES})
 endif()
 
+if((MINGW OR MSVC) AND NEOBAE_RC_ENABLED)
+  neobae_configure_rc(neobae NEOBAE_VERSION_RC "${VERSION_RC_IN}" "NeoBAE Audio Engine" "libNeoBAE.dll")
+  target_sources(neobae PRIVATE "${NEOBAE_VERSION_RC}")
+endif()
+
 set(NEOBAE_DLL_DEF_FILE "")
 set(NEOBAE_VCLIB_OUTPUT "")
 
@@ -1481,6 +1541,7 @@ target_compile_definitions(neobae
     USE_RMI_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_RMI_SUPPORT}>,1,0>
     USE_J2ME_PATCH=$<IF:$<BOOL:${BAE_ENABLE_J2ME_PATCH}>,1,0>
     BAE_ENABLE_ROLLED_MIDI_UNROLL=$<IF:$<BOOL:${BAE_ENABLE_ROLLED_MIDI_UNROLL}>,1,0>
+    GIT_DIRTY=$<IF:$<BOOL:${BAE_GIT_DIRTY}>,1,0>
 )
 
 target_compile_options(neobae PRIVATE -w)
@@ -1625,7 +1686,8 @@ if(BUILD_ZEFIDI)
       list(APPEND ZEFIDI_SOURCES neobae/src/gui/gui_script_editor.c)
     endif()
     if((MINGW OR MSVC) AND NEOBAE_RC_ENABLED)
-      list(APPEND ZEFIDI_SOURCES neobae/src/gui/zefidi.rc)
+      neobae_configure_rc(zefidi ZEFIDI_VERSION_RC "${VERSION_ZEFIDI_RC_IN}" "zefidi Media Player - Powered by NeoBAE" "zefidi.exe")
+      list(APPEND ZEFIDI_SOURCES "${ZEFIDI_VERSION_RC}")
     endif()
     if(MINGW OR MSVC)
       add_executable(zefidi WIN32 ${ZEFIDI_SOURCES})
@@ -1718,7 +1780,8 @@ if(BUILD_ZEFIDI)
         neobae/src/gui/winreg_filetypes.c
       )
       if(NEOBAE_RC_ENABLED)
-        target_sources(RegisterFileTypesToZefidi PRIVATE neobae/src/gui/winreg_filetypes.rc)
+        neobae_configure_rc(RegisterFileTypesToZefidi WINREG_VERSION_RC "${VERSION_ICO_RC_IN}" "zefidi File Registration Helper" "RegisterFileTypesToZefidi.exe")
+        target_sources(RegisterFileTypesToZefidi PRIVATE "${WINREG_VERSION_RC}")
       endif()
       if(MINGW)
         target_link_libraries(RegisterFileTypesToZefidi PRIVATE
@@ -1928,7 +1991,8 @@ if(BUILD_NBSTUDIO)
           neobae/src/thirdparty/libxmp/src/lite/lite-it_load.c          
       )
       if((MINGW OR MSVC) AND NEOBAE_RC_ENABLED)
-        list(APPEND NBSTUDIO_SOURCES neobae/src/nbstudio/editor.rc)
+        neobae_configure_rc(nbstudio NBSTUDIO_VERSION_RC "${VERSION_ICO_RC_IN}" "NeoBAE Studio" "nbstudio.exe" "BAEStudio.ico")
+        list(APPEND NBSTUDIO_SOURCES "${NBSTUDIO_VERSION_RC}")
       endif()
       if(MINGW OR MSVC)
         add_executable(nbstudio WIN32 ${NBSTUDIO_SOURCES})
@@ -1994,7 +2058,6 @@ if(BUILD_NBEDITOR)
 
   if(BAE_SDL3_INCLUDE_DIR AND BAE_SDL3_LIBRARY)
     set(NBEDITOR_MAIN ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/nbeditor/nbeditor_main.cpp)
-    set(NBEDITOR_RC ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/nbeditor/editor.rc)
     set(NBEDITOR_IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/imgui)
 
     if(EXISTS ${NBEDITOR_MAIN} AND EXISTS ${NBEDITOR_IMGUI_DIR}/imgui.cpp)
@@ -2046,8 +2109,9 @@ if(BUILD_NBEDITOR)
           neobae/src/thirdparty/libxmp/src/lite/lite-it_load.c
         )
       endif()
-      if(WIN32 AND EXISTS ${NBEDITOR_RC})
-        list(APPEND NBEDITOR_SOURCES ${NBEDITOR_RC})
+      if((MINGW OR MSVC) AND NEOBAE_RC_ENABLED)
+        neobae_configure_rc(nbeditor NBEDITOR_VERSION_RC "${VERSION_ICO_RC_IN}" "NeoBAE Editor" "nbeditor.exe" "BAEStudio.ico")
+        list(APPEND NBEDITOR_SOURCES "${NBEDITOR_VERSION_RC}")
       endif()
 
       add_executable(nbeditor ${NBEDITOR_SOURCES})
@@ -2090,6 +2154,56 @@ if(BUILD_NBEDITOR)
   else()
     message(STATUS "Skipping BUILD_NBEDITOR (SDL3 headers/library not found).")
   endif()
+endif()
+
+if((MINGW OR MSVC) AND NEOBAE_RC_ENABLED)
+  neobae_configure_rc(songtool SONGTOOL_VERSION_RC "${VERSION_RC_IN}" "NeoBAE Songtool CLI" "songtool.exe")
+  target_sources(songtool PRIVATE "${SONGTOOL_VERSION_RC}")
+
+  neobae_configure_rc(rmfutil RMFUTIL_VERSION_RC "${VERSION_RC_IN}" "NeoBAE RMF Utility" "rmfutil.exe")
+  target_sources(rmfutil PRIVATE "${RMFUTIL_VERSION_RC}")
+
+  if(TARGET adp2wav)
+    neobae_configure_rc(adp2wav ADP2WAV_VERSION_RC "${VERSION_RC_IN}" "NeoBAE ADP to WAV Converter" "adp2wav.exe")
+    target_sources(adp2wav PRIVATE "${ADP2WAV_VERSION_RC}")
+  endif()
+
+  if(TARGET adx2wav)
+    neobae_configure_rc(adx2wav ADX2WAV_VERSION_RC "${VERSION_RC_IN}" "NeoBAE ADX to WAV Converter" "adx2wav.exe")
+    target_sources(adx2wav PRIVATE "${ADX2WAV_VERSION_RC}")
+  endif()
+
+  if(TARGET mthc_decomp)
+    neobae_configure_rc(mthc_decomp MTHC_DECOMP_VERSION_RC "${VERSION_RC_IN}" "NeoBAE MTHC Decompressor" "mthc_decomp.exe")
+    target_sources(mthc_decomp PRIVATE "${MTHC_DECOMP_VERSION_RC}")
+  endif()
+
+  neobae_configure_rc(ringtone2mid RINGTONE2MID_VERSION_RC "${VERSION_RC_IN}" "NeoBAE Ringtone to MIDI Converter" "ringtone2mid.exe")
+  target_sources(ringtone2mid PRIVATE "${RINGTONE2MID_VERSION_RC}")
+
+  neobae_configure_rc(rmiutil RMIUTIL_VERSION_RC "${VERSION_RC_IN}" "NeoBAE RMI Utility" "rmiutil.exe")
+  target_sources(rmiutil PRIVATE "${RMIUTIL_VERSION_RC}")
+
+  neobae_configure_rc(bankrecomp BANKRECOMP_VERSION_RC "${VERSION_RC_IN}" "NeoBAE Bank Recompiler" "bankrecomp.exe")
+  target_sources(bankrecomp PRIVATE "${BANKRECOMP_VERSION_RC}")
+
+  neobae_configure_rc(sf2_hsb SF2HSB_VERSION_RC "${VERSION_RC_IN}" "NeoBAE SF2 to HSB Converter" "sf2-hsb.exe")
+  target_sources(sf2_hsb PRIVATE "${SF2HSB_VERSION_RC}")
+
+  if(TARGET xmfutil)
+    neobae_configure_rc(xmfutil XMFUTIL_VERSION_RC "${VERSION_RC_IN}" "NeoBAE XMF Utility" "xmfutil.exe")
+    target_sources(xmfutil PRIVATE "${XMFUTIL_VERSION_RC}")
+  endif()
+
+  if(TARGET mod2rmf)
+    neobae_configure_rc(mod2rmf MOD2RMF_VERSION_RC "${VERSION_RC_IN}" "NeoBAE MOD to RMF Converter" "mod2rmf.exe")
+    target_sources(mod2rmf PRIVATE "${MOD2RMF_VERSION_RC}")
+  endif()
+
+  if(TARGET playbae)
+    neobae_configure_rc(playbae PLAYBAE_VERSION_RC "${VERSION_RC_IN}" "NeoBAE CLI Player" "playbae.exe")
+    target_sources(playbae PRIVATE "${PLAYBAE_VERSION_RC}")
+  endif()  
 endif()
 
 include(CTest)
