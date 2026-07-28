@@ -35,7 +35,7 @@ FILEFLAGS       0x2L
 FILEFLAGS       0x0L
 #endif
 FILEOS          0x40004L
-FILETYPE        0x2L
+FILETYPE        0x@FILE_TYPE@L
 FILESUBTYPE     0x0L
 BEGIN
     BLOCK "StringFileInfo"
@@ -48,7 +48,7 @@ BEGIN
             VALUE "ProductName", "@PROJECT_DESCRIPTION@"
             VALUE "ProductVersion", "@PROJECT_VERSION@"
             VALUE "InternalName", "@ORIGINAL_FILENAME@"
-            VALUE "LegalCopyright", "Copyright (C) @VERSION_MINOR@ zefie Networks"
+            VALUE "LegalCopyright", "(C) @VERSION_MINOR@ zefie - Licensed under LGPL-3.0"
             VALUE "OriginalFilename", "@ORIGINAL_FILENAME@"
             VALUE "GitCommit", "@GIT_COMMIT@"
             VALUE "GitBranch", "@GIT_BRANCH@"
