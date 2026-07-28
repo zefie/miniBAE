@@ -1,0 +1,43 @@
+RC_MAJOR := 2
+RC_YEAR  := $(shell date +%Y)
+RC_MONTH := $(shell date +%m)
+RC_DAY   := $(shell date +%d)
+
+RC_COMPANY := zefie
+
+RC_SRC_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))..)
+RC_ICONS_DIR := $(RC_SRC_DIR)/icons
+
+RC_BIN_DIR := $(BUILD_DIR)
+
+RC_WINDRES_FLAGS :=
+ifneq ($(GIT_DIRTY),)
+  RC_WINDRES_FLAGS += -DGIT_DIRTY=1
+endif
+ifneq ($(DEBUG),)
+  RC_WINDRES_FLAGS += -D_DEBUG=1
+endif
+ifneq ($(LDEBUG),)
+  RC_WINDRES_FLAGS += -D_DEBUG=1
+endif
+
+define rc_generate
+	@mkdir -p $(RC_BIN_DIR)
+	@GIT_BRANCH=$$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown); \
+	sed \
+		-e 's|@VERSION_MAJOR@|$(RC_MAJOR)|g' \
+		-e 's|@VERSION_MINOR@|$(RC_YEAR)|g' \
+		-e 's|@VERSION_PATCH@|$(RC_MONTH)|g' \
+		-e 's|@VERSION_TWEAK@|$(RC_DAY)|g' \
+		-e 's|@PROJECT_VERSION@|$(VERSION)|g' \
+		-e 's|@PROJECT_COMPANY@|$(RC_COMPANY)|g' \
+		-e "s|@PROJECT_DESCRIPTION@|$(1)|g" \
+		-e "s|@ORIGINAL_FILENAME@|$(2)|g" \
+		-e 's|@GIT_COMMIT@|$(GIT_COMMIT)|g' \
+		-e "s|@GIT_BRANCH@|$$GIT_BRANCH|g" \
+		-e 's|@ICONS_DIR@|$(RC_ICONS_DIR)|g' \
+		-e "s|@PROJECT_ICON@|$(5)|g" \
+		$(RC_SRC_DIR)/src/BAE_Source/Common/$(3).rc.in \
+		> $(RC_BIN_DIR)/$(4).rc
+	$(WINDRES) $(RC_WINDRES_FLAGS) $(RC_BIN_DIR)/$(4).rc $@
+endef

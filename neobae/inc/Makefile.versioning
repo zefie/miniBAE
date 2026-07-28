@@ -1,27 +1,28 @@
-COMMIT      := $(shell git rev-parse --short HEAD 2>/dev/null)
-DIRTY       := $(shell git status --porcelain 2>/dev/null | head -n 1)
-TAG_COMMIT  := $(shell git rev-list --abbrev-commit --tags --max-count=1 2>/dev/null)
-TAG         := $(shell git describe --abbrev=0 --tags $(TAG_COMMIT) 2>/dev/null || true)
+GIT_COMMIT      := $(shell git rev-parse --short HEAD 2>/dev/null)
+GIT_DIRTY       := $(shell git status --porcelain 2>/dev/null | head -n 1)
+GIT_TAG_COMMIT  := $(shell git rev-list --abbrev-commit --tags --max-count=1 2>/dev/null)
+GIT_TAG         := $(shell git describe --abbrev=0 --tags $(TAG_COMMIT) 2>/dev/null || true)
 DATE        := $(shell git log -1 --format=%cd --date=format:"%Y%m%d" 2>/dev/null)
 
-ifeq ($(COMMIT),)
+ifeq ($(GIT_COMMIT),)
   # No git metadata (export tarball). Fallback to date.
   ifeq ($(DATE),)
     DATE := $(shell date +%Y%m%d)
   endif
   VERSION := $(DATE)
 else
-  ifneq ($(TAG),)
+  ifneq ($(GIT_TAG),)
     # If HEAD equals tag commit, use the tag (strip leading v)
-    ifeq ($(COMMIT),$(TAG_COMMIT))
-      VERSION := $(TAG:v%=%)
+    ifeq ($(GIT_COMMIT),$(GIT_TAG_COMMIT))
+      VERSION := $(GIT_TAG:v%=%)
     else
-      VERSION := git-$(COMMIT)
+      VERSION := git-$(GIT_COMMIT)
     endif
   else
-    VERSION := git-$(COMMIT)
+    VERSION := git-$(GIT_COMMIT)
   endif
-  ifneq ($(DIRTY),)
+  ifneq ($(GIT_DIRTY),)
+    GIT_DIRTY := 1
     VERSION := $(VERSION)-dirty
   endif
 endif

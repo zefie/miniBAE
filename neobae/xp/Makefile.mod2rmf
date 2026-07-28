@@ -38,6 +38,7 @@ ifneq ($(BAE_FLAGS),)
 endif
 
 include inc/Makefile.versioning
+include inc/Makefile.rc
 CFLAGS		+= -D_VERSION=\""$(VERSION)"\" -DUSE_DIRECTSOUND=0 -DWIN32_EXTRA_LEAN=1
 
 
@@ -66,9 +67,12 @@ endif
 
 all: $(TARGET_BIN)
 
-$(TARGET_BIN): ${OBJ_BIN}
+$(OBJ_DIR)mod2rmf_vres.o:
+	$(call rc_generate,NeoBAE MOD to RMF Converter,mod2rmf.exe,version,mod2rmf,)
+
+$(TARGET_BIN): ${OBJ_BIN} $(OBJ_DIR)mod2rmf_vres.o
 	@mkdir -p $(TARGET_OUT)
-	${LD} -o $(TARGET_OUT)${TARGET_BIN} ${LDFLAGS} ${OBJ_BIN} ${LIBS}
+	${LD} -o $(TARGET_OUT)${TARGET_BIN} ${LDFLAGS} ${OBJ_BIN} $(OBJ_DIR)mod2rmf_vres.o ${LIBS}
 
 # Generate rules for all unique source files
 ALL_SOURCES := $(sort $(SRC) $(SRC_BIN))

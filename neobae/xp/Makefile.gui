@@ -5,32 +5,41 @@ BUILD_GUI   	:= 1
 WINDOWS 		:= 0
 XPHACK := 1
 NOAUTO := 1
-ENABLE_MIDI_HW	:= 1
-PLAYLIST := 0
-MP3_DEC := 1
-MP3_ENC := 1
-FLAC_DEC := 1
-FLAC_ENC := 1
-OGG_SUPPORT := 1
-BAESCRIPT := 1
-VORBIS_DEC := 1
-VORBIS_ENC := 1
-OPUS_DEC := 1
+ZMF_SUPPORT := 1
 KARAOKE := 1
+BAESCRIPT := 1
+PLAYLIST := 0
 SF2_SUPPORT := 1
-USE_FLUIDSYNTH := 1
+USE_FLUIDLITE := 1
 EMBED_PATCHES := 1
 EMBED_FONT := 1
 XMF_SUPPORT := 1
-ZMF_SUPPORT := 1
+RMI_SUPPORT := 1
+RETRO_RINGTONE_SUPPORT := 1
+DISABLE_NOKIA := 0			    
+DISABLE_BEATNIK_SF2_NRPN := 0
 USE_BUILTIN_PATCHES_WITH_SF2 := 1
+USE_BUILTIN_PATCHES_WITH_DLS := 1
 FIX_SPAN_DC := 1
 CLASSIC_CHORUS := 1
 LZMA_SUPPORT := 1
 MTHC_SUPPORT := 1
 ADP_SUPPORT := 1
-DISABLE_NOKIA := 0
-DISABLE_BEATNIK_SF2_NRPN := 0
+QOA_SUPPORT := 1
+MP3_DEC := 1
+MP3_ENC := 1
+FLAC_DEC := 1
+FLAC_ENC := 1
+VORBIS_DEC := 1
+VORBIS_ENC := 1
+OPUS_DEC := 1
+OPUS_ENC := 1
+J2ME_PATCH := 1
+CREATION_NO_CODECS := 0
+CREATION_API := 0
+UNROLL_MIDI :=1
+ADX_SUPPORT := 1
+NATIVE_DLS := 1
 
 include inc/Makefile.common
 
@@ -74,6 +83,8 @@ CFLAGS		+= -D_VERSION=\""$(VERSION)"\"
 CXXFLAGS 	:= $(CFLAGS)
 LDFLAGS		:= $(ARCH) $(OPTI)
 
+include inc/Makefile.rc
+
 
 ifneq ($(BAE_LD_FLAGS),)
 	LDFLAGS += $(BAE_LD_FLAGS)
@@ -102,28 +113,33 @@ ifneq ($(BAE_LIBS),)
 	LIBS += $(BAE_LIBS)
 endif	
 
-all: $(TARGET_LIB).a ${TARGET_LIB}.dll $(TARGET_BIN) $(TARGET_OUT)RegisterFiletypes.exe
+all: $(TARGET_LIB).a ${TARGET_LIB}.dll $(TARGET_BIN) $(TARGET_OUT)RegisterFiletypesToZefidi.exe
 
 $(OBJ_DIR)winreg_filetypes.o:
 	$(CC) $(CFLAGS) -DUNICODE -D_UNICODE -c src/gui/winreg_filetypes.c -o $(OBJ_DIR)winreg_filetypes.o
 
-$(TARGET_OUT)RegisterFiletypes.exe: $(OBJ_DIR)winreg_filetypes.o
+$(OBJ_DIR)winreg_filetypes_res.o:
+	$(call rc_generate,zefidi File Registration Helper,RegisterFiletypesToZefidi.exe,version_ico,winreg_filetypes,BAEFile.ico)
+
+$(TARGET_OUT)RegisterFiletypesToZefidi.exe: $(OBJ_DIR)winreg_filetypes.o $(OBJ_DIR)winreg_filetypes_res.o
 	@mkdir -p $(TARGET_OUT)
-	${WINDRES} src/gui/winreg_filetypes.rc $(OBJ_DIR)winreg_filetypes_res.o; \
-	${LD} -o $(TARGET_OUT)RegisterFiletypes.exe ${LDFLAGS} $(OBJ_DIR)winreg_filetypes.o $(OBJ_DIR)winreg_filetypes_res.o -Wl,--subsystem,windows -lshlwapi -lgdi32 -lcomctl32
+	${LD} -o $(TARGET_OUT)RegisterFiletypesToZefidi.exe ${LDFLAGS} $(OBJ_DIR)winreg_filetypes.o $(OBJ_DIR)winreg_filetypes_res.o -Wl,--subsystem,windows -lshlwapi -lgdi32 -lcomctl32
 
 $(TARGET_LIB).a: $(OBJ_BIN)
 	@mkdir -p $(TARGET_OUT)
 	$(AR) rcs $(TARGET_OUT)$(TARGET_LIB).a $(OBJ_BIN)
 
-$(TARGET_LIB).dll: ${OBJ_BIN}
+$(OBJ_DIR)libneobae_vres.o:
+	$(call rc_generate,NeoBAE Audio Engine,libNeoBAE.dll,version,libneobae,)
+
+$(TARGET_LIB).dll: ${OBJ_BIN} $(OBJ_DIR)libneobae_vres.o
 	@mkdir -p $(TARGET_OUT)
 	@$(DLLTOOL) --export-all --export-all-symbols -e $(OBJ_DIR)exports.o -z $(OBJ_DIR)$(TARGET_LIB).def2 $(OBJ_BIN)
 	@echo "EXPORTS" > $(OBJ_DIR)$(TARGET_LIB).def
 	@cat $(OBJ_DIR)$(TARGET_LIB).def2 | grep "BAE" >> $(OBJ_DIR)$(TARGET_LIB).def
 	@rm -f $(OBJ_DIR)$(TARGET_LIB).def2 $(OBJ_DIR)exports.o
 	@$(DLLTOOL) -e $(OBJ_DIR)exports.o -d $(OBJ_DIR)$(TARGET_LIB).def -l $(TARGET_OUT)$(TARGET_LIB).lib $(OBJ_BIN)
-	$(CC) -shared $(LDFLAGS) ${OBJ_BIN} $(OBJ_DIR)exports.o -Wl,--subsystem,windows -o $(TARGET_OUT)${TARGET_LIB}.dll -Wl,--out-implib,$(TARGET_OUT)$(TARGET_LIB).dll.a -Wl,--export-all-symbols -Wl,--enable-auto-image-base -lstdc++ ${LIBS}
+	$(CC) -shared $(LDFLAGS) ${OBJ_BIN} $(OBJ_DIR)libneobae_vres.o $(OBJ_DIR)exports.o -Wl,--subsystem,windows -o $(TARGET_OUT)${TARGET_LIB}.dll -Wl,--out-implib,$(TARGET_OUT)$(TARGET_LIB).dll.a -Wl,--export-all-symbols -Wl,--enable-auto-image-base -lstdc++ ${LIBS}
 
 	@find /opt/mingw32-xp -name libgcc_s_dw2-1.dll -exec cp {} $(TARGET_OUT) \; 2>/dev/null || true;
 	@find /opt/mingw32-xp -name libwinpthread-1.dll -exec cp {} $(TARGET_OUT) \; 2>/dev/null || true;
@@ -173,11 +189,15 @@ $(TARGET_LIB).dll: ${OBJ_BIN}
 		find /opt/mingw32-xp -name libpng16-16.dll -exec cp {} $(TARGET_OUT) \; 2>/dev/null || true; \
 	fi	
 
-$(TARGET_BIN): ${OBJ_BIN} $(TARGET_LIB).dll
+ZEFIDI_DESC := zefidi Media Player - Powered by NeoBAE
+
+$(OBJ_DIR)zefidi_vres.o:
+	$(call rc_generate,$(ZEFIDI_DESC),zefidi.exe,version_zefidi,zefidi,neobae.ico)
+
+$(TARGET_BIN): ${OBJ_BIN} $(TARGET_LIB).dll $(OBJ_DIR)zefidi_vres.o
 	@mkdir -p $(TARGET_OUT)Banks
 	$(SHELL) src/banks/copy.sh $(TARGET_OUT)Banks
-	${WINDRES} src/gui/zefidi.rc $(OBJ_DIR)zefidi.o; \
-	${LD} -o $(TARGET_OUT)${TARGET_BIN} ${LDFLAGS} ${OBJ_BIN} $(OBJ_DIR)zefidi.o -Wl,--subsystem,windows -L./bin -lNeoBAE ${LIBS}; \
+	${LD} -o $(TARGET_OUT)${TARGET_BIN} ${LDFLAGS} ${OBJ_BIN} $(OBJ_DIR)zefidi_vres.o -Wl,--subsystem,windows -L./bin -lNeoBAE ${LIBS}; \
 
 # Rules for compiling source files to object files
 $(OBJ_DIR)%.o : %.cpp

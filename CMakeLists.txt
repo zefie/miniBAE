@@ -1780,7 +1780,7 @@ if(BUILD_ZEFIDI)
         neobae/src/gui/winreg_filetypes.c
       )
       if(NEOBAE_RC_ENABLED)
-        neobae_configure_rc(RegisterFileTypesToZefidi WINREG_VERSION_RC "${VERSION_ICO_RC_IN}" "zefidi File Registration Helper" "RegisterFileTypesToZefidi.exe")
+        neobae_configure_rc(RegisterFileTypesToZefidi WINREG_VERSION_RC "${VERSION_ICO_RC_IN}" "zefidi File Registration Helper" "RegisterFileTypesToZefidi.exe" "BAEFile.ico")
         target_sources(RegisterFileTypesToZefidi PRIVATE "${WINREG_VERSION_RC}")
       endif()
       if(MINGW)

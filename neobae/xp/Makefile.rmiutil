@@ -9,10 +9,11 @@ VORBIS_DEC := 0
 VORBIS_ENC := 0
 FLAC_DEC := 0
 FLAC_ENC := 0
-RMF2MID := 1
+ZMF_SUPPORT := 0
+RMIUTIL := 1
 include inc/Makefile.common
 
-TARGET_BIN := rmf2mid.exe
+TARGET_BIN := rmiutil.exe
 
 CROSS 		:= i686-w64-mingw32
 ARCH		:= -static
@@ -36,6 +37,7 @@ ifneq ($(BAE_FLAGS),)
 endif
 
 include inc/Makefile.versioning
+include inc/Makefile.rc
 CFLAGS		+= -D_VERSION=\""$(VERSION)"\" -DUSE_DIRECTSOUND=0 -DWIN32_EXTRA_LEAN=1
 
 
@@ -64,9 +66,12 @@ endif
 
 all: $(TARGET_BIN)
 
-$(TARGET_BIN): ${OBJ_BIN}
+$(OBJ_DIR)rmiutil_vres.o:
+	$(call rc_generate,NeoBAE RMI Utility,rmiutil.exe,version,rmiutil,)
+
+$(TARGET_BIN): ${OBJ_BIN} $(OBJ_DIR)rmiutil_vres.o
 	@mkdir -p $(TARGET_OUT)
-	${LD} -o $(TARGET_OUT)${TARGET_BIN} ${LDFLAGS} ${OBJ_BIN} ${LIBS}
+	${LD} -o $(TARGET_OUT)${TARGET_BIN} ${LDFLAGS} ${OBJ_BIN} $(OBJ_DIR)rmiutil_vres.o ${LIBS}
 
 # Generate rules for all unique source files
 ALL_SOURCES := $(sort $(SRC) $(SRC_BIN))

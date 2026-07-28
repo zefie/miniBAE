@@ -44,6 +44,7 @@ endif
 
 include inc/Makefile.versioning
 CFLAGS		+= -D_VERSION=\""$(VERSION)"\"
+include inc/Makefile.rc
 CFLAGS += -I/mingw32-xp/i686-w64-mingw32/include -I/mingw32-xp/local/include -I/mingw32-xp/opt/include -I/mingw32-xp/include
 CXXFLAGS 	:= $(CFLAGS)
 LDFLAGS		:= $(ARCH) $(OPTI)
@@ -94,15 +95,22 @@ $(TARGET_LIB).a: $(OBJ_BIN)
 	@mkdir -p $(TARGET_OUT)
 	$(AR) rcs $(TARGET_OUT)$(TARGET_LIB).a $(OBJ_BIN)
 
-$(TARGET_LIB).dll: ${OBJ_BIN}
+$(OBJ_DIR)libneobae_vres.o:
+	$(call rc_generate,NeoBAE Audio Engine,libNeoBAE.dll,version,libneobae,)
+
+$(OBJ_DIR)playbae_vres.o:
+	$(call rc_generate,NeoBAE playbae CLI,playbae.exe,version,playbae,)
+
+$(TARGET_LIB).dll: ${OBJ_BIN} $(OBJ_DIR)libneobae_vres.o
 	@mkdir -p $(TARGET_OUT)
 	@$(DLLTOOL) --export-all --export-all-symbols -e $(OBJ_DIR)exports.o -z $(OBJ_DIR)$(TARGET_LIB).def2 $(OBJ_BIN)
 	@echo "EXPORTS" > $(OBJ_DIR)$(TARGET_LIB).def
 	@cat $(OBJ_DIR)$(TARGET_LIB).def2 | grep "BAE" >> $(OBJ_DIR)$(TARGET_LIB).def
 	@rm -f $(OBJ_DIR)$(TARGET_LIB).def2 $(OBJ_DIR)exports.o
 	@$(DLLTOOL) -e $(OBJ_DIR)exports.o -d $(OBJ_DIR)$(TARGET_LIB).def -l $(TARGET_OUT)$(TARGET_LIB).lib $(OBJ_BIN)
+	$(CC) -shared $(LDFLAGS) ${OBJ_BIN} $(OBJ_DIR)libneobae_vres.o $(OBJ_DIR)exports.o -Wl,--subsystem,windows -o $(TARGET_OUT)${TARGET_LIB}.dll -Wl,--out-implib,$(TARGET_OUT)$(TARGET_LIB).dll.a -Wl,--export-all-symbols -Wl,--enable-auto-image-base -lstdc++ ${LIBS}
 
-$(TARGET_BIN): ${OBJ_BIN}
+$(TARGET_BIN): ${OBJ_BIN} $(OBJ_DIR)playbae_vres.o
 	@mkdir -p $(TARGET_OUT)Banks
 	$(SHELL) src/banks/copy.sh $(TARGET_OUT)Banks
 	${LD} -o $(TARGET_OUT)${TARGET_BIN} ${LDFLAGS} ${OBJ_BIN} ${LIBS}

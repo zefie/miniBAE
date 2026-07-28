@@ -109,6 +109,7 @@ endif
 # LDEBUG (Low-level Debug) implies normal debug
 ifeq ($(LDEBUG),1)
 	DEBUG := 1
+	BAE_FLAGS += -D_FULL_DEBUG=1
 endif
 
 # Disable SDL backends if using raylib
@@ -422,6 +423,9 @@ ifeq ($(SF2_SUPPORT),1)
 			src/fluidlite/src/fluid_tuning.c \
 			src/fluidlite/src/fluid_voice.c
 		BAE_FLAGS += -D_USING_FLUIDLITE=1 -DFLUIDLITE_STATIC=1
+		INC_PATH += -Isrc/fluidlite/include \
+        		-Isrc/fluidlite/src \
+				-Isrc/fluidlite/src/watcom
 	endif
 endif
 
@@ -1021,7 +1025,7 @@ ifeq ($(LOGFILE),1)
 	BAE_FLAGS += -DOUTPUT_TO_LOGFILE=1
 endif
 
-ifeq ($(WINDOWS),1)
+ifneq ($(filter 1,$(WINDOWS) $(XPHACK)),)
 	ifneq ($(filter 1,$(FLAC_DEC) $(FLAC_ENC)),)
 		INC_PATH += -Isrc/thirdparty/flac/src/share/win_utf8_io
 		BAE_FLAGS += -DFLAC__NO_DLL
