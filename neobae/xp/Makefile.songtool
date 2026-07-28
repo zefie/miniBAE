@@ -3,19 +3,19 @@ NOAUTO := 1
 XPHACK := 1
 EMBED_PATCHES := 0
 SF2_SUPPORT := 0
-MP3_DEC := 0
-MP3_ENC := 0
-OGG_SUPPORT := 0
-VORBIS_DEC := 0
-VORBIS_ENC := 0
-FLAC_DEC := 0
-FLAC_ENC := 0
+MP3_DEC := 1
+MP3_ENC := 1
+OGG_SUPPORT := 1
+VORBIS_DEC := 1
+VORBIS_ENC := 1
+FLAC_DEC := 1
+FLAC_ENC := 1
 ZMF_SUPPORT := 1
 CREATION_API := 1
-MOD2RMF := 1
+SONGTOOL := 1
 include inc/Makefile.common
 
-TARGET_BIN := mod2rmf.exe
+TARGET_BIN := songtool.exe
 
 CROSS 		:= i686-w64-mingw32
 ARCH		:= -static
@@ -68,12 +68,12 @@ endif
 
 all: $(TARGET_BIN)
 
-$(OBJ_DIR)mod2rmf_vres.o:
-	$(call rc_generate,NeoBAE MOD to RMF Converter,mod2rmf.exe,version,mod2rmf,)
+$(OBJ_DIR)rmfutil_vres.o:
+	$(call rc_generate,NeoBAE RMF Utility,rmfutil.exe,version,rmfutil,)
 
-$(TARGET_BIN): ${OBJ_BIN} $(OBJ_DIR)mod2rmf_vres.o
+$(TARGET_BIN): ${OBJ_BIN} $(OBJ_DIR)rmfutil_vres.o
 	@mkdir -p $(TARGET_OUT)
-	${LD} -o $(TARGET_OUT)${TARGET_BIN} ${LDFLAGS} ${OBJ_BIN} $(OBJ_DIR)mod2rmf_vres.o ${LIBS}
+	${LD} -o $(TARGET_OUT)${TARGET_BIN} ${LDFLAGS} ${OBJ_BIN} $(OBJ_DIR)rmfutil_vres.o ${LIBS}
 
 # Generate rules for all unique source files
 ALL_SOURCES := $(sort $(SRC) $(SRC_BIN))

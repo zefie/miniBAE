@@ -10,12 +10,12 @@ VORBIS_DEC := 0
 VORBIS_ENC := 0
 FLAC_DEC := 0
 FLAC_ENC := 0
-ZMF_SUPPORT := 1
-CREATION_API := 1
-MOD2RMF := 1
+ZMF_SUPPORT := 0
+CREATION_API := 0
+ADP2WAV := 1
 include inc/Makefile.common
 
-TARGET_BIN := mod2rmf.exe
+TARGET_BIN := adp2wav.exe
 
 CROSS 		:= i686-w64-mingw32
 ARCH		:= -static
