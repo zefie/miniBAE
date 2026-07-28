@@ -216,8 +216,8 @@
 #endif
 #include <stdint.h>
 #if USE_SF2_SUPPORT == TRUE
-#if _USING_FLUIDSYNTH == TRUE
-#include "GenSF2_FluidSynth.h" // FluidSynth integration
+#if _USING_FLUIDLITE == TRUE
+#include "GenSF2_FluidLite.h" // FluidSynth integration
 #endif
 #endif
 
@@ -1623,7 +1623,7 @@ OPErr GM_SetSongTickPosition(GM_Song *pSong, uint32_t songTickPosition)
                 PV_ClearSongInstruments(theSong); // don't free the instruments
 
 #if USE_SF2_SUPPORT == TRUE
-#if _USING_FLUIDSYNTH == TRUE
+#if _USING_FLUIDLITE == TRUE
                 if (GM_IsSF2Song(pSong) && GM_SF2_IsActive())
                 {
                     (void)GM_EnableSF2ForSong(pSong, TRUE);
@@ -1770,7 +1770,7 @@ OPErr GM_SetSongMicrosecondPosition(GM_Song *pSong, uint32_t songMicrosecondPosi
                 PV_ClearSongInstruments(theSong); // don't free the instruments
 
 #if USE_SF2_SUPPORT == TRUE
-#if _USING_FLUIDSYNTH == TRUE
+#if _USING_FLUIDLITE == TRUE
                 if (GM_IsSF2Song(pSong) && GM_SF2_IsActive())
                 {
                     (void)GM_EnableSF2ForSong(pSong, TRUE);

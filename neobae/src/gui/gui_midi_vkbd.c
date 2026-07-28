@@ -20,8 +20,8 @@
 #include "gui_midi_vkbd.h"
 #include "gui_bae.h" // for BAEGUI type and g_bae, g_live_song
 #if USE_SF2_SUPPORT == TRUE
-    #if _USING_FLUIDSYNTH == TRUE
-        #include "GenSF2_FluidSynth.h"
+    #if _USING_FLUIDLITE == TRUE
+        #include "GenSF2_FluidLite.h"
     #endif
 #endif
 

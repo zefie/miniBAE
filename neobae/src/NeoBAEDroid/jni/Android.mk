@@ -61,7 +61,7 @@ LOCAL_PATH := $(call my-dir)/../../BAE_Source
 include $(CLEAR_VARS)
 
 LOCAL_MODULE    := NeoBAE
-LOCAL_SRC_FILES	:= \
+NEOBAE_SOURCES := \
 			Common/BAE_Override.c \
 			Common/DriverTools.c \
 			Common/GenAudioStreams.c \
@@ -86,7 +86,7 @@ LOCAL_SRC_FILES	:= \
 			Common/GenSynthInterp2Simple.c \
 			Common/GenSynthInterp2U3232.c \
 			Common/GenDLS_MobileBAE.c \
-			Common/GenSF2_FluidSynth.c \
+			Common/GenSF2_FluidLite.c \
 			Common/GenRMI.c \
       		Common/GenXMF.c \
       		Common/GenRingtone.c \
@@ -126,28 +126,6 @@ LOCAL_SRC_FILES	:= \
 			Platform/BAE_API_Android.c \
 			../thirdparty/libogg/src/bitwise.c \
 			../thirdparty/libogg/src/framing.c \
-			../thirdparty/libvorbis/lib/analysis.c \
-      		../thirdparty/libvorbis/lib/bitrate.c \
-      		../thirdparty/libvorbis/lib/block.c \
-      		../thirdparty/libvorbis/lib/codebook.c \
-      		../thirdparty/libvorbis/lib/envelope.c \
-      		../thirdparty/libvorbis/lib/floor0.c \
-      		../thirdparty/libvorbis/lib/floor1.c \
-      		../thirdparty/libvorbis/lib/info.c \
-      		../thirdparty/libvorbis/lib/lookup.c \
-      		../thirdparty/libvorbis/lib/lsp.c \
-      		../thirdparty/libvorbis/lib/mapping0.c \
-      		../thirdparty/libvorbis/lib/mdct.c \
-      		../thirdparty/libvorbis/lib/psy.c \
-      		../thirdparty/libvorbis/lib/registry.c \
-      		../thirdparty/libvorbis/lib/res0.c \
-      		../thirdparty/libvorbis/lib/sharedbook.c \
-      		../thirdparty/libvorbis/lib/smallft.c \
-      		../thirdparty/libvorbis/lib/synthesis.c \
-      		../thirdparty/libvorbis/lib/vorbisfile.c \
-      		../thirdparty/libvorbis/lib/lpc.c \
-      		../thirdparty/libvorbis/lib/window.c \
-			../thirdparty/libvorbis/lib/vorbisenc.c \
       		../thirdparty/flac/src/libFLAC/stream_decoder.c \
 			../thirdparty/flac/src/libFLAC/bitreader.c \
 			../thirdparty/flac/src/libFLAC/bitmath.c \
@@ -188,7 +166,191 @@ LOCAL_SRC_FILES	:= \
 			../thirdparty/lzma-26.00/C/Lzma2Enc.c \
 			../thirdparty/lzma-26.00/C/Lzma2Dec.c \
 			../thirdparty/lzma-26.00/C/Xz.c \
-			../thirdparty/lzma-26.00/C/XzDec.c			
+			../thirdparty/lzma-26.00/C/XzDec.c	\
+			../fluidlite/src/fluid_chan.c \
+			../fluidlite/src/fluid_chorus.c \
+			../fluidlite/src/fluid_conv.c \
+			../fluidlite/src/fluid_defsfont.c \
+			../fluidlite/src/fluid_dsp_float.c \
+			../fluidlite/src/fluid_gen.c \
+			../fluidlite/src/fluid_hash.c \
+			../fluidlite/src/fluid_init.c \
+			../fluidlite/src/fluid_list.c \
+			../fluidlite/src/fluid_mod.c \
+			../fluidlite/src/fluid_ramsfont.c \
+			../fluidlite/src/fluid_rev.c \
+			../fluidlite/src/fluid_settings.c \
+			../fluidlite/src/fluid_synth.c \
+			../fluidlite/src/fluid_sys.c \
+			../fluidlite/src/fluid_tuning.c \
+			../fluidlite/src/fluid_voice.c
+
+OPUS_SOURCES := \
+			../thirdparty/opus/src/opus.c \
+			../thirdparty/opus/src/opus_decoder.c \
+			../thirdparty/opus/src/opus_encoder.c \
+			../thirdparty/opus/src/extensions.c \
+			../thirdparty/opus/src/opus_multistream.c \
+			../thirdparty/opus/src/opus_multistream_encoder.c \
+			../thirdparty/opus/src/opus_multistream_decoder.c \
+			../thirdparty/opus/src/repacketizer.c \
+			../thirdparty/opus/src/opus_projection_encoder.c \
+			../thirdparty/opus/src/opus_projection_decoder.c \
+			../thirdparty/opus/src/mapping_matrix.c \
+			../thirdparty/opus/src/analysis.c \
+			../thirdparty/opus/src/mlp.c \
+			../thirdparty/opus/src/mlp_data.c \
+			../thirdparty/opus/celt/bands.c \
+			../thirdparty/opus/celt/celt.c \
+			../thirdparty/opus/celt/celt_encoder.c \
+			../thirdparty/opus/celt/celt_decoder.c \
+			../thirdparty/opus/celt/cwrs.c \
+			../thirdparty/opus/celt/entcode.c \
+			../thirdparty/opus/celt/entdec.c \
+			../thirdparty/opus/celt/entenc.c \
+			../thirdparty/opus/celt/kiss_fft.c \
+			../thirdparty/opus/celt/laplace.c \
+			../thirdparty/opus/celt/mathops.c \
+			../thirdparty/opus/celt/mdct.c \
+			../thirdparty/opus/celt/modes.c \
+			../thirdparty/opus/celt/pitch.c \
+			../thirdparty/opus/celt/celt_lpc.c \
+			../thirdparty/opus/celt/quant_bands.c \
+			../thirdparty/opus/celt/rate.c \
+			../thirdparty/opus/celt/vq.c \
+			../thirdparty/opus/silk/CNG.c \
+			../thirdparty/opus/silk/code_signs.c \
+			../thirdparty/opus/silk/init_decoder.c \
+			../thirdparty/opus/silk/decode_core.c \
+			../thirdparty/opus/silk/decode_frame.c \
+			../thirdparty/opus/silk/decode_parameters.c \
+			../thirdparty/opus/silk/decode_indices.c \
+			../thirdparty/opus/silk/decode_pulses.c \
+			../thirdparty/opus/silk/decoder_set_fs.c \
+			../thirdparty/opus/silk/dec_API.c \
+			../thirdparty/opus/silk/enc_API.c \
+			../thirdparty/opus/silk/encode_indices.c \
+			../thirdparty/opus/silk/encode_pulses.c \
+			../thirdparty/opus/silk/gain_quant.c \
+			../thirdparty/opus/silk/interpolate.c \
+			../thirdparty/opus/silk/LP_variable_cutoff.c \
+			../thirdparty/opus/silk/NLSF_decode.c \
+			../thirdparty/opus/silk/NSQ.c \
+			../thirdparty/opus/silk/NSQ_del_dec.c \
+			../thirdparty/opus/silk/PLC.c \
+			../thirdparty/opus/silk/shell_coder.c \
+			../thirdparty/opus/silk/tables_gain.c \
+			../thirdparty/opus/silk/tables_LTP.c \
+			../thirdparty/opus/silk/tables_NLSF_CB_NB_MB.c \
+			../thirdparty/opus/silk/tables_NLSF_CB_WB.c \
+			../thirdparty/opus/silk/tables_other.c \
+			../thirdparty/opus/silk/tables_pitch_lag.c \
+			../thirdparty/opus/silk/tables_pulses_per_block.c \
+			../thirdparty/opus/silk/VAD.c \
+			../thirdparty/opus/silk/control_audio_bandwidth.c \
+			../thirdparty/opus/silk/quant_LTP_gains.c \
+			../thirdparty/opus/silk/VQ_WMat_EC.c \
+			../thirdparty/opus/silk/HP_variable_cutoff.c \
+			../thirdparty/opus/silk/NLSF_encode.c \
+			../thirdparty/opus/silk/NLSF_VQ.c \
+			../thirdparty/opus/silk/NLSF_unpack.c \
+			../thirdparty/opus/silk/NLSF_del_dec_quant.c \
+			../thirdparty/opus/silk/process_NLSFs.c \
+			../thirdparty/opus/silk/stereo_LR_to_MS.c \
+			../thirdparty/opus/silk/stereo_MS_to_LR.c \
+			../thirdparty/opus/silk/check_control_input.c \
+			../thirdparty/opus/silk/control_SNR.c \
+			../thirdparty/opus/silk/init_encoder.c \
+			../thirdparty/opus/silk/control_codec.c \
+			../thirdparty/opus/silk/A2NLSF.c \
+			../thirdparty/opus/silk/ana_filt_bank_1.c \
+			../thirdparty/opus/silk/biquad_alt.c \
+			../thirdparty/opus/silk/bwexpander_32.c \
+			../thirdparty/opus/silk/bwexpander.c \
+			../thirdparty/opus/silk/debug.c \
+			../thirdparty/opus/silk/decode_pitch.c \
+			../thirdparty/opus/silk/inner_prod_aligned.c \
+			../thirdparty/opus/silk/lin2log.c \
+			../thirdparty/opus/silk/log2lin.c \
+			../thirdparty/opus/silk/LPC_analysis_filter.c \
+			../thirdparty/opus/silk/LPC_inv_pred_gain.c \
+			../thirdparty/opus/silk/table_LSF_cos.c \
+			../thirdparty/opus/silk/NLSF2A.c \
+			../thirdparty/opus/silk/NLSF_stabilize.c \
+			../thirdparty/opus/silk/NLSF_VQ_weights_laroia.c \
+			../thirdparty/opus/silk/pitch_est_tables.c \
+			../thirdparty/opus/silk/resampler.c \
+			../thirdparty/opus/silk/resampler_down2_3.c \
+			../thirdparty/opus/silk/resampler_down2.c \
+			../thirdparty/opus/silk/resampler_private_AR2.c \
+			../thirdparty/opus/silk/resampler_private_down_FIR.c \
+			../thirdparty/opus/silk/resampler_private_IIR_FIR.c \
+			../thirdparty/opus/silk/resampler_private_up2_HQ.c \
+			../thirdparty/opus/silk/resampler_rom.c \
+			../thirdparty/opus/silk/sigm_Q15.c \
+			../thirdparty/opus/silk/sort.c \
+			../thirdparty/opus/silk/sum_sqr_shift.c \
+			../thirdparty/opus/silk/stereo_decode_pred.c \
+			../thirdparty/opus/silk/stereo_encode_pred.c \
+			../thirdparty/opus/silk/stereo_find_predictor.c \
+			../thirdparty/opus/silk/stereo_quant_pred.c \
+			../thirdparty/opus/silk/LPC_fit.c \
+			../thirdparty/opus/silk/float/apply_sine_window_FLP.c \
+			../thirdparty/opus/silk/float/corrMatrix_FLP.c \
+			../thirdparty/opus/silk/float/encode_frame_FLP.c \
+			../thirdparty/opus/silk/float/find_LPC_FLP.c \
+			../thirdparty/opus/silk/float/find_LTP_FLP.c \
+			../thirdparty/opus/silk/float/find_pitch_lags_FLP.c \
+			../thirdparty/opus/silk/float/find_pred_coefs_FLP.c \
+			../thirdparty/opus/silk/float/LPC_analysis_filter_FLP.c \
+			../thirdparty/opus/silk/float/LTP_analysis_filter_FLP.c \
+			../thirdparty/opus/silk/float/LTP_scale_ctrl_FLP.c \
+			../thirdparty/opus/silk/float/noise_shape_analysis_FLP.c \
+			../thirdparty/opus/silk/float/process_gains_FLP.c \
+			../thirdparty/opus/silk/float/regularize_correlations_FLP.c \
+			../thirdparty/opus/silk/float/residual_energy_FLP.c \
+			../thirdparty/opus/silk/float/warped_autocorrelation_FLP.c \
+			../thirdparty/opus/silk/float/wrappers_FLP.c \
+			../thirdparty/opus/silk/float/autocorrelation_FLP.c \
+			../thirdparty/opus/silk/float/burg_modified_FLP.c \
+			../thirdparty/opus/silk/float/bwexpander_FLP.c \
+			../thirdparty/opus/silk/float/energy_FLP.c \
+			../thirdparty/opus/silk/float/inner_product_FLP.c \
+			../thirdparty/opus/silk/float/k2a_FLP.c \
+			../thirdparty/opus/silk/float/LPC_inv_pred_gain_FLP.c \
+			../thirdparty/opus/silk/float/pitch_analysis_core_FLP.c \
+			../thirdparty/opus/silk/float/scale_copy_vector_FLP.c \
+			../thirdparty/opus/silk/float/scale_vector_FLP.c \
+			../thirdparty/opus/silk/float/schur_FLP.c \
+			../thirdparty/opus/silk/float/sort_FLP.c \
+			../thirdparty/opusfile/src/info.c \
+			../thirdparty/opusfile/src/internal.c \
+			../thirdparty/opusfile/src/opusfile.c \
+			../thirdparty/opusfile/src/stream.c			
+
+VORBIS_SOURCES := \
+			../thirdparty/libvorbis/lib/analysis.c \
+      		../thirdparty/libvorbis/lib/bitrate.c \
+      		../thirdparty/libvorbis/lib/block.c \
+      		../thirdparty/libvorbis/lib/codebook.c \
+      		../thirdparty/libvorbis/lib/envelope.c \
+      		../thirdparty/libvorbis/lib/floor0.c \
+      		../thirdparty/libvorbis/lib/floor1.c \
+      		../thirdparty/libvorbis/lib/info.c \
+      		../thirdparty/libvorbis/lib/lookup.c \
+      		../thirdparty/libvorbis/lib/lsp.c \
+      		../thirdparty/libvorbis/lib/mapping0.c \
+      		../thirdparty/libvorbis/lib/mdct.c \
+      		../thirdparty/libvorbis/lib/psy.c \
+      		../thirdparty/libvorbis/lib/registry.c \
+      		../thirdparty/libvorbis/lib/res0.c \
+      		../thirdparty/libvorbis/lib/sharedbook.c \
+      		../thirdparty/libvorbis/lib/smallft.c \
+      		../thirdparty/libvorbis/lib/synthesis.c \
+      		../thirdparty/libvorbis/lib/vorbisfile.c \
+      		../thirdparty/libvorbis/lib/lpc.c \
+      		../thirdparty/libvorbis/lib/window.c \
+			../thirdparty/libvorbis/lib/vorbisenc.c
 
 PATCHES_SCRIPT := $(LOCAL_PATH)/../../../scripts/create_embedded_patches_h.py
 PATCHES_HSB := $(LOCAL_PATH)/../banks/patches111/patches111.hsb
@@ -199,43 +361,83 @@ PATCHES_H := $(GEN_DIR)/BAEPatches.h
 # headers, so generate at parse time via $(shell ...).
 BAE_GEN := $(shell python3 "$(PATCHES_SCRIPT)" "$(PATCHES_HSB)" "$(PATCHES_H)")
 
+# --- OPUS ---
+include $(CLEAR_VARS)
+LOCAL_MODULE := opus
+LOCAL_SRC_FILES := $(OPUS_SOURCES)
+LOCAL_C_INCLUDES := \
+	$(LOCAL_PATH)/../thirdparty/config \
+	$(LOCAL_PATH)/../thirdparty/libogg/include \
+	$(LOCAL_PATH)/../thirdparty/opus/src \
+    $(LOCAL_PATH)/../thirdparty/opus/include \
+    $(LOCAL_PATH)/../thirdparty/opus/celt \
+    $(LOCAL_PATH)/../thirdparty/opus/silk \
+	$(LOCAL_PATH)/../thirdparty/opus/silk/float \
+	$(LOCAL_PATH)/../thirdparty/opusfile/src \
+	$(LOCAL_PATH)/../thirdparty/opusfile/include
+LOCAL_CFLAGS := -DOPUS_BUILD=1 -DVAR_ARRAYS=1 -D__ANDROID__=1
+ifeq ($(TARGET_ARCH_ABI), armeabi-v7a)
+LOCAL_ARM_MODE := arm
+endif
+include $(BUILD_STATIC_LIBRARY) 
 
+# --- VORBIS ---
+include $(CLEAR_VARS)
+LOCAL_MODULE := vorbis
+LOCAL_SRC_FILES := $(VORBIS_SOURCES)
+LOCAL_C_INCLUDES := \
+	$(LOCAL_PATH)/../thirdparty/config \
+	$(LOCAL_PATH)/../thirdparty/libogg/include \
+    $(LOCAL_PATH)/../thirdparty/libvorbis/include \
+    $(LOCAL_PATH)/../thirdparty/libvorbis/lib
+LOCAL_CFLAGS := -D__ANDROID__=1
+ifeq ($(TARGET_ARCH_ABI), armeabi-v7a)
+LOCAL_ARM_MODE := arm
+endif
+include $(BUILD_STATIC_LIBRARY)
+
+# --- NeoBAE ---
+include $(CLEAR_VARS)
+LOCAL_MODULE := libNeoBAE
+LOCAL_SRC_FILES := $(NEOBAE_SOURCES)
 LOCAL_LDFLAGS += -Wl,-z,max-page-size=16384
 
 LOCAL_C_INCLUDES	  := $(LOCAL_PATH)/Common
 LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/Platform
+LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../fluidlite/include
+LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../fluidlite/src
+LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../fluidlite/src/watcom
 LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../BAE_MPEG_Source_II
 LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../thirdparty/minimp3/
 LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../NeoBAEDroid
-LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_ABI)/fluidsynth/include
 LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_ABI)/sqlite3/include
-LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_ABI)/libopus/include
-LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_ABI)/libopus/include/opus
 LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../thirdparty/lzma-26.00/C
-LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/config
-LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/libogg/include
-LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/libvorbis/include
-LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/flac/include
-LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/flac/src/libFLAC/include
-LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/libvorbis/lib
-LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/libg722
-LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../thirdparty/qoa
-LOCAL_C_INCLUDES    += $(LOCAL_PATH)/../script
-LOCAL_C_INCLUDES	+= $(GEN_DIR)
+LOCAL_C_INCLUDES      += $(LOCAL_PATH)/../thirdparty/config
+LOCAL_C_INCLUDES      += $(LOCAL_PATH)/../thirdparty/libogg/include
+LOCAL_C_INCLUDES      += $(LOCAL_PATH)/../thirdparty/libvorbis/include
+LOCAL_C_INCLUDES      += $(LOCAL_PATH)/../thirdparty/flac/include
+LOCAL_C_INCLUDES      += $(LOCAL_PATH)/../thirdparty/flac/src/libFLAC/include
+LOCAL_C_INCLUDES      += $(LOCAL_PATH)/../thirdparty/opus/include
+LOCAL_C_INCLUDES      += $(LOCAL_PATH)/../thirdparty/opusfile/include
+LOCAL_C_INCLUDES      += $(LOCAL_PATH)/../thirdparty/libg722
+LOCAL_C_INCLUDES      += $(LOCAL_PATH)/../thirdparty/qoa
+LOCAL_C_INCLUDES      += $(LOCAL_PATH)/../script
+LOCAL_C_INCLUDES      += $(GEN_DIR)
 
 LOCAL_CFLAGS := -std=c99 -O2 -D_VERSION=\"$(VERSION)\" \
 	-DX_PLATFORM=X_ANDROID -D__ANDROID__=1 -D_BUILT_IN_PATCHES=1 \
 	-DUSE_MINIMP3_WRAPPER=1 -DUSE_VORBIS_DECODER=1 -DUSE_FLAC_DECODER=1 \
 	-DUSE_MPEG_DECODER=1 -DUSE_SF2_SUPPORT=1 -DUSE_OGG_FORMAT=1 \
-	-DUSE_VORBIS_ENCODER=1 -DUSE_FLAC_ENCODER=1 -D_USING_FLUIDSYNTH=1 \
+	-DUSE_VORBIS_ENCODER=1 -DUSE_FLAC_ENCODER=1 -D_USING_FLUIDLITE=1 \
 	-DUSE_XMF_SUPPORT=1 -DUSE_HIGHLEVEL_FILE_API=1 -DSUPPORT_KARAOKE=1 \
 	-DUSE_OPUS_DECODER=1 -DUSE_LZMA_COMPRESSION=1 -DUSE_ZMF_SUPPORT=1 \
-	-DBAE_FIX_SPAN_DC=1 -DBAE_CLASSIC_CHORUS=1 -DFLAC__NO_DLL \
+	-DBAE_FIX_SPAN_DC=1 -DBAE_CLASSIC_CHORUS=1 -DFLAC__NO_DLL=1 \
 	-D_LOAD_BUILTIN_PATCHES_FOR_SF2=1 -D_LOAD_BUILTIN_PATCHES_FOR_DLS=1 \
 	-DUSE_MTHC_SUPPORT=1 -DUSE_ADP_SUPPORT=1 -DUSE_NATIVE_DLS=1 \
 	-DUSE_RETRO_RINGTONE_SUPPORT=1 -DUSE_QOA_SUPPORT=1 -DUSE_RMI_SUPPORT=1 \
-	-DBAE_ENABLE_ROLLED_MIDI_UNROLL=1 -DUSE_J2ME_PATCH=1 \
-	-DHAVE_CONFIG_H=1 -Wall -fsigned-char -DZ7_ST -DUSE_ADX_SUPPORT=1
+	-DBAE_ENABLE_ROLLED_MIDI_UNROLL=1 -DUSE_J2ME_PATCH=1 -DFLUIDLITE_STATIC=1 \
+	-DHAVE_CONFIG_H=1 -Wall -fsigned-char -DZ7_ST -DUSE_ADX_SUPPORT=1 \
+	-DSUPPORT_OGG_FORMAT=1 -DSF3_SUPPORT=1
 
 ifeq ($(APP_OPTIM),debug)
     LOCAL_CFLAGS += -D_DEBUG=1
@@ -257,62 +459,14 @@ LOCAL_LDLIBS    += -landroid
 LOCAL_LDLIBS    += -lz
 
 
-# Link against prebuilt FluidSynth
-LOCAL_SHARED_LIBRARIES := fluidsynth sndfile ogg vorbis vorbisenc FLAC opus opusfile sqlite3
-
+# Link against prebuilt libraries
+LOCAL_SHARED_LIBRARIES := sqlite3
+LOCAL_STATIC_LIBRARIES := opus vorbis
 include $(BUILD_SHARED_LIBRARY)
-
-# Import prebuilt FluidSynth .so
-include $(CLEAR_VARS)
-LOCAL_MODULE := fluidsynth
-LOCAL_SRC_FILES := $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_ABI)/fluidsynth/lib/libfluidsynth.so
-include $(PREBUILT_SHARED_LIBRARY)
-
-# Import prebuilt libsndfile .so
-include $(CLEAR_VARS)
-LOCAL_MODULE := sndfile
-LOCAL_SRC_FILES := $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_ABI)/libsndfile/lib/libsndfile.so
-include $(PREBUILT_SHARED_LIBRARY)
-
-# Import prebuilt libogg .so
-include $(CLEAR_VARS)
-LOCAL_MODULE := ogg
-LOCAL_SRC_FILES := $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_ABI)/libogg/lib/libogg.so
-include $(PREBUILT_SHARED_LIBRARY)
-
-# Import prebuilt libvorbis .so
-include $(CLEAR_VARS)
-LOCAL_MODULE := vorbis
-LOCAL_SRC_FILES := $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_ABI)/libvorbis/lib/libvorbis.so
-include $(PREBUILT_SHARED_LIBRARY)
-
-# Import prebuilt libvorbisenc .so
-include $(CLEAR_VARS)
-LOCAL_MODULE := vorbisenc
-LOCAL_SRC_FILES := $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_ABI)/libvorbis/lib/libvorbisenc.so
-include $(PREBUILT_SHARED_LIBRARY)
-
-# Import prebuilt FLAC .so
-include $(CLEAR_VARS)
-LOCAL_MODULE := FLAC
-LOCAL_SRC_FILES := $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_ABI)/libflac/lib/libFLAC.so
-include $(PREBUILT_SHARED_LIBRARY)
 
 # Import prebuilt sqlite3 .so
 include $(CLEAR_VARS)
 LOCAL_MODULE := sqlite3
 LOCAL_SRC_FILES := $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_ABI)/sqlite3/lib/libsqlite3.so
 LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_ABI)/sqlite3/include
-include $(PREBUILT_SHARED_LIBRARY)
-
-# Import prebuilt opus .so
-include $(CLEAR_VARS)
-LOCAL_MODULE := opus
-LOCAL_SRC_FILES := $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_ABI)/libopus/lib/libopus.so
-include $(PREBUILT_SHARED_LIBRARY)
-
-# Import prebuilt opusfile .so
-include $(CLEAR_VARS)
-LOCAL_MODULE := opusfile
-LOCAL_SRC_FILES := $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_ABI)/libopus/lib/libopusfile.so
 include $(PREBUILT_SHARED_LIBRARY)

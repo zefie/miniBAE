@@ -86,12 +86,12 @@
 #endif
 
 #if USE_SF2_SUPPORT == TRUE
-    #if _USING_FLUIDSYNTH == TRUE
-        #include "GenSF2_FluidSynth.h"
+    #if _USING_FLUIDLITE == TRUE
+        #include "GenSF2_FluidLite.h"
     #endif
 #endif
 
-#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDLITE == TRUE || USE_NATIVE_DLS == TRUE)
 #include "GenXMF.h"
 #endif
 
@@ -962,19 +962,6 @@ int main(int argc, char *argv[])
         g_use_dls_compatiblity_mode = settings.dls_compatibility_mode;
     }
 #endif    
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-    extern bool g_use_fluidsynth_for_dls;
-    if (settings.has_use_fluidsynth_for_dls)
-    {
-        g_use_fluidsynth_for_dls = settings.use_fluidsynth_for_dls;
-#if USE_NATIVE_DLS == TRUE
-        if (g_use_fluidsynth_for_dls)
-        {
-            g_use_dls_compatiblity_mode = false;
-        }
-#endif
-    }
-#endif
     if (settings.has_export_codec)
     {
         g_exportCodecIndex = settings.export_codec_index;
@@ -1395,14 +1382,14 @@ int main(int argc, char *argv[])
 #if USE_SF2_SUPPORT == TRUE
                         if (!is_bank_file)
                             is_bank_file = _stricmp(ext, ".sf2") == 0;
-#if USE_VORBIS_DECODER == TRUE
+#if USE_VORBIS_DECODER == TRUE && SF3_SUPPORT > 0
                         if (!is_bank_file) {
                             is_bank_file = _stricmp(ext, ".sf3") == 0;
                         }
                         if (!is_bank_file) {
                             is_bank_file = _stricmp(ext, ".sfo") == 0;
                         }
-#if _USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE                  
+#if _USING_FLUIDLITE == TRUE || USE_NATIVE_DLS == TRUE                  
                         if (!is_bank_file) {
                             is_bank_file = _stricmp(ext, ".dls") == 0;
                         }
@@ -1415,12 +1402,12 @@ int main(int argc, char *argv[])
 #if USE_SF2_SUPPORT == TRUE
                         if (!is_bank_file)
                             is_bank_file = strcasecmp(ext, ".sf2") == 0;
-#if USE_VORBIS_DECODER == TRUE
+#if USE_VORBIS_DECODER == TRUE && SF3_SUPPORT > 0
                         if (!is_bank_file)
                             is_bank_file = strcasecmp(ext, ".sf3") == 0;
                         if (!is_bank_file)
                             is_bank_file = strcasecmp(ext, ".sfo") == 0;
-#if _USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE                       
+#if _USING_FLUIDLITE == TRUE || USE_NATIVE_DLS == TRUE                       
                         if (!is_bank_file)
                             is_bank_file = strcasecmp(ext, ".dls") == 0;
                 
@@ -1772,12 +1759,12 @@ int main(int argc, char *argv[])
 #if USE_SF2_SUPPORT == TRUE
                         if (!is_bank_file)
                             is_bank_file = _stricmp(ext, ".sf2") == 0;
-#if USE_VORBIS_DECODER == TRUE
+#if USE_VORBIS_DECODER == TRUE && SF3_SUPPORT > 0
                         if (!is_bank_file)
                             is_bank_file = _stricmp(ext, ".sf3") == 0;
                         if (!is_bank_file)
                             is_bank_file = _stricmp(ext, ".sfo") == 0;
-#if _USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE 
+#if _USING_FLUIDLITE == TRUE || USE_NATIVE_DLS == TRUE 
                         if (!is_bank_file)
                             is_bank_file = _stricmp(ext, ".dls") == 0;
 #endif
@@ -1789,12 +1776,12 @@ int main(int argc, char *argv[])
 #if USE_SF2_SUPPORT == TRUE
                         if (!is_bank_file)
                             is_bank_file = strcasecmp(ext, ".sf2") == 0;
-#if USE_VORBIS_DECODER == TRUE
+#if USE_VORBIS_DECODER == TRUE && SF3_SUPPORT > 0
                         if (!is_bank_file)
                             is_bank_file = strcasecmp(ext, ".sf3") == 0;
                         if (!is_bank_file)
                             is_bank_file = strcasecmp(ext, ".sfo") == 0;
-#if _USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE 
+#if _USING_FLUIDLITE == TRUE || USE_NATIVE_DLS == TRUE 
                         if (!is_bank_file)
                             is_bank_file = strcasecmp(ext, ".dls") == 0;
 #endif
@@ -6569,10 +6556,10 @@ int main(int argc, char *argv[])
                 ofn.hwndOwner = NULL;
                 ofn.lpstrFilter =
 #if USE_SF2_SUPPORT == TRUE
-    #if _USING_FLUIDSYNTH == TRUE
+    #if USE_VORBIS_DECODER == TRUE && SF3_SUPPORT > 0 && USE_NATIVE_DLS == TRUE
                     "Bank Files (*.hsb;*.zsb;*.sf2;*.sf3;*.sfo;*.dls)\0*.hsb;*.zsb;*.sf2;*.sf3;*.sfo;*.dls\0HSB/ZSB Banks\0*.hsb;*.zsb\0SF2 SoundFonts\0*.sf2\0SF3 SoundFonts\0*.sf3\0SFO SoundFonts\0*.sfo\0DLS Banks\0*.dls\0All Files\0*.*\0"
     #else
-        #if USE_VORBIS_DECODER == TRUE
+        #if USE_VORBIS_DECODER == TRUE && SF3_SUPPORT > 0
                     "Bank Files (*.hsb;*.zsb;*.sf2;*.sf3;*.sfo)\0*.hsb;*.zsb;*.sf2;*.sf3;*.sfo\0HSB/ZSB Banks\0*.hsb;*.zsb\0SF2 SoundFonts\0*.sf2\0SF3 SoundFonts\0*.sf3\0SFO SoundFonts\0*.sfo\0All Files\0*.*\0"
         #else
                     "Bank Files (*.hsb;*.zsb;*.sf2)\0*.hsb;*.zsb;*.sf2\0HSB/ZSB Banks\0*.hsb;*.zsb\0SF2 SoundFonts\0*.sf2\0All Files\0*.*\0"
@@ -6596,10 +6583,10 @@ int main(int argc, char *argv[])
                         "\"hsb\", \"zsb\""
 #if USE_SF2_SUPPORT == TRUE
                         ", \"sf2\""
-#if USE_VORBIS_DECODER == TRUE
+#if USE_VORBIS_DECODER == TRUE && SF3_SUPPORT > 0
                         ", \"sf3\", \"sfo\""
 #endif
-#if _USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE
+#if _USING_FLUIDLITE == TRUE || USE_NATIVE_DLS == TRUE
                         ", \"dls\""
 #endif
 #endif
@@ -6627,12 +6614,12 @@ int main(int argc, char *argv[])
 #else
         const char *cmds[] = {
 #if USE_SF2_SUPPORT == TRUE
-    #if _USING_FLUIDSYNTH == TRUE
+    #if USE_VORBIS_DECODER == TRUE && SF3_SUPPORT > 0 && USE_NATIVE_DLS == TRUE
             "zenity --file-selection --title='Load Patch Bank' --file-filter='Bank Files | *.hsb *.zsb *.sf2 *.sf3 *.sfo *.dls' 2>/dev/null",
             "kdialog --getopenfilename . '*.hsb *.zsb *.sf2 *.sf3 *.sfo *.dls' 2>/dev/null",
             "yad --file-selection --title='Load Patch Bank' --file-filter='Bank Files | *.hsb *.zsb *.sf2 *.sf3 *.sfo *.dls' 2>/dev/null",
     #else
-        #if USE_VORBIS_DECODER == TRUE
+        #if USE_VORBIS_DECODER == TRUE && SF3_SUPPORT > 0
             "zenity --file-selection --title='Load Patch Bank' --file-filter='Bank Files | *.hsb *.zsb *.sf2 *.sf3 *.sfo' 2>/dev/null",
             "kdialog --getopenfilename . '*.hsb *.zsb *.sf2 *.sf3 *.sfo' 2>/dev/null",
             "yad --file-selection --title='Load Patch Bank' --file-filter='Bank Files | *.hsb *.zsb *.sf2 *.sf3 *.sfo' 2>/dev/null",
@@ -6669,12 +6656,12 @@ int main(int argc, char *argv[])
                         || (l > 4 && strcasecmp(fileBuf + l - 4, ".zsb") == 0)
 #if USE_SF2_SUPPORT == TRUE
                         || (l > 4 && strcasecmp(fileBuf + l - 4, ".sf2") == 0)
-#if USE_VORBIS_DECODER == TRUE                        
+#if USE_VORBIS_DECODER == TRUE && SF3_SUPPORT > 0
                         || (l > 4 && strcasecmp(fileBuf + l - 4, ".sf3") == 0)
                         || (l > 4 && strcasecmp(fileBuf + l - 4, ".sfo") == 0)
 #endif                        
 #endif
-#if _USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE
+#if _USING_FLUIDLITE == TRUE || USE_NATIVE_DLS == TRUE
                         || (l > 4 && strcasecmp(fileBuf + l - 4, ".dls") == 0)
 #endif
 
@@ -6685,10 +6672,10 @@ int main(int argc, char *argv[])
                     else
                     {
 #if USE_SF2_SUPPORT == TRUE
-    #if _USING_FLUIDSYNTH == TRUE
+    #if USE_VORBIS_DECODER == TRUE && SF3_SUPPORT > 0 && USE_NATIVE_DLS == TRUE
                         BAE_PRINTF("Not a bank file (.hsb, .zsb, .sf2, .sf3, .sfo, or .dls): %s\n", fileBuf);
     #else
-        #if USE_VORBIS_DECODER == TRUE                        
+        #if USE_VORBIS_DECODER == TRUE && SF3_SUPPORT > 0                  
                         BAE_PRINTF("Not a bank file (.hsb, .zsb, .sf2, .sf3, or .sfo): %s\n", fileBuf);
         #else
                         BAE_PRINTF("Not a bank file (.hsb, .zsb, or .sf2): %s\n", fileBuf);
@@ -7418,12 +7405,6 @@ int main(int argc, char *argv[])
             current_settings.has_script_text = false;
         }
 #endif
-
-    #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-        extern bool g_use_fluidsynth_for_dls;
-        current_settings.has_use_fluidsynth_for_dls = true;
-        current_settings.use_fluidsynth_for_dls = g_use_fluidsynth_for_dls;
-    #endif
 
     #if USE_NATIVE_DLS == TRUE
         extern bool g_use_dls_compatiblity_mode;

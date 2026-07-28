@@ -376,8 +376,8 @@
 #endif
 #include "BAE_API.h"
 #include "X_Assert.h"
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-#include "GenSF2_FluidSynth.h"
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
+#include "GenSF2_FluidLite.h"
 #endif
 #include "NeoBAE.h"
 
@@ -1859,7 +1859,7 @@ static bool PV_ShouldUseRMFInstrumentForPatch(GM_Song *pSong, int16_t patch)
     XLongResourceID remapped;
     uint32_t bankId, progId, noteId;
 
-#if USE_SF2_SUPPORT != TRUE    
+#if USE_SF2_SUPPORT != TRUE && USE_NATIVE_DLS != TRUE
     return TRUE;
 #else
 
@@ -1889,7 +1889,7 @@ static bool PV_ShouldUseRMFInstrumentForPatch(GM_Song *pSong, int16_t patch)
     progId = 0;
     noteId = 0;
     TranslateInstrumentToBankProgram((uint32_t)patch, &bankId, &progId, &noteId);
-    if (bankId == 1 || bankId == 2)
+    if ((bankId == 1 || bankId == 2) && (pSong->songFlags & SONG_FLAG_IS_RMF))
     {
         return TRUE;
     }
@@ -1906,7 +1906,6 @@ static bool PV_ShouldUseRMFInstrumentForPatch(GM_Song *pSong, int16_t patch)
         {
             return TRUE;
         }
-        debug_message("Debug: Checking patch %d against RMFInstrumentID %d (remapped %d)\n", patch, pSong->RMFInstrumentIDs[i], remapped);
     }
 
     // Patch is not in RMFInstrumentIDs, so it doesn't have a custom version in the RMF.
@@ -2359,7 +2358,7 @@ static void PV_ProcessRolandPartAssignSysEx(GM_Song *pSong, const unsigned char 
         GM_SF2_SetChannelMode(MIDIChannel, bankMode);
         if (bankMode == USE_GM_PERC_BANK)
         {
-            PV_SF2_SetBankPreset(pSong, MIDIChannel, GM_SF2_isDLS() ? 120 : 128, 0);
+            PV_SF2_SetBankPreset(pSong, MIDIChannel, 128, 0);
         }
         else
         {
@@ -2485,10 +2484,7 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                         thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
                         PV_StartMIDINote(pSong, thePatch, MIDIChannel, currentTrack, note, volume);                       
                     } else {
-                        // Standard MIDI
-                        if (GM_SF2_isDLS() && bankId == 128) {
-                            bankId = 120;
-                        }                       
+                        // Standard MIDI                 
                         GM_SF2_ProcessNoteOn(pSong, MIDIChannel, note, volume);
                         if (pSong->songFlags & SONG_FLAG_IS_RMF) {
                             if (bankId != 0) {

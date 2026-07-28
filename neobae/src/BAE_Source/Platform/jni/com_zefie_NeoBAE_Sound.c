@@ -13,7 +13,7 @@
 #include "com_zefie_NeoBAE_Sound.h"
 #include "NeoBAE.h"
 #include "GenSnd.h"
-#include "GenSF2_FluidSynth.h"
+#include "GenSF2_FluidLite.h"
 
 #include <android/asset_manager.h>
 #include <android/asset_manager_jni.h>
@@ -569,7 +569,7 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Song__1loadRmiFromMemory
 	
 	__android_log_print(ANDROID_LOG_DEBUG, "neoBAE", "Loading RMI from memory, size=%d, useEmbeddedBank=%d", len, useEmbeddedBank);
 	
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
 	BAEResult r = BAESong_LoadRmiFromMemory(song, (void const*)bytes, (uint32_t)len, TRUE, (BAE_BOOL)useEmbeddedBank);
 	__android_log_print(ANDROID_LOG_DEBUG, "neoBAE", "BAESong_LoadRmiFromMemory returned %d", r);
 #else

@@ -30,7 +30,7 @@
 #include "gui_playlist.h"
 #include "gui_panels.h"
 #include "GenPriv.h"
-#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDLITE == TRUE || USE_NATIVE_DLS == TRUE)
 #include "GenXMF.h"
 #endif
 #include <stdio.h>
@@ -75,12 +75,6 @@ bool g_classic_chorus_enabled = false;
 extern bool g_show_virtual_keyboard;
 extern int g_exportCodecIndex;
 extern int g_window_h;
-
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_NATIVE_DLS == FALSE
-    bool g_use_fluidsynth_for_dls = true;
-#else
-    bool g_use_fluidsynth_for_dls = false;
-#endif
 
 Settings load_settings(void)
 {
@@ -151,13 +145,6 @@ Settings load_settings(void)
             settings.show_keyboard = (atoi(line + 14) != 0);
             settings.has_show_keyboard = true;
         }
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-        else if (strncmp(line, "use_fluidsynth_for_dls=", 23) == 0)
-        {
-            settings.use_fluidsynth_for_dls = (atoi(line + 23) != 0);
-            settings.has_use_fluidsynth_for_dls = true;
-        }
-#endif
 #if USE_NATIVE_DLS == TRUE
         else if (strncmp(line, "dls_compatibility_mode=", 23) == 0)
         {
@@ -346,9 +333,6 @@ void save_settings(const char *last_bank_path, int reverb_type, bool loop_enable
         fprintf(f, "sample_rate=%d\n", g_sample_rate_hz);
         fprintf(f, "show_keyboard=%d\n", g_show_virtual_keyboard ? 1 : 0);
 #if USE_NATIVE_DLS == TRUE
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-        fprintf(f, "use_fluidsynth_for_dls=%d\n", g_use_fluidsynth_for_dls ? 1 : 0);
-#endif
         fprintf(f, "dls_compatibility_mode=%d\n", g_use_dls_compatiblity_mode ? 1 : 0);
 #endif
         fprintf(f, "disable_webtv_progress_bar=%d\n", g_disable_webtv_progress_bar ? 1 : 0);
@@ -520,12 +504,6 @@ void save_full_settings(const Settings *settings)
         {
             fprintf(f, "show_keyboard=%d\n", settings->show_keyboard ? 1 : 0);
         }
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-        if (settings->has_use_fluidsynth_for_dls)
-        {
-            fprintf(f, "use_fluidsynth_for_dls=%d\n", settings->use_fluidsynth_for_dls ? 1 : 0);
-        }
-#endif
 #if USE_NATIVE_DLS == TRUE
         if (settings->has_dls_compatibility_mode)
         {
@@ -709,16 +687,6 @@ void apply_settings_to_ui(const Settings *settings, int *transpose, int *tempo, 
     {
         g_use_dls_compatiblity_mode = settings->dls_compatibility_mode;
         GM_DLS_SetMobileBAEQuirks(g_use_dls_compatiblity_mode ? false : true); // inverted
-    }
-#endif
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-    if (settings->has_use_fluidsynth_for_dls)
-    {
-        g_use_fluidsynth_for_dls = settings->use_fluidsynth_for_dls;
-        #if USE_NATIVE_DLS == TRUE
-            g_use_dls_compatiblity_mode = false;
-            GM_DLS_SetMobileBAEQuirks(true);
-        #endif
     }
 #endif
     if (settings->has_export_codec)
@@ -1475,34 +1443,9 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
     }
 #endif
 
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_NATIVE_DLS == TRUE
-    Rect fsDlsRect = {leftX, dlg.y + 144, 18, 18};
-    if (!rightColumnCheckboxesEnabled)
-    {
-        bool over = point_in(mx, my, fsDlsRect);
-        draw_custom_checkbox(R, fsDlsRect, g_use_fluidsynth_for_dls, over);
-        draw_text(R, fsDlsRect.x + fsDlsRect.w + 6, fsDlsRect.y + 2, "Use FluidSynth for DLS", g_text_color);
-    }
-    else if (ui_toggle(R, fsDlsRect, &g_use_fluidsynth_for_dls, "Use FluidSynth for DLS", mx, my, mclick))
-    {
-        if (g_use_fluidsynth_for_dls)
-        {
-            g_use_dls_compatiblity_mode = false;
-            GM_DLS_SetMobileBAEQuirks(true);
-        }
-        save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, *loopPlay);
-        if (g_current_bank_path[0])
-        {
-            if (!load_bank(g_current_bank_path, *playing, *transpose, *tempo, *volume, *loopPlay, *reverbType, ch_enable, false))
-            {
-                set_status_message("Failed to reload bank");
-            }
-        }
-    }
-#endif
 #if USE_NATIVE_DLS == TRUE
-    Rect compatDlsRect = {leftX, dlg.y + 166, 18, 18};
-    if (!rightColumnCheckboxesEnabled || g_use_fluidsynth_for_dls)
+    Rect compatDlsRect = {leftX, dlg.y + 144, 18, 18};
+    if (!rightColumnCheckboxesEnabled)
     {
         bool over = point_in(mx, my, compatDlsRect);
         draw_custom_checkbox(R, compatDlsRect, g_use_dls_compatiblity_mode, over);

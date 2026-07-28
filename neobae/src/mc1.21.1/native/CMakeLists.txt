@@ -67,7 +67,7 @@ set(ENGINE_SRC
     ${BAE}/Common/GenSynthFiltersU3232.c
     ${BAE}/Common/GenSynthInterp2Simple.c
     ${BAE}/Common/GenSynthInterp2U3232.c
-    ${BAE}/Common/GenSF2_FluidSynth.c
+    ${BAE}/Common/GenSF2_FluidLite.c
     ${BAE}/Common/GenRMI.c
     ${BAE}/Common/GenXMF.c
     ${BAE}/Common/GenRingtone.c

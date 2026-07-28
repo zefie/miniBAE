@@ -142,7 +142,7 @@ option(BAE_DISABLE_KARAOKE "Disable karaoke support" OFF)
 option(BAE_DISABLE_BAESCRIPT "Disable BAEScript support" OFF)
 option(BAE_DISABLE_PLAYLIST "Disable playlist support" OFF)
 option(BAE_DISABLE_SF2_SUPPORT "Disable SF2 support" OFF)
-option(BAE_DISABLE_FLUIDSYNTH "Disable FluidSynth integration" OFF)
+option(BAE_DISABLE_FLUIDLITE "Disable FluidLite integration" OFF)
 option(BAE_DISABLE_NATIVE_DLS "Disable native DLS system" OFF)
 option(BAE_DISABLE_XMF_SUPPORT "Disable XMF support" OFF)
 option(BAE_DISABLE_NOKIA_PATCH "Disable Nokia patch handling" OFF)
@@ -169,7 +169,6 @@ option(ENABLE_MIDI_HW "Enable hardware MIDI I/O in zefidi via RtMidi" OFF)
 option(BUILD_CLITOOLS "Build CLI tools (songtool, rmf2mid, mid2rmf, mid2rmi, sf2-hsb, mod2rmf, instdump, bankrecomp)" ON)
 option(BUILD_NBSTUDIO "Build NeoBAE Studio (RMF/ZMF editor) when wxWidgets is found" ON)
 option(BUILD_NBEDITOR "Build NeoBAE Editor (Dear ImGui + SDL3)" ON)
-option(BUILD_RAYLIB_PLAYER "Build the raylib-based mini GUI player" ON)
 set(CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING "Build type (Debug, Release, RelWithDebInfo, MinSizeRel)" FORCE)
 
 # Internal compatibility booleans: keep existing logic in terms of ENABLE vars.
@@ -189,7 +188,7 @@ set(BAE_ENABLE_KARAOKE ON)
 set(BAE_ENABLE_BAESCRIPT ON)
 set(BAE_ENABLE_PLAYLIST ON)
 set(BAE_ENABLE_SF2_SUPPORT ON)
-set(BAE_ENABLE_FLUIDSYNTH ON)
+set(BAE_ENABLE_FLUIDLITE ON)
 set(BAE_ENABLE_NATIVE_DLS ON)
 set(BAE_ENABLE_XMF_SUPPORT ON)
 set(BAE_ENABLE_NOKIA_PATCH ON)
@@ -294,11 +293,11 @@ endif()
 if(BAE_DISABLE_SF2_SUPPORT)
   set(BAE_ENABLE_SF2_SUPPORT OFF)
 endif()
-if(BAE_DISABLE_FLUIDSYNTH)
-  set(BAE_ENABLE_FLUIDSYNTH OFF)
-  message(STATUS "Disabling FluidSynth")
+if(BAE_DISABLE_FLUIDLITE)
+  set(BAE_ENABLE_FLUIDLITE OFF)
+  message(STATUS "Disabling FluidLite")
 else()
-  message(STATUS "Enabling FluidSynth")
+  message(STATUS "Enabling FluidLite")
 endif()
 if (BAE_DISABLE_NATIVE_DLS)
   set(BAE_ENABLE_NATIVE_DLS OFF)
@@ -372,47 +371,16 @@ if(BAE_ENABLE_EMBED_PATCHES)
   endif()
 endif()
 
-# FluidSynth probe and gating for SF2/XMF behavior from Makefile.common.
-set(BAE_FLUIDSYNTH_AVAILABLE OFF)
-unset(BAE_FLUIDSYNTH_INCLUDE_DIR)
-unset(BAE_FLUIDSYNTH_LIBRARY)
-if(BAE_ENABLE_FLUIDSYNTH)
-  find_package(PkgConfig QUIET)
-  if(PkgConfig_FOUND)
-    pkg_check_modules(FLUIDSYNTH QUIET fluidsynth)
-  endif()
-
-  if(FLUIDSYNTH_FOUND)
-    set(BAE_FLUIDSYNTH_INCLUDE_DIR ${FLUIDSYNTH_INCLUDE_DIRS})
-    set(BAE_FLUIDSYNTH_LIBRARY ${FLUIDSYNTH_LIBRARIES})
-    set(BAE_FLUIDSYNTH_AVAILABLE ON)
-  else()
-    message(STATUS "FluidSynth not found via pkg-config.")
-  endif()
-else()
-  message(STATUS "FluidSynth support disabled by configuration; skipping FluidSynth probe")
-endif()
-
-# Sanity checks
-if(BAE_FLUIDSYNTH_INCLUDE_DIR AND BAE_FLUIDSYNTH_LIBRARY)
-  set(BAE_FLUIDSYNTH_AVAILABLE ON)
-endif()
-
-if(BAE_ENABLE_FLUIDSYNTH AND NOT BAE_FLUIDSYNTH_AVAILABLE)
-  set(BAE_ENABLE_FLUIDSYNTH OFF)
-  message(STATUS "Disabling FluidSynth support: library/headers not found")
-endif()
-
-if(BAE_ENABLE_SF2_SUPPORT AND NOT BAE_ENABLE_FLUIDSYNTH)
-  # SF2 is only supported via FluidSynth at this moment
+if(BAE_ENABLE_SF2_SUPPORT AND NOT BAE_ENABLE_FLUIDLITE)
+  # SF2 is only supported via FluidLite at this moment
   set(BAE_ENABLE_SF2_SUPPORT OFF)
-  message(STATUS "Disabling SF2 support: FluidSynth is unavailable/disabled")
+  message(STATUS "Disabling SF2 support: FluidLite is disabled")
 endif()
 
-if(BAE_ENABLE_FLUIDSYNTH AND NOT BAE_ENABLE_SF2_SUPPORT)
+if(BAE_ENABLE_FLUIDLITE AND NOT BAE_ENABLE_SF2_SUPPORT)
   # Due to the codebase, these both need to be on
   set(BAE_ENABLE_SF2_SUPPORT ON)
-  message(STATUS "Enabling SF2 support: FluidSynth is enabled and available, and was not disabled. (Try -DBAE_DISABLE_FLUIDSYNTH=1?)")
+  message(STATUS "Enabling SF2 support: FluidLite was not disabled. (Try -DBAE_DISABLE_FLUIDLITE=1?)")
 endif()
 
 if(BAE_ENABLE_XMF_SUPPORT AND NOT BAE_ENABLE_NATIVE_DLS)
@@ -873,8 +841,30 @@ if(BAE_ENABLE_SF2_CONVERTER)
   )
 endif()
 
-if(BAE_ENABLE_SF2_SUPPORT AND BAE_ENABLE_FLUIDSYNTH)
-  list(APPEND NEOBAE_SOURCES neobae/src/BAE_Source/Common/GenSF2_FluidSynth.c)
+if(BAE_ENABLE_FLUIDLITE)
+  list(APPEND NEOBAE_SOURCES
+    neobae/src/fluidlite/src/fluid_chan.c
+    neobae/src/fluidlite/src/fluid_chorus.c
+    neobae/src/fluidlite/src/fluid_conv.c
+    neobae/src/fluidlite/src/fluid_defsfont.c
+    neobae/src/fluidlite/src/fluid_dsp_float.c
+    neobae/src/fluidlite/src/fluid_gen.c
+    neobae/src/fluidlite/src/fluid_hash.c
+    neobae/src/fluidlite/src/fluid_init.c
+    neobae/src/fluidlite/src/fluid_list.c
+    neobae/src/fluidlite/src/fluid_mod.c
+    neobae/src/fluidlite/src/fluid_ramsfont.c
+    neobae/src/fluidlite/src/fluid_rev.c
+    neobae/src/fluidlite/src/fluid_settings.c
+    neobae/src/fluidlite/src/fluid_synth.c
+    neobae/src/fluidlite/src/fluid_sys.c
+    neobae/src/fluidlite/src/fluid_tuning.c
+    neobae/src/fluidlite/src/fluid_voice.c
+  )
+endif()
+
+if(BAE_ENABLE_SF2_SUPPORT AND BAE_ENABLE_FLUIDLITE)
+  list(APPEND NEOBAE_SOURCES neobae/src/BAE_Source/Common/GenSF2_FluidLite.c)
 endif()
 
 if(BAE_ENABLE_XMF_SUPPORT)
@@ -1375,8 +1365,8 @@ if(BAE_ENABLE_BAESCRIPT)
   target_include_directories(neobae PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/script)
 endif()
 
-if(BAE_ENABLE_SF2_SUPPORT AND BAE_ENABLE_FLUIDSYNTH AND BAE_FLUIDSYNTH_INCLUDE_DIR)
-  target_include_directories(neobae PUBLIC ${BAE_FLUIDSYNTH_INCLUDE_DIR})
+if(BAE_ENABLE_SF2_SUPPORT AND BAE_ENABLE_FLUIDLITE AND BAE_FLUIDLITE_INCLUDE_DIR)
+  target_include_directories(neobae PUBLIC ${BAE_FLUIDLITE_INCLUDE_DIR})
 endif()
 
 if(BAE_PLATFORM STREQUAL "SDL2" AND BAE_SDL_BACKEND_AVAILABLE)
@@ -1415,9 +1405,6 @@ if(NEOBAE_STATIC AND MINGW)
       target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} z ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
     endif()
   endif()  
-  if(BAE_ENABLE_SF2_SUPPORT AND BAE_ENABLE_FLUIDSYNTH)
-    target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} sndfile mpg123 ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
-  endif()
 endif()
 
 
@@ -1471,7 +1458,9 @@ target_compile_definitions(neobae
     USE_OGG_FORMAT=$<IF:$<BOOL:$<OR:$<BOOL:${BAE_ENABLE_FLAC_ENCODER}>,$<BOOL:${BAE_ENABLE_FLAC_DECODER}>,$<BOOL:${BAE_ENABLE_VORBIS_ENCODER}>,$<BOOL:${BAE_ENABLE_VORBIS_DECODER}>,$<BOOL:${BAE_ENABLE_OPUS_ENCODER}>,$<BOOL:${BAE_ENABLE_OPUS_DECODER}>>>,1,0>
     SUPPORT_OGG_FORMAT=$<IF:$<BOOL:$<OR:$<BOOL:${BAE_ENABLE_FLAC_ENCODER}>,$<BOOL:${BAE_ENABLE_FLAC_DECODER}>,$<BOOL:${BAE_ENABLE_VORBIS_ENCODER}>,$<BOOL:${BAE_ENABLE_VORBIS_DECODER}>,$<BOOL:${BAE_ENABLE_OPUS_ENCODER}>,$<BOOL:${BAE_ENABLE_OPUS_DECODER}>>>,1,0>
     USE_SF2_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_SF2_SUPPORT}>,1,0>
-    _USING_FLUIDSYNTH=$<IF:$<BOOL:${BAE_ENABLE_FLUIDSYNTH}>,1,0>
+    _USING_FLUIDLITE=$<IF:$<BOOL:${BAE_ENABLE_FLUIDLITE}>,1,0>
+    FLUIDLITE_STATIC=$<IF:$<BOOL:${BAE_ENABLE_FLUIDLITE}>,1,0>
+    SF3_SUPPORT=$<IF:$<BOOL:$<AND:$<BOOL:${BAE_ENABLE_VORBIS_DECODER}>,$<BOOL:${BAE_ENABLE_FLUIDLITE}>>>,1,0>
     USE_NATIVE_DLS=$<IF:$<BOOL:${BAE_ENABLE_NATIVE_DLS}>,1,0>
     USE_XMF_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_XMF_SUPPORT}>,1,0>
     DISABLE_NOKIA_PATCH=$<IF:$<BOOL:$<NOT:$<BOOL:${BAE_ENABLE_NOKIA_PATCH}>>>,1,0>
@@ -1512,10 +1501,6 @@ if(UNIX AND NOT APPLE)
   endif()
 endif()
 
-if(BAE_ENABLE_SF2_SUPPORT AND BAE_ENABLE_FLUIDSYNTH)
-  target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} ${BAE_FLUIDSYNTH_LIBRARY} ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
-endif()
-
 if(NOT NEOBAE_STATIC AND BAE_ENABLE_XMF_SUPPORT)
   target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} z ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
 endif()
@@ -1538,6 +1523,13 @@ if(BUILD_PLAYBAE)
   if(BAE_PLAYBAE_PLATFORM_AVAILABLE)
     add_executable(playbae neobae/src/playbae/playbae.c)
     target_link_libraries(playbae PRIVATE neobae)
+    if(BAE_ENABLE_FLUIDLITE)
+      target_include_directories(playbae PRIVATE 
+        ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/fluidlite/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/fluidlite/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/fluidlite/src/watcom
+      )  
+    endif()
   else()
     message(STATUS "Skipping BUILD_PLAYBAE because BAE_PLATFORM is Dummy or Ansi.")
   endif()
@@ -1612,6 +1604,14 @@ if(BUILD_ZEFIDI)
       endif()
     endif()
 
+    if(BAE_ENABLE_FLUIDLITE)
+      target_include_directories(neobae PRIVATE 
+        ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/fluidlite/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/fluidlite/src
+       ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/fluidlite/src/watcom
+      )
+    endif()
+
     if (DEBUG)
       list(APPEND ZEFIDI_SOURCES neobae/src/gui/gui_debug_console.c)
     endif()    
@@ -1632,6 +1632,15 @@ if(BUILD_ZEFIDI)
     else()
       add_executable(zefidi ${ZEFIDI_SOURCES})
     endif()
+
+    if(BAE_ENABLE_FLUIDLITE)
+    target_include_directories(zefidi PRIVATE 
+      ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/fluidlite/include
+      ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/fluidlite/src
+      ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/fluidlite/src/watcom
+    )  
+    endif()
+
 
     if(BAE_EMBED_FONT_EFFECTIVE)
       set(BAE_EMBED_FONT_HEADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -1702,9 +1711,6 @@ if(BUILD_ZEFIDI)
         harfbuzz
         zs 
       )
-      if(BAE_ENABLE_SF2_SUPPORT AND BAE_ENABLE_FLUIDSYNTH)
-        target_link_libraries(zefidi PRIVATE sndfile)
-      endif()
     endif()
 
     if(MINGW OR MSVC)
@@ -1727,115 +1733,6 @@ if(BUILD_ZEFIDI)
     endif()
   else()
     message(STATUS "Skipping BUILD_ZEFIDI because no usable SDL2/SDL3 + SDL_ttf combination was found.")
-  endif()
-endif()
-
-if(BUILD_RAYLIB_PLAYER)
-  find_package(raylib QUIET)
-
-  set(BAE_RAYLIB_AVAILABLE OFF)
-  unset(BAE_RAYLIB_INCLUDE_DIR)
-  unset(BAE_RAYLIB_LIBRARY)
-
-  if(TARGET raylib)
-    set(BAE_RAYLIB_AVAILABLE ON)
-  else()
-    find_path(BAE_RAYLIB_INCLUDE_DIR raylib.h)
-    find_library(BAE_RAYLIB_LIBRARY NAMES raylib)
-    if(BAE_RAYLIB_INCLUDE_DIR AND BAE_RAYLIB_LIBRARY)
-      set(BAE_RAYLIB_AVAILABLE ON)
-    endif()
-  endif()
-
-  if(BAE_RAYLIB_AVAILABLE)
-    add_executable(raylib_player neobae/src/raylibplayer/main.c)
-    target_link_libraries(raylib_player PRIVATE neobae)
-
-    if(BAE_ENABLE_EMBED_FONT)
-      set(BAE_RAYLIB_EMBED_FONT_HEADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
-      set(BAE_RAYLIB_EMBED_FONT_HEADER "${BAE_RAYLIB_EMBED_FONT_HEADER_DIR}/embedded_font.h")
-
-      if(TARGET zefidi_embedded_font)
-        add_dependencies(raylib_player zefidi_embedded_font)
-        target_compile_definitions(raylib_player PRIVATE EMBED_TTF_FONT=1)
-        target_include_directories(raylib_player PRIVATE ${BAE_RAYLIB_EMBED_FONT_HEADER_DIR})
-      else()
-        set(BAE_RAYLIB_EMBED_FONT_EFFECTIVE OFF)
-        unset(BAE_RAYLIB_EMBED_TTF_FILE_RESOLVED)
-
-        if(BAE_EMBED_TTF_FILE STREQUAL "")
-          message(STATUS "Disabling raylib_player embedded font: BAE_EMBED_TTF_FILE is empty")
-        else()
-          set(_BAE_RAYLIB_EMBED_TTF_CANDIDATE "${BAE_EMBED_TTF_FILE}")
-          if(NOT IS_ABSOLUTE "${_BAE_RAYLIB_EMBED_TTF_CANDIDATE}")
-            set(_BAE_RAYLIB_EMBED_TTF_CANDIDATE "${CMAKE_CURRENT_SOURCE_DIR}/${BAE_EMBED_TTF_FILE}")
-          endif()
-          if(EXISTS "${_BAE_RAYLIB_EMBED_TTF_CANDIDATE}")
-            set(BAE_RAYLIB_EMBED_TTF_FILE_RESOLVED "${_BAE_RAYLIB_EMBED_TTF_CANDIDATE}")
-          else()
-            set(_BAE_RAYLIB_EMBED_TTF_ALT "${CMAKE_CURRENT_SOURCE_DIR}/neobae/${BAE_EMBED_TTF_FILE}")
-            if(EXISTS "${_BAE_RAYLIB_EMBED_TTF_ALT}")
-              set(BAE_RAYLIB_EMBED_TTF_FILE_RESOLVED "${_BAE_RAYLIB_EMBED_TTF_ALT}")
-            else()
-              message(STATUS "Disabling raylib_player embedded font: TTF file not found at '${BAE_EMBED_TTF_FILE}'")
-            endif()
-            unset(_BAE_RAYLIB_EMBED_TTF_ALT)
-          endif()
-          unset(_BAE_RAYLIB_EMBED_TTF_CANDIDATE)
-        endif()
-
-        if(BAE_RAYLIB_EMBED_TTF_FILE_RESOLVED)
-          find_package(Python3 COMPONENTS Interpreter QUIET)
-          if(NOT Python3_Interpreter_FOUND)
-            message(STATUS "Disabling raylib_player embedded font: Python3 interpreter not found")
-          else()
-            set(BAE_RAYLIB_EMBED_FONT_EFFECTIVE ON)
-            message(STATUS "Enabling raylib_player embedded font from '${BAE_RAYLIB_EMBED_TTF_FILE_RESOLVED}'")
-          endif()
-        endif()
-
-        if(BAE_RAYLIB_EMBED_FONT_EFFECTIVE)
-          add_custom_command(
-            OUTPUT ${BAE_RAYLIB_EMBED_FONT_HEADER}
-            COMMAND ${CMAKE_COMMAND} -E make_directory ${BAE_RAYLIB_EMBED_FONT_HEADER_DIR}
-            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/create_embedded_font_h.py ${BAE_RAYLIB_EMBED_TTF_FILE_RESOLVED} ${BAE_RAYLIB_EMBED_FONT_HEADER}
-            DEPENDS ${BAE_RAYLIB_EMBED_TTF_FILE_RESOLVED} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/create_embedded_font_h.py
-            VERBATIM
-            COMMENT "Embedding raylib_player TTF font into embedded_font.h"
-          )
-          add_custom_target(raylib_player_embedded_font DEPENDS ${BAE_RAYLIB_EMBED_FONT_HEADER})
-          add_dependencies(raylib_player raylib_player_embedded_font)
-          target_compile_definitions(raylib_player PRIVATE EMBED_TTF_FONT=1)
-          target_include_directories(raylib_player PRIVATE ${BAE_RAYLIB_EMBED_FONT_HEADER_DIR})
-        endif()
-      endif()
-    endif()
-
-    if(TARGET raylib)
-      target_link_libraries(raylib_player PRIVATE raylib)
-      if (WIN32)
-        target_link_libraries(raylib_player PRIVATE winmm)
-      endif()
-    else()
-      target_include_directories(raylib_player PRIVATE ${BAE_RAYLIB_INCLUDE_DIR})
-      target_link_libraries(raylib_player PRIVATE ${BAE_RAYLIB_LIBRARY})
-      if(UNIX AND NOT APPLE)
-        target_link_libraries(raylib_player PRIVATE m pthread dl)
-      endif()
-      if(APPLE)
-        target_link_libraries(raylib_player PRIVATE
-          "-framework IOKit"
-          "-framework Cocoa"
-          "-framework OpenGL"
-        )
-      endif()
-    endif()
-
-    if(WIN32)
-      set_target_properties(raylib_player PROPERTIES WIN32_EXECUTABLE TRUE)
-    endif()
-  else()
-    message(STATUS "Skipping BUILD_RAYLIB_PLAYER because raylib was not found.")
   endif()
 endif()
 

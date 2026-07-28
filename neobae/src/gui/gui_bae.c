@@ -28,8 +28,8 @@
 #if USE_RMI_SUPPORT == TRUE
     #include "GenRMI.h"
 #endif
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-    #include "GenSF2_FluidSynth.h"
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
+    #include "GenSF2_FluidLite.h"
 #endif
 #if USE_NATIVE_DLS == TRUE
     #include "GenDLS_MobileBAE.h"
@@ -42,10 +42,6 @@
 #include <string.h>
 #include <ctype.h>
 #include <errno.h>
-
-#if USE_NATIVE_DLS == TRUE
-extern bool g_use_fluidsynth_for_dls;
-#endif
 
 /* Single, unconditional definition of the remembered user master volume
     intent. Declared extern in headers and other modules so all translation
@@ -76,7 +72,6 @@ static char g_user_bank_path[1024] = {0};
 static char g_user_bank_name[256] = {0};
 
 // External keyboard-related globals (defined in gui_midi_vkbd.c)
-extern bool g_use_fluidsynth_for_dls;
 extern bool g_show_virtual_keyboard;
 extern int g_keyboard_channel;
 extern int g_keyboard_mouse_note;
@@ -668,7 +663,7 @@ void bae_shutdown(void)
     // GM_CleanupSF2 shuts down FluidSynth's internal threads; without this call
     // those threads continue running past process teardown and cause a crash on exit.
 #if USE_SF2_SUPPORT == TRUE
-#if _USING_FLUIDSYNTH == TRUE
+#if _USING_FLUIDLITE == TRUE
     GM_CleanupSF2();
 #endif
 #endif
@@ -699,11 +694,8 @@ bool bae_load_bank(const char *bank_path)
     g_bae.bank_token = 0;
     // Check if this is an SF2 file
     if (ext && (strcasecmp(ext, ".sf2") == 0    
-#if USE_VORBIS_DECODER == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_VORBIS_DECODER == TRUE && _USING_FLUIDLITE == TRUE
     || (strcasecmp(ext, ".sf3") == 0 || strcasecmp(ext, ".sfo") == 0)
-#endif
-#if USE_NATIVE_DLS == TRUE
-    || (strcasecmp(ext, ".dls") == 0 && g_use_fluidsynth_for_dls)
 #endif
     ))
     {
@@ -730,7 +722,7 @@ bool bae_load_bank(const char *bank_path)
 
 
 #if USE_NATIVE_DLS == TRUE
-    if (ext && strcasecmp(ext, ".dls") == 0 && !g_use_fluidsynth_for_dls) {
+    if (ext && strcasecmp(ext, ".dls") == 0) {
         // Load DLS bank
 #if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_DLS == TRUE
         BAEBankToken builtin_token = 0;
@@ -795,7 +787,7 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
         // Clear the embedded soundbank flag
         GM_ClearRMISoundbankFlag();
 
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
         GM_UnloadSF2Soundfont();
         GM_SetMixerSF2Mode(FALSE);
 #endif

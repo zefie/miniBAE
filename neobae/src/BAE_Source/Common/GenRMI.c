@@ -54,8 +54,8 @@
 #include "GenRMI.h"
 
 
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-#include "GenSF2_FluidSynth.h"
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
+#include "GenSF2_FluidLite.h"
 #endif
 
 #if USE_NATIVE_DLS == TRUE
@@ -497,7 +497,7 @@ OPErr GM_LoadRMIFromMemory(const unsigned char *buf, uint32_t len,
         {
             if (isSF2)
             {
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
 #if _DEBUG
                 const char *bankType = "SF2/SF3";
                 debug_message("[RMI] Loading embedded %s soundbank...\n", bankType);

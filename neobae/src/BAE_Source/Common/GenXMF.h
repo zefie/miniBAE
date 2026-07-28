@@ -25,7 +25,7 @@
 
 #include "NeoBAE.h"
 
-#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDLITE == TRUE || USE_NATIVE_DLS == TRUE)
 
 // Loads the indicated BAESong from an XMF/MXMF container. Extracts the
 // embedded Standard MIDI File and, if present, an embedded SF2/DLS bank to
@@ -40,4 +40,4 @@ BAEResult BAESong_LoadXmfFromFile(BAESong song,
                                   BAEPathName filePath,
                                   BAE_BOOL ignoreBadInstruments);
 
-#endif // USE_XMF_SUPPORT && (_USING_FLUIDSYNTH || USE_NATIVE_DLS)
+#endif // USE_XMF_SUPPORT && (_USING_FLUIDLITE || USE_NATIVE_DLS)

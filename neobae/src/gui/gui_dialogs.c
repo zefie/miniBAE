@@ -235,7 +235,7 @@ char *open_file_dialog(void)
 /* Compile-time built extension list, Windows Style*/
 
 static const char ALL_EXT_FILTER[] =
-#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDLITE == TRUE || USE_NATIVE_DLS == TRUE)
     "*.xmf;*.mxmf;"
 #else
     ""
@@ -324,7 +324,7 @@ static const char AUDIO_EXT_FILTER[] =
         APPEND_STR(pattern);
     }
     APPEND_STR("MIDI Files"); APPEND_STR("*.mid;*.midi;*.kar;*.rmi");
-#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDLITE == TRUE || USE_NATIVE_DLS == TRUE)
     APPEND_STR("XMF Files"); APPEND_STR("*.xmf;*.mxmf");
 #endif
     APPEND_STR("RMF Files"); APPEND_STR("*.rmf");
@@ -383,7 +383,7 @@ static const char AUDIO_EXT_FILTER[] =
 #if USE_OPUS_DECODER == TRUE && SUPPORT_OGG_FORMAT == TRUE
         ", \"opus\""
 #endif
-#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDLITE == TRUE || USE_NATIVE_DLS == TRUE)
         ", \"xmf\", \"mxmf\""
 #endif
         ", \"wav\", \"aif\", \"aiff\", \"au\"";
@@ -416,7 +416,7 @@ static const char AUDIO_EXT_FILTER[] =
 #else
 /* Compile-time built extension list, Linux Style */
 static const char ALL_EXT_FILTER[] =
-#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDLITE == TRUE || USE_NATIVE_DLS == TRUE)
     "*.xmf *.mxmf "
 #else
     ""
@@ -1462,7 +1462,7 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
         }
     }
 
-#if (USE_MPEG_DECODER == TRUE) || (USE_MPEG_ENCODER == TRUE) || (SUPPORT_MIDI_HW == TRUE) || (SUPPORT_OGG_FORMAT == TRUE) || (USE_VORBIS_DECODER == TRUE) || (USE_VORBIS_ENCODER == TRUE) || (USE_FLAC_DECODER == TRUE) || (USE_FLAC_ENCODER == TRUE) || (_USING_FLUIDSYNTH == TRUE)
+#if (USE_MPEG_DECODER == TRUE) || (USE_MPEG_ENCODER == TRUE) || (SUPPORT_MIDI_HW == TRUE) || (SUPPORT_OGG_FORMAT == TRUE) || (USE_VORBIS_DECODER == TRUE) || (USE_VORBIS_ENCODER == TRUE) || (USE_FLAC_DECODER == TRUE) || (USE_FLAC_ENCODER == TRUE) || (_USING_FLUIDLITE == TRUE)
     // Page 2 & 3: credits/licenses (part 2)
     else if (g_about_page == 2 || g_about_page == 3 || g_about_page == 4)
     {
@@ -1502,11 +1502,10 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
             "Copyright (C) 2000-2009 Josh Coalson, (C) 2011-2025 Xiph.Org Foundation",
             "https://www.xiph.org/flac/",
 #endif
-#if _USING_FLUIDSYNTH == TRUE
+#if _USING_FLUIDLITE == TRUE
             "",
-            "FluidSynth",
-            "Copyright (C) 2004-2026 FluidSynth Team",
-            "https://www.fluidsynth.org/",
+            "FluidLite (modified for NeoBAE)",
+            "Copyright (C) 2016 Robin Lobel & FluidSynth Team",
 #endif
 #if USE_QOA_SUPPORT == TRUE
             "",

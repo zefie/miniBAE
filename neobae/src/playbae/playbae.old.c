@@ -51,8 +51,8 @@
 #endif
 
 #if USE_SF2_SUPPORT == TRUE
-   #if _USING_FLUIDSYNTH == TRUE
-      #include "GenSF2_FluidSynth.h"
+   #if _USING_FLUIDLITE == TRUE
+      #include "GenSF2_FluidLite.h"
       #if USE_XMF_SUPPORT == TRUE
          #include "GenXMF.h"
       #endif
@@ -433,7 +433,7 @@ static void init_playFileString(void)
 #if USE_ZMF_SUPPORT == TRUE
    strcat(playFileString, ", ZMF");
 #endif
-#if USE_XMF_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_XMF_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
    strcat(playFileString, ", XMF/MXMF");
 #endif
 #if USE_MPEG_DECODER == TRUE
@@ -1294,7 +1294,7 @@ static BAEResult PlayRMF(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED v
    return (err);
 }
 
-#if USE_XMF_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_XMF_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
 // PlayXMF() - Load an XMF/MXMF container (extracts embedded SMF and optional bank)
 static BAEResult PlayXMF(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED volume, unsigned int timeLimit, unsigned int loopCount, BAEReverbType reverbType, char *midiMuteChannels)
 {
@@ -1422,7 +1422,7 @@ static BAEResult PlayXMF(BAEMixer theMixer, char *fileName, BAE_UNSIGNED_FIXED v
    BAESong_Delete(theSong);
    return err;
 }
-#endif // USE_XMF_SUPPORT && _USING_FLUIDSYNTH
+#endif // USE_XMF_SUPPORT && _USING_FLUIDLITE
 
 // PlayLoadedSong()
 // ---------------------------------------------------------------------
@@ -1743,7 +1743,7 @@ BAEResult playFile(BAEMixer theMixer, char *parmFile, BAE_UNSIGNED_FIXED volume,
          case BAE_RMF:
             playbae_printf("Playing RMF %s\n", parmFile);
             break;
-#if USE_XMF_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE            
+#if USE_XMF_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE            
          case BAE_XMF:
             playbae_printf("Playing XMF %s\n", parmFile);
             break;
@@ -2100,7 +2100,7 @@ int main(int argc, char *argv[])
 #if USE_VORBIS_DECODER == TRUE
          || strcasecmp(ext, ".sf3") == 0 || strcasecmp(ext, ".sfo") == 0
 #endif
-#if _USING_FLUIDSYNTH == TRUE
+#if _USING_FLUIDLITE == TRUE
          || strcasecmp(ext, ".dls") == 0
 #endif                  
          ) && !bankLoaded) {

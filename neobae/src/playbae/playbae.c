@@ -48,10 +48,10 @@
 #include "baescript.h"
 #endif
 
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-#  include "GenSF2_FluidSynth.h"
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
+#  include "GenSF2_FluidLite.h"
 #endif
-#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDLITE == TRUE || USE_NATIVE_DLS == TRUE)
 #  include "GenXMF.h"
 #endif
 
@@ -86,7 +86,7 @@ static int           gVelocityCurve  = -1; /* -1 = engine default */
 static int           gVolumePct      = 100; /* raw user volume percent, for overdrive */
 static int           gEqEnabled      = 0;
 static float         gEqGains[5]     = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_NATIVE_DLS == FALSE
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE && USE_NATIVE_DLS == FALSE
     static int           gUseSF2Mode     = 1;
 #else
     static int           gUseSF2Mode     = 0;
@@ -311,7 +311,7 @@ static void init_playFileString(void)
 #if USE_ZMF_SUPPORT == TRUE
     strcat(gPlayFileString, ", ZMF");
 #endif
-#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDLITE == TRUE || USE_NATIVE_DLS == TRUE)
     strcat(gPlayFileString, ", XMF/MXMF");
 #endif
 #if USE_MPEG_DECODER == TRUE
@@ -336,18 +336,22 @@ static void init_playFileString(void)
 }
 
 static const char usageMain[] =
-#if USE_SF2_SUPPORT == TRUE
-    "USAGE:  playbae  -p  {patches.hsb/zsb/sf2/sf3/dls}\n"
-#elif USE_NATIVE_DLS == TRUE
-    "USAGE:  playbae  -p  {patches.hsb/zsb/dls}\n"
-#else
-    "USAGE:  playbae  -p  {patches.hsb/zsb}\n"
+    "USAGE:  playbae  -p  {patches.hsb"
+#if USE_ZMF_SUPPORT == TRUE
+    "/zsb"
 #endif
+#if USE_SF2_SUPPORT == TRUE
+    "/sf2"
+#endif
+#if SF3_SUPPORT > 0
+    "/sf3"
+#endif    
+#if USE_NATIVE_DLS == TRUE
+    "/dls"
+#endif
+    "}\n"
     "                 -f  {%s}\n"
 #if USE_NATIVE_DLS == TRUE
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-    "                 -fs {use FluidSynth for DLS instead of native DLS system}\n"
-#endif
     "                 -dlscompat {Enable compatibility mode to broaden support for DLS banks. Do not use if you desire authentic MobileBAE behavior. (ignored if using FluidSynth)}\n"
 #endif
     "                 -o  {output file (wav/mp3/flac/ogg/opus)}\n"
@@ -1017,7 +1021,7 @@ static BAEResult PV_PlayFile(BAEMixer mixer, const char *path,
         if (!gWriteToFile) print_rmf_info(path);
         err = BAESong_LoadRmfFromFile(song, (BAEPathName)path, 0, TRUE);
     }
-#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDSYNTH == TRUE || USE_NATIVE_DLS == TRUE)
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDLITE == TRUE || USE_NATIVE_DLS == TRUE)
     else if (ftype == BAE_XMF) {
         playbae_printf("Playing XMF: %s\n", path);
         err = BAESong_LoadXmfFromFile(song, (BAEPathName)path, TRUE);
@@ -1259,11 +1263,8 @@ static int PV_LoadBank(BAEMixer mixer, const char *path, BAEBankToken *tokenOut)
 
 #if USE_SF2_SUPPORT == TRUE
     if (ext && (stricmp(ext, ".sf2") == 0
-#if USE_VORBIS_DECODER == TRUE
+#if USE_VORBIS_DECODER == TRUE && SF3_SUPPORT > 0
         || stricmp(ext, ".sf3") == 0 || stricmp(ext, ".sfo") == 0
-#endif
-#if _USING_FLUIDSYNTH == TRUE
-        || (stricmp(ext, ".dls") == 0 && gUseSF2Mode == 1)
 #endif
     )) {
         GM_UnloadSF2Soundfont();
@@ -1286,7 +1287,7 @@ static int PV_LoadBank(BAEMixer mixer, const char *path, BAEBankToken *tokenOut)
 #endif
 
 #if USE_NATIVE_DLS == TRUE
-    if (ext && strcasecmp(ext, ".dls") == 0 && !gUseSF2Mode) {
+    if (ext && strcasecmp(ext, ".dls") == 0) {
         // Load DLS bank
 #if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_DLS == TRUE
         BAEBankToken builtin_token = 0;
@@ -1458,16 +1459,6 @@ int main(int argc, char *argv[])
 #if USE_NATIVE_DLS == TRUE
     if (PV_ParseCommands(argc, argv, "-dlscompat", 0, NULL)) gDLSCompatibilityMode = 1;
     GM_DLS_SetMobileBAEQuirks(gDLSCompatibilityMode ? false : true); // invert
-#endif
-
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_NATIVE_DLS == TRUE
-    if (PV_ParseCommands(argc, argv, "-fs", 0, NULL)) {
-        gUseSF2Mode = 1;
-        #if USE_NATIVE_DLS == TRUE        
-            gDLSCompatibilityMode = 0;
-            GM_DLS_SetMobileBAEQuirks(true);
-        #endif
-    }
 #endif
     if (PV_ParseCommands(argc, argv, "-nf", 0, NULL))   gFadeOut = 0;
     if (PV_ParseCommands(argc, argv, "-v",  1, tmpBuf)) {
@@ -1777,7 +1768,7 @@ int main(int argc, char *argv[])
     BAEMixer_Close(mixer);
     BAEMixer_Delete(mixer);
 
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
     GM_CleanupSF2();
 #endif
 

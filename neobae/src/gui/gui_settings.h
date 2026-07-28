@@ -38,10 +38,6 @@ typedef struct
     int sample_rate_hz;
     bool has_show_keyboard;
     bool show_keyboard;
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE    
-    bool has_use_fluidsynth_for_dls;
-    bool use_fluidsynth_for_dls;
-#endif
     bool has_webtv;
     bool disable_webtv_progress_bar;
     bool has_export_codec;

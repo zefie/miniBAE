@@ -2925,7 +2925,7 @@ extern "C"
     bool BAESong_IsSF2Song(BAESong song);
 #endif
 
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
     BAEResult BAESong_EnableSF2(BAESong song, BAE_BOOL enable);
 #endif
 

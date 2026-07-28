@@ -14,8 +14,8 @@
 
 
 #if USE_SF2_SUPPORT
-    #if _USING_FLUIDSYNTH
-        #include "GenSF2_FluidSynth.h"
+    #if _USING_FLUIDLITE
+        #include "GenSF2_FluidLite.h"
         #if USE_XMF_SUPPORT
             #include "GenXMF.h"
         #endif
@@ -218,7 +218,7 @@ int BAE_WASM_LoadSoundbank(const uint8_t* data, int length) {
             isSF2 = 1;
             BAE_PRINTF("[BAE] LoadSoundbank: Detected SF2/SF3 format\n");
         }
-#if _USING_FLUIDSYNTH == TRUE
+#if _USING_FLUIDLITE == TRUE
         else if (data[8] == 'D' && data[9] == 'L' && data[10] == 'S' && data[11] == ' ') {
             isDLS = 1;
             BAE_PRINTF("[BAE] LoadSoundbank: Detected DLS format\n");
@@ -227,7 +227,7 @@ int BAE_WASM_LoadSoundbank(const uint8_t* data, int length) {
     }
     
     if (isSF2
-#if _USING_FLUIDSYNTH == TRUE
+#if _USING_FLUIDLITE == TRUE
         || isDLS
 #endif
        )
@@ -605,7 +605,7 @@ int BAE_WASM_SetVolume(int volume) {
         BAESong_SetVolume(gCurrentSong, fixedVol);
     }
 
-#if _USING_FLUIDSYNTH == TRUE && USE_SF2_SUPPORT == TRUE
+#if _USING_FLUIDLITE == TRUE && USE_SF2_SUPPORT == TRUE
     // Also set FluidSynth global volume
     if (GM_GetMixerSF2Mode()) {
         // Keep WASM volume behavior aligned with current SF2 defaults:

@@ -247,8 +247,8 @@
 #include <stdint.h>
 
 #if USE_SF2_SUPPORT == TRUE
-#if _USING_FLUIDSYNTH == TRUE
-#include "GenSF2_FluidSynth.h" // FluidSynth integration
+#if _USING_FLUIDLITE == TRUE
+#include "GenSF2_FluidLite.h" // FluidSynth integration
 #endif
 #include "NeoBAE.h"
 #endif

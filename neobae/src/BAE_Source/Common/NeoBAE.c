@@ -176,8 +176,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include "bankinfo.h" // embedded bank metadata (hash -> friendly)
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-#include "GenSF2_FluidSynth.h"
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
+#include "GenSF2_FluidLite.h"
 #if USE_XMF_SUPPORT == TRUE
 #include "GenXMF.h"
 #endif
@@ -2148,28 +2148,14 @@ snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", (
 
 
     // SF2 support
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
-    char *sf2supp = NULL;
-    if (is_libinstpatch_loaded()) {
-        sf2supp = (char *)"SF2/SF3/SFO/DLS (libinstpatch) Support";
-    } else {
-        sf2supp = (char *)"SF2/SF3/SFO/DLS Support";
-    }
-#elif USE_SF2_SUPPORT == TRUE && USE_VORBIS_DECODER == TRUE
-    char *sf2supp = "SF2/SF3/SFO Support";
-#elif USE_SF2_SUPPORT == TRUE
-    char *sf2supp = "SF2 Support";
-#else
-    char *sf2supp = NULL;
-#endif
-
 #if USE_SF2_SUPPORT == TRUE
-    #if _USING_FLUIDSYNTH == TRUE
-        static char sf2supp_buf[64];
-        snprintf(sf2supp_buf, sizeof(sf2supp_buf), "%s (FluidSynth v%s)", sf2supp, fluid_version_str());
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", sf2supp);
-        first = FALSE;
+    #if USE_VORBIS_DECODER == TRUE
+      char *sf2supp = "SF2/SF3/SFO Support";
+    #else
+      char *sf2supp = "SF2 Support";
     #endif
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", sf2supp);
+    first = FALSE;
 #endif
 
     // Playlist support
@@ -2872,7 +2858,7 @@ bool BAESong_IsSF2Song(BAESong song)
 }
 #endif
 
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
 BAEResult BAESong_EnableSF2(BAESong song, BAE_BOOL enable)
 {
     if (!song || !song->pSong)
@@ -14027,7 +14013,7 @@ BAEResult BAEMixer_LoadFromFile(BAEMixer mixer, BAEPathName filePath, BAELoadRes
         {
             sr = BAESong_LoadRmfFromFile(result->data.song, filePath, 0, TRUE);
         }
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_RMI_SUPPORT == TRUE
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE && USE_RMI_SUPPORT == TRUE
         else if (ftype == BAE_RMI)
         {
             sr = BAESong_LoadRmiFromFile(result->data.song, filePath, 0, TRUE);
@@ -14280,7 +14266,7 @@ BAEResult BAEMixer_LoadFromMemory(BAEMixer mixer, void const *pData, uint32_t da
         {
             sr = BAESong_LoadRmfFromMemory(result->data.song, pData, dataSize, 0, TRUE);
         }
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDSYNTH == TRUE && USE_RMI_SUPPORT == TRUE
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE && USE_RMI_SUPPORT == TRUE
         else if (ftype == BAE_RMI)
         {
             sr = BAESong_LoadRmiFromMemory(result->data.song, pData, dataSize, TRUE, TRUE);
