@@ -933,7 +933,7 @@ class NeoBAEPlayer {
         try {
             this.updateStatus('Initializing audio engine...');
             
-            this.player = new BeatnikPlayer();
+            this.player = new NeoBAEPlayer();
 
             this.player.addEventListener('ready', () => {
                 this.updateStatus('Ready');

@@ -22,8 +22,8 @@
  *   playSong(songUrl, bankUrl) - Opens a popup player and plays the song
  * 
  * Requires:
- *   - player-class.js (BeatnikPlayer)
- *   - engine.js (BeatnikModule)
+ *   - player-class.js (NeoBAEPlayer)
+ *   - engine.js (NeoBAEModule)
  */
 
 (function() {
@@ -951,11 +951,11 @@
     // Initialize player if needed
     async function initPlayer() {
         if (!globalPlayer) {
-            if (typeof BeatnikPlayer === 'undefined') {
-                throw new Error('BeatnikPlayer not found. Please include player-class.js');
+            if (typeof NeoBAEPlayer === 'undefined') {
+                throw new Error('NeoBAEPlayer not found. Please include player-class.js');
             }
             
-            globalPlayer = await BeatnikPlayer.init({
+            globalPlayer = await NeoBAEPlayer.init({
                 sampleRate: 44100,
                 maxVoices: 64
             });

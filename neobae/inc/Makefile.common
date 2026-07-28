@@ -134,7 +134,7 @@ ifneq ($(NATIVE_DLS),1)
 endif
 
 
-# Force OGG support if VORBIS is chosen
+# Force OGG support if VORBIS, FLAC, or OPUS is chosen
 ifneq ($(OGG_SUPPORT),1)
 	ifneq ($(filter 1,$(VORBIS_ENC) $(VORBIS_DEC) $(FLAC_DEC) $(FLAC_ENC) $(OPUS_DEC) $(OPUS_ENC)),) 
 		OGG_SUPPORT := 1

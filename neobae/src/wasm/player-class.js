@@ -16,13 +16,13 @@
  */
 
 /**
- * Beatnik Web SDK
+ * NeoBAE Web SDK
  *
- * JavaScript API for playing MIDI and RMF files using the Beatnik Audio Engine
+ * JavaScript API for playing MIDI and RMF files using the NeoBAE Audio Engine
  * compiled to WebAssembly.
  */
 
-class BeatnikPlayer {
+class NeoBAEPlayer {
     constructor() {
         this._wasmModule = null;
         this._audioContext = null;
@@ -50,7 +50,7 @@ class BeatnikPlayer {
         this._volume = 1.0;
         this._tempo = 1.0;
         this._transpose = 0;
-        this._reverbType = 3; // Acoustic Lab (Beatnik default)
+        this._reverbType = 3; // Acoustic Lab (NeoBAE default)
         this._outputGain = 0.5; // Default -6dB to reduce distortion on hot mixes
 
         // Karaoke state
@@ -73,15 +73,15 @@ class BeatnikPlayer {
     }
 
     /**
-     * Initialize the Beatnik engine
+     * Initialize the NeoBAE engine
      * @param {Object} options - Configuration options
      * @param {number} [options.sampleRate=44100] - Audio sample rate
      * @param {number} [options.maxVoices=64] - Maximum polyphony
      * @param {string} [options.soundbankUrl] - URL to preload soundbank
-     * @returns {Promise<BeatnikPlayer>}
+     * @returns {Promise<NeoBAEPlayer>}
      */
     static async init(options = {}) {
-        const player = new BeatnikPlayer();
+        const player = new NeoBAEPlayer();
         await player._init(options);
         return player;
     }
@@ -95,7 +95,7 @@ class BeatnikPlayer {
 
         try {
             // Load WebAssembly module
-            console.log('Waiting for Beatnik WebAssembly module (engine.js)...');
+            console.log('Waiting for NeoBAE WebAssembly module (engine.js)...');
             this._wasmModule = await this._waitForWasm();
 
             // Create AudioContext
@@ -106,10 +106,10 @@ class BeatnikPlayer {
             // Initialize BAE in WASM
             const result = this._wasmModule._BAE_WASM_Init(sampleRate, maxVoices);
             if (result !== 0) {
-                throw new Error(`Failed to initialize Beatnik engine: error ${result}`);
+                throw new Error(`Failed to initialize NeoBAE engine: error ${result}`);
             }
 
-            console.log("Beatnik engine initialized");
+            console.log("NeoBAE engine initialized");
 
             // Set up audio processing
             await this._setupAudioWorklet();
@@ -136,20 +136,20 @@ class BeatnikPlayer {
     }
 
     async _waitForWasm() {
-        // BeatnikModule should be loaded from engine.js
+        // NeoBAEModule should be loaded from engine.js
         // Wait for it to be available (it's loaded via script tag)
         let attempts = 0;
-        while (typeof BeatnikModule === 'undefined' && attempts < 100) {
+        while (typeof NeoBAEModule === 'undefined' && attempts < 100) {
             await new Promise(r => setTimeout(r, 50));
             attempts++;
         }
 
-        if (typeof BeatnikModule === 'undefined') {
-            throw new Error('BeatnikModule not loaded. Make sure NeoBAE.js is included.');
+        if (typeof NeoBAEModule === 'undefined') {
+            throw new Error('NeoBAEModule not loaded. Make sure NeoBAE.js is included.');
         }
 
         // Initialize the Emscripten module
-        const module = await BeatnikModule();
+        const module = await NeoBAEModule();
         return module;
     }
 
@@ -401,7 +401,7 @@ class BeatnikPlayer {
      */
     async loadSoundbank(source) {
         if (!this._isInitialized) {
-            const error = new Error('BeatnikPlayer not initialized');
+            const error = new Error('NeoBAEPlayer not initialized');
             this._dispatchEvent('error', error);
             throw error;
         }
@@ -1231,32 +1231,32 @@ class BeatnikPlayer {
 }
 
 // Reverb type constants
-BeatnikPlayer.REVERB_NONE = 0;
-BeatnikPlayer.REVERB_CLOSET = 1;
-BeatnikPlayer.REVERB_GARAGE = 2;
-BeatnikPlayer.REVERB_ACOUSTIC_LAB = 3;
-BeatnikPlayer.REVERB_CAVERN = 4;
-BeatnikPlayer.REVERB_DUNGEON = 5;
-BeatnikPlayer.REVERB_SMALL_REFLECTIONS = 6;
-BeatnikPlayer.REVERB_EARLY_REFLECTIONS = 7;
-BeatnikPlayer.REVERB_BASEMENT = 8;
-BeatnikPlayer.REVERB_BANQUET_HALL = 9;
-BeatnikPlayer.REVERB_CATACOMBS = 10;
-BeatnikPlayer.REVERB_NEO_ROOM = 11;
-BeatnikPlayer.REVERB_NEO_HALL = 12;
-BeatnikPlayer.REVERB_NEO_CAVERN = 13;
-BeatnikPlayer.REVERB_NEO_DUNGEON = 14;
-BeatnikPlayer.REVERB_NEO_NOKIA = 15;
-BeatnikPlayer.REVERB_MOBILEBAE = 16;
-BeatnikPlayer.REVERB_NEO_TAP_DELAY = 17;
-BeatnikPlayer.REVERB_CUSTOM = 18;
+NeoBAEPlayer.REVERB_NONE = 0;
+NeoBAEPlayer.REVERB_CLOSET = 1;
+NeoBAEPlayer.REVERB_GARAGE = 2;
+NeoBAEPlayer.REVERB_ACOUSTIC_LAB = 3;
+NeoBAEPlayer.REVERB_CAVERN = 4;
+NeoBAEPlayer.REVERB_DUNGEON = 5;
+NeoBAEPlayer.REVERB_SMALL_REFLECTIONS = 6;
+NeoBAEPlayer.REVERB_EARLY_REFLECTIONS = 7;
+NeoBAEPlayer.REVERB_BASEMENT = 8;
+NeoBAEPlayer.REVERB_BANQUET_HALL = 9;
+NeoBAEPlayer.REVERB_CATACOMBS = 10;
+NeoBAEPlayer.REVERB_NEO_ROOM = 11;
+NeoBAEPlayer.REVERB_NEO_HALL = 12;
+NeoBAEPlayer.REVERB_NEO_CAVERN = 13;
+NeoBAEPlayer.REVERB_NEO_DUNGEON = 14;
+NeoBAEPlayer.REVERB_NEO_NOKIA = 15;
+NeoBAEPlayer.REVERB_MOBILEBAE = 16;
+NeoBAEPlayer.REVERB_NEO_TAP_DELAY = 17;
+NeoBAEPlayer.REVERB_CUSTOM = 18;
 
 // Export for module systems
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = BeatnikPlayer;
+    module.exports = NeoBAEPlayer;
 }
 
 // Also attach to window for script tag usage
 if (typeof window !== 'undefined') {
-    window.BeatnikPlayer = BeatnikPlayer;
+    window.NeoBAEPlayer = NeoBAEPlayer;
 }

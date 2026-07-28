@@ -1,19 +1,22 @@
-BAE_BUILT_IN_PATCHES	:= 1
 BAE_API			:= WASM
 WASM			:= 1
-SF2_SUPPORT		:= 0
-USE_FLUIDSYNTH  := 0
 NOAUTO			:= 1
+SF2_SUPPORT		:= 0
+USE_FLUIDLITE   := 0
 MP3_DEC			:= 1
+LZMA_SUPPORT	:= 1
+OGG_SUPPORT		:= 1
 VORBIS_DEC 		:= 1
+VORBIS_ENC		:= 0
 OPUS_DEC		:= 1
 FLAC_DEC		:= 1
 KARAOKE			:= 1
 EMBED_PATCHES 	:= 1
-XMF_SUPPORT		:= 1
-NATIVE_DLS		:= 1
+USE_BUILTIN_PATCHES_WITH_SF2 := 0
 USE_BUILTIN_PATCHES_WITH_DLS := 1
 UNROLL_MIDI		:= 1
+XMF_SUPPORT		:= 1
+NATIVE_DLS		:= 1
 ADP_SUPPORT		:= 1
 ADX_SUPPORT		:= 1
 QOA_SUPPORT		:= 1
@@ -22,10 +25,13 @@ MTHC_SUPPORT	:= 1
 ZMF_SUPPORT 	:= 1
 RMI_SUPPORT		:= 1
 J2ME_PATCH		:= 1
+FIX_SPAN_DC		:= 1
+CLASSIC_CHORUS	:= 1
+BAESCRIPT		:= 1
 
 TARGET_JS	:= engine.js
 PACK_FILENAME	:= NeoBAE_WASM.tar.gz
-EM_SYSROOT := /home/zefie/dev/emsdk/upstream/emscripten/cache/sysroot
+EM_SYSROOT := $(EMSDK)/upstream/emscripten/cache/sysroot
 
 include inc/Makefile.common
 
@@ -52,13 +58,11 @@ endif
 include inc/Makefile.versioning
 CFLAGS		+= -D_VERSION=\""$(VERSION)"\"
 
-
-
 CXXFLAGS 	:= $(CFLAGS)
 LDFLAGS		:= $(ARCH) $(OPTI) -DNDEBUG -s WASM=1 -s ALLOW_MEMORY_GROWTH=1 -s INITIAL_MEMORY=67108864 -s MAXIMUM_MEMORY=536870912 \
--s EXPORTED_FUNCTIONS="['_BAE_WASM_Init', '_BAE_WASM_LoadSoundbank', '_BAE_WASM_LoadSong', '_BAE_WASM_Play', '_BAE_WASM_Pause', '_BAE_WASM_Resume', '_BAE_WASM_Stop', '_BAE_WASM_IsPlaying', '_BAE_WASM_GetPosition', '_BAE_WASM_SetPosition', '_BAE_WASM_GetDuration', '_BAE_WASM_SetVolume', '_BAE_WASM_SetTempo', '_BAE_WASM_SetTranspose', '_BAE_WASM_MuteChannel', '_BAE_WASM_MuteTrack', '_BAE_WASM_SoloTrack', '_BAE_WASM_GetTrackMuteStatus', '_BAE_WASM_GetTrackSoloStatus', '_BAE_WASM_ProgramChange', '_BAE_WASM_ProgramBankChange', '_BAE_WASM_GetProgram', '_BAE_WASM_SetReverbType', '_BAE_WASM_GenerateAudio', '_BAE_WASM_GetAudioBuffer', '_BAE_WASM_GetBufferFrames', '_BAE_WASM_Shutdown', '_BAE_WASM_GetSongInfo', '_BAE_WASM_SetOutputGain', '_BAE_WASM_GetOutputGain', '_BAE_WASM_LoadEffect', '_BAE_WASM_PlayEffect', '_BAE_WASM_StopEffect', '_BAE_WASM_IsEffectPlaying', '_BAE_WASM_LoadSampleBank', '_BAE_WASM_TriggerSample', '_malloc', '_free']" \
--s EXPORTED_RUNTIME_METHODS="['ccall','cwrap','UTF8ToString','HEAPU8','HEAP16','FS','addFunction']" -s MODULARIZE=1 -s EXPORT_NAME='BeatnikModule' -s ASSERTIONS=0 --no-entry \
--Wno-unused-command-line-argument -L$(EM_SYSROOT)/lib
+-s EXPORTED_FUNCTIONS="['_BAE_WASM_Init', '_BAE_WASM_LoadSoundbank', '_BAE_WASM_LoadSong', '_BAE_WASM_Play', '_BAE_WASM_Pause', '_BAE_WASM_Resume', '_BAE_WASM_Stop', '_BAE_WASM_IsPlaying', '_BAE_WASM_GetPosition', '_BAE_WASM_SetPosition', '_BAE_WASM_GetDuration', '_BAE_WASM_SetVolume', '_BAE_WASM_SetTempo', '_BAE_WASM_SetTranspose', '_BAE_WASM_MuteChannel', '_BAE_WASM_MuteTrack', '_BAE_WASM_SoloTrack', '_BAE_WASM_GetTrackMuteStatus', '_BAE_WASM_GetTrackSoloStatus', '_BAE_WASM_ProgramChange', '_BAE_WASM_ProgramBankChange', '_BAE_WASM_GetProgram', '_BAE_WASM_SetReverbType', '_BAE_WASM_GenerateAudio', '_BAE_WASM_GetAudioBuffer', '_BAE_WASM_GetBufferFrames', '_BAE_WASM_Shutdown', '_BAE_WASM_GetSongInfo', '_BAE_WASM_SetOutputGain', '_BAE_WASM_GetOutputGain', '_BAE_WASM_LoadEffect', '_BAE_WASM_PlayEffect', '_BAE_WASM_StopEffect', '_BAE_WASM_IsEffectPlaying', '_BAE_WASM_LoadSampleBank', '_BAE_WASM_TriggerSample', '_BAE_WASM_SetLyricCallback', '_BAE_WASM_ResetLyricState', '_malloc', '_free']" \
+-s EXPORTED_RUNTIME_METHODS="['ccall','cwrap','UTF8ToString','HEAPU8','HEAP16','FS','addFunction']" -s MODULARIZE=1 -s EXPORT_NAME='NeoBAEModule' -s ASSERTIONS=0 --no-entry \
+-s ALLOW_TABLE_GROWTH=1 -Wno-unused-command-line-argument
 
 ifeq ($(TESTING),1)
     LDFLAGS += --pre-js src/wasm/testing.js # search for /testing/engine.wasm on server
@@ -68,8 +72,7 @@ else
 	endif
 endif
 
-LIBS	= 	-lpthread $(BAE_LIBS)
-# -lvorbis -logg -lvorbisenc -lvorbisfile -lFLAC -lopus -lopusfile -lsndfile
+LIBS	= -L$(EM_SYSROOT)/lib $(BAE_LIBS)
 
 all: ${TARGET_JS} extra-files
 
@@ -81,7 +84,7 @@ extra-files:
 	@cp src/wasm/player-class.js $(TARGET_OUT)
 	@cp src/wasm/player.html $(TARGET_OUT)
 	@cp src/wasm/player.css $(TARGET_OUT)
-	@cp src/icons/neobae.ico $(TARGET_OUT)/favicon.ico
+	@cp icons/neobae.ico $(TARGET_OUT)/favicon.ico
 
 
 	
