@@ -183,18 +183,29 @@ static int32_t exponent_table_scale(int32_t value, int32_t scale) {
 }
 
 static int32_t dls_exp2_q16(int32_t x) {
-    int64_t cents = (int64_t)x * 1200;
-    if (cents > INT32_MAX) return INT32_MAX;
-    if (cents < INT32_MIN) return 1;
-    return dls_pitch_cents_to_ratio_q16((int32_t)cents);
+    if (x < -0x100000) return 1;
+    int32_t value = x;
+    uint32_t scale = 0x1000000u;
+    while (value >= 0x10000) { value -= 0x10000; scale <<= 1; }
+    while (value < 0 && scale != 0) { value += 0x10000; scale >>= 1; }
+    int32_t index = value >> 7;
+    int32_t rem = (int32_t)((uint32_t)value & 0x7F);
+    int32_t tableValue = EXP2_INTERP_TABLE[index]
+        + ((int32_t)(((int64_t)(EXP2_INTERP_TABLE[index + 1] - EXP2_INTERP_TABLE[index]) * rem) >> 7));
+    return exponent_table_scale(tableValue, (int32_t)scale);
 }
 
 static int32_t dls_exp10_q16(int32_t x) {
-    /* log2(10) * 1200 = 3986.3137 cents per decade. */
-    int64_t cents = (int64_t)x * 3986;
-    if (cents > INT32_MAX) return INT32_MAX;
-    if (cents < INT32_MIN) return 1;
-    return dls_pitch_cents_to_ratio_q16((int32_t)cents);
+    if (x < -315652) return 1;
+    int32_t value = x;
+    uint32_t scale = 0x1000000u;
+    while (value >= 0x10000) { value -= 0x10000; scale *= 10u; }
+    while (value < 0 && scale != 0) { value += 0x10000; scale /= 10u; }
+    int32_t index = value >> 7;
+    int32_t rem = (int32_t)((uint32_t)value & 0x7F);
+    int32_t tableValue = EXP10_INTERP_TABLE[index]
+        + ((int32_t)(((int64_t)(EXP10_INTERP_TABLE[index + 1] - EXP10_INTERP_TABLE[index]) * rem) >> 7));
+    return exponent_table_scale(tableValue, (int32_t)scale);
 }
 
 static int32_t dls_pan_scale_q16(int32_t pan, bool quirks) {
@@ -301,11 +312,18 @@ static int32_t dls_lfo_next(DLS_Lfo* lfo, int32_t frames) {
     }
     int32_t folded = lfo->phase;
     if ((uint32_t)lfo->phase >= (uint32_t)(lfo->period >> 1)) {
-        folded = lfo->period - lfo->phase;
+        /* RetroDLS folding: 32-bit overflow matches the original
+           MobileBAE Plus sub_11F59B0 ARM multiply:
+           folded = period + (0x03FFFFFF * phase)  mod 2^32 */
+        folded = (int32_t)((uint32_t)lfo->period + 0x03FFFFFFu * (uint32_t)lfo->phase);
     }
-    int64_t num = (int64_t)folded << 6;
-    int32_t den = lfo->period >> 3;
-    lfo->output = (int32_t)((num / (den > 0 ? den : 1)) << 8);
+    /* RetroDLS uses Integer.divideUnsigned on the 32-bit wrapped
+       product, so shift the unsigned folded value and divide. */
+    {
+        uint32_t shifted = (uint32_t)(folded << 6);
+        uint32_t den = (uint32_t)(lfo->period >> 3);
+        lfo->output = (int32_t)(((uint64_t)shifted / (den > 0 ? den : 1)) << 8);
+    }
     lfo->phase += 10000;
     if ((uint32_t)lfo->phase >= (uint32_t)lfo->period) {
         lfo->phase -= lfo->period;
@@ -327,7 +345,7 @@ enum {
     DLS_ENV_SHUTDOWN = 7
 };
 
-#define DLS_FORCED_FADE_MICROS 20000
+#define DLS_FORCED_FADE_MICROS 15000
 
 static int32_t dls_env_eg2_ramp_step(int32_t elapsedMicros, int32_t durationMicros)
 {
@@ -2773,7 +2791,8 @@ static int32_t dls_select_voice_index_for_note_on(DLS_Synth* synth, int32_t newC
     if (idx >= 0) return idx;
 
     idx = dls_find_active_voice_by_priority(synth, newChannel);
-    return idx;
+    if (!g_use_mobilebae_quirks) return idx;
+    return idx >= 0 ? idx : 0;
 }
 
 static int32_t dls_channel_coarse_semitones(const DLS_ChannelState* ch) {
