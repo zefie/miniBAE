@@ -42,17 +42,21 @@
 #include <BAE_API.h>
 #include <GenSnd.h>
 #include "bankinfo.h"
-#include "GenDLS_MobileBAE.h"
+
 
 #if SUPPORT_BAESCRIPT == TRUE
-#include "baescript.h"
+    #include "baescript.h"
+#endif
+
+#if USE_NATIVE_DLS == TRUE
+    #include "GenDLS_MobileBAE.h"
 #endif
 
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
-#  include "GenSF2_FluidLite.h"
+    #include "GenSF2_FluidLite.h"
 #endif
-#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDLITE == TRUE || USE_NATIVE_DLS == TRUE)
-#  include "GenXMF.h"
+#if USE_XMF_SUPPORT == TRUE && USE_NATIVE_DLS == TRUE
+    #include "GenXMF.h"
 #endif
 
 #if USE_NATIVE_DLS == TRUE
@@ -86,11 +90,6 @@ static int           gVelocityCurve  = -1; /* -1 = engine default */
 static int           gVolumePct      = 100; /* raw user volume percent, for overdrive */
 static int           gEqEnabled      = 0;
 static float         gEqGains[5]     = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE && USE_NATIVE_DLS == FALSE
-    static int           gUseSF2Mode     = 1;
-#else
-    static int           gUseSF2Mode     = 0;
-#endif
 
 /* Position display: update every N idle calls (~15 ms each) */
 static int           gPosCounter  = 0;
@@ -306,16 +305,19 @@ static char gPlayFileString[512];
 
 static void init_playFileString(void)
 {
-    strcpy(gPlayFileString, "Play a file (MIDI, RMF, WAV, AIFF");
-    strcat(gPlayFileString, ", iMelody/RTX/RNG");
+    strcpy(gPlayFileString, "Play a file (MIDI, RMF");
 #if USE_ZMF_SUPPORT == TRUE
     strcat(gPlayFileString, ", ZMF");
 #endif
 #if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDLITE == TRUE || USE_NATIVE_DLS == TRUE)
-    strcat(gPlayFileString, ", XMF/MXMF");
+    strcat(gPlayFileString, ", XMF, MXMF");
 #endif
+#if USE_RETRO_RINGTONE_SUPPORT == TRUE
+    strcat(gPlayFileString, ", iMelody, RTX, RNG (v1)");
+#endif
+    strcat(gPlayFileString, ", WAV, AIFF, AU");
 #if USE_MPEG_DECODER == TRUE
-    strcat(gPlayFileString, ", MP2/MP3");
+    strcat(gPlayFileString, ", MP2, MP3");
 #endif
 #if USE_FLAC_DECODER == TRUE
     strcat(gPlayFileString, ", FLAC");
@@ -352,9 +354,22 @@ static const char usageMain[] =
     "}\n"
     "                 -f  {%s}\n"
 #if USE_NATIVE_DLS == TRUE
-    "                 -dlscompat {Enable compatibility mode to broaden support for DLS banks. Do not use if you desire authentic MobileBAE behavior. (ignored if using FluidSynth)}\n"
+    "                 -dlscompat {Enable compatibility mode to broaden support for DLS banks. Do not use if you desire authentic MobileBAE behavior.}\n"
 #endif
-    "                 -o  {output file (wav/mp3/flac/ogg/opus)}\n"
+    "                 -o  {output file (wav"
+#if USE_MPEG_ENCODER == TRUE
+    "/mp3"
+#endif
+#if USE_FLAC_ENCODER == TRUE
+    "/flac"
+#endif
+#if USE_VORBIS_ENCODER == TRUE
+    "/ogg"
+#endif
+#if USE_OPUS_ENCODER == TRUE
+    "/opus"
+#endif
+    ")}\n"
 #if SUPPORT_KARAOKE == TRUE
     "                 -k  {enable karaoke lyric display}\n"
 #endif
@@ -363,10 +378,28 @@ static const char usageMain[] =
     "                 -vc {velocity curve 0-5 (default: engine (0), none for SF2/DLS)}\n"
     "                 -t  {max duration in seconds (0 = no limit)}\n"
     "                 -mc {MIDI channels to mute, 1-16, comma-separated}\n"
-    "                 -rv {reverb type 0-18 (default: 7)}\n"
+    "                 -rv {reverb type 0-"
+#if USE_NEO_EFFECTS == TRUE
+    "18"
+#else
+    "11"
+#endif
+    " (default: 7)}\n"
     "                 -nf {disable fade-out on stop}\n"
     "                 -q  {quiet mode}\n"
-    "                 -b  {MP3/Vorbis/Opus export bitrate kbps (default: 128)}\n"
+#if USE_MPEG_ENCODER == TRUE || USE_VORBIS_ENCODER == TRUE || USE_OPUS_ENCODER == TRUE
+    "                 -b  {"
+#if USE_MPEG_ENCODER == TRUE
+    "MP3/"
+#endif
+#if USE_VORBIS_ENCODER == TRUE
+    "Vorbis/"
+#endif
+#if USE_OPUS_ENCODER == TRUE
+    "Opus"
+#endif
+    " export bitrate kbps (default: 128)}\n"
+#endif
     "                 -h  {this help}\n"
     "                 -eq {enable 5-band EQ (flat)}\n"
     "                 -eqg {custom EQ gains g1,g2,g3,g4,g5 (e.g. 1.2,0,0,-2.5,1.0)}\n"
@@ -409,6 +442,7 @@ static const char reverbList[] =
     "   9   Basement (variable)\n"
     "   10  Banquet hall (variable)\n"
     "   11  Catacombs (variable)\n"
+#if USE_NEO_EFFECTS == TRUE
     "   12  Neo Room (Neo reverb)\n"
     "   13  Neo Hall (Neo reverb)\n"
     "   14  Neo Cavern (Neo reverb)\n"
@@ -416,6 +450,7 @@ static const char reverbList[] =
     "   16  Neo Nokia (Neo reverb)\n"
     "   17  MobileBAE\n"
     "   18  Neo Tap Delay (Neo reverb)\n";
+#endif
 
 static const char velocityList[] =
     "Valid Velocity Curves (HSB/ZSB Only) (-vc):\n"
