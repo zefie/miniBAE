@@ -1457,7 +1457,7 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
         GM_DLS_SetMobileBAEQuirks(g_use_dls_compatiblity_mode ? false : true); // inverted
     }
     {
-        Rect compatDlsFullRect = {leftX, dlg.y + 166, 280, 24};
+        Rect compatDlsFullRect = {leftX, dlg.y + 144, 280, 24};
         if (point_in(mx, my, compatDlsFullRect))
         {
             const char *tooltip_text = "Broadens DLS compatibility. Disable for authentic MobileBAE behavior.";
