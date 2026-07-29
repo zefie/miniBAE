@@ -47,7 +47,6 @@ If you do not use git submodules, place third-party sources in these folders:
 - [RtMidi](https://github.com/thestk/rtmidi) -> `neobae/src/thirdparty/rtmidi`
 - [libg722](https://github.com/sippy/libg722) -> `neobae/src/thirdparty/libg722`
 - [libxmp](https://github.com/libxmp/libxmp) -> `neobae/src/thirdparty/libxmp`
-- Linux only: modified [FluidSynth](https://github.com/zefie/fluidsynth) -> `neobae/src/thirdparty/fluidsynth`
 
 Notes:
 
@@ -117,18 +116,6 @@ make -f Makefile.gui -j$(nproc)
 ```
 
 Output executable is in `neobae/bin/`.
-
-### Optional but recommended: build FluidSynth from source
-
-Default feature sets expect FluidSynth support (SF2/SF3/SFO and limited DLS). On Linux, using zefie's modified FluidSynth tree gives best compatibility.
-
-```bash
-cd neobae/src/thirdparty/fluidsynth
-mkdir -p build && cd build
-cmake ..
-make -j$(nproc)
-sudo make install
-```
 
 ### playbae (gcc)
 
@@ -230,7 +217,7 @@ Notes:
 
 - The WebAssembly build and old `musicObject` JS are separate systems.
 - MPEG decode support is enabled in the WebAssembly build.
-- SF2 support is supported with `Makefile.emcc-full`, but requires you to compile the following with emscripten manually: lame, ogg, opus, opusfile, vorbis, vorbisfile, flac, libsndfile, and fluidsynth
+- SF2 support is supported with `Makefile.emcc-full`, but requires you to compile the following with emscripten manually: lame, ogg, opus, opusfile, vorbis, vorbisfile, and flac
 
 ## macOS
 
@@ -271,7 +258,7 @@ make NOAUTO=1 ...
 ### Synth/audio backend flags
 
 - `SF2_SUPPORT=1`: enable SoundFont support
-- `USE_FLUIDSYNTH=1`: use FluidSynth backend
+- `USE_FLUIDLITE=1`: use FluidLite backend
 - `USE_SDL2=1` or `USE_SDL3=1`: select SDL backend (mutually exclusive)
 
 ### Debug/build behavior flags
@@ -290,8 +277,8 @@ make NOAUTO=1 ...
 
 ### Important flag relationships
 
-- `SF2_SUPPORT=1` forces `USE_FLUIDSYNTH=1`.
-- `XMF_SUPPORT` requires FluidSynth path (`USE_FLUIDSYNTH=1`).
+- `SF2_SUPPORT=1` forces `USE_FLUIDLITE=1`.
+- `XMF_SUPPORT` requires Native DLS path (`USE_NATIVE_DLS=1`).
 - Any Vorbis/FLAC/Opus enablement will force `OGG_SUPPORT=1`.
 - `ZMF_SUPPORT=1` pulls in modern codec paths, as well as lzma.
 - On MinGW CLI builds, use `USE_SDL3=1` to switch from DirectSound to SDL3.
@@ -310,10 +297,6 @@ make -j$(nproc)
 ### zefidi crashes when opening MIDI device list on WSL
 
 If `/dev/snd/seq` is missing, ALSA MIDI support can crash when opening MIDI device dropdowns. Build without `ENABLE_MIDI_HW=1` on those systems.
-
-### FluidSynth logs `Not a SoundFont file` while loading DLS
-
-That message is expected in this project's DLS path. Treat later errors as the real failure signal.
 
 ### I just want the original miniBAE without all this extra junk!
 

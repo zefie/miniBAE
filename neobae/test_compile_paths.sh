@@ -35,11 +35,11 @@ runtest() {
 for f in Makefile.gui Makefile Makefile.clang; do
     # basic
     runtest make -f ${f}
-    # XMF + SF2 (FluidSynth)
+    # XMF + SF2 (FluidLite)
     runtest make -f ${f} SF2_SUPPORT=1 XMF_SUPPORT=1
-    # XMF + Native DLS (No FluidSynth)
-    runtest make -f ${f} SF2_SUPPORT=1 NATIVE_DLS=1
-    # XMF + Native DLS + FluidSynth
+    # XMF + Native DLS (No FluidLite)
+    runtest make -f ${f} XMF_SUPPORT=1 NATIVE_DLS=1
+    # XMF + Native DLS + FluidLite
     runtest make -f ${f} SF2_SUPPORT=1 NATIVE_DLS=1 XMF_SUPPORT=1
     # mp3dec
     runtest make -f ${f} MP3_DEC=1
@@ -65,7 +65,7 @@ for f in Makefile.gui Makefile Makefile.clang; do
     runtest make -f ${f} VORBIS_ENC=1
     # vorbis full
     runtest make -f ${f} VORBIS_ENC=1 VORBIS_DEC=1
-    # SF2 Support (via FluidSynth)
+    # SF2 Support (via FluidLite)
     runtest make -f ${f} SF2_SUPPORT=1
     # Creation API
     runtest make -f ${f} CREATION_API=1
@@ -75,7 +75,7 @@ for f in Makefile.gui Makefile Makefile.clang; do
     runtest make -f ${f} RMI_SUPPORT=1
     # RMI Support (with Native DLS)
     runtest make -f ${f} RMI_SUPPORT=1 NATIVE_DLS=1
-    # RMI Support (with FluidSynth)
+    # RMI Support (with FluidLite)
     runtest make -f ${f} RMI_SUPPORT=1 SF2_SUPPORT=1
     # Retro Ringtone Support
     runtest make -f ${f} RETRO_RINGTONE_SUPPORT=1
@@ -85,10 +85,10 @@ for f in Makefile.gui Makefile Makefile.clang; do
         # playlist support only
         runtest make -f ${f} PLAYLIST=1
         # full build (gui)
-        runtest make -f ${f} ENABLE_MIDI_HW=1 MP3_ENC=1 MP3_DEC=1 FLAC_ENC=1 FLAC_DEC=1 KARAOKE=1 VORBIS_ENC=1 VORBIS_DEC=1 PLAYLIST=1 SF2_SUPPORT=1 OPUS_DEC=1 ZMF_SUPPORT=1 RMI_SUPPORT=1 RETRO_RINGTONE_SUPPORT=1
+        runtest make -f ${f} NOAUTO=0
     else
         # full build (cli)
-        runtest make -f ${f} MP3_ENC=1 MP3_DEC=1 FLAC_ENC=1 FLAC_DEC=1 KARAOKE=1 VORBIS_ENC=1 VORBIS_DEC=1 SF2_SUPPORT=1 OPUS_DEC=1
+        runtest make -f ${f} NOAUTO=0
         # SDL3
         runtest make -f ${f} USE_SDL3=1
         # SDL3 MP3_ENC=1

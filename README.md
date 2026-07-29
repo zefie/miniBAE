@@ -10,7 +10,7 @@ The project can be used as an embeddable audio engine, a command-line player and
 - Multi-format playback and conversion across classic Beatnik formats, standard audio formats, retro ringtone formats, and modern codecs.
 - Cross-platform targets for Linux, Windows, Android, WebAssembly, and macOS (via [Homebrew](https://brew.sh)).
 - Multiple frontends ranging from the `playbae` CLI to the `zefidi` GUI and `nbstudio` editor.
-- Modular build flags for trimming features or enabling optional integrations such as FluidSynth-backed SoundFont and DLS support.
+- Modular build flags for trimming features or enabling optional integrations such as FluidLite-backed SoundFont support or the Native DLS engine.
 - [BAEScript](neobae/src/script/BAEScript_ReadMe.md) for manipulating songs without modification to the source file.
 - Designed with a high emphasis on preserving retro compatibility while adding new features.
 
@@ -20,7 +20,7 @@ The project can be used as an embeddable audio engine, a command-line player and
 
 - MIDI: `.mid`, `.midi`
 - Karaoke MIDI: `.kar` with lyrics processing
-- RMI: `.rmi` including RMI files with embedded DLS when built with Native DLS, and SF2 support when built with FluidSynth support
+- RMI: `.rmi` including RMI files with embedded DLS when built with Native DLS, and SF2 support when built with FluidLite support
 - RMF: `.rmf` for classic Beatnik Rich Music Format content
 - ZMF: `.zmf` for RMF-style content with modern feature and codec support
 - XMF and MXMF: `.xmf`, `.mxmf` mobileBAE formats, with full DLS support when built with Native DLS support
@@ -47,7 +47,7 @@ The project can be used as an embeddable audio engine, a command-line player and
 ### Banks and instrument formats
 
 - NeoBAE banks: `.hsb`, `.zsb`
-- SoundFont: `.sf2`, `.sf3`, `.sfo` when built with FluidSynth support
+- SoundFont: `.sf2`, `.sf3`, `.sfo` when built with FluidLite support
 - DLS: `.dls` when built with Native DLS support
 
 ## Applications

@@ -55,7 +55,7 @@ All feature flags default to `OFF` (feature enabled). Set to `ON` to disable.
 | `BAE_DISABLE_FIX_SPAN_DC` | Disable Stereo Pan DC fix. |
 | `BAE_DISABLE_FLAC_DECODER` | Disable FLAC decoder support. |
 | `BAE_DISABLE_FLAC_ENCODER` | Disable FLAC encoder support. |
-| `BAE_DISABLE_FLUIDSYNTH` | Disable FluidSynth integration. Also disables SF2 support if it was auto-enabled. |
+| `BAE_DISABLE_FLUIDLITE` | Disable FluidLite integration. Also disables SF2 support if it was auto-enabled. |
 | `BAE_DISABLE_J2ME_PATCH` | Disable J2ME percussion bank patch (maps bank 120 for percussion intent). |
 | `BAE_DISABLE_KARAOKE` | Disable karaoke support. |
 | `BAE_DISABLE_LZMA` | Disable LZMA compression support. Also disables ZMF support. |
@@ -84,8 +84,7 @@ All feature flags default to `OFF` (feature enabled). Set to `ON` to disable.
 Several features are automatically disabled if their required dependencies are not available:
 
 - **ZMF** requires: LZMA, Vorbis decoder, Opus decoder, FLAC decoder, QOA, Classic Chorus, Fix Span DC.
-- **FluidSynth** is auto-disabled if the library/headers are not found via pkg-config.
-- **SF2** requires FluidSynth. If FluidSynth is disabled or unavailable, SF2 is disabled.
+- **SF2** requires FluidLite. If FluidLite is disabled, SF2 is disabled.
 - **XMF** requires Native DLS. If Native DLS is disabled, XMF is disabled.
 - **MP3 encoder** requires bundled LAME sources (`neobae/src/thirdparty/lame-3.100-slim/`).
 - **FLAC encoder/decoder** requires bundled libFLAC sources (`neobae/src/thirdparty/flac/`).
@@ -116,7 +115,6 @@ Embedding is only effective when:
 | `BUILD_CLITOOLS` | `ON` | Build CLI tools: `songtool`, `rmf2mid`, `mid2rmf`, `mid2rmi`, `sf2-hsb`, `mod2rmf`, `instdump`, `bankrecomp`. |
 | `BUILD_NBSTUDIO` | `ON` | Build NeoBAE Studio (RMF/ZMF editor) when wxWidgets is found. |
 | `BUILD_NBEDITOR` | `ON` | Build NeoBAE Editor (Dear ImGui + SDL3). Requires SDL3. |
-| `BUILD_RAYLIB_PLAYER` | `ON` | Build the raylib-based mini GUI player. Requires raylib. |
 
 ## Internal Compatibility Variables
 
@@ -140,7 +138,7 @@ cmake -B build \
   -DBAE_DISABLE_OPUS_ENCODER=ON \
   -DBAE_DISABLE_ZMF_SUPPORT=ON \
   -DBAE_DISABLE_SF2_SUPPORT=ON \
-  -DBAE_DISABLE_FLUIDSYNTH=ON \
+  -DBAE_DISABLE_FLUIDLITE=ON \
   -DBAE_DISABLE_PLAYLIST=ON \
   -DBAE_DISABLE_BAESCRIPT=ON \
   -DBAE_DISABLE_ADP_SUPPORT=ON \
@@ -149,8 +147,7 @@ cmake -B build \
   -DBAE_DISABLE_RMI_SUPPORT=ON \
   -DBUILD_CLITOOLS=OFF \
   -DBUILD_NBSTUDIO=OFF \
-  -DBUILD_NBEDITOR=OFF \
-  -DBUILD_RAYLIB_PLAYER=OFF
+  -DBUILD_NBEDITOR=OFF
 ```
 
 SDL2 GUI build with codecs:
@@ -166,5 +163,12 @@ Static MinGW build:
 cmake -B build \
   -G "MinGW Makefiles" \
   -DNEOBAE_STATIC=ON \
+  -DBAE_PLATFORM=WinOS
+```
+
+Visual Studio Build (with CMake)
+```bash
+cmake -B build \
+  -G "Visual Studio 18 2026" \
   -DBAE_PLATFORM=WinOS
 ```
