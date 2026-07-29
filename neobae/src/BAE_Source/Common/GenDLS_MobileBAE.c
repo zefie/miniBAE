@@ -2005,6 +2005,21 @@ static DLS_Instrument* DLS_Bank_FindSelectorOrAlias(DLS_Bank* bank, uint32_t sel
     return DLS_Bank_FindAlias(bank, selector);
 }
 
+bool GM_DLS_XmfOverlayHasBankProgram(struct GM_Mixer* pMixer, int32_t bankMsb, int32_t bankLsb, int32_t program)
+{
+    if (!pMixer || !pMixer->pDLSSynth) {
+        return false;
+    }
+    DLS_Synth* synth = (DLS_Synth*)pMixer->pDLSSynth;
+    DLS_Bank* bank = synth->banks[1];
+    if (!bank) {
+        return false;
+    }
+    uint32_t selector = DLS_Selector(bankMsb & 0x7F, bankLsb & 0x7F, program & 0x7F);
+    return DLS_Bank_FindSelectorOrAlias(bank, selector) != NULL;
+}
+
+
 static DLS_Instrument* DLS_Bank_FindMidiInstrument(DLS_Bank* bank, int32_t bankId, int32_t program,
                                                    bool allowDrumProgramFallback) {
     int32_t bankMsb = (bankId >> 7) & 0x7F;
