@@ -3299,7 +3299,7 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
             }
         }
         
-        static int DLS_GAIN_FACTOR = 5;
+        static int DLS_GAIN_FACTOR = 6;
         
         // Dry mix = 50% (32/64). Keep wet paths proportionally below dry for headroom.
         int64_t mixedLeft = (int64_t)pBuffer[f * 2] + ((32 * leftOut) >> DLS_GAIN_FACTOR);
