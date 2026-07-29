@@ -50,7 +50,9 @@ static void fluid_voice_effects (fluid_voice_t *voice, int count,
 				        fluid_real_t* dsp_left_buf,
 				        fluid_real_t* dsp_right_buf,
 				        fluid_real_t* dsp_reverb_buf,
-				        fluid_real_t* dsp_chorus_buf);
+				        fluid_real_t* dsp_chorus_buf,
+				        double channel_amp_sum_sq[16][2],
+				        int channel_voice_count[16]);
 /*
  * new_fluid_voice
  */
@@ -250,7 +252,9 @@ fluid_real_t fluid_voice_gen_value(fluid_voice_t* voice, int num)
 int
 fluid_voice_write(fluid_voice_t* voice,
 		 fluid_real_t* dsp_left_buf, fluid_real_t* dsp_right_buf,
-		 fluid_real_t* dsp_reverb_buf, fluid_real_t* dsp_chorus_buf)
+		 fluid_real_t* dsp_reverb_buf, fluid_real_t* dsp_chorus_buf,
+		 double channel_amp_sum_sq[16][2],
+		 int channel_voice_count[16])
 {
   fluid_real_t fres;
   fluid_real_t target_amp;	/* target amplitude */
@@ -621,7 +625,8 @@ fluid_voice_write(fluid_voice_t* voice,
 
   if (count > 0)
     fluid_voice_effects (voice, count, dsp_left_buf, dsp_right_buf,
-			 dsp_reverb_buf, dsp_chorus_buf);
+			 dsp_reverb_buf, dsp_chorus_buf,
+			 channel_amp_sum_sq, channel_voice_count);
 
   /* turn off voice if short count (sample ended and not looping) */
   if (count < FLUID_BUFSIZE)
@@ -668,7 +673,9 @@ fluid_voice_write(fluid_voice_t* voice,
 static void
 fluid_voice_effects (fluid_voice_t *voice, int count,
 		     fluid_real_t* dsp_left_buf, fluid_real_t* dsp_right_buf,
-		     fluid_real_t* dsp_reverb_buf, fluid_real_t* dsp_chorus_buf)
+		     fluid_real_t* dsp_reverb_buf, fluid_real_t* dsp_chorus_buf,
+		     double channel_amp_sum_sq[16][2],
+		     int channel_voice_count[16])
 {
   /* IIR filter sample history */
   fluid_real_t dsp_hist1 = voice->hist1;
@@ -783,6 +790,24 @@ fluid_voice_effects (fluid_voice_t *voice, int count,
   voice->b02 = dsp_b02;
   voice->b1 = dsp_b1;
   voice->filter_coeff_incr_count = dsp_filter_coeff_incr_count;
+
+  /* Accumulate per-channel amplitude from dsp_buf samples */
+  if (channel_amp_sum_sq && channel_voice_count) {
+    int chan = voice->chan;
+    if (chan >= 0 && chan < 16) {
+      double sqL = 0.0, sqR = 0.0;
+      for (int si = 0; si < count; si++) {
+        double s = (double)dsp_buf[si];
+        double vL = s * (double)voice->amp_left;
+        double vR = s * (double)voice->amp_right;
+        sqL += vL * vL;
+        sqR += vR * vR;
+      }
+      channel_amp_sum_sq[chan][0] += sqL / (double)count;
+      channel_amp_sum_sq[chan][1] += sqR / (double)count;
+      channel_voice_count[chan]++;
+    }
+  }
 }
 
 /*

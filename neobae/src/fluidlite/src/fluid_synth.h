@@ -147,6 +147,10 @@ struct _fluid_synth_t
 
   /** fromkey for portamento */
   int fromkey_portamento;
+
+  /** Per-channel amplitude tracking (sum of squared samples) */
+  double channel_amp_sum_sq[16][2];
+  int channel_voice_count[16];
 };
 
 /** returns 1 if the value has been set, 0 otherwise */

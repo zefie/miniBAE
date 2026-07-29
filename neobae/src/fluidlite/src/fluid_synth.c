@@ -2368,6 +2368,13 @@ fluid_synth_one_block(fluid_synth_t* synth, int do_not_mix_fx_to_out)
 
 /*   fluid_mutex_lock(synth->busy); /\* Here comes the audio thread. Lock the synth. *\/ */
 
+  /* reset per-channel amplitude accumulators */
+  for (i = 0; i < 16; i++) {
+    synth->channel_amp_sum_sq[i][0] = 0.0;
+    synth->channel_amp_sum_sq[i][1] = 0.0;
+    synth->channel_voice_count[i] = 0;
+  }
+
   /* clean the audio buffers */
   for (i = 0; i < synth->nbuf; i++) {
     FLUID_MEMSET(synth->left_buf[i], 0, byte_size);
@@ -2408,7 +2415,8 @@ fluid_synth_one_block(fluid_synth_t* synth, int do_not_mix_fx_to_out)
       left_buf = synth->left_buf[auchan];
       right_buf = synth->right_buf[auchan];
 
-      fluid_voice_write(voice, left_buf, right_buf, reverb_buf, chorus_buf);
+      fluid_voice_write(voice, left_buf, right_buf, reverb_buf, chorus_buf,
+                        synth->channel_amp_sum_sq, synth->channel_voice_count);
     }
   }
 
@@ -3072,6 +3080,38 @@ fluid_synth_get_voicelist(fluid_synth_t* synth, fluid_voice_t* buf[], int bufsiz
     return;
   }
   buf[count++] = NULL;
+}
+
+void fluid_synth_get_channel_amplitudes(fluid_synth_t* synth, float amplitudes[16][2])
+{
+  int i;
+  double maxVal = 1e-12;
+  
+  /* Compute RMS per channel from tracking data */
+  for (i = 0; i < 16; i++) {
+    if (synth->channel_voice_count[i] > 0) {
+      double c = (double)synth->channel_voice_count[i];
+      amplitudes[i][0] = (float)sqrt(synth->channel_amp_sum_sq[i][0] / c);
+      amplitudes[i][1] = (float)sqrt(synth->channel_amp_sum_sq[i][1] / c);
+      if ((double)amplitudes[i][0] > maxVal) maxVal = amplitudes[i][0];
+      if ((double)amplitudes[i][1] > maxVal) maxVal = amplitudes[i][1];
+    } else {
+      amplitudes[i][0] = 0.0f;
+      amplitudes[i][1] = 0.0f;
+    }
+  }
+  
+  /* Normalize to the loudest channel */
+  if (maxVal > 1e-12) {
+    for (i = 0; i < 16; i++) {
+      amplitudes[i][0] = (float)((double)amplitudes[i][0] / maxVal);
+      amplitudes[i][1] = (float)((double)amplitudes[i][1] / maxVal);
+      if (amplitudes[i][0] < 0.0f) amplitudes[i][0] = 0.0f;
+      else if (amplitudes[i][0] > 1.0f) amplitudes[i][0] = 1.0f;
+      if (amplitudes[i][1] < 0.0f) amplitudes[i][1] = 0.0f;
+      else if (amplitudes[i][1] > 1.0f) amplitudes[i][1] = 1.0f;
+    }
+  }
 }
 
 /* Purpose:

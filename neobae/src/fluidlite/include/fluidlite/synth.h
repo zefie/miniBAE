@@ -731,6 +731,9 @@ FLUIDSYNTH_API void fluid_synth_start_voice(fluid_synth_t* synth, fluid_voice_t*
 FLUIDSYNTH_API void fluid_synth_get_voicelist(fluid_synth_t* synth, 
 					    fluid_voice_t* buf[], int bufsize, int ID);
 
+  /** Get per-channel RMS amplitude estimates (0..1 scale, 16 channels, L/R). */
+FLUIDSYNTH_API void fluid_synth_get_channel_amplitudes(fluid_synth_t* synth, float amplitudes[16][2]);
+
 
 /* midi router disabled */
 #if 0
