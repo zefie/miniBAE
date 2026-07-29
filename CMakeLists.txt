@@ -1568,17 +1568,25 @@ endif()
 if(BUILD_PLAYBAE)
   if(BAE_PLAYBAE_PLATFORM_AVAILABLE)
     add_executable(playbae neobae/src/playbae/playbae.c)
-    target_link_libraries(playbae PRIVATE neobae)
     if(BAE_ENABLE_FLUIDLITE)
       target_include_directories(playbae PRIVATE 
         ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/fluidlite/include
         ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/fluidlite/src
         ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/fluidlite/src/watcom
-      )  
+      )
     endif()
+    target_link_libraries(playbae PRIVATE neobae)
   else()
     message(STATUS "Skipping BUILD_PLAYBAE because BAE_PLATFORM is Dummy or Ansi.")
   endif()
+endif()
+
+if(BAE_ENABLE_FLUIDLITE)
+  target_include_directories(neobae PRIVATE 
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/fluidlite/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/fluidlite/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/fluidlite/src/watcom
+  )
 endif()
 
 if(BUILD_ZEFIDI)
@@ -1648,14 +1656,6 @@ if(BUILD_ZEFIDI)
       else()
         message(STATUS "ENABLE_MIDI_HW requested, but RtMidi sources are missing; building zefidi without MIDI hardware support.")
       endif()
-    endif()
-
-    if(BAE_ENABLE_FLUIDLITE)
-      target_include_directories(neobae PRIVATE 
-        ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/fluidlite/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/fluidlite/src
-       ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/fluidlite/src/watcom
-      )
     endif()
 
     if (DEBUG)
@@ -2142,53 +2142,65 @@ if(BUILD_NBEDITOR)
 endif()
 
 if((MINGW OR MSVC) AND NEOBAE_RC_ENABLED)
-  neobae_configure_rc(songtool SONGTOOL_VERSION_RC "${VERSION_RC_IN}" "NeoBAE Songtool CLI" "songtool.exe" "1" NO)
-  target_sources(songtool PRIVATE "${SONGTOOL_VERSION_RC}")
+    if(TARGET songtool)
+      neobae_configure_rc(songtool SONGTOOL_VERSION_RC "${VERSION_RC_IN}" "NeoBAE Songtool CLI" "songtool.exe" "1" NO)
+      target_sources(songtool PRIVATE "${SONGTOOL_VERSION_RC}")
+    endif()
 
-  neobae_configure_rc(rmfutil RMFUTIL_VERSION_RC "${VERSION_RC_IN}" "NeoBAE RMF Utility" "rmfutil.exe" "1" NO)
-  target_sources(rmfutil PRIVATE "${RMFUTIL_VERSION_RC}")
+    if(TARGET rmfutil)
+      neobae_configure_rc(rmfutil RMFUTIL_VERSION_RC "${VERSION_RC_IN}" "NeoBAE RMF Utility" "rmfutil.exe" "1" NO)
+      target_sources(rmfutil PRIVATE "${RMFUTIL_VERSION_RC}")
+    endif()
 
-  if(TARGET adp2wav)
-    neobae_configure_rc(adp2wav ADP2WAV_VERSION_RC "${VERSION_RC_IN}" "NeoBAE ADP to WAV Converter" "adp2wav.exe" "1" NO)
-    target_sources(adp2wav PRIVATE "${ADP2WAV_VERSION_RC}")
-  endif()
+    if(TARGET adp2wav)
+      neobae_configure_rc(adp2wav ADP2WAV_VERSION_RC "${VERSION_RC_IN}" "NeoBAE ADP to WAV Converter" "adp2wav.exe" "1" NO)
+      target_sources(adp2wav PRIVATE "${ADP2WAV_VERSION_RC}")
+    endif()
 
-  if(TARGET adx2wav)
-    neobae_configure_rc(adx2wav ADX2WAV_VERSION_RC "${VERSION_RC_IN}" "NeoBAE ADX to WAV Converter" "adx2wav.exe" "1" NO)
-    target_sources(adx2wav PRIVATE "${ADX2WAV_VERSION_RC}")
-  endif()
+    if(TARGET adx2wav)
+     neobae_configure_rc(adx2wav ADX2WAV_VERSION_RC "${VERSION_RC_IN}" "NeoBAE ADX to WAV Converter" "adx2wav.exe" "1" NO)
+      target_sources(adx2wav PRIVATE "${ADX2WAV_VERSION_RC}")
+    endif()
 
-  if(TARGET mthc_decomp)
-    neobae_configure_rc(mthc_decomp MTHC_DECOMP_VERSION_RC "${VERSION_RC_IN}" "NeoBAE MTHC Decompressor" "mthc_decomp.exe" "1" NO)
-    target_sources(mthc_decomp PRIVATE "${MTHC_DECOMP_VERSION_RC}")
-  endif()
+    if(TARGET mthc_decomp)
+      neobae_configure_rc(mthc_decomp MTHC_DECOMP_VERSION_RC "${VERSION_RC_IN}" "NeoBAE MTHC Decompressor" "mthc_decomp.exe" "1" NO)
+      target_sources(mthc_decomp PRIVATE "${MTHC_DECOMP_VERSION_RC}")
+    endif()
 
-  neobae_configure_rc(ringtone2mid RINGTONE2MID_VERSION_RC "${VERSION_RC_IN}" "NeoBAE Ringtone to MIDI Converter" "ringtone2mid.exe" "1" NO)
-  target_sources(ringtone2mid PRIVATE "${RINGTONE2MID_VERSION_RC}")
+    if(TARGET ringtone2mid)
+      neobae_configure_rc(ringtone2mid RINGTONE2MID_VERSION_RC "${VERSION_RC_IN}" "NeoBAE Ringtone to MIDI Converter" "ringtone2mid.exe" "1" NO)
+      target_sources(ringtone2mid PRIVATE "${RINGTONE2MID_VERSION_RC}")
+    endif()
 
-  neobae_configure_rc(rmiutil RMIUTIL_VERSION_RC "${VERSION_RC_IN}" "NeoBAE RMI Utility" "rmiutil.exe" "1" NO)
-  target_sources(rmiutil PRIVATE "${RMIUTIL_VERSION_RC}")
+    if(TARGET rmiutil)
+      neobae_configure_rc(rmiutil RMIUTIL_VERSION_RC "${VERSION_RC_IN}" "NeoBAE RMI Utility" "rmiutil.exe" "1" NO)
+      target_sources(rmiutil PRIVATE "${RMIUTIL_VERSION_RC}")
+    endif()
 
-  neobae_configure_rc(bankrecomp BANKRECOMP_VERSION_RC "${VERSION_RC_IN}" "NeoBAE Bank Recompiler" "bankrecomp.exe" "1" NO)
-  target_sources(bankrecomp PRIVATE "${BANKRECOMP_VERSION_RC}")
+    if(TARGET bankrecomp)
+      neobae_configure_rc(bankrecomp BANKRECOMP_VERSION_RC "${VERSION_RC_IN}" "NeoBAE Bank Recompiler" "bankrecomp.exe" "1" NO)
+      target_sources(bankrecomp PRIVATE "${BANKRECOMP_VERSION_RC}")
+    endif()
 
-  neobae_configure_rc(sf2_hsb SF2HSB_VERSION_RC "${VERSION_RC_IN}" "NeoBAE SF2 to HSB Converter" "sf2-hsb.exe" "1" NO)
-  target_sources(sf2_hsb PRIVATE "${SF2HSB_VERSION_RC}")
+    if(TARGET sf2_hsb)
+      neobae_configure_rc(sf2_hsb SF2HSB_VERSION_RC "${VERSION_RC_IN}" "NeoBAE SF2 to HSB Converter" "sf2-hsb.exe" "1" NO)
+      target_sources(sf2_hsb PRIVATE "${SF2HSB_VERSION_RC}")
+    endif()
 
-  if(TARGET xmfutil)
-    neobae_configure_rc(xmfutil XMFUTIL_VERSION_RC "${VERSION_RC_IN}" "NeoBAE XMF Utility" "xmfutil.exe" "1" NO)
-    target_sources(xmfutil PRIVATE "${XMFUTIL_VERSION_RC}")
-  endif()
+    if(TARGET xmfutil)
+      neobae_configure_rc(xmfutil XMFUTIL_VERSION_RC "${VERSION_RC_IN}" "NeoBAE XMF Utility" "xmfutil.exe" "1" NO)
+      target_sources(xmfutil PRIVATE "${XMFUTIL_VERSION_RC}")
+    endif()
 
-  if(TARGET mod2rmf)
-    neobae_configure_rc(mod2rmf MOD2RMF_VERSION_RC "${VERSION_RC_IN}" "NeoBAE MOD to RMF Converter" "mod2rmf.exe" "1" NO)
-    target_sources(mod2rmf PRIVATE "${MOD2RMF_VERSION_RC}")
-  endif()
+    if(TARGET mod2rmf)
+      neobae_configure_rc(mod2rmf MOD2RMF_VERSION_RC "${VERSION_RC_IN}" "NeoBAE MOD to RMF Converter" "mod2rmf.exe" "1" NO)
+      target_sources(mod2rmf PRIVATE "${MOD2RMF_VERSION_RC}")
+    endif()
 
-  if(TARGET playbae)
-    neobae_configure_rc(playbae PLAYBAE_VERSION_RC "${VERSION_RC_IN}" "NeoBAE CLI Player" "playbae.exe" "1" NO)
-    target_sources(playbae PRIVATE "${PLAYBAE_VERSION_RC}")
-  endif()  
+    if(TARGET playbae)
+     neobae_configure_rc(playbae PLAYBAE_VERSION_RC "${VERSION_RC_IN}" "NeoBAE CLI Player" "playbae.exe" "1" NO)
+     target_sources(playbae PRIVATE "${PLAYBAE_VERSION_RC}")
+    endif()
 endif()
 
 include(CTest)
