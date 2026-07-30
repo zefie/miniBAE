@@ -2,80 +2,167 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Clean",
+      "label": "Clean (Linux)",
       "type": "shell",
-      "command": "make",
+      "command": "rm",
       "options": {
         "cwd": "${workspaceFolder}/neobae"
       },
-      "args": ["clean"],
+      "args": ["-rf", "build"],
       "problemMatcher": []
     },
     {
-        "label": "Run GUI",
-        "type": "shell",
-        "command": "${workspaceFolder}/neobae/bin/zefidi.exe",
-        "options": {
-            "cwd": "${workspaceFolder}/neobae/bin"
-        },
-        "dependsOn": ["Build GUI"]
+      "label": "Configure Project (Linux)",
+      "type": "shell",
+      "command": "cmake",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "args": ["-B", "build", "-S", "."],
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "dependsOn": ["Clean (Linux)"],
+      "problemMatcher": "$gcc"
     },
     {
-      "label": "Build GUI",
+      "label": "Configure Project with Debug Logging (Linux)",
       "type": "shell",
-      "command": "make",
+      "command": "cmake",
       "options": {
-        "cwd": "${workspaceFolder}/neobae"
+        "cwd": "${workspaceFolder}"
       },
-      "args": ["-f", "mingw/Makefile.gui", "-j20"],
+      "args": ["-B", "build", "-S", ".", "-DDEBUG=1"],
+      "group": {
+        "kind": "test",
+        "isDefault": false
+      },
+      "dependsOn": ["Clean (Linux)"],
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Configure Project with Debug Logging and Symbols (Linux)",
+      "type": "shell",
+      "command": "cmake",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "args": ["-B", "build", "-S", ".", "-DDEBUG=1", "-DLDEBUG=1"],
+      "group": {
+        "kind": "test",
+        "isDefault": false
+      },
+      "dependsOn": ["Clean (Linux)"],
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Build Project (Linux)",
+      "type": "shell",
+      "command": "cmake",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "args": ["--build", "build"],
       "group": {
         "kind": "build",
         "isDefault": true
       },
-      "dependsOn": ["Clean"],
+      "dependsOn": ["Configure Project (Linux)"],
       "problemMatcher": "$gcc"
     },
     {
-      "label": "Build GUI with Debug Logging",
+      "label": "Build Project with Debug Logging (Linux)",
       "type": "shell",
-      "command": "make",
+      "command": "cmake",
       "options": {
-        "cwd": "${workspaceFolder}/neobae"
+        "cwd": "${workspaceFolder}"
       },
-      "args": ["-f", "mingw/Makefile.gui", "DEBUG=1", "-j20"],
+      "args": ["--build", "build"],
       "group": {
-        "kind": "build",
+        "kind": "test",
+        "isDefault": false
       },
-      "dependsOn": ["Clean"],
+      "dependsOn": ["Configure Project with Debug Logging (Linux)"],
       "problemMatcher": "$gcc"
     },
     {
-      "label": "Build GUI with Debug Logging and Symbols",
+      "label": "Build Project with Debug Logging and Symbols (Linux)",
       "type": "shell",
-      "command": "make",
+      "command": "cmake",
       "options": {
-        "cwd": "${workspaceFolder}/neobae"
+        "cwd": "${workspaceFolder}"
       },
-      "args": ["-f", "mingw/Makefile.gui", "DEBUG=1", "LDEBUG=1","-j20"],
+      "args": ["--build", "build"],
       "group": {
-        "kind": "build",
+        "kind": "test",
+        "isDefault": false
       },
-      "dependsOn": ["Clean"],
+      "dependsOn": ["Configure Project with Debug Logging and Symbols (Linux)"],
       "problemMatcher": "$gcc"
     },
     {
-      "label": "Build NeoBAE Studio (Linux)",
+      "label": "zefie's Build Clean (docker llvm-mingw)",
       "type": "shell",
-      "command": "make",
+      "command": "rm",
       "options": {
-        "cwd": "${workspaceFolder}/neobae"
+        "cwd": "${workspaceFolder}"
       },
-      "args": ["-f", "Makefile.nbstudio", "DEBUG=1", "-j20"],
+      "args": ["-rf", "build-x86_64-w64-mingw32"],
       "group": {
         "kind": "build",
+        "isDefault": false
       },
-      "dependsOn": ["Clean"],
       "problemMatcher": "$gcc"
-    }        
+    },
+    {
+      "label": "zefie's Build (docker llvm-mingw)",
+      "type": "shell",
+      "command": ".zefie/docker_launcher_debug.sh",
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "dependsOn": ["zefie's Build Clean (docker llvm-mingw)"],
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "zefie's Build (Debug) (docker llvm-mingw)",
+      "type": "shell",
+      "command": ".zefie/docker_launcher_debug.sh",
+      "args": ["-DDEBUG=1"],      
+      "group": {
+        "kind": "test",
+        "isDefault": false
+      },
+      "dependsOn": ["zefie's Build Clean (docker llvm-mingw)"],
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "zefie's Build (Debug with Symbols) (docker llvm-mingw)",
+      "type": "shell",
+      "command": ".zefie/docker_launcher_debug.sh",
+      "args": ["-DDEBUG=1", "-DLDEBUG=1"],      
+      "group": {
+        "kind": "test",
+        "isDefault": false
+      },
+      "dependsOn": ["zefie's Build Clean (docker llvm-mingw)"],
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "zefie's Install",
+      "type": "shell",
+      "command": "unzip",
+      "args": ["-o", "${workspaceFolder}/out/*x86_64*.zip"],
+      "options": {
+        "cwd": "/mnt/d/bin/BXPlayer"
+      },      
+      "group": {
+        "kind": "none",
+        "isDefault": false
+      },
+      "problemMatcher": "$gcc"
+    }
   ]
 }
