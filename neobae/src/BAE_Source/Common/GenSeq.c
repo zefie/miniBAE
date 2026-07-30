@@ -2134,9 +2134,21 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                 else
                 {
                     // HSB mode without overlay - use native synthesis
+                    int32_t hsbPatch = PV_ConvertPatchBank(pSong, thePatch, MIDIChannel);
+                    uint32_t midiBank = (uint32_t)((uint8_t)pSong->channelRawBank[MIDIChannel]);
+                    if (midiBank >= 2 && pSong->instrumentData[pSong->remapArray[hsbPatch]] == NULL)
+                    {
+                        int32_t fallbackBank = 0;
+                        pSong->channelBank[MIDIChannel] = (signed char)fallbackBank;
+                        debug_message("ProcessProgramChange Debug: Channel %d HSB fallback bank %d -> %d for program %d\n",
+                                      MIDIChannel, midiBank, fallbackBank, thePatch);
+                    }
+                    else
+                    {
+                        pSong->channelBank[MIDIChannel] = (signed char)(midiBank);
+                    }
                     pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
-                    debug_message("ProcessProgramChange Debug: Channel %d is using an instrument from the default bank (bank=%d prog=%d)\n", MIDIChannel, theBank, thePatch);
-            }
+                }
             } else {
                 uint32_t bankId, progId = 0, noteId = 0;
                 int16_t thePatch = PV_ConvertPatchBank(pSong, program, MIDIChannel);                        
