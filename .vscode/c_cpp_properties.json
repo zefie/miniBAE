@@ -59,7 +59,8 @@
                 "SF3_SUPPORT=1",
                 "SUPPORT_BAESCRIPT=1",
                 "SUPPORT_PLAYLIST=1",
-                "SUPPORT_MIDI_HW=1"
+                "BAE_FIX_SPAN_DC=1",
+                "BAE_CLASSIC_CHORUS=1"
             ],
             "compilerPath": "/usr/bin/x86_64-w64-mingw32-gcc",
             "intelliSenseMode": "linux-gcc-x64",

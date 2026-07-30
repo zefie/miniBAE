@@ -23,9 +23,11 @@
 #include <stdio.h>
 #include "NeoBAE.h"
 
+#if SUPPORT_MIDI_HW == TRUE
+
 #include "rtmidi_c.h"
 
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
 #include <SDL2/SDL.h>
 #else
 #include <SDL3/SDL.h>
@@ -128,3 +130,5 @@ void midi_output_send_all_notes_off(void)
         midi_output_send(msg, 3);
     }
 }
+
+#endif // SUPPORT_MIDI_HW

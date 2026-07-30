@@ -4849,7 +4849,7 @@ GM_Waveform     *waveform;
             break;
     #endif
         default :
-            #ifdef _DEBUG
+            #if _DEBUG == TRUE
             printf("DEBUG: Unknown file type: %d\n", fileType);
             #endif
             err = PARAM_ERR;

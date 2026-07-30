@@ -2009,7 +2009,7 @@ const char *BAE_GetFeatureString()
     bool first = TRUE;
 
     // Debugging
-#ifdef _DEBUG
+#if _DEBUG == TRUE
     const char *build = "Debug Build (Stripped)";
 #elif (_FULL_DEBUG == TRUE)
     const char *build = "Debug Build (w/ Symbols)";
@@ -11722,7 +11722,7 @@ BAEResult BAESong_InjectMidiMessage(BAESong song, const unsigned char *message, 
         return BAE_PARAM_ERR;
 
     BAE_AcquireMutex(song->mLock);
-#ifdef _DEBUG
+#if _DEBUG == TRUE
     // Debug: descriptive log for injected raw MIDI message
     {
         char desc[256];
@@ -12200,7 +12200,7 @@ static void PV_ApplySongEngineConfig(BAESong song)
     if (flags == 0)
         return;  // no per-song overrides
 
-#if BAE_CLASSIC_CHORUS
+#if BAE_CLASSIC_CHORUS == TRUE
     if (flags & SONG_CONFIG_HAS_CLASSIC_CHORUS)
     {
         song->mSavedClassicChorus = pMixer->classicChorus;
@@ -12208,7 +12208,7 @@ static void PV_ApplySongEngineConfig(BAESong song)
         pMixer->classicChorus = (flags & SONG_CONFIG_CLASSIC_CHORUS_ON) ? TRUE : FALSE;
     }
 #endif
-#if BAE_FIX_SPAN_DC
+#if BAE_FIX_SPAN_DC == TRUE
     if (flags & SONG_CONFIG_HAS_PANFIX)
     {
         song->mSavedFixSpanDC = pMixer->fixSpanDC;

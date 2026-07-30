@@ -1402,7 +1402,7 @@ GM_AudioOutputCallbackPtr GM_GetAudioOutput(void)
 //
 // Return FALSE if failure, otherwise TRUE
 
-#ifdef BAE_COMPLETE
+#if BAE_COMPLETE == TRUE
 bool GM_StartHardwareSoundManager(void *threadContext)
 {
     int32_t    sampleRate;
@@ -1426,7 +1426,7 @@ bool GM_StartHardwareSoundManager(void *threadContext)
 #endif
 
 // Stop generating samples and shutdown
-#ifdef BAE_COMPLETE
+#if BAE_COMPLETE == TRUE
 void GM_StopHardwareSoundManager(void *threadContext)
 {
     // need this so that we can properly update samplesPlayed to the total written

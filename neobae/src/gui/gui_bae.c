@@ -24,6 +24,7 @@
 #include "gui_midi.h"    // For gui_midi_event_callback and midi output functions
 #include "gui_karaoke.h" // For karaoke functions
 #include "X_API.h"
+#include "NeoBAE.h"
 #include "GenRingtone.h"
 #if USE_RMI_SUPPORT == TRUE
     #include "GenRMI.h"

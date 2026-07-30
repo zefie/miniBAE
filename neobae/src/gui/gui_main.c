@@ -77,7 +77,7 @@
 #include "gui_midi.h"     // for virtual keyboard functions
 #include "gui_playlist.h" // for playlist panel functions
 #include "gui_panels.h"
-#ifdef _DEBUG
+#if _DEBUG == TRUE
 #include "gui_debug_console.h" // for debug console window
 #endif
 
@@ -104,11 +104,11 @@ int g_thread_ch_enabled[BAE_MAX_MIDI_CHANNELS] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 
     full header (which defines globals that conflict with this file's statics). */
 void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick);
 
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
 #include "gui_midi_hw.h"
 #endif
 
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
 #include "gui_karaoke.h"
 #endif
 
@@ -195,7 +195,7 @@ void safe_strncpy(char *dst, const char *src, size_t size) {
 // Helper function to update Bank/Program display values based on current channel's bank settings
 void update_bank_program_for_channel(void)
 {
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
     // Check if we're actually in MIDI input mode
     if (g_midi_input_enabled)
     {
@@ -238,7 +238,7 @@ void update_bank_program_for_channel(void)
 // Helper function to send bank select messages when Bank/Program values change
 void send_bank_select_for_current_channel(void)
 {
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
     // Update the tracked bank values for the current channel
     g_midi_bank[g_keyboard_channel] = g_keyboard_bank;
     g_midi_bank_program[g_keyboard_channel] = g_keyboard_program;
@@ -254,7 +254,7 @@ void send_bank_select_for_current_channel(void)
         BAESong_LoadInstrument(target, g_keyboard_program);
     }
 
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
     // Also send to external MIDI output if enabled
     if (g_midi_output_enabled)
     {
@@ -435,7 +435,7 @@ char *get_absolute_path(const char *path)
 #endif
 }
 
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
 #define KARAOKE_MAX_LINES 256
 
 // Forward declaration (defined later) so helpers can call it
@@ -562,7 +562,7 @@ bool recreate_mixer_and_restore(int sampleRateHz, int reverbType,
                                 int transpose, int tempo, int volume, bool loopPlay,
                                 bool ch_enable[BAE_MAX_MIDI_CHANNELS])
 {
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
     // If MIDI service is active, stop it before tearing down mixer/songs to avoid races.
     bool resume_midi_service = (g_midi_service_thread != NULL);
     if (resume_midi_service)
@@ -699,7 +699,7 @@ bool recreate_mixer_and_restore(int sampleRateHz, int reverbType,
         }
     }
     set_status_message("Audio device reconfigured");
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
     // If MIDI input is enabled, ensure MIDI input device is (re)initialized and service resumed
     if (g_midi_input_enabled)
     {
@@ -731,9 +731,9 @@ void setWindowTitle(SDL_Window *window)
 #endif
     const char *libNeoBAECPUArch = BAE_GetCurrentCPUArchitecture();
     char debug[64];
-#ifdef _LDEBUG
+#if _LDEBUG == TRUE
     snprintf(debug, sizeof(debug), " (debug build with symbols)");
-#elif defined(_DEBUG)
+#elif _DEBUG == TRUE
     snprintf(debug, sizeof(debug), " (debug build)");
 #else
     debug[0] = '\0';
@@ -880,7 +880,7 @@ int main(int argc, char *argv[])
         return 1;
     }
     
-#ifdef _DEBUG
+#if _DEBUG == TRUE
     // Initialize debug console
     debug_console_init();
     BAE_PRINTF("Debug console initialized (press F12 to toggle)\n");
@@ -902,7 +902,7 @@ int main(int argc, char *argv[])
     {
         static int ttf_font_size = 14;
 
-#ifdef EMBED_TTF_FONT
+#if EMBED_TTF_FONT == TRUE
 #if defined(USE_SDL2)
         g_font = TTF_OpenFontRW(SDL_RWFromConstMem(embedded_font_data, embedded_font_size), 1, ttf_font_size);
 #elif defined(SDL_IOFromConstMem)
@@ -1233,7 +1233,7 @@ int main(int argc, char *argv[])
             if (!loaded_saved)
             {
                 BAE_PRINTF("Falling back to built-in/default discovery...\n");
-#ifdef _BUILT_IN_PATCHES
+#if _BUILT_IN_PATCHES == TRUE
                 // Try built-in bank when compiled in
                 if (!load_bank_simple("__builtin__", false, reverbType, loopPlay))
                 {
@@ -1289,7 +1289,7 @@ int main(int argc, char *argv[])
         }
         if (!found_patches)
         {
-#ifdef _BUILT_IN_PATCHES
+#if _BUILT_IN_PATCHES == TRUE
             // No patches.hsb/zsb; try built-in if available
             if (!load_bank_simple("__builtin__", false, reverbType, loopPlay))
             {
@@ -1360,7 +1360,7 @@ int main(int argc, char *argv[])
         rclick = false;
         while (SDL_PollEvent(&e))
         {
-#ifdef _DEBUG
+#if _DEBUG == TRUE
             // Let debug console handle its events first
             if (debug_console_handle_event(&e)) {
                 continue; // Event consumed by debug console, skip main window processing
@@ -1440,7 +1440,7 @@ int main(int argc, char *argv[])
                     }
                     else
                     {
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                         // If MIDI input is enabled we must ignore external IPC open requests for media
                         if (g_midi_input_enabled)
                         {
@@ -1467,7 +1467,7 @@ int main(int argc, char *argv[])
                             {
                                 set_status_message("Failed to load external media file");
                             }
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                         }
 #endif
                     }
@@ -1636,7 +1636,7 @@ int main(int argc, char *argv[])
                         {
                             // Slider handling: respect the same modal/enable rules used elsewhere
                             bool playback_controls_enabled_local =
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                                 !g_midi_input_enabled && !(g_bae.is_audio_file && g_bae.sound);
 #else
                                 !(g_bae.is_audio_file && g_bae.sound);
@@ -1827,7 +1827,7 @@ int main(int argc, char *argv[])
 #endif
                     else
                     {
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                         // If MIDI input is enabled we don't accept dropped media files
                         if (g_midi_input_enabled)
                         {
@@ -1845,7 +1845,7 @@ int main(int argc, char *argv[])
                                 Rect transportPanel_local = {10, 160, 880, 85}; // same as rendering
                                 int keyboardPanelY_local = transportPanel_local.y + transportPanel_local.h + 10;
                                 Rect keyboardPanel_local = {10, keyboardPanelY_local, 880, 110};
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                                 bool showKeyboard_local = g_show_virtual_keyboard && (g_midi_input_enabled || (g_bae.song_loaded && !g_bae.is_audio_file));
 #else
                                 bool showKeyboard_local = g_show_virtual_keyboard && (g_bae.song_loaded && !g_bae.is_audio_file);
@@ -1904,7 +1904,7 @@ int main(int argc, char *argv[])
 #if SUPPORT_PLAYLIST == TRUE                                
                             }
 #endif                            
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                         }
 #endif
                     }
@@ -2069,7 +2069,7 @@ int main(int argc, char *argv[])
                 // Octave shift: ',' -> down, '.' -> up (on keydown only)
                 if (isDown)
                 {
-#ifdef _DEBUG
+#if _DEBUG == TRUE
                     // F12 toggles debug console
                     if (sym == SDLK_F12)
                     {
@@ -2095,7 +2095,7 @@ int main(int argc, char *argv[])
                     if (!ui_modal_blocking())
                     {
                         // Match playback_controls_enabled logic used during rendering
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                         bool playback_controls_enabled_local = !g_midi_input_enabled;
 #else
                         bool playback_controls_enabled_local = true;
@@ -2141,7 +2141,7 @@ int main(int argc, char *argv[])
                     BAESong target = g_bae.song ? g_bae.song : g_live_song;
                     if (target)
                         BAESong_NoteOff(target, (unsigned char)g_keyboard_channel, (unsigned char)heldMidi, 0, 0);
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                     if (g_midi_output_enabled)
                     {
                         unsigned char mmsg[3];
@@ -2198,7 +2198,7 @@ int main(int argc, char *argv[])
                     // actually visible. Match the same visibility rules used
                     // when rendering the keyboard to avoid surprises.
                     bool keyboard_visible_for_typing = false;
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                     keyboard_visible_for_typing = g_show_virtual_keyboard && (g_midi_input_enabled || (g_bae.song_loaded && !g_bae.is_audio_file));
 #else
                     keyboard_visible_for_typing = g_show_virtual_keyboard && (g_bae.song_loaded && !g_bae.is_audio_file);
@@ -2224,7 +2224,7 @@ int main(int argc, char *argv[])
                             BAESong target = g_bae.song ? g_bae.song : g_live_song;
                             if (target)
                                 BAESong_NoteOnWithLoad(target, (unsigned char)g_keyboard_channel, (unsigned char)midi, 100, 0);
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                             if (g_midi_output_enabled)
                             {
                                 unsigned char mmsg[3];
@@ -2352,7 +2352,7 @@ int main(int argc, char *argv[])
             playing = g_bae.is_playing;
         }
 
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
         // Clear playing state when MIDI input is enabled to ensure Play button shows "Play" not "Pause"
         if (g_midi_input_enabled && playing)
         {
@@ -2400,7 +2400,7 @@ int main(int argc, char *argv[])
         {
             g_progress_display_tick_ms = 0;
         }
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
         // Publish current channel enables to the MIDI thread (plain byte store is fine)
         for (int _ci = 0; _ci < BAE_MAX_MIDI_CHANNELS; ++_ci)
         {
@@ -2420,7 +2420,7 @@ int main(int argc, char *argv[])
             unsigned char midi_buf[1024];
             unsigned int midi_sz = 0;
             double midi_ts = 0.0;
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
             while (midi_input_poll(midi_buf, &midi_sz, &midi_ts))
             {
                 if (midi_sz < 1)
@@ -2831,7 +2831,7 @@ int main(int argc, char *argv[])
         
         // Declare statusPanel here so it's accessible throughout the function
         Rect statusPanel;
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
         bool showKeyboard = g_show_virtual_keyboard && (g_midi_input_enabled || (g_bae.song_loaded && !g_bae.is_audio_file));
 #else
         bool showKeyboard = g_show_virtual_keyboard && (g_bae.song_loaded && !g_bae.is_audio_file);
@@ -2926,7 +2926,7 @@ int main(int argc, char *argv[])
         for (int _i = 0; _i < BAE_MAX_MIDI_CHANNELS; ++_i)
             realtime_channel_level[_i] = 0.0f;
         bool have_realtime_levels = false;
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
         if (g_bae.mixer && !g_exporting && (playing || g_midi_input_enabled))
 #else
         if (g_bae.mixer && !g_exporting && playing)
@@ -2974,7 +2974,7 @@ int main(int argc, char *argv[])
                 gui_clear_virtual_keyboard_channel(i);
                 // If MIDI-in is active, proactively send NoteOff for any active notes on this channel
                 // to prevent stuck notes from live input. Use the current target song (loaded or live).
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                 if (g_midi_input_enabled)
                 {
                     BAESong target = g_bae.song ? g_bae.song : g_live_song;
@@ -3070,7 +3070,7 @@ int main(int argc, char *argv[])
                 // Also query engine active notes when playing or when no MIDI input.
                 // Prevent querying the engine when playback is stopped AND MIDI input
                 // is enabled so cleared VUs are not immediately repopulated.
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                 if (!active && !g_exporting && (playing || !g_midi_input_enabled))
 #else
                 if (!active && !g_exporting && playing)
@@ -3151,14 +3151,14 @@ int main(int argc, char *argv[])
             // Decay the realtime meter value gradually (small additional smoothing pass)
             // But skip this extra decay when MIDI input is active, since the MIDI service thread
             // manages VU levels directly and this interferes with that.
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
             if (!g_midi_input_enabled)
             {
 #endif
                 g_channel_vu[i] *= 0.92f;
                 if (g_channel_vu[i] < 0.0005f)
                     g_channel_vu[i] = 0.0f;
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
             }
 #endif
         }
@@ -3312,7 +3312,7 @@ int main(int argc, char *argv[])
         draw_frame(R, controlPanel, panelBorder);
         draw_text(R, 410, 20, "PLAYBACK CONTROLS", headerCol);
 
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
         // When external MIDI input is active or playing audio files, dim and disable most playback controls
         bool playback_controls_enabled = !g_midi_input_enabled && !(g_bae.is_audio_file && g_bae.sound);
 #else
@@ -3711,7 +3711,7 @@ int main(int argc, char *argv[])
             g_show_eq_dialog = true;
         }
 
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
         // If MIDI input is enabled, paint a semi-transparent overlay over the control panel to dim it
         if (g_midi_input_enabled)
         {
@@ -3874,7 +3874,7 @@ int main(int argc, char *argv[])
         }
         // Disable seekbar interaction while the reverb dropdown is expanded.
         bool seekbar_enabled = !g_reverbDropdownOpen && !modal_block_transport;
-    #ifdef SUPPORT_MIDI_HW
+    #if SUPPORT_MIDI_HW == TRUE
         seekbar_enabled = seekbar_enabled && !g_midi_input_enabled;
     #endif
         if (seekbar_enabled && ui_mdown && point_in(ui_mx, ui_my, bar))
@@ -3937,7 +3937,7 @@ int main(int argc, char *argv[])
         // Clickable region just around current time text
         Rect progressRect = {pbuf_x, time_y, pbuf_w, pbuf_h > 0 ? pbuf_h : 16};
         // Transport controls (Play/seek) are disabled when external MIDI input is active.
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
         bool transport_enabled = !g_midi_input_enabled;
 #else
         bool transport_enabled = true;
@@ -4047,7 +4047,7 @@ int main(int argc, char *argv[])
         if (ui_button(R, (Rect){90, 215, 60, 22}, "Stop", transport_mx, transport_my, transport_mdown) && transport_mclick && !modal_block_transport)
         {
             bae_stop(&playing, &progress);
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
             // Ensure engine releases any held notes when user stops playback (panic)
             midi_output_send_all_notes_off(); // silence any external device too
 #endif
@@ -4468,7 +4468,7 @@ int main(int argc, char *argv[])
             // playback is stopped or when using the live fallback song.
             unsigned char merged_notes[BAE_MAX_NOTES];
             memset(merged_notes, 0, sizeof(merged_notes));
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
             // If MIDI input is enabled, fill merged_notes from per-channel state
             if (g_midi_input_enabled)
             {
@@ -4734,7 +4734,7 @@ int main(int argc, char *argv[])
                                 BAESong_NoteOnWithLoad(target, (unsigned char)g_keyboard_channel, (unsigned char)mouseNote, (unsigned char)vel, 0);
                             }
                         }
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                         if (g_midi_output_enabled)
                         {
                             unsigned char m[3];
@@ -4756,7 +4756,7 @@ int main(int argc, char *argv[])
                                 BAESong_NoteOff(target, (unsigned char)g_keyboard_channel, (unsigned char)g_keyboard_mouse_note, 0, 0);
                             }
                         }
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                         if (g_midi_output_enabled && g_keyboard_mouse_note != -1)
                         {
                             unsigned char m[3];
@@ -4779,7 +4779,7 @@ int main(int argc, char *argv[])
                         {
                             BAESong_NoteOff(target, (unsigned char)g_keyboard_channel, (unsigned char)g_keyboard_mouse_note, 0, 0);
                         }
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                         if (g_midi_output_enabled)
                         {
                             unsigned char m[3];
@@ -4803,7 +4803,7 @@ int main(int argc, char *argv[])
                     {
                         BAESong_NoteOff(target, (unsigned char)g_keyboard_channel, (unsigned char)g_keyboard_mouse_note, 0, 0);
                     }
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                     if (g_midi_output_enabled)
                     {
                         unsigned char m[3];
@@ -4824,7 +4824,7 @@ int main(int argc, char *argv[])
         // Create tooltip area that includes checkbox and label
         Rect loopTooltipArea = {160, 215, 70, 20}; // Wider to include "BAE Loop" text
         bool clicked = false;
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
         // When MIDI input is enabled, render a disabled Loop checkbox (no interaction) so it appears under the dim overlay
         if (g_midi_input_enabled)
         {
@@ -4932,11 +4932,11 @@ int main(int argc, char *argv[])
                     save_settings(g_current_bank_path, reverbType, loopPlay);
                 }
             }
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
         }
 #endif
     }
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
         if (g_midi_input_enabled)
         {
             // Draw disabled Open... button (no interaction)
@@ -5001,19 +5001,19 @@ int main(int argc, char *argv[])
                     free(sel);
                 }
             }
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
         }
 #endif
 
         // Export controls (only for MIDI/RMF files) or MIDI-in recording when enabled
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
         if (g_midi_input_enabled || (!g_bae.is_audio_file && g_bae.song_loaded))
 #else
         if (!g_bae.is_audio_file && g_bae.song_loaded)
 #endif
         {
             // If MIDI input is enabled, show Record/Stop instead of Export
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
             if (g_midi_input_enabled)
             {
                 // When MIDI-in is enabled the overlay provides recording controls. Draw a disabled placeholder here.
@@ -5033,7 +5033,7 @@ int main(int argc, char *argv[])
 #endif
                 // Export button: mutually exclusive with external MIDI Output. When MIDI Output
                 // is enabled the Export button is shown disabled and does not accept clicks.
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                 bool export_allowed = !g_midi_output_enabled && !g_exporting && !modal_block && !g_reverbDropdownOpen;
 #else
             bool export_allowed = !g_exporting && !modal_block && !g_reverbDropdownOpen;
@@ -5042,7 +5042,7 @@ int main(int argc, char *argv[])
                 {
                     if (ui_button(R, (Rect){340, 215, 80, 22}, "Export", ui_mx, ui_my, ui_mdown) && ui_mclick)
                     {
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
                         /* export_allowed already ensures g_midi_output_enabled == false */
 #endif
 
@@ -5200,7 +5200,7 @@ int main(int argc, char *argv[])
                     draw_text(R, text_x, text_y, "Export", disabledTxt);
                 }
 
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
             }
 #endif
             // RMF Info button (only for RMF files)
@@ -5223,7 +5223,7 @@ int main(int argc, char *argv[])
                 }
             }
         }
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
         // If MIDI input is enabled, paint a semi-transparent overlay over the transport panel
         // to dim it and disable interactions except the Stop button (which we keep active).
         if (g_midi_input_enabled)
@@ -5959,7 +5959,7 @@ int main(int argc, char *argv[])
         }
 #endif
 
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
         karaoke_render(R, karaokePanel, showKaraoke);
 #endif
 #if SUPPORT_PLAYLIST == TRUE
@@ -6149,7 +6149,7 @@ int main(int argc, char *argv[])
             // using the PCM WAV recorder (it consumes the same rendered frames).
             // Only call BAEMixer_GetAudioSampleFrame here when not exporting and
             // when the PCM writer is inactive to prevent draining audio.
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
             if (!g_exporting && !g_pcm_wav_recording && g_bae.mixer)
 #else
     if (!g_exporting && g_bae.mixer)
@@ -6791,7 +6791,7 @@ int main(int argc, char *argv[])
         // Status indicator (use theme-safe highlight color for playing state)
         const char *status;
         SDL_Color statusCol;
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
         if (g_midi_input_enabled)
         {
             // When MIDI Input mode is enabled, present the transport status as External
@@ -6820,7 +6820,7 @@ int main(int argc, char *argv[])
                 draw_text(R, stoppedBoxX + stoppedBoxSize + 8, lineY3, "Stopped", stoppedCol);
                 status = NULL; // Don't draw status below
             }
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
         }
 #endif
         if (status)
@@ -6838,7 +6838,7 @@ int main(int argc, char *argv[])
         {
             // Muted fallback text that adapts to theme; darker on light backgrounds for readability
             SDL_Color muted = g_is_dark_mode ? (SDL_Color){150, 150, 150, 255} : (SDL_Color){80, 80, 80, 255};
-#ifdef _DEBUG
+#if _DEBUG == TRUE
             draw_text(R, 120, lineY3, "(Debug build, press F12 for console)", muted);
 #else
             draw_text(R, 120, lineY3, "(Drag & drop media/bank files here)", muted);
@@ -7309,7 +7309,7 @@ int main(int argc, char *argv[])
         }
         SDL_RenderPresent(R);
         
-#ifdef _DEBUG
+#if _DEBUG == TRUE
         // Render debug console if visible
         debug_console_render();
 #endif
@@ -7375,7 +7375,7 @@ int main(int argc, char *argv[])
     }
 
     // Stop MIDI service and close devices before tearing down SDL
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
     midi_service_stop();
     midi_input_shutdown();
 #endif
@@ -7455,7 +7455,7 @@ int main(int argc, char *argv[])
     export_cleanup();
 
     // Clean up karaoke subsystem (destroys g_lyric_mutex)
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE 
     karaoke_cleanup();
 #endif
 
@@ -7475,7 +7475,7 @@ int main(int argc, char *argv[])
 #if SUPPORT_PLAYLIST == TRUE
     playlist_cleanup();
 #endif
-#ifdef _DEBUG
+#if _DEBUG == TRUE
     debug_console_shutdown();
 #endif
 #if SUPPORT_BAESCRIPT == TRUE

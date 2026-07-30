@@ -18,7 +18,7 @@
 #ifndef GUI_DEBUG_CONSOLE_H
 #define GUI_DEBUG_CONSOLE_H
 
-#ifdef _DEBUG
+#if _DEBUG == TRUE
 
 #include <stdbool.h>
 #include <stddef.h>

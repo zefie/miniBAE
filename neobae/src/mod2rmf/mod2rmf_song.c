@@ -269,7 +269,7 @@ int mod2rmf_ensure_loop_cc_resets(ModSongModel *song)
                 return 0;
             }
             needsSort = TRUE;
-            #ifdef _DEBUG
+            #if _DEBUG == TRUE
             fprintf(stderr, "[mod2rmf] Loop CC7 reset: ch %u -> CC7=%u @ tick %u (end was %u)\n",
                     ch, cc7AtLoopStart, (unsigned)song->loopStartTick, cc7AtLoopEnd);
             #endif
@@ -358,7 +358,7 @@ int mod2rmf_ensure_loop_pitch_bend_resets(ModSongModel *song)
                 return 0;
             }
             needsSort = TRUE;
-            #ifdef _DEBUG
+            #if _DEBUG == TRUE
             fprintf(stderr, "[mod2rmf] Loop pitch bend reset: ch %u -> bend=%u @ tick %u (end was %u)\n",
                     ch, bendAtLoopStart, (unsigned)song->loopStartTick, bendAtLoopEnd);
             #endif

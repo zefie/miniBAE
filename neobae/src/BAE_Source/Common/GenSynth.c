@@ -1127,7 +1127,7 @@ int32_t PV_DoubleBufferCallbackAndSwap(GM_DoubleBufferCallbackPtr doubleBufferCa
     {
         PV_DoCallBack(pVoice);
         pVoice->voiceMode = VOICE_UNUSED;
-#ifdef BAE_MCU
+#if BAE_MCU == TRUE
         GM_KillVoiceOnDSP(pVoice);
 #endif
     }
@@ -2316,7 +2316,7 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
                     PV_DoCallBack(pVoice);
 #endif
                     pVoice->voiceMode = VOICE_UNUSED;
-#ifdef BAE_MCU
+#if BAE_MCU == TRUE
                     GM_KillVoiceOnDSP(pVoice);
 #endif
                 }
@@ -2329,7 +2329,7 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
                     PV_DoCallBack(pVoice);
 #endif
                     pVoice->voiceMode = VOICE_UNUSED;
-#ifdef BAE_MCU
+#if BAE_MCU == TRUE
                     GM_KillVoiceOnDSP(pVoice);
 #endif
                 }
@@ -2349,7 +2349,7 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
                 PV_DoCallBack(pVoice);
 #endif
                 pVoice->voiceMode = VOICE_UNUSED;
-#ifdef BAE_MCU
+#if BAE_MCU == TRUE
                 GM_KillVoiceOnDSP(pVoice);
 #endif
             }
@@ -2362,7 +2362,7 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
     PV_UnlockInstrumentAndVoice(pVoice); // done processing
 }
 
-#ifdef BAE_COMPLETE
+#if BAE_COMPLETE == TRUE
 static void PV_ClearReverbBuffer()
 {
 #if REVERB_USED != REVERB_DISABLED
@@ -2404,7 +2404,7 @@ static void PV_ClearReverbBuffer()
 }
 #endif
 
-#ifdef BAE_COMPLETE
+#if BAE_COMPLETE == TRUE
 static void PV_ClearChorusBuffer()
 {
 #if USE_NEW_EFFECTS
@@ -2423,7 +2423,7 @@ static void PV_ClearChorusBuffer()
 }
 #endif
 
-#ifdef BAE_COMPLETE
+#if BAE_COMPLETE == TRUE
 INLINE static void PV_ClearMixBuffers(bool doStereo)
 {
     register int32_t *destL;
@@ -2720,7 +2720,7 @@ void GM_TestTone(bool toneStatus)
     gToneOn = toneStatus;
 }
 
-#ifdef BAE_MCU
+#if BAE_MCU == TRUE
 // build next frame. Causes messages to be sent to the DSP. Calls GM_ProcessSyncUpdateFromDSP
 void BAE_BuildMCUSlice(void *threadContext, uint32_t dspTime)
 {
@@ -2932,7 +2932,7 @@ static void PV_ProcessSyncronizedVoiceStart(void)
     }
 }
 
-#ifdef BAE_MCU
+#if BAE_MCU == TRUE
 // setup, runtime, a valid sample process loop. Either filtered, or not, reverb/chorused or not.
 // Return TRUE, if everything is valid.
 static bool PV_SetupProcessFunctions(GM_Mixer *pMixer)
@@ -2982,7 +2982,7 @@ static bool PV_SetupProcessFunctions(GM_Mixer *pMixer)
 }
 #endif
 
-#ifdef BAE_COMPLETE
+#if BAE_COMPLETE == TRUE
 // setup, runtime, a valid sample process loop. Either filtered, or not, reverb/chorused or not.
 // Return TRUE, if everything is valid.
 static bool PV_SetupProcessFunctions(GM_Mixer *pMixer)
@@ -3155,7 +3155,7 @@ static bool PV_SetupProcessFunctions(GM_Mixer *pMixer)
 }
 #endif
 
-#ifdef BAE_MCU
+#if BAE_MCU == TRUE
 // process next frame
 OPErr GM_ProcessSyncUpdateFromDSP(uint32_t dspTime)
 {
@@ -4097,7 +4097,7 @@ void PV_StartMIDINote(GM_Song *pSong, int16_t the_instrument,
 
         // This step is performed last.
         the_entry->voiceStartTimeStamp = XMicroseconds();
-#ifdef BAE_MCU
+#if BAE_MCU == TRUE
         if (GM_InitVoiceOnDSP(the_entry) == NO_ERR)
         {
             the_entry->voiceMode = VOICE_SUSTAINING;
@@ -4227,7 +4227,7 @@ static void PV_EndNotes(GM_Song *pSong, int16_t useChannel, XLongResourceID useI
                         {
                             if (kill)
                             {
-#ifdef BAE_MCU
+#if BAE_MCU == TRUE
                                 GM_KillVoiceOnDSP(pNote);
 #endif
                                 pNote->NoteDecay = 0;
@@ -4313,7 +4313,7 @@ void GM_KillAllNotes(void)
 // This code is deliberately less efficient than the real output scaling code, for space conservation purposes.
 int16_t GM_GetAudioSampleFrame(int16_t *pLeft, int16_t *pRight)
 {
-#ifdef BAE_MCU
+#if BAE_MCU == TRUE
     return 0;
 #else
     register int32_t size, count;

@@ -283,7 +283,7 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
     }
     needsTailToZero = (lastEnvY > 0u) ? TRUE : FALSE;
 
-    #ifdef _DEBUG
+    #if _DEBUG == TRUE
     {
         int dbgIdx;
         fprintf(stderr, "[mod2rmf]  ADSR extract: npt=%d flg=0x%02x sus=%d hasSustain=%d rls=%d usPerTick=%.1f\n",
@@ -493,7 +493,7 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
 
     raw->adsrStageCount = stage;
 
-    #ifdef _DEBUG
+    #if _DEBUG == TRUE
     {
         uint32_t s;
         fprintf(stderr, "[mod2rmf]  ADSR result: %u stages\n", stage);
@@ -915,7 +915,7 @@ void mod2rmf_compute_channel_map(const ChannelProfile profiles[],
 
         if (!foundEmpty && bestScore > 0)
         {
-            #ifdef _DEBUG
+            #if _DEBUG == TRUE
             fprintf(stderr, "[mod2rmf] Channel map: tracker ch %u -> MIDI ch %u (overlap %u ticks)\n",
                     i, bestMidi, bestScore);
             #endif

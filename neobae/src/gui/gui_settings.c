@@ -1808,10 +1808,10 @@ void settings_init(void)
     g_volume_curve = 1;
     g_stereo_output = true;
     g_sample_rate_hz = 44100;
-#if BAE_FIX_SPAN_DC
+#if BAE_FIX_SPAN_DC == TRUE
     g_panfix_enabled = true;
 #endif
-#if BAE_CLASSIC_CHORUS
+#if BAE_CLASSIC_CHORUS == TRUE
     g_classic_chorus_enabled = false;
 #endif
     g_selected_eq_preset = 0;

@@ -1232,7 +1232,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                     chLastBend[ch] = bend;
                                     (void)mod2rmf_song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend,
                                                                         activeNotes[ch].program);
-#ifdef _DEBUG
+#if _DEBUG == TRUE
                                     if (ch == 9u)
                                     {
                                         fprintf(stderr,
@@ -1321,7 +1321,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                 chLastBend[ch] = bend;
                                 (void)mod2rmf_song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend,
                                                                     activeNotes[ch].program);
-#ifdef _DEBUG
+#if _DEBUG == TRUE
                                 if (ch == 9u)
                                 {
                                     fprintf(stderr,
@@ -1725,7 +1725,7 @@ int mod2rmf_write_song_pitch_bend_events(Mod2RmfConverter *conv, const ModSongMo
         return 0;
     }
 
-#ifdef _DEBUG
+#if _DEBUG == TRUE
     {
         uint32_t ch;
         for (ch = 0; ch < song->channelCount; ++ch)
@@ -1781,7 +1781,7 @@ int mod2rmf_write_song_pitch_bend_events(Mod2RmfConverter *conv, const ModSongMo
                 if (nextEv->sourceChannel < song->channelCount &&
                     conv->channelMap.trackerToMidi[nextEv->sourceChannel] == midiCh)
                 {
-#ifdef _DEBUG
+#if _DEBUG == TRUE
                     if (midiCh == 9u)
                     {
                         fprintf(stderr,
@@ -1809,7 +1809,7 @@ int mod2rmf_write_song_pitch_bend_events(Mod2RmfConverter *conv, const ModSongMo
         }
         lastBend[ev->sourceChannel] = ev->value;
 
-    #ifdef _DEBUG
+    #if _DEBUG == TRUE
         if (midiCh == 9u)
         {
             fprintf(stderr,
@@ -1900,7 +1900,7 @@ int mod2rmf_write_song_notes(Mod2RmfConverter *conv, const ModSongModel *song)
             continue;
         }
 
-#ifdef _DEBUG
+#if _DEBUG == TRUE
         if (midiCh == 9u && note->startTick == 0u)
         {
             fprintf(stderr,
@@ -2151,7 +2151,7 @@ int mod2rmf_setup_tracks(Mod2RmfConverter *conv, const ModSongModel *song, const
                 BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex,  38, 0, 0); /* Data LSB */
                 BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 101, 0, 127); /* RPN Null MSB */
                 BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 100, 0, 127); /* RPN Null LSB */
-#ifdef _DEBUG
+#if _DEBUG == TRUE
                 fprintf(stderr,
                         "[mod2rmf][dbg][ch10] init melodic mode on track=%u at tick=0 (NRPN 5,0 -> 3)\n",
                         (unsigned)trackIndex);
@@ -2280,7 +2280,7 @@ BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char
                         &conv->channelMap,
                         conv->avoidMidiChannel10);
 
-        #ifdef _DEBUG
+        #if _DEBUG == TRUE
         {
             uint32_t ci;
             for (ci = 0; ci < song.channelCount; ++ci)

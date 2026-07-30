@@ -18,7 +18,7 @@
 #ifndef GUI_THEME_H
 #define GUI_THEME_H
 
-#if defined(USE_SDL2)
+#if X_PLATFORM == X_SDL2
 #include <SDL2/SDL.h>
 #else
 #include <SDL3/SDL.h>

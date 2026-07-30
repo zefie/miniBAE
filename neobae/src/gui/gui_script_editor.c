@@ -23,7 +23,9 @@
  * MIDI playback.
  ****************************************************************************/
 
-#ifdef SUPPORT_BAESCRIPT
+#include "NeoBAE.h"
+
+#if SUPPORT_BAESCRIPT == TRUE
 
 #include "gui_script_editor.h"
 #include "gui_text.h"
@@ -33,7 +35,7 @@
 #include "gui_export.h"
 #include "baescript.h"
 #include "baescript_internal.h"
-#if defined(USE_SDL2)
+#if X_PLATFORM == X_SDL2
 #include <SDL2/SDL.h>
 #else
 #include <SDL3/SDL.h>

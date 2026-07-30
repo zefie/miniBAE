@@ -752,7 +752,7 @@ struct GM_Mixer
 
     // voice allocation, and dry and wet mix buffers
     GM_Voice            NoteEntry[MAX_VOICES];
-#ifdef BAE_COMPLETE
+#if BAE_COMPLETE == TRUE
     int32_t             songBufferDry[(MAX_CHUNK_SIZE+64)*2];   // interleaved samples: left-right
 #if REVERB_USED != REVERB_DISABLED
     int32_t             songBufferReverb[MAX_CHUNK_SIZE+64];    // the +64 is for 48k output

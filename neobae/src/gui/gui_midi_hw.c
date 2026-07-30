@@ -30,7 +30,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#if defined(USE_SDL2)
+#if X_PLATFORM == X_SDL2
 #include <SDL2/SDL.h>
 #else
 #include <SDL3/SDL.h>

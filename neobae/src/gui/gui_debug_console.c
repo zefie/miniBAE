@@ -18,13 +18,13 @@
 // gui_debug_console.c - Debug console window for zefidi
 // Shows BAE_PRINTF output in a scrollable, resizable window
 
-#ifdef _DEBUG
+#if _DEBUG == TRUE
 
 #include "gui_debug_console.h"
 #include "gui_text.h"
 #include "gui_theme.h"
 #include "gui_widgets.h"
-#if defined(USE_SDL2)
+#if X_PLATFORM == X_SDL2
 #include <SDL2/SDL.h>
 #else
 #include <SDL3/SDL.h>

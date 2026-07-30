@@ -94,7 +94,7 @@
 #include "GenPriv.h"
 #include "X_Assert.h"
 
-#ifdef BAE_COMPLETE
+#if BAE_COMPLETE == TRUE
 
 // This is 8 bit phase. Some hardware wants silence to be 0, some wants it
 // to be 128.

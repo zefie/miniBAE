@@ -2783,7 +2783,7 @@ typedef int32_t UNIT_TYPE;
     // range from -63 to 63
     void GM_SetLinkedSamplePosition(LINKED_VOICE_REFERENCE reference, int16_t newStereoPosition);
 
-#ifdef BAE_MCU
+#if BAE_MCU == TRUE
     // build next frame. Causes messages to be sent to the DSP. Calls GM_ProcessSyncUpdateFromDSP
     void BAE_BuildMCUSlice(void *threadContext, uint32_t dspTime);
 

@@ -183,7 +183,7 @@
 
 #ifndef USE_DIRECTSOUND
     #define USE_DIRECTSOUND             1
-    #ifdef _DEBUG
+    #if _DEBUG == TRUE
         #define DEBUG_DIRECTSOUND
     #endif
 #endif

@@ -1055,7 +1055,7 @@ public:
         EnsurePlaybackEngine();
         /* Load the built-in bank into the bank editor so it is always
          * populated, even before the user explicitly opens a bank file. */
-#ifdef _BUILT_IN_PATCHES
+#if _BUILT_IN_PATCHES == TRUE
         if (m_bankEditorPanel && m_bankLoaded && m_bankToken) {
             BankEditorPanel_LoadBank(m_bankEditorPanel, m_bankToken, "(built-in)");
         }
@@ -2550,7 +2550,7 @@ private:
             }
         }
         if (!m_bankLoaded) {
-#ifdef _BUILT_IN_PATCHES
+#if _BUILT_IN_PATCHES == TRUE
             BAE_PRINTF( "[nbstudio] Loading built-in bank...\n");
             BAEResult bankResult = BAEMixer_LoadBuiltinBank(m_playbackMixer, &m_bankToken);
             BAE_PRINTF( "[nbstudio] BAEMixer_LoadBuiltinBank result=%d\n", static_cast<int>(bankResult));
@@ -2593,7 +2593,7 @@ private:
         utf8 = path.utf8_str();
         if (BAEMixer_AddBankFromFile(m_playbackMixer, const_cast<char *>(utf8.data()), &newToken) != BAE_NO_ERROR) {
             /* Restore internal bank as a single-bank fallback if external load fails. */
-#ifdef _BUILT_IN_PATCHES
+#if _BUILT_IN_PATCHES == TRUE
             BAEResult bankResult = BAEMixer_LoadBuiltinBank(m_playbackMixer, &m_bankToken);
             if (bankResult == BAE_NO_ERROR) {
                 m_bankLoaded = true;
@@ -2722,7 +2722,7 @@ private:
     }
 
     void OnBankLoadBuiltin(wxCommandEvent &) {
-#ifdef _BUILT_IN_PATCHES
+#if _BUILT_IN_PATCHES == TRUE
         if (!ConfirmDiscardBankChanges()) {
             return;
         }
@@ -6971,7 +6971,7 @@ private:
         m_loadedBankPath.clear();
         m_bankDisplayName.clear();
         m_bankModifiedHintFromSession = false;
-#ifdef _BUILT_IN_PATCHES
+#if _BUILT_IN_PATCHES == TRUE
         {
             BAEResult bankResult = BAEMixer_LoadBuiltinBank(m_playbackMixer, &m_bankToken);
             if (bankResult == BAE_NO_ERROR) {
@@ -7772,7 +7772,7 @@ private:
                 }
             } else {
                 /* Blob load failed - fallback to built-in as the only bank. */
-#ifdef _BUILT_IN_PATCHES
+#if _BUILT_IN_PATCHES == TRUE
                 BAEResult bankResult = BAEMixer_LoadBuiltinBank(m_playbackMixer, &m_bankToken);
                 if (bankResult == BAE_NO_ERROR) {
                     m_bankLoaded = true;

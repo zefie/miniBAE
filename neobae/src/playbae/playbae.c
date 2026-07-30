@@ -560,9 +560,6 @@ static void PV_AudioTask(void *ref) { BAEMixer_ServiceStreams((BAEMixer)ref); }
 static void PV_Idle(BAEMixer mixer, uint32_t us)
 {
     if (gWriteToFile) {
-#ifdef WASM
-        BAEMixer_ServiceAudioOutputToWebAudio(mixer);
-#else
         BAEResult serr = BAEMixer_ServiceAudioOutputToFile(mixer);
         if (serr != BAE_NO_ERROR) {
             playbae_printf("Export error (%d: %s). Aborting.\n",
@@ -571,7 +568,6 @@ static void PV_Idle(BAEMixer mixer, uint32_t us)
             BAEMixer_Delete(mixer);
             exit(1);
         }
-#endif
     } else {
         uint32_t slices = us / 12000;
         for (uint32_t i = 0; i < slices; i++)
@@ -600,9 +596,7 @@ static void display_song_position(uint32_t posMs, uint32_t totalMs)
         } else {
             playbae_printf("Position: %02d:%02d.%03d\r", m, s, ms);
         }
-#ifdef WASM
         playbae_printf("\n");
-#endif
     }
 }
 

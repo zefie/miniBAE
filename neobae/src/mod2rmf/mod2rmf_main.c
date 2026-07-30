@@ -482,7 +482,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-#ifdef _DEBUG
+#if _DEBUG == TRUE
     /* Diagnostic dump: per-virtual-channel event summary (spread mode only) */
     if (spreadChannels)
     {
@@ -590,7 +590,7 @@ int main(int argc, char *argv[])
                         &conv->channelMap,
                         conv->avoidMidiChannel10);
 
-        #ifdef _DEBUG
+        #if _DEBUG == TRUE
         {
             uint32_t ci;
             for (ci = 0; ci < song.channelCount; ++ci)

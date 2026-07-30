@@ -842,7 +842,7 @@ OPErr GM_StartSample(VOICE_REFERENCE reference)
     if (pVoice)
     {
         pVoice->voiceStartTimeStamp = XMicroseconds();
-#ifdef BAE_MCU
+#if BAE_MCU == TRUE
         if (GM_InitVoiceOnDSP(pVoice) == NO_ERR)
         {
             pVoice->voiceMode = VOICE_SUSTAINING;

@@ -23,7 +23,7 @@
 #include "gui_midi_hw_output.h"
 #include "NeoBAE.h"
 
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
 #include "rtmidi_c.h"
 
 // MIDI state globals

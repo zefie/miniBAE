@@ -51,7 +51,7 @@ bool g_show_eq_dialog = false;
 #include <unistd.h>
 #endif
 
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
 #include "rtmidi_c.h"
 #include "gui_midi_hw.h"
 #endif
@@ -95,7 +95,7 @@ extern bool g_exportDropdownOpen;
 extern int g_exportCodecIndex;
 extern const char *g_exportCodecNames[];
 
-#ifdef SUPPORT_MIDI_HW
+#if SUPPORT_MIDI_HW == TRUE
 extern bool g_midi_input_enabled;
 extern bool g_midi_output_enabled;
 extern bool g_midi_input_device_dd_open;

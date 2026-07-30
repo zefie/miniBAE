@@ -35,7 +35,7 @@ static BAEMixer gMixer = NULL;
 static BAESong gCurrentSong = NULL;
 static BAESong gEffectSong = NULL;  // Second song for sound effects (plays on top)
 
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
 // Lyric callback support
 typedef void (*JSLyricCallback)(const char* lyric, uint32_t timeUs);
 static JSLyricCallback gJSLyricCallback = NULL;
@@ -67,7 +67,7 @@ static size_t gTempRefillBufferSize = 0;
 extern void BAE_BuildMixerSlice(void *threadContext, void *pAudioBuffer,
                                 int32_t bufferByteLength, int32_t sampleFrames);
 
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
 static void PV_LyricCallback(struct GM_Song *songPtr, const char *lyric, uint32_t timeUs, void *ref);
 #endif
 
@@ -378,7 +378,7 @@ int BAE_WASM_LoadSong(const uint8_t* data, int length) {
     }
 #endif
 
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
     // Reset lyric state and suppress lyrics during preroll
     extern BAEResult BAESong_ResetLyricState(BAESong song);
     BAESong_ResetLyricState(gCurrentSong);
@@ -395,7 +395,7 @@ int BAE_WASM_LoadSong(const uint8_t* data, int length) {
         return (int)err;
     }
 
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
     extern BAEResult BAESong_ResetLyricState(BAESong song);
     BAESong_ResetLyricState(gCurrentSong);
     BAE_PRINTF("[BAE] LoadSong: Lyric state reset\n");
@@ -442,7 +442,7 @@ int BAE_WASM_Play(void) {
         return -1;
     }
 
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
     if (gJSLyricCallback) {
         extern BAEResult BAESong_SetLyricCallback(BAESong song, GM_SongLyricCallbackProcPtr pCallback, void *callbackReference);
         BAESong_SetLyricCallback(gCurrentSong, PV_LyricCallback, NULL);
@@ -504,7 +504,7 @@ int BAE_WASM_Stop(void) {
         return -1;
     }
 
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
     // Suppress lyrics when stopped and cancel any pending unsuppression
     gSuppressLyrics = 1;
     gLyricUnsuppressTime = 0;
@@ -737,7 +737,7 @@ EMSCRIPTEN_KEEPALIVE
 int16_t* BAE_WASM_GenerateAudio(int frames) {
     gGenerateAudioCallCount++;
 
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
     // Check if it's time to unsuppress lyrics (non-blocking)
     if (gLyricUnsuppressTime > 0 && BAE_GetMicroseconds() >= gLyricUnsuppressTime) {
         gSuppressLyrics = 0;
@@ -1462,7 +1462,7 @@ int BAE_WASM_NoteOff(int channel, int note) {
 }
 
 
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
 /*
  * Internal lyric callback that forwards to JavaScript
  */
@@ -1516,7 +1516,7 @@ int BAE_WASM_ResetLyricState(void) {
     BAEResult err = BAESong_ResetLyricState(gCurrentSong);
     return (int)err;
 }
-#endif // SUPPORT_KARAOKE
+#endif // SUPPORT_KARAOKE == TRUE
 
 /*
  * Ring Buffer Implementation

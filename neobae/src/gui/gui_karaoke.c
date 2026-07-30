@@ -27,7 +27,7 @@
 #include <string.h>
 #include <ctype.h>
 
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
 
 // Forward declare the BAEGUI structure (defined in gui_main.old.c)
 typedef struct

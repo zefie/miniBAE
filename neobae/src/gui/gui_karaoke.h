@@ -19,14 +19,14 @@
 #define GUI_KARAOKE_H
 
 #include "gui_common.h"
-#if defined(USE_SDL2)
+#if X_PLATFORM == X_SDL2
 #include <SDL2/SDL.h>
 #else
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_mutex.h>
 #endif
 
-#ifdef SUPPORT_KARAOKE
+#if SUPPORT_KARAOKE == TRUE
 
 // Karaoke event structure
 typedef struct
