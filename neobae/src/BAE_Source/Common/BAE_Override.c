@@ -37,6 +37,7 @@ static uint32_t PV_FilterOverrideFlags(uint32_t flags)
     filtered |= flags & (SONG_CONFIG_HAS_PANFIX | SONG_CONFIG_PANFIX_ON);
 #endif
     filtered |= flags & (SONG_CONFIG_HAS_EXTENDED_PITCH_RANGE | SONG_CONFIG_EXTENDED_PITCH_RANGE_ON);
+    filtered |= flags & (SONG_CONFIG_OVERRIDE_VOLUME_CURVE | SONG_CONFIG_VOLUME_CURVE_TYPE_MASK);
 
     return filtered;
 }

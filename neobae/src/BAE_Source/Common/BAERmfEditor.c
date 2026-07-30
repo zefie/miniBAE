@@ -614,6 +614,7 @@ struct BAERmfEditorDocument
     uint32_t instrumentExtCount;
     uint32_t instrumentExtCapacity;
     int32_t engineConfigFlags;  // per-song engine config (SONG_CONFIG_* bits)
+    VelocityCurveType velocityCurveType;  // per-song velocity curve (0-5)
 };
 
 static uint32_t PV_AllocateSampleAssetID(BAERmfEditorDocument *document)
@@ -3674,6 +3675,16 @@ static BAEResult PV_PopulateSongResourceInfoFromDocument(BAERmfEditorDocument co
     songInfo->songLocked = document->songLocked;
     songInfo->songEmbedded = document->songEmbedded;
     songInfo->engineConfigFlags = document->engineConfigFlags;
+    if (document->velocityCurveType != DEFAULT_VELOCITY_CURVE)
+    {
+        songInfo->engineConfigFlags &= ~(SONG_CONFIG_OVERRIDE_VOLUME_CURVE | SONG_CONFIG_VOLUME_CURVE_TYPE_MASK);
+        songInfo->engineConfigFlags |= SONG_CONFIG_OVERRIDE_VOLUME_CURVE;
+        songInfo->engineConfigFlags |= ((uint32_t)document->velocityCurveType << SONG_CONFIG_VOLUME_CURVE_TYPE_SHIFT) & SONG_CONFIG_VOLUME_CURVE_TYPE_MASK;
+    }
+    else
+    {
+        songInfo->engineConfigFlags &= ~(SONG_CONFIG_OVERRIDE_VOLUME_CURVE | SONG_CONFIG_VOLUME_CURVE_TYPE_MASK);
+    }
 
     for (infoIndex = 0; infoIndex < INFO_TYPE_COUNT; ++infoIndex)
     {
@@ -6271,6 +6282,13 @@ static BAEResult PV_LoadRmfResourceIntoDocument(BAERmfEditorDocument *document, 
     document->songVolume = songInfo->songVolume;
     document->reverbType = (BAEReverbType)songInfo->reverbType;
     document->engineConfigFlags = songInfo->engineConfigFlags;
+    document->velocityCurveType = DEFAULT_VELOCITY_CURVE;
+    if (document->engineConfigFlags & SONG_CONFIG_OVERRIDE_VOLUME_CURVE)
+    {
+        document->velocityCurveType = (VelocityCurveType)((document->engineConfigFlags & SONG_CONFIG_VOLUME_CURVE_TYPE_MASK) >> SONG_CONFIG_VOLUME_CURVE_TYPE_SHIFT);
+        if (document->velocityCurveType > 5)
+            document->velocityCurveType = DEFAULT_VELOCITY_CURVE;
+    }
     if (songInfo->title)
     {
         BAERmfEditorDocument_SetInfo(document, TITLE_INFO, songInfo->title);
@@ -9793,6 +9811,7 @@ BAERmfEditorDocument *BAERmfEditorDocument_New(void)
         document->isPristine = FALSE;
         document->nextSampleAssetID = 1;
         document->engineConfigFlags = 0;
+        document->velocityCurveType = DEFAULT_VELOCITY_CURVE;
     }
     return document;
 }
@@ -10831,6 +10850,13 @@ BAEResult BAERmfEditorDocument_SetEngineConfig(BAERmfEditorDocument *document, i
     if (!document)
         return BAE_PARAM_ERR;
     document->engineConfigFlags = flags;
+    document->velocityCurveType = DEFAULT_VELOCITY_CURVE;
+    if (flags & SONG_CONFIG_OVERRIDE_VOLUME_CURVE)
+    {
+        document->velocityCurveType = (VelocityCurveType)((flags & SONG_CONFIG_VOLUME_CURVE_TYPE_MASK) >> SONG_CONFIG_VOLUME_CURVE_TYPE_SHIFT);
+        if (document->velocityCurveType > 5)
+            document->velocityCurveType = DEFAULT_VELOCITY_CURVE;
+    }
     document->isPristine = FALSE;
     return BAE_NO_ERROR;
 }
@@ -10840,6 +10866,27 @@ BAEResult BAERmfEditorDocument_GetEngineConfig(BAERmfEditorDocument const *docum
     if (!document || !outFlags)
         return BAE_PARAM_ERR;
     *outFlags = document->engineConfigFlags;
+    return BAE_NO_ERROR;
+}
+
+BAEResult BAERmfEditorDocument_SetVelocityCurve(BAERmfEditorDocument *document, int curveType)
+{
+    if (!document)
+        return BAE_PARAM_ERR;
+    if (curveType < 0)
+        curveType = 0;
+    if (curveType > 5)
+        curveType = 5;
+    document->velocityCurveType = (VelocityCurveType)curveType;
+    document->isPristine = FALSE;
+    return BAE_NO_ERROR;
+}
+
+BAEResult BAERmfEditorDocument_GetVelocityCurve(BAERmfEditorDocument const *document, int *outCurveType)
+{
+    if (!document || !outCurveType)
+        return BAE_PARAM_ERR;
+    *outCurveType = (int)document->velocityCurveType;
     return BAE_NO_ERROR;
 }
 

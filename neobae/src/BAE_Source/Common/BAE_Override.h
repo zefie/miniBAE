@@ -35,6 +35,9 @@ typedef struct BAEOverrideEntry
 #define BAE_OVERRIDE_FLAG_EXTENDED_PITCH_RANGE_OFF \
     (SONG_CONFIG_HAS_EXTENDED_PITCH_RANGE)
 
+#define BAE_OVERRIDE_VOLUME_CURVE(curveType) \
+    ((uint32_t)(SONG_CONFIG_OVERRIDE_VOLUME_CURVE | (((curveType) << SONG_CONFIG_VOLUME_CURVE_TYPE_SHIFT) & SONG_CONFIG_VOLUME_CURVE_TYPE_MASK)))
+
 /*
  * Hash-based runtime overrides.
  *

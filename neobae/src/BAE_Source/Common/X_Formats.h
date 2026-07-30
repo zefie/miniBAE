@@ -398,11 +398,15 @@ typedef struct X_PACKBY1
 #define SONG_CONFIG_HAS_SAMPLE_OFFSET_START     0x10  // instrument start-offset metadata is meaningful
 #define SONG_CONFIG_HAS_EXTENDED_PITCH_RANGE    0x20  // engine allows pitch down to -96 semitones (vs -24)
 #define SONG_CONFIG_EXTENDED_PITCH_RANGE_ON     0x40
+#define SONG_CONFIG_OVERRIDE_VOLUME_CURVE       0x80  // song defines a custom volume curve
+// Volume curve type stored in bits 8-10 when SONG_CONFIG_OVERRIDE_VOLUME_CURVE is set
+#define SONG_CONFIG_VOLUME_CURVE_TYPE_SHIFT     8
+#define SONG_CONFIG_VOLUME_CURVE_TYPE_MASK      0x700  // 3 bits for curve type (0-5, plus future expansion)
 #define SONG_CONFIG_CONTAINER_IS_ZMF            0x40000000u
 
 // Validation mask: all valid config bits ORed together
 // Used to filter out garbage from corrupted/uninitialized memory
-#define SONG_CONFIG_VALID_BITS_MASK             0x4000007Fu
+#define SONG_CONFIG_VALID_BITS_MASK             0x400007FFu
 
 // bits for SongResource_RMF_Linear flags
 #define XBFL_disableLoops               0x80

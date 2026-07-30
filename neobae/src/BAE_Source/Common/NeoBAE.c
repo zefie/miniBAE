@@ -2403,6 +2403,9 @@ struct sBAESong
     bool mSavedFixSpanDC;
     bool mHasSavedFixSpanDC;
 #endif
+    // Per-song velocity curve override
+    VelocityCurveType mSavedVelocityCurve;
+    bool mHasSavedVelocityCurve;
 };
 
 struct sBAESound
@@ -12210,6 +12213,18 @@ static void PV_ApplySongEngineConfig(BAESong song)
         pMixer->fixSpanDC = (flags & SONG_CONFIG_PANFIX_ON) ? TRUE : FALSE;
     }
 #endif
+
+    // Per-song volume curve override
+    if (flags & SONG_CONFIG_OVERRIDE_VOLUME_CURVE)
+    {
+        VelocityCurveType curveType = (VelocityCurveType)((flags & SONG_CONFIG_VOLUME_CURVE_TYPE_MASK) >> SONG_CONFIG_VOLUME_CURVE_TYPE_SHIFT);
+        if (curveType <= 5)
+        {
+            song->mSavedVelocityCurve = song->pSong->velocityCurveType;
+            song->mHasSavedVelocityCurve = TRUE;
+            GM_SetVelocityCurveType(song->pSong, curveType);
+        }
+    }
 }
 
 // Restore mixer values that were overridden by PV_ApplySongEngineConfig.
@@ -12238,6 +12253,12 @@ static void PV_RestoreSongEngineConfig(BAESong song)
         song->mHasSavedFixSpanDC = FALSE;
     }
 #endif
+
+    if (song->mHasSavedVelocityCurve)
+    {
+        GM_SetVelocityCurveType(song->pSong, song->mSavedVelocityCurve);
+        song->mHasSavedVelocityCurve = FALSE;
+    }
 }
 
 void BAE_OverrideBAESongFromFile(void *songObject, const void *filePath)

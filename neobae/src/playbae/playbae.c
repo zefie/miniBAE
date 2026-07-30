@@ -527,6 +527,9 @@ static void print_song_engine_config(BAESong song)
     if (flags & SONG_CONFIG_HAS_PANFIX)
         playbae_printf("  Pan Fix: %s\n",
             (flags & SONG_CONFIG_PANFIX_ON) ? "On" : "Off");
+    if (flags & SONG_CONFIG_OVERRIDE_VOLUME_CURVE)
+        playbae_printf("  Override Volume Curve: %s\n",
+            (flags & SONG_CONFIG_OVERRIDE_VOLUME_CURVE) ? "On" : "Off");
     if (flags & SONG_CONFIG_HAS_EXTENDED_PITCH_RANGE)
         playbae_printf("  Extended Pitch Range: %s\n",
             (flags & SONG_CONFIG_EXTENDED_PITCH_RANGE_ON) ? "On" : "Off");

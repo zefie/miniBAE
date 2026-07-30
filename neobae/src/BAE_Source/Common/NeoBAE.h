@@ -3299,6 +3299,8 @@ BAEResult BAERmfEditorDocument_SetInfo(BAERmfEditorDocument *document, BAEInfoTy
 char const *BAERmfEditorDocument_GetInfo(BAERmfEditorDocument const *document, BAEInfoType infoType);
 BAEResult BAERmfEditorDocument_SetEngineConfig(BAERmfEditorDocument *document, int32_t flags);
 BAEResult BAERmfEditorDocument_GetEngineConfig(BAERmfEditorDocument const *document, int32_t *outFlags);
+BAEResult BAERmfEditorDocument_SetVelocityCurve(BAERmfEditorDocument *document, int curveType);
+BAEResult BAERmfEditorDocument_GetVelocityCurve(BAERmfEditorDocument const *document, int *outCurveType);
 BAEResult BAERmfEditorDocument_AddTrack(BAERmfEditorDocument *document,
                                         BAERmfEditorTrackSetup const *setup,
                                         uint16_t *outTrackIndex);
