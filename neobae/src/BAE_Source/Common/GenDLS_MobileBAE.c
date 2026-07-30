@@ -2860,8 +2860,8 @@ void GM_DLS_ProcessNoteOn(GM_Song* pSong, uint16_t channel, uint16_t note, uint1
 
     DLS_Instrument* inst = ch->selectedInstrument;
     if (!inst) {
-        debug_message("DLS Synth: no instrument for bank=%d:%d (selector=%d) program=%d\n",
-                      ch->bankMsb, ch->bankLsb, ch->selectedBankSelector, ch->program);
+        debug_message("DLS Synth: no instrument for bank=%d:%d (selector=%d) program=%d channel=%d\n",
+                      ch->bankMsb, ch->bankLsb, ch->selectedBankSelector, ch->program, channel);
         return;
     }
 
@@ -3004,7 +3004,20 @@ void GM_DLS_AllNotesOff(GM_Song* pSong, int16_t channel, bool immediate) {
 void GM_DLS_ProcessProgramChange(GM_Song* pSong, uint16_t channel, uint16_t program) {
     if (!pSong || !pSong->pMixer || !pSong->pMixer->pDLSSynth) return;
     DLS_Synth* synth = (DLS_Synth*)pSong->pMixer->pDLSSynth;
-    dls_program_change(synth, &synth->channels[channel & 0x0F], program);
+    DLS_ChannelState* ch = &synth->channels[channel & 0x0F];
+
+    if (pSong->channelBankMode[channel] == USE_GM_PERC_BANK) {
+        if (program == 0) {
+            debug_message("DLS: PERC_BANK force 120:0 ch=%d (was bankMsb=%d)\n", channel, ch->bankMsb);
+            ch->bankMsb = 120;
+            ch->bankLsb = 0;
+        } else {
+            debug_message("DLS: PERC_BANK cleared ch=%d (program=%d)\n", channel, program);
+            pSong->channelBankMode[channel] = USE_GM_DEFAULT;
+        }
+    }
+
+    dls_program_change(synth, ch, program);
 }
 
 bool GM_DLS_HasProgram(GM_Song* pSong, uint16_t channel, uint16_t program)

@@ -2093,7 +2093,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                         if (PV_DLS_TryProgramWithXmfFallback(pSong, MIDIChannel, theBank, thePatch))
                         {
                             pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
-                            debug_message("ProcessProgramChange Debug: Channel %d is using an instrument from the embedded XMF DLS bank (bank=%d prog=%d)\n", MIDIChannel, theBank / 2, thePatch);
+                            debug_message("ProcessProgramChange Debug: Channel %d is using a DLS bank instrument (bank=%d prog=%d)\n", MIDIChannel, theBank / 2, thePatch);
                             routedToDLS = TRUE;
                         }
                     }
@@ -2103,7 +2103,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                         // If SF2 is active for this song, send program change to SF2
                         pSong->channelType[MIDIChannel] = CHANNEL_TYPE_SF2;
                         int32_t combinedProgram = (theBank * 128) + thePatch;
-                        debug_message("ProcessProgramChange Debug: Channel %d is using an instrument from the SF2 Bank (bank=%d prog=%d)\n", MIDIChannel, theBank / 2, thePatch);
+                        debug_message("ProcessProgramChange Debug: Channel %d is using a SF2 bank instrument  (bank=%d prog=%d)\n", MIDIChannel, theBank / 2, thePatch);
                         GM_SF2_ProcessProgramChange(pSong, MIDIChannel, combinedProgram);
                     }
                 }
@@ -2116,7 +2116,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                     if (PV_DLS_TryProgramWithXmfFallback(pSong, MIDIChannel, theBank, thePatch))
                     {
                         pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
-                        debug_message("ProcessProgramChange Debug: Channel %d is using an instrument from the embedded XMF DLS bank (bank=%d prog=%d)\n", MIDIChannel, theBank / 2, thePatch);
+                        debug_message("ProcessProgramChange Debug: Channel %d is using a DLS bank instrument (bank=%d prog=%d)\n", MIDIChannel, theBank / 2, thePatch);
                     }
                     else
                     {
@@ -2153,7 +2153,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                 uint32_t bankId, progId = 0, noteId = 0;
                 int16_t thePatch = PV_ConvertPatchBank(pSong, program, MIDIChannel);                        
                 TranslateInstrumentToBankProgram(thePatch, &bankId, &progId, &noteId);          
-                debug_message("ProcessProgramChange Debug: Channel %d is using an instrument from the RMF/HSB (instID=%d, bank=%d, program=%d)\n", MIDIChannel, thePatch, bankId, progId);
+                debug_message("ProcessProgramChange Debug: Channel %d is using a RMF/HSB instrument (instID=%d, bank=%d, program=%d)\n", MIDIChannel, thePatch, bankId, progId);
             }
 #endif
     }
@@ -2793,61 +2793,64 @@ void PV_ProcessController(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTr
 {
     unsigned char valueLSB, valueMSB;
     int16_t valueB;
+    int16_t theBank = 0;
 
-    if (0) {}
+#if DISABLE_BEATNIK_SF2_NRPN != TRUE
+    pSong->lastThreeControl[MIDIChannel][2] = pSong->lastThreeControl[MIDIChannel][1];
+    pSong->lastThreeControl[MIDIChannel][1] = pSong->lastThreeControl[MIDIChannel][0];
+    pSong->lastThreeControl[MIDIChannel][0].control = controller;
+    pSong->lastThreeControl[MIDIChannel][0].value = (uint16_t)value;
+
+    // check for Beatnik NRPN (all modes)
+    if (pSong->lastThreeControl[MIDIChannel][2].control == 99 &&
+        pSong->lastThreeControl[MIDIChannel][2].value == 5 &&
+        pSong->lastThreeControl[MIDIChannel][1].control == 98 &&
+        pSong->lastThreeControl[MIDIChannel][1].value == 0 &&
+        pSong->lastThreeControl[MIDIChannel][0].control == 6 &&
+        pSong->lastThreeControl[MIDIChannel][0].value == 2)
+    {
+        pSong->channelBankMode[MIDIChannel] = USE_GM_PERC_BANK;
 #if USE_SF2_SUPPORT == TRUE
-    else if ((GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2) &&
+        if ((GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2) &&
+            pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF)
+        {
+            theBank = 128;
+            PV_SF2_SetBankPreset(pSong, MIDIChannel, theBank, 0);
+        } else
+#endif
+        {
+            theBank = 0;
+            pSong->channelRawBank[MIDIChannel] = theBank;
+            pSong->channelBank[MIDIChannel] = 0;
+            pSong->channelLSB[MIDIChannel] = 0;
+#if USE_NATIVE_DLS == TRUE
+            if ((GM_IsDLSSong(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_DLS) &&
+                pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF)
+            {
+                GM_DLS_ProcessProgramChange(pSong, MIDIChannel, 0);
+            }
+#endif
+        }
+        debug_message("Set channel %i to bank %i via Beatnik NRPN\n", MIDIChannel, theBank);
+    }
+#endif
+
+#if USE_SF2_SUPPORT == TRUE
+    if ((GM_IsSF2Song(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2) &&
              pSong->channelType[MIDIChannel] != CHANNEL_TYPE_DLS)
     {
         if (pSong->songFlags & SONG_FLAG_IS_RMF) {
             if (controller == 0 && (value == 1 || value == 2)) {
-                // if we are an RMF file and just set a bank MSB of 1 or 2, we are now in RMF mode for this channel
                 pSong->channelType[MIDIChannel] = CHANNEL_TYPE_RMF;
             } else if (pSong->lastThreeControl[MIDIChannel][0].control == 0 &&
                     (pSong->lastThreeControl[MIDIChannel][0].value == 0 ||
                         pSong->lastThreeControl[MIDIChannel][0].value == 127)) {
-                // if we just set a bank MSB of 0/128, we are now in GM mode for this channel
                 pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
             }
         }
-#if DISABLE_BEATNIK_SF2_NRPN != TRUE
-        pSong->lastThreeControl[MIDIChannel][2] = pSong->lastThreeControl[MIDIChannel][1];
-        pSong->lastThreeControl[MIDIChannel][1] = pSong->lastThreeControl[MIDIChannel][0];
-        pSong->lastThreeControl[MIDIChannel][0].control = controller;
-        pSong->lastThreeControl[MIDIChannel][0].value = (uint16_t)value;
-
-        // check for Beatnik NRPN 
-        if (pSong->lastThreeControl[MIDIChannel][2].control == 99 &&
-            pSong->lastThreeControl[MIDIChannel][2].value == 5 &&
-            pSong->lastThreeControl[MIDIChannel][1].control == 98 &&
-            pSong->lastThreeControl[MIDIChannel][1].value == 0 &&
-            pSong->lastThreeControl[MIDIChannel][0].control == 6 &&
-            pSong->lastThreeControl[MIDIChannel][0].value == 2)
-        {
-            pSong->channelBankMode[MIDIChannel] = USE_GM_PERC_BANK;
-            PV_SF2_SetBankPreset(pSong, MIDIChannel, 128, 0);
-            debug_message("Set channel %i to bank %i via Beatnik NRPN\n", MIDIChannel, 128);
-        } else {
-            if  (pSong->lastThreeControl[MIDIChannel][0].control != 99 &&
-                 pSong->lastThreeControl[MIDIChannel][0].control != 98 && 
-                 pSong->lastThreeControl[MIDIChannel][1].control != 98
-                ) {
-                    if (pSong->lastThreeControl[MIDIChannel][1].control == 6 &&
-                        pSong->lastThreeControl[MIDIChannel][1].value == 2 &&
-                        controller == 0) {
-                            // we just set NRPN mode and the MIDI is trying to reset the MSB again, ignore it
-                            debug_message("Ignoring control %i directly after NRPN on channel %i\n", controller, MIDIChannel);                                
-                        } else
-#endif
-                        {
-                            // send to SF2
-                            if (pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF) {
-                                GM_SF2_ProcessController(pSong, MIDIChannel, controller, value);
-                            }
-                        }                        
-#if DISABLE_BEATNIK_SF2_NRPN != TRUE
-                  }
-#endif                      
+        // send to SF2
+        if (pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF) {
+            GM_SF2_ProcessController(pSong, MIDIChannel, controller, value);
         }
         // returning here breaks rolled MIDI in SF2 mode!!!
         //if (pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF) {
