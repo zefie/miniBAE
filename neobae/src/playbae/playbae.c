@@ -1371,7 +1371,9 @@ int main(int argc, char *argv[])
 {
     init_playFileString();
     signal(SIGINT, intHandler);
-
+#ifndef _VERSION
+    #define _VERSION "unknown"
+#endif
     gCustomReverbType = gDefaultReverbIndex;
     /* ---- Early flags: quiet / verbose ---- */
     if (PV_ParseCommands(argc, argv, "-q", 0, NULL)) { gSilent = 1; gVerbose = 0; }
@@ -1383,8 +1385,8 @@ int main(int argc, char *argv[])
         const char *comp = BAE_GetCompileInfo();
         const char *arch = BAE_GetCurrentCPUArchitecture();
         const char *feat = BAE_GetFeatureString();
-        playbae_printf("playbae %s built with %s, libNeoBAE %s\nfeatures: %s\n",
-            arch, comp, ver, feat);
+        playbae_printf("playbae %s built with %s, playbae %s, libNeoBAE %s\nfeatures: %s\n",
+            arch, comp, _VERSION, ver, feat);
         playbae_printf("Copyright (C) 2009 Beatnik, Inc and"
             " Copyright (C) 2021-2026 Zefie Networks. All rights reserved.\n");
         if (comp) free((void *)comp);

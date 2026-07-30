@@ -726,10 +726,21 @@ bool recreate_mixer_and_restore(int sampleRateHz, int reverbType,
 
 void setWindowTitle(SDL_Window *window)
 {
+#ifndef _VERSION
+#define _VERSION "unknown"
+#endif
     const char *libNeoBAECPUArch = BAE_GetCurrentCPUArchitecture();
-    const char *libNeoBAEVersion = BAE_GetVersion();
+    char debug[64];
+#ifdef _LDEBUG
+    snprintf(debug, sizeof(debug), " (debug build with symbols)");
+#elif defined(_DEBUG)
+    snprintf(debug, sizeof(debug), " (debug build)");
+#else
+    debug[0] = '\0';
+#endif
+
     char windowTitle[128];
-    snprintf(windowTitle, sizeof(windowTitle), "zefidi Media Player - %s - %s", libNeoBAECPUArch, libNeoBAEVersion);
+    snprintf(windowTitle, sizeof(windowTitle), "zefidi Media Player - %s - version %s%s", libNeoBAECPUArch, _VERSION, debug);
     SDL_SetWindowTitle(window, windowTitle);
 }
 

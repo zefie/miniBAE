@@ -1218,28 +1218,34 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
     char *baeVersion = (char *)BAE_GetVersion();   /* malloc'd by engine */
     char *compInfo = (char *)BAE_GetCompileInfo(); /* malloc'd by engine */
 
+    #ifndef _VERSION
+    #define _VERSION "unknown"
+    #endif
+    
     char line1[256];
-    if (baeVersion && cpuArch)
-        snprintf(line1, sizeof(line1), "zefidi Media Player (%s) %s", cpuArch, baeVersion);
-    else if (baeVersion)
-        snprintf(line1, sizeof(line1), "zefidi Media Player %s", baeVersion);
-    else if (cpuArch)
-        snprintf(line1, sizeof(line1), "zefidi Media Player (%s)", cpuArch);
+    if (cpuArch)
+        snprintf(line1, sizeof(line1), "zefidi Media Player - %s - version %s", cpuArch, _VERSION);
     else
-        snprintf(line1, sizeof(line1), "zefidi Media Player");
+        snprintf(line1, sizeof(line1), "zefidi Media Player - version %s", _VERSION);
 
     char line2[256];
-    if (compInfo && compInfo[0])
-        snprintf(line2, sizeof(line2), "built with %s", compInfo);
+    if (compInfo && compInfo[0] && baeVersion && baeVersion[0])
+        snprintf(line2, sizeof(line2), "Running libNeoBAE version %s", baeVersion);
     else
-        line2[0] = '\0';
+        snprintf(line2, sizeof(line2), "Running unknown version of libNeoBAE?");
 
     char line3[512];
-    if (baeFeatures && baeFeatures[0]) {
-        snprintf(line3, sizeof(line3), "features: %s", baeFeatures);
-    }
+    if (compInfo && compInfo[0])
+        snprintf(line3, sizeof(line3), "Built with %s", compInfo);
     else
         line3[0] = '\0';
+
+    char line4[512];
+    if (baeFeatures && baeFeatures[0]) {
+        snprintf(line4, sizeof(line4), "Features: %s", baeFeatures);
+    }
+    else
+        line4[0] = '\0';
 
     int y = dlg.y + 40;
     // Page 0: main info
@@ -1263,7 +1269,7 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
         }
         if (mclick && overVerLink)
         {
-            const char *raw = baeVersion ? baeVersion : _VERSION;
+            const char *raw = baeVersion ? baeVersion : "unknown";
             char url[256];
             url[0] = '\0';
             if (strstr(raw, "-dirty"))
@@ -1320,15 +1326,20 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
             draw_text(R, dlg.x + pad, y, line2, g_text_color);
             y += 20;
         }
-        // Insert features line as third line on About page (with wrapping)
         if (line3[0])
+        {
+            draw_text(R, dlg.x + pad, y, line3, g_text_color);
+            y += 20;
+        }        
+        // Insert features line as third line on About page (with wrapping)
+        if (line4[0])
         {
             int wrapWidth = dlgW - pad * 2 - 8;
             int featureLineH = 18; // line height for wrapped features
-            int wrapCount = count_wrapped_lines(line3, wrapWidth);
+            int wrapCount = count_wrapped_lines(line4, wrapWidth);
             if (wrapCount <= 0)
                 wrapCount = 1;
-            draw_wrapped_text(R, dlg.x + pad, y, line3, g_text_color, wrapWidth, featureLineH);
+            draw_wrapped_text(R, dlg.x + pad, y, line4, g_text_color, wrapWidth, featureLineH);
             y += wrapCount * featureLineH;
         }
         draw_text(R, dlg.x + pad, y, "", g_text_color); /* spacer */

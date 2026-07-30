@@ -1960,31 +1960,37 @@ const char *BAE_GetCompileInfo()
     char *versionString = (char *)malloc(sizeof(char) * maxStrSize);
     if (!versionString)
         return "";
-#ifdef __EMSCRIPTEN__
-#ifdef __cplusplus
-    snprintf(versionString, maxStrSize, "clang++ v%d.%d, emscripten v%d.%d", __clang_major__, __clang_minor__, __EMSCRIPTEN_major__, __EMSCRIPTEN_minor__);
-#else
-    snprintf(versionString, maxStrSize, "clang v%d.%d, emscripten v%d.%d", __clang_major__, __clang_minor__, __EMSCRIPTEN_major__, __EMSCRIPTEN_minor__);
+
+#if defined(__clang_version__)
+    int major, minor, patch;
+    sscanf(__clang_version__, "%d.%d.%d", &major, &minor, &patch);
 #endif
-#elif __ANDROID__
+
+#if defined(__EMSCRIPTEN__) && defined(__clang_version__)
 #ifdef __cplusplus
-    snprintf(versionString, maxStrSize, "clang++ v%d.%d, (Android NDK %d.%d, API %d)", __clang_major__, __clang_minor__, __NDK_MAJOR__, __NDK_MINOR__, __ANDROID_API__);
+    snprintf(versionString, maxStrSize, "clang++ v%d.%d.%d, emscripten v%d.%d", major, minor, patch, __EMSCRIPTEN_major__, __EMSCRIPTEN_minor__);
 #else
-    snprintf(versionString, maxStrSize, "clang v%d.%d (Android NDK %d.%d, API %d)", __clang_major__, __clang_minor__, __NDK_MAJOR__, __NDK_MINOR__, __ANDROID_API__);
+    snprintf(versionString, maxStrSize, "clang v%d.%d.%d, emscripten v%d.%d", major, minor, patch, __EMSCRIPTEN_major__, __EMSCRIPTEN_minor__);
 #endif
-#elif __clang_major__
+#elif defined(__ANDROID__) && defined(__clang_version__)
 #ifdef __cplusplus
-    snprintf(versionString, maxStrSize, "clang++ v%d.%d", __clang_major__, __clang_minor__);
+    snprintf(versionString, maxStrSize, "clang++ v%d.%d.%d, (Android NDK %d.%d, API %d)", major, minor, patch, __NDK_MAJOR__, __NDK_MINOR__, __ANDROID_API__);
 #else
-    snprintf(versionString, maxStrSize, "clang v%d.%d", __clang_major__, __clang_minor__);
+    snprintf(versionString, maxStrSize, "clang v%d.%d.%d (Android NDK %d.%d, API %d)", major, minor, patch, __NDK_MAJOR__, __NDK_MINOR__, __ANDROID_API__);
 #endif
-#elif __MINGW32__
+#elif defined(__clang_version__)
+#ifdef __cplusplus
+    snprintf(versionString, maxStrSize, "clang++ v%d.%d.%d", major, minor, patch);
+#else
+    snprintf(versionString, maxStrSize, "clang v%d.%d.%d", major, minor, patch);
+#endif
+#elif defined(__MINGW32__)
 #ifdef __cplusplus
     snprintf(versionString, maxStrSize, "mingw32 v%d.%d (g++ v%d.%d)", __MINGW32_MAJOR_VERSION, __MINGW32_MINOR_VERSION, __GNUC__, __GNUC_MINOR__);
 #else
     snprintf(versionString, maxStrSize, "mingw32 v%d.%d (gcc v%d.%d)", __MINGW32_MAJOR_VERSION, __MINGW32_MINOR_VERSION, __GNUC__, __GNUC_MINOR__);
 #endif
-#elif __GNUC__
+#elif defined(__GNUC__)
 #ifdef __cplusplus
     snprintf(versionString, maxStrSize, "g++ v%d.%d", __GNUC__, __GNUC_MINOR__);
 #else
