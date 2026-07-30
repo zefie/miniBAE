@@ -2049,11 +2049,8 @@ const char *BAE_GetFeatureString()
     // Built-in patches
 #if _BUILT_IN_PATCHES == TRUE
     const char *patches = "Built-in Patches";
-    if (patches && patches[0])
-    {
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", patches);
-        first = FALSE;
-    }
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", patches);
+    first = FALSE;
 #endif
 
 #if SUPPORT_KARAOKE == TRUE
@@ -2165,20 +2162,18 @@ snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", (
 #endif
 
     // Playlist support
-#if _ZEFI_GUI == TRUE
-    #if SUPPORT_PLAYLIST == TRUE
-        const char *playlist = "Playlist Support";
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", playlist);
-        first = FALSE;
-    #endif
+#if SUPPORT_PLAYLIST == TRUE
+    const char *playlist = "Playlist Support";
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", playlist);
+    first = FALSE;
+#endif
 
-        // MIDI hardware
-    #if SUPPORT_MIDI_HW == TRUE
-        const char *midi = "MIDI Hardware Support";
-        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", midi);
-        first = FALSE;
-    #endif
-#endif // _ZEFI_GUI == TRUE
+    // MIDI hardware
+#if SUPPORT_MIDI_HW == TRUE
+    const char *midi = "MIDI Hardware Support";
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", midi);
+    first = FALSE;
+#endif
 
     // MP3 support
 

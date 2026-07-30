@@ -166,11 +166,7 @@ void debug_message(const char *format, ...);
 #endif
 
 #ifdef OUTPUT_TO_LOGFILE
-#ifdef _ZEFI_GUI
-    #define LOGFILE_NAME "/zefidi.log"
-#else
-    #define LOGFILE_NAME "/neobae.log"
-#endif
+#define LOGFILE_NAME "/neobae.log"
 #define BAE_STDOUT(...)                \
     do {                                \
         char logPath[1024];             \
