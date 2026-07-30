@@ -86,7 +86,7 @@ static int           gFadeOut        = 1;
 static int           gWriteToFile    = 0;
 static BAEFileType   gWriteToFileType = BAE_WAVE_TYPE;
 static int           gMP3BitrateKbps = 128;
-static int           gVelocityCurve  = -1; /* -1 = engine default */
+static int           gVelocityCurve  = 1; /* -1 = engine default */
 static int           gVolumePct      = 100; /* raw user volume percent, for overdrive */
 static int           gEqEnabled      = 0;
 static float         gEqGains[5]     = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
@@ -1315,7 +1315,6 @@ static int PV_LoadBank(BAEMixer mixer, const char *path, BAEBankToken *tokenOut)
             return 0;
         }
         GM_SetMixerSF2Mode(TRUE);
-        gVelocityCurve = 5; /* No Curve for SF2 */
         if (tokenOut) *tokenOut = 0;
         return 1;
     }
@@ -1338,7 +1337,6 @@ static int PV_LoadBank(BAEMixer mixer, const char *path, BAEBankToken *tokenOut)
             return 0;
         }
         GM_SetMixerDLSMode(TRUE);
-        gVelocityCurve = 5; /* No Curve for DLS */
         if (tokenOut) *tokenOut = 0;
         return 1;
     }
@@ -1447,8 +1445,8 @@ int main(int argc, char *argv[])
     if (PV_ParseCommands(argc, argv, "-vc", 1, tmpBuf)) {
         gVelocityCurve = atoi(tmpBuf);
         if (gVelocityCurve < 0 || gVelocityCurve > 5) {
-            playbae_printf("Invalid velocity curve %d (0-5), using 0.\n", gVelocityCurve);
-            gVelocityCurve = 0;
+            playbae_printf("Invalid velocity curve %d (0-5), using 1.\n", gVelocityCurve);
+            gVelocityCurve = 1;
         }
         BAE_SetDefaultVelocityCurve(gVelocityCurve);
     }

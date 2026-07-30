@@ -290,7 +290,7 @@
 #define ALLOW_16_BIT            1           // 1 - allow 16 bit if available, 0 - force 8 bit
 #define ALLOW_STEREO            1           // 1 - allow stereo if available, 0 - force mono
 #define ALLOW_DEBUG_STEREO      0           // 1 - allow keyboard debugging of stereo code
-#define USE_DLS                 0           // 1 - allow DLS changes, 0 - IGOR
+#define USE_DLS                 0           // 1 - allow DLS changes, 0 - IGOR // Old DLS code not Native DLS
 
 #if USE_CALLBACKS
 // a macro to handle broken loops and partial buffers in the inner loop code

@@ -1201,11 +1201,7 @@ class HomeFragment : Fragment() {
                             // Persist the preference and apply it to the active song if present.
                             try {
                                 currentSong?.let { song ->
-                                    if (song.isSF2Song() || song.isDLSSong()) {
-                                        song.setVelocityCurve(5)
-                                    } else {
-                                        song.setVelocityCurve(value)
-                                    }
+                                    song.setVelocityCurve(value)
                                 }
                             } catch (_: Exception) {}
                             val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
@@ -1706,11 +1702,7 @@ class HomeFragment : Fragment() {
                         applyVolume()
                         
                         // Apply velocity curve
-                        if (song.isSF2Song() || song.isDLSSong()) {
-                            song.setVelocityCurve(5)
-                        } else {
-                            song.setVelocityCurve(velocityCurve.value)
-                        }
+                        song.setVelocityCurve(velocityCurve.value)
 
                         val r = song.start()
                         if (r == 0) {
@@ -2235,11 +2227,7 @@ class HomeFragment : Fragment() {
                 // If we have an active song, apply the curve immediately.
                 try {
                     currentSong?.let { song ->
-                        if (song.isSF2Song() || song.isDLSSong()) {
-                            song.setVelocityCurve(5)
-                        } else {
-                            song.setVelocityCurve(velocityCurvePref)
-                        }
+                        song.setVelocityCurve(velocityCurvePref)
                     }
                 } catch (_: Exception) {}
             } catch (_: Exception) {}

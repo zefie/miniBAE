@@ -424,11 +424,7 @@ class MainActivity : AppCompatActivity() {
                 currentSound = null
 
                 // Match HomeFragment behavior: SF2/DLS songs force no curve (5)
-                if (song.isSF2Song() || song.isDLSSong()) {
-                    song.setVelocityCurve(5)
-                } else {
-                    song.setVelocityCurve(velocityCurve)
-                }
+                song.setVelocityCurve(velocityCurve)
                 song.setVolumePercent(volumePercent)
 
                 // Start from 0 to re-init controllers cleanly

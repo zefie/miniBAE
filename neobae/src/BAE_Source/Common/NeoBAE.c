@@ -2951,7 +2951,7 @@ AudioFileType BAE_TranslateBAEFileType(BAEFileType fileType)
 // BAEMixer Functions
 // ------------------------------------------------------------------
 // Global default velocity curve (0..5). Applied to songs when they are created or loaded.
-static int g_defaultVelocityCurve = 0;
+static int g_defaultVelocityCurve = 1;
 
 BAEResult BAE_SetDefaultVelocityCurve(int curveType)
 {
@@ -4357,7 +4357,6 @@ BAEResult BAEMixer_UnloadDLSBank(BAEMixer mixer)
                 }
             }
         }
-
         pMixer->isDLS = false;
 #if USE_SF2_SUPPORT == TRUE
         pMixer->isSF2 = false;

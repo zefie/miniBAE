@@ -2560,17 +2560,19 @@ INLINE static void PV_ServeInstruments(void)
 #endif                
             }
         }
-#if BAE_CLASSIC_CHORUS && USE_NEW_EFFECTS
+#if BAE_CLASSIC_CHORUS == TRUE && USE_NEW_EFFECTS == TRUE 
         // Classic mode: reverb before chorus (pre-4/19/2000 Beatnik ordering)
         if (pMixer->classicChorus)
         {
             GM_ProcessReverb();
+#if USE_NEW_EFFECTS == TRUE 
             RunChorus(pMixer->songBufferChorus, pMixer->songBufferDry, pMixer->One_Loop);
+#endif
         }
         else
 #endif
         {
-#if USE_NEW_EFFECTS
+#if USE_NEW_EFFECTS == TRUE
             // DLS-spec ordering: chorus before reverb (4/19/2000 change)
             RunChorus(pMixer->songBufferChorus, pMixer->songBufferDry, pMixer->One_Loop);
 #endif
@@ -3570,8 +3572,10 @@ void PV_StartMIDINote(GM_Song *pSong, int16_t the_instrument,
         return;
     }
 
-    // scale with default velocity curve
-    Volume = PV_ModifyVelocityFromCurve(pSong, Volume);
+    // scale with default velocity curve if not an DLS or SF2 instrument
+    if (pSong->channelType[the_channel] != CHANNEL_TYPE_DLS && pSong->channelType[the_channel] != CHANNEL_TYPE_SF2) {
+        Volume = PV_ModifyVelocityFromCurve(pSong, Volume);
+    }
 
     playPitch = notePitch;
     pInstrument = NULL;
@@ -3710,6 +3714,7 @@ void PV_StartMIDINote(GM_Song *pSong, int16_t the_instrument,
 
     // NOTE: This the only place we work with the scaleBackAmount.
     volume32 = (Volume * pMixer->scaleBackAmount) >> 8;
+
 
     // get the inital note volume based upon song and channel volume
     // These are used in the note stealing algorythmn

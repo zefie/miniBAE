@@ -66,7 +66,7 @@
       "args": ["--build", "build"],
       "group": {
         "kind": "build",
-        "isDefault": true
+        "isDefault": false
       },
       "dependsOn": ["Configure Project (Linux)"],
       "problemMatcher": "$gcc"
@@ -121,7 +121,7 @@
       "command": ".zefie/docker_launcher_debug.sh",
       "group": {
         "kind": "build",
-        "isDefault": false
+        "isDefault": true
       },
       "dependsOn": ["zefie's Build Clean (docker llvm-mingw)"],
       "problemMatcher": "$gcc"

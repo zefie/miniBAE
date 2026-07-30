@@ -56,7 +56,7 @@ bool g_midi_output_device_dd_open = false;
 static bool g_midi_device_list_dirty = true;
 
 // Volume curve settings
-int g_volume_curve = 0;
+int g_volume_curve = 1;
 bool g_volumeCurveDropdownOpen = false;
 
 // Sample rate settings
@@ -668,7 +668,7 @@ void apply_settings_to_ui(const Settings *settings, int *transpose, int *tempo, 
     }
     if (settings->has_volume_curve)
     {
-        g_volume_curve = (settings->volume_curve >= 0 && settings->volume_curve <= 4) ? settings->volume_curve : 0;
+        g_volume_curve = (settings->volume_curve >= 0 && settings->volume_curve <= 4) ? settings->volume_curve : 1;
     }
     if (settings->has_stereo)
     {
@@ -1805,7 +1805,7 @@ void settings_init(void)
     g_show_settings_dialog = false;
     g_volumeCurveDropdownOpen = false;
     g_sampleRateDropdownOpen = false;
-    g_volume_curve = 0;
+    g_volume_curve = 1;
     g_stereo_output = true;
     g_sample_rate_hz = 44100;
 #if BAE_FIX_SPAN_DC

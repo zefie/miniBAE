@@ -10,6 +10,7 @@ extern "C" {
 
 
 void GM_SetMixerDLSMode(bool isDLS);
+bool GM_GetMixerDLSMode();
 
 // Forward declarations
 typedef struct DLS_Bank DLS_Bank;

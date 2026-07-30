@@ -61,6 +61,16 @@ void GM_SetMixerDLSMode(bool isDLS)
     }
 }
 
+bool GM_GetMixerDLSMode() 
+{
+    GM_Mixer* pMixer = GM_GetCurrentMixer();
+    if (pMixer) 
+    {
+        return pMixer->isDLS;
+    }
+    return false;
+}
+
 bool g_use_mobilebae_quirks = true;
 
 static bool dls_bank_quirks(const DLS_Bank* bank) {
