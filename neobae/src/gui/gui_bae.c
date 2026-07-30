@@ -297,8 +297,9 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
     GM_UnloadSF2Soundfont();
 #endif
 #if USE_NATIVE_DLS == TRUE
-    GM_SetMixerDLSMode(FALSE);
-    BAEMixer_UnloadDLSBank(g_bae.mixer);
+        GM_SetMixerDLSMode(FALSE);
+        BAEMixer_UnloadXMFDLSOverlayBank(g_bae.mixer);
+        BAEMixer_UnloadDLSBank(g_bae.mixer);
 #endif
 
 #if _BUILT_IN_PATCHES == TRUE
@@ -684,6 +685,7 @@ bool bae_load_bank(const char *bank_path)
 
 #if USE_NATIVE_DLS == TRUE
     GM_SetMixerDLSMode(FALSE);
+    BAEMixer_UnloadXMFDLSOverlayBank(g_bae.mixer);
     BAEMixer_UnloadDLSBank(g_bae.mixer);
 #endif
 

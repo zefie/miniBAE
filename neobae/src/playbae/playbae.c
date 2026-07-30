@@ -1296,6 +1296,7 @@ static int PV_LoadBank(BAEMixer mixer, const char *path, BAEBankToken *tokenOut)
     BAEMixer_UnloadBanks(mixer);
 #if USE_NATIVE_DLS == TRUE
     GM_SetMixerDLSMode(FALSE);
+    BAEMixer_UnloadXMFDLSOverlayBank(mixer);
     BAEMixer_UnloadDLSBank(mixer);
 #endif
 

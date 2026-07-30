@@ -387,6 +387,7 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromFile
 	BAEMixer_UnloadBanks(mixer);
 #if USE_NATIVE_DLS == TRUE
 	GM_SetMixerDLSMode(FALSE);
+	BAEMixer_UnloadXMFDLSOverlayBank(mixer);
 	BAEMixer_UnloadDLSBank(mixer);
 #endif
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
@@ -562,6 +563,7 @@ JNIEXPORT jstring JNICALL Java_com_zefie_NeoBAE_Mixer__1getBankFriendlyName
 	BAEMixer_UnloadBanks(mixer);
 #if USE_NATIVE_DLS == TRUE
 	GM_SetMixerDLSMode(FALSE);
+	BAEMixer_UnloadXMFDLSOverlayBank(mixer);
 	BAEMixer_UnloadDLSBank(mixer);
 #endif
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
@@ -677,6 +679,7 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemory
 	BAEMixer_UnloadBanks(mixer);
 #if USE_NATIVE_DLS == TRUE
 	GM_SetMixerDLSMode(FALSE);
+	BAEMixer_UnloadXMFDLSOverlayBank(mixer);
 	BAEMixer_UnloadDLSBank(mixer);
 #endif
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
@@ -780,6 +783,7 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemoryWithFilena
 	BAEMixer_UnloadBanks(mixer);
 #if USE_NATIVE_DLS == TRUE
 	GM_SetMixerDLSMode(FALSE);
+	BAEMixer_UnloadXMFDLSOverlayBank(mixer);
 	BAEMixer_UnloadDLSBank(mixer);
 #endif
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE

@@ -4369,8 +4369,10 @@ BAEResult BAEMixer_UnloadDLSBank(BAEMixer mixer)
                 GM_UnloadDLSBank(pMixer->pDLSSynth->banks[0]);
                 pMixer->pDLSSynth->banks[0] = NULL;
             }
-            GM_FinisDLSSynth(pMixer->pDLSSynth);
-            pMixer->pDLSSynth = NULL;
+            if (!pMixer->pDLSSynth->banks[1]) {
+                GM_FinisDLSSynth(pMixer->pDLSSynth);
+                pMixer->pDLSSynth = NULL;
+            }
         }
     }
     return BAE_NO_ERROR;
