@@ -22,7 +22,7 @@
  * compiled to WebAssembly.
  */
 
-class NeoBAEPlayer {
+class NeoBAEEngine {
     constructor() {
         this._wasmModule = null;
         this._audioContext = null;
@@ -78,10 +78,10 @@ class NeoBAEPlayer {
      * @param {number} [options.sampleRate=44100] - Audio sample rate
      * @param {number} [options.maxVoices=64] - Maximum polyphony
      * @param {string} [options.soundbankUrl] - URL to preload soundbank
-     * @returns {Promise<NeoBAEPlayer>}
+     * @returns {Promise<NeoBAEEngine>}
      */
     static async init(options = {}) {
-        const player = new NeoBAEPlayer();
+        const player = new NeoBAEEngine();
         await player._init(options);
         return player;
     }
@@ -401,7 +401,7 @@ class NeoBAEPlayer {
      */
     async loadSoundbank(source) {
         if (!this._isInitialized) {
-            const error = new Error('NeoBAEPlayer not initialized');
+            const error = new Error('NeoBAEEngine not initialized');
             this._dispatchEvent('error', error);
             throw error;
         }
@@ -1231,32 +1231,32 @@ class NeoBAEPlayer {
 }
 
 // Reverb type constants
-NeoBAEPlayer.REVERB_NONE = 0;
-NeoBAEPlayer.REVERB_CLOSET = 1;
-NeoBAEPlayer.REVERB_GARAGE = 2;
-NeoBAEPlayer.REVERB_ACOUSTIC_LAB = 3;
-NeoBAEPlayer.REVERB_CAVERN = 4;
-NeoBAEPlayer.REVERB_DUNGEON = 5;
-NeoBAEPlayer.REVERB_SMALL_REFLECTIONS = 6;
-NeoBAEPlayer.REVERB_EARLY_REFLECTIONS = 7;
-NeoBAEPlayer.REVERB_BASEMENT = 8;
-NeoBAEPlayer.REVERB_BANQUET_HALL = 9;
-NeoBAEPlayer.REVERB_CATACOMBS = 10;
-NeoBAEPlayer.REVERB_NEO_ROOM = 11;
-NeoBAEPlayer.REVERB_NEO_HALL = 12;
-NeoBAEPlayer.REVERB_NEO_CAVERN = 13;
-NeoBAEPlayer.REVERB_NEO_DUNGEON = 14;
-NeoBAEPlayer.REVERB_NEO_NOKIA = 15;
-NeoBAEPlayer.REVERB_MOBILEBAE = 16;
-NeoBAEPlayer.REVERB_NEO_TAP_DELAY = 17;
-NeoBAEPlayer.REVERB_CUSTOM = 18;
+NeoBAEEngine.REVERB_NONE = 0;
+NeoBAEEngine.REVERB_CLOSET = 1;
+NeoBAEEngine.REVERB_GARAGE = 2;
+NeoBAEEngine.REVERB_ACOUSTIC_LAB = 3;
+NeoBAEEngine.REVERB_CAVERN = 4;
+NeoBAEEngine.REVERB_DUNGEON = 5;
+NeoBAEEngine.REVERB_SMALL_REFLECTIONS = 6;
+NeoBAEEngine.REVERB_EARLY_REFLECTIONS = 7;
+NeoBAEEngine.REVERB_BASEMENT = 8;
+NeoBAEEngine.REVERB_BANQUET_HALL = 9;
+NeoBAEEngine.REVERB_CATACOMBS = 10;
+NeoBAEEngine.REVERB_NEO_ROOM = 11;
+NeoBAEEngine.REVERB_NEO_HALL = 12;
+NeoBAEEngine.REVERB_NEO_CAVERN = 13;
+NeoBAEEngine.REVERB_NEO_DUNGEON = 14;
+NeoBAEEngine.REVERB_NEO_NOKIA = 15;
+NeoBAEEngine.REVERB_MOBILEBAE = 16;
+NeoBAEEngine.REVERB_NEO_TAP_DELAY = 17;
+NeoBAEEngine.REVERB_CUSTOM = 18;
 
 // Export for module systems
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = NeoBAEPlayer;
+    module.exports = NeoBAEEngine;
 }
 
 // Also attach to window for script tag usage
 if (typeof window !== 'undefined') {
-    window.NeoBAEPlayer = NeoBAEPlayer;
+    window.NeoBAEEngine = NeoBAEEngine;
 }

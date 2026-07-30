@@ -22,7 +22,7 @@
  *   playSong(songUrl, bankUrl) - Opens a popup player and plays the song
  * 
  * Requires:
- *   - player-class.js (NeoBAEPlayer)
+ *   - player-class.js (NeoBAEEngine)
  *   - engine.js (NeoBAEModule)
  */
 
@@ -951,11 +951,11 @@
     // Initialize player if needed
     async function initPlayer() {
         if (!globalPlayer) {
-            if (typeof NeoBAEPlayer === 'undefined') {
-                throw new Error('NeoBAEPlayer not found. Please include player-class.js');
+            if (typeof NeoBAEEngine === 'undefined') {
+                throw new Error('NeoBAEEngine not found. Please include player-class.js');
             }
             
-            globalPlayer = await NeoBAEPlayer.init({
+            globalPlayer = await NeoBAEEngine.init({
                 sampleRate: 44100,
                 maxVoices: 64
             });
