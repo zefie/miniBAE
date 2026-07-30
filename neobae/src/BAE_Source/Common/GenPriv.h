@@ -818,6 +818,15 @@ struct GM_Mixer
     int32_t             LPfilterLz, LPfilterRz;
 #endif
     BAEEQState          eq;
+
+    bool                channelCaptureEnabled;
+    char                channelCaptureDir[1024];
+    void               *channelCaptureFiles[16];
+    int32_t            *channelCaptureBuf[16];
+    int32_t             channelCaptureBufSamples;
+    int32_t            *channelCaptureSnapshot;
+    bool                channelCaptureActive[16];
+    int32_t             channelCaptureSliceCount;
 };
 typedef struct GM_Mixer GM_Mixer;
 
@@ -838,6 +847,9 @@ typedef struct GM_Mixer GM_Mixer;
 #endif
 
 extern GM_Mixer *MusicGlobals;
+
+void PV_FlushChannelCaptureBuffers(GM_Mixer *pMixer);
+void PV_FinalizeChannelCaptureFile(int ch);
 
 #if USE_NEW_EFFECTS
 /******************************* new reverb stuff *****************************/

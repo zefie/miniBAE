@@ -355,6 +355,8 @@
 #include "X_Assert.h"
 #include "X_Formats.h"
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 #include <math.h>
 #if USE_SF2_SUPPORT == TRUE
     #if _USING_FLUIDLITE == TRUE
@@ -2468,6 +2470,142 @@ INLINE static void PV_ClearMixBuffers(bool doStereo)
 }
 #endif
 
+static void PV_ChannelCaptureWriteHeader(FILE *file, int sampleRate)
+{
+    uint16_t channels = 2;
+    uint16_t bitsPerSample = 16;
+    uint32_t byteRate = sampleRate * channels * (bitsPerSample / 8);
+    uint16_t blockAlign = channels * (bitsPerSample / 8);
+    uint32_t riffSize = 0;
+    uint32_t dataSize = 0;
+    uint16_t audioFormat = 1;
+    uint32_t chunkSize = 16;
+
+    fwrite("RIFF", 1, 4, file);
+    fwrite(&riffSize, 4, 1, file);
+    fwrite("WAVE", 1, 4, file);
+    fwrite("fmt ", 1, 4, file);
+    fwrite(&chunkSize, 4, 1, file);
+    fwrite(&audioFormat, 2, 1, file);
+    fwrite(&channels, 2, 1, file);
+    fwrite(&sampleRate, 4, 1, file);
+    fwrite(&byteRate, 4, 1, file);
+    fwrite(&blockAlign, 2, 1, file);
+    fwrite(&bitsPerSample, 2, 1, file);
+    fwrite("data", 1, 4, file);
+    fwrite(&dataSize, 4, 1, file);
+}
+
+void PV_FinalizeChannelCaptureFile(int ch)
+{
+    GM_Mixer *pMixer = MusicGlobals;
+    FILE *file = (FILE *)pMixer->channelCaptureFiles[ch];
+    if (!file)
+        return;
+
+    uint32_t fileSize = (uint32_t)ftell(file);
+    uint32_t dataSize = fileSize - 44;
+    uint32_t riffSize = fileSize - 8;
+
+    fseek(file, 4, SEEK_SET);
+    fwrite(&riffSize, 4, 1, file);
+    fseek(file, 40, SEEK_SET);
+    fwrite(&dataSize, 4, 1, file);
+
+    fclose(file);
+    pMixer->channelCaptureFiles[ch] = NULL;
+}
+
+static void PV_ChannelCaptureEnsureFile(GM_Mixer *pMixer, int ch)
+{
+    if (pMixer->channelCaptureFiles[ch] != NULL)
+        return;
+
+    char path[1280];
+    snprintf(path, sizeof(path), "%s/channel_%02d_dry.wav",
+             pMixer->channelCaptureDir, ch);
+    FILE *file = fopen(path, "wb");
+    if (file)
+    {
+        PV_ChannelCaptureWriteHeader(file, (int)pMixer->outputRate);
+        pMixer->channelCaptureFiles[ch] = file;
+    }
+}
+
+static void PV_ChannelCaptureWriteSlice(GM_Mixer *pMixer, int ch, int validSamples)
+{
+    int32_t *src = pMixer->channelCaptureBuf[ch];
+    FILE *file = (FILE *)pMixer->channelCaptureFiles[ch];
+    if (!file)
+        return;
+
+    for (int i = 0; i < validSamples; i++)
+    {
+        int32_t val = src[i];
+        if (val > 32767) val = 32767;
+        else if (val < -32768) val = -32768;
+        int16_t s16 = (int16_t)val;
+        fwrite(&s16, 2, 1, file);
+    }
+}
+
+void PV_FlushChannelCaptureBuffers(GM_Mixer *pMixer)
+{
+    if (!pMixer->channelCaptureEnabled)
+        return;
+
+    int validSamples = (int)pMixer->One_Loop * (pMixer->generateStereoOutput ? 2 : 1);
+    int zeroCount = 0;
+    int16_t zeroSample = 0;
+
+    for (int ch = 0; ch < 16; ch++)
+    {
+        int32_t *buf = pMixer->channelCaptureBuf[ch];
+        if (!buf)
+            continue;
+
+        bool hasData = false;
+        for (int i = 0; i < validSamples; i++)
+        {
+            if (buf[i] != 0) { hasData = true; break; }
+        }
+
+        if (!hasData && !pMixer->channelCaptureActive[ch])
+            continue;
+
+        if (hasData)
+        {
+            if (!pMixer->channelCaptureActive[ch])
+            {
+                pMixer->channelCaptureActive[ch] = true;
+                PV_ChannelCaptureEnsureFile(pMixer, ch);
+                FILE *bfile = (FILE *)pMixer->channelCaptureFiles[ch];
+                if (bfile)
+                {
+                    zeroCount = pMixer->channelCaptureSliceCount * validSamples;
+                    while (zeroCount-- > 0)
+                        fwrite(&zeroSample, 2, 1, bfile);
+                }
+            }
+
+            int32_t gv = (int32_t)pMixer->globalVolume;
+            for (int i = 0; i < validSamples; i++)
+            {
+                int64_t v = (int64_t)buf[i] * gv / MAX_MASTER_VOLUME;
+                v = v >> OUTPUT_SCALAR;
+                buf[i] = (int32_t)v;
+            }
+        }
+
+        PV_ChannelCaptureEnsureFile(pMixer, ch);
+        PV_ChannelCaptureWriteSlice(pMixer, ch, validSamples);
+
+        memset(buf, 0, pMixer->channelCaptureBufSamples * sizeof(int32_t));
+    }
+
+    pMixer->channelCaptureSliceCount++;
+}
+
 #if REVERB_USED == DISABLE_REVERB
 // Process active sample voices
 INLINE static void PV_ServeInstruments(void)
@@ -2486,7 +2624,31 @@ INLINE static void PV_ServeInstruments(void)
         pVoice = &pMixer->NoteEntry[count];
         if (pVoice->voiceMode != VOICE_UNUSED)
         {
-            PV_ServeThisInstrument(pVoice);
+            if (pMixer->channelCaptureEnabled)
+            {
+                int ch = (int)pVoice->NoteChannel;
+                if (ch >= 0 && ch < 16)
+                {
+                    int32_t *dry = pMixer->songBufferDry;
+                    int32_t *snap = pMixer->channelCaptureSnapshot;
+                    int32_t *chBuf = pMixer->channelCaptureBuf[ch];
+                    int32_t samples = pMixer->channelCaptureBufSamples;
+                    size_t bytes = (size_t)samples * sizeof(int32_t);
+
+                    memcpy(snap, dry, bytes);
+                    PV_ServeThisInstrument(pVoice);
+                    for (int i = 0; i < samples; i++)
+                        chBuf[i] += dry[i] - snap[i];
+                }
+                else
+                {
+                    PV_ServeThisInstrument(pVoice);
+                }
+            }
+            else
+            {
+                PV_ServeThisInstrument(pVoice);
+            }
             someSoundActive = TRUE;
         }
     }
@@ -2530,7 +2692,31 @@ INLINE static void PV_ServeInstruments(void)
             pVoice = &pMixer->NoteEntry[count];
             if (pVoice->voiceMode != VOICE_UNUSED)
             {
-                PV_ServeThisInstrument(pVoice);
+                if (pMixer->channelCaptureEnabled)
+                {
+                    int ch = (int)pVoice->NoteChannel;
+                    if (ch >= 0 && ch < 16)
+                    {
+                        int32_t *dry = pMixer->songBufferDry;
+                        int32_t *snap = pMixer->channelCaptureSnapshot;
+                        int32_t *chBuf = pMixer->channelCaptureBuf[ch];
+                        int32_t samples = pMixer->channelCaptureBufSamples;
+                        size_t bytes = (size_t)samples * sizeof(int32_t);
+
+                        memcpy(snap, dry, bytes);
+                        PV_ServeThisInstrument(pVoice);
+                        for (int i = 0; i < samples; i++)
+                            chBuf[i] += dry[i] - snap[i];
+                    }
+                    else
+                    {
+                        PV_ServeThisInstrument(pVoice);
+                    }
+                }
+                else
+                {
+                    PV_ServeThisInstrument(pVoice);
+                }
             }
         }
 
@@ -2591,7 +2777,31 @@ INLINE static void PV_ServeInstruments(void)
             {
                 if (pVoice->avoidReverb == FALSE)
                 {
-                    PV_ServeThisInstrument(pVoice);
+                    if (pMixer->channelCaptureEnabled)
+                    {
+                        int ch = (int)pVoice->NoteChannel;
+                        if (ch >= 0 && ch < 16)
+                        {
+                            int32_t *dry = pMixer->songBufferDry;
+                            int32_t *snap = pMixer->channelCaptureSnapshot;
+                            int32_t *chBuf = pMixer->channelCaptureBuf[ch];
+                            int32_t samples = pMixer->channelCaptureBufSamples;
+                            size_t bytes = (size_t)samples * sizeof(int32_t);
+
+                            memcpy(snap, dry, bytes);
+                            PV_ServeThisInstrument(pVoice);
+                            for (int i = 0; i < samples; i++)
+                                chBuf[i] += dry[i] - snap[i];
+                        }
+                        else
+                        {
+                            PV_ServeThisInstrument(pVoice);
+                        }
+                    }
+                    else
+                    {
+                        PV_ServeThisInstrument(pVoice);
+                    }
                 }
             }
         }
@@ -2644,7 +2854,31 @@ INLINE static void PV_ServeInstruments(void)
             {
                 if (pVoice->avoidReverb != FALSE)
                 {
-                    PV_ServeThisInstrument(pVoice);
+                    if (pMixer->channelCaptureEnabled)
+                    {
+                        int ch = (int)pVoice->NoteChannel;
+                        if (ch >= 0 && ch < 16)
+                        {
+                            int32_t *dry = pMixer->songBufferDry;
+                            int32_t *snap = pMixer->channelCaptureSnapshot;
+                            int32_t *chBuf = pMixer->channelCaptureBuf[ch];
+                            int32_t samples = pMixer->channelCaptureBufSamples;
+                            size_t bytes = (size_t)samples * sizeof(int32_t);
+
+                            memcpy(snap, dry, bytes);
+                            PV_ServeThisInstrument(pVoice);
+                            for (int i = 0; i < samples; i++)
+                                chBuf[i] += dry[i] - snap[i];
+                        }
+                        else
+                        {
+                            PV_ServeThisInstrument(pVoice);
+                        }
+                    }
+                    else
+                    {
+                        PV_ServeThisInstrument(pVoice);
+                    }
                 }
             }
         }
@@ -3178,6 +3412,8 @@ OPErr GM_ProcessSyncUpdateFromDSP(uint32_t dspTime)
             // process enabled voices, and add verb, and filter
             PV_ServeInstruments();
 
+            PV_FlushChannelCaptureBuffers(pMixer);
+
             PV_ProcessSequencerEvents(NULL); // process all songs and external events
             // process sound effects fade
             PV_ServeEffectsFades();
@@ -3237,6 +3473,9 @@ void PV_ProcessSampleFrame(void *threadContext, void *destinationSamples)
 
         // process enabled voices, and add verb, and filter
         PV_ServeInstruments();
+
+        PV_FlushChannelCaptureBuffers(pMixer);
+
 #if USE_MOD_API
         // mix MOD output into our output stream before we translate it for final output
         // and mix again here in case verb is disabled

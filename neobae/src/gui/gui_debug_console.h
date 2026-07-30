@@ -17,6 +17,7 @@
 
 #ifndef GUI_DEBUG_CONSOLE_H
 #define GUI_DEBUG_CONSOLE_H
+#include "NeoBAE.h"
 
 #if _DEBUG == TRUE
 

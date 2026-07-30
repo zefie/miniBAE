@@ -176,6 +176,13 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include "bankinfo.h" // embedded bank metadata (hash -> friendly)
+
+#if defined(_MSC_VER)
+    #include <direct.h>
+#else
+    #include <sys/stat.h>
+    #include <sys/types.h>
+#endif
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
 #include "GenSF2_FluidLite.h"
 #if USE_XMF_SUPPORT == TRUE
@@ -3035,6 +3042,104 @@ BAEResult BAE_GetClassicChorus(BAE_BOOL *outEnable)
 #endif
 }
 
+BAEResult BAE_EnableChannelCapture(BAEMixer mixer, const char *outputDir)
+{
+    GM_Mixer *pMixer = MusicGlobals;
+    int ch;
+
+    if (!pMixer)
+        return BAE_NOT_SETUP;
+    if (!outputDir || !outputDir[0])
+        return BAE_PARAM_ERR;
+    if (pMixer->channelCaptureEnabled)
+        return BAE_NO_ERROR;
+
+    size_t dirLen = strlen(outputDir);
+    if (dirLen >= sizeof(pMixer->channelCaptureDir))
+        return BAE_PARAM_ERR;
+
+    strncpy(pMixer->channelCaptureDir, outputDir, sizeof(pMixer->channelCaptureDir) - 1);
+    pMixer->channelCaptureDir[sizeof(pMixer->channelCaptureDir) - 1] = '\0';
+
+#if defined(_MSC_VER)
+    _mkdir(outputDir);
+#else
+    mkdir(outputDir);
+#endif
+
+    pMixer->channelCaptureBufSamples = (pMixer->maxChunkSize + 64) * 2;
+    size_t bufBytes = pMixer->channelCaptureBufSamples * sizeof(int32_t);
+
+    pMixer->channelCaptureSnapshot = (int32_t *)malloc(bufBytes);
+    if (!pMixer->channelCaptureSnapshot)
+        return BAE_MEMORY_ERR;
+
+    for (ch = 0; ch < 16; ch++)
+    {
+        pMixer->channelCaptureBuf[ch] = (int32_t *)calloc(1, bufBytes);
+        if (!pMixer->channelCaptureBuf[ch])
+        {
+            for (int j = 0; j < ch; j++)
+            {
+                free(pMixer->channelCaptureBuf[j]);
+                pMixer->channelCaptureBuf[j] = NULL;
+            }
+            free(pMixer->channelCaptureSnapshot);
+            pMixer->channelCaptureSnapshot = NULL;
+            return BAE_MEMORY_ERR;
+        }
+        pMixer->channelCaptureFiles[ch] = NULL;
+    }
+
+    pMixer->channelCaptureEnabled = true;
+    return BAE_NO_ERROR;
+}
+
+BAEResult BAE_DisableChannelCapture(BAEMixer mixer)
+{
+    GM_Mixer *pMixer = MusicGlobals;
+    int ch;
+
+    (void)mixer;
+    if (!pMixer)
+        return BAE_NOT_SETUP;
+    if (!pMixer->channelCaptureEnabled)
+        return BAE_NO_ERROR;
+
+    for (ch = 0; ch < 16; ch++)
+    {
+        if (pMixer->channelCaptureFiles[ch] != NULL)
+        {
+            PV_FinalizeChannelCaptureFile(ch);
+            pMixer->channelCaptureFiles[ch] = NULL;
+        }
+        if (pMixer->channelCaptureBuf[ch] != NULL)
+        {
+            free(pMixer->channelCaptureBuf[ch]);
+            pMixer->channelCaptureBuf[ch] = NULL;
+        }
+    }
+
+    if (pMixer->channelCaptureSnapshot != NULL)
+    {
+        free(pMixer->channelCaptureSnapshot);
+        pMixer->channelCaptureSnapshot = NULL;
+    }
+
+    pMixer->channelCaptureEnabled = false;
+    return BAE_NO_ERROR;
+}
+
+BAEResult BAE_GetChannelCaptureActive(BAEMixer mixer, bool *outActive)
+{
+    GM_Mixer *pMixer = MusicGlobals;
+    (void)mixer;
+    if (!pMixer || !outActive)
+        return BAE_NOT_SETUP;
+    memcpy(outActive, pMixer->channelCaptureActive, sizeof(pMixer->channelCaptureActive));
+    return BAE_NO_ERROR;
+}
+
 BAEResult BAESong_GetEngineConfig(BAESong song, uint32_t *outFlags)
 {
     uint32_t flags;
@@ -3561,8 +3666,13 @@ static ReverbMode g_defaultReverbType = BAE_REVERB_NONE;
 BAEResult BAEMixer_SetDefaultReverb(BAEMixer mixer, BAEReverbType verb)
 {
 #if REVERB_USED != REVERB_DISABLED
+    if (!mixer || !mixer->pMixer)
+        return BAE_PARAM_ERR;
+    GM_Mixer *saved = MusicGlobals;
+    MusicGlobals = mixer->pMixer;
     g_defaultReverbType = BAE_TranslateFromBAEReverb(verb);
     GM_SetReverbType(BAE_TranslateFromBAEReverb(verb));
+    MusicGlobals = saved;
     return BAE_NO_ERROR;
 #else
     return BAE_NOT_SETUP;

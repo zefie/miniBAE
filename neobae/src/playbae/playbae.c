@@ -96,6 +96,12 @@ static int           gPosCounter  = 0;
 static int           gPosInterval = 10; /* ~150 ms between updates */
 
 static int gHasCustomReverb = 0;
+static char gVoiceCaptureDir[1024] = {0};
+static char gInputFilePath[1024] = {0};
+static char gBankFilePath[1024] = {0};
+static int  gTempOutputFile = 0;
+static int  gPassNumber = 0;
+static int  gPassTotal  = 0;
 
 #if USE_NEO_EFFECTS == TRUE
 static BAEReverbType gDefaultReverbIndex = BAE_REVERB_TYPE_17;
@@ -442,7 +448,8 @@ static const char usageExtra[] =
     "                 -sw {stream a WAV file}\n"
     "                 -sa {stream an AIFF file}\n"
     "                 -i  {show RMF file info}\n"
-    "                 -d  {verbose/debug mode}\n";
+    "                 -d  {verbose/debug mode}\n"
+    "                 -oc <dir> {record per-channel WAV files}\n";
 
 static const char reverbList[] =
     "Valid Reverb Types (-rv):\n"
@@ -583,6 +590,14 @@ static void display_song_position(uint32_t posMs, uint32_t totalMs)
 {
     if (++gPosCounter < gPosInterval) return;
     gPosCounter = 0;
+
+    if (gWriteToFile) {
+        if (gPassNumber > 0) {
+            playbae_printf("Pass %d/%d\r", gPassNumber, gPassTotal);
+        }
+        return;
+    }
+
     int m  = (int)(posMs / 60000);
     int s  = (int)((posMs - m*60000) / 1000);
     int ms = (int)(posMs - m*60000 - s*1000);
@@ -692,13 +707,13 @@ static BAEResult prime_encoder(BAEMixer mixer, BAESong song)
 
 static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
     BAE_UNSIGNED_FIXED volume, unsigned int timeLimitSec, unsigned int loopCount,
-    BAEReverbType reverbType, char *muteChannels)
+    BAEReverbType reverbType, char *muteChannels, int soloChannel)
 {
     unsigned int effectiveLoopCount = loopCount;
     /* Velocity curve must be set before Start (same as original PlayMidi) */
     if (gVelocityCurve >= 0) {
         BAESong_SetVelocityCurve(song, gVelocityCurve);
-        playbae_printf("Velocity curve: %d\n", gVelocityCurve);
+        if (gPassNumber <= 0) playbae_printf("Velocity curve: %d\n", gVelocityCurve);
     }
 #if USE_SF2_SUPPORT == TRUE
     else if (BAESong_IsSF2Song(song)) {
@@ -724,7 +739,7 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
     }
 
     if (gVerbose) BAESong_DisplayInfo(song);
-    print_song_engine_config(song);
+    if (gPassNumber <= 0) print_song_engine_config(song);
 
     /* Apply settings after Start (matches original PlayMidi/PlayRMF order) */
     BAESong_SetVolume(song, volume);
@@ -747,6 +762,9 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
     }
     if (muteChannels && muteChannels[0])
         MuteChannels(song, muteChannels);
+
+    if (soloChannel >= 0)
+        BAESong_SoloChannel(song, (uint16_t)soloChannel);
 
     /* Export defaults to one-shot; BAEScript may re-enable looping with exporter.loopcount. */
     if (gWriteToFile) {
@@ -790,11 +808,13 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
     }
 #endif
 
-    playbae_printf("Reverb: %d\n", (int)reverbType);
-    if (effectiveLoopCount > 0)
-        playbae_printf("Will loop %u time(s)\n", effectiveLoopCount);
-    if (timeLimitSec > 0)
-        playbae_printf("Time limit: %u sec\n", timeLimitSec);
+    if (gPassNumber <= 0) {
+        playbae_printf("Reverb: %d\n", (int)reverbType);
+        if (effectiveLoopCount > 0)
+            playbae_printf("Will loop %u time(s)\n", effectiveLoopCount);
+        if (timeLimitSec > 0)
+            playbae_printf("Time limit: %u sec\n", timeLimitSec);
+    }
 
 #if USE_MPEG_ENCODER == TRUE
     if (gWriteToFile) {
@@ -856,7 +876,7 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
     }
 
     PV_Idle(mixer, 900000);
-    playbae_printf("\n");
+    if (gPassNumber <= 0) playbae_printf("\n");
     return BAE_NO_ERROR;
 }
 
@@ -965,7 +985,7 @@ static BAEResult PV_PlayStreamed(BAEMixer mixer, const char *fileName,
 
 static BAEResult PV_PlayFile(BAEMixer mixer, const char *path,
     BAE_UNSIGNED_FIXED volume, unsigned int timeLimitSec, unsigned int loopCount,
-    BAEReverbType reverbType, char *muteChannels)
+    BAEReverbType reverbType, char *muteChannels, int soloChannel)
 {
     BAEFileType ftype = X_DetermineFileType((BAEPathName)path);
     if (ftype == BAE_INVALID_TYPE) {
@@ -1031,7 +1051,7 @@ static BAEResult PV_PlayFile(BAEMixer mixer, const char *path,
 #endif
         default: break;
         }
-        playbae_printf("Playing %s: %s\n", typeName, path);
+        if (gPassNumber <= 0) playbae_printf("Playing %s: %s\n", typeName, path);
 
         BAESound sound = BAESound_New(mixer);
         if (!sound) return BAE_MEMORY_ERR;
@@ -1056,26 +1076,26 @@ static BAEResult PV_PlayFile(BAEMixer mixer, const char *path,
     BAEResult err = BAE_NO_ERROR;
 
     if (ftype == BAE_RMF) {
-        playbae_printf("Playing RMF: %s\n", path);
+        if (gPassNumber <= 0) playbae_printf("Playing RMF: %s\n", path);
         if (!gWriteToFile) print_rmf_info(path);
         err = BAESong_LoadRmfFromFile(song, (BAEPathName)path, 0, TRUE);
     }
 #if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDLITE == TRUE || USE_NATIVE_DLS == TRUE)
     else if (ftype == BAE_XMF) {
-        playbae_printf("Playing XMF: %s\n", path);
+        if (gPassNumber <= 0) playbae_printf("Playing XMF: %s\n", path);
         err = BAESong_LoadXmfFromFile(song, (BAEPathName)path, TRUE);
     }
 #endif
 #if USE_RMI_SUPPORT == TRUE
     else if (ftype == BAE_RMI) {
-        playbae_printf("Playing RMI: %s\n", path);
+        if (gPassNumber <= 0) playbae_printf("Playing RMI: %s\n", path);
         err = BAESong_LoadRmiFromFile(song, (BAEPathName)path, TRUE, TRUE);
     }
 #endif
 #if USE_RETRO_RINGTONE_SUPPORT == TRUE
     else if (ftype == BAE_RINGTONE_IMY || ftype == BAE_RINGTONE_RNG ||
              ftype == BAE_RINGTONE_RTX) {
-        playbae_printf("Playing ringtone: %s\n", path);
+        if (gPassNumber <= 0) playbae_printf("Playing ringtone: %s\n", path);
         unsigned char *midi = NULL;
         uint32_t midiSize   = 0;
         err = BAERingtone_ConvertToMidiFromFile((BAEPathName)path, ftype,
@@ -1087,7 +1107,7 @@ static BAEResult PV_PlayFile(BAEMixer mixer, const char *path,
 #endif
     else {
         /* Default: standard MIDI */
-        playbae_printf("Playing MIDI: %s\n", path);
+        if (gPassNumber <= 0) playbae_printf("Playing MIDI: %s\n", path);
         err = BAESong_LoadMidiFromFile(song, (BAEPathName)path, TRUE);
     }
 
@@ -1099,7 +1119,7 @@ static BAEResult PV_PlayFile(BAEMixer mixer, const char *path,
     }
 
     err = PV_PlaySong(mixer, song, path,
-        volume, timeLimitSec, loopCount, reverbType, muteChannels);
+        volume, timeLimitSec, loopCount, reverbType, muteChannels, soloChannel);
     BAESong_Delete(song);
     return err;
 }
@@ -1578,6 +1598,13 @@ int main(int argc, char *argv[])
     }
 #endif
 
+    /* ---- Parse -oc ---- */
+    char tmpBuf2[1024] = {0};
+    if (PV_ParseCommands(argc, argv, "-oc", 1, tmpBuf2)) {
+        strncpy(gVoiceCaptureDir, tmpBuf2, sizeof(gVoiceCaptureDir)-1);
+        gVoiceCaptureDir[sizeof(gVoiceCaptureDir)-1] = '\0';
+    }
+
     /* ---- Load patch bank ---- */
     BAEBankToken bankToken = 0;
 
@@ -1586,6 +1613,8 @@ int main(int argc, char *argv[])
             BAEMixer_Delete(mixer);
             return 1;
         }
+        strncpy(gBankFilePath, parmFile, sizeof(gBankFilePath)-1);
+        gBankFilePath[sizeof(gBankFilePath)-1] = '\0';
         char friendly[128] = {0};
         if (bankToken &&
             BAE_GetBankFriendlyName(mixer, bankToken, friendly, sizeof(friendly)) == BAE_NO_ERROR
@@ -1725,43 +1754,92 @@ int main(int argc, char *argv[])
         }
     }
 
+    if (gVoiceCaptureDir[0]) {
+        BAEResult capErr = BAE_EnableChannelCapture(mixer, gVoiceCaptureDir);
+        if (capErr == BAE_NO_ERROR) {
+            playbae_printf("Per-channel recording enabled: %s/\n", gVoiceCaptureDir);
+        } else {
+            playbae_printf("WARNING: Failed to enable per-channel capture (%d): %s\n",
+                capErr, BAE_GetErrorString(capErr));
+        }
+        if (!gWriteToFile) {
+            char tmpPath[1280];
+            snprintf(tmpPath, sizeof(tmpPath), "%s/full.wav", gVoiceCaptureDir);
+            err = BAEMixer_StartOutputToFile(mixer, (BAEPathName)tmpPath,
+                BAE_WAVE_TYPE, BAE_COMPRESSION_NONE);
+            if (err == BAE_NO_ERROR) {
+                gWriteToFile = 1;
+                gWriteToFileType = BAE_WAVE_TYPE;
+                gTempOutputFile = 1;
+            }
+        }
+    }
+
     /* ---- Play file ---- */
     int played = 0;
 
     /* Bare first argument (no leading dash) */
     if (!played && argc > 1 && argv[1][0] != '-') {
         err = PV_PlayFile(mixer, argv[1], volume, timeLimitSec, loopCount,
-            reverbType, muteChannels);
+            reverbType, muteChannels, -1);
+        if (err == BAE_NO_ERROR) {
+            strncpy(gInputFilePath, argv[1], sizeof(gInputFilePath)-1);
+            gInputFilePath[sizeof(gInputFilePath)-1] = '\0';
+        }
         played = 1;
     }
 
     /* -f: universal auto-detect */
     if (!played && PV_ParseCommands(argc, argv, "-f", 1, parmFile)) {
         err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount,
-            reverbType, muteChannels);
+            reverbType, muteChannels, -1);
+        if (err == BAE_NO_ERROR) {
+            strncpy(gInputFilePath, parmFile, sizeof(gInputFilePath)-1);
+            gInputFilePath[sizeof(gInputFilePath)-1] = '\0';
+        }
         played = 1;
     }
 
     /* Type-specific flags kept for backward compatibility */
     if (!played && PV_ParseCommands(argc, argv, "-m", 1, parmFile)) {
-        err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount, reverbType, muteChannels);
+        err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount, reverbType, muteChannels, -1);
+        if (err == BAE_NO_ERROR) {
+            strncpy(gInputFilePath, parmFile, sizeof(gInputFilePath)-1);
+            gInputFilePath[sizeof(gInputFilePath)-1] = '\0';
+        }
         played = 1;
     }
     if (!played && PV_ParseCommands(argc, argv, "-r", 1, parmFile)) {
-        err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount, reverbType, muteChannels);
+        err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount, reverbType, muteChannels, -1);
+        if (err == BAE_NO_ERROR) {
+            strncpy(gInputFilePath, parmFile, sizeof(gInputFilePath)-1);
+            gInputFilePath[sizeof(gInputFilePath)-1] = '\0';
+        }
         played = 1;
     }
     if (!played && PV_ParseCommands(argc, argv, "-a", 1, parmFile)) {
-        err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount, reverbType, muteChannels);
+        err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount, reverbType, muteChannels, -1);
+        if (err == BAE_NO_ERROR) {
+            strncpy(gInputFilePath, parmFile, sizeof(gInputFilePath)-1);
+            gInputFilePath[sizeof(gInputFilePath)-1] = '\0';
+        }
         played = 1;
     }
     if (!played && PV_ParseCommands(argc, argv, "-w", 1, parmFile)) {
-        err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount, reverbType, muteChannels);
+        err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount, reverbType, muteChannels, -1);
+        if (err == BAE_NO_ERROR) {
+            strncpy(gInputFilePath, parmFile, sizeof(gInputFilePath)-1);
+            gInputFilePath[sizeof(gInputFilePath)-1] = '\0';
+        }
         played = 1;
     }
 #if USE_MPEG_DECODER == TRUE
     if (!played && PV_ParseCommands(argc, argv, "-mp", 1, parmFile)) {
-        err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount, reverbType, muteChannels);
+        err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount, reverbType, muteChannels, -1);
+        if (err == BAE_NO_ERROR) {
+            strncpy(gInputFilePath, parmFile, sizeof(gInputFilePath)-1);
+            gInputFilePath[sizeof(gInputFilePath)-1] = '\0';
+        }
         played = 1;
     }
 #endif
@@ -1802,6 +1880,112 @@ int main(int argc, char *argv[])
         }
 #endif
         BAEMixer_StopOutputToFile();
+    }
+
+    if (gTempOutputFile) {
+        gWriteToFile = 0;
+        gTempOutputFile = 0;
+    }
+
+    if (gVoiceCaptureDir[0]) {
+        bool channelActive[16] = {false};
+        BAEResult capErr = BAE_GetChannelCaptureActive(mixer, channelActive);
+        capErr = BAE_DisableChannelCapture(mixer);
+        if (capErr == BAE_NO_ERROR) {
+            playbae_printf("Per-channel recording complete.\n");
+        }
+
+        if (gInputFilePath[0]) {
+            int activeCount = 0;
+            for (int ch = 0; ch < 16; ch++)
+                if (channelActive[ch]) activeCount++;
+
+            int soloCount = 0;
+            for (int ch = 0; ch < 16; ch++) {
+                if (!channelActive[ch]) continue;
+
+                gPassNumber = soloCount + 1;
+                gPassTotal  = activeCount;
+
+                char wetPath[1280];
+                snprintf(wetPath, sizeof(wetPath), "%s/channel_%02d.wav",
+                         gVoiceCaptureDir, ch);
+
+                BAEMixer soloMixer = BAEMixer_New();
+                if (!soloMixer) continue;
+
+                capErr = BAEMixer_Open(soloMixer, sampleRate, interpol, mods,
+                    (int16_t)maxVoices, 8, 64, TRUE);
+                if (capErr != BAE_NO_ERROR) {
+                    BAEMixer_Delete(soloMixer);
+                    continue;
+                }
+
+                BAEMixer_SetAudioTask(soloMixer, PV_AudioTask, (void *)soloMixer);
+                apply_eq_state(soloMixer);
+                apply_output_gain(soloMixer);
+
+                if (gHasCustomReverb) {
+                    BAEMixer_SetDefaultReverb(soloMixer, gCustomReverbType);
+                    SetNeoCustomReverbCombCount(gCustomReverbCombCount);
+                    for (int j = 0; j < 4; j++) {
+                        SetNeoCustomReverbCombDelay(j, gCustomReverbDelays[j]);
+                        SetNeoCustomReverbCombFeedback(j, gCustomReverbFeedback[j]);
+                        SetNeoCustomReverbCombGain(j, gCustomReverbGain[j]);
+                    }
+                    SetNeoCustomReverbLowpass(gCustomReverbLowpass);
+                    SetNeoReverbMix(gCustomReverbMix);
+                } else {
+                    BAEMixer_SetDefaultReverb(soloMixer, reverbType);
+                }
+
+                BAEBankToken soloBankToken = 0;
+                if (gBankFilePath[0]) {
+                    if (!PV_LoadBank(soloMixer, gBankFilePath, &soloBankToken)) {
+                        BAEMixer_Delete(soloMixer);
+                        continue;
+                    }
+                } else {
+#if _BUILT_IN_PATCHES == TRUE
+                    capErr = BAEMixer_LoadBuiltinBank(soloMixer, &soloBankToken);
+                    if (capErr != BAE_NO_ERROR) {
+                        BAEMixer_Delete(soloMixer);
+                        continue;
+                    }
+#else
+                    BAEMixer_Delete(soloMixer);
+                    continue;
+#endif
+                }
+
+                capErr = BAEMixer_StartOutputToFile(soloMixer, (BAEPathName)wetPath,
+                    BAE_WAVE_TYPE, BAE_COMPRESSION_NONE);
+                if (capErr != BAE_NO_ERROR) {
+                    BAEMixer_Delete(soloMixer);
+                    continue;
+                }
+
+                playbae_printf("Recording channel %d: %s\n", ch, wetPath);
+
+                int wasWriteToFile = gWriteToFile;
+                BAEFileType wasWriteType = gWriteToFileType;
+                gWriteToFile = 1;
+                gWriteToFileType = BAE_WAVE_TYPE;
+
+                PV_PlayFile(soloMixer, gInputFilePath, volume, 0, 0,
+                    reverbType, muteChannels, ch);
+
+                gWriteToFile = wasWriteToFile;
+                gWriteToFileType = wasWriteType;
+
+                BAEMixer_StopOutputToFile();
+                BAEMixer_Close(soloMixer);
+                BAEMixer_Delete(soloMixer);
+                soloCount++;
+            }
+            if (soloCount > 0)
+                playbae_printf("Wrote %d solo channel WAV(s) to %s/\n", soloCount, gVoiceCaptureDir);
+        }
     }
 
     /* ---- Cleanup ---- */
