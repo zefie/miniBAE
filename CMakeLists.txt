@@ -112,6 +112,7 @@ if((MINGW OR MSVC) AND NEOBAE_RC_ENABLED)
 
   set(VERSION_RC_IN "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Common/version.rc.in")
   set(VERSION_ICO_RC_IN "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Common/version_ico.rc.in")
+  set(VERSION_ICO_WX_RC_IN "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Common/version_ico_wx.rc.in")
   set(VERSION_ZEFIDI_RC_IN "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Common/version_zefidi.rc.in")
 
 
@@ -1976,7 +1977,7 @@ if(BUILD_NBSTUDIO)
           neobae/src/thirdparty/libxmp/src/lite/lite-it_load.c          
       )
       if((MINGW OR MSVC) AND NEOBAE_RC_ENABLED)
-        neobae_configure_rc(nbstudio NBSTUDIO_VERSION_RC "${VERSION_ICO_RC_IN}" "NeoBAE Studio" "nbstudio.exe" "1" "BAEStudio.ico")
+        neobae_configure_rc(nbstudio NBSTUDIO_VERSION_RC "${VERSION_ICO_WX_RC_IN}" "NeoBAE Studio" "nbstudio.exe" "1" "BAEStudio.ico")
         list(APPEND NBSTUDIO_SOURCES "${NBSTUDIO_VERSION_RC}")
       endif()
       if(MINGW OR MSVC)
