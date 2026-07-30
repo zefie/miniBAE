@@ -1971,6 +1971,7 @@ static void PV_DLS_ApplyHSBBankSelect(GM_Song *pSong, int16_t MIDIChannel, int32
 static bool PV_DLS_TryProgramWithXmfFallback(GM_Song *pSong, int16_t MIDIChannel, int32_t hsbBank, int32_t program)
 {
     uint16_t rawMsb;
+    uint16_t rawLsb;
 
     if (!pSong)
     {
@@ -1990,19 +1991,24 @@ static bool PV_DLS_TryProgramWithXmfFallback(GM_Song *pSong, int16_t MIDIChannel
     }
 
     rawMsb = (uint16_t)((uint8_t)pSong->channelRawBank[MIDIChannel]);
+    rawLsb = (uint16_t)((uint8_t)pSong->channelLSB[MIDIChannel] & 0x7F);
     if ((rawMsb == 120 || rawMsb == 121) && ((uint8_t)pSong->channelLSB[MIDIChannel] != 0))
     {
         GM_DLS_ProcessController(pSong, (uint16_t)MIDIChannel, B_BANK_MSB, rawMsb);
-        GM_DLS_ProcessController(pSong, (uint16_t)MIDIChannel, B_BANK_LSB, 0);
-        GM_DLS_ProcessProgramChange(pSong, MIDIChannel, (uint16_t)(program & 0x7F));
-        if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)(program & 0x7F)))
+        for (int8_t i = 0; i < rawLsb; i++)
         {
-            debug_message("DLS XMF fallback: Channel %d used %u:0 for program %d (requested LSB=%d)\n",
-                          MIDIChannel,
-                          rawMsb,
-                          (int)(program & 0x7F),
-                          (int)((uint8_t)pSong->channelLSB[MIDIChannel]));
-            return TRUE;
+            if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)(program & 0x7F)))
+            {
+                GM_DLS_ProcessController(pSong, (uint16_t)MIDIChannel, B_BANK_LSB, (uint16_t)i);
+                GM_DLS_ProcessProgramChange(pSong, MIDIChannel, (uint16_t)(program & 0x7F));
+                debug_message("DLS XMF fallback: Channel %d used %u:%d for program %d (requested LSB=%d)\n",
+                              MIDIChannel,
+                              rawMsb,
+                              i,
+                              (int)(program & 0x7F),
+                              (int)((uint8_t)pSong->channelLSB[MIDIChannel]));
+                return TRUE;
+            }
         }
     }
 
@@ -2087,6 +2093,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                         if (PV_DLS_TryProgramWithXmfFallback(pSong, MIDIChannel, theBank, thePatch))
                         {
                             pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
+                            debug_message("ProcessProgramChange Debug: Channel %d is using an instrument from the embedded XMF DLS bank (bank=%d prog=%d)\n", MIDIChannel, theBank / 2, thePatch);
                             routedToDLS = TRUE;
                         }
                     }
@@ -2096,7 +2103,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                         // If SF2 is active for this song, send program change to SF2
                         pSong->channelType[MIDIChannel] = CHANNEL_TYPE_SF2;
                         int32_t combinedProgram = (theBank * 128) + thePatch;
-                        debug_message("ProcessProgramChange Debug: Channel %d is using a SF2 Instrument (bank=%d prog=%d)\n", MIDIChannel, theBank, thePatch);
+                        debug_message("ProcessProgramChange Debug: Channel %d is using an instrument from the SF2 Bank (bank=%d prog=%d)\n", MIDIChannel, theBank / 2, thePatch);
                         GM_SF2_ProcessProgramChange(pSong, MIDIChannel, combinedProgram);
                     }
                 }
@@ -2109,7 +2116,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                     if (PV_DLS_TryProgramWithXmfFallback(pSong, MIDIChannel, theBank, thePatch))
                     {
                         pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
-                        debug_message("ProcessProgramChange Debug: Channel %d is using a DLS Instrument (bank=%d prog=%d)\n", MIDIChannel, theBank, thePatch);
+                        debug_message("ProcessProgramChange Debug: Channel %d is using an instrument from the embedded XMF DLS bank (bank=%d prog=%d)\n", MIDIChannel, theBank / 2, thePatch);
                     }
                     else
                     {
@@ -2128,12 +2135,13 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                 {
                     // HSB mode without overlay - use native synthesis
                     pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
-                }
+                    debug_message("ProcessProgramChange Debug: Channel %d is using an instrument from the default bank (bank=%d prog=%d)\n", MIDIChannel, theBank, thePatch);
+            }
             } else {
                 uint32_t bankId, progId = 0, noteId = 0;
                 int16_t thePatch = PV_ConvertPatchBank(pSong, program, MIDIChannel);                        
                 TranslateInstrumentToBankProgram(thePatch, &bankId, &progId, &noteId);          
-                debug_message("ProcessProgramChange Debug: Channel %d is using a RMF Instrument (instID=%d, bank=%d, program=%d)\n", MIDIChannel, thePatch, bankId, progId);
+                debug_message("ProcessProgramChange Debug: Channel %d is using an instrument from the RMF/HSB (instID=%d, bank=%d, program=%d)\n", MIDIChannel, thePatch, bankId, progId);
             }
 #endif
     }

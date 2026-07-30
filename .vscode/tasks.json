@@ -121,7 +121,7 @@
       "command": ".zefie/docker_launcher_debug.sh",
       "group": {
         "kind": "build",
-        "isDefault": true
+        "isDefault": false
       },
       "dependsOn": ["zefie's Build Clean (docker llvm-mingw)"],
       "problemMatcher": "$gcc"
@@ -132,8 +132,8 @@
       "command": ".zefie/docker_launcher_debug.sh",
       "args": ["-DDEBUG=1"],      
       "group": {
-        "kind": "test",
-        "isDefault": false
+        "kind": "build",
+        "isDefault": true
       },
       "dependsOn": ["zefie's Build Clean (docker llvm-mingw)"],
       "problemMatcher": "$gcc"
@@ -144,7 +144,7 @@
       "command": ".zefie/docker_launcher_debug.sh",
       "args": ["-DDEBUG=1", "-DLDEBUG=1"],      
       "group": {
-        "kind": "test",
+        "kind": "build",
         "isDefault": false
       },
       "dependsOn": ["zefie's Build Clean (docker llvm-mingw)"],
