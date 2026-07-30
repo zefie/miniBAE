@@ -2155,6 +2155,18 @@ static DLS_Instrument* DLS_Synth_FindInstrument(DLS_Synth* synth, int32_t bankId
         }
     }
 
+    /* Overlay scan: before falling back to main bank, search entire overlay
+       for a matching program at any bank selector. */
+    if (synth->banks[1]) {
+        int32_t clampedProgram = program & 0x7F;
+        for (uint32_t i = 0; i < synth->banks[1]->instrumentCount; i++) {
+            inst = &synth->banks[1]->instruments[i];
+            if (inst->program == clampedProgram) {
+                return inst;
+            }
+        }
+    }
+
     if (synth->banks[0]) {
         inst = DLS_Bank_FindMidiInstrument(synth->banks[0], bankId, program, false);
         if (inst) {
