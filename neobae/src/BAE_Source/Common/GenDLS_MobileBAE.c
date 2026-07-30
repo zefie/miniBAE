@@ -2156,13 +2156,18 @@ static DLS_Instrument* DLS_Synth_FindInstrument(DLS_Synth* synth, int32_t bankId
     }
 
     /* Overlay scan: before falling back to main bank, search entire overlay
-       for a matching program at any bank selector. */
+       for a matching program. Only match instruments in the same bank family
+       (percussion vs melodic) as the requested selector. */
     if (synth->banks[1]) {
         int32_t clampedProgram = program & 0x7F;
+        bool wantDrum = ((bankId & 0x3F80) == (120 << 7));
         for (uint32_t i = 0; i < synth->banks[1]->instrumentCount; i++) {
             inst = &synth->banks[1]->instruments[i];
             if (inst->program == clampedProgram) {
-                return inst;
+                bool isDrum = (inst->drum || ((inst->bankMsb & 0x7F) == 120));
+                if (wantDrum == isDrum) {
+                    return inst;
+                }
             }
         }
     }
