@@ -95,6 +95,22 @@ static float         gEqGains[5]     = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 static int           gPosCounter  = 0;
 static int           gPosInterval = 10; /* ~150 ms between updates */
 
+static int gHasCustomReverb = 0;
+
+#if USE_NEO_EFFECTS == TRUE
+static BAEReverbType gDefaultReverbIndex = BAE_REVERB_TYPE_17;
+#else
+static BAEReverbType gDefaultReverbIndex = BAE_REVERB_TYPE_1;
+#endif
+
+static int gCustomReverbType = 1;
+static int gCustomReverbCombCount = 4;
+static int gCustomReverbDelays[4] = {0};
+static int gCustomReverbFeedback[4] = {0};
+static int gCustomReverbGain[4] = {127, 127, 127, 127};
+static int gCustomReverbLowpass = 64;
+static int gCustomReverbMix = 255;
+
 #if SUPPORT_KARAOKE == TRUE
 #include <ctype.h>
 static int  gKaraokeEnabled = 0;
@@ -384,7 +400,7 @@ static const char usageMain[] =
 #else
     "11"
 #endif
-    " (default: 7)}\n"
+    " (default: %d)}\n"
     "                 -nf {disable fade-out on stop}\n"
     "                 -q  {quiet mode}\n"
 #if USE_MPEG_ENCODER == TRUE || USE_VORBIS_ENCODER == TRUE || USE_OPUS_ENCODER == TRUE
@@ -679,15 +695,6 @@ static BAEResult prime_encoder(BAEMixer mixer, BAESong song)
  *
  * All song types (MIDI, RMF, XMF, RMI, ringtone) use this single path.
  * ========================================================================= */
-
-static int gHasCustomReverb = 0;
-static BAEReverbType gCustomReverbType = BAE_REVERB_TYPE_1;
-static int gCustomReverbCombCount = 4;
-static int gCustomReverbDelays[4] = {0};
-static int gCustomReverbFeedback[4] = {0};
-static int gCustomReverbGain[4] = {127, 127, 127, 127};
-static int gCustomReverbLowpass = 64;
-static int gCustomReverbMix = 255;
 
 static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
     BAE_UNSIGNED_FIXED volume, unsigned int timeLimitSec, unsigned int loopCount,
@@ -1365,6 +1372,7 @@ int main(int argc, char *argv[])
     init_playFileString();
     signal(SIGINT, intHandler);
 
+    gCustomReverbType = gDefaultReverbIndex;
     /* ---- Early flags: quiet / verbose ---- */
     if (PV_ParseCommands(argc, argv, "-q", 0, NULL)) { gSilent = 1; gVerbose = 0; }
     if (PV_ParseCommands(argc, argv, "-d", 0, NULL)) { gSilent = 0; gVerbose = 1; }
@@ -1386,7 +1394,7 @@ int main(int argc, char *argv[])
     /* ---- Informational flags (no mixer needed) ---- */
     if (PV_ParseCommands(argc, argv, "-rl", 0, NULL)) { playbae_printf(reverbList);   return 0; }
     if (PV_ParseCommands(argc, argv, "-cl", 0, NULL)) { playbae_printf(velocityList); return 0; }
-    if (PV_ParseCommands(argc, argv, "-h",  0, NULL)) { playbae_printf(usageMain, gPlayFileString); return 0; }
+    if (PV_ParseCommands(argc, argv, "-h",  0, NULL)) { playbae_printf(usageMain, gPlayFileString, gDefaultReverbIndex); return 0; }
     if (PV_ParseCommands(argc, argv, "-x",  0, NULL)) { playbae_printf(usageExtra);   return 0; }
 
     /* ---- Parse --script ---- */
@@ -1506,7 +1514,7 @@ int main(int argc, char *argv[])
     }
     if (PV_ParseCommands(argc, argv, "-rv", 1, tmpBuf)) {
         int rv = atoi(tmpBuf);
-        if (rv < 0 || rv > 18) { playbae_printf("Invalid reverb %d (0-18). Using 7.\n", rv); rv = 7; }
+        if (rv < 0 || rv > 18) { playbae_printf("Invalid reverb %d (0-18). Using %d.\n", rv, gDefaultReverbIndex); rv = gDefaultReverbIndex; }
         reverbType = (BAEReverbType)rv;
     }
     if (PV_ParseCommands(argc, argv, "--rvp", 1, tmpBuf)) {
@@ -1602,13 +1610,13 @@ int main(int argc, char *argv[])
                 playbae_printf("Bank: built-in\n");
         } else {
             playbae_printf("playbae: No -p bank and built-in bank failed (%d).\n", err);
-            playbae_printf(usageMain, gPlayFileString);
+            playbae_printf(usageMain, gPlayFileString, gDefaultReverbIndex);
             BAEMixer_Delete(mixer);
             return 1;
         }
 #else
         playbae_printf("playbae: -p is required (no built-in patches compiled in).\n");
-        playbae_printf(usageMain, gPlayFileString);
+        playbae_printf(usageMain, gPlayFileString, gDefaultReverbIndex);
         BAEMixer_Delete(mixer);
         return 1;
 #endif
@@ -1781,7 +1789,7 @@ int main(int argc, char *argv[])
     }
 
     if (!played)
-        playbae_printf(usageMain, gPlayFileString);
+        playbae_printf(usageMain, gPlayFileString, gDefaultReverbIndex);
 
     /* ---- Finalize export ---- */
     if (gWriteToFile) {
