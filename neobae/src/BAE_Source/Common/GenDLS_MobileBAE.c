@@ -3440,6 +3440,7 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
     if (!pSong || !pSong->pMixer || !pSong->pMixer->pDLSSynth) return;
     DLS_Synth* synth = (DLS_Synth*)pSong->pMixer->pDLSSynth;
     int32_t voiceLimit = DLS_MAX_VOICE_POOL;
+    int scalar_modifier = -2;
 
     for (uint32_t f = 0; f < frames; f++) {
         int64_t leftOut = 0;
@@ -3631,8 +3632,8 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
             int64_t rightSampleUnscaled = ((int64_t)rightSample * v->rightGain) >> 16;
             
             // Apply OUTPUT_SCALAR per-voice for main output
-            int64_t leftSampleScaled = leftSampleUnscaled << OUTPUT_SCALAR;
-            int64_t rightSampleScaled = rightSampleUnscaled << OUTPUT_SCALAR;
+            int64_t leftSampleScaled = leftSampleUnscaled << (OUTPUT_SCALAR + scalar_modifier);
+            int64_t rightSampleScaled = rightSampleUnscaled << (OUTPUT_SCALAR + scalar_modifier);
             
             leftOut += leftSampleScaled;
             rightOut += rightSampleScaled;
@@ -3641,11 +3642,11 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
                 // Apply OUTPUT_SCALAR to match the signal level expected by RunNewReverb/RunNeoReverb
                 // (those reverb types read from songBufferReverb which expects scaled audio, not raw samples)
                 // Average L+R (>> 1) to get mono without doubling the level
-                int64_t monoScaled = ((leftSampleUnscaled + rightSampleUnscaled) >> 1) << OUTPUT_SCALAR;
+                int64_t monoScaled = ((leftSampleUnscaled + rightSampleUnscaled) >> 1) << (OUTPUT_SCALAR + scalar_modifier);
                 revOut += (monoScaled * v->reverbSend) >> 16;
             }
             if (pChorusBuffer && v->chorusSend > 0) {
-                int64_t monoScaled = ((leftSampleUnscaled + rightSampleUnscaled) >> 1) << OUTPUT_SCALAR;
+                int64_t monoScaled = ((leftSampleUnscaled + rightSampleUnscaled) >> 1) << (OUTPUT_SCALAR + scalar_modifier);
                 choOut += (monoScaled * v->chorusSend) >> 16;
             }
         }
