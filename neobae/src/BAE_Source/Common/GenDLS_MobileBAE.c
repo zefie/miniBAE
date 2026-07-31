@@ -3175,15 +3175,9 @@ bool GM_DLS_HasProgram(GM_Song* pSong, uint16_t channel, uint16_t program)
     return (ch->selectedInstrument != NULL) ? TRUE : FALSE;
 }
 
-void GM_DLS_ProcessPitchBend(GM_Song* pSong, uint16_t channel, uint16_t value) {
-    if (!pSong || !pSong->pMixer || !pSong->pMixer->pDLSSynth) return;
-    DLS_Synth* synth = (DLS_Synth*)pSong->pMixer->pDLSSynth;
-    int32_t channelIndex = dls_channel_index(channel);
-    synth->channels[channelIndex].pitchBend = value & 0x3FFF;
-
-    /* A bend can follow note-on at the same MIDI tick. Re-evaluate affected
-       voices before their next sample instead of waiting for the 10 ms control
-       period, which otherwise leaves short/transient attacks at the old pitch. */
+/* Force active voices on the given channel to recompute runtime connections
+   on the next sample instead of waiting for the next 10 ms control tick. */
+static void dls_invalidate_channel_voices(DLS_Synth* synth, int32_t channelIndex) {
     for (int32_t i = 0; i < synth->maxVoices; i++) {
         DLS_Voice* voice = &synth->voices[i];
         if (voice->active && voice->channel == channelIndex) {
@@ -3192,18 +3186,28 @@ void GM_DLS_ProcessPitchBend(GM_Song* pSong, uint16_t channel, uint16_t value) {
     }
 }
 
+void GM_DLS_ProcessPitchBend(GM_Song* pSong, uint16_t channel, uint16_t value) {
+    if (!pSong || !pSong->pMixer || !pSong->pMixer->pDLSSynth) return;
+    DLS_Synth* synth = (DLS_Synth*)pSong->pMixer->pDLSSynth;
+    int32_t channelIndex = dls_channel_index(channel);
+    synth->channels[channelIndex].pitchBend = value & 0x3FFF;
+    dls_invalidate_channel_voices(synth, channelIndex);
+}
+
 void GM_DLS_ProcessKeyPressure(GM_Song* pSong, uint16_t channel, uint16_t key, uint16_t value) {
     if (!pSong || !pSong->pMixer || !pSong->pMixer->pDLSSynth) return;
     DLS_Synth* synth = (DLS_Synth*)pSong->pMixer->pDLSSynth;
-    DLS_ChannelState* ch = &synth->channels[channel & 0x0F];
-    ch->keyPressure[key & 0x7F] = value & 0x7F;
+    int32_t channelIndex = dls_channel_index(channel);
+    synth->channels[channelIndex].keyPressure[key & 0x7F] = value & 0x7F;
+    dls_invalidate_channel_voices(synth, channelIndex);
 }
 
 void GM_DLS_ProcessChannelPressure(GM_Song* pSong, uint16_t channel, uint16_t value) {
     if (!pSong || !pSong->pMixer || !pSong->pMixer->pDLSSynth) return;
     DLS_Synth* synth = (DLS_Synth*)pSong->pMixer->pDLSSynth;
-    DLS_ChannelState* ch = &synth->channels[channel & 0x0F];
-    ch->channelPressure = value & 0x7F;
+    int32_t channelIndex = dls_channel_index(channel);
+    synth->channels[channelIndex].channelPressure = value & 0x7F;
+    dls_invalidate_channel_voices(synth, channelIndex);
 }
 
 void GM_DLS_ProcessController(GM_Song* pSong, uint16_t channel, uint16_t controller, uint16_t value) {
@@ -3213,10 +3217,12 @@ void GM_DLS_ProcessController(GM_Song* pSong, uint16_t channel, uint16_t control
     DLS_ChannelState* ch = &synth->channels[dls_channel_index(channel)];
     if (controller == 64) {
         ch->sustain = value >= 64;
+        dls_invalidate_channel_voices(synth, dls_channel_index(channel));
     } else if (controller == 121) {
         /* MobileBAE sub_11F7520 only accepts its internal reset sentinel 127. */
         if ((value & 0x7F) == 127) {
             dls_channel_reset_controllers(ch);
+            dls_invalidate_channel_voices(synth, dls_channel_index(channel));
         }
     } else if (controller == 120) {
         GM_DLS_AllNotesOff(pSong, channel, true);
@@ -3243,24 +3249,32 @@ void GM_DLS_ProcessController(GM_Song* pSong, uint16_t channel, uint16_t control
         ch->programSelected = false;
     } else if (controller == 1) {
         ch->modulation = value & 0x7F;
+        dls_invalidate_channel_voices(synth, dls_channel_index(channel));
     } else if (controller == 33) {
         ch->modulationLsb = value & 0x7F;
+        dls_invalidate_channel_voices(synth, dls_channel_index(channel));
     } else if (controller == 4) {
         ch->foot = value & 0x7F;
     } else if (controller == 36) {
         ch->footLsb = value & 0x7F;
     } else if (controller == 7) {
         ch->volume = value & 0x7F;
+        dls_invalidate_channel_voices(synth, dls_channel_index(channel));
     } else if (controller == 39) {
         ch->volumeLsb = value & 0x7F;
+        dls_invalidate_channel_voices(synth, dls_channel_index(channel));
     } else if (controller == 10) {
         ch->pan = value & 0x7F;
+        dls_invalidate_channel_voices(synth, dls_channel_index(channel));
     } else if (controller == 42) {
         ch->panLsb = value & 0x7F;
+        dls_invalidate_channel_voices(synth, dls_channel_index(channel));
     } else if (controller == 11) {
         ch->expression = value & 0x7F;
+        dls_invalidate_channel_voices(synth, dls_channel_index(channel));
     } else if (controller == 43) {
         ch->expressionLsb = value & 0x7F;
+        dls_invalidate_channel_voices(synth, dls_channel_index(channel));
     } else if (controller == 101) {
         ch->rpnMsb = value & 0x7F;
         ch->rpnLsb = 127;
@@ -3288,10 +3302,13 @@ void GM_DLS_ProcessController(GM_Song* pSong, uint16_t channel, uint16_t control
                 ch->rpnValues[rpn] = (ch->rpnValues[rpn] - (value & 0x7F)) & 0xFFFF;
             }
         }
+        dls_invalidate_channel_voices(synth, dls_channel_index(channel));
     } else if (controller == 91) {
         ch->reverb = value & 0x7F;
+        dls_invalidate_channel_voices(synth, dls_channel_index(channel));
     } else if (controller == 93) {
         ch->chorus = value & 0x7F;
+        dls_invalidate_channel_voices(synth, dls_channel_index(channel));
     }
 }
 
