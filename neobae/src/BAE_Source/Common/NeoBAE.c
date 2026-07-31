@@ -3042,7 +3042,7 @@ BAEResult BAE_GetClassicChorus(BAE_BOOL *outEnable)
 #endif
 }
 
-#ifndef __ANDROID__
+#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
 
 BAEResult BAE_EnableChannelCapture(BAEMixer mixer, const char *outputDir)
 {

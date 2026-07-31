@@ -1935,7 +1935,7 @@ extern "C"
     BAEResult BAE_SetClassicChorus(BAE_BOOL enable);
     BAEResult BAE_GetClassicChorus(BAE_BOOL *outEnable);
 
-#ifndef __ANDROID__    
+#if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
     // Per-channel voice capture (for per-channel dry STEM recording)
     // Enables separate dry output for each MIDI channel (0-15).
     // Each active channel gets its own WAV file in outputDir.
