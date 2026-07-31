@@ -2561,6 +2561,8 @@ static void dls_channel_reset_controllers(DLS_ChannelState* ch) {
     ch->reverb = 40;
     ch->chorus = 0;
     ch->pitchBend = 0x2000;
+    ch->portamentoTime = 0;
+    ch->portamentoEnabled = false;
     ch->rpnValues[0] = 0x0100;
     ch->rpnValues[1] = 0x2000;
     ch->rpnValues[2] = 0x2000;
@@ -2570,6 +2572,7 @@ static void dls_channel_reset_controllers(DLS_ChannelState* ch) {
     ch->nrpnLsb = 127;
     ch->selectorMode = 0;
     ch->channelPressure = 0;
+    ch->lastNote = -1;
     XSetMemory(ch->keyPressure, sizeof(ch->keyPressure), 0);
 }
 
@@ -3067,6 +3070,23 @@ void GM_DLS_ProcessNoteOn(GM_Song* pSong, uint16_t channel, uint16_t note, uint1
             dls_voice_init(v, channel, voiceNote, velocity, region, regionWave, ch, synth->sampleRate);
             v->startSerial = synth->nextVoiceSerial++;
             v->noteInstanceId = noteInstance;
+            
+            /* Initialize portamento if enabled and there's a previous note */
+            if (ch->portamentoEnabled && ch->lastNote >= 0 && ch->lastNote != voiceNote) {
+                v->portamentoActive = true;
+                /* start/target as cent offsets from the voice's base note in Q16.16 */
+                int32_t centsPerSemitone = 100;
+                v->portamentoStartPitch = (int64_t)(ch->lastNote - voiceNote) * centsPerSemitone * (1 << 16);
+                v->portamentoTargetPitch = 0;  /* arrive at the voice's native base pitch */
+
+                /* Calculate glide duration in samples: CC5 0 = 10 ms, CC5 127 = 2000 ms */
+                int32_t glideTimeMs = 10 + (ch->portamentoTime * 1990 / 127);
+                int32_t totalSamples = (glideTimeMs * synth->sampleRate) / 1000;
+                if (totalSamples < 1) totalSamples = 1;
+                v->portamentoTotalFrames = (int64_t)totalSamples;
+                v->portamentoFramesRemaining = totalSamples;
+            }
+            
             startedVoices++;
         }
 
@@ -3074,6 +3094,12 @@ void GM_DLS_ProcessNoteOn(GM_Song* pSong, uint16_t channel, uint16_t note, uint1
             debug_message("DLS Synth: no region/wave for instrument=%d:%d:%d key=%d velocity=%d\n",
                           inst->bankMsb, inst->bankLsb, inst->program, note, velocity);
         }
+        
+        /* Update lastNote for portamento */
+        if (ch->portamentoEnabled) {
+            ch->lastNote = voiceNote;
+        }
+        
         return;
     }
 }
@@ -3218,6 +3244,21 @@ void GM_DLS_ProcessController(GM_Song* pSong, uint16_t channel, uint16_t control
     if (controller == 64) {
         ch->sustain = value >= 64;
         dls_invalidate_channel_voices(synth, dls_channel_index(channel));
+    } else if (controller == 65) {
+        /* Portamento on/off */
+        ch->portamentoEnabled = (value >= 64);
+        if (!ch->portamentoEnabled) {
+            /* When disabling portamento, clear the last note so the next note doesn't glide */
+            ch->lastNote = -1;
+        }
+    } else if (controller == 84) {
+        /* Portamento source note number */
+        if (ch->portamentoEnabled) {
+            ch->lastNote = value & 0x7F;
+        }
+    } else if (controller == 5) {
+        /* Portamento time */
+        ch->portamentoTime = value & 0x7F;
     } else if (controller == 121) {
         /* MobileBAE sub_11F7520 only accepts its internal reset sentinel 127. */
         if ((value & 0x7F) == 127) {
@@ -3344,6 +3385,57 @@ static int32_t dls_get_sample(DLS_Wave* wave, int64_t positionQ16) {
     return sample;
 }
 
+static void dls_get_stereo_sample(DLS_Wave* wave, int64_t positionQ16, int32_t* leftOut, int32_t* rightOut) {
+    if (!wave || !wave->pcm || !leftOut || !rightOut) {
+        if (leftOut) *leftOut = 0;
+        if (rightOut) *rightOut = 0;
+        return;
+    }
+    
+    int32_t index = (int32_t)(positionQ16 >> 16);
+    int32_t frac = (int32_t)(positionQ16 & 0xFFFF);
+    
+    if (index >= wave->frames) {
+        *leftOut = 0;
+        *rightOut = 0;
+        return;
+    }
+    
+    int32_t nextIndex = index + 1 < wave->frames ? index + 1 : index;
+    int32_t base = index * wave->channels;
+    int32_t nextBase = nextIndex * wave->channels;
+    
+    if (wave->channels == 2) {
+        /* Stereo wave - interpolate left and right separately */
+        int32_t left0 = wave->pcm[base];
+        int32_t left1 = wave->pcm[nextBase];
+        int32_t right0 = wave->pcm[base + 1];
+        int32_t right1 = wave->pcm[nextBase + 1];
+        
+        if (wave->formatTag == 1 && wave->bitsPerSample == 8) {
+            *leftOut = left0 + (((((left1 - left0) >> 8) * frac) >> 8) & ~0xFF);
+            *rightOut = right0 + (((((right1 - right0) >> 8) * frac) >> 8) & ~0xFF);
+        } else {
+            *leftOut = left0 + (((frac >> 1) * (left1 - left0)) >> 15);
+            *rightOut = right0 + (((frac >> 1) * (right1 - right0)) >> 15);
+        }
+    } else {
+        /* Mono wave - same sample for both channels */
+        int32_t left0 = wave->pcm[base];
+        int32_t left1 = wave->pcm[nextBase];
+        int32_t sample;
+        
+        if (wave->formatTag == 1 && wave->bitsPerSample == 8) {
+            sample = left0 + (((((left1 - left0) >> 8) * frac) >> 8) & ~0xFF);
+        } else {
+            sample = left0 + (((frac >> 1) * (left1 - left0)) >> 15);
+        }
+        
+        *leftOut = sample;
+        *rightOut = sample;
+    }
+}
+
 void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbBuffer, int32_t* pChorusBuffer, uint32_t frames) {
     if (!pSong || !pSong->pMixer || !pSong->pMixer->pDLSSynth) return;
     DLS_Synth* synth = (DLS_Synth*)pSong->pMixer->pDLSSynth;
@@ -3461,17 +3553,41 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
             }
             v->controlFramesUntilTick--;
             
-            // Get sample
-            int32_t sample = dls_get_sample(v->wave, v->position);
+            /* Apply portamento glide if active.  Interpolate base increment from
+               start-pitch to target-pitch, advancing one sample per frame.  Store
+               the total glide duration in portamentoFramesRemaining at init so we
+               can compute the linear fraction on each frame. */
+            if (v->portamentoActive && v->portamentoFramesRemaining > 0) {
+                int64_t elapsed = (int64_t)(v->portamentoTotalFrames - v->portamentoFramesRemaining);
+                if (elapsed < 0) elapsed = 0;
+                if (elapsed >= v->portamentoTotalFrames) {
+                    elapsed = v->portamentoTotalFrames;
+                    v->portamentoActive = false;
+                }
+                int64_t pitchDelta = v->portamentoTargetPitch - v->portamentoStartPitch;
+                int64_t currentPitch = v->portamentoStartPitch +
+                    (pitchDelta * elapsed / v->portamentoTotalFrames);
+
+                /* currentPitch is cents in Q16.16.  Pass it through the full
+                   pitch-cents-to-ratio pipeline so fractional cents are preserved. */
+                v->currentIncrement = (v->baseIncrement *
+                    dls_pitch_cents_to_ratio_q16((int32_t)(currentPitch))) >> 16;
+                v->portamentoFramesRemaining--;
+            }
+            
+            // Get stereo samples
+            int32_t leftSample, rightSample;
+            dls_get_stereo_sample(v->wave, v->position, &leftSample, &rightSample);
             
             v->lastFiltered = false;
             if (v->filterEnabled && dls_filter_enabled(&v->filter)) {
-                sample = dls_filter_next_left(&v->filter, sample);
+                leftSample = dls_filter_next_left(&v->filter, leftSample);
+                rightSample = dls_filter_next_right(&v->filter, rightSample);
                 v->lastFiltered = true;
             }
             
-            v->lastLeftSample = sample;
-            v->lastRightSample = sample;
+            v->lastLeftSample = leftSample;
+            v->lastRightSample = rightSample;
             
             // Advance position
             v->position += v->currentIncrement;
@@ -3511,15 +3627,15 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
             
             // Mix - keep in int64_t to avoid precision loss from intermediate int32_t cast
             // Calculate unscaled first for effects sends
-            int64_t leftSampleUnscaled = ((int64_t)sample * v->leftGain) >> 16;
-            int64_t rightSampleUnscaled = ((int64_t)sample * v->rightGain) >> 16;
+            int64_t leftSampleUnscaled = ((int64_t)leftSample * v->leftGain) >> 16;
+            int64_t rightSampleUnscaled = ((int64_t)rightSample * v->rightGain) >> 16;
             
             // Apply OUTPUT_SCALAR per-voice for main output
-            int64_t leftSample = leftSampleUnscaled << OUTPUT_SCALAR;
-            int64_t rightSample = rightSampleUnscaled << OUTPUT_SCALAR;
+            int64_t leftSampleScaled = leftSampleUnscaled << OUTPUT_SCALAR;
+            int64_t rightSampleScaled = rightSampleUnscaled << OUTPUT_SCALAR;
             
-            leftOut += leftSample;
-            rightOut += rightSample;
+            leftOut += leftSampleScaled;
+            rightOut += rightSampleScaled;
             
             if (pReverbBuffer && v->reverbSend > 0) {
                 // Apply OUTPUT_SCALAR to match the signal level expected by RunNewReverb/RunNeoReverb

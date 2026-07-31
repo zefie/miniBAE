@@ -259,6 +259,11 @@ struct DLS_ChannelState {
     int32_t keyPressure[128];
     bool sustain;
     bool monoMode; /* CC126 mono / CC127 poly */
+    
+    /* Portamento/Glide state */
+    int32_t portamentoTime; /* CC5 value, 0-127 (0=fastest) */
+    bool portamentoEnabled; /* CC65 value */
+    int32_t lastNote; /* Previous note for glide target */
 };
 
 #define DLS_MAX_VOICE_POOL 256
@@ -304,6 +309,13 @@ struct DLS_Voice {
     int64_t startSerial;
     int64_t currentIncrement;
     int32_t controlFramesUntilTick;
+    
+    /* Portamento/Glide state */
+    bool portamentoActive;
+    int64_t portamentoStartPitch; /* Q16.16 cents */
+    int64_t portamentoTargetPitch; /* Q16.16 cents */
+    int32_t portamentoFramesRemaining;
+    int64_t portamentoTotalFrames;
 
     int32_t targetLeftGain;
     int32_t targetRightGain;
