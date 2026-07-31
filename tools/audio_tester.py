@@ -51,10 +51,10 @@ def _to_mono(y: np.ndarray) -> np.ndarray:
     return np.mean(y, axis=0)
 
 
-def load_audio(path: str, sr: int = 48000) -> Tuple[np.ndarray, int]:
-    """Load and resample to target sr, returned as mono float32."""
+def load_audio(path: str, sr: int = 48000, mono: bool = False) -> Tuple[np.ndarray, int]:
+    """Load and resample to target sr. Returns stereo by default (ndim=2)."""
     import librosa
-    y, native_sr = librosa.load(path, sr=sr, mono=True)
+    y, native_sr = librosa.load(path, sr=sr, mono=mono)
     return y.astype(np.float32), sr
 
 
@@ -64,7 +64,7 @@ def load_audio(path: str, sr: int = 48000) -> Tuple[np.ndarray, int]:
 def detect_onsets(y: np.ndarray, sr: int) -> np.ndarray:
     """Return onset times (seconds)."""
     import librosa
-    onset_frames = librosa.onset.onset_detect(y=y, sr=sr, units="frames")
+    onset_frames = librosa.onset.onset_detect(y=_to_mono(y), sr=sr, units="frames")
     return librosa.frames_to_time(onset_frames, sr=sr)
 
 
@@ -168,7 +168,7 @@ def crepe_pitch(y: np.ndarray, sr: int) -> np.ndarray:
 
 def crepe_pitch_with_confidence(y: np.ndarray, sr: int) -> Tuple[np.ndarray, np.ndarray]:
     """Return (pitch_hz, confidence) arrays from CREPE ONNX."""
-    y16 = _resample(y, orig_sr=sr, target_sr=CREPE_SR).astype(np.float32)
+    y16 = _resample(_to_mono(y), orig_sr=sr, target_sr=CREPE_SR).astype(np.float32)
     session = _crepe_session()
     frames = _frames_from_audio(y16)
     batch_size = 256
@@ -304,7 +304,7 @@ def clap_embed(y: np.ndarray, sr: int, segment_sec: Optional[Tuple[float, float]
     import torch
 
     model, extractor = _get_clap()
-    y48 = _resample(y, orig_sr=sr, target_sr=CLAP_SR)
+    y48 = _resample(_to_mono(y), orig_sr=sr, target_sr=CLAP_SR)
 
     if segment_sec is not None:
         start_samp = int(segment_sec[0] * CLAP_SR)
@@ -384,6 +384,7 @@ class EffectResult:
 def estimate_rt60(y: np.ndarray, sr: int) -> float:
     """Estimate RT60 from the tail using exponential decay fit."""
     import librosa
+    y = _to_mono(y)
 
     # Work with the tail (last 20%)
     tail_start = int(len(y) * 0.8)
@@ -421,7 +422,7 @@ def estimate_rt60(y: np.ndarray, sr: int) -> float:
 
 def spectral_flatness(y: np.ndarray, sr: int) -> float:
     import librosa
-    flat = librosa.feature.spectral_flatness(y=y)[0]
+    flat = librosa.feature.spectral_flatness(y=_to_mono(y))[0]
     return float(np.mean(flat))
 
 
