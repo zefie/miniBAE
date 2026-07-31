@@ -258,7 +258,10 @@ struct DLS_ChannelState {
     int32_t channelPressure;
     int32_t keyPressure[128];
     bool sustain;
+    bool monoMode; /* CC126 mono / CC127 poly */
 };
+
+#define DLS_MAX_VOICE_POOL 256
 
 struct DLS_Voice {
     bool active;
@@ -269,75 +272,80 @@ struct DLS_Voice {
     int32_t velocity;
     int32_t regionIndex;
     int32_t keyGroup;
+    int64_t noteInstanceId; /* groups layered region voices from one note-on */
     DLS_Wave* wave;
     DLS_Articulation* articulation;
     DLS_ChannelState* channelState;
     DLS_Bank* parentBank;
-    
+
     uint16_t connectionCount;
     DLS_Connection* runtimeConnections;
-    
+
     int32_t baseGainQ16;
     int32_t basePanOffset;
     int32_t baseReverbSend;
     int32_t baseChorusSend;
     int64_t baseIncrement;
-    
+
     int64_t loopStart;
     int64_t loopEnd;
     bool looping;
     bool loopUntilRelease;
-    
+
     int32_t controlBlockFrames;
-    
+
     DLS_PlusFilter filter;
     bool filterEnabled;
     DLS_Envelope envelope;
     DLS_Envelope eg2Envelope;
     DLS_Lfo vibratoLfo;
     DLS_Lfo modulationLfo;
-    
+
     int64_t startSerial;
     int64_t currentIncrement;
     int32_t controlFramesUntilTick;
-    
+
     int32_t targetLeftGain;
     int32_t targetRightGain;
     int32_t targetReverbSend;
     int32_t targetChorusSend;
-    
+
     int32_t rampStartLeftGain;
     int32_t rampStartRightGain;
     int32_t rampStartReverbSend;
     int32_t rampStartChorusSend;
     int32_t rampFrame;
-    
+
     int32_t rampSegmentFrame;
     int32_t rampSegmentFrames;
     int32_t rampSegmentStartLeftGain;
     int32_t rampSegmentStartRightGain;
     int32_t rampSegmentStartReverbSend;
     int32_t rampSegmentStartChorusSend;
-        bool rampInitialized; // Added to mirror RetroDLS first-control-tick gain/send initialization
-    
+    bool rampInitialized; /* first-control-tick gain/send initialization */
+
     int32_t leftGain;
     int32_t rightGain;
     int32_t reverbSend;
     int32_t chorusSend;
-    
+
     int32_t lastLeftSample;
     int32_t lastRightSample;
     bool lastFiltered;
-    
+
     int64_t position;
 };
 
 struct DLS_Synth {
-    DLS_Bank* banks[2]; // 0 = main bank, 1 = embedded XMF bank
+    DLS_Bank* banks[2]; /* 0 = main bank, 1 = embedded XMF bank */
     int32_t sampleRate;
-    DLS_Voice voices[256];
+    int32_t maxVoices; /* active voice cap from mixer/song settings */
+    bool useQuirks;    /* mixer-local MobileBAE quirks mode */
+    DLS_Voice voices[DLS_MAX_VOICE_POOL];
     DLS_ChannelState channels[16];
     int64_t nextVoiceSerial;
+    int64_t nextNoteInstance;
+    int32_t limiterGainQ16; /* stereo-linked DLS bus limiter state */
 };
 
 // Callbacks for Sequencer

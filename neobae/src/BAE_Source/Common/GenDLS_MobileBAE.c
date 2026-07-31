@@ -71,14 +71,57 @@ bool GM_GetMixerDLSMode()
     return false;
 }
 
-bool g_use_mobilebae_quirks = true;
+bool g_use_mobilebae_quirks = true; /* default for newly created synths */
 
 static bool dls_bank_quirks(const DLS_Bank* bank) {
-    return g_use_mobilebae_quirks || (bank && bank->forceQuirks);
+    /* Prefer bank-local forceQuirks; otherwise use current mixer synth mode. */
+    if (bank && bank->forceQuirks) return true;
+    GM_Mixer* mixer = GM_GetCurrentMixer();
+    if (mixer && mixer->pDLSSynth) {
+        return mixer->pDLSSynth->useQuirks;
+    }
+    return g_use_mobilebae_quirks;
 }
 
 static bool dls_bank_spmidi(const DLS_Bank* bank) {
-    return !g_use_mobilebae_quirks && !(bank && bank->forceQuirks);
+    return !dls_bank_quirks(bank);
+}
+
+static bool dls_synth_quirks(const DLS_Synth* synth) {
+    if (!synth) return g_use_mobilebae_quirks;
+    return synth->useQuirks;
+}
+
+static int32_t dls_synth_voice_limit(const DLS_Synth* synth) {
+    int32_t limit;
+    if (!synth) return DLS_MAX_VOICE_POOL;
+    limit = synth->maxVoices > 0 ? synth->maxVoices : DLS_MAX_VOICE_POOL;
+    if (limit > DLS_MAX_VOICE_POOL) limit = DLS_MAX_VOICE_POOL;
+    if (limit < 1) limit = 1;
+    return limit;
+}
+
+static void dls_synth_sync_voice_limit(DLS_Synth* synth) {
+    GM_Mixer* mixer;
+    int32_t limit = DLS_MAX_VOICE_POOL;
+    if (!synth) return;
+    mixer = GM_GetCurrentMixer();
+    if (mixer) {
+        if (mixer->MaxNotes > 0) limit = mixer->MaxNotes;
+    }
+    if (limit > DLS_MAX_VOICE_POOL) limit = DLS_MAX_VOICE_POOL;
+    if (limit < 1) limit = 1;
+    synth->maxVoices = limit;
+}
+
+static uint16_t dls_channel_index(uint16_t channel) {
+    return (uint16_t)(channel & 0x0F);
+}
+
+static bool dls_mul_u32_ok(uint32_t a, uint32_t b, uint32_t* out) {
+    if (a != 0 && b > UINT32_MAX / a) return false;
+    if (out) *out = a * b;
+    return true;
 }
 
 static void DLS_ApplyDirectConnection(DLS_Articulation* art, const DLS_Connection* connection, bool quirks);
@@ -86,12 +129,20 @@ static void dls_refresh_current_synth_for_mode(void);
 
 void GM_DLS_SetMobileBAEQuirks(bool useQuirks) 
 {
+    GM_Mixer* mixer = GM_GetCurrentMixer();
     g_use_mobilebae_quirks = useQuirks;
+    if (mixer && mixer->pDLSSynth) {
+        mixer->pDLSSynth->useQuirks = useQuirks;
+    }
     dls_refresh_current_synth_for_mode();
 }
 
 bool GM_DLS_GetMobileBAEQuirks() 
 {
+    GM_Mixer* mixer = GM_GetCurrentMixer();
+    if (mixer && mixer->pDLSSynth) {
+        return mixer->pDLSSynth->useQuirks;
+    }
     return g_use_mobilebae_quirks;
 }
 
@@ -396,7 +447,11 @@ static void dls_env_init(DLS_Envelope* env, int32_t delayMicros, int32_t attackM
     env->current = 0;
     env->eg1Current = 0;
     env->stage = env->delayMicros == 0 ? DLS_ENV_ATTACK : DLS_ENV_DELAY;
-    env->tickIndex = 0;
+    /* The control update represents the upcoming 10 ms interval.  Starting a
+       no-delay attack at elapsed=0 makes the first update output silence and
+       inserts an un-authored 10 ms soft onset.  Delay->attack already seeds
+       10000 below; use the same convention for an initially active attack. */
+    env->tickIndex = env->stage == DLS_ENV_ATTACK ? 10000 : 0;
     env->shutdownStart = 0;
     env->finished = false;
 }
@@ -1018,7 +1073,7 @@ static void DLS_InitArticulation(DLS_Articulation* art) {
     art->filterCutoff = FILTER_DISABLED_CUTOFF;
 }
 
-static void dls_rebuild_articulation_for_mode(DLS_Articulation* art)
+static void dls_rebuild_articulation_for_mode(DLS_Articulation* art, bool quirks)
 {
     DLS_Connection* savedConnections;
     uint16_t savedCount;
@@ -1030,7 +1085,7 @@ static void dls_rebuild_articulation_for_mode(DLS_Articulation* art)
     art->runtimeConnections = savedConnections;
     art->connectionCount = savedCount;
     for (uint16_t i = 0; i < savedCount; i++) {
-        DLS_ApplyDirectConnection(art, &savedConnections[i], g_use_mobilebae_quirks);
+        DLS_ApplyDirectConnection(art, &savedConnections[i], quirks);
     }
 }
 
@@ -1038,27 +1093,27 @@ static void dls_refresh_current_synth_for_mode(void)
 {
     GM_Mixer* mixer = GM_GetCurrentMixer();
     DLS_Synth* synth;
-    bool savedQuirks;
 
     if (!mixer || !mixer->pDLSSynth) return;
     synth = mixer->pDLSSynth;
-    savedQuirks = g_use_mobilebae_quirks;
+    dls_synth_sync_voice_limit(synth);
 
     for (int bankIndex = 0; bankIndex < 2; bankIndex++) {
         DLS_Bank* bank = synth->banks[bankIndex];
+        bool quirks;
         if (!bank) continue;
-        g_use_mobilebae_quirks = (bankIndex == 1) ? true : savedQuirks;
+        /* XMF overlays always force MobileBAE quirks; main bank follows synth mode. */
+        quirks = (bankIndex == 1) || bank->forceQuirks || synth->useQuirks;
         for (uint32_t i = 0; i < bank->instrumentCount; i++) {
             DLS_Instrument* instrument = &bank->instruments[i];
-            dls_rebuild_articulation_for_mode(&instrument->articulation);
+            dls_rebuild_articulation_for_mode(&instrument->articulation, quirks);
             for (uint32_t j = 0; j < instrument->regionCount; j++) {
-                dls_rebuild_articulation_for_mode(&instrument->regions[j].articulation);
+                dls_rebuild_articulation_for_mode(&instrument->regions[j].articulation, quirks);
             }
         }
     }
-    g_use_mobilebae_quirks = savedQuirks;
 
-    for (int i = 0; i < 256; i++) {
+    for (int i = 0; i < DLS_MAX_VOICE_POOL; i++) {
         synth->voices[i].active = false;
     }
     for (int channel = 0; channel < 16; channel++) {
@@ -1138,7 +1193,9 @@ static void DLS_ApplyDirectConnection(DLS_Articulation* art, const DLS_Connectio
 static OPErr DLS_Parse_ArticulationChunk(const uint8_t* body, uint32_t size, DLS_Articulation* art) {
     if (size < 8) return BAD_FILE_TYPE;
     uint32_t count = read_le32(body + 4);
-    if (8 + count * 12 > size) return BAD_FILE_TYPE;
+    uint32_t connBytes;
+    if (!dls_mul_u32_ok(count, 12, &connBytes)) return BAD_FILE_TYPE;
+    if (connBytes > size - 8) return BAD_FILE_TYPE;
     
     if (count > 0) {
         uint32_t new_count = art->connectionCount + count;
@@ -1157,6 +1214,7 @@ static OPErr DLS_Parse_ArticulationChunk(const uint8_t* body, uint32_t size, DLS
             connection->transform = read_le16(p + 6);
             connection->scale = (int32_t)read_le32(p + 8);
             DLS_ApplyDirectConnection(art, connection, g_use_mobilebae_quirks);
+            /* refreshed later per-synth via dls_refresh_current_synth_for_mode() */
         }
         art->runtimeConnections = connections;
         art->connectionCount = new_count;
@@ -1282,6 +1340,57 @@ static bool DLS_InstrumentUsesRawSelector(DLS_Bank* bank, uint32_t rawBank) {
     return false;
 }
 
+static bool dls_parse_connection_same_key(const DLS_Connection* a, const DLS_Connection* b)
+{
+    return a->source == b->source &&
+           a->control == b->control &&
+           a->destination == b->destination;
+}
+
+/* Build the effective region articulation.  Instrument connections are
+   inherited; a region connection with the same source/control/destination
+   replaces the instrument connection.  This is both DLS semantics and the
+   merge flow seen around MobileBAE sub_11F4670/sub_11F4720. */
+static OPErr dls_merge_region_articulation(const DLS_Articulation* instrumentArt,
+                                           DLS_Region* region)
+{
+    DLS_Connection* regionConnections = region->articulation.runtimeConnections;
+    uint16_t regionCount = region->articulation.connectionCount;
+    uint32_t capacity = (uint32_t)instrumentArt->connectionCount + regionCount;
+    DLS_Connection* merged = NULL;
+    uint32_t mergedCount = 0;
+
+    if (capacity > UINT16_MAX) return BAD_FILE_TYPE;
+    if (capacity > 0) {
+        merged = (DLS_Connection*)XNewPtr(capacity * sizeof(*merged));
+        if (!merged) return MEMORY_ERR;
+    }
+
+    for (uint32_t i = 0; i < instrumentArt->connectionCount; i++) {
+        bool overridden = false;
+        for (uint32_t j = 0; j < regionCount; j++) {
+            if (dls_parse_connection_same_key(&instrumentArt->runtimeConnections[i],
+                                              &regionConnections[j])) {
+                overridden = true;
+                break;
+            }
+        }
+        if (!overridden) merged[mergedCount++] = instrumentArt->runtimeConnections[i];
+    }
+    for (uint32_t i = 0; i < regionCount; i++) {
+        merged[mergedCount++] = regionConnections[i];
+    }
+
+    if (regionConnections) XDisposePtr(regionConnections);
+    DLS_InitArticulation(&region->articulation);
+    region->articulation.runtimeConnections = merged;
+    region->articulation.connectionCount = (uint16_t)mergedCount;
+    for (uint32_t i = 0; i < mergedCount; i++) {
+        DLS_ApplyDirectConnection(&region->articulation, &merged[i], g_use_mobilebae_quirks);
+    }
+    return NO_ERR;
+}
+
 static OPErr DLS_Parse_Instrument(const uint8_t* start, const uint8_t* end, DLS_Bank* bank, DLS_Instrument* inst) {
     uint32_t declaredRegions = 0;
 
@@ -1326,22 +1435,12 @@ static OPErr DLS_Parse_Instrument(const uint8_t* start, const uint8_t* end, DLS_
         p += 8 + padded_size;
     }
 
-    /* In DLS, a region without its own lart/lar2 list inherits the complete
-       instrument articulation.  Deep-copy the connection list because each
-       region has independent cleanup ownership. */
+    /* Every region receives an independent effective articulation. */
     for (uint32_t i = 0; i < inst->regionCount; i++) {
         DLS_Region* region = &inst->regions[i];
-        if (!region->ownsArticulation) {
-            region->articulation = inst->articulation;
-            region->articulation.runtimeConnections = NULL;
-            if (inst->articulation.connectionCount > 0) {
-                uint32_t bytes = inst->articulation.connectionCount * sizeof(DLS_Connection);
-                region->articulation.runtimeConnections = (DLS_Connection*)XNewPtr(bytes);
-                if (!region->articulation.runtimeConnections) return MEMORY_ERR;
-                XBlockMove(inst->articulation.runtimeConnections,
-                           region->articulation.runtimeConnections, bytes);
-            }
-        }
+        OPErr mergeErr = dls_merge_region_articulation(&inst->articulation, region);
+        if (mergeErr != NO_ERR) return mergeErr;
+        region->ownsArticulation = true;
     }
     return NO_ERR;
 }
@@ -1580,8 +1679,12 @@ OPErr GM_LoadDLSBankFromMemory(void* pMemory, uint32_t memorySize, DLS_Bank** pp
     uint32_t* poolOffsets = NULL;
 
     if (ptbl_state.start && ptbl_state.end - ptbl_state.start >= 8) {
+        uint32_t cueBytes = 0;
         poolOffsetCount = read_le32(ptbl_state.start + 4);
-        if (poolOffsetCount * 4 + 8 <= (uint32_t)(ptbl_state.end - ptbl_state.start)) {
+        if (!dls_mul_u32_ok(poolOffsetCount, 4, &cueBytes)) {
+            poolOffsetCount = 0;
+        }
+        if (poolOffsetCount > 0 && cueBytes <= (uint32_t)(ptbl_state.end - ptbl_state.start) - 8) {
             poolOffsets = (uint32_t*)XNewPtr(poolOffsetCount * sizeof(uint32_t));
             if (poolOffsets) {
                 for(uint32_t i=0; i<poolOffsetCount; i++) {
@@ -1650,7 +1753,7 @@ OPErr GM_LoadDLSFromMemory(struct GM_Mixer* pMixer, const void* pMemory, uint32_
     pMixer->pDLSSynth->banks[0] = bank;
 
     /* Bank switch invalidates all cached channel instrument bindings and active voices. */
-    for (int i = 0; i < 256; i++) {
+    for (int i = 0; i < DLS_MAX_VOICE_POOL; i++) {
         pMixer->pDLSSynth->voices[i].active = false;
     }
     for (int ch = 0; ch < 16; ch++) {
@@ -1716,7 +1819,7 @@ OPErr GM_LoadDLSAsXMFOverlayFromMemory(struct GM_Mixer* pMixer, const void* pMem
     pMixer->pDLSSynth->banks[1] = bank;
 
     /* Overlay changes program resolution priority; force channel/program cache rebuild. */
-    for (int i = 0; i < 256; i++) {
+    for (int i = 0; i < DLS_MAX_VOICE_POOL; i++) {
         pMixer->pDLSSynth->voices[i].active = false;
     }
     for (int ch = 0; ch < 16; ch++) {
@@ -1741,7 +1844,7 @@ void GM_UnloadXMFDLSOverlay(struct GM_Mixer* pMixer)
         pMixer->pDLSSynth->banks[1] = NULL;
     }
 
-    for (int i = 0; i < 256; i++) {
+    for (int i = 0; i < DLS_MAX_VOICE_POOL; i++) {
         pMixer->pDLSSynth->voices[i].active = false;
     }
     for (int ch = 0; ch < 16; ch++) {
@@ -1800,6 +1903,10 @@ OPErr GM_InitDLSSynth(DLS_Synth** ppSynth, int32_t sampleRate) {
     if (!*ppSynth) return MEMORY_ERR;
     XSetMemory(*ppSynth, sizeof(DLS_Synth), 0);
     (*ppSynth)->sampleRate = sampleRate;
+    (*ppSynth)->useQuirks = g_use_mobilebae_quirks;
+    (*ppSynth)->maxVoices = DLS_MAX_VOICE_POOL;
+    (*ppSynth)->limiterGainQ16 = 0x10000;
+    dls_synth_sync_voice_limit(*ppSynth);
     for (int32_t channel = 0; channel < 16; channel++) {
         (*ppSynth)->channels[channel].channel = channel;
         (*ppSynth)->channels[channel].bankMsb = channel == 9 ? 120 : 121;
@@ -1828,7 +1935,7 @@ uint16_t GM_DLS_GetActiveVoiceCount(struct GM_Mixer* pMixer) {
     if (!pMixer || !pMixer->pDLSSynth) return 0;
     DLS_Synth* synth = (DLS_Synth*)pMixer->pDLSSynth;
     uint16_t active = 0;
-    for (int i = 0; i < 256; i++) {
+    for (int i = 0; i < DLS_MAX_VOICE_POOL; i++) {
         if (synth->voices[i].active) {
             active++;
         }
@@ -1859,7 +1966,7 @@ void GM_DLS_ResetForSong(GM_Song* pSong)
 
     DLS_Synth* synth = (DLS_Synth*)pSong->pMixer->pDLSSynth;
 
-    for (int i = 0; i < 256; i++)
+    for (int i = 0; i < DLS_MAX_VOICE_POOL; i++)
     {
         synth->voices[i].active = false;
     }
@@ -1879,6 +1986,7 @@ void GM_DLS_ResetForSong(GM_Song* pSong)
     }
 
     synth->nextVoiceSerial = 0;
+    synth->limiterGainQ16 = 0x10000;
 }
 
 static DLS_Instrument* DLS_Bank_FindSelector(DLS_Bank* bank, uint32_t selector);
@@ -2512,6 +2620,13 @@ static void dls_program_change(DLS_Synth* synth, DLS_ChannelState* ch, int32_t p
 
 static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t velocity, 
                            DLS_Region* region, DLS_Wave* wave, DLS_ChannelState* ch, int32_t sampleRate) {
+    /* A pool slot may be recycled directly from a killed/active voice.  Reset
+       every transient (especially rampInitialized, prior gain targets, filter
+       history, and control counters) so no previous note can impose a false
+       fade or modulation on this note.  Voice pointers are borrowed, so no
+       owned allocation is lost here. */
+    XSetMemory(v, sizeof(*v), 0);
+
     v->channel = channel;
     v->key = key;
     v->velocity = velocity;
@@ -2714,11 +2829,12 @@ static void dls_voice_fast_kill(DLS_Voice* v) {
     v->controlFramesUntilTick = 0;
 }
 
-static void dls_kill_exclusive_voices(DLS_Synth* synth, int32_t channel, int32_t key, const DLS_Region* region) {
+static void dls_kill_exclusive_voices(DLS_Synth* synth, int32_t channel, int32_t key,
+                                      const DLS_Region* region) {
     if (!synth || !region) return;
 
     int32_t exclusiveClass = region->keyGroup & 0x0F;
-    for (int i = 0; i < 256; i++) {
+    for (int i = 0; i < DLS_MAX_VOICE_POOL; i++) {
         DLS_Voice* voice = &synth->voices[i];
         if (!voice->active) continue;
 
@@ -2739,7 +2855,9 @@ static void dls_kill_exclusive_voices(DLS_Synth* synth, int32_t channel, int32_t
 }
 
 static int32_t dls_find_free_voice_index(DLS_Synth* synth) {
-    for (int i = 0; i < 256; i++) {
+    /* maxVoices limits logical notes; layered regions still need independent
+       physical slots in the full pool. */
+    for (int i = 0; i < DLS_MAX_VOICE_POOL; i++) {
         if (!synth->voices[i].active) return i;
     }
     return -1;
@@ -2748,15 +2866,16 @@ static int32_t dls_find_free_voice_index(DLS_Synth* synth) {
 static int32_t dls_find_recyclable_voice(DLS_Synth* synth, int32_t newChannel) {
     static const int32_t kQuirksVoiceStealOrder[16] = {15, 14, 13, 12, 11, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9};
     static const int32_t kSpecVoiceStealOrder[16] = {9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15};
-    bool useQuirks = dls_bank_quirks(synth->banks[0]) || dls_bank_quirks(synth->banks[1]);
+    bool useQuirks = dls_synth_quirks(synth);
     const int32_t* order = useQuirks ? kQuirksVoiceStealOrder : kSpecVoiceStealOrder;
+    int32_t voiceLimit = DLS_MAX_VOICE_POOL;
 
     for (int ord = 0; ord < 16; ord++) {
         int32_t channel = order[ord];
         if (newChannel != 9 && channel == 9) continue;
 
         int32_t candidate = -1;
-        for (int i = 0; i < 256; i++) {
+        for (int i = 0; i < voiceLimit; i++) {
             DLS_Voice* voice = &synth->voices[i];
             if (voice->active && voice->channel == channel && !voice->keyHeld && !voice->sustainSnapshot) {
                 candidate = i;
@@ -2770,8 +2889,9 @@ static int32_t dls_find_recyclable_voice(DLS_Synth* synth, int32_t newChannel) {
 static int32_t dls_find_held_percussion_voice(DLS_Synth* synth, int32_t newChannel) {
     static const int32_t kQuirksVoiceStealOrder[16] = {15, 14, 13, 12, 11, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9};
     static const int32_t kSpecVoiceStealOrder[16] = {9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15};
-    bool useQuirks = dls_bank_quirks(synth->banks[0]) || dls_bank_quirks(synth->banks[1]);
+    bool useQuirks = dls_synth_quirks(synth);
     const int32_t* order = useQuirks ? kQuirksVoiceStealOrder : kSpecVoiceStealOrder;
+    int32_t voiceLimit = DLS_MAX_VOICE_POOL;
 
     for (int ord = 0; ord < 16; ord++) {
         int32_t channel = order[ord];
@@ -2779,7 +2899,7 @@ static int32_t dls_find_held_percussion_voice(DLS_Synth* synth, int32_t newChann
 
         int32_t candidate = -1;
         int64_t priority = INT64_MAX;
-        for (int i = 0; i < 256; i++) {
+        for (int i = 0; i < voiceLimit; i++) {
             DLS_Voice* voice = &synth->voices[i];
             if (useQuirks) {
                 if (channel == 9 && voice->channel == channel && voice->keyHeld && voice->startSerial < priority) {
@@ -2801,8 +2921,9 @@ static int32_t dls_find_held_percussion_voice(DLS_Synth* synth, int32_t newChann
 static int32_t dls_find_active_voice_by_priority(DLS_Synth* synth, int32_t newChannel) {
     static const int32_t kQuirksVoiceStealOrder[16] = {15, 14, 13, 12, 11, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9};
     static const int32_t kSpecVoiceStealOrder[16] = {9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15};
-    bool useQuirks = dls_bank_quirks(synth->banks[0]) || dls_bank_quirks(synth->banks[1]);
+    bool useQuirks = dls_synth_quirks(synth);
     const int32_t* order = useQuirks ? kQuirksVoiceStealOrder : kSpecVoiceStealOrder;
+    int32_t voiceLimit = DLS_MAX_VOICE_POOL;
 
     for (int ord = 0; ord < 16; ord++) {
         int32_t channel = order[ord];
@@ -2810,7 +2931,7 @@ static int32_t dls_find_active_voice_by_priority(DLS_Synth* synth, int32_t newCh
 
         int32_t candidate = -1;
         int64_t priority = INT64_MAX;
-        for (int i = 0; i < 256; i++) {
+        for (int i = 0; i < voiceLimit; i++) {
             DLS_Voice* voice = &synth->voices[i];
             if (voice->active && voice->channel == channel && voice->startSerial < priority) {
                 candidate = i;
@@ -2833,7 +2954,7 @@ static int32_t dls_select_voice_index_for_note_on(DLS_Synth* synth, int32_t newC
     if (idx >= 0) return idx;
 
     idx = dls_find_active_voice_by_priority(synth, newChannel);
-    if (!g_use_mobilebae_quirks) return idx;
+    if (!dls_synth_quirks(synth)) return idx;
     return idx >= 0 ? idx : 0;
 }
 
@@ -2851,6 +2972,7 @@ void GM_DLS_ProcessNoteOn(GM_Song* pSong, uint16_t channel, uint16_t note, uint1
 
     DLS_Synth* synth = (DLS_Synth*)pSong->pMixer->pDLSSynth;
     
+    channel = dls_channel_index(channel);
     DLS_ChannelState* ch = &synth->channels[channel];
     ch->channel = channel;
 
@@ -2904,38 +3026,56 @@ void GM_DLS_ProcessNoteOn(GM_Song* pSong, uint16_t channel, uint16_t note, uint1
         regionKey = dls_clamp(voiceNote + dls_channel_coarse_semitones(ch), 0, 127);
     }
     
-    DLS_Region* region = DLS_Synth_FindRegion(inst, regionKey, velocity);
-    if (!region) {
-        debug_message("DLS Synth: no region for instrument=%d:%d:%d key=%d velocity=%d\n",
-                      inst->bankMsb, inst->bankLsb, inst->program, note, velocity);
-        return;
-    }
-    
-//    debug_message("DLS Synth: region found: keyLow=%d keyHigh=%d velLow=%d velHigh=%d tableIndex=%d\n",
-//                  region->keyLow, region->keyHigh, region->velocityLow, region->velocityHigh, region->tableIndex);
-    
-    DLS_Wave* wave = NULL;
-    if (inst->parentBank && region->tableIndex >= 0 && region->tableIndex < inst->parentBank->waveCount) {
-        wave = &inst->parentBank->waves[region->tableIndex];
-    }
-    if (!wave || !wave->pcm) {
-        debug_message("DLS Synth: no decoded wave for instrument=%d:%d:%d key=%d region=%d table=%d\n",
-                      inst->bankMsb, inst->bankLsb, inst->program, note,
-                      region->index, region->tableIndex);
-        return;
-    }
+    /* MobileBAE Plus (sub_11F7110) starts a voice for EVERY matching region,
+       not just the first one.  Layered instruments depend on this. */
+    {
+        int64_t noteInstance = ++synth->nextNoteInstance;
+        int32_t startedVoices = 0;
 
-    dls_kill_exclusive_voices(synth, channel, voiceNote, region);
-    
-    int32_t voiceIdx = dls_select_voice_index_for_note_on(synth, channel);
-    if (voiceIdx < 0) {
+        for (uint32_t regionIdx = 0; regionIdx < inst->regionCount; regionIdx++) {
+            DLS_Region* region = &inst->regions[regionIdx];
+            DLS_Wave* regionWave = NULL;
+            int32_t voiceIdx;
+            DLS_Voice* v;
+
+            if (regionKey < region->keyLow || regionKey > region->keyHigh) continue;
+            if (velocity < region->velocityLow || velocity > region->velocityHigh) continue;
+
+            if (inst->parentBank && region->tableIndex >= 0 &&
+                (uint32_t)region->tableIndex < inst->parentBank->waveCount) {
+                regionWave = &inst->parentBank->waves[region->tableIndex];
+            }
+            if (!regionWave || !regionWave->pcm) {
+                debug_message("DLS Synth: no decoded wave for instrument=%d:%d:%d key=%d region=%d table=%d\n",
+                              inst->bankMsb, inst->bankLsb, inst->program, note,
+                              region->index, region->tableIndex);
+                continue;
+            }
+
+            /* Match sub_11F7110 exactly: exclusive handling occurs before
+               allocating each matching region, including regions started by
+               an earlier iteration of this same note-on. */
+            dls_kill_exclusive_voices(synth, channel, voiceNote, region);
+
+            voiceIdx = dls_select_voice_index_for_note_on(synth, channel);
+            if (voiceIdx < 0) {
+                break;
+            }
+
+            v = &synth->voices[voiceIdx];
+            /* Pass the aliased key to voice init so pitch is calculated correctly */
+            dls_voice_init(v, channel, voiceNote, velocity, region, regionWave, ch, synth->sampleRate);
+            v->startSerial = synth->nextVoiceSerial++;
+            v->noteInstanceId = noteInstance;
+            startedVoices++;
+        }
+
+        if (startedVoices == 0) {
+            debug_message("DLS Synth: no region/wave for instrument=%d:%d:%d key=%d velocity=%d\n",
+                          inst->bankMsb, inst->bankLsb, inst->program, note, velocity);
+        }
         return;
     }
-    
-    DLS_Voice* v = &synth->voices[voiceIdx];
-    /* Pass the aliased key to voice init so pitch is calculated correctly */
-    dls_voice_init(v, channel, voiceNote, velocity, region, wave, ch, synth->sampleRate);
-    v->startSerial = synth->nextVoiceSerial++;
 }
 
 void GM_DLS_ProcessNoteOff(GM_Song* pSong, uint16_t channel, uint16_t note, uint16_t velocity) {
@@ -2965,7 +3105,7 @@ void GM_DLS_ProcessNoteOff(GM_Song* pSong, uint16_t channel, uint16_t note, uint
             if (spRemap != (int32_t)(note & 0x7F)) {
                 int32_t altNote = spRemap;
                 bool origFound = false;
-                for (int i = 0; i < 256; i++) {
+                for (int i = 0; i < DLS_MAX_VOICE_POOL; i++) {
                     DLS_Voice* v = &synth->voices[i];
                     if (v->active && v->channel == channel && v->key == note) {
                         origFound = true;
@@ -2979,7 +3119,7 @@ void GM_DLS_ProcessNoteOff(GM_Song* pSong, uint16_t channel, uint16_t note, uint
         }
     }
 
-    for (int i = 0; i < 256; i++) {
+    for (int i = 0; i < DLS_MAX_VOICE_POOL; i++) {
         DLS_Voice* v = &synth->voices[i];
         if (v->active && v->channel == channel && v->key == matchNote) {
             v->keyHeld = false;
@@ -2990,7 +3130,7 @@ void GM_DLS_ProcessNoteOff(GM_Song* pSong, uint16_t channel, uint16_t note, uint
 void GM_DLS_AllNotesOff(GM_Song* pSong, int16_t channel, bool immediate) {
     if (!pSong || !pSong->pMixer || !pSong->pMixer->pDLSSynth) return;
     DLS_Synth* synth = (DLS_Synth*)pSong->pMixer->pDLSSynth;
-    for (int i = 0; i < 256; i++) {
+    for (int i = 0; i < DLS_MAX_VOICE_POOL; i++) {
         DLS_Voice* v = &synth->voices[i];
         if (!v->active || (channel >= 0 && v->channel != channel)) continue;
         v->keyHeld = false;
@@ -3038,7 +3178,7 @@ bool GM_DLS_HasProgram(GM_Song* pSong, uint16_t channel, uint16_t program)
 void GM_DLS_ProcessPitchBend(GM_Song* pSong, uint16_t channel, uint16_t value) {
     if (!pSong || !pSong->pMixer || !pSong->pMixer->pDLSSynth) return;
     DLS_Synth* synth = (DLS_Synth*)pSong->pMixer->pDLSSynth;
-    synth->channels[channel].pitchBend = value & 0x3FFF;
+    synth->channels[dls_channel_index(channel)].pitchBend = value & 0x3FFF;
 }
 
 void GM_DLS_ProcessKeyPressure(GM_Song* pSong, uint16_t channel, uint16_t key, uint16_t value) {
@@ -3059,17 +3199,25 @@ void GM_DLS_ProcessController(GM_Song* pSong, uint16_t channel, uint16_t control
     if (!pSong || !pSong->pMixer || !pSong->pMixer->pDLSSynth) return;
     DLS_Synth* synth = (DLS_Synth*)pSong->pMixer->pDLSSynth;
     
-    DLS_ChannelState* ch = &synth->channels[channel];
+    DLS_ChannelState* ch = &synth->channels[dls_channel_index(channel)];
     if (controller == 64) {
         ch->sustain = value >= 64;
     } else if (controller == 121) {
-        dls_channel_reset_controllers(ch);
-        ch->selectedInstrument = NULL;
-        ch->selectedBankSelector = 0;
-        ch->programSelected = false;
+        /* MobileBAE sub_11F7520 only accepts its internal reset sentinel 127. */
+        if ((value & 0x7F) == 127) {
+            dls_channel_reset_controllers(ch);
+        }
     } else if (controller == 120) {
         GM_DLS_AllNotesOff(pSong, channel, true);
-    } else if (controller == 123 || (controller >= 124 && controller <= 127)) {
+    } else if (controller == 123) {
+        GM_DLS_AllNotesOff(pSong, channel, false);
+    } else if (controller >= 124 && controller <= 127) {
+        /* Omni Off/On (124/125) and Mono/Poly (126/127) also imply All Notes Off. */
+        if (controller == 126) {
+            ch->monoMode = true;
+        } else if (controller == 127) {
+            ch->monoMode = false;
+        }
         GM_DLS_AllNotesOff(pSong, channel, false);
     } else if (controller == 0) {
         ch->bankMsb = value & 0x7F;
@@ -3171,14 +3319,15 @@ static int32_t dls_get_sample(DLS_Wave* wave, int64_t positionQ16) {
 void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbBuffer, int32_t* pChorusBuffer, uint32_t frames) {
     if (!pSong || !pSong->pMixer || !pSong->pMixer->pDLSSynth) return;
     DLS_Synth* synth = (DLS_Synth*)pSong->pMixer->pDLSSynth;
-    
+    int32_t voiceLimit = DLS_MAX_VOICE_POOL;
+
     for (uint32_t f = 0; f < frames; f++) {
         int64_t leftOut = 0;
         int64_t rightOut = 0;
         int64_t revOut = 0;
         int64_t choOut = 0;
         
-        for (int i = 0; i < 256; i++) {
+        for (int i = 0; i < voiceLimit; i++) {
             DLS_Voice* v = &synth->voices[i];
             if (!v->active) continue;
             
@@ -3309,7 +3458,10 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
                 v->active = false;
             }
             
-            // Interpolate gain across the control block (matches Java's per-sample ramp).
+            /* Interpolate controller/envelope targets across the control
+               block to avoid discontinuities.  Note-on itself is initialized
+               directly to its first corrected EG target above, so this does
+               not reintroduce the former initial soft attack. */
             {
                 int32_t rampFrames = v->controlBlockFrames;
                 if (v->rampFrame < rampFrames) {
@@ -3355,19 +3507,72 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
         }
         
         static int DLS_GAIN_FACTOR = 5;
-        
-        // Dry mix = 50% (32/64). Keep wet paths proportionally below dry for headroom.
+
+        /* Preserve the established DLS output level. */
         int64_t mixedLeft = (int64_t)pBuffer[f * 2] + ((32 * leftOut) >> DLS_GAIN_FACTOR);
         int64_t mixedRight = (int64_t)pBuffer[f * 2 + 1] + ((32 * rightOut) >> DLS_GAIN_FACTOR);
-        pBuffer[f * 2] = (int32_t)(mixedLeft > INT32_MAX ? INT32_MAX : (mixedLeft < INT32_MIN ? INT32_MIN : mixedLeft));
-        pBuffer[f * 2 + 1] = (int32_t)(mixedRight > INT32_MAX ? INT32_MAX : (mixedRight < INT32_MIN ? INT32_MIN : mixedRight));
+
+        /* DLS is mixed before PV_ApplyOutputLimiter(), but the bus itself is
+           int32.  Use a stereo-linked limiter with immediate peak protection
+           and a smooth release.  A memoryless per-sample knee changes gain at
+           audio rate when a drum lands over a dense sustained mix, which is
+           heard as crackle. */
+        {
+            const int64_t limit = (int64_t)32767 << OUTPUT_SCALAR;
+            int64_t absLeft = mixedLeft < 0 ? -mixedLeft : mixedLeft;
+            int64_t absRight = mixedRight < 0 ? -mixedRight : mixedRight;
+            int64_t peak = absLeft > absRight ? absLeft : absRight;
+            int32_t targetGain = 0x10000;
+
+            if (peak > limit) {
+                targetGain = (int32_t)((limit << 16) / peak);
+            }
+
+            if (targetGain < synth->limiterGainQ16) {
+                /* Do not instantly pull down sustained voices when a drum
+                   transient arrives; that gain discontinuity is itself a
+                   click.  Converge over roughly 1 ms, then safety-clamp only
+                   the transient samples that still exceed the bus ceiling. */
+                int32_t attackFrames = synth->sampleRate / 1000;
+                int32_t delta;
+                if (attackFrames < 1) attackFrames = 1;
+                delta = (synth->limiterGainQ16 - targetGain) / attackFrames;
+                if (delta < 1) delta = 1;
+                synth->limiterGainQ16 -= delta;
+                if (synth->limiterGainQ16 < targetGain) {
+                    synth->limiterGainQ16 = targetGain;
+                }
+            } else if (synth->limiterGainQ16 < 0x10000) {
+                /* Approximately 50 ms release, independent of sample rate. */
+                int32_t releaseFrames = synth->sampleRate / 20;
+                int32_t delta;
+                if (releaseFrames < 1) releaseFrames = 1;
+                delta = (0x10000 - synth->limiterGainQ16) / releaseFrames;
+                if (delta < 1) delta = 1;
+                synth->limiterGainQ16 += delta;
+                if (synth->limiterGainQ16 > 0x10000) {
+                    synth->limiterGainQ16 = 0x10000;
+                }
+            }
+
+            mixedLeft = (mixedLeft * synth->limiterGainQ16) >> 16;
+            mixedRight = (mixedRight * synth->limiterGainQ16) >> 16;
+
+            /* Continuous hard ceiling for the brief limiter attack interval;
+               unlike an instantaneous stereo gain jump, this does not alter
+               the opposite channel or the sustained mix below the ceiling. */
+            if (mixedLeft > limit) mixedLeft = limit;
+            else if (mixedLeft < -limit) mixedLeft = -limit;
+            if (mixedRight > limit) mixedRight = limit;
+            else if (mixedRight < -limit) mixedRight = -limit;
+        }
+        pBuffer[f * 2] = (int32_t)mixedLeft;
+        pBuffer[f * 2 + 1] = (int32_t)mixedRight;
         if (pReverbBuffer) {
-            // Write mono reverb send (matching SF2's format: one mono sample per frame)
             int64_t mixedReverb = (int64_t)pReverbBuffer[f] + ((20 * revOut) >> DLS_GAIN_FACTOR);
             pReverbBuffer[f] = (int32_t)(mixedReverb > INT32_MAX ? INT32_MAX : (mixedReverb < INT32_MIN ? INT32_MIN : mixedReverb));
         }
         if (pChorusBuffer) {
-            // Write mono chorus send (matching SF2's format: one mono sample per frame)
             int64_t mixedChorus = (int64_t)pChorusBuffer[f] + ((20 * choOut) >> DLS_GAIN_FACTOR);
             pChorusBuffer[f] = (int32_t)(mixedChorus > INT32_MAX ? INT32_MAX : (mixedChorus < INT32_MIN ? INT32_MIN : mixedChorus));
         }
