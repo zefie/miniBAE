@@ -547,6 +547,10 @@ void GM_SoftResetSF2(void) {
         // Reset RPN parameters
         fluid_synth_cc(g_fluidsynth_synth, ch, 100, 127); // RPN LSB
         fluid_synth_cc(g_fluidsynth_synth, ch, 101, 127); // RPN MSB
+        
+        // Reset portamento
+        fluid_synth_cc(g_fluidsynth_synth, ch, 5, 0);    // Portamento time
+        fluid_synth_cc(g_fluidsynth_synth, ch, 65, 0);   // Portamento off
     }
     PV_SF2_UnlockSynth();
 }

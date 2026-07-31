@@ -785,11 +785,14 @@ fluid_synth_noteon(fluid_synth_t* synth, int chan, int key, int vel)
      advance it to the release phase. */
   fluid_synth_release_voice_on_same_note(synth, chan, key);
 
-  /* Handle portamento - if portamento is active, set up glide */
+  /* Handle portamento - if portamento is active, set up glide.
+     Otherwise clear the channel's fromkey so a MIDI loop restart
+     does not glide from a stale previous-iteration note. */
   if (fluid_channel_portamento(channel) && channel->fromkey_portamento != INVALID_NOTE) {
     synth->fromkey_portamento = channel->fromkey_portamento;
   } else {
     synth->fromkey_portamento = INVALID_NOTE;
+    channel->fromkey_portamento = INVALID_NOTE;
   }
 
   return fluid_synth_start(synth, synth->noteid++, channel->preset, 0, chan, key, vel);

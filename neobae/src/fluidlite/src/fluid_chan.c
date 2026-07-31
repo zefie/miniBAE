@@ -22,6 +22,7 @@
 #include "fluid_mod.h"
 #include "fluid_synth.h"
 #include "fluid_sfont.h"
+#include <stdint.h>
 
 #define SETCC(_c,_n,_v)  _c->cc[_n] = _v
 
@@ -511,12 +512,10 @@ unsigned int fluid_channel_portamentotime_with_mode(fluid_channel_t *chan, enum 
   switch (time_mode)
   {
     case FLUID_PORTAMENTO_TIME_MODE_XG_GS:
-      /* 7-bit MSB mapped onto a concave curve from 0s to 480s */
-      tmp = fluid_concave(msb);
-      res = (fluid_real_t)(Max/2 * 2.5) * tmp * fluid_concave(128 * tmp) + 400 * fluid_convex(msb * (fluid_real_t)(1/4.0));
-      res = res < Max ? res : Max;
-      /* Apply scaling hack for compatibility with Descent Game08 etc. */
-      res = (unsigned int)(res * abs(tokey - fromkey) / 36.0f + 0.5f);
+      /* Linear mapping: CC5 0 = 10ms, CC5 127 = 2000ms, scaled by semitone distance.
+         The original XG/GS concave formula produced absurdly long times (up to 480s). */
+      res = 10 + (msb * 1990 / 127);
+      res = (unsigned int)((int64_t)res * abs(tokey - fromkey) / 12);
       return res;
 
     case FLUID_PORTAMENTO_TIME_MODE_LINEAR:
