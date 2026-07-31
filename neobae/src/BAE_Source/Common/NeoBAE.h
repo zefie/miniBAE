@@ -1935,12 +1935,14 @@ extern "C"
     BAEResult BAE_SetClassicChorus(BAE_BOOL enable);
     BAEResult BAE_GetClassicChorus(BAE_BOOL *outEnable);
 
+#ifndef __ANDROID__    
     // Per-channel voice capture (for per-channel dry STEM recording)
     // Enables separate dry output for each MIDI channel (0-15).
     // Each active channel gets its own WAV file in outputDir.
     BAEResult BAE_EnableChannelCapture(BAEMixer mixer, const char *outputDir);
     BAEResult BAE_DisableChannelCapture(BAEMixer mixer);
     BAEResult BAE_GetChannelCaptureActive(BAEMixer mixer, bool *outActive);
+#endif
 
     // Per-song engine config flags (SONG_CONFIG_* bits from X_Formats.h).
     // Returns the raw engine config bitmask embedded in the song resource.

@@ -3042,6 +3042,8 @@ BAEResult BAE_GetClassicChorus(BAE_BOOL *outEnable)
 #endif
 }
 
+#ifndef __ANDROID__
+
 BAEResult BAE_EnableChannelCapture(BAEMixer mixer, const char *outputDir)
 {
     GM_Mixer *pMixer = MusicGlobals;
@@ -3139,6 +3141,8 @@ BAEResult BAE_GetChannelCaptureActive(BAEMixer mixer, bool *outActive)
     memcpy(outActive, pMixer->channelCaptureActive, sizeof(pMixer->channelCaptureActive));
     return BAE_NO_ERROR;
 }
+
+#endif
 
 BAEResult BAESong_GetEngineConfig(BAESong song, uint32_t *outFlags)
 {
