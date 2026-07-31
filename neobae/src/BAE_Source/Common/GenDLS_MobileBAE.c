@@ -3178,7 +3178,18 @@ bool GM_DLS_HasProgram(GM_Song* pSong, uint16_t channel, uint16_t program)
 void GM_DLS_ProcessPitchBend(GM_Song* pSong, uint16_t channel, uint16_t value) {
     if (!pSong || !pSong->pMixer || !pSong->pMixer->pDLSSynth) return;
     DLS_Synth* synth = (DLS_Synth*)pSong->pMixer->pDLSSynth;
-    synth->channels[dls_channel_index(channel)].pitchBend = value & 0x3FFF;
+    int32_t channelIndex = dls_channel_index(channel);
+    synth->channels[channelIndex].pitchBend = value & 0x3FFF;
+
+    /* A bend can follow note-on at the same MIDI tick. Re-evaluate affected
+       voices before their next sample instead of waiting for the 10 ms control
+       period, which otherwise leaves short/transient attacks at the old pitch. */
+    for (int32_t i = 0; i < synth->maxVoices; i++) {
+        DLS_Voice* voice = &synth->voices[i];
+        if (voice->active && voice->channel == channelIndex) {
+            voice->controlFramesUntilTick = 0;
+        }
+    }
 }
 
 void GM_DLS_ProcessKeyPressure(GM_Song* pSong, uint16_t channel, uint16_t key, uint16_t value) {
@@ -3578,4 +3589,3 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
         }
     }
 }
-

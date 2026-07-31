@@ -509,7 +509,10 @@ void PV_ResetControlers(GM_Song *pSong, int16_t channel2Reset, bool completeRese
     GM_SoftResetSF2();
 #endif
 #if USE_NATIVE_DLS == TRUE
-    GM_DLS_ResetForSong(pSong);
+    if (channel2Reset == -1)
+    {
+        GM_DLS_ResetForSong(pSong);
+    }
 #endif
 }
 
