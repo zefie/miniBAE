@@ -451,6 +451,35 @@ static const char usageExtra[] =
     "                 -d  {verbose/debug mode}\n"
     "                 -oc <dir> {record per-channel WAV files}\n";
 
+static const char *reverbTypeName(BAEReverbType t)
+{
+    switch (t) {
+    case BAE_REVERB_NO_CHANGE: return "Default";
+    case BAE_REVERB_NONE:      return "None";
+    case BAE_REVERB_TYPE_2:    return "Igor's Closet";
+    case BAE_REVERB_TYPE_3:    return "Igor's Garage";
+    case BAE_REVERB_TYPE_4:    return "Igor's Acoustic Lab";
+    case BAE_REVERB_TYPE_5:    return "Igor's Cavern";
+    case BAE_REVERB_TYPE_6:    return "Igor's Dungeon";
+    case BAE_REVERB_TYPE_7:    return "Small reflections (WebTV)";
+    case BAE_REVERB_TYPE_8:    return "Early reflections (variable)";
+    case BAE_REVERB_TYPE_9:    return "Basement (variable)";
+    case BAE_REVERB_TYPE_10:   return "Banquet hall (variable)";
+    case BAE_REVERB_TYPE_11:   return "Catacombs (variable)";
+#if USE_NEO_EFFECTS == TRUE
+    case BAE_REVERB_TYPE_12:   return "Neo Room (Neo reverb)";
+    case BAE_REVERB_TYPE_13:   return "Neo Hall (Neo reverb)";
+    case BAE_REVERB_TYPE_14:   return "Neo Cavern (Neo reverb)";
+    case BAE_REVERB_TYPE_15:   return "Neo Dungeon (Neo reverb)";
+    case BAE_REVERB_TYPE_16:   return "Neo Nokia (Neo reverb)";
+    case BAE_REVERB_TYPE_17:   return "MobileBAE";
+    case BAE_REVERB_TYPE_18:   return "Neo Tap Delay (Neo reverb)";
+#endif
+    case BAE_REVERB_TYPE_19:   return "Custom";
+    default:                   return "Unknown";
+    }
+}
+
 static const char reverbList[] =
     "Valid Reverb Types (-rv):\n"
     "   0   Default\n"
@@ -809,7 +838,7 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
 #endif
 
     if (gPassNumber <= 0) {
-        playbae_printf("Reverb: %d\n", (int)reverbType);
+        playbae_printf("Reverb: %s (%d)\n", reverbTypeName(reverbType), (int)reverbType);
         if (effectiveLoopCount > 0)
             playbae_printf("Will loop %u time(s)\n", effectiveLoopCount);
         if (timeLimitSec > 0)
