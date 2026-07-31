@@ -111,6 +111,7 @@ class PitchResult:
     mean_diff_hz: float           # mean abs Hz
     max_drift_hz: float
     max_drift_pct: float          # max relative pitch deviation (cents-based)
+    max_drift_time: str = "0:00.000"
     per_onset_drift: Dict[int, float] = field(default_factory=dict)
     frame_count: int = 0
 
@@ -245,12 +246,15 @@ def compare_pitch(y_src: np.ndarray, y_tgt: np.ndarray, sr: int) -> PitchResult:
     diff = np.abs(aligned_src - aligned_tgt)
     voiced = (aligned_src > 35) & (aligned_tgt > 35)
     diff_voiced = diff[voiced] if np.any(voiced) else diff
+    max_idx = int(np.argmax(diff_voiced)) if len(diff_voiced) else 0
+    max_time = _format_time(max_idx * CREPE_HOP / CREPE_SR)
 
     result = PitchResult(
         pitch_diff_hz=float(np.median(diff_voiced)) if len(diff_voiced) else 0.0,
         mean_diff_hz=float(np.mean(diff_voiced)) if len(diff_voiced) else 0.0,
         max_drift_hz=float(np.max(diff_voiced)) if len(diff_voiced) else 0.0,
         max_drift_pct=_max_pitch_drift_pct(aligned_src[voiced], aligned_tgt[voiced]),
+        max_drift_time=max_time,
         frame_count=aligned_n,
     )
 
@@ -261,6 +265,12 @@ def compare_pitch(y_src: np.ndarray, y_tgt: np.ndarray, sr: int) -> PitchResult:
             result.per_onset_drift[i] = float(diff[frame_idx])
 
     return result
+
+
+def _format_time(seconds: float) -> str:
+    m = int(seconds // 60)
+    s = seconds % 60
+    return f"{m}:{s:06.3f}"
 
 
 def _max_pitch_drift_pct(src: np.ndarray, tgt: np.ndarray) -> float:
@@ -689,6 +699,8 @@ def main() -> int:
             "raw": {
                 "pitch_diff_hz": pitch.pitch_diff_hz,
                 "pitch_max_drift_hz": pitch.max_drift_hz,
+                "pitch_max_drift_time": pitch.max_drift_time,
+                "pitch_max_drift_cents": pitch.max_drift_pct,
                 "timbre_cosine": instrument.cosine_global,
                 "inactive_chroma_bands": instrument.inactive_chroma_bands,
                 "rt60_src": effect.rt60_src,
@@ -718,7 +730,7 @@ def main() -> int:
         print("\n--- Raw values ---")
         print(f"  pitch_diff_hz (med) : {pitch.pitch_diff_hz:.3f}")
         print(f"  pitch_diff_hz (mean): {pitch.mean_diff_hz:.3f}")
-        print(f"  pitch_max_drift_hz  : {pitch.max_drift_hz:.3f}")
+        print(f"  pitch_max_drift_hz  : {pitch.max_drift_hz:.3f} at {pitch.max_drift_time}")
         print(f"  pitch_max_drift_pct : {pitch.max_drift_pct:.1f} cents")
         print(f"  timbre_cosine       : {instrument.cosine_global:.4f}")
         if instrument.inactive_chroma_bands:
