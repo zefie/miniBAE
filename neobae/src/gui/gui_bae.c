@@ -165,8 +165,9 @@ static bool restore_bank_for_song_load(const char *bank_path, const char *bank_n
         GM_SetMixerSF2Mode(FALSE);
 #endif
 #if USE_NATIVE_DLS == TRUE
-        GM_SetMixerDLSMode(FALSE);
+        BAEMixer_UnloadXMFDLSOverlayBank(g_bae.mixer);
         BAEMixer_UnloadDLSBank(g_bae.mixer);
+        GM_SetMixerDLSMode(FALSE);
 #endif
 
         BAEBankToken builtin_token = 0;
@@ -296,11 +297,12 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
     g_bae.bank_loaded = false;
 #if USE_SF2_SUPPORT == TRUE
     GM_UnloadSF2Soundfont();
+    GM_SetMixerSF2Mode(FALSE);
 #endif
 #if USE_NATIVE_DLS == TRUE
-        GM_SetMixerDLSMode(FALSE);
         BAEMixer_UnloadXMFDLSOverlayBank(g_bae.mixer);
         BAEMixer_UnloadDLSBank(g_bae.mixer);
+        GM_SetMixerDLSMode(FALSE);
 #endif
 
 #if _BUILT_IN_PATCHES == TRUE
@@ -685,9 +687,9 @@ bool bae_load_bank(const char *bank_path)
     BAEMixer_UnloadBanks(g_bae.mixer);
 
 #if USE_NATIVE_DLS == TRUE
-    GM_SetMixerDLSMode(FALSE);
     BAEMixer_UnloadXMFDLSOverlayBank(g_bae.mixer);
     BAEMixer_UnloadDLSBank(g_bae.mixer);
+    GM_SetMixerDLSMode(FALSE);
 #endif
 
 
@@ -783,20 +785,23 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
         return false;
 
     // Restore user's bank BEFORE loading new song if we had an embedded bank previously.
-    // This must run for both FluidSynth and native-DLS embedded RMI banks.
-#if USE_RMI_SUPPORT == TRUE
+    // This must run for both FluidSynth and native-DLS embedded RMI banks,
+    // and for XMF embedded DLS overlay banks loaded via nativedls.
+#if USE_RMI_SUPPORT == TRUE || USE_XMF_SUPPORT == TRUE || USE_NATIVE_DLS == TRUE
     if (g_bae.has_embedded_soundbank)
     {
-        // Clear the embedded soundbank flag
+#if USE_RMI_SUPPORT == TRUE
         GM_ClearRMISoundbankFlag();
+#endif
 
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
         GM_UnloadSF2Soundfont();
         GM_SetMixerSF2Mode(FALSE);
 #endif
 #if USE_NATIVE_DLS == TRUE
-        GM_SetMixerDLSMode(FALSE);
+        BAEMixer_UnloadXMFDLSOverlayBank(g_bae.mixer);
         BAEMixer_UnloadDLSBank(g_bae.mixer);
+        GM_SetMixerDLSMode(FALSE);
 #endif
 
         g_bae.has_embedded_soundbank = false;
@@ -1053,11 +1058,20 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
         return false;
     }
 
-    // Check if this MIDI file has an embedded soundbank (RMI format)
-#if USE_RMI_SUPPORT == TRUE
+    // Check if this MIDI file has an embedded soundbank (RMI or XMF)
+#if USE_RMI_SUPPORT == TRUE || USE_XMF_SUPPORT == TRUE || USE_NATIVE_DLS == TRUE
     if (use_embedded_banks)
     {
-        bool has_embedded_bank = GM_LastRMIHadEmbeddedSoundbank();
+        bool has_embedded_bank = false;
+#if USE_RMI_SUPPORT == TRUE
+        has_embedded_bank = GM_LastRMIHadEmbeddedSoundbank();
+#endif
+#if USE_NATIVE_DLS == TRUE && USE_XMF_SUPPORT == TRUE
+        if (!has_embedded_bank && g_bae.mixer)
+        {
+            has_embedded_bank = (BAEMixer_HasXMFDLSOverlayBank(g_bae.mixer) != 0);
+        }
+#endif
         if (has_embedded_bank)
         {
             // Store current user bank if not already stored
@@ -1072,10 +1086,18 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
             }
             
             // Update GUI to show embedded bank
-            safe_strncpy(g_bae.bank_name, "RMI Embedded Bank", sizeof(g_bae.bank_name) - 1);
+#if USE_NATIVE_DLS == TRUE && USE_XMF_SUPPORT == TRUE
+            if (BAEMixer_HasXMFDLSOverlayBank(g_bae.mixer) != 0) {
+                sprintf(g_bae.bank_name, "%s + Embedded", g_user_bank_name);
+            } else {
+                safe_strncpy(g_bae.bank_name, "Embedded Bank", sizeof(g_bae.bank_name) - 1);
+            }
+#else
+            safe_strncpy(g_bae.bank_name, "Embedded Bank", sizeof(g_bae.bank_name) - 1);
+#endif
             g_bae.bank_name[sizeof(g_bae.bank_name) - 1] = '\0';
             g_bae.has_embedded_soundbank = true;
-            BAE_PRINTF("Using embedded soundbank from RMI file\n");
+            BAE_PRINTF("Using embedded soundbank from XMF/RMI file\n");
         }
     }
     else

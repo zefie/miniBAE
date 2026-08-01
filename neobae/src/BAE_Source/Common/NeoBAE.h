@@ -889,6 +889,12 @@ extern "C"
     //
     BAEResult BAEMixer_UnloadXMFDLSOverlayBank(BAEMixer mixer);
 
+    // BAEMixer_HasXMFDLSOverlayBank()
+    // ------------------------------------
+    // Returns non-zero if the mixer has an active XMF DLS overlay bank.
+    //
+    int BAEMixer_HasXMFDLSOverlayBank(BAEMixer mixer);
+
     // BAEMixer_UnloadDLSBank()
     // ------------------------------------
     // Unload the active DLS bank

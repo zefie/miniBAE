@@ -4437,6 +4437,16 @@ BAEResult BAEMixer_UnloadXMFDLSOverlayBank(BAEMixer mixer)
     return BAE_NO_ERROR;
 }
 
+int BAEMixer_HasXMFDLSOverlayBank(BAEMixer mixer)
+{
+    if (!(mixer && mixer->pMixer))
+    {
+        return 0;
+    }
+
+    return (int)GM_DLS_HasXmfEmbeddedBank(mixer->pMixer);
+}
+
 BAEResult BAEMixer_LoadDLSBank(BAEMixer mixer, const char* filePath)
 {
     BAEResult err;
@@ -9474,7 +9484,14 @@ BAE_BOOL BAESong_HasEmbeddedBank(BAESong song)
 {
     if ((song) && (song->mID == OBJECT_ID))
     {
-        return song->mHasEmbeddedBank;
+        if (song->mHasEmbeddedBank)
+            return TRUE;
+#if USE_NATIVE_DLS == TRUE
+        if (song->mixer && song->mixer->pMixer &&
+            GM_DLS_HasXmfEmbeddedBank(song->mixer->pMixer))
+            return TRUE;
+#endif
+        return FALSE;
     }
     return FALSE;
 }
@@ -9937,19 +9954,7 @@ BAEResult BAESong_LoadRmiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL i
 
     theErr = NO_ERR;
     if ((song) && (song->mID == OBJECT_ID))
-    {
-#if USE_XMF_SUPPORT == TRUE
-    #if USE_NATIVE_DLS == TRUE
-        BAEMixer mixer = NULL;
-        if (BAESong_GetMixer(song, &mixer) == BAE_NO_ERROR && mixer)
-        {
-            if (GM_DLS_HasXmfEmbeddedBank(mixer->pMixer))
-            {
-                BAEMixer_UnloadXMFDLSOverlayBank(mixer);
-            }
-        }
-    #endif
-#endif        
+    {     
         BAE_AcquireMutex(song->mLock);
         XConvertPathToXFILENAME(filePath, &name);
         pMidiData = PV_GetFileAsData(&name, &midiSize);
@@ -10061,18 +10066,6 @@ BAEResult BAESong_LoadMidiFromFile(BAESong song, BAEPathName filePath, BAE_BOOL 
     {
         return BAE_TranslateOPErr(NULL_OBJECT);
     }
-#if USE_XMF_SUPPORT == TRUE
-    #if USE_NATIVE_DLS == TRUE
-        BAEMixer mixer = NULL;
-        if (BAESong_GetMixer(song, &mixer) == BAE_NO_ERROR && mixer)
-        {
-            if (GM_DLS_HasXmfEmbeddedBank(mixer->pMixer))
-            {
-                BAEMixer_UnloadXMFDLSOverlayBank(mixer);
-            }
-        }
-    #endif
-#endif
 
     XConvertPathToXFILENAME(filePath, &name);
     pMidiData = PV_GetFileAsData(&name, &midiSize);
@@ -10504,18 +10497,6 @@ BAEResult BAESong_LoadRmfFromFile(BAESong song, BAEPathName filePath, int16_t so
     isZmfContainer = FALSE;
     if ((song) && (song->mID == OBJECT_ID))
     {
-#if USE_XMF_SUPPORT == TRUE
-    #if USE_NATIVE_DLS == TRUE
-        BAEMixer mixer = NULL;
-        if (BAESong_GetMixer(song, &mixer) == BAE_NO_ERROR && mixer)
-        {
-            if (GM_DLS_HasXmfEmbeddedBank(mixer->pMixer))
-            {
-                BAEMixer_UnloadXMFDLSOverlayBank(mixer);
-            }
-        }
-    #endif
-#endif        
         BAE_AcquireMutex(song->mLock);
         XConvertPathToXFILENAME(filePath, &name);
         fileRef = XFileOpenResource(&name, TRUE);
