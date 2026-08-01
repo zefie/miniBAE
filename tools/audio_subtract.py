@@ -29,16 +29,14 @@ def load_audio(path: str, sr: int = 48000) -> Tuple[np.ndarray, int]:
 
 
 def _cross_correlate_lag(a: np.ndarray, b: np.ndarray, max_lag_samples: int) -> int:
-    """FFT-based cross-correlation to find integer lag aligning a to b."""
+    """FFT-based cross-correlation to find integer lag aligning b to a."""
     from scipy.signal import correlate
     n = min(len(a), len(b))
     a_norm = (a[:n] - np.mean(a[:n])).astype(np.float64)
     b_norm = (b[:n] - np.mean(b[:n])).astype(np.float64)
 
-    # Correlate centered signals
-    corr = correlate(a_norm, b_norm, mode="same", method="fft")
-    lags = np.arange(-n // 2, n // 2)
-    # Restrict to ±max_lag
+    corr = correlate(a_norm, b_norm, mode="full")
+    lags = np.arange(-(n - 1), n)
     mask = np.abs(lags) <= max_lag_samples
     best = np.argmax(corr[mask])
     return int(lags[mask][best])
@@ -50,17 +48,23 @@ def subsample_align(a: np.ndarray, b: np.ndarray, sr: int) -> float:
     max_lag_samples = int(max_lag_s * sr)
     lag_int = _cross_correlate_lag(a, b, max_lag_samples)
 
-    # Sub-sample refinement: fit quadratic to 3 points around peak
-    from scipy.signal import correlate
     n = min(len(a), len(b))
     a_norm = (a[:n] - np.mean(a[:n])).astype(np.float64)
-    b_pad = np.pad(b, (max_lag_samples, max_lag_samples))
+    a_norm /= np.sqrt(np.sum(a_norm ** 2)) + 1e-10
 
     def ncc_at(l):
-        li = int(l)
-        seg = b_pad[max_lag_samples + li : max_lag_samples + li + n].astype(np.float64)
+        li = int(np.floor(l))
+        frac = l - li
+        if frac == 0.0:
+            n2 = min(n, len(b) - li)
+            seg = b[li : li + n2].astype(np.float64)
+        else:
+            n2 = min(n - 1, len(b) - li - 1)
+            seg = ((1.0 - frac) * b[li : li + n2] + frac * b[li + 1 : li + n2 + 1]).astype(np.float64)
         seg = seg - np.mean(seg)
-        return np.dot(a_norm, seg) / (np.sqrt(np.sum(a_norm ** 2)) * np.sqrt(np.sum(seg ** 2)) + 1e-10)
+        denom = np.sqrt(np.sum(seg ** 2)) + 1e-10
+        seg /= denom
+        return float(np.dot(a_norm[:n2], seg))
 
     y0 = ncc_at(lag_int - 1)
     y1 = ncc_at(lag_int)
@@ -170,24 +174,26 @@ def main() -> int:
             else:
                 y_tgt_work[ch] *= gain
 
-    # Apply alignment shift and subtract
-    lag_int = int(round(lag_samples))
+    # Apply fractional-sample alignment shift via windowed-sinc interpolation
     print(f"Alignment: {lag_samples:.3f} samples ({lag_samples / sr * 1000:.2f} ms)", file=sys.stderr)
 
-    if lag_int > 0:
-        pad_width = (lag_int, 0) if channels == 1 else ((0, 0), (lag_int, 0))
-        tgt_shifted = np.pad(y_tgt_work, pad_width, mode="constant")
-        n_comp = min(y_src_work.shape[-1], tgt_shifted.shape[-1])
-        diff = y_src_work[..., :n_comp] - tgt_shifted[..., :n_comp]
-    elif lag_int < 0:
-        lag_abs = -lag_int
-        pad_width = (lag_abs, 0) if channels == 1 else ((0, 0), (lag_abs, 0))
-        src_shifted = np.pad(y_src_work, pad_width, mode="constant")
-        n_comp = min(src_shifted.shape[-1], y_tgt_work.shape[-1])
-        diff = src_shifted[..., :n_comp] - y_tgt_work[..., :n_comp]
-    else:
-        n_comp = min(y_src_work.shape[-1], y_tgt_work.shape[-1])
-        diff = y_src_work[..., :n_comp] - y_tgt_work[..., :n_comp]
+    def fractional_delay(signal: np.ndarray, delay: float) -> np.ndarray:
+        kernel_half = 32
+        delay_frac = delay - np.floor(delay)
+        delay_int = int(np.floor(delay))
+        t = np.arange(-kernel_half + 1, kernel_half + 1) + delay_frac
+        kernel = np.sinc(t) * np.hamming(len(t))
+        kernel /= np.sum(kernel)
+        shifted = np.convolve(signal.ravel(), kernel, mode="same")
+        if delay_int > 0:
+            shifted = np.pad(shifted, (delay_int, 0), mode="edge")[:-delay_int]
+        elif delay_int < 0:
+            shifted = np.pad(shifted, (0, -delay_int), mode="edge")[-delay_int:]
+        return shifted.reshape(signal.shape)
+
+    tgt_delayed = fractional_delay(y_tgt_work.ravel(), lag_samples).reshape(y_tgt_work.shape)
+    n_comp = min(y_src_work.shape[-1], tgt_delayed.shape[-1])
+    diff = y_src_work[..., :n_comp] - tgt_delayed[..., :n_comp]
 
     # Apply gain to make differences audible
     diff *= args.gain

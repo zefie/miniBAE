@@ -1100,4 +1100,44 @@ void RunNewReverb(int32_t *sourceP, int32_t *destP, int nSampleFrames)
     params->mFilterMemory = filterMemory;
 }
 
+void BAE_ClearNewReverbBuffers(void)
+{
+    NewReverbParams* params = GetNewReverbParams();
+    int i;
+
+    if (!params || !params->mIsInitialized)
+        return;
+
+    for (i = 0; i < kNumberOfCombFilters; i++)
+    {
+        if (params->mReverbBuffer[i])
+            XSetMemory(params->mReverbBuffer[i], sizeof(int32_t) * kCombBufferFrameSize, 0);
+        params->mReadIndex[i] = 0;
+        params->mWriteIndex[i] = 0;
+    }
+
+    if (params->mEarlyReflectionBuffer)
+        XSetMemory(params->mEarlyReflectionBuffer, sizeof(int32_t) * kEarlyReflectionBufferFrameSize, 0);
+    params->mReflectionWriteIndex = 0;
+    for (i = 0; i < kNumberOfEarlyReflections; i++)
+        params->mReflectionReadIndex[i] = 0;
+
+    for (i = 0; i < kNumberOfDiffusionStages; i++)
+    {
+        if (params->mDiffusionBuffer[i])
+            XSetMemory(params->mDiffusionBuffer[i], sizeof(int32_t) * kDiffusionBufferFrameSize, 0);
+        params->mDiffReadIndex[i] = 0;
+        params->mDiffWriteIndex[i] = 0;
+    }
+
+    if (params->mStereoizerBufferL)
+        XSetMemory(params->mStereoizerBufferL, sizeof(int32_t) * kStereoizerBufferFrameSize, 0);
+    if (params->mStereoizerBufferR)
+        XSetMemory(params->mStereoizerBufferR, sizeof(int32_t) * kStereoizerBufferFrameSize, 0);
+    params->mStereoReadIndex = 0;
+    params->mStereoWriteIndex = 0;
+
+    params->mFilterMemory = 0;
+}
+
 #endif // USE_NEW_EFFECTS

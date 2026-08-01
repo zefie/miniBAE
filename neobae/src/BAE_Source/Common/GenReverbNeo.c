@@ -1288,4 +1288,41 @@ void RunMobileReverb(int32_t *sourceP, int32_t *destP, int numFrames) {
     }
 }
 
+void BAE_ClearNeoReverbBuffers(void)
+{
+    NeoReverbParams* params = GetNeoReverbParams();
+    int i;
+
+    if (!params || !params->mIsInitialized)
+        return;
+
+    if (params->mTapBuffer)
+        XSetMemory(params->mTapBuffer, sizeof(int32_t) * NEO_TAP_BUFFER_SIZE, 0);
+    params->mTapWriteIdx = 0;
+
+    for (i = 0; i < NEO_CUSTOM_MAX_COMBS; i++)
+    {
+        if (params->mCustomBuffer[i])
+            XSetMemory(params->mCustomBuffer[i], sizeof(int32_t) * NEO_CUSTOM_BUFFER_SIZE, 0);
+        params->mCustomWriteIdx[i] = 0;
+        params->mCustomReadIdx[i] = 0;
+    }
+
+    params->mFilterMemoryL = 0;
+    params->mFilterMemoryR = 0;
+    params->mIdleFrames = 0;
+    params->mWasActive = FALSE;
+
+    if (gMobileReverb.initialized)
+    {
+        XSetMemory(gMobileReverb.inputDelay, sizeof(gMobileReverb.inputDelay), 0);
+        for (i = 0; i < 6; i++)
+            XSetMemory(gMobileReverb.comb[i], sizeof(gMobileReverb.comb[i]), 0);
+        XSetMemory(gMobileReverb.early, sizeof(gMobileReverb.early), 0);
+        XSetMemory(gMobileReverb.stereoL, sizeof(gMobileReverb.stereoL), 0);
+        XSetMemory(gMobileReverb.stereoR, sizeof(gMobileReverb.stereoR), 0);
+        gMobileReverb.wetSmoothingState = 0;
+    }
+}
+
 #endif  // USE_NEO_EFFECTS

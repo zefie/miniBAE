@@ -705,7 +705,6 @@ static void apply_output_gain(BAEMixer mixer)
  * MIDI sequencer events schedule voices.  Mirrors gui_bae.c pattern.
  * ========================================================================= */
 
-#if USE_MPEG_ENCODER == TRUE
 static BAEResult prime_encoder(BAEMixer mixer, BAESong song)
 {
     for (int i = 0; i < 8; i++) {
@@ -722,7 +721,6 @@ static BAEResult prime_encoder(BAEMixer mixer, BAESong song)
     }
     return BAE_NO_ERROR;
 }
-#endif
 
 /* =========================================================================
  * PV_PlaySong – unified MIDI/RMF/XMF playback
@@ -795,6 +793,16 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
     if (soloChannel >= 0)
         BAESong_SoloChannel(song, (uint16_t)soloChannel);
 
+    // Force reverb to reinit by briefly switching to None and back.
+    // This clears all internal reverb delay line buffers that might
+    // contain residual tails from prior playback state.
+    {
+        BAEReverbType savedVerb;
+        BAEMixer_GetDefaultReverb(mixer, &savedVerb);
+        BAEMixer_SetDefaultReverb(mixer, BAE_REVERB_NONE);
+        BAEMixer_SetDefaultReverb(mixer, savedVerb);
+    }
+
     /* Export defaults to one-shot; BAEScript may re-enable looping with exporter.loopcount. */
     if (gWriteToFile) {
         BAESong_SetLoops(song, 0);
@@ -845,7 +853,6 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
             playbae_printf("Time limit: %u sec\n", timeLimitSec);
     }
 
-#if USE_MPEG_ENCODER == TRUE
     if (gWriteToFile) {
         BAEResult perr = prime_encoder(mixer, song);
         if (perr != BAE_NO_ERROR) {
@@ -855,7 +862,6 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
             return perr;
         }
     }
-#endif
 
     /* ---- Main playback loop ---- */
     uint32_t lastPos       = 0;

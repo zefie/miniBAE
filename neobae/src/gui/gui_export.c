@@ -428,6 +428,23 @@ bool bae_start_export(const char *output_file, int export_type, int compression)
     }
 #endif
 
+    // Apply channel mutes BEFORE any audio service calls so muted channels
+    // are silenced from the very first sample of the export
+    bool ch_enable[16];
+    for (int i = 0; i < 16; i++) {
+        ch_enable[i] = g_thread_ch_enabled[i] ? true : false;
+    }
+    bae_update_channel_mutes(ch_enable);
+
+    // Force reverb to reinit by briefly switching to None and back.
+    // This clears all internal reverb delay line buffers that might
+    // contain residual tails from prior playback state.
+    {
+        int saved_reverb = g_bae.current_reverb_type;
+        bae_set_reverb(BAE_REVERB_NONE);
+        bae_set_reverb(saved_reverb);
+    }
+
     // Give the song a moment to settle and process initial MIDI events
     // This helps prevent note dropping at the beginning of the export
     for (int settle = 0; settle < 10; settle++)
@@ -435,13 +452,6 @@ bool bae_start_export(const char *output_file, int export_type, int compression)
         BAEMixer_ServiceAudioOutputToFile(g_bae.mixer);
         BAE_WaitMicroseconds(1000); // 1ms pause between each service call
     }
-
-    // Ensure channel mutes are applied during export initialization
-    bool ch_enable[16];
-    for (int i = 0; i < 16; i++) {
-        ch_enable[i] = g_thread_ch_enabled[i] ? true : false;
-    }
-    bae_update_channel_mutes(ch_enable);
 
     // Prime the encoder/mixer (like playbae does) to ensure events are processed
     for (int prime = 0; prime < 8; ++prime)
@@ -674,6 +684,23 @@ bool bae_start_mpeg_export(const char *output_file, int codec_index)
     }
 #endif
 
+    // Apply channel mutes BEFORE any audio service calls so muted channels
+    // are silenced from the very first sample of the export
+    bool ch_enable[16];
+    for (int i = 0; i < 16; i++) {
+        ch_enable[i] = g_thread_ch_enabled[i] ? true : false;
+    }
+    bae_update_channel_mutes(ch_enable);
+
+    // Force reverb to reinit by briefly switching to None and back.
+    // This clears all internal reverb delay line buffers that might
+    // contain residual tails from prior playback state.
+    {
+        int saved_reverb = g_bae.current_reverb_type;
+        bae_set_reverb(BAE_REVERB_NONE);
+        bae_set_reverb(saved_reverb);
+    }
+
     // Prime the encoder/mixer (like playbae does) to ensure events are processed
     for (int prime = 0; prime < 8; ++prime)
     {
@@ -744,13 +771,6 @@ bool bae_start_mpeg_export(const char *output_file, int codec_index)
             return false;
         }
     }
-
-    // Ensure channel mutes are applied during export initialization
-    bool ch_enable[16];
-    for (int i = 0; i < 16; i++) {
-        ch_enable[i] = g_thread_ch_enabled[i] ? true : false;
-    }
-    bae_update_channel_mutes(ch_enable);
 
     // If song still reports done, keep priming briefly until active or safety limit
     BAE_BOOL preDone = TRUE;
