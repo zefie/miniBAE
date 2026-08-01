@@ -375,6 +375,14 @@
     #endif
 #endif
 
+// Compiler memory barrier — forces the compiler to commit all pending
+// loads/stores before proceeding.  No CPU fence is emitted.
+#ifdef _MSC_VER
+    #define BAE_COMPILER_BARRIER()  _ReadWriteBarrier()
+#else
+    #define BAE_COMPILER_BARRIER()  __asm__ __volatile__("" ::: "memory")
+#endif
+
 
 
 #ifndef X_PLATFORM

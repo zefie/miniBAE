@@ -2408,6 +2408,7 @@ static void PV_ProcessNoteOff(GM_Song *pSong, int16_t MIDIChannel, int16_t curre
         if (MIDIChannel >= 0 && MIDIChannel < 16 && note >= 0 && note < 128)
         {
             pSong->channelActiveNotes[MIDIChannel][note] = 0; // mark off
+            BAE_COMPILER_BARRIER();
         }
         if (pSong->AnalyzeMode == SCAN_NORMAL)
         {
@@ -2473,6 +2474,7 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
             if (MIDIChannel >= 0 && MIDIChannel < MAX_CHANNELS && note >= 0 && note < 128)
             {
                 pSong->channelActiveNotes[MIDIChannel][note] = (unsigned char)volume; // store velocity
+                BAE_COMPILER_BARRIER();
             }
             if (pSong->AnalyzeMode == SCAN_NORMAL)
             {
@@ -2650,6 +2652,7 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
             if (MIDIChannel >= 0 && MIDIChannel < 16 && note >= 0 && note < 128)
             {
                 pSong->channelActiveNotes[MIDIChannel][note] = 0;
+                BAE_COMPILER_BARRIER();
             }
             PV_ProcessNoteOff(pSong, MIDIChannel, currentTrack, note, volume);
         }

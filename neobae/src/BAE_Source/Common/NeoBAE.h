@@ -2059,6 +2059,13 @@ extern "C"
                                      unsigned char channel,
                                      unsigned char *outNotes /* 128 bytes */);
 
+    // BAESong_GetAllActiveNotes()
+    // --------------------------------------
+    // Copies current note velocities for all 16 channels into outNotes
+    // (16 × 128 byte array) under a single mutex acquisition.
+    BAEResult BAESong_GetAllActiveNotes(BAESong song,
+                                        unsigned char outNotes[BAE_MAX_MIDI_CHANNELS][BAE_MAX_NOTES]);
+
     // BAESong_LoadInstrument()
     // --------------------------------------
     // Loads the indicated instrument (and all samples it uses) from the current

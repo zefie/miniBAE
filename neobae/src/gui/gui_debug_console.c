@@ -67,7 +67,8 @@ typedef struct {
 
 static DebugLine g_debug_lines[DEBUG_MAX_LINES];
 static int g_line_count = 0;
-static int g_line_head = 0;  // Newest line index
+static int g_line_head = 0;  // Newest line index (circular)
+static bool g_line_wrapped = false;  // Whether line array has wrapped around
 
 // Synchronization
 static SDL_Mutex *g_debug_mutex = NULL;
@@ -109,6 +110,7 @@ void debug_console_init(void)
     g_buffer_wrapped = false;
     g_line_count = 0;
     g_line_head = 0;
+    g_line_wrapped = false;
     g_scroll_offset = 0;
     g_auto_scroll = true;
     g_selecting = false;
@@ -154,15 +156,32 @@ void debug_console_shutdown(void)
     g_filtered_capacity = 0;
 }
 
-// Update filtered lines based on current filter text
-// Get line from buffer
+// Determine the real line count (considering circular wrapping)
+static int total_line_count(void)
+{
+    return g_line_wrapped ? DEBUG_MAX_LINES : g_line_count;
+}
+
+// Map a display index (0=oldest, total-1=newest) to the actual g_debug_lines array index
+static int display_to_array_index(int display_index)
+{
+    if (!g_line_wrapped) {
+        return display_index;
+    }
+    return (g_line_head + 1 + display_index) % DEBUG_MAX_LINES;
+}
+
+// Get line from buffer (line_index is display order: 0=oldest)
 static bool get_line(int line_index, char *buffer, size_t buffer_size)
 {
-    if (line_index < 0 || line_index >= g_line_count) {
+    int total = total_line_count();
+    if (line_index < 0 || line_index >= total) {
         return false;
     }
-    
-    DebugLine *line = &g_debug_lines[line_index];
+
+    int actual_index = display_to_array_index(line_index);
+
+    DebugLine *line = &g_debug_lines[actual_index];
     size_t copy_len = (line->length < buffer_size - 1) ? line->length : (buffer_size - 1);
     
     // Handle circular buffer wrap
@@ -212,7 +231,8 @@ static void update_filter(void)
     }
     
     // Ensure we have enough capacity
-    int needed_capacity = g_line_count;
+    int total_lines = g_line_wrapped ? DEBUG_MAX_LINES : g_line_count;
+    int needed_capacity = total_lines;
     if (needed_capacity > g_filtered_capacity) {
         int *new_filtered = realloc(g_filtered_lines, needed_capacity * sizeof(int));
         if (new_filtered) {
@@ -228,7 +248,7 @@ static void update_filter(void)
     g_filtered_count = 0;
     char line_buf[512];
     
-    for (int i = 0; i < g_line_count; i++) {
+    for (int i = 0; i < total_lines; i++) {
         if (get_line(i, line_buf, sizeof(line_buf))) {
             bool matches = true;
             
@@ -262,10 +282,11 @@ static void add_line(size_t offset, size_t length)
         g_line_head = g_line_count;
         g_line_count++;
     } else {
-        // Circular buffer for lines
+        // Circular buffer for lines - overwrite oldest, keep cycling
         g_line_head = (g_line_head + 1) % DEBUG_MAX_LINES;
         g_debug_lines[g_line_head].offset = offset;
         g_debug_lines[g_line_head].length = length;
+        g_line_wrapped = true;
     }
     
     // Update filter if active
@@ -299,6 +320,7 @@ static void clear_console(void)
     memset(g_debug_lines, 0, sizeof(g_debug_lines));
     g_line_count = 0;
     g_line_head = 0;
+    g_line_wrapped = false;
     
     // Reset filter state
     clear_filter();
@@ -431,15 +453,13 @@ static void mouse_to_text_position(int mx, int my, int win_h, int *out_line, int
     
     // Calculate which line
     int line_offset = (my - content_y) / DEBUG_LINE_HEIGHT;
-    int total_lines = g_filter_active ? g_filtered_count : g_line_count;
+    int total_lines = g_filter_active ? g_filtered_count : total_line_count();
     int start_line = total_lines - visible_lines - g_scroll_offset;
     if (start_line < 0) start_line = 0;
     
     *out_line = start_line + line_offset;
     if (*out_line < 0) *out_line = 0;
     if (*out_line >= total_lines) *out_line = total_lines - 1;
-    
-    // Rough column estimate (fixed-width assumed, 8 pixels per char)
     *out_col = (mx - DEBUG_PADDING) / 8;
     if (*out_col < 0) *out_col = 0;
 }
@@ -612,7 +632,8 @@ bool debug_console_handle_event(SDL_Event *event)
                     int end = (g_selection_start_line < g_selection_end_line) ? g_selection_end_line : g_selection_start_line;
                     
                     char line_buf[512];
-                    for (int i = start; i <= end && i < g_line_count; i++) {
+                    int total = total_line_count();
+                    for (int i = start; i <= end && i < total; i++) {
                         int actual_line = g_filter_active ? g_filtered_lines[i] : i;
                         if (get_line(actual_line, line_buf, sizeof(line_buf))) {
                             size_t line_len = strlen(line_buf);
@@ -638,7 +659,7 @@ bool debug_console_handle_event(SDL_Event *event)
 #else
         else if (ev_key == SDLK_A && (ev_mod & SDL_KMOD_CTRL)) {
 #endif
-            int total_display_lines = g_filter_active ? g_filtered_count : g_line_count;
+            int total_display_lines = g_filter_active ? g_filtered_count : total_line_count();
             g_selection_start_line = 0;
             g_selection_start_col = 0;
             g_selection_end_line = total_display_lines - 1;
@@ -654,7 +675,7 @@ bool debug_console_handle_event(SDL_Event *event)
             }
             debug_console_hide();
         } else if (ev_key == SDLK_HOME) {
-            int total_display_lines = g_filter_active ? g_filtered_count : g_line_count;
+            int total_display_lines = g_filter_active ? g_filtered_count : total_line_count();
             g_scroll_offset = total_display_lines;
             g_auto_scroll = false;
         } else if (ev_key == SDLK_END) {
@@ -665,7 +686,7 @@ bool debug_console_handle_event(SDL_Event *event)
             SDL_GetWindowSize(g_debug_window, NULL, &win_h);
             int visible_lines = (win_h - 2 * DEBUG_PADDING - 40) / DEBUG_LINE_HEIGHT;
             g_scroll_offset += visible_lines;
-            int total_display_lines = g_filter_active ? g_filtered_count : g_line_count;
+            int total_display_lines = g_filter_active ? g_filtered_count : total_line_count();
             if (g_scroll_offset > total_display_lines) g_scroll_offset = total_display_lines;
             g_auto_scroll = false;
         } else if (ev_key == SDLK_PAGEDOWN) {
@@ -689,7 +710,8 @@ bool debug_console_handle_event(SDL_Event *event)
 #endif
         if (event->wheel.y > 0) {
             g_scroll_offset += 3;
-            if (g_scroll_offset > g_line_count) g_scroll_offset = g_line_count;
+            int total = total_line_count();
+            if (g_scroll_offset > total) g_scroll_offset = total;
             g_auto_scroll = false;
         } else if (event->wheel.y < 0) {
             g_scroll_offset -= 3;
@@ -816,7 +838,7 @@ bool debug_console_handle_event(SDL_Event *event)
             int content_y = DEBUG_TITLE_BAR_HEIGHT + DEBUG_PADDING;
             int content_h = win_h - content_y - DEBUG_PADDING - DEBUG_STATUS_BAR_HEIGHT;
             int visible_lines = content_h / DEBUG_LINE_HEIGHT;
-            int total_scroll_lines = g_filter_active ? g_filtered_count : g_line_count;
+            int total_scroll_lines = g_filter_active ? g_filtered_count : total_line_count();
             
             if (total_scroll_lines > visible_lines) {
                 float thumb_ratio = (float)visible_lines / (float)total_scroll_lines;
@@ -842,8 +864,11 @@ bool debug_console_handle_event(SDL_Event *event)
                 g_scroll_offset = 0;
                 g_auto_scroll = true;
             }
-            if (g_scroll_offset > g_line_count) {
-                g_scroll_offset = g_line_count;
+            {
+                int total = total_line_count();
+                if (g_scroll_offset > total) {
+                    g_scroll_offset = total;
+                }
             }
             if (g_scroll_offset != 0) {
                 g_auto_scroll = false;
@@ -876,10 +901,11 @@ void debug_console_render(void)
     draw_rect(g_debug_renderer, title_bar, title_bg);
     
     char title[128];
+    int total = total_line_count();
     if (g_filter_active) {
-        snprintf(title, sizeof(title), "Debug Console - %d/%d lines (F12 to close)", g_filtered_count, g_line_count);
+        snprintf(title, sizeof(title), "Debug Console - %d/%d lines (F12 to close)", g_filtered_count, total);
     } else {
-        snprintf(title, sizeof(title), "Debug Console - %d lines (F12 to close)", g_line_count);
+        snprintf(title, sizeof(title), "Debug Console - %d lines (F12 to close)", total);
     }
     draw_text(g_debug_renderer, DEBUG_PADDING, 8, title, (SDL_Color){200, 200, 200, 255});
     
@@ -939,7 +965,7 @@ void debug_console_render(void)
     SDL_LockMutex(g_debug_mutex);
     
     // Calculate which lines to display
-    int total_lines = g_filter_active ? g_filtered_count : g_line_count;
+    int total_lines = g_filter_active ? g_filtered_count : total_line_count();
     int start_line = total_lines - visible_lines - g_scroll_offset;
     if (start_line < 0) start_line = 0;
     
@@ -971,7 +997,7 @@ void debug_console_render(void)
     SDL_UnlockMutex(g_debug_mutex);
     
     // Draw scrollbar if needed
-    int total_display_lines = g_filter_active ? g_filtered_count : g_line_count;
+    int total_display_lines = g_filter_active ? g_filtered_count : total_line_count();
     if (total_display_lines > visible_lines) {
         int scrollbar_x = win_w - DEBUG_SCROLLBAR_WIDTH - 5;
         int scrollbar_h = content_h;
@@ -998,11 +1024,11 @@ void debug_console_render(void)
     draw_rect(g_debug_renderer, status_bar, (SDL_Color){30, 30, 40, 255});
     
     char status[256];
-    total_lines = g_filter_active ? g_filtered_count : g_line_count;
+    total_lines = g_filter_active ? g_filtered_count : total_line_count();
     if (g_auto_scroll) {
         if (g_filter_active) {
             snprintf(status, sizeof(status), "FILTERED | Auto-scroll: ON | Lines: %d-%d of %d filtered (%d total) | Filter: '%s'",
-                     start_line + 1, end_line, total_lines, g_line_count, g_filter_text);
+                     start_line + 1, end_line, total_lines, total_line_count(), g_filter_text);
         } else {
             snprintf(status, sizeof(status), "Auto-scroll: ON | Lines: %d-%d of %d | Use mouse wheel or PgUp/PgDn/Home/End to scroll",
                      start_line + 1, end_line, total_lines);
@@ -1010,7 +1036,7 @@ void debug_console_render(void)
     } else {
         if (g_filter_active) {
             snprintf(status, sizeof(status), "FILTERED | Auto-scroll: OFF | Lines: %d-%d of %d filtered (%d total) | Scroll offset: %d | Filter: '%s'",
-                     start_line + 1, end_line, total_lines, g_line_count, g_scroll_offset, g_filter_text);
+                     start_line + 1, end_line, total_lines, total_line_count(), g_scroll_offset, g_filter_text);
         } else {
             snprintf(status, sizeof(status), "Auto-scroll: OFF | Lines: %d-%d of %d | Scroll offset: %d",
                      start_line + 1, end_line, total_lines, g_scroll_offset);

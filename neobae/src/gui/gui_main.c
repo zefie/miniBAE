@@ -1145,7 +1145,7 @@ int main(int argc, char *argv[])
         window_y = settings.window_y;
     }
     const float TARGET_FPS = 60.0f;
-    const float FRAME_TIME_MS = 1000.0f / TARGET_FPS;
+    float frame_time_ms = 1000.0f / TARGET_FPS;
 
 #if defined(USE_SDL2)
     SDL_Window *win = SDL_CreateWindow("zefidi Media Player", window_x, window_y, 900, g_window_h, 0);
@@ -1167,6 +1167,34 @@ int main(int argc, char *argv[])
     SDL_SetWindowResizable(win, false);
 #endif
     SDL_SetWindowPosition(win, window_x, window_y);
+
+    // Query display refresh rate for adaptive frame timing.
+    // Fall back to 60 Hz if the query fails.  Clamp to a sensible range.
+    {
+#if defined(USE_SDL2)        
+        int display_index = SDL_GetWindowDisplayIndex(win);
+#else
+        int display_index = SDL_GetDisplayForWindow(win);
+#endif
+        if (display_index >= 0)
+        {
+#if defined(USE_SDL2)
+            SDL_DisplayMode dm;
+            if (SDL_GetDesktopDisplayMode(display_index, &dm) == 0)
+#else
+            const SDL_DisplayMode *dm = SDL_GetDesktopDisplayMode(display_index);
+            if (dm)
+#endif
+            {
+                if (dm->refresh_rate >= 60 && dm->refresh_rate <= 240)
+                {
+                    frame_time_ms = 1000.0f / (float)dm->refresh_rate;
+                    BAE_PRINTF("Display refresh rate: %d Hz, frame time: %.2f ms\n",
+                               (int32_t)dm->refresh_rate, frame_time_ms);
+                }
+            }
+        }
+    }
 
 #if defined(USE_SDL2)
     SDL_Renderer *R = SDL_CreateRenderer(win, -1, 0);
@@ -2234,7 +2262,7 @@ int main(int argc, char *argv[])
                         {
                             BAESong target = g_bae.song ? g_bae.song : g_live_song;
                             if (target)
-                                BAESong_NoteOnWithLoad(target, (unsigned char)g_keyboard_channel, (unsigned char)midi, 100, 0);
+                                BAESong_NoteOn(target, (unsigned char)g_keyboard_channel, (unsigned char)midi, 100, 0);
 #if SUPPORT_MIDI_HW == TRUE
                             if (g_midi_output_enabled)
                             {
@@ -3917,7 +3945,7 @@ int main(int argc, char *argv[])
                     }
                     g_keyboard_mouse_note = -1;
                     memset(g_keyboard_active_notes, 0, sizeof(g_keyboard_active_notes));
-                    g_keyboard_suppress_until = SDL_GetTicks() + 250;
+                    g_keyboard_suppress_until = SDL_GetTicks() + 33;
                 }
             }
         }
@@ -3973,7 +4001,7 @@ int main(int argc, char *argv[])
                 }
                 g_keyboard_mouse_note = -1;
                 memset(g_keyboard_active_notes, 0, sizeof(g_keyboard_active_notes));
-                g_keyboard_suppress_until = SDL_GetTicks() + 250;
+                g_keyboard_suppress_until = SDL_GetTicks() + 33;
             }
         }
         SDL_Color progressColor = progressHover ? g_highlight_color : labelCol;
@@ -4090,7 +4118,7 @@ int main(int argc, char *argv[])
                 g_keyboard_mouse_note = -1;
                 memset(g_keyboard_active_notes_by_channel, 0, sizeof(g_keyboard_active_notes_by_channel));
                 memset(g_keyboard_active_notes, 0, sizeof(g_keyboard_active_notes));
-                g_keyboard_suppress_until = SDL_GetTicks() + 250;
+                g_keyboard_suppress_until = SDL_GetTicks() + 33;
             }
             // Reset total-play timer on user Stop
             g_total_play_ms = 0;
@@ -4110,7 +4138,7 @@ int main(int argc, char *argv[])
                 }
                 g_keyboard_mouse_note = -1;
                 memset(g_keyboard_active_notes, 0, sizeof(g_keyboard_active_notes));
-                g_keyboard_suppress_until = SDL_GetTicks() + 250;
+                g_keyboard_suppress_until = SDL_GetTicks() + 33;
             }
             // Also stop export if active
             if (g_exporting)
@@ -4319,7 +4347,7 @@ int main(int argc, char *argv[])
                             }
                             g_keyboard_mouse_note = -1;
                             memset(g_keyboard_active_notes, 0, sizeof(g_keyboard_active_notes));
-                            g_keyboard_suppress_until = SDL_GetTicks() + 250;
+                            g_keyboard_suppress_until = SDL_GetTicks() + 33;
                         }
                     }
                     // Reset preview state when not dragging
@@ -4475,61 +4503,53 @@ int main(int argc, char *argv[])
                 }
             }
             // Merge engine-driven active notes with notes coming from external
-            // MIDI input so incoming MIDI lights the virtual keys even when
-            // playback is stopped or when using the live fallback song.
+            // MIDI input, QWERTY typing, and mouse clicks so all sources light
+            // the virtual keys regardless of playback state.
             unsigned char merged_notes[BAE_MAX_NOTES];
             memset(merged_notes, 0, sizeof(merged_notes));
-#if SUPPORT_MIDI_HW == TRUE
-            // If MIDI input is enabled, fill merged_notes from per-channel state
-            if (g_midi_input_enabled)
+
+            // Always include per-channel UI/MIDI-input notes first so QWERTY
+            // typing and mouse-click notes show immediately every frame.
+            if (g_keyboard_show_all_channels)
             {
-                if (g_keyboard_show_all_channels)
+                for (int ch = 0; ch < BAE_MAX_MIDI_CHANNELS; ++ch)
                 {
-                    // OR all channels together
-                    for (int ch = 0; ch < BAE_MAX_MIDI_CHANNELS; ++ch)
-                    {
-                        for (int n = 0; n < BAE_MAX_NOTES; ++n)
-                            merged_notes[n] |= g_keyboard_active_notes_by_channel[ch][n];
-                    }
-                }
-                else
-                {
-                    // Only show the currently selected channel
                     for (int n = 0; n < BAE_MAX_NOTES; ++n)
-                        merged_notes[n] |= g_keyboard_active_notes_by_channel[g_keyboard_channel][n];
+                        merged_notes[n] |= g_keyboard_active_notes_by_channel[ch][n] ? 1 : 0;
                 }
             }
-#endif
-            // Also query engine active notes when appropriate and OR them in.
+            else
+            {
+                for (int n = 0; n < BAE_MAX_NOTES; ++n)
+                    merged_notes[n] |= g_keyboard_active_notes_by_channel[g_keyboard_channel][n] ? 1 : 0;
+            }
+
+            // Also query engine active notes and OR them in so MIDI-file
+            // playback lights the keys.  Skip during export and briefly after
+            // seek/stop (suppress_until) while engine note state settles.
             if (!g_exporting)
             {
                 BAESong target = g_bae.song ? g_bae.song : g_live_song;
-                if (target && g_bae.is_playing)
+                if (target && (g_bae.is_playing || g_keyboard_mouse_note != -1))
                 {
                     Uint32 nowms = SDL_GetTicks();
                     if (nowms >= g_keyboard_suppress_until)
                     {
                         if (g_keyboard_show_all_channels)
                         {
-                            // Query each channel and OR them together so engine-driven
-                            // activity on any channel lights the virtual keyboard when
-                            // the 'All' option is enabled.
+                            unsigned char ch_notes[BAE_MAX_MIDI_CHANNELS][BAE_MAX_NOTES];
+                            BAESong_GetAllActiveNotes(target, ch_notes);
                             for (int ch = 0; ch < BAE_MAX_MIDI_CHANNELS; ++ch)
                             {
-                                // Only include notes from enabled (non-muted) channels
                                 if (ch_enable[ch])
                                 {
-                                    unsigned char ch_notes[BAE_MAX_NOTES];
-                                    memset(ch_notes, 0, sizeof(ch_notes));
-                                    BAESong_GetActiveNotes(target, (unsigned char)ch, ch_notes);
                                     for (int i = 0; i < BAE_MAX_NOTES; i++)
-                                        merged_notes[i] |= ch_notes[i];
+                                        merged_notes[i] |= ch_notes[ch][i];
                                 }
                             }
                         }
                         else
                         {
-                            // Only show the currently selected channel if it's enabled
                             if (ch_enable[g_keyboard_channel])
                             {
                                 unsigned char engine_notes[BAE_MAX_NOTES];
@@ -4742,7 +4762,7 @@ int main(int argc, char *argv[])
                             BAESong target = g_bae.song ? g_bae.song : g_live_song;
                             if (target)
                             {
-                                BAESong_NoteOnWithLoad(target, (unsigned char)g_keyboard_channel, (unsigned char)mouseNote, (unsigned char)vel, 0);
+                                BAESong_NoteOn(target, (unsigned char)g_keyboard_channel, (unsigned char)mouseNote, (unsigned char)vel, 0);
                             }
                         }
 #if SUPPORT_MIDI_HW == TRUE
@@ -5271,7 +5291,7 @@ int main(int argc, char *argv[])
                     }
                     g_keyboard_mouse_note = -1;
                     memset(g_keyboard_active_notes, 0, sizeof(g_keyboard_active_notes));
-                    g_keyboard_suppress_until = SDL_GetTicks() + 250;
+                    g_keyboard_suppress_until = SDL_GetTicks() + 33;
                 }
                 // Reset total-play timer on user Stop
                 g_total_play_ms = 0;
@@ -7317,7 +7337,7 @@ int main(int argc, char *argv[])
                 }
                 g_keyboard_mouse_note = -1;
                 memset(g_keyboard_active_notes, 0, sizeof(g_keyboard_active_notes));
-                g_keyboard_suppress_until = SDL_GetTicks() + 250;
+                g_keyboard_suppress_until = SDL_GetTicks() + 33;
             }
         }
         SDL_RenderPresent(R);
@@ -7339,8 +7359,13 @@ int main(int argc, char *argv[])
         Uint64 frame_end = SDL_GetPerformanceCounter();
         float elapsed_ms = (frame_end - frame_start) * 1000.0f / freq;
 
-        if (elapsed_ms < FRAME_TIME_MS) {
-            SDL_Delay((Uint32)(FRAME_TIME_MS - elapsed_ms));
+        if (elapsed_ms < frame_time_ms)
+        {
+#if defined(USE_SDL2)
+            SDL_WaitEventTimeout(NULL, (int)(frame_time_ms - elapsed_ms));
+#else
+            SDL_WaitEventTimeout(NULL, (Sint32)(frame_time_ms - elapsed_ms));
+#endif
         }
         static int lastTranspose = 123456, lastTempo = 123456, lastVolume = 123456, lastReverbType = -1;
         static bool lastLoop = false;

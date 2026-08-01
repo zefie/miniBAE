@@ -11026,6 +11026,50 @@ BAEResult BAESong_GetActiveNotes(BAESong song, unsigned char channel, unsigned c
             {
                 for (int _n = 0; _n < 128; _n++)
                     outNotes[_n] = song->pSong->channelActiveNotes[channel][_n];
+                // Compiler barrier: force fresh reads of the volatile
+                // channelActiveNotes array on every invocation.  Clang may
+                // otherwise hoist or coalesce reads across mutex boundaries.
+                BAE_COMPILER_BARRIER();
+            }
+            else
+            {
+                err = NOT_SETUP;
+            }
+            BAE_ReleaseMutex(song->mLock);
+        }
+        else
+        {
+            err = PARAM_ERR;
+        }
+    }
+    else
+    {
+        err = NULL_OBJECT;
+    }
+    return BAE_TranslateOPErr(err);
+}
+
+// BAESong_GetAllActiveNotes()
+// --------------------------------------
+// Thread-safe copy of current active note velocities for all 16 channels
+// into a single 16×128 buffer with one mutex acquisition.
+BAEResult BAESong_GetAllActiveNotes(BAESong song, unsigned char outNotes[BAE_MAX_MIDI_CHANNELS][BAE_MAX_NOTES])
+{
+    OPErr err = NO_ERR;
+    if ((song) && (song->mID == OBJECT_ID))
+    {
+        if (outNotes)
+        {
+            memset(outNotes, 0, BAE_MAX_MIDI_CHANNELS * BAE_MAX_NOTES);
+            BAE_AcquireMutex(song->mLock);
+            if (song->pSong)
+            {
+                for (int _c = 0; _c < BAE_MAX_MIDI_CHANNELS; _c++)
+                    for (int _n = 0; _n < BAE_MAX_NOTES; _n++)
+                        outNotes[_c][_n] = song->pSong->channelActiveNotes[_c][_n];
+                // Compiler barrier: force fresh reads of the volatile
+                // channelActiveNotes array on every invocation.
+                BAE_COMPILER_BARRIER();
             }
             else
             {
