@@ -47,6 +47,7 @@
 #include "GenPriv.h"
 #include "GenDLS_MobileBAE_Tables.h"
 #include "X_Assert.h"
+#include "g72x.h"
 
 #if USE_MPEG_DECODER == TRUE
 #include "XMPEG_BAE_API.h"
@@ -126,6 +127,7 @@ static bool dls_mul_u32_ok(uint32_t a, uint32_t b, uint32_t* out) {
 
 static void DLS_ApplyDirectConnection(DLS_Articulation* art, const DLS_Connection* connection, bool quirks);
 static void dls_refresh_current_synth_for_mode(void);
+static void dls_channel_reset_controllers(DLS_ChannelState* ch, bool quirks);
 
 void GM_DLS_SetMobileBAEQuirks(bool useQuirks) 
 {
@@ -447,11 +449,7 @@ static void dls_env_init(DLS_Envelope* env, int32_t delayMicros, int32_t attackM
     env->current = 0;
     env->eg1Current = 0;
     env->stage = env->delayMicros == 0 ? DLS_ENV_ATTACK : DLS_ENV_DELAY;
-    /* The control update represents the upcoming 10 ms interval.  Starting a
-       no-delay attack at elapsed=0 makes the first update output silence and
-       inserts an un-authored 10 ms soft onset.  Delay->attack already seeds
-       10000 below; use the same convention for an initially active attack. */
-    env->tickIndex = env->stage == DLS_ENV_ATTACK ? 10000 : 0;
+     env->tickIndex = 0;
     env->shutdownStart = 0;
     env->finished = false;
 }
@@ -777,20 +775,7 @@ static bool looks_like_wave_chunk(const uint8_t* p, const uint8_t* end) {
     return (id == CHUNK_RIFF && type == CHUNK_WAVE) || (id == CHUNK_LIST && type == read_chunk_id((const uint8_t*)"wave"));
 }
 
-static int16_t decode_alaw(uint8_t input) {
-    int32_t u = (input & 0xFF) ^ 0x55;
-    int32_t exponent = (u & 0x70) >> 4;
-    int32_t mantissa = u & 0x0F;
-    int32_t sample = exponent == 0 ? (mantissa << 4) + 8 : ((mantissa << 4) + 0x108) << (exponent - 1);
-    return (int16_t)((u & 0x80) != 0 ? sample : -sample);
-}
 
-static int16_t decode_ulaw(uint8_t input) {
-    int32_t u = (input & 0xFF) ^ 0xFF;
-    int32_t sample = ((u & 0x0F) << 3) + 0x84;
-    sample <<= (u & 0x70) >> 4;
-    return (int16_t)((u & 0x80) != 0 ? 0x84 - sample : sample - 0x84);
-}
 
 static int32_t decode_ima_nibble(int32_t predictor, int32_t index, int32_t nibble) {
     int32_t step = IMA_STEP_TABLE[index];
@@ -988,7 +973,7 @@ static OPErr DLS_Parse_Wave_Data(const uint8_t* chunk_start, const uint8_t* chun
             wave->pcm = (int16_t*)XNewPtr((wave->frames + 1) * wave->channels * sizeof(int16_t));
             if (wave->pcm) {
                 for (uint32_t i = 0; i < wave->frames * wave->channels; i++) {
-                    wave->pcm[i] = (wave->formatTag == 6) ? decode_alaw(pcm_data[i]) : decode_ulaw(pcm_data[i]);
+                    wave->pcm[i] = (int16_t)((wave->formatTag == 6) ? alaw2linear(pcm_data[i]) : ulaw2linear(pcm_data[i]));
                 }
             }
         } else if (wave->formatTag == 17) { // IMA ADPCM
@@ -1763,18 +1748,7 @@ OPErr GM_LoadDLSFromMemory(struct GM_Mixer* pMixer, const void* pMemory, uint32_
         channelState->bankMsb = (ch == 9) ? 120 : 121;
         channelState->bankLsb = 0;
         channelState->program = 0;
-        channelState->volume = 100;
-        channelState->expression = 127;
-        channelState->pan = 64;
-        channelState->reverb = 40;
-        channelState->pitchBend = 0x2000;
-        channelState->rpnValues[0] = 0x0100;
-        channelState->rpnValues[1] = 0x2000;
-        channelState->rpnValues[2] = 0x2000;
-        channelState->rpnMsb = 127;
-        channelState->rpnLsb = 127;
-        channelState->nrpnMsb = 127;
-        channelState->nrpnLsb = 127;
+        dls_channel_reset_controllers(channelState, pMixer->pDLSSynth->useQuirks);
         channelState->selectedInstrument = NULL;
         channelState->selectedBankSelector = 0;
         channelState->programSelected = false;
@@ -1895,8 +1869,6 @@ void GM_UnloadDLSBank(DLS_Bank* pBank) {
 // SYNTHESIZER
 // ============================================================================
 
-static void dls_channel_reset_controllers(DLS_ChannelState* ch);
-
 OPErr GM_InitDLSSynth(DLS_Synth** ppSynth, int32_t sampleRate) {
     if (!ppSynth) return PARAM_ERR;
     *ppSynth = (DLS_Synth*)XNewPtr(sizeof(DLS_Synth));
@@ -1911,7 +1883,7 @@ OPErr GM_InitDLSSynth(DLS_Synth** ppSynth, int32_t sampleRate) {
         (*ppSynth)->channels[channel].channel = channel;
         (*ppSynth)->channels[channel].bankMsb = channel == 9 ? 120 : 121;
         (*ppSynth)->channels[channel].bankLsb = 0;
-        dls_channel_reset_controllers(&(*ppSynth)->channels[channel]);
+        dls_channel_reset_controllers(&(*ppSynth)->channels[channel], (*ppSynth)->useQuirks);
     }
     return NO_ERR;
 }
@@ -1979,7 +1951,7 @@ void GM_DLS_ResetForSong(GM_Song* pSong)
         channelState->bankMsb = (ch == 9) ? 120 : 121;
         channelState->bankLsb = 0;
         channelState->program = 0;
-        dls_channel_reset_controllers(channelState);
+        dls_channel_reset_controllers(channelState, synth->useQuirks);
         channelState->selectedInstrument = NULL;
         channelState->selectedBankSelector = 0;
         channelState->programSelected = false;
@@ -2424,42 +2396,46 @@ static int32_t dls_note_on_connection_value_q16(const DLS_Connection* connection
         control = (modulation14 & 0x3FFF) << 2;
     } else if (connection->control == 0x100 && ch) {
         control = (ch->rpnValues[0] & 0x3FFF) << 2;
+    } else if (connection->control == 8 && ch) {
+        control = (ch->channelPressure & 0x7F) << 9;
     }
     return DLS_FP_MUL(DLS_FP_MUL(source, control), connection->scale);
 }
 
 static void dls_apply_note_on_connection(const DLS_Connection* connection, int32_t key, int32_t velocity,
                                          int32_t unityNote, const DLS_ChannelState* ch,
-                                         int32_t* pitch, int32_t* gainAttenuation,
+                                         int32_t* pitch, int32_t* gainMultiplier,
                                          int32_t* panOffset) {
     int32_t value = dls_note_on_connection_value_q16(connection, key, velocity, unityNote, ch);
     if (value == 0) return;
-    if (connection->destination == 1) *gainAttenuation += value;
+    if (connection->destination == 1) {
+        *gainMultiplier = DLS_FP_MUL(*gainMultiplier, dls_exp10_q16(value / 200));
+    }
     else if (connection->destination == 3) *pitch += value / 100;
     else if (connection->destination == 4) *panOffset += value / 500;
 }
 
 static void dls_apply_note_on_connections(const DLS_Articulation* art, int32_t key, int32_t velocity,
                                           int32_t unityNote, const DLS_ChannelState* ch,
-                                          int32_t* pitch, int32_t* gainAttenuation,
+                                          int32_t* pitch, int32_t* gainMultiplier,
                                           int32_t* panOffset) {
     for (uint32_t i = 0; i < art->connectionCount; i++) {
         dls_apply_note_on_connection(&art->runtimeConnections[i], key, velocity, unityNote, ch,
-                                     pitch, gainAttenuation, panOffset);
+                                     pitch, gainMultiplier, panOffset);
     }
     bool quirks = dls_bank_quirks(ch->selectedInstrument->parentBank);
     if (quirks) {
         for (uint32_t i = 0; i < g_dls_default_connections_count; i++) {
             if (!dls_has_connection(art, &g_dls_default_connections[i])) {
                 dls_apply_note_on_connection(&g_dls_default_connections[i], key, velocity, unityNote, ch,
-                                             pitch, gainAttenuation, panOffset);
+                                             pitch, gainMultiplier, panOffset);
             }
         }
     } else {
         for (uint32_t i = 0; i < g_dlsv2_default_connections_count; i++) {
             if (!dls_has_connection(art, &g_dlsv2_default_connections[i])) {
                 dls_apply_note_on_connection(&g_dlsv2_default_connections[i], key, velocity, unityNote, ch,
-                                             pitch, gainAttenuation, panOffset);
+                                             pitch, gainMultiplier, panOffset);
             }
         }
     }
@@ -2467,6 +2443,7 @@ static void dls_apply_note_on_connections(const DLS_Articulation* art, int32_t k
 
 static int32_t dls_runtime_connection_value_q16(const DLS_Connection* connection, const DLS_Voice* voice) {
     const DLS_ChannelState* ch = voice->channelState;
+    bool voiceQuirks = dls_bank_quirks(voice->parentBank);
     int32_t source;
     int32_t control = 0x10000;
 
@@ -2476,12 +2453,14 @@ static int32_t dls_runtime_connection_value_q16(const DLS_Connection* connection
         case 1: source = voice->modulationLfo.output; break;
         case 5: source = voice->eg2Envelope.current; break;
         case 9: source = voice->vibratoLfo.output; break;
-        case 7: source = (ch->channelPressure & 0x7F) << 9; break;
+        case 7:
+            /* Plus14 quirks path does not consume source 7 in runtime routing. */
+            if (voiceQuirks) return 0;
+            source = (ch->channelPressure & 0x7F) << 9;
+            break;
         case 8: source = (voice->channelState->keyPressure[voice->key & 0x7F] & 0x7F) << 9; break;
         case 6:
-            if (connection->control != 0x100) return 0;
             source = (ch->pitchBend & 0x3FFF) << 2;
-            control = (ch->rpnValues[0] & 0x3FFF) << 2;
             break;
         case 0x81: source = DLS_CC_14(ch->modulation, ch->modulationLsb) << 2; break;
         case 0x101: source = (ch->rpnValues[1] & 0x3FFF) << 2; break;
@@ -2495,6 +2474,8 @@ static int32_t dls_runtime_connection_value_q16(const DLS_Connection* connection
 
     if (connection->control == 0x81) control = DLS_CC_14(ch->modulation, ch->modulationLsb) << 2;
     else if (connection->control == 0x100) control = (ch->rpnValues[0] & 0x3FFF) << 2;
+    else if (connection->control == 5) control = voice->eg2Envelope.current;
+    else if (connection->control == 8) control = (voice->channelState->keyPressure[voice->key & 0x7F] & 0x7F) << 9;
     else if (connection->control != 0) return 0;
 #undef DLS_CC_14
     return dls_connection_value_q16(connection, source, control);
@@ -2545,16 +2526,16 @@ static int32_t dls_channel_value14(int32_t msb, int32_t lsb) {
     return ((msb & 0x7F) << 7) | (lsb & 0x7F);
 }
 
-static void dls_channel_reset_controllers(DLS_ChannelState* ch) {
+static void dls_channel_reset_controllers(DLS_ChannelState* ch, bool quirks) {
     if (!ch) return;
     ch->modulation = 0;
     ch->modulationLsb = 0;
     ch->foot = 0;
     ch->footLsb = 0;
-    ch->volume = 100;
-    ch->volumeLsb = 0;
+    ch->volume = quirks ? 127 : 100;
+    ch->volumeLsb = quirks ? 127 : 0;
     ch->expression = 127;
-    ch->expressionLsb = 0;
+    ch->expressionLsb = quirks ? 127 : 0;
     ch->pan = 64;
     ch->panLsb = 0;
     ch->sustain = false;
@@ -2645,7 +2626,7 @@ static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t v
     v->runtimeConnections = art->runtimeConnections;
     
     int32_t notePitch = art->pitch;
-    int32_t noteGainAttenuation = 0;
+    int32_t noteGainMultiplier = 0x10000;
     int32_t notePanOffset = art->pan;
     int32_t filterCutoff = art->filterCutoff == FILTER_DISABLED_CUTOFF
         ? FILTER_DISABLED_CUTOFF
@@ -2653,7 +2634,7 @@ static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t v
     DLS_SampleInfo* sample = region->sample.present ? &region->sample : &wave->sample;
     int32_t unityNote = sample->present ? sample->unityNote : 60;
     dls_apply_note_on_connections(art, key, velocity, unityNote, ch, &notePitch,
-                                  &noteGainAttenuation, &notePanOffset);
+                                  &noteGainMultiplier, &notePanOffset);
 
     v->baseGainQ16 = 0x10000;
     v->basePanOffset = notePanOffset;
@@ -2669,10 +2650,7 @@ static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t v
         v->loopStart = 0;
         v->loopEnd = 0;
     }
-    v->baseGainQ16 = dls_exp10_q16(sample->attenuation / 200);
-    if (noteGainAttenuation != 0) {
-        v->baseGainQ16 = DLS_FP_MUL(v->baseGainQ16, dls_exp10_q16(noteGainAttenuation / 200));
-    }
+    v->baseGainQ16 = DLS_FP_MUL(dls_exp10_q16(sample->attenuation / 200), noteGainMultiplier);
     
     int32_t eg1Delay = dls_timecent_to_micros(art->eg1Delay);
     int32_t eg1Attack = dls_timecent_to_micros(art->eg1Attack);
@@ -3262,7 +3240,7 @@ void GM_DLS_ProcessController(GM_Song* pSong, uint16_t channel, uint16_t control
     } else if (controller == 121) {
         /* MobileBAE sub_11F7520 only accepts its internal reset sentinel 127. */
         if ((value & 0x7F) == 127) {
-            dls_channel_reset_controllers(ch);
+            dls_channel_reset_controllers(ch, dls_synth_quirks(synth));
             dls_invalidate_channel_voices(synth, dls_channel_index(channel));
         }
     } else if (controller == 120) {
@@ -3441,6 +3419,7 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
     DLS_Synth* synth = (DLS_Synth*)pSong->pMixer->pDLSSynth;
     int32_t voiceLimit = DLS_MAX_VOICE_POOL;
     int scalar_modifier = -2;
+    const int dlsGainFactor = 5;
 
     for (uint32_t f = 0; f < frames; f++) {
         int64_t leftOut = 0;
@@ -3634,6 +3613,17 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
             // Apply OUTPUT_SCALAR per-voice for main output
             int64_t leftSampleScaled = leftSampleUnscaled << (OUTPUT_SCALAR + scalar_modifier);
             int64_t rightSampleScaled = rightSampleUnscaled << (OUTPUT_SCALAR + scalar_modifier);
+
+            if (pSong->pMixer->channelCaptureEnabled && v->channel >= 0 && v->channel < 16) {
+                int32_t sampleIndex = (int32_t)(f * 2);
+                if (sampleIndex + 1 < pSong->pMixer->channelCaptureBufSamples) {
+                    int32_t* channelBuffer = pSong->pMixer->channelCaptureBuf[v->channel];
+                    if (channelBuffer) {
+                        channelBuffer[sampleIndex] += (int32_t)((32 * leftSampleScaled) >> dlsGainFactor);
+                        channelBuffer[sampleIndex + 1] += (int32_t)((32 * rightSampleScaled) >> dlsGainFactor);
+                    }
+                }
+            }
             
             leftOut += leftSampleScaled;
             rightOut += rightSampleScaled;
@@ -3651,61 +3641,35 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
             }
         }
         
-        static int DLS_GAIN_FACTOR = 5;
-
         /* Preserve the established DLS output level. */
-        int64_t mixedLeft = (int64_t)pBuffer[f * 2] + ((32 * leftOut) >> DLS_GAIN_FACTOR);
-        int64_t mixedRight = (int64_t)pBuffer[f * 2 + 1] + ((32 * rightOut) >> DLS_GAIN_FACTOR);
+        int64_t mixedLeft = (int64_t)pBuffer[f * 2] + ((32 * leftOut) >> dlsGainFactor);
+        int64_t mixedRight = (int64_t)pBuffer[f * 2 + 1] + ((32 * rightOut) >> dlsGainFactor);
 
-        /* DLS is mixed before PV_ApplyOutputLimiter(), but the bus itself is
-           int32.  Use a stereo-linked limiter with immediate peak protection
-           and a smooth release.  A memoryless per-sample knee changes gain at
-           audio rate when a drum lands over a dense sustained mix, which is
-           heard as crackle. */
         {
             const int64_t limit = (int64_t)32767 << OUTPUT_SCALAR;
             int64_t absLeft = mixedLeft < 0 ? -mixedLeft : mixedLeft;
             int64_t absRight = mixedRight < 0 ? -mixedRight : mixedRight;
             int64_t peak = absLeft > absRight ? absLeft : absRight;
-            int32_t targetGain = 0x10000;
-
-            if (peak > limit) {
-                targetGain = (int32_t)((limit << 16) / peak);
-            }
-
+            int32_t targetGain = peak > limit ? (int32_t)((limit << 16) / peak) : 0x10000;
             if (targetGain < synth->limiterGainQ16) {
-                /* Do not instantly pull down sustained voices when a drum
-                   transient arrives; that gain discontinuity is itself a
-                   click.  Converge over roughly 1 ms, then safety-clamp only
-                   the transient samples that still exceed the bus ceiling. */
                 int32_t attackFrames = synth->sampleRate / 1000;
                 int32_t delta;
                 if (attackFrames < 1) attackFrames = 1;
                 delta = (synth->limiterGainQ16 - targetGain) / attackFrames;
                 if (delta < 1) delta = 1;
                 synth->limiterGainQ16 -= delta;
-                if (synth->limiterGainQ16 < targetGain) {
-                    synth->limiterGainQ16 = targetGain;
-                }
+                if (synth->limiterGainQ16 < targetGain) synth->limiterGainQ16 = targetGain;
             } else if (synth->limiterGainQ16 < 0x10000) {
-                /* Approximately 50 ms release, independent of sample rate. */
                 int32_t releaseFrames = synth->sampleRate / 20;
                 int32_t delta;
                 if (releaseFrames < 1) releaseFrames = 1;
                 delta = (0x10000 - synth->limiterGainQ16) / releaseFrames;
                 if (delta < 1) delta = 1;
                 synth->limiterGainQ16 += delta;
-                if (synth->limiterGainQ16 > 0x10000) {
-                    synth->limiterGainQ16 = 0x10000;
-                }
+                if (synth->limiterGainQ16 > 0x10000) synth->limiterGainQ16 = 0x10000;
             }
-
             mixedLeft = (mixedLeft * synth->limiterGainQ16) >> 16;
             mixedRight = (mixedRight * synth->limiterGainQ16) >> 16;
-
-            /* Continuous hard ceiling for the brief limiter attack interval;
-               unlike an instantaneous stereo gain jump, this does not alter
-               the opposite channel or the sustained mix below the ceiling. */
             if (mixedLeft > limit) mixedLeft = limit;
             else if (mixedLeft < -limit) mixedLeft = -limit;
             if (mixedRight > limit) mixedRight = limit;
@@ -3714,11 +3678,11 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
         pBuffer[f * 2] = (int32_t)mixedLeft;
         pBuffer[f * 2 + 1] = (int32_t)mixedRight;
         if (pReverbBuffer) {
-            int64_t mixedReverb = (int64_t)pReverbBuffer[f] + ((20 * revOut) >> DLS_GAIN_FACTOR);
+            int64_t mixedReverb = (int64_t)pReverbBuffer[f] + ((20 * revOut) >> dlsGainFactor);
             pReverbBuffer[f] = (int32_t)(mixedReverb > INT32_MAX ? INT32_MAX : (mixedReverb < INT32_MIN ? INT32_MIN : mixedReverb));
         }
         if (pChorusBuffer) {
-            int64_t mixedChorus = (int64_t)pChorusBuffer[f] + ((20 * choOut) >> DLS_GAIN_FACTOR);
+            int64_t mixedChorus = (int64_t)pChorusBuffer[f] + ((20 * choOut) >> dlsGainFactor);
             pChorusBuffer[f] = (int32_t)(mixedChorus > INT32_MAX ? INT32_MAX : (mixedChorus < INT32_MIN ? INT32_MIN : mixedChorus));
         }
     }

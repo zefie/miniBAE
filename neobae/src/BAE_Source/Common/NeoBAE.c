@@ -3065,8 +3065,10 @@ BAEResult BAE_EnableChannelCapture(BAEMixer mixer, const char *outputDir)
 
 #if defined(_MSC_VER)
     _mkdir(outputDir);
-#else
+#elif defined(__MINGW32__)
     mkdir(outputDir);
+#else
+    mkdir(outputDir, 0755);
 #endif
 
     pMixer->channelCaptureBufSamples = (pMixer->maxChunkSize + 64) * 2;
@@ -4054,6 +4056,9 @@ BAEResult BAEMixer_Close(BAEMixer mixer)
         // Shut down mixer
         if (mixer->pMixer)
         {
+            GM_Mixer *closingMixer = mixer->pMixer;
+            GM_Mixer *savedMixer = MusicGlobals;
+            MusicGlobals = closingMixer;
 #if USE_CALLBACKS
             GM_SetAudioTask(NULL, NULL);
 #endif
@@ -4063,8 +4068,12 @@ BAEResult BAEMixer_Close(BAEMixer mixer)
                 GM_StopHardwareSoundManager(NULL);
                 mixer->audioEngaged = FALSE;
             }
-            GM_FinisGeneralSound(NULL, mixer->pMixer);
+            GM_FinisGeneralSound(NULL, closingMixer);
             mixer->pMixer = NULL;
+            if (savedMixer != closingMixer)
+            {
+                MusicGlobals = savedMixer;
+            }
         }
         else
         {
@@ -6042,27 +6051,40 @@ BAEResult BAEMixer_StartOutputToFile(BAEMixer theMixer,
         {
 #endif
             GM_Waveform *w = GM_NewWaveform();
-            char buf[4] = {0, 0, 0, 0};
 
             // initialize GM_Waveform with one frame of data, so that GM_WriteFileFromMemory()
             // doesn't complain.
 
-            w->bitSize = (theModifiers /*iModifiers*/ & BAE_USE_16) ? 16 : 8;
-            w->channels = (theModifiers /*iModifiers*/ & BAE_USE_STEREO) ? 2 : 1;
-            w->sampledRate = LONG_TO_UNSIGNED_FIXED(GM_ConvertFromOutputRateToRate((Rate)theRate /*iRate*/));
-            w->compressionType = C_NONE;
-            w->theWaveform = &buf;
-            w->waveFrames = 1;
-            w->waveSize = (w->bitSize / 8) * (w->channels);
-
-            // Write out the header now, we'll add data to it in ServiceAudioOutputToFile()
-            theErr = GM_WriteFileFromMemory(&theFile, w, BAE_TranslateBAEFileType(outputType));
+            if (!w)
+            {
+                theErr = MEMORY_ERR;
+            }
+            else
+            {
+                w->bitSize = (theModifiers /*iModifiers*/ & BAE_USE_16) ? 16 : 8;
+                w->channels = (theModifiers /*iModifiers*/ & BAE_USE_STEREO) ? 2 : 1;
+                w->sampledRate = LONG_TO_UNSIGNED_FIXED(GM_ConvertFromOutputRateToRate((Rate)theRate /*iRate*/));
+                w->compressionType = C_NONE;
+                w->waveFrames = 1;
+                w->waveSize = (w->bitSize / 8) * (w->channels);
+                w->theWaveform = XNewPtr(w->waveSize);
+                if (!w->theWaveform)
+                {
+                    theErr = MEMORY_ERR;
+                }
+                else
+                {
+                    XSetMemory(w->theWaveform, w->waveSize, 0);
+                    // Write out the header now, we'll add data to it in ServiceAudioOutputToFile()
+                    theErr = GM_WriteFileFromMemory(&theFile, w, BAE_TranslateBAEFileType(outputType));
+                }
+            }
 
             GM_FreeWaveform(w);
             w = NULL;
 
             // Reopen the file and jump to the end, so we can add data to it later...
-            mWritingToFileReference = (void *)XFileOpenForWrite(&theFile, FALSE);
+            mWritingToFileReference = theErr == NO_ERR ? (void *)XFileOpenForWrite(&theFile, FALSE) : NULL;
             if (mWritingToFileReference)
             {
                 XFileSetPosition((XFILE)mWritingToFileReference, XFileGetLength((XFILE)mWritingToFileReference));
