@@ -2269,7 +2269,7 @@ int main(int argc, char *argv[])
                         {
                             BAESong target = g_bae.song ? g_bae.song : g_live_song;
                             if (target)
-                                BAESong_NoteOn(target, (unsigned char)g_keyboard_channel, (unsigned char)midi, 100, 0);
+                                BAESong_NoteOnWithLoad(target, (unsigned char)g_keyboard_channel, (unsigned char)midi, 100, 0);
 #if SUPPORT_MIDI_HW == TRUE
                             if (g_midi_output_enabled)
                             {
@@ -4769,7 +4769,7 @@ int main(int argc, char *argv[])
                             BAESong target = g_bae.song ? g_bae.song : g_live_song;
                             if (target)
                             {
-                                BAESong_NoteOn(target, (unsigned char)g_keyboard_channel, (unsigned char)mouseNote, (unsigned char)vel, 0);
+                                BAESong_NoteOnWithLoad(target, (unsigned char)g_keyboard_channel, (unsigned char)mouseNote, (unsigned char)vel, 0);
                             }
                         }
 #if SUPPORT_MIDI_HW == TRUE
