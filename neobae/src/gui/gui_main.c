@@ -883,7 +883,11 @@ int main(int argc, char *argv[])
 #if _DEBUG == TRUE
     // Initialize debug console
     debug_console_init();
+# if _FULL_DEBUG == TRUE
+    BAE_PRINTF("Debug console initialized (press D to toggle)\n");
+# else
     BAE_PRINTF("Debug console initialized (press F12 to toggle)\n");
+# endif
 #endif
 
 #if SUPPORT_BAESCRIPT == TRUE
@@ -2069,7 +2073,14 @@ int main(int argc, char *argv[])
                 // Octave shift: ',' -> down, '.' -> up (on keydown only)
                 if (isDown)
                 {
-#if _DEBUG == TRUE
+#if _FULL_DEBUG == TRUE
+                    // D toggles debug console
+                    if (sym == SDLK_d)
+                    {
+                        debug_console_toggle();
+                        break;
+                    }
+#elif _DEBUG == TRUE
                     // F12 toggles debug console
                     if (sym == SDLK_F12)
                     {
@@ -6838,7 +6849,9 @@ int main(int argc, char *argv[])
         {
             // Muted fallback text that adapts to theme; darker on light backgrounds for readability
             SDL_Color muted = g_is_dark_mode ? (SDL_Color){150, 150, 150, 255} : (SDL_Color){80, 80, 80, 255};
-#if _DEBUG == TRUE
+#if _FULL_DEBUG == TRUE
+            draw_text(R, 120, lineY3, "(Debug build, press D for console)", muted);
+#elif _DEBUG == TRUE
             draw_text(R, 120, lineY3, "(Debug build, press F12 for console)", muted);
 #else
             draw_text(R, 120, lineY3, "(Drag & drop media/bank files here)", muted);
