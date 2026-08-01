@@ -89,7 +89,6 @@ add_compile_definitions(_VERSION="${BAE_VERSION}")
 message(STATUS "NeoBAE build version: ${BAE_VERSION}")
 
 string(TIMESTAMP BAE_BUILD_YEAR "%Y")
-string(TIMESTAMP BAE_BUILD_YEAR "%Y")
 string(TIMESTAMP _month "%m")
 string(TIMESTAMP _day "%d")
 
