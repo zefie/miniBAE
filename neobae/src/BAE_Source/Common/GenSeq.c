@@ -550,27 +550,20 @@ void PV_ConfigureInstruments(GM_Song *theSong)
     // This ensures notes are routed correctly even if no program change has occurred first.
     for (count = 0; count < MAX_CHANNELS; count++)
     {
-        if (theSong->songFlags & SONG_FLAG_IS_RMF)
-        {
-            // RMF song - initially route to RMF, will be overridden per-channel during playback
-            // based on whether each patch is actually a custom RMF instrument
-            theSong->channelType[count] = CHANNEL_TYPE_RMF;
-        }
 #if USE_NATIVE_DLS == TRUE
-        else if (GM_GetMixerDLSMode())
+        if (GM_GetMixerDLSMode())
         {
             // Non-RMF song with DLS available
             theSong->channelType[count] = CHANNEL_TYPE_DLS;
-        }
+        } else
 #endif
 #if USE_SF2_SUPPORT == TRUE        
-        else if (GM_SF2_IsActive())
+        if (GM_SF2_IsActive())
         {
             // Non-RMF song with SF2 available
             theSong->channelType[count] = CHANNEL_TYPE_SF2;
-        }
+        } else
 #endif
-        else
         {
             // Non-RMF song without SF2
             theSong->channelType[count] = CHANNEL_TYPE_GM;
@@ -1901,11 +1894,6 @@ static bool PV_ShouldUseRMFInstrumentForPatch(GM_Song *pSong, int16_t patch)
         return TRUE;
     }
 
-    // Check if this patch has a custom instrument in the RMF file.
-    // RMFInstrumentIDs contains flat indices (bank*128 + program) of instruments
-    // that have INST resources in the RMF. If a patch is in this list, it's a custom RMF instrument.
-    // Only use RMF for patches that are actually in the RMF file, allowing SF2 to handle
-    // standard patches that weren't customized.
     for (uint32_t i = 1; i <= pSong->RMFInstrumentIDs[0]; i++)
     {
         if (pSong->RMFInstrumentIDs[i] == (uint32_t)patch ||
@@ -1915,8 +1903,8 @@ static bool PV_ShouldUseRMFInstrumentForPatch(GM_Song *pSong, int16_t patch)
         }
     }
 
-    // Patch is not in RMFInstrumentIDs, so it doesn't have a custom version in the RMF.
-    // Let SF2 handle it if available.
+    // Patch is not an RMF-embedded instrument.
+    // Let the external bank (SF2/DLS) handle it if available.
     return FALSE;
 #endif    
 }
@@ -2123,7 +2111,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                     {
                         uint16_t rawMsb = (uint16_t)((uint8_t)pSong->channelRawBank[MIDIChannel]);
 
-                        if (rawMsb == 120 || rawMsb == 121)
+                        if (rawMsb == 0 || rawMsb == 120 || rawMsb == 121)
                         {
                             int16_t hsbBank = (int16_t)((uint8_t)pSong->channelLSB[MIDIChannel]);
                             pSong->channelBank[MIDIChannel] = (signed char)(hsbBank < (MAX_BANKS / 2) ? hsbBank : 0);
