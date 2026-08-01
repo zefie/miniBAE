@@ -89,8 +89,12 @@ add_compile_definitions(_VERSION="${BAE_VERSION}")
 message(STATUS "NeoBAE build version: ${BAE_VERSION}")
 
 string(TIMESTAMP BAE_BUILD_YEAR "%Y")
-string(TIMESTAMP BAE_BUILD_MONTH "%m")
-string(TIMESTAMP BAE_BUILD_DAY "%d")
+string(TIMESTAMP BAE_BUILD_YEAR "%Y")
+string(TIMESTAMP _month "%m")
+string(TIMESTAMP _day "%d")
+
+math(EXPR BAE_BUILD_MONTH "${_month}")
+math(EXPR BAE_BUILD_DAY "${_day}")
 
 if((MINGW OR MSVC) AND NEOBAE_RC_ENABLED)
   set(VERSION_MAJOR 2)
