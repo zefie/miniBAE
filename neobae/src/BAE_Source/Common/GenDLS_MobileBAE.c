@@ -2937,6 +2937,12 @@ void GM_DLS_ProcessNoteOn(GM_Song* pSong, uint16_t channel, uint16_t note, uint1
     DLS_ChannelState* ch = &synth->channels[channel];
     ch->channel = channel;
 
+    if (((channel == PERCUSSION_CHANNEL && pSong->channelBankMode[channel] == USE_GM_DEFAULT) || pSong->channelBankMode[channel] == USE_GM_PERC_BANK) && ch->bankMsb == 121) {
+        ch->bankMsb = 120;
+        ch->selectedInstrument = NULL;
+        ch->programSelected = false;
+    }
+
     if (!ch->programSelected) {
         dls_program_change(synth, ch, ch->program);
     }
@@ -3139,6 +3145,9 @@ void GM_DLS_ProcessProgramChange(GM_Song* pSong, uint16_t channel, uint16_t prog
             debug_message("DLS: PERC_BANK cleared ch=%d (program=%d)\n", channel, program);
             pSong->channelBankMode[channel] = USE_GM_DEFAULT;
         }
+    } else if (((channel == PERCUSSION_CHANNEL && pSong->channelBankMode[channel] == USE_GM_DEFAULT) || pSong->channelBankMode[channel] == USE_GM_PERC_BANK) && ch->bankMsb == 121) {
+        debug_message("DLS: percussion ch=%d with melodic bank 121, forcing to 120\n", channel);
+        ch->bankMsb = 120;
     }
 
     dls_program_change(synth, ch, program);
