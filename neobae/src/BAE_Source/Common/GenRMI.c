@@ -48,6 +48,7 @@
 ****************************************************************************/
 
 #include "X_API.h"
+#include "NeoBAE.h"
 #include "X_Assert.h"
 #include "GenSnd.h"
 #include "GenPriv.h"
