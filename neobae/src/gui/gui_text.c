@@ -63,7 +63,7 @@ void bitmap_draw(SDL_Renderer *R, int x, int y, const char *text, SDL_Color col)
                     unsigned int mask = 1u << (4 - bit);
                     if (bits & mask)
                     {
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                         SDL_Rect rr = {x + bit * g_bitmap_font_scale, y + row * g_bitmap_font_scale, g_bitmap_font_scale, g_bitmap_font_scale};
                         SDL_RenderFillRect(R, &rr);
 #else
@@ -91,7 +91,7 @@ void measure_text(const char *text, int *w, int *h)
     if (g_font)
     {
         int tw = 0, th = 0;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         if (TTF_SizeUTF8(g_font, text, &tw, &th) == 0)
 #else
         if (TTF_GetStringSize(g_font, text, XStrLen(text), &tw, &th) == true)
@@ -115,7 +115,7 @@ void draw_text(SDL_Renderer *R, int x, int y, const char *text, SDL_Color col)
 {
     if (g_font)
     {
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         SDL_Surface *s = TTF_RenderUTF8_Blended(g_font, text, col);
 #else
         SDL_Surface *s = TTF_RenderText_Blended(g_font, text, 0, col);
@@ -123,7 +123,7 @@ void draw_text(SDL_Renderer *R, int x, int y, const char *text, SDL_Color col)
         if (s)
         {
             SDL_Texture *tx = SDL_CreateTextureFromSurface(R, s);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             SDL_Rect dst = {x, y, s->w, s->h};
             SDL_RenderCopy(R, tx, NULL, &dst);
 #else
@@ -131,7 +131,7 @@ void draw_text(SDL_Renderer *R, int x, int y, const char *text, SDL_Color col)
             SDL_RenderTexture(R, tx, NULL, &dst);
 #endif
             SDL_DestroyTexture(tx);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             SDL_FreeSurface(s);
 #else
             SDL_DestroySurface(s);

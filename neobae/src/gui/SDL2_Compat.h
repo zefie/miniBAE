@@ -21,8 +21,7 @@
 // SDL2 compatibility shims for SDL3 API differences.
 // Include this after SDL headers when building with USE_SDL2.
 
-#if defined(USE_SDL2)
-
+#if USE_SDL2 == 1
 // SDL3 uses uppercase single-letter SDLK constants (e.g. SDLK_A).
 // SDL2 uses lowercase (e.g. SDLK_a). Map them here.
 #define SDLK_A SDLK_a

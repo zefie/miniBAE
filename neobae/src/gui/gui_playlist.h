@@ -19,7 +19,7 @@
 #define GUI_PLAYLIST_H
 
 #include "gui_common.h"
-#if X_PLATFORM == X_SDL2
+#if USE_SDL2 == TRUE
 #include <SDL2/SDL.h>
 #else
 #include <SDL3/SDL.h>

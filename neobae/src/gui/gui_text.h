@@ -19,7 +19,7 @@
 #define GUI_TEXT_H
 
 #include "gui_common.h"
-#if X_PLATFORM == X_SDL2
+#if USE_SDL2 == TRUE
 #include <SDL2/SDL_ttf.h>
 #else
 #include <SDL3_ttf/SDL_ttf.h>

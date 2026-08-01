@@ -1327,7 +1327,7 @@ void playlist_render(SDL_Renderer *R, Rect panel_rect, int mx, int my, bool mdow
         {
             SDL_Color insert_color = {255, 0, 0, 255}; // Red insertion line
             SDL_SetRenderDrawColor(R, insert_color.r, insert_color.g, insert_color.b, insert_color.a);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             SDL_RenderDrawLine(R, list_rect.x + 2, insert_y, list_rect.x + list_rect.w - 2, insert_y);
             SDL_RenderDrawLine(R, list_rect.x + 2, insert_y + 1, list_rect.x + list_rect.w - 2, insert_y + 1); // Thicker line
 #else

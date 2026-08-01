@@ -434,8 +434,16 @@
     #include "BAEBuildOptions_EPOC.h"
 #elif X_PLATFORM == X_SDL2
     #include "BAEBuildOptions_SDL2.h"
+    #ifdef USE_SDL2
+        #undef USE_SDL2
+        #define USE_SDL2 1
+    #endif
 #elif X_PLATFORM == X_SDL3
     #include "BAEBuildOptions_SDL3.h"
+    #ifdef USE_SDL2
+        #undef USE_SDL2
+        #define USE_SDL2 0
+    #endif
 #elif X_PLATFORM == X_RAYLIB
     #include "BAEBuildOptions_Raylib.h"
 #elif X_PLATFORM == X_FOOBAR2000_PLUGIN

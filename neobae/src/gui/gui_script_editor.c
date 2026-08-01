@@ -35,7 +35,7 @@
 #include "gui_export.h"
 #include "baescript.h"
 #include "baescript_internal.h"
-#if X_PLATFORM == X_SDL2
+#if USE_SDL2 == TRUE
 #include <SDL2/SDL.h>
 #else
 #include <SDL3/SDL.h>
@@ -748,7 +748,7 @@ static void lint_update(void)
 static void draw_se_rect(SDL_Renderer *R, int x, int y, int w, int h, SDL_Color c)
 {
     SDL_SetRenderDrawColor(R, c.r, c.g, c.b, c.a);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     SDL_Rect r = {x, y, w, h};
     SDL_RenderFillRect(R, &r);
 #else
@@ -760,7 +760,7 @@ static void draw_se_rect(SDL_Renderer *R, int x, int y, int w, int h, SDL_Color 
 static void draw_se_frame(SDL_Renderer *R, int x, int y, int w, int h, SDL_Color c)
 {
     SDL_SetRenderDrawColor(R, c.r, c.g, c.b, c.a);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     SDL_Rect r = {x, y, w, h};
     SDL_RenderDrawRect(R, &r);
 #else
@@ -962,7 +962,7 @@ void script_editor_hide(void)
     if (!g_se_visible) return;
     if (g_se_window) {
         SDL_HideWindow(g_se_window);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         SDL_StopTextInput();
 #else
         SDL_StopTextInput(g_se_window);
@@ -987,7 +987,7 @@ void script_editor_show(void)
 
         g_se_window = SDL_CreateWindow(
             "BAEScript Editor",
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             main_x, main_y,
 #endif
             SE_WINDOW_W,
@@ -996,11 +996,11 @@ void script_editor_show(void)
         );
         if (!g_se_window) return;
 
-#if !defined(USE_SDL2)
+#if USE_SDL2 != TRUE
         SDL_SetWindowPosition(g_se_window, main_x, main_y);
 #endif
 
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         g_se_renderer = SDL_CreateRenderer(g_se_window, -1, 0);
 #else
         g_se_renderer = SDL_CreateRenderer(g_se_window, NULL);
@@ -1015,7 +1015,7 @@ void script_editor_show(void)
     SDL_ShowWindow(g_se_window);
     update_window_title();
     g_se_visible = true;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     SDL_StartTextInput();
 #else
     SDL_StartTextInput(g_se_window);
@@ -1328,7 +1328,7 @@ bool script_editor_handle_event(SDL_Event *event)
     if (!g_se_visible || !g_se_window || !event) return false;
 
     /* SDL2 returns Uint32; SDL3 exposes SDL_WindowID. */
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     Uint32 se_win_id = SDL_GetWindowID(g_se_window);
 #else
     SDL_WindowID se_win_id = SDL_GetWindowID(g_se_window);
@@ -1336,7 +1336,7 @@ bool script_editor_handle_event(SDL_Event *event)
     bool is_ours = false;
 
     switch (event->type) {
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         case SDL_WINDOWEVENT:
 #else
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
@@ -1355,7 +1355,7 @@ bool script_editor_handle_event(SDL_Event *event)
 #endif
             is_ours = (event->window.windowID == se_win_id);
             break;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         case SDL_KEYDOWN:
         case SDL_KEYUP:
 #else
@@ -1364,14 +1364,14 @@ bool script_editor_handle_event(SDL_Event *event)
 #endif
             is_ours = (event->key.windowID == se_win_id);
             break;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         case SDL_MOUSEMOTION:
 #else
         case SDL_EVENT_MOUSE_MOTION:
 #endif
             is_ours = (event->motion.windowID == se_win_id);
             break;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         case SDL_MOUSEBUTTONDOWN:
         case SDL_MOUSEBUTTONUP:
 #else
@@ -1380,14 +1380,14 @@ bool script_editor_handle_event(SDL_Event *event)
 #endif
             is_ours = (event->button.windowID == se_win_id);
             break;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         case SDL_MOUSEWHEEL:
 #else
         case SDL_EVENT_MOUSE_WHEEL:
 #endif
             is_ours = (event->wheel.windowID == se_win_id);
             break;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         case SDL_TEXTINPUT:
 #else
         case SDL_EVENT_TEXT_INPUT:
@@ -1399,7 +1399,7 @@ bool script_editor_handle_event(SDL_Event *event)
     if (!is_ours) return false;
 
     /* Window close */
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     if (event->type == SDL_WINDOWEVENT && event->window.event == SDL_WINDOWEVENT_CLOSE) {
 #else
     if (event->type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
@@ -1417,7 +1417,7 @@ bool script_editor_handle_event(SDL_Event *event)
     SDL_GetWindowSize(g_se_window, &win_w, &win_h);
 
     /* Text input */
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     if (event->type == SDL_TEXTINPUT) {
 #else
     if (event->type == SDL_EVENT_TEXT_INPUT) {
@@ -1429,7 +1429,7 @@ bool script_editor_handle_event(SDL_Event *event)
     }
 
     /* Keyboard */
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     if (event->type == SDL_KEYDOWN) {
         SDL_Keycode key = event->key.keysym.sym;
         SDL_Keymod mod = event->key.keysym.mod;
@@ -1439,13 +1439,13 @@ bool script_editor_handle_event(SDL_Event *event)
         SDL_Keymod mod = event->key.mod;
 #endif
         bool ctrl =
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             (mod & KMOD_CTRL) != 0;
 #else
             (mod & SDL_KMOD_CTRL) != 0;
 #endif
         bool shift =
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             (mod & KMOD_SHIFT) != 0;
 #else
             (mod & SDL_KMOD_SHIFT) != 0;
@@ -1538,7 +1538,7 @@ bool script_editor_handle_event(SDL_Event *event)
     }
 
     /* Mouse button */
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     if (event->type == SDL_MOUSEBUTTONDOWN && event->button.button == SDL_BUTTON_LEFT) {
 #else
     if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN && event->button.button == SDL_BUTTON_LEFT) {
@@ -1623,7 +1623,7 @@ bool script_editor_handle_event(SDL_Event *event)
 
         /* Click in editor area - set cursor */
         if (my >= SE_TOOLBAR_H && my < win_h - g_console_h - SE_LINT_BAR_H) {
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             bool shift = (SDL_GetModState() & KMOD_SHIFT) != 0;
 #else
             bool shift = (SDL_GetModState() & SDL_KMOD_SHIFT) != 0;
@@ -1641,7 +1641,7 @@ bool script_editor_handle_event(SDL_Event *event)
         return true;
     }
 
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     if (event->type == SDL_MOUSEBUTTONUP && event->button.button == SDL_BUTTON_LEFT) {
 #else
     if (event->type == SDL_EVENT_MOUSE_BUTTON_UP && event->button.button == SDL_BUTTON_LEFT) {
@@ -1655,7 +1655,7 @@ bool script_editor_handle_event(SDL_Event *event)
     }
 
     /* Mouse motion (for drag-select) */
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     if (event->type == SDL_MOUSEMOTION && g_mouse_selecting) {
 #else
     if (event->type == SDL_EVENT_MOUSE_MOTION && g_mouse_selecting) {
@@ -1668,7 +1668,7 @@ bool script_editor_handle_event(SDL_Event *event)
     }
 
     /* Mouse wheel for scrolling */
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     if (event->type == SDL_MOUSEWHEEL) {
         int delta = event->wheel.y;
         int my; SDL_GetMouseState(NULL, &my);
@@ -1742,7 +1742,7 @@ void script_editor_render(void)
 
     /* Get mouse position for hover */
     int mouse_x = 0, mouse_y = 0;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     SDL_GetMouseState(&mouse_x, &mouse_y);
 #else
     float fmx, fmy;
@@ -1752,7 +1752,7 @@ void script_editor_render(void)
 #endif
     /* Only use mouse pos if this window is focused */
     /* SDL2 returns Uint32; SDL3 exposes SDL_WindowID. */
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     Uint32 focus_id = SDL_GetWindowID(g_se_window);
 #else
     SDL_WindowID focus_id = SDL_GetWindowID(g_se_window);
@@ -1864,7 +1864,7 @@ void script_editor_render(void)
     int nlines = count_lines();
 
     /* Set clipping rectangle for editor area */
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     SDL_Rect clip = {0, content_y, win_w, content_h};
     SDL_RenderSetClipRect(R, &clip);
 #else
@@ -1956,7 +1956,7 @@ void script_editor_render(void)
     }
 
     /* Remove clip */
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     SDL_RenderSetClipRect(R, NULL);
 #else
     SDL_SetRenderClipRect(R, NULL);
@@ -2017,7 +2017,7 @@ void script_editor_render(void)
         draw_se_rect(R, 0, con_body_y, win_w, con_body_h, con_bg);
 
         /* Set clip for console body */
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         SDL_Rect con_clip = {0, con_body_y, win_w, con_body_h};
         SDL_RenderSetClipRect(R, &con_clip);
 #else
@@ -2071,7 +2071,7 @@ void script_editor_render(void)
         }
 
         /* Remove console clip */
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         SDL_RenderSetClipRect(R, NULL);
 #else
         SDL_SetRenderClipRect(R, NULL);

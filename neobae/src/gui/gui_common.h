@@ -18,16 +18,17 @@
 #ifndef GUI_COMMON_H
 #define GUI_COMMON_H
 
-#if defined(USE_SDL2)
-#include <SDL2/SDL.h>
-#else
-#include <SDL3/SDL.h>
-#endif
-#include "SDL2_Compat.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include "X_Assert.h"
+#include "X_API.h"
 
+#if USE_SDL2 == TRUE
+#include <SDL2/SDL.h>
+#include "SDL2_Compat.h"
+#else
+#include <SDL3/SDL.h>
+#endif
 // Forward declarations for internal types used in meta callback
 struct GM_Song;       // opaque
 typedef short int16_t; // 16-bit signed used by engine for track index

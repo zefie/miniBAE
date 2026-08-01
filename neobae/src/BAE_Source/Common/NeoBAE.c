@@ -2031,9 +2031,11 @@ const char *BAE_GetFeatureString()
     
     // Audio backend
 #if (X_PLATFORM == X_SDL2)
-    const char *audio = "SDL2";
+    const char audio[64];
+    snprintf(audio, sizeof(audio), "SDL (v%d.%d.%d)", SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_PATCHLEVEL);
 #elif (X_PLATFORM == X_SDL3)
-    const char *audio = "SDL3";
+    const char audio[64];
+    snprintf(audio, sizeof(audio), "SDL (v%d.%d.%d)", SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION);
 #elif (X_PLATFORM == X_RAYLIB)
     const char *audio = "raylib";
 #elif (X_PLATFORM == X_WIN95)

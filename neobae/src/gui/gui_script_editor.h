@@ -21,7 +21,7 @@
 #if SUPPORT_BAESCRIPT == TRUE
 
 #include <stdbool.h>
-#if X_PLATFORM == X_SDL2
+#if USE_SDL2 == TRUE
 #include <SDL2/SDL_events.h>
 #else
 #include <SDL3/SDL_events.h>

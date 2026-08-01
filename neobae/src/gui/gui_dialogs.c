@@ -1261,7 +1261,7 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
         if (overVerLink)
         {
             SDL_SetRenderDrawColor(R, verLinkCol.r, verLinkCol.g, verLinkCol.b, verLinkCol.a);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             SDL_RenderDrawLine(R, verLinkRect.x, verLinkRect.y + verLinkRect.h - 2, verLinkRect.x + verLinkRect.w, verLinkRect.y + verLinkRect.h - 2);
 #else
             SDL_RenderLine(R, verLinkRect.x, verLinkRect.y + verLinkRect.h - 2, verLinkRect.x + verLinkRect.w, verLinkRect.y + verLinkRect.h - 2);
@@ -1344,7 +1344,7 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
         }
         draw_text(R, dlg.x + pad, y, "", g_text_color); /* spacer */
         y += dlg.h - (y - dlg.y) - 78;          // move down to near bottom for links
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         SDL_RendererInfo sdl2_renderer_info;
         const char *renderer_name = (SDL_GetRendererInfo(R, &sdl2_renderer_info) == 0) ? sdl2_renderer_info.name : NULL;
 #else
@@ -1352,8 +1352,12 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
 #endif
         if (renderer_name && renderer_name[0]) {
             char renderer[128];
-            snprintf(renderer, sizeof(renderer), "SDL Graphics Layer: %s", renderer_name);
-            draw_text(R, dlg.x + pad, y, renderer, g_text_color);
+#if USE_SDL2 == TRUE            
+            snprintf(renderer, sizeof(renderer), "SDL (v%d.%d.%d) Graphics Layer: %s", SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_PATCHLEVEL, renderer_name);
+#else
+            snprintf(renderer, sizeof(renderer), "SDL (v%d.%d.%d) Graphics Layer: %s", SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION, renderer_name);
+#endif
+        draw_text(R, dlg.x + pad, y, renderer, g_text_color);
             y += 18;
         }
         draw_text(R, dlg.x + pad, y, "(C) 2021-2026 Zefie Networks", g_text_color);
@@ -1371,7 +1375,7 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
             if (over)
             {
                 SDL_SetRenderDrawColor(R, col.r, col.g, col.b, col.a);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                 SDL_RenderDrawLine(R, r.x, r.y + r.h - 2, r.x + r.w, r.y + r.h - 2);
 #else
                 SDL_RenderLine(R, r.x, r.y + r.h - 2, r.x + r.w, r.y + r.h - 2);
@@ -1407,17 +1411,15 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
             "Original miniBAE source code available at:",
             "https://github.com/heyigor/miniBAE/",
             // SDL is also required for this GUI so no #ifdef is necessary
-#if defined(USE_SDL2)            
+#if USE_SDL2 == TRUE            
             "",
             "SDL2 & SDL2_ttf",
-#elif X_PLATFORM == X_SDL3
+#else
             "",
             "SDL3 & SDL3_ttf",
 #endif
-#if defined(USE_SDL2) || X_PLATFORM == X_SDL3
             "Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>",
-            "https://www.libsdl.org/",
-#endif      
+            "https://www.libsdl.org/",      
 #if USE_MPEG_DECODER == TRUE
             "",
             "minimp3",
@@ -1446,7 +1448,7 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
                 if (over)
                 {
                     SDL_SetRenderDrawColor(R, col.r, col.g, col.b, col.a);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                     SDL_RenderDrawLine(R, r.x, r.y + r.h - 2, r.x + r.w, r.y + r.h - 2);
 #else
                     SDL_RenderLine(R, r.x, r.y + r.h - 2, r.x + r.w, r.y + r.h - 2);
@@ -1587,7 +1589,7 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
                     if (over)
                     {
                         SDL_SetRenderDrawColor(R, col.r, col.g, col.b, col.a);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                         SDL_RenderDrawLine(R, r.x, r.y + r.h - 2, r.x + r.w, r.y + r.h - 2);
 #else
                         SDL_RenderLine(R, r.x, r.y + r.h - 2, r.x + r.w, r.y + r.h - 2);

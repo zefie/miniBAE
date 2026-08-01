@@ -1508,7 +1508,7 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
             {
                 SDL_Color sep = g_panel_border;
                 SDL_SetRenderDrawColor(R, sep.r, sep.g, sep.b, 255);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                 SDL_RenderDrawLine(R, ir.x, ir.y + ir.h, ir.x + ir.w, ir.y + ir.h);
 #else
                 SDL_RenderLine(R, ir.x, ir.y + ir.h, ir.x + ir.w, ir.y + ir.h);
@@ -1598,7 +1598,7 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
                 if (i < g_midi_input_device_count - 1)
                 {
                     SDL_SetRenderDrawColor(R, g_panel_border.r, g_panel_border.g, g_panel_border.b, 255);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                     SDL_RenderDrawLine(R, ir.x, ir.y + ir.h, ir.x + ir.w, ir.y + ir.h);
 #else
                     SDL_RenderLine(R, ir.x, ir.y + ir.h, ir.x + ir.w, ir.y + ir.h);
@@ -1656,7 +1656,7 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
                 if (i < g_midi_output_device_count - 1)
                 {
                     SDL_SetRenderDrawColor(R, g_panel_border.r, g_panel_border.g, g_panel_border.b, 255);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                     SDL_RenderDrawLine(R, ir.x, ir.y + ir.h, ir.x + ir.w, ir.y + ir.h);
 #else
                     SDL_RenderLine(R, ir.x, ir.y + ir.h, ir.x + ir.w, ir.y + ir.h);
@@ -1744,7 +1744,7 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
             {
                 SDL_Color sep = g_panel_border;
                 SDL_SetRenderDrawColor(R, sep.r, sep.g, sep.b, 255);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                 SDL_RenderDrawLine(R, ir.x, ir.y + ir.h, ir.x + ir.w, ir.y + ir.h);
 #else
                 SDL_RenderLine(R, ir.x, ir.y + ir.h, ir.x + ir.w, ir.y + ir.h);
@@ -2718,7 +2718,7 @@ void render_preset_name_dialog(SDL_Renderer *R, int mx, int my, bool mclick, boo
     // Cursor
     int cursor_x = inputBox.x + 4 + (g_preset_name_cursor * 7); // Approximate char width
     SDL_SetRenderDrawColor(R, g_text_color.r, g_text_color.g, g_text_color.b, g_text_color.a);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     SDL_RenderDrawLine(R, cursor_x, inputBox.y + 4, cursor_x, inputBox.y + inputBox.h - 4);
 #else
     SDL_RenderLine(R, cursor_x, inputBox.y + 4, cursor_x, inputBox.y + inputBox.h - 4);

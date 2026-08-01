@@ -25,7 +25,7 @@
 #include "gui_theme.h"
 #include "gui_widgets.h"
 
-#if X_PLATFORM == X_SDL2
+#if USE_SDL2 == TRUE
 #include <SDL2/SDL.h>
 #else
 #include <SDL3/SDL.h>
@@ -401,7 +401,7 @@ void debug_console_show(void)
     if (!g_debug_window) {
         g_debug_window = SDL_CreateWindow(
             "zefidi Debug Console",
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
 #endif
             DEBUG_WINDOW_W,
@@ -411,7 +411,7 @@ void debug_console_show(void)
         
         if (!g_debug_window) return;
         
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         g_debug_renderer = SDL_CreateRenderer(g_debug_window, -1, 0);
 #else
         g_debug_renderer = SDL_CreateRenderer(g_debug_window, NULL);
@@ -478,7 +478,7 @@ bool debug_console_handle_event(SDL_Event *event)
     bool is_our_event = false;
     
     switch (event->type) {
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         case SDL_WINDOWEVENT:
 #else
         case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
@@ -497,7 +497,7 @@ bool debug_console_handle_event(SDL_Event *event)
 #endif
             is_our_event = (event->window.windowID == debug_window_id);
             break;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         case SDL_KEYDOWN:
         case SDL_KEYUP:
 #else
@@ -506,14 +506,14 @@ bool debug_console_handle_event(SDL_Event *event)
 #endif
             is_our_event = (event->key.windowID == debug_window_id);
             break;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         case SDL_MOUSEMOTION:
 #else
         case SDL_EVENT_MOUSE_MOTION:
 #endif
             is_our_event = (event->motion.windowID == debug_window_id);
             break;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         case SDL_MOUSEBUTTONDOWN:
         case SDL_MOUSEBUTTONUP:
 #else
@@ -522,14 +522,14 @@ bool debug_console_handle_event(SDL_Event *event)
 #endif
             is_our_event = (event->button.windowID == debug_window_id);
             break;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         case SDL_MOUSEWHEEL:
 #else
         case SDL_EVENT_MOUSE_WHEEL:
 #endif
             is_our_event = (event->wheel.windowID == debug_window_id);
             break;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         case SDL_TEXTINPUT:
 #else
         case SDL_EVENT_TEXT_INPUT:
@@ -543,7 +543,7 @@ bool debug_console_handle_event(SDL_Event *event)
     }
     
     // Handle window close request
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     if (event->type == SDL_WINDOWEVENT && event->window.event == SDL_WINDOWEVENT_CLOSE) {
 #else
     if (event->type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
@@ -560,7 +560,7 @@ bool debug_console_handle_event(SDL_Event *event)
     }
     
     // Handle text input for filter
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     if (event->type == SDL_TEXTINPUT && g_filter_focused) {
 #else
     if (event->type == SDL_EVENT_TEXT_INPUT && g_filter_focused) {
@@ -574,7 +574,7 @@ bool debug_console_handle_event(SDL_Event *event)
     }
     
     // Handle keyboard events
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     if (event->type == SDL_KEYDOWN) {
         SDL_Keycode ev_key = event->key.keysym.sym;
         SDL_Keymod ev_mod = event->key.keysym.mod;
@@ -591,7 +591,7 @@ bool debug_console_handle_event(SDL_Event *event)
                 g_scroll_offset = 0;
                 g_auto_scroll = true;
                 g_filter_focused = false;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                 SDL_StopTextInput();
 #else
                 SDL_StopTextInput(g_debug_window);
@@ -615,7 +615,7 @@ bool debug_console_handle_event(SDL_Event *event)
         }
         
         // Ctrl+C to copy selection
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         if (ev_key == SDLK_C && (ev_mod & KMOD_CTRL)) {
 #else
         if (ev_key == SDLK_C && (ev_mod & SDL_KMOD_CTRL)) {
@@ -654,7 +654,7 @@ bool debug_console_handle_event(SDL_Event *event)
             return true;
         }
         // Ctrl+A to select all
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         else if (ev_key == SDLK_A && (ev_mod & KMOD_CTRL)) {
 #else
         else if (ev_key == SDLK_A && (ev_mod & SDL_KMOD_CTRL)) {
@@ -703,7 +703,7 @@ bool debug_console_handle_event(SDL_Event *event)
     }
     
     // Handle mouse wheel
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     if (event->type == SDL_MOUSEWHEEL) {
 #else
     if (event->type == SDL_EVENT_MOUSE_WHEEL) {
@@ -724,7 +724,7 @@ bool debug_console_handle_event(SDL_Event *event)
     }
     
     // Handle mouse button down
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     if (event->type == SDL_MOUSEBUTTONDOWN && event->button.button == SDL_BUTTON_LEFT) {
 #else
     if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN && event->button.button == SDL_BUTTON_LEFT) {
@@ -742,7 +742,7 @@ bool debug_console_handle_event(SDL_Event *event)
         if (event->button.x >= filter_x && event->button.x <= filter_x + filter_w &&
             event->button.y >= filter_y && event->button.y <= filter_y + filter_h) {
             g_filter_focused = true;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             SDL_StartTextInput();
 #else
             SDL_StartTextInput(g_debug_window);
@@ -754,7 +754,7 @@ bool debug_console_handle_event(SDL_Event *event)
             // Click outside filter - unfocus it
             if (g_filter_focused) {
                 g_filter_focused = false;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                 SDL_StopTextInput();
 #else
                 SDL_StopTextInput(g_debug_window);
@@ -806,7 +806,7 @@ bool debug_console_handle_event(SDL_Event *event)
     }
     
     // Handle mouse button up
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     if (event->type == SDL_MOUSEBUTTONUP && event->button.button == SDL_BUTTON_LEFT) {
 #else
     if (event->type == SDL_EVENT_MOUSE_BUTTON_UP && event->button.button == SDL_BUTTON_LEFT) {
@@ -818,7 +818,7 @@ bool debug_console_handle_event(SDL_Event *event)
     }
     
     // Handle mouse motion (dragging)
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     if (event->type == SDL_MOUSEMOTION && g_mouse_down) {
 #else
     if (event->type == SDL_EVENT_MOUSE_MOTION && g_mouse_down) {
@@ -940,7 +940,7 @@ void debug_console_render(void)
     btn_x -= btn_w + 10;
     
     // Get mouse state
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     int mx_f, my_f;
 #else
     float mx_f, my_f;

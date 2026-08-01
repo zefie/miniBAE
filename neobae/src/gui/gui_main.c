@@ -21,12 +21,6 @@
 //             but we shaved nearly 5000 lines from it
 // 2025-12-02: Updated to SDL3
 
-#if defined(USE_SDL2)
-#include <SDL2/SDL.h>
-#else
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_main.h>
-#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -39,20 +33,17 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <stdint.h>
+
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN 1
 #include <windows.h>
 #include <commdlg.h>
 #include <stdlib.h> // for _fullpath
-#if defined(USE_SDL2)
-#include <SDL2/SDL_opengl.h>
-#include <SDL2/SDL_syswm.h>
-#else
-#include <SDL3/SDL_opengl.h>
-#endif
+
 #include <winreg.h>   // for registry access
 #include <shellapi.h> // for ShellExecuteA
 #endif
+
 #if !defined(_WIN32)
 #include <stdio.h>
 #include <errno.h>
@@ -60,10 +51,21 @@
 #include <limits.h> // for PATH_MAX
 #include <unistd.h> // for readlink
 #endif
+
 #include "NeoBAE.h"
 #include "gui_bae.h"
 #include "BAE_API.h" // for BAE_GetDeviceSamplesPlayedPosition diagnostics
 #include "X_Assert.h"
+
+#if USE_SDL2 == TRUE
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_opengl.h>
+#include <SDL2/SDL_syswm.h>
+#else
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
+#include <SDL3/SDL_opengl.h>
+#endif
 
 // GUI includes
 #include "gui_common.h"
@@ -133,7 +135,7 @@ static void draw_io_arrow_icon(SDL_Renderer *R, Rect r, bool up, SDL_Color col)
 
     if (up)
     {
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         SDL_RenderDrawLine(R, cx, bot, cx, top + 2);
         SDL_RenderDrawLine(R, cx, top + 2, cx - w, top + 2 + w);
         SDL_RenderDrawLine(R, cx, top + 2, cx + w, top + 2 + w);
@@ -147,7 +149,7 @@ static void draw_io_arrow_icon(SDL_Renderer *R, Rect r, bool up, SDL_Color col)
     }
     else
     {
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         SDL_RenderDrawLine(R, cx, top, cx, bot - 2);
         SDL_RenderDrawLine(R, cx, bot - 2, cx - w, bot - 2 - w);
         SDL_RenderDrawLine(R, cx, bot - 2, cx + w, bot - 2 - w);
@@ -360,7 +362,7 @@ static LRESULT CALLBACK zefidi_WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPAR
                 s[cds->cbData] = '\0';
                 SDL_Event ev;
                 memset(&ev, 0, sizeof(ev));
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                 ev.type = SDL_USEREVENT;
 #else
                 ev.type = SDL_EVENT_USER;
@@ -752,7 +754,7 @@ void setWindowIcon(SDL_Window *window)
     // The window icon is typically handled by the system for applications with embedded icons.
 
     // Try to get the window handle and set the icon manually as a fallback
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     SDL_SysWMinfo wmInfo;
     SDL_VERSION(&wmInfo.version);
     if (SDL_GetWindowWMInfo(window, &wmInfo)) {
@@ -778,7 +780,7 @@ void setWindowIcon(SDL_Window *window)
                 BAE_PRINTF("Failed to load icon resource\n");
             }
         }
-#if !defined(USE_SDL2)
+#if USE_SDL2 != TRUE
     }
 #endif
 #else
@@ -870,7 +872,7 @@ int main(int argc, char *argv[])
             SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
         }
     #endif
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     if (SDL_Init(SDL_INIT_VIDEO) != 0)
 #else
     if (SDL_Init(SDL_INIT_VIDEO) != true)
@@ -894,7 +896,7 @@ int main(int argc, char *argv[])
     script_editor_init();
 #endif
     
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     if (TTF_Init() != 0)
 #else
     if (TTF_Init() != true)
@@ -907,7 +909,7 @@ int main(int argc, char *argv[])
         static int ttf_font_size = 14;
 
 #if EMBED_TTF_FONT == TRUE
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
         g_font = TTF_OpenFontRW(SDL_RWFromConstMem(embedded_font_data, embedded_font_size), 1, ttf_font_size);
 #elif defined(SDL_IOFromConstMem)
         g_font = TTF_OpenFontIO(SDL_IOFromConstMem(embedded_font_data, embedded_font_size), false, ttf_font_size);
@@ -1147,7 +1149,7 @@ int main(int argc, char *argv[])
     const float TARGET_FPS = 60.0f;
     float frame_time_ms = 1000.0f / TARGET_FPS;
 
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     SDL_Window *win = SDL_CreateWindow("zefidi Media Player", window_x, window_y, 900, g_window_h, 0);
 #else
     SDL_Window *win = SDL_CreateWindow("zefidi Media Player", 900, g_window_h, 0);
@@ -1161,7 +1163,7 @@ int main(int argc, char *argv[])
     g_main_window = win; // Store global reference for settings saving
     setWindowTitle(win);
     setWindowIcon(win);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     SDL_SetWindowResizable(win, SDL_FALSE);
 #else
     SDL_SetWindowResizable(win, false);
@@ -1171,14 +1173,14 @@ int main(int argc, char *argv[])
     // Query display refresh rate for adaptive frame timing.
     // Fall back to 60 Hz if the query fails.  Clamp to a sensible range.
     {
-#if defined(USE_SDL2)        
+#if USE_SDL2 == TRUE        
         int display_index = SDL_GetWindowDisplayIndex(win);
 #else
         int display_index = SDL_GetDisplayForWindow(win);
 #endif
         if (display_index >= 0)
         {
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             SDL_DisplayMode dm;
             if (SDL_GetDesktopDisplayMode(display_index, &dm) == 0)
 #else
@@ -1186,17 +1188,22 @@ int main(int argc, char *argv[])
             if (dm)
 #endif
             {
-                if (dm->refresh_rate >= 60 && dm->refresh_rate <= 240)
+                #if USE_SDL2 == TRUE
+                    int32_t refresh_rate = dm.refresh_rate;
+                #else
+                    int32_t refresh_rate = dm->refresh_rate;
+                #endif
+                if (refresh_rate >= 60 && refresh_rate <= 240)
                 {
-                    frame_time_ms = 1000.0f / (float)dm->refresh_rate;
+                    frame_time_ms = 1000.0f / (float)refresh_rate;
                     BAE_PRINTF("Display refresh rate: %d Hz, frame time: %.2f ms\n",
-                               (int32_t)dm->refresh_rate, frame_time_ms);
+                               (int32_t)refresh_rate, frame_time_ms);
                 }
             }
         }
     }
 
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     SDL_Renderer *R = SDL_CreateRenderer(win, -1, 0);
 #else
     SDL_Renderer *R = SDL_CreateRenderer(win, NULL);
@@ -1357,7 +1364,7 @@ int main(int argc, char *argv[])
 
 #ifdef _WIN32
     // Subclass the native HWND to receive WM_COPYDATA messages from subsequent instances
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
     SDL_SysWMinfo wmInfo;
     SDL_VERSION(&wmInfo.version);
     if (SDL_GetWindowWMInfo(win, &wmInfo)) {
@@ -1372,7 +1379,7 @@ int main(int argc, char *argv[])
             g_prev_wndproc = (WNDPROC)SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)zefidi_WndProc);
             BAE_PRINTF("Installed zefidi_WndProc chain (prev=%p)\n", (void *)g_prev_wndproc);
         }
-#if !defined(USE_SDL2)
+#if USE_SDL2 != TRUE
     }
 #endif
 #endif
@@ -1405,7 +1412,7 @@ int main(int argc, char *argv[])
 #endif
             switch (e.type)
             {
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             case SDL_USEREVENT:
 #else
             case SDL_EVENT_USER:
@@ -1508,7 +1515,7 @@ int main(int argc, char *argv[])
             }
             break;
 
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             case SDL_WINDOWEVENT:
                 if (e.window.event == SDL_WINDOWEVENT_CLOSE)
                 {
@@ -1520,14 +1527,14 @@ int main(int argc, char *argv[])
                 running = false;
                 break;
 #endif
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             case SDL_QUIT:
 #else
             case SDL_EVENT_QUIT:
 #endif
                 running = false;
                 break;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             case SDL_MOUSEBUTTONDOWN:
 #else
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -1537,7 +1544,7 @@ int main(int argc, char *argv[])
                     mdown = true;
                 }
                 break;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             case SDL_MOUSEBUTTONUP:
 #else
             case SDL_EVENT_MOUSE_BUTTON_UP:
@@ -1559,7 +1566,7 @@ int main(int argc, char *argv[])
                     rclick = true;
                 }
                 break;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             case SDL_MOUSEMOTION:
 #else
             case SDL_EVENT_MOUSE_MOTION:
@@ -1574,7 +1581,7 @@ int main(int argc, char *argv[])
                 }
 #endif
                 break;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             case SDL_MOUSEWHEEL:
 #else
             case SDL_EVENT_MOUSE_WHEEL:
@@ -1770,13 +1777,13 @@ int main(int argc, char *argv[])
                 }
             }
             break;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             case SDL_DROPFILE:
 #else
             case SDL_EVENT_DROP_FILE:
 #endif
             {
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                 const char *dropped = e.drop.file;
 #else
                 const char *dropped = e.drop.data;
@@ -1784,7 +1791,7 @@ int main(int argc, char *argv[])
                 if (dropped)
                 {
                     // Get current mouse position to check if drop is over playlist
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                     int drop_mx, drop_my;
 #else
                     float drop_mx, drop_my;
@@ -1943,7 +1950,7 @@ int main(int argc, char *argv[])
                 }
             }
             break;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             case SDL_TEXTINPUT:
 #else
             case SDL_EVENT_TEXT_INPUT:
@@ -1973,7 +1980,7 @@ int main(int argc, char *argv[])
                 }
             }
             break;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             case SDL_KEYDOWN:
             case SDL_KEYUP:
 #else
@@ -1981,7 +1988,7 @@ int main(int argc, char *argv[])
             case SDL_EVENT_KEY_UP:
 #endif
             {
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                 bool isDown = (e.type == SDL_KEYDOWN);
                 SDL_Keycode sym = e.key.keysym.sym;
 #else
@@ -2089,7 +2096,7 @@ int main(int argc, char *argv[])
                 // Initialize mapping table once
                 if (!g_keyboard_map_initialized)
                 {
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                     for (int i = 0; i < SDL_NUM_SCANCODES; i++)
 #else
                     for (int i = 0; i < SDL_SCANCODE_COUNT; i++)
@@ -2160,7 +2167,7 @@ int main(int argc, char *argv[])
                 // a w s e d f t g y h u j k o
                 // Mapping: a=C, w=C#, s=D, e=D#, d=E, f=F, t=F#, g=G, y=G#, h=A, u=A#, j=B,
                 // k=C (next octave), o=C#
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                 int sc = e.key.keysym.scancode;
 #else
                 int sc = e.key.scancode;
@@ -2829,7 +2836,7 @@ int main(int argc, char *argv[])
             static bool s_preset_name_text_input_active = false;
             if (g_show_preset_name_dialog && !s_preset_name_text_input_active)
             {
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                 SDL_StartTextInput();
 #else
                 SDL_StartTextInput(win);
@@ -2838,7 +2845,7 @@ int main(int argc, char *argv[])
             }
             else if (!g_show_preset_name_dialog && s_preset_name_text_input_active)
             {
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                 SDL_StopTextInput();
 #else
                 SDL_StopTextInput(win);
@@ -3179,7 +3186,7 @@ int main(int argc, char *argv[])
                     }
                     // Draw one horizontal scanline of the gradient from bottom upwards
                     SDL_SetRenderDrawColor(R, col.r, col.g, col.b, 255);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                     SDL_RenderDrawLine(R, gx, meterY + meterH - innerPad - 1 - yoff, gx + gw - 1, meterY + meterH - innerPad - 1 - yoff);
 #else
                     SDL_RenderLine(R, gx, meterY + meterH - innerPad - 1 - yoff, gx + gw - 1, meterY + meterH - innerPad - 1 - yoff);
@@ -3299,7 +3306,7 @@ int main(int argc, char *argv[])
                     }
                     // Draw from bottom upwards
                     SDL_SetRenderDrawColor(R, col.r, col.g, col.b, 255);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                     SDL_RenderDrawLine(R, gx, vuY + vuH - innerPad - 1 - yoff, gx + gw - 1, vuY + vuH - innerPad - 1 - yoff);
 #else
                     SDL_RenderLine(R, gx, vuY + vuH - innerPad - 1 - yoff, gx + gw - 1, vuY + vuH - innerPad - 1 - yoff);
@@ -3858,7 +3865,7 @@ int main(int argc, char *argv[])
 
                 // Clip drawing to the fill area so stripes don't bleed outside
                 SDL_Rect clip = {fillRect.x, fillRect.y, fillRect.w, fillRect.h};
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                 SDL_RenderSetClipRect(R, &clip);
 #else
                 SDL_SetRenderClipRect(R, &clip);
@@ -3882,7 +3889,7 @@ int main(int argc, char *argv[])
                     for (int t = 0; t < thickness; ++t)
                     {
                         // Draw from bottom to top so the slant opposes previous direction
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                         SDL_RenderDrawLine(R, x0 + t, fillRect.y + fillRect.h, x1 + t, fillRect.y);
 #else
                         SDL_RenderLine(R, x0 + t, fillRect.y + fillRect.h, x1 + t, fillRect.y);
@@ -3891,7 +3898,7 @@ int main(int argc, char *argv[])
                 }
 
                 // Restore clip
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                 SDL_RenderSetClipRect(R, NULL);
 #else
                 SDL_SetRenderClipRect(R, NULL);
@@ -4224,7 +4231,7 @@ int main(int argc, char *argv[])
                                 if (y1 > inWfY + inWfH - 1)
                                     y1 = inWfY + inWfH - 1;
                                 SDL_SetRenderDrawColor(R, g_accent_color.r, g_accent_color.g, g_accent_color.b, 255);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                                 SDL_RenderDrawLine(R, inWfX + x, y0, inWfX + x, y1);
 #else
                                 SDL_RenderLine(R, inWfX + x, y0, inWfX + x, y1);
@@ -4262,7 +4269,7 @@ int main(int argc, char *argv[])
                                 if (y1 > inWfY + inWfH - 1)
                                     y1 = inWfY + inWfH - 1;
                                 SDL_SetRenderDrawColor(R, g_accent_color.r, g_accent_color.g, g_accent_color.b, 255);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                                 SDL_RenderDrawLine(R, inWfX + x, y0, inWfX + x, y1);
 #else
                                 SDL_RenderLine(R, inWfX + x, y0, inWfX + x, y1);
@@ -4370,7 +4377,7 @@ int main(int argc, char *argv[])
                             double frac = (double)frame_pos / (double)audio_total_frames;
                             int phx = inWfX + (int)(frac * inWfW);
                             SDL_SetRenderDrawColor(R, g_highlight_color.r, g_highlight_color.g, g_highlight_color.b, 220);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                             SDL_RenderDrawLine(R, phx, inWfY, phx, inWfY + inWfH - 1);
 #else
                             SDL_RenderLine(R, phx, inWfY, phx, inWfY + inWfH - 1);
@@ -6391,13 +6398,13 @@ int main(int argc, char *argv[])
 
                         int px = inner.x + 1 + x;
                         SDL_SetRenderDrawColor(R, colL.r, colL.g, colL.b, 220);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                         SDL_RenderDrawPoint(R, px, yL);
 #else
                         SDL_RenderPoint(R, px, yL);
 #endif
                         SDL_SetRenderDrawColor(R, colR.r, colR.g, colR.b, 210);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                         SDL_RenderDrawPoint(R, px, yR);
 #else
                         SDL_RenderPoint(R, px, yR);
@@ -6440,7 +6447,7 @@ int main(int argc, char *argv[])
                             col.b = 20;
                         }
                         SDL_SetRenderDrawColor(R, col.r, col.g, col.b, 255);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                         SDL_RenderDrawLine(R, innerX + xoff, innerY, innerX + xoff, innerY + innerH - 1);
 #else
                         SDL_RenderLine(R, innerX + xoff, innerY, innerX + xoff, innerY + innerH - 1);
@@ -6488,7 +6495,7 @@ int main(int argc, char *argv[])
                             col.b = 20;
                         }
                         SDL_SetRenderDrawColor(R, col.r, col.g, col.b, 255);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                         SDL_RenderDrawLine(R, innerX2 + xoff, innerY2, innerX2 + xoff, innerY2 + innerH2 - 1);
 #else
                         SDL_RenderLine(R, innerX2 + xoff, innerY2, innerX2 + xoff, innerY2 + innerH2 - 1);
@@ -6907,7 +6914,7 @@ int main(int argc, char *argv[])
                     int y2 = inner.y + inner.h - 3;
                     int x3 = inner.x + inner.w - 3;
                     int y3 = inner.y + 3;
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                     SDL_RenderDrawLine(R, x1, y1, x2, y2);
                     SDL_RenderDrawLine(R, x2, y2, x3, y3);
 #else
@@ -7020,7 +7027,7 @@ int main(int argc, char *argv[])
                         SDL_Color sep = g_panel_border;
                         sep.a = 255;
                         SDL_SetRenderDrawColor(R, sep.r, sep.g, sep.b, sep.a);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                         SDL_RenderDrawLine(R, ir.x, ir.y + ir.h, ir.x + ir.w, ir.y + ir.h);
 #else
                         SDL_RenderLine(R, ir.x, ir.y + ir.h, ir.x + ir.w, ir.y + ir.h);
@@ -7276,7 +7283,7 @@ int main(int argc, char *argv[])
                 if (row < rows - 1)
                 {
                     SDL_SetRenderDrawColor(R, g_panel_border.r, g_panel_border.g, g_panel_border.b, 255);
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
                     SDL_RenderDrawLine(R, ir.x, ir.y + ir.h, ir.x + ir.w, ir.y + ir.h);
 #else
                     SDL_RenderLine(R, ir.x, ir.y + ir.h, ir.x + ir.w, ir.y + ir.h);
@@ -7361,7 +7368,7 @@ int main(int argc, char *argv[])
 
         if (elapsed_ms < frame_time_ms)
         {
-#if defined(USE_SDL2)
+#if USE_SDL2 == TRUE
             SDL_WaitEventTimeout(NULL, (int)(frame_time_ms - elapsed_ms));
 #else
             SDL_WaitEventTimeout(NULL, (Sint32)(frame_time_ms - elapsed_ms));
@@ -7525,3 +7532,10 @@ int main(int argc, char *argv[])
     SDL_Quit();
     return 0;
 }
+
+#if defined(_WIN32) && USE_SDL2 == TRUE
+int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmdLine, int nShowCmd)
+{
+    return main(__argc, __argv);
+}
+#endif
