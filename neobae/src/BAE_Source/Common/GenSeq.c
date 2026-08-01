@@ -2024,12 +2024,12 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
 {
     if (pSong->channelLSB[MIDIChannel] == 6 && (program == 124 || program == 125)) {
         pSong->isNokiaVibrationChannel[MIDIChannel] = TRUE;
-        debug_message("ProcessProgramChange Debug: Channel %d is set to Nokia Vibration (LSB=6, Program %d)\n", MIDIChannel, program);
+        debug_message("ProcessProgramChange Debug: Channel %d is set to Nokia Vibration (LSB=6, Program %d)\n", (MIDIChannel + 1), program);
     }
 #if USE_J2ME_PATCH    
     if (pSong->channelRawBank[MIDIChannel] == 120 && pSong->channelLSB[MIDIChannel] != 5) {
         pSong->channelBankMode[MIDIChannel] = USE_GM_PERC_BANK;
-        debug_message("ProcessProgramChange Debug: Channel %d is set to Percussion (MSB=120, LSB=%d)\n", MIDIChannel, pSong->channelLSB[MIDIChannel]);
+        debug_message("ProcessProgramChange Debug: Channel %d is set to Percussion (MSB=120, LSB=%d)\n", (MIDIChannel + 1), pSong->channelLSB[MIDIChannel]);
     }
 #endif 
 
@@ -2047,8 +2047,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
         pSong->channelProgram[MIDIChannel] = program;
             
 #if USE_SF2_SUPPORT == TRUE
-
-
+            
             if (pSong->songFlags & SONG_FLAG_IS_RMF) {
                 int16_t thePatch = PV_ConvertPatchBank(pSong, program, MIDIChannel);                      
                 if (PV_ShouldUseRMFInstrumentForPatch(pSong, thePatch)) {
@@ -2096,7 +2095,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                         if (PV_DLS_TryProgramWithXmfFallback(pSong, MIDIChannel, theBank, thePatch))
                         {
                             pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
-                            debug_message("ProcessProgramChange Debug: Channel %d is using a DLS bank instrument (bank=%d prog=%d)\n", MIDIChannel, theBank / 2, thePatch);
+                            debug_message("ProcessProgramChange Debug: Channel %d is using a DLS bank instrument (bank=%d prog=%d)\n", (MIDIChannel + 1), theBank / 2, thePatch);
                             routedToDLS = TRUE;
                         }
                     }
@@ -2106,8 +2105,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                         // If SF2 is active for this song, send program change to SF2
                         pSong->channelType[MIDIChannel] = CHANNEL_TYPE_SF2;
                         int32_t combinedProgram = (theBank * 128) + thePatch;
-                        debug_message("ProcessProgramChange Debug: Channel %d is using a SF2 bank instrument  (bank=%d prog=%d)\n", MIDIChannel, theBank / 2, thePatch);
-                        GM_SF2_ProcessProgramChange(pSong, MIDIChannel, combinedProgram);
+                        debug_message("ProcessProgramChange Debug: Channel %d is using a SF2 bank instrument  (bank=%d prog=%d)\n", (MIDIChannel + 1), theBank / 2, thePatch);
                     }
                 }
 #endif
@@ -2119,7 +2117,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                     if (PV_DLS_TryProgramWithXmfFallback(pSong, MIDIChannel, theBank, thePatch))
                     {
                         pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
-                        debug_message("ProcessProgramChange Debug: Channel %d is using a DLS bank instrument (bank=%d prog=%d)\n", MIDIChannel, theBank / 2, thePatch);
+                        debug_message("ProcessProgramChange Debug: Channel %d is using a DLS bank instrument (bank=%d prog=%d)\n", (MIDIChannel + 1), theBank / 2, thePatch);
                     }
                     else
                     {
@@ -2144,7 +2142,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                         int32_t fallbackBank = 0;
                         pSong->channelBank[MIDIChannel] = (signed char)fallbackBank;
                         debug_message("ProcessProgramChange Debug: Channel %d HSB fallback bank %d -> %d for program %d\n",
-                                      MIDIChannel, midiBank, fallbackBank, thePatch);
+                                      (MIDIChannel + 1), midiBank, fallbackBank, thePatch);
                     }
                     else
                     {
@@ -2156,7 +2154,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                 uint32_t bankId, progId = 0, noteId = 0;
                 int16_t thePatch = PV_ConvertPatchBank(pSong, program, MIDIChannel);                        
                 TranslateInstrumentToBankProgram(thePatch, &bankId, &progId, &noteId);          
-                debug_message("ProcessProgramChange Debug: Channel %d is using a RMF/HSB instrument (instID=%d, bank=%d, program=%d)\n", MIDIChannel, thePatch, bankId, progId);
+                debug_message("ProcessProgramChange Debug: Channel %d is using a RMF/HSB instrument (instID=%d, bank=%d, program=%d)\n", (MIDIChannel + 1), thePatch, bankId, progId);
             }
 #endif
     }
@@ -2611,7 +2609,7 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                 {
                     thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
                     PV_StartMIDINote(pSong, thePatch, MIDIChannel, currentTrack, note, volume);
-                    //debug_message("ProcessNoteOn Debug: Channel %d is using RMF Instrument (note=%d)\n", MIDIChannel, note);
+                    //debug_message("ProcessNoteOn Debug: Channel %d is using RMF Instrument (note=%d)\n", (MIDIChannel + 1), note);
                 }
             }
             else
