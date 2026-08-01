@@ -48,6 +48,7 @@
 #include "GenDLS_MobileBAE_Tables.h"
 #include "X_Assert.h"
 #include "g72x.h"
+#include "NeoBAE.h"
 
 #if USE_MPEG_DECODER == TRUE
 #include "XMPEG_BAE_API.h"
@@ -721,23 +722,6 @@ static int32_t dls_filter_next_right(DLS_PlusFilter* f, int32_t sample) {
     return raw >> 10;
 }
 
-// Helper to read Little-Endian values from memory
-static uint32_t read_le32(const uint8_t* p) {
-    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-}
-
-static uint16_t read_le16(const uint8_t* p) {
-    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
-}
-
-static uint32_t read_chunk_id(const uint8_t* p) {
-    // Keep it as a 32-bit integer for fast comparison, assuming Little-Endian chunk IDs 
-    // e.g., 'RIFF' -> 0x46464952 (on LE machines)
-    // Actually, just read 4 chars into a uint32_t directly without endian swapping 
-    // so 'RIFF' string directly matches 0x46464952
-    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-}
-
 static uint32_t DLS_Selector(int32_t bankMsb, int32_t bankLsb, int32_t program) {
     return (uint32_t)(program & 0x7F) | ((uint32_t)(bankLsb & 0x7F) << 8) |
            ((uint32_t)(bankMsb & 0x7F) << 16);
@@ -770,9 +754,9 @@ typedef struct {
 
 static bool looks_like_wave_chunk(const uint8_t* p, const uint8_t* end) {
     if (p + 12 > end) return false;
-    uint32_t id = read_chunk_id(p);
-    uint32_t type = read_chunk_id(p + 8);
-    return (id == CHUNK_RIFF && type == CHUNK_WAVE) || (id == CHUNK_LIST && type == read_chunk_id((const uint8_t*)"wave"));
+    uint32_t id = PV_ReadLE32(p);
+    uint32_t type = PV_ReadLE32(p + 8);
+    return (id == CHUNK_RIFF && type == CHUNK_WAVE) || (id == CHUNK_LIST && type == PV_ReadLE32((const uint8_t*)"wave"));
 }
 
 
@@ -864,7 +848,7 @@ static OPErr DLS_Parse_Wave_Data(const uint8_t* chunk_start, const uint8_t* chun
     wave->factFrames = -1;
     
     if (chunk_start + 12 > chunk_end) return BAD_FILE_TYPE;
-    uint32_t wave_chunk_size = read_le32(chunk_start + 4);
+    uint32_t wave_chunk_size = PV_ReadLE32(chunk_start + 4);
     const uint8_t* wave_end = chunk_start + 8 + wave_chunk_size;
     if (wave_end > chunk_end) return BAD_FILE_TYPE;
     const uint8_t* q = chunk_start + 12; // skip LIST <size> wave
@@ -873,22 +857,22 @@ static OPErr DLS_Parse_Wave_Data(const uint8_t* chunk_start, const uint8_t* chun
     uint32_t pcm_size = 0;
 
     while (q + 8 <= wave_end) {
-        uint32_t id = read_chunk_id(q);
-        uint32_t chunk_size = read_le32(q + 4);
+        uint32_t id = PV_ReadLE32(q);
+        uint32_t chunk_size = PV_ReadLE32(q + 4);
         const uint8_t* body = q + 8;
         uint32_t padded_size = (chunk_size + 1) & ~1;
         if (body + padded_size > wave_end) break;
 
         if (id == CHUNK_FMT) {
             if (chunk_size >= 16) {
-                wave->formatTag = read_le16(body);
-                wave->channels = read_le16(body + 2);
-                wave->sampleRate = read_le32(body + 4);
-                wave->blockAlign = read_le16(body + 12);
-                wave->bitsPerSample = read_le16(body + 14);
+                wave->formatTag = PV_ReadLE16(body);
+                wave->channels = PV_ReadLE16(body + 2);
+                wave->sampleRate = PV_ReadLE32(body + 4);
+                wave->blockAlign = PV_ReadLE16(body + 12);
+                wave->bitsPerSample = PV_ReadLE16(body + 14);
                 if (wave->formatTag == 85) {
                     /* WAVE_FORMAT_MPEGLAYER3: require cbSize=12 and decode to 16-bit PCM. */
-                    if (chunk_size < 30 || read_le16(body + 16) != 12) {
+                    if (chunk_size < 30 || PV_ReadLE16(body + 16) != 12) {
                         return BAD_FILE_TYPE;
                     }
                     wave->bitsPerSample = 16;
@@ -897,26 +881,26 @@ static OPErr DLS_Parse_Wave_Data(const uint8_t* chunk_start, const uint8_t* chun
         } else if (id == CHUNK_DATA) {
             pcm_data = body;
             pcm_size = chunk_size;
-        } else if (id == read_chunk_id((const uint8_t*)"fact")) {
+        } else if (id == PV_ReadLE32((const uint8_t*)"fact")) {
             if (chunk_size >= 4) {
-                wave->factFrames = read_le32(body);
+                wave->factFrames = PV_ReadLE32(body);
             }
         } else if (id == CHUNK_WSMP) {
             if (chunk_size >= 20) {
                 wave->sample.present = true;
-                wave->sample.unityNote = read_le16(body + 4);
-                wave->sample.fineTuneCents = (int16_t)read_le16(body + 6);
-                wave->sample.attenuation = (int32_t)read_le32(body + 8);
-                uint32_t cSampleLoops = read_le32(body + 16);
+                wave->sample.unityNote = PV_ReadLE16(body + 4);
+                wave->sample.fineTuneCents = (int16_t)PV_ReadLE16(body + 6);
+                wave->sample.attenuation = (int32_t)PV_ReadLE32(body + 8);
+                uint32_t cSampleLoops = PV_ReadLE32(body + 16);
                 wave->sample.loopMode = DLS_LOOP_NONE;
                 wave->sample.loopStart = 0;
                 wave->sample.loopEndInclusive = -1;
                 wave->sample.loopUntilRelease = false;
                 if (cSampleLoops > 0 && chunk_size >= 20 + cSampleLoops * 16) {
                     const uint8_t* loop = body + 20;
-                    uint32_t loopType = read_le32(loop + 4);
-                    uint32_t loopStart = read_le32(loop + 8);
-                    uint32_t loopLength = read_le32(loop + 12);
+                    uint32_t loopType = PV_ReadLE32(loop + 4);
+                    uint32_t loopStart = PV_ReadLE32(loop + 8);
+                    uint32_t loopLength = PV_ReadLE32(loop + 12);
                     if (loopLength != 0) {
                         wave->sample.loopStart = loopStart;
                         wave->sample.loopEndInclusive = (int32_t)(loopStart + loopLength - 1);
@@ -925,14 +909,14 @@ static OPErr DLS_Parse_Wave_Data(const uint8_t* chunk_start, const uint8_t* chun
                     }
                 }
             }
-        } else if (id == read_chunk_id((const uint8_t*)"smpl") && chunk_size >= 36) {
-            uint32_t loopCount = read_le32(body + 28);
+        } else if (id == PV_ReadLE32((const uint8_t*)"smpl") && chunk_size >= 36) {
+            uint32_t loopCount = PV_ReadLE32(body + 28);
             wave->sample.present = true;
-            wave->sample.unityNote = read_le32(body + 12) & 0xFF;
+            wave->sample.unityNote = PV_ReadLE32(body + 12) & 0xFF;
             if (loopCount > 0 && chunk_size >= 60) {
-                uint32_t loopType = read_le32(body + 40);
-                uint32_t loopStart = read_le32(body + 44);
-                uint32_t loopEnd = read_le32(body + 48);
+                uint32_t loopType = PV_ReadLE32(body + 40);
+                uint32_t loopStart = PV_ReadLE32(body + 44);
+                uint32_t loopEnd = PV_ReadLE32(body + 48);
                 if (loopEnd >= loopStart) {
                     wave->sample.loopMode = loopType == 0 ? DLS_LOOP_FORWARD : DLS_LOOP_NONE;
                     wave->sample.loopStart = loopStart;
@@ -940,7 +924,7 @@ static OPErr DLS_Parse_Wave_Data(const uint8_t* chunk_start, const uint8_t* chun
                     wave->sample.loopUntilRelease = false;
                 }
             }
-        } else if (id == read_chunk_id((const uint8_t*)"inst") && chunk_size >= 7) {
+        } else if (id == PV_ReadLE32((const uint8_t*)"inst") && chunk_size >= 7) {
             wave->sample.present = true;
             wave->sample.unityNote = body[0];
             wave->sample.fineTuneCents = (int8_t)body[1];
@@ -1177,7 +1161,7 @@ static void DLS_ApplyDirectConnection(DLS_Articulation* art, const DLS_Connectio
 
 static OPErr DLS_Parse_ArticulationChunk(const uint8_t* body, uint32_t size, DLS_Articulation* art) {
     if (size < 8) return BAD_FILE_TYPE;
-    uint32_t count = read_le32(body + 4);
+    uint32_t count = PV_ReadLE32(body + 4);
     uint32_t connBytes;
     if (!dls_mul_u32_ok(count, 12, &connBytes)) return BAD_FILE_TYPE;
     if (connBytes > size - 8) return BAD_FILE_TYPE;
@@ -1193,11 +1177,11 @@ static OPErr DLS_Parse_ArticulationChunk(const uint8_t* body, uint32_t size, DLS
         for (uint32_t i = 0; i < count; i++) {
             const uint8_t* p = body + 8 + i * 12;
             DLS_Connection* connection = &connections[art->connectionCount + i];
-            connection->source = read_le16(p);
-            connection->control = read_le16(p + 2);
-            connection->destination = read_le16(p + 4);
-            connection->transform = read_le16(p + 6);
-            connection->scale = (int32_t)read_le32(p + 8);
+            connection->source = PV_ReadLE16(p);
+            connection->control = PV_ReadLE16(p + 2);
+            connection->destination = PV_ReadLE16(p + 4);
+            connection->transform = PV_ReadLE16(p + 6);
+            connection->scale = (int32_t)PV_ReadLE32(p + 8);
             DLS_ApplyDirectConnection(art, connection, g_use_mobilebae_quirks);
             /* refreshed later per-synth via dls_refresh_current_synth_for_mode() */
         }
@@ -1210,12 +1194,12 @@ static OPErr DLS_Parse_ArticulationChunk(const uint8_t* body, uint32_t size, DLS
 static OPErr DLS_Parse_ArticulationList(const uint8_t* start, const uint8_t* end, DLS_Articulation* art) {
     const uint8_t* p = start;
     while (p + 8 <= end) {
-        uint32_t id = read_chunk_id(p);
-        uint32_t size = read_le32(p + 4);
+        uint32_t id = PV_ReadLE32(p);
+        uint32_t size = PV_ReadLE32(p + 4);
         const uint8_t* body = p + 8;
         uint32_t padded_size = (size + 1) & ~1;
         
-        if (id == CHUNK_ART1 || id == read_chunk_id((const uint8_t*)"art2")) {
+        if (id == CHUNK_ART1 || id == PV_ReadLE32((const uint8_t*)"art2")) {
             DLS_Parse_ArticulationChunk(body, size, art);
         }
         p += 8 + padded_size;
@@ -1237,38 +1221,38 @@ static OPErr DLS_Parse_Region(const uint8_t* start, const uint8_t* end, bool lev
     
     const uint8_t* p = start;
     while (p + 8 <= end) {
-        uint32_t id = read_chunk_id(p);
-        uint32_t size = read_le32(p + 4);
+        uint32_t id = PV_ReadLE32(p);
+        uint32_t size = PV_ReadLE32(p + 4);
         const uint8_t* body = p + 8;
         uint32_t padded_size = (size + 1) & ~1;
         if (body + padded_size > end) break;
         
         if (id == CHUNK_RGNH && size >= 12) {
-            region->keyLow = read_le16(body);
-            region->keyHigh = read_le16(body + 2);
-            region->velocityLow = read_le16(body + 4);
-            region->velocityHigh = read_le16(body + 6);
-            region->options = read_le16(body + 8);
-            region->keyGroup = read_le16(body + 10);
-        } else if (id == read_chunk_id((const uint8_t*)"wlnk") && size >= 12) {
-            region->channel = read_le32(body + 4);
-            region->tableIndex = read_le32(body + 8);
+            region->keyLow = PV_ReadLE16(body);
+            region->keyHigh = PV_ReadLE16(body + 2);
+            region->velocityLow = PV_ReadLE16(body + 4);
+            region->velocityHigh = PV_ReadLE16(body + 6);
+            region->options = PV_ReadLE16(body + 8);
+            region->keyGroup = PV_ReadLE16(body + 10);
+        } else if (id == PV_ReadLE32((const uint8_t*)"wlnk") && size >= 12) {
+            region->channel = PV_ReadLE32(body + 4);
+            region->tableIndex = PV_ReadLE32(body + 8);
         } else if (id == CHUNK_WSMP) {
             if (size >= 20) {
                 region->sample.present = true;
-                region->sample.unityNote = read_le16(body + 4);
-                region->sample.fineTuneCents = (int16_t)read_le16(body + 6);
-                region->sample.attenuation = (int32_t)read_le32(body + 8);
-                uint32_t cSampleLoops = read_le32(body + 16);
+                region->sample.unityNote = PV_ReadLE16(body + 4);
+                region->sample.fineTuneCents = (int16_t)PV_ReadLE16(body + 6);
+                region->sample.attenuation = (int32_t)PV_ReadLE32(body + 8);
+                uint32_t cSampleLoops = PV_ReadLE32(body + 16);
                 region->sample.loopMode = DLS_LOOP_NONE;
                 region->sample.loopStart = 0;
                 region->sample.loopEndInclusive = -1;
                 region->sample.loopUntilRelease = false;
                 if (cSampleLoops > 0 && size >= 20 + cSampleLoops * 16) {
                     const uint8_t* loop = body + 20;
-                    uint32_t loopType = read_le32(loop + 4);
-                    uint32_t loopStart = read_le32(loop + 8);
-                    uint32_t loopLength = read_le32(loop + 12);
+                    uint32_t loopType = PV_ReadLE32(loop + 4);
+                    uint32_t loopStart = PV_ReadLE32(loop + 8);
+                    uint32_t loopLength = PV_ReadLE32(loop + 12);
                     if (loopLength != 0) {
                         region->sample.loopStart = loopStart;
                         region->sample.loopEndInclusive = (int32_t)(loopStart + loopLength - 1);
@@ -1277,7 +1261,7 @@ static OPErr DLS_Parse_Region(const uint8_t* start, const uint8_t* end, bool lev
                     }
                 }
             }
-        } else if (id == CHUNK_LIST && size >= 4 && (read_chunk_id(body) == CHUNK_LART || read_chunk_id(body) == read_chunk_id((const uint8_t*)"lar2"))) {
+        } else if (id == CHUNK_LIST && size >= 4 && (PV_ReadLE32(body) == CHUNK_LART || PV_ReadLE32(body) == PV_ReadLE32((const uint8_t*)"lar2"))) {
             region->ownsArticulation = true;
             DLS_Parse_ArticulationList(body + 4, body + size, &region->articulation);
         }
@@ -1291,16 +1275,16 @@ static OPErr DLS_Parse_Regions(const uint8_t* start, const uint8_t* end, DLS_Ins
     uint32_t index = 0;
     const uint8_t* p = start;
     while (p + 8 <= end && index < inst->regionCount) {
-        uint32_t id = read_chunk_id(p);
-        uint32_t size = read_le32(p + 4);
+        uint32_t id = PV_ReadLE32(p);
+        uint32_t size = PV_ReadLE32(p + 4);
         const uint8_t* body = p + 8;
         uint32_t padded_size = (size + 1) & ~1;
         if (body + padded_size > end) break;
         
         if (id == CHUNK_LIST && size >= 4) {
-            uint32_t list_type = read_chunk_id(body);
-            if (list_type == read_chunk_id((const uint8_t*)"rgn ") || list_type == read_chunk_id((const uint8_t*)"rgn2")) {
-                DLS_Parse_Region(body + 4, body + size, list_type == read_chunk_id((const uint8_t*)"rgn2"), &inst->regions[index]);
+            uint32_t list_type = PV_ReadLE32(body);
+            if (list_type == PV_ReadLE32((const uint8_t*)"rgn ") || list_type == PV_ReadLE32((const uint8_t*)"rgn2")) {
+                DLS_Parse_Region(body + 4, body + size, list_type == PV_ReadLE32((const uint8_t*)"rgn2"), &inst->regions[index]);
                 inst->regions[index].index = index;
                 index++;
             }
@@ -1384,16 +1368,16 @@ static OPErr DLS_Parse_Instrument(const uint8_t* start, const uint8_t* end, DLS_
 
     const uint8_t* p = start;
     while (p + 8 <= end) {
-        uint32_t id = read_chunk_id(p);
-        uint32_t size = read_le32(p + 4);
+        uint32_t id = PV_ReadLE32(p);
+        uint32_t size = PV_ReadLE32(p + 4);
         const uint8_t* body = p + 8;
         uint32_t padded_size = (size + 1) & ~1;
         if (body + padded_size > end) break;
         
         if (id == CHUNK_INSH && size >= 12) {
-            declaredRegions = read_le32(body);
-            inst->rawBank = read_le32(body + 4);
-            inst->rawInstrument = read_le32(body + 8);
+            declaredRegions = PV_ReadLE32(body);
+            inst->rawBank = PV_ReadLE32(body + 4);
+            inst->rawInstrument = PV_ReadLE32(body + 8);
             inst->program = inst->rawInstrument & 0x7F;
             inst->drum = (inst->rawBank & 0x80000000) != 0;
             inst->rawMode = DLS_InstrumentUsesRawSelector(bank, inst->rawBank);
@@ -1409,11 +1393,11 @@ static OPErr DLS_Parse_Instrument(const uint8_t* start, const uint8_t* end, DLS_
                     XSetMemory(inst->regions, declaredRegions * sizeof(DLS_Region), 0);
                 }
             }
-        } else if (id == CHUNK_LIST && size >= 4 && read_chunk_id(body) == CHUNK_LRGN) {
+        } else if (id == CHUNK_LIST && size >= 4 && PV_ReadLE32(body) == CHUNK_LRGN) {
             if (inst->regions) {
                 DLS_Parse_Regions(body + 4, body + size, inst);
             }
-        } else if (id == CHUNK_LIST && size >= 4 && (read_chunk_id(body) == CHUNK_LART || read_chunk_id(body) == read_chunk_id((const uint8_t*)"lar2"))) {
+        } else if (id == CHUNK_LIST && size >= 4 && (PV_ReadLE32(body) == CHUNK_LART || PV_ReadLE32(body) == PV_ReadLE32((const uint8_t*)"lar2"))) {
             DLS_Parse_ArticulationList(body + 4, body + size, &inst->articulation);
         }
 
@@ -1436,13 +1420,13 @@ static OPErr DLS_Parse_Lins(DLS_ParserState* state, DLS_Bank* bank) {
     uint32_t index = 0;
     const uint8_t* p = state->start;
     while (p + 8 <= state->end && index < bank->declaredInstrumentCount) {
-        uint32_t id = read_chunk_id(p);
-        uint32_t size = read_le32(p + 4);
+        uint32_t id = PV_ReadLE32(p);
+        uint32_t size = PV_ReadLE32(p + 4);
         const uint8_t* body = p + 8;
         uint32_t padded_size = (size + 1) & ~1;
         if (body + padded_size > state->end) break;
         
-        if (id == CHUNK_LIST && size >= 4 && read_chunk_id(body) == CHUNK_INS) {
+        if (id == CHUNK_LIST && size >= 4 && PV_ReadLE32(body) == CHUNK_INS) {
             DLS_Parse_Instrument(body + 4, body + size, bank, &bank->instruments[index]);
             index++;
         }
@@ -1466,7 +1450,7 @@ static int32_t DLS_pgalBankLsb(uint16_t bank) {
 
 static OPErr DLS_Parse_Pgal(const uint8_t* body, uint32_t size, DLS_Bank* bank) {
     /* Detect PGAL version by checking marker at offset 0 */
-    uint32_t versionMarker = size >= 4 ? read_le32(body) : (uint32_t)-1;
+    uint32_t versionMarker = size >= 4 ? PV_ReadLE32(body) : (uint32_t)-1;
     uint32_t version = 0;
     uint32_t tableOffset = 0;
     uint32_t countOffset = 0;
@@ -1488,7 +1472,7 @@ static OPErr DLS_Parse_Pgal(const uint8_t* body, uint32_t size, DLS_Bank* bank) 
     
     if (recordOffset > size) return NO_ERR;
     
-    uint32_t count = read_le32(body + countOffset);
+    uint32_t count = PV_ReadLE32(body + countOffset);
     if (count == 0 || recordOffset + count * 8 != size) return NO_ERR;
     
     /* Parse percussion key aliases table (128 bytes at tableOffset) */
@@ -1504,10 +1488,10 @@ static OPErr DLS_Parse_Pgal(const uint8_t* body, uint32_t size, DLS_Bank* bank) 
 
     for (uint32_t i = 0; i < count; i++) {
         const uint8_t* p = body + recordOffset + i * 8;
-        uint16_t fromBank = read_le16(p);
-        uint16_t fromProgram = read_le16(p + 2) & 0x7F;
-        uint16_t toBank = read_le16(p + 4);
-        uint16_t toProgram = read_le16(p + 6) & 0x7F;
+        uint16_t fromBank = PV_ReadLE16(p);
+        uint16_t fromProgram = PV_ReadLE16(p + 2) & 0x7F;
+        uint16_t toBank = PV_ReadLE16(p + 4);
+        uint16_t toProgram = PV_ReadLE16(p + 6) & 0x7F;
         
         /* Apply legacy bank conversion for old PGAL formats */
         if (version < 2) {
@@ -1550,7 +1534,7 @@ static OPErr DLS_Parse_Wvpl(DLS_ParserState* state, DLS_Bank* bank, uint32_t* po
         const uint8_t* p = state->start;
         while (p + 8 <= state->end) {
             if (looks_like_wave_chunk(p, state->end)) count++;
-            uint32_t chunk_size = read_le32(p + 4);
+            uint32_t chunk_size = PV_ReadLE32(p + 4);
             p += 8 + ((chunk_size + 1) & ~1);
         }
         
@@ -1567,7 +1551,7 @@ static OPErr DLS_Parse_Wvpl(DLS_ParserState* state, DLS_Bank* bank, uint32_t* po
                     DLS_Parse_Wave_Data(p, state->end, index, &bank->waves[index]);
                     index++;
                 }
-                uint32_t chunk_size = read_le32(p + 4);
+                uint32_t chunk_size = PV_ReadLE32(p + 4);
                 p += 8 + ((chunk_size + 1) & ~1);
             }
         }
@@ -1596,21 +1580,21 @@ OPErr GM_LoadDLSBankFromMemory(void* pMemory, uint32_t memorySize, DLS_Bank** pp
         return BAD_FILE_TYPE;
     }
 
-    uint32_t riff_id = read_chunk_id(root_state.pos);
+    uint32_t riff_id = PV_ReadLE32(root_state.pos);
     if (riff_id != CHUNK_RIFF) {
         GM_UnloadDLSBank(bank);
         *ppBank = NULL;
         return BAD_FILE_TYPE;
     }
     
-    // uint32_t riff_size = read_le32(root_state.pos + 4);
-    uint32_t dls_id = read_chunk_id(root_state.pos + 8);
-    if (dls_id != CHUNK_DLS && dls_id != read_chunk_id((const uint8_t*)"DLSM")) {
+    // uint32_t riff_size = PV_ReadLE32(root_state.pos + 4);
+    uint32_t dls_id = PV_ReadLE32(root_state.pos + 8);
+    if (dls_id != CHUNK_DLS && dls_id != PV_ReadLE32((const uint8_t*)"DLSM")) {
         GM_UnloadDLSBank(bank);
         *ppBank = NULL;
         return BAD_FILE_TYPE;
     }
-    bank->isDLSM = dls_id == read_chunk_id((const uint8_t*)"DLSM");
+    bank->isDLSM = dls_id == PV_ReadLE32((const uint8_t*)"DLSM");
 
     root_state.pos += 12;
 
@@ -1620,8 +1604,8 @@ OPErr GM_LoadDLSBankFromMemory(void* pMemory, uint32_t memorySize, DLS_Bank** pp
     DLS_ParserState pgal_state = {NULL, NULL, NULL};
 
     while (root_state.pos + 8 <= root_state.end) {
-        uint32_t chunk_id = read_chunk_id(root_state.pos);
-        uint32_t chunk_size = read_le32(root_state.pos + 4);
+        uint32_t chunk_id = PV_ReadLE32(root_state.pos);
+        uint32_t chunk_size = PV_ReadLE32(root_state.pos + 4);
         const uint8_t* chunk_data = root_state.pos + 8;
         
         // chunk sizes are padded to even length
@@ -1629,7 +1613,7 @@ OPErr GM_LoadDLSBankFromMemory(void* pMemory, uint32_t memorySize, DLS_Bank** pp
         if (chunk_data + padded_size > root_state.end) break;
         
         if (chunk_id == CHUNK_LIST) {
-            uint32_t list_type = read_chunk_id(chunk_data);
+            uint32_t list_type = PV_ReadLE32(chunk_data);
             if (list_type == CHUNK_LINS) {
                 lins_state.start = chunk_data + 4;
                 lins_state.pos = chunk_data + 4;
@@ -1643,12 +1627,12 @@ OPErr GM_LoadDLSBankFromMemory(void* pMemory, uint32_t memorySize, DLS_Bank** pp
             ptbl_state.start = chunk_data;
             ptbl_state.pos = chunk_data;
             ptbl_state.end = chunk_data + chunk_size;
-        } else if (chunk_id == read_chunk_id((const uint8_t*)"pgal")) {
+        } else if (chunk_id == PV_ReadLE32((const uint8_t*)"pgal")) {
             pgal_state.start = chunk_data;
             pgal_state.pos = chunk_data;
             pgal_state.end = chunk_data + chunk_size;
-        } else if (chunk_id == read_chunk_id((const uint8_t*)"colh")) {
-            bank->declaredInstrumentCount = read_le32(chunk_data);
+        } else if (chunk_id == PV_ReadLE32((const uint8_t*)"colh")) {
+            bank->declaredInstrumentCount = PV_ReadLE32(chunk_data);
             if (bank->declaredInstrumentCount > 0) {
                 bank->instruments = (DLS_Instrument*)XNewPtr((int32_t)(bank->declaredInstrumentCount * sizeof(DLS_Instrument)));
                 if (bank->instruments) {
@@ -1665,7 +1649,7 @@ OPErr GM_LoadDLSBankFromMemory(void* pMemory, uint32_t memorySize, DLS_Bank** pp
 
     if (ptbl_state.start && ptbl_state.end - ptbl_state.start >= 8) {
         uint32_t cueBytes = 0;
-        poolOffsetCount = read_le32(ptbl_state.start + 4);
+        poolOffsetCount = PV_ReadLE32(ptbl_state.start + 4);
         if (!dls_mul_u32_ok(poolOffsetCount, 4, &cueBytes)) {
             poolOffsetCount = 0;
         }
@@ -1673,7 +1657,7 @@ OPErr GM_LoadDLSBankFromMemory(void* pMemory, uint32_t memorySize, DLS_Bank** pp
             poolOffsets = (uint32_t*)XNewPtr(poolOffsetCount * sizeof(uint32_t));
             if (poolOffsets) {
                 for(uint32_t i=0; i<poolOffsetCount; i++) {
-                    poolOffsets[i] = read_le32(ptbl_state.start + 8 + i*4);
+                    poolOffsets[i] = PV_ReadLE32(ptbl_state.start + 8 + i*4);
                 }
             }
         }
@@ -2329,13 +2313,9 @@ static const DLS_Connection g_dlsv2_default_connections[] = {
 static const size_t g_dlsv2_default_connections_count = sizeof(g_dlsv2_default_connections) / sizeof(g_dlsv2_default_connections[0]);
 static const size_t g_dls_default_connections_count = sizeof(g_dls_default_connections) / sizeof(g_dls_default_connections[0]);
 
-static bool dls_connection_matches(const DLS_Connection* a, const DLS_Connection* b) {
-    return a->source == b->source && a->control == b->control && a->destination == b->destination;
-}
-
 static bool dls_has_connection(const DLS_Articulation* art, const DLS_Connection* candidate) {
     for (uint32_t i = 0; i < art->connectionCount; i++) {
-        if (dls_connection_matches(&art->runtimeConnections[i], candidate)) return true;
+        if (dls_parse_connection_same_key(&art->runtimeConnections[i], candidate)) return true;
     }
     return false;
 }

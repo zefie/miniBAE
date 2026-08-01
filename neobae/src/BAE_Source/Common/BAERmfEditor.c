@@ -810,14 +810,6 @@ static bool PV_IsMpegCompression(BAERmfEditorCompressionType ct)
     }
 }
 
-static uint32_t PV_ReadLE32(unsigned char const *p)
-{
-    return ((uint32_t)p[0]) |
-           (((uint32_t)p[1]) << 8) |
-           (((uint32_t)p[2]) << 16) |
-           (((uint32_t)p[3]) << 24);
-}
-
 static uint32_t PV_ExtractOpusInputRateFromOriginalSnd(BAERmfEditorSample const *sample)
 {
     XSndHeader3 const *hdr3;

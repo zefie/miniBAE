@@ -14643,3 +14643,13 @@ bool BAEMixer_IsAudioTailActive(BAEMixer mixer)
     if (!mixer->pMixer) return FALSE;
     return GM_IsAudioTailActive(mixer->pMixer) ? TRUE : FALSE;
 }
+
+uint16_t PV_ReadLE16(const unsigned char *p)
+{
+    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+}
+
+uint32_t PV_ReadLE32(const unsigned char *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
