@@ -93,37 +93,6 @@ static bool PV_IsLikelyZlibHeader(const unsigned char *buf, uint32_t len, uint32
     return TRUE;
 }
 
-// If region holds a RIFF 'RMID' container, locate 'data' chunk and return SMF bytes
-static bool PV_ExtractRMIDToSMF(const unsigned char *buf, uint32_t len, const unsigned char **outSmf, uint32_t *outSmfLen)
-{
-    if (!buf || len < 12) return FALSE;
-    if (!(buf[0]=='R'&&buf[1]=='I'&&buf[2]=='F'&&buf[3]=='F')) return FALSE;
-    uint32_t riffSize = (uint32_t)buf[4] | ((uint32_t)buf[5]<<8) | ((uint32_t)buf[6]<<16) | ((uint32_t)buf[7]<<24);
-    if (riffSize > (len - 8)) return FALSE;
-    if (!(buf[8]=='R'&&buf[9]=='M'&&buf[10]=='I'&&buf[11]=='D')) return FALSE;
-    uint32_t i = 12;
-    while (i + 8 <= len)
-    {
-        const unsigned char *ch = buf + i;
-        uint32_t csize = (uint32_t)ch[4] | ((uint32_t)ch[5]<<8) | ((uint32_t)ch[6]<<16) | ((uint32_t)ch[7]<<24);
-        if (csize > (len - i - 8)) break;
-        if (ch[0]=='d'&&ch[1]=='a'&&ch[2]=='t'&&ch[3]=='a')
-        {
-            if (outSmf) *outSmf = ch + 8;
-            if (outSmfLen) *outSmfLen = csize;
-            return TRUE;
-        }
-        // chunks are word-aligned
-        i += 8 + csize;
-        if (i & 1)
-        {
-            if (i == 0xFFFFFFFFu) break;
-            i++;
-        }
-    }
-    return FALSE;
-}
-
 static XPTR PV_GetFileAsData(XFILENAME *pFile, int32_t *pSize)
 {
     XPTR data;

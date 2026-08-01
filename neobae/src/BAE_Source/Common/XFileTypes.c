@@ -92,23 +92,11 @@
 #define OGG_OPUS_MAGIC      0x4F707573  // "Opus" - Opus identification header
 
 // Function prototypes for internal helpers
-static uint32_t PV_ReadBigEndian32(const unsigned char *data);
 static BAEFileType PV_DetectRIFFType(const unsigned char *buffer, int32_t bufferSize);
 static BAEFileType PV_DetectOGGType(const unsigned char *buffer, int32_t bufferSize);
 static int PV_IsLikelyMPEGHeader(const unsigned char *header);
 static int PV_StartsWithNoCase(const unsigned char *data, int32_t length, const char *needle);
 static int PV_IsLikelyRTTTL(const unsigned char *data, int32_t length);
-
-/**
- * Read a 32-bit big-endian value from a buffer
- */
-static uint32_t PV_ReadBigEndian32(const unsigned char *data)
-{
-    return ((uint32_t)data[0] << 24) |
-           ((uint32_t)data[1] << 16) |
-           ((uint32_t)data[2] << 8) |
-           ((uint32_t)data[3]);
-}
 
 /**
  * Detect specific RIFF file subtypes (WAV, RMI)
@@ -121,7 +109,7 @@ static BAEFileType PV_DetectRIFFType(const unsigned char *buffer, int32_t buffer
         return BAE_INVALID_TYPE;
     
     // Read the RIFF subtype at offset 8
-    subtype = PV_ReadBigEndian32(&buffer[8]);
+    subtype = PV_ReadBE32(&buffer[8]);
     
     switch (subtype)
     {
@@ -135,9 +123,9 @@ static BAEFileType PV_DetectRIFFType(const unsigned char *buffer, int32_t buffer
             {
                 for (int i = 12; i < bufferSize - 8; i += 4)
                 {
-                    if (PV_ReadBigEndian32(&buffer[i]) == 0x64617461 && // "data"
+                    if (PV_ReadBE32(&buffer[i]) == 0x64617461 && // "data"
                         i + 12 < bufferSize &&
-                        PV_ReadBigEndian32(&buffer[i + 8]) == BAE_FOURCC_MIDI)
+                        PV_ReadBE32(&buffer[i + 8]) == BAE_FOURCC_MIDI)
                     {
                         return BAE_RMI; // RMI files are treated as MIDI
                     }
@@ -185,7 +173,7 @@ static BAEFileType PV_DetectOGGType(const unsigned char *buffer, int32_t bufferS
         if (payloadOffset + 8 <= bufferSize)
         {
 #if USE_VORBIS_DECODER == TRUE || USE_FLAC_DECODER == TRUE || USE_OPUS_DECODER == TRUE
-            uint32_t magic = PV_ReadBigEndian32(&buffer[payloadOffset]);
+            uint32_t magic = PV_ReadBE32(&buffer[payloadOffset]);
 #endif
             
 #if USE_VORBIS_DECODER == TRUE
@@ -225,7 +213,7 @@ static BAEFileType PV_DetectOGGType(const unsigned char *buffer, int32_t bufferS
         offset = payloadOffset + payloadSize;
         while (offset + 4 <= bufferSize)
         {
-            if (PV_ReadBigEndian32(&buffer[offset]) == BAE_FOURCC_OGGS)
+            if (PV_ReadBE32(&buffer[offset]) == BAE_FOURCC_OGGS)
                 break;
             offset++;
         }
@@ -627,7 +615,7 @@ BAEFileType X_DetermineFileTypeByData(const unsigned char *data, int32_t length)
     }
 #endif
     // Read the first FOURCC
-    fourcc = PV_ReadBigEndian32(data);
+    fourcc = PV_ReadBE32(data);
     // Skip leading null bytes (up to 1024 bytes)
     if (fourcc == 0)
     {
@@ -635,13 +623,13 @@ BAEFileType X_DetermineFileTypeByData(const unsigned char *data, int32_t length)
         offset += 4;
         while (offset + 4 <= length && offset < 1024)
         {
-            fourcc = PV_ReadBigEndian32(&data[offset]);
+            fourcc = PV_ReadBE32(&data[offset]);
             if (fourcc != 0) {
                 // read next bytes until we get a full FOURCC
                 while (data[offset] == 0) {
                     offset++;
                 }
-                fourcc = PV_ReadBigEndian32(&data[offset]);
+                fourcc = PV_ReadBE32(&data[offset]);
                 break;
             }                
             offset += 4;
@@ -686,7 +674,7 @@ BAEFileType X_DetermineFileTypeByData(const unsigned char *data, int32_t length)
             // IFF container, check subtype
             if (length >= 12)
             {
-                uint32_t subtype = PV_ReadBigEndian32(&data[8]);
+                uint32_t subtype = PV_ReadBE32(&data[8]);
                 if (subtype == BAE_FOURCC_AIFF)
                     return BAE_AIFF_TYPE;
             }

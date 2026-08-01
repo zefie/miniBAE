@@ -75,56 +75,7 @@ static bool PV_MatchFourCC(const unsigned char *p, const char *fourcc)
             p[2] == fourcc[2] && p[3] == fourcc[3]);
 }
 
-/**
- * PV_ExtractRMIDToSMF
- * 
- * Extract Standard MIDI File data from a RIFF RMID container.
- * Searches for the 'data' chunk which contains the raw MIDI data.
- * 
- * @param buf       Pointer to RMI file data in memory
- * @param len       Length of the RMI file data
- * @param outSmf    Pointer to receive the SMF data pointer (within buf)
- * @param outSmfLen Pointer to receive the SMF data length
- * @return TRUE if MIDI data was successfully extracted, FALSE otherwise
- */
-static bool PV_ExtractRMIDToSMF(const unsigned char *buf, uint32_t len, 
-                                  const unsigned char **outSmf, uint32_t *outSmfLen)
-{
-    if (!buf || len < 12) return FALSE;
-    
-    // Check for RIFF header
-    if (!PV_MatchFourCC(buf, "RIFF")) return FALSE;
-    
-    uint32_t riffSize = PV_ReadLE32(&buf[4]);
-    if (riffSize + 8 > len) return FALSE;
-    
-    // Check for RMID type
-    if (!PV_MatchFourCC(&buf[8], "RMID")) return FALSE;
-    
-    // Parse chunks to find 'data' chunk
-    uint32_t i = 12;
-    while (i + 8 <= len)
-    {
-        const unsigned char *chunk = buf + i;
-        uint32_t chunkSize = PV_ReadLE32(&chunk[4]);
-        
-        if (i + 8 + chunkSize > len) break;
-        
-        if (PV_MatchFourCC(chunk, "data"))
-        {
-            // Found MIDI data chunk
-            if (outSmf) *outSmf = chunk + 8;
-            if (outSmfLen) *outSmfLen = chunkSize;
-            return TRUE;
-        }
-        
-        // Move to next chunk (chunks are word-aligned)
-        i += 8 + chunkSize;
-        if (i & 1) i++;
-    }
-    
-    return FALSE;
-}
+
 
 /**
  * PV_FindSoundbankInRMI

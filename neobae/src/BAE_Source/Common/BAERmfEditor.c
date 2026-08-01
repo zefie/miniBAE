@@ -1702,8 +1702,6 @@ static BAEResult PV_CreatePascalName(char const *source, char outName[256]);
 static BAEResult PV_GrowBuffer(void **buffer, uint32_t *capacity, uint32_t elementSize, uint32_t minimumCount);
 static void PV_ClearTempoEvents(BAERmfEditorDocument *document);
 static BAEResult PV_AddTempoEvent(BAERmfEditorDocument *document, uint32_t tick, uint32_t microsecondsPerQuarter);
-static uint16_t PV_ReadBE16(unsigned char const *data);
-static uint32_t PV_ReadBE32(unsigned char const *data);
 static BAEResult PV_ReadVLQ(unsigned char const *data, uint32_t dataSize, uint32_t *ioOffset, uint32_t *outValue);
 static BAEResult PV_AddCCEventToTrack(BAERmfEditorTrack *track, uint32_t tick, unsigned char cc, unsigned char value, unsigned char data2);
 static BAEResult PV_AddSysExEventToTrack(BAERmfEditorTrack *track, uint32_t tick, unsigned char status, unsigned char const *data, uint32_t size);
@@ -3717,19 +3715,6 @@ static BAEResult PV_CreatePascalName(char const *source, char outName[256])
         XBlockMove(source, outName + 1, (int32_t)length);
     }
     return BAE_NO_ERROR;
-}
-
-static uint16_t PV_ReadBE16(unsigned char const *data)
-{
-    return (uint16_t)(((uint16_t)data[0] << 8) | (uint16_t)data[1]);
-}
-
-static uint32_t PV_ReadBE32(unsigned char const *data)
-{
-    return ((uint32_t)data[0] << 24) |
-           ((uint32_t)data[1] << 16) |
-           ((uint32_t)data[2] << 8) |
-           (uint32_t)data[3];
 }
 
 static BAEResult PV_ReadVLQ(unsigned char const *data, uint32_t dataSize, uint32_t *ioOffset, uint32_t *outValue)

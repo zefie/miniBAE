@@ -441,17 +441,27 @@ static bool PV_IsSndResourceType(XResourceType resourceType)
     return (resourceType == ID_SND || resourceType == ID_CSND || resourceType == ID_ESND) ? TRUE : FALSE;
 }
 
-static uint16_t PV_ReadBE16(unsigned char const *p)
+uint16_t PV_ReadBE16(unsigned char const *p)
 {
     return (uint16_t)(((uint16_t)p[0] << 8) | (uint16_t)p[1]);
 }
 
-static uint32_t PV_ReadBE32(unsigned char const *p)
+uint32_t PV_ReadBE32(unsigned char const *p)
 {
     return ((uint32_t)p[0] << 24) |
            ((uint32_t)p[1] << 16) |
            ((uint32_t)p[2] << 8) |
            (uint32_t)p[3];
+}
+
+uint16_t PV_ReadLE16(const unsigned char *p)
+{
+    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+}
+
+uint32_t PV_ReadLE32(const unsigned char *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
 }
 
 static void PV_WriteBE16(unsigned char *p, uint16_t value)

@@ -3906,8 +3906,8 @@ AudioStream BAE_GetAudioStream(void);
 void raylib_audio_callback(void *bufferData, unsigned int frames);
 #endif
 
-uint16_t PV_ReadLE16(const unsigned char *p);
-uint32_t PV_ReadLE32(const unsigned char *p);
+bool PV_ExtractRMIDToSMF(const unsigned char *buf, uint32_t len,
+                         const unsigned char **outSmf, uint32_t *outSmfLen);
 
 #ifdef __cplusplus
 } // extern "C"

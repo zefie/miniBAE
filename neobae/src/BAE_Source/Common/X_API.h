@@ -1007,6 +1007,11 @@ uint32_t       XGetLong(void const* address);
 void                XPutShort(void *address, uint16_t value);
 void                XPutLong(void *address, uint32_t value);
 
+uint16_t      PV_ReadBE16(unsigned char const *data);
+uint32_t      PV_ReadBE32(unsigned char const *data);
+uint16_t      PV_ReadLE16(const unsigned char *p);
+uint32_t      PV_ReadLE32(const unsigned char *p);
+
 // These will swap bytes no matter the byte order
 uint16_t      XSwapShort(uint16_t value);
 uint32_t       XSwapLong(uint32_t value);

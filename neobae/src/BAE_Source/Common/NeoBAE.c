@@ -14644,12 +14644,36 @@ bool BAEMixer_IsAudioTailActive(BAEMixer mixer)
     return GM_IsAudioTailActive(mixer->pMixer) ? TRUE : FALSE;
 }
 
-uint16_t PV_ReadLE16(const unsigned char *p)
+bool PV_ExtractRMIDToSMF(const unsigned char *buf, uint32_t len,
+                          const unsigned char **outSmf, uint32_t *outSmfLen)
 {
-    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
-}
+    if (!buf || len < 12) return FALSE;
 
-uint32_t PV_ReadLE32(const unsigned char *p)
-{
-    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+    if (!(buf[0] == 'R' && buf[1] == 'I' && buf[2] == 'F' && buf[3] == 'F')) return FALSE;
+
+    uint32_t riffSize = PV_ReadLE32(&buf[4]);
+    if (riffSize + 8 > len) return FALSE;
+
+    if (!(buf[8] == 'R' && buf[9] == 'M' && buf[10] == 'I' && buf[11] == 'D')) return FALSE;
+
+    uint32_t i = 12;
+    while (i + 8 <= len)
+    {
+        const unsigned char *chunk = buf + i;
+        uint32_t chunkSize = PV_ReadLE32(&chunk[4]);
+
+        if (i + 8 + chunkSize > len) break;
+
+        if (chunk[0] == 'd' && chunk[1] == 'a' && chunk[2] == 't' && chunk[3] == 'a')
+        {
+            if (outSmf) *outSmf = chunk + 8;
+            if (outSmfLen) *outSmfLen = chunkSize;
+            return TRUE;
+        }
+
+        i += 8 + chunkSize;
+        if (i & 1) i++;
+    }
+
+    return FALSE;
 }
