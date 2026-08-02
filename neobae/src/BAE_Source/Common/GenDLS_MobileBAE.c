@@ -90,21 +90,30 @@ static bool dls_bank_quirks(const DLS_Bank* bank) {
     return g_use_mobilebae_quirks;
 }
 
-/* Gain path for microQ/eggs banks must match MobileBAE quirks even under
- * -dlscompat: quirks ignores positive CONN_DST_ATTENUATION, so unipolar
- * LFO→ATTEN does not park notes at a constant quieting offset. */
-static bool dls_bank_gain_quirks(const DLS_Bank* bank) {
-    if (bank && bank->eggsArticulators) return true;
-    return dls_bank_quirks(bank);
+static bool dls_synth_has_eggs_bank(const DLS_Synth* synth) {
+    if (!synth) return false;
+    if (synth->banks[0] && synth->banks[0]->eggsArticulators) return true;
+    if (synth->banks[1] && synth->banks[1]->eggsArticulators) return true;
+    return false;
 }
 
 static bool dls_bank_spmidi(const DLS_Bank* bank) {
+    /* microQ/eggs banks are incomplete GM sets; SP-MIDI substitute patches
+     * (e.g. Glint PC1→0, PC24→17) change arrangement vs MobileBAE silence. */
+    if (bank && bank->eggsArticulators) return false;
     return !dls_bank_quirks(bank);
 }
 
 static bool dls_synth_quirks(const DLS_Synth* synth) {
     if (!synth) return g_use_mobilebae_quirks;
     return synth->useQuirks;
+}
+
+/* microQ: MobileBAE voice policy even under -dlscompat — held-voice steal
+ * only from ch9 (protects melodic FX like Glint ch6 prog 100). */
+static bool dls_synth_mobile_voice_mgmt(const DLS_Synth* synth) {
+    if (dls_synth_quirks(synth)) return true;
+    return dls_synth_has_eggs_bank(synth);
 }
 
 static int32_t dls_synth_voice_limit(const DLS_Synth* synth) {
@@ -2925,11 +2934,9 @@ static int32_t dls_note_on_connection_value_q16(const DLS_Connection* connection
         return 0;
     }
 
-    bool gainQuirks = ch && ch->selectedInstrument
-        ? dls_bank_gain_quirks(ch->selectedInstrument->parentBank)
-        : g_use_mobilebae_quirks;
+    bool quirks = ch && ch->selectedInstrument ? dls_bank_quirks(ch->selectedInstrument->parentBank) : g_use_mobilebae_quirks;
 
-    if (!gainQuirks && (connection->transform & 0x8000)) {
+    if (!quirks && (connection->transform & 0x8000)) {
         source = velocity;
     } else if (connection->transform & 0x8000) {
         source = 127 - source;
@@ -2942,7 +2949,7 @@ static int32_t dls_note_on_connection_value_q16(const DLS_Connection* connection
         if (type == 0) {
             source <<= 9;
         } else if (type == 1) {
-            if (gainQuirks) {
+            if (quirks) {
                 source = source == 127 ? 0x10000 : -5 * dls_log10_q16(((127 - source) << 16) / 127) / 12;
             } else {
                 source = -5 * dls_log10_q16(((source) << 16) / 127) / 12;
@@ -2983,10 +2990,8 @@ static void dls_apply_note_on_connections(const DLS_Articulation* art, int32_t k
         dls_apply_note_on_connection(&art->runtimeConnections[i], key, velocity, unityNote, ch,
                                      pitch, gainMultiplier, panOffset);
     }
-    /* Eggs use Level-1/MobileBAE default gain graph even under -dlscompat;
-     * instrument lookup/SP-MIDI remap still follow dls_bank_quirks(). */
-    bool gainQuirks = dls_bank_gain_quirks(ch->selectedInstrument->parentBank);
-    if (gainQuirks) {
+    bool quirks = dls_bank_quirks(ch->selectedInstrument->parentBank);
+    if (quirks) {
         for (uint32_t i = 0; i < g_dls_default_connections_count; i++) {
             if (!dls_has_connection(art, &g_dls_default_connections[i])) {
                 dls_apply_note_on_connection(&g_dls_default_connections[i], key, velocity, unityNote, ch,
@@ -3066,8 +3071,8 @@ static void dls_apply_runtime_connections(const DLS_Articulation* art, const DLS
         dls_apply_runtime_connection(&art->runtimeConnections[i], voice, runtimePitch, gainAttenuation,
                                      panOffset, reverbSend, chorusSend, filterCutoffDelta, filterResonanceDelta);
     }
-    bool gainQuirks = dls_bank_gain_quirks(voice->parentBank);
-    if (gainQuirks) {
+    bool quirks = dls_bank_quirks(voice->parentBank);
+    if (quirks) {
         for (uint32_t i = 0; i < g_dls_default_connections_count; i++) {
             if (!dls_has_connection(art, &g_dls_default_connections[i])) {
                 dls_apply_runtime_connection(&g_dls_default_connections[i], voice, runtimePitch, gainAttenuation,
@@ -3088,31 +3093,16 @@ static int32_t dls_channel_value14(int32_t msb, int32_t lsb) {
     return ((msb & 0x7F) << 7) | (lsb & 0x7F);
 }
 
-static bool dls_synth_has_eggs_bank(const DLS_Synth* synth) {
-    if (!synth) return false;
-    if (synth->banks[0] && synth->banks[0]->eggsArticulators) return true;
-    if (synth->banks[1] && synth->banks[1]->eggsArticulators) return true;
-    return false;
-}
-
 static void dls_channel_reset_controllers(DLS_ChannelState* ch, bool quirks) {
-    bool gainQuirks = quirks;
-    if (!gainQuirks) {
-        GM_Mixer* mixer = GM_GetCurrentMixer();
-        if (mixer && mixer->pDLSSynth) {
-            gainQuirks = dls_synth_has_eggs_bank(mixer->pDLSSynth);
-        }
-    }
     if (!ch) return;
     ch->modulation = 0;
     ch->modulationLsb = 0;
     ch->foot = 0;
     ch->footLsb = 0;
-    /* Eggs/microQ: MobileBAE-style CC7 default (127) even under -dlscompat. */
-    ch->volume = gainQuirks ? 127 : 100;
-    ch->volumeLsb = gainQuirks ? 127 : 0;
+    ch->volume = quirks ? 127 : 100;
+    ch->volumeLsb = quirks ? 127 : 0;
     ch->expression = 127;
-    ch->expressionLsb = gainQuirks ? 127 : 0;
+    ch->expressionLsb = quirks ? 127 : 0;
     ch->pan = 64;
     ch->panLsb = 0;
     ch->sustain = false;
@@ -3418,8 +3408,8 @@ static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t v
         }
 
         int32_t gainQ16 = v->baseGainQ16;
-        bool gainQuirks = dls_bank_gain_quirks(v->parentBank);
-        if (gainQuirks) {
+        bool voiceQuirks = dls_bank_quirks(v->parentBank);
+        if (voiceQuirks) {
             if (gainAttenuation < 0) {
                 gainQ16 = DLS_FP_MUL(gainQ16, dls_exp10_q16(gainAttenuation / 20));
             }
@@ -3429,8 +3419,8 @@ static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t v
         gainQ16 = DLS_FP_MUL(gainQ16, env1);
 
         panOffset = dls_clamp(panOffset, -0x10000, 0x10000);
-        v->targetLeftGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(-panOffset, gainQuirks));
-        v->targetRightGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(panOffset, gainQuirks));
+        v->targetLeftGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(-panOffset, voiceQuirks));
+        v->targetRightGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(panOffset, voiceQuirks));
 
         if (reverbSend == 0 && ch->reverb > 0) {
             reverbSend = (ch->reverb & 0x7F) << 9;
@@ -3490,8 +3480,9 @@ static void dls_kill_exclusive_voices(DLS_Synth* synth, int32_t channel, int32_t
         DLS_Voice* voice = &synth->voices[i];
         if (!voice->active) continue;
 
-        bool voiceQuirks = dls_bank_quirks(voice->parentBank);
-        if (voiceQuirks) {
+        bool channelScoped = dls_bank_quirks(voice->parentBank) ||
+                             (voice->parentBank && voice->parentBank->eggsArticulators);
+        if (channelScoped) {
             if (voice->channel != channel) continue;
         }
 
@@ -3537,7 +3528,7 @@ static int32_t dls_find_recyclable_voice(DLS_Synth* synth, int32_t newChannel) {
 }
 
 static int32_t dls_find_held_percussion_voice(DLS_Synth* synth, int32_t newChannel) {
-    bool useQuirks = dls_synth_quirks(synth);
+    bool mobileVoice = dls_synth_mobile_voice_mgmt(synth);
     bool mipMode = synth->mipActive;
     int32_t voiceLimit = DLS_MAX_VOICE_POOL;
 
@@ -3549,7 +3540,8 @@ static int32_t dls_find_held_percussion_voice(DLS_Synth* synth, int32_t newChann
         int64_t priority = INT64_MAX;
         for (int i = 0; i < voiceLimit; i++) {
             DLS_Voice* voice = &synth->voices[i];
-            if (useQuirks) {
+            if (mobileVoice) {
+                /* Plus14: only steal held percussion in this pass. */
                 if (channel == 9 && voice->channel == channel && voice->keyHeld && voice->startSerial < priority) {
                     candidate = i;
                     priority = voice->startSerial;
@@ -3599,7 +3591,8 @@ static int32_t dls_select_voice_index_for_note_on(DLS_Synth* synth, int32_t newC
     if (idx >= 0) return idx;
 
     idx = dls_find_active_voice_by_priority(synth, newChannel);
-    if (!dls_synth_quirks(synth)) return idx;
+    if (!dls_synth_mobile_voice_mgmt(synth)) return idx;
+    /* MobileBAE/microQ: never drop the note — force a slot. */
     return idx >= 0 ? idx : 0;
 }
 
@@ -4193,8 +4186,8 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
                 }
                 
                 int32_t gainQ16 = v->baseGainQ16;
-                bool gainQuirks = dls_bank_gain_quirks(v->parentBank);
-                if (gainQuirks) {
+                bool voiceQuirks = dls_bank_quirks(v->parentBank);
+                if (voiceQuirks) {
                     if (gainAttenuation < 0) {
                         gainQ16 = DLS_FP_MUL(gainQ16, dls_exp10_q16(gainAttenuation / 20));
                     }
@@ -4210,8 +4203,8 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
                     v->reverbSend = v->targetReverbSend;
                     v->chorusSend = v->targetChorusSend;
                 }
-                v->targetLeftGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(-panOffset, gainQuirks));
-                v->targetRightGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(panOffset, gainQuirks));
+                v->targetLeftGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(-panOffset, voiceQuirks));
+                v->targetRightGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(panOffset, voiceQuirks));
                 
                 // If articulation has no explicit reverb/chorus, apply channel-level CC#91/93 values
                 // This allows reverbs 8+ (which read from songBufferReverb) to process DLS audio
