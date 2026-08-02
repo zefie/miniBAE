@@ -211,6 +211,8 @@
 #include "GenSnd.h"
 #include "GenPriv.h"
 #include "X_Assert.h"
+#include "GenBankBalance.h"
+#include <math.h>
 #if USE_NATIVE_DLS == TRUE
 #include "GenDLS_MobileBAE.h"
 #endif
@@ -1978,6 +1980,106 @@ OPErr GM_GetProgramBank(GM_Song *pSong, int16_t channel, int16_t *outProgram, in
         err = NOT_SETUP;
     }
     return err;
+}
+
+// Fast MIDI+patch loudness estimate → song normalize gain (no audio render).
+OPErr GM_Song_EstimateNormalizePeak(GM_Song *pSong,
+                                    int32_t targetPeakPct,
+                                    int32_t *outAppliedGainPct)
+{
+    OPErr theErr;
+    bool loopSongSave;
+    bool metaLoopSave;
+    ScanMode savedMode;
+    float peakLin;
+    int32_t peakAbs;
+    int32_t gainPct;
+    ReverbMode reverb;
+
+    if (outAppliedGainPct)
+        *outAppliedGainPct = 100;
+
+    if (!pSong || pSong->seqType != SEQ_MIDI)
+        return NOT_SETUP;
+
+    if (targetPeakPct <= 0)
+        targetPeakPct = 89; /* ~-1 dBFS */
+    if (targetPeakPct > 99)
+        targetPeakPct = 99;
+
+    GM_SetSongNormalizeGain(100);
+    GM_EstimatePeak_Reset();
+
+    savedMode = pSong->AnalyzeMode;
+    loopSongSave = GM_GetSongLoopFlag(pSong);
+    metaLoopSave = GM_GetSongMetaLoopFlag(pSong);
+
+    theErr = PV_ConfigureMusic(pSong);
+    if (theErr != NO_ERR)
+    {
+        pSong->AnalyzeMode = savedMode;
+        return theErr;
+    }
+
+    pSong->AnalyzeMode = SCAN_ESTIMATE_PEAK;
+    pSong->SomeTrackIsAlive = TRUE;
+    pSong->voiceCount = 0;
+    pSong->voiceSustain = 0;
+    GM_SetSongLoopFlag(pSong, FALSE);
+    GM_SetSongMetaLoopFlag(pSong, FALSE);
+
+    while (pSong->SomeTrackIsAlive)
+    {
+        theErr = PV_ProcessMidiSequencerSlice(NULL, pSong);
+        if (theErr)
+            break;
+    }
+
+    pSong->AnalyzeMode = SCAN_NORMAL;
+    GM_SetSongLoopFlag(pSong, loopSongSave);
+    GM_SetSongMetaLoopFlag(pSong, metaLoopSave);
+    GM_ResetTempoToDefault(pSong);
+    PV_ConfigureMusic(pSong); /* rewind tracks for subsequent Preroll/Start */
+    pSong->AnalyzeMode = savedMode;
+    pSong->songPaused = FALSE;
+    pSong->songPrerolled = FALSE;
+    pSong->songFinished = FALSE;
+
+    if (theErr != NO_ERR && theErr != STILL_PLAYING)
+    {
+        GM_SetSongNormalizeGain(100);
+        return theErr;
+    }
+
+    peakLin = GM_EstimatePeak_GetMax();
+    reverb = GM_GetReverbType();
+    /* Estimate under-reads real peaks (ADSR hits, modulators, dense stacking).
+     * Inflate peak so applied gain sits a little under the clip point. */
+    peakLin *= 1.12f;
+    /* Wet path is invisible to the MIDI estimate; pad further with reverb. */
+    if (reverb > REVERB_TYPE_1)
+        peakLin *= 1.12f;
+
+    if (peakLin <= 1.0e-6f)
+    {
+        gainPct = 100;
+    }
+    else
+    {
+        peakAbs = (int32_t)(peakLin * 32767.0f + 0.5f);
+        if (peakAbs < 1)
+            peakAbs = 1;
+        gainPct = (int32_t)(((int64_t)targetPeakPct * 32767LL) / (int64_t)peakAbs);
+        if (gainPct < 5)
+            gainPct = 5;
+        if (gainPct > 800)
+            gainPct = 800;
+    }
+
+    GM_SetSongNormalizeGain(gainPct);
+    if (outAppliedGainPct)
+        *outAppliedGainPct = gainPct;
+    return NO_ERR;
 }
 
 // EOF of GenSong.c

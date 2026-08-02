@@ -3521,27 +3521,7 @@ void PV_ProcessSampleFrame(void *threadContext, void *destinationSamples)
             }
         }
 
-        // Capture pre-normalize peak in 16-bit FS units so deferred normalize can
-        // compute a stable per-song gain without a blocking prerender.
-        if (pMixer->normalizeCaptureEnabled)
-        {
-            int32_t *buffer = pMixer->songBufferDry;
-            int32_t samples = pMixer->One_Loop * (pMixer->generateStereoOutput ? 2 : 1);
-            int32_t peak = pMixer->normalizePeakAbs;
-            for (int32_t i = 0; i < samples; i++)
-            {
-                int32_t v = buffer[i] >> OUTPUT_SCALAR;
-                if (v < 0)
-                    v = -v;
-                if (v > 32767)
-                    v = 32767;
-                if (v > peak)
-                    peak = v;
-            }
-            pMixer->normalizePeakAbs = peak;
-        }
-
-        // Optional whole-song normalize scale (cached/deferred or prerender).
+        // Optional whole-song normalize scale (MIDI+patch estimate / cache).
         // Applied after limiter/global volume so HSB, SF2, and DLS share one gain.
         if (pMixer->songNormalizeGain != XFIXED_1 && pMixer->songNormalizeGain != 0)
         {

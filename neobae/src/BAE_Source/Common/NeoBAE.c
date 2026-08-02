@@ -12066,214 +12066,26 @@ BAEResult BAESong_Preroll(BAESong song)
     return BAE_TranslateOPErr(err);
 }
 
-/* Cooperative cancel for async UI normalize (checked each mixer slice). */
-static volatile int s_normalizeCancel = 0;
-
-void BAESong_CancelNormalizeFromPrerender(void)
+// Fast MIDI+patch peak estimate → song normalize gain (no audio render).
+BAEResult BAESong_NormalizeFromMidiEstimate(BAESong song,
+                                            int32_t targetPeakPct,
+                                            int32_t *outAppliedGainPct)
 {
-    s_normalizeCancel = 1;
-}
-
-// Offline loopless prerender to find peak, then set final-mix normalize gain.
-BAEResult BAESong_NormalizeFromPrerender(BAESong song,
-                                         int32_t targetPeakPct,
-                                         int32_t *outAppliedGainPct)
-{
-    BAEMixer mixer;
-    BAEResult err;
-    BAE_BOOL wasEngaged;
-    int16_t savedLoops;
-    uint32_t songLenUs;
-    int32_t sliceFrames;
-    int32_t channels;
-    int32_t bytesPerSample;
-    int32_t sliceBytes;
-    int16_t *sliceBuf;
-    int32_t peakAbs;
-    int32_t maxSlices;
-    int32_t sliceCount;
-    int32_t silentAfterDone;
-    BAE_BOOL songDone;
-    BAEAudioModifiers modifiers;
-    int32_t gainPct;
-    int32_t fullScale;
-    BAE_BOOL cancelled;
+    OPErr err;
+    int32_t gainPct = 100;
 
     if (outAppliedGainPct)
         *outAppliedGainPct = 100;
 
     if (!song || song->mID != OBJECT_ID)
         return BAE_TranslateOPErr(NULL_OBJECT);
-    mixer = song->mixer;
-    if (!mixer || mixer->mID != OBJECT_ID || !mixer->pMixer)
+    if (!song->mixer || song->mixer->mID != OBJECT_ID || !song->pSong)
         return BAE_TranslateOPErr(NOT_SETUP);
 
-    if (targetPeakPct <= 0)
-        targetPeakPct = 89; /* ~-1 dBFS */
-    if (targetPeakPct > 99)
-        targetPeakPct = 99;
-
-    s_normalizeCancel = 0;
-    cancelled = FALSE;
-    wasEngaged = mixer->audioEngaged ? TRUE : FALSE;
-    savedLoops = 0;
-    BAESong_GetLoops(song, &savedLoops);
-
-    /* Unity normalize while measuring; stop hardware callback so we own the slice loop. */
-    GM_SetSongNormalizeGain(100);
-    GM_StopHardwareSoundManager(NULL);
-    mixer->audioEngaged = FALSE;
-
-    err = BAEMixer_GetModifiers(mixer, &modifiers);
-    if (err != BAE_NO_ERROR)
-        goto restore_hw;
-
-    channels = (modifiers & BAE_USE_STEREO) ? 2 : 1;
-    bytesPerSample = (modifiers & BAE_USE_16) ? 2 : 1;
-    sliceFrames = (int32_t)BAE_GetMaxSamplePerSlice();
-    if (sliceFrames <= 0)
-        sliceFrames = 512;
-    sliceBytes = sliceFrames * channels * bytesPerSample;
-    sliceBuf = (int16_t *)XNewPtr((uint32_t)sliceBytes);
-    if (!sliceBuf)
-    {
-        err = BAE_TranslateOPErr(MEMORY_ERR);
-        goto restore_hw;
-    }
-
-    songLenUs = 0;
-    BAESong_GetMicrosecondLength(song, &songLenUs);
-    /* Cap render: song length + 5s reverb drain, minimum 30s, maximum ~30 min. */
-    {
-        uint64_t budgetUs = (uint64_t)songLenUs + 5000000ULL;
-        if (budgetUs < 30000000ULL)
-            budgetUs = 30000000ULL;
-        if (budgetUs > 1800000000ULL)
-            budgetUs = 1800000000ULL;
-        maxSlices = (int32_t)(budgetUs / (uint64_t)BAE_GetSliceTimeInMicroseconds());
-        if (maxSlices < 256)
-            maxSlices = 256;
-    }
-
-    BAESong_Stop(song, FALSE);
-    BAESong_SetLoops(song, 0);
-    BAESong_SetMicrosecondPosition(song, 0);
-    err = BAESong_Preroll(song);
-    if (err != BAE_NO_ERROR)
-    {
-        XDisposePtr(sliceBuf);
-        goto restore_loops;
-    }
-    err = BAESong_Start(song, 0);
-    if (err != BAE_NO_ERROR)
-    {
-        XDisposePtr(sliceBuf);
-        goto restore_loops;
-    }
-
-    peakAbs = 0;
-    songDone = FALSE;
-    silentAfterDone = 0;
-    fullScale = (bytesPerSample == 2) ? 32767 : 127;
-
-    for (sliceCount = 0; sliceCount < maxSlices; ++sliceCount)
-    {
-        int32_t nSamp;
-        int32_t i;
-
-        if (s_normalizeCancel)
-        {
-            cancelled = TRUE;
-            break;
-        }
-
-        BAE_BuildMixerSlice(NULL, sliceBuf, sliceBytes, sliceFrames);
-
-        if (bytesPerSample == 2)
-        {
-            nSamp = sliceFrames * channels;
-            for (i = 0; i < nSamp; ++i)
-            {
-                int32_t v = (int32_t)sliceBuf[i];
-                if (v < 0)
-                    v = -v;
-                if (v > peakAbs)
-                    peakAbs = v;
-            }
-        }
-        else
-        {
-            uint8_t *p8 = (uint8_t *)sliceBuf;
-            nSamp = sliceFrames * channels;
-            for (i = 0; i < nSamp; ++i)
-            {
-                int32_t v = (int32_t)p8[i] - 128;
-                if (v < 0)
-                    v = -v;
-                if (v > peakAbs)
-                    peakAbs = v;
-            }
-        }
-
-        BAESong_IsDone(song, &songDone);
-        if (songDone)
-        {
-            if (!BAEMixer_IsAudioTailActive(mixer))
-            {
-                ++silentAfterDone;
-                if (silentAfterDone >= 8)
-                    break;
-            }
-            else
-            {
-                silentAfterDone = 0;
-            }
-        }
-    }
-
-    BAESong_Stop(song, FALSE);
-    BAESong_SetMicrosecondPosition(song, 0);
-    XDisposePtr(sliceBuf);
-
-    if (cancelled)
-    {
-        GM_SetSongNormalizeGain(100);
-        if (outAppliedGainPct)
-            *outAppliedGainPct = 100;
-        err = BAE_TranslateOPErr(ABORTED_PROCESS);
-        goto restore_loops;
-    }
-
-    if (peakAbs <= 0)
-    {
-        gainPct = 100;
-    }
-    else
-    {
-        /* gain = (targetPeak / fullScale) / (peak / fullScale) */
-        gainPct = (int32_t)(((int64_t)targetPeakPct * (int64_t)fullScale) / (int64_t)peakAbs);
-        if (gainPct < 5)
-            gainPct = 5;
-        if (gainPct > 800)
-            gainPct = 800;
-    }
-
-    GM_SetSongNormalizeGain(gainPct);
+    err = GM_Song_EstimateNormalizePeak(song->pSong, targetPeakPct, &gainPct);
     if (outAppliedGainPct)
         *outAppliedGainPct = gainPct;
-    err = BAE_NO_ERROR;
-
-restore_loops:
-    BAESong_SetLoops(song, savedLoops);
-
-restore_hw:
-    if (wasEngaged)
-    {
-        if (GM_StartHardwareSoundManager(NULL))
-            mixer->audioEngaged = TRUE;
-    }
-    s_normalizeCancel = 0;
-    return err;
+    return BAE_TranslateOPErr(err);
 }
 
 static void PV_DefaultSongDoneCallback(void *threadContext, GM_Song *pSong, void *reference)

@@ -1492,7 +1492,7 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
                            &g_dls_compat_tooltip_visible, &g_dls_compat_tooltip_rect, g_dls_compat_tooltip_text, sizeof(g_dls_compat_tooltip_text));
         }
     }
-    Rect normalizeRect = {leftX, dlg.y + 180, 18, 18};
+    Rect normalizeRect = {leftX, dlg.y + 174, 18, 18};
 #else
     Rect normalizeRect = {leftX, dlg.y + 144, 18, 18};
 #endif
@@ -1513,15 +1513,17 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
         }
         else
         {
-            /* Enabling: reload current song so the async peak scan can run. */
+            /* Enabling: reload current song so the estimate applies on play. */
             bae_reload_song_for_normalize(transpose, tempo, volume, loopPlay, reverbType, ch_enable, playing);
+            if (progress > 0)
+                bae_seek_ms(*progress);
         }
     }
     {
         Rect normalizeFullRect = {normalizeRect.x, normalizeRect.y, 280, 24};
         if (point_in(mx, my, normalizeFullRect))
         {
-            const char *tooltip_text = "Measures peak on a background prerender, then plays at a stable gain. UI stays responsive; repeats use a cache.";
+            const char *tooltip_text = "Fast peak estimate using MIDI+patch data.";
             int text_w = 0, text_h = 0;
             measure_text(tooltip_text, &text_w, &text_h);
             int tooltip_w = text_w + 8;

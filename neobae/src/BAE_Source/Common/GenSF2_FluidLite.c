@@ -1929,6 +1929,112 @@ float GM_SF2_MeasureBankLoudness(void)
     return PV_SF2_MedianInPlace(values, valueCount) * pathGain;
 }
 
+float GM_SF2_EstimateNoteLoudness(int bank, int program, int key, int velocity)
+{
+    enum { kStride = 8 };
+    fluid_sfont_t *sfont;
+    fluid_defsfont_t *defsfont;
+    fluid_defpreset_t *preset;
+    float pathGain;
+    float best = 0.0f;
+    int wantBank = bank & 0x3FFF;
+    int wantProg = program & 0x7F;
+
+    if (key < 0)
+        key = 0;
+    if (key > 127)
+        key = 127;
+    if (velocity < 1)
+        velocity = 1;
+    if (velocity > 127)
+        velocity = 127;
+
+    if (!g_fluidsynth_synth || g_fluidsynth_soundfont_id < 0)
+        return 0.0f;
+
+    PV_SF2_LockSynth();
+    sfont = fluid_synth_get_sfont_by_id(g_fluidsynth_synth, g_fluidsynth_soundfont_id);
+    if (!sfont || !sfont->data)
+    {
+        PV_SF2_UnlockSynth();
+        return 0.0f;
+    }
+
+    defsfont = (fluid_defsfont_t *)sfont->data;
+    pathGain = g_fluidsynth_master_volume;
+    if (pathGain <= 0.0f)
+        pathGain = 0.5f;
+
+    for (preset = defsfont->preset; preset; preset = preset->next)
+    {
+        fluid_preset_zone_t *pzone;
+
+        if ((int)preset->bank != wantBank || (int)preset->num != wantProg)
+            continue;
+
+        for (pzone = preset->zone; pzone; pzone = pzone->next)
+        {
+            fluid_inst_t *inst;
+            fluid_inst_zone_t *izone;
+            double presetAtten = 0.0;
+
+            if (pzone->keylo > key || pzone->keyhi < key)
+                continue;
+            if (pzone->vello > velocity || pzone->velhi < velocity)
+                continue;
+
+            if (pzone->gen[GEN_ATTENUATION].flags)
+                presetAtten = pzone->gen[GEN_ATTENUATION].val;
+
+            inst = pzone->inst;
+            if (!inst)
+                continue;
+
+            for (izone = inst->zone; izone; izone = izone->next)
+            {
+                fluid_sample_t *sample;
+                double atten;
+                unsigned int start, end, frames;
+                float rms;
+                float loud;
+
+                if (izone->keylo > key || izone->keyhi < key)
+                    continue;
+                if (izone->vello > velocity || izone->velhi < velocity)
+                    continue;
+
+                sample = izone->sample;
+                if (!sample || !sample->data || !sample->valid)
+                    continue;
+                if (sample->sampletype & FLUID_SAMPLETYPE_ROM)
+                    continue;
+                if (sample->sampletype & FLUID_SAMPLETYPE_RIGHT)
+                    continue;
+
+                atten = presetAtten;
+                if (inst->global_zone && inst->global_zone->gen[GEN_ATTENUATION].flags)
+                    atten += inst->global_zone->gen[GEN_ATTENUATION].val;
+                if (izone->gen[GEN_ATTENUATION].flags)
+                    atten += izone->gen[GEN_ATTENUATION].val;
+
+                start = sample->start;
+                end = sample->end;
+                if (end <= start)
+                    continue;
+                frames = end - start + 1;
+                rms = PV_SF2_LoudnessInt16(sample->data + start, frames, kStride);
+                loud = rms * (float)pow(10.0, -atten / 200.0);
+                if (loud > best)
+                    best = loud;
+            }
+        }
+        break;
+    }
+
+    PV_SF2_UnlockSynth();
+    return best * pathGain;
+}
+
 void GM_SF2_SetChannelMode(int16_t channel, int16_t mode)
 {
     if (!g_fluidsynth_synth)

@@ -370,21 +370,16 @@ JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Song__1isDLSSong(JNIEnv* env, j
     return (isDLS) ? JNI_TRUE : JNI_FALSE;
 }
 
-// Offline loopless prerender peak-normalize; returns applied gain percent (100 = unity), or -err on failure.
-JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Song__1normalizeFromPrerender(JNIEnv* env, jclass clazz, jlong songRef, jint targetPeakPct){
+// Fast MIDI+patch peak estimate; returns applied gain percent (100 = unity), or -err on failure.
+JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Song__1normalizeFromMidiEstimate(JNIEnv* env, jclass clazz, jlong songRef, jint targetPeakPct){
     (void)env; (void)clazz;
     if(songRef == 0){ return (jint)BAE_NULL_OBJECT; }
     BAESong song = (BAESong)(intptr_t)songRef;
     int32_t applied = 100;
-    BAEResult r = BAESong_NormalizeFromPrerender(song, (int32_t)targetPeakPct, &applied);
+    BAEResult r = BAESong_NormalizeFromMidiEstimate(song, (int32_t)targetPeakPct, &applied);
     if(r != BAE_NO_ERROR){
-        __android_log_print(ANDROID_LOG_WARN, LOG_TAG, "BAESong_NormalizeFromPrerender err=%d", r);
+        __android_log_print(ANDROID_LOG_WARN, LOG_TAG, "BAESong_NormalizeFromMidiEstimate err=%d", r);
         return (jint)(-(int)r);
     }
     return (jint)applied;
-}
-
-JNIEXPORT void JNICALL Java_com_zefie_NeoBAE_Song__1cancelNormalizeFromPrerender(JNIEnv* env, jclass clazz){
-    (void)env; (void)clazz;
-    BAESong_CancelNormalizeFromPrerender();
 }

@@ -398,7 +398,7 @@ static const char usageMain[] =
 #endif
     "                 -l  {loop count (default: 0)}\n"
     "                 -v  {master volume %% (default: 100)}\n"
-    "                 -n  {normalize: loopless prerender + peak normalize}\n"
+    "                 -n  {normalize: MIDI+patch peak estimate}\n"
     "                 -vc {velocity curve 0-5 (default: engine (0), none for SF2/DLS)}\n"
     "                 -t  {max duration in seconds (0 = no limit)}\n"
     "                 -mc {MIDI channels to mute, 1-16, comma-separated}\n"
@@ -775,8 +775,8 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
 
     if (gNormalize) {
         int32_t appliedGainPct = 100;
-        playbae_printf("Normalizing (loopless prerender)...\n");
-        BAEResult nerr = BAESong_NormalizeFromPrerender(song, 89, &appliedGainPct);
+        playbae_printf("Normalizing (MIDI+patch estimate)...\n");
+        BAEResult nerr = BAESong_NormalizeFromMidiEstimate(song, 89, &appliedGainPct);
         if (nerr != BAE_NO_ERROR) {
             playbae_printf("playbae: Normalize failed for '%s' (%d: %s); continuing without\n",
                 fileName, nerr, BAE_GetErrorString(nerr));

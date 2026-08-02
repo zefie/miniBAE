@@ -2473,8 +2473,11 @@ static void PV_ProcessNoteOff(GM_Song *pSong, int16_t MIDIChannel, int16_t curre
             else
             {
                 pSong->voiceCount--;
+                if (pSong->AnalyzeMode == SCAN_ESTIMATE_PEAK)
+                    GM_EstimatePeak_NoteOff(pSong, MIDIChannel, note);
             }
-            if (pSong->firstChannelProgram[MIDIChannel] != -1)
+            if (pSong->AnalyzeMode != SCAN_ESTIMATE_PEAK &&
+                pSong->firstChannelProgram[MIDIChannel] != -1)
             {
                 thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
                 GM_SetUsedInstrumentRange(pSong, thePatch, note - 48, note + 48, TRUE); // mark note in instrument
@@ -2641,30 +2644,37 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
             {
                 pSong->voiceCount++;
 
-                if (pSong->firstNoteOnChannel == -1)
+                if (pSong->AnalyzeMode == SCAN_ESTIMATE_PEAK)
+                {
+                    GM_EstimatePeak_NoteOn(pSong, MIDIChannel, note, volume);
+                }
+                else if (pSong->firstNoteOnChannel == -1)
                 {
                     pSong->firstNoteOnChannel = MIDIChannel;
                 }
-                if (pSong->allowProgramChanges == FALSE)
+                if (pSong->AnalyzeMode != SCAN_ESTIMATE_PEAK)
                 {
-                    // if analyzing, note the channel. This is required in case program changes have been turned off
-                    // and there are no program changes before the first note.
-                    if (pSong->firstChannelProgram[MIDIChannel] == -1)
-                    { // first time only
-                        pSong->firstChannelProgram[MIDIChannel] = MIDIChannel;
-                    }
-                    GM_SetUsedInstrumentRange(pSong, thePatch, note - 48, note + 48, TRUE); // mark note in instrument
-                }
-                else
-                {
-                    if (MIDIChannel == PERCUSSION_CHANNEL && pSong->channelBankMode[MIDIChannel] != USE_NORM_BANK)
+                    if (pSong->allowProgramChanges == FALSE)
                     {
-                        pSong->hasPercData = TRUE;
-                    }
-                    if (pSong->firstChannelProgram[MIDIChannel] != -1)
-                    {
-                        thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
+                        // if analyzing, note the channel. This is required in case program changes have been turned off
+                        // and there are no program changes before the first note.
+                        if (pSong->firstChannelProgram[MIDIChannel] == -1)
+                        { // first time only
+                            pSong->firstChannelProgram[MIDIChannel] = MIDIChannel;
+                        }
                         GM_SetUsedInstrumentRange(pSong, thePatch, note - 48, note + 48, TRUE); // mark note in instrument
+                    }
+                    else
+                    {
+                        if (MIDIChannel == PERCUSSION_CHANNEL && pSong->channelBankMode[MIDIChannel] != USE_NORM_BANK)
+                        {
+                            pSong->hasPercData = TRUE;
+                        }
+                        if (pSong->firstChannelProgram[MIDIChannel] != -1)
+                        {
+                            thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
+                            GM_SetUsedInstrumentRange(pSong, thePatch, note - 48, note + 48, TRUE); // mark note in instrument
+                        }
                     }
                 }
             }

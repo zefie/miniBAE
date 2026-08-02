@@ -504,54 +504,6 @@ int32_t GM_GetSongNormalizeGain(void)
     return 100;
 }
 
-void GM_SetNormalizeCapture(bool enable)
-{
-    if (MusicGlobals)
-        MusicGlobals->normalizeCaptureEnabled = enable ? true : false;
-}
-
-bool GM_GetNormalizeCapture(void)
-{
-    return (MusicGlobals && MusicGlobals->normalizeCaptureEnabled) ? true : false;
-}
-
-void GM_ResetNormalizePeak(void)
-{
-    if (MusicGlobals)
-        MusicGlobals->normalizePeakAbs = 0;
-}
-
-int32_t GM_GetNormalizePeakAbs(void)
-{
-    if (MusicGlobals)
-        return MusicGlobals->normalizePeakAbs;
-    return 0;
-}
-
-// Convert captured 16-bit-FS peak into a stable normalize gain percent.
-int32_t GM_ComputeNormalizeGainFromPeak(int32_t targetPeakPct)
-{
-    int32_t peakAbs;
-    int32_t gainPct;
-
-    if (targetPeakPct <= 0)
-        targetPeakPct = 89;
-    if (targetPeakPct > 99)
-        targetPeakPct = 99;
-
-    peakAbs = GM_GetNormalizePeakAbs();
-    if (peakAbs <= 0)
-        return 100;
-
-    gainPct = (int32_t)(((int64_t)targetPeakPct * 32767LL) / (int64_t)peakAbs);
-    if (gainPct < 5)
-        gainPct = 5;
-    if (gainPct > 800)
-        gainPct = 800;
-    return gainPct;
-}
-
-
 // Return the number of microseconds of real time that will be generated when calling
 // BAE_BuildMixerSlice.
 uint32_t BAE_GetSliceTimeInMicroseconds(void)
@@ -708,8 +660,6 @@ OPErr GM_InitGeneralSound(void *threadContext, Rate theRate, TerpMode theTerp, A
             pMixer->effectsVolume = MAX_MASTER_VOLUME * 2 * 4;
             pMixer->outputGainPct = 100;
             pMixer->songNormalizeGain = XFIXED_1;
-            pMixer->normalizeCaptureEnabled = false;
-            pMixer->normalizePeakAbs = 0;
 
             // set control loops
             PV_SetSampleSliceSize(pMixer, theRate);

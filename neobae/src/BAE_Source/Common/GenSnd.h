@@ -529,7 +529,8 @@ extern "C"
         SCAN_SAVE_PATCHES,     // save patches during Midi scan. Fast
         SCAN_DETERMINE_LENGTH, // calculate tick length. Slow
         SCAN_FIND_PATCHES,     // mode for scanning to find the program changes
-        SCAN_COUNT_PATCHES     // mode for counting the number of program changes
+        SCAN_COUNT_PATCHES,    // mode for counting the number of program changes
+        SCAN_ESTIMATE_PEAK     // MIDI+patch loudness estimate for song normalize. Fast
     } ScanMode;
 
     typedef enum
@@ -1819,12 +1820,11 @@ typedef int32_t UNIT_TYPE;
     void GM_SetSongNormalizeGain(int32_t gainPct);
     int32_t GM_GetSongNormalizeGain(void);
 
-    // Live peak capture for deferred normalize (no prerender / no UI stall).
-    void GM_SetNormalizeCapture(bool enable);
-    bool GM_GetNormalizeCapture(void);
-    void GM_ResetNormalizePeak(void);
-    int32_t GM_GetNormalizePeakAbs(void);
-    int32_t GM_ComputeNormalizeGainFromPeak(int32_t targetPeakPct);
+    // Fast MIDI+patch peak estimate → song normalize gain (no audio render).
+    // Leaves song stopped/rewound; caller should Preroll/Start afterward.
+    OPErr GM_Song_EstimateNormalizePeak(GM_Song *pSong,
+                                        int32_t targetPeakPct,
+                                        int32_t *outAppliedGainPct);
 
 // This is an active voice reference that represents a valid/active voice.
 // Used in various functions that need to return and reference a voice.

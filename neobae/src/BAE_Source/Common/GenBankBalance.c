@@ -892,3 +892,280 @@ bool GM_BankBalance_IsActive(void)
 {
     return g_active;
 }
+
+/* ---- MIDI+patch song peak estimate -------------------------------------- */
+
+enum { kEstimateMaxChannels = 16 };
+
+static float s_estAmp[kEstimateMaxChannels][128];
+static double s_estEnergy = 0.0;
+static float s_estMaxPeak = 0.0f;
+
+void GM_EstimatePeak_Reset(void)
+{
+    XSetMemory(s_estAmp, sizeof(s_estAmp), 0);
+    s_estEnergy = 0.0;
+    s_estMaxPeak = 0.0f;
+}
+
+float GM_EstimatePeak_GetMax(void)
+{
+    return s_estMaxPeak;
+}
+
+static float PV_MeasureInstrumentLoudnessAtKey(GM_Instrument *inst, int16_t key)
+{
+    int16_t volumeParam;
+
+    if (!inst)
+        return 0.0f;
+
+    volumeParam = inst->miscParameter2;
+    if (volumeParam <= 0)
+        volumeParam = 100;
+
+    if (inst->doKeymapSplit)
+    {
+        uint16_t splitCount = inst->u.k.KeymapSplitCount;
+        int chosen = -1;
+        uint16_t s;
+
+        if (splitCount == 0)
+            return 0.0f;
+
+        for (s = 0; s < splitCount; s++)
+        {
+            GM_KeymapSplit *split = &inst->u.k.keySplits[s];
+            if (split->lowMidi <= key && split->highMidi >= key)
+            {
+                chosen = (int)s;
+                break;
+            }
+        }
+        if (chosen < 0)
+            chosen = (int)(splitCount / 2);
+
+        {
+            GM_KeymapSplit *split = &inst->u.k.keySplits[chosen];
+            if (!split->pSplitInstrument)
+                return 0.0f;
+            if (!(inst->enableSoundModifier && !inst->useSoundModifierAsRootKey))
+                volumeParam = split->miscParameter2;
+            if (volumeParam <= 0)
+                volumeParam = 100;
+            return PV_MeasureWaveformLoudness(&split->pSplitInstrument->u.w, volumeParam);
+        }
+    }
+
+    return PV_MeasureWaveformLoudness(&inst->u.w, volumeParam);
+}
+
+static int16_t PV_EstimateConvertPatchBank(GM_Song *pSong, int16_t thePatch, int16_t theChannel)
+{
+    int16_t theBank = pSong->channelBank[theChannel];
+
+    switch (pSong->channelBankMode[theChannel])
+    {
+    default:
+    case USE_GM_DEFAULT:
+        if (theChannel == PERCUSSION_CHANNEL)
+            theBank = (theBank * 2) + 1;
+        else
+            theBank = theBank * 2 + 0;
+        if (theBank < MAX_BANKS)
+            thePatch = (theBank * 128) + thePatch;
+        break;
+    case USE_NON_GM_PERC_BANK:
+    case USE_GM_PERC_BANK:
+        theBank = (theBank * 2) + 1;
+        if (theBank < MAX_BANKS)
+            thePatch = (theBank * 128) + thePatch;
+        break;
+    case USE_NORM_BANK:
+        theBank = theBank * 2 + 0;
+        if (theBank < MAX_BANKS)
+            thePatch = (theBank * 128) + thePatch;
+        break;
+    }
+    return thePatch;
+}
+
+static int16_t PV_EstimateInstrumentToUse(GM_Song *pSong, int16_t midiNote, int16_t MIDIChannel)
+{
+    int16_t thePatch = 0;
+
+    if (pSong->defaultPercusionProgram < 0)
+    {
+        switch (pSong->channelBankMode[MIDIChannel])
+        {
+        case USE_GM_DEFAULT:
+            if (MIDIChannel == PERCUSSION_CHANNEL)
+                thePatch = PV_EstimateConvertPatchBank(pSong, midiNote, MIDIChannel);
+            else
+                thePatch = PV_EstimateConvertPatchBank(pSong, pSong->channelProgram[MIDIChannel], MIDIChannel);
+            break;
+        case USE_NON_GM_PERC_BANK:
+        case USE_NORM_BANK:
+            thePatch = PV_EstimateConvertPatchBank(pSong, pSong->channelProgram[MIDIChannel], MIDIChannel);
+            break;
+        case USE_GM_PERC_BANK:
+            thePatch = PV_EstimateConvertPatchBank(pSong, midiNote, MIDIChannel);
+            break;
+        }
+    }
+    else
+    {
+        thePatch = pSong->channelProgram[MIDIChannel];
+    }
+    return thePatch;
+}
+
+float GM_EstimateNoteLoudness(GM_Song *pSong, int16_t channel, int16_t note, int16_t velocity)
+{
+    float level = 0.0f;
+    GM_BankEngine engine = GM_BANK_ENGINE_HSB;
+    int16_t thePatch;
+
+    if (!pSong || channel < 0 || channel >= kEstimateMaxChannels)
+        return 0.0f;
+    if (note < 0)
+        note = 0;
+    if (note > 127)
+        note = 127;
+    (void)velocity;
+
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
+    if ((GM_IsSF2Song(pSong) || pSong->channelType[channel] == CHANNEL_TYPE_SF2) &&
+        pSong->channelType[channel] != CHANNEL_TYPE_DLS &&
+        pSong->channelType[channel] != CHANNEL_TYPE_RMF)
+    {
+        int sf2Bank = (int)pSong->channelBank[channel];
+        int sf2Prog = pSong->channelProgram[channel];
+
+        if (sf2Prog < 0)
+            sf2Prog = 0;
+        sf2Prog &= 0x7F;
+
+        if (channel == PERCUSSION_CHANNEL ||
+            pSong->channelBankMode[channel] == USE_GM_PERC_BANK)
+        {
+            if (sf2Bank == 0 || sf2Bank == 121)
+                sf2Bank = 128;
+        }
+        else if (sf2Bank == 121)
+        {
+            sf2Bank = 0;
+        }
+
+        level = GM_SF2_EstimateNoteLoudness(sf2Bank, sf2Prog, note, velocity);
+        if (level <= kMinLoudness && sf2Bank != 0 &&
+            channel != PERCUSSION_CHANNEL &&
+            pSong->channelBankMode[channel] != USE_GM_PERC_BANK)
+        {
+            level = GM_SF2_EstimateNoteLoudness(0, sf2Prog, note, velocity);
+        }
+        engine = GM_BANK_ENGINE_SF2;
+        if (level > kMinLoudness)
+            return level * GM_BankBalance_GetMixScale(engine);
+        /* Fall through to HSB/RMF if SF2 zone missing. */
+    }
+#endif
+
+#if USE_NATIVE_DLS == TRUE
+    if ((GM_IsDLSSong(pSong) || pSong->channelType[channel] == CHANNEL_TYPE_DLS) &&
+        pSong->channelType[channel] != CHANNEL_TYPE_RMF)
+    {
+        level = GM_DLS_EstimateNoteLoudness(pSong, channel, note, velocity);
+        if (level > kMinLoudness)
+        {
+            float scaleMain = GM_BankBalance_GetMixScale(GM_BANK_ENGINE_DLS);
+            float scaleXmf = GM_BankBalance_GetMixScale(GM_BANK_ENGINE_DLS_XMF);
+            /* Overlay lookup is preferred in FindInstrument; use quieter scale when both active. */
+            float scale = scaleMain;
+            if (g_present[GM_BANK_ENGINE_DLS_XMF] && scaleXmf < scaleMain)
+                scale = scaleXmf;
+            return level * scale;
+        }
+        /* Fall through to HSB/RMF if DLS instrument missing. */
+    }
+#endif
+
+    thePatch = PV_EstimateInstrumentToUse(pSong, note, channel);
+    if (thePatch >= 0 && thePatch < (MAX_INSTRUMENTS * MAX_BANKS))
+    {
+        level = PV_MeasureInstrumentLoudnessAtKey(pSong->instrumentData[thePatch], note);
+        level *= ((float)kHsbPathGainNum / (float)kHsbPathGainDen);
+    }
+    return level * GM_BankBalance_GetMixScale(GM_BANK_ENGINE_HSB);
+}
+
+static void PV_EstimatePeak_UpdateMax(void)
+{
+    float peak = (s_estEnergy > 0.0) ? (float)sqrt(s_estEnergy) : 0.0f;
+    if (peak > s_estMaxPeak)
+        s_estMaxPeak = peak;
+}
+
+void GM_EstimatePeak_NoteOn(GM_Song *pSong, int16_t channel, int16_t note, int16_t velocity)
+{
+    float L;
+    float volScale;
+    float exprScale;
+    float velScale;
+    float amp;
+    float prev;
+
+    if (!pSong || channel < 0 || channel >= kEstimateMaxChannels)
+        return;
+    if (note < 0 || note > 127 || velocity <= 0)
+        return;
+
+    L = GM_EstimateNoteLoudness(pSong, channel, note, velocity);
+    /* Missing patch/zone: skip rather than floor — a tiny floor stacks into
+     * a bogus max peak and drives normalize gain to the clamp. */
+    if (L <= kMinLoudness)
+        return;
+
+    volScale = (float)pSong->channelVolume[channel] / (float)MAX_NOTE_VOLUME;
+    if (volScale < 0.0f)
+        volScale = 0.0f;
+    if (volScale > 1.0f)
+        volScale = 1.0f;
+
+    /* Expression 0 means "unset / unity" in the native mixer path. */
+    if (pSong->channelExpression[channel] == 0)
+        exprScale = 1.0f;
+    else
+        exprScale = (float)pSong->channelExpression[channel] / (float)MAX_NOTE_VOLUME;
+
+    velScale = (float)velocity / (float)MAX_NOTE_VOLUME;
+    amp = L * velScale * volScale * exprScale;
+
+    prev = s_estAmp[channel][note];
+    if (prev > 0.0f)
+        s_estEnergy -= (double)prev * (double)prev;
+    s_estAmp[channel][note] = amp;
+    s_estEnergy += (double)amp * (double)amp;
+    if (s_estEnergy < 0.0)
+        s_estEnergy = 0.0;
+    PV_EstimatePeak_UpdateMax();
+}
+
+void GM_EstimatePeak_NoteOff(GM_Song *pSong, int16_t channel, int16_t note)
+{
+    float prev;
+
+    (void)pSong;
+    if (channel < 0 || channel >= kEstimateMaxChannels)
+        return;
+    if (note < 0 || note > 127)
+        return;
+
+    prev = s_estAmp[channel][note];
+    if (prev <= 0.0f)
+        return;
+    s_estEnergy -= (double)prev * (double)prev;
+    if (s_estEnergy < 0.0)
+        s_estEnergy = 0.0;
+    s_estAmp[channel][note] = 0.0f;
+}

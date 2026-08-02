@@ -172,6 +172,10 @@ void GM_UnloadDLSBank(DLS_Bank* pBank);
  * sample/region attenuation. 0 if unavailable. */
 float GM_DLS_MeasureBankLoudness(DLS_Bank* bank);
 
+/* Effective sample loudness for one song note (all matching layered regions). */
+float GM_DLS_EstimateNoteLoudness(struct GM_Song* pSong, int16_t channel,
+                                  int16_t note, int16_t velocity);
+
 // Synth Public API
 OPErr GM_InitDLSSynth(DLS_Synth** ppSynth, int32_t sampleRate);
 void GM_FinisDLSSynth(DLS_Synth* pSynth);

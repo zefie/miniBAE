@@ -135,6 +135,9 @@ bool GM_SF2_CurrentFontHasAnyPreset(int *outPresetCount);
  * GEN_ATTENUATION and the current synth.gain path factor. 0 if unavailable. */
 float GM_SF2_MeasureBankLoudness(void);
 
+/* Effective sample loudness for one preset note (bank/program/key/vel). */
+float GM_SF2_EstimateNoteLoudness(int bank, int program, int key, int velocity);
+
 void GM_SF2_SetChannelMode(int16_t channel, int16_t mode);
 #endif // USE_SF2_SUPPORT
 

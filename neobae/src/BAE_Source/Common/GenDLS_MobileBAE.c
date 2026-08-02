@@ -2910,6 +2910,96 @@ static void dls_program_change(DLS_Synth* synth, DLS_ChannelState* ch, int32_t p
     ch->programSelected = true;
 }
 
+float GM_DLS_EstimateNoteLoudness(struct GM_Song* pSong, int16_t channel,
+                                  int16_t note, int16_t velocity)
+{
+    enum { kStride = 8 };
+    DLS_Synth* synth;
+    DLS_ChannelState probe;
+    DLS_Instrument* inst;
+    int32_t bankSelector;
+    int32_t program;
+    int32_t regionKey;
+    float sum = 0.0f;
+    uint32_t r;
+
+    if (!pSong || !pSong->pMixer || !pSong->pMixer->pDLSSynth)
+        return 0.0f;
+    if (channel < 0 || channel >= MAX_CHANNELS)
+        return 0.0f;
+    if (note < 0)
+        note = 0;
+    if (note > 127)
+        note = 127;
+    if (velocity < 1)
+        velocity = 1;
+    if (velocity > 127)
+        velocity = 127;
+
+    synth = (DLS_Synth*)pSong->pMixer->pDLSSynth;
+    XSetMemory(&probe, sizeof(probe), 0);
+    probe.channel = channel;
+    probe.bankMsb = pSong->channelBank[channel] & 0x7F;
+    probe.bankLsb = 0;
+    if (((channel == PERCUSSION_CHANNEL && pSong->channelBankMode[channel] == USE_GM_DEFAULT) ||
+         pSong->channelBankMode[channel] == USE_GM_PERC_BANK) &&
+        probe.bankMsb == 121)
+    {
+        probe.bankMsb = 120;
+    }
+    bankSelector = DLS_ChannelBankSelector(&probe);
+    program = pSong->channelProgram[channel];
+    if (program < 0)
+        program = 0;
+    program &= 0x7F;
+
+    inst = DLS_Synth_FindInstrument(synth, bankSelector, program);
+    if (!inst || !inst->parentBank)
+        return 0.0f;
+
+    regionKey = note;
+    if ((bankSelector & 0x3F80) == (120 << 7) &&
+        inst->parentBank->hasPercussionKeyAliases)
+    {
+        regionKey = inst->parentBank->percussionKeyAliases[note & 0x7F] & 0x7F;
+    }
+
+    for (r = 0; r < inst->regionCount; r++)
+    {
+        DLS_Region* region = &inst->regions[r];
+        DLS_Wave* wave;
+        DLS_SampleInfo* sample;
+        float rms;
+        float attenLin;
+        float loud;
+
+        if (regionKey < region->keyLow || regionKey > region->keyHigh)
+            continue;
+        if (velocity < region->velocityLow || velocity > region->velocityHigh)
+            continue;
+        if (region->tableIndex < 0 ||
+            (uint32_t)region->tableIndex >= inst->parentBank->waveCount)
+            continue;
+
+        wave = &inst->parentBank->waves[region->tableIndex];
+        if (!wave->pcm || wave->frames == 0)
+            continue;
+
+        sample = region->sample.present ? &region->sample : &wave->sample;
+        attenLin = (float)pow(10.0, (double)sample->attenuation / (200.0 * 65536.0));
+        if (attenLin < 1.0e-6f)
+            attenLin = 1.0e-6f;
+        rms = PV_DLS_LoudnessInt16(wave->pcm, wave->frames,
+                                   wave->channels > 0 ? wave->channels : 1, kStride);
+        loud = rms * attenLin;
+        /* Layered regions stack (MobileBAE starts every match). */
+        sum += loud;
+    }
+
+    /* DLS bus inserts at OUTPUT_SCALAR-2 (~0.25 vs full-scale native). */
+    return sum * 0.25f;
+}
+
 static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t velocity, 
                            DLS_Region* region, DLS_Wave* wave, DLS_ChannelState* ch, int32_t sampleRate) {
     /* A pool slot may be recycled directly from a killed/active voice.  Reset

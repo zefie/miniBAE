@@ -1140,21 +1140,6 @@ extern "C"
     BAEResult BAEMixer_SetSongNormalizeGain(BAEMixer mixer, int32_t gainPct);
     BAEResult BAEMixer_GetSongNormalizeGain(BAEMixer mixer, int32_t *outGainPct);
 
-    // Live peak capture for deferred normalize: measure during realtime playback
-    // (no prerender stall). Peak is taken before song-normalize gain is applied.
-    // Typical flow: ResetPeak + SetCapture(TRUE) on first play; on song end call
-    // FinalizeNormalizeCapture to get a stable gain percent; cache it and apply
-    // via SetSongNormalizeGain on the next Start.
-    //
-    BAEResult BAEMixer_SetNormalizeCapture(BAEMixer mixer, BAE_BOOL enabled);
-    BAEResult BAEMixer_GetNormalizeCapture(BAEMixer mixer, BAE_BOOL *outEnabled);
-    BAEResult BAEMixer_ResetNormalizePeak(BAEMixer mixer);
-    BAEResult BAEMixer_GetNormalizePeakAbs(BAEMixer mixer, int32_t *outPeakAbs);
-    // Stops capture and returns gain percent for targetPeakPct (default 89 if <=0).
-    BAEResult BAEMixer_FinalizeNormalizeCapture(BAEMixer mixer,
-                                               int32_t targetPeakPct,
-                                               int32_t *outGainPct);
-
     // BAEMixer_SetHardwareVolume()
     // ------------------------------------
     // Sets the hardware-based final output volume of the audio output device
@@ -2536,22 +2521,17 @@ extern "C"
     //
     BAEResult BAESong_Preroll(BAESong song);
 
-    // BAESong_NormalizeFromPrerender()
+    // BAESong_NormalizeFromMidiEstimate()
     // ------------------------------------
-    // Offline loopless prerender of the loaded song to measure peak amplitude,
-    // then set mixer song-normalize gain so the peak lands near targetPeakPct
-    // percent of full scale (default 89 ≈ -1 dBFS when targetPeakPct <= 0).
-    // Leaves the song stopped at position 0; caller should Preroll/Start again.
-    // Prefer deferred live capture (BAEMixer_SetNormalizeCapture) for interactive
-    // playback; use this for one-pass export where the file must be normalized.
-    // outAppliedGainPct may be NULL; 100 means unity (no change).
+    // Fast MIDI+patch loudness estimate (no audio render). Walks the sequencer
+    // in SCAN_ESTIMATE_PEAK mode, estimates concurrent note peak from sample/
+    // zone loudness × velocity × CC7/CC11, then sets mixer song-normalize gain
+    // so the peak lands near targetPeakPct (default 89 ≈ -1 dBFS).
+    // Leaves the song stopped/rewound; caller should Preroll/Start afterward.
     //
-    BAEResult BAESong_NormalizeFromPrerender(BAESong song,
-                                            int32_t targetPeakPct,
-                                            int32_t *outAppliedGainPct);
-
-    // Request cancel of an in-flight BAESong_NormalizeFromPrerender (thread-safe).
-    void BAESong_CancelNormalizeFromPrerender(void);
+    BAEResult BAESong_NormalizeFromMidiEstimate(BAESong song,
+                                                int32_t targetPeakPct,
+                                                int32_t *outAppliedGainPct);
 
     // BAESong_Start()
     // --------------------------------------

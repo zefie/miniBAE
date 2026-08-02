@@ -720,8 +720,6 @@ struct GM_Mixer
     int32_t             scaleBackAmount;
     int32_t             outputGainPct;          // user-set output gain percent (100 = normal, >100 = overdrive)
     XFIXED              songNormalizeGain;      // final-mix normalize scale (XFIXED_1 = unity, may boost)
-    bool                normalizeCaptureEnabled; // accumulate pre-gain peak while playing
-    int32_t             normalizePeakAbs;       // peak in 16-bit FS units (0..32767)
     int16_t              routeBus;
 
     int16_t              MaxNotes;

@@ -53,6 +53,21 @@ float GM_BankBalance_GetMixScale(GM_BankEngine engine);
 /* TRUE when two or more engines have measured loudness and scales are applied. */
 bool GM_BankBalance_IsActive(void);
 
+/* --- MIDI+patch song peak estimate (SCAN_ESTIMATE_PEAK) --- */
+
+/* Reset concurrent-note energy tracker before a scan. */
+void GM_EstimatePeak_Reset(void);
+
+/* Note-on/off during SCAN_ESTIMATE_PEAK: update concurrent energy + max peak. */
+void GM_EstimatePeak_NoteOn(GM_Song *pSong, int16_t channel, int16_t note, int16_t velocity);
+void GM_EstimatePeak_NoteOff(GM_Song *pSong, int16_t channel, int16_t note);
+
+/* Max concurrent peak so far, in linear full-scale units (1.0 ≈ 0 dBFS sample). */
+float GM_EstimatePeak_GetMax(void);
+
+/* Sample/zone loudness for one note (includes engine path + bank-balance scale). */
+float GM_EstimateNoteLoudness(GM_Song *pSong, int16_t channel, int16_t note, int16_t velocity);
+
 #ifdef __cplusplus
 }
 #endif

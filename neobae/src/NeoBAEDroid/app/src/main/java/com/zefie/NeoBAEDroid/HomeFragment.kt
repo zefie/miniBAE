@@ -240,10 +240,8 @@ class HomeFragment : Fragment() {
         var classicChorus = mutableStateOf(false)
         // Native DLS compatibility mode (disables MobileBAE quirks, off by default)
         var dlsCompatibilityMode = mutableStateOf(false)
-        // Optional whole-song peak normalize via loopless prerender (off by default)
+        // Optional whole-song peak normalize via MIDI+patch estimate (off by default)
         var normalizePlayback = mutableStateOf(false)
-        // True while background normalize prerender is running (UI stays responsive).
-        var isNormalizing = mutableStateOf(false)
 
         private const val PREF_NAME = "NeoBAE_prefs"
         private const val KEY_ENABLE_AUDIO_FILES = "enable_audio_files"
@@ -1237,8 +1235,6 @@ class HomeFragment : Fragment() {
                             val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
                             prefs.edit().putBoolean("normalize_playback", enabled).apply()
                             if (!enabled) {
-                                try { Song.cancelNormalizeFromPrerender() } catch (_: Exception) {}
-                                isNormalizing.value = false
                                 Mixer.setSongNormalizeGain(100)
                             }
                         },
@@ -1747,33 +1743,24 @@ class HomeFragment : Fragment() {
                         val pathKey = file.absolutePath
                         val cachedGain = if (normalizePlayback.value) normalizeGainCache[pathKey] else null
                         if (normalizePlayback.value && cachedGain == null) {
-                            // Background prerender: first play still gets a stable gain, UI stays responsive.
-                            isNormalizing.value = true
-                            viewModel.isPlaying = false
-                            Toast.makeText(requireContext(), "Normalizing…", Toast.LENGTH_SHORT).show()
-                            Thread {
-                                var gainPct = 100
-                                try {
-                                    gainPct = song.normalizeFromPrerender()
-                                } catch (e: Exception) {
-                                    android.util.Log.w("HomeFragment", "Normalize failed: ${e.message}")
-                                    gainPct = -1
+                            // Fast MIDI+patch estimate (sync); first play still gets a stable gain.
+                            var gainPct = 100
+                            try {
+                                gainPct = song.normalizeFromMidiEstimate()
+                            } catch (e: Exception) {
+                                android.util.Log.w("HomeFragment", "Normalize failed: ${e.message}")
+                                gainPct = -1
+                            }
+                            if (gainPct > 0) {
+                                normalizeGainCache[pathKey] = gainPct
+                                android.util.Log.d("HomeFragment", "Normalize estimate gain: $gainPct%")
+                            } else {
+                                Mixer.setSongNormalizeGain(100)
+                                if (gainPct < 0) {
+                                    Toast.makeText(requireContext(), "Normalize failed; playing unnormalized", Toast.LENGTH_SHORT).show()
                                 }
-                                postToMain {
-                                    isNormalizing.value = false
-                                    if (currentSong !== song) return@postToMain
-                                    if (gainPct > 0) {
-                                        normalizeGainCache[pathKey] = gainPct
-                                        android.util.Log.d("HomeFragment", "Normalize gain: $gainPct%")
-                                    } else {
-                                        Mixer.setSongNormalizeGain(100)
-                                        if (gainPct < 0) {
-                                            Toast.makeText(requireContext(), "Normalize failed; playing unnormalized", Toast.LENGTH_SHORT).show()
-                                        }
-                                    }
-                                    finishStartNormalizedSong(song, file)
-                                }
-                            }.start()
+                            }
+                            finishStartNormalizedSong(song, file)
                         } else {
                             if (cachedGain != null) {
                                 Mixer.setSongNormalizeGain(cachedGain)
@@ -1998,10 +1985,6 @@ class HomeFragment : Fragment() {
     }
     
     private fun stopPlayback(delete: Boolean = true) {
-        if (isNormalizing.value) {
-            try { Song.cancelNormalizeFromPrerender() } catch (_: Exception) {}
-            isNormalizing.value = false
-        }
         // Only try to stop if mixer exists
         if (Mixer.getMixer() != null) {
             currentSong?.stop(delete)

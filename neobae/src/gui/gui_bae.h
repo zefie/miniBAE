@@ -112,11 +112,9 @@ bool bae_load_song_with_settings(const char *path, int transpose, int tempo, int
                                  bool loop_enabled, int reverb_type, bool ch_enable[16], bool use_embedded_banks);
 bool bae_play(bool *playing);
 void bae_stop(bool *playing, int *progress);
-/* Async normalize: poll from the UI loop so the main thread stays responsive. */
-bool bae_is_normalizing(void);
-void bae_poll_normalize(bool *playing);
+/* Clear song-normalize gain (e.g. when disabling the setting). */
 void bae_cancel_normalize(void);
-/* Reload current song and (re)start so normalize can scan. Used when enabling the setting. */
+/* Reload current song and (re)start so normalize estimate applies. Used when enabling the setting. */
 void bae_reload_song_for_normalize(int *transpose, int *tempo, int *volume, bool *loopPlay,
                                    int *reverbType, bool ch_enable[16], bool *playing);
 void bae_pause(bool *playing, bool *paused);
