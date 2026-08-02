@@ -369,12 +369,13 @@ static int32_t dls_eg1_level(int64_t current) {
     return current >= DLS_EG1_FULL ? 0x10000 : (int32_t)(current >> 16);
 }
 
-static int32_t dls_modulated_time_micros(int32_t baseMicros, int32_t valueQ16) {
-    /* Direct EG times default to INT32_MIN → 0 µs (instant). DLS modulators
-     * (VEL/KEY → EG) still add in timecent space on a 0-timecent (= 1 s) base.
-     * microQ/TouchWiz banks often define attack/decay only via those modulators;
-     * discarding them when baseMicros==0 made ADSR sound wrong (always instant). */
+static int32_t dls_modulated_time_micros(int32_t baseMicros, int32_t valueQ16, bool eggs) {
+    /* MobileBAE/quirks: unset direct EG time (0 µs) keeps modulators inert.
+     * microQ/eggs (TouchWiz): many regions define attack/decay only via
+     * VEL/KEY→EG modulators; treat 0 as DLS 0-timecent (= 1 s) base so those
+     * modulators apply. Do not change the quirks path. */
     if (baseMicros <= 0) {
+        if (!eggs) return 0;
         baseMicros = 1000000;
     }
     int64_t val = ((int64_t)baseMicros * dls_exp2_q16(valueQ16 / 1200)) >> 16;
@@ -2979,6 +2980,18 @@ static const DLS_Connection g_dlsv2_default_connections[] = {
 static const size_t g_dlsv2_default_connections_count = sizeof(g_dlsv2_default_connections) / sizeof(g_dlsv2_default_connections[0]);
 static const size_t g_dls_default_connections_count = sizeof(g_dls_default_connections) / sizeof(g_dls_default_connections[0]);
 
+/* microQ/eggs under -dlscompat: ignore DLS2's 50.8% CC10 and use true 50/50.
+ * Quirks/MobileBAE keeps g_dls_default_connections (unchanged). */
+static const DLS_Connection g_eggs_cc10_pan_50 = { 0x8A, 0, 4, 0x4000, 32768000 };
+
+static const DLS_Connection* dls_compat_default_connection(size_t i, bool eggs) {
+    const DLS_Connection* c = &g_dlsv2_default_connections[i];
+    if (eggs && c->source == 0x8A && c->destination == 4) {
+        return &g_eggs_cc10_pan_50;
+    }
+    return c;
+}
+
 static bool dls_has_connection(const DLS_Articulation* art, const DLS_Connection* candidate) {
     for (uint32_t i = 0; i < art->connectionCount; i++) {
         if (dls_parse_connection_same_key(&art->runtimeConnections[i], candidate)) return true;
@@ -3069,7 +3082,9 @@ static void dls_apply_note_on_connections(const DLS_Articulation* art, int32_t k
         dls_apply_note_on_connection(&art->runtimeConnections[i], key, velocity, unityNote, ch,
                                      pitch, gainMultiplier, panOffset);
     }
-    bool quirks = dls_bank_quirks(ch->selectedInstrument->parentBank);
+    const DLS_Bank* bank = ch->selectedInstrument->parentBank;
+    bool quirks = dls_bank_quirks(bank);
+    bool eggs = bank && bank->eggsArticulators;
     if (quirks) {
         for (uint32_t i = 0; i < g_dls_default_connections_count; i++) {
             if (!dls_has_connection(art, &g_dls_default_connections[i])) {
@@ -3079,8 +3094,9 @@ static void dls_apply_note_on_connections(const DLS_Articulation* art, int32_t k
         }
     } else {
         for (uint32_t i = 0; i < g_dlsv2_default_connections_count; i++) {
-            if (!dls_has_connection(art, &g_dlsv2_default_connections[i])) {
-                dls_apply_note_on_connection(&g_dlsv2_default_connections[i], key, velocity, unityNote, ch,
+            const DLS_Connection* def = dls_compat_default_connection(i, eggs);
+            if (!dls_has_connection(art, def)) {
+                dls_apply_note_on_connection(def, key, velocity, unityNote, ch,
                                              pitch, gainMultiplier, panOffset);
             }
         }
@@ -3151,6 +3167,7 @@ static void dls_apply_runtime_connections(const DLS_Articulation* art, const DLS
                                      panOffset, reverbSend, chorusSend, filterCutoffDelta, filterResonanceDelta);
     }
     bool quirks = dls_bank_quirks(voice->parentBank);
+    bool eggs = voice->parentBank && voice->parentBank->eggsArticulators;
     if (quirks) {
         for (uint32_t i = 0; i < g_dls_default_connections_count; i++) {
             if (!dls_has_connection(art, &g_dls_default_connections[i])) {
@@ -3160,8 +3177,9 @@ static void dls_apply_runtime_connections(const DLS_Articulation* art, const DLS
         }
     } else {
         for (uint32_t i = 0; i < g_dlsv2_default_connections_count; i++) {
-            if (!dls_has_connection(art, &g_dlsv2_default_connections[i])) {
-                dls_apply_runtime_connection(&g_dlsv2_default_connections[i], voice, runtimePitch, gainAttenuation,
+            const DLS_Connection* def = dls_compat_default_connection(i, eggs);
+            if (!dls_has_connection(art, def)) {
+                dls_apply_runtime_connection(def, voice, runtimePitch, gainAttenuation,
                                              panOffset, reverbSend, chorusSend, filterCutoffDelta, filterResonanceDelta);
             }
         }
@@ -3398,31 +3416,32 @@ static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t v
     int32_t eg2Hold = dls_timecent_to_micros(art->eg2Hold);
     int32_t eg2Decay = dls_timecent_to_micros(art->eg2Decay);
     int32_t eg2Release = dls_timecent_to_micros(art->eg2Release);
+    bool eggsEg = v->parentBank && v->parentBank->eggsArticulators;
 
     for (uint32_t i = 0; i < art->connectionCount; i++) {
         const DLS_Connection* connection = &art->runtimeConnections[i];
         int32_t value = dls_note_on_connection_value_q16(connection, key, velocity, unityNote, ch);
         if (value == 0) continue;
         if (connection->destination == 0x20B) {
-            eg1Delay = dls_modulated_time_micros(eg1Delay, value);
+            eg1Delay = dls_modulated_time_micros(eg1Delay, value, eggsEg);
         } else if (connection->destination == 0x206) {
-            eg1Attack = dls_modulated_time_micros(eg1Attack, value);
+            eg1Attack = dls_modulated_time_micros(eg1Attack, value, eggsEg);
         } else if (connection->destination == 0x20C) {
-            eg1Hold = dls_modulated_time_micros(eg1Hold, value);
+            eg1Hold = dls_modulated_time_micros(eg1Hold, value, eggsEg);
         } else if (connection->destination == 0x207) {
-            eg1Decay = dls_modulated_time_micros(eg1Decay, value);
+            eg1Decay = dls_modulated_time_micros(eg1Decay, value, eggsEg);
         } else if (connection->destination == 0x209) {
-            eg1Release = dls_modulated_time_micros(eg1Release, value);
+            eg1Release = dls_modulated_time_micros(eg1Release, value, eggsEg);
         } else if (connection->destination == 0x30F) {
-            eg2Delay = dls_modulated_time_micros(eg2Delay, value);
+            eg2Delay = dls_modulated_time_micros(eg2Delay, value, eggsEg);
         } else if (connection->destination == 0x30A) {
-            eg2Attack = dls_modulated_time_micros(eg2Attack, value);
+            eg2Attack = dls_modulated_time_micros(eg2Attack, value, eggsEg);
         } else if (connection->destination == 0x310) {
-            eg2Hold = dls_modulated_time_micros(eg2Hold, value);
+            eg2Hold = dls_modulated_time_micros(eg2Hold, value, eggsEg);
         } else if (connection->destination == 0x30B) {
-            eg2Decay = dls_modulated_time_micros(eg2Decay, value);
+            eg2Decay = dls_modulated_time_micros(eg2Decay, value, eggsEg);
         } else if (connection->destination == 0x30D) {
-            eg2Release = dls_modulated_time_micros(eg2Release, value);
+            eg2Release = dls_modulated_time_micros(eg2Release, value, eggsEg);
         } else if (connection->destination == 0x500) {
             /* RetroDLS folds note-on filter modulation into the filter base cutoff. */
             filterCutoff += value / 100;
@@ -3498,8 +3517,12 @@ static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t v
         gainQ16 = DLS_FP_MUL(gainQ16, env1);
 
         panOffset = dls_clamp(panOffset, -0x10000, 0x10000);
-        v->targetLeftGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(-panOffset, voiceQuirks));
-        v->targetRightGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(panOffset, voiceQuirks));
+        /* Eggs/microQ: use MobileBAE 50% pan table (500), not DLS2 50.8% (508). */
+        {
+            bool panQuirks = voiceQuirks || (v->parentBank && v->parentBank->eggsArticulators);
+            v->targetLeftGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(-panOffset, panQuirks));
+            v->targetRightGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(panOffset, panQuirks));
+        }
 
         if (reverbSend == 0 && ch->reverb > 0) {
             reverbSend = (ch->reverb & 0x7F) << 9;
@@ -4286,8 +4309,11 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
                     v->reverbSend = v->targetReverbSend;
                     v->chorusSend = v->targetChorusSend;
                 }
-                v->targetLeftGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(-panOffset, voiceQuirks));
-                v->targetRightGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(panOffset, voiceQuirks));
+                {
+                    bool panQuirks = voiceQuirks || (v->parentBank && v->parentBank->eggsArticulators);
+                    v->targetLeftGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(-panOffset, panQuirks));
+                    v->targetRightGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(panOffset, panQuirks));
+                }
                 
                 // If articulation has no explicit reverb/chorus, apply channel-level CC#91/93 values
                 // This allows reverbs 8+ (which read from songBufferReverb) to process DLS audio
