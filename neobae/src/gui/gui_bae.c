@@ -107,6 +107,14 @@ static void norm_cache_invalidate(const char *path)
     }
 }
 
+/* Bank swap invalidates all song→gain entries; next play re-estimates. */
+static void norm_cache_clear(void)
+{
+    g_norm_cache_count = 0;
+    if (g_bae.mixer)
+        BAEMixer_SetSongNormalizeGain(g_bae.mixer, 100);
+}
+
 void bae_cancel_normalize(void)
 {
     if (g_bae.mixer)
@@ -400,6 +408,10 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
         return false;
     if (!path)
         return false;
+
+    /* Patch loudness changes with the bank — drop cached normalize gains. */
+    if (!g_in_bank_load_recreate)
+        norm_cache_clear();
 
 #if SUPPORT_MIDI_HW == TRUE
     bool midi_was_enabled_for_swap = false;
@@ -1786,22 +1798,55 @@ bool bae_play(bool *playing)
                 else
                 {
                     // For resume, preroll from start (engine needs initial setup) then seek to desired position AFTER preroll
+                    Settings settings = load_settings();
 #if SUPPORT_MIDI_HW == TRUE
                     g_midi_output_suppressed_during_seek = true;
 #endif
                     BAESong_SetMicrosecondPosition(g_bae.song, 0);
                     BAESong_Preroll(g_bae.song);
-                    Settings settings = load_settings();
                     BAESong_SetVelocityCurve(g_bae.song, settings.volume_curve);
+                    bae_set_reverb(g_bae.current_reverb_type);
+
+                    if (g_normalize_enabled)
+                    {
+                        int cachedGain = norm_cache_lookup(g_bae.loaded_path);
+                        if (cachedGain > 0)
+                        {
+                            BAEMixer_SetSongNormalizeGain(g_bae.mixer, cachedGain);
+                            BAE_PRINTF("Normalize cache hit (resume): %d%%\n", cachedGain);
+                        }
+                        else
+                        {
+                            /* Bank swap clears the cache — re-estimate before resume. */
+                            int32_t gainPct = 100;
+                            BAEResult nerr = BAESong_NormalizeFromMidiEstimate(g_bae.song, 89, &gainPct);
+                            if (nerr != BAE_NO_ERROR)
+                            {
+                                BAE_PRINTF("Normalize estimate failed on resume (%d)\n", (int)nerr);
+                                BAEMixer_SetSongNormalizeGain(g_bae.mixer, 100);
+                            }
+                            else
+                            {
+                                char nmsg[64];
+                                BAE_PRINTF("Normalize estimate gain (resume): %d%%\n", (int)gainPct);
+                                snprintf(nmsg, sizeof(nmsg), "Normalized (%d%%)", (int)gainPct);
+                                set_status_message(nmsg);
+                                norm_cache_store(g_bae.loaded_path, gainPct);
+                            }
+                            BAESong_SetMicrosecondPosition(g_bae.song, 0);
+                            BAESong_Preroll(g_bae.song);
+                            BAESong_SetVelocityCurve(g_bae.song, settings.volume_curve);
+                        }
+                    }
+                    else if (g_bae.mixer)
+                    {
+                        BAEMixer_SetSongNormalizeGain(g_bae.mixer, 100);
+                    }
+
                     BAESong_SetMicrosecondPosition(g_bae.song, startPosUs);
 #if SUPPORT_MIDI_HW == TRUE
                     g_midi_output_suppressed_during_seek = false;
 #endif
-                    {
-                        int cachedGain = g_normalize_enabled ? norm_cache_lookup(g_bae.loaded_path) : 0;
-                        if (g_bae.mixer)
-                            BAEMixer_SetSongNormalizeGain(g_bae.mixer, cachedGain > 0 ? cachedGain : 100);
-                    }
                 }
 
                 return bae_finish_song_start(playing, startPosUs);

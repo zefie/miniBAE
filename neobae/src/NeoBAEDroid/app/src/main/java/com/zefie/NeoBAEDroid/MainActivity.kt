@@ -432,6 +432,40 @@ class MainActivity : AppCompatActivity() {
                 song.preroll()
                 song.seekToMs(0)
 
+                // Bank swap invalidates HomeFragment's path→gain cache; re-estimate here
+                // (this reload path does not go through startPlayback).
+                val normalizeEnabled = prefs.getBoolean("normalize_playback", false)
+                if (normalizeEnabled) {
+                    try {
+                        val gainPct = song.normalizeFromMidiEstimate()
+                        if (gainPct > 0) {
+                            android.util.Log.d("MainActivity", "Normalize estimate after bank swap: $gainPct%")
+                            val fragment = supportFragmentManager.findFragmentById(R.id.fragment_container)
+                            if (fragment is HomeFragment) {
+                                fragment.rememberNormalizeGain(currentItem.file.absolutePath, gainPct)
+                            }
+                        } else {
+                            Mixer.setSongNormalizeGain(100)
+                            android.util.Log.w("MainActivity", "Normalize estimate failed after bank swap: $gainPct")
+                        }
+                        // Estimate walk rewinds the song; restore preroll state.
+                        song.seekToMs(0)
+                        song.preroll()
+                        song.setVelocityCurve(velocityCurve)
+                    } catch (e: Exception) {
+                        android.util.Log.w("MainActivity", "Normalize after bank swap failed: ${e.message}")
+                        try {
+                            Mixer.setSongNormalizeGain(100)
+                        } catch (_: Exception) {
+                        }
+                    }
+                } else {
+                    try {
+                        Mixer.setSongNormalizeGain(100)
+                    } catch (_: Exception) {
+                    }
+                }
+
                 val startResult = song.start()
                 if (startResult != 0) {
                     android.util.Log.e("MainActivity", "Failed to start reloaded song: $startResult")

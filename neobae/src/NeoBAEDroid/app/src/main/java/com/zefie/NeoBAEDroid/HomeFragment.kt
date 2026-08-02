@@ -368,6 +368,24 @@ class HomeFragment : Fragment() {
     private val karaokeHandler = KaraokeHandler()
     private val normalizeGainCache = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
+    /** Bank swap changes patch loudness — drop cached gains so the next play re-estimates. */
+    private fun invalidateNormalizeCacheForBankChange() {
+        normalizeGainCache.clear()
+        try {
+            if (Mixer.getMixer() != null) {
+                Mixer.setSongNormalizeGain(100)
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    /** Used by MainActivity after bank-swap reload re-estimates normalize gain. */
+    fun rememberNormalizeGain(path: String, gainPct: Int) {
+        if (path.isNotEmpty() && gainPct > 0) {
+            normalizeGainCache[path] = gainPct
+        }
+    }
+
     // Prevent overlapping bank swap operations (mixer teardown/recreate is not re-entrant).
     private val bankSwapInProgress = java.util.concurrent.atomic.AtomicBoolean(false)
 
@@ -3507,6 +3525,7 @@ class HomeFragment : Fragment() {
                 
                 if (r == 0) {
                     prefs.edit().putString("last_bank_path", resolvedFile.absolutePath).apply()
+                    invalidateNormalizeCacheForBankChange()
                     
                     postToMain {
                         currentBankName.value = originalName
@@ -3674,6 +3693,9 @@ class HomeFragment : Fragment() {
 
             val r = loadBuiltInPatchesFromAssets(requireContext())
             loadStatus = r
+            if (r == 0) {
+                invalidateNormalizeCacheForBankChange()
+            }
             postToMain {
                 if (r == 0) {
                     val friendly = Mixer.getBankFriendlyName()
