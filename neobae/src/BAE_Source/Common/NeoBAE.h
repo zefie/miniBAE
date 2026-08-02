@@ -3095,6 +3095,18 @@ BAEResult BAEMixer_LoadFromFile(BAEMixer mixer, BAEPathName filePath, BAELoadRes
 // ------------------------------------
 BAEResult BAEMixer_LoadFromMemory(BAEMixer mixer, void const *pData, uint32_t dataSize, BAELoadResult *result);
 
+// BAEMixer_ProbeSongLengthFromMemory()
+// ------------------------------------
+// Fast song duration probe for playlist / info readers. Detects type, loads
+// sequencer data only (no instrument/sample decode), measures length, frees.
+// Suitable for RMF/ZMF/MIDI without the cost of embedded bank expansion.
+// ------------------------------------
+BAEResult BAEMixer_ProbeSongLengthFromMemory(BAEMixer mixer,
+                                             void const *pData,
+                                             uint32_t dataSize,
+                                             uint32_t *outLengthMicros,
+                                             BAEFileType *outFileType);
+
 // BAELoadResult_Cleanup()
 // ------------------------------------
 // Cleans up resources allocated by BAEMixer_LoadFromFile.

@@ -640,6 +640,15 @@ OPErr GM_InitGeneralSound(void *threadContext, Rate theRate, TerpMode theTerp, A
     pMixer = NULL;
     if (theErr == NO_ERR)
     {
+        // Only one GM_Mixer may own MusicGlobals. Opening a second mixer overwrites
+        // the pointer and leaves the first session crashing on FreeSong / MIDI queue walks.
+        if (MusicGlobals != NULL)
+        {
+            theErr = NOT_REENTERANT;
+        }
+    }
+    if (theErr == NO_ERR)
+    {
 // Allocate MusicGlobals
         MusicGlobals = (GM_Mixer *)XNewPtr( (int32_t)sizeof(GM_Mixer) );
         pMixer = MusicGlobals;

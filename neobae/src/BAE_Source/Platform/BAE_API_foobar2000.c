@@ -84,12 +84,29 @@ static void PV_EnsureTimerInit(void)
     }
 }
 
+// Must match BUFFER_SLICE_TIME / rounding in GenSetup.c PV_SetSampleSliceSize().
+#ifndef FB2K_BUFFER_SLICE_TIME
+#define FB2K_BUFFER_SLICE_TIME 11610
+#endif
+
 static void PV_ComputeSliceSize(void)
 {
     int16_t maxFrames = BAE_GetMaxSamplePerSlice();
-    if (maxFrames <= 0) maxFrames = 512;
-    uint32_t frames = (uint32_t)maxFrames;
-    if (frames < 64) frames = 64;
+    uint32_t frames;
+    if (maxFrames > 0)
+    {
+        frames = (uint32_t)maxFrames;
+    }
+    else
+    {
+        // Mixer not ready yet — derive the same chunk size GenSetup would use.
+        uint32_t rate = g_sampleRate ? g_sampleRate : 44100;
+        frames = (rate * (uint32_t)FB2K_BUFFER_SLICE_TIME) / 1000000u;
+        if (frames % 16u != 0u)
+            frames = 16u * ((frames / 16u) + 1u);
+    }
+    if (frames < 64u)
+        frames = 64u;
     g_framesPerSlice = frames;
     g_audioByteBufferSize = (int32_t)(frames * g_channels * (g_bits / 8));
     g_audioByteBufferSize = (g_audioByteBufferSize + 63) & ~63; // align to 64 bytes
@@ -124,38 +141,47 @@ int32_t BAE_FB2K_RenderAudio(void *pBuffer, int32_t bufferByteLength, int32_t sa
     if (!pBuffer || bufferByteLength <= 0 || sampleFrames <= 0) return 0;
     if (!g_acquired || g_muted) { memset(pBuffer, 0, (size_t)bufferByteLength); return bufferByteLength; }
 
-    int32_t bytesNeeded = sampleFrames * (int32_t)g_channels * (int32_t)(g_bits / 8);
-    if (bytesNeeded > bufferByteLength) bytesNeeded = bufferByteLength;
-
-    // If the request fits within one slice, call the engine once directly into
-    // the caller's buffer (zero-copy fast path).
-    if (bytesNeeded <= g_audioByteBufferSize)
+    // Keep slice metrics in sync with the live mixer (rate-dependent One_Slice).
     {
-        BAE_BuildMixerSlice(NULL, pBuffer, bytesNeeded, sampleFrames);
-        return bytesNeeded;
+        int16_t liveSlice = BAE_GetMaxSamplePerSlice();
+        if (liveSlice > 0 && (uint32_t)liveSlice != g_framesPerSlice)
+            PV_ComputeSliceSize();
+    }
+    if (g_framesPerSlice == 0)
+        PV_ComputeSliceSize();
+    if (g_framesPerSlice == 0)
+        return 0;
+
+    const int32_t frameBytes = (int32_t)(g_channels * (g_bits / 8));
+    if (frameBytes <= 0)
+        return 0;
+
+    const int32_t sliceFrames = (int32_t)g_framesPerSlice;
+    const int32_t sliceBytes = sliceFrames * frameBytes;
+    if (sliceBytes <= 0 || bufferByteLength < sliceBytes)
+        return 0;
+
+    // BAE_BuildMixerSlice always advances the sequencer by one full mixer slice
+    // (bufferTime / One_Slice), ignoring a smaller sampleFrames argument. Rendering
+    // a partial last chunk therefore makes MIDI run fast at non-44.1k rates where
+    // the caller's frame count is not an integer multiple of One_Slice.
+    int32_t maxFrames = sampleFrames;
+    if (maxFrames * frameBytes > bufferByteLength)
+        maxFrames = bufferByteLength / frameBytes;
+    const int32_t wholeSlices = maxFrames / sliceFrames;
+    if (wholeSlices <= 0)
+        return 0;
+
+    uint8_t *dst = (uint8_t *)pBuffer;
+    int32_t framesOut = 0;
+
+    for (int32_t i = 0; i < wholeSlices; ++i)
+    {
+        BAE_BuildMixerSlice(NULL, dst + (framesOut * frameBytes), sliceBytes, sliceFrames);
+        framesOut += sliceFrames;
     }
 
-    // Otherwise render in slice-sized chunks and copy.
-    PV_EnsureSliceBuf();
-    if (!g_sliceBuf) return 0;
-
-    uint8_t *dst         = (uint8_t *)pBuffer;
-    int32_t  bytesLeft   = bytesNeeded;
-    int32_t  frameBytes  = (int32_t)(g_channels * (g_bits / 8));
-    int32_t  bytesWritten = 0;
-
-    while (bytesLeft > 0)
-    {
-        int32_t chunkBytes  = (bytesLeft < g_audioByteBufferSize) ? bytesLeft : g_audioByteBufferSize;
-        int32_t chunkFrames = chunkBytes / frameBytes;
-        if (chunkFrames <= 0) break;
-
-        BAE_BuildMixerSlice(NULL, g_sliceBuf, chunkBytes, chunkFrames);
-        memcpy(dst + bytesWritten, g_sliceBuf, (size_t)chunkBytes);
-        bytesWritten += chunkBytes;
-        bytesLeft    -= chunkBytes;
-    }
-    return bytesWritten;
+    return framesOut * frameBytes;
 }
 
 // ---------------------------------------------------------------------------

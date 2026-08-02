@@ -2004,6 +2004,13 @@ const char *BAE_GetCompileInfo()
 #else
     snprintf(versionString, maxStrSize, "gcc v%d.%d", __GNUC__, __GNUC_MINOR__);
 #endif
+#elif defined(_MSC_VER)
+    // _MSC_VER is e.g. 1944 for 19.44 (VS 2022 / 2026 toolsets).
+#ifdef __cplusplus
+    snprintf(versionString, maxStrSize, "MSVC C++ v%u.%u", (unsigned)(_MSC_VER / 100), (unsigned)(_MSC_VER % 100));
+#else
+    snprintf(versionString, maxStrSize, "MSVC v%u.%u", (unsigned)(_MSC_VER / 100), (unsigned)(_MSC_VER % 100));
+#endif
 #else
     snprintf(versionString, maxStrSize, "UNKNOWN");
 #endif
@@ -14852,6 +14859,259 @@ BAEResult BAEMixer_LoadFromMemory(BAEMixer mixer, void const *pData, uint32_t da
         result->result = BAE_NO_ERROR;
         return BAE_NO_ERROR;
     }
+}
+
+// BAEMixer_ProbeSongLengthFromMemory()
+// ------------------------------------
+// Playlist-friendly duration probe: sequencer walk only, no instrument decode.
+BAEResult BAEMixer_ProbeSongLengthFromMemory(BAEMixer mixer,
+                                             void const *pData,
+                                             uint32_t dataSize,
+                                             uint32_t *outLengthMicros,
+                                             BAEFileType *outFileType)
+{
+    BAEFileType ftype;
+    BAESong song;
+    BAEResult sr;
+    uint32_t len;
+
+    if (!mixer || !mixer->pMixer || !pData || dataSize == 0 || !outLengthMicros)
+        return BAE_PARAM_ERR;
+
+    *outLengthMicros = 0;
+    if (outFileType)
+        *outFileType = BAE_INVALID_TYPE;
+
+    ftype = BAE_INVALID_TYPE;
+    if (dataSize >= 4)
+    {
+        const unsigned char *bytes = (const unsigned char *)pData;
+        if ((bytes[0] == 'I' && bytes[1] == 'R' && bytes[2] == 'E' && bytes[3] == 'Z') ||
+            (bytes[0] == 'Z' && bytes[1] == 'R' && bytes[2] == 'E' && bytes[3] == 'Z'))
+        {
+            ftype = BAE_RMF;
+        }
+    }
+    if (ftype == BAE_INVALID_TYPE)
+    {
+        int32_t probeSize = (int32_t)dataSize;
+        if (probeSize > 64)
+            probeSize = 64;
+        ftype = X_DetermineFileTypeByData((const unsigned char *)pData, probeSize);
+    }
+    if (outFileType)
+        *outFileType = ftype;
+    if (ftype == BAE_INVALID_TYPE)
+        return BAE_BAD_FILE;
+
+    // Audio files are not songs — caller should not use this for sample media.
+    if (ftype == BAE_WAVE_TYPE || ftype == BAE_AIFF_TYPE || ftype == BAE_AU_TYPE)
+        return BAE_INVALID_TYPE;
+
+    song = BAESong_New(mixer);
+    if (!song)
+        return BAE_MEMORY_ERR;
+
+    sr = BAE_GENERAL_ERR;
+
+    if (ftype == BAE_RMF)
+    {
+        XFILE fileRef;
+        SongResource *pXSong;
+        GM_Song *pSong;
+        OPErr theErr;
+        XLongResourceID theID;
+        int32_t size;
+        bool isZmfContainer = FALSE;
+
+        theErr = NO_ERR;
+        fileRef = XFileOpenResourceFromMemory((XPTR)pData, dataSize, TRUE);
+        if (!fileRef)
+        {
+            BAESong_Delete(song);
+            return BAE_BAD_FILE;
+        }
+
+        {
+            XFILERESOURCEMAP mapHdr;
+            XFileSetPosition(fileRef, 0L);
+            if (XFileRead(fileRef, &mapHdr, (int32_t)sizeof(XFILERESOURCEMAP)) == 0)
+            {
+                if (XGetLong(&mapHdr.mapID) == XFILERESOURCE_ZMF_ID)
+                {
+#if USE_ZMF_SUPPORT == TRUE
+                    isZmfContainer = TRUE;
+#else
+                    XFileClose(fileRef);
+                    BAESong_Delete(song);
+                    return BAE_UNSUPPORTED_FORMAT;
+#endif
+                }
+            }
+        }
+
+        pXSong = (SongResource *)XGetIndexedFileResource(fileRef, ID_SONG, &theID, 0, NULL, &size);
+        if (pXSong && song->pSong)
+        {
+            PV_TagSongResourceContainerType(pXSong, isZmfContainer);
+            PV_BAESong_Unload(song);
+            pSong = GM_LoadSong(mixer->pMixer,
+                                NULL,
+                                song,
+                                (XShortResourceID)theID,
+                                (void *)pXSong,
+                                NULL,
+                                0L,
+                                NULL,
+                                FALSE, // do not decode INST/samples
+                                TRUE,
+                                CreateBankToken(),
+                                &theErr);
+            if (pSong && theErr == NO_ERR)
+            {
+                pSong->songFlags |= SONG_FLAG_IS_RMF;
+                GM_SetDisposeSongDataWhenDoneFlag(pSong, TRUE);
+                GM_SetSongLoopFlag(pSong, FALSE);
+                song->pSong = pSong;
+                sr = BAE_NO_ERROR;
+            }
+            else
+            {
+                sr = BAE_TranslateOPErr(theErr != NO_ERR ? theErr : BAD_FILE);
+            }
+            XDisposePtr(pXSong);
+        }
+        else
+        {
+            sr = BAE_BAD_FILE;
+        }
+        XFileClose(fileRef);
+    }
+    else if (ftype == BAE_MIDI_TYPE || ftype == BAE_RMI
+#if USE_MTHC_SUPPORT == TRUE
+             || ftype == BAE_MTHC
+#endif
+    )
+    {
+        // Full MIDI loader already walks the sequence; instrument load is the
+        // expensive part for banks, but ignoreBad + builtin bank may still touch
+        // patches. Prefer a direct loadInstruments=FALSE path.
+        SongResource *pXSong;
+        GM_Song *pSong;
+        OPErr theErr = NO_ERR;
+        XShortResourceID theID;
+        short soundVoices, midiVoices, mixLevel;
+        void *midiCopy;
+        uint32_t midiSize = dataSize;
+        const void *midiData = pData;
+
+#if USE_MTHC_SUPPORT == TRUE
+        unsigned char *decodedMthcMidi = NULL;
+        uint32_t decodedMthcMidiLen = 0;
+        if (ftype == BAE_MTHC || (dataSize >= 4 && memcmp(pData, "MThc", 4) == 0))
+        {
+            if (mthc_decompress_memory((unsigned char const *)pData, dataSize, &decodedMthcMidi, &decodedMthcMidiLen) != 0)
+            {
+                BAESong_Delete(song);
+                return BAE_BAD_FILE;
+            }
+            midiData = decodedMthcMidi;
+            midiSize = decodedMthcMidiLen;
+        }
+#endif
+
+        midiCopy = XDuplicateMemory((XPTRC)midiData, (uint32_t)midiSize);
+#if USE_MTHC_SUPPORT == TRUE
+        if (decodedMthcMidi)
+        {
+            free(decodedMthcMidi);
+            decodedMthcMidi = NULL;
+        }
+#endif
+        if (!midiCopy)
+        {
+            BAESong_Delete(song);
+            return BAE_MEMORY_ERR;
+        }
+
+        theID = midiSongCount++;
+        BAEMixer_GetMidiVoices(mixer, &midiVoices);
+        BAEMixer_GetMixLevel(mixer, &mixLevel);
+        BAEMixer_GetSoundVoices(mixer, &soundVoices);
+        pXSong = XNewSongPtr(SONG_TYPE_SMS, theID, midiVoices, mixLevel, soundVoices, REVERB_TYPE_1);
+        if (pXSong && song->pSong)
+        {
+            PV_BAESong_Unload(song);
+            pSong = GM_LoadSong(mixer->pMixer,
+                                NULL,
+                                song,
+                                theID,
+                                (void *)pXSong,
+                                midiCopy,
+                                (int32_t)midiSize,
+                                NULL,
+                                FALSE,
+                                TRUE,
+                                CreateBankToken(),
+                                &theErr);
+            if (pSong && theErr == NO_ERR)
+            {
+                GM_SetDisposeSongDataWhenDoneFlag(pSong, TRUE);
+                GM_SetSongLoopFlag(pSong, FALSE);
+                song->pSong = pSong;
+                sr = BAE_NO_ERROR;
+            }
+            else
+            {
+                XDisposePtr(midiCopy);
+                sr = BAE_TranslateOPErr(theErr != NO_ERR ? theErr : BAD_FILE);
+            }
+            XDisposePtr(pXSong);
+        }
+        else
+        {
+            XDisposePtr(midiCopy);
+            sr = BAE_MEMORY_ERR;
+        }
+    }
+#if USE_RETRO_RINGTONE_SUPPORT == TRUE
+    else if (ftype == BAE_RINGTONE_IMY || ftype == BAE_RINGTONE_RNG || ftype == BAE_RINGTONE_RTX)
+    {
+        unsigned char *midiOut = NULL;
+        uint32_t midiOutSize = 0;
+        sr = BAERingtone_ConvertToMidiFromMemory(pData, dataSize, ftype, &midiOut, &midiOutSize);
+        if (sr == BAE_NO_ERROR && midiOut && midiOutSize)
+        {
+            BAESong_Delete(song);
+            song = NULL;
+            {
+                BAEResult nested = BAEMixer_ProbeSongLengthFromMemory(mixer, midiOut, midiOutSize, outLengthMicros, NULL);
+                if (outFileType)
+                    *outFileType = ftype;
+                BAERingtone_FreeMidiBuffer(midiOut);
+                return nested;
+            }
+        }
+        BAERingtone_FreeMidiBuffer(midiOut);
+    }
+#endif
+    else
+    {
+        // XMF and other containers can pull embedded banks; skip heavy probe.
+        sr = BAE_NOT_SETUP;
+    }
+
+    if (sr == BAE_NO_ERROR && song && song->pSong)
+    {
+        len = 0;
+        sr = BAESong_GetMicrosecondLength(song, &len);
+        if (sr == BAE_NO_ERROR)
+            *outLengthMicros = (len == 0) ? 1000u : len;
+    }
+
+    if (song)
+        BAESong_Delete(song);
+    return sr;
 }
 
 bool GM_IsAudioTailActive(GM_Mixer *mixer)

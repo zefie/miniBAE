@@ -426,6 +426,11 @@ extern void BAE_BuildMixerSlice(void *threadContext, void *pAudioBuffer,
 // Typically this is 512. Use this in your calculation of audio buffers
 extern int16_t BAE_GetMaxSamplePerSlice(void);
 
+// foobar2000 pull-render entry point (BAE_API_foobar2000.c).
+// Fills pBuffer with interleaved int16 PCM for sampleFrames frames.
+// Returns bytes written, or 0 on error.
+int32_t BAE_FB2K_RenderAudio(void *pBuffer, int32_t bufferByteLength, int32_t sampleFrames);
+
 // MUTEX
 
 typedef void* BAE_Mutex;

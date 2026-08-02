@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <!-- Override on the command line or in a .user file, e.g. /p:FOOBAR_DEV=D:\dev\foobar_dev -->
+    <FOOBAR_DEV Condition="'$(FOOBAR_DEV)'==''">D:\dev\foobar_dev</FOOBAR_DEV>
+    <FOOBAR2000_SDK>$(FOOBAR_DEV)\sdk</FOOBAR2000_SDK>
+    <WTL_Include>$(FOOBAR_DEV)\3rdParty\WTL10_10320\Include</WTL_Include>
+    <!-- Directory containing libneobae.lib / libneobae.dll built with BAE_PLATFORM=foobar2000 -->
+    <NeoBAE_LibDir Condition="'$(NeoBAE_LibDir)'==''">$(ProjectDir)lib</NeoBAE_LibDir>
+    <NeoBAE_SourceDir Condition="'$(NeoBAE_SourceDir)'==''">$(ProjectDir)..\src\BAE_Source</NeoBAE_SourceDir>
+
+    <!--
+      MSVC toolset (NOT the same idea as a MinGW gcc version):
+        v142 = VS 2019
+        v143 = VS 2022
+        v145 = VS 2026
+      Your libneobae CMake build used VS 18 2026 → v145.
+      Override: msbuild ... /p:NeoBAE_PlatformToolset=v143
+    -->
+    <NeoBAE_PlatformToolset Condition="'$(NeoBAE_PlatformToolset)'==''">v145</NeoBAE_PlatformToolset>
+  </PropertyGroup>
+</Project>

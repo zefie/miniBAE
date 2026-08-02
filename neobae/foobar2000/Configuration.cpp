@@ -1,0 +1,30 @@
+#include "pch.h"
+#include "Configuration.h"
+
+static constexpr GUID guid_cfg_loop_enabled =
+{ 0xc4d166ad, 0xccf2, 0x4b8d, { 0xbd, 0x04, 0x7a, 0x91, 0x8f, 0xaa, 0x57, 0x47 } };
+static constexpr GUID guid_cfg_loop_count =
+{ 0xcd9c08ad, 0x06f9, 0x4d98, { 0xa1, 0x96, 0xa5, 0x22, 0xd4, 0x25, 0xc4, 0x1d } };
+static constexpr GUID guid_cfg_loop_infinite =
+{ 0x328fc6c2, 0x0d31, 0x42ba, { 0xb4, 0x27, 0xa4, 0x39, 0xa9, 0xb7, 0xf0, 0xd6 } };
+static constexpr GUID guid_cfg_bank_path =
+{ 0xae5da3bf, 0xb153, 0x4e8b, { 0xbe, 0xf0, 0x2a, 0x31, 0x8e, 0xe0, 0x2e, 0xa8 } };
+static constexpr GUID guid_cfg_use_builtin_bank =
+{ 0x25df4f1e, 0xdfb5, 0x42f1, { 0x90, 0x23, 0xf4, 0x09, 0x37, 0xc0, 0x9b, 0x65 } };
+static constexpr GUID guid_cfg_dls_compat =
+{ 0x4e3c3923, 0xcb7f, 0x4478, { 0xbe, 0x7c, 0x7f, 0x88, 0xa1, 0x7c, 0x3b, 0xf7 } };
+static constexpr GUID guid_cfg_normalize =
+{ 0x75ad3ab9, 0xfb7e, 0x4910, { 0xae, 0x6a, 0x21, 0xe7, 0x0e, 0xd1, 0x99, 0x6f } };
+static constexpr GUID guid_cfg_sample_rate =
+{ 0x9b2e6c41, 0x7a58, 0x4d13, { 0x9e, 0x40, 0x6f, 0x11, 0xc8, 0x2d, 0xa4, 0x77 } };
+
+namespace cfg {
+	cfg_var_modern::cfg_bool LoopEnabled(guid_cfg_loop_enabled, kDefaultLoopEnabled);
+	cfg_var_modern::cfg_int LoopCount(guid_cfg_loop_count, kDefaultLoopCount);
+	cfg_var_modern::cfg_bool LoopInfinite(guid_cfg_loop_infinite, kDefaultLoopInfinite);
+	cfg_var_modern::cfg_string BankPath(guid_cfg_bank_path, "");
+	cfg_var_modern::cfg_bool UseBuiltinBank(guid_cfg_use_builtin_bank, kDefaultUseBuiltinBank);
+	cfg_var_modern::cfg_bool DLSCompatibilityMode(guid_cfg_dls_compat, kDefaultDLSCompatibilityMode);
+	cfg_var_modern::cfg_bool Normalize(guid_cfg_normalize, kDefaultNormalize);
+	cfg_var_modern::cfg_int SampleRate(guid_cfg_sample_rate, kDefaultSampleRate);
+}

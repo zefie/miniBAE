@@ -695,6 +695,7 @@ elseif(BAE_PLATFORM STREQUAL "MacOSX")
 elseif(BAE_PLATFORM STREQUAL "foobar2000")
   set(BAE_PLATFORM_SOURCE neobae/src/BAE_Source/Platform/BAE_API_foobar2000.c)
   set(BAE_X_PLATFORM_DEFINE X_FOOBAR2000_PLUGIN)
+  message(STATUS "foobar2000 backend selected. Build libneobae, copy libneobae.dll/.lib into neobae/foobar2000/lib/, then build neobae/foobar2000/foo_neobae.sln with MSVC.")
 else()
   message(FATAL_ERROR "Unsupported BAE_PLATFORM='${BAE_PLATFORM}'.")
 endif()
@@ -1254,6 +1255,11 @@ endif()
 
 if(NEOBAE_SHARED_LIBNEOBAE)
   add_library(neobae SHARED ${NEOBAE_SOURCES})
+  if(WIN32)
+    # MSVC does not add a lib prefix; keep the historical libneobae.dll / .lib names
+    # used by foobar2000 packaging and MinGW builds.
+    set_target_properties(neobae PROPERTIES OUTPUT_NAME "libneobae")
+  endif()
 else()
   add_library(neobae STATIC ${NEOBAE_SOURCES})
 endif()
@@ -1302,10 +1308,22 @@ if(NEOBAE_STATIC AND NEOBAE_SHARED_LIBNEOBAE AND MINGW)
   )
 endif()
 
+if(NEOBAE_SHARED_LIBNEOBAE AND WIN32)
+  # Without exports MSVC will not emit an import library (.lib), which foo_neobae needs to link.
+  # MinGW also needs this (plus --export-all-symbols below).
+  set_target_properties(neobae PROPERTIES
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    ARCHIVE_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/bin/Release"
+    ARCHIVE_OUTPUT_DIRECTORY_DEBUG "${CMAKE_BINARY_DIR}/bin/Debug"
+    ARCHIVE_OUTPUT_DIRECTORY_RELWITHDEBINFO "${CMAKE_BINARY_DIR}/bin/RelWithDebInfo"
+    ARCHIVE_OUTPUT_DIRECTORY_MINSIZEREL "${CMAKE_BINARY_DIR}/bin/MinSizeRel"
+  )
+endif()
+
 if(NEOBAE_SHARED_LIBNEOBAE AND MINGW)
-  # Export symbols automatically for MinGW shared builds.
+  # Extra MinGW export + .def for optional MSVC-style import lib via dlltool.
   set(NEOBAE_DLL_DEF_FILE "${CMAKE_CURRENT_BINARY_DIR}/bin/libneobae.def")
-  set_target_properties(neobae PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
   target_link_options(neobae PRIVATE
     -Wl,--export-all-symbols
     -Wl,--output-def,${NEOBAE_DLL_DEF_FILE}
@@ -1494,13 +1512,42 @@ if(NEOBAE_STATIC AND MINGW)
       cfgmgr32  
     )
   endif()
-  if(BAE_ENABLE_XMF_SUPPORT)
-    if (MINGW)
+endif()
+
+# zlib for XMF/MXMF inflate (GenXMF.c). MinGW uses toolchain libs; MSVC uses
+# find_package or a FetchContent fallback so headers/libs are always available.
+if(BAE_ENABLE_XMF_SUPPORT)
+  if(MINGW)
+    if(NEOBAE_STATIC)
       target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} zs ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
-    else() 
+    else()
       target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} z ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
     endif()
-  endif()  
+  else()
+    find_package(ZLIB QUIET)
+    if(ZLIB_FOUND)
+      target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ZLIB::ZLIB)
+      message(STATUS "XMF: linking system zlib (${ZLIB_VERSION_STRING})")
+    else()
+      include(FetchContent)
+      set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+      FetchContent_Declare(neobae_zlib
+        GIT_REPOSITORY https://github.com/madler/zlib.git
+        GIT_TAG v1.3.1
+        GIT_SHALLOW TRUE
+      )
+      FetchContent_MakeAvailable(neobae_zlib)
+      if(TARGET zlibstatic)
+        target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} zlibstatic)
+        message(STATUS "XMF: using FetchContent zlibstatic (v1.3.1)")
+      elseif(TARGET zlib)
+        target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} zlib)
+        message(STATUS "XMF: using FetchContent zlib (v1.3.1)")
+      else()
+        message(FATAL_ERROR "XMF support requires zlib, but neither ZLIB package nor FetchContent zlib targets were found.")
+      endif()
+    endif()
+  endif()
 endif()
 
 
@@ -1545,7 +1592,6 @@ function(bae_apply_compile_definitions target)
       USE_OPUS_ENCODER=$<IF:$<BOOL:${BAE_ENABLE_OPUS_ENCODER}>,1,0>
       USE_OPUS_DECODER=$<IF:$<BOOL:${BAE_ENABLE_OPUS_DECODER}>,1,0>
       OPUS_BUILD=$<IF:$<BOOL:$<OR:$<BOOL:${BAE_ENABLE_OPUS_ENCODER}>,$<BOOL:${BAE_ENABLE_OPUS_DECODER}>>>,1,0>
-      VAR_ARRAYS=$<IF:$<BOOL:$<OR:$<BOOL:${BAE_ENABLE_OPUS_ENCODER}>,$<BOOL:${BAE_ENABLE_OPUS_DECODER}>>>,1,0>
       USE_MINIMP3_WRAPPER=$<IF:$<BOOL:${BAE_ENABLE_MP3_DECODER}>,1,0>
       USE_LAME_ENCODER=$<IF:$<BOOL:${BAE_ENABLE_MP3_ENCODER}>,1,0>
       HAVE_CONFIG_H=$<IF:$<BOOL:$<OR:$<BOOL:${BAE_ENABLE_MP3_ENCODER}>,$<BOOL:${BAE_ENABLE_FLAC_ENCODER}>,$<BOOL:${BAE_ENABLE_FLAC_DECODER}>>>,1,0>
@@ -1581,10 +1627,26 @@ function(bae_apply_compile_definitions target)
       GIT_DIRTY=$<IF:$<BOOL:${BAE_GIT_DIRTY}>,1,0>
       SUPPORT_MIDI_HW=$<IF:$<BOOL:${BAE_ENABLE_MIDI_HARDWARE}>,1,0>
   )
-  target_compile_options(${target} PRIVATE -Wall)
+  # Opus stack scratch: MSVC has no C99 VLAs, so use alloca instead of VAR_ARRAYS.
+  if(BAE_ENABLE_OPUS_ENCODER OR BAE_ENABLE_OPUS_DECODER)
+    if(MSVC)
+      target_compile_definitions(${target} PUBLIC USE_ALLOCA=1)
+    else()
+      target_compile_definitions(${target} PUBLIC VAR_ARRAYS=1)
+    endif()
+  endif()
+  # MSVC's -Wall is /Wall (every warning); keep that off. Use -Wall only for GCC/Clang.
+  if(NOT MSVC)
+    target_compile_options(${target} PRIVATE -Wall)
+  endif()
 endfunction()
 
-target_compile_options(neobae PRIVATE -w)
+# Quiet third-party/engine noise so real errors stay visible.
+if(MSVC)
+  target_compile_options(neobae PRIVATE /W0)
+else()
+  target_compile_options(neobae PRIVATE -w)
+endif()
 target_compile_features(neobae PUBLIC c_std_99)
 
 if(MINGW)
@@ -1600,10 +1662,6 @@ if(UNIX AND NOT APPLE)
   if(CMAKE_DL_LIBS)
     target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${CMAKE_DL_LIBS})
   endif()
-endif()
-
-if(NOT NEOBAE_STATIC AND BAE_ENABLE_XMF_SUPPORT)
-  target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${NEOBAE_STATIC_DEP_LINK_PREFIX} z ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
 endif()
 
 if(BAE_ENABLE_LZMA)

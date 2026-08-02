@@ -56,10 +56,6 @@
 #include "NeoBAE.h"
 #include "GenBankBalance.h"
 
-
-// For temporary file fallback when loading DLS banks (path-based load only)
-#include <unistd.h>  // mkstemp, write, close, unlink, fsync
-
 #define SAMPLE_BLOCK_SIZE 512
 
 // Channel activity tracking for amplitude estimation

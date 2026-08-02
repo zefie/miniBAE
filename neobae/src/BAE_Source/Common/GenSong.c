@@ -1250,6 +1250,12 @@ void GM_KillSongEventsFromQueue(GM_Song *pSong)
     int16_t count;
     Q_MIDIEvent *pEvent;
 
+    // MusicGlobals is a process-wide singleton; teardown races / nested mixers can null it.
+    if (MusicGlobals == NULL || pSong == NULL)
+    {
+        return;
+    }
+
     for (count = 0; count < MAX_QUEUE_EVENTS; count++)
     {
         pEvent = &MusicGlobals->theExternalMidiQueue[count];
