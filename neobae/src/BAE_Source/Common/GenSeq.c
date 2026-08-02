@@ -2490,7 +2490,7 @@ static void PV_ProcessNoteOff(GM_Song *pSong, int16_t MIDIChannel, int16_t curre
 static float PV_HsbRmfMixVolumeScale(GM_Song *pSong)
 {
     const float kMixedAttenuation = 0.25f;
-    const float kXmfHsbHostUnity = 0.85f;
+    const float kXmfHsbHostUnity = 0.55f;
 
 #if USE_NATIVE_DLS == TRUE
     if (pSong && pSong->pMixer && GM_DLS_HasXmfEmbeddedBank(pSong->pMixer))
