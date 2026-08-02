@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "NeoBAEEngine.h"
 #include "NeoBAEFeatures.h"
+#include "BAE_ProbeSongLength.h"
 
 #include "NeoBAE.h"
 #include "BAE_API.h"
@@ -110,7 +111,7 @@ void NeoBAEEngine::ReleaseGlobalRef_Locked()
 	m_holdsGlobalRef = false;
 }
 
-void NeoBAEEngine::TeardownMixer_Locked(bool clearMetadata)
+void NeoBAEEngine::TeardownMixer_Locked(bool clearMetadata, bool releaseGlobalRef)
 {
 	BAESong song = (BAESong)m_song;
 	BAEMixer mixer = (BAEMixer)m_mixer;
@@ -149,7 +150,8 @@ void NeoBAEEngine::TeardownMixer_Locked(bool clearMetadata)
 		m_codecName = "";
 	}
 
-	ReleaseGlobalRef_Locked();
+	if (releaseGlobalRef)
+		ReleaseGlobalRef_Locked();
 }
 
 void NeoBAEEngine::Close()
@@ -168,25 +170,30 @@ void NeoBAEEngine::ApplyDLSCompat_Locked() const
 #endif
 }
 
-void NeoBAEEngine::SniffCodecFromData_Locked()
+bool NeoBAEEngine::IsZmfContainer_Locked() const
 {
-	BAEFileType ftype = BAE_INVALID_TYPE;
-	const t_size size = m_fileData.get_size();
-	const unsigned char* bytes = m_fileData.get_ptr();
-
-	if (size >= 4) {
-		if ((bytes[0] == 'Z' && bytes[1] == 'R' && bytes[2] == 'E' && bytes[3] == 'Z'))
-			ftype = BAE_RMF;
-		else if ((bytes[0] == 'I' && bytes[1] == 'R' && bytes[2] == 'E' && bytes[3] == 'Z'))
-			ftype = BAE_RMF;
+	// ZMF is the ZREZ resource-map variant of RMF (same BAEFileType).
+	if (m_fileData.get_size() >= 4) {
+		const unsigned char* b = m_fileData.get_ptr();
+		if (b[0] == 'Z' && b[1] == 'R' && b[2] == 'E' && b[3] == 'Z')
+			return true;
 	}
-	if (ftype == BAE_INVALID_TYPE && size > 0) {
-		int32_t probe = (int32_t)((size > 64) ? 64 : size);
-		ftype = X_DetermineFileTypeByData(bytes, probe);
+	if (m_pathHint.get_length()) {
+		const char* ext = strrchr(m_pathHint.get_ptr(), '.');
+		if (ext && _stricmp(ext, ".zmf") == 0)
+			return true;
 	}
+	return false;
+}
 
-	const char* typeName = X_GetFileTypeString(ftype);
-	if (typeName && typeName[0] && ftype != BAE_INVALID_TYPE)
+void NeoBAEEngine::SetCodecLabel_Locked(int ftype)
+{
+	if (IsZmfContainer_Locked()) {
+		m_codecName = "ZMF";
+		return;
+	}
+	const char* typeName = X_GetFileTypeString((BAEFileType)ftype);
+	if (typeName && typeName[0] && ftype != (int)BAE_INVALID_TYPE)
 		m_codecName = typeName;
 	else if (m_pathHint.get_length()) {
 		const char* ext = strrchr(m_pathHint.get_ptr(), '.');
@@ -194,10 +201,24 @@ void NeoBAEEngine::SniffCodecFromData_Locked()
 	} else {
 		m_codecName = "MIDI";
 	}
+}
 
-	// Prefer "ZMF" label when the container is ZREZ.
-	if (size >= 4 && bytes[0] == 'Z' && bytes[1] == 'R' && bytes[2] == 'E' && bytes[3] == 'Z')
-		m_codecName = "ZMF";
+void NeoBAEEngine::SniffCodecFromData_Locked()
+{
+	BAEFileType ftype = BAE_INVALID_TYPE;
+	const t_size size = m_fileData.get_size();
+	const unsigned char* bytes = m_fileData.get_ptr();
+
+	if (size >= 4) {
+		if ((bytes[0] == 'Z' && bytes[1] == 'R' && bytes[2] == 'E' && bytes[3] == 'Z') ||
+		    (bytes[0] == 'I' && bytes[1] == 'R' && bytes[2] == 'E' && bytes[3] == 'Z'))
+			ftype = BAE_RMF;
+	}
+	if (ftype == BAE_INVALID_TYPE && size > 0) {
+		int32_t probe = (int32_t)((size > 64) ? 64 : size);
+		ftype = X_DetermineFileTypeByData(bytes, probe);
+	}
+	SetCodecLabel_Locked(ftype);
 }
 
 void NeoBAEEngine::LoadBank_Locked()
@@ -285,13 +306,7 @@ void NeoBAEEngine::LoadSong_Locked(const void* data, size_t size, const char* /*
 	loaded.data.song = nullptr;
 	loaded.type = BAE_LOAD_TYPE_NONE;
 
-	const char* typeName = X_GetFileTypeString(fileType);
-	m_codecName = (typeName && typeName[0]) ? typeName : "MIDI";
-	if (m_fileData.get_size() >= 4) {
-		const unsigned char* b = m_fileData.get_ptr();
-		if (b[0] == 'Z' && b[1] == 'R' && b[2] == 'E' && b[3] == 'Z')
-			m_codecName = "ZMF";
-	}
+	SetCodecLabel_Locked((int)fileType);
 	m_song = song;
 
 	uint32_t len = 0;
@@ -338,49 +353,12 @@ void NeoBAEEngine::OpenMixerAndSong_Locked(const char* pathHint)
 	LoadSong_Locked(m_fileData.get_ptr(), m_fileData.get_size(), pathHint);
 }
 
-void NeoBAEEngine::ProbeLengthOpportunistic_Locked(abort_callback& abort)
-{
-	abort.check();
-	if (!TryExclusive_Locked())
-		return; // decode owns the synth; leave length unknown for now
-
-	try {
-		OpenMixer_Locked(false);
-		uint32_t micros = 0;
-		BAEFileType ftype = BAE_INVALID_TYPE;
-		const BAEResult err = BAEMixer_ProbeSongLengthFromMemory(
-			(BAEMixer)m_mixer,
-			m_fileData.get_ptr(),
-			(uint32_t)m_fileData.get_size(),
-			&micros,
-			&ftype);
-		if (err == BAE_NO_ERROR && micros > 0) {
-			m_lengthMicros = micros;
-			m_lengthSeconds = (double)micros / 1000000.0;
-		}
-		if (ftype != BAE_INVALID_TYPE) {
-			const char* typeName = X_GetFileTypeString(ftype);
-			if (typeName && typeName[0])
-				m_codecName = typeName;
-			const unsigned char* b = m_fileData.get_ptr();
-			if (m_fileData.get_size() >= 4 && b[0] == 'Z' && b[1] == 'R' && b[2] == 'E' && b[3] == 'Z')
-				m_codecName = "ZMF";
-		}
-	} catch (...) {
-		// Probe is best-effort for playlist adds; keep sniffed codec / zero length.
-	}
-
-	TeardownMixer_Locked(false);
-	ReleaseExclusive_Locked();
-}
-
 void NeoBAEEngine::Prepare(const void* data, size_t size, const char* pathHint, const NeoBAEPlaybackSettings& settings, abort_callback& abort)
 {
 	if (!data || size == 0)
 		throw exception_io_data("NeoBAE: empty file");
 	abort.check();
 
-	// Per-instance bookkeeping does not need the global mixer lock.
 	{
 		std::lock_guard<std::recursive_mutex> lock(s_mutex);
 		TeardownMixer_Locked(true);
@@ -396,11 +374,20 @@ void NeoBAEEngine::Prepare(const void* data, size_t size, const char* pathHint, 
 		SniffCodecFromData_Locked();
 	}
 
-	// Fast length probe only if nothing else owns MusicGlobals — never wait here.
-	{
-		std::lock_guard<std::recursive_mutex> lock(s_mutex);
-		ProbeLengthOpportunistic_Locked(abort);
+	// Mixer-free duration — safe while another session owns MusicGlobals.
+	uint32_t micros = 0;
+	BAEFileType ftype = BAE_INVALID_TYPE;
+	const BAEResult err = BAE_ProbeSongLengthFromMemory(
+		m_fileData.get_ptr(),
+		(uint32_t)m_fileData.get_size(),
+		&micros,
+		&ftype);
+	if (err == BAE_NO_ERROR && micros > 0) {
+		m_lengthMicros = micros;
+		m_lengthSeconds = (double)micros / 1000000.0;
 	}
+	if (ftype != BAE_INVALID_TYPE)
+		SetCodecLabel_Locked((int)ftype);
 }
 
 void NeoBAEEngine::StartDecode(bool allowLooping, abort_callback& abort, const NeoBAEPlaybackSettings* settingsRefresh)

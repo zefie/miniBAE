@@ -33,8 +33,8 @@ public:
 	NeoBAEEngine(const NeoBAEEngine&) = delete;
 	NeoBAEEngine& operator=(const NeoBAEEngine&) = delete;
 
-	// Cache file bytes + prefs. Probes duration without instrument decode when
-	// the mixer is free; never blocks playlist/"Processing files" on a busy synth.
+	// Cache file bytes + prefs and resolve duration via mixer-free
+	// BAE_ProbeSongLengthFromMemory (no MusicGlobals / exclusive lock).
 	void Prepare(const void* data, size_t size, const char* pathHint, const NeoBAEPlaybackSettings& settings, abort_callback& abort);
 
 	double GetLengthSeconds() const { return m_lengthSeconds; }
@@ -46,7 +46,7 @@ public:
 
 	bool DecodeRun(audio_chunk& chunk, abort_callback& abort);
 	void Seek(double seconds, abort_callback& abort);
-	bool CanSeek() const { return m_started; }
+	bool CanSeek() const { return m_started && m_lengthSeconds > 0.0; }
 
 	void Close();
 
@@ -58,11 +58,12 @@ private:
 
 	void EnsureGlobalInit_Locked();
 	void ReleaseGlobalRef_Locked();
-	void TeardownMixer_Locked(bool clearMetadata);
+	void TeardownMixer_Locked(bool clearMetadata, bool releaseGlobalRef = true);
 	void OpenMixer_Locked(bool engageAudio);
 	void OpenMixerAndSong_Locked(const char* pathHint);
-	void ProbeLengthOpportunistic_Locked(abort_callback& abort);
 	void SniffCodecFromData_Locked();
+	bool IsZmfContainer_Locked() const;
+	void SetCodecLabel_Locked(int ftype); // BAEFileType
 	void LoadBank_Locked();
 	void LoadSong_Locked(const void* data, size_t size, const char* pathHint);
 	void ApplyDLSCompat_Locked() const;

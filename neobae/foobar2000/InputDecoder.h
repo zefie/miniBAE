@@ -40,4 +40,5 @@ private:
 	NeoBAEEngine m_engine;
 	NeoBAEPlaybackSettings m_settings;
 	bool m_opened = false;
+	bool m_pushDynamicLength = false;
 };

@@ -47,10 +47,11 @@ void InputDecoder::open(service_ptr_t<file> fileHint, const char* path, t_input_
 	if (!filesystem::g_get_native_path(path, nativePath))
 		nativePath = path;
 
-	// Probe length under the exclusive mixer lock, then release the mixer so
-	// playback / scanners do not keep overlapping BAEMixer sessions alive.
+	// Mixer-free duration probe (no exclusive BAEMixer / MusicGlobals).
+	(void)reason;
 	m_engine.Prepare(m_data.get_ptr(), m_data.get_size(), nativePath.get_ptr(), m_settings, abort);
 	m_opened = true;
+	m_pushDynamicLength = false;
 }
 
 void InputDecoder::get_info(file_info& info, abort_callback& abort)
@@ -60,7 +61,10 @@ void InputDecoder::get_info(file_info& info, abort_callback& abort)
 		throw exception_io_data("NeoBAE: not open");
 
 	// Duration WITHOUT loops / fade — looping continues past EOF during playback.
-	info.set_length(m_engine.GetLengthSeconds());
+	// Length 0 means unknown to foobar2000 (shows "?" and disables the seek bar).
+	const double length = m_engine.GetLengthSeconds();
+	if (length > 0.0)
+		info.set_length(length);
 	info.info_set_int("samplerate", m_engine.GetSampleRate());
 	info.info_set_int("channels", kChannels);
 	info.info_set_int("bitspersample", kBitsPerSample);
@@ -92,6 +96,8 @@ void InputDecoder::decode_initialize(unsigned flags, abort_callback& abort)
 	// Loop only during interactive playback, not conversion / replaygain scan.
 	const bool allowLooping = (flags & input_flag_playback) != 0;
 	m_engine.StartDecode(allowLooping, abort, &m_settings);
+	// If Prepare couldn't publish a length (or library still has "?"), push it now.
+	m_pushDynamicLength = (m_engine.GetLengthSeconds() > 0.0);
 }
 
 bool InputDecoder::decode_run(audio_chunk& chunk, abort_callback& abort)
@@ -109,9 +115,17 @@ bool InputDecoder::decode_can_seek()
 	return m_engine.CanSeek();
 }
 
-bool InputDecoder::decode_get_dynamic_info(file_info&, double&)
+bool InputDecoder::decode_get_dynamic_info(file_info& info, double& timestampDelta)
 {
-	return false;
+	if (!m_pushDynamicLength)
+		return false;
+	const double length = m_engine.GetLengthSeconds();
+	if (length <= 0.0)
+		return false;
+	info.set_length(length);
+	timestampDelta = 0;
+	m_pushDynamicLength = false;
+	return true;
 }
 
 bool InputDecoder::decode_get_dynamic_info_track(file_info&, double&)

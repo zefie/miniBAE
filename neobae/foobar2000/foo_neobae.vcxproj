@@ -158,6 +158,7 @@
     <ClInclude Include="NeoBAEEngine.h" />
     <ClInclude Include="NeoBAEFeatures.h" />
     <ClInclude Include="Version.h" />
+    <ClInclude Include="BAE_ProbeSongLength.h" />
     <ClInclude Include="resource.h" />
   </ItemGroup>
   <ItemGroup>

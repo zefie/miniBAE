@@ -27,6 +27,7 @@
     <ClInclude Include="NeoBAEFeatures.h"><Filter>Headers</Filter></ClInclude>
     <ClInclude Include="resource.h"><Filter>Headers</Filter></ClInclude>
     <ClInclude Include="Version.h"><Filter>Headers</Filter></ClInclude>
+    <ClInclude Include="BAE_ProbeSongLength.h"><Filter>Headers</Filter></ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="foo_neobae.rc"><Filter>Resources</Filter></ResourceCompile>

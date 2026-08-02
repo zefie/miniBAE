@@ -40,4 +40,14 @@ BAEResult BAESong_LoadXmfFromFile(BAESong song,
                                   BAEPathName filePath,
                                   BAE_BOOL ignoreBadInstruments);
 
+#if USE_NATIVE_DLS == TRUE
+// Sequence-only extract for duration probes / playlist info.
+// XMF/MXMF carry SMF (+ optional DLS), never RMF. Never loads banks.
+// On success, *outSmf is XNewPtr-owned SMF (caller frees with XDisposePtr).
+BAEResult BAE_ExtractXmfSequenceFromMemory(const void *data,
+                                           uint32_t ulen,
+                                           void **outSmf,
+                                           uint32_t *outSmfLen);
+#endif
+
 #endif // USE_XMF_SUPPORT && (_USING_FLUIDLITE || USE_NATIVE_DLS)

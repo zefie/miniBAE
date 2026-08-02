@@ -693,7 +693,10 @@ elseif(BAE_PLATFORM STREQUAL "MacOSX")
   set(BAE_PLATFORM_SOURCE neobae/src/BAE_Source/Platform/BAE_API_MacOSX.c)
   set(BAE_X_PLATFORM_DEFINE X_MACINTOSH)
 elseif(BAE_PLATFORM STREQUAL "foobar2000")
-  set(BAE_PLATFORM_SOURCE neobae/src/BAE_Source/Platform/BAE_API_foobar2000.c)
+  set(BAE_PLATFORM_SOURCE
+    neobae/src/BAE_Source/Platform/BAE_API_foobar2000.c
+    neobae/foobar2000/BAE_ProbeSongLength.c
+  )
   set(BAE_X_PLATFORM_DEFINE X_FOOBAR2000_PLUGIN)
   message(STATUS "foobar2000 backend selected. Build libneobae, copy libneobae.dll/.lib into neobae/foobar2000/lib/, then build neobae/foobar2000/foo_neobae.sln with MSVC.")
 else()
@@ -1393,11 +1396,18 @@ target_include_directories(neobae
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Common
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Platform
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/adx2wav
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/mthc
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/config
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/qoa
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/lzma-26.00/C
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/mod2rmf
 )
+
+if(BAE_PLATFORM STREQUAL "foobar2000")
+  target_include_directories(neobae PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/foobar2000
+  )
+endif()
 
 if(BAE_ENABLE_WMA_SUPPORT)
   target_include_directories(neobae PUBLIC

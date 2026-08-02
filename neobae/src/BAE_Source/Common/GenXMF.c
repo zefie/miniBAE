@@ -2235,4 +2235,102 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
     return BAE_BAD_FILE;
 }
 
+/* XMF/MXMF = SMF + optional DLS. Discard any incidental RMF hits from shared parsers. */
+static BAEResult PV_TakeXmfSmfResult(const unsigned char *mid, uint32_t midLen,
+                                     const unsigned char *rmf, uint32_t rmfLen,
+                                     void **outSmf, uint32_t *outSmfLen)
+{
+    if (rmf)
+        XDisposePtr((XPTR)rmf);
+    if (mid && midLen)
+    {
+        *outSmf = (void *)mid;
+        *outSmfLen = midLen;
+        return BAE_NO_ERROR;
+    }
+    return BAE_BAD_FILE;
+}
+
+BAEResult BAE_ExtractXmfSequenceFromMemory(const void *data,
+                                           uint32_t ulen,
+                                           void **outSmf,
+                                           uint32_t *outSmfLen)
+{
+    const unsigned char *bytes;
+    const unsigned char *mid = NULL;
+    const unsigned char *rmf = NULL;
+    uint32_t midLen = 0;
+    uint32_t rmfLen = 0;
+    bool skipBanks = TRUE; /* pretend bank already loaded — no bank I/O, early exit */
+
+    if (!data || ulen == 0 || !outSmf || !outSmfLen)
+        return BAE_PARAM_ERR;
+
+    *outSmf = NULL;
+    *outSmfLen = 0;
+
+    bytes = (const unsigned char *)data;
+    g_xmfBankLoadSong = NULL;
+
+    if (ulen >= 8 && memcmp(bytes, "XMF_2.00", 8) == 0)
+    {
+        if (PV_TryExtractFromPackedMXMF(bytes, ulen, &mid, &midLen, &rmf, &rmfLen, &skipBanks))
+            return PV_TakeXmfSmfResult(mid, midLen, rmf, rmfLen, outSmf, outSmfLen);
+        mid = NULL;
+        rmf = NULL;
+        midLen = 0;
+        rmfLen = 0;
+    }
+
+    if (ulen >= 8 && memcmp(bytes, "XMF_1.00", 8) == 0)
+    {
+        skipBanks = TRUE;
+        if (PV_TryParseXMF1(bytes, ulen, &mid, &midLen, &rmf, &rmfLen, &skipBanks))
+            return PV_TakeXmfSmfResult(mid, midLen, rmf, rmfLen, outSmf, outSmfLen);
+        mid = NULL;
+        rmf = NULL;
+        midLen = 0;
+        rmfLen = 0;
+        skipBanks = TRUE;
+        if (PV_TryExtractFromPackedMXMF(bytes, ulen, &mid, &midLen, &rmf, &rmfLen, &skipBanks))
+            return PV_TakeXmfSmfResult(mid, midLen, rmf, rmfLen, outSmf, outSmfLen);
+        mid = NULL;
+        rmf = NULL;
+        midLen = 0;
+        rmfLen = 0;
+    }
+
+    {
+        int smf_off = PV_FindSignature(bytes, ulen, "MThd");
+        if (smf_off >= 0)
+        {
+            uint32_t copyLen = ulen - (uint32_t)smf_off;
+            unsigned char *cpy = (unsigned char *)XNewPtr(copyLen);
+            if (!cpy)
+                return BAE_MEMORY_ERR;
+            XBlockMove(bytes + smf_off, cpy, copyLen);
+            *outSmf = cpy;
+            *outSmfLen = copyLen;
+            return BAE_NO_ERROR;
+        }
+    }
+
+    {
+        const unsigned char *rmidSmf = NULL;
+        uint32_t rmidLen = 0;
+        if (PV_ExtractRMIDToSMF(bytes, ulen, &rmidSmf, &rmidLen) && rmidSmf && rmidLen)
+        {
+            unsigned char *cpy = (unsigned char *)XNewPtr(rmidLen);
+            if (!cpy)
+                return BAE_MEMORY_ERR;
+            XBlockMove(rmidSmf, cpy, rmidLen);
+            *outSmf = cpy;
+            *outSmfLen = rmidLen;
+            return BAE_NO_ERROR;
+        }
+    }
+
+    return BAE_BAD_FILE;
+}
+
 #endif // USE_XMF_SUPPORT && USE_NATIVE_DLS
