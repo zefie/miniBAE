@@ -1264,17 +1264,16 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
                 BAE_PRINTF("Stored user bank: %s (%s)\n", g_user_bank_name, g_user_bank_path);
             }
             
-            // Update GUI to show embedded bank
-#if USE_NATIVE_DLS == TRUE && USE_XMF_SUPPORT == TRUE
-            if (BAEMixer_HasXMFDLSOverlayBank(g_bae.mixer) != 0) {
-                sprintf(g_bae.bank_name, "%s + Embedded", g_user_bank_name);
-            } else {
-                safe_strncpy(g_bae.bank_name, "Embedded Bank", sizeof(g_bae.bank_name) - 1);
+            // Update GUI to show embedded bank (keep user bank name when known).
+            if (g_user_bank_name[0] != '\0')
+            {
+                snprintf(g_bae.bank_name, sizeof(g_bae.bank_name), "%s + Embedded Bank", g_user_bank_name);
             }
-#else
-            safe_strncpy(g_bae.bank_name, "Embedded Bank", sizeof(g_bae.bank_name) - 1);
-#endif
-            g_bae.bank_name[sizeof(g_bae.bank_name) - 1] = '\0';
+            else
+            {
+                safe_strncpy(g_bae.bank_name, "Embedded Bank", sizeof(g_bae.bank_name) - 1);
+                g_bae.bank_name[sizeof(g_bae.bank_name) - 1] = '\0';
+            }
             g_bae.has_embedded_soundbank = true;
             BAE_PRINTF("Using embedded soundbank from XMF/RMI file\n");
         }

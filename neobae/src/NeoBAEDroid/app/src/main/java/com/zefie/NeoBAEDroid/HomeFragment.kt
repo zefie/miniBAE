@@ -1874,7 +1874,26 @@ class HomeFragment : Fragment() {
         val r = song.start()
         if (r == 0) {
             if (song.hasEmbeddedBank()) {
-                currentBankName.value = "Embedded Bank"
+                // Match zefidi: keep the user's bank name and append the embedded overlay.
+                val base = currentBankName.value
+                    .removeSuffix(" + Embedded Bank")
+                    .removeSuffix(" + Embedded")
+                    .takeIf {
+                        it.isNotBlank() &&
+                            !it.equals("Embedded Bank", ignoreCase = true) &&
+                            it != "Loading..." &&
+                            it != "No Bank Loaded"
+                    }
+                    ?: run {
+                        val path = requireContext()
+                            .getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                            .getString("last_bank_path", "__builtin__")
+                        when {
+                            path.isNullOrBlank() || path == "__builtin__" -> "Built-in patches"
+                            else -> File(path).name
+                        }
+                    }
+                currentBankName.value = "$base + Embedded Bank"
             }
             if (song.isSF2Song() || song.isDLSSong()) {
                 song.pause()
