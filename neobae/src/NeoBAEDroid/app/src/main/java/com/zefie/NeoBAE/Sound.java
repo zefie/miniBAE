@@ -37,6 +37,7 @@ public class Sound
     private static native int _getSoundSampleRate(long soundReference);
     private static native int _setSoundPositionFrames(long soundReference, int sampleFrames);
     private static native int _setSoundLoops(long soundReference, int loopCount);
+    private static native int _normalizeFromPeak(long soundReference, int targetPeakPct);
 
 	Sound(Mixer mixer)
 	{
@@ -176,6 +177,14 @@ public class Sound
             loops = numLoops;
         }
         return _setSoundLoops(mReference, loops);
+    }
+
+    /** Peak-normalize already-decoded PCM in RAM. Returns gain percent (100 = unity). */
+    public int normalizeFromPeak(int targetPeakPct) {
+        return _normalizeFromPeak(mReference, targetPeakPct);
+    }
+    public int normalizeFromPeak() {
+        return normalizeFromPeak(89);
     }
     
     public boolean isPlaying() {

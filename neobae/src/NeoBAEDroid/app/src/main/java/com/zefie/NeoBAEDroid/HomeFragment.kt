@@ -1849,6 +1849,16 @@ class HomeFragment : Fragment() {
                             Mixer.setSongNormalizeGain(100)
                         } catch (_: Exception) {
                         }
+                        if (normalizePlayback.value) {
+                            try {
+                                val gainPct = sound.normalizeFromPeak()
+                                if (gainPct > 0) {
+                                    android.util.Log.d("HomeFragment", "Sound normalize gain: $gainPct%")
+                                }
+                            } catch (e: Exception) {
+                                android.util.Log.w("HomeFragment", "Sound normalize failed: ${e.message}")
+                            }
+                        }
                         applyVolume()
                         val loopCount = if (viewModel.repeatMode == RepeatMode.SONG) 32767 else 0    
                         sound.setLoops(loopCount)

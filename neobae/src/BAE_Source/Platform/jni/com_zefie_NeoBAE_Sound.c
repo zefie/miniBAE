@@ -370,6 +370,22 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Sound__1setSoundLoops
 	return (jint)r;
 }
 
+// Peak-normalize already-decoded PCM; returns applied gain percent (100 = unity), or -err on failure.
+JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Sound__1normalizeFromPeak
+	(JNIEnv* env, jclass clazz, jlong soundReference, jint targetPeakPct)
+{
+	(void)env; (void)clazz;
+	BAESound sound = (BAESound)(intptr_t)soundReference;
+	if(!sound) return (jint)BAE_NULL_OBJECT;
+	int32_t applied = 100;
+	BAEResult r = BAESound_NormalizeFromPeak(sound, (int32_t)targetPeakPct, &applied);
+	if(r != BAE_NO_ERROR){
+		__android_log_print(ANDROID_LOG_WARN, "neoBAE", "BAESound_NormalizeFromPeak err=%d", r);
+		return (jint)(-(int)r);
+	}
+	return (jint)applied;
+}
+
 // Helper to get mixer from sound - forward declaration (if not present in header)
 // Implement BAESound_GetMixer wrapper if missing
 

@@ -7047,6 +7047,134 @@ BAEResult BAESound_LoadFileSample(BAESound sound, BAEPathName filePath, BAEFileT
 #endif
 }
 
+// BAESound_NormalizeFromPeak()
+// --------------------------------------
+// Peak-normalize already-decoded PCM in RAM (scan + in-place scale).
+//
+BAEResult BAESound_NormalizeFromPeak(BAESound sound,
+                                     int32_t targetPeakPct,
+                                     int32_t *outAppliedGainPct)
+{
+    GM_Waveform *pWave;
+    uint32_t sampleCount;
+    uint32_t i;
+    int32_t peakAbs;
+    int32_t gainPct = 100;
+    int64_t scaled;
+
+    if (outAppliedGainPct)
+        *outAppliedGainPct = 100;
+
+    if (!sound || sound->mID != OBJECT_ID)
+        return BAE_TranslateOPErr(NULL_OBJECT);
+
+    BAE_AcquireMutex(sound->mLock);
+    pWave = sound->pWave;
+    if (!pWave || !pWave->theWaveform || pWave->waveFrames == 0 || pWave->channels == 0)
+    {
+        BAE_ReleaseMutex(sound->mLock);
+        return BAE_TranslateOPErr(NOT_SETUP);
+    }
+
+    if (pWave->compressionType != C_NONE)
+    {
+        BAE_ReleaseMutex(sound->mLock);
+        return BAE_TranslateOPErr(BAD_FILE_TYPE);
+    }
+
+    if (targetPeakPct <= 0)
+        targetPeakPct = 89; /* ~-1 dBFS */
+    if (targetPeakPct > 99)
+        targetPeakPct = 99;
+
+    sampleCount = pWave->waveFrames * (uint32_t)pWave->channels;
+    peakAbs = 0;
+
+    if (pWave->bitSize == 16)
+    {
+        int16_t *pcm = (int16_t *)pWave->theWaveform;
+        for (i = 0; i < sampleCount; i++)
+        {
+            int32_t s = (int32_t)pcm[i];
+            if (s < 0)
+                s = -s;
+            if (s > peakAbs)
+                peakAbs = s;
+        }
+        if (peakAbs < 1)
+        {
+            BAE_ReleaseMutex(sound->mLock);
+            return BAE_NO_ERROR;
+        }
+
+        gainPct = (int32_t)(((int64_t)targetPeakPct * 32767LL) / (int64_t)peakAbs);
+        if (gainPct < 5)
+            gainPct = 5;
+        if (gainPct > 800)
+            gainPct = 800;
+
+        if (gainPct != 100)
+        {
+            for (i = 0; i < sampleCount; i++)
+            {
+                scaled = ((int64_t)pcm[i] * (int64_t)gainPct) / 100LL;
+                if (scaled > 32767)
+                    scaled = 32767;
+                if (scaled < -32768)
+                    scaled = -32768;
+                pcm[i] = (int16_t)scaled;
+            }
+        }
+    }
+    else if (pWave->bitSize == 8)
+    {
+        unsigned char *pcm = (unsigned char *)pWave->theWaveform;
+        for (i = 0; i < sampleCount; i++)
+        {
+            int32_t s = (int32_t)pcm[i] - 128;
+            if (s < 0)
+                s = -s;
+            if (s > peakAbs)
+                peakAbs = s;
+        }
+        if (peakAbs < 1)
+        {
+            BAE_ReleaseMutex(sound->mLock);
+            return BAE_NO_ERROR;
+        }
+
+        gainPct = (int32_t)(((int64_t)targetPeakPct * 127LL) / (int64_t)peakAbs);
+        if (gainPct < 5)
+            gainPct = 5;
+        if (gainPct > 800)
+            gainPct = 800;
+
+        if (gainPct != 100)
+        {
+            for (i = 0; i < sampleCount; i++)
+            {
+                scaled = ((((int64_t)pcm[i] - 128) * (int64_t)gainPct) / 100LL) + 128;
+                if (scaled > 255)
+                    scaled = 255;
+                if (scaled < 0)
+                    scaled = 0;
+                pcm[i] = (unsigned char)scaled;
+            }
+        }
+    }
+    else
+    {
+        BAE_ReleaseMutex(sound->mLock);
+        return BAE_TranslateOPErr(BAD_FILE_TYPE);
+    }
+
+    if (outAppliedGainPct)
+        *outAppliedGainPct = gainPct;
+
+    BAE_ReleaseMutex(sound->mLock);
+    return BAE_NO_ERROR;
+}
+
 // BAESound_IsPaused()
 // --------------------------------------
 //

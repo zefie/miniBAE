@@ -401,7 +401,7 @@ static const char usageMain[] =
 #endif
     "                 -l  {loop count (default: 0)}\n"
     "                 -v  {master volume %% (default: 100)}\n"
-    "                 -n  {normalize playback/export: MIDI+patch peak estimate}\n"
+    "                 -n  {normalize playback/export: MIDI estimate / PCM peak}\n"
     "                 -vc {velocity curve 0-5 (default: engine (0), none for SF2/DLS)}\n"
     "                 -t  {max duration in seconds (0 = no limit)}\n"
     "                 -mc {MIDI channels to mute, 1-16, comma-separated}\n"
@@ -1130,6 +1130,17 @@ static BAEResult PV_PlayFile(BAEMixer mixer, const char *path,
                 path, err, BAE_GetErrorString(err));
             BAESound_Delete(sound);
             return err;
+        }
+
+        if (gNormalize) {
+            int32_t gainPct = 100;
+            BAEResult nerr = BAESound_NormalizeFromPeak(sound, 89, &gainPct);
+            if (nerr != BAE_NO_ERROR) {
+                playbae_printf("playbae: Sound normalize failed for '%s' (%d: %s); continuing without\n",
+                    path, nerr, BAE_GetErrorString(nerr));
+            } else if (gPassNumber <= 0) {
+                playbae_printf("Sound normalize gain: %d%%\n", (int)gainPct);
+            }
         }
 
         err = PV_PlaySound(mixer, sound, path, volume, timeLimitSec, loopCount);

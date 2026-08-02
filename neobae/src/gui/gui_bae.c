@@ -1147,6 +1147,22 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
         g_bae.is_audio_file = true;
         /* Mixer-level song normalize must not boost PCM sample playback. */
         bae_cancel_normalize();
+        if (g_normalize_enabled)
+        {
+            int32_t gainPct = 100;
+            BAEResult nerr = BAESound_NormalizeFromPeak(g_bae.sound, 89, &gainPct);
+            if (nerr != BAE_NO_ERROR)
+            {
+                BAE_PRINTF("Sound normalize failed (%d); continuing without\n", (int)nerr);
+            }
+            else
+            {
+                char nmsg[64];
+                BAE_PRINTF("Sound normalize gain: %d%%\n", (int)gainPct);
+                snprintf(nmsg, sizeof(nmsg), "Normalized (%d%%)", (int)gainPct);
+                set_status_message(nmsg);
+            }
+        }
         get_audio_total_frames();
         audio_current_position = 0;
         /* Apply the user's last requested master volume consistently by

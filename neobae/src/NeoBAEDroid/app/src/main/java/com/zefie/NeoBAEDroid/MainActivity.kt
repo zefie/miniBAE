@@ -589,6 +589,16 @@ class MainActivity : AppCompatActivity() {
                     Mixer.setSongNormalizeGain(100)
                 } catch (_: Exception) {
                 }
+                if (prefs.getBoolean("normalize_playback", false)) {
+                    try {
+                        val gainPct = sound.normalizeFromPeak()
+                        if (gainPct > 0) {
+                            android.util.Log.d("MainActivity", "Sound normalize gain: $gainPct%")
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.w("MainActivity", "Sound normalize failed: ${e.message}")
+                    }
+                }
 
                 sound.setVolumePercent(volumePercent)
                 val loopCount = if (viewModel.repeatMode == RepeatMode.SONG) 32767 else 0

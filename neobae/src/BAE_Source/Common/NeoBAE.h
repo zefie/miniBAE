@@ -1640,6 +1640,17 @@ extern "C"
     BAEResult BAESound_GetRawPCMData(BAESound sound, char *outDataPointer,
                                      uint32_t outDataSize);
 
+    // BAESound_NormalizeFromPeak()
+    // ------------------------------------
+    // Peak-normalize already-decoded PCM in RAM (one linear pass; no re-decode).
+    // Scales sound->pWave samples in place so the peak lands near targetPeakPct
+    // (default 89 ≈ -1 dBFS). Mixer song-normalize gain is left unchanged;
+    // callers should keep that at 100 for BAESound playback.
+    //
+    BAEResult BAESound_NormalizeFromPeak(BAESound sound,
+                                         int32_t targetPeakPct,
+                                         int32_t *outAppliedGainPct);
+
     BAEResult BAESound_SetAutoBuzzFlash(BAESound sound, BAE_BOOL buzzOn, BAE_BOOL flashOn);
 
     // BAESound_Start()

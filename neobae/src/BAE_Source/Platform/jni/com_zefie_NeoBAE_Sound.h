@@ -119,6 +119,14 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Sound__1getSoundLengthFrames
 JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Sound__1getSoundSampleRate
   (JNIEnv *, jclass, jlong);
 
+/*
+ * Class:     com_zefie_NeoBAE_Sound
+ * Method:    _normalizeFromPeak
+ * Signature: (JI)I
+ */
+JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Sound__1normalizeFromPeak
+  (JNIEnv *, jclass, jlong, jint);
+
 #ifdef __cplusplus
 }
 #endif
