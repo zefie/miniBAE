@@ -2489,7 +2489,8 @@ static void PV_ProcessNoteOff(GM_Song *pSong, int16_t MIDIChannel, int16_t curre
    fallback instruments (often drums) match embedded DLS loudness. */
 static float PV_HsbRmfMixVolumeScale(GM_Song *pSong)
 {
-    const float kMixedAttenuation = 0.25f;
+    // keep it seperate for now in case we need to adjust it later
+    const float kMixedAttenuation = 0.4f;
     const float kXmfHsbHostUnity = 0.4f;
 
 #if USE_NATIVE_DLS == TRUE
