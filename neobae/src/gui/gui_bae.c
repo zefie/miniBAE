@@ -1711,6 +1711,13 @@ bool bae_play(bool *playing)
             if (isPaused)
             {
                 BAE_PRINTF("Resuming paused song '%s'\n", g_bae.loaded_path);
+                /* Pause must not clear normalize; re-apply cached gain just in case. */
+                if (g_normalize_enabled && g_bae.mixer && g_bae.loaded_path[0])
+                {
+                    int cached = norm_cache_lookup(g_bae.loaded_path);
+                    if (cached > 0)
+                        BAEMixer_SetSongNormalizeGain(g_bae.mixer, cached);
+                }
                 BAEResult rr = BAESong_Resume(g_bae.song);
                 if (rr != BAE_NO_ERROR)
                 {
@@ -1861,7 +1868,7 @@ bool bae_play(bool *playing)
         }
         else
         {
-            bae_cancel_normalize();
+            /* Keep song normalize gain across pause/resume; stop clears it. */
             BAESong_Pause(g_bae.song);
             // Ensure external MIDI devices are silenced on pause
 #if SUPPORT_MIDI_HW == TRUE

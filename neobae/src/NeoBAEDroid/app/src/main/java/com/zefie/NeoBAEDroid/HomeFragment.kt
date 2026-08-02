@@ -2017,6 +2017,17 @@ class HomeFragment : Fragment() {
             return
         }
         cancelMixerCleanup()
+        // Re-apply cached normalize gain in case mixer state was reset while paused.
+        if (normalizePlayback.value) {
+            val pathKey = currentLoadedFilePath
+            val cached = pathKey?.let { normalizeGainCache[it] }
+            if (cached != null && cached > 0) {
+                try {
+                    Mixer.setSongNormalizeGain(cached)
+                } catch (_: Exception) {
+                }
+            }
+        }
         currentSong?.resume()
         currentSound?.resume()
     }
