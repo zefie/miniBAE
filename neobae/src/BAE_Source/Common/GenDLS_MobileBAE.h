@@ -163,7 +163,9 @@ struct DLS_Bank {
     uint32_t programAliasCount;
     DLS_ProgramAlias* programAliases;
     
-    int32_t percussionKeyAliases[128];  // Percussion drum key remapping table
+    /* Percussion key remap: PGAL banks (full table), or eggs/microQ gap-fill
+     * for missing drum keys 27..87 only (present keys stay identity). */
+    int32_t percussionKeyAliases[128];
     bool hasPercussionKeyAliases;
     
     uint32_t waveCount;

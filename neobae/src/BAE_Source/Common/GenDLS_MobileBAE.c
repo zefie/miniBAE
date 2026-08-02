@@ -1755,6 +1755,71 @@ static OPErr DLS_Parse_Pgal(const uint8_t* body, uint32_t size, DLS_Bank* bank) 
     return NO_ERR;
 }
 
+/* microQ ROM percussion key gap-fill (fls_seg1 VA 0x4585D7F5, keys 27..87).
+ * sub_43459CE8 fills empty drum-key slots from this table after rgnh map build.
+ * Only missing keys are aliased; present keys stay identity (unlike always-on PGAL). */
+static const uint8_t g_microq_perc_key_remap_27_87[61] = {
+    42, 40, 42, 75, 42, 75, 42, 51, /* 27-34 */
+    36, 36, 75, 40, 54, 40, 45, 42, /* 35-42 */
+    45, 42, 45, 46, 45, 50, 49, 50, /* 43-50 */
+    51, 51, 51, 54, 46, 75, 49, 46, /* 51-58 */
+    51, 62, 64, 62, 64, 64, 62, 64, /* 59-66 */
+    75, 75, 70, 70, 42, 46, 70, 46, /* 67-74 */
+    75, 75, 75, 62, 64, 42, 46, 70, /* 75-82 */
+    51, 51, 75, 45, 45              /* 83-87 */
+};
+
+static void DLS_Install_MicroQPercKeyAliases(DLS_Bank* bank) {
+    bool hasRegion[128];
+    bool anyAlias = false;
+    int i;
+
+    if (!bank || !bank->eggsArticulators || bank->hasPercussionKeyAliases) {
+        return;
+    }
+
+    for (i = 0; i < 128; i++) {
+        hasRegion[i] = false;
+        bank->percussionKeyAliases[i] = i;
+    }
+
+    for (uint32_t ii = 0; ii < bank->instrumentCount; ii++) {
+        DLS_Instrument* inst = &bank->instruments[ii];
+        if (!inst->drum && (inst->bankMsb & 0x7F) != 120) {
+            continue;
+        }
+        for (uint32_t r = 0; r < inst->regionCount; r++) {
+            DLS_Region* region = &inst->regions[r];
+            int32_t lo = region->keyLow & 0x7F;
+            int32_t hi = region->keyHigh & 0x7F;
+            int32_t k;
+            if (lo > hi) {
+                int32_t tmp = lo;
+                lo = hi;
+                hi = tmp;
+            }
+            for (k = lo; k <= hi; k++) {
+                hasRegion[k] = true;
+            }
+        }
+    }
+
+    for (i = 27; i <= 87; i++) {
+        if (!hasRegion[i]) {
+            int32_t alias = g_microq_perc_key_remap_27_87[i - 27] & 0x7F;
+            bank->percussionKeyAliases[i] = alias;
+            if (alias != i) {
+                anyAlias = true;
+            }
+        }
+    }
+
+    if (anyAlias) {
+        bank->hasPercussionKeyAliases = true;
+        debug_message("DLS Parser: installed microQ percussion key aliases (eggs)\n");
+    }
+}
+
 static OPErr DLS_Parse_Wvpl(DLS_ParserState* state, DLS_Bank* bank, uint32_t* poolOffsets, uint32_t poolOffsetCount) {
     if (poolOffsetCount > 0) {
         bank->waveCount = poolOffsetCount;
@@ -1956,6 +2021,9 @@ OPErr GM_LoadDLSBankFromMemory(void* pMemory, uint32_t memorySize, DLS_Bank** pp
         }
         g_use_mobilebae_quirks = savedQuirks;
     }
+
+    /* Eggs/microQ: gap-fill missing drum keys 27..87 (no-op if pgal already set). */
+    DLS_Install_MicroQPercKeyAliases(bank);
 
     if (poolOffsets) {
         XDisposePtr(poolOffsets);
