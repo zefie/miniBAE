@@ -387,6 +387,7 @@ static int wma_total_gain_to_bits(int total_gain)
     return 9;
 }
 
+/* @return 0 = more blocks in frame, 1 = frame complete, -1 = fatal error */
 static int wma_decode_block(WMADecodeContext *s) {
     int ch, bsize, n, any_coded = 0;
     int total_gain = 1;
@@ -394,22 +395,40 @@ static int wma_decode_block(WMADecodeContext *s) {
     int nb_coefs[WMA_MAX_CHANNELS];
 
     if (s->use_variable_block_len) {
-        n = 0; { int t = s->nb_block_sizes - 1; while (t > 0) { n++; t >>= 1; } }
-        n++;
+        int v;
+        /* Match FFmpeg: n = av_log2(nb_block_sizes - 1) + 1 */
+        n = 0;
+        {
+            int t = s->nb_block_sizes - 1;
+            if (t > 0) {
+                while (t > 1) { n++; t >>= 1; }
+                n++;
+            }
+        }
         if (s->reset_block_lengths) {
             s->reset_block_lengths = 0;
-            s->prev_block_len_bits = s->frame_len_bits - (int)wma_get_bits(&s->gb, n);
-            s->block_len_bits      = s->frame_len_bits - (int)wma_get_bits(&s->gb, n);
+            v = (int)wma_get_bits(&s->gb, n);
+            if (v < 0 || v >= s->nb_block_sizes) return -1;
+            s->prev_block_len_bits = s->frame_len_bits - v;
+            v = (int)wma_get_bits(&s->gb, n);
+            if (v < 0 || v >= s->nb_block_sizes) return -1;
+            s->block_len_bits = s->frame_len_bits - v;
         } else {
             s->prev_block_len_bits = s->block_len_bits;
             s->block_len_bits      = s->next_block_len_bits;
         }
-        s->next_block_len_bits = s->frame_len_bits - (int)wma_get_bits(&s->gb, n);
+        v = (int)wma_get_bits(&s->gb, n);
+        if (v < 0 || v >= s->nb_block_sizes) return -1;
+        s->next_block_len_bits = s->frame_len_bits - v;
     } else {
         s->prev_block_len_bits = s->frame_len_bits;
         s->block_len_bits      = s->frame_len_bits;
         s->next_block_len_bits = s->frame_len_bits;
     }
+    if (s->block_len_bits < WMA_BLOCK_MIN_BITS ||
+        s->block_len_bits > s->frame_len_bits ||
+        (s->frame_len_bits - s->block_len_bits) >= s->nb_block_sizes)
+        return -1;
     s->block_len = 1 << s->block_len_bits;
     bsize = s->frame_len_bits - s->block_len_bits;
 
@@ -606,20 +625,28 @@ static int wma_decode_block(WMADecodeContext *s) {
     }
 
 transform:
+    /* Shared IMDCT buffer like FFmpeg's s->output: when ms-stereo has only
+     * channel 0 coded, channel 1 reuses the same time-domain data (mono→L=R). */
+    {
+    float tmp[WMA_BLOCK_MAX_SIZE * 2];
+    memset(tmp, 0, sizeof(tmp));
     for (ch = 0; ch < s->nb_channels; ch++) {
         int j, blk = s->block_len;
-        float tmp[WMA_BLOCK_MAX_SIZE * 2];
         float *window = s->windows[bsize];
         /* For fixed block lengths this lands at frame_out[0]; for short
            blocks it matches FFmpeg's (frame_len/2)+block_pos-(block_len/2). */
         int index = (s->frame_len / 2) + s->block_pos - (blk / 2);
-        float *out = s->frame_out[ch] + index;
+        float *out;
 
-        memset(tmp, 0, sizeof(tmp));
+        if (index < 0 || index + blk > s->frame_len * 2)
+            return -1;
+        out = s->frame_out[ch] + index;
+
         if (s->channel_coded[ch])
             wma_imdct(s, blk, bsize, s->coefs[ch], tmp);
         else if (!(s->ms_stereo && ch == 1))
             memset(tmp, 0, sizeof(float) * (size_t)blk * 2);
+        /* else: ms_stereo && ch==1 && !coded → keep ch0's IMDCT in tmp */
 
         /* left: add; right: overwrite (FFmpeg wma_window fixed-block case) */
         if (s->block_len_bits <= s->prev_block_len_bits) {
@@ -628,7 +655,11 @@ transform:
         } else {
             int prev = 1 << s->prev_block_len_bits;
             int mid = (blk - prev) / 2;
-            float *wprev = s->windows[s->frame_len_bits - s->prev_block_len_bits];
+            int pbsize = s->frame_len_bits - s->prev_block_len_bits;
+            float *wprev;
+            if (pbsize < 0 || pbsize >= s->nb_block_sizes || mid < 0)
+                return -1;
+            wprev = s->windows[pbsize];
             for (j = 0; j < prev; j++)
                 out[mid + j] += tmp[mid + j] * wprev[j];
             for (j = 0; j < mid; j++)
@@ -642,7 +673,11 @@ transform:
         } else {
             int next = 1 << s->next_block_len_bits;
             int mid = (blk - next) / 2;
-            float *wnext = s->windows[s->frame_len_bits - s->next_block_len_bits];
+            int nbsize = s->frame_len_bits - s->next_block_len_bits;
+            float *wnext;
+            if (nbsize < 0 || nbsize >= s->nb_block_sizes || mid < 0)
+                return -1;
+            wnext = s->windows[nbsize];
             for (j = 0; j < mid; j++)
                 out[j] = tmp[blk + j];
             for (j = 0; j < next; j++)
@@ -651,18 +686,26 @@ transform:
                 out[mid + next + j] = 0.0f;
         }
     }
+    }
 
     s->block_num++;
     s->block_pos += s->block_len;
+    if (s->block_pos > s->frame_len)
+        return -1;
     return s->block_pos >= s->frame_len;
 }
 
-int wma_decode_frame(WMADecodeContext *s, float *out) {
-    int ch, i, nc;
+/* Decode one MDCT frame into interleaved float PCM at out. */
+static int wma_decode_frame(WMADecodeContext *s, float *out) {
+    int ch, i, nc, ret;
 
     s->block_num = 0;
     s->block_pos = 0;
-    while (!wma_decode_block(s)) { }
+    for (;;) {
+        ret = wma_decode_block(s);
+        if (ret < 0) return -1;
+        if (ret > 0) break;
+    }
 
     nc = s->nb_channels;
     for (i = 0; i < s->frame_len; i++)
@@ -672,37 +715,133 @@ int wma_decode_frame(WMADecodeContext *s, float *out) {
     for (ch = 0; ch < nc; ch++) {
         memmove(s->frame_out[ch], s->frame_out[ch] + s->frame_len,
                 (size_t)s->frame_len * sizeof(float));
+        memset(s->frame_out[ch] + s->frame_len, 0,
+               (size_t)s->frame_len * sizeof(float));
     }
 
     return s->frame_len;
 }
 
-int wma_superframe_init(WMADecodeContext *s, const uint8_t *buf, int size, int bit_off) {
-    int bit_offset = 0;
-    int nb_frames = 1;
+int wma_decode_superframe(WMADecodeContext *s, const uint8_t *buf, int size,
+                          float *out, int out_cap_samples_per_ch)
+{
+    int nb_frames, bit_offset, pos, len, ret, i;
+    int samples_written = 0;
+    int nc;
+    uint8_t *q;
 
-    if (!buf || size <= 0) return -1;
+    if (!s || !buf || size <= 0 || !out || out_cap_samples_per_ch <= 0)
+        return -1;
 
+    if (s->block_align > 0 && size > s->block_align)
+        size = s->block_align;
+
+    nc = s->nb_channels;
     wma_gb_init(&s->gb, buf, size);
-    if (bit_off > 0) wma_skip_bits(&s->gb, bit_off);
 
     if (s->use_bit_reservoir) {
-        /* superframe header: 4-bit frame count-1?, then byte offset */
-        nb_frames = (int)wma_get_bits(&s->gb, 4) - 1;
-        bit_offset = (int)wma_get_bits(&s->gb, s->byte_offset_bits) + 3;
-        if (nb_frames <= 0) nb_frames = 1;
-        wma_align_bits(&s->gb);
-        /* simplified non-reservoir-append path: skip to bit_offset */
-        if (bit_offset > 0)
-            wma_skip_bits(&s->gb, bit_offset - (int)(s->gb.bit_pos));
+        /* superframe header: 4-bit index, 4-bit frame count */
+        wma_skip_bits(&s->gb, 4);
+        nb_frames = (int)wma_get_bits(&s->gb, 4) - (s->last_superframe_len <= 0 ? 1 : 0);
+        if (nb_frames < 0)
+            goto fail;
+        if (nb_frames == 0) {
+            /* Rare: stash packet body into reservoir, emit no PCM. */
+            if (s->last_superframe_len + size - 1 > WMA_MAX_CODED_SF)
+                goto fail;
+            q = s->last_superframe + s->last_superframe_len;
+            len = size - 1;
+            while (len > 0) {
+                *q++ = (uint8_t)wma_get_bits(&s->gb, 8);
+                len--;
+            }
+            s->last_superframe_len += size - 1;
+            return 0;
+        }
+
+        bit_offset = (int)wma_get_bits(&s->gb, s->byte_offset_bits + 3);
+        if (bit_offset < 0 || bit_offset > wma_gb_bits_left(&s->gb))
+            goto fail;
+
+        if (s->last_superframe_len > 0) {
+            int prior_len = s->last_superframe_len;
+
+            /* Append bit_offset bits after the saved reservoir bytes.
+             * Do not bump last_superframe_len; bit length is prior_len*8+bit_offset. */
+            if (prior_len + ((bit_offset + 7) >> 3) > WMA_MAX_CODED_SF)
+                goto fail;
+            q = s->last_superframe + prior_len;
+            len = bit_offset;
+            while (len > 7) {
+                *q++ = (uint8_t)wma_get_bits(&s->gb, 8);
+                len -= 8;
+            }
+            if (len > 0)
+                *q++ = (uint8_t)(wma_get_bits(&s->gb, len) << (8 - len));
+
+            /* Readable size covers the appended partial byte. */
+            wma_gb_init(&s->gb, s->last_superframe,
+                        prior_len + ((bit_offset + 7) >> 3));
+            if (s->last_bitoffset > 0)
+                wma_skip_bits(&s->gb, s->last_bitoffset);
+            {
+                int total_bits = prior_len * 8 + bit_offset;
+                int bytes_needed = (total_bits + 7) >> 3;
+                s->gb.buf_bytes = bytes_needed;
+                if (s->gb.bit_pos > total_bits)
+                    goto fail;
+            }
+
+            if (samples_written + s->frame_len > out_cap_samples_per_ch)
+                goto fail;
+            ret = wma_decode_frame(s, out + samples_written * nc);
+            if (ret < 0) goto fail;
+            samples_written += ret;
+            nb_frames--;
+        }
+
+        /* Decode frames that begin in this packet at bit_offset. */
+        pos = bit_offset + 4 + 4 + s->byte_offset_bits + 3;
+        if (pos > size * 8)
+            goto fail;
+        wma_gb_init(&s->gb, buf + (pos >> 3), size - (pos >> 3));
+        if (pos & 7)
+            wma_skip_bits(&s->gb, pos & 7);
+
         s->reset_block_lengths = 1;
+        for (i = 0; i < nb_frames; i++) {
+            if (samples_written + s->frame_len > out_cap_samples_per_ch)
+                goto fail;
+            ret = wma_decode_frame(s, out + samples_written * nc);
+            if (ret < 0) goto fail;
+            samples_written += ret;
+        }
+
+        /* Save unused tail of this packet into the bit reservoir. */
+        pos = s->gb.bit_pos + ((bit_offset + 4 + 4 + s->byte_offset_bits + 3) & ~7);
+        s->last_bitoffset = pos & 7;
+        pos >>= 3;
+        len = size - pos;
+        if (len < 0 || len > WMA_MAX_CODED_SF)
+            goto fail;
+        s->last_superframe_len = len;
+        if (len > 0)
+            memcpy(s->last_superframe, buf + pos, (size_t)len);
     } else {
         s->reset_block_lengths = 1;
+        if (s->frame_len > out_cap_samples_per_ch)
+            goto fail;
+        ret = wma_decode_frame(s, out);
+        if (ret < 0) goto fail;
+        samples_written = ret;
     }
 
-    s->nb_frames = nb_frames;
-    s->current_frame = 0;
-    return 0;
+    return samples_written;
+
+fail:
+    s->last_superframe_len = 0;
+    s->last_bitoffset = 0;
+    return -1;
 }
 
 int wma_decode_init(WMADecodeContext *s, const WMAFormatInfo *wfx) {
@@ -818,19 +957,37 @@ int wma_decode_init(WMADecodeContext *s, const WMAFormatInfo *wfx) {
                 }
                 s->exponent_sizes[i] = j;
             } else {
-                j = 0; lpos = 0;
-                for (int k = 0; k < 25; k++) {
-                    int a = (int)wma_critical_freqs[k];
-                    int b = s->sample_rate;
-                    pos = ((block_len * 2 * a) + (b << 1)) / (4 * b);
-                    pos <<= 2;
-                    if (pos > block_len) pos = block_len;
-                    if (pos > lpos)
-                        s->exponent_bands[i][j++] = (uint16_t)(pos - lpos);
-                    if (pos >= block_len) break;
-                    lpos = pos;
+                /* FFmpeg uses hardcoded tables for shorter blocks. */
+                int a = s->frame_len_bits - WMA_BLOCK_MIN_BITS - i;
+                const uint8_t *table = NULL;
+                if (a < 3) {
+                    if (s->sample_rate >= 44100)
+                        table = exponent_band_44100[a];
+                    else if (s->sample_rate >= 32000)
+                        table = exponent_band_32000[a];
+                    else if (s->sample_rate >= 22050)
+                        table = exponent_band_22050[a];
                 }
-                s->exponent_sizes[i] = j;
+                if (table) {
+                    int nband = table[0];
+                    for (j = 0; j < nband; j++)
+                        s->exponent_bands[i][j] = table[j + 1];
+                    s->exponent_sizes[i] = nband;
+                } else {
+                    j = 0; lpos = 0;
+                    for (int k = 0; k < 25; k++) {
+                        int aa = (int)wma_critical_freqs[k];
+                        int b = s->sample_rate;
+                        pos = ((block_len * 2 * aa) + (b << 1)) / (4 * b);
+                        pos <<= 2;
+                        if (pos > block_len) pos = block_len;
+                        if (pos > lpos)
+                            s->exponent_bands[i][j++] = (uint16_t)(pos - lpos);
+                        if (pos >= block_len) break;
+                        lpos = pos;
+                    }
+                    s->exponent_sizes[i] = j;
+                }
             }
 
             s->coefs_end[i] = (s->frame_len - ((s->frame_len * 9) / 100)) >> i;

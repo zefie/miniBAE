@@ -130,8 +130,11 @@ typedef struct {
 
 /* ---- API ---- */
 int  wma_decode_init(WMADecodeContext *s, const WMAFormatInfo *wfx);
-int  wma_superframe_init(WMADecodeContext *s, const uint8_t *buf, int size, int bit_off);
-int  wma_decode_frame(WMADecodeContext *s, float *out);
+/* Decode one WMA packet (typically block_align bytes).
+ * Writes interleaved float PCM into out (capacity out_cap_samples_per_ch * channels).
+ * Returns samples-per-channel written (>=0; 0 = reservoir-only), or -1 on error. */
+int  wma_decode_superframe(WMADecodeContext *s, const uint8_t *buf, int size,
+                           float *out, int out_cap_samples_per_ch);
 void wma_decode_close(WMADecodeContext *s);
 
 static inline int wma_gb_bits_left(WMAGetBitContext *gb) {

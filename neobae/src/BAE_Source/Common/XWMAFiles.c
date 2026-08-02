@@ -388,6 +388,13 @@ OPErr XExpandWMA(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst)
         return BAD_FILE_TYPE;
     }
 
+    /*
+     * Match DLS MSAUDIO1 priming: skip one IMDCT frame, not FFmpeg's two.
+     * Two-frame skip drops the attack and shifts content so sample loops
+     * (BAESound / full-file loop) no longer line up.
+     */
+    wma_ctx->skip_frames = 1;
+
     /* Estimate output buffer size */
     {
         int block_align = wma_ctx->block_align;
@@ -395,7 +402,10 @@ OPErr XExpandWMA(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst)
         uint32_t nb_channels = (uint32_t)wma_ctx->nb_channels;
         uint32_t frame_len = (uint32_t)wma_ctx->frame_len;
         uint32_t num_superframes;
+        /* Bit-reservoir packets can emit up to 15 frames (4-bit count). */
+        int max_frames_per_sf = 16;
         float *frame_output;
+        int frame_cap = max_frames_per_sf * (int)frame_len;
 
         if (block_align <= 0) block_align = 1;
         num_superframes = wma_data_size / (uint32_t)block_align + 2;
@@ -403,7 +413,7 @@ OPErr XExpandWMA(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst)
 
         uint32_t out_samples = num_superframes * frame_len;
         int16_t *pcm_out = (int16_t *)XNewPtr(out_samples * nb_channels * sizeof(int16_t));
-        frame_output = (float *)XNewPtr(WMA_BLOCK_MAX_SIZE * 2 * sizeof(float));
+        frame_output = (float *)XNewPtr((uint32_t)frame_cap * nb_channels * sizeof(float));
         if (!pcm_out || !frame_output) {
             if (pcm_out) XDisposePtr((XPTR)pcm_out);
             if (frame_output) XDisposePtr((XPTR)frame_output);
@@ -416,51 +426,65 @@ OPErr XExpandWMA(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst)
         dst->sampledRate = (XFIXED)((uint64_t)sample_rate << 16);
         dst->channels = (uint16_t)nb_channels;
         dst->bitSize = 16;
+        dst->baseMidiPitch = src->baseMidiPitch ? src->baseMidiPitch : 60;
 
         {
             uint32_t sf_offset = 0, out_pos = 0;
-            int max_sf = 512;
 
-            while (sf_offset < wma_data_size && max_sf-- > 0) {
+            while (sf_offset < wma_data_size) {
                 uint32_t sf_size = wma_data_size - sf_offset;
                 int samples, i, ch;
+                int skip = 0;
+
                 if (sf_size > (uint32_t)block_align)
                     sf_size = (uint32_t)block_align;
                 if (sf_size < 4) break;
 
-                if (wma_superframe_init(wma_ctx, wma_data + sf_offset, (int)sf_size, 0) < 0) {
+                samples = wma_decode_superframe(wma_ctx, wma_data + sf_offset,
+                                                (int)sf_size, frame_output,
+                                                frame_cap);
+                if (samples < 0) {
+                    /* Resync: reservoir already cleared inside decoder. */
+                    sf_offset += sf_size;
+                    continue;
+                }
+                if (samples == 0) {
                     sf_offset += sf_size;
                     continue;
                 }
 
-                samples = wma_decode_frame(wma_ctx, frame_output);
-                if (samples <= 0) { sf_offset += sf_size; continue; }
-
-                if (wma_ctx->skip_frames > 0) {
+                /* Drop decoder priming frames from the start of the stream. */
+                while (skip < samples && wma_ctx->skip_frames > 0) {
+                    skip += (int)frame_len;
                     wma_ctx->skip_frames--;
+                }
+                if (skip >= samples) {
                     sf_offset += sf_size;
                     continue;
                 }
 
-                if (out_pos + (uint32_t)samples > out_samples) {
-                    uint32_t ns = out_samples * 2 + (uint32_t)samples;
-                    int16_t *np = (int16_t *)XNewPtr(ns * nb_channels * sizeof(int16_t));
-                    if (!np) break;
-                    XBlockMove(pcm_out, np, out_pos * nb_channels * sizeof(int16_t));
-                    XDisposePtr((XPTR)pcm_out);
-                    pcm_out = np;
-                    out_samples = ns;
-                }
-
-                for (i = 0; i < samples; i++) {
-                    for (ch = 0; ch < wma_ctx->nb_channels; ch++) {
-                        float sample = frame_output[i * nb_channels + ch] * 32767.0f;
-                        if (sample > 32767.0f) sample = 32767.0f;
-                        if (sample < -32768.0f) sample = -32768.0f;
-                        pcm_out[(out_pos + i) * nb_channels + ch] = (int16_t)sample;
+                {
+                    int keep = samples - skip;
+                    if (out_pos + (uint32_t)keep > out_samples) {
+                        uint32_t ns = out_samples * 2 + (uint32_t)keep;
+                        int16_t *np = (int16_t *)XNewPtr(ns * nb_channels * sizeof(int16_t));
+                        if (!np) break;
+                        XBlockMove(pcm_out, np, out_pos * nb_channels * sizeof(int16_t));
+                        XDisposePtr((XPTR)pcm_out);
+                        pcm_out = np;
+                        out_samples = ns;
                     }
+
+                    for (i = 0; i < keep; i++) {
+                        for (ch = 0; ch < wma_ctx->nb_channels; ch++) {
+                            float sample = frame_output[(skip + i) * nb_channels + ch] * 32767.0f;
+                            if (sample > 32767.0f) sample = 32767.0f;
+                            if (sample < -32768.0f) sample = -32768.0f;
+                            pcm_out[(out_pos + (uint32_t)i) * nb_channels + ch] = (int16_t)sample;
+                        }
+                    }
+                    out_pos += (uint32_t)keep;
                 }
-                out_pos += (uint32_t)samples;
                 sf_offset += sf_size;
             }
 
@@ -488,6 +512,23 @@ OPErr XExpandWMA(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst)
                     }
                     out_pos += frame_len;
                 }
+            }
+
+            /*
+             * Drop the drained OLA flush frame from playable length. It is
+             * near-silent and breaks seamless full-sample loops in BAESound.
+             */
+            if (out_pos > frame_len)
+                out_pos -= frame_len;
+
+            if (startFrame > 0 && startFrame < out_pos) {
+                uint32_t keep = out_pos - startFrame;
+                XBlockMove(pcm_out + startFrame * nb_channels,
+                           pcm_out,
+                           keep * nb_channels * sizeof(int16_t));
+                out_pos = keep;
+            } else if (startFrame >= out_pos) {
+                out_pos = 0;
             }
 
             XDisposePtr((XPTR)frame_output);

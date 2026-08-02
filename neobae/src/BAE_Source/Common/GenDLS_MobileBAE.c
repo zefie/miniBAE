@@ -353,7 +353,13 @@ static int32_t dls_eg1_level(int64_t current) {
 }
 
 static int32_t dls_modulated_time_micros(int32_t baseMicros, int32_t valueQ16) {
-    if (baseMicros <= 0) return 0;
+    /* Direct EG times default to INT32_MIN → 0 µs (instant). DLS modulators
+     * (VEL/KEY → EG) still add in timecent space on a 0-timecent (= 1 s) base.
+     * microQ/TouchWiz banks often define attack/decay only via those modulators;
+     * discarding them when baseMicros==0 made ADSR sound wrong (always instant). */
+    if (baseMicros <= 0) {
+        baseMicros = 1000000;
+    }
     int64_t val = ((int64_t)baseMicros * dls_exp2_q16(valueQ16 / 1200)) >> 16;
     if (val < 0) return 0;
     if (val > 40000000LL) return 40000000;
@@ -864,12 +870,8 @@ static OPErr dls_decode_wma_wave(const uint8_t* encoded, uint32_t encodedBytes, 
         return BAD_FILE_TYPE;
 
     ctx = (WMADecodeContext *)XNewPtr(sizeof(WMADecodeContext));
-    frame_out = (float *)XNewPtr(WMA_BLOCK_MAX_SIZE * 2 * sizeof(float));
-    if (!ctx || !frame_out) {
-        if (ctx) XDisposePtr((XPTR)ctx);
-        if (frame_out) XDisposePtr((XPTR)frame_out);
+    if (!ctx)
         return MEMORY_ERR;
-    }
 
     XSetMemory(&info, sizeof(info), 0);
     info.codec_id = (uint16_t)wave->formatTag;
@@ -885,7 +887,6 @@ static OPErr dls_decode_wma_wave(const uint8_t* encoded, uint32_t encodedBytes, 
 
     if (wma_decode_init(ctx, &info) < 0) {
         XDisposePtr((XPTR)ctx);
-        XDisposePtr((XPTR)frame_out);
         return BAD_FILE_TYPE;
     }
 
@@ -899,26 +900,37 @@ static OPErr dls_decode_wma_wave(const uint8_t* encoded, uint32_t encodedBytes, 
 
     block_align = ctx->block_align;
     frame_len = ctx->frame_len;
-    pcm_cap = (encodedBytes / (uint32_t)block_align + 3) * (uint32_t)frame_len * (uint32_t)ctx->nb_channels;
+    /* Bit-reservoir packets can emit up to 15 frames. */
+    frame_out = (float *)XNewPtr((uint32_t)(16 * frame_len) *
+                                 (uint32_t)ctx->nb_channels * sizeof(float));
+    pcm_cap = (encodedBytes / (uint32_t)block_align + 3) *
+              (uint32_t)frame_len * (uint32_t)ctx->nb_channels * 4u;
     pcm = (int16_t *)XNewPtr(pcm_cap * sizeof(int16_t));
-    if (!pcm) {
+    if (!frame_out || !pcm) {
+        if (pcm) XDisposePtr((XPTR)pcm);
+        if (frame_out) XDisposePtr((XPTR)frame_out);
         wma_decode_close(ctx);
         XDisposePtr((XPTR)ctx);
-        XDisposePtr((XPTR)frame_out);
         return MEMORY_ERR;
     }
 
     for (offset = 0; offset + (uint32_t)block_align <= encodedBytes; offset += (uint32_t)block_align) {
-        int samples, i, ch;
-        if (wma_superframe_init(ctx, encoded + offset, block_align, 0) < 0)
+        int samples, i, ch, skip = 0;
+        samples = wma_decode_superframe(ctx, encoded + offset, block_align,
+                                        frame_out, 16 * frame_len);
+        if (samples < 0)
             continue;
-        samples = wma_decode_frame(ctx, frame_out);
-        if (samples <= 0)
+        if (samples == 0)
             continue;
-        if (ctx->skip_frames > 0) {
+
+        while (skip < samples && ctx->skip_frames > 0) {
+            skip += frame_len;
             ctx->skip_frames--;
-            continue;
         }
+        if (skip >= samples)
+            continue;
+
+        samples -= skip;
         if (pcm_n + (uint32_t)(samples * ctx->nb_channels) > pcm_cap) {
             uint32_t ncap = pcm_cap * 2 + (uint32_t)(samples * ctx->nb_channels);
             int16_t *np = (int16_t *)XNewPtr(ncap * sizeof(int16_t));
@@ -930,7 +942,7 @@ static OPErr dls_decode_wma_wave(const uint8_t* encoded, uint32_t encodedBytes, 
         }
         for (i = 0; i < samples; i++) {
             for (ch = 0; ch < ctx->nb_channels; ch++) {
-                float s = frame_out[i * ctx->nb_channels + ch] * 32767.0f;
+                float s = frame_out[(skip + i) * ctx->nb_channels + ch] * 32767.0f;
                 if (s > 32767.0f) s = 32767.0f;
                 if (s < -32768.0f) s = -32768.0f;
                 pcm[pcm_n++] = (int16_t)s;
@@ -4201,10 +4213,18 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
                 v->rampFrame = 0;
 
                 if (v->position == 0) {
-                    debug_message("DLS Control: voice=%lld env=%d gain=%d atten=%d vol=%d expr=%d pan=%d panL=%d panR=%d left=%d right=%d\n",
-                                  v->startSerial, env1, gainQ16, gainAttenuation, ch->volume,
-                                  ch->expression, panOffset,
-                                  dls_pan_scale_q16(-panOffset, voiceQuirks), dls_pan_scale_q16(panOffset, voiceQuirks),
+                    int32_t prog = ch->program;
+                    int32_t msb = ch->bankMsb;
+                    int32_t lsb = ch->bankLsb;
+                    if (ch->selectedInstrument) {
+                        prog = ch->selectedInstrument->program;
+                        msb = ch->selectedInstrument->bankMsb;
+                        lsb = ch->selectedInstrument->bankLsb;
+                    }
+                    debug_message("DLS Control: voice=%lld ch=%d key=%d vel=%d bank=%d:%d prog=%d env=%d base=%d gain=%d atten=%d vol=%d expr=%d pan=%d pitch=%d left=%d right=%d\n",
+                                  v->startSerial, v->channel, v->key, v->velocity,
+                                  msb, lsb, prog, env1, v->baseGainQ16, gainQ16, gainAttenuation,
+                                  ch->volume, ch->expression, panOffset, runtimePitch,
                                   v->targetLeftGain, v->targetRightGain);
                 }
                 
