@@ -934,7 +934,10 @@ if(BAE_ENABLE_SF2_SUPPORT AND BAE_ENABLE_FLUIDLITE)
 endif()
 
 if(BAE_ENABLE_XMF_SUPPORT)
-  list(APPEND NEOBAE_SOURCES neobae/src/BAE_Source/Common/GenXMF.c)
+  list(APPEND NEOBAE_SOURCES 
+      neobae/src/BAE_Source/Common/GenXMF.c
+      neobae/src/BAE_Source/Common/cast5mini.c
+  )
 endif()
 
 if(BAE_ENABLE_MTHC_SUPPORT)
@@ -1870,7 +1873,14 @@ if(BUILD_CLITOOLS)
   set_target_properties(sf2_hsb PROPERTIES OUTPUT_NAME sf2-hsb)
 
   if(BAE_ENABLE_XMF_SUPPORT)
-    add_executable(xmfutil neobae/src/xmfutil/xmfutil.c)
+    add_executable(xmfutil
+      neobae/src/xmfutil/xmfutil.c
+      neobae/src/BAE_Source/Common/cast5mini.c
+      neobae/src/BAE_Source/Common/sha1mini.c
+    )
+    target_include_directories(xmfutil PRIVATE
+      ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Common
+    )
     if(NEOBAE_STATIC)
       if(MINGW)
         target_link_libraries(xmfutil PRIVATE zs)

@@ -38,6 +38,8 @@ void LZSSUncompress(unsigned char* src, uint32_t srcBytes,
 #if USE_XMF_SUPPORT == TRUE && USE_NATIVE_DLS == TRUE
 #include <zlib.h>
 #include "GenDLS_MobileBAE.h"
+#include "sha1mini.h"
+#include "cast5mini.h"
 
 
 static BAESong g_xmfBankLoadSong = NULL;
@@ -118,6 +120,113 @@ static bool PV_TryLoadBankFromPackedBlob(const unsigned char *buf, uint32_t len)
 static bool PV_ProbeLZSS(const unsigned char *bytes, uint32_t ulen, uint32_t offset,
                           const unsigned char **outMidi, uint32_t *outMidiLen,
                           const unsigned char **outRmf, uint32_t *outRmfLen);
+
+/*
+ * MobileBAE Plus XMF "IDCR" decrypt (unpacker ID 128 / FourCC DECR+IDCR).
+ *
+ * Recovered from mBAE_plus14.dll sub_11FED40 / ARM sub_813A5Bxx:
+ * same recurrence as Beatnik XDecryptData, but the running state is kept as
+ * a uint16 (INIT 56549 / 0xDCE5), not uint32. Using the 32-bit RMF cipher
+ * diverges after the product overflows 16 bits and fails on XMF payloads.
+ */
+#define XMF_IDCR_INIT_R  ((uint16_t)56549u) /* also written as int16 -8987 */
+#define XMF_IDCR_C1      ((uint16_t)52845u) /* == (uint16_t)-12691 */
+#define XMF_IDCR_C2      ((uint16_t)22719u)
+
+static void PV_XmfDecryptIDCR(void *pData, uint32_t size)
+{
+    unsigned char *p;
+    unsigned char *end;
+    uint16_t R;
+
+    if (!pData || size == 0)
+        return;
+    R = XMF_IDCR_INIT_R;
+    p = (unsigned char *)pData;
+    end = p + size;
+    while (p < end)
+    {
+        unsigned char cipher = *p;
+        *p++ = (unsigned char)(cipher ^ (uint8_t)(R >> 8));
+        R = (uint16_t)((uint16_t)(cipher + R) * XMF_IDCR_C1 + XMF_IDCR_C2);
+    }
+}
+
+/*
+ * MobileBAE Plus XMF "CDCR" (unpacker mfr 269 id 2/3, FourCC DECR+CDCR).
+ *
+ * Resource layout: 40-byte header (SHA-1 of metadata region, optional
+ * password check) + CAST-128-CBC ciphertext (multiple of 8).
+ * Key = SHA1(metadataLenVLQ||metadata || seed)[0:16]
+ * IV  = SHA1(...)[12:20]
+ * Seeds recovered from mBAE_plus14.dll (type2 at "_(" / 0x8aafc, type3 at 0x8ab0c).
+ */
+#define XMF_CDCR_HEADER_LEN  40u
+
+static const unsigned char kXmfCdcrSeed2[16] = {
+    0x5fu, 0x28u, 0x00u, 0xd0u, 0x05u, 0xedu, 0xbbu, 0xf2u,
+    0x3fu, 0x71u, 0x4fu, 0xbcu, 0xc9u, 0xe1u, 0x8du, 0x13u
+};
+static const unsigned char kXmfCdcrSeed3[16] = {
+    0x8bu, 0xb5u, 0x2au, 0xe2u, 0x1eu, 0xb2u, 0x3du, 0x00u,
+    0x6au, 0x02u, 0x6bu, 0xf6u, 0x69u, 0x13u, 0xc9u, 0xefu
+};
+
+static bool PV_XmfDecryptCDCR(unsigned char **ioBuf, uint32_t *ioLen,
+                              uint32_t unpackerId,
+                              const unsigned char *hashRegion, uint32_t hashLen)
+{
+    const unsigned char *seed;
+    unsigned char digest[20];
+    unsigned char iv[8];
+    SHA1_CTX_MINI ctx;
+    uint32_t cipherLen;
+
+    if (!ioBuf || !ioLen || !*ioBuf || !hashRegion || hashLen == 0)
+        return FALSE;
+    if (*ioLen <= XMF_CDCR_HEADER_LEN)
+        return FALSE;
+    cipherLen = *ioLen - XMF_CDCR_HEADER_LEN;
+    if ((cipherLen & 7u) != 0)
+        return FALSE;
+
+    seed = (unpackerId == 3u) ? kXmfCdcrSeed3 : kXmfCdcrSeed2;
+    sha1mini_init(&ctx);
+    sha1mini_update(&ctx, hashRegion, (size_t)hashLen);
+    sha1mini_update(&ctx, seed, 16);
+    sha1mini_final(digest, &ctx);
+    memcpy(iv, digest + 12, 8);
+
+    if (cast5mini_cbc_decrypt(*ioBuf + XMF_CDCR_HEADER_LEN,
+                              *ioBuf + XMF_CDCR_HEADER_LEN,
+                              (size_t)cipherLen,
+                              digest, 16, iv) != 0)
+        return FALSE;
+
+    /* Drop the 40-byte CDCR header; plaintext starts at the former cipher. */
+    memmove(*ioBuf, *ioBuf + XMF_CDCR_HEADER_LEN, cipherLen);
+    *ioLen = cipherLen;
+    return TRUE;
+}
+
+/* Beatnik MMA manufacturer ID used for XMF NodeUnpackers (0x00010D). */
+#define XMF_BEATNIK_MFR_ID  269u
+#define XMF_UNPACK_MAX      8
+
+typedef struct XmfUnpackerEntry
+{
+    uint8_t  type;      /* 0=standard, 1=mfr */
+    uint32_t id;        /* standard id, or mfr internal id when type==1 */
+    uint32_t mfr;       /* manufacturer id when type==1 */
+    uint32_t sizeHint;  /* optional decoded-size VLQ from Beatnik entries */
+    bool     hasSizeHint;
+} XmfUnpackerEntry;
+
+static int PV_ParseXmfUnpackers(const unsigned char *buf, uint32_t len,
+                                XmfUnpackerEntry *out, int maxOut);
+static bool PV_ApplyXmfUnpackers(unsigned char **ioBuf, uint32_t *ioLen,
+                                 const XmfUnpackerEntry *ents, int nEnts,
+                                 const unsigned char *cdcrHash, uint32_t cdcrHashLen);
 
 // -------------------- XMF v1 (1.00) minimal parser --------------------
 
@@ -258,14 +367,19 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
     uint32_t headerEnd = headerStart + headerLen;
     if (headerEnd > len) return FALSE;
     uint32_t metadataLen = 0; uint32_t metaStart = 0;
+    uint32_t cdcrHashOff = 0, cdcrHashLen = 0;
     int rfType = -1, rfId = -1;
     // Metadata LEN (if any bytes remain in header)
     if (*pos < headerEnd)
     {
+        uint32_t metaLenVlqOff = *pos;
         if (!PV_ReadVLQSlice(bytes, headerStart, headerEnd, pos, &metadataLen)) metadataLen = 0;
         if (metadataLen > 0 && *pos <= headerEnd && metadataLen <= (headerEnd - *pos))
         {
             metaStart = *pos;
+            /* CDCR keys off SHA1(metadataLenVLQ || metadata) — MobileBAE sub_121AF80. */
+            cdcrHashOff = metaLenVlqOff;
+            cdcrHashLen = (metaStart - metaLenVlqOff) + metadataLen;
             PV_ParseXMF1Metadata(bytes, len, metaStart, metadataLen, &rfType, &rfId);
             *pos += metadataLen;
         }
@@ -277,21 +391,30 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
     }
     // Unpackers LEN (if any header bytes remain)
     uint32_t unpackersLen = 0;
+    const unsigned char *unpackersBuf = NULL;
+    XmfUnpackerEntry unpackEnts[XMF_UNPACK_MAX];
+    int unpackCount = 0;
     if (*pos < headerEnd)
     {
         if (!PV_ReadVLQSlice(bytes, headerStart, headerEnd, pos, &unpackersLen)) unpackersLen = 0;
         if (*pos <= headerEnd && unpackersLen <= (headerEnd - *pos))
         {
+            unpackersBuf = bytes + *pos;
+            unpackCount = PV_ParseXmfUnpackers(unpackersBuf, unpackersLen, unpackEnts, XMF_UNPACK_MAX);
             *pos += unpackersLen;
         }
-        // else malformed; fall through to headerEnd
+        // else malformed; fall through
     }
-    // Land exactly at end of header
-    *pos = headerEnd;
-    // We don't parse unpackers in detail; presence means packed content
+    /*
+     * Do not force *pos = headerEnd. Beatnik files often set NodeHeaderLength
+     * past the real metadata/unpackers into refType/content or the next child.
+     * Content / children begin immediately after the unpacker list.
+     */
+    if (*pos > headerEnd)
+        *pos = headerEnd;
     bool isPacked = (unpackersLen > 0) ? TRUE : FALSE;
-    debug_message("[XMF1] header %u..%u metaLen=%u unpackersLen=%u isPacked=%d rfTypeHint=%d rfIdHint=%d\n",
-               headerStart, headerEnd, metadataLen, unpackersLen, (int)isPacked, rfType, rfId);
+    debug_message("[XMF1] header %u..%u metaLen=%u unpackersLen=%u unpackers=%d isPacked=%d rfTypeHint=%d rfIdHint=%d\n",
+               headerStart, headerEnd, metadataLen, unpackersLen, unpackCount, (int)isPacked, rfType, rfId);
 
     if (itemCount == 0)
     {
@@ -349,13 +472,37 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
             return TRUE;
         }
 
-        // If packed, try to inflate content (zlib/gzip first, then raw)
+        // Decode via explicit NodeUnpackers when present; else try inflate heuristics.
         const unsigned char *payload = content;
         uint32_t payloadLen = contentLen;
         unsigned char *inflated = NULL; uint32_t inflatedLen = 0;
-        if (isPacked && contentLen >= 4)
+        unsigned char *ownedPayload = NULL; /* mutable working copy when unpackers run */
+        if (isPacked && contentLen >= 4 && unpackCount > 0)
         {
-            debug_message("[XMF1] content marked packed; trying inflate...\n");
+            ownedPayload = (unsigned char *)XNewPtr(contentLen);
+            if (ownedPayload)
+            {
+                uint32_t ownedLen = contentLen;
+                XBlockMove(content, ownedPayload, contentLen);
+                if (PV_ApplyXmfUnpackers(&ownedPayload, &ownedLen, unpackEnts, unpackCount,
+                                         (cdcrHashLen > 0) ? (bytes + cdcrHashOff) : NULL,
+                                         cdcrHashLen))
+                {
+                    payload = ownedPayload;
+                    payloadLen = ownedLen;
+                    debug_message("[XMF1] unpacker chain -> %u bytes\n", payloadLen);
+                }
+                else
+                {
+                    XDisposePtr(ownedPayload);
+                    ownedPayload = NULL;
+                }
+            }
+        }
+        if (payload == content && contentLen >= 4)
+        {
+            if (isPacked)
+                debug_message("[XMF1] content marked packed; trying inflate...\n");
             if (!PV_InflateFromOffset(content, contentLen, 0, &inflated, &inflatedLen))
             {
                 (void)PV_InflateRawFromOffset(content, contentLen, 0, &inflated, &inflatedLen);
@@ -373,36 +520,24 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
                 payload = inflated; payloadLen = inflatedLen;
                 debug_message("[XMF1] inflate -> %u bytes\n", payloadLen);
             }
-            else
+            else if (isPacked)
             {
-                // Try decrypt+inflate as last resort
+                // Try IDCR decrypt+inflate as last resort (MobileBAE XMF cipher)
                 unsigned char *cpy = (unsigned char *)XNewPtr(contentLen);
                 if (cpy)
                 {
                     XBlockMove(content, cpy, contentLen);
-                    XDecryptData(cpy, contentLen);
+                    PV_XmfDecryptIDCR(cpy, contentLen);
                     if (PV_InflateFromOffset(cpy, contentLen, 0, &inflated, &inflatedLen) ||
                         PV_InflateRawFromOffset(cpy, contentLen, 0, &inflated, &inflatedLen) ||
                         PV_InflateFromOffset(cpy, contentLen, 2, &inflated, &inflatedLen) ||
                         PV_InflateRawFromOffset(cpy, contentLen, 2, &inflated, &inflatedLen))
                     {
                         payload = inflated; payloadLen = inflatedLen;
-                        debug_message("[XMF1] decrypt+inflate -> %u bytes\n", payloadLen);
+                        debug_message("[XMF1] IDCR+inflate -> %u bytes\n", payloadLen);
                     }
                     XDisposePtr(cpy);
                 }
-            }
-        }
-        else if (contentLen >= 4)
-        {
-            // Even if not marked packed, try to inflate at common offsets just in case
-            if (!inflated)
-            {
-                (void)PV_InflateFromOffset(content, contentLen, 0, &inflated, &inflatedLen);
-                if (!inflated) (void)PV_InflateRawFromOffset(content, contentLen, 0, &inflated, &inflatedLen);
-                if (!inflated) (void)PV_InflateFromOffset(content, contentLen, 2, &inflated, &inflatedLen);
-                if (!inflated) (void)PV_InflateRawFromOffset(content, contentLen, 2, &inflated, &inflatedLen);
-                if (inflated) { payload = inflated; payloadLen = inflatedLen; }
             }
         }
         // If still opaque, try LZSS probe on payload
@@ -482,6 +617,7 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
         }
 
         if (inflated) { XDisposePtr(inflated); }
+        if (ownedPayload) { XDisposePtr(ownedPayload); }
         *pos = nodeEnd;
         return TRUE;
     }
@@ -490,6 +626,22 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
         // Folder node: recursively parse children in content area until nodeEnd
         while (*pos < nodeEnd)
         {
+            /*
+             * Beatnik XMF1 folders often insert a lone 0x01 before each child
+             * node (not part of the child's NodeLength VLQ).
+             */
+            if (*pos + 1 < nodeEnd && bytes[*pos] == 1)
+            {
+                uint32_t probe = *pos + 1;
+                uint32_t childLen = 0;
+                if (PV_ReadVLQ(bytes, len, &probe, &childLen) &&
+                    childLen >= 3 &&
+                    (*pos + 1u) <= nodeEnd &&
+                    childLen <= (nodeEnd - (*pos + 1u)))
+                {
+                    (*pos)++;
+                }
+            }
             if (!PV_ParseXMF1Node(bytes, len, pos, outMidi, outMidiLen, outRmf, outRmfLen, bankLoaded))
                 break;
             // Early out if we have song and bank
@@ -812,6 +964,168 @@ static bool PV_ProbeLZSS(const unsigned char *bytes, uint32_t ulen, uint32_t off
     XDisposePtr(dst);
     return FALSE;
 }
+
+/* Parse NodeUnpackers payload into entries. Supports standard IDs and Beatnik mfr 269. */
+static int PV_ParseXmfUnpackers(const unsigned char *buf, uint32_t len,
+                                XmfUnpackerEntry *out, int maxOut)
+{
+    uint32_t p = 0;
+    int n = 0;
+    if (!buf || !out || maxOut <= 0)
+        return 0;
+    while (p < len && n < maxOut)
+    {
+        uint8_t typ = buf[p++];
+        XmfUnpackerEntry *e = &out[n];
+        memset(e, 0, sizeof(*e));
+        e->type = typ;
+        if (typ == 0)
+        {
+            uint32_t uid = 0;
+            if (!PV_ReadVLQSlice(buf, 0, len, &p, &uid))
+                break;
+            e->id = uid;
+            if (p < len)
+            {
+                uint32_t dlen = 0;
+                uint32_t save = p;
+                if (PV_ReadVLQSlice(buf, 0, len, &p, &dlen) && dlen <= (len - p))
+                    p += dlen;
+                else
+                    p = save;
+            }
+            n++;
+        }
+        else if (typ == 1)
+        {
+            uint32_t mfr;
+            uint32_t uid = 0;
+            if (p >= len)
+                break;
+            if (buf[p] == 0)
+            {
+                if (p + 3 > len)
+                    break;
+                mfr = ((uint32_t)buf[p] << 16) | ((uint32_t)buf[p + 1] << 8) | (uint32_t)buf[p + 2];
+                p += 3;
+            }
+            else
+            {
+                mfr = buf[p++];
+            }
+            if (!PV_ReadVLQSlice(buf, 0, len, &p, &uid))
+                break;
+            e->mfr = mfr;
+            e->id = uid;
+            /* Beatnik stores a size-hint VLQ directly (no length prefix). */
+            if (p < len)
+            {
+                uint32_t sz = 0;
+                if (PV_ReadVLQSlice(buf, 0, len, &p, &sz))
+                {
+                    e->sizeHint = sz;
+                    e->hasSizeHint = TRUE;
+                }
+            }
+            n++;
+        }
+        else
+        {
+            break;
+        }
+    }
+    return n;
+}
+
+/*
+ * Apply unpackers in listed order (XMF: first = first applied).
+ * MobileBAE mappings from mBAE_plus14:
+ *   std 1 / mfr 269 id 1 -> zlib
+ *   std 128 (IDCR)       -> PV_XmfDecryptIDCR
+ *   mfr 269 id 2|3       -> CDCR (CAST-128-CBC + SHA-1 keying)
+ */
+static bool PV_ApplyXmfUnpackers(unsigned char **ioBuf, uint32_t *ioLen,
+                                 const XmfUnpackerEntry *ents, int nEnts,
+                                 const unsigned char *cdcrHash, uint32_t cdcrHashLen)
+{
+    int i;
+    if (!ioBuf || !ioLen || !*ioBuf)
+        return FALSE;
+    if (nEnts <= 0)
+        return TRUE;
+    for (i = 0; i < nEnts; ++i)
+    {
+        const XmfUnpackerEntry *e = &ents[i];
+        bool isZlib = FALSE;
+        bool isIdcr = FALSE;
+        bool isCdcr = FALSE;
+
+        if (e->type == 0)
+        {
+            if (e->id == 1)
+                isZlib = TRUE;
+            else if (e->id == 128)
+                isIdcr = TRUE;
+        }
+        else if (e->type == 1 && e->mfr == XMF_BEATNIK_MFR_ID)
+        {
+            if (e->id == 1)
+                isZlib = TRUE;
+            else if (e->id == 2 || e->id == 3)
+                isCdcr = TRUE;
+        }
+
+        if (isIdcr)
+        {
+            debug_message("[XMF] applying IDCR decrypt (%u bytes)\n", *ioLen);
+            PV_XmfDecryptIDCR(*ioBuf, *ioLen);
+            if (e->hasSizeHint && e->sizeHint > 0 && e->sizeHint < *ioLen)
+                *ioLen = e->sizeHint;
+        }
+        else if (isCdcr)
+        {
+            debug_message("[XMF] applying CDCR decrypt (mfr 269 id=%u, %u bytes, hashLen=%u)\n",
+                          e->id, *ioLen, cdcrHashLen);
+            if (!cdcrHash || cdcrHashLen == 0 ||
+                !PV_XmfDecryptCDCR(ioBuf, ioLen, e->id, cdcrHash, cdcrHashLen))
+            {
+                debug_message("[XMF] CDCR decrypt failed\n");
+                return FALSE;
+            }
+            if (e->hasSizeHint && e->sizeHint > 0 && e->sizeHint < *ioLen)
+                *ioLen = e->sizeHint;
+        }
+        else if (isZlib)
+        {
+            unsigned char *inflated = NULL;
+            uint32_t inflatedLen = 0;
+            debug_message("[XMF] applying zlib unpacker (%u bytes in)\n", *ioLen);
+            if (!PV_InflateFromOffset(*ioBuf, *ioLen, 0, &inflated, &inflatedLen))
+                (void)PV_InflateRawFromOffset(*ioBuf, *ioLen, 0, &inflated, &inflatedLen);
+            if (!inflated && *ioLen > 2)
+            {
+                if (!PV_InflateFromOffset(*ioBuf, *ioLen, 2, &inflated, &inflatedLen))
+                    (void)PV_InflateRawFromOffset(*ioBuf, *ioLen, 2, &inflated, &inflatedLen);
+            }
+            if (!inflated)
+            {
+                debug_message("[XMF] zlib unpacker failed\n");
+                return FALSE;
+            }
+            XDisposePtr(*ioBuf);
+            *ioBuf = inflated;
+            *ioLen = inflatedLen;
+        }
+        else
+        {
+            debug_message("[XMF] unrecognized unpacker type=%u id=%u mfr=%u\n",
+                          e->type, e->id, e->mfr);
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
 // Scan a buffer for zlib streams; try raw and decrypted windows; for each inflated blob, try to extract bank and midi/rmf.
 static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ulen,
                                          const unsigned char **outMidi, uint32_t *outMidiLen,
@@ -928,7 +1242,7 @@ static bool PV_TryExtractFromPackedMXMF(const unsigned char *bytes, uint32_t ule
             unsigned char *cpy = (unsigned char *)XNewPtr(win);
             if (!cpy) continue;
             XBlockMove(bytes + i, cpy, win);
-            XDecryptData(cpy, win);
+            PV_XmfDecryptIDCR(cpy, win);
             unsigned char *dout=NULL; uint32_t dlen=0;
             if (PV_InflateFromOffset(cpy, win, 0, &dout, &dlen))
             {
@@ -1375,7 +1689,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
             if (decAll)
             {
                 XBlockMove(bytes, decAll, ulen);
-                XDecryptData(decAll, ulen);
+                PV_XmfDecryptIDCR(decAll, ulen);
                 pm=NULL; pmLen=0; pr=NULL; prLen=0; bank2 = bankLoaded;
                 if (PV_TryExtractFromPackedMXMF(decAll, ulen, &pm, &pmLen, &pr, &prLen, &bank2))
                 {
@@ -1522,7 +1836,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
             if (mcpy)
             {
                 XBlockMove(m, mcpy, mlen);
-                XDecryptData(mcpy, mlen);
+                PV_XmfDecryptIDCR(mcpy, mlen);
                 int droff = PV_FindSignature(mcpy, mlen, smf_sig);
                 if (droff >= 0)
                 {
@@ -1577,7 +1891,7 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
                         unsigned char *dwin = (unsigned char *)XNewPtr(dlen);
                         if (!dwin) break;
                         XBlockMove(m + so, dwin, dlen);
-                        XDecryptData(dwin, dlen);
+                        PV_XmfDecryptIDCR(dwin, dlen);
                         int woff = PV_FindSignature(dwin, dlen, smf_sig);
                         if (woff >= 0)
                         {
@@ -1760,12 +2074,12 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
 
     // If we fall through to here, try a whole-file decrypt fallback (XMF v1 encrypted files)
     // We'll decrypt a copy of the container and re-run the same heuristics.
-    debug_message("[XMF] Plain scan failed; attempting XMF v1 decrypt fallback...\n");
+    debug_message("[XMF] Plain scan failed; attempting XMF IDCR decrypt fallback...\n");
     unsigned char *dec = (unsigned char *)XNewPtr(ulen);
     if (dec)
     {
         XBlockMove(bytes, dec, ulen);
-        XDecryptData(dec, ulen);
+        PV_XmfDecryptIDCR(dec, ulen);
 
         // Re-scan decrypted buffer for SMF header
         int d_smf_off = PV_FindSignature(dec, ulen, smf_sig);

@@ -11,6 +11,9 @@
  *   RP-040 XMF Compression Definition for "zlib" (UnpackerTypeID 0, UnpackerID 0x01)
  *   RP-043 XMF Meta File Format 2.0 (adds XmfFileTypeID / XmfFileTypeRevisionID BE32 fields)
  *   RP-042a Type 2 XMF (Mobile XMF): ResourceFormatID 5 for Mobile DLS, 0 for SMF
+ *
+ * Extract also supports MobileBAE Beatnik unpackers:
+ *   std 128 (IDCR) and mfr 269 id 2|3 (CDCR / CAST-128-CBC)
  */
 
 #include <stddef.h>
@@ -19,6 +22,8 @@
 #include <stdint.h>
 #include <string.h>
 #include <zlib.h>
+#include "sha1mini.h"
+#include "cast5mini.h"
 
 #define FALSE 0
 #define TRUE  1
@@ -467,6 +472,356 @@ static uint8_t *make_xmf(int version,
 
 /* ========== EXTRACT ========== */
 
+#define XMF_BEATNIK_MFR_ID   269u
+#define XMF_CDCR_HEADER_LEN  40u
+#define XMF_UNPACK_MAX       8
+#define XMF_IDCR_INIT_R      ((uint16_t)56549u)
+#define XMF_IDCR_C1          ((uint16_t)52845u)
+#define XMF_IDCR_C2          ((uint16_t)22719u)
+
+static const uint8_t kXmfCdcrSeed2[16] = {
+    0x5fu, 0x28u, 0x00u, 0xd0u, 0x05u, 0xedu, 0xbbu, 0xf2u,
+    0x3fu, 0x71u, 0x4fu, 0xbcu, 0xc9u, 0xe1u, 0x8du, 0x13u
+};
+static const uint8_t kXmfCdcrSeed3[16] = {
+    0x8bu, 0xb5u, 0x2au, 0xe2u, 0x1eu, 0xb2u, 0x3du, 0x00u,
+    0x6au, 0x02u, 0x6bu, 0xf6u, 0x69u, 0x13u, 0xc9u, 0xefu
+};
+
+typedef struct {
+    uint8_t  type;       /* 0=standard, 1=mfr */
+    uint32_t id;
+    uint32_t mfr;
+    uint32_t sizeHint;
+    bool     hasSizeHint;
+} xmf_unpack_t;
+
+static void xmf_idcr_decrypt(uint8_t *p, uint32_t size)
+{
+    uint16_t R = XMF_IDCR_INIT_R;
+    uint8_t *end = p + size;
+    while (p < end) {
+        uint8_t cipher = *p;
+        *p++ = (uint8_t)(cipher ^ (uint8_t)(R >> 8));
+        R = (uint16_t)((uint16_t)(cipher + R) * XMF_IDCR_C1 + XMF_IDCR_C2);
+    }
+}
+
+static bool xmf_cdcr_decrypt(uint8_t **ioBuf, uint32_t *ioLen, uint32_t unpackerId,
+                             const uint8_t *hashRegion, uint32_t hashLen)
+{
+    uint8_t digest[20], iv[8];
+    SHA1_CTX_MINI ctx;
+    uint32_t cipherLen;
+    const uint8_t *seed;
+
+    if (!ioBuf || !ioLen || !*ioBuf || !hashRegion || hashLen == 0) return FALSE;
+    if (*ioLen <= XMF_CDCR_HEADER_LEN) return FALSE;
+    cipherLen = *ioLen - XMF_CDCR_HEADER_LEN;
+    if ((cipherLen & 7u) != 0) return FALSE;
+
+    seed = (unpackerId == 3u) ? kXmfCdcrSeed3 : kXmfCdcrSeed2;
+    sha1mini_init(&ctx);
+    sha1mini_update(&ctx, hashRegion, (size_t)hashLen);
+    sha1mini_update(&ctx, seed, 16);
+    sha1mini_final(digest, &ctx);
+    memcpy(iv, digest + 12, 8);
+
+    if (cast5mini_cbc_decrypt(*ioBuf + XMF_CDCR_HEADER_LEN,
+                              *ioBuf + XMF_CDCR_HEADER_LEN,
+                              (size_t)cipherLen, digest, 16, iv) != 0)
+        return FALSE;
+
+    memmove(*ioBuf, *ioBuf + XMF_CDCR_HEADER_LEN, cipherLen);
+    *ioLen = cipherLen;
+    return TRUE;
+}
+
+static int xmf_parse_unpackers(const uint8_t *buf, uint32_t len, xmf_unpack_t *out, int maxOut)
+{
+    uint32_t p = 0;
+    int n = 0;
+    while (p < len && n < maxOut) {
+        uint8_t typ = buf[p++];
+        xmf_unpack_t *e = &out[n];
+        memset(e, 0, sizeof(*e));
+        e->type = typ;
+        if (typ == 0) {
+            if (p >= len) break;
+            e->id = vlq_read(buf, len, &p);
+            if (p < len) {
+                uint32_t save = p;
+                uint32_t sz = vlq_read(buf, len, &p);
+                /* RP-040 zlib: bare DecodedSize VLQ consuming the rest of the list. */
+                if (p == len) {
+                    e->sizeHint = sz;
+                    e->hasSizeHint = TRUE;
+                } else {
+                    /* Otherwise treat as length-prefixed opaque payload. */
+                    p = save;
+                    uint32_t dlen = vlq_read(buf, len, &p);
+                    if (dlen <= (len - p))
+                        p += dlen;
+                    else
+                        p = save;
+                }
+            }
+            n++;
+        } else if (typ == 1) {
+            uint32_t mfr;
+            if (p >= len) break;
+            if (buf[p] == 0) {
+                if (p + 3 > len) break;
+                mfr = ((uint32_t)buf[p] << 16) | ((uint32_t)buf[p + 1] << 8) | (uint32_t)buf[p + 2];
+                p += 3;
+            } else {
+                mfr = buf[p++];
+            }
+            e->mfr = mfr;
+            e->id = vlq_read(buf, len, &p);
+            if (p < len) {
+                uint32_t save = p;
+                uint32_t sz = vlq_read(buf, len, &p);
+                if (p <= len) {
+                    e->sizeHint = sz;
+                    e->hasSizeHint = TRUE;
+                } else {
+                    p = save;
+                }
+            }
+            n++;
+        } else {
+            break;
+        }
+    }
+    return n;
+}
+
+static uint8_t *z_inflate_any(const uint8_t *s, uint32_t n, uint32_t *o)
+{
+    uint8_t *d = z_inflate(s, n, o, n * 4);
+    if (d) return d;
+    /* Raw deflate fallback (windowBits = -15) */
+    if (n < 2) return NULL;
+    z_stream zs; memset(&zs, 0, sizeof(zs));
+    if (inflateInit2(&zs, -15) != Z_OK) return NULL;
+    uint32_t c = n * 4; if (c < 4096) c = 4096;
+    d = (uint8_t *)xalloc(c);
+    zs.next_in = (Bytef *)s; zs.avail_in = (uInt)n;
+    zs.next_out = (Bytef *)d; zs.avail_out = (uInt)c;
+    for (;;) {
+        int r = inflate(&zs, Z_NO_FLUSH);
+        if (r == Z_STREAM_END) break;
+        if (r != Z_OK) { free(d); inflateEnd(&zs); return NULL; }
+        if (!zs.avail_out) {
+            uint32_t u = (uint32_t)((char *)zs.next_out - (char *)d), nc = c * 2;
+            uint8_t *nd = (uint8_t *)realloc(d, nc);
+            if (!nd) { free(d); inflateEnd(&zs); return NULL; }
+            d = nd; c = nc; zs.next_out = (Bytef *)(d + u); zs.avail_out = (uInt)(c - u);
+        }
+    }
+    *o = (uint32_t)((char *)zs.next_out - (char *)d);
+    inflateEnd(&zs);
+    return d;
+}
+
+static bool xmf_apply_unpackers(uint8_t **ioBuf, uint32_t *ioLen,
+                                const xmf_unpack_t *ents, int nEnts,
+                                const uint8_t *cdcrHash, uint32_t cdcrHashLen,
+                                int quiet)
+{
+    int i;
+    if (!ioBuf || !ioLen || !*ioBuf) return FALSE;
+    if (nEnts <= 0) return TRUE;
+    for (i = 0; i < nEnts; ++i) {
+        const xmf_unpack_t *e = &ents[i];
+        bool isZlib = FALSE, isIdcr = FALSE, isCdcr = FALSE;
+        if (e->type == 0) {
+            if (e->id == 1) isZlib = TRUE;
+            else if (e->id == 128) isIdcr = TRUE;
+        } else if (e->type == 1 && e->mfr == XMF_BEATNIK_MFR_ID) {
+            if (e->id == 1) isZlib = TRUE;
+            else if (e->id == 2 || e->id == 3) isCdcr = TRUE;
+        }
+
+        if (isIdcr) {
+            if (!quiet) printf("  IDCR decrypt (%u bytes)\n", *ioLen);
+            xmf_idcr_decrypt(*ioBuf, *ioLen);
+            if (e->hasSizeHint && e->sizeHint > 0 && e->sizeHint < *ioLen)
+                *ioLen = e->sizeHint;
+        } else if (isCdcr) {
+            if (!quiet) printf("  CDCR decrypt (mfr 269 id=%u, %u bytes)\n", e->id, *ioLen);
+            if (!cdcrHash || cdcrHashLen == 0 ||
+                !xmf_cdcr_decrypt(ioBuf, ioLen, e->id, cdcrHash, cdcrHashLen)) {
+                if (!quiet) fprintf(stderr, "  CDCR decrypt failed\n");
+                return FALSE;
+            }
+            if (e->hasSizeHint && e->sizeHint > 0 && e->sizeHint < *ioLen)
+                *ioLen = e->sizeHint;
+        } else if (isZlib) {
+            uint32_t inflatedLen = 0;
+            uint8_t *inflated = NULL;
+            if (!quiet) printf("  zlib inflate (%u bytes in)\n", *ioLen);
+            inflated = z_inflate_any(*ioBuf, *ioLen, &inflatedLen);
+            if (!inflated && *ioLen > 2)
+                inflated = z_inflate_any(*ioBuf + 2, *ioLen - 2, &inflatedLen);
+            if (!inflated) {
+                if (!quiet) fprintf(stderr, "  zlib inflate failed\n");
+                return FALSE;
+            }
+            free(*ioBuf);
+            *ioBuf = inflated;
+            *ioLen = inflatedLen;
+        } else {
+            if (!quiet) fprintf(stderr, "  unrecognized unpacker type=%u id=%u mfr=%u\n",
+                                e->type, e->id, e->mfr);
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+static void extract_take_payload(const uint8_t *payload, uint32_t payloadLen,
+                                 uint8_t **midi, uint32_t *midiLen,
+                                 uint8_t **dls, uint32_t *dlsLen)
+{
+    if (!payload || payloadLen < 4) return;
+
+    if (!*dls && payloadLen >= 12 && m_eq(payload, "RIFF", 4)) {
+        uint32_t sz = (uint32_t)payload[4] | ((uint32_t)payload[5] << 8) |
+                      ((uint32_t)payload[6] << 16) | ((uint32_t)payload[7] << 24);
+        if (sz <= (payloadLen - 8) && m_eq(payload + 8, "DLS ", 4) && (8 + sz) >= 1024) {
+            *dls = (uint8_t *)xalloc(8 + sz);
+            memcpy(*dls, payload, 8 + sz);
+            *dlsLen = 8 + sz;
+        }
+    }
+
+    if (!*midi) {
+        int mo = find4(payload, payloadLen, "MThd");
+        if (mo >= 0) {
+            uint32_t copyLen = payloadLen - (uint32_t)mo;
+            *midi = (uint8_t *)xalloc(copyLen);
+            memcpy(*midi, payload + mo, copyLen);
+            *midiLen = copyLen;
+        } else {
+            uint8_t *smf = NULL; uint32_t sl = 0;
+            if (rmid_smf(payload, payloadLen, &smf, &sl)) {
+                *midi = smf; *midiLen = sl;
+            }
+        }
+    }
+}
+
+/* Structured XMF1/2 node walk with Beatnik unpacker support (matches GenXMF). */
+static bool extract_node(const uint8_t *bytes, uint32_t len, uint32_t *pos,
+                         uint8_t **midi, uint32_t *midiLen,
+                         uint8_t **dls, uint32_t *dlsLen, int quiet)
+{
+    uint32_t start, nodeLen, itemCount, headerLen;
+    uint32_t headerStart, headerEnd, nodeEnd;
+    uint32_t metadataLen = 0, cdcrHashOff = 0, cdcrHashLen = 0;
+    uint32_t unpackersLen = 0;
+    xmf_unpack_t ents[XMF_UNPACK_MAX];
+    int unpackCount = 0;
+
+    if (!bytes || !pos || *pos >= len) return FALSE;
+    start = *pos;
+    nodeLen = vlq_read(bytes, len, pos);
+    itemCount = vlq_read(bytes, len, pos);
+    headerLen = vlq_read(bytes, len, pos);
+    if (nodeLen == 0 || start > len || nodeLen > (len - start)) return FALSE;
+    nodeEnd = start + nodeLen;
+    headerStart = *pos;
+    if (headerStart > nodeEnd || headerLen > (nodeEnd - headerStart)) return FALSE;
+    headerEnd = headerStart + headerLen;
+
+    if (*pos < headerEnd) {
+        uint32_t metaLenVlqOff = *pos;
+        metadataLen = vlq_read(bytes, len, pos);
+        if (metadataLen > 0 && *pos <= headerEnd && metadataLen <= (headerEnd - *pos)) {
+            cdcrHashOff = metaLenVlqOff;
+            cdcrHashLen = (*pos - metaLenVlqOff) + metadataLen;
+            *pos += metadataLen;
+        } else {
+            *pos = headerEnd;
+        }
+    }
+    if (*pos < headerEnd) {
+        unpackersLen = vlq_read(bytes, len, pos);
+        if (*pos <= headerEnd && unpackersLen <= (headerEnd - *pos)) {
+            unpackCount = xmf_parse_unpackers(bytes + *pos, unpackersLen, ents, XMF_UNPACK_MAX);
+            *pos += unpackersLen;
+        }
+    }
+    /* Beatnik NodeHeaderLength often overlaps into content — stay after unpackers. */
+    if (*pos > headerEnd) *pos = headerEnd;
+
+    if (itemCount == 0) {
+        uint32_t refType = vlq_read(bytes, len, pos);
+        const uint8_t *content = NULL;
+        uint32_t contentLen = 0;
+
+        if (refType == 0) refType = 1;
+        if (refType == 1) {
+            if (*pos > nodeEnd) return FALSE;
+            content = bytes + *pos;
+            contentLen = nodeEnd - *pos;
+        } else if (refType == 2) {
+            uint32_t off = vlq_read(bytes, len, pos);
+            uint32_t blen = vlq_read(bytes, len, pos);
+            if (off > len || blen > (len - off)) return FALSE;
+            content = bytes + off;
+            contentLen = blen;
+        } else if (refType == 3) {
+            uint32_t nOff = vlq_read(bytes, len, pos);
+            uint32_t cpos;
+            if (nOff >= len) return FALSE;
+            cpos = nOff;
+            (void)extract_node(bytes, len, &cpos, midi, midiLen, dls, dlsLen, quiet);
+            *pos = nodeEnd;
+            return TRUE;
+        } else {
+            *pos = nodeEnd;
+            return TRUE;
+        }
+
+        if (content && contentLen >= 4) {
+            uint8_t *payload = (uint8_t *)xalloc(contentLen);
+            uint32_t payloadLen = contentLen;
+            memcpy(payload, content, contentLen);
+            if (unpackCount > 0) {
+                if (!xmf_apply_unpackers(&payload, &payloadLen, ents, unpackCount,
+                                         (cdcrHashLen > 0) ? (bytes + cdcrHashOff) : NULL,
+                                         cdcrHashLen, quiet)) {
+                    free(payload);
+                    *pos = nodeEnd;
+                    return TRUE; /* keep walking siblings */
+                }
+            }
+            extract_take_payload(payload, payloadLen, midi, midiLen, dls, dlsLen);
+            free(payload);
+        }
+        *pos = nodeEnd;
+        return TRUE;
+    }
+
+    /* Folder: optional Beatnik 0x01 before each child */
+    while (*pos < nodeEnd) {
+        if (*pos + 1 < nodeEnd && bytes[*pos] == 1) {
+            uint32_t probe = *pos + 1;
+            uint32_t childLen = vlq_read(bytes, len, &probe);
+            if (childLen >= 3 && childLen <= (nodeEnd - (*pos + 1u)))
+                (*pos)++;
+        }
+        if (!extract_node(bytes, len, pos, midi, midiLen, dls, dlsLen, quiet))
+            break;
+        if (*midi && *dls) break;
+    }
+    if (*pos < nodeEnd) *pos = nodeEnd;
+    return TRUE;
+}
+
 static bool extract_scan(const uint8_t *bytes, uint32_t len, uint32_t scanStart,
                           uint8_t **midi, uint32_t *midiLen,
                           uint8_t **dls, uint32_t *dlsLen)
@@ -526,15 +881,24 @@ static bool extract_scan(const uint8_t *bytes, uint32_t len, uint32_t scanStart,
 
 static bool extract_tree(const uint8_t *bytes, uint32_t len, uint32_t hdrStart,
                           uint8_t **midi, uint32_t *midiLen,
-                          uint8_t **dls, uint32_t *dlsLen)
+                          uint8_t **dls, uint32_t *dlsLen, int quiet)
 {
     uint32_t pos = hdrStart;
+    uint32_t rootOff, nodePos;
     vlq_read(bytes, len, &pos); /* fileLen */
     uint32_t mttLen = vlq_read(bytes, len, &pos); /* metaTableLen */
     pos += mttLen;
     if (pos > len) return FALSE;
-    uint32_t rootOff = vlq_read(bytes, len, &pos); /* TreeStart */
+    rootOff = vlq_read(bytes, len, &pos); /* TreeStart */
     vlq_read(bytes, len, &pos); /* TreeEnd */
+    if (rootOff >= len) return FALSE;
+
+    nodePos = rootOff;
+    if (extract_node(bytes, len, &nodePos, midi, midiLen, dls, dlsLen, quiet) &&
+        (*midi || *dls))
+        return TRUE;
+
+    /* Fallback for simple/unpacked trees */
     return extract_scan(bytes, len, rootOff, midi, midiLen, dls, dlsLen);
 }
 
@@ -548,8 +912,8 @@ static int cmd_extract(const char *in, const char *odir, int quiet)
     uint32_t n; uint8_t *d = load_file(in, &n); if (!d) return 1;
     eres r; memset(&r, 0, sizeof(r));
     bool ok = FALSE;
-    if (n>=8 && m_eq(d,"XMF_1.00",8)) { if(!quiet) printf("Detected XMF v1\n"); ok=extract_tree(d,n,8,&r.midi,&r.mlen,&r.dls,&r.dlen); }
-    else if (n>=8 && m_eq(d,"XMF_2.00",8)) { if(!quiet) printf("Detected MXMF v2\n"); ok=extract_tree(d,n,16,&r.midi,&r.mlen,&r.dls,&r.dlen); }
+    if (n>=8 && m_eq(d,"XMF_1.00",8)) { if(!quiet) printf("Detected XMF v1\n"); ok=extract_tree(d,n,8,&r.midi,&r.mlen,&r.dls,&r.dlen,quiet); }
+    else if (n>=8 && m_eq(d,"XMF_2.00",8)) { if(!quiet) printf("Detected MXMF v2\n"); ok=extract_tree(d,n,16,&r.midi,&r.mlen,&r.dls,&r.dlen,quiet); }
     else { fprintf(stderr,"Error: not an XMF file\n"); free(d); return 1; }
     free(d);
     if (!ok) { fprintf(stderr,"Error: no content found\n"); eres_free(&r); return 1; }

@@ -84,6 +84,7 @@ set(ENGINE_SRC
     ${BAE}/Common/g723_40.c
     ${BAE}/Common/g72x.c
     ${BAE}/Common/sha1mini.c
+    ${BAE}/Common/cast5mini.c
     ${BAE}/Common/XFileTypes.c
     ${BAE}/Common/XVorbisFiles.c
     ${BAE}/Common/XOpusFiles.c
