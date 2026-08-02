@@ -89,6 +89,7 @@ NEOBAE_SOURCES := \
 			Common/GenSF2_FluidLite.c \
 			Common/GenRMI.c \
       		Common/GenXMF.c \
+			Common/cast5mini.c \
       		Common/GenRingtone.c \
 			Common/NeoBAE.c \
 			Common/NewNewLZSS.c \
