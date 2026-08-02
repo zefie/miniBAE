@@ -109,10 +109,10 @@ static bool dls_synth_quirks(const DLS_Synth* synth) {
     return synth->useQuirks;
 }
 
-/* microQ: MobileBAE voice policy even under -dlscompat — held-voice steal
- * only from ch9 (protects melodic FX like Glint ch6 prog 100). */
-static bool dls_synth_mobile_voice_mgmt(const DLS_Synth* synth) {
-    if (dls_synth_quirks(synth)) return true;
+/* Eggs under -dlscompat only. Quirks mode must keep using dls_synth_quirks()
+ * / dls_bank_quirks() directly — this helper must not alter quirks paths. */
+static bool dls_synth_eggs_compat_voice_mgmt(const DLS_Synth* synth) {
+    if (!synth || dls_synth_quirks(synth)) return false;
     return dls_synth_has_eggs_bank(synth);
 }
 
@@ -3480,8 +3480,11 @@ static void dls_kill_exclusive_voices(DLS_Synth* synth, int32_t channel, int32_t
         DLS_Voice* voice = &synth->voices[i];
         if (!voice->active) continue;
 
-        bool channelScoped = dls_bank_quirks(voice->parentBank) ||
-                             (voice->parentBank && voice->parentBank->eggsArticulators);
+        /* Quirks: always channel-scoped. Eggs+compat: same (microQ). */
+        bool channelScoped = dls_bank_quirks(voice->parentBank);
+        if (!channelScoped && voice->parentBank && voice->parentBank->eggsArticulators) {
+            channelScoped = true;
+        }
         if (channelScoped) {
             if (voice->channel != channel) continue;
         }
@@ -3528,7 +3531,8 @@ static int32_t dls_find_recyclable_voice(DLS_Synth* synth, int32_t newChannel) {
 }
 
 static int32_t dls_find_held_percussion_voice(DLS_Synth* synth, int32_t newChannel) {
-    bool mobileVoice = dls_synth_mobile_voice_mgmt(synth);
+    /* Quirks unchanged; eggs+compat adopts the same Plus14 ch9-only pass. */
+    bool quirksHeldSteal = dls_synth_quirks(synth) || dls_synth_eggs_compat_voice_mgmt(synth);
     bool mipMode = synth->mipActive;
     int32_t voiceLimit = DLS_MAX_VOICE_POOL;
 
@@ -3540,7 +3544,7 @@ static int32_t dls_find_held_percussion_voice(DLS_Synth* synth, int32_t newChann
         int64_t priority = INT64_MAX;
         for (int i = 0; i < voiceLimit; i++) {
             DLS_Voice* voice = &synth->voices[i];
-            if (mobileVoice) {
+            if (quirksHeldSteal) {
                 /* Plus14: only steal held percussion in this pass. */
                 if (channel == 9 && voice->channel == channel && voice->keyHeld && voice->startSerial < priority) {
                     candidate = i;
@@ -3591,8 +3595,8 @@ static int32_t dls_select_voice_index_for_note_on(DLS_Synth* synth, int32_t newC
     if (idx >= 0) return idx;
 
     idx = dls_find_active_voice_by_priority(synth, newChannel);
-    if (!dls_synth_mobile_voice_mgmt(synth)) return idx;
-    /* MobileBAE/microQ: never drop the note — force a slot. */
+    /* Quirks (and eggs+compat): never drop the note — force a slot. */
+    if (!dls_synth_quirks(synth) && !dls_synth_eggs_compat_voice_mgmt(synth)) return idx;
     return idx >= 0 ? idx : 0;
 }
 
