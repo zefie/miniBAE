@@ -2482,11 +2482,42 @@ static void PV_ProcessNoteOff(GM_Song *pSong, int16_t MIDIChannel, int16_t curre
     }
 }
 
+#if USE_NATIVE_DLS == TRUE || USE_SF2_SUPPORT == TRUE
+/* Velocity scale for HSB/RMF (wavetable) notes when mixed with SF2/DLS.
+   Default 0.25 keeps classic wavetable from overpowering those engines.
+   When an XMF DLS overlay is paired with an HSB/ZSB host bank, use unity so
+   fallback instruments (often drums) match embedded DLS loudness. */
+static float PV_HsbRmfMixVolumeScale(GM_Song *pSong)
+{
+    const float kMixedAttenuation = 0.25f;
+    const float kXmfHsbHostUnity = 1.0f;
+
+#if USE_NATIVE_DLS == TRUE
+    if (pSong && pSong->pMixer && GM_DLS_HasXmfEmbeddedBank(pSong->pMixer))
+    {
+#if USE_SF2_SUPPORT == TRUE
+        /* Selected host bank is SF2 — keep wavetable notes attenuated. */
+        if (GM_GetMixerSF2Mode())
+        {
+            return kMixedAttenuation;
+        }
+#endif
+        return kXmfHsbHostUnity;
+    }
+#else
+    (void)pSong;
+#endif
+    return kMixedAttenuation;
+}
+#endif
+
 // Process note on
 static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTrack, int16_t note, int16_t volume)
 {
     register int16_t thePatch = 0;
-    float sf2_dls_rmf_volume_multiplier = 0.25f;
+#if USE_NATIVE_DLS == TRUE || USE_SF2_SUPPORT == TRUE
+    float sf2_dls_rmf_volume_multiplier = PV_HsbRmfMixVolumeScale(pSong);
+#endif
     if (pSong->isNokiaVibrationChannel[MIDIChannel]) {
         return;
     }
@@ -2531,8 +2562,8 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                     
                     if (pSong->channelType[MIDIChannel] == CHANNEL_TYPE_RMF)
                     {
-                        // RMF
-                        volume = (int16_t)(volume * sf2_dls_rmf_volume_multiplier); // RMF seems to be louder, so turn it down a bit
+                        // RMF / HSB wavetable mixed with SF2
+                        volume = (int16_t)(volume * sf2_dls_rmf_volume_multiplier);
                         thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
                         PV_StartMIDINote(pSong, thePatch, MIDIChannel, currentTrack, note, volume);                       
                     } else {
@@ -2568,7 +2599,6 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                             }
                             else
                             {
-                                sf2_dls_rmf_volume_multiplier = 0.85f;
                                 PV_DLS_AssignChannelTypeAfterMiss(pSong, MIDIChannel);
                             }
                         }
@@ -2599,7 +2629,8 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
 #endif
                     else
                     {
-                        volume = (int16_t)(volume * sf2_dls_rmf_volume_multiplier); // RMF seems to be louder, so turn it down a bit
+                        /* HSB/RMF fallback (e.g. drums when XMF DLS has no perc bank) */
+                        volume = (int16_t)(volume * sf2_dls_rmf_volume_multiplier);
                         thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
                         PV_StartMIDINote(pSong, thePatch, MIDIChannel, currentTrack, note, volume);
                     }
@@ -2617,12 +2648,7 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                         GM_IsSF2Song(pSong)
 #endif
                         ) {
-#if USE_NATIVE_DLS == TRUE
-                        if (GM_DLS_HasXmfEmbeddedBank(pSong->pMixer)) {
-                            sf2_dls_rmf_volume_multiplier = 0.85f;
-                        }
-#endif
-                        volume = (int16_t)(volume * sf2_dls_rmf_volume_multiplier); // RMF seems to be louder, so turn it down a bit
+                        volume = (int16_t)(volume * sf2_dls_rmf_volume_multiplier);
                     }
 #endif                    
                     thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
