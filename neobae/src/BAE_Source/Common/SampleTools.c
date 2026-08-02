@@ -711,6 +711,11 @@ uint32_t          const decodingBytes = decodingFrames * bytesPerFrame;
         return XExpandQOA(src, startFrame, dst);
 #endif
 
+#if USE_WMA_SUPPORT == TRUE
+    case C_WMA:
+        return XExpandWMA(src, startFrame, dst);
+#endif
+
 #if X_PLATFORM == X_MACINTOSH_9
     case C_MACE3 :
     case C_MACE6 :

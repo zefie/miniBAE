@@ -53,6 +53,9 @@
 #if USE_MPEG_DECODER == TRUE
 #include "XMPEG_BAE_API.h"
 #endif
+#if USE_WMA_SUPPORT == TRUE
+#include "wma_decoder.h"
+#endif
 
 void GM_SetMixerDLSMode(bool isDLS) 
 {
@@ -840,6 +843,132 @@ static OPErr dls_decode_mpeg_wave(const uint8_t* encoded, uint32_t encodedBytes,
 #endif
 }
 
+#if USE_WMA_SUPPORT == TRUE
+static OPErr dls_decode_wma_wave(const uint8_t* encoded, uint32_t encodedBytes, DLS_Wave* wave) {
+    WMADecodeContext *ctx = NULL;
+    WMAFormatInfo info;
+    float *frame_out = NULL;
+    int16_t *pcm = NULL;
+    uint32_t pcm_cap = 0, pcm_n = 0;
+    uint32_t offset;
+    int block_align;
+
+    if (!encoded || encodedBytes == 0 || !wave) return BAD_FILE_TYPE;
+    if (wave->blockAlign <= 0 || wave->channels <= 0 || wave->sampleRate <= 0)
+        return BAD_FILE_TYPE;
+
+    ctx = (WMADecodeContext *)XNewPtr(sizeof(WMADecodeContext));
+    frame_out = (float *)XNewPtr(WMA_BLOCK_MAX_SIZE * 2 * sizeof(float));
+    if (!ctx || !frame_out) {
+        if (ctx) XDisposePtr((XPTR)ctx);
+        if (frame_out) XDisposePtr((XPTR)frame_out);
+        return MEMORY_ERR;
+    }
+
+    XSetMemory(&info, sizeof(info), 0);
+    info.codec_id = (uint16_t)wave->formatTag;
+    info.channels = (uint16_t)wave->channels;
+    info.rate = (uint32_t)wave->sampleRate;
+    info.bitrate = (uint32_t)((wave->avgBytesPerSec > 0)
+                              ? wave->avgBytesPerSec
+                              : (wave->blockAlign * wave->sampleRate / 1024));
+    info.blockalign = (uint16_t)wave->blockAlign;
+    info.bitspersample = 16;
+    info.datalen = wave->wmaExtraLen;
+    info.data = (wave->wmaExtraLen > 0) ? wave->wmaExtra : NULL;
+
+    if (wma_decode_init(ctx, &info) < 0) {
+        XDisposePtr((XPTR)ctx);
+        XDisposePtr((XPTR)frame_out);
+        return BAD_FILE_TYPE;
+    }
+
+    block_align = ctx->block_align;
+    pcm_cap = (encodedBytes / (uint32_t)block_align + 3) * (uint32_t)ctx->frame_len * (uint32_t)ctx->nb_channels;
+    pcm = (int16_t *)XNewPtr(pcm_cap * sizeof(int16_t));
+    if (!pcm) {
+        wma_decode_close(ctx);
+        XDisposePtr((XPTR)ctx);
+        XDisposePtr((XPTR)frame_out);
+        return MEMORY_ERR;
+    }
+
+    for (offset = 0; offset + (uint32_t)block_align <= encodedBytes; offset += (uint32_t)block_align) {
+        int samples, i, ch;
+        if (wma_superframe_init(ctx, encoded + offset, block_align, 0) < 0)
+            continue;
+        samples = wma_decode_frame(ctx, frame_out);
+        if (samples <= 0)
+            continue;
+        if (ctx->skip_frames > 0) {
+            ctx->skip_frames--;
+            continue;
+        }
+        if (pcm_n + (uint32_t)(samples * ctx->nb_channels) > pcm_cap) {
+            uint32_t ncap = pcm_cap * 2 + (uint32_t)(samples * ctx->nb_channels);
+            int16_t *np = (int16_t *)XNewPtr(ncap * sizeof(int16_t));
+            if (!np) break;
+            XBlockMove(pcm, np, pcm_n * sizeof(int16_t));
+            XDisposePtr((XPTR)pcm);
+            pcm = np;
+            pcm_cap = ncap;
+        }
+        for (i = 0; i < samples; i++) {
+            for (ch = 0; ch < ctx->nb_channels; ch++) {
+                float s = frame_out[i * ctx->nb_channels + ch] * 32767.0f;
+                if (s > 32767.0f) s = 32767.0f;
+                if (s < -32768.0f) s = -32768.0f;
+                pcm[pcm_n++] = (int16_t)s;
+            }
+        }
+    }
+
+    /* Flush the overlap buffer (matches FFmpeg draining one final frame). */
+    if (ctx->skip_frames <= 0) {
+        int i, ch;
+        uint32_t need = (uint32_t)(ctx->frame_len * ctx->nb_channels);
+        if (pcm_n + need > pcm_cap) {
+            uint32_t ncap = pcm_n + need;
+            int16_t *np = (int16_t *)XNewPtr(ncap * sizeof(int16_t));
+            if (np) {
+                XBlockMove(pcm, np, pcm_n * sizeof(int16_t));
+                XDisposePtr((XPTR)pcm);
+                pcm = np;
+                pcm_cap = ncap;
+            }
+        }
+        if (pcm_n + need <= pcm_cap) {
+            for (i = 0; i < ctx->frame_len; i++) {
+                for (ch = 0; ch < ctx->nb_channels; ch++) {
+                    float s = ctx->frame_out[ch][i] * 32767.0f;
+                    if (s > 32767.0f) s = 32767.0f;
+                    if (s < -32768.0f) s = -32768.0f;
+                    pcm[pcm_n++] = (int16_t)s;
+                }
+            }
+        }
+    }
+
+    wma_decode_close(ctx);
+    XDisposePtr((XPTR)ctx);
+    XDisposePtr((XPTR)frame_out);
+
+    if (pcm_n == 0) {
+        XDisposePtr((XPTR)pcm);
+        return BAD_FILE_TYPE;
+    }
+
+    wave->channels = (int32_t)info.channels;
+    wave->sampleRate = (int32_t)info.rate;
+    wave->bitsPerSample = 16;
+    wave->frames = pcm_n / (uint32_t)wave->channels;
+    if (wave->factFrames >= 0 && (uint32_t)wave->factFrames < wave->frames)
+        wave->frames = (uint32_t)wave->factFrames;
+    wave->pcm = pcm;
+    return NO_ERR;
+}
+#endif
+
 static OPErr DLS_Parse_Wave_Data(const uint8_t* chunk_start, const uint8_t* chunk_end, uint32_t index, DLS_Wave* wave) {
     wave->index = index;
     wave->sample.present = false;
@@ -868,14 +997,31 @@ static OPErr DLS_Parse_Wave_Data(const uint8_t* chunk_start, const uint8_t* chun
                 wave->formatTag = PV_ReadLE16(body);
                 wave->channels = PV_ReadLE16(body + 2);
                 wave->sampleRate = PV_ReadLE32(body + 4);
+                wave->avgBytesPerSec = (int32_t)PV_ReadLE32(body + 8);
                 wave->blockAlign = PV_ReadLE16(body + 12);
                 wave->bitsPerSample = PV_ReadLE16(body + 14);
+                wave->wmaExtraLen = 0;
                 if (wave->formatTag == 85) {
                     /* WAVE_FORMAT_MPEGLAYER3: require cbSize=12 and decode to 16-bit PCM. */
                     if (chunk_size < 30 || PV_ReadLE16(body + 16) != 12) {
                         return BAD_FILE_TYPE;
                     }
                     wave->bitsPerSample = 16;
+#if USE_WMA_SUPPORT == TRUE
+                } else if (wave->formatTag == 0x0160 || wave->formatTag == 0x0161) {
+                    /* MSAUDIO1/2: keep WAVEFORMATEX extradata for decoder flags. */
+                    if (chunk_size >= 18) {
+                        uint16_t cb = PV_ReadLE16(body + 16);
+                        if (cb > 0 && chunk_size >= 18U + cb) {
+                            uint16_t copy = cb;
+                            if (copy > sizeof(wave->wmaExtra))
+                                copy = (uint16_t)sizeof(wave->wmaExtra);
+                            XBlockMove((XPTR)(body + 18), wave->wmaExtra, copy);
+                            wave->wmaExtraLen = copy;
+                        }
+                    }
+                    wave->bitsPerSample = 16;
+#endif
                 }
             }
         } else if (id == CHUNK_DATA) {
@@ -1013,6 +1159,13 @@ static OPErr DLS_Parse_Wave_Data(const uint8_t* chunk_start, const uint8_t* chun
             if (decodeErr != NO_ERR) {
                 return decodeErr;
             }
+#if USE_WMA_SUPPORT == TRUE
+        } else if (wave->formatTag == 0x0160 || wave->formatTag == 0x0161) { // WMA v1/v2
+            OPErr decodeErr = dls_decode_wma_wave(pcm_data, pcm_size, wave);
+            if (decodeErr != NO_ERR) {
+                return decodeErr;
+            }
+#endif
         }
     }
 

@@ -92,7 +92,10 @@ struct DLS_Wave {
     int32_t sampleRate;
     int32_t bitsPerSample;
     int32_t blockAlign;
+    int32_t avgBytesPerSec;
     int32_t factFrames;
+    uint16_t wmaExtraLen;
+    uint8_t wmaExtra[8];
     uint32_t frames;
     int16_t* pcm;
     DLS_SampleInfo sample;

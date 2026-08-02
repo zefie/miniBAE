@@ -2325,6 +2325,10 @@ typedef int32_t UNIT_TYPE;
     ,
     FILE_QOA_TYPE
 #endif
+#if USE_WMA_SUPPORT == TRUE
+    ,
+    FILE_WMA_TYPE
+#endif
     } AudioFileType;
 
     // This will read into memory the entire file and return a GM_Waveform structure.

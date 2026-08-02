@@ -918,6 +918,11 @@ typedef enum SndCompressionType
 #if USE_QOA_SUPPORT == TRUE
     C_QOA               = FOUR_CHAR('q','o','a','f'),   // 'qoaf'   Quite OK Audio
 #endif
+
+#if USE_WMA_SUPPORT == TRUE
+    C_WMA               = FOUR_CHAR('w','m','a','1'),   // 'wma1'   Windows Media Audio v1/v2
+#endif
+
                                                         // for all of these compression types
                                                         // the SndCompressionSubType (CS_DEFAULT)
                                                         // is CS_MPEG2.
@@ -1338,6 +1343,13 @@ OPErr XEncodeQOAToMemory(GM_Waveform const *src,
 #if USE_ADX_SUPPORT == TRUE
 OPErr XExpandADX(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst);
 GM_Waveform *PV_ReadADXIntoMemoryFromMemory(void *pMemoryFile, uint32_t memoryFileSize, OPErr *pErr);
+#endif
+
+#if USE_WMA_SUPPORT == TRUE
+OPErr XExpandWMA(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst);
+GM_Waveform *PV_ReadIntoMemoryWMAFile(XFILE file, bool decodeData,
+                                       int32_t *pFormat, void **ppBlockPtr,
+                                       uint32_t *pBlockSize, OPErr *pErr);
 #endif
 
 #ifdef __cplusplus

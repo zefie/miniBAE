@@ -41,6 +41,7 @@ ifneq ($(WASM),1)
 		MTHC_SUPPORT := 1
 		ADP_SUPPORT := 1
 		QOA_SUPPORT := 1
+		WMA_SUPPORT := 1
 		MP3_DEC := 1
 		MP3_ENC := 1
 		FLAC_DEC := 1
@@ -993,6 +994,17 @@ ifeq ($(QOA_SUPPORT),1)
 			BAE_FLAGS += -DUSE_QOA_SUPPORT=1
 			INC_PATH += -Isrc/thirdparty/qoa
 			SRC += src/BAE_Source/Common/XQOAFiles.c
+		endif
+	endif
+endif
+
+ifeq ($(WMA_SUPPORT),1)
+	ifneq ($(XMFUTIL),1)
+		ifneq ($(RMIUTIL),1)
+		  	BAE_FLAGS += -DUSE_WMA_SUPPORT=1
+			INC_PATH += -Isrc/BAE_Source/Common/libwma
+			SRC += src/BAE_Source/Common/XWMAFiles.c \
+				src/BAE_Source/Common/libwma/wma_decoder.c
 		endif
 	endif
 endif

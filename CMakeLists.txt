@@ -202,6 +202,7 @@ option(BAE_DISABLE_EMBED_PATCHES "Disable embedded built-in patches" OFF)
 option(BAE_DISABLE_EMBED_FONT "Disable embedded GUI font" OFF)
 option(BAE_DISABLE_RETRO_RINGTONE_SUPPORT "Disable retro mobile ringtone format support (IMY/EMY/RNG/RTX/RTTTL)" OFF)
 option(BAE_DISABLE_QOA_SUPPORT "Disable QOA codec support" OFF)
+option(BAE_DISABLE_WMA_SUPPORT "Disable WMA (MSAUDIO) codec support" OFF)
 option(BAE_DISABLE_RMI_SUPPORT "Disable RMI support" OFF)
 option(BAE_DISABLE_J2ME_PATCH "Disable J2ME percussion bank patch (maps bank 120 for percussion intent)" OFF)
 option(BAE_DISABLE_ROLLED_MIDI_UNROLLING "Disable unrolling of rolled MIDI files" OFF)
@@ -248,6 +249,7 @@ set(BAE_ENABLE_EMBED_PATCHES ON)
 set(BAE_ENABLE_EMBED_FONT ON)
 set(BAE_ENABLE_RETRO_RINGTONE_SUPPORT ON)
 set(BAE_ENABLE_QOA_SUPPORT ON)
+set(BAE_ENABLE_WMA_SUPPORT ON)
 set(BAE_ENABLE_RMI_SUPPORT ON)
 set(BAE_ENABLE_J2ME_PATCH ON)
 set(BAE_ENABLE_ROLLED_MIDI_UNROLL ON)
@@ -328,6 +330,12 @@ if (BAE_DISABLE_QOA_SUPPORT)
   message(STATUS "Disabling QOA codec support")
 else()
   message(STATUS "Enabling QOA codec support")
+endif()
+if (BAE_DISABLE_WMA_SUPPORT)
+  set(BAE_ENABLE_WMA_SUPPORT OFF)
+  message(STATUS "Disabling WMA (MSAUDIO) codec support")
+else()
+  message(STATUS "Enabling WMA (MSAUDIO) codec support")
 endif()
 if(BAE_DISABLE_KARAOKE)
   set(BAE_ENABLE_KARAOKE OFF)
@@ -963,6 +971,13 @@ if(BAE_ENABLE_QOA_SUPPORT)
   )
 endif()
 
+if(BAE_ENABLE_WMA_SUPPORT)
+  list(APPEND NEOBAE_SOURCES
+    neobae/src/BAE_Source/Common/XWMAFiles.c
+    neobae/src/BAE_Source/Common/libwma/wma_decoder.c
+  )
+endif()
+
 if(BAE_ENABLE_BAESCRIPT)
   list(APPEND NEOBAE_SOURCES
     neobae/src/script/baescript.c
@@ -1365,6 +1380,12 @@ target_include_directories(neobae
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/mod2rmf
 )
 
+if(BAE_ENABLE_WMA_SUPPORT)
+  target_include_directories(neobae PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Common/libwma
+  )
+endif()
+
 if(BAE_ENABLE_MP3_ENCODER OR BAE_ENABLE_MP3_DECODER)
   target_include_directories(neobae PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_MPEG_Source_II)
 endif()
@@ -1552,6 +1573,7 @@ function(bae_apply_compile_definitions target)
       SUPPORT_PLAYLIST=$<IF:$<BOOL:${BAE_ENABLE_PLAYLIST}>,1,0>
       USE_RETRO_RINGTONE_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_RETRO_RINGTONE_SUPPORT}>,1,0>
       USE_QOA_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_QOA_SUPPORT}>,1,0>
+      USE_WMA_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_WMA_SUPPORT}>,1,0>
       USE_RMI_SUPPORT=$<IF:$<BOOL:${BAE_ENABLE_RMI_SUPPORT}>,1,0>
       USE_J2ME_PATCH=$<IF:$<BOOL:${BAE_ENABLE_J2ME_PATCH}>,1,0>
       BAE_ENABLE_ROLLED_MIDI_UNROLL=$<IF:$<BOOL:${BAE_ENABLE_ROLLED_MIDI_UNROLL}>,1,0>

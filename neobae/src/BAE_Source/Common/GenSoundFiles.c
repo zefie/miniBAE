@@ -4848,6 +4848,11 @@ GM_Waveform     *waveform;
             waveform = PV_ReadIntoMemoryQOAFile(file, decodeData, NULL, NULL, NULL, &err);
             break;
     #endif
+    #if USE_WMA_SUPPORT == TRUE
+        case FILE_WMA_TYPE:
+            waveform = PV_ReadIntoMemoryWMAFile(file, decodeData, NULL, NULL, NULL, &err);
+            break;
+    #endif
         default :
             #if _DEBUG == TRUE
             printf("DEBUG: Unknown file type: %d\n", fileType);
@@ -4994,6 +4999,11 @@ GM_Waveform*    pWave = NULL;
 #if USE_QOA_SUPPORT == TRUE
         case FILE_QOA_TYPE:
             pWave = PV_ReadIntoMemoryQOAFile(file, FALSE, pFormat, ppBlockPtr, pBlockSize, &err);
+            break;
+#endif
+#if USE_WMA_SUPPORT == TRUE
+        case FILE_WMA_TYPE:
+            pWave = PV_ReadIntoMemoryWMAFile(file, FALSE, pFormat, ppBlockPtr, pBlockSize, &err);
             break;
 #endif
         default :

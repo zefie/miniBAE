@@ -334,6 +334,9 @@ extern "C"
 #if USE_QOA_SUPPORT == TRUE
         BAE_QOA_TYPE,
 #endif
+#if USE_WMA_SUPPORT == TRUE
+        BAE_WMA_TYPE,
+#endif
 #if USE_RETRO_RINGTONE_SUPPORT == TRUE
         BAE_RINGTONE_IMY,
         BAE_RINGTONE_RNG,

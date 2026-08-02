@@ -458,6 +458,12 @@ BAEFileType X_DetermineFileTypeByPath(const char *filePath)
     else if (strcmp(extLower, ".qoa") == 0)
         return BAE_QOA_TYPE;
 #endif
+#if USE_WMA_SUPPORT == TRUE
+    else if (strcmp(extLower, ".wma") == 0)
+        return BAE_WMA_TYPE;
+    else if (strcmp(extLower, ".asf") == 0)
+        return BAE_WMA_TYPE;
+#endif
     // Check for MIDI/music file extensions
     else if (strcmp(extLower, ".mid") == 0 || strcmp(extLower, ".midi") == 0 || strcmp(extLower, ".kar") == 0)
         return BAE_MIDI_TYPE;
@@ -695,6 +701,10 @@ BAEFileType X_DetermineFileTypeByData(const unsigned char *data, int32_t length)
         case BAE_FOURCC_QOA:
             return BAE_QOA_TYPE;
 #endif
+#if USE_WMA_SUPPORT == TRUE
+        case 0x3026B275:  /* ASF Header Object GUID first 4 bytes LE */
+            return BAE_WMA_TYPE;
+#endif
 
         default:
  #if USE_MPEG_DECODER == TRUE
@@ -820,6 +830,9 @@ const char *X_GetFileTypeString(BAEFileType fileType)
 #endif
 #if USE_QOA_SUPPORT == TRUE
         case BAE_QOA_TYPE:      return "QOA";
+#endif
+#if USE_WMA_SUPPORT == TRUE
+        case BAE_WMA_TYPE:      return "WMA/ASF";
 #endif
 #if USE_MTHC_SUPPORT == TRUE
         case BAE_MTHC:          return "Nokia Compressed MIDI";

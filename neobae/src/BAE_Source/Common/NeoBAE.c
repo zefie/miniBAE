@@ -2950,6 +2950,11 @@ AudioFileType BAE_TranslateBAEFileType(BAEFileType fileType)
         haeFileType = FILE_QOA_TYPE;
         break;
 #endif
+#if USE_WMA_SUPPORT == TRUE
+    case BAE_WMA_TYPE:
+        haeFileType = FILE_WMA_TYPE;
+        break;
+#endif
     case BAE_AU_TYPE:
         haeFileType = FILE_AU_TYPE;
         break;

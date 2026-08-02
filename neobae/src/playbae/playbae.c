@@ -1056,6 +1056,9 @@ static BAEResult PV_PlayFile(BAEMixer mixer, const char *path,
 #if USE_QOA_SUPPORT == TRUE
     case BAE_QOA_TYPE:     isAudio = 1; break;
 #endif
+#if USE_WMA_SUPPORT == TRUE
+    case BAE_WMA_TYPE:     isAudio = 1; break;
+#endif
     default: break;
     }
 
@@ -1083,6 +1086,9 @@ static BAEResult PV_PlayFile(BAEMixer mixer, const char *path,
 #endif
 #if USE_ADX_SUPPORT == TRUE
         case BAE_ADX_TYPE:     typeName = "CRI ADX";      break;
+#endif
+#if USE_WMA_SUPPORT == TRUE
+        case BAE_WMA_TYPE:     typeName = "WMAv1/WMAv2";   break;
 #endif
         default: break;
         }

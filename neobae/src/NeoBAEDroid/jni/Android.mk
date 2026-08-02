@@ -111,6 +111,8 @@ NEOBAE_SOURCES := \
 			Common/XOpusFiles.c \
 			Common/XQOAFiles.c \
 			Common/X_DebugCallback.c \
+			Common/XWMAFiles.c \
+     		Common/libwma/wma_decoder.c \
 			../script/baescript.c \
 			../script/baescript_lexer.c \
 			../script/baescript_parser.c \
@@ -411,6 +413,7 @@ LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../fluidlite/src/watcom
 LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../BAE_MPEG_Source_II
 LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../thirdparty/minimp3/
 LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../NeoBAEDroid
+LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../BAE_Source/Common/libwma
 LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../../../deps/android/jniLibs/$(TARGET_ARCH_ABI)/sqlite3/include
 LOCAL_C_INCLUDES	  += $(LOCAL_PATH)/../thirdparty/lzma-26.00/C
 LOCAL_C_INCLUDES      += $(LOCAL_PATH)/../thirdparty/config
@@ -438,7 +441,7 @@ LOCAL_CFLAGS := -std=c99 -O2 -D_VERSION=\"$(VERSION)\" \
 	-DUSE_RETRO_RINGTONE_SUPPORT=1 -DUSE_QOA_SUPPORT=1 -DUSE_RMI_SUPPORT=1 \
 	-DBAE_ENABLE_ROLLED_MIDI_UNROLL=1 -DUSE_J2ME_PATCH=1 -DFLUIDLITE_STATIC=1 \
 	-DHAVE_CONFIG_H=1 -Wall -fsigned-char -DZ7_ST -DUSE_ADX_SUPPORT=1 \
-	-DSUPPORT_OGG_FORMAT=1 -DSF3_SUPPORT=1
+	-DSUPPORT_OGG_FORMAT=1 -DSF3_SUPPORT=1 -DUSE_WMA_SUPPORT=1
 
 ifeq ($(APP_OPTIM),debug)
     LOCAL_CFLAGS += -D_DEBUG=1
