@@ -8952,7 +8952,7 @@ fun SettingsScreenContent(
                     )
                 }
                 Text(
-                    text = "Background peak measure before first play (UI stays responsive), then a stable gain for the whole song. Repeats use a cache.",
+                    text = "Fast normalization by scanning MIDI + patch data and creating a peak estimate.",
                     style = MaterialTheme.typography.caption,
                     color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
                     modifier = Modifier.padding(top = 4.dp)
