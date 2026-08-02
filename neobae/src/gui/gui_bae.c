@@ -121,6 +121,57 @@ void bae_cancel_normalize(void)
         BAEMixer_SetSongNormalizeGain(g_bae.mixer, 100);
 }
 
+int bae_apply_normalize_for_current_song(void)
+{
+    if (!g_bae.mixer || !g_bae.song || g_bae.is_audio_file)
+        return 100;
+
+    if (!g_normalize_enabled)
+    {
+        BAEMixer_SetSongNormalizeGain(g_bae.mixer, 100);
+        return 100;
+    }
+
+    if (g_bae.loaded_path[0])
+    {
+        int cached = norm_cache_lookup(g_bae.loaded_path);
+        if (cached > 0)
+        {
+            BAEMixer_SetSongNormalizeGain(g_bae.mixer, cached);
+            BAE_PRINTF("Normalize cache hit: %d%%\n", cached);
+            return cached;
+        }
+    }
+
+    {
+        Settings settings = load_settings();
+        int32_t gainPct = 100;
+        BAEResult nerr = BAESong_NormalizeFromMidiEstimate(g_bae.song, 89, &gainPct);
+        if (nerr != BAE_NO_ERROR)
+        {
+            BAE_PRINTF("Normalize estimate failed (%d); continuing without\n", (int)nerr);
+            BAEMixer_SetSongNormalizeGain(g_bae.mixer, 100);
+            return 100;
+        }
+
+        BAE_PRINTF("Normalize estimate gain: %d%%\n", (int)gainPct);
+        if (g_bae.loaded_path[0])
+            norm_cache_store(g_bae.loaded_path, gainPct);
+
+        /* Estimate walk rewinds the song; restore preroll state. */
+#if SUPPORT_MIDI_HW == TRUE
+        g_midi_output_suppressed_during_seek = true;
+#endif
+        BAESong_SetMicrosecondPosition(g_bae.song, 0);
+#if SUPPORT_MIDI_HW == TRUE
+        g_midi_output_suppressed_during_seek = false;
+#endif
+        BAESong_Preroll(g_bae.song);
+        BAESong_SetVelocityCurve(g_bae.song, settings.volume_curve);
+        return (int)gainPct;
+    }
+}
+
 void bae_reload_song_for_normalize(int *transpose, int *tempo, int *volume, bool *loopPlay,
                                    int *reverbType, bool ch_enable[16], bool *playing)
 {

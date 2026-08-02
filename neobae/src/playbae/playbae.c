@@ -90,7 +90,7 @@ static int           gVelocityCurve  = 1; /* -1 = engine default */
 static int           gVolumePct      = 100; /* raw user volume percent, for overdrive */
 static int           gEqEnabled      = 0;
 static float         gEqGains[5]     = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
-static int           gNormalize      = 0; /* -n: prerender peak normalize */
+static int           gNormalize      = 0; /* -n: MIDI+patch peak normalize (playback + export) */
 
 /* Position display: update every N idle calls (~15 ms each) */
 static int           gPosCounter  = 0;
@@ -398,7 +398,7 @@ static const char usageMain[] =
 #endif
     "                 -l  {loop count (default: 0)}\n"
     "                 -v  {master volume %% (default: 100)}\n"
-    "                 -n  {normalize: MIDI+patch peak estimate}\n"
+    "                 -n  {normalize playback/export: MIDI+patch peak estimate}\n"
     "                 -vc {velocity curve 0-5 (default: engine (0), none for SF2/DLS)}\n"
     "                 -t  {max duration in seconds (0 = no limit)}\n"
     "                 -mc {MIDI channels to mute, 1-16, comma-separated}\n"
@@ -758,7 +758,7 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
     }
 #endif
 
-    /* Apply mixer FX before optional normalize so the prerender matches playback. */
+    /* Apply mixer FX before optional normalize so estimate padding matches render. */
     if (gHasCustomReverb) {
         BAEMixer_SetDefaultReverb(mixer, gCustomReverbType);
         SetNeoCustomReverbCombCount(gCustomReverbCombCount);
@@ -773,16 +773,19 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
         BAEMixer_SetDefaultReverb(mixer, reverbType);
     }
 
+    /* Mixer-level gain applies to both live playback and -o file export. */
+    int32_t normalizeGainPct = 100;
     if (gNormalize) {
-        int32_t appliedGainPct = 100;
-        playbae_printf("Normalizing (MIDI+patch estimate)...\n");
-        BAEResult nerr = BAESong_NormalizeFromMidiEstimate(song, 89, &appliedGainPct);
+        playbae_printf("Normalizing (MIDI+patch estimate)%s...\n",
+            gWriteToFile ? " for export" : "");
+        BAEResult nerr = BAESong_NormalizeFromMidiEstimate(song, 89, &normalizeGainPct);
         if (nerr != BAE_NO_ERROR) {
             playbae_printf("playbae: Normalize failed for '%s' (%d: %s); continuing without\n",
                 fileName, nerr, BAE_GetErrorString(nerr));
+            normalizeGainPct = 100;
             BAEMixer_SetSongNormalizeGain(mixer, 100);
         } else if (gPassNumber <= 0) {
-            playbae_printf("Normalize gain: %d%%\n", (int)appliedGainPct);
+            playbae_printf("Normalize gain: %d%%\n", (int)normalizeGainPct);
         }
     } else {
         BAEMixer_SetSongNormalizeGain(mixer, 100);
@@ -817,6 +820,9 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
         BAEMixer_SetDefaultReverb(mixer, BAE_REVERB_NONE);
         BAEMixer_SetDefaultReverb(mixer, savedVerb);
     }
+
+    /* Re-assert normalize after Start/reverb churn (export slices use this gain). */
+    BAEMixer_SetSongNormalizeGain(mixer, normalizeGainPct);
 
     /* Export defaults to one-shot; BAEScript may re-enable looping with exporter.loopcount. */
     if (gWriteToFile) {
@@ -937,6 +943,9 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
 static BAEResult PV_PlaySound(BAEMixer mixer, BAESound sound, const char *fileName,
     BAE_UNSIGNED_FIXED volume, unsigned int timeLimitSec, unsigned int loopCount)
 {
+    /* Mixer song-normalize must not boost PCM sample playback/export. */
+    BAEMixer_SetSongNormalizeGain(mixer, 100);
+
     BAESound_SetVolume(sound, volume);
 
     if (loopCount > 0) {

@@ -114,6 +114,10 @@ bool bae_play(bool *playing);
 void bae_stop(bool *playing, int *progress);
 /* Clear song-normalize gain (e.g. when disabling the setting). */
 void bae_cancel_normalize(void);
+/* Apply mixer normalize gain for the current MIDI/RMF (cache or estimate).
+ * Caller should set reverb first so estimate FX padding matches render.
+ * Returns applied gain percent (100 = unity). */
+int bae_apply_normalize_for_current_song(void);
 /* Reload current song and (re)start so normalize estimate applies. Used when enabling the setting. */
 void bae_reload_song_for_normalize(int *transpose, int *tempo, int *volume, bool *loopPlay,
                                    int *reverbType, bool ch_enable[16], bool *playing);

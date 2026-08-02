@@ -386,6 +386,52 @@ class HomeFragment : Fragment() {
         }
     }
 
+    /** Apply mixer normalize for the current MIDI song (cache or estimate). */
+    private fun applyNormalizeGainForSong(song: Song, pathKey: String, rePreroll: Boolean = true): Int {
+        if (!normalizePlayback.value) {
+            try {
+                Mixer.setSongNormalizeGain(100)
+            } catch (_: Exception) {
+            }
+            return 100
+        }
+        val cached = normalizeGainCache[pathKey]
+        if (cached != null && cached > 0) {
+            try {
+                Mixer.setSongNormalizeGain(cached)
+            } catch (_: Exception) {
+            }
+            android.util.Log.d("HomeFragment", "Normalize cache hit: $cached%")
+            return cached
+        }
+        var gainPct = 100
+        try {
+            gainPct = song.normalizeFromMidiEstimate()
+        } catch (e: Exception) {
+            android.util.Log.w("HomeFragment", "Normalize estimate failed: ${e.message}")
+            gainPct = -1
+        }
+        if (gainPct > 0) {
+            normalizeGainCache[pathKey] = gainPct
+            android.util.Log.d("HomeFragment", "Normalize estimate gain: $gainPct%")
+        } else {
+            try {
+                Mixer.setSongNormalizeGain(100)
+            } catch (_: Exception) {
+            }
+            gainPct = 100
+        }
+        if (rePreroll) {
+            try {
+                song.seekToMs(0)
+                song.preroll()
+                song.setVelocityCurve(velocityCurve.value)
+            } catch (_: Exception) {
+            }
+        }
+        return gainPct
+    }
+
     // Prevent overlapping bank swap operations (mixer teardown/recreate is not re-entrant).
     private val bankSwapInProgress = java.util.concurrent.atomic.AtomicBoolean(false)
 
@@ -3901,6 +3947,25 @@ class HomeFragment : Fragment() {
                             throw Exception("Failed to preroll song for export (err=$prerollResult)")
                         }
                         android.util.Log.d("HomeFragment", "Song prerolled for export")
+
+                        // Match playback: reverb + optional normalize before first export slice.
+                        Mixer.setDefaultReverb(reverbType.value)
+                        if (reverbType.value == 18) {
+                            val activeReverb = getActiveCustomReverbPresetName(requireContext())
+                            if (!activeReverb.isNullOrEmpty()) {
+                                loadCustomReverbPreset(requireContext(), activeReverb)?.let { preset ->
+                                    applyCustomReverbPresetToEngine(requireContext(), preset)
+                                }
+                            } else {
+                                val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                                val lp = prefs.getInt("custom_reverb_lowpass", 64).coerceIn(0, 127)
+                                Mixer.setNeoCustomReverbLowpass(lp)
+                            }
+                        }
+                        val exportSongForNorm = currentSong
+                        if (exportSongForNorm != null) {
+                            applyNormalizeGainForSong(exportSongForNorm, currentItem.file.absolutePath, rePreroll = true)
+                        }
                         
                         val startResult = currentSong?.start() ?: -1
                         if (startResult != 0) {
@@ -3924,7 +3989,7 @@ class HomeFragment : Fragment() {
                         // Reapply MIDI channel mutes after restarting song for export
                         currentSong?.let { applyMidiChannelMuteState(it) }
                         
-                        // Apply reverb
+                        // Song start can overwrite embedded reverb default — reapply.
                         Mixer.setDefaultReverb(reverbType.value)
 
                         android.util.Log.d("HomeFragment", "Song started, letting first audio callback settle...")
@@ -4131,6 +4196,15 @@ class HomeFragment : Fragment() {
                         try {
                             android.util.Log.d("HomeFragment", "Restoring playback...")
                             activity?.runOnUiThread {
+                                val song = currentSong
+                                if (song != null) {
+                                    try {
+                                        song.preroll()
+                                        Mixer.setDefaultReverb(reverbType.value)
+                                        applyNormalizeGainForSong(song, currentItem.file.absolutePath, rePreroll = true)
+                                    } catch (_: Exception) {
+                                    }
+                                }
                                 // Seek back to saved position
                                 currentSong?.seekToMs(savedPosition)
                                 viewModel.currentPositionMs = savedPosition

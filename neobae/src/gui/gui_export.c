@@ -369,6 +369,9 @@ bool bae_start_export(const char *output_file, int export_type, int compression)
     g_midi_output_suppressed_during_seek = false;
 #endif    
     BAESong_Preroll(g_bae.song);
+    /* Match playback: reverb + optional normalize before the first export slice. */
+    bae_set_reverb(g_bae.current_reverb_type);
+    bae_apply_normalize_for_current_song();
     result = BAESong_Start(g_bae.song, 0);
     if (result != BAE_NO_ERROR)
     {
@@ -382,6 +385,8 @@ bool bae_start_export(const char *output_file, int export_type, int compression)
         g_midi_output_suppressed_during_seek = false;
 #endif
         BAESong_Preroll(g_bae.song);
+        bae_set_reverb(g_bae.current_reverb_type);
+        bae_apply_normalize_for_current_song();
         result = BAESong_Start(g_bae.song, 0);
         if (result != BAE_NO_ERROR)
         {
@@ -648,6 +653,8 @@ bool bae_start_mpeg_export(const char *output_file, int codec_index)
     g_midi_output_suppressed_during_seek = false;
 #endif
     BAESong_Preroll(g_bae.song);
+    bae_set_reverb(g_bae.current_reverb_type); // ensure reverb is set for export / normalize padding
+    bae_apply_normalize_for_current_song();
     result = BAESong_Start(g_bae.song, 0);
     if (result != BAE_NO_ERROR)
     {
@@ -657,7 +664,7 @@ bool bae_start_mpeg_export(const char *output_file, int codec_index)
         BAEMixer_StopOutputToFile();
         return false;
     }
-    bae_set_reverb(g_bae.current_reverb_type); // ensure reverb is set for export
+    bae_set_reverb(g_bae.current_reverb_type); // song start can overwrite embedded reverb default
 
     g_bae.is_playing = true;
 
@@ -902,6 +909,8 @@ void bae_stop_wav_export()
         {
             // Restart song from restored position
             BAESong_Preroll(g_bae.song);
+            bae_set_reverb(g_bae.current_reverb_type);
+            bae_apply_normalize_for_current_song();
 #if SUPPORT_MIDI_HW == TRUE
             g_midi_output_suppressed_during_seek = true;
 #endif
