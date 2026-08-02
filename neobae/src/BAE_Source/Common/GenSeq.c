@@ -2531,6 +2531,7 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                             }
                             else if (GM_DLS_GetMobileBAEQuirks() || GM_DLS_HasXmfEmbeddedBank(pSong->pMixer))
                             {
+                                sf2_dls_rmf_volume_multiplier = 0.85f;
                                 int32_t msb = (uint8_t)pSong->channelRawBank[MIDIChannel];
                                 if (msb == 0 || msb == 120 || msb == 121)
                                 {
