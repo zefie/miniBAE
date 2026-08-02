@@ -90,6 +90,7 @@ static int           gVelocityCurve  = 1; /* -1 = engine default */
 static int           gVolumePct      = 100; /* raw user volume percent, for overdrive */
 static int           gEqEnabled      = 0;
 static float         gEqGains[5]     = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+static int           gNormalize      = 0; /* -n: prerender peak normalize */
 
 /* Position display: update every N idle calls (~15 ms each) */
 static int           gPosCounter  = 0;
@@ -397,6 +398,7 @@ static const char usageMain[] =
 #endif
     "                 -l  {loop count (default: 0)}\n"
     "                 -v  {master volume %% (default: 100)}\n"
+    "                 -n  {normalize: loopless prerender + peak normalize}\n"
     "                 -vc {velocity curve 0-5 (default: engine (0), none for SF2/DLS)}\n"
     "                 -t  {max duration in seconds (0 = no limit)}\n"
     "                 -mc {MIDI channels to mute, 1-16, comma-separated}\n"
@@ -756,6 +758,36 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
     }
 #endif
 
+    /* Apply mixer FX before optional normalize so the prerender matches playback. */
+    if (gHasCustomReverb) {
+        BAEMixer_SetDefaultReverb(mixer, gCustomReverbType);
+        SetNeoCustomReverbCombCount(gCustomReverbCombCount);
+        for (int i = 0; i < 4; i++) {
+            SetNeoCustomReverbCombDelay(i, gCustomReverbDelays[i]);
+            SetNeoCustomReverbCombFeedback(i, gCustomReverbFeedback[i]);
+            SetNeoCustomReverbCombGain(i, gCustomReverbGain[i]);
+        }
+        SetNeoCustomReverbLowpass(gCustomReverbLowpass);
+        SetNeoReverbMix(gCustomReverbMix);
+    } else {
+        BAEMixer_SetDefaultReverb(mixer, reverbType);
+    }
+
+    if (gNormalize) {
+        int32_t appliedGainPct = 100;
+        playbae_printf("Normalizing (loopless prerender)...\n");
+        BAEResult nerr = BAESong_NormalizeFromPrerender(song, 89, &appliedGainPct);
+        if (nerr != BAE_NO_ERROR) {
+            playbae_printf("playbae: Normalize failed for '%s' (%d: %s); continuing without\n",
+                fileName, nerr, BAE_GetErrorString(nerr));
+            BAEMixer_SetSongNormalizeGain(mixer, 100);
+        } else if (gPassNumber <= 0) {
+            playbae_printf("Normalize gain: %d%%\n", (int)appliedGainPct);
+        }
+    } else {
+        BAEMixer_SetSongNormalizeGain(mixer, 100);
+    }
+
     BAESong_Preroll(song);
     /* Start playback (volume, loops, reverb, mutes applied after, like original) */
     BAEResult err = BAESong_Start(song, 0);
@@ -770,23 +802,6 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
 
     /* Apply settings after Start (matches original PlayMidi/PlayRMF order) */
     BAESong_SetVolume(song, volume);
-    if (gHasCustomReverb) {
-        /* BAEMixer_SetDefaultReverb isn't strictly necessary if we are overriding the params,
-           but we do it to set the base type. Custom presets use BAE_REVERB_TYPE_CUSTOM (12).
-           However, in NeoBAE, setting the custom parameters overrides the defaults. */
-        BAEMixer_SetDefaultReverb(mixer, gCustomReverbType);
-        
-        SetNeoCustomReverbCombCount(gCustomReverbCombCount);
-        for (int i = 0; i < 4; i++) {
-            SetNeoCustomReverbCombDelay(i, gCustomReverbDelays[i]);
-            SetNeoCustomReverbCombFeedback(i, gCustomReverbFeedback[i]);
-            SetNeoCustomReverbCombGain(i, gCustomReverbGain[i]);
-        }
-        SetNeoCustomReverbLowpass(gCustomReverbLowpass);
-        SetNeoReverbMix(gCustomReverbMix);
-    } else {
-        BAEMixer_SetDefaultReverb(mixer, reverbType);
-    }
     if (muteChannels && muteChannels[0])
         MuteChannels(song, muteChannels);
 
@@ -1563,6 +1578,7 @@ int main(int argc, char *argv[])
     GM_DLS_SetMobileBAEQuirks(gDLSCompatibilityMode ? false : true); // invert
 #endif
     if (PV_ParseCommands(argc, argv, "-nf", 0, NULL))   gFadeOut = 0;
+    if (PV_ParseCommands(argc, argv, "-n",  0, NULL))   gNormalize = 1;
     if (PV_ParseCommands(argc, argv, "-v",  1, tmpBuf)) {
         gVolumePct = atoi(tmpBuf);
         if (gVolumePct < 0)   gVolumePct = 0;

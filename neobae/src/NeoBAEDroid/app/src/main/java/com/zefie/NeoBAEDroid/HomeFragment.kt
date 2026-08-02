@@ -240,6 +240,10 @@ class HomeFragment : Fragment() {
         var classicChorus = mutableStateOf(false)
         // Native DLS compatibility mode (disables MobileBAE quirks, off by default)
         var dlsCompatibilityMode = mutableStateOf(false)
+        // Optional whole-song peak normalize via loopless prerender (off by default)
+        var normalizePlayback = mutableStateOf(false)
+        // True while background normalize prerender is running (UI stays responsive).
+        var isNormalizing = mutableStateOf(false)
 
         private const val PREF_NAME = "NeoBAE_prefs"
         private const val KEY_ENABLE_AUDIO_FILES = "enable_audio_files"
@@ -364,6 +368,7 @@ class HomeFragment : Fragment() {
     private var bankBrowserLoading = mutableStateOf(false)
     
     private val karaokeHandler = KaraokeHandler()
+    private val normalizeGainCache = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
     // Prevent overlapping bank swap operations (mixer teardown/recreate is not re-entrant).
     private val bankSwapInProgress = java.util.concurrent.atomic.AtomicBoolean(false)
@@ -874,6 +879,7 @@ class HomeFragment : Fragment() {
                     fixPanLfoBias.value = prefs.getBoolean("fix_pan_lfo_bias", true)
                     classicChorus.value = prefs.getBoolean("classic_chorus", false)
                     dlsCompatibilityMode.value = prefs.getBoolean("dls_compatibility_mode", false)
+                    normalizePlayback.value = prefs.getBoolean("normalize_playback", false)
                     exportCodec.value = prefs.getInt("export_codec", 2) // Default to OGG
                     baeScriptEnabled.value = prefs.getBoolean("baescript_enabled", false)
                     baeScriptSource.value = prefs.getString("baescript_source", "") ?: ""
@@ -1165,6 +1171,7 @@ class HomeFragment : Fragment() {
                         fixPanLfoBias = fixPanLfoBias.value,
                         classicChorus = classicChorus.value,
                         dlsCompatibilityMode = dlsCompatibilityMode.value,
+                        normalizePlayback = normalizePlayback.value,
                         exportCodec = exportCodec.value,
                         baeScriptEnabled = baeScriptEnabled.value,
                         baeScriptSource = baeScriptSource.value,
@@ -1224,6 +1231,16 @@ class HomeFragment : Fragment() {
                             Mixer.setDLSCompatibilityMode(enabled)
                             val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
                             prefs.edit().putBoolean("dls_compatibility_mode", enabled).apply()
+                        },
+                        onNormalizePlaybackChange = { enabled ->
+                            normalizePlayback.value = enabled
+                            val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                            prefs.edit().putBoolean("normalize_playback", enabled).apply()
+                            if (!enabled) {
+                                try { Song.cancelNormalizeFromPrerender() } catch (_: Exception) {}
+                                isNormalizing.value = false
+                                Mixer.setSongNormalizeGain(100)
+                            }
                         },
                         onExportCodecChange = { value ->
                             exportCodec.value = value
@@ -1704,64 +1721,67 @@ class HomeFragment : Fragment() {
                         // Apply velocity curve
                         song.setVelocityCurve(velocityCurve.value)
 
-                        val r = song.start()
-                        if (r == 0) {
-                            // Set loop count AFTER start (start clears songMaxLoopCount)
-                            
-                            
-                            Mixer.setDefaultReverb(reverbType.value)
-                            if (reverbType.value == 18) {
-                                val activeReverb = getActiveCustomReverbPresetName(requireContext())
-                                if (!activeReverb.isNullOrEmpty()) {
-                                    loadCustomReverbPreset(requireContext(), activeReverb)?.let { preset ->
-                                        applyCustomReverbPresetToEngine(requireContext(), preset)
-                                    }
-                                } else {
-                                    val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
-                                    val lp = prefs.getInt("custom_reverb_lowpass", 64).coerceIn(0, 127)
-                                    Mixer.setNeoCustomReverbLowpass(lp)
+                        // Apply FX before optional normalize so the prerender matches playback.
+                        Mixer.setDefaultReverb(reverbType.value)
+                        if (reverbType.value == 18) {
+                            val activeReverb = getActiveCustomReverbPresetName(requireContext())
+                            if (!activeReverb.isNullOrEmpty()) {
+                                loadCustomReverbPreset(requireContext(), activeReverb)?.let { preset ->
+                                    applyCustomReverbPresetToEngine(requireContext(), preset)
                                 }
+                            } else {
+                                val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                                val lp = prefs.getInt("custom_reverb_lowpass", 64).coerceIn(0, 127)
+                                Mixer.setNeoCustomReverbLowpass(lp)
                             }
-                            
-                            val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
-                            val eqEnabledPrefs = prefs.getBoolean("eq_enabled", false)
-                            Mixer.setEQEnabled(eqEnabledPrefs)
-                            if (eqEnabledPrefs) {
-                                for (i in 0 until 5) {
-                                    Mixer.setEQGain(i, prefs.getFloat("eq_band_$i", 0f))
-                                }
+                        }
+                        val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                        val eqEnabledPrefs = prefs.getBoolean("eq_enabled", false)
+                        Mixer.setEQEnabled(eqEnabledPrefs)
+                        if (eqEnabledPrefs) {
+                            for (i in 0 until 5) {
+                                Mixer.setEQGain(i, prefs.getFloat("eq_band_$i", 0f))
                             }
-                            if (song.hasEmbeddedBank()) {
-                                currentBankName.value = "Embedded Bank"
-                            }
-                            if (song.isSF2Song() || song.isDLSSong()) {
-                                song.pause()
-                                song.seekToMs(0)
-                                // Workaround for synth startup drop: resume after a short delay.
-                                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                                    try {
-                                        song.resume()
-                                    } catch (_: Exception) {}
-                                }, 250)
-                            }
+                        }
 
-                            if (baeScriptEnabled.value && ensureSongScriptLoaded(song)) {
-                                tickSongScript(song, 0, song.getLengthMs(), false)
-                            }
-
-                            val loopCount = if (viewModel.repeatMode == RepeatMode.SONG) 32767 else 0
-                            song.setLoops(loopCount)                                          
-
-                            // Reapply MIDI channel mutes on (re)start
-                            applyMidiChannelMuteState(song)
-
-                            viewModel.isPlaying = true
-                            val currentItemTitle = viewModel.getCurrentItem()?.takeIf { it.file.absolutePath == file.absolutePath }?.title
-                            viewModel.currentTitle = currentItemTitle ?: file.nameWithoutExtension
-                            currentLoadedFilePath = file.absolutePath
-                        } else {
+                        val pathKey = file.absolutePath
+                        val cachedGain = if (normalizePlayback.value) normalizeGainCache[pathKey] else null
+                        if (normalizePlayback.value && cachedGain == null) {
+                            // Background prerender: first play still gets a stable gain, UI stays responsive.
+                            isNormalizing.value = true
                             viewModel.isPlaying = false
-                            Toast.makeText(requireContext(), "Failed to start (err=$r)", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(requireContext(), "Normalizing…", Toast.LENGTH_SHORT).show()
+                            Thread {
+                                var gainPct = 100
+                                try {
+                                    gainPct = song.normalizeFromPrerender()
+                                } catch (e: Exception) {
+                                    android.util.Log.w("HomeFragment", "Normalize failed: ${e.message}")
+                                    gainPct = -1
+                                }
+                                postToMain {
+                                    isNormalizing.value = false
+                                    if (currentSong !== song) return@postToMain
+                                    if (gainPct > 0) {
+                                        normalizeGainCache[pathKey] = gainPct
+                                        android.util.Log.d("HomeFragment", "Normalize gain: $gainPct%")
+                                    } else {
+                                        Mixer.setSongNormalizeGain(100)
+                                        if (gainPct < 0) {
+                                            Toast.makeText(requireContext(), "Normalize failed; playing unnormalized", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                    finishStartNormalizedSong(song, file)
+                                }
+                            }.start()
+                        } else {
+                            if (cachedGain != null) {
+                                Mixer.setSongNormalizeGain(cachedGain)
+                                android.util.Log.d("HomeFragment", "Normalize cache hit: $cachedGain%")
+                            } else {
+                                Mixer.setSongNormalizeGain(100)
+                            }
+                            finishStartNormalizedSong(song, file)
                         }
                     } else {
                         viewModel.isPlaying = false
@@ -1843,6 +1863,40 @@ class HomeFragment : Fragment() {
         if (song == null) return
         if (!baeScriptEnabled.value || baeScriptSource.value.isBlank()) return
         song.tickScript(timestampMs, lengthMs, exporting)
+    }
+
+    private fun finishStartNormalizedSong(song: Song, file: File) {
+        val r = song.start()
+        if (r == 0) {
+            if (song.hasEmbeddedBank()) {
+                currentBankName.value = "Embedded Bank"
+            }
+            if (song.isSF2Song() || song.isDLSSong()) {
+                song.pause()
+                song.seekToMs(0)
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    try {
+                        if (currentSong === song) song.resume()
+                    } catch (_: Exception) {}
+                }, 250)
+            }
+
+            if (baeScriptEnabled.value && ensureSongScriptLoaded(song)) {
+                tickSongScript(song, 0, song.getLengthMs(), false)
+            }
+
+            val loopCount = if (viewModel.repeatMode == RepeatMode.SONG) 32767 else 0
+            song.setLoops(loopCount)
+            applyMidiChannelMuteState(song)
+
+            viewModel.isPlaying = true
+            val currentItemTitle = viewModel.getCurrentItem()?.takeIf { it.file.absolutePath == file.absolutePath }?.title
+            viewModel.currentTitle = currentItemTitle ?: file.nameWithoutExtension
+            currentLoadedFilePath = file.absolutePath
+        } else {
+            viewModel.isPlaying = false
+            Toast.makeText(requireContext(), "Failed to start (err=$r)", Toast.LENGTH_SHORT).show()
+        }
     }
 
     private fun applyVolume() {
@@ -1944,6 +1998,10 @@ class HomeFragment : Fragment() {
     }
     
     private fun stopPlayback(delete: Boolean = true) {
+        if (isNormalizing.value) {
+            try { Song.cancelNormalizeFromPrerender() } catch (_: Exception) {}
+            isNormalizing.value = false
+        }
         // Only try to stop if mixer exists
         if (Mixer.getMixer() != null) {
             currentSong?.stop(delete)
@@ -4146,6 +4204,7 @@ fun NewMusicPlayerScreen(
     fixPanLfoBias: Boolean,
     classicChorus: Boolean,
     dlsCompatibilityMode: Boolean,
+    normalizePlayback: Boolean,
     exportCodec: Int,
     baeScriptEnabled: Boolean,
     baeScriptSource: String,
@@ -4157,6 +4216,7 @@ fun NewMusicPlayerScreen(
     onFixPanLfoChange: (Boolean) -> Unit,
     onClassicChorusChange: (Boolean) -> Unit,
     onDLSCompatibilityModeChange: (Boolean) -> Unit,
+    onNormalizePlaybackChange: (Boolean) -> Unit,
     onExportCodecChange: (Int) -> Unit,
     onBaeScriptEnabledChange: (Boolean) -> Unit,
     onBaeScriptSourceChange: (String) -> Unit,
@@ -4662,6 +4722,7 @@ fun NewMusicPlayerScreen(
                     fixPanLfoBias = fixPanLfoBias,
                     classicChorus = classicChorus,
                     dlsCompatibilityMode = dlsCompatibilityMode,
+                    normalizePlayback = normalizePlayback,
                     exportCodec = exportCodec,
                     baeScriptEnabled = baeScriptEnabled,
                     baeScriptSource = baeScriptSource,
@@ -4678,6 +4739,7 @@ fun NewMusicPlayerScreen(
                         context.getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
                             .edit().putBoolean("dls_compatibility_mode", enabled).apply()
                     },
+                    onNormalizePlaybackChange = onNormalizePlaybackChange,
                     onVolumeChange = onVolumeChange,
                     onExportCodecChange = onExportCodecChange,
                     onBaeScriptEnabledChange = onBaeScriptEnabledChange,
@@ -7026,6 +7088,7 @@ fun SettingsScreenContent(
     fixPanLfoBias: Boolean,
     classicChorus: Boolean,
     dlsCompatibilityMode: Boolean,
+    normalizePlayback: Boolean,
     exportCodec: Int,
     baeScriptEnabled: Boolean,
     baeScriptSource: String,
@@ -7037,6 +7100,7 @@ fun SettingsScreenContent(
     onFixPanLfoChange: (Boolean) -> Unit,
     onClassicChorusChange: (Boolean) -> Unit,
     onDLSCompatibilityModeChange: (Boolean) -> Unit,
+    onNormalizePlaybackChange: (Boolean) -> Unit,
     onVolumeChange: (Int) -> Unit,
     onExportCodecChange: (Int) -> Unit,
     onBaeScriptEnabledChange: (Boolean) -> Unit,
@@ -8864,6 +8928,48 @@ fun SettingsScreenContent(
                 }
                 Text(
                     text = "Enable compatibility mode to broaden support for DLS banks. Disable for authentic MobileBAE behavior. Only applies when using the native DLS loader.",
+                    style = MaterialTheme.typography.caption,
+                    color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = 4.dp,
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onNormalizePlaybackChange(!normalizePlayback) },
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Filled.Tune,
+                        contentDescription = null,
+                        tint = MaterialTheme.colors.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Normalize Playback",
+                        style = MaterialTheme.typography.h6,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colors.primary,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Checkbox(
+                        checked = normalizePlayback,
+                        onCheckedChange = { onNormalizePlaybackChange(it) }
+                    )
+                }
+                Text(
+                    text = "Background peak measure before first play (UI stays responsive), then a stable gain for the whole song. Repeats use a cache.",
                     style = MaterialTheme.typography.caption,
                     color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
                     modifier = Modifier.padding(top = 4.dp)

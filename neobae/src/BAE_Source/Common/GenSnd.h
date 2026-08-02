@@ -1815,6 +1815,17 @@ typedef int32_t UNIT_TYPE;
     void GM_SetOutputGain(int32_t gainPct);
     int32_t GM_GetOutputGain(void);
 
+    // Final-mix song normalize gain percent (100 = unity). Affects all engines.
+    void GM_SetSongNormalizeGain(int32_t gainPct);
+    int32_t GM_GetSongNormalizeGain(void);
+
+    // Live peak capture for deferred normalize (no prerender / no UI stall).
+    void GM_SetNormalizeCapture(bool enable);
+    bool GM_GetNormalizeCapture(void);
+    void GM_ResetNormalizePeak(void);
+    int32_t GM_GetNormalizePeakAbs(void);
+    int32_t GM_ComputeNormalizeGainFromPeak(int32_t targetPeakPct);
+
 // This is an active voice reference that represents a valid/active voice.
 // Used in various functions that need to return and reference a voice.
 #define DEAD_VOICE (void *)-1L            // this represents a dead or invalid voice

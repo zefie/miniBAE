@@ -963,6 +963,15 @@ JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Mixer__1getSpanDCFix
 	return (jboolean)(enabled ? JNI_TRUE : JNI_FALSE);
 }
 
+JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1setSongNormalizeGain
+	(JNIEnv* env, jclass clazz, jlong reference, jint gainPct)
+{
+	(void)env;
+	(void)clazz;
+	if (!reference) return (jint)BAE_NULL_OBJECT;
+	return (jint)BAEMixer_SetSongNormalizeGain((BAEMixer)(intptr_t)reference, (int32_t)gainPct);
+}
+
 JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1setClassicChorus
 	(JNIEnv* env, jclass clazz, jboolean enable)
 {

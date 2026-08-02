@@ -138,6 +138,7 @@ public class Mixer
 	private static native boolean _getSpanDCFix();
 	private static native int _setClassicChorus(boolean enable);
 	private static native boolean _getClassicChorus();
+	private static native int _setSongNormalizeGain(long reference, int gainPct);
 	private static native int _setDLSCompatibilityMode(boolean enable);
 	private static native boolean _getDLSCompatibilityMode();
 	private static native int _determineFileTypeByData(byte[] data, int length);
@@ -214,6 +215,10 @@ public class Mixer
 	public static boolean getSpanDCFix(){ return _getSpanDCFix(); }
 	public static int setClassicChorus(boolean enable){ return _setClassicChorus(enable); }
 	public static boolean getClassicChorus(){ return _getClassicChorus(); }
+	public static int setSongNormalizeGain(int gainPct){
+		if(mMixer==null) return -1;
+		return _setSongNormalizeGain(mMixer.mReference, gainPct);
+	}
 	public static int setDLSCompatibilityMode(boolean enable){ return _setDLSCompatibilityMode(enable); }
 	public static boolean getDLSCompatibilityMode(){ return _getDLSCompatibilityMode(); }
 	

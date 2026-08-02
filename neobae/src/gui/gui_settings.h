@@ -76,6 +76,8 @@ typedef struct
     bool has_dls_compatibility_mode;
     bool dls_compatibility_mode;
 #endif
+    bool has_normalize;
+    bool normalize_enabled;
 } Settings;
 
 // Custom reverb preset structure
@@ -143,6 +145,7 @@ extern bool g_panfix_enabled;
 #if BAE_CLASSIC_CHORUS
 extern bool g_classic_chorus_enabled;
 #endif
+extern bool g_normalize_enabled;
 
 // Settings persistence functions
 Settings load_settings(void);

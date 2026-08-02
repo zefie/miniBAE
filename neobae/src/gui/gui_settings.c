@@ -70,6 +70,7 @@ bool g_panfix_enabled = true;
 #if BAE_CLASSIC_CHORUS
 bool g_classic_chorus_enabled = false;
 #endif
+bool g_normalize_enabled = false;
 
 // External globals we need access to
 extern bool g_show_virtual_keyboard;
@@ -152,6 +153,11 @@ Settings load_settings(void)
             settings.has_dls_compatibility_mode = true;
         }
 #endif
+        else if (strncmp(line, "normalize_enabled=", 18) == 0)
+        {
+            settings.normalize_enabled = (atoi(line + 18) != 0);
+            settings.has_normalize = true;
+        }
         else if (strncmp(line, "disable_webtv_progress_bar=", 27) == 0)
         {
             settings.disable_webtv_progress_bar = (atoi(line + 27) != 0);
@@ -335,6 +341,7 @@ void save_settings(const char *last_bank_path, int reverb_type, bool loop_enable
 #if USE_NATIVE_DLS == TRUE
         fprintf(f, "dls_compatibility_mode=%d\n", g_use_dls_compatiblity_mode ? 1 : 0);
 #endif
+        fprintf(f, "normalize_enabled=%d\n", g_normalize_enabled ? 1 : 0);
         fprintf(f, "disable_webtv_progress_bar=%d\n", g_disable_webtv_progress_bar ? 1 : 0);
         fprintf(f, "export_codec_index=%d\n", g_exportCodecIndex);
 #if BAE_FIX_SPAN_DC
@@ -510,6 +517,10 @@ void save_full_settings(const Settings *settings)
             fprintf(f, "dls_compatibility_mode=%d\n", settings->dls_compatibility_mode ? 1 : 0);
         }
 #endif
+        if (settings->has_normalize)
+        {
+            fprintf(f, "normalize_enabled=%d\n", settings->normalize_enabled ? 1 : 0);
+        }
         if (settings->has_webtv)
         {
             fprintf(f, "disable_webtv_progress_bar=%d\n", settings->disable_webtv_progress_bar ? 1 : 0);
@@ -689,6 +700,10 @@ void apply_settings_to_ui(const Settings *settings, int *transpose, int *tempo, 
         GM_DLS_SetMobileBAEQuirks(g_use_dls_compatiblity_mode ? false : true); // inverted
     }
 #endif
+    if (settings->has_normalize)
+    {
+        g_normalize_enabled = settings->normalize_enabled;
+    }
     if (settings->has_export_codec)
     {
         g_exportCodecIndex = settings->export_codec_index;
@@ -760,7 +775,7 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
     SDL_Color dim = g_is_dark_mode ? (SDL_Color){0, 0, 0, 120} : (SDL_Color){0, 0, 0, 90};
     draw_rect(R, (Rect){0, 0, WINDOW_W, g_window_h}, dim);
     int dlgW = 560;
-    int dlgH = 316;
+    int dlgH = 352;
     int pad = 10; // dialog size (wider two-column)
     Rect dlg = {(WINDOW_W - dlgW) / 2, (g_window_h - dlgH) / 2, dlgW, dlgH};
     SDL_Color dlgBg = g_panel_bg;
@@ -1477,7 +1492,53 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
                            &g_dls_compat_tooltip_visible, &g_dls_compat_tooltip_rect, g_dls_compat_tooltip_text, sizeof(g_dls_compat_tooltip_text));
         }
     }
+    Rect normalizeRect = {leftX, dlg.y + 180, 18, 18};
+#else
+    Rect normalizeRect = {leftX, dlg.y + 144, 18, 18};
 #endif
+    if (!rightColumnCheckboxesEnabled)
+    {
+        bool over = point_in(mx, my, normalizeRect);
+        draw_custom_checkbox(R, normalizeRect, g_normalize_enabled, over);
+        draw_text(R, normalizeRect.x + normalizeRect.w + 6, normalizeRect.y + 2, "Normalize Playback", g_text_color);
+    }
+    else if (ui_toggle(R, normalizeRect, &g_normalize_enabled, "Normalize Playback", mx, my, mclick))
+    {
+        save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, *loopPlay);
+        if (!g_normalize_enabled)
+        {
+            bae_cancel_normalize();
+            if (g_bae.mixer)
+                BAEMixer_SetSongNormalizeGain(g_bae.mixer, 100);
+        }
+        else
+        {
+            /* Enabling: reload current song so the async peak scan can run. */
+            bae_reload_song_for_normalize(transpose, tempo, volume, loopPlay, reverbType, ch_enable, playing);
+        }
+    }
+    {
+        Rect normalizeFullRect = {normalizeRect.x, normalizeRect.y, 280, 24};
+        if (point_in(mx, my, normalizeFullRect))
+        {
+            const char *tooltip_text = "Measures peak on a background prerender, then plays at a stable gain. UI stays responsive; repeats use a cache.";
+            int text_w = 0, text_h = 0;
+            measure_text(tooltip_text, &text_w, &text_h);
+            int tooltip_w = text_w + 8;
+            int tooltip_h = text_h + 8;
+            if (tooltip_w > 500)
+                tooltip_w = 500;
+            int tooltip_x = mx + 10;
+            int tooltip_y = my - 30;
+            if (tooltip_x + tooltip_w > WINDOW_W - 4)
+                tooltip_x = WINDOW_W - tooltip_w - 4;
+            if (tooltip_y < 4)
+                tooltip_y = my + 25;
+            ui_set_tooltip((Rect){tooltip_x, tooltip_y, tooltip_w, tooltip_h}, tooltip_text,
+                           &g_dls_compat_tooltip_visible, &g_dls_compat_tooltip_rect, g_dls_compat_tooltip_text, sizeof(g_dls_compat_tooltip_text));
+        }
+    }
+
     // MIDI channel selector removed from Settings dialog - channel is now controlled in the virtual keyboard dialog
 
     // Footer info removed (moved to About dialog)

@@ -44,6 +44,305 @@
 #include <ctype.h>
 #include <errno.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <process.h>
+#else
+#include <pthread.h>
+#include <unistd.h>
+#endif
+
+/* Per-path normalize gain cache so repeat plays skip prerender wait. */
+#define NORM_CACHE_MAX 64
+typedef struct {
+    char path[1024];
+    int32_t gain_pct;
+} NormCacheEntry;
+static NormCacheEntry g_norm_cache[NORM_CACHE_MAX];
+static int g_norm_cache_count = 0;
+
+static int norm_cache_lookup(const char *path)
+{
+    if (!path || !path[0])
+        return 0;
+    for (int i = 0; i < g_norm_cache_count; ++i)
+    {
+        if (strcmp(g_norm_cache[i].path, path) == 0)
+            return (int)g_norm_cache[i].gain_pct;
+    }
+    return 0;
+}
+
+static void norm_cache_store(const char *path, int32_t gain_pct)
+{
+    if (!path || !path[0] || gain_pct <= 0)
+        return;
+    for (int i = 0; i < g_norm_cache_count; ++i)
+    {
+        if (strcmp(g_norm_cache[i].path, path) == 0)
+        {
+            g_norm_cache[i].gain_pct = gain_pct;
+            return;
+        }
+    }
+    int slot = (g_norm_cache_count < NORM_CACHE_MAX) ? g_norm_cache_count++ : (NORM_CACHE_MAX - 1);
+    if (g_norm_cache_count >= NORM_CACHE_MAX)
+    {
+        /* simple ring: drop oldest */
+        memmove(&g_norm_cache[0], &g_norm_cache[1], sizeof(NormCacheEntry) * (NORM_CACHE_MAX - 1));
+        slot = NORM_CACHE_MAX - 1;
+        g_norm_cache_count = NORM_CACHE_MAX;
+    }
+    safe_strncpy(g_norm_cache[slot].path, path, sizeof(g_norm_cache[slot].path) - 1);
+    g_norm_cache[slot].path[sizeof(g_norm_cache[slot].path) - 1] = '\0';
+    g_norm_cache[slot].gain_pct = gain_pct;
+}
+
+static void norm_cache_invalidate(const char *path)
+{
+    if (!path || !path[0])
+        return;
+    for (int i = 0; i < g_norm_cache_count; ++i)
+    {
+        if (strcmp(g_norm_cache[i].path, path) == 0)
+        {
+            if (i < g_norm_cache_count - 1)
+                memmove(&g_norm_cache[i], &g_norm_cache[i + 1],
+                        sizeof(NormCacheEntry) * (size_t)(g_norm_cache_count - i - 1));
+            g_norm_cache_count--;
+            return;
+        }
+    }
+}
+
+/* Async normalize job (UI thread polls; worker only runs prerender). */
+static volatile bool g_norm_active = false;
+static volatile bool g_norm_finished = false;
+static volatile bool g_norm_join_needed = false;
+static BAEResult g_norm_err = BAE_NO_ERROR;
+static int32_t g_norm_gain_pct = 100;
+static uint32_t g_norm_start_pos_us = 0;
+static int g_norm_velocity_curve = 1;
+#ifdef _WIN32
+static HANDLE g_norm_thread = NULL;
+#else
+static pthread_t g_norm_thread;
+static bool g_norm_thread_valid = false;
+#endif
+
+#ifdef _WIN32
+static unsigned __stdcall normalize_thread_proc(void *param)
+#else
+static void *normalize_thread_proc(void *param)
+#endif
+{
+    (void)param;
+    int32_t gain = 100;
+    BAEResult err = BAESong_NormalizeFromPrerender(g_bae.song, 89, &gain);
+    g_norm_err = err;
+    g_norm_gain_pct = gain;
+    g_norm_finished = true;
+#ifdef _WIN32
+    return 0;
+#else
+    return NULL;
+#endif
+}
+
+static void norm_join_thread(void)
+{
+    if (!g_norm_join_needed)
+        return;
+#ifdef _WIN32
+    if (g_norm_thread)
+    {
+        WaitForSingleObject(g_norm_thread, INFINITE);
+        CloseHandle(g_norm_thread);
+        g_norm_thread = NULL;
+    }
+#else
+    if (g_norm_thread_valid)
+    {
+        pthread_join(g_norm_thread, NULL);
+        g_norm_thread_valid = false;
+    }
+#endif
+    g_norm_join_needed = false;
+}
+
+bool bae_is_normalizing(void)
+{
+    return g_norm_active ? true : false;
+}
+
+void bae_cancel_normalize(void)
+{
+    if (!g_norm_active)
+        return;
+    BAESong_CancelNormalizeFromPrerender();
+    /* Ensure the worker is done before the song/mixer can be torn down. */
+    while (!g_norm_finished)
+    {
+#ifdef _WIN32
+        Sleep(1);
+#else
+        usleep(1000);
+#endif
+    }
+    norm_join_thread();
+    g_norm_active = false;
+    g_norm_finished = false;
+    if (g_bae.mixer)
+        BAEMixer_SetSongNormalizeGain(g_bae.mixer, 100);
+}
+
+void bae_reload_song_for_normalize(int *transpose, int *tempo, int *volume, bool *loopPlay,
+                                   int *reverbType, bool ch_enable[16], bool *playing)
+{
+    char path[1024];
+    bool was_playing;
+    int pos_ms;
+    uint32_t pos_us;
+
+    if (!transpose || !tempo || !volume || !loopPlay || !reverbType || !ch_enable || !playing)
+        return;
+    if (!g_bae.song_loaded || g_bae.is_audio_file || !g_bae.loaded_path[0])
+        return;
+
+    safe_strncpy(path, g_bae.loaded_path, sizeof(path) - 1);
+    path[sizeof(path) - 1] = '\0';
+    was_playing = (*playing || g_bae.is_playing || bae_is_normalizing()) ? true : false;
+    pos_ms = bae_get_pos_ms();
+    pos_us = (pos_ms > 0) ? (uint32_t)pos_ms * 1000u : 0u;
+
+    bae_cancel_normalize();
+    norm_cache_invalidate(path);
+    if (g_bae.mixer)
+        BAEMixer_SetSongNormalizeGain(g_bae.mixer, 100);
+
+    if (*playing || g_bae.is_playing)
+    {
+        bool stop_playing = true;
+        bae_stop(&stop_playing, &pos_ms);
+        *playing = false;
+    }
+
+    set_status_message("Reloading for normalize...");
+    if (!bae_load_song_with_settings(path, *transpose, *tempo, *volume, *loopPlay, *reverbType, ch_enable, false))
+    {
+        set_status_message("Failed to reload song for normalize");
+        return;
+    }
+
+    g_bae.preserved_start_position_us = 0;
+    g_bae.preserve_position_on_next_start = false;
+    (void)was_playing;
+    (void)pos_us;
+
+    /* Start from the beginning so the async peak scan covers the full song.
+     * Keep *playing false while normalizing so the UI doesn't chase scan position. */
+    {
+        bool play_flag = false;
+        if (!bae_play(&play_flag))
+            set_status_message("Failed to start normalize scan");
+        *playing = play_flag;
+    }
+}
+
+static bool bae_finish_song_start_after_normalize(bool *playing, uint32_t startPosUs)
+{
+    BAE_PRINTF("Preroll complete. Start position now %u us for '%s'\n", startPosUs == 0 ? 0 : startPosUs, g_bae.loaded_path);
+    BAE_PRINTF("Attempting BAESong_Start on '%s'\n", g_bae.loaded_path);
+    BAEResult sr = BAESong_Start(g_bae.song, 0);
+    if (sr != BAE_NO_ERROR)
+    {
+        BAE_PRINTF("BAESong_Start failed (%d) for '%s' (will try preroll+restart)\n", sr, g_bae.loaded_path);
+#if SUPPORT_MIDI_HW == TRUE
+        g_midi_output_suppressed_during_seek = true;
+#endif
+        BAESong_SetMicrosecondPosition(g_bae.song, 0);
+        BAESong_Preroll(g_bae.song);
+        if (startPosUs)
+            BAESong_SetMicrosecondPosition(g_bae.song, startPosUs);
+#if SUPPORT_MIDI_HW == TRUE
+        g_midi_output_suppressed_during_seek = false;
+#endif
+        sr = BAESong_Start(g_bae.song, 0);
+        if (sr != BAE_NO_ERROR)
+        {
+            BAE_PRINTF("Second BAESong_Start attempt failed (%d) for '%s'\n", sr, g_bae.loaded_path);
+            return false;
+        }
+        BAE_PRINTF("Second BAESong_Start attempt succeeded for '%s'\n", g_bae.loaded_path);
+    }
+    else
+    {
+        BAE_PRINTF("BAESong_Start ok for '%s'\n", g_bae.loaded_path);
+    }
+
+    if (startPosUs)
+    {
+        unsigned int verifyPos = 0;
+        BAESong_GetMicrosecondPosition(g_bae.song, &verifyPos);
+        BAE_PRINTF("Post-start verify position %u us (requested %u us)\n", verifyPos, startPosUs);
+    }
+
+    if (g_bae.song_finished)
+    {
+        g_bae.song_finished = false;
+        g_bae.preserve_position_on_next_start = false;
+    }
+
+    bae_set_reverb(g_bae.current_reverb_type);
+    *playing = true;
+    g_bae.preserve_position_on_next_start = false;
+    g_bae.is_playing = true;
+    return true;
+}
+
+void bae_poll_normalize(bool *playing)
+{
+    if (!g_norm_active || !g_norm_finished || !playing)
+        return;
+
+    norm_join_thread();
+    g_norm_active = false;
+    g_norm_finished = false;
+
+    if (!g_bae.song_loaded || !g_bae.song || g_bae.is_audio_file)
+        return;
+
+    if (g_norm_err == BAE_ABORTED)
+    {
+        set_status_message("Normalize cancelled");
+        BAEMixer_SetSongNormalizeGain(g_bae.mixer, 100);
+        return;
+    }
+
+    if (g_norm_err != BAE_NO_ERROR)
+    {
+        BAE_PRINTF("Normalize failed (%d); continuing without\n", (int)g_norm_err);
+        BAEMixer_SetSongNormalizeGain(g_bae.mixer, 100);
+        set_status_message("Normalize failed");
+    }
+    else
+    {
+        char nmsg[64];
+        BAE_PRINTF("Normalize gain: %d%%\n", (int)g_norm_gain_pct);
+        snprintf(nmsg, sizeof(nmsg), "Normalized (%d%%)", (int)g_norm_gain_pct);
+        set_status_message(nmsg);
+        norm_cache_store(g_bae.loaded_path, g_norm_gain_pct);
+    }
+
+    BAESong_SetMicrosecondPosition(g_bae.song, 0);
+    BAESong_Preroll(g_bae.song);
+    BAESong_SetVelocityCurve(g_bae.song, g_norm_velocity_curve);
+    if (g_norm_start_pos_us)
+        BAESong_SetMicrosecondPosition(g_bae.song, g_norm_start_pos_us);
+
+    bae_finish_song_start_after_normalize(playing, g_norm_start_pos_us);
+}
+
 /* Single, unconditional definition of the remembered user master volume
     intent. Declared extern in headers and other modules so all translation
     units reference this one symbol regardless of build flags. */
@@ -1579,6 +1878,65 @@ bool bae_play(bool *playing)
 #endif
 
                     BAESong_SetVelocityCurve(g_bae.song, settings.volume_curve);
+                    /* Match prerender FX to what playback will use. */
+                    bae_set_reverb(g_bae.current_reverb_type);
+
+                    if (g_normalize_enabled)
+                    {
+                        int cached = norm_cache_lookup(g_bae.loaded_path);
+                        if (cached > 0)
+                        {
+                            BAEMixer_SetSongNormalizeGain(g_bae.mixer, cached);
+                            BAE_PRINTF("Normalize cache hit: %d%%\n", cached);
+                        }
+                        else if (!g_norm_active)
+                        {
+                            /* Async prerender so the UI keeps pumping; first play still uses measured gain. */
+                            g_norm_start_pos_us = startPosUs;
+                            g_norm_velocity_curve = settings.volume_curve;
+                            g_norm_err = BAE_NO_ERROR;
+                            g_norm_gain_pct = 100;
+                            g_norm_finished = false;
+                            g_norm_active = true;
+                            g_norm_join_needed = true;
+                            set_status_message("Normalizing...");
+#ifdef _WIN32
+                            g_norm_thread = (HANDLE)_beginthreadex(NULL, 0, normalize_thread_proc, NULL, 0, NULL);
+                            if (!g_norm_thread)
+                            {
+                                g_norm_active = false;
+                                g_norm_join_needed = false;
+                                BAEMixer_SetSongNormalizeGain(g_bae.mixer, 100);
+                                set_status_message("Normalize thread failed");
+                            }
+                            else
+                            {
+                                return true; /* *playing stays false until bae_poll_normalize */
+                            }
+#else
+                            if (pthread_create(&g_norm_thread, NULL, normalize_thread_proc, NULL) != 0)
+                            {
+                                g_norm_active = false;
+                                g_norm_join_needed = false;
+                                BAEMixer_SetSongNormalizeGain(g_bae.mixer, 100);
+                                set_status_message("Normalize thread failed");
+                            }
+                            else
+                            {
+                                g_norm_thread_valid = true;
+                                return true; /* *playing stays false until bae_poll_normalize */
+                            }
+#endif
+                        }
+                        else
+                        {
+                            return false; /* already normalizing */
+                        }
+                    }
+                    else if (g_bae.mixer)
+                    {
+                        BAEMixer_SetSongNormalizeGain(g_bae.mixer, 100);
+                    }
                 }
                 else
                 {
@@ -1594,61 +1952,14 @@ bool bae_play(bool *playing)
 #if SUPPORT_MIDI_HW == TRUE
                     g_midi_output_suppressed_during_seek = false;
 #endif
-                }
-
-                BAE_PRINTF("Preroll complete. Start position now %u us for '%s'\n", startPosUs == 0 ? 0 : startPosUs, g_bae.loaded_path);
-                BAE_PRINTF("Attempting BAESong_Start on '%s'\n", g_bae.loaded_path);
-                BAEResult sr = BAESong_Start(g_bae.song, 0);
-                if (sr != BAE_NO_ERROR)
-                {
-                    BAE_PRINTF("BAESong_Start failed (%d) for '%s' (will try preroll+restart)\n", sr, g_bae.loaded_path);
-                    // Try a safety preroll + rewind then attempt once more
-#if SUPPORT_MIDI_HW == TRUE
-                    g_midi_output_suppressed_during_seek = true;
-#endif
-                    BAESong_SetMicrosecondPosition(g_bae.song, 0);
-                    BAESong_Preroll(g_bae.song);
-                    if (startPosUs)
                     {
-                        BAESong_SetMicrosecondPosition(g_bae.song, startPosUs);
-                    }
-#if SUPPORT_MIDI_HW == TRUE
-                    g_midi_output_suppressed_during_seek = false;
-#endif
-                    sr = BAESong_Start(g_bae.song, 0);
-                    if (sr != BAE_NO_ERROR)
-                    {
-                        BAE_PRINTF("Second BAESong_Start attempt failed (%d) for '%s'\n", sr, g_bae.loaded_path);
-                        return false;
-                    }
-                    else
-                    {
-                        BAE_PRINTF("Second BAESong_Start attempt succeeded for '%s'\n", g_bae.loaded_path);
-                    }
-                }
-                else
-                {
-                    BAE_PRINTF("BAESong_Start ok for '%s'\n", g_bae.loaded_path);
-                }
-                
-                // Verify resume position if applicable
-                if (startPosUs)
-                {
-                    unsigned int verifyPos = 0;
-                    BAESong_GetMicrosecondPosition(g_bae.song, &verifyPos);
-                    BAE_PRINTF("Post-start verify position %u us (requested %u us)\n", verifyPos, startPosUs);
-                    if (verifyPos < startPosUs - 10000 || verifyPos > startPosUs + 10000)
-                    {
-                        BAE_PRINTF("WARNING: resume position mismatch (delta=%d us)\n", (int)verifyPos - (int)startPosUs);
+                        int cachedGain = g_normalize_enabled ? norm_cache_lookup(g_bae.loaded_path) : 0;
+                        if (g_bae.mixer)
+                            BAEMixer_SetSongNormalizeGain(g_bae.mixer, cachedGain > 0 ? cachedGain : 100);
                     }
                 }
 
-                // Clear finished flag now that we're starting playback from a preserved or normal position
-                if (g_bae.song_finished)
-                {
-                    g_bae.song_finished = false;
-                    g_bae.preserve_position_on_next_start = false; // consumed
-                }
+                return bae_finish_song_start_after_normalize(playing, startPosUs);
             }
 
             bae_set_reverb(g_bae.current_reverb_type);
@@ -1661,6 +1972,7 @@ bool bae_play(bool *playing)
         }
         else
         {
+            bae_cancel_normalize();
             BAESong_Pause(g_bae.song);
             // Ensure external MIDI devices are silenced on pause
 #if SUPPORT_MIDI_HW == TRUE
@@ -1706,6 +2018,7 @@ bool bae_play(bool *playing)
 
 void bae_stop(bool *playing, int *progress)
 {
+    bae_cancel_normalize();
     if (g_bae.is_audio_file && g_bae.sound)
     {
         BAESound_Stop(g_bae.sound, FALSE);

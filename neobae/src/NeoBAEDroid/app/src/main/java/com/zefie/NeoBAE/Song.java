@@ -27,6 +27,9 @@ public class Song
 	private static native boolean _isSF2Song(long songReference);
 	private static native boolean _isDLSSong(long songReference);	
 	private static native boolean _hasEmbeddedBank(long songReference);
+	/** Returns applied gain percent (100 = unity), or negative BAE error code. */
+	private static native int _normalizeFromPrerender(long songReference, int targetPeakPct);
+	private static native void _cancelNormalizeFromPrerender();
 	private native int _loadScriptFromString(long songReference, String source);
 	private native void _clearScript(long songReference);
 	private native int _tickScript(long songReference, int timestampMs, int lengthMs, boolean exporting);
@@ -193,6 +196,17 @@ public class Song
 	public boolean isSF2Song() { return _isSF2Song(mReference); }
 	public boolean isDLSSong() { return _isDLSSong(mReference); }
 	public boolean hasEmbeddedBank() { return _hasEmbeddedBank(mReference); }
+
+	/** Offline loopless prerender + peak normalize. Returns gain percent (100 = unity). */
+	public int normalizeFromPrerender(int targetPeakPct) {
+		return _normalizeFromPrerender(mReference, targetPeakPct);
+	}
+	public int normalizeFromPrerender() {
+		return normalizeFromPrerender(89);
+	}
+	public static void cancelNormalizeFromPrerender() {
+		_cancelNormalizeFromPrerender();
+	}
 
 	// MIDI channel mute controls (0..15)
 	public int muteChannel(int channel) { return _muteChannel(mReference, channel); }

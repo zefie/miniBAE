@@ -978,7 +978,11 @@ int main(int argc, char *argv[])
     {
         g_use_dls_compatiblity_mode = settings.dls_compatibility_mode;
     }
-#endif    
+#endif
+    if (settings.has_normalize)
+    {
+        g_normalize_enabled = settings.normalize_enabled;
+    }
     if (settings.has_export_codec)
     {
         g_exportCodecIndex = settings.export_codec_index;
@@ -1393,6 +1397,8 @@ int main(int argc, char *argv[])
 
     while (running)
     {
+        /* Finish async normalize on the UI thread without freezing the event loop. */
+        bae_poll_normalize(&playing);
         Uint64 frame_start = SDL_GetPerformanceCounter();
         SDL_Event e;
         mclick = false;
@@ -2390,8 +2396,38 @@ int main(int argc, char *argv[])
         }
 
         // Sync local 'playing' variable with engine state after export or any external change
-        // This ensures progress bar resumes when playback auto-restarts (e.g., after WAV export)
-        if (playing != g_bae.is_playing)
+        // This ensures progress bar resumes when playback auto-restarts (e.g., after WAV export).
+        // While async normalize is measuring, show sequencer position on the progress bar but
+        // keep playing=false so IsDone/playlist-advance do not treat the scan as a finished song.
+        if (bae_is_normalizing())
+        {
+            playing = false;
+            g_bae.is_playing = false;
+            duration = bae_get_len_ms();
+            progress = bae_get_pos_ms();
+            if (progress < 0)
+                progress = 0;
+            if (duration > 0 && progress > duration)
+                progress = duration;
+            g_progress_display_tick_ms = 0;
+            g_last_engine_pos_ms = progress;
+            {
+                static int s_last_norm_pct = -1;
+                int pct = (duration > 0) ? (int)((progress * 100L) / duration) : 0;
+                if (pct < 0)
+                    pct = 0;
+                if (pct > 100)
+                    pct = 100;
+                if (pct != s_last_norm_pct)
+                {
+                    char nmsg[64];
+                    snprintf(nmsg, sizeof(nmsg), "Normalizing... %d%%", pct);
+                    set_status_message(nmsg);
+                    s_last_norm_pct = pct;
+                }
+            }
+        }
+        else if (playing != g_bae.is_playing)
         {
             if (!g_bae.is_playing)
                 progress = bae_get_pos_ms(); // sync progress so bar reflects stop/seek
@@ -2685,7 +2721,7 @@ int main(int argc, char *argv[])
         // previous "force restart" block; looping is now handled entirely by
         // the engine via BAESong_SetLoops. If loops are set >0 the song should
         // not report done until all loops are exhausted.
-        if (playing && g_bae.song_loaded)
+        if (playing && g_bae.song_loaded && !bae_is_normalizing())
         {
             bool song_finished = false;
 
@@ -2753,7 +2789,9 @@ int main(int argc, char *argv[])
                                     {                                    
                                         if (bae_play(&playing))
                                         {
-                                            g_bae.is_playing = true;
+                                            /* Only mark playing if audio actually started (not mid-normalize). */
+                                            if (!bae_is_normalizing())
+                                                g_bae.is_playing = true;
                                             g_bae.song_finished = false;
                                             BAE_PRINTF("Playlist: next song started successfully\n");
                                         }
@@ -3918,8 +3956,9 @@ int main(int argc, char *argv[])
                 }
             }
         }
-        // Disable seekbar interaction while the reverb dropdown is expanded.
-        bool seekbar_enabled = !g_reverbDropdownOpen && !modal_block_transport;
+        // Disable seekbar while reverb dropdown is open, or while normalize is scanning
+        // (seeking mid-scan would corrupt the peak measurement / race the worker).
+        bool seekbar_enabled = !g_reverbDropdownOpen && !modal_block_transport && !bae_is_normalizing();
     #if SUPPORT_MIDI_HW == TRUE
         seekbar_enabled = seekbar_enabled && !g_midi_input_enabled;
     #endif
