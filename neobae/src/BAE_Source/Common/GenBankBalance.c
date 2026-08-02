@@ -55,9 +55,9 @@ enum
 static const float kMinLoudness = 1.0e-6f;
 static const float kScaleMin = 0.05f; /* ~-26 dB — hot RMF one-shots vs quiet DLS */
 static const float kScaleMax = 1.0f;  /* match-quietest: never boost, only attenuate */
-/* Post-match lift for HSB/RMF (~+4.5 dB). Match-quietest can leave native a
+/* Post-match lift for HSB/RMF (~+5.5 dB). Match-quietest can leave native a
  * hair shy of DLS/SF2 in practice; applied after scale calculation. */
-static const float kHsbRmfPostBoost = 1.6788040181224003f; /* 10^(4.5/20) */
+static const float kHsbRmfPostBoost = 1.883649144472985f; /* 10^(5.5/20) */
 
 static XFILE g_hsbFiles[kBankBalanceMaxHsbTrack];
 static int g_hsbCount = 0;
@@ -659,7 +659,7 @@ static void PV_BankBalance_Recalculate(void)
             g_scale[i] = 1.0f;
     }
 
-    /* HSB/RMF tends to land slightly quiet vs DLS/SF2 — +4.5 dB after match. */
+    /* HSB/RMF tends to land slightly quiet vs DLS/SF2 — +5.5 dB after match. */
     if (g_present[GM_BANK_ENGINE_HSB])
     {
         g_scale[GM_BANK_ENGINE_HSB] = PV_Clampf(
