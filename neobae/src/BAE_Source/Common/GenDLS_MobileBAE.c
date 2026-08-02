@@ -108,6 +108,8 @@ static int32_t dls_synth_voice_limit(const DLS_Synth* synth) {
     return limit;
 }
 
+static void dls_mip_rebuild_mask(DLS_Synth* synth);
+
 static void dls_synth_sync_voice_limit(DLS_Synth* synth) {
     GM_Mixer* mixer;
     int32_t limit = DLS_MAX_VOICE_POOL;
@@ -119,6 +121,7 @@ static void dls_synth_sync_voice_limit(DLS_Synth* synth) {
     if (limit > DLS_MAX_VOICE_POOL) limit = DLS_MAX_VOICE_POOL;
     if (limit < 1) limit = 1;
     synth->maxVoices = limit;
+    dls_mip_rebuild_mask(synth);
 }
 
 static uint16_t dls_channel_index(uint16_t channel) {
@@ -1324,7 +1327,45 @@ static void DLS_ApplyDirectConnection(DLS_Articulation* art, const DLS_Connectio
     }
 }
 
-static OPErr DLS_Parse_ArticulationChunk(const uint8_t* body, uint32_t size, DLS_Articulation* art) {
+/* microQ stores art1 usDestination (16-bit) and lScale (32-bit) bit-reversed
+ * when the ptbl header contains the 'eggs' marker (see sub_43459D84). */
+static uint8_t dls_bitrev8(uint8_t x)
+{
+    x = (uint8_t)(((x & 0xAAu) >> 1) | ((x & 0x55u) << 1));
+    x = (uint8_t)(((x & 0xCCu) >> 2) | ((x & 0x33u) << 2));
+    x = (uint8_t)(((x & 0xF0u) >> 4) | ((x & 0x0Fu) << 4));
+    return x;
+}
+
+static uint16_t dls_bitrev16(uint16_t x)
+{
+    return (uint16_t)(dls_bitrev8((uint8_t)(x & 0xFFu)) |
+                      ((uint16_t)dls_bitrev8((uint8_t)(x >> 8)) << 8));
+}
+
+static uint32_t dls_bitrev32(uint32_t x)
+{
+    x = ((x & 0xAAAAAAAAu) >> 1) | ((x & 0x55555555u) << 1);
+    x = ((x & 0xCCCCCCCCu) >> 2) | ((x & 0x33333333u) << 2);
+    x = ((x & 0xF0F0F0F0u) >> 4) | ((x & 0x0F0F0F0Fu) << 4);
+    x = ((x & 0xFF00FF00u) >> 8) | ((x & 0x00FF00FFu) << 8);
+    x = (x >> 16) | (x << 16);
+    return x;
+}
+
+/* Eggs wlnk.ulTableIndex: bit-reverse each byte, preserve byte order
+ * (unlike dls_bitrev32, which reverses the whole word). */
+static uint32_t dls_bitrev32_per_byte(uint32_t x)
+{
+    return (uint32_t)dls_bitrev8((uint8_t)(x)) |
+           ((uint32_t)dls_bitrev8((uint8_t)(x >> 8)) << 8) |
+           ((uint32_t)dls_bitrev8((uint8_t)(x >> 16)) << 16) |
+           ((uint32_t)dls_bitrev8((uint8_t)(x >> 24)) << 24);
+}
+
+#define DLS_EGGS_MARKER 0x73676765u /* 'eggs' LE */
+
+static OPErr DLS_Parse_ArticulationChunk(const uint8_t* body, uint32_t size, DLS_Articulation* art, bool eggsArticulators) {
     if (size < 8) return BAD_FILE_TYPE;
     uint32_t count = PV_ReadLE32(body + 4);
     uint32_t connBytes;
@@ -1347,6 +1388,10 @@ static OPErr DLS_Parse_ArticulationChunk(const uint8_t* body, uint32_t size, DLS
             connection->destination = PV_ReadLE16(p + 4);
             connection->transform = PV_ReadLE16(p + 6);
             connection->scale = (int32_t)PV_ReadLE32(p + 8);
+            if (eggsArticulators) {
+                connection->destination = dls_bitrev16(connection->destination);
+                connection->scale = (int32_t)dls_bitrev32((uint32_t)connection->scale);
+            }
             DLS_ApplyDirectConnection(art, connection, g_use_mobilebae_quirks);
             /* refreshed later per-synth via dls_refresh_current_synth_for_mode() */
         }
@@ -1356,7 +1401,7 @@ static OPErr DLS_Parse_ArticulationChunk(const uint8_t* body, uint32_t size, DLS
     return NO_ERR;
 }
 
-static OPErr DLS_Parse_ArticulationList(const uint8_t* start, const uint8_t* end, DLS_Articulation* art) {
+static OPErr DLS_Parse_ArticulationList(const uint8_t* start, const uint8_t* end, DLS_Articulation* art, bool eggsArticulators) {
     const uint8_t* p = start;
     while (p + 8 <= end) {
         uint32_t id = PV_ReadLE32(p);
@@ -1365,7 +1410,7 @@ static OPErr DLS_Parse_ArticulationList(const uint8_t* start, const uint8_t* end
         uint32_t padded_size = (size + 1) & ~1;
         
         if (id == CHUNK_ART1 || id == PV_ReadLE32((const uint8_t*)"art2")) {
-            DLS_Parse_ArticulationChunk(body, size, art);
+            DLS_Parse_ArticulationChunk(body, size, art, eggsArticulators);
         }
         p += 8 + padded_size;
     }
@@ -1373,7 +1418,7 @@ static OPErr DLS_Parse_ArticulationList(const uint8_t* start, const uint8_t* end
     return NO_ERR;
 }
 
-static OPErr DLS_Parse_Region(const uint8_t* start, const uint8_t* end, bool level2, DLS_Region* region) {
+static OPErr DLS_Parse_Region(const uint8_t* start, const uint8_t* end, bool level2, DLS_Region* region, bool eggsArticulators) {
     DLS_InitArticulation(&region->articulation);
     region->level2 = level2;
     region->keyLow = 0;
@@ -1400,8 +1445,14 @@ static OPErr DLS_Parse_Region(const uint8_t* start, const uint8_t* end, bool lev
             region->options = PV_ReadLE16(body + 8);
             region->keyGroup = PV_ReadLE16(body + 10);
         } else if (id == PV_ReadLE32((const uint8_t*)"wlnk") && size >= 12) {
+            uint32_t tableIndex = PV_ReadLE32(body + 8);
             region->channel = PV_ReadLE32(body + 4);
-            region->tableIndex = PV_ReadLE32(body + 8);
+            /* microQ eggs: ulTableIndex is stored with per-byte bitrev and is a
+             * direct ptbl cue / wave index (sub_4345A1F8). */
+            if (eggsArticulators) {
+                tableIndex = dls_bitrev32_per_byte(tableIndex);
+            }
+            region->tableIndex = (int32_t)tableIndex;
         } else if (id == CHUNK_WSMP) {
             if (size >= 20) {
                 region->sample.present = true;
@@ -1428,7 +1479,7 @@ static OPErr DLS_Parse_Region(const uint8_t* start, const uint8_t* end, bool lev
             }
         } else if (id == CHUNK_LIST && size >= 4 && (PV_ReadLE32(body) == CHUNK_LART || PV_ReadLE32(body) == PV_ReadLE32((const uint8_t*)"lar2"))) {
             region->ownsArticulation = true;
-            DLS_Parse_ArticulationList(body + 4, body + size, &region->articulation);
+            DLS_Parse_ArticulationList(body + 4, body + size, &region->articulation, eggsArticulators);
         }
         
         p += 8 + padded_size;
@@ -1436,7 +1487,7 @@ static OPErr DLS_Parse_Region(const uint8_t* start, const uint8_t* end, bool lev
     return NO_ERR;
 }
 
-static OPErr DLS_Parse_Regions(const uint8_t* start, const uint8_t* end, DLS_Instrument* inst) {
+static OPErr DLS_Parse_Regions(const uint8_t* start, const uint8_t* end, DLS_Instrument* inst, bool eggsArticulators) {
     uint32_t index = 0;
     const uint8_t* p = start;
     while (p + 8 <= end && index < inst->regionCount) {
@@ -1449,7 +1500,7 @@ static OPErr DLS_Parse_Regions(const uint8_t* start, const uint8_t* end, DLS_Ins
         if (id == CHUNK_LIST && size >= 4) {
             uint32_t list_type = PV_ReadLE32(body);
             if (list_type == PV_ReadLE32((const uint8_t*)"rgn ") || list_type == PV_ReadLE32((const uint8_t*)"rgn2")) {
-                DLS_Parse_Region(body + 4, body + size, list_type == PV_ReadLE32((const uint8_t*)"rgn2"), &inst->regions[index]);
+                DLS_Parse_Region(body + 4, body + size, list_type == PV_ReadLE32((const uint8_t*)"rgn2"), &inst->regions[index], eggsArticulators);
                 inst->regions[index].index = index;
                 index++;
             }
@@ -1560,10 +1611,10 @@ static OPErr DLS_Parse_Instrument(const uint8_t* start, const uint8_t* end, DLS_
             }
         } else if (id == CHUNK_LIST && size >= 4 && PV_ReadLE32(body) == CHUNK_LRGN) {
             if (inst->regions) {
-                DLS_Parse_Regions(body + 4, body + size, inst);
+                DLS_Parse_Regions(body + 4, body + size, inst, bank->eggsArticulators);
             }
         } else if (id == CHUNK_LIST && size >= 4 && (PV_ReadLE32(body) == CHUNK_LART || PV_ReadLE32(body) == PV_ReadLE32((const uint8_t*)"lar2"))) {
-            DLS_Parse_ArticulationList(body + 4, body + size, &inst->articulation);
+            DLS_Parse_ArticulationList(body + 4, body + size, &inst->articulation, bank->eggsArticulators);
         }
 
         p += 8 + padded_size;
@@ -1813,16 +1864,32 @@ OPErr GM_LoadDLSBankFromMemory(void* pMemory, uint32_t memorySize, DLS_Bank** pp
     uint32_t* poolOffsets = NULL;
 
     if (ptbl_state.start && ptbl_state.end - ptbl_state.start >= 8) {
+        uint32_t ptblSize = (uint32_t)(ptbl_state.end - ptbl_state.start);
+        uint32_t cbSize = PV_ReadLE32(ptbl_state.start);
         uint32_t cueBytes = 0;
+
+        /* DLS: cues begin at +cbSize. microQ/QSound may use cbSize>8 with an
+         * 'eggs' marker (bit-reversed) in the extension — see KM380 microQ. */
+        if (cbSize < 8 || cbSize > ptblSize) {
+            cbSize = 8;
+        }
+        for (uint32_t off = 8; off + 4 <= cbSize && off + 4 <= ptblSize; off += 4) {
+            if (dls_bitrev32(PV_ReadLE32(ptbl_state.start + off)) == DLS_EGGS_MARKER) {
+                bank->eggsArticulators = true;
+                break;
+            }
+        }
+
         poolOffsetCount = PV_ReadLE32(ptbl_state.start + 4);
         if (!dls_mul_u32_ok(poolOffsetCount, 4, &cueBytes)) {
             poolOffsetCount = 0;
         }
-        if (poolOffsetCount > 0 && cueBytes <= (uint32_t)(ptbl_state.end - ptbl_state.start) - 8) {
+        if (poolOffsetCount > 0 &&
+            cbSize + cueBytes <= ptblSize) {
             poolOffsets = (uint32_t*)XNewPtr(poolOffsetCount * sizeof(uint32_t));
             if (poolOffsets) {
-                for(uint32_t i=0; i<poolOffsetCount; i++) {
-                    poolOffsets[i] = PV_ReadLE32(ptbl_state.start + 8 + i*4);
+                for (uint32_t i = 0; i < poolOffsetCount; i++) {
+                    poolOffsets[i] = PV_ReadLE32(ptbl_state.start + cbSize + i * 4);
                 }
             }
         }
@@ -1848,9 +1915,83 @@ OPErr GM_LoadDLSBankFromMemory(void* pMemory, uint32_t memorySize, DLS_Bank** pp
         XDisposePtr(poolOffsets);
     }
 
-    debug_message("DLS Parser: instruments=%u waves=%u ptbl=%u pgal=%u\n",
+    /* Non-eggs banks only: if wlnk IDs are sparse OOR values with a unique
+     * count matching waveCount, remap sorted IDs → dense indices.
+     * Eggs banks already decode ulTableIndex via per-byte bitrev to a direct
+     * cue index — do not remap (sorted-unique was wrong for TouchWiz). */
+    if (!bank->eggsArticulators) {
+        uint32_t uniqueCount = 0;
+        int32_t* uniqueIds = NULL;
+        bool needsRemap = false;
+
+        for (uint32_t i = 0; i < bank->instrumentCount; i++) {
+            DLS_Instrument* inst = &bank->instruments[i];
+            for (uint32_t r = 0; r < inst->regionCount; r++) {
+                int32_t id = inst->regions[r].tableIndex;
+                if (id < 0) continue;
+                if ((uint32_t)id >= bank->waveCount) needsRemap = true;
+            }
+        }
+
+        if (needsRemap && bank->waveCount > 0) {
+            uniqueIds = (int32_t*)XNewPtr((int32_t)(bank->waveCount * sizeof(int32_t)));
+            if (uniqueIds) {
+                for (uint32_t i = 0; i < bank->instrumentCount; i++) {
+                    DLS_Instrument* inst = &bank->instruments[i];
+                    for (uint32_t r = 0; r < inst->regionCount; r++) {
+                        int32_t id = inst->regions[r].tableIndex;
+                        uint32_t u;
+                        if (id < 0) continue;
+                        for (u = 0; u < uniqueCount; u++) {
+                            if (uniqueIds[u] == id) break;
+                        }
+                        if (u == uniqueCount) {
+                            if (uniqueCount >= bank->waveCount) {
+                                uniqueCount = 0; /* abort: too many ids */
+                                goto sparse_done;
+                            }
+                            uniqueIds[uniqueCount++] = id;
+                        }
+                    }
+                }
+
+                if (uniqueCount == bank->waveCount) {
+                    for (uint32_t i = 1; i < uniqueCount; i++) {
+                        int32_t key = uniqueIds[i];
+                        uint32_t j = i;
+                        while (j > 0 && uniqueIds[j - 1] > key) {
+                            uniqueIds[j] = uniqueIds[j - 1];
+                            j--;
+                        }
+                        uniqueIds[j] = key;
+                    }
+                    for (uint32_t i = 0; i < bank->instrumentCount; i++) {
+                        DLS_Instrument* inst = &bank->instruments[i];
+                        for (uint32_t r = 0; r < inst->regionCount; r++) {
+                            int32_t id = inst->regions[r].tableIndex;
+                            uint32_t lo = 0, hi = uniqueCount;
+                            if (id < 0) continue;
+                            while (lo < hi) {
+                                uint32_t mid = lo + (hi - lo) / 2;
+                                if (uniqueIds[mid] < id) lo = mid + 1;
+                                else hi = mid;
+                            }
+                            if (lo < uniqueCount && uniqueIds[lo] == id) {
+                                inst->regions[r].tableIndex = (int32_t)lo;
+                            }
+                        }
+                    }
+                    debug_message("DLS Parser: remapped sparse wlnk IDs (%u waves)\n", uniqueCount);
+                }
+            }
+        }
+    sparse_done:
+        if (uniqueIds) XDisposePtr(uniqueIds);
+    }
+
+    debug_message("DLS Parser: instruments=%u waves=%u ptbl=%u pgal=%u eggs=%d\n",
                   bank->instrumentCount, bank->waveCount, poolOffsetCount,
-                  bank->programAliasCount);
+                  bank->programAliasCount, (int)bank->eggsArticulators);
 
     return NO_ERR;
 }
@@ -2173,6 +2314,88 @@ void GM_UnloadDLSBank(DLS_Bank* pBank) {
 // SYNTHESIZER
 // ============================================================================
 
+/* mBAE_plus14 byte_1239164 — SP-MIDI default channel priority. */
+static const uint8_t kDlsMipDefaultPriority[16] = {
+    9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15
+};
+
+static void dls_mip_rebuild_mask(DLS_Synth* synth)
+{
+    if (!synth) return;
+    if (!synth->mipActive || synth->mipPairCount == 0) {
+        synth->mipChannelMask = 0xFFFF;
+        return;
+    }
+    /* mBAE sub_11FDC60: enable channels whose MIP level <= device polyphony. */
+    int32_t budget = synth->maxVoices > 0 ? synth->maxVoices : DLS_MAX_VOICE_POOL;
+    uint16_t mask = 0;
+    for (uint8_t i = 0; i < synth->mipPairCount; i++) {
+        uint8_t level = synth->mipLevel[i];
+        if (level == 0) break;
+        if ((int32_t)level <= budget) {
+            mask = (uint16_t)(mask | (uint16_t)(1u << (synth->mipChannel[i] & 15)));
+        }
+    }
+    synth->mipChannelMask = mask ? mask : 0xFFFF;
+}
+
+static void dls_mip_reset(DLS_Synth* synth)
+{
+    if (!synth) return;
+    XBlockMove((XPTR)kDlsMipDefaultPriority, synth->channelPriority, 16);
+    synth->mipPairCount = 0;
+    synth->mipActive = false;
+    synth->mipChannelMask = 0xFFFF;
+    XSetMemory(synth->mipChannel, 16, 0);
+    XSetMemory(synth->mipLevel, 16, 0);
+}
+
+static void dls_mip_apply_message(DLS_Synth* synth, const uint8_t* pairs, uint32_t pairBytes)
+{
+    uint8_t ordered[16];
+    uint8_t count = 0;
+    uint32_t remaining;
+    const uint8_t* p;
+    uint8_t ch;
+
+    if (!synth || !pairs) return;
+
+    remaining = pairBytes;
+    p = pairs;
+    synth->mipPairCount = 0;
+    while (remaining >= 2 && count < 16 && synth->mipPairCount < 16) {
+        uint8_t channel = p[0];
+        uint8_t level = p[1];
+        if (channel < 16) {
+            /* Priority order = MIP channel order (sub_11F5990). */
+            ordered[count++] = channel;
+            if (synth->mipPairCount > 0 && level < synth->mipLevel[synth->mipPairCount - 1]) {
+                /* mBAE rejects non-increasing MIP levels (sub_11FDB90). */
+                dls_mip_reset(synth);
+                return;
+            }
+            synth->mipChannel[synth->mipPairCount] = channel;
+            synth->mipLevel[synth->mipPairCount] = level;
+            synth->mipPairCount++;
+        }
+        p += 2;
+        remaining -= 2;
+    }
+
+    /* Append channels not listed (sub_11F5990). */
+    for (ch = 0; ch < 16 && count < 16; ch++) {
+        uint8_t i;
+        bool present = false;
+        for (i = 0; i < count; i++) {
+            if (ordered[i] == ch) { present = true; break; }
+        }
+        if (!present) ordered[count++] = ch;
+    }
+    XBlockMove(ordered, synth->channelPriority, 16);
+    synth->mipActive = true;
+    dls_mip_rebuild_mask(synth);
+}
+
 OPErr GM_InitDLSSynth(DLS_Synth** ppSynth, int32_t sampleRate) {
     if (!ppSynth) return PARAM_ERR;
     *ppSynth = (DLS_Synth*)XNewPtr(sizeof(DLS_Synth));
@@ -2182,6 +2405,7 @@ OPErr GM_InitDLSSynth(DLS_Synth** ppSynth, int32_t sampleRate) {
     (*ppSynth)->useQuirks = g_use_mobilebae_quirks;
     (*ppSynth)->maxVoices = DLS_MAX_VOICE_POOL;
     (*ppSynth)->limiterGainQ16 = 0x10000;
+    dls_mip_reset(*ppSynth);
     dls_synth_sync_voice_limit(*ppSynth);
     for (int32_t channel = 0; channel < 16; channel++) {
         (*ppSynth)->channels[channel].channel = channel;
@@ -2263,6 +2487,7 @@ void GM_DLS_ResetForSong(GM_Song* pSong)
 
     synth->nextVoiceSerial = 0;
     synth->limiterGainQ16 = 0x10000;
+    dls_mip_reset(synth);
 }
 
 static DLS_Instrument* DLS_Bank_FindSelector(DLS_Bank* bank, uint32_t selector);
@@ -2462,18 +2687,23 @@ static DLS_Instrument* DLS_Bank_FindMidiInstrument(DLS_Bank* bank, int32_t bankI
 
             if (!allowDrumProgramFallback) return NULL;
 
-            for (fallbackProgram = 0; fallbackProgram < 128; fallbackProgram++) {
-                selector = DLS_Selector(bankMsb, bankLsb, fallbackProgram);
-                inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
-                if (inst) return inst;
+            /* mBAE sub_11DD160 under quirks: drum miss → program 0 only. */
+            {
+                int32_t progStart = 0;
+                int32_t progEnd = dls_bank_quirks(bank) ? 1 : 128;
+                for (fallbackProgram = progStart; fallbackProgram < progEnd; fallbackProgram++) {
+                    selector = DLS_Selector(bankMsb, bankLsb, fallbackProgram);
+                    inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
+                    if (inst) return inst;
 
-                selector = DLS_Selector((rawBank >> 7) & 0x7F, rawBank & 0x7F, fallbackProgram);
-                inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
-                if (inst && inst->drum) return inst;
+                    selector = DLS_Selector((rawBank >> 7) & 0x7F, rawBank & 0x7F, fallbackProgram);
+                    inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
+                    if (inst && inst->drum) return inst;
 
-                selector = DLS_Selector((altRawBank >> 7) & 0x7F, altRawBank & 0x7F, fallbackProgram);
-                altInst = DLS_Bank_FindSelectorOrAlias(bank, selector);
-                if (altInst && altInst->drum) return altInst;
+                    selector = DLS_Selector((altRawBank >> 7) & 0x7F, altRawBank & 0x7F, fallbackProgram);
+                    altInst = DLS_Bank_FindSelectorOrAlias(bank, selector);
+                    if (altInst && altInst->drum) return altInst;
+                }
             }
 
             /* Do not substitute melodic instruments for percussion requests.
@@ -3212,7 +3442,11 @@ static void dls_kill_exclusive_voices(DLS_Synth* synth, int32_t channel, int32_t
                                       const DLS_Region* region) {
     if (!synth || !region) return;
 
-    int32_t exclusiveClass = region->keyGroup & 0x0F;
+    /* DLS F_RGN_OPTION_SELFNONEXCLUSIVE = 0x0001: when clear, new notes choke
+     * prior same-key voices. microQ matches this (fusOptions bit0). usKeyGroup
+     * is compared in full (not nibble-masked). */
+    bool selfNonExclusive = (region->options & 0x0001) != 0;
+    int32_t exclusiveClass = region->keyGroup;
     for (int i = 0; i < DLS_MAX_VOICE_POOL; i++) {
         DLS_Voice* voice = &synth->voices[i];
         if (!voice->active) continue;
@@ -3222,12 +3456,10 @@ static void dls_kill_exclusive_voices(DLS_Synth* synth, int32_t channel, int32_t
             if (voice->channel != channel) continue;
         }
 
-        bool sameRegionKey = ((region->options & 0x10) != 0) &&
-                             (voice->key == key) &&
-                             (voice->regionIndex == region->index);
+        bool sameKey = !selfNonExclusive && (voice->key == key);
         bool sameExclusiveClass = (exclusiveClass != 0) &&
-                                  ((voice->keyGroup & 0x0F) == exclusiveClass);
-        if (sameRegionKey || sameExclusiveClass) {
+                                  (voice->keyGroup == exclusiveClass);
+        if (sameKey || sameExclusiveClass) {
             dls_voice_fast_kill(voice);
         }
     }
@@ -3242,16 +3474,16 @@ static int32_t dls_find_free_voice_index(DLS_Synth* synth) {
     return -1;
 }
 
+/* mBAE sub_11F5A10: walk channelPriority from lowest priority (index 15) to
+ * highest (index 0). Default table yields steal order 15…0 then 9 last. */
 static int32_t dls_find_recyclable_voice(DLS_Synth* synth, int32_t newChannel) {
-    static const int32_t kQuirksVoiceStealOrder[16] = {15, 14, 13, 12, 11, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9};
-    static const int32_t kSpecVoiceStealOrder[16] = {9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15};
-    bool useQuirks = dls_synth_quirks(synth);
-    const int32_t* order = useQuirks ? kQuirksVoiceStealOrder : kSpecVoiceStealOrder;
+    bool mipMode = synth->mipActive;
     int32_t voiceLimit = DLS_MAX_VOICE_POOL;
 
-    for (int ord = 0; ord < 16; ord++) {
-        int32_t channel = order[ord];
-        if (newChannel != 9 && channel == 9) continue;
+    for (int ord = 15; ord >= 0; ord--) {
+        int32_t channel = synth->channelPriority[ord] & 15;
+        /* Protect drums unless new note is drums, or MIP mode is active. */
+        if (newChannel != 9 && channel == 9 && !mipMode) continue;
 
         int32_t candidate = -1;
         for (int i = 0; i < voiceLimit; i++) {
@@ -3266,15 +3498,13 @@ static int32_t dls_find_recyclable_voice(DLS_Synth* synth, int32_t newChannel) {
 }
 
 static int32_t dls_find_held_percussion_voice(DLS_Synth* synth, int32_t newChannel) {
-    static const int32_t kQuirksVoiceStealOrder[16] = {15, 14, 13, 12, 11, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9};
-    static const int32_t kSpecVoiceStealOrder[16] = {9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15};
     bool useQuirks = dls_synth_quirks(synth);
-    const int32_t* order = useQuirks ? kQuirksVoiceStealOrder : kSpecVoiceStealOrder;
+    bool mipMode = synth->mipActive;
     int32_t voiceLimit = DLS_MAX_VOICE_POOL;
 
-    for (int ord = 0; ord < 16; ord++) {
-        int32_t channel = order[ord];
-        if (newChannel != 9 && channel == 9) continue;
+    for (int ord = 15; ord >= 0; ord--) {
+        int32_t channel = synth->channelPriority[ord] & 15;
+        if (newChannel != 9 && channel == 9 && !mipMode) continue;
 
         int32_t candidate = -1;
         int64_t priority = INT64_MAX;
@@ -3298,15 +3528,12 @@ static int32_t dls_find_held_percussion_voice(DLS_Synth* synth, int32_t newChann
 }
 
 static int32_t dls_find_active_voice_by_priority(DLS_Synth* synth, int32_t newChannel) {
-    static const int32_t kQuirksVoiceStealOrder[16] = {15, 14, 13, 12, 11, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0, 9};
-    static const int32_t kSpecVoiceStealOrder[16] = {9, 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15};
-    bool useQuirks = dls_synth_quirks(synth);
-    const int32_t* order = useQuirks ? kQuirksVoiceStealOrder : kSpecVoiceStealOrder;
+    bool mipMode = synth->mipActive;
     int32_t voiceLimit = DLS_MAX_VOICE_POOL;
 
-    for (int ord = 0; ord < 16; ord++) {
-        int32_t channel = order[ord];
-        if (newChannel != 9 && channel == 9) continue;
+    for (int ord = 15; ord >= 0; ord--) {
+        int32_t channel = synth->channelPriority[ord] & 15;
+        if (newChannel != 9 && channel == 9 && !mipMode) continue;
 
         int32_t candidate = -1;
         int64_t priority = INT64_MAX;
@@ -3342,6 +3569,43 @@ static int32_t dls_channel_coarse_semitones(const DLS_ChannelState* ch) {
     return ((int16_t)((ch->rpnValues[2] & 0x3FFF) - 0x2000)) >> 7;
 }
 
+void GM_DLS_ProcessSysEx(GM_Song* pSong, const unsigned char* message, int32_t length)
+{
+    DLS_Synth* synth;
+    const unsigned char* p;
+    int32_t n;
+
+    if (!pSong || !pSong->pMixer || !pSong->pMixer->pDLSSynth || !message || length < 2) {
+        return;
+    }
+    if (message[0] != 0xF0) {
+        return;
+    }
+
+    synth = (DLS_Synth*)pSong->pMixer->pDLSSynth;
+    p = message + 1;
+    n = length - 1;
+    if (n > 0 && p[n - 1] == 0xF7) {
+        n--;
+    }
+    if (n < 1) {
+        return;
+    }
+
+    /* Beatnik / mBAE: F0 00 01 0D 01 00 … — clear MIP mode, restore default
+     * priority (sub_11F78D0). */
+    if (n >= 5 && p[0] == 0x00 && p[1] == 0x01 && p[2] == 0x0D && p[3] == 0x01 && p[4] == 0x00) {
+        dls_mip_reset(synth);
+        return;
+    }
+
+    /* Universal Realtime MIP: F0 7F 7F 0B 01 [ch,mip]* … F7 (sub_11F78D0 /
+     * sub_11FDB90). Device ID 7F = all-call; also accept any device ID. */
+    if (n >= 4 && p[0] == 0x7F && p[2] == 0x0B && p[3] == 0x01) {
+        dls_mip_apply_message(synth, p + 4, (uint32_t)(n - 4));
+    }
+}
+
 void GM_DLS_ProcessNoteOn(GM_Song* pSong, uint16_t channel, uint16_t note, uint16_t velocity) {
     if (!pSong || !pSong->pMixer || !pSong->pMixer->pDLSSynth) return;
     if (velocity == 0) {
@@ -3352,6 +3616,10 @@ void GM_DLS_ProcessNoteOn(GM_Song* pSong, uint16_t channel, uint16_t note, uint1
     DLS_Synth* synth = (DLS_Synth*)pSong->pMixer->pDLSSynth;
     
     channel = dls_channel_index(channel);
+    /* mBAE sub_11FAC40: MIP scaleable mute — drop notes on channels outside mask. */
+    if (synth->mipActive && (synth->mipChannelMask & (uint16_t)(1u << channel)) == 0) {
+        return;
+    }
     DLS_ChannelState* ch = &synth->channels[channel];
     ch->channel = channel;
 

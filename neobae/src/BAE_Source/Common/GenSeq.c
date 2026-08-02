@@ -4911,6 +4911,14 @@ OPErr PV_ProcessMidiSequencerSlice(void *threadContext, GM_Song *pSong)
                     PV_ProcessRolandPartAssignSysEx(pSong, syx, (int32_t)sendLen);
                     PV_CallMidiEventCallback(threadContext, pSong, syx, sendLen);
 
+#if USE_NATIVE_DLS == TRUE
+                    /* MobileBAE SP-MIDI MIP / Beatnik reset SysEx (mBAE_plus14). */
+                    if (pSong->pMixer && pSong->pMixer->pDLSSynth)
+                    {
+                        GM_DLS_ProcessSysEx(pSong, syx, (int32_t)sendLen);
+                    }
+#endif
+
 #if USE_SF2_SUPPORT == TRUE
                     // FluidSynth CLI applies SysEx from MIDI files (GM reset, MTS tuning, etc.).
                     // Forward SysEx during SF2 playback so synthesis matches.

@@ -144,6 +144,10 @@ struct DLS_Bank {
     bool forceQuirks;
     bool selectorRawModeActive;
     bool selectorImplicitModeSeen;
+    /* microQ/QSound: ptbl extension encodes 'eggs' (bit-reversed); art1
+     * usDestination/lScale and wlnk.ulTableIndex are stored bit-reversed and
+     * must be decoded (wlnk → direct ptbl cue index). */
+    bool eggsArticulators;
     uint32_t declaredInstrumentCount;
     uint32_t articulationChunkCount;
     uint32_t articulationConnectionCount;
@@ -364,6 +368,14 @@ struct DLS_Synth {
     int32_t sampleRate;
     int32_t maxVoices; /* active voice cap from mixer/song settings */
     bool useQuirks;    /* mixer-local MobileBAE quirks mode */
+    /* SP-MIDI MIP (mBAE_plus14 byte_1239164 / sub_11F5990): index 0 = highest
+     * priority (steal last). Default [9,0,1,...,8,10,...,15]. */
+    uint8_t channelPriority[16];
+    uint8_t mipChannel[16];
+    uint8_t mipLevel[16];
+    uint8_t mipPairCount;
+    bool mipActive;
+    uint16_t mipChannelMask; /* bit N set => channel N allowed; default 0xFFFF */
     DLS_Voice voices[DLS_MAX_VOICE_POOL];
     DLS_ChannelState channels[16];
     int64_t nextVoiceSerial;
@@ -379,6 +391,7 @@ void GM_DLS_ProcessPitchBend(GM_Song* pSong, uint16_t channel, uint16_t value);
 void GM_DLS_ProcessKeyPressure(GM_Song* pSong, uint16_t channel, uint16_t key, uint16_t value);
 void GM_DLS_ProcessChannelPressure(GM_Song* pSong, uint16_t channel, uint16_t value);
 void GM_DLS_ProcessController(GM_Song* pSong, uint16_t channel, uint16_t controller, uint16_t value);
+void GM_DLS_ProcessSysEx(GM_Song* pSong, const unsigned char* message, int32_t length);
 void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbBuffer, int32_t* pChorusBuffer, uint32_t frames);
 void GM_DLS_AllNotesOff(GM_Song* pSong, int16_t channel, bool immediate);
 bool GM_DLS_HasProgram(GM_Song* pSong, uint16_t channel, uint16_t program);
