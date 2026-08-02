@@ -2005,6 +2005,43 @@ static bool PV_DLS_TryProgramWithXmfFallback(GM_Song *pSong, int16_t MIDIChannel
 
     return FALSE;
 }
+
+/* After GM_DLS_HasProgram fails: keep DLS only for full-bank quirks silence.
+   XMF overlays that omit a preset (common: no percussion bank) must fall back
+   to the host SF2/HSB drum/melodic set instead of staying latched on DLS. */
+static void PV_DLS_AssignChannelTypeAfterMiss(GM_Song *pSong, int16_t MIDIChannel)
+{
+    int32_t msb;
+
+    if (!pSong)
+    {
+        return;
+    }
+
+    if (GM_DLS_HasXmfEmbeddedBank(pSong->pMixer))
+    {
+#if USE_SF2_SUPPORT == TRUE
+        if (GM_IsSF2Song(pSong))
+        {
+            pSong->channelType[MIDIChannel] = CHANNEL_TYPE_SF2;
+            return;
+        }
+#endif
+        pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
+        return;
+    }
+
+    msb = (uint8_t)pSong->channelRawBank[MIDIChannel];
+    if (GM_DLS_GetMobileBAEQuirks() &&
+        (msb == 0 || msb == 120 || msb == 121 || MIDIChannel == PERCUSSION_CHANNEL))
+    {
+        /* Full DLS quirks: missing GM-family presets stay silent on DLS. */
+        pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
+        return;
+    }
+
+    pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
+}
 #endif
 
 // Process midi program change
@@ -2529,24 +2566,10 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                             {
                                 pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
                             }
-                            else if (GM_DLS_GetMobileBAEQuirks() || GM_DLS_HasXmfEmbeddedBank(pSong->pMixer))
-                            {
-                                sf2_dls_rmf_volume_multiplier = 0.85f;
-                                int32_t msb = (uint8_t)pSong->channelRawBank[MIDIChannel];
-                                if (msb == 0 || msb == 120 || msb == 121)
-                                {
-                                    if (!GM_DLS_HasXmfEmbeddedBank(pSong->pMixer) || (GM_DLS_HasXmfEmbeddedBank(pSong->pMixer) && GM_DLS_XmfOverlayHasBankProgram(pSong->pMixer, msb, (uint8_t)pSong->channelLSB[MIDIChannel], (uint16_t)PV_ConvertPatchBank(pSong, checkProgram, MIDIChannel)))) {
-                                        pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
-                                    }
-                                }
-                                else
-                                {
-                                    pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
-                                }
-                            }
                             else
                             {
-                                pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
+                                sf2_dls_rmf_volume_multiplier = 0.85f;
+                                PV_DLS_AssignChannelTypeAfterMiss(pSong, MIDIChannel);
                             }
                         }
                     }
@@ -2560,27 +2583,7 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                         }
                         else
                         {
-                            /* In quirks mode, keep GM-family channels on DLS even when
-                               the specific instrument is missing — the DLS engine will
-                               produce silence, which beats falling back to GM wavetable. */
-                            if (GM_DLS_GetMobileBAEQuirks() || GM_DLS_HasXmfEmbeddedBank(pSong->pMixer))
-                            {
-                                int32_t msb = (uint8_t)pSong->channelRawBank[MIDIChannel];
-                                if (msb == 0 || msb == 120 || msb == 121)
-                                {
-                                    if (!GM_DLS_HasXmfEmbeddedBank(pSong->pMixer) || (GM_DLS_HasXmfEmbeddedBank(pSong->pMixer) && GM_DLS_XmfOverlayHasBankProgram(pSong->pMixer, msb, (uint8_t)pSong->channelLSB[MIDIChannel], (uint16_t)PV_ConvertPatchBank(pSong, checkProgram, MIDIChannel)))) {
-                                        pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
-                                    }
-                                }
-                                else
-                                {
-                                    pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
-                                }
-                            }
-                            else
-                            {
-                                pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
-                            }
+                            PV_DLS_AssignChannelTypeAfterMiss(pSong, MIDIChannel);
                         }
                     }
 
@@ -2588,6 +2591,12 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                     {
                         GM_DLS_ProcessNoteOn(pSong, MIDIChannel, note, volume);
                     }
+#if USE_SF2_SUPPORT == TRUE
+                    else if (pSong->channelType[MIDIChannel] == CHANNEL_TYPE_SF2)
+                    {
+                        GM_SF2_ProcessNoteOn(pSong, MIDIChannel, note, volume);
+                    }
+#endif
                     else
                     {
                         volume = (int16_t)(volume * sf2_dls_rmf_volume_multiplier); // RMF seems to be louder, so turn it down a bit
@@ -2598,8 +2607,21 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                 else
 #endif                
                 {
+#if USE_NATIVE_DLS == TRUE || USE_SF2_SUPPORT == TRUE
+                    if (
 #if USE_NATIVE_DLS == TRUE
-                    if (GM_IsDLSSong(pSong) || GM_IsSF2Song(pSong)) {
+                        GM_IsDLSSong(pSong)
+#endif
+#if USE_SF2_SUPPORT == TRUE
+                        ||
+                        GM_IsSF2Song(pSong)
+#endif
+                        ) {
+#if USE_NATIVE_DLS == TRUE
+                        if (GM_DLS_HasXmfEmbeddedBank(pSong->pMixer)) {
+                            sf2_dls_rmf_volume_multiplier = 0.85f;
+                        }
+#endif
                         volume = (int16_t)(volume * sf2_dls_rmf_volume_multiplier); // RMF seems to be louder, so turn it down a bit
                     }
 #endif                    
