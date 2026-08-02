@@ -251,6 +251,7 @@
 #include "GenSF2_FluidLite.h" // FluidSynth integration
 #endif
 #include "NeoBAE.h"
+#include "GenBankBalance.h"
 #endif
 
 #define DEBUG_DISPLAY_PATCHES   1
@@ -1575,6 +1576,12 @@ OPErr GM_LoadSongInstruments(GM_Song *theSong,
         {
             GM_UnloadSongInstruments(theSong);      // ignore error
         }
+        else if (loadInstruments &&
+                 ((theSong->songFlags & SONG_FLAG_IS_RMF) || theSong->RMFInstrumentIDs[0] > 0))
+        {
+            /* Embedded RMF/ZMF instruments are already decoded in instrumentData[]. */
+            GM_BankBalance_OnRmfInstrumentsLoaded(theSong);
+        }
         XDisposePtr(theSong->pUsedPatchList);
         theSong->pUsedPatchList = NULL;
     }
@@ -1595,6 +1602,10 @@ OPErr GM_UnloadSongInstruments(GM_Song *pSong)
     err = NO_ERR;
     if (pSong)
     {
+        if ((pSong->songFlags & SONG_FLAG_IS_RMF) || pSong->RMFInstrumentIDs[0] > 0)
+        {
+            GM_BankBalance_OnRmfInstrumentsUnloaded(pSong);
+        }
         for (count = 0; count < (MAX_INSTRUMENTS*MAX_BANKS); count++)
         {
             if (GM_GetSongInstrumentRemap(pSong, (XLongResourceID)count, &realInstrument) != NO_ERR)

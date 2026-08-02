@@ -159,6 +159,7 @@
 #include "X_API.h"
 #include "GenSnd.h"
 #include "GenPriv.h"
+#include "GenBankBalance.h"
 #if USE_NATIVE_DLS == TRUE
 #include "GenDLS_MobileBAE.h"
 #endif
@@ -4154,7 +4155,8 @@ static BAEResult PV_BAEMixer_AddBank(BAEMixer mixer, XFILE newPatchFile)
             mixer->pPatchFiles = newList;
             mixer->numPatchFiles++;
 
-            XFileUseThisResourceFile(newPatchFile);            
+            XFileUseThisResourceFile(newPatchFile);
+            GM_BankBalance_OnHsbBankAdded(newPatchFile);
         }
         else
         {
@@ -4367,6 +4369,7 @@ BAEResult BAEMixer_UnloadBank(BAEMixer mixer, BAEBankToken token)
                 // Invalidate friendly name cache entry BEFORE closing to avoid
                 // potential pointer reuse mapping to stale friendly string.
                 PV_UnregisterBankFriendly(token);
+                GM_BankBalance_OnHsbBankRemoved(patchFile);
                 XFileClose(patchFile);
 
                 // compact the array.
@@ -4515,6 +4518,7 @@ BAEResult BAEMixer_UnloadDLSBank(BAEMixer mixer)
                 pMixer->pDLSSynth = NULL;
             }
         }
+        GM_BankBalance_OnDlsBanksChanged(pMixer);
     }
     return BAE_NO_ERROR;
 }

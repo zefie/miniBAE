@@ -380,6 +380,7 @@
 #include "GenSF2_FluidLite.h"
 #endif
 #include "NeoBAE.h"
+#include "GenBankBalance.h"
 
 #if SUPPORT_KARAOKE
 #ifndef BAE_KARAOKE_SINGLE_TRACK_FILTER
@@ -2483,32 +2484,12 @@ static void PV_ProcessNoteOff(GM_Song *pSong, int16_t MIDIChannel, int16_t curre
 }
 
 #if USE_NATIVE_DLS == TRUE || USE_SF2_SUPPORT == TRUE
-/* Velocity scale for HSB/RMF (wavetable) notes when mixed with SF2/DLS.
-   Default 0.25 keeps classic wavetable from overpowering those engines.
-   When an XMF DLS overlay is paired with an HSB/ZSB host bank, use unity so
-   fallback instruments (often drums) match embedded DLS loudness. */
+/* Velocity scale for HSB/RMF notes when mixed with SF2/DLS/XMF.
+   Driven entirely by post-load bank loudness balance (1.0 when inactive). */
 static float PV_HsbRmfMixVolumeScale(GM_Song *pSong)
 {
-    // keep it seperate for now in case we need to adjust it later
-    const float kMixedAttenuation = 0.4f;
-    const float kXmfHsbHostUnity = 0.4f;
-
-#if USE_NATIVE_DLS == TRUE
-    if (pSong && pSong->pMixer && GM_DLS_HasXmfEmbeddedBank(pSong->pMixer))
-    {
-#if USE_SF2_SUPPORT == TRUE
-        /* Selected host bank is SF2 — keep wavetable notes attenuated. */
-        if (GM_GetMixerSF2Mode())
-        {
-            return kMixedAttenuation;
-        }
-#endif
-        return kXmfHsbHostUnity;
-    }
-#else
     (void)pSong;
-#endif
-    return kMixedAttenuation;
+    return GM_BankBalance_GetMixScale(GM_BANK_ENGINE_HSB);
 }
 #endif
 

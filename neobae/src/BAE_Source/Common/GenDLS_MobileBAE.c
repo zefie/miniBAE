@@ -49,6 +49,8 @@
 #include "X_Assert.h"
 #include "g72x.h"
 #include "NeoBAE.h"
+#include "GenBankBalance.h"
+#include <math.h>
 
 #if USE_MPEG_DECODER == TRUE
 #include "XMPEG_BAE_API.h"
@@ -1902,6 +1904,7 @@ OPErr GM_LoadDLSFromMemory(struct GM_Mixer* pMixer, const void* pMemory, uint32_
     }
 
     pMixer->isDLS = true;
+    GM_BankBalance_OnDlsBanksChanged(pMixer);
     return NO_ERR;
 }
 
@@ -1951,6 +1954,7 @@ OPErr GM_LoadDLSAsXMFOverlayFromMemory(struct GM_Mixer* pMixer, const void* pMem
     }
 
     pMixer->isDLS = true;
+    GM_BankBalance_OnDlsBanksChanged(pMixer);
     return NO_ERR;
 }
 
@@ -1978,6 +1982,159 @@ void GM_UnloadXMFDLSOverlay(struct GM_Mixer* pMixer)
     if (!pMixer->pDLSSynth->banks[0]) {
         pMixer->isDLS = false;
     }
+    GM_BankBalance_OnDlsBanksChanged(pMixer);
+}
+
+static float PV_DLS_LoudnessInt16(const int16_t *pcm, uint32_t frames, int channels, int stride)
+{
+    double sumSq = 0.0;
+    double peak = 0.0;
+    uint32_t n = 0;
+    uint32_t f;
+    double thresh;
+
+    if (!pcm || frames == 0 || channels <= 0)
+        return 0.0f;
+    if (stride < 1)
+        stride = 1;
+
+    for (f = 0; f < frames; f += (uint32_t)stride)
+    {
+        int c;
+        for (c = 0; c < channels; c++)
+        {
+            double s = (double)pcm[f * (uint32_t)channels + (uint32_t)c] * (1.0 / 32768.0);
+            double a = (s < 0.0) ? -s : s;
+            if (a > peak)
+                peak = a;
+        }
+    }
+
+    thresh = peak * 0.10;
+    for (f = 0; f < frames; f += (uint32_t)stride)
+    {
+        int c;
+        for (c = 0; c < channels; c++)
+        {
+            double s = (double)pcm[f * (uint32_t)channels + (uint32_t)c] * (1.0 / 32768.0);
+            double a = (s < 0.0) ? -s : s;
+            if (a >= thresh)
+            {
+                sumSq += s * s;
+                n++;
+            }
+        }
+    }
+
+    if (n == 0)
+        return (float)peak;
+    {
+        float activeRms = (float)sqrt(sumSq / (double)n);
+        float peakFloor = (float)(peak * 0.35);
+        return (activeRms > peakFloor) ? activeRms : peakFloor;
+    }
+}
+
+static float PV_DLS_MedianInPlace(float *values, int count)
+{
+    int i, j;
+    if (count <= 0)
+        return 0.0f;
+    for (i = 1; i < count; i++)
+    {
+        float key = values[i];
+        j = i - 1;
+        while (j >= 0 && values[j] > key)
+        {
+            values[j + 1] = values[j];
+            j--;
+        }
+        values[j + 1] = key;
+    }
+    if (count & 1)
+        return values[count / 2];
+    return 0.5f * (values[count / 2 - 1] + values[count / 2]);
+}
+
+float GM_DLS_MeasureBankLoudness(DLS_Bank* bank)
+{
+    enum { kMaxValues = 128, kProbeKey = 60, kProbeVel = 64, kStride = 8 };
+    float values[kMaxValues];
+    int valueCount = 0;
+    uint32_t i;
+
+    if (!bank || !bank->instruments || bank->instrumentCount == 0)
+        return 0.0f;
+
+    for (i = 0; i < bank->instrumentCount && valueCount < kMaxValues; i++)
+    {
+        DLS_Instrument *inst = &bank->instruments[i];
+        float best = 0.0f;
+        uint32_t r;
+
+        if (inst->drum)
+            continue;
+
+        for (r = 0; r < inst->regionCount; r++)
+        {
+            DLS_Region *region = &inst->regions[r];
+            DLS_Wave *wave;
+            DLS_SampleInfo *sample;
+            float rms;
+            float attenLin;
+            float loud;
+
+            if (region->keyLow > kProbeKey || region->keyHigh < kProbeKey)
+                continue;
+            if (region->velocityLow > kProbeVel || region->velocityHigh < kProbeVel)
+                continue;
+            if (region->tableIndex < 0 || (uint32_t)region->tableIndex >= bank->waveCount)
+                continue;
+
+            wave = &bank->waves[region->tableIndex];
+            if (!wave->pcm || wave->frames == 0)
+                continue;
+
+            sample = region->sample.present ? &region->sample : &wave->sample;
+            /* Match voice path: dls_exp10_q16(attenuation / 200) ≈ 10^((att/200)/65536). */
+            attenLin = (float)pow(10.0, (double)sample->attenuation / (200.0 * 65536.0));
+            if (attenLin < 1.0e-6f)
+                attenLin = 1.0e-6f;
+
+            rms = PV_DLS_LoudnessInt16(wave->pcm, wave->frames, wave->channels > 0 ? wave->channels : 1, kStride);
+            loud = rms * attenLin;
+            if (loud > best)
+                best = loud;
+        }
+
+        if (best > 1.0e-6f)
+            values[valueCount++] = best;
+    }
+
+    if (valueCount <= 0)
+    {
+        /* Fallback: wave-only scan when region probes miss (odd bank layouts). */
+        for (i = 0; i < bank->waveCount && valueCount < kMaxValues; i++)
+        {
+            DLS_Wave *wave = &bank->waves[i];
+            float rms;
+            float attenLin;
+            if (!wave->pcm || wave->frames == 0)
+                continue;
+            attenLin = (float)pow(10.0, (double)wave->sample.attenuation / (200.0 * 65536.0));
+            if (attenLin < 1.0e-6f)
+                attenLin = 1.0e-6f;
+            rms = PV_DLS_LoudnessInt16(wave->pcm, wave->frames, wave->channels > 0 ? wave->channels : 1, kStride);
+            if (rms * attenLin > 1.0e-6f)
+                values[valueCount++] = rms * attenLin;
+        }
+    }
+
+    if (valueCount <= 0)
+        return 0.0f;
+    /* DLS bus inserts at OUTPUT_SCALAR-2 (see GM_DLS_RenderAudioSlice
+     * scalar_modifier), ~12 dB below native full-scale sample RMS. */
+    return PV_DLS_MedianInPlace(values, valueCount) * 0.25f;
 }
 
 void GM_UnloadDLSBank(DLS_Bank* pBank) {
@@ -3580,6 +3737,11 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
     int32_t voiceLimit = DLS_MAX_VOICE_POOL;
     int scalar_modifier = -2;
     const int dlsGainFactor = 5;
+    /* Main bank and XMF overlay can have independent balance scales. */
+    int32_t balMainQ16 = (int32_t)(GM_BankBalance_GetMixScale(GM_BANK_ENGINE_DLS) * 65536.0f);
+    int32_t balXmfQ16 = (int32_t)(GM_BankBalance_GetMixScale(GM_BANK_ENGINE_DLS_XMF) * 65536.0f);
+    if (balMainQ16 < 1) balMainQ16 = 1;
+    if (balXmfQ16 < 1) balXmfQ16 = 1;
 
     for (uint32_t f = 0; f < frames; f++) {
         int64_t leftOut = 0;
@@ -3774,6 +3936,14 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
             int64_t leftSampleScaled = leftSampleUnscaled << (OUTPUT_SCALAR + scalar_modifier);
             int64_t rightSampleScaled = rightSampleUnscaled << (OUTPUT_SCALAR + scalar_modifier);
 
+            /* Per-voice bank balance: XMF overlay (banks[1]) vs main (banks[0]). */
+            {
+                int32_t voiceBalQ16 = (v->parentBank && v->parentBank == synth->banks[1])
+                    ? balXmfQ16 : balMainQ16;
+                leftSampleScaled = (leftSampleScaled * voiceBalQ16) >> 16;
+                rightSampleScaled = (rightSampleScaled * voiceBalQ16) >> 16;
+            }
+
             if (pSong->pMixer->channelCaptureEnabled && v->channel >= 0 && v->channel < 16) {
                 int32_t sampleIndex = (int32_t)(f * 2);
                 if (sampleIndex + 1 < pSong->pMixer->channelCaptureBufSamples) {
@@ -3793,15 +3963,24 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
                 // (those reverb types read from songBufferReverb which expects scaled audio, not raw samples)
                 // Average L+R (>> 1) to get mono without doubling the level
                 int64_t monoScaled = ((leftSampleUnscaled + rightSampleUnscaled) >> 1) << (OUTPUT_SCALAR + scalar_modifier);
+                {
+                    int32_t voiceBalQ16 = (v->parentBank && v->parentBank == synth->banks[1])
+                        ? balXmfQ16 : balMainQ16;
+                    monoScaled = (monoScaled * voiceBalQ16) >> 16;
+                }
                 revOut += (monoScaled * v->reverbSend) >> 16;
             }
             if (pChorusBuffer && v->chorusSend > 0) {
                 int64_t monoScaled = ((leftSampleUnscaled + rightSampleUnscaled) >> 1) << (OUTPUT_SCALAR + scalar_modifier);
+                {
+                    int32_t voiceBalQ16 = (v->parentBank && v->parentBank == synth->banks[1])
+                        ? balXmfQ16 : balMainQ16;
+                    monoScaled = (monoScaled * voiceBalQ16) >> 16;
+                }
                 choOut += (monoScaled * v->chorusSend) >> 16;
             }
         }
         
-        /* Preserve the established DLS output level. */
         int64_t mixedLeft = (int64_t)pBuffer[f * 2] + ((32 * leftOut) >> dlsGainFactor);
         int64_t mixedRight = (int64_t)pBuffer[f * 2 + 1] + ((32 * rightOut) >> dlsGainFactor);
 

@@ -44,6 +44,7 @@
 
 #include "fluidlite.h"
 #include "fluid_sfont.h"
+#include "fluid_defsfont.h"
 #include "fluidsynth_priv.h"
 #include "GenSnd.h"
 #include "GenPriv.h"
@@ -53,6 +54,7 @@
 #include <stdio.h>
 #include <math.h>
 #include "NeoBAE.h"
+#include "GenBankBalance.h"
 
 
 // For temporary file fallback when loading DLS banks (path-based load only)
@@ -895,6 +897,7 @@ OPErr GM_LoadSF2SoundfontFromMemory(const unsigned char *data, size_t size) {
     PV_SF2_SetValidDefaultProgramsForAllChannels();
     GM_SetMixerSF2Mode(TRUE);
     PV_SF2_ResyncAllActiveSongsToSynth();
+    GM_BankBalance_OnSf2Loaded();
     return NO_ERR;
 }
 
@@ -943,6 +946,7 @@ OPErr GM_LoadSF2Soundfont(const char* sf2_path)
     PV_SF2_SetValidDefaultProgramsForAllChannels();
     GM_SetMixerSF2Mode(TRUE);
     PV_SF2_ResyncAllActiveSongsToSynth();
+    GM_BankBalance_OnSf2Loaded();
     return NO_ERR;
 }
 
@@ -977,6 +981,7 @@ void GM_UnloadSF2Soundfont(void)
     g_fluidsynth_sf2_path[0] = '\0';
     GM_ResetSF2();
     GM_SetMixerSF2Mode(FALSE);
+    GM_BankBalance_OnSf2Unloaded();
 }
 
 // Check if a song should use FluidSynth rendering
@@ -1505,7 +1510,7 @@ void GM_SF2_RenderAudioSlice(GM_Song* pSong, int32_t* mixBuffer, int32_t* reverb
         }
     }
 
-    // Apply song volume scaling
+    // Apply song volume scaling + cross-engine bank balance
     float songScale = 1.0f;
     {
         int32_t fv = pSong->songVolume;
@@ -1513,6 +1518,7 @@ void GM_SF2_RenderAudioSlice(GM_Song* pSong, int32_t* mixBuffer, int32_t* reverb
         {
             songScale *= (float)fv / 127.0f;
         }
+        songScale *= GM_BankBalance_GetMixScale(GM_BANK_ENGINE_SF2);
     }
     // Apply per-channel volume/expression: we post-scale the rendered buffer per frame
     float channelScales[BAE_MAX_MIDI_CHANNELS];
@@ -1753,6 +1759,174 @@ bool GM_SF2_CurrentFontHasAnyPreset(int *outPresetCount)
     
     if (outPresetCount) *outPresetCount = count;
     return (count > 0) ? TRUE : FALSE;
+}
+
+static float PV_SF2_LoudnessInt16(const short *pcm, unsigned int frames, int stride)
+{
+    double sumSq = 0.0;
+    double peak = 0.0;
+    unsigned int n = 0;
+    unsigned int f;
+    double thresh;
+
+    if (!pcm || frames == 0)
+        return 0.0f;
+    if (stride < 1)
+        stride = 1;
+
+    for (f = 0; f < frames; f += (unsigned int)stride)
+    {
+        double s = (double)pcm[f] * (1.0 / 32768.0);
+        double a = (s < 0.0) ? -s : s;
+        if (a > peak)
+            peak = a;
+    }
+
+    thresh = peak * 0.10;
+    for (f = 0; f < frames; f += (unsigned int)stride)
+    {
+        double s = (double)pcm[f] * (1.0 / 32768.0);
+        double a = (s < 0.0) ? -s : s;
+        if (a >= thresh)
+        {
+            sumSq += s * s;
+            n++;
+        }
+    }
+
+    if (n == 0)
+        return (float)peak;
+    {
+        float activeRms = (float)sqrt(sumSq / (double)n);
+        float peakFloor = (float)(peak * 0.35);
+        return (activeRms > peakFloor) ? activeRms : peakFloor;
+    }
+}
+
+static float PV_SF2_MedianInPlace(float *values, int count)
+{
+    int i, j;
+    if (count <= 0)
+        return 0.0f;
+    for (i = 1; i < count; i++)
+    {
+        float key = values[i];
+        j = i - 1;
+        while (j >= 0 && values[j] > key)
+        {
+            values[j + 1] = values[j];
+            j--;
+        }
+        values[j + 1] = key;
+    }
+    if (count & 1)
+        return values[count / 2];
+    return 0.5f * (values[count / 2 - 1] + values[count / 2]);
+}
+
+float GM_SF2_MeasureBankLoudness(void)
+{
+    enum { kMaxValues = 128, kProbeKey = 60, kProbeVel = 64, kStride = 8 };
+    float values[kMaxValues];
+    int valueCount = 0;
+    fluid_sfont_t *sfont;
+    fluid_defsfont_t *defsfont;
+    fluid_defpreset_t *preset;
+    float pathGain;
+
+    if (!g_fluidsynth_synth || g_fluidsynth_soundfont_id < 0)
+        return 0.0f;
+
+    PV_SF2_LockSynth();
+    sfont = fluid_synth_get_sfont_by_id(g_fluidsynth_synth, g_fluidsynth_soundfont_id);
+    if (!sfont || !sfont->data)
+    {
+        PV_SF2_UnlockSynth();
+        return 0.0f;
+    }
+
+    defsfont = (fluid_defsfont_t *)sfont->data;
+    pathGain = g_fluidsynth_master_volume;
+    if (pathGain <= 0.0f)
+        pathGain = 0.5f;
+
+    for (preset = defsfont->preset; preset && valueCount < kMaxValues; preset = preset->next)
+    {
+        fluid_preset_zone_t *pzone;
+        float best = 0.0f;
+
+        /* Skip percussion bank for melodic level matching. */
+        if (preset->bank == 128)
+            continue;
+
+        for (pzone = preset->zone; pzone; pzone = pzone->next)
+        {
+            fluid_inst_t *inst;
+            fluid_inst_zone_t *izone;
+            double presetAtten = 0.0;
+
+            if (pzone->keylo > kProbeKey || pzone->keyhi < kProbeKey)
+                continue;
+            if (pzone->vello > kProbeVel || pzone->velhi < kProbeVel)
+                continue;
+
+            if (pzone->gen[GEN_ATTENUATION].flags)
+                presetAtten = pzone->gen[GEN_ATTENUATION].val;
+
+            inst = pzone->inst;
+            if (!inst)
+                continue;
+
+            for (izone = inst->zone; izone; izone = izone->next)
+            {
+                fluid_sample_t *sample;
+                double atten;
+                unsigned int start, end, frames;
+                float rms;
+                float loud;
+
+                if (izone->keylo > kProbeKey || izone->keyhi < kProbeKey)
+                    continue;
+                if (izone->vello > kProbeVel || izone->velhi < kProbeVel)
+                    continue;
+
+                sample = izone->sample;
+                if (!sample || !sample->data || !sample->valid)
+                    continue;
+                if (sample->sampletype & FLUID_SAMPLETYPE_ROM)
+                    continue;
+                /* Prefer mono / left; skip lone right channel of stereo pairs. */
+                if (sample->sampletype & FLUID_SAMPLETYPE_RIGHT)
+                    continue;
+
+                atten = presetAtten;
+                if (inst->global_zone && inst->global_zone->gen[GEN_ATTENUATION].flags)
+                    atten += inst->global_zone->gen[GEN_ATTENUATION].val;
+                if (izone->gen[GEN_ATTENUATION].flags)
+                    atten += izone->gen[GEN_ATTENUATION].val;
+
+                start = sample->start;
+                end = sample->end;
+                if (end <= start)
+                    continue;
+                frames = end - start + 1;
+                rms = PV_SF2_LoudnessInt16(sample->data + start, frames, kStride);
+                /* SF2 attenuation is in centibels. */
+                loud = rms * (float)pow(10.0, -atten / 200.0);
+                if (loud > best)
+                    best = loud;
+            }
+        }
+
+        if (best > 1.0e-6f)
+            values[valueCount++] = best;
+    }
+
+    PV_SF2_UnlockSynth();
+
+    if (valueCount <= 0)
+        return 0.0f;
+    return PV_SF2_MedianInPlace(values, valueCount) * pathGain;
 }
 
 void GM_SF2_SetChannelMode(int16_t channel, int16_t mode)

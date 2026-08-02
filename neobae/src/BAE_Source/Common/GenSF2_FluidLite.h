@@ -131,6 +131,10 @@ void PV_SF2_SetBankPreset(GM_Song* pSong, int16_t channel, int16_t bank, int16_t
 // Optionally returns the counted number of presets.
 bool GM_SF2_CurrentFontHasAnyPreset(int *outPresetCount);
 
+/* Median effective sample loudness (linear) for the loaded SF2, including
+ * GEN_ATTENUATION and the current synth.gain path factor. 0 if unavailable. */
+float GM_SF2_MeasureBankLoudness(void);
+
 void GM_SF2_SetChannelMode(int16_t channel, int16_t mode);
 #endif // USE_SF2_SUPPORT
 

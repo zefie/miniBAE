@@ -840,6 +840,7 @@ set(NEOBAE_SOURCES
   neobae/src/BAE_Source/Common/GenSample.c
   neobae/src/BAE_Source/Common/GenSeq.c
   neobae/src/BAE_Source/Common/GenSeqTools.c
+  neobae/src/BAE_Source/Common/GenBankBalance.c
   neobae/src/BAE_Source/Common/GenSetup.c
   neobae/src/BAE_Source/Common/GenSong.c
   neobae/src/BAE_Source/Common/GenSoundFiles.c

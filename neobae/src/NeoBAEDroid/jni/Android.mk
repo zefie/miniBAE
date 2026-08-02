@@ -77,6 +77,7 @@ NEOBAE_SOURCES := \
 			Common/GenSample.c \
 			Common/GenSeq.c \
 			Common/GenSeqTools.c \
+			Common/GenBankBalance.c \
 			Common/GenSetup.c \
 			Common/GenSong.c \
 			Common/GenSoundFiles.c \

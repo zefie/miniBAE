@@ -168,6 +168,10 @@ OPErr GM_LoadDLSAsXMFOverlayFromMemory(struct GM_Mixer* pMixer, const void* pMem
 void GM_UnloadXMFDLSOverlay(struct GM_Mixer* pMixer);
 void GM_UnloadDLSBank(DLS_Bank* pBank);
 
+/* Median effective sample loudness (linear) for a loaded DLS bank, including
+ * sample/region attenuation. 0 if unavailable. */
+float GM_DLS_MeasureBankLoudness(DLS_Bank* bank);
+
 // Synth Public API
 OPErr GM_InitDLSSynth(DLS_Synth** ppSynth, int32_t sampleRate);
 void GM_FinisDLSSynth(DLS_Synth* pSynth);

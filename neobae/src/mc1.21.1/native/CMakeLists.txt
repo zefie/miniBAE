@@ -59,6 +59,7 @@ set(ENGINE_SRC
     ${BAE}/Common/GenSample.c
     ${BAE}/Common/GenSeq.c
     ${BAE}/Common/GenSeqTools.c
+    ${BAE}/Common/GenBankBalance.c
     ${BAE}/Common/GenSetup.c
     ${BAE}/Common/GenSong.c
     ${BAE}/Common/GenSoundFiles.c

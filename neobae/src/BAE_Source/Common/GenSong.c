@@ -1139,6 +1139,10 @@ GM_Song *GM_LoadSong(struct GM_Mixer *pMixer,
 
         GM_MergeExternalSong(theExternalSong, songID, pSong);
         pSong->ignoreBadInstruments = ignoreBadInstruments;
+        if (XGetSongResourceObjectType(theExternalSong) == SONG_TYPE_RMF)
+        {
+            pSong->songFlags |= SONG_FLAG_IS_RMF;
+        }
         err = GM_LoadSongInstruments(pSong,
                                      pInstrumentArray,
                                      bankToken,
