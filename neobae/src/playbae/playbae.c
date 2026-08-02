@@ -357,6 +357,9 @@ static void init_playFileString(void)
 #if USE_ADX_SUPPORT == TRUE
     strcat(gPlayFileString, ", CRI ADX");
 #endif
+#if USE_WMA_SUPPORT == TRUE
+    strcat(gPlayFileString, ", Windows Media Audio (WMA v1/v2/v7/v8/v9)");
+#endif
     strcat(gPlayFileString, ")");
 }
 
