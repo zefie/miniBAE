@@ -30,7 +30,7 @@ The project can be used as an embeddable audio engine, a command-line player and
 ### Retro ringtone formats
 
 - iMelody: `.imy`, `.emy`
-- Nokia binary ringtone: `.rng` (version 1)
+- Nokia binary ringtone: `.rng` (Basic Song / Temporary Song)
 - RTTTL and RTX: `.rtttl`, `.rtx`
 
 ### Audio and sample formats

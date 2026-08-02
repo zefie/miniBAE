@@ -866,6 +866,42 @@ static int PV_BitReaderRead(BitReader *br, uint32_t bits, uint32_t *out)
     return 1;
 }
 
+static void PV_BitReaderAlign(BitReader *br)
+{
+    uint32_t rem;
+
+    if (!br)
+        return;
+
+    rem = br->bitPos & 7u;
+    if (rem)
+        br->bitPos += 8u - rem;
+}
+
+static uint32_t PV_BitReaderTell(const BitReader *br)
+{
+    return br ? br->bitPos : 0;
+}
+
+static void PV_BitReaderSeek(BitReader *br, uint32_t bitPos)
+{
+    if (!br)
+        return;
+    br->bitPos = bitPos;
+}
+
+static uint32_t PV_BitReaderBitsLeft(const BitReader *br)
+{
+    uint32_t total;
+
+    if (!br)
+        return 0;
+    total = br->sizeBytes * 8u;
+    if (br->bitPos >= total)
+        return 0;
+    return total - br->bitPos;
+}
+
 static uint32_t PV_RNGDurationToTicks(uint32_t durationCode, uint32_t durationSpecifier)
 {
     uint32_t ticks;
@@ -904,20 +940,12 @@ static uint32_t PV_RNGDurationToTicks(uint32_t durationCode, uint32_t durationSp
 
 static int PV_RNGNoteToMidi(uint32_t noteValue, int octave)
 {
-    static const int semitoneLut[16] = {
-        -1, 0, 1, 2, 3, 4, 5, 6,
-         7, 8, 9, 10, 11, -1, -1, -1
-    };
-    int semitone;
+    int midi;
 
-    if (noteValue >= 16)
-        return -1;
-
-    if (noteValue == 0)
-        return -1;
-
-    semitone = semitoneLut[noteValue];
-    if (semitone < 0)
+    /* Nokia note values 1..12 are C..B. 13..15 are "reserved" in SM 2.0 but
+     * are emitted by some composers and accepted by mobileBAE as chromatic
+     * extensions (C/C#/D of the next scale step). */
+    if (noteValue == 0 || noteValue > 15)
         return -1;
 
     if (octave < 0)
@@ -925,7 +953,94 @@ static int PV_RNGNoteToMidi(uint32_t noteValue, int octave)
     if (octave > 9)
         octave = 9;
 
-    return (octave + 1) * 12 + semitone;
+    midi = (octave + 1) * 12 + (int)noteValue - 1;
+    if (midi < 0)
+        return -1;
+    if (midi > 127)
+        return 127;
+    return midi;
+}
+
+static uint32_t PV_RNGVolumeToMidi(uint32_t volume)
+{
+    /* mobileBAE dword/byte table at 0x123A5C0, indexed as table[volume]. */
+    static const unsigned char sRngVolumeTable[16] = {
+          0,  40,  59,  72,  81,  88,  95, 100,
+        105, 109, 113, 116, 119, 122, 125, 127
+    };
+
+    if (volume > 15)
+        volume = 15;
+    return sRngVolumeTable[volume];
+}
+
+static uint32_t PV_RNGGateTicks(uint32_t ticks, uint32_t style)
+{
+    /* Match mobileBAE sub_1212A00 note gating:
+     * 0 natural   → 19/20 of duration
+     * 1 continuous → full duration
+     * 2 staccato  → 1/2 duration
+     */
+    uint32_t gate;
+
+    if (ticks == 0)
+        return 1;
+
+    switch (style)
+    {
+        case 1:
+            gate = ticks;
+            break;
+        case 2:
+            gate = ticks >> 1;
+            break;
+        default:
+            gate = (19u * ticks) / 20u;
+            break;
+    }
+
+    if (gate == 0)
+        gate = 1;
+    if (gate > ticks)
+        gate = ticks;
+    return gate;
+}
+
+static int PV_TrackWriteNoteWithGate(RingtoneState *st, int midiNote, uint32_t durTicks, uint32_t gateTicks, int velocity)
+{
+    if (durTicks == 0)
+        durTicks = 1;
+    if (gateTicks == 0)
+        gateTicks = 1;
+    if (gateTicks > durTicks)
+        gateTicks = durTicks;
+    if (velocity < 1)
+        velocity = 1;
+    if (velocity > 127)
+        velocity = 127;
+
+    if (!PV_BufPutVLQ(&st->track, st->pendingTicks)) return 0;
+    if (!PV_BufPutU8(&st->track, 0x90)) return 0;
+    if (!PV_BufPutU8(&st->track, (unsigned char)midiNote)) return 0;
+    if (!PV_BufPutU8(&st->track, (unsigned char)velocity)) return 0;
+
+    if (!PV_BufPutVLQ(&st->track, gateTicks)) return 0;
+    if (!PV_BufPutU8(&st->track, 0x80)) return 0;
+    if (!PV_BufPutU8(&st->track, (unsigned char)midiNote)) return 0;
+    if (!PV_BufPutU8(&st->track, 0)) return 0;
+
+    st->pendingTicks = durTicks - gateTicks;
+    return 1;
+}
+
+static int PV_TrackWriteControlChange(RingtoneState *st, unsigned char controller, unsigned char value)
+{
+    if (!PV_BufPutVLQ(&st->track, st->pendingTicks)) return 0;
+    if (!PV_BufPutU8(&st->track, 0xB0)) return 0;
+    if (!PV_BufPutU8(&st->track, controller)) return 0;
+    if (!PV_BufPutU8(&st->track, value)) return 0;
+    st->pendingTicks = 0;
+    return 1;
 }
 
 static int PV_RNGTempoCodeToBpm(uint32_t tempoCode)
@@ -959,6 +1074,134 @@ static int PV_RNGScaleToOctave(uint32_t scale)
     }
 }
 
+typedef struct RNGPatternDef
+{
+    uint32_t bitPos;
+    uint32_t instructionCount;
+    int valid;
+} RNGPatternDef;
+
+static BAEResult PV_RNGEmitInstructionStream(BitReader *br,
+                                             RingtoneState *st,
+                                             uint32_t instructionCount,
+                                             int *pOctave,
+                                             uint32_t *pStyle,
+                                             int *pVelocity,
+                                             int *pTempoWritten)
+{
+    uint32_t instrIndex;
+
+    for (instrIndex = 0; instrIndex < instructionCount; ++instrIndex)
+    {
+        uint32_t instr;
+
+        if (PV_BitReaderBitsLeft(br) < 3)
+            return BAE_NO_ERROR;
+
+        if (!PV_BitReaderRead(br, 3, &instr))
+            return BAE_BAD_FILE;
+
+        if (instr == 0)
+        {
+            /* Trailing zero padding / truncated pattern-specifier (e.g. 0xFF). */
+            return BAE_NO_ERROR;
+        }
+        else if (instr == 1)
+        {
+            uint32_t noteValue;
+            uint32_t durationCode;
+            uint32_t durationSpecifier;
+            uint32_t ticks;
+            uint32_t gate;
+            int midi;
+
+            if (!PV_BitReaderRead(br, 4, &noteValue) ||
+                !PV_BitReaderRead(br, 3, &durationCode) ||
+                !PV_BitReaderRead(br, 2, &durationSpecifier))
+            {
+                return BAE_BAD_FILE;
+            }
+
+            ticks = PV_RNGDurationToTicks(durationCode, durationSpecifier);
+            if (noteValue == 0)
+            {
+                if (!PV_TrackWriteNoteOrRest(st, 1, 0, ticks))
+                    return BAE_MEMORY_ERR;
+            }
+            else
+            {
+                midi = PV_RNGNoteToMidi(noteValue, *pOctave);
+                if (midi >= 0 && *pVelocity > 0)
+                {
+                    gate = PV_RNGGateTicks(ticks, *pStyle);
+                    if (!PV_TrackWriteNoteWithGate(st, midi, ticks, gate, *pVelocity))
+                        return BAE_MEMORY_ERR;
+                }
+                else if (!PV_TrackWriteNoteOrRest(st, 1, 0, ticks))
+                {
+                    return BAE_MEMORY_ERR;
+                }
+            }
+        }
+        else if (instr == 2)
+        {
+            uint32_t scale;
+            if (!PV_BitReaderRead(br, 2, &scale))
+                return BAE_BAD_FILE;
+            *pOctave = PV_RNGScaleToOctave(scale);
+        }
+        else if (instr == 3)
+        {
+            uint32_t style;
+            if (!PV_BitReaderRead(br, 2, &style))
+                return BAE_BAD_FILE;
+            *pStyle = style;
+        }
+        else if (instr == 4)
+        {
+            uint32_t tempoCode;
+            if (!PV_BitReaderRead(br, 5, &tempoCode))
+                return BAE_BAD_FILE;
+
+            st->bpm = PV_RNGTempoCodeToBpm(tempoCode);
+            if (*pTempoWritten)
+            {
+                uint32_t mpqn = (uint32_t)(60000000UL / (uint32_t)st->bpm);
+                if (!PV_BufPutVLQ(&st->track, st->pendingTicks) ||
+                    !PV_BufPutU8(&st->track, 0xFF) ||
+                    !PV_BufPutU8(&st->track, 0x51) ||
+                    !PV_BufPutU8(&st->track, 0x03) ||
+                    !PV_BufPutU8(&st->track, (unsigned char)((mpqn >> 16) & 0xFF)) ||
+                    !PV_BufPutU8(&st->track, (unsigned char)((mpqn >> 8) & 0xFF)) ||
+                    !PV_BufPutU8(&st->track, (unsigned char)(mpqn & 0xFF)))
+                {
+                    return BAE_MEMORY_ERR;
+                }
+                st->pendingTicks = 0;
+            }
+        }
+        else if (instr == 5)
+        {
+            uint32_t volume;
+            uint32_t midiVol;
+            if (!PV_BitReaderRead(br, 4, &volume))
+                return BAE_BAD_FILE;
+
+            midiVol = PV_RNGVolumeToMidi(volume);
+            *pVelocity = (int)midiVol;
+            /* tone-off (0) still updates CC7; subsequent notes become rests. */
+            if (!PV_TrackWriteControlChange(st, 7, (unsigned char)midiVol))
+                return BAE_MEMORY_ERR;
+        }
+        else
+        {
+            return BAE_UNSUPPORTED_FORMAT;
+        }
+    }
+
+    return BAE_NO_ERROR;
+}
+
 static BAEResult PV_ParseRNGBinaryBuffer(const unsigned char *data,
                                          uint32_t dataSize,
                                          unsigned char **ppOut,
@@ -966,83 +1209,122 @@ static BAEResult PV_ParseRNGBinaryBuffer(const unsigned char *data,
 {
     BitReader br;
     RingtoneState st;
+    RNGPatternDef patterns[4];
     uint32_t commandCount;
     uint32_t command;
     uint32_t songType;
-    uint32_t titleLen;
     uint32_t sequenceLen;
     uint32_t i;
     int currentOctave;
+    uint32_t currentStyle;
+    int currentVelocity;
     int tempoWritten;
+    int unicodeTitle;
+    BAEResult err;
 
     if (!data || dataSize < 4 || !ppOut || !pOutSize)
         return BAE_PARAM_ERR;
 
+    /* Typical Nokia Smart Messaging ringtone starts 02 4A 3A
+     * (command-count=2, RINGING-TONE-PROGRAMMING, SOUND). */
     if (!(data[0] == 0x02 && data[1] == 0x4A && data[2] == 0x3A))
         return BAE_BAD_FILE;
 
     memset(&br, 0, sizeof(br));
+    memset(patterns, 0, sizeof(patterns));
     br.data = data;
     br.sizeBytes = dataSize;
 
-    if (!PV_BitReaderRead(&br, 8, &commandCount))
+    if (!PV_BitReaderRead(&br, 8, &commandCount) || commandCount == 0)
         return BAE_BAD_FILE;
-
-    for (i = 0; i < commandCount; ++i)
-    {
-        uint32_t filler;
-        if (!PV_BitReaderRead(&br, 7, &command))
-            return BAE_BAD_FILE;
-
-        /* The first command part has one filler bit to align to byte boundary. */
-        if (i == 0)
-        {
-            if (!PV_BitReaderRead(&br, 1, &filler))
-                return BAE_BAD_FILE;
-        }
-    }
-    (void)command;
 
     PV_InitState(&st);
-    st.bpm = 160;
+    st.bpm = 63; /* Nokia default BPM encoding */
     currentOctave = 5;
+    currentStyle = 0;
+    currentVelocity = 100; /* mobileBAE default before volume instruction */
     tempoWritten = 0;
+    unicodeTitle = 0;
+    songType = 0;
+    sequenceLen = 0;
 
-    if (!PV_BitReaderRead(&br, 3, &songType))
+    /* Header parsing mirrors mobileBAE sub_1212860. */
+    for (i = 0; i < commandCount; ++i)
     {
-        PV_BufFree(&st.track);
-        return BAE_BAD_FILE;
-    }
-
-    if (songType != 1)
-    {
-        PV_BufFree(&st.track);
-        return BAE_UNSUPPORTED_FORMAT;
-    }
-
-    if (!PV_BitReaderRead(&br, 4, &titleLen))
-    {
-        PV_BufFree(&st.track);
-        return BAE_BAD_FILE;
-    }
-
-    if (titleLen > 0)
-    {
-        uint32_t skipBits = titleLen * 8;
-        uint32_t dummy;
-        while (skipBits > 0)
+        if (!PV_BitReaderRead(&br, 7, &command))
         {
-            uint32_t chunk = (skipBits > 24) ? 24 : skipBits;
-            if (!PV_BitReaderRead(&br, chunk, &dummy))
+            PV_BufFree(&st.track);
+            return BAE_BAD_FILE;
+        }
+
+        if (command == 37 || command == 34)
+        {
+            /* 37 = RINGING-TONE-PROGRAMMING, 34 = Unicode text enable. */
+            if (command == 34)
+                unicodeTitle = 1;
+            PV_BitReaderAlign(&br);
+        }
+        else if (command == 29)
+        {
+            uint32_t titleLen = 0;
+
+            if (!PV_BitReaderRead(&br, 3, &songType))
             {
                 PV_BufFree(&st.track);
                 return BAE_BAD_FILE;
             }
-            skipBits -= chunk;
+
+            /* 1 = Basic Song (v1), 2 = Temporary Song (v2).
+             * MIDI/digitized song types are reserved/unsupported. */
+            if (songType != 1 && songType != 2)
+            {
+                PV_BufFree(&st.track);
+                return BAE_UNSUPPORTED_FORMAT;
+            }
+
+            if (songType == 1)
+            {
+                if (!PV_BitReaderRead(&br, 4, &titleLen))
+                {
+                    PV_BufFree(&st.track);
+                    return BAE_BAD_FILE;
+                }
+                if (unicodeTitle)
+                    titleLen *= 2;
+
+                while (titleLen > 0)
+                {
+                    uint32_t dummy;
+                    if (!PV_BitReaderRead(&br, 8, &dummy))
+                    {
+                        PV_BufFree(&st.track);
+                        return BAE_BAD_FILE;
+                    }
+                    --titleLen;
+                }
+            }
+            /* Temporary Song has no title-length / title field. */
+
+            if (!PV_BitReaderRead(&br, 8, &sequenceLen))
+            {
+                PV_BufFree(&st.track);
+                return BAE_BAD_FILE;
+            }
+            break;
+        }
+        else if (command == 5)
+        {
+            PV_BufFree(&st.track);
+            return BAE_UNSUPPORTED_FORMAT;
+        }
+        else
+        {
+            PV_BufFree(&st.track);
+            return BAE_BAD_FILE;
         }
     }
 
-    if (!PV_BitReaderRead(&br, 8, &sequenceLen))
+    if (sequenceLen == 0)
     {
         PV_BufFree(&st.track);
         return BAE_BAD_FILE;
@@ -1061,7 +1343,11 @@ static BAEResult PV_ParseRNGBinaryBuffer(const unsigned char *data,
         uint32_t patternId;
         uint32_t loopValue;
         uint32_t instructionCount;
-        uint32_t instrIndex;
+        uint32_t repeatTotal;
+        uint32_t repeatIndex;
+        uint32_t bodyBitPos;
+        uint32_t afterHeaderBitPos;
+        int reuse;
 
         if (!PV_BitReaderRead(&br, 3, &patternHeader) ||
             !PV_BitReaderRead(&br, 2, &patternId) ||
@@ -1072,124 +1358,68 @@ static BAEResult PV_ParseRNGBinaryBuffer(const unsigned char *data,
             return BAE_BAD_FILE;
         }
 
-        (void)patternId;
-        (void)loopValue;
         if (patternHeader != 0)
             break;
 
-        for (instrIndex = 0; instrIndex < instructionCount; ++instrIndex)
+        if (patternId > 3)
         {
-            uint32_t instr;
-            if (!PV_BitReaderRead(&br, 3, &instr))
+            PV_BufFree(&st.track);
+            return BAE_BAD_FILE;
+        }
+
+        reuse = (instructionCount == 0);
+        afterHeaderBitPos = PV_BitReaderTell(&br);
+
+        if (reuse)
+        {
+            if (!patterns[patternId].valid)
             {
                 PV_BufFree(&st.track);
                 return BAE_BAD_FILE;
             }
+            bodyBitPos = patterns[patternId].bitPos;
+            instructionCount = patterns[patternId].instructionCount;
+        }
+        else
+        {
+            bodyBitPos = afterHeaderBitPos;
+            patterns[patternId].bitPos = bodyBitPos;
+            patterns[patternId].instructionCount = instructionCount;
+            patterns[patternId].valid = 1;
+        }
 
-            if (instr == 0)
-            {
-                /* End-of-sequence marker / trailing null padding. Stop. */
-                break;
-            }
-            else if (instr == 1)
-            {
-                uint32_t noteValue;
-                uint32_t durationCode;
-                uint32_t durationSpecifier;
-                uint32_t ticks;
-                int midi;
+        /* loop-value 0 = play once; 15 = infinite (cap for offline conversion). */
+        if (loopValue >= 15)
+            repeatTotal = 4;
+        else
+            repeatTotal = loopValue + 1;
 
-                if (!PV_BitReaderRead(&br, 4, &noteValue) ||
-                    !PV_BitReaderRead(&br, 3, &durationCode) ||
-                    !PV_BitReaderRead(&br, 2, &durationSpecifier))
-                {
-                    PV_BufFree(&st.track);
-                    return BAE_BAD_FILE;
-                }
+        for (repeatIndex = 0; repeatIndex < repeatTotal; ++repeatIndex)
+        {
+            /* Each pattern play resets scale/style/volume like mobileBAE. */
+            currentOctave = 5;
+            currentStyle = 0;
+            currentVelocity = 100;
 
-                ticks = PV_RNGDurationToTicks(durationCode, durationSpecifier);
-                if (noteValue == 0)
-                {
-                    if (!PV_TrackWriteNoteOrRest(&st, 1, 0, ticks))
-                    {
-                        PV_BufFree(&st.track);
-                        return BAE_MEMORY_ERR;
-                    }
-                }
-                else
-                {
-                    midi = PV_RNGNoteToMidi(noteValue, currentOctave);
-                    if (midi >= 0 && midi <= 127)
-                    {
-                        if (!PV_TrackWriteNoteOrRest(&st, 0, midi, ticks))
-                        {
-                            PV_BufFree(&st.track);
-                            return BAE_MEMORY_ERR;
-                        }
-                    }
-                }
-            }
-            else if (instr == 2)
-            {
-                uint32_t scale;
-                if (!PV_BitReaderRead(&br, 2, &scale))
-                {
-                    PV_BufFree(&st.track);
-                    return BAE_BAD_FILE;
-                }
-                currentOctave = PV_RNGScaleToOctave(scale);
-            }
-            else if (instr == 3)
-            {
-                uint32_t style;
-                if (!PV_BitReaderRead(&br, 2, &style))
-                {
-                    PV_BufFree(&st.track);
-                    return BAE_BAD_FILE;
-                }
-                (void)style;
-            }
-            else if (instr == 4)
-            {
-                uint32_t tempoCode;
-                if (!PV_BitReaderRead(&br, 5, &tempoCode))
-                {
-                    PV_BufFree(&st.track);
-                    return BAE_BAD_FILE;
-                }
-                st.bpm = PV_RNGTempoCodeToBpm(tempoCode);
-                if (tempoWritten)
-                {
-                    uint32_t mpqn = (uint32_t)(60000000UL / (uint32_t)st.bpm);
-                    if (!PV_BufPutVLQ(&st.track, st.pendingTicks) ||
-                        !PV_BufPutU8(&st.track, 0xFF) ||
-                        !PV_BufPutU8(&st.track, 0x51) ||
-                        !PV_BufPutU8(&st.track, 0x03) ||
-                        !PV_BufPutU8(&st.track, (unsigned char)((mpqn >> 16) & 0xFF)) ||
-                        !PV_BufPutU8(&st.track, (unsigned char)((mpqn >> 8) & 0xFF)) ||
-                        !PV_BufPutU8(&st.track, (unsigned char)(mpqn & 0xFF)))
-                    {
-                        PV_BufFree(&st.track);
-                        return BAE_MEMORY_ERR;
-                    }
-                    st.pendingTicks = 0;
-                }
-            }
-            else if (instr == 5)
-            {
-                uint32_t volume;
-                if (!PV_BitReaderRead(&br, 4, &volume))
-                {
-                    PV_BufFree(&st.track);
-                    return BAE_BAD_FILE;
-                }
-                (void)volume;
-            }
-            else
+            PV_BitReaderSeek(&br, bodyBitPos);
+            err = PV_RNGEmitInstructionStream(&br,
+                                              &st,
+                                              instructionCount,
+                                              &currentOctave,
+                                              &currentStyle,
+                                              &currentVelocity,
+                                              &tempoWritten);
+            if (err != BAE_NO_ERROR)
             {
                 PV_BufFree(&st.track);
-                return BAE_UNSUPPORTED_FORMAT;
+                return err;
             }
+        }
+
+        if (reuse)
+        {
+            /* Resume just after the reuse pattern-header (specifier=0). */
+            PV_BitReaderSeek(&br, afterHeaderBitPos);
         }
     }
 

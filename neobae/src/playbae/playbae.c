@@ -335,7 +335,7 @@ static void init_playFileString(void)
     strcat(gPlayFileString, ", XMF, MXMF");
 #endif
 #if USE_RETRO_RINGTONE_SUPPORT == TRUE
-    strcat(gPlayFileString, ", iMelody, RTX, RNG (v1)");
+    strcat(gPlayFileString, ", iMelody, RTX, RNG (v1/v2)");
 #endif
     strcat(gPlayFileString, ", WAV, AIFF, AU");
 #if USE_MPEG_DECODER == TRUE
