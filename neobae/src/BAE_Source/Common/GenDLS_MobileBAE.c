@@ -852,6 +852,7 @@ static OPErr dls_decode_wma_wave(const uint8_t* encoded, uint32_t encodedBytes, 
     uint32_t pcm_cap = 0, pcm_n = 0;
     uint32_t offset;
     int block_align;
+    int frame_len = 0;
 
     if (!encoded || encodedBytes == 0 || !wave) return BAD_FILE_TYPE;
     if (wave->blockAlign <= 0 || wave->channels <= 0 || wave->sampleRate <= 0)
@@ -883,8 +884,17 @@ static OPErr dls_decode_wma_wave(const uint8_t* encoded, uint32_t encodedBytes, 
         return BAD_FILE_TYPE;
     }
 
+    /*
+     * FFmpeg skips 2 priming frames for general WMA, but DLS wsmp loop
+     * points in WMA banks (e.g. WinCE GM) are authored against a 1-frame
+     * skip. Using 2 leaves sustain loops spanning the silent flush frame
+     * (audible gap); program 80 C4 is a clear example.
+     */
+    ctx->skip_frames = 1;
+
     block_align = ctx->block_align;
-    pcm_cap = (encodedBytes / (uint32_t)block_align + 3) * (uint32_t)ctx->frame_len * (uint32_t)ctx->nb_channels;
+    frame_len = ctx->frame_len;
+    pcm_cap = (encodedBytes / (uint32_t)block_align + 3) * (uint32_t)frame_len * (uint32_t)ctx->nb_channels;
     pcm = (int16_t *)XNewPtr(pcm_cap * sizeof(int16_t));
     if (!pcm) {
         wma_decode_close(ctx);
