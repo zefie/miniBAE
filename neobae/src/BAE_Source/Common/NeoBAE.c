@@ -2153,6 +2153,12 @@ snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", (
     first = FALSE;
 #endif
 
+#if USE_WMA_SUPPORT == TRUE
+    const char *wma = "Windows Media Audio (WMA v1/v2/v7/v8/v9) Support";
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", wma);
+    first = FALSE;
+#endif
+
 #if USE_NATIVE_DLS == TRUE
     const char *native_dls = "Native DLS Support";
     snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", native_dls);
@@ -14202,6 +14208,9 @@ BAEResult BAEMixer_LoadFromFile(BAEMixer mixer, BAEPathName filePath, BAELoadRes
 #if USE_QOA_SUPPORT == TRUE
         || ftype == BAE_QOA_TYPE
 #endif
+#if USE_WMA_SUPPORT == TRUE
+        || ftype == BAE_WMA_TYPE
+#endif
     )
     {
         isAudio = TRUE;
@@ -14454,6 +14463,9 @@ BAEResult BAEMixer_LoadFromMemory(BAEMixer mixer, void const *pData, uint32_t da
 #endif
 #if USE_ADX_SUPPORT == TRUE
         || ftype == BAE_ADX_TYPE
+#endif
+#if USE_WMA_SUPPORT == TRUE
+        || ftype == BAE_WMA_TYPE
 #endif
     )
     {

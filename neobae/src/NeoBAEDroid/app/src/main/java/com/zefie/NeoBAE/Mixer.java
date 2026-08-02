@@ -254,8 +254,13 @@ public class Mixer
 	public static final int BAE_MTHC = 12;
 	public static final int BAE_RMI = 13;
 	public static final int BAE_ADP_TYPE = 14;
-	public static final int BAE_RAW_PCM = 15;
-	public static final int BAE_ADX_TYPE = 16;
+	public static final int BAE_ADX_TYPE = 15;
+	public static final int BAE_QOA_TYPE = 16;
+	public static final int BAE_WMA_TYPE = 17;
+	public static final int BAE_RINGTONE_IMY = 18;
+	public static final int BAE_RINGTONE_RNG = 19;
+	public static final int BAE_RINGTONE_RTX = 20;
+	public static final int BAE_RAW_PCM = 21;
 
 	public static final int BAE_COMPRESSION_NONE = 0;
 	public static final int BAE_COMPRESSION_LOSSLESS = 1;

@@ -74,22 +74,8 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Sound__1loadSound__Ljava_nio_ByteBu
 	jsize cap = (*env)->GetDirectBufferCapacity(env, byteBuffer);
 	if(cap <= 0){ __android_log_print(ANDROID_LOG_ERROR, "neoBAE", "ByteBuffer capacity <= 0"); return (jint)BAE_BAD_FILE; }
 
-	// Heuristic file type detection (extension-less memory buffer)
-	const unsigned char *bytes = (const unsigned char*)data;
-	BAEFileType ftype = BAE_INVALID_TYPE;
-	if(cap >= 12 && (memcmp(bytes, "RIFF", 4) == 0) && memcmp(bytes+8, "WAVE", 4) == 0){
-		ftype = BAE_WAVE_TYPE;
-	}else if(cap >= 12 && (memcmp(bytes, "FORM", 4) == 0) && (memcmp(bytes+8, "AIFF", 4) == 0 || memcmp(bytes+8, "AIFC", 4) == 0)){
-		ftype = BAE_AIFF_TYPE;
-	}else if(cap >= 4 && (memcmp(bytes, ".snd", 4) == 0)){
-		ftype = BAE_AU_TYPE;
-	}else if(cap >= 3 && (memcmp(bytes, "ID3", 3) == 0)){
-		ftype = BAE_MPEG_TYPE; // MP3 with ID3 tag
-	}else if(cap >= 2 && bytes[0] == 0xFF && (bytes[1] & 0xE0) == 0xE0){
-		// Likely MPEG frame (MP2/MP3). Distinguish Layer via bits but engine uses single MPEG type.
-		ftype = BAE_MPEG_TYPE;
-	}
-
+	// Content-based type detection (same path used by Mixer.loadFromMemory)
+	BAEFileType ftype = X_DetermineFileTypeByData((const unsigned char*)data, (int32_t)cap);
 	if(ftype == BAE_INVALID_TYPE){
 		__android_log_print(ANDROID_LOG_ERROR, "neoBAE", "_loadSound(ByteBuffer) unknown/unsupported buffer format");
 		return (jint)BAE_UNSUPPORTED_FORMAT;
@@ -172,7 +158,35 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Sound__1loadSound__Landroid_content
 	// Fallback: attempt to load as BAESound sample file from memory
 	if(sound){
 		BAEFileType ftype = BAE_INVALID_TYPE;
-		if(ext){ if(strcasecmp(ext, ".wav") == 0) ftype = BAE_WAVE_TYPE; else if(strcasecmp(ext, ".aif") == 0 || strcasecmp(ext, ".aiff") == 0) ftype = BAE_AIFF_TYPE; else if(strcasecmp(ext, ".au") == 0) ftype = BAE_AU_TYPE; else if(strcasecmp(ext, ".mp3") == 0) ftype = BAE_MPEG_TYPE; }
+		if(ext){
+			if(strcasecmp(ext, ".wav") == 0) ftype = BAE_WAVE_TYPE;
+			else if(strcasecmp(ext, ".aif") == 0 || strcasecmp(ext, ".aiff") == 0) ftype = BAE_AIFF_TYPE;
+			else if(strcasecmp(ext, ".au") == 0) ftype = BAE_AU_TYPE;
+#if USE_MPEG_DECODER == TRUE
+			else if(strcasecmp(ext, ".mp3") == 0) ftype = BAE_MPEG_TYPE;
+#endif
+#if USE_WMA_SUPPORT == TRUE
+			else if(strcasecmp(ext, ".wma") == 0 || strcasecmp(ext, ".asf") == 0) ftype = BAE_WMA_TYPE;
+#endif
+#if USE_FLAC_DECODER == TRUE
+			else if(strcasecmp(ext, ".flac") == 0) ftype = BAE_FLAC_TYPE;
+#endif
+#if USE_VORBIS_DECODER == TRUE
+			else if(strcasecmp(ext, ".ogg") == 0) ftype = BAE_VORBIS_TYPE;
+#endif
+#if USE_OPUS_DECODER == TRUE
+			else if(strcasecmp(ext, ".opus") == 0) ftype = BAE_OPUS_TYPE;
+#endif
+#if USE_QOA_SUPPORT == TRUE
+			else if(strcasecmp(ext, ".qoa") == 0) ftype = BAE_QOA_TYPE;
+#endif
+#if USE_ADX_SUPPORT == TRUE
+			else if(strcasecmp(ext, ".adx") == 0) ftype = BAE_ADX_TYPE;
+#endif
+		}
+		if(ftype == BAE_INVALID_TYPE){
+			ftype = X_DetermineFileTypeByData(mem, (int32_t)read_total);
+		}
 		if(ftype != BAE_INVALID_TYPE){
 			BAEResult sr = BAESound_LoadMemorySample(sound, (void*)mem, (uint32_t)read_total, ftype);
 			free(mem);

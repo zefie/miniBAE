@@ -75,8 +75,13 @@ public class LoadResult {
             case Mixer.BAE_XMF: return "XMF";
             case Mixer.BAE_MTHC: return "Nokia Compressed MIDI";
             case Mixer.BAE_ADP_TYPE: return "Nokia ADP";
-            case Mixer.BAE_RAW_PCM: return "Raw PCM";
             case Mixer.BAE_ADX_TYPE: return "CRI ADX";
+            case Mixer.BAE_QOA_TYPE: return "QOA";
+            case Mixer.BAE_WMA_TYPE: return "WMA";
+            case Mixer.BAE_RINGTONE_IMY: return "iMelody";
+            case Mixer.BAE_RINGTONE_RNG: return "RNG";
+            case Mixer.BAE_RINGTONE_RTX: return "RTX";
+            case Mixer.BAE_RAW_PCM: return "Raw PCM";
             default: return "Unknown";
         }
     }
