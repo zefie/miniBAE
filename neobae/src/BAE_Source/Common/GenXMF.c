@@ -540,24 +540,36 @@ static bool PV_ParseXMF1Node(const unsigned char *bytes, uint32_t len, uint32_t 
                 }
             }
         }
-        // If still opaque, try LZSS probe on payload
-        if (payload == content)
+        /*
+         * LZSS probe only for still-opaque payloads. Plain inline SMF/DLS/RMF
+         * (e.g. Banana Shake.xmf) must not go through LZSSUncompress: lookbacks
+         * on non-LZSS bytes read before the output buffer and SEGV on Android MTE.
+         */
+        if (payload == content && contentLen >= 4)
         {
-            const unsigned char *pm=NULL; uint32_t pmLen=0; const unsigned char *pr=NULL; uint32_t prLen=0;
-            if (PV_ProbeLZSS(content, contentLen, 0, &pm, &pmLen, &pr, &prLen))
+            bool alreadyPlain =
+                (content[0] == 'M' && content[1] == 'T' && content[2] == 'h' && content[3] == 'd') ||
+                (content[0] == 'R' && content[1] == 'I' && content[2] == 'F' && content[3] == 'F') ||
+                (content[0] == 'I' && content[1] == 'R' && content[2] == 'E' && content[3] == 'Z') ||
+                (content[0] == 'Z' && content[1] == 'R' && content[2] == 'E' && content[3] == 'Z');
+            if (!alreadyPlain)
             {
-                if (pm && pmLen && outMidi && outMidiLen && !*outMidi)
+                const unsigned char *pm=NULL; uint32_t pmLen=0; const unsigned char *pr=NULL; uint32_t prLen=0;
+                if (PV_ProbeLZSS(content, contentLen, 0, &pm, &pmLen, &pr, &prLen))
                 {
-                    *outMidi = pm; *outMidiLen = pmLen; // take ownership
-                }
-                else if (pr && prLen && outRmf && outRmfLen && !*outRmf)
-                {
-                    *outRmf = pr; *outRmfLen = prLen; // take ownership
-                }
-                else
-                {
-                    if (pm) { XDisposePtr((XPTR)pm); }
-                    if (pr) { XDisposePtr((XPTR)pr); }
+                    if (pm && pmLen && outMidi && outMidiLen && !*outMidi)
+                    {
+                        *outMidi = pm; *outMidiLen = pmLen; // take ownership
+                    }
+                    else if (pr && prLen && outRmf && outRmfLen && !*outRmf)
+                    {
+                        *outRmf = pr; *outRmfLen = prLen; // take ownership
+                    }
+                    else
+                    {
+                        if (pm) { XDisposePtr((XPTR)pm); }
+                        if (pr) { XDisposePtr((XPTR)pr); }
+                    }
                 }
             }
         }
@@ -2034,8 +2046,15 @@ BAEResult BAESong_LoadXmfFromMemory(BAESong song, const void *data, uint32_t ule
                         }
                     }
                 }
-                // Third pass: LZSS probe at coarse offsets
-                for (uint32_t loff = 0; loff + 16 < mlen; loff += (mlen <= 4096 ? 64u : 512u))
+                // Third pass: LZSS probe at coarse offsets (skip if region already looks plain)
+                if (mlen >= 4 &&
+                    ((m[0] == 'M' && m[1] == 'T' && m[2] == 'h' && m[3] == 'd') ||
+                     (m[0] == 'R' && m[1] == 'I' && m[2] == 'F' && m[3] == 'F') ||
+                     (m[0] == 'I' && m[1] == 'R' && m[2] == 'E' && m[3] == 'Z')))
+                {
+                    /* already handled by signature scans above */
+                }
+                else for (uint32_t loff = 0; loff + 16 < mlen; loff += (mlen <= 4096 ? 64u : 512u))
                 {
                     const unsigned char *pm=NULL; uint32_t pmLen=0; const unsigned char *pr=NULL; uint32_t prLen=0;
                     if (PV_ProbeLZSS(m, mlen, loff, &pm, &pmLen, &pr, &prLen))

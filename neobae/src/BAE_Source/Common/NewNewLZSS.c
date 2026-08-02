@@ -787,6 +787,13 @@ int32_t            dstCountdown;
                     bufferBits = ((unsigned int)src[0] << 8) | src[1];
                     src += 2;
                     previousBuffer = dst - (LOOKBACK - (bufferBits & 0x0FFF));
+                    /* Valid Beatnik streams only reference already-written output.
+                       Heuristic probes (and corrupt input) can emit lookbacks that
+                       point before dstBuffer; on Android MTE that is SEGV_ACCERR. */
+                    if (previousBuffer < dstBuffer)
+                    {
+                        return;
+                    }
 
                     byteCount = bufferBits >> 12;
                     byteCount += THRESHOLD;
