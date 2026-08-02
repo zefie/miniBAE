@@ -299,6 +299,11 @@ static const char AUDIO_EXT_FILTER[] =
 #else
     ""
 #endif
+#if USE_WMA_SUPPORT == TRUE
+    "*.asf;*.wma;"
+#else
+    ""
+#endif
     "*.wav;*.aif;*.aiff;*.au;";
     char fileBuf[MAX_PATH] = {0};
     OPENFILENAMEA ofn;
@@ -477,6 +482,11 @@ static const char AUDIO_EXT_FILTER[] =
 #endif
 #if USE_ADX_SUPPORT == TRUE
     "*.adx "
+#else
+    ""
+#endif
+#if USE_WMA_SUPPORT == TRUE
+    "*.asf *.wma "
 #else
     ""
 #endif
