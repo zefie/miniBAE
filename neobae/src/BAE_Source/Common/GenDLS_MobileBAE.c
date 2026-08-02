@@ -2165,6 +2165,24 @@ static DLS_Instrument* DLS_Bank_FindMidiInstrument(DLS_Bank* bank, int32_t bankI
             if (altInst) return altInst;
             /* Fall through to SP-MIDI remap below as last resort. */
         }
+
+        /*
+         * Mobile Sound Builder / MobileBAE often stores custom banks with the
+         * MIDI CC0 value in INSH bits 8-14 (e.g. bank MSB=2 → selector 2:0:N
+         * in rawMode). Our channel path normalizes that request to 121:2:N.
+         * Try the raw CC0-as-MSB form only when LSB != 0 so GM bank 121:0:N
+         * does not steal a custom 2:0:N (or 121:2:N) instrument.
+         */
+        if (bankLsb > 0) {
+            selector = DLS_Selector(bankLsb, 0, program);
+            inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
+            if (inst) {
+                bool isDrum = (inst->drum || ((inst->bankMsb & 0x7F) == 120));
+                if (wantDrum == isDrum) {
+                    return inst;
+                }
+            }
+        }
     }
 
     /* Non-quirks (SP-MIDI compliant): remap missing instruments per
@@ -2219,22 +2237,12 @@ static DLS_Instrument* DLS_Synth_FindInstrument(DLS_Synth* synth, int32_t bankId
         }
     }
 
-    /* Overlay scan: before falling back to main bank, search entire overlay
-       for a matching program. Only match instruments in the same bank family
-       (percussion vs melodic) as the requested selector. */
-    if (synth->banks[1]) {
-        int32_t clampedProgram = program & 0x7F;
-        bool wantDrum = ((bankId & 0x3F80) == (120 << 7));
-        for (uint32_t i = 0; i < synth->banks[1]->instrumentCount; i++) {
-            inst = &synth->banks[1]->instruments[i];
-            if (inst->program == clampedProgram) {
-                bool isDrum = (inst->drum || ((inst->bankMsb & 0x7F) == 120));
-                if (wantDrum == isDrum) {
-                    return inst;
-                }
-            }
-        }
-    }
+    /*
+     * Do not scan the XMF/DLS overlay by program number alone. That let a
+     * custom preset at 121:2:0 (MIDI CC0=2) hijack GM requests for 121:0:0.
+     * Bank-aware lookup above (including MobileBAE raw CC0 fallback) is enough
+     * for overlay banks; missing presets fall through to the main bank / GM.
+     */
 
     if (synth->banks[0]) {
         inst = DLS_Bank_FindMidiInstrument(synth->banks[0], bankId, program, false);
