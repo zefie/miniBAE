@@ -4924,6 +4924,11 @@ GM_Waveform     *waveform;
             waveform = PV_ReadIntoMemoryQOAFile(file, decodeData, NULL, NULL, NULL, &err);
             break;
     #endif
+    #if USE_WMA_SUPPORT == TRUE
+        case FILE_WMA_TYPE:
+            waveform = PV_ReadIntoMemoryWMAFile(file, decodeData, NULL, NULL, NULL, &err);
+            break;
+    #endif
         default :
             err = PARAM_ERR;
             break;
