@@ -2449,6 +2449,7 @@ static void PV_ProcessNoteOff(GM_Song *pSong, int16_t MIDIChannel, int16_t curre
 static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTrack, int16_t note, int16_t volume)
 {
     register int16_t thePatch = 0;
+    float sf2_dls_rmf_volume_multiplier = 0.25f;
     if (pSong->isNokiaVibrationChannel[MIDIChannel]) {
         return;
     }
@@ -2494,7 +2495,7 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                     if (pSong->channelType[MIDIChannel] == CHANNEL_TYPE_RMF)
                     {
                         // RMF
-                        volume = (int16_t)(((int32_t)volume * 85) / 100); // RMF seems to be louder, so turn it down a bit
+                        volume = (int16_t)(volume * sf2_dls_rmf_volume_multiplier); // RMF seems to be louder, so turn it down a bit
                         thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
                         PV_StartMIDINote(pSong, thePatch, MIDIChannel, currentTrack, note, volume);                       
                     } else {
@@ -2588,6 +2589,7 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                     }
                     else
                     {
+                        volume = (int16_t)(volume * sf2_dls_rmf_volume_multiplier); // RMF seems to be louder, so turn it down a bit
                         thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
                         PV_StartMIDINote(pSong, thePatch, MIDIChannel, currentTrack, note, volume);
                     }
@@ -2595,9 +2597,13 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                 else
 #endif                
                 {
+#if USE_NATIVE_DLS == TRUE
+                    if (GM_IsDLSSong(pSong) || GM_IsSF2Song(pSong)) {
+                        volume = (int16_t)(volume * sf2_dls_rmf_volume_multiplier); // RMF seems to be louder, so turn it down a bit
+                    }
+#endif                    
                     thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
                     PV_StartMIDINote(pSong, thePatch, MIDIChannel, currentTrack, note, volume);
-                    //debug_message("ProcessNoteOn Debug: Channel %d is using RMF Instrument (note=%d)\n", (MIDIChannel + 1), note);
                 }
             }
             else
