@@ -584,6 +584,12 @@ class MainActivity : AppCompatActivity() {
                 currentSound = sound
                 currentSong = null
 
+                // Mixer-level song normalize must not boost PCM sample playback.
+                try {
+                    Mixer.setSongNormalizeGain(100)
+                } catch (_: Exception) {
+                }
+
                 sound.setVolumePercent(volumePercent)
                 val loopCount = if (viewModel.repeatMode == RepeatMode.SONG) 32767 else 0
                 sound.setLoops(loopCount)

@@ -1094,6 +1094,8 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
         g_bae.loaded_path[sizeof(g_bae.loaded_path) - 1] = '\0';
         g_bae.song_loaded = true;
         g_bae.is_audio_file = true;
+        /* Mixer-level song normalize must not boost PCM sample playback. */
+        bae_cancel_normalize();
         get_audio_total_frames();
         audio_current_position = 0;
         /* Apply the user's last requested master volume consistently by
@@ -1676,6 +1678,9 @@ bool bae_play(bool *playing)
         // Handle audio files (WAV, MP2/MP3, etc.)
         if (!*playing)
         {
+            /* Ensure leftover MIDI normalize gain is cleared for sample playback. */
+            bae_cancel_normalize();
+
             // Set loop count: 0 for no looping, 0xFFFFFFFF for infinite looping
             uint32_t loopCount = g_bae.loop_enabled_gui ? 0xFFFFFFFF : 0;
             BAESound_SetLoopCount(g_bae.sound, loopCount);

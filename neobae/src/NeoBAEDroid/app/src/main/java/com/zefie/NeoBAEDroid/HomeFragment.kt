@@ -1798,6 +1798,11 @@ class HomeFragment : Fragment() {
                     if (sound != null) {
                         setCurrentSound(sound)
                         setCurrentSong(null) // Clear song reference
+                        // Mixer-level song normalize must not boost PCM sample playback.
+                        try {
+                            Mixer.setSongNormalizeGain(100)
+                        } catch (_: Exception) {
+                        }
                         applyVolume()
                         val loopCount = if (viewModel.repeatMode == RepeatMode.SONG) 32767 else 0    
                         sound.setLoops(loopCount)
@@ -2017,8 +2022,8 @@ class HomeFragment : Fragment() {
             return
         }
         cancelMixerCleanup()
-        // Re-apply cached normalize gain in case mixer state was reset while paused.
-        if (normalizePlayback.value) {
+        // Re-apply cached normalize only for MIDI/RMF songs — never for BAESound PCM.
+        if (normalizePlayback.value && currentSong != null && currentSound == null) {
             val pathKey = currentLoadedFilePath
             val cached = pathKey?.let { normalizeGainCache[it] }
             if (cached != null && cached > 0) {
@@ -2026,6 +2031,11 @@ class HomeFragment : Fragment() {
                     Mixer.setSongNormalizeGain(cached)
                 } catch (_: Exception) {
                 }
+            }
+        } else if (currentSound != null) {
+            try {
+                Mixer.setSongNormalizeGain(100)
+            } catch (_: Exception) {
             }
         }
         currentSong?.resume()
