@@ -148,6 +148,11 @@ struct DLS_Bank {
      * usDestination/lScale and wlnk.ulTableIndex are stored bit-reversed and
      * must be decoded (wlnk → direct ptbl cue index). */
     bool eggsArticulators;
+    /* MobileBAE banks ship a proprietary 'pgal' (program/percussion alias) chunk. */
+    bool hasPgal;
+    /* True for pgal banks, or bankinfo.h BANKINFO_FLAG_MOBILEBAE matches.
+     * When set, forceQuirks is also set so quirks stay on under -dlscompat. */
+    bool isMobileBAE;
     uint32_t declaredInstrumentCount;
     uint32_t articulationChunkCount;
     uint32_t articulationConnectionCount;
@@ -185,6 +190,16 @@ OPErr GM_InitDLSSynth(DLS_Synth** ppSynth, int32_t sampleRate);
 void GM_FinisDLSSynth(DLS_Synth* pSynth);
 bool GM_IsDLSSong(GM_Song* pSong);
 bool GM_DLS_HasXmfEmbeddedBank(struct GM_Mixer* pMixer);
+/* True if main or XMF-overlay DLS bank is a microQ "eggs" (scrambled) bank. */
+bool GM_DLS_HasEggsBank(struct GM_Mixer* pMixer);
+/* True if main or XMF-overlay DLS bank is treated as MobileBAE
+ * (has 'pgal', or matched bankinfo.h BANKINFO_FLAG_MOBILEBAE). */
+bool GM_DLS_HasMobileBAEBank(struct GM_Mixer* pMixer);
+/* Temporarily force quirks bake for the next DLS bank load (nesting-safe). */
+void GM_DLS_BeginForcedQuirksLoad(void);
+void GM_DLS_EndForcedQuirksLoad(void);
+/* Mark banks[0] as MobileBAE (quirks + badge) after a bankinfo-flagged load. */
+void GM_DLS_MarkMainBankMobileBAE(struct GM_Mixer* pMixer);
 bool GM_DLS_XmfOverlayHasBankProgram(struct GM_Mixer* pMixer, int32_t bankMsb, int32_t bankLsb, int32_t program);
 uint16_t GM_DLS_GetActiveVoiceCount(struct GM_Mixer* pMixer);
 GM_Instrument* GM_DLS_CreateInstrumentStub(int32_t instrument);

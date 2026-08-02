@@ -347,6 +347,23 @@ class HomeFragment : Fragment() {
     // Sound bank settings
     private var currentBankName = mutableStateOf("Loading...")
     private var isLoadingBank = mutableStateOf(false)
+    private var hasEggsBank = mutableStateOf(false)
+    private var hasMobileBAEBank = mutableStateOf(false)
+
+    private fun refreshBankBadges() {
+        try {
+            if (Mixer.exists()) {
+                hasEggsBank.value = Mixer.hasEggsDLSBank()
+                hasMobileBAEBank.value = Mixer.hasMobileBAEDLSBank()
+            } else {
+                hasEggsBank.value = false
+                hasMobileBAEBank.value = false
+            }
+        } catch (_: Exception) {
+            hasEggsBank.value = false
+            hasMobileBAEBank.value = false
+        }
+    }
     private var isExporting = mutableStateOf(false)
     private var exportStatus = mutableStateOf("")
     private var reverbType = mutableStateOf(1)
@@ -966,6 +983,7 @@ class HomeFragment : Fragment() {
                             }
                         }
                         currentBankName.value = friendly ?: "No Bank Loaded"
+                        refreshBankBadges()
                     }.start()
                     
                     // Don't check permissions on startup - only when user tries to access folders
@@ -1225,6 +1243,8 @@ class HomeFragment : Fragment() {
                             }
                         },
                         bankName = currentBankName.value,
+                        hasEggsBank = hasEggsBank.value,
+                        hasMobileBAEBank = hasMobileBAEBank.value,
                         isLoadingBank = isLoadingBank.value,
                         isExporting = isExporting.value,
                         exportStatus = exportStatus.value,
@@ -1722,6 +1742,7 @@ class HomeFragment : Fragment() {
 
                     if (status == 0) {
                         currentBankName.value = targetName
+                        refreshBankBadges()
                         android.util.Log.d("HomeFragment", "Restored bank after embedded song: $targetName")
                     } else {
                         android.util.Log.w("HomeFragment", "Failed restoring bank after embedded song (err=$status)")
@@ -1955,6 +1976,7 @@ class HomeFragment : Fragment() {
                         }
                     }
                 currentBankName.value = "$base + Embedded Bank"
+                refreshBankBadges()
             }
             if (song.isSF2Song() || song.isDLSSong()) {
                 song.pause()
@@ -2342,6 +2364,7 @@ class HomeFragment : Fragment() {
             
             // Restore bank settings
             ensureBankIsLoaded()
+            refreshBankBadges()
             
             // Restore reverb and velocity curve settings
             try {
@@ -3538,6 +3561,8 @@ class HomeFragment : Fragment() {
                     prefs.edit().putString("last_bank_path", resolvedFile.absolutePath).apply()
                     postToMain {
                         currentBankName.value = originalName
+                        hasEggsBank.value = false
+                        hasMobileBAEBank.value = false
                         isLoadingBank.value = false
                     }
                     bankSwapInProgress.set(false)
@@ -3625,7 +3650,13 @@ class HomeFragment : Fragment() {
                     
                     postToMain {
                         currentBankName.value = originalName
-                        context?.let { Toast.makeText(it, "Loaded: $originalName", Toast.LENGTH_SHORT).show() }
+                        refreshBankBadges()
+                        val toastMsg = if (hasEggsBank.value) {
+                            "Loaded: $originalName  (scrambled eggs)"
+                        } else {
+                            "Loaded: $originalName"
+                        }
+                        context?.let { Toast.makeText(it, toastMsg, Toast.LENGTH_SHORT).show() }
                     }
                     
                         // Hot-swap: only Songs need reload (Sounds don't use banks)
@@ -3644,6 +3675,8 @@ class HomeFragment : Fragment() {
                 } else {
                     postToMain {
                         currentBankName.value = "Failed to load: $originalName"
+                        hasEggsBank.value = false
+                        hasMobileBAEBank.value = false
                         context?.let { Toast.makeText(it, "Failed to load bank (err=$r)", Toast.LENGTH_SHORT).show() }
                     }
                 }
@@ -3709,6 +3742,8 @@ class HomeFragment : Fragment() {
                 prefs.edit().putString("last_bank_path", "__builtin__").apply()
                 postToMain {
                     currentBankName.value = "Built-in patches"
+                    hasEggsBank.value = false
+                    hasMobileBAEBank.value = false
                     context?.let { Toast.makeText(it, "Built-in patches will load when playback starts", Toast.LENGTH_SHORT).show() }
                     isLoadingBank.value = false
                 }
@@ -3796,6 +3831,7 @@ class HomeFragment : Fragment() {
                 if (r == 0) {
                     val friendly = Mixer.getBankFriendlyName()
                     currentBankName.value = friendly ?: "Built-in patches"
+                    refreshBankBadges()
                     prefs.edit().putString("last_bank_path", "__builtin__").apply()
                     
                     // Hot-swap: only Songs need reload (Sounds don't use banks)
@@ -3813,6 +3849,8 @@ class HomeFragment : Fragment() {
                     context?.let { Toast.makeText(it, "Loaded built-in patches", Toast.LENGTH_SHORT).show() }
                 } else {
                     currentBankName.value = "Failed to load built-in"
+                    hasEggsBank.value = false
+                    hasMobileBAEBank.value = false
                     context?.let { Toast.makeText(it, "Failed to load built-in patches (err=$r)", Toast.LENGTH_SHORT).show() }
                 }
 
@@ -4325,6 +4363,8 @@ fun NewMusicPlayerScreen(
     onNavigateToFolder: (String) -> Unit,
     onAddToPlaylist: (File) -> Unit,
     bankName: String,
+    hasEggsBank: Boolean,
+    hasMobileBAEBank: Boolean,
     isLoadingBank: Boolean,
     isExporting: Boolean,
     exportStatus: String,
@@ -4845,6 +4885,8 @@ fun NewMusicPlayerScreen(
                 )
                 NavigationScreen.SETTINGS -> SettingsScreenContent(
                     bankName = bankName,
+                    hasEggsBank = hasEggsBank,
+                    hasMobileBAEBank = hasMobileBAEBank,
                     isLoadingBank = isLoadingBank,
                     reverbType = reverbType,
                     velocityCurve = velocityCurve,
@@ -7211,6 +7253,8 @@ private fun buildGitHubUrlForBaeVersion(versionString: String): String? {
 @Composable
 fun SettingsScreenContent(
     bankName: String,
+    hasEggsBank: Boolean,
+    hasMobileBAEBank: Boolean,
     isLoadingBank: Boolean,
     reverbType: Int,
     velocityCurve: Int,
@@ -7840,7 +7884,9 @@ fun SettingsScreenContent(
                             color = MaterialTheme.colors.primary.copy(alpha = 0.1f)
                         ) {
                             Row(
-                                modifier = Modifier.padding(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
@@ -7854,8 +7900,41 @@ fun SettingsScreenContent(
                                     text = bankName,
                                     style = MaterialTheme.typography.body1,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colors.onSurface
+                                    color = MaterialTheme.colors.onSurface,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
                                 )
+                                if (hasMobileBAEBank) {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = Color(0xFFBEE1F5),
+                                        contentColor = Color(0xFF14466E)
+                                    ) {
+                                        Text(
+                                            text = "mobileBAE",
+                                            style = MaterialTheme.typography.caption,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                if (hasEggsBank) {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = Color(0xFFFFE6A0),
+                                        contentColor = Color(0xFF785014)
+                                    ) {
+                                        Text(
+                                            text = "microQ",
+                                            style = MaterialTheme.typography.caption,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
 
@@ -8406,7 +8485,9 @@ fun SettingsScreenContent(
                             color = MaterialTheme.colors.primary.copy(alpha = 0.1f)
                         ) {
                             Row(
-                                modifier = Modifier.padding(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
@@ -8420,8 +8501,41 @@ fun SettingsScreenContent(
                                     text = bankName,
                                     style = MaterialTheme.typography.body1,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colors.onSurface
+                                    color = MaterialTheme.colors.onSurface,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
                                 )
+                                if (hasMobileBAEBank) {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = Color(0xFFBEE1F5),
+                                        contentColor = Color(0xFF14466E)
+                                    ) {
+                                        Text(
+                                            text = "mobileBAE",
+                                            style = MaterialTheme.typography.caption,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                                if (hasEggsBank) {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = Color(0xFFFFE6A0),
+                                        contentColor = Color(0xFF785014)
+                                    ) {
+                                        Text(
+                                            text = "microQ",
+                                            style = MaterialTheme.typography.caption,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
 

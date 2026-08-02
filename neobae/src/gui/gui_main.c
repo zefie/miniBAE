@@ -6110,6 +6110,50 @@ int main(int argc, char *argv[])
                 approxW = 8;
             if (approxW > 400)
                 approxW = 400; // crude clamp
+#if USE_NATIVE_DLS == TRUE
+            /* Bank flavor chips: MobileBAE (pgal) and/or microQ eggs. */
+            if (g_bae.mixer)
+            {
+                const char *chips[2];
+                SDL_Color chipFills[2];
+                SDL_Color chipTexts[2];
+                int chipCount = 0;
+                if (BAEMixer_HasMobileBAEDLSBank(g_bae.mixer))
+                {
+                    chips[chipCount] = "mobileBAE";
+                    chipFills[chipCount] = g_is_dark_mode
+                        ? (SDL_Color){30, 70, 95, 220}
+                        : (SDL_Color){190, 225, 245, 230};
+                    chipTexts[chipCount] = g_is_dark_mode
+                        ? (SDL_Color){160, 220, 255, 255}
+                        : (SDL_Color){20, 70, 110, 255};
+                    chipCount++;
+                }
+                if (BAEMixer_HasEggsDLSBank(g_bae.mixer))
+                {
+                    chips[chipCount] = "microQ";
+                    chipFills[chipCount] = g_is_dark_mode
+                        ? (SDL_Color){90, 70, 30, 220}
+                        : (SDL_Color){255, 230, 160, 230};
+                    chipTexts[chipCount] = g_is_dark_mode
+                        ? (SDL_Color){255, 220, 120, 255}
+                        : (SDL_Color){120, 80, 20, 255};
+                    chipCount++;
+                }
+                for (int ci = 0; ci < chipCount; ci++)
+                {
+                    int chip_w = 0, chip_h = 0;
+                    measure_text(chips[ci], &chip_w, &chip_h);
+                    int chip_x = 60 + approxW + 10;
+                    int chip_y = lineY2 - 1;
+                    Rect chipBg = {chip_x - 4, chip_y - 1, chip_w + 8, (chip_h > 0 ? chip_h : 12) + 2};
+                    draw_rect(R, chipBg, chipFills[ci]);
+                    draw_frame(R, chipBg, chipTexts[ci]);
+                    draw_text(R, chip_x, lineY2, chips[ci], chipTexts[ci]);
+                    approxW += 10 + chipBg.w;
+                }
+            }
+#endif
             Rect bankTextRect = {60, lineY2, approxW, 16};
             // Prepare deferred tooltip drawing at end of frame (post status text)
             if (!g_keyboard_channel_dd_open && point_in(ui_mx, ui_my, bankTextRect))
@@ -6122,7 +6166,32 @@ int main(int argc, char *argv[])
                 }
                 else
                 {
-                    snprintf(tip, sizeof(tip), "%s", g_current_bank_path);
+#if USE_NATIVE_DLS == TRUE
+                    if (g_bae.mixer &&
+                        (BAEMixer_HasMobileBAEDLSBank(g_bae.mixer) ||
+                         BAEMixer_HasEggsDLSBank(g_bae.mixer)))
+                    {
+                        const char *flavor = "";
+                        if (BAEMixer_HasEggsDLSBank(g_bae.mixer) &&
+                            BAEMixer_HasMobileBAEDLSBank(g_bae.mixer))
+                        {
+                            flavor = "mobileBAE + scrambled eggs / microQ";
+                        }
+                        else if (BAEMixer_HasEggsDLSBank(g_bae.mixer))
+                        {
+                            flavor = "scrambled eggs / microQ";
+                        }
+                        else
+                        {
+                            flavor = "mobileBAE";
+                        }
+                        snprintf(tip, sizeof(tip), "%s  (%s)", g_current_bank_path, flavor);
+                    }
+                    else
+#endif
+                    {
+                        snprintf(tip, sizeof(tip), "%s", g_current_bank_path);
+                    }
                 }
                 int tipLen = (int)strlen(tip);
                 if (tipLen > 0)

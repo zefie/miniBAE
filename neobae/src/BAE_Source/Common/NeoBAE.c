@@ -2553,6 +2553,74 @@ static void PV_UnregisterBankFriendly(BAEBankToken token)
     }
 }
 
+#if USE_NATIVE_DLS == TRUE
+/* DLS banks are not HSB tokens; keep a separate SHA1→friendly lookup. */
+static char g_dlsBankSha1[41];
+static const char *g_dlsBankFriendly;
+
+static void PV_ClearDlsBankFriendly(void)
+{
+    g_dlsBankSha1[0] = '\0';
+    g_dlsBankFriendly = NULL;
+}
+
+static const BankInfo *PV_LookupBankInfoByMemory(const void *pMemory, uint32_t memorySize, char outHex[41])
+{
+    unsigned char digest[20];
+    char hex[41];
+    static const char *hexmap = "0123456789abcdef";
+    int i;
+
+    if (outHex)
+    {
+        outHex[0] = '\0';
+    }
+    /* Same soft cap as HSB file hashing; skip huge blobs. */
+    if (!pMemory || memorySize == 0 || memorySize >= (32u * 1024u * 1024u))
+    {
+        return NULL;
+    }
+
+    sha1mini((const unsigned char *)pMemory, memorySize, digest);
+    for (i = 0; i < 20; i++)
+    {
+        hex[i * 2] = hexmap[digest[i] >> 4];
+        hex[i * 2 + 1] = hexmap[digest[i] & 15];
+    }
+    hex[40] = '\0';
+    if (outHex)
+    {
+        memcpy(outHex, hex, 41);
+    }
+    for (i = 0; i < kBankCount; i++)
+    {
+        if (strcmp(hex, kBanks[i].sha1) == 0)
+        {
+            return &kBanks[i];
+        }
+    }
+    return NULL;
+}
+
+static void PV_RegisterDlsBankFriendly(const void *pMemory, uint32_t memorySize)
+{
+    char hex[41];
+    const BankInfo *info;
+
+    PV_ClearDlsBankFriendly();
+    info = PV_LookupBankInfoByMemory(pMemory, memorySize, hex);
+    if (hex[0])
+    {
+        strncpy(g_dlsBankSha1, hex, 40);
+        g_dlsBankSha1[40] = '\0';
+    }
+    if (info)
+    {
+        g_dlsBankFriendly = info->name;
+    }
+}
+#endif /* USE_NATIVE_DLS */
+
 BAEResult BAE_GetBankFriendlyName(BAEMixer mixer, BAEBankToken token, char *outName, uint32_t outNameSize)
 {
     if (!outName || outNameSize == 0)
@@ -2566,6 +2634,24 @@ BAEResult BAE_GetBankFriendlyName(BAEMixer mixer, BAEBankToken token, char *outN
     strncpy(outName, n, outNameSize - 1);
     outName[outNameSize - 1] = '\0';
     return BAE_NO_ERROR;
+}
+
+BAEResult BAEMixer_GetDLSBankFriendlyName(BAEMixer mixer, char *outName, uint32_t outNameSize)
+{
+    if (!outName || outNameSize == 0)
+        return BAE_PARAM_ERR;
+    outName[0] = '\0';
+    if (!mixer)
+        return BAE_NULL_OBJECT;
+#if USE_NATIVE_DLS == TRUE
+    if (!g_dlsBankFriendly)
+        return BAE_RESOURCE_NOT_FOUND;
+    strncpy(outName, g_dlsBankFriendly, outNameSize - 1);
+    outName[outNameSize - 1] = '\0';
+    return BAE_NO_ERROR;
+#else
+    return BAE_ERROR_FEATURE_UNAVAIL;
+#endif
 }
 // this is used as an ID for song callbacks and such
 
@@ -4415,8 +4501,34 @@ BAEResult BAEMixer_LoadDLSBankFromMemory(BAEMixer mixer, void* pMemory, uint32_t
     BAEResult err;
     if (mixer && mixer->pMixer)
     {
-        OPErr opErr = GM_LoadDLSFromMemory(mixer->pMixer, pMemory, memorySize);
+        char hex[41];
+        const BankInfo *info = PV_LookupBankInfoByMemory(pMemory, memorySize, hex);
+        bool knownMobileBAE = (info && (info->flags & BANKINFO_FLAG_MOBILEBAE) != 0);
+        OPErr opErr;
+
+        /* Bake articulations with quirks when bankinfo flags this as mobileBAE. */
+        if (knownMobileBAE)
+        {
+            GM_DLS_BeginForcedQuirksLoad();
+        }
+        opErr = GM_LoadDLSFromMemory(mixer->pMixer, pMemory, memorySize);
+        if (knownMobileBAE)
+        {
+            GM_DLS_EndForcedQuirksLoad();
+        }
         err = BAE_TranslateOPErr(opErr);
+        if (err == BAE_NO_ERROR)
+        {
+            PV_RegisterDlsBankFriendly(pMemory, memorySize);
+            if (knownMobileBAE)
+            {
+                GM_DLS_MarkMainBankMobileBAE(mixer->pMixer);
+            }
+        }
+        else
+        {
+            PV_ClearDlsBankFriendly();
+        }
     }
     else
     {
@@ -4461,6 +4573,32 @@ int BAEMixer_HasXMFDLSOverlayBank(BAEMixer mixer)
     return (int)GM_DLS_HasXmfEmbeddedBank(mixer->pMixer);
 }
 
+int BAEMixer_HasEggsDLSBank(BAEMixer mixer)
+{
+    if (!(mixer && mixer->pMixer))
+    {
+        return 0;
+    }
+#if USE_NATIVE_DLS == TRUE
+    return (int)GM_DLS_HasEggsBank(mixer->pMixer);
+#else
+    return 0;
+#endif
+}
+
+int BAEMixer_HasMobileBAEDLSBank(BAEMixer mixer)
+{
+    if (!(mixer && mixer->pMixer))
+    {
+        return 0;
+    }
+#if USE_NATIVE_DLS == TRUE
+    return (int)GM_DLS_HasMobileBAEBank(mixer->pMixer);
+#else
+    return 0;
+#endif
+}
+
 BAEResult BAEMixer_LoadDLSBank(BAEMixer mixer, const char* filePath)
 {
     BAEResult err;
@@ -4490,6 +4628,7 @@ BAEResult BAEMixer_UnloadDLSBank(BAEMixer mixer)
     if (mixer && mixer->pMixer)
     {
         GM_Mixer *pMixer = mixer->pMixer;
+        PV_ClearDlsBankFriendly();
 
         // DLS and built-in banks are mutually exclusive render paths.
         // When unloading DLS, force channels back to GM routing so

@@ -595,17 +595,17 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
             goto load_bank_fail;
         }
 
-        // SF2/SF3/SFO/DLS may use a built-in fallback bank internally,
-        // so the generic bank token friendly-name can point at the wrong bank.
-        // In that case, prefer filename-based labeling.
+        // SF2/SF3/SFO may use a built-in fallback bank internally, so the
+        // generic bank token friendly-name can point at the wrong bank.
+        // DLS has its own SHA1→bankinfo lookup (see BAEMixer_GetDLSBankFriendlyName).
         const char *ext = strrchr(path, '.');
+        bool is_dls = (ext && strcasecmp(ext, ".dls") == 0);
         bool prefer_filename_label = false;
         if (ext)
         {
             if (strcasecmp(ext, ".sf2") == 0
                 || strcasecmp(ext, ".sf3") == 0
                 || strcasecmp(ext, ".sfo") == 0
-                || strcasecmp(ext, ".dls") == 0
             )
             {
                 prefer_filename_label = true;
@@ -613,7 +613,24 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
         }
 
         // Use friendly name when reliable, otherwise use filename.
-        const char *friendly_name = prefer_filename_label ? NULL : get_bank_friendly_name();
+        const char *friendly_name = NULL;
+        static char dls_friendly_buf[256];
+        if (is_dls)
+        {
+#if USE_NATIVE_DLS == TRUE
+            if (g_bae.mixer &&
+                BAEMixer_GetDLSBankFriendlyName(g_bae.mixer, dls_friendly_buf,
+                                                sizeof(dls_friendly_buf)) == BAE_NO_ERROR &&
+                dls_friendly_buf[0])
+            {
+                friendly_name = dls_friendly_buf;
+            }
+#endif
+        }
+        else if (!prefer_filename_label)
+        {
+            friendly_name = get_bank_friendly_name();
+        }
         const char *display_name;
 
         if (friendly_name && friendly_name[0])
@@ -650,8 +667,17 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
             save_settings(path, reverb_type, loop_enabled);
         }
 
-        char msg[128];
-        snprintf(msg, sizeof(msg), "Loaded bank: %s", display_name);
+        char msg[160];
+#if USE_NATIVE_DLS == TRUE
+        if (BAEMixer_HasEggsDLSBank(g_bae.mixer))
+        {
+            snprintf(msg, sizeof(msg), "Loaded bank: %s  (scrambled eggs)", display_name);
+        }
+        else
+#endif
+        {
+            snprintf(msg, sizeof(msg), "Loaded bank: %s", display_name);
+        }
         set_status_message(msg); // If external MIDI input is enabled, recreate the mixer so the live
                                  // MIDI routing is attached to a fresh mixer instance with the new
                                  // bank loaded. Protect with a guard to avoid infinite recursion

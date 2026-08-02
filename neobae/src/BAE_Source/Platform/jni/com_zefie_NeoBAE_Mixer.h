@@ -84,6 +84,12 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1setClassicChorus
 JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Mixer__1getClassicChorus
   (JNIEnv *, jclass);
 
+JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Mixer__1hasEggsDLSBank
+  (JNIEnv *, jclass, jlong);
+
+JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Mixer__1hasMobileBAEDLSBank
+  (JNIEnv *, jclass, jlong);
+
 #ifdef __cplusplus
 }
 #endif

@@ -34,6 +34,31 @@
 // don't track native bank tokens can still query a human-friendly string.
 static char g_lastBankFriendly[256] = "";
 
+#if USE_NATIVE_DLS == TRUE
+static void cache_dls_friendly_or_fallback(BAEMixer mixer, const char *fallback)
+{
+	char friendlyBuf[256] = "";
+	if (mixer &&
+		BAEMixer_GetDLSBankFriendlyName(mixer, friendlyBuf, (uint32_t)sizeof(friendlyBuf)) == BAE_NO_ERROR &&
+		friendlyBuf[0] != '\0')
+	{
+		strncpy(g_lastBankFriendly, friendlyBuf, sizeof(g_lastBankFriendly) - 1);
+		g_lastBankFriendly[sizeof(g_lastBankFriendly) - 1] = '\0';
+		return;
+	}
+	if (fallback && fallback[0] != '\0')
+	{
+		strncpy(g_lastBankFriendly, fallback, sizeof(g_lastBankFriendly) - 1);
+		g_lastBankFriendly[sizeof(g_lastBankFriendly) - 1] = '\0';
+	}
+	else
+	{
+		strncpy(g_lastBankFriendly, "DLS Bank", sizeof(g_lastBankFriendly) - 1);
+		g_lastBankFriendly[sizeof(g_lastBankFriendly) - 1] = '\0';
+	}
+}
+#endif
+
 JavaVM* gJavaVM = NULL;
 
 jint JNI_OnLoad(JavaVM* vm, void* reserved)
@@ -450,10 +475,9 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromFile
 		for (const char *p = cpath; *p; ++p) {
 			if (*p == '/' || *p == '\\') base = p + 1;
 		}
-		strncpy(g_lastBankFriendly, base, sizeof(g_lastBankFriendly)-1);
-		g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
+		cache_dls_friendly_or_fallback(mixer, base);
 
-		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Native DLS bank loaded: %s", cpath);
+		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Native DLS bank loaded: %s (display=%s)", cpath, g_lastBankFriendly);
 		(*env)->ReleaseStringUTFChars(env, path, cpath);
 		return 0;
 	}
@@ -614,16 +638,17 @@ JNIEXPORT jstring JNICALL Java_com_zefie_NeoBAE_Mixer__1getBankFriendlyName
 			BAEMixer_SendBankToBack(mixer, token);
 		#endif
 		BAEResult dlsResult = BAEMixer_LoadDLSBankFromMemory(mixer, (void*)mem, (uint32_t)read_total);
-		free(mem);
-		(*env)->ReleaseStringUTFChars(env, assetName, aname);
 		if (dlsResult != BAE_NO_ERROR) {
+			free(mem);
+			(*env)->ReleaseStringUTFChars(env, assetName, aname);
 			__android_log_print(ANDROID_LOG_ERROR, "NeoBAE", "DLS asset load failed: %d", dlsResult);
 			return (jint)dlsResult;
 		}
 		GM_SetMixerDLSMode(TRUE);
-		strncpy(g_lastBankFriendly, aname, sizeof(g_lastBankFriendly)-1);
-		g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
-		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "DLS asset loaded: %s", aname);
+		cache_dls_friendly_or_fallback(mixer, aname);
+		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "DLS asset loaded: %s (display=%s)", aname, g_lastBankFriendly);
+		free(mem);
+		(*env)->ReleaseStringUTFChars(env, assetName, aname);
 		return 0;
 	}
 #endif
@@ -738,9 +763,8 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemory
 				return (jint)dlsResult;
 			}
 			GM_SetMixerDLSMode(TRUE);
-			strncpy(g_lastBankFriendly, "DLS Bank", sizeof(g_lastBankFriendly)-1);
-			g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
-			__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "DLS bank loaded from memory");
+			cache_dls_friendly_or_fallback(mixer, "DLS Bank");
+			__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "DLS bank loaded from memory (display=%s)", g_lastBankFriendly);
 			return 0;
 		}
 	}
@@ -859,19 +883,17 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemoryWithFilena
 				return (jint)dlsResult;
 			}
 			GM_SetMixerDLSMode(TRUE);
-			if (filename) {
-				const char *fname = (*env)->GetStringUTFChars(env, filename, NULL);
-				if (fname) {
-					strncpy(g_lastBankFriendly, fname, sizeof(g_lastBankFriendly)-1);
-					g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
-					(*env)->ReleaseStringUTFChars(env, filename, fname);
-				} else {
-					strncpy(g_lastBankFriendly, "DLS Bank", sizeof(g_lastBankFriendly)-1);
-					g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
+			{
+				const char *fallback = "DLS Bank";
+				const char *fname = NULL;
+				if (filename) {
+					fname = (*env)->GetStringUTFChars(env, filename, NULL);
+					if (fname) fallback = fname;
 				}
-			} else {
-				strncpy(g_lastBankFriendly, "DLS Bank", sizeof(g_lastBankFriendly)-1);
-				g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
+				cache_dls_friendly_or_fallback(mixer, fallback);
+				if (fname) {
+					(*env)->ReleaseStringUTFChars(env, filename, fname);
+				}
 			}
 			__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "DLS bank loaded from memory: %s", g_lastBankFriendly);
 			return 0;
@@ -1009,6 +1031,40 @@ JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Mixer__1getDLSCompatibilityMode
 	GM_DLS_GetMobileBAEQuirks(&quirks);
 	return (jboolean)(quirks ? JNI_FALSE : JNI_TRUE); // inverted: compat mode = quirks disabled
 #else
+	return (jboolean)JNI_FALSE;
+#endif
+}
+
+JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Mixer__1hasEggsDLSBank
+	(JNIEnv* env, jclass clazz, jlong reference)
+{
+	(void)env;
+	(void)clazz;
+#if USE_NATIVE_DLS == TRUE
+	BAEMixer mixer = (BAEMixer)(intptr_t)reference;
+	if (!mixer) {
+		return (jboolean)JNI_FALSE;
+	}
+	return (jboolean)(BAEMixer_HasEggsDLSBank(mixer) ? JNI_TRUE : JNI_FALSE);
+#else
+	(void)reference;
+	return (jboolean)JNI_FALSE;
+#endif
+}
+
+JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Mixer__1hasMobileBAEDLSBank
+	(JNIEnv* env, jclass clazz, jlong reference)
+{
+	(void)env;
+	(void)clazz;
+#if USE_NATIVE_DLS == TRUE
+	BAEMixer mixer = (BAEMixer)(intptr_t)reference;
+	if (!mixer) {
+		return (jboolean)JNI_FALSE;
+	}
+	return (jboolean)(BAEMixer_HasMobileBAEDLSBank(mixer) ? JNI_TRUE : JNI_FALSE);
+#else
+	(void)reference;
 	return (jboolean)JNI_FALSE;
 #endif
 }

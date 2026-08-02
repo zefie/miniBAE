@@ -898,6 +898,20 @@ extern "C"
     //
     int BAEMixer_HasXMFDLSOverlayBank(BAEMixer mixer);
 
+    // BAEMixer_HasEggsDLSBank()
+    // ------------------------------------
+    // Returns non-zero if the active native DLS bank is a microQ "eggs"
+    // (bit-reversed / scrambled) bank.
+    //
+    int BAEMixer_HasEggsDLSBank(BAEMixer mixer);
+
+    // BAEMixer_HasMobileBAEDLSBank()
+    // ------------------------------------
+    // Returns non-zero if the active native DLS bank is treated as MobileBAE
+    // (has a 'pgal' chunk, or matched bankinfo.h BANKINFO_FLAG_MOBILEBAE).
+    //
+    int BAEMixer_HasMobileBAEDLSBank(BAEMixer mixer);
+
     // BAEMixer_UnloadDLSBank()
     // ------------------------------------
     // Unload the active DLS bank
@@ -955,6 +969,15 @@ extern "C"
                                       BAEBankToken token,
                                       char *outName,
                                       uint32_t outNameSize);
+
+    // BAEMixer_GetDLSBankFriendlyName()
+    // ------------------------------------
+    // Same SHA1→bankinfo.h lookup used for HSB/ZSB, but for the active native
+    // DLS bank (DLS has no BAEBankToken). SF2 is intentionally not hashed.
+    // Returns BAE_RESOURCE_NOT_FOUND if unknown / no DLS bank loaded.
+    BAEResult BAEMixer_GetDLSBankFriendlyName(BAEMixer mixer,
+                                              char *outName,
+                                              uint32_t outNameSize);
 
     // BAEMixer_GetGroovoidNameFromBank()
     // ------------------------------------

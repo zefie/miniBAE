@@ -141,6 +141,8 @@ public class Mixer
 	private static native int _setSongNormalizeGain(long reference, int gainPct);
 	private static native int _setDLSCompatibilityMode(boolean enable);
 	private static native boolean _getDLSCompatibilityMode();
+	private static native boolean _hasEggsDLSBank(long reference);
+	private static native boolean _hasMobileBAEDLSBank(long reference);
 	private static native int _determineFileTypeByData(byte[] data, int length);
 	private static native int _loadFromMemory(long mixerReference, byte[] data, LoadResult result);
 	
@@ -221,6 +223,16 @@ public class Mixer
 	}
 	public static int setDLSCompatibilityMode(boolean enable){ return _setDLSCompatibilityMode(enable); }
 	public static boolean getDLSCompatibilityMode(){ return _getDLSCompatibilityMode(); }
+	/** True if the loaded native DLS bank is a microQ "eggs" (scrambled) bank. */
+	public static boolean hasEggsDLSBank(){
+		if (mMixer == null || mMixer.mReference == 0L) return false;
+		return _hasEggsDLSBank(mMixer.mReference);
+	}
+	/** True if the loaded native DLS bank contains a MobileBAE 'pgal' chunk. */
+	public static boolean hasMobileBAEDLSBank(){
+		if (mMixer == null || mMixer.mReference == 0L) return false;
+		return _hasMobileBAEDLSBank(mMixer.mReference);
+	}
 	
 	// Determine file type from raw data (returns BAEFileType constant)
 	public static int determineFileTypeByData(byte[] data, int length) {

@@ -1876,6 +1876,10 @@ OPErr GM_LoadDLSBankFromMemory(void* pMemory, uint32_t memorySize, DLS_Bank** pp
             pgal_state.start = chunk_data;
             pgal_state.pos = chunk_data;
             pgal_state.end = chunk_data + chunk_size;
+            /* pgal marks a MobileBAE bank: force quirks even under -dlscompat. */
+            bank->hasPgal = true;
+            bank->isMobileBAE = true;
+            bank->forceQuirks = true;
         } else if (chunk_id == PV_ReadLE32((const uint8_t*)"colh")) {
             bank->declaredInstrumentCount = PV_ReadLE32(chunk_data);
             if (bank->declaredInstrumentCount > 0) {
@@ -1905,6 +1909,8 @@ OPErr GM_LoadDLSBankFromMemory(void* pMemory, uint32_t memorySize, DLS_Bank** pp
         for (uint32_t off = 8; off + 4 <= cbSize && off + 4 <= ptblSize; off += 4) {
             if (dls_bitrev32(PV_ReadLE32(ptbl_state.start + off)) == DLS_EGGS_MARKER) {
                 bank->eggsArticulators = true;
+                /* QSound hid the microQ layout in a bit-reversed "eggs" tag — scrambled eggs. */
+                debug_message("DLS Parser: scrambled eggs detected (microQ)\n");
                 break;
             }
         }
@@ -1924,20 +1930,30 @@ OPErr GM_LoadDLSBankFromMemory(void* pMemory, uint32_t memorySize, DLS_Bank** pp
         }
     }
     
-    if (lins_state.start) {
-        DLS_Parse_Lins(&lins_state, bank);
-    }
-    bank->instrumentCount = bank->declaredInstrumentCount;
-    if (pgal_state.start) {
-        OPErr pgalErr = DLS_Parse_Pgal(pgal_state.start, (uint32_t)(pgal_state.end - pgal_state.start), bank);
-        if (pgalErr != NO_ERR) {
-            GM_UnloadDLSBank(bank);
-            *ppBank = NULL;
-            return pgalErr;
+    /* Bake articulations with MobileBAE quirks when pgal is present, matching
+     * XMF-overlay load (forceQuirks banks must not inherit -dlscompat bake). */
+    {
+        bool savedQuirks = g_use_mobilebae_quirks;
+        if (bank->forceQuirks) {
+            g_use_mobilebae_quirks = true;
         }
-    }
-    if (wvpl_state.start) {
-        DLS_Parse_Wvpl(&wvpl_state, bank, poolOffsets, poolOffsetCount);
+        if (lins_state.start) {
+            DLS_Parse_Lins(&lins_state, bank);
+        }
+        bank->instrumentCount = bank->declaredInstrumentCount;
+        if (pgal_state.start) {
+            OPErr pgalErr = DLS_Parse_Pgal(pgal_state.start, (uint32_t)(pgal_state.end - pgal_state.start), bank);
+            if (pgalErr != NO_ERR) {
+                g_use_mobilebae_quirks = savedQuirks;
+                GM_UnloadDLSBank(bank);
+                *ppBank = NULL;
+                return pgalErr;
+            }
+        }
+        if (wvpl_state.start) {
+            DLS_Parse_Wvpl(&wvpl_state, bank, poolOffsets, poolOffsetCount);
+        }
+        g_use_mobilebae_quirks = savedQuirks;
     }
 
     if (poolOffsets) {
@@ -2458,6 +2474,69 @@ bool GM_DLS_HasXmfEmbeddedBank(struct GM_Mixer* pMixer)
         return false;
     }
     return (((DLS_Synth*)pMixer->pDLSSynth)->banks[1] != NULL);
+}
+
+bool GM_DLS_HasEggsBank(struct GM_Mixer* pMixer)
+{
+    DLS_Synth* synth;
+    if (!pMixer || !pMixer->pDLSSynth) {
+        return false;
+    }
+    synth = (DLS_Synth*)pMixer->pDLSSynth;
+    if (synth->banks[0] && synth->banks[0]->eggsArticulators) return true;
+    if (synth->banks[1] && synth->banks[1]->eggsArticulators) return true;
+    return false;
+}
+
+bool GM_DLS_HasMobileBAEBank(struct GM_Mixer* pMixer)
+{
+    DLS_Synth* synth;
+    if (!pMixer || !pMixer->pDLSSynth) {
+        return false;
+    }
+    synth = (DLS_Synth*)pMixer->pDLSSynth;
+    if (synth->banks[0] && synth->banks[0]->isMobileBAE) return true;
+    if (synth->banks[1] && synth->banks[1]->isMobileBAE) return true;
+    return false;
+}
+
+static bool g_forced_quirks_load_active = false;
+static bool g_forced_quirks_load_saved = false;
+
+void GM_DLS_BeginForcedQuirksLoad(void)
+{
+    if (g_forced_quirks_load_active) {
+        return;
+    }
+    g_forced_quirks_load_saved = g_use_mobilebae_quirks;
+    g_use_mobilebae_quirks = true;
+    g_forced_quirks_load_active = true;
+}
+
+void GM_DLS_EndForcedQuirksLoad(void)
+{
+    if (!g_forced_quirks_load_active) {
+        return;
+    }
+    g_use_mobilebae_quirks = g_forced_quirks_load_saved;
+    g_forced_quirks_load_active = false;
+}
+
+void GM_DLS_MarkMainBankMobileBAE(struct GM_Mixer* pMixer)
+{
+    DLS_Synth* synth;
+    DLS_Bank* bank;
+    if (!pMixer || !pMixer->pDLSSynth) {
+        return;
+    }
+    synth = (DLS_Synth*)pMixer->pDLSSynth;
+    bank = synth->banks[0];
+    if (!bank) {
+        return;
+    }
+    bank->isMobileBAE = true;
+    bank->forceQuirks = true;
+    dls_refresh_current_synth_for_mode();
 }
 
 uint16_t GM_DLS_GetActiveVoiceCount(struct GM_Mixer* pMixer) {
