@@ -16,6 +16,10 @@ Testing/
 
 local.properties
 .idea/
+neobae/foobar2000/lib/libneobae*
+neobae/foobar2000/bin
+neobae/foobar2000/Release
+neobae/foobar2000/Debug
 neobae/bin/
 neobae/out/
 neobae/.vscode/
