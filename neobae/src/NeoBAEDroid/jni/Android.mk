@@ -379,7 +379,7 @@ LOCAL_C_INCLUDES := \
 	$(LOCAL_PATH)/../thirdparty/opus/silk/float \
 	$(LOCAL_PATH)/../thirdparty/opusfile/src \
 	$(LOCAL_PATH)/../thirdparty/opusfile/include
-LOCAL_CFLAGS := -DOPUS_BUILD=1 -DVAR_ARRAYS=1 -D__ANDROID__=1
+LOCAL_CFLAGS := -DOPUS_BUILD=1 -DVAR_ARRAYS=1 -D__ANDROID__=1 -DPACKAGE_VERSION=\"1.5.0\" # Opus version
 ifeq ($(TARGET_ARCH_ABI), armeabi-v7a)
 LOCAL_ARM_MODE := arm
 endif
