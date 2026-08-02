@@ -251,8 +251,8 @@
 #include "GenSF2_FluidLite.h" // FluidSynth integration
 #endif
 #include "NeoBAE.h"
-#include "GenBankBalance.h"
 #endif
+#include "GenBankBalance.h"
 
 #define DEBUG_DISPLAY_PATCHES   1
 
