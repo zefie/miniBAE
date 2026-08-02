@@ -1758,12 +1758,6 @@ bool bae_play(bool *playing)
 #endif
                     BAESong_Preroll(g_bae.song);
                     Settings settings = load_settings();
-#if USE_SF2_SUPPORT == TRUE
-                    bool isSF2Song = BAESong_IsSF2Song(g_bae.song);
-#endif
-#if USE_NATIVE_DLS == TRUE
-                    bool isDLSSong = BAESong_IsDLSSong(g_bae.song);
-#endif
 
                     BAESong_SetVelocityCurve(g_bae.song, settings.volume_curve);
                     /* Match estimate FX padding to what playback will use. */

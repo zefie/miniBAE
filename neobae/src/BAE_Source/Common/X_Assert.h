@@ -99,6 +99,9 @@ void debug_message(const char *format, ...);
         #include <windows.h>
     #endif
 
+#if defined(__GNUC__) || defined(__clang__)
+    __attribute__((unused))
+#endif
     static void get_executable_directory(char *buffer, size_t size) {
         if (buffer && size > 0) {
 #if (X_PLATFORM == X_RAYLIB)
@@ -135,6 +138,9 @@ void debug_message(const char *format, ...);
            own definitions and corrupting #if TRUE guards throughout the engine. */
         extern int _NSGetExecutablePath(char *buf, unsigned int *bufsize);
     #endif
+#if defined(__GNUC__) || defined(__clang__)
+    __attribute__((unused))
+#endif
     static void get_executable_directory(char *buffer, size_t size) {
         if (buffer && size > 0) {
 #ifdef __APPLE__

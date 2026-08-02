@@ -1789,10 +1789,7 @@ void script_editor_render(void)
             ? (g_is_dark_mode ? (SDL_Color){70, 70, 70, 255} : (SDL_Color){210, 210, 210, 255})
             : (g_is_dark_mode ? (SDL_Color){55, 55, 55, 255} : (SDL_Color){225, 225, 225, 255});
         draw_se_rect(R, openR.x, openR.y, openR.w, openR.h, btn_bg);
-        draw_se_rect(R, openR.x, openR.y, openR.w, 1, sep);
-        draw_se_rect(R, openR.x, openR.y + openR.h - 1, openR.w, 1, sep);
-        draw_se_rect(R, openR.x, openR.y, 1, openR.h, sep);
-        draw_se_rect(R, openR.x + openR.w - 1, openR.y, 1, openR.h, sep);
+        draw_se_frame(R, openR.x, openR.y, openR.w, openR.h, sep);
         draw_text(R, openR.x + btn_pad, openR.y + (btn_h - th_open) / 2, "Open", label_col);
 
         /* Save button */
@@ -1804,10 +1801,7 @@ void script_editor_render(void)
             ? (g_is_dark_mode ? (SDL_Color){70, 70, 70, 255} : (SDL_Color){210, 210, 210, 255})
             : (g_is_dark_mode ? (SDL_Color){55, 55, 55, 255} : (SDL_Color){225, 225, 225, 255});
         draw_se_rect(R, saveR.x, saveR.y, saveR.w, saveR.h, btn_bg);
-        draw_se_rect(R, saveR.x, saveR.y, saveR.w, 1, sep);
-        draw_se_rect(R, saveR.x, saveR.y + saveR.h - 1, saveR.w, 1, sep);
-        draw_se_rect(R, saveR.x, saveR.y, 1, saveR.h, sep);
-        draw_se_rect(R, saveR.x + saveR.w - 1, saveR.y, 1, saveR.h, sep);
+        draw_se_frame(R, saveR.x, saveR.y, saveR.w, saveR.h, sep);
         draw_text(R, saveR.x + btn_pad, saveR.y + (btn_h - th_save) / 2, "Save", label_col);
 
         /* Save As button */
@@ -1819,10 +1813,7 @@ void script_editor_render(void)
             ? (g_is_dark_mode ? (SDL_Color){70, 70, 70, 255} : (SDL_Color){210, 210, 210, 255})
             : (g_is_dark_mode ? (SDL_Color){55, 55, 55, 255} : (SDL_Color){225, 225, 225, 255});
         draw_se_rect(R, saveasR.x, saveasR.y, saveasR.w, saveasR.h, btn_bg);
-        draw_se_rect(R, saveasR.x, saveasR.y, saveasR.w, 1, sep);
-        draw_se_rect(R, saveasR.x, saveasR.y + saveasR.h - 1, saveasR.w, 1, sep);
-        draw_se_rect(R, saveasR.x, saveasR.y, 1, saveasR.h, sep);
-        draw_se_rect(R, saveasR.x + saveasR.w - 1, saveasR.y, 1, saveasR.h, sep);
+        draw_se_frame(R, saveasR.x, saveasR.y, saveasR.w, saveasR.h, sep);
         draw_text(R, saveasR.x + btn_pad, saveasR.y + (btn_h - th_saveas) / 2, "Save As", label_col);
 
         /* Close button */
@@ -1836,10 +1827,7 @@ void script_editor_render(void)
             ? (g_is_dark_mode ? (SDL_Color){70, 70, 70, 255} : (SDL_Color){210, 210, 210, 255})
             : (g_is_dark_mode ? (SDL_Color){55, 55, 55, 255} : (SDL_Color){225, 225, 225, 255});
         draw_se_rect(R, closeR.x, closeR.y, closeR.w, closeR.h, btn_bg);
-        draw_se_rect(R, closeR.x, closeR.y, closeR.w, 1, sep);
-        draw_se_rect(R, closeR.x, closeR.y + closeR.h - 1, closeR.w, 1, sep);
-        draw_se_rect(R, closeR.x, closeR.y, 1, closeR.h, sep);
-        draw_se_rect(R, closeR.x + closeR.w - 1, closeR.y, 1, closeR.h, sep);
+        draw_se_frame(R, closeR.x, closeR.y, closeR.w, closeR.h, sep);
         draw_text(R, closeR.x + btn_pad, closeR.y + (btn_h - th_close) / 2, "Close", label_col);
     }
 

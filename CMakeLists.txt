@@ -1581,6 +1581,7 @@ function(bae_apply_compile_definitions target)
       GIT_DIRTY=$<IF:$<BOOL:${BAE_GIT_DIRTY}>,1,0>
       SUPPORT_MIDI_HW=$<IF:$<BOOL:${BAE_ENABLE_MIDI_HARDWARE}>,1,0>
   )
+  target_compile_options(${target} PRIVATE -Wall)
 endfunction()
 
 target_compile_options(neobae PRIVATE -w)
