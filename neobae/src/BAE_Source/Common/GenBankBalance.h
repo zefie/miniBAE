@@ -53,6 +53,11 @@ float GM_BankBalance_GetMixScale(GM_BankEngine engine);
 /* TRUE when two or more engines have measured loudness and scales are applied. */
 bool GM_BankBalance_IsActive(void);
 
+/* TRUE when this song should apply the HSB/RMF BankBalance mix scale on note-on
+   and in the MIDI peak estimate. Pure RMF/ZMF with an unused external DLS/SF2
+   bank loaded must stay at 1.0 so normalize matches unscaled playback. */
+bool GM_BankBalance_SongAppliesHsbMixScale(struct GM_Song *pSong);
+
 /* --- MIDI+patch song peak estimate (SCAN_ESTIMATE_PEAK) --- */
 
 /* Reset concurrent-note energy tracker before a scan. */

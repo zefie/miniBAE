@@ -551,22 +551,29 @@ void PV_ConfigureInstruments(GM_Song *theSong)
     // This ensures notes are routed correctly even if no program change has occurred first.
     for (count = 0; count < MAX_CHANNELS; count++)
     {
+        if (theSong->songFlags & SONG_FLAG_IS_RMF)
+        {
+            /* RMF/ZMF: prefer embedded INST/ADSR. Note-on hybrid resolve can
+               escalate individual channels to DLS when a patch is missing. */
+            theSong->channelType[count] = CHANNEL_TYPE_RMF;
+        }
 #if USE_NATIVE_DLS == TRUE
-        if (GM_GetMixerDLSMode())
+        else if (GM_GetMixerDLSMode())
         {
             // Non-RMF song with DLS available
             theSong->channelType[count] = CHANNEL_TYPE_DLS;
-        } else
+        }
 #endif
-#if USE_SF2_SUPPORT == TRUE        
-        if (GM_SF2_IsActive())
+#if USE_SF2_SUPPORT == TRUE
+        else if (GM_SF2_IsActive())
         {
             // Non-RMF song with SF2 available
             theSong->channelType[count] = CHANNEL_TYPE_SF2;
-        } else
+        }
 #endif
+        else
         {
-            // Non-RMF song without SF2
+            // Non-RMF song without SF2/DLS
             theSong->channelType[count] = CHANNEL_TYPE_GM;
         }
     }
@@ -1854,10 +1861,11 @@ void PV_FreePatchInfo(GM_Song *pSong)
 static int16_t PV_ConvertPatchBank(GM_Song *pSong, int16_t thePatch, int16_t theChannel);
 
 // Returns TRUE when a requested patch should be rendered by RMF/ZMF built-in content
-// (embedded instrument or explicit song remap/override), even if SF2 mode is active.
+// (embedded instrument or explicit song remap/override), even if SF2/DLS mode is active.
 static bool PV_ShouldUseRMFInstrumentForPatch(GM_Song *pSong, int16_t patch)
 {
     XLongResourceID remapped;
+    XLongResourceID lookup;
     uint32_t bankId, progId, noteId;
 
 #if USE_SF2_SUPPORT != TRUE && USE_NATIVE_DLS != TRUE
@@ -1885,22 +1893,48 @@ static bool PV_ShouldUseRMFInstrumentForPatch(GM_Song *pSong, int16_t patch)
         return TRUE;
     }
 
-    // Keep legacy compatibility: bank 1/2 requests are RMF banks.
-    bankId = 0;
-    progId = 0;
-    noteId = 0;
-    TranslateInstrumentToBankProgram((uint32_t)patch, &bankId, &progId, &noteId);
-    if ((bankId == 1 || bankId == 2) && (pSong->songFlags & SONG_FLAG_IS_RMF))
-    {
-        return TRUE;
-    }
-
     for (uint32_t i = 1; i <= pSong->RMFInstrumentIDs[0]; i++)
     {
         if (pSong->RMFInstrumentIDs[i] == (uint32_t)patch ||
             pSong->RMFInstrumentIDs[i] == (uint32_t)remapped)
         {
             return TRUE;
+        }
+    }
+
+    /* Legacy bank 1/2 numbering is RMF-oriented, but only when the INST is
+       actually loaded. Empty bank 1/2 slots must fall through to GM/DLS/SF2. */
+    bankId = 0;
+    progId = 0;
+    noteId = 0;
+    TranslateInstrumentToBankProgram((uint32_t)patch, &bankId, &progId, &noteId);
+    if ((bankId == 1 || bankId == 2) && (pSong->songFlags & SONG_FLAG_IS_RMF))
+    {
+        lookup = (XLongResourceID)pSong->remapArray[patch];
+        if (lookup >= 0 && lookup < (MAX_INSTRUMENTS * MAX_BANKS) &&
+            pSong->instrumentData[lookup] != NULL)
+        {
+            return TRUE;
+        }
+        if (pSong->instrumentData[patch] != NULL)
+        {
+            return TRUE;
+        }
+    }
+
+    /* Percussion / GM patch numbers may resolve through remapArray to an
+       embedded INST id (listed in RMFInstrumentIDs). Only treat loaded data as
+       RMF when it is one of those embedded resources — not host HSB fillers. */
+    lookup = (XLongResourceID)pSong->remapArray[patch];
+    if (lookup >= 0 && lookup < (MAX_INSTRUMENTS * MAX_BANKS) &&
+        pSong->instrumentData[lookup] != NULL)
+    {
+        for (uint32_t i = 1; i <= pSong->RMFInstrumentIDs[0]; i++)
+        {
+            if (pSong->RMFInstrumentIDs[i] == (uint32_t)lookup)
+            {
+                return TRUE;
+            }
         }
     }
 
@@ -2116,7 +2150,8 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                     bool routedToDLS = FALSE;
 #if USE_NATIVE_DLS == TRUE
                     // Mixed mode: if native DLS is active and has this program, route channel to DLS.
-                    if (GM_IsDLSSong(pSong) || GM_DLS_HasXmfEmbeddedBank(pSong->pMixer))
+                    // Include mixer DLS mode so RMF/ZMF hole-fills still bind when isDLSSong is false.
+                    if (GM_IsDLSSong(pSong) || GM_GetMixerDLSMode() || GM_DLS_HasXmfEmbeddedBank(pSong->pMixer))
                     {
                         if (PV_DLS_TryProgramWithXmfFallback(pSong, MIDIChannel, theBank, thePatch))
                         {
@@ -2136,10 +2171,11 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                 }
 #endif
 #if USE_NATIVE_DLS == TRUE
-                else if (GM_IsDLSSong(pSong) || GM_DLS_HasXmfEmbeddedBank(pSong->pMixer))
+                else if (GM_IsDLSSong(pSong) || GM_GetMixerDLSMode() || GM_DLS_HasXmfEmbeddedBank(pSong->pMixer))
                 {
                     // Native DLS or XMF overlay path: use DLS when the preset exists,
                     // otherwise fall back to the loaded HSB bank.
+                    // Mixer DLS mode covers RMF/ZMF hole-fills (isDLSSong stays false for RMF).
                     if (PV_DLS_TryProgramWithXmfFallback(pSong, MIDIChannel, theBank, thePatch))
                     {
                         pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
@@ -2494,6 +2530,7 @@ static float PV_HsbRmfMixVolumeScale(GM_Song *pSong)
     (void)pSong;
     return GM_BankBalance_GetMixScale(GM_BANK_ENGINE_HSB);
 }
+
 #endif
 
 // Process note on
@@ -2564,42 +2601,93 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
                 else
 #endif
 #if USE_NATIVE_DLS == TRUE
-                if ((GM_IsDLSSong(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_DLS) &&
-                    pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF)
+                /* RMF/ZMF: keep embedded INST/ADSR on the HSB path. An external DLS
+                   bank alone must not steal embedded INST voices or attenuate a pure
+                   RMF song. BankBalance scale applies only when this song actually
+                   mixes with SF2/DLS. DLS remains an explicit hole-fill. */
+                if (pSong->songFlags & SONG_FLAG_IS_RMF)
                 {
-                    if (pSong->songFlags & SONG_FLAG_IS_RMF)
+                    /* Honor a channel already bound to DLS at program-change time. */
+                    if (pSong->channelType[MIDIChannel] == CHANNEL_TYPE_DLS)
+                    {
+                        GM_DLS_ProcessNoteOn(pSong, MIDIChannel, note, volume);
+                    }
+                    else
                     {
                         int16_t rmfPatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
                         if (PV_ShouldUseRMFInstrumentForPatch(pSong, rmfPatch))
                         {
                             pSong->channelType[MIDIChannel] = CHANNEL_TYPE_RMF;
+                            if (GM_BankBalance_SongAppliesHsbMixScale(pSong))
+                            {
+                                volume = (int16_t)(volume * sf2_dls_rmf_volume_multiplier);
+                            }
+                            PV_StartMIDINote(pSong, rmfPatch, MIDIChannel, currentTrack, note, volume);
                         }
-                        else
+                        else if (GM_GetMixerDLSMode())
                         {
                             int16_t checkProgram = pSong->channelProgram[MIDIChannel];
+                            int32_t theBank;
                             if (checkProgram < 0) { checkProgram = 0; }
-                            if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)PV_ConvertPatchBank(pSong, checkProgram, MIDIChannel)))
+
+                            /* Same bank math as ProcessProgramChange DLS bind. */
+                            theBank = pSong->channelRawBank[MIDIChannel];
+                            switch (pSong->channelBankMode[MIDIChannel])
+                            {
+                            default:
+                            case USE_GM_DEFAULT:
+                                if (MIDIChannel == PERCUSSION_CHANNEL)
+                                    theBank = (theBank * 2) + 1;
+                                else
+                                    theBank = theBank * 2 + 0;
+                                break;
+                            case USE_NON_GM_PERC_BANK:
+                            case USE_GM_PERC_BANK:
+                                theBank = (theBank * 2) + 1;
+                                break;
+                            case USE_NORM_BANK:
+                                theBank = theBank * 2 + 0;
+                                break;
+                            }
+
+                            if (PV_DLS_TryProgramWithXmfFallback(pSong, MIDIChannel, theBank, checkProgram))
                             {
                                 pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
+                                GM_DLS_ProcessNoteOn(pSong, MIDIChannel, note, volume);
                             }
                             else
                             {
-                                PV_DLS_AssignChannelTypeAfterMiss(pSong, MIDIChannel);
+                                pSong->channelType[MIDIChannel] = CHANNEL_TYPE_RMF;
+                                if (GM_BankBalance_SongAppliesHsbMixScale(pSong))
+                                {
+                                    volume = (int16_t)(volume * sf2_dls_rmf_volume_multiplier);
+                                }
+                                PV_StartMIDINote(pSong, rmfPatch, MIDIChannel, currentTrack, note, volume);
                             }
-                        }
-                    }
-                    else
-                    {
-                        int16_t checkProgram = pSong->channelProgram[MIDIChannel];
-                        if (checkProgram < 0) { checkProgram = 0; }
-                        if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)PV_ConvertPatchBank(pSong, checkProgram, MIDIChannel)))
-                        {
-                            pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
                         }
                         else
                         {
-                            PV_DLS_AssignChannelTypeAfterMiss(pSong, MIDIChannel);
+                            pSong->channelType[MIDIChannel] = CHANNEL_TYPE_RMF;
+                            if (GM_BankBalance_SongAppliesHsbMixScale(pSong))
+                            {
+                                volume = (int16_t)(volume * sf2_dls_rmf_volume_multiplier);
+                            }
+                            PV_StartMIDINote(pSong, rmfPatch, MIDIChannel, currentTrack, note, volume);
                         }
+                    }
+                }
+                else if ((GM_IsDLSSong(pSong) || pSong->channelType[MIDIChannel] == CHANNEL_TYPE_DLS) &&
+                         pSong->channelType[MIDIChannel] != CHANNEL_TYPE_RMF)
+                {
+                    int16_t checkProgram = pSong->channelProgram[MIDIChannel];
+                    if (checkProgram < 0) { checkProgram = 0; }
+                    if (GM_DLS_HasProgram(pSong, (uint16_t)MIDIChannel, (uint16_t)PV_ConvertPatchBank(pSong, checkProgram, MIDIChannel)))
+                    {
+                        pSong->channelType[MIDIChannel] = CHANNEL_TYPE_DLS;
+                    }
+                    else
+                    {
+                        PV_DLS_AssignChannelTypeAfterMiss(pSong, MIDIChannel);
                     }
 
                     if (pSong->channelType[MIDIChannel] == CHANNEL_TYPE_DLS)
@@ -2614,7 +2702,7 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
 #endif
                     else
                     {
-                        /* HSB/RMF fallback (e.g. drums when XMF DLS has no perc bank) */
+                        /* HSB fallback (e.g. drums when XMF DLS has no perc bank) */
                         volume = (int16_t)(volume * sf2_dls_rmf_volume_multiplier);
                         thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
                         PV_StartMIDINote(pSong, thePatch, MIDIChannel, currentTrack, note, volume);

@@ -543,7 +543,13 @@ OPErr GM_PrerollSong(GM_Song *pSong, GM_SongCallbackProcPtr theCallbackProc,
 #if USE_NATIVE_DLS == TRUE
         if (pSong->pMixer && pSong->pMixer->isDLS)
         {
-            pSong->isDLSSong = TRUE;
+            /* External DLS bank available: mark MIDI/XMF as DLS songs, but keep
+               RMF/ZMF on INST/ADSR. Hybrid note-on still falls back to DLS for
+               patches that are not embedded in the RMF. */
+            if ((pSong->songFlags & SONG_FLAG_IS_RMF) == 0)
+            {
+                pSong->isDLSSong = TRUE;
+            }
             // Prevent stale channel/program bindings from prior songs causing silent note-ons.
             GM_DLS_ResetForSong(pSong);
         }

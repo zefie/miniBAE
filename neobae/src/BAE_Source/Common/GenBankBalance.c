@@ -906,6 +906,35 @@ bool GM_BankBalance_IsActive(void)
     return g_active;
 }
 
+bool GM_BankBalance_SongAppliesHsbMixScale(struct GM_Song *pSong)
+{
+    int i;
+
+    if (!pSong || !g_active)
+        return FALSE;
+
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
+    if (GM_IsSF2Song(pSong))
+        return TRUE;
+#endif
+#if USE_NATIVE_DLS == TRUE
+    if (GM_IsDLSSong(pSong))
+        return TRUE;
+#endif
+    for (i = 0; i < MAX_CHANNELS; i++)
+    {
+#if USE_SF2_SUPPORT == TRUE
+        if (pSong->channelType[i] == CHANNEL_TYPE_SF2)
+            return TRUE;
+#endif
+#if USE_NATIVE_DLS == TRUE
+        if (pSong->channelType[i] == CHANNEL_TYPE_DLS)
+            return TRUE;
+#endif
+    }
+    return FALSE;
+}
+
 /* ---- MIDI+patch song peak estimate -------------------------------------- */
 
 enum { kEstimateMaxChannels = 16 };
@@ -1109,7 +1138,11 @@ float GM_EstimateNoteLoudness(GM_Song *pSong, int16_t channel, int16_t note, int
         level = PV_MeasureInstrumentLoudnessAtKey(pSong->instrumentData[thePatch], note);
         level *= ((float)kHsbPathGainNum / (float)kHsbPathGainDen);
     }
-    return level * GM_BankBalance_GetMixScale(GM_BANK_ENGINE_HSB);
+    /* Match note-on: do not attenuate pure RMF/ZMF just because a host DLS/SF2
+       bank is loaded. Otherwise MIDI normalize under-estimates peak and boosts. */
+    if (GM_BankBalance_SongAppliesHsbMixScale(pSong))
+        return level * GM_BankBalance_GetMixScale(GM_BANK_ENGINE_HSB);
+    return level;
 }
 
 static void PV_EstimatePeak_UpdateMax(void)

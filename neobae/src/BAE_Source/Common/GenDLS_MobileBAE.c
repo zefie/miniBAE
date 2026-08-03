@@ -2537,6 +2537,25 @@ bool GM_IsDLSSong(GM_Song* pSong) {
     return false;
 }
 
+bool GM_DLS_SongNeedsRender(GM_Song* pSong) {
+    int16_t i;
+
+    if (!pSong) {
+        return false;
+    }
+    if (pSong->isDLSSong) {
+        return true;
+    }
+    /* Hybrid RMF/ZMF + external DLS: isDLSSong stays false so embedded INST
+       routing is preserved, but DLS hole-fill channels still need a mix slice. */
+    for (i = 0; i < MAX_CHANNELS; i++) {
+        if (pSong->channelType[i] == CHANNEL_TYPE_DLS) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool GM_DLS_HasXmfEmbeddedBank(struct GM_Mixer* pMixer)
 {
     if (!pMixer || !pMixer->pDLSSynth) {

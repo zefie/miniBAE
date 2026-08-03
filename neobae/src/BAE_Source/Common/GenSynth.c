@@ -2666,7 +2666,7 @@ INLINE static void PV_ServeInstruments(void)
             }
 #endif
 #if USE_NATIVE_DLS == TRUE
-            if (song && GM_IsDLSSong(song))
+            if (song && GM_DLS_SongNeedsRender(song))
             {
                 GM_DLS_RenderAudioSlice(song, (int32_t *)pMixer->songBufferDry, NULL, NULL, pMixer->One_Loop);
             }
@@ -2736,7 +2736,7 @@ INLINE static void PV_ServeInstruments(void)
                 }
 #endif
 #if USE_NATIVE_DLS == TRUE
-                if (song && GM_IsDLSSong(song))
+                if (song && GM_DLS_SongNeedsRender(song))
                 {
                     GM_DLS_RenderAudioSlice(song, (int32_t *)pMixer->songBufferDry, 
                                            (int32_t *)pMixer->songBufferReverb,
@@ -2822,7 +2822,7 @@ INLINE static void PV_ServeInstruments(void)
                 }
 #endif
 #if USE_NATIVE_DLS == TRUE
-                if (song && GM_IsDLSSong(song))
+                if (song && GM_DLS_SongNeedsRender(song))
                 {
                     GM_DLS_RenderAudioSlice(song, (int32_t *)pMixer->songBufferDry, 
                                            (int32_t *)pMixer->songBufferReverb,
@@ -4512,7 +4512,7 @@ void GM_EndSongNotes(GM_Song *pSong)
 {
     PV_EndNotes(pSong, -1, -1, FALSE);
 #if USE_NATIVE_DLS == TRUE
-    if (pSong && GM_IsDLSSong(pSong)) {
+    if (pSong && GM_DLS_SongNeedsRender(pSong)) {
         GM_DLS_AllNotesOff(pSong, -1, false);
     }
 #endif
@@ -4523,7 +4523,7 @@ void GM_EndSongChannelNotes(GM_Song *pSong, int16_t channel)
 {
     PV_EndNotes(pSong, channel, -1, FALSE);
 #if USE_NATIVE_DLS == TRUE
-    if (pSong && GM_IsDLSSong(pSong)) {
+    if (pSong && GM_DLS_SongNeedsRender(pSong)) {
         GM_DLS_AllNotesOff(pSong, channel, false);
     }
 #endif
@@ -4541,7 +4541,7 @@ void GM_KillSongNotes(GM_Song *pSong)
 {
     PV_EndNotes(pSong, -1, -1, TRUE);
 #if USE_NATIVE_DLS == TRUE
-    if (pSong && GM_IsDLSSong(pSong)) {
+    if (pSong && GM_DLS_SongNeedsRender(pSong)) {
         GM_DLS_AllNotesOff(pSong, -1, true);
     }
 #endif

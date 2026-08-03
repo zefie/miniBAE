@@ -191,6 +191,9 @@ float GM_DLS_EstimateNoteLoudness(struct GM_Song* pSong, int16_t channel,
 OPErr GM_InitDLSSynth(DLS_Synth** ppSynth, int32_t sampleRate);
 void GM_FinisDLSSynth(DLS_Synth* pSynth);
 bool GM_IsDLSSong(GM_Song* pSong);
+/* TRUE when the song should run the DLS render/note-off path: full DLS songs,
+   or hybrid RMF/GM songs that have bound at least one CHANNEL_TYPE_DLS. */
+bool GM_DLS_SongNeedsRender(GM_Song* pSong);
 bool GM_DLS_HasXmfEmbeddedBank(struct GM_Mixer* pMixer);
 /* True if main or XMF-overlay DLS bank is a microQ "eggs" (scrambled) bank. */
 bool GM_DLS_HasEggsBank(struct GM_Mixer* pMixer);
