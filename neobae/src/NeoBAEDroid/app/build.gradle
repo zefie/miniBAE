@@ -1,45 +1,46 @@
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-
 plugins {
     id 'com.android.application'
-    id 'org.jetbrains.kotlin.android'
-    id 'org.jetbrains.kotlin.plugin.compose' // Added
+    // AGP 9 provides built-in Kotlin; keep only the Compose compiler plugin.
+    id 'org.jetbrains.kotlin.plugin.compose'
 }
 
 android {
-    namespace "com.zefie.NeoBAEDroid"
-    compileSdk 36
+    namespace = "com.zefie.NeoBAEDroid"
+    compileSdk = 36
 
     defaultConfig {
-        applicationId "com.zefie.NeoBAEDroid"
-        minSdk 24
-        targetSdk 36
-        versionCode 16
-        versionName "1.0.15"
+        applicationId = "com.zefie.NeoBAEDroid"
+        minSdk = 24
+        targetSdk = 36
+        versionCode = 16
+        versionName = "1.0.15"
         ndk {
-            abiFilters 'armeabi-v7a','arm64-v8a','x86','x86_64'
+            abiFilters += ['armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64']
         }
-        ndkVersion "27.0.12077973"
+        ndkVersion = "27.0.12077973"
     }
 
     buildTypes {
         release {
-            minifyEnabled true
-            shrinkResources true
-            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            minifyEnabled = true
+            shrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile('proguard-android-optimize.txt'),
+                'proguard-rules.pro'
+            )
         }
     }
 
-    flavorDimensions "distribution"
+    flavorDimensions += "distribution"
     productFlavors {
         apk {
-            dimension "distribution"
+            dimension = "distribution"
             buildConfigField "boolean", "USE_MANAGE_EXTERNAL_STORAGE", "true"
-            applicationIdSuffix ".NoSAF"
+            applicationIdSuffix = ".NoSAF"
             resValue "string", "app_name", "NeoBAE"
         }
         play {
-            dimension "distribution"
+            dimension = "distribution"
             buildConfigField "boolean", "USE_MANAGE_EXTERNAL_STORAGE", "false"
             resValue "string", "app_name", "NeoBAE"
         }
@@ -47,7 +48,7 @@ android {
 
     externalNativeBuild {
         ndkBuild {
-            path file('../jni/Android.mk')
+            path = file('../jni/Android.mk')
         }
     }
 
@@ -58,13 +59,15 @@ android {
     }
 
     buildFeatures {
-        compose true
-        buildConfig true
+        compose = true
+        buildConfig = true
+        // Required for productFlavor resValue (AGP 9 no longer defaults this on).
+        resValues = true
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_11
-        targetCompatibility JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
     }
 
     testOptions {
@@ -72,9 +75,12 @@ android {
             enabled = false
         }
     }
+}
 
-    // It's also common to define the compiler version directly in the plugin block if needed,
-    // or rely on the versions brought in by your Compose BOM.
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_11
+    }
 }
 
 dependencies {
@@ -101,14 +107,4 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2'
 
     debugImplementation 'androidx.compose.ui:ui-tooling'
-
-    // Add the Compose compiler dependency (often not needed if using the plugin and BOM correctly)
-    // implementation "androidx.compose.compiler:compiler:LATEST_COMPATIBLE_VERSION"
-}
-
-// Ensure Kotlin compiler produces Java 11 bytecode to match Java compile task
-tasks.withType(KotlinCompile).configureEach {
-    kotlinOptions {
-        jvmTarget = "11"
-    }
 }
