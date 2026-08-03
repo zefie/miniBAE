@@ -2290,6 +2290,33 @@ static float PV_DLS_LoudnessInt16(const int16_t *pcm, uint32_t frames, int chann
     }
 }
 
+/* Peak sample amplitude for MIDI normalize estimates. BankBalance keeps the
+ * RMS-biased metric above; peaky DLS banks (e.g. WinCE/Windows GM) otherwise
+ * under-read and the normalize gain overshoots into clipping. */
+static float PV_DLS_SamplePeakInt16(const int16_t *pcm, uint32_t frames, int channels, int stride)
+{
+    double peak = 0.0;
+    uint32_t f;
+
+    if (!pcm || frames == 0 || channels <= 0)
+        return 0.0f;
+    if (stride < 1)
+        stride = 1;
+
+    for (f = 0; f < frames; f += (uint32_t)stride)
+    {
+        int c;
+        for (c = 0; c < channels; c++)
+        {
+            double s = (double)pcm[f * (uint32_t)channels + (uint32_t)c] * (1.0 / 32768.0);
+            double a = (s < 0.0) ? -s : s;
+            if (a > peak)
+                peak = a;
+        }
+    }
+    return (float)peak;
+}
+
 static float PV_DLS_MedianInPlace(float *values, int count)
 {
     int i, j;
@@ -3412,7 +3439,7 @@ float GM_DLS_EstimateNoteLoudness(struct GM_Song* pSong, int16_t channel,
         DLS_Region* region = &inst->regions[r];
         DLS_Wave* wave;
         DLS_SampleInfo* sample;
-        float rms;
+        float peak;
         float attenLin;
         float loud;
 
@@ -3432,9 +3459,12 @@ float GM_DLS_EstimateNoteLoudness(struct GM_Song* pSong, int16_t channel,
         attenLin = (float)pow(10.0, (double)sample->attenuation / (200.0 * 65536.0));
         if (attenLin < 1.0e-6f)
             attenLin = 1.0e-6f;
-        rms = PV_DLS_LoudnessInt16(wave->pcm, wave->frames,
-                                   wave->channels > 0 ? wave->channels : 1, kStride);
-        loud = rms * attenLin;
+        /* Peak (not RMS): normalize cares about clip peaks; crest-heavy GM
+         * DLS banks otherwise under-estimate and over-boost. Scale < 1
+         * because EG/filter/path rarely hit the raw sample peak in-mix. */
+        peak = PV_DLS_SamplePeakInt16(wave->pcm, wave->frames,
+                                       wave->channels > 0 ? wave->channels : 1, kStride);
+        loud = peak * 0.70f * attenLin;
         /* Layered regions stack (MobileBAE starts every match). */
         sum += loud;
     }
