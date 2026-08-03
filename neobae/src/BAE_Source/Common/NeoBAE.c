@@ -2390,6 +2390,14 @@ struct sBAEMixer
     BAE_Mutex mLock;
 };
 
+/* Bind TLS current mixer from a BAEMixer; returns previous for restore. */
+static GM_Mixer *PV_BindBAEMixer(BAEMixer mixer)
+{
+    if (mixer && mixer->pMixer)
+        return GM_SetCurrentMixer(mixer->pMixer);
+    return MusicGlobals;
+}
+
 struct sBAESong
 {
     int32_t mID;
@@ -3173,7 +3181,7 @@ BAEResult BAE_GetClassicChorus(BAE_BOOL *outEnable)
 
 BAEResult BAE_EnableChannelCapture(BAEMixer mixer, const char *outputDir)
 {
-    GM_Mixer *pMixer = MusicGlobals;
+    GM_Mixer *pMixer = (mixer && mixer->pMixer) ? mixer->pMixer : MusicGlobals;
     int ch;
 
     if (!pMixer)
@@ -3345,6 +3353,16 @@ BAEMixer BAEMixer_New(void)
         }
     }
     return mixer;
+}
+
+BAEResult BAEMixer_MakeCurrent(BAEMixer mixer)
+{
+    if (!mixer)
+        return BAE_NULL_OBJECT;
+    if (!mixer->pMixer)
+        return BAE_NOT_SETUP;
+    GM_SetCurrentMixer(mixer->pMixer);
+    return BAE_NO_ERROR;
 }
 
 // BAEMixer_Delete()
@@ -3795,17 +3813,16 @@ BAEResult BAEMixer_GetDeviceName(BAEMixer mixer, int32_t deviceID, char *cName, 
 // --------------------------------------
 // Sets/Gets the master default reverb
 //
-static ReverbMode g_defaultReverbType = BAE_REVERB_NONE;
 BAEResult BAEMixer_SetDefaultReverb(BAEMixer mixer, BAEReverbType verb)
 {
 #if REVERB_USED != REVERB_DISABLED
     if (!mixer || !mixer->pMixer)
         return BAE_PARAM_ERR;
-    GM_Mixer *saved = MusicGlobals;
-    MusicGlobals = mixer->pMixer;
-    g_defaultReverbType = BAE_TranslateFromBAEReverb(verb);
-    GM_SetReverbType(BAE_TranslateFromBAEReverb(verb));
-    MusicGlobals = saved;
+    {
+        GM_Mixer *saved = GM_SetCurrentMixer(mixer->pMixer);
+        GM_SetReverbType(BAE_TranslateFromBAEReverb(verb));
+        GM_SetCurrentMixer(saved);
+    }
     return BAE_NO_ERROR;
 #else
     return BAE_NOT_SETUP;
@@ -3815,8 +3832,14 @@ BAEResult BAEMixer_SetDefaultReverb(BAEMixer mixer, BAEReverbType verb)
 BAEResult BAEMixer_GetDefaultReverb(BAEMixer mixer, BAEReverbType *pOutResult)
 {
 #if REVERB_USED != REVERB_DISABLED
-    ReverbMode r = GM_GetReverbType();
-    *pOutResult = BAE_TranslateToBAEReverb(r);
+    if (!mixer || !mixer->pMixer || !pOutResult)
+        return BAE_PARAM_ERR;
+    {
+        GM_Mixer *saved = GM_SetCurrentMixer(mixer->pMixer);
+        ReverbMode r = GM_GetReverbType();
+        *pOutResult = BAE_TranslateToBAEReverb(r);
+        GM_SetCurrentMixer(saved);
+    }
     return BAE_NO_ERROR;
 #else
     return BAE_NOT_SETUP;
@@ -4148,11 +4171,21 @@ BAEResult BAEMixer_Open(BAEMixer mixer,
                 {
                     if (engageAudio)
                     {
-                        theErr = GM_ResumeGeneralSound(NULL);
+                        /* Pass GM_Mixer* so platform audio callbacks bind TLS via
+                         * BAE_BuildMixerSlice(threadContext=userdata). */
+                        theErr = GM_ResumeGeneralSound(mixer->pMixer);
                         if (theErr == NO_ERR)
                         {
                             mixer->audioEngaged = TRUE;
                         }
+                    }
+                    else if (mixer->pMixer)
+                    {
+                        /* Pull/render mixers: unpause engine without acquiring hardware.
+                         * systemPaused blocks PV_ProcessSampleFrame, so Open(FALSE)
+                         * must still be able to BAE_BuildMixerSlice. */
+                        mixer->pMixer->systemPaused = FALSE;
+                        mixer->pMixer->sequencerPaused = FALSE;
                     }
                 }
             }
@@ -4184,8 +4217,7 @@ BAEResult BAEMixer_Close(BAEMixer mixer)
         if (mixer->pMixer)
         {
             GM_Mixer *closingMixer = mixer->pMixer;
-            GM_Mixer *savedMixer = MusicGlobals;
-            MusicGlobals = closingMixer;
+            GM_Mixer *savedMixer = GM_SetCurrentMixer(closingMixer);
 #if USE_CALLBACKS
             GM_SetAudioTask(NULL, NULL);
 #endif
@@ -4197,10 +4229,9 @@ BAEResult BAEMixer_Close(BAEMixer mixer)
             }
             GM_FinisGeneralSound(NULL, closingMixer);
             mixer->pMixer = NULL;
-            if (savedMixer != closingMixer)
-            {
-                MusicGlobals = savedMixer;
-            }
+            /* Finis clears TLS if it pointed at closingMixer; restore prior if still valid. */
+            if (MusicGlobals == NULL && savedMixer != closingMixer)
+                GM_SetCurrentMixer(savedMixer);
         }
         else
         {
@@ -5173,12 +5204,15 @@ BAEResult BAEMixer_SetRouteBus(BAEMixer mixer, int routeBus)
 //
 BAEResult BAEMixer_SetMasterVolume(BAEMixer mixer, BAE_UNSIGNED_FIXED theVolume)
 {
+    GM_Mixer *saved;
     OPErr err;
 
     err = NO_ERR;
     if (mixer)
     {
+        saved = PV_BindBAEMixer(mixer);
         GM_SetMasterVolume((int32_t)(UNSIGNED_FIXED_TO_LONG_ROUNDED(theVolume * MAX_MASTER_VOLUME)));
+        GM_SetCurrentMixer(saved);
     }
     else
     {
@@ -5193,6 +5227,7 @@ BAEResult BAEMixer_SetMasterVolume(BAEMixer mixer, BAE_UNSIGNED_FIXED theVolume)
 //
 BAEResult BAEMixer_GetMasterVolume(BAEMixer mixer, BAE_UNSIGNED_FIXED *outVolume)
 {
+    GM_Mixer *saved;
     OPErr err;
 
     err = NO_ERR;
@@ -5200,7 +5235,9 @@ BAEResult BAEMixer_GetMasterVolume(BAEMixer mixer, BAE_UNSIGNED_FIXED *outVolume
     {
         if (outVolume)
         {
+            saved = PV_BindBAEMixer(mixer);
             *outVolume = UNSIGNED_RATIO_TO_FIXED(GM_GetMasterVolume(), MAX_MASTER_VOLUME);
+            GM_SetCurrentMixer(saved);
         }
         else
         {
@@ -5220,12 +5257,15 @@ BAEResult BAEMixer_GetMasterVolume(BAEMixer mixer, BAE_UNSIGNED_FIXED *outVolume
 //
 BAEResult BAEMixer_SetGlobalVolume(BAEMixer mixer, BAE_UNSIGNED_FIXED theVolume)
 {
+    GM_Mixer *saved;
     OPErr err;
 
     err = NO_ERR;
     if (mixer)
     {
+        saved = PV_BindBAEMixer(mixer);
         GM_SetGlobalVolume((int32_t)(UNSIGNED_FIXED_TO_LONG_ROUNDED(theVolume * MAX_MASTER_VOLUME)));
+        GM_SetCurrentMixer(saved);
     }
     else
     {
@@ -5240,6 +5280,7 @@ BAEResult BAEMixer_SetGlobalVolume(BAEMixer mixer, BAE_UNSIGNED_FIXED theVolume)
 //
 BAEResult BAEMixer_GetGlobalVolume(BAEMixer mixer, BAE_UNSIGNED_FIXED *outVolume)
 {
+    GM_Mixer *saved;
     OPErr err;
 
     err = NO_ERR;
@@ -5247,7 +5288,9 @@ BAEResult BAEMixer_GetGlobalVolume(BAEMixer mixer, BAE_UNSIGNED_FIXED *outVolume
     {
         if (outVolume)
         {
+            saved = PV_BindBAEMixer(mixer);
             *outVolume = UNSIGNED_RATIO_TO_FIXED(GM_GetGlobalVolume(), MAX_MASTER_VOLUME);
+            GM_SetCurrentMixer(saved);
         }
         else
         {
@@ -5268,31 +5311,43 @@ BAEResult BAEMixer_GetGlobalVolume(BAEMixer mixer, BAE_UNSIGNED_FIXED *outVolume
 //
 BAEResult BAEMixer_SetOutputGain(BAEMixer mixer, int32_t gainPct)
 {
+    GM_Mixer *saved;
     if (!mixer) return BAE_TranslateOPErr(NULL_OBJECT);
+    saved = PV_BindBAEMixer(mixer);
     GM_SetOutputGain(gainPct);
+    GM_SetCurrentMixer(saved);
     return BAE_NO_ERROR;
 }
 
 BAEResult BAEMixer_GetOutputGain(BAEMixer mixer, int32_t *outGainPct)
 {
+    GM_Mixer *saved;
     if (!mixer) return BAE_TranslateOPErr(NULL_OBJECT);
     if (!outGainPct) return BAE_TranslateOPErr(PARAM_ERR);
+    saved = PV_BindBAEMixer(mixer);
     *outGainPct = GM_GetOutputGain();
+    GM_SetCurrentMixer(saved);
     return BAE_NO_ERROR;
 }
 
 BAEResult BAEMixer_SetSongNormalizeGain(BAEMixer mixer, int32_t gainPct)
 {
+    GM_Mixer *saved;
     if (!mixer) return BAE_TranslateOPErr(NULL_OBJECT);
+    saved = PV_BindBAEMixer(mixer);
     GM_SetSongNormalizeGain(gainPct);
+    GM_SetCurrentMixer(saved);
     return BAE_NO_ERROR;
 }
 
 BAEResult BAEMixer_GetSongNormalizeGain(BAEMixer mixer, int32_t *outGainPct)
 {
+    GM_Mixer *saved;
     if (!mixer) return BAE_TranslateOPErr(NULL_OBJECT);
     if (!outGainPct) return BAE_TranslateOPErr(PARAM_ERR);
+    saved = PV_BindBAEMixer(mixer);
     *outGainPct = GM_GetSongNormalizeGain();
+    GM_SetCurrentMixer(saved);
     return BAE_NO_ERROR;
 }
 
@@ -5422,13 +5477,16 @@ BAEResult BAEMixer_GetMasterSoundEffectsVolume(BAEMixer mixer, BAE_UNSIGNED_FIXE
 BAEResult BAEMixer_GetAudioSampleFrame(BAEMixer mixer, int16_t *pLeft, int16_t *pRight, int16_t *outFrame)
 {
     OPErr err;
+    GM_Mixer *saved;
 
     err = NO_ERR;
     if (mixer)
     {
         if (outFrame)
         {
+            saved = PV_BindBAEMixer(mixer);
             *outFrame = GM_GetAudioSampleFrame(pLeft, pRight);
+            GM_SetCurrentMixer(saved);
         }
         else
         {
@@ -5584,7 +5642,7 @@ BAEResult BAEMixer_ReengageAudio(BAEMixer mixer)
     {
         if (mixer->pMixer)
         {
-            err = GM_ResumeGeneralSound(NULL);
+            err = GM_ResumeGeneralSound(mixer->pMixer);
             if (err == NO_ERR)
             {
                 mixer->audioEngaged = TRUE;
@@ -6469,7 +6527,7 @@ void BAEMixer_StopOutputToFile(void)
         XDisposePtr(mWritingDataBlock);
         mWritingDataBlock = NULL;
 
-        GM_StartHardwareSoundManager(NULL); // reconnect to hardware
+        GM_StartHardwareSoundManager(MusicGlobals); // reconnect to hardware
     }
     mWritingToFile = FALSE;
 #if DUMP_OUTPUTFILE
@@ -6497,7 +6555,7 @@ BAEResult BAEMixer_ServiceAudioOutputToWebAudio(BAEMixer theMixer) {
     sampleSize = (theModifiers /*iModifiers*/ & BAE_USE_16) ? 2 : 1;
     uint32_t numSamples = (uint32_t)(mWritingDataBlockSize / sampleSize / channels);
 
-    BAE_BuildMixerSlice(NULL, mWritingDataBlock, mWritingDataBlockSize, numSamples);
+    BAE_BuildMixerSlice(theMixer ? theMixer->pMixer : NULL, mWritingDataBlock, mWritingDataBlockSize, numSamples);
     process_and_send_audio(mWritingDataBlock, numSamples);
     return BAE_TranslateOPErr(theErr);
 }
@@ -6604,7 +6662,7 @@ BAEResult BAEMixer_ServiceAudioOutputToFile(BAEMixer theMixer)
 
                 case BAE_RAW_PCM:
                 {
-                    BAE_BuildMixerSlice(NULL, mWritingDataBlock, mWritingDataBlockSize,
+                    BAE_BuildMixerSlice(theMixer ? theMixer->pMixer : NULL, mWritingDataBlock, mWritingDataBlockSize,
                                         (uint32_t)(mWritingDataBlockSize / sampleSize / channels));
                     if (XFileWrite((XFILE)mWritingToFileReference, mWritingDataBlock, mWritingDataBlockSize) == -1)
                     {
@@ -6617,7 +6675,7 @@ BAEResult BAEMixer_ServiceAudioOutputToFile(BAEMixer theMixer)
                 case BAE_AIFF_TYPE:
                 case BAE_AU_TYPE:
                 {
-                    BAE_BuildMixerSlice(NULL, mWritingDataBlock, mWritingDataBlockSize,
+                    BAE_BuildMixerSlice(theMixer ? theMixer->pMixer : NULL, mWritingDataBlock, mWritingDataBlockSize,
                                         (uint32_t)(mWritingDataBlockSize / sampleSize / channels));
                     theErr = GM_WriteAudioBufferToFile((XFILE)mWritingToFileReference,
                                                        BAE_TranslateBAEFileType(mWriteToFileType),
@@ -6634,7 +6692,7 @@ BAEResult BAEMixer_ServiceAudioOutputToFile(BAEMixer theMixer)
                     // Accumulate audio samples for FLAC encoding
                     uint32_t framesToProcess = (uint32_t)(mWritingDataBlockSize / sampleSize / channels);
 
-                    BAE_BuildMixerSlice(NULL, mWritingDataBlock, mWritingDataBlockSize, framesToProcess);
+                    BAE_BuildMixerSlice(theMixer ? theMixer->pMixer : NULL, mWritingDataBlock, mWritingDataBlockSize, framesToProcess);
 
                     // Check if we have room in the accumulation buffer
                     if (mFLACAccumulatedFrames + framesToProcess <= mFLACMaxAccumulatedFrames)
@@ -6665,7 +6723,7 @@ BAEResult BAEMixer_ServiceAudioOutputToFile(BAEMixer theMixer)
                 {
                     // Build PCM slice into mWritingDataBlock
                     uint32_t framesToProcess = (uint32_t)(mWritingDataBlockSize / sampleSize / channels);
-                    BAE_BuildMixerSlice(NULL, mWritingDataBlock, mWritingDataBlockSize, framesToProcess);
+                    BAE_BuildMixerSlice(theMixer ? theMixer->pMixer : NULL, mWritingDataBlock, mWritingDataBlockSize, framesToProcess);
 
                     // Convert interleaved 16-bit PCM to planar float arrays expected by encoder
                     extern long XEncodeVorbisData(void *encoder_handle, float **pcm_data, long samples, XFILE output_file);
@@ -6713,7 +6771,7 @@ BAEResult BAEMixer_ServiceAudioOutputToFile(BAEMixer theMixer)
                     uint32_t framesToProcess = (uint32_t)(mWritingDataBlockSize / sampleSize / channels);
                     extern long XEncodeOpusData(void *encoder_handle, const int16_t *pcm_interleaved, long frames, XFILE output_file);
 
-                    BAE_BuildMixerSlice(NULL, mWritingDataBlock, mWritingDataBlockSize, framesToProcess);
+                    BAE_BuildMixerSlice(theMixer ? theMixer->pMixer : NULL, mWritingDataBlock, mWritingDataBlockSize, framesToProcess);
 
                     if (XEncodeOpusData(mWritingEncoder,
                                         (const int16_t *)mWritingDataBlock,
@@ -9641,6 +9699,7 @@ static BAEResult PV_BAESong_InitLiveSong(BAESong song, BAE_BOOL addToMixer)
         {
             GM_SetSongMixer(song->pSong, song->mixer->pMixer); // associate mixer to song
                                                                // other we can't load instruments
+            PV_BindBAEMixer(song->mixer);
 
             BAEMixer_GetMidiVoices(song->mixer, &maxSongVoices);
             BAEMixer_GetSoundVoices(song->mixer, &maxEffectVoices);
@@ -9650,7 +9709,8 @@ static BAEResult PV_BAESong_InitLiveSong(BAESong song, BAE_BOOL addToMixer)
 #if USE_SF2_SUPPORT == TRUE
             if (GM_SF2_IsActive()) { GM_EnableSF2ForSong(song->pSong, TRUE); }
 #endif
-            GM_SetReverbType(g_defaultReverbType);
+            /* Keep the mixer's current reverb type (per-mixer, not process-global). */
+            GM_SetReverbType(GM_GetReverbType());
 
             if (addToMixer)
             {
@@ -14584,7 +14644,7 @@ bool PV_RefillMPEGEncodeBuffer(void *buffer, void *userRef)
     int sampleSize = (mods & BAE_USE_16) ? 2 : 1;
     uint32_t frames = (uint32_t)(mWritingDataBlockSize / (sampleSize * channels));
     // Build directly into destination buffer so encoder reads fresh PCM
-    BAE_BuildMixerSlice(mixer, buffer, mWritingDataBlockSize, frames);
+    BAE_BuildMixerSlice(mixer->pMixer, buffer, mWritingDataBlockSize, frames);
     return TRUE;
 }
 #endif

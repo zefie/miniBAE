@@ -51,21 +51,95 @@ static const float kScaleMax = 4.0f;  /* ~+12 dB — boost quiet DLS/SF2/XMF tow
 /* Native HSB/RMF mix scaling sounds wrong (timbre/envelope), so HSB stays at
  * unity and other engines are matched to its measured loudness instead. */
 
-static XFILE g_hsbFiles[kBankBalanceMaxHsbTrack];
-static int g_hsbCount = 0;
+/* Per-mixer balance state. Process-global scales used to make a second
+ * foobar/waveform mixer (e.g. HSB) attenuate an already-playing SF2 mixer. */
+enum { kBankBalanceMaxMixers = 8 };
 
-/* RMF/ZMF embedded instruments share the native (HSB) mix path. */
-static GM_Song *g_rmfSongs[kBankBalanceMaxRmfTrack];
-static float g_rmfSongLoudness[kBankBalanceMaxRmfTrack];
-static int g_rmfCount = 0;
-static float g_rmfLoudness = 0.0f; /* combined across tracked RMF songs */
-static float g_hsbBankLoudness = 0.0f; /* host HSB/ZSB bank only */
+typedef struct BankBalanceState
+{
+    GM_Mixer *mixer;
+    XFILE hsbFiles[kBankBalanceMaxHsbTrack];
+    int hsbCount;
+    GM_Song *rmfSongs[kBankBalanceMaxRmfTrack];
+    float rmfSongLoudness[kBankBalanceMaxRmfTrack];
+    int rmfCount;
+    float rmfLoudness;
+    float hsbBankLoudness;
+    bool present[GM_BANK_ENGINE_COUNT];
+    bool scanned[GM_BANK_ENGINE_COUNT];
+    float loudness[GM_BANK_ENGINE_COUNT];
+    float scale[GM_BANK_ENGINE_COUNT];
+    bool active;
+} BankBalanceState;
 
-static bool g_present[GM_BANK_ENGINE_COUNT];
-static bool g_scanned[GM_BANK_ENGINE_COUNT];
-static float g_loudness[GM_BANK_ENGINE_COUNT]; /* effective linear loudness */
-static float g_scale[GM_BANK_ENGINE_COUNT] = {1.0f, 1.0f, 1.0f, 1.0f};
-static bool g_active = false;
+static BankBalanceState g_bbSlots[kBankBalanceMaxMixers];
+static BankBalanceState *g_bb = NULL; /* working slot for helpers below */
+
+#define g_hsbFiles (g_bb->hsbFiles)
+#define g_hsbCount (g_bb->hsbCount)
+#define g_rmfSongs (g_bb->rmfSongs)
+#define g_rmfSongLoudness (g_bb->rmfSongLoudness)
+#define g_rmfCount (g_bb->rmfCount)
+#define g_rmfLoudness (g_bb->rmfLoudness)
+#define g_hsbBankLoudness (g_bb->hsbBankLoudness)
+#define g_present (g_bb->present)
+#define g_scanned (g_bb->scanned)
+#define g_loudness (g_bb->loudness)
+#define g_scale (g_bb->scale)
+#define g_active (g_bb->active)
+
+static BankBalanceState *PV_BB_InitSlot(BankBalanceState *s, GM_Mixer *mixer)
+{
+    int i;
+    memset(s, 0, sizeof(*s));
+    s->mixer = mixer;
+    for (i = 0; i < GM_BANK_ENGINE_COUNT; i++)
+        s->scale[i] = 1.0f;
+    return s;
+}
+
+static BankBalanceState *PV_BB_SlotFor(GM_Mixer *mixer)
+{
+    int i;
+    int freeIdx = -1;
+    if (!mixer)
+        return NULL;
+    for (i = 0; i < kBankBalanceMaxMixers; i++)
+    {
+        if (g_bbSlots[i].mixer == mixer)
+            return &g_bbSlots[i];
+        if (freeIdx < 0 && g_bbSlots[i].mixer == NULL)
+            freeIdx = i;
+    }
+    if (freeIdx >= 0)
+        return PV_BB_InitSlot(&g_bbSlots[freeIdx], mixer);
+    return PV_BB_InitSlot(&g_bbSlots[0], mixer);
+}
+
+/* Select working slot for subsequent g_* macros. Returns 0 if no mixer. */
+static int PV_BB_Begin(GM_Mixer *mixer)
+{
+    g_bb = PV_BB_SlotFor(mixer);
+    return g_bb != NULL;
+}
+
+void GM_BankBalance_OnMixerDestroyed(GM_Mixer *mixer)
+{
+    int i;
+    if (!mixer)
+        return;
+    for (i = 0; i < kBankBalanceMaxMixers; i++)
+    {
+        if (g_bbSlots[i].mixer == mixer)
+        {
+            PV_BB_InitSlot(&g_bbSlots[i], NULL);
+            g_bbSlots[i].mixer = NULL;
+            if (g_bb == &g_bbSlots[i])
+                g_bb = NULL;
+            return;
+        }
+    }
+}
 
 static void PV_UpdateHsbPresentAndLoudness(void);
 
@@ -652,6 +726,8 @@ void GM_BankBalance_OnHsbBankAdded(XFILE file)
     int i;
     if (!file)
         return;
+    if (!PV_BB_Begin(MusicGlobals))
+        return;
 
     for (i = 0; i < g_hsbCount; i++)
     {
@@ -696,6 +772,8 @@ void GM_BankBalance_OnHsbBankRemoved(XFILE file)
     int j;
     if (!file)
         return;
+    if (!PV_BB_Begin(MusicGlobals))
+        return;
 
     for (i = 0; i < g_hsbCount; i++)
     {
@@ -719,8 +797,12 @@ void GM_BankBalance_OnRmfInstrumentsLoaded(struct GM_Song *pSong)
 {
     float loud;
     int i;
+    GM_Mixer *mixer;
 
     if (!pSong)
+        return;
+    mixer = pSong->pMixer ? pSong->pMixer : MusicGlobals;
+    if (!PV_BB_Begin(mixer))
         return;
 
     loud = PV_ScanRmfSongLoudness(pSong);
@@ -768,8 +850,12 @@ void GM_BankBalance_OnRmfInstrumentsUnloaded(struct GM_Song *pSong)
 {
     int i;
     int j;
+    GM_Mixer *mixer;
 
     if (!pSong)
+        return;
+    mixer = pSong->pMixer ? pSong->pMixer : MusicGlobals;
+    if (!PV_BB_Begin(mixer))
         return;
 
     for (i = 0; i < g_rmfCount; i++)
@@ -793,6 +879,8 @@ void GM_BankBalance_OnRmfInstrumentsUnloaded(struct GM_Song *pSong)
 
 void GM_BankBalance_OnSf2Loaded(void)
 {
+    if (!PV_BB_Begin(MusicGlobals))
+        return;
     g_present[GM_BANK_ENGINE_SF2] = true;
     g_scanned[GM_BANK_ENGINE_SF2] = false;
     g_loudness[GM_BANK_ENGINE_SF2] = 0.0f;
@@ -801,6 +889,8 @@ void GM_BankBalance_OnSf2Loaded(void)
 
 void GM_BankBalance_OnSf2Unloaded(void)
 {
+    if (!PV_BB_Begin(MusicGlobals))
+        return;
     g_present[GM_BANK_ENGINE_SF2] = false;
     g_scanned[GM_BANK_ENGINE_SF2] = false;
     g_loudness[GM_BANK_ENGINE_SF2] = 0.0f;
@@ -812,6 +902,9 @@ void GM_BankBalance_OnDlsBanksChanged(struct GM_Mixer *pMixer)
 {
 #if USE_NATIVE_DLS == TRUE
     DLS_Synth *synth;
+
+    if (!PV_BB_Begin(pMixer ? pMixer : MusicGlobals))
+        return;
 
     g_present[GM_BANK_ENGINE_DLS] = false;
     g_scanned[GM_BANK_ENGINE_DLS] = false;
@@ -863,6 +956,8 @@ float GM_BankBalance_GetMixScale(GM_BankEngine engine)
 {
     if ((int)engine < 0 || (int)engine >= GM_BANK_ENGINE_COUNT)
         return 1.0f;
+    if (!PV_BB_Begin(MusicGlobals))
+        return 1.0f;
     if (!g_active)
         return 1.0f;
     return g_scale[engine];
@@ -870,14 +965,20 @@ float GM_BankBalance_GetMixScale(GM_BankEngine engine)
 
 bool GM_BankBalance_IsActive(void)
 {
+    if (!PV_BB_Begin(MusicGlobals))
+        return false;
     return g_active;
 }
 
 bool GM_BankBalance_SongAppliesHsbMixScale(struct GM_Song *pSong)
 {
     int i;
+    GM_Mixer *mixer;
 
-    if (!pSong || !g_active)
+    if (!pSong)
+        return false;
+    mixer = pSong->pMixer ? pSong->pMixer : MusicGlobals;
+    if (!PV_BB_Begin(mixer) || !g_active)
         return false;
 
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
@@ -927,6 +1028,7 @@ float GM_EstimateNoteLoudness(GM_Song *pSong, int16_t channel, int16_t note, int
     float level = 0.0f;
     GM_BankEngine engine = GM_BANK_ENGINE_HSB;
     int16_t thePatch;
+    GM_Mixer *mixer;
 
     if (!pSong || channel < 0 || channel >= kEstimateMaxChannels)
         return 0.0f;
@@ -935,6 +1037,9 @@ float GM_EstimateNoteLoudness(GM_Song *pSong, int16_t channel, int16_t note, int
     if (note > 127)
         note = 127;
     (void)velocity;
+
+    mixer = pSong->pMixer ? pSong->pMixer : MusicGlobals;
+    (void)PV_BB_Begin(mixer);
 
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
     if ((GM_IsSF2Song(pSong) || pSong->channelType[channel] == CHANNEL_TYPE_SF2) &&

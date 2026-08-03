@@ -103,8 +103,6 @@
 //#define _PI       3.14159265359
 
 
-ChorusParams        gChorusParams;
-
 #define READINDEXSHIFT  8L
 #define READINDEXMASK   ((1L << READINDEXSHIFT) - 1)
 
@@ -123,7 +121,16 @@ ChorusParams        gChorusParams;
 //++------------------------------------------------------------------------------
 ChorusParams* GetChorusParams()
 {
-    return &gChorusParams;
+    GM_Mixer *pMixer = MusicGlobals;
+    if (!pMixer)
+        return NULL;
+    if (!pMixer->pChorus)
+    {
+        pMixer->pChorus = (ChorusParams *)XNewPtr((int32_t)sizeof(ChorusParams));
+        if (!pMixer->pChorus)
+            return NULL;
+    }
+    return pMixer->pChorus;
 }
 
 
@@ -134,9 +141,13 @@ ChorusParams* GetChorusParams()
 void InitChorus()
 {
     ChorusParams* params = GetChorusParams();
-    
+    int32_t kMaxBytes;
+
+    if (!params)
+        return;
+
     // allocate the delay line memory
-    int32_t kMaxBytes = 2 * sizeof(int32_t) * kChorusBufferFrameSize;
+    kMaxBytes = 2 * sizeof(int32_t) * kChorusBufferFrameSize;
     params->mChorusBufferL = (int32_t*)XNewPtr(kMaxBytes );
     params->mChorusBufferR = (int32_t*)XNewPtr(kMaxBytes );
 
@@ -197,14 +208,25 @@ void InitChorus()
 //++------------------------------------------------------------------------------
 void ShutdownChorus()
 {
+    GM_Mixer *pMixer = MusicGlobals;
     ChorusParams* params = GetChorusParams();
-    
+
+    if (!params)
+        return;
     if(!params->mIsInitialized) return; // don't shutdown twice!!
     params->mIsInitialized = FALSE;     // do this before deallocating stuff!!
 
     // deallocate the buffer
     XDisposePtr(params->mChorusBufferL );
     XDisposePtr(params->mChorusBufferR );
+    params->mChorusBufferL = NULL;
+    params->mChorusBufferR = NULL;
+
+    if (pMixer && pMixer->pChorus == params)
+    {
+        XDisposePtr((XPTR)params);
+        pMixer->pChorus = NULL;
+    }
 }
 
 

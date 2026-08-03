@@ -364,8 +364,15 @@
     #endif
 #endif
 
-// the only global. Our current mixer pointer.
-GM_Mixer *MusicGlobals = NULL;
+// Thread-local current mixer pointer (one active mixer per thread).
+BAE_THREAD_LOCAL GM_Mixer *MusicGlobals = NULL;
+
+GM_Mixer *GM_SetCurrentMixer(GM_Mixer *mixer)
+{
+    GM_Mixer *prev = MusicGlobals;
+    MusicGlobals = mixer;
+    return prev;
+}
 
 // Variables - pitch tables
 
@@ -3050,7 +3057,13 @@ void BAE_BuildMixerSlice(void *threadContext, void *pAudioBuffer, int32_t buffer
                          int32_t sampleFrames)
 {
     GM_Mixer *pMixer;
+    GM_Mixer *savedMixer = NULL;
     uint32_t delta, end;
+
+    /* When threadContext is a GM_Mixer*, bind it as the TLS current mixer for this slice.
+       Callers that pass BAEMixer must pass mixer->pMixer instead. */
+    if (threadContext)
+        savedMixer = GM_SetCurrentMixer((GM_Mixer *)threadContext);
 
     pMixer = MusicGlobals;
     if (pMixer && pAudioBuffer && bufferByteLength && sampleFrames)
@@ -3100,6 +3113,9 @@ void BAE_BuildMixerSlice(void *threadContext, void *pAudioBuffer, int32_t buffer
             pMixer->timeSliceDifference = end - delta;
         }
     }
+
+    if (threadContext)
+        GM_SetCurrentMixer(savedMixer);
 }
 #endif
 

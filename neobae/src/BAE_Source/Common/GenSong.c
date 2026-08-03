@@ -677,12 +677,18 @@ OPErr GM_BeginSong(GM_Song *pSong, GM_SongCallbackProcPtr theCallbackProc,
                    bool useEmbeddedMixerSettings, bool autoLevel)
 {
     OPErr theErr;
-    GM_Mixer *pMixer = GM_GetCurrentMixer();
+    GM_Mixer *pMixer;
+    GM_Mixer *savedMixer = NULL;
     int16_t songSlot;
 
     theErr = NO_ERR;
     if (pSong)
     {
+        pMixer = pSong->pMixer ? pSong->pMixer : GM_GetCurrentMixer();
+        if (!pMixer)
+            return NOT_SETUP;
+        savedMixer = GM_SetCurrentMixer(pMixer);
+
         if (GM_IsSongPrerolled(pSong) == FALSE)
         {
             theErr = GM_PrerollSong(pSong, theCallbackProc, useEmbeddedMixerSettings, autoLevel);
@@ -705,6 +711,7 @@ OPErr GM_BeginSong(GM_Song *pSong, GM_SongCallbackProcPtr theCallbackProc,
                 theErr = TOO_MANY_SONGS_PLAYING;
             }
         }
+        GM_SetCurrentMixer(savedMixer);
     }
     else
     {
@@ -892,9 +899,13 @@ GM_Song *GM_CreateLiveSong(void *context, XShortResourceID songID)
         pSong->allowProgramChanges = TRUE;
         pSong->defaultPercusionProgram = -1;
 
-        pSong->maxSongVoices = MusicGlobals->MaxNotes;
-        pSong->mixLevel = MusicGlobals->mixLevel;
-        pSong->maxEffectVoices = MusicGlobals->MaxEffects;
+        if (MusicGlobals)
+        {
+            pSong->pMixer = MusicGlobals;
+            pSong->maxSongVoices = MusicGlobals->MaxNotes;
+            pSong->mixLevel = MusicGlobals->mixLevel;
+            pSong->maxEffectVoices = MusicGlobals->MaxEffects;
+        }
 
         PV_SetTempo(pSong, 0L);
         pSong->songVolume = MAX_SONG_VOLUME;
@@ -919,15 +930,23 @@ OPErr GM_StartLiveSong(GM_Song *pSong, bool loadPatches, XBankToken bankToken)
 {
     OPErr theErr;
     int16_t songSlot, count;
+    GM_Mixer *pMixer;
+    GM_Mixer *savedMixer;
 
     theErr = NO_ERR;
     if (pSong)
     {
+        pMixer = pSong->pMixer ? pSong->pMixer : MusicGlobals;
+        if (!pMixer)
+            return NOT_SETUP;
+        pSong->pMixer = pMixer;
+        savedMixer = GM_SetCurrentMixer(pMixer);
+
         // first find a slot in the song queue
         songSlot = -1;
         for (count = 0; count < MAX_SONGS; count++)
         {
-            if (MusicGlobals->pSongsToPlay[count] == NULL)
+            if (pMixer->pSongsToPlay[count] == NULL)
             {
                 songSlot = count;
                 break;
@@ -981,8 +1000,9 @@ OPErr GM_StartLiveSong(GM_Song *pSong, bool loadPatches, XBankToken bankToken)
             pSong->velocityCurveType = DEFAULT_VELOCITY_CURVE;
 
             // Start song playing now.
-            MusicGlobals->pSongsToPlay[songSlot] = pSong;
+            pMixer->pSongsToPlay[songSlot] = pSong;
         }
+        GM_SetCurrentMixer(savedMixer);
     }
     return theErr;
 }
@@ -1183,10 +1203,12 @@ static void PV_EndSongWithControl(void *threadContext, GM_Song *pSong, bool remo
 {
     int32_t count;
     GM_Mixer *pMixer;
+    GM_Mixer *savedMixer = NULL;
 
-    pMixer = MusicGlobals;
+    pMixer = (pSong && pSong->pMixer) ? pSong->pMixer : MusicGlobals;
     if (pMixer)
     {
+        savedMixer = GM_SetCurrentMixer(pMixer);
         if (pSong)
         {
             // For SF2-backed songs ensure the SF2 engine is fully silenced (sustain off, all sound off, all notes off)
@@ -1229,6 +1251,7 @@ static void PV_EndSongWithControl(void *threadContext, GM_Song *pSong, bool remo
                 }
             }
         }
+        GM_SetCurrentMixer(savedMixer);
     }
 }
 
@@ -1255,16 +1278,22 @@ void GM_KillSongEventsFromQueue(GM_Song *pSong)
 {
     int16_t count;
     Q_MIDIEvent *pEvent;
+    GM_Mixer *pMixer;
 
-    // MusicGlobals is a process-wide singleton; teardown races / nested mixers can null it.
-    if (MusicGlobals == NULL || pSong == NULL)
+    if (pSong == NULL)
+    {
+        return;
+    }
+
+    pMixer = pSong->pMixer ? pSong->pMixer : MusicGlobals;
+    if (pMixer == NULL)
     {
         return;
     }
 
     for (count = 0; count < MAX_QUEUE_EVENTS; count++)
     {
-        pEvent = &MusicGlobals->theExternalMidiQueue[count];
+        pEvent = &pMixer->theExternalMidiQueue[count];
         if (pEvent)
         {
             if (pEvent->pSong == pSong)
@@ -1999,15 +2028,26 @@ OPErr GM_GetDisposeSongDataWhenDoneFlag(GM_Song *pSong, bool *outDisposeData)
 OPErr GM_GetSongVoices(GM_Song *pSong, int16_t *pMaxSongVoices, int16_t *pMixLevel, int16_t *pMaxEffectVoices)
 {
     OPErr theErr;
+    GM_Mixer *pMixer;
 
     theErr = NO_ERR;
     if (pSong)
     {
         if (pMaxSongVoices && pMixLevel && pMaxEffectVoices)
         {
-            *pMaxSongVoices = MusicGlobals->MaxNotes;
-            *pMixLevel = MusicGlobals->mixLevel;
-            *pMaxEffectVoices = MusicGlobals->MaxEffects;
+            pMixer = pSong->pMixer ? pSong->pMixer : MusicGlobals;
+            if (pMixer)
+            {
+                *pMaxSongVoices = pMixer->MaxNotes;
+                *pMixLevel = pMixer->mixLevel;
+                *pMaxEffectVoices = pMixer->MaxEffects;
+            }
+            else
+            {
+                *pMaxSongVoices = pSong->maxSongVoices;
+                *pMixLevel = pSong->mixLevel;
+                *pMaxEffectVoices = pSong->maxEffectVoices;
+            }
         }
         else
         {
@@ -2098,6 +2138,13 @@ OPErr GM_Song_EstimateNormalizePeak(GM_Song *pSong,
         targetPeakPct = 89; /* ~-1 dBFS */
     if (targetPeakPct > 99)
         targetPeakPct = 99;
+
+    /* Bind the song's mixer so normalize gain writes do not hit another session. */
+    {
+        GM_Mixer *songMixer = pSong->pMixer ? pSong->pMixer : MusicGlobals;
+        if (songMixer)
+            GM_SetCurrentMixer(songMixer);
+    }
 
     GM_SetSongNormalizeGain(100);
     GM_EstimatePeak_Reset();

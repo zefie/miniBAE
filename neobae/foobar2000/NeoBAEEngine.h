@@ -5,8 +5,6 @@
 #include "NeoBAEFeatures.h"
 #include "BAE_ProbeSongLength.h"
 
-#include <condition_variable>
-
 // Snapshot of prefs taken at decode_initialize so Apply mid-play does not tear state.
 struct NeoBAEPlaybackSettings {
 	bool loopEnabled = false;
@@ -23,12 +21,9 @@ struct NeoBAEPlaybackSettings {
 
 // Thin NeoBAE session used by the foobar2000 input decoder.
 //
-// libneobae exposes a single process-wide MusicGlobals mixer. Concurrent
-// BAEMixer_Open sessions (playback + Waveform Minibar, etc.) corrupt that
-// pointer and crash in GM_FreeSong. This class enforces one exclusive mixer
-// session at a time for decode. Prepare() also takes the global mutex: probe /
-// BAEUtil share process-global X_API state and must not overlap DecodeRun or
-// another Prepare (library scan + playlist drop).
+// libneobae supports multiple concurrent BAEMixer instances (TLS MusicGlobals).
+// Prepare still takes s_mutex because probe / BAEUtil share process-global X_API
+// state. DecodeRun binds its mixer and does not require exclusive ownership.
 class NeoBAEEngine {
 public:
 	NeoBAEEngine();
@@ -38,7 +33,7 @@ public:
 	NeoBAEEngine& operator=(const NeoBAEEngine&) = delete;
 
 	// Cache file bytes + prefs and resolve duration (+ RMF/ZMF tags) via
-	// mixer-free BAE_ProbeSongLengthFromMemory (no MusicGlobals / exclusive lock).
+	// mixer-free BAE_ProbeSongLengthFromMemory (no MusicGlobals).
 	void Prepare(const void* data, size_t size, const char* pathHint, const NeoBAEPlaybackSettings& settings, abort_callback& abort);
 
 	double GetLengthSeconds() const { return m_lengthSeconds; }
@@ -48,7 +43,7 @@ public:
 		return m_rmfMetadata.present ? &m_rmfMetadata : nullptr;
 	}
 
-	// Acquire exclusive mixer, load song, start synthesis.
+	// Open mixer if needed, load song, start synthesis.
 	void StartDecode(bool allowLooping, abort_callback& abort, const NeoBAEPlaybackSettings* settingsRefresh = nullptr);
 
 	bool DecodeRun(audio_chunk& chunk, abort_callback& abort);
@@ -58,11 +53,6 @@ public:
 	void Close();
 
 private:
-	void WaitExclusive_Locked(std::unique_lock<std::recursive_mutex>& lock, abort_callback& abort);
-	bool TryExclusive_Locked();
-	void TakeExclusive_Locked();
-	void ReleaseExclusive_Locked();
-
 	void EnsureGlobalInit_Locked();
 	void ReleaseGlobalRef_Locked();
 	void TeardownMixer_Locked(bool clearMetadata, bool releaseGlobalRef = true);
@@ -74,6 +64,7 @@ private:
 	void LoadBank_Locked();
 	void LoadSong_Locked(const void* data, size_t size, const char* pathHint);
 	void ApplyDLSCompat_Locked() const;
+	void BindMixerCurrent() const;
 
 	NeoBAEPlaybackSettings m_settings;
 	pfc::array_t<t_uint8> m_fileData;
@@ -90,14 +81,11 @@ private:
 	bool m_started = false;
 	bool m_allowLooping = false;
 	bool m_holdsGlobalRef = false;
-	bool m_holdsExclusive = false;
 	unsigned m_loopsDone = 0;
 	uint64_t m_lastPosMs = 0;
 
 	pfc::array_t<int16_t> m_pcm;
 
 	static std::recursive_mutex s_mutex;
-	static std::condition_variable_any s_cv;
-	static NeoBAEEngine* s_sessionOwner;
 	static int s_globalRefCount;
 };

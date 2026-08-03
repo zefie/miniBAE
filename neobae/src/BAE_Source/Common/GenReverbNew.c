@@ -134,15 +134,22 @@
 #endif
 
 
-NewReverbParams     gNewReverbParams;
-
 //++------------------------------------------------------------------------------
 //  GetNewReverbParams()
 //
 //++------------------------------------------------------------------------------
 NewReverbParams* GetNewReverbParams()
 {
-    return &gNewReverbParams;
+    GM_Mixer *pMixer = MusicGlobals;
+    if (!pMixer)
+        return NULL;
+    if (!pMixer->pNewReverb)
+    {
+        pMixer->pNewReverb = (NewReverbParams *)XNewPtr((int32_t)sizeof(NewReverbParams));
+        if (!pMixer->pNewReverb)
+            return NULL;
+    }
+    return pMixer->pNewReverb;
 }
 
 
@@ -157,6 +164,9 @@ bool InitNewReverb()
 {
     int i;
     NewReverbParams* params = GetNewReverbParams();
+
+    if (!params)
+        return FALSE;
     
 #if 0   // code to generate lopass filter coefficent for different sampling rates...
 
@@ -285,9 +295,12 @@ bool InitNewReverb()
 void ShutdownNewReverb()
 {
     int i;
-    
+    GM_Mixer *pMixer = MusicGlobals;
     NewReverbParams* params = GetNewReverbParams();
-    
+
+    if (!params)
+        return;
+
     params->mIsInitialized = FALSE;     // do this before deallocating stuff!!
 
 #if 0   // we're sharing the comb filter and early reflection buffer with the old reverb
@@ -318,7 +331,12 @@ void ShutdownNewReverb()
     params->mStereoizerBufferL = NULL;
     XDisposePtr(params->mStereoizerBufferR);
     params->mStereoizerBufferR = NULL;
-    
+
+    if (pMixer && pMixer->pNewReverb == params)
+    {
+        XDisposePtr((XPTR)params);
+        pMixer->pNewReverb = NULL;
+    }
 }
 
 

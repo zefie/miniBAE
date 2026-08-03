@@ -383,6 +383,17 @@
     #define BAE_COMPILER_BARRIER()  __asm__ __volatile__("" ::: "memory")
 #endif
 
+// Thread-local storage for the active GM_Mixer (MusicGlobals).
+#if defined(_MSC_VER)
+    #define BAE_THREAD_LOCAL __declspec(thread)
+#elif defined(__cplusplus)
+    #define BAE_THREAD_LOCAL thread_local
+#elif defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)
+    #define BAE_THREAD_LOCAL _Thread_local
+#else
+    #define BAE_THREAD_LOCAL __thread
+#endif
+
 
 
 #ifndef X_PLATFORM

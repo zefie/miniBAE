@@ -16,8 +16,6 @@ extern "C" {
 #endif
 
 std::recursive_mutex NeoBAEEngine::s_mutex;
-std::condition_variable_any NeoBAEEngine::s_cv;
-NeoBAEEngine* NeoBAEEngine::s_sessionOwner = nullptr;
 int NeoBAEEngine::s_globalRefCount = 0;
 
 NeoBAEPlaybackSettings NeoBAEPlaybackSettings::FromConfig()
@@ -51,36 +49,11 @@ NeoBAEEngine::~NeoBAEEngine()
 	Close();
 }
 
-void NeoBAEEngine::WaitExclusive_Locked(std::unique_lock<std::recursive_mutex>& lock, abort_callback& abort)
+void NeoBAEEngine::BindMixerCurrent() const
 {
-	while (s_sessionOwner != nullptr && s_sessionOwner != this) {
-		abort.check();
-		s_cv.wait_for(lock, std::chrono::milliseconds(50));
-	}
-}
-
-bool NeoBAEEngine::TryExclusive_Locked()
-{
-	if (s_sessionOwner != nullptr && s_sessionOwner != this)
-		return false;
-	TakeExclusive_Locked();
-	return true;
-}
-
-void NeoBAEEngine::TakeExclusive_Locked()
-{
-	s_sessionOwner = this;
-	m_holdsExclusive = true;
-}
-
-void NeoBAEEngine::ReleaseExclusive_Locked()
-{
-	if (!m_holdsExclusive)
-		return;
-	if (s_sessionOwner == this)
-		s_sessionOwner = nullptr;
-	m_holdsExclusive = false;
-	s_cv.notify_all();
+	BAEMixer mixer = (BAEMixer)m_mixer;
+	if (mixer)
+		BAEMixer_MakeCurrent(mixer);
 }
 
 void NeoBAEEngine::EnsureGlobalInit_Locked()
@@ -114,6 +87,8 @@ void NeoBAEEngine::TeardownMixer_Locked(bool clearMetadata, bool releaseGlobalRe
 	BAESong song = (BAESong)m_song;
 	BAEMixer mixer = (BAEMixer)m_mixer;
 
+	BindMixerCurrent();
+
 	if (song) {
 		BAESong_Stop(song, FALSE);
 		BAESong_Delete(song);
@@ -121,6 +96,7 @@ void NeoBAEEngine::TeardownMixer_Locked(bool clearMetadata, bool releaseGlobalRe
 	}
 
 	if (mixer) {
+		BAEMixer_MakeCurrent(mixer);
 		BAEMixer_SetSongNormalizeGain(mixer, 100);
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
 		GM_UnloadSF2Soundfont();
@@ -157,7 +133,6 @@ void NeoBAEEngine::Close()
 {
 	std::lock_guard<std::recursive_mutex> lock(s_mutex);
 	TeardownMixer_Locked(true);
-	ReleaseExclusive_Locked();
 	m_fileData.set_size(0);
 	m_pathHint = "";
 }
@@ -292,6 +267,8 @@ void NeoBAEEngine::OpenMixer_Locked(bool engageAudio)
 	if (err != BAE_NO_ERROR)
 		ThrowBAE("BAEMixer_Open failed", err);
 
+	BAEMixer_MakeCurrent(mixer);
+
 	if (engageAudio) {
 		if (BAE_AcquireAudioCard(nullptr, hz, kChannels, kBitsPerSample) != 0)
 			ThrowBAE("BAE_AcquireAudioCard failed", BAE_GENERAL_ERR);
@@ -367,8 +344,6 @@ void NeoBAEEngine::Prepare(const void* data, size_t size, const char* pathHint, 
 	std::lock_guard<std::recursive_mutex> lock(s_mutex);
 
 	TeardownMixer_Locked(true);
-	if (m_holdsExclusive)
-		ReleaseExclusive_Locked();
 
 	m_settings = settings;
 	m_pathHint = pathHint ? pathHint : "";
@@ -407,9 +382,7 @@ void NeoBAEEngine::Prepare(const void* data, size_t size, const char* pathHint, 
 
 void NeoBAEEngine::StartDecode(bool allowLooping, abort_callback& abort, const NeoBAEPlaybackSettings* settingsRefresh)
 {
-	std::unique_lock<std::recursive_mutex> lock(s_mutex);
-	WaitExclusive_Locked(lock, abort);
-	TakeExclusive_Locked();
+	std::lock_guard<std::recursive_mutex> lock(s_mutex);
 	abort.check();
 
 	if (m_fileData.get_size() == 0)
@@ -434,13 +407,13 @@ void NeoBAEEngine::StartDecode(bool allowLooping, abort_callback& abort, const N
 			OpenMixerAndSong_Locked(m_pathHint.get_ptr());
 		} catch (...) {
 			TeardownMixer_Locked(false);
-			ReleaseExclusive_Locked();
 			throw;
 		}
 	}
 
 	BAESong song = (BAESong)m_song;
 	BAEMixer mixer = (BAEMixer)m_mixer;
+	BAEMixer_MakeCurrent(mixer);
 
 	ApplyDLSCompat_Locked();
 
@@ -476,12 +449,18 @@ void NeoBAEEngine::StartDecode(bool allowLooping, abort_callback& abort, const N
 
 bool NeoBAEEngine::DecodeRun(audio_chunk& chunk, abort_callback& abort)
 {
-	std::lock_guard<std::recursive_mutex> lock(s_mutex);
 	abort.check();
 	if (!m_started)
 		return false;
 
 	BAESong song = (BAESong)m_song;
+	BAEMixer mixer = (BAEMixer)m_mixer;
+	if (!song || !mixer)
+		return false;
+
+	/* Bind this session's mixer for the render thread; do not hold s_mutex
+	   across BuildMixerSlice so concurrent decoders can run. */
+	BAEMixer_MakeCurrent(mixer);
 
 	// Request whole mixer slices only. NeoBAE advances MIDI by One_Slice per
 	// BAE_BuildMixerSlice call; a fixed 1024-frame request is not a multiple of
@@ -538,11 +517,11 @@ bool NeoBAEEngine::DecodeRun(audio_chunk& chunk, abort_callback& abort)
 
 void NeoBAEEngine::Seek(double seconds, abort_callback& abort)
 {
-	std::lock_guard<std::recursive_mutex> lock(s_mutex);
 	abort.check();
 	BAESong song = (BAESong)m_song;
 	if (!song || !m_started)
 		return;
+	BindMixerCurrent();
 
 	if (seconds < 0)
 		seconds = 0;

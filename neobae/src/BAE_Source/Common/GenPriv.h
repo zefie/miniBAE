@@ -831,6 +831,19 @@ struct GM_Mixer
     int32_t            *channelCaptureSnapshot;
     bool                channelCaptureActive[16];
     int32_t             channelCaptureSliceCount;
+
+#if USE_NEW_EFFECTS
+    /* Per-mixer effect state (was process-global). Allocated during reverb setup. */
+    struct NewReverbParams  *pNewReverb;
+    struct ChorusParams     *pChorus;
+#if USE_NEO_EFFECTS == TRUE
+    struct NeoReverbParams  *pNeoReverb;
+#endif
+#endif
+#if USE_SF2_SUPPORT == TRUE
+    /* Per-mixer FluidLite state (was process-global). */
+    void                    *pSF2State;
+#endif
 };
 typedef struct GM_Mixer GM_Mixer;
 
@@ -850,7 +863,11 @@ typedef struct GM_Mixer GM_Mixer;
     extern "C" {
 #endif
 
-extern GM_Mixer *MusicGlobals;
+/* Thread-local active mixer. Concurrent mixers each bind this on their thread. */
+extern BAE_THREAD_LOCAL GM_Mixer *MusicGlobals;
+
+/* Set the TLS current mixer; returns the previous value (for save/restore). */
+struct GM_Mixer *GM_SetCurrentMixer(struct GM_Mixer *mixer);
 
 void PV_FlushChannelCaptureBuffers(GM_Mixer *pMixer);
 void PV_FinalizeChannelCaptureFile(int ch);
@@ -923,11 +940,7 @@ struct NewReverbParams
 
 typedef struct NewReverbParams NewReverbParams;
 
-extern NewReverbParams      gNewReverbParams;
-
 typedef struct NeoReverbParams NeoReverbParams;
-
-extern NeoReverbParams      gNeoReverbParams;
 
 /* prototypes */
 NewReverbParams*    GetNewReverbParams();

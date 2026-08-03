@@ -181,8 +181,6 @@ struct NeoReverbParams
     bool       mWasActive;
 };
 
-NeoReverbParams gNeoReverbParams;
-
 static INLINE int32_t PV_Clamp32From64(int64_t v)
 {
     if (v > INT32_MAX) return INT32_MAX;
@@ -389,7 +387,16 @@ static void PV_ApplyNeoReverbDefaults(NeoReverbParams *params)
 //++------------------------------------------------------------------------------
 NeoReverbParams* GetNeoReverbParams(void)
 {
-    return &gNeoReverbParams;
+    GM_Mixer *pMixer = MusicGlobals;
+    if (!pMixer)
+        return NULL;
+    if (!pMixer->pNeoReverb)
+    {
+        pMixer->pNeoReverb = (NeoReverbParams *)XNewPtr((int32_t)sizeof(NeoReverbParams));
+        if (!pMixer->pNeoReverb)
+            return NULL;
+    }
+    return pMixer->pNeoReverb;
 }
 
 // Return TRUE if Neo reverb internal state indicates activity or an active tail
@@ -455,6 +462,9 @@ bool InitNeoReverb(void)
 {
     int i;
     NeoReverbParams* params = GetNeoReverbParams();
+
+    if (!params)
+        return FALSE;
     
     params->mIsInitialized = FALSE;
     
@@ -526,18 +536,22 @@ bool InitNeoReverb(void)
 void ShutdownNeoReverb(void)
 {
     int i;
+    GM_Mixer *pMixer = MusicGlobals;
     NeoReverbParams* params = GetNeoReverbParams();
-    
+
+    if (!params)
+        return;
+
     params->mIsInitialized = FALSE;
     gMobileReverb.initialized = FALSE;
-    
+
     // Deallocate tap buffer
     if (params->mTapBuffer)
     {
         XDisposePtr(params->mTapBuffer);
         params->mTapBuffer = NULL;
     }
-    
+
     // Deallocate custom buffers
     for (i = 0; i < NEO_CUSTOM_MAX_COMBS; i++)
     {
@@ -546,6 +560,12 @@ void ShutdownNeoReverb(void)
             XDisposePtr(params->mCustomBuffer[i]);
             params->mCustomBuffer[i] = NULL;
         }
+    }
+
+    if (pMixer && pMixer->pNeoReverb == params)
+    {
+        XDisposePtr((XPTR)params);
+        pMixer->pNeoReverb = NULL;
     }
 }
 

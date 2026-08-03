@@ -608,8 +608,9 @@ extern "C"
 
     // BAEMixer_New
     // ------------------------------------
-    // 'Create' a new BAEMixer structure. Actually returns a pointer to the global
-    // single BAEMixer structure.  Can only be one mixer object per sound card.
+    // Create a new BAEMixer. Multiple mixers may exist in one process; each
+    // owns an independent GM_Mixer. Bind the active mixer on a thread with
+    // BAEMixer_MakeCurrent before rendering or calling mixer-global GM APIs.
     //
     BAEMixer BAEMixer_New(void);
 
@@ -618,6 +619,10 @@ extern "C"
     // Deactivates the indicated BAEMixer, effectively deleting it.
     //
     BAEResult BAEMixer_Delete(BAEMixer mixer);
+
+    // Bind this mixer's engine as the thread-local current mixer.
+    // Returns BAE_NO_ERROR, or BAE_NULL_OBJECT / BAE_NOT_SETUP.
+    BAEResult BAEMixer_MakeCurrent(BAEMixer mixer);
 
     // mixer callbacks and tasks
     BAEResult BAEMixer_SetAudioTask(BAEMixer mixer, BAE_AudioTaskCallbackPtr pTaskProc, void *taskReference);

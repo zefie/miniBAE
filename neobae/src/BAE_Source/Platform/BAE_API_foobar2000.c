@@ -43,6 +43,9 @@
 extern void    BAE_BuildMixerSlice(void *threadContext, void *pAudioBuffer,
                                    int32_t bufferByteLength, int32_t sampleFrames);
 extern int16_t BAE_GetMaxSamplePerSlice(void);
+/* TLS current mixer — pass into BuildMixerSlice so concurrent sessions stay bound. */
+struct GM_Mixer;
+extern struct GM_Mixer *GM_GetCurrentMixer(void);
 
 // ---------------------------------------------------------------------------
 // Global state
@@ -52,7 +55,8 @@ static uint32_t g_channels          = 2;
 static uint32_t g_bits              = 16;
 static int32_t  g_audioByteBufferSize = 0;   // bytes per BAE slice
 static uint32_t g_framesPerSlice    = 0;
-static int      g_acquired          = 0;     // 1 after BAE_AcquireAudioCard
+static int      g_acquired          = 0;     // 1 while any session holds the card
+static int      g_acquireCount      = 0;     // refcount for concurrent pull sessions
 static int      g_muted             = 0;
 
 static int16_t  g_unscaled_volume   = 256;   // 0..256
@@ -138,26 +142,42 @@ static void PV_EnsureSliceBuf(void)
 // ---------------------------------------------------------------------------
 int32_t BAE_FB2K_RenderAudio(void *pBuffer, int32_t bufferByteLength, int32_t sampleFrames)
 {
+    int16_t liveSlice;
+    uint32_t sliceFramesU;
+    int32_t frameBytes;
+    int32_t sliceFrames;
+    int32_t sliceBytes;
+    int32_t maxFrames;
+    int32_t wholeSlices;
+    uint8_t *dst;
+    int32_t framesOut;
+    int32_t i;
+
     if (!pBuffer || bufferByteLength <= 0 || sampleFrames <= 0) return 0;
     if (!g_acquired || g_muted) { memset(pBuffer, 0, (size_t)bufferByteLength); return bufferByteLength; }
 
-    // Keep slice metrics in sync with the live mixer (rate-dependent One_Slice).
+    /* Derive slice size from the TLS-bound mixer (caller must GM_SetCurrentMixer /
+       BAEMixer_MakeCurrent first). Use locals so concurrent sessions do not race
+       on g_framesPerSlice. */
+    liveSlice = BAE_GetMaxSamplePerSlice();
+    if (liveSlice > 0)
+        sliceFramesU = (uint32_t)liveSlice;
+    else if (g_framesPerSlice > 0)
+        sliceFramesU = g_framesPerSlice;
+    else
     {
-        int16_t liveSlice = BAE_GetMaxSamplePerSlice();
-        if (liveSlice > 0 && (uint32_t)liveSlice != g_framesPerSlice)
-            PV_ComputeSliceSize();
-    }
-    if (g_framesPerSlice == 0)
         PV_ComputeSliceSize();
-    if (g_framesPerSlice == 0)
+        sliceFramesU = g_framesPerSlice;
+    }
+    if (sliceFramesU == 0)
         return 0;
 
-    const int32_t frameBytes = (int32_t)(g_channels * (g_bits / 8));
+    frameBytes = (int32_t)(g_channels * (g_bits / 8));
     if (frameBytes <= 0)
         return 0;
 
-    const int32_t sliceFrames = (int32_t)g_framesPerSlice;
-    const int32_t sliceBytes = sliceFrames * frameBytes;
+    sliceFrames = (int32_t)sliceFramesU;
+    sliceBytes = sliceFrames * frameBytes;
     if (sliceBytes <= 0 || bufferByteLength < sliceBytes)
         return 0;
 
@@ -165,19 +185,22 @@ int32_t BAE_FB2K_RenderAudio(void *pBuffer, int32_t bufferByteLength, int32_t sa
     // (bufferTime / One_Slice), ignoring a smaller sampleFrames argument. Rendering
     // a partial last chunk therefore makes MIDI run fast at non-44.1k rates where
     // the caller's frame count is not an integer multiple of One_Slice.
-    int32_t maxFrames = sampleFrames;
+    maxFrames = sampleFrames;
     if (maxFrames * frameBytes > bufferByteLength)
         maxFrames = bufferByteLength / frameBytes;
-    const int32_t wholeSlices = maxFrames / sliceFrames;
+    wholeSlices = maxFrames / sliceFrames;
     if (wholeSlices <= 0)
         return 0;
 
-    uint8_t *dst = (uint8_t *)pBuffer;
-    int32_t framesOut = 0;
+    dst = (uint8_t *)pBuffer;
+    framesOut = 0;
 
-    for (int32_t i = 0; i < wholeSlices; ++i)
+    for (i = 0; i < wholeSlices; ++i)
     {
-        BAE_BuildMixerSlice(NULL, dst + (framesOut * frameBytes), sliceBytes, sliceFrames);
+        /* Prefer explicit mixer context over NULL so a concurrent Open/MakeCurrent
+         * on another thread cannot leave this render using the wrong TLS briefly. */
+        BAE_BuildMixerSlice(GM_GetCurrentMixer(),
+                            dst + (framesOut * frameBytes), sliceBytes, sliceFrames);
         framesOut += sliceFrames;
     }
 
@@ -434,6 +457,7 @@ int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t chan
     g_sampleRate = sampleRate;
     g_channels   = channels ? channels : 2;
     g_bits       = (bits == 8) ? 8 : 16;
+    g_acquireCount++;
     g_acquired   = 1;
 
     PV_ComputeSliceSize();
@@ -444,8 +468,14 @@ int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t chan
 int BAE_ReleaseAudioCard(void *threadContext)
 {
     (void)threadContext;
-    g_acquired = 0;
-    if (g_sliceBuf) { free(g_sliceBuf); g_sliceBuf = NULL; g_sliceBufBytes = 0; }
+    if (g_acquireCount > 0)
+        g_acquireCount--;
+    if (g_acquireCount <= 0)
+    {
+        g_acquireCount = 0;
+        g_acquired = 0;
+        if (g_sliceBuf) { free(g_sliceBuf); g_sliceBuf = NULL; g_sliceBufBytes = 0; }
+    }
     return 0;
 }
 

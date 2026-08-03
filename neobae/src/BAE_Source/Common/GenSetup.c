@@ -225,9 +225,13 @@
 #include "GenSnd.h"
 #include "GenPriv.h"
 #include "GenCache.h"
+#include "GenBankBalance.h"
 #include "BAE_API.h"
 #include "X_Assert.h"
 #include <stdint.h>
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
+#include "GenSF2_FluidLite.h"
+#endif
 
 // Add rates here, to allow use
 static bool PV_ValidateRate(Rate theRate)
@@ -568,21 +572,25 @@ static void PV_SetSampleSliceSize(GM_Mixer *pMixer, Rate theRate)
     pMixer->sampleExpansion = 1;
 }
 
-// Returns the global GM_Mixer pointer
+// Returns the thread-local current GM_Mixer pointer
 struct GM_Mixer * GM_GetCurrentMixer(void)
 {
     return MusicGlobals;
 }
 
+// Process-wide live mixer count (Init/Finis are expected to be externally serialized).
+static int s_activeMixerCount = 0;
+
 // allocate and setup the mixer, but don't active the hardware, yet.
 //
-// This allocates MusicGlobals, which is the common GM_Mixer structure.
+// Allocates a GM_Mixer and binds it as the thread-local MusicGlobals for this thread.
 OPErr GM_InitGeneralSound(void *threadContext, Rate theRate, TerpMode theTerp, AudioModifiers theMods,
                 int16_t maxVoices, int16_t normVoices, int16_t maxEffects, GM_Mixer **outMixer)
 {
     register GM_Mixer   *pMixer;
     register int32_t      count;
     OPErr               theErr;
+    GM_Mixer            *savedMixer;
 
     theErr = NO_ERR;
 
@@ -638,24 +646,24 @@ OPErr GM_InitGeneralSound(void *threadContext, Rate theRate, TerpMode theTerp, A
     }
 
     pMixer = NULL;
+    savedMixer = MusicGlobals;
     if (theErr == NO_ERR)
     {
-        // Only one GM_Mixer may own MusicGlobals. Opening a second mixer overwrites
-        // the pointer and leaves the first session crashing on FreeSong / MIDI queue walks.
-        if (MusicGlobals != NULL)
-        {
-            theErr = NOT_REENTERANT;
-        }
-    }
-    if (theErr == NO_ERR)
-    {
-// Allocate MusicGlobals
-        MusicGlobals = (GM_Mixer *)XNewPtr( (int32_t)sizeof(GM_Mixer) );
-        pMixer = MusicGlobals;
+// Allocate a new mixer instance and bind it as the TLS current mixer for setup.
+        pMixer = (GM_Mixer *)XNewPtr( (int32_t)sizeof(GM_Mixer) );
         if (pMixer)
         {
+            MusicGlobals = pMixer;
 #if USE_SF2_SUPPORT == TRUE
             pMixer->isSF2 = FALSE;
+            pMixer->pSF2State = NULL;
+#endif
+#if USE_NEW_EFFECTS
+            pMixer->pNewReverb = NULL;
+            pMixer->pChorus = NULL;
+#if USE_NEO_EFFECTS == TRUE
+            pMixer->pNeoReverb = NULL;
+#endif
 #endif
             // Turn off all notes!
             for (count = 0; count < MAX_VOICES; count++)
@@ -746,8 +754,11 @@ OPErr GM_InitGeneralSound(void *threadContext, Rate theRate, TerpMode theTerp, A
         else
         {
             theErr = MEMORY_ERR;
+            MusicGlobals = savedMixer;
         }
     }
+    // Continue finishing setup even if theErr is set (e.g. UNSUPPORTED_HARDWARE);
+    // historical behavior keeps the mixer alive for the caller.
     if (pMixer)
     {
         pMixer->insideAudioInterrupt = 0;
@@ -778,6 +789,10 @@ OPErr GM_InitGeneralSound(void *threadContext, Rate theRate, TerpMode theTerp, A
         {
             pMixer->sampleFrameSize *= 2;
         }
+
+        s_activeMixerCount++;
+        // Leave TLS bound to the new mixer for the caller.
+        (void)savedMixer;
 
         // since we don't call GM_StartHardwareSoundManager, we start the engine
         // up paused. You'll need to call GM_ResumeGeneralSound to start the
@@ -940,12 +955,14 @@ OPErr GM_ChangeAudioModes(void *threadContext,
 
 void GM_FinisGeneralSound(void *threadContext, GM_Mixer *mixer)
 {
-    BAE_ASSERT(mixer == MusicGlobals);
+    GM_Mixer *savedMixer;
+
     if (mixer)
     {
+        savedMixer = GM_SetCurrentMixer(mixer);
         mixer->systemPaused = TRUE;
         BAE_DestroyMutex(mixer->queueLock);
-        GM_FreeSong(threadContext, NULL);       // free all songs
+        GM_FreeSong(threadContext, NULL);       // free all songs on this mixer
 
         // Close up sound manager BEFORE releasing memory!
 //      GM_StopHardwareSoundManager(threadContext);
@@ -955,11 +972,32 @@ void GM_FinisGeneralSound(void *threadContext, GM_Mixer *mixer)
         GM_CleanupReverb();
 #endif
 
-        XDisposePtr((XPTR)mixer);
-        MusicGlobals = NULL;
-    }
+#if USE_SF2_SUPPORT == TRUE
+        if (mixer->pSF2State)
+        {
+            /* GM_CleanupSF2 uses current mixer; free per-mixer SF2 state. */
+            GM_CleanupSF2();
+            mixer->pSF2State = NULL;
+        }
+#endif
 
-    BAE_Cleanup();
+        GM_BankBalance_OnMixerDestroyed(mixer);
+
+        if (MusicGlobals == mixer)
+            MusicGlobals = (savedMixer != mixer) ? savedMixer : NULL;
+        else
+            MusicGlobals = savedMixer;
+
+        XDisposePtr((XPTR)mixer);
+
+        if (s_activeMixerCount > 0)
+            s_activeMixerCount--;
+        if (s_activeMixerCount <= 0)
+        {
+            s_activeMixerCount = 0;
+            BAE_Cleanup();
+        }
+    }
 }
 
 uint32_t PV_ScaleVolumeFromChannelAndSong(GM_Song *pSong, int16_t channel, uint32_t volume)

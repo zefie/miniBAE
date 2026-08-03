@@ -89,6 +89,18 @@ static BAEFileType   gWriteToFileType = BAE_WAVE_TYPE;
 static int           gMP3BitrateKbps = 128;
 static int           gVelocityCurve  = 1; /* -1 = engine default */
 static int           gVolumePct      = 100; /* raw user volume percent, for overdrive */
+static int           gVolume2Pct     = 50;  /* second-bank volume (dual mode); default 50 */
+static int           gDualBal1       = 0;   /* -bal1: bank A pan -100..100 (L..R), default mid */
+static int           gDualBal2       = 0;   /* -bal2: bank B pan -100..100 (L..R), default mid */
+static float         gDualPan1L      = 1.0f;
+static float         gDualPan1R      = 1.0f;
+static float         gDualPan2L      = 1.0f;
+static float         gDualPan2R      = 1.0f;
+static int           gDualMode       = 0;   /* -p2: two mixers, same song, sum overlay */
+static BAEMixer      gDualMixerB     = NULL;
+static struct GM_Mixer *gDualGmMixerB = NULL;
+static int16_t      *gDualTempBuf    = NULL;
+static int32_t       gDualTempBufBytes = 0;
 static int           gEqEnabled      = 0;
 static float         gEqGains[5]     = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 static int           gNormalize      = 0; /* -n: MIDI+patch peak normalize (playback + export) */
@@ -101,6 +113,7 @@ static int gHasCustomReverb = 0;
 static char gVoiceCaptureDir[1024] = {0};
 static char gInputFilePath[1024] = {0};
 static char gBankFilePath[1024] = {0};
+static char gBank2FilePath[1024] = {0};
 static int  gTempOutputFile = 0;
 static int  gPassNumber = 0;
 static int  gPassTotal  = 0;
@@ -379,6 +392,7 @@ static const char usageMain[] =
     "/dls"
 #endif
     "}\n"
+    "                 -p2 {second bank for dual-bank overlay (same song, sum mix)}\n"
     "                 -f  {%s}\n"
 #if USE_NATIVE_DLS == TRUE
     "                 -dlscompat {Enable compatibility mode to broaden support for DLS banks. Do not use if you desire authentic MobileBAE behavior.}\n"
@@ -401,7 +415,10 @@ static const char usageMain[] =
     "                 -k  {enable karaoke lyric display}\n"
 #endif
     "                 -l  {loop count (default: 0)}\n"
-    "                 -v  {master volume %% (default: 100)}\n"
+    "                 -v  {master volume %% (default: 100; dual: 50)}\n"
+    "                 -v2 {second-bank volume %% with -p2 (default: 50)}\n"
+    "                 -bal1 {bank A pan -100..100 (L..R, default: 0) with -p2}\n"
+    "                 -bal2 {bank B pan -100..100 (L..R, default: 0) with -p2}\n"
     "                 -n  {normalize playback/export: MIDI estimate / PCM peak}\n"
     "                 -vc {velocity curve 0-5 (default: engine (0), none for SF2/DLS)}\n"
     "                 -t  {max duration in seconds (0 = no limit)}\n"
@@ -704,6 +721,171 @@ static void apply_output_gain(BAEMixer mixer)
 {
     BAEMixer_SetOutputGain(mixer, gVolumePct);
 }
+
+static void apply_output_gain_pct(BAEMixer mixer, int pct)
+{
+    BAEMixer_SetOutputGain(mixer, pct);
+}
+
+/* Dual-bank pan: -100 = full L, 0 = mid (unity), 100 = full R. */
+static void PV_DualPanGainsFromBal(int bal, float *outL, float *outR)
+{
+    if (bal > 100) bal = 100;
+    if (bal < -100) bal = -100;
+    if (bal >= 0) {
+        *outL = 1.0f - ((float)bal / 100.0f);
+        *outR = 1.0f;
+    } else {
+        *outL = 1.0f;
+        *outR = 1.0f + ((float)bal / 100.0f);
+    }
+}
+
+static void PV_DualUpdatePanGains(void)
+{
+    PV_DualPanGainsFromBal(gDualBal1, &gDualPan1L, &gDualPan1R);
+    PV_DualPanGainsFromBal(gDualBal2, &gDualPan2L, &gDualPan2R);
+}
+
+static int32_t PV_ClampS16(int32_t s)
+{
+    if (s > 32767) return 32767;
+    if (s < -32768) return -32768;
+    return s;
+}
+
+#if USE_CALLBACKS == TRUE
+/* After mixer A's slice is in `samples`, pull-render mixer B, pan both, sum (clamp). */
+static void PV_DualMixOutput(void *threadContext, void *samples, int32_t sampleSize,
+    int32_t channels, uint32_t lengthInFrames)
+{
+    int32_t bytes;
+    uint32_t f;
+    (void)threadContext;
+
+    if (!gDualGmMixerB || !gDualTempBuf || !samples || sampleSize <= 0 || channels <= 0)
+        return;
+
+    bytes = (int32_t)lengthInFrames * sampleSize * channels;
+    if (bytes <= 0 || bytes > gDualTempBufBytes)
+        return;
+
+    memset(gDualTempBuf, 0, (size_t)bytes);
+    BAE_BuildMixerSlice(gDualGmMixerB, gDualTempBuf, bytes, (int32_t)lengthInFrames);
+
+    if (sampleSize == 2 && channels >= 2) {
+        int16_t *a = (int16_t *)samples;
+        int16_t *b = gDualTempBuf;
+        for (f = 0; f < lengthInFrames; f++) {
+            int32_t aL = (int32_t)((float)a[0] * gDualPan1L);
+            int32_t aR = (int32_t)((float)a[1] * gDualPan1R);
+            int32_t bL = (int32_t)((float)b[0] * gDualPan2L);
+            int32_t bR = (int32_t)((float)b[1] * gDualPan2R);
+            a[0] = (int16_t)PV_ClampS16(aL + bL);
+            a[1] = (int16_t)PV_ClampS16(aR + bR);
+            a += channels;
+            b += channels;
+        }
+    } else if (sampleSize == 2) {
+        int16_t *a = (int16_t *)samples;
+        int16_t *b = gDualTempBuf;
+        float mid1 = (gDualPan1L + gDualPan1R) * 0.5f;
+        float mid2 = (gDualPan2L + gDualPan2R) * 0.5f;
+        for (f = 0; f < lengthInFrames; f++) {
+            a[0] = (int16_t)PV_ClampS16(
+                (int32_t)((float)a[0] * mid1) + (int32_t)((float)b[0] * mid2));
+            a++;
+            b++;
+        }
+    } else if (sampleSize == 1 && channels >= 2) {
+        uint8_t *a = (uint8_t *)samples;
+        uint8_t *b = (uint8_t *)gDualTempBuf;
+        for (f = 0; f < lengthInFrames; f++) {
+            int32_t aL = (int32_t)(((float)a[0] - 128.0f) * gDualPan1L);
+            int32_t aR = (int32_t)(((float)a[1] - 128.0f) * gDualPan1R);
+            int32_t bL = (int32_t)(((float)b[0] - 128.0f) * gDualPan2L);
+            int32_t bR = (int32_t)(((float)b[1] - 128.0f) * gDualPan2R);
+            int32_t sL = aL + bL;
+            int32_t sR = aR + bR;
+            if (sL > 127) sL = 127;
+            if (sL < -128) sL = -128;
+            if (sR > 127) sR = 127;
+            if (sR < -128) sR = -128;
+            a[0] = (uint8_t)(sL + 128);
+            a[1] = (uint8_t)(sR + 128);
+            a += channels;
+            b += channels;
+        }
+    } else if (sampleSize == 1) {
+        uint8_t *a = (uint8_t *)samples;
+        uint8_t *b = (uint8_t *)gDualTempBuf;
+        float mid1 = (gDualPan1L + gDualPan1R) * 0.5f;
+        float mid2 = (gDualPan2L + gDualPan2R) * 0.5f;
+        for (f = 0; f < lengthInFrames; f++) {
+            int32_t s = (int32_t)(((float)a[0] - 128.0f) * mid1)
+                      + (int32_t)(((float)b[0] - 128.0f) * mid2);
+            if (s > 127) s = 127;
+            if (s < -128) s = -128;
+            a[0] = (uint8_t)(s + 128);
+            a++;
+            b++;
+        }
+    }
+}
+
+static void PV_DualMixTeardown(BAEMixer mixerA)
+{
+    if (mixerA) {
+        BAEMixer_MakeCurrent(mixerA);
+        GM_SetAudioOutput(NULL);
+    }
+    free(gDualTempBuf);
+    gDualTempBuf = NULL;
+    gDualTempBufBytes = 0;
+    gDualGmMixerB = NULL;
+}
+
+static int PV_DualMixSetup(BAEMixer mixerA, BAEMixer mixerB)
+{
+    int16_t frames;
+    int32_t bytes;
+
+    if (!mixerA || !mixerB)
+        return 0;
+
+    if (BAEMixer_MakeCurrent(mixerB) != BAE_NO_ERROR)
+        return 0;
+    gDualGmMixerB = GM_GetCurrentMixer();
+    if (!gDualGmMixerB)
+        return 0;
+
+    frames = BAE_GetMaxSamplePerSlice();
+    if (frames <= 0)
+        frames = 1024;
+    /* Cover device slices and file-export block size (GM_GetAudioBufferOutputSize). */
+    bytes = GM_GetAudioBufferOutputSize();
+    {
+        int32_t minBytes = (int32_t)frames * 2 * 2 * 4;
+        if (bytes < minBytes)
+            bytes = minBytes;
+    }
+    if (bytes < 65536)
+        bytes = 65536;
+    gDualTempBuf = (int16_t *)calloc(1, (size_t)bytes);
+    if (!gDualTempBuf) {
+        gDualGmMixerB = NULL;
+        return 0;
+    }
+    gDualTempBufBytes = bytes;
+
+    if (BAEMixer_MakeCurrent(mixerA) != BAE_NO_ERROR) {
+        PV_DualMixTeardown(NULL);
+        return 0;
+    }
+    GM_SetAudioOutput(PV_DualMixOutput);
+    return 1;
+}
+#endif /* USE_CALLBACKS */
 
 /* =========================================================================
  * PV_PlaySong – unified MIDI/RMF/XMF playback
@@ -1190,6 +1372,309 @@ static BAEResult PV_PlayFile(BAEMixer mixer, const char *path,
 }
 
 /* =========================================================================
+ * Dual-bank overlay: same song on two mixers, summed in A's output callback
+ * ========================================================================= */
+
+static BAEResult PV_LoadSongOntoMixer(BAEMixer mixer, const char *path, BAESong *outSong)
+{
+    BAEFileType ftype;
+    BAESong song;
+    BAEResult err = BAE_NO_ERROR;
+
+    if (!mixer || !path || !outSong)
+        return BAE_PARAM_ERR;
+    *outSong = NULL;
+
+    ftype = X_DetermineFileType((BAEPathName)path);
+    if (ftype == BAE_INVALID_TYPE)
+        return BAE_BAD_FILE;
+
+    switch (ftype) {
+    case BAE_WAVE_TYPE:
+    case BAE_AIFF_TYPE:
+    case BAE_AU_TYPE:
+#if USE_MPEG_DECODER == TRUE
+    case BAE_MPEG_TYPE:
+#endif
+#if USE_FLAC_DECODER == TRUE
+    case BAE_FLAC_TYPE:
+#endif
+#if USE_VORBIS_DECODER == TRUE
+    case BAE_VORBIS_TYPE:
+#endif
+#if USE_OPUS_DECODER == TRUE
+    case BAE_OPUS_TYPE:
+#endif
+#if USE_ADP_SUPPORT == TRUE
+    case BAE_ADP_TYPE:
+#endif
+#if USE_ADX_SUPPORT == TRUE
+    case BAE_ADX_TYPE:
+#endif
+#if USE_QOA_SUPPORT == TRUE
+    case BAE_QOA_TYPE:
+#endif
+#if USE_WMA_SUPPORT == TRUE
+    case BAE_WMA_TYPE:
+#endif
+        return BAE_UNSUPPORTED_FORMAT;
+    default:
+        break;
+    }
+
+    if (BAEMixer_MakeCurrent(mixer) != BAE_NO_ERROR)
+        return BAE_NOT_SETUP;
+
+    song = BAESong_New(mixer);
+    if (!song)
+        return BAE_MEMORY_ERR;
+
+    if (ftype == BAE_RMF)
+        err = BAESong_LoadRmfFromFile(song, (BAEPathName)path, 0, TRUE);
+#if USE_XMF_SUPPORT == TRUE && (_USING_FLUIDLITE == TRUE || USE_NATIVE_DLS == TRUE)
+    else if (ftype == BAE_XMF)
+        err = BAESong_LoadXmfFromFile(song, (BAEPathName)path, TRUE);
+#endif
+#if USE_RMI_SUPPORT == TRUE
+    else if (ftype == BAE_RMI)
+        err = BAESong_LoadRmiFromFile(song, (BAEPathName)path, TRUE, TRUE);
+#endif
+#if USE_RETRO_RINGTONE_SUPPORT == TRUE
+    else if (ftype == BAE_RINGTONE_IMY || ftype == BAE_RINGTONE_RNG ||
+             ftype == BAE_RINGTONE_RTX) {
+        unsigned char *midi = NULL;
+        uint32_t midiSize = 0;
+        err = BAERingtone_ConvertToMidiFromFile((BAEPathName)path, ftype, &midi, &midiSize);
+        if (err == BAE_NO_ERROR)
+            err = BAESong_LoadMidiFromMemory(song, midi, midiSize, TRUE);
+        BAERingtone_FreeMidiBuffer(midi);
+    }
+#endif
+    else
+        err = BAESong_LoadMidiFromFile(song, (BAEPathName)path, TRUE);
+
+    if (err != BAE_NO_ERROR) {
+        BAESong_Delete(song);
+        return err;
+    }
+    *outSong = song;
+    return BAE_NO_ERROR;
+}
+
+static void PV_ApplySongPrep(BAEMixer mixer, BAESong song, BAEReverbType reverbType)
+{
+    if (gVelocityCurve >= 0)
+        BAESong_SetVelocityCurve(song, gVelocityCurve);
+#if USE_SF2_SUPPORT == TRUE
+    else if (BAESong_IsSF2Song(song))
+        BAESong_SetVelocityCurve(song, 1);
+#endif
+
+    BAEMixer_MakeCurrent(mixer);
+    if (gHasCustomReverb) {
+        BAEMixer_SetDefaultReverb(mixer, gCustomReverbType);
+        SetNeoCustomReverbCombCount(gCustomReverbCombCount);
+        for (int i = 0; i < 4; i++) {
+            SetNeoCustomReverbCombDelay(i, gCustomReverbDelays[i]);
+            SetNeoCustomReverbCombFeedback(i, gCustomReverbFeedback[i]);
+            SetNeoCustomReverbCombGain(i, gCustomReverbGain[i]);
+        }
+        SetNeoCustomReverbLowpass(gCustomReverbLowpass);
+        SetNeoReverbMix(gCustomReverbMix);
+    } else {
+        BAEMixer_SetDefaultReverb(mixer, reverbType);
+    }
+}
+
+static BAEResult PV_PlayDualFile(BAEMixer mixerA, BAEMixer mixerB, const char *path,
+    unsigned int timeLimitSec, unsigned int loopCount,
+    BAEReverbType reverbType, char *muteChannels)
+{
+#if USE_CALLBACKS != TRUE
+    (void)mixerA; (void)mixerB; (void)path;
+    (void)timeLimitSec; (void)loopCount; (void)reverbType; (void)muteChannels;
+    playbae_printf("playbae: Dual-bank overlay requires USE_CALLBACKS.\n");
+    return BAE_UNSUPPORTED_FORMAT;
+#else
+    BAESong songA = NULL, songB = NULL;
+    BAEResult err;
+    BAE_UNSIGNED_FIXED songVol = volume_pct_to_fixed(100);
+    unsigned int effectiveLoopCount = loopCount;
+
+    playbae_printf("Dual-bank overlay: bank A %d%% (pan %+d) + bank B %d%% (pan %+d)\n",
+        gVolumePct, gDualBal1, gVolume2Pct, gDualBal2);
+    playbae_printf("Playing (dual): %s\n", path);
+
+    err = PV_LoadSongOntoMixer(mixerA, path, &songA);
+    if (err != BAE_NO_ERROR) {
+        playbae_printf("playbae: Couldn't load '%s' on bank A (%d: %s)\n",
+            path, err, BAE_GetErrorString(err));
+        return err;
+    }
+    err = PV_LoadSongOntoMixer(mixerB, path, &songB);
+    if (err != BAE_NO_ERROR) {
+        playbae_printf("playbae: Couldn't load '%s' on bank B (%d: %s)\n",
+            path, err, BAE_GetErrorString(err));
+        BAESong_Delete(songA);
+        return err;
+    }
+
+    PV_ApplySongPrep(mixerA, songA, reverbType);
+    PV_ApplySongPrep(mixerB, songB, reverbType);
+
+    {
+        int32_t normalizeGainPct = 100;
+        BAEMixer_MakeCurrent(mixerA);
+        (void)BAESong_ApplyNormalizeFromMidiEstimate(
+            songA, mixerA, gNormalize ? TRUE : FALSE,
+            BAE_NORMALIZE_DEFAULT_TARGET_PEAK_PCT, &normalizeGainPct);
+        BAEMixer_MakeCurrent(mixerB);
+        (void)BAESong_ApplyNormalizeFromMidiEstimate(
+            songB, mixerB, gNormalize ? TRUE : FALSE,
+            BAE_NORMALIZE_DEFAULT_TARGET_PEAK_PCT, &normalizeGainPct);
+        BAEMixer_MakeCurrent(mixerA);
+    }
+
+    /* Sync start: preroll both, then Start back-to-back on this thread. */
+    BAESong_Preroll(songA);
+    BAESong_Preroll(songB);
+    err = BAESong_Start(songA, 0);
+    if (err != BAE_NO_ERROR) {
+        playbae_printf("playbae: Couldn't start bank A (%d: %s)\n",
+            err, BAE_GetErrorString(err));
+        BAESong_Delete(songA);
+        BAESong_Delete(songB);
+        return err;
+    }
+    err = BAESong_Start(songB, 0);
+    if (err != BAE_NO_ERROR) {
+        playbae_printf("playbae: Couldn't start bank B (%d: %s)\n",
+            err, BAE_GetErrorString(err));
+        BAESong_Stop(songA, 0);
+        BAESong_Delete(songA);
+        BAESong_Delete(songB);
+        return err;
+    }
+
+    BAESong_SetVolume(songA, songVol);
+    BAESong_SetVolume(songB, songVol);
+    if (muteChannels && muteChannels[0]) {
+        MuteChannels(songA, muteChannels);
+        MuteChannels(songB, muteChannels);
+    }
+
+    {
+        BAEReverbType savedVerb;
+        BAEMixer_MakeCurrent(mixerA);
+        BAEMixer_GetDefaultReverb(mixerA, &savedVerb);
+        BAEMixer_SetDefaultReverb(mixerA, BAE_REVERB_NONE);
+        BAEMixer_SetDefaultReverb(mixerA, savedVerb);
+        BAEMixer_MakeCurrent(mixerB);
+        BAEMixer_GetDefaultReverb(mixerB, &savedVerb);
+        BAEMixer_SetDefaultReverb(mixerB, BAE_REVERB_NONE);
+        BAEMixer_SetDefaultReverb(mixerB, savedVerb);
+        BAEMixer_MakeCurrent(mixerA);
+    }
+
+    if (gWriteToFile) {
+        BAESong_SetLoops(songA, 0);
+        BAESong_SetLoops(songB, 0);
+        effectiveLoopCount = 0;
+    } else if (loopCount > 0) {
+        BAESong_SetLoops(songA, 30000);
+        BAESong_SetLoops(songB, 30000);
+    } else {
+        BAESong_SetLoops(songA, 0);
+        BAESong_SetLoops(songB, 0);
+    }
+
+    if (gPassNumber <= 0) {
+        playbae_printf("Reverb: %s (%d)\n", reverbTypeName(reverbType), (int)reverbType);
+        if (effectiveLoopCount > 0)
+            playbae_printf("Will loop %u time(s)\n", effectiveLoopCount);
+        if (timeLimitSec > 0)
+            playbae_printf("Time limit: %u sec\n", timeLimitSec);
+        print_song_engine_config(songA);
+    }
+
+    if (gWriteToFile) {
+        BAEResult perr = BAEMixer_PrimeAudioOutputToFile(mixerA, songA);
+        if (perr != BAE_NO_ERROR) {
+            playbae_printf("Export priming failed (%d: %s).\n",
+                perr, BAE_GetErrorString(perr));
+            BAESong_Stop(songA, 0);
+            BAESong_Stop(songB, 0);
+            BAESong_Delete(songA);
+            BAESong_Delete(songB);
+            return perr;
+        }
+    }
+
+    {
+        uint64_t lastPos = 0;
+        uint64_t cumulative = 0;
+        unsigned int loopsDone = 0;
+        BAE_BOOL done = FALSE;
+        gPosCounter = 0;
+
+        while (!done) {
+            if (gInterrupt) {
+                playbae_printf("\nStop requested...\n");
+                gInterrupt = 0;
+                BAESong_Stop(songA, gFadeOut);
+                BAESong_Stop(songB, gFadeOut);
+            }
+
+            if (gWriteToFile)
+                BAEMixer_ServiceAudioOutputToFile(mixerA);
+
+            BAESong_IsDone(songA, &done);
+
+            {
+                uint64_t posUs = 0;
+                BAESong_GetMicrosecondPosition64(songA, &posUs);
+                uint64_t posMs = posUs / 1000ull;
+
+                if (posMs < lastPos && (lastPos - posMs) > 1000ull) {
+                    cumulative += lastPos;
+                    if (effectiveLoopCount > 0) {
+                        loopsDone++;
+                        if (loopsDone >= effectiveLoopCount) {
+                            BAESong_Stop(songA, gFadeOut);
+                            BAESong_Stop(songB, gFadeOut);
+                        }
+                    }
+                }
+                lastPos = posMs;
+
+                {
+                    uint64_t totalMs = cumulative + posMs;
+                    display_song_position(
+                        (posMs > UINT32_MAX) ? UINT32_MAX : (uint32_t)posMs,
+                        (totalMs > UINT32_MAX) ? UINT32_MAX : (uint32_t)totalMs);
+
+                    if (timeLimitSec > 0 && totalMs > (uint64_t)timeLimitSec * 1000ull - 750ull) {
+                        BAESong_Stop(songA, gFadeOut);
+                        BAESong_Stop(songB, gFadeOut);
+                    }
+                }
+            }
+
+            if (!done) PV_Idle(mixerA, 15000);
+        }
+    }
+
+    BAESong_Stop(songB, 0);
+    PV_Idle(mixerA, 900000);
+    if (gPassNumber <= 0) playbae_printf("\n");
+
+    BAESong_Delete(songA);
+    BAESong_Delete(songB);
+    return BAE_NO_ERROR;
+#endif
+}
+
+/* =========================================================================
  * EQ Helpers
  * ========================================================================= */
 static void apply_eq_state(BAEMixer mixer)
@@ -1521,6 +2006,15 @@ int main(int argc, char *argv[])
     BAEReverbType      reverbType   = BAE_REVERB_TYPE_7; /* small reflections */
     char               muteChannels[512] = {0};
     char               parmFile[1024]    = {0};
+    char               bank2Path[1024]   = {0};
+    int                volumeSpecified   = 0;
+    int                volume2Specified  = 0;
+
+    if (PV_ParseCommands(argc, argv, "-p2", 1, bank2Path)) {
+        gDualMode = 1;
+        strncpy(gBank2FilePath, bank2Path, sizeof(gBank2FilePath) - 1);
+        gBank2FilePath[sizeof(gBank2FilePath) - 1] = '\0';
+    }
 
     if (PV_ParseCommands(argc, argv, "-l",  1, tmpBuf)) loopCount    = (unsigned)atoi(tmpBuf);
     if (PV_ParseCommands(argc, argv, "-t",  1, tmpBuf)) timeLimitSec = (unsigned)atoi(tmpBuf);
@@ -1534,10 +2028,37 @@ int main(int argc, char *argv[])
     if (PV_ParseCommands(argc, argv, "-nf", 0, NULL))   gFadeOut = 0;
     if (PV_ParseCommands(argc, argv, "-n",  0, NULL))   gNormalize = 1;
     if (PV_ParseCommands(argc, argv, "-v",  1, tmpBuf)) {
+        volumeSpecified = 1;
         gVolumePct = atoi(tmpBuf);
         if (gVolumePct < 0)   gVolumePct = 0;
         if (gVolumePct > 400) gVolumePct = 400;
         volume = volume_pct_to_fixed(gVolumePct);
+    }
+    if (PV_ParseCommands(argc, argv, "-v2", 1, tmpBuf)) {
+        volume2Specified = 1;
+        gVolume2Pct = atoi(tmpBuf);
+        if (gVolume2Pct < 0)   gVolume2Pct = 0;
+        if (gVolume2Pct > 400) gVolume2Pct = 400;
+    }
+    if (PV_ParseCommands(argc, argv, "-bal1", 1, tmpBuf)) {
+        gDualBal1 = atoi(tmpBuf);
+        if (gDualBal1 < -100) gDualBal1 = -100;
+        if (gDualBal1 > 100)  gDualBal1 = 100;
+    }
+    if (PV_ParseCommands(argc, argv, "-bal2", 1, tmpBuf)) {
+        gDualBal2 = atoi(tmpBuf);
+        if (gDualBal2 < -100) gDualBal2 = -100;
+        if (gDualBal2 > 100)  gDualBal2 = 100;
+    }
+    /* Dual defaults: 50/50 unless user set -v / -v2 */
+    if (gDualMode) {
+        if (!volumeSpecified) {
+            gVolumePct = 50;
+            volume = volume_pct_to_fixed(100); /* song full; mixer gain does -v */
+        }
+        if (!volume2Specified)
+            gVolume2Pct = 50;
+        PV_DualUpdatePanGains();
     }
     if (PV_ParseCommands(argc, argv, "-rv", 1, tmpBuf)) {
         int rv = atoi(tmpBuf);
@@ -1556,6 +2077,7 @@ int main(int argc, char *argv[])
         playbae_printf("playbae: BAEMixer_New failed\n");
         return 1;
     }
+    BAEMixer mixerB = NULL;
 
     playbae_dprintf("Opening mixer: %d Hz, %d MIDI voices, 8 sound voices, 64 mix level\n",
         (int)sampleRate, maxVoices);
@@ -1583,10 +2105,14 @@ int main(int argc, char *argv[])
     }
 
     BAEMixer_SetAudioTask(mixer, PV_AudioTask, (void *)mixer);
+    BAEMixer_MakeCurrent(mixer);
     apply_eq_state(mixer);
 
     /* ---- Output gain (applies for all volume, not just overdrive) ---- */
-    apply_output_gain(mixer);
+    if (!gDualMode)
+        apply_output_gain(mixer);
+    else
+        apply_output_gain_pct(mixer, gVolumePct);
 
     /* ---- Engine tweaks ---- */
 #if BAE_FIX_SPAN_DC
@@ -1635,6 +2161,11 @@ int main(int argc, char *argv[])
             playbae_printf("Bank: %s\n", parmFile);
         }
     } else {
+        if (gDualMode) {
+            playbae_printf("playbae: Dual-bank mode requires -p (bank A) and -p2 (bank B).\n");
+            BAEMixer_Delete(mixer);
+            return 1;
+        }
 #if _BUILT_IN_PATCHES == TRUE
         err = BAEMixer_LoadBuiltinBank(mixer, &bankToken);
         if (err == BAE_NO_ERROR) {
@@ -1655,6 +2186,63 @@ int main(int argc, char *argv[])
         playbae_printf(usageMain, gPlayFileString, gDefaultReverbIndex);
         BAEMixer_Delete(mixer);
         return 1;
+#endif
+    }
+
+    /* ---- Dual mixer B (not engaged; pulled from A's output callback) ---- */
+    if (gDualMode) {
+#if USE_CALLBACKS != TRUE
+        playbae_printf("playbae: Dual-bank overlay requires USE_CALLBACKS.\n");
+        BAEMixer_Delete(mixer);
+        return 1;
+#else
+        mixerB = BAEMixer_New();
+        if (!mixerB) {
+            playbae_printf("playbae: BAEMixer_New (bank B) failed\n");
+            BAEMixer_Delete(mixer);
+            return 1;
+        }
+        err = BAEMixer_Open(mixerB, sampleRate, interpol, mods,
+            (int16_t)maxVoices, 8, 64, FALSE);
+        if (err != BAE_NO_ERROR && err != BAE_UNSUPPORTED_HARDWARE) {
+            playbae_printf("playbae: BAEMixer_Open (bank B) failed (%d: %s)\n",
+                err, BAE_GetErrorString(err));
+            BAEMixer_Delete(mixerB);
+            BAEMixer_Delete(mixer);
+            return 1;
+        }
+        gDualMixerB = mixerB;
+        BAEMixer_SetAudioTask(mixerB, PV_AudioTask, (void *)mixerB);
+        apply_eq_state(mixerB);
+        apply_output_gain_pct(mixerB, gVolume2Pct);
+
+        {
+            BAEBankToken bankTokenB = 0;
+            if (!PV_LoadBank(mixerB, gBank2FilePath, &bankTokenB)) {
+                BAEMixer_Delete(mixerB);
+                gDualMixerB = NULL;
+                BAEMixer_Delete(mixer);
+                return 1;
+            }
+            {
+                char friendly[128] = {0};
+                if (bankTokenB &&
+                    BAE_GetBankFriendlyName(mixerB, bankTokenB, friendly, sizeof(friendly)) == BAE_NO_ERROR
+                    && friendly[0]) {
+                    playbae_printf("Bank B: %s (%s)\n", gBank2FilePath, friendly);
+                } else {
+                    playbae_printf("Bank B: %s\n", gBank2FilePath);
+                }
+            }
+        }
+
+        if (!PV_DualMixSetup(mixer, mixerB)) {
+            playbae_printf("playbae: Dual mix setup failed\n");
+            BAEMixer_Delete(mixerB);
+            gDualMixerB = NULL;
+            BAEMixer_Delete(mixer);
+            return 1;
+        }
 #endif
     }
 
@@ -1791,8 +2379,12 @@ int main(int argc, char *argv[])
 
     /* Bare first argument (no leading dash) */
     if (!played && argc > 1 && argv[1][0] != '-') {
-        err = PV_PlayFile(mixer, argv[1], volume, timeLimitSec, loopCount,
-            reverbType, muteChannels, -1);
+        if (gDualMode)
+            err = PV_PlayDualFile(mixer, mixerB, argv[1], timeLimitSec, loopCount,
+                reverbType, muteChannels);
+        else
+            err = PV_PlayFile(mixer, argv[1], volume, timeLimitSec, loopCount,
+                reverbType, muteChannels, -1);
         if (err == BAE_NO_ERROR) {
             strncpy(gInputFilePath, argv[1], sizeof(gInputFilePath)-1);
             gInputFilePath[sizeof(gInputFilePath)-1] = '\0';
@@ -1802,8 +2394,12 @@ int main(int argc, char *argv[])
 
     /* -f: universal auto-detect */
     if (!played && PV_ParseCommands(argc, argv, "-f", 1, parmFile)) {
-        err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount,
-            reverbType, muteChannels, -1);
+        if (gDualMode)
+            err = PV_PlayDualFile(mixer, mixerB, parmFile, timeLimitSec, loopCount,
+                reverbType, muteChannels);
+        else
+            err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount,
+                reverbType, muteChannels, -1);
         if (err == BAE_NO_ERROR) {
             strncpy(gInputFilePath, parmFile, sizeof(gInputFilePath)-1);
             gInputFilePath[sizeof(gInputFilePath)-1] = '\0';
@@ -1813,7 +2409,10 @@ int main(int argc, char *argv[])
 
     /* Type-specific flags kept for backward compatibility */
     if (!played && PV_ParseCommands(argc, argv, "-m", 1, parmFile)) {
-        err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount, reverbType, muteChannels, -1);
+        if (gDualMode)
+            err = PV_PlayDualFile(mixer, mixerB, parmFile, timeLimitSec, loopCount, reverbType, muteChannels);
+        else
+            err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount, reverbType, muteChannels, -1);
         if (err == BAE_NO_ERROR) {
             strncpy(gInputFilePath, parmFile, sizeof(gInputFilePath)-1);
             gInputFilePath[sizeof(gInputFilePath)-1] = '\0';
@@ -1821,7 +2420,10 @@ int main(int argc, char *argv[])
         played = 1;
     }
     if (!played && PV_ParseCommands(argc, argv, "-r", 1, parmFile)) {
-        err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount, reverbType, muteChannels, -1);
+        if (gDualMode)
+            err = PV_PlayDualFile(mixer, mixerB, parmFile, timeLimitSec, loopCount, reverbType, muteChannels);
+        else
+            err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount, reverbType, muteChannels, -1);
         if (err == BAE_NO_ERROR) {
             strncpy(gInputFilePath, parmFile, sizeof(gInputFilePath)-1);
             gInputFilePath[sizeof(gInputFilePath)-1] = '\0';
@@ -1829,7 +2431,10 @@ int main(int argc, char *argv[])
         played = 1;
     }
     if (!played && PV_ParseCommands(argc, argv, "-a", 1, parmFile)) {
-        err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount, reverbType, muteChannels, -1);
+        if (gDualMode)
+            err = PV_PlayDualFile(mixer, mixerB, parmFile, timeLimitSec, loopCount, reverbType, muteChannels);
+        else
+            err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount, reverbType, muteChannels, -1);
         if (err == BAE_NO_ERROR) {
             strncpy(gInputFilePath, parmFile, sizeof(gInputFilePath)-1);
             gInputFilePath[sizeof(gInputFilePath)-1] = '\0';
@@ -1837,7 +2442,10 @@ int main(int argc, char *argv[])
         played = 1;
     }
     if (!played && PV_ParseCommands(argc, argv, "-w", 1, parmFile)) {
-        err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount, reverbType, muteChannels, -1);
+        if (gDualMode)
+            err = PV_PlayDualFile(mixer, mixerB, parmFile, timeLimitSec, loopCount, reverbType, muteChannels);
+        else
+            err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount, reverbType, muteChannels, -1);
         if (err == BAE_NO_ERROR) {
             strncpy(gInputFilePath, parmFile, sizeof(gInputFilePath)-1);
             gInputFilePath[sizeof(gInputFilePath)-1] = '\0';
@@ -1846,7 +2454,10 @@ int main(int argc, char *argv[])
     }
 #if USE_MPEG_DECODER == TRUE
     if (!played && PV_ParseCommands(argc, argv, "-mp", 1, parmFile)) {
-        err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount, reverbType, muteChannels, -1);
+        if (gDualMode)
+            err = PV_PlayDualFile(mixer, mixerB, parmFile, timeLimitSec, loopCount, reverbType, muteChannels);
+        else
+            err = PV_PlayFile(mixer, parmFile, volume, timeLimitSec, loopCount, reverbType, muteChannels, -1);
         if (err == BAE_NO_ERROR) {
             strncpy(gInputFilePath, parmFile, sizeof(gInputFilePath)-1);
             gInputFilePath[sizeof(gInputFilePath)-1] = '\0';
@@ -2001,6 +2612,15 @@ int main(int argc, char *argv[])
 
     /* ---- Cleanup ---- */
     BAE_WaitMicroseconds(160000);
+#if USE_CALLBACKS == TRUE
+    if (gDualMode)
+        PV_DualMixTeardown(mixer);
+#endif
+    if (mixerB) {
+        BAEMixer_Close(mixerB);
+        BAEMixer_Delete(mixerB);
+        gDualMixerB = NULL;
+    }
     BAEMixer_Close(mixer);
     BAEMixer_Delete(mixer);
 

@@ -67,18 +67,76 @@ typedef struct {
     int lastActivity;    // Frame counter since last activity (for decay)
 } ChannelActivity;
 
-// Global FluidSynth state
-static fluid_settings_t* g_fluidsynth_settings = NULL;
-static fluid_synth_t* g_fluidsynth_synth = NULL;
-static BAE_Mutex g_fluidsynth_mutex = NULL;
-static int g_fluidsynth_soundfont_id = -1;
-static bool g_fluidsynth_initialized = FALSE;
-static bool g_fluidsynth_mono_mode = FALSE;
-static float g_fluidsynth_master_volume = 0.5f;
-static uint16_t g_fluidsynth_sample_rate = BAE_DEFAULT_SAMPLE_RATE;
-static char g_fluidsynth_sf2_path[256] = {0};
-// Flag to prevent audio thread from accessing synth during unload (prevents race condition crashes)
-static volatile bool g_fluidsynth_unloading = FALSE;
+/* Per-mixer FluidLite state (was process-global). Stored on GM_Mixer->pSF2State. */
+typedef struct GM_SF2MixerState {
+    fluid_settings_t* settings;
+    fluid_synth_t* synth;
+    BAE_Mutex mutex;
+    int soundfont_id;
+    bool initialized;
+    bool mono_mode;
+    float master_volume;
+    uint16_t sample_rate;
+    char sf2_path[256];
+    volatile bool unloading;
+    ChannelActivity channel_activity[BAE_MAX_MIDI_CHANNELS];
+    int activity_frame_counter;
+    float* mix_buffer;
+    int32_t mix_buffer_frames;
+    float* resample_buffer;
+    int32_t resample_buffer_frames;
+} GM_SF2MixerState;
+
+static GM_SF2MixerState s_sf2_fallback;
+static bool s_sf2_fallback_inited = FALSE;
+
+static GM_SF2MixerState *PV_SF2_GetState(void)
+{
+    GM_Mixer *m = MusicGlobals;
+    GM_SF2MixerState *s;
+
+    if (!m)
+    {
+        if (!s_sf2_fallback_inited)
+        {
+            XSetMemory(&s_sf2_fallback, (int32_t)sizeof(s_sf2_fallback), 0);
+            s_sf2_fallback.soundfont_id = -1;
+            s_sf2_fallback.master_volume = 0.5f;
+            s_sf2_fallback.sample_rate = BAE_DEFAULT_SAMPLE_RATE;
+            s_sf2_fallback_inited = TRUE;
+        }
+        return &s_sf2_fallback;
+    }
+    if (!m->pSF2State)
+    {
+        s = (GM_SF2MixerState *)XNewPtr((int32_t)sizeof(GM_SF2MixerState));
+        if (!s)
+            return &s_sf2_fallback;
+        s->soundfont_id = -1;
+        s->master_volume = 0.5f;
+        s->sample_rate = BAE_DEFAULT_SAMPLE_RATE;
+        m->pSF2State = s;
+    }
+    return (GM_SF2MixerState *)m->pSF2State;
+}
+
+/* Map legacy global names to the current mixer's SF2 state. */
+#define g_fluidsynth_settings           (PV_SF2_GetState()->settings)
+#define g_fluidsynth_synth              (PV_SF2_GetState()->synth)
+#define g_fluidsynth_mutex              (PV_SF2_GetState()->mutex)
+#define g_fluidsynth_soundfont_id       (PV_SF2_GetState()->soundfont_id)
+#define g_fluidsynth_initialized        (PV_SF2_GetState()->initialized)
+#define g_fluidsynth_mono_mode          (PV_SF2_GetState()->mono_mode)
+#define g_fluidsynth_master_volume      (PV_SF2_GetState()->master_volume)
+#define g_fluidsynth_sample_rate        (PV_SF2_GetState()->sample_rate)
+#define g_fluidsynth_sf2_path           (PV_SF2_GetState()->sf2_path)
+#define g_fluidsynth_unloading          (PV_SF2_GetState()->unloading)
+#define g_channel_activity              (PV_SF2_GetState()->channel_activity)
+#define g_activity_frame_counter        (PV_SF2_GetState()->activity_frame_counter)
+#define g_fluidsynth_mix_buffer         (PV_SF2_GetState()->mix_buffer)
+#define g_fluidsynth_mix_buffer_frames  (PV_SF2_GetState()->mix_buffer_frames)
+#define g_fluidsynth_resample_buffer    (PV_SF2_GetState()->resample_buffer)
+#define g_fluidsynth_resample_buffer_frames (PV_SF2_GetState()->resample_buffer_frames)
 
 // Minimal FluidLite log filter that routes all fluidlite FLUID_LOG output
 // through NeoBAE's debug_message so it appears in the debug log.
@@ -104,19 +162,6 @@ static void pv_fluidsynth_log_filter(int level, char* message, void* data)
     }
 }
 
-// Channel activity tracking
-static ChannelActivity g_channel_activity[BAE_MAX_MIDI_CHANNELS];
-static int g_activity_frame_counter = 0;
-
-// Audio mixing buffer for FluidSynth output
-static float* g_fluidsynth_mix_buffer = NULL;
-static int32_t g_fluidsynth_mix_buffer_frames = 0;
-
-// Resampling buffer: FluidSynth always renders at 44100 Hz internally
-// to avoid pitch shifting at non-44100 sample rates. The output is then
-// downsampled to the mixer's sample rate.
-static float* g_fluidsynth_resample_buffer = NULL;
-static int32_t g_fluidsynth_resample_buffer_frames = 0;
 #define FLUIDSYNTH_INTERNAL_RATE 44100
 
 // Private function prototypes
@@ -314,7 +359,10 @@ bool GM_GetMixerSF2Mode()
 
 void GM_CleanupSF2(void)
 {
-    if (!g_fluidsynth_initialized)
+    GM_Mixer *pMixer = MusicGlobals;
+    GM_SF2MixerState *state;
+
+    if (!g_fluidsynth_initialized && !(pMixer && pMixer->pSF2State))
     {
         return;
     }
@@ -342,6 +390,14 @@ void GM_CleanupSF2(void)
     }
     
     g_fluidsynth_initialized = FALSE;
+
+    if (pMixer && pMixer->pSF2State)
+    {
+        state = (GM_SF2MixerState *)pMixer->pSF2State;
+        pMixer->pSF2State = NULL;
+        if (state != &s_sf2_fallback)
+            XDisposePtr((XPTR)state);
+    }
 }
 
 

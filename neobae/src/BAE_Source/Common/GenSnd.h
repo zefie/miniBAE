@@ -1438,8 +1438,11 @@ typedef int32_t UNIT_TYPE;
     /**************************************************/
     void GM_FinisGeneralSound(void *threadContext, struct GM_Mixer *mixer);
 
-    // Returns the global GM_Mixer pointer
+    // Returns the thread-local current GM_Mixer pointer
     struct GM_Mixer *GM_GetCurrentMixer(void);
+
+    // Bind the thread-local current mixer; returns previous (save/restore).
+    struct GM_Mixer *GM_SetCurrentMixer(struct GM_Mixer *mixer);
 
     // get calculated microsecond time different between mixer slices.
     uint32_t GM_GetMixerUsedTime(void);

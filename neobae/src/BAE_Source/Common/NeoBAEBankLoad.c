@@ -139,6 +139,10 @@ BAEResult BAEMixer_LoadBankFromPath(BAEMixer mixer, BAEPathName path, BAEBankLoa
     if (!cpath || !cpath[0])
         return BAE_PARAM_ERR;
 
+    /* Multi-mixer: bank load uses MusicGlobals / SF2 state on the current mixer. */
+    if (BAEMixer_MakeCurrent(mixer) != BAE_NO_ERROR)
+        return BAE_NOT_SETUP;
+
     BAEMixer_UnloadAllInstrumentBanks(mixer);
     ext = PV_PathExtension(cpath);
 

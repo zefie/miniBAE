@@ -41,6 +41,9 @@ void GM_BankBalance_OnHsbBankRemoved(XFILE file);
 void GM_BankBalance_OnSf2Loaded(void);
 void GM_BankBalance_OnSf2Unloaded(void);
 
+/* Drop per-mixer balance state when a GM_Mixer is destroyed. */
+void GM_BankBalance_OnMixerDestroyed(struct GM_Mixer *mixer);
+
 /* Notify when DLS main/overlay banks change. Pass the mixer that owns them. */
 void GM_BankBalance_OnDlsBanksChanged(struct GM_Mixer *pMixer);
 
