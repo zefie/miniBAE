@@ -80,7 +80,10 @@
 #undef X_BF_5
 
 #if defined(__GNUC__) || defined(__clang__) || defined(_MSC_VER)
+    /* Android uses X_PACKBY1 attributes instead of pragma pack; skip push to avoid -Wpragma-pack. */
+    #if (X_PLATFORM != X_ANDROID)
     #pragma pack(push, 1)
+    #endif
     #if defined(_MSC_VER)
         #define X_PACKBY1
     #endif

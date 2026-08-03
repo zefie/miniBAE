@@ -59,6 +59,12 @@
 #include "wma_decoder.h"
 #endif
 
+#if defined(__GNUC__) || defined(__clang__)
+#define DLS_UNUSED_FN __attribute__((unused))
+#else
+#define DLS_UNUSED_FN
+#endif
+
 void GM_SetMixerDLSMode(bool isDLS) 
 {
     GM_Mixer* pMixer = GM_GetCurrentMixer();
@@ -68,7 +74,7 @@ void GM_SetMixerDLSMode(bool isDLS)
     }
 }
 
-bool GM_GetMixerDLSMode() 
+bool GM_GetMixerDLSMode(void) 
 {
     GM_Mixer* pMixer = GM_GetCurrentMixer();
     if (pMixer) 
@@ -130,7 +136,7 @@ static bool dls_synth_eggs_compat_voice_mgmt(const DLS_Synth* synth) {
     return dls_synth_has_eggs_bank(synth);
 }
 
-static int32_t dls_synth_voice_limit(const DLS_Synth* synth) {
+static DLS_UNUSED_FN int32_t dls_synth_voice_limit(const DLS_Synth* synth) {
     int32_t limit;
     if (!synth) return DLS_MAX_VOICE_POOL;
     limit = synth->maxVoices > 0 ? synth->maxVoices : DLS_MAX_VOICE_POOL;
@@ -179,7 +185,7 @@ void GM_DLS_SetMobileBAEQuirks(bool useQuirks)
     dls_refresh_current_synth_for_mode();
 }
 
-bool GM_DLS_GetMobileBAEQuirks() 
+bool GM_DLS_GetMobileBAEQuirks(void) 
 {
     GM_Mixer* mixer = GM_GetCurrentMixer();
     if (mixer && mixer->pDLSSynth) {
@@ -197,7 +203,7 @@ bool GM_DLS_GetMobileBAEQuirks()
 #define DLS_FP_MUL(a, b) (int32_t)(((int64_t)(a) * (b)) >> DLS_FP_SHIFT)
 #define DLS_FP_DIV(a, b) (int32_t)((((int64_t)(a)) << DLS_FP_SHIFT) / (b))
 
-static int32_t dls_pow2_millibels(int32_t mB) {
+static DLS_UNUSED_FN int32_t dls_pow2_millibels(int32_t mB) {
     if (mB < -150515) return 0;
     if (mB > 150515) return 0x7FFFFFFF;
     int32_t log2_val = (int32_t)(((int64_t)mB * 217706) >> 16);
@@ -208,7 +214,7 @@ static int32_t dls_pow2_millibels(int32_t mB) {
     return val >> (-i_part);
 }
 
-static int32_t dls_pow10_millibels(int32_t mB) {
+static DLS_UNUSED_FN int32_t dls_pow10_millibels(int32_t mB) {
     if (mB < -150515) return 0;
     if (mB > 150515) return 0x7FFFFFFF;
     int32_t log10_val = (int32_t)(((int64_t)mB * 6554) >> 16);
@@ -242,7 +248,7 @@ static int32_t dls_pitch_cents_to_ratio_q16(int32_t pitchCents) {
     return (int32_t)ratio;
 }
 
-static int32_t dls_time_cents_to_samples(int32_t tc, int32_t sampleRate) {
+static DLS_UNUSED_FN int32_t dls_time_cents_to_samples(int32_t tc, int32_t sampleRate) {
     if (tc == INT32_MIN || sampleRate <= 0) return 0;
     return (int32_t)(((int64_t)dls_pitch_cents_to_ratio_q16(tc) * sampleRate) >> 16);
 }
@@ -3427,7 +3433,7 @@ static void dls_apply_runtime_connections(const DLS_Articulation* art, const DLS
     }
 }
 
-static int32_t dls_channel_value14(int32_t msb, int32_t lsb) {
+static DLS_UNUSED_FN int32_t dls_channel_value14(int32_t msb, int32_t lsb) {
     return ((msb & 0x7F) << 7) | (lsb & 0x7F);
 }
 
@@ -4524,7 +4530,7 @@ void GM_DLS_ProcessController(GM_Song* pSong, uint16_t channel, uint16_t control
     }
 }
 
-static int32_t dls_get_sample(DLS_Wave* wave, int64_t positionQ16) {
+static DLS_UNUSED_FN int32_t dls_get_sample(DLS_Wave* wave, int64_t positionQ16) {
     if (!wave || !wave->pcm) return 0;
     int32_t index = (int32_t)(positionQ16 >> 16);
     int32_t frac = (int32_t)(positionQ16 & 0xFFFF);

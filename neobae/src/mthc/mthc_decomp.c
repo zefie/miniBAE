@@ -32,6 +32,13 @@
 
 #include "mthc_decomp.h"
 
+/* Reverse-engineering helpers below are kept for offline analysis; silence unused-fn noise. */
+#if defined(__clang__)
+#pragma clang diagnostic ignored "-Wunused-function"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic ignored "-Wunused-function"
+#endif
+
 #define DEFAULT_MIN_MATCH 6
 #define DEFAULT_MAX_MATCHES 32
 #define DEFAULT_MAX_GAPS 48
@@ -496,7 +503,6 @@ static unsigned char *decompress_mthc_file(FileBuffer const *file,
                                            size_t *out_tsize_count)
 {
     unsigned char *decompressed = NULL;
-    unsigned char *temp_buffer = NULL;
     size_t decompressed_pos = 0;
     size_t decompressed_capacity = 0;
     size_t file_pos = 0;
@@ -597,7 +603,6 @@ static unsigned char *assemble_midi_from_decompressed(unsigned char const *decom
     unsigned char *midi_out = NULL;
     size_t midi_pos = 0;
     size_t midi_capacity = 0;
-    size_t pos = 0;
     uint16_t pack_track_count;
     uint16_t track_idx;
 

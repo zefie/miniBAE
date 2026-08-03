@@ -494,8 +494,6 @@ unsigned int fluid_channel_portamentotime_with_mode(fluid_channel_t *chan, enum 
   int msb = fluid_channel_get_cc(chan, PORTAMENTO_TIME_MSB);
   int lsb = fluid_channel_get_cc(chan, PORTAMENTO_TIME_LSB);
   int res;
-  fluid_real_t tmp;
-  static const int Max = 480*1000; /*ms*/
 
   if (time_mode == FLUID_PORTAMENTO_TIME_MODE_AUTO)
   {

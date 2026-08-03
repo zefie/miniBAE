@@ -379,7 +379,8 @@ LOCAL_C_INCLUDES := \
 	$(LOCAL_PATH)/../thirdparty/opus/silk/float \
 	$(LOCAL_PATH)/../thirdparty/opusfile/src \
 	$(LOCAL_PATH)/../thirdparty/opusfile/include
-LOCAL_CFLAGS := -DOPUS_BUILD=1 -DVAR_ARRAYS=1 -D__ANDROID__=1 -DPACKAGE_VERSION=\"1.5.0\" # Opus version
+# -O2 always: opus emits a pragma warning when built without optimization.
+LOCAL_CFLAGS := -O2 -DOPUS_BUILD=1 -DVAR_ARRAYS=1 -D__ANDROID__=1 -DPACKAGE_VERSION=\"1.5.0\"
 ifeq ($(TARGET_ARCH_ABI), armeabi-v7a)
 LOCAL_ARM_MODE := arm
 endif
@@ -394,7 +395,7 @@ LOCAL_C_INCLUDES := \
 	$(LOCAL_PATH)/../thirdparty/libogg/include \
     $(LOCAL_PATH)/../thirdparty/libvorbis/include \
     $(LOCAL_PATH)/../thirdparty/libvorbis/lib
-LOCAL_CFLAGS := -D__ANDROID__=1
+LOCAL_CFLAGS := -O2 -D__ANDROID__=1
 ifeq ($(TARGET_ARCH_ABI), armeabi-v7a)
 LOCAL_ARM_MODE := arm
 endif

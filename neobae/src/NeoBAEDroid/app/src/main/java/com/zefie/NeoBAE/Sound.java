@@ -187,8 +187,9 @@ public class Sound
         return normalizeFromPeak(89);
     }
     
+    /** True only while actively playing (started, not paused, not finished). */
     public boolean isPlaying() {
-        return !isPaused(); // If not paused, assume it's playing
+        return !isPaused() && !isDone();
     }
     
     public void close() {

@@ -14932,7 +14932,7 @@ BAEResult BAEMixer_ProbeSongLengthFromMemory(BAEMixer mixer,
 
     // Audio files are not songs — caller should not use this for sample media.
     if (ftype == BAE_WAVE_TYPE || ftype == BAE_AIFF_TYPE || ftype == BAE_AU_TYPE)
-        return BAE_INVALID_TYPE;
+        return BAE_BAD_FILE_TYPE;
 
     song = BAESong_New(mixer);
     if (!song)

@@ -344,21 +344,26 @@ static float PV_ScanHsbBankLoudness(XFILE bankFile)
             {
                 int s;
                 int chosen = -1;
+                /* Max splits that fit in this INST resource (8 bytes each from offset 14). */
+                int maxSplitsBySize = (instSize >= 14) ? (int)((instSize - 14) / 8) : 0;
+                if (keySplitCount > maxSplitsBySize)
+                    keySplitCount = (int16_t)maxSplitsBySize;
                 for (s = 0; s < keySplitCount; s++)
                 {
                     KeySplit split;
-                    XGetKeySplitFromPtr(inst, (int16_t)s, &split);
+                    XGetKeySplitFromPtrWithSize(inst, instSize, (int16_t)s, &split);
                     if (split.lowMidi <= kBankBalanceProbeKey && split.highMidi >= kBankBalanceProbeKey)
                     {
                         chosen = s;
                         break;
                     }
                 }
-                if (chosen < 0)
+                if (chosen < 0 && keySplitCount > 0)
                     chosen = keySplitCount / 2;
+                if (chosen >= 0)
                 {
                     KeySplit split;
-                    XGetKeySplitFromPtr(inst, (int16_t)chosen, &split);
+                    XGetKeySplitFromPtrWithSize(inst, instSize, (int16_t)chosen, &split);
                     sndID = split.sndResourceID;
                     /* miscParameter2 is volume unless it's a sound-modifier param. */
                     if ((flags2 & ZBF_enableSoundModifier) && !(flags2 & ZBF_useSoundModifierAsRootKey))

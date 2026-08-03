@@ -427,10 +427,11 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromFile
 	{
 		
 #if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_SF2 == TRUE
-        BAEBankToken token = NULL;        
-        BAEMixer_LoadBuiltinBank(mixer, token);
-        BAEMixer_SendBankToBack(mixer, token);
-#endif 		
+		/* LoadBuiltinBank writes the bank token via out-param; pass &token not token. */
+		BAEBankToken token = NULL;
+		if (BAEMixer_LoadBuiltinBank(mixer, &token) == BAE_NO_ERROR && token)
+			BAEMixer_SendBankToBack(mixer, token);
+#endif
 		// Load SF2/DLS bank
 		OPErr err = GM_LoadSF2Soundfont(cpath);		
 		if (err != NO_ERR)
@@ -457,9 +458,10 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromFile
 	if (isDLS)
 	{
 #if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_DLS == TRUE
+		/* LoadBuiltinBank writes the bank token via out-param; pass &token not token. */
 		BAEBankToken token = NULL;
-		BAEMixer_LoadBuiltinBank(mixer, token);
-		BAEMixer_SendBankToBack(mixer, token);
+		if (BAEMixer_LoadBuiltinBank(mixer, &token) == BAE_NO_ERROR && token)
+			BAEMixer_SendBankToBack(mixer, token);
 #endif
 		BAEResult dlsResult = BAEMixer_LoadDLSBank(mixer, cpath);
 		if (dlsResult != BAE_NO_ERROR)
@@ -603,10 +605,11 @@ JNIEXPORT jstring JNICALL Java_com_zefie_NeoBAE_Mixer__1getBankFriendlyName
 	
 	if (isSF2) {
 #if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_SF2 == TRUE
-        BAEBankToken token = NULL;        
-        BAEMixer_LoadBuiltinBank(mixer, token);
-        BAEMixer_SendBankToBack(mixer, token);        
-#endif 	
+		/* LoadBuiltinBank writes the bank token via out-param; pass &token not token. */
+		BAEBankToken token = NULL;
+		if (BAEMixer_LoadBuiltinBank(mixer, &token) == BAE_NO_ERROR && token)
+			BAEMixer_SendBankToBack(mixer, token);
+#endif
 		// Load as SF2/DLS soundfont
 		OPErr err = GM_LoadSF2SoundfontFromMemory((const unsigned char*)mem, (size_t)read_total);
 		free(mem);
@@ -624,11 +627,12 @@ JNIEXPORT jstring JNICALL Java_com_zefie_NeoBAE_Mixer__1getBankFriendlyName
 #endif
 #if USE_NATIVE_DLS == TRUE
 	if (isDLS) {
-		#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_DLS == TRUE
-        	BAEBankToken token = NULL;
-        	BAEMixer_LoadBuiltinBank(mixer, token);
+#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_DLS == TRUE
+		/* LoadBuiltinBank writes the bank token via out-param; pass &token not token. */
+		BAEBankToken token = NULL;
+		if (BAEMixer_LoadBuiltinBank(mixer, &token) == BAE_NO_ERROR && token)
 			BAEMixer_SendBankToBack(mixer, token);
-		#endif
+#endif
 		BAEResult dlsResult = BAEMixer_LoadDLSBankFromMemory(mixer, (void*)mem, (uint32_t)read_total);
 		if (dlsResult != BAE_NO_ERROR) {
 			free(mem);
@@ -719,10 +723,11 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemory
 	
 	if (isSF2) {
 #if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_SF2 == TRUE
-        BAEBankToken token = NULL;        
-        BAEMixer_LoadBuiltinBank(mixer, token);
-        BAEMixer_SendBankToBack(mixer, token);
-#endif 			
+		/* LoadBuiltinBank writes the bank token via out-param; pass &token not token. */
+		BAEBankToken token = NULL;
+		if (BAEMixer_LoadBuiltinBank(mixer, &token) == BAE_NO_ERROR && token)
+			BAEMixer_SendBankToBack(mixer, token);
+#endif
 		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Loading SF2 soundfont from memory...");
 		// Load as SF2/DLS soundfont
 		OPErr err = GM_LoadSF2SoundfontFromMemory((const unsigned char*)bytes, (size_t)len);
@@ -813,7 +818,6 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemoryWithFilena
 	bool isSF2 = FALSE;
 	if (len >= 12) {
 		unsigned char *ubytes = (unsigned char*)bytes;
-		bool isDLS = (ubytes[8] == 'D' && ubytes[9] == 'L' && ubytes[10] == 'S' && ubytes[11] == ' ');
 		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Magic bytes: %02X %02X %02X %02X ... %02X %02X %02X %02X",
 			ubytes[0], ubytes[1], ubytes[2], ubytes[3], ubytes[8], ubytes[9], ubytes[10], ubytes[11]);
 		if (ubytes[0] == 'R' && ubytes[1] == 'I' && ubytes[2] == 'F' && ubytes[3] == 'F') {
@@ -826,10 +830,11 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemoryWithFilena
 	
 	if (isSF2) {
 #if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_SF2 == TRUE
-        BAEBankToken token = NULL;        
-        BAEMixer_LoadBuiltinBank(mixer, token);
-        BAEMixer_SendBankToBack(mixer, token);
-#endif 			
+		/* LoadBuiltinBank writes the bank token via out-param; pass &token not token. */
+		BAEBankToken token = NULL;
+		if (BAEMixer_LoadBuiltinBank(mixer, &token) == BAE_NO_ERROR && token)
+			BAEMixer_SendBankToBack(mixer, token);
+#endif
 		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Loading SF2 soundfont from memory...");
 		// Load as SF2/DLS soundfont
 		OPErr err = GM_LoadSF2SoundfontFromMemory((const unsigned char*)bytes, (size_t)len);
@@ -1019,9 +1024,8 @@ JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Mixer__1getDLSCompatibilityMode
 	(void)env;
 	(void)clazz;
 #if USE_NATIVE_DLS == TRUE
-	BAE_BOOL quirks = TRUE;
-	GM_DLS_GetMobileBAEQuirks(&quirks);
-	return (jboolean)(quirks ? JNI_FALSE : JNI_TRUE); // inverted: compat mode = quirks disabled
+	/* Returns bool; inverted for UI: compat mode = quirks disabled. */
+	return (jboolean)(GM_DLS_GetMobileBAEQuirks() ? JNI_FALSE : JNI_TRUE);
 #else
 	return (jboolean)JNI_FALSE;
 #endif

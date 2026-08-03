@@ -18,10 +18,10 @@ public class Song
 	private native boolean _isSongDone(long songReference);
 	private static native int _setSongVolume(long songReference, int fixedVolume);
 	private static native int _getSongVolume(long songReference);
-	// Extended position/length JNI (microseconds)
-	private static native int _getSongPositionUS(long songReference);
-	private static native int _setSongPositionUS(long songReference, int us);
-	private static native int _getSongLengthUS(long songReference);
+	// Extended position/length JNI (microseconds; jlong avoids ~35.7 min jint wrap)
+	private static native long _getSongPositionUS(long songReference);
+	private static native int _setSongPositionUS(long songReference, long us);
+	private static native long _getSongLengthUS(long songReference);
 	private static native int _setSongLoops(long songReference, int numLoops);
 	private static native int _setSongVelocityCurve(long songReference, int curve);
 	private static native boolean _isSF2Song(long songReference);
@@ -39,7 +39,8 @@ public class Song
 	private static native byte[] _getChannelMuteStatus(long songReference);
 
 	private static native long _setMetaEventCallback(long songReference, MetaEventListener listener);
-	private static native void _cleanupMetaEventCallback(long callbackRef);
+	/** Clears engine callback then deletes the GlobalRef (songRef required to avoid UAF). */
+	private static native void _cleanupMetaEventCallback(long songReference, long callbackRef);
 
 	public interface MetaEventListener {
 		void onMetaEvent(int markerType, byte[] data);
@@ -50,7 +51,7 @@ public class Song
 
 	public void setMetaEventListener(MetaEventListener listener) {
 		if (mCallbackHandle != 0) {
-			_cleanupMetaEventCallback(mCallbackHandle);
+			_cleanupMetaEventCallback(mReference, mCallbackHandle);
 			mCallbackHandle = 0;
 		}
 		if (listener != null) {
@@ -108,9 +109,8 @@ public class Song
 			clearScript();
 		}
 		if (mCallbackHandle != 0) {
-			_cleanupMetaEventCallback(mCallbackHandle);
+			_cleanupMetaEventCallback(mReference, mCallbackHandle);
 			mCallbackHandle = 0;
-			_setMetaEventCallback(mReference, null);
 		}
 		_stopSong(mReference, deleteSong);
 	}
@@ -145,9 +145,9 @@ public class Song
 		return (int)((fixed * 100L) / 65536L); }
 
 	// Position helpers (milliseconds granularity at call site)
-	public int getPositionMs(){ int us = _getSongPositionUS(mReference); return us / 1000; }
-	public void seekToMs(int ms){ if(ms < 0) ms = 0; _setSongPositionUS(mReference, ms * 1000); }
-	public int getLengthMs(){ int us = _getSongLengthUS(mReference); return us / 1000; }
+	public int getPositionMs(){ long us = _getSongPositionUS(mReference); return (int)(us / 1000L); }
+	public void seekToMs(int ms){ if(ms < 0) ms = 0; _setSongPositionUS(mReference, ms * 1000L); }
+	public int getLengthMs(){ long us = _getSongLengthUS(mReference); return (int)(us / 1000L); }
 	
 	// Loop control
 	public int setLoops(int numLoops){ return _setSongLoops(mReference, numLoops); }
@@ -218,9 +218,9 @@ public class Song
 		return out;
 	}
 	
-	// Additional methods for export functionality
+	/** True only while actively playing (started, not paused, not finished). */
 	public boolean isPlaying() {
-		return !isPaused(); // If not paused, assume it's playing
+		return !isPaused() && !isDone();
 	}
 	
 	public void close() {

@@ -153,23 +153,6 @@ static void PV_SF2_UnlockSynth(void)
 static void PV_SF2_SetValidDefaultProgramsForAllChannels(void);
 
 // Helpers to validate and choose presets present in the current font
-// Check if a preset exists in a specific soundfont by ID
-static bool PV_SF2_PresetExistsInSoundFont(int sfid, int bank, int prog)
-{
-    if (!g_fluidsynth_synth || sfid < 0) return FALSE;
-    
-    fluid_sfont_t* sf = fluid_synth_get_sfont_by_id(g_fluidsynth_synth, sfid);
-    if (!sf) return FALSE;
-    
-    fluid_preset_t p;
-    fluid_sfont_iteration_start(sf);
-    while (fluid_sfont_iteration_next(sf, &p)) {
-        if (fluid_preset_get_banknum(&p) == bank && fluid_preset_get_num(&p) == prog)
-            return TRUE;
-    }
-    return FALSE;
-}
-
 static bool PV_SF2_PresetExists(int bank, int prog)
 {
     if (!g_fluidsynth_synth || g_fluidsynth_soundfont_id < 0) return FALSE;
@@ -1446,9 +1429,8 @@ void GM_SF2_RenderAudioSlice(GM_Song* pSong, int32_t* mixBuffer, int32_t* reverb
     // Update channel activity decay
     PV_SF2_DecayChannelActivity();
     
-    // Get mixer sample rate for resampling decisions
-    GM_Mixer* pMixer = GM_GetCurrentMixer();
-    uint32_t mixerRate = g_fluidsynth_sample_rate;  // actual mixer rate we cached
+    // Mixer sample rate for resampling decisions (cached at SF2 open)
+    uint32_t mixerRate = g_fluidsynth_sample_rate;
 
     // FluidSynth always renders at 44100 Hz internally to avoid pitch shifting.
     // When the mixer rate differs, we render at 44100 and downsample via linear interpolation.

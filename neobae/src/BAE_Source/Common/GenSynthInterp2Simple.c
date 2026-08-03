@@ -103,6 +103,8 @@
 #include "GenPriv.h"
 #include <stdint.h>
 
+#if LOOPS_USED == LIMITED_LOOPS
+
 // Cubic Hermite (Catmull-Rom) interpolation for advanced interpolation mode.
 // Takes 4 consecutive sample values and a fractional position (0..STEP_FULL_RANGE).
 // Returns the interpolated sample value with smooth C1-continuous curve.
@@ -134,8 +136,6 @@ static inline int32_t PV_LoopWrapSample16(int16_t *source, int32_t idx, int32_t 
         idx -= loopLen;
     return (int32_t)source[idx];
 }
-
-#if LOOPS_USED == LIMITED_LOOPS
 
 #if WRITE_LOOPS == TRUE
     #include <stdio.h>

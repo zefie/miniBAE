@@ -335,14 +335,24 @@ void XDisposeSongPtr(SongResource *theSong)
 }
 
 
-// Get a keysplit entry. The result will be ordered for the native CPU
-void XGetKeySplitFromPtr(InstrumentResource *theX, int16_t entry, KeySplit *keysplit)
+// Get a keysplit entry. The result will be ordered for the native CPU.
+// Prefer XGetKeySplitFromPtrWithSize when the INST resource byte length is known.
+void XGetKeySplitFromPtrWithSize(InstrumentResource *theX, int32_t resourceSize, int16_t entry, KeySplit *keysplit)
 {
     const unsigned char *pBase;
     const unsigned char *pSplit;
     int16_t count;
+    int32_t need;
 
-    if (!theX)
+    if (!theX || !keysplit)
+    {
+        if (keysplit)
+            XSetMemory((void *)keysplit, (int32_t)sizeof(KeySplit), 0);
+        return;
+    }
+
+    /* Need at least count field; reject truncated INST resources. */
+    if (resourceSize >= 0 && resourceSize < (int32_t)(kInstOffset_keySplitCount + 2))
     {
         XSetMemory((void *)keysplit, (int32_t)sizeof(KeySplit), 0);
         return;
@@ -350,7 +360,9 @@ void XGetKeySplitFromPtr(InstrumentResource *theX, int16_t entry, KeySplit *keys
 
     pBase = (const unsigned char *)theX;
     count = (int16_t)XGetShort(pBase + kInstOffset_keySplitCount);
-    if ((count > 0) && (entry < count))
+    need = (int32_t)kInstOffset_keySplitData + ((int32_t)entry + 1) * (int32_t)KEY_SPLIT_FILE_SIZE;
+    if ((count > 0) && (entry >= 0) && (entry < count) &&
+        (resourceSize < 0 || resourceSize >= need))
     {
         // Walk serialized bytes using fixed offsets; do not rely on struct packing.
         pSplit = pBase + kInstOffset_keySplitData + (entry * KEY_SPLIT_FILE_SIZE);
@@ -364,6 +376,12 @@ void XGetKeySplitFromPtr(InstrumentResource *theX, int16_t entry, KeySplit *keys
     {
         XSetMemory((void *)keysplit, (int32_t)sizeof(KeySplit), 0);
     }
+}
+
+void XGetKeySplitFromPtr(InstrumentResource *theX, int16_t entry, KeySplit *keysplit)
+{
+    /* Legacy callers have no size; skip the byte-bound check (resourceSize < 0). */
+    XGetKeySplitFromPtrWithSize(theX, -1, entry, keysplit);
 }
 
 

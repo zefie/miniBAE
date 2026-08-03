@@ -96,7 +96,8 @@ static uint8_t *PV_ExtractASFWMABlocks(const uint8_t *data, uint32_t data_size,
         ASF_READ_VAR((length_flags >> 5) & 3, packet_length);
         {
             uint32_t ignored;
-            ASF_READ_VAR((length_flags >> 1) & 3, ignored);
+            ASF_READ_VAR((length_flags >> 1) & 3, ignored); /* sequence / pad field; value unused */
+            (void)ignored;
         }
         ASF_READ_VAR((length_flags >> 3) & 3, padding_length);
 
@@ -217,7 +218,6 @@ OPErr XExpandWMA(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst)
     uint8_t *owned_wma_data = NULL;
     const uint8_t *probe;
     uint32_t probe_size;
-    OPErr err;
 
     if (!src || !dst || !src->theWaveform || src->waveSize == 0)
         return PARAM_ERR;

@@ -10,7 +10,7 @@ extern "C" {
 
 
 void GM_SetMixerDLSMode(bool isDLS);
-bool GM_GetMixerDLSMode();
+bool GM_GetMixerDLSMode(void);
 
 // Forward declarations
 typedef struct DLS_Bank DLS_Bank;
@@ -430,7 +430,7 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
 void GM_DLS_AllNotesOff(GM_Song* pSong, int16_t channel, bool immediate);
 bool GM_DLS_HasProgram(GM_Song* pSong, uint16_t channel, uint16_t program);
 void GM_DLS_SetMobileBAEQuirks(bool useQuirks);
-bool GM_DLS_GetMobileBAEQuirks();
+bool GM_DLS_GetMobileBAEQuirks(void);
 #ifdef __cplusplus
 }
 #endif

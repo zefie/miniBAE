@@ -110,13 +110,15 @@ void BAE_WaitMicroseconds(uint32_t waitAmount) { (void)waitAmount; }
 
 void BAE_CopyFileNameNative(void *fileNameSource, void *fileNameDest)
 {
-    char *src = (char *)fileNameSource;
-    char *dst = (char *)fileNameDest;
-    if (src && dst)
+    /* Bound to FILE_NAME_LENGTH; destination is typically XFILENAME.theFile[]. */
+    if (fileNameSource && fileNameDest)
     {
-        while (*src)
-            *dst++ = *src++;
-        *dst = 0;
+        const char *src = (const char *)fileNameSource;
+        char *dst = (char *)fileNameDest;
+        size_t i;
+        for (i = 0; i + 1 < (size_t)FILE_NAME_LENGTH && src[i] != '\0'; i++)
+            dst[i] = src[i];
+        dst[i] = '\0';
     }
 }
 

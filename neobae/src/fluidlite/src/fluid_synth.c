@@ -3745,14 +3745,12 @@ int fluid_synth_stop(fluid_synth_t* synth, unsigned int id)
   int i;
   fluid_voice_t* voice;
   int status = FLUID_FAILED;
-  int count = 0;
 
   for (i = 0; i < synth->polyphony; i++) {
 
     voice = synth->voice[i];
 
     if (_ON(voice) && (fluid_voice_get_id(voice) == id)) {
-	    count++;
       fluid_voice_noteoff(voice);
       status = FLUID_OK;
     }

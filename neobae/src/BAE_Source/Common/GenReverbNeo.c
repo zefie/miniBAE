@@ -144,8 +144,8 @@ typedef struct {
 
 static MobileReverbState gMobileReverb;
 
-// Global reverb parameters
-typedef struct NeoReverbParams
+/* Tag name matches GenPriv.h forward typedef; do not re-typedef (C11-only). */
+struct NeoReverbParams
 {
     bool       mIsInitialized;
     Rate        mSampleRate;
@@ -179,8 +179,7 @@ typedef struct NeoReverbParams
     // Tail shutoff state (shared by Custom + Tap)
     int         mIdleFrames;
     bool       mWasActive;
-    
-} NeoReverbParams;
+};
 
 NeoReverbParams gNeoReverbParams;
 

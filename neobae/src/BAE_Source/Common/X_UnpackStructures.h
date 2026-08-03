@@ -73,7 +73,9 @@
 #endif
 
 #if defined(__clang__) || defined(__GNUC__) || defined(_MSC_VER)
+    #if (X_PLATFORM != X_ANDROID)
     #pragma pack(pop)
+    #endif
 #else
 #if (((X_PLATFORM == X_MACINTOSH) || (X_PLATFORM == X_IOS)) && (COMPILER_TYPE == GCC_COMPILER))
     #ifdef __cplusplus

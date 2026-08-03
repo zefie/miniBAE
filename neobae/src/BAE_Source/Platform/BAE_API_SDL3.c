@@ -269,7 +269,19 @@ static FILE *g_file_table[MAX_OPEN_FILES] = {0};
 static int PV_AllocateFileHandle(FILE *f){ if(!f) return -1; for(int i=1;i<MAX_OPEN_FILES;i++){ if(!g_file_table[i]){ g_file_table[i]=f; return i; } } fclose(f); return -1; }
 static FILE *PV_GetFileFromHandle(intptr_t handle){ if(handle>0 && handle<MAX_OPEN_FILES) return g_file_table[handle]; return NULL; }
 static void PV_FreeFileHandle(intptr_t handle){ if(handle>0 && handle<MAX_OPEN_FILES) g_file_table[handle]=NULL; }
-void BAE_CopyFileNameNative(void *src, void *dst){ if(src && dst) strcpy((char*)dst,(char*)src); }
+void BAE_CopyFileNameNative(void *src, void *dst)
+{
+    /* Bound to FILE_NAME_LENGTH; destination is typically XFILENAME.theFile[]. */
+    if (src && dst)
+    {
+        const char *s = (const char *)src;
+        char *d = (char *)dst;
+        size_t i;
+        for (i = 0; i + 1 < (size_t)FILE_NAME_LENGTH && s[i] != '\0'; i++)
+            d[i] = s[i];
+        d[i] = '\0';
+    }
+}
 int32_t BAE_FileCreate(void *fileName){ FILE *f=fopen((char*)fileName,"wb"); if(!f) return -1; fclose(f); return 0; }
 int32_t BAE_FileDelete(void *fileName){ return remove((char*)fileName)==0?0:-1; }
 intptr_t BAE_FileOpenForRead(void *fileName){ FILE *f=fopen((char*)fileName,"rb"); return f?PV_AllocateFileHandle(f):-1; }

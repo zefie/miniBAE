@@ -3111,6 +3111,9 @@ void * XPtoCstr(register void *pstr)
 
 
 // Debug helper: verify header integrity and print details if corrupted
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((unused))
+#endif
 static bool XValidateMemblockHeader(XPTR data, const char *context)
 {
     if (!data) return true;

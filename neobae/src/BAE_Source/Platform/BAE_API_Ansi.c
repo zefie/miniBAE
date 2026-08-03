@@ -335,25 +335,15 @@ void BAE_Idle(void *userContext)
 // in the native format to the pointer passed fileNameDest.
 void BAE_CopyFileNameNative(void *fileNameSource, void *fileNameDest)
 {
-	char *dest;
-	char *src;
-
+	/* Bound to FILE_NAME_LENGTH; destination is typically XFILENAME.theFile[]. */
 	if (fileNameSource && fileNameDest)
 	{
-		dest = (char *)fileNameDest;
-		src = (char *)fileNameSource;
-		if (src == NULL)
-		{
-			src = "";
-		}
-		if (dest)
-		{
-			while (*src)
-			{
-				*dest++ = *src++;
-			}
-			*dest = 0;
-		}
+		const char *src = (const char *)fileNameSource;
+		char *dest = (char *)fileNameDest;
+		size_t i;
+		for (i = 0; i + 1 < (size_t)FILE_NAME_LENGTH && src[i] != '\0'; i++)
+			dest[i] = src[i];
+		dest[i] = '\0';
 	}
 }
 

@@ -523,9 +523,15 @@ static void PV_FreeFileHandle(intptr_t handle)
 
 void BAE_CopyFileNameNative(void *source, void *dest)
 {
+    /* Bound to FILE_NAME_LENGTH; destination is typically XFILENAME.theFile[]. */
     if (source && dest)
     {
-        strcpy((char *)dest, (char *)source);
+        const char *s = (const char *)source;
+        char *d = (char *)dest;
+        size_t i;
+        for (i = 0; i + 1 < (size_t)FILE_NAME_LENGTH && s[i] != '\0'; i++)
+            d[i] = s[i];
+        d[i] = '\0';
     }
 }
 

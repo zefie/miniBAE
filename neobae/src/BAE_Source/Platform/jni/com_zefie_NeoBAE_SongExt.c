@@ -4,6 +4,7 @@
 #include <jni.h>
 #include <android/log.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -80,34 +81,36 @@ static ScriptBinding *set_script_binding(BAESong song, BAEScript_Context *ctx)
     return binding;
 }
 
-JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Song__1getSongPositionUS(JNIEnv* env, jclass clazz, jlong songRef){
+/* Return jlong so songs longer than ~35.7 min (INT_MAX us) do not wrap negative. */
+JNIEXPORT jlong JNICALL Java_com_zefie_NeoBAE_Song__1getSongPositionUS(JNIEnv* env, jclass clazz, jlong songRef){
     (void)env; (void)clazz;
     if(songRef == 0){ return 0; }
     BAESong song = (BAESong)(intptr_t)songRef;
     uint32_t us = 0;
     BAEResult r = BAESong_GetMicrosecondPosition(song, &us);
     if(r != BAE_NO_ERROR){ __android_log_print(ANDROID_LOG_WARN, LOG_TAG, "BAESong_GetMicrosecondPosition err=%d", r); return 0; }
-    return (jint)us;
+    return (jlong)us;
 }
 
-JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Song__1setSongPositionUS(JNIEnv* env, jclass clazz, jlong songRef, jint us){
+JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Song__1setSongPositionUS(JNIEnv* env, jclass clazz, jlong songRef, jlong us){
     (void)env; (void)clazz;
     if(songRef == 0){ return (jint)BAE_NULL_OBJECT; }
     BAESong song = (BAESong)(intptr_t)songRef;
-    BAEResult r = BAESong_SetMicrosecondPosition(song, (uint32_t)us);
+    uint32_t us32 = (us < 0) ? 0u : (us > (jlong)UINT32_MAX ? UINT32_MAX : (uint32_t)us);
+    BAEResult r = BAESong_SetMicrosecondPosition(song, us32);
     if(r != BAE_NO_ERROR){ __android_log_print(ANDROID_LOG_WARN, LOG_TAG, "BAESong_SetMicrosecondPosition err=%d", r); }
     return (jint)r;
 }
 
-// Retrieve total song length (microseconds). Returns 0 if unavailable or error.
-JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Song__1getSongLengthUS(JNIEnv* env, jclass clazz, jlong songRef){
+/* Return jlong so songs longer than ~35.7 min (INT_MAX us) do not wrap negative. */
+JNIEXPORT jlong JNICALL Java_com_zefie_NeoBAE_Song__1getSongLengthUS(JNIEnv* env, jclass clazz, jlong songRef){
     (void)env; (void)clazz;
     if(songRef == 0){ return 0; }
     BAESong song = (BAESong)(intptr_t)songRef;
     uint32_t us = 0;
     BAEResult r = BAESong_GetMicrosecondLength(song, &us);
     if(r != BAE_NO_ERROR){ __android_log_print(ANDROID_LOG_WARN, LOG_TAG, "BAESong_GetMicrosecondLength err=%d", r); return 0; }
-    return (jint)us;
+    return (jlong)us;
 }
 
 // Pause song playback
@@ -277,13 +280,16 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Song__1getScriptExporterLoopCount(J
 
 extern JavaVM* gJavaVM;
 
+/* Cached once; MetaEventListener lives for the app process. */
+static jmethodID s_onMetaEventMID = NULL;
+
 // Callback from engine
 void myMetaEventCallback(void *threadContext, struct GM_Song *pSong, char markerType, void *pMetaText, int32_t metaTextLength, short currentTrack)
 {
     (void)pSong;
     (void)currentTrack;
 
-    if (!gJavaVM) return;
+    if (!gJavaVM || !threadContext) return;
 
     JNIEnv *env;
     int getEnvStat = (*gJavaVM)->GetEnv(gJavaVM, (void**)&env, JNI_VERSION_1_6);
@@ -299,16 +305,24 @@ void myMetaEventCallback(void *threadContext, struct GM_Song *pSong, char marker
     }
 
     jobject listenerObj = (jobject)threadContext;
-
-    if (listenerObj) {
-        jclass cls = (*env)->GetObjectClass(env, listenerObj);
-        // void onMetaEvent(int markerType, byte[] data)
-        jmethodID mid = (*env)->GetMethodID(env, cls, "onMetaEvent", "(I[B)V");
-        if (mid) {
-            jbyteArray arr = (*env)->NewByteArray(env, metaTextLength);
+    jclass cls = (*env)->GetObjectClass(env, listenerObj);
+    if (cls) {
+        if (!s_onMetaEventMID) {
+            /* void onMetaEvent(int markerType, byte[] data) */
+            s_onMetaEventMID = (*env)->GetMethodID(env, cls, "onMetaEvent", "(I[B)V");
+        }
+        if (s_onMetaEventMID) {
+            jsize len = (metaTextLength > 0 && pMetaText) ? (jsize)metaTextLength : 0;
+            jbyteArray arr = (*env)->NewByteArray(env, len);
             if (arr) {
-                (*env)->SetByteArrayRegion(env, arr, 0, metaTextLength, (const jbyte*)pMetaText);
-                (*env)->CallVoidMethod(env, listenerObj, mid, (jint)markerType, arr);
+                if (len > 0) {
+                    (*env)->SetByteArrayRegion(env, arr, 0, len, (const jbyte*)pMetaText);
+                }
+                (*env)->CallVoidMethod(env, listenerObj, s_onMetaEventMID, (jint)markerType, arr);
+                if ((*env)->ExceptionCheck(env)) {
+                    (*env)->ExceptionDescribe(env);
+                    (*env)->ExceptionClear(env);
+                }
                 (*env)->DeleteLocalRef(env, arr);
             }
         }
@@ -323,19 +337,34 @@ void myMetaEventCallback(void *threadContext, struct GM_Song *pSong, char marker
 JNIEXPORT jlong JNICALL Java_com_zefie_NeoBAE_Song__1setMetaEventCallback(JNIEnv* env, jclass clazz, jlong songRef, jobject listener)
 {
     (void)clazz;
-    if(songRef == 0){ return 0; }
+    if (songRef == 0) { return 0; }
     BAESong song = (BAESong)(intptr_t)songRef;
-    
+
+    /* null listener clears the engine callback (avoids UAF after GlobalRef delete). */
+    if (!listener) {
+        BAESong_SetMetaEventCallback(song, NULL, NULL);
+        return 0;
+    }
+
     jobject globalRef = (*env)->NewGlobalRef(env, listener);
-    
+    if (!globalRef) {
+        __android_log_print(ANDROID_LOG_WARN, LOG_TAG, "NewGlobalRef failed for MetaEventListener");
+        BAESong_SetMetaEventCallback(song, NULL, NULL);
+        return 0;
+    }
+
     BAESong_SetMetaEventCallback(song, (GM_SongMetaCallbackProcPtr)myMetaEventCallback, globalRef);
-    
     return (jlong)(intptr_t)globalRef;
 }
 
-JNIEXPORT void JNICALL Java_com_zefie_NeoBAE_Song__1cleanupMetaEventCallback(JNIEnv* env, jclass clazz, jlong callbackRef)
+/* Clear engine callback before deleting the GlobalRef so meta events cannot UAF. */
+JNIEXPORT void JNICALL Java_com_zefie_NeoBAE_Song__1cleanupMetaEventCallback(JNIEnv* env, jclass clazz, jlong songRef, jlong callbackRef)
 {
     (void)clazz;
+    if (songRef != 0) {
+        BAESong song = (BAESong)(intptr_t)songRef;
+        BAESong_SetMetaEventCallback(song, NULL, NULL);
+    }
     if (callbackRef != 0) {
         jobject globalRef = (jobject)(intptr_t)callbackRef;
         (*env)->DeleteGlobalRef(env, globalRef);

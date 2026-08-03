@@ -2247,7 +2247,6 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                     {
                         // If SF2 is active for this song, send program change to SF2
                         pSong->channelType[MIDIChannel] = CHANNEL_TYPE_SF2;
-                        int32_t combinedProgram = (theBank * 128) + thePatch;
                         debug_message("ProcessProgramChange Debug: Channel %d is using a SF2 bank instrument  (bank=%d prog=%d)\n", (MIDIChannel + 1), theBank / 2, thePatch);
                     }
                 }

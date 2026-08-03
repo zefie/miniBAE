@@ -1059,6 +1059,8 @@ SongResource * XNewSongPtr( SongType songType,
 void XDisposeSongPtr(SongResource *theSong);
 
 void XGetKeySplitFromPtr(InstrumentResource *theX, int16_t entry, KeySplit *keysplit);
+/* Same as XGetKeySplitFromPtr but rejects entries that fall outside resourceSize. */
+void XGetKeySplitFromPtrWithSize(InstrumentResource *theX, int32_t resourceSize, int16_t entry, KeySplit *keysplit);
 
 XPTR XGetSoundResourceByID(XLongResourceID theID, int32_t *pReturnedSize);
 XPTR XGetSoundResourceByName(void *cName, int32_t *pReturnedSize);

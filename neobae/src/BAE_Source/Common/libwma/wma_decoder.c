@@ -201,7 +201,7 @@ static void init_pow10_table(void) {
 
 static void wma_decode_exp_vlc(WMADecodeContext *s, int ch) {
     const uint16_t *bands = s->exponent_bands[s->frame_len_bits - s->block_len_bits];
-    int last, band, pos = 0;
+    int last, pos = 0;
     float max_scale = 0.0f;
 
     if (s->version == 1) {
@@ -216,7 +216,8 @@ static void wma_decode_exp_vlc(WMADecodeContext *s, int ch) {
         last = 36;
     }
 
-    for (band = (s->version == 1); pos < s->block_len; band++) {
+    /* v1 already consumed the first band above; remaining bands until block_len. */
+    while (pos < s->block_len) {
         int code = wma_get_vlc(&s->gb, &s->exp_vlc);
         int count;
         float scale;
