@@ -1743,8 +1743,9 @@ extern "C"
     // --------------------------------------
     // Causes playback of the indicated BAESound to begin, at the indicated priority
     // and volume, and optionally beginning at the indicated sample frame number.
-    // Normal volume is 1.0.  If no voices are available at the indicated priority
-    // level, this function fails and returns BAE_NO_FREE_VOICES.
+    // Normal volume is 1.0 (maps to digital full-scale PCM playback).  If no voices
+    // are available at the indicated priority level, this function fails and returns
+    // BAE_NO_FREE_VOICES.
     // ------------------------------------
     // BAEResult codes:
     //           BAE_NO_FREE_VOICES -- Couldn't allocate a voice at this priority

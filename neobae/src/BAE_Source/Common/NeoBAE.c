@@ -2742,6 +2742,26 @@ static void PV_BAESound_SetCallback(BAESound sound, BAE_SoundCallbackPtr pCallba
 static void PV_BAESound_Unload(BAESound sound);
 static void PV_BAESound_Stop(BAESound sound, BAE_BOOL startFade);
 
+/* Map BAESound user volume (1.0 = digital full scale) to GM sample NoteVolume.
+ *
+ * The 16-bit serve path applies extra >>4 scaling plus final OUTPUT_SCALAR (>>9).
+ * With default effectsVolume (8×), the historical MAX_NOTE_VOLUME mapping for
+ * user volume 1.0 lands ~6 dB below full scale. Scale by 2 so 1.0 ≈ FS. */
+#ifndef BAE_SOUND_UNITY_TO_NOTE_SCALE
+#define BAE_SOUND_UNITY_TO_NOTE_SCALE 2
+#endif
+
+static int32_t PV_BAESound_UserVolumeToNoteVolume(BAE_UNSIGNED_FIXED userVol)
+{
+    int32_t v = (int32_t)UNSIGNED_FIXED_TO_LONG_ROUNDED(
+        userVol * (MAX_NOTE_VOLUME * BAE_SOUND_UNITY_TO_NOTE_SCALE));
+    if (v < 0)
+        v = 0;
+    if (v > 32767)
+        v = 32767;
+    return v;
+}
+
 extern char mCopyright[];
 extern char mAboutNames[];
 
@@ -7448,14 +7468,14 @@ BAEResult BAESound_Fade(BAESound sound, BAE_FIXED sourceVolume, BAE_FIXED destVo
 #if !USE_FLOAT
             BAE_FIXED delta;
             delta = PV_CalculateTimeDeltaForFade(sourceVolume, destVolume, timeInMiliseconds);
-            delta = XFixedMultiply(delta, -LONG_TO_FIXED(MAX_NOTE_VOLUME));
+            delta = XFixedMultiply(delta, -LONG_TO_FIXED(MAX_NOTE_VOLUME * BAE_SOUND_UNITY_TO_NOTE_SCALE));
 #else
             double delta;
             delta = PV_CalculateTimeDeltaForFade(sourceVolume, destVolume, timeInMiliseconds);
-            delta = delta * -MAX_NOTE_VOLUME;
+            delta = delta * -(MAX_NOTE_VOLUME * BAE_SOUND_UNITY_TO_NOTE_SCALE);
 #endif
-            source = FIXED_TO_SHORT_ROUNDED(sourceVolume * MAX_NOTE_VOLUME);
-            dest = FIXED_TO_SHORT_ROUNDED(destVolume * MAX_NOTE_VOLUME);
+            source = (int16_t)PV_BAESound_UserVolumeToNoteVolume((BAE_UNSIGNED_FIXED)sourceVolume);
+            dest = (int16_t)PV_BAESound_UserVolumeToNoteVolume((BAE_UNSIGNED_FIXED)destVolume);
             minVolume = XMIN(source, dest);
             maxVolume = XMAX(source, dest);
 #if !USE_FLOAT
@@ -7516,7 +7536,7 @@ static void PV_LoopingSoundDoneCallback(void *reference)
                 if (shouldRestart)
                 {
                     // Restart the sound from the beginning
-                    int32_t volume = UNSIGNED_FIXED_TO_LONG_ROUNDED(sound->mVolume * MAX_NOTE_VOLUME);
+                    int32_t volume = PV_BAESound_UserVolumeToNoteVolume(sound->mVolume);
                     sound->voiceRef = GM_SetupSampleFromInfo(sound->pWave, (void *)sound,
                                                              volume,
                                                              0,
@@ -7526,7 +7546,7 @@ static void PV_LoopingSoundDoneCallback(void *reference)
                     if (sound->voiceRef != DEAD_VOICE)
                     {
                         GM_SetSampleRouteBus(sound->voiceRef, sound->mRouteBus);
-                        GM_ChangeSampleVolume(sound->voiceRef, volume);
+                        GM_ChangeSampleVolume(sound->voiceRef, (int16_t)volume);
                         GM_StartSample(sound->voiceRef);
                     }
                 }
@@ -7680,7 +7700,7 @@ BAEResult BAESound_Start(BAESound sound,
             sound->voiceRef = DEAD_VOICE;
             sound->mVolume = sampleVolume;
             sound->mCurrentLoop = 0; // reset loop counter on start
-            volume = UNSIGNED_FIXED_TO_LONG_ROUNDED(sampleVolume * MAX_NOTE_VOLUME);
+            volume = PV_BAESound_UserVolumeToNoteVolume(sampleVolume);
 
             // Choose callback based on whether looping is enabled
             GM_SoundDoneCallbackPtr doneCallback = (sound->mLoopCount > 0) ? PV_LoopingSoundDoneCallback : PV_DefaultSoundDoneCallback;
@@ -7699,7 +7719,7 @@ BAEResult BAESound_Start(BAESound sound,
             {
                 // Note: callback is already set in GM_SetupSampleFromInfo
                 GM_SetSampleRouteBus(sound->voiceRef, sound->mRouteBus);
-                GM_ChangeSampleVolume(sound->voiceRef, volume);
+                GM_ChangeSampleVolume(sound->voiceRef, (int16_t)volume);
                 GM_StartSample(sound->voiceRef);
             }
         }
@@ -7930,7 +7950,8 @@ BAEResult BAESound_SetVolume(BAESound sound, BAE_UNSIGNED_FIXED newVolume)
         sound->mVolume = newVolume;
         if (sound->voiceRef != DEAD_VOICE)
         {
-            GM_ChangeSampleVolume(sound->voiceRef, FIXED_TO_SHORT_ROUNDED(newVolume * MAX_NOTE_VOLUME));
+            GM_ChangeSampleVolume(sound->voiceRef,
+                                 (int16_t)PV_BAESound_UserVolumeToNoteVolume(newVolume));
         }
         BAE_ReleaseMutex(sound->mLock);
     }
