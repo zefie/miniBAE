@@ -1321,6 +1321,8 @@ class HomeFragment : Fragment() {
                             if (!enabled) {
                                 Mixer.setSongNormalizeGain(100)
                             }
+                            // Refresh Android HSB post-mix boost (off while normalize is on).
+                            applyVolume()
                         },
                         onExportCodecChange = { value ->
                             exportCodec.value = value
@@ -2012,10 +2014,14 @@ class HomeFragment : Fragment() {
         val lastBankPath = prefs.getString("last_bank_path", "__builtin__")
         val isHsbBank = lastBankPath == "__builtin__" || lastBankPath?.endsWith(".hsb", ignoreCase = true) == true || lastBankPath?.endsWith(".zsb", ignoreCase = true) == true
 
-        // Android-only: HSB banks are noticeably quieter than SF2. Use a post-mix output gain boost
-        // (implemented in the native Android audio callback) so we are not dependent on master-volume
-        // clamping/normalization inside the engine.
-        val shouldBoostHsb = isHsbBank && (currentSong != null) && (currentSong?.isSF2Song() == false) && (currentSong?.isDLSSong() == false)
+        // Android-only: HSB banks are quieter than SF2 without normalize. Skip the post-mix
+        // boost when song normalize is on so levels match the shared mixer-relative estimate
+        // (same path as zefidi/playbae) instead of double-applying loudness.
+        val shouldBoostHsb = !normalizePlayback.value &&
+            isHsbBank &&
+            (currentSong != null) &&
+            (currentSong?.isSF2Song() == false) &&
+            (currentSong?.isDLSSong() == false)
         Mixer.setAndroidHsbBoostEnabled(shouldBoostHsb)
         Mixer.setGlobalVolumePercent(basePercent)
     }

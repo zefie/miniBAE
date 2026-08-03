@@ -2072,6 +2072,23 @@ OPErr GM_Song_EstimateNormalizePeak(GM_Song *pSong,
     if (reverb > REVERB_TYPE_1)
         peakLin *= 1.12f;
 
+    /* Native HSB/ZSB (and RMF on that path) peaks hotter than the MIDI+RMS
+     * estimate — ADSR hits, scaleBack stacking, etc. Extra pad avoids overgain.
+     * Shared for all platforms (zefidi/playbae/Android); do not fork per-OS. */
+    {
+        bool nativeHsb = TRUE;
+#if USE_SF2_SUPPORT == TRUE
+        if (GM_IsSF2Song(pSong))
+            nativeHsb = FALSE;
+#endif
+#if USE_NATIVE_DLS == TRUE
+        if (GM_IsDLSSong(pSong))
+            nativeHsb = FALSE;
+#endif
+        if (nativeHsb)
+            peakLin *= 1.333521432163324f; /* ~+2.5 dB — some HSB/ZSB banks still overgain at +1.5 */
+    }
+
     if (peakLin <= 1.0e-6f)
     {
         gainPct = 100;

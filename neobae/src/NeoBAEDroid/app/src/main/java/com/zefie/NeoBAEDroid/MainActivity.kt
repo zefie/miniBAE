@@ -379,9 +379,14 @@ class MainActivity : AppCompatActivity() {
             val lastBankPath = prefs.getString("last_bank_path", "__builtin__")
             val isHsbBank = lastBankPath == "__builtin__" || (lastBankPath?.endsWith(".hsb", ignoreCase = true) == true)
 
-            // Android-only: boost output 2x in HSB mode (HSB banks are quieter).
-            // Keep SF2/DLS (fluidsynth) behavior unchanged.
-            val shouldBoostHsb = isHsbBank && loadResult.isSong && (loadResult.song?.isSF2Song() == false) && (loadResult.song?.isDLSSong() == false)
+            // Android-only: boost output 2x in HSB mode when normalize is off.
+            // With normalize on, skip boost so levels match the shared mixer estimate.
+            val normalizeOn = prefs.getBoolean("normalize_playback", false)
+            val shouldBoostHsb = !normalizeOn &&
+                isHsbBank &&
+                loadResult.isSong &&
+                (loadResult.song?.isSF2Song() == false) &&
+                (loadResult.song?.isDLSSong() == false)
             Mixer.setAndroidHsbBoostEnabled(shouldBoostHsb)
 
             Mixer.setMasterVolumePercent(volumePercent)
