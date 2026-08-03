@@ -1055,3 +1055,20 @@ JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Mixer__1hasMobileBAEDLSBank
 #endif
 }
 
+JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1getDLSBankLevel
+	(JNIEnv* env, jclass clazz, jlong reference)
+{
+	(void)env;
+	(void)clazz;
+#if USE_NATIVE_DLS == TRUE
+	BAEMixer mixer = (BAEMixer)(intptr_t)reference;
+	if (!mixer) {
+		return 0;
+	}
+	return (jint)BAEMixer_GetDLSBankLevel(mixer);
+#else
+	(void)reference;
+	return 0;
+#endif
+}
+

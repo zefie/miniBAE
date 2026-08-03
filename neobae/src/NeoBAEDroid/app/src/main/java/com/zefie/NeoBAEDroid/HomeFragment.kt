@@ -352,6 +352,7 @@ class HomeFragment : Fragment() {
     private var isLoadingBank = mutableStateOf(false)
     private var hasEggsBank = mutableStateOf(false)
     private var hasMobileBAEBank = mutableStateOf(false)
+    private var dlsBankLevel = mutableStateOf(0)
 
     private fun refreshBankBadges(bankPathOverride: String? = null) {
         try {
@@ -364,13 +365,16 @@ class HomeFragment : Fragment() {
             if (Mixer.exists()) {
                 hasEggsBank.value = Mixer.hasEggsDLSBank()
                 hasMobileBAEBank.value = Mixer.hasMobileBAEDLSBank()
+                dlsBankLevel.value = Mixer.getDLSBankLevel()
             } else {
                 hasEggsBank.value = false
                 hasMobileBAEBank.value = false
+                dlsBankLevel.value = 0
             }
         } catch (_: Exception) {
             hasEggsBank.value = false
             hasMobileBAEBank.value = false
+            dlsBankLevel.value = 0
         }
     }
     private var isExporting = mutableStateOf(false)
@@ -1255,6 +1259,7 @@ class HomeFragment : Fragment() {
                         bankPath = currentBankPath.value,
                         hasEggsBank = hasEggsBank.value,
                         hasMobileBAEBank = hasMobileBAEBank.value,
+                        dlsBankLevel = dlsBankLevel.value,
                         isLoadingBank = isLoadingBank.value,
                         isExporting = isExporting.value,
                         exportStatus = exportStatus.value,
@@ -3679,6 +3684,7 @@ class HomeFragment : Fragment() {
                         currentBankName.value = "Failed to load: $originalName"
                         hasEggsBank.value = false
                         hasMobileBAEBank.value = false
+                        dlsBankLevel.value = 0
                         context?.let { Toast.makeText(it, "Failed to load bank (err=$r)", Toast.LENGTH_SHORT).show() }
                     }
                 }
@@ -3854,6 +3860,7 @@ class HomeFragment : Fragment() {
                     currentBankName.value = "Failed to load built-in"
                     hasEggsBank.value = false
                     hasMobileBAEBank.value = false
+                    dlsBankLevel.value = 0
                     context?.let { Toast.makeText(it, "Failed to load built-in patches (err=$r)", Toast.LENGTH_SHORT).show() }
                 }
 
@@ -4369,6 +4376,7 @@ fun NewMusicPlayerScreen(
     bankPath: String,
     hasEggsBank: Boolean,
     hasMobileBAEBank: Boolean,
+    dlsBankLevel: Int,
     isLoadingBank: Boolean,
     isExporting: Boolean,
     exportStatus: String,
@@ -4892,6 +4900,7 @@ fun NewMusicPlayerScreen(
                     bankPath = bankPath,
                     hasEggsBank = hasEggsBank,
                     hasMobileBAEBank = hasMobileBAEBank,
+                    dlsBankLevel = dlsBankLevel,
                     isLoadingBank = isLoadingBank,
                     reverbType = reverbType,
                     velocityCurve = velocityCurve,
@@ -7266,12 +7275,22 @@ private fun resolveBankFlavorBadges(
     bankPath: String,
     hasEggsBank: Boolean,
     hasMobileBAEBank: Boolean,
+    dlsBankLevel: Int,
+    dlsCompatibilityMode: Boolean,
     dark: Boolean,
 ): List<BankFlavorBadge> {
     val path = bankPath.ifBlank { "__builtin__" }
     val lower = path.lowercase()
     val badges = mutableListOf<BankFlavorBadge>()
     fun rgba(r: Int, g: Int, b: Int, a: Int) = Color(r, g, b, a)
+    fun neoDlsBadge(): BankFlavorBadge {
+        val label = if (dlsBankLevel == 2) "NeoBAE DLS 2" else "NeoBAE DLS 1"
+        return if (dark) {
+            BankFlavorBadge(label, rgba(85, 50, 25, 220), rgba(255, 185, 110, 255))
+        } else {
+            BankFlavorBadge(label, rgba(255, 205, 145, 230), rgba(100, 50, 15, 255))
+        }
+    }
 
     when {
         path == "__builtin__" || lower.endsWith(".hsb") -> {
@@ -7295,26 +7314,34 @@ private fun resolveBankFlavorBadges(
                 BankFlavorBadge("FluidBAE", rgba(175, 235, 225, 230), rgba(15, 90, 80, 255))
             }
         }
-        lower.endsWith(".dls") || hasEggsBank || hasMobileBAEBank -> {
-            if (hasMobileBAEBank) {
-                badges += if (dark) {
-                    BankFlavorBadge("mobileBAE", rgba(30, 70, 95, 220), rgba(160, 220, 255, 255))
-                } else {
-                    BankFlavorBadge("mobileBAE", rgba(190, 225, 245, 230), rgba(20, 70, 110, 255))
+        lower.endsWith(".dls") || hasEggsBank || hasMobileBAEBank || dlsBankLevel > 0 -> {
+            when {
+                hasEggsBank -> {
+                    /* microQ — own lane; ignore compat. */
+                    badges += if (dark) {
+                        BankFlavorBadge("microQ", rgba(40, 40, 40, 220), rgba(235, 235, 235, 255))
+                    } else {
+                        BankFlavorBadge("microQ", rgba(230, 230, 230, 230), rgba(25, 25, 25, 255))
+                    }
                 }
-            }
-            if (hasEggsBank) {
-                badges += if (dark) {
-                    BankFlavorBadge("microQ", rgba(40, 40, 40, 220), rgba(235, 235, 235, 255))
-                } else {
-                    BankFlavorBadge("microQ", rgba(230, 230, 230, 230), rgba(25, 25, 25, 255))
+                hasMobileBAEBank -> {
+                    /* Detected MobileBAE bank: mobileBAE badge only. */
+                    badges += if (dark) {
+                        BankFlavorBadge("mobileBAE", rgba(30, 70, 95, 220), rgba(160, 220, 255, 255))
+                    } else {
+                        BankFlavorBadge("mobileBAE", rgba(190, 225, 245, 230), rgba(20, 70, 110, 255))
+                    }
                 }
-            }
-            if (!hasMobileBAEBank && !hasEggsBank) {
-                badges += if (dark) {
-                    BankFlavorBadge("NeoBAE DLS", rgba(85, 50, 25, 220), rgba(255, 185, 110, 255))
-                } else {
-                    BankFlavorBadge("NeoBAE DLS", rgba(255, 205, 145, 230), rgba(100, 50, 15, 255))
+                else -> {
+                    /* Generic DLS: quirks → mobileBAE + NeoBAE DLS #; compat → NeoBAE DLS # only. */
+                    if (!dlsCompatibilityMode) {
+                        badges += if (dark) {
+                            BankFlavorBadge("mobileBAE", rgba(30, 70, 95, 220), rgba(160, 220, 255, 255))
+                        } else {
+                            BankFlavorBadge("mobileBAE", rgba(190, 225, 245, 230), rgba(20, 70, 110, 255))
+                        }
+                    }
+                    badges += neoDlsBadge()
                 }
             }
         }
@@ -7327,10 +7354,19 @@ private fun BankFlavorBadgesRow(
     bankPath: String,
     hasEggsBank: Boolean,
     hasMobileBAEBank: Boolean,
+    dlsBankLevel: Int,
+    dlsCompatibilityMode: Boolean,
 ) {
     val dark = isSystemInDarkTheme()
-    val badges = remember(bankPath, hasEggsBank, hasMobileBAEBank, dark) {
-        resolveBankFlavorBadges(bankPath, hasEggsBank, hasMobileBAEBank, dark)
+    val badges = remember(bankPath, hasEggsBank, hasMobileBAEBank, dlsBankLevel, dlsCompatibilityMode, dark) {
+        resolveBankFlavorBadges(
+            bankPath,
+            hasEggsBank,
+            hasMobileBAEBank,
+            dlsBankLevel,
+            dlsCompatibilityMode,
+            dark,
+        )
     }
     for (badge in badges) {
         Spacer(modifier = Modifier.width(8.dp))
@@ -7358,6 +7394,7 @@ fun SettingsScreenContent(
     bankPath: String,
     hasEggsBank: Boolean,
     hasMobileBAEBank: Boolean,
+    dlsBankLevel: Int,
     isLoadingBank: Boolean,
     reverbType: Int,
     velocityCurve: Int,
@@ -8012,6 +8049,8 @@ fun SettingsScreenContent(
                                     bankPath = bankPath,
                                     hasEggsBank = hasEggsBank,
                                     hasMobileBAEBank = hasMobileBAEBank,
+                                    dlsBankLevel = dlsBankLevel,
+                                    dlsCompatibilityMode = dlsCompatibilityMode,
                                 )
                             }
                         }
@@ -8588,6 +8627,8 @@ fun SettingsScreenContent(
                                     bankPath = bankPath,
                                     hasEggsBank = hasEggsBank,
                                     hasMobileBAEBank = hasMobileBAEBank,
+                                    dlsBankLevel = dlsBankLevel,
+                                    dlsCompatibilityMode = dlsCompatibilityMode,
                                 )
                             }
                         }

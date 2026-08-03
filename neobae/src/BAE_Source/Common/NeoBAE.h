@@ -912,6 +912,13 @@ extern "C"
     //
     int BAEMixer_HasMobileBAEDLSBank(BAEMixer mixer);
 
+    // BAEMixer_GetDLSBankLevel()
+    // ------------------------------------
+    // Returns 2 for a Level-2 bank, 1 for Level-1, or 0 if no native DLS bank.
+    // Prefers the main bank (banks[0]), else the XMF overlay bank.
+    //
+    int BAEMixer_GetDLSBankLevel(BAEMixer mixer);
+
     // BAEMixer_UnloadDLSBank()
     // ------------------------------------
     // Unload the active DLS bank

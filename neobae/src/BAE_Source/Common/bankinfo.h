@@ -65,7 +65,9 @@ static const BankInfo kBanks[] = {
     {"WebTV Classic (Alpha)",                      "ee5a505aaeee40a84b04360eadc78ce8496e7c2b", BANKINFO_FLAG_NONE},
     {"Micro Bank",                                 "f8438602a0254ee6d224f6051b33804f076ad926", BANKINFO_FLAG_NONE},
     {"Samsung TouchWiz",                           "49c36607e5540e54a088d3d1337f667f5c0206e5", BANKINFO_FLAG_NONE},
-    {"Charlie Bank",                               "1dd3935168ea167df74531df7912432f53d881e0", BANKINFO_FLAG_MOBILEBAE}
+    {"Charlie Bank",                               "1dd3935168ea167df74531df7912432f53d881e0", BANKINFO_FLAG_MOBILEBAE},
+    {"Mobile 300 (Bada)",                          "178b8ff242592fea3421da391cd1ae07248271a9", BANKINFO_FLAG_MOBILEBAE},
+    {"Mobile 300 (Blackjack)",                     "6b0504fa2c9526b20493d627f769c355b36587a6", BANKINFO_FLAG_MOBILEBAE},
 };
 
 static const int kBankCount = (int)(sizeof(kBanks)/sizeof(kBanks[0]));

@@ -90,6 +90,20 @@ static bool dls_bank_quirks(const DLS_Bank* bank) {
     return g_use_mobilebae_quirks;
 }
 
+/* -dlscompat uses DLS2 implied defaults only for Level-2 banks. Quirks /
+ * MobileBAE / pgal / eggs / XMF overlay keep the MobileBAE default path. */
+static bool dls_bank_use_dls2_defaults(const DLS_Bank* bank) {
+    if (!bank || dls_bank_quirks(bank) || bank->eggsArticulators) return false;
+    return bank->isDLS2;
+}
+
+/* MobileBAE quirks and eggs keep historical default connections (-48 dB vel,
+ * CC91/93, 50.8% pan scale). Pure compat uses true DLS1/DLS2 tables. */
+static bool dls_bank_use_mobilebae_defaults(const DLS_Bank* bank) {
+    if (dls_bank_quirks(bank)) return true;
+    return bank && bank->eggsArticulators;
+}
+
 static bool dls_synth_has_eggs_bank(const DLS_Synth* synth) {
     if (!synth) return false;
     if (synth->banks[0] && synth->banks[0]->eggsArticulators) return true;
@@ -716,7 +730,8 @@ static void dls_filter_init(DLS_PlusFilter* f, int32_t sampleRate, int32_t cutof
     f->midThreshold = filter_mapped_cutoff(dls_log10_q16(base / 6));
     f->highThreshold = filter_mapped_cutoff(dls_log10_q16(base / 2));
     f->baseCutoff = cutoff > FILTER_MIN_CUTOFF ? cutoff : FILTER_MIN_CUTOFF;
-    f->resonance = dls_clamp(resonance, 0, FILTER_MAX_RESONANCE);
+    f->baseResonance = dls_clamp(resonance, 0, FILTER_MAX_RESONANCE);
+    f->resonance = f->baseResonance;
     f->effectiveCutoff = f->baseCutoff;
     
     f->h1Left = 0; f->h2Left = 0;
@@ -732,11 +747,12 @@ static bool dls_filter_enabled(DLS_PlusFilter* f) {
 }
 
 static void dls_filter_update(DLS_PlusFilter* f, int32_t runtimeCutoffDelta, int32_t runtimeResonanceDelta) {
-    (void)runtimeResonanceDelta;
     int32_t cutoff = f->baseCutoff + runtimeCutoffDelta;
+    int32_t resonance = dls_clamp(f->baseResonance + runtimeResonanceDelta, 0, FILTER_MAX_RESONANCE);
     if (cutoff < 0) cutoff = 0;
-    if (cutoff != f->effectiveCutoff) {
+    if (cutoff != f->effectiveCutoff || resonance != f->resonance) {
         f->effectiveCutoff = cutoff;
+        f->resonance = resonance;
         if (f->effectiveCutoff < f->highThreshold) {
             dls_filter_update_coeffs(f, f->effectiveCutoff);
         }
@@ -777,7 +793,10 @@ static uint32_t DLS_Selector(int32_t bankMsb, int32_t bankLsb, int32_t program) 
 #define CHUNK_LRGN 0x6E67726C
 #define CHUNK_RGNH 0x686E6772
 #define CHUNK_LART 0x7472616C
+#define CHUNK_LAR2 0x3272616C
 #define CHUNK_ART1 0x31747261
+#define CHUNK_ART2 0x32747261
+#define CHUNK_RGN2 0x326E6772
 #define CHUNK_WVPL 0x6C707677
 #define CHUNK_WAVE 0x45564157
 #define CHUNK_FMT  0x20746D66
@@ -1438,7 +1457,8 @@ static OPErr DLS_Parse_ArticulationChunk(const uint8_t* body, uint32_t size, DLS
     return NO_ERR;
 }
 
-static OPErr DLS_Parse_ArticulationList(const uint8_t* start, const uint8_t* end, DLS_Articulation* art, bool eggsArticulators) {
+static OPErr DLS_Parse_ArticulationList(const uint8_t* start, const uint8_t* end, DLS_Articulation* art,
+                                         bool eggsArticulators, DLS_Bank* bank) {
     const uint8_t* p = start;
     while (p + 8 <= end) {
         uint32_t id = PV_ReadLE32(p);
@@ -1446,7 +1466,10 @@ static OPErr DLS_Parse_ArticulationList(const uint8_t* start, const uint8_t* end
         const uint8_t* body = p + 8;
         uint32_t padded_size = (size + 1) & ~1;
         
-        if (id == CHUNK_ART1 || id == PV_ReadLE32((const uint8_t*)"art2")) {
+        if (id == CHUNK_ART1 || id == CHUNK_ART2) {
+            if (id == CHUNK_ART2 && bank) {
+                bank->isDLS2 = true;
+            }
             DLS_Parse_ArticulationChunk(body, size, art, eggsArticulators);
         }
         p += 8 + padded_size;
@@ -1455,7 +1478,8 @@ static OPErr DLS_Parse_ArticulationList(const uint8_t* start, const uint8_t* end
     return NO_ERR;
 }
 
-static OPErr DLS_Parse_Region(const uint8_t* start, const uint8_t* end, bool level2, DLS_Region* region, bool eggsArticulators) {
+static OPErr DLS_Parse_Region(const uint8_t* start, const uint8_t* end, bool level2, DLS_Region* region,
+                               bool eggsArticulators, DLS_Bank* bank) {
     DLS_InitArticulation(&region->articulation);
     region->level2 = level2;
     region->keyLow = 0;
@@ -1483,6 +1507,8 @@ static OPErr DLS_Parse_Region(const uint8_t* start, const uint8_t* end, bool lev
             region->keyGroup = PV_ReadLE16(body + 10);
         } else if (id == PV_ReadLE32((const uint8_t*)"wlnk") && size >= 12) {
             uint32_t tableIndex = PV_ReadLE32(body + 8);
+            region->waveLinkOptions = PV_ReadLE16(body);
+            region->phaseGroup = PV_ReadLE16(body + 2);
             region->channel = PV_ReadLE32(body + 4);
             /* microQ eggs: ulTableIndex is stored with per-byte bitrev and is a
              * direct ptbl cue / wave index (sub_4345A1F8). */
@@ -1514,9 +1540,13 @@ static OPErr DLS_Parse_Region(const uint8_t* start, const uint8_t* end, bool lev
                     }
                 }
             }
-        } else if (id == CHUNK_LIST && size >= 4 && (PV_ReadLE32(body) == CHUNK_LART || PV_ReadLE32(body) == PV_ReadLE32((const uint8_t*)"lar2"))) {
+        } else if (id == CHUNK_LIST && size >= 4 &&
+                   (PV_ReadLE32(body) == CHUNK_LART || PV_ReadLE32(body) == CHUNK_LAR2)) {
+            if (PV_ReadLE32(body) == CHUNK_LAR2 && bank) {
+                bank->isDLS2 = true;
+            }
             region->ownsArticulation = true;
-            DLS_Parse_ArticulationList(body + 4, body + size, &region->articulation, eggsArticulators);
+            DLS_Parse_ArticulationList(body + 4, body + size, &region->articulation, eggsArticulators, bank);
         }
         
         p += 8 + padded_size;
@@ -1527,6 +1557,7 @@ static OPErr DLS_Parse_Region(const uint8_t* start, const uint8_t* end, bool lev
 static OPErr DLS_Parse_Regions(const uint8_t* start, const uint8_t* end, DLS_Instrument* inst, bool eggsArticulators) {
     uint32_t index = 0;
     const uint8_t* p = start;
+    DLS_Bank* bank = inst ? inst->parentBank : NULL;
     while (p + 8 <= end && index < inst->regionCount) {
         uint32_t id = PV_ReadLE32(p);
         uint32_t size = PV_ReadLE32(p + 4);
@@ -1536,8 +1567,12 @@ static OPErr DLS_Parse_Regions(const uint8_t* start, const uint8_t* end, DLS_Ins
         
         if (id == CHUNK_LIST && size >= 4) {
             uint32_t list_type = PV_ReadLE32(body);
-            if (list_type == PV_ReadLE32((const uint8_t*)"rgn ") || list_type == PV_ReadLE32((const uint8_t*)"rgn2")) {
-                DLS_Parse_Region(body + 4, body + size, list_type == PV_ReadLE32((const uint8_t*)"rgn2"), &inst->regions[index], eggsArticulators);
+            if (list_type == PV_ReadLE32((const uint8_t*)"rgn ") || list_type == CHUNK_RGN2) {
+                if (list_type == CHUNK_RGN2 && bank) {
+                    bank->isDLS2 = true;
+                }
+                DLS_Parse_Region(body + 4, body + size, list_type == CHUNK_RGN2, &inst->regions[index],
+                                 eggsArticulators, bank);
                 inst->regions[index].index = index;
                 index++;
             }
@@ -1650,8 +1685,12 @@ static OPErr DLS_Parse_Instrument(const uint8_t* start, const uint8_t* end, DLS_
             if (inst->regions) {
                 DLS_Parse_Regions(body + 4, body + size, inst, bank->eggsArticulators);
             }
-        } else if (id == CHUNK_LIST && size >= 4 && (PV_ReadLE32(body) == CHUNK_LART || PV_ReadLE32(body) == PV_ReadLE32((const uint8_t*)"lar2"))) {
-            DLS_Parse_ArticulationList(body + 4, body + size, &inst->articulation, bank->eggsArticulators);
+        } else if (id == CHUNK_LIST && size >= 4 &&
+                   (PV_ReadLE32(body) == CHUNK_LART || PV_ReadLE32(body) == CHUNK_LAR2)) {
+            if (PV_ReadLE32(body) == CHUNK_LAR2) {
+                bank->isDLS2 = true;
+            }
+            DLS_Parse_ArticulationList(body + 4, body + size, &inst->articulation, bank->eggsArticulators, bank);
         }
 
         p += 8 + padded_size;
@@ -1877,6 +1916,37 @@ static OPErr DLS_Parse_Wvpl(DLS_ParserState* state, DLS_Bank* bank, uint32_t* po
     return NO_ERR;
 }
 
+/* Walk RIFF/LIST structure; any art2/lar2/rgn2 marks the bank as Level 2. */
+static void DLS_DetectLevel2Chunks(const uint8_t* start, const uint8_t* end, DLS_Bank* bank)
+{
+    const uint8_t* p = start;
+
+    if (!bank || bank->isDLS2 || !start || start >= end) return;
+
+    while (p + 8 <= end && !bank->isDLS2) {
+        uint32_t id = PV_ReadLE32(p);
+        uint32_t size = PV_ReadLE32(p + 4);
+        const uint8_t* body = p + 8;
+        uint32_t padded = (size + 1) & ~1;
+
+        if (body + padded > end) break;
+
+        if (id == CHUNK_ART2 || id == CHUNK_LAR2 || id == CHUNK_RGN2) {
+            bank->isDLS2 = true;
+            return;
+        }
+        if (id == CHUNK_LIST && size >= 4) {
+            uint32_t listType = PV_ReadLE32(body);
+            if (listType == CHUNK_LAR2 || listType == CHUNK_RGN2) {
+                bank->isDLS2 = true;
+                return;
+            }
+            DLS_DetectLevel2Chunks(body + 4, body + size, bank);
+        }
+        p = body + padded;
+    }
+}
+
 OPErr GM_LoadDLSBankFromMemory(void* pMemory, uint32_t memorySize, DLS_Bank** ppBank) {
     if (!pMemory || !ppBank) return PARAM_ERR;
 
@@ -1915,6 +1985,8 @@ OPErr GM_LoadDLSBankFromMemory(void* pMemory, uint32_t memorySize, DLS_Bank** pp
     bank->isDLSM = dls_id == PV_ReadLE32((const uint8_t*)"DLSM");
 
     root_state.pos += 12;
+    DLS_DetectLevel2Chunks(root_state.pos, root_state.end, bank);
+    debug_message("DLS Parser: bank level=%s\n", bank->isDLS2 ? "DLS2" : "DLS1");
 
     DLS_ParserState lins_state = {NULL, NULL, NULL};
     DLS_ParserState wvpl_state = {NULL, NULL, NULL};
@@ -2622,6 +2694,21 @@ bool GM_DLS_HasMobileBAEBank(struct GM_Mixer* pMixer)
     return false;
 }
 
+int GM_DLS_GetBankLevel(struct GM_Mixer* pMixer)
+{
+    DLS_Synth* synth;
+    DLS_Bank* bank;
+    if (!pMixer || !pMixer->pDLSSynth) {
+        return 0;
+    }
+    synth = (DLS_Synth*)pMixer->pDLSSynth;
+    bank = synth->banks[0] ? synth->banks[0] : synth->banks[1];
+    if (!bank) {
+        return 0;
+    }
+    return bank->isDLS2 ? 2 : 1;
+}
+
 static bool g_forced_quirks_load_active = false;
 static bool g_forced_quirks_load_saved = false;
 
@@ -3066,10 +3153,10 @@ static DLS_Region* DLS_Synth_FindRegion(DLS_Instrument* inst, int32_t key, int32
     return NULL;
 }
 
-/* The DLS Level 1 defaults used by RetroDLS Articulation.addDefaultConnections(). */
+/* MobileBAE / quirks / eggs historical defaults. Do not change for authenticity. */
 static const DLS_Connection g_dls_default_connections[] = {
     { 3,    0,     3, 0x0000,  838860800 },
-    { 2,    0,     1, 0x8400,  -31457280 },
+    { 2,    0,     1, 0x8400,  -31457280 }, /* -48 dB (MobileBAE) */
     { 6, 0x100,     3, 0x4000,  838860800 },
     { 0x87, 0,      1, 0x8400,  -62914560 },
     { 0x8B, 0,      1, 0x8400,  -62914560 },
@@ -3079,45 +3166,44 @@ static const DLS_Connection g_dls_default_connections[] = {
     { 0xDD, 0,   0x80, 0x0000,  65536000 }
 };
 
-/* DLS v2.2 default connections per MMA RP-025/Amd2 Tables 5-6.
-   These replace the Level 1 defaults when MobileBAE quirks are disabled.
-   Only connections identical in function to the DLS1 defaults are included,
-   matching the same (source, control, destination) topology but with
-   DLS v2.2-correct default scale values for CC10 pan (50.8%) and
-   DLS v2.2 additional destinations (EG delay, hold, shutdown). */
+/* True DLS Level 1 implied defaults for -dlscompat DLS1 banks.
+ * Velocity −96 dB; CC10 50%; no CC91/93 (Level 2 only).
+ * RPN2 coarse tune is applied via key-number shift (not a separate pitch row). */
+static const DLS_Connection g_dlsv1_default_connections[] = {
+    { 3,    0,     3, 0x0000,  838860800 }, /* Key Number to Pitch */
+    { 2,    0,     1, 0x8400,  -62914560 }, /* Velocity to Gain −96 dB */
+    { 6, 0x100,     3, 0x4000,  838860800 }, /* Pitch Wheel + RPN0 */
+    { 0x87, 0,      1, 0x8400,  -62914560 }, /* CC7 to Gain */
+    { 0x8B, 0,      1, 0x8400,  -62914560 }, /* CC11 to Gain */
+    { 0x101, 0,     3, 0x4000,   6553600 }, /* RPN1 to Pitch */
+    { 0x8A, 0,      4, 0x4000,  32768000 }, /* CC10 to Pan 50% */
+};
+
+/* DLS v2.2 default connections per MMA RP-025 Tables 3–6.
+   Used under -dlscompat only when the loaded bank is Level 2 (isDLS2). */
 static const DLS_Connection g_dlsv2_default_connections[] = {
-    /* Key Number to Pitch: 12800 cents (same as DLS1) */
-    { 3,    0,     3, 0x0000,  838860800 },
-    /* Velocity to Gain: Concave, Inverted, -48 dB (matches quirks behavior;
-       DLS2 spec says -96 dB but -48 dB prevents drums from vanishing at
-       sub-127 velocities with DLS banks authored for this engine.) */
-    { 2,    0,     1, 0x8400,  -31457280 },
-    /* Pitch Wheel + RPN0 to Pitch: 12800 cents (same as DLS1) */
-    { 6, 0x100,     3, 0x4000,  838860800 },
-    /* CC7 to Gain: Concave, Inverted, -96 dB (same as DLS1) */
-    { 0x87, 0,      1, 0x8400,  -62914560 },
-    /* CC11 to Gain: Concave, Inverted, -96 dB (same as DLS1) */
-    { 0x8B, 0,      1, 0x8400,  -62914560 },
-    /* RPN1 to Pitch: 100 cents (same as DLS1) */
-    { 0x101, 0,     3, 0x4000,   6553600 },
-    /* CC10 to Pan: DLS2 uses 50.8% instead of DLS1's 50% */
-    { 0x8A, 0,      4, 0x4000,  33292288 },
-    /* CC91 to Reverb Send (same as DLS1) */
-    { 0xDB, 0,   0x81, 0x0000,  65536000 },
-    /* CC93 to Chorus Send (same as DLS1) */
-    { 0xDD, 0,   0x80, 0x0000,  65536000 },
+    { 3,    0,     3, 0x0000,  838860800 }, /* Key Number to Pitch */
+    { 2,    0,     1, 0x8400,  -62914560 }, /* Velocity to Gain −96 dB */
+    { 6, 0x100,     3, 0x4000,  838860800 }, /* Pitch Wheel + RPN0 */
+    { 0x87, 0,      1, 0x8400,  -62914560 }, /* CC7 to Gain */
+    { 0x8B, 0,      1, 0x8400,  -62914560 }, /* CC11 to Gain */
+    { 0x101, 0,     3, 0x4000,   6553600 }, /* RPN1 to Pitch */
+    { 0x8A, 0,      4, 0x4000,  33292288 }, /* CC10 to Pan 50.8% */
+    { 0xDB, 0,   0x81, 0x0000,  65536000 }, /* CC91 to Reverb */
+    { 0xDD, 0,   0x80, 0x0000,  65536000 }, /* CC93 to Chorus */
 };
 
 static const size_t g_dlsv2_default_connections_count = sizeof(g_dlsv2_default_connections) / sizeof(g_dlsv2_default_connections[0]);
+static const size_t g_dlsv1_default_connections_count = sizeof(g_dlsv1_default_connections) / sizeof(g_dlsv1_default_connections[0]);
 static const size_t g_dls_default_connections_count = sizeof(g_dls_default_connections) / sizeof(g_dls_default_connections[0]);
 
-/* microQ/eggs under -dlscompat: ignore DLS2's 50.8% CC10 and use true 50/50.
- * Quirks/MobileBAE keeps g_dls_default_connections (unchanged). */
+/* microQ/eggs: force true 50% CC10 even when using the MobileBAE table. */
 static const DLS_Connection g_eggs_cc10_pan_50 = { 0x8A, 0, 4, 0x4000, 32768000 };
 
-static const DLS_Connection* dls_compat_default_connection(size_t i, bool eggs) {
-    const DLS_Connection* c = &g_dlsv2_default_connections[i];
-    if (eggs && c->source == 0x8A && c->destination == 4) {
+static const DLS_Connection* dls_default_connection_at(const DLS_Bank* bank,
+                                                        const DLS_Connection* table, size_t i) {
+    const DLS_Connection* c = &table[i];
+    if (bank && bank->eggsArticulators && c->source == 0x8A && c->destination == 4) {
         return &g_eggs_cc10_pan_50;
     }
     return c;
@@ -3205,6 +3291,31 @@ static void dls_apply_note_on_connection(const DLS_Connection* connection, int32
     else if (connection->destination == 4) *panOffset += value / 500;
 }
 
+static void dls_apply_default_note_on_connections(const DLS_Articulation* art, const DLS_Bank* bank,
+                                                   int32_t key, int32_t velocity, int32_t unityNote,
+                                                   const DLS_ChannelState* ch, int32_t* pitch,
+                                                   int32_t* gainMultiplier, int32_t* panOffset) {
+    const DLS_Connection* table;
+    size_t count;
+    if (dls_bank_use_mobilebae_defaults(bank)) {
+        table = g_dls_default_connections;
+        count = g_dls_default_connections_count;
+    } else if (dls_bank_use_dls2_defaults(bank)) {
+        table = g_dlsv2_default_connections;
+        count = g_dlsv2_default_connections_count;
+    } else {
+        table = g_dlsv1_default_connections;
+        count = g_dlsv1_default_connections_count;
+    }
+    for (size_t i = 0; i < count; i++) {
+        const DLS_Connection* def = dls_default_connection_at(bank, table, i);
+        if (!dls_has_connection(art, def)) {
+            dls_apply_note_on_connection(def, key, velocity, unityNote, ch,
+                                         pitch, gainMultiplier, panOffset);
+        }
+    }
+}
+
 static void dls_apply_note_on_connections(const DLS_Articulation* art, int32_t key, int32_t velocity,
                                           int32_t unityNote, const DLS_ChannelState* ch,
                                           int32_t* pitch, int32_t* gainMultiplier,
@@ -3213,25 +3324,9 @@ static void dls_apply_note_on_connections(const DLS_Articulation* art, int32_t k
         dls_apply_note_on_connection(&art->runtimeConnections[i], key, velocity, unityNote, ch,
                                      pitch, gainMultiplier, panOffset);
     }
-    const DLS_Bank* bank = ch->selectedInstrument->parentBank;
-    bool quirks = dls_bank_quirks(bank);
-    bool eggs = bank && bank->eggsArticulators;
-    if (quirks) {
-        for (uint32_t i = 0; i < g_dls_default_connections_count; i++) {
-            if (!dls_has_connection(art, &g_dls_default_connections[i])) {
-                dls_apply_note_on_connection(&g_dls_default_connections[i], key, velocity, unityNote, ch,
-                                             pitch, gainMultiplier, panOffset);
-            }
-        }
-    } else {
-        for (uint32_t i = 0; i < g_dlsv2_default_connections_count; i++) {
-            const DLS_Connection* def = dls_compat_default_connection(i, eggs);
-            if (!dls_has_connection(art, def)) {
-                dls_apply_note_on_connection(def, key, velocity, unityNote, ch,
-                                             pitch, gainMultiplier, panOffset);
-            }
-        }
-    }
+    const DLS_Bank* bank = ch->selectedInstrument ? ch->selectedInstrument->parentBank : NULL;
+    dls_apply_default_note_on_connections(art, bank, key, velocity, unityNote, ch,
+                                          pitch, gainMultiplier, panOffset);
 }
 
 static int32_t dls_runtime_connection_value_q16(const DLS_Connection* connection, const DLS_Voice* voice) {
@@ -3286,7 +3381,7 @@ static void dls_apply_runtime_connection(const DLS_Connection* connection, const
     else if (connection->destination == 0x81) *reverbSend += value / 1000;
     else if (connection->destination == 0x80) *chorusSend += value / 1000;
     else if (connection->destination == 0x500) *filterCutoffDelta += value / 100;
-    else if (connection->destination == 0x501) (void)filterResonanceDelta;
+    else if (connection->destination == 0x501) *filterResonanceDelta += value / 10;
 }
 
 static void dls_apply_runtime_connections(const DLS_Articulation* art, const DLS_Voice* voice,
@@ -3297,22 +3392,25 @@ static void dls_apply_runtime_connections(const DLS_Articulation* art, const DLS
         dls_apply_runtime_connection(&art->runtimeConnections[i], voice, runtimePitch, gainAttenuation,
                                      panOffset, reverbSend, chorusSend, filterCutoffDelta, filterResonanceDelta);
     }
-    bool quirks = dls_bank_quirks(voice->parentBank);
-    bool eggs = voice->parentBank && voice->parentBank->eggsArticulators;
-    if (quirks) {
-        for (uint32_t i = 0; i < g_dls_default_connections_count; i++) {
-            if (!dls_has_connection(art, &g_dls_default_connections[i])) {
-                dls_apply_runtime_connection(&g_dls_default_connections[i], voice, runtimePitch, gainAttenuation,
-                                             panOffset, reverbSend, chorusSend, filterCutoffDelta, filterResonanceDelta);
-            }
-        }
+    const DLS_Bank* bank = voice->parentBank;
+    const DLS_Connection* table;
+    size_t count;
+    if (dls_bank_use_mobilebae_defaults(bank)) {
+        table = g_dls_default_connections;
+        count = g_dls_default_connections_count;
+    } else if (dls_bank_use_dls2_defaults(bank)) {
+        table = g_dlsv2_default_connections;
+        count = g_dlsv2_default_connections_count;
     } else {
-        for (uint32_t i = 0; i < g_dlsv2_default_connections_count; i++) {
-            const DLS_Connection* def = dls_compat_default_connection(i, eggs);
-            if (!dls_has_connection(art, def)) {
-                dls_apply_runtime_connection(def, voice, runtimePitch, gainAttenuation,
-                                             panOffset, reverbSend, chorusSend, filterCutoffDelta, filterResonanceDelta);
-            }
+        table = g_dlsv1_default_connections;
+        count = g_dlsv1_default_connections_count;
+    }
+    for (size_t i = 0; i < count; i++) {
+        const DLS_Connection* def = dls_default_connection_at(bank, table, i);
+        if (!dls_has_connection(art, def)) {
+            dls_apply_runtime_connection(def, voice, runtimePitch, gainAttenuation,
+                                         panOffset, reverbSend, chorusSend,
+                                         filterCutoffDelta, filterResonanceDelta);
         }
     }
 }
@@ -3350,6 +3448,21 @@ static void dls_channel_reset_controllers(DLS_ChannelState* ch, bool quirks) {
     ch->channelPressure = 0;
     ch->lastNote = -1;
     XSetMemory(ch->keyPressure, sizeof(ch->keyPressure), 0);
+}
+
+/* DLS/MIDI CC121 data=0: reset all controllers except Volume and Pan. */
+static void dls_channel_reset_controllers_keep_vol_pan(DLS_ChannelState* ch, bool quirks) {
+    int32_t volume, volumeLsb, pan, panLsb;
+    if (!ch) return;
+    volume = ch->volume;
+    volumeLsb = ch->volumeLsb;
+    pan = ch->pan;
+    panLsb = ch->panLsb;
+    dls_channel_reset_controllers(ch, quirks);
+    ch->volume = volume;
+    ch->volumeLsb = volumeLsb;
+    ch->pan = pan;
+    ch->panLsb = panLsb;
 }
 
 /* Equivalent to RetroDLS ChannelState.bankSelector() in its default mode. */
@@ -3490,8 +3603,12 @@ float GM_DLS_EstimateNoteLoudness(struct GM_Song* pSong, int16_t channel,
     return sum * 0.25f;
 }
 
-static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t velocity, 
-                           DLS_Region* region, DLS_Wave* wave, DLS_ChannelState* ch, int32_t sampleRate) {
+/* midiKey: note-off / exclusivity match key.
+ * pitchKey: key used for Key→Pitch and note-on EG/filter key scaling
+ *           (includes RPN2 coarse tune under pure compat). */
+static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t midiKey, int32_t pitchKey,
+                           int32_t velocity, DLS_Region* region, DLS_Wave* wave,
+                           DLS_ChannelState* ch, int32_t sampleRate) {
     /* A pool slot may be recycled directly from a killed/active voice.  Reset
        every transient (especially rampInitialized, prior gain targets, filter
        history, and control counters) so no previous note can impose a false
@@ -3500,10 +3617,13 @@ static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t v
     XSetMemory(v, sizeof(*v), 0);
 
     v->channel = channel;
-    v->key = key;
+    v->key = midiKey;
     v->velocity = velocity;
     v->regionIndex = region->index;
     v->keyGroup = region->keyGroup;
+    v->phaseGroup = region->phaseGroup;
+    v->waveLinkOptions = region->waveLinkOptions;
+    v->phaseLockMaster = -1;
     v->wave = wave;
     v->articulation = &region->articulation;
     v->channelState = ch;
@@ -3521,7 +3641,7 @@ static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t v
         : (art->filterCutoff > FILTER_MIN_CUTOFF ? art->filterCutoff : FILTER_MIN_CUTOFF);
     DLS_SampleInfo* sample = region->sample.present ? &region->sample : &wave->sample;
     int32_t unityNote = sample->present ? sample->unityNote : 60;
-    dls_apply_note_on_connections(art, key, velocity, unityNote, ch, &notePitch,
+    dls_apply_note_on_connections(art, pitchKey, velocity, unityNote, ch, &notePitch,
                                   &noteGainMultiplier, &notePanOffset);
 
     v->baseGainQ16 = 0x10000;
@@ -3554,7 +3674,7 @@ static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t v
 
     for (uint32_t i = 0; i < art->connectionCount; i++) {
         const DLS_Connection* connection = &art->runtimeConnections[i];
-        int32_t value = dls_note_on_connection_value_q16(connection, key, velocity, unityNote, ch);
+        int32_t value = dls_note_on_connection_value_q16(connection, pitchKey, velocity, unityNote, ch);
         if (value == 0) continue;
         if (connection->destination == 0x20B) {
             eg1Delay = dls_modulated_time_micros(eg1Delay, value, eggsEg);
@@ -3651,13 +3771,16 @@ static void dls_voice_init(DLS_Voice* v, int32_t channel, int32_t key, int32_t v
         gainQ16 = DLS_FP_MUL(gainQ16, env1);
 
         panOffset = dls_clamp(panOffset, -0x10000, 0x10000);
-        /* Eggs/microQ: use MobileBAE 50% pan table (500), not DLS2 50.8% (508). */
+        /* DLS1 / quirks / eggs: 50% pan table. Compat+DLS2 only: 50.8%. */
         {
-            bool panQuirks = voiceQuirks || (v->parentBank && v->parentBank->eggsArticulators);
-            v->targetLeftGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(-panOffset, panQuirks));
-            v->targetRightGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(panOffset, panQuirks));
+            bool useDls1Pan = !dls_bank_use_dls2_defaults(v->parentBank);
+            v->targetLeftGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(-panOffset, useDls1Pan));
+            v->targetRightGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(panOffset, useDls1Pan));
         }
 
+        /* Channel CC91/93 → NeoBAE FX sends when the articulation graph left
+         * sends at 0. DLS1 has no CC91/93 default connections, but NeoBAE's
+         * reverb/chorus buses still consume these sends (default CC91=40). */
         if (reverbSend == 0 && ch->reverb > 0) {
             reverbSend = (ch->reverb & 0x7F) << 9;
         }
@@ -3703,8 +3826,29 @@ static void dls_voice_fast_kill(DLS_Voice* v) {
     v->controlFramesUntilTick = 0;
 }
 
+/* MobileBAE quirks and eggs keep historical exclusivity/steal behavior.
+ * Pure -dlscompat follows DLS1/DLS2 note exclusivity + static channel priority. */
+static bool dls_bank_mobilebae_exclusivity(const DLS_Bank* bank) {
+    if (dls_bank_quirks(bank)) return true;
+    return bank && bank->eggsArticulators;
+}
+
+static bool dls_synth_use_spec_voice_alloc(const DLS_Synth* synth) {
+    return synth && !dls_synth_quirks(synth) && !dls_synth_eggs_compat_voice_mgmt(synth);
+}
+
+/* channelPriority[0] = highest priority. Returns 0..15. */
+static int32_t dls_channel_priority_rank(const DLS_Synth* synth, int32_t channel) {
+    int32_t ch = channel & 15;
+    if (!synth) return 15;
+    for (int i = 0; i < 16; i++) {
+        if ((synth->channelPriority[i] & 15) == ch) return i;
+    }
+    return 15;
+}
+
 static void dls_kill_exclusive_voices(DLS_Synth* synth, int32_t channel, int32_t key,
-                                      const DLS_Region* region) {
+                                      const DLS_Region* region, const DLS_Bank* newBank) {
     if (!synth || !region) return;
 
     /* DLS F_RGN_OPTION_SELFNONEXCLUSIVE = 0x0001: when clear, new notes choke
@@ -3712,24 +3856,47 @@ static void dls_kill_exclusive_voices(DLS_Synth* synth, int32_t channel, int32_t
      * is compared in full (not nibble-masked). */
     bool selfNonExclusive = (region->options & 0x0001) != 0;
     int32_t exclusiveClass = region->keyGroup;
+    bool mobilebaeExcl = dls_bank_mobilebae_exclusivity(newBank);
+    /* Compat Level-2 banks: exclusivity uses EG1_SHUTDOWNTIME. DLS1: Note-Off. */
+    bool useDls2Excl = !mobilebaeExcl && dls_bank_use_dls2_defaults(newBank);
+
     for (int i = 0; i < DLS_MAX_VOICE_POOL; i++) {
         DLS_Voice* voice = &synth->voices[i];
         if (!voice->active) continue;
 
-        /* Quirks: always channel-scoped. Eggs+compat: same (microQ). */
-        bool channelScoped = dls_bank_quirks(voice->parentBank);
-        if (!channelScoped && voice->parentBank && voice->parentBank->eggsArticulators) {
-            channelScoped = true;
-        }
-        if (channelScoped) {
+        if (mobilebaeExcl) {
+            /* Quirks: always channel-scoped. Eggs+compat: same (microQ). */
+            bool channelScoped = dls_bank_quirks(voice->parentBank);
+            if (!channelScoped && voice->parentBank && voice->parentBank->eggsArticulators) {
+                channelScoped = true;
+            }
+            if (channelScoped && voice->channel != channel) continue;
+        } else {
+            /* DLS1/DLS2: exclusivity is always MIDI-channel-scoped. */
             if (voice->channel != channel) continue;
         }
 
         bool sameKey = !selfNonExclusive && (voice->key == key);
+        if (sameKey && !mobilebaeExcl && !voice->keyHeld) {
+            /* Spec: only oscillators that have not received a Note-Off. */
+            sameKey = false;
+        }
+
         bool sameExclusiveClass = (exclusiveClass != 0) &&
                                   (voice->keyGroup == exclusiveClass);
-        if (sameKey || sameExclusiveClass) {
+        if (sameExclusiveClass && !mobilebaeExcl && !useDls2Excl && channel != 9) {
+            /* DLS1: mutually exclusive key groups limited to channel 10. */
+            sameExclusiveClass = false;
+        }
+
+        if (!(sameKey || sameExclusiveClass)) continue;
+
+        if (mobilebaeExcl || useDls2Excl) {
+            /* MobileBAE / DLS2: shutdown via EG1_SHUTDOWNTIME. */
             dls_voice_fast_kill(voice);
+        } else {
+            /* DLS1: exclusivity issues a Note-Off (normal EG1 release). */
+            voice->keyHeld = false;
         }
     }
 }
@@ -3744,13 +3911,18 @@ static int32_t dls_find_free_voice_index(DLS_Synth* synth) {
 }
 
 /* mBAE sub_11F5A10: walk channelPriority from lowest priority (index 15) to
- * highest (index 0). Default table yields steal order 15…0 then 9 last. */
+ * highest (index 0). Default table yields steal order 15…0 then 9 last.
+ * Spec path additionally refuses to steal from strictly higher-priority channels. */
 static int32_t dls_find_recyclable_voice(DLS_Synth* synth, int32_t newChannel) {
     bool mipMode = synth->mipActive;
+    bool specAlloc = dls_synth_use_spec_voice_alloc(synth);
+    int32_t newRank = dls_channel_priority_rank(synth, newChannel);
     int32_t voiceLimit = DLS_MAX_VOICE_POOL;
 
     for (int ord = 15; ord >= 0; ord--) {
         int32_t channel = synth->channelPriority[ord] & 15;
+        /* DLS: notes on lower-priority channels cannot steal from higher. */
+        if (specAlloc && ord < newRank) continue;
         /* Protect drums unless new note is drums, or MIP mode is active. */
         if (newChannel != 9 && channel == 9 && !mipMode) continue;
 
@@ -3769,11 +3941,14 @@ static int32_t dls_find_recyclable_voice(DLS_Synth* synth, int32_t newChannel) {
 static int32_t dls_find_held_percussion_voice(DLS_Synth* synth, int32_t newChannel) {
     /* Quirks unchanged; eggs+compat adopts the same Plus14 ch9-only pass. */
     bool quirksHeldSteal = dls_synth_quirks(synth) || dls_synth_eggs_compat_voice_mgmt(synth);
+    bool specAlloc = dls_synth_use_spec_voice_alloc(synth);
     bool mipMode = synth->mipActive;
+    int32_t newRank = dls_channel_priority_rank(synth, newChannel);
     int32_t voiceLimit = DLS_MAX_VOICE_POOL;
 
     for (int ord = 15; ord >= 0; ord--) {
         int32_t channel = synth->channelPriority[ord] & 15;
+        if (specAlloc && ord < newRank) continue;
         if (newChannel != 9 && channel == 9 && !mipMode) continue;
 
         int32_t candidate = -1;
@@ -3800,10 +3975,13 @@ static int32_t dls_find_held_percussion_voice(DLS_Synth* synth, int32_t newChann
 
 static int32_t dls_find_active_voice_by_priority(DLS_Synth* synth, int32_t newChannel) {
     bool mipMode = synth->mipActive;
+    bool specAlloc = dls_synth_use_spec_voice_alloc(synth);
+    int32_t newRank = dls_channel_priority_rank(synth, newChannel);
     int32_t voiceLimit = DLS_MAX_VOICE_POOL;
 
     for (int ord = 15; ord >= 0; ord--) {
         int32_t channel = synth->channelPriority[ord] & 15;
+        if (specAlloc && ord < newRank) continue;
         if (newChannel != 9 && channel == 9 && !mipMode) continue;
 
         int32_t candidate = -1;
@@ -3836,9 +4014,42 @@ static int32_t dls_select_voice_index_for_note_on(DLS_Synth* synth, int32_t newC
     return idx >= 0 ? idx : 0;
 }
 
-static int32_t dls_channel_coarse_semitones(const DLS_ChannelState* ch) {
+static int32_t dls_channel_coarse_semitones(const DLS_ChannelState* ch, const DLS_Bank* bank) {
     if (!ch) return 0;
+    /* DLS1: coarse tune is not supported on channel 10. */
+    if (bank && !dls_bank_use_mobilebae_defaults(bank) &&
+        !dls_bank_use_dls2_defaults(bank) && ch->channel == 9) {
+        return 0;
+    }
     return ((int16_t)((ch->rpnValues[2] & 0x3FFF) - 0x2000)) >> 7;
+}
+
+static void dls_voice_link_phase(DLS_Synth* synth, DLS_Voice* v, int32_t voiceIdx) {
+    int32_t master = -1;
+    if (!synth || !v || v->phaseGroup == 0) return;
+    if (!dls_bank_use_dls2_defaults(v->parentBank)) return;
+    /* F_WAVELINK_PHASE_MASTER: this voice is the phase reference. */
+    if (v->waveLinkOptions & 0x0001) {
+        v->phaseLockMaster = -1;
+        return;
+    }
+    for (int i = 0; i < DLS_MAX_VOICE_POOL; i++) {
+        DLS_Voice* o;
+        if (i == voiceIdx) continue;
+        o = &synth->voices[i];
+        if (!o->active || o->noteInstanceId != v->noteInstanceId) continue;
+        if (o->phaseGroup != v->phaseGroup) continue;
+        if (o->waveLinkOptions & 0x0001) {
+            master = i;
+            break;
+        }
+        if (master < 0) master = i;
+    }
+    v->phaseLockMaster = master;
+    if (master >= 0) {
+        v->position = synth->voices[master].position;
+        v->currentIncrement = synth->voices[master].currentIncrement;
+    }
 }
 
 void GM_DLS_ProcessSysEx(GM_Song* pSong, const unsigned char* message, int32_t length)
@@ -3934,7 +4145,8 @@ void GM_DLS_ProcessNoteOn(GM_Song* pSong, uint16_t channel, uint16_t note, uint1
                member. */
             int32_t spRemap = DLS_SPMIDI_RemapPercussionKey(note & 0x7F);
             if (spRemap != (int32_t)(note & 0x7F)) {
-                int32_t clampedNote = dls_clamp(note + dls_channel_coarse_semitones(ch), 0, 127);
+                int32_t coarse = dls_channel_coarse_semitones(ch, inst->parentBank);
+                int32_t clampedNote = dls_clamp(note + coarse, 0, 127);
                 DLS_Region* origRegion = DLS_Synth_FindRegion(inst, clampedNote, velocity);
                 if (!origRegion) {
                     debug_message("DLS Synth: SP-MIDI perc key alias %d -> %d for region lookup\n",
@@ -3945,17 +4157,26 @@ void GM_DLS_ProcessNoteOn(GM_Song* pSong, uint16_t channel, uint16_t note, uint1
         }
     }
 
-    int32_t regionKey = voiceNote;
-    if (!(((ch->selectedBankSelector & 0x3F80) == (120 << 7)) &&
-          inst->parentBank && inst->parentBank->hasPercussionKeyAliases)) {
-        regionKey = dls_clamp(voiceNote + dls_channel_coarse_semitones(ch), 0, 127);
-    }
-    
-    /* MobileBAE Plus (sub_11F7110) starts a voice for EVERY matching region,
-       not just the first one.  Layered instruments depend on this. */
     {
+        int32_t coarse = dls_channel_coarse_semitones(ch, inst->parentBank);
+        int32_t regionKey = voiceNote;
+        int32_t pitchKey = voiceNote;
+        /* MobileBAE / eggs / DLS2: layer every match. DLS1 compat: first only. */
+        bool allowLayers = dls_bank_use_mobilebae_defaults(inst->parentBank) ||
+                           dls_bank_use_dls2_defaults(inst->parentBank);
+        bool allowPortamento = dls_bank_use_mobilebae_defaults(inst->parentBank);
         int64_t noteInstance = ++synth->nextNoteInstance;
         int32_t startedVoices = 0;
+
+        if (!(((ch->selectedBankSelector & 0x3F80) == (120 << 7)) &&
+              inst->parentBank && inst->parentBank->hasPercussionKeyAliases)) {
+            regionKey = dls_clamp(voiceNote + coarse, 0, 127);
+        }
+        /* Spec: RPN2 shifts the key used for articulation/pitch as well as
+         * region select. Quirks/eggs keep historical pitch-from-MIDI-note. */
+        if (!dls_bank_use_mobilebae_defaults(inst->parentBank)) {
+            pitchKey = regionKey;
+        }
 
         for (uint32_t regionIdx = 0; regionIdx < inst->regionCount; regionIdx++) {
             DLS_Region* region = &inst->regions[regionIdx];
@@ -3980,7 +4201,7 @@ void GM_DLS_ProcessNoteOn(GM_Song* pSong, uint16_t channel, uint16_t note, uint1
             /* Match sub_11F7110 exactly: exclusive handling occurs before
                allocating each matching region, including regions started by
                an earlier iteration of this same note-on. */
-            dls_kill_exclusive_voices(synth, channel, voiceNote, region);
+            dls_kill_exclusive_voices(synth, channel, voiceNote, region, inst->parentBank);
 
             voiceIdx = dls_select_voice_index_for_note_on(synth, channel);
             if (voiceIdx < 0) {
@@ -3988,13 +4209,15 @@ void GM_DLS_ProcessNoteOn(GM_Song* pSong, uint16_t channel, uint16_t note, uint1
             }
 
             v = &synth->voices[voiceIdx];
-            /* Pass the aliased key to voice init so pitch is calculated correctly */
-            dls_voice_init(v, channel, voiceNote, velocity, region, regionWave, ch, synth->sampleRate);
+            dls_voice_init(v, channel, voiceNote, pitchKey, velocity, region, regionWave,
+                           ch, synth->sampleRate);
             v->startSerial = synth->nextVoiceSerial++;
             v->noteInstanceId = noteInstance;
-            
-            /* Initialize portamento if enabled and there's a previous note */
-            if (ch->portamentoEnabled && ch->lastNote >= 0 && ch->lastNote != voiceNote) {
+            dls_voice_link_phase(synth, v, voiceIdx);
+
+            /* Portamento is a MobileBAE/eggs extension, not a DLS articulator. */
+            if (allowPortamento && ch->portamentoEnabled &&
+                ch->lastNote >= 0 && ch->lastNote != voiceNote) {
                 v->portamentoActive = true;
                 /* start/target as cent offsets from the voice's base note in Q16.16 */
                 int32_t centsPerSemitone = 100;
@@ -4008,20 +4231,20 @@ void GM_DLS_ProcessNoteOn(GM_Song* pSong, uint16_t channel, uint16_t note, uint1
                 v->portamentoTotalFrames = (int64_t)totalSamples;
                 v->portamentoFramesRemaining = totalSamples;
             }
-            
+
             startedVoices++;
+            if (!allowLayers) break;
         }
 
         if (startedVoices == 0) {
             debug_message("DLS Synth: no region/wave for instrument=%d:%d:%d key=%d velocity=%d\n",
                           inst->bankMsb, inst->bankLsb, inst->program, note, velocity);
         }
-        
-        /* Update lastNote for portamento */
-        if (ch->portamentoEnabled) {
+
+        if (allowPortamento && ch->portamentoEnabled) {
             ch->lastNote = voiceNote;
         }
-        
+
         return;
     }
 }
@@ -4185,9 +4408,20 @@ void GM_DLS_ProcessController(GM_Song* pSong, uint16_t channel, uint16_t control
         /* Portamento time */
         ch->portamentoTime = value & 0x7F;
     } else if (controller == 121) {
-        /* MobileBAE sub_11F7520 only accepts its internal reset sentinel 127. */
-        if ((value & 0x7F) == 127) {
-            dls_channel_reset_controllers(ch, dls_synth_quirks(synth));
+        int32_t resetVal = value & 0x7F;
+        /* MobileBAE/eggs: only the internal reset sentinel 127. */
+        if (dls_synth_quirks(synth) || dls_synth_eggs_compat_voice_mgmt(synth)) {
+            if (resetVal == 127) {
+                dls_channel_reset_controllers(ch, dls_synth_quirks(synth));
+                dls_invalidate_channel_voices(synth, dls_channel_index(channel));
+            }
+        } else if (resetVal == 0) {
+            /* DLS/MIDI: data 0 resets all except Volume and Pan. */
+            dls_channel_reset_controllers_keep_vol_pan(ch, false);
+            dls_invalidate_channel_voices(synth, dls_channel_index(channel));
+        } else if (resetVal == 127) {
+            /* Power-on defaults. */
+            dls_channel_reset_controllers(ch, false);
             dls_invalidate_channel_voices(synth, dls_channel_index(channel));
         }
     } else if (controller == 120) {
@@ -4444,15 +4678,15 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
                     v->chorusSend = v->targetChorusSend;
                 }
                 {
-                    bool panQuirks = voiceQuirks || (v->parentBank && v->parentBank->eggsArticulators);
-                    v->targetLeftGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(-panOffset, panQuirks));
-                    v->targetRightGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(panOffset, panQuirks));
+                    bool useDls1Pan = !dls_bank_use_dls2_defaults(v->parentBank);
+                    v->targetLeftGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(-panOffset, useDls1Pan));
+                    v->targetRightGain = DLS_FP_MUL(gainQ16, dls_pan_scale_q16(panOffset, useDls1Pan));
                 }
-                
-                // If articulation has no explicit reverb/chorus, apply channel-level CC#91/93 values
-                // This allows reverbs 8+ (which read from songBufferReverb) to process DLS audio
+
+                /* Channel CC91/93 → NeoBAE FX sends when articulator send is 0.
+                 * Needed for DLS1 compat banks (no CC91/93 default connections). */
                 if (reverbSend == 0 && ch->reverb > 0) {
-                    reverbSend = (ch->reverb & 0x7F) << 9;  // Convert 0-127 to Q16 (0x0-0x3F80)
+                    reverbSend = (ch->reverb & 0x7F) << 9;
                 }
                 if (chorusSend == 0 && ch->chorus > 0) {
                     chorusSend = (ch->chorus & 0x7F) << 9;
@@ -4518,27 +4752,41 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
                 v->portamentoFramesRemaining--;
             }
             
-            // Get stereo samples
+            bool phaseSlave = false;
             int32_t leftSample, rightSample;
+
+            /* DLS2 phase-lock: slaves follow the master's oscillator phase. */
+            if (v->phaseLockMaster >= 0 && v->phaseLockMaster < DLS_MAX_VOICE_POOL) {
+                DLS_Voice* master = &synth->voices[v->phaseLockMaster];
+                if (master->active && master->noteInstanceId == v->noteInstanceId) {
+                    v->position = master->position;
+                    v->currentIncrement = master->currentIncrement;
+                    phaseSlave = true;
+                } else {
+                    v->phaseLockMaster = -1;
+                }
+            }
+
             dls_get_stereo_sample(v->wave, v->position, &leftSample, &rightSample);
-            
+
             v->lastFiltered = false;
             if (v->filterEnabled && dls_filter_enabled(&v->filter)) {
                 leftSample = dls_filter_next_left(&v->filter, leftSample);
                 rightSample = dls_filter_next_right(&v->filter, rightSample);
                 v->lastFiltered = true;
             }
-            
+
             v->lastLeftSample = leftSample;
             v->lastRightSample = rightSample;
-            
-            // Advance position
-            v->position += v->currentIncrement;
-            if (v->looping && v->position >= v->loopEnd) {
-                if (!v->loopUntilRelease || v->keyHeld || v->sustainSnapshot) {
-                    v->position = v->loopStart + (v->position - v->loopEnd);
-                } else {
-                    v->looping = false;
+
+            if (!phaseSlave) {
+                v->position += v->currentIncrement;
+                if (v->looping && v->position >= v->loopEnd) {
+                    if (!v->loopUntilRelease || v->keyHeld || v->sustainSnapshot) {
+                        v->position = v->loopStart + (v->position - v->loopEnd);
+                    } else {
+                        v->looping = false;
+                    }
                 }
             }
             if (!v->looping && v->position >= ((int64_t)v->wave->frames << 16)) {

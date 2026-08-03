@@ -110,6 +110,8 @@ struct DLS_Region {
     int32_t options;
     int32_t keyGroup;
     int32_t channel;
+    uint16_t waveLinkOptions; /* wlnk.fusOptions; bit0 = PHASE_MASTER */
+    int32_t phaseGroup;       /* wlnk.usPhaseGroup; 0 = unlocked */
     int32_t tableIndex;
     int32_t index;
     
@@ -141,6 +143,9 @@ struct DLS_ProgramAlias {
 
 struct DLS_Bank {
     bool isDLSM;
+    /* True if the file contains Level-2 chunks (art2/lar2/rgn2). Used under
+     * -dlscompat to pick DLS2 vs DLS1 implied default connections. */
+    bool isDLS2;
     bool forceQuirks;
     bool selectorRawModeActive;
     bool selectorImplicitModeSeen;
@@ -200,6 +205,8 @@ bool GM_DLS_HasEggsBank(struct GM_Mixer* pMixer);
 /* True if main or XMF-overlay DLS bank is treated as MobileBAE
  * (has 'pgal', or matched bankinfo.h BANKINFO_FLAG_MOBILEBAE). */
 bool GM_DLS_HasMobileBAEBank(struct GM_Mixer* pMixer);
+/* 2 if primary active DLS bank is Level 2, 1 if Level 1, 0 if none. */
+int GM_DLS_GetBankLevel(struct GM_Mixer* pMixer);
 /* Temporarily force quirks bake for the next DLS bank load (nesting-safe). */
 void GM_DLS_BeginForcedQuirksLoad(void);
 void GM_DLS_EndForcedQuirksLoad(void);
@@ -252,6 +259,7 @@ struct DLS_PlusFilter {
     int32_t midThreshold;
     int32_t highThreshold;
     int32_t baseCutoff;
+    int32_t baseResonance;
     int32_t resonance;
     int32_t effectiveCutoff;
     int32_t c0;
@@ -313,6 +321,9 @@ struct DLS_Voice {
     int32_t regionIndex;
     int32_t keyGroup;
     int64_t noteInstanceId; /* groups layered region voices from one note-on */
+    int32_t phaseGroup;
+    uint16_t waveLinkOptions;
+    int32_t phaseLockMaster; /* voice pool index, or -1 if master/unlocked */
     DLS_Wave* wave;
     DLS_Articulation* articulation;
     DLS_ChannelState* channelState;

@@ -141,6 +141,7 @@ public class Mixer
 	private static native boolean _getDLSCompatibilityMode();
 	private static native boolean _hasEggsDLSBank(long reference);
 	private static native boolean _hasMobileBAEDLSBank(long reference);
+	private static native int _getDLSBankLevel(long reference);
 	private static native int _determineFileTypeByData(byte[] data, int length);
 	private static native int _loadFromMemory(long mixerReference, byte[] data, LoadResult result);
 	
@@ -218,10 +219,15 @@ public class Mixer
 		if (mMixer == null || mMixer.mReference == 0L) return false;
 		return _hasEggsDLSBank(mMixer.mReference);
 	}
-	/** True if the loaded native DLS bank contains a MobileBAE 'pgal' chunk. */
+	/** True if the loaded native DLS bank is treated as MobileBAE (pgal or bankinfo). */
 	public static boolean hasMobileBAEDLSBank(){
 		if (mMixer == null || mMixer.mReference == 0L) return false;
 		return _hasMobileBAEDLSBank(mMixer.mReference);
+	}
+	/** 2 for Level-2 DLS, 1 for Level-1, 0 if no native DLS bank. */
+	public static int getDLSBankLevel(){
+		if (mMixer == null || mMixer.mReference == 0L) return 0;
+		return _getDLSBankLevel(mMixer.mReference);
 	}
 	
 	// Determine file type from raw data (returns BAEFileType constant)

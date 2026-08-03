@@ -6088,22 +6088,14 @@ int main(int argc, char *argv[])
 #if USE_NATIVE_DLS == TRUE
             else if (g_bae.mixer && GM_GetMixerDLSMode())
             {
+                extern bool g_use_dls_compatiblity_mode;
                 int has_mobile = BAEMixer_HasMobileBAEDLSBank(g_bae.mixer) ? 1 : 0;
                 int has_eggs = BAEMixer_HasEggsDLSBank(g_bae.mixer) ? 1 : 0;
-                if (has_mobile)
-                {
-                    chips[chipCount] = "mobileBAE";
-                    chipFills[chipCount] = g_is_dark_mode
-                        ? (SDL_Color){30, 70, 95, 220}
-                        : (SDL_Color){190, 225, 245, 230};
-                    chipTexts[chipCount] = g_is_dark_mode
-                        ? (SDL_Color){160, 220, 255, 255}
-                        : (SDL_Color){20, 70, 110, 255};
-                    chipCount++;
-                }
+                int dls_level = BAEMixer_GetDLSBankLevel(g_bae.mixer);
+                const char *neobae_dls_chip = (dls_level == 2) ? "NeoBAE DLS 2" : "NeoBAE DLS 1";
                 if (has_eggs)
                 {
-                    /* microQ — black & white */
+                    /* microQ — black & white (own lane; ignore compat). */
                     chips[chipCount] = "microQ";
                     chipFills[chipCount] = g_is_dark_mode
                         ? (SDL_Color){40, 40, 40, 220}
@@ -6113,10 +6105,33 @@ int main(int argc, char *argv[])
                         : (SDL_Color){25, 25, 25, 255};
                     chipCount++;
                 }
-                if (!has_mobile && !has_eggs)
+                else if (has_mobile)
                 {
-                    /* NeoBAE DLS — bronze / warm amber */
-                    chips[chipCount] = "NeoBAE DLS";
+                    /* Detected MobileBAE bank: mobileBAE badge only. */
+                    chips[chipCount] = "mobileBAE";
+                    chipFills[chipCount] = g_is_dark_mode
+                        ? (SDL_Color){30, 70, 95, 220}
+                        : (SDL_Color){190, 225, 245, 230};
+                    chipTexts[chipCount] = g_is_dark_mode
+                        ? (SDL_Color){160, 220, 255, 255}
+                        : (SDL_Color){20, 70, 110, 255};
+                    chipCount++;
+                }
+                else
+                {
+                    /* Generic DLS: quirks → mobileBAE + NeoBAE DLS #; compat → NeoBAE DLS # only. */
+                    if (!g_use_dls_compatiblity_mode)
+                    {
+                        chips[chipCount] = "mobileBAE";
+                        chipFills[chipCount] = g_is_dark_mode
+                            ? (SDL_Color){30, 70, 95, 220}
+                            : (SDL_Color){190, 225, 245, 230};
+                        chipTexts[chipCount] = g_is_dark_mode
+                            ? (SDL_Color){160, 220, 255, 255}
+                            : (SDL_Color){20, 70, 110, 255};
+                        chipCount++;
+                    }
+                    chips[chipCount] = neobae_dls_chip;
                     chipFills[chipCount] = g_is_dark_mode
                         ? (SDL_Color){85, 50, 25, 220}
                         : (SDL_Color){255, 205, 145, 230};
@@ -6264,16 +6279,21 @@ int main(int argc, char *argv[])
 #if USE_NATIVE_DLS == TRUE
                     if (!flavor && g_bae.mixer && GM_GetMixerDLSMode())
                     {
+                        extern bool g_use_dls_compatiblity_mode;
                         int tip_mobile = BAEMixer_HasMobileBAEDLSBank(g_bae.mixer) ? 1 : 0;
                         int tip_eggs = BAEMixer_HasEggsDLSBank(g_bae.mixer) ? 1 : 0;
-                        if (tip_eggs && tip_mobile)
-                            flavor = "mobileBAE + scrambled eggs / microQ";
-                        else if (tip_eggs)
+                        int tip_level = BAEMixer_GetDLSBankLevel(g_bae.mixer);
+                        const char *tip_neobae = (tip_level == 2) ? "NeoBAE DLS 2" : "NeoBAE DLS 1";
+                        if (tip_eggs)
                             flavor = "scrambled eggs / microQ";
                         else if (tip_mobile)
                             flavor = "mobileBAE";
+                        else if (!g_use_dls_compatiblity_mode)
+                            flavor = (tip_level == 2)
+                                ? "mobileBAE + NeoBAE DLS 2"
+                                : "mobileBAE + NeoBAE DLS 1";
                         else
-                            flavor = "NeoBAE DLS";
+                            flavor = tip_neobae;
                     }
 #endif
                     if (flavor)
