@@ -18,6 +18,7 @@
 #ifndef GUI_THEME_H
 #define GUI_THEME_H
 
+#include "X_API.h" /* defines TRUE/FALSE before USE_SDL2 == TRUE checks */
 #if USE_SDL2 == TRUE
 #include <SDL2/SDL.h>
 #else

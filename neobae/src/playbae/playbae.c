@@ -70,6 +70,7 @@
 
 #ifdef _WIN32
 #define stricmp _stricmp
+#define strcasecmp _stricmp
 #include <windows.h>
 #else
 #define stricmp strcasecmp

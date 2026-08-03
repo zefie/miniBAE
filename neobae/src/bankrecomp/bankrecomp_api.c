@@ -11,7 +11,12 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#ifdef _MSC_VER
+#define strcasecmp _stricmp
+#define strncasecmp _strnicmp
+#else
 #include <strings.h>
+#endif
 #include <stdint.h>
 #include <math.h>
 #include <NeoBAE.h>

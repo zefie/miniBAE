@@ -20,6 +20,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 #include "X_Assert.h"
 #include "X_API.h"
 
@@ -32,6 +33,16 @@
 // Forward declarations for internal types used in meta callback
 struct GM_Song;       // opaque
 typedef short int16_t; // 16-bit signed used by engine for track index
+
+// MSVC has no POSIX strings.h; map case-insensitive compares used across the GUI.
+#ifdef _MSC_VER
+#ifndef strcasecmp
+#define strcasecmp _stricmp
+#endif
+#ifndef strncasecmp
+#define strncasecmp _strnicmp
+#endif
+#endif
 
 // Common macros
 #ifndef MIN

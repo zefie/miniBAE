@@ -35,7 +35,9 @@
 #else
 #include <SDL3/SDL.h>
 #endif
-#include <unistd.h>
+#ifndef _WIN32
+#include <unistd.h> /* getpid() for temp MIDI record path */
+#endif
 
 // Forward declare the BAEGUI structure (defined in gui_main.old.c)
 typedef struct

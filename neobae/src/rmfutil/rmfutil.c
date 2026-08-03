@@ -47,6 +47,10 @@
 #include <string.h>
 #include <stdint.h>
 #include <errno.h>
+#ifdef _MSC_VER
+#define strcasecmp _stricmp
+#define strncasecmp _strnicmp
+#endif
 #include <NeoBAE.h>
 #include <BAE_API.h>
 #include <X_API.h>
