@@ -128,8 +128,6 @@ public class Mixer
     private static native int _setMasterVolume(long reference, int fixedVolume);
     private static native int _setGlobalVolume(long reference, int fixedVolume);
     private static native int _getGlobalVolume(long reference);
-	// Android-only: post-mix output gain boost (0..512 where 256 == 1.0x)
-	private static native int _setAndroidOutputGainBoost(int boost256);
 	private static native String _getBankFriendlyName(long reference);
 	private static native String _getVersion();
 	private static native String _getCompileInfo();
@@ -201,14 +199,6 @@ public class Mixer
 		return _setMasterVolume(mMixer.mReference, fixedVolume);
 	}
 
-	// Android-only: post-mix output gain boost (applied in the platform audio callback).
-	public static int setAndroidOutputGainBoost(int boost256){
-		return _setAndroidOutputGainBoost(boost256);
-	}
-
-	public static void setAndroidHsbBoostEnabled(boolean enabled){
-		setAndroidOutputGainBoost(enabled ? 512 : 256);
-	}
 	public static String getBankFriendlyName(){ if(mMixer==null) return null; return _getBankFriendlyName(mMixer.mReference); }
 	public static String getVersion(){ return _getVersion(); }
 	public static String getCompileInfo(){ return _getCompileInfo(); }

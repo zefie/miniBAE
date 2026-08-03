@@ -376,19 +376,6 @@ class MainActivity : AppCompatActivity() {
             val reverbType = prefs.getInt("default_reverb", 1)
             val velocityCurve = prefs.getInt("velocity_curve", 1)
             val volumePercent = prefs.getInt("volume_percent", viewModel.volumePercent).coerceIn(0, 100)
-            val lastBankPath = prefs.getString("last_bank_path", "__builtin__")
-            val isHsbBank = lastBankPath == "__builtin__" || (lastBankPath?.endsWith(".hsb", ignoreCase = true) == true)
-
-            // Android-only: boost output 2x in HSB mode when normalize is off.
-            // With normalize on, skip boost so levels match the shared mixer estimate.
-            val normalizeOn = prefs.getBoolean("normalize_playback", false)
-            val shouldBoostHsb = !normalizeOn &&
-                isHsbBank &&
-                loadResult.isSong &&
-                (loadResult.song?.isSF2Song() == false) &&
-                (loadResult.song?.isDLSSong() == false)
-            Mixer.setAndroidHsbBoostEnabled(shouldBoostHsb)
-
             Mixer.setMasterVolumePercent(volumePercent)
             Mixer.setDefaultReverb(reverbType)
 

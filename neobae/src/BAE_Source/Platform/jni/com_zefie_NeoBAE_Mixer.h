@@ -49,14 +49,6 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromFile
 JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1setMasterVolume
   (JNIEnv *, jclass, jlong, jint);
 
-/*
- * Class:     com_zefie_NeoBAE_Mixer
- * Method:    _setAndroidOutputGainBoost
- * Signature: (I)I
- */
-JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1setAndroidOutputGainBoost
-  (JNIEnv *, jclass, jint);
-
 JNIEXPORT jstring JNICALL Java_com_zefie_NeoBAE_Mixer__1getBankFriendlyName
   (JNIEnv *, jclass, jlong);
 

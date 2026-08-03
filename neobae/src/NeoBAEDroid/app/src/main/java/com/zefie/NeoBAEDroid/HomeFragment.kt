@@ -22,9 +22,11 @@ import android.provider.DocumentsContract
 import androidx.documentfile.provider.DocumentFile
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -346,12 +348,19 @@ class HomeFragment : Fragment() {
     
     // Sound bank settings
     private var currentBankName = mutableStateOf("Loading...")
+    private var currentBankPath = mutableStateOf("__builtin__")
     private var isLoadingBank = mutableStateOf(false)
     private var hasEggsBank = mutableStateOf(false)
     private var hasMobileBAEBank = mutableStateOf(false)
 
-    private fun refreshBankBadges() {
+    private fun refreshBankBadges(bankPathOverride: String? = null) {
         try {
+            if (bankPathOverride != null) {
+                currentBankPath.value = bankPathOverride
+            } else if (isAdded) {
+                val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                currentBankPath.value = prefs.getString("last_bank_path", "__builtin__") ?: "__builtin__"
+            }
             if (Mixer.exists()) {
                 hasEggsBank.value = Mixer.hasEggsDLSBank()
                 hasMobileBAEBank.value = Mixer.hasMobileBAEDLSBank()
@@ -1243,6 +1252,7 @@ class HomeFragment : Fragment() {
                             }
                         },
                         bankName = currentBankName.value,
+                        bankPath = currentBankPath.value,
                         hasEggsBank = hasEggsBank.value,
                         hasMobileBAEBank = hasMobileBAEBank.value,
                         isLoadingBank = isLoadingBank.value,
@@ -2010,19 +2020,6 @@ class HomeFragment : Fragment() {
 
     private fun applyVolume() {
         val basePercent = viewModel.volumePercent.coerceIn(0, 100)
-        val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
-        val lastBankPath = prefs.getString("last_bank_path", "__builtin__")
-        val isHsbBank = lastBankPath == "__builtin__" || lastBankPath?.endsWith(".hsb", ignoreCase = true) == true || lastBankPath?.endsWith(".zsb", ignoreCase = true) == true
-
-        // Android-only: HSB banks are quieter than SF2 without normalize. Skip the post-mix
-        // boost when song normalize is on so levels match the shared mixer-relative estimate
-        // (same path as zefidi/playbae) instead of double-applying loudness.
-        val shouldBoostHsb = !normalizePlayback.value &&
-            isHsbBank &&
-            (currentSong != null) &&
-            (currentSong?.isSF2Song() == false) &&
-            (currentSong?.isDLSSong() == false)
-        Mixer.setAndroidHsbBoostEnabled(shouldBoostHsb)
         Mixer.setGlobalVolumePercent(basePercent)
     }
 
@@ -3567,8 +3564,7 @@ class HomeFragment : Fragment() {
                     prefs.edit().putString("last_bank_path", resolvedFile.absolutePath).apply()
                     postToMain {
                         currentBankName.value = originalName
-                        hasEggsBank.value = false
-                        hasMobileBAEBank.value = false
+                        refreshBankBadges(resolvedFile.absolutePath)
                         isLoadingBank.value = false
                     }
                     bankSwapInProgress.set(false)
@@ -3656,7 +3652,7 @@ class HomeFragment : Fragment() {
                     
                     postToMain {
                         currentBankName.value = originalName
-                        refreshBankBadges()
+                        refreshBankBadges(resolvedFile.absolutePath)
                         val toastMsg = if (hasEggsBank.value) {
                             "Loaded: $originalName  (scrambled eggs)"
                         } else {
@@ -3748,8 +3744,7 @@ class HomeFragment : Fragment() {
                 prefs.edit().putString("last_bank_path", "__builtin__").apply()
                 postToMain {
                     currentBankName.value = "Built-in patches"
-                    hasEggsBank.value = false
-                    hasMobileBAEBank.value = false
+                    refreshBankBadges("__builtin__")
                     context?.let { Toast.makeText(it, "Built-in patches will load when playback starts", Toast.LENGTH_SHORT).show() }
                     isLoadingBank.value = false
                 }
@@ -3837,8 +3832,10 @@ class HomeFragment : Fragment() {
                 if (r == 0) {
                     val friendly = Mixer.getBankFriendlyName()
                     currentBankName.value = friendly ?: "Built-in patches"
-                    refreshBankBadges()
+                    // Persist before badge refresh so we don't keep the previous .dls path
+                    // (which incorrectly shows "NeoBAE DLS" once eggs/mobile flags clear).
                     prefs.edit().putString("last_bank_path", "__builtin__").apply()
+                    refreshBankBadges("__builtin__")
                     
                     // Hot-swap: only Songs need reload (Sounds don't use banks)
                     // Built-in patches are HSB; we may have cleared currentSong during teardown.
@@ -4369,6 +4366,7 @@ fun NewMusicPlayerScreen(
     onNavigateToFolder: (String) -> Unit,
     onAddToPlaylist: (File) -> Unit,
     bankName: String,
+    bankPath: String,
     hasEggsBank: Boolean,
     hasMobileBAEBank: Boolean,
     isLoadingBank: Boolean,
@@ -4891,6 +4889,7 @@ fun NewMusicPlayerScreen(
                 )
                 NavigationScreen.SETTINGS -> SettingsScreenContent(
                     bankName = bankName,
+                    bankPath = bankPath,
                     hasEggsBank = hasEggsBank,
                     hasMobileBAEBank = hasMobileBAEBank,
                     isLoadingBank = isLoadingBank,
@@ -7256,9 +7255,107 @@ private fun buildGitHubUrlForBaeVersion(versionString: String): String? {
     return "https://github.com/zefie/NeoBAE/tree/$cleaned"
 }
 
+private data class BankFlavorBadge(
+    val label: String,
+    val fill: Color,
+    val text: Color,
+)
+
+/** Match zefidi STATUS & BANK flavor chips (miniBAE / NeoBAE / FluidBAE / DLS variants). */
+private fun resolveBankFlavorBadges(
+    bankPath: String,
+    hasEggsBank: Boolean,
+    hasMobileBAEBank: Boolean,
+    dark: Boolean,
+): List<BankFlavorBadge> {
+    val path = bankPath.ifBlank { "__builtin__" }
+    val lower = path.lowercase()
+    val badges = mutableListOf<BankFlavorBadge>()
+    fun rgba(r: Int, g: Int, b: Int, a: Int) = Color(r, g, b, a)
+
+    when {
+        path == "__builtin__" || lower.endsWith(".hsb") -> {
+            badges += if (dark) {
+                BankFlavorBadge("miniBAE", rgba(20, 35, 85, 220), rgba(150, 180, 255, 255))
+            } else {
+                BankFlavorBadge("miniBAE", rgba(30, 50, 120, 230), rgba(220, 230, 255, 255))
+            }
+        }
+        lower.endsWith(".zsb") -> {
+            badges += if (dark) {
+                BankFlavorBadge("NeoBAE", rgba(90, 70, 30, 220), rgba(255, 220, 120, 255))
+            } else {
+                BankFlavorBadge("NeoBAE", rgba(255, 230, 160, 230), rgba(120, 80, 20, 255))
+            }
+        }
+        lower.endsWith(".sf2") || lower.endsWith(".sf3") -> {
+            badges += if (dark) {
+                BankFlavorBadge("FluidBAE", rgba(20, 70, 65, 220), rgba(130, 235, 215, 255))
+            } else {
+                BankFlavorBadge("FluidBAE", rgba(175, 235, 225, 230), rgba(15, 90, 80, 255))
+            }
+        }
+        lower.endsWith(".dls") || hasEggsBank || hasMobileBAEBank -> {
+            if (hasMobileBAEBank) {
+                badges += if (dark) {
+                    BankFlavorBadge("mobileBAE", rgba(30, 70, 95, 220), rgba(160, 220, 255, 255))
+                } else {
+                    BankFlavorBadge("mobileBAE", rgba(190, 225, 245, 230), rgba(20, 70, 110, 255))
+                }
+            }
+            if (hasEggsBank) {
+                badges += if (dark) {
+                    BankFlavorBadge("microQ", rgba(40, 40, 40, 220), rgba(235, 235, 235, 255))
+                } else {
+                    BankFlavorBadge("microQ", rgba(230, 230, 230, 230), rgba(25, 25, 25, 255))
+                }
+            }
+            if (!hasMobileBAEBank && !hasEggsBank) {
+                badges += if (dark) {
+                    BankFlavorBadge("NeoBAE DLS", rgba(85, 50, 25, 220), rgba(255, 185, 110, 255))
+                } else {
+                    BankFlavorBadge("NeoBAE DLS", rgba(255, 205, 145, 230), rgba(100, 50, 15, 255))
+                }
+            }
+        }
+    }
+    return badges
+}
+
+@Composable
+private fun BankFlavorBadgesRow(
+    bankPath: String,
+    hasEggsBank: Boolean,
+    hasMobileBAEBank: Boolean,
+) {
+    val dark = isSystemInDarkTheme()
+    val badges = remember(bankPath, hasEggsBank, hasMobileBAEBank, dark) {
+        resolveBankFlavorBadges(bankPath, hasEggsBank, hasMobileBAEBank, dark)
+    }
+    for (badge in badges) {
+        Spacer(modifier = Modifier.width(8.dp))
+        Surface(
+            shape = RoundedCornerShape(4.dp),
+            color = badge.fill,
+            contentColor = badge.text,
+            border = BorderStroke(1.dp, badge.text),
+        ) {
+            Text(
+                text = badge.label,
+                style = MaterialTheme.typography.caption,
+                fontWeight = FontWeight.Bold,
+                color = badge.text,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                maxLines = 1,
+            )
+        }
+    }
+}
+
 @Composable
 fun SettingsScreenContent(
     bankName: String,
+    bankPath: String,
     hasEggsBank: Boolean,
     hasMobileBAEBank: Boolean,
     isLoadingBank: Boolean,
@@ -7911,36 +8008,11 @@ fun SettingsScreenContent(
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                if (hasMobileBAEBank) {
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = Color(0xFFBEE1F5),
-                                        contentColor = Color(0xFF14466E)
-                                    ) {
-                                        Text(
-                                            text = "mobileBAE",
-                                            style = MaterialTheme.typography.caption,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                }
-                                if (hasEggsBank) {
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = Color(0xFFFFE6A0),
-                                        contentColor = Color(0xFF785014)
-                                    ) {
-                                        Text(
-                                            text = "microQ",
-                                            style = MaterialTheme.typography.caption,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                }
+                                BankFlavorBadgesRow(
+                                    bankPath = bankPath,
+                                    hasEggsBank = hasEggsBank,
+                                    hasMobileBAEBank = hasMobileBAEBank,
+                                )
                             }
                         }
 
@@ -8512,36 +8584,11 @@ fun SettingsScreenContent(
                                     maxLines = 2,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                if (hasMobileBAEBank) {
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = Color(0xFFBEE1F5),
-                                        contentColor = Color(0xFF14466E)
-                                    ) {
-                                        Text(
-                                            text = "mobileBAE",
-                                            style = MaterialTheme.typography.caption,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                }
-                                if (hasEggsBank) {
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Surface(
-                                        shape = RoundedCornerShape(4.dp),
-                                        color = Color(0xFFFFE6A0),
-                                        contentColor = Color(0xFF785014)
-                                    ) {
-                                        Text(
-                                            text = "microQ",
-                                            style = MaterialTheme.typography.caption,
-                                            fontWeight = FontWeight.Bold,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                }
+                                BankFlavorBadgesRow(
+                                    bankPath = bankPath,
+                                    hasEggsBank = hasEggsBank,
+                                    hasMobileBAEBank = hasMobileBAEBank,
+                                )
                             }
                         }
 

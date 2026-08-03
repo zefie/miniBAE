@@ -192,16 +192,6 @@ static uint32_t g_totalSamplesPlayed = 0;
 static int16_t g_unscaled_volume = 256;
 static int16_t g_balance = 0;
 
-// Android-only: optional post-mix output gain boost (0..512, where 256 == 1.0x).
-// This is applied after BAE_BuildMixerSlice to support platform-specific loudness tweaks.
-static volatile int16_t g_android_output_gain_boost = 256;
-
-void BAE_Android_SetOutputGainBoost(int16_t boost256)
-{
-    if (boost256 < 0) boost256 = 0;
-    if (boost256 > 512) boost256 = 512;
-    g_android_output_gain_boost = boost256;
-}
 #if defined(__ANDROID__)
 // forward declaration for callback (defined below)
 static void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *context);
@@ -840,22 +830,6 @@ static void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
         }
     }
 
-    // Optional post-mix output gain boost (Android-only). Applied after volume/balance.
-    if (g_os_bits == 16) {
-        int16_t boost = g_android_output_gain_boost;
-        if (boost != 256) {
-            int channels = channelsInt;
-            int totalSamples = g_bufferFrames * channels;
-            int16_t *p = buf;
-            for (int i = 0; i < totalSamples; ++i) {
-                int32_t v = (int32_t)p[i];
-                v = (v * (int32_t)boost) >> 8; // boost scaled by 256
-                if (v > 32767) v = 32767;
-                else if (v < -32768) v = -32768;
-                p[i] = (int16_t)v;
-            }
-        }
-    }
     if (gBufferQueue) {
         (*gBufferQueue)->Enqueue(gBufferQueue, buf, bytes);
     }
