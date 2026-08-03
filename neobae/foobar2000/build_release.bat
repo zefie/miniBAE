@@ -6,20 +6,30 @@ rem build_release.bat — production build of libneobae + foo_neobae
 rem
 rem Defaults match 32-bit foobar2000 (Win32 / x86).
 rem
-rem Optional env overrides:
-rem   ARCH=Win32|x64              (default Win32)
-rem   TOOLSET=v145                (default v145 = VS 2026; use v143 for VS 2022)
-rem   CONFIG=Release              (default Release)
-rem   BUILD_DIR=...               (optional; otherwise per-arch cmake tree)
+rem Usage:
+rem   build_release.bat [Win32|x64|x86]
+rem
+rem Optional env overrides (cmd.exe — NOT PowerShell's Set-Content alias):
+rem   set ARCH=Win32|x64          (default Win32)
+rem   set TOOLSET=v143            (default v143 = VS 2022; use v145 for VS 2026)
+rem   set CONFIG=Release
+rem   set BUILD_DIR=...
 rem
 rem Examples:
 rem   build_release.bat
-rem   set ARCH=x64 && build_release.bat
-rem   set TOOLSET=v143 && build_release.bat
+rem   build_release.bat x64
+rem   cmd /c "set ARCH=x64&& build_release.bat"
+rem   PowerShell:  $env:ARCH='x64'; .\build_release.bat
 rem =============================================================================
 
 set "SCRIPT_DIR=%~dp0"
 pushd "%SCRIPT_DIR%" >nul
+
+rem Positional arg wins (works from PowerShell: .\build_release.bat x64)
+rem Note: PowerShell "set ARCH=x64" is Set-Content, NOT an env var — use $env:ARCH or this arg.
+if /I "%~1"=="Win32" set "ARCH=Win32"
+if /I "%~1"=="x86"   set "ARCH=Win32"
+if /I "%~1"=="x64"   set "ARCH=x64"
 
 if not defined ARCH set "ARCH=Win32"
 if /I "%ARCH%"=="x86" set "ARCH=Win32"
@@ -55,7 +65,8 @@ echo.
 
 rem ----- 1) libneobae via CMake -----
 echo [1/3] Building libneobae ^(%ARCH%^)...
-call "%SCRIPT_DIR%build_libneobae.bat" %*
+rem Pass ARCH explicitly — nested setlocal would otherwise miss a PowerShell env slip.
+call "%SCRIPT_DIR%build_libneobae.bat" "%ARCH%"
 if errorlevel 1 (
   echo ERROR: libneobae build failed.
   popd >nul

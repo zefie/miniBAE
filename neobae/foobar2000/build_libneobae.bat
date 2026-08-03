@@ -5,14 +5,22 @@ rem Build libneobae.dll for the foobar2000 plugin (Windows / MSVC via CMake).
 rem Output is copied into neobae\foobar2000\lib\ for the MSVC foo_neobae project.
 rem
 rem Architecture (must match foo_neobae + your foobar2000.exe):
-rem   set ARCH=Win32   ^(32-bit foobar — default^)
-rem   set ARCH=x64     ^(64-bit foobar^)
+rem   build_libneobae.bat [Win32|x64|x86]
+rem   cmd:  set ARCH=Win32 ^| x64
+rem   PowerShell:  $env:ARCH='x64'; .\build_libneobae.bat
+rem                ^(plain "set ARCH=x64" does NOT work in PowerShell^)
 
 set "SCRIPT_DIR=%~dp0"
 rem Trailing backslash from %~dp0
 set "ROOT=%SCRIPT_DIR%..\.."
 for %%I in ("%ROOT%") do set "ROOT=%%~fI"
 set "LIB_OUT=%SCRIPT_DIR%lib"
+
+if not "%~1"=="" (
+  if /I "%~1"=="Win32" set "ARCH=%~1"
+  if /I "%~1"=="x86"   set "ARCH=Win32"
+  if /I "%~1"=="x64"   set "ARCH=%~1"
+)
 
 if not defined ARCH set "ARCH=Win32"
 if /I "%ARCH%"=="x86" set "ARCH=Win32"

@@ -21,6 +21,7 @@ neobae/foobar2000/lib/libneobae*
 neobae/foobar2000/bin
 neobae/foobar2000/Release
 neobae/foobar2000/Debug
+neobae/foobar2000/x64
 neobae/bin/
 neobae/out/
 neobae/.vscode/
