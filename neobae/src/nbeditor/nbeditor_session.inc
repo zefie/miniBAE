@@ -1,4 +1,4 @@
-/* Phase 1 Session / Song / Instrument Editor helpers — included inside NbEditorApp. */
+/* Session shell, Song Info, Instrument Editor, and export helpers — included inside NbEditorApp. */
 
     void DrawMainMenuBar()
     {
