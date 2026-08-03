@@ -376,7 +376,6 @@ if (g_bae.bank_loaded)
 }
 int lineY1 = statusBaseY + 20;
 int lineY2 = statusBaseY + 40;
-int lineY3 = statusBaseY + 60;
 
 // Current file
 draw_text(R, 20, lineY1, "File:", labelCol);

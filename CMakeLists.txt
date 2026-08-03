@@ -869,6 +869,8 @@ set(NEOBAE_SOURCES
   neobae/src/BAE_Source/Common/NewNewLZSS.c
   neobae/src/BAE_Source/Common/SampleTools.c
   neobae/src/BAE_Source/Common/X_API.c
+  neobae/src/BAE_Source/Common/X_Instruments.c
+  neobae/src/BAE_Source/Common/X_EditorTools.c
   neobae/src/BAE_Source/Common/X_Decompress.c
   neobae/src/BAE_Source/Common/X_IMA.c
   neobae/src/BAE_Source/Common/g711.c
@@ -916,7 +918,7 @@ if(BAE_ENABLE_LZMA)
 endif()
 
 if(BAE_ENABLE_RMF_EDITOR)
-  list(APPEND NEOBAE_SOURCES neobae/src/BAE_Source/Common/BAERmfEditor.c)
+  list(APPEND NEOBAE_SOURCES neobae/src/BAE_Source/Common/BAE_EditorAPI.c)
 endif()
 
 if(BAE_ENABLE_NATIVE_DLS)
@@ -2472,6 +2474,25 @@ if((MINGW OR MSVC) AND NEOBAE_RC_ENABLED)
         target_link_libraries(zefidi PRIVATE winmm setupapi imm32 version)
       endif()
     endif()
+
+    if(TARGET nbeditor)
+      if(MINGW)
+        target_link_options(nbeditor PRIVATE "-Wl,--subsystem,windows")
+      endif()
+      if(BAE_USING_SDL2)
+        target_link_libraries(nbeditor PRIVATE winmm setupapi imm32 version)
+      endif()
+    endif()
+
+    if(TARGET nbstudio)
+      if(MINGW)
+        target_link_options(nbstudio PRIVATE "-Wl,--subsystem,windows")
+      endif()
+      if(BAE_USING_SDL2)
+        target_link_libraries(nbstudio PRIVATE winmm setupapi imm32 version)
+      endif()
+    endif()    
+
 endif()
 
 if (BAE_USING_SDL2)
@@ -2513,7 +2534,13 @@ if (BAE_USING_SDL2)
   endif()
   if (TARGET zefidi)
     target_link_libraries(zefidi PRIVATE SDL2main SDL2)
-  endif()  
+  endif()
+  if (TARGET nbeditor)
+    target_link_libraries(nbstudio PRIVATE SDL2main SDL2)
+  endif()
+  if (TARGET nbstudio)
+    target_link_libraries(nbstudio PRIVATE SDL2main SDL2)
+  endif()
 endif()
 
 bae_apply_compile_definitions(neobae)

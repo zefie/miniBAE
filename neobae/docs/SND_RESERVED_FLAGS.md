@@ -27,7 +27,7 @@ typedef struct XSoundHeader3 {
 | `0x02`–`0x80` | *(free)* | — | Not yet allocated. |
 
 ### Who writes `XSOUND_OPUS_ROUNDTRIP_RESAMPLE`
-* **Save path** — `BAERmfEditor.c` → `BAERmfEditorDocument_Save`:
+* **Save path** — `BAE_EditorAPI.c` → `BAERmfEditorDocument_Save`:
   - When `sample->opusUseRoundTripResampling == TRUE`, the Opus encode loop
     spoofs `writeWaveform.sampledRate = 48000 << 16` before calling
     `XCreateSoundObjectFromData`, then calls `XSetSoundSampleRate` to restore
@@ -41,7 +41,7 @@ typedef struct XSoundHeader3 {
     `sampleRate` is saved before `XDecodeSampleData` overwrites it with
     48 000.  After decode the saved rate is restored in `info->rate` so the
     engine's mixer time-stretches correctly.
-* **Editor load path** — `BAERmfEditor.c` → `PV_AddEmbeddedSampleVariant`:
+* **Editor load path** — `BAE_EditorAPI.c` → `PV_AddEmbeddedSampleVariant`:
   - After constructing the `BAERmfEditorSample`, calls
     `XGetSoundOpusRoundTripFlag(sndCopy)` and stores the result in
     `sample->opusUseRoundTripResampling` so round-trip mode is preserved

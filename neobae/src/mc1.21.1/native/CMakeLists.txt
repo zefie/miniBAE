@@ -76,6 +76,8 @@ set(ENGINE_SRC
     ${BAE}/Common/NewNewLZSS.c
     ${BAE}/Common/SampleTools.c
     ${BAE}/Common/X_API.c
+    ${BAE}/Common/X_Instruments.c
+    ${BAE}/Common/X_EditorTools.c
     ${BAE}/Common/X_Decompress.c
     ${BAE}/Common/X_IMA.c
     ${BAE}/Common/X_LZMA.c

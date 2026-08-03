@@ -56,7 +56,7 @@
     <ClCompile Include="..\..\BAE_Source\Common\GenAudioStreams.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\BAE_Source\Common\BAERmfEditor.c">
+    <ClCompile Include="..\..\BAE_Source\Common\BAE_EditorAPI.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
     <ClCompile Include="..\..\BAE_Source\Common\GenCache.c">
@@ -132,6 +132,12 @@
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
     <ClCompile Include="..\..\BAE_Source\Common\X_API.c">
+      <Filter>Source Files\BAE Common</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\BAE_Source\Common\X_Instruments.c">
+      <Filter>Source Files\BAE Common</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\BAE_Source\Common\X_EditorTools.c">
       <Filter>Source Files\BAE Common</Filter>
     </ClCompile>
     <ClCompile Include="..\..\BAE_Source\Common\X_Decompress.c">
@@ -293,7 +299,13 @@
     <ClInclude Include="..\..\BAE_Source\Common\NeoBAE.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\BAE_Source\Common\BAERmfEditor.h">
+    <ClInclude Include="..\..\BAE_Source\Common\BAE_EditorAPI.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\BAE_Source\Common\X_Instruments.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\BAE_Source\Common\X_EditorTools.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\BAE_Source\Platform\BAE_API.h">

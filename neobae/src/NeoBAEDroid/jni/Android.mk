@@ -97,6 +97,8 @@ NEOBAE_SOURCES := \
 			Common/NewNewLZSS.c \
 			Common/SampleTools.c \
 			Common/X_API.c \
+			Common/X_Instruments.c \
+			Common/X_EditorTools.c \
 			Common/X_Decompress.c \
 			Common/X_IMA.c \
 			Common/X_LZMA.c \

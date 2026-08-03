@@ -2396,7 +2396,7 @@ XSoundFormat1*      header;
         }
 
         /* Low 16 bits encode a bitrate index; see PV_SubTypeToOpusBitrateIndex()
-         * in BAERmfEditor.c for the canonical mapping. */
+         * in BAE_EditorAPI.c for the canonical mapping. */
         switch (packedSubType & 0xFFFFU)
         {
         case 0: bitrate =  12000; break;  /* CS_OPUS_12K  */

@@ -374,6 +374,8 @@ SRC		+=	src/BAE_Source/Common/DriverTools.c \
 			src/BAE_Source/Common/NewNewLZSS.c \
 			src/BAE_Source/Common/SampleTools.c \
 			src/BAE_Source/Common/X_API.c \
+			src/BAE_Source/Common/X_Instruments.c \
+			src/BAE_Source/Common/X_EditorTools.c \
 			src/BAE_Source/Common/X_Decompress.c \
 			src/BAE_Source/Common/X_IMA.c \
 			src/BAE_Source/Common/g711.c \
@@ -488,11 +490,11 @@ ifneq ($(filter 1,$(MP3_ENC) $(MP3_DEC)),)
 	SRC += src/BAE_MPEG_Source_II/XMPEGFilesSun.c
 endif
 
-# RMF editing and creation API, used by NeoBAE Studio
+# RMF editing and creation API, used by NeoBAE Studio / nbeditor
 # This API enables numerous exports in the DLL and LIB
-# for interacting with the BAE system
+# for interacting with the BAE system (public header: BAE_EditorAPI.h)
 ifeq ($(CREATION_API),1)
-	SRC += src/BAE_Source/Common/BAERmfEditor.c
+	SRC += src/BAE_Source/Common/BAE_EditorAPI.c
 endif
 
 # Optional MP3 encoder integration

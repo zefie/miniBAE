@@ -14,9 +14,18 @@
  * You should have received a copy of the GNU Lesser General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
  */
-
+/*****************************************************************************/
+/*
+**  BAE_EditorAPI.c
+**
+**  RMF / bank Creation & Editor API implementation.
+**  Public declarations: BAE_EditorAPI.h (also included via NeoBAE.h).
+**  Formerly BAERmfEditor.c.
+*/
+/*****************************************************************************/
 
 #include "NeoBAE.h"
+#include "BAE_EditorAPI.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -25,6 +34,8 @@
 #include "X_API.h"
 #include "X_Formats.h"
 #include "X_Assert.h"
+#include "X_Instruments.h"
+#include "X_EditorTools.h"
 
 #if USE_MTHC_SUPPORT == TRUE
 #include "../../mthc/mthc_decomp.h"
@@ -5459,21 +5470,270 @@ static void PV_ClearInstrumentExts(BAERmfEditorDocument *document)
     document->instrumentExtCapacity = 0;
 }
 
-/* Parse an InstrumentResource blob into BAERmfEditorInstrumentExt.
- * Mirrors PV_GetEnvelopeData() from GenPatch.c but stores FOUR_CHAR (LONG) form
- * for ADSR flags, LFO destinations, and wave shapes (no translation). */
+/* Map XInstrumentData units into BAERmfEditorInstrumentExt unit fields. */
+static void PV_FillExtFromXInstrument(BAERmfEditorInstrumentExt *ext, XInstrumentData const *x)
+{
+    int32_t count;
+    int32_t count2;
+    bool haveVolumeADSR;
+
+    if (!ext || !x)
+    {
+        return;
+    }
+
+    haveVolumeADSR = FALSE;
+    for (count = 0; count < x->unitCount; count++)
+    {
+        XUnitData const *unit = &x->units[count];
+        switch (unit->unitType)
+        {
+            case INST_ADSR_ENVELOPE:
+            {
+                XEnvelopeData const *env = &unit->u.envelopeADSR;
+                int32_t stageCount = env->stageCount;
+                if (stageCount > EDITOR_MAX_ADSR_STAGES)
+                {
+                    stageCount = EDITOR_MAX_ADSR_STAGES;
+                }
+                ext->volumeADSR.stageCount = (uint32_t)stageCount;
+                for (count2 = 0; count2 < stageCount; count2++)
+                {
+                    ext->volumeADSR.stages[count2].level = env->level[count2];
+                    ext->volumeADSR.stages[count2].time = env->time[count2];
+                    ext->volumeADSR.stages[count2].flags = env->flags[count2];
+                }
+                haveVolumeADSR = TRUE;
+                break;
+            }
+
+            case INST_DEFAULT_MOD:
+                ext->hasDefaultMod = TRUE;
+                break;
+
+            case INST_REVERB_SEND:
+                ext->defaultReverbSend = (int16_t)unit->u.sendAmount;
+                break;
+
+            case INST_CHORUS_SEND:
+                ext->defaultChorusSend = (int16_t)unit->u.sendAmount;
+                break;
+
+            case INST_LOW_PASS_FILTER:
+                ext->LPF_frequency = unit->u.lpf.LPF_frequency;
+                ext->LPF_resonance = unit->u.lpf.LPF_resonance;
+                ext->LPF_lowpassAmount = unit->u.lpf.LPF_lowpassAmount;
+                break;
+
+            case INST_EXPONENTIAL_CURVE:
+                if (ext->curveCount >= EDITOR_MAX_CURVES)
+                {
+                    break;
+                }
+                {
+                    EditorCurve *pCurve = &ext->curves[ext->curveCount];
+                    XTieToData const *src = &unit->u.curve;
+                    int32_t curvePoints = src->curveCount;
+                    if (curvePoints > EDITOR_MAX_ADSR_STAGES)
+                    {
+                        curvePoints = EDITOR_MAX_ADSR_STAGES;
+                    }
+                    if (curvePoints > X_INSTRUMENT_MAX_CURVE_POINTS)
+                    {
+                        curvePoints = X_INSTRUMENT_MAX_CURVE_POINTS;
+                    }
+                    pCurve->tieFrom = (int32_t)src->tieFrom;
+                    pCurve->tieTo = (int32_t)src->tieTo;
+                    pCurve->curveCount = (int16_t)curvePoints;
+                    for (count2 = 0; count2 < curvePoints; count2++)
+                    {
+                        pCurve->from_Value[count2] = src->from_Value[count2];
+                        pCurve->to_Scalar[count2] = src->to_Scalar[count2];
+                    }
+                    ext->curveCount++;
+                }
+                break;
+
+            case INST_PITCH_LFO:
+            case INST_VOLUME_LFO:
+            case INST_STEREO_PAN_LFO:
+            case INST_STEREO_PAN_NAME2:
+            case INST_LOW_PASS_AMOUNT:
+            case INST_LPF_DEPTH:
+            case INST_LPF_FREQUENCY:
+                if (ext->lfoCount >= EDITOR_MAX_LFOS)
+                {
+                    break;
+                }
+                {
+                    EditorLFO *pLFO = &ext->lfos[ext->lfoCount];
+                    XLFOData const *src = &unit->u.lfo;
+                    int32_t stageCount = src->envelopeLFO.stageCount;
+                    if (stageCount > EDITOR_MAX_ADSR_STAGES)
+                    {
+                        stageCount = EDITOR_MAX_ADSR_STAGES;
+                    }
+                    pLFO->destination = (int32_t)unit->unitType;
+                    pLFO->period = src->period;
+                    pLFO->waveShape = src->waveShape;
+                    pLFO->DC_feed = src->DC_feed;
+                    pLFO->level = src->depth;
+                    pLFO->adsr.stageCount = (uint32_t)stageCount;
+                    for (count2 = 0; count2 < stageCount; count2++)
+                    {
+                        pLFO->adsr.stages[count2].level = src->envelopeLFO.level[count2];
+                        pLFO->adsr.stages[count2].time = src->envelopeLFO.time[count2];
+                        pLFO->adsr.stages[count2].flags = src->envelopeLFO.flags[count2];
+                    }
+                    ext->lfoCount++;
+                }
+                break;
+
+            default:
+                break;
+        }
+    }
+
+    if (!haveVolumeADSR)
+    {
+        /* Default ADSR: one TERMINATE stage at VOLUME_RANGE (4096) */
+        ext->volumeADSR.stageCount = 1;
+        ext->volumeADSR.stages[0].level = VOLUME_RANGE;
+        ext->volumeADSR.stages[0].time = 0;
+        ext->volumeADSR.stages[0].flags = ADSR_TERMINATE_LONG;
+    }
+}
+
+/* Build XInstrumentData from Ext unit fields (no edit padding). */
+static void PV_FillXFromInstrumentExt(XInstrumentData *x, BAERmfEditorInstrumentExt const *ext)
+{
+    uint32_t i;
+    int32_t count2;
+    int32_t unitIndex;
+
+    if (!x || !ext)
+    {
+        return;
+    }
+
+    XSetMemory(x, (int32_t)sizeof(*x), 0);
+    unitIndex = 0;
+
+    if (ext->volumeADSR.stageCount > 0)
+    {
+        XEnvelopeData *env = &x->units[unitIndex].u.envelopeADSR;
+        int32_t stageCount = (int32_t)ext->volumeADSR.stageCount;
+        if (stageCount > ADSR_STAGES)
+        {
+            stageCount = ADSR_STAGES;
+        }
+        x->units[unitIndex].unitType = INST_ADSR_ENVELOPE;
+        x->units[unitIndex].unitID = (uint32_t)unitIndex;
+        env->stageCount = stageCount;
+        for (count2 = 0; count2 < stageCount; count2++)
+        {
+            env->level[count2] = ext->volumeADSR.stages[count2].level;
+            env->time[count2] = ext->volumeADSR.stages[count2].time;
+            env->flags[count2] = ext->volumeADSR.stages[count2].flags;
+        }
+        unitIndex++;
+    }
+
+    if (ext->hasDefaultMod)
+    {
+        x->units[unitIndex].unitType = INST_DEFAULT_MOD;
+        x->units[unitIndex].unitID = (uint32_t)unitIndex;
+        x->units[unitIndex].u.useDefaultModwheelAction = TRUE;
+        unitIndex++;
+    }
+
+    if (ext->LPF_frequency != 0 || ext->LPF_resonance != 0 || ext->LPF_lowpassAmount != 0)
+    {
+        x->units[unitIndex].unitType = INST_LOW_PASS_FILTER;
+        x->units[unitIndex].unitID = (uint32_t)unitIndex;
+        x->units[unitIndex].u.lpf.LPF_frequency = ext->LPF_frequency;
+        x->units[unitIndex].u.lpf.LPF_resonance = ext->LPF_resonance;
+        x->units[unitIndex].u.lpf.LPF_lowpassAmount = ext->LPF_lowpassAmount;
+        unitIndex++;
+    }
+
+    if (ext->defaultReverbSend > 0)
+    {
+        x->units[unitIndex].unitType = INST_REVERB_SEND;
+        x->units[unitIndex].unitID = (uint32_t)unitIndex;
+        x->units[unitIndex].u.sendAmount = (int32_t)ext->defaultReverbSend;
+        unitIndex++;
+    }
+
+    if (ext->defaultChorusSend > 0)
+    {
+        x->units[unitIndex].unitType = INST_CHORUS_SEND;
+        x->units[unitIndex].unitID = (uint32_t)unitIndex;
+        x->units[unitIndex].u.sendAmount = (int32_t)ext->defaultChorusSend;
+        unitIndex++;
+    }
+
+    for (i = 0; i < ext->lfoCount && unitIndex < 256; i++)
+    {
+        EditorLFO const *lfo = &ext->lfos[i];
+        XLFOData *dst = &x->units[unitIndex].u.lfo;
+        int32_t stageCount = (int32_t)lfo->adsr.stageCount;
+        if (stageCount > ADSR_STAGES)
+        {
+            stageCount = ADSR_STAGES;
+        }
+        x->units[unitIndex].unitType = (XUnitType)lfo->destination;
+        x->units[unitIndex].unitID = (uint32_t)unitIndex;
+        dst->envelopeLFO.stageCount = stageCount;
+        for (count2 = 0; count2 < stageCount; count2++)
+        {
+            dst->envelopeLFO.level[count2] = lfo->adsr.stages[count2].level;
+            dst->envelopeLFO.time[count2] = lfo->adsr.stages[count2].time;
+            dst->envelopeLFO.flags[count2] = lfo->adsr.stages[count2].flags;
+        }
+        dst->period = lfo->period;
+        dst->waveShape = lfo->waveShape;
+        dst->DC_feed = lfo->DC_feed;
+        dst->depth = lfo->level;
+        unitIndex++;
+    }
+
+    for (i = 0; i < ext->curveCount && unitIndex < 256; i++)
+    {
+        EditorCurve const *curve = &ext->curves[i];
+        XTieToData *dst = &x->units[unitIndex].u.curve;
+        int32_t curvePoints = curve->curveCount;
+        if (curvePoints > X_INSTRUMENT_MAX_CURVE_POINTS)
+        {
+            curvePoints = X_INSTRUMENT_MAX_CURVE_POINTS;
+        }
+        if (curvePoints > EDITOR_MAX_ADSR_STAGES)
+        {
+            curvePoints = EDITOR_MAX_ADSR_STAGES;
+        }
+        x->units[unitIndex].unitType = INST_EXPONENTIAL_CURVE;
+        x->units[unitIndex].unitID = (uint32_t)unitIndex;
+        dst->tieFrom = curve->tieFrom;
+        dst->tieTo = curve->tieTo;
+        dst->curveCount = (int16_t)curvePoints;
+        for (count2 = 0; count2 < curvePoints; count2++)
+        {
+            dst->from_Value[count2] = curve->from_Value[count2];
+            dst->to_Scalar[count2] = curve->to_Scalar[count2];
+        }
+        unitIndex++;
+    }
+
+    x->unitCount = unitIndex;
+    x->unitBlockPresent = (unitIndex > 0) ? TRUE : FALSE;
+}
+
+/* Parse an InstrumentResource blob into BAERmfEditorInstrumentExt via
+ * XCreateXInstrumentEx (lossless; no edit padding). */
 static void PV_ParseExtendedInstData(XPTR instData, int32_t instSize, BAERmfEditorInstrumentExt *ext)
 {
     unsigned char const *pBase;
-    unsigned char const *pEnd;
-    unsigned char flags1;
-    int16_t keySplitCount;
-    unsigned char const *pData;
-    unsigned char const *pUnit;
-    int32_t count, remaining;
-    uint16_t data;
-    int32_t unitCount, unitType, unitSubCount;
-    int32_t count2;
+    XInstrumentData *x;
 
     XSetMemory(ext, (int32_t)sizeof(*ext), 0);
 
@@ -5483,391 +5743,59 @@ static void PV_ParseExtendedInstData(XPTR instData, int32_t instSize, BAERmfEdit
     }
 
     pBase = (unsigned char const *)instData;
-    pEnd = pBase + instSize;
 
     /* Read header fields via byte offsets (same as save path enum) */
     ext->panPlacement = (char)pBase[4];
     ext->flags1 = pBase[5];
     ext->flags2 = pBase[6];
     ext->midiRootKey = (int16_t)XGetShort((void *)(pBase + 2));
+    ext->miscParameter1 = (int16_t)XGetShort((void *)(pBase + 8));
     ext->miscParameter2 = (int16_t)XGetShort((void *)(pBase + 10));
-    flags1 = ext->flags1;
-    keySplitCount = (int16_t)XGetShort((void *)(pBase + 12));
 
-    /* Default ADSR: one TERMINATE stage at VOLUME_RANGE (4096) */
+    /* Default ADSR until units override it */
     ext->volumeADSR.stageCount = 1;
     ext->volumeADSR.stages[0].level = VOLUME_RANGE;
     ext->volumeADSR.stages[0].time = 0;
     ext->volumeADSR.stages[0].flags = ADSR_TERMINATE_LONG;
 
-    if (!(flags1 & ZBF_extendedFormat))
-    {
-        /* No extended data in this INST */
-        return;
-    }
-
-    /* Walk past key split data to find the 0x8000 tremolo end marker */
-    pData = pBase + 12 + 2 + (keySplitCount * EDITOR_KEY_SPLIT_FILE_SIZE);
-    remaining = (int32_t)(pEnd - pData);
-
-    pUnit = NULL;
-    for (count = 0; count < remaining - 1; count++)
-    {
-        data = (uint16_t)XGetShort((void *)&pData[count]);
-        if (data == 0x8000)
-        {
-            int32_t strLen1, strLen2;
-            count += 4;  /* skip past end token and extra word */
-            if (count >= remaining) break;
-            strLen1 = (int32_t)pData[count] + 1;       /* first pascal string length */
-            if (count + strLen1 >= remaining) break;
-            strLen2 = (int32_t)pData[count + strLen1] + 1; /* second pascal string length */
-            if (count + strLen1 + strLen2 > remaining) break;
-            pUnit = &pData[count + strLen1 + strLen2];
-            break;
-        }
-    }
-
-    if (!pUnit || pUnit + 13 > pEnd)
+    if (!(ext->flags1 & ZBF_extendedFormat))
     {
         return;
     }
 
-    ext->hasExtendedData = TRUE;
-    pUnit += 12;  /* reserved global space */
-
-    unitCount = *pUnit;
-    pUnit++;
-
-    if (unitCount <= 0)
+    x = XCreateXInstrumentEx((InstrumentResource *)instData, (uint32_t)instSize, FALSE);
+    if (!x)
     {
         return;
     }
 
-    for (count = 0; count < unitCount; count++)
+    if (x->unitBlockPresent)
     {
-        if (pUnit + 4 > pEnd)
-        {
-            break;
-        }
-        unitType = (int32_t)(XGetLong((void *)pUnit) & 0x5F5F5F5F);
-        pUnit += 4;
-
-        switch (unitType)
-        {
-            case INST_EXPONENTIAL_CURVE:
-                if (ext->curveCount >= EDITOR_MAX_CURVES)
-                {
-                    goto bail;
-                }
-                if (pUnit + 8 > pEnd) goto bail;
-                {
-                    EditorCurve *pCurve = &ext->curves[ext->curveCount];
-                    ext->curveCount++;
-                    pCurve->tieFrom = (int32_t)(XGetLong((void *)pUnit) & 0x5F5F5F5F);
-                    pUnit += 4;
-                    pCurve->tieTo = (int32_t)(XGetLong((void *)pUnit) & 0x5F5F5F5F);
-                    pUnit += 4;
-                    if (pUnit >= pEnd) goto bail;
-                    unitSubCount = *pUnit++;
-                    if (unitSubCount > EDITOR_MAX_ADSR_STAGES) goto bail;
-                    pCurve->curveCount = (int16_t)unitSubCount;
-                    for (count2 = 0; count2 < unitSubCount; count2++)
-                    {
-                        if (pUnit + 3 > pEnd) goto bail;
-                        pCurve->from_Value[count2] = *pUnit++;
-                        pCurve->to_Scalar[count2] = (int16_t)XGetShort((void *)pUnit);
-                        pUnit += 2;
-                    }
-                }
-                break;
-
-            case INST_ADSR_ENVELOPE:
-                if (pUnit >= pEnd) goto bail;
-                unitSubCount = *pUnit++;
-                if (unitSubCount > EDITOR_MAX_ADSR_STAGES) goto bail;
-                ext->volumeADSR.stageCount = (uint32_t)unitSubCount;
-                for (count2 = 0; count2 < unitSubCount; count2++)
-                {
-                    if (pUnit + 12 > pEnd) goto bail;
-                    ext->volumeADSR.stages[count2].level = (int32_t)XGetLong((void *)pUnit);
-                    pUnit += 4;
-                    ext->volumeADSR.stages[count2].time = (int32_t)XGetLong((void *)pUnit);
-                    pUnit += 4;
-                    ext->volumeADSR.stages[count2].flags = (int32_t)(XGetLong((void *)pUnit) & 0x5F5F5F5F);
-                    pUnit += 4;
-                }
-                break;
-
-            case INST_LOW_PASS_FILTER:
-                if (pUnit + 12 > pEnd) goto bail;
-                ext->LPF_frequency = (int32_t)XGetLong((void *)pUnit);
-                pUnit += 4;
-                ext->LPF_resonance = (int32_t)XGetLong((void *)pUnit);
-                pUnit += 4;
-                ext->LPF_lowpassAmount = (int32_t)XGetLong((void *)pUnit);
-                pUnit += 4;
-                break;
-
-            case INST_DEFAULT_MOD:
-                /* Just a flag, no data follows */
-                ext->hasDefaultMod = TRUE;
-                break;
-
-            case INST_REVERB_SEND:
-                if (pUnit + 4 > pEnd) goto bail;
-                ext->defaultReverbSend = (int16_t)XGetLong((void *)pUnit);
-                pUnit += 4;
-                break;
-
-            case INST_CHORUS_SEND:
-                if (pUnit + 4 > pEnd) goto bail;
-                ext->defaultChorusSend = (int16_t)XGetLong((void *)pUnit);
-                pUnit += 4;
-                break;
-
-            /* LFO types */
-            case INST_PITCH_LFO:
-            case INST_VOLUME_LFO:
-            case INST_STEREO_PAN_LFO:
-            case INST_STEREO_PAN_NAME2:
-            case INST_LOW_PASS_AMOUNT:
-            case INST_LPF_DEPTH:
-            case INST_LPF_FREQUENCY:
-                if (ext->lfoCount >= EDITOR_MAX_LFOS) goto bail;
-                if (pUnit >= pEnd) goto bail;
-                unitSubCount = *pUnit++;
-                if (unitSubCount > EDITOR_MAX_ADSR_STAGES) goto bail;
-                {
-                    EditorLFO *pLFO = &ext->lfos[ext->lfoCount];
-                    pLFO->destination = unitType;  /* already LONG form */
-                    pLFO->adsr.stageCount = (uint32_t)unitSubCount;
-                    for (count2 = 0; count2 < unitSubCount; count2++)
-                    {
-                        if (pUnit + 12 > pEnd) goto bail;
-                        pLFO->adsr.stages[count2].level = (int32_t)XGetLong((void *)pUnit);
-                        pUnit += 4;
-                        pLFO->adsr.stages[count2].time = (int32_t)XGetLong((void *)pUnit);
-                        pUnit += 4;
-                        pLFO->adsr.stages[count2].flags = (int32_t)(XGetLong((void *)pUnit) & 0x5F5F5F5F);
-                        pUnit += 4;
-                    }
-                    if (pUnit + 16 > pEnd) goto bail;
-                    pLFO->period = (int32_t)XGetLong((void *)pUnit);
-                    pUnit += 4;
-                    pLFO->waveShape = (int32_t)XGetLong((void *)pUnit);
-                    pUnit += 4;
-                    pLFO->DC_feed = (int32_t)XGetLong((void *)pUnit);
-                    pUnit += 4;
-                    pLFO->level = (int32_t)XGetLong((void *)pUnit);
-                    pUnit += 4;
-                    ext->lfoCount++;
-                }
-                break;
-
-            default:
-                /* Unknown unit type - can't safely skip (unknown size), bail */
-                goto bail;
-        }
+        ext->hasExtendedData = TRUE;
+        PV_FillExtFromXInstrument(ext, x);
     }
 
-bail:
-    return;
+    XDisposePtr((XPTR)x);
 }
 
-/* Serialize the extended instrument data into a byte buffer that can be appended
- * after the INST header + key splits + tremolo tail. Returns allocated buffer
- * (caller must XDisposePtr) and writes size to *outSize. Returns NULL on empty. */
+/* Serialize extended units via XSerializeInstrumentUnits.
+ * Uses 10 reserved bytes: caller appends after tremolo/name/descriptorFlags,
+ * and the INST parser treats descriptorFlags(2) + these 10 as the 12-byte reserved. */
 static XPTR PV_SerializeExtendedInstTail(BAERmfEditorInstrumentExt const *ext, int32_t *outSize)
 {
-    /* Compute needed size:
-     * 12 reserved + 1 unitCount
-     * + ADSR: 4 tag + 1 count + stageCount*12
-     * + LPF: 4 tag + 12
-     * + per LFO: 4 tag + 1 count + stageCount*12 + 16
-     * + per Curve: 4 tag + 4+4 + 1 count + curveCount*3
-     */
-    int32_t size;
-    int32_t unitCount;
-    uint32_t i;
-    unsigned char *buf;
-    unsigned char *p;
+    XInstrumentData x;
 
-    *outSize = 0;
-    unitCount = 0;
-    /* 10 reserved bytes (not 12): the parser navigates to the descriptorFlags
-     * position (2 bytes before our tail) and reads 12 bytes as "reserved global".
-     * Those 2 descriptorFlags bytes + our 10 reserved bytes = 12 total. */
-    size = 10 + 1;  /* reserved + unitCount byte */
-
-    /* Always write ADSR if there are stages */
-    if (ext->volumeADSR.stageCount > 0)
+    if (!ext || !outSize)
     {
-        size += 4 + 1 + (int32_t)(ext->volumeADSR.stageCount * 12);
-        unitCount++;
-    }
-
-    /* INST_DEFAULT_MOD: just a 4-byte tag, no payload */
-    if (ext->hasDefaultMod)
-    {
-        size += 4;
-        unitCount++;
-    }
-
-    /* LPF if any value is non-zero */
-    if (ext->LPF_frequency != 0 || ext->LPF_resonance != 0 || ext->LPF_lowpassAmount != 0)
-    {
-        size += 4 + 12;
-        unitCount++;
-    }
-
-    if (ext->defaultReverbSend > 0)
-    {
-        size += 4 + 4;
-        unitCount++;
-    }
-
-    if (ext->defaultChorusSend > 0)
-    {
-        size += 4 + 4;
-        unitCount++;
-    }
-
-    /* LFOs */
-    for (i = 0; i < ext->lfoCount; i++)
-    {
-        size += 4 + 1 + (int32_t)(ext->lfos[i].adsr.stageCount * 12) + 16;
-        unitCount++;
-    }
-
-    /* Curves */
-    for (i = 0; i < ext->curveCount; i++)
-    {
-        size += 4 + 4 + 4 + 1 + (int32_t)(ext->curves[i].curveCount * 3);
-        unitCount++;
-    }
-
-    if (unitCount == 0)
-    {
+        if (outSize)
+        {
+            *outSize = 0;
+        }
         return NULL;
     }
 
-    buf = (unsigned char *)XNewPtr(size);
-    if (!buf)
-    {
-        return NULL;
-    }
-    XSetMemory(buf, size, 0);
-    p = buf;
-
-    /* 10 bytes reserved global (2 from descriptorFlags + 10 here = 12 for the parser) */
-    p += 10;
-
-    /* unit count */
-    *p++ = (unsigned char)unitCount;
-
-    /* ADSR envelope */
-    if (ext->volumeADSR.stageCount > 0)
-    {
-        XPutLong(p, (uint32_t)INST_ADSR_ENVELOPE);
-        p += 4;
-        *p++ = (unsigned char)ext->volumeADSR.stageCount;
-        for (i = 0; i < ext->volumeADSR.stageCount; i++)
-        {
-            XPutLong(p, (uint32_t)ext->volumeADSR.stages[i].level);
-            p += 4;
-            XPutLong(p, (uint32_t)ext->volumeADSR.stages[i].time);
-            p += 4;
-            XPutLong(p, (uint32_t)ext->volumeADSR.stages[i].flags);
-            p += 4;
-        }
-    }
-
-    /* INST_DEFAULT_MOD (disables auto mod-wheel curve) */
-    if (ext->hasDefaultMod)
-    {
-        XPutLong(p, (uint32_t)INST_DEFAULT_MOD);
-        p += 4;
-    }
-
-    /* LPF */
-    if (ext->LPF_frequency != 0 || ext->LPF_resonance != 0 || ext->LPF_lowpassAmount != 0)
-    {
-        XPutLong(p, (uint32_t)INST_LOW_PASS_FILTER);
-        p += 4;
-        XPutLong(p, (uint32_t)ext->LPF_frequency);
-        p += 4;
-        XPutLong(p, (uint32_t)ext->LPF_resonance);
-        p += 4;
-        XPutLong(p, (uint32_t)ext->LPF_lowpassAmount);
-        p += 4;
-    }
-
-    if (ext->defaultReverbSend > 0)
-    {
-        XPutLong(p, (uint32_t)INST_REVERB_SEND);
-        p += 4;
-        XPutLong(p, (uint32_t)ext->defaultReverbSend);
-        p += 4;
-    }
-
-    if (ext->defaultChorusSend > 0)
-    {
-        XPutLong(p, (uint32_t)INST_CHORUS_SEND);
-        p += 4;
-        XPutLong(p, (uint32_t)ext->defaultChorusSend);
-        p += 4;
-    }
-
-    /* LFOs */
-    for (i = 0; i < ext->lfoCount; i++)
-    {
-        uint32_t j;
-        EditorLFO const *lfo = &ext->lfos[i];
-        XPutLong(p, (uint32_t)lfo->destination);
-        p += 4;
-        *p++ = (unsigned char)lfo->adsr.stageCount;
-        for (j = 0; j < lfo->adsr.stageCount; j++)
-        {
-            XPutLong(p, (uint32_t)lfo->adsr.stages[j].level);
-            p += 4;
-            XPutLong(p, (uint32_t)lfo->adsr.stages[j].time);
-            p += 4;
-            XPutLong(p, (uint32_t)lfo->adsr.stages[j].flags);
-            p += 4;
-        }
-        XPutLong(p, (uint32_t)lfo->period);
-        p += 4;
-        XPutLong(p, (uint32_t)lfo->waveShape);
-        p += 4;
-        XPutLong(p, (uint32_t)lfo->DC_feed);
-        p += 4;
-        XPutLong(p, (uint32_t)lfo->level);
-        p += 4;
-    }
-
-    /* Curves */
-    for (i = 0; i < ext->curveCount; i++)
-    {
-        int32_t j;
-        EditorCurve const *curve = &ext->curves[i];
-        XPutLong(p, (uint32_t)INST_EXPONENTIAL_CURVE);
-        p += 4;
-        XPutLong(p, (uint32_t)curve->tieFrom);
-        p += 4;
-        XPutLong(p, (uint32_t)curve->tieTo);
-        p += 4;
-        *p++ = (unsigned char)curve->curveCount;
-        for (j = 0; j < curve->curveCount; j++)
-        {
-            *p++ = curve->from_Value[j];
-            XPutShort(p, (uint16_t)curve->to_Scalar[j]);
-            p += 2;
-        }
-    }
-
-    *outSize = size;
-    return (XPTR)buf;
+    PV_FillXFromInstrumentExt(&x, ext);
+    return XSerializeInstrumentUnits(&x, 10, outSize);
 }
 
 /* Extract INST + SND resources from an open RMF resource file and add them
@@ -6813,12 +6741,24 @@ static BAEResult PV_EncodeMidiForResourceType(XResourceType resourceType,
         (void)isZmf;
         compType = X_RAW;
 #endif
-        compressedSize = XCompressPtr(&encoded,
-                                      (XPTR)plainMidi->data,
-                                      plainMidi->size,
-                                      compType,
-                                      NULL,
-                                      NULL);
+        if (resourceType == ID_ECMI)
+        {
+            compressedSize = XCompressAndEncryptWithType(&encoded,
+                                                         (XPTR)plainMidi->data,
+                                                         plainMidi->size,
+                                                         compType,
+                                                         NULL,
+                                                         NULL);
+        }
+        else
+        {
+            compressedSize = XCompressPtr(&encoded,
+                                          (XPTR)plainMidi->data,
+                                          plainMidi->size,
+                                          compType,
+                                          NULL,
+                                          NULL);
+        }
         if (compressedSize <= 0 || !encoded)
         {
             if (encoded)
@@ -6831,10 +6771,6 @@ static BAEResult PV_EncodeMidiForResourceType(XResourceType resourceType,
         {
             XDisposePtr(encoded);
             return BAE_BAD_FILE;
-        }
-        if (resourceType == ID_ECMI)
-        {
-            XEncryptData(encoded, (uint32_t)compressedSize);
         }
         *outData = encoded;
         *outSize = compressedSize;
@@ -9568,17 +9504,28 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                     }
                 }
 
-                XSetMemory(&instrument, sizeof(instrument), 0);
-                XPutShort(&instrument.sndResourceID, (uint16_t)sampleSndIDs[leaderIndex]);
+                {
+                    InstrumentResource *templateInst =
+                        XNewInstrumentResource((XShortResourceID)sampleSndIDs[leaderIndex]);
+                    if (!templateInst)
+                    {
+                        if (extTail)
+                        {
+                            XDisposePtr(extTail);
+                        }
+                        XDisposePtr((XPTR)sampleSndIDs);
+                        XDisposePtr((XPTR)sampleInstIDs);
+                        return BAE_MEMORY_ERR;
+                    }
+                    XBlockMove(templateInst, &instrument, (int32_t)sizeof(instrument));
+                    XDisposeInstrumentResource(templateInst);
+                }
                 XPutShort(&instrument.midiRootKey, extForInst ? extForInst->midiRootKey : 60);
                 instrument.panPlacement = extForInst ? extForInst->panPlacement : 0;
                 instrument.flags1 = writeFlags1;
                 instrument.flags2 = writeFlags2;
                 XPutShort(&instrument.miscParameter1, (uint16_t)headerMiscParam1);
                 XPutShort(&instrument.miscParameter2, (uint16_t)headerMiscParam2);
-                XPutShort(&instrument.keySplitCount, 0);
-                XPutShort(&instrument.tremoloCount, 0);
-                XPutShort(&instrument.tremoloEnd, 0x8000);
 
                 if (extTail && extTailSize > 0)
                 {
@@ -17657,8 +17604,7 @@ BAEResult BAERmfEditorBank_GrowInstrumentSampleSlots(BAEBankToken bankToken,
 {
     enum
     {
-        kInstHeaderMinSize = 14,
-        kInstKeySplitSize = 8
+        kInstHeaderMinSize = 14
     };
     XFILE bankFile;
     XLongResourceID instID;
@@ -17667,13 +17613,13 @@ BAEResult BAERmfEditorBank_GrowInstrumentSampleSlots(BAEBankToken bankToken,
     char instName[256];
     int16_t splitCount;
     uint32_t currentCount;
-    uint32_t newSplitCount;
-    int32_t oldTailOffset;
-    int32_t oldTailSize;
-    int32_t newSize;
-    unsigned char *newInst;
+    InstrumentResource *grown;
+    int16_t howMany;
+    uint32_t startInit;
+    uint32_t i;
     unsigned char defaultRoot;
     int16_t defaultSplitVolume;
+    KeySplit newSplit;
     BAEResult replaceResult;
 
     if (!bankToken || desiredSampleCount == 0)
@@ -17711,36 +17657,36 @@ BAEResult BAERmfEditorBank_GrowInstrumentSampleSlots(BAEBankToken bankToken,
         return BAE_NO_ERROR;
     }
 
-    oldTailOffset = kInstHeaderMinSize + (splitCount * kInstKeySplitSize);
-    if (instSize < oldTailOffset)
+    if (splitCount > 0)
     {
-        XDisposePtr(instData);
-        return BAE_BAD_FILE;
+        howMany = (int16_t)(desiredSampleCount - (uint32_t)splitCount);
+        grown = XAddKeySplit((InstrumentResource *)instData, howMany);
+        startInit = (uint32_t)splitCount;
     }
-    oldTailSize = instSize - oldTailOffset;
-    newSplitCount = desiredSampleCount;
-    newSize = kInstHeaderMinSize + ((int32_t)newSplitCount * kInstKeySplitSize) + oldTailSize;
+    else
+    {
+        /* Convert legacy non-split INST to split form, then grow to desired count. */
+        howMany = (int16_t)desiredSampleCount;
+        grown = XAddKeySplit((InstrumentResource *)instData, howMany);
+        startInit = 0;
+    }
 
-    newInst = (unsigned char *)XNewPtr(newSize);
-    if (!newInst)
+    if (!grown)
     {
         XDisposePtr(instData);
         return BAE_MEMORY_ERR;
     }
-    XSetMemory(newInst, newSize, 0);
 
-    XBlockMove(instData, newInst, kInstHeaderMinSize);
-
-    if (splitCount > 0)
+    defaultRoot = (unsigned char)XGetShort((unsigned char *)grown + 2);
+    defaultSplitVolume = (int16_t)XGetShort((unsigned char *)grown + 10);
+    if (defaultSplitVolume == 0)
     {
-        XBlockMove((unsigned char *)instData + kInstHeaderMinSize,
-                   newInst + kInstHeaderMinSize,
-                   splitCount * kInstKeySplitSize);
+        defaultSplitVolume = 100;
     }
-    else
+
+    if (splitCount == 0)
     {
-        /* Convert legacy non-split INST to split form with slot 0 preserving old values. */
-        unsigned char *split0 = newInst + kInstHeaderMinSize;
+        /* Slot 0 preserves legacy header sample mapping. */
         XShortResourceID baseSnd = (XShortResourceID)XGetShort((unsigned char *)instData + 0);
         int16_t baseRoot = (int16_t)XGetShort((unsigned char *)instData + 2);
         int16_t miscParam1 = (int16_t)XGetShort((unsigned char *)instData + 8);
@@ -17755,50 +17701,43 @@ BAEResult BAERmfEditorBank_GrowInstrumentSampleSlots(BAEBankToken bankToken,
                 splitRoot = miscParam1;
             }
         }
-        split0[0] = 0;
-        split0[1] = 127;
-        XPutShort(split0 + 2, (uint16_t)baseSnd);
-        XPutShort(split0 + 4, (uint16_t)splitRoot);
-        XPutShort(split0 + 6, (uint16_t)baseVolume);
+
+        XSetMemory(&newSplit, (int32_t)sizeof(newSplit), 0);
+        newSplit.lowMidi = 0;
+        newSplit.highMidi = 127;
+        newSplit.sndResourceID = baseSnd;
+        newSplit.miscParameter1 = splitRoot;
+        newSplit.miscParameter2 = baseVolume;
+        XSetKeySplitFromPtr(grown, 0, &newSplit);
+        startInit = 1;
     }
 
-    defaultRoot = (unsigned char)XGetShort(newInst + 2);
-    defaultSplitVolume = (int16_t)XGetShort(newInst + 10);
-    if (defaultSplitVolume == 0)
+    for (i = startInit; i < desiredSampleCount; ++i)
     {
-        defaultSplitVolume = 100;
+        XSetMemory(&newSplit, (int32_t)sizeof(newSplit), 0);
+        newSplit.lowMidi = 0;
+        newSplit.highMidi = 127;
+        newSplit.sndResourceID = 0;
+        newSplit.miscParameter1 = (int16_t)defaultRoot;
+        newSplit.miscParameter2 = defaultSplitVolume;
+        XSetKeySplitFromPtr(grown, (int16_t)i, &newSplit);
     }
 
-    {
-        uint32_t i;
-        uint32_t start = (splitCount > 0) ? (uint32_t)splitCount : 1u;
-        for (i = start; i < newSplitCount; ++i)
-        {
-            unsigned char *splitPtr = newInst + kInstHeaderMinSize + ((int32_t)i * kInstKeySplitSize);
-            splitPtr[0] = 0;
-            splitPtr[1] = 127;
-            XPutShort(splitPtr + 2, 0);
-            XPutShort(splitPtr + 4, (uint16_t)defaultRoot);
-            XPutShort(splitPtr + 6, (uint16_t)defaultSplitVolume);
-        }
-    }
-
-    XBlockMove((unsigned char *)instData + oldTailOffset,
-               newInst + kInstHeaderMinSize + ((int32_t)newSplitCount * kInstKeySplitSize),
-               oldTailSize);
-
-    XPutShort(newInst + 12, (uint16_t)newSplitCount);
     /* Keep header sndResourceID aligned with split 0 for compatibility. */
-    XPutShort(newInst + 0, (uint16_t)XGetShort(newInst + kInstHeaderMinSize + 2));
+    {
+        KeySplit split0;
+        XGetKeySplitFromPtr(grown, 0, &split0);
+        XPutShort((unsigned char *)grown + 0, (uint16_t)split0.sndResourceID);
+    }
 
     replaceResult = PV_BankReplaceResource(bankFile,
                                            ID_INST,
                                            instID,
                                            instName,
-                                           newInst,
-                                           newSize);
+                                           grown,
+                                           XGetPtrSize((XPTR)grown));
 
-    XDisposePtr(newInst);
+    XDisposePtr((XPTR)grown);
     XDisposePtr(instData);
     return replaceResult;
 }
@@ -17850,11 +17789,9 @@ BAEResult BAERmfEditorBank_DeleteInstrumentSample(BAEBankToken bankToken,
     removedSndID = 0;
     if (splitCount > 0)
     {
-        int32_t oldTailOffset;
-        int32_t oldTailSize;
+        InstrumentResource *shrunk;
+        KeySplit removedSplit;
         int16_t newSplitCount;
-        int32_t newSize;
-        unsigned char *newInst;
 
         if (sampleIndex >= (uint32_t)splitCount)
         {
@@ -17862,63 +17799,35 @@ BAEResult BAERmfEditorBank_DeleteInstrumentSample(BAEBankToken bankToken,
             return BAE_PARAM_ERR;
         }
 
-        oldTailOffset = kInstHeaderMinSize + (splitCount * kInstKeySplitSize);
-        if (instSize < oldTailOffset)
-        {
-            XDisposePtr(instData);
-            return BAE_BAD_FILE;
-        }
-        oldTailSize = instSize - oldTailOffset;
+        XGetKeySplitFromPtr((InstrumentResource *)instData, (int16_t)sampleIndex, &removedSplit);
+        removedSndID = removedSplit.sndResourceID;
 
-        removedSndID = (XShortResourceID)XGetShort((unsigned char *)instData +
-                                                   kInstHeaderMinSize + ((int32_t)sampleIndex * kInstKeySplitSize) + 2);
-
-        newSplitCount = (int16_t)(splitCount - 1);
-        newSize = kInstHeaderMinSize + (newSplitCount * kInstKeySplitSize) + oldTailSize;
-
-        newInst = (unsigned char *)XNewPtr(newSize);
-        if (!newInst)
+        shrunk = XRemoveThisKeySplit((InstrumentResource *)instData, (int16_t)sampleIndex);
+        if (!shrunk)
         {
             XDisposePtr(instData);
             return BAE_MEMORY_ERR;
         }
-        XSetMemory(newInst, newSize, 0);
-        XBlockMove(instData, newInst, kInstHeaderMinSize);
 
-        if (sampleIndex > 0)
-        {
-            XBlockMove((unsigned char *)instData + kInstHeaderMinSize,
-                       newInst + kInstHeaderMinSize,
-                       (int32_t)sampleIndex * kInstKeySplitSize);
-        }
-        if (sampleIndex + 1u < (uint32_t)splitCount)
-        {
-            XBlockMove((unsigned char *)instData + kInstHeaderMinSize + ((int32_t)(sampleIndex + 1u) * kInstKeySplitSize),
-                       newInst + kInstHeaderMinSize + ((int32_t)sampleIndex * kInstKeySplitSize),
-                       (int32_t)((uint32_t)splitCount - (sampleIndex + 1u)) * kInstKeySplitSize);
-        }
-
-        XBlockMove((unsigned char *)instData + oldTailOffset,
-                   newInst + kInstHeaderMinSize + (newSplitCount * kInstKeySplitSize),
-                   oldTailSize);
-
-        XPutShort(newInst + 12, (uint16_t)newSplitCount);
+        newSplitCount = (int16_t)XGetShort(&shrunk->keySplitCount);
         if (newSplitCount > 0)
         {
-            XPutShort(newInst + 0, (uint16_t)XGetShort(newInst + kInstHeaderMinSize + 2));
+            KeySplit split0;
+            XGetKeySplitFromPtr(shrunk, 0, &split0);
+            XPutShort((unsigned char *)shrunk + 0, (uint16_t)split0.sndResourceID);
         }
         else
         {
-            XPutShort(newInst + 0, 0);
+            XPutShort((unsigned char *)shrunk + 0, 0);
         }
 
         result = PV_BankReplaceResource(bankFile,
                                         ID_INST,
                                         instID,
                                         instName,
-                                        newInst,
-                                        newSize);
-        XDisposePtr(newInst);
+                                        shrunk,
+                                        XGetPtrSize((XPTR)shrunk));
+        XDisposePtr((XPTR)shrunk);
         XDisposePtr(instData);
         if (result != BAE_NO_ERROR)
         {

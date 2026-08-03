@@ -218,7 +218,7 @@ wxbase33u.lib;libmp3lame.lib;FLAC.lib;vorbisfile.lib;vorbisenc.lib;vorbis.lib;op
     <ClCompile Include="..\..\BAE_Source\Common\GenAudioStreams.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\..\BAE_Source\Common\BAERmfEditor.c">
+    <ClCompile Include="..\..\BAE_Source\Common\BAE_EditorAPI.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Include="..\..\BAE_Source\Common\GenCache.c">
@@ -299,6 +299,12 @@ wxbase33u.lib;libmp3lame.lib;FLAC.lib;vorbisfile.lib;vorbisenc.lib;vorbis.lib;op
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Include="..\..\BAE_Source\Common\X_API.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="..\..\BAE_Source\Common\X_Instruments.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="..\..\BAE_Source\Common\X_EditorTools.c">
       <CompileAs>CompileAsC</CompileAs>
     </ClCompile>
     <ClCompile Include="..\..\BAE_Source\Common\X_Decompress.c">
@@ -434,7 +440,9 @@ wxbase33u.lib;libmp3lame.lib;FLAC.lib;vorbisfile.lib;vorbisenc.lib;vorbis.lib;op
        ================================================================ -->
   <ItemGroup>
     <ClInclude Include="..\..\BAE_Source\Common\NeoBAE.h" />
-    <ClInclude Include="..\..\BAE_Source\Common\BAERmfEditor.h" />
+    <ClInclude Include="..\..\BAE_Source\Common\BAE_EditorAPI.h" />
+    <ClInclude Include="..\..\BAE_Source\Common\X_Instruments.h" />
+    <ClInclude Include="..\..\BAE_Source\Common\X_EditorTools.h" />
     <ClInclude Include="..\..\BAE_Source\Common\X_Assert.h" />
     <ClInclude Include="..\..\BAE_Source\Platform\BAE_API.h" />
     <ClInclude Include="..\..\BAE_Source\Platform\BAEBuildOptions_WinOS.h" />

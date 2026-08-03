@@ -128,7 +128,6 @@ void gui_playback_controls_draw(GuiFrameCtx *ctx)
     int volume = *ctx->volume;
     int reverbType = *ctx->reverb_type;
     bool loopPlay = *ctx->loop_enabled;
-    bool *ch_enable = ctx->ch_enable;
     int last_drag_progress = *ctx->last_drag_progress;
     Rect channelPanel = ctx->channelPanel;
     Rect controlPanel = ctx->controlPanel;
