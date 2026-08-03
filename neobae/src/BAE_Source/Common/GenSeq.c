@@ -1972,14 +1972,19 @@ static void PV_DLS_ApplyHSBBankSelect(GM_Song *pSong, int16_t MIDIChannel, int32
     }
 
     rawMsb = (uint16_t)((uint8_t)pSong->channelRawBank[MIDIChannel]);
+    bankLsb = (uint16_t)((uint8_t)pSong->channelLSB[MIDIChannel] & 0x7F);
 
-    /* If the MIDI stream selected a DLS-style bank directly (MSB 120/121),
-       preserve its explicit MSB/LSB pair. Otherwise keep legacy HSB -> DLS
-       mapping for classic banks. */
+    /* Prefer explicit MIDI CC0/CC32 when present. MSB 120/121 is already in
+       DLS/SP-MIDI form; CC0=0 + CC32=N is the common MXMF/DLS form (e.g.
+       Woodland Wood Marimba at bank LSB 6). Otherwise map classic HSB banks
+       where CC0 carries the bank and CC32 is unused. */
     if (rawMsb == 120 || rawMsb == 121)
     {
         bankMsb = rawMsb;
-        bankLsb = (uint16_t)((uint8_t)pSong->channelLSB[MIDIChannel] & 0x7F);
+    }
+    else if (bankLsb != 0)
+    {
+        bankMsb = (uint16_t)((hsbBank & 1) ? 120 : 121);
     }
     else
     {
@@ -3067,6 +3072,9 @@ void PV_ProcessController(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTr
     {
             
         case B_BANK_LSB: // bank select LSB. This is GS.
+            /* Always record CC32. DLS/MXMF banks (CC0=0, CC32=N) need this;
+               previously LSB was only stored for MSB 120/121 (Nokia path). */
+            pSong->channelLSB[MIDIChannel] = (signed char)value;
 #if DISABLE_NOKIA_PATCH != TRUE
             if (pSong->channelRawBank[MIDIChannel] == 120) {
                 switch (value) {
@@ -3078,7 +3086,6 @@ void PV_ProcessController(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTr
                     default:
                         break;
                 }
-                pSong->channelLSB[MIDIChannel] = (signed char)value;
             }
             if (pSong->channelRawBank[MIDIChannel] == 121) {
                 switch (value) {
@@ -3090,7 +3097,6 @@ void PV_ProcessController(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTr
                     default:
                         break;
                 }
-                pSong->channelLSB[MIDIChannel] = (signed char)value;
             }
 #endif          
             break;
@@ -3102,6 +3108,8 @@ void PV_ProcessController(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTr
             }
 #endif
             pSong->channelRawBank[MIDIChannel] = (unsigned char)value;
+            /* Match DLS CC0 behavior: MSB select starts a new bank pair. */
+            pSong->channelLSB[MIDIChannel] = 0;
             /* Clamp legacy GM bank range only when neither SF2 nor native DLS is handling banks.
                Native DLS XMF overlays can legitimately use higher MSB values for multi-bank sets.
                RMF/ZMF still need HSB banks 1..(MAX_BANKS/2) for embeds, but must clamp

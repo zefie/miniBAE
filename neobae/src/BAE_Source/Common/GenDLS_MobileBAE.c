@@ -482,7 +482,11 @@ static void dls_env_init(DLS_Envelope* env, int32_t delayMicros, int32_t attackM
     env->current = 0;
     env->eg1Current = 0;
     env->stage = env->delayMicros == 0 ? DLS_ENV_ATTACK : DLS_ENV_DELAY;
-     env->tickIndex = 0;
+    /* Match delay→attack handoff: EG1 attack math uses tickIndex in 10 ms
+       units and treats the first attack sample as tickIndex=10000. Starting
+       at 0 made short non-zero attacks (e.g. Windows GM Celesta ~2 ms) begin
+       at gain 0 for a full control block (~10 ms soft fade-in). */
+    env->tickIndex = (env->stage == DLS_ENV_ATTACK) ? 10000 : 0;
     env->shutdownStart = 0;
     env->finished = false;
 }
@@ -603,7 +607,10 @@ static int32_t dls_env_next_eg1(DLS_Envelope* env) {
             env->tickIndex += 10000;
         }
     } else if (env->stage == DLS_ENV_ATTACK) {
-        if (env->attackMicros == 0) {
+        /* attackTicks==0 covers authored 0 and sub-5 ms attacks (same threshold
+           as EG2 / dls_micros_to_control_ticks). Checking only attackMicros==0
+           left Celesta-style ~2 ms attacks on the slow ramp path. */
+        if (env->attackMicros == 0 || env->attackTicks == 0) {
             env->stage = env->holdMicros == 0 ? (env->decayMicros == 0 ? DLS_ENV_SUSTAIN : DLS_ENV_DECAY) : DLS_ENV_HOLD;
             env->tickIndex = 0;
             env->eg1Current = DLS_EG1_FULL;
@@ -2940,14 +2947,24 @@ static DLS_Instrument* DLS_Bank_FindMidiInstrument(DLS_Bank* bank, int32_t bankI
         }
 
         /*
-         * Mobile Sound Builder / MobileBAE often stores custom banks with the
-         * MIDI CC0 value in INSH bits 8-14 (e.g. bank MSB=2 → selector 2:0:N
-         * in rawMode). Our channel path normalizes that request to 121:2:N.
-         * Try the raw CC0-as-MSB form only when LSB != 0 so GM bank 121:0:N
-         * does not steal a custom 2:0:N (or 121:2:N) instrument.
+         * Mobile Sound Builder / MobileBAE custom banks in rawMode use two
+         * INSH layouts; channel select normalizes both to 121:X:N:
+         *   CC0=X, CC32=0 → INSH bits 8-14 = X → selector X:0:N
+         *   CC0=0, CC32=X → INSH bits 0-6  = X → selector 0:X:N
+         * Try both only when LSB != 0 so GM 121:0:N is not stolen.
          */
         if (bankLsb > 0) {
             selector = DLS_Selector(bankLsb, 0, program);
+            inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
+            if (inst) {
+                bool isDrum = (inst->drum || ((inst->bankMsb & 0x7F) == 120));
+                if (wantDrum == isDrum) {
+                    return inst;
+                }
+            }
+
+            /* DLS-spec / MSB-authored LSB form (e.g. Woodland Wood Marimba). */
+            selector = DLS_Selector(0, bankLsb, program);
             inst = DLS_Bank_FindSelectorOrAlias(bank, selector);
             if (inst) {
                 bool isDrum = (inst->drum || ((inst->bankMsb & 0x7F) == 120));
