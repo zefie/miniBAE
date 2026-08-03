@@ -225,22 +225,11 @@ void NeoBAEEngine::LoadBank_Locked()
 	BAEMixer mixer = (BAEMixer)m_mixer;
 	const char* path = m_settings.bankPath.get_ptr();
 	const bool havePath = path && path[0];
-
-	BAEMixer_UnloadBanks(mixer);
-#if USE_NATIVE_DLS == TRUE
-	GM_SetMixerDLSMode(FALSE);
-	BAEMixer_UnloadXMFDLSOverlayBank(mixer);
-	BAEMixer_UnloadDLSBank(mixer);
-#endif
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
-	GM_UnloadSF2Soundfont();
-	GM_SetMixerSF2Mode(FALSE);
-#endif
+	BAEBankLoadInfo info{};
 
 	if (!havePath || m_settings.useBuiltinBank) {
 #if _BUILT_IN_PATCHES == TRUE
-		BAEBankToken tok = 0;
-		const BAEResult err = BAEMixer_LoadBuiltinBank(mixer, &tok);
+		const BAEResult err = BAEMixer_LoadBankBuiltinOnly(mixer, &info);
 		if (err != BAE_NO_ERROR)
 			ThrowBAE("failed to load built-in bank", err);
 		return;
@@ -249,42 +238,7 @@ void NeoBAEEngine::LoadBank_Locked()
 #endif
 	}
 
-	const char* ext = strrchr(path, '.');
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
-	if (ext && (_stricmp(ext, ".sf2") == 0
-#if SF3_SUPPORT > 0
-		|| _stricmp(ext, ".sf3") == 0 || _stricmp(ext, ".sfo") == 0
-#endif
-		)) {
-#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_SF2 == TRUE
-		BAEBankToken bt = 0;
-		if (BAEMixer_LoadBuiltinBank(mixer, &bt) == BAE_NO_ERROR && bt)
-			BAEMixer_SendBankToBack(mixer, bt);
-#endif
-		if (GM_LoadSF2Soundfont(path) != NO_ERR)
-			ThrowBAE("SF2 bank load failed", BAE_BAD_FILE);
-		GM_SetMixerSF2Mode(TRUE);
-		return;
-	}
-#endif
-
-#if USE_NATIVE_DLS == TRUE
-	if (ext && _stricmp(ext, ".dls") == 0) {
-#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_DLS == TRUE
-		BAEBankToken builtin = 0;
-		if (BAEMixer_LoadBuiltinBank(mixer, &builtin) == BAE_NO_ERROR && builtin)
-			BAEMixer_SendBankToBack(mixer, builtin);
-#endif
-		const BAEResult dls = BAEMixer_LoadDLSBank(mixer, (BAEPathName)path);
-		if (dls != BAE_NO_ERROR)
-			ThrowBAE("DLS bank load failed", dls);
-		GM_SetMixerDLSMode(TRUE);
-		return;
-	}
-#endif
-
-	BAEBankToken tok = 0;
-	const BAEResult err = BAEMixer_AddBankFromFile(mixer, (BAEPathName)path, &tok);
+	const BAEResult err = BAEMixer_LoadBankFromPath(mixer, (BAEPathName)path, &info);
 	if (err != BAE_NO_ERROR)
 		ThrowBAE("bank load failed", err);
 }
@@ -501,15 +455,9 @@ void NeoBAEEngine::StartDecode(bool allowLooping, abort_callback& abort, const N
 	m_lastPosMs = 0;
 
 	int32_t normalizeGainPct = 100;
-	if (m_settings.normalize) {
-		BAEResult nerr = BAESong_NormalizeFromMidiEstimate(song, 89, &normalizeGainPct);
-		if (nerr != BAE_NO_ERROR) {
-			normalizeGainPct = 100;
-			BAEMixer_SetSongNormalizeGain(mixer, 100);
-		}
-	} else {
-		BAEMixer_SetSongNormalizeGain(mixer, 100);
-	}
+	BAESong_ApplyNormalizeFromMidiEstimate(
+		song, mixer, m_settings.normalize ? TRUE : FALSE,
+		BAE_NORMALIZE_DEFAULT_TARGET_PEAK_PCT, &normalizeGainPct);
 
 	BAESong_Preroll(song);
 	BAEResult err = BAESong_Start(song, 0);

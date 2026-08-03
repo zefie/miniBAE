@@ -893,21 +893,25 @@ static void PV_ApplyOutputLimiter(GM_Mixer *pMixer)
     int32_t   *buffer = pMixer->songBufferDry;
     int32_t samples = pMixer->One_Loop * (pMixer->generateStereoOutput ? 2 : 1);
     int32_t   peak = 0;
-    int32_t   absVal;
     int32_t i;
 
-    // Find peak absolute value in the buffer
+    if (!buffer || samples <= 0)
+        return;
+
+    // Find peak absolute value. Most frames never clip — return after this
+    // single pass without a second scale walk.
     for (i = 0; i < samples; i++)
     {
-        absVal = buffer[i];
+        int32_t absVal = buffer[i];
         if (absVal < 0)
             absVal = -absVal;
         if (absVal > peak)
             peak = absVal;
     }
 
-    // If any sample would clip, scale the entire frame down
-    if (peak > LIMITER_THRESHOLD)
+    if (peak <= LIMITER_THRESHOLD)
+        return;
+
     {
         int32_t gain = (int32_t)(((int64_t)LIMITER_THRESHOLD * 65536) / peak);
         for (i = 0; i < samples; i++)
@@ -1197,26 +1201,54 @@ void PV_SetPositionFromVoice(GM_Voice *pVoice, uint32_t pos)
     }
 }
 
+/* Cache (22050 / outputRate) so per-voice pitch math avoids repeated divides. */
+static Rate s_wavePitchCacheRate = Q_RATE_INVALID;
+#if (LOOPS_USED == U3232_LOOPS && USE_FLOAT == FALSE) || (LOOPS_USED == LIMITED_LOOPS)
+static XFIXED s_wavePitchCoefFixed = 0;
+#endif
+#if LOOPS_USED == U3232_LOOPS && USE_FLOAT != FALSE
+static float s_wavePitchInvRate = 0.0f;
+#endif
+
+#if (LOOPS_USED == U3232_LOOPS && USE_FLOAT == FALSE) || (LOOPS_USED == LIMITED_LOOPS)
+static INLINE XFIXED PV_GetWavePitchCoefFixed(void)
+{
+    Rate rate = MusicGlobals->outputRate;
+    if (rate != s_wavePitchCacheRate || s_wavePitchCoefFixed == 0)
+    {
+        XFIXED mixerRate = GM_ConvertFromOutputRateToRate(rate) << 16L;
+        s_wavePitchCoefFixed = XFixedDivide(22050L << 16L, mixerRate);
+        s_wavePitchCacheRate = rate;
+    }
+    return s_wavePitchCoefFixed;
+}
+#endif
+
 #if LOOPS_USED == U3232_LOOPS
 
 // return (22050.0 * notePitch) / mixerRate;
 #if USE_FLOAT == FALSE
 static INLINE XFIXED PV_GetWavePitchFixed(XFIXED notePitch)
 {
-    XFIXED coef;
-    XFIXED mixerRate = GM_ConvertFromOutputRateToRate(MusicGlobals->outputRate) << 16L;
-    coef = XFixedDivide(22050L << 16L, mixerRate);
-    return XFixedMultiply(coef, notePitch);
+    return XFixedMultiply(PV_GetWavePitchCoefFixed(), notePitch);
 }
 #endif
 
 #if USE_FLOAT != FALSE
 UFLOAT PV_GetWavePitchFloat(XFIXED notePitch)
 {
+    Rate rate = MusicGlobals->outputRate;
     UFLOAT pitch;
 
+    if (rate != s_wavePitchCacheRate || s_wavePitchInvRate == 0.0f)
+    {
+        float mixerRate = (float)GM_ConvertFromOutputRateToRate(rate);
+        s_wavePitchInvRate = (mixerRate > 0.0f) ? (22050.0f / mixerRate) : 0.0f;
+        s_wavePitchCacheRate = rate;
+    }
+
     pitch = XFIXED_TO_FLOAT(notePitch);
-    return (22050.0 * pitch) / (float)GM_ConvertFromOutputRateToRate(MusicGlobals->outputRate);
+    return (UFLOAT)(pitch * s_wavePitchInvRate);
 }
 #endif
 
@@ -1270,10 +1302,7 @@ U3232 PV_GetWavePitchU3232(XFIXED notePitch)
 //
 XFIXED PV_GetWavePitch(XFIXED notePitch)
 {
-    XFIXED coef;
-    XFIXED mixerRate = GM_ConvertFromOutputRateToRate(MusicGlobals->outputRate) << 16L;
-    coef = XFixedDivide(22050L << 16L, mixerRate);
-    return XFixedMultiply(coef, notePitch) >> 4L;
+    return XFixedMultiply(PV_GetWavePitchCoefFixed(), notePitch) >> 4L;
 }
 #endif
 

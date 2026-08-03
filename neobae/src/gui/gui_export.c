@@ -458,36 +458,14 @@ bool bae_start_export(const char *output_file, int export_type, int compression)
         BAE_WaitMicroseconds(1000); // 1ms pause between each service call
     }
 
-    // Prime the encoder/mixer (like playbae does) to ensure events are processed
-    for (int prime = 0; prime < 8; ++prime)
     {
-        BAEResult serr = BAEMixer_ServiceAudioOutputToFile(g_bae.mixer);
-        if (serr != BAE_NO_ERROR)
+        BAEResult perr = BAEMixer_PrimeAudioOutputToFile(g_bae.mixer, g_bae.song);
+        if (perr != BAE_NO_ERROR)
         {
-            BAE_PRINTF("Export priming failed (BAE Error #%d). Aborting.\n", serr);
+            BAE_PRINTF("Export priming failed (BAE Error #%d). Aborting.\n", perr);
             BAEMixer_StopOutputToFile();
             return false;
         }
-    }
-
-    // If song still reports done (no events processed yet), keep priming until active or limit
-    BAE_BOOL preDone = TRUE;
-    int safety = 0;
-    while (preDone && safety < 32)
-    {
-        BAESong_IsDone(g_bae.song, &preDone);
-        if (!preDone)
-            break;
-
-        BAEResult serr = BAEMixer_ServiceAudioOutputToFile(g_bae.mixer);
-        if (serr != BAE_NO_ERROR)
-        {
-            BAE_PRINTF("Export priming failed (BAE Error #%d). Aborting.\n", serr);
-            BAEMixer_StopOutputToFile();
-            return false;
-        }
-        BAE_WaitMicroseconds(2000);
-        safety++;
     }
 
     g_exporting = true;
@@ -708,36 +686,14 @@ bool bae_start_mpeg_export(const char *output_file, int codec_index)
         bae_set_reverb(saved_reverb);
     }
 
-    // Prime the encoder/mixer (like playbae does) to ensure events are processed
-    for (int prime = 0; prime < 8; ++prime)
     {
-        BAEResult serr = BAEMixer_ServiceAudioOutputToFile(g_bae.mixer);
-        if (serr != BAE_NO_ERROR)
+        BAEResult perr = BAEMixer_PrimeAudioOutputToFile(g_bae.mixer, g_bae.song);
+        if (perr != BAE_NO_ERROR)
         {
-            BAE_PRINTF("MP3 export priming failed (BAE Error #%d). Aborting.\n", serr);
+            BAE_PRINTF("MP3 export priming failed (BAE Error #%d). Aborting.\n", perr);
             BAEMixer_StopOutputToFile();
             return false;
         }
-    }
-
-    // If song still reports done (no events processed yet), keep priming until active or limit
-    BAE_BOOL mpegPreDone = TRUE;
-    int mpegSafety = 0;
-    while (mpegPreDone && mpegSafety < 32)
-    {
-        BAESong_IsDone(g_bae.song, &mpegPreDone);
-        if (!mpegPreDone)
-            break;
-
-        BAEResult serr = BAEMixer_ServiceAudioOutputToFile(g_bae.mixer);
-        if (serr != BAE_NO_ERROR)
-        {
-            BAE_PRINTF("MP3 export priming failed (BAE Error #%d). Aborting.\n", serr);
-            BAEMixer_StopOutputToFile();
-            return false;
-        }
-        BAE_WaitMicroseconds(2000);
-        mpegSafety++;
     }
 
     g_exporting = true;
@@ -763,37 +719,6 @@ bool bae_start_mpeg_export(const char *output_file, int codec_index)
 #if SUPPORT_KARAOKE == TRUE
     karaoke_suspend(true); // disable karaoke during export
 #endif
-
-    // Prime MPEG encoder by servicing several slices so sequencer events schedule
-    for (int prime = 0; prime < 8; ++prime)
-    {
-        BAEResult serr = BAEMixer_ServiceAudioOutputToFile(g_bae.mixer);
-        if (serr != BAE_NO_ERROR)
-        {
-            char msg[128];
-            snprintf(msg, sizeof(msg), "MP3 export initialization failed (%d)", serr);
-            set_status_message(msg);
-            BAEMixer_StopOutputToFile();
-            g_exporting = false;
-            return false;
-        }
-    }
-
-    // If song still reports done, keep priming briefly until active or safety limit
-    BAE_BOOL preDone = TRUE;
-    int safety = 0;
-    while (preDone && safety < 32)
-    {
-        if (BAESong_IsDone(g_bae.song, &preDone) != BAE_NO_ERROR)
-            break;
-        if (!preDone)
-            break;
-        BAEResult serr = BAEMixer_ServiceAudioOutputToFile(g_bae.mixer);
-        if (serr != BAE_NO_ERROR)
-            break;
-        BAE_WaitMicroseconds(2000);
-        safety++;
-    }
 
     g_export_progress = 0;
     g_export_last_pos = 0;

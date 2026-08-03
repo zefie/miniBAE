@@ -93,6 +93,7 @@ NEOBAE_SOURCES := \
 			Common/cast5mini.c \
       		Common/GenRingtone.c \
 			Common/NeoBAE.c \
+			Common/NeoBAEBankLoad.c \
 			Common/NewNewLZSS.c \
 			Common/SampleTools.c \
 			Common/X_API.c \

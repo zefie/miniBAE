@@ -566,7 +566,6 @@ typedef uint32_t               XFIXED;
 // from long to unsigned, then all the fade API's will fail. If you need the extra bit for an unsigned value
 // use the unsigned macros
 #define XFIXED_1                    65536L
-#define XFIXED_1                    65536L
 #define XFIXED_PI                   0x0003243FL // 3.141593 
 #define XFIXED_ONEHALF              0x00008000L
 #define XFIXED_180_OVER_PI          0x00394BB7L

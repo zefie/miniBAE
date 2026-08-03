@@ -24,13 +24,6 @@
 #include "GenDLS_MobileBAE.h"
 #endif
 
-#ifndef TRUE
-#define TRUE 1
-#endif
-#ifndef FALSE
-#define FALSE 0
-#endif
-
 /* Cap work so large banks stay interactive; stride keeps RMS cheap. */
 enum
 {
@@ -72,7 +65,7 @@ static bool g_present[GM_BANK_ENGINE_COUNT];
 static bool g_scanned[GM_BANK_ENGINE_COUNT];
 static float g_loudness[GM_BANK_ENGINE_COUNT]; /* effective linear loudness */
 static float g_scale[GM_BANK_ENGINE_COUNT] = {1.0f, 1.0f, 1.0f, 1.0f};
-static bool g_active = FALSE;
+static bool g_active = false;
 
 static void PV_UpdateHsbPresentAndLoudness(void);
 
@@ -108,14 +101,17 @@ static float PV_MedianInPlace(float *values, int count)
 
 /* Peak-aware loudness: full-buffer RMS underestimates short hot one-shots
  * padded with silence. Use RMS of samples above 10% of peak, floored by
- * a fraction of peak so transient hits still dominate. */
-static float PV_BankBalance_LoudnessInt16(const int16_t *pcm, uint32_t frames, int channels, int stride)
+ * a fraction of peak so transient hits still dominate.
+ * bitSize 16: signed int16 / 32768; otherwise unsigned 8-bit centered at 128. */
+static float PV_BankBalance_LoudnessPcm(const void *pcm, uint32_t frames, int channels, int stride, int bitSize)
 {
     double sumSq = 0.0;
     double peak = 0.0;
     uint32_t n = 0;
     uint32_t f;
     double thresh;
+    const int16_t *pcm16 = (const int16_t *)pcm;
+    const unsigned char *pcm8 = (const unsigned char *)pcm;
 
     if (!pcm || frames == 0 || channels <= 0)
         return 0.0f;
@@ -127,7 +123,10 @@ static float PV_BankBalance_LoudnessInt16(const int16_t *pcm, uint32_t frames, i
         int c;
         for (c = 0; c < channels; c++)
         {
-            double s = (double)pcm[f * (uint32_t)channels + (uint32_t)c] * (1.0 / 32768.0);
+            uint32_t idx = f * (uint32_t)channels + (uint32_t)c;
+            double s = (bitSize == 16)
+                ? ((double)pcm16[idx] * (1.0 / 32768.0))
+                : (((double)pcm8[idx] - 128.0) * (1.0 / 128.0));
             if (s < 0.0)
                 s = -s;
             if (s > peak)
@@ -141,58 +140,10 @@ static float PV_BankBalance_LoudnessInt16(const int16_t *pcm, uint32_t frames, i
         int c;
         for (c = 0; c < channels; c++)
         {
-            double s = (double)pcm[f * (uint32_t)channels + (uint32_t)c] * (1.0 / 32768.0);
-            double a = (s < 0.0) ? -s : s;
-            if (a >= thresh)
-            {
-                sumSq += s * s;
-                n++;
-            }
-        }
-    }
-
-    if (n == 0)
-        return (float)peak;
-    {
-        float activeRms = (float)sqrt(sumSq / (double)n);
-        float peakFloor = (float)(peak * 0.35);
-        return (activeRms > peakFloor) ? activeRms : peakFloor;
-    }
-}
-
-static float PV_BankBalance_LoudnessU8(const unsigned char *pcm, uint32_t frames, int channels, int stride)
-{
-    double sumSq = 0.0;
-    double peak = 0.0;
-    uint32_t n = 0;
-    uint32_t f;
-    double thresh;
-
-    if (!pcm || frames == 0 || channels <= 0)
-        return 0.0f;
-    if (stride < 1)
-        stride = 1;
-
-    for (f = 0; f < frames; f += (uint32_t)stride)
-    {
-        int c;
-        for (c = 0; c < channels; c++)
-        {
-            double s = ((double)pcm[f * (uint32_t)channels + (uint32_t)c] - 128.0) * (1.0 / 128.0);
-            if (s < 0.0)
-                s = -s;
-            if (s > peak)
-                peak = s;
-        }
-    }
-
-    thresh = peak * 0.10;
-    for (f = 0; f < frames; f += (uint32_t)stride)
-    {
-        int c;
-        for (c = 0; c < channels; c++)
-        {
-            double s = ((double)pcm[f * (uint32_t)channels + (uint32_t)c] - 128.0) * (1.0 / 128.0);
+            uint32_t idx = f * (uint32_t)channels + (uint32_t)c;
+            double s = (bitSize == 16)
+                ? ((double)pcm16[idx] * (1.0 / 32768.0))
+                : (((double)pcm8[idx] - 128.0) * (1.0 / 128.0));
             double a = (s < 0.0) ? -s : s;
             if (a >= thresh)
             {
@@ -216,7 +167,7 @@ static void PV_ResetScalesInactive(void)
     int i;
     for (i = 0; i < GM_BANK_ENGINE_COUNT; i++)
         g_scale[i] = 1.0f;
-    g_active = FALSE;
+    g_active = false;
 }
 
 static XPTR PV_LoadHsbSndResource(XFILE bankFile, XShortResourceID sndID, int32_t *outSize)
@@ -236,7 +187,7 @@ static XPTR PV_LoadHsbSndResource(XFILE bankFile, XShortResourceID sndID, int32_
 
         if (sndTypes[t] == ID_CSND)
         {
-            XPTR decompressed = XDecompressPtr(sndData, (uint32_t)sndSize, FALSE);
+            XPTR decompressed = XDecompressPtr(sndData, (uint32_t)sndSize, false);
             XDisposePtr(sndData);
             sndData = decompressed;
             if (sndData)
@@ -271,10 +222,8 @@ static float PV_MeasureHsbSndLoudness(XFILE bankFile, XShortResourceID sndID, in
     pcm = XGetSamplePtrFromSnd(sndData, &info);
     if (pcm && info.frames > 0)
     {
-        if (info.bitSize == 16)
-            rms = PV_BankBalance_LoudnessInt16((const int16_t *)pcm, info.frames, info.channels, kBankBalancePcmStride);
-        else
-            rms = PV_BankBalance_LoudnessU8((const unsigned char *)pcm, info.frames, info.channels, kBankBalancePcmStride);
+        rms = PV_BankBalance_LoudnessPcm(pcm, info.frames, info.channels, kBankBalancePcmStride,
+                                         (info.bitSize == 16) ? 16 : 8);
     }
 
     if (info.pMasterPtr && info.pMasterPtr != sndData)
@@ -408,16 +357,14 @@ static float PV_MeasureWaveformLoudness(const GM_Waveform *wave, int16_t volumeP
         return 0.0f;
 
     channels = wave->channels > 0 ? (int)wave->channels : 1;
-    if (wave->bitSize == 16)
-        level = PV_BankBalance_LoudnessInt16((const int16_t *)wave->theWaveform, wave->waveFrames, channels, kBankBalancePcmStride);
-    else
-        level = PV_BankBalance_LoudnessU8((const unsigned char *)wave->theWaveform, wave->waveFrames, channels, kBankBalancePcmStride);
+    level = PV_BankBalance_LoudnessPcm(wave->theWaveform, wave->waveFrames, channels, kBankBalancePcmStride,
+                                       (wave->bitSize == 16) ? 16 : 8);
 
     volScale = (float)((volumeParam > 0) ? volumeParam : 100) / 100.0f;
     return level * volScale;
 }
 
-static float PV_MeasureInstrumentLoudness(GM_Instrument *inst)
+static float PV_MeasureInstrumentLoudnessAtKey(GM_Instrument *inst, int16_t key)
 {
     int16_t volumeParam;
 
@@ -440,7 +387,7 @@ static float PV_MeasureInstrumentLoudness(GM_Instrument *inst)
         for (s = 0; s < splitCount; s++)
         {
             GM_KeymapSplit *split = &inst->u.k.keySplits[s];
-            if (split->lowMidi <= kBankBalanceProbeKey && split->highMidi >= kBankBalanceProbeKey)
+            if (split->lowMidi <= key && split->highMidi >= key)
             {
                 chosen = (int)s;
                 break;
@@ -462,6 +409,11 @@ static float PV_MeasureInstrumentLoudness(GM_Instrument *inst)
     }
 
     return PV_MeasureWaveformLoudness(&inst->u.w, volumeParam);
+}
+
+static float PV_MeasureInstrumentLoudness(GM_Instrument *inst)
+{
+    return PV_MeasureInstrumentLoudnessAtKey(inst, (int16_t)kBankBalanceProbeKey);
 }
 
 static float PV_ScanRmfSongLoudness(GM_Song *pSong)
@@ -562,15 +514,15 @@ static void PV_UpdateHsbPresentAndLoudness(void)
 
     if (g_hsbCount > 0 || g_rmfCount > 0)
     {
-        g_present[GM_BANK_ENGINE_HSB] = TRUE;
+        g_present[GM_BANK_ENGINE_HSB] = true;
         g_loudness[GM_BANK_ENGINE_HSB] = combined;
         /* Scanned if we have RMF data and/or already scanned the host bank. */
         g_scanned[GM_BANK_ENGINE_HSB] = (g_rmfCount > 0) || (g_hsbCount > 0 && g_hsbBankLoudness > kMinLoudness);
     }
     else
     {
-        g_present[GM_BANK_ENGINE_HSB] = FALSE;
-        g_scanned[GM_BANK_ENGINE_HSB] = FALSE;
+        g_present[GM_BANK_ENGINE_HSB] = false;
+        g_scanned[GM_BANK_ENGINE_HSB] = false;
         g_loudness[GM_BANK_ENGINE_HSB] = 0.0f;
         g_hsbBankLoudness = 0.0f;
     }
@@ -609,7 +561,7 @@ static void PV_BankBalance_Recalculate(void)
 
     if (g_present[GM_BANK_ENGINE_HSB])
     {
-        g_scanned[GM_BANK_ENGINE_HSB] = TRUE;
+        g_scanned[GM_BANK_ENGINE_HSB] = true;
         debug_message("[BankBalance] HSB/RMF loudness=%.6f (bank=%.6f rmf=%.6f songs=%d)\n",
                       g_loudness[GM_BANK_ENGINE_HSB], g_hsbBankLoudness, g_rmfLoudness, g_rmfCount);
     }
@@ -619,7 +571,7 @@ static void PV_BankBalance_Recalculate(void)
     {
         float loud = GM_SF2_MeasureBankLoudness();
         g_loudness[GM_BANK_ENGINE_SF2] = loud;
-        g_scanned[GM_BANK_ENGINE_SF2] = TRUE;
+        g_scanned[GM_BANK_ENGINE_SF2] = true;
         debug_message("[BankBalance] SF2 loudness=%.6f\n", loud);
     }
 #endif
@@ -627,12 +579,12 @@ static void PV_BankBalance_Recalculate(void)
 #if USE_NATIVE_DLS == TRUE
     if (g_present[GM_BANK_ENGINE_DLS] && !g_scanned[GM_BANK_ENGINE_DLS])
     {
-        g_scanned[GM_BANK_ENGINE_DLS] = TRUE;
+        g_scanned[GM_BANK_ENGINE_DLS] = true;
         debug_message("[BankBalance] DLS loudness=%.6f\n", g_loudness[GM_BANK_ENGINE_DLS]);
     }
     if (g_present[GM_BANK_ENGINE_DLS_XMF] && !g_scanned[GM_BANK_ENGINE_DLS_XMF])
     {
-        g_scanned[GM_BANK_ENGINE_DLS_XMF] = TRUE;
+        g_scanned[GM_BANK_ENGINE_DLS_XMF] = true;
         debug_message("[BankBalance] DLS/XMF loudness=%.6f\n", g_loudness[GM_BANK_ENGINE_DLS_XMF]);
     }
 #endif
@@ -683,7 +635,7 @@ static void PV_BankBalance_Recalculate(void)
         }
     }
 
-    g_active = TRUE;
+    g_active = true;
 
     for (i = 0; i < GM_BANK_ENGINE_COUNT; i++)
     {
@@ -714,7 +666,7 @@ void GM_BankBalance_OnHsbBankAdded(XFILE file)
                 g_hsbFiles[g_hsbCount - 1] = file;
             }
             g_hsbBankLoudness = 0.0f; /* force rescan */
-            g_scanned[GM_BANK_ENGINE_HSB] = FALSE;
+            g_scanned[GM_BANK_ENGINE_HSB] = false;
             PV_BankBalance_Recalculate();
             return;
         }
@@ -734,7 +686,7 @@ void GM_BankBalance_OnHsbBankAdded(XFILE file)
     }
 
     g_hsbBankLoudness = 0.0f;
-    g_scanned[GM_BANK_ENGINE_HSB] = FALSE;
+    g_scanned[GM_BANK_ENGINE_HSB] = false;
     PV_BankBalance_Recalculate();
 }
 
@@ -757,7 +709,7 @@ void GM_BankBalance_OnHsbBankRemoved(XFILE file)
     }
 
     g_hsbBankLoudness = 0.0f;
-    g_scanned[GM_BANK_ENGINE_HSB] = FALSE;
+    g_scanned[GM_BANK_ENGINE_HSB] = false;
     if (g_hsbCount <= 0 && g_rmfCount <= 0)
         g_scale[GM_BANK_ENGINE_HSB] = 1.0f;
     PV_BankBalance_Recalculate();
@@ -841,16 +793,16 @@ void GM_BankBalance_OnRmfInstrumentsUnloaded(struct GM_Song *pSong)
 
 void GM_BankBalance_OnSf2Loaded(void)
 {
-    g_present[GM_BANK_ENGINE_SF2] = TRUE;
-    g_scanned[GM_BANK_ENGINE_SF2] = FALSE;
+    g_present[GM_BANK_ENGINE_SF2] = true;
+    g_scanned[GM_BANK_ENGINE_SF2] = false;
     g_loudness[GM_BANK_ENGINE_SF2] = 0.0f;
     PV_BankBalance_Recalculate();
 }
 
 void GM_BankBalance_OnSf2Unloaded(void)
 {
-    g_present[GM_BANK_ENGINE_SF2] = FALSE;
-    g_scanned[GM_BANK_ENGINE_SF2] = FALSE;
+    g_present[GM_BANK_ENGINE_SF2] = false;
+    g_scanned[GM_BANK_ENGINE_SF2] = false;
     g_loudness[GM_BANK_ENGINE_SF2] = 0.0f;
     g_scale[GM_BANK_ENGINE_SF2] = 1.0f;
     PV_BankBalance_Recalculate();
@@ -861,12 +813,12 @@ void GM_BankBalance_OnDlsBanksChanged(struct GM_Mixer *pMixer)
 #if USE_NATIVE_DLS == TRUE
     DLS_Synth *synth;
 
-    g_present[GM_BANK_ENGINE_DLS] = FALSE;
-    g_scanned[GM_BANK_ENGINE_DLS] = FALSE;
+    g_present[GM_BANK_ENGINE_DLS] = false;
+    g_scanned[GM_BANK_ENGINE_DLS] = false;
     g_loudness[GM_BANK_ENGINE_DLS] = 0.0f;
     g_scale[GM_BANK_ENGINE_DLS] = 1.0f;
-    g_present[GM_BANK_ENGINE_DLS_XMF] = FALSE;
-    g_scanned[GM_BANK_ENGINE_DLS_XMF] = FALSE;
+    g_present[GM_BANK_ENGINE_DLS_XMF] = false;
+    g_scanned[GM_BANK_ENGINE_DLS_XMF] = false;
     g_loudness[GM_BANK_ENGINE_DLS_XMF] = 0.0f;
     g_scale[GM_BANK_ENGINE_DLS_XMF] = 1.0f;
 
@@ -885,8 +837,8 @@ void GM_BankBalance_OnDlsBanksChanged(struct GM_Mixer *pMixer)
         float l = GM_DLS_MeasureBankLoudness(synth->banks[0]);
         if (l > kMinLoudness)
         {
-            g_present[GM_BANK_ENGINE_DLS] = TRUE;
-            g_scanned[GM_BANK_ENGINE_DLS] = TRUE;
+            g_present[GM_BANK_ENGINE_DLS] = true;
+            g_scanned[GM_BANK_ENGINE_DLS] = true;
             g_loudness[GM_BANK_ENGINE_DLS] = l;
         }
     }
@@ -895,8 +847,8 @@ void GM_BankBalance_OnDlsBanksChanged(struct GM_Mixer *pMixer)
         float l = GM_DLS_MeasureBankLoudness(synth->banks[1]);
         if (l > kMinLoudness)
         {
-            g_present[GM_BANK_ENGINE_DLS_XMF] = TRUE;
-            g_scanned[GM_BANK_ENGINE_DLS_XMF] = TRUE;
+            g_present[GM_BANK_ENGINE_DLS_XMF] = true;
+            g_scanned[GM_BANK_ENGINE_DLS_XMF] = true;
             g_loudness[GM_BANK_ENGINE_DLS_XMF] = l;
         }
     }
@@ -926,28 +878,28 @@ bool GM_BankBalance_SongAppliesHsbMixScale(struct GM_Song *pSong)
     int i;
 
     if (!pSong || !g_active)
-        return FALSE;
+        return false;
 
 #if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
     if (GM_IsSF2Song(pSong))
-        return TRUE;
+        return true;
 #endif
 #if USE_NATIVE_DLS == TRUE
     if (GM_IsDLSSong(pSong))
-        return TRUE;
+        return true;
 #endif
     for (i = 0; i < MAX_CHANNELS; i++)
     {
 #if USE_SF2_SUPPORT == TRUE
         if (pSong->channelType[i] == CHANNEL_TYPE_SF2)
-            return TRUE;
+            return true;
 #endif
 #if USE_NATIVE_DLS == TRUE
         if (pSong->channelType[i] == CHANNEL_TYPE_DLS)
-            return TRUE;
+            return true;
 #endif
     }
-    return FALSE;
+    return false;
 }
 
 /* ---- MIDI+patch song peak estimate -------------------------------------- */
@@ -968,113 +920,6 @@ void GM_EstimatePeak_Reset(void)
 float GM_EstimatePeak_GetMax(void)
 {
     return s_estMaxPeak;
-}
-
-static float PV_MeasureInstrumentLoudnessAtKey(GM_Instrument *inst, int16_t key)
-{
-    int16_t volumeParam;
-
-    if (!inst)
-        return 0.0f;
-
-    volumeParam = inst->miscParameter2;
-    if (volumeParam <= 0)
-        volumeParam = 100;
-
-    if (inst->doKeymapSplit)
-    {
-        uint16_t splitCount = inst->u.k.KeymapSplitCount;
-        int chosen = -1;
-        uint16_t s;
-
-        if (splitCount == 0)
-            return 0.0f;
-
-        for (s = 0; s < splitCount; s++)
-        {
-            GM_KeymapSplit *split = &inst->u.k.keySplits[s];
-            if (split->lowMidi <= key && split->highMidi >= key)
-            {
-                chosen = (int)s;
-                break;
-            }
-        }
-        if (chosen < 0)
-            chosen = (int)(splitCount / 2);
-
-        {
-            GM_KeymapSplit *split = &inst->u.k.keySplits[chosen];
-            if (!split->pSplitInstrument)
-                return 0.0f;
-            if (!(inst->enableSoundModifier && !inst->useSoundModifierAsRootKey))
-                volumeParam = split->miscParameter2;
-            if (volumeParam <= 0)
-                volumeParam = 100;
-            return PV_MeasureWaveformLoudness(&split->pSplitInstrument->u.w, volumeParam);
-        }
-    }
-
-    return PV_MeasureWaveformLoudness(&inst->u.w, volumeParam);
-}
-
-static int16_t PV_EstimateConvertPatchBank(GM_Song *pSong, int16_t thePatch, int16_t theChannel)
-{
-    int16_t theBank = pSong->channelBank[theChannel];
-
-    switch (pSong->channelBankMode[theChannel])
-    {
-    default:
-    case USE_GM_DEFAULT:
-        if (theChannel == PERCUSSION_CHANNEL)
-            theBank = (theBank * 2) + 1;
-        else
-            theBank = theBank * 2 + 0;
-        if (theBank < MAX_BANKS)
-            thePatch = (theBank * 128) + thePatch;
-        break;
-    case USE_NON_GM_PERC_BANK:
-    case USE_GM_PERC_BANK:
-        theBank = (theBank * 2) + 1;
-        if (theBank < MAX_BANKS)
-            thePatch = (theBank * 128) + thePatch;
-        break;
-    case USE_NORM_BANK:
-        theBank = theBank * 2 + 0;
-        if (theBank < MAX_BANKS)
-            thePatch = (theBank * 128) + thePatch;
-        break;
-    }
-    return thePatch;
-}
-
-static int16_t PV_EstimateInstrumentToUse(GM_Song *pSong, int16_t midiNote, int16_t MIDIChannel)
-{
-    int16_t thePatch = 0;
-
-    if (pSong->defaultPercusionProgram < 0)
-    {
-        switch (pSong->channelBankMode[MIDIChannel])
-        {
-        case USE_GM_DEFAULT:
-            if (MIDIChannel == PERCUSSION_CHANNEL)
-                thePatch = PV_EstimateConvertPatchBank(pSong, midiNote, MIDIChannel);
-            else
-                thePatch = PV_EstimateConvertPatchBank(pSong, pSong->channelProgram[MIDIChannel], MIDIChannel);
-            break;
-        case USE_NON_GM_PERC_BANK:
-        case USE_NORM_BANK:
-            thePatch = PV_EstimateConvertPatchBank(pSong, pSong->channelProgram[MIDIChannel], MIDIChannel);
-            break;
-        case USE_GM_PERC_BANK:
-            thePatch = PV_EstimateConvertPatchBank(pSong, midiNote, MIDIChannel);
-            break;
-        }
-    }
-    else
-    {
-        thePatch = pSong->channelProgram[MIDIChannel];
-    }
-    return thePatch;
 }
 
 float GM_EstimateNoteLoudness(GM_Song *pSong, int16_t channel, int16_t note, int16_t velocity)
@@ -1147,7 +992,7 @@ float GM_EstimateNoteLoudness(GM_Song *pSong, int16_t channel, int16_t note, int
     }
 #endif
 
-    thePatch = PV_EstimateInstrumentToUse(pSong, note, channel);
+    thePatch = PV_DetermineInstrumentToUse(pSong, note, channel);
     if (thePatch >= 0 && thePatch < (MAX_INSTRUMENTS * MAX_BANKS))
     {
         level = PV_MeasureInstrumentLoudnessAtKey(pSong->instrumentData[thePatch], note);

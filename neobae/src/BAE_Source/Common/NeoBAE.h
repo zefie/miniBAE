@@ -846,6 +846,45 @@ extern "C"
     BAEResult BAEMixer_LoadBuiltinBank(BAEMixer mixer, BAEBankToken *outToken);
 #endif
 
+    /* High-level bank load (shared by playbae / zefidi / foobar / Android).
+     * Unloads prior HSB/SF2/DLS banks, then loads by extension/magic. */
+    typedef enum
+    {
+        BAE_BANK_KIND_UNKNOWN = 0,
+        BAE_BANK_KIND_HSB,
+        BAE_BANK_KIND_SF2,
+        BAE_BANK_KIND_DLS,
+        BAE_BANK_KIND_BUILTIN
+    } BAEBankKind;
+
+    typedef struct
+    {
+        BAEBankToken token; /* HSB/builtin token; 0 for SF2/DLS */
+        BAEBankKind kind;
+    } BAEBankLoadInfo;
+
+    BAEResult BAEMixer_UnloadAllInstrumentBanks(BAEMixer mixer);
+
+    /* Load SF2 / DLS / HSB from path. Always unloads existing banks first.
+     * For SF2/DLS, optionally loads builtin patches behind when build flags allow. */
+    BAEResult BAEMixer_LoadBankFromPath(BAEMixer mixer,
+                                        BAEPathName path,
+                                        BAEBankLoadInfo *outInfo);
+
+    /* Same policy from memory. filenameHint (optional) aids type detection
+     * when magic is ambiguous (e.g. ".dls" vs generic RIFF). */
+    BAEResult BAEMixer_LoadBankFromMemory(BAEMixer mixer,
+                                          void const *data,
+                                          uint32_t size,
+                                          char const *filenameHint,
+                                          BAEBankLoadInfo *outInfo);
+
+#if _BUILT_IN_PATCHES == TRUE
+    /* Unload everything and load only the built-in patch bank. */
+    BAEResult BAEMixer_LoadBankBuiltinOnly(BAEMixer mixer,
+                                           BAEBankLoadInfo *outInfo);
+#endif
+
     // BAEMixer_AddBankFromMemory()
     // ------------------------------------
     // Causes the indicated BAEMixer to begin using the instrument bank resource at
@@ -1263,6 +1302,16 @@ extern "C"
 
     // once started saving to a file, call this to continue saving to file
     BAEResult BAEMixer_ServiceAudioOutputToFile(BAEMixer mixer);
+
+    // BAEMixer_PrimeAudioOutputToFile()
+    // ------------------------------------
+    // After StartOutputToFile + song Start, service a few mixer slices so
+    // lossy encoders / the MIDI sequencer schedule the first voices before
+    // the main done-loop. If song is non-NULL and still reports IsDone,
+    // keeps servicing (with short waits) until active or a safety limit.
+    // Defaults: 8 prime slices, up to 32 wait slices at 2ms each.
+    //
+    BAEResult BAEMixer_PrimeAudioOutputToFile(BAEMixer mixer, BAESong song);
 
     // -----------------------------------------------------------------------------------------
     // -----------------------------------------------------------------------------------------
@@ -2580,6 +2629,24 @@ extern "C"
     BAEResult BAESong_NormalizeFromMidiEstimate(BAESong song,
                                                 int32_t targetPeakPct,
                                                 int32_t *outAppliedGainPct);
+
+#ifndef BAE_NORMALIZE_DEFAULT_TARGET_PEAK_PCT
+#define BAE_NORMALIZE_DEFAULT_TARGET_PEAK_PCT 89
+#endif
+
+    // BAESong_ApplyNormalizeFromMidiEstimate()
+    // ------------------------------------
+    // Client convenience: if enable is FALSE, forces unity gain (100%).
+    // If enable is TRUE, runs BAESong_NormalizeFromMidiEstimate (targetPeakPct<=0
+    // uses BAE_NORMALIZE_DEFAULT_TARGET_PEAK_PCT) and re-asserts mixer gain.
+    // On estimate failure, forces unity and returns the error.
+    // Leaves the song stopped/rewound; caller should Preroll/Start afterward.
+    //
+    BAEResult BAESong_ApplyNormalizeFromMidiEstimate(BAESong song,
+                                                     BAEMixer mixer,
+                                                     BAE_BOOL enable,
+                                                     int32_t targetPeakPct,
+                                                     int32_t *outAppliedGainPct);
 
     // BAESong_Start()
     // --------------------------------------

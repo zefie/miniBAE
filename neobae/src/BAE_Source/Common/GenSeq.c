@@ -1858,8 +1858,6 @@ void PV_FreePatchInfo(GM_Song *pSong)
 }
 #endif // USE_CREATION_API
 
-static int16_t PV_ConvertPatchBank(GM_Song *pSong, int16_t thePatch, int16_t theChannel);
-
 // Returns TRUE when a requested patch should be rendered by RMF/ZMF built-in content
 // (embedded instrument or explicit song remap/override), even if SF2/DLS mode is active.
 static bool PV_ShouldUseRMFInstrumentForPatch(GM_Song *pSong, int16_t patch)
@@ -2365,7 +2363,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
     }
 }
 
-static int16_t PV_ConvertPatchBank(GM_Song *pSong, int16_t thePatch, int16_t theChannel)
+int16_t PV_ConvertPatchBank(GM_Song *pSong, int16_t thePatch, int16_t theChannel)
 {
     int16_t theBank;
 
@@ -2418,7 +2416,7 @@ static int16_t PV_ConvertPatchBank(GM_Song *pSong, int16_t thePatch, int16_t the
 
 // Given a song and a midi note, this will determine the instrument to use based upon the percussion mode,
 // bank selectable mode, and other factors
-static int16_t PV_DetermineInstrumentToUse(GM_Song *pSong, int16_t midiNote, int16_t MIDIChannel)
+int16_t PV_DetermineInstrumentToUse(GM_Song *pSong, int16_t midiNote, int16_t MIDIChannel)
 {
     int16_t thePatch;
 

@@ -126,13 +126,7 @@ int bae_apply_normalize_for_current_song(void)
     if (!g_bae.mixer || !g_bae.song || g_bae.is_audio_file)
         return 100;
 
-    if (!g_normalize_enabled)
-    {
-        BAEMixer_SetSongNormalizeGain(g_bae.mixer, 100);
-        return 100;
-    }
-
-    if (g_bae.loaded_path[0])
+    if (g_normalize_enabled && g_bae.loaded_path[0])
     {
         int cached = norm_cache_lookup(g_bae.loaded_path);
         if (cached > 0)
@@ -146,11 +140,15 @@ int bae_apply_normalize_for_current_song(void)
     {
         Settings settings = load_settings();
         int32_t gainPct = 100;
-        BAEResult nerr = BAESong_NormalizeFromMidiEstimate(g_bae.song, 89, &gainPct);
+        BAEResult nerr = BAESong_ApplyNormalizeFromMidiEstimate(
+            g_bae.song, g_bae.mixer,
+            g_normalize_enabled ? TRUE : FALSE,
+            BAE_NORMALIZE_DEFAULT_TARGET_PEAK_PCT, &gainPct);
+        if (!g_normalize_enabled)
+            return 100;
         if (nerr != BAE_NO_ERROR)
         {
             BAE_PRINTF("Normalize estimate failed (%d); continuing without\n", (int)nerr);
-            BAEMixer_SetSongNormalizeGain(g_bae.mixer, 100);
             return 100;
         }
 
@@ -400,23 +398,12 @@ static bool restore_bank_for_song_load(const char *bank_path, const char *bank_n
 #if _BUILT_IN_PATCHES == TRUE
     if (strcmp(bank_path, "__builtin__") == 0)
     {
-        BAEMixer_UnloadBanks(g_bae.mixer);
-#if USE_SF2_SUPPORT == TRUE
-        GM_UnloadSF2Soundfont();
-        GM_SetMixerSF2Mode(FALSE);
-#endif
-#if USE_NATIVE_DLS == TRUE
-        BAEMixer_UnloadXMFDLSOverlayBank(g_bae.mixer);
-        BAEMixer_UnloadDLSBank(g_bae.mixer);
-        GM_SetMixerDLSMode(FALSE);
-#endif
-
-        BAEBankToken builtin_token = 0;
-        BAEResult br = BAEMixer_LoadBuiltinBank(g_bae.mixer, &builtin_token);
-        if (br != BAE_NO_ERROR || !builtin_token)
+        BAEBankLoadInfo info;
+        BAEResult br = BAEMixer_LoadBankBuiltinOnly(g_bae.mixer, &info);
+        if (br != BAE_NO_ERROR || !info.token)
             return false;
 
-        g_bae.bank_token = builtin_token;
+        g_bae.bank_token = info.token;
         g_bae.bank_loaded = true;
         safe_strncpy(g_current_bank_path, "__builtin__", sizeof(g_current_bank_path) - 1);
         g_current_bank_path[sizeof(g_current_bank_path) - 1] = '\0';
@@ -541,28 +528,17 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
         g_bae.is_playing = false;
     }
 
-    // Unload existing banks (single active bank paradigm like original patch switcher)
-    BAEMixer_UnloadBanks(g_bae.mixer);
+    /* Shared LoadBank* helpers unload HSB/SF2/DLS first (single-active-bank). */
     g_bae.bank_loaded = false;
-#if USE_SF2_SUPPORT == TRUE
-    GM_UnloadSF2Soundfont();
-    GM_SetMixerSF2Mode(FALSE);
-#endif
-#if USE_NATIVE_DLS == TRUE
-        BAEMixer_UnloadXMFDLSOverlayBank(g_bae.mixer);
-        BAEMixer_UnloadDLSBank(g_bae.mixer);
-        GM_SetMixerDLSMode(FALSE);
-#endif
 
 #if _BUILT_IN_PATCHES == TRUE
     if (strcmp(path, "__builtin__") == 0)
     {
-
-        BAEBankToken t;
-        BAEResult br = BAEMixer_LoadBuiltinBank(g_bae.mixer, &t);
+        BAEBankLoadInfo info;
+        BAEResult br = BAEMixer_LoadBankBuiltinOnly(g_bae.mixer, &info);
         if (br == BAE_NO_ERROR)
         {
-            g_bae.bank_token = t;
+            g_bae.bank_token = info.token;
             const char *friendly_name = get_bank_friendly_name();
             const char *display_name;
 
@@ -955,103 +931,47 @@ void bae_shutdown(void)
 
 bool bae_load_bank(const char *bank_path)
 {
+    BAEBankLoadInfo info;
+
     if (!g_bae.mixer || !bank_path)
         return false;
 
-    const char *ext = strrchr(bank_path, '.');
-
-    BAEMixer_UnloadBanks(g_bae.mixer);
-
-#if USE_NATIVE_DLS == TRUE
-    BAEMixer_UnloadXMFDLSOverlayBank(g_bae.mixer);
-    BAEMixer_UnloadDLSBank(g_bae.mixer);
-    GM_SetMixerDLSMode(FALSE);
-#endif
-
-
-#if USE_SF2_SUPPORT == TRUE
-    GM_UnloadSF2Soundfont();
-    GM_SetMixerSF2Mode(FALSE);
-    g_bae.bank_token = 0;
-    // Check if this is an SF2 file
-    if (ext && (strcasecmp(ext, ".sf2") == 0    
-#if USE_VORBIS_DECODER == TRUE && _USING_FLUIDLITE == TRUE
-    || (strcasecmp(ext, ".sf3") == 0 || strcasecmp(ext, ".sfo") == 0)
-#endif
-    ))
     {
-        // Load SF2 bank
-#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_SF2 == TRUE
-        BAEBankToken builtin_token = 0;
-        if (BAEMixer_LoadBuiltinBank(g_bae.mixer, &builtin_token) == BAE_NO_ERROR && builtin_token)
+        BAEResult result = BAEMixer_LoadBankFromPath(g_bae.mixer, (BAEPathName)bank_path, &info);
+        if (result != BAE_NO_ERROR)
         {
-            BAEMixer_SendBankToBack(g_bae.mixer, builtin_token);
-        }
-#endif    
-        OPErr err = GM_LoadSF2Soundfont(bank_path);
-        if (err != NO_ERR)
-        {
-            BAE_PRINTF("SF2 bank load failed: %d %s\n", err, bank_path);
+            BAE_PRINTF("Bank load failed: %d %s\n", result, bank_path);
             return false;
         }
-        GM_SetMixerSF2Mode(TRUE);
-        // Mark as loaded
-        g_bae.bank_loaded = true;
-        return true;
-    }
-#endif // USE_SF2_SUPPORT == TRUE
-
-
-#if USE_NATIVE_DLS == TRUE
-    if (ext && strcasecmp(ext, ".dls") == 0) {
-        // Load DLS bank
-#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_DLS == TRUE
-        BAEBankToken builtin_token = 0;
-        if (BAEMixer_LoadBuiltinBank(g_bae.mixer, &builtin_token) == BAE_NO_ERROR && builtin_token)
-        {
-            BAEMixer_SendBankToBack(g_bae.mixer, builtin_token);
-        }
-#endif    
-        BAEResult dls_result = BAEMixer_LoadDLSBank(g_bae.mixer, bank_path);
-        if (dls_result != BAE_NO_ERROR)
-        {
-            BAE_PRINTF("DLS bank load failed: %d %s\n", dls_result, bank_path);
-            return false;
-        }
-        GM_SetMixerDLSMode(TRUE);
-        // Mark as loaded
-        g_bae.bank_loaded = true;
-        return true;
-    }
-#endif // USE_NATIVE_DLS == TRUE
-
-    // Load the bank (HSB format)
-    BAEResult result = BAEMixer_AddBankFromFile(g_bae.mixer, (BAEPathName)bank_path, &g_bae.bank_token);
-    if (result != BAE_NO_ERROR)
-    {
-        BAE_PRINTF("Bank load failed: %d %s\n", result, bank_path);
-        return false;
     }
 
-    BAE_PRINTF("Bank loaded: %s (token=%p)\n", bank_path, g_bae.bank_token);
+    g_bae.bank_token = info.token;
+    g_bae.bank_loaded = true;
+    BAE_PRINTF("Bank loaded: %s (kind=%d token=%p)\n", bank_path, (int)info.kind, g_bae.bank_token);
     return true;
 }
 
 // Load a bank from memory
 bool bae_load_bank_from_memory(const char *bankdata, int banksize)
 {
+    BAEBankLoadInfo info;
+
     if (!g_bae.mixer || !bankdata || banksize <= 0)
         return false;
 
-    // Load the bank (API expects void*)
-    BAEResult result = BAEMixer_AddBankFromMemory(g_bae.mixer, (void *)bankdata, (uint32_t)banksize, &g_bae.bank_token);
-    if (result != BAE_NO_ERROR)
     {
-        BAE_PRINTF("Bank load failed: %d\n", result);
-        return false;
+        BAEResult result = BAEMixer_LoadBankFromMemory(
+            g_bae.mixer, bankdata, (uint32_t)banksize, NULL, &info);
+        if (result != BAE_NO_ERROR)
+        {
+            BAE_PRINTF("Bank load failed: %d\n", result);
+            return false;
+        }
     }
 
-    BAE_PRINTF("Bank loaded from memory (token=%p)\n", g_bae.bank_token);
+    g_bae.bank_token = info.token;
+    g_bae.bank_loaded = true;
+    BAE_PRINTF("Bank loaded from memory (kind=%d token=%p)\n", (int)info.kind, g_bae.bank_token);
     return true;
 }
 
@@ -1948,41 +1868,14 @@ bool bae_play(bool *playing)
                     /* Match estimate FX padding to what playback will use. */
                     bae_set_reverb(g_bae.current_reverb_type);
 
-                    if (g_normalize_enabled)
                     {
-                        int cached = norm_cache_lookup(g_bae.loaded_path);
-                        if (cached > 0)
+                        int gainPct = bae_apply_normalize_for_current_song();
+                        if (g_normalize_enabled && gainPct > 0)
                         {
-                            BAEMixer_SetSongNormalizeGain(g_bae.mixer, cached);
-                            BAE_PRINTF("Normalize cache hit: %d%%\n", cached);
+                            char nmsg[64];
+                            snprintf(nmsg, sizeof(nmsg), "Normalized (%d%%)", gainPct);
+                            set_status_message(nmsg);
                         }
-                        else
-                        {
-                            int32_t gainPct = 100;
-                            BAEResult nerr = BAESong_NormalizeFromMidiEstimate(g_bae.song, 89, &gainPct);
-                            if (nerr != BAE_NO_ERROR)
-                            {
-                                BAE_PRINTF("Normalize estimate failed (%d); continuing without\n", (int)nerr);
-                                BAEMixer_SetSongNormalizeGain(g_bae.mixer, 100);
-                                set_status_message("Normalize failed");
-                            }
-                            else
-                            {
-                                char nmsg[64];
-                                BAE_PRINTF("Normalize estimate gain: %d%%\n", (int)gainPct);
-                                snprintf(nmsg, sizeof(nmsg), "Normalized (%d%%)", (int)gainPct);
-                                set_status_message(nmsg);
-                                norm_cache_store(g_bae.loaded_path, gainPct);
-                            }
-                            /* Estimate walk rewinds the song; restore preroll state. */
-                            BAESong_SetMicrosecondPosition(g_bae.song, 0);
-                            BAESong_Preroll(g_bae.song);
-                            BAESong_SetVelocityCurve(g_bae.song, settings.volume_curve);
-                        }
-                    }
-                    else if (g_bae.mixer)
-                    {
-                        BAEMixer_SetSongNormalizeGain(g_bae.mixer, 100);
                     }
                 }
                 else
@@ -1997,40 +1890,14 @@ bool bae_play(bool *playing)
                     BAESong_SetVelocityCurve(g_bae.song, settings.volume_curve);
                     bae_set_reverb(g_bae.current_reverb_type);
 
-                    if (g_normalize_enabled)
                     {
-                        int cachedGain = norm_cache_lookup(g_bae.loaded_path);
-                        if (cachedGain > 0)
+                        int gainPct = bae_apply_normalize_for_current_song();
+                        if (g_normalize_enabled && gainPct > 0)
                         {
-                            BAEMixer_SetSongNormalizeGain(g_bae.mixer, cachedGain);
-                            BAE_PRINTF("Normalize cache hit (resume): %d%%\n", cachedGain);
+                            char nmsg[64];
+                            snprintf(nmsg, sizeof(nmsg), "Normalized (%d%%)", gainPct);
+                            set_status_message(nmsg);
                         }
-                        else
-                        {
-                            /* Bank swap clears the cache — re-estimate before resume. */
-                            int32_t gainPct = 100;
-                            BAEResult nerr = BAESong_NormalizeFromMidiEstimate(g_bae.song, 89, &gainPct);
-                            if (nerr != BAE_NO_ERROR)
-                            {
-                                BAE_PRINTF("Normalize estimate failed on resume (%d)\n", (int)nerr);
-                                BAEMixer_SetSongNormalizeGain(g_bae.mixer, 100);
-                            }
-                            else
-                            {
-                                char nmsg[64];
-                                BAE_PRINTF("Normalize estimate gain (resume): %d%%\n", (int)gainPct);
-                                snprintf(nmsg, sizeof(nmsg), "Normalized (%d%%)", (int)gainPct);
-                                set_status_message(nmsg);
-                                norm_cache_store(g_bae.loaded_path, gainPct);
-                            }
-                            BAESong_SetMicrosecondPosition(g_bae.song, 0);
-                            BAESong_Preroll(g_bae.song);
-                            BAESong_SetVelocityCurve(g_bae.song, settings.volume_curve);
-                        }
-                    }
-                    else if (g_bae.mixer)
-                    {
-                        BAEMixer_SetSongNormalizeGain(g_bae.mixer, 100);
                     }
 
                     BAESong_SetMicrosecondPosition(g_bae.song, startPosUs);

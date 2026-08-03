@@ -1,5 +1,6 @@
 #include <dlfcn.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -16,10 +17,6 @@
 #include "GenPriv.h"
 #include "GenSnd.h"
 
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
-#include "GenSF2_FluidLite.h"
-#endif
-
 #if USE_NATIVE_DLS == TRUE
 #include "GenDLS_MobileBAE.h"
 #endif
@@ -34,30 +31,75 @@
 // don't track native bank tokens can still query a human-friendly string.
 static char g_lastBankFriendly[256] = "";
 
-#if USE_NATIVE_DLS == TRUE
-static void cache_dls_friendly_or_fallback(BAEMixer mixer, const char *fallback)
+static const char *pv_path_basename(const char *path)
+{
+	const char *base = path ? path : "";
+	const char *p;
+	for (p = base; *p; ++p) {
+		if (*p == '/' || *p == '\\') base = p + 1;
+	}
+	return base;
+}
+
+static void cache_bank_friendly(BAEMixer mixer, const BAEBankLoadInfo *info, const char *fallbackName)
 {
 	char friendlyBuf[256] = "";
-	if (mixer &&
-		BAEMixer_GetDLSBankFriendlyName(mixer, friendlyBuf, (uint32_t)sizeof(friendlyBuf)) == BAE_NO_ERROR &&
-		friendlyBuf[0] != '\0')
-	{
-		strncpy(g_lastBankFriendly, friendlyBuf, sizeof(g_lastBankFriendly) - 1);
-		g_lastBankFriendly[sizeof(g_lastBankFriendly) - 1] = '\0';
+	g_lastBankFriendly[0] = '\0';
+
+	if (!info) {
+		if (fallbackName && fallbackName[0]) {
+			strncpy(g_lastBankFriendly, fallbackName, sizeof(g_lastBankFriendly) - 1);
+			g_lastBankFriendly[sizeof(g_lastBankFriendly) - 1] = '\0';
+		}
 		return;
 	}
-	if (fallback && fallback[0] != '\0')
-	{
-		strncpy(g_lastBankFriendly, fallback, sizeof(g_lastBankFriendly) - 1);
-		g_lastBankFriendly[sizeof(g_lastBankFriendly) - 1] = '\0';
+
+	if (info->kind == BAE_BANK_KIND_HSB || info->kind == BAE_BANK_KIND_BUILTIN) {
+		if (mixer && info->token &&
+			BAE_GetBankFriendlyName(mixer, info->token, friendlyBuf, (uint32_t)sizeof(friendlyBuf)) == BAE_NO_ERROR &&
+			friendlyBuf[0] != '\0')
+		{
+			strncpy(g_lastBankFriendly, friendlyBuf, sizeof(g_lastBankFriendly) - 1);
+			g_lastBankFriendly[sizeof(g_lastBankFriendly) - 1] = '\0';
+			return;
+		}
 	}
-	else
-	{
-		strncpy(g_lastBankFriendly, "DLS Bank", sizeof(g_lastBankFriendly) - 1);
+#if USE_NATIVE_DLS == TRUE
+	else if (info->kind == BAE_BANK_KIND_DLS) {
+		if (mixer &&
+			BAEMixer_GetDLSBankFriendlyName(mixer, friendlyBuf, (uint32_t)sizeof(friendlyBuf)) == BAE_NO_ERROR &&
+			friendlyBuf[0] != '\0')
+		{
+			strncpy(g_lastBankFriendly, friendlyBuf, sizeof(g_lastBankFriendly) - 1);
+			g_lastBankFriendly[sizeof(g_lastBankFriendly) - 1] = '\0';
+			return;
+		}
+		if (fallbackName && fallbackName[0]) {
+			strncpy(g_lastBankFriendly, fallbackName, sizeof(g_lastBankFriendly) - 1);
+			g_lastBankFriendly[sizeof(g_lastBankFriendly) - 1] = '\0';
+		} else {
+			strncpy(g_lastBankFriendly, "DLS Bank", sizeof(g_lastBankFriendly) - 1);
+			g_lastBankFriendly[sizeof(g_lastBankFriendly) - 1] = '\0';
+		}
+		return;
+	}
+#endif
+	else if (info->kind == BAE_BANK_KIND_SF2) {
+		if (fallbackName && fallbackName[0]) {
+			strncpy(g_lastBankFriendly, fallbackName, sizeof(g_lastBankFriendly) - 1);
+			g_lastBankFriendly[sizeof(g_lastBankFriendly) - 1] = '\0';
+		} else {
+			strncpy(g_lastBankFriendly, "SF2 Bank", sizeof(g_lastBankFriendly) - 1);
+			g_lastBankFriendly[sizeof(g_lastBankFriendly) - 1] = '\0';
+		}
+		return;
+	}
+
+	if (fallbackName && fallbackName[0]) {
+		strncpy(g_lastBankFriendly, fallbackName, sizeof(g_lastBankFriendly) - 1);
 		g_lastBankFriendly[sizeof(g_lastBankFriendly) - 1] = '\0';
 	}
 }
-#endif
 
 JavaVM* gJavaVM = NULL;
 
@@ -401,101 +443,23 @@ JNIEXPORT void JNICALL Java_com_zefie_NeoBAE_Mixer__1getNeoReverbPresetParams
 JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromFile
     (JNIEnv* env, jclass clazz, jlong reference, jstring path)
 {
-		BAEMixer mixer = (BAEMixer)(intptr_t)reference;
-		if(!mixer) return -1;
-		const char* cpath = (*env)->GetStringUTFChars(env, path, NULL);
-	
-	// Check if this is an SF2/DLS file (requires FluidSynth)
-	const char *ext = strrchr(cpath, '.');
-	bool isDLS = (ext && (strcasecmp(ext, ".dls") == 0));
-	
-	BAEMixer_UnloadBanks(mixer);
-#if USE_NATIVE_DLS == TRUE
-	GM_SetMixerDLSMode(FALSE);
-	BAEMixer_UnloadXMFDLSOverlayBank(mixer);
-	BAEMixer_UnloadDLSBank(mixer);
-#endif
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
-	GM_UnloadSF2Soundfont();
-	GM_SetMixerSF2Mode(FALSE);
-	
-	if (ext && (
-		strcasecmp(ext, ".sf2") == 0 ||
-		strcasecmp(ext, ".sf3") == 0 ||
-		strcasecmp(ext, ".sfo") == 0
-	))
-	{
-		
-#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_SF2 == TRUE
-		/* LoadBuiltinBank writes the bank token via out-param; pass &token not token. */
-		BAEBankToken token = NULL;
-		if (BAEMixer_LoadBuiltinBank(mixer, &token) == BAE_NO_ERROR && token)
-			BAEMixer_SendBankToBack(mixer, token);
-#endif
-		// Load SF2/DLS bank
-		OPErr err = GM_LoadSF2Soundfont(cpath);		
-		if (err != NO_ERR)
-		{
-			(*env)->ReleaseStringUTFChars(env, path, cpath);
-			__android_log_print(ANDROID_LOG_ERROR, "NeoBAE", "SF2 bank load failed: %d", err);
-			return (jint)err;
-		}
-		GM_SetMixerSF2Mode(TRUE);
-		// Set friendly name to filename (must happen before ReleaseStringUTFChars)
-		const char *base = cpath;
-		for (const char *p = cpath; *p; ++p) {
-			if (*p == '/' || *p == '\\') base = p + 1;
-		}
-		strncpy(g_lastBankFriendly, base, sizeof(g_lastBankFriendly)-1);
-		g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
-		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "SF2 bank loaded: %s", cpath);
-		(*env)->ReleaseStringUTFChars(env, path, cpath);
-		return 0;
-	}
-#endif
+	BAEMixer mixer = (BAEMixer)(intptr_t)reference;
+	BAEBankLoadInfo info;
+	BAEResult r;
+	const char* cpath;
 
-#if USE_NATIVE_DLS == TRUE
-	if (isDLS)
-	{
-#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_DLS == TRUE
-		/* LoadBuiltinBank writes the bank token via out-param; pass &token not token. */
-		BAEBankToken token = NULL;
-		if (BAEMixer_LoadBuiltinBank(mixer, &token) == BAE_NO_ERROR && token)
-			BAEMixer_SendBankToBack(mixer, token);
-#endif
-		BAEResult dlsResult = BAEMixer_LoadDLSBank(mixer, cpath);
-		if (dlsResult != BAE_NO_ERROR)
-		{
-			(*env)->ReleaseStringUTFChars(env, path, cpath);
-			__android_log_print(ANDROID_LOG_ERROR, "NeoBAE", "Native DLS bank load failed: %d", dlsResult);
-			return (jint)dlsResult;
-		}
+	if (!mixer) return -1;
+	cpath = (*env)->GetStringUTFChars(env, path, NULL);
+	if (!cpath) return (jint)BAE_BAD_FILE;
 
-		GM_SetMixerDLSMode(TRUE);
-
-		const char *base = cpath;
-		for (const char *p = cpath; *p; ++p) {
-			if (*p == '/' || *p == '\\') base = p + 1;
-		}
-		cache_dls_friendly_or_fallback(mixer, base);
-
-		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Native DLS bank loaded: %s (display=%s)", cpath, g_lastBankFriendly);
-		(*env)->ReleaseStringUTFChars(env, path, cpath);
-		return 0;
-	}
-#endif
-	
-	// Standard HSB bank loading
-	BAEBankToken token = 0;
-	BAEResult r = BAEMixer_AddBankFromFile(mixer, (BAEPathName)cpath, &token);
-	if(r == BAE_NO_ERROR) {
-		char friendlyBuf[256] = "";
-		if(BAE_GetBankFriendlyName(mixer, token, friendlyBuf, (uint32_t)sizeof(friendlyBuf)) == BAE_NO_ERROR) {
-			strncpy(g_lastBankFriendly, friendlyBuf, sizeof(g_lastBankFriendly)-1);
-			g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
-		} else {
-			g_lastBankFriendly[0] = '\0';
-		}
+	memset(&info, 0, sizeof(info));
+	r = BAEMixer_LoadBankFromPath(mixer, (BAEPathName)cpath, &info);
+	if (r == BAE_NO_ERROR) {
+		cache_bank_friendly(mixer, &info, pv_path_basename(cpath));
+		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Bank loaded (kind=%d): %s (display=%s)",
+			(int)info.kind, cpath, g_lastBankFriendly);
+	} else {
+		__android_log_print(ANDROID_LOG_ERROR, "NeoBAE", "Bank load failed: %d (%s)", (int)r, cpath);
 	}
 	(*env)->ReleaseStringUTFChars(env, path, cpath);
 	return (jint)r;
@@ -554,120 +518,71 @@ JNIEXPORT jstring JNICALL Java_com_zefie_NeoBAE_Mixer__1getBankFriendlyName
 		return NULL;
 }
 
-// Load a bank asset into memory and add it via BAEMixer_AddBankFromMemory
-	JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromAsset
-		(JNIEnv* env, jclass clazz, jlong reference, jobject assetManager, jstring assetName)
-	{
-		BAEMixer mixer = (BAEMixer)(intptr_t)reference;
-		if(!mixer) return -1;
-		if(!assetManager || !assetName) return (jint)BAE_PARAM_ERR;
+// Load a bank asset into memory and add it via BAEMixer_LoadBankFromMemory
+JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromAsset
+	(JNIEnv* env, jclass clazz, jlong reference, jobject assetManager, jstring assetName)
+{
+	BAEMixer mixer = (BAEMixer)(intptr_t)reference;
+	BAEBankLoadInfo info;
+	BAEResult br;
+	const char* aname;
+	AAssetManager* mgr;
+	AAsset* asset;
+	off_t asset_len;
+	unsigned char *mem;
+	int32_t read_total = 0;
+	int32_t r = 0;
 
-		const char* aname = (*env)->GetStringUTFChars(env, assetName, NULL);
-		if(!aname) return (jint)BAE_PARAM_ERR;
+	if (!mixer) return -1;
+	if (!assetManager || !assetName) return (jint)BAE_PARAM_ERR;
 
-		AAssetManager* mgr = AAssetManager_fromJava(env, assetManager);
-		if(!mgr){ (*env)->ReleaseStringUTFChars(env, assetName, aname); return (jint)BAE_GENERAL_ERR; }
+	aname = (*env)->GetStringUTFChars(env, assetName, NULL);
+	if (!aname) return (jint)BAE_PARAM_ERR;
 
-		AAsset* asset = AAssetManager_open(mgr, aname, AASSET_MODE_STREAMING);
-		if(!asset){ (*env)->ReleaseStringUTFChars(env, assetName, aname); return (jint)BAE_FILE_NOT_FOUND; }
+	mgr = AAssetManager_fromJava(env, assetManager);
+	if (!mgr) {
+		(*env)->ReleaseStringUTFChars(env, assetName, aname);
+		return (jint)BAE_GENERAL_ERR;
+	}
 
-		off_t asset_len = AAsset_getLength(asset);
-		if(asset_len <= 0){ AAsset_close(asset); (*env)->ReleaseStringUTFChars(env, assetName, aname); return (jint)BAE_BAD_FILE; }
-		unsigned char *mem = (unsigned char*)malloc((size_t)asset_len);
-		if(!mem){ AAsset_close(asset); (*env)->ReleaseStringUTFChars(env, assetName, aname); return (jint)BAE_MEMORY_ERR; }
-		int32_t read_total = 0; int32_t r = 0;
-		while(read_total < asset_len && (r = AAsset_read(asset, mem + read_total, (size_t)(asset_len - read_total))) > 0){ read_total += r; }
+	asset = AAssetManager_open(mgr, aname, AASSET_MODE_STREAMING);
+	if (!asset) {
+		(*env)->ReleaseStringUTFChars(env, assetName, aname);
+		return (jint)BAE_FILE_NOT_FOUND;
+	}
+
+	asset_len = AAsset_getLength(asset);
+	if (asset_len <= 0) {
 		AAsset_close(asset);
-	BAEMixer_UnloadBanks(mixer);
-#if USE_NATIVE_DLS == TRUE
-	GM_SetMixerDLSMode(FALSE);
-	BAEMixer_UnloadXMFDLSOverlayBank(mixer);
-	BAEMixer_UnloadDLSBank(mixer);
-#endif
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
-	GM_UnloadSF2Soundfont();
-	GM_SetMixerSF2Mode(FALSE);
-	
-	// Check for SF2/DLS format by magic bytes
-	bool isSF2 = FALSE;
-	bool isDLS = FALSE;
-	if (read_total >= 12) {
-		if ((mem[8] == 'D' && mem[9] == 'L' && mem[10] == 'S' && mem[11] == ' ')) {
-			isDLS = TRUE;
-		}
-		if (mem[0] == 'R' && mem[1] == 'I' && mem[2] == 'F' && mem[3] == 'F') {
-			if (mem[8] == 's' && mem[9] == 'f' && mem[10] == 'b' && mem[11] == 'k') {
-				isSF2 = TRUE;
-				isDLS = FALSE;
-			}
-		}
-	}
-	
-	if (isSF2) {
-#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_SF2 == TRUE
-		/* LoadBuiltinBank writes the bank token via out-param; pass &token not token. */
-		BAEBankToken token = NULL;
-		if (BAEMixer_LoadBuiltinBank(mixer, &token) == BAE_NO_ERROR && token)
-			BAEMixer_SendBankToBack(mixer, token);
-#endif
-		// Load as SF2/DLS soundfont
-		OPErr err = GM_LoadSF2SoundfontFromMemory((const unsigned char*)mem, (size_t)read_total);
-		free(mem);
 		(*env)->ReleaseStringUTFChars(env, assetName, aname);
-		if (err != NO_ERR) {
-			__android_log_print(ANDROID_LOG_ERROR, "NeoBAE", "FluidSynth asset load failed: %d", err);
-			return (jint)err;
-		}
-		GM_SetMixerSF2Mode(TRUE);
-		strncpy(g_lastBankFriendly, aname, sizeof(g_lastBankFriendly)-1);
-		g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
-		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "FluidSynth asset loaded: %s", aname);
-		return 0;
+		return (jint)BAE_BAD_FILE;
 	}
-#endif
-#if USE_NATIVE_DLS == TRUE
-	if (isDLS) {
-#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_DLS == TRUE
-		/* LoadBuiltinBank writes the bank token via out-param; pass &token not token. */
-		BAEBankToken token = NULL;
-		if (BAEMixer_LoadBuiltinBank(mixer, &token) == BAE_NO_ERROR && token)
-			BAEMixer_SendBankToBack(mixer, token);
-#endif
-		BAEResult dlsResult = BAEMixer_LoadDLSBankFromMemory(mixer, (void*)mem, (uint32_t)read_total);
-		if (dlsResult != BAE_NO_ERROR) {
-			free(mem);
-			(*env)->ReleaseStringUTFChars(env, assetName, aname);
-			__android_log_print(ANDROID_LOG_ERROR, "NeoBAE", "DLS asset load failed: %d", dlsResult);
-			return (jint)dlsResult;
-		}
-		GM_SetMixerDLSMode(TRUE);
-		cache_dls_friendly_or_fallback(mixer, aname);
-		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "DLS asset loaded: %s (display=%s)", aname, g_lastBankFriendly);
-		free(mem);
+	mem = (unsigned char*)malloc((size_t)asset_len);
+	if (!mem) {
+		AAsset_close(asset);
 		(*env)->ReleaseStringUTFChars(env, assetName, aname);
-		return 0;
+		return (jint)BAE_MEMORY_ERR;
 	}
-#endif
+	while (read_total < asset_len &&
+		   (r = AAsset_read(asset, mem + read_total, (size_t)(asset_len - read_total))) > 0) {
+		read_total += r;
+	}
+	AAsset_close(asset);
 
-		BAEBankToken token = 0;
-		BAEResult br = BAEMixer_AddBankFromMemory(mixer, (void*)mem, (uint32_t)read_total, &token);
-		if(br == BAE_NO_ERROR){
-			// After a successful add, try to resolve a friendly name for this token
-			// and cache it for Java-side reads.
-			char friendlyBuf[256] = "";
-			if(BAE_GetBankFriendlyName(mixer, token, friendlyBuf, (uint32_t)sizeof(friendlyBuf)) == BAE_NO_ERROR) {
-				strncpy(g_lastBankFriendly, friendlyBuf, sizeof(g_lastBankFriendly)-1);
-				g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
-			} else {
-				// clear cache if none
-				g_lastBankFriendly[0] = '\0';
-			}
-		}
-
-		free(mem);
-		(*env)->ReleaseStringUTFChars(env, assetName, aname);
-		return (jint)br;
+	memset(&info, 0, sizeof(info));
+	br = BAEMixer_LoadBankFromMemory(mixer, mem, (uint32_t)read_total, aname, &info);
+	if (br == BAE_NO_ERROR) {
+		cache_bank_friendly(mixer, &info, pv_path_basename(aname));
+		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Bank asset loaded (kind=%d): %s (display=%s)",
+			(int)info.kind, aname, g_lastBankFriendly);
+	} else {
+		__android_log_print(ANDROID_LOG_ERROR, "NeoBAE", "Bank asset load failed: %d (%s)", (int)br, aname);
 	}
+
+	free(mem);
+	(*env)->ReleaseStringUTFChars(env, assetName, aname);
+	return (jint)br;
+}
 
 
 /*
@@ -679,104 +594,28 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemory
 	(JNIEnv* env, jclass clazz, jlong reference, jbyteArray data)
 {
 	BAEMixer mixer = (BAEMixer)(intptr_t)reference;
-	if(!mixer) return -1;
-	if(!data) return (jint)BAE_PARAM_ERR;
-	bool isDLS = FALSE;
-	unsigned char *ubytes = NULL;
+	BAEBankLoadInfo info;
+	BAEResult br;
+	jsize len;
+	jbyte *bytes;
 
-	jsize len = (*env)->GetArrayLength(env, data);
-	jbyte *bytes = (*env)->GetByteArrayElements(env, data, NULL);
-	if(!bytes) return (jint)BAE_MEMORY_ERR;
+	if (!mixer) return -1;
+	if (!data) return (jint)BAE_PARAM_ERR;
+
+	len = (*env)->GetArrayLength(env, data);
+	bytes = (*env)->GetByteArrayElements(env, data, NULL);
+	if (!bytes) return (jint)BAE_MEMORY_ERR;
 
 	__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "addBankFromMemory: len=%d bytes", (int)len);
 
-	if (len >= 12) {
-		ubytes = (unsigned char*)bytes;
-		isDLS = (ubytes[8] == 'D' && ubytes[9] == 'L' && ubytes[10] == 'S' && ubytes[11] == ' ');
-		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Magic bytes: %02X %02X %02X %02X ... %02X %02X %02X %02X",
-			ubytes[0], ubytes[1], ubytes[2], ubytes[3], ubytes[8], ubytes[9], ubytes[10], ubytes[11]);
-	}
-
-	BAEMixer_UnloadBanks(mixer);
-#if USE_NATIVE_DLS == TRUE
-	GM_SetMixerDLSMode(FALSE);
-	BAEMixer_UnloadXMFDLSOverlayBank(mixer);
-	BAEMixer_UnloadDLSBank(mixer);
-#endif
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
-	__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "SF2 support is enabled");
-	GM_UnloadSF2Soundfont();
-	GM_SetMixerSF2Mode(FALSE);
-	
-	// Try to detect if this is SF2/DLS format by checking magic bytes
-	// SF2 starts with "RIFF....sfbk" (offset 0 and 8)
-	// DLS starts with "RIFF....DLS " (offset 0 and 8)
-	bool isSF2 = FALSE;
-	if (ubytes) {
-		if (ubytes[0] == 'R' && ubytes[1] == 'I' && ubytes[2] == 'F' && ubytes[3] == 'F') {
-			if (ubytes[8] == 's' && ubytes[9] == 'f' && ubytes[10] == 'b' && ubytes[11] == 'k') {
-				isSF2 = TRUE;
-				__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Detected SF2 bank format");
-			}
-		}
-	}
-	
-	if (isSF2) {
-#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_SF2 == TRUE
-		/* LoadBuiltinBank writes the bank token via out-param; pass &token not token. */
-		BAEBankToken token = NULL;
-		if (BAEMixer_LoadBuiltinBank(mixer, &token) == BAE_NO_ERROR && token)
-			BAEMixer_SendBankToBack(mixer, token);
-#endif
-		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Loading SF2 soundfont from memory...");
-		// Load as SF2/DLS soundfont
-		OPErr err = GM_LoadSF2SoundfontFromMemory((const unsigned char*)bytes, (size_t)len);
-		(*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
-		if (err != NO_ERR) {
-			__android_log_print(ANDROID_LOG_ERROR, "NeoBAE", "SF2 bank load from memory failed: %d", err);
-			return (jint)err;
-		}
-		GM_SetMixerSF2Mode(TRUE);
-		strncpy(g_lastBankFriendly, "SF2 Bank", sizeof(g_lastBankFriendly)-1);
-		g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
-		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "SF2 bank loaded from memory");
-		return 0;
+	memset(&info, 0, sizeof(info));
+	br = BAEMixer_LoadBankFromMemory(mixer, (void*)bytes, (uint32_t)len, NULL, &info);
+	if (br == BAE_NO_ERROR) {
+		cache_bank_friendly(mixer, &info, NULL);
+		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Bank loaded from memory (kind=%d, display=%s)",
+			(int)info.kind, g_lastBankFriendly);
 	} else {
-		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Not SF2/DLS format, trying HSB bank load");
-	}
-#else
-	__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "SF2 support is NOT enabled - USE_SF2_SUPPORT=%d _USING_FLUIDLITE=%d", USE_SF2_SUPPORT, _USING_FLUIDLITE);
-#endif
-
-#if USE_NATIVE_DLS == TRUE
-	if (isDLS && len >= 12) {
-		unsigned char *ubytes = (unsigned char*)bytes;
-		if (ubytes[0] == 'R' && ubytes[1] == 'I' && ubytes[2] == 'F' && ubytes[3] == 'F' &&
-			ubytes[8] == 'D' && ubytes[9] == 'L' && ubytes[10] == 'S' && ubytes[11] == ' ') {
-			BAEResult dlsResult = BAEMixer_LoadDLSBankFromMemory(mixer, (void*)bytes, (uint32_t)len);
-			(*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
-			if (dlsResult != BAE_NO_ERROR) {
-				__android_log_print(ANDROID_LOG_ERROR, "NeoBAE", "DLS bank load from memory failed: %d", dlsResult);
-				return (jint)dlsResult;
-			}
-			GM_SetMixerDLSMode(TRUE);
-			cache_dls_friendly_or_fallback(mixer, "DLS Bank");
-			__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "DLS bank loaded from memory (display=%s)", g_lastBankFriendly);
-			return 0;
-		}
-	}
-#endif
-
-	BAEBankToken token = 0;
-	BAEResult br = BAEMixer_AddBankFromMemory(mixer, (void*)bytes, (uint32_t)len, &token);
-	if(br == BAE_NO_ERROR){
-		char friendlyBuf[256] = "";
-		if(BAE_GetBankFriendlyName(mixer, token, friendlyBuf, (uint32_t)sizeof(friendlyBuf)) == BAE_NO_ERROR) {
-			strncpy(g_lastBankFriendly, friendlyBuf, sizeof(g_lastBankFriendly)-1);
-			g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
-		} else {
-			g_lastBankFriendly[0] = '\0';
-		}
+		__android_log_print(ANDROID_LOG_ERROR, "NeoBAE", "Bank load from memory failed: %d", (int)br);
 	}
 
 	(*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
@@ -792,136 +631,39 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemoryWithFilena
 	(JNIEnv* env, jclass clazz, jlong reference, jbyteArray data, jstring filename)
 {
 	BAEMixer mixer = (BAEMixer)(intptr_t)reference;
-	if(!mixer) return -1;
-	if(!data) return (jint)BAE_PARAM_ERR;
+	BAEBankLoadInfo info;
+	BAEResult br;
+	jsize len;
+	jbyte *bytes;
+	const char *fname = NULL;
+	const char *hint = NULL;
 
-	jsize len = (*env)->GetArrayLength(env, data);
-	jbyte *bytes = (*env)->GetByteArrayElements(env, data, NULL);
-	if(!bytes) return (jint)BAE_MEMORY_ERR;
+	if (!mixer) return -1;
+	if (!data) return (jint)BAE_PARAM_ERR;
+
+	len = (*env)->GetArrayLength(env, data);
+	bytes = (*env)->GetByteArrayElements(env, data, NULL);
+	if (!bytes) return (jint)BAE_MEMORY_ERR;
+
+	if (filename) {
+		fname = (*env)->GetStringUTFChars(env, filename, NULL);
+		hint = fname;
+	}
 
 	__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "addBankFromMemoryWithFilename: len=%d bytes", (int)len);
 
-	BAEMixer_UnloadBanks(mixer);
-#if USE_NATIVE_DLS == TRUE
-	GM_SetMixerDLSMode(FALSE);
-	BAEMixer_UnloadXMFDLSOverlayBank(mixer);
-	BAEMixer_UnloadDLSBank(mixer);
-#endif
-#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
-	__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "SF2 support is enabled");
-	GM_UnloadSF2Soundfont();
-	GM_SetMixerSF2Mode(FALSE);
-	
-	// Try to detect if this is SF2/DLS format by checking magic bytes
-	// SF2 starts with "RIFF....sfbk" (offset 0 and 8)
-	// DLS starts with "RIFF....DLS " (offset 0 and 8)
-	bool isSF2 = FALSE;
-	if (len >= 12) {
-		unsigned char *ubytes = (unsigned char*)bytes;
-		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Magic bytes: %02X %02X %02X %02X ... %02X %02X %02X %02X",
-			ubytes[0], ubytes[1], ubytes[2], ubytes[3], ubytes[8], ubytes[9], ubytes[10], ubytes[11]);
-		if (ubytes[0] == 'R' && ubytes[1] == 'I' && ubytes[2] == 'F' && ubytes[3] == 'F') {
-			if (ubytes[8] == 's' && ubytes[9] == 'f' && ubytes[10] == 'b' && ubytes[11] == 'k') {
-				isSF2 = TRUE;
-				__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Detected SF2 bank format");
-			}
-		}
-	}
-	
-	if (isSF2) {
-#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_SF2 == TRUE
-		/* LoadBuiltinBank writes the bank token via out-param; pass &token not token. */
-		BAEBankToken token = NULL;
-		if (BAEMixer_LoadBuiltinBank(mixer, &token) == BAE_NO_ERROR && token)
-			BAEMixer_SendBankToBack(mixer, token);
-#endif
-		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Loading SF2 soundfont from memory...");
-		// Load as SF2/DLS soundfont
-		OPErr err = GM_LoadSF2SoundfontFromMemory((const unsigned char*)bytes, (size_t)len);
-		(*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
-		if (err != NO_ERR) {
-			__android_log_print(ANDROID_LOG_ERROR, "NeoBAE", "SF2 bank load from memory failed: %d", err);
-			return (jint)err;
-		}
-		GM_SetMixerSF2Mode(TRUE);
-		// Use provided filename if available
-		if (filename) {
-			const char *fname = (*env)->GetStringUTFChars(env, filename, NULL);
-			if (fname) {
-				strncpy(g_lastBankFriendly, fname, sizeof(g_lastBankFriendly)-1);
-				g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
-				(*env)->ReleaseStringUTFChars(env, filename, fname);
-			} else {
-				strncpy(g_lastBankFriendly, "SF2 Bank", sizeof(g_lastBankFriendly)-1);
-				g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
-			}
-		} else {
-			strncpy(g_lastBankFriendly, "SF2 Bank", sizeof(g_lastBankFriendly)-1);
-			g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
-		}
-		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "SF2 bank loaded from memory: %s", g_lastBankFriendly);
-		return 0;
+	memset(&info, 0, sizeof(info));
+	br = BAEMixer_LoadBankFromMemory(mixer, (void*)bytes, (uint32_t)len, hint, &info);
+	if (br == BAE_NO_ERROR) {
+		cache_bank_friendly(mixer, &info, hint ? pv_path_basename(hint) : NULL);
+		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Bank loaded from memory (kind=%d, display=%s)",
+			(int)info.kind, g_lastBankFriendly);
 	} else {
-		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Not SF2/DLS format, trying HSB bank load");
-	}
-#else
-	__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "SF2 support is NOT enabled - USE_SF2_SUPPORT=%d _USING_FLUIDLITE=%d", USE_SF2_SUPPORT, _USING_FLUIDLITE);
-#endif
-
-#if USE_NATIVE_DLS == TRUE
-	if (len >= 12) {
-		unsigned char *ubytes = (unsigned char*)bytes;
-		if (ubytes[0] == 'R' && ubytes[1] == 'I' && ubytes[2] == 'F' && ubytes[3] == 'F' &&
-			ubytes[8] == 'D' && ubytes[9] == 'L' && ubytes[10] == 'S' && ubytes[11] == ' ') {
-			BAEResult dlsResult = BAEMixer_LoadDLSBankFromMemory(mixer, (void*)bytes, (uint32_t)len);
-			(*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
-			if (dlsResult != BAE_NO_ERROR) {
-				__android_log_print(ANDROID_LOG_ERROR, "NeoBAE", "DLS bank load from memory failed: %d", dlsResult);
-				return (jint)dlsResult;
-			}
-			GM_SetMixerDLSMode(TRUE);
-			{
-				const char *fallback = "DLS Bank";
-				const char *fname = NULL;
-				if (filename) {
-					fname = (*env)->GetStringUTFChars(env, filename, NULL);
-					if (fname) fallback = fname;
-				}
-				cache_dls_friendly_or_fallback(mixer, fallback);
-				if (fname) {
-					(*env)->ReleaseStringUTFChars(env, filename, fname);
-				}
-			}
-			__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "DLS bank loaded from memory: %s", g_lastBankFriendly);
-			return 0;
-		}
-	}
-#endif
-
-	BAEBankToken token = 0;
-	BAEResult br = BAEMixer_AddBankFromMemory(mixer, (void*)bytes, (uint32_t)len, &token);
-	if(br == BAE_NO_ERROR){
-		char friendlyBuf[256] = "";
-		if(BAE_GetBankFriendlyName(mixer, token, friendlyBuf, (uint32_t)sizeof(friendlyBuf)) == BAE_NO_ERROR) {
-			strncpy(g_lastBankFriendly, friendlyBuf, sizeof(g_lastBankFriendly)-1);
-			g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
-		} else {
-			// No friendly name in bank, use filename if provided
-			if (filename) {
-				const char *fname = (*env)->GetStringUTFChars(env, filename, NULL);
-				if (fname) {
-					strncpy(g_lastBankFriendly, fname, sizeof(g_lastBankFriendly)-1);
-					g_lastBankFriendly[sizeof(g_lastBankFriendly)-1] = '\0';
-					(*env)->ReleaseStringUTFChars(env, filename, fname);
-				} else {
-					g_lastBankFriendly[0] = '\0';
-				}
-			} else {
-				g_lastBankFriendly[0] = '\0';
-			}
-		}
+		__android_log_print(ANDROID_LOG_ERROR, "NeoBAE", "Bank load from memory failed: %d", (int)br);
 	}
 
+	if (fname)
+		(*env)->ReleaseStringUTFChars(env, filename, fname);
 	(*env)->ReleaseByteArrayElements(env, data, bytes, JNI_ABORT);
 	return (jint)br;
 }

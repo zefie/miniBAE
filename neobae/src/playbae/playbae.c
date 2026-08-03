@@ -706,29 +706,6 @@ static void apply_output_gain(BAEMixer mixer)
 }
 
 /* =========================================================================
- * Export priming: prime the encoder before entering the done loop.
- * Required for MP3/lossy encoders that need several mixer slices before
- * MIDI sequencer events schedule voices.  Mirrors gui_bae.c pattern.
- * ========================================================================= */
-
-static BAEResult prime_encoder(BAEMixer mixer, BAESong song)
-{
-    for (int i = 0; i < 8; i++) {
-        BAEResult serr = BAEMixer_ServiceAudioOutputToFile(mixer);
-        if (serr != BAE_NO_ERROR) return serr;
-    }
-    BAE_BOOL preDone = TRUE;
-    for (int safety = 0; preDone && safety < 32; safety++) {
-        BAESong_IsDone(song, &preDone);
-        if (!preDone) break;
-        BAEResult serr = BAEMixer_ServiceAudioOutputToFile(mixer);
-        if (serr != BAE_NO_ERROR) return serr;
-        BAE_WaitMicroseconds(2000);
-    }
-    return BAE_NO_ERROR;
-}
-
-/* =========================================================================
  * PV_PlaySong – unified MIDI/RMF/XMF playback
  *
  * Order matches the original playbae / simple.c:
@@ -782,17 +759,17 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
     if (gNormalize) {
         playbae_printf("Normalizing (MIDI+patch estimate)%s...\n",
             gWriteToFile ? " for export" : "");
-        BAEResult nerr = BAESong_NormalizeFromMidiEstimate(song, 89, &normalizeGainPct);
-        if (nerr != BAE_NO_ERROR) {
+    }
+    {
+        BAEResult nerr = BAESong_ApplyNormalizeFromMidiEstimate(
+            song, mixer, gNormalize ? TRUE : FALSE,
+            BAE_NORMALIZE_DEFAULT_TARGET_PEAK_PCT, &normalizeGainPct);
+        if (gNormalize && nerr != BAE_NO_ERROR) {
             playbae_printf("playbae: Normalize failed for '%s' (%d: %s); continuing without\n",
                 fileName, nerr, BAE_GetErrorString(nerr));
-            normalizeGainPct = 100;
-            BAEMixer_SetSongNormalizeGain(mixer, 100);
-        } else if (gPassNumber <= 0) {
+        } else if (gNormalize && gPassNumber <= 0) {
             playbae_printf("Normalize gain: %d%%\n", (int)normalizeGainPct);
         }
-    } else {
-        BAEMixer_SetSongNormalizeGain(mixer, 100);
     }
 
     BAESong_Preroll(song);
@@ -879,7 +856,7 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
     }
 
     if (gWriteToFile) {
-        BAEResult perr = prime_encoder(mixer, song);
+        BAEResult perr = BAEMixer_PrimeAudioOutputToFile(mixer, song);
         if (perr != BAE_NO_ERROR) {
             playbae_printf("Export priming failed (%d: %s).\n",
                 perr, BAE_GetErrorString(perr));
@@ -1387,73 +1364,18 @@ static int load_reverb_preset(const char *name)
 }
 
 /* =========================================================================
- * PV_LoadBank – mirrors bae_load_bank() from gui_bae.c
+ * PV_LoadBank – thin wrapper around shared BAEMixer_LoadBankFromPath
  * ========================================================================= */
 
 static int PV_LoadBank(BAEMixer mixer, const char *path, BAEBankToken *tokenOut)
 {
-    const char *ext = strrchr(path, '.');
-
-    BAEMixer_UnloadBanks(mixer);
-#if USE_NATIVE_DLS == TRUE
-    GM_SetMixerDLSMode(FALSE);
-    BAEMixer_UnloadXMFDLSOverlayBank(mixer);
-    BAEMixer_UnloadDLSBank(mixer);
-#endif
-
-#if USE_SF2_SUPPORT == TRUE
-    if (ext && (stricmp(ext, ".sf2") == 0
-#if USE_VORBIS_DECODER == TRUE && SF3_SUPPORT > 0
-        || stricmp(ext, ".sf3") == 0 || stricmp(ext, ".sfo") == 0
-#endif
-    )) {
-        GM_UnloadSF2Soundfont();
-        GM_SetMixerSF2Mode(FALSE);
-#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_SF2 == TRUE
-        BAEBankToken bt = 0;
-        if (BAEMixer_LoadBuiltinBank(mixer, &bt) == BAE_NO_ERROR && bt)
-            BAEMixer_SendBankToBack(mixer, bt);
-#endif
-        OPErr oerr = GM_LoadSF2Soundfont(path);
-        if (oerr != NO_ERR) {
-            playbae_printf("playbae: SF2 bank load failed (%d): %s\n", oerr, path);
-            return 0;
-        }
-        GM_SetMixerSF2Mode(TRUE);
-        if (tokenOut) *tokenOut = 0;
-        return 1;
-    }
-#endif
-
-#if USE_NATIVE_DLS == TRUE
-    if (ext && strcasecmp(ext, ".dls") == 0) {
-        // Load DLS bank
-#if _BUILT_IN_PATCHES == TRUE && _LOAD_BUILTIN_PATCHES_FOR_DLS == TRUE
-        BAEBankToken builtin_token = 0;
-        if (BAEMixer_LoadBuiltinBank(mixer, &builtin_token) == BAE_NO_ERROR && builtin_token)
-        {
-            BAEMixer_SendBankToBack(mixer, builtin_token);
-        }
-#endif    
-        BAEResult dls_result = BAEMixer_LoadDLSBank(mixer, path);
-        if (dls_result != BAE_NO_ERROR)
-        {
-            BAE_PRINTF("DLS bank load failed: %d %s\n", dls_result, path);
-            return 0;
-        }
-        GM_SetMixerDLSMode(TRUE);
-        if (tokenOut) *tokenOut = 0;
-        return 1;
-    }
-#endif
-
-    BAEBankToken tok = 0;
-    BAEResult err = BAEMixer_AddBankFromFile(mixer, (BAEPathName)path, &tok);
+    BAEBankLoadInfo info;
+    BAEResult err = BAEMixer_LoadBankFromPath(mixer, (BAEPathName)path, &info);
     if (err != BAE_NO_ERROR) {
         playbae_printf("playbae: Bank load failed (%d): %s\n", err, path);
         return 0;
     }
-    if (tokenOut) *tokenOut = tok;
+    if (tokenOut) *tokenOut = info.token;
     return 1;
 }
 

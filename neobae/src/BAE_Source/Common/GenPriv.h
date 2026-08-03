@@ -282,7 +282,10 @@
 
 #define SOUND_EFFECT_CHANNEL        16      // channel used for sound effects. One beyond the normal
 
-// 20.12 (whole.fractional)
+// LIMITED_LOOPS sample position uses 20.12 XFIXED (STEP_BIT_RANGE=12).
+// Whole-sample offset fits in 20 bits (~1,048,575 frames). Longer PCM can
+// wrap/overflow THE_CHECK end_wave math — prefer U3232_LOOPS (or FLOAT) for
+// large samples / streamed buffers. Cast pointer deltas to XFIXED before <<.
 #define STEP_BIT_RANGE              12L
 #define STEP_OVERFLOW_FLAG          (1<<(STEP_BIT_RANGE-1))     
 #define STEP_FULL_RANGE             ((1<<STEP_BIT_RANGE)-1)
@@ -1304,6 +1307,10 @@ void PV_StartMIDINote(GM_Song *pSong, int16_t the_instrument,
                         int16_t the_channel, int16_t the_track, int16_t notePitch, int32_t Volume);
 void PV_StopMIDINote(GM_Song *pSong, int16_t the_instrument, 
                         int16_t the_channel, int16_t the_track, int16_t notePitch);
+
+/* Patch/bank mapping shared by GenSeq note-on and GenBankBalance MIDI estimate. */
+int16_t PV_ConvertPatchBank(GM_Song *pSong, int16_t thePatch, int16_t theChannel);
+int16_t PV_DetermineInstrumentToUse(GM_Song *pSong, int16_t midiNote, int16_t MIDIChannel);
 
 // voices modifiers
 int16_t SetChannelPitchBend(GM_Song *pSong, int16_t the_channel, unsigned char bendRange, unsigned char bendMSB, unsigned char bendLSB);

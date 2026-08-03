@@ -3574,10 +3574,10 @@ uint32_t XFixedFloor(XFIXED value)
 // given a pointer, get a int16_t ordered in an Intel way
 uint16_t XGetShortIntel(void const* pData)
 {
-    register unsigned char  *pByte;
+    register const unsigned char *pByte;
     register uint16_t data;
 
-    pByte = (unsigned char *)pData;
+    pByte = (const unsigned char *)pData;
     data = ((uint16_t)pByte[1] << 8) |
            (uint16_t)pByte[0];
     return data;
@@ -3585,12 +3585,12 @@ uint16_t XGetShortIntel(void const* pData)
 // given a pointer, get a long ordered in an Intel way
 uint32_t XGetLongIntel(void const* pData)
 {
-    register unsigned char  *pByte;
+    register const unsigned char *pByte;
     register uint32_t  data;
 
-    pByte = (unsigned char *)pData;
+    pByte = (const unsigned char *)pData;
     data = ((uint32_t)pByte[3] << 24L) |
-           ((uint32_t)pByte[2] << 16L) | 
+           ((uint32_t)pByte[2] << 16L) |
            ((uint32_t)pByte[1] << 8L) |
            (uint32_t)pByte[0];
     return data;
@@ -3599,10 +3599,10 @@ uint32_t XGetLongIntel(void const* pData)
 // given a pointer, get a int16_t ordered in a Motorola way
 uint16_t XGetShort(void const* pData)
 {
-    register unsigned char  *pByte;
+    register const unsigned char *pByte;
     register uint16_t data;
 
-    pByte = (unsigned char *)pData;
+    pByte = (const unsigned char *)pData;
     data = ((uint16_t)pByte[0] << 8) |
            (uint16_t)pByte[1];
     return data;
@@ -3610,10 +3610,10 @@ uint16_t XGetShort(void const* pData)
 // given a pointer, get a long ordered in a Motorola way
 uint32_t XGetLong(void const* pData)
 {
-    register unsigned char  *pByte;
+    register const unsigned char *pByte;
     register uint32_t  data;
 
-    pByte = (unsigned char *)pData;
+    pByte = (const unsigned char *)pData;
     data = ((uint32_t)pByte[0] << 24L) |
            ((uint32_t)pByte[1] << 16L) | 
            ((uint32_t)pByte[2] << 8L) |
