@@ -1,6 +1,5 @@
 #include "pch.h"
 #include "InputDecoder.h"
-#include "NeoBAE.h"
 
 static bool IsNeoBAEExtension(const char* extension)
 {
@@ -21,102 +20,43 @@ static bool IsNeoBAEExtension(const char* extension)
 	return false;
 }
 
-static bool IsRmfOrZmfContainer(const t_uint8* data, size_t size)
-{
-	if (!data || size < 4)
-		return false;
-	return (data[0] == 'I' && data[1] == 'R' && data[2] == 'E' && data[3] == 'Z')
-		|| (data[0] == 'Z' && data[1] == 'R' && data[2] == 'E' && data[3] == 'Z');
-}
-
 static void SetMetaUtf8(file_info& info, const char* name, const char* ansiValue)
 {
 	if (!name || !ansiValue || !ansiValue[0])
 		return;
-	/* RMF text is MacRoman → WinANSI in BAEUtil_GetRmfSongInfo; foobar wants UTF-8. */
+	/* RMF text is MacRoman→WinANSI from BAEUtil/probe; foobar wants UTF-8. */
 	const pfc::stringcvt::string_utf8_from_ansi utf8(ansiValue);
 	if (utf8.get_ptr() && utf8.get_ptr()[0])
 		info.meta_set(name, utf8.get_ptr());
 }
 
-static void AppendCommentUtf8(file_info& info, const char* ansiValue)
+/* Map Beatnik RMF/ZMF song-info (from mixer-free Prepare probe) onto foobar tags.
+ * Composer → artist, Title → title, Composer Notes → comment. */
+static void FillRmfMetadata(file_info& info, const BAE_RmfSongMetadata& meta)
 {
-	if (!ansiValue || !ansiValue[0])
-		return;
-	const pfc::stringcvt::string_utf8_from_ansi utf8(ansiValue);
-	const char* text = utf8.get_ptr();
-	if (!text || !text[0])
-		return;
-	const char* existing = info.meta_get("comment", 0);
-	if (existing && existing[0]) {
-		pfc::string8 merged;
-		merged << existing << "\n" << text;
-		info.meta_set("comment", merged.get_ptr());
-	} else {
-		info.meta_set("comment", text);
+	SetMetaUtf8(info, "title", meta.title);
+
+	if (meta.composer[0]) {
+		SetMetaUtf8(info, "artist", meta.composer);
+		SetMetaUtf8(info, "composer", meta.composer);
+	} else if (meta.performed[0]) {
+		SetMetaUtf8(info, "artist", meta.performed);
 	}
-}
+	if (meta.performed[0])
+		SetMetaUtf8(info, "performer", meta.performed);
 
-/* Map Beatnik RMF/ZMF song-info fields onto foobar tags.
- * Primary credits: Composer → artist (RMF libraries browse that way), Title → title,
- * Composer Notes → comment. Remaining fields use standard or descriptive names. */
-static void FillRmfMetadata(file_info& info, const void* data, size_t size)
-{
-	if (!data || size == 0 || size > 0x7FFFFFFFu)
-		return;
-
-	char buf[4096];
-	auto readField = [&](BAEInfoType type) -> bool {
-		buf[0] = 0;
-		return BAEUtil_GetRmfSongInfo((void*)data, (uint32_t)size, 0, type, buf, (uint32_t)sizeof(buf)) == BAE_NO_ERROR
-			&& buf[0] != 0;
-	};
-
-	if (readField(TITLE_INFO))
-		SetMetaUtf8(info, "title", buf);
-
-	char composer[4096] = {};
-	char performed[4096] = {};
-	if (readField(COMPOSER_INFO)) {
-		strncpy(composer, buf, sizeof(composer) - 1);
-		composer[sizeof(composer) - 1] = 0;
-	}
-	if (readField(PERFORMED_BY_INFO)) {
-		strncpy(performed, buf, sizeof(performed) - 1);
-		performed[sizeof(performed) - 1] = 0;
-	}
-
-	/* Composer is the usual RMF credit line → artist for library display. */
-	if (composer[0]) {
-		SetMetaUtf8(info, "artist", composer);
-		SetMetaUtf8(info, "composer", composer);
-	} else if (performed[0]) {
-		SetMetaUtf8(info, "artist", performed);
-	}
-	if (performed[0])
-		SetMetaUtf8(info, "performer", performed);
-
-	if (readField(COMPOSER_NOTES_INFO))
-		AppendCommentUtf8(info, buf);
-
-	struct MapEntry { BAEInfoType type; const char* tag; };
-	static const MapEntry kSimpleMaps[] = {
-		{ COPYRIGHT_INFO, "copyright" },
-		{ GENRE_INFO, "genre" },
-		{ SUB_GENRE_INFO, "style" },
-		{ PUBLISHER_CONTACT_INFO, "publisher" },
-		{ LICENSED_TO_URL_INFO, "www" },
-		{ TEMPO_DESCRIPTION_INFO, "tempo" },
-		{ ORIGINAL_SOURCE_INFO, "original source" },
-		{ INDEX_NUMBER_INFO, "index" },
-		{ USE_OF_LICENSE_INFO, "license" },
-		{ LICENSE_TERM_INFO, "license term" },
-		{ EXPIRATION_DATE_INFO, "expiration" },
-	};
-	for (const MapEntry& entry : kSimpleMaps) {
-		if (readField(entry.type))
-			SetMetaUtf8(info, entry.tag, buf);
-	}
+	SetMetaUtf8(info, "comment", meta.composer_notes);
+	SetMetaUtf8(info, "copyright", meta.copyright);
+	SetMetaUtf8(info, "genre", meta.genre);
+	SetMetaUtf8(info, "style", meta.sub_genre);
+	SetMetaUtf8(info, "publisher", meta.publisher);
+	SetMetaUtf8(info, "www", meta.licensed_url);
+	SetMetaUtf8(info, "tempo", meta.tempo);
+	SetMetaUtf8(info, "original source", meta.original_source);
+	SetMetaUtf8(info, "index", meta.index_number);
+	SetMetaUtf8(info, "license", meta.use_license);
+	SetMetaUtf8(info, "license term", meta.license_term);
+	SetMetaUtf8(info, "expiration", meta.expiration);
 }
 
 void InputDecoder::open(service_ptr_t<file> fileHint, const char* path, t_input_open_reason reason, abort_callback& abort)
@@ -171,8 +111,8 @@ void InputDecoder::get_info(file_info& info, abort_callback& abort)
 	info.info_set("codec", m_engine.GetCodecName());
 	info.info_set("codec_profile", "NeoBAE");
 
-	if (IsRmfOrZmfContainer(m_data.get_ptr(), m_data.get_size()))
-		FillRmfMetadata(info, m_data.get_ptr(), m_data.get_size());
+	if (const BAE_RmfSongMetadata* meta = m_engine.GetRmfMetadata())
+		FillRmfMetadata(info, *meta);
 }
 
 t_filestats2 InputDecoder::get_stats2(unsigned flags, abort_callback& abort)

@@ -389,7 +389,48 @@ static XPTR FB2K_DecodeMidiResource(XPTR raw, XResourceType rtype, int32_t *ioSi
 	return raw;
 }
 
-static BAEResult FB2K_ExtractRmfToSmf(const void *data, uint32_t size, void **outSmf, uint32_t *outSmfLen)
+static void FB2K_CopyMacStr(char *dst, size_t dstSize, const char *src)
+{
+	size_t i;
+
+	if (!dst || dstSize == 0)
+		return;
+	dst[0] = 0;
+	if (!src || !src[0])
+		return;
+	for (i = 0; i + 1 < dstSize && src[i]; ++i)
+		dst[i] = XTranslateMacToWin(src[i]);
+	dst[i] = 0;
+}
+
+static void FB2K_FillRmfMetadata(BAE_RmfSongMetadata *out, const SongResource_Info *songInfo)
+{
+	if (!out)
+		return;
+	memset(out, 0, sizeof(*out));
+	if (!songInfo)
+		return;
+
+	FB2K_CopyMacStr(out->title, sizeof(out->title), songInfo->title);
+	FB2K_CopyMacStr(out->performed, sizeof(out->performed), songInfo->performed);
+	FB2K_CopyMacStr(out->composer, sizeof(out->composer), songInfo->composer);
+	FB2K_CopyMacStr(out->copyright, sizeof(out->copyright), songInfo->copyright);
+	FB2K_CopyMacStr(out->publisher, sizeof(out->publisher), songInfo->publisher_contact_info);
+	FB2K_CopyMacStr(out->use_license, sizeof(out->use_license), songInfo->use_license);
+	FB2K_CopyMacStr(out->licensed_url, sizeof(out->licensed_url), songInfo->licensed_to_URL);
+	FB2K_CopyMacStr(out->license_term, sizeof(out->license_term), songInfo->license_term);
+	FB2K_CopyMacStr(out->expiration, sizeof(out->expiration), songInfo->expire_date);
+	FB2K_CopyMacStr(out->composer_notes, sizeof(out->composer_notes), songInfo->compser_notes);
+	FB2K_CopyMacStr(out->index_number, sizeof(out->index_number), songInfo->index_number);
+	FB2K_CopyMacStr(out->genre, sizeof(out->genre), songInfo->genre);
+	FB2K_CopyMacStr(out->sub_genre, sizeof(out->sub_genre), songInfo->sub_genre);
+	FB2K_CopyMacStr(out->tempo, sizeof(out->tempo), songInfo->tempo_description);
+	FB2K_CopyMacStr(out->original_source, sizeof(out->original_source), songInfo->original_source);
+	out->present = 1;
+}
+
+static BAEResult FB2K_ExtractRmfToSmf(const void *data, uint32_t size, void **outSmf, uint32_t *outSmfLen,
+                                     BAE_RmfSongMetadata *outMetadata)
 {
 	XFILE fileRef;
 	SongResource *songResource = NULL;
@@ -425,6 +466,8 @@ static BAEResult FB2K_ExtractRmfToSmf(const void *data, uint32_t size, void **ou
 		XFileClose(fileRef);
 		return BAE_BAD_FILE;
 	}
+	if (outMetadata)
+		FB2K_FillRmfMetadata(outMetadata, songInfo);
 	objectResourceID = songInfo->objectResourceID;
 
 	midiData = XGetFileResource(fileRef, ID_MIDI, objectResourceID, NULL, &midiSize);
@@ -518,12 +561,15 @@ static BAEResult FB2K_ExtractRmfToSmf(const void *data, uint32_t size, void **ou
 }
 
 static BAEResult FB2K_ExtractToSmf(void const *data, uint32_t dataSize, BAEFileType ftype,
-                                   void **outSmf, uint32_t *outSmfLen)
+                                   void **outSmf, uint32_t *outSmfLen,
+                                   BAE_RmfSongMetadata *outMetadata)
 {
 	if (!data || dataSize == 0 || !outSmf || !outSmfLen)
 		return BAE_PARAM_ERR;
 	*outSmf = NULL;
 	*outSmfLen = 0;
+	if (outMetadata)
+		memset(outMetadata, 0, sizeof(*outMetadata));
 
 	if (ftype == BAE_MIDI_TYPE)
 	{
@@ -565,7 +611,7 @@ static BAEResult FB2K_ExtractToSmf(void const *data, uint32_t dataSize, BAEFileT
 #endif
 
 	if (ftype == BAE_RMF)
-		return FB2K_ExtractRmfToSmf(data, dataSize, outSmf, outSmfLen);
+		return FB2K_ExtractRmfToSmf(data, dataSize, outSmf, outSmfLen, outMetadata);
 
 #if USE_XMF_SUPPORT == TRUE && USE_NATIVE_DLS == TRUE
 	if (ftype == BAE_XMF)
@@ -605,7 +651,8 @@ static BAEResult FB2K_ExtractToSmf(void const *data, uint32_t dataSize, BAEFileT
 BAEResult BAE_ProbeSongLengthFromMemory(void const *data,
                                         uint32_t dataSize,
                                         uint32_t *outLengthMicros,
-                                        BAEFileType *outFileType)
+                                        BAEFileType *outFileType,
+                                        BAE_RmfSongMetadata *outMetadata)
 {
 	BAEFileType ftype;
 	void *smf = NULL;
@@ -619,6 +666,8 @@ BAEResult BAE_ProbeSongLengthFromMemory(void const *data,
 	*outLengthMicros = 0;
 	if (outFileType)
 		*outFileType = BAE_INVALID_TYPE;
+	if (outMetadata)
+		memset(outMetadata, 0, sizeof(*outMetadata));
 
 	ftype = BAE_INVALID_TYPE;
 	if (dataSize >= 4)
@@ -654,7 +703,7 @@ BAEResult BAE_ProbeSongLengthFromMemory(void const *data,
 	if (ftype == BAE_WAVE_TYPE || ftype == BAE_AIFF_TYPE || ftype == BAE_AU_TYPE)
 		return BAE_INVALID_TYPE;
 
-	err = FB2K_ExtractToSmf(data, dataSize, ftype, &smf, &smfLen);
+	err = FB2K_ExtractToSmf(data, dataSize, ftype, &smf, &smfLen, outMetadata);
 	if (err != BAE_NO_ERROR || !smf || smfLen == 0)
 	{
 		if (smf)

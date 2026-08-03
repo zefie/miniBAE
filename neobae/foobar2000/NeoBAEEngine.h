@@ -2,6 +2,8 @@
 
 #include "pch.h"
 #include "Configuration.h"
+#include "NeoBAEFeatures.h"
+#include "BAE_ProbeSongLength.h"
 
 #include <condition_variable>
 
@@ -33,13 +35,16 @@ public:
 	NeoBAEEngine(const NeoBAEEngine&) = delete;
 	NeoBAEEngine& operator=(const NeoBAEEngine&) = delete;
 
-	// Cache file bytes + prefs and resolve duration via mixer-free
-	// BAE_ProbeSongLengthFromMemory (no MusicGlobals / exclusive lock).
+	// Cache file bytes + prefs and resolve duration (+ RMF/ZMF tags) via
+	// mixer-free BAE_ProbeSongLengthFromMemory (no MusicGlobals / exclusive lock).
 	void Prepare(const void* data, size_t size, const char* pathHint, const NeoBAEPlaybackSettings& settings, abort_callback& abort);
 
 	double GetLengthSeconds() const { return m_lengthSeconds; }
 	const char* GetCodecName() const { return m_codecName.get_ptr(); }
 	unsigned GetSampleRate() const { return m_settings.sampleRateHz; }
+	const BAE_RmfSongMetadata* GetRmfMetadata() const {
+		return m_rmfMetadata.present ? &m_rmfMetadata : nullptr;
+	}
 
 	// Acquire exclusive mixer, load song, start synthesis.
 	void StartDecode(bool allowLooping, abort_callback& abort, const NeoBAEPlaybackSettings* settingsRefresh = nullptr);
@@ -78,6 +83,7 @@ private:
 	double m_lengthSeconds = 0.0;
 	uint32_t m_lengthMicros = 0;
 	pfc::string8 m_codecName;
+	BAE_RmfSongMetadata m_rmfMetadata{};
 
 	bool m_started = false;
 	bool m_allowLooping = false;

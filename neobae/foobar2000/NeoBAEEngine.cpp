@@ -1,7 +1,5 @@
 #include "pch.h"
 #include "NeoBAEEngine.h"
-#include "NeoBAEFeatures.h"
-#include "BAE_ProbeSongLength.h"
 
 #include "NeoBAE.h"
 #include "BAE_API.h"
@@ -148,6 +146,7 @@ void NeoBAEEngine::TeardownMixer_Locked(bool clearMetadata, bool releaseGlobalRe
 		m_lengthSeconds = 0.0;
 		m_lengthMicros = 0;
 		m_codecName = "";
+		memset(&m_rmfMetadata, 0, sizeof(m_rmfMetadata));
 	}
 
 	if (releaseGlobalRef)
@@ -353,6 +352,54 @@ void NeoBAEEngine::OpenMixerAndSong_Locked(const char* pathHint)
 	LoadSong_Locked(m_fileData.get_ptr(), m_fileData.get_size(), pathHint);
 }
 
+static bool IsRmfOrZmfBytes(const void* data, size_t size)
+{
+	if (!data || size < 4)
+		return false;
+	const auto* b = static_cast<const unsigned char*>(data);
+	return (b[0] == 'I' && b[1] == 'R' && b[2] == 'E' && b[3] == 'Z')
+		|| (b[0] == 'Z' && b[1] == 'R' && b[2] == 'E' && b[3] == 'Z');
+}
+
+static void CopyRmfField(char* dst, size_t dstBytes, void* data, uint32_t size, BAEInfoType type)
+{
+	if (!dst || dstBytes == 0)
+		return;
+	dst[0] = 0;
+	(void)BAEUtil_GetRmfSongInfo(data, size, 0, type, dst, (uint32_t)dstBytes);
+}
+
+/* Mixer-free RMF/ZMF tags via public BAEUtil (does not need the probe DLL entry). */
+static void FillRmfMetadataFromUtil(BAE_RmfSongMetadata& out, void* data, uint32_t size)
+{
+	memset(&out, 0, sizeof(out));
+	if (!data || size == 0 || !IsRmfOrZmfBytes(data, size))
+		return;
+
+	CopyRmfField(out.title, sizeof(out.title), data, size, TITLE_INFO);
+	CopyRmfField(out.performed, sizeof(out.performed), data, size, PERFORMED_BY_INFO);
+	CopyRmfField(out.composer, sizeof(out.composer), data, size, COMPOSER_INFO);
+	CopyRmfField(out.copyright, sizeof(out.copyright), data, size, COPYRIGHT_INFO);
+	CopyRmfField(out.publisher, sizeof(out.publisher), data, size, PUBLISHER_CONTACT_INFO);
+	CopyRmfField(out.use_license, sizeof(out.use_license), data, size, USE_OF_LICENSE_INFO);
+	CopyRmfField(out.licensed_url, sizeof(out.licensed_url), data, size, LICENSED_TO_URL_INFO);
+	CopyRmfField(out.license_term, sizeof(out.license_term), data, size, LICENSE_TERM_INFO);
+	CopyRmfField(out.expiration, sizeof(out.expiration), data, size, EXPIRATION_DATE_INFO);
+	CopyRmfField(out.composer_notes, sizeof(out.composer_notes), data, size, COMPOSER_NOTES_INFO);
+	CopyRmfField(out.index_number, sizeof(out.index_number), data, size, INDEX_NUMBER_INFO);
+	CopyRmfField(out.genre, sizeof(out.genre), data, size, GENRE_INFO);
+	CopyRmfField(out.sub_genre, sizeof(out.sub_genre), data, size, SUB_GENRE_INFO);
+	CopyRmfField(out.tempo, sizeof(out.tempo), data, size, TEMPO_DESCRIPTION_INFO);
+	CopyRmfField(out.original_source, sizeof(out.original_source), data, size, ORIGINAL_SOURCE_INFO);
+
+	out.present = (out.title[0] || out.composer[0] || out.performed[0] || out.copyright[0]
+		|| out.composer_notes[0] || out.genre[0] || out.publisher[0]
+		|| out.original_source[0]) ? 1 : 0;
+	/* Still mark present for IREZ/ZREZ so get_info knows we probed (even if all blank). */
+	if (!out.present)
+		out.present = 1;
+}
+
 void NeoBAEEngine::Prepare(const void* data, size_t size, const char* pathHint, const NeoBAEPlaybackSettings& settings, abort_callback& abort)
 {
 	if (!data || size == 0)
@@ -371,21 +418,35 @@ void NeoBAEEngine::Prepare(const void* data, size_t size, const char* pathHint, 
 		memcpy(m_fileData.get_ptr(), data, size);
 		m_lengthSeconds = 0.0;
 		m_lengthMicros = 0;
+		memset(&m_rmfMetadata, 0, sizeof(m_rmfMetadata));
 		SniffCodecFromData_Locked();
 	}
 
-	// Mixer-free duration — safe while another session owns MusicGlobals.
+	// Mixer-free duration + RMF/ZMF tags — safe while another session owns MusicGlobals.
 	uint32_t micros = 0;
 	BAEFileType ftype = BAE_INVALID_TYPE;
+	BAE_RmfSongMetadata meta{};
 	const BAEResult err = BAE_ProbeSongLengthFromMemory(
 		m_fileData.get_ptr(),
 		(uint32_t)m_fileData.get_size(),
 		&micros,
-		&ftype);
+		&ftype,
+		&meta);
 	if (err == BAE_NO_ERROR && micros > 0) {
 		m_lengthMicros = micros;
 		m_lengthSeconds = (double)micros / 1000000.0;
 	}
+
+	/* Prefer probe-side copy (same SongResource open as duration). If the DLL
+	 * is older / probe left present=0, fall back to BAEUtil so playlist add
+	 * still gets title/artist without decoding. */
+	if (meta.present && (meta.title[0] || meta.composer[0] || meta.performed[0] || meta.copyright[0]))
+		m_rmfMetadata = meta;
+	else if (IsRmfOrZmfBytes(m_fileData.get_ptr(), m_fileData.get_size()))
+		FillRmfMetadataFromUtil(m_rmfMetadata, m_fileData.get_ptr(), (uint32_t)m_fileData.get_size());
+	else if (meta.present)
+		m_rmfMetadata = meta;
+
 	if (ftype != BAE_INVALID_TYPE)
 		SetCodecLabel_Locked((int)ftype);
 }
