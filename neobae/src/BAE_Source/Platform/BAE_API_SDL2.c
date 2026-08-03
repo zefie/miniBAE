@@ -33,6 +33,9 @@ static int g_muted = 0;
 static uint32_t g_lastCallbackFrames = 0;
 static Uint64 g_perfFreq = 0;
 static Uint64 g_startTicks = 0;
+/* GM_Mixer* from Acquire — preferred over SDL userdata so re-Acquire while
+ * the device is already open still rebinds the audio callback. */
+static void *g_mixerThreadContext = NULL;
 
 // Mutex wrapper
 typedef struct
@@ -349,8 +352,9 @@ static void audio_callback(void *userdata, Uint8 *stream, int len)
             break;
         }
 
-        // Call the engine to generate audio
-        BAE_BuildMixerSlice(userdata, g_sliceStatic, sliceBytes, frames);
+        // Call the engine to generate audio (prefer Acquire-stored mixer)
+        void *mixerCtx = g_mixerThreadContext ? g_mixerThreadContext : userdata;
+        BAE_BuildMixerSlice(mixerCtx, g_sliceStatic, sliceBytes, frames);
 
         // If platform PCM recorder is active, append this slice exactly as generated
         if (g_pcm_rec_fp)
@@ -876,7 +880,7 @@ int32_t BAE_GetAudioByteBufferSize(void) { return g_audioByteBufferSize; }
 
 int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t channels, uint32_t bits)
 {
-    (void)threadContext;
+    g_mixerThreadContext = threadContext;
     BAE_PRINTF("BAE_AcquireAudioCard called: %u Hz, %u ch, %u bits\n", sampleRate, channels, bits);
 
     if (g_audioDevice)
@@ -951,6 +955,7 @@ int BAE_ReleaseAudioCard(void *threadContext)
         SDL_CloseAudioDevice(g_audioDevice);
         g_audioDevice = 0;
     }
+    g_mixerThreadContext = NULL;
     return 0;
 }
 int BAE_Mute(void)

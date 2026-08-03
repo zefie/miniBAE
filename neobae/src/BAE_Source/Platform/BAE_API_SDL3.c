@@ -39,6 +39,9 @@ static int g_muted = 0;
 static uint32_t g_lastCallbackFrames = 0;
 static Uint64 g_perfFreq = 0;
 static Uint64 g_startTicks = 0;
+/* GM_Mixer* from Acquire — preferred over SDL userdata so re-Acquire while
+ * the stream is already open still rebinds the audio callback. */
+static void *g_mixerThreadContext = NULL;
 
 // Engine forward decls
 extern void BAE_BuildMixerSlice(void *threadContext, void *pAudioBuffer, int32_t bufferByteLength, int32_t sampleFrames);
@@ -164,6 +167,7 @@ static void SDLCALL audio_stream_callback(void *userdata, SDL_AudioStream *strea
     if (g_muted || additional_amount <= 0) return;
     PV_UpdateSliceSizeIfNeeded();
     const int sampleBytes = (g_bits / 8) * (int)g_channels; if (sampleBytes <= 0) return;
+    void *mixerCtx = g_mixerThreadContext ? g_mixerThreadContext : userdata;
     static int sliceValidBytes = 0; static int sliceConsumedBytes = 0;
     int bytesNeeded = additional_amount;
     while (bytesNeeded > 0)
@@ -178,7 +182,7 @@ static void SDLCALL audio_stream_callback(void *userdata, SDL_AudioStream *strea
         if (sliceConsumedBytes >= sliceValidBytes)
         {
             int32_t sliceBytes = g_audioByteBufferSize; int32_t frames = sliceBytes / sampleBytes; if (frames <= 0) break;
-            BAE_BuildMixerSlice(userdata, g_sliceStatic, sliceBytes, frames);
+            BAE_BuildMixerSlice(mixerCtx, g_sliceStatic, sliceBytes, frames);
             if (g_pcm_rec_fp)
             { size_t wrote = fwrite(g_sliceStatic,1,(size_t)sliceBytes,g_pcm_rec_fp); if (wrote == (size_t)sliceBytes) g_pcm_rec_data_bytes += (uint64_t)wrote; }
 #if USE_FLAC_ENCODER == TRUE
@@ -319,6 +323,7 @@ int32_t BAE_GetAudioByteBufferSize(void){ return g_audioByteBufferSize; }
 
 int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t channels, uint32_t bits)
 {
+    g_mixerThreadContext = threadContext;
     if (g_audioStream) return 0; // already
     if (!g_initialized)
     {
@@ -377,6 +382,7 @@ int BAE_ReleaseAudioCard(void *threadContext)
         SDL_DestroyAudioStream(g_audioStream);
         g_audioStream = NULL; g_playbackDevice = 0;
     }
+    g_mixerThreadContext = NULL;
     return 0;
 }
 int BAE_Mute(void){ g_muted = 1; return 0; }

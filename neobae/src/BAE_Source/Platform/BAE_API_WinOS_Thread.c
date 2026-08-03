@@ -131,6 +131,9 @@
 static HANDLE               theFrameThread = NULL;
 // The function to call 
 static BAE_FrameThreadProc  theFrameProc = NULL;
+/* GM_Mixer* from BAE_AcquireAudioCard / BAE_CreateFrameThread — must reach the
+ * frame proc so BAE_BuildMixerSlice can bind TLS on this OS thread. */
+static void*                theFrameThreadContext = NULL;
 
 
 ////////////////////////////////////////////////// FORWARDS:
@@ -153,7 +156,6 @@ static void         PV_DestroyAudioContext(void);
 // Create and start the frame thread
 int BAE_CreateFrameThread(void* threadContext, BAE_FrameThreadProc proc)
 {
-    threadContext;
     if (proc)
     {
 #if USE_WIN32_THREAD_API
@@ -162,6 +164,7 @@ int BAE_CreateFrameThread(void* threadContext, BAE_FrameThreadProc proc)
         unsigned int    threadID;
 #endif
         theFrameProc = proc;
+        theFrameThreadContext = threadContext;
 #if USE_WIN32_THREAD_API
         theFrameThread = CreateThread(NULL, 0L, 
                                         PV_NativeFrameThreadProc,
@@ -180,6 +183,7 @@ int BAE_CreateFrameThread(void* threadContext, BAE_FrameThreadProc proc)
             return 0;
         }
         theFrameProc = NULL;
+        theFrameThreadContext = NULL;
     }
     return -1;
 }
@@ -214,6 +218,7 @@ int BAE_DestroyFrameThread(void* threadContext)
         CloseHandle(theFrameThread);
         theFrameThread = NULL;
         theFrameProc = NULL;
+        theFrameThreadContext = NULL;
         return 0;
     }
     DEBUG_STR("PV_NativeFrameThreadProc() called when no thread started\n");
@@ -233,8 +238,15 @@ static THREAD_CALL PV_NativeFrameThreadProc(LPVOID lpv)
 
     if (theFrameProc)
     {
+#if JAVA_SOUND
+        /* Legacy Java path: attach JNI and pass JNIEnv* (not a GM_Mixer*). */
         (*theFrameProc)(PV_CreateAudioContext());
         PV_DestroyAudioContext();
+#else
+        /* Pass the GM_Mixer* saved at CreateFrameThread so BuildMixerSlice can
+         * bind TLS on this audio thread (MusicGlobals is thread-local). */
+        (*theFrameProc)(theFrameThreadContext);
+#endif
     }
     else
     {

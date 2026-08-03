@@ -192,6 +192,9 @@ static uint32_t g_totalSamplesPlayed = 0;
 // Software master volume & balance (range volume 0..256, balance -256..256)
 static int16_t g_unscaled_volume = 256;
 static int16_t g_balance = 0;
+/* GM_Mixer* from GM_ResumeGeneralSound — audio callback runs on another thread
+ * where TLS MusicGlobals is unset, so BuildMixerSlice must receive this. */
+static void *g_mixerThreadContext = NULL;
 
 #if defined(__ANDROID__)
 // forward declaration for callback (defined below)
@@ -617,12 +620,12 @@ int BAE_Unmute(void)
 // return 0 if ok, -1 if failed
 int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t channels, uint32_t bits)
 {
-    (void)threadContext;
     SLresult r;
 #define MINI_BAE_LOGD(fmt, ...) __android_log_print(ANDROID_LOG_DEBUG, "miniBAE", "BAE_AcquireAudioCard: " fmt, ##__VA_ARGS__)
 #define MINI_BAE_LOGE(fmt, ...) __android_log_print(ANDROID_LOG_ERROR, "miniBAE", "BAE_AcquireAudioCard: " fmt, ##__VA_ARGS__)
-    MINI_BAE_LOGD("enter sampleRate=%u channels=%u bits=%u", sampleRate, channels, bits);
-    // if already created, return success
+    g_mixerThreadContext = threadContext;
+    MINI_BAE_LOGD("enter sampleRate=%u channels=%u bits=%u mixer=%p", sampleRate, channels, bits, threadContext);
+    // if already created, return success (still refresh mixer context above)
     if (gPlayerObject != NULL) { MINI_BAE_LOGD("already acquired (gPlayerObject=%p)", (void*)gPlayerObject); return 0; }
     g_os_sampleRate = sampleRate;
     g_os_channels = channels;
@@ -696,6 +699,7 @@ int BAE_ReleaseAudioCard(void *threadContext)
     if (g_audioBufferA) { free(g_audioBufferA); g_audioBufferA = NULL; }
     if (g_audioBufferB) { free(g_audioBufferB); g_audioBufferB = NULL; }
     g_totalSamplesPlayed = 0;
+    g_mixerThreadContext = NULL;
     return 0;
 }
 
@@ -775,7 +779,7 @@ static void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
     int16_t *buf = g_currentBuffer == 0 ? g_audioBufferA : g_audioBufferB;
     extern void BAE_BuildMixerSlice(void *threadContext, void *pAudioBuffer, int32_t bufferByteLength, int32_t sampleFrames);
     int32_t bytes = (int32_t)(g_bufferFrames * channelsInt * (g_os_bits/8));
-    BAE_BuildMixerSlice(NULL, buf, bytes, g_bufferFrames);
+    BAE_BuildMixerSlice(g_mixerThreadContext, buf, bytes, g_bufferFrames);
     // Apply software master volume & balance (16-bit only)
     if (g_os_bits == 16 && g_unscaled_volume < 256) {
         int16_t vol = g_unscaled_volume;

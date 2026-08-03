@@ -160,6 +160,8 @@ typedef struct
 } AudioControlData;
 
 static AudioControlData* sHardwareChannel;
+/* GM_Mixer* for audio-thread BuildMixerSlice (TLS MusicGlobals is unset there). */
+static void *sMixerThreadContext = NULL;
 
 // This file contains API's that need to be defined in order to get BAE (IgorAudio)
 // to link and compile.
@@ -653,7 +655,7 @@ static OSStatus PV_AudioUnitOutputCallback(void *inUserData,
                 char* buffer = (char*)ioData->mBuffers[0].mData;
                 buffer += (count * THIS->mAudioByteBufferSize);
                 // Generate one frame audio
-                BAE_BuildMixerSlice(NULL, buffer, THIS->mAudioByteBufferSize, THIS->mAudioFramesToGenerate);
+                BAE_BuildMixerSlice(sMixerThreadContext, buffer, THIS->mAudioByteBufferSize, THIS->mAudioFramesToGenerate);
             }
             ioData->mBuffers[0].mDataByteSize = THIS->mAudioByteBufferSize * maxBuffers;
         }
@@ -680,6 +682,7 @@ int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t chan
     int32_t          bufferSize;
     OSStatus      err = noErr;
 
+    sMixerThreadContext = threadContext;
     sHardwareChannel = BAE_Allocate(sizeof(AudioControlData));
     if (sHardwareChannel == NULL)
     {
@@ -812,6 +815,7 @@ int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t chan
 // return 0 if ok, -1 if failed.
 int BAE_ReleaseAudioCard(void *threadContext)
 {
+    (void)threadContext;
     //  Kill sounds currently playing in this channel
     if (sHardwareChannel)
     {
@@ -824,6 +828,7 @@ int BAE_ReleaseAudioCard(void *threadContext)
         BAE_Deallocate(sHardwareChannel);
         sHardwareChannel = NULL;
     }
+    sMixerThreadContext = NULL;
     return 0;
 }
 

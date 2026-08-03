@@ -74,10 +74,18 @@ void BAE_ReleaseMutex(BAE_Mutex mutex) {
 // Audio Hardware (stubs - we use JS audio)
 // ============================================
 
+/* GM_Mixer* from engage; also used by BAE_API_WASM_Export pull path. */
+static void *g_mixerThreadContext = NULL;
+
+void *BAE_WASM_GetMixerThreadContext(void)
+{
+    return g_mixerThreadContext;
+}
+
 // Alternate spelling used by zefie fork
 int BAE_AcquireAudioCard(void* context, uint32_t sampleRate,
                          uint32_t channels, uint32_t bits) {
-    (void)context;
+    g_mixerThreadContext = context;
     (void)sampleRate;
     (void)channels;
     (void)bits;
@@ -86,6 +94,7 @@ int BAE_AcquireAudioCard(void* context, uint32_t sampleRate,
 
 int BAE_ReleaseAudioCard(void* context) {
     (void)context;
+    g_mixerThreadContext = NULL;
     return 0;  // Success
 }
 

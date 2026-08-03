@@ -706,6 +706,7 @@ int32_t BAE_GetAudioByteBufferSize(void)
 
 int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t channels, uint32_t bits)
 {
+    g_threadContext = threadContext;
     if (g_audioStream.buffer)
     {
         return 0;
@@ -721,8 +722,6 @@ int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t chan
         }
         g_initialized = 1;
     }
-
-    g_threadContext = threadContext;
     g_sampleRate = sampleRate;
     g_channels = channels;
     g_bits = bits;
@@ -752,6 +751,7 @@ int BAE_ReleaseAudioCard(void *threadContext)
         UnloadAudioStream(g_audioStream);
         memset(&g_audioStream, 0, sizeof(g_audioStream));
     }
+    g_threadContext = NULL;
     return 0;
 }
 

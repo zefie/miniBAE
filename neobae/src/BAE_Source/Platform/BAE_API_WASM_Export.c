@@ -66,6 +66,20 @@ static size_t gTempRefillBufferSize = 0;
 // External function from GenSynth.c
 extern void BAE_BuildMixerSlice(void *threadContext, void *pAudioBuffer,
                                 int32_t bufferByteLength, int32_t sampleFrames);
+/* From BAE_API_WASM.c — set when hardware is engaged; may be NULL if Open(..., FALSE). */
+extern void *BAE_WASM_GetMixerThreadContext(void);
+extern struct GM_Mixer *GM_GetCurrentMixer(void);
+
+/* Prefer acquire-stored mixer, else MakeCurrent + TLS. */
+static void *PV_WASM_MixerSliceContext(void)
+{
+    void *ctx = BAE_WASM_GetMixerThreadContext();
+    if (ctx)
+        return ctx;
+    if (gMixer && BAEMixer_MakeCurrent(gMixer) == BAE_NO_ERROR)
+        return (void *)GM_GetCurrentMixer();
+    return NULL;
+}
 
 #if SUPPORT_KARAOKE == TRUE
 static void PV_LyricCallback(struct GM_Song *songPtr, const char *lyric, uint32_t timeUs, void *ref);
@@ -769,7 +783,7 @@ int16_t* BAE_WASM_GenerateAudio(int frames) {
         size_t framesToGenerate = frames - framesRead;
         int16_t *destPtr = &gAudioBuffer[framesRead * 2];
         long bufferByteLength = framesToGenerate * 2 * sizeof(int16_t);
-        BAE_BuildMixerSlice(NULL, (void*)destPtr, bufferByteLength, framesToGenerate);
+        BAE_BuildMixerSlice(PV_WASM_MixerSliceContext(), (void*)destPtr, bufferByteLength, framesToGenerate);
     }
     
     // Refill ring buffer to maintain 250ms buffer
@@ -786,7 +800,7 @@ int16_t* BAE_WASM_GenerateAudio(int frames) {
             
             // Use reusable buffer - no malloc/free in hot path
             long refillBytes = framesToRefill * 2 * sizeof(int16_t);
-            BAE_BuildMixerSlice(NULL, (void*)gTempRefillBuffer, refillBytes, framesToRefill);
+            BAE_BuildMixerSlice(PV_WASM_MixerSliceContext(), (void*)gTempRefillBuffer, refillBytes, framesToRefill);
             RingBuffer_Write(gTempRefillBuffer, framesToRefill);
         }
     }
