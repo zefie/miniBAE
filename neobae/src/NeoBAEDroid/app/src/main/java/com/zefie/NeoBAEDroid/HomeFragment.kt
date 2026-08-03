@@ -241,7 +241,7 @@ class HomeFragment : Fragment() {
         // Classic chorus ordering (off by default)
         var classicChorus = mutableStateOf(false)
         // Native DLS compatibility mode (disables MobileBAE quirks, off by default)
-        var dlsCompatibilityMode = mutableStateOf(false)
+        var dlsCompatibilityMode = mutableStateOf(true) /* default on for new installs */
         // Optional whole-song peak normalize via MIDI+patch estimate (off by default)
         var normalizePlayback = mutableStateOf(false)
 
@@ -970,7 +970,7 @@ class HomeFragment : Fragment() {
                     velocityCurve.value = prefs.getInt("velocity_curve", 1) // Default to 2nd option
                     fixPanLfoBias.value = prefs.getBoolean("fix_pan_lfo_bias", true)
                     classicChorus.value = prefs.getBoolean("classic_chorus", false)
-                    dlsCompatibilityMode.value = prefs.getBoolean("dls_compatibility_mode", false)
+                    dlsCompatibilityMode.value = prefs.getBoolean("dls_compatibility_mode", true)
                     normalizePlayback.value = prefs.getBoolean("normalize_playback", false)
                     exportCodec.value = prefs.getInt("export_codec", 2) // Default to OGG
                     baeScriptEnabled.value = prefs.getBoolean("baescript_enabled", false)
@@ -2366,7 +2366,7 @@ class HomeFragment : Fragment() {
             Mixer.setNativeCacheDir(requireContext().cacheDir.absolutePath)
 
             // Apply DLS backend preference before restoring any saved bank.
-            val dlsCompatModePref = prefs.getBoolean("dls_compatibility_mode", false)
+            val dlsCompatModePref = prefs.getBoolean("dls_compatibility_mode", true)
             HomeFragment.dlsCompatibilityMode.value = dlsCompatModePref
             Mixer.setDLSCompatibilityMode(dlsCompatModePref)
             
@@ -9252,7 +9252,7 @@ fun SettingsScreenContent(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "DLS Compatibility Mode",
+                        text = "Smart DLS Handling",
                         style = MaterialTheme.typography.h6,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colors.primary,
@@ -9264,7 +9264,7 @@ fun SettingsScreenContent(
                     )
                 }
                 Text(
-                    text = "Enable compatibility mode to broaden support for DLS banks. Disable for authentic MobileBAE behavior. Only applies when using the native DLS loader.",
+                    text = "Enables Smart DLS Handling. Disable to force all DLS to use mobileBAE behavior.",
                     style = MaterialTheme.typography.caption,
                     color = MaterialTheme.colors.onSurface.copy(alpha = 0.6f),
                     modifier = Modifier.padding(top = 4.dp)

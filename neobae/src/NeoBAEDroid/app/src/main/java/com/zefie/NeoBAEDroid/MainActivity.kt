@@ -342,7 +342,7 @@ class MainActivity : AppCompatActivity() {
                 Mixer.setNativeCacheDir(cacheDir.absolutePath)
                 try {
                     val prefs = getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
-                    Mixer.setDLSCompatibilityMode(prefs.getBoolean("dls_compatibility_mode", false))
+                    Mixer.setDLSCompatibilityMode(prefs.getBoolean("dls_compatibility_mode", true))
                 } catch (_: Exception) {
                 }
             }

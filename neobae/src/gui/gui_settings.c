@@ -39,7 +39,7 @@
 
 #if USE_NATIVE_DLS == TRUE
     #include "GenDLS_MobileBAE.h"
-    bool g_use_dls_compatiblity_mode = false;
+    bool g_use_dls_compatiblity_mode = true; /* default on for new installs */
 #endif
 
 extern bool g_dls_compat_tooltip_visible;
@@ -1464,9 +1464,9 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
     {
         bool over = point_in(mx, my, compatDlsRect);
         draw_custom_checkbox(R, compatDlsRect, g_use_dls_compatiblity_mode, over);
-        draw_text(R, compatDlsRect.x + compatDlsRect.w + 6, compatDlsRect.y + 2, "DLS Compatibility Mode", g_text_color);
+        draw_text(R, compatDlsRect.x + compatDlsRect.w + 6, compatDlsRect.y + 2, "Smart DLS Handling", g_text_color);
     }
-    else if (ui_toggle(R, compatDlsRect, &g_use_dls_compatiblity_mode, "DLS Compatibility Mode", mx, my, mclick))
+    else if (ui_toggle(R, compatDlsRect, &g_use_dls_compatiblity_mode, "Smart DLS Handling", mx, my, mclick))
     {
         save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, *loopPlay);
         GM_DLS_SetMobileBAEQuirks(g_use_dls_compatiblity_mode ? false : true); // inverted
@@ -1475,7 +1475,7 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
         Rect compatDlsFullRect = {leftX, dlg.y + 144, 280, 24};
         if (point_in(mx, my, compatDlsFullRect))
         {
-            const char *tooltip_text = "Broadens DLS compatibility. Disable for authentic MobileBAE behavior.";
+            const char *tooltip_text = "Enables Smart DLS Handling. Disable to force all DLS to use mobileBAE behavior.";
             int text_w = 0, text_h = 0;
             measure_text(tooltip_text, &text_w, &text_h);
             int tooltip_w = text_w + 8;

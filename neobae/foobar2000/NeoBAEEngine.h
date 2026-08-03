@@ -12,7 +12,7 @@ struct NeoBAEPlaybackSettings {
 	bool loopEnabled = false;
 	bool loopInfinite = false;
 	unsigned loopCount = 1; // extra plays after first when looping & finite
-	bool dlsCompatibilityMode = false;
+	bool dlsCompatibilityMode = true; /* default on for new installs */
 	bool normalize = false;
 	bool useBuiltinBank = true;
 	pfc::string8 bankPath;

@@ -34,7 +34,7 @@ static constexpr bool kDefaultLoopEnabled = false;
 static constexpr int64_t kDefaultLoopCount = 1;
 static constexpr bool kDefaultLoopInfinite = false;
 static constexpr bool kDefaultUseBuiltinBank = true;
-static constexpr bool kDefaultDLSCompatibilityMode = false;
+static constexpr bool kDefaultDLSCompatibilityMode = true; /* default on for new installs */
 static constexpr bool kDefaultNormalize = false;
 static constexpr int64_t kDefaultSampleRate = 44100;
 
