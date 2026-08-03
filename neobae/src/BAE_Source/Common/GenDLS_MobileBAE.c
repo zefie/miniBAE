@@ -2260,6 +2260,8 @@ OPErr GM_LoadDLSAsXMFOverlayFromMemory(struct GM_Mixer* pMixer, const void* pMem
         return err;
     }
     bank->forceQuirks = true;
+    /* XMF/MXMF embedded DLS is MobileBAE-era content — badge + quirks. */
+    bank->isMobileBAE = true;
 
     if (!pMixer->pDLSSynth) {
         err = GM_InitDLSSynth(&pMixer->pDLSSynth, pMixer->outputRate);
@@ -2692,6 +2694,16 @@ bool GM_DLS_HasMobileBAEBank(struct GM_Mixer* pMixer)
     if (synth->banks[0] && synth->banks[0]->isMobileBAE) return true;
     if (synth->banks[1] && synth->banks[1]->isMobileBAE) return true;
     return false;
+}
+
+bool GM_DLS_HasMobileBAEMainBank(struct GM_Mixer* pMixer)
+{
+    DLS_Synth* synth;
+    if (!pMixer || !pMixer->pDLSSynth) {
+        return false;
+    }
+    synth = (DLS_Synth*)pMixer->pDLSSynth;
+    return (synth->banks[0] && synth->banks[0]->isMobileBAE) ? true : false;
 }
 
 int GM_DLS_GetBankLevel(struct GM_Mixer* pMixer)

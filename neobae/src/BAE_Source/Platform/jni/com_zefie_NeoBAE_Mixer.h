@@ -82,6 +82,12 @@ JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Mixer__1hasEggsDLSBank
 JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Mixer__1hasMobileBAEDLSBank
   (JNIEnv *, jclass, jlong);
 
+JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Mixer__1hasMobileBAEMainBank
+  (JNIEnv *, jclass, jlong);
+
+JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Mixer__1hasXMFDLSOverlayBank
+  (JNIEnv *, jclass, jlong);
+
 JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1getDLSBankLevel
   (JNIEnv *, jclass, jlong);
 

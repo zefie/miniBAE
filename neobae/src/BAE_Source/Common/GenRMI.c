@@ -539,6 +539,12 @@ OPErr GM_LoadRMIFromMemory(const unsigned char *buf, uint32_t len,
                     if (err == NO_ERR)
                     {
                         g_last_rmi_had_soundbank = TRUE;
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
+                        /* Embedded DLS replaces the host bank — drop any prior SF2. */
+                        if (GM_SF2_IsActive())
+                            GM_UnloadSF2Soundfont();
+                        GM_SetMixerSF2Mode(FALSE);
+#endif
                         debug_message("[RMI] Embedded DLS soundbank loaded successfully via native DLS\n");
                     }
                     else

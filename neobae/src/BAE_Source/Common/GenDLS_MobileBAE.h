@@ -205,6 +205,9 @@ bool GM_DLS_HasEggsBank(struct GM_Mixer* pMixer);
 /* True if main or XMF-overlay DLS bank is treated as MobileBAE
  * (has 'pgal', or matched bankinfo.h BANKINFO_FLAG_MOBILEBAE). */
 bool GM_DLS_HasMobileBAEBank(struct GM_Mixer* pMixer);
+/* True if the main DLS bank (banks[0]) is treated as MobileBAE.
+ * Ignores the XMF overlay so host-bank badges stay accurate. */
+bool GM_DLS_HasMobileBAEMainBank(struct GM_Mixer* pMixer);
 /* 2 if primary active DLS bank is Level 2, 1 if Level 1, 0 if none. */
 int GM_DLS_GetBankLevel(struct GM_Mixer* pMixer);
 /* Temporarily force quirks bake for the next DLS bank load (nesting-safe). */

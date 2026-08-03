@@ -353,6 +353,9 @@ class HomeFragment : Fragment() {
     private var hasEggsBank = mutableStateOf(false)
     private var hasMobileBAEBank = mutableStateOf(false)
     private var dlsBankLevel = mutableStateOf(0)
+    private var hasXmfOverlay = mutableStateOf(false)
+    private var hasRmiEmbedded = mutableStateOf(false)
+    private var rmiUsesSf2 = mutableStateOf(false)
 
     private fun refreshBankBadges(bankPathOverride: String? = null) {
         try {
@@ -364,17 +367,81 @@ class HomeFragment : Fragment() {
             }
             if (Mixer.exists()) {
                 hasEggsBank.value = Mixer.hasEggsDLSBank()
-                hasMobileBAEBank.value = Mixer.hasMobileBAEDLSBank()
+                /* Main bank only — XMF overlay is always MobileBAE and would steal the host chip. */
+                hasMobileBAEBank.value = Mixer.hasMobileBAEMainBank()
                 dlsBankLevel.value = Mixer.getDLSBankLevel()
+                hasXmfOverlay.value = Mixer.hasXMFDLSOverlayBank()
+                val song = currentSong
+                val embed = song?.hasEmbeddedBank() == true
+                hasRmiEmbedded.value = embed && !hasXmfOverlay.value
+                rmiUsesSf2.value = hasRmiEmbedded.value && (song?.isSF2Song() == true)
             } else {
                 hasEggsBank.value = false
                 hasMobileBAEBank.value = false
                 dlsBankLevel.value = 0
+                hasXmfOverlay.value = false
+                hasRmiEmbedded.value = false
+                rmiUsesSf2.value = false
             }
         } catch (_: Exception) {
             hasEggsBank.value = false
             hasMobileBAEBank.value = false
             dlsBankLevel.value = 0
+            hasXmfOverlay.value = false
+            hasRmiEmbedded.value = false
+            rmiUsesSf2.value = false
+        }
+    }
+
+    /** Match zefidi: RMI replaces host title; XMF overlays as "Host + Embedded Bank". */
+    private fun applyEmbeddedBankUi(song: Song) {
+        if (!song.hasEmbeddedBank()) return
+        val isXmf = Mixer.hasXMFDLSOverlayBank()
+        if (isXmf) {
+            val base = currentBankName.value
+                .removeSuffix(" + Embedded Bank")
+                .removeSuffix(" + Embedded")
+                .takeIf {
+                    it.isNotBlank() &&
+                        !it.equals("Embedded Bank", ignoreCase = true) &&
+                        it != "Loading..." &&
+                        it != "No Bank Loaded"
+                }
+                ?: run {
+                    val path = if (isAdded) {
+                        requireContext()
+                            .getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
+                            .getString("last_bank_path", "__builtin__")
+                    } else {
+                        "__builtin__"
+                    }
+                    when {
+                        path.isNullOrBlank() || path == "__builtin__" -> "Built-in patches"
+                        else -> File(path).name
+                    }
+                }
+            currentBankName.value = "$base + Embedded Bank"
+        } else {
+            /* RMI: full bank in-file — title is just the embed. */
+            val friendly = try {
+                Mixer.getBankFriendlyName()
+            } catch (_: Exception) {
+                null
+            }
+            currentBankName.value = when {
+                !friendly.isNullOrBlank() &&
+                    !friendly.equals("DLS Bank", ignoreCase = true) -> friendly
+                else -> "Embedded Bank"
+            }
+        }
+    }
+
+    /** Called after bank-swap song reload (MainActivity path skips finishStartNormalizedSong). */
+    fun syncBankUiAfterSongLoad(song: Song?) {
+        if (song == null) return
+        postToMain {
+            applyEmbeddedBankUi(song)
+            refreshBankBadges()
         }
     }
     private var isExporting = mutableStateOf(false)
@@ -1260,6 +1327,9 @@ class HomeFragment : Fragment() {
                         hasEggsBank = hasEggsBank.value,
                         hasMobileBAEBank = hasMobileBAEBank.value,
                         dlsBankLevel = dlsBankLevel.value,
+                        hasXmfOverlay = hasXmfOverlay.value,
+                        hasRmiEmbedded = hasRmiEmbedded.value,
+                        rmiUsesSf2 = rmiUsesSf2.value,
                         isLoadingBank = isLoadingBank.value,
                         isExporting = isExporting.value,
                         exportStatus = exportStatus.value,
@@ -1973,26 +2043,7 @@ class HomeFragment : Fragment() {
         val r = song.start()
         if (r == 0) {
             if (song.hasEmbeddedBank()) {
-                // Match zefidi: keep the user's bank name and append the embedded overlay.
-                val base = currentBankName.value
-                    .removeSuffix(" + Embedded Bank")
-                    .removeSuffix(" + Embedded")
-                    .takeIf {
-                        it.isNotBlank() &&
-                            !it.equals("Embedded Bank", ignoreCase = true) &&
-                            it != "Loading..." &&
-                            it != "No Bank Loaded"
-                    }
-                    ?: run {
-                        val path = requireContext()
-                            .getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
-                            .getString("last_bank_path", "__builtin__")
-                        when {
-                            path.isNullOrBlank() || path == "__builtin__" -> "Built-in patches"
-                            else -> File(path).name
-                        }
-                    }
-                currentBankName.value = "$base + Embedded Bank"
+                applyEmbeddedBankUi(song)
                 refreshBankBadges()
             }
             if (song.isSF2Song() || song.isDLSSong()) {
@@ -3685,6 +3736,9 @@ class HomeFragment : Fragment() {
                         hasEggsBank.value = false
                         hasMobileBAEBank.value = false
                         dlsBankLevel.value = 0
+                        hasXmfOverlay.value = false
+                        hasRmiEmbedded.value = false
+                        rmiUsesSf2.value = false
                         context?.let { Toast.makeText(it, "Failed to load bank (err=$r)", Toast.LENGTH_SHORT).show() }
                     }
                 }
@@ -3861,6 +3915,9 @@ class HomeFragment : Fragment() {
                     hasEggsBank.value = false
                     hasMobileBAEBank.value = false
                     dlsBankLevel.value = 0
+                    hasXmfOverlay.value = false
+                    hasRmiEmbedded.value = false
+                    rmiUsesSf2.value = false
                     context?.let { Toast.makeText(it, "Failed to load built-in patches (err=$r)", Toast.LENGTH_SHORT).show() }
                 }
 
@@ -4377,6 +4434,9 @@ fun NewMusicPlayerScreen(
     hasEggsBank: Boolean,
     hasMobileBAEBank: Boolean,
     dlsBankLevel: Int,
+    hasXmfOverlay: Boolean,
+    hasRmiEmbedded: Boolean,
+    rmiUsesSf2: Boolean,
     isLoadingBank: Boolean,
     isExporting: Boolean,
     exportStatus: String,
@@ -4901,6 +4961,9 @@ fun NewMusicPlayerScreen(
                     hasEggsBank = hasEggsBank,
                     hasMobileBAEBank = hasMobileBAEBank,
                     dlsBankLevel = dlsBankLevel,
+                    hasXmfOverlay = hasXmfOverlay,
+                    hasRmiEmbedded = hasRmiEmbedded,
+                    rmiUsesSf2 = rmiUsesSf2,
                     isLoadingBank = isLoadingBank,
                     reverbType = reverbType,
                     velocityCurve = velocityCurve,
@@ -7270,13 +7333,16 @@ private data class BankFlavorBadge(
     val text: Color,
 )
 
-/** Match zefidi STATUS & BANK flavor chips (miniBAE / NeoBAE / FluidBAE / DLS variants). */
+/** Match zefidi STATUS & BANK flavor chips (miniBAE / NeoBAE / FluidBAE / DLS / XMF / RMI). */
 private fun resolveBankFlavorBadges(
     bankPath: String,
     hasEggsBank: Boolean,
     hasMobileBAEBank: Boolean,
     dlsBankLevel: Int,
     dlsCompatibilityMode: Boolean,
+    hasXmfOverlay: Boolean,
+    hasRmiEmbedded: Boolean,
+    rmiUsesSf2: Boolean,
     dark: Boolean,
 ): List<BankFlavorBadge> {
     val path = bankPath.ifBlank { "__builtin__" }
@@ -7291,59 +7357,82 @@ private fun resolveBankFlavorBadges(
             BankFlavorBadge(label, rgba(255, 205, 145, 230), rgba(100, 50, 15, 255))
         }
     }
+    fun mobileBadge(): BankFlavorBadge =
+        if (dark) {
+            BankFlavorBadge("mobileBAE", rgba(30, 70, 95, 220), rgba(160, 220, 255, 255))
+        } else {
+            BankFlavorBadge("mobileBAE", rgba(190, 225, 245, 230), rgba(20, 70, 110, 255))
+        }
+    fun appendDlsHostBadges(): Boolean {
+        var addedMobile = false
+        when {
+            hasEggsBank -> {
+                badges += if (dark) {
+                    BankFlavorBadge("microQ", rgba(40, 40, 40, 220), rgba(235, 235, 235, 255))
+                } else {
+                    BankFlavorBadge("microQ", rgba(230, 230, 230, 230), rgba(25, 25, 25, 255))
+                }
+            }
+            hasMobileBAEBank -> {
+                badges += mobileBadge()
+                addedMobile = true
+            }
+            else -> {
+                if (!dlsCompatibilityMode) {
+                    badges += mobileBadge()
+                    addedMobile = true
+                }
+                badges += neoDlsBadge()
+            }
+        }
+        return addedMobile
+    }
 
-    when {
-        path == "__builtin__" || lower.endsWith(".hsb") -> {
-            badges += if (dark) {
-                BankFlavorBadge("miniBAE", rgba(20, 35, 85, 220), rgba(150, 180, 255, 255))
-            } else {
-                BankFlavorBadge("miniBAE", rgba(30, 50, 120, 230), rgba(220, 230, 255, 255))
+    var hasMobileChip = false
+    if (hasRmiEmbedded) {
+        /* RMI replaces the host bank — badge from the embed only. */
+        when {
+            hasEggsBank || hasMobileBAEBank || dlsBankLevel > 0 -> {
+                appendDlsHostBadges()
             }
-        }
-        lower.endsWith(".zsb") -> {
-            badges += if (dark) {
-                BankFlavorBadge("NeoBAE", rgba(90, 70, 30, 220), rgba(255, 220, 120, 255))
-            } else {
-                BankFlavorBadge("NeoBAE", rgba(255, 230, 160, 230), rgba(120, 80, 20, 255))
-            }
-        }
-        lower.endsWith(".sf2") || lower.endsWith(".sf3") -> {
-            badges += if (dark) {
-                BankFlavorBadge("FluidBAE", rgba(20, 70, 65, 220), rgba(130, 235, 215, 255))
-            } else {
-                BankFlavorBadge("FluidBAE", rgba(175, 235, 225, 230), rgba(15, 90, 80, 255))
-            }
-        }
-        lower.endsWith(".dls") || hasEggsBank || hasMobileBAEBank || dlsBankLevel > 0 -> {
-            when {
-                hasEggsBank -> {
-                    /* microQ — own lane; ignore compat. */
-                    badges += if (dark) {
-                        BankFlavorBadge("microQ", rgba(40, 40, 40, 220), rgba(235, 235, 235, 255))
-                    } else {
-                        BankFlavorBadge("microQ", rgba(230, 230, 230, 230), rgba(25, 25, 25, 255))
-                    }
-                }
-                hasMobileBAEBank -> {
-                    /* Detected MobileBAE bank: mobileBAE badge only. */
-                    badges += if (dark) {
-                        BankFlavorBadge("mobileBAE", rgba(30, 70, 95, 220), rgba(160, 220, 255, 255))
-                    } else {
-                        BankFlavorBadge("mobileBAE", rgba(190, 225, 245, 230), rgba(20, 70, 110, 255))
-                    }
-                }
-                else -> {
-                    /* Generic DLS: quirks → mobileBAE + NeoBAE DLS #; compat → NeoBAE DLS # only. */
-                    if (!dlsCompatibilityMode) {
-                        badges += if (dark) {
-                            BankFlavorBadge("mobileBAE", rgba(30, 70, 95, 220), rgba(160, 220, 255, 255))
-                        } else {
-                            BankFlavorBadge("mobileBAE", rgba(190, 225, 245, 230), rgba(20, 70, 110, 255))
-                        }
-                    }
-                    badges += neoDlsBadge()
+            rmiUsesSf2 -> {
+                badges += if (dark) {
+                    BankFlavorBadge("FluidBAE", rgba(20, 70, 65, 220), rgba(130, 235, 215, 255))
+                } else {
+                    BankFlavorBadge("FluidBAE", rgba(175, 235, 225, 230), rgba(15, 90, 80, 255))
                 }
             }
+        }
+    } else {
+        when {
+            path == "__builtin__" || lower.endsWith(".hsb") -> {
+                badges += if (dark) {
+                    BankFlavorBadge("miniBAE", rgba(20, 35, 85, 220), rgba(150, 180, 255, 255))
+                } else {
+                    BankFlavorBadge("miniBAE", rgba(30, 50, 120, 230), rgba(220, 230, 255, 255))
+                }
+            }
+            lower.endsWith(".zsb") -> {
+                badges += if (dark) {
+                    BankFlavorBadge("NeoBAE", rgba(90, 70, 30, 220), rgba(255, 220, 120, 255))
+                } else {
+                    BankFlavorBadge("NeoBAE", rgba(255, 230, 160, 230), rgba(120, 80, 20, 255))
+                }
+            }
+            lower.endsWith(".sf2") || lower.endsWith(".sf3") || lower.endsWith(".sfo") -> {
+                badges += if (dark) {
+                    BankFlavorBadge("FluidBAE", rgba(20, 70, 65, 220), rgba(130, 235, 215, 255))
+                } else {
+                    BankFlavorBadge("FluidBAE", rgba(175, 235, 225, 230), rgba(15, 90, 80, 255))
+                }
+            }
+            lower.endsWith(".dls") || hasEggsBank || hasMobileBAEBank || dlsBankLevel > 0 -> {
+                hasMobileChip = appendDlsHostBadges()
+            }
+        }
+        /* XMF overlay: add mobileBAE alongside host (no duplicate). */
+        if (hasXmfOverlay && !hasMobileChip && badges.none { it.label == "mobileBAE" }) {
+            badges += mobileBadge()
         }
     }
     return badges
@@ -7356,15 +7445,24 @@ private fun BankFlavorBadgesRow(
     hasMobileBAEBank: Boolean,
     dlsBankLevel: Int,
     dlsCompatibilityMode: Boolean,
+    hasXmfOverlay: Boolean,
+    hasRmiEmbedded: Boolean,
+    rmiUsesSf2: Boolean,
 ) {
     val dark = isSystemInDarkTheme()
-    val badges = remember(bankPath, hasEggsBank, hasMobileBAEBank, dlsBankLevel, dlsCompatibilityMode, dark) {
+    val badges = remember(
+        bankPath, hasEggsBank, hasMobileBAEBank, dlsBankLevel, dlsCompatibilityMode,
+        hasXmfOverlay, hasRmiEmbedded, rmiUsesSf2, dark,
+    ) {
         resolveBankFlavorBadges(
             bankPath,
             hasEggsBank,
             hasMobileBAEBank,
             dlsBankLevel,
             dlsCompatibilityMode,
+            hasXmfOverlay,
+            hasRmiEmbedded,
+            rmiUsesSf2,
             dark,
         )
     }
@@ -7395,6 +7493,9 @@ fun SettingsScreenContent(
     hasEggsBank: Boolean,
     hasMobileBAEBank: Boolean,
     dlsBankLevel: Int,
+    hasXmfOverlay: Boolean,
+    hasRmiEmbedded: Boolean,
+    rmiUsesSf2: Boolean,
     isLoadingBank: Boolean,
     reverbType: Int,
     velocityCurve: Int,
@@ -8051,6 +8152,9 @@ fun SettingsScreenContent(
                                     hasMobileBAEBank = hasMobileBAEBank,
                                     dlsBankLevel = dlsBankLevel,
                                     dlsCompatibilityMode = dlsCompatibilityMode,
+                                    hasXmfOverlay = hasXmfOverlay,
+                                    hasRmiEmbedded = hasRmiEmbedded,
+                                    rmiUsesSf2 = rmiUsesSf2,
                                 )
                             }
                         }
@@ -8629,6 +8733,9 @@ fun SettingsScreenContent(
                                     hasMobileBAEBank = hasMobileBAEBank,
                                     dlsBankLevel = dlsBankLevel,
                                     dlsCompatibilityMode = dlsCompatibilityMode,
+                                    hasXmfOverlay = hasXmfOverlay,
+                                    hasRmiEmbedded = hasRmiEmbedded,
+                                    rmiUsesSf2 = rmiUsesSf2,
                                 )
                             }
                         }

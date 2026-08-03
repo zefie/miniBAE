@@ -6034,9 +6034,17 @@ int main(int argc, char *argv[])
             SDL_Color chipFills[4];
             SDL_Color chipTexts[4];
             int chipCount = 0;
+            int has_mobile_chip = 0;
+            int rmi_embed = g_bae.has_rmi_embedded_soundbank ? 1 : 0;
             const char *bank_ext = strrchr(g_current_bank_path, '.');
             int is_hsb = (strcmp(g_current_bank_path, "__builtin__") == 0);
             int is_zsb = 0;
+#if USE_NATIVE_DLS == TRUE
+            int has_xmf = (!rmi_embed && g_bae.mixer &&
+                           BAEMixer_HasXMFDLSOverlayBank(g_bae.mixer)) ? 1 : 0;
+#else
+            int has_xmf = 0;
+#endif
             if (bank_ext)
             {
 #ifdef _WIN32
@@ -6047,7 +6055,81 @@ int main(int argc, char *argv[])
                 is_zsb = (strcasecmp(bank_ext, ".zsb") == 0);
 #endif
             }
-            if (is_hsb)
+            /* RMI embed replaces the host bank — classify from mixer only.
+             * Prefer DLS over SF2 (RMI DLS load may leave a prior SF2 flag). */
+            if (rmi_embed)
+            {
+#if USE_NATIVE_DLS == TRUE
+                if (g_bae.mixer && GM_GetMixerDLSMode())
+                {
+                    extern bool g_use_dls_compatiblity_mode;
+                    int has_mobile = BAEMixer_HasMobileBAEMainBank(g_bae.mixer) ? 1 : 0;
+                    int has_eggs = BAEMixer_HasEggsDLSBank(g_bae.mixer) ? 1 : 0;
+                    int dls_level = BAEMixer_GetDLSBankLevel(g_bae.mixer);
+                    const char *neobae_dls_chip = (dls_level == 2) ? "NeoBAE DLS 2" : "NeoBAE DLS 1";
+                    if (has_eggs)
+                    {
+                        chips[chipCount] = "microQ";
+                        chipFills[chipCount] = g_is_dark_mode
+                            ? (SDL_Color){40, 40, 40, 220}
+                            : (SDL_Color){230, 230, 230, 230};
+                        chipTexts[chipCount] = g_is_dark_mode
+                            ? (SDL_Color){235, 235, 235, 255}
+                            : (SDL_Color){25, 25, 25, 255};
+                        chipCount++;
+                    }
+                    else if (has_mobile)
+                    {
+                        chips[chipCount] = "mobileBAE";
+                        chipFills[chipCount] = g_is_dark_mode
+                            ? (SDL_Color){30, 70, 95, 220}
+                            : (SDL_Color){190, 225, 245, 230};
+                        chipTexts[chipCount] = g_is_dark_mode
+                            ? (SDL_Color){160, 220, 255, 255}
+                            : (SDL_Color){20, 70, 110, 255};
+                        chipCount++;
+                    }
+                    else
+                    {
+                        if (!g_use_dls_compatiblity_mode)
+                        {
+                            chips[chipCount] = "mobileBAE";
+                            chipFills[chipCount] = g_is_dark_mode
+                                ? (SDL_Color){30, 70, 95, 220}
+                                : (SDL_Color){190, 225, 245, 230};
+                            chipTexts[chipCount] = g_is_dark_mode
+                                ? (SDL_Color){160, 220, 255, 255}
+                                : (SDL_Color){20, 70, 110, 255};
+                            chipCount++;
+                        }
+                        chips[chipCount] = neobae_dls_chip;
+                        chipFills[chipCount] = g_is_dark_mode
+                            ? (SDL_Color){85, 50, 25, 220}
+                            : (SDL_Color){255, 205, 145, 230};
+                        chipTexts[chipCount] = g_is_dark_mode
+                            ? (SDL_Color){255, 185, 110, 255}
+                            : (SDL_Color){100, 50, 15, 255};
+                        chipCount++;
+                    }
+                }
+                else
+#endif
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
+                if (GM_GetMixerSF2Mode())
+                {
+                    chips[chipCount] = "FluidBAE";
+                    chipFills[chipCount] = g_is_dark_mode
+                        ? (SDL_Color){20, 70, 65, 220}
+                        : (SDL_Color){175, 235, 225, 230};
+                    chipTexts[chipCount] = g_is_dark_mode
+                        ? (SDL_Color){130, 235, 215, 255}
+                        : (SDL_Color){15, 90, 80, 255};
+                    chipCount++;
+                }
+#endif
+                ; /* rmi_embed handled */
+            }
+            else if (is_hsb)
             {
                 /* miniBAE — dark blue */
                 chips[chipCount] = "miniBAE";
@@ -6089,7 +6171,9 @@ int main(int argc, char *argv[])
             else if (g_bae.mixer && GM_GetMixerDLSMode())
             {
                 extern bool g_use_dls_compatiblity_mode;
-                int has_mobile = BAEMixer_HasMobileBAEDLSBank(g_bae.mixer) ? 1 : 0;
+                /* Main bank only — XMF overlay is always MobileBAE and would
+                 * otherwise steal the host chip. */
+                int has_mobile = BAEMixer_HasMobileBAEMainBank(g_bae.mixer) ? 1 : 0;
                 int has_eggs = BAEMixer_HasEggsDLSBank(g_bae.mixer) ? 1 : 0;
                 int dls_level = BAEMixer_GetDLSBankLevel(g_bae.mixer);
                 const char *neobae_dls_chip = (dls_level == 2) ? "NeoBAE DLS 2" : "NeoBAE DLS 1";
@@ -6107,7 +6191,6 @@ int main(int argc, char *argv[])
                 }
                 else if (has_mobile)
                 {
-                    /* Detected MobileBAE bank: mobileBAE badge only. */
                     chips[chipCount] = "mobileBAE";
                     chipFills[chipCount] = g_is_dark_mode
                         ? (SDL_Color){30, 70, 95, 220}
@@ -6116,6 +6199,7 @@ int main(int argc, char *argv[])
                         ? (SDL_Color){160, 220, 255, 255}
                         : (SDL_Color){20, 70, 110, 255};
                     chipCount++;
+                    has_mobile_chip = 1;
                 }
                 else
                 {
@@ -6130,6 +6214,7 @@ int main(int argc, char *argv[])
                             ? (SDL_Color){160, 220, 255, 255}
                             : (SDL_Color){20, 70, 110, 255};
                         chipCount++;
+                        has_mobile_chip = 1;
                     }
                     chips[chipCount] = neobae_dls_chip;
                     chipFills[chipCount] = g_is_dark_mode
@@ -6142,6 +6227,20 @@ int main(int argc, char *argv[])
                 }
             }
 #endif
+            /* XMF/MXMF embedded DLS: add mobileBAE alongside the host chip.
+             * Skip if the host bank already contributed a mobileBAE chip.
+             * RMI embeds are not overlays — do not stack a second chip. */
+            if (has_xmf && !has_mobile_chip && chipCount < 4)
+            {
+                chips[chipCount] = "mobileBAE";
+                chipFills[chipCount] = g_is_dark_mode
+                    ? (SDL_Color){30, 70, 95, 220}
+                    : (SDL_Color){190, 225, 245, 230};
+                chipTexts[chipCount] = g_is_dark_mode
+                    ? (SDL_Color){160, 220, 255, 255}
+                    : (SDL_Color){20, 70, 110, 255};
+                chipCount++;
+            }
             if (chipCount > 0)
             {
                 int title_w = 0, title_h_unused = 0;
@@ -6249,8 +6348,39 @@ int main(int argc, char *argv[])
             if (!g_keyboard_channel_dd_open && point_in(ui_mx, ui_my, bankTextRect))
             {
                 char tip[512];
-                // Show the full path in tooltip
-                if (strcmp(g_current_bank_path, "__builtin__") == 0)
+                // Show the full path in tooltip (RMI embed: active bank, not host path)
+                if (g_bae.has_rmi_embedded_soundbank)
+                {
+                    const char *flavor = NULL;
+#if USE_NATIVE_DLS == TRUE
+                    if (g_bae.mixer && GM_GetMixerDLSMode())
+                    {
+                        extern bool g_use_dls_compatiblity_mode;
+                        int tip_mobile = BAEMixer_HasMobileBAEMainBank(g_bae.mixer) ? 1 : 0;
+                        int tip_eggs = BAEMixer_HasEggsDLSBank(g_bae.mixer) ? 1 : 0;
+                        int tip_level = BAEMixer_GetDLSBankLevel(g_bae.mixer);
+                        if (tip_eggs)
+                            flavor = "scrambled eggs / microQ";
+                        else if (tip_mobile)
+                            flavor = "mobileBAE";
+                        else if (!g_use_dls_compatiblity_mode)
+                            flavor = (tip_level == 2)
+                                ? "mobileBAE + NeoBAE DLS 2"
+                                : "mobileBAE + NeoBAE DLS 1";
+                        else
+                            flavor = (tip_level == 2) ? "NeoBAE DLS 2" : "NeoBAE DLS 1";
+                    }
+#endif
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
+                    if (!flavor && GM_GetMixerSF2Mode())
+                        flavor = "FluidBAE";
+#endif
+                    if (flavor)
+                        snprintf(tip, sizeof(tip), "RMI embedded bank  (%s)", flavor);
+                    else
+                        snprintf(tip, sizeof(tip), "RMI embedded bank");
+                }
+                else if (strcmp(g_current_bank_path, "__builtin__") == 0)
                 {
                     snprintf(tip, sizeof(tip), "Built-in patches");
                 }
@@ -6280,7 +6410,7 @@ int main(int argc, char *argv[])
                     if (!flavor && g_bae.mixer && GM_GetMixerDLSMode())
                     {
                         extern bool g_use_dls_compatiblity_mode;
-                        int tip_mobile = BAEMixer_HasMobileBAEDLSBank(g_bae.mixer) ? 1 : 0;
+                        int tip_mobile = BAEMixer_HasMobileBAEMainBank(g_bae.mixer) ? 1 : 0;
                         int tip_eggs = BAEMixer_HasEggsDLSBank(g_bae.mixer) ? 1 : 0;
                         int tip_level = BAEMixer_GetDLSBankLevel(g_bae.mixer);
                         const char *tip_neobae = (tip_level == 2) ? "NeoBAE DLS 2" : "NeoBAE DLS 1";
@@ -6294,6 +6424,20 @@ int main(int argc, char *argv[])
                                 : "mobileBAE + NeoBAE DLS 1";
                         else
                             flavor = tip_neobae;
+                    }
+                    if (g_bae.mixer && BAEMixer_HasXMFDLSOverlayBank(g_bae.mixer))
+                    {
+                        if (flavor && strcmp(flavor, "mobileBAE") != 0 &&
+                            strncmp(flavor, "mobileBAE", 9) != 0)
+                        {
+                            static char tip_flavor_buf[96];
+                            snprintf(tip_flavor_buf, sizeof(tip_flavor_buf), "%s + mobileBAE", flavor);
+                            flavor = tip_flavor_buf;
+                        }
+                        else if (!flavor)
+                        {
+                            flavor = "mobileBAE";
+                        }
                     }
 #endif
                     if (flavor)

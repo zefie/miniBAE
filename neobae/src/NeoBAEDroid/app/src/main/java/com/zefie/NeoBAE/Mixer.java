@@ -141,6 +141,8 @@ public class Mixer
 	private static native boolean _getDLSCompatibilityMode();
 	private static native boolean _hasEggsDLSBank(long reference);
 	private static native boolean _hasMobileBAEDLSBank(long reference);
+	private static native boolean _hasMobileBAEMainBank(long reference);
+	private static native boolean _hasXMFDLSOverlayBank(long reference);
 	private static native int _getDLSBankLevel(long reference);
 	private static native int _determineFileTypeByData(byte[] data, int length);
 	private static native int _loadFromMemory(long mixerReference, byte[] data, LoadResult result);
@@ -223,6 +225,16 @@ public class Mixer
 	public static boolean hasMobileBAEDLSBank(){
 		if (mMixer == null || mMixer.mReference == 0L) return false;
 		return _hasMobileBAEDLSBank(mMixer.mReference);
+	}
+	/** True if the main (non-overlay) DLS bank is MobileBAE — for host badges with XMF. */
+	public static boolean hasMobileBAEMainBank(){
+		if (mMixer == null || mMixer.mReference == 0L) return false;
+		return _hasMobileBAEMainBank(mMixer.mReference);
+	}
+	/** True if an XMF/MXMF DLS overlay bank is loaded. */
+	public static boolean hasXMFDLSOverlayBank(){
+		if (mMixer == null || mMixer.mReference == 0L) return false;
+		return _hasXMFDLSOverlayBank(mMixer.mReference);
 	}
 	/** 2 for Level-2 DLS, 1 for Level-1, 0 if no native DLS bank. */
 	public static int getDLSBankLevel(){

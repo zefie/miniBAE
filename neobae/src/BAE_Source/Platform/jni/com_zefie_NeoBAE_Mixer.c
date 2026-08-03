@@ -535,11 +535,17 @@ JNIEXPORT jstring JNICALL Java_com_zefie_NeoBAE_Mixer__1getBankFriendlyName
 		if(!mixer) return NULL;
 		char buf[256];
 		// First try the official API with no token (legacy callers expect this),
-		// then fall back to the cached friendly name filled when a bank was
-		// successfully added via the other JNI entrypoints.
+		// then live DLS/RMI main-bank friendly name, then the cached name
+		// filled when a bank was successfully added via other JNI entrypoints.
 		if(BAE_GetBankFriendlyName(mixer, NULL, buf, (uint32_t)sizeof(buf)) == BAE_NO_ERROR) {
 			return (*env)->NewStringUTF(env, buf);
 		}
+#if USE_NATIVE_DLS == TRUE
+		if(BAEMixer_GetDLSBankFriendlyName(mixer, buf, (uint32_t)sizeof(buf)) == BAE_NO_ERROR &&
+		   buf[0] != '\0') {
+			return (*env)->NewStringUTF(env, buf);
+		}
+#endif
 		if(g_lastBankFriendly[0] != '\0') {
 			return (*env)->NewStringUTF(env, g_lastBankFriendly);
 		}
@@ -1049,6 +1055,40 @@ JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Mixer__1hasMobileBAEDLSBank
 		return (jboolean)JNI_FALSE;
 	}
 	return (jboolean)(BAEMixer_HasMobileBAEDLSBank(mixer) ? JNI_TRUE : JNI_FALSE);
+#else
+	(void)reference;
+	return (jboolean)JNI_FALSE;
+#endif
+}
+
+JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Mixer__1hasMobileBAEMainBank
+	(JNIEnv* env, jclass clazz, jlong reference)
+{
+	(void)env;
+	(void)clazz;
+#if USE_NATIVE_DLS == TRUE
+	BAEMixer mixer = (BAEMixer)(intptr_t)reference;
+	if (!mixer) {
+		return (jboolean)JNI_FALSE;
+	}
+	return (jboolean)(BAEMixer_HasMobileBAEMainBank(mixer) ? JNI_TRUE : JNI_FALSE);
+#else
+	(void)reference;
+	return (jboolean)JNI_FALSE;
+#endif
+}
+
+JNIEXPORT jboolean JNICALL Java_com_zefie_NeoBAE_Mixer__1hasXMFDLSOverlayBank
+	(JNIEnv* env, jclass clazz, jlong reference)
+{
+	(void)env;
+	(void)clazz;
+#if USE_NATIVE_DLS == TRUE
+	BAEMixer mixer = (BAEMixer)(intptr_t)reference;
+	if (!mixer) {
+		return (jboolean)JNI_FALSE;
+	}
+	return (jboolean)(BAEMixer_HasXMFDLSOverlayBank(mixer) ? JNI_TRUE : JNI_FALSE);
 #else
 	(void)reference;
 	return (jboolean)JNI_FALSE;

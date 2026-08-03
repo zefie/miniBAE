@@ -4606,6 +4606,19 @@ int BAEMixer_HasMobileBAEDLSBank(BAEMixer mixer)
 #endif
 }
 
+int BAEMixer_HasMobileBAEMainBank(BAEMixer mixer)
+{
+    if (!(mixer && mixer->pMixer))
+    {
+        return 0;
+    }
+#if USE_NATIVE_DLS == TRUE
+    return (int)GM_DLS_HasMobileBAEMainBank(mixer->pMixer);
+#else
+    return 0;
+#endif
+}
+
 int BAEMixer_GetDLSBankLevel(BAEMixer mixer)
 {
     if (!(mixer && mixer->pMixer))

@@ -54,8 +54,11 @@ typedef struct
     BAEBankToken bank_token;
     char bank_name[256];
     bool bank_loaded;
-    // Embedded soundbank tracking (for RMI files)
+    // Embedded soundbank tracking (RMI replace and/or XMF overlay)
     bool has_embedded_soundbank;
+    /* RMI embeds replace the host bank (full GM bank in-file). XMF overlays
+     * stack on the host — only RMI sets this so UI can treat them differently. */
+    bool has_rmi_embedded_soundbank;
     char previous_bank_name[256];
     char previous_bank_path[1024];
     // Status message system

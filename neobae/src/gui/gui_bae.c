@@ -290,10 +290,28 @@ uint32_t g_channel_peak_hold_ms = 600; // how long to hold peak in ms
 BankEntry banks[32]; // Static array for simplicity
 int bank_count = 0;
 
-// User bank tracking for RMI embedded soundbanks
+// User bank tracking for RMI/XMF embedded soundbanks
 static bool g_user_bank_stored = false;
 static char g_user_bank_path[1024] = {0};
 static char g_user_bank_name[256] = {0};
+
+/* Drop embedded-bank display labels from a name (in place). */
+static void strip_embedded_bank_suffix(char *name)
+{
+    static const char kSuffix[] = " + Embedded Bank";
+    size_t n, s;
+    if (!name || !name[0])
+        return;
+    if (strcmp(name, "Embedded Bank") == 0)
+    {
+        name[0] = '\0';
+        return;
+    }
+    n = strlen(name);
+    s = sizeof(kSuffix) - 1;
+    if (n >= s && strcmp(name + (n - s), kSuffix) == 0)
+        name[n - s] = '\0';
+}
 
 // External keyboard-related globals (defined in gui_midi_vkbd.c)
 extern bool g_show_virtual_keyboard;
@@ -481,16 +499,20 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
     }
 #endif
 
-    // If user is manually loading a bank while an RMI embedded bank is active,
-    // clear the embedded bank state so we don't restore the old bank later
+    // Host bank is changing. Drop embedded-bank GUI state so a later song
+    // load can re-detect (and re-title) against the new host bank. The song
+    // auto-reload below re-enables embeds when the file still has one.
+    // RMI: audio stays on the reloaded embed by design; UI will show
+    // "Embedded Bank" again after reload (not host + embed).
     if (g_bae.has_embedded_soundbank)
     {
-        BAE_PRINTF("User overriding embedded bank with manual bank load\n");
+        BAE_PRINTF("Clearing embedded-bank UI state for host bank change\n");
 #if USE_RMI_SUPPORT == TRUE
         GM_ClearRMISoundbankFlag();
-#endif        
+#endif
         g_bae.has_embedded_soundbank = false;
-        // Clear stored bank so we don't try to restore later
+        g_bae.has_rmi_embedded_soundbank = false;
+        strip_embedded_bank_suffix(g_bae.bank_name);
         g_user_bank_stored = false;
         g_user_bank_path[0] = '\0';
         g_user_bank_name[0] = '\0';
@@ -712,7 +734,8 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
             g_bae.is_playing = false;
         }
 
-        if (bae_load_song_with_settings(current_song_path, transpose, tempo, volume, loop_enabled, reverb_type, ch_enable, false))
+        /* Keep embedded banks (XMF/RMI) so chips/title stay correct. */
+        if (bae_load_song_with_settings(current_song_path, transpose, tempo, volume, loop_enabled, reverb_type, ch_enable, true))
         {
             // Restore playback state
             if (was_playing)
@@ -1058,10 +1081,12 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
 #endif
 
         g_bae.has_embedded_soundbank = false;
+        g_bae.has_rmi_embedded_soundbank = false;
 
         // Reload the user's previous bank if we captured one.
         if (g_user_bank_stored)
         {
+            strip_embedded_bank_suffix(g_user_bank_name);
             BAE_PRINTF("Restoring user bank before loading new song: %s (%s)\n", g_user_bank_name, g_user_bank_path);
             if (g_user_bank_path[0] != '\0' && restore_bank_for_song_load(g_user_bank_path, g_user_bank_name))
             {
@@ -1072,10 +1097,40 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
                 BAE_PRINTF("Warning: Failed to restore user bank\n");
             }
 
+            /* Always restore the clean host display name, even if the bank
+             * reload failed — otherwise "+ Embedded Bank" sticks in the UI. */
+            if (g_user_bank_name[0] != '\0')
+            {
+                safe_strncpy(g_bae.bank_name, g_user_bank_name, sizeof(g_bae.bank_name) - 1);
+                g_bae.bank_name[sizeof(g_bae.bank_name) - 1] = '\0';
+            }
+            else if (g_user_bank_path[0] != '\0')
+            {
+                const char *base = g_user_bank_path;
+                for (const char *p = g_user_bank_path; *p; ++p)
+                {
+                    if (*p == '/' || *p == '\\')
+                        base = p + 1;
+                }
+                if (strcmp(g_user_bank_path, "__builtin__") == 0)
+                    safe_strncpy(g_bae.bank_name, "(built-in)", sizeof(g_bae.bank_name) - 1);
+                else
+                    safe_strncpy(g_bae.bank_name, base, sizeof(g_bae.bank_name) - 1);
+                g_bae.bank_name[sizeof(g_bae.bank_name) - 1] = '\0';
+            }
+            else
+            {
+                strip_embedded_bank_suffix(g_bae.bank_name);
+            }
+
             // Clear stored bank after restoration attempt
             g_user_bank_stored = false;
             g_user_bank_path[0] = '\0';
             g_user_bank_name[0] = '\0';
+        }
+        else
+        {
+            strip_embedded_bank_suffix(g_bae.bank_name);
         }
     }
 #endif
@@ -1336,41 +1391,78 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
 #if USE_RMI_SUPPORT == TRUE || USE_XMF_SUPPORT == TRUE || USE_NATIVE_DLS == TRUE
     if (use_embedded_banks)
     {
-        bool has_embedded_bank = false;
+        bool is_rmi_embed = false;
+        bool is_xmf_embed = false;
 #if USE_RMI_SUPPORT == TRUE
-        has_embedded_bank = GM_LastRMIHadEmbeddedSoundbank();
+        is_rmi_embed = GM_LastRMIHadEmbeddedSoundbank();
 #endif
 #if USE_NATIVE_DLS == TRUE && USE_XMF_SUPPORT == TRUE
-        if (!has_embedded_bank && g_bae.mixer)
+        if (!is_rmi_embed && g_bae.mixer)
         {
-            has_embedded_bank = (BAEMixer_HasXMFDLSOverlayBank(g_bae.mixer) != 0);
+            is_xmf_embed = (BAEMixer_HasXMFDLSOverlayBank(g_bae.mixer) != 0);
         }
 #endif
-        if (has_embedded_bank)
+        if (is_rmi_embed || is_xmf_embed)
         {
-            // Store current user bank if not already stored
+            // Store host bank so we can restore it after leaving the song.
             if (!g_user_bank_stored && g_bae.bank_loaded)
             {
                 safe_strncpy(g_user_bank_path, g_current_bank_path, sizeof(g_user_bank_path) - 1);
                 g_user_bank_path[sizeof(g_user_bank_path) - 1] = '\0';
                 safe_strncpy(g_user_bank_name, g_bae.bank_name, sizeof(g_user_bank_name) - 1);
                 g_user_bank_name[sizeof(g_user_bank_name) - 1] = '\0';
-                g_user_bank_stored = true;
-                BAE_PRINTF("Stored user bank: %s (%s)\n", g_user_bank_name, g_user_bank_path);
+                strip_embedded_bank_suffix(g_user_bank_name);
+                /* Don't persist a previous "Embedded Bank" label as the host. */
+                if (strcmp(g_user_bank_name, "Embedded Bank") == 0)
+                    g_user_bank_name[0] = '\0';
+                g_user_bank_stored = (g_user_bank_path[0] != '\0');
+                if (g_user_bank_stored)
+                    BAE_PRINTF("Stored user bank: %s (%s)\n", g_user_bank_name, g_user_bank_path);
             }
-            
-            // Update GUI to show embedded bank (keep user bank name when known).
-            if (g_user_bank_name[0] != '\0')
+
+            g_bae.has_embedded_soundbank = true;
+            g_bae.has_rmi_embedded_soundbank = is_rmi_embed;
+            g_bae.bank_loaded = true;
+
+            if (is_rmi_embed)
             {
-                snprintf(g_bae.bank_name, sizeof(g_bae.bank_name), "%s + Embedded Bank", g_user_bank_name);
+                /* RMI replaces the host bank entirely — title is just the embed. */
+                const char *embed_name = "Embedded Bank";
+#if USE_NATIVE_DLS == TRUE
+                static char rmi_dls_friendly[256];
+                if (g_bae.mixer && GM_GetMixerDLSMode() &&
+                    BAEMixer_GetDLSBankFriendlyName(g_bae.mixer, rmi_dls_friendly,
+                                                   sizeof(rmi_dls_friendly)) == BAE_NO_ERROR &&
+                    rmi_dls_friendly[0])
+                {
+                    embed_name = rmi_dls_friendly;
+                }
+#endif
+                safe_strncpy(g_bae.bank_name, embed_name, sizeof(g_bae.bank_name) - 1);
+                g_bae.bank_name[sizeof(g_bae.bank_name) - 1] = '\0';
+                BAE_PRINTF("Using RMI embedded soundbank (replaces host bank in UI)\n");
             }
             else
             {
-                safe_strncpy(g_bae.bank_name, "Embedded Bank", sizeof(g_bae.bank_name) - 1);
-                g_bae.bank_name[sizeof(g_bae.bank_name) - 1] = '\0';
+                /* XMF overlays the host — show both in the title. */
+                if (g_user_bank_name[0] != '\0')
+                {
+                    snprintf(g_bae.bank_name, sizeof(g_bae.bank_name), "%s + Embedded Bank", g_user_bank_name);
+                }
+                else
+                {
+                    char clean_name[256];
+                    safe_strncpy(clean_name, g_bae.bank_name, sizeof(clean_name) - 1);
+                    clean_name[sizeof(clean_name) - 1] = '\0';
+                    strip_embedded_bank_suffix(clean_name);
+                    if (clean_name[0] != '\0' && strcmp(clean_name, "Embedded Bank") != 0)
+                        snprintf(g_bae.bank_name, sizeof(g_bae.bank_name), "%s + Embedded Bank", clean_name);
+                    else
+                        safe_strncpy(g_bae.bank_name, "Embedded Bank", sizeof(g_bae.bank_name) - 1);
+                    g_bae.bank_name[sizeof(g_bae.bank_name) - 1] = '\0';
+                }
+                BAE_PRINTF("Using XMF embedded soundbank overlay\n");
             }
-            g_bae.has_embedded_soundbank = true;
-            BAE_PRINTF("Using embedded soundbank from XMF/RMI file\n");
         }
     }
     else

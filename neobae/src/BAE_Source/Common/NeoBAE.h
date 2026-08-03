@@ -912,6 +912,13 @@ extern "C"
     //
     int BAEMixer_HasMobileBAEDLSBank(BAEMixer mixer);
 
+    // BAEMixer_HasMobileBAEMainBank()
+    // ------------------------------------
+    // Returns non-zero if the main (non-overlay) native DLS bank is MobileBAE.
+    // Use this for host-bank badges when an XMF overlay may also be present.
+    //
+    int BAEMixer_HasMobileBAEMainBank(BAEMixer mixer);
+
     // BAEMixer_GetDLSBankLevel()
     // ------------------------------------
     // Returns 2 for a Level-2 bank, 1 for Level-1, or 0 if no native DLS bank.

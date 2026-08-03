@@ -467,6 +467,15 @@ class MainActivity : AppCompatActivity() {
                     return
                 }
 
+                /* Keep XMF/RMI bank title + badges in sync (this path skips HomeFragment.finishStartNormalizedSong). */
+                try {
+                    val fragment = supportFragmentManager.findFragmentById(R.id.fragment_container)
+                    if (fragment is HomeFragment) {
+                        fragment.syncBankUiAfterSongLoad(song)
+                    }
+                } catch (_: Exception) {
+                }
+
                 // IMPORTANT: Song start/preroll can overwrite the global reverb type with the
                 // song's embedded default (see GM_StartSong/GM_StartLiveSong). Force the user's
                 // selected reverb back on after start.
