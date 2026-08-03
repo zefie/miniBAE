@@ -8,8 +8,10 @@
  *
  * Cross-engine bank loudness balance.
  * Scans instrument/sample RMS (with format attenuation) once after load,
- * then derives per-engine mix scales so HSB/RMF, SF2, DLS main, and XMF
- * DLS overlay sit at equal levels when two or more sources are present.
+ * then derives per-engine mix scales so SF2 / DLS / XMF match the HSB/RMF
+ * reference level when two or more sources are present. Native HSB/RMF is
+ * left at unity (scaling that path alters timbre); other engines are
+ * boosted or attenuated toward it.
  */
 
 #ifndef GEN_BANK_BALANCE_H

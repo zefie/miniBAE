@@ -53,11 +53,10 @@ enum
 };
 
 static const float kMinLoudness = 1.0e-6f;
-static const float kScaleMin = 0.05f; /* ~-26 dB — hot RMF one-shots vs quiet DLS */
-static const float kScaleMax = 1.0f;  /* match-quietest: never boost, only attenuate */
-/* Post-match lift for HSB/RMF (~+5.5 dB). Match-quietest can leave native a
- * hair shy of DLS/SF2 in practice; applied after scale calculation. */
-static const float kHsbRmfPostBoost = 1.883649144472985f; /* 10^(5.5/20) */
+static const float kScaleMin = 0.05f; /* ~-26 dB — attenuate hot DLS/SF2/XMF toward HSB */
+static const float kScaleMax = 4.0f;  /* ~+12 dB — boost quiet DLS/SF2/XMF toward HSB */
+/* Native HSB/RMF mix scaling sounds wrong (timbre/envelope), so HSB stays at
+ * unity and other engines are matched to its measured loudness instead. */
 
 static XFILE g_hsbFiles[kBankBalanceMaxHsbTrack];
 static int g_hsbCount = 0;
@@ -633,15 +632,12 @@ static void PV_BankBalance_Recalculate(void)
     }
 #endif
 
+    measuredCount = 0;
     target = 0.0f;
     for (i = 0; i < GM_BANK_ENGINE_COUNT; i++)
     {
         if (g_present[i] && g_loudness[i] > kMinLoudness)
-        {
-            if (measuredCount == 0 || g_loudness[i] < target)
-                target = g_loudness[i];
             measuredCount++;
-        }
     }
 
     if (measuredCount < 2)
@@ -650,22 +646,36 @@ static void PV_BankBalance_Recalculate(void)
         return;
     }
 
-    /* Match quieter engine: attenuate louder engines down, never boost. */
-    for (i = 0; i < GM_BANK_ENGINE_COUNT; i++)
+    /* Prefer HSB/RMF as the reference level so native voices stay unscaled.
+     * Without HSB, match the loudest remaining engine and boost quieter ones. */
+    if (g_present[GM_BANK_ENGINE_HSB] && g_loudness[GM_BANK_ENGINE_HSB] > kMinLoudness)
     {
-        if (g_present[i] && g_loudness[i] > kMinLoudness)
-            g_scale[i] = PV_Clampf(target / g_loudness[i], kScaleMin, kScaleMax);
-        else
-            g_scale[i] = 1.0f;
+        target = g_loudness[GM_BANK_ENGINE_HSB];
+    }
+    else
+    {
+        for (i = 0; i < GM_BANK_ENGINE_COUNT; i++)
+        {
+            if (g_present[i] && g_loudness[i] > target)
+                target = g_loudness[i];
+        }
     }
 
-    /* HSB/RMF tends to land slightly quiet vs DLS/SF2 — +5.5 dB after match. */
-    if (g_present[GM_BANK_ENGINE_HSB])
+    for (i = 0; i < GM_BANK_ENGINE_COUNT; i++)
     {
-        g_scale[GM_BANK_ENGINE_HSB] = PV_Clampf(
-            g_scale[GM_BANK_ENGINE_HSB] * kHsbRmfPostBoost,
-            kScaleMin,
-            kScaleMax * kHsbRmfPostBoost);
+        if (i == GM_BANK_ENGINE_HSB && g_present[GM_BANK_ENGINE_HSB] &&
+            g_loudness[GM_BANK_ENGINE_HSB] > kMinLoudness)
+        {
+            g_scale[i] = 1.0f; /* never scale native HSB/RMF */
+        }
+        else if (g_present[i] && g_loudness[i] > kMinLoudness)
+        {
+            g_scale[i] = PV_Clampf(target / g_loudness[i], kScaleMin, kScaleMax);
+        }
+        else
+        {
+            g_scale[i] = 1.0f;
+        }
     }
 
     g_active = TRUE;
