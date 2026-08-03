@@ -60,9 +60,26 @@
 
 int g_max_vu_channels = 16;
 
-/* Per-channel VU responsiveness (was static in gui_main.c). */
-static const float CHANNEL_VU_ALPHA = 0.85f;
-static const float CHANNEL_ACTIVITY_DECAY = 0.60f;
+/* Time-based per-channel VU smoothing. Fixed per-frame alphas flicker at high
+ * refresh rates because audio levels update much slower than the UI. Attack is
+ * quicker so note-ons still feel responsive; release averages over a short
+ * window for a stable meter. */
+static const float CHANNEL_VU_ATTACK_MS = 30.0f;
+static const float CHANNEL_VU_RELEASE_MS = 140.0f;
+static const float CHANNEL_ACTIVITY_RELEASE_MS = 80.0f;
+static Uint32 g_channel_vu_last_tick = 0;
+
+static float channel_vu_ema_alpha(float dt_ms, float tau_ms)
+{
+    if (tau_ms <= 1.0f)
+        return 1.0f;
+    float a = 1.0f - expf(-dt_ms / tau_ms);
+    if (a < 0.0f)
+        return 0.0f;
+    if (a > 1.0f)
+        return 1.0f;
+    return a;
+}
 
 void gui_channels_draw(GuiFrameCtx *ctx)
 {
@@ -152,6 +169,19 @@ if (g_bae.mixer && !g_exporting && playing)
     // Always trust the engine's realtime levels when playing or MIDI input is active
     have_realtime_levels = true;
 }
+
+Uint32 nowTick = SDL_GetTicks();
+float dt_ms = 16.0f;
+if (g_channel_vu_last_tick != 0 && nowTick > g_channel_vu_last_tick)
+{
+    dt_ms = (float)(nowTick - g_channel_vu_last_tick);
+    if (dt_ms < 1.0f)
+        dt_ms = 1.0f;
+    /* Cap after stalls so a hitch doesn't slam the meters to the new sample. */
+    if (dt_ms > 100.0f)
+        dt_ms = 100.0f;
+}
+g_channel_vu_last_tick = nowTick;
 
 for (int i = 0; i < g_max_vu_channels; i++)
 {
@@ -253,14 +283,14 @@ for (int i = 0; i < g_max_vu_channels; i++)
             lvl = 0.f;
         if (lvl > 1.f)
             lvl = 1.f;
-        // Use a higher alpha for per-channel meters so they respond quickly to changes
-        const float alpha = CHANNEL_VU_ALPHA; // more responsive
+        float tau = (lvl > g_channel_vu[i]) ? CHANNEL_VU_ATTACK_MS : CHANNEL_VU_RELEASE_MS;
+        float alpha = channel_vu_ema_alpha(dt_ms, tau);
         g_channel_vu[i] = g_channel_vu[i] * (1.0f - alpha) + lvl * alpha;
         // update peak from realtime level
         if (lvl > g_channel_peak_level[i])
         {
             g_channel_peak_level[i] = lvl;
-            g_channel_peak_hold_until[i] = SDL_GetTicks() + g_channel_peak_hold_ms;
+            g_channel_peak_hold_until[i] = nowTick + g_channel_peak_hold_ms;
         }
     }
     else
@@ -299,14 +329,15 @@ for (int i = 0; i < g_max_vu_channels; i++)
                 }
             }
         }
-        // Update channel VU with simple attack/decay
+        // Update channel VU with simple attack / time-based release
         if (active)
         {
             g_channel_vu[i] = 1.0f;
         }
         else
         {
-            g_channel_vu[i] *= CHANNEL_ACTIVITY_DECAY;
+            float alpha = channel_vu_ema_alpha(dt_ms, CHANNEL_ACTIVITY_RELEASE_MS);
+            g_channel_vu[i] *= (1.0f - alpha);
             if (g_channel_vu[i] < 0.005f)
                 g_channel_vu[i] = 0.0f;
         }
@@ -355,19 +386,8 @@ for (int i = 0; i < g_max_vu_channels; i++)
         }
     }
     // Channel peak markers intentionally removed - we only draw the realtime fill.
-    // Decay the realtime meter value gradually (small additional smoothing pass)
-    // But skip this extra decay when MIDI input is active, since the MIDI service thread
-    // manages VU levels directly and this interferes with that.
-#if SUPPORT_MIDI_HW == TRUE
-    if (!g_midi_input_enabled)
-    {
-#endif
-        g_channel_vu[i] *= 0.92f;
-        if (g_channel_vu[i] < 0.0005f)
-            g_channel_vu[i] = 0.0f;
-#if SUPPORT_MIDI_HW == TRUE
-    }
-#endif
+    // Release smoothing above already decays idle meters in a frame-rate-independent way;
+    // the old per-frame *= 0.92 made high-FPS draws collapse the bars between audio updates.
 }
 
 // 'All' checkbox: moved to render after the virtual keyboard so it appears on top.
