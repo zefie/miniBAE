@@ -83,7 +83,7 @@ private:
 	void* m_song = nullptr;  // BAESong
 
 	double m_lengthSeconds = 0.0;
-	uint32_t m_lengthMicros = 0;
+	uint64_t m_lengthMicros = 0;
 	pfc::string8 m_codecName;
 	BAE_RmfSongMetadata m_rmfMetadata{};
 
@@ -92,7 +92,7 @@ private:
 	bool m_holdsGlobalRef = false;
 	bool m_holdsExclusive = false;
 	unsigned m_loopsDone = 0;
-	uint32_t m_lastPosMs = 0;
+	uint64_t m_lastPosMs = 0;
 
 	pfc::array_t<int16_t> m_pcm;
 

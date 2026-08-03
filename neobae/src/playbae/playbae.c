@@ -825,14 +825,17 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
 #if SUPPORT_BAESCRIPT == TRUE
     uint32_t scriptLenMs = 0;
     if (gScript) {
+        uint64_t scriptLenUs = 0;
         BAEScript_SetSong(gScript, song);
         BAEScript_SetExporting(gScript, gWriteToFile);
 #if BAESCRIPT_EXPORTER_LOOPCOUNT == TRUE
         if (gWriteToFile)
             BAEScript_ResetExporterOptions(gScript);
 #endif
-        BAESong_GetMicrosecondLength(song, &scriptLenMs);
-        scriptLenMs /= 1000;
+        BAESong_GetMicrosecondLength64(song, &scriptLenUs);
+        scriptLenMs = (scriptLenUs / 1000ull > UINT32_MAX)
+            ? UINT32_MAX
+            : (uint32_t)(scriptLenUs / 1000ull);
         BAEScript_Tick(gScript, 0, scriptLenMs);
 
 #if BAESCRIPT_EXPORTER_LOOPCOUNT == TRUE
@@ -866,8 +869,8 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
     }
 
     /* ---- Main playback loop ---- */
-    uint32_t lastPos       = 0;
-    uint32_t cumulative    = 0;
+    uint64_t lastPos       = 0;
+    uint64_t cumulative    = 0;
     unsigned int loopsDone = 0;
     BAE_BOOL done          = FALSE;
     gPosCounter            = 0;
@@ -884,12 +887,12 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
 
         BAESong_IsDone(song, &done);
 
-        uint32_t posUs = 0;
-        BAESong_GetMicrosecondPosition(song, &posUs);
-        uint32_t posMs = posUs / 1000;
+        uint64_t posUs = 0;
+        BAESong_GetMicrosecondPosition64(song, &posUs);
+        uint64_t posMs = posUs / 1000ull;
 
         /* Detect loop wrap-around via position going backwards by >1 second */
-        if (posMs < lastPos && (lastPos - posMs) > 1000) {
+        if (posMs < lastPos && (lastPos - posMs) > 1000ull) {
             cumulative += lastPos;
             if (effectiveLoopCount > 0) {
                 loopsDone++;
@@ -899,14 +902,19 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
         }
         lastPos = posMs;
 
-        uint32_t totalMs = cumulative + posMs;
-        display_song_position(posMs, totalMs);
+        uint64_t totalMs = cumulative + posMs;
+        display_song_position(
+            (posMs > UINT32_MAX) ? UINT32_MAX : (uint32_t)posMs,
+            (totalMs > UINT32_MAX) ? UINT32_MAX : (uint32_t)totalMs);
 
 #if SUPPORT_BAESCRIPT == TRUE
-        if (gScript) BAEScript_Tick(gScript, totalMs, scriptLenMs);
+        if (gScript) {
+            uint32_t tickMs = (totalMs > UINT32_MAX) ? UINT32_MAX : (uint32_t)totalMs;
+            BAEScript_Tick(gScript, tickMs, scriptLenMs);
+        }
 #endif
 
-        if (timeLimitSec > 0 && totalMs > (timeLimitSec * 1000) - 750)
+        if (timeLimitSec > 0 && totalMs > (uint64_t)timeLimitSec * 1000ull - 750ull)
             BAESong_Stop(song, gFadeOut);
 
         if (!done) PV_Idle(mixer, 15000);

@@ -1706,20 +1706,26 @@ typedef int32_t UNIT_TYPE;
     */
     /**************************************************/
     uint32_t GM_SongTicks(GM_Song *pSong);
+    uint64_t GM_SongTicks64(GM_Song *pSong);
 
     // Return the length in MIDI ticks of the song passed
     //  pSong   GM_Song structure. Data will be cloned for this function.
     //  pErr        OPErr error type
     uint32_t GM_GetSongTickLength(GM_Song *pSong, OPErr *pErr);
+    uint64_t GM_GetSongTickLength64(GM_Song *pSong, OPErr *pErr);
     OPErr GM_SetSongTickPosition(GM_Song *pSong, uint32_t songTickPosition);
+    OPErr GM_SetSongTickPosition64(GM_Song *pSong, uint64_t songTickPosition);
 
     // scan through song and build data structure with all program changes
     OPErr GM_GetSongInstrumentChanges(void *theSongResource, GM_Song **outSong, unsigned char **outTrackNames);
 
     uint32_t GM_SongMicroseconds(GM_Song *pSong);
+    uint64_t GM_SongMicroseconds64(GM_Song *pSong);
     uint32_t GM_GetSongMicrosecondLength(GM_Song *pSong, OPErr *pErr);
+    uint64_t GM_GetSongMicrosecondLength64(GM_Song *pSong, OPErr *pErr);
     // Set the song position in microseconds
     OPErr GM_SetSongMicrosecondPosition(GM_Song *pSong, uint32_t songMicrosecondPosition);
+    OPErr GM_SetSongMicrosecondPosition64(GM_Song *pSong, uint64_t songMicrosecondPosition);
 
     // Get current audio time stamp based upon the audio built interrupt
     uint32_t GM_GetSyncTimeStamp(void);

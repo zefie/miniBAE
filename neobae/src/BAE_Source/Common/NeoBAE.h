@@ -2789,30 +2789,40 @@ extern "C"
     // ------------------------------------
     // Sets the current playback position of the indicated BAESong to the requested
     // offset, expressed in microseconds from the beginning of the MIDI or RMF song
-    // data.
+    // data. Values above UINT32_MAX require BAESong_SetMicrosecondPosition64().
     //
     BAEResult BAESong_SetMicrosecondPosition(BAESong song,
                                              uint32_t ticks);
+    BAEResult BAESong_SetMicrosecondPosition64(BAESong song,
+                                               uint64_t ticks);
 
     // BAESong_GetMicrosecondPosition()
     // ------------------------------------
     // Upon return, parameter outTicks will point to an uint32_t containing the
     // current playback position of the indicated BAESong, expressed in microseconds.
+    // Truncates / reports OUT_OF_RANGE via the 32-bit API for positions > UINT32_MAX;
+    // use BAESong_GetMicrosecondPosition64() for full range.
     //
     BAEResult BAESong_GetMicrosecondPosition(BAESong song,
                                              uint32_t *outTicks);
+    BAEResult BAESong_GetMicrosecondPosition64(BAESong song,
+                                               uint64_t *outTicks);
 
     // BAESong_SetTickPosition()
     // ------------------------------------
     // Sets the current playback position in raw MIDI ticks.
     BAEResult BAESong_SetTickPosition(BAESong song,
                                       uint32_t ticks);
+    BAEResult BAESong_SetTickPosition64(BAESong song,
+                                        uint64_t ticks);
 
     // BAESong_GetTickPosition()
     // ------------------------------------
     // Gets the current playback position in raw MIDI ticks.
     BAEResult BAESong_GetTickPosition(BAESong song,
                                       uint32_t *outTicks);
+    BAEResult BAESong_GetTickPosition64(BAESong song,
+                                        uint64_t *outTicks);
 
     // BAESong_GetMicrosecondLength()
     // ------------------------------------
@@ -2820,16 +2830,20 @@ extern "C"
     // length in microseconds of the indicated BAESong's currently loaded MIDI or RMF
     // song data.  The result assumes that the song would be played at the tempo
     // stored in the song data, so any changes made via BAESong_SetTempo would not be
-    // reflected.
+    // reflected. Prefer BAESong_GetMicrosecondLength64() for long songs.
     //
     BAEResult BAESong_GetMicrosecondLength(BAESong song,
                                            uint32_t *outLength);
+    BAEResult BAESong_GetMicrosecondLength64(BAESong song,
+                                             uint64_t *outLength);
 
     // BAESong_GetTickLength()
     // ------------------------------------
     // Gets the length of the loaded song data in raw MIDI ticks.
     BAEResult BAESong_GetTickLength(BAESong song,
                                     uint32_t *outLength);
+    BAEResult BAESong_GetTickLength64(BAESong song,
+                                      uint64_t *outLength);
 
     // BAESong_SetMasterTempo()
     // --------------------------------------

@@ -81,14 +81,15 @@ static ScriptBinding *set_script_binding(BAESong song, BAEScript_Context *ctx)
     return binding;
 }
 
-/* Return jlong so songs longer than ~35.7 min (INT_MAX us) do not wrap negative. */
+/* Return jlong — full uint64 engine range (clamped to signed jlong max). */
 JNIEXPORT jlong JNICALL Java_com_zefie_NeoBAE_Song__1getSongPositionUS(JNIEnv* env, jclass clazz, jlong songRef){
     (void)env; (void)clazz;
     if(songRef == 0){ return 0; }
     BAESong song = (BAESong)(intptr_t)songRef;
-    uint32_t us = 0;
-    BAEResult r = BAESong_GetMicrosecondPosition(song, &us);
-    if(r != BAE_NO_ERROR){ __android_log_print(ANDROID_LOG_WARN, LOG_TAG, "BAESong_GetMicrosecondPosition err=%d", r); return 0; }
+    uint64_t us = 0;
+    BAEResult r = BAESong_GetMicrosecondPosition64(song, &us);
+    if(r != BAE_NO_ERROR){ __android_log_print(ANDROID_LOG_WARN, LOG_TAG, "BAESong_GetMicrosecondPosition64 err=%d", r); return 0; }
+    if (us > (uint64_t)INT64_MAX) us = (uint64_t)INT64_MAX;
     return (jlong)us;
 }
 
@@ -96,20 +97,21 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Song__1setSongPositionUS(JNIEnv* en
     (void)env; (void)clazz;
     if(songRef == 0){ return (jint)BAE_NULL_OBJECT; }
     BAESong song = (BAESong)(intptr_t)songRef;
-    uint32_t us32 = (us < 0) ? 0u : (us > (jlong)UINT32_MAX ? UINT32_MAX : (uint32_t)us);
-    BAEResult r = BAESong_SetMicrosecondPosition(song, us32);
-    if(r != BAE_NO_ERROR){ __android_log_print(ANDROID_LOG_WARN, LOG_TAG, "BAESong_SetMicrosecondPosition err=%d", r); }
+    uint64_t us64 = (us < 0) ? 0u : (uint64_t)us;
+    BAEResult r = BAESong_SetMicrosecondPosition64(song, us64);
+    if(r != BAE_NO_ERROR){ __android_log_print(ANDROID_LOG_WARN, LOG_TAG, "BAESong_SetMicrosecondPosition64 err=%d", r); }
     return (jint)r;
 }
 
-/* Return jlong so songs longer than ~35.7 min (INT_MAX us) do not wrap negative. */
+/* Return jlong — full uint64 engine range (clamped to signed jlong max). */
 JNIEXPORT jlong JNICALL Java_com_zefie_NeoBAE_Song__1getSongLengthUS(JNIEnv* env, jclass clazz, jlong songRef){
     (void)env; (void)clazz;
     if(songRef == 0){ return 0; }
     BAESong song = (BAESong)(intptr_t)songRef;
-    uint32_t us = 0;
-    BAEResult r = BAESong_GetMicrosecondLength(song, &us);
-    if(r != BAE_NO_ERROR){ __android_log_print(ANDROID_LOG_WARN, LOG_TAG, "BAESong_GetMicrosecondLength err=%d", r); return 0; }
+    uint64_t us = 0;
+    BAEResult r = BAESong_GetMicrosecondLength64(song, &us);
+    if(r != BAE_NO_ERROR){ __android_log_print(ANDROID_LOG_WARN, LOG_TAG, "BAESong_GetMicrosecondLength64 err=%d", r); return 0; }
+    if (us > (uint64_t)INT64_MAX) us = (uint64_t)INT64_MAX;
     return (jlong)us;
 }
 

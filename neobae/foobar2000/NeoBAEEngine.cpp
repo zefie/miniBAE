@@ -262,8 +262,8 @@ void NeoBAEEngine::LoadSong_Locked(const void* data, size_t size, const char* /*
 	SetCodecLabel_Locked((int)fileType);
 	m_song = song;
 
-	uint32_t len = 0;
-	if (BAESong_GetMicrosecondLength(song, &len) != BAE_NO_ERROR || len == 0)
+	uint64_t len = 0;
+	if (BAESong_GetMicrosecondLength64(song, &len) != BAE_NO_ERROR || len == 0)
 		len = 1000;
 	m_lengthMicros = len;
 	m_lengthSeconds = (double)len / 1000000.0;
@@ -446,7 +446,7 @@ void NeoBAEEngine::StartDecode(bool allowLooping, abort_callback& abort, const N
 
 	if (m_started) {
 		BAESong_Stop(song, FALSE);
-		BAESong_SetMicrosecondPosition(song, 0);
+		BAESong_SetMicrosecondPosition64(song, 0);
 		m_started = false;
 	}
 
@@ -511,9 +511,9 @@ bool NeoBAEEngine::DecodeRun(audio_chunk& chunk, abort_callback& abort)
 		kBitsPerSample,
 		audio_chunk::g_guess_channel_config(kChannels));
 
-	uint32_t posUs = 0;
-	BAESong_GetMicrosecondPosition(song, &posUs);
-	const uint32_t posMs = posUs / 1000;
+	uint64_t posUs = 0;
+	BAESong_GetMicrosecondPosition64(song, &posUs);
+	const uint64_t posMs = posUs / 1000;
 
 	if (m_allowLooping && posMs < m_lastPosMs && (m_lastPosMs - posMs) > 1000) {
 		++m_loopsDone;
@@ -556,7 +556,7 @@ void NeoBAEEngine::Seek(double seconds, abort_callback& abort)
 			target += m_lengthSeconds;
 	}
 
-	const uint32_t micros = (uint32_t)(target * 1000000.0 + 0.5);
-	BAESong_SetMicrosecondPosition(song, micros);
+	const uint64_t micros = (uint64_t)(target * 1000000.0 + 0.5);
+	BAESong_SetMicrosecondPosition64(song, micros);
 	m_lastPosMs = micros / 1000;
 }

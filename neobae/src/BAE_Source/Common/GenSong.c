@@ -1340,18 +1340,47 @@ OPErr GM_FreeSong(void *threadContext, GM_Song *pSong)
     return err;
 }
 
+/* Convert sequencer UFLOAT time/tick to uint64 without changing voice math. */
+static uint64_t PV_UFloatToUInt64(UFLOAT v)
+{
+#if USE_FLOAT == FALSE
+    return (uint64_t)(uint32_t)v;
+#else
+    if (v <= 0.0)
+        return 0;
+    /* Exact integer double covers >100 years of microseconds; clamp extremes. */
+    if (v >= 18446744073709549568.0) /* largest uint64 representable as double */
+        return UINT64_MAX;
+    return (uint64_t)v;
+#endif
+}
+
+/* Length-scan safety. USE_FLOAT builds track time in double — allow long songs.
+ * Non-float UFLOAT is uint32_t, so keep the historic ~1 hour ceiling. */
+#if USE_FLOAT == FALSE
+#define kSongLengthScanMaxUs ((UFLOAT)3600000000u)
+#else
+#define kSongLengthScanMaxUs ((UFLOAT)604800000000.0) /* 7 days */
+#endif
+
 // Return the length in MIDI ticks of the song passed
 
 //  pSong   GM_Song structure. Data will be cloned for this function.
 //  pErr    OPErr error type
-uint32_t GM_GetSongTickLength(GM_Song *pSong, OPErr *pErr)
+uint64_t GM_GetSongTickLength64(GM_Song *pSong, OPErr *pErr)
 {
     GM_Song *theSong;
-    uint32_t tickLength;
+    uint64_t tickLength;
     OPErr err;
 
     err = NO_ERR;
     tickLength = 0;
+    if (!pSong)
+    {
+        if (pErr)
+            *pErr = NULL_OBJECT;
+        return 0;
+    }
     if (pSong->seqType != SEQ_MIDI)
     {
         if (pErr)
@@ -1392,8 +1421,7 @@ uint32_t GM_GetSongTickLength(GM_Song *pSong, OPErr *pErr)
                         break;
                     }
 
-                    // if theSong is longer than an hour, bail
-                    if (theSong->songMicroseconds >= (UFLOAT)3600000000u)
+                    if (theSong->songMicroseconds >= kSongLengthScanMaxUs)
                     {
                         err = OUT_OF_RANGE;
                         break;
@@ -1406,12 +1434,7 @@ uint32_t GM_GetSongTickLength(GM_Song *pSong, OPErr *pErr)
                 theSong->songEndCallbackPtr = NULL;
                 theSong->disposeSongDataWhenDone = FALSE;
 
-                tickLength = (uint32_t)theSong->CurrentMidiClock;
-                if (tickLength == 0xFFFFFFFFL)
-                {
-                    err = OUT_OF_RANGE;
-                }
-
+                tickLength = PV_UFloatToUInt64(theSong->CurrentMidiClock);
                 if (err)
                 {
                     tickLength = 0;
@@ -1428,18 +1451,28 @@ uint32_t GM_GetSongTickLength(GM_Song *pSong, OPErr *pErr)
     }
     else
     {
-        tickLength = (uint32_t)pSong->songMidiTickLength;
-        if (tickLength == 0xFFFFFFFFL)
-        {
-            tickLength = 0;
-            err = OUT_OF_RANGE;
-        }
+        tickLength = PV_UFloatToUInt64(pSong->songMidiTickLength);
     }
     if (pErr)
     {
         *pErr = err;
     }
     return tickLength;
+}
+
+uint32_t GM_GetSongTickLength(GM_Song *pSong, OPErr *pErr)
+{
+    OPErr err = NO_ERR;
+    uint64_t tickLength = GM_GetSongTickLength64(pSong, &err);
+
+    if (err == NO_ERR && tickLength > UINT32_MAX)
+    {
+        tickLength = 0;
+        err = OUT_OF_RANGE;
+    }
+    if (pErr)
+        *pErr = err;
+    return (uint32_t)tickLength;
 }
 
 // meta event callback that collects track names
@@ -1579,7 +1612,7 @@ OPErr GM_GetSongInstrumentChanges(void *theSongResource, GM_Song **outSong, unsi
 #endif
 
 // Set the song position in midi ticks
-OPErr GM_SetSongTickPosition(GM_Song *pSong, uint32_t songTickPosition)
+OPErr GM_SetSongTickPosition64(GM_Song *pSong, uint64_t songTickPosition)
 {
     GM_Song *theSong;
     OPErr theErr;
@@ -1587,6 +1620,8 @@ OPErr GM_SetSongTickPosition(GM_Song *pSong, uint32_t songTickPosition)
     int32_t count;
     bool songPaused = FALSE;
 
+    if (!pSong)
+        return PARAM_ERR;
     if (pSong->seqType != SEQ_MIDI)
     {
         return NOT_SETUP;
@@ -1620,7 +1655,7 @@ OPErr GM_SetSongTickPosition(GM_Song *pSong, uint32_t songTickPosition)
                 {
                     break;
                 }
-                if (theSong->CurrentMidiClock > (UFLOAT)songTickPosition)
+                if (PV_UFloatToUInt64(theSong->CurrentMidiClock) > songTickPosition)
                 {
                     foundPosition = TRUE;
                     break;
@@ -1669,47 +1704,85 @@ OPErr GM_SetSongTickPosition(GM_Song *pSong, uint32_t songTickPosition)
     return theErr;
 }
 
-uint32_t GM_SongTicks(GM_Song *pSong)
+OPErr GM_SetSongTickPosition(GM_Song *pSong, uint32_t songTickPosition)
+{
+    return GM_SetSongTickPosition64(pSong, (uint64_t)songTickPosition);
+}
+
+uint64_t GM_SongTicks64(GM_Song *pSong)
 {
     if (pSong)
     {
         if (GM_IsSongDone(pSong) == FALSE)
         {
-            return (uint32_t)pSong->CurrentMidiClock;
+            return PV_UFloatToUInt64(pSong->CurrentMidiClock);
         }
     }
-    return 0L;
+    return 0;
+}
+
+uint32_t GM_SongTicks(GM_Song *pSong)
+{
+    uint64_t ticks = GM_SongTicks64(pSong);
+    return (ticks > UINT32_MAX) ? UINT32_MAX : (uint32_t)ticks;
+}
+
+uint64_t GM_SongMicroseconds64(GM_Song *pSong)
+{
+    if (pSong)
+    {
+        if (GM_IsSongDone(pSong) == FALSE)
+        {
+            return PV_UFloatToUInt64(pSong->songMicroseconds);
+        }
+    }
+    return 0;
 }
 
 uint32_t GM_SongMicroseconds(GM_Song *pSong)
 {
-    if (pSong)
+    uint64_t us = GM_SongMicroseconds64(pSong);
+    return (us > UINT32_MAX) ? UINT32_MAX : (uint32_t)us;
+}
+
+uint64_t GM_GetSongMicrosecondLength64(GM_Song *pSong, OPErr *pErr)
+{
+    OPErr err = NO_ERR;
+    uint64_t ms = 0;
+
+    if (!pSong)
     {
-        if (GM_IsSongDone(pSong) == FALSE)
-        {
-            // XXX - callers should check for overflow
-            return (uint32_t)pSong->songMicroseconds;
-        }
+        if (pErr)
+            *pErr = PARAM_ERR;
+        return 0;
     }
-    return 0L;
+
+    (void)GM_GetSongTickLength64(pSong, &err);
+    if (err == NO_ERR)
+        ms = PV_UFloatToUInt64(pSong->songMicrosecondLength);
+
+    if (pErr)
+        *pErr = err;
+    return ms;
 }
 
 uint32_t GM_GetSongMicrosecondLength(GM_Song *pSong, OPErr *pErr)
 {
-    uint32_t ms;
+    uint32_t ms = 0;
 
-    ms = 0;
     if (pErr && pSong)
     {
-        GM_GetSongTickLength(pSong, pErr);
+        uint64_t ms64 = GM_GetSongMicrosecondLength64(pSong, pErr);
         if (*pErr == NO_ERR)
         {
-            ms = (uint32_t)pSong->songMicrosecondLength;
-            if (ms == 0xFFFFFFFFL)
+            if (ms64 > UINT32_MAX)
             {
-                // we've overflowed,
                 ms = 0;
                 *pErr = OUT_OF_RANGE;
+            }
+            else
+            {
+                ms = (uint32_t)ms64;
             }
         }
     }
@@ -1718,7 +1791,7 @@ uint32_t GM_GetSongMicrosecondLength(GM_Song *pSong, OPErr *pErr)
 
 // Set the song position in microseconds
 // $$kk: 08.12.98 merge: changed this method
-OPErr GM_SetSongMicrosecondPosition(GM_Song *pSong, uint32_t songMicrosecondPosition)
+OPErr GM_SetSongMicrosecondPosition64(GM_Song *pSong, uint64_t songMicrosecondPosition)
 {
     GM_Song *theSong;
     OPErr theErr;
@@ -1732,6 +1805,8 @@ OPErr GM_SetSongMicrosecondPosition(GM_Song *pSong, uint32_t songMicrosecondPosi
     // i am adding a mechanism to record whether the song was paused and only
     // resume it in that case.
 
+    if (!pSong)
+        return PARAM_ERR;
     if (pSong->seqType != SEQ_MIDI)
     {
         return NOT_SETUP;
@@ -1767,7 +1842,7 @@ OPErr GM_SetSongMicrosecondPosition(GM_Song *pSong, uint32_t songMicrosecondPosi
                 {
                     break;
                 }
-                if (theSong->songMicroseconds > (UFLOAT)songMicrosecondPosition)
+                if (PV_UFloatToUInt64(theSong->songMicroseconds) > songMicrosecondPosition)
                 {
                     foundPosition = TRUE;
                     break;
@@ -1812,6 +1887,11 @@ OPErr GM_SetSongMicrosecondPosition(GM_Song *pSong, uint32_t songMicrosecondPosi
                                     // since this song was never engaged
     }
     return theErr;
+}
+
+OPErr GM_SetSongMicrosecondPosition(GM_Song *pSong, uint32_t songMicrosecondPosition)
+{
+    return GM_SetSongMicrosecondPosition64(pSong, (uint64_t)songMicrosecondPosition);
 }
 
 // Return the used patch array of instruments used in the song passed.
