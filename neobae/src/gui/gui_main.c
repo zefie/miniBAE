@@ -6027,6 +6027,125 @@ int main(int argc, char *argv[])
         draw_frame(R, statusPanel, panelBorder);
         int statusBaseY = statusPanel.y + 10;
         draw_text(R, 20, statusBaseY, "STATUS & BANK", headerCol);
+        /* Bank flavor chips sit next to the panel title (not the bank name). */
+        if (g_bae.bank_loaded)
+        {
+            const char *chips[4];
+            SDL_Color chipFills[4];
+            SDL_Color chipTexts[4];
+            int chipCount = 0;
+            const char *bank_ext = strrchr(g_current_bank_path, '.');
+            int is_hsb = (strcmp(g_current_bank_path, "__builtin__") == 0);
+            int is_zsb = 0;
+            if (bank_ext)
+            {
+#ifdef _WIN32
+                is_hsb = is_hsb || (_stricmp(bank_ext, ".hsb") == 0);
+                is_zsb = (_stricmp(bank_ext, ".zsb") == 0);
+#else
+                is_hsb = is_hsb || (strcasecmp(bank_ext, ".hsb") == 0);
+                is_zsb = (strcasecmp(bank_ext, ".zsb") == 0);
+#endif
+            }
+            if (is_hsb)
+            {
+                /* miniBAE — dark blue */
+                chips[chipCount] = "miniBAE";
+                chipFills[chipCount] = g_is_dark_mode
+                    ? (SDL_Color){20, 35, 85, 220}
+                    : (SDL_Color){30, 50, 120, 230};
+                chipTexts[chipCount] = g_is_dark_mode
+                    ? (SDL_Color){150, 180, 255, 255}
+                    : (SDL_Color){220, 230, 255, 255};
+                chipCount++;
+            }
+            else if (is_zsb)
+            {
+                /* NeoBAE — gold (former microQ colors) */
+                chips[chipCount] = "NeoBAE";
+                chipFills[chipCount] = g_is_dark_mode
+                    ? (SDL_Color){90, 70, 30, 220}
+                    : (SDL_Color){255, 230, 160, 230};
+                chipTexts[chipCount] = g_is_dark_mode
+                    ? (SDL_Color){255, 220, 120, 255}
+                    : (SDL_Color){120, 80, 20, 255};
+                chipCount++;
+            }
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
+            else if (GM_GetMixerSF2Mode())
+            {
+                /* FluidBAE — teal */
+                chips[chipCount] = "FluidBAE";
+                chipFills[chipCount] = g_is_dark_mode
+                    ? (SDL_Color){20, 70, 65, 220}
+                    : (SDL_Color){175, 235, 225, 230};
+                chipTexts[chipCount] = g_is_dark_mode
+                    ? (SDL_Color){130, 235, 215, 255}
+                    : (SDL_Color){15, 90, 80, 255};
+                chipCount++;
+            }
+#endif
+#if USE_NATIVE_DLS == TRUE
+            else if (g_bae.mixer && GM_GetMixerDLSMode())
+            {
+                int has_mobile = BAEMixer_HasMobileBAEDLSBank(g_bae.mixer) ? 1 : 0;
+                int has_eggs = BAEMixer_HasEggsDLSBank(g_bae.mixer) ? 1 : 0;
+                if (has_mobile)
+                {
+                    chips[chipCount] = "mobileBAE";
+                    chipFills[chipCount] = g_is_dark_mode
+                        ? (SDL_Color){30, 70, 95, 220}
+                        : (SDL_Color){190, 225, 245, 230};
+                    chipTexts[chipCount] = g_is_dark_mode
+                        ? (SDL_Color){160, 220, 255, 255}
+                        : (SDL_Color){20, 70, 110, 255};
+                    chipCount++;
+                }
+                if (has_eggs)
+                {
+                    /* microQ — black & white */
+                    chips[chipCount] = "microQ";
+                    chipFills[chipCount] = g_is_dark_mode
+                        ? (SDL_Color){40, 40, 40, 220}
+                        : (SDL_Color){230, 230, 230, 230};
+                    chipTexts[chipCount] = g_is_dark_mode
+                        ? (SDL_Color){235, 235, 235, 255}
+                        : (SDL_Color){25, 25, 25, 255};
+                    chipCount++;
+                }
+                if (!has_mobile && !has_eggs)
+                {
+                    /* NeoBAE DLS — bronze / warm amber */
+                    chips[chipCount] = "NeoBAE DLS";
+                    chipFills[chipCount] = g_is_dark_mode
+                        ? (SDL_Color){85, 50, 25, 220}
+                        : (SDL_Color){255, 205, 145, 230};
+                    chipTexts[chipCount] = g_is_dark_mode
+                        ? (SDL_Color){255, 185, 110, 255}
+                        : (SDL_Color){100, 50, 15, 255};
+                    chipCount++;
+                }
+            }
+#endif
+            if (chipCount > 0)
+            {
+                int title_w = 0, title_h_unused = 0;
+                measure_text("STATUS & BANK", &title_w, &title_h_unused);
+                (void)title_h_unused;
+                int chip_x = 20 + title_w + 12;
+                for (int ci = 0; ci < chipCount; ci++)
+                {
+                    int chip_w = 0, chip_h = 0;
+                    measure_text(chips[ci], &chip_w, &chip_h);
+                    int chip_y = statusBaseY - 1;
+                    Rect chipBg = {chip_x - 4, chip_y - 1, chip_w + 8, (chip_h > 0 ? chip_h : 12) + 2};
+                    draw_rect(R, chipBg, chipFills[ci]);
+                    draw_frame(R, chipBg, chipTexts[ci]);
+                    draw_text(R, chip_x, statusBaseY, chips[ci], chipTexts[ci]);
+                    chip_x += chipBg.w + 8;
+                }
+            }
+        }
         int lineY1 = statusBaseY + 20;
         int lineY2 = statusBaseY + 40;
         int lineY3 = statusBaseY + 60;
@@ -6110,50 +6229,6 @@ int main(int argc, char *argv[])
                 approxW = 8;
             if (approxW > 400)
                 approxW = 400; // crude clamp
-#if USE_NATIVE_DLS == TRUE
-            /* Bank flavor chips: MobileBAE (pgal) and/or microQ eggs. */
-            if (g_bae.mixer)
-            {
-                const char *chips[2];
-                SDL_Color chipFills[2];
-                SDL_Color chipTexts[2];
-                int chipCount = 0;
-                if (BAEMixer_HasMobileBAEDLSBank(g_bae.mixer))
-                {
-                    chips[chipCount] = "mobileBAE";
-                    chipFills[chipCount] = g_is_dark_mode
-                        ? (SDL_Color){30, 70, 95, 220}
-                        : (SDL_Color){190, 225, 245, 230};
-                    chipTexts[chipCount] = g_is_dark_mode
-                        ? (SDL_Color){160, 220, 255, 255}
-                        : (SDL_Color){20, 70, 110, 255};
-                    chipCount++;
-                }
-                if (BAEMixer_HasEggsDLSBank(g_bae.mixer))
-                {
-                    chips[chipCount] = "microQ";
-                    chipFills[chipCount] = g_is_dark_mode
-                        ? (SDL_Color){90, 70, 30, 220}
-                        : (SDL_Color){255, 230, 160, 230};
-                    chipTexts[chipCount] = g_is_dark_mode
-                        ? (SDL_Color){255, 220, 120, 255}
-                        : (SDL_Color){120, 80, 20, 255};
-                    chipCount++;
-                }
-                for (int ci = 0; ci < chipCount; ci++)
-                {
-                    int chip_w = 0, chip_h = 0;
-                    measure_text(chips[ci], &chip_w, &chip_h);
-                    int chip_x = 60 + approxW + 10;
-                    int chip_y = lineY2 - 1;
-                    Rect chipBg = {chip_x - 4, chip_y - 1, chip_w + 8, (chip_h > 0 ? chip_h : 12) + 2};
-                    draw_rect(R, chipBg, chipFills[ci]);
-                    draw_frame(R, chipBg, chipTexts[ci]);
-                    draw_text(R, chip_x, lineY2, chips[ci], chipTexts[ci]);
-                    approxW += 10 + chipBg.w;
-                }
-            }
-#endif
             Rect bankTextRect = {60, lineY2, approxW, 16};
             // Prepare deferred tooltip drawing at end of frame (post status text)
             if (!g_keyboard_channel_dd_open && point_in(ui_mx, ui_my, bankTextRect))
@@ -6166,32 +6241,45 @@ int main(int argc, char *argv[])
                 }
                 else
                 {
-#if USE_NATIVE_DLS == TRUE
-                    if (g_bae.mixer &&
-                        (BAEMixer_HasMobileBAEDLSBank(g_bae.mixer) ||
-                         BAEMixer_HasEggsDLSBank(g_bae.mixer)))
+                    const char *flavor = NULL;
+                    const char *tip_ext = strrchr(g_current_bank_path, '.');
+                    if (tip_ext)
                     {
-                        const char *flavor = "";
-                        if (BAEMixer_HasEggsDLSBank(g_bae.mixer) &&
-                            BAEMixer_HasMobileBAEDLSBank(g_bae.mixer))
-                        {
-                            flavor = "mobileBAE + scrambled eggs / microQ";
-                        }
-                        else if (BAEMixer_HasEggsDLSBank(g_bae.mixer))
-                        {
-                            flavor = "scrambled eggs / microQ";
-                        }
-                        else
-                        {
-                            flavor = "mobileBAE";
-                        }
-                        snprintf(tip, sizeof(tip), "%s  (%s)", g_current_bank_path, flavor);
-                    }
-                    else
+#ifdef _WIN32
+                        if (_stricmp(tip_ext, ".hsb") == 0)
+                            flavor = "miniBAE";
+                        else if (_stricmp(tip_ext, ".zsb") == 0)
+                            flavor = "NeoBAE";
+#else
+                        if (strcasecmp(tip_ext, ".hsb") == 0)
+                            flavor = "miniBAE";
+                        else if (strcasecmp(tip_ext, ".zsb") == 0)
+                            flavor = "NeoBAE";
 #endif
-                    {
-                        snprintf(tip, sizeof(tip), "%s", g_current_bank_path);
                     }
+#if USE_SF2_SUPPORT == TRUE && _USING_FLUIDLITE == TRUE
+                    if (!flavor && GM_GetMixerSF2Mode())
+                        flavor = "FluidBAE";
+#endif
+#if USE_NATIVE_DLS == TRUE
+                    if (!flavor && g_bae.mixer && GM_GetMixerDLSMode())
+                    {
+                        int tip_mobile = BAEMixer_HasMobileBAEDLSBank(g_bae.mixer) ? 1 : 0;
+                        int tip_eggs = BAEMixer_HasEggsDLSBank(g_bae.mixer) ? 1 : 0;
+                        if (tip_eggs && tip_mobile)
+                            flavor = "mobileBAE + scrambled eggs / microQ";
+                        else if (tip_eggs)
+                            flavor = "scrambled eggs / microQ";
+                        else if (tip_mobile)
+                            flavor = "mobileBAE";
+                        else
+                            flavor = "NeoBAE DLS";
+                    }
+#endif
+                    if (flavor)
+                        snprintf(tip, sizeof(tip), "%s  (%s)", g_current_bank_path, flavor);
+                    else
+                        snprintf(tip, sizeof(tip), "%s", g_current_bank_path);
                 }
                 int tipLen = (int)strlen(tip);
                 if (tipLen > 0)

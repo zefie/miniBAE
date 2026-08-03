@@ -30,7 +30,7 @@ else
 fi
 
 # Build the project
-/opt/llvm-mingw/wrapper.sh --cmake -DNEOBAE_STATIC=1 -DBAE_PLATFORM=SDL3 -DNEOBAE_BUILD_VCLIB=1 -DENABLE_MIDI_HW=1 "${@}"
+/opt/llvm-mingw/wrapper.sh --cmake -DNEOBAE_STATIC=1 -DBAE_PLATFORM=SDL3 -DNEOBAE_BUILD_VCLIB=1 -DBAE_ENABLE_MIDI_HARDWARE=1 "${@}"
 QUEUE_EXIT=$?
 
 # we now have build-aarch64-w64-mingw32, build-armv7-w64-mingw32, build-x86_64-w64-mingw32, and build-i686-w64-mingw32
