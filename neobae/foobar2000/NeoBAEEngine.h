@@ -26,7 +26,9 @@ struct NeoBAEPlaybackSettings {
 // libneobae exposes a single process-wide MusicGlobals mixer. Concurrent
 // BAEMixer_Open sessions (playback + Waveform Minibar, etc.) corrupt that
 // pointer and crash in GM_FreeSong. This class enforces one exclusive mixer
-// session at a time for decode, while Prepare() stays non-blocking.
+// session at a time for decode. Prepare() also takes the global mutex: probe /
+// BAEUtil share process-global X_API state and must not overlap DecodeRun or
+// another Prepare (library scan + playlist drop).
 class NeoBAEEngine {
 public:
 	NeoBAEEngine();

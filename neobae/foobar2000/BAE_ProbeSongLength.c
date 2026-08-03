@@ -573,9 +573,8 @@ static BAEResult FB2K_ExtractToSmf(void const *data, uint32_t dataSize, BAEFileT
 
 	if (ftype == BAE_MIDI_TYPE)
 	{
-		*outSmf = FB2K_DupToXPtr(data, dataSize);
-		if (!*outSmf)
-			return BAE_MEMORY_ERR;
+		/* Caller walks in-place — do not duplicate the whole file. */
+		*outSmf = (void *)data;
 		*outSmfLen = dataSize;
 		return BAE_NO_ERROR;
 	}
@@ -659,6 +658,7 @@ BAEResult BAE_ProbeSongLengthFromMemory(void const *data,
 	uint32_t smfLen = 0;
 	BAEResult err;
 	uint32_t micros = 0;
+	int ownsSmf = 1;
 
 	if (!data || dataSize == 0 || !outLengthMicros)
 		return BAE_PARAM_ERR;
@@ -703,16 +703,21 @@ BAEResult BAE_ProbeSongLengthFromMemory(void const *data,
 	if (ftype == BAE_WAVE_TYPE || ftype == BAE_AIFF_TYPE || ftype == BAE_AU_TYPE)
 		return BAE_INVALID_TYPE;
 
+	/* Raw SMF is already in `data` — walk it without an XNewPtr copy. */
+	if (ftype == BAE_MIDI_TYPE)
+		ownsSmf = 0;
+
 	err = FB2K_ExtractToSmf(data, dataSize, ftype, &smf, &smfLen, outMetadata);
 	if (err != BAE_NO_ERROR || !smf || smfLen == 0)
 	{
-		if (smf)
+		if (ownsSmf && smf)
 			XDisposePtr(smf);
 		return (err != BAE_NO_ERROR) ? err : BAE_BAD_FILE;
 	}
 
 	err = FB2K_SmfDurationMicros((const unsigned char *)smf, smfLen, &micros);
-	XDisposePtr(smf);
+	if (ownsSmf)
+		XDisposePtr(smf);
 	if (err != BAE_NO_ERROR)
 		return err;
 

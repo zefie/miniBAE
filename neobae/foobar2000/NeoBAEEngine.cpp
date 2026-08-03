@@ -406,23 +406,25 @@ void NeoBAEEngine::Prepare(const void* data, size_t size, const char* pathHint, 
 		throw exception_io_data("NeoBAE: empty file");
 	abort.check();
 
-	{
-		std::lock_guard<std::recursive_mutex> lock(s_mutex);
-		TeardownMixer_Locked(true);
-		if (m_holdsExclusive)
-			ReleaseExclusive_Locked();
+	/* Hold s_mutex for the whole probe. foobar's media library / folder-watcher
+	 * call g_open_for_info_read on worker threads; X_API resource tables and
+	 * BAEUtil are process-global and not re-entrant. Running Probe outside the
+	 * lock raced DecodeRun and other Prepares (null deref in MSVCP140). */
+	std::lock_guard<std::recursive_mutex> lock(s_mutex);
 
-		m_settings = settings;
-		m_pathHint = pathHint ? pathHint : "";
-		m_fileData.set_size(size);
-		memcpy(m_fileData.get_ptr(), data, size);
-		m_lengthSeconds = 0.0;
-		m_lengthMicros = 0;
-		memset(&m_rmfMetadata, 0, sizeof(m_rmfMetadata));
-		SniffCodecFromData_Locked();
-	}
+	TeardownMixer_Locked(true);
+	if (m_holdsExclusive)
+		ReleaseExclusive_Locked();
 
-	// Mixer-free duration + RMF/ZMF tags — safe while another session owns MusicGlobals.
+	m_settings = settings;
+	m_pathHint = pathHint ? pathHint : "";
+	m_fileData.set_size(size);
+	memcpy(m_fileData.get_ptr(), data, size);
+	m_lengthSeconds = 0.0;
+	m_lengthMicros = 0;
+	memset(&m_rmfMetadata, 0, sizeof(m_rmfMetadata));
+	SniffCodecFromData_Locked();
+
 	uint32_t micros = 0;
 	BAEFileType ftype = BAE_INVALID_TYPE;
 	BAE_RmfSongMetadata meta{};
@@ -437,15 +439,13 @@ void NeoBAEEngine::Prepare(const void* data, size_t size, const char* pathHint, 
 		m_lengthSeconds = (double)micros / 1000000.0;
 	}
 
-	/* Prefer probe-side copy (same SongResource open as duration). If the DLL
-	 * is older / probe left present=0, fall back to BAEUtil so playlist add
-	 * still gets title/artist without decoding. */
-	if (meta.present && (meta.title[0] || meta.composer[0] || meta.performed[0] || meta.copyright[0]))
+	/* Prefer probe-side copy (one SongResource open). BAEUtil_GetRmfSongInfo
+	 * re-opens the RMF per field (~15x) — only use it when the probe left
+	 * present=0 (older libneobae / non-RMF path). */
+	if (meta.present)
 		m_rmfMetadata = meta;
 	else if (IsRmfOrZmfBytes(m_fileData.get_ptr(), m_fileData.get_size()))
 		FillRmfMetadataFromUtil(m_rmfMetadata, m_fileData.get_ptr(), (uint32_t)m_fileData.get_size());
-	else if (meta.present)
-		m_rmfMetadata = meta;
 
 	if (ftype != BAE_INVALID_TYPE)
 		SetCodecLabel_Locked((int)ftype);
