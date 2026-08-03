@@ -24,7 +24,8 @@ pushd "%SCRIPT_DIR%" >nul
 if not defined ARCH set "ARCH=Win32"
 if /I "%ARCH%"=="x86" set "ARCH=Win32"
 if not defined CONFIG set "CONFIG=Release"
-if not defined TOOLSET set "TOOLSET=v145"
+rem v143 (VS 2022) matches typical foobar CRT age better than bleeding-edge v145.
+if not defined TOOLSET set "TOOLSET=v143"
 
 if /I "%ARCH%"=="Win32" (
   set "ARCH_TAG=win32"
@@ -134,6 +135,9 @@ echo.
 echo Install BOTH DLLs into your foobar2000 "components" folder:
 echo   foo_neobae.dll
 echo   libneobae.dll
+echo.
+echo Note: foobar SDK forces /MD; users who can run foobar already have the CRT.
+echo Prefer TOOLSET=v143 if targeting older machines than your VS 2026 host.
 echo ============================================================
 
 popd >nul

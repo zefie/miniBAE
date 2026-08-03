@@ -14,6 +14,18 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 if(POLICY CMP0003)
   cmake_policy(SET CMP0003 NEW)
 endif()
+# Honor CMAKE_MSVC_RUNTIME_LIBRARY (needed for /MT foobar redistributable builds).
+if(POLICY CMP0091)
+  cmake_policy(SET CMP0091 NEW)
+endif()
+
+option(NEOBAE_MSVC_STATIC_RUNTIME
+  "Link the MSVC CRT statically (/MT,/MTd). Enable for foobar2000 plugin packages so end users need no VC++ redistributable."
+  OFF)
+if(MSVC AND NEOBAE_MSVC_STATIC_RUNTIME)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  message(STATUS "NEOBAE_MSVC_STATIC_RUNTIME: using ${CMAKE_MSVC_RUNTIME_LIBRARY}")
+endif()
 
 # Version string generation equivalent to neobae/inc/Makefile.versioning.
 set(BAE_VERSION "")

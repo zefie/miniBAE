@@ -37,10 +37,13 @@ echo Building 32-bit? Use:  ARCH=Win32  and msbuild ... /p:Platform=x86
 echo Building 64-bit? Use:  ARCH=x64    and msbuild ... /p:Platform=x64
 echo.
 
+rem Keep /MD (default) so CRT matches foo_neobae + foobar SDK. /MT is not
+rem viable for the plugin because libPPUI.lib is built MD_DynamicRelease.
 cmake -S "%ROOT%" -B "%BUILD_DIR%" -A %ARCH% ^
   -DBAE_PLATFORM=foobar2000 ^
   -DNEOBAE_STATIC=ON ^
   -DNEOBAE_SHARED_LIBNEOBAE=ON ^
+  -DNEOBAE_MSVC_STATIC_RUNTIME=OFF ^
   -DNEOBAE_BUILD_VCLIB=ON ^
   -DBUILD_PLAYBAE=OFF ^
   -DBUILD_ZEFIDI=OFF ^

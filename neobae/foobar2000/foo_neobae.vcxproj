@@ -94,6 +94,7 @@
     </PostBuildEvent>
   </ItemDefinitionGroup>
 
+  <!-- Must stay /MD to match foobar SDK libPPUI.lib / shared-*.lib (MD_DynamicRelease). -->
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
