@@ -639,7 +639,11 @@ endif()
 
 
 if(NOT DEFINED BAE_PLATFORM OR BAE_PLATFORM STREQUAL "")
-  set(_BAE_PLATFORM_DEFAULT "Dummy")
+  if(MSVC)
+    set(_BAE_PLATFORM_DEFAULT "WinOS")
+  else()
+    set(_BAE_PLATFORM_DEFAULT "Dummy")
+  endif()
   if(_BAE_PLATFORM_SDL3_AVAILABLE AND (NOT _BAE_PLATFORM_SDL2_AVAILABLE OR NOT USE_SDL2))
     set(_BAE_PLATFORM_DEFAULT "SDL3")
     message(STATUS "Using SDL3 platform backend (found SDL3 headers and library).")
