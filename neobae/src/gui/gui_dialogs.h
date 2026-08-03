@@ -43,6 +43,22 @@ extern bool g_reverb_tooltip_visible;
 extern Rect g_reverb_tooltip_rect;
 extern char g_reverb_tooltip_text[520];
 
+extern bool g_loop_tooltip_visible;
+extern Rect g_loop_tooltip_rect;
+extern char g_loop_tooltip_text[520];
+
+extern bool g_voice_tooltip_visible;
+extern Rect g_voice_tooltip_rect;
+extern char g_voice_tooltip_text[520];
+
+extern bool g_program_tooltip_visible;
+extern Rect g_program_tooltip_rect;
+extern char g_program_tooltip_text[520];
+
+extern bool g_dls_compat_tooltip_visible;
+extern Rect g_dls_compat_tooltip_rect;
+extern char g_dls_compat_tooltip_text[520];
+
 // Function declarations
 const char *rmf_info_label(BAEInfoType t);
 void rmf_info_reset(void);

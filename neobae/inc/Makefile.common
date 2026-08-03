@@ -841,6 +841,12 @@ ifeq ($(BUILD_GUI),1)
 		src/gui/gui_bae.c \
 		src/gui/gui_settings.c \
 		src/gui/gui_panels.c \
+		src/gui/gui_channels.c \
+		src/gui/gui_playback_controls.c \
+		src/gui/gui_transport.c \
+		src/gui/gui_keyboard_panel.c \
+		src/gui/gui_status_bank.c \
+		src/gui/gui_file_open.c \
 		src/gui/gui_main.c
 	
 	# Add debug console for DEBUG builds

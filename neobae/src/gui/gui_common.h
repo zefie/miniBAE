@@ -18,6 +18,14 @@
 #ifndef GUI_COMMON_H
 #define GUI_COMMON_H
 
+#ifndef _WIN32
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE 1
+#endif
+#include <unistd.h>
+#include <strings.h>
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -59,6 +67,8 @@ typedef short int16_t; // 16-bit signed used by engine for track index
 // Window state globals
 extern int g_window_h;
 extern bool g_disable_webtv_progress_bar;
+extern SDL_Window *g_main_window;
+extern bool g_reverbDropdownOpen;
 
 // Common types
 typedef struct

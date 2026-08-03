@@ -26,6 +26,8 @@
 #include "X_API.h"
 #include "NeoBAE.h"
 #include "GenRingtone.h"
+#include "GenSnd.h"
+#include "GenPriv.h"
 #if USE_RMI_SUPPORT == TRUE
     #include "GenRMI.h"
 #endif
@@ -2246,3 +2248,208 @@ void gui_apply_eq_from_settings(void)
         }
     }
 }
+
+bool g_in_bank_load_recreate = false;
+
+BAERate map_rate_from_hz(int hz)
+{
+    switch (hz)
+    {
+    case 8000:
+        return BAE_RATE_8K;
+    case 11025:
+        return BAE_RATE_11K;
+    case 16000:
+        return BAE_RATE_16K;
+    case 22050:
+        return BAE_RATE_22K;
+    case 32000:
+        return BAE_RATE_32K;
+    case 44100:
+        return BAE_RATE_44K;
+    case 48000:
+        return BAE_RATE_48K;
+    default: // choose closest
+        if (hz < 9600)
+            return BAE_RATE_8K;
+        if (hz < 13500)
+            return BAE_RATE_11K;
+        if (hz < 19000)
+            return BAE_RATE_16K;
+        if (hz < 27000)
+            return BAE_RATE_22K;
+        if (hz < 38000)
+            return BAE_RATE_32K;
+        if (hz < 46000)
+            return BAE_RATE_44K;
+        return BAE_RATE_48K;
+    }
+}
+
+// Recreate mixer with new sample rate setting preserving current playback state where possible.
+bool recreate_mixer_and_restore(int sampleRateHz, int reverbType,
+                                int transpose, int tempo, int volume, bool loopPlay,
+                                bool ch_enable[BAE_MAX_MIDI_CHANNELS])
+{
+#if SUPPORT_MIDI_HW == TRUE
+    // If MIDI service is active, stop it before tearing down mixer/songs to avoid races.
+    bool resume_midi_service = (g_midi_service_thread != NULL);
+    if (resume_midi_service)
+    {
+        midi_service_stop();
+    }
+#endif
+    if (g_exporting)
+    {
+        set_status_message("Can't change audio format during export");
+        return false;
+    }
+    // Capture current song/audio state
+    char last_song_path[1024];
+    last_song_path[0] = '\0';
+    bool had_song = g_bae.song_loaded;
+    bool was_playing = g_bae.is_playing;
+    int pos_ms = 0;
+    if (had_song)
+    {
+        safe_strncpy(last_song_path, g_bae.loaded_path, sizeof(last_song_path) - 1);
+        last_song_path[sizeof(last_song_path) - 1] = '\0';
+        pos_ms = bae_get_pos_ms();
+    }
+
+    // Tear down existing mixer & objects (without clearing captured path)
+    if (g_bae.song)
+    {
+        BAESong_Stop(g_bae.song, FALSE);
+        BAESong_Delete(g_bae.song);
+        g_bae.song = NULL;
+    }
+    if (g_bae.sound)
+    {
+        BAESound_Stop(g_bae.sound, FALSE);
+        BAESound_Delete(g_bae.sound);
+        g_bae.sound = NULL;
+    }
+    if (g_live_song)
+    {
+        BAESong_Stop(g_live_song, FALSE);
+        BAESong_Delete(g_live_song);
+        g_live_song = NULL;
+    }
+    if (g_bae.mixer)
+    {
+        // Clear reverb buffers before teardown to avoid stale delay lines
+        // causing artifacts when the new mixer initializes at a different rate.
+        GM_CleanupReverb();
+        ShutdownNewReverb();
+#if USE_NEO_EFFECTS == TRUE
+        ShutdownNeoReverb();
+#endif   
+        BAEMixer_Close(g_bae.mixer);
+        BAEMixer_Delete(g_bae.mixer);
+        g_bae.mixer = NULL;
+    }
+    g_bae.song_loaded = false;
+    g_bae.is_playing = false;
+    g_bae.bank_loaded = false;
+    g_bae.bank_token = 0;
+#if USE_SF2_SUPPORT == TRUE
+    if (GM_SF2_IsActive())
+    {
+        GM_SF2_SetSampleRate(sampleRateHz);
+    }
+#endif    
+    // Create new mixer
+#if USE_SF2_SUPPORT == TRUE
+    bool wasSF2 = GM_GetMixerSF2Mode();
+#endif
+    g_bae.mixer = BAEMixer_New();
+    if (!g_bae.mixer)
+    {
+        set_status_message("Mixer recreate failed");
+        return false;
+    }
+#if USE_SF2_SUPPORT == TRUE
+    GM_SetMixerSF2Mode(wasSF2);
+#endif
+    BAERate rate = map_rate_from_hz(sampleRateHz);
+    BAEAudioModifiers mods = BAE_USE_16 | BAE_USE_STEREO;
+    BAEResult mr = BAEMixer_Open(g_bae.mixer, rate, BAE_LINEAR_INTERPOLATION, mods, 32, 8, 32, TRUE);
+    if (mr != BAE_NO_ERROR)
+    {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "Mixer open failed (%d)", mr);
+        set_status_message(msg);
+        BAEMixer_Delete(g_bae.mixer);
+        g_bae.mixer = NULL;
+        return false;
+    }
+    BAEMixer_SetAudioTask(g_bae.mixer, gui_audio_task, g_bae.mixer);
+    BAEMixer_ReengageAudio(g_bae.mixer);
+    gui_apply_eq_from_settings();
+    // reverbType may be a UI index beyond BAE_REVERB_TYPE_COUNT when using custom presets
+    bae_set_reverb(reverbType);
+    BAEMixer_SetMasterVolume(g_bae.mixer, FLOAT_TO_UNSIGNED_FIXED(g_last_requested_master_volume));
+
+    // Create a new live song bound to the new mixer for external MIDI input.
+    g_live_song = BAESong_New(g_bae.mixer);
+    if (g_live_song)
+    {
+        BAESong_Preroll(g_live_song);
+    }
+
+    // Reload bank if we had one recorded
+    if (g_current_bank_path[0])
+    {
+        bool dummy_play = false;
+        // Use load_bank to restore bank (don't instantly save again – pass save_to_settings=false)
+        load_bank(g_current_bank_path, dummy_play, transpose, tempo, volume, loopPlay, reverbType, ch_enable, false);
+    }
+    else
+    {
+        // Attempt fallback default bank
+        load_bank_simple(NULL, false, reverbType, loopPlay);
+    }
+
+    // Reload prior song
+    if (had_song && last_song_path[0])
+    {
+        if (bae_load_song_with_settings(last_song_path, transpose, tempo, volume, loopPlay, reverbType, ch_enable, true))
+        {
+            if (pos_ms > 0)
+            {
+                bae_seek_ms(pos_ms);
+            }
+            if (was_playing)
+            {
+                bool playFlag = false;
+                bae_play(&playFlag);
+            }
+        }
+    }
+    set_status_message("Audio device reconfigured");
+#if SUPPORT_MIDI_HW == TRUE
+    // If MIDI input is enabled, ensure MIDI input device is (re)initialized and service resumed
+    if (g_midi_input_enabled)
+    {
+        midi_input_shutdown();
+        if (g_midi_input_device_index >= 0 && g_midi_input_device_index < g_midi_input_device_count)
+        {
+            int api = g_midi_device_api[g_midi_input_device_index];
+            int port = g_midi_device_port[g_midi_input_device_index];
+            midi_input_init("zefidi", api, port);
+        }
+        else
+        {
+            midi_input_init("zefidi", -1, -1);
+        }
+        midi_service_start();
+    }
+    else if (resume_midi_service)
+    {
+        // Service was running before but MIDI input no longer enabled; keep it stopped.
+    }
+#endif
+    return true;
+}
+

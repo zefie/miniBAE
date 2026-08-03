@@ -1794,6 +1794,12 @@ if(BUILD_ZEFIDI)
       neobae/src/gui/gui_bae.c
       neobae/src/gui/gui_settings.c
       neobae/src/gui/gui_panels.c
+      neobae/src/gui/gui_channels.c
+      neobae/src/gui/gui_playback_controls.c
+      neobae/src/gui/gui_transport.c
+      neobae/src/gui/gui_keyboard_panel.c
+      neobae/src/gui/gui_status_bank.c
+      neobae/src/gui/gui_file_open.c
       neobae/src/gui/gui_main.c
     )
 
@@ -1864,6 +1870,8 @@ if(BUILD_ZEFIDI)
     endif()
 
     target_compile_definitions(zefidi PRIVATE _ZEFI_GUI=1)
+    # -std=c11 hides POSIX APIs (realpath/readlink/popen/strcasecmp) without this.
+    target_compile_definitions(zefidi PRIVATE _DEFAULT_SOURCE=1)
     # gui_midi_hw_input.c uses <stdatomic.h> / _Static_assert (C11).
     # MSVC needs /std:c11 plus /experimental:c11atomics (still experimental).
     set_target_properties(zefidi PROPERTIES

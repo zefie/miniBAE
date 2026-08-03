@@ -187,8 +187,8 @@ void save_settings(const char *last_bank_path, int reverb_type, bool loop_enable
 // Bank/Program update function (from gui_main.c)
 void update_bank_program_for_channel(void);
 
-// Rate conversion
-// BAERate map_rate_from_hz(int hz);  // TODO: Define if needed
+// Rate conversion (snaps Hz to nearest supported BAERate; values equal Hz)
+BAERate map_rate_from_hz(int hz);
 
 void gui_apply_eq_from_settings(void);
 

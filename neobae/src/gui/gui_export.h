@@ -19,6 +19,7 @@
 #define GUI_EXPORT_H
 
 #include "gui_common.h"
+#include "gui_frame.h"
 #include "NeoBAE.h"
 
 // Export state globals
@@ -84,5 +85,7 @@ void bae_signal_export_stop(void);
 void bae_service_wav_export(void);
 char *save_export_dialog(int export_type); // 0=WAV, 1=FLAC, 2=MP3, 3=OGG, 4=OPUS
 char *save_midi_dialog(void);
+
+void gui_export_draw_controls(GuiFrameCtx *ctx);
 
 #endif // GUI_EXPORT_H

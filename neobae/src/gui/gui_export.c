@@ -17,7 +17,24 @@
 
  // gui_export.c - WAV, MP3 and MIDI export functionality
 
+/* Ensure POSIX APIs (popen/strcasecmp/realpath) are visible. */
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE 1
+#endif
+
 #include "gui_export.h"
+#include "gui_dialogs.h"
+#include "gui_frame.h"
+#include "gui_transport.h"
+#include "gui_widgets.h"
+#include "gui_text.h"
+#include "gui_theme.h"
+#include "gui_panels.h"
+#include "gui_midi.h"
+#include "gui_settings.h"
+#if SUPPORT_MIDI_HW == TRUE
+#include "gui_midi_hw.h"
+#endif
 #include "gui_common.h"
 #include "gui_theme.h"
 #include "gui_midi.h"
@@ -1375,4 +1392,1000 @@ char *save_midi_dialog()
     BAE_PRINTF("No GUI file chooser available for saving MIDI.\n");
     return NULL;
 #endif
+}
+
+void gui_export_draw_controls(GuiFrameCtx *ctx)
+{
+    SDL_Renderer *R = ctx->R;
+    int mx = ctx->mx;
+    int my = ctx->my;
+    bool mdown = ctx->mdown;
+    bool mclick = ctx->mclick ? *ctx->mclick : false;
+    int ui_mx = ctx->ui_mx;
+    int ui_my = ctx->ui_my;
+    bool ui_mdown = ctx->ui_mdown;
+    bool ui_mclick = ctx->ui_mclick;
+    bool ui_rclick = ctx->ui_rclick;
+    bool modal_block = ctx->modal_block;
+    bool playing = *ctx->playing;
+    int progress = *ctx->progress;
+    int duration = *ctx->duration;
+    int transpose = *ctx->transpose;
+    int tempo = *ctx->tempo;
+    int volume = *ctx->volume;
+    int reverbType = *ctx->reverb_type;
+    bool loopPlay = *ctx->loop_enabled;
+    bool *ch_enable = ctx->ch_enable;
+    SDL_Color panelBg = ctx->panelBg;
+    SDL_Color panelBorder = ctx->panelBorder;
+    Rect transportPanel = ctx->transportPanel;
+    (void)ui_mdown;
+    (void)ui_rclick;
+    (void)transpose;
+    (void)tempo;
+    (void)volume;
+    (void)reverbType;
+    (void)ch_enable;
+    (void)panelBg;
+    (void)panelBorder;
+
+// Export controls (only for MIDI/RMF files) or MIDI-in recording when enabled
+#if SUPPORT_MIDI_HW == TRUE
+if (g_midi_input_enabled || (!g_bae.is_audio_file && g_bae.song_loaded))
+#else
+if (!g_bae.is_audio_file && g_bae.song_loaded)
+#endif
+{
+    // If MIDI input is enabled, show Record/Stop instead of Export
+#if SUPPORT_MIDI_HW == TRUE
+    if (g_midi_input_enabled)
+    {
+        // When MIDI-in is enabled the overlay provides recording controls. Draw a disabled placeholder here.
+        SDL_Color disabledBg = g_panel_bg;
+        SDL_Color disabledTxt = g_panel_border;
+        Rect placeholder = {348, 215, 80, 22}; // Moved from 320 to 348
+        draw_rect(R, placeholder, disabledBg);
+        draw_frame(R, placeholder, g_panel_border);
+        int text_w = 0, text_h = 0;
+        measure_text("Record", &text_w, &text_h);
+        int text_x = placeholder.x + (placeholder.w - text_w) / 2;
+        int text_y = placeholder.y + (placeholder.h - text_h) / 2;
+        draw_text(R, text_x, text_y, "Record", disabledTxt);
+    }
+    else
+    {
+#endif
+        // Export button: mutually exclusive with external MIDI Output. When MIDI Output
+        // is enabled the Export button is shown disabled and does not accept clicks.
+#if SUPPORT_MIDI_HW == TRUE
+        bool export_allowed = !g_midi_output_enabled && !g_exporting && !modal_block && !g_reverbDropdownOpen;
+#else
+    bool export_allowed = !g_exporting && !modal_block && !g_reverbDropdownOpen;
+#endif
+        if (export_allowed)
+        {
+            if (ui_button(R, (Rect){340, 215, 80, 22}, "Export", ui_mx, ui_my, ui_mdown) && ui_mclick)
+            {
+#if SUPPORT_MIDI_HW == TRUE
+                /* export_allowed already ensures g_midi_output_enabled == false */
+#endif
+
+                // Single song export
+                // When export button clicked, open save dialog using extension depending on codec
+                int export_dialog_type = 0; // 0=WAV, 1=FLAC, 2=MP3, 3=OGG/Opus
+                BAECompressionType compression = BAE_COMPRESSION_NONE;
+
+                if (g_exportCodecIndex >= 0 && g_exportCodecIndex < g_exportCompressionCount)
+                {
+                    compression = g_exportCompressionMap[g_exportCodecIndex];
+                }
+
+                if (compression == BAE_COMPRESSION_NONE)
+                {
+                    export_dialog_type = 0;
+                }
+#if USE_FLAC_ENCODER == TRUE
+                else if (compression == BAE_COMPRESSION_LOSSLESS)
+                {
+                    export_dialog_type = 1;
+                }
+#endif
+#if USE_MPEG_ENCODER == TRUE
+                else if (compression >= BAE_COMPRESSION_MPEG_32 && compression <= BAE_COMPRESSION_MPEG_320)
+                {
+                    export_dialog_type = 2;
+                }
+#endif
+#if USE_VORBIS_ENCODER == TRUE
+                else if (compression >= BAE_COMPRESSION_VORBIS_96 && compression <= BAE_COMPRESSION_VORBIS_320)
+                {
+                    export_dialog_type = 3;
+                }
+#endif
+#if USE_OPUS_ENCODER == TRUE
+                else if (compression >= BAE_COMPRESSION_OPUS_16 && compression <= BAE_COMPRESSION_OPUS_256)
+                {
+                    export_dialog_type = 4;
+                }
+#endif
+                else {
+                    // Default to WAV if something's wrong with the mapping
+                    export_dialog_type = 0;
+                }
+
+                char *export_file = save_export_dialog(export_dialog_type);
+                if (export_file)
+                {
+                    // Ensure correct file extension based on export type
+                    size_t L = strlen(export_file);
+                    const char *expected_ext = NULL;
+
+                    if (compression == BAE_COMPRESSION_LOSSLESS)
+                    {
+                        expected_ext = ".flac";
+                    }
+                    else if (compression >= BAE_COMPRESSION_MPEG_32 && compression <= BAE_COMPRESSION_MPEG_320)
+                    {
+                        expected_ext = ".mp3";
+                    }
+#if USE_OPUS_ENCODER == TRUE
+                    else if (compression >= BAE_COMPRESSION_OPUS_16 && compression <= BAE_COMPRESSION_OPUS_256)
+                    {
+                        expected_ext = ".opus";
+                    }
+#endif
+                    else if (compression >= BAE_COMPRESSION_VORBIS_96 && compression <= BAE_COMPRESSION_VORBIS_320)
+                    {
+                        expected_ext = ".ogg";
+                    }
+                    else
+                    {
+                        expected_ext = ".wav";
+                    }
+
+                    int ext_len = strlen(expected_ext);
+                    if (L < ext_len || strcasecmp(export_file + L - ext_len, expected_ext) != 0)
+                    {
+                        // Append the correct extension
+                        size_t n = L + ext_len + 1;
+                        char *tmp = malloc(n);
+                        if (tmp)
+                        {
+                            snprintf(tmp, n, "%s%s", export_file, expected_ext);
+                            free(export_file);
+                            export_file = tmp;
+                        }
+                    }
+
+                    // Start export using selected codec mapping
+                    // Map our index to BAEMixer compression enums using table
+                    if (!g_bae.song_loaded || g_bae.is_audio_file)
+                    {
+                        set_status_message("Cannot export: No MIDI/RMF loaded");
+                    }
+                    else
+                    {
+                        // Save current state
+                        BAEFileType export_file_type = BAE_WAVE_TYPE;
+
+                        // Determine file type based on compression type
+                        if (compression == BAE_COMPRESSION_NONE)
+                        {
+                            export_file_type = BAE_WAVE_TYPE;
+                        }
+#if USE_FLAC_ENCODER == TRUE
+                        else if (compression == BAE_COMPRESSION_LOSSLESS)
+                        {
+                            export_file_type = BAE_FLAC_TYPE;
+                        }
+#endif
+#if USE_MPEG_ENCODER == TRUE
+                        else if (compression >= BAE_COMPRESSION_MPEG_64 && compression <= BAE_COMPRESSION_MPEG_320)
+                        {
+                            export_file_type = BAE_MPEG_TYPE;
+                        }
+#endif
+#if USE_VORBIS_ENCODER == TRUE
+                        else if (compression >= BAE_COMPRESSION_VORBIS_96 && compression <= BAE_COMPRESSION_VORBIS_320)
+                        {
+                            export_file_type = BAE_VORBIS_TYPE;
+                        }
+#endif
+#if USE_OPUS_ENCODER == TRUE
+                        else if (compression >= BAE_COMPRESSION_OPUS_16 && compression <= BAE_COMPRESSION_OPUS_256)
+                        {
+                            export_file_type = BAE_OPUS_TYPE;
+                        }
+#endif
+
+                        // Determine export file type so service loop can apply MPEG heuristics
+                        g_export_file_type = export_file_type;
+                        bae_start_export(export_file, export_file_type, compression);
+                    }
+                    free(export_file);
+                }
+                ui_mclick = false; // consume click
+            }
+        }
+        else
+        {
+            // Draw disabled Export button (no interaction)
+            Rect disr = {340, 215, 80, 22}; // Moved from 320 to 340
+            SDL_Color disabledBg = g_panel_bg;
+            SDL_Color disabledTxt = g_panel_border;
+            disabledBg.a = 200;
+            disabledTxt.a = 200;
+            draw_rect(R, disr, disabledBg);
+            draw_frame(R, disr, g_panel_border);
+            int text_w = 0, text_h = 0;
+            measure_text("Export", &text_w, &text_h);
+            int text_x = disr.x + (disr.w - text_w) / 2;
+            int text_y = disr.y + (disr.h - text_h) / 2;
+            draw_text(R, text_x, text_y, "Export", disabledTxt);
+        }
+
+#if SUPPORT_MIDI_HW == TRUE
+    }
+#endif
+    // RMF Info button (only for RMF files)
+    if (g_bae.is_rmf_file)
+    {
+        // RMF Info button position (moved from 440 to 640 to avoid overlap with Record Format button)
+        int rmf_x_pos = 798;
+
+        if (ui_button(R, (Rect){rmf_x_pos, 215, 80, 22}, "RMF Info", ui_mx, ui_my, ui_mdown) && ui_mclick && !modal_block)
+        {
+            if (g_show_rmf_info_dialog)
+            {
+                g_show_rmf_info_dialog = false;
+            }
+            else
+            {
+                g_show_rmf_info_dialog = true;
+                rmf_info_load_if_needed();
+            }
+        }
+    }
+}
+#if SUPPORT_MIDI_HW == TRUE
+// If MIDI input is enabled, paint a semi-transparent overlay over the transport panel
+// to dim it and disable interactions except the Stop button (which we keep active).
+if (g_midi_input_enabled)
+{
+    SDL_Color dim = g_is_dark_mode ? (SDL_Color){0, 0, 0, 160} : (SDL_Color){255, 255, 255, 160};
+    draw_rect(R, transportPanel, dim);
+    // Redraw Stop button on top of the dim overlay so the user can stop
+    Rect stopRect = {90, 215, 60, 22};
+    // Use raw mouse coords so the Stop button remains clickable even when modal_block is true
+    // When MIDI-in is active the Stop button actually stops external playback (external/"♪s"), so label it accordingly.
+    const char *stop_label = g_midi_input_enabled ? "Stop ♪s" : "Stop";
+    if (ui_button(R, stopRect, stop_label, mx, my, mdown) && mclick)
+    {
+        bae_stop(&playing, &progress);
+        // Ensure engine releases any held notes when user stops playback (panic)
+        midi_output_send_all_notes_off(); // silence any external device too
+        if (g_bae.song)
+        {
+            gui_panic_all_notes(g_bae.song);
+        }
+        if (g_live_song)
+        {
+            gui_panic_all_notes(g_live_song);
+        }
+        if (g_show_virtual_keyboard)
+        {
+            BAESong target = g_bae.song ? g_bae.song : g_live_song;
+            if (target)
+            {
+                for (int n = 0; n < BAE_MAX_NOTES; n++)
+                {
+                    BAESong_NoteOff(target, (unsigned char)g_keyboard_channel, (unsigned char)n, 0, 0);
+                }
+            }
+            g_keyboard_mouse_note = -1;
+            memset(g_keyboard_active_notes, 0, sizeof(g_keyboard_active_notes));
+            g_keyboard_suppress_until = SDL_GetTicks() + 33;
+        }
+        // Reset total-play timer on user Stop
+                gui_transport_reset_session_timer();
+        // Also stop export if active
+        if (g_exporting)
+        {
+            bae_stop_wav_export();
+        }
+        // consume the click so underlying UI doesn't react to the same event
+        mclick = false;
+    }
+    // Also draw Record/Stop in the Export slot so MIDI users can record even when panel is dimmed
+    Rect recRect = {348, 215, 80, 22}; // Moved from 320 to 348
+    if (!g_midi_recording)
+    {
+        // Disable Record button when a dialog/modal is open
+        if (!modal_block && ui_button(R, recRect, "Record", mx, my, mdown) && mclick)
+        {
+            // Behavior depends on selected format
+            if (g_midiRecordFormatIndex == 0)
+            {
+                // MIDI: existing flow
+                char *export_file = save_midi_dialog();
+                if (export_file)
+                {
+                    // ensure .mid extension
+                    size_t L = strlen(export_file);
+                    if (L < 4 || strcasecmp(export_file + L - 4, ".mid") != 0)
+                    {
+                        size_t n = L + 5;
+                        char *tmp = malloc(n);
+                        if (tmp)
+                        {
+                            snprintf(tmp, n, "%s.mid", export_file);
+                            free(export_file);
+                            export_file = tmp;
+                        }
+                    }
+                    if (export_file)
+                    {
+                        bool started = midi_record_start(export_file);
+                        free(export_file);
+                        if (!started)
+                            set_status_message("Failed to start MIDI record");
+                    }
+                }
+            }
+            else
+            {
+                // WAV or MP3: start mixer export to file
+                // If no file is loaded, we can still record from MIDI-in using the lightweight live song.
+                if (!g_bae.song_loaded && !g_live_song)
+                {
+                    set_status_message("Cannot record audio: No MIDI/RMF loaded and no live song available");
+                }
+                else
+                {
+                    // Choose save dialog and extension based on format using helper function
+                    MidiRecordFormatInfo format_info = get_midi_record_format_info(g_midiRecordFormatIndex);
+                    int export_dialog_type = 0; // Default to WAV
+
+                    switch (format_info.type)
+                    {
+                    case MIDI_RECORD_FORMAT_WAV:
+                        export_dialog_type = 0; // WAV
+                        break;
+                    case MIDI_RECORD_FORMAT_FLAC:
+                        export_dialog_type = 1; // FLAC
+                        break;
+                    case MIDI_RECORD_FORMAT_MP3:
+                        export_dialog_type = 2; // MP3
+                        break;
+                    case MIDI_RECORD_FORMAT_VORBIS:
+                        export_dialog_type = 3; // OGG/Vorbis
+                        break;
+                    case MIDI_RECORD_FORMAT_OPUS:
+                        export_dialog_type = 4; // OPUS
+                        break;                                
+                    default:
+                        export_dialog_type = 0; // fallback to WAV
+                        break;
+                    }
+                    char *export_file = save_export_dialog(export_dialog_type);
+                    if (export_file)
+                    {
+                        // ensure correct extension
+                        size_t L = strlen(export_file);
+                        if (g_midiRecordFormatIndex == 1)
+                        { // WAV
+                            if (L < 4 || strcasecmp(export_file + L - 4, ".wav") != 0)
+                            {
+                                size_t n = L + 5;
+                                char *tmp = malloc(n);
+                                if (tmp)
+                                {
+                                    snprintf(tmp, n, "%s.wav", export_file);
+                                    free(export_file);
+                                    export_file = tmp;
+                                }
+                            }
+                        }
+#if USE_FLAC_ENCODER != FALSE
+                        else if (g_midiRecordFormatIndex == 2)
+                        { // FLAC
+                            if (L < 5 || strcasecmp(export_file + L - 5, ".flac") != 0)
+                            {
+                                size_t n = L + 6;
+                                char *tmp = malloc(n);
+                                if (tmp)
+                                {
+                                    snprintf(tmp, n, "%s.flac", export_file);
+                                    free(export_file);
+                                    export_file = tmp;
+                                }
+                            }
+                        }
+#endif
+                        else if (g_midiRecordFormatIndex >= 3)
+                        {
+                            // Use helper function to determine format and extension
+                            MidiRecordFormatInfo format_info = get_midi_record_format_info(g_midiRecordFormatIndex);
+                            const char *ext = format_info.extension;
+                            int ext_len = strlen(ext);
+
+                            if (L < ext_len || strcasecmp(export_file + L - ext_len, ext) != 0)
+                            {
+                                size_t n = L + ext_len + 1;
+                                char *tmp = malloc(n);
+                                if (tmp)
+                                {
+                                    snprintf(tmp, n, "%s%s", export_file, ext);
+                                    free(export_file);
+                                    export_file = tmp;
+                                }
+                            }
+                        }
+
+                        // Save current state for restore. Use live song if no file-loaded song present.
+                        BAESong target = g_bae.song ? g_bae.song : g_live_song;
+                        uint32_t curPosUs = 0;
+                        // If we're in MIDI-in mode, do not modify song playback (do not stop/seek/start).
+                        if (!g_midi_input_enabled)
+                        {
+                            if (target)
+                                BAESong_GetMicrosecondPosition(target, &curPosUs);
+                        }
+                        g_bae.position_us_before_export = curPosUs;
+                        g_bae.was_playing_before_export = g_bae.is_playing;
+                        g_bae.loop_was_enabled_before_export = g_bae.loop_enabled_gui;
+                        if (!g_midi_input_enabled && g_bae.is_playing && target)
+                        {
+                            BAESong_Stop(target, FALSE);
+                            g_bae.is_playing = false;
+                        }
+
+                        // Map selected format to BAE types using helper function
+                        BAECompressionType compression = BAE_COMPRESSION_NONE;
+                        MidiRecordFormatInfo format_info = get_midi_record_format_info(g_midiRecordFormatIndex);
+
+                        if (format_info.type == MIDI_RECORD_FORMAT_WAV)
+                        {
+                            compression = BAE_COMPRESSION_NONE;
+                        }
+#if USE_FLAC_ENCODER != FALSE
+                        else if (format_info.type == MIDI_RECORD_FORMAT_FLAC)
+                        {
+                            compression = BAE_COMPRESSION_LOSSLESS;
+                        }
+#endif
+#if USE_MPEG_ENCODER != FALSE
+                        else if (format_info.type == MIDI_RECORD_FORMAT_MP3)
+                        {
+                            // Map MP3 bitrate to compression type
+                            switch (format_info.bitrate)
+                            {
+                            case 128000:
+                                compression = BAE_COMPRESSION_MPEG_128;
+                                break;
+                            case 192000:
+                                compression = BAE_COMPRESSION_MPEG_192;
+                                break;
+                            case 256000:
+                                compression = BAE_COMPRESSION_MPEG_256;
+                                break;
+                            case 320000:
+                                compression = BAE_COMPRESSION_MPEG_320;
+                                break;
+                            default:
+                                compression = BAE_COMPRESSION_MPEG_128;
+                                break;
+                            }
+                        }
+#endif
+#if USE_VORBIS_ENCODER == TRUE
+                        else if (format_info.type == MIDI_RECORD_FORMAT_VORBIS)
+                        {
+                            // Map Vorbis bitrate to compression type
+                            switch (format_info.bitrate)
+                            {
+                            case 96000:
+                                compression = BAE_COMPRESSION_VORBIS_96;
+                                break;
+                            case 128000:
+                                compression = BAE_COMPRESSION_VORBIS_128;
+                                break;
+                            case 256000:
+                                compression = BAE_COMPRESSION_VORBIS_256;
+                                break;
+                            case 320000:
+                                compression = BAE_COMPRESSION_VORBIS_320;
+                                break;
+                            default:
+                                compression = BAE_COMPRESSION_VORBIS_128;
+                                break;
+                            }
+                        }
+#endif
+#if USE_OPUS_ENCODER == TRUE
+                        else if (format_info.type == MIDI_RECORD_FORMAT_OPUS)
+                        {
+                            // Map Opus bitrate to compression type
+                            switch (format_info.bitrate)
+                            {
+                            case 16000:
+                                compression = BAE_COMPRESSION_OPUS_16;
+                                break;
+                            case 32000:
+                                compression = BAE_COMPRESSION_OPUS_32;
+                                break;
+                            case 64000:
+                                compression = BAE_COMPRESSION_OPUS_64;
+                                break;
+                            case 96000:
+                                compression = BAE_COMPRESSION_OPUS_96;
+                                break;
+                            case 128000:
+                                compression = BAE_COMPRESSION_OPUS_128;
+                                break;
+                            case 256000:
+                                compression = BAE_COMPRESSION_OPUS_256;
+                                break;
+                            default:
+                                compression = BAE_COMPRESSION_OPUS_128;
+                                break;
+                            }
+                        }
+#endif
+
+                        if (export_file)
+                        {
+                            // If WAV or FLAC selected, use our PCM capture path instead of BAEMixer file output
+                            if (g_midiRecordFormatIndex == 1) // WAV
+                            {
+                                // start our own PCM WAV writer and start song/live-song to drive audio
+                                int wav_channels = 2;
+                                int wav_sr = g_sample_rate_hz > 0 ? g_sample_rate_hz : 44100;
+                                bool started = pcm_wav_start(export_file, wav_channels, wav_sr, 16);
+                                if (!started)
+                                {
+                                    set_status_message("Failed to open WAV file for recording");
+                                    free(export_file);
+                                }
+                                else
+                                {
+                                    // If not in MIDI-in mode, start/seek/preroll the target song to drive engine audio.
+                                    if (!g_midi_input_enabled)
+                                    {
+                                        if (target)
+                                        {
+                                            BAESong_Stop(target, FALSE);
+                                            BAESong_SetMicrosecondPosition(target, 0);
+                                            BAESong_Preroll(target);
+                                        }
+                                        BAEResult rs = target ? BAESong_Start(target, 0) : BAE_NO_ERROR;
+                                        if (rs != BAE_NO_ERROR)
+                                        {
+                                            set_status_message("Failed to start song for WAV recording");
+                                            pcm_wav_finalize();
+                                            free(export_file);
+                                        }
+                                        else
+                                        {
+                                            g_bae.is_playing = true;
+                                            g_pcm_wav_recording = true;
+                                            g_exporting = false; // use our own writer
+                                            safe_strncpy(g_export_path, export_file, sizeof(g_export_path) - 1);
+                                            g_export_path[sizeof(g_export_path) - 1] = '\0';
+                                            set_status_message("WAV recording started");
+                                            free(export_file);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // MIDI-in mode: do not change engine playback; just enable PCM writer.
+                                        g_pcm_wav_recording = true;
+                                        g_exporting = false; // use our own writer
+                                        safe_strncpy(g_export_path, export_file, sizeof(g_export_path) - 1);
+                                        g_export_path[sizeof(g_export_path) - 1] = '\0';
+                                        set_status_message("WAV recording started");
+                                        free(export_file);
+                                    }
+                                }
+                            }
+#if USE_FLAC_ENCODER != FALSE
+                            else if (g_midiRecordFormatIndex == 2) // FLAC
+                            {
+                                // start our own PCM FLAC writer and start song/live-song to drive audio
+                                int flac_channels = 2;
+                                int flac_sr = g_sample_rate_hz > 0 ? g_sample_rate_hz : 44100;
+                                set_status_message("Attempting FLAC recording...");
+                                BAE_PRINTF("GUI: Attempting FLAC recording - channels=%d, sr=%d, file=%s\n", flac_channels, flac_sr, export_file);
+                                bool started = pcm_flac_start(export_file, flac_channels, flac_sr, 16);
+                                if (!started)
+                                {
+                                    set_status_message("Failed to open FLAC file for recording");
+                                    free(export_file);
+                                }
+                                else
+                                {
+                                    // If not in MIDI-in mode, start/seek/preroll the target song to drive engine audio.
+                                    if (!g_midi_input_enabled)
+                                    {
+                                        if (target)
+                                        {
+                                            BAESong_Stop(target, FALSE);
+                                            BAESong_SetMicrosecondPosition(target, 0);
+                                            BAESong_Preroll(target);
+                                        }
+                                        BAEResult rs = target ? BAESong_Start(target, 0) : BAE_NO_ERROR;
+                                        if (rs != BAE_NO_ERROR)
+                                        {
+                                            set_status_message("Failed to start song for FLAC recording");
+                                            pcm_flac_finalize();
+                                            free(export_file);
+                                        }
+                                        else
+                                        {
+                                            g_bae.is_playing = true;
+                                            g_pcm_flac_recording = true;
+                                            g_midi_recording = true;
+                                            g_exporting = false; // use our own writer
+                                            safe_strncpy(g_export_path, export_file, sizeof(g_export_path) - 1);
+                                            g_export_path[sizeof(g_export_path) - 1] = '\0';
+                                            set_status_message("FLAC recording started");
+                                            free(export_file);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // MIDI-in mode: do not change engine playback; just enable PCM writer.
+                                        g_pcm_flac_recording = true;
+                                        g_midi_recording = true;
+                                        g_exporting = false; // use our own writer
+                                        safe_strncpy(g_export_path, export_file, sizeof(g_export_path) - 1);
+                                        g_export_path[sizeof(g_export_path) - 1] = '\0';
+                                        set_status_message("FLAC recording started");
+                                        free(export_file);
+                                    }
+                                }
+                            }
+#endif
+                            else
+                            {
+                                // MP3, Vorbis, or Opus selected - check format type
+                                if (format_info.type == MIDI_RECORD_FORMAT_MP3)
+                                {
+#if USE_MPEG_ENCODER != FALSE
+                                    if (g_midi_input_enabled)
+                                    {
+                                        // Use platform MP3 recorder for MIDI-in; do not start BAESong
+                                        int mp3_channels = 2;
+                                        int mp3_sr = g_sample_rate_hz > 0 ? g_sample_rate_hz : 44100;
+                                        int bitrate = format_info.bitrate;
+                                        int rc = BAE_Platform_MP3Recorder_Start(export_file, (uint32_t)mp3_channels, (uint32_t)mp3_sr, 16, (uint32_t)bitrate);
+                                        if (rc != 0)
+                                        {
+                                            set_status_message("Failed to start MP3 recorder");
+                                            free(export_file);
+                                        }
+                                        else
+                                        {
+                                            g_pcm_mp3_recording = true;
+                                            g_midi_recording = true;
+                                            g_exporting = false;
+                                            safe_strncpy(g_export_path, export_file, sizeof(g_export_path) - 1);
+                                            g_export_path[sizeof(g_export_path) - 1] = '\0';
+                                            set_status_message("MP3 recording started");
+                                            free(export_file);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // Fallback to BAEMixer path for normal song export to MP3
+                                        BAEResult result = BAEMixer_StartOutputToFile(g_bae.mixer, (BAEPathName)export_file,
+                                                                                      BAE_MPEG_TYPE,
+                                                                                      compression);
+                                        if (result != BAE_NO_ERROR)
+                                        {
+                                            char msg[128];
+                                            snprintf(msg, sizeof(msg), "MP3 export failed to start (%d)", result);
+                                            set_status_message(msg);
+                                            free(export_file);
+                                        }
+                                        else
+                                        {
+                                            g_exporting = true;
+                                            g_export_file_type = BAE_MPEG_TYPE;
+                                            safe_strncpy(g_export_path, export_file, sizeof(g_export_path) - 1);
+                                            g_export_path[sizeof(g_export_path) - 1] = '\0';
+                                            set_status_message("MP3 export started");
+                                            free(export_file);
+                                        }
+                                    }
+#else
+            set_status_message("MP3 export not supported in this build");
+            free(export_file);
+#endif
+                                }
+                                else if (format_info.type == MIDI_RECORD_FORMAT_VORBIS)
+                                {
+#if USE_VORBIS_ENCODER == TRUE
+                                    // Use our own PCM Vorbis writer for real-time recording
+                                    int vorbis_channels = 2;
+                                    int vorbis_sr = g_sample_rate_hz > 0 ? g_sample_rate_hz : 44100;
+                                    int bitrate = format_info.bitrate;
+                                    bool started = pcm_vorbis_start(export_file, vorbis_channels, vorbis_sr, 16, bitrate);
+                                    if (!started)
+                                    {
+                                        set_status_message("Failed to open Vorbis file for recording");
+                                        free(export_file);
+                                    }
+                                    else
+                                    {
+                                        // If not in MIDI-in mode, start/seek/preroll the target song to drive engine audio.
+                                        if (!g_midi_input_enabled)
+                                        {
+                                            if (target)
+                                            {
+                                                BAESong_Stop(target, FALSE);
+                                                BAESong_SetMicrosecondPosition(target, 0);
+                                                BAESong_Preroll(target);
+                                            }
+                                            BAEResult rs = target ? BAESong_Start(target, 0) : BAE_NO_ERROR;
+                                            if (rs != BAE_NO_ERROR)
+                                            {
+                                                set_status_message("Failed to start song for Vorbis recording");
+                                                pcm_vorbis_finalize();
+                                                free(export_file);
+                                            }
+                                            else
+                                            {
+                                                g_bae.is_playing = true;
+                                                g_pcm_vorbis_recording = true;
+                                                g_midi_recording = true;
+                                                g_exporting = false; // use our own writer
+                                                safe_strncpy(g_export_path, export_file, sizeof(g_export_path) - 1);
+                                                g_export_path[sizeof(g_export_path) - 1] = '\0';
+                                                set_status_message("Vorbis recording started");
+                                                free(export_file);
+                                            }
+                                        }
+                                        else
+                                        {
+                                            // MIDI-in mode: do not change engine playback; just enable PCM writer.
+                                            g_pcm_vorbis_recording = true;
+                                            g_midi_recording = true;
+                                            g_exporting = false; // use our own writer
+                                            safe_strncpy(g_export_path, export_file, sizeof(g_export_path) - 1);
+                                            g_export_path[sizeof(g_export_path) - 1] = '\0';
+                                            set_status_message("Vorbis recording started");
+                                            free(export_file);
+                                        }
+                                    }
+#else
+                                set_status_message("Vorbis export not supported in this build");
+                                free(export_file);
+#endif
+                                }
+                                else if (format_info.type == MIDI_RECORD_FORMAT_OPUS)
+                                {
+#if USE_OPUS_ENCODER == TRUE
+                                    // Use our own PCM Opus writer for real-time recording
+                                    int opus_channels = 2;
+                                    int opus_sr = g_sample_rate_hz > 0 ? g_sample_rate_hz : 44100;
+                                    int bitrate = format_info.bitrate;
+                                    bool started = pcm_opus_start(export_file, opus_channels, opus_sr, 16, bitrate);
+                                    if (!started)
+                                    {
+                                        set_status_message("Failed to open Opus file for recording");
+                                        free(export_file);
+                                    }
+                                    else
+                                    {
+                                        // If not in MIDI-in mode, start/seek/preroll the target song to drive engine audio.
+                                        if (!g_midi_input_enabled)
+                                        {
+                                            if (target)
+                                            {
+                                                BAESong_Stop(target, FALSE);
+                                                BAESong_SetMicrosecondPosition(target, 0);
+                                                BAESong_Preroll(target);
+                                            }
+                                            BAEResult rs = target ? BAESong_Start(target, 0) : BAE_NO_ERROR;
+                                            if (rs != BAE_NO_ERROR)
+                                            {
+                                                set_status_message("Failed to start song for Opus recording");
+                                                pcm_opus_finalize();
+                                                free(export_file);
+                                            }
+                                            else
+                                            {
+                                                g_bae.is_playing = true;
+                                                g_pcm_opus_recording = true;
+                                                g_midi_recording = true;
+                                                g_exporting = false; // use our own writer
+                                                safe_strncpy(g_export_path, export_file, sizeof(g_export_path) - 1);
+                                                g_export_path[sizeof(g_export_path) - 1] = '\0';
+                                                set_status_message("Opus recording started");
+                                                free(export_file);
+                                            }
+                                        }
+                                        else
+                                        {
+                                            // MIDI-in mode: do not change engine playback; just enable PCM writer.
+                                            g_pcm_opus_recording = true;
+                                            g_midi_recording = true;
+                                            g_exporting = false; // use our own writer
+                                            safe_strncpy(g_export_path, export_file, sizeof(g_export_path) - 1);
+                                            g_export_path[sizeof(g_export_path) - 1] = '\0';
+                                            set_status_message("Opus recording started");
+                                            free(export_file);
+                                        }
+                                    }
+#else
+                                set_status_message("Opus export not supported in this build");
+                                free(export_file);
+#endif
+                                }
+                                else
+                                {
+                                    set_status_message("Unsupported export format");
+                                    free(export_file);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            mclick = false;
+        }
+        else if (modal_block)
+        {
+            // Draw disabled Record button (no interaction)
+            SDL_Color disabledBg = g_panel_bg;
+            SDL_Color disabledTxt = g_panel_border;
+            disabledBg.a = 200;
+            disabledTxt.a = 200;
+            draw_rect(R, recRect, disabledBg);
+            draw_frame(R, recRect, g_panel_border);
+            int text_w = 0, text_h = 0;
+            measure_text("Record", &text_w, &text_h);
+            int text_x = recRect.x + (recRect.w - text_w) / 2;
+            int text_y = recRect.y + (recRect.h - text_h) / 2;
+            draw_text(R, text_x, text_y, "Record", disabledTxt);
+        }
+    }
+    else
+    {
+        // Stop either MIDI recording or active export
+        if (ui_button(R, recRect, "Stop", mx, my, mdown) && mclick)
+        {
+            // If MIDI recording is active, stop and save - use helper function
+            MidiRecordFormatInfo stop_format_info = get_midi_record_format_info(g_midiRecordFormatIndex);
+
+            if (stop_format_info.type == MIDI_RECORD_FORMAT_MIDI)
+            {
+                if (!midi_record_stop())
+                {
+                    set_status_message("Failed to finalize MIDI file");
+                }
+            }
+            else if (stop_format_info.type == MIDI_RECORD_FORMAT_WAV)
+            {
+                // WAV: if using our PCM writer, finalize it
+                if (g_pcm_wav_recording)
+                {
+                    pcm_wav_finalize();
+                }
+                else if (g_exporting)
+                {
+                    bae_stop_wav_export();
+                }
+                else
+                {
+                    set_status_message("No WAV export in progress");
+                }
+            }
+#if USE_FLAC_ENCODER == TRUE
+            else if (stop_format_info.type == MIDI_RECORD_FORMAT_FLAC)
+            {
+                // FLAC: if using our PCM writer, finalize it
+                if (g_pcm_flac_recording)
+                {
+                    pcm_flac_finalize();
+                }
+                else if (g_exporting)
+                {
+                    bae_stop_wav_export(); // Falls back to normal export stop
+                }
+                else
+                {
+                    set_status_message("No FLAC export in progress");
+                }
+            }
+#endif
+#if USE_MPEG_ENCODER == TRUE
+            else if (stop_format_info.type == MIDI_RECORD_FORMAT_MP3)
+            {
+                // MP3 format
+                if (g_midi_input_enabled && g_pcm_mp3_recording)
+                {
+                    BAE_Platform_MP3Recorder_Stop();
+                    g_pcm_mp3_recording = false;
+                    g_midi_recording = false;
+                    set_status_message("MP3 recording saved");
+                }
+                else if (g_exporting)
+                {
+                    // BAEMixer-based export
+                    bae_stop_wav_export();
+                }
+                else
+                {
+                    set_status_message("No MP3 export in progress");
+                }
+            }
+#endif                    
+            else if (stop_format_info.type == MIDI_RECORD_FORMAT_VORBIS)
+            {
+#if USE_VORBIS_ENCODER == TRUE
+                // Vorbis: if using our PCM writer, finalize it
+                if (g_pcm_vorbis_recording)
+                {
+                    pcm_vorbis_finalize();
+                }
+                else if (g_exporting)
+                {
+                    bae_stop_wav_export(); // Generic export stop function
+                }
+                else
+                {
+                    set_status_message("No Vorbis export in progress");
+                }
+#else
+    set_status_message("Vorbis not supported in this build");
+#endif
+            }
+            else if (stop_format_info.type == MIDI_RECORD_FORMAT_OPUS)
+            {
+#if USE_OPUS_ENCODER == TRUE
+                // Opus: if using our PCM writer, finalize it
+                if (g_pcm_opus_recording)
+                {
+                    pcm_opus_finalize();
+                }
+                else if (g_exporting)
+                {
+                    bae_stop_wav_export(); // Generic export stop function
+                }
+                else
+                {
+                    set_status_message("No Opus export in progress");
+                }
+#else
+    set_status_message("Opus not supported in this build");
+#endif
+            }
+            else
+            {
+                // Unknown format - fallback
+                if (g_exporting)
+                {
+                    bae_stop_wav_export();
+                }
+                else
+                {
+                    set_status_message("No export in progress");
+                }
+            }
+            mclick = false;
+        }
+    }
+}
+#endif
+
+    *ctx->playing = playing;
+    *ctx->progress = progress;
+    *ctx->duration = duration;
+    *ctx->loop_enabled = loopPlay;
+    ctx->ui_mclick = ui_mclick;
+    if (ctx->mclick)
+        *ctx->mclick = mclick;
+
 }
