@@ -43,6 +43,85 @@ static int32_t NbetReadBE32Signed(const unsigned char *p)
     return static_cast<int32_t>(NbetReadBE32(p));
 }
 
+static bool NbetBodyLooksPlain(const unsigned char *data, size_t size)
+{
+    return data && size >= 8 &&
+           NbetReadBE32(data) == static_cast<uint32_t>(FOUR_CHAR('n', 'B', 'e', 'T'));
+}
+
+/* Decode on-disk nBeT resource: plain legacy blob, or XCompressPtr LZMA frame. */
+static bool DecodeNbetResourceBody(const unsigned char *raw,
+                                   size_t raw_size,
+                                   std::vector<unsigned char> &out_plain)
+{
+    out_plain.clear();
+    if (!raw || raw_size < 4)
+    {
+        return false;
+    }
+    if (NbetBodyLooksPlain(raw, raw_size))
+    {
+        out_plain.assign(raw, raw + raw_size);
+        return true;
+    }
+#if defined(USE_LZMA_COMPRESSION) && (USE_LZMA_COMPRESSION == TRUE)
+    XPTR decoded = XDecompressPtr(const_cast<unsigned char *>(raw),
+                                  static_cast<uint32_t>(raw_size),
+                                  TRUE);
+    if (!decoded)
+    {
+        return false;
+    }
+    const int32_t dsize = XGetPtrSize(decoded);
+    const unsigned char *p = static_cast<const unsigned char *>(decoded);
+    bool ok = false;
+    if (dsize > 0 && NbetBodyLooksPlain(p, static_cast<size_t>(dsize)))
+    {
+        out_plain.assign(p, p + static_cast<size_t>(dsize));
+        ok = true;
+    }
+    XDisposePtr(decoded);
+    return ok;
+#else
+    return false;
+#endif
+}
+
+/* LZMA-wrap the plain nBeT blob (XCompressPtr / X_LZMA_RAW). Always prefer a
+ * successful compress so open→save upgrades legacy plaintext bodies. Fall back
+ * to plain only if LZMA is unavailable or compression fails. */
+static std::vector<unsigned char> EncodeNbetResourceBody(const std::vector<unsigned char> &plain)
+{
+#if USE_LZMA_COMPRESSION == TRUE
+#if USE_CREATION_API != FALSE
+    if (!plain.empty())
+    {
+        XPTR compressed = nullptr;
+        const int32_t csize =
+            XCompressPtr(&compressed,
+                         const_cast<unsigned char *>(plain.data()),
+                         static_cast<uint32_t>(plain.size()),
+                         X_LZMA_RAW,
+                         nullptr,
+                         nullptr);
+        if (compressed && csize > 0)
+        {
+            std::vector<unsigned char> out(static_cast<unsigned char *>(compressed),
+                                           static_cast<unsigned char *>(compressed) +
+                                               static_cast<size_t>(csize));
+            XDisposePtr(compressed);
+            return out;
+        }
+        if (compressed)
+        {
+            XDisposePtr(compressed);
+        }
+    }
+#endif
+#endif
+    return plain;
+}
+
 /* True if the window title-bar strip intersects any display usable area. */
 static bool NbetWindowTitleBarOnScreen(int x, int y, int w, int h)
 {
@@ -1178,7 +1257,11 @@ bool LoadSessionBsnFromPath(const char *path)
                     if (BsnResourceTypeEquals(r.type, 'n', 'B', 'e', 'T') && r.id == 1 &&
                         !r.body.empty())
                     {
-                        ApplyNbetLayoutBlob(r.body.data(), r.body.size());
+                        std::vector<unsigned char> plain;
+                        if (DecodeNbetResourceBody(r.body.data(), r.body.size(), plain))
+                        {
+                            ApplyNbetLayoutBlob(plain.data(), plain.size());
+                        }
                         break;
                     }
                 }
@@ -1494,14 +1577,15 @@ bool SaveSessionToPath(const char *path)
             std::vector<unsigned char> nbet = CaptureNbetLayoutBlob();
             if (!nbet.empty())
             {
+                std::vector<unsigned char> stored = EncodeNbetResourceBody(nbet);
                 char nbet_pascal[256];
                 BsnMakePascalName("NeoBAE Editor", nbet_pascal);
                 (void)XAddFileResource(out_file,
                                        FOUR_CHAR('n', 'B', 'e', 'T'),
                                        1,
                                        nbet_pascal,
-                                       nbet.data(),
-                                       static_cast<int32_t>(nbet.size()));
+                                       stored.data(),
+                                       static_cast<int32_t>(stored.size()));
                 date_stamps.push_back({FOUR_CHAR('n', 'B', 'e', 'T'), 1});
             }
         }

@@ -65,14 +65,16 @@ Fixture size deltas vs `empty.bsn`:
 
 - Type: `nBeT` (`FOUR_CHAR('n','B','e','T')`)
 - Name: `NeoBAE Editor`, id `1`
-- Body (version 2 — current write):
-  - `uint32` magic `'nBeT'` (big-endian), `uint32` version `2`
+- On-disk body: plain layout blob, **or** `XCompressPtr` / `X_LZMA_RAW` frame (type byte `0xFE` + 3-byte uncompressed length + LZMA). Open accepts both; Save always writes LZMA when compression succeeds (upgrades legacy plaintext on open→save).
+- Plain layout blob (version 3 — current write):
+  - `uint32` magic `'nBeT'` (big-endian), `uint32` version `3`
   - Main SDL window: `int32 x, y, w, h` + `uint32` maximized flag
   - `uint32` open_flags (bit0 IE, bit1 Sample Editor, bit2 Song Info, bit3 Song Settings)
   - IE context: `inst_id`, `instrument_index`, `bank`, `program`, `from_song`
   - SE context: `sample_row`, `is_song_sample`
+  - Player mix: `volume_percent`, `tempo_percent`, `reverb_type`
   - `uint32` length + UTF-8 ImGui ini (`SaveIniSettingsToMemory`) for dock + floating window geometry
-- Version 1 (read still supported): window geom + ini only (no open-editor flags)
+- Version 1/2 (read still supported): older headers without mix / with fewer fields
 - ImGui ini alone cannot reopen gated dialogs; open_flags drives IE/SE/Song Info restore
 - Written/read by nbeditor Save/Open Session; BE2 ignores unknown resource types
 - Edit → **Reset Layout** restores default Player/Session/Status dock and closes floating editors
