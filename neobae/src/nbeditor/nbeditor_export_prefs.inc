@@ -308,8 +308,13 @@
                 {"NeoBAE Bank (*.zsb)", "zsb"},
                 {"All files (*.*)", "*"},
             };
-            static char default_path[64];
-            std::snprintf(default_path, sizeof(default_path), "%s", want_zsb ? "export_bank.zsb" : "export_bank.hsb");
+            static char default_path[256];
+            const std::string stem = SuggestedExportFileStem();
+            std::snprintf(default_path,
+                          sizeof(default_path),
+                          "%s.%s",
+                          stem.c_str(),
+                          want_zsb ? "zsb" : "hsb");
             SDL_ShowSaveFileDialog(OnFileDialogResult,
                                    this,
                                    m_main_window,
@@ -667,8 +672,7 @@
         {
             const char *ext = codecs[m_export_audio_codec_index].extension;
             char default_name[256];
-            const std::string stem = SanitizeExportFileStem(
-                m_song_row.name.empty() ? "export" : m_song_row.name);
+            const std::string stem = SuggestedExportFileStem();
             std::snprintf(default_name, sizeof(default_name), "%s%s", stem.c_str(), ext);
             m_export_audio_open = false;
             ImGui::CloseCurrentPopup();

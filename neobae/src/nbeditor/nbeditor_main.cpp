@@ -1519,13 +1519,20 @@ private:
             {"MIDI (*.mid)", "mid"},
             {"All files (*.*)", "*"},
         };
+        static char default_path[256];
+        const std::string stem = SuggestedExportFileStem();
+        std::snprintf(default_path,
+                      sizeof(default_path),
+                      "%s.%s",
+                      stem.c_str(),
+                      want_zmf ? "zmf" : "rmf");
         SDL_ShowSaveFileDialog(OnFileDialogResult,
                                this,
                                m_main_window,
                                want_zmf ? filters_zmf : filters_any,
                                want_zmf ? static_cast<int>(SDL_arraysize(filters_zmf))
                                         : static_cast<int>(SDL_arraysize(filters_any)),
-                               want_zmf ? "song.zmf" : "song.rmf");
+                               default_path);
     }
 
     void OpenSaveSessionDialog()

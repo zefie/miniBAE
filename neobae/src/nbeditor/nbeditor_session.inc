@@ -1934,6 +1934,10 @@
                 out.push_back(c);
             }
         }
+        while (!out.empty() && (out.front() == ' ' || out.front() == '.'))
+        {
+            out.erase(out.begin());
+        }
         while (!out.empty() && (out.back() == ' ' || out.back() == '.'))
         {
             out.pop_back();
@@ -1943,6 +1947,30 @@
             out = "export";
         }
         return out;
+    }
+
+    /* Prefer saved session basename; else song title / row name. */
+    std::string SuggestedExportFileStem() const
+    {
+        std::string raw;
+        if (!m_loaded_session_path.empty())
+        {
+            raw = FileNameFromPath(m_loaded_session_path);
+            const size_t dot = raw.find_last_of('.');
+            if (dot != std::string::npos && dot > 0)
+            {
+                raw = raw.substr(0, dot);
+            }
+        }
+        else if (m_song_info_title[0] != '\0')
+        {
+            raw = m_song_info_title;
+        }
+        else if (!m_song_row.name.empty())
+        {
+            raw = m_song_row.name;
+        }
+        return SanitizeExportFileStem(raw);
     }
 
     void BeginOneShotRmfSaveDialog(const std::string &suggested_name)
