@@ -3583,6 +3583,40 @@
     {
         return static_cast<int32_t>((static_cast<int64_t>(display) * kAdsrVolumeRange) / 100);
     }
+    /* BE2 TIME (MS): µs↔ms. SUST stored as 0 shows as 12000 (classic scale/5 display). */
+    static constexpr int kBe2SustainDisplayMs = 12000;
+    static bool AdsrIsSustainFlag(int32_t flags)
+    {
+        return flags == static_cast<int32_t>(FOUR_CHAR('S', 'U', 'S', 'T'));
+    }
+    static int AdsrTimeUsToMs(int32_t us)
+    {
+        if (us >= 0)
+        {
+            return static_cast<int>((us + 500) / 1000);
+        }
+        return static_cast<int>((us - 500) / 1000);
+    }
+    static int32_t AdsrTimeMsToUs(int ms)
+    {
+        return static_cast<int32_t>(static_cast<int64_t>(ms) * 1000);
+    }
+    static int AdsrTimeToDisplayMs(int32_t flags, int32_t time_us)
+    {
+        if (AdsrIsSustainFlag(flags) && time_us == 0)
+        {
+            return kBe2SustainDisplayMs;
+        }
+        return AdsrTimeUsToMs(time_us);
+    }
+    static int32_t AdsrTimeFromDisplayMs(int32_t flags, int display_ms)
+    {
+        if (AdsrIsSustainFlag(flags) && display_ms == kBe2SustainDisplayMs)
+        {
+            return 0;
+        }
+        return AdsrTimeMsToUs(display_ms);
+    }
     static bool LfoDestUsesBeatnikLevel(int32_t destination)
     {
         return destination == static_cast<int32_t>(FOUR_CHAR('V', 'O', 'L', 'U')) ||
@@ -4151,10 +4185,12 @@
 
     void DrawAdsrEnvelopeGraph(BAERmfEditorADSRInfo &adsr,
                                const char *id,
-                               float height = 140.0f,
+                               float height = 180.0f,
                                bool editable = false,
                                bool beatnik_level_scale = false)
     {
+        /* BE2-style envelope: Y in % (100=unity), X in ms with split timeline
+         * (attack | gray sustain band | release axis resets to 0). */
         ImGui::PushID(id);
         const ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
         const float width = ImGui::GetContentRegionAvail().x;
@@ -4166,8 +4202,8 @@
         ImDrawList *dl = ImGui::GetWindowDrawList();
         const ImVec2 p0 = canvas_pos;
         const ImVec2 p1(canvas_pos.x + width, canvas_pos.y + height);
-        dl->AddRectFilled(p0, p1, IM_COL32(18, 20, 24, 255));
-        dl->AddRect(p0, p1, IM_COL32(70, 70, 70, 255));
+        dl->AddRectFilled(p0, p1, IM_COL32(32, 34, 38, 255));
+        dl->AddRect(p0, p1, IM_COL32(90, 90, 90, 255));
 
         const int stages = static_cast<int>(adsr.stageCount);
         if (stages <= 0)
@@ -4179,56 +4215,170 @@
             return;
         }
 
-        const float margin = 6.0f;
-        const float graph_l = p0.x + margin + 28.0f;
-        const float graph_r = p1.x - margin;
-        const float graph_t = p0.y + margin + 4.0f;
-        const float graph_b = p1.y - margin - 16.0f;
+        const float margin_l = 36.0f;
+        const float margin_r = 8.0f;
+        const float margin_t = 8.0f;
+        const float margin_b = 22.0f;
+        const float graph_l = p0.x + margin_l;
+        const float graph_r = p1.x - margin_r;
+        const float graph_t = p0.y + margin_t;
+        const float graph_b = p1.y - margin_b;
         const float graph_w = graph_r - graph_l;
         const float graph_h = graph_b - graph_t;
-        if (graph_w < 10.0f || graph_h < 10.0f)
+        if (graph_w < 20.0f || graph_h < 20.0f)
         {
             ImGui::PopID();
             return;
         }
 
-        int32_t min_level = 0;
-        int32_t max_level = 0;
-        int64_t total_time = 0;
+        int sust_i = -1;
+        int max_disp_level = beatnik_level_scale ? 200 : 0;
+        int min_disp_level = 0;
         for (int i = 0; i < stages; ++i)
         {
-            min_level = std::min(min_level, adsr.stages[i].level);
-            max_level = std::max(max_level, adsr.stages[i].level);
-            total_time += std::llabs(static_cast<int64_t>(adsr.stages[i].time));
+            if (sust_i < 0 && AdsrIsSustainFlag(adsr.stages[i].flags))
+            {
+                sust_i = i;
+            }
+            const int disp = beatnik_level_scale ? AdsrLevelToBeatnik(adsr.stages[i].level)
+                                                 : adsr.stages[i].level;
+            max_disp_level = std::max(max_disp_level, disp);
+            min_disp_level = std::min(min_disp_level, disp);
         }
-        min_level = std::min(min_level, 0);
-        max_level = std::max(max_level, 1000);
-        if (max_level <= min_level)
+        if (beatnik_level_scale)
         {
-            max_level = min_level + 1;
+            /* Snap Y top to next 100% above content (min 200% like BE2). */
+            max_disp_level = std::max(200, ((max_disp_level + 99) / 100) * 100);
+            min_disp_level = std::min(0, min_disp_level);
         }
-        const bool equal_time_layout = (total_time <= 0);
-        const int64_t layout_time = equal_time_layout ? static_cast<int64_t>(stages) : total_time;
+        else
+        {
+            max_disp_level = std::max(max_disp_level, 1);
+            if (max_disp_level <= min_disp_level)
+            {
+                max_disp_level = min_disp_level + 1;
+            }
+        }
+        const int level_span = max_disp_level - min_disp_level;
 
-        auto level_to_y = [&](int32_t level) -> float {
+        auto disp_level_of = [&](int32_t raw) -> int {
+            return beatnik_level_scale ? AdsrLevelToBeatnik(raw) : raw;
+        };
+        auto level_to_y = [&](int disp) -> float {
             const double norm =
-                static_cast<double>(level - min_level) / static_cast<double>(max_level - min_level);
+                static_cast<double>(disp - min_disp_level) / static_cast<double>(level_span);
             return graph_b - static_cast<float>(norm * graph_h);
         };
 
-        dl->AddLine(ImVec2(graph_l, graph_t), ImVec2(graph_l, graph_b), IM_COL32(50, 50, 50, 255));
-        dl->AddLine(ImVec2(graph_l, graph_b), ImVec2(graph_r, graph_b), IM_COL32(50, 50, 50, 255));
-        if (min_level < 0 && max_level > 0)
+        /* Layout widths: attack | sustain band | release (BE2 split timeline). */
+        const bool split = (sust_i >= 0);
+        const float left_w = split ? graph_w * 0.58f : graph_w;
+        const float sust_w = split ? graph_w * 0.14f : 0.0f;
+        const float right_w = split ? graph_w * 0.28f : 0.0f;
+        const float left_l = graph_l;
+        const float left_r = graph_l + left_w;
+        const float sust_l = left_r;
+        const float sust_r = left_r + sust_w;
+        const float right_l = sust_r;
+        const float right_r = graph_r;
+
+        int64_t pre_ms = 0;
+        int64_t post_ms = 0;
+        for (int i = 0; i < stages; ++i)
         {
-            const float y0 = level_to_y(0);
-            dl->AddLine(ImVec2(graph_l, y0), ImVec2(graph_r, y0), IM_COL32(60, 60, 60, 255));
+            if (i == sust_i)
+            {
+                continue;
+            }
+            const int64_t ms = std::llabs(static_cast<int64_t>(AdsrTimeUsToMs(adsr.stages[i].time)));
+            if (split && i > sust_i)
+            {
+                post_ms += ms;
+            }
+            else if (!split || i < sust_i)
+            {
+                pre_ms += ms;
+            }
         }
+        if (pre_ms <= 0)
+        {
+            pre_ms = 1;
+        }
+        if (split && post_ms <= 0)
+        {
+            post_ms = 1;
+        }
+
+        /* Grid + axis labels */
+        dl->AddLine(ImVec2(graph_l, graph_t), ImVec2(graph_l, graph_b), IM_COL32(70, 70, 70, 255));
+        dl->AddLine(ImVec2(graph_l, graph_b), ImVec2(graph_r, graph_b), IM_COL32(70, 70, 70, 255));
+        if (beatnik_level_scale)
+        {
+            for (int pct : {0, 100, 200})
+            {
+                if (pct < min_disp_level || pct > max_disp_level)
+                {
+                    continue;
+                }
+                const float y = level_to_y(pct);
+                const ImU32 col = (pct == 100) ? IM_COL32(110, 110, 110, 255) : IM_COL32(55, 55, 55, 255);
+                dl->AddLine(ImVec2(graph_l, y), ImVec2(graph_r, y), col);
+                char lab[16];
+                std::snprintf(lab, sizeof(lab), "%d%%", pct);
+                dl->AddText(ImVec2(p0.x + 4.0f, y - 7.0f), IM_COL32(160, 160, 160, 255), lab);
+            }
+        }
+        else
         {
             char lo[32], hi[32];
-            std::snprintf(hi, sizeof(hi), "%d", max_level);
-            std::snprintf(lo, sizeof(lo), "%d", min_level);
-            dl->AddText(ImVec2(p0.x + margin, graph_t - 2.0f), IM_COL32(140, 140, 140, 255), hi);
-            dl->AddText(ImVec2(p0.x + margin, graph_b - 8.0f), IM_COL32(140, 140, 140, 255), lo);
+            std::snprintf(hi, sizeof(hi), "%d", max_disp_level);
+            std::snprintf(lo, sizeof(lo), "%d", min_disp_level);
+            dl->AddText(ImVec2(p0.x + 4.0f, graph_t - 2.0f), IM_COL32(160, 160, 160, 255), hi);
+            dl->AddText(ImVec2(p0.x + 4.0f, graph_b - 8.0f), IM_COL32(160, 160, 160, 255), lo);
+            if (min_disp_level < 0 && max_disp_level > 0)
+            {
+                dl->AddLine(ImVec2(graph_l, level_to_y(0)),
+                            ImVec2(graph_r, level_to_y(0)),
+                            IM_COL32(70, 70, 70, 255));
+            }
+        }
+
+        auto draw_ms_ticks = [&](float x0, float x1, int64_t total_ms, bool) {
+            if (total_ms <= 0 || x1 <= x0)
+            {
+                return;
+            }
+            int64_t step = 200;
+            if (total_ms > 2000)
+            {
+                step = 500;
+            }
+            if (total_ms > 5000)
+            {
+                step = 1000;
+            }
+            for (int64_t t = 0; t <= total_ms; t += step)
+            {
+                const float x = x0 + static_cast<float>(static_cast<double>(t) / total_ms * (x1 - x0));
+                dl->AddLine(ImVec2(x, graph_b), ImVec2(x, graph_b + 4.0f), IM_COL32(90, 90, 90, 255));
+                char lab[24];
+                std::snprintf(lab, sizeof(lab), "%lld ms", static_cast<long long>(t));
+                dl->AddText(ImVec2(x - 10.0f, graph_b + 5.0f), IM_COL32(140, 140, 140, 255), lab);
+            }
+        };
+        draw_ms_ticks(left_l, left_r, pre_ms, true);
+        if (split)
+        {
+            draw_ms_ticks(right_l, right_r, post_ms, true);
+        }
+
+        if (split)
+        {
+            dl->AddRectFilled(ImVec2(sust_l, graph_t),
+                              ImVec2(sust_r, graph_b),
+                              IM_COL32(70, 70, 70, 70));
+            dl->AddLine(ImVec2(sust_l, graph_t), ImVec2(sust_l, graph_b), IM_COL32(100, 100, 100, 180));
+            dl->AddLine(ImVec2(sust_r, graph_t), ImVec2(sust_r, graph_b), IM_COL32(100, 100, 100, 180));
         }
 
         enum class AdsrDragKind : int
@@ -4242,79 +4392,97 @@
             float x1 = 0.0f;
             float x2 = 0.0f;
             float y2 = 0.0f;
+            bool in_release = false;
         };
         std::vector<StageGeom> geoms(static_cast<size_t>(stages));
-        int32_t prev_level = 0;
-        int64_t cumulative = 0;
+        std::vector<ImVec2> polyline;
+        polyline.reserve(static_cast<size_t>(stages) + 2);
+        polyline.push_back(ImVec2(left_l, level_to_y(0)));
+
+        int64_t cum_pre = 0;
+        int64_t cum_post = 0;
+        int prev_disp = 0;
         for (int i = 0; i < stages; ++i)
         {
-            const int64_t stage_time = equal_time_layout
-                                          ? 1
-                                          : std::llabs(static_cast<int64_t>(adsr.stages[i].time));
-            const float x1 =
-                graph_l + static_cast<float>(static_cast<double>(cumulative) / layout_time * graph_w);
-            const float x2 = graph_l + static_cast<float>(
-                                          static_cast<double>(cumulative + stage_time) / layout_time * graph_w);
-            const float y1 = level_to_y(prev_level);
-            const float y2 = level_to_y(adsr.stages[i].level);
-            geoms[static_cast<size_t>(i)] = {x1, x2, y2};
-            const ImU32 colour = AdsrStageFlagColor(adsr.stages[i].flags);
-            const bool selected = (editable && m_ie_adsr_selected_stage == i &&
-                                   m_ie_adsr_selected_owner == ImGui::GetID("adsr_select"));
-            const ImU32 band = IM_COL32((colour >> IM_COL32_R_SHIFT) & 0xFF,
-                                       (colour >> IM_COL32_G_SHIFT) & 0xFF,
-                                       (colour >> IM_COL32_B_SHIFT) & 0xFF,
-                                       selected ? 70 : 36);
-            dl->AddRectFilled(ImVec2(x1, graph_t), ImVec2(std::max(x1 + 1.0f, x2), graph_b), band);
-            if (selected)
+            const int disp = disp_level_of(adsr.stages[i].level);
+            const float y2 = level_to_y(disp);
+            float x1 = 0.0f;
+            float x2 = 0.0f;
+            bool in_release = false;
+            if (i == sust_i)
             {
-                dl->AddRect(ImVec2(x1, graph_t),
-                            ImVec2(std::max(x1 + 1.0f, x2), graph_b),
-                            IM_COL32(255, 255, 255, 90));
+                x1 = sust_l;
+                x2 = sust_r;
+                geoms[static_cast<size_t>(i)] = {x1, x2, y2, false};
+                /* Enter sustain: vertical then hold across band */
+                polyline.push_back(ImVec2(x1, level_to_y(prev_disp)));
+                polyline.push_back(ImVec2(x1, y2));
+                polyline.push_back(ImVec2(x2, y2));
             }
-            const bool is_hold = adsr.stages[i].flags == static_cast<int32_t>(FOUR_CHAR('S', 'U', 'S', 'T')) ||
-                                 adsr.stages[i].flags == 0;
-            if (is_hold)
+            else if (split && i > sust_i)
             {
-                const float y_hold = level_to_y(adsr.stages[i].level);
-                dl->AddLine(ImVec2(x1, y1), ImVec2(x1, y_hold), colour, 2.0f);
-                dl->AddLine(ImVec2(x1, y_hold), ImVec2(x2, y_hold), colour, 2.5f);
+                in_release = true;
+                const int64_t ms =
+                    std::max<int64_t>(0, std::llabs(static_cast<int64_t>(AdsrTimeUsToMs(adsr.stages[i].time))));
+                x1 = right_l + static_cast<float>(static_cast<double>(cum_post) / post_ms * right_w);
+                cum_post += ms;
+                x2 = right_l + static_cast<float>(static_cast<double>(cum_post) / post_ms * right_w);
+                if (ms == 0)
+                {
+                    x2 = std::max(x2, x1 + 1.0f);
+                }
+                geoms[static_cast<size_t>(i)] = {x1, x2, y2, true};
+                polyline.push_back(ImVec2(x2, y2));
             }
             else
             {
-                dl->AddLine(ImVec2(x1, y1), ImVec2(x2, y2), colour, 2.5f);
+                const int64_t ms =
+                    std::max<int64_t>(0, std::llabs(static_cast<int64_t>(AdsrTimeUsToMs(adsr.stages[i].time))));
+                x1 = left_l + static_cast<float>(static_cast<double>(cum_pre) / pre_ms * left_w);
+                cum_pre += ms;
+                x2 = left_l + static_cast<float>(static_cast<double>(cum_pre) / pre_ms * left_w);
+                if (ms == 0)
+                {
+                    x2 = std::max(x2, x1 + 1.0f);
+                }
+                geoms[static_cast<size_t>(i)] = {x1, x2, y2, false};
+                polyline.push_back(ImVec2(x2, y2));
             }
-            /* Type badge on the segment */
-            const char *label = AdsrStageFlagName(adsr.stages[i].flags);
-            const ImVec2 text_size = ImGui::CalcTextSize(label);
-            const float badge_x = std::max(x1 + 2.0f, (x1 + x2) * 0.5f - text_size.x * 0.5f);
-            const float badge_y = graph_t + 3.0f;
-            dl->AddRectFilled(ImVec2(badge_x - 3.0f, badge_y - 1.0f),
-                              ImVec2(badge_x + text_size.x + 3.0f, badge_y + text_size.y + 1.0f),
-                              IM_COL32(0, 0, 0, 160),
-                              3.0f);
-            dl->AddText(ImVec2(badge_x, badge_y), colour, label);
+            prev_disp = disp;
+        }
+
+        /* Curve */
+        const ImU32 curve_col = IM_COL32(220, 220, 220, 255);
+        for (size_t i = 1; i < polyline.size(); ++i)
+        {
+            dl->AddLine(polyline[i - 1], polyline[i], curve_col, 1.75f);
+        }
+        for (int i = 0; i < stages; ++i)
+        {
+            if (i == sust_i)
             {
-                char idx_label[8];
-                std::snprintf(idx_label, sizeof(idx_label), "%d", i);
-                dl->AddText(ImVec2(std::max(graph_l, (x1 + x2) * 0.5f - 4.0f), graph_b + 1.0f),
-                            IM_COL32(130, 130, 130, 255),
-                            idx_label);
+                continue;
             }
+            const StageGeom &g = geoms[static_cast<size_t>(i)];
+            const bool selected = (editable && m_ie_adsr_selected_stage == i &&
+                                   m_ie_adsr_selected_owner == ImGui::GetID("adsr_select"));
+            const float hx = g.x2;
+            const float hy = g.y2;
             if (editable)
             {
-                /* Level handle (corner) */
-                dl->AddCircleFilled(ImVec2(x2, y2), 6.5f, colour);
-                dl->AddCircle(ImVec2(x2, y2), 6.5f, IM_COL32(255, 255, 255, 200), 0, 1.5f);
-                /* Time-edge handle (right edge mid) */
-                const float edge_y = (graph_t + graph_b) * 0.5f;
-                dl->AddRectFilled(ImVec2(x2 - 3.0f, edge_y - 10.0f),
-                                  ImVec2(x2 + 3.0f, edge_y + 10.0f),
-                                  IM_COL32(220, 220, 220, 180),
-                                  2.0f);
+                dl->AddRectFilled(ImVec2(hx - 4.0f, hy - 4.0f),
+                                  ImVec2(hx + 4.0f, hy + 4.0f),
+                                  selected ? IM_COL32(255, 220, 80, 255) : IM_COL32(240, 240, 240, 255));
+                dl->AddRect(ImVec2(hx - 4.0f, hy - 4.0f),
+                            ImVec2(hx + 4.0f, hy + 4.0f),
+                            IM_COL32(20, 20, 20, 220));
             }
-            cumulative += stage_time;
-            prev_level = adsr.stages[i].level;
+            else
+            {
+                dl->AddRectFilled(ImVec2(hx - 3.0f, hy - 3.0f),
+                                  ImVec2(hx + 3.0f, hy + 3.0f),
+                                  IM_COL32(240, 240, 240, 255));
+            }
         }
 
         if (editable)
@@ -4331,27 +4499,26 @@
             const ImGuiID select_owner = ImGui::GetID("adsr_select");
             const ImVec2 mouse = ImGui::GetIO().MousePos;
 
-            auto hit_level_handle = [&](int i) -> bool {
+            auto hit_handle = [&](int i) -> bool {
+                if (i == sust_i)
+                {
+                    return false;
+                }
                 const float dx = mouse.x - geoms[static_cast<size_t>(i)].x2;
                 const float dy = mouse.y - geoms[static_cast<size_t>(i)].y2;
-                return (dx * dx + dy * dy) <= 11.0f * 11.0f;
-            };
-            auto hit_time_edge = [&](int i) -> bool {
-                const float x2 = geoms[static_cast<size_t>(i)].x2;
-                const float edge_y = (graph_t + graph_b) * 0.5f;
-                return std::fabs(mouse.x - x2) <= 6.0f &&
-                       mouse.y >= edge_y - 14.0f && mouse.y <= edge_y + 14.0f;
+                return (dx * dx + dy * dy) <= 10.0f * 10.0f;
             };
             auto hit_band = [&](int i) -> bool {
                 const StageGeom &g = geoms[static_cast<size_t>(i)];
-                return mouse.x >= g.x1 && mouse.x <= g.x2 && mouse.y >= graph_t && mouse.y <= graph_b;
+                return mouse.x >= g.x1 && mouse.x <= std::max(g.x1 + 2.0f, g.x2) &&
+                       mouse.y >= graph_t && mouse.y <= graph_b;
             };
 
             if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
             {
                 for (int i = stages - 1; i >= 0; --i)
                 {
-                    if (hit_band(i))
+                    if (hit_band(i) || hit_handle(i))
                     {
                         m_ie_adsr_selected_stage = i;
                         m_ie_adsr_selected_owner = select_owner;
@@ -4365,19 +4532,11 @@
             else if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
             {
                 int hit = -1;
-                AdsrDragKind kind = AdsrDragKind::None;
                 for (int i = stages - 1; i >= 0; --i)
                 {
-                    if (hit_level_handle(i))
+                    if (hit_handle(i))
                     {
                         hit = i;
-                        kind = AdsrDragKind::Level;
-                        break;
-                    }
-                    if (hit_time_edge(i))
-                    {
-                        hit = i;
-                        kind = AdsrDragKind::TimeEdge;
                         break;
                     }
                 }
@@ -4388,7 +4547,6 @@
                         if (hit_band(i))
                         {
                             hit = i;
-                            kind = AdsrDragKind::Level; /* band drag also adjusts level */
                             break;
                         }
                     }
@@ -4399,7 +4557,7 @@
                     m_ie_adsr_selected_owner = select_owner;
                     s_drag_stage = hit;
                     s_drag_owner = owner;
-                    s_drag_kind = kind;
+                    s_drag_kind = (hit == sust_i) ? AdsrDragKind::Level : AdsrDragKind::Level;
                     s_drag_start_x = mouse.x;
                     s_drag_start_y = mouse.y;
                     s_drag_start_level = adsr.stages[hit].level;
@@ -4412,7 +4570,7 @@
             {
                 for (int i = stages - 1; i >= 0; --i)
                 {
-                    if (hit_band(i) || hit_level_handle(i))
+                    if (hit_band(i) || hit_handle(i))
                     {
                         m_ie_adsr_selected_stage = i;
                         m_ie_adsr_selected_owner = select_owner;
@@ -4462,36 +4620,45 @@
             {
                 const int i = s_drag_stage;
                 bool changed = false;
-                if (s_drag_kind == AdsrDragKind::Level || s_drag_kind == AdsrDragKind::None)
+                const float dy = mouse.y - s_drag_start_y;
+                const int disp_delta = static_cast<int>(
+                    std::lround((-dy / std::max(1.0f, graph_h)) * static_cast<float>(level_span)));
+                if (beatnik_level_scale)
                 {
-                    const float level_span = static_cast<float>(max_level - min_level);
-                    const float dy = mouse.y - s_drag_start_y;
-                    const int32_t level_delta = static_cast<int32_t>(
-                        std::lround((-dy / std::max(1.0f, graph_h)) * level_span));
-                    const int32_t new_level = s_drag_start_level + level_delta;
+                    const int start_disp = AdsrLevelToBeatnik(s_drag_start_level);
+                    const int32_t new_raw = AdsrLevelFromBeatnik(start_disp + disp_delta);
+                    if (new_raw != adsr.stages[i].level)
+                    {
+                        adsr.stages[i].level = new_raw;
+                        changed = true;
+                    }
+                }
+                else
+                {
+                    const int32_t new_level = s_drag_start_level + disp_delta;
                     if (new_level != adsr.stages[i].level)
                     {
                         adsr.stages[i].level = new_level;
                         changed = true;
                     }
                 }
-                if (s_drag_kind == AdsrDragKind::TimeEdge ||
-                    (s_drag_kind == AdsrDragKind::Level && std::fabs(mouse.x - s_drag_start_x) >= 8.0f))
+                /* Horizontal drag adjusts time (not for SUST — display-only band). */
+                if (i != sust_i && std::fabs(mouse.x - s_drag_start_x) >= 6.0f)
                 {
-                    const float dx = mouse.x - s_drag_start_x;
-                    if (graph_w > 1.0f)
+                    const StageGeom &g = geoms[static_cast<size_t>(i)];
+                    const float region_w = g.in_release ? right_w : left_w;
+                    const int64_t region_ms = g.in_release ? post_ms : pre_ms;
+                    if (region_w > 1.0f)
                     {
-                        const int64_t time_ref =
-                            std::max<int64_t>(100000, total_time > 0 ? total_time : 100000);
-                        const int64_t time_delta = static_cast<int64_t>(
-                            std::llround((dx / graph_w) * static_cast<double>(time_ref)));
-                        const int64_t new_time =
-                            std::max<int64_t>(0, static_cast<int64_t>(s_drag_start_time) + time_delta);
-                        const int32_t clamped = static_cast<int32_t>(
-                            std::min<int64_t>(new_time, static_cast<int64_t>(2147483647)));
-                        if (clamped != adsr.stages[i].time)
+                        const float dx = mouse.x - s_drag_start_x;
+                        const int64_t delta_ms = static_cast<int64_t>(
+                            std::llround((dx / region_w) * static_cast<double>(region_ms)));
+                        const int start_ms = AdsrTimeUsToMs(s_drag_start_time);
+                        const int new_ms = std::max(0, start_ms + static_cast<int>(delta_ms));
+                        const int32_t new_us = AdsrTimeMsToUs(new_ms);
+                        if (new_us != adsr.stages[i].time)
                         {
-                            adsr.stages[i].time = clamped;
+                            adsr.stages[i].time = new_us;
                             changed = true;
                         }
                     }
@@ -4518,40 +4685,11 @@
                 s_drag_mutated = false;
             }
 
-            if (m_ie_adsr_selected_stage >= 0 && m_ie_adsr_selected_stage < stages &&
-                m_ie_adsr_selected_owner == select_owner)
-            {
-                const int si = m_ie_adsr_selected_stage;
-                const bool goto_stage =
-                    adsr.stages[si].flags == static_cast<int32_t>(FOUR_CHAR('G', 'O', 'T', 'O')) ||
-                    adsr.stages[si].flags == static_cast<int32_t>(FOUR_CHAR('G', 'O', 'S', 'T'));
-                if (beatnik_level_scale && !goto_stage)
-                {
-                    ImGui::Text("Stage %d  %s  level=%d  time=%d µs  (raw %d)",
-                                si,
-                                AdsrStageFlagName(adsr.stages[si].flags),
-                                AdsrLevelToBeatnik(adsr.stages[si].level),
-                                adsr.stages[si].time,
-                                adsr.stages[si].level);
-                }
-                else
-                {
-                    ImGui::Text("Stage %d  %s  level=%d  time=%d µs",
-                                si,
-                                AdsrStageFlagName(adsr.stages[si].flags),
-                                adsr.stages[si].level,
-                                adsr.stages[si].time);
-                }
-            }
-            else
-            {
-                ImGui::TextDisabled(
-                    beatnik_level_scale
-                        ? "Drag corner = level (100=unity) · edge bar = time · click = select · "
-                          "double-click / right-click = type"
-                        : "Drag corner = level · edge bar = time · click band = select · "
-                          "double-click / right-click = type");
-            }
+            ImGui::TextDisabled(
+                beatnik_level_scale
+                    ? "BE2 view · Y: %% (100=unity) · X: ms (sustain band) · drag node · "
+                      "right-click type"
+                    : "BE2 view · X: ms (sustain band) · drag node · right-click type");
         }
         ImGui::PopID();
     }
@@ -4662,7 +4800,7 @@
     {
         ImGui::PushID(id);
         m_ie_adsr_default_focus_id = id ? id : "";
-        DrawAdsrEnvelopeGraph(adsr, "graph", 160.0f, true, beatnik_level_scale);
+        DrawAdsrEnvelopeGraph(adsr, "graph", 188.0f, true, beatnik_level_scale);
         int stages = static_cast<int>(adsr.stageCount);
         auto init_stage = [&](int index) {
             if (index < 0 || index >= BAE_EDITOR_MAX_ADSR_STAGES)
@@ -4692,7 +4830,7 @@
             LivePatchInstrumentEditor();
         }
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(100.0f);
+        ImGui::SetNextItemWidth(80.0f);
         if (ImGui::InputInt("##stage_count", &stages))
         {
             stages = std::clamp(stages, 0, BAE_EDITOR_MAX_ADSR_STAGES);
@@ -4717,10 +4855,6 @@
             SaveEditorPrefsToDisk();
             SetStatus("Saved ADSR as editor default");
         }
-        if (ImGui::IsItemHovered())
-        {
-            ImGui::SetTooltip("Store this ADSR as the app-wide default (editor prefs)");
-        }
         ImGui::SameLine();
         ImGui::BeginDisabled(!m_pref_adsr_default_valid);
         if (ImGui::Button("Paste Default"))
@@ -4732,11 +4866,6 @@
             SetStatus("Pasted default ADSR");
         }
         ImGui::EndDisabled();
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-        {
-            ImGui::SetTooltip(m_pref_adsr_default_valid ? "Apply stored default ADSR here"
-                                                       : "No default ADSR stored yet");
-        }
 
         static const struct
         {
@@ -4756,16 +4885,151 @@
                    flags == static_cast<int32_t>(FOUR_CHAR('G', 'O', 'S', 'T'));
         };
 
-        if (ImGui::CollapsingHeader("Advanced stage table"))
+        /* BE2-style compact LEVEL / TIME rows under the graph. */
+        if (stages > 0)
+        {
+            const float col_w = std::max(52.0f, (ImGui::GetContentRegionAvail().x - 72.0f) /
+                                                    static_cast<float>(stages));
+            ImGui::Spacing();
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(beatnik_level_scale ? "LEVEL (%)" : "LEVEL");
+            ImGui::SameLine(72.0f);
+            for (int i = 0; i < stages; ++i)
+            {
+                ImGui::PushID(1000 + i);
+                ImGui::SetNextItemWidth(col_w - 4.0f);
+                if (is_goto_stage(adsr.stages[i].flags))
+                {
+                    int target = adsr.stages[i].level;
+                    if (target < 1)
+                    {
+                        target = 1;
+                    }
+                    if (ImGui::InputInt("##lvl", &target, 0, 0))
+                    {
+                        MarkInstrumentEditorDirty(false);
+                        adsr.stages[i].level = std::clamp(target, 1, std::max(1, stages));
+                        LivePatchInstrumentEditor();
+                    }
+                }
+                else if (beatnik_level_scale)
+                {
+                    int level = AdsrLevelToBeatnik(adsr.stages[i].level);
+                    if (ImGui::InputInt("##lvl", &level, 0, 0))
+                    {
+                        MarkInstrumentEditorDirty(false);
+                        adsr.stages[i].level = AdsrLevelFromBeatnik(level);
+                        LivePatchInstrumentEditor();
+                    }
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                    {
+                        ImGui::SetTooltip("Raw: %d  (100%% = 4096)", adsr.stages[i].level);
+                    }
+                }
+                else
+                {
+                    int level = adsr.stages[i].level;
+                    if (ImGui::InputInt("##lvl", &level, 0, 0))
+                    {
+                        MarkInstrumentEditorDirty(false);
+                        adsr.stages[i].level = level;
+                        LivePatchInstrumentEditor();
+                    }
+                }
+                if (i + 1 < stages)
+                {
+                    ImGui::SameLine(0.0f, 4.0f);
+                }
+                ImGui::PopID();
+            }
+
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted("TIME (MS)");
+            ImGui::SameLine(72.0f);
+            for (int i = 0; i < stages; ++i)
+            {
+                ImGui::PushID(2000 + i);
+                ImGui::SetNextItemWidth(col_w - 4.0f);
+                int ms = AdsrTimeToDisplayMs(adsr.stages[i].flags, adsr.stages[i].time);
+                if (ImGui::InputInt("##tm", &ms, 0, 0))
+                {
+                    MarkInstrumentEditorDirty(false);
+                    adsr.stages[i].time =
+                        AdsrTimeFromDisplayMs(adsr.stages[i].flags, std::max(0, ms));
+                    LivePatchInstrumentEditor();
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                {
+                    if (AdsrIsSustainFlag(adsr.stages[i].flags) && adsr.stages[i].time == 0)
+                    {
+                        ImGui::SetTooltip(
+                            "BE2 shows %d ms for SUST when stored time is 0",
+                            kBe2SustainDisplayMs);
+                    }
+                    else
+                    {
+                        ImGui::SetTooltip("Stored: %d µs", adsr.stages[i].time);
+                    }
+                }
+                if (i + 1 < stages)
+                {
+                    ImGui::SameLine(0.0f, 4.0f);
+                }
+                ImGui::PopID();
+            }
+
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted("TYPE");
+            ImGui::SameLine(72.0f);
+            for (int i = 0; i < stages; ++i)
+            {
+                ImGui::PushID(3000 + i);
+                ImGui::SetNextItemWidth(col_w - 4.0f);
+                const char *preview = AdsrStageFlagName(adsr.stages[i].flags);
+                if (ImGui::BeginCombo("##ty", preview))
+                {
+                    for (const auto &choice : kFlagChoices)
+                    {
+                        const bool selected = (adsr.stages[i].flags == choice.flags);
+                        if (ImGui::Selectable(choice.label, selected))
+                        {
+                            MarkInstrumentEditorDirty(false);
+                            const bool became_goto = is_goto_stage(choice.flags);
+                            const bool was_goto = is_goto_stage(adsr.stages[i].flags);
+                            adsr.stages[i].flags = choice.flags;
+                            if (became_goto && !was_goto)
+                            {
+                                if (adsr.stages[i].level < 1 || adsr.stages[i].level > stages)
+                                {
+                                    adsr.stages[i].level = 1;
+                                }
+                            }
+                            LivePatchInstrumentEditor();
+                        }
+                        if (selected)
+                        {
+                            ImGui::SetItemDefaultFocus();
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+                if (i + 1 < stages)
+                {
+                    ImGui::SameLine(0.0f, 4.0f);
+                }
+                ImGui::PopID();
+            }
+        }
+
+        if (ImGui::CollapsingHeader("Advanced (raw µs / engine levels)"))
         {
             if (beatnik_level_scale)
             {
-                ImGui::TextDisabled("Levels: Beatnik units (100 = unity / 4096 raw, 200 = 8192 raw)");
+                ImGui::TextDisabled("Levels still Beatnik %% here; times are raw microseconds");
             }
-            if (ImGui::BeginTable("adsr", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
+            if (ImGui::BeginTable("adsr_adv", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
             {
-                ImGui::TableSetupColumn(beatnik_level_scale ? "Level (100=unity) / Target"
-                                                            : "Level / Target");
+                ImGui::TableSetupColumn(beatnik_level_scale ? "Level %" : "Level");
                 ImGui::TableSetupColumn("Time (µs)");
                 ImGui::TableSetupColumn("Type");
                 ImGui::TableSetupColumn("#");
@@ -4774,20 +5038,15 @@
                 for (int i = 0; i < stages; ++i)
                 {
                     ImGui::TableNextRow();
-                    ImGui::PushID(i);
+                    ImGui::PushID(4000 + i);
                     ImGui::TableSetColumnIndex(0);
                     if (is_goto_stage(adsr.stages[i].flags))
                     {
                         int target = adsr.stages[i].level;
-                        if (target < 1)
-                        {
-                            target = 1;
-                        }
                         if (ImGui::InputInt("##goto_tgt", &target))
                         {
                             MarkInstrumentEditorDirty(false);
-                            target = std::clamp(target, 1, std::max(1, stages));
-                            adsr.stages[i].level = target;
+                            adsr.stages[i].level = std::clamp(target, 1, std::max(1, stages));
                             LivePatchInstrumentEditor();
                         }
                     }
@@ -4799,10 +5058,6 @@
                             MarkInstrumentEditorDirty(false);
                             adsr.stages[i].level = AdsrLevelFromBeatnik(level);
                             LivePatchInstrumentEditor();
-                        }
-                        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
-                        {
-                            ImGui::SetTooltip("Raw engine level: %d", adsr.stages[i].level);
                         }
                     }
                     else
@@ -4833,16 +5088,7 @@
                             if (ImGui::Selectable(choice.label, selected))
                             {
                                 MarkInstrumentEditorDirty(false);
-                                const bool became_goto = is_goto_stage(choice.flags);
-                                const bool was_goto = is_goto_stage(adsr.stages[i].flags);
                                 adsr.stages[i].flags = choice.flags;
-                                if (became_goto && !was_goto)
-                                {
-                                    if (adsr.stages[i].level < 1 || adsr.stages[i].level > stages)
-                                    {
-                                        adsr.stages[i].level = 1;
-                                    }
-                                }
                                 LivePatchInstrumentEditor();
                             }
                             if (selected)
@@ -5596,7 +5842,8 @@
                         MarkInstrumentEditorDirty();
                     }
                     ImGui::SeparatorText("Volume ADSR");
-                    ImGui::TextDisabled("Levels use Beatnik units (100 = unity / 4096 raw)");
+                    ImGui::TextDisabled(
+                        "BE2 units · LEVEL %% (100 = unity / 4096 raw) · TIME (MS)");
                     DrawAdsrStageEditor(m_ie_ext.volumeADSR, "vol_adsr", true);
                     ImGui::EndTabItem();
                 }
