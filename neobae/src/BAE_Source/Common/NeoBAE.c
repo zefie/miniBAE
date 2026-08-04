@@ -3304,6 +3304,23 @@ BAEResult BAESong_GetEngineConfig(BAESong song, uint32_t *outFlags)
     return BAE_NO_ERROR;
 }
 
+BAEResult BAESong_SetZmfCompatibilityMode(BAESong song, BAE_BOOL enable)
+{
+    if (!song || song->mID != OBJECT_ID || !song->pSong)
+    {
+        return BAE_NULL_OBJECT;
+    }
+    if (enable)
+    {
+        song->pSong->engineConfigFlags |= SONG_CONFIG_CONTAINER_IS_ZMF;
+    }
+    else
+    {
+        song->pSong->engineConfigFlags &= ~((uint32_t)SONG_CONFIG_CONTAINER_IS_ZMF);
+    }
+    return BAE_NO_ERROR;
+}
+
 #if 0
 #pragma mark -
 #pragma mark##### BAEMixer #####

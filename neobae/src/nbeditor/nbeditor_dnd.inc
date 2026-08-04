@@ -466,6 +466,7 @@
         (void)XCleanResourceFile(dest);
 
         m_bank01_touched = false;
+        EnableEditorBankZsCompatibility(m_bank_token);
         RefreshListsFromBank();
         char status[256];
         std::snprintf(status,

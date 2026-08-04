@@ -331,6 +331,10 @@ static bool PV_IsZsbBankToken(XBankToken bankToken)
     }
 
     fileRef = bankToken.xFile;
+    if (XFileGetForceZsbFeatures(fileRef))
+    {
+        return TRUE;
+    }
     savedPos = XFileGetPosition(fileRef);
     if (savedPos < 0)
     {

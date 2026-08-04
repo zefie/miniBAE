@@ -6760,6 +6760,23 @@ void XFileUseThisResourceFile(XFILE fileRef)
     }
 }
 
+void XFileSetForceZsbFeatures(XFILE fileRef, bool enable)
+{
+    if (PV_XFileValid(fileRef))
+    {
+        ((XFILENAME *)fileRef)->forceZsbFeatures = enable ? TRUE : FALSE;
+    }
+}
+
+bool XFileGetForceZsbFeatures(XFILE fileRef)
+{
+    if (!PV_XFileValid(fileRef))
+    {
+        return FALSE;
+    }
+    return ((XFILENAME *)fileRef)->forceZsbFeatures ? TRUE : FALSE;
+}
+
 
 // Decompress a 'csnd' format sound.
 // First byte is a type.

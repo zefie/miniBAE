@@ -14243,6 +14243,23 @@ BAEResult BAERmfEditorDocument_Validate(BAERmfEditorDocument *document)
 // we leave these enabled even if ZMF support is not compiled in, to allow detection of potential ZMF requirements
 // and to prevent saving RMF with ZMF features (ZMF required + no ZMF Support = fail)
 
+/* Classic HSB/RMF has no supported LPF/resonance path in NeoBAE — treat as zs*. */
+static bool PV_LfoDestinationIsLpf(int32_t destination)
+{
+    return destination == (int32_t)FOUR_CHAR('L', 'P', 'F', 'R') ||
+           destination == (int32_t)FOUR_CHAR('L', 'P', 'R', 'E') ||
+           destination == (int32_t)FOUR_CHAR('L', 'P', 'A', 'M');
+}
+
+static bool PV_InstrumentUsesLpfFilter(int32_t lpfFrequency,
+                                       int32_t lpfResonance,
+                                       int32_t lpfLowpassAmount,
+                                       bool hasFilterLfoDestination)
+{
+    return (lpfFrequency != 0 || lpfResonance != 0 || lpfLowpassAmount != 0 ||
+            hasFilterLfoDestination) ? TRUE : FALSE;
+}
+
 void BAEZMFReasonCodeToString(uint32_t reason, char *outBuffer, uint32_t bufferSize)
 {
     outBuffer[0] = '\0';
@@ -14284,6 +14301,9 @@ void BAEZMFReasonCodeToString(uint32_t reason, char *outBuffer, uint32_t bufferS
 
     if (reason & BAEZMF_REASON_EXTENDED_PITCH_RANGE)
         APPEND("Extended pitch range enabled; ");
+
+    if (reason & BAEZMF_REASON_LPF_FILTER)
+        APPEND("Low-pass filter / resonance enabled; ");
 
     if (reason & BAEZMF_REASON_OTHER)
         APPEND("Other engine flags set; ");        
@@ -14403,6 +14423,26 @@ BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document, 
                 }
             }
         }
+
+        if ((reason & BAEZMF_REASON_LPF_FILTER) == 0)
+        {
+            bool hasFilterLfo = FALSE;
+            for (lfoIdx = 0; lfoIdx < ext->lfoCount && lfoIdx < EDITOR_MAX_LFOS; ++lfoIdx)
+            {
+                if (PV_LfoDestinationIsLpf(ext->lfos[lfoIdx].destination))
+                {
+                    hasFilterLfo = TRUE;
+                    break;
+                }
+            }
+            if (PV_InstrumentUsesLpfFilter(ext->LPF_frequency,
+                                           ext->LPF_resonance,
+                                           ext->LPF_lowpassAmount,
+                                           hasFilterLfo))
+            {
+                reason |= BAEZMF_REASON_LPF_FILTER;
+            }
+        }
     }
     int32_t engineFlags;
     BAERmfEditorDocument_GetEngineConfig(document, &engineFlags);
@@ -14502,6 +14542,34 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
                 }
 #endif
                 reason |= BAEZMF_REASON_CUBIC_INTERPOLATION;
+            }
+            if ((reason & BAEZMF_REASON_LPF_FILTER) == 0)
+            {
+                bool hasFilterLfo = FALSE;
+                uint32_t lfoIdx;
+                for (lfoIdx = 0; lfoIdx < extInfo.lfoCount && lfoIdx < BAE_EDITOR_MAX_LFOS; ++lfoIdx)
+                {
+                    if (PV_LfoDestinationIsLpf(extInfo.lfos[lfoIdx].destination))
+                    {
+                        hasFilterLfo = TRUE;
+                        break;
+                    }
+                }
+                if (PV_InstrumentUsesLpfFilter(extInfo.LPF_frequency,
+                                               extInfo.LPF_resonance,
+                                               extInfo.LPF_lowpassAmount,
+                                               hasFilterLfo))
+                {
+#if defined(_DEBUG) && (_DEBUG != 0)
+                    debug_message("[BankRequiresZsb] TRIP reason=lpf-filter instIndex=%u freq=%ld res=%ld amt=%ld lfos=%u\n",
+                                  (unsigned)instrumentIndex,
+                                  (long)extInfo.LPF_frequency,
+                                  (long)extInfo.LPF_resonance,
+                                  (long)extInfo.LPF_lowpassAmount,
+                                  (unsigned)extInfo.lfoCount);
+#endif
+                    reason |= BAEZMF_REASON_LPF_FILTER;
+                }
             }
         }
 
@@ -15502,10 +15570,26 @@ BAEResult BAERmfEditorBank_GetInstrumentExtInfo(BAEBankToken bankToken,
         return BAE_BAD_FILE;
     }
 
-    /* Get basic INST header info */
+    /* Get basic INST header info.
+     * displayName must not point at this function's stack — that dangled and
+     * corrupted nbeditor titles after keyboard preview reused the stack.
+     * Static is valid until the next GetInstrumentExtInfo; callers that keep
+     * the pointer across calls should copy (nbeditor does). */
     PV_DecodeResourceName(rawName, instName);
     outInfo->instID = (uint32_t)instID;
-    outInfo->displayName = instName[0] ? instName : NULL;
+    {
+        static char s_bankExtDisplayName[256];
+        s_bankExtDisplayName[0] = 0;
+        if (instName[0])
+        {
+            XBlockMove(instName, s_bankExtDisplayName, (int32_t)strlen(instName) + 1);
+            outInfo->displayName = s_bankExtDisplayName;
+        }
+        else
+        {
+            outInfo->displayName = NULL;
+        }
+    }
     outInfo->flags1 = ((unsigned char *)instData)[5];
     /* Ghost is RMF/ZMF document-only; ignore if present on bank INST bytes. */
     outInfo->flags1 = (unsigned char)(outInfo->flags1 & (unsigned char)~ZBF_ghostInstrument);

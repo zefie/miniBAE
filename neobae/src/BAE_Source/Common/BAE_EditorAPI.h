@@ -595,6 +595,7 @@ enum BAEZMFReasonCode
     BAEZMF_REASON_CLASSIC_CHORUS = 16, /* song is flagged to use the classic chorus ordering */
     BAEZMF_REASON_PANFIX = 32, /* song is flagged to use the pan fix */
     BAEZMF_REASON_EXTENDED_ADSR = 64,  /* any instrument has > 8 ADSR stages */
+    BAEZMF_REASON_LPF_FILTER = 128, /* INST LPF / resonance (not supported in classic HSB/RMF) */
     BAEZMF_ALREADY_ZMF = 0x40000000u,
     BAEZMF_REASON_OTHER = 0x80000000u
 };

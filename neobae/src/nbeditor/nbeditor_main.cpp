@@ -1712,6 +1712,7 @@ private:
             SetStatus("BAESong_New for preview failed");
             return false;
         }
+        EnableEditorZsCompatibility(new_preview);
         BAESong_Preroll(new_preview);
         /* Start+Pause: Preroll alone leaves IE/audition NoteOn silent. */
         BAESong_Start(new_preview, 0);
@@ -1818,6 +1819,7 @@ private:
             if (bank_result == BAE_NO_ERROR && token != 0)
             {
                 m_bank_token = token;
+                EnableEditorBankZsCompatibility(m_bank_token);
                 return true;
             }
             m_loaded_bank_path.clear();
@@ -1828,6 +1830,7 @@ private:
         {
             m_loaded_bank_display_name.clear();
             m_bank_token = token;
+            EnableEditorBankZsCompatibility(m_bank_token);
             return true;
         }
 
@@ -1902,6 +1905,7 @@ private:
         m_loaded_bank_path = path;
         m_loaded_bank_display_name = FileNameFromPath(m_loaded_bank_path);
         m_bank_token = token;
+        EnableEditorBankZsCompatibility(m_bank_token);
         m_bank01_touched = false;
         m_instrument_filter_index = -1; /* full replace → default Custom Melodic */
         RefreshListsFromBank();
@@ -1967,6 +1971,7 @@ private:
         m_loaded_bank_path.clear();
         m_loaded_bank_display_name.clear();
         m_bank_token = token;
+        EnableEditorBankZsCompatibility(m_bank_token);
         RefreshListsFromBank();
         SelectAuditionBank0AfterBankLoad();
 
@@ -2021,6 +2026,7 @@ private:
             return false;
         }
 
+        EnableEditorZsCompatibility(song);
         BAESong_Preroll(song);
         BAESong_SetLoops(song, m_loop_enabled ? 32767 : 0);
         BAEMixer_SetOutputGain(m_mixer, m_volume_percent);
@@ -2151,10 +2157,29 @@ private:
             return;
         }
 
+        EnableEditorZsCompatibility(preview);
         BAESong_Preroll(preview);
         BAESong_Start(preview, 0);
         BAESong_Pause(preview);
         m_preview_song = preview;
+    }
+
+    /* Editor session always runs with ZMF/ZSB feature gates so stereo LPF,
+     * short loops, etc. audition correctly. Export still uses RequiresZ*. */
+    void EnableEditorZsCompatibility(BAESong song) const
+    {
+        if (song)
+        {
+            (void)BAESong_SetZmfCompatibilityMode(song, TRUE);
+        }
+    }
+
+    void EnableEditorBankZsCompatibility(BAEBankToken token) const
+    {
+        if (token)
+        {
+            XFileSetForceZsbFeatures(reinterpret_cast<XFILE>(token), TRUE);
+        }
     }
 
     /* Blank bank-audition song (not an RMF playback song). Session reload may
@@ -2167,6 +2192,7 @@ private:
         }
         if (m_preview_song)
         {
+            EnableEditorZsCompatibility(m_preview_song);
             return;
         }
         BAESong preview = BAESong_New(m_mixer);
@@ -2174,6 +2200,7 @@ private:
         {
             return;
         }
+        EnableEditorZsCompatibility(preview);
         BAESong_Preroll(preview);
         BAESong_Start(preview, 0);
         BAESong_Pause(preview);
@@ -5184,6 +5211,9 @@ private:
     BAERmfEditorInstrumentExtInfo m_ie_ext = {};
     BAERmfEditorInstrumentExtInfo m_ie_ext_pristine = {};
     BAERmfEditorInstrumentExtInfo m_ie_ext_pre_edit = {};
+    /* Bank GetInstrumentExtInfo returns displayName pointing at a locals buffer.
+     * Keep a stable copy for the IE lifetime (keyboard/stack reuse was ???-corrupting it). */
+    std::string m_ie_display_name;
     std::deque<BAERmfEditorInstrumentExtInfo> m_ie_undo;
     std::deque<BAERmfEditorInstrumentExtInfo> m_ie_redo;
     bool m_ie_undo_pushed_for_gesture = false;

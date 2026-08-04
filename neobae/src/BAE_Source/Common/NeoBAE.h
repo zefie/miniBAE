@@ -2079,6 +2079,11 @@ extern "C"
     // one or more engine settings that override user preferences at playback start.
     BAEResult BAESong_GetEngineConfig(BAESong song, uint32_t *outFlags);
 
+    /* Enable NeoBAE ZMF/ZSB runtime feature gates (stereo LPF, short loops, etc.)
+     * for live editor audition. Does not change on-disk export format — export
+     * still uses RequiresZmf / RequiresZsb content detection. */
+    BAEResult BAESong_SetZmfCompatibilityMode(BAESong song, BAE_BOOL enable);
+
     // BAESong_GetVolume()
     // --------------------------------------
     // Upon return, the BAE_UNSIGNED_FIXED pointed to by parameter outVolume will hold

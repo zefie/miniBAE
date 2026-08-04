@@ -721,6 +721,11 @@ struct XFILENAME
     XFILE_CACHED_ITEM   memoryCacheEntry;
     XFILERESOURCECACHE  *pCache;        // if file has been cached this will point to it
 
+    /* Editor/runtime: treat this open bank as ZSB for feature gates (stereo LPF,
+     * etc.) even when the on-disk mapID is still IREZ. Export format is decided
+     * separately via RequiresZsb content detection. */
+    bool               forceZsbFeatures;
+
     /* Batch SND write support: when pendingSndBatch != NULL, SND replacements
        are accumulated instead of flushing the bank on each encode */
     struct XFilePendingSnd *pendingSndBatch;  /* heap array, NULL when not in batch mode */
@@ -839,6 +844,10 @@ XFILE   XFileOpenForWrite(XFILENAME *file, bool create);
 // close file. Direct or resource
 void    XFileClose(XFILE fileRef);
 void    XFileUseThisResourceFile(XFILE fileRef);
+
+/* Editor: treat open bank as ZSB for runtime feature gates without rewriting mapID. */
+void    XFileSetForceZsbFeatures(XFILE fileRef, bool enable);
+bool    XFileGetForceZsbFeatures(XFILE fileRef);
 
 // get current most recently opened resource file, or NULL if nothing is open
 XFILE   XFileGetCurrentResourceFile(void);

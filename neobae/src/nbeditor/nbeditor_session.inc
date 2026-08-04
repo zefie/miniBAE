@@ -936,10 +936,10 @@
 
         unsigned char *rmf_data = nullptr;
         uint32_t rmf_size = 0;
-        uint32_t zmf_reason = 0;
-        const bool use_zmf = BAERmfEditorDocument_RequiresZmf(m_document, &zmf_reason) != FALSE;
+        /* Always serialize as ZMF for live editor playback so stereo LPF and
+         * other zs* features audition correctly. Export still probes RequiresZmf. */
         const BAEResult save_result = BAERmfEditorDocument_SaveAsRmfToMemory(m_document,
-                                                                              use_zmf,
+                                                                              TRUE,
                                                                               &rmf_data,
                                                                               &rmf_size);
         if (save_result != BAE_NO_ERROR || !rmf_data || rmf_size == 0)
@@ -975,6 +975,7 @@
             SetStatus(std::string("Playback load failed: ") + FormatBAEError(load_result));
             return false;
         }
+        EnableEditorZsCompatibility(song);
 
         BAESong_Preroll(song);
         BAESong_SetLoops(song, m_loop_enabled ? 32767 : 0);
@@ -1017,9 +1018,7 @@
         }
         unsigned char *rmf_data = nullptr;
         uint32_t rmf_size = 0;
-        uint32_t zmf_reason = 0;
-        const bool use_zmf = BAERmfEditorDocument_RequiresZmf(m_document, &zmf_reason) != FALSE;
-        if (BAERmfEditorDocument_SaveAsRmfToMemory(m_document, use_zmf, &rmf_data, &rmf_size) != BAE_NO_ERROR ||
+        if (BAERmfEditorDocument_SaveAsRmfToMemory(m_document, TRUE, &rmf_data, &rmf_size) != BAE_NO_ERROR ||
             !rmf_data)
         {
             BAESong_Delete(preview);
@@ -1032,6 +1031,7 @@
             BAESong_Delete(preview);
             return;
         }
+        EnableEditorZsCompatibility(preview);
         BAESong_Preroll(preview);
         /* Start+Pause so IE/audition NoteOn shares the same live-mixer path as
          * the main playback song (Preroll alone leaves some NoteOn paths silent). */
@@ -1212,6 +1212,7 @@
             return false;
         }
 
+        EnableEditorZsCompatibility(song);
         BAESong_Preroll(song);
         BAESong_SetLoops(song, m_loop_enabled ? 32767 : 0);
         BAEMixer_SetOutputGain(m_mixer, m_volume_percent);
@@ -4626,6 +4627,20 @@
         }
         m_ie_ext.flags1 = static_cast<unsigned char>(m_ie_ext.flags1 &
                                                      static_cast<unsigned char>(~ZBF_ghostInstrument));
+        /* Own the title — bank API displayName is only valid until the Get returns. */
+        if (m_ie_ext.displayName && m_ie_ext.displayName[0])
+        {
+            m_ie_display_name = m_ie_ext.displayName;
+        }
+        else if (!inst.name.empty())
+        {
+            m_ie_display_name = inst.name;
+        }
+        else
+        {
+            m_ie_display_name.clear();
+        }
+        m_ie_ext.displayName = m_ie_display_name.empty() ? nullptr : m_ie_display_name.c_str();
         m_ie_dirty = false;
         m_ie_page = 0;
         m_ie_selected_split = -1;
@@ -4638,7 +4653,13 @@
         m_ie_adsr_selected_owner = 0;
         m_instrument_editor_open = true;
         LivePatchInstrumentEditor();
-        SetStatus(std::string("Editing instrument ") + inst.name);
+        SetStatus(std::string("Editing instrument ") +
+                  (m_ie_display_name.empty() ? inst.name : m_ie_display_name));
+    }
+
+    void BindInstrumentEditorDisplayName()
+    {
+        m_ie_ext.displayName = m_ie_display_name.empty() ? nullptr : m_ie_display_name.c_str();
     }
 
     uint32_t InstrumentEditorPatchId() const
@@ -4716,6 +4737,7 @@
         }
         m_ie_ext = m_ie_undo.back();
         m_ie_undo.pop_back();
+        BindInstrumentEditorDisplayName();
         m_ie_dirty = true;
         m_ie_undo_pushed_for_gesture = false;
         m_ie_ext_pre_edit = m_ie_ext;
@@ -4736,6 +4758,7 @@
         }
         m_ie_ext = m_ie_redo.back();
         m_ie_redo.pop_back();
+        BindInstrumentEditorDisplayName();
         m_ie_dirty = true;
         m_ie_undo_pushed_for_gesture = false;
         m_ie_ext_pre_edit = m_ie_ext;
@@ -4746,6 +4769,7 @@
     void InstrumentEditorRevert()
     {
         m_ie_ext = m_ie_ext_pristine;
+        BindInstrumentEditorDisplayName();
         m_ie_undo.clear();
         m_ie_redo.clear();
         m_ie_dirty = false;
@@ -4941,6 +4965,9 @@
                 if (ImGui::BeginTabItem("Filter"))
                 {
                     m_ie_page = 1;
+                    ImGui::TextDisabled(
+                        "Low-pass filter / resonance are NeoBAE features — "
+                        "export/save uses .zsb / .zmf (not classic HSB/RMF).");
                     int freq = m_ie_ext.LPF_frequency;
                     int res = m_ie_ext.LPF_resonance;
                     int amt = m_ie_ext.LPF_lowpassAmount;
@@ -4959,8 +4986,67 @@
                         m_ie_ext.LPF_lowpassAmount = amt;
                         MarkInstrumentEditorDirty();
                     }
+                    if (freq != 0 || res != 0 || amt != 0)
+                    {
+                        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
+                                           "Active filter → requires .zsb / .zmf");
+                    }
                     DrawFilterFreqResPad();
                     ImGui::SeparatorText("Filter envelopes (LFO → LPFR / LPRE / LPAM)");
+                    {
+                        uint32_t filter_lfo_count = 0;
+                        for (uint32_t i = 0; i < m_ie_ext.lfoCount && i < BAE_EDITOR_MAX_LFOS; ++i)
+                        {
+                            if (is_filter_lfo_dest(m_ie_ext.lfos[i].destination))
+                            {
+                                filter_lfo_count++;
+                            }
+                        }
+                        ImGui::AlignTextToFramePadding();
+                        ImGui::Text("Filter LFOs: %u", static_cast<unsigned>(filter_lfo_count));
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("+##add_filter_lfo") &&
+                            m_ie_ext.lfoCount < BAE_EDITOR_MAX_LFOS)
+                        {
+                            MarkInstrumentEditorDirty(false);
+                            BAERmfEditorLFOInfo &lfo = m_ie_ext.lfos[m_ie_ext.lfoCount];
+                            std::memset(&lfo, 0, sizeof(lfo));
+                            lfo.destination = static_cast<int32_t>(FOUR_CHAR('L', 'P', 'F', 'R'));
+                            lfo.waveShape = static_cast<int32_t>(FOUR_CHAR('S', 'I', 'N', 'E'));
+                            lfo.period = 1000;
+                            lfo.DC_feed = 0;
+                            lfo.level = 0;
+                            lfo.adsr.stageCount = 0;
+                            m_ie_ext.lfoCount++;
+                            LivePatchInstrumentEditor();
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("-##remove_filter_lfo") && filter_lfo_count > 0)
+                        {
+                            MarkInstrumentEditorDirty(false);
+                            for (int i = static_cast<int>(m_ie_ext.lfoCount) - 1; i >= 0; --i)
+                            {
+                                if (!is_filter_lfo_dest(m_ie_ext.lfos[static_cast<uint32_t>(i)].destination))
+                                {
+                                    continue;
+                                }
+                                for (uint32_t j = static_cast<uint32_t>(i) + 1; j < m_ie_ext.lfoCount; ++j)
+                                {
+                                    m_ie_ext.lfos[j - 1] = m_ie_ext.lfos[j];
+                                }
+                                m_ie_ext.lfoCount--;
+                                std::memset(&m_ie_ext.lfos[m_ie_ext.lfoCount],
+                                            0,
+                                            sizeof(m_ie_ext.lfos[0]));
+                                break;
+                            }
+                            LivePatchInstrumentEditor();
+                        }
+                        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                        {
+                            ImGui::SetTooltip("Remove last filter-destination LFO");
+                        }
+                    }
                     bool any_filter_lfo = false;
                     for (uint32_t i = 0; i < m_ie_ext.lfoCount && i < BAE_EDITOR_MAX_LFOS; ++i)
                     {
@@ -4975,6 +5061,30 @@
                                     label_for(kLfoDestLabels,
                                               static_cast<int>(sizeof(kLfoDestLabels) / sizeof(kLfoDestLabels[0])),
                                               m_ie_ext.lfos[i].destination));
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("Remove"))
+                        {
+                            MarkInstrumentEditorDirty(false);
+                            for (uint32_t j = i + 1; j < m_ie_ext.lfoCount; ++j)
+                            {
+                                m_ie_ext.lfos[j - 1] = m_ie_ext.lfos[j];
+                            }
+                            if (m_ie_ext.lfoCount > 0)
+                            {
+                                m_ie_ext.lfoCount--;
+                                std::memset(&m_ie_ext.lfos[m_ie_ext.lfoCount],
+                                            0,
+                                            sizeof(m_ie_ext.lfos[0]));
+                            }
+                            LivePatchInstrumentEditor();
+                            ImGui::PopID();
+                            break;
+                        }
+                        draw_four_char_combo(
+                            "Destination",
+                            m_ie_ext.lfos[i].destination,
+                            kLfoDestLabels,
+                            static_cast<int>(sizeof(kLfoDestLabels) / sizeof(kLfoDestLabels[0])));
                         DrawLfoWaveformGraph(m_ie_ext.lfos[i], "filter_lfo_wave", 64.0f);
                         char adsr_id[32];
                         std::snprintf(adsr_id, sizeof(adsr_id), "filter_lfo_adsr_%u", i);
@@ -4984,7 +5094,8 @@
                     if (!any_filter_lfo)
                     {
                         ImGui::TextDisabled(
-                            "No filter-destination LFOs. Add/configure LPFR, LPRE, or LPAM on the Modulation page.");
+                            "No filter-destination LFOs. Use + to add LPFR/LPRE/LPAM, "
+                            "or configure them on the Modulation page.");
                     }
                     ImGui::EndTabItem();
                 }
@@ -5028,12 +5139,62 @@
                         m_ie_ext.hasDefaultMod = def_mod ? TRUE : FALSE;
                         MarkInstrumentEditorDirty();
                     }
-                    ImGui::Text("LFOs: %u", static_cast<unsigned>(m_ie_ext.lfoCount));
+                    ImGui::AlignTextToFramePadding();
+                    ImGui::Text("LFOs: %u / %d",
+                                static_cast<unsigned>(m_ie_ext.lfoCount),
+                                BAE_EDITOR_MAX_LFOS);
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("+##add_lfo") &&
+                        m_ie_ext.lfoCount < BAE_EDITOR_MAX_LFOS)
+                    {
+                        MarkInstrumentEditorDirty(false);
+                        BAERmfEditorLFOInfo &lfo = m_ie_ext.lfos[m_ie_ext.lfoCount];
+                        std::memset(&lfo, 0, sizeof(lfo));
+                        lfo.destination = static_cast<int32_t>(FOUR_CHAR('V', 'O', 'L', 'U'));
+                        lfo.waveShape = static_cast<int32_t>(FOUR_CHAR('S', 'I', 'N', 'E'));
+                        lfo.period = 1000;
+                        lfo.DC_feed = 0;
+                        lfo.level = 0;
+                        lfo.adsr.stageCount = 0;
+                        m_ie_ext.lfoCount++;
+                        LivePatchInstrumentEditor();
+                    }
+                    ImGui::SameLine();
+                    if (ImGui::SmallButton("-##remove_lfo") && m_ie_ext.lfoCount > 0)
+                    {
+                        MarkInstrumentEditorDirty(false);
+                        m_ie_ext.lfoCount--;
+                        std::memset(&m_ie_ext.lfos[m_ie_ext.lfoCount], 0, sizeof(m_ie_ext.lfos[0]));
+                        LivePatchInstrumentEditor();
+                    }
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                    {
+                        ImGui::SetTooltip("Remove last LFO");
+                    }
                     for (uint32_t i = 0; i < m_ie_ext.lfoCount && i < BAE_EDITOR_MAX_LFOS; ++i)
                     {
                         ImGui::PushID(static_cast<int>(i) + 1000);
                         ImGui::Separator();
                         ImGui::Text("LFO %u", static_cast<unsigned>(i));
+                        ImGui::SameLine();
+                        if (ImGui::SmallButton("Remove"))
+                        {
+                            MarkInstrumentEditorDirty(false);
+                            for (uint32_t j = i + 1; j < m_ie_ext.lfoCount; ++j)
+                            {
+                                m_ie_ext.lfos[j - 1] = m_ie_ext.lfos[j];
+                            }
+                            if (m_ie_ext.lfoCount > 0)
+                            {
+                                m_ie_ext.lfoCount--;
+                                std::memset(&m_ie_ext.lfos[m_ie_ext.lfoCount],
+                                            0,
+                                            sizeof(m_ie_ext.lfos[0]));
+                            }
+                            LivePatchInstrumentEditor();
+                            ImGui::PopID();
+                            break;
+                        }
                         draw_four_char_combo(
                             "Destination",
                             m_ie_ext.lfos[i].destination,
