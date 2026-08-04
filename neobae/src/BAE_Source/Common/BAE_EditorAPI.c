@@ -14432,7 +14432,10 @@ BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document, 
     {        
         reason |= BAEZMF_REASON_OTHER;
     }
-    *outReason = reason;
+    if (outReason)
+    {
+        *outReason = reason;
+    }
     return (reason != BAEZMF_REASON_NONE) ? TRUE : FALSE;
 }
 
@@ -14462,11 +14465,26 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
 
         if (BAERmfEditorBank_GetInstrumentExtInfo(bankToken, instrumentIndex, &extInfo) == BAE_NO_ERROR)
         {
-            if (extInfo.hasExtendedData && extInfo.volumeADSR.stageCount > BAE_RMF_MAX_ADSR_STAGES)
+            if ((reason & BAEZMF_REASON_EXTENDED_ADSR) == 0)
             {
-                reason |= BAEZMF_REASON_EXTENDED_ADSR;
+                if (extInfo.volumeADSR.stageCount > BAE_RMF_MAX_ADSR_STAGES)
+                {
+                    reason |= BAEZMF_REASON_EXTENDED_ADSR;
+                }
+                else
+                {
+                    uint32_t lfoIdx;
+                    for (lfoIdx = 0; lfoIdx < extInfo.lfoCount && lfoIdx < BAE_EDITOR_MAX_LFOS; ++lfoIdx)
+                    {
+                        if (extInfo.lfos[lfoIdx].adsr.stageCount > BAE_RMF_MAX_ADSR_STAGES)
+                        {
+                            reason |= BAEZMF_REASON_EXTENDED_ADSR;
+                            break;
+                        }
+                    }
+                }
             }
-            if (extInfo.hasExtendedData && TEST_FLAG_VALUE(extInfo.flags2, ZBF_advancedInterpolation))
+            if (TEST_FLAG_VALUE(extInfo.flags2, ZBF_advancedInterpolation))
             {
 #if defined(_DEBUG) && (_DEBUG != 0)
                 uint32_t debugSndID = 0;
@@ -14550,7 +14568,10 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
             }
         }
     }
-    *outReason = reason;
+    if (outReason)
+    {
+        *outReason = reason;
+    }
     return (reason != BAEZMF_REASON_NONE) ? TRUE : FALSE;
 }
 
@@ -18890,6 +18911,12 @@ BAEResult BAERmfEditorBank_SaveToFile(BAEBankToken bankToken,
     }
     else if (ext && (strcmp(ext, ".hsb") == 0 || strcmp(ext, ".HSB") == 0))
     {
+        uint32_t zsbReason = 0;
+        if (BAERmfEditorBank_RequiresZsb(bankToken, &zsbReason) != FALSE)
+        {
+            /* Modern codecs / extended ADSR / etc. cannot be written as classic HSB. */
+            return BAE_UNSUPPORTED_FORMAT;
+        }
         overrideResourceID = XFILERESOURCE_ID;
     }
 
@@ -20665,6 +20692,16 @@ BAEResult BAERmfEditorDocument_SaveAsRmf(BAERmfEditorDocument *document,
     }
     else
     {
+        uint32_t zmfReason = 0;
+        if (BAERmfEditorDocument_RequiresZmf(document, &zmfReason) != FALSE)
+        {
+            /* Ignore "already ZMF" container bit — only content incompatibilities block RMF. */
+            zmfReason &= ~(uint32_t)BAEZMF_ALREADY_ZMF;
+            if (zmfReason != BAEZMF_REASON_NONE)
+            {
+                return BAE_UNSUPPORTED_FORMAT;
+            }
+        }
         useZmfContainer = FALSE;
     }
 

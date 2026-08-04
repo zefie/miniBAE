@@ -43,6 +43,69 @@ static int32_t NbetReadBE32Signed(const unsigned char *p)
     return static_cast<int32_t>(NbetReadBE32(p));
 }
 
+/* True if the window title-bar strip intersects any display usable area. */
+static bool NbetWindowTitleBarOnScreen(int x, int y, int w, int h)
+{
+    if (w < 1 || h < 1)
+    {
+        return false;
+    }
+    const SDL_Rect title{x, y, w, (h < 32) ? h : 32};
+    int count = 0;
+    SDL_DisplayID *displays = SDL_GetDisplays(&count);
+    if (!displays || count <= 0)
+    {
+        SDL_free(displays);
+        return true;
+    }
+    bool ok = false;
+    for (int i = 0; i < count; ++i)
+    {
+        SDL_Rect bounds{};
+        if (!SDL_GetDisplayUsableBounds(displays[i], &bounds))
+        {
+            continue;
+        }
+        if (SDL_HasRectIntersection(&title, &bounds))
+        {
+            ok = true;
+            break;
+        }
+    }
+    SDL_free(displays);
+    return ok;
+}
+
+/* Keep current position; only relocate if the window is off-screen.
+ * Prefer saved coords when those land on a display; otherwise clamp to primary. */
+static void NbetEnsureMainWindowOnScreen(SDL_Window *window, int saved_x, int saved_y, int w, int h)
+{
+    if (!window || w < 1 || h < 1)
+    {
+        return;
+    }
+    int x = 0;
+    int y = 0;
+    SDL_GetWindowPosition(window, &x, &y);
+    if (NbetWindowTitleBarOnScreen(x, y, w, h))
+    {
+        return;
+    }
+    if (NbetWindowTitleBarOnScreen(saved_x, saved_y, w, h))
+    {
+        SDL_SetWindowPosition(window, saved_x, saved_y);
+        return;
+    }
+    const SDL_DisplayID primary = SDL_GetPrimaryDisplay();
+    SDL_Rect bounds{};
+    if (primary && SDL_GetDisplayUsableBounds(primary, &bounds))
+    {
+        const int nx = bounds.x + std::max(0, (bounds.w - w) / 2);
+        const int ny = bounds.y + std::max(0, (bounds.h - h) / 2);
+        SDL_SetWindowPosition(window, nx, ny);
+    }
+}
+
 static bool BsnSongObjectIsMidi(XFILE bank_file, const unsigned char *song_body, int32_t song_size)
 {
     if (!song_body || song_size < 8)
@@ -69,6 +132,8 @@ bool SessionRequiresZsn(uint32_t *out_reason) const
         uint32_t doc_reason = 0;
         if (BAERmfEditorDocument_RequiresZmf(m_document, &doc_reason) != FALSE)
         {
+            /* Container-only bit does not force .zsn by itself. */
+            doc_reason &= ~(uint32_t)BAEZMF_ALREADY_ZMF;
             reason |= doc_reason;
         }
     }
@@ -77,6 +142,93 @@ bool SessionRequiresZsn(uint32_t *out_reason) const
         *out_reason = reason;
     }
     return reason != 0;
+}
+
+bool BankRequiresZsb(uint32_t *out_reason) const
+{
+    uint32_t reason = 0;
+    if (m_bank_token)
+    {
+        (void)BAERmfEditorBank_RequiresZsb(m_bank_token, &reason);
+    }
+    if (out_reason)
+    {
+        *out_reason = reason;
+    }
+    return reason != 0;
+}
+
+static std::string ReplacePathExtension(const std::string &path, const char *new_ext_with_dot)
+{
+    if (!new_ext_with_dot || !new_ext_with_dot[0])
+    {
+        return path;
+    }
+    const size_t slash = path.find_last_of("/\\");
+    const size_t dot = path.find_last_of('.');
+    if (dot != std::string::npos && (slash == std::string::npos || dot > slash))
+    {
+        return path.substr(0, dot) + new_ext_with_dot;
+    }
+    return path + new_ext_with_dot;
+}
+
+/* Force .zsn when session content needs NeoBAE container features. */
+std::string EnforceSessionSavePath(const std::string &path, bool *out_remapped = nullptr) const
+{
+    if (out_remapped)
+    {
+        *out_remapped = false;
+    }
+    if (path.empty())
+    {
+        return path;
+    }
+    const bool want_zsn = SessionRequiresZsn(nullptr);
+    if (!want_zsn)
+    {
+        return path;
+    }
+    if (EndsWith(path, ".zsn"))
+    {
+        return path;
+    }
+    if (out_remapped)
+    {
+        *out_remapped = true;
+    }
+    if (EndsWith(path, ".bsn"))
+    {
+        return ReplacePathExtension(path, ".zsn");
+    }
+    return ReplacePathExtension(path, ".zsn");
+}
+
+/* Force .zsb when bank content needs NeoBAE container features. */
+std::string EnforceBankSavePath(const std::string &path, bool *out_remapped = nullptr) const
+{
+    if (out_remapped)
+    {
+        *out_remapped = false;
+    }
+    if (path.empty())
+    {
+        return path;
+    }
+    const bool want_zsb = BankRequiresZsb(nullptr);
+    if (!want_zsb)
+    {
+        return path;
+    }
+    if (EndsWith(path, ".zsb"))
+    {
+        return path;
+    }
+    if (out_remapped)
+    {
+        *out_remapped = true;
+    }
+    return ReplacePathExtension(path, ".zsb");
 }
 
 bool SyncSessionSongsFromDocument()
@@ -253,6 +405,13 @@ bool ImportSongDocumentAsNewSessionEntry(const std::string &path, const char *so
         return false;
     }
 
+    const bool is_rmf_like = EndsWith(path, ".rmf") || EndsWith(path, ".zmf");
+    if (is_rmf_like)
+    {
+        /* Promote embeds into the current bank; do not wipe the session. */
+        (void)PromoteEmbeddedResourcesFromRmfPath(path.c_str());
+    }
+
     /* Force append: do not update the previous selection slot. */
     m_session_song_index = -1;
     UpdateSongRowFromDocument(path, source_type);
@@ -261,7 +420,18 @@ bool ImportSongDocumentAsNewSessionEntry(const std::string &path, const char *so
         SetStatus("Song imported but failed to add to Session song list");
         return false;
     }
+    if (is_rmf_like && m_session_song_index >= 0 &&
+        m_session_song_index < static_cast<int>(m_session_songs.size()))
+    {
+        std::ifstream in(path, std::ios::binary);
+        if (in)
+        {
+            m_session_songs[static_cast<size_t>(m_session_song_index)].rmf_bytes.assign(
+                std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        }
+    }
     const bool play_ok = ReloadPlaybackFromDocument(true);
+    ApplyPlayerMixSettings();
     char status[256];
     std::snprintf(status,
                   sizeof(status),
@@ -318,6 +488,7 @@ bool RemoveSessionSongAt(int index)
         m_song_started = false;
         ClearSongOverrides();
         RefreshSongSamplesFromDocument();
+        EnsureBankAuditionSong();
         SetStatus("Removed Session song (none left)");
         return true;
     }
@@ -604,6 +775,86 @@ static constexpr uint32_t kNbetOpenSE = 1u << 1;
 static constexpr uint32_t kNbetOpenSongInfo = 1u << 2;
 static constexpr uint32_t kNbetOpenSongSettings = 1u << 3;
 
+void ApplyPlayerMixSettings()
+{
+    m_volume_percent = std::clamp(m_volume_percent, 0, 150);
+    m_song_settings_tempo_percent = std::clamp(m_song_settings_tempo_percent, 25, 200);
+    if (m_mixer)
+    {
+        BAEMixer_SetOutputGain(m_mixer, m_volume_percent);
+        BAEMixer_SetDefaultReverb(m_mixer, static_cast<BAEReverbType>(m_reverb_type));
+    }
+    if (m_song)
+    {
+        const float ratio =
+            static_cast<float>(std::max(1, m_song_settings_tempo_percent)) / 100.0f;
+        (void)BAESong_SetMasterTempo(m_song, FLOAT_TO_UNSIGNED_FIXED(ratio));
+    }
+}
+
+/* Drop song/editors/bank-dependent UI before replacing the session bank token. */
+void TeardownForSessionReload()
+{
+    if (m_mouse_active_note >= 0)
+    {
+        NoteOff(m_mouse_active_note);
+        m_key_mouse_held[static_cast<size_t>(m_mouse_active_note)] = false;
+        m_mouse_active_note = -1;
+    }
+    if (m_ie_note_song)
+    {
+        BAESong_KillActiveNotes(m_ie_note_song);
+        m_ie_note_song = nullptr;
+    }
+    m_instrument_editor_open = false;
+    m_ie_dirty = false;
+    m_ie_undo.clear();
+    m_ie_redo.clear();
+#if NBEDITOR_MVP
+    StopSampleEditorPreview();
+    m_sample_editor_dirty = false;
+    m_sample_editor_loop_dirty = false;
+    m_sample_editor_compression_open = false;
+    m_sample_editor_choose_note_open = false;
+    m_sample_editor_open = false;
+    ClearSampleEditorSndSnapshot();
+#endif
+    m_song_info_open = false;
+    m_song_settings_open = false;
+    m_export_rmf_open = false;
+    m_export_sample_rmf_open = false;
+    m_export_bank_open = false;
+    m_export_audio_open = false;
+
+    if (m_song)
+    {
+        BAESong_Stop(m_song, FALSE);
+        BAESong_Delete(m_song);
+        m_song = nullptr;
+    }
+    if (m_preview_song)
+    {
+        BAESong_Stop(m_preview_song, FALSE);
+        BAESong_Delete(m_preview_song);
+        m_preview_song = nullptr;
+    }
+    if (m_document)
+    {
+        BAERmfEditorDocument_Delete(m_document);
+        m_document = nullptr;
+    }
+    m_loaded_song_path.clear();
+    m_loaded_doc_path.clear();
+    m_song_row = SongRow{};
+    m_document_dirty = false;
+    m_song_started = false;
+    ClearSongOverrides();
+    m_session_songs.clear();
+    m_session_song_index = -1;
+    m_session_pcm_cache.clear();
+    m_app_compression_cache.clear();
+}
+
 std::vector<unsigned char> CaptureNbetLayoutBlob()
 {
     std::vector<unsigned char> blob;
@@ -648,10 +899,10 @@ std::vector<unsigned char> CaptureNbetLayoutBlob()
         open_flags |= kNbetOpenSongSettings;
     }
 
-    /* Version 2: window geom + open-editor state + ImGui ini. */
-    blob.reserve(64 + ini_len);
+    /* Version 3: v2 + player mix (volume / tempo / reverb) before ImGui ini. */
+    blob.reserve(76 + ini_len);
     NbetPutBE32(blob, FOUR_CHAR('n', 'B', 'e', 'T'));
-    NbetPutBE32(blob, 2u);
+    NbetPutBE32(blob, 3u);
     NbetPutBE32(blob, static_cast<uint32_t>(x));
     NbetPutBE32(blob, static_cast<uint32_t>(y));
     NbetPutBE32(blob, static_cast<uint32_t>(w));
@@ -670,6 +921,9 @@ std::vector<unsigned char> CaptureNbetLayoutBlob()
     NbetPutBE32(blob, static_cast<uint32_t>(-1));
     NbetPutBE32(blob, 0u);
 #endif
+    NbetPutBE32(blob, static_cast<uint32_t>(m_volume_percent));
+    NbetPutBE32(blob, static_cast<uint32_t>(m_song_settings_tempo_percent));
+    NbetPutBE32(blob, static_cast<uint32_t>(m_reverb_type));
     NbetPutBE32(blob, ini_len);
     if (ini_len > 0 && ini)
     {
@@ -747,7 +1001,7 @@ void ApplyNbetLayoutBlob(const unsigned char *data, size_t size)
     const uint32_t magic = NbetReadBE32(data + 0);
     const uint32_t version = NbetReadBE32(data + 4);
     if (magic != static_cast<uint32_t>(FOUR_CHAR('n', 'B', 'e', 'T')) ||
-        (version != 1 && version != 2))
+        (version != 1 && version != 2 && version != 3))
     {
         return;
     }
@@ -765,7 +1019,7 @@ void ApplyNbetLayoutBlob(const unsigned char *data, size_t size)
         ini_len = NbetReadBE32(data + 28);
         ini_off = 32;
     }
-    else
+    else if (version == 2)
     {
         /* v2 fixed header is 64 bytes before ini payload. */
         if (size < 64)
@@ -783,13 +1037,42 @@ void ApplyNbetLayoutBlob(const unsigned char *data, size_t size)
         ini_len = NbetReadBE32(data + 60);
         ini_off = 64;
     }
+    else
+    {
+        /* v3: v2 fields + volume/tempo/reverb (76 bytes before ini). */
+        if (size < 76)
+        {
+            return;
+        }
+        m_nbet_restore_open_flags = NbetReadBE32(data + 28);
+        m_nbet_restore_ie_inst_id = NbetReadBE32(data + 32);
+        m_nbet_restore_ie_instrument_index = NbetReadBE32(data + 36);
+        m_nbet_restore_ie_bank = NbetReadBE32Signed(data + 40);
+        m_nbet_restore_ie_program = NbetReadBE32Signed(data + 44);
+        m_nbet_restore_ie_from_song = (NbetReadBE32(data + 48) != 0);
+        m_nbet_restore_se_sample_row = NbetReadBE32Signed(data + 52);
+        m_nbet_restore_se_is_song = (NbetReadBE32(data + 56) != 0);
+        m_volume_percent = static_cast<int>(NbetReadBE32(data + 60));
+        m_song_settings_tempo_percent = static_cast<int>(NbetReadBE32(data + 64));
+        m_reverb_type = static_cast<int>(NbetReadBE32(data + 68));
+        ini_len = NbetReadBE32(data + 72);
+        ini_off = 76;
+        ApplyPlayerMixSettings();
+    }
     if (ini_off + ini_len > size)
     {
         return;
     }
+    /* Player mix (v3) already applied; layout/editors are optional. */
+    if (m_pref_ignore_session_layout)
+    {
+        m_nbet_restore_open_flags = 0;
+        return;
+    }
     if (m_main_window && w > 100 && h > 80)
     {
-        SDL_SetWindowPosition(m_main_window, x, y);
+        /* Restore size (and maximize), but leave the window where it is unless
+         * the current placement is off-screen (e.g. removed monitor). */
         SDL_SetWindowSize(m_main_window, w, h);
         if (maximized)
         {
@@ -798,6 +1081,7 @@ void ApplyNbetLayoutBlob(const unsigned char *data, size_t size)
         else
         {
             SDL_RestoreWindow(m_main_window);
+            NbetEnsureMainWindowOnScreen(m_main_window, x, y, w, h);
         }
     }
     m_pending_imgui_ini.clear();
@@ -849,12 +1133,19 @@ bool LoadSessionBsnFromPath(const char *path)
         return false;
     }
 
+    /* Copy path first — callers may pass m_loaded_session_path.c_str(). */
+    const std::string path_owned(path);
+    path = path_owned.c_str();
+
     std::vector<SessionSongEntry> songs;
     int casd_count = 0;
     if (!ProbeBe2SessionBsn(path, &songs, &casd_count))
     {
         return false;
     }
+
+    /* Must release song/editors before UnloadBanks replaces the session token. */
+    TeardownForSessionReload();
 
     /* Thin sessions (blank.bsn) may have no playable bank body.
      * Full replace: session file must become the active bank token. */
@@ -863,9 +1154,10 @@ bool LoadSessionBsnFromPath(const char *path)
     {
         LoadBuiltinBankAsActive();
     }
+    /* Teardown deleted the audition song; recreate for IE / instrument keys. */
+    EnsureBankAuditionSong();
 
-    /* Optional NeoBAE editor layout (nBeT), unless Preferences ignore it. */
-    if (!m_pref_ignore_session_layout)
+    /* NeoBAE nBeT: player mix always restored; window/ini/editors respect prefs. */
     {
         std::vector<unsigned char> bytes;
         if (ReadEntireFileBytes(path, bytes))
@@ -888,25 +1180,16 @@ bool LoadSessionBsnFromPath(const char *path)
 
     m_session_songs = std::move(songs);
     m_session_casd_count = casd_count;
-    m_loaded_session_path = path;
+    m_loaded_session_path = path_owned;
     m_session_song_index = -1;
-    m_session_pcm_cache.clear();
-    m_app_compression_cache.clear();
     RememberRecentSession(path);
     HydrateSessionPcmCacheFromBankCasd();
 
-    if (m_document)
-    {
-        BAERmfEditorDocument_Delete(m_document);
-        m_document = nullptr;
-    }
-    m_song_row = SongRow{};
-    m_document_dirty = false;
-
     char status[256];
-    const char *kind = EndsWith(path, ".zsn") ? "Session .zsn" : "Session .bsn";
+    const char *kind = EndsWith(path_owned, ".zsn") ? "Session .zsn" : "Session .bsn";
     if (m_session_songs.empty())
     {
+        ApplyPlayerMixSettings();
         std::snprintf(status,
                       sizeof(status),
                       "Opened %s (%s, %d CaSd)",
@@ -918,6 +1201,7 @@ bool LoadSessionBsnFromPath(const char *path)
     }
 
     const bool ok = ActivateSessionSongAt(0);
+    ApplyPlayerMixSettings();
     std::snprintf(status,
                   sizeof(status),
                   "Opened %s: %zu song(s), %d CaSd%s",
@@ -939,9 +1223,19 @@ bool SaveSessionToPath(const char *path)
     RememberSessionPcmFromSampleEditor();
     (void)SyncSessionSongsFromDocument();
 
+    bool remapped = false;
+    const std::string enforced_path = EnforceSessionSavePath(path, &remapped);
+    path = enforced_path.c_str();
+
     uint32_t z_reason = 0;
     const bool want_zsn = SessionRequiresZsn(&z_reason);
     const int32_t resource_map_id = want_zsn ? XFILERESOURCE_ZMF_ID : XFILERESOURCE_ID;
+    if (remapped)
+    {
+        char reason_buf[256] = {0};
+        BAEZMFReasonCodeToString(z_reason, reason_buf, sizeof(reason_buf));
+        SetStatus(std::string("NeoBAE features require .zsn (") + reason_buf + "); remapping save path");
+    }
 
     XFILE out_file = XFileOpenVirtualResource(resource_map_id);
     if (!out_file)

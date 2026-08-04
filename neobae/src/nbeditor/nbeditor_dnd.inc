@@ -53,6 +53,13 @@
         {
             return false;
         }
+        /* Fresh / New Session state: built-in Bank 0/1 only, never edited.
+         * Token differs from a Session file's bank, but nothing user-owned is lost. */
+        if (m_loaded_bank_path.empty() && !m_bank01_touched && !Bank2PlusHasInstruments() &&
+            m_session_custom_snd_ids.empty() && m_session_custom_inst_ids.empty())
+        {
+            return false;
+        }
         return Bank01HasInstruments() || Bank2PlusHasInstruments() ||
                !m_session_custom_snd_ids.empty() || !m_session_custom_inst_ids.empty() ||
                m_bank01_touched;
@@ -717,6 +724,78 @@
         ImGui::EndPopup();
     }
 
+    /* Songs-tab / Player / Status drops: append songs; never File→Open session wipe for RMF. */
+    void HandleSongsTabDrop(const char *path)
+    {
+        if (!path || !path[0])
+        {
+            return;
+        }
+        std::string lower = ToLower(path);
+        std::string ext;
+        const size_t dot = lower.find_last_of('.');
+        if (dot != std::string::npos && dot + 1 < lower.size())
+        {
+            ext = lower.substr(dot + 1);
+        }
+
+        if (ext == "bsn" || ext == "zsn")
+        {
+            /* Session documents still open/replace via the normal confirm path. */
+            ImportPathIntoSession(path);
+            return;
+        }
+        if (IsBankExtension(ext) && !IsSongImportExtension(ext))
+        {
+            SetStatus("Drop bank files on the Instruments tab");
+            return;
+        }
+        if (IsAudioSampleExtension(ext) && !IsSongImportExtension(ext))
+        {
+            SetStatus("Drop audio samples on the Samples tab");
+            return;
+        }
+        if (IsModuleExtension(ext))
+        {
+#if defined(LIBXMP_STATIC) || defined(LIBXMP_CORE_PLAYER)
+            (void)CommitActiveSessionSong();
+            if (LoadModuleFromPath(path))
+            {
+                m_session_song_index = -1;
+                if (!SyncSessionSongsFromDocument())
+                {
+                    SetStatus("Module loaded but failed to add to Session song list");
+                }
+                else
+                {
+                    char status[256];
+                    std::snprintf(status,
+                                  sizeof(status),
+                                  "Added Session song %d/%zu (module)",
+                                  m_session_song_index + 1,
+                                  m_session_songs.size());
+                    SetStatus(status);
+                }
+            }
+#else
+            SetStatus("Tracker module support not enabled in this build");
+#endif
+            return;
+        }
+        if (ext == "mid" || ext == "midi" || ext == "kar" || ext == "rmi")
+        {
+            (void)ImportSongDocumentAsNewSessionEntry(path, "MIDI");
+            return;
+        }
+        if (ext == "rmf" || ext == "zmf")
+        {
+            /* Same chooser as File → Open / any non-Instruments/Samples drop. */
+            ImportPathIntoSession(path);
+            return;
+        }
+        SetStatus("Songs tab accepts MIDI / RMF / ZMF / modules / Session files");
+    }
+
     void HandleDroppedPathInternal(const char *path)
     {
         if (!path || !path[0])
@@ -731,23 +810,28 @@
             ext = lower.substr(dot + 1);
         }
 
-        switch (m_session_tab)
+        /* RMF/ZMF: Open as Session / Add / Cancel everywhere except Instruments & Samples. */
+        if ((ext == "rmf" || ext == "zmf") &&
+            m_dnd_hover_target != SessionDropTarget::Instruments &&
+            m_dnd_hover_target != SessionDropTarget::Samples)
         {
-        case SessionTab::Songs:
-            if (IsBankExtension(ext) && !ProbeBe2SessionBsn(path, nullptr, nullptr))
-            {
-                SetStatus("Drop bank files on the Instruments tab");
-                return;
-            }
-            if (IsAudioSampleExtension(ext) && !IsSongImportExtension(ext))
-            {
-                SetStatus("Drop audio samples on the Samples tab");
-                return;
-            }
             ImportPathIntoSession(path);
             return;
+        }
 
-        case SessionTab::Samples:
+        /* Route by hovered window/tab — not by whichever Session tab happens to be selected. */
+        switch (m_dnd_hover_target)
+        {
+        case SessionDropTarget::None:
+            SetStatus("Drop on Session tabs, Player, or Status");
+            return;
+
+        case SessionDropTarget::Songs:
+        case SessionDropTarget::FileOpen:
+            HandleSongsTabDrop(path);
+            return;
+
+        case SessionDropTarget::Samples:
             if (!IsAudioSampleExtension(ext))
             {
                 SetStatus("Samples tab accepts WAV/AIFF/MP3/OGG/FLAC/Opus");
@@ -756,7 +840,7 @@
             BeginAddSampleFromPath(path);
             return;
 
-        case SessionTab::Instruments:
+        case SessionDropTarget::Instruments:
             if (!IsBankExtension(ext) && ext != "hsb" && ext != "zsb")
             {
                 /* .bsn session-with-bank still OK as donor */

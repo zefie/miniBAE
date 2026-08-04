@@ -32,6 +32,17 @@
             {
                 OpenSaveSessionDialog();
             }
+            if (ImGui::MenuItem("Revert Session to Saved",
+                                nullptr,
+                                false,
+                                !m_loaded_session_path.empty()))
+            {
+                RequestRevertSessionConfirm();
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            {
+                ImGui::SetTooltip("Reload the session file from disk, discarding unsaved changes.");
+            }
             if (ImGui::MenuItem("Session Info..."))
             {
                 OpenSessionInfoDialog();
@@ -108,9 +119,31 @@
             {
                 if (m_bank_token && !m_loaded_bank_path.empty())
                 {
+                    bool remapped = false;
+                    const std::string out_path = EnforceBankSavePath(m_loaded_bank_path, &remapped);
                     const BAEResult r = BAERmfEditorBank_SaveToFile(
-                        m_bank_token, const_cast<char *>(m_loaded_bank_path.c_str()));
-                    SetStatus(r == BAE_NO_ERROR ? "Bank saved" : std::string("Bank save failed: ") + FormatBAEError(r));
+                        m_bank_token, const_cast<char *>(out_path.c_str()));
+                    if (r == BAE_NO_ERROR)
+                    {
+                        m_loaded_bank_path = out_path;
+                        m_loaded_bank_display_name = FileNameFromPath(out_path);
+                        if (remapped)
+                        {
+                            uint32_t reason = 0;
+                            (void)BankRequiresZsb(&reason);
+                            char reason_buf[256] = {0};
+                            BAEZMFReasonCodeToString(reason, reason_buf, sizeof(reason_buf));
+                            SetStatus(std::string("Bank saved as .zsb (") + reason_buf + ")");
+                        }
+                        else
+                        {
+                            SetStatus("Bank saved");
+                        }
+                    }
+                    else
+                    {
+                        SetStatus(std::string("Bank save failed: ") + FormatBAEError(r));
+                    }
                 }
             }
             if (ImGui::MenuItem("Save Bank As...", nullptr, false, m_bank_token != 0))
@@ -192,6 +225,14 @@
             }
             ImGui::EndMenu();
         }
+        if (ImGui::BeginMenu("Help"))
+        {
+            if (ImGui::MenuItem("About NeoBAE Studio..."))
+            {
+                OpenAboutDialog();
+            }
+            ImGui::EndMenu();
+        }
         ImGui::EndMainMenuBar();
     }
 
@@ -258,12 +299,9 @@
         {
             ext = lower.substr(dot + 1);
         }
-        /* Session / song-session / bank loads replace current session content. */
+        /* Session / bank loads replace current session content.
+         * RMF/ZMF use a dedicated Open-as-Session / Add-to-Session chooser. */
         if (ext == "bsn" || ext == "zsn")
-        {
-            return true;
-        }
-        if (ext == "rmf" || ext == "zmf")
         {
             return true;
         }
@@ -284,6 +322,17 @@
         m_request_quit = true;
     }
 
+    void RequestRevertSessionConfirm()
+    {
+        if (m_loaded_session_path.empty())
+        {
+            SetStatus("No saved session to revert");
+            return;
+        }
+        m_pending_replace_session_path = m_loaded_session_path;
+        m_confirm_replace_session_open = true;
+    }
+
     void DrawReplaceSessionConfirmDialog()
     {
         if (m_confirm_replace_session_open)
@@ -296,16 +345,28 @@
         {
             return;
         }
-        ImGui::TextWrapped(
-            "Opening this file will replace the current session and/or bank:\n%s",
-            m_pending_replace_session_path.c_str());
+        const bool is_revert =
+            !m_loaded_session_path.empty() &&
+            m_pending_replace_session_path == m_loaded_session_path;
+        if (is_revert)
+        {
+            ImGui::TextWrapped(
+                "Revert the current session to the last saved file on disk?\n%s",
+                m_pending_replace_session_path.c_str());
+        }
+        else
+        {
+            ImGui::TextWrapped(
+                "Opening this file will replace the current session and/or bank:\n%s",
+                m_pending_replace_session_path.c_str());
+        }
         ImGui::Spacing();
         if (SessionHasUnsavedChanges())
         {
             ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
                                "The current session has unsaved changes.");
         }
-        if (ActiveBankHasContentToOverwrite())
+        if (!is_revert && ActiveBankHasContentToOverwrite())
         {
             const bool session_doc =
                 EndsWith(m_pending_replace_session_path, ".bsn") ||
@@ -322,9 +383,12 @@
                     "Bank 0/1 will be replaced (Unload Bank style). Bank 2+ / custom samples are kept.");
             }
         }
-        ImGui::TextDisabled("MIDI/modules that only append to the session do not ask.");
+        if (!is_revert)
+        {
+            ImGui::TextDisabled("MIDI/modules that only append to the session do not ask.");
+        }
         ImGui::Separator();
-        if (ImGui::Button("Discard and Open", ImVec2(150.0f, 0.0f)))
+        if (ImGui::Button(is_revert ? "Discard and Revert" : "Discard and Open", ImVec2(160.0f, 0.0f)))
         {
             const std::string path = m_pending_replace_session_path;
             m_confirm_replace_session_open = false;
@@ -337,6 +401,59 @@
         {
             m_confirm_replace_session_open = false;
             m_pending_replace_session_path.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    void DrawRmfOpenChoiceDialog()
+    {
+        if (m_confirm_rmf_open_open)
+        {
+            ImGui::OpenPopup("Open RMF / ZMF");
+        }
+        if (!ImGui::BeginPopupModal("Open RMF / ZMF",
+                                    &m_confirm_rmf_open_open,
+                                    ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            return;
+        }
+        ImGui::TextWrapped("%s", m_pending_rmf_open_path.c_str());
+        ImGui::Spacing();
+        ImGui::TextWrapped(
+            "Open as Session replaces the current session (embeds become custom bank instruments).\n"
+            "Add to Session keeps the current session and appends this song.");
+        if (SessionHasUnsavedChanges())
+        {
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.2f, 1.0f),
+                               "The current session has unsaved changes.");
+        }
+        ImGui::Separator();
+        if (ImGui::Button("Open as Session", ImVec2(150.0f, 0.0f)))
+        {
+            const std::string path = m_pending_rmf_open_path;
+            m_confirm_rmf_open_open = false;
+            m_pending_rmf_open_path.clear();
+            ImGui::CloseCurrentPopup();
+            const char *stype = EndsWith(path, ".zmf") ? "ZMF" : "RMF";
+            (void)OpenRmfAsSession(path, stype);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Add to Session", ImVec2(140.0f, 0.0f)))
+        {
+            const std::string path = m_pending_rmf_open_path;
+            m_confirm_rmf_open_open = false;
+            m_pending_rmf_open_path.clear();
+            ImGui::CloseCurrentPopup();
+            const char *stype = EndsWith(path, ".zmf") ? "ZMF" : "RMF";
+            (void)ImportSongDocumentAsNewSessionEntry(path, stype);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(100.0f, 0.0f)))
+        {
+            m_confirm_rmf_open_open = false;
+            m_pending_rmf_open_path.clear();
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
@@ -652,25 +769,44 @@
         RefreshSongSamplesFromDocument();
         m_instrument_editor_open = false;
         m_song_info_open = false;
+        /* Player mix is session-scoped (nBeT); reset to defaults on new session. */
+        m_volume_percent = 100;
+        m_song_settings_tempo_percent = 100;
+        m_reverb_type = static_cast<int>(BAE_REVERB_TYPE_1);
+        ApplyPlayerMixSettings();
         SetStatus("New Session");
     }
 
     void ImportPathIntoSession(const std::string &selected_path, bool skip_replace_confirm = false)
     {
-        if (!skip_replace_confirm && PathWouldReplaceSession(selected_path) &&
-            (SessionHasUnsavedChanges() || ActiveBankHasContentToOverwrite()))
-        {
-            m_pending_replace_session_path = selected_path;
-            m_confirm_replace_session_open = true;
-            return;
-        }
-
         std::string lower = ToLower(selected_path);
         std::string ext;
         const size_t dot = lower.find_last_of('.');
         if (dot != std::string::npos && dot + 1 < lower.size())
         {
             ext = lower.substr(dot + 1);
+        }
+
+        /* RMF/ZMF File→Open: choose Open as Session vs Add to Session. */
+        if (ext == "rmf" || ext == "zmf")
+        {
+            if (!skip_replace_confirm)
+            {
+                m_pending_rmf_open_path = selected_path;
+                m_confirm_rmf_open_open = true;
+                return;
+            }
+            /* argv / "Open with": default to Open as Session. */
+            (void)OpenRmfAsSession(selected_path, ext == "zmf" ? "ZMF" : "RMF");
+            return;
+        }
+
+        if (!skip_replace_confirm && PathWouldReplaceSession(selected_path) &&
+            (SessionHasUnsavedChanges() || ActiveBankHasContentToOverwrite()))
+        {
+            m_pending_replace_session_path = selected_path;
+            m_confirm_replace_session_open = true;
+            return;
         }
 
         if (ext == "nbs")
@@ -732,14 +868,6 @@
             /* Keep Bank 2+/custom samples; LoadBankFromPath merges Bank 0/1. */
             ClearSessionSongState(false);
             LoadBankFromPath(selected_path.c_str(), true);
-            return;
-        }
-
-        /* RMF / ZMF — establish a session around the song (promote embeds, clear prior customs). */
-        if (EndsWith(selected_path, ".rmf") || EndsWith(selected_path, ".zmf"))
-        {
-            const char *stype = EndsWith(selected_path, ".zmf") ? "ZMF" : "RMF";
-            (void)OpenRmfAsSession(selected_path, stype);
             return;
         }
 
@@ -822,6 +950,11 @@
         BAESong_Preroll(song);
         BAESong_SetLoops(song, m_loop_enabled ? 32767 : 0);
         BAEMixer_SetOutputGain(m_mixer, m_volume_percent);
+        {
+            const float ratio =
+                static_cast<float>(std::max(1, m_song_settings_tempo_percent)) / 100.0f;
+            (void)BAESong_SetMasterTempo(song, FLOAT_TO_UNSIGNED_FIXED(ratio));
+        }
         BAESong_Start(song, 0);
         if (pause_after_start)
         {
@@ -1403,6 +1536,27 @@
             "Per instrument: Off (bank ref), Embed (INST+samples), or Ghost "
             "(INST only; samples resolve from the host bank). Usually embed "
             "only instruments you created yourself.");
+        {
+            uint32_t reason = 0;
+            bool needs_z = false;
+            if (m_document && BAERmfEditorDocument_RequiresZmf(m_document, &reason) != FALSE)
+            {
+                reason &= ~(uint32_t)BAEZMF_ALREADY_ZMF;
+                needs_z = (reason != 0);
+            }
+            if (!needs_z && BankRequiresZsb(&reason))
+            {
+                needs_z = true;
+            }
+            if (needs_z)
+            {
+                char reason_buf[256] = {0};
+                BAEZMFReasonCodeToString(reason, reason_buf, sizeof(reason_buf));
+                ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
+                                   "Export will use .zmf: %s",
+                                   reason_buf);
+            }
+        }
         ImGui::Spacing();
 
         const float side_w = 88.0f;
@@ -2781,28 +2935,56 @@
 
         if (ImGui::BeginTabBar("##SessionTabs"))
         {
-            if (ImGui::BeginTabItem("Songs"))
+            const ImGuiTabItemFlags songs_flags =
+                (m_pending_session_tab == static_cast<int>(SessionTab::Songs))
+                    ? ImGuiTabItemFlags_SetSelected
+                    : ImGuiTabItemFlags_None;
+            const ImGuiTabItemFlags instruments_flags =
+                (m_pending_session_tab == static_cast<int>(SessionTab::Instruments))
+                    ? ImGuiTabItemFlags_SetSelected
+                    : ImGuiTabItemFlags_None;
+            const ImGuiTabItemFlags samples_flags =
+                (m_pending_session_tab == static_cast<int>(SessionTab::Samples))
+                    ? ImGuiTabItemFlags_SetSelected
+                    : ImGuiTabItemFlags_None;
+            if (ImGui::BeginTabItem("Songs", nullptr, songs_flags))
             {
                 m_session_tab = SessionTab::Songs;
                 DrawSongsListWindow();
                 ImGui::TextDisabled("Drop MIDI / RMF / ZMF / Session files here");
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Instruments"))
+            if (ImGui::BeginTabItem("Instruments", nullptr, instruments_flags))
             {
                 m_session_tab = SessionTab::Instruments;
                 DrawInstrumentListWindow();
                 ImGui::TextDisabled("Drop bank (.hsb/.zsb/.bsn/.zsn) to replace Bank 0/1 — Bank 2+ kept");
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Samples"))
+            if (ImGui::BeginTabItem("Samples", nullptr, samples_flags))
             {
                 m_session_tab = SessionTab::Samples;
                 DrawSampleListWindow();
                 ImGui::TextDisabled("Drop WAV / AIFF / MP3 / OGG / FLAC / Opus / QOA here");
                 ImGui::EndTabItem();
             }
+            m_pending_session_tab = -1;
             ImGui::EndTabBar();
+        }
+        if (ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows))
+        {
+            switch (m_session_tab)
+            {
+            case SessionTab::Songs:
+                m_dnd_hover_target = SessionDropTarget::Songs;
+                break;
+            case SessionTab::Instruments:
+                m_dnd_hover_target = SessionDropTarget::Instruments;
+                break;
+            case SessionTab::Samples:
+                m_dnd_hover_target = SessionDropTarget::Samples;
+                break;
+            }
         }
         ImGui::End();
     }
@@ -3038,6 +3220,10 @@
         BAERmfEditorMidiStorageType storage = BAE_EDITOR_MIDI_STORAGE_ECMI;
         BAERmfEditorDocument_GetMidiStorageType(m_document, &storage);
         m_song_info_storage = static_cast<int>(storage);
+        int32_t engine_flags = 0;
+        (void)BAERmfEditorDocument_GetEngineConfig(m_document, &engine_flags);
+        m_song_info_classic_chorus = (engine_flags & SONG_CONFIG_CLASSIC_CHORUS_ON) != 0;
+        m_song_info_pan_fix = (engine_flags & SONG_CONFIG_PANFIX_ON) != 0;
         m_song_info_open = true;
     }
 
@@ -3065,6 +3251,23 @@
                                                  static_cast<int32_t>(m_song_info_loop_count));
         BAERmfEditorDocument_SetMidiStorageType(
             m_document, static_cast<BAERmfEditorMidiStorageType>(m_song_info_storage));
+
+        int32_t engine_flags = 0;
+        (void)BAERmfEditorDocument_GetEngineConfig(m_document, &engine_flags);
+        engine_flags &= ~(SONG_CONFIG_HAS_CLASSIC_CHORUS | SONG_CONFIG_CLASSIC_CHORUS_ON |
+                          SONG_CONFIG_HAS_PANFIX | SONG_CONFIG_PANFIX_ON);
+        if (m_song_info_classic_chorus)
+        {
+            engine_flags |= SONG_CONFIG_HAS_CLASSIC_CHORUS | SONG_CONFIG_CLASSIC_CHORUS_ON;
+        }
+        if (m_song_info_pan_fix)
+        {
+            engine_flags |= SONG_CONFIG_HAS_PANFIX | SONG_CONFIG_PANFIX_ON;
+        }
+        (void)BAERmfEditorDocument_SetEngineConfig(m_document, engine_flags);
+        (void)BAE_SetClassicChorus(m_song_info_classic_chorus ? TRUE : FALSE);
+        (void)BAE_SetSpanDCFix(m_song_info_pan_fix ? TRUE : FALSE);
+
         m_document_dirty = true;
         UpdateSongRowFromDocument(m_loaded_doc_path.empty() ? m_song_row.path : m_loaded_doc_path,
                                   m_song_row.source_type.c_str());
@@ -3099,6 +3302,21 @@
             ImGui::InputInt("Loop count", &m_song_info_loop_count);
             static const char *storage_labels[] = {"CMID", "ECMI", "EMID", "MIDI"};
             ImGui::Combo("MIDI storage", &m_song_info_storage, storage_labels, IM_ARRAYSIZE(storage_labels));
+            ImGui::SeparatorText("Engine (requires ZMF)");
+            ImGui::Checkbox("Classic Chorus order", &m_song_info_classic_chorus);
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+            {
+                ImGui::SetTooltip("Per-song classic chorus ordering. Forces ZMF on export.");
+            }
+            ImGui::Checkbox("Stereo Pan LFO DC Fix", &m_song_info_pan_fix);
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+            {
+                ImGui::SetTooltip("Per-song STEREO_PAN LFO DC fix. Forces ZMF on export.");
+            }
+            if (m_song_info_classic_chorus || m_song_info_pan_fix)
+            {
+                ImGui::TextDisabled("Enabled options require .zmf / .zsn export.");
+            }
             if (ImGui::Button("Apply"))
             {
                 ApplySongInfoFieldsToDocument();
@@ -3197,21 +3415,42 @@
         return IM_COL32(98, 215, 255, 255);
     }
 
+    static int32_t AdsrCycleStageFlags(int32_t flags)
+    {
+        static const int32_t kCycle[] = {
+            static_cast<int32_t>(FOUR_CHAR('L', 'I', 'N', 'E')),
+            static_cast<int32_t>(FOUR_CHAR('S', 'U', 'S', 'T')),
+            static_cast<int32_t>(FOUR_CHAR('R', 'E', 'L', 'S')),
+            static_cast<int32_t>(FOUR_CHAR('L', 'A', 'S', 'T')),
+            0,
+        };
+        for (size_t i = 0; i < sizeof(kCycle) / sizeof(kCycle[0]); ++i)
+        {
+            if (flags == kCycle[i])
+            {
+                return kCycle[(i + 1) % (sizeof(kCycle) / sizeof(kCycle[0]))];
+            }
+        }
+        return kCycle[0];
+    }
+
     void DrawAdsrEnvelopeGraph(BAERmfEditorADSRInfo &adsr,
                                const char *id,
-                               float height = 110.0f,
+                               float height = 140.0f,
                                bool editable = false)
     {
         ImGui::PushID(id);
         const ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
         const float width = ImGui::GetContentRegionAvail().x;
-        ImGui::InvisibleButton("##adsr_canvas", ImVec2(width, height));
+        ImGui::InvisibleButton("##adsr_canvas",
+                               ImVec2(width, height),
+                               ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
         const bool hovered = ImGui::IsItemHovered();
         const bool active = ImGui::IsItemActive();
         ImDrawList *dl = ImGui::GetWindowDrawList();
         const ImVec2 p0 = canvas_pos;
         const ImVec2 p1(canvas_pos.x + width, canvas_pos.y + height);
-        dl->AddRectFilled(p0, p1, IM_COL32(22, 22, 22, 255));
+        dl->AddRectFilled(p0, p1, IM_COL32(18, 20, 24, 255));
         dl->AddRect(p0, p1, IM_COL32(70, 70, 70, 255));
 
         const int stages = static_cast<int>(adsr.stageCount);
@@ -3219,7 +3458,7 @@
         {
             dl->AddText(ImVec2(p0.x + 8.0f, p0.y + height * 0.5f - 6.0f),
                         IM_COL32(120, 120, 120, 255),
-                        editable ? "No ADSR stages — raise Stage count below" : "No ADSR stages");
+                        editable ? "No ADSR stages — use Add Stage" : "No ADSR stages");
             ImGui::PopID();
             return;
         }
@@ -3227,8 +3466,8 @@
         const float margin = 6.0f;
         const float graph_l = p0.x + margin + 28.0f;
         const float graph_r = p1.x - margin;
-        const float graph_t = p0.y + margin;
-        const float graph_b = p1.y - margin - 14.0f;
+        const float graph_t = p0.y + margin + 4.0f;
+        const float graph_b = p1.y - margin - 16.0f;
         const float graph_w = graph_r - graph_l;
         const float graph_h = graph_b - graph_t;
         if (graph_w < 10.0f || graph_h < 10.0f)
@@ -3246,14 +3485,12 @@
             max_level = std::max(max_level, adsr.stages[i].level);
             total_time += std::llabs(static_cast<int64_t>(adsr.stages[i].time));
         }
-        /* Fixed 0..1000 display range for typical Beatnik volume units; expand if needed. */
         min_level = std::min(min_level, 0);
         max_level = std::max(max_level, 1000);
         if (max_level <= min_level)
         {
             max_level = min_level + 1;
         }
-        /* Equal visual slices when all times are 0 so handles stay usable without inventing times. */
         const bool equal_time_layout = (total_time <= 0);
         const int64_t layout_time = equal_time_layout ? static_cast<int64_t>(stages) : total_time;
 
@@ -3261,11 +3498,6 @@
             const double norm =
                 static_cast<double>(level - min_level) / static_cast<double>(max_level - min_level);
             return graph_b - static_cast<float>(norm * graph_h);
-        };
-        auto y_to_level = [&](float y) -> int32_t {
-            const float clamped = std::clamp(y, graph_t, graph_b);
-            const double norm = static_cast<double>(graph_b - clamped) / static_cast<double>(graph_h);
-            return static_cast<int32_t>(std::lround(min_level + norm * (max_level - min_level)));
         };
 
         dl->AddLine(ImVec2(graph_l, graph_t), ImVec2(graph_l, graph_b), IM_COL32(50, 50, 50, 255));
@@ -3283,10 +3515,17 @@
             dl->AddText(ImVec2(p0.x + margin, graph_b - 8.0f), IM_COL32(140, 140, 140, 255), lo);
         }
 
+        enum class AdsrDragKind : int
+        {
+            None = 0,
+            Level,
+            TimeEdge,
+        };
         struct StageGeom
         {
-            float x1, x2, y2;
-            int64_t time;
+            float x1 = 0.0f;
+            float x2 = 0.0f;
+            float y2 = 0.0f;
         };
         std::vector<StageGeom> geoms(static_cast<size_t>(stages));
         int32_t prev_level = 0;
@@ -3302,31 +3541,61 @@
                                           static_cast<double>(cumulative + stage_time) / layout_time * graph_w);
             const float y1 = level_to_y(prev_level);
             const float y2 = level_to_y(adsr.stages[i].level);
-            geoms[static_cast<size_t>(i)] = {x1, x2, y2, std::llabs(static_cast<int64_t>(adsr.stages[i].time))};
+            geoms[static_cast<size_t>(i)] = {x1, x2, y2};
             const ImU32 colour = AdsrStageFlagColor(adsr.stages[i].flags);
+            const bool selected = (editable && m_ie_adsr_selected_stage == i &&
+                                   m_ie_adsr_selected_owner == ImGui::GetID("adsr_select"));
             const ImU32 band = IM_COL32((colour >> IM_COL32_R_SHIFT) & 0xFF,
                                        (colour >> IM_COL32_G_SHIFT) & 0xFF,
                                        (colour >> IM_COL32_B_SHIFT) & 0xFF,
-                                       40);
+                                       selected ? 70 : 36);
             dl->AddRectFilled(ImVec2(x1, graph_t), ImVec2(std::max(x1 + 1.0f, x2), graph_b), band);
-            if (adsr.stages[i].flags == static_cast<int32_t>(FOUR_CHAR('S', 'U', 'S', 'T')) ||
-                adsr.stages[i].flags == 0)
+            if (selected)
+            {
+                dl->AddRect(ImVec2(x1, graph_t),
+                            ImVec2(std::max(x1 + 1.0f, x2), graph_b),
+                            IM_COL32(255, 255, 255, 90));
+            }
+            const bool is_hold = adsr.stages[i].flags == static_cast<int32_t>(FOUR_CHAR('S', 'U', 'S', 'T')) ||
+                                 adsr.stages[i].flags == 0;
+            if (is_hold)
             {
                 const float y_hold = level_to_y(adsr.stages[i].level);
                 dl->AddLine(ImVec2(x1, y1), ImVec2(x1, y_hold), colour, 2.0f);
-                dl->AddLine(ImVec2(x1, y_hold), ImVec2(x2, y_hold), colour, 2.0f);
+                dl->AddLine(ImVec2(x1, y_hold), ImVec2(x2, y_hold), colour, 2.5f);
             }
             else
             {
-                dl->AddLine(ImVec2(x1, y1), ImVec2(x2, y2), colour, 2.0f);
+                dl->AddLine(ImVec2(x1, y1), ImVec2(x2, y2), colour, 2.5f);
             }
+            /* Type badge on the segment */
             const char *label = AdsrStageFlagName(adsr.stages[i].flags);
-            const float label_x = (x1 + x2) * 0.5f - 10.0f;
-            dl->AddText(ImVec2(std::max(graph_l, label_x), graph_b + 1.0f), colour, label);
+            const ImVec2 text_size = ImGui::CalcTextSize(label);
+            const float badge_x = std::max(x1 + 2.0f, (x1 + x2) * 0.5f - text_size.x * 0.5f);
+            const float badge_y = graph_t + 3.0f;
+            dl->AddRectFilled(ImVec2(badge_x - 3.0f, badge_y - 1.0f),
+                              ImVec2(badge_x + text_size.x + 3.0f, badge_y + text_size.y + 1.0f),
+                              IM_COL32(0, 0, 0, 160),
+                              3.0f);
+            dl->AddText(ImVec2(badge_x, badge_y), colour, label);
+            {
+                char idx_label[8];
+                std::snprintf(idx_label, sizeof(idx_label), "%d", i);
+                dl->AddText(ImVec2(std::max(graph_l, (x1 + x2) * 0.5f - 4.0f), graph_b + 1.0f),
+                            IM_COL32(130, 130, 130, 255),
+                            idx_label);
+            }
             if (editable)
             {
-                dl->AddCircleFilled(ImVec2(x2, y2), 5.0f, colour);
-                dl->AddCircle(ImVec2(x2, y2), 5.0f, IM_COL32(255, 255, 255, 180));
+                /* Level handle (corner) */
+                dl->AddCircleFilled(ImVec2(x2, y2), 6.5f, colour);
+                dl->AddCircle(ImVec2(x2, y2), 6.5f, IM_COL32(255, 255, 255, 200), 0, 1.5f);
+                /* Time-edge handle (right edge mid) */
+                const float edge_y = (graph_t + graph_b) * 0.5f;
+                dl->AddRectFilled(ImVec2(x2 - 3.0f, edge_y - 10.0f),
+                                  ImVec2(x2 + 3.0f, edge_y + 10.0f),
+                                  IM_COL32(220, 220, 220, 180),
+                                  2.0f);
             }
             cumulative += stage_time;
             prev_level = adsr.stages[i].level;
@@ -3336,69 +3605,218 @@
         {
             static int s_drag_stage = -1;
             static ImGuiID s_drag_owner = 0;
+            static AdsrDragKind s_drag_kind = AdsrDragKind::None;
             static float s_drag_start_x = 0.0f;
             static float s_drag_start_y = 0.0f;
             static int32_t s_drag_start_level = 0;
             static int32_t s_drag_start_time = 0;
-            static bool s_drag_time_armed = false;
+            static bool s_drag_mutated = false;
             const ImGuiID owner = ImGui::GetID("adsr_drag");
+            const ImGuiID select_owner = ImGui::GetID("adsr_select");
             const ImVec2 mouse = ImGui::GetIO().MousePos;
-            if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+
+            auto hit_level_handle = [&](int i) -> bool {
+                const float dx = mouse.x - geoms[static_cast<size_t>(i)].x2;
+                const float dy = mouse.y - geoms[static_cast<size_t>(i)].y2;
+                return (dx * dx + dy * dy) <= 11.0f * 11.0f;
+            };
+            auto hit_time_edge = [&](int i) -> bool {
+                const float x2 = geoms[static_cast<size_t>(i)].x2;
+                const float edge_y = (graph_t + graph_b) * 0.5f;
+                return std::fabs(mouse.x - x2) <= 6.0f &&
+                       mouse.y >= edge_y - 14.0f && mouse.y <= edge_y + 14.0f;
+            };
+            auto hit_band = [&](int i) -> bool {
+                const StageGeom &g = geoms[static_cast<size_t>(i)];
+                return mouse.x >= g.x1 && mouse.x <= g.x2 && mouse.y >= graph_t && mouse.y <= graph_b;
+            };
+
+            if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
             {
                 for (int i = stages - 1; i >= 0; --i)
                 {
-                    const float dx = mouse.x - geoms[static_cast<size_t>(i)].x2;
-                    const float dy = mouse.y - geoms[static_cast<size_t>(i)].y2;
-                    if ((dx * dx + dy * dy) <= 10.0f * 10.0f)
+                    if (hit_band(i))
                     {
-                        s_drag_stage = i;
-                        s_drag_owner = owner;
-                        s_drag_start_x = mouse.x;
-                        s_drag_start_y = mouse.y;
-                        s_drag_start_level = adsr.stages[i].level;
-                        s_drag_start_time = adsr.stages[i].time;
-                        s_drag_time_armed = false;
+                        m_ie_adsr_selected_stage = i;
+                        m_ie_adsr_selected_owner = select_owner;
+                        MarkInstrumentEditorDirty(false);
+                        adsr.stages[i].flags = AdsrCycleStageFlags(adsr.stages[i].flags);
+                        LivePatchInstrumentEditor();
                         break;
                     }
                 }
             }
+            else if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+            {
+                int hit = -1;
+                AdsrDragKind kind = AdsrDragKind::None;
+                for (int i = stages - 1; i >= 0; --i)
+                {
+                    if (hit_level_handle(i))
+                    {
+                        hit = i;
+                        kind = AdsrDragKind::Level;
+                        break;
+                    }
+                    if (hit_time_edge(i))
+                    {
+                        hit = i;
+                        kind = AdsrDragKind::TimeEdge;
+                        break;
+                    }
+                }
+                if (hit < 0)
+                {
+                    for (int i = stages - 1; i >= 0; --i)
+                    {
+                        if (hit_band(i))
+                        {
+                            hit = i;
+                            kind = AdsrDragKind::Level; /* band drag also adjusts level */
+                            break;
+                        }
+                    }
+                }
+                if (hit >= 0)
+                {
+                    m_ie_adsr_selected_stage = hit;
+                    m_ie_adsr_selected_owner = select_owner;
+                    s_drag_stage = hit;
+                    s_drag_owner = owner;
+                    s_drag_kind = kind;
+                    s_drag_start_x = mouse.x;
+                    s_drag_start_y = mouse.y;
+                    s_drag_start_level = adsr.stages[hit].level;
+                    s_drag_start_time = adsr.stages[hit].time;
+                    s_drag_mutated = false;
+                }
+            }
+
+            if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+            {
+                for (int i = stages - 1; i >= 0; --i)
+                {
+                    if (hit_band(i) || hit_level_handle(i))
+                    {
+                        m_ie_adsr_selected_stage = i;
+                        m_ie_adsr_selected_owner = select_owner;
+                        ImGui::OpenPopup("##adsr_stage_type");
+                        break;
+                    }
+                }
+            }
+
+            if (ImGui::BeginPopup("##adsr_stage_type"))
+            {
+                static const struct
+                {
+                    int32_t flags;
+                    const char *label;
+                } kPopupTypes[] = {
+                    {static_cast<int32_t>(FOUR_CHAR('L', 'I', 'N', 'E')), "LINE"},
+                    {static_cast<int32_t>(FOUR_CHAR('S', 'U', 'S', 'T')), "SUST"},
+                    {static_cast<int32_t>(FOUR_CHAR('R', 'E', 'L', 'S')), "RELS"},
+                    {static_cast<int32_t>(FOUR_CHAR('L', 'A', 'S', 'T')), "LAST"},
+                    {0, "OFF"},
+                    {static_cast<int32_t>(FOUR_CHAR('G', 'O', 'T', 'O')), "GOTO"},
+                    {static_cast<int32_t>(FOUR_CHAR('G', 'O', 'S', 'T')), "GOTO_COND"},
+                };
+                if (m_ie_adsr_selected_stage >= 0 && m_ie_adsr_selected_stage < stages &&
+                    m_ie_adsr_selected_owner == select_owner)
+                {
+                    const int si = m_ie_adsr_selected_stage;
+                    ImGui::Text("Stage %d type", si);
+                    ImGui::Separator();
+                    for (const auto &choice : kPopupTypes)
+                    {
+                        const bool selected = (adsr.stages[si].flags == choice.flags);
+                        if (ImGui::MenuItem(choice.label, nullptr, selected))
+                        {
+                            MarkInstrumentEditorDirty(false);
+                            adsr.stages[si].flags = choice.flags;
+                            LivePatchInstrumentEditor();
+                        }
+                    }
+                }
+                ImGui::EndPopup();
+            }
+
             if (s_drag_owner == owner && s_drag_stage >= 0 && s_drag_stage < stages &&
                 (active || ImGui::IsMouseDown(ImGuiMouseButton_Left)))
             {
                 const int i = s_drag_stage;
-                /* Delta-based level edits avoid instantly rewriting defaults on click. */
-                const float level_span = static_cast<float>(max_level - min_level);
-                const float dy = mouse.y - s_drag_start_y;
-                const int32_t level_delta = static_cast<int32_t>(
-                    std::lround((-dy / std::max(1.0f, graph_h)) * level_span));
-                adsr.stages[i].level = s_drag_start_level + level_delta;
-
-                const float dx = mouse.x - s_drag_start_x;
-                if (std::fabs(dx) >= 8.0f)
+                bool changed = false;
+                if (s_drag_kind == AdsrDragKind::Level || s_drag_kind == AdsrDragKind::None)
                 {
-                    s_drag_time_armed = true;
+                    const float level_span = static_cast<float>(max_level - min_level);
+                    const float dy = mouse.y - s_drag_start_y;
+                    const int32_t level_delta = static_cast<int32_t>(
+                        std::lround((-dy / std::max(1.0f, graph_h)) * level_span));
+                    const int32_t new_level = s_drag_start_level + level_delta;
+                    if (new_level != adsr.stages[i].level)
+                    {
+                        adsr.stages[i].level = new_level;
+                        changed = true;
+                    }
                 }
-                if (s_drag_time_armed && graph_w > 1.0f)
+                if (s_drag_kind == AdsrDragKind::TimeEdge ||
+                    (s_drag_kind == AdsrDragKind::Level && std::fabs(mouse.x - s_drag_start_x) >= 8.0f))
                 {
-                    /* Horizontal drag adjusts time by delta; 0-time sustains stay 0 until armed. */
-                    const int64_t time_ref =
-                        std::max<int64_t>(100000, total_time > 0 ? total_time : 100000);
-                    const int64_t time_delta = static_cast<int64_t>(
-                        std::llround((dx / graph_w) * static_cast<double>(time_ref)));
-                    const int64_t new_time =
-                        std::max<int64_t>(0, static_cast<int64_t>(s_drag_start_time) + time_delta);
-                    adsr.stages[i].time = static_cast<int32_t>(
-                        std::min<int64_t>(new_time, static_cast<int64_t>(2147483647)));
+                    const float dx = mouse.x - s_drag_start_x;
+                    if (graph_w > 1.0f)
+                    {
+                        const int64_t time_ref =
+                            std::max<int64_t>(100000, total_time > 0 ? total_time : 100000);
+                        const int64_t time_delta = static_cast<int64_t>(
+                            std::llround((dx / graph_w) * static_cast<double>(time_ref)));
+                        const int64_t new_time =
+                            std::max<int64_t>(0, static_cast<int64_t>(s_drag_start_time) + time_delta);
+                        const int32_t clamped = static_cast<int32_t>(
+                            std::min<int64_t>(new_time, static_cast<int64_t>(2147483647)));
+                        if (clamped != adsr.stages[i].time)
+                        {
+                            adsr.stages[i].time = clamped;
+                            changed = true;
+                        }
+                    }
                 }
-                MarkInstrumentEditorDirty();
+                if (changed)
+                {
+                    if (!s_drag_mutated)
+                    {
+                        InstrumentEditorPushUndoFromPreEdit();
+                        s_drag_mutated = true;
+                    }
+                    m_ie_dirty = true;
+                }
             }
             if (ImGui::IsMouseReleased(ImGuiMouseButton_Left) && s_drag_owner == owner)
             {
+                if (s_drag_mutated)
+                {
+                    LivePatchInstrumentEditor();
+                }
                 s_drag_stage = -1;
                 s_drag_owner = 0;
-                s_drag_time_armed = false;
+                s_drag_kind = AdsrDragKind::None;
+                s_drag_mutated = false;
             }
-            ImGui::TextDisabled("Drag handles: vertical = level; drag sideways (8px+) = stage time");
+
+            if (m_ie_adsr_selected_stage >= 0 && m_ie_adsr_selected_stage < stages &&
+                m_ie_adsr_selected_owner == select_owner)
+            {
+                const int si = m_ie_adsr_selected_stage;
+                ImGui::Text("Stage %d  %s  level=%d  time=%d µs",
+                            si,
+                            AdsrStageFlagName(adsr.stages[si].flags),
+                            adsr.stages[si].level,
+                            adsr.stages[si].time);
+            }
+            else
+            {
+                ImGui::TextDisabled(
+                    "Drag corner = level · edge bar = time · click band = select · double-click / right-click = type");
+            }
         }
         ImGui::PopID();
     }
@@ -3491,7 +3909,7 @@
     void DrawAdsrStageEditor(BAERmfEditorADSRInfo &adsr, const char *id)
     {
         ImGui::PushID(id);
-        DrawAdsrEnvelopeGraph(adsr, "graph", 120.0f, true);
+        DrawAdsrEnvelopeGraph(adsr, "graph", 160.0f, true);
         int stages = static_cast<int>(adsr.stageCount);
         auto init_stage = [&](int index) {
             if (index < 0 || index >= BAE_EDITOR_MAX_ADSR_STAGES)
@@ -3506,23 +3924,26 @@
         };
         if (ImGui::Button("Add Stage") && stages < BAE_EDITOR_MAX_ADSR_STAGES)
         {
+            MarkInstrumentEditorDirty(false);
             init_stage(stages);
             adsr.stageCount = static_cast<uint32_t>(stages + 1);
             stages = static_cast<int>(adsr.stageCount);
-            MarkInstrumentEditorDirty();
+            LivePatchInstrumentEditor();
         }
         ImGui::SameLine();
         if (ImGui::Button("Remove Last") && stages > 0)
         {
+            MarkInstrumentEditorDirty(false);
             adsr.stageCount = static_cast<uint32_t>(stages - 1);
             stages = static_cast<int>(adsr.stageCount);
-            MarkInstrumentEditorDirty();
+            LivePatchInstrumentEditor();
         }
         ImGui::SameLine();
         ImGui::SetNextItemWidth(100.0f);
         if (ImGui::InputInt("##stage_count", &stages))
         {
             stages = std::clamp(stages, 0, BAE_EDITOR_MAX_ADSR_STAGES);
+            MarkInstrumentEditorDirty(false);
             if (stages > static_cast<int>(adsr.stageCount))
             {
                 for (int i = static_cast<int>(adsr.stageCount); i < stages; ++i)
@@ -3531,10 +3952,11 @@
                 }
             }
             adsr.stageCount = static_cast<uint32_t>(stages);
-            MarkInstrumentEditorDirty();
+            LivePatchInstrumentEditor();
         }
         ImGui::SameLine();
         ImGui::TextDisabled("stages");
+
         static const struct
         {
             int32_t flags;
@@ -3545,7 +3967,6 @@
             {static_cast<int32_t>(FOUR_CHAR('S', 'U', 'S', 'T')), "SUST"},
             {static_cast<int32_t>(FOUR_CHAR('R', 'E', 'L', 'S')), "RELS"},
             {static_cast<int32_t>(FOUR_CHAR('L', 'A', 'S', 'T')), "LAST"},
-            /* NeoBAE / Beatnik engine extensions (not exposed in classic BE2 UI). */
             {static_cast<int32_t>(FOUR_CHAR('G', 'O', 'T', 'O')), "GOTO"},
             {static_cast<int32_t>(FOUR_CHAR('G', 'O', 'S', 'T')), "GOTO_COND"},
         };
@@ -3553,90 +3974,104 @@
             return flags == static_cast<int32_t>(FOUR_CHAR('G', 'O', 'T', 'O')) ||
                    flags == static_cast<int32_t>(FOUR_CHAR('G', 'O', 'S', 'T'));
         };
-        if (ImGui::BeginTable("adsr", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
+
+        if (ImGui::CollapsingHeader("Advanced stage table"))
         {
-            ImGui::TableSetupColumn("Level / Target");
-            ImGui::TableSetupColumn("Time (µs)");
-            ImGui::TableSetupColumn("Type");
-            ImGui::TableSetupColumn("#");
-            ImGui::TableSetupColumn("##del", ImGuiTableColumnFlags_WidthFixed, 56.0f);
-            ImGui::TableHeadersRow();
-            for (int i = 0; i < stages; ++i)
+            if (ImGui::BeginTable("adsr", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
             {
-                ImGui::TableNextRow();
-                ImGui::PushID(i);
-                ImGui::TableSetColumnIndex(0);
-                if (is_goto_stage(adsr.stages[i].flags))
+                ImGui::TableSetupColumn("Level / Target");
+                ImGui::TableSetupColumn("Time (µs)");
+                ImGui::TableSetupColumn("Type");
+                ImGui::TableSetupColumn("#");
+                ImGui::TableSetupColumn("##del", ImGuiTableColumnFlags_WidthFixed, 56.0f);
+                ImGui::TableHeadersRow();
+                for (int i = 0; i < stages; ++i)
                 {
-                    /* Engine: ADSRLevel is 1-based stage index for GOTO / GOTO_COND. */
-                    int target = adsr.stages[i].level;
-                    if (target < 1)
+                    ImGui::TableNextRow();
+                    ImGui::PushID(i);
+                    ImGui::TableSetColumnIndex(0);
+                    if (is_goto_stage(adsr.stages[i].flags))
                     {
-                        target = 1;
-                    }
-                    if (ImGui::InputInt("##goto_tgt", &target))
-                    {
-                        target = std::clamp(target, 1, std::max(1, stages));
-                        adsr.stages[i].level = target;
-                        MarkInstrumentEditorDirty();
-                    }
-                }
-                else if (ImGui::InputInt("##lvl", &adsr.stages[i].level))
-                {
-                    MarkInstrumentEditorDirty();
-                }
-                ImGui::TableSetColumnIndex(1);
-                if (ImGui::InputInt("##tm", &adsr.stages[i].time))
-                {
-                    MarkInstrumentEditorDirty();
-                }
-                ImGui::TableSetColumnIndex(2);
-                const char *preview = AdsrStageFlagName(adsr.stages[i].flags);
-                if (ImGui::BeginCombo("##fl", preview))
-                {
-                    for (const auto &choice : kFlagChoices)
-                    {
-                        const bool selected = (adsr.stages[i].flags == choice.flags);
-                        if (ImGui::Selectable(choice.label, selected))
+                        int target = adsr.stages[i].level;
+                        if (target < 1)
                         {
-                            const bool became_goto = is_goto_stage(choice.flags);
-                            const bool was_goto = is_goto_stage(adsr.stages[i].flags);
-                            adsr.stages[i].flags = choice.flags;
-                            if (became_goto && !was_goto)
+                            target = 1;
+                        }
+                        if (ImGui::InputInt("##goto_tgt", &target))
+                        {
+                            MarkInstrumentEditorDirty(false);
+                            target = std::clamp(target, 1, std::max(1, stages));
+                            adsr.stages[i].level = target;
+                            LivePatchInstrumentEditor();
+                        }
+                    }
+                    else
+                    {
+                        int level = adsr.stages[i].level;
+                        if (ImGui::InputInt("##lvl", &level))
+                        {
+                            MarkInstrumentEditorDirty(false);
+                            adsr.stages[i].level = level;
+                            LivePatchInstrumentEditor();
+                        }
+                    }
+                    ImGui::TableSetColumnIndex(1);
+                    int time = adsr.stages[i].time;
+                    if (ImGui::InputInt("##tm", &time))
+                    {
+                        MarkInstrumentEditorDirty(false);
+                        adsr.stages[i].time = time;
+                        LivePatchInstrumentEditor();
+                    }
+                    ImGui::TableSetColumnIndex(2);
+                    const char *preview = AdsrStageFlagName(adsr.stages[i].flags);
+                    if (ImGui::BeginCombo("##fl", preview))
+                    {
+                        for (const auto &choice : kFlagChoices)
+                        {
+                            const bool selected = (adsr.stages[i].flags == choice.flags);
+                            if (ImGui::Selectable(choice.label, selected))
                             {
-                                /* Sensible default: jump to first stage. */
-                                if (adsr.stages[i].level < 1 || adsr.stages[i].level > stages)
+                                MarkInstrumentEditorDirty(false);
+                                const bool became_goto = is_goto_stage(choice.flags);
+                                const bool was_goto = is_goto_stage(adsr.stages[i].flags);
+                                adsr.stages[i].flags = choice.flags;
+                                if (became_goto && !was_goto)
                                 {
-                                    adsr.stages[i].level = 1;
+                                    if (adsr.stages[i].level < 1 || adsr.stages[i].level > stages)
+                                    {
+                                        adsr.stages[i].level = 1;
+                                    }
                                 }
+                                LivePatchInstrumentEditor();
                             }
-                            MarkInstrumentEditorDirty();
+                            if (selected)
+                            {
+                                ImGui::SetItemDefaultFocus();
+                            }
                         }
-                        if (selected)
-                        {
-                            ImGui::SetItemDefaultFocus();
-                        }
+                        ImGui::EndCombo();
                     }
-                    ImGui::EndCombo();
-                }
-                ImGui::TableSetColumnIndex(3);
-                ImGui::Text("%d", i);
-                ImGui::TableSetColumnIndex(4);
-                if (ImGui::SmallButton("Del"))
-                {
-                    for (int j = i; j < stages - 1; ++j)
+                    ImGui::TableSetColumnIndex(3);
+                    ImGui::Text("%d", i);
+                    ImGui::TableSetColumnIndex(4);
+                    if (ImGui::SmallButton("Del"))
                     {
-                        adsr.stages[j] = adsr.stages[j + 1];
+                        MarkInstrumentEditorDirty(false);
+                        for (int j = i; j < stages - 1; ++j)
+                        {
+                            adsr.stages[j] = adsr.stages[j + 1];
+                        }
+                        adsr.stageCount = static_cast<uint32_t>(stages - 1);
+                        stages = static_cast<int>(adsr.stageCount);
+                        LivePatchInstrumentEditor();
+                        ImGui::PopID();
+                        break;
                     }
-                    adsr.stageCount = static_cast<uint32_t>(stages - 1);
-                    stages = static_cast<int>(adsr.stageCount);
-                    MarkInstrumentEditorDirty();
                     ImGui::PopID();
-                    break;
                 }
-                ImGui::PopID();
+                ImGui::EndTable();
             }
-            ImGui::EndTable();
         }
         ImGui::PopID();
     }
@@ -3747,6 +4182,13 @@
         m_ie_dirty = false;
         m_ie_page = 0;
         m_ie_selected_split = -1;
+        m_ie_ext_pristine = m_ie_ext;
+        m_ie_ext_pre_edit = m_ie_ext;
+        m_ie_undo.clear();
+        m_ie_redo.clear();
+        m_ie_undo_pushed_for_gesture = false;
+        m_ie_adsr_selected_stage = -1;
+        m_ie_adsr_selected_owner = 0;
         m_instrument_editor_open = true;
         LivePatchInstrumentEditor();
         SetStatus(std::string("Editing instrument ") + inst.name);
@@ -3766,22 +4208,113 @@
 
     void LivePatchInstrumentEditor()
     {
+        EnsureBankAuditionSong();
         BAESong audition = GetAuditionSong();
-        const uint32_t patch_id = InstrumentEditorPatchId();
-        if (!audition || patch_id == 0)
+        if (!audition)
         {
             return;
         }
+        /* Inst ID 0 is valid (bank 0 program 0). */
+        const uint32_t patch_id = InstrumentEditorPatchId();
         (void)BAESong_LoadInstrument(audition, static_cast<BAE_INSTRUMENT>(patch_id));
         (void)BAESong_PatchLoadedInstrumentExtInfo(audition,
                                                    static_cast<BAE_INSTRUMENT>(patch_id),
                                                    &m_ie_ext);
     }
 
-    void MarkInstrumentEditorDirty()
+    void InstrumentEditorRefreshPreEditSnapshot()
     {
+        if (!ImGui::IsAnyItemActive())
+        {
+            m_ie_ext_pre_edit = m_ie_ext;
+            m_ie_undo_pushed_for_gesture = false;
+        }
+    }
+
+    void InstrumentEditorPushUndoFromPreEdit()
+    {
+        if (m_ie_undo_pushed_for_gesture)
+        {
+            return;
+        }
+        m_ie_undo.push_back(m_ie_ext_pre_edit);
+        while (m_ie_undo.size() > 32u)
+        {
+            m_ie_undo.pop_front();
+        }
+        m_ie_redo.clear();
+        m_ie_undo_pushed_for_gesture = true;
+    }
+
+    void MarkInstrumentEditorDirty(bool live_patch = true)
+    {
+        InstrumentEditorPushUndoFromPreEdit();
         m_ie_dirty = true;
+        if (live_patch)
+        {
+            LivePatchInstrumentEditor();
+        }
+    }
+
+    void InstrumentEditorUndo()
+    {
+        if (m_ie_undo.empty())
+        {
+            return;
+        }
+        m_ie_redo.push_back(m_ie_ext);
+        while (m_ie_redo.size() > 32u)
+        {
+            m_ie_redo.pop_front();
+        }
+        m_ie_ext = m_ie_undo.back();
+        m_ie_undo.pop_back();
+        m_ie_dirty = true;
+        m_ie_undo_pushed_for_gesture = false;
+        m_ie_ext_pre_edit = m_ie_ext;
         LivePatchInstrumentEditor();
+        SetStatus("Instrument editor: undo");
+    }
+
+    void InstrumentEditorRedo()
+    {
+        if (m_ie_redo.empty())
+        {
+            return;
+        }
+        m_ie_undo.push_back(m_ie_ext);
+        while (m_ie_undo.size() > 32u)
+        {
+            m_ie_undo.pop_front();
+        }
+        m_ie_ext = m_ie_redo.back();
+        m_ie_redo.pop_back();
+        m_ie_dirty = true;
+        m_ie_undo_pushed_for_gesture = false;
+        m_ie_ext_pre_edit = m_ie_ext;
+        LivePatchInstrumentEditor();
+        SetStatus("Instrument editor: redo");
+    }
+
+    void InstrumentEditorRevert()
+    {
+        m_ie_ext = m_ie_ext_pristine;
+        m_ie_undo.clear();
+        m_ie_redo.clear();
+        m_ie_dirty = false;
+        m_ie_undo_pushed_for_gesture = false;
+        m_ie_ext_pre_edit = m_ie_ext;
+        LivePatchInstrumentEditor();
+        SetStatus("Instrument editor: reverted to opened state");
+    }
+
+    void ClearInstrumentEditorHistory()
+    {
+        m_ie_undo.clear();
+        m_ie_redo.clear();
+        m_ie_ext_pristine = m_ie_ext;
+        m_ie_ext_pre_edit = m_ie_ext;
+        m_ie_undo_pushed_for_gesture = false;
     }
 
     void ApplyInstrumentEditor(bool live_patch)
@@ -3807,6 +4340,7 @@
             return;
         }
         m_ie_dirty = false;
+        ClearInstrumentEditorHistory();
         MarkBank01TouchedIfNeeded(m_ie_bank);
         if (live_patch)
         {
@@ -3888,6 +4422,8 @@
         ImGui::SetNextWindowSize(ImVec2(900, 690), ImGuiCond_FirstUseEver);
         if (ImGui::Begin("Instrument Editor", &open))
         {
+            InstrumentEditorRefreshPreEditSnapshot();
+
             ImGui::Text("%s  instID=%u  B%dP%03d  %s",
                         m_ie_ext.displayName ? m_ie_ext.displayName : "(instrument)",
                         static_cast<unsigned>(m_ie_inst_id),
@@ -3898,6 +4434,50 @@
             {
                 ImGui::SameLine();
                 ImGui::TextColored(ImVec4(1, 0.7f, 0.2f, 1), "modified");
+            }
+
+            ImGui::BeginDisabled(m_ie_undo.empty());
+            if (ImGui::Button("Undo"))
+            {
+                InstrumentEditorUndo();
+            }
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            {
+                ImGui::SetTooltip("Ctrl+Z");
+            }
+            ImGui::SameLine();
+            ImGui::BeginDisabled(m_ie_redo.empty());
+            if (ImGui::Button("Redo"))
+            {
+                InstrumentEditorRedo();
+            }
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            {
+                ImGui::SetTooltip("Ctrl+Y");
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Revert"))
+            {
+                InstrumentEditorRevert();
+            }
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip("Restore instrument as opened");
+            }
+
+            const bool ie_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+            if (ie_focused && !ImGui::GetIO().WantTextInput && ImGui::GetIO().KeyCtrl)
+            {
+                if (ImGui::IsKeyPressed(ImGuiKey_Z, false))
+                {
+                    InstrumentEditorUndo();
+                }
+                if (ImGui::IsKeyPressed(ImGuiKey_Y, false))
+                {
+                    InstrumentEditorRedo();
+                }
             }
 
             ImGui::SeparatorText("Preview");
@@ -4129,6 +4709,56 @@
         m_instrument_editor_open = open;
     }
 
+    int FindSampleRowForInstrumentSplit(uint32_t instrument_index,
+                                        uint32_t split_index,
+                                        uint32_t snd_resource_id) const
+    {
+        for (size_t i = 0; i < m_samples.size(); ++i)
+        {
+            const SampleRow &row = m_samples[i];
+            if (row.source == SampleSource::Bank && row.instrument_index == instrument_index &&
+                row.split_index == split_index)
+            {
+                return static_cast<int>(i);
+            }
+        }
+        if (snd_resource_id == 0)
+        {
+            return -1;
+        }
+        for (size_t i = 0; i < m_samples.size(); ++i)
+        {
+            const SampleRow &row = m_samples[i];
+            if (row.source == SampleSource::Bank && row.snd_resource_id == snd_resource_id)
+            {
+                return static_cast<int>(i);
+            }
+        }
+        return -1;
+    }
+
+    void DeleteInstrumentSplitAt(uint32_t split_index)
+    {
+        if (!m_bank_token || !EnsureActiveBankWritable())
+        {
+            return;
+        }
+        (void)BAERmfEditorBank_DeleteInstrumentSample(m_bank_token,
+                                                      m_ie_instrument_index,
+                                                      split_index,
+                                                      false);
+        if (m_ie_selected_split == static_cast<int>(split_index))
+        {
+            m_ie_selected_split = -1;
+        }
+        else if (m_ie_selected_split > static_cast<int>(split_index))
+        {
+            --m_ie_selected_split;
+        }
+        RefreshListsFromBank();
+        RefreshSongSamplesFromDocument();
+    }
+
     void DrawInstrumentEditorKeymapPage()
     {
         if (!m_bank_token || m_ie_from_song)
@@ -4156,16 +4786,7 @@
         ImGui::SameLine();
         if (ImGui::Button("Delete selected split") && m_ie_selected_split >= 0)
         {
-            if (EnsureActiveBankWritable())
-            {
-                (void)BAERmfEditorBank_DeleteInstrumentSample(m_bank_token,
-                                                              m_ie_instrument_index,
-                                                              static_cast<uint32_t>(m_ie_selected_split),
-                                                              false);
-                m_ie_selected_split = -1;
-                RefreshListsFromBank();
-                RefreshSongSamplesFromDocument();
-            }
+            DeleteInstrumentSplitAt(static_cast<uint32_t>(m_ie_selected_split));
         }
 
         std::vector<std::pair<uint32_t, std::string>> snd_choices;
@@ -4178,11 +4799,11 @@
                               ImVec2(0, 320)))
         {
             ImGui::TableSetupColumn("Sel", ImGuiTableColumnFlags_WidthFixed, 36.0f);
-            ImGui::TableSetupColumn("Low", ImGuiTableColumnFlags_WidthFixed, 70.0f);
-            ImGui::TableSetupColumn("High", ImGuiTableColumnFlags_WidthFixed, 70.0f);
-            ImGui::TableSetupColumn("Root", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+            ImGui::TableSetupColumn("Low", ImGuiTableColumnFlags_WidthFixed, 96.0f);
+            ImGui::TableSetupColumn("High", ImGuiTableColumnFlags_WidthFixed, 96.0f);
+            ImGui::TableSetupColumn("Root", ImGuiTableColumnFlags_WidthFixed, 96.0f);
             ImGui::TableSetupColumn("Sample", ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableSetupColumn("Vol", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+            ImGui::TableSetupColumn("Vol", ImGuiTableColumnFlags_WidthFixed, 96.0f);
             ImGui::TableHeadersRow();
             for (uint32_t s = 0; s < split_count; ++s)
             {
@@ -4196,40 +4817,74 @@
                 ImGui::PushID(static_cast<int>(s));
                 ImGui::TableSetColumnIndex(0);
                 bool sel = (m_ie_selected_split == static_cast<int>(s));
-                if (ImGui::Selectable("##sel", sel))
+                char sel_label[16];
+                std::snprintf(sel_label, sizeof(sel_label), "%u", s);
+                if (ImGui::Selectable(sel_label, sel, ImGuiSelectableFlags_AllowDoubleClick))
                 {
                     m_ie_selected_split = static_cast<int>(s);
                 }
-                if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0))
+                const int sample_row = FindSampleRowForInstrumentSplit(
+                    m_ie_instrument_index, s, static_cast<uint32_t>(info.sndResourceID));
+                if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && sample_row >= 0)
                 {
-                    for (size_t i = 0; i < m_samples.size(); ++i)
-                    {
-                        if (m_samples[i].source == SampleSource::Bank &&
-                            m_samples[i].instrument_index == m_ie_instrument_index &&
-                            m_samples[i].split_index == s)
-                        {
-                            m_selected_sample = static_cast<int>(i);
+                    m_selected_sample = sample_row;
 #if NBEDITOR_MVP
-                            OpenSampleEditorForSelection();
+                    OpenSampleEditorForSelection();
 #endif
-                            break;
-                        }
+                }
+                bool deleted_split = false;
+                if (ImGui::BeginPopupContextItem("##split_sel_ctx"))
+                {
+                    m_ie_selected_split = static_cast<int>(s);
+#if NBEDITOR_MVP
+                    if (ImGui::MenuItem("Edit Sample", nullptr, false, sample_row >= 0))
+                    {
+                        m_selected_sample = sample_row;
+                        OpenSampleEditorForSelection();
                     }
+#endif
+                    if (ImGui::MenuItem("Show in Samples", nullptr, false, sample_row >= 0))
+                    {
+                        RevealSampleInSamplesTab(sample_row);
+                    }
+                    if (ImGui::MenuItem("Export Sample...",
+                                        nullptr,
+                                        false,
+                                        sample_row >= 0 && info.sndResourceID != 0))
+                    {
+                        OpenExportSampleDialog(sample_row);
+                    }
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("Delete Split"))
+                    {
+                        deleted_split = true;
+                    }
+                    ImGui::EndPopup();
+                }
+                if (deleted_split)
+                {
+                    ImGui::PopID();
+                    DeleteInstrumentSplitAt(s);
+                    break;
                 }
                 int low = info.lowKey, high = info.highKey, root = info.rootKey, vol = info.splitVolume;
+                /* InputInt defaults to full-window width; pin to column or value is clipped. */
                 ImGui::TableSetColumnIndex(1);
+                ImGui::SetNextItemWidth(-FLT_MIN);
                 if (ImGui::InputInt("##low", &low))
                 {
                     info.lowKey = static_cast<unsigned char>(std::clamp(low, 0, 127));
                     BAERmfEditorBank_SetInstrumentSampleInfo(m_bank_token, m_ie_instrument_index, s, &info);
                 }
                 ImGui::TableSetColumnIndex(2);
+                ImGui::SetNextItemWidth(-FLT_MIN);
                 if (ImGui::InputInt("##high", &high))
                 {
                     info.highKey = static_cast<unsigned char>(std::clamp(high, 0, 127));
                     BAERmfEditorBank_SetInstrumentSampleInfo(m_bank_token, m_ie_instrument_index, s, &info);
                 }
                 ImGui::TableSetColumnIndex(3);
+                ImGui::SetNextItemWidth(-FLT_MIN);
                 if (ImGui::InputInt("##root", &root))
                 {
                     info.rootKey = static_cast<unsigned char>(std::clamp(root, 0, 127));
@@ -4247,7 +4902,7 @@
                             break;
                         }
                     }
-                    ImGui::SetNextItemWidth(-1.0f);
+                    ImGui::SetNextItemWidth(-FLT_MIN);
                     if (ImGui::BeginCombo("##snd", preview))
                     {
                         for (const auto &choice : snd_choices)
@@ -4286,6 +4941,7 @@
                     }
                 }
                 ImGui::TableSetColumnIndex(5);
+                ImGui::SetNextItemWidth(-FLT_MIN);
                 if (ImGui::InputInt("##vol", &vol))
                 {
                     info.splitVolume = static_cast<int16_t>(vol);
@@ -4295,5 +4951,6 @@
             }
             ImGui::EndTable();
         }
-        ImGui::TextDisabled("Use the Sample column to reassign a keysplit. Double-click Sel to open Sample Editor.");
+        ImGui::TextDisabled(
+            "Sample column reassigns the keysplit. Right-click Sel for Edit Sample / Delete Split; double-click edits.");
     }

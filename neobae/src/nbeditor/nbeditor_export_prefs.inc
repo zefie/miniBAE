@@ -182,14 +182,15 @@
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
         {
             ImGui::SetTooltip(
-                "When saving a Session, store window positions, sizes, and docking in nBeT.\n"
+                "When saving a Session, store dock/editor layout and master window size in nBeT.\n"
+                "(Master window position is saved for off-screen recovery only.)\n"
                 "Enabled by default.");
         }
         ImGui::Checkbox("Ignore session layout on load", &m_prefs_draft_ignore_layout);
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
         {
             ImGui::SetTooltip(
-                "When opening a Session, skip applying nBeT window/dock layout.\n"
+                "When opening a Session, skip applying nBeT size/dock/editor layout.\n"
                 "Disabled by default.");
         }
         ImGui::Spacing();
@@ -246,21 +247,41 @@
             ImGui::SetTooltip("Adds each Session MIDI song as SONG→emid named like the song.");
         }
         ImGui::Spacing();
+        {
+            uint32_t zsb_reason = 0;
+            const bool want_zsb = BankRequiresZsb(&zsb_reason);
+            if (want_zsb)
+            {
+                char reason_buf[256] = {0};
+                BAEZMFReasonCodeToString(zsb_reason, reason_buf, sizeof(reason_buf));
+                ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
+                                   "Requires .zsb: %s",
+                                   reason_buf);
+            }
+        }
         if (ImGui::Button("Export...", ImVec2(100, 0)))
         {
             m_export_bank_open = false;
             ImGui::CloseCurrentPopup();
             m_pending_dialog_action = DialogAction::ExportBank;
-            static const SDL_DialogFileFilter filters[] = {
-                {"Bank (*.hsb;*.zsb;*.bsn)", "hsb;zsb;bsn"},
+            const bool want_zsb = BankRequiresZsb(nullptr);
+            static const SDL_DialogFileFilter filters_any[] = {
+                {"Bank (*.hsb;*.zsb)", "hsb;zsb"},
                 {"All files (*.*)", "*"},
             };
+            static const SDL_DialogFileFilter filters_zsb[] = {
+                {"NeoBAE Bank (*.zsb)", "zsb"},
+                {"All files (*.*)", "*"},
+            };
+            static char default_path[64];
+            std::snprintf(default_path, sizeof(default_path), "%s", want_zsb ? "export_bank.zsb" : "export_bank.hsb");
             SDL_ShowSaveFileDialog(OnFileDialogResult,
                                    this,
                                    m_main_window,
-                                   filters,
-                                   static_cast<int>(SDL_arraysize(filters)),
-                                   "export_bank.hsb");
+                                   want_zsb ? filters_zsb : filters_any,
+                                   want_zsb ? static_cast<int>(SDL_arraysize(filters_zsb))
+                                            : static_cast<int>(SDL_arraysize(filters_any)),
+                                   default_path);
         }
         ImGui::SameLine();
         if (ImGui::Button("Cancel", ImVec2(80, 0)))
@@ -278,6 +299,9 @@
             SetStatus("Export Bank failed: no bank");
             return;
         }
+
+        bool remapped = false;
+        const std::string out_path = EnforceBankSavePath(path, &remapped);
 
         unsigned char *bank_bytes = nullptr;
         uint32_t bank_size = 0;
@@ -482,11 +506,23 @@
         }
 
         const BAEResult save_r =
-            BAERmfEditorBank_SaveToFile(temp_token, const_cast<char *>(path.c_str()));
+            BAERmfEditorBank_SaveToFile(temp_token, const_cast<char *>(out_path.c_str()));
         (void)BAEMixer_UnloadBank(m_mixer, temp_token);
         if (save_r == BAE_NO_ERROR)
         {
-            SetStatus(std::string("Exported bank: ") + FileNameFromPath(path));
+            if (remapped)
+            {
+                uint32_t reason = 0;
+                (void)BankRequiresZsb(&reason);
+                char reason_buf[256] = {0};
+                BAEZMFReasonCodeToString(reason, reason_buf, sizeof(reason_buf));
+                SetStatus(std::string("Exported bank as .zsb (") + reason_buf + "): " +
+                          FileNameFromPath(out_path));
+            }
+            else
+            {
+                SetStatus(std::string("Exported bank: ") + FileNameFromPath(out_path));
+            }
         }
         else
         {
