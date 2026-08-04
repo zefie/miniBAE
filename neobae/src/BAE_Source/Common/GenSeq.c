@@ -2185,6 +2185,45 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
             }
         }
         pSong->channelProgram[MIDIChannel] = program;
+
+        /* RMF/ZMF CloneUsed embeds drum hits as melodic bank instruments
+           (INST 512+program) and issues program changes on channel 10.
+           That requires USE_NORM_BANK; new exports insert Beatnik NRPN mode 3,
+           but older files omit it. If the melodic remap target is an embedded
+           INST, switch modes so scan/playback resolve 512+program instead of
+           GM percussion (128+note). */
+        if ((pSong->songFlags & SONG_FLAG_IS_RMF) &&
+            MIDIChannel == PERCUSSION_CHANNEL &&
+            pSong->channelBankMode[MIDIChannel] != USE_NORM_BANK &&
+            pSong->RMFInstrumentIDs[0] > 0)
+        {
+            unsigned char savedMode = pSong->channelBankMode[MIDIChannel];
+            int16_t melodicPatch;
+            uint32_t rmfIndex;
+            bool melodicEmbed = FALSE;
+
+            pSong->channelBankMode[MIDIChannel] = USE_NORM_BANK;
+            melodicPatch = PV_ConvertPatchBank(pSong, program, MIDIChannel);
+            pSong->channelBankMode[MIDIChannel] = savedMode;
+
+            for (rmfIndex = 1; rmfIndex <= pSong->RMFInstrumentIDs[0]; rmfIndex++)
+            {
+                if (pSong->RMFInstrumentIDs[rmfIndex] == (uint32_t)melodicPatch)
+                {
+                    melodicEmbed = TRUE;
+                    break;
+                }
+            }
+            if (melodicEmbed)
+            {
+                pSong->channelBankMode[MIDIChannel] = USE_NORM_BANK;
+#if USE_SF2_SUPPORT == TRUE || USE_NATIVE_DLS == TRUE
+                pSong->channelType[MIDIChannel] = CHANNEL_TYPE_RMF;
+#endif
+                debug_message("ProcessProgramChange: CH10 RMF melodic percussion INST %d -> USE_NORM_BANK\n",
+                              (int)melodicPatch);
+            }
+        }
             
 #if USE_SF2_SUPPORT == TRUE
             

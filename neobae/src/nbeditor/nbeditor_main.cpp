@@ -263,12 +263,73 @@ static bool IsBe2SessionDocument(const std::vector<BsnIrezResource> &resources)
     return false;
 }
 
+/* BE2 DATe stamps editor-touched resources. Custom Session songs get Midi/SONG
+ * stamps; bank groovoids (even when stored as SONG→Midi) typically do not. */
+static void CollectDateStampedSongKeys(const unsigned char *body,
+                                       size_t size,
+                                       std::set<uint32_t> &out_song_ids,
+                                       std::set<uint32_t> &out_midi_ids)
+{
+    if (!body)
+    {
+        return;
+    }
+    const uint32_t k_song = (static_cast<uint32_t>('S') << 24) |
+                            (static_cast<uint32_t>('O') << 16) |
+                            (static_cast<uint32_t>('N') << 8) |
+                            static_cast<uint32_t>('G');
+    const uint32_t k_midi = (static_cast<uint32_t>('M') << 24) |
+                            (static_cast<uint32_t>('i') << 16) |
+                            (static_cast<uint32_t>('d') << 8) |
+                            static_cast<uint32_t>('i');
+    for (size_t off = 0; off + 12 <= size; off += 12)
+    {
+        const uint32_t type = BsnReadBE32(body + off);
+        const uint32_t id = BsnReadBE32(body + off + 4);
+        const uint32_t ts = BsnReadBE32(body + off + 8);
+        if (type == 0 && id == 0 && ts == 0)
+        {
+            break;
+        }
+        if (type == k_song)
+        {
+            out_song_ids.insert(id);
+        }
+        else if (type == k_midi)
+        {
+            out_midi_ids.insert(id);
+        }
+    }
+}
+
+static void CollectDateStampedSongKeysFromResources(const std::vector<BsnIrezResource> &resources,
+                                                    std::set<uint32_t> &out_song_ids,
+                                                    std::set<uint32_t> &out_midi_ids)
+{
+    out_song_ids.clear();
+    out_midi_ids.clear();
+    for (const BsnIrezResource &r : resources)
+    {
+        if (BsnResourceTypeEquals(r.type, 'D', 'A', 'T', 'e') && !r.body.empty())
+        {
+            CollectDateStampedSongKeys(r.body.data(), r.body.size(), out_song_ids, out_midi_ids);
+        }
+    }
+}
+
 static void CollectSessionUserSongs(const std::vector<BsnIrezResource> &resources,
                                     std::vector<SessionSongEntry> &out_songs,
                                     int &out_casd_count)
 {
     out_songs.clear();
     out_casd_count = 0;
+
+    std::set<uint32_t> dated_song_ids;
+    std::set<uint32_t> dated_midi_ids;
+    CollectDateStampedSongKeysFromResources(resources, dated_song_ids, dated_midi_ids);
+    /* When DATe lists any Midi/SONG, only those are Custom Songs. Remaining
+     * SONG→Midi entries are bank groovoids converted from emid (e.g. zpatches). */
+    const bool use_date_filter = !dated_song_ids.empty() || !dated_midi_ids.empty();
 
     std::map<uint32_t, const BsnIrezResource *> midi_by_id;
     for (const BsnIrezResource &r : resources)
@@ -307,6 +368,12 @@ static void CollectSessionUserSongs(const std::vector<BsnIrezResource> &resource
         {
             continue;
         }
+        if (use_date_filter &&
+            dated_song_ids.count(r.id) == 0 &&
+            dated_midi_ids.count(midi_id) == 0)
+        {
+            continue;
+        }
 
         SessionSongEntry entry;
         entry.song_resource_id = r.id;
@@ -318,6 +385,142 @@ static void CollectSessionUserSongs(const std::vector<BsnIrezResource> &resource
         }
         entry.source_type = "BSN";
         entry.midi_bytes = midi->body;
+        out_songs.push_back(std::move(entry));
+    }
+
+    std::sort(out_songs.begin(),
+              out_songs.end(),
+              [](const SessionSongEntry &a, const SessionSongEntry &b) {
+                  return a.song_resource_id < b.song_resource_id;
+              });
+}
+
+/* Enumerate Custom Songs via XFILE so ZREZ ZSNG/ZBNK packed songs are visible. */
+static void CollectSessionUserSongsFromBank(XFILE bank,
+                                            std::vector<SessionSongEntry> &out_songs,
+                                            int &out_casd_count)
+{
+    out_songs.clear();
+    out_casd_count = 0;
+    if (!bank)
+    {
+        return;
+    }
+
+    std::set<uint32_t> dated_song_ids;
+    std::set<uint32_t> dated_midi_ids;
+    {
+        const XResourceType date_type = FOUR_CHAR('D', 'A', 'T', 'e');
+        const int32_t date_count = XCountFileResourcesOfType(bank, date_type);
+        for (int32_t di = 0; di < date_count; ++di)
+        {
+            XLongResourceID date_id = 0;
+            int32_t date_size = 0;
+            XPTR date_data =
+                XGetIndexedFileResource(bank, date_type, &date_id, di, nullptr, &date_size);
+            if (!date_data || date_size <= 0)
+            {
+                if (date_data)
+                {
+                    XDisposePtr(date_data);
+                }
+                continue;
+            }
+            CollectDateStampedSongKeys(static_cast<const unsigned char *>(date_data),
+                                       static_cast<size_t>(date_size),
+                                       dated_song_ids,
+                                       dated_midi_ids);
+            XDisposePtr(date_data);
+        }
+    }
+    const bool use_date_filter = !dated_song_ids.empty() || !dated_midi_ids.empty();
+
+    {
+        const int32_t casd = XCountFileResourcesOfType(bank, FOUR_CHAR('C', 'a', 'S', 'd'));
+        out_casd_count = (casd > 0) ? casd : 0;
+    }
+
+    const int32_t song_count = XCountFileResourcesOfType(bank, ID_SONG);
+    for (int32_t i = 0; i < song_count; ++i)
+    {
+        XLongResourceID song_id = 0;
+        int32_t song_size = 0;
+        char song_name[256];
+        song_name[0] = 0;
+        XPTR song_data =
+            XGetIndexedFileResource(bank, ID_SONG, &song_id, i, song_name, &song_size);
+        if (!song_data || song_size < 8)
+        {
+            if (song_data)
+            {
+                XDisposePtr(song_data);
+            }
+            continue;
+        }
+
+        const unsigned char *song_body = static_cast<const unsigned char *>(song_data);
+        const uint16_t midi_id = BsnReadBE16(song_body);
+        const unsigned char song_type = song_body[6];
+        XDisposePtr(song_data);
+        if (song_type != 1)
+        {
+            continue;
+        }
+
+        int32_t midi_size = 0;
+        char midi_name[256];
+        midi_name[0] = 0;
+        XPTR midi_data = XGetFileResource(bank,
+                                          ID_MIDI,
+                                          static_cast<XLongResourceID>(midi_id),
+                                          midi_name,
+                                          &midi_size);
+        if (!midi_data || midi_size < 4)
+        {
+            if (midi_data)
+            {
+                XDisposePtr(midi_data);
+            }
+            continue;
+        }
+        const unsigned char *midi_body = static_cast<const unsigned char *>(midi_data);
+        if (!(midi_body[0] == 'M' && midi_body[1] == 'T' &&
+              midi_body[2] == 'h' && midi_body[3] == 'd'))
+        {
+            XDisposePtr(midi_data);
+            continue;
+        }
+        if (use_date_filter &&
+            dated_song_ids.count(static_cast<uint32_t>(song_id)) == 0 &&
+            dated_midi_ids.count(midi_id) == 0)
+        {
+            XDisposePtr(midi_data);
+            continue;
+        }
+
+        SessionSongEntry entry;
+        entry.song_resource_id = static_cast<uint32_t>(song_id);
+        entry.midi_resource_id = midi_id;
+        const unsigned char song_plen = static_cast<unsigned char>(song_name[0]);
+        if (song_plen > 0 && song_plen < 255)
+        {
+            entry.name.assign(song_name + 1, song_name + 1 + song_plen);
+        }
+        if (entry.name.empty())
+        {
+            const unsigned char midi_plen = static_cast<unsigned char>(midi_name[0]);
+            if (midi_plen > 0 && midi_plen < 255)
+            {
+                entry.name.assign(midi_name + 1, midi_name + 1 + midi_plen);
+            }
+        }
+        if (entry.name.empty())
+        {
+            entry.name = "Untitled Song";
+        }
+        entry.source_type = "BSN";
+        entry.midi_bytes.assign(midi_body, midi_body + midi_size);
+        XDisposePtr(midi_data);
         out_songs.push_back(std::move(entry));
     }
 
@@ -350,7 +553,19 @@ static bool ProbeBe2SessionBsn(const char *path,
     {
         std::vector<SessionSongEntry> songs;
         int casd = 0;
-        CollectSessionUserSongs(resources, songs, casd);
+        /* Prefer XFILE so ZREZ sessions expose SONG/Midi inside ZSNG/ZBNK. */
+        XFILENAME xf;
+        XConvertPathToXFILENAME(const_cast<char *>(path), &xf);
+        XFILE file = XFileOpenResource(&xf, TRUE);
+        if (file)
+        {
+            CollectSessionUserSongsFromBank(file, songs, casd);
+            XFileClose(file);
+        }
+        else
+        {
+            CollectSessionUserSongs(resources, songs, casd);
+        }
         if (out_songs)
         {
             *out_songs = std::move(songs);
@@ -451,7 +666,8 @@ enum class SongShowFilter : int
 struct GroovoidEntry
 {
     uint32_t song_resource_id = 0;
-    uint16_t emid_resource_id = 0;
+    uint16_t emid_resource_id = 0; /* object id: emid (classic) or Midi (converted) */
+    bool object_is_midi = false;   /* false = emid (decrypt); true = plain Midi */
     std::string name;
 };
 
@@ -1191,7 +1407,6 @@ private:
         ExportSample,
         ExportAudio,
         ExportBank,
-        SaveBankAs,
         SaveSessionAs,
         AddSample,
         ReImportMidi,
@@ -1344,45 +1559,6 @@ private:
                                default_path);
     }
 
-    void OpenSaveBankDialog()
-    {
-        if (!m_bank_token)
-        {
-            SetStatus("No bank loaded to save");
-            return;
-        }
-        m_pending_dialog_action = DialogAction::SaveBankAs;
-        const bool want_zsb = BankRequiresZsb(nullptr);
-        static const SDL_DialogFileFilter filters_any[] = {
-            {"Bank files (*.hsb;*.zsb)", "hsb;zsb"},
-            {"All files (*.*)", "*"},
-        };
-        static const SDL_DialogFileFilter filters_zsb[] = {
-            {"NeoBAE Bank (*.zsb)", "zsb"},
-            {"All files (*.*)", "*"},
-        };
-        const SDL_DialogFileFilter *filters = want_zsb ? filters_zsb : filters_any;
-        const int filter_count = want_zsb ? static_cast<int>(SDL_arraysize(filters_zsb))
-                                          : static_cast<int>(SDL_arraysize(filters_any));
-        // Keep a stable default string for the dialog lifetime.
-        static char default_path[1024];
-        if (!m_loaded_bank_path.empty())
-        {
-            const std::string enforced = EnforceBankSavePath(m_loaded_bank_path);
-            std::snprintf(default_path, sizeof(default_path), "%s", enforced.c_str());
-        }
-        else
-        {
-            std::snprintf(default_path, sizeof(default_path), "%s", want_zsb ? "bank.zsb" : "bank.hsb");
-        }
-        SDL_ShowSaveFileDialog(OnFileDialogResult,
-                               this,
-                               m_main_window,
-                               filters,
-                               filter_count,
-                               default_path);
-    }
-
     void ConsumeDialogResult()
     {
         if (!m_dialog_mutex)
@@ -1457,38 +1633,6 @@ private:
             }
             out_path = EnforceSessionSavePath(out_path);
             SaveSessionToPath(out_path.c_str());
-            return;
-        }
-        if (m_pending_dialog_action == DialogAction::SaveBankAs)
-        {
-            if (m_bank_token)
-            {
-                bool remapped = false;
-                const std::string out_path = EnforceBankSavePath(selected_path, &remapped);
-                const BAEResult save_result = BAERmfEditorBank_SaveToFile(
-                    m_bank_token, const_cast<char *>(out_path.c_str()));
-                if (save_result == BAE_NO_ERROR)
-                {
-                    m_loaded_bank_path = out_path;
-                    m_loaded_bank_display_name = FileNameFromPath(out_path);
-                    if (remapped)
-                    {
-                        uint32_t reason = 0;
-                        (void)BankRequiresZsb(&reason);
-                        char reason_buf[256] = {0};
-                        BAEZMFReasonCodeToString(reason, reason_buf, sizeof(reason_buf));
-                        SetStatus(std::string("Bank saved as .zsb (") + reason_buf + ")");
-                    }
-                    else
-                    {
-                        SetStatus("Bank saved");
-                    }
-                }
-                else
-                {
-                    SetStatus(std::string("Bank save failed: ") + FormatBAEError(save_result));
-                }
-            }
             return;
         }
         if (m_pending_dialog_action == DialogAction::ExportBank)
@@ -1683,7 +1827,6 @@ private:
 
     void SelectAuditionBank0AfterBankLoad()
     {
-        m_selected_uses_song_source = false;
         m_selected_bank = 0;
         BAESong audition_song = GetAuditionSong();
         if (audition_song)
@@ -2029,17 +2172,12 @@ private:
 
     BAESong GetAuditionSong() const
     {
-        /* IE preview must use the live preview song (mixer bank), not the paused
-         * RMF playback song. Song-embedded customs are promoted into the bank on
-         * RMF open; routing through m_song made IE keys silent. */
-        if (m_instrument_editor_open)
-        {
-            return m_preview_song ? m_preview_song : m_song;
-        }
-        if (m_selected_uses_song_source && m_song)
-        {
-            return m_song;
-        }
+        /* Always audition through the paused bank preview song — never the live
+         * playback song. Selecting a Sample/Instrument (incl. double-click to
+         * open Sample Editor) issues ProgramBankChange on ch1/ch10; routing that
+         * into m_song remapped the playing song and looked like voice stealing.
+         * Song-embedded customs are promoted into the bank on RMF open, so the
+         * preview song can resolve them. */
         return m_preview_song ? m_preview_song : m_song;
     }
 
@@ -2110,7 +2248,6 @@ private:
     {
         m_song_override_instruments.clear();
         m_loaded_doc_path.clear();
-        m_selected_uses_song_source = false;
         m_instruments = m_bank_instruments;
         RebuildInstrumentFilters();
     }
@@ -2354,6 +2491,36 @@ private:
         }
 
         XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
+
+        /* Custom songs are DATe-stamped Midi/SONG; exclude those from Groovoids. */
+        std::set<uint32_t> dated_song_ids;
+        std::set<uint32_t> dated_midi_ids;
+        {
+            const XResourceType date_type = FOUR_CHAR('D', 'A', 'T', 'e');
+            const int32_t date_count = XCountFileResourcesOfType(bank, date_type);
+            for (int32_t di = 0; di < date_count; ++di)
+            {
+                XLongResourceID date_id = 0;
+                int32_t date_size = 0;
+                XPTR date_data =
+                    XGetIndexedFileResource(bank, date_type, &date_id, di, nullptr, &date_size);
+                if (!date_data || date_size <= 0)
+                {
+                    if (date_data)
+                    {
+                        XDisposePtr(date_data);
+                    }
+                    continue;
+                }
+                CollectDateStampedSongKeys(static_cast<const unsigned char *>(date_data),
+                                           static_cast<size_t>(date_size),
+                                           dated_song_ids,
+                                           dated_midi_ids);
+                XDisposePtr(date_data);
+            }
+        }
+        const bool use_date_filter = !dated_song_ids.empty() || !dated_midi_ids.empty();
+
         const int32_t song_count = XCountFileResourcesOfType(bank, ID_SONG);
         for (int32_t i = 0; i < song_count; ++i)
         {
@@ -2378,19 +2545,49 @@ private:
             const unsigned char song_type = body[6];
             XDisposePtr(song_data);
 
-            if (song_type != 1 || object_id == 0)
+            if (song_type != 1)
             {
                 continue;
             }
-            /* Groovoids are SONG → emid (user Session songs are SONG → Midi). */
-            if (XExistsFileResource(bank, ID_EMID, static_cast<XLongResourceID>(object_id)) == FALSE)
+
+            /* object_id 0 is valid (classic groovoid banks use Midi/emid id 0).
+             * XExistsFileResource expands ZBNK for Midi on ZREZ banks. */
+            const bool has_emid =
+                XExistsFileResource(bank, ID_EMID, static_cast<XLongResourceID>(object_id)) != FALSE;
+            const bool has_midi =
+                XExistsFileResource(bank, ID_MIDI, static_cast<XLongResourceID>(object_id)) != FALSE;
+            if (!has_emid && !has_midi)
             {
                 continue;
+            }
+
+            /* Classic groovoids: SONG → emid.
+             * Converted bank groovoids (zpatches): SONG → Midi without DATe stamp.
+             * Custom Session songs: SONG → Midi with DATe stamp (excluded). */
+            bool object_is_midi = false;
+            if (has_emid)
+            {
+                object_is_midi = false;
+            }
+            else if (has_midi)
+            {
+                if (!use_date_filter)
+                {
+                    /* No Midi/SONG DATe stamps → treat all Midi as Custom Songs. */
+                    continue;
+                }
+                if (dated_song_ids.count(static_cast<uint32_t>(song_id)) != 0 ||
+                    dated_midi_ids.count(object_id) != 0)
+                {
+                    continue;
+                }
+                object_is_midi = true;
             }
 
             GroovoidEntry entry;
             entry.song_resource_id = static_cast<uint32_t>(song_id);
             entry.emid_resource_id = object_id;
+            entry.object_is_midi = object_is_midi;
             const unsigned char plen = static_cast<unsigned char>(name_buf[0]);
             if (plen > 0 && plen < 255)
             {
@@ -2767,6 +2964,136 @@ private:
         }
         RefreshSongSamplesFromDocument();
         SortSampleListAlphabetical();
+        if (m_sample_editor_open)
+        {
+            RefreshSampleEditorUsageText();
+        }
+    }
+
+    /* Which bank instruments reference this SND (shared samples may appear in many). */
+    std::string FormatSampleInstrumentUsage(uint32_t snd_id,
+                                            bool unassigned,
+                                            SampleSource source) const
+    {
+        if (source == SampleSource::Song)
+        {
+            return "Attached to: song document sample";
+        }
+        if (unassigned || !m_bank_token)
+        {
+            return "Attached to: (none — unassigned)";
+        }
+
+        std::vector<std::string> refs;
+        std::set<uint32_t> seen_inst;
+        uint32_t instrument_count = 0;
+        if (BAERmfEditorBank_GetInstrumentCount(m_bank_token, &instrument_count) != BAE_NO_ERROR)
+        {
+            return "Attached to: (unknown)";
+        }
+
+        for (uint32_t inst_idx = 0; inst_idx < instrument_count; ++inst_idx)
+        {
+            BAERmfEditorBankInstrumentInfo inst_info;
+            std::memset(&inst_info, 0, sizeof(inst_info));
+            if (BAERmfEditorBank_GetInstrumentInfo(m_bank_token, inst_idx, &inst_info) != BAE_NO_ERROR)
+            {
+                continue;
+            }
+            uint32_t split_count = 0;
+            if (BAERmfEditorBank_GetInstrumentSampleCount(m_bank_token, inst_idx, &split_count) !=
+                BAE_NO_ERROR)
+            {
+                continue;
+            }
+            bool uses = false;
+            for (uint32_t split_idx = 0; split_idx < split_count; ++split_idx)
+            {
+                BAERmfEditorBankSampleInfo sample_info;
+                std::memset(&sample_info, 0, sizeof(sample_info));
+                if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
+                                                             inst_idx,
+                                                             split_idx,
+                                                             &sample_info) != BAE_NO_ERROR)
+                {
+                    continue;
+                }
+                if (static_cast<uint32_t>(sample_info.sndResourceID) == snd_id)
+                {
+                    uses = true;
+                    break;
+                }
+            }
+            if (!uses || !seen_inst.insert(inst_info.instID).second)
+            {
+                continue;
+            }
+
+            const bool perc = ((inst_info.instID % 256u) >= 128u);
+            const int program = static_cast<int>(inst_info.instID % 128u);
+            const int bank = static_cast<int>(inst_info.instID / 256u);
+            char buf[192];
+            if (inst_info.name[0])
+            {
+                std::snprintf(buf,
+                              sizeof(buf),
+                              "B%d%s P%03d %s",
+                              bank,
+                              perc ? " Perc" : "",
+                              program,
+                              inst_info.name);
+            }
+            else
+            {
+                std::snprintf(buf,
+                              sizeof(buf),
+                              "B%d%s P%03d (instID %u)",
+                              bank,
+                              perc ? " Perc" : "",
+                              program,
+                              inst_info.instID);
+            }
+            refs.emplace_back(buf);
+        }
+
+        if (refs.empty())
+        {
+            return "Attached to: (none — unassigned)";
+        }
+
+        std::string out = "Attached to: ";
+        for (size_t i = 0; i < refs.size(); ++i)
+        {
+            if (i > 0)
+            {
+                out += "; ";
+            }
+            out += refs[i];
+        }
+        return out;
+    }
+
+    void RefreshSampleEditorUsageText()
+    {
+        if (m_sample_editor_is_song_sample)
+        {
+            m_sample_editor_usage_text = FormatSampleInstrumentUsage(0, false, SampleSource::Song);
+            return;
+        }
+        bool unassigned = true;
+        for (const SampleRow &row : m_samples)
+        {
+            if (row.source == SampleSource::Bank &&
+                row.snd_resource_id == m_sample_editor_snd_resource_id)
+            {
+                unassigned = row.unassigned;
+                break;
+            }
+        }
+        m_sample_editor_usage_text =
+            FormatSampleInstrumentUsage(m_sample_editor_snd_resource_id,
+                                        unassigned,
+                                        SampleSource::Bank);
     }
 
     void SortSampleListAlphabetical()
@@ -3274,9 +3601,18 @@ private:
     {
         const uint32_t now_ms = SDL_GetTicks();
         const int voice_count = std::clamp(static_cast<int>(info.voicesActive), 0, static_cast<int>(BAE_MAX_VOICES));
+        /* IE piano should only reflect the instrument under edit, not every
+         * song voice. Player keyboard keeps the full mix. */
+        const bool filter_ie = m_instrument_editor_open;
+        const int32_t ie_patch =
+            filter_ie ? static_cast<int32_t>(InstrumentEditorPatchId()) : -1;
         for (int i = 0; i < voice_count; ++i)
         {
             if (info.voiceType[i] != BAE_MIDI_PCM_VOICE)
+            {
+                continue;
+            }
+            if (filter_ie && info.instrument[i] != ie_patch)
             {
                 continue;
             }
@@ -3595,7 +3931,8 @@ private:
             {
                 std::snprintf(codec_bracket, sizeof(codec_bracket), " [%s]", codec_tag);
             }
-            /* BE2-style: SND id first; do not show bank/program assignment. */
+            /* BE2-style: SND id first. Root/range omitted — a shared SND can
+             * differ per instrument; usage is shown in the Sample Editor. */
             if (sample.unassigned)
             {
                 std::snprintf(label,
@@ -3609,25 +3946,19 @@ private:
             {
                 std::snprintf(label,
                               sizeof(label),
-                              "[SND:%u]  %s%s  [Song] [root:%d  range:%d-%d]",
+                              "[SND:%u]  %s%s  [Song]",
                               sample.snd_resource_id,
                               sample.name.c_str(),
-                              codec_bracket,
-                              sample.root_key,
-                              sample.low_key,
-                              sample.high_key);
+                              codec_bracket);
             }
             else
             {
                 std::snprintf(label,
                               sizeof(label),
-                              "[SND:%u]  %s%s  [root:%d  range:%d-%d]",
+                              "[SND:%u]  %s%s",
                               sample.snd_resource_id,
                               sample.name.c_str(),
-                              codec_bracket,
-                              sample.root_key,
-                              sample.low_key,
-                              sample.high_key);
+                              codec_bracket);
             }
             const bool sample_selected = (m_multi_samples.count(static_cast<int>(i)) != 0) ||
                                          (m_selected_sample == static_cast<int>(i));
@@ -3641,7 +3972,6 @@ private:
                                    io.KeyCtrl,
                                    io.KeyShift);
                 m_multi_sample_anchor = static_cast<int>(i);
-                m_selected_uses_song_source = sample.is_custom && !sample.unassigned;
                 if (!sample.unassigned)
                 {
                     m_selected_bank = sample.bank;
@@ -4023,7 +4353,6 @@ private:
                                    io.KeyShift);
                 m_multi_instrument_anchor = static_cast<int>(i);
                 m_selected_empty_slot = false;
-                m_selected_uses_song_source = inst.is_custom || inst.has_song_override;
                 m_selected_bank = inst.bank;
                 m_selected_program = inst.program;
                 BAESong audition_song = GetAuditionSong();
@@ -4185,7 +4514,6 @@ private:
                 {
                     m_selected_instrument = -1;
                     m_selected_empty_slot = true;
-                    m_selected_uses_song_source = false;
                     m_selected_bank = bank;
                     m_selected_program = p;
                 }
@@ -4499,7 +4827,6 @@ private:
     SongShowFilter m_song_show_filter = SongShowFilter::Custom;
     bool m_show_empty_instrument_slots = false;
     bool m_selected_empty_slot = false;
-    bool m_selected_uses_song_source = false;
     int m_selected_bank = 0;
     int m_selected_program = 0;
     bool m_song_started = false;
@@ -4621,6 +4948,7 @@ private:
     bool m_sample_editor_loop_enabled = false;
     int m_sample_editor_root_key = 60;
     uint32_t m_sample_editor_snd_resource_id = 0;
+    std::string m_sample_editor_usage_text;
     int m_sample_editor_rate_preset = 1;
     uint32_t m_sample_editor_view_start = 0;
     uint32_t m_sample_editor_view_end = 0;

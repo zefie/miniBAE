@@ -1157,6 +1157,16 @@ bool LoadSessionBsnFromPath(const char *path)
     /* Teardown deleted the audition song; recreate for IE / instrument keys. */
     EnsureBankAuditionSong();
 
+    /* Re-collect from the open bank token so ZREZ ZSNG/ZBNK songs are visible.
+     * Probe may already have filled songs via a temporary XFILE; this keeps
+     * load consistent with the active bank handle. */
+    if (bank_ok && m_bank_token)
+    {
+        CollectSessionUserSongsFromBank(reinterpret_cast<XFILE>(m_bank_token),
+                                        songs,
+                                        casd_count);
+    }
+
     /* NeoBAE nBeT: player mix always restored; window/ini/editors respect prefs. */
     {
         std::vector<unsigned char> bytes;
@@ -1248,6 +1258,13 @@ bool SaveSessionToPath(const char *path)
     if (m_bank_token)
     {
         XFILE bank_file = reinterpret_cast<XFILE>(m_bank_token);
+        std::set<uint32_t> session_song_ids;
+        std::set<uint32_t> session_midi_ids;
+        for (const SessionSongEntry &entry : m_session_songs)
+        {
+            session_song_ids.insert(entry.song_resource_id);
+            session_midi_ids.insert(entry.midi_resource_id);
+        }
         static const XResourceType bank_resource_types[] = {
             ID_INST,
             ID_SND,
@@ -1256,6 +1273,7 @@ bool SaveSessionToPath(const char *path)
             ID_ALIAS,
             ID_BANK,
             ID_SONG,
+            ID_MIDI, /* Midi-backed bank groovoids (converted emid); user Midi rewritten below */
             ID_MIDI_OLD,
             ID_CMID,
             ID_EMID,
@@ -1291,8 +1309,25 @@ bool SaveSessionToPath(const char *path)
                                         static_cast<const unsigned char *>(res_data),
                                         res_size))
                 {
+                    /* Skip only Custom Songs; keep Midi-backed bank groovoids. */
+                    if (session_song_ids.count(static_cast<uint32_t>(res_id)) != 0)
+                    {
+                        XDisposePtr(res_data);
+                        continue; /* user songs rewritten below */
+                    }
+                    const uint16_t obj_id =
+                        BsnReadBE16(static_cast<const unsigned char *>(res_data));
+                    if (session_midi_ids.count(obj_id) != 0)
+                    {
+                        XDisposePtr(res_data);
+                        continue;
+                    }
+                }
+                if (res_type == ID_MIDI &&
+                    session_midi_ids.count(static_cast<uint32_t>(res_id)) != 0)
+                {
                     XDisposePtr(res_data);
-                    continue; /* user songs rewritten below */
+                    continue; /* user Midi rewritten below */
                 }
                 if (XAddFileResource(out_file, res_type, res_id, res_name, res_data, res_size) != 0)
                 {

@@ -645,8 +645,6 @@
                 m_selected_instrument = static_cast<int>(i);
                 m_selected_bank = m_instruments[i].bank;
                 m_selected_program = m_instruments[i].program;
-                m_selected_uses_song_source = m_instruments[i].is_custom ||
-                                              m_instruments[i].has_song_override;
                 return;
             }
         }

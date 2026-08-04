@@ -20157,13 +20157,16 @@ static void PV_SynchronizeTrackInstrumentDefaults(BAERmfEditorDocument *document
         if (firstNote)
         {
             track->channel = firstNote->channel;
-            if (firstNote->channel == 9)
+            if (firstNote->channel == 9 && firstNote->bank == 0)
             {
+                /* Classic GM drums: note selects the hit; keep track defaults clear. */
                 track->bank = 0;
                 track->program = 0;
             }
             else
             {
+                /* Melodic percussion (CloneUsed bank-2 embeds) and pitched tracks
+                   keep the remapped bank/program so MIDI emit matches note state. */
                 track->bank = firstNote->bank;
                 track->program = firstNote->program;
             }
@@ -20611,6 +20614,17 @@ static BAEResult PV_PrepareUsedInstrumentsFromBank(
     if (outResult)
     {
         outResult->percussionCount = clonedPercussionCount;
+    }
+    /* Percussion hits were remapped onto melodic bank-2 INST 512+program.
+       Channel 10 must leave GM drum mode (note→INST) or playback looks up
+       missing 128+note resources. Beatnik NRPN (5,0)=3 selects USE_NORM_BANK. */
+    if (clonedPercussionCount > 0)
+    {
+        result = PV_EnableMelodicPercussionChannel(document);
+        if (result != BAE_NO_ERROR)
+        {
+            return result;
+        }
     }
     PV_SynchronizeTrackInstrumentDefaults(document);
     return PV_VerifyEmbeddedOnlyInstrumentReferences(document, kClonedInstrumentBank);

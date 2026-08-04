@@ -115,41 +115,6 @@
                 ImGui::SetTooltip(
                     "Remove Bank 0/1 instruments and unused built-in samples. Bank 2+ is kept.");
             }
-            if (ImGui::MenuItem("Save Bank", nullptr, false, m_bank_token != 0 && !m_loaded_bank_path.empty()))
-            {
-                if (m_bank_token && !m_loaded_bank_path.empty())
-                {
-                    bool remapped = false;
-                    const std::string out_path = EnforceBankSavePath(m_loaded_bank_path, &remapped);
-                    const BAEResult r = BAERmfEditorBank_SaveToFile(
-                        m_bank_token, const_cast<char *>(out_path.c_str()));
-                    if (r == BAE_NO_ERROR)
-                    {
-                        m_loaded_bank_path = out_path;
-                        m_loaded_bank_display_name = FileNameFromPath(out_path);
-                        if (remapped)
-                        {
-                            uint32_t reason = 0;
-                            (void)BankRequiresZsb(&reason);
-                            char reason_buf[256] = {0};
-                            BAEZMFReasonCodeToString(reason, reason_buf, sizeof(reason_buf));
-                            SetStatus(std::string("Bank saved as .zsb (") + reason_buf + ")");
-                        }
-                        else
-                        {
-                            SetStatus("Bank saved");
-                        }
-                    }
-                    else
-                    {
-                        SetStatus(std::string("Bank save failed: ") + FormatBAEError(r));
-                    }
-                }
-            }
-            if (ImGui::MenuItem("Save Bank As...", nullptr, false, m_bank_token != 0))
-            {
-                OpenSaveBankDialog();
-            }
             ImGui::Separator();
             if (ImGui::MenuItem("Quit"))
             {
@@ -1019,7 +984,8 @@
                 static_cast<float>(std::max(1, m_song_settings_tempo_percent)) / 100.0f;
             (void)BAESong_SetMasterTempo(song, FLOAT_TO_UNSIGNED_FIXED(ratio));
         }
-        BAESong_Start(song, 0);
+        /* Priority 1 > bank preview song (0) so audition NoteOns don't steal. */
+        BAESong_Start(song, 1);
         if (pause_after_start)
         {
             BAESong_Pause(song);
@@ -1084,8 +1050,9 @@
         const GroovoidEntry &entry = m_groovoids[static_cast<size_t>(index)];
         XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
         int32_t size = 0;
+        const XResourceType obj_type = entry.object_is_midi ? ID_MIDI : ID_EMID;
         XPTR raw = XGetFileResource(bank,
-                                    ID_EMID,
+                                    obj_type,
                                     static_cast<XLongResourceID>(entry.emid_resource_id),
                                     nullptr,
                                     &size);
@@ -1097,11 +1064,14 @@
             }
             return false;
         }
-        /* Decrypt a copy — XDecryptData works in place. */
         out_midi.assign(static_cast<const unsigned char *>(raw),
                         static_cast<const unsigned char *>(raw) + static_cast<size_t>(size));
         XDisposePtr(raw);
-        XDecryptData(out_midi.data(), static_cast<uint32_t>(out_midi.size()));
+        if (!entry.object_is_midi)
+        {
+            /* Decrypt a copy — XDecryptData works in place. */
+            XDecryptData(out_midi.data(), static_cast<uint32_t>(out_midi.size()));
+        }
         if (out_midi.size() < 4 ||
             !(out_midi[0] == 'M' && out_midi[1] == 'T' && out_midi[2] == 'h' && out_midi[3] == 'd'))
         {
@@ -1245,7 +1215,7 @@
         BAESong_Preroll(song);
         BAESong_SetLoops(song, m_loop_enabled ? 32767 : 0);
         BAEMixer_SetOutputGain(m_mixer, m_volume_percent);
-        BAESong_Start(song, 0);
+        BAESong_Start(song, 1);
         m_song = song;
         m_song_started = true;
         m_groovoid_index = index;
@@ -1264,7 +1234,7 @@
         BAESong_SetMicrosecondPosition(m_song, 0);
         BAESong_SetLoops(m_song, m_loop_enabled ? 32767 : 0);
         BAESong_Preroll(m_song);
-        BAESong_Start(m_song, 0);
+        BAESong_Start(m_song, 1);
         m_song_started = true;
     }
 
@@ -1304,7 +1274,8 @@
         {
             BAESong_SetLoops(m_song, m_loop_enabled ? 32767 : 0);
             BAESong_Preroll(m_song);
-            BAESong_Start(m_song, 0);
+            /* Priority > preview song so keyboard/SE audition NoteOns don't steal. */
+            BAESong_Start(m_song, 1);
             m_song_started = true;
         }
         else if (done_flag)
@@ -1331,7 +1302,7 @@
         BAESong_Stop(m_song, FALSE);
         BAESong_SetMicrosecondPosition(m_song, 0);
         BAESong_SetLoops(m_song, m_loop_enabled ? 32767 : 0);
-        BAESong_Start(m_song, 0);
+        BAESong_Start(m_song, 1);
         BAESong_Pause(m_song);
         m_song_started = true;
     }

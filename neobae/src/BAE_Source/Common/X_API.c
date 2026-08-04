@@ -6559,6 +6559,10 @@ bool XGetResourceName(XResourceType resourceType, XLongResourceID resourceID,
 bool XGetFileResourceName(XFILE fileRef, XResourceType resourceType,
                             XLongResourceID resourceID, char *cName)
 {
+    char            pascalName[256];
+    XPTR            pData;
+    int32_t         size;
+
     if (cName)
     {
         cName[0] = 0;
@@ -6566,6 +6570,45 @@ bool XGetFileResourceName(XFILE fileRef, XResourceType resourceType,
     if (XGetResourceNameOnly(fileRef, resourceType, resourceID, cName))
     {
         XPtoCstr(cName);
+        return TRUE;
+    }
+
+    /*
+     * ZREZ packs logical INST/SONG/Midi/BANK into ZINS/ZSNG/ZBNK. The flat
+     * resource cache only lists the packed containers, so name/exists lookups
+     * must fall through the same expanders used by XGetFileResource.
+     */
+    pascalName[0] = 0;
+    pData = NULL;
+    size = 0;
+    if (resourceType == ID_INST)
+    {
+        pData = PV_GetInstFromZmfBlockByID(fileRef, resourceID, pascalName, &size);
+    }
+    else if (resourceType == ID_ALIAS)
+    {
+        pData = PV_GetAliasFromZmfInstBlockByID(fileRef, resourceID, pascalName, &size);
+    }
+    else if (resourceType == ID_SONG)
+    {
+        pData = PV_GetSongFromZmfBlockByID(fileRef, resourceID, pascalName, &size);
+    }
+    else if (resourceType == ID_BANK || resourceType == ID_MIDI || resourceType == ID_MIDI_OLD)
+    {
+        pData = PV_GetResourceFromZmfBankBlockByTypeAndID(fileRef,
+                                                          resourceType,
+                                                          resourceID,
+                                                          pascalName,
+                                                          &size);
+    }
+    if (pData)
+    {
+        XDisposePtr(pData);
+        if (cName)
+        {
+            XBlockMove(pascalName, cName, (int32_t)((unsigned char)pascalName[0]) + 1);
+            XPtoCstr(cName);
+        }
         return TRUE;
     }
     return FALSE;

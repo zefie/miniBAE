@@ -983,6 +983,7 @@
         m_sample_editor_has_uncompressed_master =
             (!m_sample_editor_is_song_sample &&
              HasUncompressedMasterForSnd(m_sample_editor_snd_resource_id));
+        RefreshSampleEditorUsageText();
         m_sample_editor_open = true;
     }
 
@@ -1346,13 +1347,11 @@
 
     void StopSampleEditorPreview()
     {
-        if (!m_sample_editor_playing)
-        {
-            return;
-        }
         if (m_sample_editor_preview_sound)
         {
-            BAESound_Stop(m_sample_editor_preview_sound, FALSE);
+            /* Drain the mixer slice before returning — plain Stop clears
+             * voiceRef and races FreeWaveform on the next Load. */
+            (void)BAESound_StopAndWait(m_sample_editor_preview_sound);
         }
         m_sample_editor_playing = false;
     }
@@ -1595,8 +1594,10 @@
             return;
         }
 
-        BAESound_Stop(m_sample_editor_preview_sound, FALSE);
-
+        /* Do not BAESound_Stop() here. Stop clears voiceRef before
+         * LoadCustomSample → Unload can wait for GM_IsSampleProcessing, which
+         * frees the waveform mid-mix and causes an intermittent one-channel
+         * click/blip. Unload stops and drains correctly on its own. */
         uint32_t loop_start = 0;
         uint32_t loop_end = 0;
         if (m_sample_editor_loop_enabled)
@@ -1692,6 +1693,11 @@
         }
 
         const BAERmfEditorCompressionType target = options[static_cast<size_t>(m_sample_editor_codec_index)].type;
+
+        /* Stop any current audition before a (possibly slow) re-encode so the
+         * mixer is not still touching the previous waveform when we reload. */
+        StopSampleEditorPreview();
+
         if (target == BAE_EDITOR_COMPRESSION_DONT_CHANGE || target == BAE_EDITOR_COMPRESSION_PCM)
         {
             m_sample_editor_audition_pcm = m_sample_editor_original_pcm;
@@ -2493,6 +2499,10 @@
         else
         {
             ImGui::Text("Resource ID: %u", m_sample_editor_snd_resource_id);
+        }
+        if (!m_sample_editor_usage_text.empty())
+        {
+            ImGui::TextWrapped("%s", m_sample_editor_usage_text.c_str());
         }
 
         const uint32_t rate_hz = std::max<uint32_t>(m_sample_editor_sample_rate_hz, 1u);

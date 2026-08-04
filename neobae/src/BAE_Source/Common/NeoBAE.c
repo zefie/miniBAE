@@ -7850,6 +7850,37 @@ BAEResult BAESound_Stop(BAESound sound, BAE_BOOL startFade)
     return BAE_TranslateOPErr(err);
 }
 
+// BAESound_StopAndWait()
+// --------------------------------------
+// Stop immediately, then wait until the mixer is no longer processing the
+// former voice. Required before Load/Unload from the UI thread: a plain
+// BAESound_Stop() clears voiceRef first, so a following Unload cannot wait
+// and may free the waveform mid-slice (intermittent one-channel click).
+//
+BAEResult BAESound_StopAndWait(BAESound sound)
+{
+    OPErr err;
+    VOICE_REFERENCE voice;
+
+    err = NO_ERR;
+    if ((sound) && (sound->mID == OBJECT_ID))
+    {
+        BAE_AcquireMutex(sound->mLock);
+        voice = sound->voiceRef;
+        PV_BAESound_Stop(sound, FALSE);
+        while (GM_IsSampleProcessing(voice))
+        {
+            XWaitMicroseconds(BAE_GetSliceTimeInMicroseconds());
+        }
+        BAE_ReleaseMutex(sound->mLock);
+    }
+    else
+    {
+        err = NULL_OBJECT;
+    }
+    return BAE_TranslateOPErr(err);
+}
+
 // BAESound_GetInfo()
 // --------------------------------------
 //

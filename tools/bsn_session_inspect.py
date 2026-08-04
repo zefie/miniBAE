@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Inspect Beatnik Editor 2 Session (.bsn) / IREZ resource files.
+"""Inspect Beatnik Editor 2 Session (.bsn/.zsn) / IREZ/ZREZ resource files.
 
-Session documents are IREZ+BEPF banks with editor metadata (BePf/DATe) and
-optional user Midi/SONG/CaSd resources. See docs/be2_session_bsn.md.
+Session documents are IREZ/ZREZ+BEPF banks with editor metadata (BePf/DATe) and
+optional user Midi/SONG/CaSd resources. ZREZ sessions pack SONG/Midi into
+ZSNG/ZBNK; this tool expands those for song listing. See docs/be2_session_bsn.md.
 """
 from __future__ import annotations
 
 import argparse
+import lzma
 import struct
 import sys
 from collections import Counter, defaultdict
@@ -82,9 +84,140 @@ def index_by_type_id(resources: List[Resource]) -> Dict[Tuple[bytes, int], Resou
     return out
 
 
-def session_user_songs(resources: List[Resource]) -> List[dict]:
-    """SONG entries whose object resource is type Midi (not emid groovoids)."""
+def date_stamped_song_keys(resources: List[Resource]) -> Tuple[set, set]:
+    """Return (song_ids, midi_ids) stamped in DATe (BE2 editor-touched songs)."""
+    song_ids: set = set()
+    midi_ids: set = set()
+    for r in resources:
+        if r["type"] != b"DATe":
+            continue
+        for entry in parse_date(r["body"]):  # type: ignore[arg-type]
+            if entry["type"] == b"SONG":
+                song_ids.add(int(entry["id"]))
+            elif entry["type"] == b"Midi":
+                midi_ids.add(int(entry["id"]))
+    return song_ids, midi_ids
+
+
+def decompress_zmf_payload(body: bytes) -> bytes:
+    """Decompress NeoBAE XDecompressPtr LZMA payload (feXXXXXX + ZL21 + prop + LZMA2)."""
+    if len(body) < 9:
+        raise ValueError("ZMF compressed body too short")
+    hdr = struct.unpack(">I", body[:4])[0]
+    usize = hdr & 0xFFFFFF
+    if body[4:8] != b"ZL21":
+        raise ValueError(f"expected ZL21 magic, got {body[4:8]!r}")
+    prop = body[8]
+    payload = body[9:]
+    filt = lzma._decode_filter_properties(lzma.FILTER_LZMA2, bytes([prop]))
+    decoded = lzma.decompress(payload, format=lzma.FORMAT_RAW, filters=[filt])
+    if usize and len(decoded) != usize:
+        # Header size is authoritative for engine alloc; tolerate trailing slack.
+        if len(decoded) < usize:
+            raise ValueError(f"LZMA2 size mismatch: hdr={usize} got={len(decoded)}")
+        decoded = decoded[:usize]
+    return decoded
+
+
+def expand_zmf_packed_resources(resources: List[Resource]) -> List[Resource]:
+    """Inject synthetic flat SONG/Midi/BANK entries from ZSNG/ZBNK blocks."""
+    out = list(resources)
     by = index_by_type_id(resources)
+
+    for r in resources:
+        if r["type"] == b"ZSNG":
+            try:
+                block = decompress_zmf_payload(r["body"])  # type: ignore[arg-type]
+            except Exception as exc:  # noqa: BLE001
+                print(f"  warning: ZSNG id={r['id']} decompress failed: {exc}", file=sys.stderr)
+                continue
+            if len(block) < 12 or block[0:4] != b"ZSNG":
+                continue
+            count = struct.unpack(">I", block[8:12])[0]
+            p = 12
+            for _ in range(count):
+                if p + 10 > len(block):
+                    break
+                rid = struct.unpack(">I", block[p : p + 4])[0]
+                p += 4
+                nlen = struct.unpack(">H", block[p : p + 2])[0]
+                p += 2
+                dlen = struct.unpack(">I", block[p : p + 4])[0]
+                p += 4
+                name = block[p : p + nlen]
+                p += nlen
+                body = block[p : p + dlen]
+                p += dlen
+                if (b"SONG", rid) in by:
+                    continue
+                out.append(
+                    {
+                        "idx": len(out),
+                        "type": b"SONG",
+                        "id": rid,
+                        "name": name,
+                        "body": body,
+                        "body_len": dlen,
+                        "hdr_offset": -1,
+                        "next_off": 0,
+                        "from_zsng": True,
+                    }
+                )
+                by[(b"SONG", rid)] = out[-1]
+
+        if r["type"] == b"ZBNK":
+            try:
+                block = decompress_zmf_payload(r["body"])  # type: ignore[arg-type]
+            except Exception as exc:  # noqa: BLE001
+                print(f"  warning: ZBNK id={r['id']} decompress failed: {exc}", file=sys.stderr)
+                continue
+            if len(block) < 12 or block[0:4] != b"ZBNK":
+                continue
+            count = struct.unpack(">I", block[8:12])[0]
+            p = 12
+            for _ in range(count):
+                if p + 14 > len(block):
+                    break
+                etype = block[p : p + 4]
+                p += 4
+                eid = struct.unpack(">I", block[p : p + 4])[0]
+                p += 4
+                nlen = struct.unpack(">H", block[p : p + 2])[0]
+                p += 2
+                dlen = struct.unpack(">I", block[p : p + 4])[0]
+                p += 4
+                name = block[p : p + nlen]
+                p += nlen
+                body = block[p : p + dlen]
+                p += dlen
+                if (etype, eid) in by:
+                    continue
+                out.append(
+                    {
+                        "idx": len(out),
+                        "type": etype,
+                        "id": eid,
+                        "name": name,
+                        "body": body,
+                        "body_len": dlen,
+                        "hdr_offset": -1,
+                        "next_off": 0,
+                        "from_zbnk": True,
+                    }
+                )
+                by[(etype, eid)] = out[-1]
+    return out
+
+
+def session_user_songs(resources: List[Resource]) -> List[dict]:
+    """Custom Session songs: SONG→Midi, preferably DATe-stamped.
+
+    Classic banks keep groovoids as SONG→emid. Some sessions (e.g. zpatches)
+    store bank groovoids as SONG→Midi without DATe stamps; those are not user songs.
+    """
+    by = index_by_type_id(resources)
+    dated_songs, dated_midis = date_stamped_song_keys(resources)
+    use_date_filter = bool(dated_songs or dated_midis)
     songs = []
     for r in resources:
         if r["type"] != b"SONG":
@@ -95,11 +228,15 @@ def session_user_songs(resources: List[Resource]) -> List[dict]:
         midi = by.get((b"Midi", hdr["midi_id"]))
         if not midi:
             continue
+        song_id = int(r["id"])
+        midi_id = int(hdr["midi_id"])
+        if use_date_filter and song_id not in dated_songs and midi_id not in dated_midis:
+            continue
         songs.append(
             {
-                "song_id": int(r["id"]),
+                "song_id": song_id,
                 "name": r["name"].decode("latin-1", errors="replace"),  # type: ignore[union-attr]
-                "midi_id": hdr["midi_id"],
+                "midi_id": midi_id,
                 "midi_name": midi["name"].decode("latin-1", errors="replace"),  # type: ignore[union-attr]
                 "midi_len": int(midi["body_len"]),
                 "song_type": hdr["song_type"],
@@ -109,6 +246,42 @@ def session_user_songs(resources: List[Resource]) -> List[dict]:
         )
     songs.sort(key=lambda s: s["song_id"])
     return songs
+
+
+def session_groovoids(resources: List[Resource]) -> List[dict]:
+    """Bank groovoids: SONG→emid, or unstamped SONG→Midi when DATe filters custom songs."""
+    by = index_by_type_id(resources)
+    dated_songs, dated_midis = date_stamped_song_keys(resources)
+    use_date_filter = bool(dated_songs or dated_midis)
+    out = []
+    for r in resources:
+        if r["type"] != b"SONG":
+            continue
+        hdr = song_header(r["body"])  # type: ignore[arg-type]
+        if not hdr:
+            continue
+        obj = int(hdr["midi_id"])
+        has_emid = (b"emid", obj) in by
+        has_midi = (b"Midi", obj) in by
+        if has_emid:
+            kind = "emid"
+        elif has_midi and use_date_filter:
+            song_id = int(r["id"])
+            if song_id in dated_songs or obj in dated_midis:
+                continue
+            kind = "Midi"
+        else:
+            continue
+        out.append(
+            {
+                "song_id": int(r["id"]),
+                "name": r["name"].decode("latin-1", errors="replace"),  # type: ignore[union-attr]
+                "object_id": obj,
+                "object_type": kind,
+            }
+        )
+    out.sort(key=lambda s: s["name"])
+    return out
 
 
 def casd_entries(resources: List[Resource]) -> List[dict]:
@@ -155,12 +328,22 @@ def inspect(path: Path, verbose: bool = False) -> int:
     sig, ver, claimed, resources, data = parse_irez(path)
     counts = Counter(r["type"] for r in resources)
     session = is_session_document(resources)
-    songs = session_user_songs(resources)
+    logical = expand_zmf_packed_resources(resources)
+    songs = session_user_songs(logical)
+    groovoids = session_groovoids(logical)
     casds = casd_entries(resources)
+    packed_song = any(r.get("from_zsng") for r in logical)
+    packed_midi = any(r.get("from_zbnk") and r["type"] == b"Midi" for r in logical)
 
     print(f"File: {path}")
     print(f"  signature: {sig!r}  version: {ver}  claimed: {claimed}  parsed: {len(resources)}  size: {len(data)}")
     print(f"  session document (BePf 'Session Prefs'): {session}")
+    if packed_song or packed_midi:
+        print(
+            f"  ZMF packed expand: "
+            f"ZSNG→SONG={sum(1 for r in logical if r.get('from_zsng'))} "
+            f"ZBNK→Midi={sum(1 for r in logical if r.get('from_zbnk') and r['type'] == b'Midi')}"
+        )
     print("  resource counts:")
     for t, n in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])):
         total = sum(int(r["body_len"]) for r in resources if r["type"] == t)
@@ -168,7 +351,7 @@ def inspect(path: Path, verbose: bool = False) -> int:
         print(f"    {label!r:8} count={n:4d}  body_bytes={total}")
 
     if songs:
-        print(f"  user songs (SONG→Midi): {len(songs)}")
+        print(f"  user songs (SONG→Midi, DATe-filtered when present): {len(songs)}")
         for s in songs:
             print(
                 f"    SONG id={s['song_id']} name={s['name']!r} "
@@ -176,6 +359,18 @@ def inspect(path: Path, verbose: bool = False) -> int:
             )
     else:
         print("  user songs (SONG→Midi): none")
+
+    if groovoids:
+        print(f"  groovoids: {len(groovoids)}")
+        for g in groovoids[:5]:
+            print(
+                f"    SONG id={g['song_id']} name={g['name']!r} "
+                f"→ {g['object_type']} id={g['object_id']}"
+            )
+        if len(groovoids) > 5:
+            print(f"    … {len(groovoids) - 5} more")
+    else:
+        print("  groovoids: none")
 
     if casds:
         print(f"  uncompressed PCM cache (CaSd): {len(casds)}")

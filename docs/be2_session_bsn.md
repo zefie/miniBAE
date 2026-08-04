@@ -100,13 +100,15 @@ Marked-deleted resources (old `BEPF` / `BePf` / `DATe` bodies) left in the file 
 
 ## Songs
 
-Built-in groovoids: `SONG` (high random-ish IDs) → **`emid`** objects.
+Built-in groovoids: `SONG` (high random-ish IDs) → **`emid`** objects (classic banks).
 
-**User Session songs:** `SONG` → **`Midi`** objects containing raw Standard MIDI (`MThd…`).
+**User Session songs:** `SONG` → **`Midi`** objects containing raw Standard MIDI (`MThd…`), and stamped in **`DATe`** (`Midi` + `SONG` entries).
+
+Some sessions (e.g. `zpatches.bsn`) store bank groovoids as decrypted `SONG`→`Midi` as well. Those keep the original high `SONG` IDs and are **not** DATe-stamped; only the editor-added custom songs appear in `DATe`. NeoBAE uses that DATe filter so Custom Songs vs Groovoids still split correctly when both use `Midi`.
 
 `SONG` body is `SongResource_RMF` ([`X_Formats.h`](../neobae/src/BAE_Source/Common/X_Formats.h) / [`BAE_Resource_SONG.txt`](BAE_Resource_SONG.txt)):
 
-- `uint16` object id → `Midi` resource id  
+- `uint16` object id → `Midi` / `emid` resource id  
 - `songType == 1` (RMF structured)  
 - trailing typed blocks, e.g. `TITL` + C string  
 
@@ -126,11 +128,12 @@ Examples:
 
 ## Open strategy (NeoBAE)
 
-1. Detect `BePf` / `Session Prefs` (editor session document).
-2. Load whole file with existing IREZ bank loader (`BAEMixer_AddBankFromFile`).
-3. Enumerate user songs: every `SONG` whose object id resolves to type **`Midi`**.
-4. Load active song via `BAERmfEditorDocument_LoadFromMemory(midiBytes, …, BAE_MIDI_TYPE)`.
-5. Optional later: hydrate SE PCM masters from `CaSd` by matching names/ids to bank samples.
+1. Detect `BePf` / `Session Prefs` (editor session document; flat even in ZREZ).
+2. Load whole file with existing IREZ/ZREZ bank loader (`BAEMixer_AddBankFromFile`).
+3. Enumerate user songs via **XFILE APIs** (`XCountFileResourcesOfType` / `XGetFileResource`), not a raw flat resource walk — ZREZ sessions pack `SONG`→`ZSNG` and `Midi`→`ZBNK`. Keep DATe filter: stamped `SONG`→`Midi` when any Midi/SONG stamps exist; otherwise all `SONG`→`Midi`.
+4. Enumerate groovoids the same way: `SONG`→`emid`, plus unstamped `SONG`→`Midi` when the DATe filter is active (`XExistsFileResource` expands ZBNK for Midi).
+5. Load active song via `BAERmfEditorDocument_LoadFromMemory(midiBytes, …, BAE_MIDI_TYPE)`.
+6. Optional later: hydrate SE PCM masters from `CaSd` by matching names/ids to bank samples.
 
 ## Write / Phase 3 gate (2026-08)
 

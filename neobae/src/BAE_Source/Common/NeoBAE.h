@@ -1771,6 +1771,14 @@ extern "C"
     BAEResult BAESound_Stop(BAESound sound,
                             BAE_BOOL startFade);
 
+    // BAESound_StopAndWait()
+    // --------------------------------------
+    // Like BAESound_Stop(sound, FALSE), but blocks until the mixer finishes the
+    // current slice that may still reference the sound's waveform. Use before
+    // replacing or freeing sample data from another thread/UI callback.
+    //
+    BAEResult BAESound_StopAndWait(BAESound sound);
+
     // BAESound_Pause()
     // ------------------------------------
     // Pauses playback of the indicated BAESound.  If already paused, this function
