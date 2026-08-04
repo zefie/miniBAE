@@ -76,6 +76,11 @@
             SetStatus("No bank loaded");
             return;
         }
+        m_inst_dest_clip_path.clear();
+        m_inst_dest_clip_delete = false;
+        m_inst_dest_clip_inst_count = 0;
+        m_inst_dest_is_clip_package = false;
+
         if (mode != InstDestMode::Paste)
         {
             if (list_index < 0 || list_index >= static_cast<int>(m_instruments.size()))
@@ -109,26 +114,63 @@
             m_inst_dest_source_index = 0;
             m_inst_dest_source_inst_id = m_inst_clipboard_inst_id;
             m_inst_dest_source_display_id = m_inst_clipboard_inst_id;
-            m_inst_dest_bank = 2;
-            m_inst_dest_percussion = ((m_inst_clipboard_inst_id & 0x80u) != 0u);
+            /* Default to the source bank:program (user may remap to another free slot). */
+            DecodeInstSlot(m_inst_clipboard_inst_id,
+                           &m_inst_dest_bank,
+                           &m_inst_dest_percussion,
+                           &m_inst_dest_program);
         }
 
-        bool used[512];
-        BuildUsedInstIdMap(used);
-        int free_prog = -1;
-        const uint32_t base =
-            BankInstIdFromSlot(m_inst_dest_bank, m_inst_dest_percussion, 0);
-        for (int p = 0; p < 128; ++p)
+        if (mode != InstDestMode::Paste)
         {
-            if (base + static_cast<uint32_t>(p) < 512u && !used[base + static_cast<uint32_t>(p)])
+            bool used[512];
+            BuildUsedInstIdMap(used);
+            int free_prog = -1;
+            const uint32_t base =
+                BankInstIdFromSlot(m_inst_dest_bank, m_inst_dest_percussion, 0);
+            for (int p = 0; p < 128; ++p)
             {
-                free_prog = p;
-                break;
+                if (base + static_cast<uint32_t>(p) < 512u && !used[base + static_cast<uint32_t>(p)])
+                {
+                    free_prog = p;
+                    break;
+                }
             }
+            m_inst_dest_program = free_prog >= 0 ? free_prog : 0;
         }
-        m_inst_dest_program = free_prog >= 0 ? free_prog : 0;
         m_inst_dest_deep_clone = false;
         m_inst_dest_mode = mode;
+        m_inst_dest_open = true;
+    }
+
+    void OpenInstDestDialogForClipPackage(const std::string &path,
+                                          bool delete_after,
+                                          uint32_t source_inst_id,
+                                          int inst_count)
+    {
+        if (!m_bank_token && !LoadBuiltinBankAsActive())
+        {
+            SetStatus("No bank loaded");
+            return;
+        }
+        if (path.empty())
+        {
+            SetStatus("Instrument clipboard is empty");
+            return;
+        }
+        m_inst_dest_clip_path = path;
+        m_inst_dest_clip_delete = delete_after;
+        m_inst_dest_clip_inst_count = inst_count > 0 ? inst_count : 1;
+        m_inst_dest_is_clip_package = true;
+        m_inst_dest_source_index = 0;
+        m_inst_dest_source_inst_id = source_inst_id;
+        m_inst_dest_source_display_id = source_inst_id;
+        DecodeInstSlot(source_inst_id,
+                       &m_inst_dest_bank,
+                       &m_inst_dest_percussion,
+                       &m_inst_dest_program);
+        m_inst_dest_deep_clone = false;
+        m_inst_dest_mode = InstDestMode::Paste;
         m_inst_dest_open = true;
     }
 
@@ -165,11 +207,29 @@
 
         const uint32_t dest_id =
             BankInstIdFromSlot(m_inst_dest_bank, m_inst_dest_percussion, m_inst_dest_program);
-        bool used[512];
-        BuildUsedInstIdMap(used);
-        if (dest_id < 512u && used[dest_id])
+        bool used_programs[128];
+        CollectUsedProgramsForGroup(m_inst_dest_bank, m_inst_dest_percussion, used_programs);
+        if (used_programs[m_inst_dest_program])
         {
             SetStatus("Destination instrument slot is already in use");
+            return;
+        }
+
+        /* Cross-process / OS clip package paste: remap INST + colliding SNDs. */
+        if (m_inst_dest_mode == InstDestMode::Paste && m_inst_dest_is_clip_package)
+        {
+            const std::string path = m_inst_dest_clip_path;
+            const bool delete_after = m_inst_dest_clip_delete;
+            if (!RemapAndImportInstrumentClip(path, dest_id, delete_after))
+            {
+                return;
+            }
+            m_inst_dest_open = false;
+            m_inst_dest_clip_path.clear();
+            m_inst_dest_is_clip_package = false;
+            m_inst_dest_clip_delete = false;
+            m_inst_dest_clip_inst_count = 0;
+            MarkBank01TouchedIfNeeded(m_inst_dest_bank);
             return;
         }
 
@@ -340,41 +400,87 @@
             break;
         }
         ImGui::OpenPopup(title);
-        if (!ImGui::BeginPopupModal(title, &m_inst_dest_open, ImGuiWindowFlags_AlwaysAutoResize))
+        bool popup_open = m_inst_dest_open;
+        if (!ImGui::BeginPopupModal(title, &popup_open, ImGuiWindowFlags_AlwaysAutoResize))
         {
+            if (!popup_open)
+            {
+                m_inst_dest_open = false;
+                m_inst_dest_clip_path.clear();
+                m_inst_dest_is_clip_package = false;
+            }
+            return;
+        }
+        if (!popup_open)
+        {
+            m_inst_dest_open = false;
+            m_inst_dest_clip_path.clear();
+            m_inst_dest_is_clip_package = false;
+            ImGui::EndPopup();
             return;
         }
 
+        if (m_inst_dest_mode == InstDestMode::Paste)
+        {
+            int src_bank = 0;
+            bool src_perc = false;
+            int src_prog = 0;
+            DecodeInstSlot(m_inst_dest_source_display_id, &src_bank, &src_perc, &src_prog);
+            ImGui::Text("Source slot: B%d%s P%03d (instID %u)",
+                        src_bank,
+                        src_perc ? " Perc" : "",
+                        src_prog,
+                        m_inst_dest_source_display_id);
+            if (m_inst_dest_is_clip_package && m_inst_dest_clip_inst_count > 1)
+            {
+                ImGui::TextDisabled(
+                    "%d instruments in clipboard — first → selected slot; others → next free.",
+                    m_inst_dest_clip_inst_count);
+            }
+            ImGui::Separator();
+        }
+
         ImGui::Text("Destination slot");
+        const int prev_bank = m_inst_dest_bank;
+        const bool prev_perc = m_inst_dest_percussion;
         ImGui::SetNextItemWidth(80.0f);
         ImGui::InputInt("Bank", &m_inst_dest_bank);
-        if (m_inst_dest_bank < 0)
-        {
-            m_inst_dest_bank = 0;
-        }
-        if (m_inst_dest_bank > 127)
-        {
-            m_inst_dest_bank = 127;
-        }
+        m_inst_dest_bank = std::clamp(m_inst_dest_bank, 0, 127);
         if (m_inst_dest_mode == InstDestMode::Move && m_inst_dest_bank != 2)
         {
             ImGui::TextDisabled("BE2 Move targets Custom (Bank 2); other banks allowed here.");
         }
         ImGui::Checkbox("Percussion", &m_inst_dest_percussion);
+        if (m_inst_dest_bank != prev_bank || m_inst_dest_percussion != prev_perc)
+        {
+            const int free_prog = FirstFreeProgramForGroup(m_inst_dest_bank, m_inst_dest_percussion);
+            if (free_prog >= 0)
+            {
+                m_inst_dest_program = free_prog;
+            }
+        }
         ImGui::SetNextItemWidth(80.0f);
         ImGui::InputInt("Program", &m_inst_dest_program);
-        if (m_inst_dest_program < 0)
-        {
-            m_inst_dest_program = 0;
-        }
-        if (m_inst_dest_program > 127)
-        {
-            m_inst_dest_program = 127;
-        }
-        ImGui::Text("instID → %u",
-                    BankInstIdFromSlot(m_inst_dest_bank, m_inst_dest_percussion, m_inst_dest_program));
+        m_inst_dest_program = std::clamp(m_inst_dest_program, 0, 127);
 
-        if (m_inst_dest_mode == InstDestMode::Clone || m_inst_dest_mode == InstDestMode::Paste)
+        bool used[128];
+        CollectUsedProgramsForGroup(m_inst_dest_bank, m_inst_dest_percussion, used);
+        const uint32_t dest_id =
+            BankInstIdFromSlot(m_inst_dest_bank, m_inst_dest_percussion, m_inst_dest_program);
+        if (used[m_inst_dest_program])
+        {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.35f, 1.0f), "in use");
+            ImGui::TextDisabled("Choose a free program slot — Apply is disabled while occupied.");
+        }
+        else
+        {
+            ImGui::SameLine();
+            ImGui::TextDisabled("instID %u", dest_id);
+        }
+
+        if ((m_inst_dest_mode == InstDestMode::Clone || m_inst_dest_mode == InstDestMode::Paste) &&
+            !m_inst_dest_is_clip_package)
         {
             ImGui::Separator();
             ImGui::Checkbox("Deep clone (duplicate samples)", &m_inst_dest_deep_clone);
@@ -382,6 +488,11 @@
             {
                 ImGui::TextDisabled("Shares sample resources with the source.");
             }
+        }
+        else if (m_inst_dest_is_clip_package)
+        {
+            ImGui::Separator();
+            ImGui::TextDisabled("Samples with IDs already in use are remapped to free SND IDs.");
         }
 
         ImGui::Separator();
@@ -401,14 +512,29 @@
             ok_label = "Paste";
             break;
         }
+        const bool can_apply = !used[m_inst_dest_program] && m_bank_token != 0;
+        if (!can_apply)
+        {
+            ImGui::BeginDisabled();
+        }
         if (ImGui::Button(ok_label, ImVec2(140.0f, 0.0f)))
         {
             PerformInstDestAction();
+            if (!m_inst_dest_open)
+            {
+                ImGui::CloseCurrentPopup();
+            }
+        }
+        if (!can_apply)
+        {
+            ImGui::EndDisabled();
         }
         ImGui::SameLine();
         if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)))
         {
             m_inst_dest_open = false;
+            m_inst_dest_clip_path.clear();
+            m_inst_dest_is_clip_package = false;
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();

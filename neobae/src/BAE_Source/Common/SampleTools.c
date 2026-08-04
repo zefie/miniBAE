@@ -235,8 +235,6 @@ static void * PV_GetSoundHeaderPtr(XPTR pRes, int16_t  *pEncode)
 
         pSndFormat = (char *)pRes;
         soundFormat = XGetShort(pSndFormat);
-        debug_message("[PV_GetSoundHeaderPtr] soundFormat=%d (0x%04x)\n",
-                   (int)soundFormat, (unsigned)soundFormat & 0xFFFF);
         switch (soundFormat)
         {
             case XFirstSoundFormat:

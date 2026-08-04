@@ -198,6 +198,70 @@
                     "Closes floating editor windows (IE, Sample Editor, etc.).");
             }
             ImGui::Separator();
+            if (ImGui::MenuItem("Select All", "Ctrl+A"))
+            {
+                SessionSelectAllVisible();
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Cut",
+                               "Ctrl+X",
+                               false,
+                               m_session_tab == SessionTab::Songs
+                                   ? (m_session_song_index >= 0 || !m_multi_songs.empty())
+                                   : m_session_tab == SessionTab::Instruments
+                                         ? (m_selected_instrument >= 0 || !m_multi_instruments.empty())
+                                         : (m_selected_sample >= 0 || !m_multi_samples.empty())))
+            {
+                switch (m_session_tab)
+                {
+                case SessionTab::Songs:
+                    CopySongsSelection(true);
+                    break;
+                case SessionTab::Instruments:
+                    CutInstrumentsSelection();
+                    break;
+                case SessionTab::Samples:
+                    CopySamplesSelection(true);
+                    break;
+                }
+            }
+            if (ImGui::MenuItem("Copy",
+                               "Ctrl+C",
+                               false,
+                               m_session_tab == SessionTab::Songs
+                                   ? (m_session_song_index >= 0 || !m_multi_songs.empty())
+                                   : m_session_tab == SessionTab::Instruments
+                                         ? (m_selected_instrument >= 0 || !m_multi_instruments.empty())
+                                         : (m_selected_sample >= 0 || !m_multi_samples.empty())))
+            {
+                switch (m_session_tab)
+                {
+                case SessionTab::Songs:
+                    CopySongsSelection(false);
+                    break;
+                case SessionTab::Instruments:
+                    BeginCopyInstrumentsForClip();
+                    break;
+                case SessionTab::Samples:
+                    CopySamplesSelection(false);
+                    break;
+                }
+            }
+            if (ImGui::MenuItem("Paste", "Ctrl+V", false, CanPasteForSessionTab(m_session_tab)))
+            {
+                switch (m_session_tab)
+                {
+                case SessionTab::Songs:
+                    PasteSongsClipboard();
+                    break;
+                case SessionTab::Instruments:
+                    PasteInstrumentsSelection();
+                    break;
+                case SessionTab::Samples:
+                    PasteSamplesSelection();
+                    break;
+                }
+            }
             if (ImGui::MenuItem("Copy Instrument",
                                nullptr,
                                false,
@@ -205,14 +269,14 @@
                                    m_selected_instrument < static_cast<int>(m_instruments.size()) &&
                                    !m_selected_empty_slot))
             {
-                CopyInstrumentAt(m_selected_instrument);
+                BeginCopyInstrumentsForClip();
             }
             if (ImGui::MenuItem("Paste Instrument...",
                                nullptr,
                                false,
-                               m_inst_clipboard_valid && m_bank_token != 0))
+                               CanPasteInstruments()))
             {
-                OpenInstDestDialog(InstDestMode::Paste, -1);
+                PasteInstrumentsSelection();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Clear compression cache..."))
@@ -2971,6 +3035,7 @@
             m_pending_session_tab = -1;
             ImGui::EndTabBar();
         }
+        HandleSessionListShortcuts();
         if (ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows))
         {
             switch (m_session_tab)
@@ -3031,6 +3096,15 @@
                                                           ImGuiPopupFlags_MouseButtonRight |
                                                               ImGuiPopupFlags_NoOpenOverItems))
         {
+            if (ImGui::MenuItem("Paste", nullptr, false, CanPasteSongs()))
+            {
+                PasteSongsClipboard();
+            }
+            if (ImGui::MenuItem("Select All", nullptr, false, !m_session_songs.empty()))
+            {
+                SessionSelectAllVisible();
+            }
+            ImGui::Separator();
             if (ImGui::MenuItem("Add Song..."))
             {
                 OpenAddSongFileDialog();
@@ -3062,13 +3136,23 @@
                               entry.name.c_str(),
                               tag,
                               (i == m_session_song_index && m_document_dirty) ? " *" : "");
-                const bool selected = (i == m_session_song_index && m_groovoid_index < 0);
+                const bool selected =
+                    (m_multi_songs.count(i) != 0) || (i == m_session_song_index && m_groovoid_index < 0);
                 if (ImGui::Selectable(line, selected))
                 {
+                    const ImGuiIO &io = ImGui::GetIO();
+                    int primary = m_session_song_index;
+                    ApplyListSelection(m_multi_songs,
+                                       primary,
+                                       i,
+                                       m_multi_song_anchor,
+                                       io.KeyCtrl,
+                                       io.KeyShift);
+                    m_multi_song_anchor = i;
                     m_groovoid_index = -1;
-                    if (i != m_session_song_index)
+                    if (primary != m_session_song_index)
                     {
-                        ActivateSessionSongAt(i);
+                        ActivateSessionSongAt(primary);
                     }
                 }
                 if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
@@ -3093,6 +3177,10 @@
                         }
                         PlaySessionSong();
                     }
+                    if (ImGui::MenuItem("Rename..."))
+                    {
+                        OpenRenameDialog("song", i, entry.name);
+                    }
                     if (ImGui::MenuItem("Song Info...",
                                         nullptr,
                                         false,
@@ -3112,6 +3200,27 @@
                         OpenResourceUsageForSong(i);
                     }
                     ImGui::Separator();
+                    if (ImGui::MenuItem("Cut"))
+                    {
+                        m_session_song_index = i;
+                        m_multi_songs.insert(i);
+                        CopySongsSelection(true);
+                    }
+                    if (ImGui::MenuItem("Copy"))
+                    {
+                        m_session_song_index = i;
+                        m_multi_songs.insert(i);
+                        CopySongsSelection(false);
+                    }
+                    if (ImGui::MenuItem("Paste", nullptr, false, CanPasteSongs()))
+                    {
+                        PasteSongsClipboard();
+                    }
+                    if (ImGui::MenuItem("Select All"))
+                    {
+                        SessionSelectAllVisible();
+                    }
+                    ImGui::Separator();
                     if (ImGui::MenuItem("Add Song..."))
                     {
                         OpenAddSongFileDialog();
@@ -3119,6 +3228,7 @@
                     if (ImGui::MenuItem("Delete Song"))
                     {
                         RemoveSessionSongAt(i);
+                        m_multi_songs.erase(i);
                     }
                     ImGui::EndPopup();
                 }
@@ -3432,6 +3542,289 @@
             }
         }
         return kCycle[0];
+    }
+
+    /* 2D pad: X = LPF frequency, Y = resonance. InputInts stay authoritative. */
+    void DrawFilterFreqResPad()
+    {
+        constexpr int kFreqMin = 0;
+        constexpr int kFreqMax = 32767;
+        constexpr int kResMin = 0;
+        constexpr int kResMax = 32767;
+        const float height = 140.0f;
+        const ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
+        const float width = ImGui::GetContentRegionAvail().x;
+        ImGui::InvisibleButton("##lpf_pad",
+                               ImVec2(width, height),
+                               ImGuiButtonFlags_MouseButtonLeft);
+        const bool hovered = ImGui::IsItemHovered();
+        const bool active = ImGui::IsItemActive();
+        ImDrawList *dl = ImGui::GetWindowDrawList();
+        const ImVec2 p0 = canvas_pos;
+        const ImVec2 p1(canvas_pos.x + width, canvas_pos.y + height);
+        dl->AddRectFilled(p0, p1, IM_COL32(18, 20, 24, 255));
+        dl->AddRect(p0, p1, IM_COL32(70, 70, 70, 255));
+
+        const float margin = 8.0f;
+        const float graph_l = p0.x + margin + 36.0f;
+        const float graph_r = p1.x - margin - 8.0f;
+        const float graph_t = p0.y + margin + 4.0f;
+        const float graph_b = p1.y - margin - 14.0f;
+        const float graph_w = graph_r - graph_l;
+        const float graph_h = graph_b - graph_t;
+        if (graph_w < 20.0f || graph_h < 20.0f)
+        {
+            return;
+        }
+
+        dl->AddLine(ImVec2(graph_l, graph_t), ImVec2(graph_l, graph_b), IM_COL32(50, 50, 50, 255));
+        dl->AddLine(ImVec2(graph_l, graph_b), ImVec2(graph_r, graph_b), IM_COL32(50, 50, 50, 255));
+        dl->AddText(ImVec2(p0.x + 4.0f, graph_t), IM_COL32(140, 140, 140, 255), "Res");
+        dl->AddText(ImVec2(graph_r - 28.0f, graph_b + 2.0f), IM_COL32(140, 140, 140, 255), "Freq");
+
+        auto freq_to_x = [&](int f) -> float {
+            const float t = static_cast<float>(std::clamp(f, kFreqMin, kFreqMax) - kFreqMin) /
+                            static_cast<float>(kFreqMax - kFreqMin);
+            return graph_l + t * graph_w;
+        };
+        auto res_to_y = [&](int r) -> float {
+            const float t = static_cast<float>(std::clamp(r, kResMin, kResMax) - kResMin) /
+                            static_cast<float>(kResMax - kResMin);
+            return graph_b - t * graph_h;
+        };
+        auto x_to_freq = [&](float x) -> int {
+            const float t = std::clamp((x - graph_l) / graph_w, 0.0f, 1.0f);
+            return kFreqMin + static_cast<int>(std::lround(t * (kFreqMax - kFreqMin)));
+        };
+        auto y_to_res = [&](float y) -> int {
+            const float t = std::clamp((graph_b - y) / graph_h, 0.0f, 1.0f);
+            return kResMin + static_cast<int>(std::lround(t * (kResMax - kResMin)));
+        };
+
+        static bool s_dragging = false;
+        static bool s_pushed_undo = false;
+        if (active && hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+            s_dragging = true;
+            s_pushed_undo = false;
+        }
+        if (s_dragging && active)
+        {
+            if (!s_pushed_undo)
+            {
+                InstrumentEditorPushUndoFromPreEdit();
+                s_pushed_undo = true;
+            }
+            const ImVec2 mp = ImGui::GetIO().MousePos;
+            m_ie_ext.LPF_frequency = x_to_freq(mp.x);
+            m_ie_ext.LPF_resonance = y_to_res(mp.y);
+            m_ie_dirty = true;
+        }
+        if (s_dragging && !active)
+        {
+            s_dragging = false;
+            s_pushed_undo = false;
+            m_ie_dirty = true;
+            LivePatchInstrumentEditor();
+        }
+
+        const float hx = freq_to_x(m_ie_ext.LPF_frequency);
+        const float hy = res_to_y(m_ie_ext.LPF_resonance);
+        dl->AddLine(ImVec2(hx, graph_t), ImVec2(hx, graph_b), IM_COL32(60, 90, 110, 180));
+        dl->AddLine(ImVec2(graph_l, hy), ImVec2(graph_r, hy), IM_COL32(60, 90, 110, 180));
+        dl->AddCircleFilled(ImVec2(hx, hy), 7.0f, IM_COL32(98, 215, 255, 255));
+        dl->AddCircle(ImVec2(hx, hy), 7.0f, IM_COL32(20, 20, 20, 255), 0, 1.5f);
+        char meta[96];
+        std::snprintf(meta,
+                      sizeof(meta),
+                      "freq=%d  res=%d",
+                      m_ie_ext.LPF_frequency,
+                      m_ie_ext.LPF_resonance);
+        dl->AddText(ImVec2(graph_l + 4.0f, graph_t + 2.0f), IM_COL32(150, 150, 150, 255), meta);
+        ImGui::TextDisabled("Drag handle: X = frequency · Y = resonance (live-patches on release)");
+    }
+
+    void DrawKeymapZoneDiagram(uint32_t split_count)
+    {
+        const float height = 56.0f;
+        const ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
+        const float width = ImGui::GetContentRegionAvail().x;
+        ImGui::InvisibleButton("##keymap_zones",
+                               ImVec2(width, height),
+                               ImGuiButtonFlags_MouseButtonLeft);
+        const bool hovered = ImGui::IsItemHovered();
+        const bool active = ImGui::IsItemActive();
+        ImDrawList *dl = ImGui::GetWindowDrawList();
+        const ImVec2 p0 = canvas_pos;
+        const ImVec2 p1(canvas_pos.x + width, canvas_pos.y + height);
+        dl->AddRectFilled(p0, p1, IM_COL32(18, 20, 24, 255));
+        dl->AddRect(p0, p1, IM_COL32(70, 70, 70, 255));
+
+        const float margin = 6.0f;
+        const float graph_l = p0.x + margin;
+        const float graph_r = p1.x - margin;
+        const float graph_t = p0.y + margin + 10.0f;
+        const float graph_b = p1.y - margin - 10.0f;
+        const float graph_w = graph_r - graph_l;
+        if (graph_w < 40.0f)
+        {
+            return;
+        }
+
+        auto key_to_x = [&](int key) -> float {
+            return graph_l + (static_cast<float>(std::clamp(key, 0, 127)) / 127.0f) * graph_w;
+        };
+        auto x_to_key = [&](float x) -> int {
+            const float t = std::clamp((x - graph_l) / graph_w, 0.0f, 1.0f);
+            return static_cast<int>(std::lround(t * 127.0f));
+        };
+
+        static const ImU32 kZoneCols[] = {
+            IM_COL32(70, 140, 200, 160),
+            IM_COL32(90, 180, 110, 160),
+            IM_COL32(200, 150, 70, 160),
+            IM_COL32(180, 90, 160, 160),
+            IM_COL32(90, 170, 170, 160),
+            IM_COL32(160, 120, 80, 160),
+        };
+
+        struct ZoneGeom
+        {
+            uint32_t split = 0;
+            int low = 0;
+            int high = 0;
+            float x0 = 0.0f;
+            float x1 = 0.0f;
+        };
+        std::vector<ZoneGeom> zones;
+        zones.reserve(split_count);
+        for (uint32_t s = 0; s < split_count; ++s)
+        {
+            BAERmfEditorBankSampleInfo info;
+            std::memset(&info, 0, sizeof(info));
+            if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token, m_ie_instrument_index, s, &info) !=
+                BAE_NO_ERROR)
+            {
+                continue;
+            }
+            ZoneGeom z;
+            z.split = s;
+            z.low = std::clamp(static_cast<int>(info.lowKey), 0, 127);
+            z.high = std::clamp(static_cast<int>(info.highKey), 0, 127);
+            if (z.high < z.low)
+            {
+                std::swap(z.low, z.high);
+            }
+            z.x0 = key_to_x(z.low);
+            z.x1 = key_to_x(z.high + 1);
+            zones.push_back(z);
+        }
+
+        for (int k = 0; k <= 127; k += 12)
+        {
+            const float x = key_to_x(k);
+            dl->AddLine(ImVec2(x, graph_t), ImVec2(x, graph_b), IM_COL32(45, 45, 50, 255));
+            char lab[8];
+            std::snprintf(lab, sizeof(lab), "%d", k);
+            dl->AddText(ImVec2(x + 1.0f, p0.y + 1.0f), IM_COL32(110, 110, 110, 255), lab);
+        }
+
+        for (const ZoneGeom &z : zones)
+        {
+            const bool selected = (m_ie_selected_split == static_cast<int>(z.split));
+            const ImU32 fill = kZoneCols[z.split % (sizeof(kZoneCols) / sizeof(kZoneCols[0]))];
+            dl->AddRectFilled(ImVec2(z.x0, graph_t),
+                              ImVec2(std::max(z.x0 + 2.0f, z.x1), graph_b),
+                              fill);
+            if (selected)
+            {
+                dl->AddRect(ImVec2(z.x0, graph_t),
+                            ImVec2(std::max(z.x0 + 2.0f, z.x1), graph_b),
+                            IM_COL32(255, 255, 255, 220),
+                            0.0f,
+                            0,
+                            2.0f);
+            }
+            char idx[8];
+            std::snprintf(idx, sizeof(idx), "%u", z.split);
+            dl->AddText(ImVec2(z.x0 + 3.0f, graph_t + 2.0f), IM_COL32(240, 240, 240, 255), idx);
+        }
+
+        enum class EdgeDrag : int
+        {
+            None = 0,
+            Low,
+            High,
+        };
+        static EdgeDrag s_edge = EdgeDrag::None;
+        static int s_edge_split = -1;
+        const float edge_hit = 5.0f;
+        const ImVec2 mp = ImGui::GetIO().MousePos;
+
+        if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
+        {
+            s_edge = EdgeDrag::None;
+            s_edge_split = -1;
+            int hit_split = -1;
+            for (const ZoneGeom &z : zones)
+            {
+                if (std::fabs(mp.x - z.x0) <= edge_hit)
+                {
+                    s_edge = EdgeDrag::Low;
+                    s_edge_split = static_cast<int>(z.split);
+                    hit_split = s_edge_split;
+                    break;
+                }
+                if (std::fabs(mp.x - z.x1) <= edge_hit)
+                {
+                    s_edge = EdgeDrag::High;
+                    s_edge_split = static_cast<int>(z.split);
+                    hit_split = s_edge_split;
+                    break;
+                }
+                if (mp.x >= z.x0 && mp.x <= z.x1)
+                {
+                    hit_split = static_cast<int>(z.split);
+                }
+            }
+            if (hit_split >= 0)
+            {
+                m_ie_selected_split = hit_split;
+            }
+        }
+
+        if (active && s_edge != EdgeDrag::None && s_edge_split >= 0 && m_bank_token)
+        {
+            BAERmfEditorBankSampleInfo info;
+            std::memset(&info, 0, sizeof(info));
+            if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
+                                                         m_ie_instrument_index,
+                                                         static_cast<uint32_t>(s_edge_split),
+                                                         &info) == BAE_NO_ERROR)
+            {
+                const int key = x_to_key(mp.x);
+                if (s_edge == EdgeDrag::Low)
+                {
+                    info.lowKey = static_cast<unsigned char>(
+                        std::clamp(key, 0, static_cast<int>(info.highKey)));
+                }
+                else
+                {
+                    info.highKey = static_cast<unsigned char>(
+                        std::clamp(key, static_cast<int>(info.lowKey), 127));
+                }
+                (void)BAERmfEditorBank_SetInstrumentSampleInfo(m_bank_token,
+                                                               m_ie_instrument_index,
+                                                               static_cast<uint32_t>(s_edge_split),
+                                                               &info);
+            }
+        }
+        if (!active)
+        {
+            s_edge = EdgeDrag::None;
+            s_edge_split = -1;
+        }
+        ImGui::TextDisabled("Zones 0–127 · click to select · drag edges to set Low/High");
     }
 
     void DrawAdsrEnvelopeGraph(BAERmfEditorADSRInfo &adsr,
@@ -3909,6 +4302,7 @@
     void DrawAdsrStageEditor(BAERmfEditorADSRInfo &adsr, const char *id)
     {
         ImGui::PushID(id);
+        m_ie_adsr_default_focus_id = id ? id : "";
         DrawAdsrEnvelopeGraph(adsr, "graph", 160.0f, true);
         int stages = static_cast<int>(adsr.stageCount);
         auto init_stage = [&](int index) {
@@ -3956,6 +4350,34 @@
         }
         ImGui::SameLine();
         ImGui::TextDisabled("stages");
+        ImGui::SameLine();
+        if (ImGui::Button("Use As Default"))
+        {
+            m_pref_adsr_default = adsr;
+            m_pref_adsr_default_valid = true;
+            SaveEditorPrefsToDisk();
+            SetStatus("Saved ADSR as editor default");
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Store this ADSR as the app-wide default (editor prefs)");
+        }
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!m_pref_adsr_default_valid);
+        if (ImGui::Button("Paste Default"))
+        {
+            MarkInstrumentEditorDirty(false);
+            adsr = m_pref_adsr_default;
+            stages = static_cast<int>(adsr.stageCount);
+            LivePatchInstrumentEditor();
+            SetStatus("Pasted default ADSR");
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        {
+            ImGui::SetTooltip(m_pref_adsr_default_valid ? "Apply stored default ADSR here"
+                                                       : "No default ADSR stored yet");
+        }
 
         static const struct
         {
@@ -4082,7 +4504,8 @@
         std::set<uint32_t> seen;
         for (const SampleRow &sample : m_samples)
         {
-            if (sample.source != SampleSource::Bank || sample.snd_resource_id == 0)
+            /* ID 0 is valid (BSN/session banks often use it); only skip unset 0xFFFF. */
+            if (sample.source != SampleSource::Bank || sample.snd_resource_id == 0xFFFFu)
             {
                 continue;
             }
@@ -4512,6 +4935,7 @@
                         m_ie_ext.LPF_lowpassAmount = amt;
                         MarkInstrumentEditorDirty();
                     }
+                    DrawFilterFreqResPad();
                     ImGui::SeparatorText("Filter envelopes (LFO → LPFR / LPRE / LPAM)");
                     bool any_filter_lfo = false;
                     for (uint32_t i = 0; i < m_ie_ext.lfoCount && i < BAE_EDITOR_MAX_LFOS; ++i)
@@ -4791,6 +5215,8 @@
 
         std::vector<std::pair<uint32_t, std::string>> snd_choices;
         CollectBankSndChoices(snd_choices);
+
+        DrawKeymapZoneDiagram(split_count);
 
         if (ImGui::BeginTable("keymap",
                               6,

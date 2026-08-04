@@ -438,11 +438,13 @@ void setWindowIcon(SDL_Window *window)
 #endif
 }
 
-#if defined(_WIN32) && defined(_WIN32_WINNT) && _WIN32_WINNT >= 0x0A00 // Windows 10 or later
-bool isWindows10LTSC2021(void) {
+#ifdef _WIN32
+/* LTSC/LTSB (incl. 2019/17763 and 2021/19044) have historically flaky default
+ * Direct3D Present with SDL — force OpenGL before SDL_Init.
+ * Previously this only matched ReleaseId == "21H2", so LTSC 2019 never got it. */
+static bool isWindowsLTSC(void) {
     HKEY hKey;
     char productName[256] = {0};
-    char releaseId[256] = {0};
     DWORD size = sizeof(productName);
 
     if (RegOpenKeyExA(HKEY_LOCAL_MACHINE,
@@ -456,15 +458,9 @@ bool isWindows10LTSC2021(void) {
         return false;
     }
 
-    size = sizeof(releaseId);
-    if (RegGetValueA(hKey, NULL, "ReleaseId", RRF_RT_REG_SZ, NULL, releaseId, &size) != ERROR_SUCCESS) {
-        RegCloseKey(hKey);
-        return false;
-    }
-
     RegCloseKey(hKey);
 
-    return (strstr(productName, "LTSC") != NULL && strcmp(releaseId, "21H2") == 0);
+    return (strstr(productName, "LTSC") != NULL || strstr(productName, "LTSB") != NULL);
 }
 #endif
 
@@ -476,11 +472,12 @@ int main(int argc, char *argv[])
     // Single-instance check (Windows): if another instance exists, forward any file arg and exit.
     if (!gui_file_open_single_instance_or_forward(argc, argv))
         return 0;
-    #if defined(_WIN32) && defined(_WIN32_WINNT) && _WIN32_WINNT >= 0x0A00
-        if (isWindows10LTSC2021()) {
-            SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
-        }
-    #endif
+#ifdef _WIN32
+    if (isWindowsLTSC()) {
+        SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengl");
+        BAE_PRINTF("Windows LTSC/LTSB detected; forcing SDL render driver to OpenGL\n");
+    }
+#endif
 #if USE_SDL2 == TRUE
     if (SDL_Init(SDL_INIT_VIDEO) != 0)
 #else
@@ -821,7 +818,11 @@ int main(int argc, char *argv[])
     }
 
 #if USE_SDL2 == TRUE
-    SDL_Renderer *R = SDL_CreateRenderer(win, -1, 0);
+    SDL_Renderer *R = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!R)
+        R = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
+    if (!R)
+        R = SDL_CreateRenderer(win, -1, 0);
 #else
     SDL_Renderer *R = SDL_CreateRenderer(win, NULL);
 #endif
@@ -833,6 +834,21 @@ int main(int argc, char *argv[])
         SDL_Quit();
         return 1;
     }
+
+#if USE_SDL2 == TRUE
+    {
+        SDL_RendererInfo ri;
+        if (SDL_GetRendererInfo(R, &ri) == 0)
+            BAE_PRINTF("SDL renderer: %s (flags=0x%x)\n", ri.name ? ri.name : "?", (unsigned)ri.flags);
+    }
+#else
+    {
+        const char *rname = SDL_GetRendererName(R);
+        BAE_PRINTF("SDL renderer: %s\n", rname ? rname : "?");
+        if (!SDL_SetRenderVSync(R, 1))
+            BAE_PRINTF("SDL_SetRenderVSync failed: %s\n", SDL_GetError());
+    }
+#endif
     
     bool running = true;
     duration = bae_get_len_ms();
@@ -3094,6 +3110,7 @@ int main(int argc, char *argv[])
     // main run loop before the audio callback is stopped, causing a crash.
     bae_shutdown();
 
+    gui_text_cache_clear();
     SDL_DestroyRenderer(R);
     SDL_DestroyWindow(win);
     g_main_window = NULL; // Clear global reference

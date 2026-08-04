@@ -31,6 +31,7 @@ extern int g_bitmap_font_scale;
 
 // Text rendering functions
 void gui_set_font_scale(int scale);
+void gui_text_cache_clear(void);
 void measure_text(const char *text, int *w, int *h);
 void draw_text(SDL_Renderer *R, int x, int y, const char *text, SDL_Color col);
 

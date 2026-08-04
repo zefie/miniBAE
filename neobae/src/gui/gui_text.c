@@ -24,6 +24,24 @@
 TTF_Font *g_font = NULL;
 int g_bitmap_font_scale = 2; // fallback bitmap scale
 
+/* Small LRU texture cache for draw_text. Creating/destroying a GPU texture for
+ * every label every frame stresses older Windows D3D backends and can cause
+ * intermittent missing draws after the app has been open a while. */
+#define TEXT_CACHE_SIZE 128
+#define TEXT_CACHE_KEY_MAX 160
+
+typedef struct {
+    char text[TEXT_CACHE_KEY_MAX];
+    SDL_Color col;
+    SDL_Renderer *renderer;
+    SDL_Texture *texture;
+    int w, h;
+    Uint32 last_used;
+} TextCacheEntry;
+
+static TextCacheEntry g_text_cache[TEXT_CACHE_SIZE];
+static Uint32 g_text_cache_tick = 1;
+
 // Minimal 5x7 digit glyphs for fallback use (only digits needed for UI layout centering)
 static const unsigned char kGlyph5x7Digits[10][7] = {
     {0x1E, 0x21, 0x23, 0x25, 0x29, 0x31, 0x1E}, // 0
@@ -43,6 +61,67 @@ void gui_set_font_scale(int scale)
     if (scale < 1)
         scale = 1;
     g_bitmap_font_scale = scale;
+}
+
+void gui_text_cache_clear(void)
+{
+    for (int i = 0; i < TEXT_CACHE_SIZE; ++i)
+    {
+        if (g_text_cache[i].texture)
+        {
+            SDL_DestroyTexture(g_text_cache[i].texture);
+            g_text_cache[i].texture = NULL;
+        }
+        g_text_cache[i].text[0] = '\0';
+        g_text_cache[i].renderer = NULL;
+        g_text_cache[i].w = 0;
+        g_text_cache[i].h = 0;
+        g_text_cache[i].last_used = 0;
+    }
+    g_text_cache_tick = 1;
+}
+
+static int text_cache_find(SDL_Renderer *R, const char *text, SDL_Color col)
+{
+    for (int i = 0; i < TEXT_CACHE_SIZE; ++i)
+    {
+        TextCacheEntry *e = &g_text_cache[i];
+        if (e->texture && e->renderer == R &&
+            e->col.r == col.r && e->col.g == col.g && e->col.b == col.b && e->col.a == col.a &&
+            strcmp(e->text, text) == 0)
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int text_cache_alloc_slot(void)
+{
+    int empty = -1;
+    int oldest = 0;
+    Uint32 oldest_tick = g_text_cache[0].last_used;
+    for (int i = 0; i < TEXT_CACHE_SIZE; ++i)
+    {
+        if (!g_text_cache[i].texture)
+        {
+            empty = i;
+            break;
+        }
+        if (g_text_cache[i].last_used < oldest_tick)
+        {
+            oldest_tick = g_text_cache[i].last_used;
+            oldest = i;
+        }
+    }
+    if (empty >= 0)
+        return empty;
+    if (g_text_cache[oldest].texture)
+        SDL_DestroyTexture(g_text_cache[oldest].texture);
+    g_text_cache[oldest].texture = NULL;
+    g_text_cache[oldest].text[0] = '\0';
+    g_text_cache[oldest].renderer = NULL;
+    return oldest;
 }
 
 void bitmap_draw(SDL_Renderer *R, int x, int y, const char *text, SDL_Color col)
@@ -113,8 +192,32 @@ void measure_text(const char *text, int *w, int *h)
 
 void draw_text(SDL_Renderer *R, int x, int y, const char *text, SDL_Color col)
 {
+    if (!text || !*text)
+        return;
+
     if (g_font)
     {
+        const int text_len = (int)strlen(text);
+        const bool cacheable = (text_len > 0 && text_len < TEXT_CACHE_KEY_MAX);
+
+        if (cacheable)
+        {
+            int idx = text_cache_find(R, text, col);
+            if (idx >= 0)
+            {
+                TextCacheEntry *e = &g_text_cache[idx];
+                e->last_used = ++g_text_cache_tick;
+#if USE_SDL2 == TRUE
+                SDL_Rect dst = {x, y, e->w, e->h};
+                SDL_RenderCopy(R, e->texture, NULL, &dst);
+#else
+                SDL_FRect dst = {(float)x, (float)y, (float)e->w, (float)e->h};
+                SDL_RenderTexture(R, e->texture, NULL, &dst);
+#endif
+                return;
+            }
+        }
+
 #if USE_SDL2 == TRUE
         SDL_Surface *s = TTF_RenderUTF8_Blended(g_font, text, col);
 #else
@@ -123,14 +226,33 @@ void draw_text(SDL_Renderer *R, int x, int y, const char *text, SDL_Color col)
         if (s)
         {
             SDL_Texture *tx = SDL_CreateTextureFromSurface(R, s);
+            if (tx)
+            {
+                SDL_SetTextureBlendMode(tx, SDL_BLENDMODE_BLEND);
 #if USE_SDL2 == TRUE
-            SDL_Rect dst = {x, y, s->w, s->h};
-            SDL_RenderCopy(R, tx, NULL, &dst);
+                SDL_Rect dst = {x, y, s->w, s->h};
+                SDL_RenderCopy(R, tx, NULL, &dst);
 #else
-            SDL_FRect dst = {(float)x, (float)y, (float)s->w, (float)s->h};
-            SDL_RenderTexture(R, tx, NULL, &dst);
+                SDL_FRect dst = {(float)x, (float)y, (float)s->w, (float)s->h};
+                SDL_RenderTexture(R, tx, NULL, &dst);
 #endif
-            SDL_DestroyTexture(tx);
+                if (cacheable)
+                {
+                    int slot = text_cache_alloc_slot();
+                    TextCacheEntry *e = &g_text_cache[slot];
+                    memcpy(e->text, text, (size_t)text_len + 1);
+                    e->col = col;
+                    e->renderer = R;
+                    e->texture = tx;
+                    e->w = s->w;
+                    e->h = s->h;
+                    e->last_used = ++g_text_cache_tick;
+                }
+                else
+                {
+                    SDL_DestroyTexture(tx);
+                }
+            }
 #if USE_SDL2 == TRUE
             SDL_FreeSurface(s);
 #else

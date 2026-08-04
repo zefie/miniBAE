@@ -26,6 +26,26 @@
                static_cast<uint32_t>(program);
     }
 
+    static void DecodeInstSlot(uint32_t inst_id, int *out_bank, bool *out_percussion, int *out_program)
+    {
+        const int bank = static_cast<int>(inst_id / 256u);
+        const uint32_t within = inst_id % 256u;
+        const bool percussion = (within >= 128u);
+        const int program = static_cast<int>(within % 128u);
+        if (out_bank)
+        {
+            *out_bank = bank;
+        }
+        if (out_percussion)
+        {
+            *out_percussion = percussion;
+        }
+        if (out_program)
+        {
+            *out_program = program;
+        }
+    }
+
     static void MakeResourcePascalName(const char *c_name, char out_pascal[256])
     {
         if (!out_pascal)
@@ -256,7 +276,9 @@
                                false);
     }
 
-    bool AllocateUniqueSndId(XFILE bank_file, XLongResourceID *out_id)
+    bool AllocateUniqueSndId(XFILE bank_file,
+                             XLongResourceID *out_id,
+                             const std::set<XLongResourceID> *also_reserved = nullptr)
     {
         if (!bank_file || !out_id)
         {
@@ -265,10 +287,11 @@
         *out_id = 0;
 
         /* Collect IDs used by ANY sample container type. ESND-only unique IDs can
-         * collide with existing SND/CSND (e.g. Steel Drum) and look like a reuse. */
+         * collide with existing SND/CSND (e.g. Steel Drum) and look like a reuse.
+         * SND ID 0 is valid and must be treated as occupied when present. */
         static const XResourceType kTypes[] = {ID_ESND, ID_SND, ID_CSND, 0};
         std::set<XLongResourceID> used;
-        XLongResourceID max_id = 0;
+        XLongResourceID max_id = -1;
         for (int t = 0; kTypes[t] != 0; ++t)
         {
             const int32_t count = XCountFileResourcesOfType(bank_file, kTypes[t]);
@@ -283,7 +306,21 @@
                 {
                     XDisposePtr(data);
                 }
-                if (rid > 0)
+                if (rid >= 0 && rid <= 0x7FFF)
+                {
+                    used.insert(rid);
+                    if (rid > max_id)
+                    {
+                        max_id = rid;
+                    }
+                }
+            }
+        }
+        if (also_reserved)
+        {
+            for (XLongResourceID rid : *also_reserved)
+            {
+                if (rid >= 0 && rid <= 0x7FFF)
                 {
                     used.insert(rid);
                     if (rid > max_id)
@@ -295,13 +332,13 @@
         }
 
         /* Prefer max+1 when it stays in the classic 16-bit INST/SND range. */
-        if (max_id > 0 && max_id < 0x7FFF)
+        if (max_id >= 0 && max_id < 0x7FFF && used.count(max_id + 1) == 0)
         {
             *out_id = max_id + 1;
             return true;
         }
 
-        /* Otherwise scan for the first free positive ID. */
+        /* Otherwise scan for the first free ID (0 is valid but prefer 1+ for new). */
         for (XLongResourceID candidate = 1; candidate <= 0x7FFF; ++candidate)
         {
             if (used.count(candidate) == 0)
@@ -309,6 +346,11 @@
                 *out_id = candidate;
                 return true;
             }
+        }
+        if (used.count(0) == 0)
+        {
+            *out_id = 0;
+            return true;
         }
         return false;
     }
@@ -383,6 +425,8 @@
         char pascal_name[256];
         MakeResourcePascalName(leaf.c_str(), pascal_name);
         const int32_t snd_size = XGetPtrSize(snd_obj);
+        /* ESND containers must be encrypted; plaintext here makes decode/paste fail. */
+        XEncryptData(snd_obj, static_cast<uint32_t>(snd_size));
         if (XAddFileResource(bank_file,
                              ID_ESND,
                              snd_id,
@@ -551,7 +595,7 @@
         {
             return false;
         }
-        if (snd_id == 0 || snd_id > 0xFFFF)
+        if (snd_id == 0xFFFFu || snd_id > 0xFFFF)
         {
             SetStatus("Invalid sample ID");
             return false;
@@ -632,7 +676,7 @@
             return false;
         }
         const SampleRow &sample = m_samples[static_cast<size_t>(m_selected_sample)];
-        if (!sample.unassigned || sample.snd_resource_id == 0)
+        if (!sample.unassigned || sample.snd_resource_id == 0xFFFFu)
         {
             SetStatus("Make Instrument Using requires an unassigned sample");
             return false;
@@ -709,7 +753,7 @@
             return;
         }
         const SampleRow &sample = m_samples[static_cast<size_t>(m_selected_sample)];
-        if (!sample.unassigned || sample.snd_resource_id == 0)
+        if (!sample.unassigned || sample.snd_resource_id == 0xFFFFu)
         {
             SetStatus("Make Instrument Using requires an unassigned sample");
             return;

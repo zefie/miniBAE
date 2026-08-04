@@ -56,6 +56,8 @@
         m_pref_reopen_last_session = false;
         m_pref_save_session_layout = true;
         m_pref_ignore_session_layout = false;
+        m_pref_adsr_default_valid = false;
+        std::memset(&m_pref_adsr_default, 0, sizeof(m_pref_adsr_default));
         std::ifstream in(EditorPrefsFilePath());
         if (!in)
         {
@@ -127,6 +129,29 @@
             {
                 PrefAssignCString(m_pref_song_notes, sizeof(m_pref_song_notes), value);
             }
+            else if (key == "adsr_default_stages")
+            {
+                const int n = std::atoi(value.c_str());
+                m_pref_adsr_default.stageCount =
+                    static_cast<uint32_t>(std::clamp(n, 0, BAE_EDITOR_MAX_ADSR_STAGES));
+                m_pref_adsr_default_valid = (m_pref_adsr_default.stageCount > 0);
+            }
+            else if (key.rfind("adsr_default_stage_", 0) == 0)
+            {
+                /* adsr_default_stage_N=level,time,flags */
+                const int stage = std::atoi(key.c_str() + 19);
+                if (stage >= 0 && stage < BAE_EDITOR_MAX_ADSR_STAGES)
+                {
+                    int level = 0, time = 0, flags = 0;
+                    if (std::sscanf(value.c_str(), "%d,%d,%d", &level, &time, &flags) == 3)
+                    {
+                        m_pref_adsr_default.stages[stage].level = level;
+                        m_pref_adsr_default.stages[stage].time = time;
+                        m_pref_adsr_default.stages[stage].flags = flags;
+                        m_pref_adsr_default_valid = true;
+                    }
+                }
+            }
         }
     }
 
@@ -151,6 +176,18 @@
         out << "song_genre=" << m_pref_song_genre << '\n';
         out << "song_subgenre=" << m_pref_song_subgenre << '\n';
         out << "song_notes=" << m_pref_song_notes << '\n';
+        if (m_pref_adsr_default_valid)
+        {
+            out << "adsr_default_stages=" << m_pref_adsr_default.stageCount << '\n';
+            for (uint32_t i = 0; i < m_pref_adsr_default.stageCount && i < BAE_EDITOR_MAX_ADSR_STAGES;
+                 ++i)
+            {
+                out << "adsr_default_stage_" << i << '='
+                    << m_pref_adsr_default.stages[i].level << ','
+                    << m_pref_adsr_default.stages[i].time << ','
+                    << m_pref_adsr_default.stages[i].flags << '\n';
+            }
+        }
     }
 
     void OpenEditorPreferencesDialog()

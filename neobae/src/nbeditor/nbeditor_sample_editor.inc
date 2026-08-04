@@ -39,6 +39,80 @@
         }
     }
 
+    static bool SeCodecIsUncompressedPcm(BAERmfEditorCompressionType type)
+    {
+        return type == BAE_EDITOR_COMPRESSION_PCM || type == BAE_EDITOR_COMPRESSION_DONT_CHANGE;
+    }
+
+    /* Map loop points from one frame-count domain into another (lossy encode /
+     * MPEG resample). Matches PV_RemapLoopPointsToFrameCount half-open rules. */
+    static void SeRemapLoopPoints(uint32_t source_frames,
+                                  uint32_t target_frames,
+                                  uint32_t *io_loop_start,
+                                  uint32_t *io_loop_end)
+    {
+        if (!io_loop_start || !io_loop_end)
+        {
+            return;
+        }
+        uint32_t loop_start = *io_loop_start;
+        uint32_t loop_end = *io_loop_end;
+        if (source_frames == 0 || target_frames == 0 || loop_end <= loop_start ||
+            loop_start >= source_frames)
+        {
+            *io_loop_start = 0;
+            *io_loop_end = 0;
+            return;
+        }
+        if (loop_end > source_frames)
+        {
+            loop_end = source_frames;
+        }
+        if (source_frames != target_frames)
+        {
+            const uint32_t mapped_start = static_cast<uint32_t>(
+                (static_cast<uint64_t>(loop_start) * static_cast<uint64_t>(target_frames)) /
+                static_cast<uint64_t>(source_frames));
+            uint32_t mapped_end = static_cast<uint32_t>(
+                ((static_cast<uint64_t>(loop_end) * static_cast<uint64_t>(target_frames)) +
+                 (static_cast<uint64_t>(source_frames) - 1ull)) /
+                static_cast<uint64_t>(source_frames));
+            if (mapped_start > target_frames)
+            {
+                *io_loop_start = 0;
+                *io_loop_end = 0;
+                return;
+            }
+            if (mapped_end > target_frames)
+            {
+                mapped_end = target_frames;
+            }
+            if (mapped_end <= mapped_start)
+            {
+                if (mapped_start < target_frames)
+                {
+                    mapped_end = mapped_start + 1u;
+                }
+                else if (target_frames > 0)
+                {
+                    *io_loop_start = target_frames - 1u;
+                    *io_loop_end = target_frames;
+                    return;
+                }
+                else
+                {
+                    *io_loop_start = 0;
+                    *io_loop_end = 0;
+                    return;
+                }
+            }
+            loop_start = mapped_start;
+            loop_end = mapped_end;
+        }
+        *io_loop_start = loop_start;
+        *io_loop_end = loop_end;
+    }
+
     /* ---------------- PCM accessors ---------------- */
 
     uint32_t SeChannelCount() const
@@ -776,37 +850,71 @@
                 SetStatus("Sample editor: no bank loaded");
                 return;
             }
-            BAERmfEditorBankSampleInfo info;
-            std::memset(&info, 0, sizeof(info));
-            if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
-                                                         sample.instrument_index,
-                                                         sample.split_index,
-                                                         &info) != BAE_NO_ERROR)
+            if (sample.unassigned || sample.snd_resource_id != 0xFFFFu)
             {
-                SetStatus("Sample editor: failed to read sample info");
-                return;
+                /* Prefer decode-by-SND-id for unassigned rows (incl. ID 0), and as
+                 * a fallback when instrument/split indices are stale after clip import. */
+                m_sample_editor_snd_resource_id = sample.snd_resource_id;
+                m_sample_editor_root_key = sample.root_key;
+                m_sample_editor_loop_start = sample.loop_start;
+                m_sample_editor_loop_end = sample.loop_end;
+                m_sample_editor_frame_count = sample.frame_count;
+                m_sample_editor_sample_rate_hz = sample.sample_rate_hz;
+                m_sample_editor_channels = sample.channels;
+                m_sample_editor_bit_depth = sample.bit_depth;
             }
 
-            m_sample_editor_loop_start = info.loopStart;
-            m_sample_editor_loop_end = info.loopEnd;
-            m_sample_editor_frame_count = info.frameCount;
-            m_sample_editor_sample_rate_hz = info.sampleRate;
-            m_sample_editor_channels = info.channels;
-            m_sample_editor_bit_depth = info.bitDepth;
-            m_sample_editor_snd_storage_type = info.sndStorageType;
-            m_sample_editor_snd_resource_id = static_cast<uint32_t>(info.sndResourceID);
-            m_sample_editor_root_key = static_cast<int>(info.rootKey);
-            detected = BankCompressionFromCodec(info.compressionType, info.compressionSubType);
+            BAERmfEditorBankSampleInfo info;
+            std::memset(&info, 0, sizeof(info));
+            const bool have_split_info =
+                !sample.unassigned &&
+                BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
+                                                         sample.instrument_index,
+                                                         sample.split_index,
+                                                         &info) == BAE_NO_ERROR;
+            if (have_split_info)
+            {
+                m_sample_editor_loop_start = info.loopStart;
+                m_sample_editor_loop_end = info.loopEnd;
+                m_sample_editor_frame_count = info.frameCount;
+                m_sample_editor_sample_rate_hz = info.sampleRate;
+                m_sample_editor_channels = info.channels;
+                m_sample_editor_bit_depth = info.bitDepth;
+                m_sample_editor_snd_storage_type = info.sndStorageType;
+                m_sample_editor_snd_resource_id = static_cast<uint32_t>(info.sndResourceID);
+                m_sample_editor_root_key = static_cast<int>(info.rootKey);
+                detected = BankCompressionFromCodec(info.compressionType, info.compressionSubType);
+            }
 
-            if (BAERmfEditorBank_GetSampleWaveformData(m_bank_token,
-                                                       sample.instrument_index,
-                                                       sample.split_index,
-                                                       &wave_data,
-                                                       &frame_count,
-                                                       &bit_size,
-                                                       &channels,
-                                                       &sample_rate) != BAE_NO_ERROR ||
-                !wave_data || frame_count == 0)
+            BAEResult wave_r = BAE_BAD_FILE;
+            if (!sample.unassigned && have_split_info)
+            {
+                wave_r = BAERmfEditorBank_GetSampleWaveformData(m_bank_token,
+                                                               sample.instrument_index,
+                                                               sample.split_index,
+                                                               &wave_data,
+                                                               &frame_count,
+                                                               &bit_size,
+                                                               &channels,
+                                                               &sample_rate);
+            }
+            if ((wave_r != BAE_NO_ERROR || !wave_data || frame_count == 0) &&
+                sample.snd_resource_id != 0)
+            {
+                if (wave_data)
+                {
+                    BAERmfEditorBank_FreeWaveformData(wave_data);
+                    wave_data = nullptr;
+                }
+                wave_r = BAERmfEditorBank_GetSndWaveformData(m_bank_token,
+                                                            sample.snd_resource_id,
+                                                            &wave_data,
+                                                            &frame_count,
+                                                            &bit_size,
+                                                            &channels,
+                                                            &sample_rate);
+            }
+            if (wave_r != BAE_NO_ERROR || !wave_data || frame_count == 0)
             {
                 if (wave_data)
                 {
@@ -1166,6 +1274,20 @@
             }
         }
 
+        /* Persist SND resource name (list + BE2-style display). */
+        if (m_sample_editor_snd_resource_id > 0 && m_sample_editor_snd_resource_id <= 32767u &&
+            !m_sample_editor_sample_name.empty())
+        {
+            const BAEResult rename_r = BAERmfEditorBank_RenameSampleResource(
+                m_bank_token,
+                static_cast<XShortResourceID>(m_sample_editor_snd_resource_id),
+                m_sample_editor_sample_name.c_str());
+            if (rename_r != BAE_NO_ERROR)
+            {
+                SetStatus(std::string("Sample saved but rename failed: ") + FormatBAEError(rename_r));
+            }
+        }
+
         m_sample_editor_preview_needs_reencode = false;
         m_sample_editor_loop_dirty = false;
         m_sample_editor_dirty = false;
@@ -1479,8 +1601,22 @@
         uint32_t loop_end = 0;
         if (m_sample_editor_loop_enabled)
         {
-            loop_start = std::min<uint32_t>(m_sample_editor_loop_start, frames);
-            loop_end = std::min<uint32_t>(m_sample_editor_loop_end, frames);
+            loop_start = m_sample_editor_loop_start;
+            loop_end = m_sample_editor_loop_end;
+            /* Compression audition PCM may be in a different frame domain
+             * (MPEG resample / encoder trim). Remap master loops or the
+             * sustain loop lands on the wrong region and buzzes. */
+            if (source == SePreviewSource::Audition &&
+                m_sample_editor_original_frame_count > 0 &&
+                frames != m_sample_editor_original_frame_count)
+            {
+                SeRemapLoopPoints(m_sample_editor_original_frame_count,
+                                  frames,
+                                  &loop_start,
+                                  &loop_end);
+            }
+            loop_start = std::min<uint32_t>(loop_start, frames);
+            loop_end = std::min<uint32_t>(loop_end, frames);
             if (loop_end <= loop_start)
             {
                 loop_start = 0;
@@ -1488,8 +1624,24 @@
             }
         }
 
+        /* Editor PCM cache is unsigned 8-bit (center 128), matching
+         * GetSampleWaveformData / XConvert8BitTo16Bit. BAESound_LoadCustomSample
+         * expects signed 8-bit and then XPhase8BitWaveform's to unsigned — so we
+         * must convert unsigned→signed here or preview is DC-offset garbage. */
+        std::vector<unsigned char> signed_pcm;
+        const unsigned char *load_ptr = pcm->data();
+        if (bit_size == 8)
+        {
+            signed_pcm = *pcm;
+            for (unsigned char &b : signed_pcm)
+            {
+                b = static_cast<unsigned char>(b - 128u);
+            }
+            load_ptr = signed_pcm.data();
+        }
+
         BAEResult result = BAESound_LoadCustomSample(m_sample_editor_preview_sound,
-                                                     const_cast<unsigned char *>(pcm->data()),
+                                                     const_cast<unsigned char *>(load_ptr),
                                                      frames,
                                                      bit_size,
                                                      channels,
@@ -1562,19 +1714,9 @@
             return true;
         }
 
-        if (!m_bank_token)
-        {
-            return false;
-        }
-
         const SampleRow sample = m_samples[static_cast<size_t>(m_sample_editor_sample_row)];
         const uint32_t snapshot_snd_id =
             m_sample_editor_snd_resource_id != 0 ? m_sample_editor_snd_resource_id : sample.snd_resource_id;
-        if (!CaptureSampleEditorSndSnapshot(snapshot_snd_id))
-        {
-            SetStatus("Compression preview: failed to snapshot original SND");
-            return false;
-        }
 
         const bool use_opus_roundtrip = IsOpusCompressionType(target);
         const BAE_UNSIGNED_FIXED master_rate =
@@ -1582,65 +1724,39 @@
                 ? m_sample_editor_original_sample_rate
                 : LONG_TO_UNSIGNED_FIXED(m_sample_editor_sample_rate_hz);
 
-        const BAEResult enc = BAERmfEditorBank_ReEncodeSampleFromPCMEx(
-            m_bank_token,
-            sample.instrument_index,
-            sample.split_index,
-            target,
-            m_sample_editor_snd_storage_type,
-            m_sample_editor_opus_mode,
-            use_opus_roundtrip,
-            m_sample_editor_original_pcm.data(),
-            m_sample_editor_original_frame_count,
-            m_sample_editor_original_bit_size,
-            m_sample_editor_original_channels,
-            master_rate);
-        if (enc != BAE_NO_ERROR)
-        {
-            (void)RestoreSampleEditorSndSnapshot();
-            ClearSampleEditorSndSnapshot();
-            SetStatus(std::string("Compression preview encode failed: ") + FormatBAEError(enc));
-            return false;
-        }
-
         void *wave_data = nullptr;
         uint32_t frame_count = 0;
         uint16_t bit_size = 0;
         uint16_t channels = 0;
         BAE_UNSIGNED_FIXED sample_rate = 0;
         uint32_t preview_bytes = 0;
-        if (BAERmfEditorBank_GetSampleWaveformData(m_bank_token,
-                                                   sample.instrument_index,
-                                                   sample.split_index,
-                                                   &wave_data,
-                                                   &frame_count,
-                                                   &bit_size,
-                                                   &channels,
-                                                   &sample_rate) != BAE_NO_ERROR ||
-            !wave_data || frame_count == 0)
+        const BAEResult enc = BAERmfEditor_PreviewCompressPCM(
+            m_sample_editor_original_pcm.data(),
+            m_sample_editor_original_frame_count,
+            m_sample_editor_original_bit_size,
+            m_sample_editor_original_channels,
+            master_rate,
+            m_sample_editor_loop_enabled ? m_sample_editor_loop_start : 0u,
+            m_sample_editor_loop_enabled ? m_sample_editor_loop_end : 0u,
+            static_cast<int16_t>(m_sample_editor_root_key),
+            m_sample_editor_sample_rate_hz,
+            target,
+            m_sample_editor_opus_mode,
+            use_opus_roundtrip,
+            &wave_data,
+            &frame_count,
+            &bit_size,
+            &channels,
+            &sample_rate,
+            &preview_bytes);
+        if (enc != BAE_NO_ERROR || !wave_data || frame_count == 0)
         {
             if (wave_data)
             {
                 BAERmfEditorBank_FreeWaveformData(wave_data);
             }
-            (void)RestoreSampleEditorSndSnapshot();
-            ClearSampleEditorSndSnapshot();
-            SetStatus("Compression preview decode failed");
+            SetStatus(std::string("Compression preview encode failed: ") + FormatBAEError(enc));
             return false;
-        }
-
-        {
-            BAERmfEditorBankSampleInfo info;
-            std::memset(&info, 0, sizeof(info));
-            if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
-                                                         sample.instrument_index,
-                                                         sample.split_index,
-                                                         &info) == BAE_NO_ERROR)
-            {
-                SampleRow refreshed = sample;
-                refreshed.snd_resource_id = static_cast<uint32_t>(info.sndResourceID);
-                preview_bytes = QueryBankSampleResourceBytes(refreshed);
-            }
         }
 
         const uint32_t bytes_per_sample = static_cast<uint32_t>((bit_size / 8u) * channels);
@@ -1654,21 +1770,9 @@
         m_sample_editor_audition_sample_rate = sample_rate;
         m_sample_editor_compressed_bytes = preview_bytes;
 
-        /* Always restore the bank SND so Cancel/close cannot leave preview codecs
-         * (or shared-SND tag bleed) in the sample list. */
-        if (!RestoreSampleEditorSndSnapshot())
-        {
-            ClearSampleEditorSndSnapshot();
-            SetStatus("Compression preview captured, but restoring original SND failed");
-            return false;
-        }
-        ClearSampleEditorSndSnapshot();
-
-        /* App-side compression preview cache (decoded audition only; not a bank commit). */
-        if (snapshot_snd_id != 0)
-        {
-            m_app_compression_cache[snapshot_snd_id] = m_sample_editor_audition_pcm;
-        }
+        /* App-side compression preview cache (decoded audition only; not a bank commit).
+         * SND ID 0 is valid. */
+        m_app_compression_cache[snapshot_snd_id] = m_sample_editor_audition_pcm;
 
         /* Keep editor waveform on master — only audition buffer holds the decode.
          * Do not mutate m_sample_editor_codec_type / sample list tags from preview. */
@@ -2369,16 +2473,16 @@
         char name_buffer[256];
         std::snprintf(name_buffer, sizeof(name_buffer), "%s", m_sample_editor_sample_name.c_str());
         ImGui::SetNextItemWidth(280.0f);
-        const ImGuiInputTextFlags name_flags =
-            m_sample_editor_is_song_sample ? ImGuiInputTextFlags_None : ImGuiInputTextFlags_ReadOnly;
-        if (ImGui::InputText("Name", name_buffer, sizeof(name_buffer), name_flags))
+        if (ImGui::InputText("Name", name_buffer, sizeof(name_buffer)))
         {
             m_sample_editor_sample_name = name_buffer;
             m_sample_editor_dirty = true;
         }
-        if (!m_sample_editor_is_song_sample && ImGui::IsItemHovered())
+        if (ImGui::IsItemHovered())
         {
-            ImGui::SetTooltip("Bank sample names are derived from the instrument name");
+            ImGui::SetTooltip(m_sample_editor_is_song_sample
+                                 ? "Song sample display name"
+                                 : "SND resource name in the bank");
         }
 
         ImGui::SameLine();
@@ -2408,7 +2512,20 @@
         ImGui::SameLine();
         if (m_sample_editor_compressed_bytes > 0)
         {
-            ImGui::Text("   Compressed: %u bytes", m_sample_editor_compressed_bytes);
+            /* PCM SND resources include a header, so resource size is often a
+             * few dozen bytes above raw PCM — that is not "compression". */
+            if (SeCodecIsUncompressedPcm(m_sample_editor_codec_type))
+            {
+                ImGui::Text("   Stored: %u bytes", m_sample_editor_compressed_bytes);
+            }
+            else
+            {
+                ImGui::Text("   Compressed: %u bytes", m_sample_editor_compressed_bytes);
+            }
+        }
+        else if (SeCodecIsUncompressedPcm(m_sample_editor_codec_type))
+        {
+            ImGui::TextUnformatted("   Stored: unknown");
         }
         else
         {
@@ -2758,7 +2875,18 @@
                                             static_cast<uint32_t>(SeChannelCount()) *
                                             static_cast<uint32_t>((m_sample_editor_cached_bit_size == 8) ? 1 : 2);
         ImGui::Text("Uncompressed: %u bytes", uncompressed_bytes);
-        if (m_sample_editor_compressed_bytes > 0)
+        if (SeCodecIsUncompressedPcm(selected_codec))
+        {
+            /* Selecting PCM: show raw PCM as the payload size; resource/header
+             * overhead is not compression. */
+            if (m_sample_editor_compressed_bytes > 0 &&
+                m_sample_editor_compressed_bytes != uncompressed_bytes)
+            {
+                ImGui::Text("Stored:       %u bytes (SND resource)", m_sample_editor_compressed_bytes);
+            }
+            ImGui::TextDisabled("PCM is uncompressed — resource size includes SND header.");
+        }
+        else if (m_sample_editor_compressed_bytes > 0)
         {
             ImGui::Text("Compressed:   %u bytes", m_sample_editor_compressed_bytes);
         }

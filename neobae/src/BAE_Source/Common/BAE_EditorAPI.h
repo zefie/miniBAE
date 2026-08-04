@@ -851,6 +851,11 @@ BAEResult BAERmfEditorBank_DeleteAlias(BAEBankToken bankToken,
  * No-op if the bank is already writable. Safe to call repeatedly. */
 BAEResult BAERmfEditorBank_EnsureWritable(BAEBankToken bankToken);
 
+/* Rename a bank SND/CSND/ESND resource (same id/type/data, new resource name). */
+BAEResult BAERmfEditorBank_RenameSampleResource(BAEBankToken bankToken,
+                                                XShortResourceID sndID,
+                                                char const *displayName);
+
 /* Replace/add INST and SND/CSND/ESND resources from sourceFile into dest bank
  * in a single memory-safe rebuild. XDeleteFileResource is a no-op on in-memory
  * banks, so callers must not delete+XAddFileResource for overlays — use this.
@@ -900,6 +905,16 @@ BAEResult BAERmfEditorBank_GetSampleWaveformData(BAEBankToken bankToken,
                                                   uint16_t *outBitSize,
                                                   uint16_t *outChannels,
                                                   BAE_UNSIGNED_FIXED *outSampleRate);
+
+/* Decode waveform data for a bank SND/CSND/ESND by resource id (assigned or
+ * unassigned). Caller must free outWaveData with BAERmfEditorBank_FreeWaveformData. */
+BAEResult BAERmfEditorBank_GetSndWaveformData(BAEBankToken bankToken,
+                                               uint32_t sndResourceID,
+                                               void **outWaveData,
+                                               uint32_t *outFrameCount,
+                                               uint16_t *outBitSize,
+                                               uint16_t *outChannels,
+                                               BAE_UNSIGNED_FIXED *outSampleRate);
 
 /* Free waveform data returned by BAERmfEditorBank_GetSampleWaveformData. */
 void BAERmfEditorBank_FreeWaveformData(void *waveData);
@@ -978,6 +993,27 @@ BAEResult BAERmfEditorBank_ReEncodeSampleFromMutablePCMEx(BAEBankToken bankToken
                                                            uint16_t bitSize,
                                                            uint16_t channels,
                                                            BAE_UNSIGNED_FIXED sampleRate);
+
+/* In-memory encode→decode for sample-editor compression preview.
+ * Does not modify any bank. Free outWaveData with BAERmfEditorBank_FreeWaveformData. */
+BAEResult BAERmfEditor_PreviewCompressPCM(const void *sourcePcm,
+                                          uint32_t frameCount,
+                                          uint16_t bitSize,
+                                          uint16_t channels,
+                                          BAE_UNSIGNED_FIXED sampleRate,
+                                          uint32_t loopStart,
+                                          uint32_t loopEnd,
+                                          int16_t rootKey,
+                                          uint32_t metadataSampleRateHz,
+                                          BAERmfEditorCompressionType compressionType,
+                                          BAERmfEditorOpusMode opusMode,
+                                          bool opusRoundTripResample,
+                                          void **outWaveData,
+                                          uint32_t *outFrameCount,
+                                          uint16_t *outBitSize,
+                                          uint16_t *outChannels,
+                                          BAE_UNSIGNED_FIXED *outSampleRate,
+                                          uint32_t *outEncodedBytes);
 
 #ifdef __cplusplus
 } /* extern "C" */

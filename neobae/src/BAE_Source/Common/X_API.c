@@ -2483,6 +2483,24 @@ static XPTR PV_GetSndHeaderFromZmfBlockByTypeAndID(XFILE fileRef,
     return NULL;
 }
 
+static bool PV_HasZmfSndHeader(XFILE fileRef,
+                               XResourceType resourceType,
+                               XLongResourceID resourceID)
+{
+    int32_t headerSize = 0;
+    XPTR headerData = PV_GetSndHeaderFromZmfBlockByTypeAndID(fileRef,
+                                                             resourceType,
+                                                             resourceID,
+                                                             NULL,
+                                                             &headerSize);
+    if (headerData)
+    {
+        XDisposePtr(headerData);
+        return TRUE;
+    }
+    return FALSE;
+}
+
 static XPTR PV_RebuildSndResourceFromZmfHeaderRef(XFILE fileRef,
                                                   XResourceType resourceType,
                                                   XLongResourceID resourceID,
@@ -5238,17 +5256,37 @@ XPTR XGetFileResource(XFILE fileRef, XResourceType resourceType, XLongResourceID
     if (pData && PV_IsSndResourceType(resourceType))
     {
         int32_t currentSize = pReturnedResourceSize ? *pReturnedResourceSize : XGetPtrSize(pData);
-        XPTR rebuilt = PV_RebuildSndResourceFromZmfHeaderRef(fileRef,
-                                                             resourceType,
-                                                             resourceID,
-                                                             pResourceName,
-                                                             pData,
-                                                             currentSize,
-                                                             pReturnedResourceSize);
-        if (rebuilt)
+        unsigned char *payloadIgnore = NULL;
+        int32_t payloadIgnoreSize = 0;
+        bool isPayloadRef = PV_IsZmfSndPayloadRef(pData,
+                                                  currentSize,
+                                                  resourceID,
+                                                  &payloadIgnore,
+                                                  &payloadIgnoreSize);
+        /* Explicit ZSRF magic is unambiguous. Short-form BE16(id)+payload also
+         * matches encrypted ESND whose first two bytes equal the resource id —
+         * only treat that as a ref when ZSHD has a header for this id. */
+        bool isMagicRef = (currentSize >= 8 &&
+                           PV_ReadBE32((unsigned char *)pData) == (uint32_t)ZMF_SND_PAYLOAD_REF_MAGIC &&
+                           PV_ReadBE32((unsigned char *)pData + 4) == ZMF_SND_PAYLOAD_REF_VERSION);
+        bool shouldRebuild = isPayloadRef &&
+                             (isMagicRef || PV_HasZmfSndHeader(fileRef, resourceType, resourceID));
+
+        if (shouldRebuild)
         {
+            XPTR rebuilt = PV_RebuildSndResourceFromZmfHeaderRef(fileRef,
+                                                                 resourceType,
+                                                                 resourceID,
+                                                                 pResourceName,
+                                                                 pData,
+                                                                 currentSize,
+                                                                 pReturnedResourceSize);
             XDisposePtr(pData);
             pData = rebuilt;
+            if (!pData && pReturnedResourceSize)
+            {
+                *pReturnedResourceSize = 0;
+            }
         }
     }
 #if DEBUG_PRINT_RESOURCE
@@ -5269,7 +5307,7 @@ void XFileFreeResourceCache(XFILE fileRef)
 }
 
 // Force a clean/update of the resource file. Simplified: rebuild in‑memory cache.
-bool XCleanResourceFile(XFILE fileRef)
+bool XCleanResourceFileEx(XFILE fileRef, bool packSndHeaders)
 {
     if (!PV_XFileValid(fileRef))
     {
@@ -5287,12 +5325,20 @@ bool XCleanResourceFile(XFILE fileRef)
     {
         return FALSE;
     }
-    if (PV_PackSndHeaderResourcesIntoZmfBlock(fileRef) == FALSE)
+    if (packSndHeaders)
     {
-        return FALSE;
+        if (PV_PackSndHeaderResourcesIntoZmfBlock(fileRef) == FALSE)
+        {
+            return FALSE;
+        }
     }
     XFileFreeResourceCache(fileRef);
     return (XCreateAccessCache(fileRef) != NULL) ? TRUE : FALSE;
+}
+
+bool XCleanResourceFile(XFILE fileRef)
+{
+    return XCleanResourceFileEx(fileRef, TRUE);
 }
 
 // Return the Nth resource of a given type from a specific file.

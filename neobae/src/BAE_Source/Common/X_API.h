@@ -949,6 +949,11 @@ bool   XDeleteFileResource(XFILE fileRef, XResourceType theType, XLongResourceID
 // returns TRUE if ok.
 bool   XCleanResourceFile( XFILE fileRef );
 
+/* Like XCleanResourceFile, but when packSndHeaders is FALSE skip ZSHD packing and
+ * leave SND/CSND/ESND as complete resources. Use for clip/transfer packages where
+ * ZSHD payload-refs are harmful to round-trip import. */
+bool   XCleanResourceFileEx( XFILE fileRef, bool packSndHeaders );
+
 // File Manager
 int32_t    XFileRead(XFILE fileRef, XPTR buffer, int32_t bufferLength);
 int32_t    XFileWrite(XFILE fileRef, XPTRC buffer, int32_t bufferLength);

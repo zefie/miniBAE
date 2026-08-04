@@ -32,8 +32,16 @@
 #include <set>
 #include <string>
 #include <vector>
-#if !defined(_WIN32)
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#include <process.h>
+#else
+#include <dirent.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 namespace
@@ -454,6 +462,15 @@ enum class SessionTab : int
     Samples = 2,
 };
 
+/* What a cross-process / in-process clipboard package is for. */
+enum class ClipPackageKind : int
+{
+    None = 0,
+    Song = 1,
+    Instrument = 2,
+    Sample = 3,
+};
+
 /* Where an OS file drop should land (updated each frame from hovered windows). */
 enum class SessionDropTarget : int
 {
@@ -608,6 +625,12 @@ static BAERmfEditorCompressionType BankCompressionFromCodec(uint32_t compression
     case FOUR_CHAR('i', 'm', 'a', 'W'):
     case FOUR_CHAR('i', 'm', 'a', '3'):
         return BAE_EDITOR_COMPRESSION_ADPCM;
+    case FOUR_CHAR('a', 'l', 'a', 'w'):
+        return BAE_EDITOR_COMPRESSION_ALAW;
+    case FOUR_CHAR('u', 'l', 'a', 'w'):
+        return BAE_EDITOR_COMPRESSION_ULAW;
+    case FOUR_CHAR('q', 'o', 'a', 'f'):
+        return BAE_EDITOR_COMPRESSION_QOA;
     case FOUR_CHAR('f', 'L', 'a', 'C'):
     case FOUR_CHAR('F', 'L', 'A', 'C'):
         return BAE_EDITOR_COMPRESSION_FLAC;
@@ -694,6 +717,11 @@ static const SampleCodecOption *GetSampleCodecOptions(size_t *out_count)
         {BAE_EDITOR_COMPRESSION_DONT_CHANGE, "No Recompression"},
         {BAE_EDITOR_COMPRESSION_PCM, "PCM"},
         {BAE_EDITOR_COMPRESSION_ADPCM, "ADPCM"},
+        {BAE_EDITOR_COMPRESSION_ALAW, "A-law"},
+        {BAE_EDITOR_COMPRESSION_ULAW, "u-law"},
+#if USE_QOA_SUPPORT == TRUE
+        {BAE_EDITOR_COMPRESSION_QOA, "QOA"},
+#endif
         {BAE_EDITOR_COMPRESSION_FLAC, "FLAC"},
         {BAE_EDITOR_COMPRESSION_MP3_32K, "MP3 32k"},
         {BAE_EDITOR_COMPRESSION_MP3_48K, "MP3 48k"},
@@ -959,6 +987,7 @@ public:
 
         LoadRecentSessionsFromDisk();
         LoadEditorPrefsFromDisk();
+        CleanupStaleClipPackagesOnStartup();
         /* Clean slate by default; optional reopen via Preferences. */
         if (m_pref_reopen_last_session && !m_recent_sessions.empty())
         {
@@ -976,6 +1005,7 @@ public:
 
     void Shutdown()
     {
+        CleanupPublishedClipPackages();
         if (m_sample_editor_preview_sound)
         {
             BAESound_Stop(m_sample_editor_preview_sound, FALSE);
@@ -1084,6 +1114,8 @@ public:
         DrawEditConfirmDialogs();
         DrawResourceUsageDialog();
         DrawInstDestDialog();
+        DrawRenameDialog();
+        DrawIncludeSamplesPrompt();
         DrawSessionInfoDialog();
         DrawBankMergeConfirmDialog();
         DrawReplaceSessionConfirmDialog();
@@ -2610,7 +2642,8 @@ private:
             std::set<uint32_t> referenced_snds;
             for (const SampleRow &row : m_samples)
             {
-                if (row.source == SampleSource::Bank && row.snd_resource_id != 0)
+                /* ID 0 is a valid assigned SND — do not treat it as unreferenced. */
+                if (row.source == SampleSource::Bank && row.snd_resource_id != 0xFFFFu)
                 {
                     referenced_snds.insert(row.snd_resource_id);
                 }
@@ -2638,7 +2671,9 @@ private:
                         continue;
                     }
                     XDisposePtr(data);
-                    if (snd_id <= 0 || referenced_snds.count(static_cast<uint32_t>(snd_id)) != 0)
+                    /* ID 0 is a valid SND resource id; only skip the -1 sentinel. */
+                    if (snd_id < 0 || snd_id == static_cast<XLongResourceID>(0xFFFF) ||
+                        referenced_snds.count(static_cast<uint32_t>(snd_id)) != 0)
                     {
                         continue;
                     }
@@ -3534,6 +3569,11 @@ private:
                                     : "No samples in this category. Try another Show: option.");
             if (ImGui::BeginPopupContextWindow("sample_list_empty_ctx", ImGuiPopupFlags_MouseButtonRight))
             {
+                if (ImGui::MenuItem("Paste", nullptr, false, CanPasteSamples()))
+                {
+                    PasteSamplesSelection();
+                }
+                ImGui::Separator();
                 if (ImGui::MenuItem("Add Sample...", nullptr, false, m_bank_token != 0))
                 {
                     OpenAddSampleFileDialog();
@@ -3589,9 +3629,18 @@ private:
                               sample.low_key,
                               sample.high_key);
             }
-            if (ImGui::Selectable(label, m_selected_sample == static_cast<int>(i)))
+            const bool sample_selected = (m_multi_samples.count(static_cast<int>(i)) != 0) ||
+                                         (m_selected_sample == static_cast<int>(i));
+            if (ImGui::Selectable(label, sample_selected))
             {
-                m_selected_sample = static_cast<int>(i);
+                const ImGuiIO &io = ImGui::GetIO();
+                ApplyListSelection(m_multi_samples,
+                                   m_selected_sample,
+                                   static_cast<int>(i),
+                                   m_multi_sample_anchor,
+                                   io.KeyCtrl,
+                                   io.KeyShift);
+                m_multi_sample_anchor = static_cast<int>(i);
                 m_selected_uses_song_source = sample.is_custom && !sample.unassigned;
                 if (!sample.unassigned)
                 {
@@ -3643,32 +3692,66 @@ private:
             std::snprintf(popup_id, sizeof(popup_id), "sample_ctx_%zu", i);
             if (ImGui::BeginPopupContextItem(popup_id, ImGuiPopupFlags_MouseButtonRight))
             {
+#if NBEDITOR_MVP
+                if (ImGui::MenuItem("Open Sample Editor",
+                                    nullptr,
+                                    false,
+                                    sample.source == SampleSource::Bank ||
+                                        sample.source == SampleSource::Song))
+                {
+                    m_selected_sample = static_cast<int>(i);
+                    OpenSampleEditorForSelection();
+                }
+#endif
                 if (sample.unassigned)
                 {
-                    if (ImGui::MenuItem("Make Instrument Using"))
-                    {
-                        m_selected_sample = static_cast<int>(i);
-                        (void)MakeInstrumentUsingSelectedSampleAuto();
-                    }
+                    /* Double-click also runs auto; menu offers the slot dialog. */
                     if (ImGui::MenuItem("Make Instrument Using..."))
                     {
                         m_selected_sample = static_cast<int>(i);
                         OpenMakeInstrumentUsingDialog();
                     }
                 }
-#if NBEDITOR_MVP
-                else if (ImGui::MenuItem("Open Sample Editor"))
+                const bool can_rename_sample =
+                    (sample.source == SampleSource::Bank && m_bank_token != 0 &&
+                     sample.snd_resource_id != 0xFFFFu) ||
+                    (sample.source == SampleSource::Song && m_document != nullptr);
+                if (ImGui::MenuItem("Rename...", nullptr, false, can_rename_sample))
+                {
+                    OpenRenameDialog("sample", static_cast<int>(i), sample.name);
+                }
+                ImGui::Separator();
+                if (ImGui::MenuItem("Cut",
+                                    nullptr,
+                                    false,
+                                    m_bank_token != 0 && sample.source == SampleSource::Bank))
                 {
                     m_selected_sample = static_cast<int>(i);
-                    OpenSampleEditorForSelection();
+                    m_multi_samples.insert(static_cast<int>(i));
+                    CopySamplesSelection(true);
                 }
-#endif
-                ImGui::Separator();
+                if (ImGui::MenuItem("Copy",
+                                    nullptr,
+                                    false,
+                                    m_bank_token != 0 && sample.source == SampleSource::Bank))
+                {
+                    m_selected_sample = static_cast<int>(i);
+                    m_multi_samples.insert(static_cast<int>(i));
+                    CopySamplesSelection(false);
+                }
+                if (ImGui::MenuItem("Paste", nullptr, false, CanPasteSamples()))
+                {
+                    PasteSamplesSelection();
+                }
+                if (ImGui::MenuItem("Select All"))
+                {
+                    SessionSelectAllVisible();
+                }
                 if (ImGui::MenuItem("Export Sample...",
                                     nullptr,
                                     false,
                                     (sample.source == SampleSource::Bank && m_bank_token != 0 &&
-                                     sample.snd_resource_id != 0) ||
+                                     sample.snd_resource_id != 0xFFFFu) ||
                                         (sample.source == SampleSource::Song && m_document != nullptr)))
                 {
                     m_selected_sample = static_cast<int>(i);
@@ -3678,7 +3761,7 @@ private:
                                     nullptr,
                                     false,
                                     m_bank_token != 0 && sample.source == SampleSource::Bank &&
-                                        sample.snd_resource_id != 0))
+                                        sample.snd_resource_id != 0xFFFFu))
                 {
                     m_selected_sample = static_cast<int>(i);
                     OpenExportSampleRmfDialog(static_cast<int>(i));
@@ -3693,6 +3776,7 @@ private:
                                     m_bank_token != 0 && sample.source == SampleSource::Bank))
                 {
                     DeleteSampleAt(static_cast<int>(i));
+                    m_multi_samples.erase(static_cast<int>(i));
                 }
                 ImGui::Separator();
                 if (ImGui::MenuItem("Add Sample...", nullptr, false, m_bank_token != 0))
@@ -3707,6 +3791,15 @@ private:
                                            ImGuiPopupFlags_MouseButtonRight |
                                                ImGuiPopupFlags_NoOpenOverItems))
         {
+            if (ImGui::MenuItem("Paste", nullptr, false, CanPasteSamples()))
+            {
+                PasteSamplesSelection();
+            }
+            if (ImGui::MenuItem("Select All", nullptr, false, !m_samples.empty()))
+            {
+                SessionSelectAllVisible();
+            }
+            ImGui::Separator();
             if (ImGui::MenuItem("Add Sample...", nullptr, false, m_bank_token != 0))
             {
                 OpenAddSampleFileDialog();
@@ -3728,6 +3821,7 @@ private:
 #include "nbeditor_export_prefs.inc"
 #include "nbeditor_about_dlg.inc"
 #include "nbeditor_dnd.inc"
+#include "nbeditor_clip_xfer.inc"
 
     void DrawInstrumentListWindow()
     {
@@ -3915,9 +4009,19 @@ private:
                 /* Fallback when oblique TTF failed to load. */
                 ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.75f, 0.85f, 1.0f, 1.0f));
             }
-            if (ImGui::Selectable(label, m_selected_instrument == static_cast<int>(i) && !m_selected_empty_slot))
+            const bool inst_selected =
+                (m_multi_instruments.count(static_cast<int>(i)) != 0) ||
+                (m_selected_instrument == static_cast<int>(i) && !m_selected_empty_slot);
+            if (ImGui::Selectable(label, inst_selected))
             {
-                m_selected_instrument = static_cast<int>(i);
+                const ImGuiIO &io = ImGui::GetIO();
+                ApplyListSelection(m_multi_instruments,
+                                   m_selected_instrument,
+                                   static_cast<int>(i),
+                                   m_multi_instrument_anchor,
+                                   io.KeyCtrl,
+                                   io.KeyShift);
+                m_multi_instrument_anchor = static_cast<int>(i);
                 m_selected_empty_slot = false;
                 m_selected_uses_song_source = inst.is_custom || inst.has_song_override;
                 m_selected_bank = inst.bank;
@@ -3983,20 +4087,38 @@ private:
                     (void)MakeSongUsingInstrumentAt(static_cast<int>(i));
                 }
                 ImGui::Separator();
+                if (ImGui::MenuItem("Rename...",
+                                    nullptr,
+                                    false,
+                                    m_bank_token != 0 && !inst.from_song_document && !inst.is_alias))
+                {
+                    OpenRenameDialog("instrument", static_cast<int>(i), inst.name);
+                }
+                if (ImGui::MenuItem("Cut",
+                                    nullptr,
+                                    false,
+                                    m_bank_token != 0 && !inst.from_song_document))
+                {
+                    m_selected_instrument = static_cast<int>(i);
+                    m_multi_instruments.insert(static_cast<int>(i));
+                    CutInstrumentsSelection();
+                }
                 if (ImGui::MenuItem("Copy Instrument",
                                     nullptr,
                                     false,
                                     m_bank_token != 0 && !inst.from_song_document))
                 {
                     m_selected_instrument = static_cast<int>(i);
-                    CopyInstrumentAt(static_cast<int>(i));
+                    m_multi_instruments.insert(static_cast<int>(i));
+                    BeginCopyInstrumentsForClip();
                 }
-                if (ImGui::MenuItem("Paste Instrument...",
-                                    nullptr,
-                                    false,
-                                    m_inst_clipboard_valid && m_bank_token != 0))
+                if (ImGui::MenuItem("Paste", nullptr, false, CanPasteInstruments()))
                 {
-                    OpenInstDestDialog(InstDestMode::Paste, -1);
+                    PasteInstrumentsSelection();
+                }
+                if (ImGui::MenuItem("Select All"))
+                {
+                    SessionSelectAllVisible();
                 }
                 if (ImGui::MenuItem("Create Alias...",
                                     nullptr,
@@ -4095,6 +4217,15 @@ private:
                                            ImGuiPopupFlags_MouseButtonRight |
                                                ImGuiPopupFlags_NoOpenOverItems))
         {
+            if (ImGui::MenuItem("Paste", nullptr, false, CanPasteInstruments()))
+            {
+                PasteInstrumentsSelection();
+            }
+            if (ImGui::MenuItem("Select All", nullptr, false, !m_instruments.empty()))
+            {
+                SessionSelectAllVisible();
+            }
+            ImGui::Separator();
             if (ImGui::MenuItem("Add Instrument...", nullptr, false, m_bank_token != 0))
             {
                 OpenAddInstrumentDialog();
@@ -4411,6 +4542,10 @@ private:
     bool m_inst_dest_percussion = false;
     int m_inst_dest_program = 0;
     bool m_inst_dest_deep_clone = false;
+    bool m_inst_dest_is_clip_package = false;
+    bool m_inst_dest_clip_delete = false;
+    int m_inst_dest_clip_inst_count = 0;
+    std::string m_inst_dest_clip_path;
     bool m_inst_clipboard_valid = false;
     uint32_t m_inst_clipboard_inst_id = 0;
     std::string m_inst_clipboard_name;
@@ -4582,6 +4717,31 @@ private:
     bool m_pref_reopen_last_session = false;
     bool m_pref_save_session_layout = true;   /* write nBeT on Save Session */
     bool m_pref_ignore_session_layout = false; /* skip nBeT on Open Session */
+    bool m_pref_adsr_default_valid = false;
+    BAERmfEditorADSRInfo m_pref_adsr_default = {};
+    std::string m_ie_adsr_default_focus_id;
+
+    /* Session multi-select + clip transfer */
+    std::set<int> m_multi_songs;
+    std::set<int> m_multi_instruments;
+    std::set<int> m_multi_samples;
+    int m_multi_song_anchor = -1;
+    int m_multi_instrument_anchor = -1;
+    int m_multi_sample_anchor = -1;
+    std::vector<SessionSongEntry> m_song_clipboard;
+    std::vector<uint32_t> m_sample_clipboard_snd_ids;
+    bool m_rename_open = false;
+    char m_rename_buf[256] = {};
+    std::string m_rename_kind;
+    int m_rename_index = -1;
+    std::vector<std::string> m_clip_published_paths;
+    std::string m_clip_active_package_path;
+    uint32_t m_clip_seq = 0;
+    bool m_clip_include_samples_prompt = false;
+    bool m_clip_cut_instruments_after_publish = false;
+    std::vector<int> m_clip_pending_inst_list_indices;
+    std::string m_clip_offer_uri;
+    std::string m_clip_offer_path;
     bool m_prefs_draft_reopen = false;
     bool m_prefs_draft_save_layout = true;
     bool m_prefs_draft_ignore_layout = false;
