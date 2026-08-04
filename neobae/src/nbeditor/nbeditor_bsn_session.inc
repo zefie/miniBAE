@@ -22,6 +22,27 @@ static void BsnMakePascalName(const char *c_name, char out_pascal[256])
     std::memcpy(out_pascal + 1, c_name, len);
 }
 
+static void NbetPutBE32(std::vector<unsigned char> &out, uint32_t v)
+{
+    out.push_back(static_cast<unsigned char>((v >> 24) & 0xff));
+    out.push_back(static_cast<unsigned char>((v >> 16) & 0xff));
+    out.push_back(static_cast<unsigned char>((v >> 8) & 0xff));
+    out.push_back(static_cast<unsigned char>(v & 0xff));
+}
+
+static uint32_t NbetReadBE32(const unsigned char *p)
+{
+    return (static_cast<uint32_t>(p[0]) << 24) |
+           (static_cast<uint32_t>(p[1]) << 16) |
+           (static_cast<uint32_t>(p[2]) << 8) |
+           static_cast<uint32_t>(p[3]);
+}
+
+static int32_t NbetReadBE32Signed(const unsigned char *p)
+{
+    return static_cast<int32_t>(NbetReadBE32(p));
+}
+
 static bool BsnSongObjectIsMidi(XFILE bank_file, const unsigned char *song_body, int32_t song_size)
 {
     if (!song_body || song_size < 8)
@@ -577,6 +598,250 @@ bool ActivateSessionSongAt(int index)
     return ReloadPlaybackFromDocument(true);
 }
 
+/* nBeT open-editor flags (version 2+). ImGui ini alone cannot reopen gated dialogs. */
+static constexpr uint32_t kNbetOpenIE = 1u << 0;
+static constexpr uint32_t kNbetOpenSE = 1u << 1;
+static constexpr uint32_t kNbetOpenSongInfo = 1u << 2;
+static constexpr uint32_t kNbetOpenSongSettings = 1u << 3;
+
+std::vector<unsigned char> CaptureNbetLayoutBlob()
+{
+    std::vector<unsigned char> blob;
+    int x = 100;
+    int y = 100;
+    int w = 1280;
+    int h = 820;
+    uint32_t maximized = 0;
+    if (m_main_window)
+    {
+        SDL_GetWindowPosition(m_main_window, &x, &y);
+        SDL_GetWindowSize(m_main_window, &w, &h);
+        const SDL_WindowFlags flags = SDL_GetWindowFlags(m_main_window);
+        if (flags & SDL_WINDOW_MAXIMIZED)
+        {
+            maximized = 1;
+        }
+    }
+    /* Force a fresh dump of window + docking handlers into the ini blob. */
+    ImGui::MarkIniSettingsDirty();
+    size_t ini_size = 0;
+    const char *ini = ImGui::SaveIniSettingsToMemory(&ini_size);
+    const uint32_t ini_len = (ini && ini_size > 0) ? static_cast<uint32_t>(ini_size) : 0;
+
+    uint32_t open_flags = 0;
+    if (m_instrument_editor_open)
+    {
+        open_flags |= kNbetOpenIE;
+    }
+#if NBEDITOR_MVP
+    if (m_sample_editor_open)
+    {
+        open_flags |= kNbetOpenSE;
+    }
+#endif
+    if (m_song_info_open)
+    {
+        open_flags |= kNbetOpenSongInfo;
+    }
+    if (m_song_settings_open)
+    {
+        open_flags |= kNbetOpenSongSettings;
+    }
+
+    /* Version 2: window geom + open-editor state + ImGui ini. */
+    blob.reserve(64 + ini_len);
+    NbetPutBE32(blob, FOUR_CHAR('n', 'B', 'e', 'T'));
+    NbetPutBE32(blob, 2u);
+    NbetPutBE32(blob, static_cast<uint32_t>(x));
+    NbetPutBE32(blob, static_cast<uint32_t>(y));
+    NbetPutBE32(blob, static_cast<uint32_t>(w));
+    NbetPutBE32(blob, static_cast<uint32_t>(h));
+    NbetPutBE32(blob, maximized);
+    NbetPutBE32(blob, open_flags);
+    NbetPutBE32(blob, m_ie_inst_id);
+    NbetPutBE32(blob, m_ie_instrument_index);
+    NbetPutBE32(blob, static_cast<uint32_t>(m_ie_bank));
+    NbetPutBE32(blob, static_cast<uint32_t>(m_ie_program));
+    NbetPutBE32(blob, m_ie_from_song ? 1u : 0u);
+#if NBEDITOR_MVP
+    NbetPutBE32(blob, static_cast<uint32_t>(m_sample_editor_sample_row));
+    NbetPutBE32(blob, m_sample_editor_is_song_sample ? 1u : 0u);
+#else
+    NbetPutBE32(blob, static_cast<uint32_t>(-1));
+    NbetPutBE32(blob, 0u);
+#endif
+    NbetPutBE32(blob, ini_len);
+    if (ini_len > 0 && ini)
+    {
+        blob.insert(blob.end(),
+                    reinterpret_cast<const unsigned char *>(ini),
+                    reinterpret_cast<const unsigned char *>(ini) + ini_len);
+    }
+    return blob;
+}
+
+void RestoreNbetEditorWindows()
+{
+    if (m_nbet_restore_open_flags == 0)
+    {
+        return;
+    }
+    const uint32_t flags = m_nbet_restore_open_flags;
+    m_nbet_restore_open_flags = 0;
+
+    if (flags & kNbetOpenIE)
+    {
+        int match = -1;
+        for (int i = 0; i < static_cast<int>(m_instruments.size()); ++i)
+        {
+            const InstrumentRow &row = m_instruments[static_cast<size_t>(i)];
+            if (m_nbet_restore_ie_inst_id != 0 && row.inst_id == m_nbet_restore_ie_inst_id)
+            {
+                match = i;
+                break;
+            }
+            if (row.instrument_index == m_nbet_restore_ie_instrument_index &&
+                row.bank == m_nbet_restore_ie_bank &&
+                row.program == m_nbet_restore_ie_program)
+            {
+                match = i;
+                break;
+            }
+        }
+        if (match >= 0)
+        {
+            m_selected_instrument = match;
+            m_selected_empty_slot = false;
+            OpenInstrumentEditorForSelection();
+        }
+    }
+
+#if NBEDITOR_MVP
+    if (flags & kNbetOpenSE)
+    {
+        if (m_nbet_restore_se_sample_row >= 0 &&
+            m_nbet_restore_se_sample_row < static_cast<int>(m_samples.size()))
+        {
+            m_selected_sample = m_nbet_restore_se_sample_row;
+            OpenSampleEditorForSelection();
+        }
+    }
+#endif
+
+    if ((flags & kNbetOpenSongInfo) && m_document)
+    {
+        OpenSongInfoDialog();
+    }
+    if (flags & kNbetOpenSongSettings)
+    {
+        OpenSongSettingsDialog();
+    }
+}
+
+void ApplyNbetLayoutBlob(const unsigned char *data, size_t size)
+{
+    if (!data || size < 32)
+    {
+        return;
+    }
+    const uint32_t magic = NbetReadBE32(data + 0);
+    const uint32_t version = NbetReadBE32(data + 4);
+    if (magic != static_cast<uint32_t>(FOUR_CHAR('n', 'B', 'e', 'T')) ||
+        (version != 1 && version != 2))
+    {
+        return;
+    }
+    const int32_t x = NbetReadBE32Signed(data + 8);
+    const int32_t y = NbetReadBE32Signed(data + 12);
+    const int32_t w = NbetReadBE32Signed(data + 16);
+    const int32_t h = NbetReadBE32Signed(data + 20);
+    const uint32_t maximized = NbetReadBE32(data + 24);
+
+    size_t ini_off = 32;
+    uint32_t ini_len = 0;
+    m_nbet_restore_open_flags = 0;
+    if (version == 1)
+    {
+        ini_len = NbetReadBE32(data + 28);
+        ini_off = 32;
+    }
+    else
+    {
+        /* v2 fixed header is 64 bytes before ini payload. */
+        if (size < 64)
+        {
+            return;
+        }
+        m_nbet_restore_open_flags = NbetReadBE32(data + 28);
+        m_nbet_restore_ie_inst_id = NbetReadBE32(data + 32);
+        m_nbet_restore_ie_instrument_index = NbetReadBE32(data + 36);
+        m_nbet_restore_ie_bank = NbetReadBE32Signed(data + 40);
+        m_nbet_restore_ie_program = NbetReadBE32Signed(data + 44);
+        m_nbet_restore_ie_from_song = (NbetReadBE32(data + 48) != 0);
+        m_nbet_restore_se_sample_row = NbetReadBE32Signed(data + 52);
+        m_nbet_restore_se_is_song = (NbetReadBE32(data + 56) != 0);
+        ini_len = NbetReadBE32(data + 60);
+        ini_off = 64;
+    }
+    if (ini_off + ini_len > size)
+    {
+        return;
+    }
+    if (m_main_window && w > 100 && h > 80)
+    {
+        SDL_SetWindowPosition(m_main_window, x, y);
+        SDL_SetWindowSize(m_main_window, w, h);
+        if (maximized)
+        {
+            SDL_MaximizeWindow(m_main_window);
+        }
+        else
+        {
+            SDL_RestoreWindow(m_main_window);
+        }
+    }
+    m_pending_imgui_ini.clear();
+    if (ini_len > 0)
+    {
+        m_pending_imgui_ini.assign(reinterpret_cast<const char *>(data + ini_off),
+                                   static_cast<size_t>(ini_len));
+    }
+    m_pending_apply_nbet = true;
+    /* Wait for SDL resize + one frame with DockSpace/windows present.
+     * LoadIniSettingsFromMemory must run outside NewFrame (see PumpPendingNbetLayout). */
+    m_nbet_apply_delay_frames = 2;
+}
+
+void ResetSessionLayoutToDefault()
+{
+    m_pending_apply_nbet = false;
+    m_nbet_apply_delay_frames = 0;
+    m_pending_imgui_ini.clear();
+    m_nbet_restore_open_flags = 0;
+
+    m_instrument_editor_open = false;
+#if NBEDITOR_MVP
+    m_sample_editor_open = false;
+    m_sample_editor_compression_open = false;
+    m_sample_editor_choose_note_open = false;
+#endif
+    m_song_info_open = false;
+    m_song_settings_open = false;
+    m_export_rmf_open = false;
+    m_export_sample_rmf_open = false;
+    m_export_bank_open = false;
+    m_export_audio_open = false;
+    m_prefs_open = false;
+    m_session_info_open = false;
+    m_resource_usage_open = false;
+    m_bank_add_open = false;
+    m_inst_dest_open = false;
+
+    m_force_reset_dock_layout = true;
+    m_dock_layout_initialized = false;
+    SetStatus("Layout reset to default");
+}
+
 bool LoadSessionBsnFromPath(const char *path)
 {
     if (!path || !path[0])
@@ -597,6 +862,28 @@ bool LoadSessionBsnFromPath(const char *path)
     if (!bank_ok)
     {
         LoadBuiltinBankAsActive();
+    }
+
+    /* Optional NeoBAE editor layout (nBeT), unless Preferences ignore it. */
+    if (!m_pref_ignore_session_layout)
+    {
+        std::vector<unsigned char> bytes;
+        if (ReadEntireFileBytes(path, bytes))
+        {
+            std::vector<BsnIrezResource> resources;
+            if (ParseIrezResources(bytes.data(), bytes.size(), resources))
+            {
+                for (const BsnIrezResource &r : resources)
+                {
+                    if (BsnResourceTypeEquals(r.type, 'n', 'B', 'e', 'T') && r.id == 1 &&
+                        !r.body.empty())
+                    {
+                        ApplyNbetLayoutBlob(r.body.data(), r.body.size());
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     m_session_songs = std::move(songs);
@@ -873,8 +1160,25 @@ bool SaveSessionToPath(const char *path)
     }
 #endif
 
-    /* ---- BePf / BEPF / DATe ---- */
+    /* ---- nBeT / BePf / BEPF / DATe ---- */
     {
+        if (m_pref_save_session_layout)
+        {
+            std::vector<unsigned char> nbet = CaptureNbetLayoutBlob();
+            if (!nbet.empty())
+            {
+                char nbet_pascal[256];
+                BsnMakePascalName("NeoBAE Editor", nbet_pascal);
+                (void)XAddFileResource(out_file,
+                                       FOUR_CHAR('n', 'B', 'e', 'T'),
+                                       1,
+                                       nbet_pascal,
+                                       nbet.data(),
+                                       static_cast<int32_t>(nbet.size()));
+                date_stamps.push_back({FOUR_CHAR('n', 'B', 'e', 'T'), 1});
+            }
+        }
+
         static const unsigned char k_bepf_body[] = {'e', 'x', 'a', 'm', 'p', 'l', 'e'};
         char empty_pascal[256];
         empty_pascal[0] = 0;

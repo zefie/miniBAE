@@ -103,13 +103,21 @@ struct SessionPcmCacheEntry
     uint32_t snd_resource_id = 0;
 };
 
+enum class ExportInstMode : int
+{
+    Off = 0,   /* bank program ref only */
+    Embed = 1, /* INST + samples in RMF */
+    Ghost = 2, /* INST in RMF; samples bank-aliased */
+};
+
 struct ExportInstrumentItem
 {
     uint32_t inst_id = 0;
     uint32_t instrument_index = 0;
     std::string name;
     bool is_custom = false;
-    bool selected = false;
+    bool selected = false; /* legacy: true when mode == Embed */
+    ExportInstMode mode = ExportInstMode::Off;
     int custom_index = -1;
     int bank = 0;
     int program = 0;
@@ -913,8 +921,18 @@ public:
         }
 
         LoadRecentSessionsFromDisk();
-        /* BE2-style: start on a clean slate with the built-in bank. Recent
-         * sessions stay in File→Recent; nothing is auto-opened. */
+        LoadEditorPrefsFromDisk();
+        /* Clean slate by default; optional reopen via Preferences. */
+        if (m_pref_reopen_last_session && !m_recent_sessions.empty())
+        {
+            const std::string &recent = m_recent_sessions.front();
+            FILE *probe = std::fopen(recent.c_str(), "rb");
+            if (probe)
+            {
+                std::fclose(probe);
+                ImportPathIntoSession(recent, true);
+            }
+        }
         SetStatus("nbeditor ready");
         return true;
     }
@@ -974,6 +992,36 @@ public:
 
     const char *GetStatus() const { return m_status; }
 
+    /* Must run outside NewFrame/EndFrame — mid-frame LoadIni clears docks and undocks windows. */
+    void PumpPendingNbetLayout()
+    {
+        if (!m_pending_apply_nbet)
+        {
+            return;
+        }
+        if (m_nbet_apply_delay_frames > 0)
+        {
+            --m_nbet_apply_delay_frames;
+            return;
+        }
+        /* Prefer ini that actually contains docking data; otherwise keep default dock. */
+        if (!m_pending_imgui_ini.empty())
+        {
+            const bool has_docking =
+                m_pending_imgui_ini.find("[Docking][Data]") != std::string::npos;
+            if (has_docking)
+            {
+                ImGui::LoadIniSettingsFromMemory(m_pending_imgui_ini.c_str(),
+                                                 m_pending_imgui_ini.size());
+                m_dock_layout_initialized = true;
+            }
+            m_pending_imgui_ini.clear();
+        }
+        m_pending_apply_nbet = false;
+        /* Reopen IE/SE/Song Info/etc. after session lists are ready. */
+        RestoreNbetEditorWindows();
+    }
+
     void DrawUI()
     {
         ConsumeDialogResult();
@@ -983,9 +1031,13 @@ public:
         DrawSessionWindow();
         DrawBankAddDialog();
         DrawSongInfoDialog();
+        DrawSongSettingsDialog();
+        DrawEditorPreferencesDialog();
         DrawInstrumentEditorDialog();
         DrawExportRmfDialog();
         DrawExportSampleRmfDialog();
+        DrawExportBankDialog();
+        DrawExportAudioDialog();
 #if NBEDITOR_MVP
         DrawSampleEditorDialog();
 #endif
@@ -1064,9 +1116,12 @@ private:
         ExportOneShotRmf,
         ExportGroovoidRmf,
         ExportSample,
+        ExportAudio,
+        ExportBank,
         SaveBankAs,
         SaveSessionAs,
         AddSample,
+        ReImportMidi,
     };
 
     static void SDLCALL OnFileDialogResult(void *userdata, const char *const *filelist, int)
@@ -1306,6 +1361,21 @@ private:
             }
             return;
         }
+        if (m_pending_dialog_action == DialogAction::ExportBank)
+        {
+            ExportBankCloneToPath(selected_path);
+            return;
+        }
+        if (m_pending_dialog_action == DialogAction::ExportAudio)
+        {
+            ExportSessionSongAsAudioToPath(selected_path);
+            return;
+        }
+        if (m_pending_dialog_action == DialogAction::ReImportMidi)
+        {
+            ReImportMidiFromPath(selected_path);
+            return;
+        }
         if (m_pending_dialog_action == DialogAction::AddSample)
         {
             BeginAddSampleFromPath(selected_path);
@@ -1331,11 +1401,13 @@ private:
             mods |= BAE_USE_STEREO;
         }
 
+        const int16_t midi_voices =
+            static_cast<int16_t>(std::clamp(m_song_settings_voices, 8, 128));
         BAEResult open_result = BAEMixer_Open(new_mixer,
                                               RateFromHz(m_sample_rate_hz),
                                               BAE_LINEAR_INTERPOLATION,
                                               mods,
-                                              64,
+                                              midi_voices,
                                               16,
                                               32,
                                               TRUE);
@@ -2743,8 +2815,19 @@ private:
         ImGui::PopStyleVar(3);
 
         ImGuiID dockspace_id = ImGui::GetID("nbeditor_dockspace_id");
+        if (m_force_reset_dock_layout)
+        {
+            ImGui::DockBuilderRemoveNode(dockspace_id);
+            m_dock_layout_initialized = false;
+            m_force_reset_dock_layout = false;
+        }
         ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
-        SetupInitialDockLayout(dockspace_id, viewport->Size);
+        /* While waiting to apply nBeT (before NewFrame), still install the default
+         * dock once so windows are not floating for the delay frames. */
+        if (!m_pending_apply_nbet || !m_dock_layout_initialized)
+        {
+            SetupInitialDockLayout(dockspace_id, viewport->Size);
+        }
 
         ImGui::End();
 
@@ -3572,6 +3655,7 @@ private:
 #include "nbeditor_instrument_ops.inc"
 #include "nbeditor_resource_usage.inc"
 #include "nbeditor_session_extras.inc"
+#include "nbeditor_export_prefs.inc"
 #include "nbeditor_dnd.inc"
 
     void DrawInstrumentListWindow()
@@ -4326,12 +4410,61 @@ private:
     std::string m_loaded_session_path;
     std::map<uint32_t, SessionPcmCacheEntry> m_session_pcm_cache;
     std::map<uint32_t, std::vector<unsigned char>> m_app_compression_cache;
-    /* RMF/ZMF export dialog: instruments selected for embedding. */
+    /* RMF/ZMF export dialog: instruments selected for embedding / ghost. */
     bool m_export_rmf_open = false;
     std::vector<ExportInstrumentItem> m_export_items;
     std::set<uint32_t> m_export_embed_inst_ids;
+    std::set<uint32_t> m_export_ghost_inst_ids;
     /* Combo index matches BAERmfEditorSndStorageType (ESND/CSND/SND). */
     int m_export_snd_storage_index = static_cast<int>(BAE_EDITOR_SND_STORAGE_ESND);
+
+    /* Editor Preferences (~/.config/neobae/nbeditor_prefs). */
+    bool m_prefs_open = false;
+    bool m_pref_reopen_last_session = false;
+    bool m_pref_save_session_layout = true;   /* write nBeT on Save Session */
+    bool m_pref_ignore_session_layout = false; /* skip nBeT on Open Session */
+    bool m_prefs_draft_reopen = false;
+    bool m_prefs_draft_save_layout = true;
+    bool m_prefs_draft_ignore_layout = false;
+    char m_pref_song_title[256] = {0};
+    char m_pref_song_composer[256] = {0};
+    char m_pref_song_copyright[256] = {0};
+    char m_pref_song_performed[256] = {0};
+    char m_pref_song_publisher[256] = {0};
+    char m_pref_song_license_url[256] = {0};
+    char m_pref_song_genre[256] = {0};
+    char m_pref_song_subgenre[256] = {0};
+    char m_pref_song_notes[512] = {0};
+
+    /* nBeT session layout restore (applied before NewFrame, after a short delay). */
+    bool m_pending_apply_nbet = false;
+    int m_nbet_apply_delay_frames = 0;
+    std::string m_pending_imgui_ini;
+    bool m_force_reset_dock_layout = false;
+    uint32_t m_nbet_restore_open_flags = 0;
+    uint32_t m_nbet_restore_ie_inst_id = 0;
+    uint32_t m_nbet_restore_ie_instrument_index = 0;
+    int m_nbet_restore_ie_bank = 0;
+    int m_nbet_restore_ie_program = 0;
+    bool m_nbet_restore_ie_from_song = false;
+    int m_nbet_restore_se_sample_row = -1;
+    bool m_nbet_restore_se_is_song = false;
+
+    /* Export Bank dialog options. */
+    bool m_export_bank_open = false;
+    bool m_export_bank_encrypt = true;
+    bool m_export_bank_include_groovoids = true;
+    bool m_export_bank_drop_unref = false;
+    bool m_export_bank_songs_to_groovoids = false;
+
+    /* Export as Audio dialog. */
+    bool m_export_audio_open = false;
+    int m_export_audio_codec_index = 0;
+
+    /* Song Settings dialog. */
+    bool m_song_settings_open = false;
+    int m_song_settings_tempo_percent = 100;
+    int m_song_settings_voices = 64;
     /* Sample list → Export Sample (native codec file). */
     int m_export_native_sample_row = -1;
     std::string m_export_native_sample_ext;
@@ -4362,6 +4495,11 @@ private:
     char m_song_info_composer[256] = {0};
     char m_song_info_copyright[256] = {0};
     char m_song_info_performed[256] = {0};
+    char m_song_info_publisher[256] = {0};
+    char m_song_info_license_url[256] = {0};
+    char m_song_info_genre[256] = {0};
+    char m_song_info_subgenre[256] = {0};
+    char m_song_info_notes[512] = {0};
     int m_song_info_bpm = 120;
     int m_song_info_tpq = 480;
     bool m_song_info_loop_enabled = false;
@@ -4428,6 +4566,8 @@ int main(int argc, char **argv)
     ImGuiIO &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    /* Session layout lives in nBeT; do not auto-load/save imgui.ini. */
+    io.IniFilename = nullptr;
 
     ImGui::StyleColorsDark();
     ImGuiStyle &style = ImGui::GetStyle();
@@ -4549,6 +4689,9 @@ int main(int argc, char **argv)
             SDL_Delay(10);
             continue;
         }
+
+        /* Apply nBeT ImGui/dock ini before NewFrame — mid-frame load undocks windows. */
+        app.PumpPendingNbetLayout();
 
         ImGui_ImplSDLRenderer3_NewFrame();
         ImGui_ImplSDL3_NewFrame();

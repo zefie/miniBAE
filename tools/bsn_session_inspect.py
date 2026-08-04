@@ -232,6 +232,34 @@ def inspect(path: Path, verbose: bool = False) -> int:
                 f"    snd  id={r['id']} name={r['name']!r} len={r['body_len']}"  # type: ignore[str-format]
             )
 
+    nbets = [r for r in resources if r["type"] == b"nBeT"]
+    if nbets:
+        print(f"  NeoBAE editor layout (nBeT): {len(nbets)}")
+        for r in nbets:
+            body: bytes = r["body"]  # type: ignore[assignment]
+            name = r["name"].decode("latin-1", errors="replace")  # type: ignore[union-attr]
+            print(f"    nBeT id={int(r['id'])} name={name!r} len={int(r['body_len'])}")
+            if len(body) >= 32 and body[0:4] == b"nBeT":
+                ver = struct.unpack(">I", body[4:8])[0]
+                x, y, w, h, maximized = struct.unpack(">iiiiI", body[8:28])
+                if ver >= 2 and len(body) >= 64:
+                    open_flags, ie_inst, ie_index, ie_bank, ie_prog, ie_song, se_row, se_song, ini_len = (
+                        struct.unpack(">IIIiiIiII", body[28:64])
+                    )
+                    print(
+                        f"      version={ver} window=({x},{y},{w}x{h}) maximized={maximized} "
+                        f"open_flags=0x{open_flags:x} ie_inst={ie_inst} se_row={se_row} "
+                        f"imgui_ini_bytes={ini_len}"
+                    )
+                else:
+                    ini_len = struct.unpack(">I", body[28:32])[0]
+                    print(
+                        f"      version={ver} window=({x},{y},{w}x{h}) maximized={maximized} "
+                        f"imgui_ini_bytes={ini_len}"
+                    )
+    else:
+        print("  NeoBAE editor layout (nBeT): none")
+
     for r in resources:
         if r["type"] == b"BePf":
             body: bytes = r["body"]  # type: ignore[assignment]

@@ -70,6 +70,15 @@
             {
                 OpenExportRmfInstrumentDialog();
             }
+            if (ImGui::MenuItem("Export as Audio...", nullptr, false, m_document != nullptr || m_song != nullptr))
+            {
+                OpenExportAudioDialog();
+            }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Export Bank...", nullptr, false, m_bank_token != 0))
+            {
+                OpenExportBankDialog();
+            }
             ImGui::Separator();
 #if _BUILT_IN_PATCHES == TRUE
             if (ImGui::MenuItem("Load Built-in Bank", nullptr, false, m_mixer != nullptr))
@@ -129,10 +138,33 @@
             {
                 OpenSongInfoDialog();
             }
+            if (ImGui::MenuItem("Song Settings...", nullptr, false, m_document != nullptr || m_song != nullptr))
+            {
+                OpenSongSettingsDialog();
+            }
+            if (ImGui::MenuItem("Export as Audio...", nullptr, false, m_document != nullptr || m_song != nullptr))
+            {
+                OpenExportAudioDialog();
+            }
             ImGui::EndMenu();
         }
         if (ImGui::BeginMenu("Edit"))
         {
+            if (ImGui::MenuItem("Preferences..."))
+            {
+                OpenEditorPreferencesDialog();
+            }
+            if (ImGui::MenuItem("Reset Layout"))
+            {
+                ResetSessionLayoutToDefault();
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+            {
+                ImGui::SetTooltip(
+                    "Restore the default Player / Session / Status dock layout.\n"
+                    "Closes floating editor windows (IE, Sample Editor, etc.).");
+            }
+            ImGui::Separator();
             if (ImGui::MenuItem("Copy Instrument",
                                nullptr,
                                false,
@@ -1283,8 +1315,9 @@
             item.name = used.name;
             item.is_custom = is_custom;
             item.custom_index = is_custom ? custom_index++ : -1;
-            /* BE2 default: only custom instruments are checked. */
-            item.selected = is_custom;
+            /* BE2 default: only custom instruments are embedded. */
+            item.mode = is_custom ? ExportInstMode::Embed : ExportInstMode::Off;
+            item.selected = (item.mode == ExportInstMode::Embed);
             item.bank = used.bank;
             item.program = used.program;
             m_export_items.push_back(std::move(item));
@@ -1298,26 +1331,36 @@
             switch (mode)
             {
             case ExportSelectionMode::All:
-                item.selected = true;
+                item.mode = ExportInstMode::Embed;
                 break;
             case ExportSelectionMode::None:
-                item.selected = false;
+                item.mode = ExportInstMode::Off;
                 break;
             case ExportSelectionMode::Custom:
-                item.selected = item.is_custom;
+                item.mode = item.is_custom ? ExportInstMode::Embed : ExportInstMode::Off;
                 break;
             }
+            item.selected = (item.mode == ExportInstMode::Embed);
         }
     }
 
     void SyncExportEmbedSetFromItems()
     {
         m_export_embed_inst_ids.clear();
+        m_export_ghost_inst_ids.clear();
         for (const ExportInstrumentItem &item : m_export_items)
         {
-            if (item.selected && item.inst_id != 0)
+            if (item.inst_id == 0)
+            {
+                continue;
+            }
+            if (item.mode == ExportInstMode::Embed)
             {
                 m_export_embed_inst_ids.insert(item.inst_id);
+            }
+            else if (item.mode == ExportInstMode::Ghost)
+            {
+                m_export_ghost_inst_ids.insert(item.inst_id);
             }
         }
     }
@@ -1357,8 +1400,9 @@
         m_export_rmf_open = open;
 
         ImGui::TextWrapped(
-            "Select the instruments to be included in the RMF file. Usually, you only need "
-            "to select the instruments which you have created yourself.");
+            "Per instrument: Off (bank ref), Embed (INST+samples), or Ghost "
+            "(INST only; samples resolve from the host bank). Usually embed "
+            "only instruments you created yourself.");
         ImGui::Spacing();
 
         const float side_w = 88.0f;
@@ -1372,6 +1416,7 @@
                 ImGui::TextDisabled("(no instruments used by this song)");
                 ImGui::TextDisabled("OK exports with bank references only.");
             }
+            static const char *kModeLabels[] = {"Off", "Embed", "Ghost"};
             for (size_t i = 0; i < m_export_items.size(); ++i)
             {
                 ExportInstrumentItem &item = m_export_items[i];
@@ -1394,7 +1439,24 @@
                                   item.program);
                 }
                 ImGui::PushID(static_cast<int>(item.inst_id));
-                ImGui::Checkbox(label, &item.selected);
+                int mode_i = static_cast<int>(item.mode);
+                if (mode_i < 0 || mode_i > 2)
+                {
+                    mode_i = 0;
+                }
+                ImGui::SetNextItemWidth(90.0f);
+                if (ImGui::Combo("##mode", &mode_i, kModeLabels, IM_ARRAYSIZE(kModeLabels)))
+                {
+                    item.mode = static_cast<ExportInstMode>(mode_i);
+                    item.selected = (item.mode == ExportInstMode::Embed);
+                }
+                ImGui::SameLine();
+                ImGui::TextUnformatted(label);
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal) && item.mode == ExportInstMode::Ghost)
+                {
+                    ImGui::SetTooltip(
+                        "Ghost: include instrument definition; samples stay bank aliases.");
+                }
                 ImGui::PopID();
             }
         }
@@ -1408,7 +1470,7 @@
             }
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
             {
-                ImGui::SetTooltip("Check every instrument in the list.");
+                ImGui::SetTooltip("Set every instrument to Embed.");
             }
             if (ImGui::Button("Custom", ImVec2(-1, 0)))
             {
@@ -1417,7 +1479,7 @@
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
             {
                 ImGui::SetTooltip(
-                    "Check only custom (Bank 2+) instruments; uncheck bank 0/1.");
+                    "Embed custom (Bank 2+) instruments; Off for bank 0/1.");
             }
             if (ImGui::Button("None", ImVec2(-1, 0)))
             {
@@ -1426,7 +1488,7 @@
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
             {
                 ImGui::SetTooltip(
-                    "Uncheck all (export with bank references only; list stays).");
+                    "Set all to Off (bank references only; list stays).");
             }
         }
         ImGui::EndChild();
@@ -2494,11 +2556,17 @@
             return;
         }
 
-        std::vector<uint32_t> embed_ids;
-        embed_ids.reserve(m_export_embed_inst_ids.size());
+        /* Embed + Ghost both need INST on the export doc first; Ghost then
+         * strips sample payloads via SetInstrumentGhost. */
+        std::vector<uint32_t> prepare_ids;
+        prepare_ids.reserve(m_export_embed_inst_ids.size() + m_export_ghost_inst_ids.size());
         for (uint32_t id : m_export_embed_inst_ids)
         {
-            embed_ids.push_back(id);
+            prepare_ids.push_back(id);
+        }
+        for (uint32_t id : m_export_ghost_inst_ids)
+        {
+            prepare_ids.push_back(id);
         }
 
         BAERmfEditorCloneUsedResult clone_result;
@@ -2506,14 +2574,22 @@
         BAEResult prep = BAERmfEditorDocument_ExportUsedInstrumentsFromBank(
             export_doc,
             m_bank_token,
-            embed_ids.empty() ? nullptr : embed_ids.data(),
-            static_cast<uint32_t>(embed_ids.size()),
+            prepare_ids.empty() ? nullptr : prepare_ids.data(),
+            static_cast<uint32_t>(prepare_ids.size()),
             &clone_result);
         if (prep != BAE_NO_ERROR)
         {
             BAERmfEditorDocument_Delete(export_doc);
             SetStatus(std::string("Export prepare failed: ") + FormatBAEError(prep));
             return;
+        }
+
+        for (uint32_t ghost_id : m_export_ghost_inst_ids)
+        {
+            (void)BAERmfEditorDocument_SetInstrumentGhost(export_doc,
+                                                          ghost_id,
+                                                          m_bank_token,
+                                                          TRUE);
         }
 
         /* Apply chosen sound storage type to embedded (non-alias) samples. */
@@ -2574,12 +2650,18 @@
         if (r == BAE_NO_ERROR)
         {
             uint32_t embedded = 0;
+            uint32_t ghosted = 0;
             uint32_t bank_ref = 0;
             for (uint32_t i = 0; i < clone_result.mappingCount; ++i)
             {
-                if (m_export_embed_inst_ids.count(clone_result.mappings[i].resolvedInstID) != 0)
+                const uint32_t rid = clone_result.mappings[i].resolvedInstID;
+                if (m_export_embed_inst_ids.count(rid) != 0)
                 {
                     ++embedded;
+                }
+                else if (m_export_ghost_inst_ids.count(rid) != 0)
+                {
+                    ++ghosted;
                 }
                 else
                 {
@@ -2589,9 +2671,10 @@
             char status[256];
             std::snprintf(status,
                           sizeof(status),
-                          "Exported %s (%u embedded, %u bank-ref)",
+                          "Exported %s (%u embedded, %u ghost, %u bank-ref)",
                           FileNameFromPath(out_path).c_str(),
                           static_cast<unsigned>(embedded),
+                          static_cast<unsigned>(ghosted),
                           static_cast<unsigned>(bank_ref));
             SetStatus(status);
         }
@@ -2933,6 +3016,11 @@
         copy_info(COMPOSER_INFO, m_song_info_composer, sizeof(m_song_info_composer));
         copy_info(COPYRIGHT_INFO, m_song_info_copyright, sizeof(m_song_info_copyright));
         copy_info(PERFORMED_BY_INFO, m_song_info_performed, sizeof(m_song_info_performed));
+        copy_info(PUBLISHER_CONTACT_INFO, m_song_info_publisher, sizeof(m_song_info_publisher));
+        copy_info(LICENSED_TO_URL_INFO, m_song_info_license_url, sizeof(m_song_info_license_url));
+        copy_info(GENRE_INFO, m_song_info_genre, sizeof(m_song_info_genre));
+        copy_info(SUB_GENRE_INFO, m_song_info_subgenre, sizeof(m_song_info_subgenre));
+        copy_info(COMPOSER_NOTES_INFO, m_song_info_notes, sizeof(m_song_info_notes));
         uint32_t bpm = 120;
         uint16_t tpq = 480;
         BAERmfEditorDocument_GetTempoBPM(m_document, &bpm);
@@ -2953,6 +3041,35 @@
         m_song_info_open = true;
     }
 
+    void ApplySongInfoFieldsToDocument()
+    {
+        if (!m_document)
+        {
+            return;
+        }
+        BAERmfEditorDocument_SetInfo(m_document, TITLE_INFO, m_song_info_title);
+        BAERmfEditorDocument_SetInfo(m_document, COMPOSER_INFO, m_song_info_composer);
+        BAERmfEditorDocument_SetInfo(m_document, COPYRIGHT_INFO, m_song_info_copyright);
+        BAERmfEditorDocument_SetInfo(m_document, PERFORMED_BY_INFO, m_song_info_performed);
+        BAERmfEditorDocument_SetInfo(m_document, PUBLISHER_CONTACT_INFO, m_song_info_publisher);
+        BAERmfEditorDocument_SetInfo(m_document, LICENSED_TO_URL_INFO, m_song_info_license_url);
+        BAERmfEditorDocument_SetInfo(m_document, GENRE_INFO, m_song_info_genre);
+        BAERmfEditorDocument_SetInfo(m_document, SUB_GENRE_INFO, m_song_info_subgenre);
+        BAERmfEditorDocument_SetInfo(m_document, COMPOSER_NOTES_INFO, m_song_info_notes);
+        BAERmfEditorDocument_SetTempoBPM(m_document, static_cast<uint32_t>(std::max(1, m_song_info_bpm)));
+        BAERmfEditorDocument_SetTicksPerQuarter(m_document, static_cast<uint16_t>(std::max(1, m_song_info_tpq)));
+        BAERmfEditorDocument_SetMidiLoopMarkers(m_document,
+                                                 m_song_info_loop_enabled,
+                                                 static_cast<uint32_t>(std::max(0, m_song_info_loop_start)),
+                                                 static_cast<uint32_t>(std::max(0, m_song_info_loop_end)),
+                                                 static_cast<int32_t>(m_song_info_loop_count));
+        BAERmfEditorDocument_SetMidiStorageType(
+            m_document, static_cast<BAERmfEditorMidiStorageType>(m_song_info_storage));
+        m_document_dirty = true;
+        UpdateSongRowFromDocument(m_loaded_doc_path.empty() ? m_song_row.path : m_loaded_doc_path,
+                                  m_song_row.source_type.c_str());
+    }
+
     void DrawSongInfoDialog()
     {
         if (!m_song_info_open)
@@ -2966,6 +3083,14 @@
             ImGui::InputText("Composer", m_song_info_composer, sizeof(m_song_info_composer));
             ImGui::InputText("Copyright", m_song_info_copyright, sizeof(m_song_info_copyright));
             ImGui::InputText("Performed by", m_song_info_performed, sizeof(m_song_info_performed));
+            ImGui::InputText("Publisher", m_song_info_publisher, sizeof(m_song_info_publisher));
+            ImGui::InputText("License URL", m_song_info_license_url, sizeof(m_song_info_license_url));
+            ImGui::InputText("Genre", m_song_info_genre, sizeof(m_song_info_genre));
+            ImGui::InputText("Sub-genre", m_song_info_subgenre, sizeof(m_song_info_subgenre));
+            ImGui::InputTextMultiline("Composer notes",
+                                      m_song_info_notes,
+                                      sizeof(m_song_info_notes),
+                                      ImVec2(420, 60));
             ImGui::InputInt("Tempo BPM", &m_song_info_bpm);
             ImGui::InputInt("Ticks/Quarter", &m_song_info_tpq);
             ImGui::Checkbox("Loop markers", &m_song_info_loop_enabled);
@@ -2976,26 +3101,37 @@
             ImGui::Combo("MIDI storage", &m_song_info_storage, storage_labels, IM_ARRAYSIZE(storage_labels));
             if (ImGui::Button("Apply"))
             {
-                if (m_document)
-                {
-                    BAERmfEditorDocument_SetInfo(m_document, TITLE_INFO, m_song_info_title);
-                    BAERmfEditorDocument_SetInfo(m_document, COMPOSER_INFO, m_song_info_composer);
-                    BAERmfEditorDocument_SetInfo(m_document, COPYRIGHT_INFO, m_song_info_copyright);
-                    BAERmfEditorDocument_SetInfo(m_document, PERFORMED_BY_INFO, m_song_info_performed);
-                    BAERmfEditorDocument_SetTempoBPM(m_document, static_cast<uint32_t>(std::max(1, m_song_info_bpm)));
-                    BAERmfEditorDocument_SetTicksPerQuarter(m_document, static_cast<uint16_t>(std::max(1, m_song_info_tpq)));
-                    BAERmfEditorDocument_SetMidiLoopMarkers(m_document,
-                                                             m_song_info_loop_enabled,
-                                                             static_cast<uint32_t>(std::max(0, m_song_info_loop_start)),
-                                                             static_cast<uint32_t>(std::max(0, m_song_info_loop_end)),
-                                                             static_cast<int32_t>(m_song_info_loop_count));
-                    BAERmfEditorDocument_SetMidiStorageType(
-                        m_document, static_cast<BAERmfEditorMidiStorageType>(m_song_info_storage));
-                    m_document_dirty = true;
-                    UpdateSongRowFromDocument(m_loaded_doc_path.empty() ? m_song_row.path : m_loaded_doc_path,
-                                              m_song_row.source_type.c_str());
-                    SetStatus("Song Info applied");
-                }
+                ApplySongInfoFieldsToDocument();
+                SetStatus("Song Info applied");
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Save Defaults"))
+            {
+                std::snprintf(m_pref_song_title, sizeof(m_pref_song_title), "%s", m_song_info_title);
+                std::snprintf(m_pref_song_composer, sizeof(m_pref_song_composer), "%s", m_song_info_composer);
+                std::snprintf(m_pref_song_copyright, sizeof(m_pref_song_copyright), "%s", m_song_info_copyright);
+                std::snprintf(m_pref_song_performed, sizeof(m_pref_song_performed), "%s", m_song_info_performed);
+                std::snprintf(m_pref_song_publisher, sizeof(m_pref_song_publisher), "%s", m_song_info_publisher);
+                std::snprintf(m_pref_song_license_url, sizeof(m_pref_song_license_url), "%s", m_song_info_license_url);
+                std::snprintf(m_pref_song_genre, sizeof(m_pref_song_genre), "%s", m_song_info_genre);
+                std::snprintf(m_pref_song_subgenre, sizeof(m_pref_song_subgenre), "%s", m_song_info_subgenre);
+                std::snprintf(m_pref_song_notes, sizeof(m_pref_song_notes), "%s", m_song_info_notes);
+                SaveEditorPrefsToDisk();
+                SetStatus("Song Info defaults saved");
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Use Defaults"))
+            {
+                std::snprintf(m_song_info_title, sizeof(m_song_info_title), "%s", m_pref_song_title);
+                std::snprintf(m_song_info_composer, sizeof(m_song_info_composer), "%s", m_pref_song_composer);
+                std::snprintf(m_song_info_copyright, sizeof(m_song_info_copyright), "%s", m_pref_song_copyright);
+                std::snprintf(m_song_info_performed, sizeof(m_song_info_performed), "%s", m_pref_song_performed);
+                std::snprintf(m_song_info_publisher, sizeof(m_song_info_publisher), "%s", m_pref_song_publisher);
+                std::snprintf(m_song_info_license_url, sizeof(m_song_info_license_url), "%s", m_pref_song_license_url);
+                std::snprintf(m_song_info_genre, sizeof(m_song_info_genre), "%s", m_pref_song_genre);
+                std::snprintf(m_song_info_subgenre, sizeof(m_song_info_subgenre), "%s", m_pref_song_subgenre);
+                std::snprintf(m_song_info_notes, sizeof(m_song_info_notes), "%s", m_pref_song_notes);
+                SetStatus("Song Info defaults loaded into dialog");
             }
             ImGui::SameLine();
             if (ImGui::Button("Close"))

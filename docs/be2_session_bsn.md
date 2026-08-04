@@ -59,6 +59,26 @@ Fixture size deltas vs `empty.bsn`:
 - Name: `Session Prefs`
 - Body: 34 bytes (window / UI state; exact field map TBD)
 - Present on Session saves and some editor bank exports
+- NeoBAE still writes a stub for BE2 compatibility; real nbeditor layout is in `nBeT`
+
+### `nBeT` — NeoBAE Editor layout (NeoBAE-only)
+
+- Type: `nBeT` (`FOUR_CHAR('n','B','e','T')`)
+- Name: `NeoBAE Editor`, id `1`
+- Body (version 2 — current write):
+  - `uint32` magic `'nBeT'` (big-endian), `uint32` version `2`
+  - Main SDL window: `int32 x, y, w, h` + `uint32` maximized flag
+  - `uint32` open_flags (bit0 IE, bit1 Sample Editor, bit2 Song Info, bit3 Song Settings)
+  - IE context: `inst_id`, `instrument_index`, `bank`, `program`, `from_song`
+  - SE context: `sample_row`, `is_song_sample`
+  - `uint32` length + UTF-8 ImGui ini (`SaveIniSettingsToMemory`) for dock + floating window geometry
+- Version 1 (read still supported): window geom + ini only (no open-editor flags)
+- ImGui ini alone cannot reopen gated dialogs; open_flags drives IE/SE/Song Info restore
+- Written/read by nbeditor Save/Open Session; BE2 ignores unknown resource types
+- Edit → **Reset Layout** restores default Player/Session/Status dock and closes floating editors
+- Distinct from app prefs (`~/.config/neobae/nbeditor_prefs`):
+  - `save_session_layout=1` (default) — write `nBeT` on Save Session
+  - `ignore_session_layout=0` (default) — when `1`, Open Session skips applying `nBeT`
 
 ### `BEPF`
 
