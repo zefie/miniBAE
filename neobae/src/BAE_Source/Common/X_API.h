@@ -829,6 +829,10 @@ XFILE   XFileOpenResourceFromMemory(XPTR pResource, uint32_t resourceLength, boo
 // Caller can use normal resource APIs (XAddFileResource/XCleanResourceFile) on it.
 XFILE   XFileOpenVirtualResource(int32_t resourceID);
 
+// Open a writable in-memory resource file seeded from an existing IREZ/ZREZ image.
+// Copies pResource (caller retains ownership of the input buffer).
+XFILE   XFileOpenWritableResourceFromMemory(XPTR pResource, uint32_t resourceLength);
+
 // Open file as a read only file from a memory pointer. Don't dispose of pMemoryBlock until you
 // have closed the file.
 XFILE XFileOpenForReadFromMemory(XPTR pMemoryBlock, uint32_t memoryBlockSize);

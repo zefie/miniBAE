@@ -65,7 +65,7 @@ Fixture size deltas vs `empty.bsn`:
 
 - Type: `nBeT` (`FOUR_CHAR('n','B','e','T')`)
 - Name: `NeoBAE Editor`, id `1`
-- On-disk body: plain layout blob, **or** `XCompressPtr` / `X_LZMA_RAW` frame (type byte `0xFE` + 3-byte uncompressed length + LZMA). Open accepts both; Save always writes LZMA when compression succeeds (upgrades legacy plaintext on open→save).
+- On-disk body: plain layout blob, **or** `XCompressPtr` / `X_LZMA_RAW` frame (type byte `0xFE` + 3-byte uncompressed length + LZMA). Open accepts both; Save uses LZMA when it shrinks the payload.
 - Plain layout blob (version 3 — current write):
   - `uint32` magic `'nBeT'` (big-endian), `uint32` version `3`
   - Main SDL window: `int32 x, y, w, h` + `uint32` maximized flag

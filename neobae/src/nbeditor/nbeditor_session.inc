@@ -23,7 +23,8 @@
                                 !m_loaded_session_path.empty() &&
                                     (m_document != nullptr || m_bank_token != 0 || !m_session_songs.empty())))
             {
-                SaveSessionToPath(m_loaded_session_path.c_str());
+                m_long_op = LongOp::SaveSession;
+                m_long_op_path = m_loaded_session_path;
             }
             if (ImGui::MenuItem("Save Session As...",
                                 nullptr,
@@ -3569,6 +3570,302 @@
         return kCycle[0];
     }
 
+    /* Beatnik Editor units: VOLUME_RANGE (4096) → 100, FULL_RANGE (8192) → 200.
+     * Stored engine values stay raw; UI shows/edits the scaled units. */
+    static constexpr int32_t kAdsrVolumeRange = 4096;
+    static int AdsrLevelToBeatnik(int32_t raw)
+    {
+        const int64_t n = static_cast<int64_t>(raw) * 100;
+        const int64_t bias = (raw >= 0) ? (kAdsrVolumeRange / 2) : -(kAdsrVolumeRange / 2);
+        return static_cast<int>((n + bias) / kAdsrVolumeRange);
+    }
+    static int32_t AdsrLevelFromBeatnik(int display)
+    {
+        return static_cast<int32_t>((static_cast<int64_t>(display) * kAdsrVolumeRange) / 100);
+    }
+    static bool LfoDestUsesBeatnikLevel(int32_t destination)
+    {
+        return destination == static_cast<int32_t>(FOUR_CHAR('V', 'O', 'L', 'U')) ||
+               destination == static_cast<int32_t>(FOUR_CHAR('L', 'P', 'F', 'R')) ||
+               destination == static_cast<int32_t>(FOUR_CHAR('L', 'P', 'R', 'E')) ||
+               destination == static_cast<int32_t>(FOUR_CHAR('L', 'P', 'A', 'M'));
+    }
+
+    /* BE "Envelope Only": hide LFO wave UI; sine + level 0 + DC 3072 + period 0. */
+    static constexpr int32_t kLfoEnvelopeOnlyDcFeed = 3072;
+    /* BE waveform-only ADSR (raw engine units; display may use Beatnik ÷4096). */
+    static constexpr int32_t kLfoWaveformOnlyAdsrLevel = 65536;
+    static constexpr int32_t kLfoWaveformOnlyAdsrHoldUs = 90000;
+
+    struct FourCharLabel
+    {
+        int32_t value;
+        const char *label;
+    };
+
+    enum LfoControlMode : int
+    {
+        kLfoModeAdsrOnly = 0,  /* hide waveform UI; BE sine/0/3072/period0 */
+        kLfoModeWaveOnly = 1,  /* hide ADSR UI; BE flat ADSR */
+        kLfoModeBoth = 2,      /* show both (explicit) */
+    };
+
+    static bool LfoMatchesEnvelopeOnlyDefaults(const BAERmfEditorLFOInfo &lfo)
+    {
+        return lfo.period == 0 &&
+               lfo.level == 0 &&
+               lfo.DC_feed == kLfoEnvelopeOnlyDcFeed &&
+               lfo.waveShape == static_cast<int32_t>(FOUR_CHAR('S', 'I', 'N', 'E'));
+    }
+
+    static bool LfoIsWaveformOnlyAdsr(const BAERmfEditorADSRInfo &adsr)
+    {
+        return adsr.stageCount == 2 &&
+               adsr.stages[0].level == kLfoWaveformOnlyAdsrLevel &&
+               adsr.stages[0].time == 0 &&
+               adsr.stages[0].flags == static_cast<int32_t>(FOUR_CHAR('L', 'I', 'N', 'E')) &&
+               adsr.stages[1].level == kLfoWaveformOnlyAdsrLevel &&
+               adsr.stages[1].time == kLfoWaveformOnlyAdsrHoldUs &&
+               adsr.stages[1].flags == static_cast<int32_t>(FOUR_CHAR('L', 'A', 'S', 'T'));
+    }
+
+    static void LfoApplyEnvelopeOnlyDefaults(BAERmfEditorLFOInfo &lfo)
+    {
+        lfo.waveShape = static_cast<int32_t>(FOUR_CHAR('S', 'I', 'N', 'E'));
+        lfo.level = 0;
+        lfo.DC_feed = kLfoEnvelopeOnlyDcFeed;
+        lfo.period = 0;
+    }
+
+    static void LfoApplyWaveformOnlyAdsrDefault(BAERmfEditorADSRInfo &adsr)
+    {
+        std::memset(&adsr, 0, sizeof(adsr));
+        adsr.stageCount = 2;
+        adsr.stages[0].level = kLfoWaveformOnlyAdsrLevel;
+        adsr.stages[0].time = 0;
+        adsr.stages[0].flags = static_cast<int32_t>(FOUR_CHAR('L', 'I', 'N', 'E'));
+        adsr.stages[1].level = kLfoWaveformOnlyAdsrLevel;
+        adsr.stages[1].time = kLfoWaveformOnlyAdsrHoldUs;
+        adsr.stages[1].flags = static_cast<int32_t>(FOUR_CHAR('L', 'A', 'S', 'T'));
+    }
+
+    static int InferLfoControlMode(const BAERmfEditorLFOInfo &lfo)
+    {
+        /* Prefer ADSR-only when BE envelope-only waveform stub is present. */
+        if (LfoMatchesEnvelopeOnlyDefaults(lfo))
+        {
+            return kLfoModeAdsrOnly;
+        }
+        if (LfoIsWaveformOnlyAdsr(lfo.adsr))
+        {
+            return kLfoModeWaveOnly;
+        }
+        return kLfoModeBoth;
+    }
+
+    void SyncLfoControlModesFromExt()
+    {
+        for (uint32_t i = 0; i < BAE_EDITOR_MAX_LFOS; ++i)
+        {
+            if (i < m_ie_ext.lfoCount)
+            {
+                m_ie_lfo_control_mode[i] = InferLfoControlMode(m_ie_ext.lfos[i]);
+            }
+            else
+            {
+                m_ie_lfo_control_mode[i] = kLfoModeBoth;
+            }
+        }
+    }
+
+    void RemoveLfoControlModeAt(uint32_t index)
+    {
+        if (index >= BAE_EDITOR_MAX_LFOS)
+        {
+            return;
+        }
+        for (uint32_t j = index + 1; j < BAE_EDITOR_MAX_LFOS; ++j)
+        {
+            m_ie_lfo_control_mode[j - 1] = m_ie_lfo_control_mode[j];
+        }
+        m_ie_lfo_control_mode[BAE_EDITOR_MAX_LFOS - 1] = kLfoModeBoth;
+    }
+
+    /* Shared LFO editor for Modulation + Filter pages (BE envelope/waveform-only modes). */
+    void DrawInstrumentLfoEditor(BAERmfEditorLFOInfo &lfo,
+                                 uint32_t lfo_index,
+                                 const char *id,
+                                 const FourCharLabel *dest_labels,
+                                 int dest_label_count,
+                                 const FourCharLabel *shape_labels,
+                                 int shape_label_count)
+    {
+        ImGui::PushID(id);
+        auto draw_four_char_combo = [this](const char *label,
+                                           int32_t &value,
+                                           const FourCharLabel *labels,
+                                           int label_count) {
+            int current = 0;
+            for (int i = 0; i < label_count; ++i)
+            {
+                if (labels[i].value == value)
+                {
+                    current = i;
+                    break;
+                }
+            }
+            if (ImGui::BeginCombo(label, labels[current].label))
+            {
+                for (int i = 0; i < label_count; ++i)
+                {
+                    const bool selected = (i == current);
+                    if (ImGui::Selectable(labels[i].label, selected))
+                    {
+                        value = labels[i].value;
+                        MarkInstrumentEditorDirty();
+                    }
+                    if (selected)
+                    {
+                        ImGui::SetItemDefaultFocus();
+                    }
+                }
+                ImGui::EndCombo();
+            }
+        };
+
+        int mode = (lfo_index < BAE_EDITOR_MAX_LFOS) ? m_ie_lfo_control_mode[lfo_index]
+                                                     : kLfoModeBoth;
+        ImGui::TextUnformatted("Control with");
+        ImGui::SameLine();
+        if (ImGui::RadioButton("ADSR only", mode == kLfoModeAdsrOnly))
+        {
+            MarkInstrumentEditorDirty(false);
+            LfoApplyEnvelopeOnlyDefaults(lfo);
+            mode = kLfoModeAdsrOnly;
+            if (lfo_index < BAE_EDITOR_MAX_LFOS)
+            {
+                m_ie_lfo_control_mode[lfo_index] = mode;
+            }
+            LivePatchInstrumentEditor();
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        {
+            ImGui::SetTooltip(
+                "Hide waveform controls. Sets sine, level 0, DC feed 3072, period 0 "
+                "(BE). Destination is driven by the ADSR only.");
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Waveform only", mode == kLfoModeWaveOnly))
+        {
+            MarkInstrumentEditorDirty(false);
+            LfoApplyWaveformOnlyAdsrDefault(lfo.adsr);
+            if (lfo.period == 0)
+            {
+                lfo.period = 513; /* engine: 0 or > 512 */
+            }
+            mode = kLfoModeWaveOnly;
+            if (lfo_index < BAE_EDITOR_MAX_LFOS)
+            {
+                m_ie_lfo_control_mode[lfo_index] = mode;
+            }
+            LivePatchInstrumentEditor();
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        {
+            ImGui::SetTooltip(
+                "Hide ADSR editor. Installs BE flat ADSR "
+                "(LINE@65536/0µs + LAST@65536/90000µs); destination follows the LFO wave.");
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("ADSR + Waveform", mode == kLfoModeBoth))
+        {
+            MarkInstrumentEditorDirty(false);
+            if (lfo.period == 0)
+            {
+                lfo.period = 513;
+            }
+            mode = kLfoModeBoth;
+            if (lfo_index < BAE_EDITOR_MAX_LFOS)
+            {
+                m_ie_lfo_control_mode[lfo_index] = mode;
+            }
+            LivePatchInstrumentEditor();
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        {
+            ImGui::SetTooltip("Show both waveform and ADSR editors.");
+        }
+
+        if (dest_labels && dest_label_count > 0)
+        {
+            draw_four_char_combo("Destination", lfo.destination, dest_labels, dest_label_count);
+        }
+
+        const bool beatnik_levels = LfoDestUsesBeatnikLevel(lfo.destination);
+        const bool show_wave = (mode != kLfoModeAdsrOnly);
+        const bool show_adsr = (mode != kLfoModeWaveOnly);
+
+        if (show_wave)
+        {
+            if (shape_labels && shape_label_count > 0)
+            {
+                draw_four_char_combo("Wave shape",
+                                     lfo.waveShape,
+                                     shape_labels,
+                                     shape_label_count);
+            }
+            if (ImGui::InputInt("period", &lfo.period))
+            {
+                if (lfo.period != 0 && lfo.period <= 512)
+                {
+                    lfo.period = 513;
+                }
+                MarkInstrumentEditorDirty();
+            }
+            if (beatnik_levels)
+            {
+                int dc = AdsrLevelToBeatnik(lfo.DC_feed);
+                int lvl = AdsrLevelToBeatnik(lfo.level);
+                if (ImGui::InputInt("DC_feed", &dc))
+                {
+                    lfo.DC_feed = AdsrLevelFromBeatnik(dc);
+                    MarkInstrumentEditorDirty();
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                {
+                    ImGui::SetTooltip("Raw: %d (100 = unity)", lfo.DC_feed);
+                }
+                if (ImGui::InputInt("level", &lvl))
+                {
+                    lfo.level = AdsrLevelFromBeatnik(lvl);
+                    MarkInstrumentEditorDirty();
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                {
+                    ImGui::SetTooltip("Raw: %d (100 = unity)", lfo.level);
+                }
+            }
+            else
+            {
+                if (ImGui::InputInt("DC_feed", &lfo.DC_feed))
+                {
+                    MarkInstrumentEditorDirty();
+                }
+                if (ImGui::InputInt("level", &lfo.level))
+                {
+                    MarkInstrumentEditorDirty();
+                }
+            }
+            DrawLfoWaveformGraph(lfo, "lfo_wave", 72.0f, beatnik_levels);
+        }
+
+        if (show_adsr)
+        {
+            DrawAdsrStageEditor(lfo.adsr, "lfo_adsr", beatnik_levels);
+        }
+        ImGui::PopID();
+    }
+
     /* 2D pad: X = LPF frequency, Y = resonance. InputInts stay authoritative. */
     void DrawFilterFreqResPad()
     {
@@ -3855,7 +4152,8 @@
     void DrawAdsrEnvelopeGraph(BAERmfEditorADSRInfo &adsr,
                                const char *id,
                                float height = 140.0f,
-                               bool editable = false)
+                               bool editable = false,
+                               bool beatnik_level_scale = false)
     {
         ImGui::PushID(id);
         const ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
@@ -4224,22 +4522,44 @@
                 m_ie_adsr_selected_owner == select_owner)
             {
                 const int si = m_ie_adsr_selected_stage;
-                ImGui::Text("Stage %d  %s  level=%d  time=%d µs",
-                            si,
-                            AdsrStageFlagName(adsr.stages[si].flags),
-                            adsr.stages[si].level,
-                            adsr.stages[si].time);
+                const bool goto_stage =
+                    adsr.stages[si].flags == static_cast<int32_t>(FOUR_CHAR('G', 'O', 'T', 'O')) ||
+                    adsr.stages[si].flags == static_cast<int32_t>(FOUR_CHAR('G', 'O', 'S', 'T'));
+                if (beatnik_level_scale && !goto_stage)
+                {
+                    ImGui::Text("Stage %d  %s  level=%d  time=%d µs  (raw %d)",
+                                si,
+                                AdsrStageFlagName(adsr.stages[si].flags),
+                                AdsrLevelToBeatnik(adsr.stages[si].level),
+                                adsr.stages[si].time,
+                                adsr.stages[si].level);
+                }
+                else
+                {
+                    ImGui::Text("Stage %d  %s  level=%d  time=%d µs",
+                                si,
+                                AdsrStageFlagName(adsr.stages[si].flags),
+                                adsr.stages[si].level,
+                                adsr.stages[si].time);
+                }
             }
             else
             {
                 ImGui::TextDisabled(
-                    "Drag corner = level · edge bar = time · click band = select · double-click / right-click = type");
+                    beatnik_level_scale
+                        ? "Drag corner = level (100=unity) · edge bar = time · click = select · "
+                          "double-click / right-click = type"
+                        : "Drag corner = level · edge bar = time · click band = select · "
+                          "double-click / right-click = type");
             }
         }
         ImGui::PopID();
     }
 
-    void DrawLfoWaveformGraph(const BAERmfEditorLFOInfo &lfo, const char *id, float height = 72.0f)
+    void DrawLfoWaveformGraph(const BAERmfEditorLFOInfo &lfo,
+                              const char *id,
+                              float height = 72.0f,
+                              bool beatnik_level_scale = false)
     {
         ImGui::PushID(id);
         const ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
@@ -4314,21 +4634,35 @@
             has_prev = true;
         }
         char meta[96];
-        std::snprintf(meta,
-                      sizeof(meta),
-                      "period=%d  level=%d  dc=%d",
-                      lfo.period,
-                      lfo.level,
-                      lfo.DC_feed);
+        if (beatnik_level_scale)
+        {
+            std::snprintf(meta,
+                          sizeof(meta),
+                          "period=%d  level=%d  dc=%d",
+                          lfo.period,
+                          AdsrLevelToBeatnik(lfo.level),
+                          AdsrLevelToBeatnik(lfo.DC_feed));
+        }
+        else
+        {
+            std::snprintf(meta,
+                          sizeof(meta),
+                          "period=%d  level=%d  dc=%d",
+                          lfo.period,
+                          lfo.level,
+                          lfo.DC_feed);
+        }
         dl->AddText(ImVec2(left + 6.0f, top + 2.0f), IM_COL32(150, 150, 150, 255), meta);
         ImGui::PopID();
     }
 
-    void DrawAdsrStageEditor(BAERmfEditorADSRInfo &adsr, const char *id)
+    void DrawAdsrStageEditor(BAERmfEditorADSRInfo &adsr,
+                             const char *id,
+                             bool beatnik_level_scale = false)
     {
         ImGui::PushID(id);
         m_ie_adsr_default_focus_id = id ? id : "";
-        DrawAdsrEnvelopeGraph(adsr, "graph", 160.0f, true);
+        DrawAdsrEnvelopeGraph(adsr, "graph", 160.0f, true, beatnik_level_scale);
         int stages = static_cast<int>(adsr.stageCount);
         auto init_stage = [&](int index) {
             if (index < 0 || index >= BAE_EDITOR_MAX_ADSR_STAGES)
@@ -4424,9 +4758,14 @@
 
         if (ImGui::CollapsingHeader("Advanced stage table"))
         {
+            if (beatnik_level_scale)
+            {
+                ImGui::TextDisabled("Levels: Beatnik units (100 = unity / 4096 raw, 200 = 8192 raw)");
+            }
             if (ImGui::BeginTable("adsr", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
             {
-                ImGui::TableSetupColumn("Level / Target");
+                ImGui::TableSetupColumn(beatnik_level_scale ? "Level (100=unity) / Target"
+                                                            : "Level / Target");
                 ImGui::TableSetupColumn("Time (µs)");
                 ImGui::TableSetupColumn("Type");
                 ImGui::TableSetupColumn("#");
@@ -4450,6 +4789,20 @@
                             target = std::clamp(target, 1, std::max(1, stages));
                             adsr.stages[i].level = target;
                             LivePatchInstrumentEditor();
+                        }
+                    }
+                    else if (beatnik_level_scale)
+                    {
+                        int level = AdsrLevelToBeatnik(adsr.stages[i].level);
+                        if (ImGui::InputInt("##lvl", &level))
+                        {
+                            MarkInstrumentEditorDirty(false);
+                            adsr.stages[i].level = AdsrLevelFromBeatnik(level);
+                            LivePatchInstrumentEditor();
+                        }
+                        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                        {
+                            ImGui::SetTooltip("Raw engine level: %d", adsr.stages[i].level);
                         }
                     }
                     else
@@ -4651,8 +5004,10 @@
         m_ie_undo_pushed_for_gesture = false;
         m_ie_adsr_selected_stage = -1;
         m_ie_adsr_selected_owner = 0;
+        SyncLfoControlModesFromExt();
+        CaptureInstrumentEditorPristineSplits();
         m_instrument_editor_open = true;
-        LivePatchInstrumentEditor();
+        LivePatchInstrumentEditor(true);
         SetStatus(std::string("Editing instrument ") +
                   (m_ie_display_name.empty() ? inst.name : m_ie_display_name));
     }
@@ -4660,6 +5015,67 @@
     void BindInstrumentEditorDisplayName()
     {
         m_ie_ext.displayName = m_ie_display_name.empty() ? nullptr : m_ie_display_name.c_str();
+    }
+
+    void CaptureInstrumentEditorPristineSplits()
+    {
+        m_ie_pristine_split_snds.clear();
+        if (!m_bank_token || m_ie_from_song)
+        {
+            return;
+        }
+        uint32_t split_count = 0;
+        if (BAERmfEditorBank_GetInstrumentSampleCount(m_bank_token,
+                                                      m_ie_instrument_index,
+                                                      &split_count) != BAE_NO_ERROR)
+        {
+            return;
+        }
+        m_ie_pristine_split_snds.reserve(split_count);
+        for (uint32_t s = 0; s < split_count; ++s)
+        {
+            BAERmfEditorBankSampleInfo info;
+            std::memset(&info, 0, sizeof(info));
+            if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
+                                                         m_ie_instrument_index,
+                                                         s,
+                                                         &info) != BAE_NO_ERROR)
+            {
+                m_ie_pristine_split_snds.push_back(static_cast<uint16_t>(kNoSndResourceId));
+                continue;
+            }
+            m_ie_pristine_split_snds.push_back(
+                static_cast<uint16_t>(info.sndResourceID));
+        }
+    }
+
+    void RestoreInstrumentEditorPristineSplits()
+    {
+        if (!m_bank_token || m_ie_from_song || m_ie_pristine_split_snds.empty())
+        {
+            return;
+        }
+        if (!EnsureActiveBankWritable())
+        {
+            return;
+        }
+        uint32_t split_count = 0;
+        if (BAERmfEditorBank_GetInstrumentSampleCount(m_bank_token,
+                                                      m_ie_instrument_index,
+                                                      &split_count) != BAE_NO_ERROR)
+        {
+            return;
+        }
+        const uint32_t n = std::min(split_count,
+                                    static_cast<uint32_t>(m_ie_pristine_split_snds.size()));
+        for (uint32_t s = 0; s < n; ++s)
+        {
+            (void)BAERmfEditorBank_SetInstrumentSampleSndID(
+                m_bank_token,
+                m_ie_instrument_index,
+                s,
+                static_cast<XShortResourceID>(m_ie_pristine_split_snds[s]));
+        }
     }
 
     uint32_t InstrumentEditorPatchId() const
@@ -4674,7 +5090,7 @@
         return patch_id;
     }
 
-    void LivePatchInstrumentEditor()
+    void LivePatchInstrumentEditor(bool reload_samples_from_bank = false)
     {
         EnsureBankAuditionSong();
         BAESong audition = GetAuditionSong();
@@ -4684,10 +5100,25 @@
         }
         /* Inst ID 0 is valid (bank 0 program 0). */
         const uint32_t patch_id = InstrumentEditorPatchId();
-        (void)BAESong_LoadInstrument(audition, static_cast<BAE_INSTRUMENT>(patch_id));
-        (void)BAESong_PatchLoadedInstrumentExtInfo(audition,
-                                                   static_cast<BAE_INSTRUMENT>(patch_id),
-                                                   &m_ie_ext);
+        const BAE_INSTRUMENT inst = static_cast<BAE_INSTRUMENT>(patch_id);
+        if (reload_samples_from_bank)
+        {
+            /* GM_LoadInstrument keeps a cached instrument; unload so keysplit/SND
+             * edits in the bank are picked up for the preview keyboard. */
+            BAE_BOOL loaded = FALSE;
+            int guard = 0;
+            while (guard++ < 64 &&
+                   BAESong_IsInstrumentLoaded(audition, inst, &loaded) == BAE_NO_ERROR &&
+                   loaded)
+            {
+                if (BAESong_UnloadInstrument(audition, inst) != BAE_NO_ERROR)
+                {
+                    break;
+                }
+            }
+        }
+        (void)BAESong_LoadInstrument(audition, inst);
+        (void)BAESong_PatchLoadedInstrumentExtInfo(audition, inst, &m_ie_ext);
     }
 
     void InstrumentEditorRefreshPreEditSnapshot()
@@ -4738,6 +5169,7 @@
         m_ie_ext = m_ie_undo.back();
         m_ie_undo.pop_back();
         BindInstrumentEditorDisplayName();
+        SyncLfoControlModesFromExt();
         m_ie_dirty = true;
         m_ie_undo_pushed_for_gesture = false;
         m_ie_ext_pre_edit = m_ie_ext;
@@ -4759,6 +5191,7 @@
         m_ie_ext = m_ie_redo.back();
         m_ie_redo.pop_back();
         BindInstrumentEditorDisplayName();
+        SyncLfoControlModesFromExt();
         m_ie_dirty = true;
         m_ie_undo_pushed_for_gesture = false;
         m_ie_ext_pre_edit = m_ie_ext;
@@ -4770,12 +5203,14 @@
     {
         m_ie_ext = m_ie_ext_pristine;
         BindInstrumentEditorDisplayName();
+        SyncLfoControlModesFromExt();
+        RestoreInstrumentEditorPristineSplits();
         m_ie_undo.clear();
         m_ie_redo.clear();
         m_ie_dirty = false;
         m_ie_undo_pushed_for_gesture = false;
         m_ie_ext_pre_edit = m_ie_ext;
-        LivePatchInstrumentEditor();
+        LivePatchInstrumentEditor(true);
         SetStatus("Instrument editor: reverted to opened state");
     }
 
@@ -4786,6 +5221,7 @@
         m_ie_ext_pristine = m_ie_ext;
         m_ie_ext_pre_edit = m_ie_ext;
         m_ie_undo_pushed_for_gesture = false;
+        CaptureInstrumentEditorPristineSplits();
     }
 
     void ApplyInstrumentEditor(bool live_patch)
@@ -4827,11 +5263,6 @@
             return;
         }
 
-        struct FourCharLabel
-        {
-            int32_t value;
-            const char *label;
-        };
         static const FourCharLabel kLfoDestLabels[] = {
             {static_cast<int32_t>(FOUR_CHAR('V', 'O', 'L', 'U')), "VOLUME"},
             {static_cast<int32_t>(FOUR_CHAR('P', 'I', 'T', 'C')), "PITCH"},
@@ -4965,9 +5396,30 @@
                 if (ImGui::BeginTabItem("Filter"))
                 {
                     m_ie_page = 1;
+                    bool ie_has_stereo_sample = false;
+                    {
+                        uint32_t split_count = 0;
+                        if (m_bank_token &&
+                            BAERmfEditorBank_GetInstrumentSampleCount(
+                                m_bank_token, m_ie_instrument_index, &split_count) == BAE_NO_ERROR)
+                        {
+                            for (uint32_t s = 0; s < split_count; ++s)
+                            {
+                                BAERmfEditorBankSampleInfo sinfo;
+                                std::memset(&sinfo, 0, sizeof(sinfo));
+                                if (BAERmfEditorBank_GetInstrumentSampleInfo(
+                                        m_bank_token, m_ie_instrument_index, s, &sinfo) == BAE_NO_ERROR &&
+                                    sinfo.channels > 1)
+                                {
+                                    ie_has_stereo_sample = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
                     ImGui::TextDisabled(
-                        "Low-pass filter / resonance are NeoBAE features — "
-                        "export/save uses .zsb / .zmf (not classic HSB/RMF).");
+                        "Mono LPF is classic HSB/RMF-compatible. "
+                        "Stereo samples with an active filter need .zsb / .zmf.");
                     int freq = m_ie_ext.LPF_frequency;
                     int res = m_ie_ext.LPF_resonance;
                     int amt = m_ie_ext.LPF_lowpassAmount;
@@ -4986,10 +5438,23 @@
                         m_ie_ext.LPF_lowpassAmount = amt;
                         MarkInstrumentEditorDirty();
                     }
-                    if (freq != 0 || res != 0 || amt != 0)
                     {
-                        ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
-                                           "Active filter → requires .zsb / .zmf");
+                        bool has_filter_lfo = false;
+                        for (uint32_t i = 0; i < m_ie_ext.lfoCount && i < BAE_EDITOR_MAX_LFOS; ++i)
+                        {
+                            if (is_filter_lfo_dest(m_ie_ext.lfos[i].destination))
+                            {
+                                has_filter_lfo = true;
+                                break;
+                            }
+                        }
+                        const bool filter_active =
+                            (freq != 0 || res != 0 || amt != 0 || has_filter_lfo);
+                        if (filter_active && ie_has_stereo_sample)
+                        {
+                            ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
+                                               "Active filter on stereo sample → requires .zsb / .zmf");
+                        }
                     }
                     DrawFilterFreqResPad();
                     ImGui::SeparatorText("Filter envelopes (LFO → LPFR / LPRE / LPAM)");
@@ -5017,6 +5482,7 @@
                             lfo.DC_feed = 0;
                             lfo.level = 0;
                             lfo.adsr.stageCount = 0;
+                            m_ie_lfo_control_mode[m_ie_ext.lfoCount] = kLfoModeBoth;
                             m_ie_ext.lfoCount++;
                             LivePatchInstrumentEditor();
                         }
@@ -5038,6 +5504,7 @@
                                 std::memset(&m_ie_ext.lfos[m_ie_ext.lfoCount],
                                             0,
                                             sizeof(m_ie_ext.lfos[0]));
+                                RemoveLfoControlModeAt(static_cast<uint32_t>(i));
                                 break;
                             }
                             LivePatchInstrumentEditor();
@@ -5076,19 +5543,21 @@
                                             0,
                                             sizeof(m_ie_ext.lfos[0]));
                             }
+                            RemoveLfoControlModeAt(i);
                             LivePatchInstrumentEditor();
                             ImGui::PopID();
                             break;
                         }
-                        draw_four_char_combo(
-                            "Destination",
-                            m_ie_ext.lfos[i].destination,
+                        char lfo_id[32];
+                        std::snprintf(lfo_id, sizeof(lfo_id), "filter_lfo_%u", i);
+                        DrawInstrumentLfoEditor(
+                            m_ie_ext.lfos[i],
+                            i,
+                            lfo_id,
                             kLfoDestLabels,
-                            static_cast<int>(sizeof(kLfoDestLabels) / sizeof(kLfoDestLabels[0])));
-                        DrawLfoWaveformGraph(m_ie_ext.lfos[i], "filter_lfo_wave", 64.0f);
-                        char adsr_id[32];
-                        std::snprintf(adsr_id, sizeof(adsr_id), "filter_lfo_adsr_%u", i);
-                        DrawAdsrStageEditor(m_ie_ext.lfos[i].adsr, adsr_id);
+                            static_cast<int>(sizeof(kLfoDestLabels) / sizeof(kLfoDestLabels[0])),
+                            kLfoShapeLabels,
+                            static_cast<int>(sizeof(kLfoShapeLabels) / sizeof(kLfoShapeLabels[0])));
                         ImGui::PopID();
                     }
                     if (!any_filter_lfo)
@@ -5127,7 +5596,8 @@
                         MarkInstrumentEditorDirty();
                     }
                     ImGui::SeparatorText("Volume ADSR");
-                    DrawAdsrStageEditor(m_ie_ext.volumeADSR, "vol_adsr");
+                    ImGui::TextDisabled("Levels use Beatnik units (100 = unity / 4096 raw)");
+                    DrawAdsrStageEditor(m_ie_ext.volumeADSR, "vol_adsr", true);
                     ImGui::EndTabItem();
                 }
                 if (ImGui::BeginTabItem("Modulation"))
@@ -5156,6 +5626,7 @@
                         lfo.DC_feed = 0;
                         lfo.level = 0;
                         lfo.adsr.stageCount = 0;
+                        m_ie_lfo_control_mode[m_ie_ext.lfoCount] = kLfoModeBoth;
                         m_ie_ext.lfoCount++;
                         LivePatchInstrumentEditor();
                     }
@@ -5165,6 +5636,7 @@
                         MarkInstrumentEditorDirty(false);
                         m_ie_ext.lfoCount--;
                         std::memset(&m_ie_ext.lfos[m_ie_ext.lfoCount], 0, sizeof(m_ie_ext.lfos[0]));
+                        m_ie_lfo_control_mode[m_ie_ext.lfoCount] = kLfoModeBoth;
                         LivePatchInstrumentEditor();
                     }
                     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
@@ -5191,36 +5663,21 @@
                                             0,
                                             sizeof(m_ie_ext.lfos[0]));
                             }
+                            RemoveLfoControlModeAt(i);
                             LivePatchInstrumentEditor();
                             ImGui::PopID();
                             break;
                         }
-                        draw_four_char_combo(
-                            "Destination",
-                            m_ie_ext.lfos[i].destination,
+                        char lfo_id[32];
+                        std::snprintf(lfo_id, sizeof(lfo_id), "mod_lfo_%u", i);
+                        DrawInstrumentLfoEditor(
+                            m_ie_ext.lfos[i],
+                            i,
+                            lfo_id,
                             kLfoDestLabels,
-                            static_cast<int>(sizeof(kLfoDestLabels) / sizeof(kLfoDestLabels[0])));
-                        draw_four_char_combo(
-                            "Wave shape",
-                            m_ie_ext.lfos[i].waveShape,
+                            static_cast<int>(sizeof(kLfoDestLabels) / sizeof(kLfoDestLabels[0])),
                             kLfoShapeLabels,
                             static_cast<int>(sizeof(kLfoShapeLabels) / sizeof(kLfoShapeLabels[0])));
-                        if (ImGui::InputInt("period", &m_ie_ext.lfos[i].period))
-                        {
-                            MarkInstrumentEditorDirty();
-                        }
-                        if (ImGui::InputInt("DC_feed", &m_ie_ext.lfos[i].DC_feed))
-                        {
-                            MarkInstrumentEditorDirty();
-                        }
-                        if (ImGui::InputInt("level", &m_ie_ext.lfos[i].level))
-                        {
-                            MarkInstrumentEditorDirty();
-                        }
-                        DrawLfoWaveformGraph(m_ie_ext.lfos[i], "lfo_wave", 72.0f);
-                        char lfo_id[32];
-                        std::snprintf(lfo_id, sizeof(lfo_id), "lfo_adsr_%u", i);
-                        DrawAdsrStageEditor(m_ie_ext.lfos[i].adsr, lfo_id);
                         ImGui::PopID();
                     }
                     ImGui::Text("Curves: %u", static_cast<unsigned>(m_ie_ext.curveCount));
@@ -5503,23 +5960,51 @@
                 }
                 ImGui::TableSetColumnIndex(4);
                 {
-                    char preview[64];
-                    std::snprintf(preview, sizeof(preview), "SND %d", static_cast<int>(info.sndResourceID));
-                    for (const auto &choice : snd_choices)
+                    const uint32_t snd_id = static_cast<uint32_t>(
+                        static_cast<uint16_t>(info.sndResourceID));
+                    /* 0xFFFF = no sample (empty INST). ID 0 is valid; missing = blob gone. */
+                    const bool snd_none = (snd_id == kNoSndResourceId);
+                    const bool snd_missing = !snd_none && !BankSndResourceExists(snd_id);
+                    char preview[96];
+                    bool found_choice = false;
+                    if (!snd_none && !snd_missing)
                     {
-                        if (choice.first == static_cast<uint32_t>(info.sndResourceID))
+                        for (const auto &choice : snd_choices)
                         {
-                            std::snprintf(preview, sizeof(preview), "%s", choice.second.c_str());
-                            break;
+                            if (choice.first == snd_id)
+                            {
+                                std::snprintf(preview, sizeof(preview), "%s", choice.second.c_str());
+                                found_choice = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!found_choice)
+                    {
+                        if (snd_none)
+                        {
+                            std::snprintf(preview, sizeof(preview), "(none)");
+                        }
+                        else if (snd_missing)
+                        {
+                            std::snprintf(preview, sizeof(preview), "SND %u [missing]", snd_id);
+                        }
+                        else
+                        {
+                            std::snprintf(preview, sizeof(preview), "SND %u", snd_id);
                         }
                     }
                     ImGui::SetNextItemWidth(-FLT_MIN);
                     if (ImGui::BeginCombo("##snd", preview))
                     {
+                        if (snd_missing)
+                        {
+                            ImGui::TextDisabled("Current: SND %u [missing]", snd_id);
+                            ImGui::Separator();
+                        }
                         for (const auto &choice : snd_choices)
                         {
-                            const bool selected =
-                                (choice.first == static_cast<uint32_t>(info.sndResourceID));
+                            const bool selected = (choice.first == snd_id);
                             if (ImGui::Selectable(choice.second.c_str(), selected))
                             {
                                 if (EnsureActiveBankWritable())
@@ -5533,7 +6018,9 @@
                                     if (r == BAE_NO_ERROR)
                                     {
                                         m_session_custom_snd_ids.insert(choice.first);
+                                        m_ie_dirty = true;
                                         RefreshListsFromBank();
+                                        LivePatchInstrumentEditor(true);
                                         SetStatus(std::string("Keysplit sample → SND ") +
                                                   std::to_string(choice.first));
                                     }
@@ -5549,6 +6036,13 @@
                             }
                         }
                         ImGui::EndCombo();
+                    }
+                    if (snd_missing && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                    {
+                        ImGui::SetTooltip(
+                            "Sample SND %u is missing (deleted). Instrument still "
+                            "references it — pick another sample to reassign.",
+                            snd_id);
                     }
                 }
                 ImGui::TableSetColumnIndex(5);

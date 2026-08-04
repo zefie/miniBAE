@@ -342,12 +342,64 @@
 
         bool remapped = false;
         const std::string out_path = EnforceBankSavePath(path, &remapped);
+        const bool want_zsb = EndsWith(out_path, ".zsb");
+        const int32_t target_map =
+            want_zsb ? XFILERESOURCE_ZMF_ID : XFILERESOURCE_ID;
+        const bool needs_mutate = m_export_bank_encrypt || !m_export_bank_include_groovoids ||
+                                  m_export_bank_drop_unref || m_export_bank_songs_to_groovoids;
 
+        /* Fast path: no option mutations — serialize once and write. */
+        if (!needs_mutate)
+        {
+            UpdateBusyProgress(0.2f, want_zsb ? "Building ZSB…" : "Building HSB…");
+            unsigned char *out_bytes = nullptr;
+            uint32_t out_size = 0;
+            const BAEResult sr =
+                BAERmfEditorBank_SaveToMemoryEx(m_bank_token, target_map, &out_bytes, &out_size);
+            if (sr != BAE_NO_ERROR || !out_bytes || out_size == 0)
+            {
+                if (out_bytes)
+                {
+                    XDisposePtr(out_bytes);
+                }
+                SetStatus(std::string("Export Bank failed: ") + FormatBAEError(sr));
+                return;
+            }
+            UpdateBusyProgress(0.9f, "Writing bank file…");
+            XFILENAME xf_out;
+            XConvertPathToXFILENAME(const_cast<char *>(out_path.c_str()), &xf_out);
+            XFILE disk = XFileOpenForWrite(&xf_out, TRUE);
+            if (!disk ||
+                XFileSetLength(disk, 0) != 0 ||
+                XFileSetPosition(disk, 0L) != 0 ||
+                XFileWrite(disk, out_bytes, static_cast<int32_t>(out_size)) != 0)
+            {
+                if (disk)
+                {
+                    XFileClose(disk);
+                }
+                XDisposePtr(out_bytes);
+                SetStatus("Export Bank failed: write");
+                return;
+            }
+            XFileClose(disk);
+            XDisposePtr(out_bytes);
+            SetStatus(std::string("Exported bank: ") + FileNameFromPath(out_path));
+            return;
+        }
+
+        UpdateBusyProgress(0.05f, "Cloning bank…");
         unsigned char *bank_bytes = nullptr;
         uint32_t bank_size = 0;
-        BAEResult sr = BAERmfEditorBank_SaveToMemory(m_bank_token, &bank_bytes, &bank_size);
+        /* Clone in the target container up front (IREZ→ZREZ is header+Clean). */
+        BAEResult sr =
+            BAERmfEditorBank_SaveToMemoryEx(m_bank_token, target_map, &bank_bytes, &bank_size);
         if (sr != BAE_NO_ERROR || !bank_bytes || bank_size == 0)
         {
+            if (bank_bytes)
+            {
+                XDisposePtr(bank_bytes);
+            }
             SetStatus(std::string("Export Bank failed: snapshot: ") + FormatBAEError(sr));
             return;
         }
@@ -355,18 +407,21 @@
         BAEBankToken temp_token = 0;
         BAEResult ar =
             BAEMixer_AddBankFromMemory(m_mixer, bank_bytes, bank_size, &temp_token);
-        XDisposePtr(bank_bytes);
         if (ar != BAE_NO_ERROR || !temp_token)
         {
+            XDisposePtr(bank_bytes);
             SetStatus(std::string("Export Bank failed: clone load: ") + FormatBAEError(ar));
             return;
         }
+        /* AddBankFromMemory maps the buffer; keep it alive until UnloadBank. */
 
+        UpdateBusyProgress(0.15f, "Preparing writable bank clone…");
         (void)BAERmfEditorBank_EnsureWritable(temp_token);
         XFILE temp_file = reinterpret_cast<XFILE>(temp_token);
 
         if (!m_export_bank_include_groovoids)
         {
+            UpdateBusyProgress(0.2f, "Removing groovoids…");
             const int32_t song_count = XCountFileResourcesOfType(temp_file, ID_SONG);
             for (int32_t i = song_count - 1; i >= 0; --i)
             {
@@ -401,6 +456,7 @@
 
         if (m_export_bank_songs_to_groovoids)
         {
+            UpdateBusyProgress(0.25f, "Adding session songs as groovoids…");
             for (size_t i = 0; i < m_session_songs.size(); ++i)
             {
                 const SessionSongEntry &entry = m_session_songs[i];
@@ -464,40 +520,62 @@
 
         if (m_export_bank_encrypt)
         {
-            uint32_t inst_count = 0;
-            if (BAERmfEditorBank_GetInstrumentCount(temp_token, &inst_count) == BAE_NO_ERROR)
+            /* Queue every SND/CSND→ESND change, then one bank rebuild on commit.
+             * Without batch mode each sample rebuilt the whole bank (minutes on
+             * zpatches). Skip entirely when no plain/CSND samples remain. */
+            const int32_t plain_snd = XCountFileResourcesOfType(temp_file, ID_SND);
+            const int32_t csnd = XCountFileResourcesOfType(temp_file, ID_CSND);
+            if (plain_snd > 0 || csnd > 0)
             {
-                for (uint32_t ii = 0; ii < inst_count; ++ii)
+                UpdateBusyProgress(0.35f, "Encrypting samples (batch)…");
+                (void)BAERmfEditorBank_BeginBatchSnd(temp_token);
+                uint32_t inst_count = 0;
+                if (BAERmfEditorBank_GetInstrumentCount(temp_token, &inst_count) == BAE_NO_ERROR)
                 {
-                    uint32_t split_count = 0;
-                    if (BAERmfEditorBank_GetInstrumentSampleCount(temp_token, ii, &split_count) !=
-                        BAE_NO_ERROR)
+                    for (uint32_t ii = 0; ii < inst_count; ++ii)
                     {
-                        continue;
-                    }
-                    for (uint32_t si = 0; si < split_count; ++si)
-                    {
-                        BAERmfEditorBankSampleInfo sinfo;
-                        std::memset(&sinfo, 0, sizeof(sinfo));
-                        if (BAERmfEditorBank_GetInstrumentSampleInfo(temp_token, ii, si, &sinfo) !=
+                        if ((ii & 31u) == 0u && inst_count > 0u)
+                        {
+                            UpdateBusyProgress(0.35f + 0.35f * (static_cast<float>(ii) /
+                                                                static_cast<float>(inst_count)),
+                                               "Encrypting samples (batch)…");
+                        }
+                        uint32_t split_count = 0;
+                        if (BAERmfEditorBank_GetInstrumentSampleCount(temp_token, ii, &split_count) !=
                             BAE_NO_ERROR)
                         {
                             continue;
                         }
-                        /* Empty INST slots often store sndResourceID 0 — skip those, not real SND 0. */
-                        if (sinfo.frameCount == 0 && sinfo.bitDepth == 0)
+                        for (uint32_t si = 0; si < split_count; ++si)
                         {
-                            continue;
+                            BAERmfEditorBankSampleInfo sinfo;
+                            std::memset(&sinfo, 0, sizeof(sinfo));
+                            if (BAERmfEditorBank_GetInstrumentSampleInfo(temp_token, ii, si, &sinfo) !=
+                                BAE_NO_ERROR)
+                            {
+                                continue;
+                            }
+                            if (sinfo.frameCount == 0 && sinfo.bitDepth == 0)
+                            {
+                                continue;
+                            }
+                            if (sinfo.sndStorageType == BAE_EDITOR_SND_STORAGE_ESND)
+                            {
+                                continue;
+                            }
+                            (void)BAERmfEditorBank_SetSampleSndStorageType(
+                                temp_token, ii, si, BAE_EDITOR_SND_STORAGE_ESND);
                         }
-                        (void)BAERmfEditorBank_SetSampleSndStorageType(
-                            temp_token, ii, si, BAE_EDITOR_SND_STORAGE_ESND);
                     }
                 }
+                UpdateBusyProgress(0.75f, "Committing encrypted samples…");
+                (void)BAERmfEditorBank_CommitBatchSnd(temp_token);
             }
         }
 
         if (m_export_bank_drop_unref)
         {
+            UpdateBusyProgress(0.8f, "Dropping unreferenced samples…");
             std::set<uint32_t> referenced;
             uint32_t inst_count = 0;
             if (BAERmfEditorBank_GetInstrumentCount(temp_token, &inst_count) == BAE_NO_ERROR)
@@ -525,6 +603,7 @@
                 }
             }
             const XResourceType snd_types[] = {ID_SND, ID_CSND, ID_ESND};
+            int dropped = 0;
             for (XResourceType stype : snd_types)
             {
                 const int32_t count = XCountFileResourcesOfType(temp_file, stype);
@@ -539,17 +618,29 @@
                     {
                         XDisposePtr(data);
                     }
-                    if (rid != 0 && referenced.count(static_cast<uint32_t>(rid)) == 0)
+                    if (referenced.count(static_cast<uint32_t>(rid)) == 0)
                     {
-                        (void)XDeleteFileResource(temp_file, stype, rid, TRUE);
+                        /* Mark trash only — one Clean after the loop (not per delete). */
+                        if (XDeleteFileResource(temp_file, stype, rid, FALSE) != FALSE)
+                        {
+                            ++dropped;
+                        }
                     }
                 }
             }
+            if (dropped > 0)
+            {
+                UpdateBusyProgress(0.85f, "Compacting bank after drop…");
+                (void)XCleanResourceFileEx(temp_file, FALSE);
+            }
         }
 
+        UpdateBusyProgress(0.9f, "Writing bank file…");
+        /* Same-format save is a raw image clone after mutations. */
         const BAEResult save_r =
             BAERmfEditorBank_SaveToFile(temp_token, const_cast<char *>(out_path.c_str()));
         (void)BAEMixer_UnloadBank(m_mixer, temp_token);
+        XDisposePtr(bank_bytes);
         if (save_r == BAE_NO_ERROR)
         {
             if (remapped)

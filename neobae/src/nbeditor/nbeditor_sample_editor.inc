@@ -2165,131 +2165,227 @@
                                 IM_COL32(96, 200, 160, 255));
         }
 
-        draw->AddLine(ImVec2(canvas_pos.x, center_y), ImVec2(canvas_end.x, center_y), IM_COL32(66, 84, 105, 180), 1.0f);
-
-        /* Pixel-column envelope from PCM in the current view — denser and less spiky than
-         * stretching a fixed bin table across the whole canvas. */
-        const float amplitude = (wave_h * 0.46f) * m_sample_editor_zoom_y;
+        /* Pixel-column envelope from PCM in the current view. Stereo samples
+         * get stacked L/R lanes; mono stays a single centered waveform. */
         const uint32_t view_start = m_sample_editor_view_start;
         const uint32_t view_end = std::max(m_sample_editor_view_end, view_start + 1u);
         const uint32_t view_span = view_end - view_start;
         const int columns = std::max(1, static_cast<int>(canvas_size.x));
+        const uint16_t bit_size = m_sample_editor_cached_bit_size;
+        const uint16_t channels = std::max<uint16_t>(m_sample_editor_cached_channels, 1);
+        const bool stereo_lanes = (channels >= 2);
+        const float lane_gap = stereo_lanes ? 3.0f : 0.0f;
+        const float lane_h =
+            stereo_lanes ? std::max(8.0f, (wave_h - lane_gap) * 0.5f) : wave_h;
+
         if (!m_sample_editor_cached_pcm.empty() && m_sample_editor_cached_frame_count > 0 && columns > 0)
         {
-            const uint16_t bit_size = m_sample_editor_cached_bit_size;
-            const uint16_t channels = std::max<uint16_t>(m_sample_editor_cached_channels, 1);
-            std::vector<float> col_min(static_cast<size_t>(columns), 0.0f);
-            std::vector<float> col_max(static_cast<size_t>(columns), 0.0f);
-
-            for (int col = 0; col < columns; ++col)
-            {
-                const uint32_t begin =
-                    view_start + static_cast<uint32_t>((static_cast<uint64_t>(col) * view_span) /
-                                                      static_cast<uint64_t>(columns));
-                uint32_t end =
-                    view_start + static_cast<uint32_t>((static_cast<uint64_t>(col + 1) * view_span) /
-                                                      static_cast<uint64_t>(columns));
-                if (end <= begin)
+            auto fill_columns_for_channel = [&](int channel_or_mono,
+                                               std::vector<float> &col_min,
+                                               std::vector<float> &col_max) {
+                col_min.assign(static_cast<size_t>(columns), 0.0f);
+                col_max.assign(static_cast<size_t>(columns), 0.0f);
+                for (int col = 0; col < columns; ++col)
                 {
-                    end = std::min(view_end, begin + 1u);
-                }
-                end = std::min(end, m_sample_editor_cached_frame_count);
-
-                float min_v = 1.0f;
-                float max_v = -1.0f;
-                const uint32_t span = (end > begin) ? (end - begin) : 0u;
-                const uint32_t step = std::max(1u, span / 96u); /* cap work per column */
-                if (bit_size == 16)
-                {
-                    const int16_t *pcm16 =
-                        reinterpret_cast<const int16_t *>(m_sample_editor_cached_pcm.data());
-                    for (uint32_t frame = begin; frame < end; frame += step)
+                    const uint32_t begin =
+                        view_start + static_cast<uint32_t>((static_cast<uint64_t>(col) * view_span) /
+                                                          static_cast<uint64_t>(columns));
+                    uint32_t end =
+                        view_start + static_cast<uint32_t>((static_cast<uint64_t>(col + 1) * view_span) /
+                                                          static_cast<uint64_t>(columns));
+                    if (end <= begin)
                     {
-                        float mono = 0.0f;
-                        for (uint16_t ch = 0; ch < channels; ++ch)
-                        {
-                            mono += static_cast<float>(pcm16[(frame * channels) + ch]) / 32768.0f;
-                        }
-                        mono /= static_cast<float>(channels);
-                        min_v = std::min(min_v, mono);
-                        max_v = std::max(max_v, mono);
+                        end = std::min(view_end, begin + 1u);
                     }
-                }
-                else
-                {
-                    const uint8_t *pcm8 = m_sample_editor_cached_pcm.data();
-                    for (uint32_t frame = begin; frame < end; frame += step)
+                    end = std::min(end, m_sample_editor_cached_frame_count);
+
+                    float min_v = 1.0f;
+                    float max_v = -1.0f;
+                    const uint32_t span = (end > begin) ? (end - begin) : 0u;
+                    const uint32_t step = std::max(1u, span / 96u);
+                    if (bit_size == 16)
                     {
-                        float mono = 0.0f;
-                        for (uint16_t ch = 0; ch < channels; ++ch)
+                        const int16_t *pcm16 =
+                            reinterpret_cast<const int16_t *>(m_sample_editor_cached_pcm.data());
+                        for (uint32_t frame = begin; frame < end; frame += step)
                         {
-                            mono += (static_cast<float>(pcm8[(frame * channels) + ch]) - 128.0f) / 128.0f;
+                            float sample = 0.0f;
+                            if (channel_or_mono >= 0)
+                            {
+                                sample = static_cast<float>(
+                                             pcm16[(frame * channels) + static_cast<uint16_t>(channel_or_mono)]) /
+                                         32768.0f;
+                            }
+                            else
+                            {
+                                for (uint16_t ch = 0; ch < channels; ++ch)
+                                {
+                                    sample += static_cast<float>(pcm16[(frame * channels) + ch]) / 32768.0f;
+                                }
+                                sample /= static_cast<float>(channels);
+                            }
+                            min_v = std::min(min_v, sample);
+                            max_v = std::max(max_v, sample);
                         }
-                        mono /= static_cast<float>(channels);
-                        min_v = std::min(min_v, mono);
-                        max_v = std::max(max_v, mono);
                     }
+                    else
+                    {
+                        const uint8_t *pcm8 = m_sample_editor_cached_pcm.data();
+                        for (uint32_t frame = begin; frame < end; frame += step)
+                        {
+                            float sample = 0.0f;
+                            if (channel_or_mono >= 0)
+                            {
+                                sample = (static_cast<float>(
+                                              pcm8[(frame * channels) + static_cast<uint16_t>(channel_or_mono)]) -
+                                          128.0f) /
+                                         128.0f;
+                            }
+                            else
+                            {
+                                for (uint16_t ch = 0; ch < channels; ++ch)
+                                {
+                                    sample +=
+                                        (static_cast<float>(pcm8[(frame * channels) + ch]) - 128.0f) / 128.0f;
+                                }
+                                sample /= static_cast<float>(channels);
+                            }
+                            min_v = std::min(min_v, sample);
+                            max_v = std::max(max_v, sample);
+                        }
+                    }
+                    if (span == 0)
+                    {
+                        min_v = max_v = 0.0f;
+                    }
+                    col_min[static_cast<size_t>(col)] = min_v;
+                    col_max[static_cast<size_t>(col)] = max_v;
                 }
-                if (span == 0)
-                {
-                    min_v = max_v = 0.0f;
-                }
-                col_min[static_cast<size_t>(col)] = min_v;
-                col_max[static_cast<size_t>(col)] = max_v;
-            }
 
-            /* Light 3-tap smooth so adjacent columns don't look like a comb. */
-            if (columns >= 3)
-            {
-                std::vector<float> smin = col_min;
-                std::vector<float> smax = col_max;
-                for (int col = 1; col < columns - 1; ++col)
+                if (columns >= 3)
                 {
-                    smin[static_cast<size_t>(col)] =
-                        (col_min[static_cast<size_t>(col - 1)] * 0.25f) +
-                        (col_min[static_cast<size_t>(col)] * 0.50f) +
-                        (col_min[static_cast<size_t>(col + 1)] * 0.25f);
-                    smax[static_cast<size_t>(col)] =
-                        (col_max[static_cast<size_t>(col - 1)] * 0.25f) +
-                        (col_max[static_cast<size_t>(col)] * 0.50f) +
-                        (col_max[static_cast<size_t>(col + 1)] * 0.25f);
+                    std::vector<float> smin = col_min;
+                    std::vector<float> smax = col_max;
+                    for (int col = 1; col < columns - 1; ++col)
+                    {
+                        smin[static_cast<size_t>(col)] =
+                            (col_min[static_cast<size_t>(col - 1)] * 0.25f) +
+                            (col_min[static_cast<size_t>(col)] * 0.50f) +
+                            (col_min[static_cast<size_t>(col + 1)] * 0.25f);
+                        smax[static_cast<size_t>(col)] =
+                            (col_max[static_cast<size_t>(col - 1)] * 0.25f) +
+                            (col_max[static_cast<size_t>(col)] * 0.50f) +
+                            (col_max[static_cast<size_t>(col + 1)] * 0.25f);
+                    }
+                    col_min.swap(smin);
+                    col_max.swap(smax);
                 }
-                col_min.swap(smin);
-                col_max.swap(smax);
-            }
+            };
 
-            /* One AA vertical stem per pixel column — solid DAW-style envelope. */
-            for (int col = 0; col < columns; ++col)
-            {
-                const float x = canvas_pos.x + static_cast<float>(col) + 0.5f;
-                float y0 = center_y - (col_max[static_cast<size_t>(col)] * amplitude);
-                float y1 = center_y - (col_min[static_cast<size_t>(col)] * amplitude);
-                y0 = std::clamp(y0, wave_top, wave_bottom);
-                y1 = std::clamp(y1, wave_top, wave_bottom);
-                if (std::fabs(y1 - y0) < 1.0f)
+            auto draw_lane = [&](float lane_top,
+                                 float lane_bottom,
+                                 const std::vector<float> &col_min,
+                                 const std::vector<float> &col_max,
+                                 ImU32 stem_col,
+                                 ImU32 outline_col,
+                                 ImU32 zero_col,
+                                 const char *label) {
+                const float lane_center = lane_top + ((lane_bottom - lane_top) * 0.5f);
+                const float amplitude =
+                    ((lane_bottom - lane_top) * 0.46f) * m_sample_editor_zoom_y;
+                draw->AddLine(ImVec2(canvas_pos.x, lane_center),
+                              ImVec2(canvas_end.x, lane_center),
+                              zero_col,
+                              1.0f);
+                if (label && label[0])
                 {
-                    y1 = y0 + 1.0f;
+                    draw->AddText(ImVec2(canvas_pos.x + 4.0f, lane_top + 2.0f),
+                                  IM_COL32(160, 170, 185, 200),
+                                  label);
                 }
-                draw->AddLine(ImVec2(x, y0), ImVec2(x, y1), IM_COL32(118, 196, 248, 210), 1.0f);
-            }
+                for (int col = 0; col < columns; ++col)
+                {
+                    const float x = canvas_pos.x + static_cast<float>(col) + 0.5f;
+                    float y0 = lane_center - (col_max[static_cast<size_t>(col)] * amplitude);
+                    float y1 = lane_center - (col_min[static_cast<size_t>(col)] * amplitude);
+                    y0 = std::clamp(y0, lane_top, lane_bottom);
+                    y1 = std::clamp(y1, lane_top, lane_bottom);
+                    if (std::fabs(y1 - y0) < 1.0f)
+                    {
+                        y1 = y0 + 1.0f;
+                    }
+                    draw->AddLine(ImVec2(x, y0), ImVec2(x, y1), stem_col, 1.0f);
+                }
+                draw->PathClear();
+                for (int col = 0; col < columns; ++col)
+                {
+                    const float x = canvas_pos.x + static_cast<float>(col) + 0.5f;
+                    float y = lane_center - (col_max[static_cast<size_t>(col)] * amplitude);
+                    draw->PathLineTo(ImVec2(x, std::clamp(y, lane_top, lane_bottom)));
+                }
+                draw->PathStroke(outline_col, 0, 1.0f);
+                draw->PathClear();
+                for (int col = 0; col < columns; ++col)
+                {
+                    const float x = canvas_pos.x + static_cast<float>(col) + 0.5f;
+                    float y = lane_center - (col_min[static_cast<size_t>(col)] * amplitude);
+                    draw->PathLineTo(ImVec2(x, std::clamp(y, lane_top, lane_bottom)));
+                }
+                draw->PathStroke(outline_col, 0, 1.0f);
+            };
 
-            /* Soft peak outlines for a cleaner silhouette. */
-            draw->PathClear();
-            for (int col = 0; col < columns; ++col)
+            std::vector<float> col_min;
+            std::vector<float> col_max;
+            if (stereo_lanes)
             {
-                const float x = canvas_pos.x + static_cast<float>(col) + 0.5f;
-                float y = center_y - (col_max[static_cast<size_t>(col)] * amplitude);
-                draw->PathLineTo(ImVec2(x, std::clamp(y, wave_top, wave_bottom)));
+                const float l_top = wave_top;
+                const float l_bottom = wave_top + lane_h;
+                const float r_top = l_bottom + lane_gap;
+                const float r_bottom = wave_bottom;
+                draw->AddLine(ImVec2(canvas_pos.x, l_bottom + (lane_gap * 0.5f)),
+                              ImVec2(canvas_end.x, l_bottom + (lane_gap * 0.5f)),
+                              IM_COL32(50, 58, 72, 220),
+                              1.0f);
+
+                fill_columns_for_channel(0, col_min, col_max);
+                draw_lane(l_top,
+                          l_bottom,
+                          col_min,
+                          col_max,
+                          IM_COL32(118, 196, 248, 210),
+                          IM_COL32(186, 228, 255, 160),
+                          IM_COL32(66, 84, 105, 180),
+                          "L");
+
+                fill_columns_for_channel(1, col_min, col_max);
+                draw_lane(r_top,
+                          r_bottom,
+                          col_min,
+                          col_max,
+                          IM_COL32(248, 176, 118, 210),
+                          IM_COL32(255, 214, 176, 160),
+                          IM_COL32(84, 72, 66, 180),
+                          "R");
             }
-            draw->PathStroke(IM_COL32(186, 228, 255, 160), 0, 1.0f);
-            draw->PathClear();
-            for (int col = 0; col < columns; ++col)
+            else
             {
-                const float x = canvas_pos.x + static_cast<float>(col) + 0.5f;
-                float y = center_y - (col_min[static_cast<size_t>(col)] * amplitude);
-                draw->PathLineTo(ImVec2(x, std::clamp(y, wave_top, wave_bottom)));
+                fill_columns_for_channel(-1, col_min, col_max);
+                draw_lane(wave_top,
+                          wave_bottom,
+                          col_min,
+                          col_max,
+                          IM_COL32(118, 196, 248, 210),
+                          IM_COL32(186, 228, 255, 160),
+                          IM_COL32(66, 84, 105, 180),
+                          nullptr);
             }
-            draw->PathStroke(IM_COL32(186, 228, 255, 160), 0, 1.0f);
+        }
+        else
+        {
+            draw->AddLine(ImVec2(canvas_pos.x, center_y),
+                          ImVec2(canvas_end.x, center_y),
+                          IM_COL32(66, 84, 105, 180),
+                          1.0f);
         }
 
         /* Volume envelope strip (fade in / gain / fade out handles) */

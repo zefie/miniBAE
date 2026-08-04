@@ -1391,7 +1391,8 @@ static bool PV_PackInstResourcesIntoZmfBlock(XFILE fileRef)
     }
     XDisposePtr(compressedBlock);
 
-    if (XCleanResourceFile(outFile) == FALSE)
+    /* Skip PackSndHeaders on this temp file — top-level Clean handles it once. */
+    if (XCleanResourceFileEx(outFile, FALSE) == FALSE)
     {
         XFileClose(outFile);
         return FALSE;
@@ -1874,7 +1875,7 @@ static bool PV_PackSongResourcesIntoZmfBlock(XFILE fileRef)
     }
     XDisposePtr(compressedBlock);
 
-    if (XCleanResourceFile(outFile) == FALSE)
+    if (XCleanResourceFileEx(outFile, FALSE) == FALSE)
     {
         XFileClose(outFile);
         return FALSE;
@@ -2300,7 +2301,7 @@ static bool PV_PackBankResourcesIntoZmfBlock(XFILE fileRef)
     }
     XDisposePtr(compressedBlock);
 
-    if (XCleanResourceFile(outFile) == FALSE)
+    if (XCleanResourceFileEx(outFile, FALSE) == FALSE)
     {
         XFileClose(outFile);
         return FALSE;
@@ -2875,7 +2876,8 @@ static bool PV_PackSndHeaderResourcesIntoZmfBlock(XFILE fileRef)
     }
     XDisposePtr(compressedBlock);
 
-    if (XCleanResourceFile(outFile) == FALSE)
+    /* outFile already has payload-refs + ZSHD; don't re-enter pack. */
+    if (XCleanResourceFileEx(outFile, FALSE) == FALSE)
     {
         XFileClose(outFile);
         return FALSE;
@@ -4199,6 +4201,62 @@ XFILE XFileOpenVirtualResource(int32_t resourceID)
         return NULL;
     }
 
+    return pReference;
+}
+
+XFILE XFileOpenWritableResourceFromMemory(XPTR pResource, uint32_t resourceLength)
+{
+    XFILENAME *pReference;
+    XFILERESOURCEMAP map;
+    XPTR image;
+
+    if (!pResource || resourceLength < (uint32_t)sizeof(XFILERESOURCEMAP))
+    {
+        return NULL;
+    }
+
+    XBlockMove(pResource, &map, (int32_t)sizeof(XFILERESOURCEMAP));
+    if (!XFILERESOURCE_ID_IS_VALID(XGetLong(&map.mapID)) ||
+        !XFILERESOURCE_VERSION_IS_VALID(XGetLong(&map.version)))
+    {
+        return NULL;
+    }
+
+    image = XNewPtr((int32_t)resourceLength);
+    if (!image)
+    {
+        return NULL;
+    }
+    XBlockMove(pResource, image, (int32_t)resourceLength);
+
+    pReference = (XFILENAME *)XNewPtr((int32_t)sizeof(XFILENAME));
+    if (!pReference)
+    {
+        XDisposePtr(image);
+        return NULL;
+    }
+
+    XSetMemory(pReference, (int32_t)sizeof(XFILENAME), 0);
+    pReference->fileValidID = XPI_BLOCK_3_ID;
+    pReference->fileReference = 0;
+    pReference->resourceFile = TRUE;
+    pReference->readOnly = FALSE;
+    pReference->allowMemCopy = TRUE;
+    pReference->pResourceData = image;
+    pReference->resMemLength = (int32_t)resourceLength;
+    pReference->resMemOffset = 0;
+    pReference->ownsResourceData = TRUE;
+    pReference->resizeResourceData = TRUE;
+    pReference->pCache = NULL;
+
+    if (PV_AddResourceFileToOpenFiles(pReference))
+    {
+        XDisposePtr(image);
+        XDisposePtr(pReference);
+        return NULL;
+    }
+
+    pReference->pCache = XCreateAccessCache(pReference);
     return pReference;
 }
 
@@ -5599,7 +5657,7 @@ XFILERESOURCECACHE * XCreateAccessCache(XFILE fileRef)
         XDisposePtr(pReference->pCache);
     }
     pReference->pCache = newCache;
-    debug_message("[XCreateAccessCache] SUCCESS: Cache created with %d resources\n", total);
+    /* SUCCESS spam was drowning export logs (Clean/pack rebuild caches often). */
     return newCache;
 }
 
@@ -5624,13 +5682,11 @@ bool XDeleteFileResource(XFILE fileRef, XResourceType resourceType, XLongResourc
     pReference = fileRef;
     if (PV_XFileValid(fileRef))
     {
-        // first, do we have memory data?
-        if (pReference->pResourceData)
-        {
-            return FALSE;
-        }
-        // second, are we a read only file?
-        else if (PV_IsXFileLocked(fileRef))
+        /* Writable memory files support in-place TRASH marking via XFileWrite.
+         * (Older code rejected all pResourceData handles, which broke deletes
+         * after EnsureWritable cloned a bank into RAM.) */
+        if (PV_IsXFileLocked(fileRef) ||
+            (pReference->pResourceData && pReference->resizeResourceData == FALSE))
         {
             return FALSE;
         }

@@ -811,12 +811,13 @@
             ext = lower.substr(dot + 1);
         }
 
-        /* RMF/ZMF: Open as Session / Add / Cancel everywhere except Instruments & Samples. */
-        if ((ext == "rmf" || ext == "zmf") &&
+        /* Song-like files: import into Session unless dropped on Instruments/Samples.
+         * Includes hover==None (OS drag often loses ImGui hover before DROP_FILE). */
+        if (IsSongImportExtension(ext) &&
             m_dnd_hover_target != SessionDropTarget::Instruments &&
             m_dnd_hover_target != SessionDropTarget::Samples)
         {
-            ImportPathIntoSession(path);
+            HandleSongsTabDrop(path);
             return;
         }
 

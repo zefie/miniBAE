@@ -87,9 +87,8 @@ static bool DecodeNbetResourceBody(const unsigned char *raw,
 #endif
 }
 
-/* LZMA-wrap the plain nBeT blob (XCompressPtr / X_LZMA_RAW). Always prefer a
- * successful compress so open→save upgrades legacy plaintext bodies. Fall back
- * to plain only if LZMA is unavailable or compression fails. */
+/* LZMA-wrap the plain nBeT blob (XCompressPtr / X_LZMA_RAW) when it shrinks.
+ * Open still accepts legacy plaintext bodies. */
 static std::vector<unsigned char> EncodeNbetResourceBody(const std::vector<unsigned char> &plain)
 {
 #if USE_LZMA_COMPRESSION == TRUE
@@ -104,7 +103,7 @@ static std::vector<unsigned char> EncodeNbetResourceBody(const std::vector<unsig
                          X_LZMA_RAW,
                          nullptr,
                          nullptr);
-        if (compressed && csize > 0)
+        if (compressed && csize > 0 && static_cast<size_t>(csize) < plain.size())
         {
             std::vector<unsigned char> out(static_cast<unsigned char *>(compressed),
                                            static_cast<unsigned char *>(compressed) +
@@ -1311,6 +1310,7 @@ bool SaveSessionToPath(const char *path)
         return false;
     }
 
+    UpdateBusyProgress(0.02f, "Preparing session…");
     RememberSessionPcmFromSampleEditor();
     (void)SyncSessionSongsFromDocument();
 
@@ -1328,17 +1328,38 @@ bool SaveSessionToPath(const char *path)
         SetStatus(std::string("NeoBAE features require .zsn (") + reason_buf + "); remapping save path");
     }
 
-    XFILE out_file = XFileOpenVirtualResource(resource_map_id);
-    if (!out_file)
-    {
-        SetStatus("Session save failed: virtual resource");
-        return false;
-    }
-
-    /* ---- bank body (optional) ---- */
+    XFILE out_file = nullptr;
+    /* ---- bank body (optional): seed from a one-shot image clone ---- */
     if (m_bank_token)
     {
-        XFILE bank_file = reinterpret_cast<XFILE>(m_bank_token);
+        UpdateBusyProgress(0.08f, "Cloning bank image…");
+        unsigned char *bank_image = nullptr;
+        uint32_t bank_image_size = 0;
+        /* Same-format is a raw image memcpy (keeps ZINS packed). Format
+         * override (IREZ↔ZREZ) walks resources once. */
+        const BAEResult snap_r =
+            BAERmfEditorBank_SaveToMemoryEx(m_bank_token,
+                                            resource_map_id,
+                                            &bank_image,
+                                            &bank_image_size);
+        if (snap_r != BAE_NO_ERROR || !bank_image || bank_image_size < 12)
+        {
+            if (bank_image)
+            {
+                XDisposePtr(bank_image);
+            }
+            SetStatus(std::string("Session save failed: clone bank: ") + FormatBAEError(snap_r));
+            return false;
+        }
+        out_file = XFileOpenWritableResourceFromMemory(bank_image, bank_image_size);
+        XDisposePtr(bank_image);
+        if (!out_file)
+        {
+            SetStatus("Session save failed: open bank clone");
+            return false;
+        }
+
+        UpdateBusyProgress(0.35f, "Stripping session songs from bank clone…");
         std::set<uint32_t> session_song_ids;
         std::set<uint32_t> session_midi_ids;
         for (const SessionSongEntry &entry : m_session_songs)
@@ -1346,83 +1367,90 @@ bool SaveSessionToPath(const char *path)
             session_song_ids.insert(entry.song_resource_id);
             session_midi_ids.insert(entry.midi_resource_id);
         }
-        static const XResourceType bank_resource_types[] = {
-            ID_INST,
-            ID_SND,
-            ID_CSND,
-            ID_ESND,
-            ID_ALIAS,
-            ID_BANK,
-            ID_SONG,
-            ID_MIDI, /* Midi-backed bank groovoids (converted emid); user Midi rewritten below */
-            ID_MIDI_OLD,
-            ID_CMID,
-            ID_EMID,
-            ID_ECMI,
-            ID_RMF,
-            ID_TEXT,
-            ID_VERS,
-            0,
-        };
-
-        for (int type_idx = 0; bank_resource_types[type_idx] != 0; ++type_idx)
+        /* Remove Custom Song slots we'll rewrite below; keep bank groovoids. */
         {
-            const XResourceType res_type = bank_resource_types[type_idx];
-            const int32_t res_count = XCountFileResourcesOfType(bank_file, res_type);
-            for (int32_t res_index = 0; res_index < res_count; ++res_index)
+            const int32_t song_count = XCountFileResourcesOfType(out_file, ID_SONG);
+            for (int32_t i = song_count - 1; i >= 0; --i)
             {
-                XLongResourceID res_id = 0;
-                int32_t res_size = 0;
-                char res_name[256];
-                res_name[0] = 0;
-                XPTR res_data = XGetIndexedFileResource(bank_file,
-                                                       res_type,
-                                                       &res_id,
-                                                       res_index,
-                                                       res_name,
-                                                       &res_size);
-                if (!res_data)
+                XLongResourceID song_id = 0;
+                int32_t song_size = 0;
+                char name_buf[256];
+                name_buf[0] = 0;
+                XPTR song_data =
+                    XGetIndexedFileResource(out_file, ID_SONG, &song_id, i, name_buf, &song_size);
+                if (!song_data)
                 {
                     continue;
                 }
-                if (res_type == ID_SONG &&
-                    BsnSongObjectIsMidi(bank_file,
-                                        static_cast<const unsigned char *>(res_data),
-                                        res_size))
+                bool strip = false;
+                if (BsnSongObjectIsMidi(out_file,
+                                        static_cast<const unsigned char *>(song_data),
+                                        song_size))
                 {
-                    /* Skip only Custom Songs; keep Midi-backed bank groovoids. */
-                    if (session_song_ids.count(static_cast<uint32_t>(res_id)) != 0)
+                    if (session_song_ids.count(static_cast<uint32_t>(song_id)) != 0)
                     {
-                        XDisposePtr(res_data);
-                        continue; /* user songs rewritten below */
+                        strip = true;
                     }
-                    const uint16_t obj_id =
-                        BsnReadBE16(static_cast<const unsigned char *>(res_data));
-                    if (session_midi_ids.count(obj_id) != 0)
+                    else
                     {
-                        XDisposePtr(res_data);
-                        continue;
+                        const uint16_t obj_id =
+                            BsnReadBE16(static_cast<const unsigned char *>(song_data));
+                        if (session_midi_ids.count(obj_id) != 0)
+                        {
+                            strip = true;
+                        }
                     }
                 }
-                if (res_type == ID_MIDI &&
-                    session_midi_ids.count(static_cast<uint32_t>(res_id)) != 0)
+                XDisposePtr(song_data);
+                if (strip)
                 {
-                    XDisposePtr(res_data);
-                    continue; /* user Midi rewritten below */
+                    (void)XDeleteFileResource(out_file, ID_SONG, song_id, TRUE);
                 }
-                if (XAddFileResource(out_file, res_type, res_id, res_name, res_data, res_size) != 0)
+            }
+            for (uint32_t midi_id : session_midi_ids)
+            {
+                if (midi_id != 0)
                 {
-                    XDisposePtr(res_data);
-                    XFileClose(out_file);
-                    SetStatus("Session save failed: copy bank resource");
-                    return false;
+                    (void)XDeleteFileResource(out_file,
+                                              ID_MIDI,
+                                              static_cast<XLongResourceID>(midi_id),
+                                              TRUE);
                 }
-                XDisposePtr(res_data);
+            }
+        }
+        /* Drop prior session-only metadata; rewritten below. */
+        (void)XDeleteFileResource(out_file, FOUR_CHAR('n', 'B', 'e', 'T'), 1, TRUE);
+        (void)XDeleteFileResource(out_file, FOUR_CHAR('B', 'e', 'P', 'f'), 1, TRUE);
+        (void)XDeleteFileResource(out_file, FOUR_CHAR('B', 'E', 'P', 'F'), 1, TRUE);
+        (void)XDeleteFileResource(out_file, FOUR_CHAR('D', 'A', 'T', 'e'), 1, TRUE);
+        {
+            const int32_t casd_count =
+                XCountFileResourcesOfType(out_file, FOUR_CHAR('C', 'a', 'S', 'd'));
+            for (int32_t i = casd_count - 1; i >= 0; --i)
+            {
+                XLongResourceID casd_id = 0;
+                int32_t sz = 0;
+                char nm[256];
+                nm[0] = 0;
+                XPTR d = XGetIndexedFileResource(
+                    out_file, FOUR_CHAR('C', 'a', 'S', 'd'), &casd_id, i, nm, &sz);
+                if (d)
+                {
+                    XDisposePtr(d);
+                }
+                (void)XDeleteFileResource(
+                    out_file, FOUR_CHAR('C', 'a', 'S', 'd'), casd_id, TRUE);
             }
         }
     }
     else
     {
+        out_file = XFileOpenVirtualResource(resource_map_id);
+        if (!out_file)
+        {
+            SetStatus("Session save failed: virtual resource");
+            return false;
+        }
         /* Thin shell like blank.bsn */
         static const unsigned char k_zero6[6] = {0, 0, 0, 0, 0, 0};
         char empty_pascal[256];
@@ -1432,6 +1460,7 @@ bool SaveSessionToPath(const char *path)
     }
 
     /* ---- user songs (Midi + SONG) ---- */
+    UpdateBusyProgress(0.55f, "Writing session songs…");
     struct DateStamp
     {
         uint32_t type;
@@ -1442,6 +1471,12 @@ bool SaveSessionToPath(const char *path)
 
     for (size_t i = 0; i < m_session_songs.size(); ++i)
     {
+        if (!m_session_songs.empty())
+        {
+            UpdateBusyProgress(0.55f + 0.12f * (static_cast<float>(i) /
+                                                static_cast<float>(m_session_songs.size())),
+                               "Writing session songs…");
+        }
         SessionSongEntry &entry = m_session_songs[i];
         if (entry.midi_bytes.empty())
         {
@@ -1525,6 +1560,7 @@ bool SaveSessionToPath(const char *path)
     }
 
     /* ---- CaSd PCM masters ---- */
+    UpdateBusyProgress(0.70f, "Writing PCM masters…");
 #if USE_CREATION_API == TRUE
     for (const auto &kv : m_session_pcm_cache)
     {
@@ -1571,6 +1607,7 @@ bool SaveSessionToPath(const char *path)
 #endif
 
     /* ---- nBeT / BePf / BEPF / DATe ---- */
+    UpdateBusyProgress(0.80f, "Writing session metadata…");
     {
         if (m_pref_save_session_layout)
         {
@@ -1643,6 +1680,7 @@ bool SaveSessionToPath(const char *path)
                                static_cast<int32_t>(date_body.size()));
     }
 
+    UpdateBusyProgress(0.88f, want_zsn ? "Packing ZREZ (LZMA)…" : "Packing resource map…");
     if (XCleanResourceFile(out_file) == FALSE)
     {
         XFileClose(out_file);
@@ -1650,6 +1688,7 @@ bool SaveSessionToPath(const char *path)
         return false;
     }
 
+    UpdateBusyProgress(0.94f, "Writing session file…");
     XPTR packed = nullptr;
     int32_t packed_size = 0;
     if (XFileGetMemoryFileAsData(out_file, &packed, &packed_size) != 0 || !packed || packed_size <= 0)
@@ -1684,6 +1723,7 @@ bool SaveSessionToPath(const char *path)
     }
     XFileClose(disk);
     XDisposePtr(packed);
+    UpdateBusyProgress(1.0f, "Done");
 
     m_loaded_session_path = path;
     m_document_dirty = false;

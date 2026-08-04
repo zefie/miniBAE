@@ -9473,7 +9473,8 @@ private:
         targetInstID = instIDBase + static_cast<uint32_t>(targetProgram);
 
         memset(&instrument, 0, sizeof(instrument));
-        XPutShort(&instrument.sndResourceID, 0);
+        /* Beatnik: 0xFFFF = no sample. ID 0 is a real SND and must not be used here. */
+        XPutShort(&instrument.sndResourceID, 0xFFFFu);
         XPutShort(&instrument.midiRootKey, static_cast<uint16_t>(rootKey));
         instrument.panPlacement = 0;
         instrument.flags1 = ZBF_useSampleRate;

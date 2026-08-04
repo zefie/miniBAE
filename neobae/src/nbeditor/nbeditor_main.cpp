@@ -1270,6 +1270,11 @@ public:
         m_main_window = window;
     }
 
+    void SetRenderer(SDL_Renderer *renderer)
+    {
+        m_renderer = renderer;
+    }
+
     void SetUiFonts(ImFont *regular, ImFont *italic)
     {
         m_font_regular = regular;
@@ -1277,6 +1282,31 @@ public:
     }
 
     const char *GetStatus() const { return m_status; }
+
+    /* Heavy file ops run between frames so we can pump a progress modal. */
+    void PumpPendingLongOp()
+    {
+        if (m_long_op == LongOp::None)
+        {
+            return;
+        }
+        const LongOp op = m_long_op;
+        const std::string path = std::move(m_long_op_path);
+        m_long_op = LongOp::None;
+        m_long_op_path.clear();
+        if (op == LongOp::SaveSession)
+        {
+            BeginBusyProgress("Saving Session…");
+            (void)SaveSessionToPath(path.c_str());
+            EndBusyProgress();
+        }
+        else if (op == LongOp::ExportBank)
+        {
+            BeginBusyProgress("Exporting Bank…");
+            ExportBankCloneToPath(path);
+            EndBusyProgress();
+        }
+    }
 
     /* Must run outside NewFrame/EndFrame — mid-frame LoadIni clears docks and undocks windows. */
     void PumpPendingNbetLayout()
@@ -1310,8 +1340,8 @@ public:
 
     void DrawUI()
     {
-        /* Reset each frame; windows set this when hovered. Drop uses last frame's value. */
-        m_dnd_hover_target = SessionDropTarget::None;
+        /* Keep last hover sticky across frames: OS file drags often stop updating
+         * ImGui hover, so clearing to None each frame broke MIDI→Songs drops. */
         ConsumeDialogResult();
         DrawMainMenuBar();
         DrawDockspace();
@@ -1413,6 +1443,13 @@ private:
         SaveSessionAs,
         AddSample,
         ReImportMidi,
+    };
+
+    enum class LongOp
+    {
+        None = 0,
+        SaveSession,
+        ExportBank
     };
 
     static void SDLCALL OnFileDialogResult(void *userdata, const char *const *filelist, int)
@@ -1642,12 +1679,14 @@ private:
                 out_path += want_zsn ? ".zsn" : ".bsn";
             }
             out_path = EnforceSessionSavePath(out_path);
-            SaveSessionToPath(out_path.c_str());
+            m_long_op = LongOp::SaveSession;
+            m_long_op_path = out_path;
             return;
         }
         if (m_pending_dialog_action == DialogAction::ExportBank)
         {
-            ExportBankCloneToPath(EnforceBankSavePath(selected_path));
+            m_long_op = LongOp::ExportBank;
+            m_long_op_path = EnforceBankSavePath(selected_path);
             return;
         }
         if (m_pending_dialog_action == DialogAction::ExportAudio)
@@ -1982,6 +2021,101 @@ private:
     void SetStatus(const std::string &text)
     {
         std::snprintf(m_status, sizeof(m_status), "%s", text.c_str());
+    }
+
+    void BeginBusyProgress(const char *title)
+    {
+        m_busy_active = true;
+        m_busy_title = title ? title : "Working…";
+        m_busy_detail.clear();
+        m_busy_fraction = 0.0f;
+        m_busy_last_pump_ms = 0;
+        PumpBusyProgressFrame(true);
+    }
+
+    void UpdateBusyProgress(float fraction, const char *detail = nullptr)
+    {
+        if (!m_busy_active)
+        {
+            return;
+        }
+        m_busy_fraction = std::clamp(fraction, 0.0f, 1.0f);
+        if (detail)
+        {
+            m_busy_detail = detail;
+        }
+        PumpBusyProgressFrame(false);
+    }
+
+    void EndBusyProgress()
+    {
+        if (!m_busy_active)
+        {
+            return;
+        }
+        m_busy_fraction = 1.0f;
+        PumpBusyProgressFrame(true);
+        m_busy_active = false;
+        m_busy_detail.clear();
+    }
+
+    void PumpBusyProgressFrame(bool force)
+    {
+        if (!m_busy_active || !m_renderer || !m_main_window)
+        {
+            return;
+        }
+        /* Nested NewFrame inside DrawUI crashes ImGui (e.g. Add Instrument →
+         * EnsureWritable "Preparing bank…" mid-dialog). LongOps pump between frames. */
+        ImGuiContext *ctx = ImGui::GetCurrentContext();
+        if (ctx && ctx->WithinFrameScope)
+        {
+            return;
+        }
+        const uint32_t now = SDL_GetTicks();
+        if (!force && m_busy_last_pump_ms != 0 && (now - m_busy_last_pump_ms) < 50u)
+        {
+            return;
+        }
+        m_busy_last_pump_ms = now;
+
+        SDL_Event event;
+        while (SDL_PollEvent(&event))
+        {
+            ImGui_ImplSDL3_ProcessEvent(&event);
+        }
+
+        ImGui_ImplSDLRenderer3_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+
+        ImGuiIO &io = ImGui::GetIO();
+        ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
+                                ImGuiCond_Always,
+                                ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowSize(ImVec2(420.0f, 0.0f), ImGuiCond_Always);
+        ImGui::OpenPopup("##nbeditor_busy");
+        if (ImGui::BeginPopupModal("##nbeditor_busy",
+                                   nullptr,
+                                   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove |
+                                       ImGuiWindowFlags_NoTitleBar))
+        {
+            ImGui::TextUnformatted(m_busy_title.c_str());
+            ImGui::Spacing();
+            ImGui::ProgressBar(m_busy_fraction, ImVec2(-1.0f, 0.0f));
+            if (!m_busy_detail.empty())
+            {
+                ImGui::Spacing();
+                ImGui::TextWrapped("%s", m_busy_detail.c_str());
+            }
+            ImGui::EndPopup();
+        }
+
+        ImGui::Render();
+        SDL_SetRenderDrawColor(m_renderer, 18, 22, 28, 255);
+        SDL_RenderClear(m_renderer);
+        ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), m_renderer);
+        SDL_RenderPresent(m_renderer);
     }
 
     bool LoadSongFromPath(const char *path)
@@ -2743,7 +2877,19 @@ private:
                     continue;
                 }
 
-                const uint32_t snd_id = static_cast<uint32_t>(sample_info.sndResourceID);
+                const uint32_t snd_id = static_cast<uint32_t>(
+                    static_cast<uint16_t>(sample_info.sndResourceID));
+                /* Empty INST uses 0xFFFF (no sample); do not invent a Samples-tab row. */
+                if (snd_id == kNoSndResourceId)
+                {
+                    continue;
+                }
+                /* Ghost keysplit (SND deleted, INST still points at it): stay off Samples
+                 * list; keymap shows SND N [missing]. */
+                if (!BankSndResourceExists(snd_id))
+                {
+                    continue;
+                }
                 /* Bank 2+, session-added SNDs, or samples belonging to session-custom INST. */
                 const bool row_custom =
                     (inst_info.bank >= 2) ||
@@ -5028,12 +5174,21 @@ private:
     std::string m_loaded_bank_display_name;
 
     SDL_Window *m_main_window = nullptr; // not owned
+    SDL_Renderer *m_renderer = nullptr;  // not owned
     SDL_Mutex *m_dialog_mutex = nullptr;
     bool m_dialog_result_ready = false;
     bool m_dialog_error = false;
     std::string m_dialog_path;
     std::string m_dialog_error_message;
     DialogAction m_pending_dialog_action = DialogAction::OpenImport;
+    LongOp m_long_op = LongOp::None;
+    std::string m_long_op_path;
+
+    bool m_busy_active = false;
+    std::string m_busy_title;
+    std::string m_busy_detail;
+    float m_busy_fraction = 0.0f;
+    uint32_t m_busy_last_pump_ms = 0;
 
     bool m_bank_add_open = false;
     BankAddMode m_bank_add_mode = BankAddMode::Instrument;
@@ -5219,6 +5374,10 @@ private:
     bool m_ie_undo_pushed_for_gesture = false;
     int m_ie_adsr_selected_stage = -1;
     ImGuiID m_ie_adsr_selected_owner = 0;
+    /* Per-LFO UI: ADSR-only / Wave-only / Both (explicit). Not persisted in INST. */
+    int m_ie_lfo_control_mode[BAE_EDITOR_MAX_LFOS] = {};
+    /* Keysplit SND ids at IE open / after Apply — Revert restores these (bank-side). */
+    std::vector<uint16_t> m_ie_pristine_split_snds;
 
     bool m_dock_layout_initialized = false;
 
@@ -5345,6 +5504,7 @@ int main(int argc, char **argv)
 
     NbEditorApp app;
     app.SetMainWindow(window);
+    app.SetRenderer(renderer);
     app.SetUiFonts(font_regular, font_italic);
     if (!app.Init())
     {
@@ -5398,6 +5558,8 @@ int main(int argc, char **argv)
 
         /* Apply nBeT ImGui/dock ini before NewFrame — mid-frame load undocks windows. */
         app.PumpPendingNbetLayout();
+        /* Session save / bank export (progress modal); must not run mid-DrawUI. */
+        app.PumpPendingLongOp();
 
         ImGui_ImplSDLRenderer3_NewFrame();
         ImGui_ImplSDL3_NewFrame();

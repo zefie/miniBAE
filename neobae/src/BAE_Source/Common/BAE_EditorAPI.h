@@ -595,7 +595,7 @@ enum BAEZMFReasonCode
     BAEZMF_REASON_CLASSIC_CHORUS = 16, /* song is flagged to use the classic chorus ordering */
     BAEZMF_REASON_PANFIX = 32, /* song is flagged to use the pan fix */
     BAEZMF_REASON_EXTENDED_ADSR = 64,  /* any instrument has > 8 ADSR stages */
-    BAEZMF_REASON_LPF_FILTER = 128, /* INST LPF / resonance (not supported in classic HSB/RMF) */
+    BAEZMF_REASON_LPF_FILTER = 128, /* LPF/resonance on a stereo sample (mono LPF is classic HSB/RMF OK) */
     BAEZMF_ALREADY_ZMF = 0x40000000u,
     BAEZMF_REASON_OTHER = 0x80000000u
 };
@@ -894,6 +894,13 @@ BAEResult BAERmfEditorBank_SaveToFile(BAEBankToken bankToken,
 BAEResult BAERmfEditorBank_SaveToMemory(BAEBankToken bankToken,
                                         unsigned char **outData,
                                         uint32_t *outSize);
+
+/* Like SaveToMemory, but overrideResourceID may force IREZ or ZREZ
+ * (XFILERESOURCE_ID / XFILERESOURCE_ZMF_ID). Pass 0 to keep source format. */
+BAEResult BAERmfEditorBank_SaveToMemoryEx(BAEBankToken bankToken,
+                                          int32_t overrideResourceID,
+                                          unsigned char **outData,
+                                          uint32_t *outSize);
 
 /* Decode waveform data for a specific sample within a bank instrument.
  * This loads and decodes the SND resource to PCM. The caller must call

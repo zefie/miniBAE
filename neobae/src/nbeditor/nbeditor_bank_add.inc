@@ -120,7 +120,21 @@
             SetStatus("No bank loaded");
             return false;
         }
+        /* Fast path is a single memcpy. Only show the progress modal between
+         * frames — mid-DrawUI BeginBusyProgress would nest ImGui::NewFrame. */
+        const bool nested_busy = m_busy_active;
+        ImGuiContext *ctx = ImGui::GetCurrentContext();
+        const bool show_busy = !nested_busy && !(ctx && ctx->WithinFrameScope);
+        if (show_busy)
+        {
+            BeginBusyProgress("Preparing bank…");
+            UpdateBusyProgress(0.2f, "Making bank writable…");
+        }
         const BAEResult r = BAERmfEditorBank_EnsureWritable(m_bank_token);
+        if (show_busy)
+        {
+            EndBusyProgress();
+        }
         if (r != BAE_NO_ERROR)
         {
             SetStatus(std::string("Bank not writable: ") + FormatBAEError(r));
@@ -464,6 +478,19 @@
         return true;
     }
 
+    bool BankSndResourceExists(uint32_t snd_id) const
+    {
+        if (!m_bank_token)
+        {
+            return false;
+        }
+        XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
+        const XLongResourceID sid = static_cast<XLongResourceID>(snd_id);
+        return XExistsFileResource(bank, ID_ESND, sid) != FALSE ||
+               XExistsFileResource(bank, ID_CSND, sid) != FALSE ||
+               XExistsFileResource(bank, ID_SND, sid) != FALSE;
+    }
+
     void DeleteSampleAt(int sample_list_index)
     {
         if (!m_bank_token || sample_list_index < 0 ||
@@ -482,60 +509,48 @@
             return;
         }
 
-        if (sample.unassigned)
+        /* BE2-style: delete the SND only. Instruments keep their keysplit
+         * sndResourceID and show as [missing] until reassigned. Do not rewrite
+         * INST / remove splits (that caused glitches and index churn). */
+        XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
+        const XLongResourceID sid = static_cast<XLongResourceID>(sample.snd_resource_id);
+        static const XResourceType kTypes[] = {ID_ESND, ID_CSND, ID_SND, 0};
+        bool deleted = false;
+        for (int t = 0; kTypes[t] != 0; ++t)
         {
-            XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
-            const XLongResourceID sid = static_cast<XLongResourceID>(sample.snd_resource_id);
-            static const XResourceType kTypes[] = {ID_ESND, ID_CSND, ID_SND, 0};
-            bool deleted = false;
-            for (int t = 0; kTypes[t] != 0; ++t)
+            if (XExistsFileResource(bank, kTypes[t], sid) != FALSE)
             {
-                if (XExistsFileResource(bank, kTypes[t], sid) != FALSE)
+                if (XDeleteFileResource(bank, kTypes[t], sid, FALSE) != FALSE)
                 {
-                    if (XDeleteFileResource(bank, kTypes[t], sid, FALSE) != FALSE)
-                    {
-                        deleted = true;
-                        break;
-                    }
+                    deleted = true;
+                    break;
                 }
             }
-            if (!deleted)
-            {
-                SetStatus("Failed to delete unassigned sample resource");
-                return;
-            }
-            (void)XCleanResourceFile(bank);
-            m_session_custom_snd_ids.erase(sample.snd_resource_id);
-            m_session_pcm_cache.erase(sample.snd_resource_id);
-            m_app_compression_cache.erase(sample.snd_resource_id);
-            RefreshListsFromBank();
-            m_selected_sample = -1;
-            char status[128];
-            std::snprintf(status, sizeof(status), "Deleted unassigned sample SND %u",
-                          sample.snd_resource_id);
-            SetStatus(status);
-            return;
         }
-
-        const BAEResult r =
-            BAERmfEditorBank_DeleteInstrumentSample(m_bank_token,
-                                                    sample.instrument_index,
-                                                    sample.split_index,
-                                                    true);
-        if (r != BAE_NO_ERROR)
+        if (!deleted)
         {
-            SetStatus(std::string("Delete sample failed: ") + FormatBAEError(r));
+            SetStatus("Failed to delete sample resource");
             return;
         }
+        (void)XCleanResourceFile(bank);
+        m_session_custom_snd_ids.erase(sample.snd_resource_id);
+        m_session_pcm_cache.erase(sample.snd_resource_id);
+        m_app_compression_cache.erase(sample.snd_resource_id);
         RefreshListsFromBank();
         m_selected_sample = -1;
-        char status[160];
-        std::snprintf(status,
-                      sizeof(status),
-                      "Deleted sample SND %u from B%dP%03d",
-                      sample.snd_resource_id,
-                      sample.bank,
-                      sample.program);
+        char status[192];
+        if (sample.unassigned)
+        {
+            std::snprintf(status, sizeof(status), "Deleted unassigned sample SND %u",
+                          sample.snd_resource_id);
+        }
+        else
+        {
+            std::snprintf(status,
+                          sizeof(status),
+                          "Deleted sample SND %u — instruments still reference it [missing]",
+                          sample.snd_resource_id);
+        }
         SetStatus(status);
     }
 
@@ -559,7 +574,8 @@
 
         InstrumentResource instrument;
         std::memset(&instrument, 0, sizeof(instrument));
-        XPutShort(&instrument.sndResourceID, 0);
+        /* Beatnik: 0xFFFF = no sample. ID 0 is a real SND and must not be used here. */
+        XPutShort(&instrument.sndResourceID, static_cast<uint16_t>(kNoSndResourceId));
         XPutShort(&instrument.midiRootKey, static_cast<uint16_t>(root_key));
         instrument.panPlacement = 0;
         instrument.flags1 = ZBF_useSampleRate;

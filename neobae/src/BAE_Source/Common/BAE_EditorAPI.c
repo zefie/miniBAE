@@ -14303,7 +14303,7 @@ void BAEZMFReasonCodeToString(uint32_t reason, char *outBuffer, uint32_t bufferS
         APPEND("Extended pitch range enabled; ");
 
     if (reason & BAEZMF_REASON_LPF_FILTER)
-        APPEND("Low-pass filter / resonance enabled; ");
+        APPEND("Stereo sample with low-pass filter / resonance; ");
 
     if (reason & BAEZMF_REASON_OTHER)
         APPEND("Other engine flags set; ");        
@@ -14435,12 +14435,33 @@ BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document, 
                     break;
                 }
             }
+            /* Classic Beatnik supports mono LPF; stereo filter needs ZMF/ZSB. */
             if (PV_InstrumentUsesLpfFilter(ext->LPF_frequency,
                                            ext->LPF_resonance,
                                            ext->LPF_lowpassAmount,
                                            hasFilterLfo))
             {
-                reason |= BAEZMF_REASON_LPF_FILTER;
+                uint32_t si;
+                for (si = 0; si < document->sampleCount; ++si)
+                {
+                    BAERmfEditorSample const *sample = &document->samples[si];
+                    uint16_t channels;
+
+                    if (sample->instID != (uint32_t)ext->instID)
+                    {
+                        continue;
+                    }
+                    channels = sample->sampleInfo.channels;
+                    if (sample->waveform && sample->waveform->channels)
+                    {
+                        channels = sample->waveform->channels;
+                    }
+                    if (channels > 1)
+                    {
+                        reason |= BAEZMF_REASON_LPF_FILTER;
+                        break;
+                    }
+                }
             }
         }
     }
@@ -14500,9 +14521,14 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
         BAERmfEditorBankSampleInfo firstSampleInfo;
         uint32_t sampleCount;
         uint32_t sampleIndex;
+        bool usesLpf = FALSE;
+        bool hasStereoSample = FALSE;
 
         if (BAERmfEditorBank_GetInstrumentExtInfo(bankToken, instrumentIndex, &extInfo) == BAE_NO_ERROR)
         {
+            bool hasFilterLfo = FALSE;
+            uint32_t lfoIdx;
+
             if ((reason & BAEZMF_REASON_EXTENDED_ADSR) == 0)
             {
                 if (extInfo.volumeADSR.stageCount > BAE_RMF_MAX_ADSR_STAGES)
@@ -14511,7 +14537,6 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
                 }
                 else
                 {
-                    uint32_t lfoIdx;
                     for (lfoIdx = 0; lfoIdx < extInfo.lfoCount && lfoIdx < BAE_EDITOR_MAX_LFOS; ++lfoIdx)
                     {
                         if (extInfo.lfos[lfoIdx].adsr.stageCount > BAE_RMF_MAX_ADSR_STAGES)
@@ -14543,34 +14568,19 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
 #endif
                 reason |= BAEZMF_REASON_CUBIC_INTERPOLATION;
             }
-            if ((reason & BAEZMF_REASON_LPF_FILTER) == 0)
+            for (lfoIdx = 0; lfoIdx < extInfo.lfoCount && lfoIdx < BAE_EDITOR_MAX_LFOS; ++lfoIdx)
             {
-                bool hasFilterLfo = FALSE;
-                uint32_t lfoIdx;
-                for (lfoIdx = 0; lfoIdx < extInfo.lfoCount && lfoIdx < BAE_EDITOR_MAX_LFOS; ++lfoIdx)
+                if (PV_LfoDestinationIsLpf(extInfo.lfos[lfoIdx].destination))
                 {
-                    if (PV_LfoDestinationIsLpf(extInfo.lfos[lfoIdx].destination))
-                    {
-                        hasFilterLfo = TRUE;
-                        break;
-                    }
-                }
-                if (PV_InstrumentUsesLpfFilter(extInfo.LPF_frequency,
-                                               extInfo.LPF_resonance,
-                                               extInfo.LPF_lowpassAmount,
-                                               hasFilterLfo))
-                {
-#if defined(_DEBUG) && (_DEBUG != 0)
-                    debug_message("[BankRequiresZsb] TRIP reason=lpf-filter instIndex=%u freq=%ld res=%ld amt=%ld lfos=%u\n",
-                                  (unsigned)instrumentIndex,
-                                  (long)extInfo.LPF_frequency,
-                                  (long)extInfo.LPF_resonance,
-                                  (long)extInfo.LPF_lowpassAmount,
-                                  (unsigned)extInfo.lfoCount);
-#endif
-                    reason |= BAEZMF_REASON_LPF_FILTER;
+                    hasFilterLfo = TRUE;
+                    break;
                 }
             }
+            /* Classic Beatnik supports mono LPF; stereo filter needs ZSB. */
+            usesLpf = PV_InstrumentUsesLpfFilter(extInfo.LPF_frequency,
+                                                 extInfo.LPF_resonance,
+                                                 extInfo.LPF_lowpassAmount,
+                                                 hasFilterLfo);
         }
 
         sampleCount = 0;
@@ -14590,6 +14600,11 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
                                                          &sampleInfo) != BAE_NO_ERROR)
             {
                 continue;
+            }
+
+            if (sampleInfo.channels > 1)
+            {
+                hasStereoSample = TRUE;
             }
 
             if (sampleInfo.loopEnd > sampleInfo.loopStart)
@@ -14641,6 +14656,18 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
 #endif
                 reason |= BAEZMF_REASON_MODERN_CODEC;
             }
+        }
+
+        if (usesLpf && hasStereoSample && (reason & BAEZMF_REASON_LPF_FILTER) == 0)
+        {
+#if defined(_DEBUG) && (_DEBUG != 0)
+            debug_message("[BankRequiresZsb] TRIP reason=stereo-lpf-filter instIndex=%u freq=%ld res=%ld amt=%ld\n",
+                          (unsigned)instrumentIndex,
+                          (long)extInfo.LPF_frequency,
+                          (long)extInfo.LPF_resonance,
+                          (long)extInfo.LPF_lowpassAmount);
+#endif
+            reason |= BAEZMF_REASON_LPF_FILTER;
         }
     }
     if (outReason)
@@ -16090,15 +16117,42 @@ typedef struct
     int32_t         size;
 } PV_SndReplacement;
 
+static BAEResult PV_BankCopyIndexedResourcesOfType(XFILE srcFile,
+                                                    XFILE dstFile,
+                                                    XResourceType resType)
+{
+    int32_t resCount;
+    int32_t resIndex;
+
+    resCount = XCountFileResourcesOfType(srcFile, resType);
+    for (resIndex = 0; resIndex < resCount; ++resIndex)
+    {
+        XLongResourceID resID;
+        int32_t resSize;
+        XPTR resData;
+        char resName[256];
+
+        resName[0] = 0;
+        resData = XGetIndexedFileResource(srcFile, resType, &resID, resIndex, resName, &resSize);
+        if (!resData)
+        {
+            continue;
+        }
+        if (XAddFileResource(dstFile, resType, resID, resName, resData, resSize) != 0)
+        {
+            XDisposePtr(resData);
+            return BAE_FILE_IO_ERROR;
+        }
+        XDisposePtr(resData);
+    }
+    return BAE_NO_ERROR;
+}
+
 static BAEResult PV_BankReplaceMultipleSndResources(XFILE bankFile,
                                                      PV_SndReplacement const *replacements,
                                                      int32_t replacementCount)
 {
     static const XResourceType sndTypes[] = { ID_SND, ID_CSND, ID_ESND, 0 };
-    static const XResourceType nonSndTypes[] = {
-        ID_INST, ID_ALIAS, ID_BANK, ID_SONG, ID_MIDI, ID_MIDI_OLD, ID_CMID,
-        ID_EMID, ID_ECMI, ID_RMF, ID_TEXT, ID_VERS, 0
-    };
     XFILERESOURCEMAP map;
     int32_t resourceID;
     XFILE outFile;
@@ -16106,6 +16160,10 @@ static BAEResult PV_BankReplaceMultipleSndResources(XFILE bankFile,
     int32_t packedSize;
     int typeIdx;
     int32_t ri;
+    bool hasZins;
+    bool hasZsng;
+    bool hasZbnk;
+    bool needClean;
 
     if (!bankFile || !replacements || replacementCount <= 0)
     {
@@ -16128,6 +16186,13 @@ static BAEResult PV_BankReplaceMultipleSndResources(XFILE bankFile,
     {
         return BAE_MEMORY_ERR;
     }
+
+    /* Preserve packed ZMF blocks. Expanding every INST out of ZINS then
+     * re-LZMA packing was the dominant cost of encrypt/Commit on large ZSB. */
+    hasZins = (XCountFileResourcesOfType(bankFile, ID_ZINS) > 0) ? TRUE : FALSE;
+    hasZsng = (XCountFileResourcesOfType(bankFile, ID_ZSNG) > 0) ? TRUE : FALSE;
+    hasZbnk = (XCountFileResourcesOfType(bankFile, ID_ZBNK) > 0) ? TRUE : FALSE;
+    needClean = (!hasZins) ? TRUE : FALSE;
 
     /* Walk SND resources; for each one check if it's in the replacement list */
     for (typeIdx = 0; sndTypes[typeIdx] != 0; ++typeIdx)
@@ -16152,7 +16217,6 @@ static BAEResult PV_BankReplaceMultipleSndResources(XFILE bankFile,
                 continue;
             }
 
-            /* Check if this resource is being replaced */
             for (ri = 0; ri < replacementCount; ++ri)
             {
                 if (replacements[ri].oldType == resType &&
@@ -16188,42 +16252,65 @@ static BAEResult PV_BankReplaceMultipleSndResources(XFILE bankFile,
         }
     }
 
-    /* Copy all non-SND resources unchanged */
-    for (typeIdx = 0; nonSndTypes[typeIdx] != 0; ++typeIdx)
-    {
-        XResourceType resType = nonSndTypes[typeIdx];
-        int32_t resCount = XCountFileResourcesOfType(bankFile, resType);
-        int32_t resIndex;
-
-        for (resIndex = 0; resIndex < resCount; ++resIndex)
-        {
-            XLongResourceID resID;
-            int32_t resSize;
-            XPTR resData;
-            char resName[256];
-
-            resName[0] = 0;
-            resData = XGetIndexedFileResource(bankFile, resType, &resID,
-                                              resIndex, resName, &resSize);
-            if (!resData)
-            {
-                continue;
-            }
-            if (XAddFileResource(outFile, resType, resID, resName,
-                                 resData, resSize) != 0)
-            {
-                XDisposePtr(resData);
-                XFileClose(outFile);
-                return BAE_FILE_IO_ERROR;
-            }
-            XDisposePtr(resData);
-        }
-    }
-
-    if (XCleanResourceFile(outFile) == FALSE)
+    /* Opaque ZMF packs — copy as-is, never expand. Skip ZSHD: SND bodies above
+     * are full rebuilt samples, so a stale header block would be wrong. */
+    if (hasZins &&
+        PV_BankCopyIndexedResourcesOfType(bankFile, outFile, ID_ZINS) != BAE_NO_ERROR)
     {
         XFileClose(outFile);
         return BAE_FILE_IO_ERROR;
+    }
+    if (hasZsng &&
+        PV_BankCopyIndexedResourcesOfType(bankFile, outFile, ID_ZSNG) != BAE_NO_ERROR)
+    {
+        XFileClose(outFile);
+        return BAE_FILE_IO_ERROR;
+    }
+    if (hasZbnk &&
+        PV_BankCopyIndexedResourcesOfType(bankFile, outFile, ID_ZBNK) != BAE_NO_ERROR)
+    {
+        XFileClose(outFile);
+        return BAE_FILE_IO_ERROR;
+    }
+
+    /* Loose non-SND resources that are not already inside a Z* pack. */
+    {
+        static const XResourceType looseTypes[] = {
+            ID_INST, ID_ALIAS, ID_BANK, ID_SONG, ID_MIDI, ID_MIDI_OLD, ID_CMID,
+            ID_EMID, ID_ECMI, ID_RMF, ID_TEXT, ID_VERS, 0
+        };
+        for (typeIdx = 0; looseTypes[typeIdx] != 0; ++typeIdx)
+        {
+            XResourceType resType = looseTypes[typeIdx];
+            if (hasZins && (resType == ID_INST || resType == ID_ALIAS))
+            {
+                continue;
+            }
+            if (hasZsng && resType == ID_SONG)
+            {
+                continue;
+            }
+            if (hasZbnk &&
+                (resType == ID_BANK || resType == ID_MIDI || resType == ID_MIDI_OLD))
+            {
+                continue;
+            }
+            if (PV_BankCopyIndexedResourcesOfType(bankFile, outFile, resType) != BAE_NO_ERROR)
+            {
+                XFileClose(outFile);
+                return BAE_FILE_IO_ERROR;
+            }
+        }
+    }
+
+    if (needClean)
+    {
+        /* Classic IREZ / unpacked ZREZ: pack INST only (no SND-header pass). */
+        if (XCleanResourceFileEx(outFile, FALSE) == FALSE)
+        {
+            XFileClose(outFile);
+            return BAE_FILE_IO_ERROR;
+        }
     }
 
     packedData = NULL;
@@ -16257,6 +16344,7 @@ static BAEResult PV_BankReplaceMultipleSndResources(XFILE bankFile,
     bankFile->resizeResourceData = TRUE;
     bankFile->readOnly = FALSE;
     bankFile->allowMemCopy = TRUE;
+    bankFile->pCache = XCreateAccessCache(bankFile);
     return BAE_NO_ERROR;
 }
 
@@ -18378,31 +18466,11 @@ BAEResult BAERmfEditorBank_ImportInstAndSndFromFile(BAEBankToken bankToken,
 
 BAEResult BAERmfEditorBank_EnsureWritable(BAEBankToken bankToken)
 {
-    static const XResourceType bankResourceTypes[] = {
-        ID_INST,
-        ID_SND,
-        ID_CSND,
-        ID_ESND,
-        ID_ALIAS,
-        ID_BANK,
-        ID_SONG,
-        ID_MIDI,
-        ID_MIDI_OLD,
-        ID_CMID,
-        ID_EMID,
-        ID_ECMI,
-        ID_RMF,
-        ID_TEXT,
-        ID_VERS,
-        0
-    };
     XFILE bankFile;
     XFILERESOURCEMAP map;
     int32_t resourceID;
-    XFILE outFile;
-    int32_t typeIdx;
-    XPTR packedData;
-    int32_t packedSize;
+    int32_t imageSize;
+    XPTR image;
 
     if (!bankToken)
     {
@@ -18416,6 +18484,14 @@ BAEResult BAERmfEditorBank_EnsureWritable(BAEBankToken bankToken)
         return BAE_NO_ERROR;
     }
 
+    /* Fast path: clone the whole IREZ/ZREZ image in one read/memcpy.
+     * The old per-resource Get→Add→Clean path expands ZINS/ZSNG/ZBNK and
+     * re-LZMAs them — dominant cost on large ZSB banks (e.g. zpatches). */
+    imageSize = XFileGetLength(bankFile);
+    if (imageSize <= (int32_t)sizeof(XFILERESOURCEMAP))
+    {
+        return BAE_BAD_FILE;
+    }
     if (XFileSetPosition(bankFile, 0L) != 0 ||
         XFileRead(bankFile, &map, (int32_t)sizeof(XFILERESOURCEMAP)) != 0)
     {
@@ -18427,65 +18503,17 @@ BAEResult BAERmfEditorBank_EnsureWritable(BAEBankToken bankToken)
         return BAE_BAD_FILE;
     }
 
-    outFile = XFileOpenVirtualResource(resourceID);
-    if (!outFile)
+    image = XNewPtr(imageSize);
+    if (!image)
     {
         return BAE_MEMORY_ERR;
     }
-
-    for (typeIdx = 0; bankResourceTypes[typeIdx] != 0; ++typeIdx)
+    if (XFileSetPosition(bankFile, 0L) != 0 ||
+        XFileRead(bankFile, image, imageSize) != 0)
     {
-        XResourceType resType = bankResourceTypes[typeIdx];
-        int32_t resCount = XCountFileResourcesOfType(bankFile, resType);
-        int32_t resIndex;
-
-        for (resIndex = 0; resIndex < resCount; ++resIndex)
-        {
-            XLongResourceID resID = 0;
-            int32_t resSize = 0;
-            char resName[256];
-            XPTR resData;
-
-            resName[0] = 0;
-            resData = XGetIndexedFileResource(bankFile,
-                                              resType,
-                                              &resID,
-                                              resIndex,
-                                              resName,
-                                              &resSize);
-            if (!resData)
-            {
-                continue;
-            }
-            if (XAddFileResource(outFile, resType, resID, resName, resData, resSize) != 0)
-            {
-                XDisposePtr(resData);
-                XFileClose(outFile);
-                return BAE_FILE_IO_ERROR;
-            }
-            XDisposePtr(resData);
-        }
+        XDisposePtr(image);
+        return BAE_BAD_FILE;
     }
-
-    if (XCleanResourceFile(outFile) == FALSE)
-    {
-        XFileClose(outFile);
-        return BAE_FILE_IO_ERROR;
-    }
-
-    packedData = NULL;
-    packedSize = 0;
-    if (XFileGetMemoryFileAsData(outFile, &packedData, &packedSize) != 0 ||
-        !packedData || packedSize <= 0)
-    {
-        XFileClose(outFile);
-        if (packedData)
-        {
-            XDisposePtr(packedData);
-        }
-        return BAE_FILE_IO_ERROR;
-    }
-    XFileClose(outFile);
 
     if (bankFile->pCache)
     {
@@ -18496,9 +18524,16 @@ BAEResult BAERmfEditorBank_EnsureWritable(BAEBankToken bankToken)
     {
         XDisposePtr(bankFile->pResourceData);
     }
+    else if (!bankFile->pResourceData && bankFile->fileReference)
+    {
+        /* Switching disk-backed → memory-backed; close the FD so XFileClose
+         * (which skips BAE_FileClose when pResourceData is set) won't leak it. */
+        BAE_FileClose(bankFile->fileReference);
+        bankFile->fileReference = 0;
+    }
 
-    bankFile->pResourceData = packedData;
-    bankFile->resMemLength = packedSize;
+    bankFile->pResourceData = image;
+    bankFile->resMemLength = imageSize;
     bankFile->resMemOffset = 0;
     bankFile->ownsResourceData = TRUE;
     bankFile->resizeResourceData = TRUE;
@@ -19091,7 +19126,8 @@ BAEResult BAERmfEditorBank_DeleteInstrumentSample(BAEBankToken bankToken,
  *
  * The format is preserved from the source bank (IREZ stays IREZ, ZREZ
  * stays ZREZ) unless overrideResourceID is non-zero, in which case that
- * format is used instead.  All resource types are copied verbatim. */
+ * format is used instead.  Same-format saves clone the image in one shot
+ * (avoids ZINS expand/repack). Format conversion still walks resources. */
 static BAEResult PV_BankSaveToMemory(BAEBankToken bankToken,
                                      int32_t overrideResourceID,
                                      unsigned char **outData,
@@ -19101,6 +19137,7 @@ static BAEResult PV_BankSaveToMemory(BAEBankToken bankToken,
     XFILE outFile;
     XFILERESOURCEMAP map;
     int32_t resourceID;
+    int32_t sourceID;
     XPTR data;
     int32_t size;
 
@@ -19122,19 +19159,83 @@ static BAEResult PV_BankSaveToMemory(BAEBankToken bankToken,
     {
         return BAE_BAD_FILE;
     }
-    resourceID = (int32_t)XGetLong(&map.mapID);
-    if (!XFILERESOURCE_ID_IS_VALID(resourceID))
+    sourceID = (int32_t)XGetLong(&map.mapID);
+    if (!XFILERESOURCE_ID_IS_VALID(sourceID))
     {
         return BAE_BAD_FILE;
     }
 
     /* Override format if requested (e.g. .zsb extension forces ZREZ) */
-    if (overrideResourceID != 0)
+    resourceID = (overrideResourceID != 0) ? overrideResourceID : sourceID;
+
+    /* Same container, or IREZ→ZREZ: clone the image (keeps sample payloads
+     * in place). IREZ→ZREZ then patches the map header and runs Clean once to
+     * pack ZINS — avoids re-copying every SND through Get/Add. */
+    if (resourceID == sourceID ||
+        (sourceID == XFILERESOURCE_ID && resourceID == XFILERESOURCE_ZMF_ID))
     {
-        resourceID = overrideResourceID;
+        int32_t imageSize = XFileGetLength(bankFile);
+        XFILE tmpFile;
+
+        if (imageSize <= (int32_t)sizeof(XFILERESOURCEMAP))
+        {
+            return BAE_BAD_FILE;
+        }
+        data = XNewPtr(imageSize);
+        if (!data)
+        {
+            return BAE_MEMORY_ERR;
+        }
+        if (XFileSetPosition(bankFile, 0L) != 0 ||
+            XFileRead(bankFile, data, imageSize) != 0)
+        {
+            XDisposePtr(data);
+            return BAE_BAD_FILE;
+        }
+
+        if (resourceID == sourceID)
+        {
+            *outData = (unsigned char *)data;
+            *outSize = (uint32_t)imageSize;
+            return BAE_NO_ERROR;
+        }
+
+        /* IREZ → ZREZ: rewrite map ID/version, pack via Clean. */
+        {
+            XFILERESOURCEMAP hdr;
+            XBlockMove(data, &hdr, (int32_t)sizeof(hdr));
+            XPutLong(&hdr.mapID, (uint32_t)resourceID);
+            XPutLong(&hdr.version, (uint32_t)XFILERESOURCE_VERSION_FOR_ID(resourceID));
+            XBlockMove(&hdr, data, (int32_t)sizeof(hdr));
+        }
+        tmpFile = XFileOpenWritableResourceFromMemory(data, (uint32_t)imageSize);
+        XDisposePtr(data);
+        data = NULL;
+        if (!tmpFile)
+        {
+            return BAE_MEMORY_ERR;
+        }
+        if (XCleanResourceFile(tmpFile) == FALSE)
+        {
+            XFileClose(tmpFile);
+            return BAE_FILE_IO_ERROR;
+        }
+        if (XFileGetMemoryFileAsData(tmpFile, &data, &size) != 0 || !data || size <= 0)
+        {
+            XFileClose(tmpFile);
+            if (data)
+            {
+                XDisposePtr(data);
+            }
+            return BAE_MEMORY_ERR;
+        }
+        XFileClose(tmpFile);
+        *outData = (unsigned char *)data;
+        *outSize = (uint32_t)size;
+        return BAE_NO_ERROR;
     }
 
-    /* Create a virtual (in-memory) resource file with the same format */
+    /* Create a virtual (in-memory) resource file with the target format */
     outFile = XFileOpenVirtualResource(resourceID);
     if (!outFile)
     {
@@ -19177,7 +19278,7 @@ static BAEResult PV_BankSaveToMemory(BAEBankToken bankToken,
             resCount = XCountFileResourcesOfType(bankFile, resType);
             for (resIndex = 0; resIndex < resCount; ++resIndex)
             {
-                if (typeIdx == ID_SND || typeIdx == ID_CSND || typeIdx == ID_ESND)
+                if (resType == ID_SND || resType == ID_CSND || resType == ID_ESND)
                 {
                     ++soundCount;
                 }
@@ -19242,6 +19343,14 @@ BAEResult BAERmfEditorBank_SaveToMemory(BAEBankToken bankToken,
                                         uint32_t *outSize)
 {
     return PV_BankSaveToMemory(bankToken, 0, outData, outSize);
+}
+
+BAEResult BAERmfEditorBank_SaveToMemoryEx(BAEBankToken bankToken,
+                                          int32_t overrideResourceID,
+                                          unsigned char **outData,
+                                          uint32_t *outSize)
+{
+    return PV_BankSaveToMemory(bankToken, overrideResourceID, outData, outSize);
 }
 
 BAEResult BAERmfEditorBank_SaveToFile(BAEBankToken bankToken,
