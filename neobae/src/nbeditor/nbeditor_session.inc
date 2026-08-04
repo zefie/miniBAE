@@ -1381,6 +1381,7 @@
             std::string name;
         };
         std::map<uint32_t, UsedInst> used_by_inst;
+        std::set<uint32_t> requested_seen;
 
         uint16_t track_count = 0;
         if (BAERmfEditorDocument_GetTrackCount(m_document, &track_count) != BAE_NO_ERROR)
@@ -1403,10 +1404,15 @@
                     continue;
                 }
                 const int bank_group = ExportBankGroupFromNoteBank(note.bank);
-                const bool percussion = (note.channel == 9);
+                /* CH10 bank 0 = GM drums; CH10 bank != 0 = melodic CloneUsed embeds. */
+                const bool percussion = (note.channel == 9 && note.bank == 0);
                 const uint32_t requested_inst_id =
                     percussion ? (static_cast<uint32_t>(bank_group) * 256u) + 128u + note.note
                                : (static_cast<uint32_t>(bank_group) * 256u) + note.program;
+                if (!requested_seen.insert(requested_inst_id).second)
+                {
+                    continue;
+                }
 
                 uint32_t resolved_inst_id = requested_inst_id;
                 uint32_t instrument_index = 0;
@@ -1545,11 +1551,35 @@
             SetStatus("Load a bank before exporting RMF/ZMF");
             return;
         }
-        /* Full used-instrument list; default checks Custom (bank 2+) only. */
+        /* Open immediately; heavy list/ZMF scan runs on first dialog frame. */
+        m_export_items.clear();
+        m_export_embed_inst_ids.clear();
+        m_export_ghost_inst_ids.clear();
+        m_export_rmf_needs_zmf = false;
+        m_export_rmf_z_reason = 0;
+        m_export_snd_storage_index = static_cast<int>(BAE_EDITOR_SND_STORAGE_ESND);
+        m_export_rmf_prepare_pending = true;
+        m_export_rmf_open = true;
+    }
+
+    void FinishExportRmfDialogPrepare()
+    {
         RebuildExportInstrumentList();
         ApplyExportInstrumentSelection(ExportSelectionMode::Custom);
-        m_export_snd_storage_index = static_cast<int>(BAE_EDITOR_SND_STORAGE_ESND);
-        m_export_rmf_open = true;
+        uint32_t reason = 0;
+        bool needs_z = false;
+        if (m_document && BAERmfEditorDocument_RequiresZmf(m_document, &reason) != FALSE)
+        {
+            reason &= ~(uint32_t)BAEZMF_ALREADY_ZMF;
+            needs_z = (reason != 0);
+        }
+        if (!needs_z && BankRequiresZsb(&reason))
+        {
+            needs_z = true;
+        }
+        m_export_rmf_needs_zmf = needs_z;
+        m_export_rmf_z_reason = reason;
+        m_export_rmf_prepare_pending = false;
     }
 
     void DrawExportRmfDialog()
@@ -1567,30 +1597,25 @@
         }
         m_export_rmf_open = open;
 
+        if (m_export_rmf_prepare_pending)
+        {
+            ImGui::TextWrapped("Preparing export list…");
+            ImGui::EndPopup();
+            FinishExportRmfDialogPrepare();
+            return;
+        }
+
         ImGui::TextWrapped(
             "Per instrument: Off (bank ref), Embed (INST+samples), or Ghost "
             "(INST only; samples resolve from the host bank). Usually embed "
             "only instruments you created yourself.");
+        if (m_export_rmf_needs_zmf)
         {
-            uint32_t reason = 0;
-            bool needs_z = false;
-            if (m_document && BAERmfEditorDocument_RequiresZmf(m_document, &reason) != FALSE)
-            {
-                reason &= ~(uint32_t)BAEZMF_ALREADY_ZMF;
-                needs_z = (reason != 0);
-            }
-            if (!needs_z && BankRequiresZsb(&reason))
-            {
-                needs_z = true;
-            }
-            if (needs_z)
-            {
-                char reason_buf[256] = {0};
-                BAEZMFReasonCodeToString(reason, reason_buf, sizeof(reason_buf));
-                ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
-                                   "Export will use .zmf: %s",
-                                   reason_buf);
-            }
+            char reason_buf[256] = {0};
+            BAEZMFReasonCodeToString(m_export_rmf_z_reason, reason_buf, sizeof(reason_buf));
+            ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
+                               "Export will use .zmf: %s",
+                               reason_buf);
         }
         ImGui::Spacing();
 
@@ -1978,7 +2003,7 @@
         const SampleRow &sample = m_samples[static_cast<size_t>(sample_row)];
         if (sample.source == SampleSource::Bank)
         {
-            if (!m_bank_token || sample.snd_resource_id == 0)
+            if (!m_bank_token || sample.snd_resource_id == kNoSndResourceId)
             {
                 SetStatus("Export Sample requires a bank SND");
                 return;
@@ -2070,7 +2095,7 @@
         BAEResult result = BAE_PARAM_ERR;
         if (sample.source == SampleSource::Bank)
         {
-            if (!m_bank_token || sample.snd_resource_id == 0)
+            if (!m_bank_token || sample.snd_resource_id == kNoSndResourceId)
             {
                 SetStatus("Export Sample requires a bank SND");
                 return;
@@ -2126,7 +2151,7 @@
         m_oneshot_export_pending = true;
         m_oneshot_bank_instrument_index = inst.instrument_index;
         m_oneshot_sample_split_index = 0;
-        m_oneshot_snd_id = 0;
+        m_oneshot_snd_id = kNoSndResourceId;
         m_oneshot_sample_unassigned = false;
         m_oneshot_percussion = inst.percussion;
         m_oneshot_from_sample = false;
@@ -2156,7 +2181,7 @@
             return;
         }
         const SampleRow &sample = m_samples[static_cast<size_t>(sample_row)];
-        if (sample.source != SampleSource::Bank || sample.snd_resource_id == 0)
+        if (sample.source != SampleSource::Bank || sample.snd_resource_id == kNoSndResourceId)
         {
             SetStatus("Export as RMF requires a bank sample");
             return;
@@ -2190,7 +2215,7 @@
             return false;
         }
         const SampleRow &sample = m_samples[static_cast<size_t>(m_export_sample_row)];
-        if (sample.snd_resource_id == 0)
+        if (sample.snd_resource_id == kNoSndResourceId)
         {
             SetStatus("Sample has no SND resource");
             return false;
@@ -2333,8 +2358,8 @@
                             uint16_t *out_channels,
                             BAE_UNSIGNED_FIXED *out_rate) const
     {
-        if (!m_bank_token || snd_id == 0 || !out_frames || !out_bit_size || !out_channels ||
-            !out_rate)
+        if (!m_bank_token || snd_id == kNoSndResourceId || !out_frames || !out_bit_size ||
+            !out_channels || !out_rate)
         {
             return false;
         }
@@ -5117,7 +5142,7 @@
                 return static_cast<int>(i);
             }
         }
-        if (snd_resource_id == 0)
+        if (snd_resource_id == kNoSndResourceId)
         {
             return -1;
         }
@@ -5247,7 +5272,7 @@
                     if (ImGui::MenuItem("Export Sample...",
                                         nullptr,
                                         false,
-                                        sample_row >= 0 && info.sndResourceID != 0))
+                                        sample_row >= 0))
                     {
                         OpenExportSampleDialog(sample_row);
                     }

@@ -407,9 +407,6 @@ static float PV_ScanHsbBankLoudness(XFILE bankFile)
 
         XDisposePtr(instData);
 
-        if (sndID == 0)
-            continue;
-
         loud = PV_MeasureHsbSndLoudness(bankFile, sndID, volumeParam);
         if (loud > kMinLoudness)
             values[valueCount++] = loud;

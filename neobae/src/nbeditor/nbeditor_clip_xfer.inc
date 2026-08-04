@@ -1605,7 +1605,7 @@
             }
             else
             {
-                if (!m_bank_token || sample.snd_resource_id == 0)
+                if (!m_bank_token || sample.snd_resource_id == kNoSndResourceId)
                 {
                     SetStatus("Cannot rename this sample here");
                     m_rename_open = false;

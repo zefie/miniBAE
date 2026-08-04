@@ -259,6 +259,8 @@
             SetStatus("No bank loaded");
             return;
         }
+        m_export_bank_zsb_reason = 0;
+        m_export_bank_needs_zsb = BankRequiresZsb(&m_export_bank_zsb_reason);
         m_export_bank_open = true;
     }
 
@@ -284,24 +286,20 @@
             ImGui::SetTooltip("Adds each Session MIDI song as SONG→emid named like the song.");
         }
         ImGui::Spacing();
+        if (m_export_bank_needs_zsb)
         {
-            uint32_t zsb_reason = 0;
-            const bool want_zsb = BankRequiresZsb(&zsb_reason);
-            if (want_zsb)
-            {
-                char reason_buf[256] = {0};
-                BAEZMFReasonCodeToString(zsb_reason, reason_buf, sizeof(reason_buf));
-                ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
-                                   "Requires .zsb: %s",
-                                   reason_buf);
-            }
+            char reason_buf[256] = {0};
+            BAEZMFReasonCodeToString(m_export_bank_zsb_reason, reason_buf, sizeof(reason_buf));
+            ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f),
+                               "Requires .zsb: %s",
+                               reason_buf);
         }
         if (ImGui::Button("Export...", ImVec2(100, 0)))
         {
             m_export_bank_open = false;
             ImGui::CloseCurrentPopup();
             m_pending_dialog_action = DialogAction::ExportBank;
-            const bool want_zsb = BankRequiresZsb(nullptr);
+            const bool want_zsb = m_export_bank_needs_zsb;
             static const SDL_DialogFileFilter filters_any[] = {
                 {"Bank (*.hsb;*.zsb)", "hsb;zsb"},
                 {"All files (*.*)", "*"},
@@ -481,7 +479,8 @@
                         {
                             continue;
                         }
-                        if (sinfo.sndResourceID == 0)
+                        /* Empty INST slots often store sndResourceID 0 — skip those, not real SND 0. */
+                        if (sinfo.frameCount == 0 && sinfo.bitDepth == 0)
                         {
                             continue;
                         }
@@ -512,7 +511,8 @@
                         std::memset(&sinfo, 0, sizeof(sinfo));
                         if (BAERmfEditorBank_GetInstrumentSampleInfo(temp_token, ii, si, &sinfo) ==
                                 BAE_NO_ERROR &&
-                            sinfo.sndResourceID != 0)
+                            (sinfo.sndResourceID != 0 || sinfo.frameCount > 0 ||
+                             sinfo.bitDepth > 0))
                         {
                             referenced.insert(static_cast<uint32_t>(sinfo.sndResourceID));
                         }

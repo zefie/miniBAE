@@ -13729,36 +13729,39 @@ static BAEResult PV_ResolveBankInstrumentIndexForGhost(BAEBankToken bankToken,
     return BAE_BAD_FILE;
 }
 
-static XShortResourceID PV_ResolveGhostAliasSndID(BAEBankToken bankToken,
-                                                  uint32_t bankInstrumentIndex,
-                                                  uint32_t splitIndex,
-                                                  BAERmfEditorSample const *sample)
+/* Returns TRUE and writes *outSndID when resolved. sndID 0 is a valid resource id. */
+static bool PV_ResolveGhostAliasSndID(BAEBankToken bankToken,
+                                      uint32_t bankInstrumentIndex,
+                                      uint32_t splitIndex,
+                                      BAERmfEditorSample const *sample,
+                                      XShortResourceID *outSndID)
 {
     BAERmfEditorBankSampleInfo bankSample;
     XFILE bankFile;
     XPTR sndData;
     int32_t sndSize;
 
-    if (!sample)
+    if (!sample || !outSndID)
     {
-        return 0;
+        return FALSE;
     }
-    if (sample->isBankAlias && sample->aliasSndResourceID != 0)
+    if (sample->isBankAlias)
     {
-        return sample->aliasSndResourceID;
+        *outSndID = sample->aliasSndResourceID;
+        return TRUE;
     }
 
     XSetMemory(&bankSample, sizeof(bankSample), 0);
     if (BAERmfEditorBank_GetInstrumentSampleInfo(bankToken,
                                                  bankInstrumentIndex,
                                                  splitIndex,
-                                                 &bankSample) == BAE_NO_ERROR &&
-        bankSample.sndResourceID != 0)
+                                                 &bankSample) == BAE_NO_ERROR)
     {
-        return bankSample.sndResourceID;
+        *outSndID = bankSample.sndResourceID;
+        return TRUE;
     }
 
-    if (sample->sampleAssetID > 0 && sample->sampleAssetID <= 32767u)
+    if (sample->sampleAssetID <= 32767u)
     {
         bankFile = (XFILE)bankToken;
         XFileUseThisResourceFile(bankFile);
@@ -13766,17 +13769,18 @@ static XShortResourceID PV_ResolveGhostAliasSndID(BAEBankToken bankToken,
         if (sndData)
         {
             XDisposePtr(sndData);
-            return (XShortResourceID)sample->sampleAssetID;
+            *outSndID = (XShortResourceID)sample->sampleAssetID;
+            return TRUE;
         }
     }
-    return 0;
+    return FALSE;
 }
 
 static BAEResult PV_ConvertDocumentSampleToBankAlias(BAERmfEditorSample *sample,
                                                      BAEBankToken bankToken,
                                                      XShortResourceID sndID)
 {
-    if (!sample || !bankToken || sndID == 0)
+    if (!sample || !bankToken)
     {
         return BAE_PARAM_ERR;
     }
@@ -13818,10 +13822,6 @@ static BAEResult PV_HydrateDocumentSampleFromBankAlias(BAERmfEditorDocument *doc
         return BAE_NO_ERROR;
     }
     sndID = sample->aliasSndResourceID;
-    if (sndID == 0)
-    {
-        return BAE_PARAM_ERR;
-    }
 
     saved = *sample;
     beforeCount = document->sampleCount;
@@ -13988,17 +13988,15 @@ BAEResult BAERmfEditorDocument_SetInstrumentGhost(BAERmfEditorDocument *document
         if (ghost)
         {
             XShortResourceID sndID = 0;
-            if (result == BAE_NO_ERROR)
+            /* Bank index resolve may fail for song-only INSTs; still allow
+             * sampleAssetID / existing alias fallbacks inside the resolver. */
+            if (!PV_ResolveGhostAliasSndID(bankToken,
+                                           bankInstrumentIndex,
+                                           splitIndex,
+                                           sample,
+                                           &sndID))
             {
-                sndID = PV_ResolveGhostAliasSndID(bankToken, bankInstrumentIndex, splitIndex, sample);
-            }
-            if (sndID == 0 && sample->sampleAssetID > 0 && sample->sampleAssetID <= 32767u)
-            {
-                sndID = (XShortResourceID)sample->sampleAssetID;
-            }
-            if (sndID == 0)
-            {
-                return BAE_PARAM_ERR;
+                return (result != BAE_NO_ERROR) ? result : BAE_PARAM_ERR;
             }
             result = PV_ConvertDocumentSampleToBankAlias(sample, bankToken, sndID);
             if (result != BAE_NO_ERROR)
@@ -14487,19 +14485,22 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
             if (TEST_FLAG_VALUE(extInfo.flags2, ZBF_advancedInterpolation))
             {
 #if defined(_DEBUG) && (_DEBUG != 0)
-                uint32_t debugSndID = 0;
-                if (BAERmfEditorBank_GetInstrumentSampleInfo(bankToken,
-                                                             instrumentIndex,
-                                                             0,
-                                                             &firstSampleInfo) == BAE_NO_ERROR)
+                if ((reason & BAEZMF_REASON_CUBIC_INTERPOLATION) == 0)
                 {
-                    debugSndID = (uint32_t)(uint16_t)firstSampleInfo.sndResourceID;
+                    uint32_t debugSndID = 0;
+                    if (BAERmfEditorBank_GetInstrumentSampleInfo(bankToken,
+                                                                 instrumentIndex,
+                                                                 0,
+                                                                 &firstSampleInfo) == BAE_NO_ERROR)
+                    {
+                        debugSndID = (uint32_t)(uint16_t)firstSampleInfo.sndResourceID;
+                    }
+                    debug_message("[BankRequiresZsb] TRIP reason=advanced-interpolation instIndex=%u sndID=%u flags2=0x%02X\n",
+                               (unsigned)instrumentIndex,
+                               (unsigned)debugSndID,
+                               (unsigned)extInfo.flags2);
                 }
-                debug_message("[BankRequiresZsb] TRIP reason=advanced-interpolation instIndex=%u sndID=%u flags2=0x%02X\n",
-                           (unsigned)instrumentIndex,
-                           (unsigned)debugSndID,
-                           (unsigned)extInfo.flags2);
-#endif                
+#endif
                 reason |= BAEZMF_REASON_CUBIC_INTERPOLATION;
             }
         }
@@ -14529,14 +14530,17 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
                 if (loopLength >= MIN_LOOP_SIZE_ZMF && loopLength < MIN_LOOP_SIZE_RMF)
                 {
 #if defined(_DEBUG) && (_DEBUG != 0)
-                debug_message("[BankRequiresZsb] TRIP reason=short-loop-rmf-window instIndex=%u sndID=%u loopStart=%u loopEnd=%u loopLen=%u minZmf=%u minRmf=%u\n",
-                           (unsigned)instrumentIndex,
-                           (unsigned)(uint16_t)sampleInfo.sndResourceID,
-                           (unsigned)sampleInfo.loopStart,
-                           (unsigned)sampleInfo.loopEnd,
-                           (unsigned)loopLength,
-                           (unsigned)MIN_LOOP_SIZE_ZMF,
-                           (unsigned)MIN_LOOP_SIZE_RMF);
+                    if ((reason & BAEZMF_REASON_LOOP_TOO_SHORT) == 0)
+                    {
+                        debug_message("[BankRequiresZsb] TRIP reason=short-loop-rmf-window instIndex=%u sndID=%u loopStart=%u loopEnd=%u loopLen=%u minZmf=%u minRmf=%u\n",
+                                   (unsigned)instrumentIndex,
+                                   (unsigned)(uint16_t)sampleInfo.sndResourceID,
+                                   (unsigned)sampleInfo.loopStart,
+                                   (unsigned)sampleInfo.loopEnd,
+                                   (unsigned)loopLength,
+                                   (unsigned)MIN_LOOP_SIZE_ZMF,
+                                   (unsigned)MIN_LOOP_SIZE_RMF);
+                    }
 #endif
                     reason |= BAEZMF_REASON_LOOP_TOO_SHORT;
                 }
@@ -14559,10 +14563,13 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
             false)
             {
 #if defined(_DEBUG) && (_DEBUG != 0)
-                debug_message("[BankRequiresZsb] TRIP reason=modern-codec instIndex=%u sndID=%u compressionType=0x%08X\n",
-                           (unsigned)instrumentIndex,
-                           (unsigned)(uint16_t)sampleInfo.sndResourceID,
-                           (unsigned)compressionType);
+                if ((reason & BAEZMF_REASON_MODERN_CODEC) == 0)
+                {
+                    debug_message("[BankRequiresZsb] TRIP reason=modern-codec instIndex=%u sndID=%u compressionType=0x%08X\n",
+                               (unsigned)instrumentIndex,
+                               (unsigned)(uint16_t)sampleInfo.sndResourceID,
+                               (unsigned)compressionType);
+                }
 #endif
                 reason |= BAEZMF_REASON_MODERN_CODEC;
             }
@@ -16351,6 +16358,10 @@ static BAEResult PV_BankReplaceResource(XFILE bankFile,
     return BAE_NO_ERROR;
 }
 
+/* outName is a Pascal string (same form XGetFileResource / XAddFileResource use).
+   Do not fill it via XGetFileResourceName — that returns a C string, and writing
+   it back through XAddFileResource treats the first character as a length byte
+   (each save drops another leading character). */
 static BAEResult PV_BankFindSndResource(XFILE bankFile,
                                         XShortResourceID sndID,
                                         XResourceType *outType,
@@ -16377,16 +16388,19 @@ static BAEResult PV_BankFindSndResource(XFILE bankFile,
     {
         XPTR data;
         int32_t size;
+        char pascalName[256];
 
-        data = XGetFileResource(bankFile, sndTypes[typeIdx], (XLongResourceID)sndID, NULL, &size);
+        pascalName[0] = 0;
+        data = XGetFileResource(bankFile,
+                                sndTypes[typeIdx],
+                                (XLongResourceID)sndID,
+                                pascalName,
+                                &size);
         if (data)
         {
             if (outName)
             {
-                (void)XGetFileResourceName(bankFile,
-                                           sndTypes[typeIdx],
-                                           (XLongResourceID)sndID,
-                                           outName);
+                XBlockMove(pascalName, outName, (int32_t)((unsigned char)pascalName[0]) + 1);
             }
             *outType = sndTypes[typeIdx];
             *outData = data;
@@ -16835,7 +16849,8 @@ BAEResult BAERmfEditorBank_RenameSampleResource(BAEBankToken bankToken,
     char pascalName[256];
     BAEResult r;
 
-    if (!bankToken || !displayName || !displayName[0] || sndID == 0)
+    /* sndID 0 is a valid resource id on some legacy banks — do not reject it. */
+    if (!bankToken || !displayName || !displayName[0])
     {
         return BAE_PARAM_ERR;
     }
@@ -17116,15 +17131,9 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
         splitPtr[0] = info->lowKey;
         splitPtr[1] = info->highKey;
         XPutShort(splitPtr + 6, (uint16_t)info->splitVolume);
-        if (info->sndResourceID != 0)
-        {
-            XPutShort(splitPtr + 2, (uint16_t)info->sndResourceID);
-            sndID = info->sndResourceID;
-        }
-        else
-        {
-            sndID = (XShortResourceID)XGetShort(splitPtr + 2);
-        }
+        /* sndResourceID 0 is a valid SND id — always write the caller's value. */
+        XPutShort(splitPtr + 2, (uint16_t)info->sndResourceID);
+        sndID = info->sndResourceID;
 
         /* Root key storage depends on ZBF_useSoundModifierAsRootKey.
          * When set, each split stores its own root in miscParameter1.
@@ -17158,15 +17167,9 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
         {
             XPutShort((unsigned char *)instData + 8, (uint16_t)info->rootKey);
         }
-        if (info->sndResourceID != 0)
-        {
-            XPutShort((unsigned char *)instData + 0, (uint16_t)info->sndResourceID);
-            sndID = info->sndResourceID;
-        }
-        else
-        {
-            sndID = (XShortResourceID)XGetShort((unsigned char *)instData + 0);
-        }
+        /* sndResourceID 0 is a valid SND id — always write the caller's value. */
+        XPutShort((unsigned char *)instData + 0, (uint16_t)info->sndResourceID);
+        sndID = info->sndResourceID;
     }
 
     /* Check early if this is a metadata-only edit (splitVolume/rootKey only, no SND changes) */
@@ -18648,7 +18651,7 @@ static uint32_t PV_BankCountSndReferences(XFILE bankFile, XShortResourceID sndID
     int32_t instCount;
     int32_t instIndex;
 
-    if (!bankFile || sndID == 0)
+    if (!bankFile)
     {
         return 0;
     }
@@ -18972,7 +18975,8 @@ BAEResult BAERmfEditorBank_DeleteInstrumentSample(BAEBankToken bankToken,
         }
     }
 
-    if (deleteSndIfUnreferenced && removedSndID != 0)
+    /* removedSndID 0 is a valid SND id — probe by resource existence, not != 0. */
+    if (deleteSndIfUnreferenced)
     {
         if (PV_BankCountSndReferences(bankFile, removedSndID) == 0)
         {
@@ -19439,7 +19443,7 @@ BAEResult BAERmfEditorBank_GetSndWaveformData(BAEBankToken bankToken,
     *outBitSize = 0;
     *outChannels = 0;
     *outSampleRate = 0;
-    if (!bankToken || sndResourceID == 0 || sndResourceID > 32767u)
+    if (!bankToken || sndResourceID > 32767u)
     {
         return BAE_PARAM_ERR;
     }
@@ -20020,82 +20024,19 @@ static void PV_RemapPitchedNoteReferences(BAERmfEditorDocument *document,
         for (noteIndex = 0; noteIndex < track->noteCount; ++noteIndex)
         {
             BAERmfEditorNote *note = &track->notes[noteIndex];
-            if (note->channel != 9 && note->bank == sourceBank && note->program == sourceProgram)
+            /* Classic GM drums (ch10, bank 0) use note→INST; melodic ch10
+               (CloneUsed bank-2 embeds) follows bank+program like pitched. */
+            if (note->channel == 9 && note->bank == 0)
+            {
+                continue;
+            }
+            if (note->bank == sourceBank && note->program == sourceProgram)
             {
                 note->bank = targetBank;
                 note->program = targetProgram;
             }
         }
     }
-}
-
-static BAEResult PV_EnableMelodicPercussionChannel(BAERmfEditorDocument *document)
-{
-    static const unsigned char kNrpnSetup[][2] = {
-        {99, 5}, {98, 0}, {6, 3}, {38, 0}, {99, 127}, {98, 127}
-    };
-    uint32_t trackIndex;
-
-    for (trackIndex = 0; trackIndex < document->trackCount; ++trackIndex)
-    {
-        BAERmfEditorTrack *track = &document->tracks[trackIndex];
-        uint32_t noteIndex;
-        uint32_t eventIndex;
-        uint32_t setupIndex;
-        bool hasPercussionNotes = FALSE;
-
-        for (noteIndex = 0; noteIndex < track->noteCount; ++noteIndex)
-        {
-            if (track->notes[noteIndex].channel == 9)
-            {
-                hasPercussionNotes = TRUE;
-                break;
-            }
-        }
-        if (!hasPercussionNotes)
-        {
-            continue;
-        }
-
-        for (noteIndex = 0; noteIndex < track->noteCount; ++noteIndex)
-        {
-            track->notes[noteIndex].noteOnOrder += 6;
-            track->notes[noteIndex].noteOffOrder += 6;
-        }
-        for (eventIndex = 0; eventIndex < track->ccEventCount; ++eventIndex)
-        {
-            track->ccEvents[eventIndex].eventOrder += 6;
-        }
-        for (eventIndex = 0; eventIndex < track->sysexEventCount; ++eventIndex)
-        {
-            track->sysexEvents[eventIndex].eventOrder += 6;
-        }
-        for (eventIndex = 0; eventIndex < track->auxEventCount; ++eventIndex)
-        {
-            track->auxEvents[eventIndex].eventOrder += 6;
-        }
-        for (eventIndex = 0; eventIndex < track->metaEventCount; ++eventIndex)
-        {
-            track->metaEvents[eventIndex].eventOrder += 6;
-        }
-        track->nextEventOrder += 6;
-
-        for (setupIndex = 0; setupIndex < sizeof(kNrpnSetup) / sizeof(kNrpnSetup[0]); ++setupIndex)
-        {
-            BAEResult result = PV_AddAuxEventToTrack(track,
-                                                      0,
-                                                      (unsigned char)(CONTROL_CHANGE | 9),
-                                                      kNrpnSetup[setupIndex][0],
-                                                      kNrpnSetup[setupIndex][1],
-                                                      2);
-            if (result != BAE_NO_ERROR)
-            {
-                return result;
-            }
-            track->auxEvents[track->auxEventCount - 1].eventOrder = setupIndex;
-        }
-    }
-    return BAE_NO_ERROR;
 }
 
 static uint16_t PV_BankGroupFromInternalBank(uint16_t internalBank)
@@ -20361,7 +20302,10 @@ static BAEResult PV_PrepareUsedInstrumentsFromBank(
             {
                 continue;
             }
-            if (noteInfo.channel == 9)
+            /* CH10 + bank 0 = classic GM drums (note selects INST 128+n).
+               CH10 + bank != 0 = melodic percussion from a prior CloneUsed
+               (bank+program → INST 512+p); treat as pitched or Resolve fails. */
+            if (noteInfo.channel == 9 && noteInfo.bank == 0)
             {
                 if (!PV_AddUsedPercussion(usedPercussion,
                                           &usedPercussionCount,
@@ -20614,17 +20558,6 @@ static BAEResult PV_PrepareUsedInstrumentsFromBank(
     if (outResult)
     {
         outResult->percussionCount = clonedPercussionCount;
-    }
-    /* Percussion hits were remapped onto melodic bank-2 INST 512+program.
-       Channel 10 must leave GM drum mode (note→INST) or playback looks up
-       missing 128+note resources. Beatnik NRPN (5,0)=3 selects USE_NORM_BANK. */
-    if (clonedPercussionCount > 0)
-    {
-        result = PV_EnableMelodicPercussionChannel(document);
-        if (result != BAE_NO_ERROR)
-        {
-            return result;
-        }
     }
     PV_SynchronizeTrackInstrumentDefaults(document);
     return PV_VerifyEmbeddedOnlyInstrumentReferences(document, kClonedInstrumentBank);

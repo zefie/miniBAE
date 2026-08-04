@@ -53,13 +53,16 @@ enum class SampleSource
     Song = 1,
 };
 
+/* SampleRow / editor state: 0xFFFF means "no SND id". Resource id 0 is valid. */
+static constexpr uint32_t kNoSndResourceId = 0xFFFFu;
+
 struct SampleRow
 {
     uint32_t index = 0;
     uint32_t instrument_index = 0;
     uint32_t split_index = 0;
     uint32_t document_sample_index = 0;
-    uint32_t snd_resource_id = 0;
+    uint32_t snd_resource_id = kNoSndResourceId;
     uint32_t sample_rate_hz = 44100;
     uint32_t frame_count = 0;
     uint32_t loop_start = 0;
@@ -2183,7 +2186,7 @@ private:
 
     bool LookupDocumentSampleDisplayNameForSnd(uint32_t snd_id, std::string *out_name) const
     {
-        if (!m_document || !out_name || snd_id == 0)
+        if (!m_document || !out_name || snd_id == kNoSndResourceId)
         {
             return false;
         }
@@ -4947,7 +4950,7 @@ private:
     bool m_sample_editor_dirty = false;
     bool m_sample_editor_loop_enabled = false;
     int m_sample_editor_root_key = 60;
-    uint32_t m_sample_editor_snd_resource_id = 0;
+    uint32_t m_sample_editor_snd_resource_id = kNoSndResourceId;
     std::string m_sample_editor_usage_text;
     int m_sample_editor_rate_preset = 1;
     uint32_t m_sample_editor_view_start = 0;
@@ -5004,7 +5007,7 @@ private:
     bool m_bank_add_percussion = false;
     int m_bank_add_program = 0;
     int m_bank_add_root_key = 60;
-    uint32_t m_bank_add_snd_id = 0;
+    uint32_t m_bank_add_snd_id = kNoSndResourceId;
     int m_bank_add_alias_source_index = -1;
     char m_bank_add_name[256] = {0};
 
@@ -5033,6 +5036,9 @@ private:
     std::map<uint32_t, std::vector<unsigned char>> m_app_compression_cache;
     /* RMF/ZMF export dialog: instruments selected for embedding / ghost. */
     bool m_export_rmf_open = false;
+    bool m_export_rmf_prepare_pending = false;
+    bool m_export_rmf_needs_zmf = false;
+    uint32_t m_export_rmf_z_reason = 0;
     std::vector<ExportInstrumentItem> m_export_items;
     std::set<uint32_t> m_export_embed_inst_ids;
     std::set<uint32_t> m_export_ghost_inst_ids;
@@ -5099,6 +5105,8 @@ private:
 
     /* Export Bank dialog options. */
     bool m_export_bank_open = false;
+    bool m_export_bank_needs_zsb = false;
+    uint32_t m_export_bank_zsb_reason = 0;
     bool m_export_bank_encrypt = true;
     bool m_export_bank_include_groovoids = true;
     bool m_export_bank_drop_unref = false;
@@ -5125,7 +5133,7 @@ private:
     bool m_oneshot_export_pending = false;
     uint32_t m_oneshot_bank_instrument_index = 0; /* instrument export / assigned sample */
     uint32_t m_oneshot_sample_split_index = 0;
-    uint32_t m_oneshot_snd_id = 0;
+    uint32_t m_oneshot_snd_id = kNoSndResourceId;
     bool m_oneshot_sample_unassigned = false;
     bool m_oneshot_percussion = false;
     bool m_oneshot_from_sample = false; /* sample length note; else fixed 1s/2s */

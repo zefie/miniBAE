@@ -899,7 +899,7 @@
                                                                &sample_rate);
             }
             if ((wave_r != BAE_NO_ERROR || !wave_data || frame_count == 0) &&
-                sample.snd_resource_id != 0)
+                sample.snd_resource_id != kNoSndResourceId)
             {
                 if (wave_data)
                 {
@@ -989,7 +989,7 @@
 
     bool RestoreUncompressedMasterIntoEditor()
     {
-        if (m_sample_editor_is_song_sample || m_sample_editor_snd_resource_id == 0)
+        if (m_sample_editor_is_song_sample || m_sample_editor_snd_resource_id == kNoSndResourceId)
         {
             SetStatus("No session uncompressed master for this sample");
             return false;
@@ -1275,8 +1275,9 @@
             }
         }
 
-        /* Persist SND resource name (list + BE2-style display). */
-        if (m_sample_editor_snd_resource_id > 0 && m_sample_editor_snd_resource_id <= 32767u &&
+        /* Persist SND resource name (list + BE2-style display).
+         * sndID 0 is a valid resource id — do not treat it as "unset". */
+        if (m_sample_editor_snd_resource_id <= 32767u &&
             !m_sample_editor_sample_name.empty())
         {
             const BAEResult rename_r = BAERmfEditorBank_RenameSampleResource(
@@ -1310,7 +1311,7 @@
                 break;
             }
         }
-        if (m_sample_editor_sample_row < 0 && keep_snd != 0)
+        if (m_sample_editor_sample_row < 0 && keep_snd != kNoSndResourceId)
         {
             for (size_t i = 0; i < m_samples.size(); ++i)
             {
@@ -1358,7 +1359,7 @@
 
     uint32_t QueryBankSampleResourceBytes(const SampleRow &sample) const
     {
-        if (!m_bank_token || sample.snd_resource_id == 0)
+        if (!m_bank_token || sample.snd_resource_id == kNoSndResourceId)
         {
             return 0;
         }
@@ -1388,14 +1389,14 @@
         m_sample_editor_snd_snapshot_valid = false;
         m_sample_editor_snd_snapshot_data.clear();
         m_sample_editor_snd_snapshot_name.clear();
-        m_sample_editor_snd_snapshot_id = 0;
+        m_sample_editor_snd_snapshot_id = static_cast<XLongResourceID>(kNoSndResourceId);
         m_sample_editor_snd_snapshot_type = ID_ESND;
     }
 
     bool CaptureSampleEditorSndSnapshot(uint32_t snd_resource_id)
     {
         ClearSampleEditorSndSnapshot();
-        if (!m_bank_token || snd_resource_id == 0)
+        if (!m_bank_token || snd_resource_id == kNoSndResourceId)
         {
             return false;
         }
@@ -1722,7 +1723,8 @@
 
         const SampleRow sample = m_samples[static_cast<size_t>(m_sample_editor_sample_row)];
         const uint32_t snapshot_snd_id =
-            m_sample_editor_snd_resource_id != 0 ? m_sample_editor_snd_resource_id : sample.snd_resource_id;
+            m_sample_editor_snd_resource_id != kNoSndResourceId ? m_sample_editor_snd_resource_id
+                                                               : sample.snd_resource_id;
 
         const bool use_opus_roundtrip = IsOpusCompressionType(target);
         const BAE_UNSIGNED_FIXED master_rate =
@@ -2770,7 +2772,7 @@
         m_sample_editor_preview_needs_reencode = m_sample_editor_comp_preview_needs_on_open;
         m_sample_editor_audition_pcm.clear();
         m_sample_editor_audition_frame_count = 0;
-        if (m_sample_editor_snd_resource_id != 0)
+        if (m_sample_editor_snd_resource_id != kNoSndResourceId)
         {
             m_app_compression_cache.erase(m_sample_editor_snd_resource_id);
         }

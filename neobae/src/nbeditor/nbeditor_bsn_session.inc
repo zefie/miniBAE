@@ -560,7 +560,7 @@ static XResourceType SessionCasdType()
 
 bool HydrateSessionPcmEntryFromCasd(uint32_t snd_id)
 {
-    if (!m_bank_token || snd_id == 0)
+    if (!m_bank_token || snd_id == kNoSndResourceId)
     {
         return false;
     }
@@ -651,21 +651,19 @@ void HydrateSessionPcmCacheFromBankCasd()
         char name[256];
         name[0] = 0;
         XPTR data = XGetIndexedFileResource(bank, SessionCasdType(), &rid, i, name, &size);
-        if (data)
+        if (!data)
         {
-            XDisposePtr(data);
+            continue;
         }
-        if (rid > 0)
-        {
-            (void)HydrateSessionPcmEntryFromCasd(static_cast<uint32_t>(rid));
-        }
+        XDisposePtr(data);
+        (void)HydrateSessionPcmEntryFromCasd(static_cast<uint32_t>(rid));
     }
     m_session_casd_count = static_cast<int>(m_session_pcm_cache.size());
 }
 
 bool HasUncompressedMasterForSnd(uint32_t snd_id) const
 {
-    if (snd_id == 0)
+    if (snd_id == kNoSndResourceId)
     {
         return false;
     }

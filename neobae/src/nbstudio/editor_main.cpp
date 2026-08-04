@@ -9740,7 +9740,8 @@ private:
             return;
         }
 
-        if (sampleInfo.sndResourceID == 0) {
+        /* INST field 0 can mean empty OR a real SND id 0 — use sample data. */
+        if (sampleInfo.frameCount == 0 && sampleInfo.bitDepth == 0) {
             wxMessageBox("This sample slot is already empty.",
                          "Delete Sample",
                          wxOK | wxICON_INFORMATION,
@@ -9992,10 +9993,10 @@ private:
             return;
         }
 
-        /* Find first empty sample slot (sndResourceID == 0). Do not overwrite existing samples. */
+        /* Empty slots have no PCM; sndResourceID 0 alone is not enough (ID 0 is valid). */
         for (uint32_t i = 0; i < targetSampleCount; ++i) {
             if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bankToken, targetInstrumentIndex, i, &targetInfo) == BAE_NO_ERROR) {
-                if (targetInfo.sndResourceID == 0) {
+                if (targetInfo.frameCount == 0 && targetInfo.bitDepth == 0) {
                     targetSampleIndex = i;
                     foundEmptySlot = true;
                     break;
@@ -10361,10 +10362,10 @@ private:
             return;
         }
 
-        /* Find first empty sample slot (sndResourceID == 0). Do not overwrite existing samples. */
+        /* Empty slots have no PCM; sndResourceID 0 alone is not enough (ID 0 is valid). */
         for (uint32_t i = 0; i < targetSampleCount; ++i) {
             if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bankToken, targetInstrumentIndex, i, &targetInfo) == BAE_NO_ERROR) {
-                if (targetInfo.sndResourceID == 0) {
+                if (targetInfo.frameCount == 0 && targetInfo.bitDepth == 0) {
                     targetSampleIndex = i;
                     foundEmptySlot = true;
                     break;

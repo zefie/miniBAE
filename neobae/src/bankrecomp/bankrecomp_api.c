@@ -1603,7 +1603,8 @@ int main(int argc, char *argv[])
             {
                 skipReason = 3;
             }
-            else if ((int32_t)sampleInfo.sndResourceID <= 0)
+            else if ((int32_t)sampleInfo.sndResourceID < 0 ||
+                     (int32_t)sampleInfo.sndResourceID > 32767)
             {
                 skipReason = 5;
             }

@@ -237,7 +237,7 @@
             return;
         }
         m_bank_add_mode = BankAddMode::Instrument;
-        m_bank_add_snd_id = 0;
+        m_bank_add_snd_id = kNoSndResourceId;
         m_bank_add_alias_source_index = -1;
         for (size_t i = 0; i < m_instruments.size(); ++i)
         {
@@ -825,7 +825,7 @@
                                              m_bank_add_root_key,
                                              name,
                                              m_bank_add_snd_id);
-            if (ok && m_bank_add_snd_id != 0)
+            if (ok && m_bank_add_snd_id != kNoSndResourceId)
             {
                 m_session_custom_snd_ids.insert(m_bank_add_snd_id);
             }
@@ -843,7 +843,8 @@
         RefreshListsFromBank();
         EnsureInstrumentFilterShows(m_bank_add_bank, m_bank_add_percussion);
         SelectInstrumentByInstId(inst_id);
-        if (m_bank_add_mode == BankAddMode::MakeInstrument && m_bank_add_snd_id != 0)
+        if (m_bank_add_mode == BankAddMode::MakeInstrument &&
+            m_bank_add_snd_id != kNoSndResourceId)
         {
             m_sample_show_filter = SampleShowFilter::Custom;
             for (size_t i = 0; i < m_samples.size(); ++i)
@@ -1011,7 +1012,8 @@
         ImGui::Separator();
         const bool can_create =
             !used[m_bank_add_program] && m_bank_token != 0 &&
-            (m_bank_add_mode != BankAddMode::MakeInstrument || m_bank_add_snd_id != 0) &&
+            (m_bank_add_mode != BankAddMode::MakeInstrument ||
+             m_bank_add_snd_id != kNoSndResourceId) &&
             (m_bank_add_mode != BankAddMode::Alias || m_bank_add_alias_source_index >= 0);
         if (!can_create)
         {

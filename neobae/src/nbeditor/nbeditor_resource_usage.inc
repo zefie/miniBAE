@@ -376,7 +376,7 @@
                 m_resource_usage_lines.push_back(line);
             }
         }
-        else if (sample.snd_resource_id != 0)
+        else if (sample.snd_resource_id != kNoSndResourceId)
         {
             const XLongResourceID sid = static_cast<XLongResourceID>(sample.snd_resource_id);
             int32_t sz = BankResourceSize(ID_ESND, sid);

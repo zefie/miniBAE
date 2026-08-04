@@ -451,7 +451,7 @@ static void ApplyPendingSampleOverride(BAERmfEditorBankSampleInfo *sampleInfo,
 static void CacheSndMetadata(BankEditorPanel *bp,
                              BAERmfEditorBankSampleInfo const &sampleInfo)
 {
-    if (!bp || sampleInfo.sndResourceID == 0) {
+    if (!bp) {
         return;
     }
 
