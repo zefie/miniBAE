@@ -595,8 +595,7 @@ static long PV_FlushEncoderInternal(XOpusEncoder *enc, XFILE output_file, XOpusM
     if (wrote < 0) return -1;
     totalWritten += wrote;
 
-    /* Flush any remaining resampled/interpolated frames by padding the final packet. */
-    if (enc->frame_fill > 0)
+    /* Flush remaining samples (or emit a zero EOS packet if the last frame was exact). */
     {
         uint32_t remainingFrames = 960 - enc->frame_fill;
 
@@ -617,19 +616,11 @@ static long PV_FlushEncoderInternal(XOpusEncoder *enc, XFILE output_file, XOpusM
             return -1;
         }
 
+        /* Only credit real audio samples toward granule position. */
         enc->granule_pos += enc->frame_fill;
         enc->frame_fill = 0;
 
         wrote = PV_PushEncodedPacket(enc, packetBytes, output_file, mem, TRUE);
-        if (wrote < 0)
-        {
-            return -1;
-        }
-        totalWritten += wrote;
-    }
-    else
-    {
-        wrote = PV_WriteOggPages(enc, output_file, mem, TRUE);
         if (wrote < 0)
         {
             return -1;

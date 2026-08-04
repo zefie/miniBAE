@@ -2807,7 +2807,7 @@ int main(int argc, char *argv[])
             // expRect defined in settings dialog: position dropdown beneath it
             // Compute using same dialog math as the settings dialog so dropdown aligns with the control
             int dlgW = 560;
-            int dlgH = 316; // must match settings dialog (gui_settings.c)
+            int dlgH = 352; // must match settings dialog (gui_settings.c)
             int pad = 10;
             int controlW = 150;
             int dlgX = (WINDOW_W - dlgW) / 2;

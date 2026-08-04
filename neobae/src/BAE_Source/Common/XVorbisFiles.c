@@ -348,29 +348,26 @@ long XEncodeVorbisData(void *encoder_handle, float **pcm_data, long samples, XFI
     XVorbisEncoder *encoder = (XVorbisEncoder*)encoder_handle;
     float **buffer;
     long bytes_written = 0;
-    int eos = 0;
+    int end_of_stream = 0;
     
     if (encoder == NULL || !encoder->is_initialized) {
         return -1;
     }
     
-    // Get analysis buffer
-    buffer = vorbis_analysis_buffer(&encoder->vd, samples);
-    
-    // Copy PCM data to analysis buffer
+    // Copy PCM data to analysis buffer, or signal EOS
     if (pcm_data != NULL && samples > 0) {
+        buffer = vorbis_analysis_buffer(&encoder->vd, samples);
         int channels = encoder->vi.channels;
         for (int ch = 0; ch < channels; ch++) {
             for (long i = 0; i < samples; i++) {
                 buffer[ch][i] = pcm_data[ch][i];
             }
         }
-        
         vorbis_analysis_wrote(&encoder->vd, samples);
     } else {
         // Signal end of stream
         vorbis_analysis_wrote(&encoder->vd, 0);
-        eos = 1;
+        end_of_stream = 1;
     }
     
     // Process blocks
@@ -381,8 +378,10 @@ long XEncodeVorbisData(void *encoder_handle, float **pcm_data, long samples, XFI
         while (vorbis_bitrate_flushpacket(&encoder->vd, &encoder->op)) {
             ogg_stream_packetin(&encoder->os, &encoder->op);
             
-            while (!eos) {
-                int result = ogg_stream_pageout(&encoder->os, &encoder->og);
+            while (1) {
+                int result = end_of_stream
+                    ? ogg_stream_flush(&encoder->os, &encoder->og)
+                    : ogg_stream_pageout(&encoder->os, &encoder->og);
                 if (result == 0) break;
                 
                 if (output_file) {
@@ -390,8 +389,22 @@ long XEncodeVorbisData(void *encoder_handle, float **pcm_data, long samples, XFI
                     bytes_written += XFileWrite(output_file, encoder->og.body, encoder->og.body_len);
                 }
                 
-                if (ogg_page_eos(&encoder->og)) eos = 1;
+                if (ogg_page_eos(&encoder->og)) {
+                    return bytes_written;
+                }
             }
+        }
+    }
+
+    /* After EOS analysis, flush any remaining page fragments. */
+    if (end_of_stream) {
+        while (ogg_stream_flush(&encoder->os, &encoder->og) != 0) {
+            if (output_file) {
+                bytes_written += XFileWrite(output_file, encoder->og.header, encoder->og.header_len);
+                bytes_written += XFileWrite(output_file, encoder->og.body, encoder->og.body_len);
+            }
+            if (ogg_page_eos(&encoder->og))
+                break;
         }
     }
     

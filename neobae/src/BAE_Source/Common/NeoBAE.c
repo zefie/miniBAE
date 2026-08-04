@@ -5834,8 +5834,6 @@ BAEResult BAEMixer_GetModifiers(BAEMixer mixer, BAEAudioModifiers *outMods)
 {
     BAEAudioModifiers theMods;
     OPErr err;
-    bool generate16output;
-    bool generateStereoOutput;
 
     err = NO_ERR;
     if (mixer)
@@ -5844,12 +5842,13 @@ BAEResult BAEMixer_GetModifiers(BAEMixer mixer, BAEAudioModifiers *outMods)
         {
             if (mixer->pMixer)
             {
+                /* Read mixer fields directly — do not use GM_Generate* helpers here.
+                 * Those depend on TLS MusicGlobals, which is unbound on zefidi's
+                 * export thread and left channel/bit-depth flags uninitialized. */
                 theMods = 0;
-                err = GM_Generate16bitOutP(&generate16output);
-                err = GM_GenerateStereoOutP(&generateStereoOutput);
-                if (generate16output)
+                if (mixer->pMixer->generate16output)
                     theMods |= BAE_USE_16;
-                if (generateStereoOutput)
+                if (mixer->pMixer->generateStereoOutput)
                     theMods |= BAE_USE_STEREO;
                 *outMods = theMods;
             }
@@ -5916,7 +5915,6 @@ BAEResult BAEMixer_GetTerpMode(BAEMixer mixer, BAETerpMode *outTerpMode)
 BAEResult BAEMixer_GetRate(BAEMixer mixer, BAERate *outRate)
 {
     OPErr err;
-    Rate q;
 
     err = NO_ERR;
     if (mixer)
@@ -5925,11 +5923,8 @@ BAEResult BAEMixer_GetRate(BAEMixer mixer, BAERate *outRate)
         {
             if (mixer->pMixer)
             {
-                err = GM_GetRate(&q);
-                if (!err)
-                {
-                    *outRate = (BAERate)q;
-                }
+                /* Direct field read — GM_GetRate() needs TLS MusicGlobals. */
+                *outRate = (BAERate)mixer->pMixer->outputRate;
             }
             else
             {
@@ -6452,7 +6447,10 @@ void BAEMixer_StopOutputToFile(void)
             debug_message("audio: BAEMixer_StopOutputToFile freeing vorbis encoder=%p\n", mWritingEncoder);
             if (mWritingEncoder)
             {
+                extern long XEncodeVorbisData(void *encoder_handle, float **pcm_data, long samples, XFILE output_file);
                 extern void XCloseVorbisEncoder(void *encoder_handle);
+                /* Signal EOS and flush remaining Ogg pages before teardown. */
+                (void)XEncodeVorbisData(mWritingEncoder, NULL, 0, (XFILE)mWritingToFileReference);
                 XCloseVorbisEncoder(mWritingEncoder);
                 mWritingEncoder = NULL;
             }
@@ -6573,10 +6571,14 @@ BAEResult BAEMixer_ServiceAudioOutputToFile(BAEMixer theMixer)
 #if USE_CREATION_API == TRUE
     int32_t sampleSize, channels;
     OPErr theErr;
+    GM_Mixer *savedMixer = NULL;
 
 #ifndef HMP3_ENC_LOG
 #define HMP3_ENC_LOG 0
 #endif
+
+    // Bind TLS mixer for this thread (zefidi export runs off the GUI thread).
+    savedMixer = PV_BindBAEMixer(theMixer);
 
     // begin block added for NeoBAE
     BAEAudioModifiers theModifiers;
@@ -6628,6 +6630,7 @@ BAEResult BAEMixer_ServiceAudioOutputToFile(BAEMixer theMixer)
                         XFileClose((XFILE)mWritingToFileReference);
                         mWritingToFileReference = NULL;
                         mWritingToFile = FALSE;
+                        GM_SetCurrentMixer(savedMixer);
                         return BAE_GENERAL_ERR;
                     }
                     else
@@ -6729,28 +6732,33 @@ BAEResult BAEMixer_ServiceAudioOutputToFile(BAEMixer theMixer)
                     extern long XEncodeVorbisData(void *encoder_handle, float **pcm_data, long samples, XFILE output_file);
                     int ch = channels;
                     float *chanBufs[2] = {0};
-                    // Allocate channel buffers on stack for typical stereo/mono
-                    for (int c = 0; c < ch; c++)
+                    bool allocOk = (mWritingEncoder != NULL);
+
+                    for (int c = 0; c < ch && allocOk; c++)
                     {
                         chanBufs[c] = (float *)XNewPtr(sizeof(float) * framesToProcess);
+                        if (!chanBufs[c])
+                            allocOk = false;
                     }
 
-                    // deinterleave and convert
-                    int16_t *pcm = (int16_t *)mWritingDataBlock;
-                    for (uint32_t i = 0; i < framesToProcess; i++)
+                    long written = -1;
+                    if (allocOk)
                     {
-                        for (int c = 0; c < ch; c++)
+                        // deinterleave and convert
+                        int16_t *pcm = (int16_t *)mWritingDataBlock;
+                        for (uint32_t i = 0; i < framesToProcess; i++)
                         {
-                            int16_t s = *pcm++;
-                            chanBufs[c][i] = ((float)s) / 32768.0f;
+                            for (int c = 0; c < ch; c++)
+                            {
+                                int16_t s = *pcm++;
+                                chanBufs[c][i] = ((float)s) / 32768.0f;
+                            }
                         }
+
+                        written = XEncodeVorbisData(mWritingEncoder, chanBufs, (long)framesToProcess,
+                                                    (XFILE)mWritingToFileReference);
                     }
 
-                    // Call encoder; passing NULL output file if no file ref
-                    XFILE out = (XFILE)mWritingToFileReference;
-                    long written = XEncodeVorbisData(mWritingEncoder, chanBufs, (long)framesToProcess, out);
-
-                    // free channel buffers
                     for (int c = 0; c < ch; c++)
                     {
                         if (chanBufs[c])
@@ -6805,6 +6813,7 @@ BAEResult BAEMixer_ServiceAudioOutputToFile(BAEMixer theMixer)
     {
         theErr = NOT_SETUP;
     }
+    GM_SetCurrentMixer(savedMixer);
     return BAE_TranslateOPErr(theErr);
 #else
     theMixer = theMixer;

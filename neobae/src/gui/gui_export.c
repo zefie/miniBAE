@@ -486,12 +486,10 @@ bool bae_start_export(const char *output_file, int export_type, int compression)
     }
 
     g_exporting = true;
-    // Record current export file type for MPEG-specific heuristics
-    g_export_file_type = BAE_WAVE_TYPE;
-    // When called via interactive Record->WAV, prefer realtime pacing
-    g_export_realtime_mode = true;
-    // Note: this function previously only supported WAV via StartOutputToFile call above.
-    // If StartOutputToFile was called with MPEG elsewhere, g_export_file_type will be set there.
+    // Preserve caller-selected type (WAV/FLAC/MP3/Vorbis/Opus) for drain heuristics.
+    g_export_file_type = (BAEFileType)export_type;
+    // Offline file export runs at full speed; realtime pacing is for live recording paths.
+    g_export_realtime_mode = false;
 #if SUPPORT_MIDI_HW == TRUE
     // Ensure virtual keyboard is reset and any held note is released when export starts
     if (g_show_virtual_keyboard)
@@ -987,7 +985,13 @@ static void *export_thread_proc(void *param)
 #endif
 {
     BAE_PRINTF("Export thread started\n");
-    
+
+    /* Bind the song mixer on this worker thread. MusicGlobals is TLS after the
+     * multi-mixer change; without this, helpers that still read MusicGlobals
+     * (and older GetModifiers) saw an unbound mixer and mis-sized export frames. */
+    if (g_bae.mixer)
+        (void)BAEMixer_MakeCurrent(g_bae.mixer);
+
     // Apply channel mutes at the start of export to ensure they're respected
     bool ch_enable[16];
     for (int i = 0; i < 16; i++) {
