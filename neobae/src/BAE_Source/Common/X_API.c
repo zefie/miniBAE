@@ -5499,9 +5499,11 @@ XFILERESOURCECACHE * XCreateAccessCache(XFILE fileRef)
         err = XFileRead(fileRef, &headerNext, (int32_t)sizeof(int32_t)); // next pointer
         if (err != 0) { XDisposePtr(newCache); return NULL; }
         headerNext = (int32_t)XGetLong(&headerNext);
-        if (headerNext == -1L)
+        /* -1 is the normal end-of-list marker on the final resource. */
+        if (headerNext == -1L && count != total - 1)
         {
-            // corrupt entry list – bail
+            debug_message("[XCreateAccessCache] FAIL: unexpected next=-1 at resource %d of %d\n",
+                          (int)count + 1, (int)total);
             XDisposePtr(newCache);
             return NULL;
         }

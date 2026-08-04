@@ -12210,6 +12210,30 @@ BAEResult BAESong_AllNotesOff(BAESong song, uint32_t time)
     return BAE_TranslateOPErr(err);
 }
 
+// BAESong_KillActiveNotes()
+// --------------------------------------
+// Hard-kill all active voices for this song, bypassing ADSR release,
+// without stopping the song (safe for paused preview/audition songs).
+// --------------------------------------
+BAEResult BAESong_KillActiveNotes(BAESong song)
+{
+    OPErr err;
+
+    err = NO_ERR;
+    if ((song) && (song->mID == OBJECT_ID))
+    {
+        BAE_AcquireMutex(song->mLock);
+        GM_KillSongNotes(song->pSong);
+        GM_KillSongEventsFromQueue(song->pSong);
+        BAE_ReleaseMutex(song->mLock);
+    }
+    else
+    {
+        err = NULL_OBJECT;
+    }
+    return BAE_TranslateOPErr(err);
+}
+
 // BAESong_Panic()
 // --------------------------------------
 // Hard-kill all active voices for this song, bypassing ADSR release,

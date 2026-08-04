@@ -714,6 +714,7 @@
         m_sample_editor_original_pcm.clear();
         m_sample_editor_audition_pcm.clear();
         m_sample_editor_audition_frame_count = 0;
+        m_sample_editor_has_uncompressed_master = false;
 
         void *wave_data = nullptr;
         uint32_t frame_count = 0;
@@ -871,7 +872,83 @@
         m_sample_editor_view_end = frame_count;
         SeSyncFromCache();
         m_sample_editor_pristine = CaptureSampleEditorState();
+        m_sample_editor_has_uncompressed_master =
+            (!m_sample_editor_is_song_sample &&
+             HasUncompressedMasterForSnd(m_sample_editor_snd_resource_id));
         m_sample_editor_open = true;
+    }
+
+    bool RestoreUncompressedMasterIntoEditor()
+    {
+        if (m_sample_editor_is_song_sample || m_sample_editor_snd_resource_id == 0)
+        {
+            SetStatus("No session uncompressed master for this sample");
+            return false;
+        }
+        if (!HydrateSessionPcmEntryFromCasd(m_sample_editor_snd_resource_id))
+        {
+            SetStatus("Uncompressed master not found (session PCM / CaSd)");
+            m_sample_editor_has_uncompressed_master = false;
+            return false;
+        }
+        const SessionPcmCacheEntry &entry = m_session_pcm_cache[m_sample_editor_snd_resource_id];
+        if (entry.pcm.empty() || entry.frame_count == 0)
+        {
+            SetStatus("Uncompressed master is empty");
+            return false;
+        }
+
+        m_sample_editor_original_pcm = entry.pcm;
+        m_sample_editor_original_frame_count = entry.frame_count;
+        m_sample_editor_original_bit_size = entry.bit_size ? entry.bit_size : 16;
+        m_sample_editor_original_channels = entry.channels ? entry.channels : 1;
+        m_sample_editor_original_sample_rate =
+            entry.sample_rate ? entry.sample_rate : UNSIGNED_LONG_TO_XFIXED(44100);
+        m_sample_editor_original_codec_type = BAE_EDITOR_COMPRESSION_PCM;
+        m_sample_editor_codec_type = BAE_EDITOR_COMPRESSION_PCM;
+
+        m_sample_editor_cached_pcm = m_sample_editor_original_pcm;
+        m_sample_editor_cached_frame_count = m_sample_editor_original_frame_count;
+        m_sample_editor_cached_bit_size = m_sample_editor_original_bit_size;
+        m_sample_editor_cached_channels = m_sample_editor_original_channels;
+        m_sample_editor_cached_sample_rate = m_sample_editor_original_sample_rate;
+        m_sample_editor_frame_count = m_sample_editor_original_frame_count;
+        m_sample_editor_bit_depth = m_sample_editor_original_bit_size;
+        m_sample_editor_channels = m_sample_editor_original_channels;
+        m_sample_editor_sample_rate_hz =
+            m_sample_editor_original_sample_rate
+                ? static_cast<uint32_t>(m_sample_editor_original_sample_rate >> 16)
+                : 44100u;
+        if (entry.loop_end > entry.loop_start)
+        {
+            m_sample_editor_loop_start = entry.loop_start;
+            m_sample_editor_loop_end = entry.loop_end;
+            m_sample_editor_loop_enabled = true;
+        }
+        if (entry.base_key > 0)
+        {
+            m_sample_editor_root_key = entry.base_key;
+        }
+
+        size_t option_count = 0;
+        const SampleCodecOption *options = GetSampleCodecOptions(&option_count);
+        m_sample_editor_codec_index = 0;
+        for (size_t i = 0; i < option_count; ++i)
+        {
+            if (options[i].type == BAE_EDITOR_COMPRESSION_PCM)
+            {
+                m_sample_editor_codec_index = static_cast<int>(i);
+                break;
+            }
+        }
+
+        m_sample_editor_view_start = 0;
+        m_sample_editor_view_end = m_sample_editor_frame_count;
+        SeSyncFromCache();
+        m_sample_editor_dirty = true;
+        m_sample_editor_has_uncompressed_master = true;
+        SetStatus("Loaded uncompressed master — Apply to write PCM into the bank sample");
+        return true;
     }
 
     /* ---------------- Apply ---------------- */
@@ -1122,6 +1199,13 @@
                 }
             }
         }
+        RememberSessionPcmFromSampleEditor();
+        m_sample_editor_has_uncompressed_master =
+            HasUncompressedMasterForSnd(m_sample_editor_snd_resource_id);
+        if (sample.bank >= 0 && sample.bank < 2)
+        {
+            m_bank01_touched = true;
+        }
         SetStatus(closing ? "Sample saved to bank (editor closed)"
                           : (restore_master
                                  ? "Restored in-memory master (uncompressed)"
@@ -1176,6 +1260,104 @@
             }
         }
         return 0;
+    }
+
+    void ClearSampleEditorSndSnapshot()
+    {
+        m_sample_editor_snd_snapshot_valid = false;
+        m_sample_editor_snd_snapshot_data.clear();
+        m_sample_editor_snd_snapshot_name.clear();
+        m_sample_editor_snd_snapshot_id = 0;
+        m_sample_editor_snd_snapshot_type = ID_ESND;
+    }
+
+    bool CaptureSampleEditorSndSnapshot(uint32_t snd_resource_id)
+    {
+        ClearSampleEditorSndSnapshot();
+        if (!m_bank_token || snd_resource_id == 0)
+        {
+            return false;
+        }
+        static const XResourceType snd_types[] = {ID_ESND, ID_CSND, ID_SND};
+        XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
+        for (XResourceType type : snd_types)
+        {
+            int32_t size = 0;
+            char pascal_name[256];
+            std::memset(pascal_name, 0, sizeof(pascal_name));
+            XPTR data = XGetFileResource(bank,
+                                         type,
+                                         static_cast<XLongResourceID>(snd_resource_id),
+                                         pascal_name,
+                                         &size);
+            if (!data || size <= 0)
+            {
+                if (data)
+                {
+                    XDisposePtr(data);
+                }
+                continue;
+            }
+            m_sample_editor_snd_snapshot_data.resize(static_cast<size_t>(size));
+            std::memcpy(m_sample_editor_snd_snapshot_data.data(), data, static_cast<size_t>(size));
+            XDisposePtr(data);
+            m_sample_editor_snd_snapshot_type = type;
+            m_sample_editor_snd_snapshot_id = static_cast<XLongResourceID>(snd_resource_id);
+            if (pascal_name[0] > 0)
+            {
+                const unsigned char n = static_cast<unsigned char>(pascal_name[0]);
+                m_sample_editor_snd_snapshot_name.assign(pascal_name + 1, pascal_name + 1 + n);
+            }
+            else
+            {
+                char c_name[256] = {0};
+                if (XGetFileResourceName(bank,
+                                         type,
+                                         static_cast<XLongResourceID>(snd_resource_id),
+                                         c_name))
+                {
+                    m_sample_editor_snd_snapshot_name = c_name;
+                }
+            }
+            m_sample_editor_snd_snapshot_valid = true;
+            return true;
+        }
+        return false;
+    }
+
+    bool RestoreSampleEditorSndSnapshot()
+    {
+        if (!m_sample_editor_snd_snapshot_valid || !m_bank_token ||
+            m_sample_editor_snd_snapshot_data.empty())
+        {
+            return false;
+        }
+        XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
+        static const XResourceType snd_types[] = {ID_ESND, ID_CSND, ID_SND};
+        for (XResourceType type : snd_types)
+        {
+            (void)XDeleteFileResource(bank, type, m_sample_editor_snd_snapshot_id, false);
+        }
+        char pascal_name[256];
+        pascal_name[0] = 0;
+        if (!m_sample_editor_snd_snapshot_name.empty())
+        {
+            const size_t n = std::min<size_t>(m_sample_editor_snd_snapshot_name.size(), 255);
+            pascal_name[0] = static_cast<char>(n);
+            std::memcpy(pascal_name + 1, m_sample_editor_snd_snapshot_name.data(), n);
+        }
+        const int32_t added = XAddFileResource(bank,
+                                               m_sample_editor_snd_snapshot_type,
+                                               m_sample_editor_snd_snapshot_id,
+                                               pascal_name[0] ? pascal_name : nullptr,
+                                               m_sample_editor_snd_snapshot_data.data(),
+                                               static_cast<int32_t>(m_sample_editor_snd_snapshot_data.size()));
+        if (added != 0)
+        {
+            SetStatus("Failed to restore sample after compression preview");
+            return false;
+        }
+        return true;
     }
 
     bool ReloadSampleEditorPcmFromBank(const SampleRow &sample)
@@ -1386,6 +1568,14 @@
         }
 
         const SampleRow sample = m_samples[static_cast<size_t>(m_sample_editor_sample_row)];
+        const uint32_t snapshot_snd_id =
+            m_sample_editor_snd_resource_id != 0 ? m_sample_editor_snd_resource_id : sample.snd_resource_id;
+        if (!CaptureSampleEditorSndSnapshot(snapshot_snd_id))
+        {
+            SetStatus("Compression preview: failed to snapshot original SND");
+            return false;
+        }
+
         const bool use_opus_roundtrip = IsOpusCompressionType(target);
         const BAE_UNSIGNED_FIXED master_rate =
             m_sample_editor_original_sample_rate
@@ -1407,6 +1597,8 @@
             master_rate);
         if (enc != BAE_NO_ERROR)
         {
+            (void)RestoreSampleEditorSndSnapshot();
+            ClearSampleEditorSndSnapshot();
             SetStatus(std::string("Compression preview encode failed: ") + FormatBAEError(enc));
             return false;
         }
@@ -1416,6 +1608,7 @@
         uint16_t bit_size = 0;
         uint16_t channels = 0;
         BAE_UNSIGNED_FIXED sample_rate = 0;
+        uint32_t preview_bytes = 0;
         if (BAERmfEditorBank_GetSampleWaveformData(m_bank_token,
                                                    sample.instrument_index,
                                                    sample.split_index,
@@ -1430,8 +1623,24 @@
             {
                 BAERmfEditorBank_FreeWaveformData(wave_data);
             }
+            (void)RestoreSampleEditorSndSnapshot();
+            ClearSampleEditorSndSnapshot();
             SetStatus("Compression preview decode failed");
             return false;
+        }
+
+        {
+            BAERmfEditorBankSampleInfo info;
+            std::memset(&info, 0, sizeof(info));
+            if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
+                                                         sample.instrument_index,
+                                                         sample.split_index,
+                                                         &info) == BAE_NO_ERROR)
+            {
+                SampleRow refreshed = sample;
+                refreshed.snd_resource_id = static_cast<uint32_t>(info.sndResourceID);
+                preview_bytes = QueryBankSampleResourceBytes(refreshed);
+            }
         }
 
         const uint32_t bytes_per_sample = static_cast<uint32_t>((bit_size / 8u) * channels);
@@ -1443,22 +1652,26 @@
         m_sample_editor_audition_bit_size = bit_size;
         m_sample_editor_audition_channels = channels;
         m_sample_editor_audition_sample_rate = sample_rate;
+        m_sample_editor_compressed_bytes = preview_bytes;
 
-        BAERmfEditorBankSampleInfo info;
-        std::memset(&info, 0, sizeof(info));
-        if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
-                                                     sample.instrument_index,
-                                                     sample.split_index,
-                                                     &info) == BAE_NO_ERROR)
+        /* Always restore the bank SND so Cancel/close cannot leave preview codecs
+         * (or shared-SND tag bleed) in the sample list. */
+        if (!RestoreSampleEditorSndSnapshot())
         {
-            m_sample_editor_snd_resource_id = static_cast<uint32_t>(info.sndResourceID);
-            SampleRow refreshed = sample;
-            refreshed.snd_resource_id = m_sample_editor_snd_resource_id;
-            m_sample_editor_compressed_bytes = QueryBankSampleResourceBytes(refreshed);
-            m_sample_editor_codec_type = BankCompressionFromCodec(info.compressionType, info.compressionSubType);
+            ClearSampleEditorSndSnapshot();
+            SetStatus("Compression preview captured, but restoring original SND failed");
+            return false;
+        }
+        ClearSampleEditorSndSnapshot();
+
+        /* App-side compression preview cache (decoded audition only; not a bank commit). */
+        if (snapshot_snd_id != 0)
+        {
+            m_app_compression_cache[snapshot_snd_id] = m_sample_editor_audition_pcm;
         }
 
-        /* Keep editor waveform on master — only audition buffer holds the decode. */
+        /* Keep editor waveform on master — only audition buffer holds the decode.
+         * Do not mutate m_sample_editor_codec_type / sample list tags from preview. */
         SeRestoreCacheFromMaster();
         return true;
     }
@@ -1567,6 +1780,13 @@
         if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && m_sample_editor_frame_count > 0)
         {
             const uint32_t frame = SeXToFrame(mouse.x, pos, size);
+            auto begin_loop_drag = [&](SeDragMode mode) {
+                m_sample_editor_drag_mode = mode;
+                m_sample_editor_drag_anchor_frame = frame;
+                m_sample_editor_drag_start_mouse_x = mouse.x;
+                m_sample_editor_loop_start_at_drag = m_sample_editor_loop_start;
+                m_sample_editor_loop_end_at_drag = m_sample_editor_loop_end;
+            };
 
             if (mouse.y <= vol_strip_bottom)
             {
@@ -1588,28 +1808,52 @@
                     m_sample_editor_drag_mode = SeDragMode::Gain;
                 }
             }
-            else if (mouse.y >= loop_strip_top && m_sample_editor_loop_enabled)
+            else if (m_sample_editor_loop_enabled && m_sample_editor_loop_end > m_sample_editor_loop_start)
             {
+                /* Grab loop markers anywhere on the waveform (lines + bottom handles). */
                 const float loop_x0 = SeFrameToX(m_sample_editor_loop_start, pos, size);
                 const float loop_x1 = SeFrameToX(m_sample_editor_loop_end, pos, size);
                 const float loop_mid = (loop_x0 + loop_x1) * 0.5f;
                 const float d0 = std::fabs(mouse.x - loop_x0);
                 const float d1 = std::fabs(mouse.x - loop_x1);
                 const float dm = std::fabs(mouse.x - loop_mid);
-                if (dm <= 8.0f && dm < d0 && dm < d1)
+                const bool in_loop_strip = (mouse.y >= loop_strip_top);
+                const float edge_hit = in_loop_strip ? 10.0f : 6.0f;
+                const float mid_hit = in_loop_strip ? 10.0f : 5.0f;
+                if (dm <= mid_hit && dm < d0 && dm < d1 && in_loop_strip)
                 {
-                    m_sample_editor_drag_mode = SeDragMode::LoopMid;
-                    m_sample_editor_drag_anchor_frame = frame;
-                    m_sample_editor_loop_start_at_drag = m_sample_editor_loop_start;
-                    m_sample_editor_loop_end_at_drag = m_sample_editor_loop_end;
+                    begin_loop_drag(SeDragMode::LoopMid);
                 }
-                else if (d0 <= d1)
+                else if (d0 <= edge_hit && d0 <= d1)
                 {
-                    m_sample_editor_drag_mode = SeDragMode::LoopStart;
+                    begin_loop_drag(SeDragMode::LoopStart);
+                }
+                else if (d1 <= edge_hit)
+                {
+                    begin_loop_drag(SeDragMode::LoopEnd);
+                }
+                else if (in_loop_strip)
+                {
+                    if (d0 <= d1)
+                    {
+                        begin_loop_drag(SeDragMode::LoopStart);
+                    }
+                    else
+                    {
+                        begin_loop_drag(SeDragMode::LoopEnd);
+                    }
+                }
+                else if (io.KeyShift && m_sample_editor_sel_start >= 0)
+                {
+                    m_sample_editor_drag_mode = SeDragMode::Selection;
+                    m_sample_editor_drag_anchor_frame = static_cast<uint32_t>(m_sample_editor_sel_start);
                 }
                 else
                 {
-                    m_sample_editor_drag_mode = SeDragMode::LoopEnd;
+                    m_sample_editor_drag_mode = SeDragMode::Selection;
+                    m_sample_editor_drag_anchor_frame = frame;
+                    m_sample_editor_sel_start = static_cast<int>(frame);
+                    m_sample_editor_sel_end = static_cast<int>(frame);
                 }
             }
             else
@@ -1657,6 +1901,27 @@
         if (m_sample_editor_drag_mode != SeDragMode::None && ImGui::IsMouseDown(ImGuiMouseButton_Left))
         {
             const uint32_t frame = SeXToFrame(mouse.x, pos, size);
+            auto loop_drag_delta_frames = [&]() -> int64_t {
+                const uint32_t view_start = m_sample_editor_view_start;
+                const uint32_t view_end = std::max<uint32_t>(m_sample_editor_view_end, view_start + 1u);
+                const float span = static_cast<float>(view_end - view_start);
+                float scale = 1.0f;
+                if (io.KeyCtrl && io.KeyShift)
+                {
+                    scale = 0.01f; /* finest */
+                }
+                else if (io.KeyCtrl)
+                {
+                    scale = 0.05f;
+                }
+                else if (io.KeyShift)
+                {
+                    scale = 0.25f;
+                }
+                const float dx = mouse.x - m_sample_editor_drag_start_mouse_x;
+                return static_cast<int64_t>(
+                    std::llround((dx / std::max(size.x, 1.0f)) * span * scale));
+            };
             switch (m_sample_editor_drag_mode)
             {
             case SeDragMode::Selection:
@@ -1668,10 +1933,14 @@
             }
             case SeDragMode::LoopStart:
             {
-                const uint32_t new_start = std::min<uint32_t>(frame, m_sample_editor_loop_end);
-                if (new_start != m_sample_editor_loop_start)
+                int64_t new_start =
+                    static_cast<int64_t>(m_sample_editor_loop_start_at_drag) + loop_drag_delta_frames();
+                new_start = std::clamp<int64_t>(new_start,
+                                                0,
+                                                static_cast<int64_t>(m_sample_editor_loop_end_at_drag));
+                if (static_cast<uint32_t>(new_start) != m_sample_editor_loop_start)
                 {
-                    m_sample_editor_loop_start = new_start;
+                    m_sample_editor_loop_start = static_cast<uint32_t>(new_start);
                     m_sample_editor_loop_dirty = true;
                     m_sample_editor_dirty = true;
                 }
@@ -1679,10 +1948,14 @@
             }
             case SeDragMode::LoopEnd:
             {
-                const uint32_t new_end = std::max<uint32_t>(frame, m_sample_editor_loop_start);
-                if (new_end != m_sample_editor_loop_end)
+                int64_t new_end =
+                    static_cast<int64_t>(m_sample_editor_loop_end_at_drag) + loop_drag_delta_frames();
+                new_end = std::clamp<int64_t>(new_end,
+                                              static_cast<int64_t>(m_sample_editor_loop_start_at_drag),
+                                              static_cast<int64_t>(m_sample_editor_frame_count));
+                if (static_cast<uint32_t>(new_end) != m_sample_editor_loop_end)
                 {
-                    m_sample_editor_loop_end = std::min<uint32_t>(new_end, m_sample_editor_frame_count);
+                    m_sample_editor_loop_end = static_cast<uint32_t>(new_end);
                     m_sample_editor_loop_dirty = true;
                     m_sample_editor_dirty = true;
                 }
@@ -1690,16 +1963,13 @@
             }
             case SeDragMode::LoopMid:
             {
-                const int64_t delta = static_cast<int64_t>(frame) -
-                                      static_cast<int64_t>(m_sample_editor_drag_anchor_frame);
+                const int64_t delta = loop_drag_delta_frames();
                 const int64_t length = static_cast<int64_t>(m_sample_editor_loop_end_at_drag) -
                                        static_cast<int64_t>(m_sample_editor_loop_start_at_drag);
                 int64_t start = static_cast<int64_t>(m_sample_editor_loop_start_at_drag) + delta;
-                start = std::clamp<int64_t>(start, 0, static_cast<int64_t>(m_sample_editor_frame_count) - length);
-                if (start < 0)
-                {
-                    start = 0;
-                }
+                const int64_t max_start =
+                    std::max<int64_t>(0, static_cast<int64_t>(m_sample_editor_frame_count) - length);
+                start = std::clamp<int64_t>(start, 0, max_start);
                 m_sample_editor_loop_start = static_cast<uint32_t>(start);
                 m_sample_editor_loop_end = static_cast<uint32_t>(std::min<int64_t>(
                     start + length, static_cast<int64_t>(m_sample_editor_frame_count)));
@@ -1979,6 +2249,13 @@
         {
             RevertSampleEditor();
         }
+        if (ImGui::MenuItem("Restore Uncompressed Original",
+                            nullptr,
+                            false,
+                            m_sample_editor_has_uncompressed_master))
+        {
+            (void)RestoreUncompressedMasterIntoEditor();
+        }
         ImGui::Separator();
         if (ImGui::MenuItem("Select All", "Ctrl+A", false, m_sample_editor_frame_count > 0))
         {
@@ -2027,7 +2304,7 @@
             }
             if (ImGui::MenuItem("Compression..."))
             {
-                m_sample_editor_compression_open = true;
+                BeginSampleEditorCompressionModal();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Close"))
@@ -2215,7 +2492,7 @@
             ImGui::SetTooltip("Choose Note...");
         }
 
-        /* Loop controls */
+        /* Loop controls — markers are draggable on the waveform; Shift/Ctrl slow the drag. */
         bool loop_enabled = m_sample_editor_loop_enabled;
         if (ImGui::Checkbox("Loop", &loop_enabled))
         {
@@ -2227,6 +2504,10 @@
                 m_sample_editor_loop_start = 0;
                 m_sample_editor_loop_end = m_sample_editor_frame_count;
             }
+        }
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Drag green markers on the waveform. Shift = fine, Ctrl = finer, Shift+Ctrl = finest.");
         }
 
         ImGui::SameLine();
@@ -2337,14 +2618,66 @@
         ImGui::EndPopup();
     }
 
+    void BeginSampleEditorCompressionModal()
+    {
+        m_sample_editor_comp_codec_index_on_open = m_sample_editor_codec_index;
+        m_sample_editor_comp_storage_on_open = m_sample_editor_snd_storage_type;
+        m_sample_editor_comp_opus_on_open = m_sample_editor_opus_mode;
+        m_sample_editor_comp_dirty_on_open = m_sample_editor_dirty;
+        m_sample_editor_comp_preview_needs_on_open = m_sample_editor_preview_needs_reencode;
+        m_sample_editor_compression_open = true;
+    }
+
+    void CancelSampleEditorCompressionModal()
+    {
+        StopSampleEditorPreview();
+        if (m_sample_editor_snd_snapshot_valid)
+        {
+            (void)RestoreSampleEditorSndSnapshot();
+            ClearSampleEditorSndSnapshot();
+        }
+        m_sample_editor_codec_index = m_sample_editor_comp_codec_index_on_open;
+        m_sample_editor_snd_storage_type = m_sample_editor_comp_storage_on_open;
+        m_sample_editor_opus_mode = m_sample_editor_comp_opus_on_open;
+        m_sample_editor_dirty = m_sample_editor_comp_dirty_on_open;
+        m_sample_editor_preview_needs_reencode = m_sample_editor_comp_preview_needs_on_open;
+        m_sample_editor_audition_pcm.clear();
+        m_sample_editor_audition_frame_count = 0;
+        if (m_sample_editor_snd_resource_id != 0)
+        {
+            m_app_compression_cache.erase(m_sample_editor_snd_resource_id);
+        }
+        if (m_sample_editor_sample_row >= 0 &&
+            m_sample_editor_sample_row < static_cast<int>(m_samples.size()))
+        {
+            m_sample_editor_compressed_bytes =
+                QueryBankSampleResourceBytes(m_samples[static_cast<size_t>(m_sample_editor_sample_row)]);
+        }
+        m_sample_editor_compression_open = false;
+    }
+
     void DrawSampleEditorCompressionModal()
     {
         if (m_sample_editor_compression_open && !ImGui::IsPopupOpen("Sample Compression"))
         {
             ImGui::OpenPopup("Sample Compression");
         }
-        if (!ImGui::BeginPopupModal("Sample Compression", nullptr, ImGuiWindowFlags_AlwaysAutoResize))
+        bool compression_open = m_sample_editor_compression_open;
+        if (!ImGui::BeginPopupModal("Sample Compression",
+                                    &compression_open,
+                                    ImGuiWindowFlags_AlwaysAutoResize))
         {
+            if (m_sample_editor_compression_open && !compression_open)
+            {
+                CancelSampleEditorCompressionModal();
+            }
+            return;
+        }
+        if (!compression_open)
+        {
+            CancelSampleEditorCompressionModal();
+            ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
             return;
         }
 
@@ -2387,9 +2720,8 @@
                 const bool selected = (m_sample_editor_codec_index == static_cast<int>(i));
                 if (ImGui::Selectable(options[i].label, selected))
                 {
+                    /* Tentative only — Apply commits; Cancel restores. */
                     m_sample_editor_codec_index = static_cast<int>(i);
-                    m_sample_editor_preview_needs_reencode = true;
-                    m_sample_editor_dirty = true;
                 }
                 if (selected)
                 {
@@ -2405,8 +2737,6 @@
         if (ImGui::Combo("Storage", &storage_index, storage_labels, IM_ARRAYSIZE(storage_labels)))
         {
             m_sample_editor_snd_storage_type = static_cast<BAERmfEditorSndStorageType>(storage_index);
-            m_sample_editor_preview_needs_reencode = true;
-            m_sample_editor_dirty = true;
         }
 
         const BAERmfEditorCompressionType selected_codec =
@@ -2420,8 +2750,6 @@
             if (ImGui::Combo("Opus Mode", &opus_mode, opus_mode_labels, IM_ARRAYSIZE(opus_mode_labels)))
             {
                 m_sample_editor_opus_mode = static_cast<BAERmfEditorOpusMode>(opus_mode);
-                m_sample_editor_preview_needs_reencode = true;
-                m_sample_editor_dirty = true;
             }
         }
 
@@ -2436,7 +2764,7 @@
         }
         else
         {
-            ImGui::TextUnformatted("Compressed:   unknown until applied");
+            ImGui::TextUnformatted("Compressed:   unknown until applied / previewed");
         }
 
         ImGui::Separator();
@@ -2447,7 +2775,7 @@
         ImGui::SameLine();
         if (ImGui::Button("Preview"))
         {
-            /* Encode from master → audition buffer; waveform stays on master. */
+            /* Encode from master → audition buffer, then restore bank SND. */
             if (PrepareCompressionPreviewAudition())
             {
                 StartSampleEditorPreview(SePreviewSource::Audition);
@@ -2462,6 +2790,7 @@
         ImGui::Separator();
         if (ImGui::Button("Apply", ImVec2(120.0f, 0.0f)))
         {
+            ClearSampleEditorSndSnapshot();
             if (ApplySampleEditorChanges(false))
             {
                 m_sample_editor_compression_open = false;
@@ -2471,7 +2800,7 @@
         ImGui::SameLine();
         if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)))
         {
-            m_sample_editor_compression_open = false;
+            CancelSampleEditorCompressionModal();
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
@@ -2532,7 +2861,19 @@
         ImGui::SameLine();
         if (ImGui::Button("Compression..."))
         {
-            m_sample_editor_compression_open = true;
+            BeginSampleEditorCompressionModal();
+        }
+        if (m_sample_editor_has_uncompressed_master)
+        {
+            ImGui::SameLine();
+            if (ImGui::Button("Restore Uncompressed…"))
+            {
+                (void)RestoreUncompressedMasterIntoEditor();
+            }
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip("Reload session PCM / CaSd master for this SND");
+            }
         }
         ImGui::SameLine();
         if (ImGui::Button("Zoom Normal"))
@@ -2609,14 +2950,26 @@
     void CloseSampleEditor()
     {
         StopSampleEditorPreview();
-        if (m_sample_editor_dirty || m_sample_editor_loop_dirty || m_sample_editor_preview_needs_reencode)
+        if (m_sample_editor_compression_open)
+        {
+            CancelSampleEditorCompressionModal();
+        }
+        if (m_sample_editor_snd_snapshot_valid)
+        {
+            (void)RestoreSampleEditorSndSnapshot();
+            ClearSampleEditorSndSnapshot();
+        }
+        if (m_sample_editor_dirty || m_sample_editor_loop_dirty)
         {
             (void)ApplySampleEditorChanges(true);
         }
         m_sample_editor_choose_note_open = false;
         m_sample_editor_compression_open = false;
+        m_sample_editor_preview_needs_reencode = false;
         m_sample_editor_drag_mode = SeDragMode::None;
         m_sample_editor_open = false;
+        m_sample_editor_audition_pcm.clear();
+        m_sample_editor_audition_frame_count = 0;
     }
 
 

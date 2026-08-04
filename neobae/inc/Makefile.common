@@ -4,7 +4,7 @@ EMBED_PATCH_FILE ?= src/banks/patches111/patches111.hsb
 
 # TTF Font (for zefidi GUI)
 # Not required but severely recommended
-EMBED_TTF_FONT ?= src/thirdparty/fonts/HelveticaNeue.ttf
+EMBED_TTF_FONT ?= src/thirdparty/fonts/LiberationSans-Regular.ttf
 
 ### It is probably best not to change anything below this line, unless absolutely necessary for your environment
 

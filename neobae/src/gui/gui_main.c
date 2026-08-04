@@ -528,7 +528,11 @@ int main(int argc, char *argv[])
 #endif
 #endif
         if (!g_font) {
-            const char *tryFonts[] = {"C:/Windows/Fonts/arial.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", NULL};
+            const char *tryFonts[] = {
+                "C:/Windows/Fonts/arial.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                NULL};
             for (int i = 0; tryFonts[i]; ++i)
             {
                 if (!g_font)

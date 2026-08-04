@@ -866,9 +866,10 @@ static const char *inst_adsr_flag_name(uint32_t f)
 
 static const char *inst_flags1_str(unsigned char f, char *buf, size_t sz)
 {
-    snprintf(buf, sz, "%s%s%s%s%s%s",
+    snprintf(buf, sz, "%s%s%s%s%s%s%s",
              (f & 0x80) ? "Interp " : "",
              (f & 0x20) ? "NoLoop " : "",
+             (f & 0x10) ? "Ghost " : "",
              (f & 0x08) ? "UseSR " : "",
              (f & 0x04) ? "S&H " : "",
              (f & 0x02) ? "ExtFmt " : "",

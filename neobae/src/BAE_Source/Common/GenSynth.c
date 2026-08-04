@@ -1365,6 +1365,22 @@ static void PV_ADSRModule(GM_ADSR *a, bool sustaining)
 
     switch (a->ADSRFlags[index])
     {
+    case ADSR_GOTO:
+    case ADSR_GOTO_CONDITIONAL:
+        /* Level is a 1-based stage index. Conditional (GOST) currently follows
+         * the same path as GOTO; classic Beatnik left this mostly unused. */
+        index = (int32_t)a->ADSRLevel[index] - 1;
+        if (index < 0)
+        {
+            index = 0;
+        }
+        else if (index >= ADSR_STAGES)
+        {
+            index = ADSR_STAGES - 1;
+        }
+        currentTime = 0;
+        a->previousTarget = a->currentLevel;
+        break;
     case ADSR_SUSTAIN:
         a->mode = ADSR_SUSTAIN;
         if (a->ADSRLevel[index] < 0)
@@ -1442,15 +1458,6 @@ static void PV_ADSRModule(GM_ADSR *a, bool sustaining)
         break;
     }
 
-    // the index may have changed, so check for new cases.
-#if 0
-    switch (a->ADSRFlags[index])
-    {
-        case ADSR_GOTO:
-            index = a->ADSRLevel[index] - 1;
-            break;
-    }
-#endif
     // debug_message("currentLevel = %ld\n", (int32_t)a->currentLevel);
     a->currentTime = currentTime;
 

@@ -9,18 +9,32 @@
 #include "NeoBAE.h"
 #include "X_API.h"
 #include "X_Formats.h"
+#include "X_EditorTools.h"
+#include "GenPriv.h"
 #include "mod2rmf_rmfcreat.h"
+
+#if defined(NBEDITOR_EMBED_FONTS)
+#include "nbeditor_embedded_fonts.h"
+#endif
 
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <deque>
+#include <fstream>
+#include <functional>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
+#if !defined(_WIN32)
+#include <sys/stat.h>
+#endif
 
 namespace
 {
@@ -45,6 +59,7 @@ struct SampleRow
     int bit_depth = 16;
     int channels = 1;
     bool is_custom = false;
+    bool unassigned = false; /* bank SND not referenced by any INST */
     SampleSource source = SampleSource::Bank;
     int bank = 0;
     int program = 0;
@@ -52,14 +67,285 @@ struct SampleRow
     int low_key = 0;
     int high_key = 127;
     std::string name;
+    /* Visible-only list suffix e.g. "MP3 128k"; empty for plain PCM. Not part of resource name. */
+    std::string codec_label;
 };
 
 struct SongRow
 {
     std::string name;
     std::string path;
-    std::string source_type; // MIDI / RMF / ZMF / Module
+    std::string source_type; // MIDI / RMF / ZMF / Module / BSN
 };
+
+struct SessionSongEntry
+{
+    uint32_t song_resource_id = 0;
+    uint32_t midi_resource_id = 0;
+    std::string name;
+    std::string source_type; /* MIDI / RMF / ZMF / Module / BSN / … */
+    std::vector<unsigned char> midi_bytes;
+    /* Full RMF/ZMF document bytes when the song carries embeds; preferred over midi_bytes on activate. */
+    std::vector<unsigned char> rmf_bytes;
+};
+
+struct SessionPcmCacheEntry
+{
+    std::string name;
+    std::vector<unsigned char> pcm;
+    uint32_t frame_count = 0;
+    uint16_t bit_size = 16;
+    uint16_t channels = 1;
+    BAE_UNSIGNED_FIXED sample_rate = 0;
+    uint32_t loop_start = 0;
+    uint32_t loop_end = 0;
+    int base_key = 60;
+    uint32_t snd_resource_id = 0;
+};
+
+struct ExportInstrumentItem
+{
+    uint32_t inst_id = 0;
+    uint32_t instrument_index = 0;
+    std::string name;
+    bool is_custom = false;
+    bool selected = false;
+    int custom_index = -1;
+    int bank = 0;
+    int program = 0;
+};
+
+struct BsnIrezResource
+{
+    uint32_t type = 0;
+    uint32_t id = 0;
+    std::string name;
+    std::vector<unsigned char> body;
+};
+
+static uint32_t BsnReadBE32(const unsigned char *p)
+{
+    return (static_cast<uint32_t>(p[0]) << 24) |
+           (static_cast<uint32_t>(p[1]) << 16) |
+           (static_cast<uint32_t>(p[2]) << 8) |
+           static_cast<uint32_t>(p[3]);
+}
+
+static uint16_t BsnReadBE16(const unsigned char *p)
+{
+    return static_cast<uint16_t>((static_cast<uint16_t>(p[0]) << 8) | p[1]);
+}
+
+static bool BsnResourceTypeEquals(uint32_t type, char a, char b, char c, char d)
+{
+    const uint32_t want = (static_cast<uint32_t>(static_cast<unsigned char>(a)) << 24) |
+                          (static_cast<uint32_t>(static_cast<unsigned char>(b)) << 16) |
+                          (static_cast<uint32_t>(static_cast<unsigned char>(c)) << 8) |
+                          static_cast<uint32_t>(static_cast<unsigned char>(d));
+    return type == want;
+}
+
+static bool ParseIrezResources(const unsigned char *data,
+                               size_t size,
+                               std::vector<BsnIrezResource> &out)
+{
+    out.clear();
+    if (!data || size < 12)
+    {
+        return false;
+    }
+    if (!(data[0] == 'I' && data[1] == 'R' && data[2] == 'E' && data[3] == 'Z') &&
+        !(data[0] == 'Z' && data[1] == 'R' && data[2] == 'E' && data[3] == 'Z'))
+    {
+        return false;
+    }
+
+    const uint32_t claimed = BsnReadBE32(data + 8);
+    size_t offset = 12;
+    for (uint32_t idx = 0; idx < claimed; ++idx)
+    {
+        if (offset + 12 > size)
+        {
+            break;
+        }
+        BsnIrezResource res;
+        res.type = BsnReadBE32(data + offset + 4);
+        res.id = BsnReadBE32(data + offset + 8);
+        size_t p = offset + 12;
+        if (p >= size)
+        {
+            break;
+        }
+        const unsigned char name_len = data[p];
+        if (p + 1 + name_len + 4 > size)
+        {
+            break;
+        }
+        res.name.assign(reinterpret_cast<const char *>(data + p + 1), name_len);
+        p = p + 1 + name_len;
+        const uint32_t body_len = BsnReadBE32(data + p);
+        p += 4;
+        if (p + body_len > size)
+        {
+            break;
+        }
+        res.body.assign(data + p, data + p + body_len);
+        out.push_back(std::move(res));
+        offset = p + body_len;
+    }
+    return !out.empty();
+}
+
+static bool ReadEntireFileBytes(const char *path, std::vector<unsigned char> &out)
+{
+    out.clear();
+    if (!path || !path[0])
+    {
+        return false;
+    }
+    FILE *fp = std::fopen(path, "rb");
+    if (!fp)
+    {
+        return false;
+    }
+    if (std::fseek(fp, 0, SEEK_END) != 0)
+    {
+        std::fclose(fp);
+        return false;
+    }
+    const long len = std::ftell(fp);
+    if (len < 0)
+    {
+        std::fclose(fp);
+        return false;
+    }
+    if (std::fseek(fp, 0, SEEK_SET) != 0)
+    {
+        std::fclose(fp);
+        return false;
+    }
+    out.resize(static_cast<size_t>(len));
+    if (len > 0 && std::fread(out.data(), 1, out.size(), fp) != out.size())
+    {
+        std::fclose(fp);
+        out.clear();
+        return false;
+    }
+    std::fclose(fp);
+    return true;
+}
+
+static bool IsBe2SessionDocument(const std::vector<BsnIrezResource> &resources)
+{
+    for (const BsnIrezResource &r : resources)
+    {
+        if (BsnResourceTypeEquals(r.type, 'B', 'e', 'P', 'f') && r.name == "Session Prefs")
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void CollectSessionUserSongs(const std::vector<BsnIrezResource> &resources,
+                                    std::vector<SessionSongEntry> &out_songs,
+                                    int &out_casd_count)
+{
+    out_songs.clear();
+    out_casd_count = 0;
+
+    std::map<uint32_t, const BsnIrezResource *> midi_by_id;
+    for (const BsnIrezResource &r : resources)
+    {
+        if (BsnResourceTypeEquals(r.type, 'M', 'i', 'd', 'i'))
+        {
+            midi_by_id[r.id] = &r;
+        }
+        if (BsnResourceTypeEquals(r.type, 'C', 'a', 'S', 'd'))
+        {
+            ++out_casd_count;
+        }
+    }
+
+    for (const BsnIrezResource &r : resources)
+    {
+        if (!BsnResourceTypeEquals(r.type, 'S', 'O', 'N', 'G') || r.body.size() < 8)
+        {
+            continue;
+        }
+        const uint16_t midi_id = BsnReadBE16(r.body.data());
+        const unsigned char song_type = r.body[6];
+        if (song_type != 1)
+        {
+            continue;
+        }
+        auto it = midi_by_id.find(midi_id);
+        if (it == midi_by_id.end())
+        {
+            continue;
+        }
+        const BsnIrezResource *midi = it->second;
+        if (midi->body.size() < 4 ||
+            !(midi->body[0] == 'M' && midi->body[1] == 'T' &&
+              midi->body[2] == 'h' && midi->body[3] == 'd'))
+        {
+            continue;
+        }
+
+        SessionSongEntry entry;
+        entry.song_resource_id = r.id;
+        entry.midi_resource_id = midi_id;
+        entry.name = r.name.empty() ? midi->name : r.name;
+        if (entry.name.empty())
+        {
+            entry.name = "Untitled Song";
+        }
+        entry.source_type = "BSN";
+        entry.midi_bytes = midi->body;
+        out_songs.push_back(std::move(entry));
+    }
+
+    std::sort(out_songs.begin(),
+              out_songs.end(),
+              [](const SessionSongEntry &a, const SessionSongEntry &b) {
+                  return a.song_resource_id < b.song_resource_id;
+              });
+}
+
+static bool ProbeBe2SessionBsn(const char *path,
+                               std::vector<SessionSongEntry> *out_songs,
+                               int *out_casd_count)
+{
+    std::vector<unsigned char> bytes;
+    if (!ReadEntireFileBytes(path, bytes))
+    {
+        return false;
+    }
+    std::vector<BsnIrezResource> resources;
+    if (!ParseIrezResources(bytes.data(), bytes.size(), resources))
+    {
+        return false;
+    }
+    if (!IsBe2SessionDocument(resources))
+    {
+        return false;
+    }
+    if (out_songs || out_casd_count)
+    {
+        std::vector<SessionSongEntry> songs;
+        int casd = 0;
+        CollectSessionUserSongs(resources, songs, casd);
+        if (out_songs)
+        {
+            *out_songs = std::move(songs);
+        }
+        if (out_casd_count)
+        {
+            *out_casd_count = casd;
+        }
+    }
+    return true;
+}
 
 #if NBEDITOR_MVP
 /* Sample Editor drag targets in the waveform canvas. */
@@ -99,8 +385,10 @@ struct InstrumentRow
     bool is_custom = false;
     bool has_song_override = false;
     bool from_song_document = false;
+    bool is_alias = false;
     uint32_t instrument_index = 0;
-    uint32_t inst_id = 0;
+    uint32_t inst_id = 0;        /* display slot ID (aliasFrom when is_alias) */
+    uint32_t target_inst_id = 0; /* concrete INST id (aliasTo when is_alias) */
     int program = 0;
     int split_count = 0;
     int bank = 0;
@@ -115,12 +403,35 @@ struct InstrumentFilterOption
     std::string label;
 };
 
-/* BE2 Samples tab Show: — All / Custom Samples (default) / Built-in Samples */
+/* BE2 Samples tab Show: — All / Custom / Built-in / Unassigned */
 enum class SampleShowFilter : int
 {
     All = 0,
     Custom = 1,
     BuiltIn = 2,
+    Unassigned = 3,
+};
+
+/* BE2 Songs tab Show: — All / Custom Songs / Groovoids */
+enum class SongShowFilter : int
+{
+    All = 0,
+    Custom = 1,
+    Groovoids = 2,
+};
+
+struct GroovoidEntry
+{
+    uint32_t song_resource_id = 0;
+    uint16_t emid_resource_id = 0;
+    std::string name;
+};
+
+enum class SessionTab : int
+{
+    Songs = 0,
+    Instruments = 1,
+    Samples = 2,
 };
 
 struct SampleCodecOption
@@ -131,12 +442,43 @@ struct SampleCodecOption
 
 static std::string MakeBankCategoryLabel(int bank, int category)
 {
-    char label[96];
-    std::snprintf(label,
-                  sizeof(label),
-                  "Bank %d %s",
-                  bank,
-                  category == 1 ? "Percussion" : "Melodic");
+    const bool perc = (category == 1);
+    const char *suffix = nullptr;
+    if (bank == 0)
+    {
+        suffix = "General MIDI";
+    }
+    else if (bank == 1)
+    {
+        suffix = "Beatnik Special";
+    }
+    else if (bank == 2)
+    {
+        suffix = perc ? "Custom Percussion" : "Custom Melodic";
+    }
+
+    char label[128];
+    if (suffix && bank == 2)
+    {
+        std::snprintf(label, sizeof(label), "Bank %d %s - %s", bank, perc ? "Percussion" : "Melodic", suffix);
+    }
+    else if (suffix)
+    {
+        std::snprintf(label,
+                      sizeof(label),
+                      "Bank %d %s - %s",
+                      bank,
+                      perc ? "Percussion" : "Melodic",
+                      suffix);
+    }
+    else
+    {
+        std::snprintf(label,
+                      sizeof(label),
+                      "Bank %d %s",
+                      bank,
+                      perc ? "Percussion" : "Melodic");
+    }
     return std::string(label);
 }
 
@@ -359,6 +701,159 @@ static const char *GetSampleCodecLabel(BAERmfEditorCompressionType type)
     return "Unknown";
 }
 
+/* Visible-only Samples-list codec tag. Empty string = plain PCM (no suffix). */
+static std::string FormatVisibleCodecLabel(uint32_t compression_type,
+                                           uint32_t compression_sub_type,
+                                           bool opus_round_trip = false)
+{
+    auto sub_bitrate = [](uint32_t sub) -> const char * {
+        switch (sub)
+        {
+        case FOUR_CHAR('v', '0', '3', '2'):
+            return " 32k";
+        case FOUR_CHAR('v', '0', '4', '8'):
+            return " 48k";
+        case FOUR_CHAR('v', '0', '6', '4'):
+            return " 64k";
+        case FOUR_CHAR('v', '0', '8', '0'):
+            return " 80k";
+        case FOUR_CHAR('v', '0', '9', '6'):
+            return " 96k";
+        case FOUR_CHAR('v', '1', '2', '8'):
+            return " 128k";
+        case FOUR_CHAR('v', '1', '6', '0'):
+            return " 160k";
+        case FOUR_CHAR('v', '1', '9', '2'):
+            return " 192k";
+        case FOUR_CHAR('v', '2', '5', '6'):
+            return " 256k";
+        case FOUR_CHAR('o', '0', '1', '2'):
+            return " 12k";
+        case FOUR_CHAR('o', '0', '1', '6'):
+            return " 16k";
+        case FOUR_CHAR('o', '0', '2', '4'):
+            return " 24k";
+        case FOUR_CHAR('o', '0', '3', '2'):
+            return " 32k";
+        case FOUR_CHAR('o', '0', '4', '8'):
+            return " 48k";
+        case FOUR_CHAR('o', '0', '6', '4'):
+            return " 64k";
+        case FOUR_CHAR('o', '0', '8', '0'):
+            return " 80k";
+        case FOUR_CHAR('o', '0', '9', '6'):
+            return " 96k";
+        case FOUR_CHAR('o', '1', '2', '8'):
+            return " 128k";
+        case FOUR_CHAR('o', '1', '6', '0'):
+            return " 160k";
+        case FOUR_CHAR('o', '1', '9', '2'):
+            return " 192k";
+        case FOUR_CHAR('o', '2', '5', '6'):
+            return " 256k";
+        default:
+            return nullptr;
+        }
+    };
+
+    switch (compression_type)
+    {
+    case 0:
+    case FOUR_CHAR('n', 'o', 'n', 'e'):
+        return std::string();
+    case FOUR_CHAR('i', 'm', 'a', '4'):
+        return "IMA4";
+    case FOUR_CHAR('i', 'm', 'a', 'W'):
+        return "IMA4 (WAV)";
+    case FOUR_CHAR('i', 'm', 'a', '3'):
+        return "IMA3";
+    case FOUR_CHAR('m', 'a', 'c', '3'):
+        return "MACE3";
+    case FOUR_CHAR('m', 'a', 'c', '6'):
+        return "MACE6";
+    case FOUR_CHAR('u', 'l', 'a', 'w'):
+        return "uLaw";
+    case FOUR_CHAR('a', 'l', 'a', 'w'):
+        return "aLaw";
+    case FOUR_CHAR('f', 'L', 'a', 'C'):
+    case FOUR_CHAR('F', 'L', 'A', 'C'):
+        return "FLAC";
+    case FOUR_CHAR('q', 'o', 'a', 'f'):
+        return "QOA";
+    case FOUR_CHAR('m', 'p', 'g', 'n'):
+        return "MP3 32k";
+    case FOUR_CHAR('m', 'p', 'g', 'a'):
+        return "MP3 40k";
+    case FOUR_CHAR('m', 'p', 'g', 'b'):
+        return "MP3 48k";
+    case FOUR_CHAR('m', 'p', 'g', 'c'):
+        return "MP3 56k";
+    case FOUR_CHAR('m', 'p', 'g', 'd'):
+        return "MP3 64k";
+    case FOUR_CHAR('m', 'p', 'g', 'e'):
+        return "MP3 80k";
+    case FOUR_CHAR('m', 'p', 'g', 'f'):
+        return "MP3 96k";
+    case FOUR_CHAR('m', 'p', 'g', 'g'):
+        return "MP3 112k";
+    case FOUR_CHAR('m', 'p', 'g', 'h'):
+        return "MP3 128k";
+    case FOUR_CHAR('m', 'p', 'g', 'i'):
+        return "MP3 160k";
+    case FOUR_CHAR('m', 'p', 'g', 'j'):
+        return "MP3 192k";
+    case FOUR_CHAR('m', 'p', 'g', 'k'):
+        return "MP3 224k";
+    case FOUR_CHAR('m', 'p', 'g', 'l'):
+        return "MP3 256k";
+    case FOUR_CHAR('m', 'p', 'g', 'm'):
+        return "MP3 320k";
+    case FOUR_CHAR('M', 'P', 'E', 'G'):
+        return "MPEG";
+    case FOUR_CHAR('O', 'g', 'g', 'V'):
+    case FOUR_CHAR('V', 'O', 'R', 'B'):
+    {
+        const char *br = sub_bitrate(compression_sub_type);
+        return br ? (std::string("Vorbis") + br) : std::string("Vorbis");
+    }
+    case FOUR_CHAR('O', 'g', 'g', 'O'):
+    case FOUR_CHAR('O', 'P', 'U', 'S'):
+    {
+        const char *br = sub_bitrate(compression_sub_type);
+        const char *base = opus_round_trip ? "Opus RT" : "Opus";
+        return br ? (std::string(base) + br) : std::string(base);
+    }
+    default:
+        if (compression_type > 0x20202020u)
+        {
+            char buf[16];
+            std::snprintf(buf,
+                          sizeof(buf),
+                          "%c%c%c%c",
+                          static_cast<char>((compression_type >> 24) & 0xFF),
+                          static_cast<char>((compression_type >> 16) & 0xFF),
+                          static_cast<char>((compression_type >> 8) & 0xFF),
+                          static_cast<char>(compression_type & 0xFF));
+            return std::string(buf);
+        }
+        return std::string();
+    }
+}
+
+static std::string FormatVisibleCodecLabelFromEditorType(BAERmfEditorCompressionType type)
+{
+    if (type == BAE_EDITOR_COMPRESSION_PCM || type == BAE_EDITOR_COMPRESSION_DONT_CHANGE)
+    {
+        return std::string();
+    }
+    const char *label = GetSampleCodecLabel(type);
+    if (!label || !label[0] || std::strcmp(label, "PCM") == 0)
+    {
+        return std::string();
+    }
+    return std::string(label);
+}
+
 static bool IsModuleExtension(const std::string &ext)
 {
     return ext == "mod" || ext == "s3m" || ext == "xm" || ext == "it" ||
@@ -370,7 +865,7 @@ static bool IsModuleExtension(const std::string &ext)
 
 static bool IsBankExtension(const std::string &ext)
 {
-    return ext == "hsb" || ext == "zsb";
+    return ext == "hsb" || ext == "zsb" || ext == "bsn";
 }
 
 static std::string FormatBAEError(BAEResult result)
@@ -417,6 +912,9 @@ public:
             return true;
         }
 
+        LoadRecentSessionsFromDisk();
+        /* BE2-style: start on a clean slate with the built-in bank. Recent
+         * sessions stay in File→Recent; nothing is auto-opened. */
         SetStatus("nbeditor ready");
         return true;
     }
@@ -468,6 +966,12 @@ public:
         m_main_window = window;
     }
 
+    void SetUiFonts(ImFont *regular, ImFont *italic)
+    {
+        m_font_regular = regular;
+        m_font_italic = italic;
+    }
+
     const char *GetStatus() const { return m_status; }
 
     void DrawUI()
@@ -477,11 +981,79 @@ public:
         DrawDockspace();
         DrawPlayerWindow();
         DrawSessionWindow();
+        DrawBankAddDialog();
         DrawSongInfoDialog();
         DrawInstrumentEditorDialog();
+        DrawExportRmfDialog();
+        DrawExportSampleRmfDialog();
 #if NBEDITOR_MVP
         DrawSampleEditorDialog();
 #endif
+        DrawEditConfirmDialogs();
+        DrawResourceUsageDialog();
+        DrawInstDestDialog();
+        DrawSessionInfoDialog();
+        DrawBankMergeConfirmDialog();
+        DrawReplaceSessionConfirmDialog();
+        DrawQuitConfirmDialog();
+        DrawBankDestructiveConfirmDialogs();
+#if USE_NEO_EFFECTS == TRUE
+        DrawCustomReverbDialog();
+#endif
+    }
+
+    void HandleDroppedPath(const char *path)
+    {
+        HandleDroppedPathInternal(path);
+    }
+
+    /* File → Open / Windows "Open with" / argv paths (not tab-scoped DnD). */
+    void OpenPathFromCommandLine(const char *path)
+    {
+        if (!path || !path[0])
+        {
+            return;
+        }
+        std::string cleaned = path;
+        /* Windows sometimes quotes the path when launching via association. */
+        if (cleaned.size() >= 2 && cleaned.front() == '"' && cleaned.back() == '"')
+        {
+            cleaned = cleaned.substr(1, cleaned.size() - 2);
+        }
+        if (cleaned.empty())
+        {
+            return;
+        }
+        std::snprintf(m_path_input, sizeof(m_path_input), "%s", cleaned.c_str());
+        /* Explorer / argv launches always replace; Init already loaded the built-in
+         * bank so ActiveBankHasContentToOverwrite() would otherwise always confirm. */
+        ImportPathIntoSession(cleaned, true);
+    }
+
+    /* Returns true if at least one non-flag argv path was opened. */
+    bool OpenCommandLineArgs(int argc, char **argv)
+    {
+        if (!argv || argc < 2)
+        {
+            return false;
+        }
+        bool opened_any = false;
+        for (int i = 1; i < argc; ++i)
+        {
+            const char *arg = argv[i];
+            if (!arg || !arg[0])
+            {
+                continue;
+            }
+            /* Skip common flag-style args; everything else is a file path. */
+            if (arg[0] == '-')
+            {
+                continue;
+            }
+            OpenPathFromCommandLine(arg);
+            opened_any = true;
+        }
+        return opened_any;
     }
 
 private:
@@ -489,7 +1061,12 @@ private:
     {
         OpenImport = 0,
         ExportSong,
+        ExportOneShotRmf,
+        ExportGroovoidRmf,
+        ExportSample,
         SaveBankAs,
+        SaveSessionAs,
+        AddSample,
     };
 
     static void SDLCALL OnFileDialogResult(void *userdata, const char *const *filelist, int)
@@ -527,15 +1104,35 @@ private:
     {
         m_pending_dialog_action = DialogAction::OpenImport;
         static const SDL_DialogFileFilter filters[] = {
-            {"All supported files", "rmf;zmf;mid;midi;kar;rmi;hsb;zsb;nbs;mod;s3m;xm;it;mtm;stm;669;far;ult;amf;dbm;imf;liq;med;mgt;okt;ptm;xmf"},
+            {"All supported files", "rmf;zmf;mid;midi;kar;rmi;hsb;zsb;bsn;zsn;nbs;mod;s3m;xm;it;mtm;stm;669;far;ult;amf;dbm;imf;liq;med;mgt;okt;ptm;xmf"},
+            {"Beatnik / NeoBAE Session (*.bsn;*.zsn)", "bsn;zsn"},
             {"NeoBAE Session (*.nbs)", "nbs"},
             {"RMF files (*.rmf;*.zmf)", "rmf;zmf"},
             {"Module Tracker file", "mod;s3m;xm;it;mtm;stm;669;far;ult;amf;dbm;imf;liq;med;mgt;okt;ptm;xmf"},
             {"MIDI files (*.mid;*.midi;*.kar;*.rmi)", "mid;midi;kar;rmi"},
-            {"Bank files (*.hsb;*.zsb)", "hsb;zsb"},
+            {"Bank files (*.hsb;*.zsb;*.bsn)", "hsb;zsb;bsn"},
             {"All files (*.*)", "*"},
         };
 
+        SDL_ShowOpenFileDialog(OnFileDialogResult,
+                               this,
+                               m_main_window,
+                               filters,
+                               static_cast<int>(SDL_arraysize(filters)),
+                               nullptr,
+                               false);
+    }
+
+    void OpenAddSongFileDialog()
+    {
+        m_pending_dialog_action = DialogAction::OpenImport;
+        static const SDL_DialogFileFilter filters[] = {
+            {"Song files", "mid;midi;kar;rmi;rmf;zmf;mod;s3m;xm;it;mtm;stm;669;far;ult;amf;dbm;imf;liq;med;mgt;okt;ptm;xmf"},
+            {"MIDI files (*.mid;*.midi;*.kar;*.rmi)", "mid;midi;kar;rmi"},
+            {"RMF / ZMF (*.rmf;*.zmf)", "rmf;zmf"},
+            {"Module Tracker file", "mod;s3m;xm;it;mtm;stm;669;far;ult;amf;dbm;imf;liq;med;mgt;okt;ptm;xmf"},
+            {"All files (*.*)", "*"},
+        };
         SDL_ShowOpenFileDialog(OnFileDialogResult,
                                this,
                                m_main_window,
@@ -564,6 +1161,23 @@ private:
                                filters,
                                static_cast<int>(SDL_arraysize(filters)),
                                "song.rmf");
+    }
+
+    void OpenSaveSessionDialog()
+    {
+        m_pending_dialog_action = DialogAction::SaveSessionAs;
+        const bool want_zsn = SessionRequiresZsn(nullptr);
+        static const SDL_DialogFileFilter filters[] = {
+            {"Beatnik Session (*.bsn)", "bsn"},
+            {"NeoBAE Session (*.zsn)", "zsn"},
+            {"All files (*.*)", "*"},
+        };
+        SDL_ShowSaveFileDialog(OnFileDialogResult,
+                               this,
+                               m_main_window,
+                               filters,
+                               static_cast<int>(SDL_arraysize(filters)),
+                               want_zsn ? "session.zsn" : "session.bsn");
     }
 
     void OpenSaveBankDialog()
@@ -637,6 +1251,42 @@ private:
             ExportSessionSongToPath(selected_path);
             return;
         }
+        if (m_pending_dialog_action == DialogAction::ExportOneShotRmf)
+        {
+            ExportOneShotRmfToPath(selected_path);
+            return;
+        }
+        if (m_pending_dialog_action == DialogAction::ExportGroovoidRmf)
+        {
+            ExportGroovoidRmfToPath(selected_path);
+            return;
+        }
+        if (m_pending_dialog_action == DialogAction::ExportSample)
+        {
+            ExportSampleToPath(selected_path);
+            return;
+        }
+        if (m_pending_dialog_action == DialogAction::SaveSessionAs)
+        {
+            std::string out_path = selected_path;
+            const bool want_zsn = SessionRequiresZsn(nullptr);
+            const bool has_bsn = EndsWith(out_path, ".bsn");
+            const bool has_zsn = EndsWith(out_path, ".zsn");
+            if (!has_bsn && !has_zsn)
+            {
+                out_path += want_zsn ? ".zsn" : ".bsn";
+            }
+            else if (want_zsn && has_bsn)
+            {
+                out_path = out_path.substr(0, out_path.size() - 4) + ".zsn";
+            }
+            else if (!want_zsn && has_zsn)
+            {
+                out_path = out_path.substr(0, out_path.size() - 4) + ".bsn";
+            }
+            SaveSessionToPath(out_path.c_str());
+            return;
+        }
         if (m_pending_dialog_action == DialogAction::SaveBankAs)
         {
             if (m_bank_token)
@@ -654,6 +1304,11 @@ private:
                     SetStatus(std::string("Bank save failed: ") + FormatBAEError(save_result));
                 }
             }
+            return;
+        }
+        if (m_pending_dialog_action == DialogAction::AddSample)
+        {
+            BeginAddSampleFromPath(selected_path);
             return;
         }
 
@@ -821,11 +1476,39 @@ private:
         return false;
     }
 
-    bool LoadBankFromPath(const char *path)
+    void SelectAuditionBank0AfterBankLoad()
+    {
+        m_selected_uses_song_source = false;
+        m_selected_bank = 0;
+        BAESong audition_song = GetAuditionSong();
+        if (audition_song)
+        {
+            BAESong_ProgramBankChange(audition_song,
+                                      0,
+                                      static_cast<unsigned char>(m_selected_program),
+                                      static_cast<unsigned char>(m_selected_bank),
+                                      0);
+        }
+    }
+
+    /* preserve_bank2: when an active bank exists, unload Bank 0/1 safely (same as
+     * File→Unload Bank) then merge Bank 0/1 from the new file. Session opens pass
+     * false so the session file becomes the bank token. */
+    bool LoadBankFromPath(const char *path, bool preserve_bank2 = true)
     {
         if (!m_mixer || !path || !path[0])
         {
             return false;
+        }
+
+        if (preserve_bank2 && m_bank_token)
+        {
+            const bool ok = MergeBank01FromPath(path);
+            if (ok)
+            {
+                SelectAuditionBank0AfterBankLoad();
+            }
+            return ok;
         }
 
         bool restart_song = false;
@@ -861,20 +1544,10 @@ private:
         m_loaded_bank_path = path;
         m_loaded_bank_display_name = FileNameFromPath(m_loaded_bank_path);
         m_bank_token = token;
+        m_bank01_touched = false;
+        m_instrument_filter_index = -1; /* full replace → default Custom Melodic */
         RefreshListsFromBank();
-
-        // Switch preview/player selection to the newly loaded bank.
-        m_selected_uses_song_source = false;
-        m_selected_bank = 0;
-        BAESong audition_song = GetAuditionSong();
-        if (audition_song)
-        {
-            BAESong_ProgramBankChange(audition_song,
-                                      0,
-                                      static_cast<unsigned char>(m_selected_program),
-                                      static_cast<unsigned char>(m_selected_bank),
-                                      0);
-        }
+        SelectAuditionBank0AfterBankLoad();
 
         if (restart_song)
         {
@@ -912,6 +1585,19 @@ private:
             return false;
         }
 
+        /* Prefer safe Bank 0/1 replace so Bank 2+ / custom samples survive. */
+        if (m_bank_token)
+        {
+            const bool ok = MergeBank01FromBuiltin();
+            if (ok)
+            {
+                m_loaded_bank_path.clear();
+                m_loaded_bank_display_name.clear();
+                SelectAuditionBank0AfterBankLoad();
+            }
+            return ok;
+        }
+
         BAEMixer_UnloadBanks(m_mixer);
         BAEBankToken token = 0;
         if (!LoadBuiltinBankToMixer(m_mixer, &token) || token == 0)
@@ -924,18 +1610,7 @@ private:
         m_loaded_bank_display_name.clear();
         m_bank_token = token;
         RefreshListsFromBank();
-
-        m_selected_uses_song_source = false;
-        m_selected_bank = 0;
-        BAESong audition_song = GetAuditionSong();
-        if (audition_song)
-        {
-            BAESong_ProgramBankChange(audition_song,
-                                      0,
-                                      static_cast<unsigned char>(m_selected_program),
-                                      static_cast<unsigned char>(m_selected_bank),
-                                      0);
-        }
+        SelectAuditionBank0AfterBankLoad();
 
         SetStatus("Built-in bank loaded");
         return true;
@@ -1119,16 +1794,88 @@ private:
         }
 
         BAESong_Preroll(preview);
+        BAESong_Start(preview, 0);
+        BAESong_Pause(preview);
         m_preview_song = preview;
     }
 
     BAESong GetAuditionSong() const
     {
+        /* IE preview must use the live preview song (mixer bank), not the paused
+         * RMF playback song. Song-embedded customs are promoted into the bank on
+         * RMF open; routing through m_song made IE keys silent. */
+        if (m_instrument_editor_open)
+        {
+            return m_preview_song ? m_preview_song : m_song;
+        }
         if (m_selected_uses_song_source && m_song)
         {
             return m_song;
         }
         return m_preview_song ? m_preview_song : m_song;
+    }
+
+    bool LookupDocumentSampleDisplayNameForSnd(uint32_t snd_id, std::string *out_name) const
+    {
+        if (!m_document || !out_name || snd_id == 0)
+        {
+            return false;
+        }
+        uint32_t sample_count = 0;
+        if (BAERmfEditorDocument_GetSampleCount(m_document, &sample_count) != BAE_NO_ERROR)
+        {
+            return false;
+        }
+        for (uint32_t i = 0; i < sample_count; ++i)
+        {
+            uint32_t asset_id = 0;
+            if (BAERmfEditorDocument_GetSampleAssetIDForSample(m_document, i, &asset_id) !=
+                    BAE_NO_ERROR ||
+                asset_id != snd_id)
+            {
+                continue;
+            }
+            BAERmfEditorSampleInfo info;
+            std::memset(&info, 0, sizeof(info));
+            if (BAERmfEditorDocument_GetSampleInfo(m_document, i, &info) == BAE_NO_ERROR &&
+                info.displayName && info.displayName[0])
+            {
+                *out_name = info.displayName;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    bool LookupDocumentSampleDisplayNameForInst(uint32_t inst_id, std::string *out_name) const
+    {
+        if (!m_document || !out_name || inst_id == 0)
+        {
+            return false;
+        }
+        uint32_t sample_count = 0;
+        if (BAERmfEditorDocument_GetSampleCount(m_document, &sample_count) != BAE_NO_ERROR)
+        {
+            return false;
+        }
+        for (uint32_t i = 0; i < sample_count; ++i)
+        {
+            uint32_t doc_inst = BAE_EDITOR_INST_ID_NONE;
+            if (BAERmfEditorDocument_GetInstIDForSample(m_document, i, &doc_inst) != BAE_NO_ERROR ||
+                doc_inst != inst_id)
+            {
+                continue;
+            }
+            BAERmfEditorSampleInfo info;
+            std::memset(&info, 0, sizeof(info));
+            if (BAERmfEditorDocument_GetSampleInfo(m_document, i, &info) == BAE_NO_ERROR &&
+                info.displayName && info.displayName[0])
+            {
+                *out_name = info.displayName;
+                return true;
+            }
+        }
+        return false;
     }
 
     void ClearSongOverrides()
@@ -1159,7 +1906,35 @@ private:
             {
                 InstrumentRow &base = m_instruments[found->second];
                 base.has_song_override = true;
+                base.is_custom = true;
+                if (song_inst.inst_id != 0)
+                {
+                    base.inst_id = song_inst.inst_id;
+                    base.target_inst_id = song_inst.inst_id;
+                    /* Prefer the bank row that matches the promoted INST id so IE /
+                     * keymap ops read RMF-promoted data, not a colliding GM slot. */
+                    for (const InstrumentRow &bank_row : m_bank_instruments)
+                    {
+                        if (!bank_row.is_alias && bank_row.inst_id == song_inst.inst_id)
+                        {
+                            base.instrument_index = bank_row.instrument_index;
+                            base.split_count = bank_row.split_count;
+                            break;
+                        }
+                    }
+                }
+                base.from_song_document = song_inst.from_song_document;
                 base.split_count = std::max(base.split_count, song_inst.split_count);
+                if (!song_inst.name.empty() &&
+                    (base.name.empty() || base.name.find("(Override)") == std::string::npos))
+                {
+                    /* Prefer RMF display name when the bank slot still has a GM name. */
+                    if (m_session_custom_inst_ids.count(song_inst.inst_id) != 0 ||
+                        song_inst.from_song_document)
+                    {
+                        base.name = song_inst.name;
+                    }
+                }
                 if (base.name.find("(Override)") == std::string::npos)
                 {
                     base.name += " (Override)";
@@ -1169,6 +1944,21 @@ private:
             {
                 InstrumentRow merged = song_inst;
                 merged.has_song_override = true;
+                merged.is_custom = true;
+                merged.from_song_document = true;
+                if (song_inst.inst_id != 0)
+                {
+                    for (const InstrumentRow &bank_row : m_bank_instruments)
+                    {
+                        if (!bank_row.is_alias && bank_row.inst_id == song_inst.inst_id)
+                        {
+                            merged.instrument_index = bank_row.instrument_index;
+                            merged.from_song_document = false; /* promoted into bank */
+                            merged.split_count = bank_row.split_count;
+                            break;
+                        }
+                    }
+                }
                 if (merged.name.find("(Override)") == std::string::npos)
                 {
                     merged.name += " (Override)";
@@ -1237,6 +2027,9 @@ private:
             {
                 inst.is_custom = true;
                 inst.has_song_override = true;
+                inst.from_song_document = true;
+                inst.inst_id = (inst_id != BAE_EDITOR_INST_ID_NONE) ? inst_id : 0;
+                inst.target_inst_id = inst.inst_id;
                 inst.program = program;
                 inst.bank = bank;
                 inst.percussion = percussion;
@@ -1323,6 +2116,74 @@ private:
 #endif
     }
 
+    void RefreshGroovoidsFromBank()
+    {
+        m_groovoids.clear();
+        m_groovoid_index = -1;
+        if (!m_bank_token)
+        {
+            return;
+        }
+
+        XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
+        const int32_t song_count = XCountFileResourcesOfType(bank, ID_SONG);
+        for (int32_t i = 0; i < song_count; ++i)
+        {
+            XLongResourceID song_id = 0;
+            int32_t song_size = 0;
+            char name_buf[256];
+            name_buf[0] = 0;
+            XPTR song_data =
+                XGetIndexedFileResource(bank, ID_SONG, &song_id, i, name_buf, &song_size);
+            if (!song_data || song_size < 8)
+            {
+                if (song_data)
+                {
+                    XDisposePtr(song_data);
+                }
+                continue;
+            }
+
+            const unsigned char *body = static_cast<const unsigned char *>(song_data);
+            const uint16_t object_id =
+                static_cast<uint16_t>((static_cast<uint16_t>(body[0]) << 8) | body[1]);
+            const unsigned char song_type = body[6];
+            XDisposePtr(song_data);
+
+            if (song_type != 1 || object_id == 0)
+            {
+                continue;
+            }
+            /* Groovoids are SONG → emid (user Session songs are SONG → Midi). */
+            if (XExistsFileResource(bank, ID_EMID, static_cast<XLongResourceID>(object_id)) == FALSE)
+            {
+                continue;
+            }
+
+            GroovoidEntry entry;
+            entry.song_resource_id = static_cast<uint32_t>(song_id);
+            entry.emid_resource_id = object_id;
+            const unsigned char plen = static_cast<unsigned char>(name_buf[0]);
+            if (plen > 0 && plen < 255)
+            {
+                entry.name.assign(name_buf + 1, name_buf + 1 + plen);
+            }
+            if (entry.name.empty())
+            {
+                char fallback[64];
+                std::snprintf(fallback, sizeof(fallback), "Groovoid %u", entry.song_resource_id);
+                entry.name = fallback;
+            }
+            m_groovoids.push_back(std::move(entry));
+        }
+
+        std::sort(m_groovoids.begin(),
+                  m_groovoids.end(),
+                  [](const GroovoidEntry &a, const GroovoidEntry &b) {
+                      return a.name < b.name;
+                  });
+    }
+
     void RefreshListsFromBank()
     {
         m_samples.clear();
@@ -1330,6 +2191,7 @@ private:
         m_selected_sample = -1;
         m_selected_instrument = -1;
         RebuildInstrumentFilters();
+        RefreshGroovoidsFromBank();
 
         if (!m_bank_token)
         {
@@ -1352,11 +2214,29 @@ private:
                 continue;
             }
 
+            /* Skip duplicate INST ids (stale in-memory banks from failed deletes). */
+            {
+                const bool already = std::any_of(
+                    m_instruments.begin(),
+                    m_instruments.end(),
+                    [&](const InstrumentRow &row) {
+                        return !row.is_alias && row.inst_id == inst_info.instID;
+                    });
+                if (already)
+                {
+                    continue;
+                }
+            }
+
             InstrumentRow inst_row;
-            inst_row.is_custom = false;
+            inst_row.is_custom =
+                (inst_info.bank >= 2) ||
+                (m_session_custom_inst_ids.count(inst_info.instID) != 0);
             inst_row.from_song_document = false;
+            inst_row.is_alias = false;
             inst_row.instrument_index = inst_idx;
             inst_row.inst_id = inst_info.instID;
+            inst_row.target_inst_id = inst_info.instID;
             inst_row.program = static_cast<int>(inst_info.program);
             inst_row.split_count = (inst_info.keySplitCount <= 0) ? 1 : static_cast<int>(inst_info.keySplitCount);
             inst_row.bank = static_cast<int>(inst_info.bank);
@@ -1367,9 +2247,19 @@ private:
             }
             else
             {
-                char fallback[64];
-                std::snprintf(fallback, sizeof(fallback), "Inst %u", inst_info.instID);
-                inst_row.name = fallback;
+                std::string from_doc;
+                if (m_document &&
+                    LookupDocumentSampleDisplayNameForInst(inst_info.instID, &from_doc) &&
+                    !from_doc.empty())
+                {
+                    inst_row.name = from_doc;
+                }
+                else
+                {
+                    char fallback[64];
+                    std::snprintf(fallback, sizeof(fallback), "Inst %u", inst_info.instID);
+                    inst_row.name = fallback;
+                }
             }
             m_instruments.push_back(inst_row);
 
@@ -1391,37 +2281,247 @@ private:
                     continue;
                 }
 
+                const uint32_t snd_id = static_cast<uint32_t>(sample_info.sndResourceID);
+                /* Bank 2+, session-added SNDs, or samples belonging to session-custom INST. */
+                const bool row_custom =
+                    (inst_info.bank >= 2) ||
+                    (m_session_custom_snd_ids.count(snd_id) != 0) ||
+                    (m_session_custom_inst_ids.count(inst_info.instID) != 0);
+
+                /* One list row per SND (shared splits/instruments collapse). */
+                auto existing = std::find_if(m_samples.begin(),
+                                             m_samples.end(),
+                                             [snd_id](const SampleRow &s) {
+                                                 return s.source == SampleSource::Bank &&
+                                                        s.snd_resource_id == snd_id;
+                                             });
+                if (existing != m_samples.end())
+                {
+                    existing->is_custom = existing->is_custom || row_custom;
+                    continue;
+                }
+
                 SampleRow sample_row;
                 sample_row.index = sample_row_index++;
                 sample_row.instrument_index = inst_idx;
                 sample_row.split_index = split_idx;
-                sample_row.snd_resource_id = static_cast<uint32_t>(sample_info.sndResourceID);
+                sample_row.snd_resource_id = snd_id;
                 sample_row.sample_rate_hz = sample_info.sampleRate;
                 sample_row.frame_count = sample_info.frameCount;
                 sample_row.loop_start = sample_info.loopStart;
                 sample_row.loop_end = sample_info.loopEnd;
                 sample_row.bit_depth = static_cast<int>(sample_info.bitDepth);
                 sample_row.channels = static_cast<int>(sample_info.channels);
-                sample_row.is_custom = false;
+                sample_row.is_custom = row_custom;
                 sample_row.source = SampleSource::Bank;
                 sample_row.bank = static_cast<int>(inst_info.bank);
                 sample_row.program = static_cast<int>(inst_info.program);
                 sample_row.root_key = static_cast<int>(sample_info.rootKey);
                 sample_row.low_key = static_cast<int>(sample_info.lowKey);
                 sample_row.high_key = static_cast<int>(sample_info.highKey);
+                sample_row.codec_label =
+                    FormatVisibleCodecLabel(static_cast<uint32_t>(sample_info.compressionType),
+                                            sample_info.compressionSubType,
+                                            sample_info.opusRoundTripResample);
 
-                char sample_name[320];
-                std::snprintf(sample_name,
-                              sizeof(sample_name),
-                              "%s [SND:%u]",
-                              inst_row.name.c_str(),
-                              static_cast<unsigned int>(sample_info.sndResourceID));
-                sample_row.name = sample_name;
+                /* Prefer the SND resource name (BE2-style); fall back to instrument name. */
+                char snd_name[256];
+                snd_name[0] = 0;
+                {
+                    XFILE bank_file = reinterpret_cast<XFILE>(m_bank_token);
+                    static const XResourceType kSndTypes[] = {ID_ESND, ID_CSND, ID_SND, 0};
+                    for (int t = 0; kSndTypes[t] != 0; ++t)
+                    {
+                        if (XGetFileResourceName(bank_file,
+                                                 kSndTypes[t],
+                                                 static_cast<XLongResourceID>(snd_id),
+                                                 snd_name))
+                        {
+                            break;
+                        }
+                        snd_name[0] = 0;
+                    }
+                }
+                if (snd_name[0])
+                {
+                    sample_row.name = snd_name;
+                }
+                else
+                {
+                    std::string from_doc;
+                    if (m_document &&
+                        LookupDocumentSampleDisplayNameForSnd(snd_id, &from_doc) &&
+                        !from_doc.empty())
+                    {
+                        sample_row.name = from_doc;
+                    }
+                    else if (!inst_row.name.empty() &&
+                             inst_row.name.rfind("Inst ", 0) != 0)
+                    {
+                        sample_row.name = inst_row.name;
+                    }
+                    else
+                    {
+                        char fallback[64];
+                        std::snprintf(fallback, sizeof(fallback), "Sample %u", snd_id);
+                        sample_row.name = fallback;
+                    }
+                }
                 m_samples.push_back(sample_row);
             }
         }
 
+        /* Alias INST slots (ID_ALIAS) → extra list rows pointing at the concrete instrument. */
+        {
+            std::vector<InstrumentRow> alias_rows;
+            XFILE bank_file = reinterpret_cast<XFILE>(m_bank_token);
+            XAliasLinkResource *alias = XGetAliasLinkFromFile(bank_file);
+            if (alias)
+            {
+                const uint32_t alias_count = static_cast<uint32_t>(XGetLong(&alias->numberOfAliases));
+                for (uint32_t a = 0; a < alias_count; ++a)
+                {
+                    const uint32_t from_id = static_cast<uint32_t>(XGetLong(&alias->list[a].aliasFrom));
+                    const uint32_t to_id = static_cast<uint32_t>(XGetLong(&alias->list[a].aliasTo));
+                    for (const InstrumentRow &e : m_instruments)
+                    {
+                        if (e.is_alias || e.target_inst_id != to_id)
+                        {
+                            continue;
+                        }
+                        InstrumentRow alias_row = e;
+                        alias_row.is_alias = true;
+                        alias_row.inst_id = from_id;
+                        alias_row.target_inst_id = to_id;
+                        alias_row.bank = static_cast<int>(from_id / 256u);
+                        alias_row.program = static_cast<int>(from_id % 128u);
+                        alias_row.percussion = ((from_id & 0x80u) != 0u);
+                        if (alias_row.name.find("(Alias)") == std::string::npos)
+                        {
+                            alias_row.name += " (Alias)";
+                        }
+                        alias_rows.push_back(alias_row);
+                        break;
+                    }
+                }
+                XDisposePtr(reinterpret_cast<XPTR>(alias));
+            }
+            m_instruments.insert(m_instruments.end(), alias_rows.begin(), alias_rows.end());
+        }
+
+        /* Orphan SNDs: present in bank but not referenced by any instrument. */
+        {
+            std::set<uint32_t> referenced_snds;
+            for (const SampleRow &row : m_samples)
+            {
+                if (row.source == SampleSource::Bank && row.snd_resource_id != 0)
+                {
+                    referenced_snds.insert(row.snd_resource_id);
+                }
+            }
+
+            XFILE bank_file = reinterpret_cast<XFILE>(m_bank_token);
+            static const XResourceType kSndTypes[] = {ID_SND, ID_CSND, ID_ESND, 0};
+            for (int t = 0; kSndTypes[t] != 0; ++t)
+            {
+                const int32_t count = XCountFileResourcesOfType(bank_file, kSndTypes[t]);
+                for (int32_t i = 0; i < count; ++i)
+                {
+                    XLongResourceID snd_id = 0;
+                    int32_t snd_size = 0;
+                    char raw_name[256];
+                    raw_name[0] = 0;
+                    XPTR data = XGetIndexedFileResource(bank_file,
+                                                        kSndTypes[t],
+                                                        &snd_id,
+                                                        i,
+                                                        raw_name,
+                                                        &snd_size);
+                    if (!data)
+                    {
+                        continue;
+                    }
+                    XDisposePtr(data);
+                    if (snd_id <= 0 || referenced_snds.count(static_cast<uint32_t>(snd_id)) != 0)
+                    {
+                        continue;
+                    }
+                    referenced_snds.insert(static_cast<uint32_t>(snd_id)); /* de-dupe across types */
+
+                    SampleRow orphan;
+                    orphan.index = sample_row_index++;
+                    orphan.instrument_index = 0;
+                    orphan.split_index = 0;
+                    orphan.snd_resource_id = static_cast<uint32_t>(snd_id);
+                    /* Unassigned bank SNDs are Built-in unless session-added. */
+                    orphan.is_custom =
+                        (m_session_custom_snd_ids.count(static_cast<uint32_t>(snd_id)) != 0);
+                    orphan.unassigned = true;
+                    orphan.source = SampleSource::Bank;
+                    orphan.bank = -1;
+                    orphan.program = -1;
+                    orphan.root_key = 60;
+                    orphan.low_key = 0;
+                    orphan.high_key = 127;
+                    orphan.frame_count = 0;
+                    {
+                        char c_name[256];
+                        c_name[0] = 0;
+                        const unsigned char plen = static_cast<unsigned char>(raw_name[0]);
+                        if (plen > 0 && plen < 255)
+                        {
+                            std::memcpy(c_name, raw_name + 1, plen);
+                            c_name[plen] = 0;
+                        }
+                        if (c_name[0])
+                        {
+                            orphan.name = c_name;
+                        }
+                        else
+                        {
+                            char fallback[64];
+                            std::snprintf(fallback, sizeof(fallback), "Sample %u",
+                                          static_cast<unsigned>(snd_id));
+                            orphan.name = fallback;
+                        }
+                    }
+                    {
+                        XPTR snd_data = XGetFileResource(bank_file,
+                                                         kSndTypes[t],
+                                                         snd_id,
+                                                         nullptr,
+                                                         &snd_size);
+                        if (snd_data)
+                        {
+                            SampleDataInfo sdi;
+                            std::memset(&sdi, 0, sizeof(sdi));
+                            if (XGetSampleInfoFromSnd(snd_data, &sdi) == 0)
+                            {
+                                orphan.codec_label =
+                                    FormatVisibleCodecLabel(static_cast<uint32_t>(sdi.compressionType),
+                                                            0,
+                                                            XGetSoundOpusRoundTripFlag(snd_data) != FALSE);
+                                orphan.frame_count = sdi.frames;
+                                orphan.bit_depth = sdi.bitSize ? sdi.bitSize : 16;
+                                orphan.channels = sdi.channels ? sdi.channels : 1;
+                            }
+                            XDisposePtr(snd_data);
+                        }
+                    }
+                    m_samples.push_back(orphan);
+                }
+            }
+        }
+
         std::sort(m_instruments.begin(), m_instruments.end(), [](const InstrumentRow &a, const InstrumentRow &b) {
+            if (a.bank != b.bank)
+            {
+                return a.bank < b.bank;
+            }
+            if (a.percussion != b.percussion)
+            {
+                return static_cast<int>(a.percussion) < static_cast<int>(b.percussion);
+            }
             return a.program < b.program;
         });
         m_bank_instruments = m_instruments;
@@ -1435,10 +2535,43 @@ private:
             RebuildInstrumentFilters();
         }
         RefreshSongSamplesFromDocument();
+        SortSampleListAlphabetical();
+    }
+
+    void SortSampleListAlphabetical()
+    {
+        std::sort(m_samples.begin(), m_samples.end(), [](const SampleRow &a, const SampleRow &b) {
+            const int name_cmp = strcasecmp(a.name.c_str(), b.name.c_str());
+            if (name_cmp != 0)
+            {
+                return name_cmp < 0;
+            }
+            if (a.snd_resource_id != b.snd_resource_id)
+            {
+                return a.snd_resource_id < b.snd_resource_id;
+            }
+            return a.document_sample_index < b.document_sample_index;
+        });
+        for (size_t i = 0; i < m_samples.size(); ++i)
+        {
+            m_samples[i].index = static_cast<uint32_t>(i);
+        }
     }
 
     void RebuildInstrumentFilters()
     {
+        /* Rematch by (bank, category) — raw indices shifted when Custom filters
+         * were inserted (old default index 5 is now Bank 1 Melodic). */
+        int prefer_bank = -2;
+        int prefer_category = 0;
+        if (m_instrument_filter_index >= 0 &&
+            m_instrument_filter_index < static_cast<int>(m_instrument_filters.size()))
+        {
+            prefer_bank = m_instrument_filters[static_cast<size_t>(m_instrument_filter_index)].bank;
+            prefer_category =
+                m_instrument_filters[static_cast<size_t>(m_instrument_filter_index)].category;
+        }
+
         m_instrument_filters.clear();
         InstrumentFilterOption all;
         all.bank = -1;
@@ -1446,9 +2579,42 @@ private:
         all.label = "All";
         m_instrument_filters.push_back(all);
 
-        const int ordered_banks[] = {0, 1, 2};
-        for (int bank : ordered_banks)
+        /* Custom = session-owned / promoted at any bank (not only Bank 2). */
+        InstrumentFilterOption custom_melodic;
+        custom_melodic.bank = -2;
+        custom_melodic.category = 0;
+        custom_melodic.label = "Custom Melodic (any bank)";
+        m_instrument_filters.push_back(custom_melodic);
+        InstrumentFilterOption custom_perc;
+        custom_perc.bank = -2;
+        custom_perc.category = 1;
+        custom_perc.label = "Custom Percussion (any bank)";
+        m_instrument_filters.push_back(custom_perc);
+
+        bool seen_banks[128];
+        std::memset(seen_banks, 0, sizeof(seen_banks));
+        seen_banks[0] = seen_banks[1] = seen_banks[2] = true;
+        for (const InstrumentRow &inst : m_instruments)
         {
+            if (inst.bank >= 0 && inst.bank < 128)
+            {
+                seen_banks[inst.bank] = true;
+            }
+        }
+        for (const InstrumentRow &inst : m_bank_instruments)
+        {
+            if (inst.bank >= 0 && inst.bank < 128)
+            {
+                seen_banks[inst.bank] = true;
+            }
+        }
+
+        for (int bank = 0; bank < 128; ++bank)
+        {
+            if (!seen_banks[bank])
+            {
+                continue;
+            }
             InstrumentFilterOption melodic;
             melodic.bank = bank;
             melodic.category = 0;
@@ -1462,7 +2628,17 @@ private:
             m_instrument_filters.push_back(percussion);
         }
 
-        if (m_instrument_filter_index < 0 || m_instrument_filter_index >= static_cast<int>(m_instrument_filters.size()))
+        m_instrument_filter_index = -1;
+        for (size_t i = 0; i < m_instrument_filters.size(); ++i)
+        {
+            if (m_instrument_filters[i].bank == prefer_bank &&
+                m_instrument_filters[i].category == prefer_category)
+            {
+                m_instrument_filter_index = static_cast<int>(i);
+                break;
+            }
+        }
+        if (m_instrument_filter_index < 0)
         {
             m_instrument_filter_index = DefaultInstrumentFilterIndex();
         }
@@ -1470,11 +2646,19 @@ private:
 
     int DefaultInstrumentFilterIndex() const
     {
+        /* Prefer Custom Melodic (any bank) so Bank 2+ / promoted customs show. */
+        for (size_t i = 0; i < m_instrument_filters.size(); ++i)
+        {
+            if (m_instrument_filters[i].bank == -2 && m_instrument_filters[i].category == 0)
+            {
+                return static_cast<int>(i);
+            }
+        }
         for (size_t i = 0; i < m_instrument_filters.size(); ++i)
         {
             if (m_instrument_filters[i].bank == 2 && m_instrument_filters[i].category == 0)
             {
-                return static_cast<int>(i); // Bank 2 Melodic
+                return static_cast<int>(i);
             }
         }
         return 0;
@@ -1493,6 +2677,10 @@ private:
             return true;
         }
         const int category = inst.percussion ? 1 : 0;
+        if (opt.bank == -2)
+        {
+            return inst.is_custom && category == opt.category;
+        }
         return inst.bank == opt.bank && category == opt.category;
     }
 
@@ -1527,6 +2715,7 @@ private:
 
     // Session / IE / Song Info / Export helpers
 #include "nbeditor_session.inc"
+#include "nbeditor_bsn_session.inc"
 
     void DrawDockspace()
     {
@@ -1560,7 +2749,7 @@ private:
         ImGui::End();
 
         ImGui::SetNextWindowBgAlpha(0.95f);
-        if (ImGui::Begin("nbeditor_status", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysAutoResize))
+        if (ImGui::Begin("Status", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysAutoResize))
         {
             ImGui::Text("%s", m_status);
             if (!m_song_row.name.empty())
@@ -1613,7 +2802,8 @@ private:
 
         ImGuiID dock_status = 0;
         ImGuiID dock_main = 0;
-        ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Down, 0.14f, &dock_status, &dock_main);
+        /* ~5 status lines; Liberation reads larger than DejaVu at the same px size. */
+        ImGui::DockBuilderSplitNode(dockspace_id, ImGuiDir_Down, 0.16f, &dock_status, &dock_main);
 
         ImGuiID dock_sidebar = 0;
         ImGuiID dock_player = 0;
@@ -1621,7 +2811,7 @@ private:
 
         ImGui::DockBuilderDockWindow("Player", dock_player);
         ImGui::DockBuilderDockWindow("Session", dock_sidebar);
-        ImGui::DockBuilderDockWindow("nbeditor_status", dock_status);
+        ImGui::DockBuilderDockWindow("Status", dock_status);
         ImGui::DockBuilderFinish(dockspace_id);
 
         m_dock_layout_initialized = true;
@@ -1642,13 +2832,8 @@ private:
         {
             OpenLoadDialog();
         }
-        ImGui::SameLine();
-        if (ImGui::Button("Load Built-in Bank"))
-        {
-            LoadBuiltinBankAsActive();
-        }
 
-        bool recreate = false;
+        PollSessionSongFinished();
 
         ImGui::SetNextItemWidth(180.0f);
         if (ImGui::SliderInt("Volume", &m_volume_percent, 0, 150))
@@ -1679,27 +2864,67 @@ private:
             "Basement",
             "Banquet Hall",
             "Catacombs",
+            "Neo Room",
+            "Neo Hall",
+            "Neo Cavern",
+            "Neo Dungeon",
+            "Neo Nokia",
+            "MobileBAE",
+            "Neo Tap Delay",
+            "Custom",
         };
-        int reverb_choice = std::clamp(m_reverb_type - static_cast<int>(BAE_REVERB_TYPE_1), 0, 10);
+        const int reverb_max = static_cast<int>(IM_ARRAYSIZE(reverb_labels)) - 1;
+        int reverb_choice =
+            std::clamp(m_reverb_type - static_cast<int>(BAE_REVERB_TYPE_1), 0, reverb_max);
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(190.0f);
+        ImGui::SetNextItemWidth(210.0f);
         if (ImGui::Combo("Reverb", &reverb_choice, reverb_labels, IM_ARRAYSIZE(reverb_labels)))
         {
             m_reverb_type = static_cast<int>(BAE_REVERB_TYPE_1) + reverb_choice;
-            recreate = true;
+            /* Apply live — do not recreate the mixer (that stopped playback). */
+            if (m_mixer)
+            {
+                BAEMixer_SetDefaultReverb(m_mixer, static_cast<BAEReverbType>(m_reverb_type));
+            }
+            if (m_reverb_type == static_cast<int>(BAE_REVERB_TYPE_19))
+            {
+                OpenCustomReverbDialog();
+            }
         }
+#if USE_NEO_EFFECTS == TRUE
+        /* Neo presets + Custom share the editable Neo reverb engine (like zefidi). */
+        const bool neo_reverb_editable =
+            (m_reverb_type >= static_cast<int>(BAE_REVERB_TYPE_12) &&
+             m_reverb_type != static_cast<int>(BAE_REVERB_TYPE_17) &&
+             m_reverb_type != static_cast<int>(BAE_REVERB_TYPE_18));
+        if (neo_reverb_editable)
+        {
+            ImGui::SameLine();
+            if (ImGui::Button("Edit…"))
+            {
+                OpenCustomReverbDialog();
+            }
+        }
+#endif
 
         ImGui::SameLine();
         bool paused = false;
+        bool song_done = false;
         if (m_song)
         {
             BAE_BOOL paused_flag = FALSE;
+            BAE_BOOL done_flag = FALSE;
             if (BAESong_IsPaused(m_song, &paused_flag) == BAE_NO_ERROR)
             {
                 paused = (paused_flag != FALSE);
             }
+            if (BAESong_IsDone(m_song, &done_flag) == BAE_NO_ERROR)
+            {
+                song_done = (done_flag != FALSE);
+            }
         }
-        const char *play_pause_label = (!m_song_started || paused) ? "Play" : "Pause";
+        const char *play_pause_label =
+            (!m_song_started || paused || song_done) ? "Play" : "Pause";
         if (ImGui::Button(play_pause_label))
         {
             PlaySessionSong();
@@ -1712,17 +2937,12 @@ private:
         ImGui::SameLine();
         if (ImGui::Button("Export..."))
         {
-            OpenExportSongDialog();
+            OpenExportRmfInstrumentDialog();
         }
         ImGui::SameLine();
         if (ImGui::Button("Song Info"))
         {
             OpenSongInfoDialog();
-        }
-
-        if (recreate)
-        {
-            CreateMixer(false);
         }
 
         BAEAudioInfo info;
@@ -1782,11 +3002,18 @@ private:
         }
         if (!selected_instrument_name.empty())
         {
-            ImGui::Text("B%dP%03d  %s", m_selected_bank, m_selected_program, selected_instrument_name.c_str());
+            ImGui::Text("B%dP%03d  %s%s",
+                        m_selected_bank,
+                        m_selected_program,
+                        selected_instrument_name.c_str(),
+                        SelectedInstrumentIsPercussion() ? "  (drum / Ch 10)" : "");
         }
         else
         {
-            ImGui::Text("B%dP%03d", m_selected_bank, m_selected_program);
+            ImGui::Text("B%dP%03d%s",
+                        m_selected_bank,
+                        m_selected_program,
+                        SelectedInstrumentIsPercussion() ? "  (drum / Ch 10)" : "");
         }
         DrawKeyboard();
 
@@ -1797,7 +3024,7 @@ private:
         ImGui::End();
     }
 
-    void DrawKeyboard()
+    void DrawKeyboard(bool for_instrument_editor = false)
     {
         struct KeyRect
         {
@@ -1812,21 +3039,19 @@ private:
             return pitch == 1 || pitch == 3 || pitch == 6 || pitch == 8 || pitch == 10;
         };
 
+        ImGui::PushID(for_instrument_editor ? "ie_vkbd" : "player_vkbd");
         if (ImGui::Button("Panic"))
         {
-            BAESong audition_song = GetAuditionSong();
-            if (audition_song)
-            {
-                BAESong_AllNotesOff(audition_song, 0);
-            }
-            m_mouse_active_note = -1;
+            PanicAuditionNotes();
         }
         ImGui::SameLine();
-        ImGui::Text("Click/hold keyboard keys to audition selected instrument.");
+        ImGui::Text(for_instrument_editor
+                        ? "Preview uses live (unapplied) instrument edits."
+                        : "Click/hold keyboard keys to audition selected instrument.");
 
         const float width = std::max(520.0f, ImGui::GetContentRegionAvail().x);
-        const float white_h = 60.0f;
-        const float black_h = 38.0f;
+        const float white_h = for_instrument_editor ? 52.0f : 60.0f;
+        const float black_h = for_instrument_editor ? 34.0f : 38.0f;
         int white_count = 0;
 
         for (int note = kFirstNote; note <= kLastNote; ++note)
@@ -1845,13 +3070,22 @@ private:
         const ImRect key_area(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
         ImDrawList *draw = ImGui::GetWindowDrawList();
 
-        /* Only accept clicks when this keyboard is the topmost hovered item.
-         * Raw geometry checks pierce through Sample Editor / modal dialogs. */
+        /* Accept clicks when hovered; keep tracking while the button is active or a
+         * note is held so click-drag can wash across keys.
+         * Main player vkbd is suppressed while IE is open — must not touch shared
+         * m_mouse_active_note or IE hold/drag dies every frame. */
+        const bool suppressed_by_ie = !for_instrument_editor && m_instrument_editor_open;
         const bool modal_blocking = (ImGui::GetTopMostPopupModal() != nullptr);
         const bool editor_blocking =
-            m_sample_editor_open || m_instrument_editor_open || m_song_info_open || m_sample_editor_compression_open;
-        const bool keyboard_interactive =
-            !modal_blocking && !editor_blocking && ImGui::IsItemHovered(ImGuiHoveredFlags_None);
+            m_sample_editor_open || m_song_info_open || m_sample_editor_compression_open ||
+            suppressed_by_ie;
+        const bool item_hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_None);
+        const bool item_active = ImGui::IsItemActive();
+        const bool holding_mouse_note =
+            m_mouse_active_note >= 0 && ImGui::IsMouseDown(ImGuiMouseButton_Left);
+        const bool keyboard_tracking =
+            !modal_blocking && !editor_blocking && (item_hovered || item_active || holding_mouse_note);
+        (void)item_hovered;
 
         std::vector<KeyRect> white_keys;
         std::vector<KeyRect> black_keys;
@@ -1887,7 +3121,7 @@ private:
 
         const ImVec2 mouse = ImGui::GetIO().MousePos;
         int hovered_note = -1;
-        if (keyboard_interactive)
+        if (keyboard_tracking)
         {
             for (const KeyRect &k : black_keys)
             {
@@ -1910,36 +3144,42 @@ private:
             }
         }
 
-        const bool left_clicked = keyboard_interactive && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
-        const bool left_down = keyboard_interactive && ImGui::IsMouseDown(ImGuiMouseButton_Left);
-        const bool left_released = ImGui::IsMouseReleased(ImGuiMouseButton_Left);
-        const bool in_key_area = keyboard_interactive && key_area.Contains(mouse);
+        const bool left_clicked = keyboard_tracking && ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+        const bool left_down = keyboard_tracking && ImGui::IsMouseDown(ImGuiMouseButton_Left);
+        const bool left_released = keyboard_tracking && ImGui::IsMouseReleased(ImGuiMouseButton_Left);
+        const bool in_key_area = key_area.Contains(mouse);
 
-        if (left_clicked && in_key_area && hovered_note >= 0)
+        if (!suppressed_by_ie)
         {
-            if (m_mouse_active_note >= 0 && m_mouse_active_note != hovered_note)
+            if (left_clicked && in_key_area && hovered_note >= 0)
+            {
+                if (m_mouse_active_note >= 0 && m_mouse_active_note != hovered_note)
+                {
+                    NoteOff(m_mouse_active_note);
+                    m_key_mouse_held[static_cast<size_t>(m_mouse_active_note)] = false;
+                }
+                m_mouse_active_note = hovered_note;
+                m_key_mouse_held[static_cast<size_t>(hovered_note)] = true;
+                NoteOn(hovered_note);
+            }
+            else if (left_down && m_mouse_active_note >= 0 && hovered_note >= 0 &&
+                     hovered_note != m_mouse_active_note)
             {
                 NoteOff(m_mouse_active_note);
                 m_key_mouse_held[static_cast<size_t>(m_mouse_active_note)] = false;
+                m_mouse_active_note = hovered_note;
+                m_key_mouse_held[static_cast<size_t>(hovered_note)] = true;
+                NoteOn(hovered_note);
             }
-            m_mouse_active_note = hovered_note;
-            m_key_mouse_held[static_cast<size_t>(hovered_note)] = true;
-            NoteOn(hovered_note);
-        }
-        else if (left_down && m_mouse_active_note >= 0 && in_key_area && hovered_note >= 0 && hovered_note != m_mouse_active_note)
-        {
-            NoteOff(m_mouse_active_note);
-            m_key_mouse_held[static_cast<size_t>(m_mouse_active_note)] = false;
-            m_mouse_active_note = hovered_note;
-            m_key_mouse_held[static_cast<size_t>(hovered_note)] = true;
-            NoteOn(hovered_note);
-        }
 
-        if ((left_released || !keyboard_interactive) && m_mouse_active_note >= 0)
-        {
-            NoteOff(m_mouse_active_note);
-            m_key_mouse_held[static_cast<size_t>(m_mouse_active_note)] = false;
-            m_mouse_active_note = -1;
+            if ((left_released || !keyboard_tracking ||
+                 (left_down && !in_key_area && hovered_note < 0)) &&
+                m_mouse_active_note >= 0)
+            {
+                NoteOff(m_mouse_active_note);
+                m_key_mouse_held[static_cast<size_t>(m_mouse_active_note)] = false;
+                m_mouse_active_note = -1;
+            }
         }
 
         const uint32_t now_ms = SDL_GetTicks();
@@ -1975,6 +3215,7 @@ private:
         }
 
         ImGui::Dummy(ImVec2(width, 2.0f));
+        ImGui::PopID();
     }
 
     void UpdateKeyboardVoiceActivity(const BAEAudioInfo &info)
@@ -2072,7 +3313,8 @@ private:
 
     static bool SampleIsCustom(const SampleRow &sample)
     {
-        // Song-document samples are Custom; bank-patch samples are Built-in.
+        /* Custom: bank 2+ / session-added SNDs / song samples.
+         * Unassigned bank orphans stay Built-in unless session-added. */
         return sample.is_custom || sample.source == SampleSource::Song;
     }
 
@@ -2084,6 +3326,8 @@ private:
             return SampleIsCustom(sample);
         case SampleShowFilter::BuiltIn:
             return !SampleIsCustom(sample);
+        case SampleShowFilter::Unassigned:
+            return sample.unassigned;
         case SampleShowFilter::All:
         default:
             return true;
@@ -2096,16 +3340,18 @@ private:
             "All Samples",
             "Custom Samples",
             "Built-in Samples",
+            "Unassigned Samples",
         };
         const int filter_index = static_cast<int>(m_sample_show_filter);
-        const char *preview = kSampleShowLabels[filter_index >= 0 && filter_index < 3 ? filter_index : 0];
+        const char *preview =
+            kSampleShowLabels[filter_index >= 0 && filter_index < 4 ? filter_index : 0];
 
         ImGui::Text("Show:");
         ImGui::SameLine();
         ImGui::SetNextItemWidth(-1.0f);
         if (ImGui::BeginCombo("##SampleShowFilter", preview))
         {
-            for (int i = 0; i < 3; ++i)
+            for (int i = 0; i < 4; ++i)
             {
                 const bool selected = (filter_index == i);
                 if (ImGui::Selectable(kSampleShowLabels[i], selected))
@@ -2135,6 +3381,14 @@ private:
         if (visible_count == 0)
         {
             ImGui::TextDisabled("No samples in this category. Try another Show: option.");
+            if (ImGui::BeginPopupContextWindow("sample_list_empty_ctx", ImGuiPopupFlags_MouseButtonRight))
+            {
+                if (ImGui::MenuItem("Add Sample...", nullptr, false, m_bank_token != 0))
+                {
+                    OpenAddSampleFileDialog();
+                }
+                ImGui::EndPopup();
+            }
             return;
         }
 
@@ -2146,53 +3400,165 @@ private:
                 continue;
             }
 
-            char label[320];
-            std::snprintf(label,
-                          sizeof(label),
-                          "%s B%dP%03d  %s  [root:%d  range:%d-%d]",
-                          sample.source == SampleSource::Song ? "[Song]" : "[Bank]",
-                          sample.bank,
-                          sample.program,
-                          sample.name.c_str(),
-                          sample.root_key,
-                          sample.low_key,
-                          sample.high_key);
+            char label[384];
+            const char *codec_tag = sample.codec_label.empty() ? "" : sample.codec_label.c_str();
+            char codec_bracket[64] = {0};
+            if (codec_tag[0])
+            {
+                std::snprintf(codec_bracket, sizeof(codec_bracket), " [%s]", codec_tag);
+            }
+            /* BE2-style: SND id first; do not show bank/program assignment. */
+            if (sample.unassigned)
+            {
+                std::snprintf(label,
+                              sizeof(label),
+                              "[SND:%u]  %s%s  [Unassigned]",
+                              sample.snd_resource_id,
+                              sample.name.c_str(),
+                              codec_bracket);
+            }
+            else if (sample.source == SampleSource::Song)
+            {
+                std::snprintf(label,
+                              sizeof(label),
+                              "[SND:%u]  %s%s  [Song] [root:%d  range:%d-%d]",
+                              sample.snd_resource_id,
+                              sample.name.c_str(),
+                              codec_bracket,
+                              sample.root_key,
+                              sample.low_key,
+                              sample.high_key);
+            }
+            else
+            {
+                std::snprintf(label,
+                              sizeof(label),
+                              "[SND:%u]  %s%s  [root:%d  range:%d-%d]",
+                              sample.snd_resource_id,
+                              sample.name.c_str(),
+                              codec_bracket,
+                              sample.root_key,
+                              sample.low_key,
+                              sample.high_key);
+            }
             if (ImGui::Selectable(label, m_selected_sample == static_cast<int>(i)))
             {
                 m_selected_sample = static_cast<int>(i);
-                m_selected_uses_song_source = sample.is_custom;
-                m_selected_bank = sample.bank;
-                m_selected_program = sample.program;
-                BAESong audition_song = GetAuditionSong();
-                if (audition_song)
+                m_selected_uses_song_source = sample.is_custom && !sample.unassigned;
+                if (!sample.unassigned)
                 {
-                    BAESong_ProgramBankChange(audition_song,
-                                              0,
-                                              static_cast<unsigned char>(m_selected_program),
-                                              static_cast<unsigned char>(m_selected_bank),
-                                              0);
+                    m_selected_bank = sample.bank;
+                    m_selected_program = sample.program;
+                    m_selected_instrument = -1;
+                    for (size_t ii = 0; ii < m_instruments.size(); ++ii)
+                    {
+                        if (m_instruments[ii].bank == m_selected_bank &&
+                            m_instruments[ii].program == m_selected_program)
+                        {
+                            m_selected_instrument = static_cast<int>(ii);
+                            break;
+                        }
+                    }
+                    BAESong audition_song = GetAuditionSong();
+                    if (audition_song)
+                    {
+                        BAESong_ProgramBankChange(audition_song,
+                                                  AuditionMidiChannel(),
+                                                  static_cast<unsigned char>(m_selected_program),
+                                                  static_cast<unsigned char>(m_selected_bank),
+                                                  0);
+                    }
                 }
             }
 
-#if NBEDITOR_MVP
             if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
             {
                 m_selected_sample = static_cast<int>(i);
-                OpenSampleEditorForSelection();
+                if (sample.unassigned)
+                {
+                    (void)MakeInstrumentUsingSelectedSampleAuto();
+                }
+#if NBEDITOR_MVP
+                else
+                {
+                    OpenSampleEditorForSelection();
+                }
+#endif
             }
 
             char popup_id[64];
             std::snprintf(popup_id, sizeof(popup_id), "sample_ctx_%zu", i);
             if (ImGui::BeginPopupContextItem(popup_id, ImGuiPopupFlags_MouseButtonRight))
             {
-                if (ImGui::MenuItem("Open Sample Editor"))
+                if (sample.unassigned)
+                {
+                    if (ImGui::MenuItem("Make Instrument Using"))
+                    {
+                        m_selected_sample = static_cast<int>(i);
+                        (void)MakeInstrumentUsingSelectedSampleAuto();
+                    }
+                    if (ImGui::MenuItem("Make Instrument Using..."))
+                    {
+                        m_selected_sample = static_cast<int>(i);
+                        OpenMakeInstrumentUsingDialog();
+                    }
+                }
+#if NBEDITOR_MVP
+                else if (ImGui::MenuItem("Open Sample Editor"))
                 {
                     m_selected_sample = static_cast<int>(i);
                     OpenSampleEditorForSelection();
                 }
+#endif
+                ImGui::Separator();
+                if (ImGui::MenuItem("Export Sample...",
+                                    nullptr,
+                                    false,
+                                    (sample.source == SampleSource::Bank && m_bank_token != 0 &&
+                                     sample.snd_resource_id != 0) ||
+                                        (sample.source == SampleSource::Song && m_document != nullptr)))
+                {
+                    m_selected_sample = static_cast<int>(i);
+                    OpenExportSampleDialog(static_cast<int>(i));
+                }
+                if (ImGui::MenuItem("Export as RMF...",
+                                    nullptr,
+                                    false,
+                                    m_bank_token != 0 && sample.source == SampleSource::Bank &&
+                                        sample.snd_resource_id != 0))
+                {
+                    m_selected_sample = static_cast<int>(i);
+                    OpenExportSampleRmfDialog(static_cast<int>(i));
+                }
+                if (ImGui::MenuItem("Get Resource Usage..."))
+                {
+                    OpenResourceUsageForSample(static_cast<int>(i));
+                }
+                if (ImGui::MenuItem("Delete Sample",
+                                    nullptr,
+                                    false,
+                                    m_bank_token != 0 && sample.source == SampleSource::Bank))
+                {
+                    DeleteSampleAt(static_cast<int>(i));
+                }
+                ImGui::Separator();
+                if (ImGui::MenuItem("Add Sample...", nullptr, false, m_bank_token != 0))
+                {
+                    OpenAddSampleFileDialog();
+                }
                 ImGui::EndPopup();
             }
-#endif
+        }
+
+        if (ImGui::BeginPopupContextWindow("sample_list_bg_ctx",
+                                           ImGuiPopupFlags_MouseButtonRight |
+                                               ImGuiPopupFlags_NoOpenOverItems))
+        {
+            if (ImGui::MenuItem("Add Sample...", nullptr, false, m_bank_token != 0))
+            {
+                OpenAddSampleFileDialog();
+            }
+            ImGui::EndPopup();
         }
 
     }
@@ -2201,6 +3567,12 @@ private:
     // Phase 2 BE2-style Sample Editor
 #include "nbeditor_sample_editor.inc"
 #endif
+
+#include "nbeditor_bank_add.inc"
+#include "nbeditor_instrument_ops.inc"
+#include "nbeditor_resource_usage.inc"
+#include "nbeditor_session_extras.inc"
+#include "nbeditor_dnd.inc"
 
     void DrawInstrumentListWindow()
     {
@@ -2228,17 +3600,50 @@ private:
             }
         }
 
+        const InstrumentFilterOption *active_filter = nullptr;
+        if (m_instrument_filter_index >= 0 &&
+            m_instrument_filter_index < static_cast<int>(m_instrument_filters.size()))
+        {
+            active_filter = &m_instrument_filters[static_cast<size_t>(m_instrument_filter_index)];
+        }
+        const bool filter_is_group =
+            active_filter && active_filter->bank >= 0 && active_filter->category >= 0;
+
         int visible_count = 0;
+        bool used_programs[128];
+        std::memset(used_programs, 0, sizeof(used_programs));
         for (size_t i = 0; i < m_instruments.size(); ++i)
         {
             const InstrumentRow &inst = m_instruments[i];
             if (InstrumentMatchesFilter(inst))
             {
                 ++visible_count;
+                if (filter_is_group && inst.program >= 0 && inst.program < 128)
+                {
+                    used_programs[inst.program] = true;
+                }
+            }
+        }
+        int empty_count = 0;
+        if (m_show_empty_instrument_slots && filter_is_group)
+        {
+            for (int p = 0; p < 128; ++p)
+            {
+                if (!used_programs[p])
+                {
+                    ++empty_count;
+                }
             }
         }
 
-        ImGui::Text("Instruments: %d", visible_count);
+        if (m_show_empty_instrument_slots && filter_is_group)
+        {
+            ImGui::Text("Instruments: %d (+ %d empty)", visible_count, empty_count);
+        }
+        else
+        {
+            ImGui::Text("Instruments: %d", visible_count);
+        }
         ImGui::Separator();
 
         for (size_t i = 0; i < m_instruments.size(); ++i)
@@ -2258,9 +3663,20 @@ private:
                           inst.name.c_str(),
                           inst.split_count,
                           inst.split_count == 1 ? "" : "s");
-            if (ImGui::Selectable(label, m_selected_instrument == static_cast<int>(i)))
+            const bool alias_italic = inst.is_alias && m_font_italic != nullptr;
+            if (alias_italic)
+            {
+                ImGui::PushFont(m_font_italic);
+            }
+            else if (inst.is_alias)
+            {
+                /* Fallback when oblique TTF failed to load. */
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.75f, 0.85f, 1.0f, 1.0f));
+            }
+            if (ImGui::Selectable(label, m_selected_instrument == static_cast<int>(i) && !m_selected_empty_slot))
             {
                 m_selected_instrument = static_cast<int>(i);
+                m_selected_empty_slot = false;
                 m_selected_uses_song_source = inst.is_custom || inst.has_song_override;
                 m_selected_bank = inst.bank;
                 m_selected_program = inst.program;
@@ -2268,7 +3684,7 @@ private:
                 if (audition_song)
                 {
                     BAESong_ProgramBankChange(audition_song,
-                                              0,
+                                              AuditionMidiChannel(),
                                               static_cast<unsigned char>(m_selected_program),
                                               static_cast<unsigned char>(m_selected_bank),
                                               0);
@@ -2277,21 +3693,254 @@ private:
             if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
             {
                 m_selected_instrument = static_cast<int>(i);
-                OpenInstrumentEditorForSelection();
+                m_selected_empty_slot = false;
+                if (!inst.is_alias)
+                {
+                    OpenInstrumentEditorForSelection();
+                }
+            }
+            if (alias_italic)
+            {
+                ImGui::PopFont();
+            }
+            else if (inst.is_alias)
+            {
+                ImGui::PopStyleColor();
             }
             char popup_id[64];
             std::snprintf(popup_id, sizeof(popup_id), "inst_ctx_%zu", i);
             if (ImGui::BeginPopupContextItem(popup_id, ImGuiPopupFlags_MouseButtonRight))
             {
-                if (ImGui::MenuItem("Edit Instrument"))
+                if (ImGui::MenuItem("Edit Instrument", nullptr, false, !inst.is_alias))
                 {
                     m_selected_instrument = static_cast<int>(i);
+                    m_selected_empty_slot = false;
                     OpenInstrumentEditorForSelection();
+                }
+                if (ImGui::MenuItem("Get Resource Usage..."))
+                {
+                    OpenResourceUsageForInstrument(static_cast<int>(i));
+                }
+                if (ImGui::MenuItem("Export as RMF...",
+                                    nullptr,
+                                    false,
+                                    m_bank_token != 0 && !inst.from_song_document))
+                {
+                    m_selected_instrument = static_cast<int>(i);
+                    m_selected_empty_slot = false;
+                    OpenExportInstrumentAsRmf(static_cast<int>(i));
+                }
+                if (ImGui::MenuItem("Make Song Using",
+                                    nullptr,
+                                    false,
+                                    m_bank_token != 0 && !inst.from_song_document &&
+                                        !inst.is_alias))
+                {
+                    m_selected_instrument = static_cast<int>(i);
+                    m_selected_empty_slot = false;
+                    (void)MakeSongUsingInstrumentAt(static_cast<int>(i));
+                }
+                ImGui::Separator();
+                if (ImGui::MenuItem("Copy Instrument",
+                                    nullptr,
+                                    false,
+                                    m_bank_token != 0 && !inst.from_song_document))
+                {
+                    m_selected_instrument = static_cast<int>(i);
+                    CopyInstrumentAt(static_cast<int>(i));
+                }
+                if (ImGui::MenuItem("Paste Instrument...",
+                                    nullptr,
+                                    false,
+                                    m_inst_clipboard_valid && m_bank_token != 0))
+                {
+                    OpenInstDestDialog(InstDestMode::Paste, -1);
+                }
+                if (ImGui::MenuItem("Create Alias...",
+                                    nullptr,
+                                    false,
+                                    m_bank_token != 0 && !inst.from_song_document))
+                {
+                    OpenInstDestDialog(InstDestMode::Alias, static_cast<int>(i));
+                }
+                if (ImGui::MenuItem("Clone Instrument...",
+                                    nullptr,
+                                    false,
+                                    m_bank_token != 0 && !inst.from_song_document))
+                {
+                    OpenInstDestDialog(InstDestMode::Clone, static_cast<int>(i));
+                }
+                if (ImGui::MenuItem("Move Instrument...",
+                                    nullptr,
+                                    false,
+                                    m_bank_token != 0 && !inst.is_alias && !inst.from_song_document))
+                {
+                    OpenInstDestDialog(InstDestMode::Move, static_cast<int>(i));
+                }
+                if (inst.is_alias)
+                {
+                    if (ImGui::MenuItem("Remove Alias", nullptr, false, m_bank_token != 0))
+                    {
+                        RemoveAliasAt(static_cast<int>(i));
+                    }
+                }
+                else if (ImGui::MenuItem("Delete Instrument",
+                                         nullptr,
+                                         false,
+                                         m_bank_token != 0 && !inst.from_song_document))
+                {
+                    DeleteInstrumentAt(static_cast<int>(i));
+                }
+                ImGui::Separator();
+                if (ImGui::MenuItem("Add Instrument...", nullptr, false, m_bank_token != 0))
+                {
+                    OpenAddInstrumentDialog();
+                }
+                if (ImGui::MenuItem("Show Empty Instrument Slots",
+                                    nullptr,
+                                    m_show_empty_instrument_slots,
+                                    filter_is_group))
+                {
+                    m_show_empty_instrument_slots = !m_show_empty_instrument_slots;
                 }
                 ImGui::EndPopup();
             }
         }
 
+        if (m_show_empty_instrument_slots && filter_is_group)
+        {
+            const int bank = active_filter->bank;
+            for (int p = 0; p < 128; ++p)
+            {
+                if (used_programs[p])
+                {
+                    continue;
+                }
+                char label[128];
+                std::snprintf(label, sizeof(label), "B%dP%03d  (empty)", bank, p);
+                const bool selected =
+                    m_selected_empty_slot && m_selected_bank == bank && m_selected_program == p;
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.55f, 0.58f, 1.0f));
+                if (ImGui::Selectable(label, selected))
+                {
+                    m_selected_instrument = -1;
+                    m_selected_empty_slot = true;
+                    m_selected_uses_song_source = false;
+                    m_selected_bank = bank;
+                    m_selected_program = p;
+                }
+                ImGui::PopStyleColor();
+                char empty_popup[64];
+                std::snprintf(empty_popup, sizeof(empty_popup), "inst_empty_ctx_%d_%d", bank, p);
+                if (ImGui::BeginPopupContextItem(empty_popup, ImGuiPopupFlags_MouseButtonRight))
+                {
+                    if (ImGui::MenuItem("Add Instrument...", nullptr, false, m_bank_token != 0))
+                    {
+                        m_selected_instrument = -1;
+                        m_selected_empty_slot = true;
+                        m_selected_bank = bank;
+                        m_selected_program = p;
+                        OpenAddInstrumentDialog();
+                    }
+                    if (ImGui::MenuItem("Show Empty Instrument Slots",
+                                        nullptr,
+                                        m_show_empty_instrument_slots))
+                    {
+                        m_show_empty_instrument_slots = !m_show_empty_instrument_slots;
+                    }
+                    ImGui::EndPopup();
+                }
+            }
+        }
+
+        if (ImGui::BeginPopupContextWindow("inst_list_bg_ctx",
+                                           ImGuiPopupFlags_MouseButtonRight |
+                                               ImGuiPopupFlags_NoOpenOverItems))
+        {
+            if (ImGui::MenuItem("Add Instrument...", nullptr, false, m_bank_token != 0))
+            {
+                OpenAddInstrumentDialog();
+            }
+            if (ImGui::MenuItem("Show Empty Instrument Slots",
+                                nullptr,
+                                m_show_empty_instrument_slots,
+                                filter_is_group))
+            {
+                m_show_empty_instrument_slots = !m_show_empty_instrument_slots;
+            }
+            ImGui::EndPopup();
+        }
+
+    }
+
+    bool SelectedInstrumentIsPercussion() const
+    {
+        if (m_instrument_editor_open)
+        {
+            return (m_ie_inst_id & 0x80u) != 0u;
+        }
+        if (m_selected_instrument >= 0 &&
+            m_selected_instrument < static_cast<int>(m_instruments.size()))
+        {
+            return m_instruments[static_cast<size_t>(m_selected_instrument)].percussion;
+        }
+        for (const InstrumentRow &inst : m_instruments)
+        {
+            if (inst.bank == m_selected_bank && inst.program == m_selected_program)
+            {
+                return inst.percussion;
+            }
+        }
+        /* Empty slot under a Percussion filter group. */
+        if (m_selected_empty_slot && m_instrument_filter_index >= 0 &&
+            m_instrument_filter_index < static_cast<int>(m_instrument_filters.size()))
+        {
+            return m_instrument_filters[static_cast<size_t>(m_instrument_filter_index)].category == 1;
+        }
+        return false;
+    }
+
+    /* GM channel 10 (index 9) for percussion; otherwise ch 1 (index 0). */
+    unsigned char AuditionMidiChannel() const
+    {
+        return SelectedInstrumentIsPercussion() ? static_cast<unsigned char>(9)
+                                                : static_cast<unsigned char>(0);
+    }
+
+    /* On ch10 the engine maps note→drum INST. For audition we always fire the
+     * selected percussion slot's note so every VKBD key plays that one drum. */
+    unsigned char AuditionPlayNote(int vkbd_note, int program) const
+    {
+        if (SelectedInstrumentIsPercussion())
+        {
+            int drum = program;
+            if (drum < 0)
+            {
+                drum = 0;
+            }
+            if (drum > 127)
+            {
+                drum = 127;
+            }
+            return static_cast<unsigned char>(drum);
+        }
+        if (vkbd_note < 0)
+        {
+            vkbd_note = 0;
+        }
+        if (vkbd_note > 127)
+        {
+            vkbd_note = 127;
+        }
+        return static_cast<unsigned char>(vkbd_note);
+    }
+
+    void RememberAuditionSoundingNote(int vkbd_note, unsigned char play_note)
+    {
+        if (vkbd_note >= 0 && vkbd_note < 128)
+        {
+            m_vkbd_sounding_note[static_cast<size_t>(vkbd_note)] = static_cast<int>(play_note);
+        }
     }
 
     void NoteOn(int midi_note)
@@ -2302,30 +3951,163 @@ private:
             return;
         }
 
+        const int bank = m_instrument_editor_open ? m_ie_bank : m_selected_bank;
+        const int program = m_instrument_editor_open ? m_ie_program : m_selected_program;
+        const bool is_perc = SelectedInstrumentIsPercussion();
+        const unsigned char ch = AuditionMidiChannel();
+        /* GM perc bank uses note as INST; keep program 0 so NoteOnWithLoad does
+         * not add program+note into the wrong instrument id. */
+        const unsigned char prog_for_channel =
+            is_perc ? static_cast<unsigned char>(0) : static_cast<unsigned char>(program);
+        const unsigned char play_note = AuditionPlayNote(midi_note, program);
+        RememberAuditionSoundingNote(midi_note, play_note);
+
         BAESong_ProgramBankChange(audition_song,
-                      0,
-                      static_cast<unsigned char>(m_selected_program),
-                      static_cast<unsigned char>(m_selected_bank),
+                      ch,
+                      prog_for_channel,
+                      static_cast<unsigned char>(bank),
                       0);
-        BAESong_NoteOnWithLoad(audition_song,
-                               0,
-                               static_cast<unsigned char>(midi_note),
-                               100,
-                               0);
+        if (m_instrument_editor_open)
+        {
+            /* Load + live-patch, then NoteOn (not WithLoad) so ADSR edits are audible. */
+            const uint32_t patch_id = InstrumentEditorPatchId();
+            BAEResult load_r = BAE_GENERAL_BAD;
+            if (patch_id != 0)
+            {
+                load_r = BAESong_LoadInstrument(audition_song, static_cast<BAE_INSTRUMENT>(patch_id));
+                /* Document-only INST (not yet in bank): fall back to playback song. */
+                if (load_r != BAE_NO_ERROR && m_song && audition_song != m_song)
+                {
+                    audition_song = m_song;
+                    BAESong_ProgramBankChange(audition_song,
+                                              ch,
+                                              prog_for_channel,
+                                              static_cast<unsigned char>(bank),
+                                              0);
+                    load_r = BAESong_LoadInstrument(audition_song,
+                                                    static_cast<BAE_INSTRUMENT>(patch_id));
+                }
+                if (load_r == BAE_NO_ERROR)
+                {
+                    (void)BAESong_PatchLoadedInstrumentExtInfo(audition_song,
+                                                               static_cast<BAE_INSTRUMENT>(patch_id),
+                                                               &m_ie_ext);
+                    BAESong_NoteOn(audition_song,
+                                   ch,
+                                   play_note,
+                                   127,
+                                   0);
+                }
+                else if (m_song)
+                {
+                    /* Bank load failed: play through the RMF song (has embeds). */
+                    audition_song = m_song;
+                    BAESong_ProgramBankChange(audition_song,
+                                              ch,
+                                              prog_for_channel,
+                                              static_cast<unsigned char>(bank),
+                                              0);
+                    BAESong_NoteOnWithLoad(audition_song,
+                                           ch,
+                                           play_note,
+                                           127,
+                                           0);
+                }
+            }
+            else if (m_song)
+            {
+                audition_song = m_song;
+                BAESong_NoteOnWithLoad(audition_song,
+                                       ch,
+                                       play_note,
+                                       127,
+                                       0);
+            }
+            m_ie_note_song = audition_song;
+        }
+        else
+        {
+            BAESong_NoteOnWithLoad(audition_song,
+                                   ch,
+                                   play_note,
+                                   127,
+                                   0);
+            m_ie_note_song = nullptr;
+        }
     }
 
     void NoteOff(int midi_note)
     {
-        BAESong audition_song = GetAuditionSong();
+        BAESong audition_song = m_ie_note_song ? m_ie_note_song : GetAuditionSong();
         if (!audition_song)
         {
             return;
         }
-        BAESong_NoteOff(audition_song,
-                        0,
-                        static_cast<unsigned char>(midi_note),
-                        0,
-                        0);
+        unsigned char play_note = static_cast<unsigned char>(
+            (midi_note < 0) ? 0 : (midi_note > 127 ? 127 : midi_note));
+        if (midi_note >= 0 && midi_note < 128)
+        {
+            const int remembered = m_vkbd_sounding_note[static_cast<size_t>(midi_note)];
+            if (remembered >= 0 && remembered <= 127)
+            {
+                play_note = static_cast<unsigned char>(remembered);
+            }
+            m_vkbd_sounding_note[static_cast<size_t>(midi_note)] = -1;
+        }
+        /* Clear both audition channels so switching melodic↔drums can't hang notes. */
+        const unsigned char channels[2] = {0, 9};
+        for (unsigned char ch : channels)
+        {
+            BAESong_NoteOff(audition_song, ch, play_note, 0, 0);
+            if (play_note != static_cast<unsigned char>(midi_note) && midi_note >= 0 && midi_note <= 127)
+            {
+                BAESong_NoteOff(audition_song,
+                                ch,
+                                static_cast<unsigned char>(midi_note),
+                                0,
+                                0);
+            }
+        }
+        /* Also clear the other song in case IE fell back mid-session. */
+        if (m_instrument_editor_open)
+        {
+            if (m_preview_song && m_preview_song != audition_song)
+            {
+                for (unsigned char ch : channels)
+                {
+                    BAESong_NoteOff(m_preview_song, ch, play_note, 0, 0);
+                }
+            }
+            if (m_song && m_song != audition_song)
+            {
+                for (unsigned char ch : channels)
+                {
+                    BAESong_NoteOff(m_song, ch, play_note, 0, 0);
+                }
+            }
+        }
+    }
+
+    void PanicAuditionNotes()
+    {
+        m_mouse_active_note = -1;
+        m_key_mouse_held.fill(false);
+        m_key_active_until_ms.fill(0);
+        m_vkbd_sounding_note.fill(-1);
+        /* Hard-kill (not AllNotesOff): IE live ADSR often has long release. */
+        if (m_ie_note_song)
+        {
+            BAESong_KillActiveNotes(m_ie_note_song);
+        }
+        if (m_preview_song)
+        {
+            BAESong_KillActiveNotes(m_preview_song);
+        }
+        if (m_song)
+        {
+            BAESong_KillActiveNotes(m_song);
+        }
+        m_ie_note_song = nullptr;
     }
 
 private:
@@ -2333,6 +4115,7 @@ private:
     BAEMixer m_mixer = nullptr;
     BAESong m_song = nullptr;
     BAESong m_preview_song = nullptr;
+    BAESong m_ie_note_song = nullptr; /* song that received the last IE NoteOn */
     BAERmfEditorDocument *m_document = nullptr;
     BAEBankToken m_bank_token = 0;
 
@@ -2344,23 +4127,69 @@ private:
 
     int m_selected_sample = -1;
     int m_selected_instrument = -1;
-    int m_instrument_filter_index = 5; // Bank 2 Melodic (All=0 … Bank2 Melodic=5)
+    int m_instrument_filter_index = -1; /* rebuilt → Custom Melodic (any bank) */
     SampleShowFilter m_sample_show_filter = SampleShowFilter::Custom;
+    SongShowFilter m_song_show_filter = SongShowFilter::Custom;
+    bool m_show_empty_instrument_slots = false;
+    bool m_selected_empty_slot = false;
     bool m_selected_uses_song_source = false;
     int m_selected_bank = 0;
     int m_selected_program = 0;
     bool m_song_started = false;
+
+    bool m_confirm_clear_cache_open = false;
+    bool m_confirm_delete_pcm_open = false;
+    bool m_confirm_replace_session_open = false;
+    std::string m_pending_replace_session_path;
+    bool m_confirm_quit_open = false;
+    bool m_confirm_unload_bank_open = false;
+    bool m_confirm_load_builtin_open = false;
+    bool m_confirm_new_session_open = false;
+    bool m_resource_usage_open = false;
+    std::string m_resource_usage_title;
+    std::vector<std::string> m_resource_usage_lines;
+
+    bool m_session_info_open = false;
+    std::vector<std::string> m_recent_sessions;
+    std::set<uint32_t> m_session_custom_snd_ids;
+    /* Session-owned / RMF-promoted instruments at any bank (not only Bank 2+). */
+    std::set<uint32_t> m_session_custom_inst_ids;
+
+    SessionTab m_session_tab = SessionTab::Songs;
+    bool m_bank01_touched = false;
+    bool m_confirm_bank_merge_open = false;
+    std::string m_pending_bank_merge_path;
+    bool m_sample_editor_has_uncompressed_master = false;
+
+    bool m_inst_dest_open = false;
+    InstDestMode m_inst_dest_mode = InstDestMode::Alias;
+    uint32_t m_inst_dest_source_index = 0;
+    uint32_t m_inst_dest_source_inst_id = 0;
+    uint32_t m_inst_dest_source_display_id = 0;
+    int m_inst_dest_bank = 2;
+    bool m_inst_dest_percussion = false;
+    int m_inst_dest_program = 0;
+    bool m_inst_dest_deep_clone = false;
+    bool m_inst_clipboard_valid = false;
+    uint32_t m_inst_clipboard_inst_id = 0;
+    std::string m_inst_clipboard_name;
 
     int m_sample_rate_hz = 44100;
     int m_sample_rate_index = 2;
     bool m_stereo = true;
     int m_reverb_type = static_cast<int>(BAE_REVERB_TYPE_1);
     int m_volume_percent = 100;
-    bool m_loop_enabled = false;
+    bool m_loop_enabled = true;
 
     std::array<bool, 16> m_channel_muted = {};
     std::array<bool, 128> m_key_mouse_held = {};
     std::array<uint32_t, 128> m_key_active_until_ms = {};
+    /* VKBD key → actual MIDI note sent (percussion remaps every key to the drum slot). */
+    std::array<int, 128> m_vkbd_sounding_note = [] {
+        std::array<int, 128> notes{};
+        notes.fill(-1);
+        return notes;
+    }();
     int m_mouse_active_note = -1;
 
     std::array<float, 128> m_scope_history = {};
@@ -2428,10 +4257,21 @@ private:
     bool m_sample_editor_choose_note_open = false;
     bool m_sample_editor_compression_open = false;
     bool m_sample_editor_player20_compat = false;
+    int m_sample_editor_comp_codec_index_on_open = 0;
+    BAERmfEditorSndStorageType m_sample_editor_comp_storage_on_open = BAE_EDITOR_SND_STORAGE_ESND;
+    BAERmfEditorOpusMode m_sample_editor_comp_opus_on_open = BAE_EDITOR_OPUS_MODE_AUDIO;
+    bool m_sample_editor_comp_dirty_on_open = false;
+    bool m_sample_editor_comp_preview_needs_on_open = false;
+    bool m_sample_editor_snd_snapshot_valid = false;
+    XResourceType m_sample_editor_snd_snapshot_type = ID_ESND;
+    XLongResourceID m_sample_editor_snd_snapshot_id = 0;
+    std::vector<unsigned char> m_sample_editor_snd_snapshot_data;
+    std::string m_sample_editor_snd_snapshot_name;
     SeDragMode m_sample_editor_drag_mode = SeDragMode::None;
     uint32_t m_sample_editor_drag_anchor_frame = 0;
     uint32_t m_sample_editor_loop_start_at_drag = 0;
     uint32_t m_sample_editor_loop_end_at_drag = 0;
+    float m_sample_editor_drag_start_mouse_x = 0.0f;
     uint32_t m_sample_editor_pan_view_start_at_drag = 0;
     std::deque<SampleEditorUndoState> m_sample_editor_undo;
     std::deque<SampleEditorUndoState> m_sample_editor_redo;
@@ -2453,7 +4293,67 @@ private:
     std::string m_dialog_error_message;
     DialogAction m_pending_dialog_action = DialogAction::OpenImport;
 
+    bool m_bank_add_open = false;
+    BankAddMode m_bank_add_mode = BankAddMode::Instrument;
+    int m_bank_add_bank = 2;
+    bool m_bank_add_percussion = false;
+    int m_bank_add_program = 0;
+    int m_bank_add_root_key = 60;
+    uint32_t m_bank_add_snd_id = 0;
+    int m_bank_add_alias_source_index = -1;
+    char m_bank_add_name[256] = {0};
+
+    ImFont *m_font_regular = nullptr;
+    ImFont *m_font_italic = nullptr;
+
     SongRow m_song_row;
+    std::vector<SessionSongEntry> m_session_songs;
+    int m_session_song_index = -1;
+    std::vector<GroovoidEntry> m_groovoids;
+    int m_groovoid_index = -1;
+    int m_pending_groovoid_export_index = -1;
+
+#if USE_NEO_EFFECTS == TRUE
+    bool m_custom_reverb_open = false;
+    int m_custom_reverb_comb_count = 4;
+    int m_custom_reverb_delays[NEO_CUSTOM_MAX_COMBS] = {50, 75, 100, 125};
+    int m_custom_reverb_feedback[NEO_CUSTOM_MAX_COMBS] = {90, 90, 90, 90};
+    int m_custom_reverb_gain[NEO_CUSTOM_MAX_COMBS] = {127, 127, 127, 127};
+    int m_custom_reverb_lowpass = 64;
+    int m_custom_reverb_mix = 110;
+#endif
+    int m_session_casd_count = 0;
+    std::string m_loaded_session_path;
+    std::map<uint32_t, SessionPcmCacheEntry> m_session_pcm_cache;
+    std::map<uint32_t, std::vector<unsigned char>> m_app_compression_cache;
+    /* RMF/ZMF export dialog: instruments selected for embedding. */
+    bool m_export_rmf_open = false;
+    std::vector<ExportInstrumentItem> m_export_items;
+    std::set<uint32_t> m_export_embed_inst_ids;
+    /* Combo index matches BAERmfEditorSndStorageType (ESND/CSND/SND). */
+    int m_export_snd_storage_index = static_cast<int>(BAE_EDITOR_SND_STORAGE_ESND);
+    /* Sample list → Export Sample (native codec file). */
+    int m_export_native_sample_row = -1;
+    std::string m_export_native_sample_ext;
+    /* Sample list → Export as RMF (temp doc only; does not mutate session). */
+    bool m_export_sample_rmf_open = false;
+    int m_export_sample_row = -1;
+    int m_export_sample_bank = 2;
+    bool m_export_sample_percussion = false;
+    int m_export_sample_program = 0;
+    /* Pending one-shot RMF after Save As path is chosen. */
+    bool m_oneshot_export_pending = false;
+    uint32_t m_oneshot_bank_instrument_index = 0; /* instrument export / assigned sample */
+    uint32_t m_oneshot_sample_split_index = 0;
+    uint32_t m_oneshot_snd_id = 0;
+    bool m_oneshot_sample_unassigned = false;
+    bool m_oneshot_percussion = false;
+    bool m_oneshot_from_sample = false; /* sample length note; else fixed 1s/2s */
+    int m_oneshot_target_program = 0;
+    int m_oneshot_note = 60;
+    uint32_t m_oneshot_sample_frames = 0;
+    uint32_t m_oneshot_sample_rate_hz = 0;
+    std::string m_oneshot_title;
     bool m_document_dirty = false;
     bool m_request_quit = false;
 
@@ -2485,11 +4385,12 @@ private:
 
 public:
     bool WantsQuit() const { return m_request_quit; }
+    void RequestQuit() { RequestQuitConfirm(); }
 };
 
 } // namespace
 
-int main(int, char **)
+int main(int argc, char **argv)
 {
 #if NBEDITOR
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD))
@@ -2501,7 +4402,7 @@ int main(int, char **)
     const float main_scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
     const SDL_WindowFlags window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     char versionString[128];
-    std::snprintf(versionString, sizeof(versionString), "NeoBAE Editor v0.00 (%s)", _VERSION);
+    std::snprintf(versionString, sizeof(versionString), "NeoBAE Editor - %s - %s", BAE_GetCurrentCPUArchitecture(), _VERSION);
     SDL_Window *window = SDL_CreateWindow(versionString, static_cast<int>(1280 * main_scale), static_cast<int>(820 * main_scale), window_flags);
     if (!window)
     {
@@ -2533,11 +4434,72 @@ int main(int, char **)
     style.ScaleAllSizes(main_scale);
     style.FontScaleDpi = main_scale;
 
+    const float font_size = 14.0f * main_scale;
+    ImFont *font_regular = nullptr;
+    ImFont *font_italic = nullptr;
+
+#if defined(NBEDITOR_EMBED_FONTS)
+    {
+        ImFontConfig cfg;
+        cfg.FontDataOwnedByAtlas = false; /* static const embed blobs */
+        font_regular = io.Fonts->AddFontFromMemoryTTF(
+            const_cast<unsigned char *>(liberation_sans_regular_data),
+            static_cast<int>(liberation_sans_regular_size),
+            font_size,
+            &cfg);
+        ImFontConfig cfg_italic;
+        cfg_italic.FontDataOwnedByAtlas = false;
+        font_italic = io.Fonts->AddFontFromMemoryTTF(
+            const_cast<unsigned char *>(liberation_sans_italic_data),
+            static_cast<int>(liberation_sans_italic_size),
+            font_size,
+            &cfg_italic);
+    }
+#else
+    auto try_font = [&](const char *path) -> ImFont * {
+        if (!path || !path[0])
+        {
+            return nullptr;
+        }
+        return io.Fonts->AddFontFromFileTTF(path, font_size);
+    };
+    font_regular = try_font("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf");
+    if (!font_regular)
+    {
+        font_regular = try_font("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+    }
+#if defined(_WIN32)
+    if (!font_regular)
+    {
+        font_regular = try_font("C:\\Windows\\Fonts\\segoeui.ttf");
+    }
+#endif
+    /* Prefer plain italic — never BoldOblique (aliases should not look bold). */
+    font_italic = try_font("/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf");
+    if (!font_italic)
+    {
+        font_italic = try_font("/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf");
+    }
+#if defined(_WIN32)
+    if (!font_italic)
+    {
+        font_italic = try_font("C:\\Windows\\Fonts\\segoeuiz.ttf");
+    }
+#endif
+#endif
+
+    if (!font_regular)
+    {
+        font_regular = io.Fonts->AddFontDefault();
+    }
+    io.FontDefault = font_regular;
+
     ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
     ImGui_ImplSDLRenderer3_Init(renderer);
 
     NbEditorApp app;
     app.SetMainWindow(window);
+    app.SetUiFonts(font_regular, font_italic);
     if (!app.Init())
     {
         SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,
@@ -2553,6 +4515,8 @@ int main(int, char **)
         return 1;
     }
 
+    (void)app.OpenCommandLineArgs(argc, argv);
+
     SDL_ShowWindow(window);
 
     bool done = false;
@@ -2564,11 +4528,19 @@ int main(int, char **)
             ImGui_ImplSDL3_ProcessEvent(&event);
             if (event.type == SDL_EVENT_QUIT)
             {
-                done = true;
+                app.RequestQuit();
             }
             if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == SDL_GetWindowID(window))
             {
-                done = true;
+                app.RequestQuit();
+            }
+            if (event.type == SDL_EVENT_DROP_FILE)
+            {
+                const char *dropped = event.drop.data;
+                if (dropped && dropped[0])
+                {
+                    app.HandleDroppedPath(dropped);
+                }
             }
         }
 
@@ -2606,6 +4578,17 @@ int main(int, char **)
     SDL_Quit();
     return 0;
 #else
+    (void)argc;
+    (void)argv;
     return 0;
 #endif
 }
+
+#if defined(_WIN32) && !defined(NBEDITOR_NO_WINMAIN)
+/* MinGW -Wl,--subsystem,windows entry: forward shell/Open-with args into main. */
+#include <windows.h>
+int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int)
+{
+    return main(__argc, __argv);
+}
+#endif

@@ -540,6 +540,10 @@ typedef struct X_PACKBY1
 #define ZBF_enableAmpScale              0x40    // not used
 #define ZBF_disableSndLooping           0x20
 #define ZBF_reserved_1                  0x10
+/* Ghost instrument (RMF/ZMF song documents only): INST may reference bank SND
+ * IDs without embedding those samples. Never meaningful for HSB/ZSB banks —
+ * a bank cannot ghost to itself. Editor convention using former reserved bit. */
+#define ZBF_ghostInstrument             ZBF_reserved_1
 #define ZBF_useSampleRate               0x08
 #define ZBF_sampleAndHold               0x04
 #define ZBF_extendedFormat              0x02

@@ -8131,8 +8131,9 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
             }
         }
 
-        /* Bank alias samples reference external bank SND IDs and must not
-         * participate in local SND dedupe/ID assignment. */
+        /* Ghost / bank-alias samples (RMF/ZMF song documents only): reference
+         * external bank SND IDs and must not be embedded or participate in
+         * local SND dedupe/ID assignment. HSB/ZSB bank save never uses this path. */
         if (sample->isBankAlias)
         {
             sampleSndIDs[index] = sample->aliasSndResourceID;
@@ -13310,6 +13311,110 @@ BAEResult BAERmfEditorDocument_GetSampleCodecDescription(BAERmfEditorDocument co
     return BAE_NO_ERROR;
 }
 
+/* Codecs whose native bitstream can be extracted from an XSndHeader3 blob
+ * (FLAC/Vorbis/Opus/MPEG/QOA). IMA/ADPCM/PCM decode to WAV instead. */
+static bool PV_IsBitstreamPassthroughCodec(SndCompressionType srcCodec)
+{
+    switch (srcCodec)
+    {
+#if USE_FLAC_DECODER == TRUE
+    case C_FLAC:
+        return TRUE;
+#endif
+#if USE_VORBIS_DECODER == TRUE
+    case C_VORBIS:
+    case CS_VORBIS_32K:
+    case CS_VORBIS_48K:
+    case CS_VORBIS_64K:
+    case CS_VORBIS_80K:
+    case CS_VORBIS_96K:
+    case CS_VORBIS_128K:
+    case CS_VORBIS_160K:
+    case CS_VORBIS_192K:
+    case CS_VORBIS_256K:
+        return TRUE;
+#endif
+#if USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE
+    case C_OPUS:
+    case CS_OPUS_12K:
+    case CS_OPUS_16K:
+    case CS_OPUS_24K:
+    case CS_OPUS_32K:
+    case CS_OPUS_48K:
+    case CS_OPUS_64K:
+    case CS_OPUS_80K:
+    case CS_OPUS_96K:
+    case CS_OPUS_128K:
+    case CS_OPUS_160K:
+    case CS_OPUS_192K:
+    case CS_OPUS_256K:
+        return TRUE;
+#endif
+#if USE_MPEG_DECODER != 0
+    case C_MPEG_32:  case C_MPEG_40:  case C_MPEG_48:  case C_MPEG_56:
+    case C_MPEG_64:  case C_MPEG_80:  case C_MPEG_96:  case C_MPEG_112:
+    case C_MPEG_128: case C_MPEG_160: case C_MPEG_192: case C_MPEG_224:
+    case C_MPEG_256: case C_MPEG_320:
+        return TRUE;
+#endif
+#if USE_QOA_SUPPORT == TRUE
+    case C_QOA:
+        return TRUE;
+#endif
+    default:
+        return FALSE;
+    }
+}
+
+/* Write the compressed payload from an XSndHeader3 SND blob, or BAE_NOT_SETUP
+ * if the blob is not a passthrough Type-3 compressed sample. */
+static BAEResult PV_ExportSndBitstreamToFile(XPTR sndData,
+                                             int32_t sndSize,
+                                             SndCompressionType srcCodec,
+                                             BAEPathName filePath)
+{
+    XSndHeader3 const *hdr3;
+    int32_t bitstreamSize;
+    unsigned char const *bitstream;
+    unsigned char const *blobEnd;
+    XFILENAME fileName;
+    XFILE outFile;
+    int32_t writeErr;
+
+    if (!sndData || !filePath || sndSize <= (int32_t)sizeof(XSndHeader3))
+    {
+        return BAE_PARAM_ERR;
+    }
+    if (!PV_IsBitstreamPassthroughCodec(srcCodec))
+    {
+        return BAE_NOT_SETUP;
+    }
+
+    hdr3 = (XSndHeader3 const *)sndData;
+    if (XGetShort(&hdr3->type) != XThirdSoundFormat)
+    {
+        return BAE_NOT_SETUP;
+    }
+
+    bitstreamSize = XGetLong(&hdr3->sndBuffer.encodedBytes);
+    bitstream = (unsigned char const *)&hdr3->sndBuffer.sampleArea[0];
+    blobEnd = (unsigned char const *)sndData + sndSize;
+    if (bitstreamSize <= 0 || bitstream + bitstreamSize > blobEnd)
+    {
+        return BAE_BAD_FILE;
+    }
+
+    XConvertPathToXFILENAME(filePath, &fileName);
+    outFile = XFileOpenForWrite(&fileName, TRUE);
+    if (!outFile)
+    {
+        return BAE_FILE_IO_ERROR;
+    }
+    writeErr = XFileWrite(outFile, (XPTRC)bitstream, bitstreamSize);
+    XFileClose(outFile);
+    return (writeErr == 0) ? BAE_NO_ERROR : BAE_FILE_IO_ERROR;
+}
+
 BAEResult BAERmfEditorDocument_ExportSampleToFile(BAERmfEditorDocument const *document,
                                                   uint32_t sampleIndex,
                                                   BAEPathName filePath)
@@ -13320,6 +13425,7 @@ BAEResult BAERmfEditorDocument_ExportSampleToFile(BAERmfEditorDocument const *do
     char const *ext;
     GM_Waveform waveCopy;
     OPErr opErr;
+    BAEResult passResult;
 
     if (!document || !filePath || sampleIndex >= document->sampleCount)
     {
@@ -13332,68 +13438,22 @@ BAEResult BAERmfEditorDocument_ExportSampleToFile(BAERmfEditorDocument const *do
     }
 
     /* For compressed formats with an original SND blob, extract and write the
-     * raw bitstream directly: FLAC -> .flac, Vorbis -> .ogg, Opus -> .opus, MPEG -> .mp3.
-     * The blob is laid out as XSndHeader3 (int16_t format tag + XSoundHeader3),
-     * with the compressed bitstream at sndBuffer.sampleArea[0]. */
+     * raw bitstream directly: FLAC -> .flac, Vorbis/Opus -> .ogg, MPEG -> .mp3,
+     * QOA -> .qoa. The blob is laid out as XSndHeader3 (int16_t format tag +
+     * XSoundHeader3), with the compressed bitstream at sndBuffer.sampleArea[0]. */
     if (sample->originalSndData && sample->originalSndSize > (int32_t)sizeof(XSndHeader3))
     {
-        SndCompressionType srcCodec = (SndCompressionType)sample->sourceCompressionType;
-        bool isCompressed = FALSE;
-
-        switch (srcCodec)
+        passResult = PV_ExportSndBitstreamToFile(sample->originalSndData,
+                                                 sample->originalSndSize,
+                                                 (SndCompressionType)sample->sourceCompressionType,
+                                                 filePath);
+        if (passResult != BAE_NOT_SETUP)
         {
-#if USE_FLAC_DECODER == TRUE
-        case C_FLAC:
-            isCompressed = TRUE;
-            break;
-#endif
-#if USE_VORBIS_DECODER == TRUE
-        case C_VORBIS:
-            isCompressed = TRUE;
-            break;
-#endif
-#if USE_OPUS_DECODER == TRUE || USE_OPUS_ENCODER == TRUE
-    case C_OPUS:
-        isCompressed = TRUE;
-        break;
-#endif
-#if USE_MPEG_DECODER != 0
-        case C_MPEG_32:  case C_MPEG_40:  case C_MPEG_48:  case C_MPEG_56:
-        case C_MPEG_64:  case C_MPEG_80:  case C_MPEG_96:  case C_MPEG_112:
-        case C_MPEG_128: case C_MPEG_160: case C_MPEG_192: case C_MPEG_224:
-        case C_MPEG_256: case C_MPEG_320:
-            isCompressed = TRUE;
-            break;
-#endif
-        default:
-            break;
-        }
-
-        if (isCompressed)
-        {
-            XSndHeader3 const *hdr3      = (XSndHeader3 const *)sample->originalSndData;
-            int32_t bitstreamSize        = XGetLong(&hdr3->sndBuffer.encodedBytes);
-            unsigned char const *bitstream = (unsigned char const *)&hdr3->sndBuffer.sampleArea[0];
-            unsigned char const *blobEnd   = (unsigned char const *)sample->originalSndData + sample->originalSndSize;
-
-            if (bitstreamSize > 0 && bitstream + bitstreamSize <= blobEnd)
-            {
-                XFILE outFile;
-                int32_t writeErr;
-                XConvertPathToXFILENAME(filePath, &fileName);
-                outFile = XFileOpenForWrite(&fileName, TRUE);
-                if (!outFile)
-                {
-                    return BAE_FILE_IO_ERROR;
-                }
-                writeErr = XFileWrite(outFile, (XPTRC)bitstream, bitstreamSize);
-                XFileClose(outFile);
-                return (writeErr == 0) ? BAE_NO_ERROR : BAE_FILE_IO_ERROR;
-            }
+            return passResult;
         }
     }
 
-    /* PCM/ADPCM or no original blob: export decoded waveform as WAV or AIFF. */
+    /* PCM/ADPCM/IMA or no original blob: export decoded waveform as WAV or AIFF. */
     ext = strrchr(filePath, '.');
     if (ext && (!XStrCmp(ext, ".aif") || !XStrCmp(ext, ".aiff") ||
                !XStrCmp(ext, ".AIF") || !XStrCmp(ext, ".AIFF")))
@@ -13630,6 +13690,390 @@ BAEResult BAERmfEditorDocument_SetInstrumentExtInfo(BAERmfEditorDocument *docume
         XDisposePtr(ext->originalInstData);
         ext->originalInstData = NULL;
         ext->originalInstSize = 0;
+    }
+
+    PV_MarkDocumentDirty(document);
+    return BAE_NO_ERROR;
+}
+
+static BAEResult PV_ResolveBankInstrumentIndexForGhost(BAEBankToken bankToken,
+                                                       uint32_t instID,
+                                                       uint32_t *outInstrumentIndex)
+{
+    uint32_t instrumentCount;
+    uint32_t instrumentIndex;
+    uint32_t resolvedInstID;
+
+    if (!bankToken || !outInstrumentIndex)
+    {
+        return BAE_PARAM_ERR;
+    }
+    if (BAERmfEditorBank_GetInstrumentCount(bankToken, &instrumentCount) != BAE_NO_ERROR)
+    {
+        return BAE_BAD_FILE;
+    }
+    for (instrumentIndex = 0; instrumentIndex < instrumentCount; ++instrumentIndex)
+    {
+        BAERmfEditorBankInstrumentInfo info;
+        if (BAERmfEditorBank_GetInstrumentInfo(bankToken, instrumentIndex, &info) == BAE_NO_ERROR &&
+            info.instID == instID)
+        {
+            *outInstrumentIndex = instrumentIndex;
+            return BAE_NO_ERROR;
+        }
+    }
+    if (BAERmfEditorBank_ResolveInstID(bankToken, instID, &resolvedInstID, outInstrumentIndex) == BAE_NO_ERROR)
+    {
+        return BAE_NO_ERROR;
+    }
+    return BAE_BAD_FILE;
+}
+
+static XShortResourceID PV_ResolveGhostAliasSndID(BAEBankToken bankToken,
+                                                  uint32_t bankInstrumentIndex,
+                                                  uint32_t splitIndex,
+                                                  BAERmfEditorSample const *sample)
+{
+    BAERmfEditorBankSampleInfo bankSample;
+    XFILE bankFile;
+    XPTR sndData;
+    int32_t sndSize;
+
+    if (!sample)
+    {
+        return 0;
+    }
+    if (sample->isBankAlias && sample->aliasSndResourceID != 0)
+    {
+        return sample->aliasSndResourceID;
+    }
+
+    XSetMemory(&bankSample, sizeof(bankSample), 0);
+    if (BAERmfEditorBank_GetInstrumentSampleInfo(bankToken,
+                                                 bankInstrumentIndex,
+                                                 splitIndex,
+                                                 &bankSample) == BAE_NO_ERROR &&
+        bankSample.sndResourceID != 0)
+    {
+        return bankSample.sndResourceID;
+    }
+
+    if (sample->sampleAssetID > 0 && sample->sampleAssetID <= 32767u)
+    {
+        bankFile = (XFILE)bankToken;
+        XFileUseThisResourceFile(bankFile);
+        sndData = XGetSoundResourceByID((XLongResourceID)sample->sampleAssetID, &sndSize);
+        if (sndData)
+        {
+            XDisposePtr(sndData);
+            return (XShortResourceID)sample->sampleAssetID;
+        }
+    }
+    return 0;
+}
+
+static BAEResult PV_ConvertDocumentSampleToBankAlias(BAERmfEditorSample *sample,
+                                                     BAEBankToken bankToken,
+                                                     XShortResourceID sndID)
+{
+    if (!sample || !bankToken || sndID == 0)
+    {
+        return BAE_PARAM_ERR;
+    }
+    if (sample->waveform)
+    {
+        GM_FreeWaveform(sample->waveform);
+        sample->waveform = NULL;
+    }
+    if (sample->originalSndData)
+    {
+        XDisposePtr(sample->originalSndData);
+        sample->originalSndData = NULL;
+        sample->originalSndSize = 0;
+    }
+    sample->isBankAlias = TRUE;
+    sample->aliasBankToken = bankToken;
+    sample->aliasSndResourceID = sndID;
+    sample->sampleAssetID = (uint32_t)sndID;
+    return BAE_NO_ERROR;
+}
+
+static BAEResult PV_HydrateDocumentSampleFromBankAlias(BAERmfEditorDocument *document,
+                                                       uint32_t sampleIndex,
+                                                       BAEBankToken bankToken)
+{
+    BAERmfEditorSample *sample;
+    BAERmfEditorSample saved;
+    XShortResourceID sndID;
+    uint32_t beforeCount;
+    BAEResult result;
+
+    if (!document || !bankToken || sampleIndex >= document->sampleCount)
+    {
+        return BAE_PARAM_ERR;
+    }
+    sample = &document->samples[sampleIndex];
+    if (!sample->isBankAlias)
+    {
+        return BAE_NO_ERROR;
+    }
+    sndID = sample->aliasSndResourceID;
+    if (sndID == 0)
+    {
+        return BAE_PARAM_ERR;
+    }
+
+    saved = *sample;
+    beforeCount = document->sampleCount;
+    result = PV_AddEmbeddedSampleVariant(document,
+                                         (XFILE)bankToken,
+                                         (XLongResourceID)saved.instID,
+                                         saved.displayName,
+                                         saved.program,
+                                         sndID,
+                                         saved.rootKey,
+                                         saved.lowKey,
+                                         saved.highKey);
+    if (result != BAE_NO_ERROR || document->sampleCount != beforeCount + 1)
+    {
+        return (result != BAE_NO_ERROR) ? result : BAE_GENERAL_ERR;
+    }
+
+    {
+        BAERmfEditorSample *hydrated = &document->samples[document->sampleCount - 1];
+        hydrated->splitVolume = saved.splitVolume;
+        hydrated->instID = saved.instID;
+        hydrated->program = saved.program;
+        hydrated->rootKey = saved.rootKey;
+        hydrated->lowKey = saved.lowKey;
+        hydrated->highKey = saved.highKey;
+
+        /* Replace the alias slot with the hydrated sample, then drop the temp. */
+        if (sample->displayName)
+        {
+            PV_FreeString(&sample->displayName);
+        }
+        if (sample->sourcePath)
+        {
+            PV_FreeString(&sample->sourcePath);
+        }
+        *sample = *hydrated;
+        XSetMemory(hydrated, sizeof(*hydrated), 0);
+        document->sampleCount--;
+    }
+    return BAE_NO_ERROR;
+}
+
+BAEResult BAERmfEditorDocument_IsInstrumentGhost(BAERmfEditorDocument const *document,
+                                                 uint32_t instID,
+                                                 BAE_BOOL *outGhost)
+{
+    BAERmfEditorInstrumentExt *ext;
+    uint32_t i;
+    uint32_t sampleCountForInst;
+    uint32_t aliasCount;
+
+    if (!document || !outGhost)
+    {
+        return BAE_PARAM_ERR;
+    }
+    *outGhost = FALSE;
+
+    ext = PV_FindInstrumentExt((BAERmfEditorDocument *)document, (XLongResourceID)instID);
+    if (ext && TEST_FLAG_VALUE(ext->flags1, ZBF_ghostInstrument))
+    {
+        *outGhost = TRUE;
+        return BAE_NO_ERROR;
+    }
+
+    sampleCountForInst = 0;
+    aliasCount = 0;
+    for (i = 0; i < document->sampleCount; ++i)
+    {
+        if (document->samples[i].instID != instID)
+        {
+            continue;
+        }
+        sampleCountForInst++;
+        if (document->samples[i].isBankAlias)
+        {
+            aliasCount++;
+        }
+    }
+    if (sampleCountForInst > 0 && aliasCount == sampleCountForInst)
+    {
+        *outGhost = TRUE;
+    }
+    return BAE_NO_ERROR;
+}
+
+BAEResult BAERmfEditorDocument_SetInstrumentGhost(BAERmfEditorDocument *document,
+                                                  uint32_t instID,
+                                                  BAEBankToken bankToken,
+                                                  BAE_BOOL ghost)
+{
+    BAERmfEditorInstrumentExtInfo info;
+    BAEResult result;
+    uint32_t bankInstrumentIndex;
+    uint32_t sampleIndex;
+    uint32_t splitIndex;
+    BAE_BOOL currentlyGhost;
+
+    if (!document || !bankToken)
+    {
+        return BAE_PARAM_ERR;
+    }
+
+    currentlyGhost = FALSE;
+    (void)BAERmfEditorDocument_IsInstrumentGhost(document, instID, &currentlyGhost);
+
+    result = BAERmfEditorDocument_GetInstrumentExtInfo(document, instID, &info);
+    if (result != BAE_NO_ERROR)
+    {
+        return result;
+    }
+
+    if (ghost)
+    {
+        info.flags1 = (unsigned char)(info.flags1 | ZBF_ghostInstrument);
+    }
+    else
+    {
+        info.flags1 = (unsigned char)(info.flags1 & (unsigned char)~ZBF_ghostInstrument);
+    }
+    result = BAERmfEditorDocument_SetInstrumentExtInfo(document, instID, &info);
+    if (result != BAE_NO_ERROR)
+    {
+        return result;
+    }
+
+    if (ghost == currentlyGhost)
+    {
+        /* Still ensure sample alias state matches when enabling. */
+        if (!ghost)
+        {
+            return BAE_NO_ERROR;
+        }
+    }
+
+    bankInstrumentIndex = 0;
+    {
+        BAEResult resolveResult;
+
+        resolveResult = PV_ResolveBankInstrumentIndexForGhost(bankToken, instID, &bankInstrumentIndex);
+        if (resolveResult != BAE_NO_ERROR)
+        {
+            /* Song-only INST with no bank counterpart: allow flag-only ghost when
+             * samples already carry usable bank SND IDs via sampleAssetID. */
+            if (!ghost)
+            {
+                return BAE_BAD_FILE;
+            }
+            result = resolveResult;
+        }
+        else
+        {
+            result = BAE_NO_ERROR;
+        }
+    }
+
+    splitIndex = 0;
+    for (sampleIndex = 0; sampleIndex < document->sampleCount; ++sampleIndex)
+    {
+        BAERmfEditorSample *sample = &document->samples[sampleIndex];
+        if (sample->instID != instID)
+        {
+            continue;
+        }
+        if (ghost)
+        {
+            XShortResourceID sndID = 0;
+            if (result == BAE_NO_ERROR)
+            {
+                sndID = PV_ResolveGhostAliasSndID(bankToken, bankInstrumentIndex, splitIndex, sample);
+            }
+            if (sndID == 0 && sample->sampleAssetID > 0 && sample->sampleAssetID <= 32767u)
+            {
+                sndID = (XShortResourceID)sample->sampleAssetID;
+            }
+            if (sndID == 0)
+            {
+                return BAE_PARAM_ERR;
+            }
+            result = PV_ConvertDocumentSampleToBankAlias(sample, bankToken, sndID);
+            if (result != BAE_NO_ERROR)
+            {
+                return result;
+            }
+        }
+        else
+        {
+            result = PV_HydrateDocumentSampleFromBankAlias(document, sampleIndex, bankToken);
+            if (result != BAE_NO_ERROR)
+            {
+                return result;
+            }
+        }
+        splitIndex++;
+    }
+
+    /* Enabling ghost with no document samples yet (e.g. session reload):
+     * materialize bank-alias splits from the bank INST so RMF export can
+     * omit embedding without the user re-checking Ghost. */
+    if (ghost && splitIndex == 0 && result == BAE_NO_ERROR)
+    {
+        uint32_t bankSampleCount;
+        uint32_t s;
+        BAERmfEditorBankInstrumentInfo bankInfo;
+        BAERmfEditorInstrumentExtInfo bankExt;
+
+        bankSampleCount = 0;
+        XSetMemory(&bankInfo, sizeof(bankInfo), 0);
+        XSetMemory(&bankExt, sizeof(bankExt), 0);
+        if (BAERmfEditorBank_GetInstrumentSampleCount(bankToken,
+                                                      bankInstrumentIndex,
+                                                      &bankSampleCount) != BAE_NO_ERROR ||
+            bankSampleCount == 0 ||
+            BAERmfEditorBank_GetInstrumentInfo(bankToken, bankInstrumentIndex, &bankInfo) != BAE_NO_ERROR)
+        {
+            return BAE_BAD_FILE;
+        }
+        for (s = 0; s < bankSampleCount; ++s)
+        {
+            BAERmfEditorBankSampleInfo bankSample;
+            XSetMemory(&bankSample, sizeof(bankSample), 0);
+            if (BAERmfEditorBank_GetInstrumentSampleInfo(bankToken,
+                                                        bankInstrumentIndex,
+                                                        s,
+                                                        &bankSample) != BAE_NO_ERROR)
+            {
+                return BAE_BAD_FILE;
+            }
+            if (BAERmfEditorDocument_AddBankAliasSample(document,
+                                                       bankToken,
+                                                       instID,
+                                                       bankInfo.program,
+                                                       bankSample.sndResourceID,
+                                                       bankInfo.name,
+                                                       bankSample.rootKey,
+                                                       bankSample.lowKey,
+                                                       bankSample.highKey,
+                                                       NULL,
+                                                       NULL) != BAE_NO_ERROR)
+            {
+                return BAE_GENERAL_ERR;
+            }
+            document->samples[document->sampleCount - 1].splitVolume = bankSample.splitVolume;
+        }
+        if (BAERmfEditorBank_GetInstrumentExtInfo(bankToken, bankInstrumentIndex, &bankExt) == BAE_NO_ERROR)
+        {
+            /* Bank GetInstrumentExtInfo displayName points at a locals buffer;
+             * retarget to bankInfo.name which remains valid in this scope. */
+            bankExt.displayName = bankInfo.name[0] ? bankInfo.name : NULL;
+            bankExt.flags1 = (unsigned char)(bankExt.flags1 | ZBF_ghostInstrument);
+            bankExt.instID = instID;
+            (void)BAERmfEditorDocument_SetInstrumentExtInfo(document, instID, &bankExt);
+        }
     }
 
     PV_MarkDocumentDirty(document);
@@ -14911,10 +15355,10 @@ BAEResult BAERmfEditorBank_GetInstrumentSampleInfo(BAEBankToken bankToken,
 
     outInfo->sndResourceID = sndID;
 
-    /* Get SND resource info - try snd, csnd, esnd in order */
+    /* Get SND resource info — prefer ESND/CSND over plain SND (promote collisions). */
     {
         int32_t sndSize;
-        static const XResourceType sndTypes[] = { ID_SND, ID_CSND, ID_ESND, 0 };
+        static const XResourceType sndTypes[] = { ID_ESND, ID_CSND, ID_SND, 0 };
         int32_t typeIdx;
         XResourceType foundSndType;
 
@@ -15049,8 +15493,12 @@ BAEResult BAERmfEditorBank_GetInstrumentExtInfo(BAEBankToken bankToken,
     outInfo->instID = (uint32_t)instID;
     outInfo->displayName = instName[0] ? instName : NULL;
     outInfo->flags1 = ((unsigned char *)instData)[5];
+    /* Ghost is RMF/ZMF document-only; ignore if present on bank INST bytes. */
+    outInfo->flags1 = (unsigned char)(outInfo->flags1 & (unsigned char)~ZBF_ghostInstrument);
     outInfo->flags2 = ((unsigned char *)instData)[6];
+    outInfo->panPlacement = ((unsigned char *)instData)[4];
     outInfo->midiRootKey = (int16_t)XGetShort(((unsigned char *)instData) + 2);
+    outInfo->miscParameter1 = (int16_t)XGetShort(((unsigned char *)instData) + 8);
     outInfo->miscParameter2 = (int16_t)XGetShort(((unsigned char *)instData) + 10);
 
     /* Parse extended data using existing function */
@@ -15903,7 +16351,7 @@ static BAEResult PV_BankFindSndResource(XFILE bankFile,
                                         int32_t *outSize,
                                         char outName[256])
 {
-    static const XResourceType sndTypes[] = { ID_SND, ID_CSND, ID_ESND, 0 };
+    static const XResourceType sndTypes[] = { ID_ESND, ID_CSND, ID_SND, 0 };
     int32_t typeIdx;
 
     if (!bankFile || !outType || !outData || !outSize)
@@ -16257,6 +16705,8 @@ BAEResult BAERmfEditorBank_SetInstrumentExtInfo(BAEBankToken bankToken,
     ext.instID = (XLongResourceID)info->instID;
     ext.hasExtendedData = info->hasExtendedData;
     ext.flags1 = info->flags1;
+    /* HSB/ZSB banks always embed their own SNDs — never persist ghost. */
+    ext.flags1 = (unsigned char)(ext.flags1 & (unsigned char)~ZBF_ghostInstrument);
     ext.flags2 = info->flags2;
     ext.panPlacement = info->panPlacement;
     ext.midiRootKey = info->midiRootKey;
@@ -16324,7 +16774,7 @@ BAEResult BAERmfEditorBank_SetInstrumentExtInfo(BAEBankToken bankToken,
 
     XPutShort(instBytes + 2, (uint16_t)info->midiRootKey);
     instBytes[4] = (unsigned char)info->panPlacement;
-    instBytes[5] = info->flags1;
+    instBytes[5] = ext.flags1;
     instBytes[6] = info->flags2;
     XPutShort(instBytes + 8, (uint16_t)info->miscParameter1);
     XPutShort(instBytes + 10, (uint16_t)info->miscParameter2);
@@ -17310,6 +17760,375 @@ BAEResult BAERmfEditorBank_DeleteAlias(BAEBankToken bankToken,
     return result;
 }
 
+static bool PV_BankIdInList(XShortResourceID const *ids, uint32_t count, XLongResourceID id)
+{
+    uint32_t i;
+
+    if (!ids || count == 0 || id > 32767)
+    {
+        return FALSE;
+    }
+    for (i = 0; i < count; ++i)
+    {
+        if ((XLongResourceID)ids[i] == id)
+        {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+BAEResult BAERmfEditorBank_ImportInstAndSndFromFile(BAEBankToken bankToken,
+                                                    void *sourceFile,
+                                                    XShortResourceID const *instIds,
+                                                    uint32_t instCount,
+                                                    XShortResourceID const *sndIds,
+                                                    uint32_t sndCount)
+{
+    static const XResourceType bankResourceTypes[] = {
+        ID_INST,
+        ID_SND,
+        ID_CSND,
+        ID_ESND,
+        ID_ALIAS,
+        ID_BANK,
+        ID_SONG,
+        ID_MIDI,
+        ID_MIDI_OLD,
+        ID_CMID,
+        ID_EMID,
+        ID_ECMI,
+        ID_RMF,
+        ID_TEXT,
+        ID_VERS,
+        0
+    };
+    static const XResourceType sndTypes[] = {ID_ESND, ID_CSND, ID_SND, 0};
+    XFILE bankFile;
+    XFILE donor;
+    XFILERESOURCEMAP map;
+    int32_t resourceID;
+    XFILE outFile;
+    int32_t typeIdx;
+    XPTR packedData;
+    int32_t packedSize;
+    uint32_t i;
+
+    if (!bankToken || !sourceFile)
+    {
+        return BAE_PARAM_ERR;
+    }
+    if ((instCount > 0 && !instIds) || (sndCount > 0 && !sndIds))
+    {
+        return BAE_PARAM_ERR;
+    }
+    if (instCount == 0 && sndCount == 0)
+    {
+        return BAE_NO_ERROR;
+    }
+
+    bankFile = (XFILE)bankToken;
+    donor = (XFILE)sourceFile;
+
+    if (XFileSetPosition(bankFile, 0L) != 0 ||
+        XFileRead(bankFile, &map, (int32_t)sizeof(XFILERESOURCEMAP)) != 0)
+    {
+        return BAE_BAD_FILE;
+    }
+    resourceID = (int32_t)XGetLong(&map.mapID);
+    if (!XFILERESOURCE_ID_IS_VALID(resourceID))
+    {
+        return BAE_BAD_FILE;
+    }
+
+    outFile = XFileOpenVirtualResource(resourceID);
+    if (!outFile)
+    {
+        return BAE_MEMORY_ERR;
+    }
+
+    /* Copy dest resources, omitting ids that will be replaced. */
+    for (typeIdx = 0; bankResourceTypes[typeIdx] != 0; ++typeIdx)
+    {
+        XResourceType resType = bankResourceTypes[typeIdx];
+        int32_t resCount = XCountFileResourcesOfType(bankFile, resType);
+        int32_t resIndex;
+
+        for (resIndex = 0; resIndex < resCount; ++resIndex)
+        {
+            XLongResourceID resID = 0;
+            int32_t resSize = 0;
+            char resName[256];
+            XPTR resData;
+
+            resName[0] = 0;
+            resData = XGetIndexedFileResource(bankFile,
+                                              resType,
+                                              &resID,
+                                              resIndex,
+                                              resName,
+                                              &resSize);
+            if (!resData)
+            {
+                continue;
+            }
+
+            if (resType == ID_INST && PV_BankIdInList(instIds, instCount, resID))
+            {
+                XDisposePtr(resData);
+                continue;
+            }
+            if ((resType == ID_SND || resType == ID_CSND || resType == ID_ESND) &&
+                PV_BankIdInList(sndIds, sndCount, resID))
+            {
+                XDisposePtr(resData);
+                continue;
+            }
+
+            if (XAddFileResource(outFile, resType, resID, resName, resData, resSize) != 0)
+            {
+                XDisposePtr(resData);
+                XFileClose(outFile);
+                return BAE_FILE_IO_ERROR;
+            }
+            XDisposePtr(resData);
+        }
+    }
+
+    /* Overlay SND containers from donor (ESND/CSND/SND). */
+    for (i = 0; i < sndCount; ++i)
+    {
+        XLongResourceID rid = (XLongResourceID)sndIds[i];
+        int t;
+
+        for (t = 0; sndTypes[t] != 0; ++t)
+        {
+            char name[256];
+            int32_t size = 0;
+            XPTR data;
+
+            name[0] = 0;
+            data = XGetFileResource(donor, sndTypes[t], rid, name, &size);
+            if (!data || size <= 0)
+            {
+                if (data)
+                {
+                    XDisposePtr(data);
+                }
+                continue;
+            }
+            if (XAddFileResource(outFile, sndTypes[t], rid, name, data, size) != 0)
+            {
+                XDisposePtr(data);
+                XFileClose(outFile);
+                return BAE_FILE_IO_ERROR;
+            }
+            XDisposePtr(data);
+        }
+    }
+
+    /* Overlay INST resources from donor. */
+    for (i = 0; i < instCount; ++i)
+    {
+        XLongResourceID rid = (XLongResourceID)instIds[i];
+        char name[256];
+        int32_t size = 0;
+        XPTR data;
+
+        name[0] = 0;
+        data = XGetFileResource(donor, ID_INST, rid, name, &size);
+        if (!data || size <= 0)
+        {
+            if (data)
+            {
+                XDisposePtr(data);
+            }
+            continue;
+        }
+        if (XAddFileResource(outFile, ID_INST, rid, name, data, size) != 0)
+        {
+            XDisposePtr(data);
+            XFileClose(outFile);
+            return BAE_FILE_IO_ERROR;
+        }
+        XDisposePtr(data);
+    }
+
+    if (XCleanResourceFile(outFile) == FALSE)
+    {
+        XFileClose(outFile);
+        return BAE_FILE_IO_ERROR;
+    }
+
+    packedData = NULL;
+    packedSize = 0;
+    if (XFileGetMemoryFileAsData(outFile, &packedData, &packedSize) != 0 ||
+        !packedData || packedSize <= 0)
+    {
+        XFileClose(outFile);
+        if (packedData)
+        {
+            XDisposePtr(packedData);
+        }
+        return BAE_FILE_IO_ERROR;
+    }
+    XFileClose(outFile);
+
+    if (bankFile->pCache)
+    {
+        XDisposePtr(bankFile->pCache);
+        bankFile->pCache = NULL;
+    }
+    if (bankFile->pResourceData && bankFile->ownsResourceData)
+    {
+        XDisposePtr(bankFile->pResourceData);
+    }
+
+    bankFile->pResourceData = packedData;
+    bankFile->resMemLength = packedSize;
+    bankFile->resMemOffset = 0;
+    bankFile->ownsResourceData = TRUE;
+    bankFile->resizeResourceData = TRUE;
+    bankFile->readOnly = FALSE;
+    bankFile->allowMemCopy = TRUE;
+    return BAE_NO_ERROR;
+}
+
+BAEResult BAERmfEditorBank_EnsureWritable(BAEBankToken bankToken)
+{
+    static const XResourceType bankResourceTypes[] = {
+        ID_INST,
+        ID_SND,
+        ID_CSND,
+        ID_ESND,
+        ID_ALIAS,
+        ID_BANK,
+        ID_SONG,
+        ID_MIDI,
+        ID_MIDI_OLD,
+        ID_CMID,
+        ID_EMID,
+        ID_ECMI,
+        ID_RMF,
+        ID_TEXT,
+        ID_VERS,
+        0
+    };
+    XFILE bankFile;
+    XFILERESOURCEMAP map;
+    int32_t resourceID;
+    XFILE outFile;
+    int32_t typeIdx;
+    XPTR packedData;
+    int32_t packedSize;
+
+    if (!bankToken)
+    {
+        return BAE_PARAM_ERR;
+    }
+    bankFile = (XFILE)bankToken;
+    if (bankFile->pResourceData &&
+        bankFile->readOnly == FALSE &&
+        bankFile->resizeResourceData != FALSE)
+    {
+        return BAE_NO_ERROR;
+    }
+
+    if (XFileSetPosition(bankFile, 0L) != 0 ||
+        XFileRead(bankFile, &map, (int32_t)sizeof(XFILERESOURCEMAP)) != 0)
+    {
+        return BAE_BAD_FILE;
+    }
+    resourceID = (int32_t)XGetLong(&map.mapID);
+    if (!XFILERESOURCE_ID_IS_VALID(resourceID))
+    {
+        return BAE_BAD_FILE;
+    }
+
+    outFile = XFileOpenVirtualResource(resourceID);
+    if (!outFile)
+    {
+        return BAE_MEMORY_ERR;
+    }
+
+    for (typeIdx = 0; bankResourceTypes[typeIdx] != 0; ++typeIdx)
+    {
+        XResourceType resType = bankResourceTypes[typeIdx];
+        int32_t resCount = XCountFileResourcesOfType(bankFile, resType);
+        int32_t resIndex;
+
+        for (resIndex = 0; resIndex < resCount; ++resIndex)
+        {
+            XLongResourceID resID = 0;
+            int32_t resSize = 0;
+            char resName[256];
+            XPTR resData;
+
+            resName[0] = 0;
+            resData = XGetIndexedFileResource(bankFile,
+                                              resType,
+                                              &resID,
+                                              resIndex,
+                                              resName,
+                                              &resSize);
+            if (!resData)
+            {
+                continue;
+            }
+            if (XAddFileResource(outFile, resType, resID, resName, resData, resSize) != 0)
+            {
+                XDisposePtr(resData);
+                XFileClose(outFile);
+                return BAE_FILE_IO_ERROR;
+            }
+            XDisposePtr(resData);
+        }
+    }
+
+    if (XCleanResourceFile(outFile) == FALSE)
+    {
+        XFileClose(outFile);
+        return BAE_FILE_IO_ERROR;
+    }
+
+    packedData = NULL;
+    packedSize = 0;
+    if (XFileGetMemoryFileAsData(outFile, &packedData, &packedSize) != 0 ||
+        !packedData || packedSize <= 0)
+    {
+        XFileClose(outFile);
+        if (packedData)
+        {
+            XDisposePtr(packedData);
+        }
+        return BAE_FILE_IO_ERROR;
+    }
+    XFileClose(outFile);
+
+    if (bankFile->pCache)
+    {
+        XDisposePtr(bankFile->pCache);
+        bankFile->pCache = NULL;
+    }
+    if (bankFile->pResourceData && bankFile->ownsResourceData)
+    {
+        XDisposePtr(bankFile->pResourceData);
+    }
+
+    bankFile->pResourceData = packedData;
+    bankFile->resMemLength = packedSize;
+    bankFile->resMemOffset = 0;
+    bankFile->ownsResourceData = TRUE;
+    bankFile->resizeResourceData = TRUE;
+    bankFile->readOnly = FALSE;
+    bankFile->allowMemCopy = TRUE;
+
+    /* Rebuild access cache so Exists/name lookups work (uncached path has a
+     * not-found bug that reports success for missing IDs). */
+    bankFile->pCache = XCreateAccessCache(bankFile);
+    return BAE_NO_ERROR;
+}
+
 // Clone an INST resource to a new instID.  If deepClone is TRUE, all SND/CSND/ESND
 // resources referenced by the instrument's key-splits are also duplicated with new IDs.
 BAEResult BAERmfEditorBank_CloneInstrument(BAEBankToken bankToken,
@@ -18133,7 +18952,9 @@ BAEResult BAERmfEditorBank_GetSampleWaveformData(BAEBankToken bankToken,
     XPTR pcmOwner;
     int32_t pcmSize;
     XPTR ownedPcm;
-    static const XResourceType sndTypes[] = { ID_SND, ID_CSND, ID_ESND, 0 };
+    /* Prefer encrypted/compressed containers — session promote can leave a
+     * colliding plain GM SND alongside the intended ESND/CSND. */
+    static const XResourceType sndTypes[] = { ID_ESND, ID_CSND, ID_SND, 0 };
     int32_t typeIdx;
 
     if (!outWaveData || !outFrameCount || !outBitSize || !outChannels || !outSampleRate)
@@ -18295,6 +19116,166 @@ void BAERmfEditorBank_FreeWaveformData(void *waveData)
     {
         XDisposePtr((XPTR)waveData);
     }
+}
+
+BAEResult BAERmfEditorBank_ExportSndResourceToFile(BAEBankToken bankToken,
+                                                   uint32_t sndResourceID,
+                                                   BAEPathName filePath)
+{
+    XFILE bankFile;
+    XPTR sndData;
+    int32_t sndSize;
+    static const XResourceType sndTypes[] = { ID_SND, ID_CSND, ID_ESND, 0 };
+    int32_t typeIdx;
+    SampleDataInfo sdi;
+    BAEResult passResult;
+    XPTR pcmData;
+    XPTR pcmOwner;
+    int32_t pcmSize;
+    GM_Waveform wave;
+    XFILENAME fileName;
+    OPErr opErr;
+    AudioFileType outType;
+    char const *ext;
+
+    if (!bankToken || !filePath)
+    {
+        return BAE_PARAM_ERR;
+    }
+    bankFile = (XFILE)bankToken;
+
+    sndData = NULL;
+    sndSize = 0;
+    for (typeIdx = 0; sndTypes[typeIdx] != 0; ++typeIdx)
+    {
+        sndData = XGetFileResource(bankFile, sndTypes[typeIdx],
+                                   (XLongResourceID)sndResourceID, NULL, &sndSize);
+        if (sndData)
+        {
+            if (sndTypes[typeIdx] == ID_CSND)
+            {
+                XPTR decompressed = XDecompressPtr(sndData, (uint32_t)sndSize, FALSE);
+                XDisposePtr(sndData);
+                sndData = decompressed;
+                if (sndData)
+                {
+                    sndSize = XGetPtrSize(sndData);
+                }
+            }
+            else if (sndTypes[typeIdx] == ID_ESND)
+            {
+                XDecryptData(sndData, (uint32_t)sndSize);
+            }
+            break;
+        }
+    }
+    if (!sndData || sndSize <= 0)
+    {
+        return BAE_BAD_FILE;
+    }
+
+    {
+        int16_t soundFormat = (int16_t)XGetShort(sndData);
+        if (soundFormat != 1 && soundFormat != 2 && soundFormat != 3)
+        {
+            XDisposePtr(sndData);
+            return BAE_BAD_FILE;
+        }
+    }
+
+    XSetMemory(&sdi, (int32_t)sizeof(sdi), 0);
+    if (XGetSampleInfoFromSnd(sndData, &sdi) == 0)
+    {
+        passResult = PV_ExportSndBitstreamToFile(sndData,
+                                                 sndSize,
+                                                 (SndCompressionType)sdi.compressionType,
+                                                 filePath);
+        if (passResult != BAE_NOT_SETUP)
+        {
+            XDisposePtr(sndData);
+            return passResult;
+        }
+    }
+
+    /* PCM / IMA / ADPCM (or failed bitstream extract): decode and write WAV/AIFF. */
+    XSetMemory(&sdi, (int32_t)sizeof(sdi), 0);
+    pcmData = XGetSamplePtrFromSnd(sndData, &sdi);
+    pcmOwner = NULL;
+    if (sdi.pMasterPtr && sdi.pMasterPtr != sndData)
+    {
+        pcmOwner = sdi.pMasterPtr;
+    }
+    if (!pcmData || sdi.bitSize == 0 || sdi.channels == 0 || sdi.frames == 0)
+    {
+        if (pcmOwner)
+        {
+            XDisposePtr(pcmOwner);
+        }
+        XDisposePtr(sndData);
+        return BAE_BAD_FILE;
+    }
+
+    pcmSize = (int32_t)(sdi.frames * (sdi.bitSize / 8) * sdi.channels);
+    if (pcmSize <= 0)
+    {
+        if (pcmOwner)
+        {
+            XDisposePtr(pcmOwner);
+        }
+        XDisposePtr(sndData);
+        return BAE_BAD_FILE;
+    }
+
+    XSetMemory(&wave, (int32_t)sizeof(wave), 0);
+    wave.theWaveform = (XPTR)pcmData;
+    wave.waveSize = (uint32_t)pcmSize;
+    wave.waveFrames = sdi.frames;
+    wave.bitSize = (unsigned char)sdi.bitSize;
+    wave.channels = (unsigned char)sdi.channels;
+    wave.sampledRate = sdi.rate;
+    wave.baseMidiPitch = (uint16_t)sdi.baseKey;
+    wave.startLoop = sdi.loopStart;
+    wave.endLoop = sdi.loopEnd;
+
+    ext = strrchr(filePath, '.');
+    if (ext && (!XStrCmp(ext, ".aif") || !XStrCmp(ext, ".aiff") ||
+               !XStrCmp(ext, ".AIF") || !XStrCmp(ext, ".AIFF")))
+    {
+        outType = FILE_AIFF_TYPE;
+    }
+    else
+    {
+        outType = FILE_WAVE_TYPE;
+    }
+
+    XConvertPathToXFILENAME(filePath, &fileName);
+    opErr = GM_WriteFileFromMemory(&fileName, &wave, outType);
+
+    if (pcmOwner)
+    {
+        XDisposePtr(pcmOwner);
+    }
+    XDisposePtr(sndData);
+    return (opErr == NO_ERR) ? BAE_NO_ERROR : BAE_FILE_IO_ERROR;
+}
+
+BAEResult BAERmfEditorBank_ExportSampleToFile(BAEBankToken bankToken,
+                                              uint32_t instrumentIndex,
+                                              uint32_t sampleIndex,
+                                              BAEPathName filePath)
+{
+    BAERmfEditorBankSampleInfo info;
+    BAEResult result;
+
+    result = BAERmfEditorBank_GetInstrumentSampleInfo(bankToken, instrumentIndex,
+                                                     sampleIndex, &info);
+    if (result != BAE_NO_ERROR)
+    {
+        return result;
+    }
+    return BAERmfEditorBank_ExportSndResourceToFile(bankToken,
+                                                    (uint32_t)(uint16_t)info.sndResourceID,
+                                                    filePath);
 }
 
 BAEResult BAERmfEditorDocument_CloneInstrumentFromBankToInstID(
@@ -18866,9 +19847,37 @@ static void PV_AddCloneUsedMapping(BAERmfEditorCloneUsedResult *outResult,
     XStrCpy(mapping->resolvedName, resolvedName ? resolvedName : "");
 }
 
-BAEResult BAERmfEditorDocument_CloneUsedInstrumentsFromBank(
+static BAE_BOOL PV_ExportShouldEmbedInst(uint32_t resolvedInstID,
+                                         BAE_BOOL embedAll,
+                                         uint32_t const *embedResolvedInstIDs,
+                                         uint32_t embedCount)
+{
+    uint32_t i;
+
+    if (embedAll)
+    {
+        return TRUE;
+    }
+    if (!embedResolvedInstIDs || embedCount == 0)
+    {
+        return FALSE;
+    }
+    for (i = 0; i < embedCount; ++i)
+    {
+        if (embedResolvedInstIDs[i] == resolvedInstID)
+        {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static BAEResult PV_PrepareUsedInstrumentsFromBank(
     BAERmfEditorDocument *document,
     BAEBankToken bankToken,
+    BAE_BOOL embedAll,
+    uint32_t const *embedResolvedInstIDs,
+    uint32_t embedCount,
     BAERmfEditorCloneUsedResult *outResult)
 {
     enum { kMaximumPitchedInstruments = 128 };
@@ -19007,10 +20016,23 @@ BAEResult BAERmfEditorDocument_CloneUsedInstrumentsFromBank(
         }
 
         firstSampleIndex = document->sampleCount;
-        result = BAERmfEditorDocument_CloneInstrumentFromBank(document,
-                                                               bankToken,
-                                                               instrumentIndex,
-                                                               (unsigned char)clonedPitchedCount);
+        if (PV_ExportShouldEmbedInst(resolvedInstID, embedAll, embedResolvedInstIDs, embedCount))
+        {
+            result = BAERmfEditorDocument_CloneInstrumentFromBank(document,
+                                                                   bankToken,
+                                                                   instrumentIndex,
+                                                                   (unsigned char)clonedPitchedCount);
+        }
+        else
+        {
+            result = BAERmfEditorDocument_AliasInstrumentFromBank(document,
+                                                                   bankToken,
+                                                                   instrumentIndex,
+                                                                   (unsigned char)clonedPitchedCount);
+            debug_message("[CloneUsed] alias (ghost) pitched INST=%u -> program=%u\n",
+                          (unsigned)resolvedInstID,
+                          (unsigned)clonedPitchedCount);
+        }
         if (result != BAE_NO_ERROR)
         {
             return result;
@@ -19105,11 +20127,25 @@ BAEResult BAERmfEditorDocument_CloneUsedInstrumentsFromBank(
             }
             targetProgram = (unsigned char)(clonedPitchedCount + clonedPercussionCount);
             firstSampleIndex = document->sampleCount;
-            result = BAERmfEditorDocument_CloneInstrumentFromBankToInstID(document,
-                                                                          bankToken,
-                                                                          instrumentIndex,
-                                                                          512u + targetProgram,
-                                                                          targetProgram);
+            if (PV_ExportShouldEmbedInst(resolvedInstID, embedAll, embedResolvedInstIDs, embedCount))
+            {
+                result = BAERmfEditorDocument_CloneInstrumentFromBankToInstID(document,
+                                                                              bankToken,
+                                                                              instrumentIndex,
+                                                                              512u + targetProgram,
+                                                                              targetProgram);
+            }
+            else
+            {
+                /* Alias path always lands at INST 512+program. */
+                result = BAERmfEditorDocument_AliasInstrumentFromBank(document,
+                                                                       bankToken,
+                                                                       instrumentIndex,
+                                                                       targetProgram);
+                debug_message("[CloneUsed] alias (ghost) percussion INST=%u -> program=%u\n",
+                              (unsigned)resolvedInstID,
+                              (unsigned)targetProgram);
+            }
             if (result != BAE_NO_ERROR)
             {
                 return result;
@@ -19151,6 +20187,34 @@ BAEResult BAERmfEditorDocument_CloneUsedInstrumentsFromBank(
     }
     PV_SynchronizeTrackInstrumentDefaults(document);
     return PV_VerifyEmbeddedOnlyInstrumentReferences(document, kClonedInstrumentBank);
+}
+
+BAEResult BAERmfEditorDocument_CloneUsedInstrumentsFromBank(
+    BAERmfEditorDocument *document,
+    BAEBankToken bankToken,
+    BAERmfEditorCloneUsedResult *outResult)
+{
+    return PV_PrepareUsedInstrumentsFromBank(document,
+                                             bankToken,
+                                             TRUE,
+                                             NULL,
+                                             0,
+                                             outResult);
+}
+
+BAEResult BAERmfEditorDocument_ExportUsedInstrumentsFromBank(
+    BAERmfEditorDocument *document,
+    BAEBankToken bankToken,
+    uint32_t const *embedResolvedInstIDs,
+    uint32_t embedCount,
+    BAERmfEditorCloneUsedResult *outResult)
+{
+    return PV_PrepareUsedInstrumentsFromBank(document,
+                                             bankToken,
+                                             FALSE,
+                                             embedResolvedInstIDs,
+                                             embedCount,
+                                             outResult);
 }
 
 static BAEResult PV_AddRequiredAliases(BAERmfEditorDocument *document, XFILE fileRef, bool isZmf)
@@ -19753,6 +20817,61 @@ BAE_BOOL BAERmfEditorDocument_CanSaveAsMidi(BAERmfEditorDocument const *document
     }
     /* Raw MIDI export is valid only for documents without custom sample/instrument data. */
     return (document->sampleCount == 0) ? TRUE : FALSE;
+}
+
+BAEResult BAERmfEditorDocument_SaveAsMidiToMemory(BAERmfEditorDocument *document,
+                                                  unsigned char **outData,
+                                                  uint32_t *outSize)
+{
+    ByteBuffer midiData;
+    BAEResult result;
+    XPTR copy;
+
+    if (!document || !outData || !outSize)
+    {
+        return BAE_PARAM_ERR;
+    }
+    *outData = NULL;
+    *outSize = 0;
+    result = BAERmfEditorDocument_Validate(document);
+    if (result != BAE_NO_ERROR)
+    {
+        return result;
+    }
+    XSetMemory(&midiData, sizeof(midiData), 0);
+    if (document->loopMarkersOnlyDirty)
+    {
+        result = PV_BuildMidiWithAppendedLoopTrack(document, &midiData);
+    }
+    else
+    {
+        result = PV_BuildMidiFile(document, &midiData);
+    }
+    if (result != BAE_NO_ERROR)
+    {
+        PV_ByteBufferDispose(&midiData);
+        return result;
+    }
+    if (!midiData.data || midiData.size == 0)
+    {
+        PV_ByteBufferDispose(&midiData);
+        return BAE_BAD_FILE;
+    }
+    {
+        uint32_t midiSize = (uint32_t)midiData.size;
+
+        copy = XNewPtr((int32_t)midiSize);
+        if (!copy)
+        {
+            PV_ByteBufferDispose(&midiData);
+            return BAE_MEMORY_ERR;
+        }
+        XBlockMove(midiData.data, copy, (int32_t)midiSize);
+        PV_ByteBufferDispose(&midiData);
+        *outData = (unsigned char *)copy;
+        *outSize = midiSize;
+    }
+    return BAE_NO_ERROR;
 }
 
 BAEResult BAERmfEditorDocument_SaveAsMidi(BAERmfEditorDocument *document,

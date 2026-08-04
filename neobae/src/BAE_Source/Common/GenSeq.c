@@ -2278,7 +2278,13 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                     // HSB mode without overlay - use native synthesis
                     int32_t hsbPatch = PV_ConvertPatchBank(pSong, thePatch, MIDIChannel);
                     uint32_t midiBank = (uint32_t)((uint8_t)pSong->channelRawBank[MIDIChannel]);
-                    if (midiBank >= 2 && pSong->instrumentData[pSong->remapArray[hsbPatch]] == NULL)
+                    /* Only fall back during playback. During instrument scan
+                     * instrumentData is still empty, so treating that as "missing
+                     * bank 2" incorrectly forces bank 0 and loads piano instead of
+                     * requesting INST 512+ (e.g. session Bank 2 customs). */
+                    if (midiBank >= 2 &&
+                        pSong->AnalyzeMode == SCAN_NORMAL &&
+                        pSong->instrumentData[pSong->remapArray[hsbPatch]] == NULL)
                     {
                         int32_t fallbackBank = 0;
                         pSong->channelBank[MIDIChannel] = (signed char)fallbackBank;

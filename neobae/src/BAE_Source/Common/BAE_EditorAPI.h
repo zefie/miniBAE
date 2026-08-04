@@ -472,6 +472,18 @@ BAEResult BAERmfEditorDocument_GetInstrumentExtInfo(BAERmfEditorDocument const *
 BAEResult BAERmfEditorDocument_SetInstrumentExtInfo(BAERmfEditorDocument *document,
                                                     uint32_t instID,
                                                     BAERmfEditorInstrumentExtInfo const *info);
+/* Ghost instruments (RMF/ZMF only): INST stays in the song document, but
+ * referenced bank SNDs are not embedded on RMF/ZMF save. Not used for HSB/ZSB
+ * bank files (a bank cannot ghost to itself). Allowed on any MIDI bank number.
+ * When ghost is TRUE, document samples for this INST become bank aliases;
+ * when FALSE, bank-alias samples are re-embedded from bankToken. */
+BAEResult BAERmfEditorDocument_SetInstrumentGhost(BAERmfEditorDocument *document,
+                                                  uint32_t instID,
+                                                  BAEBankToken bankToken,
+                                                  BAE_BOOL ghost);
+BAEResult BAERmfEditorDocument_IsInstrumentGhost(BAERmfEditorDocument const *document,
+                                                 uint32_t instID,
+                                                 BAE_BOOL *outGhost);
 BAEResult BAERmfEditorDocument_CopyTempoMapFrom(BAERmfEditorDocument *dest,
                                                 BAERmfEditorDocument const *src);
 BAEResult BAERmfEditorDocument_GetTempoEventCount(BAERmfEditorDocument const *document,
@@ -545,6 +557,11 @@ BAEResult BAERmfEditorDocument_SaveAsRmfPreserveMidi(BAERmfEditorDocument *docum
                                                      BAEPathName filePath);
 BAEResult BAERmfEditorDocument_SaveAsMidi(BAERmfEditorDocument *document,
                                           BAEPathName filePath);
+/* Build Standard MIDI File bytes from the document tracks (ignores sampleCount gate).
+ * Caller frees *outData with XDisposePtr. */
+BAEResult BAERmfEditorDocument_SaveAsMidiToMemory(BAERmfEditorDocument *document,
+                                                  unsigned char **outData,
+                                                  uint32_t *outSize);
 BAE_BOOL BAERmfEditorDocument_CanSaveAsMidi(BAERmfEditorDocument const *document);
 BAEResult BAERmfEditorDocument_DebugReportMidiRoundTripDiff(BAERmfEditorDocument *document);
 BAEResult BAERmfEditorDocument_Validate(BAERmfEditorDocument *document);
@@ -686,6 +703,19 @@ BAEResult BAERmfEditorDocument_CloneUsedInstrumentsFromBank(
     BAEBankToken bankToken,
     BAERmfEditorCloneUsedResult *outResult);
 
+/* RMF/ZMF export helper: for each bank instrument used by the song, either
+ * embed (clone) or bank-alias (ghost) based on embedResolvedInstIDs.
+ * Instruments whose resolved INST id is in the embed list are cloned; all
+ * other used instruments are aliased (SND not embedded). Remaps notes like
+ * CloneUsedInstrumentsFromBank. embedResolvedInstIDs may be NULL when
+ * embedCount is 0 (alias everything used). */
+BAEResult BAERmfEditorDocument_ExportUsedInstrumentsFromBank(
+    BAERmfEditorDocument *document,
+    BAEBankToken bankToken,
+    uint32_t const *embedResolvedInstIDs,
+    uint32_t embedCount,
+    BAERmfEditorCloneUsedResult *outResult);
+
 /* Query whether a sample is a bank alias (pointer to bank SND, no embedded data). */
 BAEResult BAERmfEditorDocument_IsSampleBankAlias(BAERmfEditorDocument const *document,
                                                   uint32_t sampleIndex,
@@ -816,6 +846,23 @@ BAEResult BAERmfEditorBank_DeleteInstrument(BAEBankToken bankToken,
 BAEResult BAERmfEditorBank_DeleteAlias(BAEBankToken bankToken,
                                        uint32_t aliasFromInstID);
 
+/* Promote a mixer-loaded bank (typically read-only disk/memory) to an in-memory
+ * writable/resizable resource image so XAddFileResource and other mutations work.
+ * No-op if the bank is already writable. Safe to call repeatedly. */
+BAEResult BAERmfEditorBank_EnsureWritable(BAEBankToken bankToken);
+
+/* Replace/add INST and SND/CSND/ESND resources from sourceFile into dest bank
+ * in a single memory-safe rebuild. XDeleteFileResource is a no-op on in-memory
+ * banks, so callers must not delete+XAddFileResource for overlays — use this.
+ * For each snd id, any existing SND/CSND/ESND with that id is removed before
+ * the donor's container type is copied. Missing donor ids are skipped. */
+BAEResult BAERmfEditorBank_ImportInstAndSndFromFile(BAEBankToken bankToken,
+                                                    void *sourceFile /* XFILE */,
+                                                    XShortResourceID const *instIds,
+                                                    uint32_t instCount,
+                                                    XShortResourceID const *sndIds,
+                                                    uint32_t sndCount);
+
 /* Clone an instrument to a new instID within the same bank.
  * If deepClone is TRUE, all referenced SND/CSND/ESND resources are also duplicated.
  * If deepClone is FALSE, the new instrument shares the same SND resource IDs (pointers). */
@@ -856,6 +903,20 @@ BAEResult BAERmfEditorBank_GetSampleWaveformData(BAEBankToken bankToken,
 
 /* Free waveform data returned by BAERmfEditorBank_GetSampleWaveformData. */
 void BAERmfEditorBank_FreeWaveformData(void *waveData);
+
+/* Export a bank SND resource to a native audio file. Compressed codecs write
+ * their bitstream (FLAC/Vorbis/Opus/MPEG/QOA); PCM/IMA/ADPCM write WAV (or AIFF
+ * if the path ends in .aif/.aiff). Works for assigned and unassigned samples. */
+BAEResult BAERmfEditorBank_ExportSndResourceToFile(BAEBankToken bankToken,
+                                                   uint32_t sndResourceID,
+                                                   BAEPathName filePath);
+
+/* Export a sample (key split) from a bank instrument. Resolves the SND id then
+ * calls BAERmfEditorBank_ExportSndResourceToFile. */
+BAEResult BAERmfEditorBank_ExportSampleToFile(BAEBankToken bankToken,
+                                              uint32_t instrumentIndex,
+                                              uint32_t sampleIndex,
+                                              BAEPathName filePath);
 
 /* Re-encode the audio data for a specific sample in a bank instrument using the
  * specified codec and container type.  The sample PCM is decoded from the current

@@ -609,13 +609,21 @@ XInstrumentData *XCreateXInstrumentEx(InstrumentResource *theX, uint32_t theXSiz
 									break;
 
 								default:
-									/* Unknown unit type: size unknown, cannot skip safely. */
+									/* Unknown unit type: size unknown, cannot skip safely.
+									 * BE2 sometimes overstates unitCount and pads with zeros
+									 * after real units (e.g. Bank 2 customs with ADSR only).
+									 * Keep units already parsed instead of discarding all. */
+									if (parsedUnits > 0)
+									{
+										goto units_done;
+									}
 									XDisposePtr(pXInstrument);
 									pXInstrument = NULL;
 									goto bailoninstrument;
 							}
 						}
 					}
+units_done:
 					pXInstrument->unitCount = parsedUnits;
 				}
 			}

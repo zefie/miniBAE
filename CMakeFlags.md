@@ -98,7 +98,8 @@ Run `git submodule update --init --recursive` if bundled third-party sources are
 | Flag | Default | Description |
 |------|---------|-------------|
 | `BAE_EMBED_PATCH_FILE` | `neobae/src/banks/patches111/patches111.hsb` | HSB bank file to embed as built-in patches. Set to empty string to disable embedding. Requires Python 3. |
-| `BAE_EMBED_TTF_FILE` | `neobae/src/thirdparty/fonts/HelveticaNeue.ttf` | TTF font file to embed for zefidi GUI use. Set to empty string to disable embedding. Requires Python 3. |
+| `BAE_EMBED_TTF_FILE` | `neobae/src/thirdparty/fonts/LiberationSans-Regular.ttf` | TTF font file to embed for zefidi GUI use (Liberation Sans). Set to empty string to disable embedding. Requires Python 3. |
+| nbeditor fonts | `LiberationSans-Regular.ttf` + `LiberationSans-Italic.ttf` | Embedded automatically for nbeditor when Python 3 is available (same `thirdparty/fonts` folder). |
 
 Embedding is only effective when:
 1. The corresponding `BAE_DISABLE_EMBED_*` flag is `OFF`.

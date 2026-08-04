@@ -215,7 +215,9 @@ option(BAE_DISABLE_J2ME_PATCH "Disable J2ME percussion bank patch (maps bank 120
 option(BAE_DISABLE_ROLLED_MIDI_UNROLLING "Disable unrolling of rolled MIDI files" OFF)
 option(BAE_DISABLE_MIDI_HARDWARE "Disable hardware MIDI I/O in zefidi via RtMidi" OFF)
 set(BAE_EMBED_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/banks/patches111/patches111.hsb" CACHE FILEPATH "HSB bank file to embed as built-in patches (empty disables embedding)")
-set(BAE_EMBED_TTF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/fonts/HelveticaNeue.ttf" CACHE FILEPATH "TTF font file to embed for zefidi GUI use (empty disables embedding)")
+set(BAE_EMBED_TTF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/fonts/LiberationSans-Regular.ttf" CACHE FILEPATH "TTF font file to embed for zefidi GUI use (Liberation Sans; empty disables embedding)")
+set(BAE_NBEDITOR_FONT_REGULAR "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/fonts/LiberationSans-Regular.ttf" CACHE FILEPATH "Regular TTF embedded for nbeditor")
+set(BAE_NBEDITOR_FONT_ITALIC "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/fonts/LiberationSans-Italic.ttf" CACHE FILEPATH "Italic TTF embedded for nbeditor (aliases)")
 option(USE_SDL2 "Prefer SDL2 as the platform backend (default if SDL2 is found and SDL3 is not found)" OFF)
 option(BUILD_PLAYBAE "Build playbae when a non-Dummy/non-Ansi backend is selected" ON)
 option(BUILD_ZEFIDI "Build zefidi when SDL2/SDL3 backend and matching SDL_ttf are available" ON)
@@ -1272,9 +1274,9 @@ endif()
 
 if(NEOBAE_SHARED_LIBNEOBAE)
   add_library(neobae SHARED ${NEOBAE_SOURCES})
-  if(WIN32)
-    # MSVC does not add a lib prefix; keep the historical libneobae.dll / .lib names
-    # used by foobar2000 packaging and MinGW builds.
+  if(MSVC)
+    # MSVC does not add a lib prefix; keep the historical libneobae.dll / .lib names.
+    # MinGW already prefixes with "lib", so OUTPUT_NAME stays "neobae" → libneobae.dll.
     set_target_properties(neobae PROPERTIES OUTPUT_NAME "libneobae")
   endif()
 else()
@@ -2324,6 +2326,45 @@ if(BUILD_NBEDITOR)
       else()
         message(STATUS "nbeditor: libxmp-lite not found, module loading disabled.")
       endif()
+
+      # Embed Liberation Sans Regular + Italic for UI (no system font dependency).
+      set(BAE_NBEDITOR_EMBED_FONTS_EFFECTIVE OFF)
+      if(EXISTS "${BAE_NBEDITOR_FONT_REGULAR}" AND EXISTS "${BAE_NBEDITOR_FONT_ITALIC}")
+        if(NOT Python3_Interpreter_FOUND)
+          find_package(Python3 COMPONENTS Interpreter QUIET)
+        endif()
+        if(Python3_Interpreter_FOUND)
+          set(BAE_NBEDITOR_EMBED_FONTS_EFFECTIVE ON)
+        else()
+          message(STATUS "nbeditor: Python3 not found; skipping Liberation font embed")
+        endif()
+      else()
+        message(STATUS "nbeditor: Liberation TTF files missing; skipping font embed")
+      endif()
+      if(BAE_NBEDITOR_EMBED_FONTS_EFFECTIVE)
+        set(BAE_NBEDITOR_FONT_HEADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+        set(BAE_NBEDITOR_FONT_HEADER "${BAE_NBEDITOR_FONT_HEADER_DIR}/nbeditor_embedded_fonts.h")
+        add_custom_command(
+          OUTPUT ${BAE_NBEDITOR_FONT_HEADER}
+          COMMAND ${CMAKE_COMMAND} -E make_directory ${BAE_NBEDITOR_FONT_HEADER_DIR}
+          COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/create_embedded_font_h.py
+                  ${BAE_NBEDITOR_FONT_HEADER}
+                  --font ${BAE_NBEDITOR_FONT_REGULAR} liberation_sans_regular
+                  --font ${BAE_NBEDITOR_FONT_ITALIC} liberation_sans_italic
+          DEPENDS
+            ${BAE_NBEDITOR_FONT_REGULAR}
+            ${BAE_NBEDITOR_FONT_ITALIC}
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/create_embedded_font_h.py
+          VERBATIM
+          COMMENT "Embedding Liberation Sans fonts for nbeditor"
+        )
+        add_custom_target(nbeditor_embedded_fonts DEPENDS ${BAE_NBEDITOR_FONT_HEADER})
+        add_dependencies(nbeditor nbeditor_embedded_fonts)
+        target_compile_definitions(nbeditor PRIVATE NBEDITOR_EMBED_FONTS=1)
+        target_include_directories(nbeditor PRIVATE ${BAE_NBEDITOR_FONT_HEADER_DIR})
+        message(STATUS "nbeditor: embedding Liberation Sans Regular + Italic")
+      endif()
+
       message(STATUS "Building nbeditor with SDL3 + Dear ImGui.")
     else()
       message(STATUS "Skipping BUILD_NBEDITOR (nbeditor/imgui sources not present in workspace).")

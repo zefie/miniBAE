@@ -2464,6 +2464,15 @@ extern "C"
     BAEResult BAESong_AllNotesOff(BAESong song,
                                   uint32_t time);
 
+    // BAESong_KillActiveNotes()
+    // ------------------------------------
+    // Immediately hard-kills all active voices for the indicated BAESong and
+    // clears pending note events from its queue, without stopping playback.
+    // Unlike BAESong_AllNotesOff (graceful key-off / ADSR release), silence is
+    // achieved instantly. Prefer this for UI Panic on a live preview song.
+    // ------------------------------------
+    BAEResult BAESong_KillActiveNotes(BAESong song);
+
     // BAESong_Panic()
     // ------------------------------------
     // Immediately and forcefully kills all active voices for the indicated

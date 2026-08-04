@@ -1100,53 +1100,53 @@ int32_t XCopySndResources(XShortResourceID *pSndCopy, int16_t sndCount, XFILE re
 
 	if (sndCount && pSndCopy)
 	{
-		XFileUseThisResourceFile(readFileRef);		/* from resource file */
 		for (count = 0; count < sndCount; count++)
 		{
-			theID = pSndCopy[count];
-			
-			// determine if the resource is already in the written file
-			XFileUseThisResourceFile(writeFileRef);
-			pData = XGetAndDetachResource(ID_SND, theID, &size);
-			if (pData == NULL)
-			{
-				pData = XGetAndDetachResource(ID_ESND, theID, &size);
-			}
-			if (pData == NULL)
-			{
-				pData = XGetAndDetachResource(ID_CSND, theID, &size);
-			}
-			XDisposePtr(pData);
-			if (pData == NULL)			// check to see that its not there already!!
-			{
-				for (resCount = 0; resCount < 3; resCount++)
-				{
-					XFileUseThisResourceFile(readFileRef);		/* from resource file */
-					pData = XGetFileResource(readFileRef, soundTypes[resCount], theID, theName, &size);
-					if (pData)
-					{
-						if (copyNames == FALSE)
-						{
-							theName[0] = 0;
-						}
+			bool alreadyThere;
 
-						XFileUseThisResourceFile(writeFileRef);
-						if (protect && (soundTypes[resCount] == ID_SND))
-						{
-							XEncryptData(pData, size);
-							XAddResource(ID_ESND, theID, theName, pData, size);
-						}
-						else
-						{
-							XAddResource(soundTypes[resCount], theID, theName, pData, size);
-						}
-						XDisposePtr(pData);
-					}
+			theID = pSndCopy[count];
+
+			/* Probe ONLY writeFileRef. XGetAndDetachResource scans every open
+			 * resource file, so with a donor still open it would find the
+			 * source sample and then skip the copy into the destination. */
+			alreadyThere = FALSE;
+			for (resCount = 0; resCount < 3; resCount++)
+			{
+				pData = XGetFileResource(writeFileRef, soundTypes[resCount], theID, NULL, &size);
+				if (pData)
+				{
+					XDisposePtr(pData);
+					alreadyThere = TRUE;
+					break;
 				}
 			}
-			else
+			if (alreadyThere)
 			{
-				XDisposePtr(pData);
+				continue;
+			}
+
+			for (resCount = 0; resCount < 3; resCount++)
+			{
+				theName[0] = 0;
+				pData = XGetFileResource(readFileRef, soundTypes[resCount], theID, theName, &size);
+				if (pData)
+				{
+					if (copyNames == FALSE)
+					{
+						theName[0] = 0;
+					}
+
+					if (protect && (soundTypes[resCount] == ID_SND))
+					{
+						XEncryptData(pData, size);
+						(void)XAddFileResource(writeFileRef, ID_ESND, theID, theName, pData, size);
+					}
+					else
+					{
+						(void)XAddFileResource(writeFileRef, soundTypes[resCount], theID, theName, pData, size);
+					}
+					XDisposePtr(pData);
+				}
 			}
 		}
 	}
@@ -1164,27 +1164,26 @@ int32_t XCopyInstrumentResources(XShortResourceID *pInstCopy, int16_t instCount,
 
 	if (instCount && pInstCopy)
 	{
-		XFileUseThisResourceFile(readFileRef);		/* from resource file */
 		for (count = 0; count < instCount; count++)
 		{
 			theID = pInstCopy[count];
-			XFileUseThisResourceFile(writeFileRef);
 			pData = XGetFileResource(writeFileRef, ID_INST, theID, theName, &size);
-			if (pData == NULL)		// check to see that its not there already!!
+			if (pData != NULL)		/* already in destination */
 			{
-				XFileUseThisResourceFile(readFileRef);		/* from resource file */
-				pData = XGetFileResource(readFileRef, ID_INST, theID, theName, &size);
-				if (pData)
-				{
-					XFileUseThisResourceFile(writeFileRef);
-					if (copyNames == FALSE)
-					{
-						theName[0] = 0;
-					}
-					XAddResource(ID_INST, theID, theName, pData, size);
-				}
+				XDisposePtr(pData);
+				continue;
 			}
-			XDisposePtr(pData);
+			theName[0] = 0;
+			pData = XGetFileResource(readFileRef, ID_INST, theID, theName, &size);
+			if (pData)
+			{
+				if (copyNames == FALSE)
+				{
+					theName[0] = 0;
+				}
+				(void)XAddFileResource(writeFileRef, ID_INST, theID, theName, pData, size);
+				XDisposePtr(pData);
+			}
 		}
 	}
 	return 0;
