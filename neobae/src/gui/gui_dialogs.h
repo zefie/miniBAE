@@ -28,6 +28,8 @@ extern char g_rmf_info_values[INFO_TYPE_COUNT][512];
 
 extern bool g_show_about_dialog;
 extern int g_about_page;
+extern int g_about_credits_scroll;
+extern int g_about_wheel_delta;
 
 // Tooltip state
 extern bool g_bank_tooltip_visible;

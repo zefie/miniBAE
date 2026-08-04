@@ -1124,6 +1124,16 @@ int main(int argc, char *argv[])
                         g_custom_reverb_wheel_delta += (wy > 0) ? 1 : -1;
                         break;
                     }
+                    if (g_show_about_dialog)
+                    {
+                        /* Licenses page scrolls; Info page ignores wheel. */
+                        extern int g_about_wheel_delta;
+                        if (g_about_page == 1)
+                        {
+                            g_about_wheel_delta += (wy > 0) ? -3 : 3;
+                        }
+                        break;
+                    }
 
                     if (!ui_modal_blocking())
                     {

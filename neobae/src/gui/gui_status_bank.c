@@ -1009,6 +1009,8 @@ else                               \
             g_show_settings_dialog = false;
             g_show_rmf_info_dialog = false;
             g_about_page = 0;
+            g_about_credits_scroll = 0;
+            g_about_wheel_delta = 0;
         }
     }
 

@@ -39,7 +39,9 @@ char g_rmf_info_values[INFO_TYPE_COUNT][512];
 char g_rmf_container_version[64];
 
 bool g_show_about_dialog = false;
-int g_about_page = 0;
+int g_about_page = 0; /* 0 = info, 1 = licenses */
+int g_about_credits_scroll = 0;
+int g_about_wheel_delta = 0; /* consumed by render_about_dialog */
 bool g_show_eq_dialog = false;
 
 #ifdef _WIN32
@@ -1192,7 +1194,41 @@ void render_rmf_info_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
     }
 }
 
-// About dialog rendering
+static void about_open_url(const char *url)
+{
+    if (!url || strncmp(url, "http", 4) != 0)
+        return;
+#ifdef _WIN32
+    ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
+#else
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "(xdg-open '%s' || open '%s') >/dev/null 2>&1 &", url, url);
+    system(cmd);
+#endif
+}
+
+static void about_draw_link_line(SDL_Renderer *R, int x, int y, const char *txt, int mx, int my, bool mclick)
+{
+    int tw = 0, th = 0;
+    measure_text(txt, &tw, &th);
+    Rect r = {x, y, tw, th > 0 ? th : 14};
+    bool over = point_in(mx, my, r);
+    SDL_Color col = over ? g_accent_color : g_highlight_color;
+    draw_text(R, r.x, r.y, txt, col);
+    if (over)
+    {
+        SDL_SetRenderDrawColor(R, col.r, col.g, col.b, col.a);
+#if USE_SDL2 == TRUE
+        SDL_RenderDrawLine(R, r.x, r.y + r.h - 2, r.x + r.w, r.y + r.h - 2);
+#else
+        SDL_RenderLine(R, r.x, r.y + r.h - 2, r.x + r.w, r.y + r.h - 2);
+#endif
+        if (mclick)
+            about_open_url(txt);
+    }
+}
+
+// About dialog: Info page + single scrollable Licenses page (no multi-page credit packing).
 void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
 {
     if (!g_show_about_dialog)
@@ -1200,38 +1236,34 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
 
     SDL_Color dim = g_is_dark_mode ? (SDL_Color){0, 0, 0, 120} : (SDL_Color){0, 0, 0, 90};
     draw_rect(R, (Rect){0, 0, WINDOW_W, g_window_h}, dim);
-    int dlgW = 560;
-    int dlgH = 380;
-    int pad = 10;
+    const int dlgW = 560;
+    const int dlgH = 400;
+    const int pad = 10;
+    const int lineH = 16;
     Rect dlg = {(WINDOW_W - dlgW) / 2, (g_window_h - dlgH) / 2, dlgW, dlgH};
     SDL_Color dlgBg = g_panel_bg;
     dlgBg.a = 240;
     draw_rect(R, dlg, dlgBg);
     draw_frame(R, dlg, g_panel_border);
     draw_text(R, dlg.x + pad, dlg.y + 8, "About", g_header_color);
-    // Close X (slightly larger for better hit/visibility)
+
     Rect closeBtn = {dlg.x + dlg.w - 22, dlg.y + 6, 16, 16};
     bool overClose = point_in(mx, my, closeBtn);
     draw_rect(R, closeBtn, overClose ? g_button_hover : g_button_base);
     draw_frame(R, closeBtn, g_button_border);
-    // Nudge X up ~3px for better visual alignment
     draw_text(R, closeBtn.x + 4, closeBtn.y - 1, "X", g_button_text);
     if (mclick && overClose)
-    {
         g_show_about_dialog = false;
-    }
 
-    // About dialog content: paged. Page 0 = main info, Page 1 = credits/licenses
-    // Navigation controls drawn bottom-right
     const char *cpuArch = BAE_GetCurrentCPUArchitecture();
     const char *baeFeatures = BAE_GetFeatureString();
-    char *baeVersion = (char *)BAE_GetVersion();   /* malloc'd by engine */
-    char *compInfo = (char *)BAE_GetCompileInfo(); /* malloc'd by engine */
+    char *baeVersion = (char *)BAE_GetVersion();
+    char *compInfo = (char *)BAE_GetCompileInfo();
 
-    #ifndef _VERSION
-    #define _VERSION "unknown"
-    #endif
-    
+#ifndef _VERSION
+#define _VERSION "unknown"
+#endif
+
     char line1[256];
     if (cpuArch)
         snprintf(line1, sizeof(line1), "zefidi Media Player - %s - version %s", cpuArch, _VERSION);
@@ -1239,7 +1271,7 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
         snprintf(line1, sizeof(line1), "zefidi Media Player - version %s", _VERSION);
 
     char line2[256];
-    if (compInfo && compInfo[0] && baeVersion && baeVersion[0])
+    if (baeVersion && baeVersion[0])
         snprintf(line2, sizeof(line2), "Running libNeoBAE version %s", baeVersion);
     else
         snprintf(line2, sizeof(line2), "Running unknown version of libNeoBAE?");
@@ -1251,17 +1283,17 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
         line3[0] = '\0';
 
     char line4[512];
-    if (baeFeatures && baeFeatures[0]) {
+    if (baeFeatures && baeFeatures[0])
         snprintf(line4, sizeof(line4), "Features: %s", baeFeatures);
-    }
     else
         line4[0] = '\0';
 
-    int y = dlg.y + 40;
-    // Page 0: main info
+    const int contentTop = dlg.y + 36;
+    const int footerTop = dlg.y + dlg.h - 38;
+    int y = contentTop;
+
     if (g_about_page == 0)
     {
-        // Make version text clickable and link to GitHub (commit or tree)
         int vw = 0, vh = 0;
         measure_text(line1, &vw, &vh);
         Rect verLinkRect = {dlg.x + pad, y, vw, vh > 0 ? vh : 14};
@@ -1272,9 +1304,11 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
         {
             SDL_SetRenderDrawColor(R, verLinkCol.r, verLinkCol.g, verLinkCol.b, verLinkCol.a);
 #if USE_SDL2 == TRUE
-            SDL_RenderDrawLine(R, verLinkRect.x, verLinkRect.y + verLinkRect.h - 2, verLinkRect.x + verLinkRect.w, verLinkRect.y + verLinkRect.h - 2);
+            SDL_RenderDrawLine(R, verLinkRect.x, verLinkRect.y + verLinkRect.h - 2,
+                               verLinkRect.x + verLinkRect.w, verLinkRect.y + verLinkRect.h - 2);
 #else
-            SDL_RenderLine(R, verLinkRect.x, verLinkRect.y + verLinkRect.h - 2, verLinkRect.x + verLinkRect.w, verLinkRect.y + verLinkRect.h - 2);
+            SDL_RenderLine(R, verLinkRect.x, verLinkRect.y + verLinkRect.h - 2,
+                           verLinkRect.x + verLinkRect.w, verLinkRect.y + verLinkRect.h - 2);
 #endif
         }
         if (mclick && overVerLink)
@@ -1282,25 +1316,6 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
             const char *raw = baeVersion ? baeVersion : "unknown";
             char url[256];
             url[0] = '\0';
-            if (strstr(raw, "-dirty"))
-            {
-                size_t len = strlen(raw);
-                if (len > 6)
-                {
-                    size_t copylen = (len > 6) ? len - 6 : 0;
-                    if (copylen >= sizeof(url)) copylen = sizeof(url) - 1;
-                    safe_strncpy(url, raw, copylen);
-                    url[copylen] = '\0';
-                }
-                else
-                {
-                    snprintf(url, sizeof(url), "%s", raw);
-                }
-            }
-            else
-            {
-                snprintf(url, sizeof(url), "%s", raw);
-            }
             if (strncmp(raw, "git-", 4) == 0)
             {
                 const char *sha = raw + 4;
@@ -1314,21 +1329,18 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
                 shortSha[i] = '\0';
                 snprintf(url, sizeof(url), "https://github.com/zefie/NeoBAE/commit/%s", shortSha);
             }
-            else if (strncmp(raw, "built", 5) != 0 && !strstr(raw, "dirty"))
+            else if (strncmp(raw, "built", 5) != 0)
             {
-                snprintf(url, sizeof(url), "https://github.com/zefie/NeoBAE/tree/%s", raw);
+                char clean[128];
+                snprintf(clean, sizeof(clean), "%s", raw);
+                char *dirty = strstr(clean, "-dirty");
+                if (dirty)
+                    *dirty = '\0';
+                if (clean[0])
+                    snprintf(url, sizeof(url), "https://github.com/zefie/NeoBAE/tree/%s", clean);
             }
-
             if (url[0])
-            {
-#ifdef _WIN32
-                ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
-#else
-                char cmd[512];
-                snprintf(cmd, sizeof(cmd), "(xdg-open '%s' || open '%s') >/dev/null 2>&1 &", url, url);
-                system(cmd);
-#endif
-            }
+                about_open_url(url);
         }
         y += 20;
         if (line2[0])
@@ -1340,101 +1352,78 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
         {
             draw_text(R, dlg.x + pad, y, line3, g_text_color);
             y += 20;
-        }        
-        // Insert features line as third line on About page (with wrapping)
+        }
         if (line4[0])
         {
             int wrapWidth = dlgW - pad * 2 - 8;
-            int featureLineH = 18; // line height for wrapped features
+            int featureLineH = 18;
             int wrapCount = count_wrapped_lines(line4, wrapWidth);
             if (wrapCount <= 0)
                 wrapCount = 1;
             draw_wrapped_text(R, dlg.x + pad, y, line4, g_text_color, wrapWidth, featureLineH);
-            y += wrapCount * featureLineH;
+            y += wrapCount * featureLineH + 8;
         }
-        draw_text(R, dlg.x + pad, y, "", g_text_color); /* spacer */
-        y += dlg.h - (y - dlg.y) - 78;          // move down to near bottom for links
+
 #if USE_SDL2 == TRUE
         SDL_RendererInfo sdl2_renderer_info;
-        const char *renderer_name = (SDL_GetRendererInfo(R, &sdl2_renderer_info) == 0) ? sdl2_renderer_info.name : NULL;
+        const char *renderer_name =
+            (SDL_GetRendererInfo(R, &sdl2_renderer_info) == 0) ? sdl2_renderer_info.name : NULL;
 #else
         const char *renderer_name = SDL_GetRendererName(R);
 #endif
-        if (renderer_name && renderer_name[0]) {
-            char renderer[128];
-#if USE_SDL2 == TRUE            
-            snprintf(renderer, sizeof(renderer), "SDL (v%d.%d.%d) Graphics Layer: %s", SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_PATCHLEVEL, renderer_name);
+        if (renderer_name && renderer_name[0])
+        {
+            char renderer[160];
+#if USE_SDL2 == TRUE
+            snprintf(renderer, sizeof(renderer), "SDL (v%d.%d.%d) Graphics Layer: %s",
+                     SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_PATCHLEVEL, renderer_name);
 #else
-            snprintf(renderer, sizeof(renderer), "SDL (v%d.%d.%d) Graphics Layer: %s", SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION, renderer_name);
+            snprintf(renderer, sizeof(renderer), "SDL (v%d.%d.%d) Graphics Layer: %s",
+                     SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION, renderer_name);
 #endif
-        draw_text(R, dlg.x + pad, y, renderer, g_text_color);
+            draw_text(R, dlg.x + pad, y, renderer, g_text_color);
             y += 18;
         }
         draw_text(R, dlg.x + pad, y, "(C) 2021-2026 Zefie Networks", g_text_color);
         y += 18;
-        const char *urls[] = {"https://www.soundmusicsys.com/", "https://github.com/zefie/NeoBAE/", NULL};
-        for (int i = 0; urls[i]; ++i)
-        {
-            const char *u = urls[i];
-            int tw = 0, th = 0;
-            measure_text(u, &tw, &th);
-            Rect r = {dlg.x + pad, y, tw, th > 0 ? th : 14};
-            bool over = point_in(mx, my, r);
-            SDL_Color col = over ? g_accent_color : g_highlight_color;
-            draw_text(R, r.x, r.y, u, col);
-            if (over)
-            {
-                SDL_SetRenderDrawColor(R, col.r, col.g, col.b, col.a);
-#if USE_SDL2 == TRUE
-                SDL_RenderDrawLine(R, r.x, r.y + r.h - 2, r.x + r.w, r.y + r.h - 2);
-#else
-                SDL_RenderLine(R, r.x, r.y + r.h - 2, r.x + r.w, r.y + r.h - 2);
-#endif
-            }
-            if (mclick && over)
-            {
-                if (strncmp(u, "http", 4) == 0)
-                {
-#ifdef _WIN32
-                    ShellExecuteA(NULL, "open", u, NULL, NULL, SW_SHOWNORMAL);
-#else
-                    char cmd[512];
-                    snprintf(cmd, sizeof(cmd), "(xdg-open '%s' || open '%s') >/dev/null 2>&1 &", u, u);
-                    system(cmd);
-#endif
-                }
-            }
-            y += 18;
-        }
-    }
-    // Page 1: credits/licenses (part 1)
-    else if (g_about_page == 1)
-    {
-        draw_text(R, dlg.x + pad, y, "This software makes use of the following software:", g_text_color);
+        about_draw_link_line(R, dlg.x + pad, y, "https://www.soundmusicsys.com/", mx, my, mclick);
         y += 18;
-        const char *credits_page1[] = {
-            // NeoBAE is obviously required
-            "",
+        about_draw_link_line(R, dlg.x + pad, y, "https://github.com/zefie/NeoBAE/", mx, my, mclick);
+    }
+    else
+    {
+        /* Page 1: scrollable third-party licenses */
+        draw_text(R, dlg.x + pad, y, "This software makes use of the following software:", g_text_color);
+        y += 20;
+
+        static const char *const credits[] = {
             "NeoBAE",
             "Copyright (c) 2026 Zefie Networks",
             "Based on miniBAE, Copyright (c) 2009 Beatnik, Inc.",
             "Original miniBAE source code available at:",
             "https://github.com/heyigor/miniBAE/",
-            // SDL is also required for this GUI so no #ifdef is necessary
-#if USE_SDL2 == TRUE            
             "",
+#if USE_SDL2 == TRUE
             "SDL2 & SDL2_ttf",
 #else
-            "",
             "SDL3 & SDL3_ttf",
 #endif
             "Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>",
-            "https://www.libsdl.org/",      
+            "https://www.libsdl.org/",
+            "",
+            "Liberation Sans fonts",
+            "Copyright (c) 2012 Red Hat, Inc.",
+            "https://github.com/liberationfonts/liberation-fonts",
 #if USE_MPEG_DECODER == TRUE
             "",
             "minimp3",
             "Licensed under the CC0",
             "http://creativecommons.org/publicdomain/zero/1.0/",
+#endif
+#if USE_MPEG_ENCODER == TRUE
+            "",
+            "libmp3lame",
+            "https://lame.sourceforge.io/",
 #endif
 #if USE_XMF_SUPPORT == TRUE
             "",
@@ -1442,59 +1431,6 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
             "Copyright (C) 1995-2024 Jean-loup Gailly and Mark Adler",
             "http://www.zlib.net/",
 #endif
-            "",
-            NULL};
-        for (int i = 0; credits_page1[i]; ++i)
-        {
-            const char *txt = credits_page1[i];
-            if (strncmp(txt, "http", 4) == 0)
-            {
-                int tw = 0, th = 0;
-                measure_text(txt, &tw, &th);
-                Rect r = {dlg.x + pad + 8, y, tw, th > 0 ? th : 14};
-                bool over = point_in(mx, my, r);
-                SDL_Color col = over ? g_accent_color : g_highlight_color;
-                draw_text(R, r.x, r.y, txt, col);
-                if (over)
-                {
-                    SDL_SetRenderDrawColor(R, col.r, col.g, col.b, col.a);
-#if USE_SDL2 == TRUE
-                    SDL_RenderDrawLine(R, r.x, r.y + r.h - 2, r.x + r.w, r.y + r.h - 2);
-#else
-                    SDL_RenderLine(R, r.x, r.y + r.h - 2, r.x + r.w, r.y + r.h - 2);
-#endif
-                }
-                if (mclick && over)
-                {
-#ifdef _WIN32
-                    ShellExecuteA(NULL, "open", txt, NULL, NULL, SW_SHOWNORMAL);
-#else
-                    char cmd[512];
-                    snprintf(cmd, sizeof(cmd), "(xdg-open '%s' || open '%s') >/dev/null 2>&1 &", txt, txt);
-                    system(cmd);
-#endif
-                }
-            }
-            else
-            {
-                draw_text(R, dlg.x + pad + 8, y, txt, g_text_color);
-            }
-            y += 16;
-            if (y > dlg.y + dlg.h - 36)
-                break;
-        }
-    }
-
-#if (USE_MPEG_DECODER == TRUE) || (USE_MPEG_ENCODER == TRUE) || (SUPPORT_MIDI_HW == TRUE) || (SUPPORT_OGG_FORMAT == TRUE) || (USE_VORBIS_DECODER == TRUE) || (USE_VORBIS_ENCODER == TRUE) || (USE_FLAC_DECODER == TRUE) || (USE_FLAC_ENCODER == TRUE) || (_USING_FLUIDLITE == TRUE)
-    // Page 2 & 3: credits/licenses (part 2)
-    else if (g_about_page == 2 || g_about_page == 3 || g_about_page == 4)
-    {
-        const char *credits_page2[] = {
-#if USE_MPEG_ENCODER == TRUE
-            "",
-            "libmp3lame",
-            "https://lame.sourceforge.io/",
-#endif            
 #if SUPPORT_MIDI_HW == TRUE
             "",
             "RtMidi: realtime MIDI i/o C++ classes",
@@ -1543,190 +1479,105 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
             "http://www.sippysoft.com",
 #endif
 #if USE_LZMA_COMPRESSION == TRUE
-             "",
-             "LZMA SDK",
-             "Copyright (C) 1999-2026 Igor Pavlov",
-             "https://www.7-zip.org/sdk.html",
-#endif
-
             "",
-            NULL
-        };
-        
-        // Check if credits_page2 has any meaningful content (not just empty strings)
-        bool has_credits_content = false;
-        for (int i = 0; credits_page2[i]; ++i)
-        {
-            if (credits_page2[i][0] != '\0')
-            {
-                has_credits_content = true;
-                break;
-            }
-        }
-        
-        // Only render if there's actual content
-        if (has_credits_content)
-        {
-            // Calculate how many items fit on page 2
-            int page2_max_items = 0;
-            int temp_y = dlg.y + 40;
-            for (int i = 0; credits_page2[i]; ++i)
-            {
-                temp_y += 16;
-                if (temp_y > dlg.y + dlg.h - 36)
-                {
-                    page2_max_items = i;
-                    break;
-                }
-            }
-            
-            // If we're on page 2, render up to page2_max_items
-            // If we're on page 3, render from page2_max_items onward
-            int start_index = (g_about_page == 2) ? 0 : page2_max_items;
-            int end_index = (g_about_page == 2) ? page2_max_items : -1;
-            
-            for (int i = start_index; credits_page2[i] && (end_index == -1 || i < end_index); ++i)
-            {
-                const char *txt = credits_page2[i];
-                if (strncmp(txt, "http", 4) == 0)
-                {
-                    int tw = 0, th = 0;
-                    measure_text(txt, &tw, &th);
-                    Rect r = {dlg.x + pad + 8, y, tw, th > 0 ? th : 14};
-                    bool over = point_in(mx, my, r);
-                    SDL_Color col = over ? g_accent_color : g_highlight_color;
-                    draw_text(R, r.x, r.y, txt, col);
-                    if (over)
-                    {
-                        SDL_SetRenderDrawColor(R, col.r, col.g, col.b, col.a);
+            "LZMA SDK",
+            "Copyright (C) 1999-2026 Igor Pavlov",
+            "https://www.7-zip.org/sdk.html",
+#endif
+            NULL};
+
+        int credit_count = 0;
+        while (credits[credit_count])
+            credit_count++;
+
+        const int listTop = y;
+        const int listBottom = footerTop - 4;
+        const int listH = listBottom - listTop;
+        int visible_lines = listH / lineH;
+        if (visible_lines < 1)
+            visible_lines = 1;
+
+        g_about_credits_scroll += g_about_wheel_delta;
+        g_about_wheel_delta = 0;
+        int max_scroll = credit_count - visible_lines;
+        if (max_scroll < 0)
+            max_scroll = 0;
+        if (g_about_credits_scroll < 0)
+            g_about_credits_scroll = 0;
+        if (g_about_credits_scroll > max_scroll)
+            g_about_credits_scroll = max_scroll;
+
+        Rect clip = {dlg.x + pad, listTop, dlg.w - pad * 2 - 14, listH};
 #if USE_SDL2 == TRUE
-                        SDL_RenderDrawLine(R, r.x, r.y + r.h - 2, r.x + r.w, r.y + r.h - 2);
+        SDL_Rect sdl_clip = {clip.x, clip.y, clip.w, clip.h};
+        SDL_RenderSetClipRect(R, &sdl_clip);
 #else
-                        SDL_RenderLine(R, r.x, r.y + r.h - 2, r.x + r.w, r.y + r.h - 2);
+        SDL_Rect sdl_clip = {clip.x, clip.y, clip.w, clip.h};
+        SDL_SetRenderClipRect(R, &sdl_clip);
 #endif
-                    }
-                    if (mclick && over)
-                    {
-#ifdef _WIN32
-                        ShellExecuteA(NULL, "open", txt, NULL, NULL, SW_SHOWNORMAL);
+
+        for (int i = 0; i < visible_lines && (g_about_credits_scroll + i) < credit_count; ++i)
+        {
+            const char *txt = credits[g_about_credits_scroll + i];
+            const int ly = listTop + i * lineH;
+            if (!txt[0])
+                continue;
+            if (strncmp(txt, "http", 4) == 0)
+                about_draw_link_line(R, dlg.x + pad + 8, ly, txt, mx, my, mclick);
+            else
+                draw_text(R, dlg.x + pad + 8, ly, txt, g_text_color);
+        }
+
+#if USE_SDL2 == TRUE
+        SDL_RenderSetClipRect(R, NULL);
 #else
-                        char cmd[512];
-                        snprintf(cmd, sizeof(cmd), "(xdg-open '%s' || open '%s') >/dev/null 2>&1 &", txt, txt);
-                        system(cmd);
+        SDL_SetRenderClipRect(R, NULL);
 #endif
-                    }
-                }
-                else
-                {
-                    draw_text(R, dlg.x + pad + 8, y, txt, g_text_color);
-                }
-                y += 16;
-                if (y > dlg.y + dlg.h - 36)
-                    break;
-            }
-        }
-    }
-#endif
-    // Page navigation controls (bottom-right)
-    // Calculate max pages dynamically based on available features and content overflow
-    int max_pages = 2; // Always have pages 0 and 1
-#if (USE_MPEG_DECODER == TRUE) || (USE_MPEG_ENCODER == TRUE) || (SUPPORT_MIDI_HW == TRUE) || (SUPPORT_OGG_FORMAT == TRUE) || (USE_VORBIS_DECODER == TRUE) || (USE_VORBIS_ENCODER == TRUE) || (USE_FLAC_DECODER == TRUE) || (USE_FLAC_ENCODER == TRUE)
-    // Check if page 2 content would overflow and require page 3
-    const char *credits_page2[] = {
-#if USE_MPEG_DECODER == TRUE
-        "", "minimp3", "Licensed under the CC0", "http://creativecommons.org/publicdomain/zero/1.0/",
-#endif
-#if SUPPORT_MIDI_HW == TRUE
-        "", "RtMidi: realtime MIDI i/o C++ classes", "Copyright (c) 2003-2023 Gary P. Scavone", "https://github.com/thestk/rtmidi",
-#endif
-#if SUPPORT_OGG_FORMAT == TRUE
-        "", "libogg", "Copyright (c) 2002, Xiph.org Foundation", "https://www.xiph.org/ogg/",
-#endif
-#if (USE_VORBIS_DECODER == TRUE) || (USE_VORBIS_ENCODER == TRUE)
-        "", "libvorbis", "Copyright (c) 2002-2020 Xiph.org Foundation", "https://www.xiph.org/vorbis/",
-#endif
-#if (USE_OPUS_DECODER == TRUE) || (USE_OPUS_ENCODER == TRUE)
-        "", "libopus", "Copyright (c) 2007-2026 Xiph.org Foundation", "https://www.xiph.org/opus/",
-#endif
-#if (USE_FLAC_DECODER == TRUE) || (USE_FLAC_ENCODER == TRUE)
-        "", "libFLAC", "Copyright (C) 2000-2009  Josh Coalson", "Copyright (C) 2011-2025  Xiph.Org Foundation", "https://www.xiph.org/flac/",
-#endif
-        "", NULL};
-    
-    // Check if credits_page2 has any meaningful content (not just empty strings)
-    bool has_credits_content = false;
-    for (int i = 0; credits_page2[i]; ++i)
-    {
-        if (credits_page2[i][0] != '\0')
+
+        /* Simple scrollbar when content overflows. */
+        if (max_scroll > 0)
         {
-            has_credits_content = true;
-            break;
-        }
-    }
-    
-    if (has_credits_content)
-    {
-        max_pages = 3; // Add page 2 if features are available and have content
-        
-        // Simulate rendering to see if all items fit on page 2
-        int temp_y = dlg.y + 40;
-        bool page3_needed = false;
-        for (int i = 0; credits_page2[i]; ++i)
-        {
-            temp_y += 16;
-            if (temp_y > dlg.y + dlg.h - 36)
-            {
-                // Check if there are more items after this one
-                if (credits_page2[i + 1] != NULL)
-                {
-                    page3_needed = true;
-                }
-                break;
-            }
-        }
-        
-        if (page3_needed)
-        {
-            max_pages = 4; // Add page 3 if content overflows
-        }
-    }
-#endif
-    
-    Rect navPrev = {dlg.x + dlg.w - 70, dlg.y + dlg.h - 34, 24, 20};
-    Rect navNext = {dlg.x + dlg.w - 34, dlg.y + dlg.h - 34, 24, 20};
-    bool overPrev = point_in(mx, my, navPrev);
-    bool overNext = point_in(mx, my, navNext);
-    draw_rect(R, navPrev, overPrev ? g_button_hover : g_button_base);
-    draw_frame(R, navPrev, g_button_border);
-    draw_text(R, navPrev.x + 6, navPrev.y, "<", g_button_text);
-    draw_rect(R, navNext, overNext ? g_button_hover : g_button_base);
-    draw_frame(R, navNext, g_button_border);
-    draw_text(R, navNext.x + 6, navNext.y, ">", g_button_text);
-    // Page indicator
-    char pg[32];
-    snprintf(pg, sizeof(pg), "%d / %d", g_about_page + 1, max_pages);
-    int pw = 0, ph = 0;
-    measure_text(pg, &pw, &ph);
-    draw_text(R, dlg.x + dlg.w - 100 - pw / 2, dlg.y + dlg.h - 32, pg, g_text_color);
-    if (mclick)
-    {
-        if (overPrev && g_about_page > 0)
-        {
-            g_about_page--;
-        }
-        else if (overNext && g_about_page < (max_pages - 1))
-        {
-            g_about_page++;
+            Rect track = {dlg.x + dlg.w - pad - 8, listTop, 6, listH};
+            draw_rect(R, track, g_is_dark_mode ? (SDL_Color){40, 40, 48, 255} : (SDL_Color){200, 200, 210, 255});
+            const int thumbH = (listH * visible_lines) / credit_count;
+            int thumbY = listTop;
+            if (max_scroll > 0)
+                thumbY = listTop + ((listH - thumbH) * g_about_credits_scroll) / max_scroll;
+            Rect thumb = {track.x, thumbY, track.w, thumbH > 12 ? thumbH : 12};
+            draw_rect(R, thumb, g_accent_color);
         }
     }
 
-    if (baeVersion)
+    /* Footer: Info | Licenses */
+    Rect tabInfo = {dlg.x + pad, footerTop, 70, 22};
+    Rect tabLic = {tabInfo.x + tabInfo.w + 6, footerTop, 90, 22};
+    bool overInfo = point_in(mx, my, tabInfo);
+    bool overLic = point_in(mx, my, tabLic);
+    draw_rect(R, tabInfo, (g_about_page == 0 || overInfo) ? g_button_hover : g_button_base);
+    draw_frame(R, tabInfo, g_button_border);
+    draw_text(R, tabInfo.x + 18, tabInfo.y + 3, "Info", g_button_text);
+    draw_rect(R, tabLic, (g_about_page == 1 || overLic) ? g_button_hover : g_button_base);
+    draw_frame(R, tabLic, g_button_border);
+    draw_text(R, tabLic.x + 12, tabLic.y + 3, "Licenses", g_button_text);
+    if (mclick && overInfo)
+    {
+        g_about_page = 0;
+        g_about_wheel_delta = 0;
+    }
+    else if (mclick && overLic)
+    {
+        g_about_page = 1;
+        g_about_credits_scroll = 0;
+        g_about_wheel_delta = 0;
+    }
+
+    if (g_about_page == 1)
+        draw_text(R, dlg.x + dlg.w - pad - 120, footerTop + 4, "Scroll: mouse wheel", g_text_color);
+
+    if (baeVersion && baeVersion[0])
         free(baeVersion);
-    if (compInfo)
+    if (compInfo && compInfo[0])
         free(compInfo);
-
-    // Note: deliberately do NOT close About dialog when clicking outside to
-    // avoid immediate close when the About button (outside the dialog) is clicked.
 }
 
 void render_eq_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool mdown, int window_h)
@@ -2022,6 +1873,8 @@ void dialogs_init(void)
     g_rmf_info_loaded = false;
     g_show_about_dialog = false;
     g_about_page = 0;
+    g_about_credits_scroll = 0;
+    g_about_wheel_delta = 0;
     g_show_eq_dialog = false;
     ui_clear_tooltip(&g_bank_tooltip_visible);
     ui_clear_tooltip(&g_file_tooltip_visible);
