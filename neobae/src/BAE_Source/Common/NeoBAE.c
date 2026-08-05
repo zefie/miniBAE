@@ -2665,7 +2665,7 @@ BAEResult BAEMixer_GetDLSBankFriendlyName(BAEMixer mixer, char *outName, uint32_
     outName[outNameSize - 1] = '\0';
     return BAE_NO_ERROR;
 #else
-    return BAE_ERROR_FEATURE_UNAVAIL;
+    return BAE_UNSUPPORTED_FORMAT;
 #endif
 }
 // this is used as an ID for song callbacks and such

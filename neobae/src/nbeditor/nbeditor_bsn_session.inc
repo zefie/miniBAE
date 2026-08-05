@@ -811,6 +811,17 @@ bool ActivateSessionSongAt(int index)
     m_document = new_doc;
     m_session_song_index = index;
     m_document_dirty = false;
+    m_midi_selected_track = -1;
+    m_midi_selected_notes.clear();
+    m_midi_primary_note = -1;
+    m_midi_undo.clear();
+    m_midi_redo.clear();
+    m_midi_undo_pending_valid = false;
+    m_midi_note_cache_dirty = true;
+    m_midi_cached_notes.clear();
+    m_midi_track_muted.clear();
+    m_midi_track_solo.clear();
+    m_midi_scroll_tick = 0.0f;
 
     /* Promote after m_document is swapped so bank list naming can read
      * document display names for empty INST/SND Pascal names. */
@@ -850,6 +861,7 @@ static constexpr uint32_t kNbetOpenIE = 1u << 0;
 static constexpr uint32_t kNbetOpenSE = 1u << 1;
 static constexpr uint32_t kNbetOpenSongInfo = 1u << 2;
 static constexpr uint32_t kNbetOpenSongSettings = 1u << 3;
+static constexpr uint32_t kNbetOpenMidiEditor = 1u << 4;
 
 void ApplyPlayerMixSettings()
 {
@@ -897,6 +909,8 @@ void TeardownForSessionReload()
 #endif
     m_song_info_open = false;
     m_song_settings_open = false;
+    m_midi_editor_open = false;
+    MeClearMidiEditorState();
     m_export_rmf_open = false;
     m_export_sample_rmf_open = false;
     m_export_bank_open = false;
@@ -973,6 +987,10 @@ std::vector<unsigned char> CaptureNbetLayoutBlob()
     if (m_song_settings_open)
     {
         open_flags |= kNbetOpenSongSettings;
+    }
+    if (m_midi_editor_open)
+    {
+        open_flags |= kNbetOpenMidiEditor;
     }
 
     /* Version 3: v2 + player mix (volume / tempo / reverb) before ImGui ini. */
@@ -1065,6 +1083,10 @@ void RestoreNbetEditorWindows()
     if (flags & kNbetOpenSongSettings)
     {
         OpenSongSettingsDialog();
+    }
+    if ((flags & kNbetOpenMidiEditor) && m_document)
+    {
+        OpenMidiEditor();
     }
 }
 
@@ -1187,6 +1209,8 @@ void ResetSessionLayoutToDefault()
 #endif
     m_song_info_open = false;
     m_song_settings_open = false;
+    m_midi_editor_open = false;
+    MeClearMidiEditorState();
     m_export_rmf_open = false;
     m_export_sample_rmf_open = false;
     m_export_bank_open = false;

@@ -101,6 +101,11 @@
                 OpenSongInfoDialog();
             }
             ImGui::SameLine();
+            if (ImGui::SmallButton("MIDI Editor"))
+            {
+                OpenMidiEditor();
+            }
+            ImGui::SameLine();
             if (ImGui::SmallButton("Export…"))
             {
                 OpenExportRmfInstrumentDialog();

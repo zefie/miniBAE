@@ -141,6 +141,10 @@
             {
                 OpenSongSettingsDialog();
             }
+            if (ImGui::MenuItem("MIDI Editor...", nullptr, false, m_document != nullptr))
+            {
+                OpenMidiEditor();
+            }
             if (ImGui::MenuItem("Export as Audio...", nullptr, false, m_document != nullptr || m_song != nullptr))
             {
                 OpenExportAudioDialog();
@@ -996,6 +1000,7 @@
         m_song_started = true;
         m_document_dirty = false;
         ApplyChannelMutes();
+        MeApplyTrackMutes();
         RebuildPreviewSongFromDocument();
         return true;
     }
@@ -3213,6 +3218,15 @@
                                         m_document != nullptr && i == m_session_song_index))
                     {
                         OpenSongInfoDialog();
+                    }
+                    if (ImGui::MenuItem("MIDI Editor..."))
+                    {
+                        m_groovoid_index = -1;
+                        if (i != m_session_song_index)
+                        {
+                            ActivateSessionSongAt(i);
+                        }
+                        OpenMidiEditor();
                     }
                     if (ImGui::MenuItem("Export RMF/ZMF...",
                                         nullptr,

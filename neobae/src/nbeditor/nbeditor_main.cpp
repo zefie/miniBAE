@@ -32,6 +32,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <unordered_set>
 #include <vector>
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -1348,6 +1349,7 @@ public:
         DrawDockspace();
         DrawPlayerWindow();
         DrawSessionWindow();
+        DrawMidiEditorWindow();
         DrawBankAddDialog();
         DrawSongInfoDialog();
         DrawSongSettingsDialog();
@@ -3468,6 +3470,7 @@ private:
     // Session / IE / Song Info / Export helpers
 #include "nbeditor_session.inc"
 #include "nbeditor_bsn_session.inc"
+#include "nbeditor_midi_editor.inc"
 
     void DrawDockspace()
     {
@@ -5334,6 +5337,47 @@ private:
     std::string m_oneshot_title;
     bool m_document_dirty = false;
     bool m_request_quit = false;
+
+    /* MIDI Editor (GarageBand-style track timeline + piano roll). */
+    bool m_midi_editor_open = false;
+    bool m_midi_editor_focused = false;
+    int m_midi_selected_track = -1;
+    std::unordered_set<int> m_midi_selected_notes;
+    int m_midi_primary_note = -1;
+    float m_midi_scroll_tick = 0.0f;
+    float m_midi_scroll_pitch = 40.0f; /* rows from top; ~C4 centered-ish */
+    float m_midi_px_per_tick = 0.12f;
+    float m_midi_px_per_pitch = 14.0f;
+    bool m_midi_snap_enabled = true;
+    int m_midi_snap_division = 4;
+    int m_midi_snap_division_index = 2;
+    bool m_midi_follow_playhead = true;
+    uint32_t m_midi_playhead_tick = 0;
+    MeDragMode m_midi_drag_mode = MeDragMode::None;
+    uint32_t m_midi_drag_origin_tick = 0;
+    int m_midi_drag_origin_pitch = 60;
+    int32_t m_midi_drag_tick_delta = 0;
+    int m_midi_drag_pitch_delta = 0;
+    ImVec2 m_midi_marquee_a = ImVec2(0, 0);
+    int m_midi_auto_drag_lane = -1;
+    int m_midi_auto_drag_index = -1;
+    bool m_midi_vel_undo_open = false;
+    /* Default: only Volume visible so the piano roll keeps most of the height. */
+    std::array<bool, 16> m_midi_auto_lane_visible = {
+        false, false, false, true, false, false, false, false, false, false, false, false, false, false, false, false};
+    bool m_midi_auto_collapsed = false;
+    std::vector<bool> m_midi_track_muted;
+    std::vector<bool> m_midi_track_solo;
+    bool m_midi_note_cache_dirty = true;
+    std::vector<BAERmfEditorNoteInfo> m_midi_cached_notes;
+    std::deque<MeMidiUndoState> m_midi_undo;
+    std::deque<MeMidiUndoState> m_midi_redo;
+    MeMidiUndoState m_midi_undo_pending;
+    bool m_midi_undo_pending_valid = false;
+    bool m_midi_undo_restoring = false;
+    std::vector<MeNoteClip> m_midi_note_clipboard;
+    int m_midi_rename_track = -1;
+    char m_midi_rename_buf[128] = {0};
 
     bool m_song_info_open = false;
     char m_song_info_title[256] = {0};
