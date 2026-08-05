@@ -2175,13 +2175,11 @@ private:
         BAESong_SetLoops(song, m_loop_enabled ? 32767 : 0);
         BAEMixer_SetOutputGain(m_mixer, m_volume_percent);
 
-        // Prime the song engine so virtual keyboard note preview works immediately.
-        BAESong_Start(song, 0);
-        BAESong_Pause(song);
-
+        /* Preroll only — Start+Pause dispatches and kills tick-0 notes before Play.
+         * Preview song (RebuildPreviewSongFromPath) still Start+Pauses for audition. */
         m_song = song;
         m_loaded_song_path = path;
-        m_song_started = true;
+        m_song_started = false;
         RebuildPreviewSongFromPath(path);
 
         if (!rmf_like && !module_like)

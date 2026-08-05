@@ -1297,7 +1297,18 @@
         }
         else if (paused_flag)
         {
-            BAESong_Resume(m_song);
+            /* If we're still at the top of the song, Resume cannot re-fire notes
+             * already consumed by a prior Start+Pause arming — restart instead. */
+            uint32_t pos_us = 0;
+            if (BAESong_GetMicrosecondPosition(m_song, &pos_us) == BAE_NO_ERROR &&
+                pos_us < 50000u)
+            {
+                RestartSessionSongFromStart();
+            }
+            else
+            {
+                BAESong_Resume(m_song);
+            }
         }
         else
         {

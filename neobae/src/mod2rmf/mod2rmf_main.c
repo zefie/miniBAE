@@ -58,7 +58,8 @@ static void print_usage(const char *program_name)
             "  --filters             List available filter/resample options\n"
             "  --stereo-separation N Stereo width 0-100%% (0=mono, 75=default, 100=hard L/R)\n"
             "  --it-v00-cut-rows N   Cut sustained note after N silent rows following explicit IT v00 (0=off, default: 6)\n"
-            "  --down-octave-range   Shift virtual sample root down one extra octave for more low-note range\n"
+            "  --down-octave-range   Lower sample root/rate by 1 octave for more low-note range\n"
+            "                        (legacy headroom trick; prefer --ext-pitch for deep bass)\n"
             "  --avoid-midi-ch10     Avoid mapping tracker channels to MIDI ch10 (useful for some SPC2IT outputs)\n"
             "  --spread              [Experimental] Spread instruments across MIDI channels\n"
             "  --tempomap            Reserved for future tempo-map handling\n"
@@ -405,7 +406,7 @@ int main(int argc, char *argv[])
     conv->avoidMidiChannel10 = avoidMidiChannel10;
     if (downOctaveRange)
     {
-        /* Default is -24 st; this adds one octave (total -36 st). */
+        /* Opt-in: drop root + sample rate by one octave (pitch-compensated). */
         conv->rootShiftSemitones = (uint8_t)(conv->rootShiftSemitones + 12u);
     }
     conv->stereoSeparation = stereoSeparation;

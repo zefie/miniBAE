@@ -23,7 +23,11 @@
 #include <math.h>
 #include <xmp.h>
 
-#define MOD2RMF_DEFAULT_ROOT_SHIFT_ST 24u
+/* Default: keep native Amiga/XM rate and middle-C root. Non-zero shift
+ * (via --down-octave-range) still lowers root + rate together for low-note
+ * headroom under BAE's default -24 semitone pitch floor; prefer --ext-pitch. */
+#define MOD2RMF_DEFAULT_ROOT_SHIFT_ST 0u
+#define MOD2RMF_LOGICAL_ROOT_KEY 60u
 
 static unsigned char mod2rmf_shifted_root_key(unsigned char rootKey, uint8_t shiftSemitones)
 {
@@ -34,6 +38,11 @@ static BAE_UNSIGNED_FIXED mod2rmf_compensated_sample_rate(uint32_t baseRateHz, u
 {
     double rateScale;
     double shiftedRate;
+
+    if (shiftSemitones == 0u)
+    {
+        return (BAE_UNSIGNED_FIXED)((double)baseRateHz * 65536.0 + 0.5);
+    }
 
     rateScale = pow(2.0, -((double)shiftSemitones / 12.0));
     shiftedRate = (double)baseRateHz * rateScale;
@@ -78,19 +87,11 @@ bool mod2rmf_path_is_it(const char *path)
 
 static int mod2rmf_tracker_note_bias(const Mod2RmfConverter *conv)
 {
-    if (!conv)
-    {
-        return 12;
-    }
-
-    /* IT modules are 1 octave low in default mode; restore +12 there.
-     * Keep 0 bias when down-octave-range is enabled (extra root shift). */
-    if (conv->isIt && conv->rootShiftSemitones > MOD2RMF_DEFAULT_ROOT_SHIFT_ST)
-    {
-        return 0;
-    }
-
-    return 12;
+    (void)conv;
+    /* Logical root is middle C (60); libxmp notes map 1:1 with no octave bias.
+     * (Former root 72 + bias +12 was pitch-equivalent but pushed MIDI into
+     * octaves 5–7 and paired with a default -24 st rate/root fake-out.) */
+    return 0;
 }
 
 static void mod2rmf_apply_sample_gain(ModRawSample *raw, double gainDb)
@@ -369,8 +370,8 @@ int mod2rmf_setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
         memset(&setup, 0, sizeof(setup));
         setup.program = playable->program;
         
-        /* Lower the virtual root key to extend down-note range, while applying
-         * a matching sample-rate compensation so audible pitch stays unchanged. */
+        /* Optional rootShiftSemitones lowers root + rate together (pitch-neutral)
+         * for low-note headroom; default shift is 0 (native rate / root 60). */
         setup.rootKey = mod2rmf_shifted_root_key(playable->rootKey, conv->rootShiftSemitones);
         
         setup.lowKey = 0;
@@ -734,7 +735,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
         raw = &conv->rawSamples[i];
         memset(raw, 0, sizeof(*raw));
         mod2rmf_trim_copy_ascii(raw->name, sizeof(raw->name), s->name);
-        raw->rootKey = 72;
+        raw->rootKey = MOD2RMF_LOGICAL_ROOT_KEY;
         raw->defaultVolume = 64;
         raw->defaultPan = -1; /* unset; will be filled from sub-instrument */
         raw->finetune = 0;
@@ -1445,7 +1446,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
         p = &song->playables[program];
         p->sourceSlot = i;
         p->program = (unsigned char)program;
-        p->rootKey = 72;
+        p->rootKey = MOD2RMF_LOGICAL_ROOT_KEY;
         p->hasSampleRateOverride = TRUE;
         p->sampleRateOverrideHz = conv->moduleBaseRateHz;
         
@@ -1939,7 +1940,7 @@ int mod2rmf_setup_instrument_ext(Mod2RmfConverter *conv, const ModSongModel *son
     extraRootShiftSemitones = (conv->rootShiftSemitones > MOD2RMF_DEFAULT_ROOT_SHIFT_ST)
                              ? (uint8_t)(conv->rootShiftSemitones - MOD2RMF_DEFAULT_ROOT_SHIFT_ST)
                              : 0u;
-    extMidiRootKey = 60 - (int)extraRootShiftSemitones;
+    extMidiRootKey = (int)MOD2RMF_LOGICAL_ROOT_KEY - (int)extraRootShiftSemitones;
     if (extMidiRootKey < 0)
     {
         extMidiRootKey = 0;
