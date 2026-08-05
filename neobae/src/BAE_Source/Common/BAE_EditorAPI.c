@@ -20496,8 +20496,10 @@ static BAEResult PV_PrepareUsedInstrumentsFromBank(
                 continue;
             }
             /* CH10 + bank 0 = classic GM drums (note selects INST 128+n).
-               CH10 + bank != 0 = melodic percussion from a prior CloneUsed
-               (bank+program → INST 512+p); treat as pitched or Resolve fails. */
+               CH10 + bank != 0 may be either:
+                 - melodic CloneUsed embeds (bank+program → INST 512+p), or
+                 - bank-group kits (group*256 + 128 + note, e.g. DreamTheme bank 2).
+               Prefer Resolve of the melodic ID; fall back to kit percussion. */
             if (noteInfo.channel == 9 && noteInfo.bank == 0)
             {
                 if (!PV_AddUsedPercussion(usedPercussion,
@@ -20505,6 +20507,42 @@ static BAEResult PV_PrepareUsedInstrumentsFromBank(
                                           kMaximumPitchedInstruments,
                                           noteInfo.bank,
                                           noteInfo.note))
+                {
+                    return BAE_PARAM_ERR;
+                }
+            }
+            else if (noteInfo.channel == 9 && noteInfo.bank != 0)
+            {
+                uint32_t bankGroup = PV_BankGroupFromInternalBank(noteInfo.bank);
+                uint32_t melodicInstID = (bankGroup * 256u) + noteInfo.program;
+                uint32_t resolvedInstID = melodicInstID;
+                uint32_t instrumentIndex = 0;
+                bool treatAsPercussion = FALSE;
+
+                if (BAERmfEditorBank_ResolveInstID(bankToken,
+                                                   melodicInstID,
+                                                   &resolvedInstID,
+                                                   &instrumentIndex) != BAE_NO_ERROR)
+                {
+                    treatAsPercussion = TRUE;
+                }
+
+                if (treatAsPercussion)
+                {
+                    if (!PV_AddUsedPercussion(usedPercussion,
+                                              &usedPercussionCount,
+                                              kMaximumPitchedInstruments,
+                                              noteInfo.bank,
+                                              noteInfo.note))
+                    {
+                        return BAE_PARAM_ERR;
+                    }
+                }
+                else if (!PV_AddUsedInstrumentPair(pitchedPairs,
+                                                   &pitchedPairCount,
+                                                   kMaximumPitchedInstruments,
+                                                   noteInfo.bank,
+                                                   noteInfo.program))
                 {
                     return BAE_PARAM_ERR;
                 }

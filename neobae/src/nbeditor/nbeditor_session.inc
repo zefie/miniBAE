@@ -1411,11 +1411,31 @@
                     continue;
                 }
                 const int bank_group = ExportBankGroupFromNoteBank(note.bank);
-                /* CH10 bank 0 = GM drums; CH10 bank != 0 = melodic CloneUsed embeds. */
-                const bool percussion = (note.channel == 9 && note.bank == 0);
-                const uint32_t requested_inst_id =
+                /* CH10 bank 0 = GM drums. CH10 bank != 0: try melodic CloneUsed
+                 * (group*256+program), else bank-group kit (group*256+128+note). */
+                bool percussion = (note.channel == 9 && note.bank == 0);
+                uint32_t requested_inst_id =
                     percussion ? (static_cast<uint32_t>(bank_group) * 256u) + 128u + note.note
                                : (static_cast<uint32_t>(bank_group) * 256u) + note.program;
+                if (note.channel == 9 && note.bank != 0)
+                {
+                    uint32_t melodic_id = (static_cast<uint32_t>(bank_group) * 256u) + note.program;
+                    uint32_t resolved_tmp = melodic_id;
+                    uint32_t index_tmp = 0;
+                    if (BAERmfEditorBank_ResolveInstID(m_bank_token,
+                                                       melodic_id,
+                                                       &resolved_tmp,
+                                                       &index_tmp) != BAE_NO_ERROR)
+                    {
+                        percussion = true;
+                        requested_inst_id =
+                            (static_cast<uint32_t>(bank_group) * 256u) + 128u + note.note;
+                    }
+                    else
+                    {
+                        requested_inst_id = melodic_id;
+                    }
+                }
                 if (!requested_seen.insert(requested_inst_id).second)
                 {
                     continue;

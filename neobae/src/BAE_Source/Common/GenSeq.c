@@ -2283,8 +2283,10 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                     if (!routedToDLS)
                     {
                         // If SF2 is active for this song, send program change to SF2
+                        int32_t combinedProgram = (theBank * 128) + thePatch;
                         pSong->channelType[MIDIChannel] = CHANNEL_TYPE_SF2;
                         debug_message("ProcessProgramChange Debug: Channel %d is using a SF2 bank instrument  (bank=%d prog=%d)\n", (MIDIChannel + 1), theBank / 2, thePatch);
+                        GM_SF2_ProcessProgramChange(pSong, MIDIChannel, combinedProgram);
                     }
                 }
 #endif
@@ -2317,11 +2319,18 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                     // HSB mode without overlay - use native synthesis
                     int32_t hsbPatch = PV_ConvertPatchBank(pSong, thePatch, MIDIChannel);
                     uint32_t midiBank = (uint32_t)((uint8_t)pSong->channelRawBank[MIDIChannel]);
+                    /* GM-style selectors (MSB 120/121) stay in channelRawBank for
+                     * J2ME/DLS quirks; channelBank must remain in the HSB range. */
+                    uint32_t hsbBank = midiBank;
+                    if (hsbBank > (uint32_t)(MAX_BANKS / 2))
+                    {
+                        hsbBank = 0;
+                    }
                     /* Only fall back during playback. During instrument scan
                      * instrumentData is still empty, so treating that as "missing
                      * bank 2" incorrectly forces bank 0 and loads piano instead of
                      * requesting INST 512+ (e.g. session Bank 2 customs). */
-                    if (midiBank >= 2 &&
+                    if (hsbBank >= 2 &&
                         pSong->AnalyzeMode == SCAN_NORMAL &&
                         pSong->instrumentData[pSong->remapArray[hsbPatch]] == NULL)
                     {
@@ -2332,7 +2341,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                     }
                     else
                     {
-                        pSong->channelBank[MIDIChannel] = (signed char)(midiBank);
+                        pSong->channelBank[MIDIChannel] = (signed char)hsbBank;
                     }
                     pSong->channelType[MIDIChannel] = CHANNEL_TYPE_GM;
                 }
