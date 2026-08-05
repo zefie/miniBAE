@@ -148,6 +148,7 @@ public class Mixer
 	private static native int _loadFromMemory(long mixerReference, byte[] data, LoadResult result);
 	
 	// Export functionality
+	private static native int _makeCurrent(long reference);
 	private static native int _startOutputToFile(long reference, String filePath, int outputType, int compressionType);
 	private static native int _serviceOutputToFile(long reference);
 	private static native int _stopOutputToFile(long reference);
@@ -257,6 +258,18 @@ public class Mixer
 	
 	// Get the global mixer instance
 	public static Mixer getMixer() { return mMixer; }
+
+	/** Bind this mixer's GM_Mixer into TLS MusicGlobals for the calling thread.
+	 *  Required on export worker threads after the multi-mixer change. */
+	public int makeCurrent() {
+		if (mReference == 0L) return -1;
+		return _makeCurrent(mReference);
+	}
+
+	public static int makeCurrentMixer() {
+		if (mMixer == null || mMixer.mReference == 0L) return -1;
+		return _makeCurrent(mMixer.mReference);
+	}
 	
 	// Export functionality constants (from MiniBAE.h)
 	public static final int BAE_INVALID_TYPE = 0;

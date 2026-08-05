@@ -834,6 +834,8 @@ void GM_SetSongFadeRate(GM_Song *pSong, XFIXED fadeRate,
 // Pause all songs
 void GM_PauseSequencer(bool endVoices)
 {
+    if (!MusicGlobals)
+        return;
     if ((MusicGlobals->systemPaused == FALSE) && (MusicGlobals->sequencerPaused == FALSE))
     {
         MusicGlobals->sequencerPaused = TRUE;

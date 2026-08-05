@@ -55,6 +55,9 @@ JNIEXPORT jstring JNICALL Java_com_zefie_NeoBAE_Mixer__1getBankFriendlyName
 JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromMemoryWithFilename
   (JNIEnv *, jclass, jlong, jbyteArray, jstring);
 
+JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1makeCurrent
+  (JNIEnv *, jclass, jlong);
+
 JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1startOutputToFile
   (JNIEnv *, jclass, jlong, jstring, jint, jint);
 

@@ -2684,6 +2684,9 @@ void *mWritingToFileReference;
 void *mWritingEncoder;
 void *mWritingDataBlock;
 uint32_t mWritingDataBlockSize;
+/* Mixer that owns the active file export — needed so Stop can rebind TLS /
+ * reconnect hardware on a worker thread where MusicGlobals is otherwise NULL. */
+static BAEMixer mWritingMixer = NULL;
 
 #if USE_FLAC_ENCODER != FALSE
 // FLAC encoding state for streaming
@@ -6084,6 +6087,7 @@ BAEResult BAEMixer_StartOutputToFile(BAEMixer theMixer,
     OPErr theErr;
     XFILENAME theFile;
     BAEResult err;
+    GM_Mixer *savedMixer = NULL;
     // begin block added for NeoBAE 11/29/00 tom
     BAEAudioModifiers theModifiers;
     BAERate theRate;
@@ -6097,15 +6101,24 @@ BAEResult BAEMixer_StartOutputToFile(BAEMixer theMixer,
     }
 #endif
 
+    if (!theMixer || !theMixer->pMixer)
+        return BAE_NULL_OBJECT;
+
+    /* Export often runs on a worker thread (zefidi / Android). Bind TLS so any
+     * remaining MusicGlobals-dependent helpers see this mixer. */
+    savedMixer = PV_BindBAEMixer(theMixer);
+
     // begin block added for NeoBAE  11/28/00  tom
     err = BAEMixer_GetModifiers(theMixer, &theModifiers);
     if (err != BAE_NO_ERROR)
     {
+        GM_SetCurrentMixer(savedMixer);
         return err;
     }
     err = BAEMixer_GetRate(theMixer, &theRate);
     if (err != BAE_NO_ERROR)
     {
+        GM_SetCurrentMixer(savedMixer);
         return err;
     }
     // end block added for NeoBAE
@@ -6117,8 +6130,12 @@ BAEResult BAEMixer_StartOutputToFile(BAEMixer theMixer,
     {
         // StopOutputToFile();
         BAEMixer_StopOutputToFile();
+        /* Stop may leave TLS on a different mixer; re-bind without losing
+         * the pre-Start TLS saved above. */
+        (void)PV_BindBAEMixer(theMixer);
     }
 
+    mWritingMixer = theMixer;
     mWriteToFileType = outputType;
     XConvertPathToXFILENAME(pAudioOutputFile, &theFile);
 
@@ -6428,7 +6445,9 @@ BAEResult BAEMixer_StartOutputToFile(BAEMixer theMixer,
     {
         XDisposePtr(mWritingDataBlock);
         mWritingDataBlock = NULL;
+        mWritingMixer = NULL;
     }
+    GM_SetCurrentMixer(savedMixer);
     return BAE_TranslateOPErr(theErr);
 #else
     pAudioOutputFile = pAudioOutputFile;
@@ -6447,6 +6466,21 @@ BAEResult BAEMixer_StartOutputToFile(BAEMixer theMixer,
 void BAEMixer_StopOutputToFile(void)
 {
 #if USE_CREATION_API == TRUE
+    GM_Mixer *savedMixer = NULL;
+    GM_Mixer *hardwareMixer = NULL;
+    int didBindWritingMixer = 0;
+
+    if (mWritingMixer && mWritingMixer->pMixer)
+    {
+        savedMixer = PV_BindBAEMixer(mWritingMixer);
+        hardwareMixer = mWritingMixer->pMixer;
+        didBindWritingMixer = 1;
+    }
+    else
+    {
+        hardwareMixer = MusicGlobals;
+    }
+
     if (mWritingToFile && mWritingToFileReference)
     {
         switch (mWriteToFileType)
@@ -6542,9 +6576,13 @@ void BAEMixer_StopOutputToFile(void)
         XDisposePtr(mWritingDataBlock);
         mWritingDataBlock = NULL;
 
-        GM_StartHardwareSoundManager(MusicGlobals); // reconnect to hardware
+        /* Pass GM_Mixer* so Acquire stores it for the OpenSL/audio callback TLS bind. */
+        GM_StartHardwareSoundManager(hardwareMixer); // reconnect to hardware
     }
     mWritingToFile = FALSE;
+    mWritingMixer = NULL;
+    if (didBindWritingMixer)
+        GM_SetCurrentMixer(savedMixer);
 #if DUMP_OUTPUTFILE
     if (fp)
     {
@@ -12518,13 +12556,19 @@ BAEResult BAESong_InjectMidiMessage(BAESong song, const unsigned char *message, 
 BAEResult BAESong_Preroll(BAESong song)
 {
     OPErr err;
+    GM_Mixer *savedMixer = NULL;
 
     err = NO_ERR;
     if ((song) && (song->mID == OBJECT_ID))
     {
         BAE_AcquireMutex(song->mLock);
+        /* GM_PrerollSong still touches MusicGlobals (reverb / voice rebalance). */
+        if (song->mixer)
+            savedMixer = PV_BindBAEMixer(song->mixer);
         // auto level engaged
         err = GM_PrerollSong(song->pSong, NULL, FALSE, TRUE);
+        if (song->mixer)
+            GM_SetCurrentMixer(savedMixer);
         BAE_ReleaseMutex(song->mLock);
     }
     else
@@ -12956,6 +13000,7 @@ void BAE_OverrideBAESongFromFile(void *songObject, const void *filePath)
 BAEResult BAESong_Start(BAESong song, int16_t priority)
 {
     OPErr err;
+    GM_Mixer *savedMixer = NULL;
 
     err = NO_ERR;
     if ((song) && (song->mID == OBJECT_ID))
@@ -12963,6 +13008,7 @@ BAEResult BAESong_Start(BAESong song, int16_t priority)
         BAE_AcquireMutex(song->mLock);
         if (song->mixer)
         {
+            savedMixer = PV_BindBAEMixer(song->mixer);
             GM_SetSongPriority(song->pSong, priority);
             GM_SetSongVolume(song->pSong, song->mVolume);
             GM_SetSongRouteBus(song->pSong, song->mRouteBus);
@@ -12975,6 +13021,7 @@ BAEResult BAESong_Start(BAESong song, int16_t priority)
                 GM_SetSongCallback(song->pSong, PV_DefaultSongDoneCallback, (void *)song);
                 PV_ApplySongEngineConfig(song);
             }
+            GM_SetCurrentMixer(savedMixer);
         }
         else
         {
@@ -12992,6 +13039,11 @@ BAEResult BAESong_Start(BAESong song, int16_t priority)
 
 static void PV_BAESong_Stop(BAESong song, BAE_BOOL startFade)
 {
+    GM_Mixer *savedMixer = NULL;
+
+    if (song->mixer)
+        savedMixer = PV_BindBAEMixer(song->mixer);
+
     if (GM_IsSongPaused(song->pSong))
     {
         GM_ResumeSong(song->pSong);
@@ -13012,6 +13064,9 @@ static void PV_BAESong_Stop(BAESong song, BAE_BOOL startFade)
         song->mInMixer = FALSE;
         PV_RestoreSongEngineConfig(song);
     }
+
+    if (song->mixer)
+        GM_SetCurrentMixer(savedMixer);
 }
 
 // BAESong_Stop()

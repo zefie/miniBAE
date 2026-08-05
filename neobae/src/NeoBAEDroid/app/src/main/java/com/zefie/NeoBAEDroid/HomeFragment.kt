@@ -3768,6 +3768,16 @@ class HomeFragment : Fragment() {
         
         Thread {
             try {
+                /* MusicGlobals is TLS after multi-mixer; bind before any song/export API
+                 * on this worker thread (same as gui_export.c export_thread_proc). */
+                if (Mixer.makeCurrentMixer() != 0) {
+                    android.util.Log.e("HomeFragment", "Failed to makeCurrent mixer for export")
+                    activity?.runOnUiThread {
+                        Toast.makeText(requireContext(), "Export failed (mixer not ready)", Toast.LENGTH_SHORT).show()
+                    }
+                    return@Thread
+                }
+
                 val currentItem = viewModel.getCurrentItem()
                 if (currentItem == null) {
                     activity?.runOnUiThread {

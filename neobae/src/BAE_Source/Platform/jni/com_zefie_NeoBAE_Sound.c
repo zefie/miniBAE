@@ -673,6 +673,16 @@ JNIEXPORT jbyteArray JNICALL Java_com_zefie_NeoBAE_Song__1getChannelMuteStatus
 }
 
 // Export functionality
+JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1makeCurrent
+	(JNIEnv* env, jclass clazz, jlong mixerReference)
+{
+	(void)env;
+	(void)clazz;
+	BAEMixer mixer = (BAEMixer)(intptr_t)mixerReference;
+	if (!mixer) return (jint)BAE_PARAM_ERR;
+	return (jint)BAEMixer_MakeCurrent(mixer);
+}
+
 JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1startOutputToFile
 	(JNIEnv* env, jclass clazz, jlong mixerReference, jstring filePath, jint outputType, jint compressionType)
 {
@@ -683,6 +693,9 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1startOutputToFile
 	if(!path) return (jint)BAE_MEMORY_ERR;
 	
 	__android_log_print(ANDROID_LOG_DEBUG, "neoBAE", "Starting output to file: %s, type: %d, compression: %d", path, outputType, compressionType);
+
+	/* Worker-thread export: bind TLS before Start (matches gui_export.c). */
+	(void)BAEMixer_MakeCurrent(mixer);
 	
 	BAEResult result = BAEMixer_StartOutputToFile(mixer, (BAEPathName)path, (BAEFileType)outputType, (BAECompressionType)compressionType);
 	
@@ -710,7 +723,8 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1stopOutputToFile
 	if(!mixer) return (jint)BAE_PARAM_ERR;
 	
 	__android_log_print(ANDROID_LOG_DEBUG, "neoBAE", "Stopping output to file");
-	
+
+	(void)BAEMixer_MakeCurrent(mixer);
 	BAEMixer_StopOutputToFile();
 	
 	__android_log_print(ANDROID_LOG_DEBUG, "neoBAE", "BAEMixer_StopOutputToFile completed");
