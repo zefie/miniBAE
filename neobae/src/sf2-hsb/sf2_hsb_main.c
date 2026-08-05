@@ -36,10 +36,15 @@ static void print_usage(const char *programName)
     printf("  --force-hsb    Force .hsb output\n");
     printf("  --force-zsb    Force .zsb output\n");
     printf("  --extended-adsr / --ext-adsr\n");
-    printf("                 Approximate SF2 exponential ADSR curves with 8-segment\n");
-    printf("                 piecewise linear interpolation.  Implies --force-zsb.\n");
+    printf("                 Approximate SF2 ADSR with ZSB multi-stage envelopes:\n");
+    printf("                 linear amplitude attack; lin-dB (exponential amp) decay/release.\n");
+    printf("                 Implies --force-zsb. Auto-enabled when writing .zsb.\n");
+    printf("  --classic-adsr Use single-segment linear ADSR even for .zsb output\n");
+    printf("                 (legacy HSB-style envelopes; max 8 stages).\n");
     printf("  --attn-div N   Centibel divisor for initialAttenuation->volume mapping.\n");
-    printf("                 200 = SF2 spec-correct (default); 400 = legacy compressed range.\n");
+    printf("                 500 = Creative/AWE-compatible (default; ~0.4 dB per SF2 dB).\n");
+    printf("                 200 = IEEE SF2 literal amplitude (often too quiet/loud).\n");
+    printf("                 400 = legacy half-range. Envelope sustain always uses /200.\n");
     printf("  --codec NAME   Sample encoding codec (or numeric id). Alias: --encoding\n");
     printf("  --bitrate N    Codec bitrate in kbps (or bps). Used by MP3/Vorbis/Opus.\n");
     printf("  --codecs       Print available codec/bitrate options and exit\n");
@@ -78,6 +83,8 @@ int main(int argc, char **argv)
             options.forceZsb = 1;
         } else if (strcmp(argv[i], "--extended-adsr") == 0 || strcmp(argv[i], "--ext-adsr") == 0) {
             options.extendedAdsr = 1;
+        } else if (strcmp(argv[i], "--classic-adsr") == 0) {
+            options.classicAdsr = 1;
         } else if (strcmp(argv[i], "--attn-div") == 0) {
             if (i + 1 >= argc) {
                 fprintf(stderr, "--attn-div requires a numeric argument.\n");

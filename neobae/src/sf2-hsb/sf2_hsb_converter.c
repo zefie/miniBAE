@@ -166,13 +166,89 @@ static double approximate_linear_amp_decay_seconds(double convertedSeconds)
     return high;
 }
 
-static double resolve_attack_seconds_from_sf2_tc(int attackTc)
+/* SF2 volume envelope sustain is always amplitude centibels (÷200), independent
+ * of --attn-div (which only tweaks initialAttenuation → split volume). */
+static int32_t cb_to_level4096_env(int cb)
+{
+    double ratio;
+    int32_t level;
+
+    if (cb >= 96000) return 0;
+    if (cb <= 0) return SF2HSB_VOLUME_RANGE;
+
+    ratio = pow(10.0, -cb / 200.0);
+    level = (int32_t)((double)SF2HSB_VOLUME_RANGE * ratio + 0.5);
+
+    if (level < 0) level = 0;
+    if (level > SF2HSB_VOLUME_RANGE) level = SF2HSB_VOLUME_RANGE;
+    return level;
+}
+
+static double level_to_atten_db(int32_t level)
+{
+    if (level <= 0) {
+        return 100.0;
+    }
+    if (level >= SF2HSB_VOLUME_RANGE) {
+        return 0.0;
+    }
+    return -20.0 * log10((double)level / (double)SF2HSB_VOLUME_RANGE);
+}
+
+static int apply_keynum_to_tc(int baseTc, int keynumToTcPerKey, int key)
+{
+    long v;
+
+    if (keynumToTcPerKey == 0) {
+        return baseTc;
+    }
+    if (key < 0) {
+        key = 0;
+    } else if (key > 127) {
+        key = 127;
+    }
+
+    /* SF2: tc' = tc + keynumTo*(keynum-60) */
+    v = (long)baseTc + (long)keynumToTcPerKey * (long)(key - 60);
+    if (v < -32768) v = -32768;
+    if (v > 32767) v = 32767;
+    return (int)v;
+}
+
+static int zone_envelope_bake_key(const SF2Zone *zone, int drumNote)
+{
+    if (drumNote >= 0 && drumNote <= 127) {
+        return drumNote;
+    }
+
+    /* Melodic INST ADSR is shared across all key splits. Baking keynumTo* at a
+     * zone midpoint warps the envelope for the whole program — e.g. GeneralUser
+     * Muted Guitar (keynumToVolEnvDecay=84) at mid-key 23 collapses a ~1.75s SF2
+     * decay to ~0.29s and sounds like harsh attack clicks. SF2 applies keynumTo
+     * per played note; with one ADSR, keep the SF2 reference key (60). */
+    (void)zone;
+    return 60;
+}
+
+static double resolve_attack_seconds_from_sf2_tc(int attackTc, int extAdsr)
 {
     double attackSeconds = tc_to_seconds(attackTc);
 
     if (!(attackSeconds > 0.0)) {
         return 0.0;
     }
+
+    /* Sub-10ms is effectively instantaneous on both paths. */
+    if (attackSeconds <= 0.010) {
+        return 0.0;
+    }
+
+    /* Extended/ZSB: keep true SF2 attack time (linear amplitude ramp). */
+    if (extAdsr) {
+        return attackSeconds;
+    }
+
+    /* Classic single-segment path: short attacks read as clicks if fully preserved. */
     if (attackSeconds <= 0.050) {
         return 0.0;
     }
@@ -192,43 +268,41 @@ static double resolve_ext_decay_seconds(double fullDropSeconds, int32_t sustainL
         return 0.0;
     }
 
-    /* SF2 decay TC is specified as time for a full 100dB drop.
-     * Decay traverses full->sustain, i.e. sustain attenuation span. */
-    if (sustainLevel > 0) {
-        sustain_db = -20.0 * log10((double)sustainLevel / (double)SF2HSB_VOLUME_RANGE);
-    } else {
-        sustain_db = 100.0;
-    }
+    /* SF2 decay TC = time for a full 100 dB drop. Decay only travels peak→sustain.
+     *
+     * Extended ADSR approximates that path with piecewise lin-dB (exponential amp)
+     * segments, so use the true SF2 peak→sustain duration — including sustain≈0
+     * plucks (Muted Guitar, etc.). The old linear-amp blend + approx*1.2 cap
+     * collapsed multi-second SF2 decays to ~20ms and produced harsh attack clicks. */
+    sustain_db = level_to_atten_db(sustainLevel);
     if (sustain_db < 0.0) sustain_db = 0.0;
     if (sustain_db > 100.0) sustain_db = 100.0;
     dbScaledSeconds = fullDropSeconds * sustain_db / 100.0;
-
-    if (sustainLevel <= 4) {
-        double approxSeconds = approximate_linear_amp_decay_seconds(fullDropSeconds);
-        double blended = (approxSeconds * 0.58) + (dbScaledSeconds * 0.42);
-        double maxNearSilence = approxSeconds * 1.20;
-
-        /* Soft cap only for edge cases where blended near-silence tails still run long. */
-        if (blended > maxNearSilence) {
-            blended = maxNearSilence;
-        }
-        return blended;
-    }
 
     return dbScaledSeconds;
 }
 
 static double resolve_ext_release_seconds(double fullDropSeconds, int32_t sustainLevel)
 {
-    (void)sustainLevel;
+    double sustain_db;
+    double remaining_db;
 
     if (!(fullDropSeconds > 0.0)) {
         return 0.0;
     }
 
-    /* Preserve SF2 release directly. Scaling by sustain level can incorrectly
-     * shorten long tails (e.g. 39s -> 3.9s) or collapse to ~1ms. */
-    return fullDropSeconds;
+    /* SF2 release TC = time for a full 100 dB change at the release rate.
+     * From sustain attenuation S to silence (100 dB), duration is
+     * T * (100 - S) / 100. Loud sustains keep nearly the full tail (e.g. 39s);
+     * the old T * S / 100 formula wrongly collapsed those. */
+    sustain_db = level_to_atten_db(sustainLevel);
+    if (sustain_db < 0.0) sustain_db = 0.0;
+    if (sustain_db > 100.0) sustain_db = 100.0;
+    remaining_db = 100.0 - sustain_db;
+    if (remaining_db < 0.5) {
+        remaining_db = 0.5; /* avoid zero-length release when already near silence */
+    }
+    return fullDropSeconds * remaining_db / 100.0;
 }
 
 static double resolve_decay_seconds_from_sf2_tc(int decayTc, int32_t sustainLevel, int extAdsr)
@@ -267,22 +341,6 @@ static double resolve_release_seconds_from_sf2_tc(int releaseTc, int32_t sustain
         return approximate_linear_amp_decay_seconds(releaseSeconds);
     }
     return releaseSeconds;
-}
-
-static int32_t cb_to_level4096(int cb, int attnDiv)
-{
-    double ratio;
-    int32_t level;
-
-    if (cb >= 96000) return 0;
-    if (cb <= 0) return SF2HSB_VOLUME_RANGE;
-
-    ratio = pow(10.0, -cb / (double)attnDiv);
-    level = (int32_t)((double)SF2HSB_VOLUME_RANGE * ratio);
-
-    if (level < 0) level = 0;
-    if (level > SF2HSB_VOLUME_RANGE) level = SF2HSB_VOLUME_RANGE;
-    return level;
 }
 
 static int32_t pm_to_level4096(int pm)
@@ -464,75 +522,66 @@ static void refine_loop_points_from_pcm(const uint8_t *pcmData,
     *ioLoopEnd = (int32_t)bestEnd;
 }
 
-/* Add a piecewise linear attack approximation to an ADSR stage array.
- * SF2 volume attack is convex in amplitude (fast initial rise, slowing near peak),
- * modelled as level(t) = peak * (1 - exp(-4*t/T)), normalised so the last segment = peak.
- * nSegments controls resolution; falls back to a single linear segment when there are
- * fewer free slots than nSegments or the attack time is too short to bother subdividing.
- * Returns the new stage index.
+/* Allocate ZSB polyline segments across decay/release only.
+ * SF2 volume attack is linear in amplitude (convex only in dB space), so attack
+ * always uses a single Beatnik LINE stage and does not consume this budget.
  */
-static uint32_t adsr_push_attack_piecewise(BAERmfEditorADSRInfo *adsr,
-                                           uint32_t st,
-                                           int32_t targetLevel,
-                                           int32_t attackUs,
-                                           int nSegments)
+static void allocate_decay_release_segments(int budget,
+                                            double decaySec,
+                                            double releaseSec,
+                                            int *outDecay,
+                                            int *outRelease)
 {
-    int N = (nSegments > 1) ? nSegments : 1;
-    static const double k = 4.0;
-    int i;
-    if (attackUs <= 0) {
-        if (st < BAE_EDITOR_MAX_ADSR_STAGES) {
-            adsr->stages[st].level = targetLevel;
-            adsr->stages[st].time = 0;
-            adsr->stages[st].flags = FCC('L','I','N','E');
-            st++;
-        }
-        return st;
+    double wD = (decaySec > 0.001) ? (1.0 + decaySec * 1.5) : 0.0;
+    double wR = (releaseSec > 0.001) ? (1.5 + releaseSec * 2.5) : 0.0;
+    double sum = wD + wR;
+    int nD = 0, nR = 0;
+    int used;
+    int leftover;
+
+    if (budget < 1) {
+        budget = 1;
     }
-    if ((int32_t)(st + (uint32_t)N) > BAE_EDITOR_MAX_ADSR_STAGES || attackUs < N * 1000) {
-        /* Not enough room or attack too short: single linear ramp */
-        if (st < BAE_EDITOR_MAX_ADSR_STAGES) {
-            adsr->stages[st].level = targetLevel;
-            adsr->stages[st].time = attackUs;
-            adsr->stages[st].flags = FCC('L','I','N','E');
-            st++;
-        }
-        return st;
+
+    if (sum <= 0.0) {
+        *outDecay = (decaySec > 0.0) ? 1 : 0;
+        *outRelease = (releaseSec > 0.0) ? 1 : 0;
+        return;
     }
-    {
-        /* Normalisation constant so that i==N yields exactly targetLevel */
-        double norm = 1.0 - exp(-k);
-        int32_t segTime = attackUs / N;
-        int32_t lastTime = attackUs - segTime * (N - 1);
-        for (i = 1; i <= N; i++) {
-            double t = (double)i / (double)N;
-            int32_t level = (i == N) ? targetLevel
-                          : (int32_t)((double)targetLevel * (1.0 - exp(-k * t)) / norm + 0.5);
-            int32_t time  = (i == N) ? lastTime : segTime;
-            /* Coalesce identical-level intermediate stages (early attack rounds to 0) */
-            if (i < N && st > 0
-                    && adsr->stages[st - 1].flags == FCC('L','I','N','E')
-                    && adsr->stages[st - 1].level == level) {
-                adsr->stages[st - 1].time += time;
-            } else {
-                if (st >= BAE_EDITOR_MAX_ADSR_STAGES) break;
-                adsr->stages[st].level = level;
-                adsr->stages[st].time  = time;
-                adsr->stages[st].flags = FCC('L','I','N','E');
-                st++;
-            }
+
+    if (wD > 0.0) nD = (int)((budget * wD / sum) + 0.5);
+    if (wR > 0.0) nR = (int)((budget * wR / sum) + 0.5);
+    if (wD > 0.0 && nD < 1) nD = 1;
+    if (wR > 0.0 && nR < 1) nR = 1;
+
+    used = nD + nR;
+    while (used > budget) {
+        if (nR >= nD && nR > 1) {
+            nR--;
+        } else if (nD > 1) {
+            nD--;
+        } else {
+            break;
+        }
+        used = nD + nR;
+    }
+
+    leftover = budget - used;
+    if (leftover > 0) {
+        if (nR >= nD) {
+            nR += leftover;
+        } else {
+            nD += leftover;
         }
     }
-    return st;
+
+    *outDecay = nD;
+    *outRelease = nR;
 }
 
-/* Add a piecewise linear decay/release approximation to an ADSR stage array.
- * SF2 decay/release is exponential (fast initial drop, slower approach to target),
- * modelled as level(t) = endLevel + range * exp(-4*t/T).
- * The last segment always carries finalFlags (LINE for decay, LAST for release).
- * nSegments controls resolution; falls back to a single linear segment when there are
- * fewer free slots than nSegments or the decay time is too short.
- * Returns the new stage index.
+/* SF2 decay/release are linear in dB (= exponential in Beatnik linear amplitude).
+ * Place equal-time knots in log-amplitude space so each LINE segment tracks the
+ * SF2 lin-dB trajectory. Returns the new stage index.
  */
 static uint32_t adsr_push_decay_piecewise(BAERmfEditorADSRInfo *adsr,
                                           uint32_t st,
@@ -544,6 +593,7 @@ static uint32_t adsr_push_decay_piecewise(BAERmfEditorADSRInfo *adsr,
 {
     int N = (nSegments > 1) ? nSegments : 1;
     int i;
+
     if (decayUs <= 0) {
         if (st < BAE_EDITOR_MAX_ADSR_STAGES) {
             adsr->stages[st].level = endLevel;
@@ -553,8 +603,9 @@ static uint32_t adsr_push_decay_piecewise(BAERmfEditorADSRInfo *adsr,
         }
         return st;
     }
-    if ((int32_t)(st + (uint32_t)N) > BAE_EDITOR_MAX_ADSR_STAGES || decayUs < N * 1000) {
-        /* Not enough room or decay too short: single linear ramp */
+    if (startLevel <= endLevel
+            || (int32_t)(st + (uint32_t)N) > BAE_EDITOR_MAX_ADSR_STAGES
+            || decayUs < N * 1000) {
         if (st < BAE_EDITOR_MAX_ADSR_STAGES) {
             adsr->stages[st].level = endLevel;
             adsr->stages[st].time = decayUs;
@@ -563,25 +614,37 @@ static uint32_t adsr_push_decay_piecewise(BAERmfEditorADSRInfo *adsr,
         }
         return st;
     }
+
     {
-        /* SF2 decay/release is linear in dB = multiplicative exponential in amplitude.
-         * Interpolate in log space: level(t) = startLevel * (endLevel/startLevel)^t
-         * For endLevel==0 we use 0.5 as the log floor so integer rounding approaches 1
-         * before the explicit final stage clamps to 0.
-         * Coalesce consecutive intermediate stages that round to the same integer level
-         * into a single longer stage to avoid wasting slots on redundant flat segments. */
-        double ln_start = (startLevel > 0) ? log((double)startLevel) : log(0.5);
-        double ln_end   = (endLevel   > 0) ? log((double)endLevel)   : log(0.5);
-        int32_t segTime  = decayUs / N;
-        int32_t lastTime = decayUs - segTime * (N - 1);
+        /* Silence floor ~-96 dB relative to start when targeting 0. */
+        double floorLevel = (endLevel > 0) ? (double)endLevel
+                                           : ((double)startLevel * pow(10.0, -96.0 / 20.0));
+        double ln_start;
+        double ln_end;
+        int32_t segTime;
+        int32_t lastTime;
+        uint32_t begin = st;
+
+        if (endLevel <= 0 && floorLevel < 1.0) {
+            floorLevel = 1.0;
+        }
+        ln_start = log((double)startLevel);
+        ln_end = log(floorLevel);
+        segTime = decayUs / N;
+        lastTime = decayUs - segTime * (N - 1);
+
         for (i = 1; i <= N; i++) {
             double t = (double)i / (double)N;
             int32_t level = (i == N) ? endLevel
                           : (int32_t)(exp(ln_start + t * (ln_end - ln_start)) + 0.5);
-            int32_t time  = (i == N) ? lastTime : segTime;
+            int32_t time = (i == N) ? lastTime : segTime;
             int32_t flags = (i == N) ? finalFlags : FCC('L','I','N','E');
-            /* Coalesce: merge into previous stage if it's an intermediate LINE stage
-             * with the same level. This collapses long runs of level=1 tail segments. */
+
+            if (time < 1) time = 1;
+            if (level < 0) level = 0;
+            if (endLevel > 0 && level < endLevel) level = endLevel;
+            if (level > startLevel) level = startLevel;
+
             if (i < N && st > 0
                     && adsr->stages[st - 1].flags == FCC('L','I','N','E')
                     && adsr->stages[st - 1].level == level) {
@@ -589,9 +652,23 @@ static uint32_t adsr_push_decay_piecewise(BAERmfEditorADSRInfo *adsr,
             } else {
                 if (st >= BAE_EDITOR_MAX_ADSR_STAGES) break;
                 adsr->stages[st].level = level;
-                adsr->stages[st].time  = time;
+                adsr->stages[st].time = time;
                 adsr->stages[st].flags = flags;
                 st++;
+            }
+        }
+
+        {
+            int32_t sum = 0;
+            uint32_t j;
+            for (j = begin; j < st; j++) {
+                sum += adsr->stages[j].time;
+            }
+            if (st > begin && sum != decayUs) {
+                adsr->stages[st - 1].time += (decayUs - sum);
+                if (adsr->stages[st - 1].time < 1) {
+                    adsr->stages[st - 1].time = 1;
+                }
             }
         }
     }
@@ -599,10 +676,13 @@ static uint32_t adsr_push_decay_piecewise(BAERmfEditorADSRInfo *adsr,
 }
 
 /* Build BAE ADSR stages from SF2 envelope parameters.
- * extAdsr: when non-zero, use 8-segment piecewise linear approximation for
- *          attack, decay, and release to emulate the SF2 exponential curves.
- *          Requires --extended-adsr / --ext-adsr CLI flag (implies ZSB output).
- *          When zero, single linear segments are used (classic HSB behaviour).
+ *
+ * SF2 volume envelope (important for Beatnik's linear-amplitude ADSR):
+ *   - Attack is convex in dB space so that amplitude rises LINEARLY.
+ *   - Decay/release are linear in dB (= exponential in amplitude).
+ *
+ * extAdsr: spend ZSB's extra stages approximating lin-dB decay/release.
+ * Classic mode: one LINE segment per phase (HSB, max 8 stages).
  */
 static void build_adsr_from_sf2(BAERmfEditorADSRInfo *adsr,
                                 int delayTc,
@@ -614,70 +694,72 @@ static void build_adsr_from_sf2(BAERmfEditorADSRInfo *adsr,
                                 int extAdsr)
 {
     uint32_t st = 0;
-    int32_t attackUs = seconds_to_us_clamped(resolve_attack_seconds_from_sf2_tc(attackTc));
+    double attackSec = resolve_attack_seconds_from_sf2_tc(attackTc, extAdsr);
+    double decaySec = resolve_decay_seconds_from_sf2_tc(decayTc, sustainLevel, extAdsr);
+    double releaseSec = resolve_release_seconds_from_sf2_tc(releaseTc, sustainLevel, extAdsr);
+    int32_t attackUs = seconds_to_us_clamped(attackSec);
     int32_t holdUs = tc_to_us(holdTc);
-    int32_t decayUs = seconds_to_us_clamped(resolve_decay_seconds_from_sf2_tc(decayTc, sustainLevel, extAdsr));
-    int32_t releaseUs = seconds_to_us_clamped(resolve_release_seconds_from_sf2_tc(releaseTc, sustainLevel, extAdsr));
+    int32_t decayUs = seconds_to_us_clamped(decaySec);
+    int32_t releaseUs = seconds_to_us_clamped(releaseSec);
     int32_t delayUs = tc_to_us(delayTc);
+    int maxAdsrStages = (extAdsr) ? BAE_EDITOR_MAX_ADSR_STAGES : 8;
+    int nDecay = 1;
+    int nRelease = 1;
 
     memset(adsr, 0, sizeof(*adsr));
 
-    const int maxAdsrStages = (extAdsr) ? BAE_EDITOR_MAX_ADSR_STAGES : 8;
-
-    /* Compute piecewise segment count to spread budget across attack, decay, release.
-     * Fixed stages: 1 sustain + optional delay + optional hold.
-     * Remaining budget split evenly among the three expandable phases. */
-    int nPiece = 8;
-    if (extAdsr) {
-        int fixedStages = 1 /* sustain */
-                        + (delayUs  > 0 ? 1 : 0)
-                        + (holdUs   > 0 ? 1 : 0);
-        nPiece = (BAE_EDITOR_MAX_ADSR_STAGES - fixedStages) / 3;
-        if (nPiece < 1) nPiece = 1;
+    /* SF2: sustain at full level implies zero-length decay regardless of decay TC. */
+    if (sustainLevel >= SF2HSB_VOLUME_RANGE - 1) {
+        decayUs = 0;
+        decaySec = 0.0;
+        sustainLevel = SF2HSB_VOLUME_RANGE;
     }
 
-    /* Delay: always a single linear stage (delay is linear in SF2 too) */
-    if (delayUs > 0 && st < maxAdsrStages) {
+    if (extAdsr) {
+        int fixedStages = 1 /* sustain */
+                        + 1 /* linear attack */
+                        + (delayUs > 0 ? 1 : 0)
+                        + (holdUs > 0 ? 1 : 0);
+        int budget = BAE_EDITOR_MAX_ADSR_STAGES - fixedStages;
+        if (budget < 2) budget = 2;
+        allocate_decay_release_segments(budget, decaySec, releaseSec, &nDecay, &nRelease);
+        if (nDecay < 1) nDecay = 1;
+        if (nRelease < 1) nRelease = 1;
+    }
+
+    if (delayUs > 0 && st < (uint32_t)maxAdsrStages) {
         adsr->stages[st].level = 0;
         adsr->stages[st].time = delayUs;
         adsr->stages[st].flags = FCC('L','I','N','E');
         st++;
     }
 
-    /* Attack */
-    if (extAdsr) {
-        st = adsr_push_attack_piecewise(adsr, st, SF2HSB_VOLUME_RANGE, attackUs, nPiece);
-    } else {
-        if (st < maxAdsrStages) {
-            adsr->stages[st].level = SF2HSB_VOLUME_RANGE;
-            adsr->stages[st].time = attackUs;
-            adsr->stages[st].flags = FCC('L','I','N','E');
-            st++;
-        }
+    /* Attack: always a single linear amplitude ramp (SF2-correct for Beatnik). */
+    if (st < (uint32_t)maxAdsrStages) {
+        adsr->stages[st].level = SF2HSB_VOLUME_RANGE;
+        adsr->stages[st].time = attackUs;
+        adsr->stages[st].flags = FCC('L','I','N','E');
+        st++;
     }
 
-    /* Hold: always a single flat stage */
-    if (holdUs > 0 && st < maxAdsrStages) {
+    if (holdUs > 0 && st < (uint32_t)maxAdsrStages) {
         adsr->stages[st].level = SF2HSB_VOLUME_RANGE;
         adsr->stages[st].time = holdUs;
         adsr->stages[st].flags = FCC('L','I','N','E');
         st++;
     }
 
-    /* Decay */
     if (extAdsr) {
-        st = adsr_push_decay_piecewise(adsr, st, SF2HSB_VOLUME_RANGE, sustainLevel, decayUs, FCC('L','I','N','E'), nPiece);
-    } else {
-        if (st < maxAdsrStages) {
-            adsr->stages[st].level = sustainLevel;
-            adsr->stages[st].time = decayUs;
-            adsr->stages[st].flags = FCC('L','I','N','E');
-            st++;
-        }
+        st = adsr_push_decay_piecewise(adsr, st, SF2HSB_VOLUME_RANGE, sustainLevel, decayUs,
+                                       FCC('L','I','N','E'), nDecay);
+    } else if (st < (uint32_t)maxAdsrStages) {
+        adsr->stages[st].level = sustainLevel;
+        adsr->stages[st].time = decayUs;
+        adsr->stages[st].flags = FCC('L','I','N','E');
+        st++;
     }
 
-    /* Sustain hold point */
-    if (st < maxAdsrStages) {
+    if (st < (uint32_t)maxAdsrStages) {
         adsr->stages[st].level = sustainLevel;
         adsr->stages[st].time = 0;
         adsr->stages[st].flags = FCC('S','U','S','T');
@@ -688,16 +770,14 @@ static void build_adsr_from_sf2(BAERmfEditorADSRInfo *adsr,
         releaseUs = 1000;
     }
 
-    /* Release */
     if (extAdsr) {
-        st = adsr_push_decay_piecewise(adsr, st, sustainLevel, 0, releaseUs, FCC('L','A','S','T'), nPiece);
-    } else {
-        if (st < maxAdsrStages) {
-            adsr->stages[st].level = 0;
-            adsr->stages[st].time = releaseUs;
-            adsr->stages[st].flags = FCC('L','A','S','T');
-            st++;
-        }
+        st = adsr_push_decay_piecewise(adsr, st, sustainLevel, 0, releaseUs,
+                                       FCC('L','A','S','T'), nRelease);
+    } else if (st < (uint32_t)maxAdsrStages) {
+        adsr->stages[st].level = 0;
+        adsr->stages[st].time = releaseUs;
+        adsr->stages[st].flags = FCC('L','A','S','T');
+        st++;
     }
 
     adsr->stageCount = st;
@@ -725,16 +805,106 @@ static void build_lfo_delay_adsr(BAERmfEditorADSRInfo *adsr, int delayTc)
 
 static int16_t cb_to_split_volume(int cb, int attnDiv)
 {
-    // initialAttenuation is in centibels (0.1 dB) where 0 = no attenuation (full volume).
-    // BAE uses miscParameter2 = 100 as unity gain: Volume = (Volume * miscParameter2) / 100.
-    // attnDiv=200 is SF2 spec-correct (amplitude = 10^(-cb/200)).
-    // attnDiv=400 compresses the dB range by half, trading accuracy for headroom in
-    // BAE's integer mixing pipeline.
+    /* initialAttenuation is in centibels (0.1 dB); 0 = full scale.
+     * BAE split volume: miscParameter2, 100 = unity
+     *   Volume = (Volume * miscParameter2) / 100
+     *
+     * attnDiv selects the dB→amplitude curve:
+     *   200 = IEEE SF2 literal amplitude (10^(-dB/20)). Sounds too extreme in
+     *         Beatnik: soft layers collapse to vol≈1..15 and vanish next to hot ones.
+     *   500 = Creative/AWE-compatible (~0.4 dB applied per SF2 dB). Default.
+     *         Most GM banks were authored against this hardware quirk.
+     *   400 = legacy half-range compromise.
+     *
+     * Result is further adjusted by finalize_split_volume() using PCM peak so
+     * quiet-recorded samples (typical strings) aren't buried under hot ones.
+     */
+    double amp;
     int32_t v;
-    if (cb <= 0) return 100;
-    v = (int32_t)(100.0 * pow(10.0, -cb / (double)attnDiv) + 0.5);
-    if (v < 1) v = 1;
-    if (v > 127) v = 127;
+
+    if (cb <= 0) {
+        return 100;
+    }
+    if (attnDiv <= 0) {
+        attnDiv = 500;
+    }
+
+    amp = pow(10.0, -cb / (double)attnDiv);
+    /* Compress into a Beatnik-friendly band (~35..100) so attenuation still
+     * ranks instruments without driving soft layers into the noise floor. */
+    v = (int32_t)(35.0 + 65.0 * pow(amp, 0.75) + 0.5);
+    if (v < 20) {
+        v = 20;
+    }
+    if (v > 127) {
+        v = 127;
+    }
+    return (int16_t)v;
+}
+
+/* Peak of int16 PCM (mono or interleaved stereo). */
+static int32_t pcm16_peak_abs(const uint8_t *pcm, uint32_t frames, int channels)
+{
+    const int16_t *s;
+    uint32_t n;
+    uint32_t i;
+    int32_t peak = 0;
+
+    if (!pcm || frames == 0u || channels < 1) {
+        return 0;
+    }
+    s = (const int16_t *)(const void *)pcm;
+    n = frames * (uint32_t)channels;
+    for (i = 0; i < n; ++i) {
+        int32_t a = (int32_t)s[i];
+        if (a < 0) {
+            a = -a;
+        }
+        if (a > peak) {
+            peak = a;
+        }
+    }
+    return peak;
+}
+
+/* Combine SF2 attenuation volume with sample-peak makeup. SF2 banks often mix
+ * full-scale plucks with quietly recorded sustains; Beatnik applies split volume
+ * as linear gain on whatever PCM we stored, so without makeup the quiet samples
+ * stay inaudible even after AWE-style attenuation mapping. */
+static int16_t finalize_split_volume(int16_t attenVol, int32_t peakAbs)
+{
+    double peakNorm;
+    double makeup;
+    int32_t v;
+
+    if (attenVol < 1) {
+        attenVol = 1;
+    }
+    if (peakAbs < 1) {
+        peakAbs = 1;
+    }
+
+    peakNorm = (double)peakAbs / 32767.0;
+    if (peakNorm < 0.03) {
+        peakNorm = 0.03; /* don't insane-boost near-silence / pads of zeros */
+    }
+
+    /* Target ~0.65 FS contribution at attenVol=100. */
+    makeup = 0.65 / peakNorm;
+    if (makeup > 5.0) {
+        makeup = 5.0;
+    }
+    if (makeup < 0.40) {
+        makeup = 0.40;
+    }
+
+    v = (int32_t)((double)attenVol * makeup + 0.5);
+    if (v < 18) {
+        v = 18;
+    }
+    if (v > 127) {
+        v = 127;
+    }
     return (int16_t)v;
 }
 
@@ -839,8 +1009,9 @@ static int prefer_zone_for_instrument_ext(SF2Zone const *candidate,
         return 1;
     }
 
-    candidateSustain = cb_to_level4096(candidate->volSustainCb, attnDiv);
-    currentSustain = cb_to_level4096(current->volSustainCb, attnDiv);
+    (void)attnDiv;
+    candidateSustain = cb_to_level4096_env(candidate->volSustainCb);
+    currentSustain = cb_to_level4096_env(current->volSustainCb);
     if (candidateSustain != currentSustain) {
         return candidateSustain > currentSustain;
     }
@@ -1024,6 +1195,440 @@ static int prefer_zone_for_melodic_layer(SF2Zone const *candidate,
     return candidate->sampleIdx < current->sampleIdx;
 }
 
+/* Beatnik keymap splits are first-match only (GenSynth breaks on the first
+ * hit). SF2 presets often layer different instruments on overlapping keys
+ * (e.g. GeneralUser FM EP: DX7 Strike + DX7 Wave). Emitting both as overlapping
+ * splits makes neighbouring notes flip between layers — "wrong sample" at
+ * boundaries like G#5. Resolve by mixing layered zones into one split per
+ * atomic key range. */
+#define SF2HSB_MAX_LAYER_ZONES 4
+#define SF2HSB_MAX_MELODIC_JOBS 512
+
+typedef struct {
+    int loKey;
+    int hiKey;
+    int nLayers;
+    int layerZoneIdx[SF2HSB_MAX_LAYER_ZONES];
+    uint8_t *mixedPcm;
+    uint32_t mixedFrames;
+    uint32_t mixedSampleRate;
+    int mixedRootKey;
+    int32_t mixedLoopStart;
+    int32_t mixedLoopEnd;
+    int16_t mixedSplitVolume;
+} MelodicEmitJob;
+
+static int melodic_zone_kept(SF2Zone const *zones, uint32_t zoneCount, uint32_t z)
+{
+    uint32_t zk;
+    SF2Zone const *zone = &zones[z];
+
+    if (zone->sampleIdx < 0) {
+        return 0;
+    }
+    for (zk = 0; zk < zoneCount; ++zk) {
+        SF2Zone const *other = &zones[zk];
+        if (zk == z || other->sampleIdx < 0) {
+            continue;
+        }
+        if (other->loKey == zone->loKey && other->hiKey == zone->hiKey) {
+            if (prefer_zone_for_melodic_layer(other, zone)) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+static int zone_effective_root(SF2Zone const *zone, SF2SampleHdr const *sample)
+{
+    int rootKey = (zone->overrideRootKey >= 0 && zone->overrideRootKey <= 127)
+                      ? zone->overrideRootKey
+                      : ((sample->originalPitch != 255) ? sample->originalPitch : 60);
+    rootKey -= zone->coarseTune;
+    if (rootKey < 0) rootKey = 0;
+    if (rootKey > 127) rootKey = 127;
+    return rootKey;
+}
+
+static int16_t *pitch_resample_mono_linear(const int16_t *src,
+                                           uint32_t srcFrames,
+                                           uint32_t srcRate,
+                                           int srcRoot,
+                                           int dstNote,
+                                           uint32_t dstRate,
+                                           double fineTuneCents,
+                                           uint32_t *outFrames)
+{
+    double pitchRatio;
+    double outFramesF;
+    uint32_t outCount;
+    int16_t *out;
+    uint32_t i;
+
+    if (!src || srcFrames == 0u || !outFrames || srcRate < 1u || dstRate < 1u) {
+        return NULL;
+    }
+
+    pitchRatio = pow(2.0, ((double)(dstNote - srcRoot) + fineTuneCents / 100.0) / 12.0);
+    if (!(pitchRatio > 1.0e-6)) {
+        pitchRatio = 1.0e-6;
+    }
+    outFramesF = (double)srcFrames * (double)dstRate / ((double)srcRate * pitchRatio);
+    if (outFramesF < 1.0) {
+        outFramesF = 1.0;
+    }
+    if (outFramesF > 8.0 * 44100.0) {
+        outFramesF = 8.0 * 44100.0; /* cap mixed layer length */
+    }
+    outCount = (uint32_t)(outFramesF + 0.5);
+    out = (int16_t *)malloc((size_t)outCount * sizeof(int16_t));
+    if (!out) {
+        return NULL;
+    }
+
+    for (i = 0; i < outCount; ++i) {
+        double srcPos = ((double)i * (double)srcFrames) / (double)outCount;
+        uint32_t i0 = (uint32_t)srcPos;
+        double frac = srcPos - (double)i0;
+        int16_t s0;
+        int16_t s1;
+        double y;
+
+        if (i0 >= srcFrames) {
+            i0 = srcFrames - 1u;
+        }
+        s0 = src[i0];
+        s1 = (i0 + 1u < srcFrames) ? src[i0 + 1u] : s0;
+        y = (1.0 - frac) * (double)s0 + frac * (double)s1;
+        if (y > 32767.0) y = 32767.0;
+        if (y < -32768.0) y = -32768.0;
+        out[i] = (int16_t)(y + (y >= 0.0 ? 0.5 : -0.5));
+    }
+
+    *outFrames = outCount;
+    return out;
+}
+
+static int mix_melodic_layers_to_job(SF2Bank const *sf2,
+                                     SF2Zone const *zones,
+                                     MelodicEmitJob *job,
+                                     int attnDiv)
+{
+    int mid;
+    int li;
+    uint32_t dstRate = 44100u;
+    uint32_t maxFrames = 0u;
+    int16_t *layerPcm[SF2HSB_MAX_LAYER_ZONES];
+    uint32_t layerFrames[SF2HSB_MAX_LAYER_ZONES];
+    double layerGain[SF2HSB_MAX_LAYER_ZONES];
+    int loopLayer = -1;
+    int32_t loopStart = 0;
+    int32_t loopEnd = 0;
+    float *mix;
+    uint32_t i;
+    double peak = 1.0;
+    int16_t *out;
+    int bestAttn = 0;
+    int32_t peakAbs = 1;
+
+    memset(layerPcm, 0, sizeof(layerPcm));
+    if (!sf2 || !zones || !job || job->nLayers < 2) {
+        return -1;
+    }
+
+    mid = (job->loKey + job->hiKey) / 2;
+    if (mid < 0) mid = 0;
+    if (mid > 127) mid = 127;
+    job->mixedRootKey = mid;
+
+    for (li = 0; li < job->nLayers; ++li) {
+        SF2Zone const *zone = &zones[job->layerZoneIdx[li]];
+        SF2SampleHdr const *sample;
+        int32_t finalStart;
+        int32_t finalEnd;
+        int32_t finalLoopStart;
+        int32_t finalLoopEnd;
+        uint32_t srcFrames;
+        int rootKey;
+        const int16_t *src;
+        uint32_t outFrames = 0;
+        double fineCents;
+
+        if (zone->sampleIdx < 0 || (uint32_t)zone->sampleIdx >= sf2->sampleCount) {
+            goto fail;
+        }
+        sample = &sf2->samples[zone->sampleIdx];
+        finalStart = (int32_t)sample->start + zone->startAddrsOffset + (zone->startAddrsCoarse * 32768);
+        finalEnd = (int32_t)sample->end + zone->endAddrsOffset + (zone->endAddrsCoarse * 32768);
+        finalLoopStart = (int32_t)sample->loopStart + zone->startloopAddrsOffset + (zone->startloopAddrsCoarse * 32768);
+        finalLoopEnd = (int32_t)sample->loopEnd + zone->endloopAddrsOffset + (zone->endloopAddrsCoarse * 32768);
+        if (finalStart < 0) finalStart = 0;
+        if (finalEnd <= finalStart) {
+            goto fail;
+        }
+        srcFrames = (uint32_t)(finalEnd - finalStart);
+        rootKey = zone_effective_root(zone, sample);
+        fineCents = (double)zone->fineTune + (double)sample->pitchCorrection;
+        src = (const int16_t *)(const void *)(sf2->smplData + ((uint32_t)finalStart * 2u));
+        layerPcm[li] = pitch_resample_mono_linear(src,
+                                                  srcFrames,
+                                                  sample->sampleRate ? sample->sampleRate : 44100u,
+                                                  rootKey,
+                                                  mid,
+                                                  dstRate,
+                                                  fineCents,
+                                                  &outFrames);
+        if (!layerPcm[li]) {
+            goto fail;
+        }
+        layerFrames[li] = outFrames;
+        if (outFrames > maxFrames) {
+            maxFrames = outFrames;
+        }
+        /* SF2 layer amplitude from initialAttenuation (IEEE centibels). */
+        layerGain[li] = (zone->initialAttenuation <= 0)
+                            ? 1.0
+                            : pow(10.0, -(double)zone->initialAttenuation / 200.0);
+        if (li == 0 || zone->initialAttenuation < bestAttn) {
+            bestAttn = zone->initialAttenuation;
+        }
+        if ((zone->sampleModes & 0x1) != 0 && finalLoopEnd > finalLoopStart + 1) {
+            double ratio = (double)outFrames / (double)srcFrames;
+            int32_t ls = (int32_t)(((double)(finalLoopStart - finalStart) * ratio) + 0.5);
+            int32_t le = (int32_t)(((double)(finalLoopEnd - finalStart) * ratio) + 0.5);
+            if (ls < 0) ls = 0;
+            if (le > (int32_t)outFrames) le = (int32_t)outFrames;
+            if (le > ls + 1 && (loopLayer < 0 || zone->volSustainCb < zones[job->layerZoneIdx[loopLayer]].volSustainCb)) {
+                loopLayer = li;
+                loopStart = ls;
+                loopEnd = le;
+            }
+        }
+    }
+
+    mix = (float *)calloc((size_t)maxFrames, sizeof(float));
+    if (!mix) {
+        goto fail;
+    }
+    for (li = 0; li < job->nLayers; ++li) {
+        uint32_t n = layerFrames[li];
+        double g = layerGain[li];
+        for (i = 0; i < n; ++i) {
+            mix[i] += (float)((double)layerPcm[li][i] * g);
+        }
+        free(layerPcm[li]);
+        layerPcm[li] = NULL;
+    }
+    for (i = 0; i < maxFrames; ++i) {
+        double a = fabs((double)mix[i]);
+        if (a > peak) {
+            peak = a;
+        }
+    }
+    /* Leave a little headroom; split volume still applies later. */
+    if (peak < 1.0) {
+        peak = 1.0;
+    }
+    out = (int16_t *)malloc((size_t)maxFrames * sizeof(int16_t));
+    if (!out) {
+        free(mix);
+        goto fail;
+    }
+    {
+        double scale = 30000.0 / peak;
+        for (i = 0; i < maxFrames; ++i) {
+            double y = (double)mix[i] * scale;
+            if (y > 32767.0) y = 32767.0;
+            if (y < -32768.0) y = -32768.0;
+            out[i] = (int16_t)(y + (y >= 0.0 ? 0.5 : -0.5));
+        }
+    }
+    free(mix);
+
+    peakAbs = pcm16_peak_abs((const uint8_t *)(const void *)out, maxFrames, 1);
+    job->mixedPcm = (uint8_t *)(void *)out;
+    job->mixedFrames = maxFrames;
+    job->mixedSampleRate = dstRate;
+    job->mixedLoopStart = (loopLayer >= 0) ? loopStart : 0;
+    job->mixedLoopEnd = (loopLayer >= 0) ? loopEnd : 0;
+    job->mixedSplitVolume = finalize_split_volume(cb_to_split_volume(bestAttn, attnDiv), peakAbs);
+    return 0;
+
+fail:
+    for (li = 0; li < SF2HSB_MAX_LAYER_ZONES; ++li) {
+        free(layerPcm[li]);
+    }
+    return -1;
+}
+
+static void free_melodic_jobs(MelodicEmitJob *jobs, uint32_t jobCount)
+{
+    uint32_t i;
+    if (!jobs) {
+        return;
+    }
+    for (i = 0; i < jobCount; ++i) {
+        free(jobs[i].mixedPcm);
+        jobs[i].mixedPcm = NULL;
+    }
+    free(jobs);
+}
+
+static int same_layer_set(int const *a, int na, int const *b, int nb)
+{
+    int i;
+    int j;
+    if (na != nb) {
+        return 0;
+    }
+    for (i = 0; i < na; ++i) {
+        int found = 0;
+        for (j = 0; j < nb; ++j) {
+            if (a[i] == b[j]) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static MelodicEmitJob *build_melodic_emit_jobs(SF2Bank const *sf2,
+                                               SF2Zone const *zones,
+                                               uint32_t zoneCount,
+                                               int attnDiv,
+                                               uint32_t *outJobCount)
+{
+    uint8_t kept[1024];
+    int noteLayers[128][SF2HSB_MAX_LAYER_ZONES];
+    int noteLayerCount[128];
+    MelodicEmitJob *jobs;
+    uint32_t jobCount = 0;
+    uint32_t z;
+    int n;
+
+    if (!sf2 || !zones || !outJobCount) {
+        return NULL;
+    }
+    *outJobCount = 0;
+    if (zoneCount > sizeof(kept)) {
+        return NULL;
+    }
+
+    memset(kept, 0, sizeof(kept));
+    memset(noteLayerCount, 0, sizeof(noteLayerCount));
+    for (z = 0; z < zoneCount; ++z) {
+        kept[z] = (uint8_t)melodic_zone_kept(zones, zoneCount, z);
+    }
+
+    for (z = 0; z < zoneCount; ++z) {
+        int lo;
+        int hi;
+        int note;
+        if (!kept[z]) {
+            continue;
+        }
+        lo = zones[z].loKey;
+        hi = zones[z].hiKey;
+        if (lo < 0) lo = 0;
+        if (hi > 127) hi = 127;
+        if (lo > hi) {
+            int tmp = lo;
+            lo = hi;
+            hi = tmp;
+        }
+        for (note = lo; note <= hi; ++note) {
+            int c = noteLayerCount[note];
+            int dup = 0;
+            int k;
+            for (k = 0; k < c; ++k) {
+                if (noteLayers[note][k] == (int)z ||
+                    zones[noteLayers[note][k]].sampleIdx == zones[z].sampleIdx) {
+                    /* Same sample already present for this note — keep quieter/louder by atten. */
+                    if (zones[z].initialAttenuation < zones[noteLayers[note][k]].initialAttenuation) {
+                        noteLayers[note][k] = (int)z;
+                    }
+                    dup = 1;
+                    break;
+                }
+            }
+            if (dup) {
+                continue;
+            }
+            if (c >= SF2HSB_MAX_LAYER_ZONES) {
+                /* Prefer keeping lower attenuation layers. */
+                int worst = 0;
+                for (k = 1; k < c; ++k) {
+                    if (zones[noteLayers[note][k]].initialAttenuation >
+                        zones[noteLayers[note][worst]].initialAttenuation) {
+                        worst = k;
+                    }
+                }
+                if (zones[z].initialAttenuation < zones[noteLayers[note][worst]].initialAttenuation) {
+                    noteLayers[note][worst] = (int)z;
+                }
+                continue;
+            }
+            noteLayers[note][c] = (int)z;
+            noteLayerCount[note] = c + 1;
+        }
+    }
+
+    jobs = (MelodicEmitJob *)calloc(SF2HSB_MAX_MELODIC_JOBS, sizeof(MelodicEmitJob));
+    if (!jobs) {
+        return NULL;
+    }
+
+    for (n = 0; n < 128; ) {
+        int lo;
+        int hi;
+        MelodicEmitJob *job;
+        if (noteLayerCount[n] <= 0) {
+            n++;
+            continue;
+        }
+        lo = n;
+        hi = n;
+        while (hi + 1 < 128 &&
+               same_layer_set(noteLayers[lo], noteLayerCount[lo],
+                              noteLayers[hi + 1], noteLayerCount[hi + 1])) {
+            hi++;
+        }
+        if (jobCount >= SF2HSB_MAX_MELODIC_JOBS) {
+            free_melodic_jobs(jobs, jobCount);
+            return NULL;
+        }
+        job = &jobs[jobCount++];
+        job->loKey = lo;
+        job->hiKey = hi;
+        job->nLayers = noteLayerCount[lo];
+        memcpy(job->layerZoneIdx, noteLayers[lo], (size_t)job->nLayers * sizeof(int));
+        if (job->nLayers >= 2) {
+            if (mix_melodic_layers_to_job(sf2, zones, job, attnDiv) != 0) {
+                /* Fall back to single loudest layer. */
+                int best = 0;
+                int k;
+                for (k = 1; k < job->nLayers; ++k) {
+                    if (zones[job->layerZoneIdx[k]].initialAttenuation <
+                        zones[job->layerZoneIdx[best]].initialAttenuation) {
+                        best = k;
+                    }
+                }
+                job->layerZoneIdx[0] = job->layerZoneIdx[best];
+                job->nLayers = 1;
+            }
+        }
+        n = hi + 1;
+    }
+
+    *outJobCount = jobCount;
+    return jobs;
+}
+
 static BAEResult stage_instrument_ext(PendingInstrumentExt *pendingExts,
                                       uint32_t *pendingExtCount,
                                       uint32_t maxPendingExts,
@@ -1201,6 +1806,12 @@ static BAEResult apply_ext_info_for_zone(BAERmfEditorDocument *document,
     int32_t sustainLevel;
     int effectiveVolReleaseTc;
 
+    int bakeKey;
+    int volHoldTc;
+    int volDecayTc;
+    int modHoldTc;
+    int modDecayTc;
+
     memset(&ext, 0, sizeof(ext));
     result = BAERmfEditorDocument_GetInstrumentExtInfo(document, instID, &ext);
     if (result != BAE_NO_ERROR && result != BAE_BAD_FILE) {
@@ -1210,7 +1821,21 @@ static BAEResult apply_ext_info_for_zone(BAERmfEditorDocument *document,
     ext.instID = instID;
     ext.displayName = (char *)presetName;
     ext.hasExtendedData = TRUE;
-    sustainLevel = cb_to_level4096(zone->volSustainCb, attnDiv);
+    sustainLevel = cb_to_level4096_env(zone->volSustainCb);
+    (void)attnDiv; /* envelope sustain uses SF2 amp centibels; attnDiv is split volume only */
+
+    bakeKey = zone_envelope_bake_key(zone, -1);
+    if (isDrumPreset) {
+        if (instID >= 384u && instID <= 511u) {
+            bakeKey = (int)(instID - 384u);
+        } else if (instID >= 128u && instID <= 255u) {
+            bakeKey = (int)(instID - 128u);
+        }
+    }
+    volHoldTc = apply_keynum_to_tc(zone->volHoldTc, zone->keynumToVolEnvHold, bakeKey);
+    volDecayTc = apply_keynum_to_tc(zone->volDecayTc, zone->keynumToVolEnvDecay, bakeKey);
+    modHoldTc = apply_keynum_to_tc(zone->modHoldTc, zone->keynumToModEnvHold, bakeKey);
+    modDecayTc = apply_keynum_to_tc(zone->modDecayTc, zone->keynumToModEnvDecay, bakeKey);
     /*
     if (isDrumPreset) {
         ext.flags2 |= ZBF_playAtSampledFreq;
@@ -1245,8 +1870,8 @@ static BAEResult apply_ext_info_for_zone(BAERmfEditorDocument *document,
         /* Some drum zones resolve to default/no release in SF2 metadata, which maps to
          * a 1ms TERMINATE in BAE and sounds unnaturally chopped. Use decay as fallback
          * when available, otherwise apply a short practical tail (~125ms). */
-        if (zone->volDecayTc > -12000) {
-            effectiveVolReleaseTc = zone->volDecayTc;
+        if (volDecayTc > -12000) {
+            effectiveVolReleaseTc = volDecayTc;
         } else {
             effectiveVolReleaseTc = -3600;
         }
@@ -1271,12 +1896,13 @@ static BAEResult apply_ext_info_for_zone(BAERmfEditorDocument *document,
         ext.defaultChorusSend = (int16_t)ch;
     }
 
-    /* Volume ADSR mapped from SF2 to BAE stage model (VOLUME_RANGE=4096). */
+    /* Volume ADSR mapped from SF2 to BAE stage model (VOLUME_RANGE=4096).
+     * Hold/decay TCs are baked with keynumTo* at key 60 (melodic) or drum note. */
     build_adsr_from_sf2(&ext.volumeADSR,
                         zone->volDelayTc,
                         zone->volAttackTc,
-                        zone->volHoldTc,
-                        zone->volDecayTc,
+                        volHoldTc,
+                        volDecayTc,
                         sustainLevel,
                         effectiveVolReleaseTc,
                         extAdsr);
@@ -1381,8 +2007,8 @@ static BAEResult apply_ext_info_for_zone(BAERmfEditorDocument *document,
         build_adsr_from_sf2(&lfo->adsr,
                             zone->modDelayTc,
                             attackTc,
-                            zone->modHoldTc,
-                            zone->modDecayTc,
+                            modHoldTc,
+                            modDecayTc,
                             pm_to_level4096(zone->modSustainPm),
                             zone->modReleaseTc,
                             extAdsr);
@@ -1397,12 +2023,12 @@ static BAEResult apply_ext_info_for_zone(BAERmfEditorDocument *document,
         lfo->waveShape = FCC('S','I','N','E');
         lfo->level = 0;
         lfo->DC_feed = -zone->modEnvToFilterCents * 41;
-        
+
         build_adsr_from_sf2(&lfo->adsr,
                             zone->modDelayTc,
                             attackTc,
-                            zone->modHoldTc,
-                            zone->modDecayTc,
+                            modHoldTc,
+                            modDecayTc,
                             pm_to_level4096(zone->modSustainPm),
                             zone->modReleaseTc,
                             extAdsr);
@@ -1460,7 +2086,8 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
     localOptions.conflateStereo = 1;
 
     if (localOptions.attnDiv <= 0) {
-        localOptions.attnDiv = 200; /* SF2 spec-correct default */
+        /* Creative/AWE-compatible default. Use --attn-div 200 for literal SF2 amp. */
+        localOptions.attnDiv = 500;
     }
 
     resolvedCompression = mod2rmf_encoder_resolve(&localOptions.encoderSettings);
@@ -1474,6 +2101,10 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
         localOptions.forceZsb = 1;
     }
 
+    if (localOptions.extendedAdsr && localOptions.classicAdsr) {
+        set_error(errorBuffer, errorBufferSize, "--extended-adsr and --classic-adsr cannot be used together.");
+        return BAE_PARAM_ERR;
+    }
     if (localOptions.extendedAdsr && localOptions.forceHsb) {
         set_error(errorBuffer, errorBufferSize, "--extended-adsr cannot be used with --force-hsb.");
         return BAE_PARAM_ERR;
@@ -1543,6 +2174,14 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
         outputIsZsb = 1;
     }
 
+    /* ZSB can hold up to 32 linear ADSR stages — use them by default to approximate
+     * SF2 convex attack / lin-dB decay+release. Opt out with --classic-adsr. */
+    if (outputIsZsb && !localOptions.classicAdsr) {
+        localOptions.extendedAdsr = 1;
+    } else if (!outputIsZsb) {
+        localOptions.extendedAdsr = 0;
+    }
+
     if (!localOptions.dryRun && outputPath != NULL) {
         if (outputIsZsb && ends_with_ci(outputPath, ".hsb")) {
             set_error(errorBuffer, errorBufferSize, "Selected ZSB output cannot be written to a .hsb path.");
@@ -1598,6 +2237,11 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
         outInstID = sf2_preset_to_inst_id(preset->bank, preset->preset);
         drumKitSlot = -1;
         isDrumPreset = (preset->bank == 128u) ? 1 : 0;
+        {
+        MelodicEmitJob *melodicJobs = NULL;
+        uint32_t melodicJobCount = 0;
+        uint32_t emitCount;
+        uint32_t emitIdx;
 
         if (isDrumPreset) {
             if (drumPresets[0] == preset->preset) {
@@ -1655,12 +2299,29 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
                     }
                 }
             }
+        } else {
+            melodicJobs = build_melodic_emit_jobs(sf2Ptr,
+                                                  zones,
+                                                  zoneCount,
+                                                  localOptions.attnDiv,
+                                                  &melodicJobCount);
+            if (!melodicJobs && zoneCount > 0u) {
+                set_error(errorBuffer, errorBufferSize, "Failed to build melodic key-split plan.");
+                free(zones);
+                free(sampleCache);
+                BAERmfEditorDocument_Delete(document);
+                SF2Bank_Free(sf2Ptr);
+                return BAE_MEMORY_ERR;
+            }
         }
 
-        for (z = 0; z < zoneCount; ++z) {
-            SF2Zone const *zone = &zones[z];
+        emitCount = isDrumPreset ? zoneCount : melodicJobCount;
+        for (emitIdx = 0; emitIdx < emitCount; ++emitIdx) {
+            MelodicEmitJob *job = (!isDrumPreset) ? &melodicJobs[emitIdx] : NULL;
+            SF2Zone jobZoneStorage;
+            SF2Zone const *zone;
             SF2Zone stageZone;
-            SF2Zone const *stageZonePtr = zone;
+            SF2Zone const *stageZonePtr;
             SF2SampleHdr const *sample;
             SF2SampleHdr const *linkedSample;
             BAERmfEditorSampleSetup setup;
@@ -1691,33 +2352,26 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
             int16_t splitVolume;
             uint16_t sampleTypeBase;
             uint16_t linkedSampleTypeBase;
+            int usingMixedLayers = 0;
 
-            if (!isDrumPreset) {
-                uint32_t zk;
-                int shadowedByBetterLayer = 0;
-
-                /* RMF split playback is key-based (no velocity gating in this path).
-                 * For identical key ranges that only differ by velocity layers, choose
-                 * one representative zone near target velocity to avoid program-level
-                 * loud/quiet skew from first-match ordering. */
-                for (zk = 0; zk < zoneCount; ++zk) {
-                    SF2Zone const *other = &zones[zk];
-                    if (zk == z) {
-                        continue;
-                    }
-                    if (other->loKey == zone->loKey &&
-                        other->hiKey == zone->hiKey &&
-                        other->sampleIdx >= 0) {
-                        if (prefer_zone_for_melodic_layer(other, zone)) {
-                            shadowedByBetterLayer = 1;
-                            break;
-                        }
+            z = isDrumPreset ? emitIdx : (uint32_t)job->layerZoneIdx[0];
+            zone = &zones[z];
+            if (job) {
+                int li;
+                /* Prefer sustain/body layer params for shared ADSR when mixed. */
+                for (li = 1; li < job->nLayers; ++li) {
+                    if (prefer_zone_for_instrument_ext(&zones[job->layerZoneIdx[li]], zone, localOptions.attnDiv)) {
+                        z = (uint32_t)job->layerZoneIdx[li];
+                        zone = &zones[z];
                     }
                 }
-                if (shadowedByBetterLayer) {
-                    continue;
-                }
+                jobZoneStorage = *zone;
+                jobZoneStorage.loKey = job->loKey;
+                jobZoneStorage.hiKey = job->hiKey;
+                zone = &jobZoneStorage;
+                usingMixedLayers = (job->mixedPcm != NULL && job->nLayers >= 2) ? 1 : 0;
             }
+            stageZonePtr = zone;
 
             if (zone->sampleIdx < 0 || (uint32_t)zone->sampleIdx >= sf2Ptr->sampleCount) {
                 continue;
@@ -1734,6 +2388,29 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
             sampleTypeBase = sf2_sample_type_base(sample->sampleType);
             linkedSampleTypeBase = 0;
 
+            if (usingMixedLayers) {
+                /* Pre-pitched mono mix of overlapping SF2 layers for this key range. */
+                useStereoPair = 0;
+                linkedSample = NULL;
+                frameCount = job->mixedFrames;
+                if (frameCount == 0u) {
+                    continue;
+                }
+                finalStart = 0;
+                finalEnd = (int32_t)frameCount;
+                localLoopStart = job->mixedLoopStart;
+                localLoopEnd = job->mixedLoopEnd;
+                if (localLoopEnd <= localLoopStart) {
+                    localLoopStart = 0;
+                    localLoopEnd = 0;
+                }
+                rootKey = job->mixedRootKey;
+                sampleRateFixed = job->mixedSampleRate * 65536u;
+                splitVolume = job->mixedSplitVolume;
+                importChannels = 1;
+                importWaveSize = frameCount * 2u;
+                pcmHash = hash_pcm_fnv1a64(job->mixedPcm, (size_t)frameCount * 2u);
+            } else {
             if (localOptions.conflateStereo &&
                 (sampleTypeBase == 2u || sampleTypeBase == 4u) &&
                 sample->sampleLink < sf2Ptr->sampleCount) {
@@ -1871,6 +2548,7 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
                 stageZone.pan = 0;
                 stageZonePtr = &stageZone;
             }
+            } /* !usingMixedLayers */
 
             /* Determine iteration strategy:
              *   - Drums: per-key split (one split per note) while preserving SF2 root/tuning pitch mapping
@@ -1898,6 +2576,30 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
 
             nStart = needPerKeySplits ? zoneLo : 0;
             nEnd   = needPerKeySplits ? zoneHi : 0;
+
+            /* Peak-compensate split volume once per zone sample (not per key). */
+            if (!usingMixedLayers) {
+                int16_t attenVol = cb_to_split_volume(zone->initialAttenuation, localOptions.attnDiv);
+                int32_t peakAbs = 0;
+                const uint8_t *peakPcm = sf2Ptr->smplData + ((uint32_t)finalStart * 2u);
+                peakAbs = pcm16_peak_abs(peakPcm, frameCount, 1);
+                if (useStereoPair) {
+                    int32_t linkedPeak = pcm16_peak_abs(
+                        sf2Ptr->smplData + ((uint32_t)linkedFinalStart * 2u), frameCount, 1);
+                    if (linkedPeak > peakAbs) {
+                        peakAbs = linkedPeak;
+                    }
+                }
+                splitVolume = finalize_split_volume(attenVol, peakAbs);
+            } else {
+                /* Mixed PCM is already pitched to mixedRootKey for this key span. */
+                zoneLo = job->loKey;
+                zoneHi = job->hiKey;
+                needPerKeySplits = 0;
+                nStart = 0;
+                nEnd = 0;
+            }
+
             for (n = nStart; n <= nEnd; ++n) {
             if (isDrumPreset && bestDrumZoneForNote[n] != (int)z) {
                 continue;
@@ -1920,7 +2622,6 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
             zoneInstID = isDrumPreset
                          ? sf2_drum_note_to_inst_id(drumKitSlot, n)
                          : outInstID;
-            splitVolume = cb_to_split_volume(zone->initialAttenuation, localOptions.attnDiv);
 
             if (isDrumPreset) {
                 drumNoteSeen[(uint8_t)n] = 1;
@@ -2048,6 +2749,8 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
 
                     interleave_stereo_pcm16(leftPcm, rightPcm, frameCount, stereoPcmData);
                     pcmData = stereoPcmData;
+                } else if (usingMixedLayers) {
+                    pcmData = job->mixedPcm;
                 } else {
                     pcmData = sf2Ptr->smplData + ((uint32_t)finalStart * 2u);
                 }
@@ -2210,7 +2913,9 @@ static BAEResult SF2HSB_ConvertParsedBank(BAEMixer mixer,
             }
         }
 
+        free_melodic_jobs(melodicJobs, melodicJobCount);
         free(zones);
+        } /* melodicJobs scope */
     }
 
     if (!mod2rmf_encoder_apply(document, &localOptions.encoderSettings, resolvedCompression)) {

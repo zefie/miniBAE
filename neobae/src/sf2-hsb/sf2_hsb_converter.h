@@ -36,10 +36,13 @@ typedef struct {
     int strict;
     int forceHsb;
     int forceZsb;
-    int extendedAdsr;  /* --extended-adsr / --ext-adsr: 8-segment exponential curve approx; forces ZSB */
+    int extendedAdsr;  /* --extended-adsr / --ext-adsr: up to 32-stage ZSB curve approx; forces ZSB.
+                        * Auto-enabled when writing .zsb unless classicAdsr is set. */
+    int classicAdsr;   /* --classic-adsr: force single-segment ADSR even for ZSB output */
     int conflateStereo;/* --conflate-stereo: merge linked SF2 L/R mono pairs into one stereo sample */
     int attnDiv;       /* --attn-div N: centibel divisor for initialAttenuation->volume mapping.
-                        * 200 = SF2 spec-correct (default); 400 = legacy compressed range. */
+                        * 500 = Creative/AWE-compatible (default); 200 = SF2 literal amplitude;
+                        * 400 = legacy half-range. */
     Mod2RmfEncoderSettings encoderSettings;  /* --codec/--encoding + optional --bitrate */
 } SF2HSBConvertOptions;
 

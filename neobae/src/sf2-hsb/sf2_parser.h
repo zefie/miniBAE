@@ -104,12 +104,16 @@ typedef struct {
 #define SF2_GEN_DECAY_MOD_ENV          28
 #define SF2_GEN_SUSTAIN_MOD_ENV        29
 #define SF2_GEN_RELEASE_MOD_ENV        30
+#define SF2_GEN_KEYNUM_TO_MOD_ENV_HOLD 31
+#define SF2_GEN_KEYNUM_TO_MOD_ENV_DECAY 32
 #define SF2_GEN_DELAY_VOL_ENV          33
 #define SF2_GEN_ATTACK_VOL_ENV         34
 #define SF2_GEN_HOLD_VOL_ENV           35
 #define SF2_GEN_DECAY_VOL_ENV          36
 #define SF2_GEN_SUSTAIN_VOL_ENV        37
 #define SF2_GEN_RELEASE_VOL_ENV        38
+#define SF2_GEN_KEYNUM_TO_VOL_ENV_HOLD 39
+#define SF2_GEN_KEYNUM_TO_VOL_ENV_DECAY 40
 #define SF2_GEN_INSTRUMENT             41
 #define SF2_GEN_KEY_RANGE              43
 #define SF2_GEN_VEL_RANGE              44
@@ -152,6 +156,8 @@ typedef struct {
     int volDecayTc;
     int volSustainCb;   /* centibels */
     int volReleaseTc;
+    int keynumToVolEnvHold;   /* timecents per key relative to key 60 */
+    int keynumToVolEnvDecay;  /* timecents per key relative to key 60 */
 
     /* Sample offsets (in samples) */
     int startAddrsOffset;
@@ -170,6 +176,8 @@ typedef struct {
     int modDecayTc;
     int modSustainPm;   /* per-mille, 0=full, 1000=silence */
     int modReleaseTc;
+    int keynumToModEnvHold;   /* timecents per key relative to key 60 */
+    int keynumToModEnvDecay;  /* timecents per key relative to key 60 */
     int modEnvToPitchCents;
     int modEnvToFilterCents;
 
