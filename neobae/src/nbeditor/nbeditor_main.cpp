@@ -1497,13 +1497,12 @@ private:
     {
         m_pending_dialog_action = DialogAction::OpenImport;
         static const SDL_DialogFileFilter filters[] = {
-            {"All supported files", "rmf;zmf;mid;midi;kar;rmi;hsb;zsb;bsn;zsn;nbs;mod;s3m;xm;it;mtm;stm;669;far;ult;amf;dbm;imf;liq;med;mgt;okt;ptm;xmf"},
+            {"All supported files", "rmf;zmf;mid;midi;kar;rmi;hsb;zsb;bsn;zsn;mod;s3m;xm;it;mtm;stm;669;far;ult;amf;dbm;imf;liq;med;mgt;okt;ptm;xmf"},
             {"Beatnik / NeoBAE Session (*.bsn;*.zsn)", "bsn;zsn"},
-            {"NeoBAE Session (*.nbs)", "nbs"},
             {"RMF files (*.rmf;*.zmf)", "rmf;zmf"},
             {"Module Tracker file", "mod;s3m;xm;it;mtm;stm;669;far;ult;amf;dbm;imf;liq;med;mgt;okt;ptm;xmf"},
             {"MIDI files (*.mid;*.midi;*.kar;*.rmi)", "mid;midi;kar;rmi"},
-            {"Bank files (*.hsb;*.zsb;*.bsn)", "hsb;zsb;bsn"},
+            {"Bank files (*.hsb;*.zsb)", "hsb;zsb"},
             {"All files (*.*)", "*"},
         };
 
