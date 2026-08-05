@@ -11,14 +11,17 @@ cmake -B build -DDEBUG=ON -DBAE_DISABLE_MP3_DECODER=ON
 cmake --build build
 ```
 
+Run configure from the repository root (where the top-level `CMakeLists.txt` lives).
+
 ## Global Build Options
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `DEBUG` | `OFF` | Enable debug build (zefidi debug console). Enables debug output from the NeoBAE engine. |
-| `LDEBUG` | `OFF` | Enable full debug build (zefidi debug console, gdb debugging). Disables compile-time optimizations and retains debug symbols. |
+| `LDEBUG` | `OFF` | Enable full debug build (zefidi debug console, gdb debugging). Disables compile-time optimizations, retains debug symbols, and implies `DEBUG`. |
 | `NEOBAE_STATIC` | `OFF` | Enable static linking for NeoBAE apps and dependencies (best support on MinGW). When enabled and `NEOBAE_EXTERNAL_CODECS` is not already set, it is forced `ON`. When enabled and `NEOBAE_SHARED_LIBNEOBAE` is not already set, it is forced `ON`. On MinGW, sets static suffixes and link options. |
 | `NEOBAE_BUILD_VCLIB` | `OFF` | Build an additional MSVC-style import library for `libneobae.dll` using `dlltool`. Only meaningful for MinGW shared `libneobae.dll` builds. |
+| `USE_SDL2` | `OFF` | Prefer SDL2 as the platform backend when both SDL2 and SDL3 are available. Default auto-select prefers SDL3 when present. |
 | `CMAKE_BUILD_TYPE` | (empty) | Build type: `Debug`, `Release`, `RelWithDebInfo`, `MinSizeRel`. |
 
 ## Static/Coupling Options
@@ -34,7 +37,7 @@ These are controlled automatically when `NEOBAE_STATIC=ON` unless explicitly pre
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `BAE_PLATFORM` | `Dummy` (auto-detects SDL3/SDL2 if available) | Backend platform. Supported values: `Dummy`, `SDL2`, `SDL3`, `Raylib`, `WinOS`, `Ansi`, `WASM`, `Android`, `IOS`, `MacOSX`, `foobar2000`. |
+| `BAE_PLATFORM` | auto | Backend platform. Auto-detect prefers SDL3, then SDL2, then `WinOS` on Windows / `Dummy` elsewhere. Supported values: `Dummy`, `SDL2`, `SDL3`, `Raylib`, `WinOS`, `Ansi`, `WASM`, `Android`, `IOS`, `MacOSX`, `foobar2000`. |
 
 ## Feature Flags (BAE_DISABLE_*)
 
@@ -55,10 +58,11 @@ All feature flags default to `OFF` (feature enabled). Set to `ON` to disable.
 | `BAE_DISABLE_FIX_SPAN_DC` | Disable Stereo Pan DC fix. |
 | `BAE_DISABLE_FLAC_DECODER` | Disable FLAC decoder support. |
 | `BAE_DISABLE_FLAC_ENCODER` | Disable FLAC encoder support. |
-| `BAE_DISABLE_FLUIDLITE` | Disable FluidLite integration. Also disables SF2 support if it was auto-enabled. |
+| `BAE_DISABLE_FLUIDLITE` | Disable NeoBAE's FluidLite SoundFont backend. Also disables SF2 support if it was auto-enabled. |
 | `BAE_DISABLE_J2ME_PATCH` | Disable J2ME percussion bank patch (maps bank 120 for percussion intent). |
 | `BAE_DISABLE_KARAOKE` | Disable karaoke support. |
 | `BAE_DISABLE_LZMA` | Disable LZMA compression support. Also disables ZMF support. |
+| `BAE_DISABLE_MIDI_HARDWARE` | Disable hardware MIDI I/O in zefidi via RtMidi. |
 | `BAE_DISABLE_MP3_DECODER` | Disable MP3 decoder support. |
 | `BAE_DISABLE_MP3_ENCODER` | Disable MP3 encoder support. |
 | `BAE_DISABLE_MTHC_SUPPORT` | Disable MTHC (Nokia Compressed MIDI) support. |
@@ -76,6 +80,7 @@ All feature flags default to `OFF` (feature enabled). Set to `ON` to disable.
 | `BAE_DISABLE_SF2_SUPPORT` | Disable SF2 support. |
 | `BAE_DISABLE_VORBIS_DECODER` | Disable Vorbis decoder support. Also disables ZMF support. |
 | `BAE_DISABLE_VORBIS_ENCODER` | Disable Vorbis encoder support. |
+| `BAE_DISABLE_WMA_SUPPORT` | Disable WMA (MSAUDIO) codec support. |
 | `BAE_DISABLE_XMF_SUPPORT` | Disable XMF support. |
 | `BAE_DISABLE_ZMF_SUPPORT` | Disable ZMF support. |
 
@@ -84,7 +89,7 @@ All feature flags default to `OFF` (feature enabled). Set to `ON` to disable.
 Several features are automatically disabled if their required dependencies are not available:
 
 - **ZMF** requires: LZMA, Vorbis decoder, Opus decoder, FLAC decoder, QOA, Classic Chorus, Fix Span DC.
-- **SF2** requires FluidLite. If FluidLite is disabled, SF2 is disabled.
+- **SF2** requires NeoBAE's FluidLite. If FluidLite is disabled, SF2 is disabled.
 - **XMF** requires Native DLS. If Native DLS is disabled, XMF is disabled.
 - **MP3 encoder** requires bundled LAME sources (`neobae/src/thirdparty/lame-3.100-slim/`).
 - **FLAC encoder/decoder** requires bundled libFLAC sources (`neobae/src/thirdparty/flac/`).
@@ -99,12 +104,15 @@ Run `git submodule update --init --recursive` if bundled third-party sources are
 |------|---------|-------------|
 | `BAE_EMBED_PATCH_FILE` | `neobae/src/banks/patches111/patches111.hsb` | HSB bank file to embed as built-in patches. Set to empty string to disable embedding. Requires Python 3. |
 | `BAE_EMBED_TTF_FILE` | `neobae/src/thirdparty/fonts/LiberationSans-Regular.ttf` | TTF font file to embed for zefidi GUI use (Liberation Sans). Set to empty string to disable embedding. Requires Python 3. |
-| nbeditor fonts | `LiberationSans-Regular.ttf` + `LiberationSans-Italic.ttf` | Embedded automatically for nbeditor when Python 3 is available (same `thirdparty/fonts` folder). |
+| `BAE_NBEDITOR_FONT_REGULAR` | `neobae/src/thirdparty/fonts/LiberationSans-Regular.ttf` | Regular TTF embedded for nbeditor. |
+| `BAE_NBEDITOR_FONT_ITALIC` | `neobae/src/thirdparty/fonts/LiberationSans-Italic.ttf` | Italic TTF embedded for nbeditor (aliases). |
 
 Embedding is only effective when:
-1. The corresponding `BAE_DISABLE_EMBED_*` flag is `OFF`.
+1. The corresponding `BAE_DISABLE_EMBED_*` flag is `OFF` (for patch/font embed options).
 2. The file path is non-empty and the file exists.
 3. Python 3 interpreter is found.
+
+nbeditor embeds Regular + Italic Liberation Sans automatically when those files exist and Python 3 is available.
 
 ## Build Target Options
 
@@ -112,10 +120,8 @@ Embedding is only effective when:
 |------|---------|-------------|
 | `BUILD_PLAYBAE` | `ON` | Build `playbae` when a non-Dummy/non-Ansi backend is selected. |
 | `BUILD_ZEFIDI` | `ON` | Build `zefidi` when SDL2/SDL3 backend and matching SDL_ttf are available. |
-| `ENABLE_MIDI_HW` | `OFF` | Enable hardware MIDI I/O in zefidi via RtMidi. Requires bundled RtMidi sources. |
 | `BUILD_CLITOOLS` | `ON` | Build CLI tools: `songtool`, `rmf2mid`, `mid2rmf`, `mid2rmi`, `sf2-hsb`, `mod2rmf`, `instdump`, `bankrecomp`. |
-| `BUILD_NBSTUDIO` | `ON` | Build NeoBAE Studio (RMF/ZMF editor) when wxWidgets is found. |
-| `BUILD_NBEDITOR` | `ON` | Build NeoBAE Editor (Dear ImGui + SDL3). Requires SDL3. |
+| `BUILD_NBEDITOR` | `ON` | Build NeoBAE Editor (`nbeditor`, Dear ImGui + SDL3). Requires SDL3 headers/library and `neobae/src/nbeditor` + `neobae/src/thirdparty/imgui` sources. |
 
 ## Internal Compatibility Variables
 
@@ -145,9 +151,9 @@ cmake -B build \
   -DBAE_DISABLE_ADP_SUPPORT=ON \
   -DBAE_DISABLE_ADX_SUPPORT=ON \
   -DBAE_DISABLE_QOA_SUPPORT=ON \
+  -DBAE_DISABLE_WMA_SUPPORT=ON \
   -DBAE_DISABLE_RMI_SUPPORT=ON \
   -DBUILD_CLITOOLS=OFF \
-  -DBUILD_NBSTUDIO=OFF \
   -DBUILD_NBEDITOR=OFF
 ```
 
@@ -155,8 +161,7 @@ SDL2 GUI build with codecs:
 ```bash
 cmake -B build \
   -DBAE_PLATFORM=SDL2 \
-  -DDEBUG=ON \
-  -DENABLE_MIDI_HW=ON
+  -DDEBUG=ON
 ```
 
 Static MinGW build:

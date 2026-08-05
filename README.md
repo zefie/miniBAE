@@ -9,8 +9,8 @@ The project can be used as an embeddable audio engine, a command-line player and
 - Real-time software synthesis with Beatnik-style banks, General MIDI playback, karaoke support, and live MIDI interaction.
 - Multi-format playback and conversion across classic Beatnik formats, standard audio formats, retro ringtone formats, and modern codecs.
 - Cross-platform targets for Linux, Windows, Android, WebAssembly, and macOS (via [Homebrew](https://brew.sh)).
-- Multiple frontends ranging from the `playbae` CLI to the `zefidi` GUI and `nbstudio` editor.
-- Modular build flags for trimming features or enabling optional integrations such as FluidLite-backed SoundFont support or the Native DLS engine.
+- Multiple frontends ranging from the `playbae` CLI to the `zefidi` GUI and `nbeditor` editor.
+- Modular build flags for trimming features or enabling optional integrations such as NeoBAE's FluidLite SoundFont backend or the Native DLS engine.
 - [BAEScript](neobae/src/script/BAEScript_ReadMe.md) for manipulating songs without modification to the source file.
 - Designed with a high emphasis on preserving retro compatibility while adding new features.
 
@@ -20,7 +20,7 @@ The project can be used as an embeddable audio engine, a command-line player and
 
 - MIDI: `.mid`, `.midi`
 - Karaoke MIDI: `.kar` with lyrics processing
-- RMI: `.rmi` including RMI files with embedded DLS when built with Native DLS, and SF2 support when built with FluidLite support
+- RMI: `.rmi` including RMI files with embedded DLS when built with Native DLS, and SF2 support when built with NeoBAE's FluidLite
 - RMF: `.rmf` for classic Beatnik Rich Music Format content
 - ZMF: `.zmf` for RMF-style content with modern feature and codec support
 - XMF and MXMF: `.xmf`, `.mxmf` mobileBAE formats, with full DLS support when built with Native DLS support
@@ -41,20 +41,21 @@ The project can be used as an embeddable audio engine, a command-line player and
 - Ogg Vorbis: `.ogg`, `.oga`
 - Opus: `.opus` and Ogg Opus content
 - Quite OK Audio: `.qoa`
+- WMA / MSAUDIO: `.wma` when built with WMA support
 - ADP / ADPCM content: `.adp`
 - CRI ADX: `.adx`
 
 ### Banks and instrument formats
 
 - NeoBAE banks: `.hsb`, `.zsb`
-- SoundFont: `.sf2`, `.sf3`, `.sfo` when built with FluidLite support
+- SoundFont: `.sf2`, `.sf3`, `.sfo` when built with NeoBAE's FluidLite
 - DLS: `.dls` when built with Native DLS support
 
 ## Applications
 
 - `playbae`: primary command-line player, renderer, and export tool for NeoBAE-supported content.
 - `zefidi`: GUI player with playlists, visualization, channel controls, export features, and hardware MIDI integration where supported.
-- `nbstudio`: RMF/ZMF/HSB/ZSB editor for instrument management, sample authoring, preview, and modern codec workflows. NBStudio is currently in early access and considered alpha quality.
+- `nbeditor`: RMF/ZMF/HSB/ZSB editor for instrument management, sample authoring, preview, and modern codec workflows. NeoBAE Editor is currently in early access and considered alpha quality.
 - WebAssembly build: browser-targeted engine output for custom web players and interactive tools.
 - Android app: mobile frontend under `neobae/src/NeoBAEDroid` for NeoBAE-based playback on Android.
 - `libNeoBAE`: embeddable library output for integrating the engine into other applications.
@@ -77,26 +78,17 @@ The project can be used as an embeddable audio engine, a command-line player and
 
 ## Quick Start
 
-All build artifacts are generated from the `neobae/` tree.
+CMake is the recommended build path. Run from the repository root after initializing submodules.
 
-### Linux
-
-```bash
-cd neobae
-make clean
-make USE_SDL3=1 -j$(nproc)
-./bin/playbae -h
-```
-
-### GUI build
+### Linux (cmake)
 
 ```bash
-cd neobae
-make clean
-make -f Makefile.gui -j$(nproc)
+cmake -B build .
+cmake --build build --parallel $(nproc)
+./build/bin/playbae -h
 ```
 
-### WebAssembly build
+### WebAssembly build (legacy Makefile)
 
 ```bash
 cd neobae
@@ -104,7 +96,7 @@ make clean
 make -f Makefile.emcc -j$(nproc)
 ```
 
-For platform-specific prerequisites, Windows cross-compilation, debug builds, and optional feature flags, see [HowToBuild.md](HowToBuild.md).
+For platform-specific prerequisites, Windows cross-compilation, legacy Makefiles, debug builds, and optional feature flags, see [HowToBuild.md](HowToBuild.md) and [CMakeFlags.md](CMakeFlags.md).
 
 ## Project Layout
 

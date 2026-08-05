@@ -12,7 +12,7 @@ python3 tools/bsn_session_inspect.py reference/bsn/*.bsn
 |------|------|
 | **BE2 Session `.bsn`** | IREZ resource document: **optional bank body** + session songs + optional PCM masters + editor prefs |
 | **NeoBAE / HSB bank `.bsn`** | IREZ bank + trailing `BEPF` only (no `BePf` Session Prefs) |
-| **`.nbs`** | NeoBAE nbstudio LZMA TLV session (not BE2) |
+| **`.nbs`** | Old NeoBAE nbstudio LZMA TLV session (not BE2) |
 | **`.zsn`** | NeoBAE Session with ZREZ map (ZMF/ZSB tripwires); same BePf/session layout |
 
 Detector for BE2 editor documents: presence of resource type **`BePf`** named **`Session Prefs`**.

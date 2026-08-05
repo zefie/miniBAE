@@ -5,8 +5,9 @@ These instructions were tested on Debian Linux (including WSL2). Package names m
 ## Before you start
 
 - Run commands from the repository root unless the section says otherwise.
-- Build artifacts are in `neobae/bin/`.
-- Keep `clean` separate from parallel builds. Do this:
+- CMake build artifacts are in `build/bin/` (or your chosen `-B` directory).
+- Legacy Makefile build artifacts are in `neobae/bin/`.
+- Keep `clean` separate from parallel Makefile builds. Do this:
 
 ```bash
 make clean
@@ -15,13 +16,13 @@ make -j$(nproc)
 
 Do not combine into one line like `make clean -j$(nproc)`.
 
-By default (without `NOAUTO=1`), builds enable modern format support and SoundFont via FluidSynth where applicable.
+By default (without `NOAUTO=1`), Makefile builds enable modern format support and SoundFont support via NeoBAE's FluidLite where applicable.
 
 ## What should I build?
 
 - `playbae`: command-line player and test tool.
 - `zefidi`: GUI player/editor utility.
-- `nbstudio`: NeoBAE Studio (RMF editor).
+- `nbeditor`: NeoBAE Editor (RMF/ZMF/HSB/ZSB editor; Dear ImGui + SDL3).
 - Web build: WebAssembly output (`engine.js` + `engine.wasm`).
 
 ## Get the source
@@ -47,49 +48,57 @@ If you do not use git submodules, place third-party sources in these folders:
 - [RtMidi](https://github.com/thestk/rtmidi) -> `neobae/src/thirdparty/rtmidi`
 - [libg722](https://github.com/sippy/libg722) -> `neobae/src/thirdparty/libg722`
 - [libxmp](https://github.com/libxmp/libxmp) -> `neobae/src/thirdparty/libxmp`
+- [qoa](https://github.com/phoboslab/qoa) -> `neobae/src/thirdparty/qoa`
+- [Dear ImGui](https://github.com/ocornut/imgui) (docking branch) -> `neobae/src/thirdparty/imgui`
 
 Notes:
 
 - If you use `NOAUTO=1`, you only need third-party code for the features you enable.
+- `imgui` is required to build `nbeditor`.
 
 # Compiling NeoBAE
 
 ## cmake
 
-The current recommended way to build the NeoBAE suite is with `cmake`.
+The current recommended way to build the NeoBAE suite is with `cmake` from the repository root.
+
+For available `-D` flags, see [CMakeFlags.md](CMakeFlags.md).
 
 ### Linux
+
 ```bash
 sudo apt-get update
-sudo apt-get install -y wx3.2-headers libsdl3-dev
-cd neobae
-mkdir build
+sudo apt-get install -y libsdl3-dev libsdl3-ttf-dev
 cmake -B build .
 cmake --build build --parallel $(nproc)
 ./build/bin/playbae -h
 ```
+
+Optional packages for richer system-codec / tooling builds: `libsndfile-dev`, `libmp3lame-dev`, `libogg-dev`, `libvorbis-dev`, `libopus-dev`, `libopusfile-dev`, `libflac-dev`, `liblzma-dev`, `libxmp-dev`, `python3`.
+
 ### Windows
 
 I highly recommend building in my [docker toolchain](https://hub.docker.com/repository/docker/zefie/llvm-mingw)
 
-To build just for x86_64:
+To build just for x86_64 (from the repository root):
+
 ```bash
-cd neobae
 docker run --rm -it -v ./:/src zefie/llvm-mingw:latest .zefie/build-llvm-mingw-static_x86_64_only.sh
 ```
-This will generate a zip in the `neobae/out` folder.
+
+This will generate a zip in the `out/` folder.
 
 To build for all archs:
+
 ```bash
-cd neobae
 docker run --rm -it -v ./:/src zefie/llvm-mingw:latest .zefie/build-llvm-mingw-static.sh
 ```
 
-This will generate 4 zips in the `neobae/out` folder, one pertaining to each architechure.
+This will generate 4 zips in the `out/` folder, one pertaining to each architecture.
 
 ## Legacy Makefiles
 
-Some parts of NeoBAE can still be built, in seperate parts, using the legacy Makefiles.
+Some parts of NeoBAE can still be built, in separate parts, using the legacy Makefiles. Run these from `neobae/`.
 
 ### Linux: playbae (SDL3)
 
@@ -177,24 +186,30 @@ You must install the corresponding development packages for ALSA and/or JACK.
 - `zefidi` looks for `zenity`, then `kdialog`, then `yad` for file dialogs.
 - Without one of those tools, `Open`, `Load Bank`, `Export`, and `Record` may not work.
 
-### NeoBAE Studio
+### NeoBAE Editor
 
-### Linux 
+CMake (recommended; builds `nbeditor` when SDL3 and Dear ImGui sources are available):
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y libsdl3-dev libsdl3-ttf-dev libsndfile-dev \
+sudo apt-get install -y libsdl3-dev
+cmake -B build -DBUILD_NBEDITOR=ON .
+cmake --build build --parallel $(nproc) --target nbeditor
+./build/bin/nbeditor
+```
+
+Legacy Makefile:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y libsdl3-dev libsndfile-dev \
   libogg-dev libvorbis-dev libopus-dev libopusfile-dev libflac-dev \
   liblzma-dev libmp3lame-dev libxmp-dev
 cd neobae
 make clean
-make -f Makefile.nbstudio -j$(nproc)
+make -f Makefile.nbeditor -j$(nproc)
+./bin/nbeditor
 ```
-
-### Windows (Visual Studio, unsupported)
-- Open `neobae/src/nbstudio/vs2022/nbstudio.vsxproj`.
-- In Developer PowerShell, within the `neobae/src/nbstudio/vs2022` folder, run `vcpkg install --triplet x64-windows`.
-- Build in Visual Studio.
 
 ## WebAssembly (Emscripten)
 
@@ -258,7 +273,7 @@ make NOAUTO=1 ...
 ### Synth/audio backend flags
 
 - `SF2_SUPPORT=1`: enable SoundFont support
-- `USE_FLUIDLITE=1`: use FluidLite backend
+- `USE_FLUIDLITE=1`: use NeoBAE's FluidLite SoundFont backend
 - `USE_SDL2=1` or `USE_SDL3=1`: select SDL backend (mutually exclusive)
 
 ### Debug/build behavior flags
@@ -296,7 +311,7 @@ make -j$(nproc)
 
 ### zefidi crashes when opening MIDI device list on WSL
 
-If `/dev/snd/seq` is missing, ALSA MIDI support can crash when opening MIDI device dropdowns. Build without `ENABLE_MIDI_HW=1` on those systems.
+If `/dev/snd/seq` is missing, ALSA MIDI support can crash when opening MIDI device dropdowns. Build without `ENABLE_MIDI_HW=1` on those systems. With CMake, pass `-DBAE_DISABLE_MIDI_HARDWARE=ON`.
 
 ### I just want the original miniBAE without all this extra junk!
 
@@ -304,4 +319,4 @@ That's fine, and totally possible! Just build `playbae` with the following optio
 - Linux: `make -f Makefile NOAUTO=1 MP3_DEC=1`
 - Windows: `make -f Makefile.mingw NOAUTO=1 MP3_DEC=1`
 
-This will produce a minimal playbae with only base miniBAE and MPEG support. No Nokia Patches, no Fluidsynth, no modern codecs... Just plain old original miniBAE.
+This will produce a minimal playbae with only base miniBAE and MPEG support. No Nokia Patches, no FluidLite SoundFont backend, no modern codecs... Just plain old original miniBAE.
