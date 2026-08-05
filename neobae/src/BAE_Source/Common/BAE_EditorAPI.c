@@ -15533,6 +15533,13 @@ BAEResult BAERmfEditorBank_GetInstrumentSampleInfo(BAEBankToken bankToken,
                     outInfo->compressionSubType = PV_GetStoredCompressionSubTypeFromSnd(
                         sndData, sndSize, (uint32_t)sampleInfo.compressionType);
                     outInfo->opusRoundTripResample = XGetSoundOpusRoundTripFlag(sndData);
+                    /* midiRootKey 0 means "no INST override" — effective root is
+                     * the SND baseFrequency (same as PV_AddEmbeddedSampleVariant). */
+                    if (outInfo->rootKey == 0 &&
+                        sampleInfo.baseKey > 0 && sampleInfo.baseKey <= 127)
+                    {
+                        outInfo->rootKey = (unsigned char)sampleInfo.baseKey;
+                    }
                 }
             }
             XDisposePtr(sndData);
@@ -20232,9 +20239,22 @@ static void PV_RemapPitchedNoteReferences(BAERmfEditorDocument *document,
     }
 }
 
+/* Note bank is stored as MIDI (MSB<<7)|LSB. HSB INST groups use MSB 0..N.
+   GM-style selectors MSB 120/121 are not HSB banks — map them to group 0. */
 static uint16_t PV_BankGroupFromInternalBank(uint16_t internalBank)
 {
-    return internalBank >= 128 ? (uint16_t)((internalBank >> 7) & 0x7F) : internalBank;
+    uint16_t msb;
+
+    if (internalBank < 128)
+    {
+        return internalBank;
+    }
+    msb = (uint16_t)((internalBank >> 7) & 0x7F);
+    if (msb == 120u || msb == 121u)
+    {
+        return 0;
+    }
+    return msb;
 }
 
 static void PV_RemoveDocumentInstrumentAuxEvents(BAERmfEditorDocument *document)
@@ -20367,8 +20387,11 @@ static BAEResult PV_VerifyClonedInstrument(BAERmfEditorDocument const *document,
         if (BAERmfEditorBank_GetInstrumentSampleInfo(bankToken,
                                                       instrumentIndex,
                                                       sampleOffset,
-                                                      &sourceSample) != BAE_NO_ERROR ||
-            clonedSample->instID != targetInstID ||
+                                                      &sourceSample) != BAE_NO_ERROR)
+        {
+            return BAE_BAD_FILE;
+        }
+        if (clonedSample->instID != targetInstID ||
             clonedSample->rootKey != sourceSample.rootKey ||
             clonedSample->lowKey != sourceSample.lowKey ||
             clonedSample->highKey != sourceSample.highKey ||

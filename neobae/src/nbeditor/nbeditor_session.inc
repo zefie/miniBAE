@@ -990,14 +990,19 @@
                 static_cast<float>(std::max(1, m_song_settings_tempo_percent)) / 100.0f;
             (void)BAESong_SetMasterTempo(song, FLOAT_TO_UNSIGNED_FIXED(ratio));
         }
-        /* Priority 1 > bank preview song (0) so audition NoteOns don't steal. */
-        BAESong_Start(song, 1);
+        /* Arm with Preroll only when paused: Start+Pause would dispatch and then
+         * kill tick-0 notes, so the first note never returns on Resume. */
         if (pause_after_start)
         {
-            BAESong_Pause(song);
+            m_song_started = false;
+        }
+        else
+        {
+            /* Priority 1 > bank preview song (0) so audition NoteOns don't steal. */
+            BAESong_Start(song, 1);
+            m_song_started = true;
         }
         m_song = song;
-        m_song_started = true;
         m_document_dirty = false;
         ApplyChannelMutes();
         MeApplyTrackMutes();
@@ -1309,9 +1314,9 @@
         BAESong_Stop(m_song, FALSE);
         BAESong_SetMicrosecondPosition(m_song, 0);
         BAESong_SetLoops(m_song, m_loop_enabled ? 32767 : 0);
-        BAESong_Start(m_song, 1);
-        BAESong_Pause(m_song);
-        m_song_started = true;
+        BAESong_Preroll(m_song);
+        /* Leave stopped/armed — Start+Pause here would drop tick-0 notes on Play. */
+        m_song_started = false;
     }
 
     /* When loop is off and the engine finishes, park like Stop so Play returns. */
@@ -1354,11 +1359,20 @@
         }
     }
 
-    /* Matches CloneUsed / rmfutil create bank-group decoding. */
+    /* Matches CloneUsed / rmfutil create bank-group decoding.
+     * Note bank is MIDI (MSB<<7)|LSB; GM MSB 120/121 → HSB group 0. */
     static int ExportBankGroupFromNoteBank(uint16_t internal_bank)
     {
-        return (internal_bank >= 128) ? static_cast<int>((internal_bank >> 7) & 0x7F)
-                                      : static_cast<int>(internal_bank);
+        if (internal_bank < 128)
+        {
+            return static_cast<int>(internal_bank);
+        }
+        const int msb = static_cast<int>((internal_bank >> 7) & 0x7F);
+        if (msb == 120 || msb == 121)
+        {
+            return 0;
+        }
+        return msb;
     }
 
     enum class ExportSelectionMode
