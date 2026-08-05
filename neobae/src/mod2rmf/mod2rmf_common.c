@@ -777,6 +777,32 @@ int mod2rmf_rate_fin_to_cents(int fin)
     return (fin * 100 + 64) / 128;
 }
 
+uint32_t mod2rmf_fold_rate_for_fixed(uint32_t rateHz, int16_t *outRootAdjust)
+{
+    int16_t rootAdjust = 0;
+
+    if (rateHz == 0u)
+    {
+        rateHz = 1u;
+    }
+    /* Each octave fold halves the stored rate and drops root by 12 so that
+     * note 60 still plays at the original C5 frequency. */
+    while (rateHz > MOD2RMF_MAX_FIXED_RATE_HZ)
+    {
+        rateHz = (rateHz + 1u) / 2u;
+        rootAdjust = (int16_t)(rootAdjust - 12);
+        if (rootAdjust < -96)
+        {
+            break;
+        }
+    }
+    if (outRootAdjust)
+    {
+        *outRootAdjust = rootAdjust;
+    }
+    return rateHz;
+}
+
 int mod2rmf_is_ascii_space(char c)
 {
     return (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == '\v');

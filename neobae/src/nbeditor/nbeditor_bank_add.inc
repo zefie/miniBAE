@@ -509,30 +509,28 @@
             return;
         }
 
-        /* BE2-style: delete the SND only. Instruments keep their keysplit
-         * sndResourceID and show as [missing] until reassigned. Do not rewrite
-         * INST / remove splits (that caused glitches and index churn). */
+        /* Move SND to TRSH (ZTRS). Instruments keep keysplit refs → [missing]
+         * until reassigned; Restore from Trash brings the sample back. */
         XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
         const XLongResourceID sid = static_cast<XLongResourceID>(sample.snd_resource_id);
         static const XResourceType kTypes[] = {ID_ESND, ID_CSND, ID_SND, 0};
-        bool deleted = false;
+        bool trashed = false;
         for (int t = 0; kTypes[t] != 0; ++t)
         {
             if (XExistsFileResource(bank, kTypes[t], sid) != FALSE)
             {
-                if (XDeleteFileResource(bank, kTypes[t], sid, FALSE) != FALSE)
+                if (XTrashFileResource(bank, kTypes[t], sid) != FALSE)
                 {
-                    deleted = true;
+                    trashed = true;
                     break;
                 }
             }
         }
-        if (!deleted)
+        if (!trashed)
         {
-            SetStatus("Failed to delete sample resource");
+            SetStatus("Failed to move sample to Trash");
             return;
         }
-        (void)XCleanResourceFile(bank);
         m_session_custom_snd_ids.erase(sample.snd_resource_id);
         m_session_pcm_cache.erase(sample.snd_resource_id);
         m_app_compression_cache.erase(sample.snd_resource_id);
@@ -541,14 +539,14 @@
         char status[192];
         if (sample.unassigned)
         {
-            std::snprintf(status, sizeof(status), "Deleted unassigned sample SND %u",
+            std::snprintf(status, sizeof(status), "Moved sample SND %u to Trash",
                           sample.snd_resource_id);
         }
         else
         {
             std::snprintf(status,
                           sizeof(status),
-                          "Deleted sample SND %u — instruments still reference it [missing]",
+                          "Moved SND %u to Trash — instruments still reference it [missing]",
                           sample.snd_resource_id);
         }
         SetStatus(status);

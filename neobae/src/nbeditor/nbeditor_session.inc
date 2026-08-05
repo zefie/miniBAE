@@ -168,6 +168,39 @@
                     "Closes floating editor windows (IE, Sample Editor, etc.).");
             }
             ImGui::Separator();
+            {
+                const int trash_n = CountBankTrash();
+                char trash_label[64];
+                if (trash_n > 0)
+                {
+                    std::snprintf(trash_label, sizeof(trash_label), "Trash... (%d)", trash_n);
+                }
+                else
+                {
+                    std::snprintf(trash_label, sizeof(trash_label), "Trash...");
+                }
+                if (ImGui::MenuItem(trash_label, nullptr, false, m_bank_token != 0))
+                {
+                    OpenTrashWindow();
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal |
+                                         ImGuiHoveredFlags_AllowWhenDisabled))
+                {
+                    ImGui::SetTooltip(
+                        "Browse soft-deleted samples/instruments.\n"
+                        "Restore, delete permanently, or Empty Trash.\n"
+                        "Also recovers legacy TRSH left by older ZSN saves.");
+                }
+                if (ImGui::MenuItem("Empty Trash...",
+                                    nullptr,
+                                    false,
+                                    m_bank_token != 0 && trash_n > 0))
+                {
+                    m_confirm_empty_trash_open = true;
+                    m_trash_open = true;
+                }
+            }
+            ImGui::Separator();
             if (ImGui::MenuItem("Select All", "Ctrl+A"))
             {
                 SessionSelectAllVisible();
@@ -676,7 +709,9 @@
                                    ImGuiWindowFlags_AlwaysAutoResize))
         {
             ImGui::TextWrapped(
-                "Unload Bank 0 and Bank 1 instruments and remove their built-in samples?");
+                "Unload Bank 0 and Bank 1 instruments and permanently remove their\n"
+                "built-in samples? Bank 2+ and custom samples are kept.\n"
+                "(This does not use Trash — it is not undoable.)");
             ImGui::Spacing();
             ImGui::TextDisabled(
                 "Samples still used by Bank 2+, and custom/session samples, are kept.");
@@ -878,12 +913,15 @@
                 }
                 else
                 {
+                    /* Bank body is what .zsn/.bsn persists — promote embeds now. */
+                    (void)PromoteActiveSessionSongEmbedsIntoBank();
                     char status[256];
                     std::snprintf(status,
                                   sizeof(status),
-                                  "Added Session song %d/%zu (module)",
+                                  "Added Session song %d/%zu (module, %zu custom INST)",
                                   m_session_song_index + 1,
-                                  m_session_songs.size());
+                                  m_session_songs.size(),
+                                  m_session_custom_inst_ids.size());
                     SetStatus(status);
                 }
             }

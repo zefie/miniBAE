@@ -749,6 +749,12 @@ typedef struct XBankToken XBankToken;
 #define XFILERESOURCE_ZMF_ID    FOUR_CHAR('Z','R','E','Z')  // ZREZ (ZMF: RMF with modern codecs)
 #define XFILECACHE_ID           FOUR_CHAR('C','A','C','H')  // CACH
 #define XFILETRASH_ID           FOUR_CHAR('T','R','S','H')  // TRSH
+/* NeoBAE trash payload wrapper (body of a TRSH resource). Preserves original
+ * type/id so Move to Trash / Restore round-trips. Legacy Beatnik TRSH entries
+ * have no wrapper — type/id were overwritten in-place to TRSH/0. */
+#define XFILETRASH_META_MAGIC   FOUR_CHAR('Z','T','R','S')  // ZTRS
+#define XFILETRASH_META_VERSION 1u
+#define XFILETRASH_META_SIZE    16  /* magic + version + origType + origId */
 
 // Check if a mapID is a valid resource file (IREZ always; ZREZ only when USE_ZMF_SUPPORT)
 #if USE_ZMF_SUPPORT == TRUE
@@ -957,7 +963,66 @@ char    *XGetResourceNameOnly(XFILE fileRef,
                                 char *pResourceName);
 
 // returns TRUE if ok.
+// Soft-marks the resource as TRSH (legacy: type→TRSH, id→0, body unchanged).
+// Prefer XTrashFileResource for recoverable editor deletes (ZTRS metadata).
+// collectTrash=TRUE empties all TRSH via XEmptyFileTrash.
 bool   XDeleteFileResource(XFILE fileRef, XResourceType theType, XLongResourceID resourceID, bool collectTrash );
+
+/* Move a resource to trash with ZTRS metadata (original type/id + payload).
+ * Survives XCleanResourceFile; use XEmptyFileTrash to purge permanently. */
+bool   XTrashFileResource(XFILE fileRef, XResourceType theType, XLongResourceID resourceID);
+
+/* Permanently remove one resource (no TRSH left behind). Packed ZINS/ZSNG/ZBNK
+ * entries are omitted by reconstituting the packed set. Other TRSH are kept. */
+bool   XPurgeFileResource(XFILE fileRef, XResourceType theType, XLongResourceID resourceID);
+
+/* One-shot hard remove of many INST + SND/CSND/ESND ids (Unload Bank).
+ * Prefer this over calling XPurgeFileResource in a loop — repeated INST expands
+ * were dropping Bank 2+ from ZINS. Does not create TRSH. */
+bool   XPurgeFileInstrumentAndSoundLists(XFILE fileRef,
+                                         const XLongResourceID *omitInstIds,
+                                         int32_t omitInstCount,
+                                         const XLongResourceID *omitSndIds,
+                                         int32_t omitSndCount);
+
+/* One-shot hard omit of arbitrary (type,id) pairs by raw copy — no ZINS/ZSNG
+ * expand. Use for session-save song/metadata strip instead of looping
+ * XPurgeFileResource (each purge Clean/PackInst was dropping flat custom INST). */
+bool   XOmitFileResources(XFILE fileRef,
+                          const XResourceType *omitTypes,
+                          const XLongResourceID *omitIds,
+                          int32_t omitCount);
+
+/* Remove every TRSH entry from the file (Empty Trash). */
+bool   XEmptyFileTrash(XFILE fileRef);
+
+/* Number of TRSH entries (same as XCountFileResourcesOfType(..., XFILETRASH_ID)). */
+int32_t XCountFileTrash(XFILE fileRef);
+
+/* Describe the Nth TRSH entry. cName is a C string when non-NULL.
+ * hasMeta=TRUE when body starts with ZTRS; otherwise origType may be guessed. */
+bool   XGetIndexedFileTrashInfo(XFILE fileRef,
+                                int32_t trashIndex,
+                                XLongResourceID *pTrashResourceID,
+                                XResourceType *pOriginalType,
+                                XLongResourceID *pOriginalID,
+                                char *cName,
+                                int32_t *pPayloadSize,
+                                bool *pHasMeta,
+                                bool *pTypeGuessed);
+
+/* Restore the Nth TRSH entry. Prefers original id when free; otherwise assigns
+ * a unique id (returned in pRestoredID when non-NULL). */
+bool   XRestoreIndexedFileTrash(XFILE fileRef,
+                                int32_t trashIndex,
+                                XLongResourceID *pRestoredID);
+
+/* Permanently remove the Nth TRSH entry only. */
+bool   XPurgeIndexedFileTrash(XFILE fileRef, int32_t trashIndex);
+
+/* Collapse identical TRSH bodies (same name + payload) to a single entry.
+ * Returns TRUE if ok; *pRemovedCount (optional) gets how many duplicates were dropped. */
+bool   XDedupeFileTrash(XFILE fileRef, int32_t *pRemovedCount);
 
 // returns TRUE if ok.
 bool   XCleanResourceFile( XFILE fileRef );
@@ -966,6 +1031,10 @@ bool   XCleanResourceFile( XFILE fileRef );
  * leave SND/CSND/ESND as complete resources. Use for clip/transfer packages where
  * ZSHD payload-refs are harmful to round-trip import. */
 bool   XCleanResourceFileEx( XFILE fileRef, bool packSndHeaders );
+
+/* Full Clean control. Session .zsn/.bsn save must pass packInst=FALSE — PackInst
+ * was rebuilding ZINS from Bank 0/1 and dropping flat custom / Bank 2+ INST. */
+bool   XCleanResourceFileOptions( XFILE fileRef, bool packInst, bool packSndHeaders );
 
 // File Manager
 int32_t    XFileRead(XFILE fileRef, XPTR buffer, int32_t bufferLength);

@@ -101,7 +101,9 @@ Terminated by zeros. Tracks create/modify times for `Midi`, `SONG`, `snd `, `CaS
 
 ### `TRSH`
 
-Marked-deleted resources (old `BEPF` / `BePf` / `DATe` bodies) left in the file until compacted.
+Soft-deleted resources left in the file until Empty Trash / compact.
+
+Classic Beatnik marks overwrite the entry type to `TRSH` and id to `0` (original type/id lost; Pascal name + body remain). NeoBAE editor deletes wrap the body in a **`ZTRS`** header (`magic/version/origType/origId` + payload) under a unique `TRSH` id so Move to Trash / Restore round-trips. Legacy `TRSH` (no `ZTRS`) can still be listed and heuristically restored (snd/INST sniff).
 
 ## Songs
 

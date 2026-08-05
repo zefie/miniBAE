@@ -145,8 +145,10 @@ static void mod2rmf_apply_sample_gain(ModRawSample *raw, double gainDb)
  * Some formats (notably IT) can reuse the same sample across multiple
  * instruments with different transpose settings, so a global per-sample
  * transpose cache can detune only certain notes.
- * When the sample's C5/C2 rate was baked into sampleRateHz, subtract that
- * rate-encoding xpo so MIDI notes stay in the pattern-note domain. */
+ *
+ * IT/S3M: C5/C2 rate is stored on the sample; strip that rate-encoding
+ * xpo so MIDI notes stay in the pattern-key domain (avoids note>127 clamp
+ * on high-C5 samples like AVP2.it). */
 static int mod2rmf_resolve_note_transpose(const struct xmp_module *mod,
                                           const struct xmp_channel_info *ci,
                                           int sid,
@@ -157,9 +159,10 @@ static int mod2rmf_resolve_note_transpose(const struct xmp_module *mod,
     int noteXpo = 0;
     int instIndex = -1;
 
-    if (ci && ci->instrument > 0)
+    /* libxmp exports xc->ins as a 0-based instrument index (or 255 if none). */
+    if (ci && mod && (int)ci->instrument >= 0 && (int)ci->instrument < mod->ins)
     {
-        instIndex = (int)ci->instrument - 1;
+        instIndex = (int)ci->instrument;
     }
     if (mod && instIndex >= 0 && instIndex < mod->ins && mod->xxi)
     {
@@ -197,6 +200,31 @@ static int mod2rmf_resolve_note_transpose(const struct xmp_module *mod,
     }
 
     return noteXpo;
+}
+
+/* Sample baseKey for IT/S3M: logical middle C plus octave-fold adjust so a
+ * 16.16-safe stored rate still plays the true C5 pitch. Instrument
+ * midiRootKey must stay at logical middle C — applying the fold on both
+ * would double-compensate. */
+static unsigned char mod2rmf_sample_root_key_for_raw(const ModRawSample *raw,
+                                                    uint8_t rootShiftSemitones)
+{
+    int root;
+
+    root = (int)MOD2RMF_LOGICAL_ROOT_KEY;
+    if (raw && raw->hasRateMapping)
+    {
+        root += (int)raw->rateRootAdjust;
+    }
+    if (root < 0)
+    {
+        root = 0;
+    }
+    if (root > 127)
+    {
+        root = 127;
+    }
+    return mod2rmf_shifted_root_key((unsigned char)root, rootShiftSemitones);
 }
 
 /* Read the raw row event directly from the module pattern/track tables.
@@ -380,8 +408,9 @@ int mod2rmf_setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
         memset(&setup, 0, sizeof(setup));
         setup.program = playable->program;
         
-        /* Optional rootShiftSemitones lowers root + rate together (pitch-neutral)
-         * for low-note headroom; default shift is 0 (native rate / root 60). */
+        /* Sample baseKey stays at logical middle C (editor-friendly). Song
+         * pitch compensation for IT/S3M rates is applied on instrument
+         * midiRootKey in setup_instrument_ext. */
         setup.rootKey = mod2rmf_shifted_root_key(playable->rootKey, conv->rootShiftSemitones);
         
         setup.lowKey = 0;
@@ -856,6 +885,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
         raw->hasRateMapping = FALSE;
         raw->rateXpo = 0;
         raw->rateFin = 0;
+        raw->rateRootAdjust = 0;
     }
 
     /* Extract amplitude envelope ADSR and (for IT/S3M) per-sample C5/C2
@@ -887,10 +917,16 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                 }
                 if (useSampleC5Rate && !conv->rawSamples[sid].hasRateMapping)
                 {
+                    uint32_t trueRate;
+                    int16_t rootAdjust = 0;
+
                     conv->rawSamples[sid].rateXpo = (int16_t)inst->sub[sub].xpo;
                     conv->rawSamples[sid].rateFin = (int16_t)inst->sub[sub].fin;
+                    trueRate = mod2rmf_c2spd_from_xpo_fin(inst->sub[sub].xpo, inst->sub[sub].fin);
+                    /* AVP2.it etc. use C5 > 65535 Hz — fold into 16.16-safe range. */
                     conv->rawSamples[sid].sampleRateHz =
-                        mod2rmf_c2spd_from_xpo_fin(inst->sub[sub].xpo, inst->sub[sub].fin);
+                        mod2rmf_fold_rate_for_fixed(trueRate, &rootAdjust);
+                    conv->rawSamples[sid].rateRootAdjust = rootAdjust;
                     conv->rawSamples[sid].hasRateMapping = TRUE;
                 }
                 if (!sampleHasEnvelope[sid] &&
@@ -1493,7 +1529,8 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
         p = &song->playables[program];
         p->sourceSlot = i;
         p->program = (unsigned char)program;
-        p->rootKey = MOD2RMF_LOGICAL_ROOT_KEY;
+        /* Includes octave-fold root adjust for high-C5 IT/S3M samples. */
+        p->rootKey = mod2rmf_sample_root_key_for_raw(&conv->rawSamples[i], 0u);
         p->hasSampleRateOverride = TRUE;
         p->sampleRateOverrideHz =
             (conv->rawSamples[i].sampleRateHz > 0u) ? conv->rawSamples[i].sampleRateHz
@@ -1978,21 +2015,10 @@ int mod2rmf_write_song_notes(Mod2RmfConverter *conv, const ModSongModel *song)
 int mod2rmf_setup_instrument_ext(Mod2RmfConverter *conv, const ModSongModel *song, bool useZmfContainer)
 {
     uint32_t i;
-    uint8_t extraRootShiftSemitones;
-    int extMidiRootKey;
 
     if (!conv || !conv->document || !song)
     {
         return 0;
-    }
-
-    extraRootShiftSemitones = (conv->rootShiftSemitones > MOD2RMF_DEFAULT_ROOT_SHIFT_ST)
-                             ? (uint8_t)(conv->rootShiftSemitones - MOD2RMF_DEFAULT_ROOT_SHIFT_ST)
-                             : 0u;
-    extMidiRootKey = (int)MOD2RMF_LOGICAL_ROOT_KEY - (int)extraRootShiftSemitones;
-    if (extMidiRootKey < 0)
-    {
-        extMidiRootKey = 0;
     }
 
     for (i = 0; i < song->playableCount; ++i)
@@ -2001,6 +2027,7 @@ int mod2rmf_setup_instrument_ext(Mod2RmfConverter *conv, const ModSongModel *son
         BAEResult result;
         uint32_t instID;
         const ModPlayable *playable;
+        unsigned char instRootKey;
 
         playable = &song->playables[i];
         if (!playable->rawSample || !playable->rawSample->valid ||
@@ -2009,6 +2036,10 @@ int mod2rmf_setup_instrument_ext(Mod2RmfConverter *conv, const ModSongModel *son
             continue;
         }
         instID = 512u + (uint32_t)playable->program;
+        /* Keep instrument masterRootKey at logical middle C; sample baseKey
+         * carries any high-C5 octave-fold adjust. */
+        instRootKey = mod2rmf_shifted_root_key(MOD2RMF_LOGICAL_ROOT_KEY,
+                                               conv->rootShiftSemitones);
 
         memset(&extInfo, 0, sizeof(extInfo));
         result = BAERmfEditorDocument_GetInstrumentExtInfo(conv->document, instID, &extInfo);
@@ -2019,7 +2050,7 @@ int mod2rmf_setup_instrument_ext(Mod2RmfConverter *conv, const ModSongModel *son
             extInfo.instID = instID;
             extInfo.flags1 = MOD2RMF_ZBF_USE_SAMPLE_RATE;
             extInfo.flags2 = 0;
-            extInfo.midiRootKey = (uint8_t)extMidiRootKey;
+            extInfo.midiRootKey = instRootKey;
             extInfo.miscParameter2 = 100;
             /* 2-stage ADSR: sustain at max, then immediate release to 0.
              * This activates the "new style" ADSR path in the engine,
@@ -2038,9 +2069,7 @@ int mod2rmf_setup_instrument_ext(Mod2RmfConverter *conv, const ModSongModel *son
 
         extInfo.instID = instID;
         extInfo.displayName = playable->displayName;
-        /* Keep root-key deterministic for stable tuning, but allow extra
-         * down-octave range to shift this root key as well. */
-        extInfo.midiRootKey = (uint8_t)extMidiRootKey;
+        extInfo.midiRootKey = instRootKey;
 
         /* Apply per-instrument pan placement from tracker sub-instrument */
         extInfo.panPlacement = playable->panPlacement;

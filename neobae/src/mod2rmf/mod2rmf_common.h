@@ -29,6 +29,8 @@
 #define MOD2RMF_MAX_SAMPLES 256
 #define MOD2RMF_ROW_TICKS 120
 #define MOD2RMF_SAMPLE_RATE 8287
+/* BAE stores sample rate as 16.16 in a 32-bit word — max integer Hz is 65535. */
+#define MOD2RMF_MAX_FIXED_RATE_HZ 65535u
 /* BAERmfEditor stores bank as 14-bit (MSB: bits 7-13, LSB: bits 0-6).
  * Embedded RMF bank 2 must be encoded as MSB=2, LSB=0. */
 #define MOD2RMF_EMBEDDED_BANK ((uint16_t)(2u << 7))
@@ -83,12 +85,16 @@ typedef struct {
     ModAdsrStage adsrStages[MOD2RMF_MAX_ADSR_STAGES];
     int16_t defaultPan;          /* sub-instrument pan: 0..255, 128=center, -1=unset */
     /* IT/S3M: true C5/C2 playback rate recovered from libxmp xpo/fin.
-     * When hasRateMapping, rateXpo/rateFin were baked into sampleRateHz and
-     * must be stripped from MIDI note / pitch-bend mapping. */
+     * sampleRateHz is the stored rate (octave-folded to fit 16.16 FIXED).
+     * rateXpo is stripped from MIDI notes (pattern-key domain).
+     * rateRootAdjust shifts sample baseKey only for octave folding
+     * (negative = lower root, compensates a halved stored rate).
+     * rateFin is baked into sampleRateHz and subtracted from pitch bends. */
     bool hasRateMapping;
     uint32_t sampleRateHz;
     int16_t rateXpo;
     int16_t rateFin;             /* 0..127 libxmp finetune units (128 = 1 st) */
+    int16_t rateRootAdjust;      /* semitones added to root (usually 0 or -12*n) */
     int8_t *pcm8;
 } ModRawSample;
 
@@ -235,6 +241,8 @@ bool mod2rmf_is_s3m_family(const char *type);
 bool mod2rmf_format_uses_sample_c5_rate(bool isIt, const char *type);
 uint32_t mod2rmf_c2spd_from_xpo_fin(int xpo, int fin);
 int mod2rmf_rate_fin_to_cents(int fin);
+/* Fold rate into 16.16-safe Hz; returns stored rate and root semitone adjust. */
+uint32_t mod2rmf_fold_rate_for_fixed(uint32_t rateHz, int16_t *outRootAdjust);
 int mod2rmf_is_ascii_space(char c);
 void mod2rmf_trim_copy_ascii(char *dst, size_t dstSize, const char *src);
 void mod2rmf_append_linef(char *dst, size_t dstSize, const char *text);

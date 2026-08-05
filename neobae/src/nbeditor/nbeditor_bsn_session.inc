@@ -1357,6 +1357,10 @@ bool SaveSessionToPath(const char *path)
     UpdateBusyProgress(0.02f, "Preparing session…");
     RememberSessionPcmFromSampleEditor();
     (void)SyncSessionSongsFromDocument();
+    /* Module/RMF song embeds live in rmf_bytes until promoted. Session files
+     * only store bank + Midi/SONG — promote so customs survive save→reload. */
+    UpdateBusyProgress(0.05f, "Promoting song instruments into bank…");
+    (void)PromoteAllSessionSongEmbedsIntoBank();
 
     bool remapped = false;
     const std::string enforced_path = EnforceSessionSavePath(path, &remapped);
@@ -1414,10 +1418,18 @@ bool SaveSessionToPath(const char *path)
             session_song_ids.insert(entry.song_resource_id);
             session_midi_ids.insert(entry.midi_resource_id);
         }
-        /* Remove Custom Song slots we'll rewrite below; keep bank groovoids. */
+        /* One-shot raw omit — never loop XPurgeFileResource (each purge ran
+         * Clean/PackInst and dropped flat Bank 2+/custom INST from the clone). */
         {
+            std::vector<XResourceType> omit_types;
+            std::vector<XLongResourceID> omit_ids;
+            auto omit_one = [&](XResourceType t, XLongResourceID id) {
+                omit_types.push_back(t);
+                omit_ids.push_back(id);
+            };
+
             const int32_t song_count = XCountFileResourcesOfType(out_file, ID_SONG);
-            for (int32_t i = song_count - 1; i >= 0; --i)
+            for (int32_t i = 0; i < song_count; ++i)
             {
                 XLongResourceID song_id = 0;
                 int32_t song_size = 0;
@@ -1451,42 +1463,47 @@ bool SaveSessionToPath(const char *path)
                 XDisposePtr(song_data);
                 if (strip)
                 {
-                    (void)XDeleteFileResource(out_file, ID_SONG, song_id, TRUE);
+                    omit_one(ID_SONG, song_id);
                 }
             }
             for (uint32_t midi_id : session_midi_ids)
             {
                 if (midi_id != 0)
                 {
-                    (void)XDeleteFileResource(out_file,
-                                              ID_MIDI,
-                                              static_cast<XLongResourceID>(midi_id),
-                                              TRUE);
+                    omit_one(ID_MIDI, static_cast<XLongResourceID>(midi_id));
                 }
             }
-        }
-        /* Drop prior session-only metadata; rewritten below. */
-        (void)XDeleteFileResource(out_file, FOUR_CHAR('n', 'B', 'e', 'T'), 1, TRUE);
-        (void)XDeleteFileResource(out_file, FOUR_CHAR('B', 'e', 'P', 'f'), 1, TRUE);
-        (void)XDeleteFileResource(out_file, FOUR_CHAR('B', 'E', 'P', 'F'), 1, TRUE);
-        (void)XDeleteFileResource(out_file, FOUR_CHAR('D', 'A', 'T', 'e'), 1, TRUE);
-        {
-            const int32_t casd_count =
-                XCountFileResourcesOfType(out_file, FOUR_CHAR('C', 'a', 'S', 'd'));
-            for (int32_t i = casd_count - 1; i >= 0; --i)
+            omit_one(FOUR_CHAR('n', 'B', 'e', 'T'), 1);
+            omit_one(FOUR_CHAR('B', 'e', 'P', 'f'), 1);
+            omit_one(FOUR_CHAR('B', 'E', 'P', 'F'), 1);
+            omit_one(FOUR_CHAR('D', 'A', 'T', 'e'), 1);
             {
-                XLongResourceID casd_id = 0;
-                int32_t sz = 0;
-                char nm[256];
-                nm[0] = 0;
-                XPTR d = XGetIndexedFileResource(
-                    out_file, FOUR_CHAR('C', 'a', 'S', 'd'), &casd_id, i, nm, &sz);
-                if (d)
+                const int32_t casd_count =
+                    XCountFileResourcesOfType(out_file, FOUR_CHAR('C', 'a', 'S', 'd'));
+                for (int32_t i = 0; i < casd_count; ++i)
                 {
-                    XDisposePtr(d);
+                    XLongResourceID casd_id = 0;
+                    int32_t sz = 0;
+                    char nm[256];
+                    nm[0] = 0;
+                    XPTR d = XGetIndexedFileResource(
+                        out_file, FOUR_CHAR('C', 'a', 'S', 'd'), &casd_id, i, nm, &sz);
+                    if (d)
+                    {
+                        XDisposePtr(d);
+                    }
+                    omit_one(FOUR_CHAR('C', 'a', 'S', 'd'), casd_id);
                 }
-                (void)XDeleteFileResource(
-                    out_file, FOUR_CHAR('C', 'a', 'S', 'd'), casd_id, TRUE);
+            }
+            if (!omit_types.empty() &&
+                XOmitFileResources(out_file,
+                                   omit_types.data(),
+                                   omit_ids.data(),
+                                   static_cast<int32_t>(omit_types.size())) == FALSE)
+            {
+                XFileClose(out_file);
+                SetStatus("Session save failed: strip session resources");
+                return false;
             }
         }
     }
@@ -1737,11 +1754,48 @@ bool SaveSessionToPath(const char *path)
     }
 
     UpdateBusyProgress(0.88f, want_zsn ? "Packing ZREZ (LZMA)…" : "Packing resource map…");
-    if (XCleanResourceFile(out_file) == FALSE)
+    /* Never PackInst here: flat Bank 2+/custom INST must survive. PackSong/Bank
+     * only; skip ZSHD too (payload-refs without headers lose samples). */
+    if (XCleanResourceFileOptions(out_file, FALSE, FALSE) == FALSE)
     {
-        XFileClose(out_file);
-        SetStatus("Session save failed: clean");
-        return false;
+        /* Still try to write the in-memory image. */
+    }
+
+    /* Fail closed if promoted custom INST did not make it into the clone. */
+    if (m_bank_token && !m_session_custom_inst_ids.empty())
+    {
+        std::vector<uint32_t> missing;
+        for (uint32_t inst_id : m_session_custom_inst_ids)
+        {
+            int32_t sz = 0;
+            char name[256];
+            name[0] = 0;
+            XPTR data = XGetFileResource(out_file,
+                                         ID_INST,
+                                         static_cast<XLongResourceID>(inst_id),
+                                         name,
+                                         &sz);
+            if (!data)
+            {
+                missing.push_back(inst_id);
+            }
+            else
+            {
+                XDisposePtr(data);
+            }
+        }
+        if (!missing.empty())
+        {
+            XFileClose(out_file);
+            char buf[160];
+            std::snprintf(buf,
+                          sizeof(buf),
+                          "Session save failed: %zu custom instrument(s) missing after pack (e.g. id %u)",
+                          missing.size(),
+                          missing.front());
+            SetStatus(buf);
+            return false;
+        }
     }
 
     UpdateBusyProgress(0.94f, "Writing session file…");

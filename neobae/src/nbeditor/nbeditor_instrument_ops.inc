@@ -364,15 +364,27 @@
         {
             return;
         }
-        const BAEResult r =
-            BAERmfEditorBank_DeleteInstrument(m_bank_token, row.instrument_index);
-        if (r != BAE_NO_ERROR)
+        XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
+        const XLongResourceID iid = static_cast<XLongResourceID>(row.inst_id);
+        if (XTrashFileResource(bank, ID_INST, iid) == FALSE)
         {
-            SetStatus(std::string("Delete instrument failed: ") + FormatBAEError(r));
+            /* Fallback for edge cases where ZTRS trash rebuild fails. */
+            const BAEResult r =
+                BAERmfEditorBank_DeleteInstrument(m_bank_token, row.instrument_index);
+            if (r != BAE_NO_ERROR)
+            {
+                SetStatus(std::string("Move instrument to Trash failed: ") + FormatBAEError(r));
+                return;
+            }
+            char status[128];
+            std::snprintf(status, sizeof(status), "Deleted instrument instID %u", row.inst_id);
+            SetStatus(status);
+            RefreshListsFromBank();
             return;
         }
+        m_session_custom_inst_ids.erase(row.inst_id);
         char status[128];
-        std::snprintf(status, sizeof(status), "Deleted instrument instID %u", row.inst_id);
+        std::snprintf(status, sizeof(status), "Moved instrument instID %u to Trash", row.inst_id);
         SetStatus(status);
         RefreshListsFromBank();
     }

@@ -1185,6 +1185,14 @@ static std::string FormatBAEError(BAEResult result)
         return "BAE_NOT_SETUP";
     case BAE_BAD_SAMPLE_RATE:
         return "BAE_BAD_SAMPLE_RATE";
+    case BAE_TOO_MANY_SAMPLES:
+        return "BAE_TOO_MANY_SAMPLES";
+    case BAE_FILE_IO_ERROR:
+        return "BAE_FILE_IO_ERROR";
+    case BAE_BAD_FILE:
+        return "BAE_BAD_FILE";
+    case BAE_UNSUPPORTED_FORMAT:
+        return "BAE_UNSUPPORTED_FORMAT";
     default:
     {
         char buf[32];
@@ -1370,6 +1378,7 @@ public:
 #if NBEDITOR_MVP
         DrawSampleEditorDialog();
 #endif
+        DrawTrashWindow();
         DrawEditConfirmDialogs();
         DrawResourceUsageDialog();
         DrawInstDestDialog();
@@ -4303,7 +4312,7 @@ private:
                 {
                     OpenResourceUsageForSample(static_cast<int>(i));
                 }
-                if (ImGui::MenuItem("Delete Sample",
+                if (ImGui::MenuItem("Move Sample to Trash",
                                     nullptr,
                                     false,
                                     m_bank_token != 0 && sample.source == SampleSource::Bank))
@@ -4349,6 +4358,7 @@ private:
 
 #include "nbeditor_bank_add.inc"
 #include "nbeditor_instrument_ops.inc"
+#include "nbeditor_trash.inc"
 #include "nbeditor_resource_usage.inc"
 #include "nbeditor_session_extras.inc"
 #include "nbeditor_export_prefs.inc"
@@ -4785,7 +4795,7 @@ private:
                         RemoveAliasAt(static_cast<int>(i));
                     }
                 }
-                else if (ImGui::MenuItem("Delete Instrument",
+                else if (ImGui::MenuItem("Move Instrument to Trash",
                                          nullptr,
                                          false,
                                          m_bank_token != 0 && !inst.from_song_document))
@@ -5364,6 +5374,13 @@ private:
     /* Editor Preferences (~/.config/neobae/nbeditor_prefs). */
     bool m_prefs_open = false;
     bool m_about_open = false;
+    bool m_trash_open = false;
+    int m_trash_selected = -1;
+    bool m_confirm_empty_trash_open = false;
+    bool m_confirm_empty_trash_popup = false;
+    bool m_confirm_purge_trash_open = false;
+    bool m_confirm_purge_trash_popup = false;
+    int m_confirm_purge_trash_index = -1;
     bool m_pref_reopen_last_session = false;
     bool m_pref_save_session_layout = true;   /* write nBeT on Save Session */
     bool m_pref_ignore_session_layout = false; /* skip nBeT on Open Session */

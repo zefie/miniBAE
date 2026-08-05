@@ -1202,10 +1202,70 @@ static int32_t PV_CountAliasesInZmfBlock(XFILE fileRef)
     return PV_CountResourcesInZmfInstBlockByType(fileRef, ID_ALIAS);
 }
 
+/* Flat (cache) INST/ALIAS only — does not look inside ZINS. */
+static bool PV_CacheHasResourceTypeID(XFILE fileRef,
+                                      XResourceType resourceType,
+                                      XLongResourceID resourceID)
+{
+    XFILENAME *srcRef;
+    int32_t i;
+
+    srcRef = (XFILENAME *)fileRef;
+    if (!srcRef || !srcRef->pCache)
+    {
+        return FALSE;
+    }
+    for (i = 0; i < srcRef->pCache->totalResources; ++i)
+    {
+        if ((XResourceType)srcRef->pCache->cached[i].resourceType == resourceType &&
+            (XLongResourceID)srcRef->pCache->cached[i].resourceID == resourceID)
+        {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static bool PV_AppendInstEntryToZmfPlain(XPTR *plainBlock,
+                                         int32_t *plainSize,
+                                         int32_t *plainCapacity,
+                                         int64_t *originalStoredBytes,
+                                         XResourceType rtype,
+                                         XLongResourceID resourceID,
+                                         const char *pName,
+                                         XPTR resourceData,
+                                         int32_t resourceSize)
+{
+    uint16_t nameLen;
+    unsigned char eh[14];
+
+    if (!plainBlock || !plainSize || !plainCapacity || !resourceData || resourceSize <= 0)
+    {
+        return FALSE;
+    }
+    nameLen = pName ? (uint16_t)(uint8_t)pName[0] : 0;
+    if (originalStoredBytes)
+    {
+        *originalStoredBytes += (int64_t)17 + (int64_t)nameLen + (int64_t)resourceSize;
+    }
+    PV_WriteBE32(eh + 0, (uint32_t)rtype);
+    PV_WriteBE32(eh + 4, (uint32_t)resourceID);
+    PV_WriteBE16(eh + 8, nameLen);
+    PV_WriteBE32(eh + 10, (uint32_t)resourceSize);
+    if (!PV_AppendBytes(plainBlock, plainSize, plainCapacity, eh, 14) ||
+        (nameLen > 0 && !PV_AppendBytes(plainBlock, plainSize, plainCapacity, pName + 1, nameLen)) ||
+        !PV_AppendBytes(plainBlock, plainSize, plainCapacity, resourceData, resourceSize))
+    {
+        return FALSE;
+    }
+    return TRUE;
+}
+
 static bool PV_PackInstResourcesIntoZmfBlock(XFILE fileRef)
 {
     int32_t mapID;
     int32_t packedCount;
+    int32_t flatCount;
     int32_t i;
     XPTR plainBlock;
     int32_t plainSize;
@@ -1217,6 +1277,12 @@ static bool PV_PackInstResourcesIntoZmfBlock(XFILE fileRef)
     int32_t packedSize;
     XFILENAME *srcRef;
     int64_t originalStoredBytes;
+    XPTR existingZins;
+    int32_t existingZinsSize;
+    uint32_t existingVersion;
+    uint32_t existingCount;
+    unsigned char *existingEntries;
+    unsigned char *existingEnd;
 
     if (!PV_GetResourceMapInfo(fileRef, &mapID, NULL))
     {
@@ -1236,17 +1302,86 @@ static bool PV_PackInstResourcesIntoZmfBlock(XFILE fileRef)
     {
         return FALSE;
     }
-    packedCount = 0;
+    flatCount = 0;
     for (i = 0; i < srcRef->pCache->totalResources; ++i)
     {
         XResourceType rtype = (XResourceType)srcRef->pCache->cached[i].resourceType;
         if (rtype == ID_INST || rtype == ID_ALIAS)
         {
-            packedCount++;
+            flatCount++;
         }
     }
+
+    /* Merge existing ZINS with flat INST/ALIAS. Flat wins on id conflict.
+     * Without this, adding one custom INST then Clean replaces ZINS and
+     * permanently drops every packed instrument. */
+    existingZins = PV_LoadZmfInstBlock(fileRef, &existingZinsSize);
+    existingVersion = 0;
+    existingCount = 0;
+    existingEntries = NULL;
+    existingEnd = NULL;
+    if (existingZins &&
+        !PV_ParseZmfInstBlockHeader(existingZins,
+                                    existingZinsSize,
+                                    &existingVersion,
+                                    &existingCount,
+                                    &existingEntries,
+                                    &existingEnd))
+    {
+        XDisposePtr(existingZins);
+        existingZins = NULL;
+        existingCount = 0;
+    }
+
+    packedCount = flatCount;
+    if (existingZins && existingCount > 0)
+    {
+        unsigned char *p = existingEntries;
+        for (i = 0; i < (int32_t)existingCount; ++i)
+        {
+            uint32_t type = (uint32_t)ID_INST;
+            uint32_t id;
+            uint16_t nameLen;
+            uint32_t dataLen;
+
+            if (existingVersion >= ZMF_INST_BLOCK_VERSION_V2)
+            {
+                if (p + 4 > existingEnd)
+                {
+                    break;
+                }
+                type = PV_ReadBE32(p);
+                p += 4;
+            }
+            if (p + 10 > existingEnd)
+            {
+                break;
+            }
+            id = PV_ReadBE32(p);
+            p += 4;
+            nameLen = PV_ReadBE16(p);
+            p += 2;
+            dataLen = PV_ReadBE32(p);
+            p += 4;
+            if (p + nameLen + dataLen > existingEnd)
+            {
+                break;
+            }
+            p += nameLen + dataLen;
+            if ((type == (uint32_t)ID_INST || type == (uint32_t)ID_ALIAS) &&
+                !PV_CacheHasResourceTypeID(fileRef, (XResourceType)type, (XLongResourceID)id))
+            {
+                packedCount++;
+            }
+        }
+    }
+
     if (packedCount <= 0)
     {
+        if (existingZins)
+        {
+            XDisposePtr(existingZins);
+        }
         return TRUE;
     }
 
@@ -1261,10 +1396,93 @@ static bool PV_PackInstResourcesIntoZmfBlock(XFILE fileRef)
         PV_WriteBE32(header + 8, (uint32_t)packedCount);
         if (!PV_AppendBytes(&plainBlock, &plainSize, &plainCapacity, header, 12))
         {
+            if (existingZins)
+            {
+                XDisposePtr(existingZins);
+            }
             return FALSE;
         }
     }
 
+    /* 1) Carry forward ZINS entries not overridden by a flat resource. */
+    if (existingZins && existingCount > 0)
+    {
+        unsigned char *p = existingEntries;
+        for (i = 0; i < (int32_t)existingCount; ++i)
+        {
+            uint32_t type = (uint32_t)ID_INST;
+            uint32_t id;
+            uint16_t nameLen;
+            uint32_t dataLen;
+            unsigned char *namePtr;
+            unsigned char *dataPtr;
+            char pName[256];
+
+            if (existingVersion >= ZMF_INST_BLOCK_VERSION_V2)
+            {
+                if (p + 4 > existingEnd)
+                {
+                    break;
+                }
+                type = PV_ReadBE32(p);
+                p += 4;
+            }
+            if (p + 10 > existingEnd)
+            {
+                break;
+            }
+            id = PV_ReadBE32(p);
+            p += 4;
+            nameLen = PV_ReadBE16(p);
+            p += 2;
+            dataLen = PV_ReadBE32(p);
+            p += 4;
+            if (p + nameLen + dataLen > existingEnd)
+            {
+                break;
+            }
+            namePtr = p;
+            p += nameLen;
+            dataPtr = p;
+            p += dataLen;
+
+            if (type != (uint32_t)ID_INST && type != (uint32_t)ID_ALIAS)
+            {
+                continue;
+            }
+            if (PV_CacheHasResourceTypeID(fileRef, (XResourceType)type, (XLongResourceID)id))
+            {
+                continue; /* flat wins */
+            }
+            pName[0] = (char)((nameLen > 255u) ? 255u : nameLen);
+            if (pName[0] > 0)
+            {
+                XBlockMove(namePtr, pName + 1, (int32_t)(uint8_t)pName[0]);
+            }
+            if (!PV_AppendInstEntryToZmfPlain(&plainBlock,
+                                              &plainSize,
+                                              &plainCapacity,
+                                              &originalStoredBytes,
+                                              (XResourceType)type,
+                                              (XLongResourceID)id,
+                                              pName,
+                                              dataPtr,
+                                              (int32_t)dataLen))
+            {
+                XDisposePtr(plainBlock);
+                XDisposePtr(existingZins);
+                return FALSE;
+            }
+        }
+    }
+    if (existingZins)
+    {
+        XDisposePtr(existingZins);
+    }
+
+    /* 2) Append flat INST/ALIAS (overrides). Raw cache read — XGetFileResource
+     * has failed for some flat custom INST and skipping them produced a ZINS
+     * with only Bank 0/1 (session save lost Bank 2+/customs). */
     for (i = 0; i < srcRef->pCache->totalResources; ++i)
     {
         XFILE_CACHED_ITEM *item;
@@ -1273,8 +1491,6 @@ static bool PV_PackInstResourcesIntoZmfBlock(XFILE fileRef)
         int32_t resourceSize;
         XPTR resourceData;
         char pName[256];
-        uint16_t nameLen;
-        unsigned char eh[14];
 
         item = &srcRef->pCache->cached[i];
         rtype = (XResourceType)item->resourceType;
@@ -1285,23 +1501,29 @@ static bool PV_PackInstResourcesIntoZmfBlock(XFILE fileRef)
 
         resourceID = (XLongResourceID)item->resourceID;
         pName[0] = 0;
-        resourceData = XGetFileResource(fileRef, rtype, resourceID, pName, &resourceSize);
-        if (!resourceData || resourceSize <= 0)
+        resourceData = NULL;
+        resourceSize = 0;
+        if (!PV_ReadCachedResourceRaw(fileRef, item, pName, &resourceData, &resourceSize) ||
+            !resourceData || resourceSize <= 0)
         {
-            if (resourceData) XDisposePtr(resourceData);
+            /* Abort pack — leave flat customs + existing ZINS untouched. */
+            if (resourceData)
+            {
+                XDisposePtr(resourceData);
+            }
             XDisposePtr(plainBlock);
-            return FALSE;
+            return TRUE;
         }
 
-        nameLen = (uint8_t)pName[0];
-        originalStoredBytes += (int64_t)17 + (int64_t)nameLen + (int64_t)resourceSize;
-        PV_WriteBE32(eh + 0, (uint32_t)rtype);
-        PV_WriteBE32(eh + 4, (uint32_t)resourceID);
-        PV_WriteBE16(eh + 8, nameLen);
-        PV_WriteBE32(eh + 10, (uint32_t)resourceSize);
-        if (!PV_AppendBytes(&plainBlock, &plainSize, &plainCapacity, eh, 14) ||
-            (nameLen > 0 && !PV_AppendBytes(&plainBlock, &plainSize, &plainCapacity, pName + 1, nameLen)) ||
-            !PV_AppendBytes(&plainBlock, &plainSize, &plainCapacity, resourceData, resourceSize))
+        if (!PV_AppendInstEntryToZmfPlain(&plainBlock,
+                                          &plainSize,
+                                          &plainCapacity,
+                                          &originalStoredBytes,
+                                          rtype,
+                                          resourceID,
+                                          pName,
+                                          resourceData,
+                                          resourceSize))
         {
             XDisposePtr(resourceData);
             XDisposePtr(plainBlock);
@@ -1354,18 +1576,22 @@ static bool PV_PackInstResourcesIntoZmfBlock(XFILE fileRef)
         char name[256];
 
         item = &srcRef->pCache->cached[i];
-        if (item->resourceType == ID_INST || item->resourceType == ID_ALIAS || item->resourceType == ID_ZINS)
+        if (item->resourceType == ID_INST || item->resourceType == ID_ALIAS ||
+            item->resourceType == ID_ZINS)
         {
             continue;
         }
+        /* Raw copy — don't expand ZSHD payload-refs via XGetFileResource.
+         * TRSH entries are preserved so editor trash survives Clean/pack. */
         name[0] = 0;
-        data = XGetFileResource(fileRef,
-                                (XResourceType)item->resourceType,
-                                (XLongResourceID)item->resourceID,
-                                name,
-                                &size);
-        if (!data)
+        data = NULL;
+        size = 0;
+        if (!PV_ReadCachedResourceRaw(fileRef, item, name, &data, &size) || !data)
         {
+            if (data)
+            {
+                XDisposePtr(data);
+            }
             continue;
         }
         if (XAddFileResource(outFile,
@@ -1391,8 +1617,8 @@ static bool PV_PackInstResourcesIntoZmfBlock(XFILE fileRef)
     }
     XDisposePtr(compressedBlock);
 
-    /* Skip PackSndHeaders on this temp file — top-level Clean handles it once. */
-    if (XCleanResourceFileEx(outFile, FALSE) == FALSE)
+    /* Temp already has new ZINS; do not re-PackInst/PackSnd. */
+    if (XCleanResourceFileOptions(outFile, FALSE, FALSE) == FALSE)
     {
         XFileClose(outFile);
         return FALSE;
@@ -1843,13 +2069,14 @@ static bool PV_PackSongResourcesIntoZmfBlock(XFILE fileRef)
             continue;
         }
         name[0] = 0;
-        data = XGetFileResource(fileRef,
-                                (XResourceType)item->resourceType,
-                                (XLongResourceID)item->resourceID,
-                                name,
-                                &size);
-        if (!data)
+        data = NULL;
+        size = 0;
+        if (!PV_ReadCachedResourceRaw(fileRef, item, name, &data, &size) || !data)
         {
+            if (data)
+            {
+                XDisposePtr(data);
+            }
             continue;
         }
         if (XAddFileResource(outFile,
@@ -1875,7 +2102,8 @@ static bool PV_PackSongResourcesIntoZmfBlock(XFILE fileRef)
     }
     XDisposePtr(compressedBlock);
 
-    if (XCleanResourceFileEx(outFile, FALSE) == FALSE)
+    /* Keep flat INST/ZINS as copied — do not PackInst on this temp. */
+    if (XCleanResourceFileOptions(outFile, FALSE, FALSE) == FALSE)
     {
         XFileClose(outFile);
         return FALSE;
@@ -2269,15 +2497,21 @@ static bool PV_PackBankResourcesIntoZmfBlock(XFILE fileRef)
 
         if (item->resourceType == ID_BANK || item->resourceType == ID_MIDI ||
             item->resourceType == ID_MIDI_OLD || item->resourceType == ID_ZBNK)
+        {
             continue;
+        }
 
         name[0] = 0;
-        data = XGetFileResource(fileRef,
-                                (XResourceType)item->resourceType,
-                                (XLongResourceID)item->resourceID,
-                                name,
-                                &size);
-        if (!data) continue;
+        data = NULL;
+        size = 0;
+        if (!PV_ReadCachedResourceRaw(fileRef, item, name, &data, &size) || !data)
+        {
+            if (data)
+            {
+                XDisposePtr(data);
+            }
+            continue;
+        }
         if (XAddFileResource(outFile,
                              (XResourceType)item->resourceType,
                              (XLongResourceID)item->resourceID,
@@ -2301,7 +2535,8 @@ static bool PV_PackBankResourcesIntoZmfBlock(XFILE fileRef)
     }
     XDisposePtr(compressedBlock);
 
-    if (XCleanResourceFileEx(outFile, FALSE) == FALSE)
+    /* Keep flat INST/ZINS as copied — do not PackInst on this temp. */
+    if (XCleanResourceFileOptions(outFile, FALSE, FALSE) == FALSE)
     {
         XFileClose(outFile);
         return FALSE;
@@ -2619,11 +2854,12 @@ static bool PV_PackSndHeaderResourcesIntoZmfBlock(XFILE fileRef)
         }
         if (!PV_ReadCachedResourceRaw(fileRef, item, pName, &rawData, &rawSize))
         {
+            /* Skip unreadable SND entries — don't fail the whole Clean/pack. */
             if (rawData)
             {
                 XDisposePtr(rawData);
             }
-            return FALSE;
+            continue;
         }
         if (!rawData || rawSize <= 0)
         {
@@ -2698,12 +2934,12 @@ static bool PV_PackSndHeaderResourcesIntoZmfBlock(XFILE fileRef)
         }
         if (!PV_ReadCachedResourceRaw(fileRef, item, pName, &rawData, &rawSize))
         {
+            /* Skip unreadable SND — don't fail whole Clean (IREZ↔ZREZ clone). */
             if (rawData)
             {
                 XDisposePtr(rawData);
             }
-            XDisposePtr(plainBlock);
-            return FALSE;
+            continue;
         }
         if (!rawData || rawSize <= 0)
         {
@@ -2760,7 +2996,8 @@ static bool PV_PackSndHeaderResourcesIntoZmfBlock(XFILE fileRef)
         {
             XDisposePtr(compressedBlock);
         }
-        return FALSE;
+        /* Leave SNDs unpacked rather than failing Clean / clone bank. */
+        return TRUE;
     }
 
     if ((wrappedStoredBytes + (int64_t)17 + (int64_t)compressedSize) >= originalStoredBytes)
@@ -2773,7 +3010,7 @@ static bool PV_PackSndHeaderResourcesIntoZmfBlock(XFILE fileRef)
     if (!outFile)
     {
         XDisposePtr(compressedBlock);
-        return FALSE;
+        return TRUE;
     }
 
     for (i = 0; i < srcRef->pCache->totalResources; ++i)
@@ -2801,9 +3038,10 @@ static bool PV_PackSndHeaderResourcesIntoZmfBlock(XFILE fileRef)
             {
                 XDisposePtr(rawData);
             }
+            /* Abort ZSHD pack; keep source bank as-is. */
             XDisposePtr(compressedBlock);
             XFileClose(outFile);
-            return FALSE;
+            return TRUE;
         }
 
         if (PV_IsSndResourceType(rtype) &&
@@ -2813,7 +3051,6 @@ static bool PV_PackSndHeaderResourcesIntoZmfBlock(XFILE fileRef)
             headerBytes > 0 && payloadOffset >= 0 && payloadOffset <= rawSize)
         {
             int32_t payloadSize = rawSize - payloadOffset;
-            char packedName[1];
 
             payloadRef = XNewPtr(2 + payloadSize);
             if (!payloadRef)
@@ -2830,12 +3067,12 @@ static bool PV_PackSndHeaderResourcesIntoZmfBlock(XFILE fileRef)
                            (unsigned char *)payloadRef + 2,
                            payloadSize);
             }
-            packedName[0] = 0;
-
+            /* Keep the SND resource name on the payload-ref entry so
+             * XGetFileResourceName still works if ZSHD lookup is skipped. */
             if (XAddFileResource(outFile,
                                  rtype,
                                  (XLongResourceID)item->resourceID,
-                                 packedName,
+                                 pName,
                                  payloadRef,
                                  2 + payloadSize) != 0)
             {
@@ -5365,38 +5602,36 @@ void XFileFreeResourceCache(XFILE fileRef)
 }
 
 // Force a clean/update of the resource file. Simplified: rebuild in‑memory cache.
-bool XCleanResourceFileEx(XFILE fileRef, bool packSndHeaders)
+bool XCleanResourceFileOptions(XFILE fileRef, bool packInst, bool packSndHeaders)
 {
     if (!PV_XFileValid(fileRef))
     {
         return FALSE;
     }
-    if (PV_PackInstResourcesIntoZmfBlock(fileRef) == FALSE)
+    /* Packers are best-effort. Session save must use packInst=FALSE so flat
+     * Bank 2+/custom INST are not rebuilt into a Bank-0/1-only ZINS. */
+    if (packInst)
     {
-        return FALSE;
+        (void)PV_PackInstResourcesIntoZmfBlock(fileRef);
     }
-    if (PV_PackSongResourcesIntoZmfBlock(fileRef) == FALSE)
-    {
-        return FALSE;
-    }
-    if (PV_PackBankResourcesIntoZmfBlock(fileRef) == FALSE)
-    {
-        return FALSE;
-    }
+    (void)PV_PackSongResourcesIntoZmfBlock(fileRef);
+    (void)PV_PackBankResourcesIntoZmfBlock(fileRef);
     if (packSndHeaders)
     {
-        if (PV_PackSndHeaderResourcesIntoZmfBlock(fileRef) == FALSE)
-        {
-            return FALSE;
-        }
+        (void)PV_PackSndHeaderResourcesIntoZmfBlock(fileRef);
     }
     XFileFreeResourceCache(fileRef);
     return (XCreateAccessCache(fileRef) != NULL) ? TRUE : FALSE;
 }
 
+bool XCleanResourceFileEx(XFILE fileRef, bool packSndHeaders)
+{
+    return XCleanResourceFileOptions(fileRef, TRUE, packSndHeaders);
+}
+
 bool XCleanResourceFile(XFILE fileRef)
 {
-    return XCleanResourceFileEx(fileRef, TRUE);
+    return XCleanResourceFileOptions(fileRef, TRUE, TRUE);
 }
 
 // Return the Nth resource of a given type from a specific file.
@@ -5418,6 +5653,14 @@ XPTR XGetIndexedFileResource(XFILE fileRef, XResourceType resourceType, XLongRes
     if (pReference->pCache)
     {
         int32_t found = 0;
+        int32_t flatCount = 0;
+        for (int32_t i = 0; i < pReference->pCache->totalResources; i++)
+        {
+            if (pReference->pCache->cached[i].resourceType == resourceType)
+            {
+                flatCount++;
+            }
+        }
         for (int32_t i = 0; i < pReference->pCache->totalResources; i++)
         {
             XFILE_CACHED_ITEM *item = &pReference->pCache->cached[i];
@@ -5425,12 +5668,127 @@ XPTR XGetIndexedFileResource(XFILE fileRef, XResourceType resourceType, XLongRes
             {
                 if (found == resourceIndex)
                 {
-                    if (pReturnedID) { *pReturnedID = item->resourceID; }
-                    return XGetFileResource(fileRef, (XResourceType)item->resourceType, (XLongResourceID)item->resourceID,
-                                             pResourceName, pReturnedResourceSize);
+                    /* Read THIS cache slot. XGetFileResource(type,id) is wrong when
+                     * multiple entries share an id (legacy TRSH all use id 0). */
+                    char localName[256];
+                    char *nameOut = pResourceName ? (char *)pResourceName : localName;
+                    XPTR data = NULL;
+                    int32_t size = 0;
+                    XLongResourceID rid = (XLongResourceID)item->resourceID;
+
+                    nameOut[0] = 0;
+                    if (pReturnedID)
+                    {
+                        *pReturnedID = rid;
+                    }
+                    if (!PV_ReadCachedResourceRaw(fileRef, item, nameOut, &data, &size) || !data)
+                    {
+                        if (data)
+                        {
+                            XDisposePtr(data);
+                        }
+                        if (pReturnedResourceSize)
+                        {
+                            *pReturnedResourceSize = 0;
+                        }
+                        return NULL;
+                    }
+                    if (PV_IsSndResourceType(resourceType))
+                    {
+                        unsigned char *payloadIgnore = NULL;
+                        int32_t payloadIgnoreSize = 0;
+                        bool isPayloadRef = PV_IsZmfSndPayloadRef(data,
+                                                                  size,
+                                                                  rid,
+                                                                  &payloadIgnore,
+                                                                  &payloadIgnoreSize);
+                        bool isMagicRef = (size >= 8 &&
+                                           PV_ReadBE32((unsigned char *)data) == (uint32_t)ZMF_SND_PAYLOAD_REF_MAGIC &&
+                                           PV_ReadBE32((unsigned char *)data + 4) == ZMF_SND_PAYLOAD_REF_VERSION);
+                        bool shouldRebuild = isPayloadRef &&
+                                             (isMagicRef || PV_HasZmfSndHeader(fileRef, resourceType, rid));
+                        if (shouldRebuild)
+                        {
+                            int32_t rebuiltSize = 0;
+                            XPTR rebuilt = PV_RebuildSndResourceFromZmfHeaderRef(fileRef,
+                                                                                 resourceType,
+                                                                                 rid,
+                                                                                 nameOut,
+                                                                                 data,
+                                                                                 size,
+                                                                                 &rebuiltSize);
+                            XDisposePtr(data);
+                            data = rebuilt;
+                            size = rebuiltSize;
+                            if (!data)
+                            {
+                                if (pReturnedResourceSize)
+                                {
+                                    *pReturnedResourceSize = 0;
+                                }
+                                return NULL;
+                            }
+                        }
+                    }
+                    if (pReturnedResourceSize)
+                    {
+                        *pReturnedResourceSize = size;
+                    }
+                    return data;
                 }
                 found++;
             }
+        }
+        /* Flat exhausted — for INST/ALIAS continue into ZINS with an index
+         * that skips ids already present as flat (same union as Count). */
+        if ((resourceType == ID_INST || resourceType == ID_ALIAS) && flatCount > 0)
+        {
+            int32_t packedCount = (resourceType == ID_INST)
+                                      ? PV_CountInstsInZmfBlock(fileRef)
+                                      : PV_CountAliasesInZmfBlock(fileRef);
+            int32_t need = resourceIndex - flatCount;
+            int32_t seen = 0;
+            int32_t i;
+            for (i = 0; i < packedCount; ++i)
+            {
+                XLongResourceID id = 0;
+                int32_t sz = 0;
+                char name[256];
+                XPTR data;
+
+                name[0] = 0;
+                data = (resourceType == ID_INST)
+                           ? PV_GetIndexedInstFromZmfBlock(fileRef, i, &id, name, &sz)
+                           : PV_GetIndexedAliasFromZmfInstBlock(fileRef, i, &id, name, &sz);
+                if (!data)
+                {
+                    continue;
+                }
+                if (PV_CacheHasResourceTypeID(fileRef, resourceType, id))
+                {
+                    XDisposePtr(data);
+                    continue;
+                }
+                if (seen == need)
+                {
+                    if (pReturnedID)
+                    {
+                        *pReturnedID = id;
+                    }
+                    if (pReturnedResourceSize)
+                    {
+                        *pReturnedResourceSize = sz;
+                    }
+                    if (pResourceName)
+                    {
+                        XBlockMove(name, pResourceName, (int32_t)((unsigned char)name[0]) + 1);
+                    }
+                    return data;
+                }
+                XDisposePtr(data);
+                seen++;
+            }
+            return NULL;
         }
     }
     if (resourceType == ID_INST)
@@ -5662,13 +6020,15 @@ XFILERESOURCECACHE * XCreateAccessCache(XFILE fileRef)
 }
 
 
-//  Marks the selected resource as a 'TRSH' type w/ID of 0.  If collectTrash is TRUE, 
-//  writes out the file IN PLACE to remove dead space.  Does not work on read only or
-//  memory mapped files.
+//  Marks the selected resource as a 'TRSH' type w/ID of 0 (legacy soft-delete:
+//  original type/id are lost; body + Pascal name remain). Prefer XTrashFileResource
+//  for recoverable deletes. collectTrash=TRUE calls XEmptyFileTrash.
 //
 //  Not the fastest thing in the world, but none of the resource functions are!
 //
 #if USE_CREATION_API == TRUE
+bool XEmptyFileTrash(XFILE fileRef); /* used by XDeleteFileResource(collectTrash) */
+
 bool XDeleteFileResource(XFILE fileRef, XResourceType resourceType, XLongResourceID resourceID, bool collectTrash )
 {
     XFILENAME           *pReference;
@@ -5793,12 +6153,1414 @@ deleteanyways:
 
     if (collectTrash)
     {
-        if (XCleanResourceFile(fileRef) == FALSE)
+        if (XEmptyFileTrash(fileRef) == FALSE)
         {
             err = -8;
         }
     }
     return (err == 0);
+}
+
+/* ---- NeoBAE recoverable trash (ZTRS) ------------------------------------ */
+
+static bool PV_ParseZtrsMeta(XPTR data,
+                             int32_t dataSize,
+                             XResourceType *outOrigType,
+                             XLongResourceID *outOrigID,
+                             unsigned char **outPayload,
+                             int32_t *outPayloadSize)
+{
+    unsigned char *p;
+
+    if (outOrigType)
+    {
+        *outOrigType = 0;
+    }
+    if (outOrigID)
+    {
+        *outOrigID = 0;
+    }
+    if (outPayload)
+    {
+        *outPayload = NULL;
+    }
+    if (outPayloadSize)
+    {
+        *outPayloadSize = 0;
+    }
+    if (!data || dataSize < XFILETRASH_META_SIZE)
+    {
+        return FALSE;
+    }
+    p = (unsigned char *)data;
+    if (PV_ReadBE32(p) != (uint32_t)XFILETRASH_META_MAGIC ||
+        PV_ReadBE32(p + 4) != XFILETRASH_META_VERSION)
+    {
+        return FALSE;
+    }
+    if (outOrigType)
+    {
+        *outOrigType = (XResourceType)PV_ReadBE32(p + 8);
+    }
+    if (outOrigID)
+    {
+        *outOrigID = (XLongResourceID)PV_ReadBE32(p + 12);
+    }
+    if (outPayload)
+    {
+        *outPayload = p + XFILETRASH_META_SIZE;
+    }
+    if (outPayloadSize)
+    {
+        *outPayloadSize = dataSize - XFILETRASH_META_SIZE;
+    }
+    return TRUE;
+}
+
+static XPTR PV_MakeZtrsWrapped(XResourceType origType,
+                               XLongResourceID origID,
+                               XPTR payload,
+                               int32_t payloadSize,
+                               int32_t *outWrappedSize)
+{
+    XPTR wrapped;
+    unsigned char *p;
+
+    if (outWrappedSize)
+    {
+        *outWrappedSize = 0;
+    }
+    if (!payload || payloadSize < 0)
+    {
+        return NULL;
+    }
+    wrapped = XNewPtr(XFILETRASH_META_SIZE + payloadSize);
+    if (!wrapped)
+    {
+        return NULL;
+    }
+    p = (unsigned char *)wrapped;
+    PV_WriteBE32(p + 0, (uint32_t)XFILETRASH_META_MAGIC);
+    PV_WriteBE32(p + 4, XFILETRASH_META_VERSION);
+    PV_WriteBE32(p + 8, (uint32_t)origType);
+    PV_WriteBE32(p + 12, (uint32_t)origID);
+    if (payloadSize > 0)
+    {
+        XBlockMove(payload, p + XFILETRASH_META_SIZE, payloadSize);
+    }
+    if (outWrappedSize)
+    {
+        *outWrappedSize = XFILETRASH_META_SIZE + payloadSize;
+    }
+    return wrapped;
+}
+
+/* Guess original type for legacy TRSH (no ZTRS). Best-effort for recovery. */
+static XResourceType PV_GuessTrashedResourceType(XPTR data, int32_t dataSize)
+{
+    int32_t headerBytes = 0;
+    int32_t payloadOffset = 0;
+
+    if (!data || dataSize <= 0)
+    {
+        return 0;
+    }
+    if (PV_ParseSndHeaderAndPayload(data, dataSize, &headerBytes, &payloadOffset))
+    {
+        return ID_SND;
+    }
+    /* InstrumentResource on disk: keySplitCount @14, then KeySplit[], then
+     * tremoloCount + tremoloEnd (typically 0x8000). */
+    if (dataSize >= 20)
+    {
+        unsigned char *p = (unsigned char *)data;
+        int16_t keySplits = (int16_t)PV_ReadBE16(p + 12);
+        if (keySplits >= 0 && keySplits < 128)
+        {
+            int32_t tremoloEndOff = 14 + (int32_t)keySplits * (int32_t)sizeof(KeySplit) + 2;
+            if (tremoloEndOff + 2 <= dataSize)
+            {
+                int16_t tremoloEnd = (int16_t)PV_ReadBE16(p + tremoloEndOff);
+                if (tremoloEnd == (int16_t)0x8000)
+                {
+                    return ID_INST;
+                }
+            }
+        }
+    }
+    if (dataSize >= 4 && PV_ReadBE32((unsigned char *)data) == (uint32_t)FOUR_CHAR('M', 'T', 'h', 'd'))
+    {
+        return ID_MIDI;
+    }
+    return 0;
+}
+
+static bool PV_CommitVirtualOverFileEx(XFILE fileRef, XFILE outFile, bool runClean)
+{
+    XPTR packedData = NULL;
+    int32_t packedSize = 0;
+    XFILENAME *pReference;
+
+    if (runClean)
+    {
+        if (XCleanResourceFileEx(outFile, TRUE) == FALSE)
+        {
+            return FALSE;
+        }
+    }
+    if (XFileGetMemoryFileAsData(outFile, &packedData, &packedSize) != 0 ||
+        !packedData || packedSize <= 0)
+    {
+        if (packedData)
+        {
+            XDisposePtr(packedData);
+        }
+        return FALSE;
+    }
+
+    XFileFreeResourceCache(fileRef);
+    pReference = (XFILENAME *)fileRef;
+    if (pReference->pResourceData)
+    {
+        if (pReference->ownsResourceData)
+        {
+            XDisposePtr(pReference->pResourceData);
+        }
+        pReference->pResourceData = packedData;
+        pReference->resMemLength = packedSize;
+        pReference->resMemOffset = 0;
+        pReference->ownsResourceData = TRUE;
+        pReference->resizeResourceData = TRUE;
+        pReference->readOnly = FALSE;
+        pReference->allowMemCopy = TRUE;
+    }
+    else
+    {
+        if (XFileSetLength(fileRef, 0) != 0 ||
+            XFileSetPosition(fileRef, 0L) != 0 ||
+            XFileWrite(fileRef, packedData, packedSize) != 0)
+        {
+            XDisposePtr(packedData);
+            return FALSE;
+        }
+        XDisposePtr(packedData);
+    }
+    return (XCreateAccessCache(fileRef) != NULL) ? TRUE : FALSE;
+}
+
+static bool PV_CommitVirtualOverFile(XFILE fileRef, XFILE outFile)
+{
+    return PV_CommitVirtualOverFileEx(fileRef, outFile, TRUE);
+}
+
+static bool PV_LongIdListContains(const XLongResourceID *ids, int32_t count, XLongResourceID id)
+{
+    int32_t i;
+    if (!ids || count <= 0)
+    {
+        return FALSE;
+    }
+    for (i = 0; i < count; ++i)
+    {
+        if (ids[i] == id)
+        {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+/*
+ * Rebuild fileRef into a fresh image.
+ * - emptyTrash: drop every TRSH
+ * - omitTrashIndex >= 0: drop the Nth TRSH only
+ * - omitTrashBitmap: if non-NULL, length omitTrashBitmapLen; drop TRSH indices
+ *   where the byte is non-zero
+ * - omitType/omitID: drop one logical resource (expands ZINS/ZSNG/ZBNK when needed)
+ * - omitInstIds/omitSndIds: bulk omit (Unload Bank); expands ZINS once
+ */
+static bool PV_RebuildFileForTrashOps(XFILE fileRef,
+                                      XResourceType omitType,
+                                      XLongResourceID omitID,
+                                      bool emptyTrash,
+                                      int32_t omitTrashIndex,
+                                      const unsigned char *omitTrashBitmap,
+                                      int32_t omitTrashBitmapLen,
+                                      const XLongResourceID *omitInstIds,
+                                      int32_t omitInstCount,
+                                      const XLongResourceID *omitSndIds,
+                                      int32_t omitSndCount)
+{
+    int32_t mapID = 0;
+    XFILE outFile;
+    XFILENAME *srcRef;
+    int32_t i;
+    bool expandInst;
+    bool expandSong;
+    bool expandBank;
+    int32_t trashSeen;
+
+    if (!PV_XFileValid(fileRef) || !PV_GetResourceMapInfo(fileRef, &mapID, NULL))
+    {
+        return FALSE;
+    }
+    if (PV_IsXFileLocked(fileRef))
+    {
+        return FALSE;
+    }
+
+    srcRef = (XFILENAME *)fileRef;
+    if (srcRef->pCache == NULL)
+    {
+        XCreateAccessCache(fileRef);
+    }
+    if (!srcRef->pCache)
+    {
+        return FALSE;
+    }
+
+    expandInst = (omitType == ID_INST || omitType == ID_ALIAS || omitInstCount > 0) ? TRUE : FALSE;
+    expandSong = (omitType == ID_SONG) ? TRUE : FALSE;
+    expandBank = (omitType == ID_BANK || omitType == ID_MIDI || omitType == ID_MIDI_OLD)
+                     ? TRUE
+                     : FALSE;
+
+    outFile = XFileOpenVirtualResource(mapID);
+    if (!outFile)
+    {
+        return FALSE;
+    }
+
+    trashSeen = 0;
+    for (i = 0; i < srcRef->pCache->totalResources; ++i)
+    {
+        XFILE_CACHED_ITEM *item = &srcRef->pCache->cached[i];
+        XResourceType rtype = (XResourceType)item->resourceType;
+        XLongResourceID rid = (XLongResourceID)item->resourceID;
+        XPTR data = NULL;
+        int32_t size = 0;
+        char name[256];
+
+        if (rtype == XFILETRASH_ID)
+        {
+            int32_t thisTrash = trashSeen;
+            trashSeen++;
+            if (emptyTrash)
+            {
+                continue;
+            }
+            if (omitTrashIndex >= 0 && thisTrash == omitTrashIndex)
+            {
+                continue;
+            }
+            if (omitTrashBitmap && thisTrash >= 0 && thisTrash < omitTrashBitmapLen &&
+                omitTrashBitmap[thisTrash] != 0)
+            {
+                continue;
+            }
+        }
+        if (omitType != 0 && rtype == omitType && rid == omitID)
+        {
+            continue;
+        }
+        if (omitSndCount > 0 && PV_IsSndResourceType(rtype) &&
+            PV_LongIdListContains(omitSndIds, omitSndCount, rid))
+        {
+            continue;
+        }
+        if (expandInst && rtype == ID_ZINS)
+        {
+            continue;
+        }
+        if (expandSong && rtype == ID_ZSNG)
+        {
+            continue;
+        }
+        if (expandBank && rtype == ID_ZBNK)
+        {
+            continue;
+        }
+        /* When omitting a logical INST/SONG/… skip flat peers of the same
+         * family — they are re-added from GetIndexed below. */
+        if (expandInst && (rtype == ID_INST || rtype == ID_ALIAS))
+        {
+            continue;
+        }
+        if (expandSong && rtype == ID_SONG)
+        {
+            continue;
+        }
+        if (expandBank &&
+            (rtype == ID_BANK || rtype == ID_MIDI || rtype == ID_MIDI_OLD))
+        {
+            continue;
+        }
+
+        name[0] = 0;
+        if (!PV_ReadCachedResourceRaw(fileRef, item, name, &data, &size) || !data)
+        {
+            if (data)
+            {
+                XDisposePtr(data);
+            }
+            continue;
+        }
+        if (XAddFileResource(outFile, rtype, rid, name, data, size) != 0)
+        {
+            XDisposePtr(data);
+            XFileClose(outFile);
+            return FALSE;
+        }
+        XDisposePtr(data);
+    }
+
+    if (expandInst)
+    {
+        int32_t count = XCountFileResourcesOfType(fileRef, ID_INST);
+        int32_t expectedKeep = 0;
+        int32_t keptInst = 0;
+        /* Fail closed on any unreadable INST index — silently skipping used to
+         * drop Bank 2+ / custom INST while still committing the rebuild. */
+        for (i = 0; i < count; ++i)
+        {
+            XLongResourceID id = 0;
+            int32_t sz = 0;
+            char name[256];
+            XPTR data;
+            name[0] = 0;
+            data = XGetIndexedFileResource(fileRef, ID_INST, &id, i, name, &sz);
+            if (!data)
+            {
+                XFileClose(outFile);
+                return FALSE;
+            }
+            if ((omitType == ID_INST && id == omitID) ||
+                PV_LongIdListContains(omitInstIds, omitInstCount, id))
+            {
+                XDisposePtr(data);
+                continue;
+            }
+            ++expectedKeep;
+            if (XAddFileResource(outFile, ID_INST, id, name, data, sz) != 0)
+            {
+                XDisposePtr(data);
+                XFileClose(outFile);
+                return FALSE;
+            }
+            XDisposePtr(data);
+            ++keptInst;
+        }
+        if (keptInst != expectedKeep ||
+            (omitInstCount > 0 && expectedKeep == 0 && count > omitInstCount))
+        {
+            XFileClose(outFile);
+            return FALSE;
+        }
+        count = XCountFileResourcesOfType(fileRef, ID_ALIAS);
+        for (i = 0; i < count; ++i)
+        {
+            XLongResourceID id = 0;
+            int32_t sz = 0;
+            char name[256];
+            XPTR data;
+            name[0] = 0;
+            data = XGetIndexedFileResource(fileRef, ID_ALIAS, &id, i, name, &sz);
+            if (!data)
+            {
+                XFileClose(outFile);
+                return FALSE;
+            }
+            if (omitType == ID_ALIAS && id == omitID)
+            {
+                XDisposePtr(data);
+                continue;
+            }
+            if (XAddFileResource(outFile, ID_ALIAS, id, name, data, sz) != 0)
+            {
+                XDisposePtr(data);
+                XFileClose(outFile);
+                return FALSE;
+            }
+            XDisposePtr(data);
+        }
+    }
+    if (expandSong)
+    {
+        int32_t count = XCountFileResourcesOfType(fileRef, ID_SONG);
+        for (i = 0; i < count; ++i)
+        {
+            XLongResourceID id = 0;
+            int32_t sz = 0;
+            char name[256];
+            XPTR data;
+            name[0] = 0;
+            data = XGetIndexedFileResource(fileRef, ID_SONG, &id, i, name, &sz);
+            if (!data)
+            {
+                continue;
+            }
+            if (id == omitID)
+            {
+                XDisposePtr(data);
+                continue;
+            }
+            if (XAddFileResource(outFile, ID_SONG, id, name, data, sz) != 0)
+            {
+                XDisposePtr(data);
+                XFileClose(outFile);
+                return FALSE;
+            }
+            XDisposePtr(data);
+        }
+    }
+    if (expandBank)
+    {
+        static const XResourceType kBankTypes[] = {ID_BANK, ID_MIDI, ID_MIDI_OLD, 0};
+        int t;
+        for (t = 0; kBankTypes[t] != 0; ++t)
+        {
+            int32_t count = XCountFileResourcesOfType(fileRef, kBankTypes[t]);
+            for (i = 0; i < count; ++i)
+            {
+                XLongResourceID id = 0;
+                int32_t sz = 0;
+                char name[256];
+                XPTR data;
+                name[0] = 0;
+                data = XGetIndexedFileResource(fileRef, kBankTypes[t], &id, i, name, &sz);
+                if (!data)
+                {
+                    continue;
+                }
+                if (kBankTypes[t] == omitType && id == omitID)
+                {
+                    XDisposePtr(data);
+                    continue;
+                }
+                if (XAddFileResource(outFile, kBankTypes[t], id, name, data, sz) != 0)
+                {
+                    XDisposePtr(data);
+                    XFileClose(outFile);
+                    return FALSE;
+                }
+                XDisposePtr(data);
+            }
+        }
+    }
+
+    if (PV_CommitVirtualOverFile(fileRef, outFile) == FALSE)
+    {
+        XFileClose(outFile);
+        return FALSE;
+    }
+    XFileClose(outFile);
+    return TRUE;
+}
+
+bool XPurgeFileResource(XFILE fileRef, XResourceType theType, XLongResourceID resourceID)
+{
+    if (!PV_XFileValid(fileRef) || theType == 0)
+    {
+        return FALSE;
+    }
+    return PV_RebuildFileForTrashOps(fileRef, theType, resourceID, FALSE, -1, NULL, 0,
+                                     NULL, 0, NULL, 0);
+}
+
+bool XOmitFileResources(XFILE fileRef,
+                        const XResourceType *omitTypes,
+                        const XLongResourceID *omitIds,
+                        int32_t omitCount)
+{
+    int32_t mapID = 0;
+    XFILE outFile;
+    XFILENAME *srcRef;
+    int32_t i;
+    int32_t j;
+
+    if (!PV_XFileValid(fileRef))
+    {
+        return FALSE;
+    }
+    if (omitCount < 0)
+    {
+        return FALSE;
+    }
+    if (omitCount == 0)
+    {
+        return TRUE;
+    }
+    if (!omitTypes || !omitIds)
+    {
+        return FALSE;
+    }
+    if (!PV_GetResourceMapInfo(fileRef, &mapID, NULL) || PV_IsXFileLocked(fileRef))
+    {
+        return FALSE;
+    }
+
+    srcRef = (XFILENAME *)fileRef;
+    if (srcRef->pCache == NULL)
+    {
+        XCreateAccessCache(fileRef);
+    }
+    if (!srcRef->pCache)
+    {
+        return FALSE;
+    }
+
+    outFile = XFileOpenVirtualResource(mapID);
+    if (!outFile)
+    {
+        return FALSE;
+    }
+
+    for (i = 0; i < srcRef->pCache->totalResources; ++i)
+    {
+        XFILE_CACHED_ITEM *item = &srcRef->pCache->cached[i];
+        XResourceType rtype = (XResourceType)item->resourceType;
+        XLongResourceID rid = (XLongResourceID)item->resourceID;
+        XPTR data = NULL;
+        int32_t size = 0;
+        char name[256];
+        bool omit = FALSE;
+
+        for (j = 0; j < omitCount; ++j)
+        {
+            if (omitTypes[j] == rtype && omitIds[j] == rid)
+            {
+                omit = TRUE;
+                break;
+            }
+        }
+        if (omit)
+        {
+            continue;
+        }
+
+        name[0] = 0;
+        if (!PV_ReadCachedResourceRaw(fileRef, item, name, &data, &size) || !data)
+        {
+            if (data)
+            {
+                XDisposePtr(data);
+            }
+            /* Fail closed on unreadable entries — silent skip used to drop ZINS. */
+            XFileClose(outFile);
+            return FALSE;
+        }
+        if (XAddFileResource(outFile, rtype, rid, name, data, size) != 0)
+        {
+            XDisposePtr(data);
+            XFileClose(outFile);
+            return FALSE;
+        }
+        XDisposePtr(data);
+    }
+
+    /* No Clean/PackInst here — preserve flat custom INST + ZINS byte-for-byte.
+     * Session save runs one Clean at the end. */
+    if (PV_CommitVirtualOverFileEx(fileRef, outFile, FALSE) == FALSE)
+    {
+        XFileClose(outFile);
+        return FALSE;
+    }
+    XFileClose(outFile);
+    return TRUE;
+}
+
+bool XPurgeFileInstrumentAndSoundLists(XFILE fileRef,
+                                       const XLongResourceID *omitInstIds,
+                                       int32_t omitInstCount,
+                                       const XLongResourceID *omitSndIds,
+                                       int32_t omitSndCount)
+{
+    int32_t mapID = 0;
+    XFILE outFile;
+    XFILENAME *srcRef;
+    int32_t i;
+    XPTR existingZins = NULL;
+    int32_t existingZinsSize = 0;
+    XPTR newZinsPlain = NULL;
+    int32_t newZinsPlainSize = 0;
+    int32_t newZinsCap = 0;
+    XPTR newZinsCompressed = NULL;
+    int32_t newZinsCompressedSize = 0;
+    int32_t keptFromZins = 0;
+    int32_t keptFlat = 0;
+    uint32_t existingVersion = 0;
+    uint32_t existingCount = 0;
+    unsigned char *existingEntries = NULL;
+    unsigned char *existingEnd = NULL;
+
+    if (!PV_XFileValid(fileRef))
+    {
+        return FALSE;
+    }
+    if (omitInstCount < 0 || omitSndCount < 0)
+    {
+        return FALSE;
+    }
+    if (omitInstCount == 0 && omitSndCount == 0)
+    {
+        return TRUE;
+    }
+    if ((omitInstCount > 0 && !omitInstIds) || (omitSndCount > 0 && !omitSndIds))
+    {
+        return FALSE;
+    }
+    if (!PV_GetResourceMapInfo(fileRef, &mapID, NULL) || PV_IsXFileLocked(fileRef))
+    {
+        return FALSE;
+    }
+
+    srcRef = (XFILENAME *)fileRef;
+    if (srcRef->pCache == NULL)
+    {
+        XCreateAccessCache(fileRef);
+    }
+    if (!srcRef->pCache)
+    {
+        return FALSE;
+    }
+
+    /* Filter ZINS in place (no GetIndexed expand). Expanding used to drop
+     * Bank 2+ when any INST index failed to read. */
+    if (omitInstCount > 0)
+    {
+        bool hasZinsResource = FALSE;
+        for (i = 0; i < srcRef->pCache->totalResources; ++i)
+        {
+            if ((XResourceType)srcRef->pCache->cached[i].resourceType == ID_ZINS)
+            {
+                hasZinsResource = TRUE;
+                break;
+            }
+        }
+        existingZins = PV_LoadZmfInstBlock(fileRef, &existingZinsSize);
+        if (hasZinsResource &&
+            (!existingZins ||
+             !PV_ParseZmfInstBlockHeader(existingZins,
+                                         existingZinsSize,
+                                         &existingVersion,
+                                         &existingCount,
+                                         &existingEntries,
+                                         &existingEnd)))
+        {
+            /* Fail closed — do not rebuild without being able to read ZINS. */
+            if (existingZins)
+            {
+                XDisposePtr(existingZins);
+            }
+            return FALSE;
+        }
+        if (existingZins &&
+            PV_ParseZmfInstBlockHeader(existingZins,
+                                       existingZinsSize,
+                                       &existingVersion,
+                                       &existingCount,
+                                       &existingEntries,
+                                       &existingEnd))
+        {
+            unsigned char header[12];
+            unsigned char *p = existingEntries;
+
+            PV_WriteBE32(header + 0, (uint32_t)ZMF_INST_BLOCK_MAGIC);
+            PV_WriteBE32(header + 4, ZMF_INST_BLOCK_VERSION_V2);
+            PV_WriteBE32(header + 8, 0); /* filled after count */
+            if (!PV_AppendBytes(&newZinsPlain, &newZinsPlainSize, &newZinsCap, header, 12))
+            {
+                XDisposePtr(existingZins);
+                return FALSE;
+            }
+            for (i = 0; i < (int32_t)existingCount; ++i)
+            {
+                uint32_t type = (uint32_t)ID_INST;
+                uint32_t id;
+                uint16_t nameLen;
+                uint32_t dataLen;
+                unsigned char *namePtr;
+                unsigned char *dataPtr;
+                char pName[256];
+
+                if (existingVersion >= ZMF_INST_BLOCK_VERSION_V2)
+                {
+                    if (p + 4 > existingEnd)
+                    {
+                        break;
+                    }
+                    type = PV_ReadBE32(p);
+                    p += 4;
+                }
+                if (p + 10 > existingEnd)
+                {
+                    break;
+                }
+                id = PV_ReadBE32(p);
+                p += 4;
+                nameLen = PV_ReadBE16(p);
+                p += 2;
+                dataLen = PV_ReadBE32(p);
+                p += 4;
+                if (p + nameLen + dataLen > existingEnd)
+                {
+                    break;
+                }
+                namePtr = p;
+                p += nameLen;
+                dataPtr = p;
+                p += dataLen;
+                if (type != (uint32_t)ID_INST && type != (uint32_t)ID_ALIAS)
+                {
+                    continue;
+                }
+                if (PV_LongIdListContains(omitInstIds, omitInstCount, (XLongResourceID)id))
+                {
+                    continue;
+                }
+                pName[0] = (char)((nameLen > 255u) ? 255u : nameLen);
+                if (pName[0] > 0)
+                {
+                    XBlockMove(namePtr, pName + 1, (int32_t)(uint8_t)pName[0]);
+                }
+                if (!PV_AppendInstEntryToZmfPlain(&newZinsPlain,
+                                                  &newZinsPlainSize,
+                                                  &newZinsCap,
+                                                  NULL,
+                                                  (XResourceType)type,
+                                                  (XLongResourceID)id,
+                                                  pName,
+                                                  dataPtr,
+                                                  (int32_t)dataLen))
+                {
+                    XDisposePtr(newZinsPlain);
+                    XDisposePtr(existingZins);
+                    return FALSE;
+                }
+                ++keptFromZins;
+            }
+            PV_WriteBE32((unsigned char *)newZinsPlain + 8, (uint32_t)keptFromZins);
+        }
+        if (existingZins)
+        {
+            XDisposePtr(existingZins);
+            existingZins = NULL;
+        }
+    }
+
+    outFile = XFileOpenVirtualResource(mapID);
+    if (!outFile)
+    {
+        if (newZinsPlain)
+        {
+            XDisposePtr(newZinsPlain);
+        }
+        return FALSE;
+    }
+
+    for (i = 0; i < srcRef->pCache->totalResources; ++i)
+    {
+        XFILE_CACHED_ITEM *item = &srcRef->pCache->cached[i];
+        XResourceType rtype = (XResourceType)item->resourceType;
+        XLongResourceID rid = (XLongResourceID)item->resourceID;
+        XPTR data = NULL;
+        int32_t size = 0;
+        char name[256];
+
+        if (rtype == ID_ZINS && omitInstCount > 0)
+        {
+            continue; /* replaced below when filtering INST */
+        }
+        if (omitInstCount > 0 && (rtype == ID_INST || rtype == ID_ALIAS))
+        {
+            if (PV_LongIdListContains(omitInstIds, omitInstCount, rid))
+            {
+                continue;
+            }
+            /* Flat keeper: append into new ZINS plain (flat wins over packed). */
+            name[0] = 0;
+            if (!PV_ReadCachedResourceRaw(fileRef, item, name, &data, &size) || !data)
+            {
+                if (data)
+                {
+                    XDisposePtr(data);
+                }
+                XFileClose(outFile);
+                if (newZinsPlain)
+                {
+                    XDisposePtr(newZinsPlain);
+                }
+                return FALSE;
+            }
+            if (!newZinsPlain)
+            {
+                unsigned char header[12];
+                PV_WriteBE32(header + 0, (uint32_t)ZMF_INST_BLOCK_MAGIC);
+                PV_WriteBE32(header + 4, ZMF_INST_BLOCK_VERSION_V2);
+                PV_WriteBE32(header + 8, 0);
+                if (!PV_AppendBytes(&newZinsPlain, &newZinsPlainSize, &newZinsCap, header, 12))
+                {
+                    XDisposePtr(data);
+                    XFileClose(outFile);
+                    return FALSE;
+                }
+            }
+            /* Drop any prior packed entry with same id (flat wins). */
+            /* Simpler: append flat; PackInst-style duplicate ids: readers prefer flat
+             * but we have only ZINS — skip append if id already in plain. */
+            {
+                unsigned char *scan = (unsigned char *)newZinsPlain + 12;
+                unsigned char *end = (unsigned char *)newZinsPlain + newZinsPlainSize;
+                bool dup = FALSE;
+                while (scan + 14 <= end)
+                {
+                    uint32_t t = PV_ReadBE32(scan);
+                    uint32_t sid = PV_ReadBE32(scan + 4);
+                    uint16_t nlen = PV_ReadBE16(scan + 8);
+                    uint32_t dlen = PV_ReadBE32(scan + 10);
+                    scan += 14;
+                    if (scan + nlen + dlen > end)
+                    {
+                        break;
+                    }
+                    if ((t == (uint32_t)ID_INST || t == (uint32_t)ID_ALIAS) &&
+                        sid == (uint32_t)rid)
+                    {
+                        dup = TRUE;
+                        break;
+                    }
+                    scan += nlen + dlen;
+                }
+                if (!dup)
+                {
+                    if (!PV_AppendInstEntryToZmfPlain(&newZinsPlain,
+                                                      &newZinsPlainSize,
+                                                      &newZinsCap,
+                                                      NULL,
+                                                      rtype,
+                                                      rid,
+                                                      name,
+                                                      data,
+                                                      size))
+                    {
+                        XDisposePtr(data);
+                        XDisposePtr(newZinsPlain);
+                        XFileClose(outFile);
+                        return FALSE;
+                    }
+                    ++keptFlat;
+                    PV_WriteBE32((unsigned char *)newZinsPlain + 8,
+                                 (uint32_t)(keptFromZins + keptFlat));
+                }
+            }
+            XDisposePtr(data);
+            continue;
+        }
+        if (omitSndCount > 0 && PV_IsSndResourceType(rtype) &&
+            PV_LongIdListContains(omitSndIds, omitSndCount, rid))
+        {
+            continue;
+        }
+
+        name[0] = 0;
+        if (!PV_ReadCachedResourceRaw(fileRef, item, name, &data, &size) || !data)
+        {
+            if (data)
+            {
+                XDisposePtr(data);
+            }
+            continue;
+        }
+        if (XAddFileResource(outFile, rtype, rid, name, data, size) != 0)
+        {
+            XDisposePtr(data);
+            if (newZinsPlain)
+            {
+                XDisposePtr(newZinsPlain);
+            }
+            XFileClose(outFile);
+            return FALSE;
+        }
+        XDisposePtr(data);
+    }
+
+    if (omitInstCount > 0)
+    {
+        int32_t totalKept = keptFromZins + keptFlat;
+        /* Before omit, if the bank had instruments, we must keep some when
+         * omit list is a proper subset. */
+        {
+            int32_t before = XCountFileResourcesOfType(fileRef, ID_INST);
+            if (before > omitInstCount && totalKept <= 0)
+            {
+                if (newZinsPlain)
+                {
+                    XDisposePtr(newZinsPlain);
+                }
+                XFileClose(outFile);
+                return FALSE;
+            }
+        }
+        if (newZinsPlain && totalKept > 0)
+        {
+            PV_WriteBE32((unsigned char *)newZinsPlain + 8, (uint32_t)totalKept);
+#if USE_LZMA_COMPRESSION == TRUE
+            newZinsCompressedSize = XCompressPtr(&newZinsCompressed,
+                                                 newZinsPlain,
+                                                 (uint32_t)newZinsPlainSize,
+                                                 X_LZMA_RAW,
+                                                 NULL,
+                                                 NULL);
+#else
+            newZinsCompressed = XNewPtr(newZinsPlainSize);
+            if (newZinsCompressed)
+            {
+                XBlockMove(newZinsPlain, newZinsCompressed, newZinsPlainSize);
+                newZinsCompressedSize = newZinsPlainSize;
+            }
+#endif
+            XDisposePtr(newZinsPlain);
+            newZinsPlain = NULL;
+            if (!newZinsCompressed || newZinsCompressedSize <= 0)
+            {
+                if (newZinsCompressed)
+                {
+                    XDisposePtr(newZinsCompressed);
+                }
+                XFileClose(outFile);
+                return FALSE;
+            }
+            if (XAddFileResource(outFile, ID_ZINS, 1, NULL, newZinsCompressed,
+                                 newZinsCompressedSize) != 0)
+            {
+                XDisposePtr(newZinsCompressed);
+                XFileClose(outFile);
+                return FALSE;
+            }
+            XDisposePtr(newZinsCompressed);
+        }
+        else if (newZinsPlain)
+        {
+            XDisposePtr(newZinsPlain);
+        }
+    }
+    else if (newZinsPlain)
+    {
+        XDisposePtr(newZinsPlain);
+    }
+
+    if (PV_CommitVirtualOverFile(fileRef, outFile) == FALSE)
+    {
+        XFileClose(outFile);
+        return FALSE;
+    }
+    XFileClose(outFile);
+    return TRUE;
+}
+
+bool XEmptyFileTrash(XFILE fileRef)
+{
+    if (!PV_XFileValid(fileRef))
+    {
+        return FALSE;
+    }
+    if (XCountFileResourcesOfType(fileRef, XFILETRASH_ID) <= 0)
+    {
+        return TRUE;
+    }
+    return PV_RebuildFileForTrashOps(fileRef, 0, 0, TRUE, -1, NULL, 0,
+                                     NULL, 0, NULL, 0);
+}
+
+bool XPurgeIndexedFileTrash(XFILE fileRef, int32_t trashIndex)
+{
+    if (!PV_XFileValid(fileRef) || trashIndex < 0)
+    {
+        return FALSE;
+    }
+    if (trashIndex >= XCountFileResourcesOfType(fileRef, XFILETRASH_ID))
+    {
+        return FALSE;
+    }
+    return PV_RebuildFileForTrashOps(fileRef, 0, 0, FALSE, trashIndex, NULL, 0,
+                                     NULL, 0, NULL, 0);
+}
+
+bool XDedupeFileTrash(XFILE fileRef, int32_t *pRemovedCount)
+{
+    int32_t count;
+    int32_t i;
+    int32_t j;
+    unsigned char *omit = NULL;
+    int32_t removed = 0;
+    XPTR *bodies = NULL;
+    int32_t *sizes = NULL;
+    char *names = NULL;
+
+    if (pRemovedCount)
+    {
+        *pRemovedCount = 0;
+    }
+    if (!PV_XFileValid(fileRef))
+    {
+        return FALSE;
+    }
+    count = XCountFileResourcesOfType(fileRef, XFILETRASH_ID);
+    if (count <= 1)
+    {
+        return TRUE;
+    }
+
+    omit = (unsigned char *)XNewPtr(count);
+    bodies = (XPTR *)XNewPtr((int32_t)sizeof(XPTR) * count);
+    sizes = (int32_t *)XNewPtr((int32_t)sizeof(int32_t) * count);
+    names = (char *)XNewPtr(count * 256);
+    if (!omit || !bodies || !sizes || !names)
+    {
+        if (omit) XDisposePtr(omit);
+        if (bodies) XDisposePtr(bodies);
+        if (sizes) XDisposePtr(sizes);
+        if (names) XDisposePtr(names);
+        return FALSE;
+    }
+    XSetMemory(omit, count, 0);
+    XSetMemory(bodies, (int32_t)sizeof(XPTR) * count, 0);
+    XSetMemory(sizes, (int32_t)sizeof(int32_t) * count, 0);
+    XSetMemory(names, count * 256, 0);
+
+    for (i = 0; i < count; ++i)
+    {
+        XLongResourceID tid = 0;
+        char *name_i = names + (i * 256);
+        name_i[0] = 0;
+        bodies[i] = XGetIndexedFileResource(fileRef, XFILETRASH_ID, &tid, i, name_i, &sizes[i]);
+    }
+
+    for (i = 0; i < count; ++i)
+    {
+        char *name_i;
+        if (omit[i] || !bodies[i])
+        {
+            continue;
+        }
+        name_i = names + (i * 256);
+        for (j = i + 1; j < count; ++j)
+        {
+            char *name_j;
+            if (omit[j] || !bodies[j])
+            {
+                continue;
+            }
+            name_j = names + (j * 256);
+            if (sizes[j] != sizes[i])
+            {
+                continue;
+            }
+            if (name_i[0] != name_j[0])
+            {
+                continue;
+            }
+            if (name_i[0] > 0 &&
+                XMemCmp(name_i + 1, name_j + 1, (int32_t)(unsigned char)name_i[0]) != 0)
+            {
+                continue;
+            }
+            if (sizes[i] > 0 && XMemCmp(bodies[i], bodies[j], sizes[i]) != 0)
+            {
+                continue;
+            }
+            omit[j] = 1;
+            removed++;
+        }
+    }
+
+    for (i = 0; i < count; ++i)
+    {
+        if (bodies[i])
+        {
+            XDisposePtr(bodies[i]);
+        }
+    }
+    XDisposePtr(bodies);
+    XDisposePtr(sizes);
+    XDisposePtr(names);
+
+    if (removed <= 0)
+    {
+        XDisposePtr(omit);
+        return TRUE;
+    }
+
+    if (PV_RebuildFileForTrashOps(fileRef, 0, 0, FALSE, -1, omit, count,
+                                  NULL, 0, NULL, 0) == FALSE)
+    {
+        XDisposePtr(omit);
+        return FALSE;
+    }
+    XDisposePtr(omit);
+    if (pRemovedCount)
+    {
+        *pRemovedCount = removed;
+    }
+    return TRUE;
+}
+
+int32_t XCountFileTrash(XFILE fileRef)
+{
+    return XCountFileResourcesOfType(fileRef, XFILETRASH_ID);
+}
+
+bool XTrashFileResource(XFILE fileRef, XResourceType theType, XLongResourceID resourceID)
+{
+    XPTR data = NULL;
+    int32_t dataSize = 0;
+    char pName[256];
+    XPTR wrapped = NULL;
+    int32_t wrappedSize = 0;
+    XLongResourceID trashID = 1;
+
+    if (!PV_XFileValid(fileRef) || theType == 0 || theType == XFILETRASH_ID)
+    {
+        return FALSE;
+    }
+
+    pName[0] = 0;
+    data = XGetFileResource(fileRef, theType, resourceID, pName, &dataSize);
+    if (!data || dataSize <= 0)
+    {
+        if (data)
+        {
+            XDisposePtr(data);
+        }
+        return FALSE;
+    }
+
+    wrapped = PV_MakeZtrsWrapped(theType, resourceID, data, dataSize, &wrappedSize);
+    XDisposePtr(data);
+    if (!wrapped || wrappedSize <= 0)
+    {
+        if (wrapped)
+        {
+            XDisposePtr(wrapped);
+        }
+        return FALSE;
+    }
+
+    if (XGetUniqueFileResourceID(fileRef, XFILETRASH_ID, &trashID) != 0)
+    {
+        trashID = resourceID != 0 ? resourceID : 1;
+        (void)XMakeUniqueFileResourceID(fileRef, XFILETRASH_ID, &trashID);
+    }
+
+    if (XAddFileResource(fileRef, XFILETRASH_ID, trashID, pName, wrapped, wrappedSize) != 0)
+    {
+        XDisposePtr(wrapped);
+        return FALSE;
+    }
+    XDisposePtr(wrapped);
+
+    /* Remove the live resource; keep the new TRSH entry. */
+    if (XPurgeFileResource(fileRef, theType, resourceID) == FALSE)
+    {
+        return FALSE;
+    }
+    return TRUE;
+}
+
+bool XGetIndexedFileTrashInfo(XFILE fileRef,
+                              int32_t trashIndex,
+                              XLongResourceID *pTrashResourceID,
+                              XResourceType *pOriginalType,
+                              XLongResourceID *pOriginalID,
+                              char *cName,
+                              int32_t *pPayloadSize,
+                              bool *pHasMeta,
+                              bool *pTypeGuessed)
+{
+    XLongResourceID trashID = 0;
+    int32_t size = 0;
+    char pName[256];
+    XPTR data;
+    XResourceType origType = 0;
+    XLongResourceID origID = 0;
+    unsigned char *payload = NULL;
+    int32_t payloadSize = 0;
+    bool hasMeta;
+    bool guessed = FALSE;
+
+    if (pTrashResourceID)
+    {
+        *pTrashResourceID = 0;
+    }
+    if (pOriginalType)
+    {
+        *pOriginalType = 0;
+    }
+    if (pOriginalID)
+    {
+        *pOriginalID = 0;
+    }
+    if (cName)
+    {
+        cName[0] = 0;
+    }
+    if (pPayloadSize)
+    {
+        *pPayloadSize = 0;
+    }
+    if (pHasMeta)
+    {
+        *pHasMeta = FALSE;
+    }
+    if (pTypeGuessed)
+    {
+        *pTypeGuessed = FALSE;
+    }
+    if (!PV_XFileValid(fileRef) || trashIndex < 0)
+    {
+        return FALSE;
+    }
+
+    pName[0] = 0;
+    data = XGetIndexedFileResource(fileRef, XFILETRASH_ID, &trashID, trashIndex, pName, &size);
+    if (!data)
+    {
+        return FALSE;
+    }
+
+    hasMeta = PV_ParseZtrsMeta(data, size, &origType, &origID, &payload, &payloadSize);
+    if (!hasMeta)
+    {
+        payload = (unsigned char *)data;
+        payloadSize = size;
+        origType = PV_GuessTrashedResourceType(data, size);
+        origID = trashID; /* often 0 for legacy */
+        guessed = (origType != 0) ? TRUE : FALSE;
+    }
+
+    if (pTrashResourceID)
+    {
+        *pTrashResourceID = trashID;
+    }
+    if (pOriginalType)
+    {
+        *pOriginalType = origType;
+    }
+    if (pOriginalID)
+    {
+        *pOriginalID = origID;
+    }
+    if (pPayloadSize)
+    {
+        *pPayloadSize = payloadSize;
+    }
+    if (pHasMeta)
+    {
+        *pHasMeta = hasMeta;
+    }
+    if (pTypeGuessed)
+    {
+        *pTypeGuessed = guessed;
+    }
+    if (cName)
+    {
+        if (pName[0] != 0)
+        {
+            XBlockMove(pName, cName, (int32_t)((unsigned char)pName[0]) + 1);
+            XPtoCstr(cName);
+        }
+        else
+        {
+            cName[0] = 0;
+        }
+    }
+    XDisposePtr(data);
+    return TRUE;
+}
+
+bool XRestoreIndexedFileTrash(XFILE fileRef,
+                              int32_t trashIndex,
+                              XLongResourceID *pRestoredID)
+{
+    XLongResourceID trashID = 0;
+    int32_t size = 0;
+    char pName[256];
+    XPTR data;
+    XResourceType origType = 0;
+    XLongResourceID origID = 0;
+    unsigned char *payload = NULL;
+    int32_t payloadSize = 0;
+    XPTR payloadCopy = NULL;
+    bool hasMeta;
+
+    if (pRestoredID)
+    {
+        *pRestoredID = 0;
+    }
+    if (!PV_XFileValid(fileRef) || trashIndex < 0)
+    {
+        return FALSE;
+    }
+
+    pName[0] = 0;
+    data = XGetIndexedFileResource(fileRef, XFILETRASH_ID, &trashID, trashIndex, pName, &size);
+    if (!data || size <= 0)
+    {
+        if (data)
+        {
+            XDisposePtr(data);
+        }
+        return FALSE;
+    }
+
+    hasMeta = PV_ParseZtrsMeta(data, size, &origType, &origID, &payload, &payloadSize);
+    if (!hasMeta)
+    {
+        payload = (unsigned char *)data;
+        payloadSize = size;
+        origType = PV_GuessTrashedResourceType(data, size);
+        origID = 0;
+    }
+    if (origType == 0 || !payload || payloadSize <= 0)
+    {
+        XDisposePtr(data);
+        return FALSE;
+    }
+
+    payloadCopy = XNewPtr(payloadSize);
+    if (!payloadCopy)
+    {
+        XDisposePtr(data);
+        return FALSE;
+    }
+    XBlockMove(payload, payloadCopy, payloadSize);
+    XDisposePtr(data);
+
+    if (origID == 0 || XExistsFileResource(fileRef, origType, origID) != FALSE)
+    {
+        if (XGetUniqueFileResourceID(fileRef, origType, &origID) != 0)
+        {
+            XDisposePtr(payloadCopy);
+            return FALSE;
+        }
+    }
+
+    if (XAddFileResource(fileRef, origType, origID, pName, payloadCopy, payloadSize) != 0)
+    {
+        XDisposePtr(payloadCopy);
+        return FALSE;
+    }
+    XDisposePtr(payloadCopy);
+
+    if (XPurgeIndexedFileTrash(fileRef, trashIndex) == FALSE)
+    {
+        return FALSE;
+    }
+    if (pRestoredID)
+    {
+        *pRestoredID = origID;
+    }
+    return TRUE;
 }
 #endif  // USE_CREATION_API == TRUE
 
@@ -5905,13 +7667,38 @@ int32_t XCountFileResourcesOfType(XFILE fileRef, XResourceType theType)
             }
         }
     }
-    if (resCount == 0 && theType == ID_INST)
+    if (theType == ID_INST || theType == ID_ALIAS)
     {
-        resCount = PV_CountInstsInZmfBlock(fileRef);
-    }
-    if (resCount == 0 && theType == ID_ALIAS)
-    {
-        resCount = PV_CountAliasesInZmfBlock(fileRef);
+        int32_t packedCount;
+        int32_t i;
+        int32_t extra;
+
+        packedCount = (theType == ID_INST) ? PV_CountInstsInZmfBlock(fileRef)
+                                           : PV_CountAliasesInZmfBlock(fileRef);
+        if (resCount == 0)
+        {
+            return packedCount;
+        }
+        /* Union: flat + ZINS entries not overridden by a flat id. */
+        extra = 0;
+        for (i = 0; i < packedCount; ++i)
+        {
+            XLongResourceID id = 0;
+            int32_t sz = 0;
+            XPTR data = (theType == ID_INST)
+                            ? PV_GetIndexedInstFromZmfBlock(fileRef, i, &id, NULL, &sz)
+                            : PV_GetIndexedAliasFromZmfInstBlock(fileRef, i, &id, NULL, &sz);
+            if (!data)
+            {
+                continue;
+            }
+            XDisposePtr(data);
+            if (!PV_CacheHasResourceTypeID(fileRef, theType, id))
+            {
+                extra++;
+            }
+        }
+        return resCount + extra;
     }
     if (resCount == 0 && theType == ID_SONG)
     {
@@ -6618,21 +8405,29 @@ bool XGetFileResourceName(XFILE fileRef, XResourceType resourceType,
     char            pascalName[256];
     XPTR            pData;
     int32_t         size;
-
     if (cName)
     {
         cName[0] = 0;
     }
     if (XGetResourceNameOnly(fileRef, resourceType, resourceID, cName))
     {
-        XPtoCstr(cName);
-        return TRUE;
+        /* Empty Pascal name still "succeeds" from the cache — treat as missing
+         * so ZSHD / ZINS / ZBNK name tables can supply the real name. */
+        if (cName && cName[0] != 0)
+        {
+            XPtoCstr(cName);
+            return TRUE;
+        }
+        if (cName)
+        {
+            cName[0] = 0;
+        }
     }
 
     /*
-     * ZREZ packs logical INST/SONG/Midi/BANK into ZINS/ZSNG/ZBNK. The flat
-     * resource cache only lists the packed containers, so name/exists lookups
-     * must fall through the same expanders used by XGetFileResource.
+     * ZREZ packs logical INST/SONG/Midi/BANK into ZINS/ZSNG/ZBNK, and SND
+     * headers/names into ZSHD. The flat resource cache only lists packed
+     * containers or payload-refs, so name lookups must fall through.
      */
     pascalName[0] = 0;
     pData = NULL;
@@ -6657,15 +8452,23 @@ bool XGetFileResourceName(XFILE fileRef, XResourceType resourceType,
                                                           pascalName,
                                                           &size);
     }
+    else if (resourceType == ID_SND || resourceType == ID_CSND || resourceType == ID_ESND)
+    {
+        pData = PV_GetSndHeaderFromZmfBlockByTypeAndID(fileRef,
+                                                       resourceType,
+                                                       resourceID,
+                                                       pascalName,
+                                                       &size);
+    }
     if (pData)
     {
         XDisposePtr(pData);
-        if (cName)
+        if (cName && pascalName[0] != 0)
         {
             XBlockMove(pascalName, cName, (int32_t)((unsigned char)pascalName[0]) + 1);
             XPtoCstr(cName);
+            return TRUE;
         }
-        return TRUE;
     }
     return FALSE;
 }

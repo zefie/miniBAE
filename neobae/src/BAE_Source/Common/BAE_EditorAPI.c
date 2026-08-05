@@ -17690,132 +17690,20 @@ static BAEResult PV_BankDeleteResource(XFILE bankFile,
                                        XResourceType type,
                                        XLongResourceID id)
 {
-    static const XResourceType bankResourceTypes[] = {
-        ID_INST,
-        ID_SND,
-        ID_CSND,
-        ID_ESND,
-        ID_ALIAS,
-        ID_BANK,
-        ID_SONG,
-        ID_MIDI,
-        ID_MIDI_OLD,
-        ID_CMID,
-        ID_EMID,
-        ID_ECMI,
-        ID_RMF,
-        ID_TEXT,
-        ID_VERS,
-        0
-    };
-    XFILERESOURCEMAP map;
-    int32_t resourceID;
-    XFILE outFile;
-    int32_t typeIdx;
-    XPTR packedData;
-    int32_t packedSize;
-
+    /*
+     * Hard-remove one resource while preserving ZSHD / TRSH / CaSd / ZINS peers.
+     * The old type-walk rebuild only copied a fixed INST/SND/… list, so deleting
+     * one INST (Unload Bank, etc.) silently dropped ZSHD — leaving payload-ref
+     * SNDs unrestorable and subsequent soft-deletes as opaque TRSH junk.
+     */
     if (!bankFile)
     {
         return BAE_PARAM_ERR;
     }
-    if (XFileSetPosition(bankFile, 0L) != 0 ||
-        XFileRead(bankFile, &map, (int32_t)sizeof(XFILERESOURCEMAP)) != 0)
+    if (XPurgeFileResource(bankFile, type, id) == FALSE)
     {
-        return BAE_BAD_FILE;
-    }
-    resourceID = (int32_t)XGetLong(&map.mapID);
-    if (!XFILERESOURCE_ID_IS_VALID(resourceID))
-    {
-        return BAE_BAD_FILE;
-    }
-
-    outFile = XFileOpenVirtualResource(resourceID);
-    if (!outFile)
-    {
-        return BAE_MEMORY_ERR;
-    }
-
-    for (typeIdx = 0; bankResourceTypes[typeIdx] != 0; ++typeIdx)
-    {
-        XResourceType resType;
-        int32_t resCount;
-        int32_t resIndex;
-
-        resType = bankResourceTypes[typeIdx];
-        resCount = XCountFileResourcesOfType(bankFile, resType);
-        for (resIndex = 0; resIndex < resCount; ++resIndex)
-        {
-            XLongResourceID resID;
-            int32_t resSize;
-            XPTR resData;
-            char resName[256];
-
-            resName[0] = 0;
-            resData = XGetIndexedFileResource(bankFile,
-                                              resType,
-                                              &resID,
-                                              resIndex,
-                                              resName,
-                                              &resSize);
-            if (!resData)
-            {
-                continue;
-            }
-
-            if (resType == type && resID == id)
-            {
-                XDisposePtr(resData);
-                continue;
-            }
-
-            if (XAddFileResource(outFile, resType, resID, resName, resData, resSize) != 0)
-            {
-                XDisposePtr(resData);
-                XFileClose(outFile);
-                return BAE_FILE_IO_ERROR;
-            }
-            XDisposePtr(resData);
-        }
-    }
-
-    if (XCleanResourceFile(outFile) == FALSE)
-    {
-        XFileClose(outFile);
         return BAE_FILE_IO_ERROR;
     }
-
-    packedData = NULL;
-    packedSize = 0;
-    if (XFileGetMemoryFileAsData(outFile, &packedData, &packedSize) != 0 ||
-        !packedData || packedSize <= 0)
-    {
-        XFileClose(outFile);
-        if (packedData)
-        {
-            XDisposePtr(packedData);
-        }
-        return BAE_FILE_IO_ERROR;
-    }
-    XFileClose(outFile);
-
-    if (bankFile->pCache)
-    {
-        XDisposePtr(bankFile->pCache);
-        bankFile->pCache = NULL;
-    }
-    if (bankFile->pResourceData && bankFile->ownsResourceData)
-    {
-        XDisposePtr(bankFile->pResourceData);
-    }
-
-    bankFile->pResourceData = packedData;
-    bankFile->resMemLength = packedSize;
-    bankFile->resMemOffset = 0;
-    bankFile->ownsResourceData = TRUE;
-    bankFile->resizeResourceData = TRUE;
-    bankFile->readOnly = FALSE;
-    bankFile->allowMemCopy = TRUE;
     return BAE_NO_ERROR;
 }
 
@@ -19216,17 +19104,23 @@ static BAEResult PV_BankSaveToMemory(BAEBankToken bankToken,
             XBlockMove(&hdr, data, (int32_t)sizeof(hdr));
         }
         tmpFile = XFileOpenWritableResourceFromMemory(data, (uint32_t)imageSize);
-        XDisposePtr(data);
-        data = NULL;
         if (!tmpFile)
         {
+            XDisposePtr(data);
             return BAE_MEMORY_ERR;
         }
-        if (XCleanResourceFile(tmpFile) == FALSE)
+        /* Prefer full Clean; fall back to no ZSHD pack; last resort return
+         * header-patched image (valid ZREZ, packing deferred). */
+        if (XCleanResourceFile(tmpFile) == FALSE &&
+            XCleanResourceFileEx(tmpFile, FALSE) == FALSE)
         {
             XFileClose(tmpFile);
-            return BAE_FILE_IO_ERROR;
+            *outData = (unsigned char *)data;
+            *outSize = (uint32_t)imageSize;
+            return BAE_NO_ERROR;
         }
+        XDisposePtr(data);
+        data = NULL;
         if (XFileGetMemoryFileAsData(tmpFile, &data, &size) != 0 || !data || size <= 0)
         {
             XFileClose(tmpFile);

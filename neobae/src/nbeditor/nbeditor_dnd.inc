@@ -182,7 +182,8 @@
         {
             return;
         }
-        std::vector<uint32_t> indices;
+        XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
+        std::vector<uint32_t> inst_ids;
         uint32_t inst_count = 0;
         if (BAERmfEditorBank_GetInstrumentCount(m_bank_token, &inst_count) != BAE_NO_ERROR)
         {
@@ -198,18 +199,18 @@
             }
             if (bank_match(info.bank))
             {
-                indices.push_back(i);
+                inst_ids.push_back(info.instID);
             }
         }
-        std::sort(indices.begin(), indices.end(), std::greater<uint32_t>());
-        for (uint32_t idx : indices)
+        /* Hard purge — Unload Bank must not flood Trash (user deletes only). */
+        for (uint32_t inst_id : inst_ids)
         {
-            (void)BAERmfEditorBank_DeleteInstrument(m_bank_token, idx);
+            (void)XPurgeFileResource(bank, ID_INST, static_cast<XLongResourceID>(inst_id));
+            m_session_custom_inst_ids.erase(inst_id);
         }
 
         /* Drop aliases whose display slot bank matches the predicate. */
-        XAliasLinkResource *alias =
-            XGetAliasLinkFromFile(reinterpret_cast<XFILE>(m_bank_token));
+        XAliasLinkResource *alias = XGetAliasLinkFromFile(bank);
         if (alias)
         {
             const uint32_t n = static_cast<uint32_t>(XGetLong(&alias->numberOfAliases));
@@ -371,14 +372,15 @@
             {
                 if (XExistsFileResource(bank, kSndTypes[t], rid) != FALSE)
                 {
-                    (void)XDeleteFileResource(bank, kSndTypes[t], rid, FALSE);
+                    /* Hard purge (no Trash). Keeps ZSHD/TRSH peers intact. */
+                    (void)XPurgeFileResource(bank, kSndTypes[t], rid);
+                    break;
                 }
             }
             m_session_custom_snd_ids.erase(snd_id);
             m_session_pcm_cache.erase(snd_id);
             m_app_compression_cache.erase(snd_id);
         }
-        (void)XCleanResourceFile(bank);
     }
 
     /* Same cleanup Unload Bank uses; ok if Bank 0/1 is already empty. */
@@ -389,37 +391,199 @@
             SetStatus("No bank loaded");
             return false;
         }
-        if (!Bank01HasInstruments())
-        {
-            if (!quiet_if_empty)
-            {
-                SetStatus("Bank 0/1 already empty");
-            }
-            /* Still drop orphaned built-in SNDs not used by Bank 2+. */
-            if (EnsureActiveBankWritable())
-            {
-                std::set<uint32_t> bank01_snds;
-                std::set<uint32_t> bank2_snds;
-                CollectBankReferencedSndIds(bank01_snds, bank2_snds);
-                (void)bank01_snds;
-                DeleteOrphanedBuiltinBank01Samples(bank2_snds);
-                RefreshListsFromBank();
-            }
-            return true;
-        }
         if (!EnsureActiveBankWritable())
         {
             return false;
         }
 
+        XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
         std::set<uint32_t> bank01_snds;
         std::set<uint32_t> bank2_snds;
         CollectBankReferencedSndIds(bank01_snds, bank2_snds);
-        (void)bank01_snds;
 
-        DeleteBank01InstrumentsFromActive();
-        /* Built-in Bank 0/1 samples go away; Bank 2+ refs and custom/session SNDs stay. */
-        DeleteOrphanedBuiltinBank01Samples(bank2_snds);
+        /* INST to drop: Bank 0/1 only. Keep Bank 2+ and session-custom INST
+         * even if they happen to live on Bank 0/1 (RMF promote). */
+        std::vector<XLongResourceID> omit_inst;
+        uint32_t inst_count = 0;
+        if (BAERmfEditorBank_GetInstrumentCount(m_bank_token, &inst_count) == BAE_NO_ERROR)
+        {
+            for (uint32_t i = 0; i < inst_count; ++i)
+            {
+                BAERmfEditorBankInstrumentInfo info;
+                std::memset(&info, 0, sizeof(info));
+                if (BAERmfEditorBank_GetInstrumentInfo(m_bank_token, i, &info) != BAE_NO_ERROR)
+                {
+                    continue;
+                }
+                if (info.bank >= 2)
+                {
+                    continue;
+                }
+                if (m_session_custom_inst_ids.count(info.instID) != 0)
+                {
+                    continue;
+                }
+                omit_inst.push_back(static_cast<XLongResourceID>(info.instID));
+            }
+        }
+
+        if (omit_inst.empty() && !Bank01HasInstruments())
+        {
+            if (!quiet_if_empty)
+            {
+                SetStatus("Bank 0/1 already empty");
+            }
+        }
+
+        /* SND to drop: only those referenced by Bank 0/1 INST being removed.
+         * Never use (all SNDs − protect) — if Bank 2 sample collection misses
+         * anything, that wiped every sample including Bank 2+. */
+        std::set<uint32_t> protect = bank2_snds;
+        protect.insert(m_session_custom_snd_ids.begin(), m_session_custom_snd_ids.end());
+        for (uint32_t custom_id : m_session_custom_inst_ids)
+        {
+            uint32_t resolved = 0;
+            uint32_t index = 0;
+            if (BAERmfEditorBank_ResolveInstID(m_bank_token, custom_id, &resolved, &index) !=
+                BAE_NO_ERROR)
+            {
+                continue;
+            }
+            uint32_t split_count = 0;
+            if (BAERmfEditorBank_GetInstrumentSampleCount(m_bank_token, index, &split_count) !=
+                BAE_NO_ERROR)
+            {
+                continue;
+            }
+            for (uint32_t s = 0; s < split_count; ++s)
+            {
+                BAERmfEditorBankSampleInfo sinfo;
+                std::memset(&sinfo, 0, sizeof(sinfo));
+                if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token, index, s, &sinfo) ==
+                    BAE_NO_ERROR)
+                {
+                    protect.insert(static_cast<uint32_t>(sinfo.sndResourceID));
+                }
+            }
+        }
+
+        std::vector<XLongResourceID> omit_snd;
+        for (uint32_t snd_id : bank01_snds)
+        {
+            if (protect.count(snd_id) == 0)
+            {
+                omit_snd.push_back(static_cast<XLongResourceID>(snd_id));
+            }
+        }
+
+        if (omit_inst.empty() && omit_snd.empty())
+        {
+            m_bank01_touched = false;
+            RefreshListsFromBank();
+            return true;
+        }
+
+        /* INST first (ZINS filter, no expand). Then SND-only omit so a sample
+         * purge cannot touch the instrument block. */
+        if (!omit_inst.empty())
+        {
+            if (XPurgeFileInstrumentAndSoundLists(bank,
+                                                  omit_inst.data(),
+                                                  static_cast<int32_t>(omit_inst.size()),
+                                                  nullptr,
+                                                  0) == FALSE)
+            {
+                SetStatus("Unload Bank 0/1 failed (instruments)");
+                return false;
+            }
+        }
+        if (!omit_snd.empty())
+        {
+            if (XPurgeFileInstrumentAndSoundLists(bank,
+                                                  nullptr,
+                                                  0,
+                                                  omit_snd.data(),
+                                                  static_cast<int32_t>(omit_snd.size())) == FALSE)
+            {
+                SetStatus("Unload Bank 0/1 failed (samples)");
+                return false;
+            }
+        }
+
+        /* Drop Bank 0/1 aliases only (not Bank 2+). */
+        {
+            XAliasLinkResource *alias = XGetAliasLinkFromFile(bank);
+            if (alias)
+            {
+                const uint32_t n = static_cast<uint32_t>(XGetLong(&alias->numberOfAliases));
+                std::vector<uint32_t> alias_from;
+                for (uint32_t a = 0; a < n; ++a)
+                {
+                    const uint32_t from_id =
+                        static_cast<uint32_t>(XGetLong(&alias->list[a].aliasFrom));
+                    if ((from_id / 256u) < 2u &&
+                        m_session_custom_inst_ids.count(from_id) == 0)
+                    {
+                        alias_from.push_back(from_id);
+                    }
+                }
+                XDisposePtr(reinterpret_cast<XPTR>(alias));
+                for (uint32_t from_id : alias_from)
+                {
+                    (void)BAERmfEditorBank_DeleteAlias(m_bank_token, from_id);
+                }
+            }
+        }
+
+        /* Verify Bank 2+ / custom INST and samples survived before refreshing UI. */
+        {
+            std::vector<uint32_t> must_keep_inst;
+            for (const InstrumentRow &row : m_instruments)
+            {
+                if (row.is_alias)
+                {
+                    continue;
+                }
+                if (row.bank >= 2 || m_session_custom_inst_ids.count(row.inst_id) != 0)
+                {
+                    must_keep_inst.push_back(row.inst_id);
+                }
+            }
+            for (uint32_t id : must_keep_inst)
+            {
+                int32_t sz = 0;
+                char name[256];
+                name[0] = 0;
+                XPTR data = XGetFileResource(bank, ID_INST, static_cast<XLongResourceID>(id), name, &sz);
+                if (!data)
+                {
+                    SetStatus("Unload Bank 0/1 failed: Bank 2+/custom instrument missing after purge");
+                    return false;
+                }
+                XDisposePtr(data);
+            }
+            std::set<uint32_t> must_keep_snd = bank2_snds;
+            must_keep_snd.insert(m_session_custom_snd_ids.begin(), m_session_custom_snd_ids.end());
+            for (uint32_t snd_id : must_keep_snd)
+            {
+                if (!BankSndResourceExists(snd_id))
+                {
+                    SetStatus("Unload Bank 0/1 failed: Bank 2+/custom sample missing after purge");
+                    return false;
+                }
+            }
+        }
+
+        for (XLongResourceID id : omit_inst)
+        {
+            m_session_custom_inst_ids.erase(static_cast<uint32_t>(id));
+        }
+        for (XLongResourceID id : omit_snd)
+        {
+            m_session_custom_snd_ids.erase(static_cast<uint32_t>(id));
+            m_session_pcm_cache.erase(static_cast<uint32_t>(id));
+            m_app_compression_cache.erase(static_cast<uint32_t>(id));
+        }
 
         m_bank01_touched = false;
         RefreshListsFromBank();
@@ -746,6 +910,46 @@
         return ok;
     }
 
+    /* Modules/RMF songs keep INST/SND in the document until promoted. Session
+     * save only persists the bank body + Midi/SONG — without promote, S3M/XM/IT
+     * customs vanish on save→reload. */
+    bool PromoteAllSessionSongEmbedsIntoBank()
+    {
+        bool any = false;
+        for (const SessionSongEntry &entry : m_session_songs)
+        {
+            if (entry.rmf_bytes.empty())
+            {
+                continue;
+            }
+            if (PromoteEmbeddedResourcesFromRmfMemory(
+                    entry.rmf_bytes.data(),
+                    static_cast<uint32_t>(entry.rmf_bytes.size())))
+            {
+                any = true;
+            }
+        }
+        return any;
+    }
+
+    bool PromoteActiveSessionSongEmbedsIntoBank()
+    {
+        if (m_session_song_index < 0 ||
+            m_session_song_index >= static_cast<int>(m_session_songs.size()))
+        {
+            return false;
+        }
+        const SessionSongEntry &entry =
+            m_session_songs[static_cast<size_t>(m_session_song_index)];
+        if (entry.rmf_bytes.empty())
+        {
+            return false;
+        }
+        return PromoteEmbeddedResourcesFromRmfMemory(
+            entry.rmf_bytes.data(),
+            static_cast<uint32_t>(entry.rmf_bytes.size()));
+    }
+
     bool MergeBank01FromPath(const char *path)
     {
         if (!path || !path[0] || !m_bank_token)
@@ -884,12 +1088,14 @@
                 }
                 else
                 {
+                    (void)PromoteActiveSessionSongEmbedsIntoBank();
                     char status[256];
                     std::snprintf(status,
                                   sizeof(status),
-                                  "Added Session song %d/%zu (module)",
+                                  "Added Session song %d/%zu (module, %zu custom INST)",
                                   m_session_song_index + 1,
-                                  m_session_songs.size());
+                                  m_session_songs.size(),
+                                  m_session_custom_inst_ids.size());
                     SetStatus(status);
                 }
             }
