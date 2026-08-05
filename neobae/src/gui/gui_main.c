@@ -835,6 +835,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+#if _DEBUG == TRUE
 #if USE_SDL2 == TRUE
     {
         SDL_RendererInfo ri;
@@ -849,7 +850,8 @@ int main(int argc, char *argv[])
             BAE_PRINTF("SDL_SetRenderVSync failed: %s\n", SDL_GetError());
     }
 #endif
-    
+#endif
+
     bool running = true;
     duration = bae_get_len_ms();
     g_bae.loop_enabled_gui = loopPlay;
