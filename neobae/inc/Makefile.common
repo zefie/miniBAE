@@ -59,15 +59,6 @@ ifneq ($(WASM),1)
 	endif
 endif
 
-ifeq ($(NBSTUDIO),1)
-	# NBStudio requires ZMF support
-	# and the creation API
-	ZMF_SUPPORT := 1
-	CREATION_API := 1
-	FIX_SPAN_DC := 1
-	CLASSIC_CHORUS := 1
-endif
-
 ifeq ($(NBEDITOR),1)
 	# NBEditor requires ZMF support
 	# and the creation API
@@ -895,60 +886,47 @@ else
 											src/sf2-hsb/sf2_hsb_main.c
 										BAE_FLAGS += -Isrc/mod2rmf
 									else							
-										ifeq ($(NBSTUDIO),1)
-											SRC += 	src/nbstudio/editor_main.cpp \
-												src/nbstudio/editor_bank.cpp \
-												src/nbstudio/editor_instrument_ext_dialog.cpp \
-												src/nbstudio/editor_metadata_dialog.cpp \
-												src/nbstudio/editor_pianoroll_panel.cpp \
-												src/nbstudio/batch_compress_dialog.cpp
-											ifneq ($(MACOSX),1)
-												BAE_FLAGS += $(shell pkg-config --cflags gtk+-3.0) $(shell pkg-config --cflags glib-2.0)
-												BAE_LIBS += -lz $(shell pkg-config --libs gtk+-3.0) $(shell pkg-config --libs glib-2.0)
-											endif
+										ifeq ($(NBEDITOR),1)
+											SRC += src/nbeditor/nbeditor_main.cpp \
+												src/thirdparty/imgui/imgui.cpp \
+												src/thirdparty/imgui/imgui_draw.cpp \
+												src/thirdparty/imgui/imgui_tables.cpp \
+												src/thirdparty/imgui/imgui_widgets.cpp \
+												src/thirdparty/imgui/backends/imgui_impl_sdl3.cpp \
+												src/thirdparty/imgui/backends/imgui_impl_sdlrenderer3.cpp
+											INC_PATH += -Isrc/thirdparty/imgui -Isrc/thirdparty/imgui/backends
 										else
-											ifeq ($(NBEDITOR),1)
-												SRC += src/nbeditor/nbeditor_main.cpp \
-													src/thirdparty/imgui/imgui.cpp \
-													src/thirdparty/imgui/imgui_draw.cpp \
-													src/thirdparty/imgui/imgui_tables.cpp \
-													src/thirdparty/imgui/imgui_widgets.cpp \
-													src/thirdparty/imgui/backends/imgui_impl_sdl3.cpp \
-													src/thirdparty/imgui/backends/imgui_impl_sdlrenderer3.cpp
-												INC_PATH += -Isrc/thirdparty/imgui -Isrc/thirdparty/imgui/backends
+											ifeq ($(ADX2WAV),1)
+												SRC := src/adx2wav/adx2wav_main.c src/adx2wav/adx2wav_decode.c
 											else
-												ifeq ($(ADX2WAV),1)
-													SRC := src/adx2wav/adx2wav_main.c src/adx2wav/adx2wav_decode.c
+												ifeq ($(ADP2WAV),1)
+												# adp2wav with third-party G.722 decoder
+												SRC := src/adp2wav/adp2wav_main.c src/adp2wav/adp2wav_decode.c src/thirdparty/libg722/g722_decode.c
+											else
+												ifeq ($(MIDDECOMP),1)
+													SRC := src/mthc/mthc_decomp.c src/mthc/mthc_main.c
 												else
-													ifeq ($(ADP2WAV),1)
-													# adp2wav with third-party G.722 decoder
-													SRC := src/adp2wav/adp2wav_main.c src/adp2wav/adp2wav_decode.c src/thirdparty/libg722/g722_decode.c
-												else
-													ifeq ($(MIDDECOMP),1)
-														SRC := src/mthc/mthc_decomp.c src/mthc/mthc_main.c
+													ifeq ($(RAYLIB_EXAMPLE),1)
+														SRC += src/raylib_example/audio_stream_callback.c
+														BAE_LIBS += -lraylib -lm
 													else
-														ifeq ($(RAYLIB_EXAMPLE),1)
-															SRC += src/raylib_example/audio_stream_callback.c
-															BAE_LIBS += -lraylib -lm
-														else
-															ifneq ($(WASM),1)
-																ifneq ($(SONGTOOL),1)
-																		ifeq ($(RINGTONE2MID),1)
-																			# libNeoBAE srcs + ringtone2mid.c
-																			SRC += src/ringtone2mid/ringtone2mid.c
+														ifneq ($(WASM),1)
+															ifneq ($(SONGTOOL),1)
+																	ifeq ($(RINGTONE2MID),1)
+																		# libNeoBAE srcs + ringtone2mid.c
+																		SRC += src/ringtone2mid/ringtone2mid.c
+																	else
+																		ifeq ($(NEOBAE_TUI),1)
+																			# neobae-tui = libNeoBAE srcs + neobae_tui.c
+																			SRC += src/playbae/neobae_tui.c
 																		else
-																			ifeq ($(NEOBAE_TUI),1)
-																				# neobae-tui = libNeoBAE srcs + neobae_tui.c
-																				SRC += src/playbae/neobae_tui.c
-																			else
-																				# playbae = libNeoBAE srcs + playbae.c
-																				SRC += src/playbae/playbae.c
-																			endif
+																			# playbae = libNeoBAE srcs + playbae.c
+																			SRC += src/playbae/playbae.c
 																		endif
-																else
-																	# libNeoBAE srcs + songtool.c
-																	SRC += src/songtool/songtool.c
-																endif
+																	endif
+															else
+																# libNeoBAE srcs + songtool.c
+																SRC += src/songtool/songtool.c
 															endif
 														endif
 													endif

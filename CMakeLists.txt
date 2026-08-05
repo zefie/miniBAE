@@ -222,7 +222,6 @@ option(USE_SDL2 "Prefer SDL2 as the platform backend (default if SDL2 is found a
 option(BUILD_PLAYBAE "Build playbae when a non-Dummy/non-Ansi backend is selected" ON)
 option(BUILD_ZEFIDI "Build zefidi when SDL2/SDL3 backend and matching SDL_ttf are available" ON)
 option(BUILD_CLITOOLS "Build CLI tools (songtool, rmf2mid, mid2rmf, mid2rmi, sf2-hsb, mod2rmf, instdump, bankrecomp)" ON)
-option(BUILD_NBSTUDIO "Build NeoBAE Studio (RMF/ZMF editor) when wxWidgets is found" ON)
 option(BUILD_NBEDITOR "Build NeoBAE Editor (Dear ImGui + SDL3)" ON)
 set(CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING "Build type (Debug, Release, RelWithDebInfo, MinSizeRel)" FORCE)
 
@@ -2091,131 +2090,6 @@ if(BUILD_CLITOOLS)
   endif()
 endif()
 
-if(BUILD_NBSTUDIO)
-  find_package(wxWidgets COMPONENTS core base QUIET)
-  if(wxWidgets_FOUND)
-    set(BAE_WXWIDGETS_LINKABLE ON)
-    if(NEOBAE_STATIC AND MINGW)
-      set(_wx_missing_libs "")
-      set(_wx_resolved_libs "")
-      foreach(_wxlib IN LISTS wxWidgets_LIBRARIES)
-        if(IS_ABSOLUTE "${_wxlib}" AND NOT EXISTS "${_wxlib}")
-          get_filename_component(_wxlib_dir "${_wxlib}" DIRECTORY)
-          get_filename_component(_wxlib_name "${_wxlib}" NAME)
-          if(_wxlib_name MATCHES "^libwx_mswu.*\\.a$" AND EXISTS "${_wxlib_dir}/libwx_mswu-3.3-Windows.a")
-            message(STATUS "Using wxWidgets Windows static archive fallback: ${_wxlib_dir}/libwx_mswu-3.3-Windows.a")
-            list(APPEND _wx_resolved_libs "${_wxlib_dir}/libwx_mswu-3.3-Windows.a")
-          else()
-            list(APPEND _wx_resolved_libs "${_wxlib}")
-            list(APPEND _wx_missing_libs "${_wxlib}")
-          endif()
-        else()
-          list(APPEND _wx_resolved_libs "${_wxlib}")
-        endif()
-      endforeach()
-      set(wxWidgets_LIBRARIES ${_wx_resolved_libs})
-      if(_wx_missing_libs)
-        set(BAE_WXWIDGETS_LINKABLE OFF)
-        message(STATUS "Skipping BUILD_NBSTUDIO: missing wxWidgets static libraries for this MinGW target: ${_wx_missing_libs}")
-      endif()
-    endif()
-
-    if(BAE_WXWIDGETS_LINKABLE)
-      set(NBSTUDIO_SOURCES 
-          neobae/src/nbstudio/editor_main.cpp
-          neobae/src/nbstudio/editor_bank.cpp
-          neobae/src/nbstudio/editor_instrument_ext_dialog.cpp
-          neobae/src/nbstudio/editor_metadata_dialog.cpp
-          neobae/src/nbstudio/editor_pianoroll_panel.cpp
-          neobae/src/nbstudio/batch_compress_dialog.cpp
-          neobae/src/mod2rmf/mod2rmf_common.c
-          neobae/src/mod2rmf/mod2rmf_encoder.c
-          neobae/src/mod2rmf/mod2rmf_resampler.c
-          neobae/src/mod2rmf/mod2rmf_rmfcreat.c
-          neobae/src/mod2rmf/mod2rmf_song.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-virtual.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-format.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-period.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-player.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-read_event.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-misc.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-dataio.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-lfo.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-scan.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-control.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-filter.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-effects.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-mixer.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-mix_all.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-load_helpers.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-load.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-filetype.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-hio.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-smix.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-memio.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-rng.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-win32.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-flow.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-common.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-itsex.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-sample.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-xm_load.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-mod_load.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-s3m_load.c
-          neobae/src/thirdparty/libxmp/src/lite/lite-it_load.c          
-      )
-      if((MINGW OR MSVC) AND NEOBAE_RC_ENABLED)
-        neobae_configure_rc(nbstudio NBSTUDIO_VERSION_RC "${VERSION_ICO_WX_RC_IN}" "NeoBAE Studio" "nbstudio.exe" "1" "BAEStudio.ico")
-        list(APPEND NBSTUDIO_SOURCES "${NBSTUDIO_VERSION_RC}")
-      endif()
-      if(MINGW OR MSVC)
-        add_executable(nbstudio WIN32 ${NBSTUDIO_SOURCES})
-      else()
-        add_executable(nbstudio ${NBSTUDIO_SOURCES})
-      endif()
-      target_include_directories(nbstudio PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/nbstudio
-        ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libxmp/include
-        ${wxWidgets_INCLUDE_DIRS}
-      )
-      set(_wx_cxx_flags ${wxWidgets_CXX_FLAGS})
-      set(_wx_link_libs ${wxWidgets_LIBRARIES})
-      if(MINGW)
-        if(_wx_cxx_flags)
-          separate_arguments(_wx_cxx_flags_list NATIVE_COMMAND "${_wx_cxx_flags}")
-          list(FILTER _wx_cxx_flags_list EXCLUDE REGEX "^-l(pthread|winpthread|winpthreads)$|^-pthread$")
-          set(_wx_cxx_flags ${_wx_cxx_flags_list})
-        endif()
-        if(_wx_link_libs)
-          list(FILTER _wx_link_libs EXCLUDE REGEX "^-l(pthread|winpthread|winpthreads)$|^-pthread$|^pthread$")
-        endif()
-      endif()
-      target_compile_definitions(nbstudio PRIVATE LIBXMP_STATIC=1 LIBXMP_CORE_PLAYER=1 LIBXMP_BUILD=1 ${wxWidgets_DEFINITIONS} WXMAKINGDLL_BASE=1 WXMAKINGDLL_CORE=1)
-      target_compile_options(nbstudio PRIVATE ${_wx_cxx_flags})
-      if(MINGW)
-        target_link_libraries(nbstudio PRIVATE neobae ${_wx_link_libs} zs)
-      else()
-        target_link_libraries(nbstudio PRIVATE neobae ${_wx_link_libs} z)
-      endif()
-      find_package(ZLIB QUIET)
-      if(ZLIB_FOUND)
-        target_link_libraries(nbstudio PRIVATE ZLIB::ZLIB)
-      endif()
-      if(UNIX AND NOT APPLE)
-        find_package(PkgConfig REQUIRED)
-        pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
-        pkg_check_modules(GLIB REQUIRED glib-2.0)
-        target_include_directories(nbstudio PRIVATE ${GTK3_INCLUDE_DIRS} ${GLIB_INCLUDE_DIRS})
-        target_compile_options(nbstudio PRIVATE ${GTK3_CFLAGS_OTHER} ${GLIB_CFLAGS_OTHER})
-        target_link_libraries(nbstudio PRIVATE ${GTK3_LIBRARIES} ${GLIB_LIBRARIES})
-      endif()
-      message(STATUS "Building nbstudio with wxWidgets ${wxWidgets_VERSION_STRING}.")
-    endif()
-  else()
-    message(STATUS "Skipping BUILD_NBSTUDIO (wxWidgets not found).")
-  endif()
-endif()
-
 if(BUILD_NBEDITOR)
   if(NOT BAE_SDL3_INCLUDE_DIR)
     find_path(BAE_SDL3_INCLUDE_DIR SDL3/SDL.h)
@@ -2519,25 +2393,15 @@ if((MINGW OR MSVC) AND NEOBAE_RC_ENABLED)
     if(TARGET nbeditor)
       if(MINGW)
         if(DEBUG)
-          target_link_options(nbstudio PRIVATE "-Wl,--subsystem,console")
+          target_link_options(nbeditor PRIVATE "-Wl,--subsystem,console")
         else()
-          target_link_options(nbstudio PRIVATE "-Wl,--subsystem,windows")
+          target_link_options(nbeditor PRIVATE "-Wl,--subsystem,windows")
         endif()
       endif()
       if(BAE_USING_SDL2)
         target_link_libraries(nbeditor PRIVATE winmm setupapi imm32 version)
       endif()
-    endif()
-
-    if(TARGET nbstudio)
-      if(MINGW)
-        target_link_options(nbstudio PRIVATE "-Wl,--subsystem,windows")
-      endif()
-      if(BAE_USING_SDL2)
-        target_link_libraries(nbstudio PRIVATE winmm setupapi imm32 version)
-      endif()
-    endif()    
-
+    endif() 
 endif()
 
 if (BAE_USING_SDL2)
@@ -2581,10 +2445,7 @@ if (BAE_USING_SDL2)
     target_link_libraries(zefidi PRIVATE SDL2main SDL2)
   endif()
   if (TARGET nbeditor)
-    target_link_libraries(nbstudio PRIVATE SDL2main SDL2)
-  endif()
-  if (TARGET nbstudio)
-    target_link_libraries(nbstudio PRIVATE SDL2main SDL2)
+    target_link_libraries(nbeditor PRIVATE SDL2main SDL2)
   endif()
 endif()
 
