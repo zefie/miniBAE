@@ -17,6 +17,8 @@
 
 #include "mod2rmf_common.h"
 #include "mod2rmf_rmfcreat.h"
+#include <math.h>
+#include <string.h>
 
 
 /* --- Event sorting helpers for channel spreading ------------------------ */
@@ -705,6 +707,74 @@ bool mod2rmf_is_mod_family(const char *type)
     }
 
     return FALSE;
+}
+
+bool mod2rmf_is_s3m_family(const char *type)
+{
+    if (!type || !type[0])
+    {
+        return FALSE;
+    }
+
+    /* libxmp uses "Scream Tracker 3" / variant tracker names for .s3m. */
+    if (strstr(type, "Scream Tracker 3") ||
+        strstr(type, "ScreamTracker 3") ||
+        strstr(type, "S3M"))
+    {
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+bool mod2rmf_format_uses_sample_c5_rate(bool isIt, const char *type)
+{
+    /* IT/S3M store a true per-sample C5/C2 frequency that libxmp converts
+     * into subinstrument xpo/fin relative to 8363 Hz. XM relative-note and
+     * MOD finetune are musical offsets, not sample rates. */
+    return isIt || mod2rmf_is_s3m_family(type);
+}
+
+uint32_t mod2rmf_c2spd_from_xpo_fin(int xpo, int fin)
+{
+    double cents;
+    double rate;
+
+    /* Inverse of libxmp_c2spd_to_note(): c2spd = 8363 * 2^((xpo + fin/128)/12). */
+    if (fin < 0)
+    {
+        fin = 0;
+    }
+    if (fin > 127)
+    {
+        fin = 127;
+    }
+
+    cents = (double)xpo * 100.0 + ((double)fin * 100.0) / 128.0;
+    rate = 8363.0 * pow(2.0, cents / 1200.0);
+    if (rate < 100.0)
+    {
+        rate = 100.0;
+    }
+    if (rate > 768000.0)
+    {
+        rate = 768000.0;
+    }
+    return (uint32_t)(rate + 0.5);
+}
+
+int mod2rmf_rate_fin_to_cents(int fin)
+{
+    if (fin < 0)
+    {
+        fin = 0;
+    }
+    if (fin > 127)
+    {
+        fin = 127;
+    }
+    /* 128 fin units = 100 cents. */
+    return (fin * 100 + 64) / 128;
 }
 
 int mod2rmf_is_ascii_space(char c)

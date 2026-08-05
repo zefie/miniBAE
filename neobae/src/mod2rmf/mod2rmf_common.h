@@ -82,6 +82,13 @@ typedef struct {
     uint32_t adsrStageCount;
     ModAdsrStage adsrStages[MOD2RMF_MAX_ADSR_STAGES];
     int16_t defaultPan;          /* sub-instrument pan: 0..255, 128=center, -1=unset */
+    /* IT/S3M: true C5/C2 playback rate recovered from libxmp xpo/fin.
+     * When hasRateMapping, rateXpo/rateFin were baked into sampleRateHz and
+     * must be stripped from MIDI note / pitch-bend mapping. */
+    bool hasRateMapping;
+    uint32_t sampleRateHz;
+    int16_t rateXpo;
+    int16_t rateFin;             /* 0..127 libxmp finetune units (128 = 1 st) */
     int8_t *pcm8;
 } ModRawSample;
 
@@ -163,6 +170,7 @@ typedef struct {
     unsigned char velocity;
     unsigned char program;
     int bendOffsetCents;
+    int rateFinCents; /* subtract: finetune already baked into sample rate */
 } ActiveNote;
 
 typedef struct {
@@ -223,6 +231,10 @@ bool mod2rmf_get_row_volume_command(const struct xmp_event *ev,
 bool mod2rmf_row_has_tone_portamento(const struct xmp_event *ev);
 
 bool mod2rmf_is_mod_family(const char *type);
+bool mod2rmf_is_s3m_family(const char *type);
+bool mod2rmf_format_uses_sample_c5_rate(bool isIt, const char *type);
+uint32_t mod2rmf_c2spd_from_xpo_fin(int xpo, int fin);
+int mod2rmf_rate_fin_to_cents(int fin);
 int mod2rmf_is_ascii_space(char c);
 void mod2rmf_trim_copy_ascii(char *dst, size_t dstSize, const char *src);
 void mod2rmf_append_linef(char *dst, size_t dstSize, const char *text);

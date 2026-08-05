@@ -144,11 +144,15 @@ static void mod2rmf_apply_sample_gain(ModRawSample *raw, double gainDb)
 /* Resolve per-note transpose from the active instrument mapping.
  * Some formats (notably IT) can reuse the same sample across multiple
  * instruments with different transpose settings, so a global per-sample
- * transpose cache can detune only certain notes. */
+ * transpose cache can detune only certain notes.
+ * When the sample's C5/C2 rate was baked into sampleRateHz, subtract that
+ * rate-encoding xpo so MIDI notes stay in the pattern-note domain. */
 static int mod2rmf_resolve_note_transpose(const struct xmp_module *mod,
                                           const struct xmp_channel_info *ci,
                                           int sid,
-                                          const int16_t sampleTranspose[MOD2RMF_MAX_SAMPLES])
+                                          const int16_t sampleTranspose[MOD2RMF_MAX_SAMPLES],
+                                          const ModRawSample *rawSamples,
+                                          uint32_t rawSampleCount)
 {
     int noteXpo = 0;
     int instIndex = -1;
@@ -184,6 +188,12 @@ static int mod2rmf_resolve_note_transpose(const struct xmp_module *mod,
     else if (sid >= 0 && sid < MOD2RMF_MAX_SAMPLES)
     {
         noteXpo = (int)sampleTranspose[sid];
+    }
+
+    if (rawSamples && sid >= 0 && (uint32_t)sid < rawSampleCount &&
+        rawSamples[sid].hasRateMapping)
+    {
+        noteXpo -= (int)rawSamples[sid].rateXpo;
     }
 
     return noteXpo;
@@ -840,15 +850,22 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
         {
             mod2rmf_emulate_reverse_loop(raw);
         }
+
+        /* Default rate until IT/S3M C5/C2 mapping below overrides it. */
+        raw->sampleRateHz = conv->moduleBaseRateHz;
+        raw->hasRateMapping = FALSE;
+        raw->rateXpo = 0;
+        raw->rateFin = 0;
     }
 
-    /* Extract amplitude envelope ADSR for each sample from the first
-     * instrument that references it (same "first wins" policy as
-     * sampleTranspose).  This runs AFTER the sample extraction loop
-     * above so the memset() on each raw sample doesn't clobber the
-     * envelope data. */
+    /* Extract amplitude envelope ADSR and (for IT/S3M) per-sample C5/C2
+     * rates from the first instrument that references each sample.
+     * Runs AFTER PCM extraction so memset() above cannot clobber them. */
     if (mod->ins > 0 && mod->xxi)
     {
+        const bool useSampleC5Rate =
+            mod2rmf_format_uses_sample_c5_rate(conv->isIt, mod->type);
+
         for (i = 0; i < (uint32_t)mod->ins; ++i)
         {
             struct xmp_instrument *inst;
@@ -867,6 +884,14 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                 if (sid < 0 || sid >= (int)conv->rawSampleCount || sid >= MOD2RMF_MAX_SAMPLES)
                 {
                     continue;
+                }
+                if (useSampleC5Rate && !conv->rawSamples[sid].hasRateMapping)
+                {
+                    conv->rawSamples[sid].rateXpo = (int16_t)inst->sub[sub].xpo;
+                    conv->rawSamples[sid].rateFin = (int16_t)inst->sub[sub].fin;
+                    conv->rawSamples[sid].sampleRateHz =
+                        mod2rmf_c2spd_from_xpo_fin(inst->sub[sub].xpo, inst->sub[sub].fin);
+                    conv->rawSamples[sid].hasRateMapping = TRUE;
                 }
                 if (!sampleHasEnvelope[sid] &&
                     (inst->aei.flg & XMP_ENVELOPE_ON) && inst->aei.npt >= 2)
@@ -1085,7 +1110,9 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                 if (activeNotes[ch].active)
                 {
                     uint16_t bend;
-                    bend = mod2rmf_pitchbend_to_midi(ci->pitchbend + activeNotes[ch].bendOffsetCents,
+                    bend = mod2rmf_pitchbend_to_midi(ci->pitchbend -
+                                                        activeNotes[ch].rateFinCents +
+                                                        activeNotes[ch].bendOffsetCents,
                                                     song->pitchBendRangeSemitones);
                     if (bend != chLastBend[ch])
                     {
@@ -1214,7 +1241,9 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                 noteXpo = mod2rmf_resolve_note_transpose(mod,
                                                                          ci,
                                                                          sid,
-                                                                         sampleTranspose);
+                                                                         sampleTranspose,
+                                                                         conv->rawSamples,
+                                                                         conv->rawSampleCount);
                                 midiNote = baseNote + mod2rmf_tracker_note_bias(conv) + noteXpo;
 
                                 activeNotes[ch].active = TRUE;
@@ -1225,10 +1254,17 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                                                                                : (uint8_t)mod2rmf_clamp_int((int)ci->volume, 0, 64));
                                 activeNotes[ch].program = (uint8_t)program;
                                 activeNotes[ch].bendOffsetCents = (midiNote - (int)activeNotes[ch].note) * 100;
+                                activeNotes[ch].rateFinCents =
+                                    (sid >= 0 && (uint32_t)sid < conv->rawSampleCount &&
+                                     conv->rawSamples[sid].hasRateMapping)
+                                        ? mod2rmf_rate_fin_to_cents(conv->rawSamples[sid].rateFin)
+                                        : 0;
                                 chLastBend[ch] = 0xFFFFu;
                                 {
                                     uint16_t bend;
-                                    bend = mod2rmf_pitchbend_to_midi(ci->pitchbend + activeNotes[ch].bendOffsetCents,
+                                    bend = mod2rmf_pitchbend_to_midi(ci->pitchbend -
+                                                                        activeNotes[ch].rateFinCents +
+                                                                        activeNotes[ch].bendOffsetCents,
                                                                     song->pitchBendRangeSemitones);
                                     chLastBend[ch] = bend;
                                     (void)mod2rmf_song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend,
@@ -1305,7 +1341,9 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                             noteXpo = mod2rmf_resolve_note_transpose(mod,
                                                                      ci,
                                                                      delaySid,
-                                                                     sampleTranspose);
+                                                                     sampleTranspose,
+                                                                     conv->rawSamples,
+                                                                     conv->rawSampleCount);
                             midiNote = baseNote + mod2rmf_tracker_note_bias(conv) + noteXpo;
 
                             activeNotes[ch].active = TRUE;
@@ -1314,10 +1352,17 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                             activeNotes[ch].velocity = mod2rmf_note_velocity_from_volume(chEffects[ch].delayedVolume);
                             activeNotes[ch].program = (uint8_t)program;
                             activeNotes[ch].bendOffsetCents = (midiNote - (int)activeNotes[ch].note) * 100;
+                            activeNotes[ch].rateFinCents =
+                                (delaySid >= 0 && (uint32_t)delaySid < conv->rawSampleCount &&
+                                 conv->rawSamples[delaySid].hasRateMapping)
+                                    ? mod2rmf_rate_fin_to_cents(conv->rawSamples[delaySid].rateFin)
+                                    : 0;
                             chLastBend[ch] = 0xFFFFu;
                             {
                                 uint16_t bend;
-                                bend = mod2rmf_pitchbend_to_midi(ci->pitchbend + activeNotes[ch].bendOffsetCents,
+                                bend = mod2rmf_pitchbend_to_midi(ci->pitchbend -
+                                                                    activeNotes[ch].rateFinCents +
+                                                                    activeNotes[ch].bendOffsetCents,
                                                                 song->pitchBendRangeSemitones);
                                 chLastBend[ch] = bend;
                                 (void)mod2rmf_song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend,
@@ -1371,7 +1416,9 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                         chLastBend[ch] = 0xFFFFu;
                         {
                             uint16_t bend;
-                            bend = mod2rmf_pitchbend_to_midi(ci->pitchbend + activeNotes[ch].bendOffsetCents,
+                            bend = mod2rmf_pitchbend_to_midi(ci->pitchbend -
+                                                                activeNotes[ch].rateFinCents +
+                                                                activeNotes[ch].bendOffsetCents,
                                                             song->pitchBendRangeSemitones);
                             chLastBend[ch] = bend;
                             (void)mod2rmf_song_model_append_pitch_bend(song, (uint16_t)ch, tick, bend,
@@ -1448,7 +1495,9 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
         p->program = (unsigned char)program;
         p->rootKey = MOD2RMF_LOGICAL_ROOT_KEY;
         p->hasSampleRateOverride = TRUE;
-        p->sampleRateOverrideHz = conv->moduleBaseRateHz;
+        p->sampleRateOverrideHz =
+            (conv->rawSamples[i].sampleRateHz > 0u) ? conv->rawSamples[i].sampleRateHz
+                                                    : conv->moduleBaseRateHz;
         
         p->sampleOffsetBytes = 0;
         p->offsetVariant = FALSE;
