@@ -634,8 +634,8 @@ struct InstrumentRow
 
 struct InstrumentFilterOption
 {
-    int bank = -1;
-    int category = -1; // -1 all, 0 melodic, 1 percussion
+    int bank = -1;     /* -1 All, -2 Custom, -3 Used by current song, else bank # */
+    int category = -1; // -1 all/special, 0 melodic, 1 percussion
     std::string label;
 };
 
@@ -3372,6 +3372,12 @@ private:
             m_instrument_filters.push_back(percussion);
         }
 
+        InstrumentFilterOption used_by_song;
+        used_by_song.bank = -3;
+        used_by_song.category = -1;
+        used_by_song.label = "Used by current song";
+        m_instrument_filters.push_back(used_by_song);
+
         m_instrument_filter_index = -1;
         for (size_t i = 0; i < m_instrument_filters.size(); ++i)
         {
@@ -3416,7 +3422,9 @@ private:
         }
 
         const InstrumentFilterOption &opt = m_instrument_filters[static_cast<size_t>(m_instrument_filter_index)];
-        if (opt.bank < 0 && opt.category < 0)
+        /* All (-1/-1) and Used by current song (-3): bank/category don't restrict
+         * here; song-used membership is applied in DrawInstrumentListWindow. */
+        if ((opt.bank < 0 && opt.category < 0) || opt.bank == -3)
         {
             return true;
         }
@@ -4340,6 +4348,86 @@ private:
 #include "nbeditor_dnd.inc"
 #include "nbeditor_clip_xfer.inc"
 
+    /* Same note→ResolveInstID mapping as RebuildExportInstrumentList. */
+    void CollectCurrentSongUsedInstrumentKeys(std::set<uint32_t> &out_inst_ids,
+                                              std::set<uint32_t> &out_instrument_indexes) const
+    {
+        out_inst_ids.clear();
+        out_instrument_indexes.clear();
+        if (!m_document || !m_bank_token)
+        {
+            return;
+        }
+
+        std::set<uint32_t> requested_seen;
+        uint16_t track_count = 0;
+        if (BAERmfEditorDocument_GetTrackCount(m_document, &track_count) != BAE_NO_ERROR)
+        {
+            return;
+        }
+        for (uint16_t t = 0; t < track_count; ++t)
+        {
+            uint32_t note_count = 0;
+            if (BAERmfEditorDocument_GetNoteCount(m_document, t, &note_count) != BAE_NO_ERROR)
+            {
+                continue;
+            }
+            for (uint32_t n = 0; n < note_count; ++n)
+            {
+                BAERmfEditorNoteInfo note;
+                std::memset(&note, 0, sizeof(note));
+                if (BAERmfEditorDocument_GetNoteInfo(m_document, t, n, &note) != BAE_NO_ERROR)
+                {
+                    continue;
+                }
+                const int bank_group = ExportBankGroupFromNoteBank(note.bank);
+                const bool percussion = (note.channel == 9 && note.bank == 0);
+                const uint32_t requested_inst_id =
+                    percussion ? (static_cast<uint32_t>(bank_group) * 256u) + 128u + note.note
+                               : (static_cast<uint32_t>(bank_group) * 256u) + note.program;
+                if (!requested_seen.insert(requested_inst_id).second)
+                {
+                    continue;
+                }
+
+                out_inst_ids.insert(requested_inst_id);
+                uint32_t resolved_inst_id = requested_inst_id;
+                uint32_t instrument_index = 0;
+                if (BAERmfEditorBank_ResolveInstID(m_bank_token,
+                                                   requested_inst_id,
+                                                   &resolved_inst_id,
+                                                   &instrument_index) == BAE_NO_ERROR)
+                {
+                    out_inst_ids.insert(resolved_inst_id);
+                    out_instrument_indexes.insert(instrument_index);
+                }
+            }
+        }
+    }
+
+    bool InstrumentUsedByCurrentSong(const InstrumentRow &inst,
+                                     const std::set<uint32_t> &used_inst_ids,
+                                     const std::set<uint32_t> &used_instrument_indexes) const
+    {
+        if (!used_inst_ids.empty())
+        {
+            if (inst.inst_id != 0 && used_inst_ids.count(inst.inst_id) != 0)
+            {
+                return true;
+            }
+            if (inst.target_inst_id != 0 && used_inst_ids.count(inst.target_inst_id) != 0)
+            {
+                return true;
+            }
+        }
+        if (!inst.from_song_document &&
+            used_instrument_indexes.count(inst.instrument_index) != 0)
+        {
+            return true;
+        }
+        return false;
+    }
+
     void DrawInstrumentListWindow()
     {
         static const char *kInstrumentSortLabels[] = {
@@ -4410,6 +4498,15 @@ private:
         }
         const bool filter_is_group =
             active_filter && active_filter->bank >= 0 && active_filter->category >= 0;
+        const bool used_by_song = active_filter && active_filter->bank == -3;
+
+        std::set<uint32_t> song_used_inst_ids;
+        std::set<uint32_t> song_used_instrument_indexes;
+        if (used_by_song)
+        {
+            CollectCurrentSongUsedInstrumentKeys(song_used_inst_ids,
+                                                 song_used_instrument_indexes);
+        }
 
         std::vector<size_t> visible;
         visible.reserve(m_instruments.size());
@@ -4425,6 +4522,13 @@ private:
             if (filter_is_group && inst.program >= 0 && inst.program < 128)
             {
                 used_programs[inst.program] = true;
+            }
+            if (used_by_song &&
+                !InstrumentUsedByCurrentSong(inst,
+                                             song_used_inst_ids,
+                                             song_used_instrument_indexes))
+            {
+                continue;
             }
             if (!InstrumentMatchesTextFilter(inst))
             {
@@ -4462,7 +4566,8 @@ private:
 
         int empty_count = 0;
         std::vector<int> empty_programs;
-        if (m_show_empty_instrument_slots && filter_is_group)
+        /* Empty slots are meaningless when filtering to song-used instruments. */
+        if (m_show_empty_instrument_slots && filter_is_group && !used_by_song)
         {
             const int bank = active_filter->bank;
             for (int p = 0; p < 128; ++p)
@@ -4492,9 +4597,17 @@ private:
         }
 
         const int visible_count = static_cast<int>(visible.size());
-        if (m_show_empty_instrument_slots && filter_is_group)
+        if (used_by_song && !m_document)
+        {
+            ImGui::TextDisabled("Instruments: 0 (no active song)");
+        }
+        else if (m_show_empty_instrument_slots && filter_is_group && !used_by_song)
         {
             ImGui::Text("Instruments: %d (+ %d empty)", visible_count, empty_count);
+        }
+        else if (used_by_song)
+        {
+            ImGui::Text("Instruments: %d (used by current song)", visible_count);
         }
         else
         {
@@ -5073,6 +5186,8 @@ private:
 
     std::array<bool, 16> m_channel_muted = {};
     int m_channel_solo = -1; /* -1 = none; 0..15 = solo that channel */
+    std::array<float, 16> m_channel_vu = {};
+    uint32_t m_channel_vu_last_tick_ms = 0;
     std::array<bool, 128> m_key_mouse_held = {};
     std::array<uint32_t, 128> m_key_active_until_ms = {};
     /* VKBD key → actual MIDI note sent (percussion remaps every key to the drum slot). */

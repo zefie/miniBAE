@@ -1,8 +1,138 @@
 /* Phase 5 — BE2-inspired Player transport (included inside EditorApp). */
 
+    void UpdateChannelVuMeters()
+    {
+        const uint32_t now = SDL_GetTicks();
+        float dt_ms = 16.0f;
+        if (m_channel_vu_last_tick_ms != 0 && now >= m_channel_vu_last_tick_ms)
+        {
+            dt_ms = static_cast<float>(now - m_channel_vu_last_tick_ms);
+            if (dt_ms < 1.0f)
+            {
+                dt_ms = 1.0f;
+            }
+            if (dt_ms > 100.0f)
+            {
+                dt_ms = 100.0f;
+            }
+        }
+        m_channel_vu_last_tick_ms = now;
+
+        float ch_l[16] = {};
+        float ch_r[16] = {};
+        if (m_mixer)
+        {
+            GM_GetRealtimeChannelLevels(ch_l, ch_r);
+        }
+
+        /* Match zefidi: time-based EMA so high refresh rates don't flicker. */
+        constexpr float k_attack_ms = 30.0f;
+        constexpr float k_release_ms = 140.0f;
+        auto ema_alpha = [](float dt, float tau) -> float {
+            if (tau <= 1.0f)
+            {
+                return 1.0f;
+            }
+            const float a = 1.0f - std::exp(-dt / tau);
+            if (a < 0.0f)
+            {
+                return 0.0f;
+            }
+            if (a > 1.0f)
+            {
+                return 1.0f;
+            }
+            return a;
+        };
+
+        for (int ch = 0; ch < 16; ++ch)
+        {
+            float &vu = m_channel_vu[static_cast<size_t>(ch)];
+            if (ChannelEffectivelyMuted(ch))
+            {
+                vu = 0.0f;
+                continue;
+            }
+            float lvl = 0.0f;
+            if (m_mixer)
+            {
+                lvl = (ch_l[ch] + ch_r[ch]) * 0.5f;
+                if (lvl < 0.0f)
+                {
+                    lvl = 0.0f;
+                }
+                if (lvl > 1.0f)
+                {
+                    lvl = 1.0f;
+                }
+            }
+            const float tau = (lvl > vu) ? k_attack_ms : k_release_ms;
+            const float alpha = ema_alpha(dt_ms, tau);
+            vu = vu * (1.0f - alpha) + lvl * alpha;
+            if (vu < 0.005f && lvl <= 0.0f)
+            {
+                vu = 0.0f;
+            }
+        }
+    }
+
+    void DrawChannelVuMeter(int ch, float height)
+    {
+        const ImVec2 size(6.0f, height);
+        const ImVec2 p0 = ImGui::GetCursorScreenPos();
+        ImGui::Dummy(size);
+        ImDrawList *dl = ImGui::GetWindowDrawList();
+        if (!dl)
+        {
+            return;
+        }
+        const ImVec2 p1(p0.x + size.x, p0.y + size.y);
+        dl->AddRectFilled(p0, p1, IM_COL32(28, 30, 34, 255));
+        dl->AddRect(p0, p1, IM_COL32(60, 64, 72, 255));
+
+        float lvl = m_channel_vu[static_cast<size_t>(ch)];
+        if (lvl < 0.0f)
+        {
+            lvl = 0.0f;
+        }
+        if (lvl > 1.0f)
+        {
+            lvl = 1.0f;
+        }
+        const float pad = 1.0f;
+        const float inner_h = size.y - pad * 2.0f;
+        const int fill_h = static_cast<int>(lvl * inner_h);
+        if (fill_h <= 0 || inner_h <= 0.0f)
+        {
+            return;
+        }
+        const float gx0 = p0.x + pad;
+        const float gx1 = p0.x + size.x - pad;
+        for (int yoff = 0; yoff < fill_h; ++yoff)
+        {
+            const float frac = static_cast<float>(yoff) / inner_h;
+            ImU32 col;
+            if (frac < 0.5f)
+            {
+                const float p = frac / 0.5f;
+                col = IM_COL32(static_cast<int>(20.0f + 180.0f * p), 200, 20, 255);
+            }
+            else
+            {
+                const float p = (frac - 0.5f) / 0.5f;
+                col = IM_COL32(static_cast<int>(200.0f + 55.0f * p),
+                               static_cast<int>(200.0f * (1.0f - p)),
+                               20,
+                               255);
+            }
+            const float y = p0.y + size.y - pad - 1.0f - static_cast<float>(yoff);
+            dl->AddLine(ImVec2(gx0, y), ImVec2(gx1, y), col);
+        }
+    }
+
     void DrawPlayerWindow()
     {
-        ImGui::SetNextWindowSizeConstraints(ImVec2(560.0f, 420.0f), ImVec2(4096.0f, 4096.0f));
+        ImGui::SetNextWindowSizeConstraints(ImVec2(780.0f, 420.0f), ImVec2(4096.0f, 4096.0f));
         if (!ImGui::Begin("Player", nullptr, ImGuiWindowFlags_NoCollapse))
         {
             ImGui::End();
@@ -332,10 +462,12 @@
         ImGui::EndChild();
         ImGui::PopStyleColor();
 
-        /* ---- Channels mute pad (LMB mute, RMB solo) ---- */
+        /* ---- Channels mute pad (LMB mute, RMB solo) + per-channel VU ---- */
         ImGui::SeparatorText("Channels");
+        UpdateChannelVuMeters();
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6.0f, 6.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.0f, 4.0f));
+        constexpr float k_ch_btn_h = 28.0f;
         for (int ch = 0; ch < 16; ++ch)
         {
             ImGui::PushID(ch);
@@ -361,7 +493,7 @@
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.36f, 0.44f, 1.0f));
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.18f, 0.24f, 0.30f, 1.0f));
             }
-            ImGui::Button(label, ImVec2(36.0f, 28.0f));
+            ImGui::Button(label, ImVec2(36.0f, k_ch_btn_h));
             if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
             {
                 /* Any other channel ends solo; then toggle this channel's mute. */
@@ -391,6 +523,8 @@
                                            : (m_channel_muted[static_cast<size_t>(ch)] ? "Muted" : "Open");
                 ImGui::SetTooltip("Channel %d — %s\nLeft: mute  Right: solo", ch + 1, state);
             }
+            ImGui::SameLine(0.0f, 2.0f);
+            DrawChannelVuMeter(ch, k_ch_btn_h);
             ImGui::PopID();
             if (ch < 15)
             {
