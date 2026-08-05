@@ -1507,10 +1507,10 @@ private:
     {
         m_pending_dialog_action = DialogAction::OpenImport;
         static const SDL_DialogFileFilter filters[] = {
-            {"All supported files", "rmf;zmf;mid;midi;kar;rmi;hsb;zsb;bsn;zsn;mod;s3m;xm;it;mtm;stm;669;far;ult;amf;dbm;imf;liq;med;mgt;okt;ptm;xmf"},
+            {"All supported files", "rmf;zmf;mid;midi;kar;rmi;hsb;zsb;bsn;zsn;mod;s3m;xm;it;mtm;stm;669;far;ult;amf;dbm;imf;liq;med;mgt;okt;ptm"},
             {"Beatnik / NeoBAE Session (*.bsn;*.zsn)", "bsn;zsn"},
             {"RMF files (*.rmf;*.zmf)", "rmf;zmf"},
-            {"Module Tracker file", "mod;s3m;xm;it;mtm;stm;669;far;ult;amf;dbm;imf;liq;med;mgt;okt;ptm;xmf"},
+            {"Module Tracker file", "mod;s3m;xm;it;mtm;stm;669;far;ult;amf;dbm;imf;liq;med;mgt;okt;ptm"},
             {"MIDI files (*.mid;*.midi;*.kar;*.rmi)", "mid;midi;kar;rmi"},
             {"Bank files (*.hsb;*.zsb)", "hsb;zsb"},
             {"All files (*.*)", "*"},
@@ -1529,10 +1529,10 @@ private:
     {
         m_pending_dialog_action = DialogAction::OpenImport;
         static const SDL_DialogFileFilter filters[] = {
-            {"Song files", "mid;midi;kar;rmi;rmf;zmf;mod;s3m;xm;it;mtm;stm;669;far;ult;amf;dbm;imf;liq;med;mgt;okt;ptm;xmf"},
+            {"Song files", "mid;midi;kar;rmi;rmf;zmf;mod;s3m;xm;it;mtm;stm;669;far;ult;amf;dbm;imf;liq;med;mgt;okt;ptm"},
             {"MIDI files (*.mid;*.midi;*.kar;*.rmi)", "mid;midi;kar;rmi"},
             {"RMF / ZMF (*.rmf;*.zmf)", "rmf;zmf"},
-            {"Module Tracker file", "mod;s3m;xm;it;mtm;stm;669;far;ult;amf;dbm;imf;liq;med;mgt;okt;ptm;xmf"},
+            {"Module Tracker file", "mod;s3m;xm;it;mtm;stm;669;far;ult;amf;dbm;imf;liq;med;mgt;okt;ptm"},
             {"All files (*.*)", "*"},
         };
         SDL_ShowOpenFileDialog(OnFileDialogResult,
