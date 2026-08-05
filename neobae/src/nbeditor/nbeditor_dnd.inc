@@ -145,8 +145,11 @@
             const int16_t split_count = XGetShort(&inst->keySplitCount);
             if (split_count <= 0)
             {
-                const XShortResourceID snd = static_cast<XShortResourceID>(XGetShort(&inst->sndResourceID));
-                if (snd != 0 && snd_seen.insert(snd).second)
+                /* INST blob is still big-endian on disk — XGetShort once. */
+                const XShortResourceID snd =
+                    static_cast<XShortResourceID>(XGetShort(&inst->sndResourceID));
+                if (snd != static_cast<XShortResourceID>(kNoSndResourceId) &&
+                    snd_seen.insert(snd).second)
                 {
                     out_snd.push_back(snd);
                 }
@@ -157,10 +160,13 @@
                 {
                     KeySplit split;
                     std::memset(&split, 0, sizeof(split));
+                    /* XGetKeySplitFromPtrWithSize already host-endianizes fields.
+                     * Do not XGetShort() again (double-swap → wrong IDs, SND copy
+                     * misses, Samples list empty — e.g. NokiaRevBS8a.bsn). */
                     XGetKeySplitFromPtrWithSize(inst, size, s, &split);
-                    const XShortResourceID snd =
-                        static_cast<XShortResourceID>(XGetShort(&split.sndResourceID));
-                    if (snd != 0 && snd_seen.insert(snd).second)
+                    const XShortResourceID snd = split.sndResourceID;
+                    if (snd != static_cast<XShortResourceID>(kNoSndResourceId) &&
+                        snd_seen.insert(snd).second)
                     {
                         out_snd.push_back(snd);
                     }
@@ -463,6 +469,8 @@
                                        donor,
                                        dest,
                                        TRUE);
+        /* INST/SND copy does not touch ALIS — merge Bank 0/1 aliases (BE2 does). */
+        const size_t alias_count = MergeBank01AliasesFromDonor(donor, dest);
         (void)XCleanResourceFile(dest);
 
         m_bank01_touched = false;
@@ -471,11 +479,118 @@
         char status[256];
         std::snprintf(status,
                       sizeof(status),
-                      "Loaded Bank 0/1 from %s (%zu instruments, Bank 2+ kept)",
+                      "Loaded Bank 0/1 from %s (%zu instruments, %zu aliases, Bank 2+ kept)",
                       source_label && source_label[0] ? source_label : "bank",
-                      inst_ids.size());
+                      inst_ids.size(),
+                      alias_count);
         SetStatus(status);
         return true;
+    }
+
+    /* Append donor Bank 0/1 ALIS entries onto dest (which still has Bank 2+ aliases
+     * after UnloadBank01). Returns number of donor aliases imported. */
+    size_t MergeBank01AliasesFromDonor(XFILE donor, XFILE dest)
+    {
+        if (!donor || !dest)
+        {
+            return 0;
+        }
+
+        XAliasLinkResource *donor_alias = XGetAliasLinkFromFile(donor);
+        if (!donor_alias)
+        {
+            return 0;
+        }
+
+        struct AliasPair
+        {
+            uint32_t from_id;
+            uint32_t to_id;
+        };
+        std::vector<AliasPair> merged;
+        std::set<uint32_t> from_seen;
+
+        XAliasLinkResource *dest_alias = XGetAliasLinkFromFile(dest);
+        if (dest_alias)
+        {
+            const uint32_t n = static_cast<uint32_t>(XGetLong(&dest_alias->numberOfAliases));
+            for (uint32_t i = 0; i < n; ++i)
+            {
+                const uint32_t from_id =
+                    static_cast<uint32_t>(XGetLong(&dest_alias->list[i].aliasFrom));
+                const uint32_t to_id =
+                    static_cast<uint32_t>(XGetLong(&dest_alias->list[i].aliasTo));
+                if (from_seen.insert(from_id).second)
+                {
+                    merged.push_back({from_id, to_id});
+                }
+            }
+            XDisposePtr(reinterpret_cast<XPTR>(dest_alias));
+        }
+
+        size_t imported = 0;
+        const uint32_t donor_n =
+            static_cast<uint32_t>(XGetLong(&donor_alias->numberOfAliases));
+        for (uint32_t i = 0; i < donor_n; ++i)
+        {
+            const uint32_t from_id =
+                static_cast<uint32_t>(XGetLong(&donor_alias->list[i].aliasFrom));
+            const uint32_t to_id =
+                static_cast<uint32_t>(XGetLong(&donor_alias->list[i].aliasTo));
+            /* Same Bank 0/1 slot rule as UnloadBank01 alias deletion. */
+            if ((from_id / 256u) >= 2u)
+            {
+                continue;
+            }
+            if (!from_seen.insert(from_id).second)
+            {
+                continue;
+            }
+            merged.push_back({from_id, to_id});
+            ++imported;
+        }
+        XDisposePtr(reinterpret_cast<XPTR>(donor_alias));
+
+        if (imported == 0 && merged.empty())
+        {
+            return 0;
+        }
+
+        if (merged.empty())
+        {
+            (void)XDeleteFileResource(dest, ID_ALIAS, DEFAULT_RESOURCE_ALIAS_ID, FALSE);
+            return 0;
+        }
+
+        const int32_t new_size = static_cast<int32_t>(sizeof(uint32_t) * 2 +
+                                                     merged.size() * sizeof(XAliasLink));
+        XAliasLinkResource *new_alias =
+            static_cast<XAliasLinkResource *>(XNewPtr(new_size));
+        if (!new_alias)
+        {
+            return 0;
+        }
+        XPutLong(&new_alias->version, ALIAS_ID_RESOURCE_VERSION);
+        XPutLong(&new_alias->numberOfAliases, static_cast<uint32_t>(merged.size()));
+        for (size_t i = 0; i < merged.size(); ++i)
+        {
+            XPutLong(&new_alias->list[i].aliasFrom, merged[i].from_id);
+            XPutLong(&new_alias->list[i].aliasTo, merged[i].to_id);
+        }
+
+        (void)XDeleteFileResource(dest, ID_ALIAS, DEFAULT_RESOURCE_ALIAS_ID, FALSE);
+        char empty_name[1] = {0};
+        if (XAddFileResource(dest,
+                             ID_ALIAS,
+                             DEFAULT_RESOURCE_ALIAS_ID,
+                             empty_name,
+                             new_alias,
+                             new_size) != 0)
+        {
+            imported = 0;
+        }
+        XDisposePtr(reinterpret_cast<XPTR>(new_alias));
+        return imported;
     }
 
     /* Collect every INST + referenced SND from a resource file (any bank). */

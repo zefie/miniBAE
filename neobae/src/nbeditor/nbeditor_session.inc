@@ -4885,138 +4885,167 @@
                    flags == static_cast<int32_t>(FOUR_CHAR('G', 'O', 'S', 'T'));
         };
 
-        /* BE2-style compact LEVEL / TIME rows under the graph. */
+        /* BE2-style compact LEVEL / TIME rows — wrap into groups so 32 stages fit. */
         if (stages > 0)
         {
-            const float col_w = std::max(52.0f, (ImGui::GetContentRegionAvail().x - 72.0f) /
-                                                    static_cast<float>(stages));
+            constexpr float kLabelCol = 72.0f;
+            constexpr float kMinColW = 56.0f;
+            const float avail = std::max(120.0f, ImGui::GetContentRegionAvail().x - kLabelCol);
+            int per_row = static_cast<int>(avail / kMinColW);
+            per_row = std::clamp(per_row, 4, 8); /* 4–8 cols/group; 32 stages → ≥4 groups */
+            const int group_count = (stages + per_row - 1) / per_row;
+
             ImGui::Spacing();
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextUnformatted(beatnik_level_scale ? "LEVEL (%)" : "LEVEL");
-            ImGui::SameLine(72.0f);
-            for (int i = 0; i < stages; ++i)
+            for (int g = 0; g < group_count; ++g)
             {
-                ImGui::PushID(1000 + i);
-                ImGui::SetNextItemWidth(col_w - 4.0f);
-                if (is_goto_stage(adsr.stages[i].flags))
+                const int begin = g * per_row;
+                const int end = std::min(stages, begin + per_row);
+                const int count = end - begin;
+                const float col_w = std::max(kMinColW, avail / static_cast<float>(count));
+
+                if (group_count > 1)
                 {
-                    int target = adsr.stages[i].level;
-                    if (target < 1)
-                    {
-                        target = 1;
-                    }
-                    if (ImGui::InputInt("##lvl", &target, 0, 0))
-                    {
-                        MarkInstrumentEditorDirty(false);
-                        adsr.stages[i].level = std::clamp(target, 1, std::max(1, stages));
-                        LivePatchInstrumentEditor();
-                    }
+                    char group_title[48];
+                    std::snprintf(group_title,
+                                  sizeof(group_title),
+                                  "Stages %d–%d",
+                                  begin,
+                                  end - 1);
+                    ImGui::SeparatorText(group_title);
                 }
-                else if (beatnik_level_scale)
+
+                ImGui::PushID(5000 + g);
+
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted(beatnik_level_scale ? "LEVEL (%)" : "LEVEL");
+                ImGui::SameLine(kLabelCol);
+                for (int i = begin; i < end; ++i)
                 {
-                    int level = AdsrLevelToBeatnik(adsr.stages[i].level);
-                    if (ImGui::InputInt("##lvl", &level, 0, 0))
+                    ImGui::PushID(1000 + i);
+                    ImGui::SetNextItemWidth(col_w - 4.0f);
+                    if (is_goto_stage(adsr.stages[i].flags))
+                    {
+                        int target = adsr.stages[i].level;
+                        if (target < 1)
+                        {
+                            target = 1;
+                        }
+                        if (ImGui::InputInt("##lvl", &target, 0, 0))
+                        {
+                            MarkInstrumentEditorDirty(false);
+                            adsr.stages[i].level = std::clamp(target, 1, std::max(1, stages));
+                            LivePatchInstrumentEditor();
+                        }
+                    }
+                    else if (beatnik_level_scale)
+                    {
+                        int level = AdsrLevelToBeatnik(adsr.stages[i].level);
+                        if (ImGui::InputInt("##lvl", &level, 0, 0))
+                        {
+                            MarkInstrumentEditorDirty(false);
+                            adsr.stages[i].level = AdsrLevelFromBeatnik(level);
+                            LivePatchInstrumentEditor();
+                        }
+                        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                        {
+                            ImGui::SetTooltip("Raw: %d  (100%% = 4096)", adsr.stages[i].level);
+                        }
+                    }
+                    else
+                    {
+                        int level = adsr.stages[i].level;
+                        if (ImGui::InputInt("##lvl", &level, 0, 0))
+                        {
+                            MarkInstrumentEditorDirty(false);
+                            adsr.stages[i].level = level;
+                            LivePatchInstrumentEditor();
+                        }
+                    }
+                    if (i + 1 < end)
+                    {
+                        ImGui::SameLine(0.0f, 4.0f);
+                    }
+                    ImGui::PopID();
+                }
+
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted("TIME (MS)");
+                ImGui::SameLine(kLabelCol);
+                for (int i = begin; i < end; ++i)
+                {
+                    ImGui::PushID(2000 + i);
+                    ImGui::SetNextItemWidth(col_w - 4.0f);
+                    int ms = AdsrTimeToDisplayMs(adsr.stages[i].flags, adsr.stages[i].time);
+                    if (ImGui::InputInt("##tm", &ms, 0, 0))
                     {
                         MarkInstrumentEditorDirty(false);
-                        adsr.stages[i].level = AdsrLevelFromBeatnik(level);
+                        adsr.stages[i].time =
+                            AdsrTimeFromDisplayMs(adsr.stages[i].flags, std::max(0, ms));
                         LivePatchInstrumentEditor();
                     }
                     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
                     {
-                        ImGui::SetTooltip("Raw: %d  (100%% = 4096)", adsr.stages[i].level);
-                    }
-                }
-                else
-                {
-                    int level = adsr.stages[i].level;
-                    if (ImGui::InputInt("##lvl", &level, 0, 0))
-                    {
-                        MarkInstrumentEditorDirty(false);
-                        adsr.stages[i].level = level;
-                        LivePatchInstrumentEditor();
-                    }
-                }
-                if (i + 1 < stages)
-                {
-                    ImGui::SameLine(0.0f, 4.0f);
-                }
-                ImGui::PopID();
-            }
-
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextUnformatted("TIME (MS)");
-            ImGui::SameLine(72.0f);
-            for (int i = 0; i < stages; ++i)
-            {
-                ImGui::PushID(2000 + i);
-                ImGui::SetNextItemWidth(col_w - 4.0f);
-                int ms = AdsrTimeToDisplayMs(adsr.stages[i].flags, adsr.stages[i].time);
-                if (ImGui::InputInt("##tm", &ms, 0, 0))
-                {
-                    MarkInstrumentEditorDirty(false);
-                    adsr.stages[i].time =
-                        AdsrTimeFromDisplayMs(adsr.stages[i].flags, std::max(0, ms));
-                    LivePatchInstrumentEditor();
-                }
-                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
-                {
-                    if (AdsrIsSustainFlag(adsr.stages[i].flags) && adsr.stages[i].time == 0)
-                    {
-                        ImGui::SetTooltip(
-                            "BE2 shows %d ms for SUST when stored time is 0",
-                            kBe2SustainDisplayMs);
-                    }
-                    else
-                    {
-                        ImGui::SetTooltip("Stored: %d µs", adsr.stages[i].time);
-                    }
-                }
-                if (i + 1 < stages)
-                {
-                    ImGui::SameLine(0.0f, 4.0f);
-                }
-                ImGui::PopID();
-            }
-
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextUnformatted("TYPE");
-            ImGui::SameLine(72.0f);
-            for (int i = 0; i < stages; ++i)
-            {
-                ImGui::PushID(3000 + i);
-                ImGui::SetNextItemWidth(col_w - 4.0f);
-                const char *preview = AdsrStageFlagName(adsr.stages[i].flags);
-                if (ImGui::BeginCombo("##ty", preview))
-                {
-                    for (const auto &choice : kFlagChoices)
-                    {
-                        const bool selected = (adsr.stages[i].flags == choice.flags);
-                        if (ImGui::Selectable(choice.label, selected))
+                        if (AdsrIsSustainFlag(adsr.stages[i].flags) && adsr.stages[i].time == 0)
                         {
-                            MarkInstrumentEditorDirty(false);
-                            const bool became_goto = is_goto_stage(choice.flags);
-                            const bool was_goto = is_goto_stage(adsr.stages[i].flags);
-                            adsr.stages[i].flags = choice.flags;
-                            if (became_goto && !was_goto)
+                            ImGui::SetTooltip(
+                                "BE2 shows %d ms for SUST when stored time is 0",
+                                kBe2SustainDisplayMs);
+                        }
+                        else
+                        {
+                            ImGui::SetTooltip("Stored: %d µs", adsr.stages[i].time);
+                        }
+                    }
+                    if (i + 1 < end)
+                    {
+                        ImGui::SameLine(0.0f, 4.0f);
+                    }
+                    ImGui::PopID();
+                }
+
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted("TYPE");
+                ImGui::SameLine(kLabelCol);
+                for (int i = begin; i < end; ++i)
+                {
+                    ImGui::PushID(3000 + i);
+                    ImGui::SetNextItemWidth(col_w - 4.0f);
+                    const char *preview = AdsrStageFlagName(adsr.stages[i].flags);
+                    if (ImGui::BeginCombo("##ty", preview))
+                    {
+                        for (const auto &choice : kFlagChoices)
+                        {
+                            const bool selected = (adsr.stages[i].flags == choice.flags);
+                            if (ImGui::Selectable(choice.label, selected))
                             {
-                                if (adsr.stages[i].level < 1 || adsr.stages[i].level > stages)
+                                MarkInstrumentEditorDirty(false);
+                                const bool became_goto = is_goto_stage(choice.flags);
+                                const bool was_goto = is_goto_stage(adsr.stages[i].flags);
+                                adsr.stages[i].flags = choice.flags;
+                                if (became_goto && !was_goto)
                                 {
-                                    adsr.stages[i].level = 1;
+                                    if (adsr.stages[i].level < 1 ||
+                                        adsr.stages[i].level > stages)
+                                    {
+                                        adsr.stages[i].level = 1;
+                                    }
                                 }
+                                LivePatchInstrumentEditor();
                             }
-                            LivePatchInstrumentEditor();
+                            if (selected)
+                            {
+                                ImGui::SetItemDefaultFocus();
+                            }
                         }
-                        if (selected)
-                        {
-                            ImGui::SetItemDefaultFocus();
-                        }
+                        ImGui::EndCombo();
                     }
-                    ImGui::EndCombo();
+                    if (i + 1 < end)
+                    {
+                        ImGui::SameLine(0.0f, 4.0f);
+                    }
+                    ImGui::PopID();
                 }
-                if (i + 1 < stages)
-                {
-                    ImGui::SameLine(0.0f, 4.0f);
-                }
+
                 ImGui::PopID();
             }
         }
