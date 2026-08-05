@@ -767,33 +767,47 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1loadFromMemory
 	
 	if(r == BAE_NO_ERROR)
 	{
-		// Get the LoadResult class and set its fields
+		/* Fields looked up by name — R8 must keep LoadResult (proguard-rules.pro).
+		 * Never Set*Field with a NULL jfieldID (SIGSEGV under minify). */
 		jclass resultClass = (*env)->GetObjectClass(env, resultObj);
-		
-		// Set type field
+		if (!resultClass) {
+			__android_log_print(ANDROID_LOG_ERROR, "neoBAE", "loadFromMemory: GetObjectClass failed");
+			return (jint)BAE_GENERAL_ERR;
+		}
+
 		jfieldID typeField = (*env)->GetFieldID(env, resultClass, "type", "I");
-		(*env)->SetIntField(env, resultObj, typeField, (jint)result.type);
-		
-		// Set fileType field
 		jfieldID fileTypeField = (*env)->GetFieldID(env, resultClass, "fileType", "I");
-		(*env)->SetIntField(env, resultObj, fileTypeField, (jint)result.fileType);
-		
-		// Set result field
 		jfieldID resultField = (*env)->GetFieldID(env, resultClass, "result", "I");
+		if (!typeField || !fileTypeField || !resultField) {
+			__android_log_print(ANDROID_LOG_ERROR, "neoBAE",
+				"loadFromMemory: GetFieldID failed (R8 renamed LoadResult fields?)");
+			(*env)->ExceptionClear(env);
+			(*env)->DeleteLocalRef(env, resultClass);
+			return (jint)BAE_GENERAL_ERR;
+		}
+
+		(*env)->SetIntField(env, resultObj, typeField, (jint)result.type);
+		(*env)->SetIntField(env, resultObj, fileTypeField, (jint)result.fileType);
 		(*env)->SetIntField(env, resultObj, resultField, (jint)result.result);
-		
-		// Set the appropriate object reference
+
 		if(result.type == BAE_LOAD_TYPE_SONG && result.data.song)
 		{
 			jfieldID songField = (*env)->GetFieldID(env, resultClass, "songReference", "J");
-			(*env)->SetLongField(env, resultObj, songField, (jlong)(intptr_t)result.data.song);
+			if (songField)
+				(*env)->SetLongField(env, resultObj, songField, (jlong)(intptr_t)result.data.song);
+			else
+				(*env)->ExceptionClear(env);
 		}
 		else if(result.type == BAE_LOAD_TYPE_SOUND && result.data.sound)
 		{
 			jfieldID soundField = (*env)->GetFieldID(env, resultClass, "soundReference", "J");
-			(*env)->SetLongField(env, resultObj, soundField, (jlong)(intptr_t)result.data.sound);
+			if (soundField)
+				(*env)->SetLongField(env, resultObj, soundField, (jlong)(intptr_t)result.data.sound);
+			else
+				(*env)->ExceptionClear(env);
 		}
-		
+
+		(*env)->DeleteLocalRef(env, resultClass);
 		__android_log_print(ANDROID_LOG_DEBUG, "neoBAE", "BAEMixer_LoadFromMemory succeeded: type=%d, fileType=%d", result.type, result.fileType);
 	}
 	else

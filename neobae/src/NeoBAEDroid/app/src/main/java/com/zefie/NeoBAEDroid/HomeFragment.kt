@@ -3934,48 +3934,30 @@ class HomeFragment : Fragment() {
                         // Song start can overwrite embedded reverb default — reapply.
                         Mixer.setDefaultReverb(reverbType.value)
 
-                        android.util.Log.d("HomeFragment", "Song started, letting first audio callback settle...")
-                        
-                        // CRITICAL: Give the mixer/song a moment to actually start processing
-                        // The first audio callback needs to happen before export will work
-                        Thread.sleep(100) // 100ms should be enough for initial scheduling
-                        
                         android.util.Log.d("HomeFragment", "Priming export pipeline...")
+                        // Prime offline (no OpenSL): service slices until the song leaves IsDone
+                        // or position advances. Never recursively re-enter exportToFile.
                         val positionMs1 = currentSong?.getPositionMs() ?: 0
-                        // CRITICAL: Prime the export pipeline (matching gui_export.c behavior)
-                        // Service several times to ensure audio engine starts processing
-                        for (prime in 0 until 8) {
+                        var primed = false
+                        val maxPrimes = 40
+                        for (prime in 0 until maxPrimes) {
                             val primeResult = Mixer.getMixer()?.serviceOutputToFile() ?: -1
                             if (primeResult != 0) {
                                 throw Exception("Export priming failed (err=$primeResult)")
                             }
-                            Thread.sleep(1) // Small delay between primes
-                        }
-                        val positionMs2 = currentSong?.getPositionMs() ?: 0
-
-                        if (positionMs1 == positionMs2) {
-                            //throw Exception("Export failed (song must be playing to export)")
-                            resumePlayback()
-                            exportToFile(uri)
-                            return@Thread
-
-                        }
-                        // Keep priming while song reports done (hasn't started processing yet)
-                        var primeCount = 0
-                        val maxPrimes = 32
-                        while (primeCount < maxPrimes) {
-                            val stillDone = currentSong?.isDone() ?: false
-                            if (!stillDone) break // Song is now active
-                            
-                            val primeResult = Mixer.getMixer()?.serviceOutputToFile() ?: -1
-                            if (primeResult != 0) {
-                                throw Exception("Export priming failed (err=$primeResult)")
+                            val positionMs = currentSong?.getPositionMs() ?: 0
+                            val stillDone = currentSong?.isDone() ?: true
+                            if (positionMs != positionMs1 || !stillDone) {
+                                primed = true
+                                break
                             }
-                            Thread.sleep(2) // 2ms between priming attempts
-                            primeCount++
+                            Thread.sleep(2)
+                        }
+                        if (!primed) {
+                            throw Exception("Export failed (song did not start advancing)")
                         }
                         
-                        android.util.Log.d("HomeFragment", "Export pipeline primed after ${primeCount + 8} service calls")
+                        android.util.Log.d("HomeFragment", "Export pipeline primed")
                         
                         activity?.runOnUiThread {
                             exportStatus.value = if (exportTargetLoops > 0) {

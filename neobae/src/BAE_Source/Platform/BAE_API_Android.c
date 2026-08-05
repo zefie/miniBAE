@@ -195,6 +195,9 @@ static int16_t g_balance = 0;
 /* GM_Mixer* from GM_ResumeGeneralSound — audio callback runs on another thread
  * where TLS MusicGlobals is unset, so BuildMixerSlice must receive this. */
 static void *g_mixerThreadContext = NULL;
+/* Set while tearing down OpenSL so late buffer-queue callbacks no-op instead of
+ * UAF (export StartOutputToFile → ReleaseAudioCard is a hot path for this). */
+static volatile int g_audioShuttingDown = 0;
 
 #if defined(__ANDROID__)
 // forward declaration for callback (defined below)
@@ -624,6 +627,7 @@ int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t chan
 #define MINI_BAE_LOGD(fmt, ...) __android_log_print(ANDROID_LOG_DEBUG, "miniBAE", "BAE_AcquireAudioCard: " fmt, ##__VA_ARGS__)
 #define MINI_BAE_LOGE(fmt, ...) __android_log_print(ANDROID_LOG_ERROR, "miniBAE", "BAE_AcquireAudioCard: " fmt, ##__VA_ARGS__)
     g_mixerThreadContext = threadContext;
+    __atomic_store_n(&g_audioShuttingDown, 0, __ATOMIC_RELEASE);
     MINI_BAE_LOGD("enter sampleRate=%u channels=%u bits=%u mixer=%p", sampleRate, channels, bits, threadContext);
     // if already created, return success (still refresh mixer context above)
     if (gPlayerObject != NULL) { MINI_BAE_LOGD("already acquired (gPlayerObject=%p)", (void*)gPlayerObject); return 0; }
@@ -691,15 +695,41 @@ int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t chan
 int BAE_ReleaseAudioCard(void *threadContext)
 {
     (void)threadContext;
-    // Stop player
-    if (gPlayerPlay) { (*gPlayerPlay)->SetPlayState(gPlayerPlay, SL_PLAYSTATE_STOPPED); }
-    if (gPlayerObject) { (*gPlayerObject)->Destroy(gPlayerObject); gPlayerObject = NULL; gPlayerPlay = NULL; gBufferQueue = NULL; }
-    if (gOutputMixObject) { (*gOutputMixObject)->Destroy(gOutputMixObject); gOutputMixObject = NULL; }
-    if (gEngineObject) { (*gEngineObject)->Destroy(gEngineObject); gEngineObject = NULL; gEngineEngine = NULL; }
-    if (g_audioBufferA) { free(g_audioBufferA); g_audioBufferA = NULL; }
-    if (g_audioBufferB) { free(g_audioBufferB); g_audioBufferB = NULL; }
-    g_totalSamplesPlayed = 0;
+    /* Make in-flight / late OpenSL callbacks bail before we Destroy/free. */
+    __atomic_store_n(&g_audioShuttingDown, 1, __ATOMIC_RELEASE);
     g_mixerThreadContext = NULL;
+
+    if (gPlayerPlay) {
+        (*gPlayerPlay)->SetPlayState(gPlayerPlay, SL_PLAYSTATE_STOPPED);
+    }
+    /* Clear queue iface before Destroy so callbacks that race past the flag
+     * still refuse Enqueue. */
+    gBufferQueue = NULL;
+    gPlayerPlay = NULL;
+
+    if (gPlayerObject) {
+        (*gPlayerObject)->Destroy(gPlayerObject); /* waits for in-flight callback */
+        gPlayerObject = NULL;
+    }
+    if (gOutputMixObject) {
+        (*gOutputMixObject)->Destroy(gOutputMixObject);
+        gOutputMixObject = NULL;
+    }
+    if (gEngineObject) {
+        (*gEngineObject)->Destroy(gEngineObject);
+        gEngineObject = NULL;
+        gEngineEngine = NULL;
+    }
+
+    int16_t *bufA = g_audioBufferA;
+    int16_t *bufB = g_audioBufferB;
+    g_audioBufferA = NULL;
+    g_audioBufferB = NULL;
+    if (bufA) free(bufA);
+    if (bufB) free(bufB);
+
+    g_totalSamplesPlayed = 0;
+    __atomic_store_n(&g_audioShuttingDown, 0, __ATOMIC_RELEASE);
     return 0;
 }
 
@@ -774,12 +804,25 @@ void BAE_GetDeviceName(int32_t deviceID, char *cName, uint32_t cNameLength)
 #if defined(__ANDROID__)
 static void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
 {
+    (void)bq;
     (void)context;
+    if (__atomic_load_n(&g_audioShuttingDown, __ATOMIC_ACQUIRE))
+        return;
+
+    void *mixerCtx = g_mixerThreadContext;
+    int16_t *bufA = g_audioBufferA;
+    int16_t *bufB = g_audioBufferB;
+    SLAndroidSimpleBufferQueueItf queue = gBufferQueue;
+    if (!mixerCtx || !bufA || !bufB || !queue)
+        return;
+
     int channelsInt = (int)g_os_channels;
-    int16_t *buf = g_currentBuffer == 0 ? g_audioBufferA : g_audioBufferB;
+    int16_t *buf = g_currentBuffer == 0 ? bufA : bufB;
     extern void BAE_BuildMixerSlice(void *threadContext, void *pAudioBuffer, int32_t bufferByteLength, int32_t sampleFrames);
     int32_t bytes = (int32_t)(g_bufferFrames * channelsInt * (g_os_bits/8));
-    BAE_BuildMixerSlice(g_mixerThreadContext, buf, bytes, g_bufferFrames);
+    if (bytes <= 0 || g_bufferFrames <= 0)
+        return;
+    BAE_BuildMixerSlice(mixerCtx, buf, bytes, g_bufferFrames);
     // Apply software master volume & balance (16-bit only)
     if (g_os_bits == 16 && g_unscaled_volume < 256) {
         int16_t vol = g_unscaled_volume;
@@ -825,8 +868,12 @@ static void bqPlayerCallback(SLAndroidSimpleBufferQueueItf bq, void *context)
         }
     }
 
-    if (gBufferQueue) {
-        (*gBufferQueue)->Enqueue(gBufferQueue, buf, bytes);
+    if (__atomic_load_n(&g_audioShuttingDown, __ATOMIC_ACQUIRE))
+        return;
+    /* Re-read queue; Release nulls it before Destroy. */
+    queue = gBufferQueue;
+    if (queue) {
+        (*queue)->Enqueue(queue, buf, bytes);
     }
     g_totalSamplesPlayed += (uint32_t)g_bufferFrames;
     g_currentBuffer ^= 1;

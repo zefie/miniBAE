@@ -6139,6 +6139,15 @@ BAEResult BAEMixer_StartOutputToFile(BAEMixer theMixer,
     mWriteToFileType = outputType;
     XConvertPathToXFILENAME(pAudioOutputFile, &theFile);
 
+    /* Offline export builds slices via Service, not OpenSL. Clear systemPaused so
+     * PV_ProcessSampleFrame actually advances (a prior DisengageAudio would leave
+     * the mixer paused and export would hang / never move position). */
+    if (MusicGlobals)
+    {
+        MusicGlobals->systemPaused = FALSE;
+        MusicGlobals->sequencerPaused = FALSE;
+    }
+
     // mWritingDataBlock is where we will store the results of BAE_BuildMixerSlice()
     if (mWritingDataBlock)
     {
