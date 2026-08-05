@@ -3573,6 +3573,11 @@
     /* Beatnik Editor units: VOLUME_RANGE (4096) → 100, FULL_RANGE (8192) → 200.
      * Stored engine values stay raw; UI shows/edits the scaled units. */
     static constexpr int32_t kAdsrVolumeRange = 4096;
+    static constexpr int kAdsrBeatnikLevelMin = 0;
+    static constexpr int kAdsrBeatnikLevelMax = 200; /* FULL_RANGE — BE2 envelope limit */
+    /* UI times are milliseconds; engine stores microseconds. Cap avoids int32 overflow. */
+    static constexpr int kAdsrTimeMsMax =
+        static_cast<int>((std::numeric_limits<int32_t>::max)() / 1000);
     static int AdsrLevelToBeatnik(int32_t raw)
     {
         const int64_t n = static_cast<int64_t>(raw) * 100;
@@ -3581,6 +3586,7 @@
     }
     static int32_t AdsrLevelFromBeatnik(int display)
     {
+        display = std::clamp(display, kAdsrBeatnikLevelMin, kAdsrBeatnikLevelMax);
         return static_cast<int32_t>((static_cast<int64_t>(display) * kAdsrVolumeRange) / 100);
     }
     /* BE2 TIME (MS): µs↔ms. SUST stored as 0 shows as 12000 (classic scale/5 display). */
@@ -3599,6 +3605,7 @@
     }
     static int32_t AdsrTimeMsToUs(int ms)
     {
+        ms = std::clamp(ms, 0, kAdsrTimeMsMax);
         return static_cast<int32_t>(static_cast<int64_t>(ms) * 1000);
     }
     static int AdsrTimeToDisplayMs(int32_t flags, int32_t time_us)
@@ -3607,10 +3614,11 @@
         {
             return kBe2SustainDisplayMs;
         }
-        return AdsrTimeUsToMs(time_us);
+        return std::clamp(AdsrTimeUsToMs(time_us), 0, kAdsrTimeMsMax);
     }
     static int32_t AdsrTimeFromDisplayMs(int32_t flags, int display_ms)
     {
+        display_ms = std::clamp(display_ms, 0, kAdsrTimeMsMax);
         if (AdsrIsSustainFlag(flags) && display_ms == kBe2SustainDisplayMs)
         {
             return 0;
@@ -3808,7 +3816,7 @@
         {
             ImGui::SetTooltip(
                 "Hide ADSR editor. Installs BE flat ADSR "
-                "(LINE@65536/0µs + LAST@65536/90000µs); destination follows the LFO wave.");
+                "(LINE@65536/0ms + LAST@65536/90ms); destination follows the LFO wave.");
         }
         ImGui::SameLine();
         if (ImGui::RadioButton("ADSR + Waveform", mode == kLfoModeBoth))
@@ -3848,11 +3856,21 @@
                                      shape_labels,
                                      shape_label_count);
             }
-            if (ImGui::InputInt("period", &lfo.period))
+            /* Engine stores period in µs; UI edits milliseconds. */
+            int period_ms = (lfo.period <= 0) ? 0 : AdsrTimeUsToMs(lfo.period);
+            if (ImGui::InputInt("period (ms)", &period_ms))
             {
-                if (lfo.period != 0 && lfo.period <= 512)
+                if (period_ms <= 0)
                 {
-                    lfo.period = 513;
+                    lfo.period = 513; /* wave mode: engine needs 0 or > 512 */
+                }
+                else
+                {
+                    lfo.period = AdsrTimeMsToUs(period_ms);
+                    if (lfo.period != 0 && lfo.period <= 512)
+                    {
+                        lfo.period = 513;
+                    }
                 }
                 MarkInstrumentEditorDirty();
             }
@@ -3862,21 +3880,27 @@
                 int lvl = AdsrLevelToBeatnik(lfo.level);
                 if (ImGui::InputInt("DC_feed", &dc))
                 {
+                    dc = std::clamp(dc, kAdsrBeatnikLevelMin, kAdsrBeatnikLevelMax);
                     lfo.DC_feed = AdsrLevelFromBeatnik(dc);
                     MarkInstrumentEditorDirty();
                 }
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
                 {
-                    ImGui::SetTooltip("Raw: %d (100 = unity)", lfo.DC_feed);
+                    ImGui::SetTooltip("%d–%d (100 = unity)",
+                                      kAdsrBeatnikLevelMin,
+                                      kAdsrBeatnikLevelMax);
                 }
                 if (ImGui::InputInt("level", &lvl))
                 {
+                    lvl = std::clamp(lvl, kAdsrBeatnikLevelMin, kAdsrBeatnikLevelMax);
                     lfo.level = AdsrLevelFromBeatnik(lvl);
                     MarkInstrumentEditorDirty();
                 }
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
                 {
-                    ImGui::SetTooltip("Raw: %d (100 = unity)", lfo.level);
+                    ImGui::SetTooltip("%d–%d (100 = unity)",
+                                      kAdsrBeatnikLevelMin,
+                                      kAdsrBeatnikLevelMax);
                 }
             }
             else
@@ -3900,13 +3924,21 @@
         ImGui::PopID();
     }
 
+    /* LPF UI clamps — match engine CLIP / BE TMPL (freq 0 = off). */
+    static constexpr int kLpfFreqMin = 0;
+    static constexpr int kLpfFreqMax = 127 * 256; /* MAXRESONANCE*256 */
+    static constexpr int kLpfResMin = 0;
+    static constexpr int kLpfResMax = 255;
+    static constexpr int kLpfAmountMin = -256;
+    static constexpr int kLpfAmountMax = 256;
+
     /* 2D pad: X = LPF frequency, Y = resonance. InputInts stay authoritative. */
     void DrawFilterFreqResPad()
     {
-        constexpr int kFreqMin = 0;
-        constexpr int kFreqMax = 32767;
-        constexpr int kResMin = 0;
-        constexpr int kResMax = 32767;
+        constexpr int kFreqMin = kLpfFreqMin;
+        constexpr int kFreqMax = kLpfFreqMax;
+        constexpr int kResMin = kLpfResMin;
+        constexpr int kResMax = kLpfResMax;
         const float height = 140.0f;
         const ImVec2 canvas_pos = ImGui::GetCursorScreenPos();
         const float width = ImGui::GetContentRegionAvail().x;
@@ -4232,7 +4264,7 @@
         }
 
         int sust_i = -1;
-        int max_disp_level = beatnik_level_scale ? 200 : 0;
+        int max_disp_level = 0;
         int min_disp_level = 0;
         for (int i = 0; i < stages; ++i)
         {
@@ -4240,16 +4272,18 @@
             {
                 sust_i = i;
             }
-            const int disp = beatnik_level_scale ? AdsrLevelToBeatnik(adsr.stages[i].level)
-                                                 : adsr.stages[i].level;
-            max_disp_level = std::max(max_disp_level, disp);
-            min_disp_level = std::min(min_disp_level, disp);
+            if (!beatnik_level_scale)
+            {
+                const int disp = adsr.stages[i].level;
+                max_disp_level = std::max(max_disp_level, disp);
+                min_disp_level = std::min(min_disp_level, disp);
+            }
         }
         if (beatnik_level_scale)
         {
-            /* Snap Y top to next 100% above content (min 200% like BE2). */
-            max_disp_level = std::max(200, ((max_disp_level + 99) / 100) * 100);
-            min_disp_level = std::min(0, min_disp_level);
+            /* Fixed BE2 envelope range: 0% … 200%. */
+            max_disp_level = kAdsrBeatnikLevelMax;
+            min_disp_level = kAdsrBeatnikLevelMin;
         }
         else
         {
@@ -4262,9 +4296,19 @@
         const int level_span = max_disp_level - min_disp_level;
 
         auto disp_level_of = [&](int32_t raw) -> int {
-            return beatnik_level_scale ? AdsrLevelToBeatnik(raw) : raw;
+            if (!beatnik_level_scale)
+            {
+                return raw;
+            }
+            return std::clamp(AdsrLevelToBeatnik(raw),
+                              kAdsrBeatnikLevelMin,
+                              kAdsrBeatnikLevelMax);
         };
         auto level_to_y = [&](int disp) -> float {
+            if (beatnik_level_scale)
+            {
+                disp = std::clamp(disp, kAdsrBeatnikLevelMin, kAdsrBeatnikLevelMax);
+            }
             const double norm =
                 static_cast<double>(disp - min_disp_level) / static_cast<double>(level_span);
             return graph_b - static_cast<float>(norm * graph_h);
@@ -4626,7 +4670,10 @@
                 if (beatnik_level_scale)
                 {
                     const int start_disp = AdsrLevelToBeatnik(s_drag_start_level);
-                    const int32_t new_raw = AdsrLevelFromBeatnik(start_disp + disp_delta);
+                    const int new_disp = std::clamp(start_disp + disp_delta,
+                                                   kAdsrBeatnikLevelMin,
+                                                   kAdsrBeatnikLevelMax);
+                    const int32_t new_raw = AdsrLevelFromBeatnik(new_disp);
                     if (new_raw != adsr.stages[i].level)
                     {
                         adsr.stages[i].level = new_raw;
@@ -4642,7 +4689,7 @@
                         changed = true;
                     }
                 }
-                /* Horizontal drag adjusts time (not for SUST — display-only band). */
+                /* Horizontal drag adjusts time in ms (not for SUST — display-only band). */
                 if (i != sust_i && std::fabs(mouse.x - s_drag_start_x) >= 6.0f)
                 {
                     const StageGeom &g = geoms[static_cast<size_t>(i)];
@@ -4654,7 +4701,9 @@
                         const int64_t delta_ms = static_cast<int64_t>(
                             std::llround((dx / region_w) * static_cast<double>(region_ms)));
                         const int start_ms = AdsrTimeUsToMs(s_drag_start_time);
-                        const int new_ms = std::max(0, start_ms + static_cast<int>(delta_ms));
+                        const int new_ms = std::clamp(start_ms + static_cast<int>(delta_ms),
+                                                     0,
+                                                     kAdsrTimeMsMax);
                         const int32_t new_us = AdsrTimeMsToUs(new_ms);
                         if (new_us != adsr.stages[i].time)
                         {
@@ -4772,12 +4821,13 @@
             has_prev = true;
         }
         char meta[96];
+        const int period_ms = (lfo.period <= 0) ? 0 : AdsrTimeUsToMs(lfo.period);
         if (beatnik_level_scale)
         {
             std::snprintf(meta,
                           sizeof(meta),
-                          "period=%d  level=%d  dc=%d",
-                          lfo.period,
+                          "period=%dms  level=%d  dc=%d",
+                          period_ms,
                           AdsrLevelToBeatnik(lfo.level),
                           AdsrLevelToBeatnik(lfo.DC_feed));
         }
@@ -4785,8 +4835,8 @@
         {
             std::snprintf(meta,
                           sizeof(meta),
-                          "period=%d  level=%d  dc=%d",
-                          lfo.period,
+                          "period=%dms  level=%d  dc=%d",
+                          period_ms,
                           lfo.level,
                           lfo.DC_feed);
         }
@@ -4943,12 +4993,9 @@
                         if (ImGui::InputInt("##lvl", &level, 0, 0))
                         {
                             MarkInstrumentEditorDirty(false);
+                            level = std::clamp(level, kAdsrBeatnikLevelMin, kAdsrBeatnikLevelMax);
                             adsr.stages[i].level = AdsrLevelFromBeatnik(level);
                             LivePatchInstrumentEditor();
-                        }
-                        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
-                        {
-                            ImGui::SetTooltip("Raw: %d  (100%% = 4096)", adsr.stages[i].level);
                         }
                     }
                     else
@@ -4980,21 +5027,15 @@
                     {
                         MarkInstrumentEditorDirty(false);
                         adsr.stages[i].time =
-                            AdsrTimeFromDisplayMs(adsr.stages[i].flags, std::max(0, ms));
+                            AdsrTimeFromDisplayMs(adsr.stages[i].flags, ms);
                         LivePatchInstrumentEditor();
                     }
-                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal) &&
+                        AdsrIsSustainFlag(adsr.stages[i].flags) && adsr.stages[i].time == 0)
                     {
-                        if (AdsrIsSustainFlag(adsr.stages[i].flags) && adsr.stages[i].time == 0)
-                        {
-                            ImGui::SetTooltip(
-                                "BE2 shows %d ms for SUST when stored time is 0",
-                                kBe2SustainDisplayMs);
-                        }
-                        else
-                        {
-                            ImGui::SetTooltip("Stored: %d µs", adsr.stages[i].time);
-                        }
+                        ImGui::SetTooltip(
+                            "BE2 shows %d ms for SUST when stored time is 0",
+                            kBe2SustainDisplayMs);
                     }
                     if (i + 1 < end)
                     {
@@ -5085,6 +5126,7 @@
                         if (ImGui::InputInt("##lvl", &level))
                         {
                             MarkInstrumentEditorDirty(false);
+                            level = std::clamp(level, kAdsrBeatnikLevelMin, kAdsrBeatnikLevelMax);
                             adsr.stages[i].level = AdsrLevelFromBeatnik(level);
                             LivePatchInstrumentEditor();
                         }
@@ -5100,11 +5142,11 @@
                         }
                     }
                     ImGui::TableSetColumnIndex(1);
-                    int time = adsr.stages[i].time;
-                    if (ImGui::InputInt("##tm", &time))
+                    int time_us = adsr.stages[i].time;
+                    if (ImGui::InputInt("##tm", &time_us))
                     {
                         MarkInstrumentEditorDirty(false);
-                        adsr.stages[i].time = time;
+                        adsr.stages[i].time = std::max(0, time_us);
                         LivePatchInstrumentEditor();
                     }
                     ImGui::TableSetColumnIndex(2);
@@ -5700,18 +5742,36 @@
                     int amt = m_ie_ext.LPF_lowpassAmount;
                     if (ImGui::InputInt("LPF frequency", &freq))
                     {
-                        m_ie_ext.LPF_frequency = freq;
+                        m_ie_ext.LPF_frequency =
+                            std::clamp(freq, kLpfFreqMin, kLpfFreqMax);
                         MarkInstrumentEditorDirty();
+                    }
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                    {
+                        ImGui::SetTooltip("0 = off · engine active range ≈ 512–%d",
+                                          kLpfFreqMax);
                     }
                     if (ImGui::InputInt("LPF resonance", &res))
                     {
-                        m_ie_ext.LPF_resonance = res;
+                        m_ie_ext.LPF_resonance =
+                            std::clamp(res, kLpfResMin, kLpfResMax);
                         MarkInstrumentEditorDirty();
+                    }
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                    {
+                        ImGui::SetTooltip("Range %d–%d", kLpfResMin, kLpfResMax);
                     }
                     if (ImGui::InputInt("LPF lowpass amount", &amt))
                     {
-                        m_ie_ext.LPF_lowpassAmount = amt;
+                        m_ie_ext.LPF_lowpassAmount =
+                            std::clamp(amt, kLpfAmountMin, kLpfAmountMax);
                         MarkInstrumentEditorDirty();
+                    }
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                    {
+                        ImGui::SetTooltip("Range %d–%d",
+                                          kLpfAmountMin,
+                                          kLpfAmountMax);
                     }
                     {
                         bool has_filter_lfo = false;

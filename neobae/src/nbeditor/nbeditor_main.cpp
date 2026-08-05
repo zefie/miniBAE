@@ -28,6 +28,7 @@
 #include <deque>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <map>
 #include <set>
 #include <string>
