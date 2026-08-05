@@ -1710,17 +1710,8 @@
             return true;
         }
 
-        if (m_sample_editor_is_song_sample)
-        {
-            SetStatus("Song compression previews on export — auditioning master PCM");
-            m_sample_editor_audition_pcm = m_sample_editor_original_pcm;
-            m_sample_editor_audition_frame_count = m_sample_editor_original_frame_count;
-            m_sample_editor_audition_bit_size = m_sample_editor_original_bit_size;
-            m_sample_editor_audition_channels = m_sample_editor_original_channels;
-            m_sample_editor_audition_sample_rate = m_sample_editor_original_sample_rate;
-            return true;
-        }
-
+        /* Song samples (module / RMF embeds) and bank samples share the same
+         * PCM→encode→decode audition path; Apply still defers song encode to export. */
         const SampleRow sample = m_samples[static_cast<size_t>(m_sample_editor_sample_row)];
         const uint32_t snapshot_snd_id =
             m_sample_editor_snd_resource_id != kNoSndResourceId ? m_sample_editor_snd_resource_id
