@@ -1079,8 +1079,9 @@
         const uint32_t length_ticks = MeSongLengthTicks();
         const float key_w = kMeTimeGutter; /* same as timeline chrome — keeps playheads aligned */
         const float key_draw_w = 48.0f;
-        const float auto_lane_h = 36.0f;
         const float auto_header_h = 22.0f;
+        const float auto_splitter_h = 5.0f;
+        const float min_lane_h = 52.0f;
         int auto_count = 0;
         const MeAutoLaneDesc *auto_lanes = MeAutoLanes(&auto_count);
         int visible_auto = 0;
@@ -1091,20 +1092,22 @@
                 ++visible_auto;
             }
         }
-        /* Keep piano roll dominant: cap automation strip and scroll lanes inside. */
+        const float min_roll_h = 120.0f;
+        const float min_auto_h = auto_header_h + min_lane_h + 8.0f;
+        const float max_auto_h = std::max(min_auto_h, height - min_roll_h - auto_splitter_h - 4.0f);
         float auto_h = auto_header_h;
         if (!m_midi_auto_collapsed && visible_auto > 0)
         {
-            const float content_h = static_cast<float>(visible_auto) * auto_lane_h;
-            const float max_auto =
-                std::clamp(height * 0.22f, auto_lane_h + auto_header_h, 140.0f);
-            auto_h = auto_header_h + std::min(content_h, max_auto - auto_header_h);
+            /* Clamp display only — keep preferred height if the window is temporarily small. */
+            auto_h = std::clamp(m_midi_auto_panel_h, min_auto_h, max_auto_h);
         }
         else if (!m_midi_auto_collapsed)
         {
             auto_h = auto_header_h;
         }
-        const float roll_h = std::max(160.0f, height - auto_h - 4.0f);
+        const bool show_auto_split = !m_midi_auto_collapsed && visible_auto > 0;
+        const float split_h = show_auto_split ? auto_splitter_h : 0.0f;
+        const float roll_h = std::max(min_roll_h, height - auto_h - split_h - 4.0f);
 
         ImGui::BeginChild("##me_roll", ImVec2(width, roll_h), true, ImGuiWindowFlags_NoScrollWithMouse);
         ImDrawList *dl = ImGui::GetWindowDrawList();
@@ -1456,7 +1459,37 @@
 
         ImGui::EndChild();
 
-        /* Automation lanes — compact, scrollable, collapsible */
+        /* Drag strip between piano roll and automation. */
+        if (show_auto_split)
+        {
+            ImGui::InvisibleButton("##me_auto_split", ImVec2(width, split_h));
+            const bool split_hover = ImGui::IsItemHovered();
+            const bool split_active = ImGui::IsItemActive();
+            if (split_hover || split_active)
+            {
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+            }
+            if (split_active)
+            {
+                m_midi_auto_panel_h = std::clamp(m_midi_auto_panel_h - ImGui::GetIO().MouseDelta.y,
+                                                 min_auto_h,
+                                                 max_auto_h);
+            }
+            {
+                const ImVec2 sp0 = ImGui::GetItemRectMin();
+                const ImVec2 sp1 = ImGui::GetItemRectMax();
+                const float mid_y = (sp0.y + sp1.y) * 0.5f;
+                ImGui::GetWindowDrawList()->AddLine(
+                    ImVec2(sp0.x + 8.0f, mid_y),
+                    ImVec2(sp1.x - 8.0f, mid_y),
+                    split_active   ? IM_COL32(160, 140, 220, 255)
+                    : split_hover  ? IM_COL32(120, 110, 160, 220)
+                                   : IM_COL32(70, 74, 90, 200),
+                    2.0f);
+            }
+        }
+
+        /* Automation lanes — resizable against the piano roll, scrollable when many. */
         ImGui::BeginChild("##me_auto", ImVec2(width, auto_h), true);
         {
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 2.0f));
@@ -1470,7 +1503,8 @@
                         visible_auto,
                         visible_auto == 1 ? "" : "s");
             ImGui::SameLine();
-            ImGui::TextDisabled("— enable lanes in toolbar");
+            ImGui::TextDisabled(show_auto_split ? "— drag bar above to resize"
+                                                : "— enable lanes in toolbar");
             ImGui::PopStyleVar();
 
             if (m_midi_auto_collapsed)
@@ -1480,6 +1514,11 @@
             }
 
             const float lanes_view_h = std::max(0.0f, auto_h - auto_header_h - 6.0f);
+            /* Fill the panel when few lanes are visible; scroll when many. */
+            const float auto_lane_h =
+                (visible_auto > 0)
+                    ? std::max(min_lane_h, lanes_view_h / static_cast<float>(visible_auto))
+                    : min_lane_h;
             ImGui::BeginChild("##me_auto_scroll",
                               ImVec2(0.0f, lanes_view_h),
                               false,
@@ -1504,8 +1543,8 @@
 
                 const float plot_x = l0.x + key_w;
                 const float plot_w = std::max(1.0f, (l1.x - l0.x) - key_w);
-                const float plot_y = l0.y + 14.0f;
-                const float plot_h = auto_lane_h - 18.0f;
+                const float plot_y = l0.y + 16.0f;
+                const float plot_h = std::max(12.0f, auto_lane_h - 20.0f);
 
                 struct Node
                 {

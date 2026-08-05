@@ -5489,6 +5489,7 @@ private:
     std::array<bool, 16> m_midi_auto_lane_visible = {
         false, false, false, true, false, false, false, false, false, false, false, false, false, false, false, false};
     bool m_midi_auto_collapsed = false;
+    float m_midi_auto_panel_h = 180.0f; /* user-resizable automation strip height */
     std::vector<bool> m_midi_track_muted;
     std::vector<bool> m_midi_track_solo;
     bool m_midi_note_cache_dirty = true;
