@@ -1,0 +1,49 @@
+name: Feature Request
+description: Suggest a new feature or enhancement for NeoBAE
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a feature! Please provide as much detail as possible.
+
+  - type: dropdown
+    id: subsystem
+    attributes:
+      label: Subsystem
+      description: Which part of NeoBAE does this feature relate to?
+      options:
+        - NeoBAE Core Engine
+        - Android App (Github)
+        - Android App (Google Play)
+        - zefidi Media Player
+        - NeoBAE Editor
+        - playbae
+        - mod2rmf
+        - CLI Tools (rmfutil, xmfutil, songtool, etc.)
+        - Other / Unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Feature description
+      description: What should be added or improved?
+      placeholder: "Describe the feature clearly."
+    validations:
+      required: true
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Why is this needed?
+      description: Explain the problem or use-case this feature solves.
+      placeholder: "Tell us why this matters."
+
+  - type: textarea
+    id: attachments
+    attributes:
+      label: Attachments
+      description: Upload mockups, examples, or related files.

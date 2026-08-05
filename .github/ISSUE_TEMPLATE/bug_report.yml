@@ -1,0 +1,70 @@
+name: Bug Report
+description: Report a reproducible issue in NeoBAE or its components
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill out all required fields.
+
+  - type: input
+    id: neobae-version
+    attributes:
+      label: NeoBAE Version
+      description: Exact version or commit hash you are running.
+      placeholder: "e.g., zefie-release-2026-08.03, git-(commit), etc."
+    validations:
+      required: true
+
+  - type: dropdown
+    id: subsystem
+    attributes:
+      label: Subsystem
+      description: Which part of NeoBAE is affected?
+      options:
+        - NeoBAE Core Engine
+        - Android App (Github)
+        - Android App (Google Play)
+        - zefidi Media Player
+        - NeoBAE Editor
+        - playbae
+        - mod2rmf
+        - CLI Tools (rmfutil, xmfutil, songtool, etc.)
+        - Other / Unsure
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the bug clearly.
+      placeholder: "Tell us what you expected vs what actually happened."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Provide exact steps so we can reproduce the issue.
+      placeholder: |
+        1. …
+        2. …
+        3. …
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or output
+      description: Paste logcat, console output, or error messages.
+      render: shell
+
+  - type: textarea
+    id: attachments
+    attributes:
+      label: Attachments
+      description: Upload screenshots, audio samples, or files if relevant. If submitting a MIDI comparison, please include the original MIDI file.

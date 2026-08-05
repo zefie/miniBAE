@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussions
+    url: https://github.com/zefie/NeoBAE/discussions
+    about: Ask questions or get help here
+  - name: NeoBAE Website
+    url: https://www.soundmusicsys.com/
+    about: Visit the NeoBAE website for more information
+  - name: NeoBAE Documentation
+    url: https://www.soundmusicsys.com/docs/
+    about: Read the NeoBAE documentation
+  - name: NeoBAE GitHub
+    url: https://github.com/zefie/NeoBAE
+    about: View the NeoBAE source code

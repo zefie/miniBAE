@@ -55,7 +55,7 @@ The project can be used as an embeddable audio engine, a command-line player and
 
 - `playbae`: primary command-line player, renderer, and export tool for NeoBAE-supported content.
 - `zefidi`: GUI player with playlists, visualization, channel controls, export features, and hardware MIDI integration where supported.
-- `nbeditor`: RMF/ZMF/HSB/ZSB editor for instrument management, sample authoring, preview, and modern codec workflows. NeoBAE Editor is currently in early access and considered alpha quality.
+- `nbeditor`: RMF/ZMF/HSB/ZSB editor for instrument management, sample authoring, preview, and modern codec workflows. NeoBAE Editor is currently in beta / early access.
 - WebAssembly build: browser-targeted engine output for custom web players and interactive tools.
 - Android app: mobile frontend under `neobae/src/NeoBAEDroid` for NeoBAE-based playback on Android.
 - `libNeoBAE`: embeddable library output for integrating the engine into other applications.
