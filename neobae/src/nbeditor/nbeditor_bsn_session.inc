@@ -1363,7 +1363,10 @@ bool SaveSessionToPath(const char *path)
     path = enforced_path.c_str();
 
     uint32_t z_reason = 0;
-    const bool want_zsn = SessionRequiresZsn(&z_reason);
+    const bool requires_zsn = SessionRequiresZsn(&z_reason);
+    /* Container follows extension: .zsn → ZREZ even when content wouldn't force it.
+     * Save As to .bsn can still write IREZ when features allow. */
+    const bool want_zsn = requires_zsn || EndsWith(enforced_path, ".zsn");
     const int32_t resource_map_id = want_zsn ? XFILERESOURCE_ZMF_ID : XFILERESOURCE_ID;
     if (remapped)
     {
