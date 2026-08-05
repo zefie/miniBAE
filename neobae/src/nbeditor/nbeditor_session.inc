@@ -803,6 +803,72 @@
         }
     }
 
+    void DrawDeleteSongConfirmDialog()
+    {
+        if (m_confirm_delete_song_open)
+        {
+            ImGui::OpenPopup("Delete Song");
+        }
+        if (!ImGui::BeginPopupModal("Delete Song",
+                                    &m_confirm_delete_song_open,
+                                    ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            return;
+        }
+
+        const size_t n = m_pending_delete_song_indices.size();
+        if (n == 1 && m_pending_delete_song_indices[0] >= 0 &&
+            m_pending_delete_song_indices[0] < static_cast<int>(m_session_songs.size()))
+        {
+            const SessionSongEntry &entry =
+                m_session_songs[static_cast<size_t>(m_pending_delete_song_indices[0])];
+            ImGui::TextWrapped("Delete song \"%s\" from the session?", entry.name.c_str());
+        }
+        else
+        {
+            ImGui::TextWrapped("Delete %zu song%s from the session?", n, n == 1 ? "" : "s");
+        }
+        ImGui::Spacing();
+        ImGui::TextDisabled("Songs are removed from the session (not moved to Trash).");
+
+        const bool has_unused = (m_pending_delete_song_unused_inst +
+                                 m_pending_delete_song_unused_snd) > 0;
+        if (has_unused)
+        {
+            ImGui::Spacing();
+            ImGui::Checkbox("Also move unused custom instruments/samples to Trash",
+                            &m_pending_delete_song_trash_unused);
+            ImGui::TextDisabled("%zu instrument%s, %zu sample%s unused by remaining songs",
+                                m_pending_delete_song_unused_inst,
+                                m_pending_delete_song_unused_inst == 1 ? "" : "s",
+                                m_pending_delete_song_unused_snd,
+                                m_pending_delete_song_unused_snd == 1 ? "" : "s");
+            ImGui::TextDisabled(
+                "Restore from Trash remaps to a free ID if the original is taken.");
+        }
+        else
+        {
+            m_pending_delete_song_trash_unused = false;
+            ImGui::Spacing();
+            ImGui::TextDisabled("No unused custom instruments/samples found for these songs.");
+        }
+
+        ImGui::Separator();
+        if (ImGui::Button("Delete", ImVec2(120.0f, 0.0f)))
+        {
+            ConfirmDeletePendingSessionSongs();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)))
+        {
+            m_confirm_delete_song_open = false;
+            m_pending_delete_song_indices.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
     void NewSession()
     {
         ClearSessionSongState(true);
@@ -3350,8 +3416,13 @@
                     }
                     if (ImGui::MenuItem("Delete Song"))
                     {
-                        RemoveSessionSongAt(i);
-                        m_multi_songs.erase(i);
+                        m_session_song_index = i;
+                        if (m_multi_songs.count(i) == 0)
+                        {
+                            m_multi_songs.clear();
+                            m_multi_songs.insert(i);
+                        }
+                        RequestDeleteSessionSongs(CollectTargetSongIndices());
                     }
                     ImGui::EndPopup();
                 }

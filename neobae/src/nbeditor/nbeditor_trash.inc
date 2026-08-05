@@ -115,6 +115,8 @@
             SetStatus("Restore from Trash failed (unknown type or I/O error)");
             return;
         }
+        const bool remapped =
+            has_meta && orig_id != 0 && restored_id != orig_id;
         if (orig_type == ID_INST ||
             XExistsFileResource(bank, ID_INST, restored_id) != FALSE)
         {
@@ -129,8 +131,30 @@
         }
         RefreshListsFromBank();
         m_trash_selected = -1;
-        char status[192];
-        if (name_before[0])
+        char status[320];
+        if (remapped)
+        {
+            if (name_before[0])
+            {
+                std::snprintf(status,
+                              sizeof(status),
+                              "Restored \"%s\" as %s id %ld (id %ld in use — MIDI/INST refs may need update)",
+                              name_before,
+                              TrashTypeLabel(orig_type),
+                              static_cast<long>(restored_id),
+                              static_cast<long>(orig_id));
+            }
+            else
+            {
+                std::snprintf(status,
+                              sizeof(status),
+                              "Restored %s as id %ld (id %ld in use — MIDI/INST refs may need update)",
+                              TrashTypeLabel(orig_type),
+                              static_cast<long>(restored_id),
+                              static_cast<long>(orig_id));
+            }
+        }
+        else if (name_before[0])
         {
             std::snprintf(status,
                           sizeof(status),
@@ -346,7 +370,8 @@
         {
             ImGui::SetTooltip(
                 "Legacy TRSH (from older saves) has no original type/id metadata.\n"
-                "Restore guesses snd/INST from the body when possible.");
+                "Restore guesses snd/INST from the body when possible.\n"
+                "If the original ID is already taken, Restore assigns a free ID.");
         }
 
         ImGui::End();

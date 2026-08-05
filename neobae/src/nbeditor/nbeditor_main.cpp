@@ -1388,6 +1388,7 @@ public:
         DrawBankMergeConfirmDialog();
         DrawReplaceSessionConfirmDialog();
         DrawRmfOpenChoiceDialog();
+        DrawDeleteSongConfirmDialog();
         DrawQuitConfirmDialog();
         DrawBankDestructiveConfirmDialogs();
 #if USE_NEO_EFFECTS == TRUE
@@ -5159,6 +5160,11 @@ private:
     bool m_confirm_unload_bank_open = false;
     bool m_confirm_load_builtin_open = false;
     bool m_confirm_new_session_open = false;
+    bool m_confirm_delete_song_open = false;
+    std::vector<int> m_pending_delete_song_indices;
+    bool m_pending_delete_song_trash_unused = true;
+    size_t m_pending_delete_song_unused_inst = 0;
+    size_t m_pending_delete_song_unused_snd = 0;
     bool m_resource_usage_open = false;
     std::string m_resource_usage_title;
     std::vector<std::string> m_resource_usage_lines;

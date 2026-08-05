@@ -2180,13 +2180,7 @@
             {
             case SessionTab::Songs:
             {
-                std::vector<int> indices = CollectTargetSongIndices();
-                std::sort(indices.begin(), indices.end(), std::greater<int>());
-                for (int idx : indices)
-                {
-                    RemoveSessionSongAt(idx);
-                }
-                m_multi_songs.clear();
+                RequestDeleteSessionSongs(CollectTargetSongIndices());
                 break;
             }
             case SessionTab::Instruments:

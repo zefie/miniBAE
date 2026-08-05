@@ -592,6 +592,532 @@ bool RemoveSessionSongAt(int index)
     return true;
 }
 
+    static bool MidiReadVlq(const unsigned char *midi,
+                            size_t end,
+                            size_t *pos,
+                            uint32_t *out_value)
+    {
+        if (!midi || !pos || !out_value || *pos >= end)
+        {
+            return false;
+        }
+        uint32_t value = 0;
+        for (int i = 0; i < 4; ++i)
+        {
+            if (*pos >= end)
+            {
+                return false;
+            }
+            const unsigned char b = midi[(*pos)++];
+            value = (value << 7) | static_cast<uint32_t>(b & 0x7Fu);
+            if ((b & 0x80u) == 0)
+            {
+                *out_value = value;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /* Beatnik patch bank = CC0 MSB; instID = bank*256 + program. */
+    void CollectInstIdsReferencedByMidi(const unsigned char *midi,
+                                        size_t midi_len,
+                                        std::set<uint32_t> &out_inst) const
+    {
+        if (!midi || midi_len < 14 ||
+            std::memcmp(midi, "MThd", 4) != 0)
+        {
+            return;
+        }
+        const uint32_t hdr_len = (static_cast<uint32_t>(midi[4]) << 24) |
+                                 (static_cast<uint32_t>(midi[5]) << 16) |
+                                 (static_cast<uint32_t>(midi[6]) << 8) |
+                                 static_cast<uint32_t>(midi[7]);
+        if (hdr_len < 6 || 8u + hdr_len > midi_len)
+        {
+            return;
+        }
+        const uint16_t n_tracks = static_cast<uint16_t>((midi[10] << 8) | midi[11]);
+        size_t pos = 8u + hdr_len;
+        uint8_t bank_msb[16] = {};
+        uint8_t program[16] = {};
+
+        for (uint16_t t = 0; t < n_tracks; ++t)
+        {
+            if (pos + 8 > midi_len || std::memcmp(midi + pos, "MTrk", 4) != 0)
+            {
+                return;
+            }
+            const uint32_t trk_len = (static_cast<uint32_t>(midi[pos + 4]) << 24) |
+                                     (static_cast<uint32_t>(midi[pos + 5]) << 16) |
+                                     (static_cast<uint32_t>(midi[pos + 6]) << 8) |
+                                     static_cast<uint32_t>(midi[pos + 7]);
+            pos += 8;
+            if (pos + trk_len > midi_len)
+            {
+                return;
+            }
+            const size_t end = pos + trk_len;
+            uint8_t running = 0;
+            while (pos < end)
+            {
+                uint32_t delta = 0;
+                if (!MidiReadVlq(midi, end, &pos, &delta))
+                {
+                    return;
+                }
+                if (pos >= end)
+                {
+                    return;
+                }
+                uint8_t status = midi[pos];
+                if (status & 0x80u)
+                {
+                    ++pos;
+                    running = status;
+                }
+                else
+                {
+                    if (!running)
+                    {
+                        return;
+                    }
+                    status = running;
+                }
+                if (status == 0xFFu)
+                {
+                    if (pos + 1 > end)
+                    {
+                        return;
+                    }
+                    ++pos; /* meta type */
+                    uint32_t mlen = 0;
+                    if (!MidiReadVlq(midi, end, &pos, &mlen) || pos + mlen > end)
+                    {
+                        return;
+                    }
+                    pos += mlen;
+                    continue;
+                }
+                if (status == 0xF0u || status == 0xF7u)
+                {
+                    uint32_t slen = 0;
+                    if (!MidiReadVlq(midi, end, &pos, &slen) || pos + slen > end)
+                    {
+                        return;
+                    }
+                    pos += slen;
+                    continue;
+                }
+                const uint8_t type = static_cast<uint8_t>(status & 0xF0u);
+                const uint8_t ch = static_cast<uint8_t>(status & 0x0Fu);
+                uint8_t p1 = 0;
+                uint8_t p2 = 0;
+                if (type == 0xC0u || type == 0xD0u)
+                {
+                    if (pos + 1 > end)
+                    {
+                        return;
+                    }
+                    p1 = midi[pos++];
+                }
+                else
+                {
+                    if (pos + 2 > end)
+                    {
+                        return;
+                    }
+                    p1 = midi[pos++];
+                    p2 = midi[pos++];
+                }
+                if (type == 0xB0u)
+                {
+                    if (p1 == 0)
+                    {
+                        bank_msb[ch] = p2;
+                    }
+                }
+                else if (type == 0xC0u)
+                {
+                    program[ch] = static_cast<uint8_t>(p1 & 0x7Fu);
+                    out_inst.insert(static_cast<uint32_t>(bank_msb[ch]) * 256u +
+                                    static_cast<uint32_t>(program[ch]));
+                }
+                else if (type == 0x90u && (p2 & 0x7Fu) != 0)
+                {
+                    out_inst.insert(static_cast<uint32_t>(bank_msb[ch]) * 256u +
+                                    static_cast<uint32_t>(program[ch]));
+                }
+            }
+        }
+    }
+
+    void CollectSongEmbedInstAndSnd(const SessionSongEntry &entry,
+                                    std::set<uint32_t> &out_inst,
+                                    std::set<uint32_t> &out_snd) const
+    {
+        if (entry.rmf_bytes.empty())
+        {
+            return;
+        }
+        XFILE donor = XFileOpenResourceFromMemory(
+            (XPTR)const_cast<unsigned char *>(entry.rmf_bytes.data()),
+            static_cast<uint32_t>(entry.rmf_bytes.size()),
+            TRUE);
+        if (!donor)
+        {
+            return;
+        }
+        std::vector<XShortResourceID> inst_ids;
+        std::vector<XShortResourceID> snd_ids;
+        CollectAllInstAndSndIdsFromFile(donor, inst_ids, snd_ids);
+        XFileClose(donor);
+        for (XShortResourceID id : inst_ids)
+        {
+            out_inst.insert(static_cast<uint32_t>(static_cast<uint16_t>(id)));
+        }
+        for (XShortResourceID id : snd_ids)
+        {
+            out_snd.insert(static_cast<uint32_t>(static_cast<uint16_t>(id)));
+        }
+    }
+
+    void CollectCustomResourcesUsedBySong(const SessionSongEntry &entry,
+                                          std::set<uint32_t> &out_inst,
+                                          std::set<uint32_t> &out_snd) const
+    {
+        std::set<uint32_t> embed_inst;
+        std::set<uint32_t> embed_snd;
+        CollectSongEmbedInstAndSnd(entry, embed_inst, embed_snd);
+
+        std::set<uint32_t> midi_inst;
+        if (!entry.midi_bytes.empty())
+        {
+            CollectInstIdsReferencedByMidi(entry.midi_bytes.data(),
+                                           entry.midi_bytes.size(),
+                                           midi_inst);
+        }
+        else if (!entry.rmf_bytes.empty())
+        {
+            XFILE donor = XFileOpenResourceFromMemory(
+                (XPTR)const_cast<unsigned char *>(entry.rmf_bytes.data()),
+                static_cast<uint32_t>(entry.rmf_bytes.size()),
+                TRUE);
+            if (donor)
+            {
+                static const XResourceType kMidiTypes[] = {ID_MIDI, ID_MIDI_OLD, 0};
+                for (int t = 0; kMidiTypes[t] != 0; ++t)
+                {
+                    const int32_t count = XCountFileResourcesOfType(donor, kMidiTypes[t]);
+                    for (int32_t i = 0; i < count; ++i)
+                    {
+                        XLongResourceID rid = 0;
+                        int32_t size = 0;
+                        XPTR data = XGetIndexedFileResource(donor,
+                                                            kMidiTypes[t],
+                                                            &rid,
+                                                            i,
+                                                            nullptr,
+                                                            &size);
+                        if (data && size > 0)
+                        {
+                            CollectInstIdsReferencedByMidi(
+                                static_cast<const unsigned char *>(data),
+                                static_cast<size_t>(size),
+                                midi_inst);
+                        }
+                        if (data)
+                        {
+                            XDisposePtr(data);
+                        }
+                    }
+                }
+                XFileClose(donor);
+            }
+        }
+
+        for (uint32_t id : embed_inst)
+        {
+            if (m_session_custom_inst_ids.count(id) != 0)
+            {
+                out_inst.insert(id);
+            }
+        }
+        for (uint32_t id : midi_inst)
+        {
+            if (m_session_custom_inst_ids.count(id) != 0)
+            {
+                out_inst.insert(id);
+            }
+        }
+        for (uint32_t id : embed_snd)
+        {
+            if (m_session_custom_snd_ids.count(id) != 0)
+            {
+                out_snd.insert(id);
+            }
+        }
+    }
+
+    void CollectSndIdsReferencedByInstrument(uint32_t inst_id, std::set<uint32_t> &out_snd) const
+    {
+        if (!m_bank_token)
+        {
+            return;
+        }
+        uint32_t resolved = 0;
+        uint32_t index = 0;
+        if (BAERmfEditorBank_ResolveInstID(m_bank_token, inst_id, &resolved, &index) !=
+            BAE_NO_ERROR)
+        {
+            return;
+        }
+        uint32_t split_count = 0;
+        if (BAERmfEditorBank_GetInstrumentSampleCount(m_bank_token, index, &split_count) !=
+            BAE_NO_ERROR)
+        {
+            return;
+        }
+        for (uint32_t s = 0; s < split_count; ++s)
+        {
+            BAERmfEditorBankSampleInfo info;
+            std::memset(&info, 0, sizeof(info));
+            if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token, index, s, &info) ==
+                BAE_NO_ERROR)
+            {
+                out_snd.insert(static_cast<uint32_t>(info.sndResourceID));
+            }
+        }
+    }
+
+    void ComputeUnusedCustomResourcesForSongDelete(const std::vector<int> &delete_indices,
+                                                   std::set<uint32_t> &out_unused_inst,
+                                                   std::set<uint32_t> &out_unused_snd) const
+    {
+        out_unused_inst.clear();
+        out_unused_snd.clear();
+        std::set<int> deleting(delete_indices.begin(), delete_indices.end());
+
+        std::set<uint32_t> used_by_deleted_inst;
+        std::set<uint32_t> used_by_deleted_snd;
+        std::set<uint32_t> used_by_kept_inst;
+        std::set<uint32_t> used_by_kept_snd;
+
+        for (int i = 0; i < static_cast<int>(m_session_songs.size()); ++i)
+        {
+            const SessionSongEntry &entry = m_session_songs[static_cast<size_t>(i)];
+            if (deleting.count(i) != 0)
+            {
+                CollectCustomResourcesUsedBySong(entry, used_by_deleted_inst, used_by_deleted_snd);
+            }
+            else
+            {
+                CollectCustomResourcesUsedBySong(entry, used_by_kept_inst, used_by_kept_snd);
+            }
+        }
+
+        for (uint32_t id : used_by_deleted_inst)
+        {
+            if (used_by_kept_inst.count(id) == 0)
+            {
+                out_unused_inst.insert(id);
+            }
+        }
+        for (uint32_t id : used_by_deleted_snd)
+        {
+            if (used_by_kept_snd.count(id) == 0)
+            {
+                out_unused_snd.insert(id);
+            }
+        }
+
+        /* SNDs exclusive to instruments we're about to trash. */
+        for (uint32_t inst_id : out_unused_inst)
+        {
+            std::set<uint32_t> from_inst;
+            CollectSndIdsReferencedByInstrument(inst_id, from_inst);
+            for (uint32_t snd_id : from_inst)
+            {
+                if (used_by_kept_snd.count(snd_id) != 0)
+                {
+                    continue;
+                }
+                /* Still used by a kept custom instrument? */
+                bool kept_inst_uses = false;
+                for (uint32_t keep_inst : used_by_kept_inst)
+                {
+                    std::set<uint32_t> keep_snd;
+                    CollectSndIdsReferencedByInstrument(keep_inst, keep_snd);
+                    if (keep_snd.count(snd_id) != 0)
+                    {
+                        kept_inst_uses = true;
+                        break;
+                    }
+                }
+                if (!kept_inst_uses)
+                {
+                    out_unused_snd.insert(snd_id);
+                }
+            }
+        }
+    }
+
+    unsigned TrashCustomInstrumentsAndSamples(const std::set<uint32_t> &inst_ids,
+                                              const std::set<uint32_t> &snd_ids)
+    {
+        if (!m_bank_token || (inst_ids.empty() && snd_ids.empty()))
+        {
+            return 0;
+        }
+        if (!EnsureActiveBankWritable())
+        {
+            return 0;
+        }
+        XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
+        std::set<uint32_t> snd_from_inst;
+        for (uint32_t inst_id : inst_ids)
+        {
+            CollectSndIdsReferencedByInstrument(inst_id, snd_from_inst);
+        }
+
+        unsigned trashed = 0;
+        for (uint32_t inst_id : inst_ids)
+        {
+            if (XTrashFileResource(bank, ID_INST, static_cast<XLongResourceID>(inst_id)) != FALSE)
+            {
+                m_session_custom_inst_ids.erase(inst_id);
+                ++trashed;
+            }
+        }
+
+        std::set<uint32_t> bank01_snd;
+        std::set<uint32_t> bank2_snd;
+        CollectBankReferencedSndIds(bank01_snd, bank2_snd);
+        std::set<uint32_t> still_ref = bank01_snd;
+        still_ref.insert(bank2_snd.begin(), bank2_snd.end());
+
+        std::set<uint32_t> candidates = snd_ids;
+        candidates.insert(snd_from_inst.begin(), snd_from_inst.end());
+        static const XResourceType kSndTypes[] = {ID_ESND, ID_CSND, ID_SND, 0};
+        for (uint32_t snd_id : candidates)
+        {
+            if (still_ref.count(snd_id) != 0)
+            {
+                continue;
+            }
+            const XLongResourceID sid = static_cast<XLongResourceID>(snd_id);
+            bool ok = false;
+            for (int t = 0; kSndTypes[t] != 0; ++t)
+            {
+                if (XExistsFileResource(bank, kSndTypes[t], sid) != FALSE)
+                {
+                    if (XTrashFileResource(bank, kSndTypes[t], sid) != FALSE)
+                    {
+                        ok = true;
+                    }
+                    break;
+                }
+            }
+            if (ok)
+            {
+                m_session_custom_snd_ids.erase(snd_id);
+                m_session_pcm_cache.erase(snd_id);
+                m_app_compression_cache.erase(snd_id);
+                ++trashed;
+            }
+        }
+        return trashed;
+    }
+
+    void RequestDeleteSessionSongs(const std::vector<int> &indices)
+    {
+        m_pending_delete_song_indices.clear();
+        for (int idx : indices)
+        {
+            if (idx >= 0 && idx < static_cast<int>(m_session_songs.size()))
+            {
+                m_pending_delete_song_indices.push_back(idx);
+            }
+        }
+        if (m_pending_delete_song_indices.empty())
+        {
+            return;
+        }
+        std::sort(m_pending_delete_song_indices.begin(), m_pending_delete_song_indices.end());
+        m_pending_delete_song_indices.erase(
+            std::unique(m_pending_delete_song_indices.begin(), m_pending_delete_song_indices.end()),
+            m_pending_delete_song_indices.end());
+
+        std::set<uint32_t> unused_inst;
+        std::set<uint32_t> unused_snd;
+        ComputeUnusedCustomResourcesForSongDelete(m_pending_delete_song_indices,
+                                                  unused_inst,
+                                                  unused_snd);
+        m_pending_delete_song_unused_inst = unused_inst.size();
+        m_pending_delete_song_unused_snd = unused_snd.size();
+        m_pending_delete_song_trash_unused =
+            (m_pending_delete_song_unused_inst + m_pending_delete_song_unused_snd) > 0;
+        m_confirm_delete_song_open = true;
+    }
+
+    void ConfirmDeletePendingSessionSongs()
+    {
+        if (m_pending_delete_song_indices.empty())
+        {
+            m_confirm_delete_song_open = false;
+            return;
+        }
+
+        std::set<uint32_t> unused_inst;
+        std::set<uint32_t> unused_snd;
+        if (m_pending_delete_song_trash_unused)
+        {
+            ComputeUnusedCustomResourcesForSongDelete(m_pending_delete_song_indices,
+                                                      unused_inst,
+                                                      unused_snd);
+        }
+
+        std::vector<int> sorted = m_pending_delete_song_indices;
+        std::sort(sorted.begin(), sorted.end(), std::greater<int>());
+        const size_t song_count = sorted.size();
+        for (int idx : sorted)
+        {
+            RemoveSessionSongAt(idx);
+        }
+        m_multi_songs.clear();
+
+        unsigned trashed = 0;
+        if (m_pending_delete_song_trash_unused && (!unused_inst.empty() || !unused_snd.empty()))
+        {
+            trashed = TrashCustomInstrumentsAndSamples(unused_inst, unused_snd);
+            RefreshListsFromBank();
+        }
+
+        m_pending_delete_song_indices.clear();
+        m_confirm_delete_song_open = false;
+
+        char status[256];
+        if (trashed > 0)
+        {
+            std::snprintf(status,
+                          sizeof(status),
+                          "Deleted %zu song%s; moved %u unused custom resource%s to Trash",
+                          song_count,
+                          song_count == 1 ? "" : "s",
+                          trashed,
+                          trashed == 1 ? "" : "s");
+        }
+        else
+        {
+            std::snprintf(status,
+                          sizeof(status),
+                          "Deleted %zu song%s",
+                          song_count,
+                          song_count == 1 ? "" : "s");
+        }
+        SetStatus(status);
+    }
+
 void RememberSessionPcmFromSampleEditor()
 {
 #if NBEDITOR_MVP
