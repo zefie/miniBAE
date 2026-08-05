@@ -512,6 +512,34 @@ BAEFileType X_DetermineFileType(const char *filePath)
     // Try extension-based detection first (fast)
     BAEFileType result = X_DetermineFileTypeByPath(filePath);
     debug_message("[FileType] Extension-based detection result: %s\n", X_GetFileTypeString(result));
+
+#if USE_MTHC_SUPPORT == TRUE
+    /* .mid/.midi often host Nokia MThc containers; prefer content magic. */
+    if (result == BAE_MIDI_TYPE)
+    {
+        XFILENAME fileName;
+        XFILE fileRef;
+
+        XConvertPathToXFILENAME((void *)filePath, &fileName);
+        fileRef = XFileOpenForRead(&fileName);
+        if (fileRef != 0)
+        {
+            unsigned char magic[4];
+            int32_t readResult;
+
+            memset(magic, 0, sizeof(magic));
+            XFileSetPosition(fileRef, 0L);
+            readResult = XFileRead(fileRef, magic, 4);
+            XFileClose(fileRef);
+            if (readResult == 0 &&
+                magic[0] == 'M' && magic[1] == 'T' && magic[2] == 'h' && magic[3] == 'c')
+            {
+                result = BAE_MTHC;
+                debug_message("[FileType] Overrode MIDI extension to MThc by content\n");
+            }
+        }
+    }
+#endif
     
     // If extension-based detection failed, try content-based detection
     if (result == BAE_INVALID_TYPE)

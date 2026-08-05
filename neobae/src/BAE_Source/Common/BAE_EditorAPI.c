@@ -214,26 +214,27 @@ static BAEFileType PV_DetermineEditorImportMemoryFileType(void const *data,
 {
     unsigned char const *bytes;
 
-    if (fileTypeHint != BAE_INVALID_TYPE)
-    {
-        return fileTypeHint;
-    }
     if (!data || dataSize < 4)
     {
-        return BAE_INVALID_TYPE;
+        return (fileTypeHint != BAE_INVALID_TYPE) ? fileTypeHint : BAE_INVALID_TYPE;
     }
 
     bytes = (unsigned char const *)data;
-    if (bytes[0] == 'M' && bytes[1] == 'T' && bytes[2] == 'h' && bytes[3] == 'd')
-    {
-        return BAE_MIDI_TYPE;
-    }
 #if USE_MTHC_SUPPORT == TRUE
+    /* Prefer container magic over a .mid-derived MIDI hint. */
     if (bytes[0] == 'M' && bytes[1] == 'T' && bytes[2] == 'h' && bytes[3] == 'c')
     {
         return BAE_MTHC;
     }
 #endif
+    if (fileTypeHint != BAE_INVALID_TYPE)
+    {
+        return fileTypeHint;
+    }
+    if (bytes[0] == 'M' && bytes[1] == 'T' && bytes[2] == 'h' && bytes[3] == 'd')
+    {
+        return BAE_MIDI_TYPE;
+    }
     if ((bytes[0] == 'I' && bytes[1] == 'R' && bytes[2] == 'E' && bytes[3] == 'Z') ||
         (bytes[0] == 'Z' && bytes[1] == 'R' && bytes[2] == 'E' && bytes[3] == 'Z'))
     {
@@ -4991,6 +4992,69 @@ static BAEResult PV_LoadMidiBytesIntoDocument(BAERmfEditorDocument *document,
         document->tempoBPM = 60000000UL / document->tempoEvents[0].microsecondsPerQuarter;
     }
     return (document->trackCount > 0) ? BAE_NO_ERROR : BAE_BAD_FILE;
+}
+
+/* Load standard MIDI, or transparently decompress Nokia MThc containers first
+ * (same behavior as BAESong_LoadMidiFromMemory). Always stores decoded SMF as
+ * the document's original MIDI bytes when successful. */
+static BAEResult PV_LoadMidiOrMthcBytesIntoDocument(BAERmfEditorDocument *document,
+                                                    unsigned char const *data,
+                                                    uint32_t dataSize)
+{
+    unsigned char const *midiData;
+    uint32_t midiSize;
+    BAEResult result;
+#if USE_MTHC_SUPPORT == TRUE
+    unsigned char *decodedMthcMidi = NULL;
+    uint32_t decodedMthcMidiLen = 0;
+#endif
+
+    if (!document || !data || dataSize == 0)
+    {
+        return BAE_BAD_FILE;
+    }
+
+    midiData = data;
+    midiSize = dataSize;
+
+#if USE_MTHC_SUPPORT == TRUE
+    if (dataSize >= 4 &&
+        data[0] == 'M' && data[1] == 'T' && data[2] == 'h' && data[3] == 'c')
+    {
+        if (mthc_decompress_memory(data, dataSize, &decodedMthcMidi, &decodedMthcMidiLen) != 0 ||
+            !decodedMthcMidi ||
+            decodedMthcMidiLen < 4 ||
+            decodedMthcMidi[0] != 'M' || decodedMthcMidi[1] != 'T' ||
+            decodedMthcMidi[2] != 'h' || decodedMthcMidi[3] != 'd')
+        {
+            if (decodedMthcMidi)
+            {
+                free(decodedMthcMidi);
+            }
+            return BAE_BAD_FILE;
+        }
+        midiData = decodedMthcMidi;
+        midiSize = decodedMthcMidiLen;
+    }
+#endif
+
+    result = PV_LoadMidiBytesIntoDocument(document, midiData, midiSize);
+    if (result == BAE_NO_ERROR)
+    {
+        result = PV_SetDebugOriginalMidiData(document, midiData, midiSize);
+    }
+    if (result == BAE_NO_ERROR)
+    {
+        document->isPristine = TRUE;
+    }
+
+#if USE_MTHC_SUPPORT == TRUE
+    if (decodedMthcMidi)
+    {
+        free(decodedMthcMidi);
+    }
+#endif
+    return result;
 }
 
 static void PV_DecodeResourceName(char const *rawName, char outName[256])
@@ -9757,7 +9821,11 @@ BAERmfEditorDocument *BAERmfEditorDocument_LoadFromFile(BAEPathName filePath)
     {
         return NULL;
     }
+#if USE_MTHC_SUPPORT == TRUE
+    if (fileType == BAE_MIDI_TYPE || fileType == BAE_MTHC)
+#else
     if (fileType == BAE_MIDI_TYPE)
+#endif
     {
         unsigned char *data;
         uint32_t dataSize;
@@ -9765,16 +9833,9 @@ BAERmfEditorDocument *BAERmfEditorDocument_LoadFromFile(BAEPathName filePath)
         result = PV_ReadWholeFile(filePath, &data, &dataSize);
         if (result == BAE_NO_ERROR)
         {
-            result = PV_LoadMidiBytesIntoDocument(document, data, dataSize);
-            if (result == BAE_NO_ERROR)
-            {
-                result = PV_SetDebugOriginalMidiData(document, data, dataSize);
-            }
+            /* .mid extension reports BAE_MIDI_TYPE even for MThc payloads. */
+            result = PV_LoadMidiOrMthcBytesIntoDocument(document, data, dataSize);
             XDisposePtr(data);
-            if (result == BAE_NO_ERROR)
-            {
-                document->isPristine = TRUE;
-            }
         }
     }
     else if (fileType == BAE_RMF)
@@ -9867,21 +9928,15 @@ BAERmfEditorDocument *BAERmfEditorDocument_LoadFromMemory(void const *data,
         return NULL;
     }
 
+#if USE_MTHC_SUPPORT == TRUE
+    if (fileType == BAE_MIDI_TYPE || fileType == BAE_MTHC)
+#else
     if (fileType == BAE_MIDI_TYPE)
+#endif
     {
-        result = PV_LoadMidiBytesIntoDocument(document,
-                                              (unsigned char const *)data,
-                                              dataSize);
-        if (result == BAE_NO_ERROR)
-        {
-            result = PV_SetDebugOriginalMidiData(document,
-                                                 (unsigned char const *)data,
-                                                 dataSize);
-        }
-        if (result == BAE_NO_ERROR)
-        {
-            document->isPristine = TRUE;
-        }
+        result = PV_LoadMidiOrMthcBytesIntoDocument(document,
+                                                    (unsigned char const *)data,
+                                                    dataSize);
     }
     else if (fileType == BAE_RMF)
     {
@@ -9928,58 +9983,13 @@ BAERmfEditorDocument *BAERmfEditorDocument_LoadFromMemory(void const *data,
         if (midiStart && midiLen >= 4 &&
             midiStart[0]=='M' && midiStart[1]=='T' && midiStart[2]=='h' && midiStart[3]=='d')
         {
-            result = PV_LoadMidiBytesIntoDocument(document, midiStart, midiLen);
-            if (result == BAE_NO_ERROR)
-            {
-                result = PV_SetDebugOriginalMidiData(document, midiStart, midiLen);
-            }
-            if (result == BAE_NO_ERROR)
-            {
-                document->isPristine = TRUE;
-            }
+            result = PV_LoadMidiOrMthcBytesIntoDocument(document, midiStart, midiLen);
         }
         else
         {
             result = BAE_BAD_FILE;
         }
     }
-#if USE_MTHC_SUPPORT == TRUE
-    else if (fileType == BAE_MTHC)
-    {
-        unsigned char *decodedMthcMidi = NULL;
-        uint32_t decodedMthcMidiLen = 0;
-
-        if (mthc_decompress_memory((unsigned char const *)data,
-                                    dataSize,
-                                    &decodedMthcMidi,
-                                    &decodedMthcMidiLen) != 0)
-        {
-            result = BAE_BAD_FILE;
-        }
-        else if (decodedMthcMidiLen >= 4 &&
-                 decodedMthcMidi[0]=='M' && decodedMthcMidi[1]=='T' && decodedMthcMidi[2]=='h' && decodedMthcMidi[3]=='d')
-        {
-            result = PV_LoadMidiBytesIntoDocument(document, decodedMthcMidi, decodedMthcMidiLen);
-            if (result == BAE_NO_ERROR)
-            {
-                result = PV_SetDebugOriginalMidiData(document, decodedMthcMidi, decodedMthcMidiLen);
-            }
-            if (result == BAE_NO_ERROR)
-            {
-                document->isPristine = TRUE;
-            }
-        }
-        else
-        {
-            result = BAE_BAD_FILE;
-        }
-
-        if (decodedMthcMidi)
-        {
-            free(decodedMthcMidi);
-        }
-    }
-#endif
     else
     {
         result = BAE_BAD_FILE_TYPE;
