@@ -2,6 +2,7 @@
 #include "imgui_internal.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlrenderer3.h"
+#include "neobae_theme.inc"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_dialog.h>
@@ -3878,8 +3879,12 @@ private:
         }
 
         ImDrawList *draw_list = ImGui::GetWindowDrawList();
-        draw_list->AddRectFilled(canvas_pos, ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y), IM_COL32(18, 24, 32, 255));
-        draw_list->AddRect(canvas_pos, ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y), IM_COL32(95, 130, 170, 255));
+        draw_list->AddRectFilled(canvas_pos,
+                                 ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y),
+                                 NeoBaeTheme::ScopeBg());
+        draw_list->AddRect(canvas_pos,
+                           ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + canvas_size.y),
+                           NeoBaeTheme::ScopeBorder());
 
         const int points = static_cast<int>(m_scope_history.size());
         const float mid_y = canvas_pos.y + (canvas_size.y * 0.5f);
@@ -3892,7 +3897,7 @@ private:
             const int history_idx = (m_scope_write_index + i) % points;
             const float y = mid_y - (a * m_scope_history[static_cast<size_t>(history_idx)]);
             ImVec2 cur = ImVec2(x, y);
-            draw_list->AddLine(prev, cur, IM_COL32(118, 226, 195, 255), 1.6f);
+            draw_list->AddLine(prev, cur, NeoBaeTheme::ScopeWave(), 1.6f);
             prev = cur;
         }
 
@@ -4643,7 +4648,7 @@ private:
             else if (inst.is_alias)
             {
                 /* Fallback when oblique TTF failed to load. */
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.75f, 0.85f, 1.0f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Text, NeoBaeTheme::AliasTextFallback());
             }
             const bool inst_selected =
                 (m_multi_instruments.count(static_cast<int>(i)) != 0) ||
@@ -5601,6 +5606,7 @@ int main(int argc, char **argv)
     io.IniFilename = nullptr;
 
     ImGui::StyleColorsDark();
+    NeoBaeTheme::ApplyImGuiStyle();
     ImGuiStyle &style = ImGui::GetStyle();
     style.ScaleAllSizes(main_scale);
     style.FontScaleDpi = main_scale;

@@ -1,4 +1,4 @@
-/* About NeoBAE Studio — included inside NbEditorApp. */
+/* About NeoBAE Editor — included inside NbEditorApp. */
 
     void OpenAboutDialog()
     {
@@ -19,7 +19,7 @@
         if (std::strncmp(text, "http", 4) == 0)
         {
             ImGui::Indent(8.0f);
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.45f, 0.72f, 1.0f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Text, NeoBaeTheme::LinkText());
             if (ImGui::Selectable(text, false))
             {
                 (void)SDL_OpenURL(text);
@@ -39,9 +39,9 @@
         {
             return;
         }
-        ImGui::OpenPopup("About NeoBAE Studio");
+        ImGui::OpenPopup("About NeoBAE Editor");
         ImGui::SetNextWindowSize(ImVec2(560.0f, 520.0f), ImGuiCond_FirstUseEver);
-        if (!ImGui::BeginPopupModal("About NeoBAE Studio", &m_about_open, 0))
+        if (!ImGui::BeginPopupModal("About NeoBAE Editor", &m_about_open, 0))
         {
             return;
         }
@@ -54,7 +54,7 @@
         const char *features = BAE_GetFeatureString();
         const char *cpu = BAE_GetCurrentCPUArchitecture();
 
-        ImGui::Text("NeoBAE Studio version: %s", _VERSION);
+        ImGui::Text("NeoBAE Editor version: %s", _VERSION);
         if (cpu && cpu[0])
         {
             ImGui::SameLine();

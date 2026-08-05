@@ -477,21 +477,21 @@
             const bool muted = ChannelEffectivelyMuted(ch);
             if (soloed)
             {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22f, 0.48f, 0.28f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.58f, 0.34f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.18f, 0.40f, 0.24f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Button, NeoBaeTheme::ChannelSolo());
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, NeoBaeTheme::ChannelSoloHover());
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, NeoBaeTheme::ChannelSoloActive());
             }
             else if (muted)
             {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.45f, 0.22f, 0.20f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.55f, 0.28f, 0.25f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.40f, 0.18f, 0.16f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Button, NeoBaeTheme::ChannelMuted());
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, NeoBaeTheme::ChannelMutedHover());
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, NeoBaeTheme::ChannelMutedActive());
             }
             else
             {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22f, 0.28f, 0.34f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.28f, 0.36f, 0.44f, 1.0f));
-                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.18f, 0.24f, 0.30f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_Button, NeoBaeTheme::ChannelOpen());
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, NeoBaeTheme::ChannelOpenHover());
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, NeoBaeTheme::ChannelOpenActive());
             }
             ImGui::Button(label, ImVec2(36.0f, k_ch_btn_h));
             if (ImGui::IsItemClicked(ImGuiMouseButton_Left))

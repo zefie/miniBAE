@@ -261,7 +261,7 @@
         }
         if (ImGui::BeginMenu("Help"))
         {
-            if (ImGui::MenuItem("About NeoBAE Studio..."))
+            if (ImGui::MenuItem("About NeoBAE Editor..."))
             {
                 OpenAboutDialog();
             }
