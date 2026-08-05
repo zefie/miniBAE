@@ -1522,9 +1522,17 @@ void GM_SF2_RenderAudioSlice(GM_Song* pSong, int32_t* mixBuffer, int32_t* reverb
                            g_fluidsynth_mix_buffer, 1, 2);
     PV_SF2_UnlockSynth();
     
-    // Normalize FluidSynth output to ±1.0 to prevent clipping from hot SoundFonts.
-    // This tames the signal at the source so the downstream volume controls
-    // and output stage all work cleanly.
+    // Apply BankBalance before peak-limit so a >1x scale cannot re-blow the buffer.
+    // Song volume stays in the convert path (after limit) as before.
+    {
+        float bankScale = GM_BankBalance_GetMixScale(GM_BANK_ENGINE_SF2);
+        if (bankScale != 1.0f)
+        {
+            int32_t totalSamples = fsFrames * 2;
+            for (int32_t s = 0; s < totalSamples; s++)
+                g_fluidsynth_mix_buffer[s] *= bankScale;
+        }
+    }
     {
         int32_t totalSamples = fsFrames * 2;
         float peak = 0.0f;
@@ -1538,21 +1546,15 @@ void GM_SF2_RenderAudioSlice(GM_Song* pSong, int32_t* mixBuffer, int32_t* reverb
         {
             float scale = 1.0f / peak;
             for (int32_t s = 0; s < totalSamples; s++)
-            {
                 g_fluidsynth_mix_buffer[s] *= scale;
-            }
         }
     }
 
-    // Apply song volume scaling + cross-engine bank balance
     float songScale = 1.0f;
     {
         int32_t fv = pSong->songVolume;
         if (fv >= 0 && fv <= MAX_SONG_VOLUME)
-        {
             songScale *= (float)fv / 127.0f;
-        }
-        songScale *= GM_BankBalance_GetMixScale(GM_BANK_ENGINE_SF2);
     }
     // Apply per-channel volume/expression: we post-scale the rendered buffer per frame
     float channelScales[BAE_MAX_MIDI_CHANNELS];
@@ -1945,8 +1947,10 @@ float GM_SF2_MeasureBankLoudness(void)
                     continue;
                 frames = end - start + 1;
                 rms = PV_SF2_LoudnessInt16(sample->data + start, frames, kStride);
-                /* SF2 attenuation is in centibels. */
-                loud = rms * (float)pow(10.0, -atten / 200.0);
+                /* FluidLite applies only ALT_ATTENUATION_SCALE (0.4) of GEN_ATTENUATION
+                 * (see fluid_voice.c). Full-scale atten here under-read loudness and
+                 * made BankBalance over-boost SF2. */
+                loud = rms * (float)pow(10.0, -(atten * 0.4) / 200.0);
                 if (loud > best)
                     best = loud;
             }
@@ -2057,7 +2061,8 @@ float GM_SF2_EstimateNoteLoudness(int bank, int program, int key, int velocity)
                     continue;
                 frames = end - start + 1;
                 rms = PV_SF2_LoudnessInt16(sample->data + start, frames, kStride);
-                loud = rms * (float)pow(10.0, -atten / 200.0);
+                /* Match FluidLite ALT_ATTENUATION_SCALE (0.4). */
+                loud = rms * (float)pow(10.0, -(atten * 0.4) / 200.0);
                 if (loud > best)
                     best = loud;
             }
