@@ -945,7 +945,7 @@ void TeardownForSessionReload()
     m_app_compression_cache.clear();
 }
 
-std::vector<unsigned char> CaptureNbetLayoutBlob()
+std::vector<unsigned char> CaptureNbetLayoutBlob(bool include_layout = true)
 {
     std::vector<unsigned char> blob;
     int x = 100;
@@ -953,47 +953,54 @@ std::vector<unsigned char> CaptureNbetLayoutBlob()
     int w = 1280;
     int h = 820;
     uint32_t maximized = 0;
-    if (m_main_window)
+    uint32_t open_flags = 0;
+    uint32_t ini_len = 0;
+    const char *ini = nullptr;
+
+    if (include_layout)
     {
-        SDL_GetWindowPosition(m_main_window, &x, &y);
-        SDL_GetWindowSize(m_main_window, &w, &h);
-        const SDL_WindowFlags flags = SDL_GetWindowFlags(m_main_window);
-        if (flags & SDL_WINDOW_MAXIMIZED)
+        if (m_main_window)
         {
-            maximized = 1;
+            SDL_GetWindowPosition(m_main_window, &x, &y);
+            SDL_GetWindowSize(m_main_window, &w, &h);
+            const SDL_WindowFlags flags = SDL_GetWindowFlags(m_main_window);
+            if (flags & SDL_WINDOW_MAXIMIZED)
+            {
+                maximized = 1;
+            }
+        }
+        /* Force a fresh dump of window + docking handlers into the ini blob. */
+        ImGui::MarkIniSettingsDirty();
+        size_t ini_size = 0;
+        ini = ImGui::SaveIniSettingsToMemory(&ini_size);
+        ini_len = (ini && ini_size > 0) ? static_cast<uint32_t>(ini_size) : 0;
+
+        if (m_instrument_editor_open)
+        {
+            open_flags |= kNbetOpenIE;
+        }
+#if NBEDITOR_MVP
+        if (m_sample_editor_open)
+        {
+            open_flags |= kNbetOpenSE;
+        }
+#endif
+        if (m_song_info_open)
+        {
+            open_flags |= kNbetOpenSongInfo;
+        }
+        if (m_song_settings_open)
+        {
+            open_flags |= kNbetOpenSongSettings;
+        }
+        if (m_midi_editor_open)
+        {
+            open_flags |= kNbetOpenMidiEditor;
         }
     }
-    /* Force a fresh dump of window + docking handlers into the ini blob. */
-    ImGui::MarkIniSettingsDirty();
-    size_t ini_size = 0;
-    const char *ini = ImGui::SaveIniSettingsToMemory(&ini_size);
-    const uint32_t ini_len = (ini && ini_size > 0) ? static_cast<uint32_t>(ini_size) : 0;
 
-    uint32_t open_flags = 0;
-    if (m_instrument_editor_open)
-    {
-        open_flags |= kNbetOpenIE;
-    }
-#if NBEDITOR_MVP
-    if (m_sample_editor_open)
-    {
-        open_flags |= kNbetOpenSE;
-    }
-#endif
-    if (m_song_info_open)
-    {
-        open_flags |= kNbetOpenSongInfo;
-    }
-    if (m_song_settings_open)
-    {
-        open_flags |= kNbetOpenSongSettings;
-    }
-    if (m_midi_editor_open)
-    {
-        open_flags |= kNbetOpenMidiEditor;
-    }
-
-    /* Version 3: v2 + player mix (volume / tempo / reverb) before ImGui ini. */
+    /* Version 3: v2 + player mix (volume / tempo / reverb) before ImGui ini.
+     * When include_layout is false (ZSN marker / prefs off), still store mix. */
     blob.reserve(76 + ini_len);
     NbetPutBE32(blob, FOUR_CHAR('n', 'B', 'e', 'T'));
     NbetPutBE32(blob, 3u);
@@ -1003,18 +1010,31 @@ std::vector<unsigned char> CaptureNbetLayoutBlob()
     NbetPutBE32(blob, static_cast<uint32_t>(h));
     NbetPutBE32(blob, maximized);
     NbetPutBE32(blob, open_flags);
-    NbetPutBE32(blob, m_ie_inst_id);
-    NbetPutBE32(blob, m_ie_instrument_index);
-    NbetPutBE32(blob, static_cast<uint32_t>(m_ie_bank));
-    NbetPutBE32(blob, static_cast<uint32_t>(m_ie_program));
-    NbetPutBE32(blob, m_ie_from_song ? 1u : 0u);
+    if (include_layout)
+    {
+        NbetPutBE32(blob, m_ie_inst_id);
+        NbetPutBE32(blob, m_ie_instrument_index);
+        NbetPutBE32(blob, static_cast<uint32_t>(m_ie_bank));
+        NbetPutBE32(blob, static_cast<uint32_t>(m_ie_program));
+        NbetPutBE32(blob, m_ie_from_song ? 1u : 0u);
 #if NBEDITOR_MVP
-    NbetPutBE32(blob, static_cast<uint32_t>(m_sample_editor_sample_row));
-    NbetPutBE32(blob, m_sample_editor_is_song_sample ? 1u : 0u);
+        NbetPutBE32(blob, static_cast<uint32_t>(m_sample_editor_sample_row));
+        NbetPutBE32(blob, m_sample_editor_is_song_sample ? 1u : 0u);
 #else
-    NbetPutBE32(blob, static_cast<uint32_t>(-1));
-    NbetPutBE32(blob, 0u);
+        NbetPutBE32(blob, static_cast<uint32_t>(-1));
+        NbetPutBE32(blob, 0u);
 #endif
+    }
+    else
+    {
+        NbetPutBE32(blob, 0u);
+        NbetPutBE32(blob, 0u);
+        NbetPutBE32(blob, 0u);
+        NbetPutBE32(blob, 0u);
+        NbetPutBE32(blob, 0u);
+        NbetPutBE32(blob, static_cast<uint32_t>(-1));
+        NbetPutBE32(blob, 0u);
+    }
     NbetPutBE32(blob, static_cast<uint32_t>(m_volume_percent));
     NbetPutBE32(blob, static_cast<uint32_t>(m_song_settings_tempo_percent));
     NbetPutBE32(blob, static_cast<uint32_t>(m_reverb_type));
@@ -1633,9 +1653,13 @@ bool SaveSessionToPath(const char *path)
     /* ---- nBeT / BePf / BEPF / DATe ---- */
     UpdateBusyProgress(0.80f, "Writing session metadata…");
     {
-        if (m_pref_save_session_layout)
+        /* .zsn always writes nBeT (session marker + player mix). Layout/dock/ini
+         * follow the save-layout pref. Classic .bsn only writes nBeT when that
+         * pref is on; BePf marks the BE2 session instead. */
+        if (want_zsn || m_pref_save_session_layout)
         {
-            std::vector<unsigned char> nbet = CaptureNbetLayoutBlob();
+            std::vector<unsigned char> nbet =
+                CaptureNbetLayoutBlob(m_pref_save_session_layout);
             if (!nbet.empty())
             {
                 std::vector<unsigned char> stored = EncodeNbetResourceBody(nbet);
@@ -1651,31 +1675,36 @@ bool SaveSessionToPath(const char *path)
             }
         }
 
-        static const unsigned char k_bepf_body[] = {'e', 'x', 'a', 'm', 'p', 'l', 'e'};
-        char empty_pascal[256];
-        empty_pascal[0] = 0;
-        (void)XAddFileResource(out_file,
-                               FOUR_CHAR('B', 'E', 'P', 'F'),
-                               1,
-                               empty_pascal,
-                               (void *)k_bepf_body,
-                               static_cast<int32_t>(sizeof(k_bepf_body)));
-        date_stamps.push_back({FOUR_CHAR('B', 'E', 'P', 'F'), 1});
+        /* BEPF / BePf are Beatnik Editor session/bank trailers. Classic .bsn
+         * keeps them for BE2; .zsn is NeoBAE-only (detect via nBeT). */
+        if (!want_zsn)
+        {
+            static const unsigned char k_bepf_body[] = {'e', 'x', 'a', 'm', 'p', 'l', 'e'};
+            char empty_pascal[256];
+            empty_pascal[0] = 0;
+            (void)XAddFileResource(out_file,
+                                   FOUR_CHAR('B', 'E', 'P', 'F'),
+                                   1,
+                                   empty_pascal,
+                                   (void *)k_bepf_body,
+                                   static_cast<int32_t>(sizeof(k_bepf_body)));
+            date_stamps.push_back({FOUR_CHAR('B', 'E', 'P', 'F'), 1});
 
-        /* 34-byte Session Prefs stub (layout TBD; matches fixture size). */
-        unsigned char bepf_prefs[34];
-        std::memset(bepf_prefs, 0, sizeof(bepf_prefs));
-        bepf_prefs[0] = 0x00;
-        bepf_prefs[1] = 0x02;
-        char bepf_pascal[256];
-        BsnMakePascalName("Session Prefs", bepf_pascal);
-        (void)XAddFileResource(out_file,
-                               FOUR_CHAR('B', 'e', 'P', 'f'),
-                               1,
-                               bepf_pascal,
-                               bepf_prefs,
-                               static_cast<int32_t>(sizeof(bepf_prefs)));
-        date_stamps.push_back({FOUR_CHAR('B', 'e', 'P', 'f'), 1});
+            /* 34-byte Session Prefs stub (layout TBD; matches fixture size). */
+            unsigned char bepf_prefs[34];
+            std::memset(bepf_prefs, 0, sizeof(bepf_prefs));
+            bepf_prefs[0] = 0x00;
+            bepf_prefs[1] = 0x02;
+            char bepf_pascal[256];
+            BsnMakePascalName("Session Prefs", bepf_pascal);
+            (void)XAddFileResource(out_file,
+                                   FOUR_CHAR('B', 'e', 'P', 'f'),
+                                   1,
+                                   bepf_pascal,
+                                   bepf_prefs,
+                                   static_cast<int32_t>(sizeof(bepf_prefs)));
+            date_stamps.push_back({FOUR_CHAR('B', 'e', 'P', 'f'), 1});
+        }
 
         std::vector<unsigned char> date_body;
         date_body.reserve((date_stamps.size() + 1) * 12);

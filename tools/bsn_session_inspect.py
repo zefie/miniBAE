@@ -74,6 +74,8 @@ def is_session_document(resources: List[Resource]) -> bool:
     for r in resources:
         if r["type"] == b"BePf" and r["name"] == b"Session Prefs":
             return True
+        if r["type"] == b"nBeT":
+            return True
     return False
 
 

@@ -260,7 +260,13 @@ static bool IsBe2SessionDocument(const std::vector<BsnIrezResource> &resources)
 {
     for (const BsnIrezResource &r : resources)
     {
+        /* Classic BE2 Session .bsn */
         if (BsnResourceTypeEquals(r.type, 'B', 'e', 'P', 'f') && r.name == "Session Prefs")
+        {
+            return true;
+        }
+        /* NeoBAE .zsn (and optional NeoBAE layout on .bsn) */
+        if (BsnResourceTypeEquals(r.type, 'n', 'B', 'e', 'T'))
         {
             return true;
         }

@@ -857,7 +857,7 @@
             }
             if (ext == "zsn")
             {
-                SetStatus("Not a NeoBAE/BE2 Session .zsn (missing BePf Session Prefs)");
+                SetStatus("Not a NeoBAE Session .zsn (missing nBeT)");
                 return;
             }
             /* Keep Bank 2+/custom samples; LoadBankFromPath merges Bank 0/1. */

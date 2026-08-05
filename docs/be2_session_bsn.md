@@ -13,11 +13,13 @@ python3 tools/bsn_session_inspect.py reference/bsn/*.bsn
 | **BE2 Session `.bsn`** | IREZ resource document: **optional bank body** + session songs + optional PCM masters + editor prefs |
 | **NeoBAE / HSB bank `.bsn`** | IREZ bank + trailing `BEPF` only (no `BePf` Session Prefs) |
 | **`.nbs`** | Old NeoBAE nbstudio LZMA TLV session (not BE2) |
-| **`.zsn`** | NeoBAE Session with ZREZ map (ZMF/ZSB tripwires); same BePf/session layout |
+| **`.zsn`** | NeoBAE Session with ZREZ map (ZMF/ZSB tripwires); marked by **`nBeT`** (no `BePf`/`BEPF`) |
 
-Detector for BE2 editor documents: presence of resource type **`BePf`** named **`Session Prefs`**.
+Detectors:
+- **BE2 Session `.bsn`:** resource type **`BePf`** named **`Session Prefs`**
+- **NeoBAE Session `.zsn`:** resource type **`nBeT`** (also accepted on `.bsn` when present)
 
-Plain converted banks (e.g. `patches111.bsn`) have `BEPF` but **not** `BePf`.
+Plain converted banks (e.g. `patches111.bsn`) have `BEPF` but **not** `BePf` / `nBeT`.
 
 ## Container
 
@@ -85,6 +87,7 @@ Fixture size deltas vs `empty.bsn`:
 ### `BEPF`
 
 - Small trailer resource (often body `example`); also used by NeoBAE `tools/hsb_bsn.py` bank toggle
+- Written for classic Session `.bsn` (BE2); **omitted from `.zsn`** along with `BePf` (Beatnik Editor cannot open ZREZ; NeoBAE detects `.zsn` via `nBeT`)
 
 ### `DATe` — datestamp list
 
@@ -130,7 +133,7 @@ Examples:
 
 ## Open strategy (NeoBAE)
 
-1. Detect `BePf` / `Session Prefs` (editor session document; flat even in ZREZ).
+1. Detect session: `BePf` / `Session Prefs` (classic `.bsn`) or `nBeT` (`.zsn` / NeoBAE).
 2. Load whole file with existing IREZ/ZREZ bank loader (`BAEMixer_AddBankFromFile`).
 3. Enumerate user songs via **XFILE APIs** (`XCountFileResourcesOfType` / `XGetFileResource`), not a raw flat resource walk — ZREZ sessions pack `SONG`→`ZSNG` and `Midi`→`ZBNK`. Keep DATe filter: stamped `SONG`→`Midi` when any Midi/SONG stamps exist; otherwise all `SONG`→`Midi`.
 4. Enumerate groovoids the same way: `SONG`→`emid`, plus unstamped `SONG`→`Midi` when the DATe filter is active (`XExistsFileResource` expands ZBNK for Midi).
