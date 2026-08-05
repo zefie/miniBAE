@@ -1113,11 +1113,12 @@
         const ImVec2 grid_origin(origin.x + key_w, origin.y);
         const ImVec2 grid_size(std::max(1.0f, size.x - key_w), size.y);
 
-        /* Gutter fill + piano keys (keys flush to the time grid edge). */
+        /* Gutter fill + piano keys — leave a hard edge so the roll never paints over keys. */
+        const float key_x1 = grid_origin.x - 2.0f;
         dl->AddRectFilled(origin,
-                          ImVec2(grid_origin.x, origin.y + size.y),
+                          ImVec2(key_x1, origin.y + size.y),
                           IM_COL32(28, 30, 36, 255));
-        const float key_x0 = grid_origin.x - key_draw_w;
+        const float key_x0 = key_x1 - key_draw_w;
         for (int pitch = 0; pitch < 128; ++pitch)
         {
             const float y0 = MePitchToY(pitch, grid_origin.y);
@@ -1129,8 +1130,12 @@
             const int pc = pitch % 12;
             const bool black = (pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10);
             dl->AddRectFilled(ImVec2(key_x0, y0),
-                              ImVec2(grid_origin.x - 1.0f, y1),
+                              ImVec2(key_x1, y1),
                               black ? IM_COL32(40, 42, 48, 255) : IM_COL32(220, 220, 225, 255));
+            /* Black separators between keys (stronger on white keys so they don't merge). */
+            dl->AddLine(ImVec2(key_x0, y1 - 0.5f),
+                        ImVec2(key_x1, y1 - 0.5f),
+                        black ? IM_COL32(20, 20, 24, 255) : IM_COL32(0, 0, 0, 255));
             if (pc == 0)
             {
                 char lab[16];
@@ -1140,6 +1145,15 @@
                             lab);
             }
         }
+        /* Separator strip between keyboard and time grid. */
+        dl->AddRectFilled(ImVec2(key_x1, origin.y),
+                          ImVec2(grid_origin.x, origin.y + size.y),
+                          IM_COL32(12, 12, 16, 255));
+
+        /* Clip all roll content so notes/grid/playhead cannot overlap the keys. */
+        dl->PushClipRect(grid_origin,
+                         ImVec2(grid_origin.x + grid_size.x, grid_origin.y + grid_size.y),
+                         true);
 
         /* Grid background */
         dl->AddRectFilled(grid_origin,
@@ -1153,6 +1167,10 @@
         for (uint32_t t = (start_tick / beat) * beat; t <= end_tick + beat; t += beat)
         {
             const float x = MeTickToX(t, grid_origin.x);
+            if (x < grid_origin.x || x > grid_origin.x + grid_size.x)
+            {
+                continue;
+            }
             const bool is_bar = (t % bar) == 0;
             dl->AddLine(ImVec2(x, grid_origin.y),
                         ImVec2(x, grid_origin.y + grid_size.y),
@@ -1246,6 +1264,8 @@
                             1.5f);
             }
         }
+
+        dl->PopClipRect();
 
         ImGui::SetCursorScreenPos(grid_origin);
         ImGui::InvisibleButton("##me_grid", grid_size);
