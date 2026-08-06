@@ -2283,6 +2283,26 @@
         return SanitizeExportFileStem(raw);
     }
 
+    /* Bank export: session basename, else "export" (not the active song name). */
+    std::string SuggestedBankExportFileStem() const
+    {
+        std::string raw;
+        if (!m_loaded_session_path.empty())
+        {
+            raw = FileNameFromPath(m_loaded_session_path);
+            const size_t dot = raw.find_last_of('.');
+            if (dot != std::string::npos && dot > 0)
+            {
+                raw = raw.substr(0, dot);
+            }
+        }
+        if (raw.empty())
+        {
+            raw = "export";
+        }
+        return SanitizeExportFileStem(raw);
+    }
+
     void BeginOneShotRmfSaveDialog(const std::string &suggested_name)
     {
         m_pending_dialog_action = DialogAction::ExportOneShotRmf;

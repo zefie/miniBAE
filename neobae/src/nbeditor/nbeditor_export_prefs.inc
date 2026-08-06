@@ -338,7 +338,7 @@
                 {"All files (*.*)", "*"},
             };
             static char default_path[256];
-            const std::string stem = SuggestedExportFileStem();
+            const std::string stem = SuggestedBankExportFileStem();
             std::snprintf(default_path,
                           sizeof(default_path),
                           "%s.%s",
