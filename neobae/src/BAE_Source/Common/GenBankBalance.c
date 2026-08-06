@@ -47,11 +47,9 @@ enum
 
 static const float kMinLoudness = 1.0e-6f;
 static const float kScaleMin = 0.05f; /* ~-26 dB — attenuate hot DLS/SF2/XMF toward HSB */
-/* Match 2026.08.02 "DLS Gold Master": never boost DLS/SF2 above unity when
- * balancing toward HSB (kScaleMax=4 was making DLS far too loud). */
-static const float kScaleMax = 1.0f;
-/* Native HSB/RMF mix scaling sounds wrong (timbre/envelope), so HSB stays at
- * unity and other engines are matched to its measured loudness instead. */
+static const float kScaleMax = 3.0f;  /* ~+12 dB — boost quiet DLS/SF2/XMF toward HSB */
+/* Never scale native HSB/RMF (note-on attenuation breaks render). Match SF2/DLS
+ * up to HSB instead. Cap still TBD vs "DLS too loud" when RMF embeds are hot. */
 
 /* Per-mixer balance state. Process-global scales used to make a second
  * foobar/waveform mixer (e.g. HSB) attenuate an already-playing SF2 mixer. */
@@ -676,7 +674,7 @@ static void PV_BankBalance_Recalculate(void)
         return;
     }
 
-    /* Prefer HSB/RMF as the reference level so native voices stay unscaled.
+    /* Prefer HSB/RMF as the reference so native voices stay unscaled.
      * Without HSB, match the loudest remaining engine and boost quieter ones. */
     if (g_present[GM_BANK_ENGINE_HSB] && g_loudness[GM_BANK_ENGINE_HSB] > kMinLoudness)
     {
