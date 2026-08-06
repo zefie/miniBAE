@@ -549,47 +549,55 @@ void GM_SF2_CheckAndDisableSF2ForRMFEmbedded(GM_Song* pSong)
 }
 
 void GM_SoftResetSF2(void) {
+    GM_Mixer *pMixer;
+    int songIndex;
+
     if (!g_fluidsynth_synth)
         return;
 
-    // Soft reset: Reset controllers without resetting programs
-    // This resets pitch bend, modulation, sustain, etc.
-    // but preserves the currently selected instrument on each channel
-    // NOTE: We do NOT reset CC7 (volume) or CC11 (expression) here because
-    // MIDI files set these during preroll and we don't want to overwrite them
-    
+    /* Soft reset: controllers without resetting programs. Called from
+     * PV_ResetControlers on song start/loop. Many phone MIDIs fade CC11→0 at
+     * the end and never restore it at the top — leaving FluidSynth + our
+     * post-scale muted for the next loop. Reset expression to GM default 127.
+     * CC7 is left alone; songs almost always re-send volume at bar 1. */
     PV_SF2_LockSynth();
     for (int ch = 0; ch < BAE_MAX_MIDI_CHANNELS; ch++) {
-        // Reset pitch bend to center (8192 = 0x2000)
         fluid_synth_pitch_bend(g_fluidsynth_synth, ch, 8192);
-        
-        // Reset modulation wheel (CC 1)
         fluid_synth_cc(g_fluidsynth_synth, ch, 1, 0);
-        
-        // DO NOT reset CC7 (volume) - let MIDI file control it
-        // DO NOT reset CC11 (expression) - let MIDI file control it
-        
-        // Reset pan (CC 10) to center
+        fluid_synth_cc(g_fluidsynth_synth, ch, 11, 127);
         fluid_synth_cc(g_fluidsynth_synth, ch, 10, 64);
-        
-        // Reset sustain pedal (CC 64) to off
         fluid_synth_cc(g_fluidsynth_synth, ch, 64, 0);
-        
-        // Disable reverb (CC 91)
         fluid_synth_cc(g_fluidsynth_synth, ch, 91, 0);
-        
-        // Disable chorus (CC 93)
         fluid_synth_cc(g_fluidsynth_synth, ch, 93, 0);
-        
-        // Reset RPN parameters
-        fluid_synth_cc(g_fluidsynth_synth, ch, 100, 127); // RPN LSB
-        fluid_synth_cc(g_fluidsynth_synth, ch, 101, 127); // RPN MSB
-        
-        // Reset portamento
-        fluid_synth_cc(g_fluidsynth_synth, ch, 5, 0);    // Portamento time
-        fluid_synth_cc(g_fluidsynth_synth, ch, 65, 0);   // Portamento off
+        fluid_synth_cc(g_fluidsynth_synth, ch, 100, 127);
+        fluid_synth_cc(g_fluidsynth_synth, ch, 101, 127);
+        fluid_synth_cc(g_fluidsynth_synth, ch, 5, 0);
+        fluid_synth_cc(g_fluidsynth_synth, ch, 65, 0);
     }
     PV_SF2_UnlockSynth();
+
+    /* Post-scale uses info->channelExpression independently of FluidSynth CC11. */
+    pMixer = GM_GetCurrentMixer();
+    if (!pMixer)
+    {
+        return;
+    }
+    for (songIndex = 0; songIndex < MAX_SONGS; ++songIndex)
+    {
+        GM_Song *pSong = pMixer->pSongsToPlay[songIndex];
+        GM_SF2Info *info;
+        int ch;
+
+        if (!pSong || !pSong->sf2Info)
+        {
+            continue;
+        }
+        info = (GM_SF2Info *)pSong->sf2Info;
+        for (ch = 0; ch < BAE_MAX_MIDI_CHANNELS; ++ch)
+        {
+            info->channelExpression[ch] = 127;
+        }
+    }
 }
 
 // FluidSynth default controller setup

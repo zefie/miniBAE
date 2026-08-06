@@ -987,22 +987,17 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
     /* Re-assert normalize after Start/reverb churn (export slices use this gain). */
     BAEMixer_SetSongNormalizeGain(mixer, normalizeGainPct);
 
-    /* Export defaults to one-shot; BAEScript may re-enable looping with exporter.loopcount. */
-    if (gWriteToFile) {
-        BAESong_SetLoops(song, 0);
-        effectiveLoopCount = 0;
-    } else {
-        /* BAESong_SetLoops(song, N) has a known engine bug: it sets both loopSong=TRUE and
-         * songMaxLoopCount=N, but the sequencer re-loops forever when loopSong=TRUE even after
-         * songMaxLoopCount is exhausted (the max count is meant for controller 86/87 mute markers).
-         * Fix: if loopCount > 0, tell the engine to loop indefinitely (large value keeps loopSong=TRUE
-         * so IsDone stays FALSE), and stop externally when we detect N wrap-arounds via position
-         * tracking. loopCount == 0 keeps the default one-shot behaviour (loopSong=FALSE). */
-        if (loopCount > 0)
-            BAESong_SetLoops(song, 30000); /* effectively infinite; we stop it ourselves */
-        else
-            BAESong_SetLoops(song, 0); /* one-shot, loopSong=FALSE, IsDone fires when done */
-    }
+    /* BAESong_SetLoops(song, N) has a known engine bug: it sets both loopSong=TRUE and
+     * songMaxLoopCount=N, but the sequencer re-loops forever when loopSong=TRUE even after
+     * songMaxLoopCount is exhausted (the max count is meant for controller 86/87 mute markers).
+     * Fix: if loopCount > 0, tell the engine to loop indefinitely (large value keeps loopSong=TRUE
+     * so IsDone stays FALSE), and stop externally when we detect N wrap-arounds via position
+     * tracking. loopCount == 0 keeps the default one-shot behaviour (loopSong=FALSE).
+     * Honor -l for both live playback and -o offline render (needed to capture 2nd+ loops). */
+    if (loopCount > 0)
+        BAESong_SetLoops(song, 30000); /* effectively infinite; we stop it ourselves */
+    else
+        BAESong_SetLoops(song, 0); /* one-shot, loopSong=FALSE, IsDone fires when done */
 
 #if SUPPORT_BAESCRIPT == TRUE
     uint32_t scriptLenMs = 0;
@@ -1576,11 +1571,8 @@ static BAEResult PV_PlayDualFile(BAEMixer mixerA, BAEMixer mixerB, const char *p
         BAEMixer_MakeCurrent(mixerA);
     }
 
-    if (gWriteToFile) {
-        BAESong_SetLoops(songA, 0);
-        BAESong_SetLoops(songB, 0);
-        effectiveLoopCount = 0;
-    } else if (loopCount > 0) {
+    /* Honor -l for live and -o offline (same SetLoops quirk as single-bank path). */
+    if (loopCount > 0) {
         BAESong_SetLoops(songA, 30000);
         BAESong_SetLoops(songB, 30000);
     } else {
