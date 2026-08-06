@@ -58,6 +58,10 @@
         m_pref_ignore_session_layout = false;
         m_pref_adsr_default_valid = false;
         std::memset(&m_pref_adsr_default, 0, sizeof(m_pref_adsr_default));
+#if SUPPORT_MIDI_HW == TRUE
+        m_midi_hw_enabled = false;
+        m_midi_hw_device_index = -1;
+#endif
         std::ifstream in(EditorPrefsFilePath());
         if (!in)
         {
@@ -93,6 +97,16 @@
             {
                 m_pref_ignore_session_layout = PrefParseBool(value, false);
             }
+#if SUPPORT_MIDI_HW == TRUE
+            else if (key == "midi_hw_enabled")
+            {
+                m_midi_hw_enabled = PrefParseBool(value, false);
+            }
+            else if (key == "midi_hw_device_index")
+            {
+                m_midi_hw_device_index = std::atoi(value.c_str());
+            }
+#endif
             else if (key == "song_title")
             {
                 PrefAssignCString(m_pref_song_title, sizeof(m_pref_song_title), value);
@@ -167,6 +181,10 @@
         out << "reopen_last_session=" << (m_pref_reopen_last_session ? "1" : "0") << '\n';
         out << "save_session_layout=" << (m_pref_save_session_layout ? "1" : "0") << '\n';
         out << "ignore_session_layout=" << (m_pref_ignore_session_layout ? "1" : "0") << '\n';
+#if SUPPORT_MIDI_HW == TRUE
+        out << "midi_hw_enabled=" << (m_midi_hw_enabled ? "1" : "0") << '\n';
+        out << "midi_hw_device_index=" << m_midi_hw_device_index << '\n';
+#endif
         out << "song_title=" << m_pref_song_title << '\n';
         out << "song_composer=" << m_pref_song_composer << '\n';
         out << "song_copyright=" << m_pref_song_copyright << '\n';
@@ -195,6 +213,11 @@
         m_prefs_draft_reopen = m_pref_reopen_last_session;
         m_prefs_draft_save_layout = m_pref_save_session_layout;
         m_prefs_draft_ignore_layout = m_pref_ignore_session_layout;
+#if SUPPORT_MIDI_HW == TRUE
+        m_prefs_draft_midi_hw_enabled = m_midi_hw_enabled;
+        m_prefs_draft_midi_hw_device_index = m_midi_hw_device_index;
+        MidiHwRefreshDeviceList();
+#endif
         m_prefs_open = true;
     }
 
@@ -230,12 +253,18 @@
                 "When opening a Session, skip applying nBeT size/dock/editor layout.\n"
                 "Disabled by default.");
         }
+        DrawMidiHwPreferencesSection();
         ImGui::Spacing();
         if (ImGui::Button("OK", ImVec2(80, 0)))
         {
             m_pref_reopen_last_session = m_prefs_draft_reopen;
             m_pref_save_session_layout = m_prefs_draft_save_layout;
             m_pref_ignore_session_layout = m_prefs_draft_ignore_layout;
+#if SUPPORT_MIDI_HW == TRUE
+            m_midi_hw_enabled = m_prefs_draft_midi_hw_enabled;
+            m_midi_hw_device_index = m_prefs_draft_midi_hw_device_index;
+            MidiHwApplyFromPrefs();
+#endif
             SaveEditorPrefsToDisk();
             m_prefs_open = false;
             ImGui::CloseCurrentPopup();

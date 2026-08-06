@@ -14,6 +14,14 @@
 #include "GenPriv.h"
 #include "mod2rmf_rmfcreat.h"
 
+#ifndef SUPPORT_MIDI_HW
+#define SUPPORT_MIDI_HW 0
+#endif
+#if SUPPORT_MIDI_HW == TRUE
+#include "gui_midi_hw_input.h"
+#include "rtmidi_c.h"
+#endif
+
 #if defined(NBEDITOR_EMBED_FONTS)
 #include "nbeditor_embedded_fonts.h"
 #endif
@@ -49,6 +57,31 @@
 
 namespace
 {
+
+#if SUPPORT_MIDI_HW == TRUE
+struct MidiHwDevice
+{
+    char name[128] = {};
+    int api_index = -1;
+    int port_index = -1;
+};
+#endif
+
+/* Sample-editor pitched audition voices (OpenMPT-style multi-playhead). */
+static constexpr int kSePreviewVoiceCount = 8;
+struct SePreviewVoice
+{
+    BAESound sound = nullptr;
+    int midi_note = -1;
+    bool active = false;
+    uint32_t started_ms = 0;
+    double playback_hz = 0.0;
+    uint32_t buffer_frames = 0;
+    bool looping = false;
+    uint32_t loop_start = 0;
+    uint32_t loop_end = 0;
+    uint32_t playhead_frame = 0;
+};
 
 enum class SampleSource
 {
@@ -1237,18 +1270,24 @@ public:
                 ImportPathIntoSession(recent, true);
             }
         }
+        MidiHwApplyFromPrefs();
         SetStatus("nbeditor ready");
         return true;
     }
 
     void Shutdown()
     {
+        MidiHwShutdownInput();
         CleanupPublishedClipPackages();
-        if (m_sample_editor_preview_sound)
+        for (SePreviewVoice &voice : m_se_preview_voices)
         {
-            BAESound_Stop(m_sample_editor_preview_sound, FALSE);
-            BAESound_Delete(m_sample_editor_preview_sound);
-            m_sample_editor_preview_sound = nullptr;
+            if (voice.sound)
+            {
+                BAESound_Stop(voice.sound, FALSE);
+                BAESound_Delete(voice.sound);
+                voice.sound = nullptr;
+            }
+            voice = SePreviewVoice{};
         }
         if (m_preview_song)
         {
@@ -1361,6 +1400,7 @@ public:
     {
         /* Keep last hover sticky across frames: OS file drags often stop updating
          * ImGui hover, so clearing to None each frame broke MIDI→Songs drops. */
+        PollHardwareMidiInput();
         ConsumeDialogResult();
         DrawMainMenuBar();
         DrawDockspace();
@@ -1401,6 +1441,11 @@ public:
     void HandleDroppedPath(const char *path)
     {
         HandleDroppedPathInternal(path);
+    }
+
+    void HandlePcKeyboardEvent(const SDL_Event &event)
+    {
+        HandlePcKeyboardEventInternal(event);
     }
 
     /* File → Open / Windows "Open with" / argv paths (not tab-scoped DnD). */
@@ -1795,13 +1840,21 @@ private:
         BAESong_Start(new_preview, 0);
         BAESong_Pause(new_preview);
 
-        BAESound new_sample_preview = BAESound_New(new_mixer);
-        if (!new_sample_preview)
+        std::array<BAESound, kSePreviewVoiceCount> new_se_sounds{};
+        for (int i = 0; i < kSePreviewVoiceCount; ++i)
         {
-            BAESong_Delete(new_preview);
-            BAEMixer_Close(new_mixer);
-            SetStatus("BAESound_New for sample preview failed");
-            return false;
+            new_se_sounds[static_cast<size_t>(i)] = BAESound_New(new_mixer);
+            if (!new_se_sounds[static_cast<size_t>(i)])
+            {
+                for (int j = 0; j < i; ++j)
+                {
+                    BAESound_Delete(new_se_sounds[static_cast<size_t>(j)]);
+                }
+                BAESong_Delete(new_preview);
+                BAEMixer_Close(new_mixer);
+                SetStatus("BAESound_New for sample preview failed");
+                return false;
+            }
         }
 
         if (m_preview_song)
@@ -1809,11 +1862,14 @@ private:
             BAESong_Stop(m_preview_song, FALSE);
             BAESong_Delete(m_preview_song);
         }
-        if (m_sample_editor_preview_sound)
+        for (SePreviewVoice &voice : m_se_preview_voices)
         {
-            BAESound_Stop(m_sample_editor_preview_sound, FALSE);
-            BAESound_Delete(m_sample_editor_preview_sound);
-            m_sample_editor_preview_sound = nullptr;
+            if (voice.sound)
+            {
+                BAESound_Stop(voice.sound, FALSE);
+                BAESound_Delete(voice.sound);
+            }
+            voice = SePreviewVoice{};
         }
         if (m_song)
         {
@@ -1828,7 +1884,10 @@ private:
 
         m_mixer = new_mixer;
         m_preview_song = new_preview;
-    m_sample_editor_preview_sound = new_sample_preview;
+        for (int i = 0; i < kSePreviewVoiceCount; ++i)
+        {
+            m_se_preview_voices[static_cast<size_t>(i)].sound = new_se_sounds[static_cast<size_t>(i)];
+        }
 
         if (!LoadActiveBankIntoMixer())
         {
@@ -3515,6 +3574,7 @@ private:
 #include "nbeditor_session.inc"
 #include "nbeditor_bsn_session.inc"
 #include "nbeditor_midi_editor.inc"
+#include "nbeditor_keyboard_input.inc"
 
     void DrawDockspace()
     {
@@ -3652,12 +3712,18 @@ private:
         ImGui::PushID(for_instrument_editor ? "ie_vkbd" : "player_vkbd");
         if (ImGui::Button("Panic"))
         {
+            PanicPcKeyboardNotes();
             PanicAuditionNotes();
+#if NBEDITOR_MVP
+            StopSampleEditorPreview();
+#endif
         }
+        ImGui::SameLine();
+        ImGui::Text("Oct %d  (,/.  |  A–K musical typing)", m_pc_keyboard_octave);
         ImGui::SameLine();
         ImGui::Text(for_instrument_editor
                         ? "Preview uses live (unapplied) instrument edits."
-                        : "Click/hold keyboard keys to audition selected instrument.");
+                        : "Click/hold keys or type A–K to audition.");
 
         const float width = std::max(520.0f, ImGui::GetContentRegionAvail().x);
         const float white_h = for_instrument_editor ? 52.0f : 60.0f;
@@ -3765,28 +3831,28 @@ private:
             {
                 if (m_mouse_active_note >= 0 && m_mouse_active_note != hovered_note)
                 {
-                    NoteOff(m_mouse_active_note);
+                    DispatchKeyboardNoteOff(m_mouse_active_note);
                     m_key_mouse_held[static_cast<size_t>(m_mouse_active_note)] = false;
                 }
                 m_mouse_active_note = hovered_note;
                 m_key_mouse_held[static_cast<size_t>(hovered_note)] = true;
-                NoteOn(hovered_note);
+                DispatchKeyboardNoteOn(hovered_note);
             }
             else if (left_down && m_mouse_active_note >= 0 && hovered_note >= 0 &&
                      hovered_note != m_mouse_active_note)
             {
-                NoteOff(m_mouse_active_note);
+                DispatchKeyboardNoteOff(m_mouse_active_note);
                 m_key_mouse_held[static_cast<size_t>(m_mouse_active_note)] = false;
                 m_mouse_active_note = hovered_note;
                 m_key_mouse_held[static_cast<size_t>(hovered_note)] = true;
-                NoteOn(hovered_note);
+                DispatchKeyboardNoteOn(hovered_note);
             }
 
             if ((left_released || !keyboard_tracking ||
                  (left_down && !in_key_area && hovered_note < 0)) &&
                 m_mouse_active_note >= 0)
             {
-                NoteOff(m_mouse_active_note);
+                DispatchKeyboardNoteOff(m_mouse_active_note);
                 m_key_mouse_held[static_cast<size_t>(m_mouse_active_note)] = false;
                 m_mouse_active_note = -1;
             }
@@ -3798,7 +3864,9 @@ private:
             {
                 return false;
             }
-            return m_key_mouse_held[static_cast<size_t>(note)] || m_key_active_until_ms[static_cast<size_t>(note)] > now_ms;
+            return m_key_mouse_held[static_cast<size_t>(note)] ||
+                   m_hw_note_held[static_cast<size_t>(note)] ||
+                   m_key_active_until_ms[static_cast<size_t>(note)] > now_ms;
         };
 
         for (const KeyRect &k : white_keys)
@@ -4384,6 +4452,7 @@ private:
 #include "nbeditor_trash.inc"
 #include "nbeditor_resource_usage.inc"
 #include "nbeditor_session_extras.inc"
+#include "nbeditor_midi_hw.inc"
 #include "nbeditor_export_prefs.inc"
 #include "nbeditor_about_dlg.inc"
 #include "nbeditor_dnd.inc"
@@ -4994,8 +5063,13 @@ private:
         }
     }
 
-    void NoteOn(int midi_note)
+    void NoteOn(int midi_note, unsigned char velocity = 127)
     {
+        if (velocity == 0)
+        {
+            NoteOff(midi_note);
+            return;
+        }
         if (m_instrument_editor_open)
         {
             EnsureBankAuditionSong();
@@ -5050,7 +5124,7 @@ private:
                 BAESong_NoteOn(audition_song,
                                ch,
                                play_note,
-                               127,
+                               velocity,
                                0);
             }
             else if (m_song)
@@ -5065,7 +5139,7 @@ private:
                 BAESong_NoteOnWithLoad(audition_song,
                                        ch,
                                        play_note,
-                                       127,
+                                       velocity,
                                        0);
             }
             m_ie_note_song = audition_song;
@@ -5075,7 +5149,7 @@ private:
             BAESong_NoteOnWithLoad(audition_song,
                                    ch,
                                    play_note,
-                                   127,
+                                   velocity,
                                    0);
             m_ie_note_song = nullptr;
         }
@@ -5137,6 +5211,9 @@ private:
     {
         m_mouse_active_note = -1;
         m_key_mouse_held.fill(false);
+        m_hw_note_held.fill(false);
+        m_keyboard_note_target.fill(KeyboardInputTarget::None);
+        m_pc_key_note.fill(-1);
         m_key_active_until_ms.fill(0);
         m_vkbd_sounding_note.fill(-1);
         /* Hard-kill (not AllNotesOff): IE live ADSR often has long release. */
@@ -5248,7 +5325,18 @@ private:
     std::array<float, 16> m_channel_vu = {};
     uint32_t m_channel_vu_last_tick_ms = 0;
     std::array<bool, 128> m_key_mouse_held = {};
+    std::array<bool, 128> m_hw_note_held = {};
+    std::array<KeyboardInputTarget, 128> m_keyboard_note_target = {};
     std::array<uint32_t, 128> m_key_active_until_ms = {};
+
+#if SUPPORT_MIDI_HW == TRUE
+    bool m_midi_hw_enabled = false;
+    bool m_midi_hw_open = false;
+    int m_midi_hw_device_index = -1;
+    bool m_prefs_draft_midi_hw_enabled = false;
+    int m_prefs_draft_midi_hw_device_index = -1;
+    std::vector<MidiHwDevice> m_midi_hw_devices;
+#endif
     /* VKBD key → actual MIDI note sent (percussion remaps every key to the drum slot). */
     std::array<int, 128> m_vkbd_sounding_note = [] {
         std::array<int, 128> notes{};
@@ -5303,7 +5391,13 @@ private:
     uint16_t m_sample_editor_audition_channels = 0;
     BAE_UNSIGNED_FIXED m_sample_editor_audition_sample_rate = 0;
     bool m_sample_editor_loop_dirty = false;
-    BAESound m_sample_editor_preview_sound = nullptr;
+    std::array<SePreviewVoice, kSePreviewVoiceCount> m_se_preview_voices{};
+    int m_pc_keyboard_octave = 4;
+    std::array<int, 512> m_pc_key_note = [] {
+        std::array<int, 512> notes{};
+        notes.fill(-1);
+        return notes;
+    }();
 
     bool m_sample_editor_dirty = false;
     bool m_sample_editor_loop_enabled = false;
@@ -5778,6 +5872,10 @@ int main(int argc, char **argv)
                 {
                     app.HandleDroppedPath(dropped);
                 }
+            }
+            if (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP)
+            {
+                app.HandlePcKeyboardEvent(event);
             }
         }
 

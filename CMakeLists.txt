@@ -213,7 +213,7 @@ option(BAE_DISABLE_WMA_SUPPORT "Disable WMA (MSAUDIO) codec support" OFF)
 option(BAE_DISABLE_RMI_SUPPORT "Disable RMI support" OFF)
 option(BAE_DISABLE_J2ME_PATCH "Disable J2ME percussion bank patch (maps bank 120 for percussion intent)" OFF)
 option(BAE_DISABLE_ROLLED_MIDI_UNROLLING "Disable unrolling of rolled MIDI files" OFF)
-option(BAE_DISABLE_MIDI_HARDWARE "Disable hardware MIDI I/O in zefidi via RtMidi" OFF)
+option(BAE_DISABLE_MIDI_HARDWARE "Disable hardware MIDI I/O (zefidi / nbeditor) via RtMidi" OFF)
 set(BAE_EMBED_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/banks/patches111/patches111.hsb" CACHE FILEPATH "HSB bank file to embed as built-in patches (empty disables embedding)")
 set(BAE_EMBED_TTF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/fonts/LiberationSans-Regular.ttf" CACHE FILEPATH "TTF font file to embed for zefidi GUI use (Liberation Sans; empty disables embedding)")
 set(BAE_NBEDITOR_FONT_REGULAR "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/fonts/LiberationSans-Regular.ttf" CACHE FILEPATH "Regular TTF embedded for nbeditor")
@@ -418,16 +418,35 @@ else()
   message(STATUS "Enabling ADX support")
 endif()
 
-if (BUILD_ZEFIDI)
-  if (BAE_DISABLE_MIDI_HARDWARE)
-    set(BAE_ENABLE_MIDI_HARDWARE OFF)
-    message(STATUS "Disabling hardware MIDI I/O in zefidi via RtMidi")
-  else()
-    message(STATUS "Enabling hardware MIDI I/O in zefidi via RtMidi")
-  endif()
+# RtMidi hardware I/O for zefidi and/or nbeditor (shared input helper).
+set(BAE_ENABLE_MIDI_HARDWARE OFF)
+set(BAE_MIDI_HW_SOURCES_OK OFF)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/rtmidi/rtmidi_c.h" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/rtmidi/rtmidi_c.cpp" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/rtmidi/RtMidi.cpp")
+  set(BAE_MIDI_HW_SOURCES_OK ON)
+endif()
+
+if(BAE_DISABLE_MIDI_HARDWARE)
+  message(STATUS "Disabling hardware MIDI I/O via RtMidi (BAE_DISABLE_MIDI_HARDWARE)")
+elseif(NOT BUILD_ZEFIDI AND NOT BUILD_NBEDITOR)
+  message(STATUS "Disabling hardware MIDI I/O via RtMidi (no zefidi/nbeditor)")
+elseif(NOT BAE_MIDI_HW_SOURCES_OK)
+  message(STATUS "Disabling hardware MIDI I/O: RtMidi sources missing")
 else()
-  set(BAE_ENABLE_MIDI_HARDWARE OFF)
-  message(STATUS "Disabling hardware MIDI I/O in zefidi via RtMidi (zefidi build disabled)")
+  if(WIN32 OR APPLE)
+    set(BAE_ENABLE_MIDI_HARDWARE ON)
+  elseif(UNIX)
+    find_library(BAE_ALSA_LIBRARY NAMES asound)
+    if(BAE_ALSA_LIBRARY)
+      set(BAE_ENABLE_MIDI_HARDWARE ON)
+    else()
+      message(STATUS "Disabling hardware MIDI I/O: ALSA library not found")
+    endif()
+  endif()
+  if(BAE_ENABLE_MIDI_HARDWARE)
+    message(STATUS "Enabling hardware MIDI I/O via RtMidi (zefidi/nbeditor)")
+  endif()
 endif()
 
 set(BAE_EMBED_PATCHES_EFFECTIVE OFF)
@@ -1795,20 +1814,13 @@ if(BUILD_ZEFIDI)
     )
 
     if(BAE_ENABLE_MIDI_HARDWARE)
-      if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/rtmidi/rtmidi_c.h" AND
-         EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/rtmidi/rtmidi_c.cpp" AND
-         EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/rtmidi/RtMidi.cpp")
-        list(APPEND ZEFIDI_SOURCES
-          neobae/src/gui/gui_midi_hw.c
-          neobae/src/gui/gui_midi_hw_input.c
-          neobae/src/gui/gui_midi_hw_output.c
-          neobae/src/thirdparty/rtmidi/rtmidi_c.cpp
-          neobae/src/thirdparty/rtmidi/RtMidi.cpp
-        )
-      else()
-        set(BAE_ENABLE_MIDI_HARDWARE OFF)
-        message(STATUS "BAE_ENABLE_MIDI_HARDWARE requested, but RtMidi sources are missing; building zefidi without MIDI hardware support.")
-      endif()
+      list(APPEND ZEFIDI_SOURCES
+        neobae/src/gui/gui_midi_hw.c
+        neobae/src/gui/gui_midi_hw_input.c
+        neobae/src/gui/gui_midi_hw_output.c
+        neobae/src/thirdparty/rtmidi/rtmidi_c.cpp
+        neobae/src/thirdparty/rtmidi/RtMidi.cpp
+      )
     endif()
 
     # Always compile the debug console TU. Its body is gated on `_DEBUG == TRUE`.
@@ -1875,8 +1887,11 @@ if(BUILD_ZEFIDI)
     endif()
 
     if(BAE_ENABLE_MIDI_HARDWARE)
-      target_include_directories(zefidi PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/rtmidi)
-
+      target_include_directories(zefidi PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/rtmidi
+        ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/gui
+      )
+      target_compile_definitions(zefidi PRIVATE SUPPORT_MIDI_HW=1)
       if(WIN32)
         target_compile_definitions(zefidi PRIVATE __WINDOWS_MM__)
         target_link_libraries(zefidi PRIVATE winmm)
@@ -1888,15 +1903,9 @@ if(BUILD_ZEFIDI)
           "-framework CoreMIDI"
           "-framework CoreFoundation"
         )
-      elseif(UNIX)
-        find_library(BAE_ALSA_LIBRARY NAMES asound)
-        if(BAE_ALSA_LIBRARY)
-          target_compile_definitions(zefidi PRIVATE __LINUX_ALSA__)
-          target_link_libraries(zefidi PRIVATE ${BAE_ALSA_LIBRARY})
-        else()
-          set(BAE_ENABLE_MIDI_HARDWARE OFF)
-          message(STATUS "BAE_ENABLE_MIDI_HARDWARE set, but ALSA library was not found; RtMidi ALSA backend will be unavailable.")
-        endif()
+      elseif(UNIX AND BAE_ALSA_LIBRARY)
+        target_compile_definitions(zefidi PRIVATE __LINUX_ALSA__)
+        target_link_libraries(zefidi PRIVATE ${BAE_ALSA_LIBRARY})
       endif()
     endif()
 
@@ -2162,6 +2171,14 @@ if(BUILD_NBEDITOR)
         list(APPEND NBEDITOR_SOURCES "${NBEDITOR_VERSION_RC}")
       endif()
 
+      if(BAE_ENABLE_MIDI_HARDWARE)
+        list(APPEND NBEDITOR_SOURCES
+          neobae/src/gui/gui_midi_hw_input.c
+          neobae/src/thirdparty/rtmidi/rtmidi_c.cpp
+          neobae/src/thirdparty/rtmidi/RtMidi.cpp
+        )
+      endif()
+
       add_executable(nbeditor ${NBEDITOR_SOURCES})
       target_include_directories(nbeditor PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/nbeditor
@@ -2182,6 +2199,7 @@ if(BUILD_NBEDITOR)
         NBEDITOR_PLAYER_WINDOW=1
         NBEDITOR_SAMPLE_LIST_WINDOW=1
         NBEDITOR_INSTRUMENT_LIST_WINDOW=1
+        SUPPORT_MIDI_HW=$<IF:$<BOOL:${BAE_ENABLE_MIDI_HARDWARE}>,1,0>
       )
       if(NBEDITOR_LIBXMP_LITE_AVAILABLE)
         target_compile_definitions(nbeditor PRIVATE LIBXMP_STATIC=1 LIBXMP_CORE_PLAYER=1 LIBXMP_BUILD=1)
@@ -2192,6 +2210,40 @@ if(BUILD_NBEDITOR)
         CXX_STANDARD 17
         CXX_STANDARD_REQUIRED ON
       )
+      # gui_midi_hw_input.c uses <stdatomic.h> / _Static_assert (C11).
+      if(BAE_ENABLE_MIDI_HARDWARE)
+        set_source_files_properties(
+          neobae/src/gui/gui_midi_hw_input.c
+          PROPERTIES
+            LANGUAGE C
+            C_STANDARD 11
+            C_STANDARD_REQUIRED ON
+        )
+        target_include_directories(nbeditor PRIVATE
+          ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/rtmidi
+          ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/gui
+        )
+        if(WIN32)
+          target_compile_definitions(nbeditor PRIVATE __WINDOWS_MM__)
+        elseif(APPLE)
+          target_compile_definitions(nbeditor PRIVATE __MACOSX_CORE__)
+          target_link_libraries(nbeditor PRIVATE
+            "-framework CoreServices"
+            "-framework CoreAudio"
+            "-framework CoreMIDI"
+            "-framework CoreFoundation"
+          )
+        elseif(UNIX AND BAE_ALSA_LIBRARY)
+          target_compile_definitions(nbeditor PRIVATE __LINUX_ALSA__)
+          target_link_libraries(nbeditor PRIVATE ${BAE_ALSA_LIBRARY})
+        endif()
+        if(MSVC)
+          target_compile_options(nbeditor PRIVATE /experimental:c11atomics)
+        endif()
+        message(STATUS "nbeditor: hardware MIDI input (RtMidi) enabled.")
+      else()
+        message(STATUS "nbeditor: hardware MIDI input disabled.")
+      endif()
       if(WIN32)
         target_link_libraries(nbeditor PRIVATE imm32 winmm setupapi cfgmgr32 version)
       endif()

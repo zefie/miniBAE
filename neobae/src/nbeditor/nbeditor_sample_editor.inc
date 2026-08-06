@@ -1344,17 +1344,97 @@
         return ApplySampleEditorChanges(false);
     }
 
-    /* ---------------- Preview ---------------- */
+    /* ---------------- Preview (multi-voice, pitched like OpenMPT) ---------------- */
 
-    void StopSampleEditorPreview()
+    void SeReleasePreviewVoice(SePreviewVoice &voice)
     {
-        if (m_sample_editor_preview_sound)
+        if (voice.sound)
         {
             /* Drain the mixer slice before returning — plain Stop clears
              * voiceRef and races FreeWaveform on the next Load. */
-            (void)BAESound_StopAndWait(m_sample_editor_preview_sound);
+            (void)BAESound_StopAndWait(voice.sound);
+        }
+        voice.active = false;
+        voice.midi_note = -1;
+        voice.started_ms = 0;
+        voice.playback_hz = 0.0;
+        voice.buffer_frames = 0;
+        voice.looping = false;
+        voice.loop_start = 0;
+        voice.loop_end = 0;
+        voice.playhead_frame = 0;
+    }
+
+    void StopSampleEditorPreview()
+    {
+        for (SePreviewVoice &voice : m_se_preview_voices)
+        {
+            SeReleasePreviewVoice(voice);
         }
         m_sample_editor_playing = false;
+        m_sample_editor_playhead_frame = 0;
+    }
+
+    void StopSampleEditorNote(int midi_note)
+    {
+        if (midi_note < 0 || midi_note > 127)
+        {
+            return;
+        }
+        bool any = false;
+        for (SePreviewVoice &voice : m_se_preview_voices)
+        {
+            if (voice.active && voice.midi_note == midi_note)
+            {
+                SeReleasePreviewVoice(voice);
+            }
+            else if (voice.active)
+            {
+                any = true;
+            }
+        }
+        m_sample_editor_playing = any;
+        if (!any)
+        {
+            m_sample_editor_playhead_frame = 0;
+        }
+    }
+
+    SePreviewVoice *SeAcquirePreviewVoice(int midi_note)
+    {
+        /* Retrigger same note on its existing voice. */
+        for (SePreviewVoice &voice : m_se_preview_voices)
+        {
+            if (voice.active && voice.midi_note == midi_note)
+            {
+                return &voice;
+            }
+        }
+        for (SePreviewVoice &voice : m_se_preview_voices)
+        {
+            if (voice.sound && !voice.active)
+            {
+                return &voice;
+            }
+        }
+        /* Steal oldest. */
+        SePreviewVoice *oldest = nullptr;
+        for (SePreviewVoice &voice : m_se_preview_voices)
+        {
+            if (!voice.sound)
+            {
+                continue;
+            }
+            if (!oldest || voice.started_ms < oldest->started_ms)
+            {
+                oldest = &voice;
+            }
+        }
+        if (oldest)
+        {
+            SeReleasePreviewVoice(*oldest);
+        }
+        return oldest;
     }
 
     uint32_t QueryBankSampleResourceBytes(const SampleRow &sample) const
@@ -1560,14 +1640,18 @@
         Audition = 2, /* compression round-trip buffer */
     };
 
-    void StartSampleEditorPreview(SePreviewSource source)
+    void StartSampleEditorNote(int midi_note,
+                               unsigned char velocity = 100,
+                               SePreviewSource source = SePreviewSource::Cache)
     {
-        /* BE2: loop by default when Loop is on (Original and Preview alike). */
+        midi_note = std::clamp(midi_note, 0, 127);
+        velocity = static_cast<unsigned char>(std::clamp<int>(velocity, 1, 127));
+
         const std::vector<unsigned char> *pcm = &m_sample_editor_cached_pcm;
         uint32_t frames = m_sample_editor_cached_frame_count;
         uint16_t bit_size = m_sample_editor_cached_bit_size;
         uint16_t channels = m_sample_editor_cached_channels;
-        BAE_UNSIGNED_FIXED rate = m_sample_editor_cached_sample_rate;
+        BAE_UNSIGNED_FIXED native_rate = m_sample_editor_cached_sample_rate;
         const char *status = "Auditioning sample";
 
         if (source == SePreviewSource::Master)
@@ -1576,7 +1660,7 @@
             frames = m_sample_editor_original_frame_count;
             bit_size = m_sample_editor_original_bit_size;
             channels = m_sample_editor_original_channels;
-            rate = m_sample_editor_original_sample_rate;
+            native_rate = m_sample_editor_original_sample_rate;
             status = "Auditioning original (master)";
         }
         else if (source == SePreviewSource::Audition)
@@ -1585,29 +1669,23 @@
             frames = m_sample_editor_audition_frame_count;
             bit_size = m_sample_editor_audition_bit_size;
             channels = m_sample_editor_audition_channels;
-            rate = m_sample_editor_audition_sample_rate;
+            native_rate = m_sample_editor_audition_sample_rate;
             status = "Previewing compressed decode";
         }
 
-        if (!m_sample_editor_preview_sound || !pcm || pcm->empty() || frames == 0)
+        SePreviewVoice *voice = SeAcquirePreviewVoice(midi_note);
+        if (!voice || !voice->sound || !pcm || pcm->empty() || frames == 0)
         {
             SetStatus("Sample preview unavailable");
             return;
         }
 
-        /* Do not BAESound_Stop() here. Stop clears voiceRef before
-         * LoadCustomSample → Unload can wait for GM_IsSampleProcessing, which
-         * frees the waveform mid-mix and causes an intermittent one-channel
-         * click/blip. Unload stops and drains correctly on its own. */
         uint32_t loop_start = 0;
         uint32_t loop_end = 0;
         if (m_sample_editor_loop_enabled)
         {
             loop_start = m_sample_editor_loop_start;
             loop_end = m_sample_editor_loop_end;
-            /* Compression audition PCM may be in a different frame domain
-             * (MPEG resample / encoder trim). Remap master loops or the
-             * sustain loop lands on the wrong region and buzzes. */
             if (source == SePreviewSource::Audition &&
                 m_sample_editor_original_frame_count > 0 &&
                 frames != m_sample_editor_original_frame_count)
@@ -1626,10 +1704,7 @@
             }
         }
 
-        /* Editor PCM cache is unsigned 8-bit (center 128), matching
-         * GetSampleWaveformData / XConvert8BitTo16Bit. BAESound_LoadCustomSample
-         * expects signed 8-bit and then XPhase8BitWaveform's to unsigned — so we
-         * must convert unsigned→signed here or preview is DC-offset garbage. */
+        /* Editor PCM cache is unsigned 8-bit (center 128). LoadCustomSample wants signed. */
         std::vector<unsigned char> signed_pcm;
         const unsigned char *load_ptr = pcm->data();
         if (bit_size == 8)
@@ -1642,33 +1717,71 @@
             load_ptr = signed_pcm.data();
         }
 
-        BAEResult result = BAESound_LoadCustomSample(m_sample_editor_preview_sound,
+        if (!native_rate)
+        {
+            native_rate = LONG_TO_UNSIGNED_FIXED(m_sample_editor_sample_rate_hz);
+        }
+        const double native_hz = std::max(1.0, UNSIGNED_FIXED_TO_FLOAT(native_rate));
+        const int root = std::clamp(m_sample_editor_root_key, 0, 127);
+        const double pitched_hz =
+            native_hz * std::pow(2.0, static_cast<double>(midi_note - root) / 12.0);
+        const double clamped_hz = std::clamp(pitched_hz, 100.0, 768000.0);
+
+        /* Do not Stop() before Load — Unload drains correctly on its own. */
+        BAEResult result = BAESound_LoadCustomSample(voice->sound,
                                                      const_cast<unsigned char *>(load_ptr),
                                                      frames,
                                                      bit_size,
                                                      channels,
-                                                     rate ? rate : LONG_TO_UNSIGNED_FIXED(m_sample_editor_sample_rate_hz),
+                                                     native_rate,
                                                      loop_start,
                                                      loop_end);
         if (result == BAE_NO_ERROR)
         {
-            (void)BAESound_SetLoopCount(m_sample_editor_preview_sound,
+            (void)BAESound_SetRate(voice->sound, FLOAT_TO_UNSIGNED_FIXED(clamped_hz));
+            (void)BAESound_SetLoopCount(voice->sound,
                                         (loop_end > loop_start) ? 0xFFFFFFFFu : 0u);
-            result = BAESound_Start(m_sample_editor_preview_sound, 0, LONG_TO_UNSIGNED_FIXED(1), 0);
+            const double vol = std::max(0.05, static_cast<double>(velocity) / 127.0);
+            result = BAESound_Start(voice->sound, 0, FLOAT_TO_UNSIGNED_FIXED(vol), 0);
         }
 
         if (result == BAE_NO_ERROR)
         {
-            m_sample_editor_play_started_ms = SDL_GetTicks();
-            m_sample_editor_playhead_frame = 0;
+            voice->active = true;
+            voice->midi_note = midi_note;
+            voice->started_ms = SDL_GetTicks();
+            voice->playback_hz = clamped_hz;
+            voice->buffer_frames = frames;
+            voice->looping = (loop_end > loop_start);
+            voice->loop_start = loop_start;
+            voice->loop_end = loop_end;
+            voice->playhead_frame = 0;
             m_sample_editor_playing = true;
+            m_sample_editor_preview_note = midi_note;
+            m_sample_editor_play_started_ms = voice->started_ms;
             SetStatus(status);
         }
         else
         {
-            m_sample_editor_playing = false;
+            SeReleasePreviewVoice(*voice);
+            bool any = false;
+            for (const SePreviewVoice &v : m_se_preview_voices)
+            {
+                if (v.active)
+                {
+                    any = true;
+                    break;
+                }
+            }
+            m_sample_editor_playing = any;
             SetStatus(std::string("Sample preview failed: ") + FormatBAEError(result));
         }
+    }
+
+    void StartSampleEditorPreview(SePreviewSource source)
+    {
+        /* Transport Play: root-key pitch on its own voice (polyphony still allowed). */
+        StartSampleEditorNote(m_sample_editor_root_key, 100, source);
     }
 
     void StartSampleEditorPreview(bool use_original)
@@ -1785,49 +1898,67 @@
         {
             return;
         }
-        if (m_sample_editor_preview_sound)
+
+        const uint32_t now_ms = SDL_GetTicks();
+        bool any = false;
+        uint32_t primary_head = 0;
+        uint32_t primary_started = 0;
+
+        for (SePreviewVoice &voice : m_se_preview_voices)
         {
-            BAE_BOOL is_done = FALSE;
-            if (BAESound_IsDone(m_sample_editor_preview_sound, &is_done) == BAE_NO_ERROR && is_done)
+            if (!voice.active || !voice.sound)
             {
-                m_sample_editor_playing = false;
+                continue;
             }
-        }
 
-        const uint32_t elapsed_ms = SDL_GetTicks() - m_sample_editor_play_started_ms;
-        const uint32_t native_hz = UNSIGNED_FIXED_TO_LONG_ROUNDED(m_sample_editor_cached_sample_rate);
-        const uint64_t elapsed_frames =
-            (static_cast<uint64_t>(elapsed_ms) * static_cast<uint64_t>(std::max<uint32_t>(native_hz, 1))) / 1000ull;
-        if (m_sample_editor_frame_count == 0)
-        {
-            return;
-        }
-
-        if (m_sample_editor_loop_enabled &&
-            m_sample_editor_loop_end > m_sample_editor_loop_start &&
-            m_sample_editor_loop_end <= m_sample_editor_frame_count)
-        {
-            if (elapsed_frames < m_sample_editor_loop_end)
+            BAE_BOOL is_done = FALSE;
+            if (BAESound_IsDone(voice.sound, &is_done) == BAE_NO_ERROR && is_done)
             {
-                m_sample_editor_playhead_frame = static_cast<uint32_t>(elapsed_frames);
+                SeReleasePreviewVoice(voice);
+                continue;
+            }
+
+            const uint32_t elapsed_ms = now_ms - voice.started_ms;
+            const double hz = std::max(1.0, voice.playback_hz);
+            const uint64_t elapsed_frames =
+                static_cast<uint64_t>((static_cast<double>(elapsed_ms) * hz) / 1000.0);
+            const uint32_t buf = std::max<uint32_t>(voice.buffer_frames, 1);
+
+            if (voice.looping && voice.loop_end > voice.loop_start)
+            {
+                if (elapsed_frames < voice.loop_end)
+                {
+                    voice.playhead_frame = static_cast<uint32_t>(elapsed_frames);
+                }
+                else
+                {
+                    const uint32_t loop_len = voice.loop_end - voice.loop_start;
+                    const uint32_t loop_pos = static_cast<uint32_t>(
+                        (elapsed_frames - voice.loop_start) % std::max<uint32_t>(loop_len, 1));
+                    voice.playhead_frame = voice.loop_start + loop_pos;
+                }
             }
             else
             {
-                const uint32_t loop_len = m_sample_editor_loop_end - m_sample_editor_loop_start;
-                const uint32_t loop_pos = static_cast<uint32_t>(
-                    (elapsed_frames - m_sample_editor_loop_start) % std::max<uint32_t>(loop_len, 1));
-                m_sample_editor_playhead_frame = m_sample_editor_loop_start + loop_pos;
+                voice.playhead_frame =
+                    static_cast<uint32_t>(std::min<uint64_t>(elapsed_frames, buf));
+                if (elapsed_frames >= buf)
+                {
+                    SeReleasePreviewVoice(voice);
+                    continue;
+                }
             }
-        }
-        else
-        {
-            m_sample_editor_playhead_frame =
-                static_cast<uint32_t>(std::min<uint64_t>(elapsed_frames, m_sample_editor_frame_count));
-            if (elapsed_frames >= m_sample_editor_frame_count)
+
+            any = true;
+            if (!primary_started || voice.started_ms >= primary_started)
             {
-                StopSampleEditorPreview();
+                primary_started = voice.started_ms;
+                primary_head = voice.playhead_frame;
             }
         }
+
+        m_sample_editor_playing = any;
+        m_sample_editor_playhead_frame = any ? primary_head : 0;
     }
 
     /* ---------------- Waveform ---------------- */
@@ -2407,13 +2538,44 @@
 
         if (m_sample_editor_frame_count > 0)
         {
-            const float play_x = SeFrameToX(m_sample_editor_playhead_frame, canvas_pos, canvas_size);
-            if (play_x >= canvas_pos.x && play_x <= canvas_end.x)
+            static const ImU32 kPlayheadColors[] = {
+                IM_COL32(255, 238, 138, 255),
+                IM_COL32(138, 220, 255, 255),
+                IM_COL32(255, 170, 200, 255),
+                IM_COL32(180, 255, 170, 255),
+                IM_COL32(210, 180, 255, 255),
+                IM_COL32(255, 200, 140, 255),
+                IM_COL32(160, 255, 230, 255),
+                IM_COL32(255, 150, 150, 255),
+            };
+            bool drew_any = false;
+            for (size_t i = 0; i < m_se_preview_voices.size(); ++i)
             {
-                draw->AddLine(ImVec2(play_x, canvas_pos.y),
-                              ImVec2(play_x, canvas_end.y),
-                              IM_COL32(255, 238, 138, 255),
-                              2.0f);
+                const SePreviewVoice &voice = m_se_preview_voices[i];
+                if (!voice.active)
+                {
+                    continue;
+                }
+                const float play_x = SeFrameToX(voice.playhead_frame, canvas_pos, canvas_size);
+                if (play_x >= canvas_pos.x && play_x <= canvas_end.x)
+                {
+                    draw->AddLine(ImVec2(play_x, canvas_pos.y),
+                                  ImVec2(play_x, canvas_end.y),
+                                  kPlayheadColors[i % (sizeof(kPlayheadColors) / sizeof(kPlayheadColors[0]))],
+                                  2.0f);
+                    drew_any = true;
+                }
+            }
+            if (!drew_any && m_sample_editor_playing)
+            {
+                const float play_x = SeFrameToX(m_sample_editor_playhead_frame, canvas_pos, canvas_size);
+                if (play_x >= canvas_pos.x && play_x <= canvas_end.x)
+                {
+                    draw->AddLine(ImVec2(play_x, canvas_pos.y),
+                                  ImVec2(play_x, canvas_end.y),
+                                  IM_COL32(255, 238, 138, 255),
+                                  2.0f);
+                }
             }
         }
 
@@ -3068,6 +3230,7 @@
         DrawSampleEditorProperties();
         ImGui::Separator();
 
+        ImGui::TextDisabled("Type A–K / MIDI keys to pitch-preview (poly playheads). ,/. octave.");
         if (ImGui::Button(m_sample_editor_playing ? "Stop" : "Play"))
         {
             if (m_sample_editor_playing)
