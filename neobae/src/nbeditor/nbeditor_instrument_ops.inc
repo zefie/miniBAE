@@ -350,9 +350,19 @@
             return;
         }
         const InstrumentRow &row = m_instruments[static_cast<size_t>(list_index)];
-        if (row.from_song_document)
+        if (row.from_song_document || row.has_song_override)
         {
-            SetStatus("Cannot delete a song-document instrument from the bank");
+            if (m_document)
+            {
+                (void)BAERmfEditorDocument_DeleteInstrument(m_document, row.inst_id);
+                (void)BAERmfEditorDocument_DeleteInstrument(m_document, row.target_inst_id);
+                m_session_custom_inst_ids.erase(row.inst_id);
+                m_session_custom_inst_ids.erase(row.target_inst_id);
+                RefreshListsFromBank();
+                SetStatus(std::string("Deleted song instrument ") + row.name);
+                return;
+            }
+            SetStatus("Cannot delete a song-document instrument");
             return;
         }
         if (row.is_alias)

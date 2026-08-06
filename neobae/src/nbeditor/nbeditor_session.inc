@@ -1509,6 +1509,7 @@
 
         struct UsedInst
         {
+            uint32_t requested_inst_id = 0;
             uint32_t resolved_inst_id = 0;
             uint32_t instrument_index = 0;
             int bank = 0;
@@ -1518,6 +1519,8 @@
         };
         std::map<uint32_t, UsedInst> used_by_inst;
         std::set<uint32_t> requested_seen;
+        std::set<uint32_t> resolve_cache_success;
+        std::set<uint32_t> resolve_cache_failed;
 
         uint16_t track_count = 0;
         if (BAERmfEditorDocument_GetTrackCount(m_document, &track_count) != BAE_NO_ERROR)
@@ -1540,31 +1543,10 @@
                     continue;
                 }
                 const int bank_group = ExportBankGroupFromNoteBank(note.bank);
-                /* CH10 bank 0 = GM drums. CH10 bank != 0: try melodic CloneUsed
-                 * (group*256+program), else bank-group kit (group*256+128+note). */
-                bool percussion = (note.channel == 9 && note.bank == 0);
+                bool percussion = (note.channel == 9);
                 uint32_t requested_inst_id =
                     percussion ? (static_cast<uint32_t>(bank_group) * 256u) + 128u + note.note
                                : (static_cast<uint32_t>(bank_group) * 256u) + note.program;
-                if (note.channel == 9 && note.bank != 0)
-                {
-                    uint32_t melodic_id = (static_cast<uint32_t>(bank_group) * 256u) + note.program;
-                    uint32_t resolved_tmp = melodic_id;
-                    uint32_t index_tmp = 0;
-                    if (BAERmfEditorBank_ResolveInstID(m_bank_token,
-                                                       melodic_id,
-                                                       &resolved_tmp,
-                                                       &index_tmp) != BAE_NO_ERROR)
-                    {
-                        percussion = true;
-                        requested_inst_id =
-                            (static_cast<uint32_t>(bank_group) * 256u) + 128u + note.note;
-                    }
-                    else
-                    {
-                        requested_inst_id = melodic_id;
-                    }
-                }
                 if (!requested_seen.insert(requested_inst_id).second)
                 {
                     continue;
@@ -1579,17 +1561,28 @@
                 {
                     continue;
                 }
+                if (percussion && resolved_inst_id < 128)
+                {
+                    /* Drum note must not resolve to a melodic instrument (e.g. 118 Synth Drum). */
+                    continue;
+                }
                 if (used_by_inst.count(resolved_inst_id) != 0)
                 {
+                    if (!percussion)
+                    {
+                        used_by_inst[resolved_inst_id].percussion = false;
+                        used_by_inst[resolved_inst_id].program = static_cast<int>(note.program);
+                    }
                     continue;
                 }
 
                 UsedInst entry;
+                entry.requested_inst_id = requested_inst_id;
                 entry.resolved_inst_id = resolved_inst_id;
                 entry.instrument_index = instrument_index;
                 entry.bank = bank_group;
                 entry.program = percussion ? static_cast<int>(note.note) : static_cast<int>(note.program);
-                entry.percussion = percussion;
+                entry.percussion = (resolved_inst_id < 128) ? false : percussion;
 
                 BAERmfEditorBankInstrumentInfo info;
                 std::memset(&info, 0, sizeof(info));
@@ -1641,9 +1634,11 @@
                 (m_session_custom_inst_ids.count(used.resolved_inst_id) != 0);
             ExportInstrumentItem item;
             item.inst_id = used.resolved_inst_id;
+            item.requested_inst_id = used.requested_inst_id;
             item.instrument_index = used.instrument_index;
             item.name = used.name;
             item.is_custom = is_custom;
+            item.percussion = used.percussion;
             item.custom_index = is_custom ? custom_index++ : -1;
             /* BE2 default: only custom instruments are embedded. */
             item.mode = is_custom ? ExportInstMode::Embed : ExportInstMode::Off;
@@ -1687,10 +1682,18 @@
             if (item.mode == ExportInstMode::Embed)
             {
                 m_export_embed_inst_ids.insert(item.inst_id);
+                if (item.requested_inst_id != 0 && item.requested_inst_id != item.inst_id)
+                {
+                    m_export_embed_inst_ids.insert(item.requested_inst_id);
+                }
             }
             else if (item.mode == ExportInstMode::Ghost)
             {
                 m_export_ghost_inst_ids.insert(item.inst_id);
+                if (item.requested_inst_id != 0 && item.requested_inst_id != item.inst_id)
+                {
+                    m_export_ghost_inst_ids.insert(item.requested_inst_id);
+                }
             }
         }
     }
@@ -1713,7 +1716,7 @@
         m_export_ghost_inst_ids.clear();
         m_export_rmf_needs_zmf = false;
         m_export_rmf_z_reason = 0;
-        m_export_snd_storage_index = static_cast<int>(BAE_EDITOR_SND_STORAGE_ESND);
+        m_export_snd_storage_index = static_cast<int>(BAE_EDITOR_SND_STORAGE_SND);
         m_export_rmf_prepare_pending = true;
         m_export_rmf_open = true;
     }
@@ -1721,7 +1724,7 @@
     void FinishExportRmfDialogPrepare()
     {
         RebuildExportInstrumentList();
-        ApplyExportInstrumentSelection(ExportSelectionMode::Custom);
+        ApplyExportInstrumentSelection(ExportSelectionMode::All);
         uint32_t reason = 0;
         bool needs_z = false;
         if (m_document && BAERmfEditorDocument_RequiresZmf(m_document, &reason) != FALSE)
@@ -1795,17 +1798,19 @@
                 {
                     std::snprintf(label,
                                   sizeof(label),
-                                  "%s (Custom: %d)",
+                                  "%s (Custom: %d%s)",
                                   item.name.c_str(),
-                                  item.custom_index);
+                                  item.custom_index,
+                                  item.percussion ? " Perc" : "");
                 }
                 else
                 {
                     std::snprintf(label,
                                   sizeof(label),
-                                  "%s (B%d P%03d)",
+                                  "%s (B%d%s P%03d)",
                                   item.name.c_str(),
                                   item.bank,
+                                  item.percussion ? " Perc" : "",
                                   item.program);
                 }
                 ImGui::PushID(static_cast<int>(item.inst_id));
@@ -2932,27 +2937,38 @@
             return;
         }
 
-        unsigned char *midi_data = nullptr;
-        uint32_t midi_size = 0;
-        if (BAERmfEditorDocument_SaveAsMidiToMemory(m_document, &midi_data, &midi_size) != BAE_NO_ERROR ||
-            !midi_data || midi_size == 0)
+        UpdateBusyProgress(0.10f, "Snapshotting song document…");
+        unsigned char *rmf_snapshot_data = nullptr;
+        uint32_t rmf_snapshot_size = 0;
+        uint32_t zmf_reason = 0;
+        const bool use_zmf = BAERmfEditorDocument_RequiresZmf(m_document, &zmf_reason) != FALSE;
+        if (BAERmfEditorDocument_SaveAsRmfToMemory(m_document, use_zmf, &rmf_snapshot_data, &rmf_snapshot_size) != BAE_NO_ERROR ||
+            !rmf_snapshot_data || rmf_snapshot_size == 0)
         {
-            if (midi_data)
+            if (rmf_snapshot_data)
             {
-                XDisposePtr(midi_data);
+                XDisposePtr(rmf_snapshot_data);
             }
-            SetStatus("Export failed: could not snapshot song MIDI");
+            SetStatus("Export failed: could not snapshot song document");
             return;
         }
 
         BAERmfEditorDocument *export_doc =
-            BAERmfEditorDocument_LoadFromMemory(midi_data, midi_size, BAE_MIDI_TYPE);
-        XDisposePtr(midi_data);
+            BAERmfEditorDocument_LoadFromMemory(rmf_snapshot_data, rmf_snapshot_size, BAE_RMF);
+        XDisposePtr(rmf_snapshot_data);
         if (!export_doc)
         {
             SetStatus("Export failed: could not build export document");
             return;
         }
+
+        UpdateBusyProgress(0.30f, "Resolving used instruments…");
+        if (m_export_items.empty())
+        {
+            RebuildExportInstrumentList();
+            ApplyExportInstrumentSelection(ExportSelectionMode::All);
+        }
+        SyncExportEmbedSetFromItems();
 
         /* Embed + Ghost both need INST on the export doc first; Ghost then
          * strips sample payloads via SetInstrumentGhost. */
@@ -2967,6 +2983,7 @@
             prepare_ids.push_back(id);
         }
 
+        UpdateBusyProgress(0.50f, "Cloning instruments and samples…");
         BAERmfEditorCloneUsedResult clone_result;
         std::memset(&clone_result, 0, sizeof(clone_result));
         BAEResult prep = BAERmfEditorDocument_ExportUsedInstrumentsFromBank(
@@ -2982,12 +2999,36 @@
             return;
         }
 
-        for (uint32_t ghost_id : m_export_ghost_inst_ids)
+        for (const ExportInstrumentItem &item : m_export_items)
         {
-            (void)BAERmfEditorDocument_SetInstrumentGhost(export_doc,
-                                                          ghost_id,
-                                                          m_bank_token,
-                                                          TRUE);
+            uint32_t target_inst = item.inst_id;
+            if (item.percussion)
+            {
+                for (uint32_t mi = 0; mi < clone_result.mappingCount; ++mi)
+                {
+                    if (clone_result.mappings[mi].resolvedInstID == item.inst_id &&
+                        clone_result.mappings[mi].isPercussion)
+                    {
+                        target_inst = clone_result.mappings[mi].targetInstID;
+                        break;
+                    }
+                }
+            }
+            if (item.mode == ExportInstMode::Off)
+            {
+                (void)BAERmfEditorDocument_DeleteInstrument(export_doc, item.inst_id);
+                if (item.percussion && target_inst != item.inst_id)
+                {
+                    (void)BAERmfEditorDocument_DeleteInstrument(export_doc, target_inst);
+                }
+            }
+            else if (item.mode == ExportInstMode::Ghost)
+            {
+                (void)BAERmfEditorDocument_SetInstrumentGhost(export_doc,
+                                                               target_inst,
+                                                               m_bank_token,
+                                                               TRUE);
+            }
         }
 
         /* Apply chosen sound storage type to embedded (non-alias) samples. */
@@ -3043,8 +3084,10 @@
             SetStatus(std::string("ZMF required (") + reason_buf + "); exporting as .zmf");
         }
 
+        UpdateBusyProgress(0.85f, "Writing exported song file…");
         const BAEResult r = BAERmfEditorDocument_SaveAsRmf(export_doc, const_cast<char *>(out_path.c_str()));
         BAERmfEditorDocument_Delete(export_doc);
+        UpdateBusyProgress(1.00f, "Export Complete");
         if (r == BAE_NO_ERROR)
         {
             uint32_t embedded = 0;

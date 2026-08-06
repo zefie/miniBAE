@@ -842,6 +842,31 @@
             return true; /* song-only RMF; nothing to promote */
         }
 
+        bool all_already_present = true;
+        for (XShortResourceID id : inst_ids)
+        {
+            if (m_session_custom_inst_ids.count(static_cast<uint32_t>(id)) == 0)
+            {
+                all_already_present = false;
+                break;
+            }
+        }
+        if (all_already_present)
+        {
+            for (XShortResourceID id : snd_ids)
+            {
+                if (m_session_custom_snd_ids.count(static_cast<uint32_t>(id)) == 0)
+                {
+                    all_already_present = false;
+                    break;
+                }
+            }
+        }
+        if (all_already_present)
+        {
+            return true; /* All embedded resources already promoted into bank */
+        }
+
         /* XDeleteFileResource is a no-op on in-memory (EnsureWritable) banks, so
          * delete+XAddFileResource would append duplicates (EndGame bank0 INST
          * listed twice). Import rebuilds the bank image in one pass. */

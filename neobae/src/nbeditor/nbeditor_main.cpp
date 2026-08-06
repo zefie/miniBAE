@@ -127,10 +127,12 @@ enum class ExportInstMode : int
 struct ExportInstrumentItem
 {
     uint32_t inst_id = 0;
+    uint32_t requested_inst_id = 0;
     uint32_t instrument_index = 0;
     std::string name;
     bool is_custom = false;
     bool selected = false; /* legacy: true when mode == Embed */
+    bool percussion = false;
     ExportInstMode mode = ExportInstMode::Off;
     int custom_index = -1;
     int bank = 0;
@@ -1877,6 +1879,7 @@ private:
             if (bank_result == BAE_NO_ERROR && token != 0)
             {
                 m_bank_token = token;
+                m_song_used_keys_dirty = true;
                 EnableEditorBankZsCompatibility(m_bank_token);
                 return true;
             }
@@ -1963,6 +1966,7 @@ private:
         m_loaded_bank_path = path;
         m_loaded_bank_display_name = FileNameFromPath(m_loaded_bank_path);
         m_bank_token = token;
+        m_song_used_keys_dirty = true;
         EnableEditorBankZsCompatibility(m_bank_token);
         m_bank01_touched = false;
         m_instrument_filter_index = -1; /* full replace → default Custom Melodic */
@@ -2029,6 +2033,7 @@ private:
         m_loaded_bank_path.clear();
         m_loaded_bank_display_name.clear();
         m_bank_token = token;
+        m_song_used_keys_dirty = true;
         EnableEditorBankZsCompatibility(m_bank_token);
         RefreshListsFromBank();
         SelectAuditionBank0AfterBankLoad();
@@ -4523,8 +4528,18 @@ private:
         std::set<uint32_t> song_used_instrument_indexes;
         if (used_by_song)
         {
-            CollectCurrentSongUsedInstrumentKeys(song_used_inst_ids,
-                                                 song_used_instrument_indexes);
+            if (m_document_dirty)
+            {
+                m_song_used_keys_dirty = true;
+            }
+            if (m_song_used_keys_dirty)
+            {
+                CollectCurrentSongUsedInstrumentKeys(m_song_used_inst_ids,
+                                                     m_song_used_instrument_indexes);
+                m_song_used_keys_dirty = false;
+            }
+            song_used_inst_ids = m_song_used_inst_ids;
+            song_used_instrument_indexes = m_song_used_instrument_indexes;
         }
 
         std::vector<size_t> visible;
@@ -4796,10 +4811,10 @@ private:
                         RemoveAliasAt(static_cast<int>(i));
                     }
                 }
-                else if (ImGui::MenuItem("Move Instrument to Trash",
+                else if (ImGui::MenuItem(inst.from_song_document ? "Delete Song Instrument" : "Move Instrument to Trash",
                                          nullptr,
                                          false,
-                                         m_bank_token != 0 && !inst.from_song_document))
+                                         true))
                 {
                     DeleteInstrumentAt(static_cast<int>(i));
                 }
@@ -5482,6 +5497,9 @@ private:
     uint32_t m_oneshot_sample_rate_hz = 0;
     std::string m_oneshot_title;
     bool m_document_dirty = false;
+    bool m_song_used_keys_dirty = true;
+    std::set<uint32_t> m_song_used_inst_ids;
+    std::set<uint32_t> m_song_used_instrument_indexes;
     bool m_request_quit = false;
 
     /* MIDI Editor (GarageBand-style track timeline + piano roll). */

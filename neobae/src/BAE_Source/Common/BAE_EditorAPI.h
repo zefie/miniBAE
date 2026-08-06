@@ -432,6 +432,8 @@ BAEResult BAERmfEditorDocument_CloneSampleAssetForSample(BAERmfEditorDocument *d
                                                          uint32_t *outNewAssetID);
 BAEResult BAERmfEditorDocument_DeleteSample(BAERmfEditorDocument *document,
                                             uint32_t sampleIndex);
+BAEResult BAERmfEditorDocument_DeleteInstrument(BAERmfEditorDocument *document,
+                                                uint32_t instID);
 BAEResult BAERmfEditorDocument_ReplaceSampleFromFile(BAERmfEditorDocument *document,
                                                      uint32_t sampleIndex,
                                                      BAEPathName filePath,
