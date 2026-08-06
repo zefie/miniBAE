@@ -10,6 +10,7 @@
         LoopStart,
         LoopEnd,
         AutoNode,
+        TrackEot,
         Pan
     };
 
@@ -294,9 +295,36 @@
         return std::clamp(pitch, 0, 127);
     }
 
+    uint32_t MeComputeFreeRunTick() const
+    {
+        if (!m_midi_record_free_run)
+        {
+            return m_midi_playhead_tick;
+        }
+        const uint32_t bpm = MeSongBpm();
+        const uint16_t tpq = MeGetTpq();
+        const uint32_t elapsed_ms = SDL_GetTicks() - m_midi_record_clock_start_ms;
+        const uint64_t delta_ticks =
+            (static_cast<uint64_t>(elapsed_ms) * static_cast<uint64_t>(bpm) *
+             static_cast<uint64_t>(tpq)) /
+            60000ull;
+        const uint64_t tick =
+            static_cast<uint64_t>(m_midi_record_clock_origin_tick) + delta_ticks;
+        return tick > 0xffffffffull ? 0xffffffffu : static_cast<uint32_t>(tick);
+    }
+
     uint32_t MePlayheadTick() const
     {
-        if (!m_song)
+        if (m_midi_record_free_run)
+        {
+            return MeComputeFreeRunTick();
+        }
+        if (!m_song || !m_song_started)
+        {
+            return m_midi_playhead_tick;
+        }
+        BAE_BOOL paused = FALSE;
+        if (BAESong_IsPaused(m_song, &paused) == BAE_NO_ERROR && paused)
         {
             return m_midi_playhead_tick;
         }
@@ -306,6 +334,47 @@
             return m_midi_playhead_tick;
         }
         return MeMicrosecondsToTicks(pos_us);
+    }
+
+    uint32_t MeRecordCaptureTick() const
+    {
+        return MePlayheadTick();
+    }
+
+    void MeExtendTrackForRecord(uint32_t tick)
+    {
+        if (!m_document || m_midi_selected_track < 0)
+        {
+            return;
+        }
+        uint32_t eot = 0;
+        (void)BAERmfEditorDocument_GetTrackEndOfTrackTick(
+            m_document, static_cast<uint16_t>(m_midi_selected_track), &eot);
+        const uint32_t need = tick + static_cast<uint32_t>(MeGetTpq()) * 4u; /* +1 bar pad */
+        if (need > eot)
+        {
+            (void)BAERmfEditorDocument_SetTrackEndOfTrackTick(
+                m_document, static_cast<uint16_t>(m_midi_selected_track), need);
+            m_document_dirty = true;
+        }
+    }
+
+    void MeStartRecordFreeRun()
+    {
+        m_midi_record_free_run = true;
+        m_midi_record_clock_origin_tick = m_midi_playhead_tick;
+        m_midi_record_clock_start_ms = SDL_GetTicks();
+        m_midi_metro_last_song_beat = -1;
+        m_midi_record_was_playing = false;
+    }
+
+    void MeStopRecordFreeRun()
+    {
+        if (m_midi_record_free_run)
+        {
+            m_midi_playhead_tick = MeComputeFreeRunTick();
+        }
+        m_midi_record_free_run = false;
     }
 
     void MeSeekToTick(uint32_t tick)
@@ -516,6 +585,14 @@
 
     void MeClearMidiEditorState()
     {
+        MeCancelCountIn();
+        if (m_midi_record_take_open || m_midi_record_armed)
+        {
+            MeFinishRecordTake();
+        }
+        MeStopRecordFreeRun();
+        m_midi_record_armed = false;
+        m_midi_record_held_start.fill(-1);
         m_midi_selected_track = -1;
         m_midi_selected_notes.clear();
         m_midi_primary_note = -1;
@@ -599,6 +676,623 @@
         {
             m_midi_selected_notes.insert(index);
             m_midi_primary_note = index;
+        }
+    }
+
+    /* Shift-click: select inclusive index range from primary (or hit alone). */
+    void MeSelectNoteRange(int index)
+    {
+        if (index < 0)
+        {
+            return;
+        }
+        if (m_midi_primary_note < 0)
+        {
+            MeSelectSingleNote(index);
+            return;
+        }
+        const int a = std::min(m_midi_primary_note, index);
+        const int b = std::max(m_midi_primary_note, index);
+        m_midi_selected_notes.clear();
+        for (int i = a; i <= b; ++i)
+        {
+            m_midi_selected_notes.insert(i);
+        }
+        m_midi_primary_note = index;
+    }
+
+    void MeQuantizeSelectedNotes()
+    {
+        if (!m_document || m_midi_selected_track < 0 || m_midi_selected_notes.empty())
+        {
+            return;
+        }
+        MeBeginUndo();
+        const auto &notes = MeNotes();
+        for (int idx : m_midi_selected_notes)
+        {
+            if (idx < 0 || idx >= static_cast<int>(notes.size()))
+            {
+                continue;
+            }
+            BAERmfEditorNoteInfo info = notes[static_cast<size_t>(idx)];
+            const uint32_t end = info.startTick + std::max(1u, info.durationTicks);
+            info.startTick = MeSnapTick(info.startTick);
+            uint32_t new_end = MeSnapTick(end);
+            if (new_end <= info.startTick)
+            {
+                new_end = info.startTick + MeSnapTicks();
+            }
+            info.durationTicks = new_end - info.startTick;
+            BAERmfEditorDocument_SetNoteInfo(m_document,
+                                             static_cast<uint16_t>(m_midi_selected_track),
+                                             static_cast<uint32_t>(idx),
+                                             &info);
+        }
+        m_midi_note_cache_dirty = true;
+        MeCommitUndo();
+        SetStatus("Quantized selection");
+    }
+
+    void MeApplySelectedNoteVelocity(unsigned char velocity)
+    {
+        if (!m_document || m_midi_selected_track < 0 || m_midi_selected_notes.empty())
+        {
+            return;
+        }
+        const auto &notes = MeNotes();
+        for (int idx : m_midi_selected_notes)
+        {
+            if (idx < 0 || idx >= static_cast<int>(notes.size()))
+            {
+                continue;
+            }
+            BAERmfEditorNoteInfo info = notes[static_cast<size_t>(idx)];
+            info.velocity = velocity;
+            BAERmfEditorDocument_SetNoteInfo(m_document,
+                                             static_cast<uint16_t>(m_midi_selected_track),
+                                             static_cast<uint32_t>(idx),
+                                             &info);
+        }
+        m_midi_note_cache_dirty = true;
+    }
+
+    void MeApplySelectedNoteBank(uint16_t bank)
+    {
+        if (!m_document || m_midi_selected_track < 0 || m_midi_selected_notes.empty())
+        {
+            return;
+        }
+        const auto &notes = MeNotes();
+        for (int idx : m_midi_selected_notes)
+        {
+            if (idx < 0 || idx >= static_cast<int>(notes.size()))
+            {
+                continue;
+            }
+            BAERmfEditorNoteInfo info = notes[static_cast<size_t>(idx)];
+            info.bank = bank;
+            BAERmfEditorDocument_SetNoteInfo(m_document,
+                                             static_cast<uint16_t>(m_midi_selected_track),
+                                             static_cast<uint32_t>(idx),
+                                             &info);
+        }
+        m_midi_note_cache_dirty = true;
+    }
+
+    void MeApplySelectedNoteProgram(unsigned char program)
+    {
+        if (!m_document || m_midi_selected_track < 0 || m_midi_selected_notes.empty())
+        {
+            return;
+        }
+        const auto &notes = MeNotes();
+        for (int idx : m_midi_selected_notes)
+        {
+            if (idx < 0 || idx >= static_cast<int>(notes.size()))
+            {
+                continue;
+            }
+            BAERmfEditorNoteInfo info = notes[static_cast<size_t>(idx)];
+            info.program = program;
+            BAERmfEditorDocument_SetNoteInfo(m_document,
+                                             static_cast<uint16_t>(m_midi_selected_track),
+                                             static_cast<uint32_t>(idx),
+                                             &info);
+        }
+        m_midi_note_cache_dirty = true;
+    }
+
+    void MeRecordFlushHeldNotes()
+    {
+        if (!m_document || m_midi_selected_track < 0)
+        {
+            m_midi_record_held_start.fill(-1);
+            return;
+        }
+        uint32_t end_tick = MePlayheadTick();
+        if (m_midi_snap_enabled)
+        {
+            end_tick = MeSnapTick(end_tick);
+        }
+        for (int n = 0; n < 128; ++n)
+        {
+            const int32_t start = m_midi_record_held_start[static_cast<size_t>(n)];
+            if (start < 0)
+            {
+                continue;
+            }
+            uint32_t dur = (end_tick > static_cast<uint32_t>(start))
+                               ? (end_tick - static_cast<uint32_t>(start))
+                               : MeSnapTicks();
+            if (dur < 1u)
+            {
+                dur = MeSnapTicks();
+            }
+            (void)BAERmfEditorDocument_AddNote(m_document,
+                                               static_cast<uint16_t>(m_midi_selected_track),
+                                               static_cast<uint32_t>(start),
+                                               dur,
+                                               static_cast<unsigned char>(n),
+                                               m_midi_record_held_vel[static_cast<size_t>(n)]);
+            m_midi_record_held_start[static_cast<size_t>(n)] = -1;
+        }
+        m_midi_note_cache_dirty = true;
+    }
+
+    void MeFinishRecordTake()
+    {
+        MeRecordFlushHeldNotes();
+        MeStopRecordFreeRun();
+        if (m_midi_record_take_open)
+        {
+            MeCommitUndo();
+            m_midi_record_take_open = false;
+            SetStatus("Recording take committed");
+        }
+    }
+
+    /* Switch free-run capture onto the song clock at the current free-run tick. */
+    void MeAttachRecordToSongClock()
+    {
+        if (!m_midi_record_free_run)
+        {
+            return;
+        }
+        const uint32_t tick = MeComputeFreeRunTick();
+        MeStopRecordFreeRun();
+        m_midi_playhead_tick = tick;
+        if (m_song)
+        {
+            MeSeekToTick(tick);
+        }
+    }
+
+    bool MeCanRecordCapture() const
+    {
+        return m_midi_record_armed && m_document && m_midi_selected_track >= 0 &&
+               !m_midi_count_in_active &&
+               (m_song_started || m_midi_record_free_run);
+    }
+
+    void MeEnsureRecordTakeOpen()
+    {
+        if (!m_midi_record_take_open)
+        {
+            MeBeginUndo();
+            m_midi_record_take_open = true;
+        }
+        m_document_dirty = true;
+    }
+
+    void MeRecordNoteOn(int midi_note, unsigned char velocity)
+    {
+        /* Always monitor through audition. */
+        NoteOn(midi_note, velocity);
+        if (!MeCanRecordCapture())
+        {
+            return;
+        }
+        if (midi_note < 0 || midi_note > 127)
+        {
+            return;
+        }
+        MeEnsureRecordTakeOpen();
+        uint32_t tick = MeRecordCaptureTick();
+        if (m_midi_snap_enabled)
+        {
+            tick = MeSnapTick(tick);
+        }
+        m_midi_record_held_start[static_cast<size_t>(midi_note)] = static_cast<int32_t>(tick);
+        m_midi_record_held_vel[static_cast<size_t>(midi_note)] = velocity ? velocity : 100;
+        MeExtendTrackForRecord(tick);
+    }
+
+    void MeRecordNoteOff(int midi_note)
+    {
+        NoteOff(midi_note);
+        if (midi_note < 0 || midi_note > 127)
+        {
+            return;
+        }
+        const int32_t start = m_midi_record_held_start[static_cast<size_t>(midi_note)];
+        if (start < 0 || !m_document || m_midi_selected_track < 0)
+        {
+            m_midi_record_held_start[static_cast<size_t>(midi_note)] = -1;
+            return;
+        }
+        uint32_t end_tick = MeRecordCaptureTick();
+        if (m_midi_snap_enabled)
+        {
+            end_tick = MeSnapTick(end_tick);
+        }
+        uint32_t dur = (end_tick > static_cast<uint32_t>(start))
+                           ? (end_tick - static_cast<uint32_t>(start))
+                           : MeSnapTicks();
+        if (dur < 1u)
+        {
+            dur = MeSnapTicks();
+        }
+        (void)BAERmfEditorDocument_AddNote(m_document,
+                                           static_cast<uint16_t>(m_midi_selected_track),
+                                           static_cast<uint32_t>(start),
+                                           dur,
+                                           static_cast<unsigned char>(midi_note),
+                                           m_midi_record_held_vel[static_cast<size_t>(midi_note)]);
+        m_midi_record_held_start[static_cast<size_t>(midi_note)] = -1;
+        m_midi_note_cache_dirty = true;
+        MeExtendTrackForRecord(static_cast<uint32_t>(start) + dur);
+    }
+
+    /* Live CC / pitch-bend into the selected track (+ monitor). */
+    void MeRecordController(unsigned char status, unsigned char data1, unsigned char data2)
+    {
+        const unsigned char mtype = status & 0xF0u;
+        if (mtype != 0xB0u && mtype != 0xE0u)
+        {
+            return;
+        }
+
+        unsigned char ch = 0;
+        if (m_document && m_midi_selected_track >= 0)
+        {
+            BAERmfEditorTrackInfo ti{};
+            if (BAERmfEditorDocument_GetTrackInfo(
+                    m_document, static_cast<uint16_t>(m_midi_selected_track), &ti) == BAE_NO_ERROR)
+            {
+                ch = ti.channel;
+            }
+        }
+        BAESong song = GetAuditionSong();
+        if (song)
+        {
+            if (mtype == 0xB0u)
+            {
+                const unsigned char cc = data1 & 0x7fu;
+                if (cc != 120 && cc != 123)
+                {
+                    BAESong_ControlChange(song, ch, cc, data2 & 0x7fu, 0);
+                }
+            }
+            else
+            {
+                BAESong_PitchBend(song, ch, data1 & 0x7fu, data2 & 0x7fu, 0);
+            }
+        }
+
+        if (mtype == 0xB0u && ((data1 & 0x7fu) == 120 || (data1 & 0x7fu) == 123))
+        {
+            PanicAuditionNotes();
+            return;
+        }
+
+        if (!MeCanRecordCapture())
+        {
+            return;
+        }
+
+        MeEnsureRecordTakeOpen();
+        const uint32_t tick = MeRecordCaptureTick(); /* raw ticks for continuous CC */
+        const uint32_t min_gap = std::max(1u, static_cast<uint32_t>(MeGetTpq()) / 32u);
+
+        if (mtype == 0xB0u)
+        {
+            const unsigned char cc = data1 & 0x7fu;
+            const unsigned char val = data2 & 0x7fu;
+            const int32_t last_t = m_midi_record_last_cc_tick[cc];
+            const int last_v = m_midi_record_last_cc_val[cc];
+            if (last_t >= 0)
+            {
+                const uint32_t dt = (tick >= static_cast<uint32_t>(last_t))
+                                       ? (tick - static_cast<uint32_t>(last_t))
+                                       : 0u;
+                if (last_v == static_cast<int>(val) && dt < min_gap)
+                {
+                    return;
+                }
+                if (last_v != static_cast<int>(val) && dt < (min_gap / 4u))
+                {
+                    return; /* light throttle while sweeping */
+                }
+            }
+            if (BAERmfEditorDocument_AddTrackCCEvent(m_document,
+                                                     static_cast<uint16_t>(m_midi_selected_track),
+                                                     cc,
+                                                     tick,
+                                                     val) == BAE_NO_ERROR)
+            {
+                m_midi_record_last_cc_tick[cc] = static_cast<int32_t>(tick);
+                m_midi_record_last_cc_val[cc] = static_cast<int>(val);
+                MeExtendTrackForRecord(tick);
+            }
+            return;
+        }
+
+        /* Pitch bend: 14-bit */
+        const int pb = static_cast<int>(data1 & 0x7fu) | (static_cast<int>(data2 & 0x7fu) << 7);
+        if (m_midi_record_last_pb_tick >= 0 &&
+            static_cast<uint32_t>(m_midi_record_last_pb_tick) + min_gap > tick &&
+            m_midi_record_last_pb_val == pb)
+        {
+            return;
+        }
+        if (BAERmfEditorDocument_AddTrackPitchBendEvent(
+                m_document,
+                static_cast<uint16_t>(m_midi_selected_track),
+                tick,
+                static_cast<uint16_t>(pb)) == BAE_NO_ERROR)
+        {
+            m_midi_record_last_pb_tick = static_cast<int32_t>(tick);
+            m_midi_record_last_pb_val = pb;
+            MeExtendTrackForRecord(tick);
+        }
+    }
+
+    void MeSetRecordArmed(bool armed)
+    {
+        if (m_midi_record_armed == armed)
+        {
+            return;
+        }
+        if (m_midi_record_armed && !armed)
+        {
+            MeFinishRecordTake();
+            MeCancelCountIn();
+        }
+        m_midi_record_armed = armed;
+        m_midi_record_was_playing = m_song_started;
+        m_midi_record_last_cc_tick.fill(-1);
+        m_midi_record_last_cc_val.fill(-1);
+        m_midi_record_last_pb_tick = -1;
+        m_midi_record_last_pb_val = -1;
+        if (armed)
+        {
+            if (m_song_started)
+            {
+                MeStopRecordFreeRun();
+                SetStatus("Recording armed — synced to Play");
+            }
+            else if (m_midi_count_in_bars > 0)
+            {
+                MeStartCountIn();
+            }
+            else
+            {
+                MeStartRecordFreeRun();
+                SetStatus("Recording — free-run clock (Play optional for monitor)");
+            }
+        }
+    }
+
+    void MePumpRecordTransport()
+    {
+        if (!m_midi_record_armed)
+        {
+            return;
+        }
+        /* Keep UI playhead + track length moving during free-run. */
+        if (m_midi_record_free_run && !m_midi_count_in_active)
+        {
+            m_midi_playhead_tick = MeComputeFreeRunTick();
+            MeExtendTrackForRecord(m_midi_playhead_tick);
+            if (m_midi_metronome)
+            {
+                const uint16_t tpq = MeGetTpq();
+                const int beat =
+                    static_cast<int>(m_midi_playhead_tick / std::max<uint16_t>(1, tpq));
+                if (beat != m_midi_metro_last_song_beat)
+                {
+                    MePlayMetronomeClick((beat % 4) == 0);
+                    m_midi_metro_last_song_beat = beat;
+                }
+            }
+        }
+        /* Ending Play (song sync) commits the take, then keeps capturing on free-run. */
+        if (m_midi_record_was_playing && !m_song_started && !m_midi_count_in_active &&
+            !m_midi_record_free_run)
+        {
+            MeFinishRecordTake();
+            if (m_midi_record_armed)
+            {
+                MeStartRecordFreeRun();
+                SetStatus("Recording — free-run clock (Play optional for monitor)");
+            }
+        }
+        m_midi_record_was_playing = m_song_started;
+    }
+
+    static void MeFillClickPcm(std::vector<int16_t> &out, double freq_hz, bool accent)
+    {
+        constexpr int kRate = 22050;
+        constexpr int kFrames = 220; /* ~10 ms */
+        out.assign(static_cast<size_t>(kFrames), 0);
+        const double amp = accent ? 0.55 : 0.32;
+        for (int i = 0; i < kFrames; ++i)
+        {
+            const double t = static_cast<double>(i) / static_cast<double>(kRate);
+            const double env = 1.0 - static_cast<double>(i) / static_cast<double>(kFrames);
+            const double s = std::sin(2.0 * 3.14159265358979323846 * freq_hz * t) * amp * env * env;
+            out[static_cast<size_t>(i)] =
+                static_cast<int16_t>(std::clamp(s * 32767.0, -32767.0, 32767.0));
+        }
+    }
+
+    void MeEnsureMetronomeSounds()
+    {
+        if (!m_mixer)
+        {
+            return;
+        }
+        if (!m_midi_click_hi)
+        {
+            m_midi_click_hi = BAESound_New(m_mixer);
+            MeFillClickPcm(m_midi_click_hi_pcm, 1200.0, true);
+            if (m_midi_click_hi && !m_midi_click_hi_pcm.empty())
+            {
+                (void)BAESound_LoadCustomSample(m_midi_click_hi,
+                                                m_midi_click_hi_pcm.data(),
+                                                static_cast<uint32_t>(m_midi_click_hi_pcm.size()),
+                                                16,
+                                                1,
+                                                LONG_TO_UNSIGNED_FIXED(22050),
+                                                0,
+                                                0);
+            }
+        }
+        if (!m_midi_click_lo)
+        {
+            m_midi_click_lo = BAESound_New(m_mixer);
+            MeFillClickPcm(m_midi_click_lo_pcm, 800.0, false);
+            if (m_midi_click_lo && !m_midi_click_lo_pcm.empty())
+            {
+                (void)BAESound_LoadCustomSample(m_midi_click_lo,
+                                                m_midi_click_lo_pcm.data(),
+                                                static_cast<uint32_t>(m_midi_click_lo_pcm.size()),
+                                                16,
+                                                1,
+                                                LONG_TO_UNSIGNED_FIXED(22050),
+                                                0,
+                                                0);
+            }
+        }
+    }
+
+    void MePlayMetronomeClick(bool accent)
+    {
+        if (!m_midi_metronome)
+        {
+            return;
+        }
+        MeEnsureMetronomeSounds();
+        BAESound snd = accent ? m_midi_click_hi : m_midi_click_lo;
+        if (!snd)
+        {
+            return;
+        }
+        (void)BAESound_Stop(snd, FALSE);
+        (void)BAESound_Start(snd, 0, FLOAT_TO_UNSIGNED_FIXED(accent ? 0.9 : 0.65), 0);
+    }
+
+    uint32_t MeSongBpm() const
+    {
+        uint32_t bpm = 120;
+        if (m_document)
+        {
+            BAERmfEditorDocument_GetTempoBPM(m_document, &bpm);
+        }
+        if (bpm == 0)
+        {
+            bpm = 120;
+        }
+        return bpm;
+    }
+
+    void MeCancelCountIn()
+    {
+        m_midi_count_in_active = false;
+        m_midi_count_in_last_beat = -1;
+    }
+
+    void MeStartCountIn()
+    {
+        m_midi_count_in_active = true;
+        m_midi_count_in_start_ms = SDL_GetTicks();
+        m_midi_count_in_last_beat = -1;
+        MeEnsureMetronomeSounds();
+        char buf[96];
+        std::snprintf(buf,
+                      sizeof(buf),
+                      "Count-in: %d bar%s…",
+                      m_midi_count_in_bars,
+                      m_midi_count_in_bars == 1 ? "" : "s");
+        SetStatus(buf);
+    }
+
+    /* Start transport after count-in (no re-entry into count-in). */
+    void MeStartPlaybackForRecord()
+    {
+        if (!m_song && m_document)
+        {
+            if (!ReloadPlaybackFromDocument(false))
+            {
+                return;
+            }
+        }
+        if (!m_song)
+        {
+            SetStatus("No song to play");
+            return;
+        }
+        BAESong_SetLoops(m_song, m_loop_enabled ? 32767 : 0);
+        BAESong_Preroll(m_song);
+        BAESong_Start(m_song, 1);
+        m_song_started = true;
+        m_midi_metro_last_song_beat = -1;
+        m_midi_record_was_playing = true;
+    }
+
+    void MePumpCountInAndMetronome()
+    {
+        const uint32_t bpm = MeSongBpm();
+        const uint32_t ms_per_beat = std::max(1u, 60000u / bpm);
+
+        if (m_midi_count_in_active)
+        {
+            const int total_beats = std::max(1, m_midi_count_in_bars) * 4;
+            const uint32_t elapsed = SDL_GetTicks() - m_midi_count_in_start_ms;
+            const int beat = static_cast<int>(elapsed / ms_per_beat);
+            if (beat != m_midi_count_in_last_beat && beat < total_beats)
+            {
+                MePlayMetronomeClick((beat % 4) == 0);
+                m_midi_count_in_last_beat = beat;
+            }
+            if (beat >= total_beats)
+            {
+                m_midi_count_in_active = false;
+                m_midi_count_in_last_beat = -1;
+                MeStartRecordFreeRun();
+                SetStatus("Recording — free-run clock (Play optional for monitor)");
+            }
+            return;
+        }
+
+        /* Song metronome (free-run metronome is handled in MePumpRecordTransport). */
+        if (!m_midi_metronome || !m_song_started || !m_song || m_midi_record_free_run)
+        {
+            return;
+        }
+        BAE_BOOL paused = FALSE;
+        if (BAESong_IsPaused(m_song, &paused) == BAE_NO_ERROR && paused)
+        {
+            return;
+        }
+        const uint32_t tick = MePlayheadTick();
+        const uint16_t tpq = MeGetTpq();
+        const int beat = static_cast<int>(tick / std::max<uint16_t>(1, tpq));
+        if (beat != m_midi_metro_last_song_beat)
+        {
+            MePlayMetronomeClick((beat % 4) == 0);
+            m_midi_metro_last_song_beat = beat;
         }
     }
 
@@ -754,6 +1448,318 @@
         {
             MeCancelUndo();
         }
+    }
+
+    uint32_t MeCountNotesAffectedByEot(uint16_t track, uint32_t boundary_tick) const
+    {
+        if (!m_document)
+        {
+            return 0;
+        }
+        uint32_t note_count = 0;
+        if (BAERmfEditorDocument_GetNoteCount(m_document, track, &note_count) != BAE_NO_ERROR)
+        {
+            return 0;
+        }
+        uint32_t affected = 0;
+        for (uint32_t n = 0; n < note_count; ++n)
+        {
+            BAERmfEditorNoteInfo info{};
+            if (BAERmfEditorDocument_GetNoteInfo(m_document, track, n, &info) != BAE_NO_ERROR)
+            {
+                continue;
+            }
+            if (info.startTick >= boundary_tick ||
+                info.startTick + info.durationTicks > boundary_tick)
+            {
+                ++affected;
+            }
+        }
+        return affected;
+    }
+
+    void MeApplySetEndOfTrack(uint16_t track, uint32_t boundary_tick)
+    {
+        if (!m_document)
+        {
+            return;
+        }
+        MeBeginUndo();
+
+        uint32_t note_count = 0;
+        (void)BAERmfEditorDocument_GetNoteCount(m_document, track, &note_count);
+        for (int32_t n = static_cast<int32_t>(note_count) - 1; n >= 0; --n)
+        {
+            BAERmfEditorNoteInfo info{};
+            if (BAERmfEditorDocument_GetNoteInfo(
+                    m_document, track, static_cast<uint32_t>(n), &info) != BAE_NO_ERROR)
+            {
+                continue;
+            }
+            if (info.startTick >= boundary_tick)
+            {
+                (void)BAERmfEditorDocument_DeleteNote(m_document, track, static_cast<uint32_t>(n));
+                continue;
+            }
+            if (info.startTick + info.durationTicks > boundary_tick)
+            {
+                const uint32_t new_dur = boundary_tick - info.startTick;
+                if (new_dur < 1u)
+                {
+                    (void)BAERmfEditorDocument_DeleteNote(
+                        m_document, track, static_cast<uint32_t>(n));
+                }
+                else
+                {
+                    info.durationTicks = new_dur;
+                    (void)BAERmfEditorDocument_SetNoteInfo(
+                        m_document, track, static_cast<uint32_t>(n), &info);
+                }
+            }
+        }
+
+        for (int cc = 0; cc < 128; ++cc)
+        {
+            uint32_t cc_count = 0;
+            if (BAERmfEditorDocument_GetTrackCCEventCount(
+                    m_document, track, static_cast<unsigned char>(cc), &cc_count) != BAE_NO_ERROR)
+            {
+                continue;
+            }
+            for (int32_t i = static_cast<int32_t>(cc_count) - 1; i >= 0; --i)
+            {
+                uint32_t tick = 0;
+                unsigned char value = 0;
+                if (BAERmfEditorDocument_GetTrackCCEvent(m_document,
+                                                        track,
+                                                        static_cast<unsigned char>(cc),
+                                                        static_cast<uint32_t>(i),
+                                                        &tick,
+                                                        &value) != BAE_NO_ERROR)
+                {
+                    continue;
+                }
+                if (tick >= boundary_tick)
+                {
+                    (void)BAERmfEditorDocument_DeleteTrackCCEvent(
+                        m_document, track, static_cast<unsigned char>(cc), static_cast<uint32_t>(i));
+                }
+            }
+        }
+
+        uint32_t pb_count = 0;
+        if (BAERmfEditorDocument_GetTrackPitchBendEventCount(m_document, track, &pb_count) ==
+            BAE_NO_ERROR)
+        {
+            for (int32_t i = static_cast<int32_t>(pb_count) - 1; i >= 0; --i)
+            {
+                uint32_t tick = 0;
+                uint16_t value = 0;
+                if (BAERmfEditorDocument_GetTrackPitchBendEvent(
+                        m_document, track, static_cast<uint32_t>(i), &tick, &value) != BAE_NO_ERROR)
+                {
+                    continue;
+                }
+                if (tick >= boundary_tick)
+                {
+                    (void)BAERmfEditorDocument_DeleteTrackPitchBendEvent(
+                        m_document, track, static_cast<uint32_t>(i));
+                }
+            }
+        }
+
+        (void)BAERmfEditorDocument_SetTrackEndOfTrackTick(m_document, track, boundary_tick);
+        if (m_midi_selected_track == static_cast<int>(track))
+        {
+            m_midi_selected_notes.clear();
+            m_midi_primary_note = -1;
+            m_midi_note_cache_dirty = true;
+        }
+        MeCommitUndo();
+        char buf[96];
+        std::snprintf(buf, sizeof(buf), "End of track set to tick %u", boundary_tick);
+        SetStatus(buf);
+    }
+
+    uint32_t MeCountNotesAffectedByEotSong(uint32_t boundary_tick) const
+    {
+        if (!m_document)
+        {
+            return 0;
+        }
+        uint16_t track_count = 0;
+        if (BAERmfEditorDocument_GetTrackCount(m_document, &track_count) != BAE_NO_ERROR)
+        {
+            return 0;
+        }
+        uint32_t affected = 0;
+        for (uint16_t t = 0; t < track_count; ++t)
+        {
+            affected += MeCountNotesAffectedByEot(t, boundary_tick);
+        }
+        return affected;
+    }
+
+    void MeApplySetEndOfSong(uint32_t boundary_tick)
+    {
+        if (!m_document)
+        {
+            return;
+        }
+        MeBeginUndo();
+        (void)BAERmfEditorDocument_TrimToTick(m_document, boundary_tick);
+
+        bool loop_on = false;
+        uint32_t loop_start = 0;
+        uint32_t loop_end = 0;
+        int32_t loop_count = 0;
+        (void)BAERmfEditorDocument_GetMidiLoopMarkers(
+            m_document, &loop_on, &loop_start, &loop_end, &loop_count);
+        if (!loop_on)
+        {
+            loop_start = 0;
+            loop_count = 0;
+        }
+        if (boundary_tick == 0)
+        {
+            loop_start = 0;
+            loop_end = 1;
+        }
+        else
+        {
+            if (loop_start >= boundary_tick)
+            {
+                loop_start = 0;
+            }
+            loop_end = boundary_tick;
+            if (loop_end <= loop_start)
+            {
+                loop_end = loop_start + 1;
+            }
+        }
+        (void)BAERmfEditorDocument_SetMidiLoopMarkers(
+            m_document, true, loop_start, loop_end, loop_count);
+
+        m_midi_selected_notes.clear();
+        m_midi_primary_note = -1;
+        m_midi_note_cache_dirty = true;
+        MeCommitUndo();
+        char buf[96];
+        std::snprintf(buf, sizeof(buf), "End of song set to tick %u", boundary_tick);
+        SetStatus(buf);
+    }
+
+    void MeRequestSetEndOfTrack(int track, uint32_t tick)
+    {
+        if (!m_document || track < 0)
+        {
+            return;
+        }
+        uint16_t track_count = 0;
+        if (BAERmfEditorDocument_GetTrackCount(m_document, &track_count) != BAE_NO_ERROR ||
+            track >= static_cast<int>(track_count))
+        {
+            return;
+        }
+        uint32_t boundary = tick;
+        if (m_midi_snap_enabled)
+        {
+            boundary = MeSnapTick(boundary);
+        }
+        const uint32_t affected =
+            MeCountNotesAffectedByEot(static_cast<uint16_t>(track), boundary);
+        if (affected == 0)
+        {
+            MeApplySetEndOfTrack(static_cast<uint16_t>(track), boundary);
+            return;
+        }
+        m_midi_set_eot_is_song = false;
+        m_midi_set_eot_track = track;
+        m_midi_set_eot_tick = boundary;
+        m_midi_set_eot_note_count = affected;
+        m_midi_set_eot_confirm_open = true;
+    }
+
+    void MeRequestSetEndOfSong(uint32_t tick)
+    {
+        if (!m_document)
+        {
+            return;
+        }
+        uint32_t boundary = tick;
+        if (m_midi_snap_enabled)
+        {
+            boundary = MeSnapTick(boundary);
+        }
+        const uint32_t affected = MeCountNotesAffectedByEotSong(boundary);
+        if (affected == 0)
+        {
+            MeApplySetEndOfSong(boundary);
+            return;
+        }
+        m_midi_set_eot_is_song = true;
+        m_midi_set_eot_track = -1;
+        m_midi_set_eot_tick = boundary;
+        m_midi_set_eot_note_count = affected;
+        m_midi_set_eot_confirm_open = true;
+    }
+
+    void MeDrawSetEotConfirmDialog()
+    {
+        const char *popup_id =
+            m_midi_set_eot_is_song ? "Trim Song to Here" : "Trim Track to Here";
+        if (m_midi_set_eot_confirm_open)
+        {
+            ImGui::OpenPopup(popup_id);
+        }
+        if (!ImGui::BeginPopupModal(popup_id,
+                                    &m_midi_set_eot_confirm_open,
+                                    ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            return;
+        }
+        if (m_midi_set_eot_is_song)
+        {
+            ImGui::TextWrapped(
+                "Trim song to tick %u?\n"
+                "This will truncate or remove %u note%s across all tracks, "
+                "trim events, and move the end-of-song marker.",
+                m_midi_set_eot_tick,
+                m_midi_set_eot_note_count,
+                m_midi_set_eot_note_count == 1 ? "" : "s");
+        }
+        else
+        {
+            ImGui::TextWrapped(
+                "Trim track to tick %u?\nThis will truncate or remove %u note%s on this track.",
+                m_midi_set_eot_tick,
+                m_midi_set_eot_note_count,
+                m_midi_set_eot_note_count == 1 ? "" : "s");
+        }
+        ImGui::Spacing();
+        ImGui::TextDisabled("CC and pitch-bend events at or after this tick are also removed.");
+        ImGui::Separator();
+        if (ImGui::Button("Truncate", ImVec2(120.0f, 0.0f)))
+        {
+            if (m_midi_set_eot_is_song)
+            {
+                MeApplySetEndOfSong(m_midi_set_eot_tick);
+            }
+            else if (m_midi_set_eot_track >= 0)
+            {
+                MeApplySetEndOfTrack(static_cast<uint16_t>(m_midi_set_eot_track),
+                                     m_midi_set_eot_tick);
+            }
+            m_midi_set_eot_confirm_open = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)))
+        {
+            m_midi_set_eot_confirm_open = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
     }
 
     void MeDeleteSelectedTrack()
@@ -935,7 +1941,7 @@
         BAERmfEditorDocument_GetTrackCount(m_document, &track_count);
         const uint32_t length_ticks = MeSongLengthTicks();
         const float chrome_w = kMeTimeGutter;
-        const float lane_h = 48.0f;
+        const float lane_h = std::clamp(m_midi_track_lane_h, 28.0f, 120.0f);
         const float ruler_h = 22.0f;
 
         ImGui::BeginChild("##me_timeline", ImVec2(width, height), true);
@@ -997,12 +2003,29 @@
             ImGui::SameLine();
             ImGui::TextDisabled("%u:%03u", info.bank, info.program);
 
-            /* Note overview silhouette */
+            /* Note overview: active region vs past end-of-track. */
             const float body_x = win.x + chrome_w;
             const float body_w = std::max(1.0f, content_w - chrome_w);
-            dl->AddRectFilled(ImVec2(body_x, y + 2.0f),
-                              ImVec2(body_x + body_w, y + lane_h - 2.0f),
-                              IM_COL32(22, 24, 28, 255));
+            const float body_y0 = y + 2.0f;
+            const float body_y1 = y + lane_h - 2.0f;
+            uint32_t eot_tick = 0;
+            (void)BAERmfEditorDocument_GetTrackEndOfTrackTick(m_document, t, &eot_tick);
+            const bool eot_dragging =
+                (m_midi_drag_mode == MeDragMode::TrackEot && m_midi_eot_drag_track == static_cast<int>(t));
+            const uint32_t draw_eot = eot_dragging ? m_midi_eot_drag_tick : eot_tick;
+            const float eot_x = MeTickToX(draw_eot, body_x);
+            const float body_x1 = body_x + body_w;
+            /* Beyond EOT — darker void */
+            dl->AddRectFilled(ImVec2(body_x, body_y0),
+                              ImVec2(body_x1, body_y1),
+                              IM_COL32(16, 17, 20, 255));
+            /* In-track region */
+            if (eot_x > body_x)
+            {
+                dl->AddRectFilled(ImVec2(body_x, body_y0),
+                                  ImVec2(std::min(eot_x, body_x1), body_y1),
+                                  selected ? IM_COL32(34, 40, 52, 255) : IM_COL32(28, 32, 40, 255));
+            }
             uint32_t note_count = 0;
             BAERmfEditorDocument_GetNoteCount(m_document, t, &note_count);
             for (uint32_t n = 0; n < note_count; ++n)
@@ -1014,25 +2037,84 @@
                 }
                 const float x0 = MeTickToX(note.startTick, body_x);
                 const float x1 = MeTickToX(note.startTick + note.durationTicks, body_x);
-                if (x1 < body_x || x0 > body_x + body_w)
+                if (x1 < body_x || x0 > body_x1)
                 {
                     continue;
                 }
                 const float ny =
                     y + 4.0f + (1.0f - static_cast<float>(note.note) / 127.0f) * (lane_h - 12.0f);
                 dl->AddRectFilled(ImVec2(std::max(x0, body_x), ny),
-                                  ImVec2(std::min(x1, body_x + body_w), ny + 3.0f),
+                                  ImVec2(std::min(x1, body_x1), ny + 3.0f),
                                   IM_COL32(90, 160, 230, 200));
             }
+            /* End-of-track marker */
+            if (eot_x >= body_x - 2.0f && eot_x <= body_x1 + 2.0f)
+            {
+                const ImU32 eot_col = eot_dragging ? IM_COL32(255, 220, 120, 255)
+                                                  : (selected ? IM_COL32(255, 200, 90, 240)
+                                                             : IM_COL32(200, 170, 80, 200));
+                dl->AddLine(ImVec2(eot_x, body_y0), ImVec2(eot_x, body_y1), eot_col, 2.0f);
+                dl->AddLine(ImVec2(eot_x - 4.0f, body_y0), ImVec2(eot_x + 4.0f, body_y0), eot_col, 2.0f);
+                dl->AddLine(ImVec2(eot_x - 4.0f, body_y1), ImVec2(eot_x + 4.0f, body_y1), eot_col, 2.0f);
+            }
 
-            /* Click body to select track */
+            /* Click body to select track; EOT drag uses manual hit-test (no overlapping button). */
             ImGui::SetCursorScreenPos(ImVec2(body_x, y));
-            if (ImGui::InvisibleButton("##lane_body", ImVec2(body_w, lane_h)))
+            ImGui::InvisibleButton("##lane_body", ImVec2(body_w, lane_h));
+            const bool lane_hovered = ImGui::IsItemHovered();
+            const ImVec2 mp = ImGui::GetIO().MousePos;
+            constexpr float kEotHitPx = 6.0f;
+            const bool near_eot =
+                lane_hovered && std::fabs(mp.x - eot_x) <= kEotHitPx && eot_x >= body_x - 2.0f &&
+                eot_x <= body_x1 + 2.0f;
+            if (near_eot || eot_dragging)
+            {
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+            }
+            if (near_eot && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal) && !eot_dragging)
+            {
+                ImGui::SetTooltip("Drag to set end of track");
+            }
+            if (near_eot && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+                m_midi_drag_mode == MeDragMode::None)
             {
                 m_midi_selected_track = static_cast<int>(t);
                 m_midi_selected_notes.clear();
                 m_midi_primary_note = -1;
                 m_midi_note_cache_dirty = true;
+                m_midi_drag_mode = MeDragMode::TrackEot;
+                m_midi_eot_drag_track = static_cast<int>(t);
+                m_midi_eot_drag_tick = eot_tick;
+            }
+            else if (lane_hovered && ImGui::IsItemClicked(ImGuiMouseButton_Left) &&
+                     m_midi_drag_mode == MeDragMode::None)
+            {
+                m_midi_selected_track = static_cast<int>(t);
+                m_midi_selected_notes.clear();
+                m_midi_primary_note = -1;
+                m_midi_note_cache_dirty = true;
+            }
+            if (m_midi_drag_mode == MeDragMode::TrackEot &&
+                m_midi_eot_drag_track == static_cast<int>(t))
+            {
+                if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
+                {
+                    uint32_t tick = MeXToTick(mp.x, body_x);
+                    if (m_midi_snap_enabled)
+                    {
+                        tick = MeSnapTick(tick);
+                    }
+                    m_midi_eot_drag_tick = tick;
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+                }
+                else
+                {
+                    const uint32_t commit_tick = m_midi_eot_drag_tick;
+                    const int commit_track = m_midi_eot_drag_track;
+                    m_midi_drag_mode = MeDragMode::None;
+                    m_midi_eot_drag_track = -1;
+                    MeRequestSetEndOfTrack(commit_track, commit_tick);
+                }
             }
             ImGui::PopID();
             y += lane_h + 2.0f;
@@ -1051,15 +2133,89 @@
             }
         }
 
-        if (ImGui::BeginPopupContextWindow("##me_track_ctx"))
+        /* One timeline context menu: resolve track + tick from the right-click. */
+        if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
+            ImGui::IsMouseClicked(ImGuiMouseButton_Right))
+        {
+            const ImVec2 mp = ImGui::GetIO().MousePos;
+            const float time_x = win.x + chrome_w;
+            const float lanes_top = win.y + ruler_h + 4.0f;
+            int hit_track = -1;
+            if (mp.y >= lanes_top)
+            {
+                const float rel = mp.y - lanes_top;
+                const int idx = static_cast<int>(rel / (lane_h + 2.0f));
+                if (idx >= 0 && idx < static_cast<int>(track_count) &&
+                    rel - static_cast<float>(idx) * (lane_h + 2.0f) <= lane_h)
+                {
+                    hit_track = idx;
+                }
+            }
+            if (hit_track >= 0)
+            {
+                m_midi_selected_track = hit_track;
+                m_midi_selected_notes.clear();
+                m_midi_primary_note = -1;
+                m_midi_note_cache_dirty = true;
+                m_midi_ctx_track = hit_track;
+            }
+            else if (m_midi_selected_track >= 0)
+            {
+                m_midi_ctx_track = m_midi_selected_track;
+            }
+            else
+            {
+                m_midi_ctx_track = -1;
+            }
+            if (mp.x >= time_x)
+            {
+                m_midi_ctx_tick = MeXToTick(mp.x, time_x);
+                m_midi_ctx_has_tick = true;
+            }
+            else
+            {
+                /* Chrome: trim at playhead if we have a track. */
+                m_midi_ctx_tick = MePlayheadTick();
+                m_midi_ctx_has_tick = (m_midi_ctx_track >= 0);
+            }
+            ImGui::OpenPopup("##me_track_ctx");
+        }
+        if (ImGui::BeginPopup("##me_track_ctx"))
         {
             if (ImGui::MenuItem("Add Track"))
             {
                 MeAddTrack();
             }
-            if (ImGui::MenuItem("Delete Track", nullptr, false, track_count > 1))
+            if (ImGui::MenuItem("Delete Track", nullptr, false, track_count > 1 && m_midi_selected_track >= 0))
             {
                 MeDeleteSelectedTrack();
+            }
+            if (m_midi_ctx_has_tick && m_midi_ctx_track >= 0)
+            {
+                ImGui::Separator();
+                char trim_track_label[80];
+                char trim_song_label[80];
+                uint32_t show_tick = m_midi_ctx_tick;
+                if (m_midi_snap_enabled)
+                {
+                    show_tick = MeSnapTick(show_tick);
+                }
+                std::snprintf(trim_track_label,
+                              sizeof(trim_track_label),
+                              "Trim Track to Here (%u)",
+                              show_tick);
+                std::snprintf(trim_song_label,
+                              sizeof(trim_song_label),
+                              "Trim Song to Here (%u)",
+                              show_tick);
+                if (ImGui::MenuItem(trim_track_label))
+                {
+                    MeRequestSetEndOfTrack(m_midi_ctx_track, m_midi_ctx_tick);
+                }
+                if (ImGui::MenuItem(trim_song_label))
+                {
+                    MeRequestSetEndOfSong(m_midi_ctx_tick);
+                }
             }
             ImGui::EndPopup();
         }
@@ -1199,6 +2355,48 @@
                         IM_COL32(36, 38, 46, 255));
         }
 
+        /* Dim past this track's end-of-track; amber boundary line (live while dragging). */
+        uint32_t track_eot = 0;
+        float roll_eot_x = -1.0f;
+        if (BAERmfEditorDocument_GetTrackEndOfTrackTick(
+                m_document, static_cast<uint16_t>(m_midi_selected_track), &track_eot) == BAE_NO_ERROR)
+        {
+            const bool eot_dragging =
+                (m_midi_drag_mode == MeDragMode::TrackEot &&
+                 m_midi_eot_drag_track == m_midi_selected_track);
+            const uint32_t draw_eot = eot_dragging ? m_midi_eot_drag_tick : track_eot;
+            roll_eot_x = MeTickToX(draw_eot, grid_origin.x);
+            const float grid_x1 = grid_origin.x + grid_size.x;
+            const float grid_y1 = grid_origin.y + grid_size.y;
+            if (roll_eot_x < grid_x1)
+            {
+                const float dim_x0 = std::max(roll_eot_x, grid_origin.x);
+                if (dim_x0 < grid_x1)
+                {
+                    dl->AddRectFilled(ImVec2(dim_x0, grid_origin.y),
+                                      ImVec2(grid_x1, grid_y1),
+                                      IM_COL32(8, 8, 10, 140));
+                }
+            }
+            if (roll_eot_x >= grid_origin.x && roll_eot_x <= grid_x1)
+            {
+                const ImU32 eot_col =
+                    eot_dragging ? IM_COL32(255, 220, 120, 255) : IM_COL32(255, 200, 90, 220);
+                dl->AddLine(ImVec2(roll_eot_x, grid_origin.y),
+                            ImVec2(roll_eot_x, grid_y1),
+                            eot_col,
+                            2.0f);
+                dl->AddLine(ImVec2(roll_eot_x - 5.0f, grid_origin.y),
+                            ImVec2(roll_eot_x + 5.0f, grid_origin.y),
+                            eot_col,
+                            2.0f);
+                dl->AddLine(ImVec2(roll_eot_x - 5.0f, grid_y1),
+                            ImVec2(roll_eot_x + 5.0f, grid_y1),
+                            eot_col,
+                            2.0f);
+            }
+        }
+
         /* Notes — single draw path for selected and unselected */
         const auto &notes = MeNotes();
         for (int i = 0; i < static_cast<int>(notes.size()); ++i)
@@ -1273,7 +2471,52 @@
         ImGui::SetCursorScreenPos(grid_origin);
         ImGui::InvisibleButton("##me_grid", grid_size);
         const bool hovered = ImGui::IsItemHovered();
+        const bool grid_left_clicked = ImGui::IsItemClicked(ImGuiMouseButton_Left);
         const ImGuiIO &io = ImGui::GetIO();
+        const bool eot_dragging =
+            (m_midi_drag_mode == MeDragMode::TrackEot &&
+             m_midi_eot_drag_track == m_midi_selected_track);
+        constexpr float kEotHitPx = 6.0f;
+        const bool near_roll_eot =
+            hovered && roll_eot_x >= grid_origin.x &&
+            roll_eot_x <= grid_origin.x + grid_size.x &&
+            std::fabs(io.MousePos.x - roll_eot_x) <= kEotHitPx;
+        if (near_roll_eot || eot_dragging)
+        {
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+        }
+        if (near_roll_eot && !eot_dragging && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        {
+            ImGui::SetTooltip("Drag to set end of track");
+        }
+        if (near_roll_eot && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+            m_midi_drag_mode == MeDragMode::None)
+        {
+            m_midi_drag_mode = MeDragMode::TrackEot;
+            m_midi_eot_drag_track = m_midi_selected_track;
+            m_midi_eot_drag_tick = track_eot;
+        }
+        if (eot_dragging)
+        {
+            if (ImGui::IsMouseDown(ImGuiMouseButton_Left))
+            {
+                uint32_t tick = MeXToTick(io.MousePos.x, grid_origin.x);
+                if (m_midi_snap_enabled)
+                {
+                    tick = MeSnapTick(tick);
+                }
+                m_midi_eot_drag_tick = tick;
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+            }
+            else
+            {
+                const uint32_t commit_tick = m_midi_eot_drag_tick;
+                const int commit_track = m_midi_eot_drag_track;
+                m_midi_drag_mode = MeDragMode::None;
+                m_midi_eot_drag_track = -1;
+                MeRequestSetEndOfTrack(commit_track, commit_tick);
+            }
+        }
 
         if (hovered && io.MouseWheel != 0.0f)
         {
@@ -1294,13 +2537,17 @@
             }
         }
 
-        if (ImGui::IsItemClicked(ImGuiMouseButton_Left))
+        if (grid_left_clicked && m_midi_drag_mode == MeDragMode::None && !near_roll_eot)
         {
             float edge = 0.0f;
             const int hit = MeHitTestNote(io.MousePos.x, io.MousePos.y, grid_origin.x, grid_origin.y, &edge);
             if (hit >= 0)
             {
-                if (io.KeyCtrl)
+                if (io.KeyShift && !io.KeyCtrl)
+                {
+                    MeSelectNoteRange(hit);
+                }
+                else if (io.KeyCtrl)
                 {
                     MeToggleNoteSelection(hit);
                 }
@@ -1318,7 +2565,7 @@
             }
             else
             {
-                if (!io.KeyCtrl)
+                if (!io.KeyCtrl && !io.KeyShift)
                 {
                     m_midi_selected_notes.clear();
                     m_midi_primary_note = -1;
@@ -1816,18 +3063,98 @@
 
     void MeDrawToolbar()
     {
+        /* Flow toolbar widgets across up to 3 lines based on window width. */
+        const float region_max_x =
+            ImGui::GetWindowPos().x + ImGui::GetContentRegionMax().x;
+        const float spacing_x = ImGui::GetStyle().ItemSpacing.x;
+        const ImGuiStyle &style = ImGui::GetStyle();
+        int wrap_line = 0;
+        bool first_on_line = true;
+        constexpr int kMaxWrapLines = 3;
+
+        /* InputInt width includes +/- steppers; size for 4 digits so values aren't clipped. */
+        const float int_field_w =
+            ImGui::CalcTextSize("0000").x + style.FramePadding.x * 2.0f +
+            ImGui::GetFrameHeight() * 2.0f + style.ItemInnerSpacing.x;
+        auto btn_w = [&](const char *label) -> float {
+            return ImGui::CalcTextSize(label, nullptr, true).x + style.FramePadding.x * 2.0f;
+        };
+        auto labeled_w = [&](const char *label, float field_w) -> float {
+            return ImGui::CalcTextSize(label, nullptr, true).x + style.ItemInnerSpacing.x + field_w;
+        };
+        auto place = [&](float approx_w) {
+            if (first_on_line)
+            {
+                first_on_line = false;
+                return;
+            }
+            const float next_max = ImGui::GetItemRectMax().x + spacing_x + approx_w;
+            if (wrap_line + 1 < kMaxWrapLines && next_max > region_max_x)
+            {
+                ++wrap_line;
+                first_on_line = false;
+                return;
+            }
+            ImGui::SameLine();
+        };
+
+        place(btn_w("Add Track"));
         if (ImGui::Button("Add Track"))
         {
             MeAddTrack();
         }
-        ImGui::SameLine();
+        place(btn_w("Delete Track"));
         if (ImGui::Button("Delete Track"))
         {
             MeDeleteSelectedTrack();
         }
-        ImGui::SameLine();
+        {
+            const bool rec = m_midi_record_armed;
+            const char *rec_label = rec ? "Rec" : "Record";
+            place(btn_w(rec_label));
+            if (rec)
+            {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.75f, 0.15f, 0.15f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.90f, 0.25f, 0.25f, 1.0f));
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.60f, 0.10f, 0.10f, 1.0f));
+            }
+            if (ImGui::Button(rec ? "Rec###merec" : "Record###merec"))
+            {
+                MeSetRecordArmed(!m_midi_record_armed);
+            }
+            if (rec)
+            {
+                ImGui::PopStyleColor(3);
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+            {
+                ImGui::SetTooltip(
+                    "Arm recording into the selected track from the playhead.\n"
+                    "Play is optional: free-run clock when stopped, song-sync when playing.\n"
+                    "Notes + CC + pitch bend (PC / HW / typing). Track length grows with the take.\n"
+                    "Disarm to commit. Stop ends a song-synced take then keeps free-run armed.");
+            }
+        }
+        place(labeled_w("Metronome", ImGui::GetFrameHeight()));
+        ImGui::Checkbox("Metronome", &m_midi_metronome);
+        place(labeled_w("Count-in", 70.0f));
+        ImGui::SetNextItemWidth(70.0f);
+        ImGui::Combo("Count-in", &m_midi_count_in_bars, "Off\0" "1 bar\0" "2 bars\0");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        {
+            ImGui::SetTooltip(
+                "Bars of delay before capture when Record is armed while stopped.\n"
+                "Clicks only play when Metronome is checked.\n"
+                "(Ignored if Play is already running.)");
+        }
+        if (m_midi_count_in_active)
+        {
+            place(ImGui::CalcTextSize("Count-in…").x);
+            ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "Count-in…");
+        }
+        place(labeled_w("Snap", ImGui::GetFrameHeight()));
         ImGui::Checkbox("Snap", &m_midi_snap_enabled);
-        ImGui::SameLine();
+        place(70.0f);
         ImGui::SetNextItemWidth(70.0f);
         ImGui::Combo("##snapdiv",
                      &m_midi_snap_division_index,
@@ -1835,35 +3162,46 @@
         static const int kDivs[] = {1, 2, 4, 8, 16};
         m_midi_snap_division =
             kDivs[std::clamp(m_midi_snap_division_index, 0, 4)];
-        ImGui::SameLine();
+        place(labeled_w("Follow", ImGui::GetFrameHeight()));
         ImGui::Checkbox("Follow", &m_midi_follow_playhead);
-        ImGui::SameLine();
+        place(labeled_w("Zoom", 100.0f));
         ImGui::SetNextItemWidth(100.0f);
         ImGui::SliderFloat("Zoom", &m_midi_px_per_tick, 0.02f, 1.5f, "%.3f");
-        ImGui::SameLine();
+        place(btn_w("Undo"));
         if (ImGui::Button("Undo"))
         {
             MeUndo();
         }
-        ImGui::SameLine();
+        place(btn_w("Redo"));
         if (ImGui::Button("Redo"))
         {
             MeRedo();
         }
-        ImGui::SameLine();
+        place(btn_w("Copy Notes"));
         if (ImGui::Button("Copy Notes"))
         {
             MeCopySelectedNotes();
         }
-        ImGui::SameLine();
+        place(btn_w("Paste"));
         if (ImGui::Button("Paste"))
         {
             MePasteNotesAtPlayhead();
         }
-        ImGui::SameLine();
+        place(btn_w("Delete Notes"));
         if (ImGui::Button("Delete Notes"))
         {
             MeDeleteSelectedNotes();
+        }
+        place(btn_w("Quantize"));
+        ImGui::BeginDisabled(m_midi_selected_notes.empty());
+        if (ImGui::Button("Quantize"))
+        {
+            MeQuantizeSelectedNotes();
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        {
+            ImGui::SetTooltip("Snap start/end of selected notes to the grid (Ctrl+Q).");
         }
 
         if (m_document && m_midi_selected_track >= 0)
@@ -1872,9 +3210,8 @@
             if (BAERmfEditorDocument_GetTrackInfo(
                     m_document, static_cast<uint16_t>(m_midi_selected_track), &info) == BAE_NO_ERROR)
             {
-                ImGui::SameLine();
+                place(ImGui::CalcTextSize("|").x);
                 ImGui::TextDisabled("|");
-                ImGui::SameLine();
                 if (m_midi_rename_track != m_midi_selected_track)
                 {
                     m_midi_rename_track = m_midi_selected_track;
@@ -1883,6 +3220,7 @@
                                   "%s",
                                   (info.name && info.name[0]) ? info.name : "Track");
                 }
+                place(labeled_w("Name", 120.0f));
                 ImGui::SetNextItemWidth(120.0f);
                 if (ImGui::InputText("Name", m_midi_rename_buf, sizeof(m_midi_rename_buf)))
                 {
@@ -1896,13 +3234,13 @@
                         m_document, static_cast<uint16_t>(m_midi_selected_track), &info);
                     MeCommitUndo();
                 }
-                ImGui::SameLine();
                 int bank = info.bank;
                 int program = info.program;
                 int channel = info.channel;
                 int vol = info.volume;
                 int pan = info.pan;
-                ImGui::SetNextItemWidth(50.0f);
+                place(labeled_w("Ch", int_field_w));
+                ImGui::SetNextItemWidth(int_field_w);
                 if (ImGui::InputInt("Ch", &channel))
                 {
                     MeBeginUndo();
@@ -1911,8 +3249,8 @@
                         m_document, static_cast<uint16_t>(m_midi_selected_track), &info);
                     MeCommitUndo();
                 }
-                ImGui::SameLine();
-                ImGui::SetNextItemWidth(60.0f);
+                place(labeled_w("Bank", int_field_w));
+                ImGui::SetNextItemWidth(int_field_w);
                 if (ImGui::InputInt("Bank", &bank))
                 {
                     MeBeginUndo();
@@ -1921,8 +3259,8 @@
                         m_document, static_cast<uint16_t>(m_midi_selected_track), &info);
                     MeCommitUndo();
                 }
-                ImGui::SameLine();
-                ImGui::SetNextItemWidth(60.0f);
+                place(labeled_w("Prog", int_field_w));
+                ImGui::SetNextItemWidth(int_field_w);
                 if (ImGui::InputInt("Prog", &program))
                 {
                     MeBeginUndo();
@@ -1931,8 +3269,8 @@
                         m_document, static_cast<uint16_t>(m_midi_selected_track), &info);
                     MeCommitUndo();
                 }
-                ImGui::SameLine();
-                ImGui::SetNextItemWidth(60.0f);
+                place(labeled_w("Vol", int_field_w));
+                ImGui::SetNextItemWidth(int_field_w);
                 if (ImGui::InputInt("Vol", &vol))
                 {
                     MeBeginUndo();
@@ -1941,8 +3279,8 @@
                         m_document, static_cast<uint16_t>(m_midi_selected_track), &info);
                     MeCommitUndo();
                 }
-                ImGui::SameLine();
-                ImGui::SetNextItemWidth(60.0f);
+                place(labeled_w("Pan", int_field_w));
+                ImGui::SetNextItemWidth(int_field_w);
                 if (ImGui::InputInt("Pan", &pan))
                 {
                     MeBeginUndo();
@@ -1969,34 +3307,139 @@
             ImGui::TreePop();
         }
 
-        if (m_midi_primary_note >= 0 && m_document && m_midi_selected_track >= 0)
+        if (!m_midi_selected_notes.empty() && m_document && m_midi_selected_track >= 0)
         {
             const auto &notes = MeNotes();
-            if (m_midi_primary_note < static_cast<int>(notes.size()))
+            bool have_vel = false;
+            bool have_bank = false;
+            bool have_prog = false;
+            bool vel_mixed = false;
+            bool bank_mixed = false;
+            bool prog_mixed = false;
+            int vel = 100;
+            int bank = 0;
+            int program = 0;
+            for (int idx : m_midi_selected_notes)
             {
-                BAERmfEditorNoteInfo info = notes[static_cast<size_t>(m_midi_primary_note)];
-                int vel = info.velocity;
-                ImGui::SetNextItemWidth(120.0f);
-                if (ImGui::SliderInt("Velocity", &vel, 1, 127))
+                if (idx < 0 || idx >= static_cast<int>(notes.size()))
                 {
-                    if (!m_midi_vel_undo_open)
-                    {
-                        MeBeginUndo();
-                        m_midi_vel_undo_open = true;
-                    }
-                    info.velocity = static_cast<unsigned char>(vel);
-                    BAERmfEditorDocument_SetNoteInfo(
-                        m_document,
-                        static_cast<uint16_t>(m_midi_selected_track),
-                        static_cast<uint32_t>(m_midi_primary_note),
-                        &info);
-                    m_midi_note_cache_dirty = true;
+                    continue;
                 }
-                if (m_midi_vel_undo_open && ImGui::IsItemDeactivatedAfterEdit())
+                const BAERmfEditorNoteInfo &n = notes[static_cast<size_t>(idx)];
+                if (!have_vel)
                 {
-                    MeCommitUndo();
-                    m_midi_vel_undo_open = false;
+                    vel = n.velocity;
+                    have_vel = true;
                 }
+                else if (vel != static_cast<int>(n.velocity))
+                {
+                    vel_mixed = true;
+                }
+                if (!have_bank)
+                {
+                    bank = n.bank;
+                    have_bank = true;
+                }
+                else if (bank != static_cast<int>(n.bank))
+                {
+                    bank_mixed = true;
+                }
+                if (!have_prog)
+                {
+                    program = n.program;
+                    have_prog = true;
+                }
+                else if (program != static_cast<int>(n.program))
+                {
+                    prog_mixed = true;
+                }
+            }
+
+            ImGui::Separator();
+            ImGui::TextDisabled("Selection (%d note%s)",
+                                static_cast<int>(m_midi_selected_notes.size()),
+                                m_midi_selected_notes.size() == 1 ? "" : "s");
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(120.0f);
+            if (vel_mixed)
+            {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.75f, 1.0f));
+            }
+            if (ImGui::SliderInt(vel_mixed ? "Velocity###selvel" : "Velocity###selvel", &vel, 1, 127))
+            {
+                if (!m_midi_vel_undo_open)
+                {
+                    MeBeginUndo();
+                    m_midi_vel_undo_open = true;
+                }
+                MeApplySelectedNoteVelocity(static_cast<unsigned char>(vel));
+                vel_mixed = false;
+            }
+            if (vel_mixed)
+            {
+                ImGui::PopStyleColor();
+            }
+            if (m_midi_vel_undo_open && ImGui::IsItemDeactivatedAfterEdit())
+            {
+                MeCommitUndo();
+                m_midi_vel_undo_open = false;
+            }
+
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(int_field_w);
+            if (bank_mixed)
+            {
+                ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.65f);
+            }
+            if (ImGui::InputInt(bank_mixed ? "Note Bank###selbank" : "Note Bank###selbank", &bank))
+            {
+                if (!m_midi_note_bank_undo_open)
+                {
+                    MeBeginUndo();
+                    m_midi_note_bank_undo_open = true;
+                }
+                MeApplySelectedNoteBank(static_cast<uint16_t>(std::max(0, bank)));
+            }
+            if (bank_mixed)
+            {
+                ImGui::PopStyleVar();
+            }
+            if (m_midi_note_bank_undo_open && ImGui::IsItemDeactivatedAfterEdit())
+            {
+                MeCommitUndo();
+                m_midi_note_bank_undo_open = false;
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+            {
+                ImGui::SetTooltip(
+                    "Per-note bank for the selection.\n"
+                    "MIDI export emits Bank Select / Program Change only when they change.");
+            }
+
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(int_field_w);
+            if (prog_mixed)
+            {
+                ImGui::PushStyleVar(ImGuiStyleVar_Alpha, 0.65f);
+            }
+            if (ImGui::InputInt(prog_mixed ? "Note Prog###selprog" : "Note Prog###selprog", &program))
+            {
+                if (!m_midi_note_prog_undo_open)
+                {
+                    MeBeginUndo();
+                    m_midi_note_prog_undo_open = true;
+                }
+                MeApplySelectedNoteProgram(
+                    static_cast<unsigned char>(std::clamp(program, 0, 127)));
+            }
+            if (prog_mixed)
+            {
+                ImGui::PopStyleVar();
+            }
+            if (m_midi_note_prog_undo_open && ImGui::IsItemDeactivatedAfterEdit())
+            {
+                MeCommitUndo();
+                m_midi_note_prog_undo_open = false;
             }
         }
     }
@@ -2005,6 +3448,7 @@
     {
         if (!m_midi_editor_open)
         {
+            MeDrawSetEotConfirmDialog();
             return;
         }
         bool open = m_midi_editor_open;
@@ -2013,6 +3457,7 @@
         {
             ImGui::End();
             m_midi_editor_open = open;
+            MeDrawSetEotConfirmDialog();
             return;
         }
         m_midi_editor_open = open;
@@ -2022,6 +3467,7 @@
         {
             ImGui::TextDisabled("Load or activate a song to edit MIDI.");
             ImGui::End();
+            MeDrawSetEotConfirmDialog();
             return;
         }
 
@@ -2038,7 +3484,7 @@
         MeEnsureTrackMuteSize();
 
         /* Follow playhead (use time-grid width, not the left gutter). */
-        if (m_midi_follow_playhead && m_song_started)
+        if (m_midi_follow_playhead && (m_song_started || m_midi_record_free_run))
         {
             const uint32_t play = MePlayheadTick();
             const float view_ticks =
@@ -2052,13 +3498,48 @@
         }
         m_midi_playhead_tick = MePlayheadTick();
 
+        MePumpRecordTransport();
         MeDrawToolbar();
         ImGui::Separator();
 
         const ImVec2 avail = ImGui::GetContentRegionAvail();
-        const float timeline_h = std::clamp(avail.y * 0.22f, 120.0f, 200.0f);
+        uint16_t track_count_for_h = 0;
+        BAERmfEditorDocument_GetTrackCount(m_document, &track_count_for_h);
+        const float lane_h = std::clamp(m_midi_track_lane_h, 28.0f, 120.0f);
+        const float timeline_h = std::clamp(
+            26.0f + static_cast<float>(std::max<uint16_t>(1, track_count_for_h)) * (lane_h + 2.0f) +
+                8.0f,
+            100.0f,
+            std::max(100.0f, avail.y * 0.45f));
+        const float split_h = 6.0f;
         MeDrawTrackTimeline(avail.x, timeline_h);
-        MeDrawPianoRoll(avail.x, avail.y - timeline_h - 4.0f);
+
+        ImGui::InvisibleButton("##me_lane_h_split", ImVec2(avail.x, split_h));
+        {
+            const bool split_hover = ImGui::IsItemHovered();
+            const bool split_active = ImGui::IsItemActive();
+            if (split_hover || split_active)
+            {
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+            }
+            if (split_active)
+            {
+                m_midi_track_lane_h =
+                    std::clamp(m_midi_track_lane_h + ImGui::GetIO().MouseDelta.y, 28.0f, 120.0f);
+            }
+            const ImVec2 sp0 = ImGui::GetItemRectMin();
+            const ImVec2 sp1 = ImGui::GetItemRectMax();
+            const float mid_y = (sp0.y + sp1.y) * 0.5f;
+            ImGui::GetWindowDrawList()->AddLine(
+                ImVec2(sp0.x + 8.0f, mid_y),
+                ImVec2(sp1.x - 8.0f, mid_y),
+                split_active  ? IM_COL32(160, 140, 220, 255)
+                : split_hover ? IM_COL32(120, 110, 160, 220)
+                              : IM_COL32(70, 74, 90, 200),
+                2.0f);
+        }
+
+        MeDrawPianoRoll(avail.x, avail.y - timeline_h - split_h - 4.0f);
 
         /* Shortcuts when focused */
         if (m_midi_editor_focused)
@@ -2107,7 +3588,17 @@
             {
                 MeDeleteSelectedNotes();
             }
+            if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Q, false) &&
+                !m_midi_selected_notes.empty())
+            {
+                MeQuantizeSelectedNotes();
+            }
+            if (ImGui::IsKeyPressed(ImGuiKey_R, false) && !io.KeyCtrl && !io.WantTextInput)
+            {
+                MeSetRecordArmed(!m_midi_record_armed);
+            }
         }
 
         ImGui::End();
+        MeDrawSetEotConfirmDialog();
     }

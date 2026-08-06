@@ -1289,6 +1289,20 @@ public:
             }
             voice = SePreviewVoice{};
         }
+        if (m_midi_click_hi)
+        {
+            BAESound_Stop(m_midi_click_hi, FALSE);
+            BAESound_Delete(m_midi_click_hi);
+            m_midi_click_hi = nullptr;
+        }
+        if (m_midi_click_lo)
+        {
+            BAESound_Stop(m_midi_click_lo, FALSE);
+            BAESound_Delete(m_midi_click_lo);
+            m_midi_click_lo = nullptr;
+        }
+        m_midi_click_hi_pcm.clear();
+        m_midi_click_lo_pcm.clear();
         if (m_preview_song)
         {
             BAESong_Stop(m_preview_song, FALSE);
@@ -1401,6 +1415,7 @@ public:
         /* Keep last hover sticky across frames: OS file drags often stop updating
          * ImGui hover, so clearing to None each frame broke MIDI→Songs drops. */
         PollHardwareMidiInput();
+        MePumpCountInAndMetronome();
         ConsumeDialogResult();
         DrawMainMenuBar();
         DrawDockspace();
@@ -1431,6 +1446,7 @@ public:
         DrawReplaceSessionConfirmDialog();
         DrawRmfOpenChoiceDialog();
         DrawDeleteSongConfirmDialog();
+        DrawExportMidiConfirmDialog();
         DrawQuitConfirmDialog();
         DrawBankDestructiveConfirmDialogs();
 #if USE_NEO_EFFECTS == TRUE
@@ -1502,6 +1518,7 @@ private:
     {
         OpenImport = 0,
         ExportSong,
+        ExportMidi,
         ExportOneShotRmf,
         ExportGroovoidRmf,
         ExportSample,
@@ -1589,6 +1606,32 @@ private:
                                static_cast<int>(SDL_arraysize(filters)),
                                nullptr,
                                false);
+    }
+
+    void OpenExportMidiDialog()
+    {
+        if (!m_document)
+        {
+            SetStatus("No song document to export");
+            return;
+        }
+        m_pending_dialog_action = DialogAction::ExportMidi;
+        static const SDL_DialogFileFilter filters[] = {
+            {"MIDI (*.mid)", "mid"},
+            {"All files (*.*)", "*"},
+        };
+        static char default_path[256];
+        const std::string stem = SuggestedExportFileStem();
+        std::snprintf(default_path,
+                      sizeof(default_path),
+                      "%s.mid",
+                      stem.empty() ? "song" : stem.c_str());
+        SDL_ShowSaveFileDialog(OnFileDialogResult,
+                               this,
+                               m_main_window,
+                               filters,
+                               static_cast<int>(SDL_arraysize(filters)),
+                               default_path);
     }
 
     void OpenExportSongDialog()
@@ -1734,6 +1777,11 @@ private:
         if (m_pending_dialog_action == DialogAction::ExportSong)
         {
             ExportSessionSongToPath(selected_path);
+            return;
+        }
+        if (m_pending_dialog_action == DialogAction::ExportMidi)
+        {
+            ExportSessionSongMidiToPath(selected_path);
             return;
         }
         if (m_pending_dialog_action == DialogAction::ExportOneShotRmf)
@@ -5209,9 +5257,19 @@ private:
 
     void PanicAuditionNotes()
     {
+        if (m_midi_record_take_open || m_midi_record_armed)
+        {
+            MeFinishRecordTake();
+        }
+        MeStopRecordFreeRun();
+        m_midi_record_held_start.fill(-1);
         m_mouse_active_note = -1;
         m_key_mouse_held.fill(false);
         m_hw_note_held.fill(false);
+        for (auto &ch_notes : m_hw_full_ch_note_held)
+        {
+            ch_notes.fill(false);
+        }
         m_keyboard_note_target.fill(KeyboardInputTarget::None);
         m_pc_key_note.fill(-1);
         m_key_active_until_ms.fill(0);
@@ -5273,6 +5331,7 @@ private:
     bool m_confirm_load_builtin_open = false;
     bool m_confirm_new_session_open = false;
     bool m_confirm_delete_song_open = false;
+    bool m_confirm_export_midi_open = false;
     std::vector<int> m_pending_delete_song_indices;
     bool m_pending_delete_song_trash_unused = true;
     size_t m_pending_delete_song_unused_inst = 0;
@@ -5326,6 +5385,8 @@ private:
     uint32_t m_channel_vu_last_tick_ms = 0;
     std::array<bool, 128> m_key_mouse_held = {};
     std::array<bool, 128> m_hw_note_held = {};
+    /* Main-preview HW MIDI: held notes per channel (zefidi-style). */
+    std::array<std::array<bool, 128>, 16> m_hw_full_ch_note_held = {};
     std::array<KeyboardInputTarget, 128> m_keyboard_note_target = {};
     std::array<uint32_t, 128> m_key_active_until_ms = {};
 
@@ -5336,6 +5397,9 @@ private:
     bool m_prefs_draft_midi_hw_enabled = false;
     int m_prefs_draft_midi_hw_device_index = -1;
     std::vector<MidiHwDevice> m_midi_hw_devices;
+    std::string m_midi_hw_open_device_name;
+    uint32_t m_midi_hw_last_alive_check_ms = 0;
+    uint32_t m_midi_hw_last_prefs_enum_ms = 0;
 #endif
     /* VKBD key → actual MIDI note sent (percussion remaps every key to the drum slot). */
     std::array<int, 128> m_vkbd_sounding_note = [] {
@@ -5626,6 +5690,7 @@ private:
     float m_midi_scroll_pitch = 40.0f; /* rows from top; ~C4 centered-ish */
     float m_midi_px_per_tick = 0.12f;
     float m_midi_px_per_pitch = 14.0f;
+    float m_midi_track_lane_h = 48.0f; /* timeline lane height (resizable) */
     bool m_midi_snap_enabled = true;
     int m_midi_snap_division = 4;
     int m_midi_snap_division_index = 2;
@@ -5636,10 +5701,48 @@ private:
     int m_midi_drag_origin_pitch = 60;
     int32_t m_midi_drag_tick_delta = 0;
     int m_midi_drag_pitch_delta = 0;
+    int m_midi_eot_drag_track = -1;
+    uint32_t m_midi_eot_drag_tick = 0;
     ImVec2 m_midi_marquee_a = ImVec2(0, 0);
     int m_midi_auto_drag_lane = -1;
     int m_midi_auto_drag_index = -1;
     bool m_midi_vel_undo_open = false;
+    bool m_midi_note_bank_undo_open = false;
+    bool m_midi_note_prog_undo_open = false;
+    bool m_midi_record_armed = false;
+    bool m_midi_record_take_open = false; /* undo begun for current take */
+    bool m_midi_record_was_playing = false;
+    bool m_midi_record_free_run = false; /* wall-clock record when Play is not running */
+    uint32_t m_midi_record_clock_origin_tick = 0;
+    uint32_t m_midi_record_clock_start_ms = 0;
+    std::array<int32_t, 128> m_midi_record_held_start = [] {
+        std::array<int32_t, 128> a{};
+        a.fill(-1);
+        return a;
+    }();
+    std::array<unsigned char, 128> m_midi_record_held_vel = {};
+    std::array<int32_t, 128> m_midi_record_last_cc_tick = [] {
+        std::array<int32_t, 128> a{};
+        a.fill(-1);
+        return a;
+    }();
+    std::array<int, 128> m_midi_record_last_cc_val = [] {
+        std::array<int, 128> a{};
+        a.fill(-1);
+        return a;
+    }();
+    int32_t m_midi_record_last_pb_tick = -1;
+    int m_midi_record_last_pb_val = -1;
+    bool m_midi_metronome = false;
+    int m_midi_count_in_bars = 1; /* 0 / 1 / 2 */
+    bool m_midi_count_in_active = false;
+    uint32_t m_midi_count_in_start_ms = 0;
+    int m_midi_count_in_last_beat = -1;
+    int m_midi_metro_last_song_beat = -1;
+    BAESound m_midi_click_hi = nullptr;
+    BAESound m_midi_click_lo = nullptr;
+    std::vector<int16_t> m_midi_click_hi_pcm;
+    std::vector<int16_t> m_midi_click_lo_pcm;
     /* Default: only Volume visible so the piano roll keeps most of the height. */
     std::array<bool, 16> m_midi_auto_lane_visible = {
         false, false, false, true, false, false, false, false, false, false, false, false, false, false, false, false};
@@ -5657,6 +5760,14 @@ private:
     std::vector<MeNoteClip> m_midi_note_clipboard;
     int m_midi_rename_track = -1;
     char m_midi_rename_buf[128] = {0};
+    int m_midi_ctx_track = -1;
+    uint32_t m_midi_ctx_tick = 0;
+    bool m_midi_ctx_has_tick = false;
+    bool m_midi_set_eot_confirm_open = false;
+    bool m_midi_set_eot_is_song = false; /* false = one track, true = whole song */
+    int m_midi_set_eot_track = -1;
+    uint32_t m_midi_set_eot_tick = 0;
+    uint32_t m_midi_set_eot_note_count = 0;
 
     bool m_song_info_open = false;
     char m_song_info_title[256] = {0};
@@ -5850,7 +5961,125 @@ int main(int argc, char **argv)
 
     SDL_ShowWindow(window);
 
+    /* Windows (and some other hosts) run a modal move/size loop inside
+     * SDL_PollEvent that never returns until the drag ends — freezing UI and
+     * MIDI-in. SDL fires SDL_EVENT_WINDOW_EXPOSED from a timer during that
+     * loop; handle it via an event watch so we keep iterating.
+     * Maximize/restore are one-shot size snaps (PIXEL_SIZE_CHANGED etc.);
+     * redraw those from the watch too so the first painted frame matches.
+     * See https://wiki.libsdl.org/SDL3/AppFreezeDuringDrag */
+    struct ModalLoopFrameCtx
+    {
+        NbEditorApp *app = nullptr;
+        SDL_Window *window = nullptr;
+        SDL_Renderer *renderer = nullptr;
+        ImGuiIO *io = nullptr;
+        bool *done = nullptr;
+        int frame_depth = 0;
+        Uint64 last_watch_frame_ns = 0;
+    };
+
     bool done = false;
+    ModalLoopFrameCtx frame_ctx;
+    frame_ctx.app = &app;
+    frame_ctx.window = window;
+    frame_ctx.renderer = renderer;
+    frame_ctx.io = &io;
+    frame_ctx.done = &done;
+
+    auto run_nbeditor_frame = [](ModalLoopFrameCtx *ctx) {
+        if (!ctx || !ctx->app || !ctx->window || !ctx->renderer || !ctx->io || !ctx->done)
+        {
+            return;
+        }
+        if (ctx->frame_depth > 0)
+        {
+            return;
+        }
+        if (SDL_GetWindowFlags(ctx->window) & SDL_WINDOW_MINIMIZED)
+        {
+            return;
+        }
+
+        ++ctx->frame_depth;
+
+        /* Apply nBeT ImGui/dock ini before NewFrame — mid-frame load undocks windows. */
+        ctx->app->PumpPendingNbetLayout();
+        /* Session save / bank export (progress modal); must not run mid-DrawUI. */
+        ctx->app->PumpPendingLongOp();
+
+        ImGui_ImplSDLRenderer3_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+
+        ctx->app->DrawUI(); /* includes PollHardwareMidiInput */
+        if (ctx->app->WantsQuit())
+        {
+            *ctx->done = true;
+        }
+
+        ImGui::Render();
+        SDL_SetRenderScale(ctx->renderer,
+                           ctx->io->DisplayFramebufferScale.x,
+                           ctx->io->DisplayFramebufferScale.y);
+        SDL_SetRenderDrawColor(ctx->renderer, 18, 22, 28, 255);
+        SDL_RenderClear(ctx->renderer);
+        ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), ctx->renderer);
+        SDL_RenderPresent(ctx->renderer);
+
+        --ctx->frame_depth;
+    };
+
+    struct ModalLoopWatchPack
+    {
+        ModalLoopFrameCtx *ctx;
+        void (*run_frame)(ModalLoopFrameCtx *);
+    };
+    ModalLoopWatchPack watch_pack{&frame_ctx, +run_nbeditor_frame};
+
+    auto modal_loop_watch = [](void *userdata, SDL_Event *event) -> bool {
+        if (!userdata || !event)
+        {
+            return true;
+        }
+        const Uint32 t = event->type;
+        const bool size_snap = (t == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED ||
+                                t == SDL_EVENT_WINDOW_RESIZED ||
+                                t == SDL_EVENT_WINDOW_MAXIMIZED ||
+                                t == SDL_EVENT_WINDOW_RESTORED);
+        if (t != SDL_EVENT_WINDOW_EXPOSED && !size_snap)
+        {
+            return true;
+        }
+
+        auto *pack = static_cast<ModalLoopWatchPack *>(userdata);
+        ModalLoopFrameCtx *ctx = pack->ctx;
+        /* Maximize fires several size events at once — one frame is enough. */
+        const Uint64 now = SDL_GetTicksNS();
+        if (ctx->last_watch_frame_ns != 0 &&
+            (now - ctx->last_watch_frame_ns) < 4000000ull)
+        {
+            return true;
+        }
+        ctx->last_watch_frame_ns = now;
+
+        /* Let ImGui see PlatformRequestResize before NewFrame. */
+        ImGui_ImplSDL3_ProcessEvent(event);
+
+        /* Skip a VSync wait on big snaps so the first correct frame shows sooner. */
+        if (size_snap)
+        {
+            SDL_SetRenderVSync(ctx->renderer, 0);
+        }
+        pack->run_frame(ctx);
+        if (size_snap)
+        {
+            SDL_SetRenderVSync(ctx->renderer, 1);
+        }
+        return true;
+    };
+    SDL_AddEventWatch(modal_loop_watch, &watch_pack);
+
     while (!done)
     {
         SDL_Event event;
@@ -5861,7 +6090,8 @@ int main(int argc, char **argv)
             {
                 app.RequestQuit();
             }
-            if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED && event.window.windowID == SDL_GetWindowID(window))
+            if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED &&
+                event.window.windowID == SDL_GetWindowID(window))
             {
                 app.RequestQuit();
             }
@@ -5885,28 +6115,10 @@ int main(int argc, char **argv)
             continue;
         }
 
-        /* Apply nBeT ImGui/dock ini before NewFrame — mid-frame load undocks windows. */
-        app.PumpPendingNbetLayout();
-        /* Session save / bank export (progress modal); must not run mid-DrawUI. */
-        app.PumpPendingLongOp();
-
-        ImGui_ImplSDLRenderer3_NewFrame();
-        ImGui_ImplSDL3_NewFrame();
-        ImGui::NewFrame();
-
-        app.DrawUI();
-        if (app.WantsQuit())
-        {
-            done = true;
-        }
-
-        ImGui::Render();
-        SDL_SetRenderScale(renderer, io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y);
-        SDL_SetRenderDrawColor(renderer, 18, 22, 28, 255);
-        SDL_RenderClear(renderer);
-        ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
-        SDL_RenderPresent(renderer);
+        run_nbeditor_frame(&frame_ctx);
     }
+
+    SDL_RemoveEventWatch(modal_loop_watch, &watch_pack);
 
     app.Shutdown();
     ImGui_ImplSDLRenderer3_Shutdown();

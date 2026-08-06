@@ -82,6 +82,10 @@
             {
                 OpenExportRmfInstrumentDialog();
             }
+            if (ImGui::MenuItem("Export MIDI...", nullptr, false, m_document != nullptr))
+            {
+                RequestExportMidi();
+            }
             if (ImGui::MenuItem("Export as Audio...", nullptr, false, m_document != nullptr || m_song != nullptr))
             {
                 OpenExportAudioDialog();
@@ -144,6 +148,10 @@
             if (ImGui::MenuItem("MIDI Editor...", nullptr, false, m_document != nullptr))
             {
                 OpenMidiEditor();
+            }
+            if (ImGui::MenuItem("Export MIDI...", nullptr, false, m_document != nullptr))
+            {
+                RequestExportMidi();
             }
             if (ImGui::MenuItem("Export as Audio...", nullptr, false, m_document != nullptr || m_song != nullptr))
             {
@@ -1370,10 +1378,38 @@
                 return;
             }
         }
+        /* Count-in owns the transport; Play waits until capture starts. */
+        if (m_midi_count_in_active)
+        {
+            return;
+        }
+        const bool attach_record = m_midi_record_free_run;
+        uint32_t attach_tick = m_midi_playhead_tick;
+        if (attach_record)
+        {
+            attach_tick = MeComputeFreeRunTick();
+            MeAttachRecordToSongClock();
+            attach_tick = m_midi_playhead_tick;
+        }
         if (m_document && (m_document_dirty || !m_song))
         {
             if (!ReloadPlaybackFromDocument(false))
             {
+                if (attach_record && m_midi_record_armed)
+                {
+                    MeStartRecordFreeRun();
+                }
+                return;
+            }
+            if (attach_record || m_midi_record_armed)
+            {
+                MeSeekToTick(attach_tick);
+                m_midi_metro_last_song_beat = -1;
+                m_midi_record_was_playing = true;
+                SetStatus(m_midi_record_armed ? "Recording — synced to Play"
+                                              : (m_song_row.name.empty()
+                                                     ? "Playing Session song"
+                                                     : (std::string("Playing ") + m_song_row.name)));
                 return;
             }
             SetStatus(m_song_row.name.empty() ? "Playing Session song"
@@ -1391,16 +1427,27 @@
         BAESong_IsDone(m_song, &done_flag);
         if (!m_song_started)
         {
+            if (attach_record)
+            {
+                MeSeekToTick(attach_tick);
+            }
             BAESong_SetLoops(m_song, m_loop_enabled ? 32767 : 0);
             BAESong_Preroll(m_song);
             /* Priority > preview song so keyboard/SE audition NoteOns don't steal. */
             BAESong_Start(m_song, 1);
             m_song_started = true;
+            m_midi_metro_last_song_beat = -1;
+            if (m_midi_record_armed)
+            {
+                m_midi_record_was_playing = true;
+                SetStatus("Recording — synced to Play");
+            }
         }
         else if (done_flag)
         {
             /* Natural end (loop off): Resume is a no-op on finished tracks. */
             RestartSessionSongFromStart();
+            m_midi_metro_last_song_beat = -1;
         }
         else if (paused_flag)
         {
@@ -1411,6 +1458,7 @@
                 pos_us < 50000u)
             {
                 RestartSessionSongFromStart();
+                m_midi_metro_last_song_beat = -1;
             }
             else
             {
@@ -1425,8 +1473,10 @@
 
     void StopSessionSong()
     {
+        MeCancelCountIn();
         if (!m_song)
         {
+            m_song_started = false;
             return;
         }
         BAESong_Stop(m_song, FALSE);
@@ -1435,6 +1485,7 @@
         BAESong_Preroll(m_song);
         /* Leave stopped/armed — Start+Pause here would drop tick-0 notes on Play. */
         m_song_started = false;
+        m_midi_metro_last_song_beat = -1;
     }
 
     /* When loop is off and the engine finishes, park like Stop so Play returns. */
@@ -2061,6 +2112,93 @@
                       inst.percussion ? " Perc" : "",
                       inst.program);
         SetStatus(status);
+        return true;
+    }
+
+    /* Append an empty Session song (one silent track, no notes). */
+    bool CreateEmptySong()
+    {
+        (void)CommitActiveSessionSong();
+
+        BAERmfEditorDocument *doc = BAERmfEditorDocument_New();
+        if (!doc)
+        {
+            SetStatus("Create empty song failed: could not create document");
+            return false;
+        }
+
+        const std::string title = "Untitled Song";
+        const uint32_t bpm = 120;
+        const uint16_t tpq = 480;
+        (void)BAERmfEditorDocument_SetTempoBPM(doc, bpm);
+        (void)BAERmfEditorDocument_SetTicksPerQuarter(doc, tpq);
+        (void)BAERmfEditorDocument_AddTempoEvent(doc, 0, 60000000u / bpm);
+        (void)BAERmfEditorDocument_SetInfo(doc, TITLE_INFO, title.c_str());
+
+        char track_name_buf[64];
+        std::snprintf(track_name_buf, sizeof(track_name_buf), "Track 1");
+
+        BAERmfEditorTrackSetup setup;
+        std::memset(&setup, 0, sizeof(setup));
+        setup.channel = 0;
+        setup.bank = 0;
+        setup.program = 0;
+        setup.name = track_name_buf;
+
+        uint16_t track_index = 0;
+        if (BAERmfEditorDocument_AddTrack(doc, &setup, &track_index) != BAE_NO_ERROR)
+        {
+            BAERmfEditorDocument_Delete(doc);
+            SetStatus("Create empty song failed: add track");
+            return false;
+        }
+        (void)BAERmfEditorDocument_SetTrackDefaultInstrument(doc, track_index, 0, 0);
+        (void)BAERmfEditorDocument_SetTrackEndOfTrackTick(doc, track_index, tpq * 4u);
+
+        unsigned char *midi_data = nullptr;
+        uint32_t midi_size = 0;
+        const BAEResult midi_r =
+            BAERmfEditorDocument_SaveAsMidiToMemory(doc, &midi_data, &midi_size);
+        if (midi_r != BAE_NO_ERROR || !midi_data || midi_size == 0)
+        {
+            if (midi_data)
+            {
+                XDisposePtr(midi_data);
+            }
+            BAERmfEditorDocument_Delete(doc);
+            SetStatus(std::string("Create empty song failed: ") + FormatBAEError(midi_r));
+            return false;
+        }
+
+        SessionSongEntry entry;
+        entry.song_resource_id = 0;
+        entry.midi_resource_id = 0;
+        entry.name = title;
+        entry.source_type = "Song";
+        entry.midi_bytes.assign(midi_data, midi_data + midi_size);
+        XDisposePtr(midi_data);
+
+        if (m_document)
+        {
+            BAERmfEditorDocument_Delete(m_document);
+        }
+        m_document = doc;
+        m_session_songs.push_back(std::move(entry));
+        m_session_song_index = static_cast<int>(m_session_songs.size()) - 1;
+        m_document_dirty = false;
+        m_song_row.name = title;
+        m_song_row.path.clear();
+        m_song_row.source_type = "Song";
+        m_loaded_song_path.clear();
+        m_loaded_doc_path.clear();
+        m_song_show_filter = SongShowFilter::Custom;
+        m_session_tab = SessionTab::Songs;
+        m_groovoid_index = -1;
+        RefreshSongOverridesFromDocument();
+        RefreshSongSamplesFromDocument();
+        (void)ReloadPlaybackFromDocument(true);
+        OpenMidiEditor();
+        SetStatus("Created empty song \"Untitled Song\"");
         return true;
     }
 
@@ -2920,6 +3058,192 @@
         }
     }
 
+    bool SongUsesCustomInstrumentsForMidiWarn() const
+    {
+        if (!m_document)
+        {
+            return false;
+        }
+        /* Embedded INST/SND in the song document cannot be represented in SMF. */
+        if (BAERmfEditorDocument_CanSaveAsMidi(m_document) == FALSE)
+        {
+            return true;
+        }
+
+        uint16_t track_count = 0;
+        if (BAERmfEditorDocument_GetTrackCount(m_document, &track_count) != BAE_NO_ERROR)
+        {
+            return false;
+        }
+        for (uint16_t t = 0; t < track_count; ++t)
+        {
+            BAERmfEditorTrackInfo ti{};
+            if (BAERmfEditorDocument_GetTrackInfo(m_document, t, &ti) == BAE_NO_ERROR)
+            {
+                if (ExportBankGroupFromNoteBank(ti.bank) >= 2)
+                {
+                    return true;
+                }
+                if (m_bank_token && !m_session_custom_inst_ids.empty())
+                {
+                    const bool percussion = (ti.channel == 9);
+                    const uint32_t requested_inst_id =
+                        percussion ? (static_cast<uint32_t>(ExportBankGroupFromNoteBank(ti.bank)) * 256u) +
+                                         128u + ti.program
+                                   : (static_cast<uint32_t>(ExportBankGroupFromNoteBank(ti.bank)) * 256u) +
+                                         ti.program;
+                    uint32_t resolved = requested_inst_id;
+                    uint32_t index = 0;
+                    if (BAERmfEditorBank_ResolveInstID(m_bank_token,
+                                                       requested_inst_id,
+                                                       &resolved,
+                                                       &index) == BAE_NO_ERROR &&
+                        m_session_custom_inst_ids.count(resolved) != 0)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            uint32_t note_count = 0;
+            if (BAERmfEditorDocument_GetNoteCount(m_document, t, &note_count) != BAE_NO_ERROR)
+            {
+                continue;
+            }
+            for (uint32_t n = 0; n < note_count; ++n)
+            {
+                BAERmfEditorNoteInfo note{};
+                if (BAERmfEditorDocument_GetNoteInfo(m_document, t, n, &note) != BAE_NO_ERROR)
+                {
+                    continue;
+                }
+                const int bank_group = ExportBankGroupFromNoteBank(note.bank);
+                if (bank_group >= 2)
+                {
+                    return true;
+                }
+                if (m_bank_token && !m_session_custom_inst_ids.empty())
+                {
+                    const bool percussion = (note.channel == 9);
+                    const uint32_t requested_inst_id =
+                        percussion ? (static_cast<uint32_t>(bank_group) * 256u) + 128u + note.note
+                                   : (static_cast<uint32_t>(bank_group) * 256u) + note.program;
+                    uint32_t resolved = requested_inst_id;
+                    uint32_t index = 0;
+                    if (BAERmfEditorBank_ResolveInstID(m_bank_token,
+                                                       requested_inst_id,
+                                                       &resolved,
+                                                       &index) == BAE_NO_ERROR &&
+                        m_session_custom_inst_ids.count(resolved) != 0)
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    void RequestExportMidi()
+    {
+        if (!m_document)
+        {
+            SetStatus("No song document to export");
+            return;
+        }
+        if (SongUsesCustomInstrumentsForMidiWarn())
+        {
+            m_confirm_export_midi_open = true;
+            return;
+        }
+        OpenExportMidiDialog();
+    }
+
+    void DrawExportMidiConfirmDialog()
+    {
+        if (m_confirm_export_midi_open)
+        {
+            ImGui::OpenPopup("Export MIDI");
+        }
+        if (!ImGui::BeginPopupModal("Export MIDI",
+                                    &m_confirm_export_midi_open,
+                                    ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            return;
+        }
+        ImGui::TextWrapped(
+            "This song uses custom instruments. Standard MIDI (.mid) cannot embed "
+            "those instruments, so they will not play correctly in other players.");
+        ImGui::Spacing();
+        ImGui::TextDisabled("Bank/program numbers are still written; use Export RMF/ZMF to keep samples.");
+        ImGui::Separator();
+        if (ImGui::Button("Export MIDI anyway", ImVec2(160.0f, 0.0f)))
+        {
+            m_confirm_export_midi_open = false;
+            ImGui::CloseCurrentPopup();
+            OpenExportMidiDialog();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)))
+        {
+            m_confirm_export_midi_open = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    void ExportSessionSongMidiToPath(const std::string &path)
+    {
+        if (!m_document)
+        {
+            SetStatus("No song document to export");
+            return;
+        }
+
+        std::string out_path = path;
+        if (!EndsWith(out_path, ".mid") && !EndsWith(out_path, ".midi"))
+        {
+            out_path += ".mid";
+        }
+
+        unsigned char *midi_data = nullptr;
+        uint32_t midi_size = 0;
+        const BAEResult build_r =
+            BAERmfEditorDocument_SaveAsMidiToMemory(m_document, &midi_data, &midi_size);
+        if (build_r != BAE_NO_ERROR || !midi_data || midi_size == 0)
+        {
+            if (midi_data)
+            {
+                XDisposePtr((XPTR)midi_data);
+            }
+            SetStatus(std::string("MIDI export failed: ") + FormatBAEError(build_r));
+            return;
+        }
+
+        std::ofstream out(out_path, std::ios::binary | std::ios::trunc);
+        if (!out)
+        {
+            XDisposePtr((XPTR)midi_data);
+            SetStatus("MIDI export failed: could not write file");
+            return;
+        }
+        out.write(reinterpret_cast<const char *>(midi_data),
+                  static_cast<std::streamsize>(midi_size));
+        XDisposePtr((XPTR)midi_data);
+        if (!out)
+        {
+            SetStatus("MIDI export failed: write error");
+            return;
+        }
+
+        char status[256];
+        std::snprintf(status,
+                      sizeof(status),
+                      "Exported MIDI \"%s\"",
+                      FileNameFromPath(out_path).c_str());
+        SetStatus(status);
+    }
+
     void ExportSessionSongToPath(const std::string &path)
     {
         if (!m_document)
@@ -2932,13 +3256,7 @@
         const bool want_midi = EndsWith(out_path, ".mid") || EndsWith(out_path, ".midi");
         if (want_midi)
         {
-            if (!BAERmfEditorDocument_CanSaveAsMidi(m_document))
-            {
-                SetStatus("Document cannot be saved as MIDI");
-                return;
-            }
-            const BAEResult r = BAERmfEditorDocument_SaveAsMidi(m_document, const_cast<char *>(out_path.c_str()));
-            SetStatus(r == BAE_NO_ERROR ? "Exported MIDI" : std::string("MIDI export failed: ") + FormatBAEError(r));
+            ExportSessionSongMidiToPath(out_path);
             return;
         }
 
@@ -3339,6 +3657,10 @@
                 SessionSelectAllVisible();
             }
             ImGui::Separator();
+            if (ImGui::MenuItem("Create Empty Song"))
+            {
+                CreateEmptySong();
+            }
             if (ImGui::MenuItem("Add Song..."))
             {
                 OpenAddSongFileDialog();
@@ -3438,6 +3760,13 @@
                     {
                         OpenExportRmfInstrumentDialog();
                     }
+                    if (ImGui::MenuItem("Export MIDI...",
+                                        nullptr,
+                                        false,
+                                        m_document != nullptr && i == m_session_song_index))
+                    {
+                        RequestExportMidi();
+                    }
                     if (ImGui::MenuItem("Get Resource Usage..."))
                     {
                         OpenResourceUsageForSong(i);
@@ -3464,6 +3793,10 @@
                         SessionSelectAllVisible();
                     }
                     ImGui::Separator();
+                    if (ImGui::MenuItem("Create Empty Song"))
+                    {
+                        CreateEmptySong();
+                    }
                     if (ImGui::MenuItem("Add Song..."))
                     {
                         OpenAddSongFileDialog();

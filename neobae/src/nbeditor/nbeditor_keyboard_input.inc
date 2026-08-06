@@ -25,10 +25,12 @@
         {
             return KeyboardInputTarget::InstrumentEditor;
         }
-        /* Recording arm comes later (§2); focused piano roll monitors via main for now. */
         if (m_midi_editor_open && m_midi_editor_focused)
         {
-            /* if (m_midi_record_armed) return KeyboardInputTarget::MidiEditorRecord; */
+            if (m_midi_record_armed)
+            {
+                return KeyboardInputTarget::MidiEditorRecord;
+            }
             return KeyboardInputTarget::MainPreview;
         }
         return KeyboardInputTarget::MainPreview;
@@ -97,7 +99,7 @@
 #endif
             return;
         case KeyboardInputTarget::MidiEditorRecord:
-            /* §2: append to record buffer + optional monitor. */
+            MeRecordNoteOn(midi_note, velocity);
             return;
         case KeyboardInputTarget::InstrumentEditor:
         case KeyboardInputTarget::MainPreview:
@@ -129,10 +131,181 @@
 #endif
             return;
         case KeyboardInputTarget::MidiEditorRecord:
+            MeRecordNoteOff(midi_note);
             return;
         case KeyboardInputTarget::InstrumentEditor:
         case KeyboardInputTarget::MainPreview:
             NoteOff(midi_note);
+            return;
+        }
+    }
+
+    void RefreshHwNoteHeldDisplay(int midi_note)
+    {
+        if (midi_note < 0 || midi_note > 127)
+        {
+            return;
+        }
+        bool any = false;
+        for (int c = 0; c < 16; ++c)
+        {
+            if (m_hw_full_ch_note_held[static_cast<size_t>(c)][static_cast<size_t>(midi_note)])
+            {
+                any = true;
+                break;
+            }
+        }
+        m_hw_note_held[static_cast<size_t>(midi_note)] = any;
+    }
+
+    /* Main preview only: zefidi-style full MIDI (all 16 channels, native CC/PC/PB).
+     * Does not remap through the selected instrument / AuditionMidiChannel(). */
+    void DispatchMainPreviewFullMidi(unsigned char status,
+                                     unsigned char data1,
+                                     unsigned char data2)
+    {
+        BAESong song = GetAuditionSong();
+        if (!song)
+        {
+            return;
+        }
+        const unsigned char mtype = status & 0xF0u;
+        const unsigned char ch = status & 0x0Fu;
+        const unsigned char d1 = data1 & 0x7fu;
+        const unsigned char d2 = data2 & 0x7fu;
+
+        switch (mtype)
+        {
+        case 0x80u: /* Note Off — always deliver (avoid stuck notes after focus change) */
+            BAESong_NoteOff(song, ch, d1, 0, 0);
+            m_hw_full_ch_note_held[ch][d1] = false;
+            RefreshHwNoteHeldDisplay(static_cast<int>(d1));
+            return;
+        case 0x90u: /* Note On / vel0 off */
+            if (d2 == 0)
+            {
+                BAESong_NoteOff(song, ch, d1, 0, 0);
+                m_hw_full_ch_note_held[ch][d1] = false;
+                RefreshHwNoteHeldDisplay(static_cast<int>(d1));
+            }
+            else
+            {
+                BAESong_NoteOnWithLoad(song, ch, d1, d2, 0);
+                m_hw_full_ch_note_held[ch][d1] = true;
+                RefreshHwNoteHeldDisplay(static_cast<int>(d1));
+            }
+            return;
+        case 0xA0u:
+            BAESong_KeyPressure(song, ch, d1, d2, 0);
+            return;
+        case 0xB0u:
+            BAESong_ControlChange(song, ch, d1, d2, 0);
+            return;
+        case 0xC0u:
+            BAESong_ProgramChange(song, ch, d1, 0);
+            return;
+        case 0xD0u:
+            BAESong_ChannelPressure(song, ch, d1, 0);
+            return;
+        case 0xE0u:
+            BAESong_PitchBend(song, ch, d1, d2, 0);
+            return;
+        default:
+            return;
+        }
+    }
+
+    /* Instrument editor / sample editor: remapped single-channel audition.
+     * Main preview uses DispatchMainPreviewFullMidi instead. */
+    void DispatchAuditionMidiMessage(unsigned char status,
+                                     unsigned char data1,
+                                     unsigned char data2)
+    {
+        const unsigned char mtype = status & 0xF0u;
+        if (mtype == 0x80u || mtype == 0x90u)
+        {
+            return; /* notes use DispatchKeyboardNote* */
+        }
+
+        const KeyboardInputTarget target = ResolveKeyboardTarget();
+        if (target == KeyboardInputTarget::MainPreview)
+        {
+            DispatchMainPreviewFullMidi(status, data1, data2);
+            return;
+        }
+
+        if (target == KeyboardInputTarget::MidiEditorRecord)
+        {
+            MeRecordController(status, data1, data2);
+            return;
+        }
+
+        if (target == KeyboardInputTarget::None)
+        {
+            if (mtype == 0xB0u && (data1 == 120 || data1 == 123))
+            {
+                PanicAuditionNotes();
+#if NBEDITOR_MVP
+                StopSampleEditorPreview();
+#endif
+            }
+            return;
+        }
+
+        if (target == KeyboardInputTarget::SampleEditor)
+        {
+            if (mtype == 0xB0u && (data1 == 120 || data1 == 123))
+            {
+#if NBEDITOR_MVP
+                StopSampleEditorPreview();
+#endif
+                PanicAuditionNotes();
+            }
+            return;
+        }
+
+        /* InstrumentEditor — keep patch; controllers on audition channel only. */
+        if (m_instrument_editor_open)
+        {
+            EnsureBankAuditionSong();
+        }
+        BAESong song = m_ie_note_song ? m_ie_note_song : GetAuditionSong();
+        if (!song)
+        {
+            return;
+        }
+        const unsigned char ch = AuditionMidiChannel();
+
+        switch (mtype)
+        {
+        case 0xA0u:
+            BAESong_KeyPressure(song, ch, data1 & 0x7fu, data2 & 0x7fu, 0);
+            return;
+        case 0xB0u:
+        {
+            const unsigned char cc = data1 & 0x7fu;
+            const unsigned char val = data2 & 0x7fu;
+            if (cc == 120 || cc == 123)
+            {
+                PanicAuditionNotes();
+#if NBEDITOR_MVP
+                StopSampleEditorPreview();
+#endif
+                return;
+            }
+            BAESong_ControlChange(song, ch, cc, val, 0);
+            return;
+        }
+        case 0xC0u:
+            /* Keep IE patch; PC would fight the instrument being edited. */
+            return;
+        case 0xD0u:
+            BAESong_ChannelPressure(song, ch, data1 & 0x7fu, 0);
+            return;
+        case 0xE0u:
+            BAESong_PitchBend(song, ch, data1 & 0x7fu, data2 & 0x7fu, 0);
+            return;
+        default:
             return;
         }
     }
