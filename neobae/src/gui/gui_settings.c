@@ -1009,15 +1009,22 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
                 bae_set_volume(*volume);
             }
             // If the user has chosen a specific input device, open that one
+            bool midi_ok = false;
             if (g_midi_input_device_index >= 0 && g_midi_input_device_index < g_midi_input_device_count)
             {
                 int api = g_midi_device_api[g_midi_input_device_index];
                 int port = g_midi_device_port[g_midi_input_device_index];
-                midi_input_init("NeoBAE", api, port);
+                midi_ok = midi_input_init("NeoBAE", api, port);
             }
             else
             {
-                midi_input_init("NeoBAE", -1, -1);
+                midi_ok = midi_input_init("NeoBAE", -1, -1);
+            }
+            if (!midi_ok)
+            {
+                midi_service_stop();
+                g_midi_input_enabled = false;
+                set_status_message("MIDI input failed to open");
             }
             if (g_bae.mixer)
             {
@@ -1035,15 +1042,19 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
             {
                 bae_set_volume(*volume);
             }
+            if (g_live_song)
+            {
+                bool skip_curve = false;
 #if USE_SF2_SUPPORT == TRUE
-            if (!BAESong_IsSF2Song(g_live_song))
-#elif USE_NATIVE_DLS == TRUE
-            if (!BAESong_IsDLSSong(g_live_song))
-#elif USE_SF2_SUPPORT == TRUE && USE_NATIVE_DLS == TRUE
-            if (!BAESong_IsSF2Song(g_live_song) && !BAESong_IsDLSSong(g_live_song))
-#endif            
-            {            
-                BAESong_SetVelocityCurve(g_live_song, g_volume_curve);
+                if (BAESong_IsSF2Song(g_live_song))
+                    skip_curve = true;
+#endif
+#if USE_NATIVE_DLS == TRUE
+                if (BAESong_IsDLSSong(g_live_song))
+                    skip_curve = true;
+#endif
+                if (!skip_curve)
+                    BAESong_SetVelocityCurve(g_live_song, g_volume_curve);
             }
         }
         else

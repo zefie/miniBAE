@@ -512,6 +512,10 @@ int32_t GM_GetSongNormalizeGain(void)
 // BAE_BuildMixerSlice.
 uint32_t BAE_GetSliceTimeInMicroseconds(void)
 {
+    /* MusicGlobals is thread-local; worker threads must BAEMixer_MakeCurrent /
+     * GM_SetCurrentMixer first. Never crash if unbound. */
+    if (!MusicGlobals)
+        return 11000u; /* ~11 ms historical default slice */
     return MusicGlobals->bufferTime;
 }
 

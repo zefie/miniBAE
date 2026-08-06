@@ -119,48 +119,84 @@ static void midi_ccallback(double timeStamp, const unsigned char *message, size_
     }
 }
 
+/* rtmidi_in_create* returns a non-NULL wrapper even on failure (ok=false, ptr=NULL).
+ * Using that wrapper without checking crashes in open/callback. */
+static bool midi_in_wrapper_usable(RtMidiInPtr p)
+{
+    return p && p->ok && p->ptr;
+}
+
+static void midi_in_discard_wrapper(void)
+{
+    if (!g_rtmidi)
+        return;
+    rtmidi_in_free(g_rtmidi);
+    g_rtmidi = NULL;
+}
+
 bool midi_input_init(const char *client_name, int api_index, int port_index)
 {
-    if (g_rtmidi)
-        return true; // already initialized
+    if (midi_in_wrapper_usable(g_rtmidi))
+        return true; /* already initialized */
+    midi_in_discard_wrapper();
     /* reset indices */
     atomic_store(&g_q_head, 0UL);
     atomic_store(&g_q_tail, 0UL);
     atomic_store(&g_drop_count, 0u);
-    // If an api_index is provided, try to create with that API, otherwise use default
+
+    const char *name = client_name ? client_name : "NeoBAE";
+
+    /* If an api_index is provided, try to create with that API, otherwise use default */
     if (api_index >= 0)
     {
         enum RtMidiApi apis[16];
         int n = rtmidi_get_compiled_api(apis, (unsigned int)(sizeof(apis) / sizeof(apis[0])));
         if (api_index < n)
         {
-            g_rtmidi = rtmidi_in_create(apis[api_index], client_name ? client_name : "miniBAE", 1000);
+            g_rtmidi = rtmidi_in_create(apis[api_index], name, 1000);
+            if (!midi_in_wrapper_usable(g_rtmidi))
+                midi_in_discard_wrapper();
         }
     }
-    if (!g_rtmidi)
+    if (!midi_in_wrapper_usable(g_rtmidi))
         g_rtmidi = rtmidi_in_create_default();
-    if (!g_rtmidi)
+    if (!midi_in_wrapper_usable(g_rtmidi))
+    {
+        midi_in_discard_wrapper();
         return false;
-    // try to set callback
+    }
+
     rtmidi_in_set_callback(g_rtmidi, midi_ccallback, NULL);
-    // Ignore SysEx and system realtime messages (clock/sense) to prevent queue floods from large or frequent messages.
-    // If SysEx recording is desired later, this can be made configurable.
+    if (!midi_in_wrapper_usable(g_rtmidi))
+    {
+        midi_in_discard_wrapper();
+        return false;
+    }
+    /* Ignore SysEx and system realtime messages (clock/sense) to prevent queue floods. */
     rtmidi_in_ignore_types(g_rtmidi, true, true, true);
-    // open requested port if specified
+
     unsigned int count = rtmidi_get_port_count(g_rtmidi);
     if (port_index >= 0 && (unsigned int)port_index < count)
     {
-        rtmidi_open_port(g_rtmidi, (unsigned int)port_index, client_name ? client_name : "miniBAE");
+        rtmidi_open_port(g_rtmidi, (unsigned int)port_index, name);
     }
     else if (count > 0)
     {
-        // open first available port
-        rtmidi_open_port(g_rtmidi, 0, client_name ? client_name : "miniBAE");
+        rtmidi_open_port(g_rtmidi, 0, name);
     }
     else
     {
-        // create virtual port so user can connect
-        rtmidi_open_virtual_port(g_rtmidi, client_name ? client_name : "miniBAE");
+        /* Windows MM has no virtual ports (WARNING only). ALSA/JACK/CoreMIDI can. */
+#if !defined(_WIN32) && !defined(__WINDOWS_MM__)
+        rtmidi_open_virtual_port(g_rtmidi, name);
+#endif
+    }
+    /* openPort failure sets ok=false; keep the object if callback is set so
+     * the UI can still show "enabled" with no ports, but refuse a dead wrapper. */
+    if (!g_rtmidi || !g_rtmidi->ptr)
+    {
+        midi_in_discard_wrapper();
+        return false;
     }
     return true;
 }
@@ -169,9 +205,11 @@ void midi_input_shutdown(void)
 {
     if (!g_rtmidi)
         return;
-    // cancel callback and close
-    rtmidi_in_cancel_callback(g_rtmidi);
-    rtmidi_close_port(g_rtmidi);
+    if (g_rtmidi->ptr)
+    {
+        rtmidi_in_cancel_callback(g_rtmidi);
+        rtmidi_close_port(g_rtmidi);
+    }
     rtmidi_in_free(g_rtmidi);
     g_rtmidi = NULL;
     /* clear queue indices */
@@ -181,7 +219,7 @@ void midi_input_shutdown(void)
 
 bool midi_input_poll(unsigned char *buffer, unsigned int *size_out, double *timestamp)
 {
-    if (!g_rtmidi)
+    if (!midi_in_wrapper_usable(g_rtmidi))
         return false;
     bool have = false;
     unsigned long head = atomic_load_explicit(&g_q_head, memory_order_relaxed);

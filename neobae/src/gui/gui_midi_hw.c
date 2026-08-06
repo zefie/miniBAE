@@ -490,6 +490,16 @@ int midi_service_thread_fn(void *unused)
             SDL_Delay(idle_sleep_ms);
             continue;
         }
+        /* MusicGlobals is TLS (multi-mixer). This worker never inherited the
+         * UI/audio thread's mixer — NoteOn→GetSliceTime would NULL-deref.
+         * Re-bind each wake so mixer recreate/swap stays correct. */
+        if (g_bae.mixer)
+            (void)BAEMixer_MakeCurrent(g_bae.mixer);
+        else
+        {
+            SDL_Delay(idle_sleep_ms);
+            continue;
+        }
         // Drain queued MIDI quickly
         unsigned char midi_buf[1024];
         unsigned int midi_sz = 0;

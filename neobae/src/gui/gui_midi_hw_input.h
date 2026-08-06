@@ -22,8 +22,10 @@
 
 #include <stdbool.h>
 
-// Initialize MIDI input. Returns true on success.
-// client_name: optional display name for virtual port, may be NULL.
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Initialize MIDI input. Returns true on success.
 // client_name: optional display name for virtual port, may be NULL.
 // api_index: if >=0, attempts to use that RtMidi compiled API (see rtmidi_get_compiled_api). Use -1 for default.
@@ -40,5 +42,9 @@ bool midi_input_poll(unsigned char *buffer, unsigned int *size_out, double *time
 
 // Return number of messages that were dropped due to full input queue since init
 unsigned int midi_input_drops(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif // MIDI_INPUT_H

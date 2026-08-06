@@ -1521,7 +1521,7 @@ int main(int argc, char *argv[])
                 {
 #if _FULL_DEBUG == TRUE
                     // D toggles debug console
-                    if (sym == SDLK_d)
+                    if (sym == SDLK_D)
                     {
                         debug_console_toggle();
                         break;
