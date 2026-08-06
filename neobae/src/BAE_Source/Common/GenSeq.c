@@ -2865,18 +2865,20 @@ static void PV_ProcessNoteOn(GM_Song *pSong, int16_t MIDIChannel, int16_t curren
 #endif                
                 {
 #if USE_NATIVE_DLS == TRUE || USE_SF2_SUPPORT == TRUE
+                    /* Keep || out of per-feature #if — DLS-off+SF2-on left a leading ||. */
                     if (
-#if USE_NATIVE_DLS == TRUE
+#if USE_NATIVE_DLS == TRUE && USE_SF2_SUPPORT == TRUE
+                        GM_IsDLSSong(pSong) || GM_IsSF2Song(pSong)
+#elif USE_NATIVE_DLS == TRUE
                         GM_IsDLSSong(pSong)
-#endif
-#if USE_SF2_SUPPORT == TRUE
-                        ||
+#else
                         GM_IsSF2Song(pSong)
 #endif
-                        ) {
+                        )
+                    {
                         volume = (int16_t)(volume * sf2_dls_rmf_volume_multiplier);
                     }
-#endif                    
+#endif
                     thePatch = PV_DetermineInstrumentToUse(pSong, note, MIDIChannel);
                     PV_StartMIDINote(pSong, thePatch, MIDIChannel, currentTrack, note, volume);
                 }
