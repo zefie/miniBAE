@@ -309,6 +309,9 @@
         m_session_song_index = -1;
         m_session_casd_count = 0;
         m_loaded_session_path.clear();
+        /* Stale Song Info title otherwise sticks into Save Session As / export
+         * suggested filenames after New Session or Open as Session. */
+        m_song_info_title[0] = 0;
         if (clear_bank_custom_state)
         {
             m_session_pcm_cache.clear();
@@ -2110,11 +2113,27 @@
         return out;
     }
 
-    /* Prefer saved session basename; else song title / row name. */
+    /* Prefer live song row / document title; session basename only when set. */
     std::string SuggestedExportFileStem() const
     {
         std::string raw;
-        if (!m_loaded_session_path.empty())
+        if (!m_song_row.name.empty())
+        {
+            raw = m_song_row.name;
+        }
+        else if (m_document)
+        {
+            const char *title = BAERmfEditorDocument_GetInfo(m_document, TITLE_INFO);
+            if (title && title[0])
+            {
+                raw = title;
+            }
+        }
+        if (raw.empty() && m_song_info_title[0] != '\0')
+        {
+            raw = m_song_info_title;
+        }
+        if (raw.empty() && !m_loaded_session_path.empty())
         {
             raw = FileNameFromPath(m_loaded_session_path);
             const size_t dot = raw.find_last_of('.');
@@ -2122,14 +2141,6 @@
             {
                 raw = raw.substr(0, dot);
             }
-        }
-        else if (m_song_info_title[0] != '\0')
-        {
-            raw = m_song_info_title;
-        }
-        else if (!m_song_row.name.empty())
-        {
-            raw = m_song_row.name;
         }
         return SanitizeExportFileStem(raw);
     }

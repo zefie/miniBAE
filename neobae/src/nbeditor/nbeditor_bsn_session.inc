@@ -1461,6 +1461,8 @@ void TeardownForSessionReload()
     }
     m_loaded_song_path.clear();
     m_loaded_doc_path.clear();
+    m_loaded_session_path.clear();
+    m_song_info_title[0] = 0;
     m_song_row = SongRow{};
     m_document_dirty = false;
     m_song_started = false;

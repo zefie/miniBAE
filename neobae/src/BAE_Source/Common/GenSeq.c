@@ -2188,12 +2188,11 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
         }
         pSong->channelProgram[MIDIChannel] = program;
 
-        /* RMF/ZMF CloneUsed embeds drum hits as melodic bank instruments
-           (INST 512+program) and issues program changes on channel 10.
-           That requires USE_NORM_BANK; new exports insert Beatnik NRPN mode 3,
-           but older files omit it. If the melodic remap target is an embedded
-           INST, switch modes so scan/playback resolve 512+program instead of
-           GM percussion (128+note). */
+        /* Legacy CloneUsed put CH10 hits in melodic INST 512+program and relied
+           on USE_NORM_BANK (or Beatnik NRPN mode 3). Newer exports keep natural
+           kit IDs (group*256+128+note) and also embed unrelated melodic bank-2
+           instruments (e.g. INST 512 "rhodes"). Seeing that melodic INST must
+           NOT force NORM_BANK — otherwise bank-2 drums resolve as piano. */
         if ((pSong->songFlags & SONG_FLAG_IS_RMF) &&
             MIDIChannel == PERCUSSION_CHANNEL &&
             pSong->channelBankMode[MIDIChannel] != USE_NORM_BANK &&
@@ -2203,6 +2202,7 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
             int16_t melodicPatch;
             uint32_t rmfIndex;
             bool melodicEmbed = FALSE;
+            bool hasNaturalKit = FALSE;
 
             pSong->channelBankMode[MIDIChannel] = USE_NORM_BANK;
             melodicPatch = PV_ConvertPatchBank(pSong, program, MIDIChannel);
@@ -2216,7 +2216,23 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                     break;
                 }
             }
-            if (melodicEmbed)
+            if (melodicEmbed && melodicPatch >= 0)
+            {
+                uint32_t bankGroup = (uint32_t)melodicPatch / 256u;
+                uint32_t kitLo = bankGroup * 256u + 128u;
+                uint32_t kitHi = bankGroup * 256u + 255u;
+
+                for (rmfIndex = 1; rmfIndex <= pSong->RMFInstrumentIDs[0]; rmfIndex++)
+                {
+                    uint32_t id = pSong->RMFInstrumentIDs[rmfIndex];
+                    if (id >= kitLo && id <= kitHi)
+                    {
+                        hasNaturalKit = TRUE;
+                        break;
+                    }
+                }
+            }
+            if (melodicEmbed && !hasNaturalKit)
             {
                 pSong->channelBankMode[MIDIChannel] = USE_NORM_BANK;
 #if USE_SF2_SUPPORT == TRUE || USE_NATIVE_DLS == TRUE
@@ -2331,10 +2347,19 @@ static void PV_ProcessProgramChange(GM_Song *pSong, int16_t MIDIChannel, int16_t
                     /* Only fall back during playback. During instrument scan
                      * instrumentData is still empty, so treating that as "missing
                      * bank 2" incorrectly forces bank 0 and loads piano instead of
-                     * requesting INST 512+ (e.g. session Bank 2 customs). */
+                     * requesting INST 512+ (e.g. session Bank 2 customs).
+                     *
+                     * Never apply this on note-based percussion modes: PC uses
+                     * program (often 0) so ConvertPatchBank yields group*256+128+0
+                     * (e.g. 640), which is not the kit INST for real hits
+                     * (676/678/…). Clearing bank 2→0 then makes notes resolve as
+                     * GM 128+note and often fall through to DLS program 0 (piano). */
                     if (hsbBank >= 2 &&
                         pSong->AnalyzeMode == SCAN_NORMAL &&
-                        pSong->instrumentData[pSong->remapArray[hsbPatch]] == NULL)
+                        pSong->instrumentData[pSong->remapArray[hsbPatch]] == NULL &&
+                        !(MIDIChannel == PERCUSSION_CHANNEL &&
+                          (pSong->channelBankMode[MIDIChannel] == USE_GM_DEFAULT ||
+                           pSong->channelBankMode[MIDIChannel] == USE_GM_PERC_BANK)))
                     {
                         int32_t fallbackBank = 0;
                         pSong->channelBank[MIDIChannel] = (signed char)fallbackBank;

@@ -47,7 +47,9 @@ enum
 
 static const float kMinLoudness = 1.0e-6f;
 static const float kScaleMin = 0.05f; /* ~-26 dB — attenuate hot DLS/SF2/XMF toward HSB */
-static const float kScaleMax = 4.0f;  /* ~+12 dB — boost quiet DLS/SF2/XMF toward HSB */
+/* Match 2026.08.02 "DLS Gold Master": never boost DLS/SF2 above unity when
+ * balancing toward HSB (kScaleMax=4 was making DLS far too loud). */
+static const float kScaleMax = 1.0f;
 /* Native HSB/RMF mix scaling sounds wrong (timbre/envelope), so HSB stays at
  * unity and other engines are matched to its measured loudness instead. */
 

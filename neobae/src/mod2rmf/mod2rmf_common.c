@@ -737,21 +737,15 @@ bool mod2rmf_format_uses_sample_c5_rate(bool isIt, const char *type)
 
 uint32_t mod2rmf_c2spd_from_xpo_fin(int xpo, int fin)
 {
-    double cents;
+    double c;
     double rate;
 
-    /* Inverse of libxmp_c2spd_to_note(): c2spd = 8363 * 2^((xpo + fin/128)/12). */
-    if (fin < 0)
-    {
-        fin = 0;
-    }
-    if (fin > 127)
-    {
-        fin = 127;
-    }
-
-    cents = (double)xpo * 100.0 + ((double)fin * 100.0) / 128.0;
-    rate = 8363.0 * pow(2.0, cents / 1200.0);
+    /* Exact inverse of libxmp_c2spd_to_note():
+     *   c = 1536 * log2(c2spd/8363)
+     *   xpo = c/128, fin = c%128  (fin is signed when below a semitone)
+     * so c2spd = 8363 * 2^((xpo*128 + fin)/1536). Do not clamp fin to 0..127. */
+    c = (double)xpo * 128.0 + (double)fin;
+    rate = 8363.0 * pow(2.0, c / 1536.0);
     if (rate < 100.0)
     {
         rate = 100.0;
@@ -765,16 +759,12 @@ uint32_t mod2rmf_c2spd_from_xpo_fin(int xpo, int fin)
 
 int mod2rmf_rate_fin_to_cents(int fin)
 {
-    if (fin < 0)
+    /* 128 fin units = 100 cents; keep signed fin from libxmp. */
+    if (fin >= 0)
     {
-        fin = 0;
+        return (fin * 100 + 64) / 128;
     }
-    if (fin > 127)
-    {
-        fin = 127;
-    }
-    /* 128 fin units = 100 cents. */
-    return (fin * 100 + 64) / 128;
+    return -((-fin * 100 + 64) / 128);
 }
 
 uint32_t mod2rmf_fold_rate_for_fixed(uint32_t rateHz, int16_t *outRootAdjust)

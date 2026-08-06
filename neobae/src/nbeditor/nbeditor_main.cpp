@@ -1610,14 +1610,31 @@ private:
         const int filter_count = want_zsn ? static_cast<int>(SDL_arraysize(filters_zsn))
                                           : static_cast<int>(SDL_arraysize(filters_any));
         static char default_path[1024];
-        if (!m_loaded_session_path.empty())
         {
-            const std::string enforced = EnforceSessionSavePath(m_loaded_session_path);
-            std::snprintf(default_path, sizeof(default_path), "%s", enforced.c_str());
-        }
-        else
-        {
-            std::snprintf(default_path, sizeof(default_path), "%s", want_zsn ? "session.zsn" : "session.bsn");
+            /* Prefer a stem from the current song, not the previous session path
+             * (Open as Session / New Session must not keep suggesting the old .zsn). */
+            const std::string stem = SuggestedExportFileStem();
+            const std::string leaf =
+                (!stem.empty() ? stem : std::string("session")) + (want_zsn ? ".zsn" : ".bsn");
+            if (!m_loaded_session_path.empty())
+            {
+                /* Keep directory of the open session when present. */
+                std::string dir = m_loaded_session_path;
+                const size_t slash = dir.find_last_of("/\\");
+                if (slash != std::string::npos)
+                {
+                    dir = dir.substr(0, slash + 1);
+                    std::snprintf(default_path, sizeof(default_path), "%s%s", dir.c_str(), leaf.c_str());
+                }
+                else
+                {
+                    std::snprintf(default_path, sizeof(default_path), "%s", leaf.c_str());
+                }
+            }
+            else
+            {
+                std::snprintf(default_path, sizeof(default_path), "%s", leaf.c_str());
+            }
         }
         SDL_ShowSaveFileDialog(OnFileDialogResult,
                                this,
@@ -4405,7 +4422,10 @@ private:
                     continue;
                 }
                 const int bank_group = ExportBankGroupFromNoteBank(note.bank);
-                const bool percussion = (note.channel == 9 && note.bank == 0);
+                /* All CH10 hits use kit encoding (group*256 + 128 + note), including
+                 * custom bank-2 kits (INST 640+). Melodic bank+program on CH10 would
+                 * collide with pitched INST 512+p (e.g. spacerock drums vs rhodes). */
+                const bool percussion = (note.channel == 9);
                 const uint32_t requested_inst_id =
                     percussion ? (static_cast<uint32_t>(bank_group) * 256u) + 128u + note.note
                                : (static_cast<uint32_t>(bank_group) * 256u) + note.program;

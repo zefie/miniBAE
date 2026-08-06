@@ -2130,7 +2130,17 @@ int fluid_voice_optimize_sample(fluid_sample_t* s)
 
     /* 16 bits => 96+4=100 dB dynamic range => 0.00001 */
     normalized_amplitude_during_loop = ((fluid_real_t)peak)/32768.;
-    result = FLUID_NOISE_FLOOR / normalized_amplitude_during_loop;
+    /* Very quiet sustain loops (common in phone SF2s) make this factor huge,
+     * which early-kills held notes once has_looped. Cap so quiet loops still
+     * ring under a normal sustain envelope. */
+    if (normalized_amplitude_during_loop < 0.01f)
+    {
+      result = FLUID_NOISE_FLOOR;
+    }
+    else
+    {
+      result = FLUID_NOISE_FLOOR / normalized_amplitude_during_loop;
+    }
 
     /* Store in sample */
     s->amplitude_that_reaches_noise_floor = (double)result;

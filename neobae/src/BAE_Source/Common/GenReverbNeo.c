@@ -516,8 +516,9 @@ bool InitNeoReverb(void)
     params->mFilterMemoryR = 0;
     params->mLopassK = 13107;  // ~0.2 filter coefficient (gentle smoothing)
     
-    // Default wet/dry mix (MT-32 style: strong wet signal for obvious effect)
-    params->mWetGain = 98304;   // ~1.5 (very strong for obvious reverb)
+    /* Default wet/dry. 1.5 wet was hot enough to int16-clamp in MobileBAE/Neo
+     * paths on dense MOD/ZMF material (audible rasp). Unity wet is safer. */
+    params->mWetGain = 65536;   // 1.0
     params->mDryGain = 52428;   // ~0.8
     
     params->mReverbMode = -1;  // Will be set by CheckNeoReverbType

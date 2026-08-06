@@ -782,18 +782,52 @@ static bool PV_GetResourceMapInfo(XFILE fileRef, int32_t *outMapID, int32_t *out
     return TRUE;
 }
 
+/* Decoded ZINS cache — every INST resolve used to LZMA-decompress the whole
+ * block. Callers still own a copy (XDisposePtr); we only skip re-decode. */
+static XFILE s_zinsDecodedFile = NULL;
+static XPTR s_zinsDecodedBlock = NULL;
+static int32_t s_zinsDecodedSize = 0;
+
+static void PV_ClearZmfInstBlockCache(XFILE fileRef)
+{
+    if (fileRef != NULL && s_zinsDecodedFile != fileRef)
+    {
+        return;
+    }
+    if (s_zinsDecodedBlock)
+    {
+        XDisposePtr(s_zinsDecodedBlock);
+        s_zinsDecodedBlock = NULL;
+    }
+    s_zinsDecodedFile = NULL;
+    s_zinsDecodedSize = 0;
+}
+
 static XPTR PV_LoadZmfInstBlock(XFILE fileRef, int32_t *outSize)
 {
     XLongResourceID blockID;
     int32_t blockSize;
     XPTR blockData;
     XPTR decoded;
+    XPTR copy;
 
     if (!outSize)
     {
         return NULL;
     }
     *outSize = 0;
+
+    if (s_zinsDecodedFile == fileRef && s_zinsDecodedBlock && s_zinsDecodedSize > 0)
+    {
+        copy = XNewPtr(s_zinsDecodedSize);
+        if (!copy)
+        {
+            return NULL;
+        }
+        XBlockMove(s_zinsDecodedBlock, copy, s_zinsDecodedSize);
+        *outSize = s_zinsDecodedSize;
+        return copy;
+    }
 
     blockData = XGetIndexedFileResource(fileRef, ID_ZINS, &blockID, 0, NULL, &blockSize);
     if (!blockData || blockSize <= 0)
@@ -811,8 +845,20 @@ static XPTR PV_LoadZmfInstBlock(XFILE fileRef, int32_t *outSize)
     {
         return NULL;
     }
-    *outSize = XGetPtrSize(decoded);
-    return decoded;
+
+    PV_ClearZmfInstBlockCache(NULL);
+    s_zinsDecodedFile = fileRef;
+    s_zinsDecodedBlock = decoded;
+    s_zinsDecodedSize = XGetPtrSize(decoded);
+
+    copy = XNewPtr(s_zinsDecodedSize);
+    if (!copy)
+    {
+        return NULL;
+    }
+    XBlockMove(s_zinsDecodedBlock, copy, s_zinsDecodedSize);
+    *outSize = s_zinsDecodedSize;
+    return copy;
 }
 
 static bool PV_ParseZmfInstBlockHeader(XPTR block,
@@ -1609,6 +1655,8 @@ static bool PV_PackInstResourcesIntoZmfBlock(XFILE fileRef)
         XDisposePtr(data);
     }
 
+    PV_ClearZmfInstBlockCache(outFile);
+    PV_ClearZmfInstBlockCache(fileRef);
     if (XAddFileResource(outFile, ID_ZINS, 1, NULL, compressedBlock, compressedSize) != 0)
     {
         XDisposePtr(compressedBlock);
@@ -4592,6 +4640,7 @@ void XFileClose(XFILE fileRef)
     pReference = fileRef;
     if (PV_XFileValid(fileRef))
     {
+        PV_ClearZmfInstBlockCache(fileRef);
         XFileFreeResourceCache(fileRef);
         pReference->fileValidID = (int32_t)XPI_DEAD_ID;
         if (pReference->pResourceData)
