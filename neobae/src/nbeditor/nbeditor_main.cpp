@@ -2624,7 +2624,8 @@ private:
                         base.name = song_inst.name;
                     }
                 }
-                if (base.name.find("(Override)") == std::string::npos)
+                /* Only Bank 0/1 slots are GM overrides; Bank 2+ customs are native. */
+                if (base.bank < 2 && base.name.find("(Override)") == std::string::npos)
                 {
                     base.name += " (Override)";
                 }
@@ -2648,10 +2649,7 @@ private:
                         }
                     }
                 }
-                if (merged.name.find("(Override)") == std::string::npos)
-                {
-                    merged.name += " (Override)";
-                }
+                /* No matching bank row — not an override of a Bank 0/1 INST. */
                 by_bank_program[key] = m_instruments.size();
                 m_instruments.push_back(merged);
             }
