@@ -128,6 +128,15 @@ typedef struct
 	int32_t			LPF_lowpassAmount;
 } XLowPassFilterData;
 
+#if USE_ZMF_SUPPORT == TRUE
+typedef struct
+{
+	int32_t			waveShape;		/* PLSE / SAWW / SINE / TRIA / NOIS */
+	int32_t			pulseWidth;		/* 0..65536, 32768 = 50% */
+	int32_t			volume;			/* 0..65536, 65536 = unity; default 25% if omitted */
+} XOscillatorData;
+#endif
+
 // Use one of these INST_XXXX for unitType in the structure XUnitData below. When there
 // are multiple LFO types use a different unitID for tracking.
 /*
@@ -144,6 +153,9 @@ typedef struct
 	INST_LOW_PASS_AMOUNT
 	INST_LPF_DEPTH
 	INST_LPF_FREQUENCY
+	INST_OSCILLATOR (ZMF)
+	INST_PULSE_WIDTH_LFO (ZMF)
+	INST_WAVE_INDEX_LFO (ZMF)
 */
 typedef uint32_t XUnitType;
 
@@ -160,6 +172,9 @@ typedef struct
 		XTieToData			curve;
 		bool				useDefaultModwheelAction;
 		int32_t				sendAmount;		/* INST_REVERB_SEND / INST_CHORUS_SEND */
+#if USE_ZMF_SUPPORT == TRUE
+		XOscillatorData		osc;
+#endif
 	} u;
 } XUnitData;
 

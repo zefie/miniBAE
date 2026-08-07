@@ -10654,7 +10654,8 @@ static bool PV_XFileHasModernCodecSamples(XFILE fileRef)
         0x664C6143UL,   // 'fLaC' = C_FLAC
         0x4F676756UL,   // 'OggV' = C_VORBIS
         0x4F67674FUL,   // 'OggO' = C_OPUS
-        0x716F6166UL    // 'qoaf' = C_QOA
+        0x716F6166UL,   // 'qoaf' = C_QOA
+        0x696D6132UL    // 'ima2' = C_IMA2
     };
 
     for (int t = 0; t < 3; t++)
@@ -10675,7 +10676,7 @@ static bool PV_XFileHasModernCodecSamples(XFILE fileRef)
                     // Bytes 2-5: XSoundHeader3.subType (big-endian FourCC)
                     uint32_t subType = ((uint32_t)rb[2] << 24) | ((uint32_t)rb[3] << 16)
                                      | ((uint32_t)rb[4] <<  8) |  (uint32_t)rb[5];
-                    for (int c = 0; c < 4; c++)
+                    for (int c = 0; c < (int)(sizeof(modernCodecs) / sizeof(modernCodecs[0])); c++)
                     {
                         if (subType == modernCodecs[c])
                         {
@@ -11694,6 +11695,22 @@ static void PV_PatchInstrumentEnvelopes(GM_Instrument *theI,
     theI->LPF_frequency = info->LPF_frequency;
     theI->LPF_resonance = info->LPF_resonance;
     theI->LPF_lowpassAmount = info->LPF_lowpassAmount;
+
+#if USE_ZMF_SUPPORT == TRUE
+    theI->useOscillator = info->useOscillator ? TRUE : FALSE;
+    if (theI->useOscillator)
+    {
+        theI->oscWaveShape = PV_TranslateFromFileToMemoryID((uint32_t)info->oscWaveShape);
+        if (theI->oscWaveShape == 0 || theI->oscWaveShape == SINE_WAVE)
+            theI->oscWaveShape = SINE_WAVE_REAL;
+        theI->oscPulseWidth = info->oscPulseWidth > 0 ? info->oscPulseWidth : 32768;
+        theI->oscVolume = info->oscVolume;
+        if (theI->oscVolume < 0)
+            theI->oscVolume = 0;
+        if (theI->oscVolume > 65536)
+            theI->oscVolume = 65536;
+    }
+#endif
 
     /* LFOs - patch only the editor-known LFOs; preserve any extra
      * engine-added records (e.g. the default mod-wheel pitch LFO that

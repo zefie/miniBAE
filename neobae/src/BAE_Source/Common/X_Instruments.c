@@ -565,6 +565,27 @@ XInstrumentData *XCreateXInstrumentEx(InstrumentResource *theX, uint32_t theXSiz
 									parsedUnits++;
 									break;
 
+#if USE_ZMF_SUPPORT == TRUE
+								case INST_OSCILLATOR:
+									pXInstrument->units[parsedUnits].u.osc.waveShape = XGetLong(pUnit) & 0x5F5F5F5F;
+									pUnit += 4;
+									pXInstrument->units[parsedUnits].u.osc.pulseWidth = (int32_t)XGetLong(pUnit);
+									pUnit += 4;
+									/* Optional third DLNG: volume (0..65536). Absent in older OSCL. */
+									{
+										int32_t peekVol = (int32_t)XGetLong(pUnit);
+										if (peekVol >= 0 && peekVol <= 65536)
+										{
+											pXInstrument->units[parsedUnits].u.osc.volume = peekVol;
+											pUnit += 4;
+										}
+										else
+											pXInstrument->units[parsedUnits].u.osc.volume = OSC_VOLUME_DEFAULT;
+									}
+									parsedUnits++;
+									break;
+#endif
+
 								// LFO types
 								case INST_VOLUME_LFO:
 								case INST_PITCH_LFO:
@@ -573,6 +594,10 @@ XInstrumentData *XCreateXInstrumentEx(InstrumentResource *theX, uint32_t theXSiz
 								case INST_LOW_PASS_AMOUNT:
 								case INST_LPF_DEPTH:
 								case INST_LPF_FREQUENCY:
+#if USE_ZMF_SUPPORT == TRUE
+								case INST_PULSE_WIDTH_LFO:
+								case INST_WAVE_INDEX_LFO:
+#endif
 									unitSubCount = *pUnit;		// how many unit records?
 									pUnit++;					// byte
 									if (unitSubCount > ADSR_STAGES)
@@ -739,6 +764,25 @@ static int32_t PV_WriteInstrumentUnits(XInstrumentData *pXInstrument,
 					pUnit += 4;
 					break;
 
+#if USE_ZMF_SUPPORT == TRUE
+				case INST_OSCILLATOR:
+					XPutLong(pUnit, pXInstrument->units[count].u.osc.waveShape);
+					pUnit += 4;
+					XPutLong(pUnit, pXInstrument->units[count].u.osc.pulseWidth);
+					pUnit += 4;
+					{
+						int32_t vol = pXInstrument->units[count].u.osc.volume;
+						if (vol < 0)
+							vol = 0;
+						if (vol > 65536)
+							vol = 65536;
+						/* Always write volume so mute (0) round-trips; readers peek 0..65536. */
+						XPutLong(pUnit, (uint32_t)vol);
+						pUnit += 4;
+					}
+					break;
+#endif
+
 				// LFO types
 				case INST_VOLUME_LFO:
 				case INST_PITCH_LFO:
@@ -747,6 +791,10 @@ static int32_t PV_WriteInstrumentUnits(XInstrumentData *pXInstrument,
 				case INST_LOW_PASS_AMOUNT:
 				case INST_LPF_DEPTH:
 				case INST_LPF_FREQUENCY:
+#if USE_ZMF_SUPPORT == TRUE
+				case INST_PULSE_WIDTH_LFO:
+				case INST_WAVE_INDEX_LFO:
+#endif
 					pLFO = &pXInstrument->units[count].u.lfo;
 					if (stripEditPadding)
 					{

@@ -166,6 +166,7 @@ endif
 INC_PATH	:= -Isrc/BAE_Source/Common
 INC_PATH	+= -Isrc/BAE_Source/Platform
 INC_PATH	+= -Isrc/thirdparty/config
+INC_PATH	+= -Isrc/thirdparty/adpcm-xq
 
 ifneq ($(filter 1,$(MP3_ENC) $(MP3_DEC)),) 
 	INC_PATH  += -Isrc/BAE_MPEG_Source_II
@@ -369,6 +370,8 @@ SRC		+=	src/BAE_Source/Common/DriverTools.c \
 			src/BAE_Source/Common/X_EditorTools.c \
 			src/BAE_Source/Common/X_Decompress.c \
 			src/BAE_Source/Common/X_IMA.c \
+			src/thirdparty/adpcm-xq/adpcm-lib.c \
+			src/thirdparty/adpcm-xq/adpcm-dns.c \
 			src/BAE_Source/Common/g711.c \
 			src/BAE_Source/Common/g721.c \
 			src/BAE_Source/Common/g723_24.c \

@@ -80,6 +80,8 @@ set(ENGINE_SRC
     ${BAE}/Common/X_EditorTools.c
     ${BAE}/Common/X_Decompress.c
     ${BAE}/Common/X_IMA.c
+    ${TP}/adpcm-xq/adpcm-lib.c
+    ${TP}/adpcm-xq/adpcm-dns.c
     ${BAE}/Common/X_LZMA.c
     ${BAE}/Common/g711.c
     ${BAE}/Common/g721.c
@@ -190,6 +192,7 @@ target_include_directories(NeoBAE PRIVATE
     ${TP}/lzma-26.00/C
     ${TP}/libg722
     ${TP}/qoa
+    ${TP}/adpcm-xq
     ${CMAKE_CURRENT_BINARY_DIR}/generated
     ${JNI_INCLUDE_DIRS}
 )

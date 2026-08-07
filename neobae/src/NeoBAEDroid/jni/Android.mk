@@ -101,6 +101,8 @@ NEOBAE_SOURCES := \
 			Common/X_EditorTools.c \
 			Common/X_Decompress.c \
 			Common/X_IMA.c \
+			../thirdparty/adpcm-xq/adpcm-lib.c \
+			../thirdparty/adpcm-xq/adpcm-dns.c \
 			Common/X_LZMA.c \
 			Common/g711.c \
 			Common/g721.c \
@@ -430,6 +432,7 @@ LOCAL_C_INCLUDES      += $(LOCAL_PATH)/../thirdparty/opus/include
 LOCAL_C_INCLUDES      += $(LOCAL_PATH)/../thirdparty/opusfile/include
 LOCAL_C_INCLUDES      += $(LOCAL_PATH)/../thirdparty/libg722
 LOCAL_C_INCLUDES      += $(LOCAL_PATH)/../thirdparty/qoa
+LOCAL_C_INCLUDES      += $(LOCAL_PATH)/../thirdparty/adpcm-xq
 LOCAL_C_INCLUDES      += $(LOCAL_PATH)/../script
 LOCAL_C_INCLUDES      += $(GEN_DIR)
 

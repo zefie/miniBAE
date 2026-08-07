@@ -897,6 +897,7 @@ typedef enum SndCompressionType
     C_NONE              = FOUR_CHAR('n','o','n','e'),   // 'none'
     C_IMA4              = FOUR_CHAR('i','m','a','4'),   // 'ima4'   CCITT G.721 ADPCM compression (IMA 4 to 1)
     C_IMA4_WAV          = FOUR_CHAR('i','m','a','W'),   // 'imaW'   Microsoft's ADPCM
+    C_IMA2              = FOUR_CHAR('i','m','a','2'),   // 'ima2'   experimental 2-bit IMA (headerless, ZMF v6)
     C_MACE3             = FOUR_CHAR('m','a','c','3'),   // 'mac3'   Apple MACE type 3 to 1
     C_MACE6             = FOUR_CHAR('m','a','c','6'),   // 'mac6'   Apple MACE type 6 to 1
     C_ULAW              = FOUR_CHAR('u','l','a','w'),   // 'ulaw'   �Law; 2 to 1
@@ -1344,6 +1345,12 @@ OPErr XEncodeOpusToMemory(GM_Waveform const *src, uint32_t bitrate, uint32_t mod
 OPErr XExpandQOA(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst);
 OPErr XEncodeQOAToMemory(GM_Waveform const *src,
                          XPTR *outData, uint32_t *outSize);
+#endif
+
+/* Headerless 2-bit IMA (adpcm-xq), ZMF v6. */
+OPErr XExpandIma2(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst);
+#if USE_CREATION_API == TRUE
+OPErr XEncodeIma2ToMemory(GM_Waveform const *src, XPTR *outData, uint32_t *outSize);
 #endif
 
 #if USE_ADX_SUPPORT == TRUE

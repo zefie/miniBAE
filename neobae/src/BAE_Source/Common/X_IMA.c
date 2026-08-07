@@ -106,7 +106,40 @@
 
 #include "X_API.h"
 #include "X_Formats.h"
+#include "adpcm-lib.h"
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* Layout must match adpcm-lib.c's adpcm_channel / adpcm_context for state peek. */
+typedef struct
+{
+    int32_t pcmdata;
+    int32_t shaping_weight;
+    int32_t error;
+    int8_t  index;
+} PV_AdpcmXqChannelPeek;
+
+typedef struct
+{
+    PV_AdpcmXqChannelPeek channels[2];
+} PV_AdpcmXqContextPeek;
+
+#define ADPCM_XQ_LOOKAHEAD_DEFAULT  3
+#define ADPCM_XQ_DNS_RATE_DEFAULT   22050
+/* Prefer STATIC over DYNAMIC for large one-shot encodes: DYNAMIC allocates a
+ * per-sample shaping buffer via malloc inside stock adpcm-xq (and DNS itself
+ * mallocs filter temps) with no null checks. We keep the third-party tree
+ * pristine and bound risk from NeoBAE. AIFF IMA still uses DYNAMIC on tiny
+ * 64-frame blocks where those allocs are negligible. */
+#define ADPCM_XQ_IMA2_NOISE_SHAPING NOISE_SHAPING_STATIC
+/* Encode in chunks so peak work stays bounded for huge samples.
+ * Must keep (CHUNK * bps) divisible by 32 so bit-packing aligns at boundaries
+ * (identical to a single-shot encode with FORMAT_NO_HEADERS state). */
+#define ADPCM_XQ_IMA2_CHUNK_FRAMES  16384
+#if ((ADPCM_XQ_IMA2_CHUNK_FRAMES * 2) % 32) != 0
+#error ADPCM_XQ_IMA2_CHUNK_FRAMES must align 2-bit packing to 32-bit groups
+#endif
 
 ///////////////////////////////////////////////// DOCUMENTATION:
 
@@ -250,12 +283,13 @@ XPTR        data;
     }
     return data;
 }
-void XCompressAiffIma(void const* src, uint32_t srcBitsPerSample,
-                        unsigned char* dst, uint32_t frameCount, uint32_t channelCount)
+static void PV_CompressAiffImaLegacy(void const* src, uint32_t srcBitsPerSample,
+                                     unsigned char* dst, uint32_t frameCount,
+                                     uint32_t channelCount)
 {
 int             const srcIncrement = (AIFF_IMA_BLOCK_FRAMES - 1) * channelCount;
-int16_t           predictorCache[2];  // to allow for compression of more than 2
-int16_t           indexCache[2];      // channels, increase these array sizes
+int16_t           predictorCache[2];
+int16_t           indexCache[2];
 unsigned char const*    src8;
 int16_t const*    src16;
 
@@ -301,7 +335,7 @@ int16_t const*    src16;
             channel++;
         }
         while (channel < channelCount);
-        
+
         if (src16)
         {
             src16 += srcIncrement;
@@ -312,7 +346,130 @@ int16_t const*    src16;
         }
         frameCount -= blockFrameCount;
     }
-}   
+}
+
+void XCompressAiffIma(void const* src, uint32_t srcBitsPerSample,
+                        unsigned char* dst, uint32_t frameCount, uint32_t channelCount)
+{
+void *          contexts[2];
+uint32_t        channel;
+uint32_t        remaining;
+unsigned char const* src8;
+int16_t const*  src16;
+unsigned char*  const dstStart = dst;
+
+    if (!src || !dst || channelCount == 0 || channelCount > 2)
+    {
+        return;
+    }
+
+    contexts[0] = NULL;
+    contexts[1] = NULL;
+    for (channel = 0; channel < channelCount; channel++)
+    {
+        contexts[channel] = adpcm_create_context(
+            1, ADPCM_XQ_DNS_RATE_DEFAULT, ADPCM_XQ_LOOKAHEAD_DEFAULT,
+            NOISE_SHAPING_DYNAMIC, FORMAT_NO_HEADERS);
+        if (!contexts[channel])
+        {
+            uint32_t ch;
+            for (ch = 0; ch < 2; ch++)
+            {
+                if (contexts[ch])
+                {
+                    adpcm_free_context(contexts[ch]);
+                }
+            }
+            PV_CompressAiffImaLegacy(src, srcBitsPerSample, dstStart, frameCount, channelCount);
+            return;
+        }
+    }
+
+    if (srcBitsPerSample == 8)
+    {
+        src8 = (unsigned char const*)src;
+        src16 = NULL;
+    }
+    else
+    {
+        src8 = NULL;
+        src16 = (int16_t const*)src;
+    }
+
+    remaining = frameCount;
+    while (remaining > 0)
+    {
+    uint32_t const blockFrameCount = XMIN(remaining, (uint32_t)AIFF_IMA_BLOCK_FRAMES);
+
+        channel = 0;
+        do
+        {
+        int16_t temp[AIFF_IMA_BLOCK_FRAMES];
+        uint8_t body[AIFF_IMA_BLOCK_BYTES - AIFF_IMA_HEADER_BYTES];
+        size_t  outSize;
+        uint32_t i;
+        PV_AdpcmXqContextPeek const* peek =
+            (PV_AdpcmXqContextPeek const*)contexts[channel];
+
+            for (i = 0; i < blockFrameCount; i++)
+            {
+                if (src16)
+                {
+                    temp[i] = src16[i * channelCount + channel];
+                }
+                else
+                {
+                    temp[i] = (int16_t)(((int32_t)src8[i * channelCount + channel] - 128) << 8);
+                }
+            }
+            for (; i < (uint32_t)AIFF_IMA_BLOCK_FRAMES; i++)
+            {
+                temp[i] = 0;
+            }
+
+            XPutShort(dst, (uint16_t)((peek->channels[0].pcmdata & 0xFF80) |
+                                      (peek->channels[0].index & 0x7F)));
+            dst += AIFF_IMA_HEADER_BYTES;
+
+            XSetMemory(body, (int32_t)sizeof(body), 0);
+            outSize = 0;
+            if (!adpcm_encode_block_ex(contexts[channel], body, &outSize, temp,
+                                       (int)blockFrameCount, 4))
+            {
+                uint32_t ch;
+                for (ch = 0; ch < 2; ch++)
+                {
+                    if (contexts[ch])
+                    {
+                        adpcm_free_context(contexts[ch]);
+                    }
+                }
+                PV_CompressAiffImaLegacy(src, srcBitsPerSample, dstStart, frameCount,
+                                         channelCount);
+                return;
+            }
+            XBlockMove(body, dst, (int32_t)(AIFF_IMA_BLOCK_BYTES - AIFF_IMA_HEADER_BYTES));
+            dst += AIFF_IMA_BLOCK_BYTES - AIFF_IMA_HEADER_BYTES;
+            channel++;
+        }
+        while (channel < channelCount);
+
+        if (src16)
+        {
+            src16 += AIFF_IMA_BLOCK_FRAMES * channelCount;
+        }
+        else
+        {
+            src8 += AIFF_IMA_BLOCK_FRAMES * channelCount;
+        }
+        remaining -= blockFrameCount;
+    }
+
+    for (channel = 0; channel < channelCount; channel++)
+    {
+        adpcm_free_context(contexts[channel]);
+    }
+}
 
 void PV_CompressImaBlock(unsigned char const* src8, int16_t const* src16, unsigned char* dst,
                                 uint32_t sampleCount, uint32_t channelCount,
@@ -401,7 +558,327 @@ uint32_t      sampleIndex;
     *indexCache = index;
 }
 
+OPErr XEncodeIma2ToMemory(GM_Waveform const *src, XPTR *outData, uint32_t *outSize)
+{
+void *          ctx;
+XPTR            encoded;
+uint32_t        encodedBytes;
+size_t          written;
+int16_t const*  pcm;
+XPTR            wordData;
+uint32_t        rate;
+int             capacityFrames;
+int64_t         needBytes;
+enum { bps = 2 };
+
+    if (!src || !outData || !outSize || !src->theWaveform)
+    {
+        return PARAM_ERR;
+    }
+    if (src->compressionType != (uint32_t)C_NONE)
+    {
+        return PARAM_ERR;
+    }
+    if (src->channels < 1 || src->channels > 2 || src->waveFrames == 0)
+    {
+        return PARAM_ERR;
+    }
+    /* adpcm-xq APIs take int frame counts; reject sizes that won't fit. */
+    if (src->waveFrames > (uint32_t)0x3fffffff / (uint32_t)src->channels)
+    {
+        return PARAM_ERR;
+    }
+
+    *outData = NULL;
+    *outSize = 0;
+    wordData = NULL;
+    pcm = (int16_t const*)src->theWaveform;
+
+    if (src->bitSize == 8)
+    {
+        wordData = XConvert8BitTo16Bit((unsigned char *)src->theWaveform,
+                                       src->waveFrames, src->channels);
+        if (!wordData)
+        {
+            return MEMORY_ERR;
+        }
+        pcm = (int16_t const*)wordData;
+    }
+    else if (src->bitSize != 16)
+    {
+        return NOT_SETUP;
+    }
+
+    rate = (uint32_t)(src->sampledRate >> 16);
+    if (rate == 0)
+    {
+        rate = ADPCM_XQ_DNS_RATE_DEFAULT;
+    }
+
+    needBytes = (int64_t)adpcm_sample_count_to_block_size_no_header(
+        (int)src->waveFrames, (int)src->channels, bps);
+    if (needBytes <= 0 || needBytes > 0x7fffffff)
+    {
+        XDisposePtr(wordData);
+        return PARAM_ERR;
+    }
+    encodedBytes = (uint32_t)needBytes;
+
+    capacityFrames = adpcm_block_size_to_sample_count_no_header(
+        (int)encodedBytes, (int)src->channels, bps);
+    if (capacityFrames <= 0 || (uint32_t)capacityFrames < src->waveFrames)
+    {
+        XDisposePtr(wordData);
+        return GENERAL_BAD;
+    }
+
+    encoded = XNewPtr((int32_t)encodedBytes);
+    if (!encoded)
+    {
+        XDisposePtr(wordData);
+        return MEMORY_ERR;
+    }
+    XSetMemory(encoded, (int32_t)encodedBytes, 0);
+
+    ctx = adpcm_create_context((int)src->channels, (int)rate,
+                               ADPCM_XQ_LOOKAHEAD_DEFAULT,
+                               ADPCM_XQ_IMA2_NOISE_SHAPING, FORMAT_NO_HEADERS);
+    if (!ctx)
+    {
+        XDisposePtr(encoded);
+        XDisposePtr(wordData);
+        return MEMORY_ERR;
+    }
+
+    /* Stream in chunks (FORMAT_NO_HEADERS keeps encoder state across calls). */
+    {
+    uint32_t        framesDone;
+    uint32_t        outOffset;
+    int16_t const*  pcmCursor;
+
+        framesDone = 0;
+        outOffset = 0;
+        pcmCursor = pcm;
+        while (framesDone < src->waveFrames)
+        {
+        uint32_t    chunkFrames;
+        size_t      chunkWritten;
+
+            chunkFrames = src->waveFrames - framesDone;
+            if (chunkFrames > (uint32_t)ADPCM_XQ_IMA2_CHUNK_FRAMES)
+            {
+                chunkFrames = (uint32_t)ADPCM_XQ_IMA2_CHUNK_FRAMES;
+            }
+            chunkWritten = 0;
+            if (!adpcm_encode_block_ex(ctx,
+                                       (uint8_t *)encoded + outOffset,
+                                       &chunkWritten,
+                                       pcmCursor,
+                                       (int)chunkFrames,
+                                       bps) ||
+                chunkWritten == 0 ||
+                outOffset + (uint32_t)chunkWritten > encodedBytes)
+            {
+                adpcm_free_context(ctx);
+                XDisposePtr(encoded);
+                XDisposePtr(wordData);
+                return GENERAL_BAD;
+            }
+            outOffset += (uint32_t)chunkWritten;
+            pcmCursor += chunkFrames * src->channels;
+            framesDone += chunkFrames;
+        }
+        written = (size_t)outOffset;
+    }
+    adpcm_free_context(ctx);
+    if (written == 0 || written > encodedBytes)
+    {
+        XDisposePtr(encoded);
+        XDisposePtr(wordData);
+        return GENERAL_BAD;
+    }
+
+    /* Verify the bitstream decodes without faulting before we hand it back.
+     * Capacity is padded; allocate for the padded sample count. */
+    {
+    void *      verifyCtx;
+    int16_t *   verifyPcm;
+    int         decodedFrames;
+    int64_t     verifyBytes;
+
+        verifyBytes = (int64_t)capacityFrames * (int64_t)src->channels * (int64_t)sizeof(int16_t);
+        if (verifyBytes <= 0 || verifyBytes > 0x7fffffff)
+        {
+            XDisposePtr(encoded);
+            XDisposePtr(wordData);
+            return GENERAL_BAD;
+        }
+        verifyPcm = (int16_t *)XNewPtr((int32_t)verifyBytes);
+        if (!verifyPcm)
+        {
+            XDisposePtr(encoded);
+            XDisposePtr(wordData);
+            return MEMORY_ERR;
+        }
+        verifyCtx = adpcm_create_context((int)src->channels, (int)rate, 0,
+                                         NOISE_SHAPING_OFF, FORMAT_NO_HEADERS);
+        if (!verifyCtx)
+        {
+            XDisposePtr(verifyPcm);
+            XDisposePtr(encoded);
+            XDisposePtr(wordData);
+            return MEMORY_ERR;
+        }
+        decodedFrames = adpcm_decode_block_ex(verifyCtx, verifyPcm, (const uint8_t *)encoded,
+                                              written, (int)src->channels, bps);
+        adpcm_free_context(verifyCtx);
+        XDisposePtr(verifyPcm);
+        if (decodedFrames < (int)src->waveFrames)
+        {
+            XDisposePtr(encoded);
+            XDisposePtr(wordData);
+            return GENERAL_BAD;
+        }
+    }
+
+    XDisposePtr(wordData);
+
+    *outData = encoded;
+    *outSize = (uint32_t)written;
+    return NO_ERR;
+}
+
 #endif  // USE_CREATION_API == TRUE
+
+OPErr XExpandIma2(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst)
+{
+void *          ctx;
+int16_t *       decoded;
+uint32_t        encodedBytes;
+uint32_t        totalFrames;
+uint32_t        outFrames;
+uint32_t        outBytes;
+int             decodedFrames;
+int             capacityFrames;
+uint32_t        rate;
+int             channels;
+int64_t         decodeBytes;
+enum { bps = 2 };
+
+    if (dst)
+    {
+        dst->theWaveform = NULL;
+        dst->waveSize = 0;
+        dst->waveFrames = 0;
+    }
+
+    if (!src || !dst || !src->theWaveform || src->waveSize == 0)
+    {
+        return PARAM_ERR;
+    }
+
+    channels = src->channels;
+    if (channels < 1 || channels > 2)
+    {
+        return BAD_FILE;
+    }
+
+    encodedBytes = src->waveSize;
+    if (encodedBytes < (uint32_t)(channels * 4) ||
+        (encodedBytes % (uint32_t)(channels * 4)) != 0)
+    {
+        return BAD_FILE;
+    }
+
+    capacityFrames = adpcm_block_size_to_sample_count_no_header(
+        (int)encodedBytes, channels, bps);
+    if (capacityFrames <= 0)
+    {
+        return BAD_FILE;
+    }
+
+    /* Metadata frame count may be smaller than padded bitstream capacity.
+     * Decode always expands the full padded capacity, so allocate for that. */
+    totalFrames = src->waveFrames;
+    if (totalFrames == 0 || totalFrames > (uint32_t)capacityFrames)
+    {
+        totalFrames = (uint32_t)capacityFrames;
+    }
+    if (startFrame > totalFrames)
+    {
+        return BAD_FILE;
+    }
+
+    decodeBytes = (int64_t)capacityFrames * (int64_t)channels * (int64_t)sizeof(int16_t);
+    if (decodeBytes <= 0 || decodeBytes > 0x7fffffff)
+    {
+        return MEMORY_ERR;
+    }
+    decoded = (int16_t *)XNewPtr((int32_t)decodeBytes);
+    if (!decoded)
+    {
+        return MEMORY_ERR;
+    }
+    XSetMemory(decoded, (int32_t)decodeBytes, 0);
+
+    rate = (uint32_t)(src->sampledRate >> 16);
+    if (rate == 0)
+    {
+        rate = ADPCM_XQ_DNS_RATE_DEFAULT;
+    }
+
+    ctx = adpcm_create_context(channels, (int)rate, 0, NOISE_SHAPING_OFF, FORMAT_NO_HEADERS);
+    if (!ctx)
+    {
+        XDisposePtr(decoded);
+        return MEMORY_ERR;
+    }
+
+    decodedFrames = adpcm_decode_block_ex(ctx, decoded, (const uint8_t *)src->theWaveform,
+                                          (size_t)encodedBytes, channels, bps);
+    adpcm_free_context(ctx);
+    if (decodedFrames <= 0)
+    {
+        XDisposePtr(decoded);
+        return BAD_FILE;
+    }
+    if (decodedFrames > capacityFrames)
+    {
+        /* Should be impossible; refuse rather than copy OOB. */
+        XDisposePtr(decoded);
+        return BAD_FILE;
+    }
+    if (totalFrames > (uint32_t)decodedFrames)
+    {
+        totalFrames = (uint32_t)decodedFrames;
+    }
+    if (startFrame > totalFrames)
+    {
+        XDisposePtr(decoded);
+        return BAD_FILE;
+    }
+
+    outFrames = totalFrames - startFrame;
+    outBytes = outFrames * (uint32_t)channels * sizeof(int16_t);
+
+    dst->channels = (int16_t)channels;
+    dst->bitSize = 16;
+    dst->sampledRate = src->sampledRate;
+    dst->waveFrames = outFrames;
+    dst->waveSize = outBytes;
+    dst->compressionType = C_NONE;
+    dst->theWaveform = XNewPtr((int32_t)outBytes);
+    if (!dst->theWaveform)
+    {
+        XDisposePtr(decoded);
+        return MEMORY_ERR;
+    }
+
+    XBlockMove((XPTR)(decoded + (startFrame * (uint32_t)channels)),
+               dst->theWaveform, (int32_t)outBytes);
+    XDisposePtr(decoded);
+    return NO_ERR;
+}
 
 
 #if USE_NEW_EXPAND_CODE == TRUE

@@ -886,8 +886,11 @@ static BAERmfEditorCompressionType BankCompressionFromCodec(uint32_t compression
         return BAE_EDITOR_COMPRESSION_PCM;
     case FOUR_CHAR('i', 'm', 'a', '4'):
     case FOUR_CHAR('i', 'm', 'a', 'W'):
-    case FOUR_CHAR('i', 'm', 'a', '3'):
         return BAE_EDITOR_COMPRESSION_ADPCM;
+#if USE_ZMF_SUPPORT == TRUE
+    case FOUR_CHAR('i', 'm', 'a', '2'):
+        return BAE_EDITOR_COMPRESSION_ADPCM_2BIT;
+#endif
     case FOUR_CHAR('a', 'l', 'a', 'w'):
         return BAE_EDITOR_COMPRESSION_ALAW;
     case FOUR_CHAR('u', 'l', 'a', 'w'):
@@ -980,6 +983,9 @@ static const SampleCodecOption *GetSampleCodecOptions(size_t *out_count)
         {BAE_EDITOR_COMPRESSION_DONT_CHANGE, "No Recompression"},
         {BAE_EDITOR_COMPRESSION_PCM, "PCM"},
         {BAE_EDITOR_COMPRESSION_ADPCM, "ADPCM"},
+#if USE_ZMF_SUPPORT == TRUE
+        {BAE_EDITOR_COMPRESSION_ADPCM_2BIT, "2-bit ADPCM"},
+#endif
         {BAE_EDITOR_COMPRESSION_ALAW, "A-law"},
         {BAE_EDITOR_COMPRESSION_ULAW, "u-law"},
 #if USE_QOA_SUPPORT == TRUE
@@ -1101,8 +1107,8 @@ static std::string FormatVisibleCodecLabel(uint32_t compression_type,
         return "IMA4";
     case FOUR_CHAR('i', 'm', 'a', 'W'):
         return "IMA4 (WAV)";
-    case FOUR_CHAR('i', 'm', 'a', '3'):
-        return "IMA3";
+    case FOUR_CHAR('i', 'm', 'a', '2'):
+        return "2-bit ADPCM";
     case FOUR_CHAR('m', 'a', 'c', '3'):
         return "MACE3";
     case FOUR_CHAR('m', 'a', 'c', '6'):
@@ -5177,18 +5183,24 @@ private:
             }
             else if (m_song)
             {
-                /* Bank load failed: play through the RMF song (has embeds). */
+                /* Bank load failed: play through the RMF song (has embeds).
+                 * Still live-patch so oscillator / ADSR edits are audible. */
                 audition_song = m_song;
                 BAESong_ProgramBankChange(audition_song,
                                           ch,
                                           prog_for_channel,
                                           static_cast<unsigned char>(bank),
                                           0);
-                BAESong_NoteOnWithLoad(audition_song,
-                                       ch,
-                                       play_note,
-                                       velocity,
-                                       0);
+                (void)BAESong_LoadInstrument(audition_song,
+                                             static_cast<BAE_INSTRUMENT>(patch_id));
+                (void)BAESong_PatchLoadedInstrumentExtInfo(audition_song,
+                                                           static_cast<BAE_INSTRUMENT>(patch_id),
+                                                           &m_ie_ext);
+                BAESong_NoteOn(audition_song,
+                               ch,
+                               play_note,
+                               velocity,
+                               0);
             }
             m_ie_note_song = audition_song;
         }

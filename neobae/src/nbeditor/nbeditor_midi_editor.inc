@@ -3412,8 +3412,8 @@
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
             {
                 ImGui::SetTooltip(
-                    "Per-note bank for the selection.\n"
-                    "MIDI export emits Bank Select / Program Change only when they change.");
+                    "Per-note Beatnik bank (CC0 / instID = bank×256+prog).\n"
+                    "0..127 = bank group. Preview/export emit Bank Select when it changes.");
             }
 
             ImGui::SameLine();

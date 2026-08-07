@@ -893,6 +893,8 @@ set(NEOBAE_SOURCES
   neobae/src/BAE_Source/Common/X_EditorTools.c
   neobae/src/BAE_Source/Common/X_Decompress.c
   neobae/src/BAE_Source/Common/X_IMA.c
+  neobae/src/thirdparty/adpcm-xq/adpcm-lib.c
+  neobae/src/thirdparty/adpcm-xq/adpcm-dns.c
   neobae/src/BAE_Source/Common/g711.c
   neobae/src/BAE_Source/Common/g721.c
   neobae/src/BAE_Source/Common/g723_24.c
@@ -1433,6 +1435,7 @@ target_include_directories(neobae
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/mthc
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/config
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/qoa
+    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/adpcm-xq
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/lzma-26.00/C
     ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/mod2rmf
 )

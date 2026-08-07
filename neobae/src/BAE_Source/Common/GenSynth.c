@@ -1552,6 +1552,331 @@ static INLINE int32_t PV_GetWaveShape(int32_t where, int32_t what_kind)
     }
 }
 
+#if USE_ZMF_SUPPORT == TRUE
+/* Oscillator wave-index table. WIDX modulates this index (256 = one step,
+ * same scale as pitch LFO: 256 = 1 semitone). With ADSR at VOLUME_RANGE (4096),
+ * LFO level ≈ 4096 → ±1 wave; short period + SAW/SQUA → rapid wave changes.
+ * Order is stable for C64-style snare: square/pulse attack → noise body. */
+enum
+{
+    kOscWaveIndexCount = 6,
+    kOscWaveIndexStep = 256
+};
+static const int32_t kOscWaveIndexTable[kOscWaveIndexCount] =
+{
+    SINE_WAVE_REAL,  /* 0 — true sine (file 'SINE'; LFO SINE is a triangle) */
+    TRIANGLE_WAVE,   /* 1 */
+    SAWTOOTH_WAVE,   /* 2 — LFO SAWT (SAWW aliases here) */
+    SQUARE_WAVE,     /* 3 */
+    PULSE_OSC_WAVE,  /* 4 — variable pulse width */
+    NOISE_OSC_WAVE   /* 5 */
+};
+
+static int32_t PV_OscShapeToWaveIndex(int32_t shape)
+{
+    int32_t i;
+
+    /* File/LFO 'SINE' is the historical triangle; oscillators use real sine. */
+    if (shape == SINE_WAVE)
+        shape = SINE_WAVE_REAL;
+    if (shape == SAWTOOTH_OSC_WAVE || shape == SAWTOOTH_WAVE2)
+        shape = SAWTOOTH_WAVE;
+    if (shape == SQUARE_WAVE2)
+        shape = SQUARE_WAVE;
+    for (i = 0; i < kOscWaveIndexCount; i++)
+    {
+        if (kOscWaveIndexTable[i] == shape)
+            return i;
+    }
+    return 0;
+}
+
+/* Audio-rate oscillator shape. PLSE/NOIS are oscillator-only; SINE→real sine;
+ * other shapes match LFO (TRIA/SAWT/SQUA). */
+static INLINE int32_t PV_GetOscWaveShape(int32_t where, int32_t what_kind, int32_t pulseWidth, uint32_t *noiseState)
+{
+    if (what_kind == PULSE_OSC_WAVE)
+    {
+        if (pulseWidth < 1)
+            pulseWidth = 1;
+        if (pulseWidth > 65535)
+            pulseWidth = 65535;
+        return (where < pulseWidth) ? 65536 : -65536;
+    }
+    if (what_kind == NOISE_OSC_WAVE)
+    {
+        if (noiseState)
+        {
+            uint32_t x = *noiseState;
+            if (x == 0)
+                x = 0xA341316Cu;
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            *noiseState = x;
+            return (int32_t)((int16_t)(x & 0xFFFF)) * 2;
+        }
+        return 0;
+    }
+    /* SAWW → same as LFO SAWT; file/LFO SINE → real sine for oscillators */
+    if (what_kind == SAWTOOTH_OSC_WAVE)
+        what_kind = SAWTOOTH_WAVE;
+    if (what_kind == SINE_WAVE)
+        what_kind = SINE_WAVE_REAL;
+    return PV_GetWaveShape(where, what_kind);
+}
+
+static INLINE int32_t PV_ResolveOscWaveShape(const GM_Voice *pVoice)
+{
+    int32_t idx;
+
+    if (!pVoice)
+        return SINE_WAVE_REAL;
+    idx = pVoice->oscWaveIndexLive / kOscWaveIndexStep;
+    if (idx < 0)
+        idx = 0;
+    if (idx >= kOscWaveIndexCount)
+        idx = kOscWaveIndexCount - 1;
+    return kOscWaveIndexTable[idx];
+}
+
+static void PV_UpdateOscPhaseInc(GM_Voice *pVoice, int32_t pitch88)
+{
+    double note;
+    double freq;
+    double rate;
+    double inc;
+
+    if (!pVoice || !MusicGlobals)
+        return;
+    note = (double)pitch88 / 256.0;
+    freq = 440.0 * pow(2.0, (note - 69.0) / 12.0);
+    if (freq < 0.01)
+        freq = 0.01;
+    rate = (double)GM_ConvertFromOutputRateToRate(MusicGlobals->outputRate);
+    if (rate < 1.0)
+        rate = 1.0;
+    if (freq > rate * 0.45)
+        freq = rate * 0.45;
+    /* U32 phase: increment = freq/rate * 2^32 */
+    inc = (freq / rate) * 4294967296.0;
+    if (inc < 1.0)
+        inc = 1.0;
+    if (inc > 4294967295.0)
+        inc = 4294967295.0;
+    pVoice->oscPhaseInc = (uint32_t)inc;
+}
+
+static INLINE uint32_t PV_NextOscNoise(uint32_t x)
+{
+    if (x == 0)
+        x = 0xA341316Cu;
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+    return x;
+}
+
+/* Same resonant LPF math as GenSynthFiltersU3232 (mono path). */
+static INLINE void PV_OscFilterGetParams(GM_Voice *pVoice, int32_t *outXn, int32_t *outZ1, int32_t *outZn)
+{
+    int32_t Z1, Xn, Zn;
+
+    if (pVoice->LPF_frequency < 0x200)
+        pVoice->LPF_frequency = 0x200;
+    if (pVoice->LPF_frequency > (MAXRESONANCE * 256))
+        pVoice->LPF_frequency = MAXRESONANCE * 256;
+    if (pVoice->previous_zFrequency == 0)
+        pVoice->previous_zFrequency = pVoice->LPF_frequency;
+    if (pVoice->LPF_resonance < 0)
+        pVoice->LPF_resonance = 0;
+    if (pVoice->LPF_resonance > 0x100)
+        pVoice->LPF_resonance = 0x100;
+    if (pVoice->LPF_lowpassAmount < -0xFF)
+        pVoice->LPF_lowpassAmount = -0xFF;
+    if (pVoice->LPF_lowpassAmount > 0xFF)
+        pVoice->LPF_lowpassAmount = 0xFF;
+    Z1 = pVoice->LPF_lowpassAmount << 8;
+    if (Z1 < 0)
+        Xn = 65536 + Z1;
+    else
+        Xn = 65536 - Z1;
+    if (Z1 >= 0)
+    {
+        Zn = ((0x10000 - Z1) * pVoice->LPF_resonance) >> 8;
+        Zn = -Zn;
+    }
+    else
+        Zn = 0;
+    *outXn = Xn;
+    *outZ1 = Z1;
+    *outZn = Zn;
+}
+
+static INLINE int32_t PV_OscFilterStep(GM_Voice *pVoice, int32_t sample,
+                                       int32_t Xn, int32_t Z1, int32_t Zn,
+                                       int32_t *z1value, int32_t *zIndex)
+{
+    if (Zn == 0 || pVoice->LPF_resonance == 0)
+    {
+        sample = (sample * Xn + (*z1value) * Z1) >> 16;
+        *z1value = sample - (sample >> 9);
+        return sample;
+    }
+    {
+        int32_t zIndex1;
+
+        pVoice->previous_zFrequency +=
+            (pVoice->LPF_frequency - pVoice->previous_zFrequency) >> 5;
+        zIndex1 = *zIndex - (pVoice->previous_zFrequency >> 8);
+        sample = (sample * Xn + (*z1value) * Z1 +
+                  pVoice->z[zIndex1 & MAXRESONANCE] * Zn) >> 16;
+        pVoice->z[(*zIndex) & MAXRESONANCE] = (int16_t)sample;
+        (*zIndex)++;
+        *z1value = sample - (sample >> 9);
+        return sample;
+    }
+}
+
+static void PV_ServeOscillatorBuffer(GM_Voice *pVoice)
+{
+    register int32_t *dest;
+    register int32_t a, inner;
+    register int32_t sample;
+    register int32_t amplitudeL, amplitudeR;
+    int32_t amplitudeLincrement, amplitudeRincrement;
+    int32_t ampValueL, ampValueR;
+    int32_t where;
+    int32_t pw;
+    int32_t oscVol;
+    uint32_t phase;
+    uint32_t phaseInc;
+    uint32_t noise;
+    int32_t noiseHeld;
+    bool useFilter;
+    int32_t Xn = 0, Z1 = 0, Zn = 0;
+    int32_t z1value = 0;
+    int32_t zIndex = 0;
+#if REVERB_USED == VARIABLE_REVERB
+    int32_t *destReverb = NULL;
+    int32_t *destChorus = NULL;
+    bool sendReverb;
+#endif
+
+    if (!pVoice || !MusicGlobals)
+        return;
+
+    PV_CalculateStereoVolume(pVoice, &ampValueL, &ampValueR);
+    amplitudeL = pVoice->lastAmplitudeL;
+    amplitudeR = pVoice->lastAmplitudeR;
+    amplitudeLincrement = ((ampValueL - amplitudeL) / MusicGlobals->Four_Loop) >> 2;
+    amplitudeRincrement = ((ampValueR - amplitudeR) / MusicGlobals->Four_Loop) >> 2;
+    amplitudeL = amplitudeL >> 2;
+    amplitudeR = amplitudeR >> 2;
+
+    dest = &MusicGlobals->songBufferDry[0];
+    phase = pVoice->oscPhase;
+    phaseInc = pVoice->oscPhaseInc;
+    noise = pVoice->oscNoiseState;
+    noiseHeld = pVoice->oscNoiseHeld;
+    oscVol = pVoice->oscVolume;
+    if (oscVol < 0)
+        oscVol = 0;
+    if (oscVol > 65536)
+        oscVol = 65536;
+    pw = pVoice->oscPulseWidthLive;
+    if (pw < 1)
+        pw = 1;
+    if (pw > 65535)
+        pw = 65535;
+
+    /* Same enable rule as sample voices. */
+    useFilter = (pVoice->LPF_lowpassAmount != 0 || pVoice->LPF_resonance != 0) ? TRUE : FALSE;
+    if (useFilter)
+    {
+        PV_OscFilterGetParams(pVoice, &Xn, &Z1, &Zn);
+        z1value = pVoice->Z1value;
+        zIndex = pVoice->zIndex;
+    }
+
+    {
+        int32_t oscShape = PV_ResolveOscWaveShape(pVoice);
+
+#if REVERB_USED == VARIABLE_REVERB
+    sendReverb = (pVoice->reverbLevel > 1 || pVoice->chorusLevel > 1) ? TRUE : FALSE;
+    if (sendReverb)
+    {
+        destReverb = &MusicGlobals->songBufferReverb[0];
+        destChorus = &MusicGlobals->songBufferChorus[0];
+    }
+#endif
+
+    for (a = MusicGlobals->Four_Loop; a > 0; --a)
+    {
+        for (inner = 0; inner < 4; inner++)
+        {
+            if (oscShape == NOISE_OSC_WAVE)
+            {
+                /* Grain rate tracks pitch but runs 16× note frequency so noise
+                 * reads at a similar "height" to other oscillator waves. */
+                uint32_t oldPhase = phase;
+                phase += phaseInc;
+                if (((phase ^ oldPhase) & 0xF0000000u) != 0)
+                {
+                    noise = PV_NextOscNoise(noise);
+                    noiseHeld = (int32_t)((int16_t)(noise & 0xFFFF)) * 2;
+                }
+                sample = noiseHeld;
+            }
+            else
+            {
+                where = (int32_t)(phase >> 16);
+                sample = PV_GetOscWaveShape(where, oscShape, pw, NULL);
+                phase += phaseInc;
+            }
+            /* Match ~8-bit-scaled mix range used by filtered PCM path */
+            sample = sample >> 6;
+            if (oscVol != 65536)
+            {
+                sample = (int32_t)(((int64_t)sample * (int64_t)oscVol) >> 16);
+            }
+            if (useFilter)
+            {
+                sample = PV_OscFilterStep(pVoice, sample, Xn, Z1, Zn, &z1value, &zIndex);
+            }
+            dest[0] += sample * amplitudeL;
+            dest[1] += sample * amplitudeR;
+            dest += 2;
+#if REVERB_USED == VARIABLE_REVERB
+            if (sendReverb && destReverb && destChorus)
+            {
+                destReverb[0] += sample * amplitudeL;
+                destReverb[1] += sample * amplitudeR;
+                destReverb += 2;
+                destChorus[0] += sample * amplitudeL;
+                destChorus[1] += sample * amplitudeR;
+                destChorus += 2;
+            }
+#endif
+        }
+        amplitudeL += amplitudeLincrement;
+        amplitudeR += amplitudeRincrement;
+    }
+
+    pVoice->oscPhase = phase;
+    pVoice->oscNoiseState = noise;
+    pVoice->oscNoiseHeld = noiseHeld;
+    if (useFilter)
+    {
+        pVoice->Z1value = z1value;
+        pVoice->zIndex = zIndex;
+    }
+    pVoice->lastAmplitudeL = amplitudeL << 2;
+    pVoice->lastAmplitudeR = amplitudeR << 2;
+    } /* oscShape scope */
+}
+#endif /* USE_ZMF_SUPPORT */
+
 static const char resonantFilterLookup[] =
     {
         42,
@@ -1896,6 +2221,13 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
     pVoice->volumeLFOValue = 4096; // default value. Will change below if there's a volume LFO unit present.
     pVoice->LPF_resonance = pVoice->LPF_base_resonance;
     pVoice->LPF_lowpassAmount = pVoice->LPF_base_lowpassAmount;
+#if USE_ZMF_SUPPORT == TRUE
+    if (pVoice->useOscillator)
+    {
+        pVoice->oscPulseWidthLive = pVoice->oscPulseWidth;
+        pVoice->oscWaveIndexLive = pVoice->oscWaveIndexBase;
+    }
+#endif
     if (pVoice->LPF_base_frequency <= 0) // if resonant frequency tied to note pitch, zero out frequency
     {
         pVoice->LPF_frequency = 0;
@@ -1978,6 +2310,22 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
                 case LPF_DEPTH:
                     pVoice->LPF_resonance += value;
                     break;
+#if USE_ZMF_SUPPORT == TRUE
+                case PULSE_WIDTH_LFO:
+                    if (pVoice->useOscillator)
+                        pVoice->oscPulseWidthLive += value;
+                    break;
+                case WAVE_INDEX_LFO:
+                    if (pVoice->useOscillator)
+                    {
+                        pVoice->oscWaveIndexLive += value;
+                        if (pVoice->oscWaveIndexLive < 0)
+                            pVoice->oscWaveIndexLive = 0;
+                        if (pVoice->oscWaveIndexLive > ((kOscWaveIndexCount - 1) * kOscWaveIndexStep))
+                            pVoice->oscWaveIndexLive = (kOscWaveIndexCount - 1) * kOscWaveIndexStep;
+                    }
+                    break;
+#endif
                 default:
                     // DEBUG_STR("\p Invalid LFO Unit Feed-To");
                     break;
@@ -2033,6 +2381,10 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
 
         // Recalculate number of samples in a slice
         pVoice->NoteNextSize = 0;
+#if USE_ZMF_SUPPORT == TRUE
+        if (pVoice->useOscillator)
+            PV_UpdateOscPhaseInc(pVoice, n);
+#endif
     }
 
     start = 0;
@@ -2113,6 +2465,63 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
         pVoice->NoteVolumeEnvelope = (int16_t)((pVoice->NoteVolumeEnvelope * pVoice->volumeLFOValue) >> 12L);
     }
     // debug_message("3;NoteVolumeEnvelope = %ld\n", (int32_t)pVoice->NoteVolumeEnvelope);
+
+#if USE_ZMF_SUPPORT == TRUE
+    /* Oscillator voices: generate continuously until volume ADSR finishes. */
+    if (pVoice->useOscillator)
+    {
+        PV_ServeOscillatorBuffer(pVoice);
+        if (pVoice->voiceMode == VOICE_RELEASING)
+        {
+            if ((pVoice->volumeADSRRecord.ADSRTime[0] != 0) || (pVoice->volumeADSRRecord.ADSRFlags[0] != ADSR_TERMINATE))
+            {
+                if (pVoice->volumeADSRRecord.mode == ADSR_TERMINATE)
+                {
+                    if ((pVoice->volumeADSRRecord.currentLevel < 0x100) || (pVoice->volumeADSRRecord.sustainingDecayLevel < 0x100))
+                    {
+#if USE_CALLBACKS
+                        PV_DoCallBack(pVoice);
+#endif
+                        pVoice->voiceMode = VOICE_UNUSED;
+#if BAE_MCU == TRUE
+                        GM_KillVoiceOnDSP(pVoice);
+#endif
+                    }
+                }
+                else if (pVoice->volumeADSRRecord.sustainingDecayLevel == 0)
+                {
+#if USE_CALLBACKS
+                    PV_DoCallBack(pVoice);
+#endif
+                    pVoice->voiceMode = VOICE_UNUSED;
+#if BAE_MCU == TRUE
+                    GM_KillVoiceOnDSP(pVoice);
+#endif
+                }
+                else if (pVoice->volumeADSRRecord.sustainingDecayLevel < 0x800)
+                {
+                    pVoice->volumeADSRRecord.sustainingDecayLevel = 0;
+                }
+            }
+            else if (pVoice->NoteDecay == 0)
+            {
+#if USE_CALLBACKS
+                PV_DoCallBack(pVoice);
+#endif
+                pVoice->voiceMode = VOICE_UNUSED;
+#if BAE_MCU == TRUE
+                GM_KillVoiceOnDSP(pVoice);
+#endif
+            }
+            else
+            {
+                pVoice->NoteDecay--;
+            }
+        }
+        PV_UnlockInstrumentAndVoice(pVoice);
+        return;
+    }
+#endif
 
     // now modify the pVoice->NoteVolumeEnvelope to zero, if this voice doesn't match
     // the current audio route
@@ -4082,9 +4491,47 @@ void PV_StartMIDINote(GM_Song *pSong, int16_t the_instrument,
         the_entry->pInstrument = pInstrument;
         the_entry->pSong = pSong;
         the_entry->NoteVolumeEnvelopeBeforeLFO = VOLUME_PRECISION_SCALAR;
-        pSample = (unsigned char *)pInstrument->u.w.theWaveform;
-        the_entry->NotePtr = pSample;
-        the_entry->NotePtrEnd = pSample + pInstrument->u.w.waveFrames;
+#if USE_ZMF_SUPPORT == TRUE
+        if (pInstrument->useOscillator)
+        {
+            pSample = NULL;
+            the_entry->NotePtr = NULL;
+            the_entry->NotePtrEnd = NULL;
+            the_entry->useOscillator = 1;
+            the_entry->oscWaveShape = pInstrument->oscWaveShape;
+            the_entry->oscWaveIndexBase = PV_OscShapeToWaveIndex(pInstrument->oscWaveShape) * kOscWaveIndexStep;
+            the_entry->oscWaveIndexLive = the_entry->oscWaveIndexBase;
+            the_entry->oscPulseWidth = pInstrument->oscPulseWidth;
+            the_entry->oscPulseWidthLive = pInstrument->oscPulseWidth;
+            the_entry->oscVolume = pInstrument->oscVolume;
+            if (the_entry->oscVolume < 0)
+                the_entry->oscVolume = 0;
+            if (the_entry->oscVolume > 65536)
+                the_entry->oscVolume = 65536;
+            the_entry->oscPhase = 0;
+            the_entry->oscPhaseInc = 0;
+            /* Note-dependent seed so different pitches don't share an identical sequence. */
+            the_entry->oscNoiseState = PV_NextOscNoise(
+                0xA341316Cu ^ ((uint32_t)newPitch * 0x9E3779B9u));
+            the_entry->oscNoiseHeld =
+                (int32_t)((int16_t)(the_entry->oscNoiseState & 0xFFFF)) * 2;
+        }
+        else
+        {
+            the_entry->useOscillator = 0;
+#endif
+            pSample = (unsigned char *)pInstrument->u.w.theWaveform;
+            if (pSample == NULL || pInstrument->u.w.waveFrames == 0)
+            {
+                /* No sample and not an oscillator voice — abandon allocation. */
+                the_entry->voiceMode = VOICE_UNUSED;
+                return;
+            }
+            the_entry->NotePtr = pSample;
+            the_entry->NotePtrEnd = pSample + pInstrument->u.w.waveFrames;
+#if USE_ZMF_SUPPORT == TRUE
+        }
+#endif
         the_entry->NoteChannel = (signed char)the_channel;
         the_entry->NoteTrack = (signed char)the_track;
 
@@ -4150,24 +4597,43 @@ void PV_StartMIDINote(GM_Song *pSong, int16_t the_instrument,
         }
 
         // factor in sample rate of sample, if enabled
+#if USE_ZMF_SUPPORT == TRUE
+        if (pInstrument->useOscillator)
+        {
+            the_entry->noteSamplePitchAdjust = 0x10000;
+            the_entry->NoteLoopPtr = NULL;
+            the_entry->NoteLoopEnd = NULL;
+        }
+        else
+#endif
         if (pInstrument->useSampleRate)
         {
             the_entry->noteSamplePitchAdjust = XFixedDivide(pInstrument->u.w.sampledRate >> 2, 22050L << 14);
             the_entry->NotePitch = XFixedMultiply(the_entry->NotePitch, the_entry->noteSamplePitchAdjust);
+            if (loopend - loopstart)
+            {
+                the_entry->NoteLoopPtr = (unsigned char *)the_entry->NotePtr + loopstart;
+                the_entry->NoteLoopEnd = (unsigned char *)the_entry->NotePtr + loopend;
+            }
+            else
+            {
+                the_entry->NoteLoopPtr = NULL;
+                the_entry->NoteLoopEnd = NULL;
+            }
         }
         else
         {
             the_entry->noteSamplePitchAdjust = 0x10000;
-        }
-        if (loopend - loopstart)
-        {
-            the_entry->NoteLoopPtr = (unsigned char *)the_entry->NotePtr + loopstart;
-            the_entry->NoteLoopEnd = (unsigned char *)the_entry->NotePtr + loopend;
-        }
-        else
-        {
-            the_entry->NoteLoopPtr = NULL;
-            the_entry->NoteLoopEnd = NULL;
+            if (loopend - loopstart)
+            {
+                the_entry->NoteLoopPtr = (unsigned char *)the_entry->NotePtr + loopstart;
+                the_entry->NoteLoopEnd = (unsigned char *)the_entry->NotePtr + loopend;
+            }
+            else
+            {
+                the_entry->NoteLoopPtr = NULL;
+                the_entry->NoteLoopEnd = NULL;
+            }
         }
         the_entry->NoteDecay = 8;    // default note decay
         the_entry->NoteNextSize = 0; // recalculate next size
@@ -4202,6 +4668,16 @@ void PV_StartMIDINote(GM_Song *pSong, int16_t the_instrument,
         the_entry->ModWheelValue = pSong->channelModWheel[the_channel];
         the_entry->LastModWheelValue = 0;
         the_entry->NoteLoopCount = 0;
+#if USE_ZMF_SUPPORT == TRUE
+        if (pInstrument->useOscillator)
+        {
+            PV_UpdateOscPhaseInc(the_entry,
+                                 (int32_t)the_entry->ProcessedPitch * 256 +
+                                     (int32_t)the_entry->NotePitchBend);
+            /* Force first serve slice to refresh pitch tables / phase inc. */
+            the_entry->LastPitchBend = (int16_t)(the_entry->NotePitchBend ^ 1);
+        }
+#endif
 
         // Set the inital pan placement as the combination of the initial pan and the current
         // controller state

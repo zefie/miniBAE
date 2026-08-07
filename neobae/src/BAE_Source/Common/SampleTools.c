@@ -709,6 +709,9 @@ uint32_t          const decodingBytes = decodingFrames * bytesPerFrame;
         return XExpandQOA(src, startFrame, dst);
 #endif
 
+    case C_IMA2:
+        return XExpandIma2(src, startFrame, dst);
+
 #if USE_WMA_SUPPORT == TRUE
     case C_WMA:
         return XExpandWMA(src, startFrame, dst);
@@ -1003,6 +1006,11 @@ int32_t XGetSampleInfoFromSnd(XPTR pResource, SampleDataInfo *pOutInfo)
                         pOutInfo->bitSize = 16;
                         break;
 #endif
+                    case C_IMA2:
+                        pOutInfo->size = XGetLong(&header3->encodedBytes);
+                        pOutInfo->frames = XGetLong(&header3->frameCount);
+                        pOutInfo->bitSize = 16;
+                        break;
                     default:
                         debug_message("Unsupported codec %d\n", pOutInfo->compressionType);
                         BAE_ASSERT(FALSE);
@@ -1290,6 +1298,12 @@ uint32_t              roundTripSavedRate;  /* non-zero if XSOUND_OPUS_ROUNDTRIP_
             info->bitSize = 16;
             break;
 #endif
+        case C_IMA2:
+            /* encodedBytes = headerless 2-bit IMA size; frameCount = decoded PCM frames */
+            info->size   = XGetLong(&header3->encodedBytes);
+            info->frames = XGetLong(&header3->frameCount);
+            info->bitSize = 16;
+            break;
         default:
             debug_message("Unsupported codec %d\n", info->compressionType);
             BAE_ASSERT(FALSE);
@@ -2523,6 +2537,57 @@ XSoundFormat1*      header;
         return NO_ERR;
     }
 #endif
+
+    case C_IMA2:
+    {
+    XPTR        encodedData;
+    uint32_t    encodedBytes;
+    OPErr       err;
+    XSndHeader3 *snd;
+    GM_Waveform pcmSrc;
+
+        pcmSrc = src;
+        if (pcmSrc.compressionType != (uint32_t)C_NONE)
+        {
+            XDisposePtr(intermediateData);
+            return PARAM_ERR;
+        }
+
+        err = XEncodeIma2ToMemory(&pcmSrc, &encodedData, &encodedBytes);
+        XDisposePtr(intermediateData);
+        if (err != NO_ERR || !encodedData)
+        {
+            return err != NO_ERR ? err : MEMORY_ERR;
+        }
+
+        *dst = XNewPtr((int32_t)(sizeof(XSndHeader3) + encodedBytes));
+        if (!*dst)
+        {
+            XDisposePtr(encodedData);
+            return MEMORY_ERR;
+        }
+        snd = (XSndHeader3 *)*dst;
+        XSetMemory(snd, sizeof(XSndHeader3), 0);
+        XPutShort(&snd->type, XThirdSoundFormat);
+
+        XPutLong(&snd->sndBuffer.subType,      C_IMA2);
+        XPutLong(&snd->sndBuffer.sampleRate,   pcmSrc.sampledRate);
+        XPutLong(&snd->sndBuffer.frameCount,   pcmSrc.waveFrames);
+        XPutLong(&snd->sndBuffer.encodedBytes, encodedBytes);
+        XPutLong(&snd->sndBuffer.decodedBytes,
+                 (uint32_t)(pcmSrc.waveFrames * pcmSrc.channels * 2));
+        XPutLong(&snd->sndBuffer.blockBytes,   0);
+        XPutLong(&snd->sndBuffer.startFrame,   0);
+        XPutLong(&snd->sndBuffer.loopStart[0], pcmSrc.startLoop);
+        XPutLong(&snd->sndBuffer.loopEnd[0],   pcmSrc.endLoop);
+        snd->sndBuffer.baseKey    = (unsigned char)pcmSrc.baseMidiPitch;
+        snd->sndBuffer.channels   = (unsigned char)pcmSrc.channels;
+        snd->sndBuffer.bitSize    = 16;
+        snd->sndBuffer.isEmbedded = TRUE;
+        XBlockMove(encodedData, snd->sndBuffer.sampleArea, (int32_t)encodedBytes);
+        XDisposePtr(encodedData);
+        return NO_ERR;
+    }
 
     }   // switch
 

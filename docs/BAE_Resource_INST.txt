@@ -54,6 +54,9 @@ LSTC
 		CASE	Low Pass Amount LFO=LPAM
 		CASE	Curve=CURV
 		CASE	Default MOD Wheel to Pitch LFO Connection=DMOD
+		CASE	Instrument Oscillator (ZMF v6+)=OSCL
+		CASE	Pulse Width LFO/ADSR (ZMF v6+)=PWID
+		CASE	Wave Index LFO/ADSR (ZMF v6+)=WIDX
 	KEYB	ADSR
 		BCNT	Envelope
 		LSTC	
@@ -223,4 +226,62 @@ LSTC
 	KEYE	CURV
 	KEYB	DMOD
 	KEYE	DMOD
+	KEYB	OSCL
+		TNAM	Wave Shape (base; WIDX can override)
+			CASE	Sine (true sine; LFO SINE is triangle)=SINE
+			CASE	Triangle (same as LFO TRIA)=TRIA
+			CASE	Sawtooth (same as LFO SAWT; SAWW alias)=SAWT
+			CASE	Square (same as LFO SQUA)=SQUA
+			CASE	Pulse (variable width)=PLSE
+			CASE	Noise=NOIS
+		DLNG	Pulse Width (0..65536, 32768=50%; used when shape is PLSE)
+		DLNG	Oscillator Volume (0..65536, 65536=unity, default 16384=25%; optional — older OSCL omits this)
+	KEYE	OSCL
+	KEYB	PWID
+		BCNT	Pulse Width modulator (period=0 → ADSR/DC only; period>0 → LFO)
+		LSTC	
+			DLNG	Pulse Width ADSR Level
+			DLNG	Pulse Width ADSR Time (microseconds)
+			TNAM	Pulse Width ADSR Mode
+				CASE	Line=LINE
+				CASE	Sustain=SUST
+				CASE	Terminate=LAST
+		LSTE	
+		DLNG	Period of LFO in microseconds (0 = envelope/DC only)
+		TNAM	Wave Shape
+			CASE	Sine wave=SINE
+			CASE	Sawtooth wave=SAWT
+			CASE	Sawtooth type 2 wave=SAW2
+			CASE	Square wave=SQUA
+			CASE	Square type 2 wave=SQU2
+			CASE	Triangle wave=TRIA
+		DLNG	Amount to use as ADSR (DC)
+		DLNG	Amount to use as LFO
+	KEYE	PWID
+	KEYB	WIDX
+		BCNT	Wave Index modulator (256 = one step in OSCL wave table; pitch-LFO scale)
+		LSTC	
+			DLNG	Wave Index ADSR Level
+			DLNG	Wave Index ADSR Time (microseconds)
+			TNAM	Wave Index ADSR Mode
+				CASE	Line=LINE
+				CASE	Sustain=SUST
+				CASE	Terminate=LAST
+		LSTE	
+		DLNG	Period of LFO in microseconds (0 = envelope/DC only; short period = rapid morph)
+		TNAM	Wave Shape
+			CASE	Sine wave=SINE
+			CASE	Sawtooth wave=SAWT
+			CASE	Sawtooth type 2 wave=SAW2
+			CASE	Square wave=SQUA
+			CASE	Square type 2 wave=SQU2
+			CASE	Triangle wave=TRIA
+		DLNG	Amount to use as ADSR (DC)
+		DLNG	Amount to use as LFO
+		NOTE	Wave table index order: 0=SINE (real sine) 1=TRIA 2=SAWT 3=SQUA 4=PLSE 5=NOIS
+			256 = one index step (same as pitch: 256 = 1 semitone). With ADSR~4096,
+			LFO level ~4096 ≈ ±1 wave; level ~12288 sweeps several. Short period +
+			SAW/SQUA LFO shape = rapid wave hopping.
+			Example C64-ish snare: OSCL base=SQUA, WIDX ADSR (period=0) raises index toward NOIS.
+	KEYE	WIDX
 LSTE	

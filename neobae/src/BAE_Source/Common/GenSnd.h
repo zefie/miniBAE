@@ -796,6 +796,10 @@ typedef int32_t UNIT_TYPE;
         LPF_FREQUENCY_LONG = FOUR_CHAR('L', 'P', 'F', 'R'),    // 'LPFR'
         LPF_DEPTH_LONG = FOUR_CHAR('L', 'P', 'R', 'E'),        // 'LPRE'
         LOW_PASS_AMOUNT_LONG = FOUR_CHAR('L', 'P', 'A', 'M'),  // 'LPAM'
+#if USE_ZMF_SUPPORT == TRUE
+        PULSE_WIDTH_LFO_LONG = FOUR_CHAR('P', 'W', 'I', 'D'),  // 'PWID' — oscillator pulse width
+        WAVE_INDEX_LFO_LONG = FOUR_CHAR('W', 'I', 'D', 'X'),   // 'WIDX' — oscillator wave index
+#endif
 
 #if USE_MEMORY_OPTS == 1
         // small footprint translations. These represent the larger file based tags.
@@ -806,7 +810,11 @@ typedef int32_t UNIT_TYPE;
         STEREO_PAN_LFO = 13,
         STEREO_PAN_NAME2 = 14,
         LPF_FREQUENCY = 15,
-        LPF_DEPTH = 16
+        LPF_DEPTH = 16,
+#if USE_ZMF_SUPPORT == TRUE
+        PULSE_WIDTH_LFO = 17,
+        WAVE_INDEX_LFO = 18,
+#endif
 #else
     LOW_PASS_AMOUNT = LOW_PASS_AMOUNT_LONG,
     VOLUME_LFO = VOLUME_LFO_LONG,
@@ -814,7 +822,11 @@ typedef int32_t UNIT_TYPE;
     STEREO_PAN_LFO = STEREO_PAN_LFO_LONG,
     STEREO_PAN_NAME2 = STEREO_PAN_NAME2_LONG,
     LPF_FREQUENCY = LPF_FREQUENCY_LONG,
-    LPF_DEPTH = LPF_DEPTH_LONG
+    LPF_DEPTH = LPF_DEPTH_LONG,
+#if USE_ZMF_SUPPORT == TRUE
+    PULSE_WIDTH_LFO = PULSE_WIDTH_LFO_LONG,
+    WAVE_INDEX_LFO = WAVE_INDEX_LFO_LONG,
+#endif
 #endif
     };
 
@@ -828,6 +840,12 @@ typedef int32_t UNIT_TYPE;
         SQUARE_WAVE2_LONG = FOUR_CHAR('S', 'Q', 'U', '2'),   // 'SQU2'
         SAWTOOTH_WAVE_LONG = FOUR_CHAR('S', 'A', 'W', 'T'),  // 'SAWT'
         SAWTOOTH_WAVE2_LONG = FOUR_CHAR('S', 'A', 'W', '2'), // 'SAW2'
+#if USE_ZMF_SUPPORT == TRUE
+        /* Oscillator-only shapes (INST unit OSCL). All other shapes reuse LFO waves. */
+        PULSE_OSC_WAVE_LONG = FOUR_CHAR('P', 'L', 'S', 'E'),     // 'PLSE' — variable pulse width
+        SAWTOOTH_OSC_WAVE_LONG = FOUR_CHAR('S', 'A', 'W', 'W'),  // 'SAWW' — alias of LFO SAWT
+        NOISE_OSC_WAVE_LONG = FOUR_CHAR('N', 'O', 'I', 'S'),     // 'NOIS'
+#endif
 
 #if USE_MEMORY_OPTS == 1
                                                              // small footprint translations. These represent the larger file based tags.
@@ -839,13 +857,23 @@ typedef int32_t UNIT_TYPE;
         SAWTOOTH_WAVE = 25,
         SAWTOOTH_WAVE2 = 26,
         SINE_WAVE_REAL = 27,
+#if USE_ZMF_SUPPORT == TRUE
+        PULSE_OSC_WAVE = 28,
+        SAWTOOTH_OSC_WAVE = 29,
+        NOISE_OSC_WAVE = 30,
+#endif
 #else
     SINE_WAVE = SINE_WAVE_LONG,
     TRIANGLE_WAVE = TRIANGLE_WAVE_LONG,
     SQUARE_WAVE = SQUARE_WAVE_LONG,
     SQUARE_WAVE2 = SQUARE_WAVE2_LONG,
     SAWTOOTH_WAVE = SAWTOOTH_WAVE_LONG,
-    SAWTOOTH_WAVE2 = SAWTOOTH_WAVE2_LONG
+    SAWTOOTH_WAVE2 = SAWTOOTH_WAVE2_LONG,
+#if USE_ZMF_SUPPORT == TRUE
+    PULSE_OSC_WAVE = PULSE_OSC_WAVE_LONG,
+    SAWTOOTH_OSC_WAVE = SAWTOOTH_OSC_WAVE_LONG,
+    NOISE_OSC_WAVE = NOISE_OSC_WAVE_LONG
+#endif
 #endif
     };
 
@@ -863,6 +891,7 @@ typedef int32_t UNIT_TYPE;
         WAVEFORM_OFFSET_LONG = FOUR_CHAR('W', 'A', 'V', 'E'),   // 'WAVE'
         SAMPLE_NUMBER_LONG = FOUR_CHAR('S', 'A', 'M', 'P'),     // 'SAMP'
         MOD_WHEEL_CONTROL_LONG = FOUR_CHAR('M', 'O', 'D', 'W'), // 'MODW'
+        /* Pulse-width curve tie-to uses PULSE_WIDTH_LFO / 'PWID' (same as LFO dest). */
 
 #if USE_MEMORY_OPTS == 1
         VOLUME_LFO_FREQUENCY = 40,
@@ -901,6 +930,12 @@ typedef int32_t UNIT_TYPE;
         LOW_PASS_FILTER_LONG = FOUR_CHAR('L', 'P', 'G', 'F'),   //  'LPGF'
         REVERB_SEND_LONG = FOUR_CHAR('R', 'V', 'S', 'D'),       //  'RVSD'
         CHORUS_SEND_LONG = FOUR_CHAR('C', 'H', 'S', 'D'),       //  'CHSD'
+#if USE_ZMF_SUPPORT == TRUE
+        /* 'OSCL' — trailing-space 'OSC ' is unsafe with the 0x5F5F5F5F unit mask. */
+        OSCILLATOR_LONG = FOUR_CHAR('O', 'S', 'C', 'L'),        //  'OSCL'
+        /* Default OSCL volume when the optional field is absent / newly created (25%). */
+        OSC_VOLUME_DEFAULT = 16384,
+#endif
 
         // These must be defined as 4 byte identifiers because they are used to parse the
         // instrument from a file
@@ -917,6 +952,12 @@ typedef int32_t UNIT_TYPE;
         INST_LOW_PASS_AMOUNT = LOW_PASS_AMOUNT_LONG,
         INST_LPF_DEPTH = LPF_DEPTH_LONG,
         INST_LPF_FREQUENCY = LPF_FREQUENCY_LONG
+#if USE_ZMF_SUPPORT == TRUE
+        ,
+        INST_OSCILLATOR = OSCILLATOR_LONG,
+        INST_PULSE_WIDTH_LFO = PULSE_WIDTH_LFO_LONG,
+        INST_WAVE_INDEX_LFO = WAVE_INDEX_LFO_LONG
+#endif
     };
 
     // Controls for registered parameter status
@@ -1073,6 +1114,9 @@ typedef int32_t UNIT_TYPE;
 #if REVERB_USED != REVERB_DISABLED
         bool avoidReverb; // if TRUE, this instrument is not mixed into reverb unit
 #endif
+#if USE_ZMF_SUPPORT == TRUE
+        bool useOscillator; // TRUE: audio-rate generator (OSCL); sample optional
+#endif
         unsigned char usageReferenceCount; // number of references this instrument is associated to
 
         unsigned char LFORecordCount;
@@ -1087,6 +1131,12 @@ typedef int32_t UNIT_TYPE;
         
         int16_t defaultReverbSend;
         int16_t defaultChorusSend;
+
+#if USE_ZMF_SUPPORT == TRUE
+        int32_t oscWaveShape;  // SINE_WAVE_REAL (file 'SINE') / TRIA / SAWT / SQUA / PLSE / NOIS
+        int32_t oscPulseWidth; // 0..65536, 32768 = 50%
+        int32_t oscVolume;     // 0..65536, 65536 = unity (default OSC_VOLUME_DEFAULT)
+#endif
 
         GM_LFO LFORecords[MAX_LFOS];
         GM_ADSR volumeADSRRecord;

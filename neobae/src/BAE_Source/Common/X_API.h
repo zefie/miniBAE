@@ -765,7 +765,7 @@ typedef struct XBankToken XBankToken;
     ((id) == XFILERESOURCE_ID)
 #endif
 
-// Resource file version numbers: RMF uses 1 (original), ZMF uses 5 (current)
+// Resource file version numbers: RMF uses 1 (original), ZMF uses 5/6
 #define XFILERESOURCE_VERSION_RMF   1
 
 // v2: LZMA via XZ container
@@ -774,9 +774,15 @@ typedef struct XBankToken XBankToken;
 // v5: ZINS v2 typed entries (allows packing INST and ALIS together)
 //     ZBNK typed block for BANK and MIDI resources
 //     ZSHD packed SND/CSND/ESND headers with payload references
-#define XFILERESOURCE_VERSION_ZMF   5
+// v6: Instrument oscillators (OSCL) + PWID / WIDX modulators
+//
+// Writers should stamp v5 unless any instrument uses OSCL (then v6), so older
+// v5-only players can still open non-oscillator ZMF/ZSB files.
+#define XFILERESOURCE_VERSION_ZMF_NO_OSC 5
+#define XFILERESOURCE_VERSION_ZMF        6
 
-// Return the correct version number for a given mapID
+// Default new-file stamp for a mapID (ZMF defaults to v6; save paths may
+// downgrade to XFILERESOURCE_VERSION_ZMF_NO_OSC when no oscillators are used).
 #define XFILERESOURCE_VERSION_FOR_ID(id) \
     (((id) == XFILERESOURCE_ZMF_ID) ? XFILERESOURCE_VERSION_ZMF : XFILERESOURCE_VERSION_RMF)
 

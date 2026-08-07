@@ -214,6 +214,9 @@ void XGetCompressionName(int32_t compressionType, void *cName)
 //          XStrCpy((char *)cName, "CCITT G.721 ADPCM compression (IMA 4 to 1)");
             XStrCpy((char *)cName, "ADPCM compression (IMA 4 to 1)");
             break;
+        case C_IMA2:
+            XStrCpy((char *)cName, "2-bit ADPCM (headerless)");
+            break;
         case C_IMA4_WAV:
             XStrCpy((char *)cName, "WAV-style ADPCM compression (IMA 4 to 1)");
             break;

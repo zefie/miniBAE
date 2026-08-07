@@ -460,6 +460,12 @@ UNIT_TYPE PV_TranslateFromFileToMemoryID(uint32_t fileUnitType)
         {SQUARE_WAVE2,SQUARE_WAVE2_LONG},
         {SAWTOOTH_WAVE,SAWTOOTH_WAVE_LONG},
         {SAWTOOTH_WAVE2,SAWTOOTH_WAVE2_LONG},
+#if USE_ZMF_SUPPORT == TRUE
+        {PULSE_OSC_WAVE,PULSE_OSC_WAVE_LONG},
+        /* SAWW is an alias of LFO SAWT for oscillators */
+        {SAWTOOTH_WAVE,SAWTOOTH_OSC_WAVE_LONG},
+        {NOISE_OSC_WAVE,NOISE_OSC_WAVE_LONG},
+#endif
 
         {VOLUME_LFO,VOLUME_LFO_LONG},
         {PITCH_LFO,PITCH_LFO_LONG},
@@ -468,6 +474,10 @@ UNIT_TYPE PV_TranslateFromFileToMemoryID(uint32_t fileUnitType)
         {LPF_FREQUENCY,LPF_FREQUENCY_LONG},
         {LPF_DEPTH,LPF_DEPTH_LONG},
         {LOW_PASS_AMOUNT,LOW_PASS_AMOUNT_LONG}
+#if USE_ZMF_SUPPORT == TRUE
+        ,{PULSE_WIDTH_LFO,PULSE_WIDTH_LFO_LONG}
+        ,{WAVE_INDEX_LFO,WAVE_INDEX_LFO_LONG}
+#endif
     };
 
     for (count = 0; count < (int16_t)(sizeof(types) / sizeof(MemoryToFileXlate)); count++)
@@ -519,6 +529,12 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
     theI->LFORecordCount = 0;
     theI->curveRecordCount = 0;
     theI->extendedFormat = FALSE;
+#if USE_ZMF_SUPPORT == TRUE
+    theI->useOscillator = FALSE;
+    theI->oscWaveShape = SINE_WAVE_REAL;
+    theI->oscPulseWidth = 32768;
+    theI->oscVolume = OSC_VOLUME_DEFAULT;
+#endif
     pUnit = NULL;
     size = theXSize;
     if (theX && size)
@@ -633,7 +649,36 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                                 
                             case INST_DEFAULT_MOD:      // default mod wheel hookup
                                 disableModWheel = TRUE;
-                                break;                                  
+                                break;
+
+#if USE_ZMF_SUPPORT == TRUE
+                            case INST_OSCILLATOR:
+                                theI->useOscillator = TRUE;
+                                theI->oscWaveShape = PV_TranslateFromFileToMemoryID(XGetLong(pUnit) & 0x5F5F5F5F);
+                                pUnit += 4;
+                                theI->oscPulseWidth = (int32_t)XGetLong(pUnit);
+                                pUnit += 4;
+                                if (theI->oscPulseWidth < 0)
+                                    theI->oscPulseWidth = 0;
+                                if (theI->oscPulseWidth > 65536)
+                                    theI->oscPulseWidth = 65536;
+                                /* Optional third DLNG: volume. Older OSCL was shape+PW only;
+                                 * next value is volume when 0..65536 (unit FourCCs are larger). */
+                                {
+                                    int32_t peekVol = (int32_t)XGetLong(pUnit);
+                                    if (peekVol >= 0 && peekVol <= 65536)
+                                    {
+                                        theI->oscVolume = peekVol;
+                                        pUnit += 4;
+                                    }
+                                    else
+                                        theI->oscVolume = OSC_VOLUME_DEFAULT;
+                                }
+                                /* File 'SINE' → SINE_WAVE (LFO triangle); oscillators use real sine. */
+                                if (theI->oscWaveShape == 0 || theI->oscWaveShape == SINE_WAVE)
+                                    theI->oscWaveShape = SINE_WAVE_REAL;
+                                break;
+#endif
 
                             // LFO types
                             case INST_PITCH_LFO:
@@ -643,6 +688,10 @@ static void PV_GetEnvelopeData(InstrumentResource   *theX, GM_Instrument *theI, 
                             case INST_LOW_PASS_AMOUNT:
                             case INST_LPF_DEPTH:
                             case INST_LPF_FREQUENCY:
+#if USE_ZMF_SUPPORT == TRUE
+                            case INST_PULSE_WIDTH_LFO:
+                            case INST_WAVE_INDEX_LFO:
+#endif
                                 if (lfoCount > MAX_LFOS)
                                 {
                                     goto bailoninstrument;
@@ -903,19 +952,36 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
         if (header.keySplitCount < 2)
         {
             theSampleID = (int32_t)header.sndResourceID;
-            if (GMCache_IsIDInCache(pMixer, theSampleID, bankToken) != TRUE)
+            theSound = NULL;
+#if USE_ZMF_SUPPORT == TRUE
+            /* 0xFFFF = no sample; oscillator instruments may omit SND entirely. */
+            if ((uint16_t)header.sndResourceID != 0xFFFFu)
+#endif
             {
-                sndInfo = GMCache_BuildSampleCacheEntry(pMixer, theSampleID, bankToken, NULL, pErr);
+                if (GMCache_IsIDInCache(pMixer, theSampleID, bankToken) != TRUE)
+                {
+                    sndInfo = GMCache_BuildSampleCacheEntry(pMixer, theSampleID, bankToken, NULL, pErr);
+                }
+                else
+                {
+                    sndInfo = GMCache_GetCachePtrFromID(pMixer, theSampleID, bankToken, pErr);
+                    if (pErr && *pErr == NO_ERR)
+                    {
+                        *pErr = GMCache_IncrCacheEntryRef(pMixer, sndInfo);
+                        if (*pErr == NO_ERR) { cacheRefAdded = TRUE; }
+                    }
+                }
+                if (pErr && *pErr == NO_ERR && sndInfo)
+                {
+                    theSound = GMCache_GetSamplePtr(sndInfo, pErr);
+                }
             }
-            else
+#if USE_ZMF_SUPPORT == TRUE
+            else if (pErr)
             {
-                sndInfo = GMCache_GetCachePtrFromID(pMixer, theSampleID, bankToken, pErr);
-                if (pErr && *pErr != NO_ERR) { return theI; }
-                *pErr = GMCache_IncrCacheEntryRef(pMixer, sndInfo);
-                if (pErr && *pErr == NO_ERR) { cacheRefAdded = TRUE; }
+                *pErr = NO_ERR;
             }
-            if (pErr && *pErr != NO_ERR) { return theI; }
-            theSound = GMCache_GetSamplePtr(sndInfo, pErr);
+#endif
             if (theSound)
             {
                 theI = (GM_Instrument *)XNewPtr((int32_t)sizeof(GM_Instrument));
@@ -972,7 +1038,69 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                     if (pErr) { *pErr = MEMORY_ERR; }
                 }
             }
-            else
+#if USE_ZMF_SUPPORT == TRUE
+            else if ((header.flags1 & ZBF_extendedFormat) != 0)
+            {
+                /* Sample missing/none: allow OSCL-only instruments. */
+                theI = (GM_Instrument *)XNewPtr((int32_t)sizeof(GM_Instrument));
+                if (theI)
+                {
+                    theI->sourceIsZsb = PV_IsZsbBankToken(bankToken);
+                    theI->disableSndLooping = TEST_FLAG_VALUE(header.flags1, ZBF_disableSndLooping);
+                    theI->playAtSampledFreq = TEST_FLAG_VALUE(header.flags2, ZBF_playAtSampledFreq);
+                    theI->doKeymapSplit = FALSE;
+                    theI->notPolyphonic = TEST_FLAG_VALUE(header.flags2, ZBF_notPolyphonic);
+#if REVERB_USED != REVERB_DISABLED
+                    theI->avoidReverb = TEST_FLAG_VALUE(header.flags1, ZBF_avoidReverb);
+#endif
+                    theI->useSampleRate = FALSE;
+                    theI->sampleAndHold = TEST_FLAG_VALUE(header.flags1, ZBF_sampleAndHold);
+                    theI->advancedInterpolation = FALSE;
+                    theI->sampleOffsetStartEnabled = FALSE;
+                    theI->minLoopSize = PV_GetInstrumentMinLoopSize(pSong);
+                    theI->useSoundModifierAsRootKey = TEST_FLAG_VALUE(header.flags2, ZBF_useSoundModifierAsRootKey);
+                    PV_GetEnvelopeData(theX, theI, patchSize);
+                    if (!theI->useOscillator)
+                    {
+                        XDisposePtr(theI);
+                        theI = NULL;
+                    }
+                    else
+                    {
+                        theI->u.w.theWaveform = NULL;
+                        theI->u.w.bitSize = 16;
+                        theI->u.w.channels = 1;
+                        theI->u.w.waveformID = (XShortResourceID)0xFFFF;
+                        theI->u.w.waveSize = 0;
+                        theI->u.w.waveFrames = 0;
+                        theI->u.w.startLoop = 0;
+                        theI->u.w.endLoop = 0;
+                        theI->masterRootKey = header.midiRootKey;
+                        theI->panPlacement = header.panPlacement;
+                        theI->u.w.baseMidiPitch = 60;
+                        theI->u.w.sampledRate = (XFIXED)(44100L << 16);
+                        theI->miscParameter1 = header.miscParameter1;
+                        theI->miscParameter2 = header.miscParameter2;
+                        if (theI->useSoundModifierAsRootKey)
+                        {
+                            theI->enableSoundModifier = FALSE;
+                            if (theI->miscParameter2 == 0) { theI->miscParameter2 = 100; }
+                        }
+                        else
+                        {
+                            theI->enableSoundModifier = FALSE;
+                            theI->smodResourceID = 0;
+                        }
+                        if (pErr) { *pErr = NO_ERR; }
+                    }
+                }
+                else if (pErr)
+                {
+                    *pErr = MEMORY_ERR;
+                }
+            }
+#endif
+            if (!theI)
             {
                 if (pErr && *pErr == NO_ERR)
                 {
@@ -1068,6 +1196,13 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                             theS->LPF_lowpassAmount = theI->LPF_lowpassAmount;
                             theS->defaultReverbSend = theI->defaultReverbSend;
                             theS->defaultChorusSend = theI->defaultChorusSend;
+#if USE_ZMF_SUPPORT == TRUE
+                            /* OSCL lives on the parent INST; notes play the split. */
+                            theS->useOscillator = theI->useOscillator;
+                            theS->oscWaveShape = theI->oscWaveShape;
+                            theS->oscPulseWidth = theI->oscPulseWidth;
+                            theS->oscVolume = theI->oscVolume;
+#endif
                         }
                         else if (pErr && *pErr != NO_ERR)
                         {

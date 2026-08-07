@@ -138,7 +138,10 @@ typedef enum BAERmfEditorCompressionType
     BAE_EDITOR_COMPRESSION_ALAW        = 33, /* G.711 A-law */
     BAE_EDITOR_COMPRESSION_ULAW        = 34, /* G.711 u-law */
 #if USE_QOA_SUPPORT == TRUE
-    BAE_EDITOR_COMPRESSION_QOA         = 35  /* Quite OK Audio (sample-only, ZMF required) */
+    BAE_EDITOR_COMPRESSION_QOA         = 35, /* Quite OK Audio (sample-only, ZMF required) */
+#endif
+#if USE_ZMF_SUPPORT == TRUE
+    BAE_EDITOR_COMPRESSION_ADPCM_2BIT  = 36  /* headerless 2-bit IMA (ZMF v6) */
 #endif
 } BAERmfEditorCompressionType;
 
@@ -278,6 +281,14 @@ typedef struct BAERmfEditorInstrumentExtInfo
     BAERmfEditorCompressionType sampleTargetCompression;
     BAERmfEditorSndStorageType  sampleTargetStorageType;
     BAERmfEditorOpusMode        sampleTargetOpusMode;
+
+#if USE_ZMF_SUPPORT == TRUE
+    /* Sample-free oscillator (INST unit OSCL). ZMF v6+. */
+    BAE_BOOL useOscillator;
+    int32_t oscWaveShape;   /* LFO shapes + 'PLSE'/'NOIS' ('SAWW' aliases 'SAWT') */
+    int32_t oscPulseWidth;  /* 0..65536, 32768 = 50% duty; used for PLSE / PWID */
+    int32_t oscVolume;      /* 0..65536, 65536 = unity; default OSC_VOLUME_DEFAULT (25%) */
+#endif
 } BAERmfEditorInstrumentExtInfo;
 
 // BAESong_PatchLoadedInstrumentExtInfo()
@@ -571,7 +582,7 @@ BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document, 
 BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReason);
 
 /* Read the resource-map header of an RMF/ZMF file and return its format version.
-    outVersion receives the raw version field (e.g. XFILERESOURCE_VERSION_ZMF = 5).
+    outVersion receives the raw version field (ZMF: 5 without OSCL, 6 with OSCL).
     Returns BAE_PARAM_ERR, BAE_FILE_NOT_FOUND, BAE_FILE_IO_ERROR, or BAE_BAD_FILE on failure. */
 BAEResult BAERmfEditorDocument_GetFileVersion(BAEPathName filePath, int32_t *outVersion);
 
@@ -598,6 +609,8 @@ enum BAEZMFReasonCode
     BAEZMF_REASON_PANFIX = 32, /* song is flagged to use the pan fix */
     BAEZMF_REASON_EXTENDED_ADSR = 64,  /* any instrument has > 8 ADSR stages */
     BAEZMF_REASON_LPF_FILTER = 128, /* LPF/resonance on a stereo sample (mono LPF is classic HSB/RMF OK) */
+    BAEZMF_REASON_OSCILLATOR = 256, /* instrument uses OSCL sample-free oscillator (ZMF v6) */
+    BAEZMF_REASON_ADPCM_2BIT = 512, /* sample uses headerless 2-bit IMA (ZMF v6) */
     BAEZMF_ALREADY_ZMF = 0x40000000u,
     BAEZMF_REASON_OTHER = 0x80000000u
 };

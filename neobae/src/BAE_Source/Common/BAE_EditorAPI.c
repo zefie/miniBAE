@@ -563,6 +563,12 @@ typedef struct BAERmfEditorInstrumentExt
     EditorLFO       lfos[EDITOR_MAX_LFOS];
     uint32_t        curveCount;
     EditorCurve     curves[EDITOR_MAX_CURVES];
+#if USE_ZMF_SUPPORT == TRUE
+    bool            useOscillator;
+    int32_t         oscWaveShape;
+    int32_t         oscPulseWidth;
+    int32_t         oscVolume;
+#endif
     /* Raw INST resource blob for unmodified round-trip */
     XPTR            originalInstData;
     int32_t         originalInstSize;
@@ -1805,9 +1811,17 @@ static BAERmfEditorCCEvent *PV_FindTrackCCEvent(BAERmfEditorTrack *track, unsign
 static BAERmfEditorCCEvent const *PV_FindTrackCCEventConst(BAERmfEditorTrack const *track, unsigned char cc, uint32_t eventIndex, uint32_t *outActualIndex);
 static unsigned char PV_ToLowerAscii(unsigned char c);
 static uint16_t PV_BankGroupFromInternalBank(uint16_t internalBank);
+static void PV_BankToMidiMsbLsb(uint16_t internalBank, uint16_t *outMsb, uint16_t *outLsb);
+static bool PV_BanksEquivalent(uint16_t a, uint16_t b);
 static bool PV_IsLoopStartMarkerText(unsigned char const *data, uint32_t size, int32_t *outLoopCount);
 static bool PV_IsLoopEndMarkerText(unsigned char const *data, uint32_t size);
 static void PV_RemoveLoopMarkersFromTrack(BAERmfEditorTrack *track);
+
+/* Beatnik: 0xFFFF (-1) means "no sample". ID 0 is a valid SND resource. */
+static bool PV_IsNoSampleSndID(XShortResourceID sid)
+{
+    return ((uint16_t)sid == 0xFFFFu) ? TRUE : FALSE;
+}
 
 static char *PV_DuplicateString(char const *source)
 {
@@ -3364,6 +3378,8 @@ static bool PV_IsSupportedPassthroughCompression(SndCompressionType compressionT
         case C_QOA:
             return TRUE;
 #endif
+        case C_IMA2:
+            return TRUE;
         default:
             return FALSE;
     }
@@ -5637,6 +5653,19 @@ static void PV_FillExtFromXInstrument(BAERmfEditorInstrumentExt *ext, XInstrumen
                 ext->LPF_lowpassAmount = unit->u.lpf.LPF_lowpassAmount;
                 break;
 
+#if USE_ZMF_SUPPORT == TRUE
+            case INST_OSCILLATOR:
+                ext->useOscillator = TRUE;
+                ext->oscWaveShape = unit->u.osc.waveShape;
+                ext->oscPulseWidth = unit->u.osc.pulseWidth;
+                ext->oscVolume = unit->u.osc.volume;
+                if (ext->oscVolume < 0)
+                    ext->oscVolume = 0;
+                if (ext->oscVolume > 65536)
+                    ext->oscVolume = 65536;
+                break;
+#endif
+
             case INST_EXPONENTIAL_CURVE:
                 if (ext->curveCount >= EDITOR_MAX_CURVES)
                 {
@@ -5673,6 +5702,10 @@ static void PV_FillExtFromXInstrument(BAERmfEditorInstrumentExt *ext, XInstrumen
             case INST_LOW_PASS_AMOUNT:
             case INST_LPF_DEPTH:
             case INST_LPF_FREQUENCY:
+#if USE_ZMF_SUPPORT == TRUE
+            case INST_PULSE_WIDTH_LFO:
+            case INST_WAVE_INDEX_LFO:
+#endif
                 if (ext->lfoCount >= EDITOR_MAX_LFOS)
                 {
                     break;
@@ -5785,6 +5818,24 @@ static void PV_FillXFromInstrumentExt(XInstrumentData *x, BAERmfEditorInstrument
         unitIndex++;
     }
 
+#if USE_ZMF_SUPPORT == TRUE
+    if (ext->useOscillator && unitIndex < 256)
+    {
+        x->units[unitIndex].unitType = INST_OSCILLATOR;
+        x->units[unitIndex].unitID = (uint32_t)unitIndex;
+        x->units[unitIndex].u.osc.waveShape = ext->oscWaveShape ? ext->oscWaveShape : SINE_WAVE_LONG;
+        x->units[unitIndex].u.osc.pulseWidth = ext->oscPulseWidth;
+        if (x->units[unitIndex].u.osc.pulseWidth <= 0)
+            x->units[unitIndex].u.osc.pulseWidth = 32768;
+        x->units[unitIndex].u.osc.volume = ext->oscVolume;
+        if (x->units[unitIndex].u.osc.volume < 0)
+            x->units[unitIndex].u.osc.volume = 0;
+        if (x->units[unitIndex].u.osc.volume > 65536)
+            x->units[unitIndex].u.osc.volume = 65536;
+        unitIndex++;
+    }
+#endif
+
     for (i = 0; i < ext->lfoCount && unitIndex < 256; i++)
     {
         EditorLFO const *lfo = &ext->lfos[i];
@@ -5863,6 +5914,10 @@ static void PV_ParseExtendedInstData(XPTR instData, int32_t instSize, BAERmfEdit
     ext->midiRootKey = (int16_t)XGetShort((void *)(pBase + 2));
     ext->miscParameter1 = (int16_t)XGetShort((void *)(pBase + 8));
     ext->miscParameter2 = (int16_t)XGetShort((void *)(pBase + 10));
+#if USE_ZMF_SUPPORT == TRUE
+    ext->oscVolume = OSC_VOLUME_DEFAULT;
+    ext->oscPulseWidth = 32768;
+#endif
 
     /* Default ADSR until units override it */
     ext->volumeADSR.stageCount = 1;
@@ -7503,19 +7558,21 @@ static BAEResult PV_BuildTrackData(BAERmfEditorTrack const *track,
     }
 
     /* Emit the track's bank/program at tick 0 only when not already explicitly
-     * present in aux events for the channel. Keep bank as canonical 14-bit
-     * (MSB: bits 7-13, LSB: bits 0-6) to avoid mutating authored LSB-only banks. */
+     * present in aux events for the channel. Editor banks 0..127 are Beatnik
+     * groups (CC0); values >= 128 are MIDI (MSB<<7)|LSB. */
     if (track->bank != 0 || track->program != 0)
     {
         unsigned char channel = track->channel & 0x0F;
-        uint16_t bankMsb = (track->bank >> 7) & 0x7F;
-        uint16_t bankLsb = track->bank & 0x7F;
+        uint16_t bankMsb = 0;
+        uint16_t bankLsb = 0;
+        int emittedBankMsb = 0;
+        int emittedBankLsb = 0;
+
+        PV_BankToMidiMsbLsb(track->bank, &bankMsb, &bankLsb);
 
         /* Emit Bank MSB (CC 0). Channel 10 still needs non-zero MSB for Beatnik
          * kit banks (group*256+128+note). Only skip when MSB is already explicit
          * in aux, or is zero (standard GM drums). */
-        int emittedBankMsb = 0;
-        int emittedBankLsb = 0;
         if (!explicitBankMsb[channel] && bankMsb != 0)
         {
             result = PV_ByteBufferAppendVLQ(trackData, 0);
@@ -7611,7 +7668,10 @@ static BAEResult PV_BuildTrackData(BAERmfEditorTrack const *track,
             noteOn->blobSize = 0;
             noteOn->bank = note->bank;
             noteOn->program = note->program;
-            noteOn->applyProgram = (explicitBankMsb[note->channel] || explicitBankLsb[note->channel] || explicitProgram[note->channel]) ? 0 : 1;
+            /* Always allow per-note bank/program injection. Explicit aux events
+             * still run first (order); injection only emits when the note's
+             * bank/program differs from the channel's current state. */
+            noteOn->applyProgram = 1;
 
             noteOff->tick = note->startTick + note->durationTicks;
             noteOff->sequence = note->noteOffOrder;
@@ -7749,17 +7809,16 @@ static BAEResult PV_BuildTrackData(BAERmfEditorTrack const *track,
                 int bankChanged;
 
                 eventChannel = (unsigned char)(event->status & 0x0F);
-                bankChanged = (event->bank != currentBank[eventChannel]);
+                bankChanged = !PV_BanksEquivalent(event->bank, currentBank[eventChannel]);
                 if (bankChanged)
                 {
                     uint16_t bankMsb;
                     uint16_t bankLsb;
-                    uint16_t prevBankLsb;
+                    uint16_t prevMsb;
+                    uint16_t prevLsb;
 
-                    bankMsb = (uint16_t)((event->bank >> 7) & 0x7F);
-                    bankLsb = (uint16_t)(event->bank & 0x7F);
-
-                    prevBankLsb = (uint16_t)(currentBank[eventChannel] & 0x7F);
+                    PV_BankToMidiMsbLsb(event->bank, &bankMsb, &bankLsb);
+                    PV_BankToMidiMsbLsb(currentBank[eventChannel], &prevMsb, &prevLsb);
 
                     result = PV_ByteBufferAppendVLQ(trackData, delta);
                     if (result != BAE_NO_ERROR)
@@ -7788,7 +7847,7 @@ static BAEResult PV_BuildTrackData(BAERmfEditorTrack const *track,
                     /* CC0 consumed the delta; all subsequent injected events at the
                        same tick (CC32, PC) must use delta=0. */
                     delta = 0;
-                    if (bankLsb != 0 || prevBankLsb != 0)
+                    if (bankLsb != 0 || prevLsb != 0)
                     {
                         result = PV_ByteBufferAppendVLQ(trackData, 0);
                         if (result != BAE_NO_ERROR)
@@ -8163,6 +8222,147 @@ static BAEResult PV_BuildMidiWithAppendedLoopTrack(BAERmfEditorDocument const *d
     return result;
 }
 
+#if USE_ZMF_SUPPORT == TRUE
+/* Write INST resources for oscillator-only (sample-free) instruments that were
+ * not emitted by the sample-driven INST builder above/below. */
+static BAEResult PV_AddSampleFreeInstrumentResources(BAERmfEditorDocument *document,
+                                                     XFILE fileRef)
+{
+    uint32_t extIndex;
+
+    if (!document || !fileRef)
+    {
+        return BAE_PARAM_ERR;
+    }
+
+    for (extIndex = 0; extIndex < document->instrumentExtCount; ++extIndex)
+    {
+        BAERmfEditorInstrumentExt const *ext = &document->instrumentExts[extIndex];
+        XLongResourceID instID;
+        uint32_t sampleIndex;
+        bool hasSample;
+        char pascalName[256];
+        BAEResult nameResult;
+        XPTR extTail;
+        int32_t extTailSize;
+        unsigned char *instBytes;
+        int32_t instSize;
+        int32_t totalSize;
+
+        if (!ext->useOscillator)
+        {
+            continue;
+        }
+        instID = ext->instID;
+        /* INST id 0 is valid (bank-group 0 / program 0). */
+        if (XExistsFileResource(fileRef, ID_INST, instID) != FALSE)
+        {
+            continue;
+        }
+
+        hasSample = FALSE;
+        for (sampleIndex = 0; sampleIndex < document->sampleCount; ++sampleIndex)
+        {
+            if (document->samples[sampleIndex].instID == (uint32_t)instID)
+            {
+                hasSample = TRUE;
+                break;
+            }
+        }
+        if (hasSample)
+        {
+            continue;
+        }
+
+        nameResult = PV_CreatePascalName(
+            (ext->displayName && ext->displayName[0]) ? ext->displayName : "Oscillator",
+            pascalName);
+        if (nameResult != BAE_NO_ERROR)
+        {
+            return nameResult;
+        }
+
+        /* Prefer bit-perfect original INST when oscillator mode was not edited. */
+        if (!ext->dirty && ext->originalInstData && ext->originalInstSize >= 14)
+        {
+            debug_message("[RMF Save] INST id=%ld sample-free oscillator verbatim (%ld bytes)\n",
+                          (long)instID, (long)ext->originalInstSize);
+            if (XAddFileResource(fileRef,
+                                 ID_INST,
+                                 instID,
+                                 pascalName,
+                                 ext->originalInstData,
+                                 ext->originalInstSize) != 0)
+            {
+                return BAE_FILE_IO_ERROR;
+            }
+            continue;
+        }
+
+        extTail = NULL;
+        extTailSize = 0;
+        if (ext->hasExtendedData || ext->dirty || ext->useOscillator)
+        {
+            if (!ext->dirty && ext->originalInstData && ext->originalInstSize > 0)
+            {
+                if (PV_CopyOriginalInstExtendedTail(ext, &extTail, &extTailSize) != BAE_NO_ERROR)
+                {
+                    extTail = NULL;
+                    extTailSize = 0;
+                }
+            }
+            if (!extTail)
+            {
+                extTail = PV_SerializeExtendedInstTail(ext, &extTailSize);
+            }
+        }
+
+        /* Non-split INST header + tremolo terminator (same layout as empty bank INST). */
+        instSize = (int32_t)sizeof(InstrumentResource);
+        totalSize = instSize + extTailSize;
+        instBytes = (unsigned char *)XNewPtr(totalSize);
+        if (!instBytes)
+        {
+            if (extTail)
+            {
+                XDisposePtr(extTail);
+            }
+            return BAE_MEMORY_ERR;
+        }
+        XSetMemory(instBytes, totalSize, 0);
+        XPutShort(instBytes + 0, 0xFFFFu); /* sndResourceID: no sample */
+        XPutShort(instBytes + 2, ext->midiRootKey ? (uint16_t)ext->midiRootKey : 60u);
+        instBytes[4] = (unsigned char)ext->panPlacement;
+        instBytes[5] = (unsigned char)(ext->flags1 | ZBF_extendedFormat);
+        instBytes[6] = ext->flags2;
+        XPutShort(instBytes + 8, (uint16_t)ext->miscParameter1);
+        XPutShort(instBytes + 10, (uint16_t)(ext->miscParameter2 ? ext->miscParameter2 : 100));
+        XPutShort(instBytes + 12, 0); /* keySplitCount */
+        XPutShort(instBytes + 14, 0); /* tremoloCount */
+        XPutShort(instBytes + 16, 0x8000); /* tremoloEnd */
+        if (extTail && extTailSize > 0)
+        {
+            XBlockMove(extTail, instBytes + instSize, extTailSize);
+        }
+        if (extTail)
+        {
+            XDisposePtr(extTail);
+        }
+
+        debug_message("[RMF Save] INST id=%ld sample-free oscillator rebuilt (%ld bytes)\n",
+                      (long)instID, (long)totalSize);
+        if (XAddFileResource(fileRef, ID_INST, instID, pascalName, instBytes, totalSize) != 0)
+        {
+            XDisposePtr((XPTR)instBytes);
+            return BAE_FILE_IO_ERROR;
+        }
+        XDisposePtr((XPTR)instBytes);
+    }
+
+    return BAE_NO_ERROR;
+}
+#endif /* USE_ZMF_SUPPORT */
+
 static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fileRef, bool isZmf)
 {
     uint32_t index;
@@ -8176,8 +8376,12 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
     }
     if (document->sampleCount == 0)
     {
-        debug_message("[RMF Save] PV_AddSampleResources: no samples, returning OK\n");
+        debug_message("[RMF Save] PV_AddSampleResources: no samples\n");
+#if USE_ZMF_SUPPORT == TRUE
+        return PV_AddSampleFreeInstrumentResources(document, fileRef);
+#else
         return BAE_NO_ERROR;
+#endif
     }
 
     sampleSndIDs = (XShortResourceID *)XNewPtr((int32_t)(document->sampleCount * sizeof(XShortResourceID)));
@@ -8550,6 +8754,12 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
                     compType    = C_IMA4;
                     compSubType = CS_DEFAULT;
                     break;
+#if USE_ZMF_SUPPORT == TRUE
+                case BAE_EDITOR_COMPRESSION_ADPCM_2BIT:
+                    compType    = C_IMA2;
+                    compSubType = CS_DEFAULT;
+                    break;
+#endif
                 case BAE_EDITOR_COMPRESSION_MP3_32K:
                     compType    = C_MPEG_32;
                     compSubType = CS_MPEG2;
@@ -9782,6 +9992,15 @@ static BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fil
 
     XDisposePtr((XPTR)sampleSndIDs);
     XDisposePtr((XPTR)sampleInstIDs);
+#if USE_ZMF_SUPPORT == TRUE
+    {
+        BAEResult oscResult = PV_AddSampleFreeInstrumentResources(document, fileRef);
+        if (oscResult != BAE_NO_ERROR)
+        {
+            return oscResult;
+        }
+    }
+#endif
     return BAE_NO_ERROR;
 }
 
@@ -13527,6 +13746,10 @@ BAEResult BAERmfEditorDocument_GetSampleCodecDescription(BAERmfEditorDocument co
         PV_CopyStringBounded(outCodec, outCodecSize, "QOA");
     } else
 #endif
+    if (sample->sourceCompressionType == (uint32_t)C_IMA2)
+    {
+        PV_CopyStringBounded(outCodec, outCodecSize, "2-bit ADPCM");
+    } else
     {
         if ((sample->sourceCompressionType == (uint32_t)C_NONE || sample->sourceCompressionType == 0)
             && (bitSize == 8 || bitSize == 16))
@@ -13604,6 +13827,8 @@ static bool PV_IsBitstreamPassthroughCodec(SndCompressionType srcCodec)
     case C_QOA:
         return TRUE;
 #endif
+    case C_IMA2:
+        return TRUE;
     default:
         return FALSE;
     }
@@ -13806,6 +14031,16 @@ BAEResult BAERmfEditorDocument_GetInstrumentExtInfo(BAERmfEditorDocument const *
     outInfo->LPF_lowpassAmount = ext->LPF_lowpassAmount;
     outInfo->defaultReverbSend = ext->defaultReverbSend;
     outInfo->defaultChorusSend = ext->defaultChorusSend;
+#if USE_ZMF_SUPPORT == TRUE
+    outInfo->useOscillator = ext->useOscillator ? TRUE : FALSE;
+    outInfo->oscWaveShape = ext->oscWaveShape ? ext->oscWaveShape : (int32_t)SINE_WAVE_LONG;
+    outInfo->oscPulseWidth = ext->oscPulseWidth > 0 ? ext->oscPulseWidth : 32768;
+    outInfo->oscVolume = ext->oscVolume;
+    if (outInfo->oscVolume < 0)
+        outInfo->oscVolume = 0;
+    if (outInfo->oscVolume > 65536)
+        outInfo->oscVolume = 65536;
+#endif
     PV_CopyEditorADSRToInfo(&ext->volumeADSR, &outInfo->volumeADSR);
     outInfo->lfoCount = ext->lfoCount;
     for (i = 0; i < ext->lfoCount && i < EDITOR_MAX_LFOS; i++)
@@ -13888,6 +14123,21 @@ BAEResult BAERmfEditorDocument_SetInstrumentExtInfo(BAERmfEditorDocument *docume
     ext->LPF_lowpassAmount = info->LPF_lowpassAmount;
     ext->defaultReverbSend = info->defaultReverbSend;
     ext->defaultChorusSend = info->defaultChorusSend;
+#if USE_ZMF_SUPPORT == TRUE
+    ext->useOscillator = info->useOscillator ? TRUE : FALSE;
+    ext->oscWaveShape = info->oscWaveShape ? info->oscWaveShape : (int32_t)SINE_WAVE_LONG;
+    ext->oscPulseWidth = info->oscPulseWidth > 0 ? info->oscPulseWidth : 32768;
+    ext->oscVolume = info->oscVolume;
+    if (ext->oscVolume < 0)
+        ext->oscVolume = 0;
+    if (ext->oscVolume > 65536)
+        ext->oscVolume = 65536;
+    if (ext->useOscillator)
+    {
+        ext->flags1 |= ZBF_extendedFormat;
+        ext->hasExtendedData = TRUE;
+    }
+#endif
     PV_CopyInfoToEditorADSR(&info->volumeADSR, &ext->volumeADSR);
     ext->lfoCount = info->lfoCount;
     if (ext->lfoCount > EDITOR_MAX_LFOS)
@@ -14548,6 +14798,12 @@ void BAEZMFReasonCodeToString(uint32_t reason, char *outBuffer, uint32_t bufferS
     if (reason & BAEZMF_REASON_LPF_FILTER)
         APPEND("Stereo sample with low-pass filter / resonance; ");
 
+    if (reason & BAEZMF_REASON_OSCILLATOR)
+        APPEND("Instrument oscillator (sample-free generator); ");
+
+    if (reason & BAEZMF_REASON_ADPCM_2BIT)
+        APPEND("Using 2-bit ADPCM (ZMF v6); ");
+
     if (reason & BAEZMF_REASON_OTHER)
         APPEND("Other engine flags set; ");        
 
@@ -14613,6 +14869,7 @@ BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document, 
                 {
                     reason |= BAEZMF_REASON_MODERN_CODEC;
                 }
+                /* fall through — also inspect original/source compression */
 
             case BAE_EDITOR_COMPRESSION_DONT_CHANGE:
                 /* Original data may contain a modern codec */
@@ -14629,11 +14886,22 @@ BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document, 
 #if USE_QOA_SUPPORT == TRUE
                     sample->sourceCompressionType == (uint32_t)C_QOA ||
 #endif
+                    sample->sourceCompressionType == (uint32_t)C_IMA2 ||
                 false)
                 {
                     reason |= BAEZMF_REASON_MODERN_CODEC;
+                    if (sample->sourceCompressionType == (uint32_t)C_IMA2)
+                    {
+                        reason |= BAEZMF_REASON_ADPCM_2BIT;
+                    }
                 }
                 break;
+#if USE_ZMF_SUPPORT == TRUE
+            case BAE_EDITOR_COMPRESSION_ADPCM_2BIT:
+                reason |= BAEZMF_REASON_ADPCM_2BIT;
+                reason |= BAEZMF_REASON_MODERN_CODEC;
+                break;
+#endif
             default:
                 break;
         }
@@ -14707,6 +14975,12 @@ BAE_BOOL BAERmfEditorDocument_RequiresZmf(BAERmfEditorDocument const *document, 
                 }
             }
         }
+#if USE_ZMF_SUPPORT == TRUE
+        if (ext->useOscillator)
+        {
+            reason |= BAEZMF_REASON_OSCILLATOR;
+        }
+#endif
     }
     int32_t engineFlags;
     BAERmfEditorDocument_GetEngineConfig(document, &engineFlags);
@@ -14886,6 +15160,7 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
 #if USE_QOA_SUPPORT == TRUE
                 compressionType == (uint32_t)C_QOA ||
 #endif
+                compressionType == (uint32_t)C_IMA2 ||
             false)
             {
 #if defined(_DEBUG) && (_DEBUG != 0)
@@ -14898,6 +15173,10 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
                 }
 #endif
                 reason |= BAEZMF_REASON_MODERN_CODEC;
+                if (compressionType == (uint32_t)C_IMA2)
+                {
+                    reason |= BAEZMF_REASON_ADPCM_2BIT;
+                }
             }
         }
 
@@ -14912,6 +15191,12 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
 #endif
             reason |= BAEZMF_REASON_LPF_FILTER;
         }
+#if USE_ZMF_SUPPORT == TRUE
+        if (extInfo.useOscillator)
+        {
+            reason |= BAEZMF_REASON_OSCILLATOR;
+        }
+#endif
     }
     if (outReason)
     {
@@ -14921,6 +15206,71 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
 }
 
 // end ZMF Requirements detection
+
+#if USE_ZMF_SUPPORT == TRUE
+/* Stamp ZREZ map version: v6 when OSCL or 2-bit ADPCM is present, otherwise v5
+ * so older players can open the file. No-op for IREZ / short buffers. */
+static void PV_StampZmfMapVersionForOscillator(unsigned char *data,
+                                               uint32_t size,
+                                               bool needsV6)
+{
+    XFILERESOURCEMAP map;
+    int32_t version;
+
+    if (!data || size < (uint32_t)sizeof(XFILERESOURCEMAP))
+    {
+        return;
+    }
+    XBlockMove(data, &map, (int32_t)sizeof(map));
+    if ((int32_t)XGetLong(&map.mapID) != XFILERESOURCE_ZMF_ID)
+    {
+        return;
+    }
+    version = needsV6 ? XFILERESOURCE_VERSION_ZMF
+                      : XFILERESOURCE_VERSION_ZMF_NO_OSC;
+    XPutLong(&map.version, (uint32_t)version);
+    XBlockMove(&map, data, (int32_t)sizeof(map));
+}
+
+static bool PV_DocumentNeedsZmfV6(BAERmfEditorDocument const *document)
+{
+    uint32_t reason = 0;
+
+    if (!document)
+    {
+        return FALSE;
+    }
+    (void)BAERmfEditorDocument_RequiresZmf(document, &reason);
+    return ((reason & (BAEZMF_REASON_OSCILLATOR | BAEZMF_REASON_ADPCM_2BIT)) != 0)
+               ? TRUE
+               : FALSE;
+}
+
+static bool PV_BankNeedsZmfV6(BAEBankToken bankToken)
+{
+    uint32_t reason = 0;
+
+    if (!bankToken)
+    {
+        return FALSE;
+    }
+    (void)BAERmfEditorBank_RequiresZsb(bankToken, &reason);
+    return ((reason & (BAEZMF_REASON_OSCILLATOR | BAEZMF_REASON_ADPCM_2BIT)) != 0)
+               ? TRUE
+               : FALSE;
+}
+
+/* Keep old helper names as wrappers for call-site compatibility. */
+static bool PV_DocumentHasOscillator(BAERmfEditorDocument const *document)
+{
+    return PV_DocumentNeedsZmfV6(document);
+}
+
+static bool PV_BankHasOscillator(BAEBankToken bankToken)
+{
+    return PV_BankNeedsZmfV6(bankToken);
+}
+#endif /* USE_ZMF_SUPPORT */
 
 /* ---------- Bank instrument enumeration and cloning ---------- */
 
@@ -15101,6 +15451,12 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBank(BAERmfEditorDocument *doc
                 XStrCpy(sampleName, instName);
             }
 
+            /* Oscillator / sample-free splits use snd=0xFFFF — skip payload. */
+            if (PV_IsNoSampleSndID(split.sndResourceID))
+            {
+                continue;
+            }
+
             if (PV_AddEmbeddedSampleVariant(document,
                                             bankFile,
                                             targetInstID,
@@ -15138,7 +15494,7 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBank(BAERmfEditorDocument *doc
             }
         }
     }
-    else
+    else if (!PV_IsNoSampleSndID(baseSndID))
     {
         unsigned char nonSplitRootForLoad;
         char sampleName[256];
@@ -15186,6 +15542,7 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBank(BAERmfEditorDocument *doc
                 (int16_t)XGetShort(&inst->miscParameter2);
         }
     }
+    /* else: non-split sample-free (oscillator) — INST body only, added below. */
 
     /* Parse and store extended instrument data (ADSR, LFO, LPF, curves) */
     if (!PV_FindInstrumentExt(document, targetInstID))
@@ -15209,6 +15566,23 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBank(BAERmfEditorDocument *doc
             {
                 XDisposePtr(extData.originalInstData);
             }
+        }
+    }
+
+    /* Sample-free clone must carry an oscillator (or other sample-less) INST. */
+    if (document->sampleCount == initialSampleCount)
+    {
+        BAERmfEditorInstrumentExt *ext = PV_FindInstrumentExt(document, targetInstID);
+#if USE_ZMF_SUPPORT == TRUE
+        if (!ext || !ext->useOscillator)
+#else
+        if (!ext)
+#endif
+        {
+            debug_message("[CloneFromBank] INST ID=%ld has no samples and is not oscillator\n",
+                          (long)instID);
+            XDisposePtr(instData);
+            return BAE_BAD_INSTRUMENT;
         }
     }
 
@@ -15240,12 +15614,14 @@ BAEResult BAERmfEditorDocument_AliasInstrumentFromBank(BAERmfEditorDocument *doc
     bool useSoundModifierAsRootKey;
     int16_t instMiscParam1;
     XLongResourceID targetInstID;
+    uint32_t initialSampleCount;
 
     if (!document || !bankToken)
     {
         return BAE_PARAM_ERR;
     }
     bankFile = (XFILE)bankToken;
+    initialSampleCount = document->sampleCount;
 
     rawName[0] = 0;
     instData = XGetIndexedFileResource(bankFile, ID_INST, &instID,
@@ -15313,6 +15689,11 @@ BAEResult BAERmfEditorDocument_AliasInstrumentFromBank(BAERmfEditorDocument *doc
                 XStrCpy(sampleName, instName);
             }
 
+            if (PV_IsNoSampleSndID(split.sndResourceID))
+            {
+                continue;
+            }
+
             if (PV_AddBankAliasSample(document,
                                       bankFile,
                                       bankToken,
@@ -15333,7 +15714,7 @@ BAEResult BAERmfEditorDocument_AliasInstrumentFromBank(BAERmfEditorDocument *doc
             }
         }
     }
-    else
+    else if (!PV_IsNoSampleSndID(baseSndID))
     {
         unsigned char nonSplitRootForLoad;
         char sampleName[256];
@@ -15375,6 +15756,7 @@ BAEResult BAERmfEditorDocument_AliasInstrumentFromBank(BAERmfEditorDocument *doc
                 (int16_t)XGetShort(&inst->miscParameter2);
         }
     }
+    /* else: sample-free oscillator — INST body only. */
 
     /* Parse and store extended instrument data (ADSR, LFO, LPF, curves) */
     if (!PV_FindInstrumentExt(document, targetInstID))
@@ -15397,6 +15779,22 @@ BAEResult BAERmfEditorDocument_AliasInstrumentFromBank(BAERmfEditorDocument *doc
             {
                 XDisposePtr(extData.originalInstData);
             }
+        }
+    }
+
+    if (document->sampleCount == initialSampleCount)
+    {
+        BAERmfEditorInstrumentExt *ext = PV_FindInstrumentExt(document, targetInstID);
+#if USE_ZMF_SUPPORT == TRUE
+        if (!ext || !ext->useOscillator)
+#else
+        if (!ext)
+#endif
+        {
+            debug_message("[AliasFromBank] INST ID=%ld has no samples and is not oscillator\n",
+                          (long)instID);
+            XDisposePtr(instData);
+            return BAE_BAD_INSTRUMENT;
         }
     }
 
@@ -15946,6 +16344,16 @@ BAEResult BAERmfEditorBank_GetInstrumentExtInfo(BAEBankToken bankToken,
         outInfo->LPF_lowpassAmount = extData.LPF_lowpassAmount;
         outInfo->defaultReverbSend = extData.defaultReverbSend;
         outInfo->defaultChorusSend = extData.defaultChorusSend;
+#if USE_ZMF_SUPPORT == TRUE
+        outInfo->useOscillator = extData.useOscillator ? TRUE : FALSE;
+        outInfo->oscWaveShape = extData.oscWaveShape ? extData.oscWaveShape : (int32_t)SINE_WAVE_LONG;
+        outInfo->oscPulseWidth = extData.oscPulseWidth > 0 ? extData.oscPulseWidth : 32768;
+        outInfo->oscVolume = extData.oscVolume;
+        if (outInfo->oscVolume < 0)
+            outInfo->oscVolume = 0;
+        if (outInfo->oscVolume > 65536)
+            outInfo->oscVolume = 65536;
+#endif
         PV_CopyEditorADSRToInfo(&extData.volumeADSR, &outInfo->volumeADSR);
         outInfo->lfoCount = extData.lfoCount;
         for (i = 0; i < extData.lfoCount && i < BAE_EDITOR_MAX_LFOS; i++)
@@ -17218,6 +17626,21 @@ BAEResult BAERmfEditorBank_SetInstrumentExtInfo(BAEBankToken bankToken,
     ext.LPF_frequency = info->LPF_frequency;
     ext.LPF_resonance = info->LPF_resonance;
     ext.LPF_lowpassAmount = info->LPF_lowpassAmount;
+#if USE_ZMF_SUPPORT == TRUE
+    ext.useOscillator = info->useOscillator ? TRUE : FALSE;
+    ext.oscWaveShape = info->oscWaveShape ? info->oscWaveShape : (int32_t)SINE_WAVE_LONG;
+    ext.oscPulseWidth = info->oscPulseWidth > 0 ? info->oscPulseWidth : 32768;
+    ext.oscVolume = info->oscVolume;
+    if (ext.oscVolume < 0)
+        ext.oscVolume = 0;
+    if (ext.oscVolume > 65536)
+        ext.oscVolume = 65536;
+    if (ext.useOscillator)
+    {
+        ext.flags1 |= ZBF_extendedFormat;
+        ext.hasExtendedData = TRUE;
+    }
+#endif
     PV_CopyInfoToEditorADSR(&info->volumeADSR, &ext.volumeADSR);
     ext.lfoCount = info->lfoCount;
     if (ext.lfoCount > EDITOR_MAX_LFOS)
@@ -18202,7 +18625,7 @@ static bool PV_BankFileHasValidSndResource(XFILE file, XShortResourceID sid)
     static const XResourceType sndTypes[] = {ID_ESND, ID_CSND, ID_SND, 0};
     int t;
 
-    if (!file || sid == (XShortResourceID)-1)
+    if (!file || PV_IsNoSampleSndID(sid))
     {
         return FALSE;
     }
@@ -19392,6 +19815,13 @@ static BAEResult PV_BankSaveToMemory(BAEBankToken bankToken,
         {
             *outData = (unsigned char *)data;
             *outSize = (uint32_t)imageSize;
+#if USE_ZMF_SUPPORT == TRUE
+            if (resourceID == XFILERESOURCE_ZMF_ID)
+            {
+                PV_StampZmfMapVersionForOscillator(*outData, *outSize,
+                                                   PV_BankHasOscillator(bankToken));
+            }
+#endif
             return BAE_NO_ERROR;
         }
 
@@ -19417,6 +19847,10 @@ static BAEResult PV_BankSaveToMemory(BAEBankToken bankToken,
             XFileClose(tmpFile);
             *outData = (unsigned char *)data;
             *outSize = (uint32_t)imageSize;
+#if USE_ZMF_SUPPORT == TRUE
+            PV_StampZmfMapVersionForOscillator(*outData, *outSize,
+                                               PV_BankHasOscillator(bankToken));
+#endif
             return BAE_NO_ERROR;
         }
         XDisposePtr(data);
@@ -19433,6 +19867,10 @@ static BAEResult PV_BankSaveToMemory(BAEBankToken bankToken,
         XFileClose(tmpFile);
         *outData = (unsigned char *)data;
         *outSize = (uint32_t)size;
+#if USE_ZMF_SUPPORT == TRUE
+        PV_StampZmfMapVersionForOscillator(*outData, *outSize,
+                                           PV_BankHasOscillator(bankToken));
+#endif
         return BAE_NO_ERROR;
     }
 
@@ -19535,6 +19973,13 @@ static BAEResult PV_BankSaveToMemory(BAEBankToken bankToken,
 
     *outData = (unsigned char *)data;
     *outSize = (uint32_t)size;
+#if USE_ZMF_SUPPORT == TRUE
+    if (resourceID == XFILERESOURCE_ZMF_ID)
+    {
+        PV_StampZmfMapVersionForOscillator(*outData, *outSize,
+                                           PV_BankHasOscillator(bankToken));
+    }
+#endif
     return BAE_NO_ERROR;
 }
 
@@ -20202,6 +20647,11 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBankToInstID(
                 XStrCpy(sampleName, instName);
             }
 
+            if (PV_IsNoSampleSndID(split.sndResourceID))
+            {
+                continue;
+            }
+
             if (PV_AddEmbeddedSampleVariant(document,
                                             bankFile,
                                             (XLongResourceID)targetInstID,
@@ -20240,7 +20690,7 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBankToInstID(
             }
         }
     }
-    else
+    else if (!PV_IsNoSampleSndID(baseSndID))
     {
         unsigned char nonSplitRootForLoad;
         char sampleName[256];
@@ -20289,6 +20739,7 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBankToInstID(
                 (int16_t)XGetShort(&inst->miscParameter2);
         }
     }
+    /* else: non-split sample-free (oscillator) — INST body only, added below. */
 
     /* Parse and store extended instrument data (ADSR, LFO, LPF, curves) */
     if (!PV_FindInstrumentExt(document, (XLongResourceID)targetInstID))
@@ -20311,6 +20762,23 @@ BAEResult BAERmfEditorDocument_CloneInstrumentFromBankToInstID(
             {
                 XDisposePtr(extData.originalInstData);
             }
+        }
+    }
+
+    if (document->sampleCount == initialSampleCount)
+    {
+        BAERmfEditorInstrumentExt *ext =
+            PV_FindInstrumentExt(document, (XLongResourceID)targetInstID);
+#if USE_ZMF_SUPPORT == TRUE
+        if (!ext || !ext->useOscillator)
+#else
+        if (!ext)
+#endif
+        {
+            debug_message("[CloneToInstID] INST ID=%ld has no samples and is not oscillator\n",
+                          (long)instID);
+            XDisposePtr(instData);
+            return BAE_BAD_INSTRUMENT;
         }
     }
 
@@ -20457,7 +20925,8 @@ static void PV_RemapPitchedNoteReferences(BAERmfEditorDocument *document,
 }
 
 /* Note bank is stored as MIDI (MSB<<7)|LSB. HSB INST groups use MSB 0..N.
-   GM-style selectors MSB 120/121 are not HSB banks — map them to group 0. */
+   GM-style selectors MSB 120/121 are not HSB banks — map them to group 0.
+   Editor short form: values 0..127 are Beatnik bank groups (CC0), not MIDI LSB. */
 static uint16_t PV_BankGroupFromInternalBank(uint16_t internalBank)
 {
     uint16_t msb;
@@ -20472,6 +20941,40 @@ static uint16_t PV_BankGroupFromInternalBank(uint16_t internalBank)
         return 0;
     }
     return msb;
+}
+
+/* Map editor/document bank to MIDI CC0/CC32. Beatnik uses CC0 as bank group. */
+static void PV_BankToMidiMsbLsb(uint16_t internalBank, uint16_t *outMsb, uint16_t *outLsb)
+{
+    if (!outMsb || !outLsb)
+    {
+        return;
+    }
+    if (internalBank < 128)
+    {
+        *outMsb = internalBank;
+        *outLsb = 0;
+        return;
+    }
+    *outMsb = (uint16_t)((internalBank >> 7) & 0x7F);
+    *outLsb = (uint16_t)(internalBank & 0x7F);
+}
+
+/* True when two stored bank values select the same Beatnik/MIDI bank. */
+static bool PV_BanksEquivalent(uint16_t a, uint16_t b)
+{
+    uint16_t aMsb;
+    uint16_t aLsb;
+    uint16_t bMsb;
+    uint16_t bLsb;
+
+    if (a == b)
+    {
+        return TRUE;
+    }
+    PV_BankToMidiMsbLsb(a, &aMsb, &aLsb);
+    PV_BankToMidiMsbLsb(b, &bMsb, &bLsb);
+    return (aMsb == bMsb && aLsb == bLsb) ? TRUE : FALSE;
 }
 
 static void PV_RemoveDocumentInstrumentAuxEvents(BAERmfEditorDocument *document)
@@ -20566,13 +21069,72 @@ static BAEResult PV_VerifyClonedInstrument(BAERmfEditorDocument const *document,
 {
     uint32_t sourceSampleCount;
     uint32_t sampleOffset;
+    uint32_t loadedSampleCount;
 
     sourceSampleCount = 0;
     if (BAERmfEditorBank_GetInstrumentSampleCount(bankToken,
                                                    instrumentIndex,
                                                    &sourceSampleCount) != BAE_NO_ERROR ||
-        sourceSampleCount == 0 ||
-        document->sampleCount != firstSampleIndex + sourceSampleCount)
+        sourceSampleCount == 0)
+    {
+        return BAE_BAD_FILE;
+    }
+
+    loadedSampleCount = (document->sampleCount >= firstSampleIndex)
+                            ? (document->sampleCount - firstSampleIndex)
+                            : 0;
+
+#if USE_ZMF_SUPPORT == TRUE
+    /* Oscillator-only instruments clear SND to 0xFFFF and clone with no samples. */
+    if (loadedSampleCount == 0)
+    {
+        BAERmfEditorInstrumentExtInfo extInfo;
+        BAERmfEditorInstrumentExt const *docExt;
+        uint32_t noSampleSlots;
+        uint32_t i;
+
+        XSetMemory(&extInfo, (int32_t)sizeof(extInfo), 0);
+        if (BAERmfEditorBank_GetInstrumentExtInfo(bankToken, instrumentIndex, &extInfo) != BAE_NO_ERROR ||
+            !extInfo.useOscillator)
+        {
+            return BAE_BAD_FILE;
+        }
+        noSampleSlots = 0;
+        for (i = 0; i < sourceSampleCount; ++i)
+        {
+            BAERmfEditorBankSampleInfo sourceSample;
+            XSetMemory(&sourceSample, (int32_t)sizeof(sourceSample), 0);
+            if (BAERmfEditorBank_GetInstrumentSampleInfo(bankToken,
+                                                          instrumentIndex,
+                                                          i,
+                                                          &sourceSample) != BAE_NO_ERROR)
+            {
+                return BAE_BAD_FILE;
+            }
+            if (PV_IsNoSampleSndID(sourceSample.sndResourceID))
+            {
+                noSampleSlots++;
+            }
+        }
+        if (noSampleSlots != sourceSampleCount)
+        {
+            return BAE_BAD_FILE;
+        }
+        docExt = PV_FindInstrumentExt((BAERmfEditorDocument *)document,
+                                      (XLongResourceID)targetInstID);
+        if (!docExt || !docExt->useOscillator)
+        {
+            return BAE_BAD_FILE;
+        }
+        if (outSampleCount)
+        {
+            *outSampleCount = 0;
+        }
+        return BAE_NO_ERROR;
+    }
+#endif
+
+    if (document->sampleCount != firstSampleIndex + sourceSampleCount)
     {
         return BAE_BAD_FILE;
     }
@@ -21070,6 +21632,26 @@ static BAEResult PV_AddRequiredAliases(BAERmfEditorDocument *document, XFILE fil
             }
         }
     }
+#if USE_ZMF_SUPPORT == TRUE
+    /* Sample-free oscillator embeds still need alias coverage by INST id. */
+    {
+        uint32_t extIndex;
+        for (extIndex = 0; extIndex < document->instrumentExtCount; ++extIndex)
+        {
+            BAERmfEditorInstrumentExt const *ext = &document->instrumentExts[extIndex];
+            if (ext->useOscillator &&
+                ext->instID != (XLongResourceID)BAE_EDITOR_INST_ID_NONE &&
+                ext->instID >= 512)
+            {
+                uint32_t program = (uint32_t)ext->instID - 512u;
+                if (program < 128 && program > maxProgram)
+                {
+                    maxProgram = program;
+                }
+            }
+        }
+    }
+#endif
 
     if (maxProgram == 0)
     {
@@ -21472,6 +22054,13 @@ BAEResult BAERmfEditorDocument_SaveAsRmfToMemory(BAERmfEditorDocument *document,
 
     *outData = (unsigned char *)data;
     *outSize = (uint32_t)size;
+#if USE_ZMF_SUPPORT == TRUE
+    if (useZmfContainer)
+    {
+        PV_StampZmfMapVersionForOscillator(*outData, *outSize,
+                                           PV_DocumentHasOscillator(document));
+    }
+#endif
     return BAE_NO_ERROR;
 }
 
@@ -21612,6 +22201,13 @@ BAEResult BAERmfEditorDocument_SaveAsRmfPreserveMidi(BAERmfEditorDocument *docum
 
     rmfData = (unsigned char *)data;
     rmfSize = (uint32_t)size;
+#if USE_ZMF_SUPPORT == TRUE
+    if (useZmfContainer)
+    {
+        PV_StampZmfMapVersionForOscillator(rmfData, rmfSize,
+                                           PV_DocumentHasOscillator(document));
+    }
+#endif
 
     XConvertPathToXFILENAME(filePath, &name);
     fileRef = XFileOpenForWrite(&name, TRUE);
@@ -21894,6 +22490,12 @@ static BAEResult PV_BankReEncodeSampleCore(XFILE bankFile,
             compType = C_IMA4;
             compSubType = CS_DEFAULT;
             break;
+#if USE_ZMF_SUPPORT == TRUE
+        case BAE_EDITOR_COMPRESSION_ADPCM_2BIT:
+            compType = C_IMA2;
+            compSubType = CS_DEFAULT;
+            break;
+#endif
         case BAE_EDITOR_COMPRESSION_ALAW:
             compType = C_ALAW;
             compSubType = CS_DEFAULT;

@@ -4205,7 +4205,9 @@
         return destination == static_cast<int32_t>(FOUR_CHAR('V', 'O', 'L', 'U')) ||
                destination == static_cast<int32_t>(FOUR_CHAR('L', 'P', 'F', 'R')) ||
                destination == static_cast<int32_t>(FOUR_CHAR('L', 'P', 'R', 'E')) ||
-               destination == static_cast<int32_t>(FOUR_CHAR('L', 'P', 'A', 'M'));
+               destination == static_cast<int32_t>(FOUR_CHAR('L', 'P', 'A', 'M')) ||
+               /* WIDX: Beatnik 100 (=4096) × ADSR 100 ≈ one wave table step. */
+               destination == static_cast<int32_t>(FOUR_CHAR('W', 'I', 'D', 'X'));
     }
 
     /* BE "Envelope Only": hide LFO wave UI; sine + level 0 + DC 3072 + period 0. */
@@ -4415,7 +4417,22 @@
 
         if (dest_labels && dest_label_count > 0)
         {
+            const int32_t prev_dest = lfo.destination;
             draw_four_char_combo("Destination", lfo.destination, dest_labels, dest_label_count);
+#if USE_ZMF_SUPPORT == TRUE
+            /* Fresh WIDX: Beatnik 100 (=4096) is one wave step with ADSR at 100. */
+            if (lfo.destination != prev_dest &&
+                lfo.destination == static_cast<int32_t>(FOUR_CHAR('W', 'I', 'D', 'X')) &&
+                lfo.level == 0 && lfo.DC_feed == 0)
+            {
+                lfo.DC_feed = 4096;
+                if (lfo.adsr.stageCount == 0)
+                {
+                    LfoApplyWaveformOnlyAdsrDefault(lfo.adsr);
+                }
+                LivePatchInstrumentEditor();
+            }
+#endif
         }
 
         const bool beatnik_levels = LfoDestUsesBeatnikLevel(lfo.destination);
@@ -5990,6 +6007,36 @@
         {
             return;
         }
+#if USE_ZMF_SUPPORT == TRUE
+        /* Oscillator audition NoteOn often loads from the bank/doc, not the
+         * patched in-memory instrument. Persist OSCL + PWID/WIDX LFOs so wave
+         * index and PWM modulators are audible before Apply (PW slider already
+         * went through SyncInstrumentEditorOscillatorPreview for the same reason). */
+        if (m_ie_ext.useOscillator)
+        {
+            BindInstrumentEditorDisplayName();
+            m_ie_ext.flags1 = static_cast<unsigned char>(
+                m_ie_ext.flags1 & static_cast<unsigned char>(~ZBF_ghostInstrument));
+            m_ie_ext.flags1 = static_cast<unsigned char>(m_ie_ext.flags1 | ZBF_extendedFormat);
+            m_ie_ext.hasExtendedData = TRUE;
+            if (m_ie_from_song && m_document)
+            {
+                if (BAERmfEditorDocument_SetInstrumentExtInfo(m_document, m_ie_inst_id, &m_ie_ext) ==
+                    BAE_NO_ERROR)
+                {
+                    m_document_dirty = true;
+                }
+            }
+            else if (m_bank_token && EnsureActiveBankWritable())
+            {
+                (void)BAERmfEditorBank_SetInstrumentExtInfo(m_bank_token,
+                                                            m_ie_instrument_index,
+                                                            &m_ie_ext);
+                MarkBank01TouchedIfNeeded(m_ie_bank);
+            }
+            reload_samples_from_bank = true;
+        }
+#endif
         /* Inst ID 0 is valid (bank 0 program 0). */
         const uint32_t patch_id = InstrumentEditorPatchId();
         const BAE_INSTRUMENT inst = static_cast<BAE_INSTRUMENT>(patch_id);
@@ -6102,7 +6149,13 @@
         m_ie_dirty = false;
         m_ie_undo_pushed_for_gesture = false;
         m_ie_ext_pre_edit = m_ie_ext;
+#if USE_ZMF_SUPPORT == TRUE
+        /* Oscillator toggle may have written OSCL into the bank for audition;
+         * push pristine ext back so Revert truly restores opened state. */
+        SyncInstrumentEditorOscillatorPreview();
+#else
         LivePatchInstrumentEditor(true);
+#endif
         SetStatus("Instrument editor: reverted to opened state");
     }
 
@@ -6121,6 +6174,21 @@
         BAEResult r = BAE_PARAM_ERR;
         m_ie_ext.flags1 = static_cast<unsigned char>(m_ie_ext.flags1 &
                                                      static_cast<unsigned char>(~ZBF_ghostInstrument));
+#if USE_ZMF_SUPPORT == TRUE
+        /* Persist SND linkage with oscillator mode: clear on enable, restore on disable. */
+        if (m_bank_token && !m_ie_from_song)
+        {
+            if (m_ie_ext.useOscillator)
+            {
+                SetInstrumentEditorSplitSndIds(static_cast<uint16_t>(kNoSndResourceId));
+            }
+            else
+            {
+                RestoreInstrumentEditorPristineSplits();
+            }
+            RefreshListsFromBank();
+        }
+#endif
         if (m_ie_from_song && m_document)
         {
             r = BAERmfEditorDocument_SetInstrumentExtInfo(m_document, m_ie_inst_id, &m_ie_ext);
@@ -6143,7 +6211,7 @@
         MarkBank01TouchedIfNeeded(m_ie_bank);
         if (live_patch)
         {
-            LivePatchInstrumentEditor();
+            LivePatchInstrumentEditor(true);
         }
         SetStatus("Instrument applied");
     }
@@ -6163,6 +6231,10 @@
             {static_cast<int32_t>(FOUR_CHAR('L', 'P', 'F', 'R')), "LPF_FREQUENCY"},
             {static_cast<int32_t>(FOUR_CHAR('L', 'P', 'R', 'E')), "LPF_DEPTH"},
             {static_cast<int32_t>(FOUR_CHAR('L', 'P', 'A', 'M')), "LOW_PASS_AMOUNT"},
+#if USE_ZMF_SUPPORT == TRUE
+            {static_cast<int32_t>(FOUR_CHAR('P', 'W', 'I', 'D')), "PULSE_WIDTH"},
+            {static_cast<int32_t>(FOUR_CHAR('W', 'I', 'D', 'X')), "WAVE_INDEX"},
+#endif
         };
         static const FourCharLabel kLfoShapeLabels[] = {
             {0, "None"},
@@ -6652,6 +6724,8 @@
 #if USE_ZMF_SUPPORT == TRUE
                     flag_bit("Advanced interpolation (ZMF)", m_ie_ext.flags2, ZBF_advancedInterpolation);
                     flag_bit("Sample offset start (ZMF)", m_ie_ext.flags2, ZBF_enableSampleOffsetStart);
+                    ImGui::Spacing();
+                    DrawInstrumentEditorOscillatorControls();
 #endif
                     ImGui::EndTabItem();
                 }
@@ -6736,8 +6810,180 @@
         RefreshSongSamplesFromDocument();
     }
 
+#if USE_ZMF_SUPPORT == TRUE
+    void SetInstrumentEditorSplitSndIds(uint16_t snd_id)
+    {
+        if (!m_bank_token || m_ie_from_song || !EnsureActiveBankWritable())
+        {
+            return;
+        }
+        uint32_t split_count = 0;
+        if (BAERmfEditorBank_GetInstrumentSampleCount(m_bank_token,
+                                                      m_ie_instrument_index,
+                                                      &split_count) != BAE_NO_ERROR)
+        {
+            return;
+        }
+        for (uint32_t s = 0; s < split_count; ++s)
+        {
+            (void)BAERmfEditorBank_SetInstrumentSampleSndID(
+                m_bank_token,
+                m_ie_instrument_index,
+                s,
+                static_cast<XShortResourceID>(snd_id));
+        }
+    }
+
+    /* Oscillator shape/PW UI entry point; LivePatch persists OSCL+modulators. */
+    void SyncInstrumentEditorOscillatorPreview()
+    {
+        LivePatchInstrumentEditor(true);
+    }
+
+    void DrawInstrumentEditorOscillatorControls()
+    {
+        ImGui::SeparatorText("Oscillator (ZMF)");
+        bool use_osc = m_ie_ext.useOscillator != FALSE;
+        if (ImGui::Checkbox("Don't use sample", &use_osc))
+        {
+            m_ie_ext.useOscillator = use_osc ? TRUE : FALSE;
+            if (use_osc)
+            {
+                if (m_ie_ext.oscWaveShape == 0)
+                {
+                    m_ie_ext.oscWaveShape = static_cast<int32_t>(FOUR_CHAR('S', 'I', 'N', 'E'));
+                }
+                if (m_ie_ext.oscPulseWidth <= 0)
+                {
+                    m_ie_ext.oscPulseWidth = 32768;
+                }
+                if (m_ie_ext.oscVolume <= 0)
+                {
+                    m_ie_ext.oscVolume = 16384; /* 25% default */
+                }
+                MarkInstrumentEditorDirty(false);
+                SyncInstrumentEditorOscillatorPreview();
+            }
+            else
+            {
+                /* Restore sample links so reload can succeed; clearing useOscillator
+                 * on a NULL-waveform voice crashes on note-on. */
+                RestoreInstrumentEditorPristineSplits();
+                RefreshListsFromBank();
+                MarkInstrumentEditorDirty(false);
+                SyncInstrumentEditorOscillatorPreview();
+            }
+        }
+        if (!use_osc)
+        {
+            return;
+        }
+
+        struct WaveChoice
+        {
+            const char *label;
+            int32_t fourcc;
+        };
+        /* SINE = real sine (SINE_WAVE_REAL); TRIA/SAWT/SQUA match LFO. Osc-only: PLSE/NOIS. */
+        static const WaveChoice kWaves[] = {
+            {"Sine", static_cast<int32_t>(FOUR_CHAR('S', 'I', 'N', 'E'))},
+            {"Triangle", static_cast<int32_t>(FOUR_CHAR('T', 'R', 'I', 'A'))},
+            {"Saw", static_cast<int32_t>(FOUR_CHAR('S', 'A', 'W', 'T'))},
+            {"Square", static_cast<int32_t>(FOUR_CHAR('S', 'Q', 'U', 'A'))},
+            {"Pulse", static_cast<int32_t>(FOUR_CHAR('P', 'L', 'S', 'E'))},
+            {"Noise", static_cast<int32_t>(FOUR_CHAR('N', 'O', 'I', 'S'))},
+        };
+        const int wave_count = static_cast<int>(sizeof(kWaves) / sizeof(kWaves[0]));
+        int current = 0;
+        for (int i = 0; i < wave_count; ++i)
+        {
+            int32_t shape = m_ie_ext.oscWaveShape;
+            if (shape == static_cast<int32_t>(FOUR_CHAR('S', 'A', 'W', 'W')))
+            {
+                shape = static_cast<int32_t>(FOUR_CHAR('S', 'A', 'W', 'T'));
+            }
+            if (shape == kWaves[i].fourcc)
+            {
+                current = i;
+                break;
+            }
+        }
+        ImGui::BeginGroup();
+        for (int i = 0; i < wave_count; ++i)
+        {
+            if (i)
+            {
+                ImGui::SameLine();
+            }
+            const bool selected = (current == i);
+            if (selected)
+            {
+                ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+            }
+            if (ImGui::Button(kWaves[i].label, ImVec2(64.0f, 48.0f)))
+            {
+                m_ie_ext.oscWaveShape = kWaves[i].fourcc;
+                MarkInstrumentEditorDirty(false);
+                SyncInstrumentEditorOscillatorPreview();
+            }
+            if (selected)
+            {
+                ImGui::PopStyleColor();
+            }
+        }
+        ImGui::EndGroup();
+
+        float pw_pct = static_cast<float>(m_ie_ext.oscPulseWidth) * (100.0f / 65536.0f);
+        if (ImGui::SliderFloat("Pulse Width", &pw_pct, 1.0f, 99.0f, "%.0f%%"))
+        {
+            m_ie_ext.oscPulseWidth = static_cast<int32_t>(pw_pct * (65536.0f / 100.0f) + 0.5f);
+            if (m_ie_ext.oscPulseWidth < 1)
+            {
+                m_ie_ext.oscPulseWidth = 1;
+            }
+            if (m_ie_ext.oscPulseWidth > 65535)
+            {
+                m_ie_ext.oscPulseWidth = 65535;
+            }
+            MarkInstrumentEditorDirty(false);
+            SyncInstrumentEditorOscillatorPreview();
+        }
+        if (m_ie_ext.oscVolume < 0)
+        {
+            m_ie_ext.oscVolume = 0;
+        }
+        if (m_ie_ext.oscVolume > 65536)
+        {
+            m_ie_ext.oscVolume = 65536;
+        }
+        float osc_vol_pct = static_cast<float>(m_ie_ext.oscVolume) * (100.0f / 65536.0f);
+        if (ImGui::SliderFloat("Oscillator Volume", &osc_vol_pct, 0.0f, 100.0f, "%.0f%%"))
+        {
+            m_ie_ext.oscVolume = static_cast<int32_t>(osc_vol_pct * (65536.0f / 100.0f) + 0.5f);
+            if (m_ie_ext.oscVolume < 0)
+            {
+                m_ie_ext.oscVolume = 0;
+            }
+            if (m_ie_ext.oscVolume > 65536)
+            {
+                m_ie_ext.oscVolume = 65536;
+            }
+            MarkInstrumentEditorDirty(false);
+            SyncInstrumentEditorOscillatorPreview();
+        }
+        ImGui::TextDisabled(
+            "A4=440 Hz. Noise updates at note rate. Modulators (Modulation tab): "
+            "PWID = pulse width; WIDX = wave index 0..5 (SINE TRIA SAWT SQUA PLSE NOIS). "
+            "WIDX uses Beatnik levels (100 ≈ one wave step).");
+    }
+#endif
+
     void DrawInstrumentEditorKeymapPage()
     {
+#if USE_ZMF_SUPPORT == TRUE
+        DrawInstrumentEditorOscillatorControls();
+        ImGui::Spacing();
+#endif
         if (!m_bank_token || m_ie_from_song)
         {
             ImGui::TextWrapped("Keymap split editing is available for bank instruments. Song-embedded instruments: use Volume/Filter/Modulation/Output pages.");

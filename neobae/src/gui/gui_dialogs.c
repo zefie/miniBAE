@@ -1472,6 +1472,10 @@ void render_about_dialog(SDL_Renderer *R, int mx, int my, bool mclick)
             "Copyright (C) 2023 Dominic Szablewski",
             "https://github.com/phoboslab/qoa",
 #endif
+            "",
+            "ADPCM-XQ",
+            "Copyright (c) 2024 David Bryant",
+            "https://github.com/dbry/adpcm-xq",
 #if USE_ADP_SUPPORT == TRUE
             "",
             "libg722",

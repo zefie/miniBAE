@@ -620,6 +620,19 @@ struct GM_Voice
     int32_t                 LPF_lowpassAmount, LPF_frequency, LPF_resonance;
     int32_t                 LPF_base_lowpassAmount, LPF_base_frequency, LPF_base_resonance;
 //  int32_t                 s1Left, s2Left, s3Left, s4Left, s5Left, s6Left; // for INTERP3 mode only
+#if USE_ZMF_SUPPORT == TRUE
+    unsigned char           useOscillator;      // nonzero: audio-rate generator voice
+    int32_t                 oscWaveShape;       // base shape from OSCL (may be overridden by WIDX)
+    int32_t                 oscWaveIndexBase;   // index * 256 into oscillator wave table
+    int32_t                 oscWaveIndexLive;   // base + WIDX modulation (256 = one step)
+    int32_t                 oscPulseWidth;      // base PW from INST
+    int32_t                 oscPulseWidthLive;  // after PWID LFO/ADSR modulation
+    int32_t                 oscVolume;          // 0..65536 unity gain from OSCL
+    uint32_t                oscPhase;           // 0..0xFFFFFFFF phase accumulator
+    uint32_t                oscPhaseInc;        // phase increment per sample
+    uint32_t                oscNoiseState;      // LFSR state for NOIS
+    int32_t                 oscNoiseHeld;       // sample-and-hold output (note-rate noise)
+#endif
 };
 typedef struct GM_Voice GM_Voice;
 

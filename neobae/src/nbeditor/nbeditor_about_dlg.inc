@@ -161,6 +161,10 @@
         AboutDrawCreditLine("Copyright (C) 2023 Dominic Szablewski");
         AboutDrawCreditLine("https://github.com/phoboslab/qoa");
 #endif
+        AboutDrawCreditLine("");
+        AboutDrawCreditLine("ADPCM-XQ");
+        AboutDrawCreditLine("Copyright (c) 2024 David Bryant");
+        AboutDrawCreditLine("https://github.com/dbry/adpcm-xq");
 #if defined(USE_ADP_SUPPORT) && (USE_ADP_SUPPORT == TRUE)
         AboutDrawCreditLine("");
         AboutDrawCreditLine("libg722");

@@ -32,3 +32,7 @@
 	path = neobae/src/thirdparty/imgui
 	url = https://github.com/ocornut/imgui
 	branch = docking
+[submodule "neobae/src/thirdparty/adpcm-xq"]
+	path = neobae/src/thirdparty/adpcm-xq
+	url = https://github.com/dbry/adpcm-xq/
+	branch = new-formats
