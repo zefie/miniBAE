@@ -259,7 +259,7 @@ LSTC
 		DLNG	Amount to use as LFO
 	KEYE	PWID
 	KEYB	WIDX
-		BCNT	Wave Index modulator (256 = one step in OSCL wave table; pitch-LFO scale)
+		BCNT	Wave Index modulator (~51 = one step; ~255 = full 0..5 table)
 		LSTC	
 			DLNG	Wave Index ADSR Level
 			DLNG	Wave Index ADSR Time (microseconds)
@@ -279,9 +279,10 @@ LSTC
 		DLNG	Amount to use as ADSR (DC)
 		DLNG	Amount to use as LFO
 		NOTE	Wave table index order: 0=SINE (real sine) 1=TRIA 2=SAWT 3=SQUA 4=PLSE 5=NOIS
-			256 = one index step (same as pitch: 256 = 1 semitone). With ADSR~4096,
-			LFO level ~4096 ≈ ±1 wave; level ~12288 sweeps several. Short period +
-			SAW/SQUA LFO shape = rapid wave hopping.
+			Six evenly spaced bands over ~0..255 (step = 256/5 = 51). With ADSR~4096,
+			LFO/DC level ~4096 (Beatnik 100) ≈ full table sweep (±5 from base, clamped).
+			Bands: 0..50→+0, 51..101→+1, …, 204..254→+4, 255+→+5. Short period +
+			SAW/SQUA LFO shape = rapid wave hopping through all six.
 			Example C64-ish snare: OSCL base=SQUA, WIDX ADSR (period=0) raises index toward NOIS.
 	KEYE	WIDX
 LSTE	

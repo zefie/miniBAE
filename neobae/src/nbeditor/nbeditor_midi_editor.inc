@@ -1762,6 +1762,654 @@
         ImGui::EndPopup();
     }
 
+    /* ---- Beatnik / NeoBAE NRPN insert & remove ---- */
+
+    enum class MeNrpnPreset : int
+    {
+        VelocityCurve = 0,   /* NRPN 4,0 */
+        ChannelInstMode = 1, /* NRPN 5,0 (Beatnik NRPN 640) */
+        SampleOffset = 2,    /* NRPN 6,0 (NeoBAE ZMF, 21-bit) */
+        Custom = 3,
+    };
+
+    struct MeNrpnCcHit
+    {
+        uint32_t index = 0;
+        uint32_t tick = 0;
+        unsigned char value = 0;
+    };
+
+    struct MeNrpnEntry
+    {
+        uint32_t tick = 0;
+        unsigned char msb = 0;
+        unsigned char lsb = 0;
+        uint32_t data = 0; /* decoded data (21-bit for sample offset) */
+        int data_digits = 1;
+        bool has_data_lsb = false;
+        bool has_null = false;
+        bool is_null_only = false;
+        uint32_t idx_cc99 = 0;
+        uint32_t idx_cc98 = 0;
+        uint32_t idx_cc6[3] = {0, 0, 0};
+        uint32_t idx_cc38 = 0;
+        uint32_t idx_null99 = 0;
+        uint32_t idx_null98 = 0;
+    };
+
+    static const char *MeNrpnPresetLabel(MeNrpnPreset p)
+    {
+        switch (p)
+        {
+        case MeNrpnPreset::VelocityCurve:
+            return "Velocity Curve (4,0)";
+        case MeNrpnPreset::ChannelInstMode:
+            return "Channel Instrument Mode (5,0)";
+        case MeNrpnPreset::SampleOffset:
+            return "Sample Start Offset (6,0) [ZMF]";
+        case MeNrpnPreset::Custom:
+            return "Custom NRPN";
+        }
+        return "NRPN";
+    }
+
+    static const char *MeNrpnDescribe(unsigned char msb, unsigned char lsb, uint32_t data, bool is_null)
+    {
+        if (is_null || (msb == 127 && lsb == 127))
+        {
+            return "NRPN Null";
+        }
+        if (msb == 4 && lsb == 0)
+        {
+            switch (data & 0x7Fu)
+            {
+            case 0:
+                return "Velocity Curve: Default S";
+            case 1:
+                return "Velocity Curve: Peaky S";
+            case 2:
+                return "Velocity Curve: WebTV";
+            case 3:
+                return "Velocity Curve: 2× Exp";
+            case 4:
+                return "Velocity Curve: 2× Linear";
+            case 5:
+                return "Velocity Curve: Passthrough";
+            default:
+                return "Velocity Curve";
+            }
+        }
+        if (msb == 5 && lsb == 0)
+        {
+            switch (data & 0x7Fu)
+            {
+            case 0:
+                return "Inst Mode: GM Default";
+            case 1:
+                return "Inst Mode: Non-GM Perc Bank";
+            case 2:
+                return "Inst Mode: GM Perc Bank";
+            case 3:
+                return "Inst Mode: Melodic (Norm)";
+            default:
+                return "Channel Instrument Mode";
+            }
+        }
+        if (msb == 6 && lsb == 0)
+        {
+            return "Sample Start Offset (ZMF)";
+        }
+        if (msb == 1 && lsb == 8)
+        {
+            return "GS Vibrato Rate (stub)";
+        }
+        if (msb == 1 && lsb == 9)
+        {
+            return "GS Vibrato Depth (stub)";
+        }
+        if (msb == 1 && lsb == 10)
+        {
+            return "GS Vibrato Delay (stub)";
+        }
+        if (msb == 1 && lsb == 32)
+        {
+            return "GS Cutoff Freq (stub)";
+        }
+        if (msb == 1 && lsb == 33)
+        {
+            return "GS Resonance (stub)";
+        }
+        return "NRPN";
+    }
+
+    void MeCollectTrackCc(uint16_t track, unsigned char cc, std::vector<MeNrpnCcHit> *out) const
+    {
+        out->clear();
+        if (!m_document)
+        {
+            return;
+        }
+        uint32_t count = 0;
+        if (BAERmfEditorDocument_GetTrackCCEventCount(m_document, track, cc, &count) != BAE_NO_ERROR ||
+            count == 0)
+        {
+            return;
+        }
+        out->reserve(count);
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            uint32_t tick = 0;
+            unsigned char value = 0;
+            if (BAERmfEditorDocument_GetTrackCCEvent(m_document, track, cc, i, &tick, &value) !=
+                BAE_NO_ERROR)
+            {
+                continue;
+            }
+            MeNrpnCcHit hit;
+            hit.index = i;
+            hit.tick = tick;
+            hit.value = value;
+            out->push_back(hit);
+        }
+    }
+
+    void MeScanTrackNrpns(uint16_t track, std::vector<MeNrpnEntry> *out) const
+    {
+        out->clear();
+        std::vector<MeNrpnCcHit> cc99;
+        std::vector<MeNrpnCcHit> cc98;
+        std::vector<MeNrpnCcHit> cc6;
+        std::vector<MeNrpnCcHit> cc38;
+        MeCollectTrackCc(track, 99, &cc99);
+        MeCollectTrackCc(track, 98, &cc98);
+        MeCollectTrackCc(track, 6, &cc6);
+        MeCollectTrackCc(track, 38, &cc38);
+
+        std::vector<bool> used99(cc99.size(), false);
+        std::vector<bool> used98(cc98.size(), false);
+        std::vector<bool> used6(cc6.size(), false);
+        std::vector<bool> used38(cc38.size(), false);
+
+        auto find_unused_at = [](const std::vector<MeNrpnCcHit> &hits,
+                                 const std::vector<bool> &used,
+                                 uint32_t tick,
+                                 int prefer_value = -1) -> int {
+            int fallback = -1;
+            for (size_t i = 0; i < hits.size(); ++i)
+            {
+                if (used[i] || hits[i].tick != tick)
+                {
+                    continue;
+                }
+                if (prefer_value >= 0 && hits[i].value == static_cast<unsigned char>(prefer_value))
+                {
+                    return static_cast<int>(i);
+                }
+                if (fallback < 0)
+                {
+                    fallback = static_cast<int>(i);
+                }
+            }
+            return fallback;
+        };
+
+        for (size_t i99 = 0; i99 < cc99.size(); ++i99)
+        {
+            if (used99[i99])
+            {
+                continue;
+            }
+            const MeNrpnCcHit &msb_ev = cc99[i99];
+            const int i98 = find_unused_at(cc98, used98, msb_ev.tick, -1);
+            if (i98 < 0)
+            {
+                continue;
+            }
+            used99[i99] = true;
+            used98[static_cast<size_t>(i98)] = true;
+
+            MeNrpnEntry entry;
+            entry.tick = msb_ev.tick;
+            entry.msb = msb_ev.value;
+            entry.lsb = cc98[static_cast<size_t>(i98)].value;
+            entry.idx_cc99 = msb_ev.index;
+            entry.idx_cc98 = cc98[static_cast<size_t>(i98)].index;
+
+            if (entry.msb == 127 && entry.lsb == 127)
+            {
+                entry.is_null_only = true;
+                out->push_back(entry);
+                continue;
+            }
+
+            const int want_digits = (entry.msb == 6 && entry.lsb == 0) ? 3 : 1;
+            entry.data_digits = 0;
+            entry.data = 0;
+            for (int d = 0; d < want_digits; ++d)
+            {
+                const int i6 = find_unused_at(cc6, used6, entry.tick, -1);
+                if (i6 < 0)
+                {
+                    break;
+                }
+                used6[static_cast<size_t>(i6)] = true;
+                entry.idx_cc6[d] = cc6[static_cast<size_t>(i6)].index;
+                entry.data = (entry.data << 7) | (cc6[static_cast<size_t>(i6)].value & 0x7Fu);
+                ++entry.data_digits;
+            }
+
+            if (want_digits == 1)
+            {
+                const int i38 = find_unused_at(cc38, used38, entry.tick, -1);
+                if (i38 >= 0)
+                {
+                    used38[static_cast<size_t>(i38)] = true;
+                    entry.has_data_lsb = true;
+                    entry.idx_cc38 = cc38[static_cast<size_t>(i38)].index;
+                }
+            }
+
+            const int n99 = find_unused_at(cc99, used99, entry.tick, 127);
+            const int n98 = find_unused_at(cc98, used98, entry.tick, 127);
+            if (n99 >= 0 && n98 >= 0 && cc99[static_cast<size_t>(n99)].value == 127 &&
+                cc98[static_cast<size_t>(n98)].value == 127)
+            {
+                used99[static_cast<size_t>(n99)] = true;
+                used98[static_cast<size_t>(n98)] = true;
+                entry.has_null = true;
+                entry.idx_null99 = cc99[static_cast<size_t>(n99)].index;
+                entry.idx_null98 = cc98[static_cast<size_t>(n98)].index;
+            }
+
+            out->push_back(entry);
+        }
+    }
+
+    void MeDeleteNrpnEntry(uint16_t track, const MeNrpnEntry &entry)
+    {
+        if (!m_document)
+        {
+            return;
+        }
+        /* Delete high indices first within each CC number. */
+        struct Del
+        {
+            unsigned char cc;
+            uint32_t index;
+        };
+        std::vector<Del> dels;
+        dels.push_back({99, entry.idx_cc99});
+        dels.push_back({98, entry.idx_cc98});
+        for (int d = 0; d < entry.data_digits; ++d)
+        {
+            dels.push_back({6, entry.idx_cc6[d]});
+        }
+        if (entry.has_data_lsb)
+        {
+            dels.push_back({38, entry.idx_cc38});
+        }
+        if (entry.has_null)
+        {
+            dels.push_back({99, entry.idx_null99});
+            dels.push_back({98, entry.idx_null98});
+        }
+        std::sort(dels.begin(),
+                  dels.end(),
+                  [](const Del &a, const Del &b) {
+                      if (a.cc != b.cc)
+                      {
+                          return a.cc > b.cc;
+                      }
+                      return a.index > b.index;
+                  });
+        for (const Del &d : dels)
+        {
+            (void)BAERmfEditorDocument_DeleteTrackCCEvent(m_document, track, d.cc, d.index);
+        }
+    }
+
+    bool MeInsertNrpnSequence(uint16_t track,
+                              uint32_t tick,
+                              unsigned char msb,
+                              unsigned char lsb,
+                              const unsigned char *data_digits,
+                              int data_count,
+                              bool data_lsb_zero,
+                              bool append_null)
+    {
+        if (!m_document || !data_digits || data_count <= 0)
+        {
+            return false;
+        }
+        if (BAERmfEditorDocument_AddTrackCCEvent(m_document, track, 99, tick, msb) != BAE_NO_ERROR ||
+            BAERmfEditorDocument_AddTrackCCEvent(m_document, track, 98, tick, lsb) != BAE_NO_ERROR)
+        {
+            return false;
+        }
+        for (int i = 0; i < data_count; ++i)
+        {
+            if (BAERmfEditorDocument_AddTrackCCEvent(
+                    m_document, track, 6, tick, data_digits[i] & 0x7Fu) != BAE_NO_ERROR)
+            {
+                return false;
+            }
+        }
+        if (data_lsb_zero)
+        {
+            if (BAERmfEditorDocument_AddTrackCCEvent(m_document, track, 38, tick, 0) != BAE_NO_ERROR)
+            {
+                return false;
+            }
+        }
+        if (append_null)
+        {
+            if (BAERmfEditorDocument_AddTrackCCEvent(m_document, track, 99, tick, 127) != BAE_NO_ERROR ||
+                BAERmfEditorDocument_AddTrackCCEvent(m_document, track, 98, tick, 127) != BAE_NO_ERROR)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    void OpenNrpnManagerDialog(uint32_t tick_hint, bool use_tick_hint)
+    {
+        if (!m_document || m_midi_selected_track < 0)
+        {
+            SetStatus("Select a track to manage NRPNs");
+            return;
+        }
+        m_midi_nrpn_track = m_midi_selected_track;
+        if (use_tick_hint)
+        {
+            m_midi_nrpn_tick = static_cast<int>(tick_hint);
+        }
+        else
+        {
+            m_midi_nrpn_tick = static_cast<int>(MePlayheadTick());
+        }
+        if (m_midi_snap_enabled)
+        {
+            m_midi_nrpn_tick = static_cast<int>(MeSnapTick(static_cast<uint32_t>(std::max(0, m_midi_nrpn_tick))));
+        }
+        m_midi_nrpn_preset = static_cast<int>(MeNrpnPreset::ChannelInstMode);
+        m_midi_nrpn_curve = 0;
+        m_midi_nrpn_mode = 3; /* melodic — common Beatnik use */
+        m_midi_nrpn_sample_offset = 0;
+        m_midi_nrpn_custom_msb = 5;
+        m_midi_nrpn_custom_lsb = 0;
+        m_midi_nrpn_custom_data = 3;
+        m_midi_nrpn_append_null = true;
+        m_midi_nrpn_open = true;
+    }
+
+    void MeDrawNrpnManagerDialog()
+    {
+        if (m_midi_nrpn_open)
+        {
+            ImGui::OpenPopup("NRPN Manager");
+        }
+        if (!ImGui::BeginPopupModal("NRPN Manager", &m_midi_nrpn_open, ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            return;
+        }
+        if (!m_document || m_midi_nrpn_track < 0)
+        {
+            ImGui::TextDisabled("No track selected.");
+            if (ImGui::Button("Close"))
+            {
+                m_midi_nrpn_open = false;
+                ImGui::CloseCurrentPopup();
+            }
+            ImGui::EndPopup();
+            return;
+        }
+
+        const uint16_t track = static_cast<uint16_t>(m_midi_nrpn_track);
+        ImGui::Text("Track %d", m_midi_nrpn_track + 1);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(120.0f);
+        ImGui::InputInt("Tick", &m_midi_nrpn_tick);
+        if (m_midi_nrpn_tick < 0)
+        {
+            m_midi_nrpn_tick = 0;
+        }
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Playhead"))
+        {
+            m_midi_nrpn_tick = static_cast<int>(MePlayheadTick());
+        }
+        if (m_midi_ctx_has_tick && m_midi_ctx_track == m_midi_nrpn_track)
+        {
+            ImGui::SameLine();
+            if (ImGui::SmallButton("Context"))
+            {
+                m_midi_nrpn_tick = static_cast<int>(m_midi_ctx_tick);
+            }
+        }
+
+        ImGui::Separator();
+        ImGui::TextUnformatted("Insert");
+        ImGui::SetNextItemWidth(280.0f);
+        if (ImGui::BeginCombo("Preset", MeNrpnPresetLabel(static_cast<MeNrpnPreset>(m_midi_nrpn_preset))))
+        {
+            for (int p = 0; p <= static_cast<int>(MeNrpnPreset::Custom); ++p)
+            {
+                const bool sel = (m_midi_nrpn_preset == p);
+                if (ImGui::Selectable(MeNrpnPresetLabel(static_cast<MeNrpnPreset>(p)), sel))
+                {
+                    m_midi_nrpn_preset = p;
+                }
+                if (sel)
+                {
+                    ImGui::SetItemDefaultFocus();
+                }
+            }
+            ImGui::EndCombo();
+        }
+
+        const MeNrpnPreset preset = static_cast<MeNrpnPreset>(m_midi_nrpn_preset);
+        unsigned char msb = 0;
+        unsigned char lsb = 0;
+        unsigned char digits[3] = {0, 0, 0};
+        int digit_count = 1;
+        bool data_lsb_zero = true;
+        bool can_insert = true;
+
+        if (preset == MeNrpnPreset::VelocityCurve)
+        {
+            msb = 4;
+            lsb = 0;
+            static const char *kCurves[] = {
+                "0 — Default S",
+                "1 — Peaky S",
+                "2 — WebTV",
+                "3 — 2× Exponential",
+                "4 — 2× Linear",
+                "5 — Passthrough",
+            };
+            m_midi_nrpn_curve = std::clamp(m_midi_nrpn_curve, 0, 5);
+            ImGui::SetNextItemWidth(280.0f);
+            ImGui::Combo("Curve", &m_midi_nrpn_curve, kCurves, IM_ARRAYSIZE(kCurves));
+            digits[0] = static_cast<unsigned char>(m_midi_nrpn_curve);
+            ImGui::TextDisabled("Song-wide velocity response (Beatnik NRPN 4,0).");
+        }
+        else if (preset == MeNrpnPreset::ChannelInstMode)
+        {
+            msb = 5;
+            lsb = 0;
+            static const char *kModes[] = {
+                "0 — GM Default",
+                "1 — Non-GM Percussion Bank",
+                "2 — GM Percussion Bank",
+                "3 — Melodic / Normal Bank",
+            };
+            m_midi_nrpn_mode = std::clamp(m_midi_nrpn_mode, 0, 3);
+            ImGui::SetNextItemWidth(280.0f);
+            ImGui::Combo("Mode", &m_midi_nrpn_mode, kModes, IM_ARRAYSIZE(kModes));
+            digits[0] = static_cast<unsigned char>(m_midi_nrpn_mode);
+            ImGui::TextDisabled("Beatnik Channel Instrument Mode (NRPN 640 / 5,0).\n"
+                                "Mode 3 makes MIDI ch10 melodic.");
+        }
+        else if (preset == MeNrpnPreset::SampleOffset)
+        {
+            msb = 6;
+            lsb = 0;
+            digit_count = 3;
+            data_lsb_zero = false;
+            ImGui::SetNextItemWidth(160.0f);
+            ImGui::InputInt("Offset (frames)", &m_midi_nrpn_sample_offset);
+            m_midi_nrpn_sample_offset = std::clamp(m_midi_nrpn_sample_offset, 0, 0x1FFFFF);
+            const uint32_t o = static_cast<uint32_t>(m_midi_nrpn_sample_offset) & 0x1FFFFFu;
+            digits[0] = static_cast<unsigned char>((o >> 14) & 0x7Fu);
+            digits[1] = static_cast<unsigned char>((o >> 7) & 0x7Fu);
+            digits[2] = static_cast<unsigned char>(o & 0x7Fu);
+            ImGui::TextDisabled("NeoBAE ZMF NRPN 6,0 — three CC6 digits.\n"
+                                "0 clears channel NRPN offset. Requires ZMF song.");
+        }
+        else
+        {
+            ImGui::SetNextItemWidth(80.0f);
+            ImGui::InputInt("MSB##nrpn", &m_midi_nrpn_custom_msb);
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(80.0f);
+            ImGui::InputInt("LSB##nrpn", &m_midi_nrpn_custom_lsb);
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(80.0f);
+            ImGui::InputInt("Data##nrpn", &m_midi_nrpn_custom_data);
+            m_midi_nrpn_custom_msb = std::clamp(m_midi_nrpn_custom_msb, 0, 127);
+            m_midi_nrpn_custom_lsb = std::clamp(m_midi_nrpn_custom_lsb, 0, 127);
+            m_midi_nrpn_custom_data = std::clamp(m_midi_nrpn_custom_data, 0, 127);
+            msb = static_cast<unsigned char>(m_midi_nrpn_custom_msb);
+            lsb = static_cast<unsigned char>(m_midi_nrpn_custom_lsb);
+            digits[0] = static_cast<unsigned char>(m_midi_nrpn_custom_data);
+            if (msb == 6 && lsb == 0)
+            {
+                ImGui::TextDisabled("For 21-bit sample offset, use the Sample Start Offset preset.");
+            }
+        }
+
+        ImGui::Checkbox("Append NRPN Null (127,127)", &m_midi_nrpn_append_null);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        {
+            ImGui::SetTooltip(
+                "Clears NRPN selection after data entry so later CC6\n"
+                "does not accidentally change the parameter.\n"
+                "Recommended for 4,0 / 5,0. Optional for 6,0.");
+        }
+
+        if (ImGui::Button("Insert", ImVec2(100, 0)) && can_insert)
+        {
+            uint32_t tick = static_cast<uint32_t>(std::max(0, m_midi_nrpn_tick));
+            if (m_midi_snap_enabled)
+            {
+                tick = MeSnapTick(tick);
+                m_midi_nrpn_tick = static_cast<int>(tick);
+            }
+            MeBeginUndo();
+            if (MeInsertNrpnSequence(track,
+                                     tick,
+                                     msb,
+                                     lsb,
+                                     digits,
+                                     digit_count,
+                                     data_lsb_zero && digit_count == 1,
+                                     m_midi_nrpn_append_null))
+            {
+                MeCommitUndo();
+                char buf[128];
+                std::snprintf(buf,
+                              sizeof(buf),
+                              "Inserted %s at tick %u",
+                              MeNrpnDescribe(msb, lsb, digits[0], false),
+                              tick);
+                SetStatus(buf);
+            }
+            else
+            {
+                MeCancelUndo();
+                SetStatus("NRPN insert failed");
+            }
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextUnformatted("Existing on this track");
+        ImGui::BeginChild("##nrpn_list", ImVec2(520, 220), true);
+        std::vector<MeNrpnEntry> entries;
+        MeScanTrackNrpns(track, &entries);
+        if (entries.empty())
+        {
+            ImGui::TextDisabled("No NRPN sequences found on this track.");
+        }
+        else
+        {
+            for (size_t i = 0; i < entries.size(); ++i)
+            {
+                const MeNrpnEntry &e = entries[i];
+                ImGui::PushID(static_cast<int>(i));
+                char label[192];
+                if (e.is_null_only)
+                {
+                    std::snprintf(label,
+                                  sizeof(label),
+                                  "tick %u  NRPN Null",
+                                  e.tick);
+                }
+                else if (e.msb == 6 && e.lsb == 0)
+                {
+                    std::snprintf(label,
+                                  sizeof(label),
+                                  "tick %u  %s = %u%s",
+                                  e.tick,
+                                  MeNrpnDescribe(e.msb, e.lsb, e.data, false),
+                                  e.data,
+                                  e.has_null ? " +null" : "");
+                }
+                else
+                {
+                    std::snprintf(label,
+                                  sizeof(label),
+                                  "tick %u  %s (MSB=%u LSB=%u data=%u)%s",
+                                  e.tick,
+                                  MeNrpnDescribe(e.msb, e.lsb, e.data, false),
+                                  e.msb,
+                                  e.lsb,
+                                  e.data & 0x7Fu,
+                                  e.has_null ? " +null" : "");
+                }
+                ImGui::AlignTextToFramePadding();
+                ImGui::TextUnformatted(label);
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Remove"))
+                {
+                    MeBeginUndo();
+                    MeDeleteNrpnEntry(track, e);
+                    MeCommitUndo();
+                    SetStatus("Removed NRPN sequence");
+                    ImGui::PopID();
+                    break; /* list rebuilt next frame */
+                }
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Go"))
+                {
+                    m_midi_nrpn_tick = static_cast<int>(e.tick);
+                    m_midi_scroll_tick = std::max(0.0f, static_cast<float>(e.tick) - 64.0f);
+                }
+                ImGui::PopID();
+            }
+        }
+        ImGui::EndChild();
+
+        ImGui::Spacing();
+        if (ImGui::Button("Close", ImVec2(100, 0)))
+        {
+            m_midi_nrpn_open = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
     void MeDeleteSelectedTrack()
     {
         if (!m_document || m_midi_selected_track < 0)
@@ -2215,6 +2863,31 @@
                 if (ImGui::MenuItem(trim_song_label))
                 {
                     MeRequestSetEndOfSong(m_midi_ctx_tick);
+                }
+                ImGui::Separator();
+                char nrpn_label[80];
+                std::snprintf(nrpn_label, sizeof(nrpn_label), "NRPN Manager (%u)...", show_tick);
+                if (ImGui::MenuItem(nrpn_label, nullptr, false, m_midi_selected_track >= 0))
+                {
+                    if (m_midi_ctx_track >= 0)
+                    {
+                        m_midi_selected_track = m_midi_ctx_track;
+                    }
+                    OpenNrpnManagerDialog(show_tick, true);
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                {
+                    ImGui::SetTooltip(
+                        "Insert or remove Beatnik / NeoBAE NRPNs\n"
+                        "(velocity curve, instrument mode, sample offset).");
+                }
+            }
+            else if (m_midi_selected_track >= 0)
+            {
+                ImGui::Separator();
+                if (ImGui::MenuItem("NRPN Manager..."))
+                {
+                    OpenNrpnManagerDialog(MePlayheadTick(), true);
                 }
             }
             ImGui::EndPopup();
@@ -3192,6 +3865,21 @@
         {
             MeDeleteSelectedNotes();
         }
+        place(btn_w("NRPN..."));
+        ImGui::BeginDisabled(m_midi_selected_track < 0);
+        if (ImGui::Button("NRPN..."))
+        {
+            OpenNrpnManagerDialog(MePlayheadTick(), true);
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal |
+                                 ImGuiHoveredFlags_AllowWhenDisabled))
+        {
+            ImGui::SetTooltip(
+                "Insert or remove Beatnik / NeoBAE NRPNs on the selected track:\n"
+                "velocity curve (4,0), channel instrument mode (5,0),\n"
+                "ZMF sample offset (6,0), or custom.");
+        }
         place(btn_w("Quantize"));
         ImGui::BeginDisabled(m_midi_selected_notes.empty());
         if (ImGui::Button("Quantize"))
@@ -3449,6 +4137,7 @@
         if (!m_midi_editor_open)
         {
             MeDrawSetEotConfirmDialog();
+            MeDrawNrpnManagerDialog();
             return;
         }
         bool open = m_midi_editor_open;
@@ -3458,6 +4147,7 @@
             ImGui::End();
             m_midi_editor_open = open;
             MeDrawSetEotConfirmDialog();
+            MeDrawNrpnManagerDialog();
             return;
         }
         m_midi_editor_open = open;
@@ -3468,6 +4158,7 @@
             ImGui::TextDisabled("Load or activate a song to edit MIDI.");
             ImGui::End();
             MeDrawSetEotConfirmDialog();
+            MeDrawNrpnManagerDialog();
             return;
         }
 
@@ -3601,4 +4292,5 @@
 
         ImGui::End();
         MeDrawSetEotConfirmDialog();
+        MeDrawNrpnManagerDialog();
     }

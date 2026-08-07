@@ -1553,14 +1553,14 @@ static INLINE int32_t PV_GetWaveShape(int32_t where, int32_t what_kind)
 }
 
 #if USE_ZMF_SUPPORT == TRUE
-/* Oscillator wave-index table. WIDX modulates this index (256 = one step,
- * same scale as pitch LFO: 256 = 1 semitone). With ADSR at VOLUME_RANGE (4096),
- * LFO level ≈ 4096 → ±1 wave; short period + SAW/SQUA → rapid wave changes.
+/* Oscillator wave-index table. WIDX maps modulation into 6 evenly spaced
+ * index bands over ~0..255 (Beatnik 100 / ADSR@VOLUME_RANGE → value ≈ 256).
+ * Step = 256/5 so 0..255 covers indices 0..5; unity depth sweeps the full table.
  * Order is stable for C64-style snare: square/pulse attack → noise body. */
 enum
 {
     kOscWaveIndexCount = 6,
-    kOscWaveIndexStep = 256
+    kOscWaveIndexStep = 256 / (kOscWaveIndexCount - 1) /* 51: six levels in 0..255 */
 };
 static const int32_t kOscWaveIndexTable[kOscWaveIndexCount] =
 {

@@ -623,8 +623,8 @@ struct GM_Voice
 #if USE_ZMF_SUPPORT == TRUE
     unsigned char           useOscillator;      // nonzero: audio-rate generator voice
     int32_t                 oscWaveShape;       // base shape from OSCL (may be overridden by WIDX)
-    int32_t                 oscWaveIndexBase;   // index * 256 into oscillator wave table
-    int32_t                 oscWaveIndexLive;   // base + WIDX modulation (256 = one step)
+    int32_t                 oscWaveIndexBase;   // index * step into oscillator wave table
+    int32_t                 oscWaveIndexLive;   // base + WIDX modulation (~51 = one step; 255 ≈ full 0..5)
     int32_t                 oscPulseWidth;      // base PW from INST
     int32_t                 oscPulseWidthLive;  // after PWID LFO/ADSR modulation
     int32_t                 oscVolume;          // 0..65536 unity gain from OSCL

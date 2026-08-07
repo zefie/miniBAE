@@ -5816,6 +5816,19 @@ private:
     uint32_t m_midi_set_eot_tick = 0;
     uint32_t m_midi_set_eot_note_count = 0;
 
+    /* Beatnik / NeoBAE NRPN manager (MIDI Editor). */
+    bool m_midi_nrpn_open = false;
+    int m_midi_nrpn_track = -1;
+    int m_midi_nrpn_tick = 0;
+    int m_midi_nrpn_preset = 1; /* ChannelInstMode */
+    int m_midi_nrpn_curve = 0;
+    int m_midi_nrpn_mode = 3;
+    int m_midi_nrpn_sample_offset = 0;
+    int m_midi_nrpn_custom_msb = 5;
+    int m_midi_nrpn_custom_lsb = 0;
+    int m_midi_nrpn_custom_data = 3;
+    bool m_midi_nrpn_append_null = true;
+
     bool m_song_info_open = false;
     char m_song_info_title[256] = {0};
     char m_song_info_composer[256] = {0};
