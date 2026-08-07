@@ -2513,53 +2513,66 @@
                                   e.tick,
                                   kind);
                 }
-                else if (!e.is_rpn && e.msb == 6 && e.lsb == 0)
-                {
-                    std::snprintf(label,
-                                  sizeof(label),
-                                  "tick %u  %s %s = %u%s",
-                                  e.tick,
-                                  kind,
-                                  MeRpDescribe(e.is_rpn, e.msb, e.lsb, e.data, false),
-                                  e.data,
-                                  e.has_null ? " +null" : "");
-                }
-                else if (e.is_rpn && e.msb == 0 && e.lsb == 0)
-                {
-                    const unsigned char semis = static_cast<unsigned char>(e.data & 0x7Fu);
-                    std::snprintf(label,
-                                  sizeof(label),
-                                  "tick %u  %s %s = %u semitone%s%s",
-                                  e.tick,
-                                  kind,
-                                  MeRpDescribe(e.is_rpn, e.msb, e.lsb, e.data, false),
-                                  semis,
-                                  semis == 1 ? "" : "s",
-                                  e.has_null ? " +null" : "");
-                }
-                else if (e.is_rpn && e.msb == 0 && e.lsb == 1 && e.has_data_lsb)
-                {
-                    /* Fine tuning: reconstruct 14-bit from CC6 + CC38 at same tick. */
-                    std::snprintf(label,
-                                  sizeof(label),
-                                  "tick %u  %s %s (14-bit via CC6/CC38)%s",
-                                  e.tick,
-                                  kind,
-                                  MeRpDescribe(e.is_rpn, e.msb, e.lsb, e.data, false),
-                                  e.has_null ? " +null" : "");
-                }
                 else
                 {
-                    std::snprintf(label,
-                                  sizeof(label),
-                                  "tick %u  %s %s (MSB=%u LSB=%u data=%u)%s",
-                                  e.tick,
-                                  kind,
-                                  MeRpDescribe(e.is_rpn, e.msb, e.lsb, e.data, false),
-                                  e.msb,
-                                  e.lsb,
-                                  e.data & 0x7Fu,
-                                  e.has_null ? " +null" : "");
+                    /* Trailing (N)RPN Null select (127,127) — same as "Append … Null". */
+                    const char *null_tag =
+                        e.has_null ? (e.is_rpn ? " (+ RPN Null)" : " (+ NRPN Null)") : "";
+                    if (!e.is_rpn && e.msb == 6 && e.lsb == 0)
+                    {
+                        std::snprintf(label,
+                                      sizeof(label),
+                                      "tick %u  %s %s = %u%s",
+                                      e.tick,
+                                      kind,
+                                      MeRpDescribe(e.is_rpn, e.msb, e.lsb, e.data, false),
+                                      e.data,
+                                      null_tag);
+                    }
+                    else if (e.is_rpn && e.msb == 0 && e.lsb == 0)
+                    {
+                        const unsigned char semis = static_cast<unsigned char>(e.data & 0x7Fu);
+                        /* Build plural in one buffer — avoid stacked %s ternaries
+                         * (some CRTs print "(null)" for an empty %s edge case). */
+                        char range[48];
+                        std::snprintf(range,
+                                      sizeof(range),
+                                      "%u semitone%s",
+                                      semis,
+                                      (semis == 1) ? "" : "s");
+                        std::snprintf(label,
+                                      sizeof(label),
+                                      "tick %u  %s %s = %s%s",
+                                      e.tick,
+                                      kind,
+                                      MeRpDescribe(e.is_rpn, e.msb, e.lsb, e.data, false),
+                                      range,
+                                      null_tag);
+                    }
+                    else if (e.is_rpn && e.msb == 0 && e.lsb == 1 && e.has_data_lsb)
+                    {
+                        /* Fine tuning: reconstruct 14-bit from CC6 + CC38 at same tick. */
+                        std::snprintf(label,
+                                      sizeof(label),
+                                      "tick %u  %s %s (14-bit via CC6/CC38)%s",
+                                      e.tick,
+                                      kind,
+                                      MeRpDescribe(e.is_rpn, e.msb, e.lsb, e.data, false),
+                                      null_tag);
+                    }
+                    else
+                    {
+                        std::snprintf(label,
+                                      sizeof(label),
+                                      "tick %u  %s %s (MSB=%u LSB=%u data=%u)%s",
+                                      e.tick,
+                                      kind,
+                                      MeRpDescribe(e.is_rpn, e.msb, e.lsb, e.data, false),
+                                      e.msb,
+                                      e.lsb,
+                                      e.data & 0x7Fu,
+                                      null_tag);
+                    }
                 }
                 ImGui::AlignTextToFramePadding();
                 ImGui::TextUnformatted(label);
