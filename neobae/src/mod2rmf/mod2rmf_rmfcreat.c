@@ -99,7 +99,7 @@ static void mod2rmf_apply_sample_gain(ModRawSample *raw, double gainDb)
     double scale;
     uint32_t i;
 
-    if (!raw || !raw->pcm8 || raw->frameCount == 0)
+    if (!raw || raw->frameCount == 0)
     {
         return;
     }
@@ -109,6 +109,20 @@ static void mod2rmf_apply_sample_gain(ModRawSample *raw, double gainDb)
     }
 
     scale = pow(10.0, gainDb / 20.0);
+    if (raw->pcm16)
+    {
+        for (i = 0; i < raw->frameCount; ++i)
+        {
+            double v = (double)raw->pcm16[i] * scale;
+            if (v > 32767.0) v = 32767.0;
+            if (v < -32768.0) v = -32768.0;
+            raw->pcm16[i] = (int16_t)((v >= 0.0) ? (v + 0.5) : (v - 0.5));
+        }
+    }
+    if (!raw->pcm8)
+    {
+        return;
+    }
     for (i = 0; i < raw->frameCount; ++i)
     {
         int sampleU8;
@@ -472,13 +486,20 @@ int mod2rmf_setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
 
             if (!usedSharedAsset)
             {
-                bool needsProcessing;
+                bool forceOriginal;
+                bool requiresFilterResample;
+                bool useNative16;
 
                 chosenLoopStart = loopStart;
                 chosenLoopEnd = loopEnd;
-                needsProcessing = conv->forceOriginalSamples ? FALSE : TRUE;
+                forceOriginal = conv->forceOriginalSamples ? TRUE : FALSE;
+                requiresFilterResample = mod2rmf_sample_requires_processing(playable,
+                                                                           &conv->resamplerSettings,
+                                                                           conv->moduleBaseRateHz);
+                /* Prefer untouched IT/XM 16-bit PCM when no filter/resample. */
+                useNative16 = (!forceOriginal && raw->pcm16 != NULL && !requiresFilterResample);
 
-                 if (!needsProcessing)
+                 if (forceOriginal)
                  {
                      BAE_UNSIGNED_FIXED sampledRate;
                      double baseRate = playable->hasSampleRateOverride ? 
@@ -500,6 +521,32 @@ int mod2rmf_setup_samples(Mod2RmfConverter *conv, const ModSongModel *song)
                      if (result != BAE_NO_ERROR)
                      {
                          fprintf(stderr, "[mod2rmf] Warning: failed to inject raw 8-bit PCM for program %u (%d)\n",
+                                 (unsigned)setup.program,
+                                 (int)result);
+                     }
+                 }
+                 else if (useNative16)
+                 {
+                     BAE_UNSIGNED_FIXED sampledRate;
+                     double baseRate = playable->hasSampleRateOverride ?
+                                         (double)playable->sampleRateOverrideHz :
+                                         (double)conv->moduleBaseRateHz;
+                     sampledRate = mod2rmf_compensated_sample_rate((uint32_t)(baseRate + 0.5),
+                                                                   conv->rootShiftSemitones);
+
+                     result = BAERmfEditorDocument_ReplaceSampleFromPCM(conv->document,
+                                                                        sampleIndex,
+                                                                        raw->pcm16,
+                                                                        pcmFrames,
+                                                                        16,
+                                                                        1,
+                                                                        sampledRate,
+                                                                        loopStart,
+                                                                        loopEnd,
+                                                                        &sampleInfo);
+                     if (result != BAE_NO_ERROR)
+                     {
+                         fprintf(stderr, "[mod2rmf] Warning: failed to inject native 16-bit PCM for program %u (%d)\n",
                                  (unsigned)setup.program,
                                  (int)result);
                      }
@@ -794,14 +841,20 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
             uint32_t f;
 
             outFrames = (uint32_t)len;
+            raw->pcm16 = (int16_t *)malloc(outFrames * sizeof(int16_t));
             raw->pcm8 = (int8_t *)malloc(outFrames);
-            if (!raw->pcm8)
+            if (!raw->pcm16 || !raw->pcm8)
             {
+                free(raw->pcm16);
+                free(raw->pcm8);
+                raw->pcm16 = NULL;
+                raw->pcm8 = NULL;
                 xmp_release_module(ctx);
                 xmp_free_context(ctx);
                 return 0;
             }
             src16 = (const int16_t *)s->data;
+            memcpy(raw->pcm16, src16, outFrames * sizeof(int16_t));
             for (f = 0; f < outFrames; ++f)
             {
                 int v;
@@ -1132,20 +1185,62 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                     }
                 }
 
-                /* Use row-start volume only; per-frame ci->volume is post-processed
-                 * (envelope/fade/runtime), not the raw channel volume intent. */
-                if (fi.frame == 0)
+                /* Emit CC7 on any frame where channel volume changes. Amp
+                 * envelopes are disabled in libxmp after ADSR extract, so
+                 * ci->volume is channel/slide intent (IT Dxx, etc.), not the
+                 * instrument envelope curve. Row volume commands still win
+                 * on frame 0 when present.
+                 *
+                 * Do not emit idle CC7=0 when no note is active — libxmp
+                 * reports volume 0 between notes, and parking the MIDI
+                 * channel at 0 would silence the next note-on.
+                 *
+                 * Also skip CC7=0 while a note is still held unless the row
+                 * has an intentional volume set/slide. libxmp drops channel
+                 * volume to 0 when a oneshot sample ends, but our MIDI note
+                 * duration can still be active — muting then gates/clicks
+                 * (audible around dense sections like ~2:40 in (M)TRANC). */
                 {
                     uint8_t vol64;
-                    vol64 = hasRowVolumeCmd
+                    bool rowHasVolSlide;
+                    const struct xmp_event *slideEv;
+                    vol64 = (fi.frame == 0 && hasRowVolumeCmd)
                               ? rowVolumeCmd64
                               : (uint8_t)mod2rmf_clamp_int((int)ci->volume, 0, 64);
+                    /* Prefer the raw pattern row so Dxx/vol-col slides stay
+                     * visible on every frame of the row (ci->event may clear). */
+                    slideEv = mod2rmf_get_raw_row_event(mod, fi.pattern, fi.row, ch);
+                    if (!slideEv)
+                    {
+                        slideEv = rowEvent;
+                    }
+                    rowHasVolSlide = mod2rmf_row_has_volume_slide(slideEv);
                     if (vol64 != chLastVol[ch])
                     {
-                        chLastVol[ch] = vol64;
-                        (void)mod2rmf_song_model_append_cc_event(song, (uint16_t)ch, tick, 7,
-                                                        mod2rmf_vol_to_midi(vol64),
-                                                        activeNotes[ch].program);
+                        bool intentionalZero =
+                            (fi.frame == 0 && hasRowVolumeCmd && rowVolumeCmd64 == 0) ||
+                            rowHasVolSlide;
+                        bool emitVol;
+                        if (vol64 == 0 && activeNotes[ch].active && !intentionalZero)
+                        {
+                            /* oneshot/mixer silence — keep last emitted CC7;
+                             * do not update chLastVol so a later return to the
+                             * same level does not need a redundant rewrite. */
+                            emitVol = FALSE;
+                        }
+                        else
+                        {
+                            emitVol = (vol64 != 0) ||
+                                      intentionalZero ||
+                                      (fi.frame == 0 && hasRowVolumeCmd);
+                            chLastVol[ch] = vol64;
+                        }
+                        if (emitVol)
+                        {
+                            (void)mod2rmf_song_model_append_cc_event(song, (uint16_t)ch, tick, 7,
+                                                            mod2rmf_vol_to_midi(vol64),
+                                                            activeNotes[ch].program);
+                        }
                     }
                 }
                 if (activeNotes[ch].active)
@@ -1710,6 +1805,7 @@ void mod2rmf_converter_delete(Mod2RmfConverter *conv)
         for (i = 0; i < conv->rawSampleCount; ++i)
         {
             free(conv->rawSamples[i].pcm8);
+            free(conv->rawSamples[i].pcm16);
         }
         free(conv->rawSamples);
     }
@@ -1795,6 +1891,9 @@ int mod2rmf_write_song_cc_events(Mod2RmfConverter *conv, const ModSongModel *son
     {
         const ModCCEvent *ev;
         uint16_t trackIndex;
+        uint8_t midiCh;
+        uint32_t j;
+        bool superseded = FALSE;
 
         ev = &song->ccEvents[i];
         if (ev->sourceChannel >= song->channelCount) continue;
@@ -1812,6 +1911,31 @@ int mod2rmf_write_song_cc_events(Mod2RmfConverter *conv, const ModSongModel *son
 
         trackIndex = conv->channelToTrackIndex[ev->sourceChannel];
         if (trackIndex == (uint16_t)0xFFFF) continue;
+
+        midiCh = conv->channelMap.trackerToMidi[ev->sourceChannel];
+        if (midiCh >= MOD2RMF_MAX_MIDI_CHANNELS) continue;
+
+        /* When multiple source tracks share a MIDI channel, GenSeq applies
+         * controllers in track order at the same tick.  Keep only the last
+         * CC of each type for that MIDI channel (mirrors pitch-bend write). */
+        for (j = i + 1; j < song->ccCount; ++j)
+        {
+            const ModCCEvent *nextEv = &song->ccEvents[j];
+            if (nextEv->tick > ev->tick) break;
+            if (nextEv->tick == ev->tick &&
+                nextEv->cc == ev->cc &&
+                nextEv->sourceChannel < song->channelCount &&
+                conv->channelMap.trackerToMidi[nextEv->sourceChannel] == midiCh &&
+                conv->channelToTrackIndex[nextEv->sourceChannel] != (uint16_t)0xFFFF)
+            {
+                superseded = TRUE;
+                break;
+            }
+        }
+        if (superseded)
+        {
+            continue;
+        }
 
         /* Skip if this CC value was already emitted for this source track */
         if (lastCC[ev->sourceChannel][ev->cc] == (uint16_t)ev->value)
@@ -2286,6 +2410,12 @@ int mod2rmf_setup_tracks(Mod2RmfConverter *conv, const ModSongModel *song, const
 
         memset(&setup, 0, sizeof(setup));
         setup.channel = chMap->trackerToMidi[i];
+        /* Skip unused/unmapped tracker channels — empty tracks that share a
+         * MIDI channel emit CC7=0 and silence real notes on that channel. */
+        if (setup.channel >= MOD2RMF_MAX_MIDI_CHANNELS)
+        {
+            continue;
+        }
         setup.bank = MOD2RMF_EMBEDDED_BANK;
         setup.program = 0;
         snprintf(trackName, sizeof(trackName), "Ch %u", i + 1);

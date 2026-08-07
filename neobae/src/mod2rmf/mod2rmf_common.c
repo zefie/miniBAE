@@ -17,6 +17,7 @@
 
 #include "mod2rmf_common.h"
 #include "mod2rmf_rmfcreat.h"
+#include "mod2rmf_song.h"
 #include <math.h>
 #include <string.h>
 
@@ -535,7 +536,8 @@ void mod2rmf_emulate_bidi_loop(ModRawSample *raw)
     uint32_t loopLen;
     uint32_t reversedLen;
     uint32_t newFrameCount;
-    int8_t  *newPcm;
+    int8_t  *newPcm8;
+    int16_t *newPcm16;
     uint32_t dst;
     uint32_t src;
 
@@ -555,24 +557,47 @@ void mod2rmf_emulate_bidi_loop(ModRawSample *raw)
     reversedLen = loopLen - 2; /* skip both endpoints to avoid doubling */
     newFrameCount = raw->loopEnd + reversedLen;
 
-    newPcm = (int8_t *)malloc(newFrameCount);
-    if (!newPcm)
+    newPcm8 = (int8_t *)malloc(newFrameCount);
+    if (!newPcm8)
     {
         return; /* leave sample unchanged on OOM */
     }
 
     /* Copy everything up to loopEnd. */
-    memcpy(newPcm, raw->pcm8, raw->loopEnd);
+    memcpy(newPcm8, raw->pcm8, raw->loopEnd);
 
     /* Append reversed loop body, skipping the endpoint samples. */
     dst = raw->loopEnd;
     for (src = raw->loopEnd - 2; src > raw->loopStart; --src)
     {
-        newPcm[dst++] = raw->pcm8[src];
+        newPcm8[dst++] = raw->pcm8[src];
+    }
+
+    /* Keep native 16-bit in sync when present (IT 16-bit bidir pads). */
+    newPcm16 = NULL;
+    if (raw->pcm16)
+    {
+        newPcm16 = (int16_t *)malloc(newFrameCount * sizeof(int16_t));
+        if (newPcm16)
+        {
+            memcpy(newPcm16, raw->pcm16, (size_t)raw->loopEnd * sizeof(int16_t));
+            dst = raw->loopEnd;
+            for (src = raw->loopEnd - 2; src > raw->loopStart; --src)
+            {
+                newPcm16[dst++] = raw->pcm16[src];
+            }
+            free(raw->pcm16);
+            raw->pcm16 = newPcm16;
+        }
+        else
+        {
+            free(raw->pcm16);
+            raw->pcm16 = NULL;
+        }
     }
 
     free(raw->pcm8);
-    raw->pcm8 = newPcm;
+    raw->pcm8 = newPcm8;
     raw->frameCount = newFrameCount;
     raw->loopEnd = raw->loopStart + loopLen + reversedLen; /* = loopStart + 2*loopLen - 2 */
     raw->loopType = MOD2RMF_LOOP_FORWARD;
@@ -604,6 +629,11 @@ void mod2rmf_emulate_reverse_loop(ModRawSample *raw)
     }
 
     raw->loopType = MOD2RMF_LOOP_FORWARD;
+    if (raw->pcm16)
+    {
+        free(raw->pcm16);
+        raw->pcm16 = NULL;
+    }
 }
 
 /* Parse a row's primary and secondary effect columns for retrigger and
@@ -770,6 +800,35 @@ bool mod2rmf_row_has_tone_portamento(const struct xmp_event *ev)
         return TRUE;
     }
     return FALSE;
+}
+
+static bool mod2rmf_fx_is_volume_slide(uint8_t fxt)
+{
+    switch (fxt)
+    {
+        case MOD2RMF_FX_VOLSLIDE:
+        case MOD2RMF_FX_TONE_VSLIDE:
+        case MOD2RMF_FX_VIBRA_VSLIDE:
+        case MOD2RMF_FX_TRK_VSLIDE:
+        case MOD2RMF_FX_TRK_FVSLIDE:
+        case MOD2RMF_FX_VSLIDE_UP_2:
+        case MOD2RMF_FX_VSLIDE_DN_2:
+        case MOD2RMF_FX_F_VSLIDE_UP_2:
+        case MOD2RMF_FX_F_VSLIDE_DN_2:
+            return TRUE;
+        default:
+            return FALSE;
+    }
+}
+
+bool mod2rmf_row_has_volume_slide(const struct xmp_event *ev)
+{
+    if (!ev)
+    {
+        return FALSE;
+    }
+    return mod2rmf_fx_is_volume_slide(ev->fxt) ||
+           mod2rmf_fx_is_volume_slide(ev->f2t);
 }
 
 
@@ -985,6 +1044,61 @@ int mod2rmf_clamp_int(int v, int lo, int hi)
     return v;
 }
 
+static uint32_t mod2rmf_profile_active_ticks(const ChannelProfile *p)
+{
+    uint32_t total = 0;
+    uint32_t ri;
+
+    if (!p)
+    {
+        return 0;
+    }
+    for (ri = 0; ri < p->rangeCount; ++ri)
+    {
+        if (p->activeRanges[ri].endTick > p->activeRanges[ri].startTick)
+        {
+            total += p->activeRanges[ri].endTick - p->activeRanges[ri].startTick;
+        }
+    }
+    return total;
+}
+
+static uint16_t mod2rmf_channel_group_rep(const uint16_t *parent, uint16_t ch)
+{
+    while (parent[ch] != ch)
+    {
+        ch = parent[ch];
+    }
+    return ch;
+}
+
+static void mod2rmf_build_group_aggregate(const ChannelProfile profiles[],
+                                         const uint16_t used[],
+                                         uint32_t usedCount,
+                                         const uint16_t *parent,
+                                         uint16_t rep,
+                                         ChannelProfile *agg)
+{
+    uint32_t ui;
+    uint32_t ri;
+
+    memset(agg, 0, sizeof(*agg));
+    for (ui = 0; ui < usedCount; ++ui)
+    {
+        uint16_t ch = used[ui];
+        if (mod2rmf_channel_group_rep(parent, ch) != rep)
+        {
+            continue;
+        }
+        for (ri = 0; ri < profiles[ch].rangeCount; ++ri)
+        {
+            mod2rmf_channel_profile_add_range(agg,
+                                             profiles[ch].activeRanges[ri].startTick,
+                                             profiles[ch].activeRanges[ri].endTick);
+        }
+    }
+}
+
 void mod2rmf_compute_channel_map(const ChannelProfile profiles[],
                                 uint32_t trackerCount,
                                 ChannelMap *map,
@@ -996,7 +1110,11 @@ void mod2rmf_compute_channel_map(const ChannelProfile profiles[],
         10, 11, 12, 13, 14, 15
     };
     uint32_t preferredCount = 16u;
-    uint32_t directAssignCount;
+    uint16_t used[MOD2RMF_MAX_CHANNELS];
+    uint32_t usedCount = 0;
+    uint16_t parent[MOD2RMF_MAX_CHANNELS];
+    uint32_t groupCount;
+    uint32_t midiIdx;
 
     if (avoidMidiChannel10)
     {
@@ -1010,85 +1128,123 @@ void mod2rmf_compute_channel_map(const ChannelProfile profiles[],
     }
 
     memset(map, 0, sizeof(*map));
-    /* Initialize all mappings to 0xFF (unmapped) */
     memset(map->trackerToMidi, 0xFF, sizeof(map->trackerToMidi));
 
-    /* Pass 1: direct assignment to preferred MIDI channels. */
-    directAssignCount = trackerCount;
-    if (directAssignCount > preferredCount)
+    for (i = 0; i < trackerCount && usedCount < MOD2RMF_MAX_CHANNELS; ++i)
     {
-        directAssignCount = preferredCount;
-    }
-
-    for (i = 0; i < directAssignCount; ++i)
-    {
-        uint8_t mappedMidi = preferredMidiChannels[i];
-        map->trackerToMidi[i] = mappedMidi;
+        parent[i] = (uint16_t)i;
         if (profiles[i].used)
         {
-            map->midiChannelUsed[mappedMidi] = TRUE;
+            used[usedCount++] = (uint16_t)i;
         }
     }
-
-    /* Pass 2: overflow assignment with overlap-minimizing reuse. */
-    for (i = directAssignCount; i < trackerCount; ++i)
+    for (; i < trackerCount; ++i)
     {
-        uint8_t bestMidi = preferredMidiChannels[0];
-        uint32_t bestScore = UINT32_MAX; /* lower = better */
-        bool foundEmpty = FALSE;
-        uint32_t prefIdx;
+        parent[i] = (uint16_t)i;
+    }
 
-        if (!profiles[i].used)
+    /* When more tracker channels are used than MIDI slots, repeatedly merge
+     * the globally least-overlapping group pair. Overflowing the highest
+     * tracker index alone tends to park busy percussion on sustained pads
+     * (e.g. (M)TRANC ~2:40). */
+    groupCount = usedCount;
+    while (groupCount > preferredCount)
+    {
+        uint32_t bestOvl = UINT32_MAX;
+        uint32_t bestAct = UINT32_MAX;
+        uint16_t bestA = 0;
+        uint16_t bestB = 0;
+        bool found = FALSE;
+        uint32_t ai;
+        uint32_t bi;
+
+        for (ai = 0; ai < usedCount; ++ai)
         {
-            /* Unused tracker channel - map to ch 0 as placeholder */
-            map->trackerToMidi[i] = preferredMidiChannels[0];
+            for (bi = ai + 1; bi < usedCount; ++bi)
+            {
+                uint16_t ra = mod2rmf_channel_group_rep(parent, used[ai]);
+                uint16_t rb = mod2rmf_channel_group_rep(parent, used[bi]);
+                ChannelProfile aggA;
+                ChannelProfile aggB;
+                uint32_t ovlap;
+                uint32_t act;
+
+                if (ra == rb)
+                {
+                    continue;
+                }
+                if (ra > rb)
+                {
+                    uint16_t tmp = ra;
+                    ra = rb;
+                    rb = tmp;
+                }
+
+                mod2rmf_build_group_aggregate(profiles, used, usedCount, parent, ra, &aggA);
+                mod2rmf_build_group_aggregate(profiles, used, usedCount, parent, rb, &aggB);
+                ovlap = mod2rmf_overlap_ticks(&aggA, &aggB);
+                act = mod2rmf_profile_active_ticks(&aggA) +
+                      mod2rmf_profile_active_ticks(&aggB);
+                free(aggA.activeRanges);
+                free(aggB.activeRanges);
+
+                if (!found || ovlap < bestOvl || (ovlap == bestOvl && act < bestAct))
+                {
+                    found = TRUE;
+                    bestOvl = ovlap;
+                    bestAct = act;
+                    bestA = ra;
+                    bestB = rb;
+                }
+            }
+        }
+
+        if (!found)
+        {
+            break;
+        }
+
+        parent[bestB] = bestA;
+        groupCount--;
+        fprintf(stderr,
+                "[mod2rmf] Channel map: tracker ch %u shares with ch %u (overlap %u ticks)\n",
+                (unsigned)bestB, (unsigned)bestA, (unsigned)bestOvl);
+    }
+
+    /* Pack each remaining group onto a preferred MIDI channel. */
+    midiIdx = 0;
+    for (i = 0; i < usedCount; ++i)
+    {
+        uint16_t ch = used[i];
+        uint16_t rep = mod2rmf_channel_group_rep(parent, ch);
+        uint8_t midiCh;
+
+        if (ch != rep)
+        {
+            continue; /* assign representatives first */
+        }
+        if (midiIdx >= preferredCount)
+        {
+            /* Should not happen if merges succeeded; fall back to ch0. */
+            midiCh = preferredMidiChannels[0];
+        }
+        else
+        {
+            midiCh = preferredMidiChannels[midiIdx++];
+        }
+        map->trackerToMidi[ch] = midiCh;
+        map->midiChannelUsed[midiCh] = TRUE;
+    }
+    for (i = 0; i < usedCount; ++i)
+    {
+        uint16_t ch = used[i];
+        uint16_t rep = mod2rmf_channel_group_rep(parent, ch);
+
+        if (ch == rep)
+        {
             continue;
         }
-
-        for (prefIdx = 0; prefIdx < preferredCount; ++prefIdx)
-        {
-            ChannelProfile agg;
-            uint32_t ovlap;
-            uint8_t midiCh;
-
-            midiCh = preferredMidiChannels[prefIdx];
-
-            memset(&agg, 0, sizeof(agg));
-
-            if (!map->midiChannelUsed[midiCh])
-            {
-                /* Empty MIDI channel - best possible choice */
-                bestMidi = midiCh;
-                foundEmpty = TRUE;
-                break;
-            }
-
-            /* Build aggregate profile for this MIDI channel */
-            mod2rmf_build_midi_channel_aggregate(profiles, map->trackerToMidi,
-                                         trackerCount, midiCh, &agg);
-
-            /* Check overlap between overflow channel and aggregate */
-            ovlap = mod2rmf_overlap_ticks(&profiles[i], &agg);
-            free(agg.activeRanges);
-
-            if (ovlap < bestScore)
-            {
-                bestScore = ovlap;
-                bestMidi = midiCh;
-                if (ovlap == 0) break; /* no overlap = no conflict */
-            }
-        }
-
-        map->trackerToMidi[i] = bestMidi;
-        map->midiChannelUsed[bestMidi] = TRUE;
-
-        if (!foundEmpty && bestScore > 0)
-        {
-            #if _DEBUG == TRUE
-            fprintf(stderr, "[mod2rmf] Channel map: tracker ch %u -> MIDI ch %u (overlap %u ticks)\n",
-                    i, bestMidi, bestScore);
-            #endif
-        }
+        map->trackerToMidi[ch] = map->trackerToMidi[rep];
     }
 }
 

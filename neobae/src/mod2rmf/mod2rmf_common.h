@@ -61,9 +61,15 @@
 #define MOD2RMF_FX_MULTI_RETRIG         0x1B
 #define MOD2RMF_FX_TONEPORTA            0x03
 #define MOD2RMF_FX_TONE_VSLIDE          0x05
+#define MOD2RMF_FX_VIBRA_VSLIDE         0x06
+#define MOD2RMF_FX_VOLSLIDE             0x0a
 #define MOD2RMF_FX_TRK_VOL              0x80
 #define MOD2RMF_FX_TRK_VSLIDE           0x81
 #define MOD2RMF_FX_TRK_FVSLIDE          0x82
+#define MOD2RMF_FX_VSLIDE_UP_2          0xc0 /* IT volume-column slide */
+#define MOD2RMF_FX_VSLIDE_DN_2          0xc1
+#define MOD2RMF_FX_F_VSLIDE_UP_2        0xc2
+#define MOD2RMF_FX_F_VSLIDE_DN_2        0xc3
 #define MOD2RMF_SAMPLE_OFFSET_MAX_FRAMES 0x1FFFFFu /* 21-bit NRPN 6,0 */
 /* Array capacity matches ZMF/editor limit; RMF path caps at BAE_RMF_MAX_ADSR_STAGES. */
 #define MOD2RMF_MAX_ADSR_STAGES         BAE_EDITOR_MAX_ADSR_STAGES
@@ -100,6 +106,10 @@ typedef struct {
     int16_t rateFin;             /* 0..127 libxmp finetune units (128 = 1 st) */
     int16_t rateRootAdjust;      /* semitones added to root (usually 0 or -12*n) */
     int8_t *pcm8;
+    /* Optional native 16-bit PCM (IT/XM). Kept alongside pcm8 so we can
+     * inject full resolution when no 8-bit-only processing is required.
+     * Cleared if bidi/reverse loop baking mutates the buffer. */
+    int16_t *pcm16;
 } ModRawSample;
 
 typedef struct {
@@ -256,6 +266,8 @@ bool mod2rmf_get_row_volume_command(const struct xmp_event *ev,
                                    uint8_t *outVol64);
 
 bool mod2rmf_row_has_tone_portamento(const struct xmp_event *ev);
+/* TRUE if this row has an intentional volume slide (IT Dxx / vol-col slide). */
+bool mod2rmf_row_has_volume_slide(const struct xmp_event *ev);
 
 bool mod2rmf_is_mod_family(const char *type);
 bool mod2rmf_is_s3m_family(const char *type);
