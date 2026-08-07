@@ -75,10 +75,24 @@
 #define MOD2RMF_MAX_ADSR_STAGES         BAE_EDITOR_MAX_ADSR_STAGES
 
 typedef struct {
-    int32_t level;  /* 0..VOLUME_RANGE */
+    int32_t level;  /* typically 0..VOLUME_RANGE; pitch env may be signed */
     int32_t timeUs; /* microseconds */
     int32_t flags;  /* ADSR_LINEAR_RAMP_LONG, ADSR_SUSTAIN_LONG, etc. */
 } ModAdsrStage;
+
+/* Scale mode for mod2rmf_extract_envelope_to_adsr. */
+typedef enum {
+    MOD2RMF_ENV_SCALE_VOLUME = 0, /* libxmp aei Y 0..64 → 0..VOLUME_RANGE */
+    MOD2RMF_ENV_SCALE_PITCH,      /* libxmp fei Y (~cents) → signed ±VOLUME_RANGE */
+    MOD2RMF_ENV_SCALE_FILTER      /* libxmp filter fei Y 0..256 → 0..VOLUME_RANGE */
+} ModEnvScaleMode;
+
+typedef struct {
+    bool valid;
+    uint32_t stageCount;
+    ModAdsrStage stages[MOD2RMF_MAX_ADSR_STAGES];
+    int32_t peakAbsY; /* max |env Y|; used for LFO DC_feed scaling */
+} ModEnvelopeAdsr;
 
 typedef struct {
     bool valid;
@@ -93,6 +107,34 @@ typedef struct {
     bool   hasEnvelope;        /* instrument has an amplitude envelope */
     uint32_t adsrStageCount;
     ModAdsrStage adsrStages[MOD2RMF_MAX_ADSR_STAGES];
+    /* Pitch envelope (fei without FLT) → PITC envelope-only LFO */
+    bool hasPitchEnv;
+    uint32_t pitchEnvStageCount;
+    ModAdsrStage pitchEnvStages[MOD2RMF_MAX_ADSR_STAGES];
+    int32_t pitchEnvPeakAbsY;    /* libxmp Y units ≈ cents */
+    /* Filter envelope (fei with FLT) → LPFR envelope-only LFO */
+    bool hasFilterEnv;
+    uint32_t filterEnvStageCount;
+    ModAdsrStage filterEnvStages[MOD2RMF_MAX_ADSR_STAGES];
+    int32_t filterEnvPeakAbsY;
+    /* Static LPF from IT ifc/ifr */
+    bool hasLpf;
+    int32_t lpfFrequency;
+    int32_t lpfResonance;
+    int32_t lpfAmount;
+    /* Sample vibrato (vwf/vde/vra/vsw) → PITC wave LFO */
+    bool hasVibrato;
+    int32_t vibPeriodUs;
+    int32_t vibLevel;
+    int32_t vibWaveShape;        /* FOUR_CHAR: SINE/TRIA/SQUA/SAWT */
+    int32_t vibSweepUs;          /* 0 = no sweep delay ADSR */
+    /* IT new-note / duplicate-check policy from first-wins sub-instrument.
+     * Values match XMP_INST_NNA_* / XMP_INST_DCT_* / XMP_INST_DCA_*. */
+    bool hasNotePolicy;
+    int8_t nna;
+    int8_t dct;
+    int8_t dca;
+    int32_t fadeout;             /* libxmp instrument rls / IT fadeout */
     int16_t defaultPan;          /* sub-instrument pan: 0..255, 128=center, -1=unset */
     /* IT/S3M: true C5/C2 playback rate recovered from libxmp xpo/fin.
      * sampleRateHz is the stored rate (octave-folded to fit 16.16 FIXED).
@@ -123,6 +165,23 @@ typedef struct {
     bool hasVolumeAdsr;
     uint32_t adsrStageCount;
     ModAdsrStage adsrStages[MOD2RMF_MAX_ADSR_STAGES];
+    bool hasPitchEnv;
+    uint32_t pitchEnvStageCount;
+    ModAdsrStage pitchEnvStages[MOD2RMF_MAX_ADSR_STAGES];
+    int32_t pitchEnvPeakAbsY;
+    bool hasFilterEnv;
+    uint32_t filterEnvStageCount;
+    ModAdsrStage filterEnvStages[MOD2RMF_MAX_ADSR_STAGES];
+    int32_t filterEnvPeakAbsY;
+    bool hasLpf;
+    int32_t lpfFrequency;
+    int32_t lpfResonance;
+    int32_t lpfAmount;
+    bool hasVibrato;
+    int32_t vibPeriodUs;
+    int32_t vibLevel;
+    int32_t vibWaveShape;
+    int32_t vibSweepUs;
     int8_t panPlacement;         /* BAE pan: -128..+127, 0=center */
     char displayName[256];
     ModRawSample *rawSample;
@@ -245,10 +304,20 @@ uint16_t mod2rmf_pitchbend_to_midi(int32_t xmpPitchbend,
                                          uint16_t bendRangeSemitones);
 /* maxStages: stage budget (typically BAE_RMF_MAX_ADSR_STAGES or BAE_EDITOR_MAX_ADSR_STAGES).
  * Clamped to [2, MOD2RMF_MAX_ADSR_STAGES]. */
+void mod2rmf_extract_envelope_to_adsr(const struct xmp_envelope *env,
+                                      const struct xmp_instrument *inst,
+                                      uint32_t bpm,
+                                      ModEnvScaleMode scaleMode,
+                                      ModEnvelopeAdsr *out,
+                                      uint32_t maxStages);
+/* Volume-envelope wrapper: fills raw->adsrStages / hasEnvelope. */
 void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
                                   uint32_t bpm,
                                   ModRawSample *raw,
                                   uint32_t maxStages);
+void mod2rmf_copy_adsr_to_editor(BAERmfEditorADSRInfo *dst,
+                                 const ModAdsrStage *stages,
+                                 uint32_t stageCount);
 void mod2rmf_emulate_bidi_loop(ModRawSample *raw);
 void mod2rmf_emulate_reverse_loop(ModRawSample *raw);
 void mod2rmf_parse_row_effects(const struct xmp_event *ev,

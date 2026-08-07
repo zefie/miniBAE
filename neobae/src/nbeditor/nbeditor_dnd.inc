@@ -47,6 +47,15 @@
         return false;
     }
 
+    /* Bank file open/merge should keep Bank 2+ / session customs. If none of that
+     * exists (typical New Session = pristine built-in only), fully replace the
+     * bank token instead of merging on top of built-in leftovers. */
+    bool ShouldPreserveBank2OnBankLoad() const
+    {
+        return Bank2PlusHasInstruments() || !m_session_custom_snd_ids.empty() ||
+               !m_session_custom_inst_ids.empty();
+    }
+
     bool ActiveBankHasContentToOverwrite() const
     {
         if (!m_bank_token)
@@ -108,6 +117,57 @@
             }
         }
         DeleteUnreferencedSndResources(to_delete, protect);
+    }
+
+    /* Drop SNDs not referenced by any remaining INST. Keeps session-custom
+     * unassigned samples. Catches built-in bank orphans (unused SNDs that
+     * UnloadBank01 never sees because no Bank 0/1 INST referenced them). */
+    void PurgeOrphanBankSamples()
+    {
+        if (!m_bank_token)
+        {
+            return;
+        }
+        std::set<uint32_t> referenced;
+        uint32_t inst_count = 0;
+        if (BAERmfEditorBank_GetInstrumentCount(m_bank_token, &inst_count) == BAE_NO_ERROR)
+        {
+            for (uint32_t i = 0; i < inst_count; ++i)
+            {
+                uint32_t split_count = 0;
+                if (BAERmfEditorBank_GetInstrumentSampleCount(m_bank_token, i, &split_count) !=
+                    BAE_NO_ERROR)
+                {
+                    continue;
+                }
+                for (uint32_t s = 0; s < split_count; ++s)
+                {
+                    BAERmfEditorBankSampleInfo sample;
+                    std::memset(&sample, 0, sizeof(sample));
+                    if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token, i, s, &sample) ==
+                        BAE_NO_ERROR)
+                    {
+                        referenced.insert(static_cast<uint32_t>(sample.sndResourceID));
+                    }
+                }
+            }
+        }
+        referenced.insert(m_session_custom_snd_ids.begin(), m_session_custom_snd_ids.end());
+
+        std::set<uint32_t> all_snds;
+        CollectAllBankSndIds(all_snds);
+        std::set<uint32_t> to_delete;
+        for (uint32_t snd_id : all_snds)
+        {
+            if (referenced.count(snd_id) == 0)
+            {
+                to_delete.insert(snd_id);
+            }
+        }
+        if (!to_delete.empty())
+        {
+            DeleteUnreferencedSndResources(to_delete, referenced);
+        }
     }
 
     /* SND ids referenced by one INST resource in a bank/RMF file. */
@@ -695,6 +755,13 @@
         const size_t alias_count = MergeBank01AliasesFromDonor(donor, dest);
         (void)XCleanResourceFile(dest);
 
+        /* Bank-mode load only merges instruments — drop leftover session/built-in
+         * groovoids so the Songs list matches the instrument bank being loaded. */
+        (void)StripBankGroovoids(dest, nullptr);
+        /* Built-in patches ship unused SNDs; UnloadBank01 only drops samples that
+         * were referenced by removed INST — purge true orphans here. */
+        PurgeOrphanBankSamples();
+
         m_bank01_touched = false;
         EnableEditorBankZsCompatibility(m_bank_token);
         RefreshListsFromBank();
@@ -1112,7 +1179,8 @@
         ImGui::Separator();
         if (ImGui::Button("Replace Bank 0/1", ImVec2(160.0f, 0.0f)))
         {
-            LoadBankFromPath(m_pending_bank_merge_path.c_str(), true);
+            LoadBankFromPath(m_pending_bank_merge_path.c_str(),
+                             ShouldPreserveBank2OnBankLoad());
             m_confirm_bank_merge_open = false;
             m_pending_bank_merge_path.clear();
             ImGui::CloseCurrentPopup();
@@ -1268,7 +1336,7 @@
             }
             else
             {
-                LoadBankFromPath(path, true);
+                LoadBankFromPath(path, ShouldPreserveBank2OnBankLoad());
             }
             return;
         }

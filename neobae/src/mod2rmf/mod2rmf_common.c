@@ -79,14 +79,61 @@ uint16_t mod2rmf_pitchbend_to_midi(int32_t xmpPitchbend,
     return (uint16_t)bend;
 }
 
-static int32_t mod2rmf_env_level_from_xmp(uint32_t envY)
+static int32_t mod2rmf_env_abs_i32(int32_t value)
 {
-    return (int32_t)(envY * VOLUME_RANGE / 64u);
+    return (value < 0) ? -value : value;
+}
+
+static int32_t mod2rmf_env_level_from_y(int32_t envY,
+                                        ModEnvScaleMode scaleMode,
+                                        int32_t peakAbsY)
+{
+    int32_t peak;
+
+    switch (scaleMode)
+    {
+    case MOD2RMF_ENV_SCALE_PITCH:
+        peak = (peakAbsY > 0) ? peakAbsY : 1;
+        return (int32_t)(((int64_t)envY * (int64_t)VOLUME_RANGE) / (int64_t)peak);
+
+    case MOD2RMF_ENV_SCALE_FILTER:
+        /* libxmp filter envelope Y is typically 0..256 after IT load scaling. */
+        if (envY < 0)
+        {
+            envY = 0;
+        }
+        return (int32_t)(((int64_t)envY * (int64_t)VOLUME_RANGE) / 256);
+
+    case MOD2RMF_ENV_SCALE_VOLUME:
+    default:
+        if (envY < 0)
+        {
+            envY = 0;
+        }
+        return (int32_t)(((int64_t)envY * (int64_t)VOLUME_RANGE) / 64);
+    }
 }
 
 static uint32_t mod2rmf_env_delta_to_us(uint32_t deltaTicks, double usPerTick)
 {
     return (uint32_t)(deltaTicks * usPerTick + 0.5);
+}
+
+static int32_t mod2rmf_env_peak_abs_y(const struct xmp_envelope *env, int npt)
+{
+    int i;
+    int32_t peak = 0;
+
+    for (i = 0; i < npt; ++i)
+    {
+        int32_t y = (int32_t)env->data[i * 2 + 1];
+        int32_t ay = mod2rmf_env_abs_i32(y);
+        if (ay > peak)
+        {
+            peak = ay;
+        }
+    }
+    return peak;
 }
 
 static double mod2rmf_abs_double(double value)
@@ -204,15 +251,15 @@ static int mod2rmf_select_env_points(const struct xmp_envelope *aei,
     return count;
 }
 
-static void mod2rmf_store_adsr_stage(ModRawSample *raw,
+static void mod2rmf_store_adsr_stage(ModAdsrStage *stages,
                                      uint32_t stageIndex,
-                                     uint32_t envY,
+                                     int32_t level,
                                      uint32_t timeUs,
                                      int32_t flags)
 {
-    raw->adsrStages[stageIndex].level = mod2rmf_env_level_from_xmp(envY);
-    raw->adsrStages[stageIndex].timeUs = (int32_t)timeUs;
-    raw->adsrStages[stageIndex].flags = flags;
+    stages[stageIndex].level = level;
+    stages[stageIndex].timeUs = (int32_t)timeUs;
+    stages[stageIndex].flags = flags;
 }
 
 static uint32_t mod2rmf_default_release_tail_us(const struct xmp_instrument *inst,
@@ -236,16 +283,17 @@ static uint32_t mod2rmf_default_release_tail_us(const struct xmp_instrument *ins
     return releaseUs;
 }
 
-/* Map a libxmp instrument's amplitude envelope to BAE ADSR stages.
- * We keep the most significant envelope points within maxStages,
- * preserve explicit tracker release segments, and only synthesize a release
+/* Map a libxmp envelope to BAE ADSR stages.
+ * Keeps the most significant envelope points within maxStages,
+ * preserves explicit tracker release segments, and only synthesizes a release
  * tail when the source envelope does not provide one. */
-void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
-                                  uint32_t bpm,
-                                  ModRawSample *raw,
-                                  uint32_t maxStages)
+void mod2rmf_extract_envelope_to_adsr(const struct xmp_envelope *env,
+                                      const struct xmp_instrument *inst,
+                                      uint32_t bpm,
+                                      ModEnvScaleMode scaleMode,
+                                      ModEnvelopeAdsr *out,
+                                      uint32_t maxStages)
 {
-    const struct xmp_envelope *aei;
     bool hasSustain;
     bool needsTailToZero;
     int sustainIdx;
@@ -256,13 +304,17 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
     int releasePointCount;
     double usPerTick;
     uint32_t stage;
-    uint32_t lastEnvY;
+    int32_t lastEnvY;
+    int32_t peakAbsY;
     uint32_t stageLimit;
+    uint32_t lastAbsYForTail;
 
-    if (!inst || !raw)
+    if (!env || !out)
     {
         return;
     }
+
+    memset(out, 0, sizeof(*out));
 
     stageLimit = maxStages;
     if (stageLimit < 2u)
@@ -274,40 +326,46 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
         stageLimit = (uint32_t)MOD2RMF_MAX_ADSR_STAGES;
     }
 
-    aei = &inst->aei;
-    if (!(aei->flg & XMP_ENVELOPE_ON) || aei->npt < 2)
+    if (!(env->flg & XMP_ENVELOPE_ON) || env->npt < 2)
     {
         return;
     }
 
-    npt = aei->npt;
+    npt = env->npt;
     if (npt > XMP_MAX_ENV_POINTS)
     {
         npt = XMP_MAX_ENV_POINTS;
     }
 
-    raw->hasEnvelope = TRUE;
-    usPerTick = 2500000.0 / (double)(bpm > 0 ? bpm : 125);
-    lastEnvY = (uint32_t)aei->data[(npt - 1) * 2 + 1];
+    peakAbsY = mod2rmf_env_peak_abs_y(env, npt);
+    if (peakAbsY <= 0)
+    {
+        peakAbsY = 1;
+    }
+    out->peakAbsY = peakAbsY;
 
-    sustainIdx = (aei->flg & XMP_ENVELOPE_SUS) ? aei->sus : -1;
+    usPerTick = 2500000.0 / (double)(bpm > 0 ? bpm : 125);
+    lastEnvY = (int32_t)env->data[(npt - 1) * 2 + 1];
+    lastAbsYForTail = (uint32_t)mod2rmf_env_abs_i32(lastEnvY);
+
+    sustainIdx = (env->flg & XMP_ENVELOPE_SUS) ? env->sus : -1;
     hasSustain = (sustainIdx >= 0 && sustainIdx < npt - 1) ? TRUE : FALSE;
     if (!hasSustain)
     {
         sustainIdx = npt - 1;
     }
-    needsTailToZero = (lastEnvY > 0u) ? TRUE : FALSE;
+    needsTailToZero = (lastEnvY != 0) ? TRUE : FALSE;
 
     #if _DEBUG == TRUE
     {
         int dbgIdx;
-        fprintf(stderr, "[mod2rmf]  ADSR extract: npt=%d flg=0x%02x sus=%d hasSustain=%d rls=%d usPerTick=%.1f maxStages=%u\n",
-                npt, aei->flg, aei->sus, hasSustain ? 1 : 0, inst->rls, usPerTick,
-                (unsigned)stageLimit);
+        fprintf(stderr, "[mod2rmf]  ADSR extract: scale=%d npt=%d flg=0x%02x sus=%d hasSustain=%d rls=%d usPerTick=%.1f maxStages=%u peakAbs=%d\n",
+                (int)scaleMode, npt, env->flg, env->sus, hasSustain ? 1 : 0,
+                inst ? inst->rls : 0, usPerTick, (unsigned)stageLimit, (int)peakAbsY);
         for (dbgIdx = 0; dbgIdx < npt; ++dbgIdx)
         {
             fprintf(stderr, "    pt[%d]: X=%d Y=%d%s\n",
-                    dbgIdx, aei->data[dbgIdx * 2], aei->data[dbgIdx * 2 + 1],
+                    dbgIdx, env->data[dbgIdx * 2], env->data[dbgIdx * 2 + 1],
                     (hasSustain && dbgIdx == sustainIdx) ? " <sustain>" : "");
         }
     }
@@ -367,12 +425,12 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
             }
         }
 
-        attackPointCount = mod2rmf_select_env_points(aei,
+        attackPointCount = mod2rmf_select_env_points(env,
                                                      0,
                                                      sustainIdx,
                                                      attackMax,
                                                      selectedAttack);
-        releasePointCount = mod2rmf_select_env_points(aei,
+        releasePointCount = mod2rmf_select_env_points(env,
                                                       sustainIdx + 1,
                                                       npt - 1,
                                                       releaseMax,
@@ -380,8 +438,7 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
 
         if (attackPointCount <= 0 || releasePointCount <= 0)
         {
-            raw->hasEnvelope = FALSE;
-            raw->adsrStageCount = 0;
+            memset(out, 0, sizeof(*out));
             return;
         }
 
@@ -392,13 +449,13 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
             for (i = 0; i < attackPointCount && stage < stageLimit; ++i)
             {
                 int pointIdx = selectedAttack[i];
-                uint32_t ptX = (uint32_t)aei->data[pointIdx * 2];
-                uint32_t ptY = (uint32_t)aei->data[pointIdx * 2 + 1];
+                uint32_t ptX = (uint32_t)env->data[pointIdx * 2];
+                int32_t ptY = (int32_t)env->data[pointIdx * 2 + 1];
                 uint32_t deltaX = (ptX > prevX) ? (ptX - prevX) : 0u;
 
-                mod2rmf_store_adsr_stage(raw,
+                mod2rmf_store_adsr_stage(out->stages,
                                          stage++,
-                                         ptY,
+                                         mod2rmf_env_level_from_y(ptY, scaleMode, peakAbsY),
                                          mod2rmf_env_delta_to_us(deltaX, usPerTick),
                                          ADSR_LINEAR_RAMP_LONG);
                 prevX = ptX;
@@ -407,22 +464,23 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
 
         if (stage < stageLimit)
         {
-            mod2rmf_store_adsr_stage(raw,
+            mod2rmf_store_adsr_stage(out->stages,
                                      stage++,
-                                     (uint32_t)aei->data[sustainIdx * 2 + 1],
+                                     mod2rmf_env_level_from_y((int32_t)env->data[sustainIdx * 2 + 1],
+                                                              scaleMode, peakAbsY),
                                      0u,
                                      ADSR_SUSTAIN_LONG);
         }
 
         {
-            uint32_t prevX = (uint32_t)aei->data[sustainIdx * 2];
+            uint32_t prevX = (uint32_t)env->data[sustainIdx * 2];
             int i;
 
             for (i = 0; i < releasePointCount && stage < stageLimit; ++i)
             {
                 int pointIdx = selectedRelease[i];
-                uint32_t ptX = (uint32_t)aei->data[pointIdx * 2];
-                uint32_t ptY = (uint32_t)aei->data[pointIdx * 2 + 1];
+                uint32_t ptX = (uint32_t)env->data[pointIdx * 2];
+                int32_t ptY = (int32_t)env->data[pointIdx * 2 + 1];
                 uint32_t deltaX = (ptX > prevX) ? (ptX - prevX) : 0u;
                 int32_t flags;
 
@@ -439,9 +497,9 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
                     flags = ADSR_LINEAR_RAMP_LONG;
                 }
 
-                mod2rmf_store_adsr_stage(raw,
+                mod2rmf_store_adsr_stage(out->stages,
                                          stage++,
-                                         ptY,
+                                         mod2rmf_env_level_from_y(ptY, scaleMode, peakAbsY),
                                          mod2rmf_env_delta_to_us(deltaX, usPerTick),
                                          flags);
                 prevX = ptX;
@@ -450,10 +508,10 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
 
         if (needsTailToZero && stage < stageLimit)
         {
-            mod2rmf_store_adsr_stage(raw,
+            mod2rmf_store_adsr_stage(out->stages,
                                      stage++,
-                                     0u,
-                                     mod2rmf_default_release_tail_us(inst, lastEnvY, usPerTick),
+                                     0,
+                                     mod2rmf_default_release_tail_us(inst, lastAbsYForTail, usPerTick),
                                      ADSR_TERMINATE_LONG);
         }
     }
@@ -463,23 +521,22 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
         int i;
         uint32_t prevX = 0;
 
-        attackPointCount = mod2rmf_select_env_points(aei,
+        attackPointCount = mod2rmf_select_env_points(env,
                                                      0,
                                                      npt - 1,
                                                      availablePointStages,
                                                      selectedAttack);
         if (attackPointCount <= 0)
         {
-            raw->hasEnvelope = FALSE;
-            raw->adsrStageCount = 0;
+            memset(out, 0, sizeof(*out));
             return;
         }
 
         for (i = 0; i < attackPointCount && stage < stageLimit; ++i)
         {
             int pointIdx = selectedAttack[i];
-            uint32_t ptX = (uint32_t)aei->data[pointIdx * 2];
-            uint32_t ptY = (uint32_t)aei->data[pointIdx * 2 + 1];
+            uint32_t ptX = (uint32_t)env->data[pointIdx * 2];
+            int32_t ptY = (int32_t)env->data[pointIdx * 2 + 1];
             uint32_t deltaX = (ptX > prevX) ? (ptX - prevX) : 0u;
             int32_t flags;
 
@@ -492,9 +549,9 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
                 flags = ADSR_LINEAR_RAMP_LONG;
             }
 
-            mod2rmf_store_adsr_stage(raw,
+            mod2rmf_store_adsr_stage(out->stages,
                                      stage++,
-                                     ptY,
+                                     mod2rmf_env_level_from_y(ptY, scaleMode, peakAbsY),
                                      mod2rmf_env_delta_to_us(deltaX, usPerTick),
                                      flags);
             prevX = ptX;
@@ -502,15 +559,16 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
 
         if (needsTailToZero && stage < stageLimit)
         {
-            mod2rmf_store_adsr_stage(raw,
+            mod2rmf_store_adsr_stage(out->stages,
                                      stage++,
-                                     0u,
-                                     mod2rmf_default_release_tail_us(inst, lastEnvY, usPerTick),
+                                     0,
+                                     mod2rmf_default_release_tail_us(inst, lastAbsYForTail, usPerTick),
                                      ADSR_TERMINATE_LONG);
         }
     }
 
-    raw->adsrStageCount = stage;
+    out->valid = TRUE;
+    out->stageCount = stage;
 
     #if _DEBUG == TRUE
     {
@@ -519,11 +577,67 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
         for (s = 0; s < stage; ++s)
         {
             fprintf(stderr, "    stage[%u]: level=%d time=%dus flags=0x%08x\n",
-                    s, raw->adsrStages[s].level, raw->adsrStages[s].timeUs,
-                    raw->adsrStages[s].flags);
+                    s, out->stages[s].level, out->stages[s].timeUs,
+                    out->stages[s].flags);
         }
     }
     #endif
+}
+
+void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
+                                  uint32_t bpm,
+                                  ModRawSample *raw,
+                                  uint32_t maxStages)
+{
+    ModEnvelopeAdsr extracted;
+
+    if (!inst || !raw)
+    {
+        return;
+    }
+
+    mod2rmf_extract_envelope_to_adsr(&inst->aei, inst, bpm,
+                                     MOD2RMF_ENV_SCALE_VOLUME,
+                                     &extracted, maxStages);
+    if (!extracted.valid || extracted.stageCount == 0)
+    {
+        return;
+    }
+
+    raw->hasEnvelope = TRUE;
+    raw->adsrStageCount = extracted.stageCount;
+    memcpy(raw->adsrStages, extracted.stages,
+           extracted.stageCount * sizeof(ModAdsrStage));
+}
+
+void mod2rmf_copy_adsr_to_editor(BAERmfEditorADSRInfo *dst,
+                                 const ModAdsrStage *stages,
+                                 uint32_t stageCount)
+{
+    uint32_t s;
+
+    if (!dst)
+    {
+        return;
+    }
+
+    memset(dst, 0, sizeof(*dst));
+    if (!stages || stageCount == 0)
+    {
+        return;
+    }
+
+    dst->stageCount = stageCount;
+    if (dst->stageCount > BAE_EDITOR_MAX_ADSR_STAGES)
+    {
+        dst->stageCount = BAE_EDITOR_MAX_ADSR_STAGES;
+    }
+    for (s = 0; s < dst->stageCount; ++s)
+    {
+        dst->stages[s].level = stages[s].level;
+        dst->stages[s].time = stages[s].timeUs;
+        dst->stages[s].flags = stages[s].flags;
+    }
 }
 
 /* Emulate a bidirectional (ping-pong) sample loop by appending a reversed

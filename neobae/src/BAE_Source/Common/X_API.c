@@ -8385,8 +8385,32 @@ bool XExistsFileResource(XFILE fileRef,
                             XResourceType resourceType, XLongResourceID resourceID)
 {
     char        name[256];
+    int32_t     size;
+    XPTR        data;
 
-    return XGetFileResourceName(fileRef, resourceType, resourceID, name);
+    name[0] = 0;
+    /* Flat cache/scan hit — including empty Pascal names. Classic bank emid
+     * entries are often unnamed; XGetFileResourceName treats "" as missing so
+     * it can fall through to ZSHD/ZINS name tables, which wrongly made Exists
+     * fail for those resources (nbeditor groovoid strip skipped all of them). */
+    if (XGetResourceNameOnly(fileRef, resourceType, resourceID, name) != NULL)
+    {
+        return TRUE;
+    }
+    /* Named packed ZREZ logical resources (ZINS/ZSNG/ZBNK/ZSHD). */
+    if (XGetFileResourceName(fileRef, resourceType, resourceID, name))
+    {
+        return TRUE;
+    }
+    /* Unnamed packed resources: probe load. */
+    size = 0;
+    data = XGetFileResource(fileRef, resourceType, resourceID, NULL, &size);
+    if (data)
+    {
+        XDisposePtr(data);
+        return TRUE;
+    }
+    return FALSE;
 }
 
 // Get just the resource name from resourceType and resourceID.

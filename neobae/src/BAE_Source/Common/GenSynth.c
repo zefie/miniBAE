@@ -2323,7 +2323,11 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
 #if USE_ZMF_SUPPORT == TRUE
                 case PULSE_WIDTH_LFO:
                     if (pVoice->useOscillator)
-                        pVoice->oscPulseWidthLive += value;
+                    {
+                        /* Beatnik 100 / ADSR@VOLUME_RANGE → value ≈ 256.
+                         * Scale ×128 so unity depth is ±32768 (±50% duty). */
+                        pVoice->oscPulseWidthLive += value * 128;
+                    }
                     break;
                 case WAVE_INDEX_LFO:
                     if (pVoice->useOscillator)

@@ -311,8 +311,9 @@ static bool IsBe2SessionDocument(const std::vector<BsnIrezResource> &resources)
     return false;
 }
 
-/* BE2 DATe stamps editor-touched resources. Custom Session songs get Midi/SONG
- * stamps; bank groovoids (even when stored as SONG→Midi) typically do not. */
+/* BE2 DATe stamps editor-touched resources. Custom Session songs get SONG and
+ * object stamps (Midi, or emid/ecmi/cmid when encrypted); bank groovoids
+ * typically do not. out_midi_ids holds any stamped song-object id. */
 static void CollectDateStampedSongKeys(const unsigned char *body,
                                        size_t size,
                                        std::set<uint32_t> &out_song_ids,
@@ -330,6 +331,18 @@ static void CollectDateStampedSongKeys(const unsigned char *body,
                             (static_cast<uint32_t>('i') << 16) |
                             (static_cast<uint32_t>('d') << 8) |
                             static_cast<uint32_t>('i');
+    const uint32_t k_emid = (static_cast<uint32_t>('e') << 24) |
+                            (static_cast<uint32_t>('m') << 16) |
+                            (static_cast<uint32_t>('i') << 8) |
+                            static_cast<uint32_t>('d');
+    const uint32_t k_ecmi = (static_cast<uint32_t>('e') << 24) |
+                            (static_cast<uint32_t>('c') << 16) |
+                            (static_cast<uint32_t>('m') << 8) |
+                            static_cast<uint32_t>('i');
+    const uint32_t k_cmid = (static_cast<uint32_t>('c') << 24) |
+                            (static_cast<uint32_t>('m') << 16) |
+                            (static_cast<uint32_t>('i') << 8) |
+                            static_cast<uint32_t>('d');
     for (size_t off = 0; off + 12 <= size; off += 12)
     {
         const uint32_t type = BsnReadBE32(body + off);
@@ -343,7 +356,7 @@ static void CollectDateStampedSongKeys(const unsigned char *body,
         {
             out_song_ids.insert(id);
         }
-        else if (type == k_midi)
+        else if (type == k_midi || type == k_emid || type == k_ecmi || type == k_cmid)
         {
             out_midi_ids.insert(id);
         }
@@ -2050,8 +2063,9 @@ private:
     }
 
     /* preserve_bank2: when an active bank exists, unload Bank 0/1 safely (same as
-     * File→Unload Bank) then merge Bank 0/1 from the new file. Session opens pass
-     * false so the session file becomes the bank token. */
+     * File→Unload Bank) then merge Bank 0/1 from the new file. Pass false for
+     * session opens and for pure bank opens with nothing to keep (avoids merging
+     * onto Init's built-in and leaking its unused samples). */
     bool LoadBankFromPath(const char *path, bool preserve_bank2 = true)
     {
         if (!m_mixer || !path || !path[0])
@@ -2887,6 +2901,236 @@ private:
 #endif
     }
 
+    /* Remove built-in/converted groovoids from a bank file. Keeps DATe-stamped
+     * Session songs (SONG and Midi/emid/ecmi/cmid bodies) and undated plain Midi
+     * SONG entries (treated as Custom Songs when no DATe is present). */
+    bool StripBankGroovoids(XFILE bank, const char **out_error = nullptr)
+    {
+        if (out_error)
+        {
+            *out_error = nullptr;
+        }
+        if (!bank)
+        {
+            return true;
+        }
+
+        /* Expose ZSNG/ZBNK logical SONG/Midi for enumeration on ZREZ. */
+        XFileSetForceZsbFeatures(bank, TRUE);
+
+        std::set<uint32_t> dated_song_ids;
+        std::set<uint32_t> dated_midi_ids;
+        {
+            const XResourceType date_type = FOUR_CHAR('D', 'A', 'T', 'e');
+            const int32_t date_count = XCountFileResourcesOfType(bank, date_type);
+            for (int32_t di = 0; di < date_count; ++di)
+            {
+                XLongResourceID date_id = 0;
+                int32_t date_size = 0;
+                XPTR date_data =
+                    XGetIndexedFileResource(bank, date_type, &date_id, di, nullptr, &date_size);
+                if (!date_data || date_size <= 0)
+                {
+                    if (date_data)
+                    {
+                        XDisposePtr(date_data);
+                    }
+                    continue;
+                }
+                CollectDateStampedSongKeys(static_cast<const unsigned char *>(date_data),
+                                           static_cast<size_t>(date_size),
+                                           dated_song_ids,
+                                           dated_midi_ids);
+                XDisposePtr(date_data);
+            }
+        }
+        const bool use_date_filter = !dated_song_ids.empty() || !dated_midi_ids.empty();
+
+        /* Prefer Midi over emid — orphan built-in emids must not reclassify a
+         * custom Midi body (same object id) as a groovoid. */
+        auto resolve_song_object_type = [&](uint16_t object_id) -> XResourceType {
+            const XLongResourceID oid = static_cast<XLongResourceID>(object_id);
+            if (XExistsFileResource(bank, ID_MIDI, oid) != FALSE)
+            {
+                return ID_MIDI;
+            }
+            if (XExistsFileResource(bank, ID_MIDI_OLD, oid) != FALSE)
+            {
+                return ID_MIDI_OLD;
+            }
+            if (XExistsFileResource(bank, ID_EMID, oid) != FALSE)
+            {
+                return ID_EMID;
+            }
+            if (XExistsFileResource(bank, ID_ECMI, oid) != FALSE)
+            {
+                return ID_ECMI;
+            }
+            if (XExistsFileResource(bank, ID_CMID, oid) != FALSE)
+            {
+                return ID_CMID;
+            }
+            return 0;
+        };
+
+        /* Collect first — XPurgeFileResource expands ZSNG/ZBNK and must not
+         * run while we are still indexing. */
+        struct GroovoidPurge
+        {
+            XLongResourceID song_id;
+            XResourceType object_type;
+            XLongResourceID object_id;
+        };
+        std::vector<GroovoidPurge> to_purge;
+        const int32_t song_count = XCountFileResourcesOfType(bank, ID_SONG);
+        for (int32_t i = 0; i < song_count; ++i)
+        {
+            XLongResourceID song_id = 0;
+            int32_t song_size = 0;
+            char name_buf[256];
+            name_buf[0] = 0;
+            XPTR song_data =
+                XGetIndexedFileResource(bank, ID_SONG, &song_id, i, name_buf, &song_size);
+            if (!song_data || song_size < 8)
+            {
+                if (song_data)
+                {
+                    XDisposePtr(song_data);
+                }
+                continue;
+            }
+            const unsigned char *body = static_cast<const unsigned char *>(song_data);
+            const uint16_t object_id =
+                static_cast<uint16_t>((static_cast<uint16_t>(body[0]) << 8) | body[1]);
+            const unsigned char song_type = body[6];
+            XDisposePtr(song_data);
+            if (song_type != 1)
+            {
+                continue;
+            }
+
+            /* DATe-stamped SONG = custom Session song (any object type). */
+            if (use_date_filter &&
+                dated_song_ids.count(static_cast<uint32_t>(song_id)) != 0)
+            {
+                continue;
+            }
+
+            const XResourceType object_type = resolve_song_object_type(object_id);
+            if (object_type == 0)
+            {
+                continue;
+            }
+
+            if (object_type == ID_MIDI || object_type == ID_MIDI_OLD)
+            {
+                if (!use_date_filter)
+                {
+                    /* No DATe → treat plain Midi as Custom Songs. */
+                    continue;
+                }
+                if (dated_midi_ids.count(object_id) != 0)
+                {
+                    continue;
+                }
+            }
+            else if (object_type == ID_EMID || object_type == ID_ECMI || object_type == ID_CMID)
+            {
+                /* Custom may also be emid/ecmi/cmid when DATe-stamped on the
+                 * object id (or SONG id, already handled above). */
+                if (use_date_filter && dated_midi_ids.count(object_id) != 0)
+                {
+                    continue;
+                }
+            }
+
+            to_purge.push_back(GroovoidPurge{song_id,
+                                             object_type,
+                                             static_cast<XLongResourceID>(object_id)});
+        }
+
+        for (const GroovoidPurge &g : to_purge)
+        {
+            /* Purge SONG first so ZSNG is reconstituted without it. */
+            if (XPurgeFileResource(bank, ID_SONG, g.song_id) == FALSE)
+            {
+                if (out_error)
+                {
+                    *out_error = "could not remove groovoid SONG";
+                }
+                return false;
+            }
+            if (g.object_type != 0)
+            {
+                (void)XPurgeFileResource(bank, g.object_type, g.object_id);
+            }
+        }
+
+        /* Orphan payloads: SONG removed but emid/ecmi/cmid (or undated Midi) left
+         * behind. Never touch objects still referenced by a remaining SONG, or
+         * DATe-stamped Midi object ids (custom Session song bodies). */
+        {
+            std::set<uint32_t> referenced_object_ids;
+            const int32_t keep_songs = XCountFileResourcesOfType(bank, ID_SONG);
+            for (int32_t i = 0; i < keep_songs; ++i)
+            {
+                XLongResourceID song_id = 0;
+                int32_t song_size = 0;
+                XPTR song_data =
+                    XGetIndexedFileResource(bank, ID_SONG, &song_id, i, nullptr, &song_size);
+                if (!song_data || song_size < 2)
+                {
+                    if (song_data)
+                    {
+                        XDisposePtr(song_data);
+                    }
+                    continue;
+                }
+                const unsigned char *body = static_cast<const unsigned char *>(song_data);
+                const uint16_t object_id =
+                    static_cast<uint16_t>((static_cast<uint16_t>(body[0]) << 8) | body[1]);
+                XDisposePtr(song_data);
+                referenced_object_ids.insert(object_id);
+            }
+
+            auto purge_unreferenced = [&](XResourceType type) {
+                std::vector<XLongResourceID> ids;
+                const int32_t count = XCountFileResourcesOfType(bank, type);
+                ids.reserve(static_cast<size_t>(count > 0 ? count : 0));
+                for (int32_t i = 0; i < count; ++i)
+                {
+                    XLongResourceID rid = 0;
+                    int32_t rsize = 0;
+                    XPTR data = XGetIndexedFileResource(bank, type, &rid, i, nullptr, &rsize);
+                    if (data)
+                    {
+                        XDisposePtr(data);
+                    }
+                    if (referenced_object_ids.count(static_cast<uint32_t>(rid)) != 0)
+                    {
+                        continue;
+                    }
+                    if (dated_midi_ids.count(static_cast<uint32_t>(rid)) != 0)
+                    {
+                        continue;
+                    }
+                    ids.push_back(rid);
+                }
+                for (XLongResourceID rid : ids)
+                {
+                    (void)XPurgeFileResource(bank, type, rid);
+                }
+            };
+
+            purge_unreferenced(ID_EMID);
+            purge_unreferenced(ID_ECMI);
+            purge_unreferenced(ID_CMID);
+            purge_unreferenced(ID_MIDI);
+            purge_unreferenced(ID_MIDI_OLD);
+        }
+        return true;
+    }
+
     void RefreshGroovoidsFromBank()
     {
         m_groovoids.clear();
@@ -2956,38 +3200,42 @@ private:
                 continue;
             }
 
-            /* object_id 0 is valid (classic groovoid banks use Midi/emid id 0).
-             * XExistsFileResource expands ZBNK for Midi on ZREZ banks. */
-            const bool has_emid =
-                XExistsFileResource(bank, ID_EMID, static_cast<XLongResourceID>(object_id)) != FALSE;
+            if (use_date_filter &&
+                (dated_song_ids.count(static_cast<uint32_t>(song_id)) != 0 ||
+                 dated_midi_ids.count(object_id) != 0))
+            {
+                /* DATe-stamped = Custom Session song, never a Groovoid. */
+                continue;
+            }
+
+            /* Prefer Midi when both exist — orphan emid must not steal a custom
+             * Midi object id. Classic groovoids: SONG → emid only.
+             * Converted bank groovoids: SONG → Midi without DATe stamp. */
             const bool has_midi =
-                XExistsFileResource(bank, ID_MIDI, static_cast<XLongResourceID>(object_id)) != FALSE;
+                XExistsFileResource(bank, ID_MIDI, static_cast<XLongResourceID>(object_id)) != FALSE ||
+                XExistsFileResource(bank, ID_MIDI_OLD, static_cast<XLongResourceID>(object_id)) != FALSE;
+            const bool has_emid =
+                XExistsFileResource(bank, ID_EMID, static_cast<XLongResourceID>(object_id)) != FALSE ||
+                XExistsFileResource(bank, ID_ECMI, static_cast<XLongResourceID>(object_id)) != FALSE ||
+                XExistsFileResource(bank, ID_CMID, static_cast<XLongResourceID>(object_id)) != FALSE;
             if (!has_emid && !has_midi)
             {
                 continue;
             }
 
-            /* Classic groovoids: SONG → emid.
-             * Converted bank groovoids (zpatches): SONG → Midi without DATe stamp.
-             * Custom Session songs: SONG → Midi with DATe stamp (excluded). */
             bool object_is_midi = false;
-            if (has_emid)
-            {
-                object_is_midi = false;
-            }
-            else if (has_midi)
+            if (has_midi)
             {
                 if (!use_date_filter)
                 {
                     /* No Midi/SONG DATe stamps → treat all Midi as Custom Songs. */
                     continue;
                 }
-                if (dated_song_ids.count(static_cast<uint32_t>(song_id)) != 0 ||
-                    dated_midi_ids.count(object_id) != 0)
-                {
-                    continue;
-                }
                 object_is_midi = true;
+            }
+            else
+            {
+                object_is_midi = false;
             }
 
             GroovoidEntry entry;

@@ -1001,9 +1001,10 @@
                 SetStatus("Not a NeoBAE Session .zsn (missing session layout)");
                 return;
             }
-            /* Keep Bank 2+/custom samples; LoadBankFromPath merges Bank 0/1. */
+            /* Bank-shaped .bsn: full replace unless Bank 2+/customs must stay.
+             * Avoid merging onto the Init built-in (orphan SNDs leak into export). */
             ClearSessionSongState(false);
-            LoadBankFromPath(selected_path.c_str(), true);
+            LoadBankFromPath(selected_path.c_str(), ShouldPreserveBank2OnBankLoad());
             return;
         }
         if (IsModuleExtension(ext))
@@ -1043,9 +1044,11 @@
         }
         if (IsBankExtension(ext))
         {
-            /* Keep Bank 2+/custom samples; LoadBankFromPath merges Bank 0/1. */
+            /* Pure bank (.zsb/.hsb): replace the built-in token when there is
+             * nothing to preserve. RMF sessions still keep built-in underneath
+             * (OpenRmfAsSession) so Bank 0 overrides like EndGame work. */
             ClearSessionSongState(false);
-            LoadBankFromPath(selected_path.c_str(), true);
+            LoadBankFromPath(selected_path.c_str(), ShouldPreserveBank2OnBankLoad());
             return;
         }
 
@@ -4239,7 +4242,9 @@
                destination == static_cast<int32_t>(FOUR_CHAR('L', 'P', 'R', 'E')) ||
                destination == static_cast<int32_t>(FOUR_CHAR('L', 'P', 'A', 'M')) ||
                /* WIDX: Beatnik 100 (=4096) × ADSR 100 ≈ full 0..5 wave table. */
-               destination == static_cast<int32_t>(FOUR_CHAR('W', 'I', 'D', 'X'));
+               destination == static_cast<int32_t>(FOUR_CHAR('W', 'I', 'D', 'X')) ||
+               /* PWID: same Beatnik 100 → engine ×128 ≈ ±50% pulse width. */
+               destination == static_cast<int32_t>(FOUR_CHAR('P', 'W', 'I', 'D'));
     }
 
     /* BE "Envelope Only": hide LFO wave UI; sine + level 0 + DC 3072 + period 0. */
@@ -4452,12 +4457,19 @@
             const int32_t prev_dest = lfo.destination;
             draw_four_char_combo("Destination", lfo.destination, dest_labels, dest_label_count);
 #if USE_ZMF_SUPPORT == TRUE
-            /* Fresh WIDX: Beatnik 100 (=4096) sweeps all 6 waves with ADSR at 100. */
+            /* Fresh WIDX/PWID: Beatnik 100 (=4096) is a useful unity depth. */
             if (lfo.destination != prev_dest &&
-                lfo.destination == static_cast<int32_t>(FOUR_CHAR('W', 'I', 'D', 'X')) &&
+                (lfo.destination == static_cast<int32_t>(FOUR_CHAR('W', 'I', 'D', 'X')) ||
+                 lfo.destination == static_cast<int32_t>(FOUR_CHAR('P', 'W', 'I', 'D'))) &&
                 lfo.level == 0 && lfo.DC_feed == 0)
             {
                 lfo.DC_feed = 4096;
+                if (lfo.destination == static_cast<int32_t>(FOUR_CHAR('P', 'W', 'I', 'D')))
+                {
+                    /* Oscillating PWM: put depth in level, not DC. */
+                    lfo.level = 4096;
+                    lfo.DC_feed = 0;
+                }
                 if (lfo.adsr.stageCount == 0)
                 {
                     LfoApplyWaveformOnlyAdsrDefault(lfo.adsr);
@@ -7006,7 +7018,7 @@
         ImGui::TextDisabled(
             "A4=440 Hz. Noise updates at note rate. Modulators (Modulation tab): "
             "PWID = pulse width; WIDX = wave index 0..5 (SINE TRIA SAWT SQUA PLSE NOIS). "
-            "WIDX uses Beatnik levels (100 ≈ full table; ~17 per wave step).");
+            "Beatnik levels: WIDX 100 ≈ full table; PWID 100 ≈ ±50%% duty.");
     }
 #endif
 

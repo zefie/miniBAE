@@ -238,6 +238,7 @@ LSTC
 		DLNG	Oscillator Volume (0..65536, 65536=unity, default 16384=25%; optional — older OSCL omits this)
 	KEYE	OSCL
 	KEYB	PWID
+		NOTE	LFO depth uses Beatnik scale: level 100 (4096) with ADSR@VOLUME_RANGE ≈ ±50% duty (engine applies ×128)
 		BCNT	Pulse Width modulator (period=0 → ADSR/DC only; period>0 → LFO)
 		LSTC	
 			DLNG	Pulse Width ADSR Level

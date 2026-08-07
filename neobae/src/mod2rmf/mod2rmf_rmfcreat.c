@@ -21,13 +21,271 @@
 #include "X_Formats.h"
 #include "X_Assert.h"
 #include <math.h>
+#include <string.h>
 #include <xmp.h>
+
+#ifndef FOUR_CHAR
+#include "X_API.h"
+#endif
+#define MOD2RMF_FCC(a,b,c,d) FOUR_CHAR((a),(b),(c),(d))
 
 /* Default: keep native Amiga/XM rate and middle-C root. Non-zero shift
  * (via --down-octave-range) still lowers root + rate together for low-note
  * headroom under BAE's default -24 semitone pitch floor; prefer --ext-pitch. */
 #define MOD2RMF_DEFAULT_ROOT_SHIFT_ST 0u
 #define MOD2RMF_LOGICAL_ROOT_KEY 60u
+/* BAE pitch LFO depth: cents * 41 (same as sf2-hsb). */
+#define MOD2RMF_PITCH_CENTS_TO_LFO 41
+
+static int32_t mod2rmf_it_vib_wave_shape(int vwf)
+{
+    switch (vwf & 3)
+    {
+    case 1: return (int32_t)MOD2RMF_FCC('S', 'A', 'W', 'T');
+    case 2: return (int32_t)MOD2RMF_FCC('S', 'Q', 'U', 'A');
+    case 3: return (int32_t)MOD2RMF_FCC('T', 'R', 'I', 'A');
+    case 0:
+    default: return (int32_t)MOD2RMF_FCC('S', 'I', 'N', 'E');
+    }
+}
+
+static void mod2rmf_capture_it_lpf(ModRawSample *raw, int ifc, int ifr)
+{
+    if (!raw || raw->hasLpf)
+    {
+        return;
+    }
+    if (!(ifc & 0x80))
+    {
+        return;
+    }
+    raw->hasLpf = TRUE;
+    raw->lpfFrequency = (int32_t)(ifc & 0x7f) * 256;
+    if (raw->lpfFrequency < 0x200 && raw->lpfFrequency > 0)
+    {
+        raw->lpfFrequency = 0x200;
+    }
+    if (ifr & 0x80)
+    {
+        raw->lpfResonance = (int32_t)(ifr & 0x7f) * 2;
+    }
+    else
+    {
+        raw->lpfResonance = 0;
+    }
+    /* Engage mono LPF path even when resonance is 0. */
+    raw->lpfAmount = 255;
+}
+
+/* IT NNA Cut/Fade on note replace does not play the full post-sustain
+ * envelope release. Collapse that tail so MIDI note-off (our flush on
+ * retrigger / DCT) does not smear the previous phrase under the next. */
+/* IT duplicate check: when a new note starts, apply DCA to other active
+ * notes that match DCT (note / sample / instrument). We approximate
+ * instrument as program (1 sample → 1 program in mod2rmf). */
+static int mod2rmf_flush_dct_duplicates(ModSongModel *song,
+                                        ActiveNote *activeNotes,
+                                        uint32_t channelCount,
+                                        uint16_t newChannel,
+                                        uint8_t newProgram,
+                                        unsigned char newNote,
+                                        int dct,
+                                        uint64_t tickFP)
+{
+    uint32_t ch;
+
+    if (!song || !activeNotes || dct == XMP_INST_DCT_OFF)
+    {
+        return 1;
+    }
+
+    for (ch = 0; ch < channelCount; ++ch)
+    {
+        ActiveNote *other = &activeNotes[ch];
+        int match = 0;
+
+        if (ch == (uint32_t)newChannel || !other->active)
+        {
+            continue;
+        }
+
+        switch (dct)
+        {
+        case XMP_INST_DCT_NOTE:
+            match = (other->note == newNote) ? 1 : 0;
+            break;
+        case XMP_INST_DCT_SMP:
+        case XMP_INST_DCT_INST:
+            match = (other->program == newProgram) ? 1 : 0;
+            break;
+        default:
+            break;
+        }
+
+        if (match)
+        {
+            if (!mod2rmf_flush_active_note(song, (uint16_t)ch, other, tickFP))
+            {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+static void mod2rmf_clamp_adsr_for_nna(ModRawSample *raw, uint32_t bpm)
+{
+    uint32_t i;
+    uint32_t sustainIdx;
+    uint32_t shortUs;
+    double usPerTick;
+    int32_t fadeout;
+
+    if (!raw || !raw->hasEnvelope || raw->adsrStageCount < 2 || !raw->hasNotePolicy)
+    {
+        return;
+    }
+
+    if (raw->nna != XMP_INST_NNA_CUT && raw->nna != XMP_INST_NNA_FADE)
+    {
+        return;
+    }
+
+    usPerTick = 2500000.0 / (double)(bpm > 0 ? bpm : 125);
+    fadeout = raw->fadeout;
+    if (raw->nna == XMP_INST_NNA_CUT)
+    {
+        shortUs = 15000u; /* ~15ms hard cut */
+    }
+    else if (fadeout <= 0)
+    {
+        /* NNA Fade with zero IT fadeout still needs a short declick tail.
+         * Keep it well under a row so DCT/NNA replaces do not smear. */
+        shortUs = 80000u; /* 80ms */
+    }
+    else
+    {
+        /* libxmp: fadeout -= rls each tick from ~65536. */
+        double ticks = 65536.0 / (double)fadeout;
+        shortUs = (uint32_t)(ticks * usPerTick + 0.5);
+        if (shortUs < 40000u)
+        {
+            shortUs = 40000u;
+        }
+        if (shortUs > 500000u)
+        {
+            shortUs = 500000u; /* cap 0.5s — still much shorter than env tails */
+        }
+    }
+
+    sustainIdx = raw->adsrStageCount;
+    for (i = 0; i < raw->adsrStageCount; ++i)
+    {
+        if (raw->adsrStages[i].flags == ADSR_SUSTAIN_LONG)
+        {
+            sustainIdx = i;
+            break;
+        }
+    }
+    if (sustainIdx >= raw->adsrStageCount)
+    {
+        return;
+    }
+
+    /* Keep attack+sustain; replace release with a short terminate. */
+    raw->adsrStageCount = sustainIdx + 2u;
+    raw->adsrStages[sustainIdx + 1u].level = 0;
+    raw->adsrStages[sustainIdx + 1u].timeUs = (int32_t)shortUs;
+    raw->adsrStages[sustainIdx + 1u].flags = ADSR_TERMINATE_LONG;
+}
+
+static void mod2rmf_capture_note_policy(ModRawSample *raw,
+                                        const struct xmp_instrument *inst,
+                                        const struct xmp_subinstrument *sub)
+{
+    if (!raw || !inst || !sub || raw->hasNotePolicy)
+    {
+        return;
+    }
+    raw->hasNotePolicy = TRUE;
+    raw->nna = (int8_t)sub->nna;
+    raw->dct = (int8_t)sub->dct;
+    raw->dca = (int8_t)sub->dca;
+    raw->fadeout = inst->rls;
+}
+
+static void mod2rmf_capture_sample_vibrato(ModRawSample *raw,
+                                          const struct xmp_subinstrument *sub,
+                                          uint32_t bpm)
+{
+    int rate;
+    double usPerTick;
+    int32_t cents;
+    int32_t periodUs;
+    int32_t sweepFrames;
+
+    if (!raw || !sub || raw->hasVibrato)
+    {
+        return;
+    }
+    if (sub->vde <= 0 || sub->vra <= 0)
+    {
+        return;
+    }
+
+    /* libxmp: rate = (vra + 2) >> 2, 64-phase table advanced once per tick. */
+    rate = (sub->vra + 2) >> 2;
+    if (rate < 1)
+    {
+        rate = 1;
+    }
+    usPerTick = 2500000.0 / (double)(bpm > 0 ? bpm : 125);
+    periodUs = (int32_t)((64.0 / (double)rate) * usPerTick + 0.5);
+    if (periodUs < 10000)
+    {
+        periodUs = 10000;
+    }
+    if (periodUs > 10000000)
+    {
+        periodUs = 10000000;
+    }
+
+    /* IT sample vibrato depth is in 1/64 semitone; libxmp stores vid<<1. */
+    cents = (int32_t)(((int64_t)sub->vde * 50) / 64);
+    if (cents < 1)
+    {
+        cents = 1;
+    }
+
+    raw->hasVibrato = TRUE;
+    raw->vibPeriodUs = periodUs;
+    raw->vibLevel = cents * MOD2RMF_PITCH_CENTS_TO_LFO;
+    if (raw->vibLevel < 1)
+    {
+        raw->vibLevel = 1;
+    }
+    if (raw->vibLevel > 524288)
+    {
+        raw->vibLevel = 524288;
+    }
+    raw->vibWaveShape = mod2rmf_it_vib_wave_shape(sub->vwf);
+
+    /* libxmp sweep counts down by 2 each tick from vsw. Approximate as a
+     * linear delay-to-full LFO ADSR over that many ticks. */
+    sweepFrames = sub->vsw;
+    if (sweepFrames > 1)
+    {
+        raw->vibSweepUs = (int32_t)((double)sweepFrames * usPerTick + 0.5);
+        if (raw->vibSweepUs < 0)
+        {
+            raw->vibSweepUs = 0;
+        }
+    }
+    else
+    {
+        raw->vibSweepUs = 0;
+    }
+}
 
 static unsigned char mod2rmf_shifted_root_key(unsigned char rootKey, uint8_t shiftSemitones)
 {
@@ -710,6 +968,8 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
     uint16_t chLastBend[MOD2RMF_MAX_CHANNELS];
     int16_t sampleTranspose[MOD2RMF_MAX_SAMPLES];  /* sub-instrument xpo per sample */
     bool sampleHasEnvelope[MOD2RMF_MAX_SAMPLES];   /* instrument has amplitude envelope */
+    bool sampleHasPitchEnv[MOD2RMF_MAX_SAMPLES];
+    bool sampleHasFilterEnv[MOD2RMF_MAX_SAMPLES];
     uint64_t positionTickFP[XMP_MAX_MOD_LENGTH]; /* MIDI tick at start of each order position */
     int positionSeen[XMP_MAX_MOD_LENGTH];        /* whether we've recorded the tick for this pos */
     int lastPos;                                 /* last seen order position */
@@ -784,6 +1044,8 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
      * while ci->pitchbend is relative to the TRANSPOSED note. */
     memset(sampleTranspose, 0, sizeof(sampleTranspose));
     memset(sampleHasEnvelope, 0, sizeof(sampleHasEnvelope));
+    memset(sampleHasPitchEnv, 0, sizeof(sampleHasPitchEnv));
+    memset(sampleHasFilterEnv, 0, sizeof(sampleHasFilterEnv));
     if (mod->ins > 0 && mod->xxi)
     {
         for (i = 0; i < (uint32_t)mod->ins; ++i)
@@ -992,6 +1254,70 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                           conv->maxAdsrStages);
                     sampleHasEnvelope[sid] = conv->rawSamples[sid].hasEnvelope;
                 }
+
+                mod2rmf_capture_note_policy(&conv->rawSamples[sid], inst, &inst->sub[sub]);
+                if (sampleHasEnvelope[sid])
+                {
+                    mod2rmf_clamp_adsr_for_nna(&conv->rawSamples[sid],
+                                              (uint32_t)(mod->bpm > 0 ? mod->bpm : 125));
+                }
+
+                /* Pitch / filter envelope (fei). FLT bit selects filter vs pitch. */
+                if ((inst->fei.flg & XMP_ENVELOPE_ON) && inst->fei.npt >= 2)
+                {
+                    ModEnvelopeAdsr extracted;
+                    uint32_t bpm = (uint32_t)(mod->bpm > 0 ? mod->bpm : 125);
+
+                    if ((inst->fei.flg & XMP_ENVELOPE_FLT) && !sampleHasFilterEnv[sid])
+                    {
+                        mod2rmf_extract_envelope_to_adsr(&inst->fei, inst, bpm,
+                                                         MOD2RMF_ENV_SCALE_FILTER,
+                                                         &extracted,
+                                                         conv->maxAdsrStages);
+                        if (extracted.valid && extracted.stageCount > 0)
+                        {
+                            ModRawSample *raw = &conv->rawSamples[sid];
+                            raw->hasFilterEnv = TRUE;
+                            raw->filterEnvStageCount = extracted.stageCount;
+                            raw->filterEnvPeakAbsY = extracted.peakAbsY;
+                            memcpy(raw->filterEnvStages, extracted.stages,
+                                   extracted.stageCount * sizeof(ModAdsrStage));
+                            sampleHasFilterEnv[sid] = TRUE;
+                        }
+                    }
+                    else if (!(inst->fei.flg & XMP_ENVELOPE_FLT) && !sampleHasPitchEnv[sid])
+                    {
+                        mod2rmf_extract_envelope_to_adsr(&inst->fei, inst, bpm,
+                                                         MOD2RMF_ENV_SCALE_PITCH,
+                                                         &extracted,
+                                                         conv->maxAdsrStages);
+                        if (extracted.valid && extracted.stageCount > 0)
+                        {
+                            ModRawSample *raw = &conv->rawSamples[sid];
+                            raw->hasPitchEnv = TRUE;
+                            raw->pitchEnvStageCount = extracted.stageCount;
+                            raw->pitchEnvPeakAbsY = extracted.peakAbsY;
+                            memcpy(raw->pitchEnvStages, extracted.stages,
+                                   extracted.stageCount * sizeof(ModAdsrStage));
+                            sampleHasPitchEnv[sid] = TRUE;
+                        }
+                    }
+                }
+
+                /* IT initial filter cutoff / resonance (first assignment wins). */
+                mod2rmf_capture_it_lpf(&conv->rawSamples[sid],
+                                      inst->sub[sub].ifc,
+                                      inst->sub[sub].ifr);
+
+                /* Sample vibrato → INST PITC LFO (first assignment wins). */
+                mod2rmf_capture_sample_vibrato(&conv->rawSamples[sid],
+                                               &inst->sub[sub],
+                                               (uint32_t)(mod->bpm > 0 ? mod->bpm : 125));
+                /* Always clear so libxmp does not bake vibrato into pitchbend. */
+                inst->sub[sub].vde = 0;
+                inst->sub[sub].vra = 0;
+                inst->sub[sub].vsw = 0;
+
                 /* Capture default pan from sub-instrument (first assignment wins) */
                 if (conv->rawSamples[sid].defaultPan < 0)
                 {
@@ -999,14 +1325,16 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                 }
             }
 
-            /* Now that we have captured the ADSR parameters, disable the
-             * amplitude envelope so libxmp no longer folds it into
-             * ci->volume.  This lets us emit CC7 from the raw channel
-             * volume (including volume slides) while BAE handles the
-             * envelope shape through its own ADSR engine. */
+            /* Disable amplitude + pitch/filter envelopes so libxmp no longer
+             * folds them into ci->volume / pitchbend. BAE INST units own them.
+             * Pan envelope (pei) stays enabled for CC10 bake-in. */
             if (inst->aei.flg & XMP_ENVELOPE_ON)
             {
                 inst->aei.flg &= ~XMP_ENVELOPE_ON;
+            }
+            if (inst->fei.flg & XMP_ENVELOPE_ON)
+            {
+                inst->fei.flg &= ~XMP_ENVELOPE_ON;
             }
         }
     }
@@ -1397,6 +1725,29 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                                                          conv->rawSampleCount);
                                 midiNote = baseNote + mod2rmf_tracker_note_bias(conv) + noteXpo;
 
+                                /* IT DCT: cut/off/fade duplicates on other channels
+                                 * before this note starts (e.g. singing DCT=INST). */
+                                if (conv->rawSamples[sid].hasNotePolicy &&
+                                    conv->rawSamples[sid].dct != XMP_INST_DCT_OFF)
+                                {
+                                    unsigned char dctNote = (unsigned char)mod2rmf_clamp_int(midiNote, 0, 127);
+                                    if (!mod2rmf_flush_dct_duplicates(song,
+                                                                      activeNotes,
+                                                                      song->channelCount,
+                                                                      (uint16_t)ch,
+                                                                      (uint8_t)program,
+                                                                      dctNote,
+                                                                      conv->rawSamples[sid].dct,
+                                                                      currentTickFP))
+                                    {
+                                        if (playerStarted) xmp_end_player(ctx);
+                                        free(sampleToProgram);
+                                        xmp_release_module(ctx);
+                                        xmp_free_context(ctx);
+                                        return 0;
+                                    }
+                                }
+
                                 activeNotes[ch].active = TRUE;
                                 activeNotes[ch].startTickFP = currentTickFP;
                                 activeNotes[ch].note = (unsigned char)mod2rmf_clamp_int(midiNote, 0, 127);
@@ -1497,6 +1848,28 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                                                      conv->rawSamples,
                                                                      conv->rawSampleCount);
                             midiNote = baseNote + mod2rmf_tracker_note_bias(conv) + noteXpo;
+
+                            if (delaySid >= 0 && (uint32_t)delaySid < conv->rawSampleCount &&
+                                conv->rawSamples[delaySid].hasNotePolicy &&
+                                conv->rawSamples[delaySid].dct != XMP_INST_DCT_OFF)
+                            {
+                                unsigned char dctNote = (unsigned char)mod2rmf_clamp_int(midiNote, 0, 127);
+                                if (!mod2rmf_flush_dct_duplicates(song,
+                                                                  activeNotes,
+                                                                  song->channelCount,
+                                                                  (uint16_t)ch,
+                                                                  (uint8_t)program,
+                                                                  dctNote,
+                                                                  conv->rawSamples[delaySid].dct,
+                                                                  currentTickFP))
+                                {
+                                    if (playerStarted) xmp_end_player(ctx);
+                                    free(sampleToProgram);
+                                    xmp_release_module(ctx);
+                                    xmp_free_context(ctx);
+                                    return 0;
+                                }
+                            }
 
                             activeNotes[ch].active = TRUE;
                             activeNotes[ch].startTickFP = currentTickFP;
@@ -1671,6 +2044,40 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
             p->adsrStageCount = conv->rawSamples[i].adsrStageCount;
             memcpy(p->adsrStages, conv->rawSamples[i].adsrStages,
                    conv->rawSamples[i].adsrStageCount * sizeof(ModAdsrStage));
+        }
+
+        if (conv->rawSamples[i].hasPitchEnv &&
+            conv->rawSamples[i].pitchEnvStageCount > 0)
+        {
+            p->hasPitchEnv = TRUE;
+            p->pitchEnvStageCount = conv->rawSamples[i].pitchEnvStageCount;
+            p->pitchEnvPeakAbsY = conv->rawSamples[i].pitchEnvPeakAbsY;
+            memcpy(p->pitchEnvStages, conv->rawSamples[i].pitchEnvStages,
+                   conv->rawSamples[i].pitchEnvStageCount * sizeof(ModAdsrStage));
+        }
+        if (conv->rawSamples[i].hasFilterEnv &&
+            conv->rawSamples[i].filterEnvStageCount > 0)
+        {
+            p->hasFilterEnv = TRUE;
+            p->filterEnvStageCount = conv->rawSamples[i].filterEnvStageCount;
+            p->filterEnvPeakAbsY = conv->rawSamples[i].filterEnvPeakAbsY;
+            memcpy(p->filterEnvStages, conv->rawSamples[i].filterEnvStages,
+                   conv->rawSamples[i].filterEnvStageCount * sizeof(ModAdsrStage));
+        }
+        if (conv->rawSamples[i].hasLpf)
+        {
+            p->hasLpf = TRUE;
+            p->lpfFrequency = conv->rawSamples[i].lpfFrequency;
+            p->lpfResonance = conv->rawSamples[i].lpfResonance;
+            p->lpfAmount = conv->rawSamples[i].lpfAmount;
+        }
+        if (conv->rawSamples[i].hasVibrato)
+        {
+            p->hasVibrato = TRUE;
+            p->vibPeriodUs = conv->rawSamples[i].vibPeriodUs;
+            p->vibLevel = conv->rawSamples[i].vibLevel;
+            p->vibWaveShape = conv->rawSamples[i].vibWaveShape;
+            p->vibSweepUs = conv->rawSamples[i].vibSweepUs;
         }
 
         /* Map sub-instrument default pan to BAE panPlacement */
@@ -2371,7 +2778,111 @@ int mod2rmf_setup_instrument_ext(Mod2RmfConverter *conv, const ModSongModel *son
             }
         }
 
-        /* MOD files don't use mod-wheel vibrato; suppress the engine's
+        /* Static LPF from IT ifc/ifr. Filter-env-only instruments still need
+         * a base cutoff so LPFR modulation has something to work against. */
+        if (playable->hasLpf)
+        {
+            extInfo.LPF_frequency = playable->lpfFrequency;
+            extInfo.LPF_resonance = playable->lpfResonance;
+            extInfo.LPF_lowpassAmount = playable->lpfAmount;
+        }
+        else if (playable->hasFilterEnv)
+        {
+            extInfo.LPF_frequency = 127 * 256;
+            extInfo.LPF_resonance = 0;
+            extInfo.LPF_lowpassAmount = 255;
+        }
+
+        /* INST LFOs: prefer filter env, pitch env, then vibrato (max 6). */
+        extInfo.lfoCount = 0;
+
+        if (playable->hasFilterEnv &&
+            playable->filterEnvStageCount > 0 &&
+            extInfo.lfoCount < BAE_EDITOR_MAX_LFOS)
+        {
+            BAERmfEditorLFOInfo *lfo = &extInfo.lfos[extInfo.lfoCount++];
+            int32_t baseFreq = extInfo.LPF_frequency > 0 ? extInfo.LPF_frequency : (127 * 256);
+            int32_t peak = playable->filterEnvPeakAbsY > 0 ? playable->filterEnvPeakAbsY : 256;
+
+            memset(lfo, 0, sizeof(*lfo));
+            lfo->destination = (int32_t)MOD2RMF_FCC('L', 'P', 'F', 'R');
+            lfo->period = 0;
+            lfo->waveShape = (int32_t)MOD2RMF_FCC('S', 'I', 'N', 'E');
+            lfo->level = 0;
+            /* Negative DC_feed: high ADSR brightens (matches SF2 mod-env→filter). */
+            lfo->DC_feed = -((int32_t)(((int64_t)baseFreq * (int64_t)peak) / 256));
+            if (lfo->DC_feed > -1)
+            {
+                lfo->DC_feed = -baseFreq;
+            }
+            mod2rmf_copy_adsr_to_editor(&lfo->adsr,
+                                        playable->filterEnvStages,
+                                        playable->filterEnvStageCount);
+        }
+
+        if (playable->hasPitchEnv &&
+            playable->pitchEnvStageCount > 0 &&
+            extInfo.lfoCount < BAE_EDITOR_MAX_LFOS)
+        {
+            BAERmfEditorLFOInfo *lfo = &extInfo.lfos[extInfo.lfoCount++];
+            int32_t peak = playable->pitchEnvPeakAbsY > 0 ? playable->pitchEnvPeakAbsY : 1;
+
+            memset(lfo, 0, sizeof(*lfo));
+            lfo->destination = (int32_t)MOD2RMF_FCC('P', 'I', 'T', 'C');
+            lfo->period = 0;
+            lfo->waveShape = (int32_t)MOD2RMF_FCC('S', 'I', 'N', 'E');
+            lfo->level = 0;
+            /* libxmp fei Y ≈ cents after IT *50 scaling. */
+            lfo->DC_feed = peak * MOD2RMF_PITCH_CENTS_TO_LFO;
+            if (lfo->DC_feed < 1)
+            {
+                lfo->DC_feed = 1;
+            }
+            if (lfo->DC_feed > 524288)
+            {
+                lfo->DC_feed = 524288;
+            }
+            mod2rmf_copy_adsr_to_editor(&lfo->adsr,
+                                        playable->pitchEnvStages,
+                                        playable->pitchEnvStageCount);
+        }
+
+        if (playable->hasVibrato && extInfo.lfoCount < BAE_EDITOR_MAX_LFOS)
+        {
+            BAERmfEditorLFOInfo *lfo = &extInfo.lfos[extInfo.lfoCount++];
+
+            memset(lfo, 0, sizeof(*lfo));
+            lfo->destination = (int32_t)MOD2RMF_FCC('P', 'I', 'T', 'C');
+            lfo->period = playable->vibPeriodUs;
+            lfo->waveShape = playable->vibWaveShape
+                                 ? playable->vibWaveShape
+                                 : (int32_t)MOD2RMF_FCC('S', 'I', 'N', 'E');
+            lfo->DC_feed = 0;
+            lfo->level = playable->vibLevel;
+            if (lfo->level < 1)
+            {
+                lfo->level = 1;
+            }
+            if (playable->vibSweepUs > 0)
+            {
+                lfo->adsr.stageCount = 2;
+                lfo->adsr.stages[0].level = 0;
+                lfo->adsr.stages[0].time = playable->vibSweepUs;
+                lfo->adsr.stages[0].flags = (int32_t)MOD2RMF_FCC('L', 'I', 'N', 'E');
+                lfo->adsr.stages[1].level = VOLUME_RANGE;
+                lfo->adsr.stages[1].time = 0;
+                lfo->adsr.stages[1].flags = (int32_t)MOD2RMF_FCC('S', 'U', 'S', 'T');
+            }
+            else
+            {
+                lfo->adsr.stageCount = 1;
+                lfo->adsr.stages[0].level = VOLUME_RANGE;
+                lfo->adsr.stages[0].time = 0;
+                lfo->adsr.stages[0].flags = (int32_t)MOD2RMF_FCC('S', 'U', 'S', 'T');
+            }
+        }
+
+        /* MOD/IT files don't use mod-wheel vibrato; suppress the engine's
          * automatic pitch LFO injection. */
         extInfo.hasDefaultMod = TRUE;
 

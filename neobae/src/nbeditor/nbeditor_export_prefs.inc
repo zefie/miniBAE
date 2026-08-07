@@ -730,35 +730,14 @@
         if (!m_export_bank_include_groovoids)
         {
             UpdateBusyProgress(0.2f, "Removing groovoids…");
-            const int32_t song_count = XCountFileResourcesOfType(temp_file, ID_SONG);
-            for (int32_t i = song_count - 1; i >= 0; --i)
+            const char *strip_err = nullptr;
+            if (!StripBankGroovoids(temp_file, &strip_err))
             {
-                XLongResourceID song_id = 0;
-                int32_t song_size = 0;
-                char name_buf[256];
-                name_buf[0] = 0;
-                XPTR song_data =
-                    XGetIndexedFileResource(temp_file, ID_SONG, &song_id, i, name_buf, &song_size);
-                if (!song_data || song_size < 8)
-                {
-                    if (song_data)
-                    {
-                        XDisposePtr(song_data);
-                    }
-                    continue;
-                }
-                const unsigned char *body = static_cast<const unsigned char *>(song_data);
-                const uint16_t object_id =
-                    static_cast<uint16_t>((static_cast<uint16_t>(body[0]) << 8) | body[1]);
-                XDisposePtr(song_data);
-                if (object_id == 0 ||
-                    XExistsFileResource(temp_file, ID_EMID, static_cast<XLongResourceID>(object_id)) ==
-                        FALSE)
-                {
-                    continue;
-                }
-                (void)XDeleteFileResource(temp_file, ID_SONG, song_id, TRUE);
-                (void)XDeleteFileResource(temp_file, ID_EMID, static_cast<XLongResourceID>(object_id), TRUE);
+                SetStatus(std::string("Export Bank failed: ") +
+                          (strip_err ? strip_err : "could not remove groovoids"));
+                (void)BAEMixer_UnloadBank(m_mixer, temp_token);
+                XDisposePtr(bank_bytes);
+                return;
             }
         }
 
