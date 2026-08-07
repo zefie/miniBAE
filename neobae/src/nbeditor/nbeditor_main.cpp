@@ -1279,7 +1279,7 @@ public:
         }
         MidiHwApplyFromPrefs();
         ScheduleStartupTipsIfEnabled();
-        SetStatus("nbeditor ready");
+        SetStatus("NeoBAE Editor ready");
         return true;
     }
 
