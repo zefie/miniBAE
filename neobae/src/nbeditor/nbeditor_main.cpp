@@ -4856,9 +4856,13 @@ private:
                 BAESong audition_song = GetAuditionSong();
                 if (audition_song)
                 {
+                    /* Perc: keep channel program 0 (note selects the drum INST). */
+                    const unsigned char prog =
+                        inst.percussion ? static_cast<unsigned char>(0)
+                                        : static_cast<unsigned char>(m_selected_program);
                     BAESong_ProgramBankChange(audition_song,
                                               AuditionMidiChannel(),
-                                              static_cast<unsigned char>(m_selected_program),
+                                              prog,
                                               static_cast<unsigned char>(m_selected_bank),
                                               0);
                 }
@@ -5171,12 +5175,21 @@ private:
                       prog_for_channel,
                       static_cast<unsigned char>(bank),
                       0);
+        /* Load by explicit patch id — do not rely on NoteOnWithLoad reading
+         * queued ProgramBankChange (paused audition song + mel↔perc moves). */
+        const uint32_t patch_id =
+            m_instrument_editor_open
+                ? InstrumentEditorPatchId()
+                : BankInstIdFromSlot(bank, is_perc, program);
+        if (m_bank_token)
+        {
+            XFileUseThisResourceFile(reinterpret_cast<XFILE>(m_bank_token));
+        }
         if (m_instrument_editor_open)
         {
             /* Inst ID 0 is valid (B0P000). Load + live-patch, then NoteOn (not
              * WithLoad) so ADSR edits are audible. Always ProgramBankChange on
              * the song that actually receives the note. */
-            const uint32_t patch_id = InstrumentEditorPatchId();
             BAEResult load_r =
                 BAESong_LoadInstrument(audition_song, static_cast<BAE_INSTRUMENT>(patch_id));
             /* Document-only INST (not yet in bank): fall back to playback song. */
@@ -5227,11 +5240,23 @@ private:
         }
         else
         {
-            BAESong_NoteOnWithLoad(audition_song,
-                                   ch,
-                                   play_note,
-                                   velocity,
-                                   0);
+            BAEResult load_r =
+                BAESong_LoadInstrument(audition_song, static_cast<BAE_INSTRUMENT>(patch_id));
+            if (load_r != BAE_NO_ERROR)
+            {
+                char buf[160];
+                std::snprintf(buf,
+                              sizeof(buf),
+                              "Can't load instrument id %u for audition (%s)",
+                              patch_id,
+                              FormatBAEError(load_r).c_str());
+                SetStatus(buf);
+            }
+            BAESong_NoteOn(audition_song,
+                           ch,
+                           play_note,
+                           velocity,
+                           0);
             m_ie_note_song = nullptr;
         }
     }
@@ -5816,17 +5841,23 @@ private:
     uint32_t m_midi_set_eot_tick = 0;
     uint32_t m_midi_set_eot_note_count = 0;
 
-    /* Beatnik / NeoBAE NRPN manager (MIDI Editor). */
+    /* Beatnik / NeoBAE (N)RPN manager (MIDI Editor). */
     bool m_midi_nrpn_open = false;
     int m_midi_nrpn_track = -1;
     int m_midi_nrpn_tick = 0;
-    int m_midi_nrpn_preset = 1; /* ChannelInstMode */
+    int m_midi_nrpn_preset = 1; /* NrpnChannelInstMode */
     int m_midi_nrpn_curve = 0;
     int m_midi_nrpn_mode = 3;
     int m_midi_nrpn_sample_offset = 0;
     int m_midi_nrpn_custom_msb = 5;
     int m_midi_nrpn_custom_lsb = 0;
     int m_midi_nrpn_custom_data = 3;
+    int m_midi_rpn_pb_semitones = 2;
+    int m_midi_rpn_fine_14 = 8192;
+    int m_midi_rpn_coarse = 64;
+    int m_midi_rpn_custom_msb = 0;
+    int m_midi_rpn_custom_lsb = 0;
+    int m_midi_rpn_custom_data = 2;
     bool m_midi_nrpn_append_null = true;
 
     bool m_song_info_open = false;

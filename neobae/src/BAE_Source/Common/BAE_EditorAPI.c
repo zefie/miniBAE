@@ -17205,8 +17205,11 @@ static BAEResult PV_BankReplaceResource(XFILE bankFile,
         }
     }
 
-    debug_message("[PV_BankReplaceResource] step 5: XCleanResourceFile...\n");
-    if (XCleanResourceFile(outFile) == FALSE)
+    /* Do not PackInst here: editor mutations (clone/move/alias) must keep flat
+     * Bank 2+/custom INST. PackInst into ZINS made ResolveInstID succeed while
+     * mixer XGetAndDetachResource failed to load the new id for audition. */
+    debug_message("[PV_BankReplaceResource] step 5: XCleanResourceFileOptions(no PackInst)...\n");
+    if (XCleanResourceFileOptions(outFile, FALSE, FALSE) == FALSE)
     {
         XFileClose(outFile);
         return BAE_FILE_IO_ERROR;
@@ -17244,6 +17247,8 @@ static BAEResult PV_BankReplaceResource(XFILE bankFile,
     bankFile->resizeResourceData = TRUE;
     bankFile->readOnly = FALSE;
     bankFile->allowMemCopy = TRUE;
+    /* Match EnsureWritable — Exists/load paths need a live cache. */
+    bankFile->pCache = XCreateAccessCache(bankFile);
     return BAE_NO_ERROR;
 }
 
@@ -17516,7 +17521,8 @@ static BAEResult PV_BankReplaceResourceEx(XFILE bankFile,
         }
     }
 
-    if (XCleanResourceFile(outFile) == FALSE)
+    /* Same as PV_BankReplaceResource: keep flat custom INST (no PackInst). */
+    if (XCleanResourceFileOptions(outFile, FALSE, FALSE) == FALSE)
     {
         XFileClose(outFile);
         return BAE_FILE_IO_ERROR;
@@ -17553,6 +17559,7 @@ static BAEResult PV_BankReplaceResourceEx(XFILE bankFile,
     bankFile->resizeResourceData = TRUE;
     bankFile->readOnly = FALSE;
     bankFile->allowMemCopy = TRUE;
+    bankFile->pCache = XCreateAccessCache(bankFile);
     return BAE_NO_ERROR;
 }
 

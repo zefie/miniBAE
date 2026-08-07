@@ -657,9 +657,87 @@
             if (m_instruments[i].inst_id == inst_id)
             {
                 m_selected_instrument = static_cast<int>(i);
+                m_selected_empty_slot = false;
                 m_selected_bank = m_instruments[i].bank;
                 m_selected_program = m_instruments[i].program;
+                EnsureBankAuditionSong();
+                BAESong audition_song = GetAuditionSong();
+                if (audition_song)
+                {
+                    const bool is_perc = m_instruments[i].percussion;
+                    const unsigned char ch = is_perc ? static_cast<unsigned char>(9)
+                                                    : static_cast<unsigned char>(0);
+                    /* Perc: program 0 + note=program at NoteOn; melodic uses program. */
+                    const unsigned char prog =
+                        is_perc ? static_cast<unsigned char>(0)
+                                : static_cast<unsigned char>(m_selected_program);
+                    BAESong_ProgramBankChange(audition_song,
+                                              ch,
+                                              prog,
+                                              static_cast<unsigned char>(m_selected_bank),
+                                              0);
+                }
                 return;
+            }
+        }
+    }
+
+    /* After clone/move: drop stale song cache for old id and force-load new id. */
+    void RefreshAuditionInstrumentLoad(uint32_t old_inst_id, uint32_t new_inst_id)
+    {
+        EnsureBankAuditionSong();
+        BAESong audition = GetAuditionSong();
+        if (!audition || !m_bank_token)
+        {
+            return;
+        }
+        XFileUseThisResourceFile(reinterpret_cast<XFILE>(m_bank_token));
+        if (old_inst_id != new_inst_id && old_inst_id < (128u * 6u))
+        {
+            BAE_BOOL loaded = FALSE;
+            int guard = 0;
+            while (guard++ < 64 &&
+                   BAESong_IsInstrumentLoaded(audition,
+                                              static_cast<BAE_INSTRUMENT>(old_inst_id),
+                                              &loaded) == BAE_NO_ERROR &&
+                   loaded)
+            {
+                if (BAESong_UnloadInstrument(audition,
+                                             static_cast<BAE_INSTRUMENT>(old_inst_id)) !=
+                    BAE_NO_ERROR)
+                {
+                    break;
+                }
+            }
+        }
+        if (new_inst_id < (128u * 6u))
+        {
+            BAE_BOOL loaded = FALSE;
+            int guard = 0;
+            while (guard++ < 64 &&
+                   BAESong_IsInstrumentLoaded(audition,
+                                              static_cast<BAE_INSTRUMENT>(new_inst_id),
+                                              &loaded) == BAE_NO_ERROR &&
+                   loaded)
+            {
+                if (BAESong_UnloadInstrument(audition,
+                                             static_cast<BAE_INSTRUMENT>(new_inst_id)) !=
+                    BAE_NO_ERROR)
+                {
+                    break;
+                }
+            }
+            const BAEResult lr =
+                BAESong_LoadInstrument(audition, static_cast<BAE_INSTRUMENT>(new_inst_id));
+            if (lr != BAE_NO_ERROR)
+            {
+                char buf[160];
+                std::snprintf(buf,
+                              sizeof(buf),
+                              "Moved/cloned instID %u but audition load failed (%s)",
+                              new_inst_id,
+                              FormatBAEError(lr).c_str());
+                SetStatus(buf);
             }
         }
     }

@@ -1761,6 +1761,8 @@ static void PV_ServeOscillatorBuffer(GM_Voice *pVoice)
     int32_t *destReverb = NULL;
     int32_t *destChorus = NULL;
     bool sendReverb;
+    int32_t amplitudeReverb = 0;
+    int32_t amplitudeChorus = 0;
 #endif
 
     if (!pVoice || !MusicGlobals)
@@ -1803,6 +1805,9 @@ static void PV_ServeOscillatorBuffer(GM_Voice *pVoice)
         int32_t oscShape = PV_ResolveOscWaveShape(pVoice);
 
 #if REVERB_USED == VARIABLE_REVERB
+    /* songBufferReverb/Chorus are MONO (One_Loop frames), unlike stereo dry.
+     * Writing interleaved stereo here overflowed adjacent mixer state and crashed
+     * nbeditor/zefidi when reverb/chorus sends were enabled on oscillator voices. */
     sendReverb = (pVoice->reverbLevel > 1 || pVoice->chorusLevel > 1) ? TRUE : FALSE;
     if (sendReverb)
     {
@@ -1813,6 +1818,15 @@ static void PV_ServeOscillatorBuffer(GM_Voice *pVoice)
 
     for (a = MusicGlobals->Four_Loop; a > 0; --a)
     {
+#if REVERB_USED == VARIABLE_REVERB
+        /* Match GenInterp2Reverb stereo→mono send scaling; amplitudeL/R are
+         * already >>2 vs sample path, so >>6 here ≡ sample path >>8. */
+        if (sendReverb)
+        {
+            amplitudeReverb = ((amplitudeL + amplitudeR) >> 6) * (int32_t)pVoice->reverbLevel;
+            amplitudeChorus = ((amplitudeL + amplitudeR) >> 6) * (int32_t)pVoice->chorusLevel;
+        }
+#endif
         for (inner = 0; inner < 4; inner++)
         {
             if (oscShape == NOISE_OSC_WAVE)
@@ -1850,12 +1864,8 @@ static void PV_ServeOscillatorBuffer(GM_Voice *pVoice)
 #if REVERB_USED == VARIABLE_REVERB
             if (sendReverb && destReverb && destChorus)
             {
-                destReverb[0] += sample * amplitudeL;
-                destReverb[1] += sample * amplitudeR;
-                destReverb += 2;
-                destChorus[0] += sample * amplitudeL;
-                destChorus[1] += sample * amplitudeR;
-                destChorus += 2;
+                *destReverb++ += sample * amplitudeReverb;
+                *destChorus++ += sample * amplitudeChorus;
             }
 #endif
         }
