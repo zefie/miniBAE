@@ -1205,18 +1205,18 @@ extern "C"
     // BAEMixer_SetOutputGain()
     // ------------------------------------
     // Sets the output gain as a percent (100 = normal, >100 = overdrive).
-    // This scales scaleBackAmount, which directly controls MIDI voice amplitudes.
-    // Unlike SetMasterVolume/SetGlobalVolume, this affects the MIDI synthesis path.
-    // Any resulting clipping is handled by the per-frame peak limiter.
+    // Applied on the full mix bus (HSB+SF2+Native DLS) before the peak limiter.
+    // Use this for player/master volume so DLS-RMF balance stays correct when
+    // volume is not 100%. Keep BAESong_SetVolume at unity when using this knob.
     //
     BAEResult BAEMixer_SetOutputGain(BAEMixer mixer, int32_t gainPct);
     BAEResult BAEMixer_GetOutputGain(BAEMixer mixer, int32_t *outGainPct);
 
     // BAEMixer_SetSongNormalizeGain()
     // ------------------------------------
-    // Sets the final-mix normalize gain as a percent (100 = unity). Unlike
-    // SetOutputGain (MIDI/HSB path only), this scales the mixed bus after all
-    // engines (HSB/SF2/DLS), EQ, limiter, and global volume.
+    // Sets the final-mix normalize gain as a percent (100 = unity). Scales the
+    // mixed bus after all engines (HSB/SF2/DLS), EQ, limiter, and global volume.
+    // Intended for automatic song normalize, not the interactive player slider.
     //
     BAEResult BAEMixer_SetSongNormalizeGain(BAEMixer mixer, int32_t gainPct);
     BAEResult BAEMixer_GetSongNormalizeGain(BAEMixer mixer, int32_t *outGainPct);

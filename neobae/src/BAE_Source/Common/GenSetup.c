@@ -469,16 +469,15 @@ int32_t GM_GetGlobalVolume(void)
 }
 
 // GM_SetOutputGain / GM_GetOutputGain
-// Set output gain percent (100 = normal, >100 = overdrive). Recalculates scaleBackAmount,
-// which scales MIDI voice amplitudes directly. Any clipping is handled by the per-frame
-// peak limiter in PV_ApplyOutputLimiter.
+// Set output gain percent (100 = normal, >100 = overdrive). Applied on the full
+// mix bus (HSB+SF2+DLS) before the peak limiter — not via scaleBackAmount —
+// so player volume does not skew DLS-RMF vs embedded HSB balance.
 void GM_SetOutputGain(int32_t gainPct)
 {
     if (MusicGlobals)
     {
         if (gainPct < 0) gainPct = 0;
         MusicGlobals->outputGainPct = gainPct;
-        PV_CalcScaleBack();
     }
 }
 

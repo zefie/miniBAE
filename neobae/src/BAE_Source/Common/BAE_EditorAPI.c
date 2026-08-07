@@ -15823,17 +15823,19 @@ BAEResult BAERmfEditorBank_GetInstrumentSampleInfo(BAEBankToken bankToken,
                         sndData, sndSize, (uint32_t)sampleInfo.compressionType);
                     outInfo->opusRoundTripResample = XGetSoundOpusRoundTripFlag(sndData);
                     /* When outInfo->rootKey was left 0 (!useSoundModifierAsRootKey),
-                     * resolve the sample root the same way as PV_AddEmbeddedSampleVariant. */
+                     * the engine uses SND baseKey/baseFrequency as the sample root.
+                     * Prefer that over inferring from a single-key split range — the
+                     * split key is the mapping zone, not the sample's recorded pitch. */
                     if (outInfo->rootKey == 0)
                     {
-                        if (outInfo->lowKey <= 127 && outInfo->highKey <= 127 &&
-                            outInfo->lowKey == outInfo->highKey)
-                        {
-                            outInfo->rootKey = outInfo->lowKey;
-                        }
-                        else if (sampleInfo.baseKey > 0 && sampleInfo.baseKey <= 127)
+                        if (sampleInfo.baseKey >= 0 && sampleInfo.baseKey <= 127)
                         {
                             outInfo->rootKey = (unsigned char)sampleInfo.baseKey;
+                        }
+                        else if (outInfo->lowKey <= 127 && outInfo->highKey <= 127 &&
+                                 outInfo->lowKey == outInfo->highKey)
+                        {
+                            outInfo->rootKey = outInfo->lowKey;
                         }
                         else
                         {
@@ -17569,6 +17571,7 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
     BAEResult replaceResult;
     BAERmfEditorBankSampleInfo currentInfo;
     int needsSndHeaderUpdate;
+    bool useSoundModifierAsRootKey;
 
     if (!bankToken || !info)
     {
@@ -17595,10 +17598,12 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
         splitCount = 0;
     }
 
+    useSoundModifierAsRootKey = TEST_FLAG_VALUE(((unsigned char *)instData)[6],
+                                             ZBF_useSoundModifierAsRootKey);
+
     if (splitCount > 0)
     {
         unsigned char *splitPtr;
-        unsigned char flags2;
 
         if (sampleIndex >= (uint32_t)splitCount)
         {
@@ -17616,34 +17621,24 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
 
         /* Root key storage depends on ZBF_useSoundModifierAsRootKey.
          * When set, each split stores its own root in miscParameter1.
-         * When clear, all splits share the instrument-level midiRootKey. */
-        flags2 = ((unsigned char *)instData)[6];
-        if (TEST_FLAG_VALUE(flags2, ZBF_useSoundModifierAsRootKey))
+         * When clear, the sample root lives in the SND baseFrequency /
+         * baseKey — never overwrite INST midiRootKey (master transpose). */
+        if (useSoundModifierAsRootKey)
         {
             XPutShort(splitPtr + 4, (uint16_t)info->rootKey);
-        }
-        else
-        {
-            /* Write to the shared midiRootKey - this affects all splits,
-             * which is correct because the format has no per-split root
-             * key in this mode. */
-            XPutShort((unsigned char *)instData + 2, (uint16_t)info->rootKey);
         }
     }
     else
     {
-        unsigned char flags2;
-
         if (sampleIndex != 0)
         {
             XDisposePtr(instData);
             return BAE_PARAM_ERR;
         }
-        XPutShort((unsigned char *)instData + 2, (uint16_t)info->rootKey);
         XPutShort((unsigned char *)instData + 10, (uint16_t)info->splitVolume);
-        flags2 = ((unsigned char *)instData)[6];
-        if (TEST_FLAG_VALUE(flags2, ZBF_useSoundModifierAsRootKey))
+        if (useSoundModifierAsRootKey)
         {
+            /* Per-sample root in miscParameter1; keep midiRootKey as master transpose. */
             XPutShort((unsigned char *)instData + 8, (uint16_t)info->rootKey);
         }
         /* sndResourceID 0 is a valid SND id — always write the caller's value. */
@@ -17651,7 +17646,8 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
         sndID = info->sndResourceID;
     }
 
-    /* Check early if this is a metadata-only edit (splitVolume/rootKey only, no SND changes) */
+    /* Check early if this is a metadata-only edit (splitVolume/INST root only,
+     * no SND rate/loop/baseKey changes). */
     needsSndHeaderUpdate = 1;
     XSetMemory(&currentInfo, (int32_t)sizeof(currentInfo), 0);
     if (BAERmfEditorBank_GetInstrumentSampleInfo(bankToken,
@@ -17661,7 +17657,8 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
     {
         if (currentInfo.sampleRate == info->sampleRate &&
             currentInfo.loopStart == info->loopStart &&
-            currentInfo.loopEnd == info->loopEnd)
+            currentInfo.loopEnd == info->loopEnd &&
+            (useSoundModifierAsRootKey || currentInfo.rootKey == info->rootKey))
         {
             needsSndHeaderUpdate = 0;
         }
@@ -17735,13 +17732,16 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
 
         hz = info->sampleRate;
         sampleRate = (BAE_UNSIGNED_FIXED)(hz << 16);
-        /* Do NOT overwrite the SND's baseFrequency/baseMidiPitch here.
-         * That field represents the sample's recorded pitch (used by the
-         * engine's baseMidiPitch calculation) and is a property of the
-         * audio data itself.  The instrument root key is stored in the
-         * INST resource (midiRootKey / split miscParameter1) above. */
         XSetSoundSampleRate(sndPlain, sampleRate);
         XSetSoundLoopPoints(sndPlain, (int32_t)info->loopStart, (int32_t)info->loopEnd);
+
+        /* When useSoundModifierAsRootKey is clear, the sample root is the SND
+         * baseKey/baseFrequency.  When set, INST miscParameter1 owns the root
+         * and the SND key stays as the sample's recorded pitch. */
+        if (!useSoundModifierAsRootKey)
+        {
+            XSetSoundBaseKey(sndPlain, (int16_t)info->rootKey);
+        }
     }
 
     sndWrapped = NULL;
@@ -21881,7 +21881,11 @@ static BAEResult PV_BankReEncodeSampleCore(XFILE bankFile,
     needInspectOldSndHeader = FALSE;
     oldSndType = ID_SND;
     XSetMemory(&oldSndInfo, (int32_t)sizeof(oldSndInfo), 0);
-    preservedBaseKey = (int16_t)pSampleInfo->rootKey;
+    /* Editor/INST rootKey is NOT the SND baseFrequency.  The engine always
+     * loads baseMidiPitch from the SND header; when useSoundModifierAsRootKey
+     * is clear that value is the playback root.  Prefer the existing SND key
+     * and only fall back to the caller's rootKey (preview path / missing SND). */
+    preservedBaseKey = -1;
     compType = C_NONE;
     compSubType = CS_DEFAULT;
     switch (compressionType)
@@ -21990,10 +21994,9 @@ static BAEResult PV_BankReEncodeSampleCore(XFILE bankFile,
             return result;
         }
 
-        if (preservedBaseKey < 0 || preservedBaseKey > 127)
-        {
-            needInspectOldSndHeader = TRUE;
-        }
+        /* Always read the prior SND baseKey — do not stamp INST/editor rootKey
+         * onto the sample header (that breaks pitch for !useSoundModifierAsRootKey). */
+        needInspectOldSndHeader = TRUE;
 
         if (needInspectOldSndHeader)
         {
@@ -22019,10 +22022,28 @@ static BAEResult PV_BankReEncodeSampleCore(XFILE bankFile,
                 }
             }
         }
+
+        if (preservedBaseKey < 0 || preservedBaseKey > 127)
+        {
+            /* Missing/unreadable SND header: fall back to editor root, then middle C. */
+            if (pSampleInfo->rootKey <= 127)
+            {
+                preservedBaseKey = (int16_t)pSampleInfo->rootKey;
+            }
+            else
+            {
+                preservedBaseKey = 60;
+            }
+        }
     }
-    else if (preservedBaseKey < 0 || preservedBaseKey > 127)
+    else
     {
-        preservedBaseKey = 60;
+        /* In-memory preview: caller supplies the intended base key via rootKey. */
+        preservedBaseKey = (int16_t)pSampleInfo->rootKey;
+        if (preservedBaseKey < 0 || preservedBaseKey > 127)
+        {
+            preservedBaseKey = 60;
+        }
     }
 
     /* Build the source waveform descriptor */

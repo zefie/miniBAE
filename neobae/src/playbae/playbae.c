@@ -703,20 +703,16 @@ static void MuteChannels(BAESong song, char *list)
  * ========================================================================= */
 
 /* Per-song/sound volume: BAE_UNSIGNED_FIXED is 16.16 fixed-point.
- * BAESong_SetVolume computes: mVolume = FIXED_TO_SHORT_ROUNDED(volume * MAX_SONG_VOLUME)
- * GM_SetSongVolume clamps at MAX_NOTE_VOLUME (127), so the effective range is 0-100%.
- * Values above 100% are handled via BAEMixer_SetOutputGain (scaleBackAmount overdrive). */
+ * For MIDI/RMF/DLS-RMF, player -v uses BAEMixer_SetOutputGain (full mix bus).
+ * Keep BAESong_SetVolume at unity so HSB is not double-attenuated vs Native DLS. */
 static BAE_UNSIGNED_FIXED volume_pct_to_fixed(int pct)
 {
     if (pct < 0)   pct = 0;
-    if (pct > 100) pct = 100; /* clamped: overdrive handled by output gain */
+    if (pct > 100) pct = 100; /* song/sound object path; overdrive via OutputGain */
     return FLOAT_TO_UNSIGNED_FIXED(pct / 100.0);
 }
 
-/* Apply volume to the mixer output gain path.
- * BAEMixer_SetOutputGain scales scaleBackAmount, which is the real gain knob for
- * MIDI synthesis. BAEMixer_SetMasterVolume/SetGlobalVolume do NOT affect MIDI voices
- * (MasterVolume is only used in the PCM effects path; GlobalVolume clamps at 256). */
+/* Player volume on the full mix bus (HSB+SF2+DLS) before the peak limiter. */
 static void apply_output_gain(BAEMixer mixer)
 {
     BAEMixer_SetOutputGain(mixer, gVolumePct);
@@ -966,8 +962,11 @@ static BAEResult PV_PlaySong(BAEMixer mixer, BAESong song, const char *fileName,
     if (gVerbose) BAESong_DisplayInfo(song);
     if (gPassNumber <= 0) print_song_engine_config(song);
 
-    /* Apply settings after Start (matches original PlayMidi/PlayRMF order) */
-    BAESong_SetVolume(song, volume);
+    /* Apply settings after Start (matches original PlayMidi/PlayRMF order).
+     * Song volume stays at unity; player -v is OutputGain on the full mix bus
+     * so Native DLS and HSB/SF2 stay balanced in DLS-RMF songs. */
+    (void)volume;
+    BAESong_SetVolume(song, volume_pct_to_fixed(100));
     if (muteChannels && muteChannels[0])
         MuteChannels(song, muteChannels);
 
@@ -2024,6 +2023,8 @@ int main(int argc, char *argv[])
         gVolumePct = atoi(tmpBuf);
         if (gVolumePct < 0)   gVolumePct = 0;
         if (gVolumePct > 400) gVolumePct = 400;
+        /* PCM/stream object volume (clamped 0-100). MIDI/RMF uses OutputGain
+         * (gVolumePct) with song volume held at unity in PV_PlaySong. */
         volume = volume_pct_to_fixed(gVolumePct);
     }
     if (PV_ParseCommands(argc, argv, "-v2", 1, tmpBuf)) {

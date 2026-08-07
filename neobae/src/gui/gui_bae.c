@@ -1407,22 +1407,33 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
     // Update MSB/LSB values for the current channel after loading a new song
     update_bank_program_for_channel();
 
-    /* Apply current user-requested master volume to the newly loaded song
-       so UI volume state is respected immediately on load. Songs do not get
-       the per-sound doubling applied to raw audio files. */
+    /* Apply current UI master volume via the same bus path as bae_set_volume
+       (GlobalVolume). Do NOT route UI volume through BAESong_SetVolume /
+       SetMasterVolume — those only scale HSB and skew DLS-RMF balance. */
     {
         double stored = g_last_requested_master_volume; /* 0..1 engine space */
-        if (g_bae.song)
-            BAESong_SetVolume(g_bae.song, FLOAT_TO_UNSIGNED_FIXED(stored));            
+        double baseline = (NEW_BASELINE_PCT / 100.0);
+        double ratio = (baseline > 0.0) ? (stored / baseline) : 0.0;
+        double sqrtRatio;
+        int volPct;
 
-#if SUPPORT_MIDI_HW == TRUE
-        if (g_bae.mixer && !g_master_muted_for_midi_out)
-#else
-        if (g_bae.mixer)
-#endif
-        {
-            BAEMixer_SetMasterVolume(g_bae.mixer, FLOAT_TO_UNSIGNED_FIXED(stored));
+        if (ratio < 0.0) ratio = 0.0;
+        if (ratio > 1.0) ratio = 1.0;
+        if (ratio <= 0.0) {
+            sqrtRatio = 0.0;
+        } else {
+            sqrtRatio = (ratio + 1.0) * 0.5;
+            sqrtRatio = (sqrtRatio + ratio / sqrtRatio) * 0.5;
+            sqrtRatio = (sqrtRatio + ratio / sqrtRatio) * 0.5;
         }
+        volPct = (int)(sqrtRatio * 100.0 + 0.5);
+        if (volPct < 0)
+            volPct = 0;
+        if (volPct > NEW_MAX_VOLUME_PCT)
+            volPct = NEW_MAX_VOLUME_PCT;
+        if (g_bae.song)
+            BAESong_SetVolume(g_bae.song, FLOAT_TO_UNSIGNED_FIXED(1.0));
+        bae_set_volume(volPct);
     }
 
 #if SUPPORT_KARAOKE == TRUE

@@ -859,10 +859,9 @@ void PV_CalcScaleBack(void)
 #if 1
     pMixer->scaleBackAmount = PV_L2(pMixer->mixLevel);
     pMixer->scaleBackAmount = (int16_t)(((int32_t)pMixer->scaleBackAmount * HSB_MAX_OUTPUT_SCALE_NUM) / HSB_MAX_OUTPUT_SCALE_DEN);
-    /* Apply user-set output gain (100 = normal, >100 = overdrive). Capped by the
-     * per-frame peak limiter, so extreme values just bring the limiter into play. */
-    if (pMixer->outputGainPct != 100)
-        pMixer->scaleBackAmount = (int32_t)((int64_t)pMixer->scaleBackAmount * pMixer->outputGainPct / 100);
+    /* outputGainPct is applied on the full mix bus (HSB+SF2+DLS) in
+     * PV_ProcessSampleFrame — not here. Scaling scaleBackAmount would
+     * attenuate HSB/SF2 voices only and skew DLS-RMF balance. */
 #else
     int noteScale;
     int32_t scaleSize;
@@ -3557,6 +3556,32 @@ void PV_ProcessSampleFrame(void *threadContext, void *destinationSamples)
 
         // Apply EQ to final mix buffer
         PV_ApplyEQ(pMixer);
+
+        /* User OutputGain on the full dry bus (HSB + SF2 + Native DLS) before
+         * the limiter so overdrive still engages peak limiting, and DLS-RMF
+         * balance tracks the player volume the same way as pure HSB content. */
+        if (pMixer->outputGainPct != 100)
+        {
+            int32_t *buffer = pMixer->songBufferDry;
+            int32_t samples = pMixer->One_Loop * (pMixer->generateStereoOutput ? 2 : 1);
+            int32_t gainPct = pMixer->outputGainPct;
+            int32_t i;
+
+            if (gainPct <= 0)
+            {
+                for (i = 0; i < samples; i++)
+                {
+                    buffer[i] = 0;
+                }
+            }
+            else
+            {
+                for (i = 0; i < samples; i++)
+                {
+                    buffer[i] = (int32_t)(((int64_t)buffer[i] * (int64_t)gainPct) / 100);
+                }
+            }
+        }
 
         // Limit the raw mix bus before global volume so the limiter
         // never interacts with the volume slider.

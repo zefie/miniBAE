@@ -3491,10 +3491,9 @@ OPErr XExpandVorbis(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* ds
             dst->bitSize = decoded->bitSize;
             dst->channels = decoded->channels;
             /* Vorbis bitstreams carry no MIDI pitch info; the decoder defaults
-             * baseMidiPitch to 60.  Preserve the value from the SND header
-             * (already in src->baseMidiPitch) so the engine and editor see the
-             * rootKey that was stored at save time. */
-            dst->baseMidiPitch = src->baseMidiPitch ? src->baseMidiPitch : decoded->baseMidiPitch;
+             * baseMidiPitch to 60.  Always keep the SND header value from src
+             * (baseMidiPitch 0 is a valid MIDI note — do not treat it as missing). */
+            dst->baseMidiPitch = src->baseMidiPitch;
             dst->compressionType = C_NONE; // Decoded is uncompressed
             /* Preserve loop points from SND metadata. Vorbis streams usually do
              * not carry loop tags in this path, and decoded->startLoop/endLoop
@@ -3845,7 +3844,9 @@ OPErr XExpandOpus(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst)
             dst->sampledRate = decoded->sampledRate;
             dst->bitSize = decoded->bitSize;
             dst->channels = decoded->channels;
-            dst->baseMidiPitch = src->baseMidiPitch ? src->baseMidiPitch : decoded->baseMidiPitch;
+            /* Opus bitstreams carry no MIDI pitch info; keep SND header value.
+             * baseMidiPitch 0 is valid — do not fall back to the decoder default. */
+            dst->baseMidiPitch = src->baseMidiPitch;
             dst->compressionType = C_NONE; // Decoded is uncompressed
             /* Preserve loop points from SND metadata; Opus decoder metadata does
              * not provide loop points in this code path. */
@@ -4653,11 +4654,9 @@ OPErr XExpandFLAC(GM_Waveform const* src, uint32_t startFrame, GM_Waveform* dst)
         dst->bitSize = decoded->bitSize;
         dst->channels = decoded->channels;
         dst->sampledRate = decoded->sampledRate;
-        /* FLAC bitstreams carry no MIDI pitch info; the decoder defaults
-         * baseMidiPitch to 60.  Preserve the value from the SND header
-         * (already in src->baseMidiPitch) so the engine and editor see the
-         * rootKey that was stored at save time. */
-        dst->baseMidiPitch = src->baseMidiPitch ? src->baseMidiPitch : decoded->baseMidiPitch;
+        /* FLAC bitstreams carry no MIDI pitch info; keep SND header value.
+         * baseMidiPitch 0 is valid — do not fall back to the decoder default. */
+        dst->baseMidiPitch = src->baseMidiPitch;
         dst->compressionType = C_NONE;
 
         // Free temporary decoded buffer and struct

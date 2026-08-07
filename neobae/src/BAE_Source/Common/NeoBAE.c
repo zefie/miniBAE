@@ -5326,8 +5326,8 @@ BAEResult BAEMixer_GetGlobalVolume(BAEMixer mixer, BAE_UNSIGNED_FIXED *outVolume
 
 // BAEMixer_SetOutputGain()
 // ------------------------------------
-// Sets output gain as a percent (100 = normal, >100 = overdrive). Affects scaleBackAmount,
-// which controls MIDI voice amplitude directly.
+// Sets output gain as a percent (100 = normal, >100 = overdrive). Applied on the
+// full mix bus (HSB+SF2+DLS) before the peak limiter.
 //
 BAEResult BAEMixer_SetOutputGain(BAEMixer mixer, int32_t gainPct)
 {
