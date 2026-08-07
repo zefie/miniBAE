@@ -381,7 +381,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    /* Vorbis, FLAC, Opus and QOA require the ZMF container. */
+    /* Vorbis, FLAC, Opus, QOA, and 2-bit ADPCM require the ZMF container. */
     if (mod2rmf_encoder_requires_zmf(encSettings.codec) && !is_zmf_path(destPath))
     {
         fprintf(stderr,
@@ -406,7 +406,8 @@ int main(int argc, char *argv[])
     }
 
     (void)tempoMap; /* Reserved for future tempo-map handling. */
-    useZmfContainer = is_zmf_path(destPath) || useExtendedPitchRange || useExtendedAdsr;
+    useZmfContainer = is_zmf_path(destPath) || useExtendedPitchRange || useExtendedAdsr ||
+                      mod2rmf_encoder_requires_zmf(encSettings.codec);
     conv->resamplerSettings = resamplerSettings;
     conv->forceOriginalSamples = forceOriginalSamples;
     conv->sampleGainDb = sampleGainDb;

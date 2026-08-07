@@ -240,7 +240,7 @@ static void print_usage(const char *program_name)
             "  --upgrade             Upgrade file to the current ZMF format version, or\n"
             "                        convert standard MIDI (.mid) to RMF/ZMF (standalone)\n"
             "  --codec N|NAME        Recompress all samples to codec number/name\n"
-            "                        (pcm, adpcm, alaw, ulaw, mp3, vorbis, flac, opus, qoa)\n"
+            "                        (pcm, adpcm, adpcm2, alaw, ulaw, mp3, vorbis, flac, opus, qoa)\n"
             "  --sndstorage T        Set all sample storage containers: ESND, CSND, or SND\n"
             "  --sample-codec SPEC   Override one sample codec (repeatable)\n"
             "                        SPEC: index:codec[@bitrate], e.g. 3:opus@96\n"

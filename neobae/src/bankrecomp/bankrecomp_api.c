@@ -54,9 +54,19 @@ enum
     CODEC_OPUS = 7,
 #if USE_QOA_SUPPORT == TRUE
     CODEC_QOA = 8,
+#if USE_ZMF_SUPPORT == TRUE
+    CODEC_ADPCM_2BIT = 9, /* headerless 2-bit IMA (ZSB/ZMF v6) */
+    CODEC_COUNT = 10
+#else
+    CODEC_COUNT = 9
+#endif
+#else
+#if USE_ZMF_SUPPORT == TRUE
+    CODEC_ADPCM_2BIT = 8, /* headerless 2-bit IMA (ZSB/ZMF v6) */
     CODEC_COUNT = 9
 #else
     CODEC_COUNT = 8
+#endif
 #endif
 };
 
@@ -68,11 +78,12 @@ static const char *codecNames[CODEC_COUNT] = {
     "MP3",
     "VORBIS",
     "FLAC",
-#if USE_QOA_SUPPORT == TRUE
     "OPUS",
-    "QOA"
-#else
-    "OPUS"
+#if USE_QOA_SUPPORT == TRUE
+    "QOA",
+#endif
+#if USE_ZMF_SUPPORT == TRUE
+    "2-bit ADPCM",
 #endif
 };
 
@@ -359,6 +370,9 @@ static int codecRequiresZsb(int codec)
 #if USE_QOA_SUPPORT == TRUE
             || codec == CODEC_QOA
 #endif
+#if USE_ZMF_SUPPORT == TRUE
+            || codec == CODEC_ADPCM_2BIT
+#endif
             );
 }
 
@@ -417,6 +431,8 @@ static const char *compressionName(XResourceType ct, uint32_t subType)
         case FOUR_CHAR('i','m','a','4'):
         case FOUR_CHAR('i','m','a','W'):
             return "IMA4/ADPCM";
+        case FOUR_CHAR('i','m','a','2'):
+            return "2-bit ADPCM";
         case FOUR_CHAR('u','l','a','w'):
             return "uLaw";
         case FOUR_CHAR('a','l','a','w'):
@@ -767,10 +783,22 @@ static void printHelp(const char *progName)
            CODEC_OPUS, codecNames[CODEC_OPUS]);
 #if USE_QOA_SUPPORT == TRUE
     printf("  %d  %-22s  (no bitrate option)\n", CODEC_QOA, codecNames[CODEC_QOA]);
+#endif
+#if USE_ZMF_SUPPORT == TRUE
+    printf("  %d  %-22s  (no bitrate option; ZSB v6)\n",
+           CODEC_ADPCM_2BIT, codecNames[CODEC_ADPCM_2BIT]);
+#endif
+#if USE_QOA_SUPPORT == TRUE && USE_ZMF_SUPPORT == TRUE
+    printf("\nNote: VORBIS, FLAC, OPUS, QOA, 2-bit ADPCM force ZSB (ZREZ) output.\n");
+#elif USE_QOA_SUPPORT == TRUE
     printf("\nNote: VORBIS, FLAC, OPUS, QOA codecs force ZSB (ZREZ) output format.\n");
+#elif USE_ZMF_SUPPORT == TRUE
+    printf("\nNote: VORBIS, FLAC, OPUS, 2-bit ADPCM force ZSB (ZREZ) output.\n");
 #else
     printf("\nNote: VORBIS, FLAC, OPUS codecs force ZSB (ZREZ) output format.\n");
 #endif
+    printf("      ZSB exports stamp v5 unless a v6 feature is used\n");
+    printf("      (instrument oscillator or 2-bit ADPCM).\n");
     printf("      Without --codec/--sgain/--igain, the bank is resaved unchanged.\n");
 }
 
@@ -864,6 +892,11 @@ static int inferCompressionFromSampleInfo(const BAERmfEditorBankSampleInfo *samp
         case FOUR_CHAR('i','m','a','W'):
             *outCompression = BAE_EDITOR_COMPRESSION_ADPCM;
             return 1;
+#if USE_ZMF_SUPPORT == TRUE
+        case FOUR_CHAR('i','m','a','2'):
+            *outCompression = BAE_EDITOR_COMPRESSION_ADPCM_2BIT;
+            return 1;
+#endif
         case FOUR_CHAR('u','l','a','w'):
             *outCompression = BAE_EDITOR_COMPRESSION_ULAW;
             return 1;
@@ -985,6 +1018,12 @@ static int resolveTargetCompression(int codec,
             *outCompression = BAE_EDITOR_COMPRESSION_ADPCM;
             if (outChosenKbps) *outChosenKbps = 0;
             return 1;
+#if USE_ZMF_SUPPORT == TRUE
+        case CODEC_ADPCM_2BIT:
+            *outCompression = BAE_EDITOR_COMPRESSION_ADPCM_2BIT;
+            if (outChosenKbps) *outChosenKbps = 0;
+            return 1;
+#endif
         case CODEC_ALAW:
             *outCompression = BAE_EDITOR_COMPRESSION_ALAW;
             if (outChosenKbps) *outChosenKbps = 0;

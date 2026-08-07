@@ -125,6 +125,11 @@ static const CodecName codecNames[] = {
 #if USE_QOA_SUPPORT == TRUE
     { "qoa",     MOD2RMF_CODEC_QOA     },
 #endif
+#if USE_ZMF_SUPPORT == TRUE
+    { "adpcm2",  MOD2RMF_CODEC_ADPCM_2BIT },
+    { "ima2",    MOD2RMF_CODEC_ADPCM_2BIT },
+    { "2bit",    MOD2RMF_CODEC_ADPCM_2BIT },
+#endif
 };
 
 /* ------------------------------------------------------------------ */
@@ -197,6 +202,11 @@ BAERmfEditorCompressionType mod2rmf_encoder_resolve(const Mod2RmfEncoderSettings
         case MOD2RMF_CODEC_ADPCM:
             return BAE_EDITOR_COMPRESSION_ADPCM;
 
+#if USE_ZMF_SUPPORT == TRUE
+        case MOD2RMF_CODEC_ADPCM_2BIT:
+            return BAE_EDITOR_COMPRESSION_ADPCM_2BIT;
+#endif
+
         case MOD2RMF_CODEC_ALAW:
             return BAE_EDITOR_COMPRESSION_ALAW;
 
@@ -235,6 +245,9 @@ const char *mod2rmf_encoder_label(BAERmfEditorCompressionType ct)
     {
         case BAE_EDITOR_COMPRESSION_PCM:         return "PCM (uncompressed)";
         case BAE_EDITOR_COMPRESSION_ADPCM:       return "ADPCM";
+#if USE_ZMF_SUPPORT == TRUE
+        case BAE_EDITOR_COMPRESSION_ADPCM_2BIT:  return "2-bit ADPCM (ZMF v6)";
+#endif
         case BAE_EDITOR_COMPRESSION_ALAW:        return "A-law";
         case BAE_EDITOR_COMPRESSION_ULAW:        return "u-law";
         case BAE_EDITOR_COMPRESSION_FLAC:        return "FLAC (lossless)";
@@ -360,6 +373,9 @@ int mod2rmf_encoder_requires_zmf(Mod2RmfCodec codec)
 #if USE_QOA_SUPPORT == TRUE
             || codec == MOD2RMF_CODEC_QOA
 #endif
+#if USE_ZMF_SUPPORT == TRUE
+            || codec == MOD2RMF_CODEC_ADPCM_2BIT
+#endif
             );
 }
 
@@ -376,6 +392,15 @@ void mod2rmf_encoder_print_codecs(void)
     fprintf(stderr, "  7  opus       Ogg Opus (round-trip) --bitrate: 12 16 24 32 48* 64 80 96 128 160 192 256\n");
 #if USE_QOA_SUPPORT == TRUE
     fprintf(stderr, "  8  qoa        Quite OK Audio (sample codec, no bitrate option)\n");
+#if USE_ZMF_SUPPORT == TRUE
+    fprintf(stderr, "  9  adpcm2     2-bit IMA ADPCM (ZMF v6; aliases: ima2, 2bit)\n");
+#endif
+#else
+#if USE_ZMF_SUPPORT == TRUE
+    fprintf(stderr, "  8  adpcm2     2-bit IMA ADPCM (ZMF v6; aliases: ima2, 2bit)\n");
+#endif
 #endif
     fprintf(stderr, "                * = default bitrate when --bitrate is omitted\n");
+    fprintf(stderr, "                ZMF exports stamp v5 unless a v6 feature is used\n");
+    fprintf(stderr, "                (instrument oscillator or 2-bit ADPCM).\n");
 }

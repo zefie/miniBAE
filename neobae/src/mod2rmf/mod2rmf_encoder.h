@@ -36,9 +36,19 @@ typedef enum Mod2RmfCodec
     MOD2RMF_CODEC_OPUS      = 7,
 #if USE_QOA_SUPPORT == TRUE
     MOD2RMF_CODEC_QOA       = 8,
+#if USE_ZMF_SUPPORT == TRUE
+    MOD2RMF_CODEC_ADPCM_2BIT = 9, /* headerless 2-bit IMA (ZMF v6) */
+    MOD2RMF_CODEC_COUNT     = 10
+#else
+    MOD2RMF_CODEC_COUNT     = 9
+#endif
+#else
+#if USE_ZMF_SUPPORT == TRUE
+    MOD2RMF_CODEC_ADPCM_2BIT = 8, /* headerless 2-bit IMA (ZMF v6) */
     MOD2RMF_CODEC_COUNT     = 9
 #else
     MOD2RMF_CODEC_COUNT     = 8
+#endif
 #endif
 } Mod2RmfCodec;
 
@@ -52,8 +62,9 @@ typedef struct Mod2RmfEncoderSettings
 /* Fill *settings with default values (PCM, no bitrate override). */
 void mod2rmf_encoder_defaults(Mod2RmfEncoderSettings *settings);
 
-/* Parse a --codec argument string (e.g. "pcm", "adpcm", "alaw", "ulaw",
- * "mp3", "vorbis", "flac", "opus", "qoa"). Returns 0 on success, -1 on bad name. */
+/* Parse a --codec argument string (e.g. "pcm", "adpcm", "adpcm2", "alaw",
+ * "ulaw", "mp3", "vorbis", "flac", "opus", "qoa"). Returns 0 on success,
+ * -1 on bad name. */
 int mod2rmf_encoder_parse_codec(const char *name, Mod2RmfCodec *outCodec);
 
 /* Parse a --bitrate argument string.  Accepts plain kbps ("128") or bps
@@ -77,7 +88,8 @@ int mod2rmf_encoder_apply(BAERmfEditorDocument *document,
                           BAERmfEditorCompressionType ct);
 
 /* Returns non-zero if the chosen codec requires ZMF container
- * (Vorbis, FLAC, Opus, QOA). */
+ * (Vorbis, FLAC, Opus, QOA, 2-bit ADPCM). ZMF map version is stamped
+ * v5 unless a v6 feature is present (oscillator / 2-bit ADPCM). */
 int mod2rmf_encoder_requires_zmf(Mod2RmfCodec codec);
 
 /* Print the list of available codecs and bitrates to stderr. */
