@@ -111,7 +111,7 @@
                         break; /* safety */
                     }
                 }
-                (void)XCleanResourceFile(bank);
+                (void)XFinalizeEditorResourceFile(bank);
             }
         }
 

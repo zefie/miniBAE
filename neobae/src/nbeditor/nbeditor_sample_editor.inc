@@ -926,6 +926,19 @@
         }
 
         m_sample_editor_codec_type = detected;
+        /* Pending export encode prefs override bank PCM SND display. */
+        if (!m_sample_editor_is_song_sample &&
+            m_sample_editor_snd_resource_id != kNoSndResourceId)
+        {
+            auto pref = m_session_pcm_cache.find(m_sample_editor_snd_resource_id);
+            if (pref != m_session_pcm_cache.end() && pref->second.has_export_target)
+            {
+                m_sample_editor_codec_type = pref->second.export_compression;
+                m_sample_editor_snd_storage_type = pref->second.export_storage;
+                m_sample_editor_opus_mode = pref->second.export_opus_mode;
+                detected = pref->second.export_compression;
+            }
+        }
         m_sample_editor_loop_enabled = (m_sample_editor_loop_end > m_sample_editor_loop_start);
 
         size_t option_count = 0;
@@ -937,6 +950,19 @@
             {
                 m_sample_editor_codec_index = static_cast<int>(i);
                 break;
+            }
+        }
+        /* Prefer matching the pending/export codec in the combo when set. */
+        if (detected != BAE_EDITOR_COMPRESSION_PCM &&
+            detected != BAE_EDITOR_COMPRESSION_DONT_CHANGE)
+        {
+            for (size_t i = 0; i < option_count; ++i)
+            {
+                if (options[i].type == detected)
+                {
+                    m_sample_editor_codec_index = static_cast<int>(i);
+                    break;
+                }
             }
         }
         m_sample_editor_player20_compat = false;
@@ -1188,14 +1214,18 @@
             return false;
         }
 
+        /* Editor working bank: always PCM in SND (no CSND LZMA / codec rewrap).
+         * Desired codec + storage are session export prefs applied on Export. */
+        const BAERmfEditorSndStorageType bank_storage = BAE_EDITOR_SND_STORAGE_SND;
+        const BAERmfEditorCompressionType bank_codec = BAE_EDITOR_COMPRESSION_PCM;
         const BAEResult result = BAERmfEditorBank_ReEncodeSampleFromPCMEx(
             m_bank_token,
             sample.instrument_index,
             sample.split_index,
-            effective,
-            restore_master ? m_sample_editor_original_snd_storage_type : m_sample_editor_snd_storage_type,
-            restore_master ? m_sample_editor_original_opus_mode : m_sample_editor_opus_mode,
-            use_opus_roundtrip,
+            bank_codec,
+            bank_storage,
+            BAE_EDITOR_OPUS_MODE_AUDIO,
+            FALSE,
             m_sample_editor_original_pcm.data(),
             m_sample_editor_original_frame_count,
             m_sample_editor_original_bit_size,
@@ -1204,10 +1234,15 @@
 
         if (result != BAE_NO_ERROR)
         {
-            SetStatus(std::string("Sample encode failed: ") + FormatBAEError(result));
+            SetStatus(std::string("Sample write failed: ") + FormatBAEError(result));
             return false;
         }
+        /* UI / export prefs keep the user's chosen codec+storage. */
         m_sample_editor_codec_type = effective;
+        if (restore_master)
+        {
+            m_sample_editor_snd_storage_type = BAE_EDITOR_SND_STORAGE_SND;
+        }
 
         BAERmfEditorBankSampleInfo updated_info;
         std::memset(&updated_info, 0, sizeof(updated_info));
@@ -1257,10 +1292,7 @@
         }
         else
         {
-            /* Measure size / refresh metadata, but keep waveform on master (no gen-loss display). */
-            SampleRow refreshed = sample;
-            refreshed.snd_resource_id = m_sample_editor_snd_resource_id;
-            m_sample_editor_compressed_bytes = QueryBankSampleResourceBytes(refreshed);
+            /* Bank holds PCM SND; size estimate stays from compression preview if any. */
             SeRestoreCacheFromMaster();
             BAERmfEditorBankSampleInfo info;
             std::memset(&info, 0, sizeof(info));
@@ -1269,10 +1301,9 @@
                                                          sample.split_index,
                                                          &info) == BAE_NO_ERROR)
             {
-                m_sample_editor_codec_type = BankCompressionFromCodec(info.compressionType, info.compressionSubType);
-                m_sample_editor_snd_storage_type = info.sndStorageType;
                 m_sample_editor_snd_resource_id = static_cast<uint32_t>(info.sndResourceID);
             }
+            /* Keep m_sample_editor_codec_type / storage as export prefs (not bank). */
         }
 
         /* Persist SND resource name (list + BE2-style display).
@@ -1323,7 +1354,7 @@
                 }
             }
         }
-        RememberSessionPcmFromSampleEditor();
+        RememberSessionPcmFromSampleEditor(true);
         m_sample_editor_has_uncompressed_master =
             HasUncompressedMasterForSnd(m_sample_editor_snd_resource_id);
         if (sample.bank >= 0 && sample.bank < 2)
@@ -1332,9 +1363,10 @@
         }
         SetStatus(closing ? "Sample saved to bank (editor closed)"
                           : (restore_master
-                                 ? "Restored in-memory master (uncompressed)"
-                                 : (std::string("Sample encoded (") + GetSampleCodecLabel(m_sample_editor_codec_type) +
-                                    ", " + std::to_string(m_sample_editor_compressed_bytes) + " bytes)")));
+                                 ? "Restored PCM master in bank (no compression)"
+                                 : (std::string("Sample saved as PCM; ") +
+                                    GetSampleCodecLabel(m_sample_editor_codec_type) +
+                                    " / storage set for export")));
         return true;
     }
 

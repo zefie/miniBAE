@@ -789,9 +789,8 @@
         {
             *out_snd_copied = static_cast<unsigned>(snd_ok.size());
         }
-        /* ZREZ clip packages keep full ESND/SND payloads (no ZSHD packing).
-         * If clean fails, still try to serialize the in-memory resources. */
-        if (XCleanResourceFileEx(dest, FALSE) == FALSE)
+        /* Clip packages: flat finalize (no Pack/LZMA). Full ESND/SND payloads. */
+        if (XFinalizeEditorResourceFile(dest) == FALSE)
         {
             (void)XCreateAccessCache(dest);
         }

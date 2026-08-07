@@ -1104,8 +1104,9 @@
         uint32_t rmf_size = 0;
         /* Always serialize as ZMF for live editor playback so stereo LPF and
          * other zs* features audition correctly. Export still probes RequiresZmf. */
-        const BAEResult save_result = BAERmfEditorDocument_SaveAsRmfToMemory(m_document,
+        const BAEResult save_result = BAERmfEditorDocument_SaveAsRmfToMemoryEx(m_document,
                                                                               TRUE,
+                                                                              FALSE,
                                                                               &rmf_data,
                                                                               &rmf_size);
         if (save_result != BAE_NO_ERROR || !rmf_data || rmf_size == 0)
@@ -1192,7 +1193,8 @@
         }
         unsigned char *rmf_data = nullptr;
         uint32_t rmf_size = 0;
-        if (BAERmfEditorDocument_SaveAsRmfToMemory(m_document, TRUE, &rmf_data, &rmf_size) != BAE_NO_ERROR ||
+        if (BAERmfEditorDocument_SaveAsRmfToMemoryEx(m_document, TRUE, FALSE, &rmf_data, &rmf_size) !=
+                BAE_NO_ERROR ||
             !rmf_data)
         {
             BAESong_Delete(preview);
@@ -4854,10 +4856,16 @@
                     info.highKey = static_cast<unsigned char>(
                         std::clamp(key, static_cast<int>(info.lowKey), 127));
                 }
-                (void)BAERmfEditorBank_SetInstrumentSampleInfo(m_bank_token,
-                                                               m_ie_instrument_index,
-                                                               static_cast<uint32_t>(s_edge_split),
-                                                               &info);
+                /* INST-only: zone edges never touch SND headers. */
+                info.sampleRate = 0;
+                if (EnsureActiveBankWritable() &&
+                    BAERmfEditorBank_SetInstrumentSampleInfo(m_bank_token,
+                                                             m_ie_instrument_index,
+                                                             static_cast<uint32_t>(s_edge_split),
+                                                             &info) == BAE_NO_ERROR)
+                {
+                    SyncInstrumentEditorBankIndex();
+                }
             }
         }
         if (!active)
@@ -6000,7 +6008,7 @@
 
     void CaptureInstrumentEditorPristineSplits()
     {
-        m_ie_pristine_split_snds.clear();
+        m_ie_pristine_splits.clear();
         if (!m_bank_token || m_ie_from_song)
         {
             return;
@@ -6012,9 +6020,10 @@
         {
             return;
         }
-        m_ie_pristine_split_snds.reserve(split_count);
+        m_ie_pristine_splits.reserve(split_count);
         for (uint32_t s = 0; s < split_count; ++s)
         {
+            IePristineSplit snap;
             BAERmfEditorBankSampleInfo info;
             std::memset(&info, 0, sizeof(info));
             if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
@@ -6022,17 +6031,22 @@
                                                          s,
                                                          &info) != BAE_NO_ERROR)
             {
-                m_ie_pristine_split_snds.push_back(static_cast<uint16_t>(kNoSndResourceId));
+                snap.sndResourceID = static_cast<uint16_t>(kNoSndResourceId);
+                m_ie_pristine_splits.push_back(snap);
                 continue;
             }
-            m_ie_pristine_split_snds.push_back(
-                static_cast<uint16_t>(info.sndResourceID));
+            snap.lowKey = info.lowKey;
+            snap.highKey = info.highKey;
+            snap.rootKey = info.rootKey;
+            snap.splitVolume = info.splitVolume;
+            snap.sndResourceID = static_cast<uint16_t>(info.sndResourceID);
+            m_ie_pristine_splits.push_back(snap);
         }
     }
 
     void RestoreInstrumentEditorPristineSplits()
     {
-        if (!m_bank_token || m_ie_from_song || m_ie_pristine_split_snds.empty())
+        if (!m_bank_token || m_ie_from_song || m_ie_pristine_splits.empty())
         {
             return;
         }
@@ -6040,6 +6054,8 @@
         {
             return;
         }
+        /* Flat INST shadows shift GetIndexed order; INST id 0 is valid. */
+        SyncInstrumentEditorBankIndex();
         uint32_t split_count = 0;
         if (BAERmfEditorBank_GetInstrumentSampleCount(m_bank_token,
                                                       m_ie_instrument_index,
@@ -6048,15 +6064,59 @@
         {
             return;
         }
-        const uint32_t n = std::min(split_count,
-                                    static_cast<uint32_t>(m_ie_pristine_split_snds.size()));
-        std::vector<XShortResourceID> ids(n);
+        const uint32_t want = static_cast<uint32_t>(m_ie_pristine_splits.size());
+        /* Align split count so Vol/Low/High/Root/SND can all be restored. */
+        while (split_count > want)
+        {
+            if (BAERmfEditorBank_DeleteInstrumentSample(
+                    m_bank_token, m_ie_instrument_index, split_count - 1, false) !=
+                BAE_NO_ERROR)
+            {
+                break;
+            }
+            SyncInstrumentEditorBankIndex();
+            if (BAERmfEditorBank_GetInstrumentSampleCount(m_bank_token,
+                                                          m_ie_instrument_index,
+                                                          &split_count) != BAE_NO_ERROR)
+            {
+                return;
+            }
+        }
+        if (split_count < want)
+        {
+            if (BAERmfEditorBank_GrowInstrumentSampleSlots(
+                    m_bank_token, m_ie_instrument_index, want) == BAE_NO_ERROR)
+            {
+                SyncInstrumentEditorBankIndex();
+                if (BAERmfEditorBank_GetInstrumentSampleCount(m_bank_token,
+                                                              m_ie_instrument_index,
+                                                              &split_count) !=
+                    BAE_NO_ERROR)
+                {
+                    return;
+                }
+            }
+        }
+        const uint32_t n = std::min(split_count, want);
         for (uint32_t s = 0; s < n; ++s)
         {
-            ids[s] = static_cast<XShortResourceID>(m_ie_pristine_split_snds[s]);
+            const IePristineSplit &snap = m_ie_pristine_splits[s];
+            BAERmfEditorBankSampleInfo info;
+            std::memset(&info, 0, sizeof(info));
+            info.lowKey = snap.lowKey;
+            info.highKey = snap.highKey;
+            info.rootKey = snap.rootKey;
+            info.splitVolume = snap.splitVolume;
+            info.sndResourceID = static_cast<XShortResourceID>(snap.sndResourceID);
+            /* INST keymap only — same sentinel as the Vol/Low/High commit path. */
+            info.sampleRate = 0;
+            if (BAERmfEditorBank_SetInstrumentSampleInfo(
+                    m_bank_token, m_ie_instrument_index, s, &info) != BAE_NO_ERROR)
+            {
+                break;
+            }
+            SyncInstrumentEditorBankIndex();
         }
-        (void)BAERmfEditorBank_SetInstrumentSampleSndIDs(
-            m_bank_token, m_ie_instrument_index, ids.data(), n);
     }
 
     uint32_t InstrumentEditorPatchId() const
@@ -6069,6 +6129,31 @@
             patch_id = m_instruments[static_cast<size_t>(m_selected_instrument)].target_inst_id;
         }
         return patch_id;
+    }
+
+    /* XReplace appends a flat INST shadow; GetIndexed lists flats first, so
+     * instrument_index shifts. Always re-resolve by INST id after bank mutates.
+     * INST id 0 is valid (e.g. B0P000 Piano) — do not treat 0 as unset. */
+    void SyncInstrumentEditorBankIndex()
+    {
+        if (!m_bank_token || m_ie_from_song)
+        {
+            return;
+        }
+        uint32_t resolved = 0;
+        uint32_t index = m_ie_instrument_index;
+        if (BAERmfEditorBank_ResolveInstID(m_bank_token, m_ie_inst_id, &resolved, &index) !=
+            BAE_NO_ERROR)
+        {
+            return;
+        }
+        m_ie_instrument_index = index;
+        if (m_selected_instrument >= 0 &&
+            m_selected_instrument < static_cast<int>(m_instruments.size()) &&
+            m_instruments[static_cast<size_t>(m_selected_instrument)].inst_id == m_ie_inst_id)
+        {
+            m_instruments[static_cast<size_t>(m_selected_instrument)].instrument_index = index;
+        }
     }
 
     void LivePatchInstrumentEditor(bool reload_samples_from_bank = false)
@@ -6215,6 +6300,9 @@
         m_ie_ext = m_ie_ext_pristine;
         BindInstrumentEditorDisplayName();
         SyncLfoControlModesFromExt();
+        /* Re-resolve before bank writes — index may already be stale from prior
+         * XReplace (esp. INST id 0 where Sync used to no-op). */
+        SyncInstrumentEditorBankIndex();
         RestoreInstrumentEditorPristineSplits();
         m_ie_undo.clear();
         m_ie_redo.clear();
@@ -6285,24 +6373,9 @@
                 return;
             }
             r = BAERmfEditorBank_SetInstrumentExtInfo(m_bank_token, m_ie_instrument_index, &m_ie_ext);
-            if (r == BAE_NO_ERROR && m_ie_inst_id != 0)
+            if (r == BAE_NO_ERROR)
             {
-                uint32_t resolved = 0;
-                uint32_t index = m_ie_instrument_index;
-                if (BAERmfEditorBank_ResolveInstID(m_bank_token, m_ie_inst_id, &resolved, &index) ==
-                    BAE_NO_ERROR)
-                {
-                    m_ie_instrument_index = index;
-                    /* Keep list row index in sync after flat-INST promote. */
-                    if (m_selected_instrument >= 0 &&
-                        m_selected_instrument < static_cast<int>(m_instruments.size()) &&
-                        m_instruments[static_cast<size_t>(m_selected_instrument)].inst_id ==
-                            m_ie_inst_id)
-                    {
-                        m_instruments[static_cast<size_t>(m_selected_instrument)].instrument_index =
-                            index;
-                    }
-                }
+                SyncInstrumentEditorBankIndex();
             }
         }
         if (r != BAE_NO_ERROR)
@@ -6840,7 +6913,10 @@
 
             if (ImGui::Button("Apply"))
             {
-                ApplyInstrumentEditor(true);
+                /* Defer off the ImGui frame so busy UI can paint before
+                 * EnsureWritable / ZINS work on large banks. */
+                m_long_op = LongOp::ApplyInstrument;
+                ArmBusyProgress("Applying instrument…");
             }
             ImGui::SameLine();
             if (ImGui::Button("Close"))
@@ -6900,10 +6976,13 @@
         {
             return;
         }
-        (void)BAERmfEditorBank_DeleteInstrumentSample(m_bank_token,
-                                                      m_ie_instrument_index,
-                                                      split_index,
-                                                      false);
+        if (BAERmfEditorBank_DeleteInstrumentSample(m_bank_token,
+                                                    m_ie_instrument_index,
+                                                    split_index,
+                                                    false) == BAE_NO_ERROR)
+        {
+            SyncInstrumentEditorBankIndex();
+        }
         if (m_ie_selected_split == static_cast<int>(split_index))
         {
             m_ie_selected_split = -1;
@@ -6932,8 +7011,11 @@
             return;
         }
         std::vector<XShortResourceID> ids(split_count, static_cast<XShortResourceID>(snd_id));
-        (void)BAERmfEditorBank_SetInstrumentSampleSndIDs(
-            m_bank_token, m_ie_instrument_index, ids.data(), split_count);
+        if (BAERmfEditorBank_SetInstrumentSampleSndIDs(
+                m_bank_token, m_ie_instrument_index, ids.data(), split_count) == BAE_NO_ERROR)
+        {
+            SyncInstrumentEditorBankIndex();
+        }
     }
 
     /* Oscillator shape/PW UI entry point; LivePatch persists OSCL+modulators. */
@@ -7101,9 +7183,12 @@
         {
             if (EnsureActiveBankWritable())
             {
-                (void)BAERmfEditorBank_GrowInstrumentSampleSlots(m_bank_token,
-                                                                 m_ie_instrument_index,
-                                                                 split_count + 1);
+                if (BAERmfEditorBank_GrowInstrumentSampleSlots(m_bank_token,
+                                                               m_ie_instrument_index,
+                                                               split_count + 1) == BAE_NO_ERROR)
+                {
+                    SyncInstrumentEditorBankIndex();
+                }
                 RefreshListsFromBank();
                 RefreshSongSamplesFromDocument();
             }
@@ -7119,19 +7204,22 @@
 
         DrawKeymapZoneDiagram(split_count);
 
+        ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(8.0f, 6.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6.0f, 4.0f));
         if (ImGui::BeginTable("keymap",
                               6,
                               ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
-                                  ImGuiTableFlags_Resizable,
+                                  ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingFixedFit,
                               ImVec2(0, 320)))
         {
-            ImGui::TableSetupColumn("Sel", ImGuiTableColumnFlags_WidthFixed, 36.0f);
-            ImGui::TableSetupColumn("Low", ImGuiTableColumnFlags_WidthFixed, 96.0f);
-            ImGui::TableSetupColumn("High", ImGuiTableColumnFlags_WidthFixed, 96.0f);
-            ImGui::TableSetupColumn("Root", ImGuiTableColumnFlags_WidthFixed, 96.0f);
+            ImGui::TableSetupColumn("Sel", ImGuiTableColumnFlags_WidthFixed, 40.0f);
+            ImGui::TableSetupColumn("Low", ImGuiTableColumnFlags_WidthFixed, 72.0f);
+            ImGui::TableSetupColumn("High", ImGuiTableColumnFlags_WidthFixed, 72.0f);
+            ImGui::TableSetupColumn("Root", ImGuiTableColumnFlags_WidthFixed, 72.0f);
             ImGui::TableSetupColumn("Sample", ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableSetupColumn("Vol", ImGuiTableColumnFlags_WidthFixed, 96.0f);
+            ImGui::TableSetupColumn("Vol", ImGuiTableColumnFlags_WidthFixed, 80.0f);
             ImGui::TableHeadersRow();
+            const float split_row_h = ImGui::GetFrameHeightWithSpacing() + 4.0f;
             for (uint32_t s = 0; s < split_count; ++s)
             {
                 BAERmfEditorBankSampleInfo info;
@@ -7140,7 +7228,7 @@
                 {
                     continue;
                 }
-                ImGui::TableNextRow();
+                ImGui::TableNextRow(ImGuiTableRowFlags_None, split_row_h);
                 ImGui::PushID(static_cast<int>(s));
                 ImGui::TableSetColumnIndex(0);
                 bool sel = (m_ie_selected_split == static_cast<int>(s));
@@ -7195,27 +7283,58 @@
                     break;
                 }
                 int low = info.lowKey, high = info.highKey, root = info.rootKey, vol = info.splitVolume;
-                /* InputInt defaults to full-window width; pin to column or value is clipped. */
+                /* step=0 hides +/- (they crush 72px cells). Commit on deactivate so
+                 * typing does not rebuild INST on every keystroke. */
+                /* sampleRate==0 → INST-only replace (skip SND open/decompress).
+                 * Root-in-SND still needs a real sampleRate so the SND baseKey updates. */
+                auto commit_split = [&](bool may_touch_snd_root) {
+                    /* XReplace fails on read-only banks; EnsureWritable first so
+                     * INST Vol never falls into a multi-second full Replace. */
+                    if (!EnsureActiveBankWritable())
+                    {
+                        return;
+                    }
+                    const uint32_t saved_rate = info.sampleRate;
+                    if (!may_touch_snd_root)
+                    {
+                        info.sampleRate = 0;
+                    }
+                    if (BAERmfEditorBank_SetInstrumentSampleInfo(
+                            m_bank_token, m_ie_instrument_index, s, &info) == BAE_NO_ERROR)
+                    {
+                        /* Flat INST shadow shifts GetIndexed order — without this,
+                         * the next frame reads a different INST (often all Vol=192). */
+                        SyncInstrumentEditorBankIndex();
+                        m_ie_dirty = true;
+                    }
+                    info.sampleRate = saved_rate;
+                };
                 ImGui::TableSetColumnIndex(1);
                 ImGui::SetNextItemWidth(-FLT_MIN);
-                if (ImGui::InputInt("##low", &low))
+                ImGui::InputInt("##low", &low, 0, 0);
+                if (ImGui::IsItemDeactivatedAfterEdit())
                 {
                     info.lowKey = static_cast<unsigned char>(std::clamp(low, 0, 127));
-                    BAERmfEditorBank_SetInstrumentSampleInfo(m_bank_token, m_ie_instrument_index, s, &info);
+                    commit_split(false);
                 }
                 ImGui::TableSetColumnIndex(2);
                 ImGui::SetNextItemWidth(-FLT_MIN);
-                if (ImGui::InputInt("##high", &high))
+                ImGui::InputInt("##high", &high, 0, 0);
+                if (ImGui::IsItemDeactivatedAfterEdit())
                 {
                     info.highKey = static_cast<unsigned char>(std::clamp(high, 0, 127));
-                    BAERmfEditorBank_SetInstrumentSampleInfo(m_bank_token, m_ie_instrument_index, s, &info);
+                    commit_split(false);
                 }
                 ImGui::TableSetColumnIndex(3);
                 ImGui::SetNextItemWidth(-FLT_MIN);
-                if (ImGui::InputInt("##root", &root))
+                ImGui::InputInt("##root", &root, 0, 0);
+                if (ImGui::IsItemDeactivatedAfterEdit())
                 {
                     info.rootKey = static_cast<unsigned char>(std::clamp(root, 0, 127));
-                    BAERmfEditorBank_SetInstrumentSampleInfo(m_bank_token, m_ie_instrument_index, s, &info);
+                    /* Root lives in SND only when useSoundModifierAsRootKey is clear. */
+                    const bool root_in_snd =
+                        !TEST_FLAG_VALUE(m_ie_ext.flags2, ZBF_useSoundModifierAsRootKey);
+                    commit_split(root_in_snd);
                 }
                 ImGui::TableSetColumnIndex(4);
                 {
@@ -7276,6 +7395,7 @@
                                             static_cast<XShortResourceID>(choice.first));
                                     if (r == BAE_NO_ERROR)
                                     {
+                                        SyncInstrumentEditorBankIndex();
                                         m_session_custom_snd_ids.insert(choice.first);
                                         m_ie_dirty = true;
                                         RefreshListsFromBank();
@@ -7306,15 +7426,36 @@
                 }
                 ImGui::TableSetColumnIndex(5);
                 ImGui::SetNextItemWidth(-FLT_MIN);
-                if (ImGui::InputInt("##vol", &vol))
+                /* miscParameter2 is volume only when offset-start / sound-modifier
+                 * are clear — otherwise editing "Vol" corrupts those fields. */
+                const bool vol_editable = !TEST_FLAG_VALUE(m_ie_ext.flags2,
+                                                           ZBF_enableSampleOffsetStart) &&
+                                          !TEST_FLAG_VALUE(m_ie_ext.flags2,
+                                                           ZBF_enableSoundModifier);
+                if (vol_editable)
                 {
-                    info.splitVolume = static_cast<int16_t>(vol);
-                    BAERmfEditorBank_SetInstrumentSampleInfo(m_bank_token, m_ie_instrument_index, s, &info);
+                    ImGui::InputInt("##vol", &vol, 0, 0);
+                    if (ImGui::IsItemDeactivatedAfterEdit())
+                    {
+                        info.splitVolume = static_cast<int16_t>(vol);
+                        commit_split(false);
+                    }
+                }
+                else
+                {
+                    ImGui::TextDisabled("—");
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                    {
+                        ImGui::SetTooltip(
+                            "Volume unavailable: this instrument uses sample-offset "
+                            "or sound-modifier mode (miscParameter2 is not volume).");
+                    }
                 }
                 ImGui::PopID();
             }
             ImGui::EndTable();
         }
+        ImGui::PopStyleVar(2);
         ImGui::TextDisabled(
             "Sample column reassigns the keysplit. Right-click Sel for Edit Sample / Delete Split; double-click edits.");
     }

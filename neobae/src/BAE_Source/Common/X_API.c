@@ -782,8 +782,45 @@ static bool PV_GetResourceMapInfo(XFILE fileRef, int32_t *outMapID, int32_t *out
     return TRUE;
 }
 
-/* Decoded ZINS cache — every INST resolve used to LZMA-decompress the whole
- * block. Callers still own a copy (XDisposePtr); we only skip re-decode. */
+/* Virtual/Pack rebuilds open a fresh map with VERSION_FOR_ID (ZMF default v5).
+ * Copy the source file's version so a prior content-based v5/v6 stamp survives. */
+static void PV_ApplySourceMapVersionToPacked(XFILE srcFile, XPTR packedData, int32_t packedSize)
+{
+    int32_t srcMapID = 0;
+    int32_t srcVersion = 0;
+    XFILERESOURCEMAP dst;
+
+    if (!packedData || packedSize < (int32_t)sizeof(dst))
+    {
+        return;
+    }
+    if (!PV_GetResourceMapInfo(srcFile, &srcMapID, &srcVersion))
+    {
+        return;
+    }
+    if (!XFILERESOURCE_VERSION_IS_VALID(srcVersion))
+    {
+        return;
+    }
+    XBlockMove(packedData, &dst, (int32_t)sizeof(dst));
+    if ((int32_t)XGetLong(&dst.mapID) != srcMapID)
+    {
+        return;
+    }
+    XPutLong(&dst.version, (uint32_t)srcVersion);
+    XBlockMove(&dst, packedData, (int32_t)sizeof(dst));
+}
+
+/* Decoded ZINS cache.
+ *
+ * Why: editor ResolveInstID / GetIndexed INST on zpatches was
+ * O(N × ZINS_size) — each extract LZMA-decompressed once (cached) but still
+ * XNewPtr+XBlockMove'd the *entire* decoded block, then copied one entry.
+ * What: retain one decode; extractors parse in place and allocate only the
+ * single INST/ALIAS payload (+ name). Flat INST/ALIAS peers still shadow
+ * packed entries (XGetFileResource / GetIndexed prefer flat first).
+ * Safe: XGetIndexedFileResource callers dispose the small entry pointer, not
+ * the packed block. PackInst / Purge own a clone via PV_LoadZmfInstBlock. */
 static XFILE s_zinsDecodedFile = NULL;
 static XPTR s_zinsDecodedBlock = NULL;
 static int32_t s_zinsDecodedSize = 0;
@@ -803,13 +840,13 @@ static void PV_ClearZmfInstBlockCache(XFILE fileRef)
     s_zinsDecodedSize = 0;
 }
 
-static XPTR PV_LoadZmfInstBlock(XFILE fileRef, int32_t *outSize)
+/* Borrowed pointer into s_zinsDecodedBlock — do NOT XDisposePtr. */
+static XPTR PV_EnsureZmfInstBlockCached(XFILE fileRef, int32_t *outSize)
 {
     XLongResourceID blockID;
     int32_t blockSize;
     XPTR blockData;
     XPTR decoded;
-    XPTR copy;
 
     if (!outSize)
     {
@@ -819,14 +856,8 @@ static XPTR PV_LoadZmfInstBlock(XFILE fileRef, int32_t *outSize)
 
     if (s_zinsDecodedFile == fileRef && s_zinsDecodedBlock && s_zinsDecodedSize > 0)
     {
-        copy = XNewPtr(s_zinsDecodedSize);
-        if (!copy)
-        {
-            return NULL;
-        }
-        XBlockMove(s_zinsDecodedBlock, copy, s_zinsDecodedSize);
         *outSize = s_zinsDecodedSize;
-        return copy;
+        return s_zinsDecodedBlock;
     }
 
     blockData = XGetIndexedFileResource(fileRef, ID_ZINS, &blockID, 0, NULL, &blockSize);
@@ -850,14 +881,34 @@ static XPTR PV_LoadZmfInstBlock(XFILE fileRef, int32_t *outSize)
     s_zinsDecodedFile = fileRef;
     s_zinsDecodedBlock = decoded;
     s_zinsDecodedSize = XGetPtrSize(decoded);
+    *outSize = s_zinsDecodedSize;
+    return s_zinsDecodedBlock;
+}
 
-    copy = XNewPtr(s_zinsDecodedSize);
+/* Owned full-block clone for PackInst / Purge (caller XDisposePtr). */
+static XPTR PV_LoadZmfInstBlock(XFILE fileRef, int32_t *outSize)
+{
+    XPTR borrowed;
+    XPTR copy;
+    int32_t size;
+
+    if (!outSize)
+    {
+        return NULL;
+    }
+    *outSize = 0;
+    borrowed = PV_EnsureZmfInstBlockCached(fileRef, &size);
+    if (!borrowed || size <= 0)
+    {
+        return NULL;
+    }
+    copy = XNewPtr(size);
     if (!copy)
     {
         return NULL;
     }
-    XBlockMove(s_zinsDecodedBlock, copy, s_zinsDecodedSize);
-    *outSize = s_zinsDecodedSize;
+    XBlockMove(borrowed, copy, size);
+    *outSize = size;
     return copy;
 }
 
@@ -907,14 +958,14 @@ static XPTR PV_GetResourceFromZmfInstBlockByTypeAndID(XFILE fileRef,
     uint32_t version;
     uint32_t i;
 
-    block = PV_LoadZmfInstBlock(fileRef, &blockSize);
+    /* Borrow retained decode — copy only the matching entry. */
+    block = PV_EnsureZmfInstBlockCached(fileRef, &blockSize);
     if (!block)
     {
         return NULL;
     }
     if (!PV_ParseZmfInstBlockHeader(block, blockSize, &version, &count, &p, &end))
     {
-        XDisposePtr(block);
         return NULL;
     }
 
@@ -933,7 +984,6 @@ static XPTR PV_GetResourceFromZmfInstBlockByTypeAndID(XFILE fileRef,
         {
             if (p + 4 > end)
             {
-                XDisposePtr(block);
                 return NULL;
             }
             type = PV_ReadBE32(p);
@@ -942,7 +992,6 @@ static XPTR PV_GetResourceFromZmfInstBlockByTypeAndID(XFILE fileRef,
 
         if (p + 10 > end)
         {
-            XDisposePtr(block);
             return NULL;
         }
         id = PV_ReadBE32(p);
@@ -953,14 +1002,12 @@ static XPTR PV_GetResourceFromZmfInstBlockByTypeAndID(XFILE fileRef,
         p += 4;
         if (p + nameLen > end)
         {
-            XDisposePtr(block);
             return NULL;
         }
         namePtr = p;
         p += nameLen;
         if (p + dataLen > end)
         {
-            XDisposePtr(block);
             return NULL;
         }
         dataPtr = p;
@@ -970,7 +1017,6 @@ static XPTR PV_GetResourceFromZmfInstBlockByTypeAndID(XFILE fileRef,
             copy = XNewPtr((int32_t)dataLen);
             if (!copy)
             {
-                XDisposePtr(block);
                 return NULL;
             }
             XBlockMove(dataPtr, copy, (int32_t)dataLen);
@@ -987,14 +1033,12 @@ static XPTR PV_GetResourceFromZmfInstBlockByTypeAndID(XFILE fileRef,
                     XBlockMove(namePtr, (unsigned char *)pResourceName + 1, pNameLen);
                 }
             }
-            XDisposePtr(block);
             return copy;
         }
 
         p += dataLen;
     }
 
-    XDisposePtr(block);
     return NULL;
 }
 
@@ -1014,15 +1058,13 @@ static XPTR PV_GetIndexedResourceFromZmfInstBlockByType(XFILE fileRef,
     uint32_t i;
     int32_t found;
 
-    block = PV_LoadZmfInstBlock(fileRef, &blockSize);
+    block = PV_EnsureZmfInstBlockCached(fileRef, &blockSize);
     if (!block || resourceIndex < 0)
     {
-        if (block) XDisposePtr(block);
         return NULL;
     }
     if (!PV_ParseZmfInstBlockHeader(block, blockSize, &version, &count, &p, &end))
     {
-        XDisposePtr(block);
         return NULL;
     }
 
@@ -1042,7 +1084,6 @@ static XPTR PV_GetIndexedResourceFromZmfInstBlockByType(XFILE fileRef,
         {
             if (p + 4 > end)
             {
-                XDisposePtr(block);
                 return NULL;
             }
             type = PV_ReadBE32(p);
@@ -1051,7 +1092,6 @@ static XPTR PV_GetIndexedResourceFromZmfInstBlockByType(XFILE fileRef,
 
         if (p + 10 > end)
         {
-            XDisposePtr(block);
             return NULL;
         }
         id = PV_ReadBE32(p);
@@ -1062,14 +1102,12 @@ static XPTR PV_GetIndexedResourceFromZmfInstBlockByType(XFILE fileRef,
         p += 4;
         if (p + nameLen > end)
         {
-            XDisposePtr(block);
             return NULL;
         }
         namePtr = p;
         p += nameLen;
         if (p + dataLen > end)
         {
-            XDisposePtr(block);
             return NULL;
         }
         dataPtr = p;
@@ -1081,7 +1119,6 @@ static XPTR PV_GetIndexedResourceFromZmfInstBlockByType(XFILE fileRef,
                 copy = XNewPtr((int32_t)dataLen);
                 if (!copy)
                 {
-                    XDisposePtr(block);
                     return NULL;
                 }
                 XBlockMove(dataPtr, copy, (int32_t)dataLen);
@@ -1102,7 +1139,6 @@ static XPTR PV_GetIndexedResourceFromZmfInstBlockByType(XFILE fileRef,
                         XBlockMove(namePtr, (unsigned char *)pResourceName + 1, pNameLen);
                     }
                 }
-                XDisposePtr(block);
                 return copy;
             }
             found++;
@@ -1111,7 +1147,6 @@ static XPTR PV_GetIndexedResourceFromZmfInstBlockByType(XFILE fileRef,
         p += dataLen;
     }
 
-    XDisposePtr(block);
     return NULL;
 }
 
@@ -1126,21 +1161,19 @@ static int32_t PV_CountResourcesInZmfInstBlockByType(XFILE fileRef, XResourceTyp
     uint32_t i;
     int32_t found;
 
-    block = PV_LoadZmfInstBlock(fileRef, &blockSize);
+    block = PV_EnsureZmfInstBlockCached(fileRef, &blockSize);
     if (!block)
     {
         return 0;
     }
     if (!PV_ParseZmfInstBlockHeader(block, blockSize, &version, &count, &p, &end))
     {
-        XDisposePtr(block);
         return 0;
     }
 
     if (version == ZMF_INST_BLOCK_VERSION_V1)
     {
         int32_t v1Count = (resourceType == ID_INST) ? (int32_t)count : 0;
-        XDisposePtr(block);
         return (v1Count < 0) ? 0 : v1Count;
     }
 
@@ -1153,7 +1186,6 @@ static int32_t PV_CountResourcesInZmfInstBlockByType(XFILE fileRef, XResourceTyp
 
         if (p + 14 > end)
         {
-            XDisposePtr(block);
             return 0;
         }
         type = PV_ReadBE32(p);
@@ -1170,19 +1202,16 @@ static int32_t PV_CountResourcesInZmfInstBlockByType(XFILE fileRef, XResourceTyp
         }
         if (p + nameLen > end)
         {
-            XDisposePtr(block);
             return 0;
         }
         p += nameLen;
         if (p + dataLen > end)
         {
-            XDisposePtr(block);
             return 0;
         }
         p += dataLen;
     }
 
-    XDisposePtr(block);
     return found;
 }
 
@@ -1681,6 +1710,7 @@ static bool PV_PackInstResourcesIntoZmfBlock(XFILE fileRef)
     }
     XFileClose(outFile);
 
+    PV_ApplySourceMapVersionToPacked(fileRef, packedData, packedSize);
     XFileFreeResourceCache(fileRef);
     {
         XFILENAME *pReference = (XFILENAME *)fileRef;
@@ -2166,6 +2196,7 @@ static bool PV_PackSongResourcesIntoZmfBlock(XFILE fileRef)
     }
     XFileClose(outFile);
 
+    PV_ApplySourceMapVersionToPacked(fileRef, packedData, packedSize);
     XFileFreeResourceCache(fileRef);
     {
         XFILENAME *pReference = (XFILENAME *)fileRef;
@@ -2599,6 +2630,7 @@ static bool PV_PackBankResourcesIntoZmfBlock(XFILE fileRef)
     }
     XFileClose(outFile);
 
+    PV_ApplySourceMapVersionToPacked(fileRef, packedData, packedSize);
     XFileFreeResourceCache(fileRef);
     {
         XFILENAME *pReference = (XFILENAME *)fileRef;
@@ -3276,6 +3308,7 @@ static bool PV_PackSndHeaderResourcesIntoZmfBlock(XFILE fileRef)
     }
     XFileClose(outFile);
 
+    PV_ApplySourceMapVersionToPacked(fileRef, packedData, packedSize);
     XFileFreeResourceCache(fileRef);
     {
         XFILENAME *pReference = (XFILENAME *)fileRef;
@@ -5747,7 +5780,11 @@ void XFileFreeResourceCache(XFILE fileRef)
 }
 
 // Force a clean/update of the resource file. Simplified: rebuild in‑memory cache.
-bool XCleanResourceFileOptions(XFILE fileRef, bool packInst, bool packSndHeaders)
+bool XCleanResourceFileOptionsEx(XFILE fileRef,
+                                 bool packInst,
+                                 bool packSong,
+                                 bool packBank,
+                                 bool packSndHeaders)
 {
     if (!PV_XFileValid(fileRef))
     {
@@ -5759,14 +5796,42 @@ bool XCleanResourceFileOptions(XFILE fileRef, bool packInst, bool packSndHeaders
     {
         (void)PV_PackInstResourcesIntoZmfBlock(fileRef);
     }
-    (void)PV_PackSongResourcesIntoZmfBlock(fileRef);
-    (void)PV_PackBankResourcesIntoZmfBlock(fileRef);
+    if (packSong)
+    {
+        (void)PV_PackSongResourcesIntoZmfBlock(fileRef);
+    }
+    if (packBank)
+    {
+        (void)PV_PackBankResourcesIntoZmfBlock(fileRef);
+    }
     if (packSndHeaders)
     {
         (void)PV_PackSndHeaderResourcesIntoZmfBlock(fileRef);
     }
     XFileFreeResourceCache(fileRef);
     return (XCreateAccessCache(fileRef) != NULL) ? TRUE : FALSE;
+}
+
+bool XCleanResourceFileOptions(XFILE fileRef, bool packInst, bool packSndHeaders)
+{
+    /* Historic behaviour: always PackSong + PackBank on ZREZ. */
+    return XCleanResourceFileOptionsEx(fileRef, packInst, TRUE, TRUE, packSndHeaders);
+}
+
+bool XRebuildResourceFileCache(XFILE fileRef)
+{
+    return XCleanResourceFileOptionsEx(fileRef, FALSE, FALSE, FALSE, FALSE);
+}
+
+bool XFinalizeEditorResourceFile(XFILE fileRef)
+{
+    /* Flat INST/SND/ALIAS/SONG in a ZREZ map are valid; do not Pack or LZMA. */
+    return XRebuildResourceFileCache(fileRef);
+}
+
+bool XPackResourceFileForShip(XFILE fileRef)
+{
+    return XCleanResourceFile(fileRef);
 }
 
 bool XCleanResourceFileEx(XFILE fileRef, bool packSndHeaders)
@@ -6440,18 +6505,23 @@ static XResourceType PV_GuessTrashedResourceType(XPTR data, int32_t dataSize)
     return 0;
 }
 
-static bool PV_CommitVirtualOverFileEx(XFILE fileRef, XFILE outFile, bool runClean)
+/* packForShip: TRUE = full Pack+LZMA Clean; FALSE = editor finalize (cache only). */
+static bool PV_CommitVirtualOverFileEx(XFILE fileRef, XFILE outFile, bool packForShip)
 {
     XPTR packedData = NULL;
     int32_t packedSize = 0;
     XFILENAME *pReference;
 
-    if (runClean)
+    if (packForShip)
     {
-        if (XCleanResourceFileEx(outFile, TRUE) == FALSE)
+        if (XPackResourceFileForShip(outFile) == FALSE)
         {
             return FALSE;
         }
+    }
+    else if (XFinalizeEditorResourceFile(outFile) == FALSE)
+    {
+        return FALSE;
     }
     if (XFileGetMemoryFileAsData(outFile, &packedData, &packedSize) != 0 ||
         !packedData || packedSize <= 0)
@@ -6462,6 +6532,7 @@ static bool PV_CommitVirtualOverFileEx(XFILE fileRef, XFILE outFile, bool runCle
         }
         return FALSE;
     }
+    PV_ApplySourceMapVersionToPacked(fileRef, packedData, packedSize);
 
     XFileFreeResourceCache(fileRef);
     pReference = (XFILENAME *)fileRef;
@@ -6495,7 +6566,8 @@ static bool PV_CommitVirtualOverFileEx(XFILE fileRef, XFILE outFile, bool runCle
 
 static bool PV_CommitVirtualOverFile(XFILE fileRef, XFILE outFile)
 {
-    return PV_CommitVirtualOverFileEx(fileRef, outFile, TRUE);
+    /* Purge/omit/trash: never Pack or LZMA — editor working set stays flat ZREZ. */
+    return PV_CommitVirtualOverFileEx(fileRef, outFile, FALSE);
 }
 
 static bool PV_LongIdListContains(const XLongResourceID *ids, int32_t count, XLongResourceID id)
@@ -7112,10 +7184,11 @@ bool XReplaceFileResource(XFILE fileRef,
 
     /* ZINS-packed INST/ALIAS: append a flat resource that shadows the packed
      * entry. Get-by-id prefers flat; avoids recompressing ZINS and rewriting
-     * every SND on each instrument-editor Apply (zpatches-sized banks). */
+     * every SND on each instrument-editor Apply (zpatches-sized banks).
+     * Do NOT clear the ZINS decode cache — packed bytes are unchanged; clearing
+     * forced a full LZMA decompress on the next INST read. */
     if (resourceType == ID_INST || resourceType == ID_ALIAS)
     {
-        PV_ClearZmfInstBlockCache(fileRef);
         return (XAddFileResource(fileRef,
                                  resourceType,
                                  resourceID,
@@ -7144,8 +7217,6 @@ bool XPurgeFileInstrumentAndSoundLists(XFILE fileRef,
     XPTR newZinsPlain = NULL;
     int32_t newZinsPlainSize = 0;
     int32_t newZinsCap = 0;
-    XPTR newZinsCompressed = NULL;
-    int32_t newZinsCompressedSize = 0;
     int32_t keptFromZins = 0;
     int32_t keptFlat = 0;
     uint32_t existingVersion = 0;
@@ -7463,41 +7534,56 @@ bool XPurgeFileInstrumentAndSoundLists(XFILE fileRef,
         }
         if (newZinsPlain && totalKept > 0)
         {
+            /* Editor policy: emit kept INST/ALIAS as flat resources — do not
+             * re-LZMA a ZINS block (Unload Bank used to stall on large ZSB). */
+            unsigned char *p = (unsigned char *)newZinsPlain + 12;
+            unsigned char *end = (unsigned char *)newZinsPlain + newZinsPlainSize;
+            int32_t emitted = 0;
+
             PV_WriteBE32((unsigned char *)newZinsPlain + 8, (uint32_t)totalKept);
-#if USE_LZMA_COMPRESSION == TRUE
-            newZinsCompressedSize = XCompressPtr(&newZinsCompressed,
-                                                 newZinsPlain,
-                                                 (uint32_t)newZinsPlainSize,
-                                                 X_LZMA_RAW,
-                                                 NULL,
-                                                 NULL);
-#else
-            newZinsCompressed = XNewPtr(newZinsPlainSize);
-            if (newZinsCompressed)
+            while (p + 14 <= end && emitted < totalKept)
             {
-                XBlockMove(newZinsPlain, newZinsCompressed, newZinsPlainSize);
-                newZinsCompressedSize = newZinsPlainSize;
+                uint32_t type = PV_ReadBE32(p);
+                uint32_t id = PV_ReadBE32(p + 4);
+                uint16_t nameLen = PV_ReadBE16(p + 8);
+                uint32_t dataLen = PV_ReadBE32(p + 10);
+                unsigned char *namePtr;
+                unsigned char *dataPtr;
+                char pName[256];
+
+                p += 14;
+                if (p + nameLen + dataLen > end)
+                {
+                    break;
+                }
+                namePtr = p;
+                p += nameLen;
+                dataPtr = p;
+                p += dataLen;
+                if (type != (uint32_t)ID_INST && type != (uint32_t)ID_ALIAS)
+                {
+                    continue;
+                }
+                pName[0] = (char)((nameLen > 255u) ? 255u : nameLen);
+                if (pName[0] > 0)
+                {
+                    XBlockMove(namePtr, pName + 1, (int32_t)(uint8_t)pName[0]);
+                }
+                if (XAddFileResource(outFile,
+                                     (XResourceType)type,
+                                     (XLongResourceID)id,
+                                     pName,
+                                     dataPtr,
+                                     (int32_t)dataLen) != 0)
+                {
+                    XDisposePtr(newZinsPlain);
+                    XFileClose(outFile);
+                    return FALSE;
+                }
+                ++emitted;
             }
-#endif
             XDisposePtr(newZinsPlain);
             newZinsPlain = NULL;
-            if (!newZinsCompressed || newZinsCompressedSize <= 0)
-            {
-                if (newZinsCompressed)
-                {
-                    XDisposePtr(newZinsCompressed);
-                }
-                XFileClose(outFile);
-                return FALSE;
-            }
-            if (XAddFileResource(outFile, ID_ZINS, 1, NULL, newZinsCompressed,
-                                 newZinsCompressedSize) != 0)
-            {
-                XDisposePtr(newZinsCompressed);
-                XFileClose(outFile);
-                return FALSE;
-            }
-            XDisposePtr(newZinsCompressed);
         }
         else if (newZinsPlain)
         {

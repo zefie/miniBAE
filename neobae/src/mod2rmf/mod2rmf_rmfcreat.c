@@ -81,13 +81,16 @@ static void mod2rmf_capture_it_lpf(ModRawSample *raw, int ifc, int ifr)
  * envelope release. Collapse that tail so MIDI note-off (our flush on
  * retrigger / DCT) does not smear the previous phrase under the next. */
 /* IT duplicate check: when a new note starts, apply DCA to other active
- * notes that match DCT (note / sample / instrument). We approximate
- * instrument as program (1 sample → 1 program in mod2rmf). */
+ * notes that match DCT (note / sample / instrument).
+ * DCT=Instrument must use the IT instrument index — NOT program/sample.
+ * (M)TRANC pattern 9 layers ins7+ins27 on the same sample; matching by
+ * program cut the undelayed voice after SDx (~1 frame). */
 static int mod2rmf_flush_dct_duplicates(ModSongModel *song,
                                         ActiveNote *activeNotes,
                                         uint32_t channelCount,
                                         uint16_t newChannel,
                                         uint8_t newProgram,
+                                        uint8_t newInstrument,
                                         unsigned char newNote,
                                         int dct,
                                         uint64_t tickFP)
@@ -115,8 +118,12 @@ static int mod2rmf_flush_dct_duplicates(ModSongModel *song,
             match = (other->note == newNote) ? 1 : 0;
             break;
         case XMP_INST_DCT_SMP:
-        case XMP_INST_DCT_INST:
+            /* One sample → one MIDI program in mod2rmf. */
             match = (other->program == newProgram) ? 1 : 0;
+            break;
+        case XMP_INST_DCT_INST:
+            match = (other->instrument == newInstrument &&
+                     newInstrument != 255u) ? 1 : 0;
             break;
         default:
             break;
@@ -1731,6 +1738,8 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                 chEffects[ch].hasDelayedNote = TRUE;
                                 chEffects[ch].delayedEvNote = evNote;
                                 chEffects[ch].delayedSid = sid;
+                                chEffects[ch].delayedInstrument =
+                                    (uint8_t)((ci->instrument <= 255u) ? ci->instrument : 255u);
                                 chEffects[ch].delayedVolume = hasRowVolumeCmd
                                                               ? rowVolumeCmd64
                                                               : (uint8_t)mod2rmf_clamp_int((int)ci->volume, 0, 64);
@@ -1783,11 +1792,13 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                     conv->rawSamples[sid].dct != XMP_INST_DCT_OFF)
                                 {
                                     unsigned char dctNote = (unsigned char)mod2rmf_clamp_int(midiNote, 0, 127);
+                                    uint8_t dctInst = (uint8_t)((ci->instrument <= 255u) ? ci->instrument : 255u);
                                     if (!mod2rmf_flush_dct_duplicates(song,
                                                                       activeNotes,
                                                                       song->channelCount,
                                                                       (uint16_t)ch,
                                                                       (uint8_t)program,
+                                                                      dctInst,
                                                                       dctNote,
                                                                       conv->rawSamples[sid].dct,
                                                                       currentTickFP))
@@ -1807,6 +1818,8 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                                                                                ? rowVolumeCmd64
                                                                                                : (uint8_t)mod2rmf_clamp_int((int)ci->volume, 0, 64));
                                 activeNotes[ch].program = (uint8_t)program;
+                                activeNotes[ch].instrument =
+                                    (uint8_t)((ci->instrument <= 255u) ? ci->instrument : 255u);
                                 activeNotes[ch].bendOffsetCents = (midiNote - (int)activeNotes[ch].note) * 100;
                                 activeNotes[ch].rateFinCents =
                                     (sid >= 0 && (uint32_t)sid < conv->rawSampleCount &&
@@ -1911,6 +1924,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                                                   song->channelCount,
                                                                   (uint16_t)ch,
                                                                   (uint8_t)program,
+                                                                  chEffects[ch].delayedInstrument,
                                                                   dctNote,
                                                                   conv->rawSamples[delaySid].dct,
                                                                   currentTickFP))
@@ -1928,6 +1942,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                             activeNotes[ch].note = (unsigned char)mod2rmf_clamp_int(midiNote, 0, 127);
                             activeNotes[ch].velocity = mod2rmf_note_velocity_from_volume(chEffects[ch].delayedVolume);
                             activeNotes[ch].program = (uint8_t)program;
+                            activeNotes[ch].instrument = chEffects[ch].delayedInstrument;
                             activeNotes[ch].bendOffsetCents = (midiNote - (int)activeNotes[ch].note) * 100;
                             activeNotes[ch].rateFinCents =
                                 (delaySid >= 0 && (uint32_t)delaySid < conv->rawSampleCount &&

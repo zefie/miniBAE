@@ -87,37 +87,11 @@ static bool DecodeNbetResourceBody(const unsigned char *raw,
 #endif
 }
 
-/* LZMA-wrap the plain nBeT blob (XCompressPtr / X_LZMA_RAW) when it shrinks.
- * Open still accepts legacy plaintext bodies. */
+/* Store nBeT as plaintext. Open still accepts legacy LZMA-wrapped bodies.
+ * Session saves skip LZMA entirely — compression cost was not worth it for
+ * a small layout blob, and ZSN packing no longer LZMA-compresses either. */
 static std::vector<unsigned char> EncodeNbetResourceBody(const std::vector<unsigned char> &plain)
 {
-#if USE_LZMA_COMPRESSION == TRUE
-#if USE_CREATION_API != FALSE
-    if (!plain.empty())
-    {
-        XPTR compressed = nullptr;
-        const int32_t csize =
-            XCompressPtr(&compressed,
-                         const_cast<unsigned char *>(plain.data()),
-                         static_cast<uint32_t>(plain.size()),
-                         X_LZMA_RAW,
-                         nullptr,
-                         nullptr);
-        if (compressed && csize > 0 && static_cast<size_t>(csize) < plain.size())
-        {
-            std::vector<unsigned char> out(static_cast<unsigned char *>(compressed),
-                                           static_cast<unsigned char *>(compressed) +
-                                               static_cast<size_t>(csize));
-            XDisposePtr(compressed);
-            return out;
-        }
-        if (compressed)
-        {
-            XDisposePtr(compressed);
-        }
-    }
-#endif
-#endif
     return plain;
 }
 
@@ -350,7 +324,7 @@ bool SyncSessionSongsFromDocument()
         uint32_t zmf_reason = 0;
         const bool use_zmf = BAERmfEditorDocument_RequiresZmf(m_document, &zmf_reason) != FALSE;
         const BAEResult rmf_result =
-            BAERmfEditorDocument_SaveAsRmfToMemory(m_document, use_zmf, &rmf_data, &rmf_size);
+            BAERmfEditorDocument_SaveAsRmfToMemoryEx(m_document, use_zmf, FALSE, &rmf_data, &rmf_size);
         if (rmf_result == BAE_NO_ERROR && rmf_data && rmf_size > 0)
         {
             rmf_bytes.assign(rmf_data, rmf_data + rmf_size);
@@ -1132,7 +1106,7 @@ bool RemoveSessionSongAt(int index)
         SetStatus(status);
     }
 
-void RememberSessionPcmFromSampleEditor()
+void RememberSessionPcmFromSampleEditor(bool capture_export_target = false)
 {
 #if NBEDITOR_MVP
     if (m_sample_editor_cached_pcm.empty() || m_sample_editor_cached_frame_count == 0)
@@ -1162,8 +1136,140 @@ void RememberSessionPcmFromSampleEditor()
     entry.snd_resource_id = m_sample_editor_snd_resource_id;
     const uint32_t key = entry.snd_resource_id ? entry.snd_resource_id
                                                : static_cast<uint32_t>(m_session_pcm_cache.size() + 1);
+    /* Keep prior export prefs unless Apply captures a new ship-encode target. */
+    auto prior = m_session_pcm_cache.find(key);
+    if (prior != m_session_pcm_cache.end() && prior->second.has_export_target)
+    {
+        entry.has_export_target = prior->second.has_export_target;
+        entry.export_compression = prior->second.export_compression;
+        entry.export_storage = prior->second.export_storage;
+        entry.export_opus_mode = prior->second.export_opus_mode;
+        entry.export_opus_roundtrip = prior->second.export_opus_roundtrip;
+    }
+    if (capture_export_target)
+    {
+        entry.has_export_target = true;
+        entry.export_compression = m_sample_editor_codec_type;
+        entry.export_storage = m_sample_editor_snd_storage_type;
+        entry.export_opus_mode = m_sample_editor_opus_mode;
+        entry.export_opus_roundtrip = IsOpusCompressionType(m_sample_editor_codec_type);
+    }
     m_session_pcm_cache[key] = std::move(entry);
 #endif
+}
+
+bool SessionHasPendingSndExportEncode() const
+{
+    for (const auto &kv : m_session_pcm_cache)
+    {
+        const SessionPcmCacheEntry &e = kv.second;
+        if (!e.has_export_target || e.pcm.empty() || e.frame_count == 0)
+        {
+            continue;
+        }
+        if (e.export_compression != BAE_EDITOR_COMPRESSION_PCM ||
+            e.export_storage != BAE_EDITOR_SND_STORAGE_SND)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Apply pending codec/storage to a writable bank clone (Export only). */
+bool ApplySessionExportTargetsToBank(BAEBankToken bank_token, const char **out_error)
+{
+    if (out_error)
+    {
+        *out_error = nullptr;
+    }
+    if (!bank_token)
+    {
+        if (out_error)
+        {
+            *out_error = "no bank";
+        }
+        return false;
+    }
+    if (!SessionHasPendingSndExportEncode())
+    {
+        return true;
+    }
+
+    uint32_t inst_count = 0;
+    if (BAERmfEditorBank_GetInstrumentCount(bank_token, &inst_count) != BAE_NO_ERROR)
+    {
+        if (out_error)
+        {
+            *out_error = "could not enumerate instruments";
+        }
+        return false;
+    }
+
+    (void)BAERmfEditorBank_BeginBatchSnd(bank_token);
+    for (uint32_t ii = 0; ii < inst_count; ++ii)
+    {
+        uint32_t split_count = 0;
+        if (BAERmfEditorBank_GetInstrumentSampleCount(bank_token, ii, &split_count) != BAE_NO_ERROR)
+        {
+            continue;
+        }
+        for (uint32_t si = 0; si < split_count; ++si)
+        {
+            BAERmfEditorBankSampleInfo sinfo;
+            std::memset(&sinfo, 0, sizeof(sinfo));
+            if (BAERmfEditorBank_GetInstrumentSampleInfo(bank_token, ii, si, &sinfo) != BAE_NO_ERROR)
+            {
+                continue;
+            }
+            const uint32_t snd_id = static_cast<uint32_t>(static_cast<uint16_t>(sinfo.sndResourceID));
+            if (snd_id == kNoSndResourceId)
+            {
+                continue;
+            }
+            auto it = m_session_pcm_cache.find(snd_id);
+            if (it == m_session_pcm_cache.end() || !it->second.has_export_target)
+            {
+                continue;
+            }
+            const SessionPcmCacheEntry &pcm = it->second;
+            if (pcm.pcm.empty() || pcm.frame_count == 0)
+            {
+                continue;
+            }
+            if (pcm.export_compression == BAE_EDITOR_COMPRESSION_PCM &&
+                pcm.export_storage == BAE_EDITOR_SND_STORAGE_SND)
+            {
+                continue;
+            }
+            const BAE_UNSIGNED_FIXED rate =
+                pcm.sample_rate ? pcm.sample_rate : UNSIGNED_LONG_TO_XFIXED(44100);
+            const BAEResult rr = BAERmfEditorBank_ReEncodeSampleFromPCMEx(
+                bank_token,
+                ii,
+                si,
+                pcm.export_compression,
+                pcm.export_storage,
+                pcm.export_opus_mode,
+                pcm.export_opus_roundtrip ? TRUE : FALSE,
+                pcm.pcm.data(),
+                pcm.frame_count,
+                pcm.bit_size,
+                pcm.channels,
+                rate);
+            if (rr != BAE_NO_ERROR && rr != BAE_COMPRESSION_INEFFECTIVE)
+            {
+                (void)BAERmfEditorBank_AbortBatchSnd(bank_token);
+                if (out_error)
+                {
+                    *out_error = "export sample encode failed";
+                }
+                return false;
+            }
+        }
+    }
+    (void)BAERmfEditorBank_CommitBatchSnd(bank_token);
+    return true;
 }
 
 void ClearAppCompressionCache()
@@ -1947,11 +2053,13 @@ bool SaveSessionToPath(const char *path)
         uint32_t bank_image_size = 0;
         /* Same-format is a raw image memcpy (keeps ZINS packed). Format
          * override (IREZ↔ZREZ) walks resources once. */
+        /* Session clone: flat ZREZ stamp — never Pack/LZMA here. */
         const BAEResult snap_r =
-            BAERmfEditorBank_SaveToMemoryEx(m_bank_token,
-                                            resource_map_id,
-                                            &bank_image,
-                                            &bank_image_size);
+            BAERmfEditorBank_SaveToMemoryExFlags(m_bank_token,
+                                                 resource_map_id,
+                                                 FALSE,
+                                                 &bank_image,
+                                                 &bank_image_size);
         if (snap_r != BAE_NO_ERROR || !bank_image || bank_image_size < 12)
         {
             if (bank_image)
@@ -2312,10 +2420,11 @@ bool SaveSessionToPath(const char *path)
                                static_cast<int32_t>(date_body.size()));
     }
 
-    UpdateBusyProgress(0.88f, want_zsn ? "Packing ZREZ (LZMA)…" : "Packing resource map…");
-    /* Never PackInst here: flat Bank 2+/custom INST must survive. PackSong/Bank
-     * only; skip ZSHD too (payload-refs without headers lose samples). */
-    if (XCleanResourceFileOptions(out_file, FALSE, FALSE) == FALSE)
+    UpdateBusyProgress(0.88f, "Finalizing resource map…");
+    /* Session saves: no PackInst/Song/Bank/ZSHD and no LZMA. Flat Midi/SONG
+     * (and existing ZINS) inside a ZREZ map are valid; re-packing was the
+     * dominant cost on zpatches-sized banks. Cache rebuild only. */
+    if (XRebuildResourceFileCache(out_file) == FALSE)
     {
         /* Still try to write the in-memory image. */
     }

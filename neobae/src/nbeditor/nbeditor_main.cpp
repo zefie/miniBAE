@@ -149,6 +149,12 @@ struct SessionPcmCacheEntry
     uint32_t loop_end = 0;
     int base_key = 60;
     uint32_t snd_resource_id = 0;
+    /* Pending ship-format encode (editor bank stays PCM SND until Export). */
+    bool has_export_target = false;
+    BAERmfEditorCompressionType export_compression = BAE_EDITOR_COMPRESSION_PCM;
+    BAERmfEditorSndStorageType export_storage = BAE_EDITOR_SND_STORAGE_SND;
+    BAERmfEditorOpusMode export_opus_mode = BAE_EDITOR_OPUS_MODE_AUDIO;
+    bool export_opus_roundtrip = false;
 };
 
 enum class ExportInstMode : int
@@ -1421,6 +1427,25 @@ public:
             ExportBankCloneToPath(path);
             EndBusyProgress();
         }
+        else if (op == LongOp::ApplyInstrument)
+        {
+            if (!m_busy_active)
+            {
+                BeginBusyProgress("Applying instrument…");
+            }
+            else
+            {
+                if (m_busy_title.empty())
+                {
+                    m_busy_title = "Applying instrument…";
+                }
+                PumpBusyProgressFrame(true);
+            }
+            m_busy_last_pump_ms = 0;
+            UpdateBusyProgress(0.25f, "Writing instrument…");
+            ApplyInstrumentEditor(true);
+            EndBusyProgress();
+        }
     }
 
     /* Must run outside NewFrame/EndFrame — mid-frame LoadIni clears docks and undocks windows. */
@@ -1582,7 +1607,8 @@ private:
     {
         None = 0,
         SaveSession,
-        ExportBank
+        ExportBank,
+        ApplyInstrument
     };
 
     static void SDLCALL OnFileDialogResult(void *userdata, const char *const *filelist, int)
@@ -2460,8 +2486,9 @@ private:
         uint32_t rmf_size = 0;
         uint32_t zmf_reason = 0;
         const bool use_zmf = BAERmfEditorDocument_RequiresZmf(m_document, &zmf_reason) != FALSE;
-        const BAEResult save_result = BAERmfEditorDocument_SaveAsRmfToMemory(m_document,
+        const BAEResult save_result = BAERmfEditorDocument_SaveAsRmfToMemoryEx(m_document,
                                                                               use_zmf,
+                                                                              FALSE,
                                                                               &rmf_data,
                                                                               &rmf_size);
         if (save_result != BAE_NO_ERROR || !rmf_data || rmf_size == 0)
@@ -3077,8 +3104,8 @@ private:
         {
             return true;
         }
-        const XResourceType date_type = FOUR_CHAR('D', 'A', 'T', 'e');
-        return XCountFileResourcesOfType(bank, date_type) > 0;
+        /* DATe alone is metadata — do not force the slow omit/rebuild path. */
+        return false;
     }
 
     /* Hard-omit SNDs not referenced by any INST (export clone — no Trash). */
@@ -6862,8 +6889,16 @@ private:
     ImGuiID m_ie_adsr_selected_owner = 0;
     /* Per-LFO UI: ADSR-only / Wave-only / Both (explicit). Not persisted in INST. */
     int m_ie_lfo_control_mode[BAE_EDITOR_MAX_LFOS] = {};
-    /* Keysplit SND ids at IE open / after Apply — Revert restores these (bank-side). */
-    std::vector<uint16_t> m_ie_pristine_split_snds;
+    /* Keymap snapshot at IE open / after Apply — Revert restores these (bank-side). */
+    struct IePristineSplit
+    {
+        unsigned char lowKey = 0;
+        unsigned char highKey = 0;
+        unsigned char rootKey = 0;
+        int16_t splitVolume = 0;
+        uint16_t sndResourceID = 0;
+    };
+    std::vector<IePristineSplit> m_ie_pristine_splits;
 
     bool m_dock_layout_initialized = false;
 

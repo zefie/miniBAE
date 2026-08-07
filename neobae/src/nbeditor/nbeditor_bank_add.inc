@@ -120,18 +120,24 @@
             SetStatus("No bank loaded");
             return false;
         }
-        /* Fast path is a single memcpy. Only show the progress modal between
-         * frames — mid-DrawUI BeginBusyProgress would nest ImGui::NewFrame. */
-        const bool nested_busy = m_busy_active;
+        /* Fast path is a single memcpy. Mid-DrawUI cannot PumpBusy (nested
+         * NewFrame). Prefer ArmBusy + LongOp; when busy is already armed,
+         * still update the detail line. */
         ImGuiContext *ctx = ImGui::GetCurrentContext();
-        const bool show_busy = !nested_busy && !(ctx && ctx->WithinFrameScope);
-        if (show_busy)
+        const bool within_frame = (ctx && ctx->WithinFrameScope);
+        const bool own_busy = !m_busy_active && !within_frame;
+        if (own_busy)
         {
             BeginBusyProgress("Preparing bank…");
             UpdateBusyProgress(0.2f, "Making bank writable…");
         }
+        else if (m_busy_active)
+        {
+            m_busy_last_pump_ms = 0;
+            UpdateBusyProgress(std::max(m_busy_fraction, 0.15f), "Making bank writable…");
+        }
         const BAEResult r = BAERmfEditorBank_EnsureWritable(m_bank_token);
-        if (show_busy)
+        if (own_busy)
         {
             EndBusyProgress();
         }

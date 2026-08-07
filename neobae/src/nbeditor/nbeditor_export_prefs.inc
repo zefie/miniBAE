@@ -676,10 +676,17 @@
             XCountFileResourcesOfType(src_bank, FOUR_CHAR('C', 'a', 'S', 'd')) > 0;
         const bool need_drop =
             m_export_bank_drop_unref && CountUnreferencedBankSamples(m_bank_token) > 0;
-        const bool need_encrypt = m_export_bank_encrypt;
+        /* Encrypt checkbox only forces mutate when plain/CSND samples remain. */
+        const bool need_encrypt =
+            m_export_bank_encrypt &&
+            (XCountFileResourcesOfType(src_bank, ID_SND) > 0 ||
+             XCountFileResourcesOfType(src_bank, ID_CSND) > 0);
         const bool need_add_groovoids = m_export_bank_songs_to_groovoids && !m_session_songs.empty();
+        /* Sample editor defers CSND/codec to Export — must clone + encode first. */
+        const bool need_export_encode = SessionHasPendingSndExportEncode();
         const bool needs_mutate =
-            need_song_strip || need_casd_strip || need_drop || need_encrypt || need_add_groovoids;
+            need_song_strip || need_casd_strip || need_drop || need_encrypt ||
+            need_add_groovoids || need_export_encode;
 
         /* Fast path: serialize once and write (no clone / rebuild). */
         if (!needs_mutate)
@@ -748,6 +755,19 @@
             return;
         }
         BAEBankToken temp_token = reinterpret_cast<BAEBankToken>(temp_file);
+
+        if (need_export_encode)
+        {
+            UpdateBusyProgress(0.20f, "Encoding samples for export…");
+            const char *enc_err = nullptr;
+            if (!ApplySessionExportTargetsToBank(temp_token, &enc_err))
+            {
+                SetStatus(std::string("Export Bank failed: ") +
+                          (enc_err ? enc_err : "sample encode"));
+                XFileClose(temp_file);
+                return;
+            }
+        }
 
         if (need_song_strip)
         {

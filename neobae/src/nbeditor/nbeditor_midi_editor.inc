@@ -458,7 +458,8 @@
         uint32_t size = 0;
         uint32_t reason = 0;
         const bool use_zmf = BAERmfEditorDocument_RequiresZmf(m_document, &reason) != FALSE;
-        if (BAERmfEditorDocument_SaveAsRmfToMemory(m_document, use_zmf, &data, &size) != BAE_NO_ERROR ||
+        if (BAERmfEditorDocument_SaveAsRmfToMemoryEx(m_document, use_zmf, FALSE, &data, &size) !=
+                BAE_NO_ERROR ||
             !data || size == 0)
         {
             if (data)

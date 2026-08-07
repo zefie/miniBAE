@@ -422,7 +422,7 @@
         m_session_custom_inst_ids.clear();
         m_session_pcm_cache.clear();
         m_app_compression_cache.clear();
-        (void)XCleanResourceFile(reinterpret_cast<XFILE>(m_bank_token));
+        (void)XFinalizeEditorResourceFile(reinterpret_cast<XFILE>(m_bank_token));
         RefreshListsFromBank();
     }
 
@@ -753,7 +753,7 @@
                                        TRUE);
         /* INST/SND copy does not touch ALIS — merge Bank 0/1 aliases (BE2 does). */
         const size_t alias_count = MergeBank01AliasesFromDonor(donor, dest);
-        (void)XCleanResourceFile(dest);
+        (void)XFinalizeEditorResourceFile(dest);
 
         /* Bank-mode load only merges instruments — drop leftover session/built-in
          * groovoids so the Songs list matches the instrument bank being loaded. */

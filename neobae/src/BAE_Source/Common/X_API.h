@@ -776,15 +776,17 @@ typedef struct XBankToken XBankToken;
 //     ZSHD packed SND/CSND/ESND headers with payload references
 // v6: Instrument oscillators (OSCL) + PWID / WIDX modulators
 //
-// Writers should stamp v5 unless any instrument uses OSCL (then v6), so older
-// v5-only players can still open non-oscillator ZMF/ZSB files.
+// Writers should stamp v5 unless any instrument uses OSCL / 2-bit ADPCM (then
+// v6), so older v5-only players can still open non-oscillator ZMF/ZSB files.
 #define XFILERESOURCE_VERSION_ZMF_NO_OSC 5
 #define XFILERESOURCE_VERSION_ZMF        6
 
-// Default new-file stamp for a mapID (ZMF defaults to v6; save paths may
-// downgrade to XFILERESOURCE_VERSION_ZMF_NO_OSC when no oscillators are used).
+// Default new-file stamp for a mapID. ZMF defaults to v5; save paths upgrade
+// to XFILERESOURCE_VERSION_ZMF when OSCL or 2-bit ADPCM is present. (Pack/Omit
+// used to open virtual ZREZ as v6 and never stamp down — false v6 flags.)
 #define XFILERESOURCE_VERSION_FOR_ID(id) \
-    (((id) == XFILERESOURCE_ZMF_ID) ? XFILERESOURCE_VERSION_ZMF : XFILERESOURCE_VERSION_RMF)
+    (((id) == XFILERESOURCE_ZMF_ID) ? XFILERESOURCE_VERSION_ZMF_NO_OSC \
+                                    : XFILERESOURCE_VERSION_RMF)
 
 // Check if a version number is recognised
 #if USE_ZMF_SUPPORT == TRUE
@@ -1058,6 +1060,24 @@ bool   XCleanResourceFileEx( XFILE fileRef, bool packSndHeaders );
 /* Full Clean control. Session .zsn/.bsn save must pass packInst=FALSE — PackInst
  * was rebuilding ZINS from Bank 0/1 and dropping flat custom / Bank 2+ INST. */
 bool   XCleanResourceFileOptions( XFILE fileRef, bool packInst, bool packSndHeaders );
+
+/* Like XCleanResourceFileOptions, but also controls PackSong / PackBank (LZMA on
+ * ZREZ). Session .zsn saves should pass all pack flags FALSE — flat resources in
+ * a ZREZ map are valid and LZMA re-pack was dominating large-bank save time. */
+bool   XCleanResourceFileOptionsEx( XFILE fileRef,
+                                    bool packInst,
+                                    bool packSong,
+                                    bool packBank,
+                                    bool packSndHeaders );
+
+/* Rebuild access cache only (no Pack / LZMA). */
+bool   XRebuildResourceFileCache( XFILE fileRef );
+
+/* Editor / session / in-RAM audition policy: flat ZREZ is valid. PackInst /
+ * PackSong / PackBank / PackSndHeaders (LZMA) run only at explicit ship export.
+ * FinalizeEditor == RebuildCache; PackForShip == full Clean. */
+bool   XFinalizeEditorResourceFile( XFILE fileRef );
+bool   XPackResourceFileForShip( XFILE fileRef );
 
 // File Manager
 int32_t    XFileRead(XFILE fileRef, XPTR buffer, int32_t bufferLength);

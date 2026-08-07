@@ -568,6 +568,12 @@ BAEResult BAERmfEditorDocument_SaveAsRmfToMemory(BAERmfEditorDocument *document,
                                                  bool useZmfContainer,
                                                  unsigned char **outData,
                                                  uint32_t *outSize);
+/* packForShip: TRUE = Pack+LZMA (disk export); FALSE = flat finalize (preview/playback). */
+BAEResult BAERmfEditorDocument_SaveAsRmfToMemoryEx(BAERmfEditorDocument *document,
+                                                   bool useZmfContainer,
+                                                   bool packForShip,
+                                                   unsigned char **outData,
+                                                   uint32_t *outSize);
 BAEResult BAERmfEditorDocument_SaveAsRmf(BAERmfEditorDocument *document,
                                          BAEPathName filePath);
 BAEResult BAERmfEditorDocument_SaveAsRmfPreserveMidi(BAERmfEditorDocument *document,
@@ -798,7 +804,9 @@ BAEResult BAERmfEditorBank_SetInstrumentExtInfo(BAEBankToken bankToken,
                                                 BAERmfEditorInstrumentExtInfo const *info);
 
 /* Set sample info for a specific sample within a bank instrument.
- * This modifies the in-memory bank state. Call BAERmfEditorBank_SaveToFile to persist. */
+ * This modifies the in-memory bank state. Call BAERmfEditorBank_SaveToFile to persist.
+ * Pass sampleRate == 0 to update INST keymap fields only (Vol/Low/High/root-in-INST)
+ * without opening or rewriting the SND resource — used by the instrument editor keymap. */
 BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
                                                     uint32_t instrumentIndex,
                                                     uint32_t sampleIndex,
@@ -921,11 +929,19 @@ BAEResult BAERmfEditorBank_SaveToMemory(BAEBankToken bankToken,
                                         uint32_t *outSize);
 
 /* Like SaveToMemory, but overrideResourceID may force IREZ or ZREZ
- * (XFILERESOURCE_ID / XFILERESOURCE_ZMF_ID). Pass 0 to keep source format. */
+ * (XFILERESOURCE_ID / XFILERESOURCE_ZMF_ID). Pass 0 to keep source format.
+ * Packs for ship (LZMA) when converting formats. */
 BAEResult BAERmfEditorBank_SaveToMemoryEx(BAEBankToken bankToken,
                                           int32_t overrideResourceID,
                                           unsigned char **outData,
                                           uint32_t *outSize);
+/* packForShip: TRUE = Pack on IREZ→ZREZ / format convert (export);
+ * FALSE = stamp flat ZREZ only (session / editor clone). */
+BAEResult BAERmfEditorBank_SaveToMemoryExFlags(BAEBankToken bankToken,
+                                               int32_t overrideResourceID,
+                                               BAE_BOOL packForShip,
+                                               unsigned char **outData,
+                                               uint32_t *outSize);
 
 /* Decode waveform data for a specific sample within a bank instrument.
  * This loads and decodes the SND resource to PCM. The caller must call

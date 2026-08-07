@@ -940,7 +940,14 @@ if(BAE_ENABLE_LZMA)
 endif()
 
 if(BAE_ENABLE_RMF_EDITOR)
-  list(APPEND NEOBAE_SOURCES neobae/src/BAE_Source/Common/BAE_EditorAPI.c)
+  list(APPEND NEOBAE_SOURCES
+    neobae/src/BAE_Source/Common/BAE_EditorAPI.c
+    neobae/src/BAE_Source/Common/BAE_EditorAPI_codec.c
+    neobae/src/BAE_Source/Common/BAE_EditorAPI_midi.c
+    neobae/src/BAE_Source/Common/BAE_EditorAPI_rmf_io.c
+    neobae/src/BAE_Source/Common/BAE_EditorAPI_document.c
+    neobae/src/BAE_Source/Common/BAE_EditorAPI_bank.c
+  )
 endif()
 
 if(BAE_ENABLE_NATIVE_DLS)

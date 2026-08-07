@@ -252,6 +252,9 @@ typedef struct {
     unsigned char note;
     unsigned char velocity;
     unsigned char program;
+    /* libxmp 0-based instrument index (255 = none). Used for IT DCT=Instrument
+     * so two instruments that share one sample do not kill each other. */
+    uint8_t instrument;
     int bendOffsetCents;
     int rateFinCents; /* subtract: finetune already baked into sample rate */
     uint32_t sampleOffsetFrames; /* sticky for retriggers until next note-on */
@@ -263,6 +266,7 @@ typedef struct {
     bool   hasDelayedNote;     /* a note is pending for this row */
     unsigned char delayedEvNote;/* the note value to trigger after delay */
     int     delayedSid;         /* sample ID for the delayed note */
+    uint8_t delayedInstrument;  /* IT instrument index for delayed note DCT */
     uint8_t delayedVolume;      /* volume at time of row start */
     uint32_t delayedSampleOffsetFrames;
 } ChannelEffectState;
