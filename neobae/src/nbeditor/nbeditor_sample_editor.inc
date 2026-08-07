@@ -1214,9 +1214,84 @@
             return false;
         }
 
-        /* Editor working bank: always PCM in SND (no CSND LZMA / codec rewrap).
-         * Desired codec + storage are session export prefs applied on Export. */
-        const BAERmfEditorSndStorageType bank_storage = BAE_EDITOR_SND_STORAGE_SND;
+        /* UI / export prefs keep the user's chosen codec+storage. */
+        m_sample_editor_codec_type = effective;
+
+        /* Codec/storage Apply is an export preference. Skip bank I/O unless the
+         * working-set sample itself changed — forcing ESND/CSND→SND used to run
+         * a full-bank SND rebuild (multi-second freeze on zpatches). */
+        BAERmfEditorBankSampleInfo bank_info;
+        std::memset(&bank_info, 0, sizeof(bank_info));
+        const bool have_bank_info =
+            !sample.unassigned &&
+            BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
+                                                     sample.instrument_index,
+                                                     sample.split_index,
+                                                     &bank_info) == BAE_NO_ERROR;
+        const uint32_t want_root =
+            static_cast<uint32_t>(std::clamp(m_sample_editor_root_key, 0, 127));
+        const bool keymap_dirty =
+            have_bank_info &&
+            (bank_info.loopStart != loop_start || bank_info.loopEnd != loop_end ||
+             static_cast<uint32_t>(bank_info.rootKey) != want_root ||
+             bank_info.sampleRate != m_sample_editor_sample_rate_hz);
+        const bool name_dirty =
+            !m_sample_editor_sample_name.empty() &&
+            m_sample_editor_sample_name != sample.name;
+        const bool bank_write_needed =
+            restore_master || m_sample_editor_dirty || m_sample_editor_loop_dirty ||
+            keymap_dirty || name_dirty;
+
+        if (!bank_write_needed)
+        {
+            SeRestoreCacheFromMaster();
+            RememberSessionPcmFromSampleEditor(true);
+            m_sample_editor_preview_needs_reencode = false;
+            m_sample_editor_loop_dirty = false;
+            m_sample_editor_dirty = false;
+            m_sample_editor_audition_pcm.clear();
+            m_sample_editor_audition_frame_count = 0;
+            if (m_sample_editor_sample_row >= 0 &&
+                m_sample_editor_sample_row < static_cast<int>(m_samples.size()))
+            {
+                m_samples[static_cast<size_t>(m_sample_editor_sample_row)].codec_label =
+                    FormatVisibleCodecLabelFromEditorType(effective);
+            }
+            if (sample.bank >= 0 && sample.bank < 2)
+            {
+                m_bank01_touched = true;
+            }
+            SetStatus(closing ? "Compression set for export (editor closed)"
+                              : (std::string("Compression set for export: ") +
+                                 GetSampleCodecLabel(m_sample_editor_codec_type)));
+            return true;
+        }
+
+        if (!EnsureActiveBankWritable())
+        {
+            SetStatus("Sample write failed: bank not writable");
+            return false;
+        }
+
+        /* Keep the existing container type so same-type XReplace stays O(1).
+         * CSND rewrap would LZMA-compress PCM — demote working-set to ESND. */
+        BAERmfEditorSndStorageType bank_storage = BAE_EDITOR_SND_STORAGE_ESND;
+        if (have_bank_info)
+        {
+            bank_storage = bank_info.sndStorageType;
+            if (bank_storage == BAE_EDITOR_SND_STORAGE_CSND)
+            {
+                bank_storage = BAE_EDITOR_SND_STORAGE_ESND;
+            }
+        }
+        if (restore_master)
+        {
+            /* "No Recompression" restores master PCM; keep container cheap. */
+            if (bank_storage == BAE_EDITOR_SND_STORAGE_CSND)
+            {
+                bank_storage = BAE_EDITOR_SND_STORAGE_ESND;
+            }
+        }
         const BAERmfEditorCompressionType bank_codec = BAE_EDITOR_COMPRESSION_PCM;
         const BAEResult result = BAERmfEditorBank_ReEncodeSampleFromPCMEx(
             m_bank_token,
@@ -1236,12 +1311,6 @@
         {
             SetStatus(std::string("Sample write failed: ") + FormatBAEError(result));
             return false;
-        }
-        /* UI / export prefs keep the user's chosen codec+storage. */
-        m_sample_editor_codec_type = effective;
-        if (restore_master)
-        {
-            m_sample_editor_snd_storage_type = BAE_EDITOR_SND_STORAGE_SND;
         }
 
         BAERmfEditorBankSampleInfo updated_info;
@@ -1263,12 +1332,14 @@
 
             updated_info.loopStart = applied_start;
             updated_info.loopEnd = applied_end;
-            updated_info.rootKey = static_cast<unsigned char>(std::clamp(m_sample_editor_root_key, 0, 127));
-            updated_info.sampleRate = m_sample_editor_sample_rate_hz;
-            const BAEResult info_result = BAERmfEditorBank_SetInstrumentSampleInfo(m_bank_token,
-                                                                                    sample.instrument_index,
-                                                                                    sample.split_index,
-                                                                                    &updated_info);
+            updated_info.rootKey = static_cast<unsigned char>(want_root);
+            /* sampleRate==0 → INST keymap only when rate already matches bank SND. */
+            updated_info.sampleRate =
+                (have_bank_info && bank_info.sampleRate == m_sample_editor_sample_rate_hz)
+                    ? 0u
+                    : m_sample_editor_sample_rate_hz;
+            const BAEResult info_result = BAERmfEditorBank_SetInstrumentSampleInfo(
+                m_bank_token, sample.instrument_index, sample.split_index, &updated_info);
             if (info_result != BAE_NO_ERROR)
             {
                 SetStatus(std::string("Sample info update failed: ") + FormatBAEError(info_result));
@@ -1292,7 +1363,6 @@
         }
         else
         {
-            /* Bank holds PCM SND; size estimate stays from compression preview if any. */
             SeRestoreCacheFromMaster();
             BAERmfEditorBankSampleInfo info;
             std::memset(&info, 0, sizeof(info));
@@ -1303,13 +1373,10 @@
             {
                 m_sample_editor_snd_resource_id = static_cast<uint32_t>(info.sndResourceID);
             }
-            /* Keep m_sample_editor_codec_type / storage as export prefs (not bank). */
         }
 
-        /* Persist SND resource name (list + BE2-style display).
-         * sndID 0 is a valid resource id — do not treat it as "unset". */
-        if (m_sample_editor_snd_resource_id <= 32767u &&
-            !m_sample_editor_sample_name.empty())
+        /* Persist SND resource name only when it actually changed. */
+        if (name_dirty && m_sample_editor_snd_resource_id <= 32767u)
         {
             const BAEResult rename_r = BAERmfEditorBank_RenameSampleResource(
                 m_bank_token,
@@ -1354,6 +1421,12 @@
                 }
             }
         }
+        if (m_sample_editor_sample_row >= 0 &&
+            m_sample_editor_sample_row < static_cast<int>(m_samples.size()))
+        {
+            m_samples[static_cast<size_t>(m_sample_editor_sample_row)].codec_label =
+                FormatVisibleCodecLabelFromEditorType(effective);
+        }
         RememberSessionPcmFromSampleEditor(true);
         m_sample_editor_has_uncompressed_master =
             HasUncompressedMasterForSnd(m_sample_editor_snd_resource_id);
@@ -1364,7 +1437,7 @@
         SetStatus(closing ? "Sample saved to bank (editor closed)"
                           : (restore_master
                                  ? "Restored PCM master in bank (no compression)"
-                                 : (std::string("Sample saved as PCM; ") +
+                                 : (std::string("Sample saved; ") +
                                     GetSampleCodecLabel(m_sample_editor_codec_type) +
                                     " / storage set for export")));
         return true;

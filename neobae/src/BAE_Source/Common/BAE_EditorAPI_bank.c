@@ -980,7 +980,27 @@ BAEResult PV_BankReplaceSndResourceInPlace(XFILE bankFile,
         return BAE_NO_ERROR;
     }
 
-    /* Type change or Replace unavailable: one opaque rebuild (keeps ZINS/ZSNG/ZBNK). */
+    /* Type change on a writable bank: soft-delete old container + append new type.
+     * Avoids PV_BankReplaceMultipleSndResources (full SND-table copy) which freezes
+     * multi‑MB banks like zpatches for seconds on a single sample Apply. */
+    if (oldSndType != newSndType)
+    {
+        (void)XDeleteFileResource(bankFile,
+                                  oldSndType,
+                                  (XLongResourceID)sndID,
+                                  FALSE);
+        if (XAddFileResource(bankFile,
+                             newSndType,
+                             (XLongResourceID)sndID,
+                             pascalName,
+                             sndData,
+                             sndSize) == 0)
+        {
+            return BAE_NO_ERROR;
+        }
+    }
+
+    /* Replace unavailable (read-only / no flat entry): one opaque rebuild. */
     {
         PV_SndReplacement one;
         int32_t ni;
