@@ -2985,7 +2985,10 @@
                 MeApplyTrackMutes();
             }
             ImGui::SameLine();
-            ImGui::TextDisabled("%u:%03u", info.bank, info.program);
+            /* Show Beatnik bank group (CC0), not raw MIDI 14-bit (MSB<<7)|LSB. */
+            ImGui::TextDisabled("%d:%03u",
+                                ExportBankGroupFromNoteBank(info.bank),
+                                info.program);
 
             /* Note overview: active region vs past end-of-track. */
             const float body_x = win.x + chrome_w;
@@ -4260,7 +4263,7 @@
                         m_document, static_cast<uint16_t>(m_midi_selected_track), &info);
                     MeCommitUndo();
                 }
-                int bank = info.bank;
+                int bank = ExportBankGroupFromNoteBank(info.bank);
                 int program = info.program;
                 int channel = info.channel;
                 int vol = info.volume;
@@ -4280,10 +4283,15 @@
                 if (ImGui::InputInt("Bank", &bank))
                 {
                     MeBeginUndo();
-                    info.bank = static_cast<uint16_t>(std::max(0, bank));
+                    /* Store editor short form: 0..127 = Beatnik bank group (CC0). */
+                    info.bank = static_cast<uint16_t>(std::clamp(bank, 0, 127));
                     BAERmfEditorDocument_SetTrackInfo(
                         m_document, static_cast<uint16_t>(m_midi_selected_track), &info);
                     MeCommitUndo();
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                {
+                    ImGui::SetTooltip("Beatnik bank group (CC0). Stored as 0..127.");
                 }
                 place(labeled_w("Prog", int_field_w));
                 ImGui::SetNextItemWidth(int_field_w);
@@ -4363,10 +4371,10 @@
                 }
                 if (!have_bank)
                 {
-                    bank = n.bank;
+                    bank = ExportBankGroupFromNoteBank(n.bank);
                     have_bank = true;
                 }
-                else if (bank != static_cast<int>(n.bank))
+                else if (bank != ExportBankGroupFromNoteBank(n.bank))
                 {
                     bank_mixed = true;
                 }
@@ -4424,7 +4432,8 @@
                     MeBeginUndo();
                     m_midi_note_bank_undo_open = true;
                 }
-                MeApplySelectedNoteBank(static_cast<uint16_t>(std::max(0, bank)));
+                MeApplySelectedNoteBank(
+                    static_cast<uint16_t>(std::clamp(bank, 0, 127)));
             }
             if (bank_mixed)
             {
