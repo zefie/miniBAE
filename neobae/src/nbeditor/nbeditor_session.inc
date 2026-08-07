@@ -932,6 +932,7 @@
         /* Player mix is session-scoped (nBeT); reset to defaults on new session. */
         m_volume_percent = 100;
         m_song_settings_tempo_percent = 100;
+        m_transpose_semitones = 0;
         m_reverb_type = static_cast<int>(BAE_REVERB_TYPE_1);
         m_velocity_curve = 1;
         m_velocity_curve_save_to_song = false;
@@ -1120,6 +1121,7 @@
             const float ratio =
                 static_cast<float>(std::max(1, m_song_settings_tempo_percent)) / 100.0f;
             (void)BAESong_SetMasterTempo(song, FLOAT_TO_UNSIGNED_FIXED(ratio));
+            (void)BAESong_SetTranspose(song, std::clamp(m_transpose_semitones, -24, 24));
         }
         /* Arm with Preroll only when paused: Start+Pause would dispatch and then
          * kill tick-0 notes, so the first note never returns on Resume. */

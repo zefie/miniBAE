@@ -7676,13 +7676,18 @@ static BAEResult PV_BuildTrackData(BAERmfEditorTrack const *track,
             noteOff->tick = note->startTick + note->durationTicks;
             noteOff->sequence = note->noteOffOrder;
             noteOff->order = 0;
-            if ((note->noteOffStatus & 0xF0) == NOTE_ON || (note->noteOffStatus & 0xF0) == NOTE_OFF)
+            /* Keep the original note-off type (NOTE_OFF vs NOTE_ON vel 0), but always
+             * emit on the note's current channel. SetNoteInfo can move notes across
+             * channels without rewriting noteOffStatus; using the stale status byte
+             * leaves note-ons stranded (e.g. percussion remapped to ch10). */
             {
-                noteOff->status = note->noteOffStatus;
-            }
-            else
-            {
-                noteOff->status = (unsigned char)(NOTE_OFF | (note->channel & 0x0F));
+                unsigned char noteOffType = (unsigned char)(note->noteOffStatus & 0xF0);
+
+                if (noteOffType != NOTE_ON && noteOffType != NOTE_OFF)
+                {
+                    noteOffType = NOTE_OFF;
+                }
+                noteOff->status = (unsigned char)(noteOffType | (note->channel & 0x0F));
             }
             noteOff->data1 = transposedNote;
             noteOff->data2 = note->noteOffVelocity;
@@ -11327,6 +11332,16 @@ BAEResult BAERmfEditorDocument_SetTrackInfo(BAERmfEditorDocument *document,
                 note->bank == track->bank &&
                 note->program == track->program)
             {
+                if (note->channel != trackInfo->channel)
+                {
+                    unsigned char noteOffType = (unsigned char)(note->noteOffStatus & 0xF0);
+
+                    if (noteOffType == NOTE_ON || noteOffType == NOTE_OFF)
+                    {
+                        note->noteOffStatus =
+                            (unsigned char)(noteOffType | (trackInfo->channel & 0x0F));
+                    }
+                }
                 note->channel = trackInfo->channel;
                 note->bank = trackInfo->bank;
                 note->program = trackInfo->program;
@@ -12035,6 +12050,16 @@ BAEResult BAERmfEditorDocument_SetNoteInfo(BAERmfEditorDocument *document,
     track->notes[noteIndex].durationTicks = noteInfo->durationTicks;
     track->notes[noteIndex].note = noteInfo->note;
     track->notes[noteIndex].velocity = noteInfo->velocity;
+    if (track->notes[noteIndex].channel != noteInfo->channel)
+    {
+        unsigned char noteOffType = (unsigned char)(track->notes[noteIndex].noteOffStatus & 0xF0);
+
+        if (noteOffType == NOTE_ON || noteOffType == NOTE_OFF)
+        {
+            track->notes[noteIndex].noteOffStatus =
+                (unsigned char)(noteOffType | (noteInfo->channel & 0x0F));
+        }
+    }
     track->notes[noteIndex].channel = noteInfo->channel;
     track->notes[noteIndex].bank = noteInfo->bank;
     track->notes[noteIndex].program = noteInfo->program;

@@ -1396,6 +1396,7 @@ void ApplyPlayerMixSettings()
 {
     m_volume_percent = std::clamp(m_volume_percent, 0, 150);
     m_song_settings_tempo_percent = std::clamp(m_song_settings_tempo_percent, 25, 200);
+    m_transpose_semitones = std::clamp(m_transpose_semitones, -24, 24);
     m_velocity_curve = std::clamp(m_velocity_curve, 0, 5);
     if (m_mixer)
     {
@@ -1407,6 +1408,7 @@ void ApplyPlayerMixSettings()
         const float ratio =
             static_cast<float>(std::max(1, m_song_settings_tempo_percent)) / 100.0f;
         (void)BAESong_SetMasterTempo(m_song, FLOAT_TO_UNSIGNED_FIXED(ratio));
+        (void)BAESong_SetTranspose(m_song, m_transpose_semitones);
     }
     ApplyVelocityCurveToSongs();
 }

@@ -2319,6 +2319,7 @@ private:
         BAESong_Preroll(song);
         BAESong_SetLoops(song, m_loop_enabled ? 32767 : 0);
         BAEMixer_SetOutputGain(m_mixer, m_volume_percent);
+        (void)BAESong_SetTranspose(song, std::clamp(m_transpose_semitones, -24, 24));
 
         /* Preroll only — Start+Pause dispatches and kills tick-0 notes before Play.
          * Preview song (RebuildPreviewSongFromPath) still Start+Pauses for audition. */
@@ -5436,6 +5437,7 @@ private:
     bool m_stereo = true;
     int m_reverb_type = static_cast<int>(BAE_REVERB_TYPE_1);
     int m_volume_percent = 100;
+    int m_transpose_semitones = 0; /* song transpose; -24..24 */
     int m_velocity_curve = 1; /* 0..5 Beatnik velocity curve; default Peaky S */
     bool m_velocity_curve_save_to_song = false; /* write NRPN 4,0 + 7,0 at tick 0 */
     bool m_loop_enabled = true;

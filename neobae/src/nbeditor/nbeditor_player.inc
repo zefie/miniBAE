@@ -478,6 +478,8 @@
         ImGui::BeginChild("##PlayerMix", ImVec2(0.0f, 104.0f), true);
         {
             const float label_gap = ImGui::GetStyle().ItemInnerSpacing.x;
+
+            /* Row 1: Volume | Transpose | Tempo */
             ImGui::SetNextItemWidth(140.0f);
             if (ImGui::SliderInt("##Volume", &m_volume_percent, 0, 150))
             {
@@ -496,6 +498,32 @@
                     BAEMixer_SetOutputGain(m_mixer, m_volume_percent);
                 }
             }
+
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(120.0f);
+            m_transpose_semitones = std::clamp(m_transpose_semitones, -24, 24);
+            if (ImGui::SliderInt("##Transpose", &m_transpose_semitones, -24, 24, "%+d"))
+            {
+                if (m_song)
+                {
+                    (void)BAESong_SetTranspose(m_song, m_transpose_semitones);
+                }
+            }
+            ImGui::SameLine(0.0f, label_gap);
+            ImGui::TextUnformatted("Transpose");
+            if (ImGui::IsItemClicked())
+            {
+                m_transpose_semitones = 0;
+                if (m_song)
+                {
+                    (void)BAESong_SetTranspose(m_song, 0);
+                }
+            }
+            if (ImGui::IsItemHovered())
+            {
+                ImGui::SetTooltip("Song transpose in semitones (−24…+24).\nClick label to reset to 0.");
+            }
+
             ImGui::SameLine();
             ImGui::SetNextItemWidth(120.0f);
             if (ImGui::SliderInt("##Tempo", &m_song_settings_tempo_percent, 25, 200))
@@ -518,6 +546,7 @@
                 }
             }
 
+            /* Row 2: Reverb | Velocity Curve | Save to Song */
             static const char *reverb_labels[] = {
                 "None",
                 "Igor's Closet",
@@ -542,7 +571,6 @@
             const int reverb_max = static_cast<int>(IM_ARRAYSIZE(reverb_labels)) - 1;
             int reverb_choice =
                 std::clamp(m_reverb_type - static_cast<int>(BAE_REVERB_TYPE_1), 0, reverb_max);
-            ImGui::SameLine();
             ImGui::SetNextItemWidth(180.0f);
             if (ImGui::Combo("Reverb", &reverb_choice, reverb_labels, IM_ARRAYSIZE(reverb_labels)))
             {
@@ -584,6 +612,7 @@
                 "5 — Passthrough",
             };
             m_velocity_curve = std::clamp(m_velocity_curve, 0, 5);
+            ImGui::SameLine();
             ImGui::SetNextItemWidth(200.0f);
             if (ImGui::Combo("Velocity Curve",
                              &m_velocity_curve,
