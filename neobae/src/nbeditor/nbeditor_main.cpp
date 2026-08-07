@@ -2763,6 +2763,9 @@ private:
         m_document = new_doc;
         m_loaded_doc_path = path;
         m_document_dirty = false;
+        m_velocity_curve_save_to_song = false;
+        SyncPlayerMixNrpnsFromDocument();
+        ApplyPlayerMixSettings();
         RefreshSongOverridesFromDocument();
         RefreshSongSamplesFromDocument();
         SetStatus("Document loaded");
@@ -5433,6 +5436,8 @@ private:
     bool m_stereo = true;
     int m_reverb_type = static_cast<int>(BAE_REVERB_TYPE_1);
     int m_volume_percent = 100;
+    int m_velocity_curve = 1; /* 0..5 Beatnik velocity curve; default Peaky S */
+    bool m_velocity_curve_save_to_song = false; /* write NRPN 4,0 + 7,0 at tick 0 */
     bool m_loop_enabled = true;
 
     std::array<bool, 16> m_channel_muted = {};
@@ -5847,6 +5852,7 @@ private:
     int m_midi_nrpn_curve = 0;
     int m_midi_nrpn_mode = 3;
     int m_midi_nrpn_sample_offset = 0;
+    int m_midi_nrpn_reverb = 1; /* BAE_REVERB_TYPE_1..19 */
     int m_midi_nrpn_custom_msb = 5;
     int m_midi_nrpn_custom_lsb = 0;
     int m_midi_nrpn_custom_data = 3;

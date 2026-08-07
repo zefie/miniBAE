@@ -1,5 +1,130 @@
 /* Phase 5 — BE2-inspired Player transport (included inside EditorApp). */
 
+    void ApplyVelocityCurveToSongs()
+    {
+        m_velocity_curve = std::clamp(m_velocity_curve, 0, 5);
+        if (m_song)
+        {
+            (void)BAESong_SetVelocityCurve(m_song, m_velocity_curve);
+        }
+        if (m_preview_song)
+        {
+            (void)BAESong_SetVelocityCurve(m_preview_song, m_velocity_curve);
+        }
+    }
+
+    bool FindNrpnAtTick0(unsigned char msb,
+                         unsigned char lsb,
+                         uint16_t *out_track,
+                         MeRpEntry *out_entry) const
+    {
+        if (!m_document || !out_track || !out_entry)
+        {
+            return false;
+        }
+        uint16_t track_count = 0;
+        if (BAERmfEditorDocument_GetTrackCount(m_document, &track_count) != BAE_NO_ERROR ||
+            track_count == 0)
+        {
+            return false;
+        }
+        for (uint16_t t = 0; t < track_count; ++t)
+        {
+            std::vector<MeRpEntry> entries;
+            MeScanTrackRps(t, &entries);
+            for (const MeRpEntry &e : entries)
+            {
+                if (!e.is_rpn && !e.is_null_only && e.msb == msb && e.lsb == lsb && e.tick == 0 &&
+                    e.data_digits > 0)
+                {
+                    *out_track = t;
+                    *out_entry = e;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    void SyncPlayerMixNrpnsFromDocument()
+    {
+        if (!m_document)
+        {
+            return;
+        }
+        uint16_t track = 0;
+        MeRpEntry entry;
+        if (FindNrpnAtTick0(4, 0, &track, &entry))
+        {
+            m_velocity_curve = std::clamp(static_cast<int>(entry.data & 0x7Fu), 0, 5);
+        }
+        else
+        {
+            int doc_curve = m_velocity_curve;
+            if (BAERmfEditorDocument_GetVelocityCurve(m_document, &doc_curve) == BAE_NO_ERROR)
+            {
+                m_velocity_curve = std::clamp(doc_curve, 0, 5);
+            }
+        }
+        if (FindNrpnAtTick0(7, 0, &track, &entry))
+        {
+            const int verb = static_cast<int>(entry.data & 0x7Fu);
+            if (verb >= static_cast<int>(BAE_REVERB_TYPE_1) &&
+                verb <= static_cast<int>(BAE_REVERB_TYPE_19))
+            {
+                m_reverb_type = verb;
+            }
+        }
+    }
+
+    /* Replace/insert a single NRPN at tick 0 (caller owns MeBeginUndo/MeCommitUndo). */
+    bool ReplaceNrpnAtTick0(unsigned char msb, unsigned char lsb, unsigned char data)
+    {
+        if (!m_document)
+        {
+            return false;
+        }
+        uint16_t target_track = 0;
+        MeRpEntry existing;
+        if (FindNrpnAtTick0(msb, lsb, &target_track, &existing))
+        {
+            MeDeleteRpEntry(target_track, existing);
+        }
+        const unsigned char digit = static_cast<unsigned char>(data & 0x7Fu);
+        return MeInsertRpSequence(target_track, 0, false, msb, lsb, &digit, 1, true, 0, true);
+    }
+
+    bool WritePlayerMixNrpnsToSong()
+    {
+        if (!m_document)
+        {
+            return false;
+        }
+        m_velocity_curve = std::clamp(m_velocity_curve, 0, 5);
+        m_reverb_type = std::clamp(m_reverb_type,
+                                   static_cast<int>(BAE_REVERB_TYPE_1),
+                                   static_cast<int>(BAE_REVERB_TYPE_19));
+        uint16_t track_count = 0;
+        if (BAERmfEditorDocument_GetTrackCount(m_document, &track_count) != BAE_NO_ERROR ||
+            track_count == 0)
+        {
+            SetStatus("Save to Song: song has no tracks");
+            return false;
+        }
+
+        MeBeginUndo();
+        if (!ReplaceNrpnAtTick0(4, 0, static_cast<unsigned char>(m_velocity_curve)) ||
+            !ReplaceNrpnAtTick0(7, 0, static_cast<unsigned char>(m_reverb_type)))
+        {
+            MeCancelUndo();
+            SetStatus("Save to Song: NRPN write failed");
+            return false;
+        }
+        MeCommitUndo();
+        SetStatus("Saved velocity curve + reverb NRPNs at tick 0");
+        return true;
+    }
+
     void UpdateChannelVuMeters()
     {
         const uint32_t now = SDL_GetTicks();
@@ -350,7 +475,7 @@
 
         /* ---- Mix band ---- */
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.11f, 0.12f, 0.14f, 1.0f));
-        ImGui::BeginChild("##PlayerMix", ImVec2(0.0f, 72.0f), true);
+        ImGui::BeginChild("##PlayerMix", ImVec2(0.0f, 104.0f), true);
         {
             const float label_gap = ImGui::GetStyle().ItemInnerSpacing.x;
             ImGui::SetNextItemWidth(140.0f);
@@ -430,6 +555,10 @@
                 {
                     OpenCustomReverbDialog();
                 }
+                if (m_velocity_curve_save_to_song)
+                {
+                    (void)WritePlayerMixNrpnsToSong();
+                }
             }
 #if USE_NEO_EFFECTS == TRUE
             const bool neo_reverb_editable =
@@ -445,6 +574,47 @@
                 }
             }
 #endif
+
+            static const char *velocity_curve_labels[] = {
+                "0 — Default S",
+                "1 — Peaky S",
+                "2 — WebTV",
+                "3 — 2× Exponential",
+                "4 — 2× Linear",
+                "5 — Passthrough",
+            };
+            m_velocity_curve = std::clamp(m_velocity_curve, 0, 5);
+            ImGui::SetNextItemWidth(200.0f);
+            if (ImGui::Combo("Velocity Curve",
+                             &m_velocity_curve,
+                             velocity_curve_labels,
+                             IM_ARRAYSIZE(velocity_curve_labels)))
+            {
+                ApplyVelocityCurveToSongs();
+                if (m_velocity_curve_save_to_song)
+                {
+                    (void)WritePlayerMixNrpnsToSong();
+                }
+            }
+            ImGui::SameLine();
+            ImGui::BeginDisabled(m_document == nullptr);
+            if (ImGui::Checkbox("Save to Song", &m_velocity_curve_save_to_song))
+            {
+                if (m_velocity_curve_save_to_song)
+                {
+                    if (!WritePlayerMixNrpnsToSong())
+                    {
+                        m_velocity_curve_save_to_song = false;
+                    }
+                }
+            }
+            ImGui::EndDisabled();
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            {
+                ImGui::SetTooltip(
+                    "When enabled, writes tick-0 NRPNs into the song:\n"
+                    "NRPN 4,0 velocity curve and NRPN 7,0 reverb type.");
+            }
 
             BAEAudioInfo info;
             std::memset(&info, 0, sizeof(info));

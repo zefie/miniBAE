@@ -933,6 +933,8 @@
         m_volume_percent = 100;
         m_song_settings_tempo_percent = 100;
         m_reverb_type = static_cast<int>(BAE_REVERB_TYPE_1);
+        m_velocity_curve = 1;
+        m_velocity_curve_save_to_song = false;
         ApplyPlayerMixSettings();
         SetStatus("New Session");
     }
@@ -1136,6 +1138,7 @@
         ApplyChannelMutes();
         MeApplyTrackMutes();
         RebuildPreviewSongFromDocument();
+        ApplyVelocityCurveToSongs();
         return true;
     }
 
@@ -1178,6 +1181,7 @@
         BAESong_Start(preview, 0);
         BAESong_Pause(preview);
         m_preview_song = preview;
+        ApplyVelocityCurveToSongs();
     }
 
     bool DecodeGroovoidMidiBytes(int index, std::vector<unsigned char> &out_midi) const

@@ -3089,6 +3089,17 @@ static void PV_ProcessRegisteredParameters(GM_Song *pSong, int16_t MIDIChannel, 
             }
             break;
 #endif
+        /* NeoBAE: mixer reverb type override (song-wide).
+         * Encoding: CC99=7, CC98=0, CC6 = ReverbMode 1..19 (BAE_REVERB_TYPE_*).
+         * Overrides the user/mixer default until changed again (same as CC90). */
+        case (7 * 128) + 0:
+#if REVERB_USED != REVERB_DISABLED
+            if (value >= REVERB_TYPE_1 && value < MAX_REVERB_TYPES)
+            {
+                GM_SetReverbType((ReverbMode)value);
+            }
+#endif
+            break;
         }
 
         if (changePercProgram)

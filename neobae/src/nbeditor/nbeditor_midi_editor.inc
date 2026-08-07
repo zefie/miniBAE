@@ -1770,11 +1770,12 @@
         NrpnVelocityCurve = 0,   /* NRPN 4,0 */
         NrpnChannelInstMode = 1, /* NRPN 5,0 (Beatnik NRPN 640) */
         NrpnSampleOffset = 2,    /* NRPN 6,0 (NeoBAE ZMF, 21-bit) */
-        NrpnCustom = 3,
-        RpnPitchBendSens = 4, /* RPN 0,0 — supported */
-        RpnFineTuning = 5,    /* RPN 0,1 — recognized (no engine effect yet) */
-        RpnCoarseTuning = 6,  /* RPN 0,2 — recognized (no engine effect yet) */
-        RpnCustom = 7,
+        NrpnReverbType = 3,      /* NRPN 7,0 (NeoBAE, 1-byte ReverbMode) */
+        NrpnCustom = 4,
+        RpnPitchBendSens = 5, /* RPN 0,0 — supported */
+        RpnFineTuning = 6,    /* RPN 0,1 — recognized (no engine effect yet) */
+        RpnCoarseTuning = 7,  /* RPN 0,2 — recognized (no engine effect yet) */
+        RpnCustom = 8,
     };
 
     struct MeRpCcHit
@@ -1818,6 +1819,8 @@
             return "NRPN: Channel Instrument Mode (5,0)";
         case MeRpPreset::NrpnSampleOffset:
             return "NRPN: Sample Start Offset (6,0) [ZMF]";
+        case MeRpPreset::NrpnReverbType:
+            return "NRPN: Reverb Type (7,0)";
         case MeRpPreset::NrpnCustom:
             return "NRPN: Custom";
         case MeRpPreset::RpnPitchBendSens:
@@ -1830,6 +1833,53 @@
             return "RPN: Custom";
         }
         return "(N)RPN";
+    }
+
+    static const char *MeRpReverbTypeName(unsigned char type)
+    {
+        switch (type)
+        {
+        case 1:
+            return "None";
+        case 2:
+            return "Igor's Closet";
+        case 3:
+            return "Igor's Garage";
+        case 4:
+            return "Igor's Acoustic Lab";
+        case 5:
+            return "Igor's Cavern";
+        case 6:
+            return "Igor's Dungeon";
+        case 7:
+            return "Small Reflections";
+        case 8:
+            return "Early Reflections";
+        case 9:
+            return "Basement";
+        case 10:
+            return "Banquet Hall";
+        case 11:
+            return "Catacombs";
+        case 12:
+            return "Neo Room";
+        case 13:
+            return "Neo Hall";
+        case 14:
+            return "Neo Cavern";
+        case 15:
+            return "Neo Dungeon";
+        case 16:
+            return "Neo Nokia";
+        case 17:
+            return "MobileBAE";
+        case 18:
+            return "Neo Tap Delay";
+        case 19:
+            return "Custom";
+        default:
+            return "Unknown";
+        }
     }
 
     static const char *MeRpDescribe(bool is_rpn,
@@ -1897,6 +1947,53 @@
         if (msb == 6 && lsb == 0)
         {
             return "Sample Start Offset (ZMF)";
+        }
+        if (msb == 7 && lsb == 0)
+        {
+            /* Labels are static; include type name via dedicated helper in UI list. */
+            switch (data & 0x7Fu)
+            {
+            case 1:
+                return "Reverb: None";
+            case 2:
+                return "Reverb: Igor's Closet";
+            case 3:
+                return "Reverb: Igor's Garage";
+            case 4:
+                return "Reverb: Igor's Acoustic Lab";
+            case 5:
+                return "Reverb: Igor's Cavern";
+            case 6:
+                return "Reverb: Igor's Dungeon";
+            case 7:
+                return "Reverb: Small Reflections";
+            case 8:
+                return "Reverb: Early Reflections";
+            case 9:
+                return "Reverb: Basement";
+            case 10:
+                return "Reverb: Banquet Hall";
+            case 11:
+                return "Reverb: Catacombs";
+            case 12:
+                return "Reverb: Neo Room";
+            case 13:
+                return "Reverb: Neo Hall";
+            case 14:
+                return "Reverb: Neo Cavern";
+            case 15:
+                return "Reverb: Neo Dungeon";
+            case 16:
+                return "Reverb: Neo Nokia";
+            case 17:
+                return "Reverb: MobileBAE";
+            case 18:
+                return "Reverb: Neo Tap Delay";
+            case 19:
+                return "Reverb: Custom";
+            default:
+                return "Reverb Type";
+            }
         }
         if (msb == 1 && lsb == 8)
         {
@@ -2219,6 +2316,7 @@
         m_midi_nrpn_curve = 0;
         m_midi_nrpn_mode = 3; /* melodic — common Beatnik use */
         m_midi_nrpn_sample_offset = 0;
+        m_midi_nrpn_reverb = std::clamp(m_reverb_type, 1, 19);
         m_midi_nrpn_custom_msb = 5;
         m_midi_nrpn_custom_lsb = 0;
         m_midi_nrpn_custom_data = 3;
@@ -2360,6 +2458,44 @@
             ImGui::TextDisabled("NeoBAE ZMF NRPN 6,0 — three CC6 digits.\n"
                                 "0 clears channel NRPN offset. Requires ZMF song.");
         }
+        else if (preset == MeRpPreset::NrpnReverbType)
+        {
+            msb = 7;
+            lsb = 0;
+            static const char *kReverbs[] = {
+                "1 — None",
+                "2 — Igor's Closet",
+                "3 — Igor's Garage",
+                "4 — Igor's Acoustic Lab",
+                "5 — Igor's Cavern",
+                "6 — Igor's Dungeon",
+                "7 — Small Reflections",
+                "8 — Early Reflections",
+                "9 — Basement",
+                "10 — Banquet Hall",
+                "11 — Catacombs",
+                "12 — Neo Room",
+                "13 — Neo Hall",
+                "14 — Neo Cavern",
+                "15 — Neo Dungeon",
+                "16 — Neo Nokia",
+                "17 — MobileBAE",
+                "18 — Neo Tap Delay",
+                "19 — Custom",
+            };
+            m_midi_nrpn_reverb = std::clamp(m_midi_nrpn_reverb, 1, 19);
+            int reverb_choice = m_midi_nrpn_reverb - 1;
+            ImGui::SetNextItemWidth(280.0f);
+            if (ImGui::Combo("Reverb", &reverb_choice, kReverbs, IM_ARRAYSIZE(kReverbs)))
+            {
+                m_midi_nrpn_reverb = reverb_choice + 1;
+            }
+            digits[0] = static_cast<unsigned char>(m_midi_nrpn_reverb);
+            ImGui::TextDisabled(
+                "NeoBAE NRPN 7,0 — overrides mixer reverb type (1–19).\n"
+                "Song-wide; same effect as non-standard CC90. Current: %s.",
+                MeRpReverbTypeName(static_cast<unsigned char>(m_midi_nrpn_reverb)));
+        }
         else if (preset == MeRpPreset::NrpnCustom)
         {
             ImGui::SetNextItemWidth(80.0f);
@@ -2379,6 +2515,10 @@
             if (msb == 6 && lsb == 0)
             {
                 ImGui::TextDisabled("For 21-bit sample offset, use the Sample Start Offset preset.");
+            }
+            else if (msb == 7 && lsb == 0)
+            {
+                ImGui::TextDisabled("For reverb type (1–19), use the Reverb Type preset.");
             }
         }
         else if (preset == MeRpPreset::RpnPitchBendSens)
@@ -3076,7 +3216,7 @@
                     ImGui::SetTooltip(
                         "Insert or remove NRPNs and RPNs\n"
                         "(velocity curve, instrument mode, sample offset,\n"
-                        "pitch bend sensitivity, …).");
+                        "reverb type, pitch bend sensitivity, …).");
                 }
             }
             else if (m_midi_selected_track >= 0)
@@ -4074,7 +4214,8 @@
         {
             ImGui::SetTooltip(
                 "Insert or remove NRPNs / RPNs on the selected track:\n"
-                "NRPN: velocity curve, instrument mode, ZMF sample offset;\n"
+                "NRPN: velocity curve, instrument mode, ZMF sample offset,\n"
+                "reverb type (7,0);\n"
                 "RPN: pitch bend sensitivity (0,0), fine/coarse tuning.");
         }
         place(btn_w("Quantize"));

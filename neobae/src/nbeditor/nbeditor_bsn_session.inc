@@ -1376,6 +1376,9 @@ bool ActivateSessionSongAt(int index)
         m_loaded_song_path.clear();
         m_loaded_doc_path.clear();
     }
+    m_velocity_curve_save_to_song = false;
+    SyncPlayerMixNrpnsFromDocument();
+    ApplyPlayerMixSettings();
     RefreshSongOverridesFromDocument();
     RefreshSongSamplesFromDocument();
     (void)BAERmfEditorDocument_SetInfo(m_document, TITLE_INFO, entry.name.c_str());
@@ -1393,6 +1396,7 @@ void ApplyPlayerMixSettings()
 {
     m_volume_percent = std::clamp(m_volume_percent, 0, 150);
     m_song_settings_tempo_percent = std::clamp(m_song_settings_tempo_percent, 25, 200);
+    m_velocity_curve = std::clamp(m_velocity_curve, 0, 5);
     if (m_mixer)
     {
         BAEMixer_SetOutputGain(m_mixer, m_volume_percent);
@@ -1404,6 +1408,7 @@ void ApplyPlayerMixSettings()
             static_cast<float>(std::max(1, m_song_settings_tempo_percent)) / 100.0f;
         (void)BAESong_SetMasterTempo(m_song, FLOAT_TO_UNSIGNED_FIXED(ratio));
     }
+    ApplyVelocityCurveToSongs();
 }
 
 /* Drop song/editors/bank-dependent UI before replacing the session bank token. */
