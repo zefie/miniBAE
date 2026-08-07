@@ -182,10 +182,10 @@ void mod2rmf_analyze_channel_usage(const ModSongModel *song,
  /* --- Loop CC state reset ------------------------------------------------ */
 
 /* When a song loops via meta markers, the engine kills active notes but does
- * NOT reset channel state (CC7, CC10, pitch bend, etc.).  If a channel's last
- * CC7 value at the end of the song differs from what was in effect at the loop
- * start, the channel will have the wrong volume until its first CC7 event
- * replays.
+ * NOT reset channel state (CC7, CC10, pitch bend, program, etc.).  If a
+ * channel's last CC7 value at the end of the song differs from what was in
+ * effect at the loop start, the channel will have the wrong volume until its
+ * first CC7 event replays.
  *
  * This function finds the effective CC7 value at loopStartTick (the last CC7
  * at or before that tick, or 127 if none) and the last CC7 at or before
@@ -374,6 +374,70 @@ int mod2rmf_ensure_loop_pitch_bend_resets(ModSongModel *song)
     return 1;
 }
 
+/* Same idea as ensure_loop_cc_resets, but for program/instrument.  Program
+ * changes are only injected into the MIDI stream when a note's program differs
+ * from the running channel program during linear serialization.  After
+ * loop-back the engine keeps channelProgram, so if the last program before
+ * loopEnd differs from the effective program at loopStart, notes after the
+ * loop play with the wrong instrument until a later PC.
+ *
+ * Records the needed restore program in song->loopProgramReset[ch] (0xFF =
+ * none).  The write path emits an explicit Program Change at loopStartTick. */
+
+int mod2rmf_ensure_loop_program_resets(ModSongModel *song)
+{
+    uint32_t ch, i;
+
+    if (!song || !song->loopEnabled)
+    {
+        return 1;
+    }
+
+    memset(song->loopProgramReset, 0xFF, sizeof(song->loopProgramReset));
+
+    for (ch = 0; ch < song->channelCount && ch < MOD2RMF_MAX_CHANNELS; ++ch)
+    {
+        uint8_t progAtLoopStart = 0;
+        uint8_t progAtLoopEnd = 0;
+        bool hasProgAtLoopStart = FALSE;
+        bool hasNotes = FALSE;
+
+        for (i = 0; i < song->noteCount; ++i)
+        {
+            if (song->notes[i].sourceChannel != ch)
+            {
+                continue;
+            }
+            hasNotes = TRUE;
+            if (song->notes[i].startTick <= song->loopStartTick)
+            {
+                progAtLoopStart = song->notes[i].program;
+                hasProgAtLoopStart = TRUE;
+            }
+            if (song->notes[i].startTick <= song->loopEndTick)
+            {
+                progAtLoopEnd = song->notes[i].program;
+            }
+        }
+
+        if (!hasNotes || !hasProgAtLoopStart)
+        {
+            continue;
+        }
+
+        if (progAtLoopEnd != progAtLoopStart)
+        {
+            song->loopProgramReset[ch] = progAtLoopStart;
+            #if _DEBUG == TRUE
+            fprintf(stderr, "[mod2rmf] Loop program reset: ch %u -> prog=%u @ tick %u (end was %u)\n",
+                    ch, progAtLoopStart, (unsigned)song->loopStartTick, progAtLoopEnd);
+            #endif
+        }
+    }
+
+    return 1;
+}
+
 /* --- Channel spreading by program --------------------------------------- */
 
 /* Spread tracker channels so each unique program (instrument/sample) gets its
@@ -513,6 +577,7 @@ void mod2rmf_song_model_init(ModSongModel *song)
     {
         memset(song, 0, sizeof(*song));
         song->pitchBendRangeSemitones = MOD2RMF_PITCH_BEND_RANGE_ST;
+        memset(song->loopProgramReset, 0xFF, sizeof(song->loopProgramReset));
     }
 }
 

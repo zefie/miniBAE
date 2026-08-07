@@ -495,6 +495,16 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    /* Same for program - engine keeps channelProgram across loop-back. */
+    if (!mod2rmf_ensure_loop_program_resets(&song))
+    {
+        fprintf(stderr, "Error: loop program reset failed\n");
+        mod2rmf_song_model_dispose(&song);
+        mod2rmf_converter_delete(conv);
+        BAE_Cleanup();
+        return 1;
+    }
+
 #if _DEBUG == TRUE
     /* Diagnostic dump: per-virtual-channel event summary (spread mode only) */
     if (spreadChannels)
@@ -631,6 +641,7 @@ int main(int argc, char *argv[])
         !mod2rmf_setup_instrument_ext(conv, &song, useZmfContainer) ||
         !mod2rmf_write_song_cc_events(conv, &song) ||
         !mod2rmf_write_song_pitch_bend_events(conv, &song) ||
+        !mod2rmf_write_loop_program_resets(conv, &song) ||
         !mod2rmf_write_song_notes(conv, &song, useZmfContainer) ||
         !mod2rmf_write_song_tempo_events(conv, &song) ||
         !mod2rmf_encoder_apply(conv->document, &encSettings, compressionType) ||

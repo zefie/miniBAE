@@ -2015,6 +2015,49 @@ static void mod2rmf_emit_sample_offset_nrpn(Mod2RmfConverter *conv,
     (void)BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 6, tick, b2);
 }
 
+int mod2rmf_write_loop_program_resets(Mod2RmfConverter *conv, const ModSongModel *song)
+{
+    uint32_t ch;
+
+    if (!conv || !song)
+    {
+        return 0;
+    }
+    if (!song->loopEnabled)
+    {
+        return 1;
+    }
+
+    /* Emit before notes so aux PC eventOrder sorts ahead of note-ons at the
+     * same tick.  Explicit aux PCs are always serialized (unlike per-note
+     * program injection, which skips when currentProgram already matches). */
+    for (ch = 0; ch < song->channelCount && ch < MOD2RMF_MAX_CHANNELS; ++ch)
+    {
+        uint16_t trackIndex;
+        uint8_t program;
+
+        program = song->loopProgramReset[ch];
+        if (program == 0xFF)
+        {
+            continue;
+        }
+        trackIndex = conv->channelToTrackIndex[ch];
+        if (trackIndex == (uint16_t)0xFFFF)
+        {
+            continue;
+        }
+        if (BAERmfEditorDocument_AddTrackProgramChange(conv->document,
+                                                       trackIndex,
+                                                       song->loopStartTick,
+                                                       program) != BAE_NO_ERROR)
+        {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 int mod2rmf_write_song_notes(Mod2RmfConverter *conv, const ModSongModel *song, bool useZmfContainer)
 {
     uint32_t i;
@@ -2452,6 +2495,15 @@ BAEResult mod2rmf_load_module_to_document_ex(BAERmfEditorDocument **doc,
         return BAE_MEMORY_ERR;
     }
 
+    /* Same for program - engine keeps channelProgram across loop-back. */
+    if (!mod2rmf_ensure_loop_program_resets(&song))
+    {
+        fprintf(stderr, "Error: loop program reset failed\n");
+        mod2rmf_song_model_dispose(&song);
+        mod2rmf_converter_delete(conv);
+        return BAE_MEMORY_ERR;
+    }
+
     if (!mod2rmf_setup_document(conv, &song, sourcePath))
     {
         fprintf(stderr, "Error: document setup failed\n");
@@ -2519,6 +2571,7 @@ BAEResult mod2rmf_load_module_to_document_ex(BAERmfEditorDocument **doc,
         !mod2rmf_setup_instrument_ext(conv, &song, useZmfContainer) ||
         !mod2rmf_write_song_cc_events(conv, &song) ||
         !mod2rmf_write_song_pitch_bend_events(conv, &song) ||
+        !mod2rmf_write_loop_program_resets(conv, &song) ||
         !mod2rmf_write_song_notes(conv, &song, useZmfContainer) ||
         !mod2rmf_write_song_tempo_events(conv, &song))
     {

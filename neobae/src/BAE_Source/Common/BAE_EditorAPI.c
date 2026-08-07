@@ -11040,6 +11040,36 @@ BAEResult BAERmfEditorDocument_AddTrackPitchBendEvent(BAERmfEditorDocument *docu
     return result;
 }
 
+BAEResult BAERmfEditorDocument_AddTrackProgramChange(BAERmfEditorDocument *document,
+                                                     uint16_t trackIndex,
+                                                     uint32_t tick,
+                                                     unsigned char program)
+{
+    BAERmfEditorTrack *track;
+    BAEResult result;
+
+    if (!document || program > 127)
+    {
+        return BAE_PARAM_ERR;
+    }
+    track = PV_GetTrack(document, trackIndex);
+    if (!track)
+    {
+        return BAE_PARAM_ERR;
+    }
+    result = PV_AddAuxEventToTrack(track,
+                                   tick,
+                                   (unsigned char)(PROGRAM_CHANGE | (track->channel & 0x0F)),
+                                   program,
+                                   0,
+                                   1);
+    if (result == BAE_NO_ERROR)
+    {
+        PV_MarkDocumentDirty(document);
+    }
+    return result;
+}
+
 BAEResult BAERmfEditorDocument_SetTrackPitchBendEvent(BAERmfEditorDocument *document,
                                                       uint16_t trackIndex,
                                                       uint32_t eventIndex,

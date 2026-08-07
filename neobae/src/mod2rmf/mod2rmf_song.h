@@ -21,6 +21,7 @@
 
 int mod2rmf_ensure_loop_cc_resets(ModSongModel *song);
 int mod2rmf_ensure_loop_pitch_bend_resets(ModSongModel *song);
+int mod2rmf_ensure_loop_program_resets(ModSongModel *song);
 
 void mod2rmf_song_model_init(ModSongModel *song);
 void mod2rmf_song_model_dispose(ModSongModel *song);

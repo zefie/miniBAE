@@ -172,6 +172,9 @@ typedef struct {
     bool loopEnabled;
     uint32_t loopStartTick;  /* MIDI tick where playback should loop back to */
     uint32_t loopEndTick;    /* MIDI tick where the loop point is (end of song data) */
+    /* Per source channel: program to re-emit at loopStartTick (0xFF = none).
+     * Filled by mod2rmf_ensure_loop_program_resets. */
+    uint8_t loopProgramReset[MOD2RMF_MAX_CHANNELS];
 } ModSongModel;
 
 typedef struct {

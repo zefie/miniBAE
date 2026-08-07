@@ -84,6 +84,7 @@ int mod2rmf_flush_active_note(ModSongModel *song,
 int mod2rmf_write_song_tempo_events(Mod2RmfConverter *conv, const ModSongModel *song);                             
 int mod2rmf_write_song_cc_events(Mod2RmfConverter *conv, const ModSongModel *song);
 int mod2rmf_write_song_pitch_bend_events(Mod2RmfConverter *conv, const ModSongModel *song);
+int mod2rmf_write_loop_program_resets(Mod2RmfConverter *conv, const ModSongModel *song);
 int mod2rmf_add_programmed_note(Mod2RmfConverter *conv,
                                uint16_t trackIndex,
                                uint32_t startTick,

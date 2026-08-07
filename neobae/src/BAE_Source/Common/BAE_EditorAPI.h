@@ -542,6 +542,10 @@ BAEResult BAERmfEditorDocument_AddTrackPitchBendEvent(BAERmfEditorDocument *docu
                                                       uint16_t trackIndex,
                                                       uint32_t tick,
                                                       uint16_t value);
+BAEResult BAERmfEditorDocument_AddTrackProgramChange(BAERmfEditorDocument *document,
+                                                     uint16_t trackIndex,
+                                                     uint32_t tick,
+                                                     unsigned char program);
 BAEResult BAERmfEditorDocument_SetTrackPitchBendEvent(BAERmfEditorDocument *document,
                                                       uint16_t trackIndex,
                                                       uint32_t eventIndex,
