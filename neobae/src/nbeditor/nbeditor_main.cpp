@@ -1278,6 +1278,7 @@ public:
             }
         }
         MidiHwApplyFromPrefs();
+        ScheduleStartupTipsIfEnabled();
         SetStatus("nbeditor ready");
         return true;
     }
@@ -1434,6 +1435,7 @@ public:
         DrawSongSettingsDialog();
         DrawEditorPreferencesDialog();
         DrawModuleImportSettingsDialog();
+        DrawTipsDialog();
         DrawAboutDialog();
         DrawInstrumentEditorDialog();
         DrawExportRmfDialog();
@@ -4589,6 +4591,7 @@ private:
 #include "nbeditor_session_extras.inc"
 #include "nbeditor_midi_hw.inc"
 #include "nbeditor_export_prefs.inc"
+#include "nbeditor_tips_dlg.inc"
 #include "nbeditor_about_dlg.inc"
 #include "nbeditor_dnd.inc"
 #include "nbeditor_clip_xfer.inc"
@@ -5709,6 +5712,15 @@ private:
     bool m_prefs_open = false;
     bool m_mod_import_prefs_open = false;
     bool m_about_open = false;
+    bool m_tips_open = false;
+    bool m_tips_startup_pending = false;
+    int m_tips_startup_delay_frames = 0;
+    int m_tips_index = 0;
+    bool m_tips_dont_show_again = false;
+    bool m_pref_show_tips_at_startup = true;
+    bool m_prefs_draft_show_tips = true;
+    int m_tips_next = 0; /* next tip index to show on startup (persisted) */
+    std::vector<uint8_t> m_tips_seen;
     bool m_trash_open = false;
     int m_trash_selected = -1;
     bool m_confirm_empty_trash_open = false;

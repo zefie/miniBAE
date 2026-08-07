@@ -3,30 +3,66 @@
 
     static std::string EditorPrefsFilePath()
     {
+        const char *xdg = std::getenv("XDG_CONFIG_HOME");
+        if (xdg && xdg[0])
+        {
+            return std::string(xdg) + "/neobae/nbeditor_prefs";
+        }
         const char *home = std::getenv("HOME");
         if (home && home[0])
         {
             return std::string(home) + "/.config/neobae/nbeditor_prefs";
+        }
+        /* Windows builds often lack HOME; USERPROFILE is the usual stand-in. */
+        const char *userprofile = std::getenv("USERPROFILE");
+        if (userprofile && userprofile[0])
+        {
+            return std::string(userprofile) + "/.config/neobae/nbeditor_prefs";
         }
         return std::string("nbeditor_prefs");
     }
 
     static void PrefEnsureParentDirs(const std::string &path)
     {
-        const size_t slash = path.find_last_of('/');
-        if (slash == std::string::npos)
+        /* Create each path segment so ~/.config/neobae exists on first save. */
+        std::string dir = path;
+        for (char &c : dir)
+        {
+            if (c == '\\')
+            {
+                c = '/';
+            }
+        }
+        const size_t slash = dir.find_last_of('/');
+        if (slash == std::string::npos || slash == 0)
         {
             return;
         }
-#if !defined(_WIN32)
-        const std::string dir = path.substr(0, slash);
-        const size_t mid = dir.find_last_of('/');
-        if (mid != std::string::npos && mid > 0)
+        dir.resize(slash);
+        std::string cur;
+        cur.reserve(dir.size());
+        for (size_t i = 0; i < dir.size(); ++i)
         {
-            ::mkdir(dir.substr(0, mid).c_str(), 0755);
-        }
-        ::mkdir(dir.c_str(), 0755);
+            const char ch = dir[i];
+            cur.push_back(ch);
+            if (ch == '/' || i + 1 == dir.size())
+            {
+                if (cur.size() <= 1)
+                {
+                    continue; /* "/" or drive-root skip handled below */
+                }
+                /* Skip "C:" style roots on Windows (no trailing slash yet). */
+                if (cur.size() == 2 && cur[1] == ':')
+                {
+                    continue;
+                }
+#if defined(_WIN32)
+                CreateDirectoryA(cur.c_str(), nullptr);
+#else
+                ::mkdir(cur.c_str(), 0755);
 #endif
+            }
+        }
     }
 
     static void PrefAssignCString(char *dst, size_t n, const std::string &value)
@@ -56,6 +92,9 @@
         m_pref_reopen_last_session = false;
         m_pref_save_session_layout = true;
         m_pref_ignore_session_layout = false;
+        m_pref_show_tips_at_startup = true;
+        m_tips_seen.clear();
+        m_tips_next = 0;
         m_pref_adsr_default_valid = false;
         std::memset(&m_pref_adsr_default, 0, sizeof(m_pref_adsr_default));
         m_pref_mod_ext_pitch = false;
@@ -102,6 +141,45 @@
             else if (key == "ignore_session_layout")
             {
                 m_pref_ignore_session_layout = PrefParseBool(value, false);
+            }
+            else if (key == "show_tips_at_startup")
+            {
+                m_pref_show_tips_at_startup = PrefParseBool(value, true);
+            }
+            else if (key == "tips_seen")
+            {
+                m_tips_seen.clear();
+                size_t start = 0;
+                while (start < value.size())
+                {
+                    size_t comma = value.find(',', start);
+                    if (comma == std::string::npos)
+                    {
+                        comma = value.size();
+                    }
+                    const std::string token = value.substr(start, comma - start);
+                    if (!token.empty())
+                    {
+                        const int idx = std::atoi(token.c_str());
+                        if (idx >= 0)
+                        {
+                            if (idx >= static_cast<int>(m_tips_seen.size()))
+                            {
+                                m_tips_seen.resize(static_cast<size_t>(idx) + 1u, 0);
+                            }
+                            m_tips_seen[static_cast<size_t>(idx)] = 1;
+                        }
+                    }
+                    start = comma + (comma < value.size() ? 1u : 0u);
+                    if (comma >= value.size())
+                    {
+                        break;
+                    }
+                }
+            }
+            else if (key == "tips_next")
+            {
+                m_tips_next = std::max(0, std::atoi(value.c_str()));
             }
             else if (key == "mod_import_ext_pitch")
             {
@@ -213,6 +291,26 @@
         out << "reopen_last_session=" << (m_pref_reopen_last_session ? "1" : "0") << '\n';
         out << "save_session_layout=" << (m_pref_save_session_layout ? "1" : "0") << '\n';
         out << "ignore_session_layout=" << (m_pref_ignore_session_layout ? "1" : "0") << '\n';
+        out << "show_tips_at_startup=" << (m_pref_show_tips_at_startup ? "1" : "0") << '\n';
+        out << "tips_next=" << m_tips_next << '\n';
+        {
+            out << "tips_seen=";
+            bool first = true;
+            for (size_t i = 0; i < m_tips_seen.size(); ++i)
+            {
+                if (!m_tips_seen[i])
+                {
+                    continue;
+                }
+                if (!first)
+                {
+                    out << ',';
+                }
+                out << i;
+                first = false;
+            }
+            out << '\n';
+        }
         out << "mod_import_ext_pitch=" << (m_pref_mod_ext_pitch ? "1" : "0") << '\n';
         out << "mod_import_ext_adsr=" << (m_pref_mod_ext_adsr ? "1" : "0") << '\n';
         out << "mod_import_resample_filter=" << m_pref_mod_resample_filter << '\n';
@@ -251,6 +349,7 @@
         m_prefs_draft_reopen = m_pref_reopen_last_session;
         m_prefs_draft_save_layout = m_pref_save_session_layout;
         m_prefs_draft_ignore_layout = m_pref_ignore_session_layout;
+        m_prefs_draft_show_tips = m_pref_show_tips_at_startup;
 #if SUPPORT_MIDI_HW == TRUE
         m_prefs_draft_midi_hw_enabled = m_midi_hw_enabled;
         m_prefs_draft_midi_hw_device_index = m_midi_hw_device_index;
@@ -276,11 +375,11 @@
             ImGui::SetTooltip(
                 "BE2 does this by default. Off by default in nbeditor (clean slate).");
         }
-        ImGui::Checkbox("Save session layout (nBeT)", &m_prefs_draft_save_layout);
+        ImGui::Checkbox("Save session layout", &m_prefs_draft_save_layout);
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
         {
             ImGui::SetTooltip(
-                "When saving a Session, store dock/editor layout and master window size in nBeT.\n"
+                "When saving a Session, store dock/editor layout and master window size.\n"
                 "(Master window position is saved for off-screen recovery only.)\n"
                 "Enabled by default.");
         }
@@ -288,8 +387,16 @@
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
         {
             ImGui::SetTooltip(
-                "When opening a Session, skip applying nBeT size/dock/editor layout.\n"
+                "When opening a Session, skip applying saved size/dock/editor layout.\n"
                 "Disabled by default.");
+        }
+        ImGui::Checkbox("Show tips at startup", &m_prefs_draft_show_tips);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        {
+            ImGui::SetTooltip(
+                "Show a Tip dialog when NBEditor starts.\n"
+                "Also available from Help → Tips…\n"
+                "Enabled by default.");
         }
         DrawMidiHwPreferencesSection();
         ImGui::Spacing();
@@ -298,6 +405,7 @@
             m_pref_reopen_last_session = m_prefs_draft_reopen;
             m_pref_save_session_layout = m_prefs_draft_save_layout;
             m_pref_ignore_session_layout = m_prefs_draft_ignore_layout;
+            m_pref_show_tips_at_startup = m_prefs_draft_show_tips;
 #if SUPPORT_MIDI_HW == TRUE
             m_midi_hw_enabled = m_prefs_draft_midi_hw_enabled;
             m_midi_hw_device_index = m_prefs_draft_midi_hw_device_index;

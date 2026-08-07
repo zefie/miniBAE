@@ -316,6 +316,16 @@
         }
         if (ImGui::BeginMenu("Help"))
         {
+            if (ImGui::MenuItem("Tips..."))
+            {
+                OpenTipsDialog(false);
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+            {
+                ImGui::SetTooltip(
+                    "Browse editor tips.\n"
+                    "Startup tips can be toggled in Preferences → General.");
+            }
             if (ImGui::MenuItem("About NeoBAE Editor..."))
             {
                 OpenAboutDialog();
@@ -406,6 +416,8 @@
 
     void RequestQuitConfirm()
     {
+        /* Drop tips first so a stuck modal cannot block Quit / the confirm. */
+        DismissTipsDialog();
         if (SessionHasUnsavedChanges())
         {
             m_confirm_quit_open = true;
@@ -986,7 +998,7 @@
             }
             if (ext == "zsn")
             {
-                SetStatus("Not a NeoBAE Session .zsn (missing nBeT)");
+                SetStatus("Not a NeoBAE Session .zsn (missing session layout)");
                 return;
             }
             /* Keep Bank 2+/custom samples; LoadBankFromPath merges Bank 0/1. */
