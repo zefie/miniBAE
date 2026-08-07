@@ -120,6 +120,19 @@
                 ImGui::SetTooltip(
                     "Remove Bank 0/1 instruments and unused built-in samples. Bank 2+ is kept.");
             }
+            if (ImGui::MenuItem("Clean Unused Samples",
+                                nullptr,
+                                false,
+                                m_bank_token != 0 && CountUnusedBankSamples() > 0))
+            {
+                CleanUnusedSamplesToTrash();
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal |
+                                     ImGuiHoveredFlags_AllowWhenDisabled))
+            {
+                ImGui::SetTooltip(
+                    "Move all unassigned bank samples to Trash (not referenced by any instrument).");
+            }
             ImGui::Separator();
             if (ImGui::MenuItem("Quit"))
             {
@@ -3467,6 +3480,9 @@
             BAEZMFReasonCodeToString(reason, reason_buf, sizeof(reason_buf));
             SetStatus(std::string("ZMF required (") + reason_buf + "); exporting as .zmf");
         }
+
+        UpdateBusyProgress(0.80f, "Dropping unused samples…");
+        (void)DropUnreferencedSamplesFromDocument(export_doc);
 
         UpdateBusyProgress(0.85f, "Writing exported song file…");
         const BAEResult r = BAERmfEditorDocument_SaveAsRmf(export_doc, const_cast<char *>(out_path.c_str()));

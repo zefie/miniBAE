@@ -133,6 +133,44 @@ static int mod2rmf_flush_dct_duplicates(ModSongModel *song,
     return 1;
 }
 
+/* IT instruments with fadeout but no volume envelope: put release in INST
+ * volumeADSR instead of letting libxmp bake it into per-frame CC7. */
+static void mod2rmf_synthesize_fadeout_adsr(ModRawSample *raw,
+                                           const struct xmp_instrument *inst,
+                                           uint32_t bpm)
+{
+    double usPerTick;
+    uint32_t releaseUs;
+    double ticks;
+
+    if (!raw || !inst || raw->hasEnvelope || inst->rls <= 0)
+    {
+        return;
+    }
+
+    usPerTick = 2500000.0 / (double)(bpm > 0 ? bpm : 125);
+    /* libxmp: fadeout -= rls each tick from ~65536. */
+    ticks = 65536.0 / (double)inst->rls;
+    releaseUs = (uint32_t)(ticks * usPerTick + 0.5);
+    if (releaseUs < 1000u)
+    {
+        releaseUs = 1000u;
+    }
+    if (releaseUs > 10000000u)
+    {
+        releaseUs = 10000000u;
+    }
+
+    raw->hasEnvelope = TRUE;
+    raw->adsrStageCount = 2u;
+    raw->adsrStages[0].level = VOLUME_RANGE;
+    raw->adsrStages[0].timeUs = 0;
+    raw->adsrStages[0].flags = ADSR_SUSTAIN_LONG;
+    raw->adsrStages[1].level = 0;
+    raw->adsrStages[1].timeUs = (int32_t)releaseUs;
+    raw->adsrStages[1].flags = ADSR_TERMINATE_LONG;
+}
+
 static void mod2rmf_clamp_adsr_for_nna(ModRawSample *raw, uint32_t bpm)
 {
     uint32_t i;
@@ -1215,10 +1253,14 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
 
         for (i = 0; i < (uint32_t)mod->ins; ++i)
         {
-            struct xmp_instrument *inst;
+            struct xmp_instrument *inst = &mod->xxi[i];
             int sub;
+            bool instrumentGotVolumeAdsr = FALSE;
+            bool instrumentGotPitchOrFilter = FALSE;
+            const bool instrumentHadAei = (inst->aei.flg & XMP_ENVELOPE_ON) != 0;
+            const bool instrumentHadFei = (inst->fei.flg & XMP_ENVELOPE_ON) != 0;
+            uint32_t bpm = (uint32_t)(mod->bpm > 0 ? mod->bpm : 125);
 
-            inst = &mod->xxi[i];
             if (inst->nsm <= 0 || !inst->sub)
             {
                 continue;
@@ -1246,27 +1288,34 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                     conv->rawSamples[sid].rateRootAdjust = rootAdjust;
                     conv->rawSamples[sid].hasRateMapping = TRUE;
                 }
+                /* Keep aei enabled for the whole sub loop so multi-sample
+                 * instruments can stamp volumeADSR onto every mapped sample. */
                 if (!sampleHasEnvelope[sid] &&
-                    (inst->aei.flg & XMP_ENVELOPE_ON) && inst->aei.npt >= 2)
+                    instrumentHadAei && inst->aei.npt >= 2)
                 {
-                    mod2rmf_extract_envelope_adsr(inst, (uint32_t)(mod->bpm > 0 ? mod->bpm : 125),
+                    mod2rmf_extract_envelope_adsr(inst, bpm,
                                           &conv->rawSamples[sid],
                                           conv->maxAdsrStages);
+                    sampleHasEnvelope[sid] = conv->rawSamples[sid].hasEnvelope;
+                }
+                /* Fadeout-only IT instruments: INST release, not MIDI CC7. */
+                if (!sampleHasEnvelope[sid] && inst->rls > 0)
+                {
+                    mod2rmf_synthesize_fadeout_adsr(&conv->rawSamples[sid], inst, bpm);
                     sampleHasEnvelope[sid] = conv->rawSamples[sid].hasEnvelope;
                 }
 
                 mod2rmf_capture_note_policy(&conv->rawSamples[sid], inst, &inst->sub[sub]);
                 if (sampleHasEnvelope[sid])
                 {
-                    mod2rmf_clamp_adsr_for_nna(&conv->rawSamples[sid],
-                                              (uint32_t)(mod->bpm > 0 ? mod->bpm : 125));
+                    instrumentGotVolumeAdsr = TRUE;
+                    mod2rmf_clamp_adsr_for_nna(&conv->rawSamples[sid], bpm);
                 }
 
                 /* Pitch / filter envelope (fei). FLT bit selects filter vs pitch. */
-                if ((inst->fei.flg & XMP_ENVELOPE_ON) && inst->fei.npt >= 2)
+                if (instrumentHadFei && inst->fei.npt >= 2)
                 {
                     ModEnvelopeAdsr extracted;
-                    uint32_t bpm = (uint32_t)(mod->bpm > 0 ? mod->bpm : 125);
 
                     if ((inst->fei.flg & XMP_ENVELOPE_FLT) && !sampleHasFilterEnv[sid])
                     {
@@ -1283,6 +1332,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                             memcpy(raw->filterEnvStages, extracted.stages,
                                    extracted.stageCount * sizeof(ModAdsrStage));
                             sampleHasFilterEnv[sid] = TRUE;
+                            instrumentGotPitchOrFilter = TRUE;
                         }
                     }
                     else if (!(inst->fei.flg & XMP_ENVELOPE_FLT) && !sampleHasPitchEnv[sid])
@@ -1300,6 +1350,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                             memcpy(raw->pitchEnvStages, extracted.stages,
                                    extracted.stageCount * sizeof(ModAdsrStage));
                             sampleHasPitchEnv[sid] = TRUE;
+                            instrumentGotPitchOrFilter = TRUE;
                         }
                     }
                 }
@@ -1312,7 +1363,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                 /* Sample vibrato → INST PITC LFO (first assignment wins). */
                 mod2rmf_capture_sample_vibrato(&conv->rawSamples[sid],
                                                &inst->sub[sub],
-                                               (uint32_t)(mod->bpm > 0 ? mod->bpm : 125));
+                                               bpm);
                 /* Always clear so libxmp does not bake vibrato into pitchbend. */
                 inst->sub[sub].vde = 0;
                 inst->sub[sub].vra = 0;
@@ -1325,14 +1376,18 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                 }
             }
 
-            /* Disable amplitude + pitch/filter envelopes so libxmp no longer
-             * folds them into ci->volume / pitchbend. BAE INST units own them.
-             * Pan envelope (pei) stays enabled for CC10 bake-in. */
-            if (inst->aei.flg & XMP_ENVELOPE_ON)
+            /* INST volumeADSR owns envelope + fadeout — zero rls so libxmp
+             * does not fold release into ci->volume / CC7. Only clear aei/fei
+             * after a successful extract so a failed extract keeps libxmp. */
+            if (instrumentGotVolumeAdsr)
             {
-                inst->aei.flg &= ~XMP_ENVELOPE_ON;
+                inst->rls = 0;
+                if (instrumentHadAei)
+                {
+                    inst->aei.flg &= ~XMP_ENVELOPE_ON;
+                }
             }
-            if (inst->fei.flg & XMP_ENVELOPE_ON)
+            if (instrumentGotPitchOrFilter && instrumentHadFei)
             {
                 inst->fei.flg &= ~XMP_ENVELOPE_ON;
             }
@@ -1513,28 +1568,15 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                     }
                 }
 
-                /* Emit CC7 on any frame where channel volume changes. Amp
-                 * envelopes are disabled in libxmp after ADSR extract, so
-                 * ci->volume is channel/slide intent (IT Dxx, etc.), not the
-                 * instrument envelope curve. Row volume commands still win
-                 * on frame 0 when present.
-                 *
-                 * Do not emit idle CC7=0 when no note is active — libxmp
-                 * reports volume 0 between notes, and parking the MIDI
-                 * channel at 0 would silence the next note-on.
-                 *
-                 * Also skip CC7=0 while a note is still held unless the row
-                 * has an intentional volume set/slide. libxmp drops channel
-                 * volume to 0 when a oneshot sample ends, but our MIDI note
-                 * duration can still be active — muting then gates/clicks
-                 * (audible around dense sections like ~2:40 in (M)TRANC). */
+                /* CC7 = tracker channel/slide volume intent only.
+                 * Instrument envelope + IT fadeout live in INST volumeADSR
+                 * (rls zeroed after extract). Do not park the MIDI channel
+                 * from libxmp finalvol between notes or after note-off. */
                 {
                     uint8_t vol64;
                     bool rowHasVolSlide;
                     const struct xmp_event *slideEv;
-                    vol64 = (fi.frame == 0 && hasRowVolumeCmd)
-                              ? rowVolumeCmd64
-                              : (uint8_t)mod2rmf_clamp_int((int)ci->volume, 0, 64);
+                    bool intentionalRowVol;
                     /* Prefer the raw pattern row so Dxx/vol-col slides stay
                      * visible on every frame of the row (ci->event may clear). */
                     slideEv = mod2rmf_get_raw_row_event(mod, fi.pattern, fi.row, ch);
@@ -1543,31 +1585,41 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                         slideEv = rowEvent;
                     }
                     rowHasVolSlide = mod2rmf_row_has_volume_slide(slideEv);
-                    if (vol64 != chLastVol[ch])
+                    intentionalRowVol = (fi.frame == 0 && hasRowVolumeCmd) || rowHasVolSlide;
+
+                    if (!activeNotes[ch].active && !intentionalRowVol)
                     {
-                        bool intentionalZero =
-                            (fi.frame == 0 && hasRowVolumeCmd && rowVolumeCmd64 == 0) ||
-                            rowHasVolSlide;
-                        bool emitVol;
-                        if (vol64 == 0 && activeNotes[ch].active && !intentionalZero)
+                        /* Idle / post-flush: leave last CC7 alone. */
+                    }
+                    else
+                    {
+                        vol64 = (fi.frame == 0 && hasRowVolumeCmd)
+                                  ? rowVolumeCmd64
+                                  : (uint8_t)mod2rmf_clamp_int((int)ci->volume, 0, 64);
+                        if (vol64 != chLastVol[ch])
                         {
-                            /* oneshot/mixer silence — keep last emitted CC7;
-                             * do not update chLastVol so a later return to the
-                             * same level does not need a redundant rewrite. */
-                            emitVol = FALSE;
-                        }
-                        else
-                        {
-                            emitVol = (vol64 != 0) ||
-                                      intentionalZero ||
-                                      (fi.frame == 0 && hasRowVolumeCmd);
-                            chLastVol[ch] = vol64;
-                        }
-                        if (emitVol)
-                        {
-                            (void)mod2rmf_song_model_append_cc_event(song, (uint16_t)ch, tick, 7,
-                                                            mod2rmf_vol_to_midi(vol64),
-                                                            activeNotes[ch].program);
+                            bool intentionalZero =
+                                (fi.frame == 0 && hasRowVolumeCmd && rowVolumeCmd64 == 0) ||
+                                rowHasVolSlide;
+                            bool emitVol;
+                            if (vol64 == 0 && activeNotes[ch].active && !intentionalZero)
+                            {
+                                /* oneshot/mixer silence — keep last emitted CC7. */
+                                emitVol = FALSE;
+                            }
+                            else
+                            {
+                                emitVol = (vol64 != 0) ||
+                                          intentionalZero ||
+                                          (fi.frame == 0 && hasRowVolumeCmd);
+                                chLastVol[ch] = vol64;
+                            }
+                            if (emitVol)
+                            {
+                                (void)mod2rmf_song_model_append_cc_event(song, (uint16_t)ch, tick, 7,
+                                                                mod2rmf_vol_to_midi(vol64),
+                                                                activeNotes[ch].program);
+                            }
                         }
                     }
                 }

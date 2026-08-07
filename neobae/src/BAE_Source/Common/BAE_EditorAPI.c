@@ -6855,6 +6855,10 @@ static BAEResult PV_WriteOriginalResources(BAERmfEditorDocument const *document,
         {
             return BAE_BAD_FILE;
         }
+        if (entry->type == FOUR_CHAR('C', 'a', 'S', 'd'))
+        {
+            continue; /* Session CaSd masters stay out of RMF/ZMF writes. */
+        }
         if (XAddFileResource(fileRef,
                              entry->type,
                              entry->id,
@@ -21946,6 +21950,11 @@ static BAEResult PV_WriteRmfDocumentToResourceFile(BAERmfEditorDocument *documen
                 continue;
             }
             if (entry->type == ID_SONG)
+            {
+                continue;
+            }
+            /* Session uncompressed PCM masters — never write into export RMF/ZMF. */
+            if (entry->type == FOUR_CHAR('C', 'a', 'S', 'd'))
             {
                 continue;
             }

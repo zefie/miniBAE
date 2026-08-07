@@ -491,17 +491,74 @@
                XExistsFileResource(bank, ID_SND, sid) != FALSE;
     }
 
-    void DeleteSampleAt(int sample_list_index)
+    /* Batch ZTRS trash — one omit rebuild + one Refresh. Looping DeleteSampleAt
+     * on Zpatches-sized banks freezes (full Clean per sample). */
+    void DeleteSamplesAtListIndices(const std::vector<int> &indices)
     {
-        if (!m_bank_token || sample_list_index < 0 ||
-            sample_list_index >= static_cast<int>(m_samples.size()))
+        if (!m_bank_token || indices.empty())
         {
             return;
         }
-        const SampleRow sample = m_samples[static_cast<size_t>(sample_list_index)];
-        if (sample.source != SampleSource::Bank)
+
+        struct TrashItem
         {
-            SetStatus("Song-document samples: remove via the instrument / export path");
+            XResourceType type;
+            XLongResourceID id;
+            uint32_t snd_id;
+            bool unassigned;
+        };
+        std::vector<TrashItem> items;
+        std::set<uint32_t> seen_snd;
+        bool saw_song_doc = false;
+        bool saw_referenced = false;
+
+        for (int sample_list_index : indices)
+        {
+            if (sample_list_index < 0 ||
+                sample_list_index >= static_cast<int>(m_samples.size()))
+            {
+                continue;
+            }
+            const SampleRow &sample = m_samples[static_cast<size_t>(sample_list_index)];
+            if (sample.source != SampleSource::Bank)
+            {
+                saw_song_doc = true;
+                continue;
+            }
+            if (!seen_snd.insert(sample.snd_resource_id).second)
+            {
+                continue;
+            }
+            if (!sample.unassigned)
+            {
+                saw_referenced = true;
+            }
+
+            XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
+            const XLongResourceID sid = static_cast<XLongResourceID>(sample.snd_resource_id);
+            static const XResourceType kTypes[] = {ID_ESND, ID_CSND, ID_SND, 0};
+            XResourceType found = 0;
+            for (int t = 0; kTypes[t] != 0; ++t)
+            {
+                if (XExistsFileResource(bank, kTypes[t], sid) != FALSE)
+                {
+                    found = kTypes[t];
+                    break;
+                }
+            }
+            if (found == 0)
+            {
+                continue;
+            }
+            items.push_back(TrashItem{found, sid, sample.snd_resource_id, sample.unassigned});
+        }
+
+        if (items.empty())
+        {
+            if (saw_song_doc)
+            {
+                SetStatus("Song-document samples: remove via the instrument / export path");
+            }
             return;
         }
         if (!EnsureActiveBankWritable())
@@ -509,47 +566,129 @@
             return;
         }
 
-        /* Move SND to TRSH (ZTRS). Instruments keep keysplit refs → [missing]
-         * until reassigned; Restore from Trash brings the sample back. */
-        XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
-        const XLongResourceID sid = static_cast<XLongResourceID>(sample.snd_resource_id);
-        static const XResourceType kTypes[] = {ID_ESND, ID_CSND, ID_SND, 0};
-        bool trashed = false;
-        for (int t = 0; kTypes[t] != 0; ++t)
+        std::vector<XResourceType> types;
+        std::vector<XLongResourceID> ids;
+        types.reserve(items.size());
+        ids.reserve(items.size());
+        for (const TrashItem &it : items)
         {
-            if (XExistsFileResource(bank, kTypes[t], sid) != FALSE)
-            {
-                if (XTrashFileResource(bank, kTypes[t], sid) != FALSE)
-                {
-                    trashed = true;
-                    break;
-                }
-            }
+            types.push_back(it.type);
+            ids.push_back(it.id);
         }
-        if (!trashed)
+
+        const bool nested_busy = m_busy_active;
+        if (!nested_busy && items.size() > 3)
         {
-            SetStatus("Failed to move sample to Trash");
+            BeginBusyProgress("Moving samples to Trash…");
+            UpdateBusyProgress(0.15f, "Writing Trash entries…");
+        }
+
+        XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
+        const bool ok = XTrashFileResources(bank,
+                                            types.data(),
+                                            ids.data(),
+                                            static_cast<int32_t>(types.size())) != FALSE;
+
+        if (!nested_busy && m_busy_active)
+        {
+            UpdateBusyProgress(0.85f, "Refreshing sample list…");
+        }
+
+        if (!ok)
+        {
+            if (!nested_busy && m_busy_active)
+            {
+                EndBusyProgress();
+            }
+            SetStatus("Failed to move sample(s) to Trash");
             return;
         }
-        m_session_custom_snd_ids.erase(sample.snd_resource_id);
-        m_session_pcm_cache.erase(sample.snd_resource_id);
-        m_app_compression_cache.erase(sample.snd_resource_id);
+
+        for (const TrashItem &it : items)
+        {
+            m_session_custom_snd_ids.erase(it.snd_id);
+            m_session_pcm_cache.erase(it.snd_id);
+            m_app_compression_cache.erase(it.snd_id);
+        }
         RefreshListsFromBank();
         m_selected_sample = -1;
-        char status[192];
-        if (sample.unassigned)
+        m_multi_samples.clear();
+
+        if (!nested_busy && m_busy_active)
         {
-            std::snprintf(status, sizeof(status), "Moved sample SND %u to Trash",
-                          sample.snd_resource_id);
+            EndBusyProgress();
         }
-        else
+
+        char status[192];
+        if (items.size() == 1)
+        {
+            if (items[0].unassigned)
+            {
+                std::snprintf(status, sizeof(status), "Moved sample SND %u to Trash",
+                              items[0].snd_id);
+            }
+            else
+            {
+                std::snprintf(status,
+                              sizeof(status),
+                              "Moved SND %u to Trash — instruments still reference it [missing]",
+                              items[0].snd_id);
+            }
+        }
+        else if (saw_referenced)
         {
             std::snprintf(status,
                           sizeof(status),
-                          "Moved SND %u to Trash — instruments still reference it [missing]",
-                          sample.snd_resource_id);
+                          "Moved %zu samples to Trash (some INST refs may show [missing])",
+                          items.size());
+        }
+        else
+        {
+            std::snprintf(status, sizeof(status), "Moved %zu unused samples to Trash",
+                          items.size());
         }
         SetStatus(status);
+    }
+
+    void DeleteSampleAt(int sample_list_index)
+    {
+        DeleteSamplesAtListIndices(std::vector<int>{sample_list_index});
+    }
+
+    /* Move every bank SND not referenced by any INST into Trash (recoverable). */
+    int CountUnusedBankSamples() const
+    {
+        int n = 0;
+        for (const SampleRow &sample : m_samples)
+        {
+            if (sample.unassigned && sample.source == SampleSource::Bank &&
+                sample.snd_resource_id != 0xFFFFu)
+            {
+                ++n;
+            }
+        }
+        return n;
+    }
+
+    void CleanUnusedSamplesToTrash()
+    {
+        std::vector<int> indices;
+        indices.reserve(static_cast<size_t>(CountUnusedBankSamples()));
+        for (size_t i = 0; i < m_samples.size(); ++i)
+        {
+            const SampleRow &sample = m_samples[i];
+            if (sample.unassigned && sample.source == SampleSource::Bank &&
+                sample.snd_resource_id != 0xFFFFu)
+            {
+                indices.push_back(static_cast<int>(i));
+            }
+        }
+        if (indices.empty())
+        {
+            SetStatus("No unused samples to clean");
+            return;
+        }
+        DeleteSamplesAtListIndices(indices);
     }
 
     void BeginAddSampleFromPath(const std::string &path)

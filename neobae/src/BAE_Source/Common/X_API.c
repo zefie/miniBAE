@@ -2842,6 +2842,100 @@ static XPTR PV_RebuildSndResourceFromZmfHeaderRef(XFILE fileRef,
     return rebuilt;
 }
 
+/* Drop ZSHD when no flat SND/CSND/ESND peers remain (payload-refs or full). */
+static bool PV_StripOrphanZmfSndHeaderBlock(XFILE fileRef)
+{
+    XFILENAME *srcRef;
+    int32_t i;
+    int32_t sndCount;
+    int32_t zshdCount;
+    XResourceType *omitTypes;
+    XLongResourceID *omitIds;
+    int32_t omitCount;
+    int32_t omitCap;
+
+    if (!PV_XFileValid(fileRef))
+    {
+        return FALSE;
+    }
+    srcRef = (XFILENAME *)fileRef;
+    if (srcRef->pCache == NULL)
+    {
+        XCreateAccessCache(fileRef);
+    }
+    if (!srcRef->pCache)
+    {
+        return FALSE;
+    }
+
+    sndCount = 0;
+    zshdCount = 0;
+    for (i = 0; i < srcRef->pCache->totalResources; ++i)
+    {
+        XResourceType rtype = (XResourceType)srcRef->pCache->cached[i].resourceType;
+        if (PV_IsSndResourceType(rtype))
+        {
+            sndCount++;
+        }
+        else if (rtype == ID_ZSHD)
+        {
+            zshdCount++;
+        }
+    }
+    if (sndCount > 0 || zshdCount <= 0)
+    {
+        return TRUE;
+    }
+
+    omitCap = zshdCount;
+    omitTypes = (XResourceType *)XNewPtr((int32_t)(sizeof(XResourceType) * (uint32_t)omitCap));
+    omitIds = (XLongResourceID *)XNewPtr((int32_t)(sizeof(XLongResourceID) * (uint32_t)omitCap));
+    if (!omitTypes || !omitIds)
+    {
+        if (omitTypes)
+        {
+            XDisposePtr(omitTypes);
+        }
+        if (omitIds)
+        {
+            XDisposePtr(omitIds);
+        }
+        return FALSE;
+    }
+    omitCount = 0;
+    for (i = 0; i < srcRef->pCache->totalResources; ++i)
+    {
+        XFILE_CACHED_ITEM *item = &srcRef->pCache->cached[i];
+        if ((XResourceType)item->resourceType != ID_ZSHD)
+        {
+            continue;
+        }
+        if (omitCount >= omitCap)
+        {
+            break;
+        }
+        omitTypes[omitCount] = ID_ZSHD;
+        omitIds[omitCount] = (XLongResourceID)item->resourceID;
+        omitCount++;
+    }
+    if (omitCount <= 0)
+    {
+        XDisposePtr(omitTypes);
+        XDisposePtr(omitIds);
+        return TRUE;
+    }
+    /* XOmitFileResources rebuilds without Clean — safe from PackSnd re-entry. */
+    if (XOmitFileResources(fileRef, omitTypes, omitIds, omitCount) == FALSE)
+    {
+        XDisposePtr(omitTypes);
+        XDisposePtr(omitIds);
+        return FALSE;
+    }
+    XDisposePtr(omitTypes);
+    XDisposePtr(omitIds);
+    return TRUE;
+}
+
 static bool PV_PackSndHeaderResourcesIntoZmfBlock(XFILE fileRef)
 {
     int32_t mapID;
@@ -2943,6 +3037,8 @@ static bool PV_PackSndHeaderResourcesIntoZmfBlock(XFILE fileRef)
 
     if (packableCount <= 0)
     {
+        /* Already packed (payload-refs + ZSHD) keeps ZSHD; orphan ZSHD goes. */
+        (void)PV_StripOrphanZmfSndHeaderBlock(fileRef);
         return TRUE;
     }
 
@@ -6726,6 +6822,9 @@ bool XOmitFileResources(XFILE fileRef,
     XFILENAME *srcRef;
     int32_t i;
     int32_t j;
+    bool keepZshd;
+    bool expandBank;
+    bool expandSong;
 
     if (!PV_XFileValid(fileRef))
     {
@@ -6758,10 +6857,55 @@ bool XOmitFileResources(XFILE fileRef,
         return FALSE;
     }
 
+    /* Logical Midi/BANK live in ZBNK; SONG in ZSNG — flat omit alone can't
+     * remove them (export song-strip was leaving a fat ZBNK behind). */
+    expandBank = FALSE;
+    expandSong = FALSE;
+    for (j = 0; j < omitCount; ++j)
+    {
+        if (omitTypes[j] == ID_BANK || omitTypes[j] == ID_MIDI ||
+            omitTypes[j] == ID_MIDI_OLD || omitTypes[j] == ID_ZBNK)
+        {
+            expandBank = TRUE;
+        }
+        if (omitTypes[j] == ID_SONG || omitTypes[j] == ID_ZSNG)
+        {
+            expandSong = TRUE;
+        }
+    }
+
     outFile = XFileOpenVirtualResource(mapID);
     if (!outFile)
     {
         return FALSE;
+    }
+
+    /* If this omit removes the last SND/CSND/ESND, also drop orphan ZSHD. */
+    keepZshd = FALSE;
+    for (i = 0; i < srcRef->pCache->totalResources; ++i)
+    {
+        XFILE_CACHED_ITEM *item = &srcRef->pCache->cached[i];
+        XResourceType rtype = (XResourceType)item->resourceType;
+        XLongResourceID rid = (XLongResourceID)item->resourceID;
+        bool omit = FALSE;
+
+        if (!PV_IsSndResourceType(rtype))
+        {
+            continue;
+        }
+        for (j = 0; j < omitCount; ++j)
+        {
+            if (omitTypes[j] == rtype && omitIds[j] == rid)
+            {
+                omit = TRUE;
+                break;
+            }
+        }
+        if (!omit)
+        {
+            keepZshd = TRUE;
+            break;
+        }
     }
 
     for (i = 0; i < srcRef->pCache->totalResources; ++i)
@@ -6786,6 +6930,28 @@ bool XOmitFileResources(XFILE fileRef,
         {
             continue;
         }
+        if (!keepZshd && rtype == ID_ZSHD)
+        {
+            continue;
+        }
+        /* Drop packed containers; re-add kept logical peers below. */
+        if (expandBank && rtype == ID_ZBNK)
+        {
+            continue;
+        }
+        if (expandSong && rtype == ID_ZSNG)
+        {
+            continue;
+        }
+        if (expandBank &&
+            (rtype == ID_BANK || rtype == ID_MIDI || rtype == ID_MIDI_OLD))
+        {
+            continue;
+        }
+        if (expandSong && rtype == ID_SONG)
+        {
+            continue;
+        }
 
         name[0] = 0;
         if (!PV_ReadCachedResourceRaw(fileRef, item, name, &data, &size) || !data)
@@ -6805,6 +6971,91 @@ bool XOmitFileResources(XFILE fileRef,
             return FALSE;
         }
         XDisposePtr(data);
+    }
+
+    if (expandBank)
+    {
+        static const XResourceType kBankTypes[] = {ID_BANK, ID_MIDI, ID_MIDI_OLD, 0};
+        int t;
+        for (t = 0; kBankTypes[t] != 0; ++t)
+        {
+            int32_t count = XCountFileResourcesOfType(fileRef, kBankTypes[t]);
+            for (i = 0; i < count; ++i)
+            {
+                XLongResourceID id = 0;
+                int32_t sz = 0;
+                char name[256];
+                XPTR data;
+                bool omit = FALSE;
+
+                name[0] = 0;
+                data = XGetIndexedFileResource(fileRef, kBankTypes[t], &id, i, name, &sz);
+                if (!data)
+                {
+                    continue;
+                }
+                for (j = 0; j < omitCount; ++j)
+                {
+                    if (omitTypes[j] == kBankTypes[t] && omitIds[j] == id)
+                    {
+                        omit = TRUE;
+                        break;
+                    }
+                }
+                if (omit)
+                {
+                    XDisposePtr(data);
+                    continue;
+                }
+                if (XAddFileResource(outFile, kBankTypes[t], id, name, data, sz) != 0)
+                {
+                    XDisposePtr(data);
+                    XFileClose(outFile);
+                    return FALSE;
+                }
+                XDisposePtr(data);
+            }
+        }
+    }
+
+    if (expandSong)
+    {
+        int32_t count = XCountFileResourcesOfType(fileRef, ID_SONG);
+        for (i = 0; i < count; ++i)
+        {
+            XLongResourceID id = 0;
+            int32_t sz = 0;
+            char name[256];
+            XPTR data;
+            bool omit = FALSE;
+
+            name[0] = 0;
+            data = XGetIndexedFileResource(fileRef, ID_SONG, &id, i, name, &sz);
+            if (!data)
+            {
+                continue;
+            }
+            for (j = 0; j < omitCount; ++j)
+            {
+                if (omitTypes[j] == ID_SONG && omitIds[j] == id)
+                {
+                    omit = TRUE;
+                    break;
+                }
+            }
+            if (omit)
+            {
+                XDisposePtr(data);
+                continue;
+            }
+            if (XAddFileResource(outFile, ID_SONG, id, name, data, sz) != 0)
+            {
+                XDisposePtr(data);
+                XFileClose(outFile);
+                return FALSE;
+            }
+            XDisposePtr(data);
+        }
     }
 
     /* No Clean/PackInst here — preserve flat custom INST + ZINS byte-for-byte.
@@ -7359,61 +7610,140 @@ int32_t XCountFileTrash(XFILE fileRef)
     return XCountFileResourcesOfType(fileRef, XFILETRASH_ID);
 }
 
-bool XTrashFileResource(XFILE fileRef, XResourceType theType, XLongResourceID resourceID)
+bool XTrashFileResources(XFILE fileRef,
+                         const XResourceType *types,
+                         const XLongResourceID *ids,
+                         int32_t count)
 {
-    XPTR data = NULL;
-    int32_t dataSize = 0;
-    char pName[256];
-    XPTR wrapped = NULL;
-    int32_t wrappedSize = 0;
-    XLongResourceID trashID = 1;
+    XResourceType *omitTypes = NULL;
+    XLongResourceID *omitIds = NULL;
+    int32_t omitCount = 0;
+    int32_t i;
 
-    if (!PV_XFileValid(fileRef) || theType == 0 || theType == XFILETRASH_ID)
+    if (!PV_XFileValid(fileRef))
+    {
+        return FALSE;
+    }
+    if (count < 0)
+    {
+        return FALSE;
+    }
+    if (count == 0)
+    {
+        return TRUE;
+    }
+    if (!types || !ids)
     {
         return FALSE;
     }
 
-    pName[0] = 0;
-    data = XGetFileResource(fileRef, theType, resourceID, pName, &dataSize);
-    if (!data || dataSize <= 0)
+    omitTypes = (XResourceType *)XNewPtr(sizeof(XResourceType) * (uint32_t)count);
+    omitIds = (XLongResourceID *)XNewPtr(sizeof(XLongResourceID) * (uint32_t)count);
+    if (!omitTypes || !omitIds)
     {
-        if (data)
+        if (omitTypes)
         {
-            XDisposePtr(data);
+            XDisposePtr(omitTypes);
+        }
+        if (omitIds)
+        {
+            XDisposePtr(omitIds);
         }
         return FALSE;
     }
 
-    wrapped = PV_MakeZtrsWrapped(theType, resourceID, data, dataSize, &wrappedSize);
-    XDisposePtr(data);
-    if (!wrapped || wrappedSize <= 0)
+    for (i = 0; i < count; ++i)
     {
-        if (wrapped)
+        XPTR data = NULL;
+        int32_t dataSize = 0;
+        char pName[256];
+        XPTR wrapped = NULL;
+        int32_t wrappedSize = 0;
+        XLongResourceID trashID = 1;
+        const XResourceType theType = types[i];
+        const XLongResourceID resourceID = ids[i];
+        int32_t o;
+
+        if (theType == 0 || theType == XFILETRASH_ID)
+        {
+            continue;
+        }
+
+        /* Skip duplicates in the batch list. */
+        for (o = 0; o < omitCount; ++o)
+        {
+            if (omitTypes[o] == theType && omitIds[o] == resourceID)
+            {
+                break;
+            }
+        }
+        if (o < omitCount)
+        {
+            continue;
+        }
+
+        pName[0] = 0;
+        data = XGetFileResource(fileRef, theType, resourceID, pName, &dataSize);
+        if (!data || dataSize <= 0)
+        {
+            if (data)
+            {
+                XDisposePtr(data);
+            }
+            continue;
+        }
+
+        wrapped = PV_MakeZtrsWrapped(theType, resourceID, data, dataSize, &wrappedSize);
+        XDisposePtr(data);
+        if (!wrapped || wrappedSize <= 0)
+        {
+            if (wrapped)
+            {
+                XDisposePtr(wrapped);
+            }
+            continue;
+        }
+
+        if (XGetUniqueFileResourceID(fileRef, XFILETRASH_ID, &trashID) != 0)
+        {
+            trashID = resourceID != 0 ? resourceID : 1;
+            (void)XMakeUniqueFileResourceID(fileRef, XFILETRASH_ID, &trashID);
+        }
+
+        if (XAddFileResource(fileRef, XFILETRASH_ID, trashID, pName, wrapped, wrappedSize) != 0)
         {
             XDisposePtr(wrapped);
+            continue;
         }
-        return FALSE;
-    }
-
-    if (XGetUniqueFileResourceID(fileRef, XFILETRASH_ID, &trashID) != 0)
-    {
-        trashID = resourceID != 0 ? resourceID : 1;
-        (void)XMakeUniqueFileResourceID(fileRef, XFILETRASH_ID, &trashID);
-    }
-
-    if (XAddFileResource(fileRef, XFILETRASH_ID, trashID, pName, wrapped, wrappedSize) != 0)
-    {
         XDisposePtr(wrapped);
-        return FALSE;
-    }
-    XDisposePtr(wrapped);
 
-    /* Remove the live resource; keep the new TRSH entry. */
-    if (XPurgeFileResource(fileRef, theType, resourceID) == FALSE)
+        omitTypes[omitCount] = theType;
+        omitIds[omitCount] = resourceID;
+        omitCount++;
+    }
+
+    if (omitCount == 0)
     {
+        XDisposePtr(omitTypes);
+        XDisposePtr(omitIds);
         return FALSE;
     }
+
+    /* One omit rebuild — no per-item Clean/ZSHD pack (same as XOmitFileResources). */
+    if (XOmitFileResources(fileRef, omitTypes, omitIds, omitCount) == FALSE)
+    {
+        XDisposePtr(omitTypes);
+        XDisposePtr(omitIds);
+        return FALSE;
+    }
+    XDisposePtr(omitTypes);
+    XDisposePtr(omitIds);
     return TRUE;
+}
+
+bool XTrashFileResource(XFILE fileRef, XResourceType theType, XLongResourceID resourceID)
+{
+    return XTrashFileResources(fileRef, &theType, &resourceID, 1);
 }
 
 bool XGetIndexedFileTrashInfo(XFILE fileRef,

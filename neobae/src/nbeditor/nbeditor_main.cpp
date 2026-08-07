@@ -2204,6 +2204,9 @@ private:
         m_busy_detail.clear();
         m_busy_fraction = 0.0f;
         m_busy_last_pump_ms = 0;
+        /* Two pumps: first frame often only clears the backbuffer before the
+         * overlay is ready; second paints title/progress immediately. */
+        PumpBusyProgressFrame(true);
         PumpBusyProgressFrame(true);
     }
 
@@ -2264,26 +2267,37 @@ private:
         ImGui::NewFrame();
 
         ImGuiIO &io = ImGui::GetIO();
+        /* Full-window dim + centered card (regular window — OpenPopup often
+         * fails to paint on the first pump, which looked like a blank window). */
+        ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.07f, 0.09f, 0.11f, 0.92f));
+        ImGui::Begin("##nbeditor_busy_backdrop",
+                     nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav |
+                         ImGuiWindowFlags_NoInputs);
+        ImGui::End();
+        ImGui::PopStyleColor();
+
         ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
                                 ImGuiCond_Always,
                                 ImVec2(0.5f, 0.5f));
         ImGui::SetNextWindowSize(ImVec2(420.0f, 0.0f), ImGuiCond_Always);
-        ImGui::OpenPopup("##nbeditor_busy");
-        if (ImGui::BeginPopupModal("##nbeditor_busy",
-                                   nullptr,
-                                   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove |
-                                       ImGuiWindowFlags_NoTitleBar))
+        ImGui::Begin("##nbeditor_busy",
+                     nullptr,
+                     ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove |
+                         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings |
+                         ImGuiWindowFlags_NoDocking);
+        ImGui::TextUnformatted(m_busy_title.c_str());
+        ImGui::Spacing();
+        ImGui::ProgressBar(m_busy_fraction, ImVec2(-1.0f, 0.0f));
+        if (!m_busy_detail.empty())
         {
-            ImGui::TextUnformatted(m_busy_title.c_str());
             ImGui::Spacing();
-            ImGui::ProgressBar(m_busy_fraction, ImVec2(-1.0f, 0.0f));
-            if (!m_busy_detail.empty())
-            {
-                ImGui::Spacing();
-                ImGui::TextWrapped("%s", m_busy_detail.c_str());
-            }
-            ImGui::EndPopup();
+            ImGui::TextWrapped("%s", m_busy_detail.c_str());
         }
+        ImGui::End();
 
         ImGui::Render();
         SDL_SetRenderDrawColor(m_renderer, 18, 22, 28, 255);
@@ -2901,10 +2915,336 @@ private:
 #endif
     }
 
-    /* Remove built-in/converted groovoids from a bank file. Keeps DATe-stamped
-     * Session songs (SONG and Midi/emid/ecmi/cmid bodies) and undated plain Midi
-     * SONG entries (treated as Custom Songs when no DATe is present). */
-    bool StripBankGroovoids(XFILE bank, const char **out_error = nullptr)
+    /* Collect SND ids referenced by any INST (bank token = XFILE). */
+    void CollectBankReferencedSndIdsAll(BAEBankToken token, std::set<uint32_t> &out) const
+    {
+        out.clear();
+        if (!token)
+        {
+            return;
+        }
+        uint32_t inst_count = 0;
+        if (BAERmfEditorBank_GetInstrumentCount(token, &inst_count) != BAE_NO_ERROR)
+        {
+            return;
+        }
+        for (uint32_t ii = 0; ii < inst_count; ++ii)
+        {
+            uint32_t split_count = 0;
+            if (BAERmfEditorBank_GetInstrumentSampleCount(token, ii, &split_count) != BAE_NO_ERROR)
+            {
+                continue;
+            }
+            for (uint32_t si = 0; si < split_count; ++si)
+            {
+                BAERmfEditorBankSampleInfo sinfo;
+                std::memset(&sinfo, 0, sizeof(sinfo));
+                if (BAERmfEditorBank_GetInstrumentSampleInfo(token, ii, si, &sinfo) ==
+                        BAE_NO_ERROR &&
+                    (sinfo.sndResourceID != 0 || sinfo.frameCount > 0 || sinfo.bitDepth > 0))
+                {
+                    out.insert(static_cast<uint32_t>(sinfo.sndResourceID));
+                }
+            }
+        }
+    }
+
+    int CountUnreferencedBankSamples(BAEBankToken token) const
+    {
+        if (!token)
+        {
+            return 0;
+        }
+        XFILE bank = reinterpret_cast<XFILE>(token);
+        std::set<uint32_t> referenced;
+        CollectBankReferencedSndIdsAll(token, referenced);
+        int unused = 0;
+        const XResourceType snd_types[] = {ID_ESND, ID_CSND, ID_SND};
+        for (XResourceType stype : snd_types)
+        {
+            const int32_t count = XCountFileResourcesOfType(bank, stype);
+            for (int32_t i = 0; i < count; ++i)
+            {
+                XLongResourceID rid = 0;
+                int32_t size = 0;
+                XPTR data = XGetIndexedFileResource(bank, stype, &rid, i, nullptr, &size);
+                if (data)
+                {
+                    XDisposePtr(data);
+                }
+                if (referenced.count(static_cast<uint32_t>(rid)) == 0)
+                {
+                    ++unused;
+                }
+            }
+        }
+        return unused;
+    }
+
+    bool BankFileHasSongPayloads(XFILE bank) const
+    {
+        if (!bank)
+        {
+            return false;
+        }
+        XFileSetForceZsbFeatures(bank, TRUE);
+        if (XCountFileResourcesOfType(bank, ID_SONG) > 0)
+        {
+            return true;
+        }
+        if (XCountFileResourcesOfType(bank, ID_ZSNG) > 0)
+        {
+            return true;
+        }
+        if (XCountFileResourcesOfType(bank, ID_MIDI) > 0 ||
+            XCountFileResourcesOfType(bank, ID_MIDI_OLD) > 0 ||
+            XCountFileResourcesOfType(bank, ID_EMID) > 0 ||
+            XCountFileResourcesOfType(bank, ID_ECMI) > 0 ||
+            XCountFileResourcesOfType(bank, ID_CMID) > 0)
+        {
+            return true;
+        }
+        const XResourceType date_type = FOUR_CHAR('D', 'A', 'T', 'e');
+        return XCountFileResourcesOfType(bank, date_type) > 0;
+    }
+
+    /* Hard-omit SNDs not referenced by any INST (export clone — no Trash). */
+    int DropUnreferencedSamplesFromBankFile(XFILE bank, BAEBankToken token)
+    {
+        if (!bank || !token)
+        {
+            return 0;
+        }
+        std::set<uint32_t> referenced;
+        CollectBankReferencedSndIdsAll(token, referenced);
+
+        std::vector<XResourceType> omit_types;
+        std::vector<XLongResourceID> omit_ids;
+        const XResourceType snd_types[] = {ID_ESND, ID_CSND, ID_SND};
+        for (XResourceType stype : snd_types)
+        {
+            const int32_t count = XCountFileResourcesOfType(bank, stype);
+            for (int32_t i = 0; i < count; ++i)
+            {
+                XLongResourceID rid = 0;
+                int32_t size = 0;
+                XPTR data = XGetIndexedFileResource(bank, stype, &rid, i, nullptr, &size);
+                if (data)
+                {
+                    XDisposePtr(data);
+                }
+                if (referenced.count(static_cast<uint32_t>(rid)) == 0)
+                {
+                    omit_types.push_back(stype);
+                    omit_ids.push_back(rid);
+                }
+            }
+        }
+        if (omit_types.empty())
+        {
+            return 0;
+        }
+        if (XOmitFileResources(bank,
+                               omit_types.data(),
+                               omit_ids.data(),
+                               static_cast<int32_t>(omit_types.size())) == FALSE)
+        {
+            return 0;
+        }
+        return static_cast<int>(omit_types.size());
+    }
+
+    /* Export: drop session PCM masters (not needed for playback banks/songs). */
+    bool StripCasdFromBankFile(XFILE bank, const char **out_error = nullptr)
+    {
+        if (out_error)
+        {
+            *out_error = nullptr;
+        }
+        if (!bank)
+        {
+            return true;
+        }
+        const XResourceType casd_type = FOUR_CHAR('C', 'a', 'S', 'd');
+        XFileSetForceZsbFeatures(bank, TRUE);
+        const int32_t count = XCountFileResourcesOfType(bank, casd_type);
+        if (count <= 0)
+        {
+            return true;
+        }
+        std::vector<XResourceType> omit_types;
+        std::vector<XLongResourceID> omit_ids;
+        omit_types.reserve(static_cast<size_t>(count));
+        omit_ids.reserve(static_cast<size_t>(count));
+        for (int32_t i = 0; i < count; ++i)
+        {
+            XLongResourceID rid = 0;
+            int32_t size = 0;
+            XPTR data = XGetIndexedFileResource(bank, casd_type, &rid, i, nullptr, &size);
+            if (data)
+            {
+                XDisposePtr(data);
+            }
+            omit_types.push_back(casd_type);
+            omit_ids.push_back(rid);
+        }
+        if (XOmitFileResources(bank,
+                               omit_types.data(),
+                               omit_ids.data(),
+                               static_cast<int32_t>(omit_types.size())) == FALSE)
+        {
+            if (out_error)
+            {
+                *out_error = "could not strip CaSd from bank";
+            }
+            return false;
+        }
+        return true;
+    }
+
+    /* Export strip-all: one omit rebuild (flat SONG/Midi + packed ZSNG). */
+    bool StripAllSongsFromBankFile(XFILE bank, const char **out_error = nullptr)
+    {
+        if (out_error)
+        {
+            *out_error = nullptr;
+        }
+        if (!bank)
+        {
+            return true;
+        }
+        XFileSetForceZsbFeatures(bank, TRUE);
+        std::vector<XResourceType> omit_types;
+        std::vector<XLongResourceID> omit_ids;
+        auto collect_type = [&](XResourceType type) {
+            const int32_t count = XCountFileResourcesOfType(bank, type);
+            for (int32_t i = 0; i < count; ++i)
+            {
+                XLongResourceID rid = 0;
+                int32_t size = 0;
+                XPTR data = XGetIndexedFileResource(bank, type, &rid, i, nullptr, &size);
+                if (data)
+                {
+                    XDisposePtr(data);
+                }
+                omit_types.push_back(type);
+                omit_ids.push_back(rid);
+            }
+        };
+        collect_type(ID_SONG);
+        collect_type(ID_ZSNG);
+        collect_type(ID_MIDI);
+        collect_type(ID_MIDI_OLD);
+        collect_type(ID_EMID);
+        collect_type(ID_ECMI);
+        collect_type(ID_CMID);
+        collect_type(FOUR_CHAR('D', 'A', 'T', 'e'));
+        if (omit_types.empty())
+        {
+            return true;
+        }
+        if (XOmitFileResources(bank,
+                               omit_types.data(),
+                               omit_ids.data(),
+                               static_cast<int32_t>(omit_types.size())) == FALSE)
+        {
+            if (out_error)
+            {
+                *out_error = "could not strip songs from bank";
+            }
+            return false;
+        }
+        return true;
+    }
+
+    bool WriteBankFileImageToPath(XFILE bank, const std::string &out_path)
+    {
+        if (!bank || out_path.empty())
+        {
+            return false;
+        }
+        XFILENAME *ref = reinterpret_cast<XFILENAME *>(bank);
+        if (!ref->pResourceData || ref->resMemLength <= 0)
+        {
+            return false;
+        }
+        XFILENAME xf_out;
+        XConvertPathToXFILENAME(const_cast<char *>(out_path.c_str()), &xf_out);
+        XFILE disk = XFileOpenForWrite(&xf_out, TRUE);
+        if (!disk ||
+            XFileSetLength(disk, 0) != 0 ||
+            XFileSetPosition(disk, 0L) != 0 ||
+            XFileWrite(disk, ref->pResourceData, ref->resMemLength) != 0)
+        {
+            if (disk)
+            {
+                XFileClose(disk);
+            }
+            return false;
+        }
+        XFileClose(disk);
+        return true;
+    }
+
+    /* Song export: remove sample rows whose assets are no longer used.
+     * GetSampleAssetUsageCount returns PARAM_ERR when usage is 0. */
+    int DropUnreferencedSamplesFromDocument(BAERmfEditorDocument *doc)
+    {
+        if (!doc)
+        {
+            return 0;
+        }
+        int dropped = 0;
+        /* Repeat until stable — deleting a sample shifts later indices. */
+        for (;;)
+        {
+            uint32_t sample_count = 0;
+            if (BAERmfEditorDocument_GetSampleCount(doc, &sample_count) != BAE_NO_ERROR ||
+                sample_count == 0)
+            {
+                break;
+            }
+            int remove_index = -1;
+            for (uint32_t si = 0; si < sample_count; ++si)
+            {
+                uint32_t asset_id = 0;
+                if (BAERmfEditorDocument_GetSampleAssetIDForSample(doc, si, &asset_id) !=
+                        BAE_NO_ERROR ||
+                    asset_id == 0)
+                {
+                    continue;
+                }
+                uint32_t usage = 0;
+                const BAEResult ur =
+                    BAERmfEditorDocument_GetSampleAssetUsageCount(doc, asset_id, &usage);
+                if (ur == BAE_NO_ERROR && usage > 0)
+                {
+                    continue;
+                }
+                remove_index = static_cast<int>(si);
+                break;
+            }
+            if (remove_index < 0)
+            {
+                break;
+            }
+            if (BAERmfEditorDocument_DeleteSample(doc, static_cast<uint32_t>(remove_index)) !=
+                BAE_NO_ERROR)
+            {
+                break;
+            }
+            ++dropped;
+        }
+        return dropped;
+    }
+
+    /* Remove songs from a bank file.
+     * keep_session_songs: bank-merge path — drop groovoids, keep DATe Session songs.
+     * keep_session_songs=false: bank export — drop Session Midi/SONG too (they
+     * belong in .zsn; use "Convert Session songs to groovoids" to re-embed). */
+    bool StripBankGroovoids(XFILE bank,
+                            const char **out_error = nullptr,
+                            bool keep_session_songs = true)
     {
         if (out_error)
         {
@@ -3009,9 +3349,12 @@ private:
                 continue;
             }
 
-            /* DATe-stamped SONG = custom Session song (any object type). */
-            if (use_date_filter &&
-                dated_song_ids.count(static_cast<uint32_t>(song_id)) != 0)
+            const bool is_session_song =
+                use_date_filter &&
+                (dated_song_ids.count(static_cast<uint32_t>(song_id)) != 0 ||
+                 dated_midi_ids.count(object_id) != 0);
+
+            if (keep_session_songs && is_session_song)
             {
                 continue;
             }
@@ -3019,28 +3362,35 @@ private:
             const XResourceType object_type = resolve_song_object_type(object_id);
             if (object_type == 0)
             {
+                /* Still drop the SONG shell if we are stripping everything. */
+                if (!keep_session_songs)
+                {
+                    to_purge.push_back(GroovoidPurge{song_id, 0, 0});
+                }
                 continue;
             }
 
-            if (object_type == ID_MIDI || object_type == ID_MIDI_OLD)
+            if (keep_session_songs)
             {
-                if (!use_date_filter)
+                if (object_type == ID_MIDI || object_type == ID_MIDI_OLD)
                 {
-                    /* No DATe → treat plain Midi as Custom Songs. */
-                    continue;
+                    if (!use_date_filter)
+                    {
+                        /* No DATe → treat plain Midi as Custom Songs. */
+                        continue;
+                    }
+                    if (dated_midi_ids.count(object_id) != 0)
+                    {
+                        continue;
+                    }
                 }
-                if (dated_midi_ids.count(object_id) != 0)
+                else if (object_type == ID_EMID || object_type == ID_ECMI ||
+                         object_type == ID_CMID)
                 {
-                    continue;
-                }
-            }
-            else if (object_type == ID_EMID || object_type == ID_ECMI || object_type == ID_CMID)
-            {
-                /* Custom may also be emid/ecmi/cmid when DATe-stamped on the
-                 * object id (or SONG id, already handled above). */
-                if (use_date_filter && dated_midi_ids.count(object_id) != 0)
-                {
-                    continue;
+                    if (use_date_filter && dated_midi_ids.count(object_id) != 0)
+                    {
+                        continue;
+                    }
                 }
             }
 
@@ -3066,9 +3416,9 @@ private:
             }
         }
 
-        /* Orphan payloads: SONG removed but emid/ecmi/cmid (or undated Midi) left
-         * behind. Never touch objects still referenced by a remaining SONG, or
-         * DATe-stamped Midi object ids (custom Session song bodies). */
+        /* Orphan payloads: SONG removed but emid/ecmi/cmid (or Midi) left
+         * behind. Never touch objects still referenced by a remaining SONG.
+         * When keep_session_songs, also protect DATe-stamped Midi ids. */
         {
             std::set<uint32_t> referenced_object_ids;
             const int32_t keep_songs = XCountFileResourcesOfType(bank, ID_SONG);
@@ -3110,7 +3460,8 @@ private:
                     {
                         continue;
                     }
-                    if (dated_midi_ids.count(static_cast<uint32_t>(rid)) != 0)
+                    if (keep_session_songs &&
+                        dated_midi_ids.count(static_cast<uint32_t>(rid)) != 0)
                     {
                         continue;
                     }
@@ -3127,6 +3478,190 @@ private:
             purge_unreferenced(ID_CMID);
             purge_unreferenced(ID_MIDI);
             purge_unreferenced(ID_MIDI_OLD);
+        }
+
+        /* Session DATe stamps are meaningless without the songs they mark. */
+        if (!keep_session_songs)
+        {
+            const XResourceType date_type = FOUR_CHAR('D', 'A', 'T', 'e');
+            std::vector<XLongResourceID> date_ids;
+            const int32_t date_count = XCountFileResourcesOfType(bank, date_type);
+            for (int32_t di = 0; di < date_count; ++di)
+            {
+                XLongResourceID date_id = 0;
+                int32_t date_size = 0;
+                XPTR date_data =
+                    XGetIndexedFileResource(bank, date_type, &date_id, di, nullptr, &date_size);
+                if (date_data)
+                {
+                    XDisposePtr(date_data);
+                }
+                date_ids.push_back(date_id);
+            }
+            for (XLongResourceID date_id : date_ids)
+            {
+                (void)XPurgeFileResource(bank, date_type, date_id);
+            }
+        }
+        return true;
+    }
+
+    /* Bank export with Include groovoids on: drop Session songs only. */
+    bool StripBankSessionSongs(XFILE bank, const char **out_error = nullptr)
+    {
+        if (out_error)
+        {
+            *out_error = nullptr;
+        }
+        if (!bank)
+        {
+            return true;
+        }
+        XFileSetForceZsbFeatures(bank, TRUE);
+
+        std::set<uint32_t> dated_song_ids;
+        std::set<uint32_t> dated_midi_ids;
+        {
+            const XResourceType date_type = FOUR_CHAR('D', 'A', 'T', 'e');
+            const int32_t date_count = XCountFileResourcesOfType(bank, date_type);
+            for (int32_t di = 0; di < date_count; ++di)
+            {
+                XLongResourceID date_id = 0;
+                int32_t date_size = 0;
+                XPTR date_data =
+                    XGetIndexedFileResource(bank, date_type, &date_id, di, nullptr, &date_size);
+                if (!date_data || date_size <= 0)
+                {
+                    if (date_data)
+                    {
+                        XDisposePtr(date_data);
+                    }
+                    continue;
+                }
+                CollectDateStampedSongKeys(static_cast<const unsigned char *>(date_data),
+                                           static_cast<size_t>(date_size),
+                                           dated_song_ids,
+                                           dated_midi_ids);
+                XDisposePtr(date_data);
+            }
+        }
+        const bool use_date_filter = !dated_song_ids.empty() || !dated_midi_ids.empty();
+
+        struct PurgeItem
+        {
+            XLongResourceID song_id;
+            XResourceType object_type;
+            XLongResourceID object_id;
+        };
+        std::vector<PurgeItem> to_purge;
+        const int32_t song_count = XCountFileResourcesOfType(bank, ID_SONG);
+        for (int32_t i = 0; i < song_count; ++i)
+        {
+            XLongResourceID song_id = 0;
+            int32_t song_size = 0;
+            XPTR song_data =
+                XGetIndexedFileResource(bank, ID_SONG, &song_id, i, nullptr, &song_size);
+            if (!song_data || song_size < 8)
+            {
+                if (song_data)
+                {
+                    XDisposePtr(song_data);
+                }
+                continue;
+            }
+            const unsigned char *body = static_cast<const unsigned char *>(song_data);
+            const uint16_t object_id =
+                static_cast<uint16_t>((static_cast<uint16_t>(body[0]) << 8) | body[1]);
+            const unsigned char song_type = body[6];
+            XDisposePtr(song_data);
+            if (song_type != 1)
+            {
+                continue;
+            }
+
+            const bool dated =
+                use_date_filter &&
+                (dated_song_ids.count(static_cast<uint32_t>(song_id)) != 0 ||
+                 dated_midi_ids.count(object_id) != 0);
+
+            XResourceType object_type = 0;
+            const XLongResourceID oid = static_cast<XLongResourceID>(object_id);
+            if (XExistsFileResource(bank, ID_MIDI, oid) != FALSE)
+            {
+                object_type = ID_MIDI;
+            }
+            else if (XExistsFileResource(bank, ID_MIDI_OLD, oid) != FALSE)
+            {
+                object_type = ID_MIDI_OLD;
+            }
+            else if (XExistsFileResource(bank, ID_EMID, oid) != FALSE)
+            {
+                object_type = ID_EMID;
+            }
+            else if (XExistsFileResource(bank, ID_ECMI, oid) != FALSE)
+            {
+                object_type = ID_ECMI;
+            }
+            else if (XExistsFileResource(bank, ID_CMID, oid) != FALSE)
+            {
+                object_type = ID_CMID;
+            }
+
+            /* Session: DATe-stamped anything, or plain Midi when no DATe exists
+             * (RefreshGroovoids treats undated Midi as Custom Songs). Keep
+             * classic emid groovoids and undated Midi when DATe marks others. */
+            bool is_session = dated;
+            if (!use_date_filter &&
+                (object_type == ID_MIDI || object_type == ID_MIDI_OLD))
+            {
+                is_session = true;
+            }
+            if (!is_session)
+            {
+                continue;
+            }
+
+            to_purge.push_back(
+                PurgeItem{song_id, object_type, static_cast<XLongResourceID>(object_id)});
+        }
+
+        for (const PurgeItem &g : to_purge)
+        {
+            if (XPurgeFileResource(bank, ID_SONG, g.song_id) == FALSE)
+            {
+                if (out_error)
+                {
+                    *out_error = "could not remove Session SONG";
+                }
+                return false;
+            }
+            if (g.object_type != 0)
+            {
+                (void)XPurgeFileResource(bank, g.object_type, g.object_id);
+            }
+        }
+
+        /* Drop DATe resources for songs we removed. */
+        {
+            const XResourceType date_type = FOUR_CHAR('D', 'A', 'T', 'e');
+            std::vector<XLongResourceID> date_ids;
+            const int32_t date_count = XCountFileResourcesOfType(bank, date_type);
+            for (int32_t di = 0; di < date_count; ++di)
+            {
+                XLongResourceID date_id = 0;
+                int32_t date_size = 0;
+                XPTR date_data =
+                    XGetIndexedFileResource(bank, date_type, &date_id, di, nullptr, &date_size);
+                if (date_data)
+                {
+                    XDisposePtr(date_data);
+                }
+                date_ids.push_back(date_id);
+            }
+            for (XLongResourceID date_id : date_ids)
+            {
+                (void)XPurgeFileResource(bank, date_type, date_id);
+            }
         }
         return true;
     }
@@ -4796,6 +5331,13 @@ private:
                     DeleteSampleAt(static_cast<int>(i));
                     m_multi_samples.erase(static_cast<int>(i));
                 }
+                if (ImGui::MenuItem("Clean Unused Samples",
+                                    nullptr,
+                                    false,
+                                    m_bank_token != 0 && CountUnusedBankSamples() > 0))
+                {
+                    CleanUnusedSamplesToTrash();
+                }
                 ImGui::Separator();
                 if (ImGui::MenuItem("Add Sample...", nullptr, false, m_bank_token != 0))
                 {
@@ -4816,6 +5358,13 @@ private:
             if (ImGui::MenuItem("Select All", nullptr, false, !m_samples.empty()))
             {
                 SessionSelectAllVisible();
+            }
+            if (ImGui::MenuItem("Clean Unused Samples",
+                                nullptr,
+                                false,
+                                m_bank_token != 0 && CountUnusedBankSamples() > 0))
+            {
+                CleanUnusedSamplesToTrash();
             }
             ImGui::Separator();
             if (ImGui::MenuItem("Add Sample...", nullptr, false, m_bank_token != 0))
@@ -6009,7 +6558,7 @@ private:
     bool m_prefs_draft_ignore_layout = false;
     /* Module import settings (mod2rmf) — live + dialog drafts. */
     bool m_pref_mod_ext_pitch = false;
-    bool m_pref_mod_ext_adsr = false;
+    bool m_pref_mod_ext_adsr = true; /* ZMF import; preserve IT envelope detail */
     int m_pref_mod_resample_filter = static_cast<int>(MOD2RMF_RESAMPLE_SINC_8TAP);
     int m_pref_mod_resample_rate = 0; /* 0 = native */
     int m_pref_mod_amiga_filter = static_cast<int>(MOD2RMF_AMIGA_FILTER_NONE);
@@ -6049,8 +6598,8 @@ private:
     bool m_export_bank_needs_zsb = false;
     uint32_t m_export_bank_zsb_reason = 0;
     bool m_export_bank_encrypt = true;
-    bool m_export_bank_include_groovoids = true;
-    bool m_export_bank_drop_unref = false;
+    bool m_export_bank_include_groovoids = false;
+    bool m_export_bank_drop_unref = true; /* exclude unassigned SNDs from bank export */
     bool m_export_bank_songs_to_groovoids = false;
 
     /* Export as Audio dialog. */

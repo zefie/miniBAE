@@ -2046,13 +2046,7 @@
         SetStatus(cut_after ? "Cut sample(s)" : "Copied sample(s)");
         if (cut_after)
         {
-            std::vector<int> sorted = indices;
-            std::sort(sorted.begin(), sorted.end(), std::greater<int>());
-            for (int idx : sorted)
-            {
-                DeleteSampleAt(idx);
-            }
-            m_multi_samples.clear();
+            DeleteSamplesAtListIndices(indices);
         }
     }
 
@@ -2196,13 +2190,7 @@
             }
             case SessionTab::Samples:
             {
-                std::vector<int> indices = CollectTargetSampleIndices();
-                std::sort(indices.begin(), indices.end(), std::greater<int>());
-                for (int idx : indices)
-                {
-                    DeleteSampleAt(idx);
-                }
-                m_multi_samples.clear();
+                DeleteSamplesAtListIndices(CollectTargetSampleIndices());
                 break;
             }
             }

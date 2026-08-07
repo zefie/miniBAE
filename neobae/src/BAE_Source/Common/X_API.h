@@ -978,6 +978,13 @@ bool   XDeleteFileResource(XFILE fileRef, XResourceType theType, XLongResourceID
  * Survives XCleanResourceFile; use XEmptyFileTrash to purge permanently. */
 bool   XTrashFileResource(XFILE fileRef, XResourceType theType, XLongResourceID resourceID);
 
+/* Batch ZTRS trash: wrap each live resource into TRSH, then one omit rebuild
+ * (no per-item Clean). Prefer this over looping XTrashFileResource. */
+bool   XTrashFileResources(XFILE fileRef,
+                           const XResourceType *types,
+                           const XLongResourceID *ids,
+                           int32_t count);
+
 /* Permanently remove one resource (no TRSH left behind). Packed ZINS/ZSNG/ZBNK
  * entries are omitted by reconstituting the packed set. Other TRSH are kept. */
 bool   XPurgeFileResource(XFILE fileRef, XResourceType theType, XLongResourceID resourceID);
