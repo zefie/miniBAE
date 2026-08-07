@@ -335,7 +335,9 @@
 
         /* ---- Header band ---- */
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.12f, 0.13f, 0.15f, 1.0f));
-        ImGui::BeginChild("##PlayerHeader", ImVec2(0.0f, 56.0f), true);
+        ImGui::BeginChild("##PlayerHeader",
+                          ImVec2(0.0f, 0.0f),
+                          ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
         {
             ImGui::SetWindowFontScale(1.25f);
             ImGui::TextUnformatted(song_title.c_str());
@@ -375,7 +377,9 @@
 
         /* ---- Transport band ---- */
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.11f, 0.13f, 1.0f));
-        ImGui::BeginChild("##PlayerTransport", ImVec2(0.0f, 96.0f), true);
+        ImGui::BeginChild("##PlayerTransport",
+                          ImVec2(0.0f, 0.0f),
+                          ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
         {
             bool paused = false;
             bool song_done = false;
@@ -475,7 +479,9 @@
 
         /* ---- Mix band ---- */
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.11f, 0.12f, 0.14f, 1.0f));
-        ImGui::BeginChild("##PlayerMix", ImVec2(0.0f, 104.0f), true);
+        ImGui::BeginChild("##PlayerMix",
+                          ImVec2(0.0f, 0.0f),
+                          ImGuiChildFlags_Borders | ImGuiChildFlags_AutoResizeY);
         {
             const float label_gap = ImGui::GetStyle().ItemInnerSpacing.x;
 
