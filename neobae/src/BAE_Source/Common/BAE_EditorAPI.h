@@ -829,6 +829,12 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleSndID(BAEBankToken bankToken,
                                                      uint32_t sampleIndex,
                                                      XShortResourceID sndResourceID);
 
+/* Set SND resource ids for every keysplit in one INST write (no per-split rebuild). */
+BAEResult BAERmfEditorBank_SetInstrumentSampleSndIDs(BAEBankToken bankToken,
+                                                      uint32_t instrumentIndex,
+                                                      XShortResourceID const *sndResourceIDs,
+                                                      uint32_t sndResourceIDCount);
+
 /* Convert a sample's backing resource between SND/CSND/ESND by rewrapping
  * container data (including CSND compression/encryption handling) without
  * PCM decode/re-encode. */

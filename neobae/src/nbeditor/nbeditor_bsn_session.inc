@@ -199,10 +199,12 @@ bool SessionRequiresZsn(uint32_t *out_reason) const
     uint32_t reason = 0;
     if (m_bank_token)
     {
+        /* outReason==NULL → RequiresZsb stops on first hit (large banks). */
         uint32_t bank_reason = 0;
-        if (BAERmfEditorBank_RequiresZsb(m_bank_token, &bank_reason) != FALSE)
+        if (BAERmfEditorBank_RequiresZsb(m_bank_token,
+                                         out_reason ? &bank_reason : nullptr) != FALSE)
         {
-            reason |= bank_reason;
+            reason |= (out_reason ? bank_reason : 1u);
         }
     }
     if (m_document)
@@ -227,7 +229,15 @@ bool BankRequiresZsb(uint32_t *out_reason) const
     uint32_t reason = 0;
     if (m_bank_token)
     {
-        (void)BAERmfEditorBank_RequiresZsb(m_bank_token, &reason);
+        /* outReason==NULL → RequiresZsb stops on first hit (large banks). */
+        if (BAERmfEditorBank_RequiresZsb(m_bank_token,
+                                         out_reason ? &reason : nullptr) != FALSE)
+        {
+            if (!out_reason)
+            {
+                return true;
+            }
+        }
     }
     if (out_reason)
     {
@@ -251,8 +261,11 @@ static std::string ReplacePathExtension(const std::string &path, const char *new
     return path + new_ext_with_dot;
 }
 
-/* Force .zsn when session content needs NeoBAE container features. */
-std::string EnforceSessionSavePath(const std::string &path, bool *out_remapped = nullptr) const
+/* Force .zsn when session content needs NeoBAE container features.
+ * Pass want_zsn_override >= 0 to skip a second RequiresZsb scan. */
+std::string EnforceSessionSavePath(const std::string &path,
+                                   bool *out_remapped = nullptr,
+                                   int want_zsn_override = -1) const
 {
     if (out_remapped)
     {
@@ -262,7 +275,8 @@ std::string EnforceSessionSavePath(const std::string &path, bool *out_remapped =
     {
         return path;
     }
-    const bool want_zsn = SessionRequiresZsn(nullptr);
+    const bool want_zsn =
+        (want_zsn_override >= 0) ? (want_zsn_override != 0) : SessionRequiresZsn(nullptr);
     if (!want_zsn)
     {
         return path;
@@ -1890,26 +1904,35 @@ bool SaveSessionToPath(const char *path)
         return false;
     }
 
+    /* Force paints — throttle would skip these right after BeginBusyProgress. */
+    m_busy_last_pump_ms = 0;
     UpdateBusyProgress(0.02f, "Preparing session…");
     RememberSessionPcmFromSampleEditor();
     (void)SyncSessionSongsFromDocument();
     /* Module/RMF song embeds live in rmf_bytes until promoted. Session files
      * only store bank + Midi/SONG — promote so customs survive save→reload. */
+    m_busy_last_pump_ms = 0;
     UpdateBusyProgress(0.05f, "Promoting song instruments into bank…");
     (void)PromoteAllSessionSongEmbedsIntoBank();
 
+    m_busy_last_pump_ms = 0;
+    UpdateBusyProgress(0.07f, "Checking session format…");
+    /* Boolean probe only — full reason scan is reserved for remap / status text. */
+    uint32_t z_reason = 0;
+    const bool requires_zsn = SessionRequiresZsn(nullptr);
     bool remapped = false;
-    const std::string enforced_path = EnforceSessionSavePath(path, &remapped);
+    const std::string enforced_path =
+        EnforceSessionSavePath(path, &remapped, requires_zsn ? 1 : 0);
     path = enforced_path.c_str();
 
-    uint32_t z_reason = 0;
-    const bool requires_zsn = SessionRequiresZsn(&z_reason);
     /* Container follows extension: .zsn → ZREZ even when content wouldn't force it.
      * Save As to .bsn can still write IREZ when features allow. */
     const bool want_zsn = requires_zsn || EndsWith(enforced_path, ".zsn");
     const int32_t resource_map_id = want_zsn ? XFILERESOURCE_ZMF_ID : XFILERESOURCE_ID;
     if (remapped)
     {
+        /* Full reason scan only when remapping (busy UI already visible). */
+        (void)SessionRequiresZsn(&z_reason);
         char reason_buf[256] = {0};
         BAEZMFReasonCodeToString(z_reason, reason_buf, sizeof(reason_buf));
         SetStatus(std::string("NeoBAE features require .zsn (") + reason_buf + "); remapping save path");
@@ -2379,12 +2402,23 @@ bool SaveSessionToPath(const char *path)
     char status[320];
     if (want_zsn)
     {
-        std::snprintf(status,
-                      sizeof(status),
-                      "Session saved (.zsn, Z reason=0x%x): %zu song(s), %d CaSd",
-                      z_reason,
-                      m_session_songs.size(),
-                      m_session_casd_count);
+        if (z_reason != 0)
+        {
+            std::snprintf(status,
+                          sizeof(status),
+                          "Session saved (.zsn, Z reason=0x%x): %zu song(s), %d CaSd",
+                          z_reason,
+                          m_session_songs.size(),
+                          m_session_casd_count);
+        }
+        else
+        {
+            std::snprintf(status,
+                          sizeof(status),
+                          "Session saved (.zsn): %zu song(s), %d CaSd",
+                          m_session_songs.size(),
+                          m_session_casd_count);
+        }
     }
     else
     {

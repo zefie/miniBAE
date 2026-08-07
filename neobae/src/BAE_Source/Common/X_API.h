@@ -1006,6 +1006,16 @@ bool   XOmitFileResources(XFILE fileRef,
                           const XLongResourceID *omitIds,
                           int32_t omitCount);
 
+/* Fast replace for editor mutations on writable memory banks.
+ * Flat INST: TRASH-mark old + append (no full-bank rebuild).
+ * ZINS-only INST/ALIAS: append a flat peer that shadows the packed entry. */
+bool   XReplaceFileResource(XFILE fileRef,
+                            XResourceType resourceType,
+                            XLongResourceID resourceID,
+                            void const *pResourceName,
+                            void *pData,
+                            int32_t length);
+
 /* Remove every TRSH entry from the file (Empty Trash). */
 bool   XEmptyFileTrash(XFILE fileRef);
 

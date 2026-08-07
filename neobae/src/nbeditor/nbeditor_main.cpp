@@ -1389,13 +1389,35 @@ public:
         m_long_op_path.clear();
         if (op == LongOp::SaveSession)
         {
-            BeginBusyProgress("Saving Session…");
+            if (!m_busy_active)
+            {
+                BeginBusyProgress("Saving Session…");
+            }
+            else
+            {
+                if (m_busy_title.empty())
+                {
+                    m_busy_title = "Saving Session…";
+                }
+                PumpBusyProgressFrame(true);
+            }
             (void)SaveSessionToPath(path.c_str());
             EndBusyProgress();
         }
         else if (op == LongOp::ExportBank)
         {
-            BeginBusyProgress("Exporting Bank…");
+            if (!m_busy_active)
+            {
+                BeginBusyProgress("Exporting Bank…");
+            }
+            else
+            {
+                if (m_busy_title.empty())
+                {
+                    m_busy_title = "Exporting Bank…";
+                }
+                PumpBusyProgressFrame(true);
+            }
             ExportBankCloneToPath(path);
             EndBusyProgress();
         }
@@ -1477,6 +1499,8 @@ public:
 #if USE_NEO_EFFECTS == TRUE
         DrawCustomReverbDialog();
 #endif
+        /* After menus/dialogs arm a long-op, paint busy before Present. */
+        DrawBusyProgressOverlay();
     }
 
     void HandleDroppedPath(const char *path)
@@ -1826,6 +1850,7 @@ private:
         }
         if (m_pending_dialog_action == DialogAction::SaveSessionAs)
         {
+            ArmBusyProgress("Saving Session…");
             std::string out_path = selected_path;
             const bool want_zsn = SessionRequiresZsn(nullptr);
             const bool has_bsn = EndsWith(out_path, ".bsn");
@@ -1834,13 +1859,15 @@ private:
             {
                 out_path += want_zsn ? ".zsn" : ".bsn";
             }
-            out_path = EnforceSessionSavePath(out_path);
+            out_path = EnforceSessionSavePath(out_path, nullptr, want_zsn ? 1 : 0);
             m_long_op = LongOp::SaveSession;
             m_long_op_path = out_path;
             return;
         }
         if (m_pending_dialog_action == DialogAction::ExportBank)
         {
+            /* Arm first so DrawBusyProgressOverlay paints before path checks. */
+            ArmBusyProgress("Exporting Bank…");
             m_long_op = LongOp::ExportBank;
             m_long_op_path = EnforceBankSavePath(selected_path);
             return;
@@ -2197,17 +2224,63 @@ private:
         std::snprintf(m_status, sizeof(m_status), "%s", text.c_str());
     }
 
-    void BeginBusyProgress(const char *title)
+    /* Arm overlay without pumping — safe mid-DrawUI (menu / dialog result).
+     * DrawBusyProgressOverlay paints it before the frame presents; the long-op
+     * then runs on the next PumpPendingLongOp with progress already visible. */
+    void ArmBusyProgress(const char *title)
     {
         m_busy_active = true;
         m_busy_title = title ? title : "Working…";
         m_busy_detail.clear();
         m_busy_fraction = 0.0f;
         m_busy_last_pump_ms = 0;
+    }
+
+    void BeginBusyProgress(const char *title)
+    {
+        ArmBusyProgress(title);
         /* Two pumps: first frame often only clears the backbuffer before the
          * overlay is ready; second paints title/progress immediately. */
         PumpBusyProgressFrame(true);
         PumpBusyProgressFrame(true);
+    }
+
+    void DrawBusyProgressOverlay()
+    {
+        if (!m_busy_active)
+        {
+            return;
+        }
+        ImGuiIO &io = ImGui::GetIO();
+        ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(io.DisplaySize, ImGuiCond_Always);
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.07f, 0.09f, 0.11f, 0.92f));
+        ImGui::Begin("##nbeditor_busy_backdrop",
+                     nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav |
+                         ImGuiWindowFlags_NoInputs);
+        ImGui::End();
+        ImGui::PopStyleColor();
+
+        ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
+                                ImGuiCond_Always,
+                                ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowSize(ImVec2(420.0f, 0.0f), ImGuiCond_Always);
+        ImGui::Begin("##nbeditor_busy",
+                     nullptr,
+                     ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove |
+                         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings |
+                         ImGuiWindowFlags_NoDocking);
+        ImGui::TextUnformatted(m_busy_title.c_str());
+        ImGui::Spacing();
+        ImGui::ProgressBar(m_busy_fraction, ImVec2(-1.0f, 0.0f));
+        if (!m_busy_detail.empty())
+        {
+            ImGui::Spacing();
+            ImGui::TextWrapped("%s", m_busy_detail.c_str());
+        }
+        ImGui::End();
     }
 
     void UpdateBusyProgress(float fraction, const char *detail = nullptr)

@@ -15304,6 +15304,12 @@ BAE_BOOL BAERmfEditorBank_RequiresZsb(BAEBankToken bankToken, uint32_t *outReaso
             reason |= BAEZMF_REASON_OSCILLATOR;
         }
 #endif
+        /* Boolean probes (outReason == NULL) only need any hit — zpatches-sized
+         * banks were spending ~0.5–1s scanning every sample for save-path checks. */
+        if (outReason == NULL && reason != BAEZMF_REASON_NONE)
+        {
+            break;
+        }
     }
     if (outReason)
     {
@@ -17839,12 +17845,25 @@ BAEResult BAERmfEditorBank_SetInstrumentExtInfo(BAEBankToken bankToken,
         {
             nameForReplace = pascalName;
         }
-        replaceResult = PV_BankReplaceResource(bankFile,
-                                               ID_INST,
-                                               instID,
-                                               nameForReplace,
-                                               instBytes,
-                                               baseSize + extTailSize);
+        /* Prefer O(INST) replace — full PV_BankReplaceResource walks every SND. */
+        if (XReplaceFileResource(bankFile,
+                                 ID_INST,
+                                 instID,
+                                 nameForReplace,
+                                 instBytes,
+                                 baseSize + extTailSize) != FALSE)
+        {
+            replaceResult = BAE_NO_ERROR;
+        }
+        else
+        {
+            replaceResult = PV_BankReplaceResource(bankFile,
+                                                   ID_INST,
+                                                   instID,
+                                                   nameForReplace,
+                                                   instBytes,
+                                                   baseSize + extTailSize);
+        }
     }
 
     if (extTail)
@@ -18375,15 +18394,106 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleSndID(BAEBankToken bankToken,
     }
 
     {
-        BAEResult result = PV_BankReplaceResource(bankFile,
-                                                  ID_INST,
-                                                  instID,
-                                                  instName,
-                                                  instData,
-                                                  instSize);
+        BAEResult result;
+        if (XReplaceFileResource(bankFile, ID_INST, instID, instName, instData, instSize) != FALSE)
+        {
+            result = BAE_NO_ERROR;
+        }
+        else
+        {
+            result = PV_BankReplaceResource(bankFile,
+                                            ID_INST,
+                                            instID,
+                                            instName,
+                                            instData,
+                                            instSize);
+        }
         XDisposePtr(instData);
         return result;
     }
+}
+
+
+BAEResult BAERmfEditorBank_SetInstrumentSampleSndIDs(BAEBankToken bankToken,
+                                                      uint32_t instrumentIndex,
+                                                      XShortResourceID const *sndResourceIDs,
+                                                      uint32_t sndResourceIDCount)
+{
+    enum
+    {
+        kInstHeaderMinSize = 14,
+        kInstKeySplitSize = 8
+    };
+    XFILE bankFile;
+    XPTR instData;
+    XLongResourceID instID;
+    int32_t instSize;
+    char instName[256];
+    int16_t splitCount;
+    uint32_t s;
+    BAEResult result;
+
+    if (!bankToken || !sndResourceIDs || sndResourceIDCount == 0)
+    {
+        return BAE_PARAM_ERR;
+    }
+    bankFile = (XFILE)bankToken;
+
+    instName[0] = 0;
+    instData = XGetIndexedFileResource(bankFile, ID_INST, &instID,
+                                       (int32_t)instrumentIndex, instName, &instSize);
+    if (!instData)
+    {
+        return BAE_BAD_FILE;
+    }
+    if (instSize < kInstHeaderMinSize)
+    {
+        XDisposePtr(instData);
+        return BAE_BAD_FILE;
+    }
+
+    splitCount = (int16_t)XGetShort((unsigned char *)instData + 12);
+    if (splitCount < 0)
+    {
+        splitCount = 0;
+    }
+
+    if (splitCount > 0)
+    {
+        if (sndResourceIDCount < (uint32_t)splitCount)
+        {
+            XDisposePtr(instData);
+            return BAE_PARAM_ERR;
+        }
+        for (s = 0; s < (uint32_t)splitCount; ++s)
+        {
+            unsigned char *splitPtr =
+                (unsigned char *)instData + 14 + (s * kInstKeySplitSize);
+            XPutShort(splitPtr + 2, (uint16_t)sndResourceIDs[s]);
+        }
+        XPutShort((unsigned char *)instData + 0,
+                  (uint16_t)XGetShort((unsigned char *)instData + 14 + 2));
+    }
+    else
+    {
+        XPutShort((unsigned char *)instData + 0, (uint16_t)sndResourceIDs[0]);
+    }
+
+    if (XReplaceFileResource(bankFile, ID_INST, instID, instName, instData, instSize) != FALSE)
+    {
+        result = BAE_NO_ERROR;
+    }
+    else
+    {
+        result = PV_BankReplaceResource(bankFile,
+                                        ID_INST,
+                                        instID,
+                                        instName,
+                                        instData,
+                                        instSize);
+    }
+    XDisposePtr(instData);
+    return result;
 }
 
 BAEResult BAERmfEditorBank_SetSampleSndStorageType(BAEBankToken bankToken,

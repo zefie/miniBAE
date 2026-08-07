@@ -7069,6 +7069,66 @@ bool XOmitFileResources(XFILE fileRef,
     return TRUE;
 }
 
+bool XReplaceFileResource(XFILE fileRef,
+                          XResourceType resourceType,
+                          XLongResourceID resourceID,
+                          void const *pResourceName,
+                          void *pData,
+                          int32_t length)
+{
+    XFILENAME *pReference;
+
+    if (!PV_XFileValid(fileRef) || !pData || length <= 0)
+    {
+        return FALSE;
+    }
+    pReference = (XFILENAME *)fileRef;
+    if (PV_IsXFileLocked(fileRef) ||
+        (pReference->pResourceData && pReference->resizeResourceData == FALSE))
+    {
+        return FALSE;
+    }
+    if (pReference->pCache == NULL)
+    {
+        XCreateAccessCache(fileRef);
+    }
+
+    /* Fast path: flat resource — soft-delete + append (no SND walk). */
+    if (pReference->pCache && PV_XGetCacheEntry(fileRef, resourceType, resourceID))
+    {
+        if (XDeleteFileResource(fileRef, resourceType, resourceID, FALSE) == FALSE)
+        {
+            return FALSE;
+        }
+        return (XAddFileResource(fileRef,
+                                 resourceType,
+                                 resourceID,
+                                 pResourceName,
+                                 pData,
+                                 length) == 0)
+                   ? TRUE
+                   : FALSE;
+    }
+
+    /* ZINS-packed INST/ALIAS: append a flat resource that shadows the packed
+     * entry. Get-by-id prefers flat; avoids recompressing ZINS and rewriting
+     * every SND on each instrument-editor Apply (zpatches-sized banks). */
+    if (resourceType == ID_INST || resourceType == ID_ALIAS)
+    {
+        PV_ClearZmfInstBlockCache(fileRef);
+        return (XAddFileResource(fileRef,
+                                 resourceType,
+                                 resourceID,
+                                 pResourceName,
+                                 pData,
+                                 length) == 0)
+                   ? TRUE
+                   : FALSE;
+    }
+
+    return FALSE;
+}
+
 bool XPurgeFileInstrumentAndSoundLists(XFILE fileRef,
                                        const XLongResourceID *omitInstIds,
                                        int32_t omitInstCount,

@@ -25,6 +25,7 @@
             {
                 m_long_op = LongOp::SaveSession;
                 m_long_op_path = m_loaded_session_path;
+                ArmBusyProgress("Saving Session…");
             }
             if (ImGui::MenuItem("Save Session As...",
                                 nullptr,
@@ -5936,6 +5937,17 @@
         if (!loaded_from_doc && m_bank_token)
         {
             m_ie_from_song = false;
+            /* Resolve by INST id — flat promote after Apply can shift indexes. */
+            if (m_ie_inst_id != 0)
+            {
+                uint32_t resolved = 0;
+                uint32_t index = m_ie_instrument_index;
+                if (BAERmfEditorBank_ResolveInstID(m_bank_token, m_ie_inst_id, &resolved, &index) ==
+                    BAE_NO_ERROR)
+                {
+                    m_ie_instrument_index = index;
+                }
+            }
             r = BAERmfEditorBank_GetInstrumentExtInfo(m_bank_token, m_ie_instrument_index, &m_ie_ext);
             if (r == BAE_NO_ERROR)
             {
@@ -6031,20 +6043,20 @@
         uint32_t split_count = 0;
         if (BAERmfEditorBank_GetInstrumentSampleCount(m_bank_token,
                                                       m_ie_instrument_index,
-                                                      &split_count) != BAE_NO_ERROR)
+                                                      &split_count) != BAE_NO_ERROR ||
+            split_count == 0)
         {
             return;
         }
         const uint32_t n = std::min(split_count,
                                     static_cast<uint32_t>(m_ie_pristine_split_snds.size()));
+        std::vector<XShortResourceID> ids(n);
         for (uint32_t s = 0; s < n; ++s)
         {
-            (void)BAERmfEditorBank_SetInstrumentSampleSndID(
-                m_bank_token,
-                m_ie_instrument_index,
-                s,
-                static_cast<XShortResourceID>(m_ie_pristine_split_snds[s]));
+            ids[s] = static_cast<XShortResourceID>(m_ie_pristine_split_snds[s]);
         }
+        (void)BAERmfEditorBank_SetInstrumentSampleSndIDs(
+            m_bank_token, m_ie_instrument_index, ids.data(), n);
     }
 
     uint32_t InstrumentEditorPatchId() const
@@ -6232,21 +6244,29 @@
     void ApplyInstrumentEditor(bool live_patch)
     {
         BAEResult r = BAE_PARAM_ERR;
+        bool splits_changed = false;
         m_ie_ext.flags1 = static_cast<unsigned char>(m_ie_ext.flags1 &
                                                      static_cast<unsigned char>(~ZBF_ghostInstrument));
 #if USE_ZMF_SUPPORT == TRUE
-        /* Persist SND linkage with oscillator mode: clear on enable, restore on disable. */
+        /* Only rewrite split SND ids when oscillator mode actually toggled.
+         * ADSR/LPF/LFO Apply used to restore every split (N full bank rebuilds). */
         if (m_bank_token && !m_ie_from_song)
         {
-            if (m_ie_ext.useOscillator)
+            const bool osc_now = m_ie_ext.useOscillator != FALSE;
+            const bool osc_was = m_ie_ext_pristine.useOscillator != FALSE;
+            if (osc_now != osc_was)
             {
-                SetInstrumentEditorSplitSndIds(static_cast<uint16_t>(kNoSndResourceId));
+                splits_changed = true;
+                if (osc_now)
+                {
+                    SetInstrumentEditorSplitSndIds(static_cast<uint16_t>(kNoSndResourceId));
+                }
+                else
+                {
+                    RestoreInstrumentEditorPristineSplits();
+                }
+                RefreshListsFromBank();
             }
-            else
-            {
-                RestoreInstrumentEditorPristineSplits();
-            }
-            RefreshListsFromBank();
         }
 #endif
         if (m_ie_from_song && m_document)
@@ -6259,7 +6279,31 @@
         }
         else if (m_bank_token)
         {
+            if (!EnsureActiveBankWritable())
+            {
+                SetStatus("Instrument apply failed: bank not writable");
+                return;
+            }
             r = BAERmfEditorBank_SetInstrumentExtInfo(m_bank_token, m_ie_instrument_index, &m_ie_ext);
+            if (r == BAE_NO_ERROR && m_ie_inst_id != 0)
+            {
+                uint32_t resolved = 0;
+                uint32_t index = m_ie_instrument_index;
+                if (BAERmfEditorBank_ResolveInstID(m_bank_token, m_ie_inst_id, &resolved, &index) ==
+                    BAE_NO_ERROR)
+                {
+                    m_ie_instrument_index = index;
+                    /* Keep list row index in sync after flat-INST promote. */
+                    if (m_selected_instrument >= 0 &&
+                        m_selected_instrument < static_cast<int>(m_instruments.size()) &&
+                        m_instruments[static_cast<size_t>(m_selected_instrument)].inst_id ==
+                            m_ie_inst_id)
+                    {
+                        m_instruments[static_cast<size_t>(m_selected_instrument)].instrument_index =
+                            index;
+                    }
+                }
+            }
         }
         if (r != BAE_NO_ERROR)
         {
@@ -6271,7 +6315,9 @@
         MarkBank01TouchedIfNeeded(m_ie_bank);
         if (live_patch)
         {
-            LivePatchInstrumentEditor(true);
+            /* Ext-only Apply: patch in-memory voice. Reload samples only when
+             * keysplit SND linkage changed (oscillator toggle). */
+            LivePatchInstrumentEditor(splits_changed);
         }
         SetStatus("Instrument applied");
     }
@@ -6880,18 +6926,14 @@
         uint32_t split_count = 0;
         if (BAERmfEditorBank_GetInstrumentSampleCount(m_bank_token,
                                                       m_ie_instrument_index,
-                                                      &split_count) != BAE_NO_ERROR)
+                                                      &split_count) != BAE_NO_ERROR ||
+            split_count == 0)
         {
             return;
         }
-        for (uint32_t s = 0; s < split_count; ++s)
-        {
-            (void)BAERmfEditorBank_SetInstrumentSampleSndID(
-                m_bank_token,
-                m_ie_instrument_index,
-                s,
-                static_cast<XShortResourceID>(snd_id));
-        }
+        std::vector<XShortResourceID> ids(split_count, static_cast<XShortResourceID>(snd_id));
+        (void)BAERmfEditorBank_SetInstrumentSampleSndIDs(
+            m_bank_token, m_ie_instrument_index, ids.data(), split_count);
     }
 
     /* Oscillator shape/PW UI entry point; LivePatch persists OSCL+modulators. */
