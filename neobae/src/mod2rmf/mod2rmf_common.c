@@ -236,12 +236,13 @@ static uint32_t mod2rmf_default_release_tail_us(const struct xmp_instrument *ins
 }
 
 /* Map a libxmp instrument's amplitude envelope to BAE ADSR stages.
- * We keep the most significant envelope points within BAE's 8-stage limit,
+ * We keep the most significant envelope points within maxStages,
  * preserve explicit tracker release segments, and only synthesize a release
  * tail when the source envelope does not provide one. */
 void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
                                   uint32_t bpm,
-                                  ModRawSample *raw)
+                                  ModRawSample *raw,
+                                  uint32_t maxStages)
 {
     const struct xmp_envelope *aei;
     bool hasSustain;
@@ -255,10 +256,21 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
     double usPerTick;
     uint32_t stage;
     uint32_t lastEnvY;
+    uint32_t stageLimit;
 
     if (!inst || !raw)
     {
         return;
+    }
+
+    stageLimit = maxStages;
+    if (stageLimit < 2u)
+    {
+        stageLimit = 2u;
+    }
+    if (stageLimit > (uint32_t)MOD2RMF_MAX_ADSR_STAGES)
+    {
+        stageLimit = (uint32_t)MOD2RMF_MAX_ADSR_STAGES;
     }
 
     aei = &inst->aei;
@@ -288,8 +300,9 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
     #if _DEBUG == TRUE
     {
         int dbgIdx;
-        fprintf(stderr, "[mod2rmf]  ADSR extract: npt=%d flg=0x%02x sus=%d hasSustain=%d rls=%d usPerTick=%.1f\n",
-                npt, aei->flg, aei->sus, hasSustain ? 1 : 0, inst->rls, usPerTick);
+        fprintf(stderr, "[mod2rmf]  ADSR extract: npt=%d flg=0x%02x sus=%d hasSustain=%d rls=%d usPerTick=%.1f maxStages=%u\n",
+                npt, aei->flg, aei->sus, hasSustain ? 1 : 0, inst->rls, usPerTick,
+                (unsigned)stageLimit);
         for (dbgIdx = 0; dbgIdx < npt; ++dbgIdx)
         {
             fprintf(stderr, "    pt[%d]: X=%d Y=%d%s\n",
@@ -304,7 +317,7 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
     if (hasSustain)
     {
         int reservedStages = 1 + (needsTailToZero ? 1 : 0);
-        int availablePointStages = MOD2RMF_MAX_ADSR_STAGES - reservedStages;
+        int availablePointStages = (int)stageLimit - reservedStages;
         int attackDesired = sustainIdx + 1;
         int releaseDesired = npt - sustainIdx - 1;
         int attackMin = (sustainIdx > 0) ? 2 : 1;
@@ -375,7 +388,7 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
             uint32_t prevX = 0;
             int i;
 
-            for (i = 0; i < attackPointCount && stage < MOD2RMF_MAX_ADSR_STAGES; ++i)
+            for (i = 0; i < attackPointCount && stage < stageLimit; ++i)
             {
                 int pointIdx = selectedAttack[i];
                 uint32_t ptX = (uint32_t)aei->data[pointIdx * 2];
@@ -391,17 +404,20 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
             }
         }
 
-        mod2rmf_store_adsr_stage(raw,
-                                 stage++,
-                                 (uint32_t)aei->data[sustainIdx * 2 + 1],
-                                 0u,
-                                 ADSR_SUSTAIN_LONG);
+        if (stage < stageLimit)
+        {
+            mod2rmf_store_adsr_stage(raw,
+                                     stage++,
+                                     (uint32_t)aei->data[sustainIdx * 2 + 1],
+                                     0u,
+                                     ADSR_SUSTAIN_LONG);
+        }
 
         {
             uint32_t prevX = (uint32_t)aei->data[sustainIdx * 2];
             int i;
 
-            for (i = 0; i < releasePointCount && stage < MOD2RMF_MAX_ADSR_STAGES; ++i)
+            for (i = 0; i < releasePointCount && stage < stageLimit; ++i)
             {
                 int pointIdx = selectedRelease[i];
                 uint32_t ptX = (uint32_t)aei->data[pointIdx * 2];
@@ -431,7 +447,7 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
             }
         }
 
-        if (needsTailToZero && stage < MOD2RMF_MAX_ADSR_STAGES)
+        if (needsTailToZero && stage < stageLimit)
         {
             mod2rmf_store_adsr_stage(raw,
                                      stage++,
@@ -442,7 +458,7 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
     }
     else
     {
-        int availablePointStages = MOD2RMF_MAX_ADSR_STAGES - (needsTailToZero ? 1 : 0);
+        int availablePointStages = (int)stageLimit - (needsTailToZero ? 1 : 0);
         int i;
         uint32_t prevX = 0;
 
@@ -458,7 +474,7 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
             return;
         }
 
-        for (i = 0; i < attackPointCount && stage < MOD2RMF_MAX_ADSR_STAGES; ++i)
+        for (i = 0; i < attackPointCount && stage < stageLimit; ++i)
         {
             int pointIdx = selectedAttack[i];
             uint32_t ptX = (uint32_t)aei->data[pointIdx * 2];
@@ -483,7 +499,7 @@ void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
             prevX = ptX;
         }
 
-        if (needsTailToZero && stage < MOD2RMF_MAX_ADSR_STAGES)
+        if (needsTailToZero && stage < stageLimit)
         {
             mod2rmf_store_adsr_stage(raw,
                                      stage++,
@@ -631,6 +647,73 @@ void mod2rmf_parse_row_effects(const struct xmp_event *ev,
             {
                 *outRetrigInterval = interval;
             }
+        }
+    }
+}
+
+/* Parse sample-offset effects (9xx / IT SAx). Memory is per-channel and
+ * sticky across rows; *outHasOffset is set only when FX_OFFSET is present. */
+void mod2rmf_parse_sample_offset(const struct xmp_event *ev,
+                                 uint8_t *ioOffsetMemory,
+                                 uint8_t *ioHiOffsetMemory,
+                                 bool *outHasOffset,
+                                 uint32_t *outOffsetFrames)
+{
+    int col;
+    bool hasOffset = FALSE;
+    uint8_t loParam = 0;
+
+    if (outHasOffset)
+    {
+        *outHasOffset = FALSE;
+    }
+    if (outOffsetFrames)
+    {
+        *outOffsetFrames = 0;
+    }
+    if (!ev || !ioOffsetMemory || !ioHiOffsetMemory)
+    {
+        return;
+    }
+
+    loParam = *ioOffsetMemory;
+
+    for (col = 0; col < 2; ++col)
+    {
+        uint8_t fxType = (col == 0) ? ev->fxt : ev->f2t;
+        uint8_t fxParam = (col == 0) ? ev->fxp : ev->f2p;
+
+        if (fxType == MOD2RMF_FX_HIOFFSET)
+        {
+            *ioHiOffsetMemory = fxParam;
+        }
+        else if (fxType == MOD2RMF_FX_OFFSET)
+        {
+            hasOffset = TRUE;
+            if (fxParam != 0)
+            {
+                *ioOffsetMemory = fxParam;
+            }
+            loParam = (fxParam != 0) ? fxParam : *ioOffsetMemory;
+        }
+    }
+
+    if (hasOffset)
+    {
+        uint32_t frames;
+
+        frames = ((uint32_t)(*ioHiOffsetMemory) << 16) | ((uint32_t)loParam << 8);
+        if (frames > MOD2RMF_SAMPLE_OFFSET_MAX_FRAMES)
+        {
+            frames = MOD2RMF_SAMPLE_OFFSET_MAX_FRAMES;
+        }
+        if (outHasOffset)
+        {
+            *outHasOffset = TRUE;
+        }
+        if (outOffsetFrames)
+        {
+            *outOffsetFrames = frames;
         }
     }
 }

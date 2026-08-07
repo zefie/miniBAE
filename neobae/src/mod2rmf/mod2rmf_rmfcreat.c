@@ -656,6 +656,8 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
     ChannelEffectState chEffects[MOD2RMF_MAX_CHANNELS];
     uint8_t v00CutArmed[MOD2RMF_MAX_CHANNELS];
     uint16_t v00SilentRows[MOD2RMF_MAX_CHANNELS];
+    uint8_t chOffsetMemory[MOD2RMF_MAX_CHANNELS];
+    uint8_t chHiOffsetMemory[MOD2RMF_MAX_CHANNELS];
     uint8_t chLastVol[MOD2RMF_MAX_CHANNELS];
     uint8_t chLastPan[MOD2RMF_MAX_CHANNELS];
     uint16_t chLastBend[MOD2RMF_MAX_CHANNELS];
@@ -933,7 +935,8 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                     (inst->aei.flg & XMP_ENVELOPE_ON) && inst->aei.npt >= 2)
                 {
                     mod2rmf_extract_envelope_adsr(inst, (uint32_t)(mod->bpm > 0 ? mod->bpm : 125),
-                                          &conv->rawSamples[sid]);
+                                          &conv->rawSamples[sid],
+                                          conv->maxAdsrStages);
                     sampleHasEnvelope[sid] = conv->rawSamples[sid].hasEnvelope;
                 }
                 /* Capture default pan from sub-instrument (first assignment wins) */
@@ -976,6 +979,8 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
     memset(chEffects, 0, sizeof(chEffects));
     memset(v00CutArmed, 0, sizeof(v00CutArmed));
     memset(v00SilentRows, 0, sizeof(v00SilentRows));
+    memset(chOffsetMemory, 0, sizeof(chOffsetMemory));
+    memset(chHiOffsetMemory, 0, sizeof(chHiOffsetMemory));
     for (i = 0; i < MOD2RMF_MAX_CHANNELS; ++i)
     {
         chLastVol[i] = 0xFF;
@@ -1163,6 +1168,8 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                 {
                     uint8_t retrigInterval = 0;
                     uint8_t noteDelayFrames = 0;
+                    bool hasSampleOffset = FALSE;
+                    uint32_t sampleOffsetFrames = 0;
 
                     /* Reset per-row effect state. */
                     memset(&chEffects[ch], 0, sizeof(chEffects[ch]));
@@ -1171,6 +1178,18 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                     mod2rmf_parse_row_effects(rowEvent, &retrigInterval, &noteDelayFrames);
                     chEffects[ch].retrigInterval = retrigInterval;
                     chEffects[ch].noteDelayFrames = noteDelayFrames;
+
+                    /* Sample offset (9xx / HIOFFSET): memory is sticky; apply only
+                     * when FX_OFFSET is present on this row with a note-on. */
+                    mod2rmf_parse_sample_offset(rowEvent,
+                                               &chOffsetMemory[ch],
+                                               &chHiOffsetMemory[ch],
+                                               &hasSampleOffset,
+                                               &sampleOffsetFrames);
+                    if (!hasSampleOffset)
+                    {
+                        sampleOffsetFrames = 0;
+                    }
 
                     /* Smart v00-cut arming: arm on explicit v00, disarm on
                      * non-zero row volume or a fresh row note. */
@@ -1240,6 +1259,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                 chEffects[ch].delayedVolume = hasRowVolumeCmd
                                                               ? rowVolumeCmd64
                                                               : (uint8_t)mod2rmf_clamp_int((int)ci->volume, 0, 64);
+                                chEffects[ch].delayedSampleOffsetFrames = sampleOffsetFrames;
                             }
                             else
                             {
@@ -1295,6 +1315,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                      conv->rawSamples[sid].hasRateMapping)
                                         ? mod2rmf_rate_fin_to_cents(conv->rawSamples[sid].rateFin)
                                         : 0;
+                                activeNotes[ch].sampleOffsetFrames = sampleOffsetFrames;
                                 chLastBend[ch] = 0xFFFFu;
                                 {
                                     uint16_t bend;
@@ -1393,6 +1414,7 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                                  conv->rawSamples[delaySid].hasRateMapping)
                                     ? mod2rmf_rate_fin_to_cents(conv->rawSamples[delaySid].rateFin)
                                     : 0;
+                            activeNotes[ch].sampleOffsetFrames = chEffects[ch].delayedSampleOffsetFrames;
                             chLastBend[ch] = 0xFFFFu;
                             {
                                 uint16_t bend;
@@ -1434,6 +1456,8 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                         ((uint8_t)fi.frame % chEffects[ch].retrigInterval) == 0 &&
                         activeNotes[ch].active)
                     {
+                        uint32_t savedOffsetFrames = activeNotes[ch].sampleOffsetFrames;
+
                         if (!mod2rmf_flush_active_note(song, (uint16_t)ch, &activeNotes[ch], currentTickFP))
                         {
                             if (playerStarted) xmp_end_player(ctx);
@@ -1447,7 +1471,8 @@ int mod2rmf_build_song_model(Mod2RmfConverter *conv, ModSongModel *song)
                         * (which already applies Rxy volume table changes). */
                         activeNotes[ch].active = TRUE;
                         activeNotes[ch].startTickFP = currentTickFP;
-                        /* note and program stay the same from the row's note-on */
+                        /* note, program, and sample offset stay the same from the row's note-on */
+                        activeNotes[ch].sampleOffsetFrames = savedOffsetFrames;
                         activeNotes[ch].velocity = mod2rmf_note_velocity_from_volume((uint8_t)mod2rmf_clamp_int((int)ci->volume, 0, 64));
                         chLastBend[ch] = 0xFFFFu;
                         {
@@ -1658,6 +1683,9 @@ Mod2RmfConverter *mod2rmf_converter_create(void)
         conv->sampleGainDb = 0.0;
         conv->rootShiftSemitones = MOD2RMF_DEFAULT_ROOT_SHIFT_ST;
         conv->itV00CutRows = 6;
+        conv->stereoSeparation = 75;
+        conv->maxAdsrStages = (uint8_t)BAE_RMF_MAX_ADSR_STAGES;
+        mod2rmf_resampler_defaults(&conv->resamplerSettings);
     }
     return conv;
 }
@@ -1713,7 +1741,8 @@ int mod2rmf_flush_active_note(ModSongModel *song,
                                 duration,
                                 note->note,
                                 note->velocity,
-                                note->program))
+                                note->program,
+                                note->sampleOffsetFrames))
     {
         return 0;
     }
@@ -1960,20 +1989,50 @@ int mod2rmf_add_programmed_note(Mod2RmfConverter *conv,
     return BAERmfEditorDocument_SetNoteInfo(conv->document, trackIndex, noteCount - 1, &info) == BAE_NO_ERROR;
 }
 
-int mod2rmf_write_song_notes(Mod2RmfConverter *conv, const ModSongModel *song)
+/* Emit ZMF-only NRPN 6,0 + three CC6 digits for a 21-bit frame offset. */
+static void mod2rmf_emit_sample_offset_nrpn(Mod2RmfConverter *conv,
+                                           uint16_t trackIndex,
+                                           uint32_t tick,
+                                           uint32_t offsetFrames)
+{
+    uint32_t o;
+    unsigned char b0, b1, b2;
+
+    if (!conv || trackIndex == (uint16_t)0xFFFF)
+    {
+        return;
+    }
+
+    o = offsetFrames & MOD2RMF_SAMPLE_OFFSET_MAX_FRAMES;
+    b0 = (unsigned char)((o >> 14) & 0x7Fu);
+    b1 = (unsigned char)((o >> 7) & 0x7Fu);
+    b2 = (unsigned char)(o & 0x7Fu);
+
+    (void)BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 99, tick, 6);
+    (void)BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 98, tick, 0);
+    (void)BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 6, tick, b0);
+    (void)BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 6, tick, b1);
+    (void)BAERmfEditorDocument_AddTrackCCEvent(conv->document, trackIndex, 6, tick, b2);
+}
+
+int mod2rmf_write_song_notes(Mod2RmfConverter *conv, const ModSongModel *song, bool useZmfContainer)
 {
     uint32_t i;
+    uint32_t lastEmittedOffset[MOD2RMF_MAX_CHANNELS];
 
     if (!conv || !song)
     {
         return 0;
     }
 
+    memset(lastEmittedOffset, 0, sizeof(lastEmittedOffset));
+
     for (i = 0; i < song->noteCount; ++i)
     {
         const ModNoteEvent *note;
         uint16_t trackIndex;
         uint8_t midiCh;
+        uint32_t wantOffset;
 
         note = &song->notes[i];
         if (note->sourceChannel >= song->channelCount)
@@ -1985,6 +2044,15 @@ int mod2rmf_write_song_notes(Mod2RmfConverter *conv, const ModSongModel *song)
         if (trackIndex == (uint16_t)0xFFFF)
         {
             continue;
+        }
+
+        wantOffset = note->sampleOffsetFrames & MOD2RMF_SAMPLE_OFFSET_MAX_FRAMES;
+        if (useZmfContainer &&
+            note->sourceChannel < MOD2RMF_MAX_CHANNELS &&
+            lastEmittedOffset[note->sourceChannel] != wantOffset)
+        {
+            mod2rmf_emit_sample_offset_nrpn(conv, trackIndex, note->startTick, wantOffset);
+            lastEmittedOffset[note->sourceChannel] = wantOffset;
         }
 
 #if _DEBUG == TRUE
@@ -2267,12 +2335,73 @@ void mod2rmf_build_midi_channel_aggregate(const ChannelProfile trackerProfiles[]
     }
 }
 
-BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char *sourcePath, bool useZmfContainer) {
-    Mod2RmfResamplerSettings resamplerSettings;
-    Mod2RmfConverter *conv = mod2rmf_converter_create();
+void mod2rmf_load_options_defaults(Mod2RmfLoadOptions *opts)
+{
+    if (!opts)
+    {
+        return;
+    }
+    memset(opts, 0, sizeof(*opts));
+    opts->useZmfContainer = TRUE;
+    opts->useExtendedPitchRange = FALSE;
+    opts->useExtendedAdsr = FALSE;
+    mod2rmf_resampler_defaults(&opts->resamplerSettings);
+    opts->stereoSeparation = 75;
+}
+
+BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char *sourcePath, bool useZmfContainer)
+{
+    Mod2RmfLoadOptions opts;
+    mod2rmf_load_options_defaults(&opts);
+    opts.useZmfContainer = useZmfContainer ? TRUE : FALSE;
+    return mod2rmf_load_module_to_document_ex(doc, sourcePath, &opts);
+}
+
+BAEResult mod2rmf_load_module_to_document_ex(BAERmfEditorDocument **doc,
+                                             const char *sourcePath,
+                                             const Mod2RmfLoadOptions *opts)
+{
+    Mod2RmfLoadOptions localOpts;
+    Mod2RmfConverter *conv;
     ModSongModel song;
-    mod2rmf_song_model_init(&song);    
-    mod2rmf_resampler_defaults(&resamplerSettings);
+    bool useZmfContainer;
+
+    if (!doc || !sourcePath || !sourcePath[0])
+    {
+        return BAE_PARAM_ERR;
+    }
+    *doc = NULL;
+
+    if (opts)
+    {
+        localOpts = *opts;
+    }
+    else
+    {
+        mod2rmf_load_options_defaults(&localOpts);
+    }
+    if (localOpts.stereoSeparation > 100u)
+    {
+        localOpts.stereoSeparation = 100u;
+    }
+
+    conv = mod2rmf_converter_create();
+    if (!conv)
+    {
+        return BAE_MEMORY_ERR;
+    }
+    mod2rmf_song_model_init(&song);
+
+    conv->resamplerSettings = localOpts.resamplerSettings;
+    conv->stereoSeparation = localOpts.stereoSeparation;
+    conv->useExtendedPitchRange = localOpts.useExtendedPitchRange ? TRUE : FALSE;
+    conv->maxAdsrStages = localOpts.useExtendedAdsr
+                              ? (uint8_t)BAE_EDITOR_MAX_ADSR_STAGES
+                              : (uint8_t)BAE_RMF_MAX_ADSR_STAGES;
+    /* Extended ADSR / pitch features require ZMF. */
+    useZmfContainer = localOpts.useZmfContainer ||
+                      localOpts.useExtendedAdsr ||
+                      localOpts.useExtendedPitchRange;
     conv->isIt = mod2rmf_path_is_it(sourcePath);
 
     if (!mod2rmf_load_source_data(conv, sourcePath))
@@ -2280,21 +2409,23 @@ BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char
         BAE_STDERR("Error: failed to read source file\n");
         mod2rmf_song_model_dispose(&song);
         mod2rmf_converter_delete(conv);
-        return BAE_FILE_IO_ERROR; 
+        return BAE_FILE_IO_ERROR;
     }
 
-    struct xmp_test_info testInfo;
-    memset(&testInfo, 0, sizeof(testInfo));
-    if (xmp_test_module_from_memory(conv->sourceData, (long)conv->sourceSize, &testInfo) != 0)
     {
-        BAE_STDERR("Error: unsupported or invalid tracker module\n");
-        mod2rmf_song_model_dispose(&song);
-        mod2rmf_converter_delete(conv);
-        return BAE_UNSUPPORTED_FORMAT;
+        struct xmp_test_info testInfo;
+        memset(&testInfo, 0, sizeof(testInfo));
+        if (xmp_test_module_from_memory(conv->sourceData, (long)conv->sourceSize, &testInfo) != 0)
+        {
+            BAE_STDERR("Error: unsupported or invalid tracker module\n");
+            mod2rmf_song_model_dispose(&song);
+            mod2rmf_converter_delete(conv);
+            return BAE_UNSUPPORTED_FORMAT;
+        }
+        BAE_PRINTF("Module detected by libxmp: %s (%s)\n",
+                testInfo.name[0] ? testInfo.name : "(untitled)",
+                testInfo.type[0] ? testInfo.type : "unknown");
     }
-    BAE_PRINTF("Module detected by libxmp: %s (%s)\n",
-            testInfo.name[0] ? testInfo.name : "(untitled)",
-            testInfo.type[0] ? testInfo.type : "unknown");
 
     if (!mod2rmf_build_song_model(conv, &song))
     {
@@ -2326,10 +2457,10 @@ BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char
         fprintf(stderr, "Error: document setup failed\n");
         mod2rmf_song_model_dispose(&song);
         mod2rmf_converter_delete(conv);
-        return 1;
+        return BAE_GENERAL_ERR;
     }
 
-        /* Emit MIDI loop markers if the song has an infinite loop */
+    /* Emit MIDI loop markers if the song has an infinite loop */
     if (song.loopEnabled)
     {
         BAERmfEditorDocument_SetMidiLoopMarkers(conv->document,
@@ -2346,7 +2477,7 @@ BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char
         fprintf(stderr, "Error: sample setup failed\n");
         mod2rmf_song_model_dispose(&song);
         mod2rmf_converter_delete(conv);
-        return 1;
+        return BAE_GENERAL_ERR;
     }
 
     /* Analyze channel usage and compute tracker→MIDI channel mapping */
@@ -2376,11 +2507,19 @@ BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char
         mod2rmf_channel_profile_cleanup(profiles, song.channelCount);
     }
 
+    if (conv->useExtendedPitchRange && conv->document)
+    {
+        int32_t engineConfig = 0;
+        (void)BAERmfEditorDocument_GetEngineConfig(conv->document, &engineConfig);
+        engineConfig |= (int32_t)(SONG_CONFIG_HAS_EXTENDED_PITCH_RANGE | SONG_CONFIG_EXTENDED_PITCH_RANGE_ON);
+        BAERmfEditorDocument_SetEngineConfig(conv->document, engineConfig);
+    }
+
     if (!mod2rmf_setup_tracks(conv, &song, &conv->channelMap) ||
         !mod2rmf_setup_instrument_ext(conv, &song, useZmfContainer) ||
         !mod2rmf_write_song_cc_events(conv, &song) ||
         !mod2rmf_write_song_pitch_bend_events(conv, &song) ||
-        !mod2rmf_write_song_notes(conv, &song) ||
+        !mod2rmf_write_song_notes(conv, &song, useZmfContainer) ||
         !mod2rmf_write_song_tempo_events(conv, &song))
     {
         BAE_STDERR("Error: conversion failed\n");

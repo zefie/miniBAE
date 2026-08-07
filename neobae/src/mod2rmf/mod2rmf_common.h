@@ -56,13 +56,17 @@
 #define MOD2RMF_FX_EXTENDED             0x0E
 #define MOD2RMF_EX_RETRIG               0x09
 #define MOD2RMF_EX_DELAY                0x0D
+#define MOD2RMF_FX_OFFSET               0x09 /* sample offset (9xx); not EX_RETRIG */
+#define MOD2RMF_FX_HIOFFSET             0x8c /* IT high offset (SAx) */
 #define MOD2RMF_FX_MULTI_RETRIG         0x1B
 #define MOD2RMF_FX_TONEPORTA            0x03
 #define MOD2RMF_FX_TONE_VSLIDE          0x05
 #define MOD2RMF_FX_TRK_VOL              0x80
 #define MOD2RMF_FX_TRK_VSLIDE           0x81
 #define MOD2RMF_FX_TRK_FVSLIDE          0x82
-#define MOD2RMF_MAX_ADSR_STAGES         8 /* matches BAE_EDITOR_MAX_ADSR_STAGES */
+#define MOD2RMF_SAMPLE_OFFSET_MAX_FRAMES 0x1FFFFFu /* 21-bit NRPN 6,0 */
+/* Array capacity matches ZMF/editor limit; RMF path caps at BAE_RMF_MAX_ADSR_STAGES. */
+#define MOD2RMF_MAX_ADSR_STAGES         BAE_EDITOR_MAX_ADSR_STAGES
 
 typedef struct {
     int32_t level;  /* 0..VOLUME_RANGE */
@@ -121,6 +125,7 @@ typedef struct {
     unsigned char note;
     unsigned char velocity;
     unsigned char program;
+    uint32_t sampleOffsetFrames; /* 0 = start of sample; ZMF NRPN 6,0 */
 } ModNoteEvent;
 
 typedef struct {
@@ -177,6 +182,7 @@ typedef struct {
     unsigned char program;
     int bendOffsetCents;
     int rateFinCents; /* subtract: finetune already baked into sample rate */
+    uint32_t sampleOffsetFrames; /* sticky for retriggers until next note-on */
 } ActiveNote;
 
 typedef struct {
@@ -186,6 +192,7 @@ typedef struct {
     unsigned char delayedEvNote;/* the note value to trigger after delay */
     int     delayedSid;         /* sample ID for the delayed note */
     uint8_t delayedVolume;      /* volume at time of row start */
+    uint32_t delayedSampleOffsetFrames;
 } ChannelEffectState;
 
 /* --- Channel mapping structs -------------------------------------------- */
@@ -223,14 +230,25 @@ int mod2rmf_compare_pitch_bend_by_tick(const void *a, const void *b);
 int mod2rmf_compare_cc_by_tick(const void *a, const void *b);
 uint16_t mod2rmf_pitchbend_to_midi(int32_t xmpPitchbend,
                                          uint16_t bendRangeSemitones);
+/* maxStages: stage budget (typically BAE_RMF_MAX_ADSR_STAGES or BAE_EDITOR_MAX_ADSR_STAGES).
+ * Clamped to [2, MOD2RMF_MAX_ADSR_STAGES]. */
 void mod2rmf_extract_envelope_adsr(const struct xmp_instrument *inst,
                                   uint32_t bpm,
-                                  ModRawSample *raw);
+                                  ModRawSample *raw,
+                                  uint32_t maxStages);
 void mod2rmf_emulate_bidi_loop(ModRawSample *raw);
 void mod2rmf_emulate_reverse_loop(ModRawSample *raw);
 void mod2rmf_parse_row_effects(const struct xmp_event *ev,
                               uint8_t *outRetrigInterval,
                               uint8_t *outDelayFrames);
+/* Parse FX_OFFSET / FX_HIOFFSET. Updates per-channel lo/hi memory.
+ * When FX_OFFSET is present, sets *outHasOffset and *outOffsetFrames
+ * (libxmp units == frames for our mono pcm8 path), clamped to 21-bit. */
+void mod2rmf_parse_sample_offset(const struct xmp_event *ev,
+                                 uint8_t *ioOffsetMemory,
+                                 uint8_t *ioHiOffsetMemory,
+                                 bool *outHasOffset,
+                                 uint32_t *outOffsetFrames);
 bool mod2rmf_get_row_volume_command(const struct xmp_event *ev,
                                    uint8_t *outVol64);
 

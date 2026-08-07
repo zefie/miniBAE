@@ -64,6 +64,7 @@ static void print_usage(const char *program_name)
             "  --spread              [Experimental] Spread instruments across MIDI channels\n"
             "  --tempomap            Reserved for future tempo-map handling\n"
             "  --ext-pitch           [ZMF] Allow pitch down to -96 semitones (vs default -24)\n"
+            "  --ext-adsr            [ZMF] Allow up to 32-stage envelopes (default: 8-stage RMF cap)\n"
             "  --help, -h            Show this help\n",
             program_name);
 }
@@ -111,6 +112,7 @@ int main(int argc, char *argv[])
     bool bitrateArgSeen;
     bool spreadChannels;
     bool useExtendedPitchRange;
+    bool useExtendedAdsr;
     bool avoidMidiChannel10;
     bool downOctaveRange;
     double sampleGainDb;
@@ -127,6 +129,7 @@ int main(int argc, char *argv[])
     bitrateArgSeen = FALSE;
     spreadChannels = FALSE;
     useExtendedPitchRange = FALSE;
+    useExtendedAdsr = FALSE;
     avoidMidiChannel10 = FALSE;
     downOctaveRange = FALSE;
     sampleGainDb = 0.0;
@@ -183,6 +186,11 @@ int main(int argc, char *argv[])
         if (!strcmp(arg, "--ext-pitch"))
         {
             useExtendedPitchRange = TRUE;
+            continue;
+        }
+        if (!strcmp(arg, "--ext-adsr") || !strcmp(arg, "--extended-adsr"))
+        {
+            useExtendedAdsr = TRUE;
             continue;
         }
         if (!strcmp(arg, "--amiga-filter"))
@@ -398,7 +406,7 @@ int main(int argc, char *argv[])
     }
 
     (void)tempoMap; /* Reserved for future tempo-map handling. */
-    useZmfContainer = is_zmf_path(destPath);    
+    useZmfContainer = is_zmf_path(destPath) || useExtendedPitchRange || useExtendedAdsr;
     conv->resamplerSettings = resamplerSettings;
     conv->forceOriginalSamples = forceOriginalSamples;
     conv->sampleGainDb = sampleGainDb;
@@ -411,6 +419,10 @@ int main(int argc, char *argv[])
     }
     conv->stereoSeparation = stereoSeparation;
     conv->itV00CutRows = itV00CutRows;
+    conv->useExtendedPitchRange = useExtendedPitchRange;
+    conv->maxAdsrStages = useExtendedAdsr
+                              ? (uint8_t)BAE_EDITOR_MAX_ADSR_STAGES
+                              : (uint8_t)BAE_RMF_MAX_ADSR_STAGES;
 
     if (!mod2rmf_load_source_data(conv, sourcePath))
     {
@@ -606,17 +618,19 @@ int main(int argc, char *argv[])
 
         mod2rmf_channel_profile_cleanup(profiles, song.channelCount);
     }
-    uint32_t engineConfig = 0;
-    if (useExtendedPitchRange) {
-        engineConfig |= SONG_CONFIG_HAS_EXTENDED_PITCH_RANGE;
+    if (useExtendedPitchRange && conv->document)
+    {
+        int32_t engineConfig = 0;
+        (void)BAERmfEditorDocument_GetEngineConfig(conv->document, &engineConfig);
+        engineConfig |= (int32_t)(SONG_CONFIG_HAS_EXTENDED_PITCH_RANGE |
+                                  SONG_CONFIG_EXTENDED_PITCH_RANGE_ON);
+        BAERmfEditorDocument_SetEngineConfig(conv->document, engineConfig);
     }
-
-    BAERmfEditorDocument_SetEngineConfig(conv->document, engineConfig);
     if (!mod2rmf_setup_tracks(conv, &song, &conv->channelMap) ||
         !mod2rmf_setup_instrument_ext(conv, &song, useZmfContainer) ||
         !mod2rmf_write_song_cc_events(conv, &song) ||
         !mod2rmf_write_song_pitch_bend_events(conv, &song) ||
-        !mod2rmf_write_song_notes(conv, &song) ||
+        !mod2rmf_write_song_notes(conv, &song, useZmfContainer) ||
         !mod2rmf_write_song_tempo_events(conv, &song) ||
         !mod2rmf_encoder_apply(conv->document, &encSettings, compressionType) ||
         !mod2rmf_save_document(conv, destPath))

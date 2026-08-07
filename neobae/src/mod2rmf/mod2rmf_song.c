@@ -549,7 +549,8 @@ int mod2rmf_song_model_append_note(ModSongModel *song,
                                   uint32_t durationTicks,
                                   unsigned char note,
                                   unsigned char velocity,
-                                  unsigned char program)
+                                  unsigned char program,
+                                  uint32_t sampleOffsetFrames)
 {
     ModNoteEvent *newNotes;
     uint32_t newCapacity;
@@ -576,6 +577,7 @@ int mod2rmf_song_model_append_note(ModSongModel *song,
     song->notes[song->noteCount].note = note;
     song->notes[song->noteCount].velocity = velocity;
     song->notes[song->noteCount].program = program;
+    song->notes[song->noteCount].sampleOffsetFrames = sampleOffsetFrames;
     song->noteCount++;
     return 1;
 }

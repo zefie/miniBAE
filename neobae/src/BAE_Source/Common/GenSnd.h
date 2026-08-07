@@ -1331,6 +1331,12 @@ typedef int32_t UNIT_TYPE;
         unsigned char channelVolume[MAX_CHANNELS];                     // current channel volume
         unsigned char channelExpression[MAX_CHANNELS];                 // current channel expression
         unsigned char channelPitchBendRange[MAX_CHANNELS];             // current bend range in half steps
+#if USE_ZMF_SUPPORT == TRUE
+        /* ZMF-only NRPN 6,0: sample start offset in frames (3× CC6, 21-bit). */
+        uint32_t channelSampleOffsetFrames[MAX_CHANNELS];
+        uint32_t channelSampleOffsetAccum[MAX_CHANNELS];
+        unsigned char channelSampleOffsetCount[MAX_CHANNELS];
+#endif
 
         unsigned char channelModWheel[MAX_CHANNELS];              // Mod wheel (primarily affects pitch bend)
         unsigned char channelLowPassAmount[MAX_CHANNELS];         // low pass amount controller (NOT CONNECTED as of 3.8.99)

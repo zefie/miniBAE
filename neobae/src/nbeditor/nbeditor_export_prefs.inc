@@ -58,6 +58,12 @@
         m_pref_ignore_session_layout = false;
         m_pref_adsr_default_valid = false;
         std::memset(&m_pref_adsr_default, 0, sizeof(m_pref_adsr_default));
+        m_pref_mod_ext_pitch = false;
+        m_pref_mod_ext_adsr = false;
+        m_pref_mod_resample_filter = static_cast<int>(MOD2RMF_RESAMPLE_SINC_8TAP);
+        m_pref_mod_resample_rate = 0;
+        m_pref_mod_amiga_filter = static_cast<int>(MOD2RMF_AMIGA_FILTER_NONE);
+        m_pref_mod_stereo_sep = 75;
 #if SUPPORT_MIDI_HW == TRUE
         m_midi_hw_enabled = false;
         m_midi_hw_device_index = -1;
@@ -96,6 +102,32 @@
             else if (key == "ignore_session_layout")
             {
                 m_pref_ignore_session_layout = PrefParseBool(value, false);
+            }
+            else if (key == "mod_import_ext_pitch")
+            {
+                m_pref_mod_ext_pitch = PrefParseBool(value, false);
+            }
+            else if (key == "mod_import_ext_adsr")
+            {
+                m_pref_mod_ext_adsr = PrefParseBool(value, false);
+            }
+            else if (key == "mod_import_resample_filter")
+            {
+                m_pref_mod_resample_filter = std::clamp(std::atoi(value.c_str()), 0, 3);
+            }
+            else if (key == "mod_import_resample_rate")
+            {
+                const int rate = std::atoi(value.c_str());
+                m_pref_mod_resample_rate =
+                    (rate == 0 || (rate >= 1000 && rate <= 384000)) ? rate : 0;
+            }
+            else if (key == "mod_import_amiga_filter")
+            {
+                m_pref_mod_amiga_filter = std::clamp(std::atoi(value.c_str()), 0, 2);
+            }
+            else if (key == "mod_import_stereo_separation")
+            {
+                m_pref_mod_stereo_sep = std::clamp(std::atoi(value.c_str()), 0, 100);
             }
 #if SUPPORT_MIDI_HW == TRUE
             else if (key == "midi_hw_enabled")
@@ -181,6 +213,12 @@
         out << "reopen_last_session=" << (m_pref_reopen_last_session ? "1" : "0") << '\n';
         out << "save_session_layout=" << (m_pref_save_session_layout ? "1" : "0") << '\n';
         out << "ignore_session_layout=" << (m_pref_ignore_session_layout ? "1" : "0") << '\n';
+        out << "mod_import_ext_pitch=" << (m_pref_mod_ext_pitch ? "1" : "0") << '\n';
+        out << "mod_import_ext_adsr=" << (m_pref_mod_ext_adsr ? "1" : "0") << '\n';
+        out << "mod_import_resample_filter=" << m_pref_mod_resample_filter << '\n';
+        out << "mod_import_resample_rate=" << m_pref_mod_resample_rate << '\n';
+        out << "mod_import_amiga_filter=" << m_pref_mod_amiga_filter << '\n';
+        out << "mod_import_stereo_separation=" << m_pref_mod_stereo_sep << '\n';
 #if SUPPORT_MIDI_HW == TRUE
         out << "midi_hw_enabled=" << (m_midi_hw_enabled ? "1" : "0") << '\n';
         out << "midi_hw_device_index=" << m_midi_hw_device_index << '\n';
@@ -274,6 +312,139 @@
         if (ImGui::Button("Cancel", ImVec2(80, 0)))
         {
             m_prefs_open = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    void OpenModuleImportSettingsDialog()
+    {
+        m_mod_import_draft_ext_pitch = m_pref_mod_ext_pitch;
+        m_mod_import_draft_ext_adsr = m_pref_mod_ext_adsr;
+        m_mod_import_draft_resample_filter = m_pref_mod_resample_filter;
+        m_mod_import_draft_resample_rate = m_pref_mod_resample_rate;
+        m_mod_import_draft_amiga_filter = m_pref_mod_amiga_filter;
+        m_mod_import_draft_stereo_sep = m_pref_mod_stereo_sep;
+        m_mod_import_prefs_open = true;
+    }
+
+    void DrawModuleImportSettingsDialog()
+    {
+        if (!m_mod_import_prefs_open)
+        {
+            return;
+        }
+        ImGui::OpenPopup("Module Import Settings");
+        if (!ImGui::BeginPopupModal("Module Import Settings",
+                                    &m_mod_import_prefs_open,
+                                    ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            return;
+        }
+
+        ImGui::TextUnformatted("ZMF features");
+        ImGui::Checkbox("Extended pitch range (-96 st)", &m_mod_import_draft_ext_pitch);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        {
+            ImGui::SetTooltip(
+                "Allow pitch down to -96 semitones (vs default -24).\n"
+                "Matches mod2rmf --ext-pitch. Implies ZMF.");
+        }
+        ImGui::Checkbox("Extended ADSR (up to 32 stages)", &m_mod_import_draft_ext_adsr);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        {
+            ImGui::SetTooltip(
+                "Preserve more tracker envelope points (up to 32 stages).\n"
+                "Off = classic 8-stage RMF cap. Matches mod2rmf --ext-adsr.\n"
+                "Implies ZMF when envelopes exceed 8 stages.");
+        }
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        static const char *kResampleLabels[] = {
+            "Nearest",
+            "Linear",
+            "Cubic",
+            "Sinc (8-tap)",
+        };
+        m_mod_import_draft_resample_filter =
+            std::clamp(m_mod_import_draft_resample_filter, 0, 3);
+        ImGui::Combo("Resample filter",
+                     &m_mod_import_draft_resample_filter,
+                     kResampleLabels,
+                     IM_ARRAYSIZE(kResampleLabels));
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        {
+            ImGui::SetTooltip(
+                "Interpolation used when resampling module samples.\n"
+                "Matches mod2rmf --resample-filter. Default: Sinc.\n"
+                "Only applied when Resample rate is non-zero.");
+        }
+        ImGui::InputInt("Resample rate (Hz)", &m_mod_import_draft_resample_rate);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        {
+            ImGui::SetTooltip(
+                "0 = keep native module rate. Otherwise 1000–384000 Hz.\n"
+                "Matches mod2rmf --resample-rate.");
+        }
+        if (m_mod_import_draft_resample_rate < 0)
+        {
+            m_mod_import_draft_resample_rate = 0;
+        }
+
+        static const char *kAmigaLabels[] = {
+            "None",
+            "A500 (~3275 Hz LPF)",
+            "A1200 (~28867 Hz LPF)",
+        };
+        m_mod_import_draft_amiga_filter = std::clamp(m_mod_import_draft_amiga_filter, 0, 2);
+        ImGui::Combo("Amiga filter",
+                     &m_mod_import_draft_amiga_filter,
+                     kAmigaLabels,
+                     IM_ARRAYSIZE(kAmigaLabels));
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        {
+            ImGui::SetTooltip(
+                "Bake Amiga hardware low-pass into samples before import.\n"
+                "Matches mod2rmf --amiga-filter.");
+        }
+
+        ImGui::Spacing();
+        ImGui::SliderInt("Stereo separation", &m_mod_import_draft_stereo_sep, 0, 100, "%d%%");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        {
+            ImGui::SetTooltip(
+                "Stereo width: 0 = mono (center), 75 = default (OpenMPT-like),\n"
+                "100 = hard L/R. Matches mod2rmf --stereo-separation.");
+        }
+
+        ImGui::Spacing();
+        if (ImGui::Button("OK", ImVec2(80, 0)))
+        {
+            m_pref_mod_ext_pitch = m_mod_import_draft_ext_pitch;
+            m_pref_mod_ext_adsr = m_mod_import_draft_ext_adsr;
+            m_pref_mod_resample_filter = std::clamp(m_mod_import_draft_resample_filter, 0, 3);
+            {
+                int rate = m_mod_import_draft_resample_rate;
+                if (rate != 0 && (rate < 1000 || rate > 384000))
+                {
+                    rate = 0;
+                }
+                m_pref_mod_resample_rate = std::max(0, rate);
+            }
+            m_pref_mod_amiga_filter = std::clamp(m_mod_import_draft_amiga_filter, 0, 2);
+            m_pref_mod_stereo_sep = std::clamp(m_mod_import_draft_stereo_sep, 0, 100);
+            SaveEditorPrefsToDisk();
+            m_mod_import_prefs_open = false;
+            ImGui::CloseCurrentPopup();
+            SetStatus("Module import settings saved");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(80, 0)))
+        {
+            m_mod_import_prefs_open = false;
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();

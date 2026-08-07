@@ -1764,6 +1764,7 @@ void ResetSessionLayoutToDefault()
     m_export_bank_open = false;
     m_export_audio_open = false;
     m_prefs_open = false;
+    m_mod_import_prefs_open = false;
     m_session_info_open = false;
     m_resource_usage_open = false;
     m_bank_add_open = false;

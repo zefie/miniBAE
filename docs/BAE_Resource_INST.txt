@@ -285,3 +285,19 @@ LSTC
 			Example C64-ish snare: OSCL base=SQUA, WIDX ADSR (period=0) raises index toward NOIS.
 	KEYE	WIDX
 LSTE	
+
+---------------------------------------------------------------------------
+ZMF sample start offset
+
+Static (INST): When flags2 ZBF_enableSampleOffsetStart is set, Misc parameter 1/2
+pack a 32-bit frame start (hi/lo). Applied at note-on for PCM voices.
+
+Per-note MIDI (ZMF songs only): NeoBAE custom NRPN 6,0
+  CC99=6, CC98=0, then three Data Entry MSB (CC6) big-endian 7-bit digits:
+    offset_frames = (b0<<14) | (b1<<7) | b2   (21-bit, 0..2097151)
+  Three CC6=0 clears the channel NRPN offset.
+  At note-on: if channel NRPN offset != 0, it overrides the INST static offset;
+  if NRPN is 0, INST static offset (if any) still applies.
+  Ignored for classic RMF/HSB and for oscillator-only voices.
+  Related custom NRPNs: 4,0 = velocity curve; 5,0 = bank mode.
+---------------------------------------------------------------------------

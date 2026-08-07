@@ -1432,6 +1432,7 @@ public:
         DrawSongInfoDialog();
         DrawSongSettingsDialog();
         DrawEditorPreferencesDialog();
+        DrawModuleImportSettingsDialog();
         DrawAboutDialog();
         DrawInstrumentEditorDialog();
         DrawExportRmfDialog();
@@ -2779,7 +2780,27 @@ private:
 
 #if defined(LIBXMP_STATIC) || defined(LIBXMP_CORE_PLAYER)
         BAERmfEditorDocument *new_doc = nullptr;
-        const BAEResult result = mod2rmf_load_module_to_document(&new_doc, path, true);
+        Mod2RmfLoadOptions mod_opts;
+        mod2rmf_load_options_defaults(&mod_opts);
+        mod_opts.useZmfContainer = true;
+        mod_opts.useExtendedPitchRange = m_pref_mod_ext_pitch;
+        mod_opts.useExtendedAdsr = m_pref_mod_ext_adsr;
+        mod_opts.resamplerSettings.amigaFilter =
+            static_cast<Mod2RmfAmigaFilter>(std::clamp(m_pref_mod_amiga_filter, 0, 2));
+        mod_opts.resamplerSettings.resampleFilter =
+            static_cast<Mod2RmfResampleFilter>(std::clamp(m_pref_mod_resample_filter, 0, 3));
+        {
+            int rate = m_pref_mod_resample_rate;
+            if (rate != 0 && (rate < 1000 || rate > 384000))
+            {
+                rate = 0;
+            }
+            mod_opts.resamplerSettings.targetRate = static_cast<uint32_t>(std::max(0, rate));
+        }
+        mod_opts.stereoSeparation =
+            static_cast<uint8_t>(std::clamp(m_pref_mod_stereo_sep, 0, 100));
+        const BAEResult result =
+            mod2rmf_load_module_to_document_ex(&new_doc, path, &mod_opts);
         if (result != BAE_NO_ERROR || !new_doc)
         {
             SetStatus(std::string("Module load failed: ") + FormatBAEError(result));
@@ -5584,6 +5605,7 @@ private:
 
     /* Editor Preferences (~/.config/neobae/nbeditor_prefs). */
     bool m_prefs_open = false;
+    bool m_mod_import_prefs_open = false;
     bool m_about_open = false;
     bool m_trash_open = false;
     int m_trash_selected = -1;
@@ -5623,6 +5645,19 @@ private:
     bool m_prefs_draft_reopen = false;
     bool m_prefs_draft_save_layout = true;
     bool m_prefs_draft_ignore_layout = false;
+    /* Module import settings (mod2rmf) — live + dialog drafts. */
+    bool m_pref_mod_ext_pitch = false;
+    bool m_pref_mod_ext_adsr = false;
+    int m_pref_mod_resample_filter = static_cast<int>(MOD2RMF_RESAMPLE_SINC_8TAP);
+    int m_pref_mod_resample_rate = 0; /* 0 = native */
+    int m_pref_mod_amiga_filter = static_cast<int>(MOD2RMF_AMIGA_FILTER_NONE);
+    int m_pref_mod_stereo_sep = 75;
+    bool m_mod_import_draft_ext_pitch = false;
+    bool m_mod_import_draft_ext_adsr = false;
+    int m_mod_import_draft_resample_filter = static_cast<int>(MOD2RMF_RESAMPLE_SINC_8TAP);
+    int m_mod_import_draft_resample_rate = 0;
+    int m_mod_import_draft_amiga_filter = static_cast<int>(MOD2RMF_AMIGA_FILTER_NONE);
+    int m_mod_import_draft_stereo_sep = 75;
     char m_pref_song_title[256] = {0};
     char m_pref_song_composer[256] = {0};
     char m_pref_song_copyright[256] = {0};

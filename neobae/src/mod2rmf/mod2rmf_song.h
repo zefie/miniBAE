@@ -30,7 +30,8 @@ int mod2rmf_song_model_append_note(ModSongModel *song,
                                   uint32_t durationTicks,
                                   unsigned char note,
                                   unsigned char velocity,
-                                  unsigned char program);
+                                  unsigned char program,
+                                  uint32_t sampleOffsetFrames);
 int mod2rmf_song_model_append_cc_event(ModSongModel *song,
                                       uint16_t sourceChannel,
                                       uint32_t tick,

@@ -504,6 +504,11 @@ void PV_ResetControlers(GM_Song *pSong, int16_t channel2Reset, bool completeRese
         pSong->channelPitchBendRange[count] = DEFAULT_PITCH_RANGE; // pitch bend controler
         pSong->channelBend[count] = 0;
         pSong->channelModWheel[count] = 0;
+#if USE_ZMF_SUPPORT == TRUE
+        pSong->channelSampleOffsetFrames[count] = 0;
+        pSong->channelSampleOffsetAccum[count] = 0;
+        pSong->channelSampleOffsetCount[count] = 0;
+#endif
         pSong->isNokiaVibrationChannel[count] = FALSE;
     }
 #if USE_SF2_SUPPORT == TRUE
@@ -2984,8 +2989,14 @@ static void PV_ProcessRegisteredParameters(GM_Song *pSong, int16_t MIDIChannel, 
 {
     unsigned char valueLSB, valueMSB;
     bool changePercProgram;
+#if USE_ZMF_SUPPORT == TRUE
+    bool keepNrpnSelect;
+#endif
 
     changePercProgram = FALSE;
+#if USE_ZMF_SUPPORT == TRUE
+    keepNrpnSelect = FALSE;
+#endif
     switch (pSong->channelWhichParameter[MIDIChannel])
     {
     // GM Registered parameters
@@ -3048,6 +3059,36 @@ static void PV_ProcessRegisteredParameters(GM_Song *pSong, int16_t MIDIChannel, 
                 break;
             }
             break;
+#if USE_ZMF_SUPPORT == TRUE
+        /* ZMF-only: sample start offset in frames.
+         * Encoding: CC99=6, CC98=0, then three CC6 digits (big-endian 7-bit)
+         * forming a 21-bit frame offset: o = (b0<<14)|(b1<<7)|b2.
+         * Offset 0 clears channel NRPN offset (INST static offset may still apply). */
+        case (6 * 128) + 0:
+            if (pSong->engineConfigFlags & SONG_CONFIG_CONTAINER_IS_ZMF)
+            {
+                if (pSong->channelSampleOffsetCount[MIDIChannel] == 0)
+                {
+                    pSong->channelSampleOffsetAccum[MIDIChannel] = 0;
+                }
+                pSong->channelSampleOffsetAccum[MIDIChannel] =
+                    (pSong->channelSampleOffsetAccum[MIDIChannel] << 7) | (uint32_t)(value & 0x7Fu);
+                pSong->channelSampleOffsetCount[MIDIChannel]++;
+                if (pSong->channelSampleOffsetCount[MIDIChannel] < 3)
+                {
+                    /* Keep NRPN select until the third CC6 commits. */
+                    keepNrpnSelect = TRUE;
+                }
+                else
+                {
+                    pSong->channelSampleOffsetFrames[MIDIChannel] =
+                        pSong->channelSampleOffsetAccum[MIDIChannel] & 0x1FFFFFu;
+                    pSong->channelSampleOffsetCount[MIDIChannel] = 0;
+                    pSong->channelSampleOffsetAccum[MIDIChannel] = 0;
+                }
+            }
+            break;
+#endif
         }
 
         if (changePercProgram)
@@ -3062,11 +3103,23 @@ static void PV_ProcessRegisteredParameters(GM_Song *pSong, int16_t MIDIChannel, 
             }
         }
 
+#if USE_ZMF_SUPPORT == TRUE
+        if (keepNrpnSelect)
+        {
+            break;
+        }
+#endif
         // reset
         pSong->channelNonRegisteredParameterLSB[MIDIChannel] = -1;
         pSong->channelNonRegisteredParameterMSB[MIDIChannel] = -1;
         break;
     }
+#if USE_ZMF_SUPPORT == TRUE
+    if (keepNrpnSelect)
+    {
+        return;
+    }
+#endif
     pSong->channelWhichParameter[MIDIChannel] = USE_NO_RP;
 }
 
@@ -3225,10 +3278,27 @@ void PV_ProcessController(GM_Song *pSong, int16_t MIDIChannel, int16_t currentTr
         case B_NRPN_LSB: // non registered parameter numbers LSB
             pSong->channelNonRegisteredParameterLSB[MIDIChannel] = (signed char)value;
             pSong->channelWhichParameter[MIDIChannel] = USE_NRPN;
+#if USE_ZMF_SUPPORT == TRUE
+            /* Selecting NRPN 6,0 resets the 3×CC6 digit accumulator. */
+            if (pSong->channelNonRegisteredParameterMSB[MIDIChannel] == 6 &&
+                pSong->channelNonRegisteredParameterLSB[MIDIChannel] == 0)
+            {
+                pSong->channelSampleOffsetCount[MIDIChannel] = 0;
+                pSong->channelSampleOffsetAccum[MIDIChannel] = 0;
+            }
+#endif
             break;
         case B_NRPN_MSB: // non registered parameter numbers MSB
             pSong->channelNonRegisteredParameterMSB[MIDIChannel] = (signed char)value;
             pSong->channelWhichParameter[MIDIChannel] = USE_NRPN;
+#if USE_ZMF_SUPPORT == TRUE
+            if (pSong->channelNonRegisteredParameterMSB[MIDIChannel] == 6 &&
+                pSong->channelNonRegisteredParameterLSB[MIDIChannel] == 0)
+            {
+                pSong->channelSampleOffsetCount[MIDIChannel] = 0;
+                pSong->channelSampleOffsetAccum[MIDIChannel] = 0;
+            }
+#endif
             break;
 
         case B_RPN_LSB: // registered parameter numbers LSB

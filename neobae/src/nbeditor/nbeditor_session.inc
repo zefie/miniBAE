@@ -161,9 +161,23 @@
         }
         if (ImGui::BeginMenu("Edit"))
         {
-            if (ImGui::MenuItem("Preferences..."))
+            if (ImGui::BeginMenu("Preferences"))
             {
-                OpenEditorPreferencesDialog();
+                if (ImGui::MenuItem("General..."))
+                {
+                    OpenEditorPreferencesDialog();
+                }
+                if (ImGui::MenuItem("Module Import Settings..."))
+                {
+                    OpenModuleImportSettingsDialog();
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                {
+                    ImGui::SetTooltip(
+                        "Options applied when opening tracker modules\n"
+                        "(MOD/S3M/XM/IT/…). Saved to app preferences.");
+                }
+                ImGui::EndMenu();
             }
             if (ImGui::MenuItem("Reset Layout"))
             {

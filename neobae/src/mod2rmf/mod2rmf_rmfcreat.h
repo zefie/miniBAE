@@ -39,14 +39,29 @@ typedef struct {
     bool avoidMidiChannel10;   /* map around MIDI ch10 (index 9) when requested */
     uint8_t stereoSeparation;  /* 0=mono (center), 75=default, 100=hard L/R */
     uint8_t itV00CutRows;      /* 0 disables; default 6 */
+    bool useExtendedPitchRange; /* SONG_CONFIG extended pitch (-96 st) */
+    uint8_t maxAdsrStages;     /* envelope stage budget (8 classic / 32 extended) */
 } Mod2RmfConverter;
 
+/* Options for mod2rmf_load_module_to_document_ex (nbeditor / library callers). */
+typedef struct Mod2RmfLoadOptions
+{
+    bool useZmfContainer;              /* prefer ZMF container for editor import */
+    bool useExtendedPitchRange;        /* --ext-pitch */
+    bool useExtendedAdsr;              /* up to 32-stage envelopes (forces ZMF) */
+    Mod2RmfResamplerSettings resamplerSettings;
+    uint8_t stereoSeparation;          /* 0=mono, 75=default, 100=hard L/R */
+} Mod2RmfLoadOptions;
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+void mod2rmf_load_options_defaults(Mod2RmfLoadOptions *opts);
 BAEResult mod2rmf_load_module_to_document(BAERmfEditorDocument **doc, const char *sourcePath, bool useZmfContainer);
+BAEResult mod2rmf_load_module_to_document_ex(BAERmfEditorDocument **doc,
+                                             const char *sourcePath,
+                                             const Mod2RmfLoadOptions *opts);
 bool mod2rmf_path_is_it(const char *path);
 
 #ifdef __cplusplus
@@ -77,7 +92,7 @@ int mod2rmf_add_programmed_note(Mod2RmfConverter *conv,
                                unsigned char velocity,
                                unsigned char program);
 
-int mod2rmf_write_song_notes(Mod2RmfConverter *conv, const ModSongModel *song);
+int mod2rmf_write_song_notes(Mod2RmfConverter *conv, const ModSongModel *song, bool useZmfContainer);
 int mod2rmf_setup_instrument_ext(Mod2RmfConverter *conv, const ModSongModel *song, bool useZmfContainer);
 int mod2rmf_setup_tracks(Mod2RmfConverter *conv, const ModSongModel *song, const ChannelMap *chMap);
 void mod2rmf_build_midi_channel_aggregate(const ChannelProfile trackerProfiles[],

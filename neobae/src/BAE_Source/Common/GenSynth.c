@@ -4413,7 +4413,25 @@ void PV_StartMIDINote(GM_Song *pSong, int16_t the_instrument,
         return;
     }
 
-    if (pInstrument->sampleOffsetStartEnabled)
+#if USE_ZMF_SUPPORT == TRUE
+    /* Prefer ZMF channel NRPN 6,0 sample offset when set; else INST static. */
+    if (!(pInstrument->useOscillator) &&
+        (pSong->engineConfigFlags & SONG_CONFIG_CONTAINER_IS_ZMF) &&
+        pSong->channelSampleOffsetFrames[the_channel] != 0)
+    {
+        noteStartOffsetFrames = pSong->channelSampleOffsetFrames[the_channel];
+        if (noteStartOffsetFrames >= pInstrument->u.w.waveFrames)
+        {
+            noteStartOffsetFrames = 0;
+        }
+    }
+    else
+#endif
+    if (pInstrument->sampleOffsetStartEnabled
+#if USE_ZMF_SUPPORT == TRUE
+        && !(pInstrument->useOscillator)
+#endif
+        )
     {
         noteStartOffsetFrames = pInstrument->sampleOffsetStartFrames;
         if (noteStartOffsetFrames >= pInstrument->u.w.waveFrames)
