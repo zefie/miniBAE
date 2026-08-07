@@ -110,6 +110,64 @@
         DeleteUnreferencedSndResources(to_delete, protect);
     }
 
+    /* SND ids referenced by one INST resource in a bank/RMF file. */
+    bool CollectSndIdsForInstInFile(XFILE file,
+                                    uint32_t inst_id,
+                                    std::vector<XShortResourceID> &out_snd) const
+    {
+        out_snd.clear();
+        if (!file)
+        {
+            return false;
+        }
+        int32_t size = 0;
+        char name[256];
+        name[0] = 0;
+        XPTR data = XGetFileResource(file,
+                                     ID_INST,
+                                     static_cast<XLongResourceID>(inst_id),
+                                     name,
+                                     &size);
+        if (!data || size < static_cast<int32_t>(sizeof(InstrumentResource)))
+        {
+            if (data)
+            {
+                XDisposePtr(data);
+            }
+            return false;
+        }
+
+        InstrumentResource *inst = static_cast<InstrumentResource *>(data);
+        const int16_t split_count = XGetShort(&inst->keySplitCount);
+        if (split_count <= 0)
+        {
+            const XShortResourceID snd =
+                static_cast<XShortResourceID>(XGetShort(&inst->sndResourceID));
+            if (snd != static_cast<XShortResourceID>(kNoSndResourceId))
+            {
+                out_snd.push_back(snd);
+            }
+        }
+        else
+        {
+            std::set<XShortResourceID> seen;
+            for (int16_t s = 0; s < split_count; ++s)
+            {
+                KeySplit split;
+                std::memset(&split, 0, sizeof(split));
+                XGetKeySplitFromPtrWithSize(inst, size, s, &split);
+                const XShortResourceID snd = split.sndResourceID;
+                if (snd != static_cast<XShortResourceID>(kNoSndResourceId) &&
+                    seen.insert(snd).second)
+                {
+                    out_snd.push_back(snd);
+                }
+            }
+        }
+        XDisposePtr(data);
+        return true;
+    }
+
     void CollectInstAndSndIdsFromBankFile(XFILE file,
                                           std::vector<XShortResourceID> &out_inst,
                                           std::vector<XShortResourceID> &out_snd) const

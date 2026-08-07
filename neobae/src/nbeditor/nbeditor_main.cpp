@@ -39,6 +39,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <tuple>
 #include <set>
 #include <string>
 #include <unordered_set>
@@ -1446,6 +1447,8 @@ public:
         DrawEditConfirmDialogs();
         DrawResourceUsageDialog();
         DrawInstDestDialog();
+        DrawInstMoveSongRemapConfirmDialog();
+        PollInstMoveSongRemapPendingApply();
         DrawRenameDialog();
         DrawIncludeSamplesPrompt();
         DrawSessionInfoDialog();
@@ -2581,22 +2584,50 @@ private:
     {
         m_instruments = m_bank_instruments;
 
-        std::map<std::pair<int, int>, size_t> by_bank_program;
+        /* Key must include percussion: melodic B0P059 (INST 59) and drum
+         * B0N059 (INST 187) share bank+program and must not collide. */
+        using SlotKey = std::tuple<int, int, bool>;
+        std::map<SlotKey, size_t> by_slot;
+        std::map<uint32_t, size_t> by_inst_id;
         for (size_t i = 0; i < m_instruments.size(); ++i)
         {
             const InstrumentRow &inst = m_instruments[i];
-            by_bank_program[std::make_pair(inst.bank, inst.program)] = i;
+            by_slot[SlotKey(inst.bank, inst.program, inst.percussion)] = i;
+            if (!inst.is_alias && inst.inst_id != 0)
+            {
+                by_inst_id[inst.inst_id] = i;
+            }
         }
 
         for (const InstrumentRow &song_inst : m_song_override_instruments)
         {
-            const std::pair<int, int> key(song_inst.bank, song_inst.program);
-            auto found = by_bank_program.find(key);
-            if (found != by_bank_program.end())
+            const SlotKey key(song_inst.bank, song_inst.program, song_inst.percussion);
+            size_t match_index = static_cast<size_t>(-1);
+            if (song_inst.inst_id != 0)
             {
-                InstrumentRow &base = m_instruments[found->second];
+                auto by_id = by_inst_id.find(song_inst.inst_id);
+                if (by_id != by_inst_id.end())
+                {
+                    match_index = by_id->second;
+                }
+            }
+            if (match_index == static_cast<size_t>(-1))
+            {
+                auto by_slot_it = by_slot.find(key);
+                if (by_slot_it != by_slot.end())
+                {
+                    match_index = by_slot_it->second;
+                }
+            }
+
+            if (match_index != static_cast<size_t>(-1))
+            {
+                InstrumentRow &base = m_instruments[match_index];
                 base.has_song_override = true;
                 base.is_custom = true;
+                base.percussion = song_inst.percussion;
+                /* Matched a bank list row — keep bank ops (Move/Clone/…) enabled. */
+                base.from_song_document = false;
                 if (song_inst.inst_id != 0)
                 {
                     base.inst_id = song_inst.inst_id;
@@ -2609,21 +2640,20 @@ private:
                         {
                             base.instrument_index = bank_row.instrument_index;
                             base.split_count = bank_row.split_count;
+                            if (!bank_row.name.empty())
+                            {
+                                base.name = bank_row.name;
+                            }
                             break;
                         }
                     }
                 }
-                base.from_song_document = song_inst.from_song_document;
                 base.split_count = std::max(base.split_count, song_inst.split_count);
-                if (!song_inst.name.empty() &&
-                    (base.name.empty() || base.name.find("(Override)") == std::string::npos))
+                /* Fill name only when the bank INST has none; song_inst.name is
+                 * often a sample display name and should not replace INST names. */
+                if (base.name.empty() && !song_inst.name.empty())
                 {
-                    /* Prefer RMF display name when the bank slot still has a GM name. */
-                    if (m_session_custom_inst_ids.count(song_inst.inst_id) != 0 ||
-                        song_inst.from_song_document)
-                    {
-                        base.name = song_inst.name;
-                    }
+                    base.name = song_inst.name;
                 }
                 /* Only Bank 0/1 slots are GM overrides; Bank 2+ customs are native. */
                 if (base.bank < 2 && base.name.find("(Override)") == std::string::npos)
@@ -2651,7 +2681,11 @@ private:
                     }
                 }
                 /* No matching bank row — not an override of a Bank 0/1 INST. */
-                by_bank_program[key] = m_instruments.size();
+                by_slot[key] = m_instruments.size();
+                if (merged.inst_id != 0)
+                {
+                    by_inst_id[merged.inst_id] = m_instruments.size();
+                }
                 m_instruments.push_back(merged);
             }
         }
@@ -2687,7 +2721,9 @@ private:
             return;
         }
 
-        std::map<std::pair<int, int>, InstrumentRow> by_bank_program;
+        /* Slot = bank + program + melodic/perc; melodic P059 ≠ drum N059. */
+        using SlotKey = std::tuple<int, int, bool>;
+        std::map<SlotKey, InstrumentRow> by_slot;
         for (uint32_t i = 0; i < sample_count; ++i)
         {
             BAERmfEditorSampleInfo info;
@@ -2709,8 +2745,18 @@ private:
                 program = static_cast<int>(inst_id % 128u);
                 percussion = ((inst_id & 0x80u) != 0u);
             }
+            else
+            {
+                /* info.program is 0..127 within its category; treat high bit
+                 * form as percussion only when no INST id is available. */
+                if (program >= 128)
+                {
+                    percussion = true;
+                    program = program % 128;
+                }
+            }
 
-            InstrumentRow &inst = by_bank_program[std::make_pair(bank, program)];
+            InstrumentRow &inst = by_slot[SlotKey(bank, program, percussion)];
             if (inst.split_count == 0)
             {
                 inst.is_custom = true;
@@ -2721,11 +2767,23 @@ private:
                 inst.program = program;
                 inst.bank = bank;
                 inst.percussion = percussion;
-                if (info.displayName && info.displayName[0])
+                /* Prefer INST resource name over per-sample display names. */
+                if (inst.inst_id != 0 && m_document)
+                {
+                    BAERmfEditorInstrumentExtInfo ext{};
+                    if (BAERmfEditorDocument_GetInstrumentExtInfo(m_document,
+                                                                  inst.inst_id,
+                                                                  &ext) == BAE_NO_ERROR &&
+                        ext.displayName && ext.displayName[0])
+                    {
+                        inst.name = ext.displayName;
+                    }
+                }
+                if (inst.name.empty() && info.displayName && info.displayName[0])
                 {
                     inst.name = info.displayName;
                 }
-                else
+                if (inst.name.empty())
                 {
                     char generated[64];
                     std::snprintf(generated, sizeof(generated), "Inst B%dP%03d", bank, program);
@@ -2735,7 +2793,7 @@ private:
             inst.split_count += 1;
         }
 
-        for (const auto &entry : by_bank_program)
+        for (const auto &entry : by_slot)
         {
             m_song_override_instruments.push_back(entry.second);
         }
@@ -5431,6 +5489,20 @@ private:
     bool m_inst_clipboard_valid = false;
     uint32_t m_inst_clipboard_inst_id = 0;
     std::string m_inst_clipboard_name;
+
+    bool m_inst_move_remap_confirm_open = false;
+    bool m_inst_move_remap_pending_apply = false;
+    uint32_t m_inst_move_remap_note_count = 0;
+    int m_inst_move_remap_old_bank = 0;
+    int m_inst_move_remap_old_program = 0;
+    bool m_inst_move_remap_old_percussion = false;
+    int m_inst_move_remap_new_bank = 0;
+    int m_inst_move_remap_new_program = 0;
+    bool m_inst_move_remap_new_percussion = false;
+    /* Nonzero while Move cloned to dest but source delete is deferred until
+     * the song-remap dialog is answered (Yes → delete; No → keep original). */
+    uint32_t m_inst_move_pending_delete_source_id = 0;
+    uint32_t m_inst_move_pending_dest_id = 0;
 
     int m_sample_rate_hz = 44100;
     int m_sample_rate_index = 2;

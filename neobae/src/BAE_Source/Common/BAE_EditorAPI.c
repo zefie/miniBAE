@@ -11652,11 +11652,24 @@ static BAEResult PV_RemapTrackInstrumentReferences(BAERmfEditorTrack *track,
 {
     bool changed;
     bool restartScan;
+    uint16_t sourceMsb;
+    uint16_t sourceLsb;
+    uint16_t targetMsb;
+    uint16_t targetLsb;
+    uint16_t sourceBankMidi;
+    uint16_t targetBankMidi;
 
     if (!track)
     {
         return BAE_PARAM_ERR;
     }
+
+    /* Normalize to MIDI (MSB<<7)|LSB so short Beatnik groups and imported
+     * MIDI banks compare / rewrite correctly. */
+    PV_BankToMidiMsbLsb(sourceBank, &sourceMsb, &sourceLsb);
+    PV_BankToMidiMsbLsb(targetBank, &targetMsb, &targetLsb);
+    sourceBankMidi = (uint16_t)((sourceMsb << 7) | sourceLsb);
+    targetBankMidi = (uint16_t)((targetMsb << 7) | targetLsb);
 
     changed = FALSE;
     do
@@ -11687,105 +11700,116 @@ static BAEResult PV_RemapTrackInstrumentReferences(BAERmfEditorTrack *track,
             lastBankLsbIndex[i] = 0xFFFFFFFFu;
         }
 
-        for (i = 0; i < track->auxEventCount; ++i)
+        /* Freeze the scan length: inserts grow auxEventCount and must not
+         * extend this loop past the allocated refs[] array. */
         {
-            refs[i].index = i;
-            refs[i].tick = track->auxEvents[i].tick;
-            refs[i].eventOrder = track->auxEvents[i].eventOrder;
-        }
-        qsort(refs, track->auxEventCount, sizeof(PV_AuxOrderRef), PV_CompareAuxOrderRef);
+            uint32_t scanCount = track->auxEventCount;
 
-        for (i = 0; i < track->auxEventCount; ++i)
-        {
-            BAERmfEditorAuxEvent *aux;
-            unsigned char eventType;
-            unsigned char channel;
-
-            aux = &track->auxEvents[refs[i].index];
-            eventType = (unsigned char)(aux->status & 0xF0);
-            channel = (unsigned char)(aux->status & 0x0F);
-
-            if (eventType == CONTROL_CHANGE && aux->dataBytes >= 2)
+            for (i = 0; i < scanCount; ++i)
             {
-                unsigned char sourceData2;
-
-                sourceData2 = aux->data2;
-                if (aux->data1 == BANK_MSB)
-                {
-                    currentBank[channel] = (uint16_t)((((uint16_t)sourceData2) << 7) | (currentBank[channel] & 0x7F));
-                    lastBankMsbIndex[channel] = refs[i].index;
-                }
-                else if (aux->data1 == BANK_LSB)
-                {
-                    currentBank[channel] = (uint16_t)((currentBank[channel] & 0x3F80) | ((uint16_t)sourceData2 & 0x7F));
-                    lastBankLsbIndex[channel] = refs[i].index;
-                }
-
-                if (sourceBank != targetBank && (remapChannelMask & (uint16_t)(1u << channel)) != 0)
-                {
-                    if (aux->data1 == BANK_MSB && sourceData2 == (unsigned char)((sourceBank >> 7) & 0x7F))
-                    {
-                        aux->data2 = (unsigned char)((targetBank >> 7) & 0x7F);
-                        changed = TRUE;
-                    }
-                    else if (aux->data1 == BANK_LSB && sourceData2 == (unsigned char)(sourceBank & 0x7F))
-                    {
-                        aux->data2 = (unsigned char)(targetBank & 0x7F);
-                        changed = TRUE;
-                    }
-                }
+                refs[i].index = i;
+                refs[i].tick = track->auxEvents[i].tick;
+                refs[i].eventOrder = track->auxEvents[i].eventOrder;
             }
-            else if (eventType == PROGRAM_CHANGE && aux->dataBytes >= 1)
+            qsort(refs, scanCount, sizeof(PV_AuxOrderRef), PV_CompareAuxOrderRef);
+
+            for (i = 0; i < scanCount; ++i)
             {
-                bool channelFallbackAllowed;
+                BAERmfEditorAuxEvent *aux;
+                unsigned char eventType;
+                unsigned char channel;
 
-                channelFallbackAllowed = ((((remapChannelMask & (uint16_t)(1u << channel)) != 0)
-                                           && (lastBankMsbIndex[channel] == 0xFFFFFFFFu)
-                                           && (lastBankLsbIndex[channel] == 0xFFFFFFFFu))
-                                          ? TRUE
-                                          : FALSE);
+                aux = &track->auxEvents[refs[i].index];
+                eventType = (unsigned char)(aux->status & 0xF0);
+                channel = (unsigned char)(aux->status & 0x0F);
 
-                if (aux->data1 == sourceProgram
-                    && (currentBank[channel] == sourceBank
-                        || channelFallbackAllowed))
+                if (eventType == CONTROL_CHANGE && aux->dataBytes >= 2)
                 {
-                    aux->data1 = targetProgram;
-                    changed = TRUE;
+                    unsigned char sourceData2;
 
-                    if (sourceBank != targetBank && currentBank[channel] != targetBank)
+                    sourceData2 = aux->data2;
+                    if (aux->data1 == BANK_MSB)
                     {
-                        BAEResult insertResult;
-                        bool needMsb;
-                        bool needLsb;
+                        currentBank[channel] = (uint16_t)((((uint16_t)sourceData2) << 7) | (currentBank[channel] & 0x7F));
+                        lastBankMsbIndex[channel] = refs[i].index;
+                    }
+                    else if (aux->data1 == BANK_LSB)
+                    {
+                        currentBank[channel] = (uint16_t)((currentBank[channel] & 0x3F80) | ((uint16_t)sourceData2 & 0x7F));
+                        lastBankLsbIndex[channel] = refs[i].index;
+                    }
 
-                        needMsb = (lastBankMsbIndex[channel] == 0xFFFFFFFFu) ? TRUE : FALSE;
-                        needLsb = (lastBankLsbIndex[channel] == 0xFFFFFFFFu) ? TRUE : FALSE;
-
-                        if (!needMsb)
+                    if (sourceBankMidi != targetBankMidi &&
+                        (remapChannelMask & (uint16_t)(1u << channel)) != 0)
+                    {
+                        if (aux->data1 == BANK_MSB && sourceData2 == (unsigned char)sourceMsb)
                         {
-                            track->auxEvents[lastBankMsbIndex[channel]].data2 = (unsigned char)((targetBank >> 7) & 0x7F);
+                            aux->data2 = (unsigned char)targetMsb;
                             changed = TRUE;
                         }
-                        if (!needLsb)
+                        else if (aux->data1 == BANK_LSB && sourceData2 == (unsigned char)sourceLsb)
                         {
-                            track->auxEvents[lastBankLsbIndex[channel]].data2 = (unsigned char)(targetBank & 0x7F);
+                            aux->data2 = (unsigned char)targetLsb;
                             changed = TRUE;
                         }
+                    }
+                }
+                else if (eventType == PROGRAM_CHANGE && aux->dataBytes >= 1)
+                {
+                    bool channelFallbackAllowed;
 
-                        if (needMsb || needLsb)
+                    channelFallbackAllowed = ((((remapChannelMask & (uint16_t)(1u << channel)) != 0)
+                                               && (lastBankMsbIndex[channel] == 0xFFFFFFFFu)
+                                               && (lastBankLsbIndex[channel] == 0xFFFFFFFFu))
+                                              ? TRUE
+                                              : FALSE);
+
+                    if (aux->data1 == sourceProgram
+                        && (PV_BanksEquivalent(currentBank[channel], sourceBankMidi)
+                            || channelFallbackAllowed))
+                    {
+                        aux->data1 = targetProgram;
+                        changed = TRUE;
+
+                        if (sourceBankMidi != targetBankMidi &&
+                            !PV_BanksEquivalent(currentBank[channel], targetBankMidi))
                         {
-                            insertResult = PV_InsertBankSelectBeforeAuxEvent(track,
-                                                                              refs[i].index,
-                                                                              channel,
-                                                                              targetBank,
-                                                                              needMsb,
-                                                                              needLsb);
-                            if (insertResult != BAE_NO_ERROR)
+                            BAEResult insertResult;
+                            bool needMsb;
+                            bool needLsb;
+
+                            needMsb = (lastBankMsbIndex[channel] == 0xFFFFFFFFu) ? TRUE : FALSE;
+                            needLsb = (lastBankLsbIndex[channel] == 0xFFFFFFFFu) ? TRUE : FALSE;
+
+                            if (!needMsb)
                             {
-                                XDisposePtr(refs);
-                                return insertResult;
+                                track->auxEvents[lastBankMsbIndex[channel]].data2 = (unsigned char)targetMsb;
+                                changed = TRUE;
                             }
-                            changed = TRUE;
+                            if (!needLsb)
+                            {
+                                track->auxEvents[lastBankLsbIndex[channel]].data2 = (unsigned char)targetLsb;
+                                changed = TRUE;
+                            }
+
+                            if (needMsb || needLsb)
+                            {
+                                insertResult = PV_InsertBankSelectBeforeAuxEvent(track,
+                                                                                  refs[i].index,
+                                                                                  channel,
+                                                                                  targetBankMidi,
+                                                                                  needMsb,
+                                                                                  needLsb);
+                                if (insertResult != BAE_NO_ERROR)
+                                {
+                                    XDisposePtr(refs);
+                                    return insertResult;
+                                }
+                                changed = TRUE;
+                                /* Indices/orders shifted — rescan from scratch. */
+                                restartScan = TRUE;
+                                break;
+                            }
                         }
                     }
                 }
@@ -11802,6 +11826,20 @@ static BAEResult PV_RemapTrackInstrumentReferences(BAERmfEditorTrack *track,
     return BAE_NO_ERROR;
 }
 
+/* Keep short (0..127 group) vs MIDI ((MSB<<7)|LSB) encoding of the old value. */
+static uint16_t PV_RemapBankPreserveForm(uint16_t oldBank, uint16_t targetBank)
+{
+    uint16_t targetMsb;
+    uint16_t targetLsb;
+
+    if (oldBank < 128)
+    {
+        return PV_BankGroupFromInternalBank(targetBank);
+    }
+    PV_BankToMidiMsbLsb(targetBank, &targetMsb, &targetLsb);
+    return (uint16_t)((targetMsb << 7) | targetLsb);
+}
+
 BAEResult BAERmfEditorDocument_RemapInstrumentReferences(BAERmfEditorDocument *document,
                                                          uint16_t sourceBank,
                                                          unsigned char sourceProgram,
@@ -11816,7 +11854,7 @@ BAEResult BAERmfEditorDocument_RemapInstrumentReferences(BAERmfEditorDocument *d
     {
         return BAE_PARAM_ERR;
     }
-    if (sourceBank == targetBank && sourceProgram == targetProgram)
+    if (PV_BanksEquivalent(sourceBank, targetBank) && sourceProgram == targetProgram)
     {
         return BAE_NO_ERROR;
     }
@@ -11829,14 +11867,20 @@ BAEResult BAERmfEditorDocument_RemapInstrumentReferences(BAERmfEditorDocument *d
         uint32_t noteIndex;
 
         track = &document->tracks[trackIndex];
-        if (track->bank == sourceBank && track->program == sourceProgram)
+        /* CH10 kit hits select INST by note number, not program — exclude from
+         * pitched bank:program remap (matches nbeditor song→INST resolution). */
+        if (track->channel != 9 &&
+            PV_BanksEquivalent(track->bank, sourceBank) &&
+            track->program == sourceProgram)
         {
             documentRemapChannelMask |= (uint16_t)(1u << (track->channel & 0x0F));
         }
         for (noteIndex = 0; noteIndex < track->noteCount; ++noteIndex)
         {
             BAERmfEditorNote const *note = &track->notes[noteIndex];
-            if (note->bank == sourceBank && note->program == sourceProgram)
+            if (note->channel != 9 &&
+                PV_BanksEquivalent(note->bank, sourceBank) &&
+                note->program == sourceProgram)
             {
                 documentRemapChannelMask |= (uint16_t)(1u << (note->channel & 0x0F));
             }
@@ -11852,9 +11896,11 @@ BAEResult BAERmfEditorDocument_RemapInstrumentReferences(BAERmfEditorDocument *d
 
         track = &document->tracks[trackIndex];
 
-        if (track->bank == sourceBank && track->program == sourceProgram)
+        if (track->channel != 9 &&
+            PV_BanksEquivalent(track->bank, sourceBank) &&
+            track->program == sourceProgram)
         {
-            track->bank = targetBank;
+            track->bank = PV_RemapBankPreserveForm(track->bank, targetBank);
             track->program = targetProgram;
             changed = TRUE;
         }
@@ -11864,9 +11910,11 @@ BAEResult BAERmfEditorDocument_RemapInstrumentReferences(BAERmfEditorDocument *d
             BAERmfEditorNote *note;
 
             note = &track->notes[noteIndex];
-            if (note->bank == sourceBank && note->program == sourceProgram)
+            if (note->channel != 9 &&
+                PV_BanksEquivalent(note->bank, sourceBank) &&
+                note->program == sourceProgram)
             {
-                note->bank = targetBank;
+                note->bank = PV_RemapBankPreserveForm(note->bank, targetBank);
                 note->program = targetProgram;
                 changed = TRUE;
             }
