@@ -20,6 +20,14 @@
             "File → Save Session so you can reopen the whole project later.",
         },
         {
+            "Backwards compatible",
+            "NeoBAE Editor is backwards compatible with Beatnik Editor 2. "
+            "You can open your old Beatnik Editor 2 sessions into NeoBAE "
+            "Editor. If your project does not use ZMF features, you can also "
+            "save your session as a .bsn file, which can then be opened in Beatnik "
+            "Editor 2.",
+        },
+        {
             "Sessions vs banks vs songs",
             "A Session (.bsn / .zsn) is your working project. The bank holds "
             "instruments and samples; songs reference them by program. Export "
