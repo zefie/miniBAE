@@ -3817,8 +3817,7 @@ BAEResult PV_PrepareUsedInstrumentsFromBank(
 
 BAEResult PV_AddRequiredAliases(BAERmfEditorDocument *document, XFILE fileRef, bool isZmf)
 {
-    uint32_t sampleIndex;
-    uint32_t maxProgram;
+    uint32_t program;
     uint32_t percussionAliasCount;
     uint32_t pitchedAliasCount;
     uint32_t aliasCount;
@@ -3829,79 +3828,44 @@ BAEResult PV_AddRequiredAliases(BAERmfEditorDocument *document, XFILE fileRef, b
     unsigned char percussionTargetPrograms[128];
     unsigned char percussionUsedNotes[128];
     uint32_t percussionNoteCount;
+    unsigned char pitchedAliasPrograms[128];
+
+    (void)isZmf;
 
     if (!document || !fileRef)
     {
         return BAE_PARAM_ERR;
     }
 
-    maxProgram = 0;
-    for (sampleIndex = 0; sampleIndex < document->sampleCount; ++sampleIndex)
+    /*
+     * Sparse pitched ALIS: only emit bank0 program N → INST (512+N) when that
+     * bank-2 INST was actually written. A dense 0..maxProgram table (old
+     * behavior) remaps unused GM slots like 0:4 → missing INST 516 and silences
+     * tracks that intentionally keep natural bank-0 instruments.
+     *
+     * Called after AddSampleResources / sample-free INST writers, so fileRef is
+     * the source of truth for which INST bodies exist.
+     *
+     * Also skip N → 512+N when INST N itself exists — otherwise a natural bank-0
+     * embed is hijacked by the bank-2 alias slot.
+     */
+    XSetMemory(pitchedAliasPrograms, (int32_t)sizeof(pitchedAliasPrograms), 0);
+    pitchedAliasCount = 0;
+    for (program = 0; program < 128u; ++program)
     {
-        BAERmfEditorSample const *sample = &document->samples[sampleIndex];
-        if (sample->instID != BAE_EDITOR_INST_ID_NONE && sample->instID >= 512)
-        {
-            uint32_t program = (uint32_t)(sample->instID - 512);
-            if (program < 128 && program > maxProgram)
-            {
-                maxProgram = program;
-            }
-        }
-    }
-#if USE_ZMF_SUPPORT == TRUE
-    /* Sample-free oscillator embeds still need alias coverage by INST id. */
-    {
-        uint32_t extIndex;
-        for (extIndex = 0; extIndex < document->instrumentExtCount; ++extIndex)
-        {
-            BAERmfEditorInstrumentExt const *ext = &document->instrumentExts[extIndex];
-            if (ext->useOscillator &&
-                ext->instID != (XLongResourceID)BAE_EDITOR_INST_ID_NONE &&
-                ext->instID >= 512)
-            {
-                uint32_t program = (uint32_t)ext->instID - 512u;
-                if (program < 128 && program > maxProgram)
-                {
-                    maxProgram = program;
-                }
-            }
-        }
-    }
-#endif
+        XLongResourceID bank2InstID = (XLongResourceID)(512u + program);
+        XLongResourceID naturalInstID = (XLongResourceID)program;
 
-    {
-        bool hasPitchedEmbed = FALSE;
-        for (sampleIndex = 0; sampleIndex < document->sampleCount; ++sampleIndex)
+        if (XExistsFileResource(fileRef, ID_INST, bank2InstID) == FALSE)
         {
-            BAERmfEditorSample const *sample = &document->samples[sampleIndex];
-            if (sample->instID != BAE_EDITOR_INST_ID_NONE && sample->instID >= 512)
-            {
-                hasPitchedEmbed = TRUE;
-                break;
-            }
+            continue;
         }
-#if USE_ZMF_SUPPORT == TRUE
-        if (!hasPitchedEmbed)
+        if (XExistsFileResource(fileRef, ID_INST, naturalInstID) != FALSE)
         {
-            uint32_t extIndex;
-            for (extIndex = 0; extIndex < document->instrumentExtCount; ++extIndex)
-            {
-                BAERmfEditorInstrumentExt const *ext = &document->instrumentExts[extIndex];
-                if (ext->useOscillator &&
-                    ext->instID != (XLongResourceID)BAE_EDITOR_INST_ID_NONE &&
-                    ext->instID >= 512)
-                {
-                    hasPitchedEmbed = TRUE;
-                    break;
-                }
-            }
+            continue;
         }
-#endif
-        /* Program 0 alone leaves maxProgram==0; still need ALIS 0→512. */
-        if (!hasPitchedEmbed)
-        {
-            return BAE_NO_ERROR;
-        }
+        pitchedAliasPrograms[program] = 1;
+        ++pitchedAliasCount;
     }
 
     XSetMemory(percussionTargetPrograms, (int32_t)sizeof(percussionTargetPrograms), 0);
@@ -3938,9 +3902,13 @@ BAEResult PV_AddRequiredAliases(BAERmfEditorDocument *document, XFILE fileRef, b
         }
     }
 
-    pitchedAliasCount = maxProgram + 1;
     percussionAliasCount = percussionNoteCount;
     aliasCount = pitchedAliasCount + percussionAliasCount;
+    if (aliasCount == 0)
+    {
+        return BAE_NO_ERROR;
+    }
+
     aliasBytes = 8 + (aliasCount * 8);
     aliasBlob = XNewPtr((int32_t)aliasBytes);
     if (!aliasBlob)
@@ -3953,12 +3921,18 @@ BAEResult PV_AddRequiredAliases(BAERmfEditorDocument *document, XFILE fileRef, b
     XPutLong(&((unsigned char *)aliasBlob)[4], aliasCount);
 
     w = 0;
-
-    for (; w < pitchedAliasCount; ++w)
+    for (program = 0; program < 128u; ++program)
     {
-        uint32_t offset = (uint32_t)(8 + (w * 8));
-        XPutLong(&((unsigned char *)aliasBlob)[offset],     (uint32_t)w);
-        XPutLong(&((unsigned char *)aliasBlob)[offset + 4], 512u + w);
+        uint32_t offset;
+
+        if (!pitchedAliasPrograms[program])
+        {
+            continue;
+        }
+        offset = (uint32_t)(8 + (w * 8));
+        XPutLong(&((unsigned char *)aliasBlob)[offset], program);
+        XPutLong(&((unsigned char *)aliasBlob)[offset + 4], 512u + program);
+        ++w;
     }
 
     {
@@ -3981,6 +3955,11 @@ BAEResult PV_AddRequiredAliases(BAERmfEditorDocument *document, XFILE fileRef, b
             {
                 continue;
             }
+            /* Cap against the pre-counted table; identity skips can shrink it. */
+            if (w >= aliasCount)
+            {
+                break;
+            }
             offset = (uint32_t)(8 + (w * 8));
             XPutLong(&((unsigned char *)aliasBlob)[offset], fromId);
             XPutLong(&((unsigned char *)aliasBlob)[offset + 4], toId);
@@ -3988,6 +3967,7 @@ BAEResult PV_AddRequiredAliases(BAERmfEditorDocument *document, XFILE fileRef, b
         }
         /* Rewrite alias count — skipped identity perc aliases shrink the table. */
         XPutLong(&((unsigned char *)aliasBlob)[4], w);
+        aliasBytes = 8 + (w * 8);
     }
 
     {
@@ -4001,8 +3981,8 @@ BAEResult PV_AddRequiredAliases(BAERmfEditorDocument *document, XFILE fileRef, b
     }
 
     XDisposePtr(aliasBlob);
-    debug_message("[RMF Save] Added %u alias entries (%u pitched, %u percussion)\n",
-                  aliasCount, pitchedAliasCount, percussionAliasCount);
+    debug_message("[RMF Save] Added %u alias entries (%u pitched sparse, %u percussion)\n",
+                  w, pitchedAliasCount, percussionAliasCount);
     return BAE_NO_ERROR;
 }
 
