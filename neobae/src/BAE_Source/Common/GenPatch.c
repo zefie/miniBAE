@@ -878,6 +878,12 @@ static GM_Instrument * PV_CreateInstrumentFromResource(GM_Instrument *theMaster,
             theI->u.w.endLoop = sndInfo->loopEnd;
             theI->u.w.baseMidiPitch = (unsigned char)sndInfo->baseKey;
             theI->u.w.sampledRate = sndInfo->rate;
+            /* Per-sample SND bit; parent INST flag also applied below for keymap splits. */
+            theI->advancedInterpolation = TEST_FLAG_VALUE(sndInfo->sndFlags, XSOUND_ADVANCED_INTERPOLATION);
+            if (theMaster && theMaster->advancedInterpolation)
+            {
+                theI->advancedInterpolation = TRUE;
+            }
         }
         else
         {
@@ -998,7 +1004,10 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
 #endif
                     theI->useSampleRate = TEST_FLAG_VALUE(header.flags1, ZBF_useSampleRate);
                     theI->sampleAndHold = TEST_FLAG_VALUE(header.flags1, ZBF_sampleAndHold);
-                    theI->advancedInterpolation = TEST_FLAG_VALUE(sndInfo->sndFlags, XSOUND_ADVANCED_INTERPOLATION);
+                    /* SND bit is authoritative after ZMF save; INST flags2 covers live/unsaved toggles. */
+                    theI->advancedInterpolation =
+                        TEST_FLAG_VALUE(sndInfo->sndFlags, XSOUND_ADVANCED_INTERPOLATION) ||
+                        TEST_FLAG_VALUE(header.flags2, ZBF_advancedInterpolation);
                     theI->sampleOffsetStartEnabled = TEST_FLAG_VALUE(header.flags2, ZBF_enableSampleOffsetStart);
                     theI->minLoopSize = PV_GetInstrumentMinLoopSize(pSong);
                     theI->useSoundModifierAsRootKey = TEST_FLAG_VALUE(header.flags2, ZBF_useSoundModifierAsRootKey);
@@ -1131,6 +1140,8 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                 theI->sampleAndHold = TEST_FLAG_VALUE(header.flags1, ZBF_sampleAndHold);
                 theI->playAtSampledFreq = TEST_FLAG_VALUE(header.flags2, ZBF_playAtSampledFreq);
                 theI->sampleOffsetStartEnabled = TEST_FLAG_VALUE(header.flags2, ZBF_enableSampleOffsetStart);
+                /* Propagated to splits in PV_CreateInstrumentFromResource (OR with per-SND bit). */
+                theI->advancedInterpolation = TEST_FLAG_VALUE(header.flags2, ZBF_advancedInterpolation);
                 theI->minLoopSize = PV_GetInstrumentMinLoopSize(pSong);
                 theI->useSoundModifierAsRootKey = TEST_FLAG_VALUE(header.flags2, ZBF_useSoundModifierAsRootKey);
                 PV_GetEnvelopeData(theX, theI, patchSize);

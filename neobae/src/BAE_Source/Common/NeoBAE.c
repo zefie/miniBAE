@@ -12088,6 +12088,11 @@ static void PV_PatchInstrumentEnvelopes(GM_Instrument *theI,
         }
     }
 
+    /* Live IE preview: INST flags2 is authoritative for the toggle (including
+     * keymap splits patched below). Disk/SND bit is applied on full GenPatch load. */
+    theI->advancedInterpolation =
+        TEST_FLAG_VALUE(info->flags2, ZBF_advancedInterpolation) ? TRUE : FALSE;
+
     /* LPF */
     theI->LPF_frequency = info->LPF_frequency;
     theI->LPF_resonance = info->LPF_resonance;

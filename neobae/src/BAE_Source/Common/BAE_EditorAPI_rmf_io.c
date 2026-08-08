@@ -2408,7 +2408,8 @@ BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fileRef, b
                            (unsigned)index, (unsigned)(((uint32_t)roundTripWriteRate) >> 16));
             }
 #endif
-            if (isZmf && sampleAdvancedInterpolation && writeWaveform.endLoop > writeWaveform.startLoop)
+            /* One-shots and looped samples both get the SND bit; mixer cubic path does not require a loop. */
+            if (isZmf && sampleAdvancedInterpolation)
             {
                 XSetSoundAdvancedInterpolationFlag(sndResource, TRUE);
             }

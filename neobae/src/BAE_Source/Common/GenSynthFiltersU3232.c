@@ -83,6 +83,8 @@
 
 #if LOOPS_USED == U3232_LOOPS
 
+#include "GenInterpCubicU3232.inc"
+
 #define CLIP(LIMIT_VAR, LIMIT_LOWER, LIMIT_UPPER) if (LIMIT_VAR < LIMIT_LOWER) LIMIT_VAR = LIMIT_LOWER; if (LIMIT_VAR > LIMIT_UPPER) LIMIT_VAR = LIMIT_UPPER;
 #define GET_FILTER_PARAMS \
     CLIP (this_voice->LPF_frequency, 0x200, MAXRESONANCE*256);  \
@@ -884,7 +886,6 @@ void PV_ServeU3232FilterPartialBuffer16 (GM_Voice *this_voice, bool looping)
 {
     register int32_t          *destL;
     register int16_t          *source;
-    register int16_t          b, c;
     register U32            cur_wave_i, cur_wave_f;
     register U32            end_wave, wave_adjust = 0;
     U3232                   wave_increment;
@@ -942,9 +943,7 @@ void PV_ServeU3232FilterPartialBuffer16 (GM_Voice *this_voice, bool looping)
                     for (inner = 0; inner < 4; inner++)
                     {
                         THE_CHECK_U3232(int16_t *);
-                        b = source[cur_wave_i];
-                        c = source[cur_wave_i+1];
-                        sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
+                        sample = PV_FilterFetchInterp16(this_voice, source, cur_wave_i, cur_wave_f, looping);
                         sample = PV_FilterStepNoResonance(sample, Xn, Z1, &Z1value);
                         *destL += (sample * amplitudeL) >> 2;
                         destL++;
@@ -960,9 +959,7 @@ void PV_ServeU3232FilterPartialBuffer16 (GM_Voice *this_voice, bool looping)
                     for (inner = 0; inner < 4; inner++)
                     {
                         THE_CHECK_U3232(int16_t *);
-                        b = source[cur_wave_i];
-                        c = source[cur_wave_i+1];
-                        sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
+                        sample = PV_FilterFetchInterp16(this_voice, source, cur_wave_i, cur_wave_f, looping);
                         sample = PV_FilterStepWithResonance(sample,
                                                             Xn,
                                                             Z1,
@@ -986,7 +983,6 @@ void PV_ServeU3232FilterPartialBuffer16 (GM_Voice *this_voice, bool looping)
             int16_t *zRight = this_voice->zRight;
             int32_t zIndexRight = this_voice->zIndexRight;
             int32_t Z1valueRight = this_voice->Z1valueRight;
-            int16_t *calculated_source;
             int32_t sampleRight;
 
             if (this_voice->previous_zFrequencyRight == 0)
@@ -999,15 +995,8 @@ void PV_ServeU3232FilterPartialBuffer16 (GM_Voice *this_voice, bool looping)
                 for (inner = 0; inner < 4; inner++)
                 {
                     THE_CHECK_U3232(int16_t *);
-                    calculated_source = source + cur_wave_i * 2;
-
-                    b = calculated_source[0];
-                    c = calculated_source[2];
-                    sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
-
-                    b = calculated_source[1];
-                    c = calculated_source[3];
-                    sampleRight = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
+                    PV_FilterFetchInterp16Stereo(this_voice, source, cur_wave_i, cur_wave_f, looping,
+                                                 &sample, &sampleRight);
 
                     if (this_voice->LPF_resonance == 0)
                     {
@@ -1068,7 +1057,6 @@ void PV_ServeU3232StereoFilterPartialBuffer16 (GM_Voice *this_voice, bool loopin
 {
     register int32_t          *destL;
     register int16_t          *source;
-    register int16_t          b, c;
     register U32            cur_wave_i, cur_wave_f;
     register U32            end_wave, wave_adjust = 0;
     U3232                   wave_increment;
@@ -1130,9 +1118,7 @@ void PV_ServeU3232StereoFilterPartialBuffer16 (GM_Voice *this_voice, bool loopin
                     for (inner = 0; inner < 4; inner++)
                     {
                         THE_CHECK_U3232(int16_t *);
-                        b = source[cur_wave_i];
-                        c = source[cur_wave_i+1];
-                        sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
+                        sample = PV_FilterFetchInterp16(this_voice, source, cur_wave_i, cur_wave_f, looping);
                         sample = PV_FilterStepNoResonance(sample, Xn, Z1, &Z1value);
                         destL[0] += (sample * amplitudeL) >> 2;
                         destL[1] += (sample * amplitudeR) >> 2;
@@ -1150,9 +1136,7 @@ void PV_ServeU3232StereoFilterPartialBuffer16 (GM_Voice *this_voice, bool loopin
                     for (inner = 0; inner < 4; inner++)
                     {
                         THE_CHECK_U3232(int16_t *);
-                        b = source[cur_wave_i];
-                        c = source[cur_wave_i+1];
-                        sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
+                        sample = PV_FilterFetchInterp16(this_voice, source, cur_wave_i, cur_wave_f, looping);
                         sample = PV_FilterStepWithResonance(sample,
                                                             Xn,
                                                             Z1,
@@ -1178,7 +1162,6 @@ void PV_ServeU3232StereoFilterPartialBuffer16 (GM_Voice *this_voice, bool loopin
             int16_t *zRight = this_voice->zRight;
             int32_t zIndexRight = this_voice->zIndexRight;
             int32_t Z1valueRight = this_voice->Z1valueRight;
-            int16_t *calculated_source;
             int32_t sampleRight;
 
             if (this_voice->previous_zFrequencyRight == 0)
@@ -1191,15 +1174,8 @@ void PV_ServeU3232StereoFilterPartialBuffer16 (GM_Voice *this_voice, bool loopin
                 for (inner = 0; inner < 4; inner++)
                 {
                     THE_CHECK_U3232(int16_t *);
-                    calculated_source = source + cur_wave_i * 2;
-
-                    b = calculated_source[0];
-                    c = calculated_source[2];
-                    sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
-
-                    b = calculated_source[1];
-                    c = calculated_source[3];
-                    sampleRight = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
+                    PV_FilterFetchInterp16Stereo(this_voice, source, cur_wave_i, cur_wave_f, looping,
+                                                 &sample, &sampleRight);
 
                     if (this_voice->LPF_resonance == 0)
                     {

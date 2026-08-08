@@ -84,6 +84,8 @@
 
 #if ((REVERB_USED == VARIABLE_REVERB) && (LOOPS_USED == U3232_LOOPS))
 
+#include "GenInterpCubicU3232.inc"
+
 #define CLIP(LIMIT_VAR, LIMIT_LOWER, LIMIT_UPPER) if (LIMIT_VAR < LIMIT_LOWER) LIMIT_VAR = LIMIT_LOWER; if (LIMIT_VAR > LIMIT_UPPER) LIMIT_VAR = LIMIT_UPPER;
 #define GET_FILTER_PARAMS \
     CLIP (this_voice->LPF_frequency, 0x200, MAXRESONANCE*256);  \
@@ -594,7 +596,6 @@ void PV_ServeU3232FilterPartialBufferNewReverb16 (GM_Voice *this_voice, bool loo
     register int32_t          *destL;
     register int32_t          *destReverb, *destChorus;
     register int16_t          *source;
-    register int16_t          b, c;
     register U32            cur_wave_i, cur_wave_f;
     register U32            end_wave, wave_adjust = 0;
     U3232                   wave_increment;
@@ -647,9 +648,7 @@ void PV_ServeU3232FilterPartialBufferNewReverb16 (GM_Voice *this_voice, bool loo
                 for (inner = 0; inner < 4; inner++)
                 {
                     THE_CHECK_U3232(int16_t *);       // is in the mail
-                    b = source[cur_wave_i];
-                    c = source[cur_wave_i+1];
-                    sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
+                    sample = PV_FilterFetchInterp16(this_voice, source, cur_wave_i, cur_wave_f, looping);
                     sample = (sample * Xn + Z1value * Z1) >> 16;
                     Z1value = sample - (sample >> 9);   // remove DC bias
                     *destL += (sample * amplitudeL) >> 2;
@@ -674,9 +673,7 @@ void PV_ServeU3232FilterPartialBufferNewReverb16 (GM_Voice *this_voice, bool loo
                 for (inner = 0; inner < 4; inner++)
                 {
                     THE_CHECK_U3232(int16_t *);       // is in the mail
-                    b = source[cur_wave_i];
-                    c = source[cur_wave_i+1];
-                    sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
+                    sample = PV_FilterFetchInterp16(this_voice, source, cur_wave_i, cur_wave_f, looping);
                     sample = (sample * Xn + Z1value * Z1 + z[zIndex1 & MAXRESONANCE] * Zn) >> 16;
                     zIndex1++;
                     z[zIndex2 & MAXRESONANCE] = (int16_t)sample;
@@ -713,7 +710,6 @@ void PV_ServeU3232StereoFilterPartialBufferNewReverb16 (GM_Voice *this_voice, bo
     register int32_t          *destL;
     register int32_t          *destReverb, *destChorus;
     register int16_t          *source;
-    register int16_t          b, c;
     register U32            cur_wave_i, cur_wave_f;
     register U32            end_wave, wave_adjust = 0;
     U3232                   wave_increment;
@@ -776,9 +772,7 @@ void PV_ServeU3232StereoFilterPartialBufferNewReverb16 (GM_Voice *this_voice, bo
                 for (inner = 0; inner < 4; inner++)
                 {
                     THE_CHECK_U3232(int16_t *);       // is in the mail
-                    b = source[cur_wave_i];
-                    c = source[cur_wave_i+1];
-                    sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
+                    sample = PV_FilterFetchInterp16(this_voice, source, cur_wave_i, cur_wave_f, looping);
                     sample = (sample * Xn + Z1value * Z1) >> 16;
                     Z1value = sample - (sample >> 9);
                     destL[0] += (sample * amplitudeL) >> 2;
@@ -805,9 +799,7 @@ void PV_ServeU3232StereoFilterPartialBufferNewReverb16 (GM_Voice *this_voice, bo
                 for (inner = 0; inner < 4; inner++)
                 {
                     THE_CHECK_U3232(int16_t *);
-                    b = source[cur_wave_i];
-                    c = source[cur_wave_i+1];
-                    sample = ((((int32_t)(cur_wave_f >> 17) * (int32_t)(c-b)) >> 15) + b) >> 6;
+                    sample = PV_FilterFetchInterp16(this_voice, source, cur_wave_i, cur_wave_f, looping);
                     sample = (sample * Xn + Z1value * Z1 + z[zIndex1 & MAXRESONANCE] * Zn) >> 16;
                     zIndex1++;
                     z[zIndex2 & MAXRESONANCE] = (int16_t)sample;
