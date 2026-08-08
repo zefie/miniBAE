@@ -889,22 +889,24 @@
             stage = enc_hi;
         }
 
+        /* Song strip + CaSd in one omit when both apply (one full-bank rebuild). */
         if (need_song_strip)
         {
             UpdateBusyProgress(stage,
                                m_export_bank_include_groovoids
-                                   ? "Removing Session songs…"
-                                   : "Removing songs…");
+                                   ? (need_casd_strip ? "Removing Session songs and CaSd…"
+                                                     : "Removing Session songs…")
+                                   : (need_casd_strip ? "Removing songs and CaSd…"
+                                                     : "Removing songs…"));
             const char *strip_err = nullptr;
             bool strip_ok = true;
             if (!m_export_bank_include_groovoids)
             {
-                /* One omit rebuild for SONG/ZSNG/Midi/emid/DATe. */
-                strip_ok = StripAllSongsFromBankFile(temp_file, &strip_err);
+                strip_ok = StripAllSongsFromBankFile(temp_file, &strip_err, need_casd_strip);
             }
             else
             {
-                strip_ok = StripBankSessionSongs(temp_file, &strip_err);
+                strip_ok = StripBankSessionSongs(temp_file, &strip_err, need_casd_strip);
             }
             if (!strip_ok)
             {
@@ -913,10 +915,9 @@
                 XFileClose(temp_file);
                 return;
             }
-            stage = std::min(stage + 0.02f, 0.54f);
+            stage = std::min(stage + (need_casd_strip ? 0.035f : 0.02f), 0.56f);
         }
-
-        if (need_casd_strip)
+        else if (need_casd_strip)
         {
             UpdateBusyProgress(stage, "Removing CaSd masters…");
             const char *casd_err = nullptr;

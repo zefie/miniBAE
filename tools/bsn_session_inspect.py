@@ -250,11 +250,22 @@ def session_user_songs(resources: List[Resource]) -> List[dict]:
     return songs
 
 
+def is_session_document(resources: List[Resource]) -> bool:
+    """BePf Session Prefs or NeoBAE nBeT mark a session working set."""
+    for r in resources:
+        if r["type"] == b"nBeT":
+            return True
+        if r["type"] == b"BePf" and r["name"] == b"Session Prefs":
+            return True
+    return False
+
+
 def session_groovoids(resources: List[Resource]) -> List[dict]:
-    """Bank groovoids: SONG→emid, or unstamped SONG→Midi when DATe filters custom songs."""
+    """Bank groovoids: SONG→emid, or unstamped SONG→Midi (playback banks / DATe filter)."""
     by = index_by_type_id(resources)
     dated_songs, dated_midis = date_stamped_song_keys(resources)
     use_date_filter = bool(dated_songs or dated_midis)
+    session_doc = is_session_document(resources)
     out = []
     for r in resources:
         if r["type"] != b"SONG":
@@ -265,18 +276,22 @@ def session_groovoids(resources: List[Resource]) -> List[dict]:
         obj = int(hdr["midi_id"])
         has_emid = (b"emid", obj) in by
         has_midi = (b"Midi", obj) in by
+        song_id = int(r["id"])
         if has_emid:
             kind = "emid"
-        elif has_midi and use_date_filter:
-            song_id = int(r["id"])
-            if song_id in dated_songs or obj in dated_midis:
+        elif has_midi:
+            if use_date_filter:
+                if song_id in dated_songs or obj in dated_midis:
+                    continue
+            elif session_doc:
+                # Session without DATe: Midi rows are custom songs, not groovoids.
                 continue
             kind = "Midi"
         else:
             continue
         out.append(
             {
-                "song_id": int(r["id"]),
+                "song_id": song_id,
                 "name": r["name"].decode("latin-1", errors="replace"),  # type: ignore[union-attr]
                 "object_id": obj,
                 "object_type": kind,

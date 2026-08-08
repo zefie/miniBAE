@@ -3307,7 +3307,9 @@ private:
     }
 
     /* Export strip-all: one omit rebuild (flat SONG/Midi + packed ZSNG). */
-    bool StripAllSongsFromBankFile(XFILE bank, const char **out_error = nullptr)
+    bool StripAllSongsFromBankFile(XFILE bank,
+                                   const char **out_error = nullptr,
+                                   bool also_strip_casd = false)
     {
         if (out_error)
         {
@@ -3343,6 +3345,11 @@ private:
         collect_type(ID_ECMI);
         collect_type(ID_CMID);
         collect_type(FOUR_CHAR('D', 'A', 'T', 'e'));
+        if (also_strip_casd)
+        {
+            collect_type(FOUR_CHAR('C', 'a', 'S', 'd'));
+        }
+        CollectSessionDocumentOmitIds(bank, omit_types, omit_ids);
         if (omit_types.empty())
         {
             return true;
@@ -3796,8 +3803,75 @@ private:
         return true;
     }
 
-    /* Bank export with Include groovoids on: drop Session songs only. */
-    bool StripBankSessionSongs(XFILE bank, const char **out_error = nullptr)
+    /* True when the open bank still carries session-document markers. */
+    bool BankFileHasSessionDocument(XFILE bank) const
+    {
+        if (!bank)
+        {
+            return false;
+        }
+        if (XCountFileResourcesOfType(bank, FOUR_CHAR('n', 'B', 'e', 'T')) > 0)
+        {
+            return true;
+        }
+        const XResourceType bepf = FOUR_CHAR('B', 'e', 'P', 'f');
+        const int32_t count = XCountFileResourcesOfType(bank, bepf);
+        for (int32_t i = 0; i < count; ++i)
+        {
+            XLongResourceID rid = 0;
+            int32_t size = 0;
+            char name[256];
+            name[0] = 0;
+            XPTR data = XGetIndexedFileResource(bank, bepf, &rid, i, name, &size);
+            if (data)
+            {
+                XDisposePtr(data);
+            }
+            const unsigned char plen = static_cast<unsigned char>(name[0]);
+            if (plen == 13 && std::memcmp(name + 1, "Session Prefs", 13) == 0)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void CollectSessionDocumentOmitIds(XFILE bank,
+                                       std::vector<XResourceType> &omit_types,
+                                       std::vector<XLongResourceID> &omit_ids) const
+    {
+        auto collect_type = [&](XResourceType type) {
+            const int32_t count = XCountFileResourcesOfType(bank, type);
+            for (int32_t i = 0; i < count; ++i)
+            {
+                XLongResourceID rid = 0;
+                int32_t size = 0;
+                XPTR data = XGetIndexedFileResource(bank, type, &rid, i, nullptr, &size);
+                if (data)
+                {
+                    XDisposePtr(data);
+                }
+                omit_types.push_back(type);
+                omit_ids.push_back(rid);
+            }
+        };
+        collect_type(FOUR_CHAR('n', 'B', 'e', 'T'));
+        collect_type(FOUR_CHAR('n', 'E', 'n', 'c'));
+        collect_type(FOUR_CHAR('B', 'e', 'P', 'f'));
+        collect_type(FOUR_CHAR('B', 'E', 'P', 'F'));
+    }
+
+    /* Bank export with Include groovoids on: drop Session songs only.
+     * One XOmitFileResources — never loop XPurgeFileResource (each purge
+     * rebuilt the whole bank and could silently drop kept groovoids).
+     *
+     * Identify session songs from m_session_songs (same as session save),
+     * with DATe stamps as a supplement. Never fall back to "all Midi are
+     * session" — that wiped converted SONG→Midi groovoids when DATe was
+     * missing on the export clone. */
+    bool StripBankSessionSongs(XFILE bank,
+                               const char **out_error = nullptr,
+                               bool also_strip_casd = false)
     {
         if (out_error)
         {
@@ -3809,8 +3883,14 @@ private:
         }
         XFileSetForceZsbFeatures(bank, TRUE);
 
-        std::set<uint32_t> dated_song_ids;
-        std::set<uint32_t> dated_midi_ids;
+        std::set<uint32_t> session_song_ids;
+        std::set<uint32_t> session_midi_ids;
+        for (const SessionSongEntry &entry : m_session_songs)
+        {
+            /* SONG id 0 is valid (e.g. M_IN_CIT). */
+            session_song_ids.insert(entry.song_resource_id);
+            session_midi_ids.insert(entry.midi_resource_id);
+        }
         {
             const XResourceType date_type = FOUR_CHAR('D', 'A', 'T', 'e');
             const int32_t date_count = XCountFileResourcesOfType(bank, date_type);
@@ -3830,20 +3910,19 @@ private:
                 }
                 CollectDateStampedSongKeys(static_cast<const unsigned char *>(date_data),
                                            static_cast<size_t>(date_size),
-                                           dated_song_ids,
-                                           dated_midi_ids);
+                                           session_song_ids,
+                                           session_midi_ids);
                 XDisposePtr(date_data);
             }
         }
-        const bool use_date_filter = !dated_song_ids.empty() || !dated_midi_ids.empty();
 
-        struct PurgeItem
-        {
-            XLongResourceID song_id;
-            XResourceType object_type;
-            XLongResourceID object_id;
+        std::vector<XResourceType> omit_types;
+        std::vector<XLongResourceID> omit_ids;
+        auto omit_one = [&](XResourceType t, XLongResourceID id) {
+            omit_types.push_back(t);
+            omit_ids.push_back(id);
         };
-        std::vector<PurgeItem> to_purge;
+
         const int32_t song_count = XCountFileResourcesOfType(bank, ID_SONG);
         for (int32_t i = 0; i < song_count; ++i)
         {
@@ -3869,10 +3948,13 @@ private:
                 continue;
             }
 
-            const bool dated =
-                use_date_filter &&
-                (dated_song_ids.count(static_cast<uint32_t>(song_id)) != 0 ||
-                 dated_midi_ids.count(object_id) != 0);
+            const bool is_session =
+                session_song_ids.count(static_cast<uint32_t>(song_id)) != 0 ||
+                session_midi_ids.count(object_id) != 0;
+            if (!is_session)
+            {
+                continue;
+            }
 
             XResourceType object_type = 0;
             const XLongResourceID oid = static_cast<XLongResourceID>(object_id);
@@ -3897,44 +3979,16 @@ private:
                 object_type = ID_CMID;
             }
 
-            /* Session: DATe-stamped anything, or plain Midi when no DATe exists
-             * (RefreshGroovoids treats undated Midi as Custom Songs). Keep
-             * classic emid groovoids and undated Midi when DATe marks others. */
-            bool is_session = dated;
-            if (!use_date_filter &&
-                (object_type == ID_MIDI || object_type == ID_MIDI_OLD))
+            omit_one(ID_SONG, song_id);
+            if (object_type != 0)
             {
-                is_session = true;
-            }
-            if (!is_session)
-            {
-                continue;
-            }
-
-            to_purge.push_back(
-                PurgeItem{song_id, object_type, static_cast<XLongResourceID>(object_id)});
-        }
-
-        for (const PurgeItem &g : to_purge)
-        {
-            if (XPurgeFileResource(bank, ID_SONG, g.song_id) == FALSE)
-            {
-                if (out_error)
-                {
-                    *out_error = "could not remove Session SONG";
-                }
-                return false;
-            }
-            if (g.object_type != 0)
-            {
-                (void)XPurgeFileResource(bank, g.object_type, g.object_id);
+                omit_one(object_type, oid);
             }
         }
 
-        /* Drop DATe resources for songs we removed. */
+        /* Session DATe stamps are meaningless without the songs they mark. */
         {
             const XResourceType date_type = FOUR_CHAR('D', 'A', 'T', 'e');
-            std::vector<XLongResourceID> date_ids;
             const int32_t date_count = XCountFileResourcesOfType(bank, date_type);
             for (int32_t di = 0; di < date_count; ++di)
             {
@@ -3946,12 +4000,45 @@ private:
                 {
                     XDisposePtr(date_data);
                 }
-                date_ids.push_back(date_id);
+                omit_one(date_type, date_id);
             }
-            for (XLongResourceID date_id : date_ids)
+        }
+
+        if (also_strip_casd)
+        {
+            const XResourceType casd_type = FOUR_CHAR('C', 'a', 'S', 'd');
+            const int32_t casd_count = XCountFileResourcesOfType(bank, casd_type);
+            for (int32_t i = 0; i < casd_count; ++i)
             {
-                (void)XPurgeFileResource(bank, date_type, date_id);
+                XLongResourceID rid = 0;
+                int32_t size = 0;
+                XPTR data = XGetIndexedFileResource(bank, casd_type, &rid, i, nullptr, &size);
+                if (data)
+                {
+                    XDisposePtr(data);
+                }
+                omit_one(casd_type, rid);
             }
+        }
+
+        /* Drop session markers so the export is a playback bank; otherwise
+         * RefreshGroovoids would still treat undated Midi as Custom Songs. */
+        CollectSessionDocumentOmitIds(bank, omit_types, omit_ids);
+
+        if (omit_types.empty())
+        {
+            return true;
+        }
+        if (XOmitFileResources(bank,
+                               omit_types.data(),
+                               omit_ids.data(),
+                               static_cast<int32_t>(omit_types.size())) == FALSE)
+        {
+            if (out_error)
+            {
+                *out_error = "could not strip Session songs from bank";
+            }
+            return false;
         }
         return true;
     }
@@ -4051,9 +4138,11 @@ private:
             bool object_is_midi = false;
             if (has_midi)
             {
-                if (!use_date_filter)
+                if (!use_date_filter && BankFileHasSessionDocument(bank))
                 {
-                    /* No Midi/SONG DATe stamps → treat all Midi as Custom Songs. */
+                    /* Session document without Midi/SONG DATe stamps: Midi rows
+                     * are Custom Songs. Playback banks (no BePf/nBeT) keep
+                     * undated SONG→Midi as groovoids — Export strips DATe. */
                     continue;
                 }
                 object_is_midi = true;

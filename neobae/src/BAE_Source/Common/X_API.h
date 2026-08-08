@@ -709,7 +709,8 @@ struct XFILENAME
     bool               resourceFile;
 
     XPTR                pResourceData;  // if file is memory based
-    int32_t                resMemLength;   // length of memory resource file
+    int32_t                resMemLength;   // logical length of memory resource file
+    int32_t                resMemCapacity; // allocated bytes for pResourceData (>= length); 0 → treat as length
     int32_t                resMemOffset;   // current offset of memory resource file
     bool               ownsResourceData; // TRUE when this XFILE owns pResourceData and must free it
     bool               resizeResourceData; // TRUE when memory file is writable/resizable

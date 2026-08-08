@@ -1724,6 +1724,7 @@ static bool PV_PackInstResourcesIntoZmfBlock(XFILE fileRef)
             }
             pReference->pResourceData = packedData;
             pReference->resMemLength = packedSize;
+            pReference->resMemCapacity = packedSize;
             pReference->resMemOffset = 0;
             pReference->ownsResourceData = TRUE;
         }
@@ -2211,6 +2212,7 @@ static bool PV_PackSongResourcesIntoZmfBlock(XFILE fileRef)
             }
             pReference->pResourceData = packedData;
             pReference->resMemLength = packedSize;
+            pReference->resMemCapacity = packedSize;
             pReference->resMemOffset = 0;
             pReference->ownsResourceData = TRUE;
         }
@@ -2644,6 +2646,7 @@ static bool PV_PackBankResourcesIntoZmfBlock(XFILE fileRef)
                 XDisposePtr(pReference->pResourceData);
             pReference->pResourceData = packedData;
             pReference->resMemLength = packedSize;
+            pReference->resMemCapacity = packedSize;
             pReference->resMemOffset = 0;
             pReference->ownsResourceData = TRUE;
         }
@@ -3324,6 +3327,7 @@ static bool PV_PackSndHeaderResourcesIntoZmfBlock(XFILE fileRef)
             }
             pReference->pResourceData = packedData;
             pReference->resMemLength = packedSize;
+            pReference->resMemCapacity = packedSize;
             pReference->resMemOffset = 0;
             pReference->ownsResourceData = TRUE;
         }
@@ -4399,6 +4403,7 @@ XFILE XFileOpenResourceFromMemory(XPTR pResource, uint32_t resourceLength, bool 
     {
         pReference->pResourceData = pResource;
         pReference->resMemLength = resourceLength;
+        pReference->resMemCapacity = resourceLength;
         pReference->resMemOffset = 0;
         pReference->ownsResourceData = FALSE;
         pReference->resizeResourceData = FALSE;
@@ -4581,6 +4586,7 @@ XFILE XFileOpenVirtualResource(int32_t resourceID)
     XSetMemory(&pReference->memoryCacheEntry, sizeof(XFILE_CACHED_ITEM), 0);
     pReference->pResourceData = XNewPtr((int32_t)sizeof(XFILERESOURCEMAP));
     pReference->resMemLength = (pReference->pResourceData != NULL) ? (int32_t)sizeof(XFILERESOURCEMAP) : 0;
+    pReference->resMemCapacity = pReference->resMemLength;
     pReference->resMemOffset = 0;
     pReference->ownsResourceData = TRUE;
     pReference->resizeResourceData = TRUE;
@@ -4674,6 +4680,7 @@ static XFILE PV_OpenWritableResourceMemory(XPTR image,
     pReference->allowMemCopy = TRUE;
     pReference->pResourceData = owned;
     pReference->resMemLength = (int32_t)resourceLength;
+    pReference->resMemCapacity = (int32_t)resourceLength;
     pReference->resMemOffset = 0;
     pReference->ownsResourceData = TRUE;
     pReference->resizeResourceData = TRUE;
@@ -4715,6 +4722,7 @@ XFILE XFileOpenForReadFromMemory(XPTR pMemoryBlock, uint32_t memoryBlockSize)
     {
         pReference->pResourceData = pMemoryBlock;
         pReference->resMemLength = memoryBlockSize;
+        pReference->resMemCapacity = memoryBlockSize;
         pReference->resMemOffset = 0;
         pReference->ownsResourceData = FALSE;
         pReference->resizeResourceData = FALSE;
@@ -4876,16 +4884,37 @@ int32_t XFileWrite(XFILE fileRef, XPTRC buffer, int32_t bufferLength)
             {
                 return -1;
             }
+            /* Geometric capacity — exact-grow rebuilds of large banks were O(n²). */
+            {
+                int32_t capacity = pReference->resMemCapacity;
+                if (capacity < pReference->resMemLength)
+                {
+                    capacity = pReference->resMemLength;
+                }
+                if (requiredLength > capacity)
+                {
+                    int32_t newCapacity = (capacity > 0) ? capacity : 256;
+                    XPTR grown;
+
+                    while (newCapacity < requiredLength)
+                    {
+                        if (newCapacity > 0x3FFFFFFF)
+                        {
+                            return -1;
+                        }
+                        newCapacity *= 2;
+                    }
+                    grown = XResizePtr(pReference->pResourceData, newCapacity);
+                    if (!grown)
+                    {
+                        return -1;
+                    }
+                    pReference->pResourceData = grown;
+                    pReference->resMemCapacity = newCapacity;
+                }
+            }
             if (requiredLength > pReference->resMemLength)
             {
-                XPTR grown;
-
-                grown = XResizePtr(pReference->pResourceData, requiredLength);
-                if (!grown)
-                {
-                    return -1;
-                }
-                pReference->pResourceData = grown;
                 pReference->resMemLength = requiredLength;
             }
             if (bufferLength > 0)
@@ -5001,16 +5030,37 @@ int32_t XFileSetLength(XFILE fileRef, uint32_t newSize)
             }
             else
             {
-                XPTR grown;
-
-                grown = XResizePtr(pReference->pResourceData, (int32_t)newSize);
-                if (!grown && newSize > 0)
+                int32_t capacity = pReference->resMemCapacity;
+                if (capacity < pReference->resMemLength)
                 {
-                    error = -1;
+                    capacity = pReference->resMemLength;
                 }
-                else
+                if ((int32_t)newSize > capacity)
                 {
-                    pReference->pResourceData = grown;
+                    int32_t newCapacity = (capacity > 0) ? capacity : 256;
+                    XPTR grown;
+
+                    while (newCapacity < (int32_t)newSize)
+                    {
+                        if (newCapacity > 0x3FFFFFFF)
+                        {
+                            return -1;
+                        }
+                        newCapacity *= 2;
+                    }
+                    grown = XResizePtr(pReference->pResourceData, newCapacity);
+                    if (!grown && newSize > 0)
+                    {
+                        error = -1;
+                    }
+                    else
+                    {
+                        pReference->pResourceData = grown;
+                        pReference->resMemCapacity = newCapacity;
+                    }
+                }
+                if (error == 0)
+                {
                     pReference->resMemLength = (int32_t)newSize;
                     if (pReference->resMemOffset > pReference->resMemLength)
                     {
@@ -6585,6 +6635,7 @@ static bool PV_CommitVirtualOverFileEx(XFILE fileRef, XFILE outFile, bool packFo
         }
         pReference->pResourceData = packedData;
         pReference->resMemLength = packedSize;
+        pReference->resMemCapacity = packedSize;
         pReference->resMemOffset = 0;
         pReference->ownsResourceData = TRUE;
         pReference->resizeResourceData = TRUE;
@@ -6682,11 +6733,45 @@ static bool PV_RebuildFileForTrashOps(XFILE fileRef,
     expandBank = (omitType == ID_BANK || omitType == ID_MIDI || omitType == ID_MIDI_OLD)
                      ? TRUE
                      : FALSE;
+    if (expandBank || expandSong)
+    {
+        bool hasZbnk = FALSE;
+        bool hasZsng = FALSE;
+        for (i = 0; i < srcRef->pCache->totalResources; ++i)
+        {
+            XResourceType rt = (XResourceType)srcRef->pCache->cached[i].resourceType;
+            if (rt == ID_ZBNK)
+            {
+                hasZbnk = TRUE;
+            }
+            else if (rt == ID_ZSNG)
+            {
+                hasZsng = TRUE;
+            }
+        }
+        if (!hasZbnk)
+        {
+            expandBank = FALSE;
+        }
+        if (!hasZsng)
+        {
+            expandSong = FALSE;
+        }
+    }
 
     outFile = XFileOpenVirtualResource(mapID);
     if (!outFile)
     {
         return FALSE;
+    }
+    if (srcRef->resMemLength > 0)
+    {
+        int32_t mapLen = XFileGetLength(outFile);
+        if (mapLen > 0 &&
+            XFileSetLength(outFile, (uint32_t)srcRef->resMemLength) == 0)
+        {
+            (void)XFileSetLength(outFile, (uint32_t)mapLen);
+        }
     }
 
     trashSeen = 0;
@@ -6766,7 +6851,9 @@ static bool PV_RebuildFileForTrashOps(XFILE fileRef,
             {
                 XDisposePtr(data);
             }
-            continue;
+            /* Fail closed — silent skip used to drop kept SONG/Midi/INST. */
+            XFileClose(outFile);
+            return FALSE;
         }
         if (XAddFileResource(outFile, rtype, rid, name, data, size) != 0)
         {
@@ -6860,7 +6947,8 @@ static bool PV_RebuildFileForTrashOps(XFILE fileRef,
             data = XGetIndexedFileResource(fileRef, ID_SONG, &id, i, name, &sz);
             if (!data)
             {
-                continue;
+                XFileClose(outFile);
+                return FALSE;
             }
             if (id == omitID)
             {
@@ -6893,7 +6981,8 @@ static bool PV_RebuildFileForTrashOps(XFILE fileRef,
                 data = XGetIndexedFileResource(fileRef, kBankTypes[t], &id, i, name, &sz);
                 if (!data)
                 {
-                    continue;
+                    XFileClose(outFile);
+                    return FALSE;
                 }
                 if (kBankTypes[t] == omitType && id == omitID)
                 {
@@ -6976,7 +7065,9 @@ bool XOmitFileResources(XFILE fileRef,
     }
 
     /* Logical Midi/BANK live in ZBNK; SONG in ZSNG — flat omit alone can't
-     * remove them (export song-strip was leaving a fat ZBNK behind). */
+     * remove them (export song-strip was leaving a fat ZBNK behind).
+     * Only expand when those packed containers exist; on flat banks, expand
+     * would skip every SONG/Midi in the copy loop and re-add via GetIndexed. */
     expandBank = FALSE;
     expandSong = FALSE;
     for (j = 0; j < omitCount; ++j)
@@ -6991,11 +7082,46 @@ bool XOmitFileResources(XFILE fileRef,
             expandSong = TRUE;
         }
     }
+    if (expandBank || expandSong)
+    {
+        bool hasZbnk = FALSE;
+        bool hasZsng = FALSE;
+        for (i = 0; i < srcRef->pCache->totalResources; ++i)
+        {
+            XResourceType rt = (XResourceType)srcRef->pCache->cached[i].resourceType;
+            if (rt == ID_ZBNK)
+            {
+                hasZbnk = TRUE;
+            }
+            else if (rt == ID_ZSNG)
+            {
+                hasZsng = TRUE;
+            }
+        }
+        if (!hasZbnk)
+        {
+            expandBank = FALSE;
+        }
+        if (!hasZsng)
+        {
+            expandSong = FALSE;
+        }
+    }
 
     outFile = XFileOpenVirtualResource(mapID);
     if (!outFile)
     {
         return FALSE;
+    }
+    /* Pre-size capacity to source length so the copy loop barely reallocs. */
+    if (srcRef->resMemLength > 0)
+    {
+        int32_t mapLen = XFileGetLength(outFile);
+        if (mapLen > 0 &&
+            XFileSetLength(outFile, (uint32_t)srcRef->resMemLength) == 0)
+        {
+            (void)XFileSetLength(outFile, (uint32_t)mapLen);
+        }
     }
 
     /* If this omit removes the last SND/CSND/ESND, also drop orphan ZSHD. */
@@ -7114,7 +7240,8 @@ bool XOmitFileResources(XFILE fileRef,
                 data = XGetIndexedFileResource(fileRef, kBankTypes[t], &id, i, name, &sz);
                 if (!data)
                 {
-                    continue;
+                    XFileClose(outFile);
+                    return FALSE;
                 }
                 for (j = 0; j < omitCount; ++j)
                 {
@@ -7155,7 +7282,8 @@ bool XOmitFileResources(XFILE fileRef,
             data = XGetIndexedFileResource(fileRef, ID_SONG, &id, i, name, &sz);
             if (!data)
             {
-                continue;
+                XFileClose(outFile);
+                return FALSE;
             }
             for (j = 0; j < omitCount; ++j)
             {
