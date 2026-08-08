@@ -157,6 +157,10 @@
             {
                 OpenMidiEditor();
             }
+            if (ImGui::MenuItem("MIDI Note Remapper...", nullptr, false, m_document != nullptr))
+            {
+                OpenMidiNoteRemapperDialog();
+            }
             if (ImGui::MenuItem("Lyrics...", nullptr, false, m_document != nullptr))
             {
                 OpenLyricsEditor();

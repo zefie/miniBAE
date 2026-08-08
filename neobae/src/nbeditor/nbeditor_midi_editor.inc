@@ -4972,6 +4972,17 @@
                 "then align/quantize on the Lyrics lane.\n"
                 "Tip: Tap to sync, then Quantize.");
         }
+        place(btn_w("Remap..."));
+        if (ImGui::Button("Remap..."))
+        {
+            OpenMidiNoteRemapperDialog();
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        {
+            ImGui::SetTooltip(
+                "Bulk-remap notes from one bank/program to another\n"
+                "(Song → MIDI Note Remapper…).");
+        }
         place(labeled_w("Lyric lane", ImGui::GetFrameHeight()));
         ImGui::Checkbox("Lyric lane", &m_midi_lyrics_lane_visible);
         place(btn_w("Quantize"));

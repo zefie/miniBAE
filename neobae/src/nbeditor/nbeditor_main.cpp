@@ -1566,6 +1566,7 @@ public:
         DrawInstDestDialog();
         DrawInstMoveSongRemapConfirmDialog();
         PollInstMoveSongRemapPendingApply();
+        DrawMidiNoteRemapperDialog();
         DrawRenameDialog();
         DrawIncludeSamplesPrompt();
         DrawSessionInfoDialog();
@@ -5816,6 +5817,7 @@ private:
 
 #include "nbeditor_bank_add.inc"
 #include "nbeditor_instrument_ops.inc"
+#include "nbeditor_note_remapper.inc"
 #include "nbeditor_trash.inc"
 #include "nbeditor_resource_usage.inc"
 #include "nbeditor_session_extras.inc"
@@ -6735,6 +6737,16 @@ private:
     int m_inst_move_remap_new_bank = 0;
     int m_inst_move_remap_new_program = 0;
     bool m_inst_move_remap_new_percussion = false;
+
+    bool m_note_remap_open = false;
+    int m_note_remap_src_bank = 0;
+    int m_note_remap_src_program = 0;
+    bool m_note_remap_src_percussion = false;
+    int m_note_remap_dst_bank = 0;
+    int m_note_remap_dst_program = 0;
+    bool m_note_remap_dst_percussion = false;
+    bool m_note_remap_scanned = false;
+    uint32_t m_note_remap_count = 0;
     /* Nonzero while Move cloned to dest but source delete is deferred until
      * the song-remap dialog is answered (Yes → delete; No → keep original). */
     uint32_t m_inst_move_pending_delete_source_id = 0;

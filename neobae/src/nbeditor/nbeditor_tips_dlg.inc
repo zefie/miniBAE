@@ -184,6 +184,13 @@
             "“Don't show this again”, or re-enable them under Edit → "
             "Preferences → General… (“Show tips at startup”).",
         },
+        {
+            "MIDI Note Remapper",
+            "Song → MIDI Note Remapper… bulk-changes notes from one "
+            "bank/program to another. Scan shows how many notes match the "
+            "source; Remap updates them (and track program changes) to the "
+            "destination. Percussion matches by drum note on channel 10.",
+        },
     };
 
     static constexpr int kEditorTipCount =

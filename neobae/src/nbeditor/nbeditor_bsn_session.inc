@@ -1962,6 +1962,7 @@ void TeardownForSessionReload()
     m_song_info_open = false;
     m_song_settings_open = false;
     m_midi_editor_open = false;
+    m_note_remap_open = false;
     MeClearMidiEditorState();
     m_export_rmf_open = false;
     m_export_sample_rmf_open = false;
@@ -2295,6 +2296,7 @@ void ResetSessionLayoutToDefault()
     m_song_info_open = false;
     m_song_settings_open = false;
     m_midi_editor_open = false;
+    m_note_remap_open = false;
     MeClearMidiEditorState();
     m_export_rmf_open = false;
     m_export_sample_rmf_open = false;
