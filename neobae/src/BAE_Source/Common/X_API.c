@@ -423,6 +423,85 @@
 // Variables
 static int16_t    g_resourceFileCount = 0;                // number of open resource files
 static XFILE        g_openResourceFiles[MAX_OPEN_XFILES];
+/* Protects g_openResourceFiles[] / g_resourceFileCount. Readers snapshot under
+ * the lock then scan unlocked so file I/O is not serialized. Mutators wait
+ * (unlike the old static inUse flag, which silently skipped updates). */
+static BAE_Mutex    g_openResourceFilesMutex = NULL;
+
+static void PV_EnsureOpenResourceFilesMutex(void)
+{
+    if (g_openResourceFilesMutex == NULL)
+    {
+        BAE_Mutex created = NULL;
+
+        if (BAE_NewMutex(&created, "openResourceFiles", (char *)__FILE__, __LINE__) != 0 &&
+            created != NULL)
+        {
+            if (g_openResourceFilesMutex == NULL)
+            {
+                g_openResourceFilesMutex = created;
+            }
+            else
+            {
+                BAE_DestroyMutex(created);
+            }
+        }
+    }
+}
+
+static void PV_LockOpenResourceFiles(void)
+{
+    PV_EnsureOpenResourceFilesMutex();
+    if (g_openResourceFilesMutex)
+    {
+        BAE_AcquireMutex(g_openResourceFilesMutex);
+    }
+}
+
+static void PV_UnlockOpenResourceFiles(void)
+{
+    if (g_openResourceFilesMutex)
+    {
+        BAE_ReleaseMutex(g_openResourceFilesMutex);
+    }
+}
+
+/* Copy the open list under the lock. Caller may scan outFiles[] after unlock. */
+static int16_t PV_SnapshotOpenResourceFiles(XFILE *outFiles, int16_t maxFiles)
+{
+    int16_t count;
+    int16_t i;
+
+    if (!outFiles || maxFiles <= 0)
+    {
+        return 0;
+    }
+    PV_LockOpenResourceFiles();
+    count = g_resourceFileCount;
+    if (count > maxFiles)
+    {
+        count = maxFiles;
+    }
+    for (i = 0; i < count; i++)
+    {
+        outFiles[i] = g_openResourceFiles[i];
+    }
+    PV_UnlockOpenResourceFiles();
+    return count;
+}
+
+static XFILE PV_GetFrontOpenResourceFile(void)
+{
+    XFILE front = NULL;
+
+    PV_LockOpenResourceFiles();
+    if (g_resourceFileCount > 0)
+    {
+        front = g_openResourceFiles[0];
+    }
+    PV_UnlockOpenResourceFiles();
+    return front;
+}
 
 #define ZMF_INST_BLOCK_MAGIC       FOUR_CHAR('Z','I','N','S')
 #define ZMF_SONG_BLOCK_MAGIC       FOUR_CHAR('Z','S','N','G')
@@ -3418,7 +3497,8 @@ int32_t PV_CopyWithinFile(XFILE fileRef,
     return err;
 }
 
-// Given a valid XFILE, this will return the open index. Will return -1 if not valid
+// Given a valid XFILE, this will return the open index. Will return -1 if not valid.
+// Caller must hold PV_LockOpenResourceFiles().
 static int16_t PV_FindResourceFileReferenceIndex(XFILE fileRef)
 {
     int16_t   count;
@@ -3433,73 +3513,65 @@ static int16_t PV_FindResourceFileReferenceIndex(XFILE fileRef)
     return -1;
 }
 
-// add an newly open resource file to the resource search path.
-// NOTE:    This is not thread safe. There's a hack cause this function to fail if another
-//          thread is trying to add at the same time.
+// Add a newly opened resource file to the front of the search path.
+// Returns TRUE if the list is full (file was not added).
 static bool PV_AddResourceFileToOpenFiles(XFILE fileRef)
 {
     bool           full;
     int16_t       count;
-    static bool    inUse = FALSE;
 
     full = TRUE;
-    if (inUse == FALSE)
+    PV_LockOpenResourceFiles();
+    if (g_resourceFileCount < MAX_OPEN_XFILES)
     {
-        inUse = TRUE;   // this is a temporary fix for thread issues
-
-        if (g_resourceFileCount < MAX_OPEN_XFILES)
+        for (count = MAX_OPEN_XFILES-2; count >= 0; count--)
         {
-            for (count = MAX_OPEN_XFILES-2; count >= 0; count--)
-            {
-                g_openResourceFiles[count+1] = g_openResourceFiles[count];
-            }
-            g_openResourceFiles[0] = fileRef;
-            g_resourceFileCount++;
-            full = FALSE;
+            g_openResourceFiles[count+1] = g_openResourceFiles[count];
         }
-        inUse = FALSE;
+        g_openResourceFiles[0] = fileRef;
+        g_resourceFileCount++;
+        full = FALSE;
     }
+    PV_UnlockOpenResourceFiles();
     return full;
 }
 
-// remove an open resource file to the resource search path.
-// NOTE:    This is not thread safe. There's a hack cause this function to fail if another
-//          thread is trying to remove at the same time.
+// Remove an open resource file from the resource search path.
 static void PV_RemoveResourceFileFromOpenFiles(XFILE fileRef)
 {
     int16_t       count;
     int16_t       found;
-    static bool    inUse = FALSE;
 
     found = -1;
-    if (inUse == FALSE)
+    PV_LockOpenResourceFiles();
+    for (count = 0; count < g_resourceFileCount; count++)
     {
-        inUse = TRUE;   // this is a temporary fix for thread issues
-
-        for (count = 0; count < g_resourceFileCount; count++)
+        if (g_openResourceFiles[count] == fileRef)
         {
-            if (g_openResourceFiles[count] == fileRef)
-            {
-                found = count;
-                break;
-            }
+            found = count;
+            break;
         }
-        if (found != -1)
-        {
-            for (count = found; count < g_resourceFileCount-1; count++)
-            {
-                g_openResourceFiles[count] = g_openResourceFiles[count+1];
-            }
-            g_openResourceFiles[count] = 0;
-            g_resourceFileCount--;
-        }
-        inUse = FALSE;
     }
+    if (found != -1)
+    {
+        for (count = found; count < g_resourceFileCount-1; count++)
+        {
+            g_openResourceFiles[count] = g_openResourceFiles[count+1];
+        }
+        g_openResourceFiles[count] = 0;
+        g_resourceFileCount--;
+    }
+    PV_UnlockOpenResourceFiles();
 }
 
 static INLINE bool PV_IsAnyOpenResourceFiles(void)
 {
-    return (g_resourceFileCount) ? TRUE : FALSE;
+    bool any;
+
+    PV_LockOpenResourceFiles();
+    any = (g_resourceFileCount > 0) ? TRUE : FALSE;
+    PV_UnlockOpenResourceFiles();
+    return any;
 }
 
 // Functions
@@ -8293,6 +8365,7 @@ bool XRestoreIndexedFileTrash(XFILE fileRef,
 int32_t XCountResourcesOfType(XResourceType resourceType)
 {
     int32_t    err;
+    XFILE      front;
 
     err = -1;
 
@@ -8302,9 +8375,10 @@ int32_t XCountResourcesOfType(XResourceType resourceType)
         return Count1Resources((ResType)resourceType);
     }
 #endif
-    if (PV_IsAnyOpenResourceFiles())
-    {   // delete from the most recent open file
-        err = XCountFileResourcesOfType(g_openResourceFiles[0], resourceType);
+    front = PV_GetFrontOpenResourceFile();
+    if (front)
+    {   // count from the most recent open file
+        err = XCountFileResourcesOfType(front, resourceType);
     }
     return err;
 }
@@ -8442,19 +8516,19 @@ XPTR XGetIndexedResource(XResourceType resourceType, XLongResourceID *pReturnedI
                                 void *pResourceName, int32_t *pReturnedResourceSize)
 {
     int32_t    count;
+    int16_t    openCount;
+    XFILE      openFiles[MAX_OPEN_XFILES];
     XPTR    pData;
 
     pData = NULL;
-    if (PV_IsAnyOpenResourceFiles())
+    openCount = PV_SnapshotOpenResourceFiles(openFiles, MAX_OPEN_XFILES);
+    for (count = 0; count < openCount; count++)
     {
-        for (count = 0; count < g_resourceFileCount; count++)
+        pData = XGetIndexedFileResource(openFiles[count], resourceType, 
+                                pReturnedID, resourceIndex, pResourceName, pReturnedResourceSize);
+        if (pData)
         {
-            pData = XGetIndexedFileResource(g_openResourceFiles[count], resourceType, 
-                                    pReturnedID, resourceIndex, pResourceName, pReturnedResourceSize);
-            if (pData)
-            {
-                break;
-            }
+            break;
         }
     }
 #if X_PLATFORM == X_MACINTOSH_9
@@ -8503,6 +8577,7 @@ XPTR XGetIndexedResource(XResourceType resourceType, XLongResourceID *pReturnedI
 int32_t XGetUniqueResourceID(XResourceType resourceType, XLongResourceID *pReturnedID)
 {
     int32_t    err;
+    XFILE      front;
 
     err = -1;
 #if X_PLATFORM == X_MACINTOSH_9
@@ -8512,9 +8587,10 @@ int32_t XGetUniqueResourceID(XResourceType resourceType, XLongResourceID *pRetur
         return 0;
     }
 #endif
-    if (PV_IsAnyOpenResourceFiles())
+    front = PV_GetFrontOpenResourceFile();
+    if (front)
     {   // pull from the most recent open file
-        err = XGetUniqueFileResourceID(g_openResourceFiles[0], resourceType, pReturnedID);
+        err = XGetUniqueFileResourceID(front, resourceType, pReturnedID);
     }
     return err;
 }
@@ -8733,9 +8809,12 @@ int32_t    XAddResource(XResourceType resourceType, XLongResourceID resourceID, 
         return (ResError() == noErr) ? 0 : -1;
     }
 #endif
-    if (PV_IsAnyOpenResourceFiles())
-    {   // add to the most recent open file
-        err = XAddFileResource(g_openResourceFiles[0], resourceType, resourceID, pResourceName, pData, length);
+    {
+        XFILE front = PV_GetFrontOpenResourceFile();
+        if (front)
+        {   // add to the most recent open file
+            err = XAddFileResource(front, resourceType, resourceID, pResourceName, pData, length);
+        }
     }
     return err;
 }
@@ -8764,9 +8843,12 @@ bool XDeleteResource(XResourceType resourceType, XLongResourceID resourceID, boo
         return (ResError() == noErr) ? TRUE : FALSE;
     }
 #endif
-    if (PV_IsAnyOpenResourceFiles())
-    {   // delete from the most recent open file
-        return XDeleteFileResource(g_openResourceFiles[0], resourceType, resourceID, collectTrash);
+    {
+        XFILE front = PV_GetFrontOpenResourceFile();
+        if (front)
+        {   // delete from the most recent open file
+            return XDeleteFileResource(front, resourceType, resourceID, collectTrash);
+        }
     }
     return FALSE;
 }
@@ -8928,21 +9010,21 @@ XPTR XGetNamedResource(XResourceType resourceType, void *cName, int32_t *pReturn
     {
         Handle  theData;
         int32_t    size;
+        XFILE      openFiles[MAX_OPEN_XFILES];
+        int16_t    openCount;
 
         // first look inside any open resource files
-        if (PV_IsAnyOpenResourceFiles())
+        openCount = PV_SnapshotOpenResourceFiles(openFiles, MAX_OPEN_XFILES);
+        for (count = 0; count < openCount; count++)
         {
-            for (count = 0; count < g_resourceFileCount; count++)
+            pCacheItem = PV_XGetNamedCacheEntry(openFiles[count], resourceType, cName);
+            if (pCacheItem)
             {
-                pCacheItem = PV_XGetNamedCacheEntry(g_openResourceFiles[count], resourceType, cName);
-                if (pCacheItem)
-                {
-                    pData = XGetFileResource(g_openResourceFiles[count], pCacheItem->resourceType, 
-                                                                    pCacheItem->resourceID, 
-                                                                    pResourceName, pReturnedResourceSize);
-                    // we found our resource
-                    break;
-                }
+                pData = XGetFileResource(openFiles[count], pCacheItem->resourceType, 
+                                                                pCacheItem->resourceID, 
+                                                                pResourceName, pReturnedResourceSize);
+                // we found our resource
+                break;
             }
         }
         if (pData == NULL)
@@ -8973,72 +9055,73 @@ XPTR XGetNamedResource(XResourceType resourceType, void *cName, int32_t *pReturn
 #endif
     if (pData == NULL)
     {
-        if (PV_IsAnyOpenResourceFiles())
+        XFILE      openFiles[MAX_OPEN_XFILES];
+        int16_t    openCount;
+
+        openCount = PV_SnapshotOpenResourceFiles(openFiles, MAX_OPEN_XFILES);
+        for (fileCount = 0; fileCount < openCount; fileCount++)
         {
-            for (fileCount = 0; fileCount < g_resourceFileCount; fileCount++)
+            pCacheItem = PV_XGetNamedCacheEntry(openFiles[fileCount], resourceType, cName);
+            if (pCacheItem)
             {
-                pCacheItem = PV_XGetNamedCacheEntry(g_openResourceFiles[fileCount], resourceType, cName);
-                if (pCacheItem)
+                pData = XGetFileResource(openFiles[fileCount], pCacheItem->resourceType, 
+                                                                pCacheItem->resourceID, 
+                                                                pResourceName, pReturnedResourceSize);
+                // we found our resource
+                break;
+            }
+            else
+            {
+                err = 0;
+                // search through without cache.
+                fileRef = openFiles[fileCount];
+                XFileSetPosition(fileRef, 0L);      // at start
+                if (XFileRead(fileRef, &map, (int32_t)sizeof(XFILERESOURCEMAP)) == 0)
                 {
-                    pData = XGetFileResource(g_openResourceFiles[fileCount], pCacheItem->resourceType, 
-                                                                    pCacheItem->resourceID, 
-                                                                    pResourceName, pReturnedResourceSize);
-                    // we found our resource
-                    break;
-                }
-                else
-                {
-                    err = 0;
-                    // search through without cache.
-                    fileRef = g_openResourceFiles[fileCount];
-                    XFileSetPosition(fileRef, 0L);      // at start
-                    if (XFileRead(fileRef, &map, (int32_t)sizeof(XFILERESOURCEMAP)) == 0)
+                    if (XFILERESOURCE_ID_IS_VALID(XGetLong(&map.mapID)))
                     {
-                        if (XFILERESOURCE_ID_IS_VALID(XGetLong(&map.mapID)))
+                        next = sizeof(XFILERESOURCEMAP);
+                        total = XGetLong(&map.totalResources);
+                        for (count = 0; (count < total) && (err == 0); count++)
                         {
-                            next = sizeof(XFILERESOURCEMAP);
-                            total = XGetLong(&map.totalResources);
-                            for (count = 0; (count < total) && (err == 0); count++)
+                            err = XFileSetPosition(fileRef, next);      // at start
+                            if (err == 0)
                             {
-                                err = XFileSetPosition(fileRef, next);      // at start
-                                if (err == 0)
-                                {
-                                    err = XFileRead(fileRef, &next, (int32_t)sizeof(int32_t));        // get next pointer
-                                    next = XGetLong(&next);
-                                    if (next != -1L)
-                                    {   
-                                        err = XFileRead(fileRef, &data, (int32_t)sizeof(int32_t));        // get type
-                                        if ((XResourceType)XGetLong(&data) == resourceType)
+                                err = XFileRead(fileRef, &next, (int32_t)sizeof(int32_t));        // get next pointer
+                                next = XGetLong(&next);
+                                if (next != -1L)
+                                {   
+                                    err = XFileRead(fileRef, &data, (int32_t)sizeof(int32_t));        // get type
+                                    if ((XResourceType)XGetLong(&data) == resourceType)
+                                    {
+                                        err = XFileRead(fileRef, &data, (int32_t)sizeof(int32_t));        // get ID
+                                        resourceID = (XLongResourceID)XGetLong(&data);
+                                        err = XFileRead(fileRef, &pResourceName[0], 1L);        // get name
+                                        if (pResourceName[0])
                                         {
-                                            err = XFileRead(fileRef, &data, (int32_t)sizeof(int32_t));        // get ID
-                                            resourceID = (XLongResourceID)XGetLong(&data);
-                                            err = XFileRead(fileRef, &pResourceName[0], 1L);        // get name
-                                            if (pResourceName[0])
+                                            err = XFileRead(fileRef, &pResourceName[1], (int32_t)pResourceName[0]);
+                                            XPtoCstr(pResourceName);
+                                            if (XStrCmp(pResourceName, (char *)cName) == 0)
+                                            {   // match?
+                                                return XGetFileResource(fileRef, 
+                                                                resourceType, resourceID, 
+                                                                pResourceName, pReturnedResourceSize);
+                                            }
+                                            err = XFileRead(fileRef, &data, (int32_t)sizeof(int32_t));        // get length
+                                            data = XGetLong(&data);     // get resource size
+                                            if (XFileSetPositionRelative(fileRef, data))
                                             {
-                                                err = XFileRead(fileRef, &pResourceName[1], (int32_t)pResourceName[0]);
-                                                XPtoCstr(pResourceName);
-                                                if (XStrCmp(pResourceName, (char *)cName) == 0)
-                                                {   // match?
-                                                    return XGetFileResource(fileRef, 
-                                                                    resourceType, resourceID, 
-                                                                    pResourceName, pReturnedResourceSize);
-                                                }
-                                                err = XFileRead(fileRef, &data, (int32_t)sizeof(int32_t));        // get length
-                                                data = XGetLong(&data);     // get resource size
-                                                if (XFileSetPositionRelative(fileRef, data))
-                                                {
-                                                    err = -2;
-                                                }
+                                                err = -2;
                                             }
                                         }
                                     }
                                 }
-                                else
-                                {
-                                    err = -4;
-                                    debug_message("Next offset is bad\n");
-                                    break;
-                                }
+                            }
+                            else
+                            {
+                                err = -4;
+                                debug_message("Next offset is bad\n");
+                                break;
                             }
                         }
                     }
@@ -9094,22 +9177,22 @@ bool XGetResourceName(XResourceType resourceType, XLongResourceID resourceID,
                         char *cName)
 {
     int         count;
+    XFILE       openFiles[MAX_OPEN_XFILES];
+    int16_t     openCount;
 
     if (cName)
     {
         cName[0] = 0;
+        openCount = PV_SnapshotOpenResourceFiles(openFiles, MAX_OPEN_XFILES);
 #if X_PLATFORM == X_MACINTOSH_9
         // first look in any open resource files
-        if (PV_IsAnyOpenResourceFiles())
+        for (count = 0; count < openCount; count++)
         {
-            for (count = 0; count < g_resourceFileCount; count++)
+            if (XGetFileResourceName(openFiles[count],
+                                        resourceType, resourceID, cName))
             {
-                if (XGetFileResourceName(g_openResourceFiles[count],
-                                            resourceType, resourceID, cName))
-                {
-                    // we found data
-                    break;
-                }
+                // we found data
+                break;
             }
         }
         if (cName[0] == 0)
@@ -9135,9 +9218,9 @@ bool XGetResourceName(XResourceType resourceType, XLongResourceID resourceID,
             return TRUE;
         }
 #else
-        for (count = 0; count < g_resourceFileCount; count++)
+        for (count = 0; count < openCount; count++)
         {
-            if (XGetFileResourceName(g_openResourceFiles[count],
+            if (XGetFileResourceName(openFiles[count],
                                         resourceType, resourceID, cName))
             {
                 return TRUE;
@@ -9232,6 +9315,8 @@ XPTR XGetAndDetachResource(XResourceType resourceType, XLongResourceID resourceI
     int32_t        size;
     char        szPName[256];
     int16_t   count;
+    int16_t   openCount;
+    XFILE       openFiles[MAX_OPEN_XFILES];
     XFILE       fileRef;
     XFILENAME   *pReference;
 
@@ -9241,36 +9326,34 @@ XPTR XGetAndDetachResource(XResourceType resourceType, XLongResourceID resourceI
         *pReturnedResourceSize = 0;
     }
     // first look in any open resource files
-    if (PV_IsAnyOpenResourceFiles())
+    openCount = PV_SnapshotOpenResourceFiles(openFiles, MAX_OPEN_XFILES);
+    for (count = 0; count < openCount; count++)
     {
-        for (count = 0; count < g_resourceFileCount; count++)
+        pData = XGetFileResource(openFiles[count], resourceType, resourceID, szPName, &size);
+        if (pData)
         {
-            pData = XGetFileResource(g_openResourceFiles[count], resourceType, resourceID, szPName, &size);
-            if (pData)
+            fileRef = openFiles[count];
+            pReference = fileRef;
+            if (pReference->pResourceData && (pReference->allowMemCopy) )
             {
-                fileRef = g_openResourceFiles[count];
-                pReference = fileRef;
-                if (pReference->pResourceData && (pReference->allowMemCopy) )
+                //In the case of a memory file, we have to create a new block to return.
+                pNewData = XNewPtr(size);
+                if (pNewData)
                 {
-                    //In the case of a memory file, we have to create a new block to return.
-                    pNewData = XNewPtr(size);
-                    if (pNewData)
-                    {
-                        XBlockMove(pData, pNewData, size);
-                        pData = pNewData;
-                    }
-                    else
-                    {
-                        pData = NULL;   //not detaching is NO SUCCESS!
-                    }
+                    XBlockMove(pData, pNewData, size);
+                    pData = pNewData;
                 }
-                if (pReturnedResourceSize)
+                else
                 {
-                    *pReturnedResourceSize = size;
+                    pData = NULL;   //not detaching is NO SUCCESS!
                 }
-                // we found data
-                break;
             }
+            if (pReturnedResourceSize)
+            {
+                *pReturnedResourceSize = size;
+            }
+            // we found data
+            break;
         }
     }
     if (pData == NULL)
@@ -9301,16 +9384,19 @@ XPTR XGetAndDetachResource(XResourceType resourceType, XLongResourceID resourceI
     XPTR        pData = NULL;
     XPTR        pNewData;
     int16_t   count;
+    int16_t   openCount;
+    XFILE       openFiles[MAX_OPEN_XFILES];
     XFILE       fileRef;
     XFILENAME   *pReference;
 
-    for (count = 0; count < g_resourceFileCount; count++)
+    openCount = PV_SnapshotOpenResourceFiles(openFiles, MAX_OPEN_XFILES);
+    for (count = 0; count < openCount; count++)
     {
-        pData = XGetFileResource(g_openResourceFiles[count], resourceType, resourceID, szPName, &lSize);
+        pData = XGetFileResource(openFiles[count], resourceType, resourceID, szPName, &lSize);
 
         if (pData)
         {
-            fileRef = g_openResourceFiles[count];
+            fileRef = openFiles[count];
             pReference = fileRef;
             if (pReference->pResourceData && (pReference->allowMemCopy) )
             {
@@ -9342,11 +9428,7 @@ XPTR XGetAndDetachResource(XResourceType resourceType, XLongResourceID resourceI
 // get current most recently opened resource file, or NULL if nothing is open
 XFILE XFileGetCurrentResourceFile(void)
 {
-    if (PV_IsAnyOpenResourceFiles())
-    {
-        return g_openResourceFiles[0];
-    }
-    return NULL;
+    return PV_GetFrontOpenResourceFile();
 }
 
 // make sure this resource file is first in the scan list
@@ -9357,6 +9439,7 @@ void XFileUseThisResourceFile(XFILE fileRef)
 
     if (PV_XFileValid(fileRef))
     {
+        PV_LockOpenResourceFiles();
         fileCount = PV_FindResourceFileReferenceIndex(fileRef);
         if (fileCount != -1)
         {
@@ -9364,6 +9447,7 @@ void XFileUseThisResourceFile(XFILE fileRef)
             g_openResourceFiles[0] = fileRef;
             g_openResourceFiles[fileCount] = currentFirst;
         }
+        PV_UnlockOpenResourceFiles();
     }
 }
 
