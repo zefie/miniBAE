@@ -154,7 +154,7 @@
       "label": "zefie's Install",
       "type": "shell",
       "command": "unzip",
-      "args": ["-o", "${workspaceFolder}/out/*x86_64*.zip"],
+      "args": ["-o", "${workspaceFolder}/out/neobae-suite_windows_x86_64*.zip"],
       "options": {
         "cwd": "/mnt/d/bin/BXPlayer"
       },      

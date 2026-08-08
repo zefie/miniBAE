@@ -660,7 +660,6 @@ int main(int argc, char *argv[])
         g_playlist.enabled = true; // default to enabled
     }
 
-    // Auto-load playlist.m3u from application directory if it exists
 #endif
 
     // Initialize export subsystem
@@ -724,29 +723,25 @@ int main(int argc, char *argv[])
         }
     }
 
-    char exe_dir[512];
-    get_executable_directory(exe_dir, sizeof(exe_dir));
-#if SUPPORT_PLAYLIST == TRUE // Initialize playlist system
-    char playlist_path[768];
-#ifdef _WIN32
-    snprintf(playlist_path, sizeof(playlist_path), "%s\\playlist.m3u", exe_dir);
-#else
-    snprintf(playlist_path, sizeof(playlist_path), "%s/playlist.m3u", exe_dir);
-#endif
-
-    // Check if file exists and load it
-    FILE *test_file = fopen(playlist_path, "r");
-    if (test_file)
+    // Auto-load playlist.m3u from NeoBAE config root (migrates from exeDir once)
+#if SUPPORT_PLAYLIST == TRUE
     {
-        fclose(test_file);
-        BAE_PRINTF("Auto-loading playlist: %s\n", playlist_path);
-        playlist_load(playlist_path);
+        char playlist_path[768];
+        zefidi_get_playlist_path(playlist_path, sizeof(playlist_path));
+
+        FILE *test_file = fopen(playlist_path, "r");
+        if (test_file)
+        {
+            fclose(test_file);
+            BAE_PRINTF("Auto-loading playlist: %s\n", playlist_path);
+            playlist_load(playlist_path);
+        }
     }
 #endif
 
     if (!g_bae.bank_loaded)
     {
-        BAE_PRINTF("WARNING: No patch bank loaded. Place patches.hsb (or .zsb) next to executable or use built-in patches.\n");
+        BAE_PRINTF("WARNING: No patch bank loaded. Place patches.hsb/.zsb/.dls/.sf2 next to the executable or in the NeoBAE config dir, or use built-in patches.\n");
     }
 
     // Calculate correct window height including playlist panel
@@ -872,53 +867,8 @@ int main(int argc, char *argv[])
 
         if (!loaded_saved)
         {
-            BAE_PRINTF("Saved bank missing or failed to load. Trying patches.hsb/zsb in executable dir...\n");
-
-            // Next priority: patches.hsb or patches.zsb located next to the executable
-            char exe_dir_try[512];
-            char patches_try[1024];
-            get_executable_directory(exe_dir_try, sizeof(exe_dir_try));
-            static const char *patch_names[] = {"patches.hsb", "patches.zsb", NULL};
-            for (int pi = 0; patch_names[pi] && !loaded_saved; ++pi)
-            {
-#ifdef _WIN32
-                snprintf(patches_try, sizeof(patches_try), "%s\\%s", exe_dir_try, patch_names[pi]);
-#else
-                snprintf(patches_try, sizeof(patches_try), "%s/%s", exe_dir_try, patch_names[pi]);
-#endif
-                FILE *tf = fopen(patches_try, "r");
-                if (tf)
-                {
-                    fclose(tf);
-                    if (load_bank_simple(patches_try, false, reverbType, loopPlay))
-                    {
-                        // Remember which bank we loaded for UI (do not overwrite user settings file)
-                        safe_strncpy(g_current_bank_path, patches_try, sizeof(g_current_bank_path) - 1);
-                        g_current_bank_path[sizeof(g_current_bank_path) - 1] = '\0';
-                        loaded_saved = true; // treat as loaded to skip built-in fallback
-                    }
-                    else
-                    {
-                        BAE_PRINTF("Found %s but failed to load it: %s\n", patch_names[pi], patches_try);
-                    }
-                }
-            }
-
-            if (!loaded_saved)
-            {
-                BAE_PRINTF("Falling back to built-in/default discovery...\n");
-#if _BUILT_IN_PATCHES == TRUE
-                // Try built-in bank when compiled in
-                if (!load_bank_simple("__builtin__", false, reverbType, loopPlay))
-                {
-                    // Final fallback to default discovery
-                    (void)load_bank_simple(NULL, false, reverbType, loopPlay);
-                }
-#else
-                // No built-in bank compiled. Try default discovery
-                (void)load_bank_simple(NULL, false, reverbType, loopPlay);
-#endif
-            }
+            BAE_PRINTF("Saved bank missing or failed to load. Trying Default Bank (app/config), then built-in...\n");
+            (void)load_bank_simple(NULL, false, reverbType, loopPlay);
         }
         else
         {
@@ -930,50 +880,8 @@ int main(int argc, char *argv[])
     }
     else
     {
-        BAE_PRINTF("No saved bank found, trying patches.hsb/zsb in executable dir then built-in...\n");
-
-        // First try patches.hsb next to the executable
-        char exe_dir_try[512];
-        char patches_try[1024];
-        get_executable_directory(exe_dir_try, sizeof(exe_dir_try));
-        static const char *patch_names2[] = {"patches.hsb", "patches.zsb", NULL};
-        bool found_patches = false;
-        for (int pi = 0; patch_names2[pi] && !found_patches; ++pi)
-        {
-#ifdef _WIN32
-            snprintf(patches_try, sizeof(patches_try), "%s\\%s", exe_dir_try, patch_names2[pi]);
-#else
-            snprintf(patches_try, sizeof(patches_try), "%s/%s", exe_dir_try, patch_names2[pi]);
-#endif
-            FILE *tf = fopen(patches_try, "r");
-            if (tf)
-            {
-                fclose(tf);
-                if (load_bank_simple(patches_try, false, reverbType, loopPlay))
-                {
-                    safe_strncpy(g_current_bank_path, patches_try, sizeof(g_current_bank_path) - 1);
-                    g_current_bank_path[sizeof(g_current_bank_path) - 1] = '\0';
-                    found_patches = true;
-                }
-                else
-                {
-                    BAE_PRINTF("Found %s but failed to load it: %s\n", patch_names2[pi], patches_try);
-                }
-            }
-        }
-        if (!found_patches)
-        {
-#if _BUILT_IN_PATCHES == TRUE
-            // No patches.hsb/zsb; try built-in if available
-            if (!load_bank_simple("__builtin__", false, reverbType, loopPlay))
-            {
-                (void)load_bank_simple(NULL, false, reverbType, loopPlay);
-            }
-#else
-            // Final fallback: auto-discovery (npatches/patches)
-            (void)load_bank_simple(NULL, false, reverbType, loopPlay);
-#endif
-        }
+        BAE_PRINTF("No saved bank found, trying Default Bank (app/config), then built-in...\n");
+        (void)load_bank_simple(NULL, false, reverbType, loopPlay);
     }
 
     // Initialize Bank/Program values for the default channel
@@ -3070,27 +2978,23 @@ int main(int argc, char *argv[])
         save_full_settings(&current_settings);
     }
 
-    // Auto-save playlist to application directory
-    get_executable_directory(exe_dir, sizeof(exe_dir));
-#if SUPPORT_PLAYLIST == TRUE // Initialize playlist system
-
-#ifdef _WIN32
-    snprintf(playlist_path, sizeof(playlist_path), "%s\\playlist.m3u", exe_dir);
-#else
-    snprintf(playlist_path, sizeof(playlist_path), "%s/playlist.m3u", exe_dir);
-#endif
-
-    if (g_playlist.count > 0)
+#if SUPPORT_PLAYLIST == TRUE // Auto-save playlist under NeoBAE config root
     {
-        BAE_PRINTF("Auto-saving playlist: %s\n", playlist_path);
-        playlist_save(playlist_path);
-    }
-    else
-    {
-        // If playlist is empty, remove the file if it exists
-        if (remove(playlist_path) == 0)
+        char playlist_path[768];
+        zefidi_get_playlist_path(playlist_path, sizeof(playlist_path));
+
+        if (g_playlist.count > 0)
         {
-            BAE_PRINTF("Removed empty playlist file: %s\n", playlist_path);
+            BAE_PRINTF("Auto-saving playlist: %s\n", playlist_path);
+            playlist_save(playlist_path);
+        }
+        else
+        {
+            // If playlist is empty, remove the file if it exists
+            if (remove(playlist_path) == 0)
+            {
+                BAE_PRINTF("Removed empty playlist file: %s\n", playlist_path);
+            }
         }
     }
 #endif

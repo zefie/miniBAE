@@ -1186,34 +1186,9 @@ for (int ci = 0; cmds[ci]; ++ci)
 
     // Default Bank button (right of Load Bank)
     bool defaultBankExists = false;
-#if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)
-    // Check if we should show the Default Bank button
-
-    // Check if patches.hsb or patches.zsb exists in executable directory
-
-    char exe_dir[512];
-    char patches_path[1024];
-    get_executable_directory(exe_dir, sizeof(exe_dir));
-    {
-        static const char *default_names[] = {"patches.hsb", "patches.zsb", NULL};
-        for (int di = 0; default_names[di]; ++di)
-        {
-#ifdef _WIN32
-            snprintf(patches_path, sizeof(patches_path), "%s\\%s", exe_dir, default_names[di]);
-#else
-            snprintf(patches_path, sizeof(patches_path), "%s/%s", exe_dir, default_names[di]);
-#endif
-            FILE *test_file = fopen(patches_path, "r");
-            if (test_file)
-            {
-                fclose(test_file);
-                defaultBankExists = true;
-                break;
-            }
-        }
-    }
-
-#endif
+    char patches_path[1100];
+    patches_path[0] = '\0';
+    defaultBankExists = zefidi_find_default_bank(patches_path, sizeof(patches_path));
 
     bool default_loaded = false;
     bool builtin_loaded = false;
@@ -1239,7 +1214,18 @@ for (int ci = 0; cmds[ci]; ++ci)
     {
         if (defaultBankExists && !default_loaded)
         {
-            if (!load_bank(patches_path, playing, transpose, tempo, volume, loopPlay, reverbType, ch_enable, true))
+            bool loaded_default = false;
+            char try_path[1100];
+            int di = 0;
+            while (zefidi_next_default_bank(&di, try_path, sizeof(try_path)))
+            {
+                if (load_bank(try_path, playing, transpose, tempo, volume, loopPlay, reverbType, ch_enable, true))
+                {
+                    loaded_default = true;
+                    break;
+                }
+            }
+            if (!loaded_default)
             {
                 set_status_message("Failed to load default bank");
             }

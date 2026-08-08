@@ -25,6 +25,7 @@
 #include "gui_karaoke.h" // For karaoke functions
 #include "X_API.h"
 #include "NeoBAE.h"
+#include "NeoBAEConfigPath.h"
 #include "GenRingtone.h"
 #include "GenSnd.h"
 #include "GenPriv.h"
@@ -783,6 +784,74 @@ load_bank_fail:
     return false;
 }
 
+bool zefidi_next_default_bank(int *index, char *out, size_t outSize)
+{
+    static const char *const names[] = {
+        "patches.hsb",
+        "patches.zsb",
+#if USE_NATIVE_DLS == TRUE
+        "patches.dls",
+#endif
+#if USE_SF2_SUPPORT == TRUE
+        "patches.sf2",
+#endif
+        NULL};
+    int name_count = 0;
+
+    if (!index || !out || outSize == 0)
+    {
+        return false;
+    }
+    out[0] = '\0';
+
+    while (names[name_count])
+    {
+        ++name_count;
+    }
+    if (name_count == 0)
+    {
+        return false;
+    }
+
+    /* Slot layout: [0 .. name_count) = app/runtime dir, then config dir. */
+    while (*index < name_count * 2)
+    {
+        int slot = *index;
+        int dir = slot / name_count; /* 0 = app, 1 = config */
+        int ni = slot % name_count;
+        (*index)++;
+
+        if (dir == 0)
+        {
+            if (BAE_GetRuntimeFilePath(out, outSize, names[ni]) != 0)
+            {
+                continue;
+            }
+        }
+        else
+        {
+            if (BAE_GetConfigFilePath(out, outSize, names[ni]) != 0)
+            {
+                continue;
+            }
+        }
+
+        FILE *tf = fopen(out, "r");
+        if (tf)
+        {
+            fclose(tf);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool zefidi_find_default_bank(char *out, size_t outSize)
+{
+    int index = 0;
+    return zefidi_next_default_bank(&index, out, outSize);
+}
+
 bool load_bank_simple(const char *path, bool save_to_settings, int reverb_type, bool loop_enabled)
 {
     bool dummy_ch[BAE_MAX_MIDI_CHANNELS];
@@ -794,18 +863,27 @@ bool load_bank_simple(const char *path, bool save_to_settings, int reverb_type, 
     {
         BAE_PRINTF("No bank specified, trying fallback discovery\n");
 
-        // Try traditional auto bank discovery
-        const char *autoBanks[] = {
-#if _BUILT_IN_PATCHES == TRUE
-            "__builtin__",
-#endif
-            "patches.hsb", "patches.zsb", "npatches.hsb", NULL};
-        for (int i = 0; autoBanks[i] && !g_bae.bank_loaded; ++i)
+        char candidate[1100];
+        int di = 0;
+        while (zefidi_next_default_bank(&di, candidate, sizeof(candidate)))
         {
-            if (load_bank(autoBanks[i], false, 0, 100, 75, loop_enabled, reverb_type, dummy_ch, false))
+            if (load_bank(candidate, false, 0, 100, 75, loop_enabled, reverb_type, dummy_ch, false))
             {
                 return true;
             }
+            BAE_PRINTF("Found default bank but failed to load: %s\n", candidate);
+        }
+
+#if _BUILT_IN_PATCHES == TRUE
+        if (load_bank("__builtin__", false, 0, 100, 75, loop_enabled, reverb_type, dummy_ch, false))
+        {
+            return true;
+        }
+#endif
+        /* Last resort: cwd-relative npatches.hsb (legacy playbae-style name). */
+        if (load_bank("npatches.hsb", false, 0, 100, 75, loop_enabled, reverb_type, dummy_ch, false))
+        {
+            return true;
         }
         return false;
     }

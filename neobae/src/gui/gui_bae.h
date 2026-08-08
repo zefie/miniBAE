@@ -147,6 +147,12 @@ void bae_apply_current_settings(int transpose, int tempo, int volume, bool loop_
 bool load_bank(const char *path, bool current_playing_state, int transpose, int tempo, int volume,
                bool loop_enabled, int reverb_type, bool ch_enable[16], bool save_to_settings);
 bool load_bank_simple(const char *path, bool save_to_settings, int reverb_type, bool loop_enabled);
+/* Default Bank discovery: app dir first, then config dir.
+ * Names: patches.hsb, patches.zsb, patches.dls (if DLS), patches.sf2 (if SF2).
+ * zefidi_next_default_bank: start *index at 0; each call advances and fills next existing path.
+ * zefidi_find_default_bank: first existing candidate only. */
+bool zefidi_next_default_bank(int *index, char *out, size_t outSize);
+bool zefidi_find_default_bank(char *out, size_t outSize);
 // Memory-based bank loader
 bool bae_load_bank_from_memory(const char *bankdata, int banksize);
 const char *get_bank_friendly_name();

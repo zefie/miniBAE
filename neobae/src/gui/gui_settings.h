@@ -151,6 +151,8 @@ extern bool g_normalize_enabled;
 Settings load_settings(void);
 void save_settings(const char *last_bank_path, int reverb_type, bool loop_enabled);
 void save_full_settings(const Settings *settings);
+/* Auto playlist path under NeoBAE config root (migrates exeDir/playlist.m3u once). */
+void zefidi_get_playlist_path(char *out, size_t outSize);
 void save_playlist_settings(void); // Save just shuffle and repeat settings
 void save_custom_reverb_preset(const char *name);
 void load_custom_reverb_preset(const char *name);

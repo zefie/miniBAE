@@ -89,6 +89,7 @@ static void zefidi_prepare_config_files(void)
     }
     (void)BAE_PrepareConfigFile("zefidi.ini", NULL);
     (void)BAE_PrepareConfigFile("zefidi_script.txt", NULL);
+    (void)BAE_PrepareConfigFile("playlist.m3u", NULL);
     s_prepared = 1;
 }
 
@@ -119,6 +120,21 @@ static void zefidi_get_script_path(char *out, size_t outSize)
     if (BAE_GetConfigFilePath(out, outSize, "zefidi_script.txt") != 0)
     {
         (void)BAE_GetRuntimeFilePath(out, outSize, "zefidi_script.txt");
+    }
+}
+
+void zefidi_get_playlist_path(char *out, size_t outSize)
+{
+    if (!out || outSize == 0)
+    {
+        return;
+    }
+    out[0] = '\0';
+    zefidi_prepare_config_files();
+    (void)BAE_EnsureConfigDirectory();
+    if (BAE_GetConfigFilePath(out, outSize, "playlist.m3u") != 0)
+    {
+        (void)BAE_GetRuntimeFilePath(out, outSize, "playlist.m3u");
     }
 }
 
