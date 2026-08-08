@@ -558,6 +558,86 @@ BAEResult BAERmfEditorDocument_SetTrackPitchBendEvent(BAERmfEditorDocument *docu
 BAEResult BAERmfEditorDocument_DeleteTrackPitchBendEvent(BAERmfEditorDocument *document,
                                                          uint16_t trackIndex,
                                                          uint32_t eventIndex);
+
+/* Meta events (including karaoke lyrics). typeFilter 0 = all types; else match that
+ * meta type (e.g. 0x05 Lyric, 0x01 Generic Text). Indices are among filtered events. */
+BAEResult BAERmfEditorDocument_GetTrackMetaEventCount(BAERmfEditorDocument const *document,
+                                                      uint16_t trackIndex,
+                                                      unsigned char typeFilter,
+                                                      uint32_t *outCount);
+/* outData may be NULL to query size only. dataCapacity is bytes available in outData.
+ * outSize receives the full event size (may exceed dataCapacity; data is truncated). */
+BAEResult BAERmfEditorDocument_GetTrackMetaEvent(BAERmfEditorDocument const *document,
+                                                 uint16_t trackIndex,
+                                                 unsigned char typeFilter,
+                                                 uint32_t eventIndex,
+                                                 uint32_t *outTick,
+                                                 unsigned char *outType,
+                                                 unsigned char *outData,
+                                                 uint32_t dataCapacity,
+                                                 uint32_t *outSize);
+BAEResult BAERmfEditorDocument_AddTrackMetaEvent(BAERmfEditorDocument *document,
+                                                 uint16_t trackIndex,
+                                                 uint32_t tick,
+                                                 unsigned char type,
+                                                 unsigned char const *data,
+                                                 uint32_t size);
+BAEResult BAERmfEditorDocument_SetTrackMetaEvent(BAERmfEditorDocument *document,
+                                                 uint16_t trackIndex,
+                                                 unsigned char typeFilter,
+                                                 uint32_t eventIndex,
+                                                 uint32_t tick,
+                                                 unsigned char type,
+                                                 unsigned char const *data,
+                                                 uint32_t size);
+BAEResult BAERmfEditorDocument_DeleteTrackMetaEvent(BAERmfEditorDocument *document,
+                                                    uint16_t trackIndex,
+                                                    unsigned char typeFilter,
+                                                    uint32_t eventIndex);
+
+/* Karaoke lyric helpers (MIDI meta 0x05). Display text has leading '/' or '\\'
+ * stripped into outStartsNewLine. */
+typedef struct BAERmfEditorLyricFragment
+{
+    uint32_t tick;
+    char const *text;     /* NUL-terminated display text (no line delimiter) */
+    BAE_BOOL startsNewLine; /* TRUE => encode leading '/' on write */
+} BAERmfEditorLyricFragment;
+
+BAEResult BAERmfEditorDocument_GetLyricEventCount(BAERmfEditorDocument const *document,
+                                                  uint16_t trackIndex,
+                                                  uint32_t *outCount);
+BAEResult BAERmfEditorDocument_GetLyricEvent(BAERmfEditorDocument const *document,
+                                             uint16_t trackIndex,
+                                             uint32_t eventIndex,
+                                             uint32_t *outTick,
+                                             char *outText,
+                                             uint32_t textCapacity,
+                                             BAE_BOOL *outStartsNewLine);
+BAEResult BAERmfEditorDocument_AddLyricEvent(BAERmfEditorDocument *document,
+                                             uint16_t trackIndex,
+                                             uint32_t tick,
+                                             char const *text,
+                                             BAE_BOOL startsNewLine);
+BAEResult BAERmfEditorDocument_SetLyricEvent(BAERmfEditorDocument *document,
+                                             uint16_t trackIndex,
+                                             uint32_t eventIndex,
+                                             uint32_t tick,
+                                             char const *text,
+                                             BAE_BOOL startsNewLine);
+BAEResult BAERmfEditorDocument_DeleteLyricEvent(BAERmfEditorDocument *document,
+                                                uint16_t trackIndex,
+                                                uint32_t eventIndex);
+/* Remove meta 0x05. If alsoClearGenericText01, also remove non-@ meta 0x01. */
+BAEResult BAERmfEditorDocument_ClearTrackLyricEvents(BAERmfEditorDocument *document,
+                                                     uint16_t trackIndex,
+                                                     BAE_BOOL alsoClearGenericText01);
+/* Clear lyric metas on track, then write fragments as meta 0x05 (KAR '/' newlines). */
+BAEResult BAERmfEditorDocument_ReplaceTrackLyrics(BAERmfEditorDocument *document,
+                                                  uint16_t trackIndex,
+                                                  BAERmfEditorLyricFragment const *fragments,
+                                                  uint32_t fragmentCount);
+
 BAEResult BAERmfEditorDocument_CopySamplesFrom(BAERmfEditorDocument *dest,
                                                BAERmfEditorDocument const *src);
 BAEResult BAERmfEditorDocument_CopySamplesForPrograms(BAERmfEditorDocument *dest,

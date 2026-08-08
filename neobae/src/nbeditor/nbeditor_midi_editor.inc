@@ -557,6 +557,8 @@
         const uint32_t clamped =
             usec > 0xffffffffULL ? 0xffffffffu : static_cast<uint32_t>(usec);
         BAESong_SetMicrosecondPosition(m_song, clamped);
+        LyResetPreview();
+        LyWirePreviewCallback();
     }
 
     void MeApplyTrackMutes()
@@ -727,6 +729,10 @@
                 m_midi_redo.pop_front();
             }
             SetStatus("MIDI Editor: undo");
+            if (m_lyrics_open || m_midi_lyrics_lane_visible)
+            {
+                LyReloadFromDocument();
+            }
         }
         m_midi_undo_restoring = false;
     }
@@ -749,6 +755,10 @@
         {
             m_midi_undo.push_back(std::move(current));
             SetStatus("MIDI Editor: redo");
+            if (m_lyrics_open || m_midi_lyrics_lane_visible)
+            {
+                LyReloadFromDocument();
+            }
         }
         m_midi_undo_restoring = false;
     }
@@ -772,6 +782,13 @@
         m_midi_note_clipboard.clear();
         m_midi_track_muted.clear();
         m_midi_track_solo.clear();
+        m_lyrics_track = -1;
+        m_lyrics_fragments.clear();
+        m_lyrics_selected.clear();
+        m_lyrics_text_buf[0] = 0;
+        m_lyrics_sync_cursor = 0;
+        m_lyrics_dirty = false;
+        LyResetPreview();
         m_midi_drag_mode = MeDragMode::None;
         MeInvalidateMidiDocCaches();
         m_midi_cached_notes.clear();
@@ -3425,9 +3442,11 @@
                 ++visible_auto;
             }
         }
+        const float lyrics_lane_h = m_midi_lyrics_lane_visible ? 56.0f : 0.0f;
         const float min_roll_h = 120.0f;
         const float min_auto_h = auto_header_h + min_lane_h + 8.0f;
-        const float max_auto_h = std::max(min_auto_h, height - min_roll_h - auto_splitter_h - 4.0f);
+        const float max_auto_h =
+            std::max(min_auto_h, height - min_roll_h - auto_splitter_h - lyrics_lane_h - 4.0f);
         float auto_h = auto_header_h;
         if (!m_midi_auto_collapsed && visible_auto > 0)
         {
@@ -3440,7 +3459,8 @@
         }
         const bool show_auto_split = !m_midi_auto_collapsed && visible_auto > 0;
         const float split_h = show_auto_split ? auto_splitter_h : 0.0f;
-        const float roll_h = std::max(min_roll_h, height - auto_h - split_h - 4.0f);
+        const float roll_h =
+            std::max(min_roll_h, height - auto_h - split_h - lyrics_lane_h - 4.0f);
 
         ImGui::BeginChild("##me_roll", ImVec2(width, roll_h), true, ImGuiWindowFlags_NoScrollWithMouse);
         ImDrawList *dl = ImGui::GetWindowDrawList();
@@ -4280,6 +4300,16 @@
             ImGui::EndChild(); /* ##me_auto_scroll */
         }
         ImGui::EndChild();
+
+        if (m_midi_lyrics_lane_visible && lyrics_lane_h > 0.0f)
+        {
+            LyEnsureTrack();
+            LyDrawLane(width, lyrics_lane_h, key_w);
+            if (m_midi_editor_focused)
+            {
+                LyHandleTapShortcuts(true);
+            }
+        }
     }
 
     void MeDrawToolbar()
@@ -4429,6 +4459,20 @@
                 "reverb type (7,0);\n"
                 "RPN: pitch bend sensitivity (0,0), fine/coarse tuning.");
         }
+        place(btn_w("Lyrics..."));
+        if (ImGui::Button("Lyrics..."))
+        {
+            OpenLyricsEditor();
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        {
+            ImGui::SetTooltip(
+                "Edit karaoke lyrics: paste lines, tap-to-sync while playing,\n"
+                "then align/quantize on the Lyrics lane.\n"
+                "Tip: Tap to sync, then Quantize.");
+        }
+        place(labeled_w("Lyric lane", ImGui::GetFrameHeight()));
+        ImGui::Checkbox("Lyric lane", &m_midi_lyrics_lane_visible);
         place(btn_w("Quantize"));
         ImGui::BeginDisabled(m_midi_selected_notes.empty());
         if (ImGui::Button("Quantize"))

@@ -82,6 +82,13 @@
             "loops after a module or MIDI import.",
         },
         {
+            "Karaoke lyrics",
+            "Song → Lyrics… (or MIDI Editor → Lyrics…) paste verse lines, "
+            "enable Tap-to-sync, and stamp words with Space while the song "
+            "plays. Then drag chips on the Lyrics lane or Quantize to the "
+            "snap grid. Lyrics save as MIDI meta 0x05.",
+        },
+        {
             "Export RMF vs ZMF",
             "Classic RMF has tighter limits; ZMF unlocks NeoBAE extensions "
             "(deeper pitch, longer ADSR, etc.). The export dialog will suggest "

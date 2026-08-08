@@ -157,6 +157,10 @@
             {
                 OpenMidiEditor();
             }
+            if (ImGui::MenuItem("Lyrics...", nullptr, false, m_document != nullptr))
+            {
+                OpenLyricsEditor();
+            }
             if (ImGui::MenuItem("Export MIDI...", nullptr, false, m_document != nullptr))
             {
                 RequestExportMidi();
@@ -1188,6 +1192,8 @@
         MeApplyTrackMutes();
         RebuildPreviewSongFromDocument();
         ApplyVelocityCurveToSongs();
+        LyResetPreview();
+        LyWirePreviewCallback();
         return true;
     }
 
@@ -3997,6 +4003,15 @@
                             ActivateSessionSongAt(i);
                         }
                         OpenMidiEditor();
+                    }
+                    if (ImGui::MenuItem("Lyrics..."))
+                    {
+                        m_groovoid_index = -1;
+                        if (i != m_session_song_index)
+                        {
+                            ActivateSessionSongAt(i);
+                        }
+                        OpenLyricsEditor();
                     }
                     if (ImGui::MenuItem("Export RMF/ZMF...",
                                         nullptr,

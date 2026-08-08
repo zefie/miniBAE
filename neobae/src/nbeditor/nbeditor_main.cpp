@@ -17,6 +17,9 @@
 #ifndef SUPPORT_MIDI_HW
 #define SUPPORT_MIDI_HW 0
 #endif
+#ifndef SUPPORT_KARAOKE
+#define SUPPORT_KARAOKE 0
+#endif
 #if SUPPORT_MIDI_HW == TRUE
 #include "gui_midi_hw_input.h"
 #include "rtmidi_c.h"
@@ -1526,6 +1529,7 @@ public:
             --m_floating_placement_frames;
         }
         DrawMidiEditorWindow();
+        DrawLyricsEditorWindow();
         DrawBankAddDialog();
         DrawSongInfoDialog();
         DrawSongSettingsDialog();
@@ -4800,6 +4804,7 @@ private:
 #include "nbeditor_session.inc"
 #include "nbeditor_bsn_session.inc"
 #include "nbeditor_midi_editor.inc"
+#include "nbeditor_lyrics.inc"
 #include "nbeditor_keyboard_input.inc"
 
     /* Player floating min matches SetNextWindowSizeConstraints in DrawPlayerWindow.
@@ -7184,6 +7189,24 @@ private:
     int m_midi_rpn_custom_lsb = 0;
     int m_midi_rpn_custom_data = 2;
     bool m_midi_nrpn_append_null = true;
+
+    /* Karaoke lyric editor */
+    bool m_lyrics_open = false;
+    bool m_lyrics_tap_sync = false;
+    bool m_lyrics_dirty = false;
+    bool m_midi_lyrics_lane_visible = true;
+    int m_lyrics_track = -1;
+    int m_lyrics_sync_cursor = 0;
+    char m_lyrics_text_buf[8192] = {0};
+    std::vector<LyFragment> m_lyrics_fragments;
+    std::unordered_set<int> m_lyrics_selected;
+    bool m_lyrics_drag_active = false;
+    bool m_lyrics_drag_undo_open = false;
+    uint32_t m_lyrics_drag_origin_tick = 0;
+    int32_t m_lyrics_drag_last_delta = 0;
+    char m_lyrics_preview_current[256] = {0};
+    char m_lyrics_preview_previous[256] = {0};
+    size_t m_lyrics_preview_current_len = 0;
 
     bool m_song_info_open = false;
     char m_song_info_title[256] = {0};

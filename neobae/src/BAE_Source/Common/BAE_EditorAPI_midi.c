@@ -6478,3 +6478,556 @@ BAEResult BAERmfEditorDocument_DebugReportMidiRoundTripDiff(BAERmfEditorDocument
     return result;
 }
 
+
+static int PV_CompareMetaEvents(void const *left, void const *right)
+{
+    BAERmfEditorMetaEvent const *a;
+    BAERmfEditorMetaEvent const *b;
+
+    a = (BAERmfEditorMetaEvent const *)left;
+    b = (BAERmfEditorMetaEvent const *)right;
+    if (a->tick < b->tick)
+    {
+        return -1;
+    }
+    if (a->tick > b->tick)
+    {
+        return 1;
+    }
+    if (a->eventOrder < b->eventOrder)
+    {
+        return -1;
+    }
+    if (a->eventOrder > b->eventOrder)
+    {
+        return 1;
+    }
+    return 0;
+}
+
+
+static void PV_SortTrackMetaEvents(BAERmfEditorTrack *track)
+{
+    if (!track || track->metaEventCount < 2)
+    {
+        return;
+    }
+    qsort(track->metaEvents,
+          track->metaEventCount,
+          sizeof(BAERmfEditorMetaEvent),
+          PV_CompareMetaEvents);
+}
+
+
+static BAERmfEditorMetaEvent *PV_FindTrackMetaEvent(BAERmfEditorTrack *track,
+                                                    unsigned char typeFilter,
+                                                    uint32_t eventIndex,
+                                                    uint32_t *outActualIndex)
+{
+    uint32_t index;
+    uint32_t match;
+
+    if (!track)
+    {
+        return NULL;
+    }
+    match = 0;
+    for (index = 0; index < track->metaEventCount; ++index)
+    {
+        if (typeFilter != 0 && track->metaEvents[index].type != typeFilter)
+        {
+            continue;
+        }
+        if (match == eventIndex)
+        {
+            if (outActualIndex)
+            {
+                *outActualIndex = index;
+            }
+            return &track->metaEvents[index];
+        }
+        match++;
+    }
+    return NULL;
+}
+
+
+static BAERmfEditorMetaEvent const *PV_FindTrackMetaEventConst(BAERmfEditorTrack const *track,
+                                                               unsigned char typeFilter,
+                                                               uint32_t eventIndex,
+                                                               uint32_t *outActualIndex)
+{
+    return PV_FindTrackMetaEvent((BAERmfEditorTrack *)track,
+                                 typeFilter,
+                                 eventIndex,
+                                 outActualIndex);
+}
+
+
+static void PV_LyricEncodeText(char const *text,
+                               BAE_BOOL startsNewLine,
+                               unsigned char *outBuf,
+                               uint32_t outCapacity,
+                               uint32_t *outSize)
+{
+    uint32_t textLen;
+    uint32_t need;
+    uint32_t write;
+
+    if (!outSize)
+    {
+        return;
+    }
+    textLen = (text && text[0]) ? (uint32_t)strlen(text) : 0;
+    need = textLen + (startsNewLine ? 1u : 0u);
+    *outSize = need;
+    if (!outBuf || outCapacity == 0)
+    {
+        return;
+    }
+    write = 0;
+    if (startsNewLine && write < outCapacity)
+    {
+        outBuf[write++] = '/';
+    }
+    if (textLen > 0 && write < outCapacity)
+    {
+        uint32_t copy = textLen;
+        if (write + copy > outCapacity)
+        {
+            copy = outCapacity - write;
+        }
+        XBlockMove((XPTRC)text, outBuf + write, (int32_t)copy);
+        write += copy;
+    }
+}
+
+
+static void PV_LyricDecodeText(unsigned char const *data,
+                               uint32_t size,
+                               char *outText,
+                               uint32_t textCapacity,
+                               BAE_BOOL *outStartsNewLine)
+{
+    uint32_t offset;
+    BAE_BOOL newLine;
+
+    offset = 0;
+    newLine = FALSE;
+    if (data && size > 0 && (data[0] == '/' || data[0] == '\\'))
+    {
+        newLine = TRUE;
+        offset = 1;
+    }
+    if (outStartsNewLine)
+    {
+        *outStartsNewLine = newLine;
+    }
+    if (!outText || textCapacity == 0)
+    {
+        return;
+    }
+    if (size > offset)
+    {
+        uint32_t copy = size - offset;
+        if (copy >= textCapacity)
+        {
+            copy = textCapacity - 1;
+        }
+        XBlockMove((XPTRC)(data + offset), outText, (int32_t)copy);
+        outText[copy] = 0;
+    }
+    else
+    {
+        outText[0] = 0;
+    }
+}
+
+
+BAEResult BAERmfEditorDocument_GetTrackMetaEventCount(BAERmfEditorDocument const *document,
+                                                      uint16_t trackIndex,
+                                                      unsigned char typeFilter,
+                                                      uint32_t *outCount)
+{
+    BAERmfEditorTrack const *track;
+    uint32_t index;
+    uint32_t count;
+
+    if (!document || !outCount)
+    {
+        return BAE_PARAM_ERR;
+    }
+    track = PV_GetTrackConst(document, trackIndex);
+    if (!track)
+    {
+        return BAE_PARAM_ERR;
+    }
+    count = 0;
+    for (index = 0; index < track->metaEventCount; ++index)
+    {
+        if (typeFilter == 0 || track->metaEvents[index].type == typeFilter)
+        {
+            count++;
+        }
+    }
+    *outCount = count;
+    return BAE_NO_ERROR;
+}
+
+
+BAEResult BAERmfEditorDocument_GetTrackMetaEvent(BAERmfEditorDocument const *document,
+                                                 uint16_t trackIndex,
+                                                 unsigned char typeFilter,
+                                                 uint32_t eventIndex,
+                                                 uint32_t *outTick,
+                                                 unsigned char *outType,
+                                                 unsigned char *outData,
+                                                 uint32_t dataCapacity,
+                                                 uint32_t *outSize)
+{
+    BAERmfEditorTrack const *track;
+    BAERmfEditorMetaEvent const *event;
+
+    if (!document || !outTick || !outType || !outSize)
+    {
+        return BAE_PARAM_ERR;
+    }
+    track = PV_GetTrackConst(document, trackIndex);
+    if (!track)
+    {
+        return BAE_PARAM_ERR;
+    }
+    event = PV_FindTrackMetaEventConst(track, typeFilter, eventIndex, NULL);
+    if (!event)
+    {
+        return BAE_PARAM_ERR;
+    }
+    *outTick = event->tick;
+    *outType = event->type;
+    *outSize = event->size;
+    if (outData && dataCapacity > 0 && event->size > 0 && event->data)
+    {
+        uint32_t copy = event->size;
+        if (copy > dataCapacity)
+        {
+            copy = dataCapacity;
+        }
+        XBlockMove(event->data, outData, (int32_t)copy);
+    }
+    return BAE_NO_ERROR;
+}
+
+
+BAEResult BAERmfEditorDocument_AddTrackMetaEvent(BAERmfEditorDocument *document,
+                                                 uint16_t trackIndex,
+                                                 uint32_t tick,
+                                                 unsigned char type,
+                                                 unsigned char const *data,
+                                                 uint32_t size)
+{
+    BAERmfEditorTrack *track;
+    BAEResult result;
+
+    if (!document || (size > 0 && !data))
+    {
+        return BAE_PARAM_ERR;
+    }
+    track = PV_GetTrack(document, trackIndex);
+    if (!track)
+    {
+        return BAE_PARAM_ERR;
+    }
+    result = PV_AddMetaEventToTrack(track, tick, type, data, size);
+    if (result == BAE_NO_ERROR)
+    {
+        PV_SortTrackMetaEvents(track);
+        PV_MarkDocumentDirty(document);
+    }
+    return result;
+}
+
+
+BAEResult BAERmfEditorDocument_SetTrackMetaEvent(BAERmfEditorDocument *document,
+                                                 uint16_t trackIndex,
+                                                 unsigned char typeFilter,
+                                                 uint32_t eventIndex,
+                                                 uint32_t tick,
+                                                 unsigned char type,
+                                                 unsigned char const *data,
+                                                 uint32_t size)
+{
+    BAERmfEditorTrack *track;
+    BAERmfEditorMetaEvent *event;
+    unsigned char *newData;
+
+    if (!document || (size > 0 && !data))
+    {
+        return BAE_PARAM_ERR;
+    }
+    track = PV_GetTrack(document, trackIndex);
+    if (!track)
+    {
+        return BAE_PARAM_ERR;
+    }
+    event = PV_FindTrackMetaEvent(track, typeFilter, eventIndex, NULL);
+    if (!event)
+    {
+        return BAE_PARAM_ERR;
+    }
+    newData = NULL;
+    if (size > 0)
+    {
+        newData = (unsigned char *)XNewPtr((int32_t)size);
+        if (!newData)
+        {
+            return BAE_MEMORY_ERR;
+        }
+        XBlockMove((XPTRC)data, newData, (int32_t)size);
+    }
+    if (event->data)
+    {
+        XDisposePtr(event->data);
+        event->data = NULL;
+    }
+    event->tick = tick;
+    event->type = type;
+    event->data = newData;
+    event->size = size;
+    PV_SortTrackMetaEvents(track);
+    PV_MarkDocumentDirty(document);
+    return BAE_NO_ERROR;
+}
+
+
+BAEResult BAERmfEditorDocument_DeleteTrackMetaEvent(BAERmfEditorDocument *document,
+                                                    uint16_t trackIndex,
+                                                    unsigned char typeFilter,
+                                                    uint32_t eventIndex)
+{
+    BAERmfEditorTrack *track;
+    uint32_t actualIndex;
+    BAERmfEditorMetaEvent *event;
+
+    if (!document)
+    {
+        return BAE_PARAM_ERR;
+    }
+    track = PV_GetTrack(document, trackIndex);
+    if (!track)
+    {
+        return BAE_PARAM_ERR;
+    }
+    event = PV_FindTrackMetaEvent(track, typeFilter, eventIndex, &actualIndex);
+    if (!event)
+    {
+        return BAE_PARAM_ERR;
+    }
+    if (event->data)
+    {
+        XDisposePtr(event->data);
+        event->data = NULL;
+    }
+    if (actualIndex + 1 < track->metaEventCount)
+    {
+        XBlockMove(&track->metaEvents[actualIndex + 1],
+                   &track->metaEvents[actualIndex],
+                   (int32_t)((track->metaEventCount - (actualIndex + 1)) *
+                             sizeof(BAERmfEditorMetaEvent)));
+    }
+    track->metaEventCount--;
+    PV_MarkDocumentDirty(document);
+    return BAE_NO_ERROR;
+}
+
+
+BAEResult BAERmfEditorDocument_GetLyricEventCount(BAERmfEditorDocument const *document,
+                                                  uint16_t trackIndex,
+                                                  uint32_t *outCount)
+{
+    return BAERmfEditorDocument_GetTrackMetaEventCount(document, trackIndex, 0x05, outCount);
+}
+
+
+BAEResult BAERmfEditorDocument_GetLyricEvent(BAERmfEditorDocument const *document,
+                                             uint16_t trackIndex,
+                                             uint32_t eventIndex,
+                                             uint32_t *outTick,
+                                             char *outText,
+                                             uint32_t textCapacity,
+                                             BAE_BOOL *outStartsNewLine)
+{
+    unsigned char type;
+    unsigned char data[512];
+    uint32_t size;
+    BAEResult result;
+
+    result = BAERmfEditorDocument_GetTrackMetaEvent(document,
+                                                    trackIndex,
+                                                    0x05,
+                                                    eventIndex,
+                                                    outTick,
+                                                    &type,
+                                                    data,
+                                                    (uint32_t)sizeof(data),
+                                                    &size);
+    if (result != BAE_NO_ERROR)
+    {
+        return result;
+    }
+    if (size > sizeof(data))
+    {
+        size = (uint32_t)sizeof(data);
+    }
+    PV_LyricDecodeText(data, size, outText, textCapacity, outStartsNewLine);
+    return BAE_NO_ERROR;
+}
+
+
+BAEResult BAERmfEditorDocument_AddLyricEvent(BAERmfEditorDocument *document,
+                                             uint16_t trackIndex,
+                                             uint32_t tick,
+                                             char const *text,
+                                             BAE_BOOL startsNewLine)
+{
+    unsigned char buf[512];
+    uint32_t size;
+
+    PV_LyricEncodeText(text, startsNewLine, buf, (uint32_t)sizeof(buf), &size);
+    if (size > sizeof(buf))
+    {
+        return BAE_PARAM_ERR;
+    }
+    return BAERmfEditorDocument_AddTrackMetaEvent(document, trackIndex, tick, 0x05, buf, size);
+}
+
+
+BAEResult BAERmfEditorDocument_SetLyricEvent(BAERmfEditorDocument *document,
+                                             uint16_t trackIndex,
+                                             uint32_t eventIndex,
+                                             uint32_t tick,
+                                             char const *text,
+                                             BAE_BOOL startsNewLine)
+{
+    unsigned char buf[512];
+    uint32_t size;
+
+    PV_LyricEncodeText(text, startsNewLine, buf, (uint32_t)sizeof(buf), &size);
+    if (size > sizeof(buf))
+    {
+        return BAE_PARAM_ERR;
+    }
+    return BAERmfEditorDocument_SetTrackMetaEvent(document,
+                                                  trackIndex,
+                                                  0x05,
+                                                  eventIndex,
+                                                  tick,
+                                                  0x05,
+                                                  buf,
+                                                  size);
+}
+
+
+BAEResult BAERmfEditorDocument_DeleteLyricEvent(BAERmfEditorDocument *document,
+                                                uint16_t trackIndex,
+                                                uint32_t eventIndex)
+{
+    return BAERmfEditorDocument_DeleteTrackMetaEvent(document, trackIndex, 0x05, eventIndex);
+}
+
+
+BAEResult BAERmfEditorDocument_ClearTrackLyricEvents(BAERmfEditorDocument *document,
+                                                     uint16_t trackIndex,
+                                                     BAE_BOOL alsoClearGenericText01)
+{
+    BAERmfEditorTrack *track;
+    uint32_t readIndex;
+    uint32_t writeIndex;
+    BAE_BOOL changed;
+
+    if (!document)
+    {
+        return BAE_PARAM_ERR;
+    }
+    track = PV_GetTrack(document, trackIndex);
+    if (!track)
+    {
+        return BAE_PARAM_ERR;
+    }
+    writeIndex = 0;
+    changed = FALSE;
+    for (readIndex = 0; readIndex < track->metaEventCount; ++readIndex)
+    {
+        BAERmfEditorMetaEvent *event;
+        BAE_BOOL drop;
+
+        event = &track->metaEvents[readIndex];
+        drop = FALSE;
+        if (event->type == 0x05)
+        {
+            drop = TRUE;
+        }
+        else if (alsoClearGenericText01 && event->type == 0x01)
+        {
+            /* Keep @-prefixed KAR control/info markers. */
+            if (!(event->size > 0 && event->data && event->data[0] == '@'))
+            {
+                drop = TRUE;
+            }
+        }
+        if (drop)
+        {
+            if (event->data)
+            {
+                XDisposePtr(event->data);
+                event->data = NULL;
+            }
+            changed = TRUE;
+            continue;
+        }
+        if (writeIndex != readIndex)
+        {
+            track->metaEvents[writeIndex] = *event;
+        }
+        writeIndex++;
+    }
+    track->metaEventCount = writeIndex;
+    if (changed)
+    {
+        PV_MarkDocumentDirty(document);
+    }
+    return BAE_NO_ERROR;
+}
+
+
+BAEResult BAERmfEditorDocument_ReplaceTrackLyrics(BAERmfEditorDocument *document,
+                                                  uint16_t trackIndex,
+                                                  BAERmfEditorLyricFragment const *fragments,
+                                                  uint32_t fragmentCount)
+{
+    BAEResult result;
+    uint32_t index;
+
+    if (!document || (fragmentCount > 0 && !fragments))
+    {
+        return BAE_PARAM_ERR;
+    }
+    result = BAERmfEditorDocument_ClearTrackLyricEvents(document, trackIndex, TRUE);
+    if (result != BAE_NO_ERROR)
+    {
+        return result;
+    }
+    for (index = 0; index < fragmentCount; ++index)
+    {
+        result = BAERmfEditorDocument_AddLyricEvent(document,
+                                                    trackIndex,
+                                                    fragments[index].tick,
+                                                    fragments[index].text,
+                                                    fragments[index].startsNewLine);
+        if (result != BAE_NO_ERROR)
+        {
+            return result;
+        }
+    }
+    return BAE_NO_ERROR;
+}
+
