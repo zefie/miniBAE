@@ -1862,8 +1862,9 @@
 
         ImGui::TextWrapped(
             "Per instrument: Off (bank ref), Embed (INST+samples), or Ghost "
-            "(INST only; samples resolve from the host bank). Usually embed "
-            "only instruments you created yourself.");
+            "(INST only; samples resolve from the host bank). Oscillator "
+            "('Don't use sample') instruments embed sample-free in either "
+            "Embed or Ghost. Usually embed only instruments you created yourself.");
         if (m_export_rmf_needs_zmf)
         {
             char reason_buf[256] = {0};
@@ -3390,6 +3391,49 @@
             return;
         }
 
+        /* Refuse to write a silent song: every Embed/Ghost INST must land on the
+         * export document (ExtInfo and/or samples). ALIS-without-INST was the
+         * miami-vice failure mode. */
+        for (uint32_t id : prepare_ids)
+        {
+            BAERmfEditorInstrumentExtInfo ext;
+            std::memset(&ext, 0, sizeof(ext));
+            const bool has_ext =
+                BAERmfEditorDocument_GetInstrumentExtInfo(export_doc, id, &ext) == BAE_NO_ERROR;
+#if USE_ZMF_SUPPORT == TRUE
+            const bool has_osc = has_ext && ext.useOscillator != FALSE;
+#else
+            const bool has_osc = false;
+#endif
+            bool has_sample = false;
+            uint32_t sc = 0;
+            if (BAERmfEditorDocument_GetSampleCount(export_doc, &sc) == BAE_NO_ERROR)
+            {
+                for (uint32_t si = 0; si < sc; ++si)
+                {
+                    uint32_t sample_inst = BAE_EDITOR_INST_ID_NONE;
+                    if (BAERmfEditorDocument_GetInstIDForSample(export_doc, si, &sample_inst) ==
+                            BAE_NO_ERROR &&
+                        sample_inst == id)
+                    {
+                        has_sample = true;
+                        break;
+                    }
+                }
+            }
+            if (!has_osc && !has_sample)
+            {
+                BAERmfEditorDocument_Delete(export_doc);
+                char buf[128];
+                std::snprintf(buf,
+                              sizeof(buf),
+                              "Export prepare failed: instrument %u was not embedded",
+                              static_cast<unsigned>(id));
+                SetStatus(buf);
+                return;
+            }
+        }
+
         for (const ExportInstrumentItem &item : m_export_items)
         {
             uint32_t target_inst = item.inst_id;
@@ -3421,6 +3465,95 @@
                                                                TRUE);
             }
         }
+
+#if USE_ZMF_SUPPORT == TRUE
+        /* Generators are sample-free. Re-apply song-doc OSCL (export reclones
+         * from the bank and can drop song-only Apply), and strip any leftover
+         * sample rows so Ghost/Embed both write a playable OSCL INST. */
+        for (const ExportInstrumentItem &item : m_export_items)
+        {
+            if (item.mode == ExportInstMode::Off)
+            {
+                continue;
+            }
+            uint32_t target_inst = item.inst_id;
+            if (item.percussion)
+            {
+                for (uint32_t mi = 0; mi < clone_result.mappingCount; ++mi)
+                {
+                    if (clone_result.mappings[mi].resolvedInstID == item.inst_id &&
+                        clone_result.mappings[mi].isPercussion)
+                    {
+                        target_inst = clone_result.mappings[mi].targetInstID;
+                        break;
+                    }
+                }
+            }
+            BAERmfEditorInstrumentExtInfo ext;
+            std::memset(&ext, 0, sizeof(ext));
+            bool have_osc =
+                BAERmfEditorDocument_GetInstrumentExtInfo(export_doc, target_inst, &ext) ==
+                    BAE_NO_ERROR &&
+                ext.useOscillator != FALSE;
+            if (!have_osc && m_document)
+            {
+                BAERmfEditorInstrumentExtInfo song_ext;
+                std::memset(&song_ext, 0, sizeof(song_ext));
+                if (BAERmfEditorDocument_GetInstrumentExtInfo(m_document, item.inst_id, &song_ext) ==
+                        BAE_NO_ERROR &&
+                    song_ext.useOscillator != FALSE)
+                {
+                    char name_buf[256];
+                    name_buf[0] = 0;
+                    if (song_ext.displayName && song_ext.displayName[0])
+                    {
+                        std::snprintf(name_buf, sizeof(name_buf), "%s", song_ext.displayName);
+                        song_ext.displayName = name_buf;
+                    }
+                    else
+                    {
+                        song_ext.displayName = nullptr;
+                    }
+                    song_ext.instID = target_inst;
+                    song_ext.flags1 = static_cast<unsigned char>(
+                        song_ext.flags1 & static_cast<unsigned char>(~ZBF_ghostInstrument));
+                    song_ext.flags1 =
+                        static_cast<unsigned char>(song_ext.flags1 | ZBF_extendedFormat);
+                    song_ext.hasExtendedData = TRUE;
+                    if (BAERmfEditorDocument_SetInstrumentExtInfo(export_doc, target_inst, &song_ext) ==
+                        BAE_NO_ERROR)
+                    {
+                        ext = song_ext;
+                        have_osc = true;
+                    }
+                }
+            }
+            if (!have_osc)
+            {
+                continue;
+            }
+            uint32_t sample_count = 0;
+            if (BAERmfEditorDocument_GetSampleCount(export_doc, &sample_count) == BAE_NO_ERROR)
+            {
+                for (uint32_t si = sample_count; si > 0; --si)
+                {
+                    uint32_t sample_inst = BAE_EDITOR_INST_ID_NONE;
+                    if (BAERmfEditorDocument_GetInstIDForSample(export_doc, si - 1, &sample_inst) ==
+                            BAE_NO_ERROR &&
+                        sample_inst == target_inst)
+                    {
+                        (void)BAERmfEditorDocument_DeleteSample(export_doc, si - 1);
+                    }
+                }
+            }
+            if (TEST_FLAG_VALUE(ext.flags1, ZBF_ghostInstrument))
+            {
+                ext.flags1 = static_cast<unsigned char>(ext.flags1 &
+                                                        static_cast<unsigned char>(~ZBF_ghostInstrument));
+                (void)BAERmfEditorDocument_SetInstrumentExtInfo(export_doc, target_inst, &ext);
+            }
+        }
+#endif
 
         /* Apply chosen sound storage type to embedded (non-alias) samples. */
         {
@@ -3479,7 +3612,22 @@
         (void)DropUnreferencedSamplesFromDocument(export_doc);
 
         UpdateBusyProgress(0.85f, "Writing exported song file…");
-        const BAEResult r = BAERmfEditorDocument_SaveAsRmf(export_doc, const_cast<char *>(out_path.c_str()));
+        BAEResult r = BAERmfEditorDocument_SaveAsRmf(export_doc, const_cast<char *>(out_path.c_str()));
+        if (r == BAE_NO_ERROR && !prepare_ids.empty())
+        {
+            /* Safety net: refuse ALIS-without-INST (silent ZMF). Rebuild OSCL
+             * INST from the export doc and/or copy from the session bank. */
+            const BAEResult patch = BAERmfEditorDocument_PatchMissingInstIntoSongFile(
+                export_doc,
+                const_cast<char *>(out_path.c_str()),
+                m_bank_token,
+                prepare_ids.data(),
+                static_cast<uint32_t>(prepare_ids.size()));
+            if (patch != BAE_NO_ERROR)
+            {
+                r = patch;
+            }
+        }
         BAERmfEditorDocument_Delete(export_doc);
         UpdateBusyProgress(1.00f, "Export Complete");
         if (r == BAE_NO_ERROR)
@@ -6379,7 +6527,8 @@
                                                      static_cast<unsigned char>(~ZBF_ghostInstrument));
 #if USE_ZMF_SUPPORT == TRUE
         /* Only rewrite split SND ids when oscillator mode actually toggled.
-         * ADSR/LPF/LFO Apply used to restore every split (N full bank rebuilds). */
+         * ADSR/LPF/LFO Apply used to restore every split (N full bank rebuilds).
+         * Export strips leftover samples for OSCL instruments as a safety net. */
         {
             const bool osc_now = m_ie_ext.useOscillator != FALSE;
             const bool osc_was = m_ie_ext_pristine.useOscillator != FALSE;
@@ -6398,7 +6547,7 @@
             }
             /* Song instrument → generator: drop its document sample rows so they
              * don't linger as undeletable [Song] orphans. */
-            if (m_ie_from_song && m_document && osc_now && !osc_was)
+            if (m_ie_from_song && m_document && osc_now)
             {
                 (void)DeleteDocumentSamplesForInstrument(m_ie_inst_id);
                 RefreshSongSamplesFromDocument();

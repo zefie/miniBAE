@@ -1256,8 +1256,6 @@ BAEResult PV_AddSampleFreeInstrumentResources(BAERmfEditorDocument *document,
     {
         BAERmfEditorInstrumentExt const *ext = &document->instrumentExts[extIndex];
         XLongResourceID instID;
-        uint32_t sampleIndex;
-        bool hasSample;
         char pascalName[256];
         BAEResult nameResult;
         XPTR extTail;
@@ -1266,9 +1264,20 @@ BAEResult PV_AddSampleFreeInstrumentResources(BAERmfEditorDocument *document,
         int32_t instSize;
         int32_t totalSize;
 
-        if (!ext->useOscillator)
         {
-            continue;
+            bool sampleFree = (ext->useOscillator != FALSE);
+            if (!sampleFree &&
+                ext->originalInstData &&
+                ext->originalInstSize >= 2 &&
+                PV_IsNoSampleSndID((XShortResourceID)XGetShort(ext->originalInstData)))
+            {
+                /* Ext parse sometimes misses OSCL; FFFF header still means sample-free. */
+                sampleFree = TRUE;
+            }
+            if (!sampleFree)
+            {
+                continue;
+            }
         }
         instID = ext->instID;
         /* INST id 0 is valid (bank-group 0 / program 0). */
@@ -1277,19 +1286,10 @@ BAEResult PV_AddSampleFreeInstrumentResources(BAERmfEditorDocument *document,
             continue;
         }
 
-        hasSample = FALSE;
-        for (sampleIndex = 0; sampleIndex < document->sampleCount; ++sampleIndex)
-        {
-            if (document->samples[sampleIndex].instID == (uint32_t)instID)
-            {
-                hasSample = TRUE;
-                break;
-            }
-        }
-        if (hasSample)
-        {
-            continue;
-        }
+        /* Oscillator instruments are defined by OSCL, not by document sample
+         * rows. Export Ghost / failed cleanup used to leave alias rows that
+         * blocked this writer — producing ALIS with no INST (silent ZMF).
+         * Always emit the sample-free OSCL INST when missing. */
 
         nameResult = PV_CreatePascalName(
             (ext->displayName && ext->displayName[0]) ? ext->displayName : "Oscillator",
@@ -3273,6 +3273,74 @@ BAEResult PV_VerifyClonedInstrument(BAERmfEditorDocument const *document,
 }
 
 
+#if USE_ZMF_SUPPORT == TRUE
+/* Song-document oscillator ExtInfo is wiped when export deletes + reclones from
+ * the bank. Capture before DeleteInstrument (displayName must be copied — the
+ * GetInstrumentExtInfo pointer dangles after delete). */
+static bool PV_CaptureDocumentOscillatorExt(BAERmfEditorDocument *document,
+                                            uint32_t instID,
+                                            BAERmfEditorInstrumentExtInfo *outInfo,
+                                            char *nameBuf,
+                                            uint32_t nameBufSize)
+{
+    if (!document || !outInfo)
+    {
+        return FALSE;
+    }
+    XSetMemory(outInfo, (int32_t)sizeof(*outInfo), 0);
+    if (BAERmfEditorDocument_GetInstrumentExtInfo(document, instID, outInfo) != BAE_NO_ERROR ||
+        !outInfo->useOscillator)
+    {
+        return FALSE;
+    }
+    if (outInfo->displayName && outInfo->displayName[0] && nameBuf && nameBufSize > 1)
+    {
+        uint32_t i;
+        for (i = 0; i + 1 < nameBufSize && outInfo->displayName[i]; ++i)
+        {
+            nameBuf[i] = outInfo->displayName[i];
+        }
+        nameBuf[i] = 0;
+        outInfo->displayName = nameBuf;
+    }
+    else
+    {
+        outInfo->displayName = NULL;
+    }
+    return TRUE;
+}
+
+static void PV_ApplyCapturedOscillatorExt(BAERmfEditorDocument *document,
+                                          uint32_t instID,
+                                          BAERmfEditorInstrumentExtInfo *info)
+{
+    uint32_t si;
+
+    if (!document || !info)
+    {
+        return;
+    }
+    info->instID = instID;
+    /* Sample-free: ghost bit is meaningless and confuses save/load paths. */
+    info->flags1 = (unsigned char)(info->flags1 & (unsigned char)~ZBF_ghostInstrument);
+    info->flags1 = (unsigned char)(info->flags1 | ZBF_extendedFormat);
+    info->hasExtendedData = TRUE;
+    (void)BAERmfEditorDocument_SetInstrumentExtInfo(document, instID, info);
+    si = 0;
+    while (si < document->sampleCount)
+    {
+        if (document->samples[si].instID == instID)
+        {
+            (void)BAERmfEditorDocument_DeleteSample(document, si);
+        }
+        else
+        {
+            ++si;
+        }
+    }
+}
+#endif /* USE_ZMF_SUPPORT */
+
 BAEResult PV_PrepareUsedInstrumentsFromBank(
     BAERmfEditorDocument *document,
     BAEBankToken bankToken,
@@ -3378,9 +3446,38 @@ BAEResult PV_PrepareUsedInstrumentsFromBank(
         if (!PV_ExportShouldEmbedInst(expectedInstID, embedAll, embedResolvedInstIDs, embedCount))
         {
             (void)BAERmfEditorDocument_DeleteInstrument(document, expectedInstID);
-            (void)BAERmfEditorDocument_DeleteInstrument(document, 512u + targetProgram);
+            /* Do not wipe 512+program when that slot is explicitly selected for
+             * embed/ghost (e.g. bank-2 generators). Older code always deleted
+             * 512+prog here and could drop OSCL INSTs before they were cloned. */
+            {
+                uint32_t slot512 = 512u + (uint32_t)targetProgram;
+                if (!PV_ExportShouldEmbedInst(slot512, embedAll, embedResolvedInstIDs, embedCount))
+                {
+                    (void)BAERmfEditorDocument_DeleteInstrument(document, slot512);
+                }
+            }
             continue;
         }
+#if USE_ZMF_SUPPORT == TRUE
+        /* Preserve song-doc OSCL before delete+reclone from bank. */
+        BAERmfEditorInstrumentExtInfo preservedOsc;
+        char preservedOscName[256];
+        bool havePreservedOsc = FALSE;
+        preservedOscName[0] = 0;
+        havePreservedOsc = PV_CaptureDocumentOscillatorExt(document,
+                                                           expectedInstID,
+                                                           &preservedOsc,
+                                                           preservedOscName,
+                                                           (uint32_t)sizeof(preservedOscName));
+        if (!havePreservedOsc)
+        {
+            havePreservedOsc = PV_CaptureDocumentOscillatorExt(document,
+                                                               512u + targetProgram,
+                                                               &preservedOsc,
+                                                               preservedOscName,
+                                                               (uint32_t)sizeof(preservedOscName));
+        }
+#endif
         (void)BAERmfEditorDocument_DeleteInstrument(document, expectedInstID);
         (void)BAERmfEditorDocument_DeleteInstrument(document, 512u + targetProgram);
 
@@ -3468,6 +3565,13 @@ BAEResult PV_PrepareUsedInstrumentsFromBank(
         {
             return result;
         }
+#if USE_ZMF_SUPPORT == TRUE
+        if (havePreservedOsc)
+        {
+            PV_ApplyCapturedOscillatorExt(document, targetInstID, &preservedOsc);
+            clonedSampleCount = 0;
+        }
+#endif
         PV_AddCloneUsedMapping(outResult,
                                pair->bank,
                                pair->program,
@@ -3518,6 +3622,17 @@ BAEResult PV_PrepareUsedInstrumentsFromBank(
             (void)BAERmfEditorDocument_DeleteInstrument(document, requestedInstID);
             continue;
         }
+#if USE_ZMF_SUPPORT == TRUE
+        BAERmfEditorInstrumentExtInfo preservedPercOsc;
+        char preservedPercOscName[256];
+        bool havePreservedPercOsc = FALSE;
+        preservedPercOscName[0] = 0;
+        havePreservedPercOsc = PV_CaptureDocumentOscillatorExt(document,
+                                                               requestedInstID,
+                                                               &preservedPercOsc,
+                                                               preservedPercOscName,
+                                                               (uint32_t)sizeof(preservedPercOscName));
+#endif
         (void)BAERmfEditorDocument_DeleteInstrument(document, requestedInstID);
 
         if (BAERmfEditorBank_ResolveInstID(bankToken,
@@ -3573,6 +3688,13 @@ BAEResult PV_PrepareUsedInstrumentsFromBank(
         {
             return result;
         }
+#if USE_ZMF_SUPPORT == TRUE
+        if (havePreservedPercOsc)
+        {
+            PV_ApplyCapturedOscillatorExt(document, requestedInstID, &preservedPercOsc);
+            clonedSampleCount = 0;
+        }
+#endif
         /* Preserve original bank + note references on the MIDI (no remap). */
         PV_AddCloneUsedMapping(outResult,
                                percussion->bank,
@@ -3590,6 +3712,105 @@ BAEResult PV_PrepareUsedInstrumentsFromBank(
     {
         outResult->percussionCount = clonedPercussionCount;
     }
+
+    /* Force-clone any explicitly selected INST IDs that note-scan missed.
+     * Happens when snapshot MIDI bank form disagrees with the editor list
+     * (UI selected 512/513 but export_doc notes looked like bank 0). Without
+     * this, export can write ALIS remaps and no INST bodies → silent ZMF. */
+    if (!embedAll && embedResolvedInstIDs && embedCount > 0)
+    {
+        uint32_t sel;
+        for (sel = 0; sel < embedCount; ++sel)
+        {
+            uint32_t wantID = embedResolvedInstIDs[sel];
+            uint32_t resolvedInstID = wantID;
+            uint32_t instrumentIndex = 0;
+            uint32_t firstSampleIndex;
+            uint32_t clonedSampleCount = 0;
+            BAERmfEditorBankInstrumentInfo sourceInfo;
+            unsigned char targetProgram;
+
+            if (wantID == BAE_EDITOR_INST_ID_NONE)
+            {
+                continue;
+            }
+            if (PV_DocumentHasEmbeddedInstID(document, wantID))
+            {
+                continue;
+            }
+            if (BAERmfEditorBank_ResolveInstID(bankToken,
+                                               wantID,
+                                               &resolvedInstID,
+                                               &instrumentIndex) != BAE_NO_ERROR)
+            {
+                debug_message("[CloneUsed] Force-embed: missing INST=%u\n", (unsigned)wantID);
+                continue;
+            }
+            if (BAERmfEditorBank_GetInstrumentInfo(bankToken,
+                                                    instrumentIndex,
+                                                    &sourceInfo) != BAE_NO_ERROR ||
+                sourceInfo.instID != resolvedInstID)
+            {
+                continue;
+            }
+            {
+                uint32_t withinBank = resolvedInstID % 256u;
+                bool isPercussion = (withinBank >= 128u);
+                targetProgram = isPercussion ? (unsigned char)(withinBank - 128u)
+                                             : (unsigned char)withinBank;
+                (void)BAERmfEditorDocument_DeleteInstrument(document, wantID);
+                firstSampleIndex = document->sampleCount;
+                result = BAERmfEditorDocument_CloneInstrumentFromBankToInstID(document,
+                                                                              bankToken,
+                                                                              instrumentIndex,
+                                                                              wantID,
+                                                                              targetProgram);
+                if (result != BAE_NO_ERROR)
+                {
+                    debug_message("[CloneUsed] Force-embed clone INST=%u failed result=%d\n",
+                                  (unsigned)wantID, (int)result);
+                    return result;
+                }
+                result = PV_VerifyClonedInstrument(document,
+                                                   bankToken,
+                                                   instrumentIndex,
+                                                   wantID,
+                                                   firstSampleIndex,
+                                                   &clonedSampleCount);
+                if (result != BAE_NO_ERROR)
+                {
+                    debug_message("[CloneUsed] Force-embed verify INST=%u failed result=%d\n",
+                                  (unsigned)wantID, (int)result);
+                    return result;
+                }
+                PV_AddCloneUsedMapping(outResult,
+                                       sourceInfo.bank,
+                                       targetProgram,
+                                       isPercussion,
+                                       wantID,
+                                       resolvedInstID,
+                                       wantID,
+                                       clonedSampleCount,
+                                       sourceInfo.name);
+                debug_message("[CloneUsed] Force-embed INST=%u -> document (%u samples)\n",
+                              (unsigned)wantID, (unsigned)clonedSampleCount);
+                if (isPercussion)
+                {
+                    clonedPercussionCount++;
+                }
+                else
+                {
+                    clonedPitchedCount++;
+                }
+            }
+        }
+        if (outResult)
+        {
+            outResult->pitchedCount = clonedPitchedCount;
+            outResult->percussionCount = clonedPercussionCount;
+        }
+    }
+
     return BAE_NO_ERROR;
 }
 
@@ -3648,9 +3869,39 @@ BAEResult PV_AddRequiredAliases(BAERmfEditorDocument *document, XFILE fileRef, b
     }
 #endif
 
-    if (maxProgram == 0)
     {
-        return BAE_NO_ERROR;
+        bool hasPitchedEmbed = FALSE;
+        for (sampleIndex = 0; sampleIndex < document->sampleCount; ++sampleIndex)
+        {
+            BAERmfEditorSample const *sample = &document->samples[sampleIndex];
+            if (sample->instID != BAE_EDITOR_INST_ID_NONE && sample->instID >= 512)
+            {
+                hasPitchedEmbed = TRUE;
+                break;
+            }
+        }
+#if USE_ZMF_SUPPORT == TRUE
+        if (!hasPitchedEmbed)
+        {
+            uint32_t extIndex;
+            for (extIndex = 0; extIndex < document->instrumentExtCount; ++extIndex)
+            {
+                BAERmfEditorInstrumentExt const *ext = &document->instrumentExts[extIndex];
+                if (ext->useOscillator &&
+                    ext->instID != (XLongResourceID)BAE_EDITOR_INST_ID_NONE &&
+                    ext->instID >= 512)
+                {
+                    hasPitchedEmbed = TRUE;
+                    break;
+                }
+            }
+        }
+#endif
+        /* Program 0 alone leaves maxProgram==0; still need ALIS 0→512. */
+        if (!hasPitchedEmbed)
+        {
+            return BAE_NO_ERROR;
+        }
     }
 
     XSetMemory(percussionTargetPrograms, (int32_t)sizeof(percussionTargetPrograms), 0);
@@ -3824,8 +4075,12 @@ BAEResult PV_WriteRmfDocumentToResourceFile(BAERmfEditorDocument *document,
             {
                 continue;
             }
-            if (entry->type == ID_SND || entry->type == ID_CSND || entry->type == ID_ESND || entry->type == ID_INST)
+            if (entry->type == ID_SND || entry->type == ID_CSND || entry->type == ID_ESND ||
+                entry->type == ID_INST || entry->type == ID_ALIAS || entry->type == ID_ZINS)
             {
+                /* Always rebuild INST/ALIAS/ZINS from the live document — copying
+                 * a stale ALIS from the snapshot without INST bodies yields a
+                 * silent ZMF (aliases to missing 512+ generators). */
                 continue;
             }
             if (PV_IsMidiResourceType(entry->type))
@@ -3932,6 +4187,26 @@ BAEResult PV_WriteRmfDocumentToResourceFile(BAERmfEditorDocument *document,
             PV_ByteBufferDispose(&midiData);
             return result;
         }
+#if USE_ZMF_SUPPORT == TRUE
+        {
+            uint32_t extIndex;
+            for (extIndex = 0; extIndex < document->instrumentExtCount; ++extIndex)
+            {
+                BAERmfEditorInstrumentExt const *ext = &document->instrumentExts[extIndex];
+                if (!ext->useOscillator)
+                {
+                    continue;
+                }
+                if (XExistsFileResource(fileRef, ID_INST, ext->instID) == FALSE)
+                {
+                    debug_message("[RMF Save] refusing silent save: missing sample-free INST id=%ld\n",
+                                  (long)ext->instID);
+                    PV_ByteBufferDispose(&midiData);
+                    return BAE_BAD_INSTRUMENT;
+                }
+            }
+        }
+#endif
         if (packForShip)
         {
             if (XPackResourceFileForShip(fileRef) == FALSE)
@@ -3990,6 +4265,27 @@ BAEResult PV_WriteRmfDocumentToResourceFile(BAERmfEditorDocument *document,
         result = PV_AddRequiredAliases(document, fileRef, isZmf);
         debug_message("[RMF Save] AddRequiredAliases result=%d\n", (int)result);
     }
+#if USE_ZMF_SUPPORT == TRUE
+    if (result == BAE_NO_ERROR)
+    {
+        uint32_t extIndex;
+        for (extIndex = 0; extIndex < document->instrumentExtCount; ++extIndex)
+        {
+            BAERmfEditorInstrumentExt const *ext = &document->instrumentExts[extIndex];
+            if (!ext->useOscillator)
+            {
+                continue;
+            }
+            if (XExistsFileResource(fileRef, ID_INST, ext->instID) == FALSE)
+            {
+                debug_message("[RMF Save] refusing silent save: missing sample-free INST id=%ld\n",
+                              (long)ext->instID);
+                result = BAE_BAD_INSTRUMENT;
+                break;
+            }
+        }
+    }
+#endif
     if (result == BAE_NO_ERROR)
     {
         result = PV_AddSongResource(document, fileRef, midiID);

@@ -3093,6 +3093,37 @@ BAEResult BAERmfEditorDocument_SetInstrumentGhost(BAERmfEditorDocument *document
         return result;
     }
 
+#if USE_ZMF_SUPPORT == TRUE
+    /* Oscillator instruments are sample-free (SND 0xFFFF). Ghost aliases are
+     * meaningless here and inventing a 0xFFFF bank-alias row makes the RMF
+     * writer treat the INST as sample-backed, so the OSCL-only INST path is
+     * skipped and playback is silent without a host bank sample. */
+    if (info.useOscillator)
+    {
+        uint32_t si = 0;
+        while (si < document->sampleCount)
+        {
+            if (document->samples[si].instID == instID)
+            {
+                (void)BAERmfEditorDocument_DeleteSample(document, si);
+            }
+            else
+            {
+                ++si;
+            }
+        }
+        /* Drop the ghost bit we may have just set — sample-free OSCL embeds
+         * fully; there is nothing to resolve from a host bank. */
+        if (TEST_FLAG_VALUE(info.flags1, ZBF_ghostInstrument))
+        {
+            info.flags1 = (unsigned char)(info.flags1 & (unsigned char)~ZBF_ghostInstrument);
+            (void)BAERmfEditorDocument_SetInstrumentExtInfo(document, instID, &info);
+        }
+        PV_MarkDocumentDirty(document);
+        return BAE_NO_ERROR;
+    }
+#endif
+
     if (ghost == currentlyGhost)
     {
         /* Still ensure sample alias state matches when enabling. */
@@ -3182,32 +3213,58 @@ BAEResult BAERmfEditorDocument_SetInstrumentGhost(BAERmfEditorDocument *document
         {
             return BAE_BAD_FILE;
         }
-        for (s = 0; s < bankSampleCount; ++s)
         {
-            BAERmfEditorBankSampleInfo bankSample;
-            XSetMemory(&bankSample, sizeof(bankSample), 0);
-            if (BAERmfEditorBank_GetInstrumentSampleInfo(bankToken,
-                                                        bankInstrumentIndex,
-                                                        s,
-                                                        &bankSample) != BAE_NO_ERROR)
+            uint32_t aliasesAdded = 0;
+            for (s = 0; s < bankSampleCount; ++s)
             {
+                BAERmfEditorBankSampleInfo bankSample;
+                XSetMemory(&bankSample, sizeof(bankSample), 0);
+                if (BAERmfEditorBank_GetInstrumentSampleInfo(bankToken,
+                                                            bankInstrumentIndex,
+                                                            s,
+                                                            &bankSample) != BAE_NO_ERROR)
+                {
+                    return BAE_BAD_FILE;
+                }
+                /* 0xFFFF = no sample (oscillator / empty INST). Do not invent aliases. */
+                if (PV_IsNoSampleSndID(bankSample.sndResourceID))
+                {
+                    continue;
+                }
+                if (BAERmfEditorDocument_AddBankAliasSample(document,
+                                                           bankToken,
+                                                           instID,
+                                                           bankInfo.program,
+                                                           bankSample.sndResourceID,
+                                                           bankInfo.name,
+                                                           bankSample.rootKey,
+                                                           bankSample.lowKey,
+                                                           bankSample.highKey,
+                                                           NULL,
+                                                           NULL) != BAE_NO_ERROR)
+                {
+                    return BAE_GENERAL_ERR;
+                }
+                document->samples[document->sampleCount - 1].splitVolume = bankSample.splitVolume;
+                aliasesAdded++;
+            }
+            if (aliasesAdded == 0)
+            {
+#if USE_ZMF_SUPPORT == TRUE
+                if (BAERmfEditorBank_GetInstrumentExtInfo(bankToken, bankInstrumentIndex, &bankExt) ==
+                        BAE_NO_ERROR &&
+                    bankExt.useOscillator)
+                {
+                    bankExt.displayName = bankInfo.name[0] ? bankInfo.name : NULL;
+                    bankExt.flags1 = (unsigned char)(bankExt.flags1 | ZBF_ghostInstrument);
+                    bankExt.instID = instID;
+                    (void)BAERmfEditorDocument_SetInstrumentExtInfo(document, instID, &bankExt);
+                    PV_MarkDocumentDirty(document);
+                    return BAE_NO_ERROR;
+                }
+#endif
                 return BAE_BAD_FILE;
             }
-            if (BAERmfEditorDocument_AddBankAliasSample(document,
-                                                       bankToken,
-                                                       instID,
-                                                       bankInfo.program,
-                                                       bankSample.sndResourceID,
-                                                       bankInfo.name,
-                                                       bankSample.rootKey,
-                                                       bankSample.lowKey,
-                                                       bankSample.highKey,
-                                                       NULL,
-                                                       NULL) != BAE_NO_ERROR)
-            {
-                return BAE_GENERAL_ERR;
-            }
-            document->samples[document->sampleCount - 1].splitVolume = bankSample.splitVolume;
         }
         if (BAERmfEditorBank_GetInstrumentExtInfo(bankToken, bankInstrumentIndex, &bankExt) == BAE_NO_ERROR)
         {
@@ -4781,6 +4838,360 @@ BAEResult BAERmfEditorDocument_ExportUsedInstrumentsFromBank(
                                              embedResolvedInstIDs,
                                              embedCount,
                                              outResult);
+}
+
+
+static BAEResult PV_OpenSongFileWritableAdopt(BAEPathName songPath,
+                                              XFILENAME *outSongName,
+                                              XFILE *outSongFile)
+{
+    XFILE songFile;
+    XPTR songImage;
+    int32_t songImageSize;
+
+    if (!songPath || !outSongName || !outSongFile)
+    {
+        return BAE_PARAM_ERR;
+    }
+    *outSongFile = NULL;
+    XConvertPathToXFILENAME(songPath, outSongName);
+    /* Disk-backed XFileOpenResource has no pResourceData — GetMemoryFileAsData
+     * always fails. Read bytes, then adopt into a writable memory resource. */
+    songImage = NULL;
+    songImageSize = 0;
+    if (XGetFileAsData(outSongName, &songImage, &songImageSize) != 0 ||
+        !songImage || songImageSize <= 0)
+    {
+        if (songImage)
+        {
+            XDisposePtr(songImage);
+        }
+        return BAE_FILE_IO_ERROR;
+    }
+    songFile = XFileOpenWritableResourceAdoptMemory(songImage, (uint32_t)songImageSize);
+    if (!songFile)
+    {
+        XDisposePtr(songImage);
+        return BAE_MEMORY_ERR;
+    }
+    *outSongFile = songFile;
+    return BAE_NO_ERROR;
+}
+
+static BAEResult PV_WriteBackAdoptedSongFile(XFILENAME *songName, XFILE *songFile)
+{
+    XPTR outData;
+    int32_t outSize;
+    XFILE outFile;
+
+    if (!songName || !songFile || !*songFile)
+    {
+        return BAE_PARAM_ERR;
+    }
+    if (XPackResourceFileForShip(*songFile) == FALSE)
+    {
+        return BAE_FILE_IO_ERROR;
+    }
+    outData = NULL;
+    outSize = 0;
+    if (XFileGetMemoryFileAsData(*songFile, &outData, &outSize) != 0 ||
+        !outData || outSize <= 0)
+    {
+        if (outData)
+        {
+            XDisposePtr(outData);
+        }
+        return BAE_FILE_IO_ERROR;
+    }
+    XFileClose(*songFile);
+    *songFile = NULL;
+    outFile = XFileOpenForWrite(songName, TRUE);
+    if (!outFile)
+    {
+        XDisposePtr(outData);
+        return BAE_FILE_IO_ERROR;
+    }
+    if (XFileSetLength(outFile, 0) != 0 ||
+        XFileSetPosition(outFile, 0L) != 0 ||
+        XFileWrite(outFile, outData, outSize) != 0)
+    {
+        XFileClose(outFile);
+        XDisposePtr(outData);
+        return BAE_FILE_IO_ERROR;
+    }
+    XFileClose(outFile);
+    XDisposePtr(outData);
+    return BAE_NO_ERROR;
+}
+
+static BAEResult PV_InjectOneInstFromBank(XFILE songFile,
+                                          BAEBankToken bankToken,
+                                          uint32_t wantID)
+{
+    XFILE bankFile;
+    XLongResourceID bankInstID;
+    XPTR instData;
+    int32_t instSize;
+    char rawName[256];
+    uint32_t resolvedID;
+    uint32_t instrumentIndex;
+
+    if (!songFile || !bankToken || wantID == BAE_EDITOR_INST_ID_NONE)
+    {
+        return BAE_PARAM_ERR;
+    }
+    if (XExistsFileResource(songFile, ID_INST, (XLongResourceID)wantID) != FALSE)
+    {
+        return BAE_NO_ERROR;
+    }
+    resolvedID = wantID;
+    instrumentIndex = 0;
+    if (BAERmfEditorBank_ResolveInstID(bankToken, wantID, &resolvedID, &instrumentIndex) !=
+        BAE_NO_ERROR)
+    {
+        return BAE_BAD_INSTRUMENT;
+    }
+    bankFile = (XFILE)bankToken;
+    bankInstID = (XLongResourceID)resolvedID;
+    rawName[0] = 0;
+    instData = XGetFileResource(bankFile, ID_INST, bankInstID, rawName, &instSize);
+    if (!instData || instSize < 14)
+    {
+        if (instData)
+        {
+            XDisposePtr(instData);
+        }
+        /* Indexed fallback when id lookup misses but Resolve gave an index. */
+        bankInstID = (XLongResourceID)resolvedID;
+        instData = XGetIndexedFileResource(bankFile,
+                                           ID_INST,
+                                           &bankInstID,
+                                           (int32_t)instrumentIndex,
+                                           rawName,
+                                           &instSize);
+        if (!instData || instSize < 14)
+        {
+            if (instData)
+            {
+                XDisposePtr(instData);
+            }
+            return BAE_BAD_INSTRUMENT;
+        }
+    }
+    if (XAddFileResource(songFile,
+                         ID_INST,
+                         (XLongResourceID)wantID,
+                         rawName,
+                         instData,
+                         instSize) != 0)
+    {
+        XDisposePtr(instData);
+        return BAE_FILE_IO_ERROR;
+    }
+    XDisposePtr(instData);
+    debug_message("[InjectInst] wrote INST id=%lu (%ld bytes) from bank into song\n",
+                  (unsigned long)wantID, (long)instSize);
+    return BAE_NO_ERROR;
+}
+
+BAEResult BAERmfEditor_InjectMissingInstFromBankIntoSongFile(
+    BAEPathName songPath,
+    BAEBankToken bankToken,
+    uint32_t const *instIDs,
+    uint32_t instCount)
+{
+    XFILENAME songName;
+    XFILE songFile;
+    uint32_t i;
+    uint32_t injected;
+    BAEResult result;
+
+    if (!songPath || !bankToken || !instIDs || instCount == 0)
+    {
+        return BAE_PARAM_ERR;
+    }
+
+    result = PV_OpenSongFileWritableAdopt(songPath, &songName, &songFile);
+    if (result != BAE_NO_ERROR)
+    {
+        return result;
+    }
+
+    injected = 0;
+    for (i = 0; i < instCount; ++i)
+    {
+        if (instIDs[i] == BAE_EDITOR_INST_ID_NONE)
+        {
+            continue;
+        }
+        if (XExistsFileResource(songFile, ID_INST, (XLongResourceID)instIDs[i]) != FALSE)
+        {
+            continue;
+        }
+        result = PV_InjectOneInstFromBank(songFile, bankToken, instIDs[i]);
+        if (result != BAE_NO_ERROR)
+        {
+            break;
+        }
+        injected++;
+    }
+
+    if (result == BAE_NO_ERROR && injected > 0)
+    {
+        result = PV_WriteBackAdoptedSongFile(&songName, &songFile);
+    }
+
+    if (songFile)
+    {
+        XFileClose(songFile);
+    }
+    return result;
+}
+
+BAEResult BAERmfEditorDocument_PatchMissingInstIntoSongFile(
+    BAERmfEditorDocument *document,
+    BAEPathName songPath,
+    BAEBankToken bankToken,
+    uint32_t const *instIDs,
+    uint32_t instCount)
+{
+    XFILENAME songName;
+    XFILE songFile;
+    uint32_t i;
+    uint32_t patched;
+    BAEResult result;
+
+    if (!document || !songPath || !instIDs || instCount == 0)
+    {
+        return BAE_PARAM_ERR;
+    }
+
+    result = PV_OpenSongFileWritableAdopt(songPath, &songName, &songFile);
+    if (result != BAE_NO_ERROR)
+    {
+        return result;
+    }
+
+    patched = 0;
+#if USE_ZMF_SUPPORT == TRUE
+    {
+        /* Rebuild any still-missing sample-free OSCL INST from live ExtInfo. */
+        uint32_t beforeMissing = 0;
+        for (i = 0; i < instCount; ++i)
+        {
+            if (instIDs[i] != BAE_EDITOR_INST_ID_NONE &&
+                XExistsFileResource(songFile, ID_INST, (XLongResourceID)instIDs[i]) == FALSE)
+            {
+                beforeMissing++;
+            }
+        }
+        result = PV_AddSampleFreeInstrumentResources(document, songFile);
+        if (result != BAE_NO_ERROR)
+        {
+            XFileClose(songFile);
+            return result;
+        }
+        for (i = 0; i < instCount; ++i)
+        {
+            if (instIDs[i] != BAE_EDITOR_INST_ID_NONE &&
+                XExistsFileResource(songFile, ID_INST, (XLongResourceID)instIDs[i]) != FALSE)
+            {
+                /* count reductions below */
+            }
+        }
+        {
+            uint32_t afterMissing = 0;
+            for (i = 0; i < instCount; ++i)
+            {
+                if (instIDs[i] != BAE_EDITOR_INST_ID_NONE &&
+                    XExistsFileResource(songFile, ID_INST, (XLongResourceID)instIDs[i]) == FALSE)
+                {
+                    afterMissing++;
+                }
+            }
+            if (afterMissing < beforeMissing)
+            {
+                patched += (beforeMissing - afterMissing);
+            }
+        }
+    }
+#endif
+
+    for (i = 0; i < instCount; ++i)
+    {
+        BAERmfEditorInstrumentExt *ext;
+
+        if (instIDs[i] == BAE_EDITOR_INST_ID_NONE)
+        {
+            continue;
+        }
+        if (XExistsFileResource(songFile, ID_INST, (XLongResourceID)instIDs[i]) != FALSE)
+        {
+            continue;
+        }
+        ext = PV_FindInstrumentExt(document, (XLongResourceID)instIDs[i]);
+        if (ext && ext->originalInstData && ext->originalInstSize >= 14)
+        {
+            char pascalName[256];
+            BAEResult nameResult = PV_CreatePascalName(
+                (ext->displayName && ext->displayName[0]) ? ext->displayName : "Instrument",
+                pascalName);
+            if (nameResult != BAE_NO_ERROR)
+            {
+                XFileClose(songFile);
+                return nameResult;
+            }
+            if (XAddFileResource(songFile,
+                                 ID_INST,
+                                 (XLongResourceID)instIDs[i],
+                                 pascalName,
+                                 ext->originalInstData,
+                                 ext->originalInstSize) != 0)
+            {
+                XFileClose(songFile);
+                return BAE_FILE_IO_ERROR;
+            }
+            patched++;
+            debug_message("[PatchInst] wrote INST id=%lu verbatim (%ld bytes) from document\n",
+                          (unsigned long)instIDs[i], (long)ext->originalInstSize);
+            continue;
+        }
+        if (bankToken)
+        {
+            result = PV_InjectOneInstFromBank(songFile, bankToken, instIDs[i]);
+            if (result != BAE_NO_ERROR)
+            {
+                XFileClose(songFile);
+                return result;
+            }
+            patched++;
+        }
+    }
+
+    for (i = 0; i < instCount; ++i)
+    {
+        if (instIDs[i] == BAE_EDITOR_INST_ID_NONE)
+        {
+            continue;
+        }
+        if (XExistsFileResource(songFile, ID_INST, (XLongResourceID)instIDs[i]) == FALSE)
+        {
+            debug_message("[PatchInst] INST id=%lu still missing after patch — refusing silent export\n",
+                          (unsigned long)instIDs[i]);
+            XFileClose(songFile);
+            return BAE_BAD_INSTRUMENT;
+        }
+    }
+
+    if (patched > 0)
+    {
+        result = PV_WriteBackAdoptedSongFile(&songName, &songFile);
+    }
+    if (songFile)
+    {
+        XFileClose(songFile);
+    }
+    return result;
 }
 
 

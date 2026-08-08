@@ -746,6 +746,25 @@ BAEResult BAERmfEditorDocument_ExportUsedInstrumentsFromBank(
     uint32_t embedCount,
     BAERmfEditorCloneUsedResult *outResult);
 
+/* After RMF/ZMF song save: copy any missing ID_INST resources from bankToken
+ * into the song file. Used by export so oscillator (sample-free) instruments
+ * cannot be dropped when the document writer emits ALIS without INST bodies. */
+BAEResult BAERmfEditor_InjectMissingInstFromBankIntoSongFile(
+    BAEPathName songPath,
+    BAEBankToken bankToken,
+    uint32_t const *instIDs,
+    uint32_t instCount);
+
+/* After song save: ensure every listed INST id exists in the file. Prefers
+ * sample-free OSCL rebuild from document, then bank INST copy. Fails if any
+ * id is still missing (refuses silent ALIS-without-INST exports). */
+BAEResult BAERmfEditorDocument_PatchMissingInstIntoSongFile(
+    BAERmfEditorDocument *document,
+    BAEPathName songPath,
+    BAEBankToken bankToken,
+    uint32_t const *instIDs,
+    uint32_t instCount);
+
 /* Query whether a sample is a bank alias (pointer to bank SND, no embedded data). */
 BAEResult BAERmfEditorDocument_IsSampleBankAlias(BAERmfEditorDocument const *document,
                                                   uint32_t sampleIndex,
