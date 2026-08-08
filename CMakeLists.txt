@@ -223,6 +223,7 @@ option(BUILD_PLAYBAE "Build playbae when a non-Dummy/non-Ansi backend is selecte
 option(BUILD_ZEFIDI "Build zefidi when SDL2/SDL3 backend and matching SDL_ttf are available" ON)
 option(BUILD_CLITOOLS "Build CLI tools (songtool, rmf2mid, mid2rmf, mid2rmi, sf2-hsb, mod2rmf, instdump, bankrecomp)" ON)
 option(BUILD_NBEDITOR "Build NeoBAE Editor (Dear ImGui + SDL3)" ON)
+option(BAE_ENABLE_LIB_HYPHEN "nbeditor: syllable Apply-text via vendored libhyphen" ON)
 set(CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING "Build type (Debug, Release, RelWithDebInfo, MinSizeRel)" FORCE)
 
 # Internal compatibility booleans: keep existing logic in terms of ENABLE vars.
@@ -2213,6 +2214,17 @@ if(BUILD_NBEDITOR)
         )
       endif()
 
+      set(BAE_NBEDITOR_LIB_HYPHEN OFF)
+      if(BAE_ENABLE_LIB_HYPHEN AND
+         EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/hyphen/hyphen.c" AND
+         EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/hyphen/hnjalloc.c")
+        set(BAE_NBEDITOR_LIB_HYPHEN ON)
+        list(APPEND NBEDITOR_SOURCES
+          neobae/src/thirdparty/hyphen/hyphen.c
+          neobae/src/thirdparty/hyphen/hnjalloc.c
+        )
+      endif()
+
       add_executable(nbeditor ${NBEDITOR_SOURCES})
       target_include_directories(nbeditor PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/nbeditor
@@ -2220,6 +2232,43 @@ if(BUILD_NBEDITOR)
         ${NBEDITOR_IMGUI_DIR}/backends
         ${BAE_SDL3_INCLUDE_DIR}
       )
+      if(BAE_NBEDITOR_LIB_HYPHEN)
+        target_include_directories(nbeditor PRIVATE
+          ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/hyphen
+        )
+        target_compile_definitions(nbeditor PRIVATE USE_LIB_HYPHEN=1)
+        if(WIN32)
+          target_link_libraries(nbeditor PRIVATE winhttp)
+        else()
+          find_package(CURL)
+          if(CURL_FOUND)
+            target_compile_definitions(nbeditor PRIVATE NBEDITOR_HAVE_LIBCURL=1)
+            target_link_libraries(nbeditor PRIVATE CURL::libcurl)
+          else()
+            message(STATUS "nbeditor: libcurl not found; hyphen downloads disabled")
+          endif()
+        endif()
+        # Windows: data lives in nbeditor/ next to nbeditor.exe.
+        # Linux: binary is also named nbeditor, so bundle dir would clash — use
+        # system hyphen packages + config downloads; catalog installs to share/.
+        if(WIN32)
+          set(BAE_NBEDITOR_DATA_SRC "${CMAKE_CURRENT_SOURCE_DIR}/neobae/data/nbeditor")
+          set(BAE_NBEDITOR_DATA_DST "$<TARGET_FILE_DIR:nbeditor>/nbeditor")
+          add_custom_command(TARGET nbeditor POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${BAE_NBEDITOR_DATA_DST}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+              "${BAE_NBEDITOR_DATA_SRC}/hyph_catalog.json"
+              "${BAE_NBEDITOR_DATA_SRC}/README.md"
+              "${BAE_NBEDITOR_DATA_SRC}/hyph_en_US.dic"
+              "${BAE_NBEDITOR_DATA_SRC}/hyph_ru_RU.dic"
+              "${BAE_NBEDITOR_DATA_DST}/"
+            COMMENT "Copying nbeditor hyphen data (Windows)"
+          )
+        endif()
+        message(STATUS "nbeditor: libhyphen syllable support enabled")
+      else()
+        target_compile_definitions(nbeditor PRIVATE USE_LIB_HYPHEN=0)
+      endif()
       if(NBEDITOR_LIBXMP_LITE_AVAILABLE)
         target_include_directories(nbeditor PRIVATE
           ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/mod2rmf

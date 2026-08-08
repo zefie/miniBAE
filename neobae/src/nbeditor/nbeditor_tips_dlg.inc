@@ -88,6 +88,16 @@
             "plays. Then drag chips on the Lyrics lane or Quantize to the "
             "snap grid. Lyrics save as MIDI meta 0x05.",
         },
+#if USE_LIB_HYPHEN == TRUE
+        {
+            "Syllable Apply text",
+            "In Lyrics, set Split to Syllables before Apply text to break "
+            "words with EN/RU (or other) hyphenation patterns. Auto picks "
+            "Russian for Cyrillic words. Use Get more languages… to download "
+            "extra LibreOffice dictionaries into your NeoBAE config folder.",
+        },
+#endif
+
         {
             "Export RMF vs ZMF",
             "Classic RMF has tighter limits; ZMF unlocks NeoBAE extensions "

@@ -9,6 +9,10 @@
         int line_index = 0;
     };
 
+#if USE_LIB_HYPHEN == TRUE
+#include "nbeditor_hyphen.inc"
+#endif
+
     static void LyAppendParsedMetaText(std::vector<LyFragment> *out,
                                        uint32_t tick,
                                        const unsigned char *data,
@@ -370,12 +374,18 @@
 
     void LyApplyTextPreserveTimings()
     {
-        /* Split text into words; rematch synced ticks by fragment order. */
+        /* Split text into words (or syllables); rematch synced ticks by order. */
         std::vector<LyFragment> old = m_lyrics_fragments;
         std::vector<LyFragment> neu;
         const char *p = m_lyrics_text_buf;
         int line = 0;
         bool at_line_start = true;
+#if USE_LIB_HYPHEN == TRUE
+        if (!m_hyph_langs_scanned)
+        {
+            LyHyphRescanLanguages();
+        }
+#endif
         while (*p)
         {
             while (*p == '\r')
@@ -391,8 +401,10 @@
             }
             /* Collect whitespace-prefixed word. */
             std::string word;
+            bool lead_space = false;
             if (!at_line_start && (*p == ' ' || *p == '\t'))
             {
+                lead_space = true;
                 while (*p == ' ' || *p == '\t')
                 {
                     word.push_back(*p++);
@@ -413,13 +425,23 @@
             {
                 continue;
             }
-            LyFragment frag;
-            frag.text = word;
-            frag.starts_new_line = at_line_start && !neu.empty();
-            frag.line_index = line;
-            frag.synced = false;
-            frag.tick = 0;
-            neu.push_back(std::move(frag));
+            const bool starts_nl = at_line_start && !neu.empty();
+#if USE_LIB_HYPHEN == TRUE
+            if (m_lyrics_split_mode == LySplit_Syllables)
+            {
+                LySyllabifyWord(word, lead_space, starts_nl, line, &neu);
+            }
+            else
+#endif
+            {
+                LyFragment frag;
+                frag.text = word;
+                frag.starts_new_line = starts_nl;
+                frag.line_index = line;
+                frag.synced = false;
+                frag.tick = 0;
+                neu.push_back(std::move(frag));
+            }
             at_line_start = false;
         }
         /* Rematch timings by order. */
@@ -1168,6 +1190,80 @@
 
         ImGui::Separator();
         ImGui::TextUnformatted("Lyric text (one line per verse line; words split on spaces)");
+#if USE_LIB_HYPHEN == TRUE
+        {
+            if (!m_hyph_langs_scanned)
+            {
+                LyHyphRescanLanguages();
+            }
+            const char *mode_label =
+                (m_lyrics_split_mode == LySplit_Syllables) ? "Syllables" : "Words";
+            ImGui::SetNextItemWidth(120.0f);
+            if (ImGui::BeginCombo("Split", mode_label))
+            {
+                if (ImGui::Selectable("Words", m_lyrics_split_mode == LySplit_Words))
+                {
+                    m_lyrics_split_mode = LySplit_Words;
+                }
+                if (ImGui::Selectable("Syllables", m_lyrics_split_mode == LySplit_Syllables))
+                {
+                    m_lyrics_split_mode = LySplit_Syllables;
+                }
+                ImGui::EndCombo();
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+            {
+                ImGui::SetTooltip(
+                    "Words: one fragment per whitespace-separated word.\n"
+                    "Syllables: break with hyphenation patterns (EN/RU/…).");
+            }
+            if (m_lyrics_split_mode == LySplit_Syllables)
+            {
+                ImGui::SameLine();
+                char lang_preview[64];
+                if (std::strcmp(m_lyrics_hyph_lang, "auto") == 0)
+                {
+                    std::snprintf(lang_preview, sizeof(lang_preview), "Auto (Cyr→RU)");
+                }
+                else
+                {
+                    std::snprintf(lang_preview, sizeof(lang_preview), "%s", m_lyrics_hyph_lang);
+                }
+                ImGui::SetNextItemWidth(160.0f);
+                if (ImGui::BeginCombo("Lang", lang_preview))
+                {
+                    if (ImGui::Selectable("Auto (Cyrillic→RU, else EN)",
+                                          std::strcmp(m_lyrics_hyph_lang, "auto") == 0))
+                    {
+                        std::snprintf(m_lyrics_hyph_lang, sizeof(m_lyrics_hyph_lang), "auto");
+                    }
+                    for (const LyHyphLang &lang : m_hyph_langs)
+                    {
+                        const bool sel = (lang.id == m_lyrics_hyph_lang);
+                        if (ImGui::Selectable(lang.name.c_str(), sel))
+                        {
+                            std::snprintf(m_lyrics_hyph_lang,
+                                          sizeof(m_lyrics_hyph_lang),
+                                          "%s",
+                                          lang.id.c_str());
+                        }
+                        if (sel)
+                        {
+                            ImGui::SetItemDefaultFocus();
+                        }
+                    }
+                    ImGui::EndCombo();
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Get more languages…"))
+                {
+                    m_hyph_get_more_open = true;
+                }
+            }
+            LyDrawHyphGetMorePopup();
+            LyDrawHyphGetMoreModal();
+        }
+#endif
         if (ImGui::InputTextMultiline("##ly_text",
                                       m_lyrics_text_buf,
                                       sizeof(m_lyrics_text_buf),
@@ -1183,7 +1279,7 @@
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
         {
             ImGui::SetTooltip(
-                "Rebuild word fragments from the text. Already-synced timings\n"
+                "Rebuild fragments from the text. Already-synced timings\n"
                 "are kept by fragment order when possible.");
         }
         ImGui::SameLine();

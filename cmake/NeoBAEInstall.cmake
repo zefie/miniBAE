@@ -68,6 +68,31 @@ if(NEOBAE_TOOL_TARGETS)
   )
 endif()
 
+# nbeditor hyphen data:
+#   Windows suite: Tools/nbeditor/ (next to nbeditor.exe) with EN+RU .dic
+#   Linux: catalog/README under share/neobae/nbeditor (binary name is nbeditor)
+set(BAE_NBEDITOR_DATA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/neobae/data/nbeditor")
+if(EXISTS "${BAE_NBEDITOR_DATA_DIR}/hyph_catalog.json")
+  if(WIN32)
+    install(FILES
+        "${BAE_NBEDITOR_DATA_DIR}/hyph_catalog.json"
+        "${BAE_NBEDITOR_DATA_DIR}/README.md"
+        "${BAE_NBEDITOR_DATA_DIR}/hyph_en_US.dic"
+        "${BAE_NBEDITOR_DATA_DIR}/hyph_ru_RU.dic"
+      DESTINATION "${NEOBAE_INSTALL_TOOL_DIR}/nbeditor"
+      COMPONENT Tools
+    )
+  else()
+    include(GNUInstallDirs)
+    install(FILES
+        "${BAE_NBEDITOR_DATA_DIR}/hyph_catalog.json"
+        "${BAE_NBEDITOR_DATA_DIR}/README.md"
+      DESTINATION "${CMAKE_INSTALL_DATADIR}/neobae/nbeditor"
+      COMPONENT Tools
+    )
+  endif()
+endif()
+
 # --- Curated public headers ---
 set(NEOBAE_PUBLIC_COMMON_HEADERS
   NeoBAE.h

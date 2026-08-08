@@ -93,6 +93,8 @@ elseif(UNIX AND NOT APPLE)
   set(CPACK_DEBIAN_DEVELOPMENT_PACKAGE_SHLIBDEPS OFF)
   set(CPACK_DEBIAN_TOOLS_PACKAGE_DEPENDS "libneobae")
   set(CPACK_DEBIAN_DEVELOPMENT_PACKAGE_DEPENDS "libneobae")
+  # Optional system hyphenation dictionaries for nbeditor syllable Apply-text.
+  set(CPACK_DEBIAN_TOOLS_PACKAGE_SUGGESTS "hyphen-en-us, hyphen-ru")
 
   set(CPACK_DEBIAN_RUNTIME_DESCRIPTION "NeoBAE shared library")
   set(CPACK_DEBIAN_TOOLS_DESCRIPTION "NeoBAE command-line and GUI tools")

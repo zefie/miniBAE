@@ -1,0 +1,162 @@
+{
+  "version": 1,
+  "source": "LibreOffice/dictionaries",
+  "languages": [
+    {
+      "id": "af_ZA",
+      "name": "Afrikaans",
+      "file": "hyph_af_ZA.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/af_ZA/hyph_af_ZA.dic"
+    },
+    {
+      "id": "bg_BG",
+      "name": "Bulgarian",
+      "file": "hyph_bg_BG.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/bg_BG/hyph_bg_BG.dic"
+    },
+    {
+      "id": "ca",
+      "name": "Catalan",
+      "file": "hyph_ca.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/ca/dictionaries/hyph_ca.dic"
+    },
+    {
+      "id": "hr_HR",
+      "name": "Croatian",
+      "file": "hyph_hr_HR.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/hr_HR/hyph_hr_HR.dic"
+    },
+    {
+      "id": "cs_CZ",
+      "name": "Czech",
+      "file": "hyph_cs_CZ.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/cs_CZ/hyph_cs_CZ.dic"
+    },
+    {
+      "id": "da_DK",
+      "name": "Danish",
+      "file": "hyph_da_DK.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/da_DK/hyph_da_DK.dic"
+    },
+    {
+      "id": "nl_NL",
+      "name": "Dutch",
+      "file": "hyph_nl_NL.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/nl_NL/hyph_nl_NL.dic"
+    },
+    {
+      "id": "en_GB",
+      "name": "English (UK)",
+      "file": "hyph_en_GB.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/en/hyph_en_GB.dic"
+    },
+    {
+      "id": "en_US",
+      "name": "English (US)",
+      "file": "hyph_en_US.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/en/hyph_en_US.dic"
+    },
+    {
+      "id": "et_EE",
+      "name": "Estonian",
+      "file": "hyph_et_EE.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/et_EE/hyph_et_EE.dic"
+    },
+    {
+      "id": "de_DE",
+      "name": "German",
+      "file": "hyph_de_DE.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/de/hyph_de_DE.dic"
+    },
+    {
+      "id": "el_GR",
+      "name": "Greek",
+      "file": "hyph_el_GR.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/el_GR/hyph_el_GR.dic"
+    },
+    {
+      "id": "hu_HU",
+      "name": "Hungarian",
+      "file": "hyph_hu_HU.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/hu_HU/hyph_hu_HU.dic"
+    },
+    {
+      "id": "is",
+      "name": "Icelandic",
+      "file": "hyph_is.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/is/hyph_is.dic"
+    },
+    {
+      "id": "id_ID",
+      "name": "Indonesian",
+      "file": "hyph_id_ID.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/id/hyph_id_ID.dic"
+    },
+    {
+      "id": "it_IT",
+      "name": "Italian",
+      "file": "hyph_it_IT.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/it_IT/hyph_it_IT.dic"
+    },
+    {
+      "id": "lv_LV",
+      "name": "Latvian",
+      "file": "hyph_lv_LV.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/lv_LV/hyph_lv_LV.dic"
+    },
+    {
+      "id": "nb_NO",
+      "name": "Norwegian Bokmål",
+      "file": "hyph_nb_NO.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/no/hyph_nb_NO.dic"
+    },
+    {
+      "id": "pl_PL",
+      "name": "Polish",
+      "file": "hyph_pl_PL.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/pl_PL/hyph_pl_PL.dic"
+    },
+    {
+      "id": "pt_BR",
+      "name": "Portuguese (Brazil)",
+      "file": "hyph_pt_BR.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/pt_BR/hyph_pt_BR.dic"
+    },
+    {
+      "id": "pt_PT",
+      "name": "Portuguese (Portugal)",
+      "file": "hyph_pt_PT.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/pt_PT/hyph_pt_PT.dic"
+    },
+    {
+      "id": "ro_RO",
+      "name": "Romanian",
+      "file": "hyph_ro_RO.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/ro/hyph_ro_RO.dic"
+    },
+    {
+      "id": "ru_RU",
+      "name": "Russian",
+      "file": "hyph_ru_RU.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/ru_RU/hyph_ru_RU.dic"
+    },
+    {
+      "id": "sk_SK",
+      "name": "Slovak",
+      "file": "hyph_sk_SK.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/sk_SK/hyph_sk_SK.dic"
+    },
+    {
+      "id": "sl_SI",
+      "name": "Slovenian",
+      "file": "hyph_sl_SI.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/sl_SI/hyph_sl_SI.dic"
+    },
+    {
+      "id": "uk_UA",
+      "name": "Ukrainian",
+      "file": "hyph_uk_UA.dic",
+      "url": "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/uk_UA/hyph_uk_UA.dic"
+    }
+  ]
+}

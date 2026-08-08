@@ -78,6 +78,13 @@ all: $(TARGET_BIN_FULL)
 $(TARGET_BIN_FULL): ${OBJ_BIN}
 	@mkdir -p $(TARGET_OUT)
 	${LD} -o $(TARGET_OUT)${TARGET_BIN_FULL} ${LDFLAGS} ${OBJ_BIN} ${LIBS}
+ifeq ($(WINDOWS),1)
+	@# Windows: data dir is nbeditor/ next to nbeditor.exe (no name clash).
+	@mkdir -p $(TARGET_OUT)nbeditor
+	@cp -f data/nbeditor/hyph_catalog.json data/nbeditor/README.md \
+		data/nbeditor/hyph_en_US.dic data/nbeditor/hyph_ru_RU.dic \
+		$(TARGET_OUT)nbeditor/ 2>/dev/null || true
+endif
 
 ifeq ($(WINDOWS),1)
 $(RC_OBJ): src/nbeditor/editor.rc

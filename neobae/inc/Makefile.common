@@ -6,6 +6,10 @@ EMBED_PATCH_FILE ?= src/banks/patches111/patches111.hsb
 # Not required but severely recommended
 EMBED_TTF_FONT ?= src/thirdparty/fonts/LiberationSans-Regular.ttf
 
+# TTF Fonts (for nbeditor ImGui UI — Regular + Italic)
+NBEDITOR_FONT_REGULAR ?= src/thirdparty/fonts/LiberationSans-Regular.ttf
+NBEDITOR_FONT_ITALIC ?= src/thirdparty/fonts/LiberationSans-Italic.ttf
+
 ### It is probably best not to change anything below this line, unless absolutely necessary for your environment
 
 BUILD_DIR	  := build/
@@ -68,6 +72,39 @@ ifeq ($(NBEDITOR),1)
 	CLASSIC_CHORUS := 1
 	BAE_FLAGS += -DNBEDITOR=1 -DNBEDITOR_MVP=1 -DNBEDITOR_PLAYER_WINDOW=1 -DNBEDITOR_SAMPLE_LIST_WINDOW=1 -DNBEDITOR_INSTRUMENT_LIST_WINDOW=1
 	INC_PATH += -Isrc/thirdparty/imgui -Isrc/thirdparty/imgui/backends
+	# Embed Liberation Sans Regular + Italic (same as CMake / zefidi path).
+	# Disable with NBEDITOR_EMBED_FONTS=0.
+	ifeq ($(origin NBEDITOR_EMBED_FONTS),undefined)
+		ifneq ($(wildcard $(NBEDITOR_FONT_REGULAR)),)
+			ifneq ($(wildcard $(NBEDITOR_FONT_ITALIC)),)
+				NBEDITOR_EMBED_FONTS := 1
+			endif
+		endif
+	endif
+	# Syllable dictionaries (libhyphen) — default ON when sources present.
+	# Flags/libs here; SRC append must wait until after BAE_API's `SRC :=`.
+	ifeq ($(origin LIB_HYPHEN),undefined)
+		ifeq ($(wildcard src/thirdparty/hyphen/hyphen.c),)
+			LIB_HYPHEN := 0
+		else
+			LIB_HYPHEN := 1
+		endif
+	endif
+	ifeq ($(LIB_HYPHEN),1)
+		BAE_FLAGS += -DUSE_LIB_HYPHEN=1 -Isrc/thirdparty/hyphen
+		ifeq ($(WINDOWS),1)
+			BAE_LIBS += -lwinhttp
+		else
+			CURL_LIBS := $(shell pkg-config --libs libcurl 2>/dev/null)
+			CURL_CFLAGS := $(shell pkg-config --cflags libcurl 2>/dev/null)
+			ifneq ($(CURL_LIBS),)
+				BAE_FLAGS += -DNBEDITOR_HAVE_LIBCURL=1 $(CURL_CFLAGS)
+				BAE_LIBS += $(CURL_LIBS)
+			endif
+		endif
+	else
+		BAE_FLAGS += -DUSE_LIB_HYPHEN=0
+	endif
 endif
 
 ifeq ($(CREATION_API),1) 
@@ -904,6 +941,10 @@ else
 												src/thirdparty/imgui/backends/imgui_impl_sdl3.cpp \
 												src/thirdparty/imgui/backends/imgui_impl_sdlrenderer3.cpp
 											INC_PATH += -Isrc/thirdparty/imgui -Isrc/thirdparty/imgui/backends
+											ifeq ($(LIB_HYPHEN),1)
+												SRC += src/thirdparty/hyphen/hyphen.c \
+													src/thirdparty/hyphen/hnjalloc.c
+											endif
 										else
 											ifeq ($(ADX2WAV),1)
 												SRC := src/adx2wav/adx2wav_main.c src/adx2wav/adx2wav_decode.c
@@ -1094,6 +1135,23 @@ endif # EMBED_FONT_HEADER
 endif # EMBED_FONT
 
 endif # BUILD_GUI
+
+# nbeditor: embed Liberation Sans Regular + Italic (no system font dependency)
+ifeq ($(NBEDITOR),1)
+ifeq ($(NBEDITOR_EMBED_FONTS),1)
+BAE_FLAGS += -DNBEDITOR_EMBED_FONTS=1 -I$(OBJ_DIR)
+
+NBEDITOR_EMBED_FONT_HEADER := $(OBJ_DIR)nbeditor_embedded_fonts.h
+$(NBEDITOR_EMBED_FONT_HEADER): $(NBEDITOR_FONT_REGULAR) $(NBEDITOR_FONT_ITALIC) ../scripts/create_embedded_font_h.py
+	@echo @embed nbeditor fonts
+	@mkdir -p $(dir $(NBEDITOR_EMBED_FONT_HEADER))
+	@python3 ../scripts/create_embedded_font_h.py $(NBEDITOR_EMBED_FONT_HEADER) \
+		--font $(NBEDITOR_FONT_REGULAR) liberation_sans_regular \
+		--font $(NBEDITOR_FONT_ITALIC) liberation_sans_italic
+
+$(OBJ_DIR)nbeditor_main.o: $(NBEDITOR_EMBED_FONT_HEADER)
+endif # NBEDITOR_EMBED_FONTS
+endif # NBEDITOR
 
 # If EMBED_PATCH_FILE specified, generate BAEPatches.h that embeds the binary bank
 ifeq ($(EMBED_PATCHES),1)

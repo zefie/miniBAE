@@ -15,11 +15,21 @@
 #include "GenPriv.h"
 #include "mod2rmf_rmfcreat.h"
 
+#ifndef USE_LIB_HYPHEN
+#define USE_LIB_HYPHEN 0
+#endif
 #ifndef SUPPORT_MIDI_HW
 #define SUPPORT_MIDI_HW 0
 #endif
 #ifndef SUPPORT_KARAOKE
 #define SUPPORT_KARAOKE 0
+#endif
+
+#if USE_LIB_HYPHEN == TRUE
+#include "hyphen.h"
+#include <atomic>
+#include <mutex>
+#include <thread>
 #endif
 #if SUPPORT_MIDI_HW == TRUE
 #include "gui_midi_hw_input.h"
@@ -58,6 +68,10 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#endif
+
+#if USE_LIB_HYPHEN == TRUE
+#include "nbeditor_http.inc"
 #endif
 
 namespace
@@ -7210,6 +7224,19 @@ private:
     char m_lyrics_preview_current[256] = {0};
     char m_lyrics_preview_previous[256] = {0};
     size_t m_lyrics_preview_current_len = 0;
+#if USE_LIB_HYPHEN == TRUE
+    std::vector<LyHyphLang> m_hyph_langs;
+    std::map<std::string, HyphenDict *> m_hyph_dicts;
+    int m_lyrics_split_mode = LySplit_Words;
+    char m_lyrics_hyph_lang[32] = "auto";
+    bool m_hyph_langs_scanned = false;
+    bool m_hyph_get_more_open = false;
+    std::vector<LyHyphCatalogEntry> m_hyph_catalog;
+    bool m_hyph_catalog_loaded = false;
+    std::atomic<bool> m_hyph_dl_busy{false};
+    std::string m_hyph_dl_status;
+    std::mutex m_hyph_dl_mutex;
+#endif
 
     bool m_song_info_open = false;
     char m_song_info_title[256] = {0};
@@ -7344,11 +7371,18 @@ int main(int argc, char **argv)
             &cfg_italic);
     }
 #else
+    /* ImGui asserts if AddFontFromFileTTF cannot open the file — probe first. */
     auto try_font = [&](const char *path) -> ImFont * {
         if (!path || !path[0])
         {
             return nullptr;
         }
+        FILE *fp = std::fopen(path, "rb");
+        if (!fp)
+        {
+            return nullptr;
+        }
+        std::fclose(fp);
         return io.Fonts->AddFontFromFileTTF(path, font_size);
     };
     font_regular = try_font("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf");
