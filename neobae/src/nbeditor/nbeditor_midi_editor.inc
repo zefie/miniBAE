@@ -1837,6 +1837,115 @@
         SetStatus(buf);
     }
 
+    void MeSetLoopStartAtTick(uint32_t tick)
+    {
+        if (!m_document)
+        {
+            return;
+        }
+        if (m_midi_snap_enabled)
+        {
+            tick = MeSnapTick(tick);
+        }
+        bool loop_on = false;
+        uint32_t loop_start = 0;
+        uint32_t loop_end = 0;
+        int32_t loop_count = 0;
+        (void)BAERmfEditorDocument_GetMidiLoopMarkers(
+            m_document, &loop_on, &loop_start, &loop_end, &loop_count);
+        if (!loop_on)
+        {
+            const uint32_t song_end = MeSongLengthTicks();
+            loop_end = (song_end > tick) ? song_end : (tick + 1);
+            loop_count = 0;
+        }
+        else if (tick >= loop_end)
+        {
+            loop_end = tick + 1;
+        }
+        loop_start = tick;
+        MeBeginUndo();
+        (void)BAERmfEditorDocument_SetMidiLoopMarkers(
+            m_document, true, loop_start, loop_end, loop_count);
+        MeInvalidateMidiDocCaches();
+        MeCommitUndo();
+        char buf[96];
+        std::snprintf(buf, sizeof(buf), "Loop start set to tick %u", loop_start);
+        SetStatus(buf);
+    }
+
+    void MeSetLoopEndAtTick(uint32_t tick)
+    {
+        if (!m_document)
+        {
+            return;
+        }
+        if (m_midi_snap_enabled)
+        {
+            tick = MeSnapTick(tick);
+        }
+        bool loop_on = false;
+        uint32_t loop_start = 0;
+        uint32_t loop_end = 0;
+        int32_t loop_count = 0;
+        (void)BAERmfEditorDocument_GetMidiLoopMarkers(
+            m_document, &loop_on, &loop_start, &loop_end, &loop_count);
+        if (!loop_on)
+        {
+            loop_start = 0;
+            loop_count = 0;
+        }
+        if (tick <= loop_start)
+        {
+            if (tick == 0)
+            {
+                loop_start = 0;
+                tick = 1;
+            }
+            else
+            {
+                loop_start = 0;
+            }
+        }
+        loop_end = tick;
+        if (loop_end <= loop_start)
+        {
+            loop_end = loop_start + 1;
+        }
+        MeBeginUndo();
+        (void)BAERmfEditorDocument_SetMidiLoopMarkers(
+            m_document, true, loop_start, loop_end, loop_count);
+        MeInvalidateMidiDocCaches();
+        MeCommitUndo();
+        char buf[96];
+        std::snprintf(buf, sizeof(buf), "Loop end set to tick %u", loop_end);
+        SetStatus(buf);
+    }
+
+    void MeClearLoopMarkers()
+    {
+        if (!m_document)
+        {
+            return;
+        }
+        bool loop_on = false;
+        uint32_t loop_start = 0;
+        uint32_t loop_end = 0;
+        int32_t loop_count = 0;
+        (void)BAERmfEditorDocument_GetMidiLoopMarkers(
+            m_document, &loop_on, &loop_start, &loop_end, &loop_count);
+        if (!loop_on)
+        {
+            SetStatus("No loop markers to clear");
+            return;
+        }
+        MeBeginUndo();
+        (void)BAERmfEditorDocument_SetMidiLoopMarkers(m_document, false, 0, 0, 0);
+        MeInvalidateMidiDocCaches();
+        MeCommitUndo();
+        SetStatus("Loop markers cleared");
+    }
+
     void MeRequestSetEndOfTrack(int track, uint32_t tick)
     {
         if (!m_document || track < 0)
@@ -3359,49 +3468,99 @@
             {
                 MeDeleteSelectedTrack();
             }
-            if (m_midi_ctx_has_tick && m_midi_ctx_track >= 0)
+            if (m_midi_ctx_has_tick)
             {
-                ImGui::Separator();
-                char trim_track_label[80];
-                char trim_song_label[80];
                 uint32_t show_tick = m_midi_ctx_tick;
                 if (m_midi_snap_enabled)
                 {
                     show_tick = MeSnapTick(show_tick);
                 }
-                std::snprintf(trim_track_label,
-                              sizeof(trim_track_label),
-                              "Trim Track to Here (%u)",
-                              show_tick);
-                std::snprintf(trim_song_label,
-                              sizeof(trim_song_label),
-                              "Trim Song to Here (%u)",
-                              show_tick);
-                if (ImGui::MenuItem(trim_track_label))
-                {
-                    MeRequestSetEndOfTrack(m_midi_ctx_track, m_midi_ctx_tick);
-                }
-                if (ImGui::MenuItem(trim_song_label))
-                {
-                    MeRequestSetEndOfSong(m_midi_ctx_tick);
-                }
+                bool loop_on = false;
+                uint32_t loop_start = 0;
+                uint32_t loop_end = 0;
+                int32_t loop_count = 0;
+                (void)BAERmfEditorDocument_GetMidiLoopMarkers(
+                    m_document, &loop_on, &loop_start, &loop_end, &loop_count);
+
                 ImGui::Separator();
-                char nrpn_label[80];
-                std::snprintf(nrpn_label, sizeof(nrpn_label), "(N)RPN Manager (%u)...", show_tick);
-                if (ImGui::MenuItem(nrpn_label, nullptr, false, m_midi_selected_track >= 0))
+                char loop_start_label[80];
+                char loop_end_label[80];
+                std::snprintf(loop_start_label,
+                              sizeof(loop_start_label),
+                              "Set Loop Start Here (%u)",
+                              show_tick);
+                std::snprintf(loop_end_label,
+                              sizeof(loop_end_label),
+                              "Set Loop End Here (%u)",
+                              show_tick);
+                if (ImGui::MenuItem(loop_start_label))
                 {
-                    if (m_midi_ctx_track >= 0)
-                    {
-                        m_midi_selected_track = m_midi_ctx_track;
-                    }
-                    OpenNrpnManagerDialog(show_tick, true);
+                    MeSetLoopStartAtTick(m_midi_ctx_tick);
                 }
                 if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
                 {
                     ImGui::SetTooltip(
-                        "Insert or remove NRPNs and RPNs\n"
-                        "(velocity curve, instrument mode, sample offset,\n"
-                        "reverb type, pitch bend sensitivity, …).");
+                        loop_on
+                            ? "Move the loop start marker to this tick."
+                            : "Create loop markers (start here → end of song),\n"
+                              "then drag the cyan handles on the time ruler.");
+                }
+                if (ImGui::MenuItem(loop_end_label))
+                {
+                    MeSetLoopEndAtTick(m_midi_ctx_tick);
+                }
+                if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                {
+                    ImGui::SetTooltip(
+                        loop_on
+                            ? "Move the loop end marker to this tick."
+                            : "Create loop markers (tick 0 → here),\n"
+                              "then drag the cyan handles on the time ruler.");
+                }
+                if (ImGui::MenuItem("Clear Loop Markers", nullptr, false, loop_on))
+                {
+                    MeClearLoopMarkers();
+                }
+
+                if (m_midi_ctx_track >= 0)
+                {
+                    ImGui::Separator();
+                    char trim_track_label[80];
+                    char trim_song_label[80];
+                    std::snprintf(trim_track_label,
+                                  sizeof(trim_track_label),
+                                  "Trim Track to Here (%u)",
+                                  show_tick);
+                    std::snprintf(trim_song_label,
+                                  sizeof(trim_song_label),
+                                  "Trim Song to Here (%u)",
+                                  show_tick);
+                    if (ImGui::MenuItem(trim_track_label))
+                    {
+                        MeRequestSetEndOfTrack(m_midi_ctx_track, m_midi_ctx_tick);
+                    }
+                    if (ImGui::MenuItem(trim_song_label))
+                    {
+                        MeRequestSetEndOfSong(m_midi_ctx_tick);
+                    }
+                    ImGui::Separator();
+                    char nrpn_label[80];
+                    std::snprintf(nrpn_label, sizeof(nrpn_label), "(N)RPN Manager (%u)...", show_tick);
+                    if (ImGui::MenuItem(nrpn_label, nullptr, false, m_midi_selected_track >= 0))
+                    {
+                        if (m_midi_ctx_track >= 0)
+                        {
+                            m_midi_selected_track = m_midi_ctx_track;
+                        }
+                        OpenNrpnManagerDialog(show_tick, true);
+                    }
+                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+                    {
+                        ImGui::SetTooltip(
+                            "Insert or remove NRPNs and RPNs\n"
+                            "(velocity curve, instrument mode, sample offset,\n"
+                            "reverb type, pitch bend sensitivity, …).");
+                    }
                 }
             }
             else if (m_midi_selected_track >= 0)
