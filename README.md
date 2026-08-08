@@ -24,7 +24,7 @@ Projects are **Sessions** (`.bsn` / `.zsn`): songs, instruments, and samples liv
 | Open / Import | Sessions, RMF/ZMF, MIDI, WAV/AIFF, tracker modules (MOD/S3M/XM/IT/… via `mod2rmf`); drag-and-drop |
 | Instruments & samples | Instrument Editor (key splits, ADSR, flags); Sample Editor (trim, loop, gain, compress) |
 | Songs | Piano-roll MIDI Editor; karaoke lyrics with tap-to-sync (optional hyphenation for syllables) |
-| Banks | Built-in GM-like bank for playback; Bank 2+ as the custom-instrument sandbox |
+| Banks | Built-in Beatnik Standard bank for playback; Bank 2+ as the custom-instrument sandbox |
 | Export | RMF or ZMF (ZMF when NeoBAE extensions are needed); bank export; render to audio |
 | Extra | Soft-delete Trash; multi-instance copy/paste; hardware MIDI input when built with RtMidi |
 
@@ -51,7 +51,6 @@ With **Native DLS** enabled, both playbae and zefidi play **mobileBAE** content 
 **microQ** (QSound “scrambled eggs” DLS) is recognized and handled on the same Native DLS path — a small but important niche for phone ROMs and TouchWiz-era banks.
 
 ```bash
-# Offline render (always pass -o so playbae does not play through speakers)
 ./build/bin/playbae -nf -t 10 -p bank.dls -f song.mxmf -o /tmp/out.wav
 ./build/bin/playbae -h
 ```
@@ -62,7 +61,7 @@ With **Native DLS** enabled, both playbae and zefidi play **mobileBAE** content 
 
 **Ringtones:** iMelody, Nokia `.rng`, RTTTL/RTX
 
-**Audio:** WAV/AIFF/AU, MP2/MP3, FLAC, Vorbis, Opus, QOA, WMA (optional), ADP, CRI ADX
+**Audio:** WAV/AIFF/AU, MP2/MP3, FLAC, Vorbis, Opus, QOA, WMA, ADP, CRI ADX
 
 **Banks:** HSB/ZSB; SF2/SF3/SFO (FluidLite); DLS (Native DLS)
 

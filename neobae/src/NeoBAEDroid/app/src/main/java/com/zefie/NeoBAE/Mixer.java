@@ -121,7 +121,7 @@ public class Mixer
 	private static native void _setNeoReverbMix(long reference, int wetLevel);
 	private static native int _getNeoReverbMix(long reference);
 	private static native int _addBankFromFile(long reference, String path);
-	private static native int _addBankFromAsset(long reference, android.content.res.AssetManager assetManager, String assetName);
+	private static native int _loadBuiltinBank(long reference);
 	private static native int _addBankFromMemory(long reference, byte[] data);
 	private static native int _addBankFromMemoryWithFilename(long reference, byte[] data, String filename);
 	private static native void _setNativeCacheDir(String path);
@@ -176,7 +176,8 @@ public class Mixer
 	public static int getNeoReverbMix(){ if(mMixer==null) return 255; return _getNeoReverbMix(mMixer.mReference); }
 	public static void getNeoReverbPresetParams(int reverbType, int[] combCount, int[] delaysMs, int[] feedback, int[] gain, int[] lowpass, int[] mix){ if(mMixer==null) return; _getNeoReverbPresetParams(mMixer.mReference, reverbType, combCount, delaysMs, feedback, gain, lowpass, mix); }
 	public static int addBankFromFile(String path){ if(mMixer==null) return -1; return _addBankFromFile(mMixer.mReference, path); }
-	public static int addBankFromAsset(String assetName){ if(mMixer==null) return -1; return _addBankFromAsset(mMixer.mReference, mMixer.mAssetManager, assetName); }
+	/** Unload other instrument banks and load the compile-time embedded patch bank. */
+	public static int loadBuiltinBank(){ if(mMixer==null) return -1; return _loadBuiltinBank(mMixer.mReference); }
 	public static int addBankFromMemory(byte[] data){ if(mMixer==null) return -1; return _addBankFromMemory(mMixer.mReference, data); }
 	public static int addBankFromMemory(byte[] data, String filename){ if(mMixer==null) return -1; return _addBankFromMemoryWithFilename(mMixer.mReference, data, filename); }
 	public static void setNativeCacheDir(String path){ _setNativeCacheDir(path); }

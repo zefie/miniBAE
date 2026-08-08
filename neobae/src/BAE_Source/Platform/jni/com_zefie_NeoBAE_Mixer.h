@@ -46,6 +46,9 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1setDefaultReverb
 JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromFile
   (JNIEnv *, jclass, jlong, jstring);
 
+JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1loadBuiltinBank
+  (JNIEnv *, jclass, jlong);
+
 JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1setMasterVolume
   (JNIEnv *, jclass, jlong, jint);
 

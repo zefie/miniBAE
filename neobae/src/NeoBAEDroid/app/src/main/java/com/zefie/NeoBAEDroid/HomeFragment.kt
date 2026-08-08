@@ -1513,18 +1513,18 @@ class HomeFragment : Fragment() {
         val prefs = requireContext().getSharedPreferences("NeoBAE_prefs", Context.MODE_PRIVATE)
         val lastBankPath = prefs.getString("last_bank_path", null)
 
-        // Treat missing preference as "builtin" (default bank is patches.hsb).
+        // Treat missing preference as "builtin" (embedded patches111 bank).
         val bankKey = if (lastBankPath.isNullOrBlank()) "__builtin__" else lastBankPath
 
         val r = when {
-            bankKey == "__builtin__" -> loadBuiltInPatchesFromAssets(requireContext())
+            bankKey == "__builtin__" -> loadEmbeddedBuiltinBank()
             bankKey.endsWith(".hsb", ignoreCase = true) || bankKey.endsWith(".zsb", ignoreCase = true) -> {
                 val bankFile = File(bankKey)
                 if (bankFile.exists() && bankFile.isFile) {
                     Mixer.addBankFromFile(bankFile.absolutePath)
                 } else {
                     // If the configured HSB disappeared, fall back to built-in patches.
-                    loadBuiltInPatchesFromAssets(requireContext())
+                    loadEmbeddedBuiltinBank()
                 }
             }
             else -> return
@@ -1630,7 +1630,7 @@ class HomeFragment : Fragment() {
 
                     if (status == 0) {
                         status = if (lastBankPath == "__builtin__") {
-                            loadBuiltInPatchesFromAssets(ctx)
+                            loadEmbeddedBuiltinBank()
                         } else {
                             // Load by path to avoid OOM for large SF2/DLS; also works for HSB.
                             Mixer.addBankFromFile(lastBankPath)
@@ -2297,7 +2297,7 @@ class HomeFragment : Fragment() {
             
             if (!lastBankPath.isNullOrEmpty()) {
                 if (lastBankPath == "__builtin__") {
-                    if (loadBuiltInPatchesFromAssets(requireContext()) == 0) {
+                    if (loadEmbeddedBuiltinBank() == 0) {
                         bankLoaded = true
                     }
                 } else {
@@ -2316,20 +2316,20 @@ class HomeFragment : Fragment() {
             
             // Fall back to built-in patches if no bank was loaded
             if (!bankLoaded) {
-                loadBuiltInPatchesFromAssets(requireContext())
+                loadEmbeddedBuiltinBank()
             }
         } catch (_: Exception) {
             // If restoration fails, use built-in patches
             try {
-                loadBuiltInPatchesFromAssets(requireContext())
+                loadEmbeddedBuiltinBank()
             } catch (_: Exception) {}
         }
     }
 
-    private fun loadBuiltInPatchesFromAssets(ctx: Context): Int {
+    /** Load the compile-time embedded patch bank (patches111). Returns BAE error code. */
+    private fun loadEmbeddedBuiltinBank(): Int {
         return try {
-            val data = ctx.assets.open("patches.hsb").use { it.readBytes() }
-            Mixer.addBankFromMemory(data, "patches.hsb")
+            Mixer.loadBuiltinBank()
         } catch (_: Throwable) {
             -1
         }
@@ -3700,7 +3700,7 @@ class HomeFragment : Fragment() {
                 }
             }
 
-            val r = loadBuiltInPatchesFromAssets(requireContext())
+            val r = loadEmbeddedBuiltinBank()
             loadStatus = r
             if (r == 0) {
                 invalidateNormalizeCacheForBankChange()

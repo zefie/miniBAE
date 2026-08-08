@@ -180,7 +180,7 @@ fun BankBrowserScreen(
                                         color = MaterialTheme.colors.onBackground
                                     )
                                     Text(
-                                        text = "Beatnik Standard sound bank",
+                                        text = "Beatnik Standard (v1.1.1, uncomp)",
                                         fontSize = 12.sp,
                                         color = MaterialTheme.colors.onBackground.copy(alpha = 0.6f)
                                     )
@@ -321,7 +321,7 @@ fun BankBrowserScreen(
                                         color = MaterialTheme.colors.onBackground
                                     )
                                     Text(
-                                        text = "Beatnik Standard sound bank",
+                                        text = "Beatnik Standard (v1.1.1, uncomp)",
                                         fontSize = 12.sp,
                                         color = MaterialTheme.colors.onBackground.copy(alpha = 0.6f)
                                     )

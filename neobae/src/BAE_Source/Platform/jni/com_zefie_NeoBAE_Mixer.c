@@ -8,10 +8,6 @@
 // printf
 #include <android/log.h>
 
-// for native asset manager
-#include <android/asset_manager.h>
-#include <android/asset_manager_jni.h>
-
 #include "com_zefie_NeoBAE_Mixer.h"
 #include "NeoBAE.h"
 #include "GenPriv.h"
@@ -518,70 +514,44 @@ JNIEXPORT jstring JNICALL Java_com_zefie_NeoBAE_Mixer__1getBankFriendlyName
 		return NULL;
 }
 
-// Load a bank asset into memory and add it via BAEMixer_LoadBankFromMemory
-JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1addBankFromAsset
-	(JNIEnv* env, jclass clazz, jlong reference, jobject assetManager, jstring assetName)
+/*
+ * Class:     com_zefie_NeoBAE_Mixer
+ * Method:    _loadBuiltinBank
+ * Signature: (J)I
+ */
+JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Mixer__1loadBuiltinBank
+	(JNIEnv* env, jclass clazz, jlong reference)
 {
 	BAEMixer mixer = (BAEMixer)(intptr_t)reference;
-	BAEBankLoadInfo info;
-	BAEResult br;
-	const char* aname;
-	AAssetManager* mgr;
-	AAsset* asset;
-	off_t asset_len;
-	unsigned char *mem;
-	int32_t read_total = 0;
-	int32_t r = 0;
+
+	(void)env;
+	(void)clazz;
 
 	if (!mixer) return -1;
-	if (!assetManager || !assetName) return (jint)BAE_PARAM_ERR;
 
-	aname = (*env)->GetStringUTFChars(env, assetName, NULL);
-	if (!aname) return (jint)BAE_PARAM_ERR;
+#if _BUILT_IN_PATCHES == TRUE
+	{
+		BAEBankLoadInfo info;
+		BAEResult br;
 
-	mgr = AAssetManager_fromJava(env, assetManager);
-	if (!mgr) {
-		(*env)->ReleaseStringUTFChars(env, assetName, aname);
-		return (jint)BAE_GENERAL_ERR;
+		memset(&info, 0, sizeof(info));
+		br = BAEMixer_LoadBankBuiltinOnly(mixer, &info);
+		if (br == BAE_NO_ERROR) {
+			cache_bank_friendly(mixer, &info, "Built-in patches");
+			__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE",
+				"Builtin bank loaded (kind=%d, display=%s)",
+				(int)info.kind, g_lastBankFriendly);
+		} else {
+			__android_log_print(ANDROID_LOG_ERROR, "NeoBAE",
+				"Builtin bank load failed: %d", (int)br);
+		}
+		return (jint)br;
 	}
-
-	asset = AAssetManager_open(mgr, aname, AASSET_MODE_STREAMING);
-	if (!asset) {
-		(*env)->ReleaseStringUTFChars(env, assetName, aname);
-		return (jint)BAE_FILE_NOT_FOUND;
-	}
-
-	asset_len = AAsset_getLength(asset);
-	if (asset_len <= 0) {
-		AAsset_close(asset);
-		(*env)->ReleaseStringUTFChars(env, assetName, aname);
-		return (jint)BAE_BAD_FILE;
-	}
-	mem = (unsigned char*)malloc((size_t)asset_len);
-	if (!mem) {
-		AAsset_close(asset);
-		(*env)->ReleaseStringUTFChars(env, assetName, aname);
-		return (jint)BAE_MEMORY_ERR;
-	}
-	while (read_total < asset_len &&
-		   (r = AAsset_read(asset, mem + read_total, (size_t)(asset_len - read_total))) > 0) {
-		read_total += r;
-	}
-	AAsset_close(asset);
-
-	memset(&info, 0, sizeof(info));
-	br = BAEMixer_LoadBankFromMemory(mixer, mem, (uint32_t)read_total, aname, &info);
-	if (br == BAE_NO_ERROR) {
-		cache_bank_friendly(mixer, &info, pv_path_basename(aname));
-		__android_log_print(ANDROID_LOG_DEBUG, "NeoBAE", "Bank asset loaded (kind=%d): %s (display=%s)",
-			(int)info.kind, aname, g_lastBankFriendly);
-	} else {
-		__android_log_print(ANDROID_LOG_ERROR, "NeoBAE", "Bank asset load failed: %d (%s)", (int)br, aname);
-	}
-
-	free(mem);
-	(*env)->ReleaseStringUTFChars(env, assetName, aname);
-	return (jint)br;
+#else
+	__android_log_print(ANDROID_LOG_ERROR, "NeoBAE",
+		"Builtin bank unavailable (_BUILT_IN_PATCHES disabled)");
+	return (jint)BAE_NOT_SETUP;
+#endif
 }
 
 
