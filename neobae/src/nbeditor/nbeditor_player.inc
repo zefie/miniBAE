@@ -94,9 +94,10 @@
         return MeInsertRpSequence(target_track, 0, false, msb, lsb, &digit, 1, true, 0, true);
     }
 
-    bool WritePlayerMixNrpnsToSong()
+    /* Write selected player mix NRPNs at tick 0. Used by Song Info Apply. */
+    bool WritePlayerMixNrpnsToSong(bool write_velocity_curve, bool write_reverb)
     {
-        if (!m_document)
+        if (!m_document || (!write_velocity_curve && !write_reverb))
         {
             return false;
         }
@@ -108,20 +109,39 @@
         if (BAERmfEditorDocument_GetTrackCount(m_document, &track_count) != BAE_NO_ERROR ||
             track_count == 0)
         {
-            SetStatus("Save to Song: song has no tracks");
+            SetStatus("Apply Player mix: song has no tracks");
             return false;
         }
 
         MeBeginUndo();
-        if (!ReplaceNrpnAtTick0(4, 0, static_cast<unsigned char>(m_velocity_curve)) ||
-            !ReplaceNrpnAtTick0(7, 0, static_cast<unsigned char>(m_reverb_type)))
+        bool ok = true;
+        if (write_velocity_curve)
+        {
+            ok = ReplaceNrpnAtTick0(4, 0, static_cast<unsigned char>(m_velocity_curve));
+        }
+        if (ok && write_reverb)
+        {
+            ok = ReplaceNrpnAtTick0(7, 0, static_cast<unsigned char>(m_reverb_type));
+        }
+        if (!ok)
         {
             MeCancelUndo();
-            SetStatus("Save to Song: NRPN write failed");
+            SetStatus("Apply Player mix: NRPN write failed");
             return false;
         }
         MeCommitUndo();
-        SetStatus("Saved velocity curve + reverb NRPNs at tick 0");
+        if (write_velocity_curve && write_reverb)
+        {
+            SetStatus("Applied player velocity curve + reverb NRPNs at tick 0");
+        }
+        else if (write_velocity_curve)
+        {
+            SetStatus("Applied player velocity curve NRPN at tick 0");
+        }
+        else
+        {
+            SetStatus("Applied player reverb NRPN at tick 0");
+        }
         return true;
     }
 
@@ -559,7 +579,7 @@
                 }
             }
 
-            /* Row 2: Reverb | Velocity Curve | Save to Song */
+            /* Row 2: Reverb | Velocity Curve (stamp into song via Song Info) */
             static const char *reverb_labels[] = {
                 "None",
                 "Igor's Closet",
@@ -596,10 +616,6 @@
                 {
                     OpenCustomReverbDialog();
                 }
-                if (m_velocity_curve_save_to_song)
-                {
-                    (void)WritePlayerMixNrpnsToSong();
-                }
             }
 #if USE_NEO_EFFECTS == TRUE
             const bool neo_reverb_editable =
@@ -633,29 +649,6 @@
                              IM_ARRAYSIZE(velocity_curve_labels)))
             {
                 ApplyVelocityCurveToSongs();
-                if (m_velocity_curve_save_to_song)
-                {
-                    (void)WritePlayerMixNrpnsToSong();
-                }
-            }
-            ImGui::SameLine();
-            ImGui::BeginDisabled(m_document == nullptr);
-            if (ImGui::Checkbox("Save to Song", &m_velocity_curve_save_to_song))
-            {
-                if (m_velocity_curve_save_to_song)
-                {
-                    if (!WritePlayerMixNrpnsToSong())
-                    {
-                        m_velocity_curve_save_to_song = false;
-                    }
-                }
-            }
-            ImGui::EndDisabled();
-            if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            {
-                ImGui::SetTooltip(
-                    "When enabled, writes tick-0 NRPNs into the song:\n"
-                    "NRPN 4,0 velocity curve and NRPN 7,0 reverb type.");
             }
 
             BAEAudioInfo info;

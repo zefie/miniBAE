@@ -1007,7 +1007,8 @@
         m_transpose_semitones = 0;
         m_reverb_type = static_cast<int>(BAE_REVERB_TYPE_1);
         m_velocity_curve = 1;
-        m_velocity_curve_save_to_song = false;
+        m_song_info_apply_player_reverb = false;
+        m_song_info_apply_player_velocity_curve = false;
         ApplyPlayerMixSettings();
         m_session_undocked_layout = m_pref_default_undocked_layout;
         ApplyWorkspaceLayoutMode();
@@ -4179,6 +4180,9 @@
         (void)BAERmfEditorDocument_GetEngineConfig(m_document, &engine_flags);
         m_song_info_classic_chorus = (engine_flags & SONG_CONFIG_CLASSIC_CHORUS_ON) != 0;
         m_song_info_pan_fix = (engine_flags & SONG_CONFIG_PANFIX_ON) != 0;
+        /* Opt-in stamps of current Player controls; not persisted song state. */
+        m_song_info_apply_player_reverb = false;
+        m_song_info_apply_player_velocity_curve = false;
         m_song_info_open = true;
     }
 
@@ -4272,10 +4276,45 @@
             {
                 ImGui::TextDisabled("Enabled options require .zmf / .zsn export.");
             }
+            ImGui::SeparatorText("Player mix (tick 0 NRPN)");
+            ImGui::Checkbox("Apply Player Reverb to Song", &m_song_info_apply_player_reverb);
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+            {
+                ImGui::SetTooltip(
+                    "On Apply, write the Player panel reverb as NRPN 7,0 at tick 0.");
+            }
+            ImGui::Checkbox("Apply Player Velocity Curve to Song",
+                            &m_song_info_apply_player_velocity_curve);
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+            {
+                ImGui::SetTooltip(
+                    "On Apply, write the Player panel velocity curve as NRPN 4,0 at tick 0.");
+            }
             if (ImGui::Button("Apply"))
             {
+                const bool stamp_reverb = m_song_info_apply_player_reverb;
+                const bool stamp_velocity = m_song_info_apply_player_velocity_curve;
                 ApplySongInfoFieldsToDocument();
-                SetStatus("Song Info applied");
+                bool nrpn_ok = true;
+                if (stamp_reverb || stamp_velocity)
+                {
+                    nrpn_ok = WritePlayerMixNrpnsToSong(stamp_velocity, stamp_reverb);
+                    /* One-shot; leave unchecked so a later Apply does not re-stamp. */
+                    m_song_info_apply_player_reverb = false;
+                    m_song_info_apply_player_velocity_curve = false;
+                }
+                if (stamp_reverb || stamp_velocity)
+                {
+                    /* WritePlayerMixNrpnsToSong already set a detailed status. */
+                    if (!nrpn_ok)
+                    {
+                        SetStatus("Song Info applied; player mix NRPN write failed");
+                    }
+                }
+                else
+                {
+                    SetStatus("Song Info applied");
+                }
             }
             ImGui::SameLine();
             if (ImGui::Button("Save Defaults"))

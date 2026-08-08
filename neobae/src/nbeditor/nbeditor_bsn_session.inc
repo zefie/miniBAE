@@ -1894,7 +1894,8 @@ bool ActivateSessionSongAt(int index)
         m_loaded_song_path.clear();
         m_loaded_doc_path.clear();
     }
-    m_velocity_curve_save_to_song = false;
+    m_song_info_apply_player_reverb = false;
+    m_song_info_apply_player_velocity_curve = false;
     SyncPlayerMixNrpnsFromDocument();
     ApplyPlayerMixSettings();
     RefreshSongOverridesFromDocument();

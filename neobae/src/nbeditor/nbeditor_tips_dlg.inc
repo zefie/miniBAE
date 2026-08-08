@@ -146,8 +146,9 @@
         {
             "Song Info & metadata",
             "Song → Song Info… sets title, composer, copyright, and notes "
-            "embedded on export. Session Info covers the project file itself. "
-            "Fill these in before shipping an RMF/ZMF.",
+            "embedded on export. Use Apply Player Reverb / Velocity Curve to "
+            "stamp the Player panel mix as tick-0 NRPNs. Session Info covers "
+            "the project file itself.",
         },
         {
             "Resource usage",

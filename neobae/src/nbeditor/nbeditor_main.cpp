@@ -3014,7 +3014,8 @@ private:
         m_document = new_doc;
         m_loaded_doc_path = path;
         m_document_dirty = false;
-        m_velocity_curve_save_to_song = false;
+        m_song_info_apply_player_reverb = false;
+        m_song_info_apply_player_velocity_curve = false;
         SyncPlayerMixNrpnsFromDocument();
         ApplyPlayerMixSettings();
         RefreshSongOverridesFromDocument();
@@ -6759,7 +6760,6 @@ private:
     int m_volume_percent = 100;
     int m_transpose_semitones = 0; /* song transpose; -24..24 */
     int m_velocity_curve = 1; /* 0..5 Beatnik velocity curve; default Peaky S */
-    bool m_velocity_curve_save_to_song = false; /* write NRPN 4,0 + 7,0 at tick 0 */
     bool m_loop_enabled = true;
 
     std::array<bool, 16> m_channel_muted = {};
@@ -7269,6 +7269,8 @@ private:
     int m_song_info_storage = 1;
     bool m_song_info_classic_chorus = false;
     bool m_song_info_pan_fix = false;
+    bool m_song_info_apply_player_reverb = false;          /* Song Info → NRPN 7,0 */
+    bool m_song_info_apply_player_velocity_curve = false; /* Song Info → NRPN 4,0 */
 
     bool m_instrument_editor_open = false;
     bool m_instrument_editor_focused = false;
