@@ -51,6 +51,8 @@ If you do not use git submodules, place third-party sources in these folders:
 - [libxmp](https://github.com/libxmp/libxmp) -> `neobae/src/thirdparty/libxmp`
 - [qoa](https://github.com/phoboslab/qoa) -> `neobae/src/thirdparty/qoa`
 - [Dear ImGui](https://github.com/ocornut/imgui) (docking branch) -> `neobae/src/thirdparty/imgui`
+- [ADPCM-XQ](https://github.com/dbry/adpcm-xq) -> `neobae/src/thirdparty/adpcm-xq`
+- [hyphen](https://github.com/hunspell/hyphen) -> `neobae/src/thirdparty/hyphen`
 
 Notes:
 

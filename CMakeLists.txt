@@ -222,8 +222,8 @@ option(USE_SDL2 "Prefer SDL2 as the platform backend (default if SDL2 is found a
 option(BUILD_PLAYBAE "Build playbae when a non-Dummy/non-Ansi backend is selected" ON)
 option(BUILD_ZEFIDI "Build zefidi when SDL2/SDL3 backend and matching SDL_ttf are available" ON)
 option(BUILD_CLITOOLS "Build CLI tools (songtool, rmfutil, rmiutil, xmfutil, sf2-hsb, mod2rmf, bankrecomp, ringtone2mid, …)" ON)
-option(BUILD_NBEDITOR "Build NeoBAE Editor (Dear ImGui + SDL3)" ON)
-option(BAE_ENABLE_LIB_HYPHEN "nbeditor: syllable Apply-text via vendored libhyphen" ON)
+option(BUILD_NBEDITOR "Build NeoBAE Editor (Dear ImGui + SDL3); requires BAE_ENABLE_RMF_EDITOR" ON)
+option(BAE_DISABLE_LIB_HYPHEN "nbeditor: syllable Apply-text via vendored libhyphen" OFF)
 set(CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING "Build type (Debug, Release, RelWithDebInfo, MinSizeRel)" FORCE)
 
 # Internal compatibility booleans: keep existing logic in terms of ENABLE vars.
@@ -264,7 +264,15 @@ set(BAE_ENABLE_J2ME_PATCH ON)
 set(BAE_ENABLE_ROLLED_MIDI_UNROLL ON)
 set(BAE_ENABLE_ADX_SUPPORT ON)
 set(BAE_ENABLE_MIDI_HARDWARE ON)
+set(BAE_ENABLE_LIB_HYPHEN ON)
 set(BAE_USING_SDL2 OFF)
+
+if(BAE_DISABLE_LIB_HYPHEN)
+  set(BAE_ENABLE_LIB_HYPHEN OFF)
+  message(STATUS "Disabling hyphen support in NeoBAE Editor")
+else()
+  message(STATUS "Enabling hyphen support in NeoBAE Editor")
+endif()
 
 if(BAE_DISABLE_J2ME_PATCH)
   set(BAE_ENABLE_J2ME_PATCH OFF)
@@ -272,146 +280,188 @@ if(BAE_DISABLE_J2ME_PATCH)
 else()
   message(STATUS "Enabling J2ME percussion bank patch (maps bank 120 for percussion intent)")
 endif()
+
 if(BAE_DISABLE_RMF_EDITOR)
   set(BAE_ENABLE_RMF_EDITOR OFF)
   message(STATUS "Disabling RMF/ZMF Creation API Support")
 else()
   message(STATUS "Enabling RMF/ZMF Creation API Support")
 endif()
+
 if(BAE_DISABLE_SF2_CONVERTER)
   set(BAE_ENABLE_SF2_CONVERTER OFF)
   message(STATUS "Disabling SF2->HSB Converter Support")
 else()
   message(STATUS "Enabling SF2->HSB Converter Support")
 endif()
+
 if(BAE_DISABLE_ZMF_SUPPORT)
   set(BAE_ENABLE_ZMF_SUPPORT OFF)
   message(STATUS "Disabling ZMF Support")
 else()
   message(STATUS "Enabling ZMF Support")    
 endif()
+
 if(BAE_DISABLE_LZMA)
   set(BAE_ENABLE_LZMA OFF)
   message(STATUS "Disabling LZMA Support")
 else()
   message(STATUS "Enabling LZMA Support")
 endif()
+
 if(BAE_DISABLE_MP3_ENCODER)
   set(BAE_ENABLE_MP3_ENCODER OFF)
   message(STATUS "Disabling MP3 encoder support")
 endif()
+
 if(BAE_DISABLE_MP3_DECODER)
   set(BAE_ENABLE_MP3_DECODER OFF)
   message(STATUS "Disabling MP3 decoder support")
 endif()
+
 if(BAE_DISABLE_FLAC_ENCODER)
   set(BAE_ENABLE_FLAC_ENCODER OFF)
   message(STATUS "Disabling FLAC encoder support")
 endif()
+
 if(BAE_DISABLE_FLAC_DECODER)
   set(BAE_ENABLE_FLAC_DECODER OFF)
   message(STATUS "Disabling FLAC decoder support")
 endif()
+
 if(BAE_DISABLE_VORBIS_ENCODER)
   set(BAE_ENABLE_VORBIS_ENCODER OFF)
   message(STATUS "Disabling Vorbis encoder support")
 endif()
+
 if(BAE_DISABLE_VORBIS_DECODER)
   set(BAE_ENABLE_VORBIS_DECODER OFF)
   message(STATUS "Disabling Vorbis decoder support")
 endif()
+
 if(BAE_DISABLE_OPUS_ENCODER)
   set(BAE_ENABLE_OPUS_ENCODER OFF)
   message(STATUS "Disabling Opus encoder support")
 endif()
+
 if(BAE_DISABLE_OPUS_DECODER)
   set(BAE_ENABLE_OPUS_DECODER OFF)
   message(STATUS "Disabling Opus decoder support")
 endif()
+
 if(BAE_DISABLE_RETRO_RINGTONE_SUPPORT)
   set(BAE_ENABLE_RETRO_RINGTONE_SUPPORT OFF)
   message(STATUS "Disabling retro mobile ringtone format support (IMY/EMY/RNG/RTX/RTTTL)")
 else()
   message(STATUS "Enabling retro mobile ringtone format support (IMY/EMY/RNG/RTX/RTTTL)")
 endif()
+
 if (BAE_DISABLE_QOA_SUPPORT)
   set(BAE_ENABLE_QOA_SUPPORT OFF)
   message(STATUS "Disabling QOA codec support")
 else()
   message(STATUS "Enabling QOA codec support")
 endif()
+
 if (BAE_DISABLE_WMA_SUPPORT)
   set(BAE_ENABLE_WMA_SUPPORT OFF)
   message(STATUS "Disabling WMA (MSAUDIO) codec support")
 else()
   message(STATUS "Enabling WMA (MSAUDIO) codec support")
 endif()
+
 if(BAE_DISABLE_KARAOKE)
   set(BAE_ENABLE_KARAOKE OFF)
 endif()
+
 if(BAE_DISABLE_BAESCRIPT)
   set(BAE_ENABLE_BAESCRIPT OFF)
 endif()
+
 if(BAE_DISABLE_PLAYLIST)
   set(BAE_ENABLE_PLAYLIST OFF)
 endif()
+
 if(BAE_DISABLE_SF2_SUPPORT)
   set(BAE_ENABLE_SF2_SUPPORT OFF)
 endif()
+
 if(BAE_DISABLE_FLUIDLITE)
   set(BAE_ENABLE_FLUIDLITE OFF)
   message(STATUS "Disabling FluidLite")
 else()
   message(STATUS "Enabling FluidLite")
 endif()
+
 if (BAE_DISABLE_NATIVE_DLS)
   set(BAE_ENABLE_NATIVE_DLS OFF)
   message(STATUS "Disabling Native DLS System")
 else()
   message(STATUS "Enabling Native DLS System")
 endif()
+
 if(BAE_DISABLE_XMF_SUPPORT)
   set(BAE_ENABLE_XMF_SUPPORT OFF)
 endif()
+
 if(BAE_DISABLE_NOKIA_PATCH)
   set(BAE_ENABLE_NOKIA_PATCH OFF)
 endif()
+
 if(BAE_DISABLE_BEATNIK_SF2_NRPN)
   set(BAE_ENABLE_BEATNIK_SF2_NRPN OFF)
 endif()
+
 if(BAE_DISABLE_BUILTIN_PATCHES_WITH_SF2)
   set(BAE_ENABLE_BUILTIN_PATCHES_WITH_SF2 OFF)
 endif()
+
 if(BAE_DISABLE_BUILTIN_PATCHES_WITH_DLS)
   set(BAE_ENABLE_BUILTIN_PATCHES_WITH_DLS OFF)
 endif()
+
 if(BAE_DISABLE_FIX_SPAN_DC)
   set(BAE_ENABLE_FIX_SPAN_DC OFF)
 endif()
+
 if(BAE_DISABLE_CLASSIC_CHORUS)
   set(BAE_ENABLE_CLASSIC_CHORUS OFF)
 endif()
+
 if(BAE_DISABLE_MTHC_SUPPORT)
   set(BAE_ENABLE_MTHC_SUPPORT OFF)
 endif()
+
 if(BAE_DISABLE_ADP_SUPPORT)
   set(BAE_ENABLE_ADP_SUPPORT OFF)
 endif()
+
 if(BAE_DISABLE_CREATION_API)
   set(BAE_ENABLE_RMF_EDITOR OFF)
 endif()
+
+# nbeditor needs the BAE Editor / Creation API (BAE_ENABLE_RMF_EDITOR).
+if(BUILD_NBEDITOR AND NOT BAE_ENABLE_RMF_EDITOR)
+  set(BUILD_NBEDITOR OFF)
+  message(STATUS "Disabling BUILD_NBEDITOR (requires BAE_ENABLE_RMF_EDITOR; disabled via BAE_DISABLE_RMF_EDITOR or BAE_DISABLE_CREATION_API)")
+endif()
+
 if(BAE_DISABLE_EMBED_PATCHES)
   set(BAE_ENABLE_EMBED_PATCHES OFF)
 endif()
+
 if(BAE_DISABLE_EMBED_FONT)
   set(BAE_ENABLE_EMBED_FONT OFF)
 endif()
+
 if(BAE_DISABLE_RMI_SUPPORT)
   set(BAE_ENABLE_RMI_SUPPORT OFF)
 endif()
+
 if(BAE_DISABLE_ROLLED_MIDI_UNROLL)
   set(BAE_ENABLE_ROLLED_MIDI_UNROLL OFF)
 endif()
+
 if(BAE_DISABLE_ADX_SUPPORT)
   set(BAE_ENABLE_ADX_SUPPORT OFF)
   message(STATUS "Disabling ADX support")

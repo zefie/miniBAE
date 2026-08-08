@@ -61,6 +61,7 @@ All feature flags default to `OFF` (feature enabled). Set to `ON` to disable.
 | `BAE_DISABLE_FLUIDLITE` | Disable NeoBAE's FluidLite SoundFont backend. Also disables SF2 support if it was auto-enabled. |
 | `BAE_DISABLE_J2ME_PATCH` | Disable J2ME percussion bank patch (maps bank 120 for percussion intent). |
 | `BAE_DISABLE_KARAOKE` | Disable karaoke support. |
+| `BAE_DISABLE_LIB_HYPHEN` | Disable hyphen support (for karaoke lyric editor in NeoBAE Editor). If enabled, it is only built into NeoBAE Editor, not into libneobae. |
 | `BAE_DISABLE_LZMA` | Disable LZMA compression support. Also disables ZMF support. |
 | `BAE_DISABLE_MIDI_HARDWARE` | Disable hardware MIDI I/O in zefidi via RtMidi. |
 | `BAE_DISABLE_MP3_DECODER` | Disable MP3 decoder support. |
@@ -73,7 +74,7 @@ All feature flags default to `OFF` (feature enabled). Set to `ON` to disable.
 | `BAE_DISABLE_PLAYLIST` | Disable playlist support. |
 | `BAE_DISABLE_QOA_SUPPORT` | Disable QOA codec support. Also disables ZMF support. |
 | `BAE_DISABLE_RETRO_RINGTONE_SUPPORT` | Disable retro mobile ringtone format support (IMY/EMY/RNG/RTX/RTTTL). |
-| `BAE_DISABLE_RMF_EDITOR` | Disable BAERmfEditor (Creation API) support. |
+| `BAE_DISABLE_RMF_EDITOR` | Disable support for the BAE Editor API (required by NeoBAE Editor). |
 | `BAE_DISABLE_RMI_SUPPORT` | Disable RMI support. |
 | `BAE_DISABLE_ROLLED_MIDI_UNROLLING` | Disable unrolling of rolled MIDI files. |
 | `BAE_DISABLE_SF2_CONVERTER` | Disable SF2->HSB converter support. |
@@ -84,6 +85,7 @@ All feature flags default to `OFF` (feature enabled). Set to `ON` to disable.
 | `BAE_DISABLE_XMF_SUPPORT` | Disable XMF support. |
 | `BAE_DISABLE_ZMF_SUPPORT` | Disable ZMF support. |
 
+
 ## Dependency Constraints
 
 Several features are automatically disabled if their required dependencies are not available:
@@ -91,6 +93,7 @@ Several features are automatically disabled if their required dependencies are n
 - **ZMF** requires: LZMA, Vorbis decoder, Opus decoder, FLAC decoder, QOA, Classic Chorus, Fix Span DC.
 - **SF2** requires NeoBAE's FluidLite. If FluidLite is disabled, SF2 is disabled.
 - **XMF** requires Native DLS. If Native DLS is disabled, XMF is disabled.
+- **`BUILD_NBEDITOR`** requires `BAE_ENABLE_RMF_EDITOR`. If RMF editor / Creation API support is disabled (`BAE_DISABLE_RMF_EDITOR` or `BAE_DISABLE_CREATION_API`), `BUILD_NBEDITOR` is forced off.
 - **MP3 encoder** requires bundled LAME sources (`neobae/src/thirdparty/lame-3.100-slim/`).
 - **FLAC encoder/decoder** requires bundled libFLAC sources (`neobae/src/thirdparty/flac/`).
 - **Vorbis encoder/decoder** requires bundled Vorbis/Ogg sources (`neobae/src/thirdparty/libvorbis/`, `neobae/src/thirdparty/libogg/`).
@@ -122,7 +125,7 @@ nbeditor embeds Regular + Italic Liberation Sans automatically when those files 
 | `BUILD_ZEFIDI` | `ON` | Build `zefidi` when SDL2/SDL3 backend and matching SDL_ttf are available. |
 | `BUILD_ZEFIDI2` | `ON` | Build `zefidi2` slim ImGui player when SDL3 + Dear ImGui sources are available (no SDL_ttf). |
 | `BUILD_CLITOOLS` | `ON` | Build CLI tools: `songtool`, `rmfutil`, `rmiutil`, `xmfutil`, `sf2-hsb`, `mod2rmf`, `bankrecomp`, `ringtone2mid`, plus codec helpers (`adp2wav`, `adx2wav`, `mthc_decomp`) when enabled. |
-| `BUILD_NBEDITOR` | `ON` | Build NeoBAE Editor (`nbeditor`, Dear ImGui + SDL3). Requires SDL3 headers/library and `neobae/src/nbeditor` + `neobae/src/thirdparty/imgui` sources. |
+| `BUILD_NBEDITOR` | `ON` | Build NeoBAE Editor (`nbeditor`, Dear ImGui + SDL3). Requires `BAE_ENABLE_RMF_EDITOR`, SDL3 headers/library, and `neobae/src/nbeditor` + `neobae/src/thirdparty/imgui` sources. |
 
 ## Internal Compatibility Variables
 
