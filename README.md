@@ -38,7 +38,7 @@ cmake --build build --parallel $(nproc) --target nbeditor
 
 <img src="docs/zefidi.png" alt="zefidi Media Player" width="700">
 
-**playbae** is the CLI player, offline renderer, and exporter. **zefidi** is the classic SDL GUI player (playlists, channel panel, karaoke, export, BAEScript editor, hardware MIDI). **zefidi2** is a slim Dear ImGui + SDL3 alternative.
+**playbae** is the CLI player, offline renderer, and exporter. **zefidi** is the classic SDL GUI player (playlists, channel panel, karaoke, export, BAEScript editor, hardware MIDI).
 
 With **Native DLS** enabled, both playbae and zefidi play **mobileBAE** content authentically:
 
