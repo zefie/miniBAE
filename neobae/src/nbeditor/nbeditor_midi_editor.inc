@@ -442,6 +442,93 @@
         return static_cast<uint32_t>(std::max(0.0f, ticks));
     }
 
+    float MeMaxScrollTick(float view_width_px) const
+    {
+        const float view_ticks =
+            std::max(1.0f, view_width_px) / std::max(0.001f, m_midi_px_per_tick);
+        const float length = static_cast<float>(MeSongLengthTicks());
+        /* Keep a little of the song in view when scrolled to the end. */
+        return std::max(0.0f, length - view_ticks * 0.25f);
+    }
+
+    void MeClampScrollTick(float view_width_px)
+    {
+        m_midi_scroll_tick =
+            std::clamp(m_midi_scroll_tick, 0.0f, MeMaxScrollTick(view_width_px));
+    }
+
+    void MeScrollTimeByPixels(float dx_pixels, float view_width_px, bool user_initiated)
+    {
+        if (dx_pixels == 0.0f)
+        {
+            return;
+        }
+        if (user_initiated)
+        {
+            m_midi_follow_playhead = false;
+        }
+        m_midi_scroll_tick -= dx_pixels / std::max(0.001f, m_midi_px_per_tick);
+        MeClampScrollTick(view_width_px);
+    }
+
+    void MeScrollTimeByWheel(float wheel, float view_width_px)
+    {
+        /* Positive wheel = scroll earlier (left content moves right), matching Shift+wheel. */
+        MeScrollTimeByPixels(wheel * 40.0f, view_width_px, true);
+    }
+
+    /* Returns LoopStart / LoopEnd / None. Prefer the nearer handle when both are close. */
+    MeDragMode MeHitLoopHandle(float mouse_x, float time_x, uint32_t loop_start, uint32_t loop_end) const
+    {
+        constexpr float kLoopHitPx = 12.0f;
+        const float x0 = MeTickToX(loop_start, time_x);
+        const float x1 = MeTickToX(loop_end, time_x);
+        const float d0 = std::fabs(mouse_x - x0);
+        const float d1 = std::fabs(mouse_x - x1);
+        if (d0 <= kLoopHitPx && d0 <= d1)
+        {
+            return MeDragMode::LoopStart;
+        }
+        if (d1 <= kLoopHitPx)
+        {
+            return MeDragMode::LoopEnd;
+        }
+        return MeDragMode::None;
+    }
+
+    void MeDrawLoopDragGuide(ImDrawList *dl, float time_x, float x_max, float y0, float y1) const
+    {
+        if (!dl || !m_document)
+        {
+            return;
+        }
+        if (m_midi_drag_mode != MeDragMode::LoopStart && m_midi_drag_mode != MeDragMode::LoopEnd)
+        {
+            return;
+        }
+        bool loop_on = false;
+        uint32_t loop_start = 0;
+        uint32_t loop_end = 0;
+        int32_t loop_count = 0;
+        (void)BAERmfEditorDocument_GetMidiLoopMarkers(
+            m_document, &loop_on, &loop_start, &loop_end, &loop_count);
+        if (!loop_on)
+        {
+            return;
+        }
+        const uint32_t guide_tick =
+            (m_midi_drag_mode == MeDragMode::LoopStart) ? loop_start : loop_end;
+        const float x = MeTickToX(guide_tick, time_x);
+        if (x < time_x || x > x_max)
+        {
+            return;
+        }
+        dl->AddLine(ImVec2(x, y0),
+                    ImVec2(x, y1),
+                    IM_COL32(80, 200, 255, 200),
+                    1.5f);
+    }
+
     float MePitchToY(int pitch, float origin_y) const
     {
         const int top = 127 - pitch;
@@ -3146,39 +3233,37 @@
                         IM_COL32(255, 90, 70, 255),
                         2.0f);
         }
+        MeDrawLoopDragGuide(dl, time_x, time_x + time_w, origin.y, origin.y + size.y);
 
         ImGui::SetCursorScreenPos(ImVec2(time_x, origin.y));
         ImGui::InvisibleButton("##me_ruler", ImVec2(time_w, size.y));
-        if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left))
+        const ImGuiIO &ruler_io = ImGui::GetIO();
+        const float mp_x = ruler_io.MousePos.x;
+        const MeDragMode loop_hit =
+            loop_on ? MeHitLoopHandle(mp_x, time_x, loop_start, loop_end) : MeDragMode::None;
+        if (ImGui::IsItemHovered() &&
+            (loop_hit != MeDragMode::None || m_midi_drag_mode == MeDragMode::LoopStart ||
+             m_midi_drag_mode == MeDragMode::LoopEnd))
         {
-            const ImVec2 mp = ImGui::GetIO().MousePos;
-            if (m_midi_drag_mode == MeDragMode::None)
+            ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+        }
+        /* Grab loop handles on mouse-down (before drag threshold moves off the handle). */
+        if (ImGui::IsItemActivated() && ImGui::IsMouseDown(ImGuiMouseButton_Left))
+        {
+            if (loop_hit != MeDragMode::None)
             {
-                if (loop_on)
-                {
-                    const float x0 = MeTickToX(loop_start, time_x);
-                    const float x1 = MeTickToX(loop_end, time_x);
-                    if (std::fabs(mp.x - x0) < 6.0f)
-                    {
-                        m_midi_drag_mode = MeDragMode::LoopStart;
-                        MeBeginUndo();
-                    }
-                    else if (std::fabs(mp.x - x1) < 6.0f)
-                    {
-                        m_midi_drag_mode = MeDragMode::LoopEnd;
-                        MeBeginUndo();
-                    }
-                    else
-                    {
-                        m_midi_drag_mode = MeDragMode::Seek;
-                    }
-                }
-                else
-                {
-                    m_midi_drag_mode = MeDragMode::Seek;
-                }
+                m_midi_drag_mode = loop_hit;
+                MeBeginUndo();
             }
-            const uint32_t tick = MeSnapTick(MeXToTick(mp.x, time_x));
+            else
+            {
+                m_midi_drag_mode = MeDragMode::Seek;
+                MeSeekToTick(MeSnapTick(MeXToTick(mp_x, time_x)));
+            }
+        }
+        if (ImGui::IsItemActive() && ImGui::IsMouseDown(ImGuiMouseButton_Left))
+        {
+            const uint32_t tick = MeSnapTick(MeXToTick(ruler_io.MousePos.x, time_x));
             if (m_midi_drag_mode == MeDragMode::Seek)
             {
                 MeSeekToTick(tick);
@@ -3188,17 +3273,15 @@
                 loop_start = std::min(tick, loop_end > 0 ? loop_end - 1 : tick);
                 BAERmfEditorDocument_SetMidiLoopMarkers(
                     m_document, true, loop_start, loop_end, loop_count);
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
             }
             else if (m_midi_drag_mode == MeDragMode::LoopEnd)
             {
                 loop_end = std::max(tick, loop_start + 1);
                 BAERmfEditorDocument_SetMidiLoopMarkers(
                     m_document, true, loop_start, loop_end, loop_count);
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
             }
-        }
-        if (ImGui::IsItemClicked(ImGuiMouseButton_Left) && m_midi_drag_mode == MeDragMode::None)
-        {
-            MeSeekToTick(MeSnapTick(MeXToTick(ImGui::GetIO().MousePos.x, time_x)));
         }
         if (ImGui::IsItemDeactivated())
         {
@@ -3206,7 +3289,12 @@
             {
                 MeCommitUndo();
             }
-            m_midi_drag_mode = MeDragMode::None;
+            if (m_midi_drag_mode == MeDragMode::Seek ||
+                m_midi_drag_mode == MeDragMode::LoopStart ||
+                m_midi_drag_mode == MeDragMode::LoopEnd)
+            {
+                m_midi_drag_mode = MeDragMode::None;
+            }
         }
     }
 
@@ -3225,11 +3313,13 @@
         const float lane_h = std::clamp(m_midi_track_lane_h, 28.0f, 120.0f);
         const float ruler_h = 22.0f;
 
-        ImGui::BeginChild("##me_timeline", ImVec2(width, height), true);
+        ImGui::BeginChild("##me_timeline", ImVec2(width, height), true,
+                          ImGuiWindowFlags_NoScrollWithMouse);
         ImDrawList *dl = ImGui::GetWindowDrawList();
         const ImVec2 win = ImGui::GetCursorScreenPos();
         /* Content width must match piano-roll child so time origins share screen X. */
         const float content_w = ImGui::GetContentRegionAvail().x;
+        const float time_view_w = std::max(1.0f, content_w - chrome_w);
 
         MeDrawRuler(dl, win, ImVec2(content_w, ruler_h), length_ticks);
 
@@ -3408,6 +3498,31 @@
                             ImVec2(play_x, y),
                             IM_COL32(255, 90, 70, 220),
                             2.0f);
+            }
+            MeDrawLoopDragGuide(dl, time_x, win.x + content_w, win.y + ruler_h, y);
+        }
+
+        /* Horizontal pan / scroll (Shift+wheel, trackpad wheel-H, middle-drag). */
+        {
+            const ImGuiIO &tio = ImGui::GetIO();
+            const bool tl_hovered =
+                ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+            if (tl_hovered && m_midi_drag_mode == MeDragMode::None)
+            {
+                if (tio.MouseWheelH != 0.0f)
+                {
+                    MeScrollTimeByWheel(tio.MouseWheelH, time_view_w);
+                }
+                else if (tio.KeyShift && tio.MouseWheel != 0.0f)
+                {
+                    MeScrollTimeByWheel(tio.MouseWheel, time_view_w);
+                }
+            }
+            if (tl_hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Middle) &&
+                m_midi_drag_mode == MeDragMode::None)
+            {
+                m_midi_drag_mode = MeDragMode::Pan;
+                m_midi_follow_playhead = false;
             }
         }
 
@@ -3840,6 +3955,11 @@
                             1.5f);
             }
         }
+        MeDrawLoopDragGuide(dl,
+                            grid_origin.x,
+                            grid_origin.x + grid_size.x,
+                            grid_origin.y,
+                            grid_origin.y + grid_size.y);
 
         dl->PopClipRect();
 
@@ -3893,19 +4013,36 @@
             }
         }
 
-        if (hovered && io.MouseWheel != 0.0f)
+        if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Middle) &&
+            m_midi_drag_mode == MeDragMode::None)
         {
-            if (io.KeyCtrl)
+            m_midi_drag_mode = MeDragMode::Pan;
+            m_midi_follow_playhead = false;
+        }
+
+        if (hovered && (io.MouseWheel != 0.0f || io.MouseWheelH != 0.0f))
+        {
+            if (io.MouseWheelH != 0.0f)
+            {
+                MeScrollTimeByWheel(io.MouseWheelH, grid_size.x);
+            }
+            else if (io.KeyCtrl && io.MouseWheel != 0.0f)
             {
                 const float factor = (io.MouseWheel > 0.0f) ? 1.15f : (1.0f / 1.15f);
+                const float old_ppt = m_midi_px_per_tick;
                 m_midi_px_per_tick = std::clamp(m_midi_px_per_tick * factor, 0.02f, 2.5f);
-            }
-            else if (io.KeyShift)
-            {
+                /* Zoom toward cursor X so the tick under the mouse stays put. */
+                const float focus_tick = m_midi_scroll_tick +
+                    (io.MousePos.x - grid_origin.x) / std::max(0.001f, old_ppt);
                 m_midi_scroll_tick =
-                    std::max(0.0f, m_midi_scroll_tick - io.MouseWheel * 40.0f / m_midi_px_per_tick);
+                    focus_tick - (io.MousePos.x - grid_origin.x) / std::max(0.001f, m_midi_px_per_tick);
+                MeClampScrollTick(grid_size.x);
             }
-            else
+            else if (io.KeyShift && io.MouseWheel != 0.0f)
+            {
+                MeScrollTimeByWheel(io.MouseWheel, grid_size.x);
+            }
+            else if (io.MouseWheel != 0.0f)
             {
                 m_midi_scroll_pitch =
                     std::clamp(m_midi_scroll_pitch - io.MouseWheel * 2.0f, 0.0f, 127.0f);
@@ -4574,9 +4711,43 @@
             kDivs[std::clamp(m_midi_snap_division_index, 0, 4)];
         place(labeled_w("Follow", ImGui::GetFrameHeight()));
         ImGui::Checkbox("Follow", &m_midi_follow_playhead);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        {
+            ImGui::SetTooltip(
+                "Keep the playhead in view while playing.\n"
+                "Manual scroll (Shift+wheel, trackpad, middle-drag, or Scroll)\n"
+                "turns Follow off.");
+        }
         place(labeled_w("Zoom", 100.0f));
         ImGui::SetNextItemWidth(100.0f);
-        ImGui::SliderFloat("Zoom", &m_midi_px_per_tick, 0.02f, 1.5f, "%.3f");
+        {
+            const float view_w =
+                std::max(1.0f, ImGui::GetContentRegionAvail().x - kMeTimeGutter);
+            if (ImGui::SliderFloat("Zoom", &m_midi_px_per_tick, 0.02f, 1.5f, "%.3f"))
+            {
+                MeClampScrollTick(view_w);
+            }
+            place(labeled_w("Scroll", 140.0f));
+            ImGui::SetNextItemWidth(140.0f);
+            const float max_scroll = MeMaxScrollTick(view_w);
+            float scroll = m_midi_scroll_tick;
+            if (ImGui::SliderFloat("Scroll",
+                                   &scroll,
+                                   0.0f,
+                                   std::max(0.0f, max_scroll),
+                                   "%.0f"))
+            {
+                m_midi_follow_playhead = false;
+                m_midi_scroll_tick = scroll;
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+            {
+                ImGui::SetTooltip(
+                    "Horizontal scroll in ticks.\n"
+                    "Also: Shift+wheel, horizontal trackpad swipe,\n"
+                    "or middle-mouse drag on the timeline / piano roll.");
+            }
+        }
         place(btn_w("Undo"));
         if (ImGui::Button("Undo"))
         {
@@ -4990,10 +5161,44 @@
 
         MeDrawPianoRoll(avail.x, avail.y - timeline_h - split_h - 4.0f);
 
+        /* Middle-mouse pan is started in timeline/roll; apply once per frame here. */
+        if (m_midi_drag_mode == MeDragMode::Pan)
+        {
+            const ImGuiIO &io = ImGui::GetIO();
+            if (ImGui::IsMouseDown(ImGuiMouseButton_Middle))
+            {
+                const float view_w = std::max(1.0f, avail.x - kMeTimeGutter);
+                MeScrollTimeByPixels(io.MouseDelta.x, view_w, true);
+                m_midi_scroll_pitch = std::clamp(
+                    m_midi_scroll_pitch - io.MouseDelta.y / std::max(0.001f, m_midi_px_per_pitch),
+                    0.0f,
+                    127.0f);
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+            }
+            else
+            {
+                m_midi_drag_mode = MeDragMode::None;
+            }
+        }
+
         /* Shortcuts when focused */
         if (m_midi_editor_focused)
         {
             const ImGuiIO &io = ImGui::GetIO();
+            if (!io.WantTextInput && !io.KeyCtrl && !io.KeyAlt &&
+                m_midi_selected_notes.empty())
+            {
+                const float view_w = std::max(1.0f, avail.x - kMeTimeGutter);
+                const float page = view_w * 0.85f;
+                if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true))
+                {
+                    MeScrollTimeByPixels(io.KeyShift ? page : 40.0f, view_w, true);
+                }
+                if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true))
+                {
+                    MeScrollTimeByPixels(io.KeyShift ? -page : -40.0f, view_w, true);
+                }
+            }
             if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Z, false))
             {
                 if (io.KeyShift)
