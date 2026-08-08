@@ -1976,9 +1976,9 @@ const char *BAE_GetCompileInfo()
 
 #if defined(__EMSCRIPTEN__) && defined(__clang_version__)
 #ifdef __cplusplus
-    snprintf(versionString, maxStrSize, "clang++ v%d.%d.%d, emscripten v%d.%d", major, minor, patch, __EMSCRIPTEN_major__, __EMSCRIPTEN_minor__);
+    snprintf(versionString, maxStrSize, "clang++ v%d.%d.%d, emscripten v%d.%d", major, minor, patch, __EMSCRIPTEN_MAJOR__, __EMSCRIPTEN_MINOR__);
 #else
-    snprintf(versionString, maxStrSize, "clang v%d.%d.%d, emscripten v%d.%d", major, minor, patch, __EMSCRIPTEN_major__, __EMSCRIPTEN_minor__);
+    snprintf(versionString, maxStrSize, "clang v%d.%d.%d, emscripten v%d.%d", major, minor, patch, __EMSCRIPTEN_MAJOR__, __EMSCRIPTEN_MINOR__);
 #endif
 #elif defined(__ANDROID__) && defined(__clang_version__)
 #ifdef __cplusplus

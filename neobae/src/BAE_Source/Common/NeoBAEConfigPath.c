@@ -290,6 +290,15 @@ int BAE_GetRuntimeFilePath(char *out, size_t outSize, char const *relativeName)
     {
         return -1;
     }
+#if defined(__EMSCRIPTEN__) || defined(__ANDROID__)
+    /* X_Assert.h does not define get_executable_directory for these targets. */
+    (void)exe_dir;
+    if (snprintf(out, outSize, "%s", relativeName) < 0)
+    {
+        return -1;
+    }
+    return 0;
+#else
     get_executable_directory(exe_dir, sizeof(exe_dir));
     if (!exe_dir[0])
     {
@@ -305,6 +314,7 @@ int BAE_GetRuntimeFilePath(char *out, size_t outSize, char const *relativeName)
         return -1;
     }
     return 0;
+#endif
 }
 
 int BAE_PrepareConfigFile(char const *relativeName, char const *legacyPath)
