@@ -92,6 +92,7 @@
         m_pref_reopen_last_session = false;
         m_pref_save_session_layout = true;
         m_pref_ignore_session_layout = false;
+        m_pref_default_undocked_layout = false;
         m_pref_show_tips_at_startup = true;
         m_tips_seen.clear();
         m_tips_next = 0;
@@ -141,6 +142,10 @@
             else if (key == "ignore_session_layout")
             {
                 m_pref_ignore_session_layout = PrefParseBool(value, false);
+            }
+            else if (key == "default_undocked_layout")
+            {
+                m_pref_default_undocked_layout = PrefParseBool(value, false);
             }
             else if (key == "show_tips_at_startup")
             {
@@ -291,6 +296,7 @@
         out << "reopen_last_session=" << (m_pref_reopen_last_session ? "1" : "0") << '\n';
         out << "save_session_layout=" << (m_pref_save_session_layout ? "1" : "0") << '\n';
         out << "ignore_session_layout=" << (m_pref_ignore_session_layout ? "1" : "0") << '\n';
+        out << "default_undocked_layout=" << (m_pref_default_undocked_layout ? "1" : "0") << '\n';
         out << "show_tips_at_startup=" << (m_pref_show_tips_at_startup ? "1" : "0") << '\n';
         out << "tips_next=" << m_tips_next << '\n';
         {
@@ -349,6 +355,7 @@
         m_prefs_draft_reopen = m_pref_reopen_last_session;
         m_prefs_draft_save_layout = m_pref_save_session_layout;
         m_prefs_draft_ignore_layout = m_pref_ignore_session_layout;
+        m_prefs_draft_default_undocked = m_pref_default_undocked_layout;
         m_prefs_draft_show_tips = m_pref_show_tips_at_startup;
 #if SUPPORT_MIDI_HW == TRUE
         m_prefs_draft_midi_hw_enabled = m_midi_hw_enabled;
@@ -390,6 +397,15 @@
                 "When opening a Session, skip applying saved size/dock/editor layout.\n"
                 "Disabled by default.");
         }
+        ImGui::Checkbox("Default to undocked layout", &m_prefs_draft_default_undocked);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        {
+            ImGui::SetTooltip(
+                "New sessions (and loads with Ignore session layout) start with\n"
+                "floating Player / Session / Status windows (BE2-style).\n"
+                "Per-session override: Edit → Undocked layout.\n"
+                "Off by default (docked workspace).");
+        }
         ImGui::Checkbox("Show tips at startup", &m_prefs_draft_show_tips);
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
         {
@@ -405,6 +421,7 @@
             m_pref_reopen_last_session = m_prefs_draft_reopen;
             m_pref_save_session_layout = m_prefs_draft_save_layout;
             m_pref_ignore_session_layout = m_prefs_draft_ignore_layout;
+            m_pref_default_undocked_layout = m_prefs_draft_default_undocked;
             m_pref_show_tips_at_startup = m_prefs_draft_show_tips;
 #if SUPPORT_MIDI_HW == TRUE
             m_midi_hw_enabled = m_prefs_draft_midi_hw_enabled;

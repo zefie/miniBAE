@@ -1745,6 +1745,7 @@ static constexpr uint32_t kNbetOpenSE = 1u << 1;
 static constexpr uint32_t kNbetOpenSongInfo = 1u << 2;
 static constexpr uint32_t kNbetOpenSongSettings = 1u << 3;
 static constexpr uint32_t kNbetOpenMidiEditor = 1u << 4;
+static constexpr uint32_t kNbetUndockedLayout = 1u << 5;
 
 void ApplyPlayerMixSettings()
 {
@@ -1885,6 +1886,10 @@ std::vector<unsigned char> CaptureNbetLayoutBlob(bool include_layout = true)
         if (m_midi_editor_open)
         {
             open_flags |= kNbetOpenMidiEditor;
+        }
+        if (m_session_undocked_layout)
+        {
+            open_flags |= kNbetUndockedLayout;
         }
     }
 
@@ -2075,8 +2080,12 @@ void ApplyNbetLayoutBlob(const unsigned char *data, size_t size)
     if (m_pref_ignore_session_layout)
     {
         m_nbet_restore_open_flags = 0;
+        m_session_undocked_layout = m_pref_default_undocked_layout;
+        ApplyWorkspaceLayoutMode();
         return;
     }
+    m_session_undocked_layout =
+        (m_nbet_restore_open_flags & kNbetUndockedLayout) != 0;
     if (m_main_window && w > 100 && h > 80)
     {
         /* Restore size (and maximize), but leave the window where it is unless
@@ -2098,6 +2107,11 @@ void ApplyNbetLayoutBlob(const unsigned char *data, size_t size)
         m_pending_imgui_ini.assign(reinterpret_cast<const char *>(data + ini_off),
                                    static_cast<size_t>(ini_len));
     }
+    else
+    {
+        /* No ini — apply docked/undocked defaults for the restored mode. */
+        ApplyWorkspaceLayoutMode();
+    }
     m_pending_apply_nbet = true;
     /* Wait for SDL resize + one frame with DockSpace/windows present.
      * LoadIniSettingsFromMemory must run outside NewFrame (see PumpPendingNbetLayout). */
@@ -2106,9 +2120,6 @@ void ApplyNbetLayoutBlob(const unsigned char *data, size_t size)
 
 void ResetSessionLayoutToDefault()
 {
-    m_pending_apply_nbet = false;
-    m_nbet_apply_delay_frames = 0;
-    m_pending_imgui_ini.clear();
     m_nbet_restore_open_flags = 0;
 
     m_instrument_editor_open = false;
@@ -2132,9 +2143,10 @@ void ResetSessionLayoutToDefault()
     m_bank_add_open = false;
     m_inst_dest_open = false;
 
-    m_force_reset_dock_layout = true;
-    m_dock_layout_initialized = false;
-    SetStatus("Layout reset to default");
+    /* Keep m_session_undocked_layout — never redock when undocked is on. */
+    ApplyWorkspaceLayoutMode();
+    SetStatus(m_session_undocked_layout ? "Layout reset to undocked defaults"
+                                        : "Layout reset to docked defaults");
 }
 
 bool LoadSessionBsnFromPath(const char *path)
@@ -2178,9 +2190,12 @@ bool LoadSessionBsnFromPath(const char *path)
                                         casd_count);
     }
 
+    /* Seed layout mode from app default; nBeT overrides when present (unless ignore). */
+    m_session_undocked_layout = m_pref_default_undocked_layout;
     /* NeoBAE nBeT: player mix always restored; window/ini/editors respect prefs. */
     {
         std::vector<unsigned char> bytes;
+        bool applied_nbet = false;
         if (ReadEntireFileBytes(path, bytes))
         {
             std::vector<BsnIrezResource> resources;
@@ -2195,11 +2210,16 @@ bool LoadSessionBsnFromPath(const char *path)
                         if (DecodeNbetResourceBody(r.body.data(), r.body.size(), plain))
                         {
                             ApplyNbetLayoutBlob(plain.data(), plain.size());
+                            applied_nbet = true;
                         }
                         break;
                     }
                 }
             }
+        }
+        if (!applied_nbet)
+        {
+            ApplyWorkspaceLayoutMode();
         }
     }
 

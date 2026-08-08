@@ -187,6 +187,22 @@
                 }
                 ImGui::EndMenu();
             }
+            if (ImGui::MenuItem("Undocked layout",
+                                nullptr,
+                                m_session_undocked_layout))
+            {
+                m_session_undocked_layout = !m_session_undocked_layout;
+                ApplyWorkspaceLayoutMode();
+                SetStatus(m_session_undocked_layout
+                              ? "Undocked layout (floating Player / Session / Status)"
+                              : "Docked layout (Player / Session / Status)");
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+            {
+                ImGui::SetTooltip(
+                    "BE2-style floating dashboard for Player / Session / Status.\n"
+                    "Off = docked workspace (default). Per-session; app default in Preferences.");
+            }
             if (ImGui::MenuItem("Reset Layout"))
             {
                 ResetSessionLayoutToDefault();
@@ -194,7 +210,8 @@
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
             {
                 ImGui::SetTooltip(
-                    "Restore the default Player / Session / Status dock layout.\n"
+                    "Restore default Player / Session / Status layout for the current mode\n"
+                    "(docked or undocked). Does not change Undocked layout on/off.\n"
                     "Closes floating editor windows (IE, Sample Editor, etc.).");
             }
             ImGui::Separator();
@@ -957,6 +974,8 @@
         m_velocity_curve = 1;
         m_velocity_curve_save_to_song = false;
         ApplyPlayerMixSettings();
+        m_session_undocked_layout = m_pref_default_undocked_layout;
+        ApplyWorkspaceLayoutMode();
         SetStatus("New Session");
     }
 
@@ -3756,7 +3775,13 @@
 
     void DrawSessionWindow()
     {
-        if (!ImGui::Begin("Session"))
+        ApplyPendingFloatingWindowPlacement("Session");
+        ImGuiWindowFlags session_flags = 0;
+        if (m_session_undocked_layout)
+        {
+            session_flags |= ImGuiWindowFlags_NoDocking;
+        }
+        if (!ImGui::Begin("Session", nullptr, session_flags))
         {
             m_session_window_focused = false;
             ImGui::End();

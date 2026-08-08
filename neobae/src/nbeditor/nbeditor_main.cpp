@@ -1285,6 +1285,7 @@ public:
 
         LoadRecentSessionsFromDisk();
         LoadEditorPrefsFromDisk();
+        m_session_undocked_layout = m_pref_default_undocked_layout;
         CleanupStaleClipPackagesOnStartup();
         /* Clean slate by default; optional reopen via Preferences. */
         if (m_pref_reopen_last_session && !m_recent_sessions.empty())
@@ -1470,22 +1471,43 @@ public:
             --m_nbet_apply_delay_frames;
             return;
         }
-        /* Prefer ini that actually contains docking data; otherwise keep default dock. */
+        /* Load window positions always; docking block is optional (undocked sessions). */
         if (!m_pending_imgui_ini.empty())
         {
             const bool has_docking =
                 m_pending_imgui_ini.find("[Docking][Data]") != std::string::npos;
-            if (has_docking)
+            ImGui::LoadIniSettingsFromMemory(m_pending_imgui_ini.c_str(),
+                                             m_pending_imgui_ini.size());
+            if (m_session_undocked_layout)
             {
-                ImGui::LoadIniSettingsFromMemory(m_pending_imgui_ini.c_str(),
-                                                 m_pending_imgui_ini.size());
+                m_floating_layout_initialized = true;
+                m_dock_layout_initialized = true; /* skip default dock builder */
+                m_floating_placement_frames = 0;
+            }
+            else if (has_docking)
+            {
                 m_dock_layout_initialized = true;
+                m_floating_layout_initialized = false;
             }
             m_pending_imgui_ini.clear();
         }
         m_pending_apply_nbet = false;
         /* Reopen IE/SE/Song Info/etc. after session lists are ready. */
         RestoreNbetEditorWindows();
+    }
+
+    /* Undocked = no drag-dock previews; docked = normal docking. Call before NewFrame. */
+    void SyncDockingConfigForLayoutMode()
+    {
+        ImGuiIO &io = ImGui::GetIO();
+        if (m_session_undocked_layout)
+        {
+            io.ConfigFlags &= ~ImGuiConfigFlags_DockingEnable;
+        }
+        else
+        {
+            io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+        }
     }
 
     void DrawUI()
@@ -1499,6 +1521,10 @@ public:
         DrawDockspace();
         DrawPlayerWindow();
         DrawSessionWindow();
+        if (m_floating_placement_frames > 0)
+        {
+            --m_floating_placement_frames;
+        }
         DrawMidiEditorWindow();
         DrawBankAddDialog();
         DrawSongInfoDialog();
@@ -4776,6 +4802,83 @@ private:
 #include "nbeditor_midi_editor.inc"
 #include "nbeditor_keyboard_input.inc"
 
+    /* Player floating min matches SetNextWindowSizeConstraints in DrawPlayerWindow.
+     * Height fits transport + channels + audition keyboard (~500 logical px). */
+    static constexpr float kPlayerFloatMinW = 780.0f;
+    static constexpr float kPlayerFloatMinH = 500.0f;
+
+    /* Rebuild workspace for m_session_undocked_layout without changing that flag. */
+    void ApplyWorkspaceLayoutMode()
+    {
+        m_pending_apply_nbet = false;
+        m_nbet_apply_delay_frames = 0;
+        m_pending_imgui_ini.clear();
+        m_force_reset_dock_layout = true;
+        m_dock_layout_initialized = false;
+        m_floating_layout_initialized = false;
+        m_floating_placement_frames = 0;
+        SyncDockingConfigForLayoutMode();
+    }
+
+    /* BE2-style floating Player / Session / Status. Call SetNext* before each Begin. */
+    void ApplyPendingFloatingWindowPlacement(const char *which)
+    {
+        if (m_floating_placement_frames <= 0 || !m_session_undocked_layout || !which)
+        {
+            return;
+        }
+        ImGuiViewport *vp = ImGui::GetMainViewport();
+        const ImVec2 work_pos = vp->WorkPos;
+        const ImVec2 work_size = vp->WorkSize;
+        const float margin = 8.0f;
+        const float gap = 6.0f;
+        const float status_h = std::max(110.0f, work_size.y * 0.14f);
+        /* Player shrinks to its minimum; Session fills remaining width beside it. */
+        const float player_w = kPlayerFloatMinW;
+        const float player_h = kPlayerFloatMinH;
+        const float session_x = work_pos.x + margin + player_w + gap;
+        const float session_w =
+            std::max(320.0f, work_size.x - (session_x - work_pos.x) - margin);
+        const float session_h =
+            std::max(player_h, work_size.y - status_h - margin * 2.0f - gap);
+
+        /* DockID 0 = floating (docking branch). */
+        ImGui::SetNextWindowDockID(0, ImGuiCond_Always);
+        if (std::strcmp(which, "Player") == 0)
+        {
+            ImGui::SetNextWindowPos(ImVec2(work_pos.x + margin, work_pos.y + margin),
+                                    ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2(player_w, player_h), ImGuiCond_Always);
+        }
+        else if (std::strcmp(which, "Session") == 0)
+        {
+            ImGui::SetNextWindowPos(ImVec2(session_x, work_pos.y + margin), ImGuiCond_Always);
+            ImGui::SetNextWindowSize(ImVec2(session_w, session_h), ImGuiCond_Always);
+        }
+        else if (std::strcmp(which, "Status") == 0)
+        {
+            ImGui::SetNextWindowPos(
+                ImVec2(work_pos.x + margin, work_pos.y + work_size.y - margin - status_h),
+                ImGuiCond_Always);
+        }
+    }
+
+    void SetupFloatingLayout(ImGuiID dockspace_id)
+    {
+        if (m_floating_layout_initialized)
+        {
+            return;
+        }
+        /* Empty dock host — main windows stay floating. */
+        ImGui::DockBuilderRemoveNode(dockspace_id);
+        ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_PassthruCentralNode);
+        ImGui::DockBuilderFinish(dockspace_id);
+        m_floating_placement_frames = 3;
+        m_floating_layout_initialized = true;
+        /* Prevent SetupInitialDockLayout from redocking while undocked. */
+        m_dock_layout_initialized = true;
+    }
+
     void DrawDockspace()
     {
         ImGuiIO &io = ImGui::GetIO();
@@ -4806,20 +4909,35 @@ private:
         {
             ImGui::DockBuilderRemoveNode(dockspace_id);
             m_dock_layout_initialized = false;
+            m_floating_layout_initialized = false;
             m_force_reset_dock_layout = false;
         }
         ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
-        /* While waiting to apply nBeT (before NewFrame), still install the default
-         * dock once so windows are not floating for the delay frames. */
-        if (!m_pending_apply_nbet || !m_dock_layout_initialized)
+        /* While waiting to apply nBeT, install a mode-appropriate default once so
+         * windows are not stuck mid-transition for the delay frames. */
+        if (m_session_undocked_layout)
+        {
+            if (!m_pending_apply_nbet || !m_floating_layout_initialized)
+            {
+                SetupFloatingLayout(dockspace_id);
+            }
+        }
+        else if (!m_pending_apply_nbet || !m_dock_layout_initialized)
         {
             SetupInitialDockLayout(dockspace_id, viewport->Size);
         }
 
         ImGui::End();
 
+        ApplyPendingFloatingWindowPlacement("Status");
         ImGui::SetNextWindowBgAlpha(0.95f);
-        if (ImGui::Begin("Status", nullptr, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysAutoResize))
+        ImGuiWindowFlags status_flags =
+            ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysAutoResize;
+        if (m_session_undocked_layout)
+        {
+            status_flags |= ImGuiWindowFlags_NoDocking;
+        }
+        if (ImGui::Begin("Status", nullptr, status_flags))
         {
             ImGui::Text("%s", m_status);
             if (!m_song_row.name.empty())
@@ -4866,7 +4984,7 @@ private:
 
     void SetupInitialDockLayout(ImGuiID dockspace_id, const ImVec2 &dock_size)
     {
-        if (m_dock_layout_initialized)
+        if (m_dock_layout_initialized || m_session_undocked_layout)
         {
             return;
         }
@@ -4890,6 +5008,7 @@ private:
         ImGui::DockBuilderFinish(dockspace_id);
 
         m_dock_layout_initialized = true;
+        m_floating_layout_initialized = false;
     }
 
 #include "nbeditor_player.inc"
@@ -6816,6 +6935,12 @@ private:
     bool m_pref_reopen_last_session = false;
     bool m_pref_save_session_layout = true;   /* write nBeT on Save Session */
     bool m_pref_ignore_session_layout = false; /* skip nBeT on Open Session */
+    /* App default for new sessions / ignore-layout loads. Session override below. */
+    bool m_pref_default_undocked_layout = false;
+    bool m_session_undocked_layout = false;
+    bool m_floating_layout_initialized = false;
+    /* Apply SetNextWindowPos/Size for Player/Session/Status for N frames. */
+    int m_floating_placement_frames = 0;
     bool m_pref_adsr_default_valid = false;
     BAERmfEditorADSRInfo m_pref_adsr_default = {};
     std::string m_ie_adsr_default_focus_id;
@@ -6844,6 +6969,7 @@ private:
     bool m_prefs_draft_reopen = false;
     bool m_prefs_draft_save_layout = true;
     bool m_prefs_draft_ignore_layout = false;
+    bool m_prefs_draft_default_undocked = false;
     /* Module import settings (mod2rmf) — live + dialog drafts. */
     bool m_pref_mod_ext_pitch = false;
     bool m_pref_mod_ext_adsr = true; /* ZMF import; preserve IT envelope detail */
@@ -7289,6 +7415,8 @@ int main(int argc, char **argv)
         ctx->app->PumpPendingNbetLayout();
         /* Session save / bank export (progress modal); must not run mid-DrawUI. */
         ctx->app->PumpPendingLongOp();
+        /* Undocked sessions turn off DockingEnable so drag-dock previews stay gone. */
+        ctx->app->SyncDockingConfigForLayoutMode();
 
         ImGui_ImplSDLRenderer3_NewFrame();
         ImGui_ImplSDL3_NewFrame();

@@ -257,8 +257,15 @@
 
     void DrawPlayerWindow()
     {
-        ImGui::SetNextWindowSizeConstraints(ImVec2(780.0f, 420.0f), ImVec2(4096.0f, 4096.0f));
-        if (!ImGui::Begin("Player", nullptr, ImGuiWindowFlags_NoCollapse))
+        ApplyPendingFloatingWindowPlacement("Player");
+        ImGui::SetNextWindowSizeConstraints(ImVec2(kPlayerFloatMinW, kPlayerFloatMinH),
+                                            ImVec2(4096.0f, 4096.0f));
+        ImGuiWindowFlags player_flags = ImGuiWindowFlags_NoCollapse;
+        if (m_session_undocked_layout)
+        {
+            player_flags |= ImGuiWindowFlags_NoDocking;
+        }
+        if (!ImGui::Begin("Player", nullptr, player_flags))
         {
             ImGui::End();
             return;
