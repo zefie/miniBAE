@@ -116,10 +116,24 @@ list(APPEND NEOBAE_PUBLIC_HEADER_FILES
   "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Platform/BAE_API.h"
 )
 
-file(GLOB NEOBAE_PUBLIC_BUILDOPTIONS_HEADERS
-  "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Platform/BAEBuildOptions_*.h"
+# Only ship the BAEBuildOptions header for the compiled-in platform.
+# Cache value is "Ansi"; the header file uses uppercase "ANSI".
+if(BAE_PLATFORM STREQUAL "Ansi")
+  set(_neobae_buildoptions_stem "ANSI")
+else()
+  set(_neobae_buildoptions_stem "${BAE_PLATFORM}")
+endif()
+set(_neobae_buildoptions_hdr
+  "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Platform/BAEBuildOptions_${_neobae_buildoptions_stem}.h"
 )
-list(APPEND NEOBAE_PUBLIC_HEADER_FILES ${NEOBAE_PUBLIC_BUILDOPTIONS_HEADERS})
+if(NOT EXISTS "${_neobae_buildoptions_hdr}")
+  message(FATAL_ERROR
+    "No BAEBuildOptions header for BAE_PLATFORM='${BAE_PLATFORM}' "
+    "(expected ${_neobae_buildoptions_hdr})")
+endif()
+list(APPEND NEOBAE_PUBLIC_HEADER_FILES "${_neobae_buildoptions_hdr}")
+unset(_neobae_buildoptions_stem)
+unset(_neobae_buildoptions_hdr)
 
 install(FILES ${NEOBAE_PUBLIC_HEADER_FILES}
   DESTINATION "${NEOBAE_INSTALL_INCLUDEDIR}/neobae"
