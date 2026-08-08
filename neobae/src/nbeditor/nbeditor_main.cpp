@@ -6883,6 +6883,17 @@ private:
     std::vector<bool> m_midi_track_solo;
     bool m_midi_note_cache_dirty = true;
     std::vector<BAERmfEditorNoteInfo> m_midi_cached_notes;
+    /* Song length + track-lane overview — rebuilt on note/EOT/track edits only. */
+    mutable bool m_midi_layout_cache_dirty = true;
+    mutable uint32_t m_midi_cached_length_ticks = 0;
+    mutable std::vector<std::vector<MeOverviewStub>> m_midi_overview;
+    /* MePlayheadTick() memo for the current ImGui frame. */
+    mutable int m_midi_playhead_sample_frame = -1;
+    mutable uint32_t m_midi_playhead_sampled = 0;
+    /* Automation lane node cache (per selected track). */
+    mutable int m_midi_auto_cache_track = -1;
+    mutable std::array<bool, 16> m_midi_auto_lane_dirty = {};
+    mutable std::array<std::vector<MeAutoNode>, 16> m_midi_auto_nodes;
     std::deque<MeMidiUndoState> m_midi_undo;
     std::deque<MeMidiUndoState> m_midi_redo;
     MeMidiUndoState m_midi_undo_pending;

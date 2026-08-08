@@ -1697,7 +1697,7 @@ bool ActivateSessionSongAt(int index)
     m_midi_undo.clear();
     m_midi_redo.clear();
     m_midi_undo_pending_valid = false;
-    m_midi_note_cache_dirty = true;
+    MeInvalidateMidiDocCaches();
     m_midi_cached_notes.clear();
     m_midi_track_muted.clear();
     m_midi_track_solo.clear();

@@ -41,6 +41,21 @@
         std::vector<unsigned char> serialized;
     };
 
+    /* Compact multi-track overview stubs (timeline lanes). */
+    struct MeOverviewStub
+    {
+        uint32_t startTick = 0;
+        uint32_t durationTicks = 0;
+        uint8_t note = 0;
+    };
+
+    struct MeAutoNode
+    {
+        uint32_t tick = 0;
+        int value = 0;
+        uint32_t index = 0; /* document event index for edit/delete */
+    };
+
     static const MeAutoLaneDesc *MeAutoLanes(int *out_count)
     {
         static const MeAutoLaneDesc kLanes[] = {
@@ -235,14 +250,130 @@
         return current_tick + static_cast<uint32_t>((remaining * tpq) / us_per_q);
     }
 
-    uint32_t MeSongLengthTicks() const
+    void MeInvalidateMidiDocCaches()
     {
+        m_midi_note_cache_dirty = true;
+        m_midi_layout_cache_dirty = true;
+        MeInvalidateAutoCache();
+    }
+
+    void MeInvalidateAutoCache()
+    {
+        m_midi_auto_cache_track = -1;
+        m_midi_auto_lane_dirty.fill(true);
+    }
+
+    void MeRebuildAutoLaneCache(int lane_index) const
+    {
+        if (lane_index < 0 || lane_index >= static_cast<int>(m_midi_auto_nodes.size()))
+        {
+            return;
+        }
+        auto &nodes = m_midi_auto_nodes[static_cast<size_t>(lane_index)];
+        nodes.clear();
+        m_midi_auto_lane_dirty[static_cast<size_t>(lane_index)] = false;
         if (!m_document)
         {
-            return MeGetTpq() * 16u;
+            return;
+        }
+        int auto_count = 0;
+        const MeAutoLaneDesc *auto_lanes = MeAutoLanes(&auto_count);
+        if (lane_index >= auto_count)
+        {
+            return;
+        }
+        const MeAutoLaneDesc &lane = auto_lanes[lane_index];
+        if (lane.kind == MeAutoKind::Tempo)
+        {
+            uint32_t count = 0;
+            BAERmfEditorDocument_GetTempoEventCount(m_document, &count);
+            nodes.reserve(count);
+            for (uint32_t i = 0; i < count; ++i)
+            {
+                uint32_t tick = 0;
+                uint32_t uspq = 0;
+                if (BAERmfEditorDocument_GetTempoEvent(m_document, i, &tick, &uspq) != BAE_NO_ERROR)
+                {
+                    continue;
+                }
+                const int bpm = uspq > 0 ? static_cast<int>(60000000UL / uspq) : 120;
+                nodes.push_back(MeAutoNode{tick, bpm, i});
+            }
+            return;
+        }
+        if (m_midi_selected_track < 0)
+        {
+            return;
+        }
+        const uint16_t track = static_cast<uint16_t>(m_midi_selected_track);
+        if (lane.kind == MeAutoKind::Controller)
+        {
+            uint32_t count = 0;
+            BAERmfEditorDocument_GetTrackCCEventCount(m_document, track, lane.cc, &count);
+            nodes.reserve(count);
+            for (uint32_t i = 0; i < count; ++i)
+            {
+                uint32_t tick = 0;
+                unsigned char value = 0;
+                if (BAERmfEditorDocument_GetTrackCCEvent(
+                        m_document, track, lane.cc, i, &tick, &value) == BAE_NO_ERROR)
+                {
+                    nodes.push_back(MeAutoNode{tick, value, i});
+                }
+            }
+            return;
+        }
+        uint32_t count = 0;
+        BAERmfEditorDocument_GetTrackPitchBendEventCount(m_document, track, &count);
+        nodes.reserve(count);
+        for (uint32_t i = 0; i < count; ++i)
+        {
+            uint32_t tick = 0;
+            uint16_t value = 0;
+            if (BAERmfEditorDocument_GetTrackPitchBendEvent(
+                    m_document, track, i, &tick, &value) == BAE_NO_ERROR)
+            {
+                nodes.push_back(MeAutoNode{tick, static_cast<int>(value), i});
+            }
+        }
+    }
+
+    const std::vector<MeAutoNode> &MeAutoLaneNodes(int lane_index) const
+    {
+        static const std::vector<MeAutoNode> kEmpty;
+        if (lane_index < 0 || lane_index >= static_cast<int>(m_midi_auto_nodes.size()))
+        {
+            return kEmpty;
+        }
+        if (m_midi_auto_cache_track != m_midi_selected_track)
+        {
+            m_midi_auto_cache_track = m_midi_selected_track;
+            m_midi_auto_lane_dirty.fill(true);
+        }
+        /* Live drag mutates events every frame — keep that lane fresh. */
+        if (m_midi_drag_mode == MeDragMode::AutoNode && m_midi_auto_drag_lane == lane_index)
+        {
+            m_midi_auto_lane_dirty[static_cast<size_t>(lane_index)] = true;
+        }
+        if (m_midi_auto_lane_dirty[static_cast<size_t>(lane_index)])
+        {
+            MeRebuildAutoLaneCache(lane_index);
+        }
+        return m_midi_auto_nodes[static_cast<size_t>(lane_index)];
+    }
+
+    void MeRebuildLayoutCache() const
+    {
+        m_midi_layout_cache_dirty = false;
+        m_midi_overview.clear();
+        if (!m_document)
+        {
+            m_midi_cached_length_ticks = MeGetTpq() * 16u;
+            return;
         }
         uint16_t track_count = 0;
         BAERmfEditorDocument_GetTrackCount(m_document, &track_count);
+        m_midi_overview.resize(track_count);
         uint32_t max_tick = MeGetTpq() * 16u;
         for (uint16_t t = 0; t < track_count; ++t)
         {
@@ -256,16 +387,45 @@
             {
                 continue;
             }
+            auto &lane = m_midi_overview[static_cast<size_t>(t)];
+            lane.reserve(note_count);
             for (uint32_t n = 0; n < note_count; ++n)
             {
                 BAERmfEditorNoteInfo info{};
-                if (BAERmfEditorDocument_GetNoteInfo(m_document, t, n, &info) == BAE_NO_ERROR)
+                if (BAERmfEditorDocument_GetNoteInfo(m_document, t, n, &info) != BAE_NO_ERROR)
                 {
-                    max_tick = std::max(max_tick, info.startTick + info.durationTicks);
+                    continue;
                 }
+                max_tick = std::max(max_tick, info.startTick + info.durationTicks);
+                lane.push_back(MeOverviewStub{info.startTick, info.durationTicks, info.note});
             }
         }
-        return max_tick + MeGetTpq() * 4u;
+        m_midi_cached_length_ticks = max_tick + MeGetTpq() * 4u;
+    }
+
+    void MeEnsureLayoutCache() const
+    {
+        if (m_midi_layout_cache_dirty)
+        {
+            MeRebuildLayoutCache();
+        }
+    }
+
+    uint32_t MeSongLengthTicks() const
+    {
+        MeEnsureLayoutCache();
+        return m_midi_cached_length_ticks;
+    }
+
+    const std::vector<MeOverviewStub> &MeOverviewLane(uint16_t track) const
+    {
+        MeEnsureLayoutCache();
+        static const std::vector<MeOverviewStub> kEmpty;
+        if (track >= m_midi_overview.size())
+        {
+            return kEmpty;
+        }
+        return m_midi_overview[static_cast<size_t>(track)];
     }
 
     /* Shared left gutter for track chrome / piano keys so time (and playheads) line up. */
@@ -315,25 +475,32 @@
 
     uint32_t MePlayheadTick() const
     {
+        /* One sample per ImGui frame — ruler/timeline/roll/follow all share it. */
+        const int frame = ImGui::GetFrameCount();
+        if (m_midi_playhead_sample_frame == frame)
+        {
+            return m_midi_playhead_sampled;
+        }
+        uint32_t tick = m_midi_playhead_tick;
         if (m_midi_record_free_run)
         {
-            return MeComputeFreeRunTick();
+            tick = MeComputeFreeRunTick();
         }
-        if (!m_song || !m_song_started)
+        else if (m_song && m_song_started)
         {
-            return m_midi_playhead_tick;
+            BAE_BOOL paused = FALSE;
+            if (!(BAESong_IsPaused(m_song, &paused) == BAE_NO_ERROR && paused))
+            {
+                uint32_t pos_us = 0;
+                if (BAESong_GetMicrosecondPosition(m_song, &pos_us) == BAE_NO_ERROR)
+                {
+                    tick = MeMicrosecondsToTicks(pos_us);
+                }
+            }
         }
-        BAE_BOOL paused = FALSE;
-        if (BAESong_IsPaused(m_song, &paused) == BAE_NO_ERROR && paused)
-        {
-            return m_midi_playhead_tick;
-        }
-        uint32_t pos_us = 0;
-        if (BAESong_GetMicrosecondPosition(m_song, &pos_us) != BAE_NO_ERROR)
-        {
-            return m_midi_playhead_tick;
-        }
-        return MeMicrosecondsToTicks(pos_us);
+        m_midi_playhead_sample_frame = frame;
+        m_midi_playhead_sampled = tick;
+        return tick;
     }
 
     uint32_t MeRecordCaptureTick() const
@@ -380,6 +547,8 @@
     void MeSeekToTick(uint32_t tick)
     {
         m_midi_playhead_tick = tick;
+        m_midi_playhead_sampled = tick;
+        m_midi_playhead_sample_frame = ImGui::GetFrameCount();
         if (!m_song)
         {
             return;
@@ -445,7 +614,7 @@
             }
             MeApplyTrackMutes();
         }
-        m_midi_note_cache_dirty = true;
+        MeInvalidateMidiDocCaches();
     }
 
     bool MeCaptureUndo(MeMidiUndoState *out) const
@@ -494,7 +663,7 @@
         m_document = loaded;
         m_midi_selected_notes.clear();
         m_midi_primary_note = -1;
-        m_midi_note_cache_dirty = true;
+        MeInvalidateMidiDocCaches();
         MeCommitDocumentEdit(true);
         return true;
     }
@@ -604,8 +773,9 @@
         m_midi_track_muted.clear();
         m_midi_track_solo.clear();
         m_midi_drag_mode = MeDragMode::None;
-        m_midi_note_cache_dirty = true;
+        MeInvalidateMidiDocCaches();
         m_midi_cached_notes.clear();
+        m_midi_overview.clear();
     }
 
     void MeRebuildNoteCache()
@@ -730,7 +900,7 @@
                                              static_cast<uint32_t>(idx),
                                              &info);
         }
-        m_midi_note_cache_dirty = true;
+        MeInvalidateMidiDocCaches();
         MeCommitUndo();
         SetStatus("Quantized selection");
     }
@@ -755,7 +925,7 @@
                                              static_cast<uint32_t>(idx),
                                              &info);
         }
-        m_midi_note_cache_dirty = true;
+        MeInvalidateMidiDocCaches();
     }
 
     void MeApplySelectedNoteBank(uint16_t bank)
@@ -778,7 +948,7 @@
                                              static_cast<uint32_t>(idx),
                                              &info);
         }
-        m_midi_note_cache_dirty = true;
+        MeInvalidateMidiDocCaches();
     }
 
     void MeApplySelectedNoteProgram(unsigned char program)
@@ -801,7 +971,7 @@
                                              static_cast<uint32_t>(idx),
                                              &info);
         }
-        m_midi_note_cache_dirty = true;
+        MeInvalidateMidiDocCaches();
     }
 
     void MeRecordFlushHeldNotes()
@@ -838,7 +1008,7 @@
                                                m_midi_record_held_vel[static_cast<size_t>(n)]);
             m_midi_record_held_start[static_cast<size_t>(n)] = -1;
         }
-        m_midi_note_cache_dirty = true;
+        MeInvalidateMidiDocCaches();
     }
 
     void MeFinishRecordTake()
@@ -941,7 +1111,7 @@
                                            static_cast<unsigned char>(midi_note),
                                            m_midi_record_held_vel[static_cast<size_t>(midi_note)]);
         m_midi_record_held_start[static_cast<size_t>(midi_note)] = -1;
-        m_midi_note_cache_dirty = true;
+        MeInvalidateMidiDocCaches();
         MeExtendTrackForRecord(static_cast<uint32_t>(start) + dur);
     }
 
@@ -1343,7 +1513,7 @@
         }
         m_midi_selected_notes.clear();
         m_midi_primary_note = -1;
-        m_midi_note_cache_dirty = true;
+        MeInvalidateMidiDocCaches();
         MeCommitUndo();
     }
 
@@ -1416,7 +1586,7 @@
                 m_midi_primary_note = static_cast<int>(idx);
             }
         }
-        m_midi_note_cache_dirty = true;
+        MeInvalidateMidiDocCaches();
         MeCommitUndo();
         SetStatus("MIDI notes pasted");
     }
@@ -1574,7 +1744,7 @@
         {
             m_midi_selected_notes.clear();
             m_midi_primary_note = -1;
-            m_midi_note_cache_dirty = true;
+            MeInvalidateMidiDocCaches();
         }
         MeCommitUndo();
         char buf[96];
@@ -1643,7 +1813,7 @@
 
         m_midi_selected_notes.clear();
         m_midi_primary_note = -1;
-        m_midi_note_cache_dirty = true;
+        MeInvalidateMidiDocCaches();
         MeCommitUndo();
         char buf[96];
         std::snprintf(buf, sizeof(buf), "End of song set to tick %u", boundary_tick);
@@ -2963,7 +3133,7 @@
                 m_midi_selected_track = static_cast<int>(t);
                 m_midi_selected_notes.clear();
                 m_midi_primary_note = -1;
-                m_midi_note_cache_dirty = true;
+                MeInvalidateMidiDocCaches();
             }
             ImGui::SetCursorScreenPos(ImVec2(win.x + 4.0f, y + 24.0f));
             bool muted = t < m_midi_track_muted.size() ? m_midi_track_muted[t] : false;
@@ -3014,15 +3184,9 @@
                                   ImVec2(std::min(eot_x, body_x1), body_y1),
                                   selected ? IM_COL32(34, 40, 52, 255) : IM_COL32(28, 32, 40, 255));
             }
-            uint32_t note_count = 0;
-            BAERmfEditorDocument_GetNoteCount(m_document, t, &note_count);
-            for (uint32_t n = 0; n < note_count; ++n)
+            const auto &overview = MeOverviewLane(t);
+            for (const MeOverviewStub &note : overview)
             {
-                BAERmfEditorNoteInfo note{};
-                if (BAERmfEditorDocument_GetNoteInfo(m_document, t, n, &note) != BAE_NO_ERROR)
-                {
-                    continue;
-                }
                 const float x0 = MeTickToX(note.startTick, body_x);
                 const float x1 = MeTickToX(note.startTick + note.durationTicks, body_x);
                 if (x1 < body_x || x0 > body_x1)
@@ -3069,7 +3233,7 @@
                 m_midi_selected_track = static_cast<int>(t);
                 m_midi_selected_notes.clear();
                 m_midi_primary_note = -1;
-                m_midi_note_cache_dirty = true;
+                MeInvalidateMidiDocCaches();
                 m_midi_drag_mode = MeDragMode::TrackEot;
                 m_midi_eot_drag_track = static_cast<int>(t);
                 m_midi_eot_drag_tick = eot_tick;
@@ -3080,7 +3244,7 @@
                 m_midi_selected_track = static_cast<int>(t);
                 m_midi_selected_notes.clear();
                 m_midi_primary_note = -1;
-                m_midi_note_cache_dirty = true;
+                MeInvalidateMidiDocCaches();
             }
             if (m_midi_drag_mode == MeDragMode::TrackEot &&
                 m_midi_eot_drag_track == static_cast<int>(t))
@@ -3144,7 +3308,7 @@
                 m_midi_selected_track = hit_track;
                 m_midi_selected_notes.clear();
                 m_midi_primary_note = -1;
-                m_midi_note_cache_dirty = true;
+                MeInvalidateMidiDocCaches();
                 m_midi_ctx_track = hit_track;
             }
             else if (m_midi_selected_track >= 0)
@@ -3246,7 +3410,6 @@
             return;
         }
 
-        const uint32_t length_ticks = MeSongLengthTicks();
         const float key_w = kMeTimeGutter; /* same as timeline chrome — keeps playheads aligned */
         const float key_draw_w = 48.0f;
         const float auto_header_h = 22.0f;
@@ -3413,13 +3576,27 @@
 
         /* Notes — single draw path for selected and unselected */
         const auto &notes = MeNotes();
+        std::vector<char> selected_mask;
+        if (!m_midi_selected_notes.empty())
+        {
+            selected_mask.assign(notes.size(), 0);
+            for (int idx : m_midi_selected_notes)
+            {
+                if (idx >= 0 && idx < static_cast<int>(selected_mask.size()))
+                {
+                    selected_mask[static_cast<size_t>(idx)] = 1;
+                }
+            }
+        }
+        const bool dragging_notes = (m_midi_drag_mode == MeDragMode::MoveNotes ||
+                                     m_midi_drag_mode == MeDragMode::ResizeNotes);
         for (int i = 0; i < static_cast<int>(notes.size()); ++i)
         {
             BAERmfEditorNoteInfo n = notes[static_cast<size_t>(i)];
+            const bool selected =
+                !selected_mask.empty() && selected_mask[static_cast<size_t>(i)] != 0;
             /* Live drag preview */
-            if ((m_midi_drag_mode == MeDragMode::MoveNotes ||
-                 m_midi_drag_mode == MeDragMode::ResizeNotes) &&
-                MeIsNoteSelected(i))
+            if (dragging_notes && selected)
             {
                 if (m_midi_drag_mode == MeDragMode::MoveNotes)
                 {
@@ -3435,6 +3612,12 @@
                     n.durationTicks = static_cast<uint32_t>(std::max(static_cast<int32_t>(MeSnapTicks()), dur));
                 }
             }
+            /* Tick cull before float/screen work (full-song tracks during play). */
+            if (n.startTick > end_tick ||
+                n.startTick + std::max(1u, n.durationTicks) < start_tick)
+            {
+                continue;
+            }
             const float x0 = MeTickToX(n.startTick, grid_origin.x);
             const float x1 = MeTickToX(n.startTick + std::max(1u, n.durationTicks), grid_origin.x);
             const float y0 = MePitchToY(n.note, grid_origin.y);
@@ -3444,7 +3627,6 @@
             {
                 continue;
             }
-            const bool selected = MeIsNoteSelected(i);
             const float vel_t = static_cast<float>(n.velocity) / 127.0f;
             const ImU32 fill =
                 selected ? IM_COL32(255, 170, 70, 255)
@@ -3605,7 +3787,7 @@
                                                  static_cast<unsigned char>(pitch),
                                                  100) == BAE_NO_ERROR)
                 {
-                    m_midi_note_cache_dirty = true;
+                    MeInvalidateMidiDocCaches();
                     uint32_t count = 0;
                     BAERmfEditorDocument_GetNoteCount(
                         m_document, static_cast<uint16_t>(m_midi_selected_track), &count);
@@ -3680,7 +3862,7 @@
                                                     static_cast<uint32_t>(idx),
                                                     &info);
                 }
-                m_midi_note_cache_dirty = true;
+                MeInvalidateMidiDocCaches();
                 m_midi_drag_tick_delta = 0;
                 m_midi_drag_pitch_delta = 0;
                 m_midi_drag_mode = MeDragMode::None;
@@ -3806,76 +3988,10 @@
                 const float plot_w = std::max(1.0f, (l1.x - l0.x) - key_w);
                 const float plot_y = l0.y + 16.0f;
                 const float plot_h = std::max(12.0f, auto_lane_h - 20.0f);
-
-                struct Node
-                {
-                    uint32_t tick;
-                    int value;
-                    uint32_t index;
-                };
-                std::vector<Node> nodes;
-                if (lane.kind == MeAutoKind::Tempo)
-                {
-                    uint32_t count = 0;
-                    BAERmfEditorDocument_GetTempoEventCount(m_document, &count);
-                    for (uint32_t i = 0; i < count; ++i)
-                    {
-                        uint32_t tick = 0;
-                        uint32_t uspq = 0;
-                        if (BAERmfEditorDocument_GetTempoEvent(m_document, i, &tick, &uspq) !=
-                            BAE_NO_ERROR)
-                        {
-                            continue;
-                        }
-                        const int bpm =
-                            uspq > 0 ? static_cast<int>(60000000UL / uspq) : 120;
-                        nodes.push_back({tick, bpm, i});
-                    }
-                }
-                else if (lane.kind == MeAutoKind::Controller)
-                {
-                    uint32_t count = 0;
-                    BAERmfEditorDocument_GetTrackCCEventCount(
-                        m_document,
-                        static_cast<uint16_t>(m_midi_selected_track),
-                        lane.cc,
-                        &count);
-                    for (uint32_t i = 0; i < count; ++i)
-                    {
-                        uint32_t tick = 0;
-                        unsigned char value = 0;
-                        if (BAERmfEditorDocument_GetTrackCCEvent(
-                                m_document,
-                                static_cast<uint16_t>(m_midi_selected_track),
-                                lane.cc,
-                                i,
-                                &tick,
-                                &value) == BAE_NO_ERROR)
-                        {
-                            nodes.push_back({tick, value, i});
-                        }
-                    }
-                }
-                else
-                {
-                    uint32_t count = 0;
-                    BAERmfEditorDocument_GetTrackPitchBendEventCount(
-                        m_document, static_cast<uint16_t>(m_midi_selected_track), &count);
-                    for (uint32_t i = 0; i < count; ++i)
-                    {
-                        uint32_t tick = 0;
-                        uint16_t value = 0;
-                        if (BAERmfEditorDocument_GetTrackPitchBendEvent(
-                                m_document,
-                                static_cast<uint16_t>(m_midi_selected_track),
-                                i,
-                                &tick,
-                                &value) == BAE_NO_ERROR)
-                        {
-                            nodes.push_back({tick, static_cast<int>(value), i});
-                        }
-                    }
-                }
+                const auto &nodes = MeAutoLaneNodes(li);
+                const uint32_t view0 =
+                    static_cast<uint32_t>(std::max(0.0f, m_midi_scroll_tick));
+                const uint32_t view1 = MeXToTick(plot_x + plot_w, plot_x);
 
                 auto value_to_y = [&](int value) {
                     float norm = static_cast<float>(value) / static_cast<float>(lane.max_value);
@@ -3891,19 +4007,109 @@
                     return plot_y + plot_h * (1.0f - norm);
                 };
 
-                for (size_t i = 1; i < nodes.size(); ++i)
+                /* Visible index range (+1 neighbor for line continuity). */
+                size_t first = 0;
+                while (first < nodes.size() &&
+                       nodes[first].tick < view0 &&
+                       (first + 1 >= nodes.size() || nodes[first + 1].tick < view0))
                 {
-                    const float x0 = MeTickToX(nodes[i - 1].tick, plot_x);
-                    const float x1 = MeTickToX(nodes[i].tick, plot_x);
-                    adl->AddLine(ImVec2(x0, value_to_y(nodes[i - 1].value)),
-                                 ImVec2(x1, value_to_y(nodes[i].value)),
-                                 lane.color,
-                                 1.5f);
+                    ++first;
                 }
-                for (const Node &node : nodes)
+                if (first > 0)
                 {
+                    --first;
+                }
+                size_t last = first;
+                while (last < nodes.size() && nodes[last].tick <= view1)
+                {
+                    ++last;
+                }
+                if (last < nodes.size())
+                {
+                    ++last; /* include one past right edge */
+                }
+
+                const size_t vis_count = (last > first) ? (last - first) : 0;
+                const bool dense = vis_count > static_cast<size_t>(plot_w * 1.5f) + 8u;
+
+                if (dense)
+                {
+                    /* One vertical sample per pixel column — dense tracker CC dumps. */
+                    int prev_col = -1;
+                    float prev_x = 0.0f;
+                    float prev_y = 0.0f;
+                    bool have_prev = false;
+                    for (size_t i = first; i < last; ++i)
+                    {
+                        const float x = MeTickToX(nodes[i].tick, plot_x);
+                        if (x < plot_x - 1.0f || x > plot_x + plot_w + 1.0f)
+                        {
+                            continue;
+                        }
+                        const int col = static_cast<int>(x - plot_x);
+                        if (have_prev && col == prev_col)
+                        {
+                            prev_y = value_to_y(nodes[i].value);
+                            continue;
+                        }
+                        const float y = value_to_y(nodes[i].value);
+                        if (have_prev)
+                        {
+                            adl->AddLine(ImVec2(prev_x, prev_y),
+                                         ImVec2(x, y),
+                                         lane.color,
+                                         1.5f);
+                        }
+                        prev_col = col;
+                        prev_x = x;
+                        prev_y = y;
+                        have_prev = true;
+                    }
+                }
+                else
+                {
+                    for (size_t i = first + 1; i < last; ++i)
+                    {
+                        const float x0 = MeTickToX(nodes[i - 1].tick, plot_x);
+                        const float x1 = MeTickToX(nodes[i].tick, plot_x);
+                        if (x1 < plot_x || x0 > plot_x + plot_w)
+                        {
+                            continue;
+                        }
+                        adl->AddLine(ImVec2(x0, value_to_y(nodes[i - 1].value)),
+                                     ImVec2(x1, value_to_y(nodes[i].value)),
+                                     lane.color,
+                                     1.5f);
+                    }
+                }
+
+                /* Node handles: all when sparse; only near cursor / active drag when dense. */
+                const bool lane_hovered_early =
+                    (io.MousePos.x >= plot_x && io.MousePos.x <= plot_x + plot_w &&
+                     io.MousePos.y >= plot_y && io.MousePos.y <= plot_y + plot_h);
+                for (size_t i = first; i < last; ++i)
+                {
+                    const MeAutoNode &node = nodes[i];
+                    if (node.tick < view0 || node.tick > view1)
+                    {
+                        continue;
+                    }
                     const float nx = MeTickToX(node.tick, plot_x);
                     const float ny = value_to_y(node.value);
+                    if (dense)
+                    {
+                        const bool dragging_this =
+                            (m_midi_drag_mode == MeDragMode::AutoNode &&
+                             m_midi_auto_drag_lane == li &&
+                             m_midi_auto_drag_index == static_cast<int>(node.index));
+                        if (!dragging_this &&
+                            !(lane_hovered_early &&
+                              std::fabs(io.MousePos.x - nx) < 10.0f &&
+                              std::fabs(io.MousePos.y - ny) < 10.0f))
+                        {
+                            continue;
+                        }
+                    }
                     adl->AddCircleFilled(ImVec2(nx, ny), 4.0f, lane.color);
                     adl->AddCircle(ImVec2(nx, ny), 4.0f, IM_COL32(255, 255, 255, 180));
                 }
@@ -3916,8 +4122,9 @@
                     const uint32_t tick = MeSnapTick(MeXToTick(io.MousePos.x, plot_x));
                     float hit_node = -1.0f;
                     int hit_index = -1;
-                    for (const Node &node : nodes)
+                    for (size_t i = first; i < last; ++i)
                     {
+                        const MeAutoNode &node = nodes[i];
                         const float nx = MeTickToX(node.tick, plot_x);
                         const float ny = value_to_y(node.value);
                         const float d = std::hypot(io.MousePos.x - nx, io.MousePos.y - ny);
@@ -4019,8 +4226,9 @@
                 {
                     float hit_node = -1.0f;
                     int hit_index = -1;
-                    for (const Node &node : nodes)
+                    for (size_t i = first; i < last; ++i)
                     {
+                        const MeAutoNode &node = nodes[i];
                         const float nx = MeTickToX(node.tick, plot_x);
                         const float ny = value_to_y(node.value);
                         const float d = std::hypot(io.MousePos.x - nx, io.MousePos.y - ny);
@@ -4069,7 +4277,6 @@
                 /* Reserve vertical space so the scroll region covers all lanes. */
                 ImGui::Dummy(ImVec2(1.0f, static_cast<float>(drawn) * auto_lane_h));
             }
-            (void)length_ticks;
             ImGui::EndChild(); /* ##me_auto_scroll */
         }
         ImGui::EndChild();
@@ -4517,7 +4724,7 @@
                 track_count > 0)
             {
                 m_midi_selected_track = 0;
-                m_midi_note_cache_dirty = true;
+                MeInvalidateMidiDocCaches();
             }
         }
         MeEnsureTrackMuteSize();

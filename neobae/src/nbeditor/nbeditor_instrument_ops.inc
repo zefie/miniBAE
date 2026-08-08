@@ -807,7 +807,7 @@
                 if (is_active)
                 {
                     m_document_dirty = true;
-                    m_midi_note_cache_dirty = true;
+                    MeInvalidateMidiDocCaches();
                     (void)CommitActiveSessionSong();
                 }
                 else
@@ -829,7 +829,7 @@
             {
                 any = true;
                 m_document_dirty = true;
-                m_midi_note_cache_dirty = true;
+                MeInvalidateMidiDocCaches();
                 (void)CommitActiveSessionSong();
             }
         }
