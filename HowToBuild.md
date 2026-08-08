@@ -22,7 +22,6 @@ By default (without `NOAUTO=1`), Makefile builds enable modern format support an
 
 - `playbae`: command-line player and test tool.
 - `zefidi`: GUI player/editor utility (SDL + SDL_ttf).
-- `zefidi2`: slim ImGui GUI player (Dear ImGui + SDL3; parallel to classic zefidi).
 - `nbeditor`: NeoBAE Editor (RMF/ZMF/HSB/ZSB editor; Dear ImGui + SDL3).
 - Web build: WebAssembly output (`engine.js` + `engine.wasm`).
 
@@ -217,20 +216,6 @@ You must install the corresponding development packages for ALSA and/or JACK.
 
 - `zefidi` looks for `zenity`, then `kdialog`, then `yad` for file dialogs.
 - Without one of those tools, `Open`, `Load Bank`, `Export`, and `Record` may not work.
-
-### zefidi2 (slim ImGui player)
-
-CMake (recommended; builds when SDL3 and Dear ImGui sources are available; does **not** need SDL_ttf):
-
-```bash
-sudo apt-get update
-sudo apt-get install -y libsdl3-dev
-cmake -B build -DBUILD_ZEFIDI2=ON .
-cmake --build build --parallel $(nproc) --target zefidi2
-./build/bin/zefidi2
-```
-
-Settings live in `zefidi2.ini` under the NeoBAE config directory (separate from classic `zefidi.ini`).
 
 ### NeoBAE Editor
 
