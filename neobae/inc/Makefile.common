@@ -488,7 +488,12 @@ endif
 # This API enables numerous exports in the DLL and LIB
 # for interacting with the BAE system (public header: BAE_EditorAPI.h)
 ifeq ($(CREATION_API),1)
-	SRC += src/BAE_Source/Common/BAE_EditorAPI.c
+	SRC += src/BAE_Source/Common/BAE_EditorAPI.c \
+	    src/BAE_Source/Common/BAE_EditorAPI_codec.c \
+    	src/BAE_Source/Common/BAE_EditorAPI_midi.c \
+    	src/BAE_Source/Common/BAE_EditorAPI_rmf_io.c \
+    	src/BAE_Source/Common/BAE_EditorAPI_document.c \
+		src/BAE_Source/Common/BAE_EditorAPI_bank.c
 endif
 
 # Optional MP3 encoder integration
