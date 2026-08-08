@@ -9,7 +9,7 @@ The project can be used as an embeddable audio engine, a command-line player and
 - Real-time software synthesis with Beatnik-style banks, General MIDI playback, karaoke support, and live MIDI interaction.
 - Multi-format playback and conversion across classic Beatnik formats, standard audio formats, retro ringtone formats, and modern codecs.
 - Cross-platform targets for Linux, Windows, Android, WebAssembly, and macOS (via [Homebrew](https://brew.sh)).
-- Multiple frontends ranging from the `playbae` CLI to the `zefidi` GUI and `nbeditor` editor.
+- Multiple frontends ranging from the `playbae` CLI to the `zefidi` / `zefidi2` GUIs and `nbeditor` editor.
 - Modular build flags for trimming features or enabling optional integrations such as NeoBAE's FluidLite SoundFont backend or the Native DLS engine.
 - [BAEScript](neobae/src/script/BAEScript_ReadMe.md) for manipulating songs without modification to the source file.
 - Designed with a high emphasis on preserving retro compatibility while adding new features.
@@ -55,6 +55,7 @@ The project can be used as an embeddable audio engine, a command-line player and
 
 - `playbae`: primary command-line player, renderer, and export tool for NeoBAE-supported content.
 - `zefidi`: GUI player with playlists, visualization, channel controls, export features, and hardware MIDI integration where supported.
+- `zefidi2`: slim Dear ImGui + SDL3 player (parallel to classic zefidi; no SDL_ttf).
 - `nbeditor`: RMF/ZMF/HSB/ZSB editor for instrument management, sample authoring, preview, and modern codec workflows. NeoBAE Editor is currently in beta / early access.
 - WebAssembly build: browser-targeted engine output for custom web players and interactive tools.
 - Android app: mobile frontend under `neobae/src/NeoBAEDroid` for NeoBAE-based playback on Android.

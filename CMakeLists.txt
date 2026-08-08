@@ -213,7 +213,7 @@ option(BAE_DISABLE_WMA_SUPPORT "Disable WMA (MSAUDIO) codec support" OFF)
 option(BAE_DISABLE_RMI_SUPPORT "Disable RMI support" OFF)
 option(BAE_DISABLE_J2ME_PATCH "Disable J2ME percussion bank patch (maps bank 120 for percussion intent)" OFF)
 option(BAE_DISABLE_ROLLED_MIDI_UNROLLING "Disable unrolling of rolled MIDI files" OFF)
-option(BAE_DISABLE_MIDI_HARDWARE "Disable hardware MIDI I/O (zefidi / nbeditor) via RtMidi" OFF)
+option(BAE_DISABLE_MIDI_HARDWARE "Disable hardware MIDI I/O (zefidi / nbeditor / zefidi2) via RtMidi" OFF)
 set(BAE_EMBED_PATCH_FILE "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/banks/patches111/patches111.hsb" CACHE FILEPATH "HSB bank file to embed as built-in patches (empty disables embedding)")
 set(BAE_EMBED_TTF_FILE "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/fonts/LiberationSans-Regular.ttf" CACHE FILEPATH "TTF font file to embed for zefidi GUI use (Liberation Sans; empty disables embedding)")
 set(BAE_NBEDITOR_FONT_REGULAR "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/fonts/LiberationSans-Regular.ttf" CACHE FILEPATH "Regular TTF embedded for nbeditor")
@@ -221,6 +221,7 @@ set(BAE_NBEDITOR_FONT_ITALIC "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/
 option(USE_SDL2 "Prefer SDL2 as the platform backend (default if SDL2 is found and SDL3 is not found)" OFF)
 option(BUILD_PLAYBAE "Build playbae when a non-Dummy/non-Ansi backend is selected" ON)
 option(BUILD_ZEFIDI "Build zefidi when SDL2/SDL3 backend and matching SDL_ttf are available" ON)
+option(BUILD_ZEFIDI2 "Build zefidi2 slim ImGui player when SDL3 + Dear ImGui are available" ON)
 option(BUILD_CLITOOLS "Build CLI tools (songtool, rmf2mid, mid2rmf, mid2rmi, sf2-hsb, mod2rmf, instdump, bankrecomp)" ON)
 option(BUILD_NBEDITOR "Build NeoBAE Editor (Dear ImGui + SDL3)" ON)
 option(BAE_ENABLE_LIB_HYPHEN "nbeditor: syllable Apply-text via vendored libhyphen" ON)
@@ -430,8 +431,8 @@ endif()
 
 if(BAE_DISABLE_MIDI_HARDWARE)
   message(STATUS "Disabling hardware MIDI I/O via RtMidi (BAE_DISABLE_MIDI_HARDWARE)")
-elseif(NOT BUILD_ZEFIDI AND NOT BUILD_NBEDITOR)
-  message(STATUS "Disabling hardware MIDI I/O via RtMidi (no zefidi/nbeditor)")
+elseif(NOT BUILD_ZEFIDI AND NOT BUILD_NBEDITOR AND NOT BUILD_ZEFIDI2)
+  message(STATUS "Disabling hardware MIDI I/O via RtMidi (no zefidi/nbeditor/zefidi2)")
 elseif(NOT BAE_MIDI_HW_SOURCES_OK)
   message(STATUS "Disabling hardware MIDI I/O: RtMidi sources missing")
 else()
@@ -446,7 +447,7 @@ else()
     endif()
   endif()
   if(BAE_ENABLE_MIDI_HARDWARE)
-    message(STATUS "Enabling hardware MIDI I/O via RtMidi (zefidi/nbeditor)")
+    message(STATUS "Enabling hardware MIDI I/O via RtMidi (zefidi/nbeditor/zefidi2)")
   endif()
 endif()
 
@@ -2380,6 +2381,142 @@ if(BUILD_NBEDITOR)
     endif()
   else()
     message(STATUS "Skipping BUILD_NBEDITOR (SDL3 headers/library not found).")
+  endif()
+endif()
+
+if(BUILD_ZEFIDI2)
+  if(NOT BAE_SDL3_INCLUDE_DIR)
+    find_path(BAE_SDL3_INCLUDE_DIR SDL3/SDL.h)
+  endif()
+  if(NOT BAE_SDL3_LIBRARY)
+    find_library(BAE_SDL3_LIBRARY NAMES SDL3)
+  endif()
+
+  if(BAE_SDL3_INCLUDE_DIR AND BAE_SDL3_LIBRARY)
+    set(ZEFIDI2_MAIN ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/zefidi2/zefidi2_main.cpp)
+    set(ZEFIDI2_IMGUI_DIR ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/imgui)
+
+    if(EXISTS ${ZEFIDI2_MAIN} AND EXISTS ${ZEFIDI2_IMGUI_DIR}/imgui.cpp)
+      set(ZEFIDI2_SOURCES
+        ${ZEFIDI2_MAIN}
+        ${ZEFIDI2_IMGUI_DIR}/imgui.cpp
+        ${ZEFIDI2_IMGUI_DIR}/imgui_draw.cpp
+        ${ZEFIDI2_IMGUI_DIR}/imgui_tables.cpp
+        ${ZEFIDI2_IMGUI_DIR}/imgui_widgets.cpp
+        ${ZEFIDI2_IMGUI_DIR}/backends/imgui_impl_sdl3.cpp
+        ${ZEFIDI2_IMGUI_DIR}/backends/imgui_impl_sdlrenderer3.cpp
+      )
+
+      if((MINGW OR MSVC) AND NEOBAE_RC_ENABLED)
+        neobae_configure_rc(zefidi2 ZEFIDI2_VERSION_RC "${VERSION_ICO_RC_IN}" "zefidi2 Media Player" "zefidi2.exe" "1" "BAEStudio.ico")
+        list(APPEND ZEFIDI2_SOURCES "${ZEFIDI2_VERSION_RC}")
+      endif()
+
+      if(BAE_ENABLE_MIDI_HARDWARE)
+        list(APPEND ZEFIDI2_SOURCES
+          neobae/src/gui/gui_midi_hw_input.c
+          neobae/src/thirdparty/rtmidi/rtmidi_c.cpp
+          neobae/src/thirdparty/rtmidi/RtMidi.cpp
+        )
+      endif()
+
+      add_executable(zefidi2 ${ZEFIDI2_SOURCES})
+      target_include_directories(zefidi2 PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/zefidi2
+        ${ZEFIDI2_IMGUI_DIR}
+        ${ZEFIDI2_IMGUI_DIR}/backends
+        ${BAE_SDL3_INCLUDE_DIR}
+      )
+      target_compile_definitions(zefidi2 PRIVATE
+        ZEFIDI2=1
+        SUPPORT_MIDI_HW=$<IF:$<BOOL:${BAE_ENABLE_MIDI_HARDWARE}>,1,0>
+      )
+      target_link_libraries(zefidi2 PRIVATE neobae ${BAE_SDL3_LIBRARY})
+      set_target_properties(zefidi2 PROPERTIES
+        CXX_STANDARD 17
+        CXX_STANDARD_REQUIRED ON
+      )
+
+      if(BAE_ENABLE_MIDI_HARDWARE)
+        set_source_files_properties(
+          neobae/src/gui/gui_midi_hw_input.c
+          PROPERTIES
+            LANGUAGE C
+            C_STANDARD 11
+            C_STANDARD_REQUIRED ON
+        )
+        target_include_directories(zefidi2 PRIVATE
+          ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/rtmidi
+          ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/gui
+        )
+        if(WIN32)
+          target_compile_definitions(zefidi2 PRIVATE __WINDOWS_MM__)
+        elseif(APPLE)
+          target_compile_definitions(zefidi2 PRIVATE __MACOSX_CORE__)
+          target_link_libraries(zefidi2 PRIVATE
+            "-framework CoreServices"
+            "-framework CoreAudio"
+            "-framework CoreMIDI"
+            "-framework CoreFoundation"
+          )
+        elseif(UNIX AND BAE_ALSA_LIBRARY)
+          target_compile_definitions(zefidi2 PRIVATE __LINUX_ALSA__)
+          target_link_libraries(zefidi2 PRIVATE ${BAE_ALSA_LIBRARY})
+        endif()
+        if(MSVC)
+          target_compile_options(zefidi2 PRIVATE /experimental:c11atomics)
+        endif()
+        message(STATUS "zefidi2: hardware MIDI input (RtMidi) enabled.")
+      else()
+        message(STATUS "zefidi2: hardware MIDI input disabled.")
+      endif()
+
+      if(WIN32)
+        target_link_libraries(zefidi2 PRIVATE imm32 winmm setupapi cfgmgr32 version)
+      endif()
+
+      # Embed Liberation Sans Regular only (compact).
+      set(BAE_ZEFIDI2_EMBED_FONTS_EFFECTIVE OFF)
+      if(EXISTS "${BAE_NBEDITOR_FONT_REGULAR}")
+        if(NOT Python3_Interpreter_FOUND)
+          find_package(Python3 COMPONENTS Interpreter QUIET)
+        endif()
+        if(Python3_Interpreter_FOUND)
+          set(BAE_ZEFIDI2_EMBED_FONTS_EFFECTIVE ON)
+        else()
+          message(STATUS "zefidi2: Python3 not found; skipping Liberation font embed")
+        endif()
+      else()
+        message(STATUS "zefidi2: Liberation TTF missing; skipping font embed")
+      endif()
+      if(BAE_ZEFIDI2_EMBED_FONTS_EFFECTIVE)
+        set(BAE_ZEFIDI2_FONT_HEADER_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+        set(BAE_ZEFIDI2_FONT_HEADER "${BAE_ZEFIDI2_FONT_HEADER_DIR}/zefidi2_embedded_fonts.h")
+        add_custom_command(
+          OUTPUT ${BAE_ZEFIDI2_FONT_HEADER}
+          COMMAND ${CMAKE_COMMAND} -E make_directory ${BAE_ZEFIDI2_FONT_HEADER_DIR}
+          COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/create_embedded_font_h.py
+                  ${BAE_ZEFIDI2_FONT_HEADER}
+                  --font ${BAE_NBEDITOR_FONT_REGULAR} liberation_sans_regular
+          DEPENDS
+            ${BAE_NBEDITOR_FONT_REGULAR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/scripts/create_embedded_font_h.py
+          VERBATIM
+          COMMENT "Embedding Liberation Sans Regular for zefidi2"
+        )
+        add_custom_target(zefidi2_embedded_fonts DEPENDS ${BAE_ZEFIDI2_FONT_HEADER})
+        add_dependencies(zefidi2 zefidi2_embedded_fonts)
+        target_compile_definitions(zefidi2 PRIVATE ZEFIDI2_EMBED_FONTS=1)
+        target_include_directories(zefidi2 PRIVATE ${BAE_ZEFIDI2_FONT_HEADER_DIR})
+        message(STATUS "zefidi2: embedding Liberation Sans Regular")
+      endif()
+
+      message(STATUS "Building zefidi2 with SDL3 + Dear ImGui.")
+    else()
+      message(STATUS "Skipping BUILD_ZEFIDI2 (zefidi2/imgui sources not present in workspace).")
+    endif()
+  else()
+    message(STATUS "Skipping BUILD_ZEFIDI2 (SDL3 headers/library not found).")
   endif()
 endif()
 

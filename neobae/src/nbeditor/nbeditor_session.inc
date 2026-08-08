@@ -6329,16 +6329,14 @@
                 }
             }
         }
-        const bool root_in_snd =
-            !TEST_FLAG_VALUE(m_ie_ext.flags2, ZBF_useSoundModifierAsRootKey);
         const uint32_t n = std::min(split_count, want);
         for (uint32_t s = 0; s < n; ++s)
         {
             const IePristineSplit &snap = splits[s];
             BAERmfEditorBankSampleInfo info;
             std::memset(&info, 0, sizeof(info));
-            /* Prefer current SND metadata so root-in-SND restore can rewrite
-             * baseKey (sampleRate==0 only updates INST keymap fields). */
+            /* Prefer current SND metadata so root restore can rewrite baseKey
+             * (sampleRate==0 only updates INST keymap fields). */
             if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
                                                          m_ie_instrument_index,
                                                          s,
@@ -6351,10 +6349,7 @@
             info.rootKey = snap.rootKey;
             info.splitVolume = snap.splitVolume;
             info.sndResourceID = static_cast<XShortResourceID>(snap.sndResourceID);
-            if (!root_in_snd || info.sampleRate == 0)
-            {
-                info.sampleRate = 0;
-            }
+            /* Keep sampleRate from Get so root restore rewrites SND baseKey. */
             if (BAERmfEditorBank_SetInstrumentSampleInfo(
                     m_bank_token, m_ie_instrument_index, s, &info) != BAE_NO_ERROR)
             {
@@ -7924,10 +7919,9 @@
                 if (ImGui::IsItemDeactivatedAfterEdit())
                 {
                     info.rootKey = static_cast<unsigned char>(std::clamp(root, 0, 127));
-                    /* Root lives in SND only when useSoundModifierAsRootKey is clear. */
-                    const bool root_in_snd =
-                        !TEST_FLAG_VALUE(m_ie_ext.flags2, ZBF_useSoundModifierAsRootKey);
-                    commit_split(root_in_snd);
+                    /* Root is the SND baseKey; when useSoundModifierAsRootKey is
+                     * set, SetInstrumentSampleInfo also mirrors it into misc. */
+                    commit_split(true);
                 }
                 ImGui::TableSetColumnIndex(4);
                 {

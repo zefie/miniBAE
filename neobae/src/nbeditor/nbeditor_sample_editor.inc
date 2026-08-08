@@ -1128,10 +1128,14 @@
 
         const uint32_t loop_start = m_sample_editor_loop_enabled ? m_sample_editor_loop_start : 0u;
         const uint32_t loop_end = m_sample_editor_loop_enabled ? m_sample_editor_loop_end : 0u;
-        const BAE_UNSIGNED_FIXED master_rate =
-            m_sample_editor_original_sample_rate
-                ? m_sample_editor_original_sample_rate
-                : LONG_TO_UNSIGNED_FIXED(m_sample_editor_sample_rate_hz);
+        /* Retag uses the editor rate (UI), not the load-time original — otherwise
+         * Apply keeps rewriting the old Hz and sample-rate changes never stick. */
+        const BAE_UNSIGNED_FIXED apply_rate =
+            m_sample_editor_cached_sample_rate
+                ? m_sample_editor_cached_sample_rate
+                : LONG_TO_UNSIGNED_FIXED(m_sample_editor_sample_rate_hz
+                                             ? m_sample_editor_sample_rate_hz
+                                             : 44100u);
 
         if (m_sample_editor_is_song_sample)
         {
@@ -1150,7 +1154,7 @@
                 m_sample_editor_original_frame_count,
                 m_sample_editor_original_bit_size,
                 m_sample_editor_original_channels,
-                master_rate,
+                apply_rate,
                 loop_start,
                 loop_end,
                 &replaced_info);
@@ -1174,7 +1178,7 @@
             info.rootKey = static_cast<unsigned char>(std::clamp(m_sample_editor_root_key, 0, 127));
             info.sampleInfo.startLoop = loop_start;
             info.sampleInfo.endLoop = loop_end;
-            info.sampleInfo.sampledRate = LONG_TO_UNSIGNED_FIXED(m_sample_editor_sample_rate_hz);
+            info.sampleInfo.sampledRate = apply_rate;
 
             std::string display_name = m_sample_editor_sample_name;
             const std::string song_prefix = "[Song] ";
@@ -1201,6 +1205,9 @@
                 (void)BAERmfEditorDocument_SetSampleAssetCompression(m_document, asset_id, effective);
             }
             m_sample_editor_codec_type = effective;
+            m_sample_editor_original_sample_rate = apply_rate;
+            m_sample_editor_sample_rate_hz =
+                static_cast<uint32_t>(apply_rate >> 16);
             SeRestoreCacheFromMaster();
 
             BAERmfEditorSampleInfo refreshed;
@@ -1415,7 +1422,7 @@
             m_sample_editor_original_frame_count,
             m_sample_editor_original_bit_size,
             m_sample_editor_original_channels,
-            master_rate);
+            apply_rate);
 
         if (result != BAE_NO_ERROR)
         {
@@ -1452,22 +1459,14 @@
                 /* Preserve SND linkage — never let a zeroed/stale field remint. */
                 updated_info.sndResourceID =
                     static_cast<XShortResourceID>(static_cast<uint16_t>(keep_snd));
-                bool root_in_snd = true;
-                {
-                    BAERmfEditorInstrumentExtInfo ext{};
-                    if (BAERmfEditorBank_GetInstrumentExtInfo(
-                            m_bank_token, work_inst_index, &ext) == BAE_NO_ERROR)
-                    {
-                        root_in_snd =
-                            !TEST_FLAG_VALUE(ext.flags2, ZBF_useSoundModifierAsRootKey);
-                    }
-                }
+                /* Root is always the SND baseKey (mirrored into misc when
+                 * useSoundModifierAsRootKey is set). */
                 const bool snd_meta_dirty =
                     !have_bank_info ||
                     bank_info.sampleRate != m_sample_editor_sample_rate_hz ||
                     bank_info.loopStart != applied_start ||
                     bank_info.loopEnd != applied_end ||
-                    (root_in_snd && static_cast<uint32_t>(bank_info.rootKey) != want_root);
+                    static_cast<uint32_t>(bank_info.rootKey) != want_root;
                 updated_info.sampleRate =
                     snd_meta_dirty ? m_sample_editor_sample_rate_hz : 0u;
                 const BAEResult info_result = BAERmfEditorBank_SetInstrumentSampleInfo(
@@ -1489,6 +1488,9 @@
             }
         }
 
+        /* Commit retag rate into master before restoring the waveform cache. */
+        m_sample_editor_original_sample_rate = apply_rate;
+        m_sample_editor_sample_rate_hz = static_cast<uint32_t>(apply_rate >> 16);
         SeRestoreCacheFromMaster();
         {
             SampleRow refreshed = sample;
@@ -1933,7 +1935,10 @@
             frames = m_sample_editor_original_frame_count;
             bit_size = m_sample_editor_original_bit_size;
             channels = m_sample_editor_original_channels;
-            native_rate = m_sample_editor_original_sample_rate;
+            /* Retag: honor the editor sample-rate, not the load-time original. */
+            native_rate = m_sample_editor_cached_sample_rate
+                              ? m_sample_editor_cached_sample_rate
+                              : LONG_TO_UNSIGNED_FIXED(m_sample_editor_sample_rate_hz);
             status = "Auditioning original (master)";
         }
         else if (source == SePreviewSource::Audition)
@@ -2174,9 +2179,11 @@
                                aud_rate))
             {
                 LiveReloadInstrumentsUsingSnd(keep_snd);
+                /* Restore working-set PCM at the editor (retag) rate, not the
+                 * load-time original — otherwise Apply's rate change is undone. */
                 const BAE_UNSIGNED_FIXED master_rate =
-                    m_sample_editor_original_sample_rate
-                        ? m_sample_editor_original_sample_rate
+                    m_sample_editor_cached_sample_rate
+                        ? m_sample_editor_cached_sample_rate
                         : LONG_TO_UNSIGNED_FIXED(m_sample_editor_sample_rate_hz
                                                      ? m_sample_editor_sample_rate_hz
                                                      : 44100u);
@@ -2215,13 +2222,20 @@
          * mixer is not still touching the previous waveform when we reload. */
         StopSampleEditorPreview();
 
+        const BAE_UNSIGNED_FIXED editor_rate =
+            m_sample_editor_cached_sample_rate
+                ? m_sample_editor_cached_sample_rate
+                : LONG_TO_UNSIGNED_FIXED(m_sample_editor_sample_rate_hz
+                                             ? m_sample_editor_sample_rate_hz
+                                             : 44100u);
+
         if (target == BAE_EDITOR_COMPRESSION_DONT_CHANGE || target == BAE_EDITOR_COMPRESSION_PCM)
         {
             m_sample_editor_audition_pcm = m_sample_editor_original_pcm;
             m_sample_editor_audition_frame_count = m_sample_editor_original_frame_count;
             m_sample_editor_audition_bit_size = m_sample_editor_original_bit_size;
             m_sample_editor_audition_channels = m_sample_editor_original_channels;
-            m_sample_editor_audition_sample_rate = m_sample_editor_original_sample_rate;
+            m_sample_editor_audition_sample_rate = editor_rate;
             SeRestoreCacheFromMaster();
             return true;
         }
@@ -2234,10 +2248,7 @@
                                                                : sample.snd_resource_id;
 
         const bool use_opus_roundtrip = IsOpusCompressionType(target);
-        const BAE_UNSIGNED_FIXED master_rate =
-            m_sample_editor_original_sample_rate
-                ? m_sample_editor_original_sample_rate
-                : LONG_TO_UNSIGNED_FIXED(m_sample_editor_sample_rate_hz);
+        const BAE_UNSIGNED_FIXED master_rate = editor_rate;
 
         void *wave_data = nullptr;
         uint32_t frame_count = 0;
@@ -3225,6 +3236,8 @@
                     m_sample_editor_sample_rate_hz = static_cast<uint32_t>(presets[i]);
                     m_sample_editor_cached_sample_rate =
                         LONG_TO_UNSIGNED_FIXED(m_sample_editor_sample_rate_hz);
+                    /* Rate retag is metadata — mark dirty so Apply is obvious. */
+                    m_sample_editor_dirty = true;
                 }
             }
             if (ImGui::Selectable("Other", m_sample_editor_rate_preset >= static_cast<int>(preset_count)))
@@ -3244,7 +3257,9 @@
                 custom_hz = std::clamp(custom_hz, 1000, 192000);
                 PushSampleEditorUndo();
                 m_sample_editor_sample_rate_hz = static_cast<uint32_t>(custom_hz);
-                m_sample_editor_cached_sample_rate = LONG_TO_UNSIGNED_FIXED(m_sample_editor_sample_rate_hz);
+                m_sample_editor_cached_sample_rate =
+                    LONG_TO_UNSIGNED_FIXED(m_sample_editor_sample_rate_hz);
+                m_sample_editor_dirty = true;
             }
         }
 
