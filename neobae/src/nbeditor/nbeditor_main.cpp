@@ -8,6 +8,7 @@
 #include <SDL3/SDL_dialog.h>
 
 #include "NeoBAE.h"
+#include "NeoBAEConfigPath.h"
 #include "X_API.h"
 #include "X_Formats.h"
 #include "X_EditorTools.h"
@@ -6927,7 +6928,7 @@ private:
     /* Combo index matches BAERmfEditorSndStorageType (ESND/CSND/SND). */
     int m_export_snd_storage_index = static_cast<int>(BAE_EDITOR_SND_STORAGE_ESND);
 
-    /* Editor Preferences (~/.config/neobae/nbeditor_prefs). */
+    /* Editor Preferences (<configRoot>/nbeditor_prefs). */
     bool m_prefs_open = false;
     bool m_mod_import_prefs_open = false;
     bool m_about_open = false;

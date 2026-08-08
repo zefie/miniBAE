@@ -37,6 +37,7 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <NeoBAE.h>
+#include <NeoBAEConfigPath.h>
 #include <X_Assert.h>
 #include <X_Formats.h>
 #include <BAE_API.h>
@@ -1680,6 +1681,27 @@ static void apply_eq_state(BAEMixer mixer)
     }
 }
 
+/* Resolve zefidi.ini under the shared NeoBAE config root (migrate from exeDir once). */
+static void playbae_get_zefidi_ini_path(char *out, size_t outSize)
+{
+    static int s_prepared = 0;
+
+    if (!out || outSize == 0)
+    {
+        return;
+    }
+    out[0] = '\0';
+    if (!s_prepared)
+    {
+        (void)BAE_PrepareConfigFile("zefidi.ini", NULL);
+        s_prepared = 1;
+    }
+    if (BAE_GetConfigFilePath(out, outSize, "zefidi.ini") != 0)
+    {
+        (void)BAE_GetRuntimeFilePath(out, outSize, "zefidi.ini");
+    }
+}
+
 static int load_eq_preset(const char *name, float *gains)
 {
     /* Standard presets */
@@ -1703,14 +1725,7 @@ static int load_eq_preset(const char *name, float *gains)
     
     /* Attempt to load from zefidi.ini */
     char iniPath[1024] = {0};
-#ifdef _WIN32
-    GetModuleFileNameA(NULL, iniPath, sizeof(iniPath));
-    char *slash = strrchr(iniPath, '\\');
-    if (slash) *slash = '\0';
-    strcat(iniPath, "\\zefidi.ini");
-#else
-    strcpy(iniPath, "zefidi.ini");
-#endif
+    playbae_get_zefidi_ini_path(iniPath, sizeof(iniPath));
     
     FILE *f = fopen(iniPath, "r");
     if (!f) return 0;
@@ -1772,14 +1787,7 @@ static int load_reverb_preset(const char *name)
 {
     /* Attempt to load from zefidi.ini */
     char iniPath[1024] = {0};
-#ifdef _WIN32
-    GetModuleFileNameA(NULL, iniPath, sizeof(iniPath));
-    char *slash = strrchr(iniPath, '\\');
-    if (slash) *slash = '\0';
-    strcat(iniPath, "\\zefidi.ini");
-#else
-    strcpy(iniPath, "zefidi.ini");
-#endif
+    playbae_get_zefidi_ini_path(iniPath, sizeof(iniPath));
     
     FILE *f = fopen(iniPath, "r");
     if (!f) return 0;

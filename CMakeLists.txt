@@ -885,6 +885,7 @@ set(NEOBAE_SOURCES
   neobae/src/BAE_Source/Common/GenSynthInterp2Simple.c
   neobae/src/BAE_Source/Common/GenSynthInterp2U3232.c
   neobae/src/BAE_Source/Common/NeoBAE.c
+  neobae/src/BAE_Source/Common/NeoBAEConfigPath.c
   neobae/src/BAE_Source/Common/NeoBAEBankLoad.c
   neobae/src/BAE_Source/Common/NewNewLZSS.c
   neobae/src/BAE_Source/Common/SampleTools.c

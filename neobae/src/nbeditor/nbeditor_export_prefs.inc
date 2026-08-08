@@ -1,25 +1,38 @@
 /* Editor Preferences, Export Bank, Export as Audio, Song Settings.
  * Included inside NbEditorApp. */
 
-    static std::string EditorPrefsFilePath()
+    static std::string EditorPrefsLegacyFilePath()
     {
-        const char *xdg = std::getenv("XDG_CONFIG_HOME");
-        if (xdg && xdg[0])
-        {
-            return std::string(xdg) + "/neobae/nbeditor_prefs";
-        }
-        const char *home = std::getenv("HOME");
-        if (home && home[0])
-        {
-            return std::string(home) + "/.config/neobae/nbeditor_prefs";
-        }
-        /* Windows builds often lack HOME; USERPROFILE is the usual stand-in. */
+        /* Pre-config-root Windows path (USERPROFILE/.config/neobae/...). */
         const char *userprofile = std::getenv("USERPROFILE");
         if (userprofile && userprofile[0])
         {
             return std::string(userprofile) + "/.config/neobae/nbeditor_prefs";
         }
+        return std::string();
+    }
+
+    static std::string EditorPrefsFilePath()
+    {
+        char path[1100];
+        if (BAE_GetConfigFilePath(path, sizeof(path), "nbeditor_prefs") == 0)
+        {
+            return std::string(path);
+        }
         return std::string("nbeditor_prefs");
+    }
+
+    static void EditorPrefsPrepareOnce()
+    {
+        static bool prepared = false;
+        if (prepared)
+        {
+            return;
+        }
+        const std::string legacy = EditorPrefsLegacyFilePath();
+        (void)BAE_PrepareConfigFile("nbeditor_prefs",
+                                    legacy.empty() ? nullptr : legacy.c_str());
+        prepared = true;
     }
 
     static void PrefEnsureParentDirs(const std::string &path)
@@ -89,6 +102,7 @@
 
     void LoadEditorPrefsFromDisk()
     {
+        EditorPrefsPrepareOnce();
         m_pref_reopen_last_session = false;
         m_pref_save_session_layout = true;
         m_pref_ignore_session_layout = false;
@@ -291,7 +305,9 @@
 
     void SaveEditorPrefsToDisk() const
     {
+        EditorPrefsPrepareOnce();
         const std::string path = EditorPrefsFilePath();
+        (void)BAE_EnsureConfigDirectory();
         PrefEnsureParentDirs(path);
         std::ofstream out(path, std::ios::trunc);
         if (!out)

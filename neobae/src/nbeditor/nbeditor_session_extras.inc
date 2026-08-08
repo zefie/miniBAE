@@ -2,18 +2,42 @@
 
     static constexpr int kMaxRecentSessions = 10;
 
+    static std::string RecentSessionsLegacyFilePath()
+    {
+        const char *userprofile = std::getenv("USERPROFILE");
+        if (userprofile && userprofile[0])
+        {
+            return std::string(userprofile) + "/.config/neobae/nbeditor_recent_sessions.txt";
+        }
+        return std::string();
+    }
+
     static std::string RecentSessionsFilePath()
     {
-        const char *home = std::getenv("HOME");
-        if (home && home[0])
+        char path[1100];
+        if (BAE_GetConfigFilePath(path, sizeof(path), "nbeditor_recent_sessions.txt") == 0)
         {
-            return std::string(home) + "/.config/neobae/nbeditor_recent_sessions.txt";
+            return std::string(path);
         }
         return std::string("nbeditor_recent_sessions.txt");
     }
 
+    static void RecentSessionsPrepareOnce()
+    {
+        static bool prepared = false;
+        if (prepared)
+        {
+            return;
+        }
+        const std::string legacy = RecentSessionsLegacyFilePath();
+        (void)BAE_PrepareConfigFile("nbeditor_recent_sessions.txt",
+                                    legacy.empty() ? nullptr : legacy.c_str());
+        prepared = true;
+    }
+
     void LoadRecentSessionsFromDisk()
     {
+        RecentSessionsPrepareOnce();
         m_recent_sessions.clear();
         std::ifstream in(RecentSessionsFilePath());
         if (!in)
@@ -41,21 +65,9 @@
 
     void SaveRecentSessionsToDisk() const
     {
+        RecentSessionsPrepareOnce();
         const std::string path = RecentSessionsFilePath();
-        const size_t slash = path.find_last_of('/');
-        if (slash != std::string::npos)
-        {
-#if !defined(_WIN32)
-            const std::string dir = path.substr(0, slash);
-            /* ~/.config then ~/.config/neobae — ignore errors if present. */
-            const size_t mid = dir.find_last_of('/');
-            if (mid != std::string::npos && mid > 0)
-            {
-                ::mkdir(dir.substr(0, mid).c_str(), 0755);
-            }
-            ::mkdir(dir.c_str(), 0755);
-#endif
-        }
+        (void)BAE_EnsureConfigDirectory();
         std::ofstream out(path, std::ios::trunc);
         if (!out)
         {

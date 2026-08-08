@@ -19,6 +19,7 @@
 
 #include "BAE_API.h"
 #include "NeoBAE.h"
+#include "NeoBAEConfigPath.h"
 #include "gui_settings.h"
 #include "gui_bae.h"
 #include "gui_export.h"
@@ -77,20 +78,56 @@ extern bool g_show_virtual_keyboard;
 extern int g_exportCodecIndex;
 extern int g_window_h;
 
+/* Resolve zefidi.ini under the shared NeoBAE config root (migrate from exeDir once). */
+static void zefidi_prepare_config_files(void)
+{
+    static int s_prepared = 0;
+
+    if (s_prepared)
+    {
+        return;
+    }
+    (void)BAE_PrepareConfigFile("zefidi.ini", NULL);
+    (void)BAE_PrepareConfigFile("zefidi_script.txt", NULL);
+    s_prepared = 1;
+}
+
+static void zefidi_get_settings_path(char *out, size_t outSize)
+{
+    if (!out || outSize == 0)
+    {
+        return;
+    }
+    out[0] = '\0';
+    zefidi_prepare_config_files();
+    (void)BAE_EnsureConfigDirectory();
+    if (BAE_GetConfigFilePath(out, outSize, "zefidi.ini") != 0)
+    {
+        (void)BAE_GetRuntimeFilePath(out, outSize, "zefidi.ini");
+    }
+}
+
+static void zefidi_get_script_path(char *out, size_t outSize)
+{
+    if (!out || outSize == 0)
+    {
+        return;
+    }
+    out[0] = '\0';
+    zefidi_prepare_config_files();
+    (void)BAE_EnsureConfigDirectory();
+    if (BAE_GetConfigFilePath(out, outSize, "zefidi_script.txt") != 0)
+    {
+        (void)BAE_GetRuntimeFilePath(out, outSize, "zefidi_script.txt");
+    }
+}
+
 Settings load_settings(void)
 {
     Settings settings = {0};
 
-    char exe_dir[512];
-    get_executable_directory(exe_dir, sizeof(exe_dir));
-
     char settings_path[768];
-
-#ifdef _WIN32
-    snprintf(settings_path, sizeof(settings_path), "%s\\zefidi.ini", exe_dir);
-#else
-    snprintf(settings_path, sizeof(settings_path), "%s/zefidi.ini", exe_dir);
-#endif
+    zefidi_get_settings_path(settings_path, sizeof(settings_path));
 
     FILE *f = fopen(settings_path, "r");
     if (!f)
@@ -271,11 +308,7 @@ Settings load_settings(void)
     /* Load script_text from separate file (may contain newlines) */
     {
         char script_text_path[768];
-#ifdef _WIN32
-        snprintf(script_text_path, sizeof(script_text_path), "%s\\zefidi_script.txt", exe_dir);
-#else
-        snprintf(script_text_path, sizeof(script_text_path), "%s/zefidi_script.txt", exe_dir);
-#endif
+        zefidi_get_script_path(script_text_path, sizeof(script_text_path));
         FILE *sf = fopen(script_text_path, "rb");
         if (sf) {
             fseek(sf, 0, SEEK_END);
@@ -297,17 +330,10 @@ Settings load_settings(void)
 
 void save_settings(const char *last_bank_path, int reverb_type, bool loop_enabled)
 {
-    char exe_dir[512];
-    get_executable_directory(exe_dir, sizeof(exe_dir));
-
     char settings_path[768];
-#ifdef _WIN32
-    snprintf(settings_path, sizeof(settings_path), "%s\\zefidi.ini", exe_dir);
-#else
-    snprintf(settings_path, sizeof(settings_path), "%s/zefidi.ini", exe_dir);
-#endif
+    zefidi_get_settings_path(settings_path, sizeof(settings_path));
 
-    // Read existing content to preserve custom reverb presets
+// Read existing content to preserve custom reverb presets
     char *content = NULL;
     size_t content_size = 0;
     FILE *f_read = fopen(settings_path, "r");
@@ -452,17 +478,10 @@ void save_full_settings(const Settings *settings)
     if (!settings)
         return;
 
-    char exe_dir[512];
-    get_executable_directory(exe_dir, sizeof(exe_dir));
-
     char settings_path[768];
-#ifdef _WIN32
-    snprintf(settings_path, sizeof(settings_path), "%s\\zefidi.ini", exe_dir);
-#else
-    snprintf(settings_path, sizeof(settings_path), "%s/zefidi.ini", exe_dir);
-#endif
+    zefidi_get_settings_path(settings_path, sizeof(settings_path));
 
-    // Read existing content to preserve custom reverb presets
+// Read existing content to preserve custom reverb presets
     char *content = NULL;
     size_t content_size = 0;
     FILE *f_read = fopen(settings_path, "r");
@@ -641,11 +660,7 @@ void save_full_settings(const Settings *settings)
     /* Save script text to a separate file (it may contain newlines) */
     {
         char script_text_path[768];
-#ifdef _WIN32
-        snprintf(script_text_path, sizeof(script_text_path), "%s\\zefidi_script.txt", exe_dir);
-#else
-        snprintf(script_text_path, sizeof(script_text_path), "%s/zefidi_script.txt", exe_dir);
-#endif
+        zefidi_get_script_path(script_text_path, sizeof(script_text_path));
         if (settings->has_script_text && settings->script_text[0])
         {
             FILE *sf = fopen(script_text_path, "wb");
@@ -1983,17 +1998,10 @@ void load_custom_reverb_preset_list(void)
     }
     g_custom_reverb_preset_count = 0;
 
-    char exe_dir[512];
-    get_executable_directory(exe_dir, sizeof(exe_dir));
-
     char settings_path[768];
-#ifdef _WIN32
-    snprintf(settings_path, sizeof(settings_path), "%s\\zefidi.ini", exe_dir);
-#else
-    snprintf(settings_path, sizeof(settings_path), "%s/zefidi.ini", exe_dir);
-#endif
+    zefidi_get_settings_path(settings_path, sizeof(settings_path));
 
-    FILE *f = fopen(settings_path, "r");
+FILE *f = fopen(settings_path, "r");
     if (!f) return;
 
     // First pass: find maximum numeric preset index present in custom_reverb_%d_* keys
@@ -2193,17 +2201,10 @@ void save_custom_reverb_preset(const char *name)
     extern void set_status_message(const char *msg);
     
     // Read all existing content
-    char exe_dir[512];
-    get_executable_directory(exe_dir, sizeof(exe_dir));
-    
     char settings_path[768];
-#ifdef _WIN32
-    snprintf(settings_path, sizeof(settings_path), "%s\\zefidi.ini", exe_dir);
-#else
-    snprintf(settings_path, sizeof(settings_path), "%s/zefidi.ini", exe_dir);
-#endif
-    
-    // Read existing content to preserve settings and find max index
+    zefidi_get_settings_path(settings_path, sizeof(settings_path));
+
+// Read existing content to preserve settings and find max index
     char *content = NULL;
     size_t content_size = 0;
     FILE *f = fopen(settings_path, "r");
@@ -2638,17 +2639,10 @@ void delete_custom_reverb_preset(const char *name)
     int preset_file_idx = -1;
     
     // Read all existing content
-    char exe_dir[512];
-    get_executable_directory(exe_dir, sizeof(exe_dir));
-    
     char settings_path[768];
-#ifdef _WIN32
-    snprintf(settings_path, sizeof(settings_path), "%s\\zefidi.ini", exe_dir);
-#else
-    snprintf(settings_path, sizeof(settings_path), "%s/zefidi.ini", exe_dir);
-#endif
-    
-    // Read existing content
+    zefidi_get_settings_path(settings_path, sizeof(settings_path));
+
+// Read existing content
     char *content = NULL;
     size_t content_size = 0;
     FILE *f = fopen(settings_path, "r");
@@ -2925,17 +2919,10 @@ void load_custom_eq_preset_list(void)
     }
     g_custom_eq_preset_count = 0;
 
-    char exe_dir[512];
-    get_executable_directory(exe_dir, sizeof(exe_dir));
-
     char settings_path[768];
-#ifdef _WIN32
-    snprintf(settings_path, sizeof(settings_path), "%s\\zefidi.ini", exe_dir);
-#else
-    snprintf(settings_path, sizeof(settings_path), "%s/zefidi.ini", exe_dir);
-#endif
+    zefidi_get_settings_path(settings_path, sizeof(settings_path));
 
-    FILE *f = fopen(settings_path, "r");
+FILE *f = fopen(settings_path, "r");
     if (!f) return;
 
     // First pass: find maximum numeric preset index present in custom_eq_%d_* keys
@@ -3103,17 +3090,10 @@ void save_custom_eq_preset(const char *name)
     extern void set_status_message(const char *msg);
     
     // Read all existing content
-    char exe_dir[512];
-    get_executable_directory(exe_dir, sizeof(exe_dir));
-    
     char settings_path[768];
-#ifdef _WIN32
-    snprintf(settings_path, sizeof(settings_path), "%s\\zefidi.ini", exe_dir);
-#else
-    snprintf(settings_path, sizeof(settings_path), "%s/zefidi.ini", exe_dir);
-#endif
-    
-    // Read existing content to preserve settings and find max index
+    zefidi_get_settings_path(settings_path, sizeof(settings_path));
+
+// Read existing content to preserve settings and find max index
     char *content = NULL;
     size_t content_size = 0;
     FILE *f = fopen(settings_path, "r");
@@ -3290,17 +3270,10 @@ void delete_custom_eq_preset(const char *name)
 
     int preset_file_idx = -1;
     
-    char exe_dir[512];
-    get_executable_directory(exe_dir, sizeof(exe_dir));
-    
     char settings_path[768];
-#ifdef _WIN32
-    snprintf(settings_path, sizeof(settings_path), "%s\\zefidi.ini", exe_dir);
-#else
-    snprintf(settings_path, sizeof(settings_path), "%s/zefidi.ini", exe_dir);
-#endif
-    
-    // Read existing content
+    zefidi_get_settings_path(settings_path, sizeof(settings_path));
+
+// Read existing content
     char *content = NULL;
     size_t content_size = 0;
     FILE *f = fopen(settings_path, "r");
