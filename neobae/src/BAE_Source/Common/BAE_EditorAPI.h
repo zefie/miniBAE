@@ -290,7 +290,7 @@ typedef struct BAERmfEditorInstrumentExtInfo
     /* Sample-free oscillator (INST unit OSCL). ZMF v6+. */
     BAE_BOOL useOscillator;
     int32_t oscWaveShape;   /* LFO shapes + 'PLSE'/'NOIS' ('SAWW' aliases 'SAWT') */
-    int32_t oscPulseWidth;  /* 0..65536, 32768 = 50% duty; used for PLSE / PWID */
+    int32_t oscPulseWidth;  /* 0..65536, 32768 = natural shape; PWM all osc waves except Noise */
     int32_t oscVolume;      /* 0..65536, 65536 = unity; default OSC_VOLUME_DEFAULT (25%) */
 #endif
 } BAERmfEditorInstrumentExtInfo;

@@ -537,11 +537,24 @@
 
     void DrawRmfOpenChoiceDialog()
     {
+        /* Shared chooser for RMF/ZMF and tracker modules. */
+        std::string pending_ext;
+        {
+            const std::string lower = ToLower(m_pending_rmf_open_path);
+            const size_t dot = lower.find_last_of('.');
+            if (dot != std::string::npos && dot + 1 < lower.size())
+            {
+                pending_ext = lower.substr(dot + 1);
+            }
+        }
+        const bool pending_module = IsModuleExtension(pending_ext);
+        const char *popup_title = pending_module ? "Open Module" : "Open RMF / ZMF";
+
         if (m_confirm_rmf_open_open)
         {
-            ImGui::OpenPopup("Open RMF / ZMF");
+            ImGui::OpenPopup(popup_title);
         }
-        if (!ImGui::BeginPopupModal("Open RMF / ZMF",
+        if (!ImGui::BeginPopupModal(popup_title,
                                     &m_confirm_rmf_open_open,
                                     ImGuiWindowFlags_AlwaysAutoResize))
         {
@@ -565,8 +578,15 @@
             m_confirm_rmf_open_open = false;
             m_pending_rmf_open_path.clear();
             ImGui::CloseCurrentPopup();
-            const char *stype = EndsWith(path, ".zmf") ? "ZMF" : "RMF";
-            (void)OpenRmfAsSession(path, stype);
+            if (pending_module)
+            {
+                (void)OpenModuleAsSession(path);
+            }
+            else
+            {
+                const char *stype = EndsWith(path, ".zmf") ? "ZMF" : "RMF";
+                (void)OpenRmfAsSession(path, stype);
+            }
         }
         ImGui::SameLine();
         if (ImGui::Button("Add to Session", ImVec2(140.0f, 0.0f)))
@@ -575,8 +595,15 @@
             m_confirm_rmf_open_open = false;
             m_pending_rmf_open_path.clear();
             ImGui::CloseCurrentPopup();
-            const char *stype = EndsWith(path, ".zmf") ? "ZMF" : "RMF";
-            (void)ImportSongDocumentAsNewSessionEntry(path, stype);
+            if (pending_module)
+            {
+                (void)AddModuleToSession(path);
+            }
+            else
+            {
+                const char *stype = EndsWith(path, ".zmf") ? "ZMF" : "RMF";
+                (void)ImportSongDocumentAsNewSessionEntry(path, stype);
+            }
         }
         ImGui::SameLine();
         if (ImGui::Button("Cancel", ImVec2(100.0f, 0.0f)))
@@ -989,8 +1016,8 @@
             ext = lower.substr(dot + 1);
         }
 
-        /* RMF/ZMF File→Open: choose Open as Session vs Add to Session. */
-        if (ext == "rmf" || ext == "zmf")
+        /* RMF/ZMF / modules: choose Open as Session vs Add to Session. */
+        if (ext == "rmf" || ext == "zmf" || IsModuleExtension(ext))
         {
             if (!skip_replace_confirm)
             {
@@ -999,7 +1026,14 @@
                 return;
             }
             /* argv / "Open with": default to Open as Session. */
-            (void)OpenRmfAsSession(selected_path, ext == "zmf" ? "ZMF" : "RMF");
+            if (IsModuleExtension(ext))
+            {
+                (void)OpenModuleAsSession(selected_path);
+            }
+            else
+            {
+                (void)OpenRmfAsSession(selected_path, ext == "zmf" ? "ZMF" : "RMF");
+            }
             return;
         }
 
@@ -1032,36 +1066,6 @@
              * Avoid merging onto the Init built-in (orphan SNDs leak into export). */
             ClearSessionSongState(false);
             LoadBankFromPath(selected_path.c_str(), ShouldPreserveBank2OnBankLoad());
-            return;
-        }
-        if (IsModuleExtension(ext))
-        {
-#if defined(LIBXMP_STATIC) || defined(LIBXMP_CORE_PLAYER)
-            (void)CommitActiveSessionSong();
-            if (LoadModuleFromPath(selected_path.c_str()))
-            {
-                m_session_song_index = -1;
-                if (!SyncSessionSongsFromDocument())
-                {
-                    SetStatus("Module loaded but failed to add to Session song list");
-                }
-                else
-                {
-                    /* Bank body is what .zsn/.bsn persists — promote embeds now. */
-                    (void)PromoteActiveSessionSongEmbedsIntoBank();
-                    char status[256];
-                    std::snprintf(status,
-                                  sizeof(status),
-                                  "Added Session song %d/%zu (module, %zu custom INST)",
-                                  m_session_song_index + 1,
-                                  m_session_songs.size(),
-                                  m_session_custom_inst_ids.size());
-                    SetStatus(status);
-                }
-            }
-#else
-            SetStatus("Tracker module support not enabled in this build");
-#endif
             return;
         }
         if (ext == "mid" || ext == "midi" || ext == "kar" || ext == "rmi")
@@ -6831,7 +6835,7 @@
             {static_cast<int32_t>(FOUR_CHAR('L', 'P', 'R', 'E')), "LPF_DEPTH"},
             {static_cast<int32_t>(FOUR_CHAR('L', 'P', 'A', 'M')), "LOW_PASS_AMOUNT"},
 #if USE_ZMF_SUPPORT == TRUE
-            {static_cast<int32_t>(FOUR_CHAR('P', 'W', 'I', 'D')), "PULSE_WIDTH"},
+            {static_cast<int32_t>(FOUR_CHAR('P', 'W', 'I', 'D')), "PULSE_WIDTH/SHAPE"},
             {static_cast<int32_t>(FOUR_CHAR('W', 'I', 'D', 'X')), "WAVE_INDEX"},
 #endif
         };
@@ -7574,7 +7578,9 @@
             const char *label;
             int32_t fourcc;
         };
-        /* SINE = real sine (SINE_WAVE_REAL); TRIA/SAWT/SQUA match LFO. Osc-only: PLSE/NOIS. */
+        /* SINE = real sine; TRIA/SAWT/SQUA match LFO. Osc-only: PLSE/NOIS.
+         * PLSE is variable-duty (high first); SQUA is fixed-polarity square
+         * with PW via phase remap — not the same waveform. */
         static const WaveChoice kWaves[] = {
             {"Sine", static_cast<int32_t>(FOUR_CHAR('S', 'I', 'N', 'E'))},
             {"Triangle", static_cast<int32_t>(FOUR_CHAR('T', 'R', 'I', 'A'))},
@@ -7623,20 +7629,60 @@
         }
         ImGui::EndGroup();
 
-        float pw_pct = static_cast<float>(m_ie_ext.oscPulseWidth) * (100.0f / 65536.0f);
-        if (ImGui::SliderFloat("Pulse Width", &pw_pct, 1.0f, 99.0f, "%.0f%%"))
+        /* Same OSCL/PWID field; label depends on wave (Pulse = duty, others = shape). */
         {
-            m_ie_ext.oscPulseWidth = static_cast<int32_t>(pw_pct * (65536.0f / 100.0f) + 0.5f);
-            if (m_ie_ext.oscPulseWidth < 1)
+            int32_t shape = m_ie_ext.oscWaveShape;
+            if (shape == static_cast<int32_t>(FOUR_CHAR('S', 'A', 'W', 'W')))
             {
-                m_ie_ext.oscPulseWidth = 1;
+                shape = static_cast<int32_t>(FOUR_CHAR('S', 'A', 'W', 'T'));
             }
-            if (m_ie_ext.oscPulseWidth > 65535)
+            const bool is_pulse =
+                shape == static_cast<int32_t>(FOUR_CHAR('P', 'L', 'S', 'E'));
+            const bool is_noise =
+                shape == static_cast<int32_t>(FOUR_CHAR('N', 'O', 'I', 'S'));
+            /* ### keeps ImGui ID stable when the visible label swaps. */
+            const char *pw_label =
+                is_pulse ? "Pulse Width###osc_pw" : "Shape###osc_pw";
+            float pw_pct = static_cast<float>(m_ie_ext.oscPulseWidth) * (100.0f / 65536.0f);
+            if (is_noise)
             {
-                m_ie_ext.oscPulseWidth = 65535;
+                ImGui::BeginDisabled();
             }
-            MarkInstrumentEditorDirty(false);
-            SyncInstrumentEditorOscillatorPreview();
+            if (ImGui::SliderFloat(pw_label, &pw_pct, 1.0f, 99.0f, "%.0f%%"))
+            {
+                m_ie_ext.oscPulseWidth = static_cast<int32_t>(pw_pct * (65536.0f / 100.0f) + 0.5f);
+                if (m_ie_ext.oscPulseWidth < 1)
+                {
+                    m_ie_ext.oscPulseWidth = 1;
+                }
+                if (m_ie_ext.oscPulseWidth > 65535)
+                {
+                    m_ie_ext.oscPulseWidth = 65535;
+                }
+                MarkInstrumentEditorDirty(false);
+                SyncInstrumentEditorOscillatorPreview();
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+            {
+                if (is_noise)
+                {
+                    ImGui::SetTooltip("Noise ignores Shape / Pulse Width (PWID).");
+                }
+                else if (is_pulse)
+                {
+                    ImGui::SetTooltip("Duty cycle: %% of the cycle that is high.");
+                }
+                else
+                {
+                    ImGui::SetTooltip(
+                        "Phase morph / asymmetry (50%% = natural wave).\n"
+                        "Same PWID field as Pulse Width. Subtle on Saw.");
+                }
+            }
+            if (is_noise)
+            {
+                ImGui::EndDisabled();
+            }
         }
         if (m_ie_ext.oscVolume < 0)
         {
@@ -7663,8 +7709,9 @@
         }
         ImGui::TextDisabled(
             "A4=440 Hz. Noise updates at note rate. Modulators (Modulation tab): "
-            "PWID = pulse width; WIDX = wave index 0..5 (SINE TRIA SAWT SQUA PLSE NOIS). "
-            "Beatnik levels: WIDX 100 ≈ full table; PWID 100 ≈ ±50%% duty.");
+            "PWID = Pulse Width (Pulse) or Shape (other waves; ignored by Noise); "
+            "WIDX = wave index 0..5 (SINE TRIA SAWT SQUA PLSE NOIS). "
+            "Beatnik levels: WIDX 100 ≈ full table; PWID 100 ≈ ±50%%.");
     }
 #endif
 

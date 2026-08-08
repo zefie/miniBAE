@@ -92,6 +92,7 @@
         m_pref_reopen_last_session = false;
         m_pref_save_session_layout = true;
         m_pref_ignore_session_layout = false;
+        m_pref_compress_session_on_save = false;
         m_pref_default_undocked_layout = false;
         m_pref_show_tips_at_startup = true;
         m_tips_seen.clear();
@@ -146,6 +147,10 @@
             else if (key == "default_undocked_layout")
             {
                 m_pref_default_undocked_layout = PrefParseBool(value, false);
+            }
+            else if (key == "compress_session_on_save")
+            {
+                m_pref_compress_session_on_save = PrefParseBool(value, false);
             }
             else if (key == "show_tips_at_startup")
             {
@@ -297,6 +302,7 @@
         out << "save_session_layout=" << (m_pref_save_session_layout ? "1" : "0") << '\n';
         out << "ignore_session_layout=" << (m_pref_ignore_session_layout ? "1" : "0") << '\n';
         out << "default_undocked_layout=" << (m_pref_default_undocked_layout ? "1" : "0") << '\n';
+        out << "compress_session_on_save=" << (m_pref_compress_session_on_save ? "1" : "0") << '\n';
         out << "show_tips_at_startup=" << (m_pref_show_tips_at_startup ? "1" : "0") << '\n';
         out << "tips_next=" << m_tips_next << '\n';
         {
@@ -355,6 +361,7 @@
         m_prefs_draft_reopen = m_pref_reopen_last_session;
         m_prefs_draft_save_layout = m_pref_save_session_layout;
         m_prefs_draft_ignore_layout = m_pref_ignore_session_layout;
+        m_prefs_draft_compress_session = m_pref_compress_session_on_save;
         m_prefs_draft_default_undocked = m_pref_default_undocked_layout;
         m_prefs_draft_show_tips = m_pref_show_tips_at_startup;
 #if SUPPORT_MIDI_HW == TRUE
@@ -406,6 +413,16 @@
                 "Per-session override: Edit → Undocked layout.\n"
                 "Off by default (docked workspace).");
         }
+        ImGui::Checkbox("Compress Session on Save", &m_prefs_draft_compress_session);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        {
+            ImGui::SetTooltip(
+                "When saving a Session, pack resources for smaller files:\n"
+                "  .zsn — LZMA pack (ZINS/ZSNG/ZBNK)\n"
+                "  .bsn — LZSS wrap samples as CSND\n"
+                "Warning: may greatly reduce save performance on large banks.\n"
+                "Off by default (fast flat save).");
+        }
         ImGui::Checkbox("Show tips at startup", &m_prefs_draft_show_tips);
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
         {
@@ -421,6 +438,7 @@
             m_pref_reopen_last_session = m_prefs_draft_reopen;
             m_pref_save_session_layout = m_prefs_draft_save_layout;
             m_pref_ignore_session_layout = m_prefs_draft_ignore_layout;
+            m_pref_compress_session_on_save = m_prefs_draft_compress_session;
             m_pref_default_undocked_layout = m_prefs_draft_default_undocked;
             m_pref_show_tips_at_startup = m_prefs_draft_show_tips;
 #if SUPPORT_MIDI_HW == TRUE

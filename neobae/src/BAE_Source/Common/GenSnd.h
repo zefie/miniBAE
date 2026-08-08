@@ -1134,7 +1134,7 @@ typedef int32_t UNIT_TYPE;
 
 #if USE_ZMF_SUPPORT == TRUE
         int32_t oscWaveShape;  // SINE_WAVE_REAL (file 'SINE') / TRIA / SAWT / SQUA / PLSE / NOIS
-        int32_t oscPulseWidth; // 0..65536, 32768 = 50%
+        int32_t oscPulseWidth; // 0..65536, 32768 = natural; PWM all osc waves except Noise
         int32_t oscVolume;     // 0..65536, 65536 = unity (default OSC_VOLUME_DEFAULT)
 #endif
 

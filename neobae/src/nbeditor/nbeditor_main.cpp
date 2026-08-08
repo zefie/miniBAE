@@ -4940,6 +4940,15 @@ private:
         if (ImGui::Begin("Status", nullptr, status_flags))
         {
             ImGui::Text("%s", m_status);
+            if (m_loaded_session_path.empty())
+            {
+                ImGui::Text("Session file: (unsaved)");
+            }
+            else
+            {
+                ImGui::Text("Session file: %s", FileNameFromPath(m_loaded_session_path).c_str());
+                ImGui::Text("  %s", m_loaded_session_path.c_str());
+            }
             if (!m_song_row.name.empty())
             {
                 ImGui::Text("Session song: %s [%s]%s",
@@ -4951,7 +4960,8 @@ private:
             {
                 ImGui::Text("Session song: (none)");
             }
-            ImGui::Text("Loaded path: %s", m_loaded_song_path.empty() ? "(none)" : m_loaded_song_path.c_str());
+            ImGui::Text("Song path: %s",
+                        m_loaded_song_path.empty() ? "(none)" : m_loaded_song_path.c_str());
             std::string bank_display_storage;
             const char *bank_display = "Built-in Bank";
             if (!m_loaded_bank_display_name.empty())
@@ -4975,7 +4985,7 @@ private:
             ImGui::Text("FPS %.1f", io.Framerate);
             if (ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows))
             {
-                /* Status drops use File → Open (RMF asks Open as Session / Add). */
+                /* Status drops use File → Open (RMF/modules ask Open as Session / Add). */
                 m_dnd_hover_target = SessionDropTarget::FileOpen;
             }
         }
@@ -6935,6 +6945,8 @@ private:
     bool m_pref_reopen_last_session = false;
     bool m_pref_save_session_layout = true;   /* write nBeT on Save Session */
     bool m_pref_ignore_session_layout = false; /* skip nBeT on Open Session */
+    /* Opt-in: LZMA Pack on .zsn / LZSS CSND on .bsn at Save Session (slow). */
+    bool m_pref_compress_session_on_save = false;
     /* App default for new sessions / ignore-layout loads. Session override below. */
     bool m_pref_default_undocked_layout = false;
     bool m_session_undocked_layout = false;
@@ -6969,6 +6981,7 @@ private:
     bool m_prefs_draft_reopen = false;
     bool m_prefs_draft_save_layout = true;
     bool m_prefs_draft_ignore_layout = false;
+    bool m_prefs_draft_compress_session = false;
     bool m_prefs_draft_default_undocked = false;
     /* Module import settings (mod2rmf) — live + dialog drafts. */
     bool m_pref_mod_ext_pitch = false;

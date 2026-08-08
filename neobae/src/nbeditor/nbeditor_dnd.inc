@@ -1231,44 +1231,15 @@
             SetStatus("Drop audio samples on the Samples tab");
             return;
         }
-        if (IsModuleExtension(ext))
+        if (IsModuleExtension(ext) || ext == "rmf" || ext == "zmf")
         {
-#if defined(LIBXMP_STATIC) || defined(LIBXMP_CORE_PLAYER)
-            (void)CommitActiveSessionSong();
-            if (LoadModuleFromPath(path))
-            {
-                m_session_song_index = -1;
-                if (!SyncSessionSongsFromDocument())
-                {
-                    SetStatus("Module loaded but failed to add to Session song list");
-                }
-                else
-                {
-                    (void)PromoteActiveSessionSongEmbedsIntoBank();
-                    char status[256];
-                    std::snprintf(status,
-                                  sizeof(status),
-                                  "Added Session song %d/%zu (module, %zu custom INST)",
-                                  m_session_song_index + 1,
-                                  m_session_songs.size(),
-                                  m_session_custom_inst_ids.size());
-                    SetStatus(status);
-                }
-            }
-#else
-            SetStatus("Tracker module support not enabled in this build");
-#endif
+            /* Same Open as Session / Add to Session chooser as File → Open. */
+            ImportPathIntoSession(path);
             return;
         }
         if (ext == "mid" || ext == "midi" || ext == "kar" || ext == "rmi")
         {
             (void)ImportSongDocumentAsNewSessionEntry(path, "MIDI");
-            return;
-        }
-        if (ext == "rmf" || ext == "zmf")
-        {
-            /* Same chooser as File → Open / any non-Instruments/Samples drop. */
-            ImportPathIntoSession(path);
             return;
         }
         SetStatus("Songs tab accepts MIDI / RMF / ZMF / modules / Session files");

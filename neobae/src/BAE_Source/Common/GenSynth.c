@@ -1591,18 +1591,40 @@ static int32_t PV_OscShapeToWaveIndex(int32_t shape)
     return 0;
 }
 
-/* Audio-rate oscillator shape. PLSE/NOIS are oscillator-only; SINE→real sine;
- * other shapes match LFO (TRIA/SAWT/SQUA). */
+/* Remap oscillator phase by pulse width (PWM / phase distortion).
+ * pw=32768 is identity; other values stretch the first vs second half of the
+ * cycle so Sine/Triangle/Saw morph and Square becomes variable duty. */
+static INLINE int32_t PV_RemapOscPhaseByPulseWidth(int32_t where, int32_t pulseWidth)
+{
+    if (pulseWidth < 1)
+        pulseWidth = 1;
+    if (pulseWidth > 65535)
+        pulseWidth = 65535;
+    if (where < 0)
+        where = 0;
+    if (where > 65535)
+        where = 65535;
+
+    if (where < pulseWidth)
+    {
+        /* [0, pw) → [0, 32768) */
+        return (int32_t)(((int64_t)where * 32768) / pulseWidth);
+    }
+    else
+    {
+        /* [pw, 65536) → [32768, 65536) */
+        int32_t rem = 65536 - pulseWidth;
+        if (rem < 1)
+            rem = 1;
+        return 32768 + (int32_t)(((int64_t)(where - pulseWidth) * 32768) / rem);
+    }
+}
+
+/* Audio-rate oscillator shape. NOIS/PLSE are oscillator-only; SINE→real sine;
+ * other shapes match LFO (TRIA/SAWT/SQUA). Pulse width: PLSE = duty cycle
+ * (high first); Sine/Tri/Saw/Square = phase remap (50% = identity). */
 static INLINE int32_t PV_GetOscWaveShape(int32_t where, int32_t what_kind, int32_t pulseWidth, uint32_t *noiseState)
 {
-    if (what_kind == PULSE_OSC_WAVE)
-    {
-        if (pulseWidth < 1)
-            pulseWidth = 1;
-        if (pulseWidth > 65535)
-            pulseWidth = 65535;
-        return (where < pulseWidth) ? 65536 : -65536;
-    }
     if (what_kind == NOISE_OSC_WAVE)
     {
         if (noiseState)
@@ -1618,6 +1640,21 @@ static INLINE int32_t PV_GetOscWaveShape(int32_t where, int32_t what_kind, int32
         }
         return 0;
     }
+    if (pulseWidth < 1)
+        pulseWidth = 1;
+    if (pulseWidth > 65535)
+        pulseWidth = 65535;
+
+    /* PLSE: variable duty, high for first `pulseWidth` of the cycle.
+     * Not the same as SQUA (which is high in the second half at 50%). */
+    if (what_kind == PULSE_OSC_WAVE)
+    {
+        return (where < pulseWidth) ? 65536 : -65536;
+    }
+
+    /* Sine / Triangle / Saw / Square: PWM via phase remapping. */
+    where = PV_RemapOscPhaseByPulseWidth(where, pulseWidth);
+
     /* SAWW → same as LFO SAWT; file/LFO SINE → real sine for oscillators */
     if (what_kind == SAWTOOTH_OSC_WAVE)
         what_kind = SAWTOOTH_WAVE;

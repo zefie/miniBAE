@@ -87,12 +87,85 @@ static bool DecodeNbetResourceBody(const unsigned char *raw,
 #endif
 }
 
-/* Store nBeT as plaintext. Open still accepts legacy LZMA-wrapped bodies.
- * Session saves skip LZMA entirely — compression cost was not worth it for
- * a small layout blob, and ZSN packing no longer LZMA-compresses either. */
-static std::vector<unsigned char> EncodeNbetResourceBody(const std::vector<unsigned char> &plain)
+/* Store nBeT plaintext by default. When compress_session_on_save is on:
+ * .zsn → LZMA frame, .bsn → LZSS (X_RAW). Open accepts plain or compressed. */
+static std::vector<unsigned char> EncodeNbetResourceBody(const std::vector<unsigned char> &plain,
+                                                         bool compress,
+                                                         bool want_zsn)
 {
+    if (!compress || plain.empty())
+    {
+        return plain;
+    }
+#if USE_CREATION_API != FALSE
+    XCOMPRESSION_TYPE ctype = X_RAW; /* LZSS — classic IREZ / .bsn */
+#if defined(USE_LZMA_COMPRESSION) && (USE_LZMA_COMPRESSION == TRUE)
+    if (want_zsn)
+    {
+        ctype = X_LZMA_RAW;
+    }
+#endif
+    XPTR wrapped = nullptr;
+    const int32_t wrapped_size =
+        XCompressPtr(&wrapped,
+                     const_cast<unsigned char *>(plain.data()),
+                     static_cast<uint32_t>(plain.size()),
+                     ctype,
+                     nullptr,
+                     nullptr);
+    if (wrapped_size > 0 && wrapped)
+    {
+        std::vector<unsigned char> out(
+            static_cast<unsigned char *>(wrapped),
+            static_cast<unsigned char *>(wrapped) + static_cast<size_t>(wrapped_size));
+        XDisposePtr(wrapped);
+        return out;
+    }
+    if (wrapped)
+    {
+        XDisposePtr(wrapped);
+    }
+#else
+    (void)want_zsn;
+#endif
     return plain;
+}
+
+/* Classic .bsn: wrap plain SND samples as LZSS CSND on the session clone. */
+static void CompressSessionBsnSamplesLzss(XFILE out_file)
+{
+    if (!out_file)
+    {
+        return;
+    }
+    BAEBankToken tok = reinterpret_cast<BAEBankToken>(out_file);
+    uint32_t inst_count = 0;
+    if (BAERmfEditorBank_GetInstrumentCount(tok, &inst_count) != BAE_NO_ERROR)
+    {
+        return;
+    }
+    for (uint32_t ii = 0; ii < inst_count; ++ii)
+    {
+        uint32_t split_count = 0;
+        if (BAERmfEditorBank_GetInstrumentSampleCount(tok, ii, &split_count) != BAE_NO_ERROR)
+        {
+            continue;
+        }
+        for (uint32_t si = 0; si < split_count; ++si)
+        {
+            BAERmfEditorBankSampleInfo sinfo{};
+            if (BAERmfEditorBank_GetInstrumentSampleInfo(tok, ii, si, &sinfo) != BAE_NO_ERROR)
+            {
+                continue;
+            }
+            if (sinfo.sndStorageType != BAE_EDITOR_SND_STORAGE_SND)
+            {
+                continue;
+            }
+            (void)BAERmfEditorBank_SetSampleSndStorageType(
+                tok, ii, si, BAE_EDITOR_SND_STORAGE_CSND);
+        }
+    }
 }
 
 /* True if the window title-bar strip intersects any display usable area. */
@@ -374,6 +447,96 @@ bool SyncSessionSongsFromDocument()
 
     XDisposePtr(midi_data);
     return true;
+}
+
+/* File→Open / drop module: new session; promote converted embeds into bank. */
+bool OpenModuleAsSession(const std::string &path)
+{
+#if !(defined(LIBXMP_STATIC) || defined(LIBXMP_CORE_PLAYER))
+    SetStatus("Tracker module support not enabled in this build");
+    return false;
+#else
+    if (m_song)
+    {
+        BAESong_Stop(m_song, FALSE);
+        BAESong_Delete(m_song);
+        m_song = nullptr;
+    }
+    if (m_document)
+    {
+        BAERmfEditorDocument_Delete(m_document);
+        m_document = nullptr;
+    }
+    ClearSessionSongState(false);
+    ClearBank2AndCustomSamples();
+    m_loaded_song_path.clear();
+    m_loaded_doc_path.clear();
+    m_song_row = SongRow{};
+    m_document_dirty = false;
+    m_song_started = false;
+    ClearSongOverrides();
+    m_instrument_editor_open = false;
+
+    if (!m_bank_token)
+    {
+        (void)LoadBuiltinBankAsActive();
+    }
+
+    if (!LoadModuleFromPath(path.c_str()))
+    {
+        return false;
+    }
+
+    m_session_song_index = -1;
+    if (!SyncSessionSongsFromDocument())
+    {
+        SetStatus("Module opened but failed to add Session song entry");
+        return false;
+    }
+    (void)PromoteActiveSessionSongEmbedsIntoBank();
+    const bool play_ok = ReloadPlaybackFromDocument(true);
+    ApplyPlayerMixSettings();
+    char status[256];
+    std::snprintf(status,
+                  sizeof(status),
+                  "Opened module as Session (%zu custom INST)%s",
+                  m_session_custom_inst_ids.size(),
+                  play_ok ? "" : " (playback failed)");
+    SetStatus(status);
+    return true;
+#endif
+}
+
+/* Append a tracker module as another Session song (keep current bank/session). */
+bool AddModuleToSession(const std::string &path)
+{
+#if !(defined(LIBXMP_STATIC) || defined(LIBXMP_CORE_PLAYER))
+    SetStatus("Tracker module support not enabled in this build");
+    return false;
+#else
+    (void)CommitActiveSessionSong();
+    if (!LoadModuleFromPath(path.c_str()))
+    {
+        return false;
+    }
+    m_session_song_index = -1;
+    if (!SyncSessionSongsFromDocument())
+    {
+        SetStatus("Module loaded but failed to add to Session song list");
+        return false;
+    }
+    (void)PromoteActiveSessionSongEmbedsIntoBank();
+    ApplyPlayerMixSettings();
+    char status[256];
+    std::snprintf(status,
+                  sizeof(status),
+                  "Added Session song %d/%zu (module, %zu custom INST)",
+                  m_session_song_index + 1,
+                  m_session_songs.size(),
+                  m_session_custom_inst_ids.size());
+    SetStatus(status);
+    return true;
+#endif
 }
 
 /* File→Open RMF/ZMF: new session around the song; promote embeds into bank as custom. */
@@ -2618,7 +2781,10 @@ bool SaveSessionToPath(const char *path)
                 CaptureNbetLayoutBlob(m_pref_save_session_layout);
             if (!nbet.empty())
             {
-                std::vector<unsigned char> stored = EncodeNbetResourceBody(nbet);
+                std::vector<unsigned char> stored =
+                    EncodeNbetResourceBody(nbet,
+                                           m_pref_compress_session_on_save,
+                                           want_zsn);
                 char nbet_pascal[256];
                 BsnMakePascalName("NeoBAE Editor", nbet_pascal);
                 (void)XAddFileResource(out_file,
@@ -2690,10 +2856,27 @@ bool SaveSessionToPath(const char *path)
     }
 
     UpdateBusyProgress(0.88f, "Finalizing resource map…");
-    /* Session saves: no PackInst/Song/Bank/ZSHD and no LZMA. Flat Midi/SONG
-     * (and existing ZINS) inside a ZREZ map are valid; re-packing was the
-     * dominant cost on zpatches-sized banks. Cache rebuild only. */
-    if (XRebuildResourceFileCache(out_file) == FALSE)
+    /* Default: cache rebuild only (flat ZREZ/IREZ). Opt-in Compress Session on
+     * Save packs for smaller files — LZMA Z* blocks on .zsn, LZSS CSND on .bsn. */
+    if (m_pref_compress_session_on_save)
+    {
+        UpdateBusyProgress(0.90f,
+                           want_zsn ? "Compressing session (LZMA pack)…"
+                                    : "Compressing session (LZSS CSND)…");
+        if (want_zsn)
+        {
+            if (XPackResourceFileForShip(out_file) == FALSE)
+            {
+                (void)XRebuildResourceFileCache(out_file);
+            }
+        }
+        else
+        {
+            CompressSessionBsnSamplesLzss(out_file);
+            (void)XRebuildResourceFileCache(out_file);
+        }
+    }
+    else if (XRebuildResourceFileCache(out_file) == FALSE)
     {
         /* Still try to write the in-memory image. */
     }
@@ -2777,14 +2960,21 @@ bool SaveSessionToPath(const char *path)
     m_session_casd_count = static_cast<int>(m_session_pcm_cache.size());
     RememberRecentSession(path);
 
-    char status[320];
+    char status[384];
+    const char *compress_tag =
+        m_pref_compress_session_on_save
+            ? (want_zsn ? ", LZMA" : ", LZSS")
+            : "";
+    const std::string session_name = FileNameFromPath(path);
     if (want_zsn)
     {
         if (z_reason != 0)
         {
             std::snprintf(status,
                           sizeof(status),
-                          "Session saved (.zsn, Z reason=0x%x): %zu song(s), %d CaSd",
+                          "Saved session \"%s\" (.zsn%s, Z reason=0x%x): %zu song(s), %d CaSd",
+                          session_name.c_str(),
+                          compress_tag,
                           z_reason,
                           m_session_songs.size(),
                           m_session_casd_count);
@@ -2793,7 +2983,9 @@ bool SaveSessionToPath(const char *path)
         {
             std::snprintf(status,
                           sizeof(status),
-                          "Session saved (.zsn): %zu song(s), %d CaSd",
+                          "Saved session \"%s\" (.zsn%s): %zu song(s), %d CaSd — Ctrl+S updates this file",
+                          session_name.c_str(),
+                          compress_tag,
                           m_session_songs.size(),
                           m_session_casd_count);
         }
@@ -2802,7 +2994,9 @@ bool SaveSessionToPath(const char *path)
     {
         std::snprintf(status,
                       sizeof(status),
-                      "Session saved (.bsn): %zu song(s), %d CaSd",
+                      "Saved session \"%s\" (.bsn%s): %zu song(s), %d CaSd — Ctrl+S updates this file",
+                      session_name.c_str(),
+                      compress_tag,
                       m_session_songs.size(),
                       m_session_casd_count);
     }
