@@ -862,15 +862,29 @@ void mod2rmf_parse_sample_offset(const struct xmp_event *ev,
     }
 }
 
-/* Decode explicit row volume-set commands (tracker volume column).
+/* Decode explicit row volume-set commands (Cxx / volume column).
  * Returns TRUE only when the row contains an absolute volume command.
- * This allows callers to distinguish "v00" from "no volume command". */
+ * This allows callers to distinguish "C00"/"v00" from "no volume command"
+ * so intentional silence is emitted as CC7=0 instead of being treated as
+ * oneshot end (which would leave the previous CC7 hanging on looped samples). */
 bool mod2rmf_get_row_volume_command(const struct xmp_event *ev,
                                    uint8_t *outVol64)
 {
     if (!ev || !outVol64)
     {
         return FALSE;
+    }
+
+    /* ProTracker/XM effect Cxx (libxmp FX_VOLSET). */
+    if (ev->fxt == MOD2RMF_FX_VOLSET)
+    {
+        *outVol64 = (uint8_t)mod2rmf_clamp_int((int)ev->fxp, 0, 64);
+        return TRUE;
+    }
+    if (ev->f2t == MOD2RMF_FX_VOLSET)
+    {
+        *outVol64 = (uint8_t)mod2rmf_clamp_int((int)ev->f2p, 0, 64);
+        return TRUE;
     }
 
     /* libxmp may map volume-column set to a tracker FX opcode. */
@@ -953,11 +967,15 @@ bool mod2rmf_is_mod_family(const char *type)
         return FALSE;
     }
 
+    /* libxmp uses "Protracker" (lowercase 't'); also accept "ProTracker". */
     if (strstr(type, "MOD") ||
+        strstr(type, "Protracker") ||
         strstr(type, "ProTracker") ||
         strstr(type, "NoiseTracker") ||
+        strstr(type, "Noisetracker") ||
         strstr(type, "Startrekker") ||
-        strstr(type, "Fast Tracker"))
+        strstr(type, "Fast Tracker") ||
+        strstr(type, "FastTracker"))
     {
         return TRUE;
     }

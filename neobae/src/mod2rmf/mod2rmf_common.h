@@ -63,6 +63,7 @@
 #define MOD2RMF_FX_TONE_VSLIDE          0x05
 #define MOD2RMF_FX_VIBRA_VSLIDE         0x06
 #define MOD2RMF_FX_VOLSLIDE             0x0a
+#define MOD2RMF_FX_VOLSET               0x0c /* ProTracker/XM Cxx set volume */
 #define MOD2RMF_FX_TRK_VOL              0x80
 #define MOD2RMF_FX_TRK_VSLIDE           0x81
 #define MOD2RMF_FX_TRK_FVSLIDE          0x82

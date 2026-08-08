@@ -3876,7 +3876,9 @@ BAEResult PV_BuildTrackData(BAERmfEditorTrack const *track,
     for (initChannel = 0; initChannel < BAE_MAX_MIDI_CHANNELS; ++initChannel)
     {
         currentBank[initChannel] = 0;
-        currentProgram[initChannel] = 0;
+        /* 0xFF = unset. Program 0 is a real patch; initializing to 0 made
+         * per-note injection skip PC 0 when the tick-0 header PC was suppressed. */
+        currentProgram[initChannel] = 0xFF;
         explicitBankMsb[initChannel] = 0;
         explicitBankLsb[initChannel] = 0;
         explicitProgram[initChannel] = 0;
@@ -3889,6 +3891,14 @@ BAEResult PV_BuildTrackData(BAERmfEditorTrack const *track,
         unsigned char eventType;
 
         aux = &track->auxEvents[eventIndex];
+        /* Only tick-0 aux events suppress the header bank/program emit.
+         * Mid-song aux PCs (e.g. mod2rmf loop-start restores) must not block
+         * the initial Program Change — otherwise the first notes play with an
+         * unset/wrong patch when note.program happens to be 0. */
+        if (aux->tick != 0)
+        {
+            continue;
+        }
         channel = (unsigned char)(aux->status & 0x0F);
         eventType = (unsigned char)(aux->status & 0xF0);
         if (eventType == CONTROL_CHANGE && aux->dataBytes >= 2)
@@ -3905,6 +3915,7 @@ BAEResult PV_BuildTrackData(BAERmfEditorTrack const *track,
         else if (eventType == PROGRAM_CHANGE && aux->dataBytes >= 1)
         {
             explicitProgram[channel] = 1;
+            currentProgram[channel] = aux->data1;
         }
     }
 
