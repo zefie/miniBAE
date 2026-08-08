@@ -6232,9 +6232,15 @@
             }
             else if (m_bank_token && EnsureActiveBankWritable())
             {
-                (void)BAERmfEditorBank_SetInstrumentExtInfo(m_bank_token,
-                                                            m_ie_instrument_index,
-                                                            &m_ie_ext);
+                /* Re-resolve before write — prior live patches XReplace and shift
+                 * GetIndexed INST order. */
+                SyncInstrumentEditorBankIndex();
+                if (BAERmfEditorBank_SetInstrumentExtInfo(m_bank_token,
+                                                          m_ie_instrument_index,
+                                                          &m_ie_ext) == BAE_NO_ERROR)
+                {
+                    SyncInstrumentEditorBankIndex();
+                }
                 MarkBank01TouchedIfNeeded(m_ie_bank);
             }
         }
@@ -6414,6 +6420,7 @@
                 SetStatus("Instrument apply failed: bank not writable");
                 return;
             }
+            SyncInstrumentEditorBankIndex();
             r = BAERmfEditorBank_SetInstrumentExtInfo(m_bank_token, m_ie_instrument_index, &m_ie_ext);
             if (r == BAE_NO_ERROR)
             {
@@ -7061,6 +7068,7 @@
         {
             return;
         }
+        SyncInstrumentEditorBankIndex();
         uint32_t split_count = 0;
         if (BAERmfEditorBank_GetInstrumentSampleCount(m_bank_token,
                                                       m_ie_instrument_index,

@@ -1779,6 +1779,8 @@ BAEResult BAERmfEditorBank_SetInstrumentExtInfo(BAEBankToken bankToken,
     BAERmfEditorInstrumentExt ext;
     uint32_t i;
     BAEResult replaceResult;
+    uint32_t resolvedID;
+    uint32_t resolvedIndex;
 
     if (!bankToken || !info)
     {
@@ -1786,11 +1788,28 @@ BAEResult BAERmfEditorBank_SetInstrumentExtInfo(BAEBankToken bankToken,
     }
     bankFile = (XFILE)bankToken;
 
+    /* XReplaceFileResource (flat trash+append) shifts GetIndexed INST order.
+     * Callers often keep a stale instrumentIndex from open/Apply — resolve by
+     * INST id so live IE patches cannot write B2P000 edits onto B2P001. */
+    resolvedID = info->instID;
+    resolvedIndex = instrumentIndex;
+    if (BAERmfEditorBank_ResolveInstID(bankToken, info->instID, &resolvedID, &resolvedIndex) ==
+        BAE_NO_ERROR)
+    {
+        instrumentIndex = resolvedIndex;
+    }
+
     rawName[0] = 0;
     instData = XGetIndexedFileResource(bankFile, ID_INST, &instID,
                                        (int32_t)instrumentIndex, rawName, &instSize);
     if (!instData)
     {
+        return BAE_BAD_FILE;
+    }
+    if ((uint32_t)instID != info->instID && (uint32_t)instID != resolvedID)
+    {
+        /* Index still wrong after resolve — refuse rather than corrupt a neighbor. */
+        XDisposePtr(instData);
         return BAE_BAD_FILE;
     }
     if (instSize < kInstHeaderMinSize)
