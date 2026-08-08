@@ -1299,8 +1299,15 @@ if(BAE_ENABLE_OPUS_ENCODER OR BAE_ENABLE_OPUS_DECODER)
 endif()
 
 
+# ABI soversion for shared libneobae (matches Windows RC VERSION_MAJOR).
+set(NEOBAE_SOVERSION 2)
+
 if(NEOBAE_SHARED_LIBNEOBAE)
   add_library(neobae SHARED ${NEOBAE_SOURCES})
+  set_target_properties(neobae PROPERTIES
+    VERSION "${NEOBAE_SOVERSION}.0.0"
+    SOVERSION "${NEOBAE_SOVERSION}"
+  )
   if(MSVC)
     # MSVC does not add a lib prefix; keep the historical libneobae.dll / .lib names.
     # MinGW already prefixes with "lib", so OUTPUT_NAME stays "neobae" → libneobae.dll.
@@ -1318,10 +1325,13 @@ endif()
 set(NEOBAE_DLL_DEF_FILE "")
 set(NEOBAE_VCLIB_OUTPUT "")
 
-set(NEOBAE_DEP_LINK_VISIBILITY PUBLIC)
-if(NEOBAE_STATIC AND NEOBAE_SHARED_LIBNEOBAE)
-  # Build a self-contained libneobae.dll and avoid propagating dependency libs to consumers.
+# Shared libneobae already DT_NEEDEDs its deps; keep them out of the exported
+# INTERFACE so install/CMake packages stay relocatable. Static libneobae still
+# propagates link deps to consumers.
+if(NEOBAE_SHARED_LIBNEOBAE)
   set(NEOBAE_DEP_LINK_VISIBILITY PRIVATE)
+else()
+  set(NEOBAE_DEP_LINK_VISIBILITY PUBLIC)
 endif()
 
 set(NEOBAE_STATIC_DEP_LINK_PREFIX "")
@@ -1434,116 +1444,129 @@ if(BAE_EMBED_PATCHES_EFFECTIVE)
   target_include_directories(neobae PRIVATE ${BAE_EMBED_PATCH_HEADER_DIR})
 endif()
 
+# Public install surface is only the curated headers under include/neobae.
+# In-tree / third-party includes stay BUILD_INTERFACE so they are not exported.
 target_include_directories(neobae
   PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Common
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Platform
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/adx2wav
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/mthc
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/config
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/qoa
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/adpcm-xq
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/lzma-26.00/C
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/mod2rmf
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Common>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Platform>
+    $<INSTALL_INTERFACE:include/neobae>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/adx2wav>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/mthc>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/config>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/qoa>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/adpcm-xq>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/lzma-26.00/C>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/mod2rmf>
 )
 
 if(BAE_PLATFORM STREQUAL "foobar2000")
   target_include_directories(neobae PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/foobar2000
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/foobar2000>
   )
 endif()
 
 if(BAE_ENABLE_WMA_SUPPORT)
   target_include_directories(neobae PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Common/libwma
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_Source/Common/libwma>
   )
 endif()
 
 if(BAE_ENABLE_MP3_ENCODER OR BAE_ENABLE_MP3_DECODER)
-  target_include_directories(neobae PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_MPEG_Source_II)
+  target_include_directories(neobae PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/BAE_MPEG_Source_II>
+  )
 endif()
 
 if(BAE_ENABLE_MP3_ENCODER)
   target_include_directories(neobae PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/lame-3.100-slim/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/lame-3.100-slim/libmp3lame
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/lame-3.100-slim/mpglib
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/lame-3.100-slim/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/lame-3.100-slim/libmp3lame>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/lame-3.100-slim/mpglib>
   )
 endif()
 
 if(BAE_ENABLE_MP3_DECODER)
-  target_include_directories(neobae PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/minimp3)
+  target_include_directories(neobae PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/minimp3>
+  )
 endif()
 
 if(BAE_ENABLE_FLAC_ENCODER OR BAE_ENABLE_FLAC_DECODER)
   target_include_directories(neobae PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/flac/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/flac/src/libFLAC/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/flac/src
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/flac/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/flac/src/libFLAC/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/flac/src>
   )
 endif()
 
 if(BAE_ENABLE_VORBIS_ENCODER OR BAE_ENABLE_VORBIS_DECODER)
   target_include_directories(neobae PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libvorbis/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libvorbis/lib
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libogg/include
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libvorbis/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libvorbis/lib>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libogg/include>
   )
   if(BAE_VORBIS_INCLUDE_DIR)
-    target_include_directories(neobae PUBLIC ${BAE_VORBIS_INCLUDE_DIR})
+    target_include_directories(neobae PUBLIC $<BUILD_INTERFACE:${BAE_VORBIS_INCLUDE_DIR}>)
   endif()
 endif()
 
 if(BAE_ENABLE_OPUS_ENCODER OR BAE_ENABLE_OPUS_DECODER)
   target_include_directories(neobae BEFORE PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opus/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opus/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opus/celt
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opus/silk
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opus/silk/float
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opus/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opus/src>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opus/celt>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opus/silk>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opus/silk/float>
   )
 endif()
 
 if(BAE_ENABLE_OPUS_DECODER)
   target_include_directories(neobae BEFORE PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opusfile/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opusfile/src
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opusfile/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/opusfile/src>
   )
 endif()
 
 if(BAE_ENABLE_SF2_CONVERTER)
   target_include_directories(neobae PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/mod2rmf
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/mod2rmf>
   )
 endif()
 
 
 if(BAE_ENABLE_FLAC_ENCODER OR BAE_ENABLE_FLAC_DECODER OR BAE_ENABLE_VORBIS_ENCODER OR BAE_ENABLE_VORBIS_DECODER OR BAE_ENABLE_OPUS_ENCODER OR BAE_ENABLE_OPUS_DECODER)
-  target_include_directories(neobae PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libogg/include)
+  target_include_directories(neobae PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/libogg/include>
+  )
   if(BAE_OGG_INCLUDE_DIR)
-    target_include_directories(neobae PUBLIC ${BAE_OGG_INCLUDE_DIR})
+    target_include_directories(neobae PUBLIC $<BUILD_INTERFACE:${BAE_OGG_INCLUDE_DIR}>)
   endif()
 endif()
 
 if(BAE_ENABLE_SF2_CONVERTER)
-  target_include_directories(neobae PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/sf2-hsb)
+  target_include_directories(neobae PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/sf2-hsb>
+  )
 endif()
 
 if(BAE_ENABLE_BAESCRIPT)
-  target_include_directories(neobae PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/script)
+  target_include_directories(neobae PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/script>
+  )
 endif()
 
 if(BAE_ENABLE_SF2_SUPPORT AND BAE_ENABLE_FLUIDLITE AND BAE_FLUIDLITE_INCLUDE_DIR)
-  target_include_directories(neobae PUBLIC ${BAE_FLUIDLITE_INCLUDE_DIR})
+  target_include_directories(neobae PUBLIC $<BUILD_INTERFACE:${BAE_FLUIDLITE_INCLUDE_DIR}>)
 endif()
 
 if(BAE_PLATFORM STREQUAL "SDL2" AND BAE_SDL_BACKEND_AVAILABLE)
-  target_include_directories(neobae PUBLIC ${BAE_SDL2_INCLUDE_DIR})
+  target_include_directories(neobae PUBLIC $<BUILD_INTERFACE:${BAE_SDL2_INCLUDE_DIR}>)
   target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${BAE_SDL2_LIBRARY})
 endif()
 
 if(BAE_PLATFORM STREQUAL "SDL3" AND BAE_SDL_BACKEND_AVAILABLE)
-  target_include_directories(neobae PUBLIC ${BAE_SDL3_INCLUDE_DIR})
+  target_include_directories(neobae PUBLIC $<BUILD_INTERFACE:${BAE_SDL3_INCLUDE_DIR}>)
   target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${BAE_SDL3_LIBRARY})
 endif()
 
@@ -2525,3 +2548,31 @@ include(CTest)
 if(BUILD_TESTING)
   include(cmake/cmake_tests.cmake)
 endif()
+
+# Collect enabled tool/app targets for install / CPack.
+set(NEOBAE_TOOL_TARGETS "")
+foreach(_neobae_tool
+    playbae
+    zefidi
+    RegisterFileTypesToZefidi
+    songtool
+    rmfutil
+    adp2wav
+    adx2wav
+    mthc_decomp
+    ringtone2mid
+    rmiutil
+    bankrecomp
+    sf2_hsb
+    xmfutil
+    mod2rmf
+    nbeditor
+  )
+  if(TARGET ${_neobae_tool})
+    list(APPEND NEOBAE_TOOL_TARGETS ${_neobae_tool})
+  endif()
+endforeach()
+unset(_neobae_tool)
+
+include(cmake/NeoBAEInstall.cmake)
+include(cmake/NeoBAECpack.cmake)

@@ -453,8 +453,27 @@
 
     void MeClampScrollTick(float view_width_px)
     {
-        m_midi_scroll_tick =
+        const float clamped =
             std::clamp(m_midi_scroll_tick, 0.0f, MeMaxScrollTick(view_width_px));
+        if (clamped != m_midi_scroll_tick)
+        {
+            m_midi_scroll_tick = clamped;
+            m_midi_hscroll_sync = true;
+        }
+    }
+
+    void MeSetScrollTick(float tick, float view_width_px, bool user_initiated)
+    {
+        if (user_initiated)
+        {
+            m_midi_follow_playhead = false;
+        }
+        const float clamped = std::clamp(tick, 0.0f, MeMaxScrollTick(view_width_px));
+        if (clamped != m_midi_scroll_tick)
+        {
+            m_midi_scroll_tick = clamped;
+            m_midi_hscroll_sync = true;
+        }
     }
 
     void MeScrollTimeByPixels(float dx_pixels, float view_width_px, bool user_initiated)
@@ -463,18 +482,37 @@
         {
             return;
         }
-        if (user_initiated)
-        {
-            m_midi_follow_playhead = false;
-        }
-        m_midi_scroll_tick -= dx_pixels / std::max(0.001f, m_midi_px_per_tick);
-        MeClampScrollTick(view_width_px);
+        MeSetScrollTick(m_midi_scroll_tick - dx_pixels / std::max(0.001f, m_midi_px_per_tick),
+                        view_width_px,
+                        user_initiated);
     }
 
     void MeScrollTimeByWheel(float wheel, float view_width_px)
     {
         /* Positive wheel = scroll earlier (left content moves right), matching Shift+wheel. */
         MeScrollTimeByPixels(wheel * 40.0f, view_width_px, true);
+    }
+
+    /* Ctrl+wheel zoom. focus_screen_x / time_origin_x keep the tick under the cursor stable. */
+    void MeZoomTimeAt(float wheel, float focus_screen_x, float time_origin_x, float view_width_px)
+    {
+        if (wheel == 0.0f)
+        {
+            return;
+        }
+        const float old_ppt = std::max(0.001f, m_midi_px_per_tick);
+        const float factor = (wheel > 0.0f) ? 1.15f : (1.0f / 1.15f);
+        const float new_ppt = std::clamp(old_ppt * factor, 0.02f, 2.5f);
+        if (new_ppt == old_ppt)
+        {
+            return;
+        }
+        const float focus_tick =
+            m_midi_scroll_tick + (focus_screen_x - time_origin_x) / old_ppt;
+        m_midi_px_per_tick = new_ppt;
+        m_midi_scroll_tick = focus_tick - (focus_screen_x - time_origin_x) / new_ppt;
+        MeClampScrollTick(view_width_px);
+        m_midi_hscroll_sync = true;
     }
 
     /* Returns LoopStart / LoopEnd / None. Prefer the nearer handle when both are close. */
@@ -527,6 +565,50 @@
                     ImVec2(x, y1),
                     IM_COL32(80, 200, 255, 200),
                     1.5f);
+    }
+
+    float MeTimeScrollbarHostHeight() const
+    {
+        return ImGui::GetStyle().ScrollbarSize;
+    }
+
+    /* Native-looking horizontal scrollbar under the time grid (skips left gutter).
+     * Uses ScrollbarEx so we only need ScrollbarSize height — no child window / V-scroll. */
+    void MeDrawTimeScrollbar(float width)
+    {
+        const float bar_h = MeTimeScrollbarHostHeight();
+        const float view_w = std::max(1.0f, width - kMeTimeGutter);
+        const float ppt = std::max(0.001f, m_midi_px_per_tick);
+        const float max_scroll_tick = MeMaxScrollTick(view_w);
+        const float content_px = std::max(view_w + 1.0f, view_w + max_scroll_tick * ppt);
+        ImS64 scroll_px = static_cast<ImS64>(
+            std::clamp(m_midi_scroll_tick, 0.0f, max_scroll_tick) * ppt + 0.5f);
+        m_midi_hscroll_sync = false;
+
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
+        ImGui::Dummy(ImVec2(kMeTimeGutter, bar_h));
+        ImGui::SameLine(0.0f, 0.0f);
+
+        const ImVec2 bar_pos = ImGui::GetCursorScreenPos();
+        ImGui::Dummy(ImVec2(view_w, bar_h)); /* layout slot */
+        const ImRect bb(bar_pos, ImVec2(bar_pos.x + view_w, bar_pos.y + bar_h));
+        const ImGuiID id = ImGui::GetID("##me_hscroll");
+        const ImS64 before = scroll_px;
+        (void)ImGui::ScrollbarEx(bb,
+                                 id,
+                                 ImGuiAxis_X,
+                                 &scroll_px,
+                                 static_cast<ImS64>(view_w),
+                                 static_cast<ImS64>(content_px),
+                                 ImDrawFlags_RoundCornersNone);
+        if (scroll_px != before)
+        {
+            m_midi_follow_playhead = false;
+            m_midi_scroll_tick =
+                static_cast<float>(scroll_px) / ppt;
+            MeClampScrollTick(view_w);
+        }
+        ImGui::PopStyleVar();
     }
 
     float MePitchToY(int pitch, float origin_y) const
@@ -3115,6 +3197,7 @@
                 {
                     m_midi_nrpn_tick = static_cast<int>(e.tick);
                     m_midi_scroll_tick = std::max(0.0f, static_cast<float>(e.tick) - 64.0f);
+                    m_midi_hscroll_sync = true;
                 }
                 ImGui::PopID();
             }
@@ -3323,20 +3406,38 @@
 
         MeDrawRuler(dl, win, ImVec2(content_w, ruler_h), length_ticks);
 
-        float y = win.y + ruler_h + 4.0f;
+        /* Lanes scroll vertically when they don't fit the (capped) timeline panel. */
+        const float lanes_area_h =
+            std::max(1.0f, height - ruler_h - 4.0f - ImGui::GetStyle().WindowPadding.y);
+        ImGui::SetCursorScreenPos(ImVec2(win.x, win.y + ruler_h + 4.0f));
+        ImGui::BeginChild("##me_tl_lanes",
+                          ImVec2(content_w, lanes_area_h),
+                          ImGuiChildFlags_None,
+                          ImGuiWindowFlags_NoScrollWithMouse);
+        dl = ImGui::GetWindowDrawList();
+        const float lanes_content_h =
+            static_cast<float>(std::max<uint16_t>(1, track_count)) * (lane_h + 2.0f) + 2.0f;
+        /* Establish scroll range, then draw in content space (respects GetScrollY). */
+        ImGui::Dummy(ImVec2(content_w, lanes_content_h));
+        ImGui::SetCursorPos(ImVec2(0.0f, 0.0f));
+        const ImVec2 lanes_win = ImGui::GetCursorScreenPos();
+
+        float y = lanes_win.y;
         for (uint16_t t = 0; t < track_count; ++t)
         {
+            ImGui::SetCursorPos(ImVec2(0.0f, static_cast<float>(t) * (lane_h + 2.0f)));
+            y = ImGui::GetCursorScreenPos().y;
             BAERmfEditorTrackInfo info{};
             BAERmfEditorDocument_GetTrackInfo(m_document, t, &info);
             const bool selected = (static_cast<int>(t) == m_midi_selected_track);
-            const ImVec2 lane0(win.x, y);
-            const ImVec2 lane1(win.x + content_w, y + lane_h);
+            const ImVec2 lane0(lanes_win.x, y);
+            const ImVec2 lane1(lanes_win.x + content_w, y + lane_h);
             dl->AddRectFilled(lane0,
                               lane1,
                               selected ? IM_COL32(48, 56, 72, 255) : IM_COL32(28, 30, 36, 255));
             dl->AddRect(lane0, lane1, IM_COL32(70, 74, 86, 255));
 
-            ImGui::SetCursorScreenPos(ImVec2(win.x + 4.0f, y + 4.0f));
+            ImGui::SetCursorScreenPos(ImVec2(lanes_win.x + 4.0f, y + 4.0f));
             ImGui::PushID(static_cast<int>(t) + 9000);
             char label[128];
             std::snprintf(label,
@@ -3351,7 +3452,7 @@
                 m_midi_primary_note = -1;
                 MeInvalidateMidiDocCaches();
             }
-            ImGui::SetCursorScreenPos(ImVec2(win.x + 4.0f, y + 24.0f));
+            ImGui::SetCursorScreenPos(ImVec2(lanes_win.x + 4.0f, y + 24.0f));
             bool muted = t < m_midi_track_muted.size() ? m_midi_track_muted[t] : false;
             bool solo = t < m_midi_track_solo.size() ? m_midi_track_solo[t] : false;
             if (ImGui::Checkbox("M", &muted))
@@ -3378,7 +3479,7 @@
                                 info.program);
 
             /* Note overview: active region vs past end-of-track. */
-            const float body_x = win.x + chrome_w;
+            const float body_x = lanes_win.x + chrome_w;
             const float body_w = std::max(1.0f, content_w - chrome_w);
             const float body_y0 = y + 2.0f;
             const float body_y1 = y + lane_h - 2.0f;
@@ -3485,37 +3586,49 @@
                 }
             }
             ImGui::PopID();
-            y += lane_h + 2.0f;
         }
 
         /* Shared playhead over lanes (same time origin as ruler / piano roll). */
         {
-            const float time_x = win.x + chrome_w;
+            const float time_x = lanes_win.x + chrome_w;
             const float play_x = MeTickToX(MePlayheadTick(), time_x);
-            if (play_x >= time_x && play_x <= win.x + content_w)
+            const float lanes_bottom =
+                lanes_win.y + static_cast<float>(track_count) * (lane_h + 2.0f);
+            if (play_x >= time_x && play_x <= lanes_win.x + content_w)
             {
-                dl->AddLine(ImVec2(play_x, win.y + ruler_h),
-                            ImVec2(play_x, y),
+                dl->AddLine(ImVec2(play_x, lanes_win.y),
+                            ImVec2(play_x, lanes_bottom),
                             IM_COL32(255, 90, 70, 220),
                             2.0f);
             }
-            MeDrawLoopDragGuide(dl, time_x, win.x + content_w, win.y + ruler_h, y);
+            MeDrawLoopDragGuide(dl, time_x, lanes_win.x + content_w, lanes_win.y, lanes_bottom);
         }
 
-        /* Horizontal pan / scroll (Shift+wheel, trackpad wheel-H, middle-drag). */
+        /* Zoom / pan / scroll (Ctrl+wheel zoom, Shift+wheel / wheel-H scroll, middle-drag). */
         {
             const ImGuiIO &tio = ImGui::GetIO();
             const bool tl_hovered =
                 ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
             if (tl_hovered && m_midi_drag_mode == MeDragMode::None)
             {
-                if (tio.MouseWheelH != 0.0f)
+                if (tio.KeyCtrl && tio.MouseWheel != 0.0f)
+                {
+                    const float time_x = lanes_win.x + chrome_w;
+                    MeZoomTimeAt(tio.MouseWheel, tio.MousePos.x, time_x, time_view_w);
+                }
+                else if (tio.MouseWheelH != 0.0f)
                 {
                     MeScrollTimeByWheel(tio.MouseWheelH, time_view_w);
                 }
                 else if (tio.KeyShift && tio.MouseWheel != 0.0f)
                 {
                     MeScrollTimeByWheel(tio.MouseWheel, time_view_w);
+                }
+                else if (tio.MouseWheel != 0.0f &&
+                         lanes_content_h > lanes_area_h + 1.0f)
+                {
+                    /* Plain wheel scrolls the track list when it overflows. */
+                    ImGui::SetScrollY(ImGui::GetScrollY() - tio.MouseWheel * (lane_h + 2.0f));
                 }
             }
             if (tl_hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Middle) &&
@@ -3526,17 +3639,18 @@
             }
         }
 
-        /* One timeline context menu: resolve track + tick from the right-click. */
+        /* Defer context menu to the outer timeline window (shared with ruler right-click). */
+        bool open_track_ctx = false;
         if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
             ImGui::IsMouseClicked(ImGuiMouseButton_Right))
         {
             const ImVec2 mp = ImGui::GetIO().MousePos;
-            const float time_x = win.x + chrome_w;
-            const float lanes_top = win.y + ruler_h + 4.0f;
+            const float time_x = lanes_win.x + chrome_w;
+            const float scroll_y = ImGui::GetScrollY();
             int hit_track = -1;
-            if (mp.y >= lanes_top)
+            if (mp.y >= lanes_win.y)
             {
-                const float rel = mp.y - lanes_top;
+                const float rel = mp.y - lanes_win.y + scroll_y;
                 const int idx = static_cast<int>(rel / (lane_h + 2.0f));
                 if (idx >= 0 && idx < static_cast<int>(track_count) &&
                     rel - static_cast<float>(idx) * (lane_h + 2.0f) <= lane_h)
@@ -3571,6 +3685,49 @@
                 m_midi_ctx_tick = MePlayheadTick();
                 m_midi_ctx_has_tick = (m_midi_ctx_track >= 0);
             }
+            open_track_ctx = true;
+        }
+        ImGui::EndChild(); /* ##me_tl_lanes */
+
+        /* Ruler strip: zoom / horizontal scroll / loop context. */
+        {
+            const ImGuiIO &tio = ImGui::GetIO();
+            const bool outer_hovered =
+                ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+            const bool over_ruler =
+                outer_hovered && tio.MousePos.y >= win.y &&
+                tio.MousePos.y < win.y + ruler_h + 4.0f;
+            if (over_ruler && m_midi_drag_mode == MeDragMode::None)
+            {
+                const float time_x = win.x + chrome_w;
+                if (tio.KeyCtrl && tio.MouseWheel != 0.0f)
+                {
+                    MeZoomTimeAt(tio.MouseWheel, tio.MousePos.x, time_x, time_view_w);
+                }
+                else if (tio.MouseWheelH != 0.0f)
+                {
+                    MeScrollTimeByWheel(tio.MouseWheelH, time_view_w);
+                }
+                else if (tio.KeyShift && tio.MouseWheel != 0.0f)
+                {
+                    MeScrollTimeByWheel(tio.MouseWheel, time_view_w);
+                }
+                if (ImGui::IsMouseClicked(ImGuiMouseButton_Middle))
+                {
+                    m_midi_drag_mode = MeDragMode::Pan;
+                    m_midi_follow_playhead = false;
+                }
+                if (ImGui::IsMouseClicked(ImGuiMouseButton_Right) && tio.MousePos.x >= time_x)
+                {
+                    m_midi_ctx_tick = MeXToTick(tio.MousePos.x, time_x);
+                    m_midi_ctx_has_tick = true;
+                    m_midi_ctx_track = m_midi_selected_track;
+                    open_track_ctx = true;
+                }
+            }
+        }
+        if (open_track_ctx)
+        {
             ImGui::OpenPopup("##me_track_ctx");
         }
         if (ImGui::BeginPopup("##me_track_ctx"))
@@ -3688,7 +3845,7 @@
             }
             ImGui::EndPopup();
         }
-        ImGui::EndChild();
+        ImGui::EndChild(); /* ##me_timeline */
     }
 
     void MeDrawPianoRoll(float width, float height)
@@ -3716,7 +3873,7 @@
                 ++visible_auto;
             }
         }
-        const float lyrics_lane_h = m_midi_lyrics_lane_visible ? 56.0f : 0.0f;
+        const float lyrics_lane_h = m_midi_lyrics_lane_visible ? 52.0f : 0.0f;
         const float min_roll_h = 120.0f;
         const float min_auto_h = auto_header_h + min_lane_h + 8.0f;
         const float max_auto_h =
@@ -4022,21 +4179,13 @@
 
         if (hovered && (io.MouseWheel != 0.0f || io.MouseWheelH != 0.0f))
         {
-            if (io.MouseWheelH != 0.0f)
+            if (io.KeyCtrl && io.MouseWheel != 0.0f)
+            {
+                MeZoomTimeAt(io.MouseWheel, io.MousePos.x, grid_origin.x, grid_size.x);
+            }
+            else if (io.MouseWheelH != 0.0f)
             {
                 MeScrollTimeByWheel(io.MouseWheelH, grid_size.x);
-            }
-            else if (io.KeyCtrl && io.MouseWheel != 0.0f)
-            {
-                const float factor = (io.MouseWheel > 0.0f) ? 1.15f : (1.0f / 1.15f);
-                const float old_ppt = m_midi_px_per_tick;
-                m_midi_px_per_tick = std::clamp(m_midi_px_per_tick * factor, 0.02f, 2.5f);
-                /* Zoom toward cursor X so the tick under the mouse stays put. */
-                const float focus_tick = m_midi_scroll_tick +
-                    (io.MousePos.x - grid_origin.x) / std::max(0.001f, old_ppt);
-                m_midi_scroll_tick =
-                    focus_tick - (io.MousePos.x - grid_origin.x) / std::max(0.001f, m_midi_px_per_tick);
-                MeClampScrollTick(grid_size.x);
             }
             else if (io.KeyShift && io.MouseWheel != 0.0f)
             {
@@ -4249,7 +4398,10 @@
         }
 
         /* Automation lanes — resizable against the piano roll, scrollable when many. */
-        ImGui::BeginChild("##me_auto", ImVec2(width, auto_h), true);
+        ImGui::BeginChild("##me_auto",
+                          ImVec2(width, auto_h),
+                          ImGuiChildFlags_Borders,
+                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         {
             ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 2.0f));
             if (ImGui::ArrowButton("##me_auto_toggle",
@@ -4272,16 +4424,27 @@
                 return;
             }
 
-            const float lanes_view_h = std::max(0.0f, auto_h - auto_header_h - 6.0f);
+            /* Use leftover space after the header — avoids 1px outer-panel overflow scroll. */
+            const float lanes_view_h = std::max(0.0f, ImGui::GetContentRegionAvail().y);
             /* Fill the panel when few lanes are visible; scroll when many. */
             const float auto_lane_h =
                 (visible_auto > 0)
                     ? std::max(min_lane_h, lanes_view_h / static_cast<float>(visible_auto))
                     : min_lane_h;
+            const float lanes_content_h =
+                static_cast<float>(std::max(0, visible_auto)) * auto_lane_h;
+            /* Solo / few lanes that fill the panel must not get a V-scrollbar. */
+            const bool auto_needs_vscroll = lanes_content_h > lanes_view_h + 1.0f;
+            ImGuiWindowFlags auto_scroll_flags = ImGuiWindowFlags_NoScrollWithMouse;
+            if (!auto_needs_vscroll)
+            {
+                auto_scroll_flags |= ImGuiWindowFlags_NoScrollbar;
+            }
+            /* No H-scrollbar here — time scroll is shared with the piano roll. */
             ImGui::BeginChild("##me_auto_scroll",
                               ImVec2(0.0f, lanes_view_h),
-                              false,
-                              ImGuiWindowFlags_HorizontalScrollbar);
+                              ImGuiChildFlags_None,
+                              auto_scroll_flags);
             ImDrawList *adl = ImGui::GetWindowDrawList();
             ImVec2 aorigin = ImGui::GetCursorScreenPos();
             float ay = aorigin.y;
@@ -4588,10 +4751,33 @@
             {
                 ImGui::TextDisabled("No automation lanes visible (enable in toolbar).");
             }
-            else
+            else if (auto_needs_vscroll)
             {
-                /* Reserve vertical space so the scroll region covers all lanes. */
-                ImGui::Dummy(ImVec2(1.0f, static_cast<float>(drawn) * auto_lane_h));
+                /* Only extend content when lanes actually overflow the view. */
+                ImGui::SetCursorPos(ImVec2(0.0f, static_cast<float>(drawn) * auto_lane_h));
+                ImGui::Dummy(ImVec2(1.0f, 1.0f));
+            }
+            if (!auto_needs_vscroll && ImGui::GetScrollY() != 0.0f)
+            {
+                ImGui::SetScrollY(0.0f);
+            }
+            /* Ctrl+wheel time-zoom (same as piano roll / timeline). */
+            if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
+                io.KeyCtrl && io.MouseWheel != 0.0f)
+            {
+                const float time_x = aorigin.x + key_w;
+                const float view_w = std::max(1.0f, lane_draw_w - key_w);
+                MeZoomTimeAt(io.MouseWheel, io.MousePos.x, time_x, view_w);
+            }
+            else if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
+                     io.MouseWheelH != 0.0f)
+            {
+                MeScrollTimeByWheel(io.MouseWheelH, std::max(1.0f, lane_draw_w - key_w));
+            }
+            else if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
+                     io.KeyShift && io.MouseWheel != 0.0f)
+            {
+                MeScrollTimeByWheel(io.MouseWheel, std::max(1.0f, lane_draw_w - key_w));
             }
             ImGui::EndChild(); /* ##me_auto_scroll */
         }
@@ -4715,7 +4901,7 @@
         {
             ImGui::SetTooltip(
                 "Keep the playhead in view while playing.\n"
-                "Manual scroll (Shift+wheel, trackpad, middle-drag, or Scroll)\n"
+                "Manual scroll (scrollbar, Shift+wheel, trackpad, middle-drag)\n"
                 "turns Follow off.");
         }
         place(labeled_w("Zoom", 100.0f));
@@ -4723,29 +4909,14 @@
         {
             const float view_w =
                 std::max(1.0f, ImGui::GetContentRegionAvail().x - kMeTimeGutter);
-            if (ImGui::SliderFloat("Zoom", &m_midi_px_per_tick, 0.02f, 1.5f, "%.3f"))
+            if (ImGui::SliderFloat("Zoom", &m_midi_px_per_tick, 0.02f, 2.5f, "%.3f"))
             {
                 MeClampScrollTick(view_w);
-            }
-            place(labeled_w("Scroll", 140.0f));
-            ImGui::SetNextItemWidth(140.0f);
-            const float max_scroll = MeMaxScrollTick(view_w);
-            float scroll = m_midi_scroll_tick;
-            if (ImGui::SliderFloat("Scroll",
-                                   &scroll,
-                                   0.0f,
-                                   std::max(0.0f, max_scroll),
-                                   "%.0f"))
-            {
-                m_midi_follow_playhead = false;
-                m_midi_scroll_tick = scroll;
+                m_midi_hscroll_sync = true;
             }
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
             {
-                ImGui::SetTooltip(
-                    "Horizontal scroll in ticks.\n"
-                    "Also: Shift+wheel, horizontal trackpad swipe,\n"
-                    "or middle-mouse drag on the timeline / piano roll.");
+                ImGui::SetTooltip("Time zoom (also Ctrl+mouse wheel over the editor).");
             }
         }
         place(btn_w("Undo"));
@@ -5071,13 +5242,20 @@
         }
         bool open = m_midi_editor_open;
         ImGui::SetNextWindowSize(ImVec2(980, 720), ImGuiCond_FirstUseEver);
-        if (!ImGui::Begin("MIDI Editor", &open, ImGuiWindowFlags_NoScrollbar))
+        if (!ImGui::Begin("MIDI Editor",
+                          &open,
+                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
         {
             ImGui::End();
             m_midi_editor_open = open;
             MeDrawSetEotConfirmDialog();
             MeDrawNrpnManagerDialog();
             return;
+        }
+        /* Layout is fitted to avail; never keep a leftover scroll from taller frames. */
+        if (ImGui::GetScrollY() != 0.0f)
+        {
+            ImGui::SetScrollY(0.0f);
         }
         m_midi_editor_open = open;
         m_midi_editor_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
@@ -5113,7 +5291,9 @@
             if (play < static_cast<uint32_t>(m_midi_scroll_tick) ||
                 play > static_cast<uint32_t>(m_midi_scroll_tick + view_ticks * 0.85f))
             {
-                m_midi_scroll_tick = std::max(0.0f, static_cast<float>(play) - view_ticks * 0.25f);
+                const float view_w =
+                    std::max(1.0f, ImGui::GetContentRegionAvail().x - kMeTimeGutter);
+                MeSetScrollTick(static_cast<float>(play) - view_ticks * 0.25f, view_w, false);
             }
         }
         m_midi_playhead_tick = MePlayheadTick();
@@ -5123,18 +5303,29 @@
         ImGui::Separator();
 
         const ImVec2 avail = ImGui::GetContentRegionAvail();
-        uint16_t track_count_for_h = 0;
-        BAERmfEditorDocument_GetTrackCount(m_document, &track_count_for_h);
-        const float lane_h = std::clamp(m_midi_track_lane_h, 28.0f, 120.0f);
-        const float timeline_h = std::clamp(
-            26.0f + static_cast<float>(std::max<uint16_t>(1, track_count_for_h)) * (lane_h + 2.0f) +
-                8.0f,
-            100.0f,
-            std::max(100.0f, avail.y * 0.45f));
+        const float hscroll_h = MeTimeScrollbarHostHeight();
         const float split_h = 6.0f;
+        /* Zero Y spacing so timeline + split + roll + H-bar fit avail.y exactly (no parent V-scroll). */
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
+                            ImVec2(ImGui::GetStyle().ItemSpacing.x, 0.0f));
+
+        /* Track timeline is a capped, splitter-sized panel; piano roll gets the rest.
+         * Sizes are chosen so timeline + split + roll + H-bar == avail.y (no overflow). */
+        const float min_timeline_h = 90.0f;
+        const float min_roll_h = 48.0f;
+        const float max_timeline_h = std::max(min_timeline_h, avail.y * 0.40f);
+        const float body_budget = std::max(0.0f, avail.y - split_h - hscroll_h);
+        float timeline_h = std::clamp(m_midi_timeline_panel_h, min_timeline_h, max_timeline_h);
+        if (timeline_h + min_roll_h > body_budget)
+        {
+            timeline_h = std::max(40.0f, body_budget - min_roll_h);
+        }
+        m_midi_timeline_panel_h = timeline_h;
+        const float roll_h = std::max(0.0f, body_budget - timeline_h);
+
         MeDrawTrackTimeline(avail.x, timeline_h);
 
-        ImGui::InvisibleButton("##me_lane_h_split", ImVec2(avail.x, split_h));
+        ImGui::InvisibleButton("##me_timeline_split", ImVec2(avail.x, split_h));
         {
             const bool split_hover = ImGui::IsItemHovered();
             const bool split_active = ImGui::IsItemActive();
@@ -5144,8 +5335,17 @@
             }
             if (split_active)
             {
-                m_midi_track_lane_h =
-                    std::clamp(m_midi_track_lane_h + ImGui::GetIO().MouseDelta.y, 28.0f, 120.0f);
+                const float max_drag = std::min(
+                    max_timeline_h,
+                    std::max(min_timeline_h, body_budget - min_roll_h));
+                m_midi_timeline_panel_h = std::clamp(
+                    m_midi_timeline_panel_h + ImGui::GetIO().MouseDelta.y,
+                    min_timeline_h,
+                    max_drag);
+            }
+            if (split_hover && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+            {
+                ImGui::SetTooltip("Drag to resize track timeline vs piano roll");
             }
             const ImVec2 sp0 = ImGui::GetItemRectMin();
             const ImVec2 sp1 = ImGui::GetItemRectMax();
@@ -5159,7 +5359,9 @@
                 2.0f);
         }
 
-        MeDrawPianoRoll(avail.x, avail.y - timeline_h - split_h - 4.0f);
+        MeDrawPianoRoll(avail.x, roll_h);
+        MeDrawTimeScrollbar(avail.x);
+        ImGui::PopStyleVar();
 
         /* Middle-mouse pan is started in timeline/roll; apply once per frame here. */
         if (m_midi_drag_mode == MeDragMode::Pan)

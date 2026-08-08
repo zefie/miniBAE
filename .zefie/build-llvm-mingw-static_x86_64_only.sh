@@ -1,39 +1,9 @@
 #!/bin/bash
-# Get the version
-COMMIT=$(git rev-parse --short HEAD 2>/dev/null)
-DIRTY=$(git status --porcelain 2>/dev/null | head -n 1)
-TAG_COMMIT=$(git rev-list --abbrev-commit --tags --max-count=1 2>/dev/null)
-TAG=$(git describe --abbrev=0 --tags "$TAG_COMMIT" 2>/dev/null || true)
-DATE=$(git log -1 --format=%cd --date=format:"%Y%m%d" 2>/dev/null)
-
 function checkexit() {
 	if [ "$1" != 0 ]; then
 		exit "$1"
 	fi
 }
-
-if [[ -z "$COMMIT" ]]; then
-  # No git metadata (export tarball). Fallback to date.
-  if [[ -z "$DATE" ]]; then
-    DATE=$(date +%Y%m%d)
-  fi
-  VERSION="$DATE"
-else
-  if [[ -n "$TAG" ]]; then
-    # If HEAD equals tag commit, use the tag (strip leading v)
-    if [[ "$COMMIT" == "$TAG_COMMIT" ]]; then
-      VERSION="${TAG#v}"
-    else
-      VERSION="git-$COMMIT"
-    fi
-  else
-    VERSION="git-$COMMIT"
-  fi
-
-  if [[ -n "$DIRTY" ]]; then
-    VERSION="${VERSION}-dirty"
-  fi
-fi
 
 # Build the project
 export TARGET=x86_64-w64-mingw32
@@ -53,8 +23,9 @@ export PKG_CONFIG_SYSROOT_DIR="${TOOLCHAIN_PREFIX}/${TARGET}"
 export CFLAGS="-march=x86-64 -mtune=znver4"
 export CXXFLAGS="$CFLAGS"
 
-mkdir -p build-${TARGET}
-pushd build-${TARGET}
+REPO_ROOT="$(pwd)"
+mkdir -p "build-${TARGET}"
+pushd "build-${TARGET}"
 
 cmake .. \
     -DCMAKE_SYSTEM_NAME=Windows \
@@ -71,20 +42,12 @@ checkexit "$?"
 
 popd
 
-# we now have build-aarch64-w64-mingw32, build-armv7-w64-mingw32, build-x86_64-w64-mingw32, and build-i686-w64-mingw32
-# directories with the built libraries and executables. Now build the release package.
+# Package suite + sdk ZIPs via CPack (names come from BAE_VERSION in CMake).
 rm -rf out/
 mkdir -p out/
-if [ "${1}" == "--clean" ]; then
-    echo " *** Cleaning build directories..."
-    rm -rf build-*-w64-mingw32
-fi
-
-DEST="neobae-suite_windows_x86_64_${VERSION}"
-cd "build-x86_64-w64-mingw32/bin"
-echo " *** Packaging ${DEST}.zip..."
-zip -9 "../../out/${DEST}.zip" *.*
-cd "../.."
+echo " *** Packaging suite + sdk ZIPs with CPack..."
+cpack --config "${REPO_ROOT}/build-${TARGET}/CPackConfig.cmake" -G ZIP -B "${REPO_ROOT}/out"
+checkexit "$?"
 
 if [ "${1}" == "--clean" ]; then
     echo " *** Cleaning build directories..."

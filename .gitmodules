@@ -36,3 +36,6 @@
 	path = neobae/src/thirdparty/adpcm-xq
 	url = https://github.com/dbry/adpcm-xq/
 	branch = new-formats
+[submodule "neobae/src/thirdparty/hyphen"]
+	path = neobae/src/thirdparty/hyphen
+	url = https://github.com/hunspell/hyphen.git

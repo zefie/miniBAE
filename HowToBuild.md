@@ -76,6 +76,32 @@ cmake --build build --parallel $(nproc)
 
 Optional packages for richer system-codec / tooling builds: `libsndfile-dev`, `libmp3lame-dev`, `libogg-dev`, `libvorbis-dev`, `libopus-dev`, `libopusfile-dev`, `libflac-dev`, `liblzma-dev`, `libxmp-dev`, `python3`.
 
+#### Install (headers, library, tools)
+
+```bash
+cmake --install build --prefix /usr/local
+# or: sudo cmake --install build --prefix /usr
+```
+
+This installs:
+
+- library → `lib/libneobae.so*`
+- tools → `bin/`
+- public headers → `include/neobae/`
+- CMake package → `lib/cmake/NeoBAE/` (`find_package(NeoBAE)`)
+
+Components: `Runtime`, `Tools`, `Development` (select with `--component`).
+
+#### Optional Debian packages
+
+CPack can build `.deb` packages for **the distro you build on** (Depends come from that machine’s `dpkg-shlibdeps`). A Trixie build is for Trixie; rebuild on another release/distro for that target.
+
+```bash
+cd build
+cpack -G DEB
+# produces libneobae, neobae-tools, libneobae-dev
+```
+
 ### Windows
 
 I highly recommend building in my [docker toolchain](https://hub.docker.com/repository/docker/zefie/llvm-mingw)
@@ -86,7 +112,10 @@ To build just for x86_64 (from the repository root):
 docker run --rm -it -v ./:/src zefie/llvm-mingw:latest .zefie/build-llvm-mingw-static_x86_64_only.sh
 ```
 
-This will generate a zip in the `out/` folder.
+This uses CPack to write two zips under `out/`:
+
+- `neobae-suite_windows_<arch>_<version>.zip` — flat tools + `libneobae.dll`
+- `neobae-sdk_windows_<arch>_<version>.zip` — `include/neobae/`, `lib/` (import libs, `.def`, CMake package), `bin/libneobae.dll`
 
 To build for all archs:
 
@@ -94,7 +123,7 @@ To build for all archs:
 docker run --rm -it -v ./:/src zefie/llvm-mingw:latest .zefie/build-llvm-mingw-static.sh
 ```
 
-This will generate 4 zips in the `out/` folder, one pertaining to each architecture.
+This generates suite + sdk zips per architecture (8 archives) in `out/`.
 
 ## Legacy Makefiles
 

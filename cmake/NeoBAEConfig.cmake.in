@@ -1,0 +1,31 @@
+@PACKAGE_INIT@
+
+set(NeoBAE_VERSION "@BAE_VERSION@")
+set(NeoBAE_SOVERSION "@NEOBAE_SOVERSION@")
+set(NeoBAE_PLATFORM "@BAE_PLATFORM@")
+
+include(CMakeFindDependencyMacro)
+
+if(NOT WIN32)
+  find_dependency(Threads)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/NeoBAETargets.cmake")
+
+# Public headers pull platform build-options headers (e.g. SDL3/SDL.h).
+# Resolve those include roots on the consumer machine when possible.
+if(NeoBAE_PLATFORM STREQUAL "SDL3")
+  find_path(NeoBAE_SDL3_INCLUDE_DIR NAMES SDL3/SDL.h)
+  if(NeoBAE_SDL3_INCLUDE_DIR AND TARGET NeoBAE::neobae)
+    set_property(TARGET NeoBAE::neobae APPEND PROPERTY
+      INTERFACE_INCLUDE_DIRECTORIES "${NeoBAE_SDL3_INCLUDE_DIR}")
+  endif()
+elseif(NeoBAE_PLATFORM STREQUAL "SDL2")
+  find_path(NeoBAE_SDL2_INCLUDE_DIR NAMES SDL2/SDL.h)
+  if(NeoBAE_SDL2_INCLUDE_DIR AND TARGET NeoBAE::neobae)
+    set_property(TARGET NeoBAE::neobae APPEND PROPERTY
+      INTERFACE_INCLUDE_DIRECTORIES "${NeoBAE_SDL2_INCLUDE_DIR}")
+  endif()
+endif()
+
+check_required_components(NeoBAE)

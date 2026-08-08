@@ -154,10 +154,19 @@
         },
 #endif
         {
+            "MIDI Editor",
+            "The MIDI Editor allows real-time editing of the selected song. "
+            "You can use CTRL+Mouse Wheel to zoom in and out of the timeline. "
+            "The MIDI Editor allows you to change notes, as well as add/remove: "
+            "Notes, Tracks, (N)RPN, Automation, Loop Point, Lyrics, and more.",
+        },
+        {
             "Status bar & long jobs",
             "The bottom status line reports what the editor is doing. Long "
             "imports, saves, and exports show progress — wait for them to "
-            "finish before quitting so you do not interrupt a write.",
+            "finish before quitting so you do not interrupt a write. If the "
+            "program appears to be frozen or locked up, please be patient. "
+            "The operation will finish even if the program appears to be frozen.",
         },
         {
             "Reopen these tips anytime",

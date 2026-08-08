@@ -1865,6 +1865,7 @@ bool ActivateSessionSongAt(int index)
     m_midi_track_muted.clear();
     m_midi_track_solo.clear();
     m_midi_scroll_tick = 0.0f;
+    m_midi_hscroll_sync = true;
 
     /* Promote after m_document is swapped so bank list naming can read
      * document display names for empty INST/SND Pascal names. */

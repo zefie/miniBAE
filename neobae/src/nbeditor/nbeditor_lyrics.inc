@@ -903,6 +903,19 @@
         const bool lane_hovered = ImGui::IsItemHovered();
         const ImGuiIO &io = ImGui::GetIO();
 
+        if (lane_hovered && io.KeyCtrl && io.MouseWheel != 0.0f)
+        {
+            MeZoomTimeAt(io.MouseWheel, io.MousePos.x, plot_x, plot_w);
+        }
+        else if (lane_hovered && io.MouseWheelH != 0.0f)
+        {
+            MeScrollTimeByWheel(io.MouseWheelH, plot_w);
+        }
+        else if (lane_hovered && io.KeyShift && io.MouseWheel != 0.0f)
+        {
+            MeScrollTimeByWheel(io.MouseWheel, plot_w);
+        }
+
         if (lane_hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left))
         {
             if (hit >= 0)

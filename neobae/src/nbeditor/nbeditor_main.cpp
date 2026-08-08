@@ -7077,10 +7077,12 @@ private:
     std::unordered_set<int> m_midi_selected_notes;
     int m_midi_primary_note = -1;
     float m_midi_scroll_tick = 0.0f;
+    bool m_midi_hscroll_sync = true; /* push m_midi_scroll_tick into the H scrollbar */
     float m_midi_scroll_pitch = 40.0f; /* rows from top; ~C4 centered-ish */
     float m_midi_px_per_tick = 0.12f;
     float m_midi_px_per_pitch = 14.0f;
-    float m_midi_track_lane_h = 48.0f; /* timeline lane height (resizable) */
+    float m_midi_track_lane_h = 48.0f; /* timeline lane row height */
+    float m_midi_timeline_panel_h = 112.0f; /* ~ruler + 2 lanes; piano roll flexes */
     bool m_midi_snap_enabled = true;
     int m_midi_snap_division = 4;
     int m_midi_snap_division_index = 2;
@@ -7137,7 +7139,7 @@ private:
     std::array<bool, 16> m_midi_auto_lane_visible = {
         false, false, false, true, false, false, false, false, false, false, false, false, false, false, false, false};
     bool m_midi_auto_collapsed = false;
-    float m_midi_auto_panel_h = 180.0f; /* user-resizable automation strip height */
+    float m_midi_auto_panel_h = 100.0f; /* user-resizable automation strip height */
     std::vector<bool> m_midi_track_muted;
     std::vector<bool> m_midi_track_solo;
     bool m_midi_note_cache_dirty = true;
