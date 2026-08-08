@@ -651,6 +651,30 @@ endif()
 
 find_path(BAE_SDL3_INCLUDE_DIR SDL3/SDL.h)
 find_library(BAE_SDL3_LIBRARY NAMES SDL3)
+# Cross toolchains (llvm-mingw) often set FIND_ROOT_PATH_MODE_*=ONLY without a
+# usable FIND_ROOT_PATH, so find_* misses sysroot SDL. Fall back to pkg-config
+# when PKG_CONFIG_LIBDIR points at the target (docker mingw scripts do this).
+if(NOT BAE_SDL3_INCLUDE_DIR OR NOT BAE_SDL3_LIBRARY)
+  find_package(PkgConfig QUIET)
+  if(PkgConfig_FOUND)
+    pkg_check_modules(PC_SDL3 QUIET sdl3)
+    if(PC_SDL3_FOUND)
+      if(NOT BAE_SDL3_INCLUDE_DIR AND PC_SDL3_INCLUDEDIR)
+        set(BAE_SDL3_INCLUDE_DIR "${PC_SDL3_INCLUDEDIR}" CACHE PATH "SDL3 include dir" FORCE)
+      endif()
+      if(NOT BAE_SDL3_LIBRARY AND PC_SDL3_LIBDIR AND EXISTS "${PC_SDL3_LIBDIR}/libSDL3.a")
+        set(BAE_SDL3_LIBRARY "${PC_SDL3_LIBDIR}/libSDL3.a" CACHE FILEPATH "SDL3 library" FORCE)
+      elseif(NOT BAE_SDL3_LIBRARY AND PC_SDL3_LIBDIR AND EXISTS "${PC_SDL3_LIBDIR}/libSDL3.dll.a")
+        set(BAE_SDL3_LIBRARY "${PC_SDL3_LIBDIR}/libSDL3.dll.a" CACHE FILEPATH "SDL3 library" FORCE)
+      elseif(NOT BAE_SDL3_LIBRARY)
+        find_library(BAE_SDL3_LIBRARY NAMES SDL3 HINTS ${PC_SDL3_LIBDIR} ${PC_SDL3_LIBRARY_DIRS})
+      endif()
+      if(BAE_SDL3_INCLUDE_DIR AND BAE_SDL3_LIBRARY)
+        message(STATUS "SDL3 found via pkg-config: ${BAE_SDL3_LIBRARY}")
+      endif()
+    endif()
+  endif()
+endif()
 if(BAE_SDL3_INCLUDE_DIR AND BAE_SDL3_LIBRARY)
   set(_BAE_PLATFORM_SDL3_AVAILABLE ON)
 else()
@@ -659,6 +683,27 @@ endif()
 
 find_path(BAE_SDL2_INCLUDE_DIR SDL2/SDL.h)
 find_library(BAE_SDL2_LIBRARY NAMES SDL2)
+if(NOT BAE_SDL2_INCLUDE_DIR OR NOT BAE_SDL2_LIBRARY)
+  find_package(PkgConfig QUIET)
+  if(PkgConfig_FOUND)
+    pkg_check_modules(PC_SDL2 QUIET sdl2)
+    if(PC_SDL2_FOUND)
+      if(NOT BAE_SDL2_INCLUDE_DIR AND PC_SDL2_INCLUDEDIR)
+        set(BAE_SDL2_INCLUDE_DIR "${PC_SDL2_INCLUDEDIR}" CACHE PATH "SDL2 include dir" FORCE)
+      endif()
+      if(NOT BAE_SDL2_LIBRARY AND PC_SDL2_LIBDIR AND EXISTS "${PC_SDL2_LIBDIR}/libSDL2.a")
+        set(BAE_SDL2_LIBRARY "${PC_SDL2_LIBDIR}/libSDL2.a" CACHE FILEPATH "SDL2 library" FORCE)
+      elseif(NOT BAE_SDL2_LIBRARY AND PC_SDL2_LIBDIR AND EXISTS "${PC_SDL2_LIBDIR}/libSDL2.dll.a")
+        set(BAE_SDL2_LIBRARY "${PC_SDL2_LIBDIR}/libSDL2.dll.a" CACHE FILEPATH "SDL2 library" FORCE)
+      elseif(NOT BAE_SDL2_LIBRARY)
+        find_library(BAE_SDL2_LIBRARY NAMES SDL2 HINTS ${PC_SDL2_LIBDIR} ${PC_SDL2_LIBRARY_DIRS})
+      endif()
+      if(BAE_SDL2_INCLUDE_DIR AND BAE_SDL2_LIBRARY)
+        message(STATUS "SDL2 found via pkg-config: ${BAE_SDL2_LIBRARY}")
+      endif()
+    endif()
+  endif()
+endif()
 if(BAE_SDL2_INCLUDE_DIR AND BAE_SDL2_LIBRARY)
   set(_BAE_PLATFORM_SDL2_AVAILABLE ON)
 else()
@@ -740,14 +785,22 @@ if(BAE_PLATFORM STREQUAL "SDL3")
   if(_BAE_PLATFORM_SDL3_AVAILABLE)
     set(BAE_SDL_BACKEND_AVAILABLE ON)
   else()
-    message(STATUS "BAE_PLATFORM=SDL3 selected, but SDL3 headers/library were not found.")
+    message(FATAL_ERROR
+      "BAE_PLATFORM=SDL3 selected, but SDL3 headers/library were not found.\n"
+      "For llvm-mingw cross builds, ensure PKG_CONFIG_LIBDIR points at the "
+      "target pkgconfig dir, or pass -DCMAKE_FIND_ROOT_PATH=/path/to/<triple> "
+      "and/or -DCMAKE_PREFIX_PATH=/path/to/<triple>.")
   endif()
 elseif(BAE_PLATFORM STREQUAL "SDL2")
   if(_BAE_PLATFORM_SDL2_AVAILABLE)
     set(BAE_SDL_BACKEND_AVAILABLE ON)
     set(BAE_USING_SDL2 OFF)
   else()
-    message(STATUS "BAE_PLATFORM=SDL2 selected, but SDL2 headers/library were not found.")
+    message(FATAL_ERROR
+      "BAE_PLATFORM=SDL2 selected, but SDL2 headers/library were not found.\n"
+      "For llvm-mingw cross builds, ensure PKG_CONFIG_LIBDIR points at the "
+      "target pkgconfig dir, or pass -DCMAKE_FIND_ROOT_PATH=/path/to/<triple> "
+      "and/or -DCMAKE_PREFIX_PATH=/path/to/<triple>.")
   endif()
 endif()
 
@@ -771,6 +824,22 @@ if(BUILD_ZEFIDI)
   endif()
   if(NOT BAE_SDL3_TTF_LIBRARY)
     find_library(BAE_SDL3_TTF_LIBRARY NAMES SDL3_ttf)
+  endif()
+  if(NOT BAE_SDL3_TTF_INCLUDE_DIR OR NOT BAE_SDL3_TTF_LIBRARY)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+      pkg_check_modules(PC_SDL3_TTF QUIET sdl3-ttf)
+      if(PC_SDL3_TTF_FOUND)
+        if(NOT BAE_SDL3_TTF_INCLUDE_DIR AND PC_SDL3_TTF_INCLUDEDIR)
+          set(BAE_SDL3_TTF_INCLUDE_DIR "${PC_SDL3_TTF_INCLUDEDIR}" CACHE PATH "SDL3_ttf include dir" FORCE)
+        endif()
+        if(NOT BAE_SDL3_TTF_LIBRARY AND PC_SDL3_TTF_LIBDIR AND EXISTS "${PC_SDL3_TTF_LIBDIR}/libSDL3_ttf.a")
+          set(BAE_SDL3_TTF_LIBRARY "${PC_SDL3_TTF_LIBDIR}/libSDL3_ttf.a" CACHE FILEPATH "SDL3_ttf library" FORCE)
+        elseif(NOT BAE_SDL3_TTF_LIBRARY AND PC_SDL3_TTF_LIBDIR AND EXISTS "${PC_SDL3_TTF_LIBDIR}/libSDL3_ttf.dll.a")
+          set(BAE_SDL3_TTF_LIBRARY "${PC_SDL3_TTF_LIBDIR}/libSDL3_ttf.dll.a" CACHE FILEPATH "SDL3_ttf library" FORCE)
+        endif()
+      endif()
+    endif()
   endif()
 
   if(NOT BAE_SDL2_INCLUDE_DIR)
@@ -1564,12 +1633,14 @@ endif()
 
 if(BAE_PLATFORM STREQUAL "SDL2" AND BAE_SDL_BACKEND_AVAILABLE)
   target_include_directories(neobae PUBLIC $<BUILD_INTERFACE:${BAE_SDL2_INCLUDE_DIR}>)
-  target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${BAE_SDL2_LIBRARY})
+  target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY}
+    ${NEOBAE_STATIC_DEP_LINK_PREFIX} ${BAE_SDL2_LIBRARY} ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
 endif()
 
 if(BAE_PLATFORM STREQUAL "SDL3" AND BAE_SDL_BACKEND_AVAILABLE)
   target_include_directories(neobae PUBLIC $<BUILD_INTERFACE:${BAE_SDL3_INCLUDE_DIR}>)
-  target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY} ${BAE_SDL3_LIBRARY})
+  target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY}
+    ${NEOBAE_STATIC_DEP_LINK_PREFIX} ${BAE_SDL3_LIBRARY} ${NEOBAE_STATIC_DEP_LINK_SUFFIX})
 endif()
 
 if(NEOBAE_STATIC AND MINGW)
@@ -1584,11 +1655,18 @@ if(NEOBAE_STATIC AND MINGW)
     dxguid
   )
   if(BAE_SDL_BACKEND_AVAILABLE)
+    # Extra Win32 libs required when SDL is linked statically into libneobae.dll.
     target_link_libraries(neobae ${NEOBAE_DEP_LINK_VISIBILITY}
       version
       setupapi
       imm32
-      cfgmgr32  
+      cfgmgr32
+      gdi32
+      user32
+      shell32
+      oleaut32
+      advapi32
+      dinput8
     )
   endif()
 endif()
