@@ -140,10 +140,11 @@
         }
         const float mid = (p0.y + p1.y) * 0.5f;
         const float amp = (height * 0.42f);
+        /* History is bipolar PCM (-1..1); draw as a real waveform. */
         for (int i = 1; i < n; ++i)
         {
-            const int idx0 = (m_scope_write_index + i - 1) % n;
-            const int idx1 = (m_scope_write_index + i) % n;
+            const int idx0 = (m_scope_write_index + i) % n;
+            const int idx1 = (m_scope_write_index + i + 1) % n;
             const float v0 = m_scope_history[static_cast<size_t>(idx0)];
             const float v1 = m_scope_history[static_cast<size_t>(idx1)];
             const float x0 = p0.x + (width * static_cast<float>(i - 1) / static_cast<float>(n - 1));
@@ -164,8 +165,15 @@
 
     void DrawPlayerWindow()
     {
-        ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse;
-        ImGui::SetNextWindowSizeConstraints(ImVec2(480.0f, 280.0f), ImVec2(4096.0f, 4096.0f));
+        /* Full-viewport chrome: no ImGui title/tab bar (can't be hidden → stuck).
+         * OS window decorations still move/resize the app. */
+        ImGuiWindowFlags flags =
+            ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
+            ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoDocking;
+        const ImGuiViewport *vp = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(vp->WorkPos);
+        ImGui::SetNextWindowSize(vp->WorkSize);
         if (!ImGui::Begin("Player", nullptr, flags))
         {
             ImGui::End();
@@ -377,7 +385,7 @@
         ImGui::PopStyleColor();
 
         /* Channels */
-        ImGui::TextDisabled("Channels  (LMB mute · RMB solo)");
+        ImGui::TextDisabled("Channels  (LMB select · Shift+LMB mute · RMB solo)");
         const float ch_h = 36.0f;
         for (int ch = 0; ch < 16; ++ch)
         {
@@ -387,8 +395,8 @@
             }
             ImGui::PushID(ch);
             ImGui::BeginGroup();
-            const bool muted = ChannelEffectivelyMuted(ch);
             const bool solo = (m_channel_solo == ch);
+            const bool selected = (KeyboardChannel() == ch);
             if (solo)
             {
                 ImGui::PushStyleColor(ImGuiCol_Button, Zefidi2Theme::ChannelSolo());
@@ -401,6 +409,12 @@
                 ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Zefidi2Theme::ChannelMutedHover());
                 ImGui::PushStyleColor(ImGuiCol_ButtonActive, Zefidi2Theme::ChannelMutedActive());
             }
+            else if (selected)
+            {
+                ImGui::PushStyleColor(ImGuiCol_Button, Zefidi2Theme::Accent());
+                ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Zefidi2Theme::AccentHover());
+                ImGui::PushStyleColor(ImGuiCol_ButtonActive, Zefidi2Theme::AccentActive());
+            }
             else
             {
                 ImGui::PushStyleColor(ImGuiCol_Button, Zefidi2Theme::ChannelOpen());
@@ -411,12 +425,19 @@
             std::snprintf(label, sizeof(label), "%02d", ch + 1);
             if (ImGui::Button(label, ImVec2(28.0f, 22.0f)))
             {
-                m_channel_muted[static_cast<size_t>(ch)] = !m_channel_muted[static_cast<size_t>(ch)];
-                if (m_channel_solo == ch)
+                if (ImGui::GetIO().KeyShift)
                 {
-                    m_channel_solo = -1;
+                    m_channel_muted[static_cast<size_t>(ch)] = !m_channel_muted[static_cast<size_t>(ch)];
+                    if (m_channel_solo == ch)
+                    {
+                        m_channel_solo = -1;
+                    }
+                    ApplyChannelMutes();
                 }
-                ApplyChannelMutes();
+                else
+                {
+                    SelectKeyboardChannel(ch);
+                }
             }
             if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
             {
@@ -426,7 +447,6 @@
             ImGui::PopStyleColor(3);
             ImGui::SameLine(0.0f, 1.0f);
             DrawChannelVuMeter(ch, ch_h);
-            (void)muted;
             ImGui::EndGroup();
             ImGui::PopID();
         }
@@ -443,35 +463,5 @@
         ImGui::Separator();
         ImGui::TextDisabled("%s", m_status.c_str());
 
-        ImGui::End();
-    }
-
-    void DrawDockspace()
-    {
-        const ImGuiViewport *vp = ImGui::GetMainViewport();
-        ImGui::SetNextWindowPos(vp->WorkPos);
-        ImGui::SetNextWindowSize(vp->WorkSize);
-        ImGui::SetNextWindowViewport(vp->ID);
-        ImGuiWindowFlags host_flags =
-            ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse |
-            ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
-            ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoBackground;
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-        ImGui::Begin("zefidi2_desktop", nullptr, host_flags);
-        ImGui::PopStyleVar(3);
-
-        const ImGuiID dockspace_id = ImGui::GetID("zefidi2_dock");
-        if (!m_dock_built)
-        {
-            m_dock_built = true;
-            ImGui::DockBuilderRemoveNode(dockspace_id);
-            ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
-            ImGui::DockBuilderSetNodeSize(dockspace_id, vp->WorkSize);
-            ImGui::DockBuilderDockWindow("Player", dockspace_id);
-            ImGui::DockBuilderFinish(dockspace_id);
-        }
-        ImGui::DockSpace(dockspace_id, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
         ImGui::End();
     }

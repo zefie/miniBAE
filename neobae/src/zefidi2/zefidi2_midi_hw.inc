@@ -65,28 +65,54 @@
             const unsigned char status = buf[0];
             const unsigned char cmd = status & 0xF0u;
             const unsigned char ch = status & 0x0Fu;
+            const int note = (size >= 2) ? static_cast<int>(buf[1]) : -1;
+            const bool on_selected = (static_cast<int>(ch) == KeyboardChannel());
             if (cmd == 0x90u && size >= 3)
             {
                 if (buf[2])
                 {
                     (void)BAESong_NoteOn(song, ch, buf[1], buf[2], 0);
+                    if (on_selected && note >= 0 && note < 128)
+                    {
+                        m_keyboard_midi_lit[static_cast<size_t>(note)] = true;
+                    }
                 }
                 else
                 {
                     (void)BAESong_NoteOff(song, ch, buf[1], 0, 0);
+                    if (on_selected && note >= 0 && note < 128)
+                    {
+                        m_keyboard_midi_lit[static_cast<size_t>(note)] = false;
+                    }
                 }
             }
             else if (cmd == 0x80u && size >= 3)
             {
                 (void)BAESong_NoteOff(song, ch, buf[1], buf[2], 0);
+                if (on_selected && note >= 0 && note < 128)
+                {
+                    m_keyboard_midi_lit[static_cast<size_t>(note)] = false;
+                }
             }
             else if (cmd == 0xB0u && size >= 3)
             {
                 (void)BAESong_ControlChange(song, ch, buf[1], buf[2], 0);
+                /* CC0 bank MSB / CC32 bank LSB — refresh UI when selected ch. */
+                if (on_selected && (buf[1] == 0 || buf[1] == 32))
+                {
+                    m_keyboard_prog_dirty = false;
+                    SyncKeyboardBankProgramFromEngine();
+                }
             }
             else if (cmd == 0xC0u && size >= 2)
             {
                 (void)BAESong_ProgramChange(song, ch, buf[1], 0);
+                if (on_selected)
+                {
+                    m_keyboard_program = buf[1];
+                    m_keyboard_prog_dirty = true;
+                    m_keyboard_prog_hold_until_ms = SDL_GetTicks() + 400;
+                }
             }
             else if (cmd == 0xE0u && size >= 3)
             {

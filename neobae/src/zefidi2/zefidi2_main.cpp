@@ -15,6 +15,7 @@
 
 #include "NeoBAE.h"
 #include "NeoBAEConfigPath.h"
+#include "X_API.h"
 #include "GenPriv.h"
 #include "GenSnd.h"
 #if USE_XMF_SUPPORT == TRUE
@@ -83,7 +84,6 @@ public:
 
     bool m_bae_initialized = false;
     bool m_want_quit = false;
-    bool m_dock_built = false;
 
     BAEMixer m_mixer = nullptr;
     BAESong m_song = nullptr;
@@ -148,10 +148,14 @@ public:
     int m_export_progress = 0;
     int m_export_format = 0;
 
-    int m_keyboard_octave = 4;
-    int m_keyboard_channel = 1;
-    int m_keyboard_program = 0;
-    std::array<bool, 128> m_keyboard_note_on = {};
+    int m_keyboard_octave = 4;          /* PC-keyboard transpose (C of octave) */
+    int m_keyboard_channel = 0;         /* 0..15 — selected channel (classic zefidi) */
+    int m_keyboard_program = 0;         /* 0..127 — live display / edit */
+    int m_keyboard_bank = 0;            /* 0..127 — live display / edit */
+    bool m_keyboard_prog_dirty = false; /* user editing bank/prog; pause engine sync briefly */
+    uint32_t m_keyboard_prog_hold_until_ms = 0;
+    std::array<bool, 128> m_keyboard_note_on = {}; /* local mouse / PC keys held */
+    std::array<bool, 128> m_keyboard_midi_lit = {}; /* hardware MIDI notes on selected ch */
 
 #if SUPPORT_PLAYLIST == TRUE
     bool m_playlist_enabled = true;
@@ -283,7 +287,6 @@ public:
     void DrawUI()
     {
         ConsumeDialogResult();
-        DrawDockspace();
         DrawPlayerWindow();
         DrawSettingsModal();
         DrawAboutModal();
@@ -355,6 +358,7 @@ int main(int argc, char **argv)
     io.IniFilename = nullptr;
 
     ImGui::StyleColorsDark();
+    Zefidi2Theme::DetectSystemAccent(); /* Windows accent, else NeoBAE purple */
     Zefidi2Theme::ApplyImGuiStyle();
     ImGuiStyle &style = ImGui::GetStyle();
     style.ScaleAllSizes(main_scale);

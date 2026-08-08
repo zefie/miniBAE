@@ -1,24 +1,145 @@
-/* Compact virtual MIDI keyboard (methods of Zefidi2App). */
+/* Virtual MIDI keyboard — 61-key (C2–C7), channel-linked bank/prog + note light-up
+ * (methods of Zefidi2App). Mirrors classic zefidi keyboard behaviour. */
+
+    int KeyboardChannel() const
+    {
+        return std::clamp(m_keyboard_channel, 0, 15);
+    }
+
+    void SyncKeyboardBankProgramFromEngine()
+    {
+        const uint32_t now = SDL_GetTicks();
+        if (m_keyboard_prog_dirty && now < m_keyboard_prog_hold_until_ms)
+        {
+            return;
+        }
+        m_keyboard_prog_dirty = false;
+        BAESong song = ActiveNoteSong();
+        if (!song)
+        {
+            return;
+        }
+        unsigned char program = 0;
+        unsigned char bank = 0;
+        if (BAESong_GetProgramBank(song, static_cast<unsigned char>(KeyboardChannel()), &program,
+                                   &bank, TRUE) == BAE_NO_ERROR)
+        {
+            m_keyboard_program = static_cast<int>(program);
+            m_keyboard_bank = static_cast<int>(bank);
+        }
+    }
+
+    void ApplyKeyboardBankProgram()
+    {
+        BAESong song = ActiveNoteSong();
+        if (!song)
+        {
+            return;
+        }
+        const unsigned char ch = static_cast<unsigned char>(KeyboardChannel());
+        (void)BAESong_ProgramBankChange(song, ch,
+                                        static_cast<unsigned char>(std::clamp(m_keyboard_program, 0, 127)),
+                                        static_cast<unsigned char>(std::clamp(m_keyboard_bank, 0, 127)),
+                                        0);
+        (void)BAESong_LoadInstrument(song, static_cast<unsigned char>(std::clamp(m_keyboard_program, 0, 127)));
+        m_keyboard_prog_dirty = true;
+        m_keyboard_prog_hold_until_ms = SDL_GetTicks() + 400;
+    }
+
+    void SelectKeyboardChannel(int ch)
+    {
+        ch = std::clamp(ch, 0, 15);
+        if (ch == m_keyboard_channel)
+        {
+            return;
+        }
+        /* Release any locally held notes on the old channel. */
+        BAESong song = ActiveNoteSong();
+        if (song)
+        {
+            for (int n = 0; n < 128; ++n)
+            {
+                if (m_keyboard_note_on[static_cast<size_t>(n)])
+                {
+                    (void)BAESong_NoteOff(song, static_cast<unsigned char>(m_keyboard_channel),
+                                          static_cast<unsigned char>(n), 0, 0);
+                    m_keyboard_note_on[static_cast<size_t>(n)] = false;
+                }
+            }
+        }
+        m_keyboard_channel = ch;
+        m_keyboard_midi_lit.fill(false);
+        SyncKeyboardBankProgramFromEngine();
+    }
+
+    void CollectKeyboardLitNotes(bool out_lit[128])
+    {
+        std::memset(out_lit, 0, 128);
+        const int ch = KeyboardChannel();
+        for (int n = 0; n < 128; ++n)
+        {
+            if (m_keyboard_note_on[static_cast<size_t>(n)] || m_keyboard_midi_lit[static_cast<size_t>(n)])
+            {
+                out_lit[n] = true;
+            }
+        }
+        if (m_exporting)
+        {
+            return;
+        }
+        BAESong song = ActiveNoteSong();
+        if (!song)
+        {
+            return;
+        }
+        /* Light keys from engine activity on the selected channel (playback + live). */
+        unsigned char engine[128] = {};
+        if (BAESong_GetActiveNotes(song, static_cast<unsigned char>(ch), engine) == BAE_NO_ERROR)
+        {
+            for (int n = 0; n < 128; ++n)
+            {
+                if (engine[n])
+                {
+                    out_lit[n] = true;
+                }
+            }
+        }
+    }
 
     void DrawKeyboardSection()
     {
-        if (!m_show_keyboard)
+        if (!m_show_keyboard || m_is_audio_file)
         {
             return;
         }
-        if (!ImGui::CollapsingHeader("Keyboard"))
+        if (!ImGui::CollapsingHeader("Keyboard", ImGuiTreeNodeFlags_DefaultOpen))
         {
             return;
         }
 
+        SyncKeyboardBankProgramFromEngine();
+
+        int ch_ui = KeyboardChannel() + 1;
         ImGui::SetNextItemWidth(70.0f);
+        if (ImGui::SliderInt("Ch", &ch_ui, 1, 16))
+        {
+            SelectKeyboardChannel(ch_ui - 1);
+        }
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(70.0f);
+        if (ImGui::SliderInt("Bank", &m_keyboard_bank, 0, 127))
+        {
+            ApplyKeyboardBankProgram();
+        }
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(70.0f);
+        if (ImGui::SliderInt("Prog", &m_keyboard_program, 0, 127))
+        {
+            ApplyKeyboardBankProgram();
+        }
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(60.0f);
         ImGui::SliderInt("Oct", &m_keyboard_octave, 0, 8);
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(70.0f);
-        ImGui::SliderInt("Ch", &m_keyboard_channel, 1, 16);
-        ImGui::SameLine();
-        ImGui::SetNextItemWidth(70.0f);
-        ImGui::SliderInt("Prog", &m_keyboard_program, 0, 127);
         ImGui::SameLine();
         if (ImGui::SmallButton("Panic"))
         {
@@ -27,68 +148,91 @@
             {
                 for (int n = 0; n < 128; ++n)
                 {
-                    if (m_keyboard_note_on[static_cast<size_t>(n)])
+                    if (m_keyboard_note_on[static_cast<size_t>(n)] ||
+                        m_keyboard_midi_lit[static_cast<size_t>(n)])
                     {
-                        (void)BAESong_NoteOff(song,
-                                              static_cast<unsigned char>(m_keyboard_channel - 1),
+                        (void)BAESong_NoteOff(song, static_cast<unsigned char>(KeyboardChannel()),
                                               static_cast<unsigned char>(n), 0, 0);
-                        m_keyboard_note_on[static_cast<size_t>(n)] = false;
                     }
+                    m_keyboard_note_on[static_cast<size_t>(n)] = false;
+                    m_keyboard_midi_lit[static_cast<size_t>(n)] = false;
                 }
             }
         }
-        ImGui::SameLine();
-        if (ImGui::SmallButton("Apply Prog"))
+
+        bool lit[128];
+        CollectKeyboardLitNotes(lit);
+
+        /* 61-key span C2 (36) .. C7 (96), like classic zefidi. */
+        constexpr int kFirstNote = 36;
+        constexpr int kLastNote = 96;
+        auto is_white = [](int note) {
+            const int m = note % 12;
+            return m == 0 || m == 2 || m == 4 || m == 5 || m == 7 || m == 9 || m == 11;
+        };
+
+        int white_count = 0;
+        for (int n = kFirstNote; n <= kLastNote; ++n)
         {
-            BAESong song = ActiveNoteSong();
-            if (song)
+            if (is_white(n))
             {
-                (void)BAESong_ProgramBankChange(song,
-                                                static_cast<unsigned char>(m_keyboard_channel - 1),
-                                                static_cast<unsigned char>(m_keyboard_program),
-                                                0, 0);
+                ++white_count;
             }
         }
+        if (white_count < 1)
+        {
+            white_count = 1;
+        }
 
-        /* One octave white/black keys starting at C of selected octave. */
-        const int base = std::clamp(m_keyboard_octave, 0, 8) * 12;
-        static const int kWhiteOffsets[] = {0, 2, 4, 5, 7, 9, 11};
-        static const int kBlackOffsets[] = {1, 3, -1, 6, 8, 10}; /* -1 = gap */
-        const float white_w = 22.0f;
-        const float white_h = 56.0f;
-        const float black_w = 14.0f;
-        const float black_h = 34.0f;
+        const float avail_w = ImGui::GetContentRegionAvail().x;
+        const float white_h = 64.0f;
+        const float black_h = 40.0f;
+        const float white_w = std::max(10.0f, avail_w / static_cast<float>(white_count));
+        const float black_w = white_w * 0.62f;
         const ImVec2 origin = ImGui::GetCursorScreenPos();
         ImDrawList *dl = ImGui::GetWindowDrawList();
+        ImGui::Dummy(ImVec2(white_w * static_cast<float>(white_count), white_h));
+
+        const ImU32 accent = Zefidi2Theme::ToU32(Zefidi2Theme::Accent());
+        const ImU32 local_hi = IM_COL32(255, 210, 90, 255);
 
         auto note_button = [&](int note, ImVec2 min, ImVec2 max, bool black) {
-            if (note < 0 || note > 127)
+            if (note < kFirstNote || note > kLastNote || !dl)
             {
                 return;
             }
-            const ImGuiID id = ImGui::GetID(static_cast<int>(1000 + note));
             ImGui::SetCursorScreenPos(min);
-            ImGui::InvisibleButton("##k", ImVec2(max.x - min.x, max.y - min.y));
+            ImGui::PushID(note + (black ? 1000 : 0));
+            char id_buf[32];
+            std::snprintf(id_buf, sizeof(id_buf), "##vkbd_%d", note);
+            ImGui::InvisibleButton(id_buf, ImVec2(max.x - min.x, max.y - min.y));
             const bool held = ImGui::IsItemActive();
             const bool hovered = ImGui::IsItemHovered();
+            ImGui::PopID();
+
             bool &on = m_keyboard_note_on[static_cast<size_t>(note)];
             BAESong song = ActiveNoteSong();
             if (held && !on && song)
             {
-                (void)BAESong_NoteOn(song, static_cast<unsigned char>(m_keyboard_channel - 1),
+                (void)BAESong_NoteOn(song, static_cast<unsigned char>(KeyboardChannel()),
                                      static_cast<unsigned char>(note), 100, 0);
                 on = true;
             }
             else if (!held && on && song)
             {
-                (void)BAESong_NoteOff(song, static_cast<unsigned char>(m_keyboard_channel - 1),
+                (void)BAESong_NoteOff(song, static_cast<unsigned char>(KeyboardChannel()),
                                       static_cast<unsigned char>(note), 0, 0);
                 on = false;
             }
+
             ImU32 col;
             if (on)
             {
-                col = IM_COL32(40, 200, 180, 255);
+                col = local_hi;
+            }
+            else if (lit[note])
+            {
+                col = accent;
             }
             else if (hovered)
             {
@@ -100,37 +244,55 @@
             }
             dl->AddRectFilled(min, max, col, black ? 1.0f : 2.0f);
             dl->AddRect(min, max, IM_COL32(40, 50, 52, 255), black ? 1.0f : 2.0f);
-            (void)id;
+            if (!black && (note % 12) == 0)
+            {
+                char nb[8];
+                std::snprintf(nb, sizeof(nb), "C%d", (note / 12) - 1);
+                dl->AddText(ImVec2(min.x + 2.0f, max.y - 14.0f), IM_COL32(40, 40, 44, 200), nb);
+            }
         };
 
-        for (int i = 0; i < 7; ++i)
+        /* White keys */
+        int w_index = 0;
+        for (int n = kFirstNote; n <= kLastNote; ++n)
         {
-            const int note = base + kWhiteOffsets[i];
-            const ImVec2 min(origin.x + white_w * static_cast<float>(i), origin.y);
-            const ImVec2 max(min.x + white_w - 1.0f, min.y + white_h);
-            note_button(note, min, max, false);
-        }
-        for (int i = 0; i < 6; ++i)
-        {
-            if (kBlackOffsets[i] < 0)
+            if (!is_white(n))
             {
                 continue;
             }
-            const int note = base + kBlackOffsets[i];
-            const float x = origin.x + white_w * static_cast<float>(i) + white_w - black_w * 0.5f;
-            note_button(note, ImVec2(x, origin.y), ImVec2(x + black_w, origin.y + black_h), true);
+            const float x0 = origin.x + white_w * static_cast<float>(w_index);
+            const float x1 = origin.x + white_w * static_cast<float>(w_index + 1);
+            note_button(n, ImVec2(x0, origin.y), ImVec2(x1 - 1.0f, origin.y + white_h), false);
+            ++w_index;
         }
+        /* Black keys — position relative to preceding white key index. */
+        w_index = 0;
+        for (int n = kFirstNote; n <= kLastNote; ++n)
+        {
+            if (is_white(n))
+            {
+                ++w_index;
+                continue;
+            }
+            /* Center black key over the boundary between white w_index-1 and w_index. */
+            const float boundary = origin.x + white_w * static_cast<float>(w_index);
+            const float x0 = boundary - black_w * 0.5f;
+            note_button(n, ImVec2(x0, origin.y), ImVec2(x0 + black_w, origin.y + black_h), true);
+        }
+
         ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + white_h + 4.0f));
-        ImGui::Dummy(ImVec2(white_w * 7.0f, 1.0f));
+        ImGui::Dummy(ImVec2(1.0f, 1.0f));
+        ImGui::TextDisabled("Ch %d  ·  lights follow selected channel (playback + MIDI in)",
+                            KeyboardChannel() + 1);
     }
 
     void HandlePcKeyboardEvent(const SDL_Event &event)
     {
-        if (!m_show_keyboard || ImGui::GetIO().WantTextInput)
+        if (!m_show_keyboard || m_is_audio_file || ImGui::GetIO().WantTextInput)
         {
             return;
         }
-        /* Simple QWERTY row → notes. */
+        /* Covers one octave + C above; transposed by Oct slider. */
         auto map_key = [](SDL_Keycode k) -> int {
             switch (k)
             {
@@ -178,13 +340,13 @@
         bool &on = m_keyboard_note_on[static_cast<size_t>(note)];
         if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat && !on)
         {
-            (void)BAESong_NoteOn(song, static_cast<unsigned char>(m_keyboard_channel - 1),
+            (void)BAESong_NoteOn(song, static_cast<unsigned char>(KeyboardChannel()),
                                  static_cast<unsigned char>(note), 100, 0);
             on = true;
         }
         else if (event.type == SDL_EVENT_KEY_UP && on)
         {
-            (void)BAESong_NoteOff(song, static_cast<unsigned char>(m_keyboard_channel - 1),
+            (void)BAESong_NoteOff(song, static_cast<unsigned char>(KeyboardChannel()),
                                   static_cast<unsigned char>(note), 0, 0);
             on = false;
         }

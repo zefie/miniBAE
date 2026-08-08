@@ -193,6 +193,39 @@
         }
     }
 
+    std::string LoadRmfContainerVersion(const std::string &path) const
+    {
+        /* Match classic zefidi: IREZ/ZREZ header mapID + version dword. */
+        FILE *f = std::fopen(path.c_str(), "rb");
+        if (!f)
+        {
+            return {};
+        }
+        unsigned char hdr[12] = {};
+        const size_t n = std::fread(hdr, 1, sizeof(hdr), f);
+        std::fclose(f);
+        if (n != sizeof(hdr))
+        {
+            return {};
+        }
+        const uint32_t map_id = (static_cast<uint32_t>(hdr[0]) << 24) |
+                                (static_cast<uint32_t>(hdr[1]) << 16) |
+                                (static_cast<uint32_t>(hdr[2]) << 8) |
+                                static_cast<uint32_t>(hdr[3]);
+        const uint32_t version = (static_cast<uint32_t>(hdr[4]) << 24) |
+                                 (static_cast<uint32_t>(hdr[5]) << 16) |
+                                 (static_cast<uint32_t>(hdr[6]) << 8) |
+                                 static_cast<uint32_t>(hdr[7]);
+        if (!XFILERESOURCE_ID_IS_VALID(map_id))
+        {
+            return {};
+        }
+        char buf[64];
+        const char *kind = (map_id == XFILERESOURCE_ZMF_ID || version >= 2u) ? "ZMF" : "RMF";
+        std::snprintf(buf, sizeof(buf), "%s Version: %u", kind, static_cast<unsigned>(version));
+        return std::string(buf);
+    }
+
     void DrawRmfInfoModal()
     {
         if (m_rmf_info_open)
@@ -208,6 +241,12 @@
             }
             else
             {
+                const std::string ver = LoadRmfContainerVersion(m_loaded_media_path);
+                if (!ver.empty())
+                {
+                    ImGui::TextUnformatted(ver.c_str());
+                    ImGui::Separator();
+                }
                 static const BAEInfoType kTypes[] = {
                     TITLE_INFO, PERFORMED_BY_INFO, COMPOSER_INFO, COPYRIGHT_INFO,
                     GENRE_INFO, TEMPO_DESCRIPTION_INFO, ORIGINAL_SOURCE_INFO,
@@ -216,6 +255,7 @@
                     "Title", "Performed by", "Composer", "Copyright",
                     "Genre", "Tempo", "Source",
                 };
+                bool any = !ver.empty();
                 for (size_t i = 0; i < IM_ARRAYSIZE(kTypes); ++i)
                 {
                     char buf[512] = {};
@@ -224,7 +264,12 @@
                         buf[0])
                     {
                         ImGui::Text("%s: %s", kLabels[i], buf);
+                        any = true;
                     }
+                }
+                if (!any)
+                {
+                    ImGui::TextDisabled("No embedded info fields.");
                 }
             }
             if (ImGui::Button("Close", ImVec2(100.0f, 0.0f)))

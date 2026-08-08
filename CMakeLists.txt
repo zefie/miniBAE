@@ -2741,6 +2741,7 @@ set(NEOBAE_TOOL_TARGETS "")
 foreach(_neobae_tool
     playbae
     zefidi
+    zefidi2
     RegisterFileTypesToZefidi
     songtool
     rmfutil

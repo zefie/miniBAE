@@ -91,6 +91,39 @@
         }
     }
 
+    /* Prefer RMF/ZMF TITLE_INFO (same source as RMF Info dialog). BAESong_GetTitle
+     * often synthesizes "Untitled <id>" for containers that only store meta in INFO. */
+    std::string ResolveSongDisplayTitle(const std::string &path, bool is_rmf)
+    {
+        if (is_rmf && !path.empty())
+        {
+            char buf[512] = {};
+            if (BAEUtil_GetRmfSongInfoFromFile((BAEPathName)path.c_str(), 0, TITLE_INFO, buf,
+                                               sizeof(buf)) == BAE_NO_ERROR &&
+                buf[0])
+            {
+                return std::string(buf);
+            }
+        }
+        if (m_song)
+        {
+            char title[256] = {};
+            if (BAESong_GetTitle(m_song, title, static_cast<int>(sizeof(title))) == BAE_NO_ERROR &&
+                title[0])
+            {
+                /* Skip engine placeholder "Untitled N" / "Unknown N". */
+                const bool placeholder =
+                    (std::strncmp(title, "Untitled", 8) == 0) ||
+                    (std::strncmp(title, "Unknown", 7) == 0);
+                if (!placeholder)
+                {
+                    return std::string(title);
+                }
+            }
+        }
+        return PathBasename(path);
+    }
+
     void SetStatus(const std::string &msg)
     {
         m_status = msg;
@@ -539,13 +572,7 @@
         m_is_rmf_file = is_rmf;
         m_song_loaded = true;
         m_loaded_media_path = path;
-        m_song_title = PathBasename(path);
-        char title[256] = {};
-        if (BAESong_GetTitle(m_song, title, static_cast<int>(sizeof(title))) == BAE_NO_ERROR &&
-            title[0])
-        {
-            m_song_title = title;
-        }
+        m_song_title = ResolveSongDisplayTitle(path, is_rmf);
         (void)BAESong_Preroll(m_song);
 #if SUPPORT_KARAOKE == TRUE
         SetupKaraokeCallbacks();
@@ -764,9 +791,19 @@
         }
         m_channel_vu_last_tick_ms = now;
 
+        if (!m_mixer)
+        {
+            m_master_vu_l = 0.0f;
+            m_master_vu_r = 0.0f;
+            return;
+        }
+
+        /* GM_GetRealtimeChannelLevels reads the *current* mixer — bind ours. */
+        (void)BAEMixer_MakeCurrent(m_mixer);
+
         float ch_l[16] = {};
         float ch_r[16] = {};
-        if (m_mixer && !m_is_audio_file)
+        if (!m_is_audio_file)
         {
             GM_GetRealtimeChannelLevels(ch_l, ch_r);
         }
@@ -779,7 +816,6 @@
             return std::clamp(1.0f - std::exp(-dt / tau), 0.0f, 1.0f);
         };
 
-        float master = 0.0f;
         for (int ch = 0; ch < 16; ++ch)
         {
             float &vu = m_channel_vu[static_cast<size_t>(ch)];
@@ -796,22 +832,42 @@
             {
                 vu = 0.0f;
             }
-            master = std::max(master, vu);
         }
 
-        /* Scope history from master level (lightweight candy). */
-        m_scope_history[static_cast<size_t>(m_scope_write_index)] = master;
-        m_scope_write_index = (m_scope_write_index + 1) % static_cast<int>(m_scope_history.size());
-
-        if (m_mixer)
+        /* Scope + stereo peak from PCM (nbeditor-style). Full slice buffers. */
+        static int16_t left[16384] = {};
+        static int16_t right[16384] = {};
+        int16_t frame = 0;
+        if (BAEMixer_GetAudioSampleFrame(m_mixer, left, right, &frame) != BAE_NO_ERROR)
         {
-            int16_t left = 0;
-            int16_t right = 0;
-            int16_t frame = 0;
-            if (BAEMixer_GetAudioSampleFrame(m_mixer, &left, &right, &frame) == BAE_NO_ERROR)
-            {
-                m_master_vu_l = std::clamp(std::fabs(static_cast<float>(left) / 32768.0f), 0.0f, 1.0f);
-                m_master_vu_r = std::clamp(std::fabs(static_cast<float>(right) / 32768.0f), 0.0f, 1.0f);
-            }
+            return;
         }
+        const int max_idx = static_cast<int>(sizeof(left) / sizeof(left[0])) - 1;
+        int idx = 0;
+        if (frame > 0 && frame <= max_idx)
+        {
+            idx = static_cast<int>(frame) / 2;
+        }
+        idx = std::clamp(idx, 0, max_idx);
+
+        const float l = static_cast<float>(left[idx]) / 32768.0f;
+        const float r = static_cast<float>(right[idx]) / 32768.0f;
+        m_master_vu_l = std::clamp(std::fabs(l), 0.0f, 1.0f);
+        m_master_vu_r = std::clamp(std::fabs(r), 0.0f, 1.0f);
+
+        float env_accum = 0.0f;
+        constexpr int kEnvWindow = 48;
+        for (int i = 0; i < kEnvWindow; ++i)
+        {
+            const int sidx = std::clamp(idx - i, 0, max_idx);
+            const float sl = static_cast<float>(left[sidx]) / 32768.0f;
+            const float sr = static_cast<float>(right[sidx]) / 32768.0f;
+            env_accum += std::fabs((sl + sr) * 0.5f);
+        }
+        const float env = env_accum / static_cast<float>(kEnvWindow);
+        const float dynamic_gain = std::clamp(4.4f - (env * 8.0f), 1.8f, 4.4f);
+        const float mono = std::clamp(((l + r) * 0.5f) * dynamic_gain, -1.0f, 1.0f);
+
+        m_scope_write_index = (m_scope_write_index + 1) % static_cast<int>(m_scope_history.size());
+        m_scope_history[static_cast<size_t>(m_scope_write_index)] = mono;
     }
