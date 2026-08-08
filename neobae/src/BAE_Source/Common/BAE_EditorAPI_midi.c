@@ -2912,8 +2912,9 @@ BAEResult PV_AddBankAliasSample(BAERmfEditorDocument *document,
         {
             rootKey = lowKey;
         }
-        else if (haveSdi && sdi.baseKey > 0 && sdi.baseKey <= 127)
+        else if (haveSdi && sdi.baseKey >= 0 && sdi.baseKey <= 127)
         {
+            /* baseKey 0 is valid (C-1); only out-of-range falls back. */
             rootKey = (unsigned char)sdi.baseKey;
         }
         else
@@ -2941,15 +2942,9 @@ BAEResult PV_AddBankAliasSample(BAERmfEditorDocument *document,
     sample->aliasSndResourceID = sndID;
     sample->program = program;
     sample->instID = (uint32_t)instID;
+    /* SND / asset id 0 is valid — do not remint. */
     sample->sampleAssetID = (uint32_t)sndID;
-    if (sample->sampleAssetID == 0)
-    {
-        sample->sampleAssetID = PV_AllocateSampleAssetID(document);
-    }
-    else
-    {
-        PV_NoteSampleAssetID(document, sample->sampleAssetID);
-    }
+    PV_NoteSampleAssetID(document, sample->sampleAssetID);
     sample->rootKey = rootKey;
     sample->lowKey = lowKey;
     sample->highKey = highKey;

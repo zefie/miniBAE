@@ -1134,8 +1134,12 @@ void RememberSessionPcmFromSampleEditor(bool capture_export_target = false)
     entry.loop_end = m_sample_editor_loop_end;
     entry.base_key = m_sample_editor_root_key;
     entry.snd_resource_id = m_sample_editor_snd_resource_id;
-    const uint32_t key = entry.snd_resource_id ? entry.snd_resource_id
-                                               : static_cast<uint32_t>(m_session_pcm_cache.size() + 1);
+    /* SND id 0 is valid — only 0xFFFF means unset. Mapping 0→(size+1) used to
+     * collide with SND 1 and overwrite its session/CaSd name on Apply. */
+    const uint32_t key =
+        (entry.snd_resource_id != kNoSndResourceId)
+            ? entry.snd_resource_id
+            : (0x80000000u + static_cast<uint32_t>(m_session_pcm_cache.size()));
     /* Keep prior export prefs unless Apply captures a new ship-encode target. */
     auto prior = m_session_pcm_cache.find(key);
     if (prior != m_session_pcm_cache.end() && prior->second.has_export_target)
@@ -1148,13 +1152,56 @@ void RememberSessionPcmFromSampleEditor(bool capture_export_target = false)
     }
     if (capture_export_target)
     {
-        entry.has_export_target = true;
-        entry.export_compression = m_sample_editor_codec_type;
-        entry.export_storage = m_sample_editor_snd_storage_type;
-        entry.export_opus_mode = m_sample_editor_opus_mode;
-        entry.export_opus_roundtrip = IsOpusCompressionType(m_sample_editor_codec_type);
+        /* PCM / "No Recompression" means no deferred encode — clear the tag
+         * so the sample list stops showing the old codec after Restore/Apply. */
+        if (m_sample_editor_codec_type == BAE_EDITOR_COMPRESSION_PCM ||
+            m_sample_editor_codec_type == BAE_EDITOR_COMPRESSION_DONT_CHANGE)
+        {
+            entry.has_export_target = false;
+            entry.export_compression = BAE_EDITOR_COMPRESSION_PCM;
+            entry.export_storage = BAE_EDITOR_SND_STORAGE_SND;
+            entry.export_opus_mode = BAE_EDITOR_OPUS_MODE_AUDIO;
+            entry.export_opus_roundtrip = false;
+        }
+        else
+        {
+            entry.has_export_target = true;
+            entry.export_compression = m_sample_editor_codec_type;
+            entry.export_storage = m_sample_editor_snd_storage_type;
+            entry.export_opus_mode = m_sample_editor_opus_mode;
+            entry.export_opus_roundtrip = IsOpusCompressionType(m_sample_editor_codec_type);
+        }
     }
     m_session_pcm_cache[key] = std::move(entry);
+#endif
+}
+
+/* Drop deferred export-codec overlay for one SND and refresh list labels. */
+void ClearSessionExportTargetForSnd(uint32_t snd_id)
+{
+#if NBEDITOR_MVP
+    if (snd_id == kNoSndResourceId)
+    {
+        return;
+    }
+    auto it = m_session_pcm_cache.find(snd_id);
+    if (it != m_session_pcm_cache.end() && it->second.has_export_target)
+    {
+        it->second.has_export_target = false;
+        it->second.export_compression = BAE_EDITOR_COMPRESSION_PCM;
+        it->second.export_storage = BAE_EDITOR_SND_STORAGE_SND;
+        it->second.export_opus_mode = BAE_EDITOR_OPUS_MODE_AUDIO;
+        it->second.export_opus_roundtrip = false;
+    }
+    for (SampleRow &row : m_samples)
+    {
+        if (row.source == SampleSource::Bank && row.snd_resource_id == snd_id)
+        {
+            row.codec_label.clear();
+        }
+    }
+#else
+    (void)snd_id;
 #endif
 }
 
@@ -1282,6 +1329,134 @@ static XResourceType SessionCasdType()
     return FOUR_CHAR('C', 'a', 'S', 'd');
 }
 
+/* Pending export codec/storage per SND — survives session save/reload.
+ * Bank working-set stays PCM; without this, Apply compression vanishes on reopen. */
+static XResourceType SessionNencType()
+{
+    return FOUR_CHAR('n', 'E', 'n', 'c');
+}
+
+bool WriteSessionExportTargetsToFile(XFILE out_file)
+{
+    if (!out_file)
+    {
+        return false;
+    }
+    std::vector<unsigned char> blob;
+    blob.reserve(16 + m_session_pcm_cache.size() * 20u);
+    auto put32 = [&blob](uint32_t v) {
+        blob.push_back(static_cast<unsigned char>((v >> 24) & 0xFFu));
+        blob.push_back(static_cast<unsigned char>((v >> 16) & 0xFFu));
+        blob.push_back(static_cast<unsigned char>((v >> 8) & 0xFFu));
+        blob.push_back(static_cast<unsigned char>(v & 0xFFu));
+    };
+    put32(static_cast<uint32_t>(SessionNencType()));
+    put32(1u); /* version */
+    size_t count_at = blob.size();
+    put32(0u);
+    uint32_t count = 0;
+    for (const auto &kv : m_session_pcm_cache)
+    {
+        const SessionPcmCacheEntry &e = kv.second;
+        if (!e.has_export_target)
+        {
+            continue;
+        }
+        const uint32_t snd_id =
+            (e.snd_resource_id != kNoSndResourceId) ? e.snd_resource_id : kv.first;
+        if (snd_id == kNoSndResourceId || snd_id >= 0x80000000u)
+        {
+            continue;
+        }
+        put32(snd_id);
+        put32(static_cast<uint32_t>(e.export_compression));
+        put32(static_cast<uint32_t>(e.export_storage));
+        put32(static_cast<uint32_t>(e.export_opus_mode));
+        put32(e.export_opus_roundtrip ? 1u : 0u);
+        ++count;
+    }
+    blob[count_at + 0] = static_cast<unsigned char>((count >> 24) & 0xFFu);
+    blob[count_at + 1] = static_cast<unsigned char>((count >> 16) & 0xFFu);
+    blob[count_at + 2] = static_cast<unsigned char>((count >> 8) & 0xFFu);
+    blob[count_at + 3] = static_cast<unsigned char>(count & 0xFFu);
+    if (count == 0)
+    {
+        return false;
+    }
+    char nenc_pascal[256];
+    BsnMakePascalName("NeoBAE Export Encode", nenc_pascal);
+    return XAddFileResource(out_file,
+                            SessionNencType(),
+                            1,
+                            nenc_pascal,
+                            blob.data(),
+                            static_cast<int32_t>(blob.size())) == 0;
+}
+
+void LoadSessionExportTargetsFromBank()
+{
+    if (!m_bank_token)
+    {
+        return;
+    }
+    XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
+    int32_t size = 0;
+    char name[256];
+    name[0] = 0;
+    XPTR data = XGetFileResource(bank, SessionNencType(), 1, name, &size);
+    if (!data || size < 12)
+    {
+        if (data)
+        {
+            XDisposePtr(data);
+        }
+        return;
+    }
+    const unsigned char *p = static_cast<const unsigned char *>(data);
+    auto read32 = [&p]() -> uint32_t {
+        const uint32_t v = (static_cast<uint32_t>(p[0]) << 24) |
+                           (static_cast<uint32_t>(p[1]) << 16) |
+                           (static_cast<uint32_t>(p[2]) << 8) |
+                           static_cast<uint32_t>(p[3]);
+        p += 4;
+        return v;
+    };
+    const uint32_t magic = read32();
+    const uint32_t version = read32();
+    const uint32_t count = read32();
+    if (magic != static_cast<uint32_t>(SessionNencType()) || version != 1u)
+    {
+        XDisposePtr(data);
+        return;
+    }
+    const size_t need = 12u + static_cast<size_t>(count) * 20u;
+    if (static_cast<size_t>(size) < need)
+    {
+        XDisposePtr(data);
+        return;
+    }
+    for (uint32_t i = 0; i < count; ++i)
+    {
+        const uint32_t snd_id = read32();
+        const uint32_t compression = read32();
+        const uint32_t storage = read32();
+        const uint32_t opus_mode = read32();
+        const uint32_t flags = read32();
+        if (snd_id == kNoSndResourceId)
+        {
+            continue;
+        }
+        SessionPcmCacheEntry &entry = m_session_pcm_cache[snd_id];
+        entry.snd_resource_id = snd_id;
+        entry.has_export_target = true;
+        entry.export_compression = static_cast<BAERmfEditorCompressionType>(compression);
+        entry.export_storage = static_cast<BAERmfEditorSndStorageType>(storage);
+        entry.export_opus_mode = static_cast<BAERmfEditorOpusMode>(opus_mode);
+        entry.export_opus_roundtrip = (flags & 1u) != 0;
+    }
+    XDisposePtr(data);
+}
+
 bool HydrateSessionPcmEntryFromCasd(uint32_t snd_id)
 {
     if (!m_bank_token || snd_id == kNoSndResourceId)
@@ -1334,6 +1509,16 @@ bool HydrateSessionPcmEntryFromCasd(uint32_t snd_id)
     }
 
     SessionPcmCacheEntry entry;
+    /* Preserve pending export encode prefs if Apply already stored them. */
+    auto prior = m_session_pcm_cache.find(snd_id);
+    if (prior != m_session_pcm_cache.end() && prior->second.has_export_target)
+    {
+        entry.has_export_target = prior->second.has_export_target;
+        entry.export_compression = prior->second.export_compression;
+        entry.export_storage = prior->second.export_storage;
+        entry.export_opus_mode = prior->second.export_opus_mode;
+        entry.export_opus_roundtrip = prior->second.export_opus_roundtrip;
+    }
     entry.snd_resource_id = snd_id;
     entry.frame_count = sdi.frames;
     entry.bit_size = static_cast<uint16_t>(sdi.bitSize ? sdi.bitSize : 16);
@@ -1341,7 +1526,7 @@ bool HydrateSessionPcmEntryFromCasd(uint32_t snd_id)
     entry.sample_rate = sdi.rate ? sdi.rate : UNSIGNED_LONG_TO_XFIXED(44100);
     entry.loop_start = sdi.loopStart;
     entry.loop_end = sdi.loopEnd;
-    entry.base_key = sdi.baseKey ? sdi.baseKey : 60;
+    entry.base_key = (sdi.baseKey >= 0 && sdi.baseKey <= 127) ? sdi.baseKey : 60;
     {
         const unsigned char plen = static_cast<unsigned char>(name[0]);
         if (plen > 0 && plen < 255)
@@ -1718,7 +1903,8 @@ void RestoreNbetEditorWindows()
         for (int i = 0; i < static_cast<int>(m_instruments.size()); ++i)
         {
             const InstrumentRow &row = m_instruments[static_cast<size_t>(i)];
-            if (m_nbet_restore_ie_inst_id != 0 && row.inst_id == m_nbet_restore_ie_inst_id)
+            /* INST id 0 is valid — always try id match before index/bank/program. */
+            if (row.inst_id == m_nbet_restore_ie_inst_id)
             {
                 match = i;
                 break;
@@ -1974,6 +2160,9 @@ bool LoadSessionBsnFromPath(const char *path)
     m_session_song_index = -1;
     RememberRecentSession(path);
     HydrateSessionPcmCacheFromBankCasd();
+    LoadSessionExportTargetsFromBank();
+    /* Bank load refreshed the sample list before nEnc prefs existed. */
+    RefreshListsFromBank();
 
     char status[256];
     const char *kind = EndsWith(path_owned, ".zsn") ? "Session .zsn" : "Session .bsn";
@@ -2141,6 +2330,7 @@ bool SaveSessionToPath(const char *path)
                 }
             }
             omit_one(FOUR_CHAR('n', 'B', 'e', 'T'), 1);
+            omit_one(FOUR_CHAR('n', 'E', 'n', 'c'), 1);
             omit_one(FOUR_CHAR('B', 'e', 'P', 'f'), 1);
             omit_one(FOUR_CHAR('B', 'E', 'P', 'F'), 1);
             omit_one(FOUR_CHAR('D', 'A', 'T', 'e'), 1);
@@ -2311,7 +2501,9 @@ bool SaveSessionToPath(const char *path)
                                            : UNSIGNED_LONG_TO_XFIXED(44100);
         wave.startLoop = pcm.loop_start;
         wave.endLoop = pcm.loop_end;
-        wave.baseMidiPitch = static_cast<unsigned char>(pcm.base_key ? pcm.base_key : 60);
+        /* Root key 0 is valid (C-1); do not coerce to 60. */
+        wave.baseMidiPitch =
+            static_cast<unsigned char>(std::clamp(pcm.base_key, 0, 127));
         wave.compressionType = C_NONE;
 
         XPTR snd_obj = nullptr;
@@ -2322,7 +2514,9 @@ bool SaveSessionToPath(const char *path)
         }
         char casd_pascal[256];
         BsnMakePascalName(pcm.name.c_str(), casd_pascal);
-        const uint32_t casd_id = pcm.snd_resource_id ? pcm.snd_resource_id : kv.first;
+        /* SND id 0 is valid; do not fall through to kv.first (often 1). */
+        const uint32_t casd_id =
+            (pcm.snd_resource_id != kNoSndResourceId) ? pcm.snd_resource_id : kv.first;
         const int32_t snd_size = XGetPtrSize(snd_obj);
         if (XAddFileResource(out_file,
                              FOUR_CHAR('C', 'a', 'S', 'd'),
@@ -2336,6 +2530,12 @@ bool SaveSessionToPath(const char *path)
         XDisposePtr(snd_obj);
     }
 #endif
+
+    /* ---- nEnc export codec prefs (deferred bank encode) ---- */
+    if (WriteSessionExportTargetsToFile(out_file))
+    {
+        date_stamps.push_back({static_cast<uint32_t>(SessionNencType()), 1u});
+    }
 
     /* ---- nBeT / BePf / BEPF / DATe ---- */
     UpdateBusyProgress(0.80f, "Writing session metadata…");

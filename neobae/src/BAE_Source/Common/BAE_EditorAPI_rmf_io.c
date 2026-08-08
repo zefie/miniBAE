@@ -304,8 +304,9 @@ BAEResult PV_AddEmbeddedSampleVariant(BAERmfEditorDocument *document,
             /* Single-key split with no explicit root: infer the split key first. */
             rootKey = lowKey;
         }
-        else if (sdi.baseKey > 0 && sdi.baseKey <= 127)
+        else if (sdi.baseKey >= 0 && sdi.baseKey <= 127)
         {
+            /* baseKey 0 is valid (C-1); only out-of-range falls back. */
             rootKey = (unsigned char)sdi.baseKey;
         }
         else
@@ -334,15 +335,9 @@ BAEResult PV_AddEmbeddedSampleVariant(BAERmfEditorDocument *document,
     sample->waveform = waveform;
     sample->program = program;
     sample->instID = (uint32_t)instID;
+    /* SND / asset id 0 is valid — do not remint. */
     sample->sampleAssetID = (uint32_t)sndID;
-    if (sample->sampleAssetID == 0)
-    {
-        sample->sampleAssetID = PV_AllocateSampleAssetID(document);
-    }
-    else
-    {
-        PV_NoteSampleAssetID(document, sample->sampleAssetID);
-    }
+    PV_NoteSampleAssetID(document, sample->sampleAssetID);
     sample->rootKey = rootKey;
     sample->lowKey = lowKey;
     sample->highKey = highKey;
@@ -1521,9 +1516,9 @@ BAEResult PV_AddSampleResources(BAERmfEditorDocument *document, XFILE fileRef, b
             preferredID = (XLongResourceID)sample->sampleAssetID;
 
             /* Keep SND IDs stable across saves by reusing the sample-asset ID
-             * whenever it is a valid short resource ID and not already used in
-             * this save pass by another asset. */
-            if (preferredID > 0 && preferredID <= 32767)
+             * whenever it is a valid short resource ID (including 0) and not
+             * already used in this save pass by another asset. */
+            if (sample->sampleAssetID <= 32767u)
             {
                 uint32_t priorIDIndex;
 

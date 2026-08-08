@@ -7852,7 +7852,9 @@ bool XTrashFileResources(XFILE fileRef,
 
         if (XGetUniqueFileResourceID(fileRef, XFILETRASH_ID, &trashID) != 0)
         {
-            trashID = resourceID != 0 ? resourceID : 1;
+            /* Trash entry ids are arbitrary; resourceID 0 is a valid original id
+             * but may already be taken as a trash id — prefer a unique mint. */
+            trashID = 1;
             (void)XMakeUniqueFileResourceID(fileRef, XFILETRASH_ID, &trashID);
         }
 
@@ -8061,7 +8063,9 @@ bool XRestoreIndexedFileTrash(XFILE fileRef,
     XBlockMove(payload, payloadCopy, payloadSize);
     XDisposePtr(data);
 
-    if (origID == 0 || XExistsFileResource(fileRef, origType, origID) != FALSE)
+    /* Resource id 0 is valid. Only mint a new id when the trash entry had no
+     * original id metadata, or the original id is already taken. */
+    if (!hasMeta || XExistsFileResource(fileRef, origType, origID) != FALSE)
     {
         if (XGetUniqueFileResourceID(fileRef, origType, &origID) != 0)
         {

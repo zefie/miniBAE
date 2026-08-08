@@ -148,7 +148,8 @@ struct SessionPcmCacheEntry
     uint32_t loop_start = 0;
     uint32_t loop_end = 0;
     int base_key = 60;
-    uint32_t snd_resource_id = 0;
+    /* 0 is a valid SND id — unset must be 0xFFFF, never 0. */
+    uint32_t snd_resource_id = kNoSndResourceId;
     /* Pending ship-format encode (editor bank stays PCM SND until Export). */
     bool has_export_target = false;
     BAERmfEditorCompressionType export_compression = BAE_EDITOR_COMPRESSION_PCM;
@@ -2673,7 +2674,8 @@ private:
 
     bool LookupDocumentSampleDisplayNameForInst(uint32_t inst_id, std::string *out_name) const
     {
-        if (!m_document || !out_name || inst_id == 0)
+        /* INST id 0 is valid — only reject unset sentinel / missing doc. */
+        if (!m_document || !out_name || inst_id == BAE_EDITOR_INST_ID_NONE)
         {
             return false;
         }
@@ -2723,7 +2725,8 @@ private:
         {
             const InstrumentRow &inst = m_instruments[i];
             by_slot[SlotKey(inst.bank, inst.program, inst.percussion)] = i;
-            if (!inst.is_alias && inst.inst_id != 0)
+            /* INST id 0 is valid — only skip aliases / unset sentinel. */
+            if (!inst.is_alias && inst.inst_id != BAE_EDITOR_INST_ID_NONE)
             {
                 by_inst_id[inst.inst_id] = i;
             }
@@ -2733,7 +2736,7 @@ private:
         {
             const SlotKey key(song_inst.bank, song_inst.program, song_inst.percussion);
             size_t match_index = static_cast<size_t>(-1);
-            if (song_inst.inst_id != 0)
+            if (song_inst.inst_id != BAE_EDITOR_INST_ID_NONE)
             {
                 auto by_id = by_inst_id.find(song_inst.inst_id);
                 if (by_id != by_inst_id.end())
@@ -2758,7 +2761,7 @@ private:
                 base.percussion = song_inst.percussion;
                 /* Matched a bank list row — keep bank ops (Move/Clone/…) enabled. */
                 base.from_song_document = false;
-                if (song_inst.inst_id != 0)
+                if (song_inst.inst_id != BAE_EDITOR_INST_ID_NONE)
                 {
                     base.inst_id = song_inst.inst_id;
                     base.target_inst_id = song_inst.inst_id;
@@ -2797,7 +2800,7 @@ private:
                 merged.has_song_override = true;
                 merged.is_custom = true;
                 merged.from_song_document = true;
-                if (song_inst.inst_id != 0)
+                if (song_inst.inst_id != BAE_EDITOR_INST_ID_NONE)
                 {
                     for (const InstrumentRow &bank_row : m_bank_instruments)
                     {
@@ -2812,7 +2815,7 @@ private:
                 }
                 /* No matching bank row — not an override of a Bank 0/1 INST. */
                 by_slot[key] = m_instruments.size();
-                if (merged.inst_id != 0)
+                if (merged.inst_id != BAE_EDITOR_INST_ID_NONE)
                 {
                     by_inst_id[merged.inst_id] = m_instruments.size();
                 }
@@ -2892,13 +2895,15 @@ private:
                 inst.is_custom = true;
                 inst.has_song_override = true;
                 inst.from_song_document = true;
-                inst.inst_id = (inst_id != BAE_EDITOR_INST_ID_NONE) ? inst_id : 0;
+                inst.inst_id = (inst_id != BAE_EDITOR_INST_ID_NONE) ? inst_id
+                                                                   : BAE_EDITOR_INST_ID_NONE;
                 inst.target_inst_id = inst.inst_id;
                 inst.program = program;
                 inst.bank = bank;
                 inst.percussion = percussion;
-                /* Prefer INST resource name over per-sample display names. */
-                if (inst.inst_id != 0 && m_document)
+                /* Prefer INST resource name over per-sample display names.
+                 * INST id 0 is valid — only skip the unset sentinel. */
+                if (inst.inst_id != BAE_EDITOR_INST_ID_NONE && m_document)
                 {
                     BAERmfEditorInstrumentExtInfo ext{};
                     if (BAERmfEditorDocument_GetInstrumentExtInfo(m_document,
@@ -3041,9 +3046,10 @@ private:
                 std::memset(&sinfo, 0, sizeof(sinfo));
                 if (BAERmfEditorBank_GetInstrumentSampleInfo(token, ii, si, &sinfo) ==
                         BAE_NO_ERROR &&
-                    (sinfo.sndResourceID != 0 || sinfo.frameCount > 0 || sinfo.bitDepth > 0))
+                    static_cast<uint16_t>(sinfo.sndResourceID) != 0xFFFFu)
                 {
-                    out.insert(static_cast<uint32_t>(sinfo.sndResourceID));
+                    /* SND id 0 is valid — only 0xFFFF means "no sample". */
+                    out.insert(static_cast<uint32_t>(static_cast<uint16_t>(sinfo.sndResourceID)));
                 }
             }
         }
@@ -3307,10 +3313,10 @@ private:
             int remove_index = -1;
             for (uint32_t si = 0; si < sample_count; ++si)
             {
-                uint32_t asset_id = 0;
+                uint32_t asset_id = BAE_EDITOR_SAMPLE_ASSET_ID_NONE;
                 if (BAERmfEditorDocument_GetSampleAssetIDForSample(doc, si, &asset_id) !=
                         BAE_NO_ERROR ||
-                    asset_id == 0)
+                    asset_id == BAE_EDITOR_SAMPLE_ASSET_ID_NONE)
                 {
                     continue;
                 }
@@ -4049,6 +4055,17 @@ private:
                     FormatVisibleCodecLabel(static_cast<uint32_t>(sample_info.compressionType),
                                             sample_info.compressionSubType,
                                             sample_info.opusRoundTripResample);
+                /* Bank stays PCM after deferred encode — show pending export codec. */
+                {
+                    auto pref = m_session_pcm_cache.find(snd_id);
+                    if (pref != m_session_pcm_cache.end() && pref->second.has_export_target &&
+                        pref->second.export_compression != BAE_EDITOR_COMPRESSION_PCM &&
+                        pref->second.export_compression != BAE_EDITOR_COMPRESSION_DONT_CHANGE)
+                    {
+                        sample_row.codec_label =
+                            FormatVisibleCodecLabelFromEditorType(pref->second.export_compression);
+                    }
+                }
 
                 /* Prefer the SND resource name (BE2-style); fall back to instrument name. */
                 char snd_name[256];
@@ -4233,6 +4250,16 @@ private:
                                 orphan.frame_count = sdi.frames;
                                 orphan.bit_depth = sdi.bitSize ? sdi.bitSize : 16;
                                 orphan.channels = sdi.channels ? sdi.channels : 1;
+                                auto pref = m_session_pcm_cache.find(static_cast<uint32_t>(snd_id));
+                                if (pref != m_session_pcm_cache.end() &&
+                                    pref->second.has_export_target &&
+                                    pref->second.export_compression != BAE_EDITOR_COMPRESSION_PCM &&
+                                    pref->second.export_compression !=
+                                        BAE_EDITOR_COMPRESSION_DONT_CHANGE)
+                                {
+                                    orphan.codec_label = FormatVisibleCodecLabelFromEditorType(
+                                        pref->second.export_compression);
+                                }
                             }
                             XDisposePtr(snd_data);
                         }
@@ -5559,11 +5586,13 @@ private:
     {
         if (!used_inst_ids.empty())
         {
-            if (inst.inst_id != 0 && used_inst_ids.count(inst.inst_id) != 0)
+            if (inst.inst_id != BAE_EDITOR_INST_ID_NONE &&
+                used_inst_ids.count(inst.inst_id) != 0)
             {
                 return true;
             }
-            if (inst.target_inst_id != 0 && used_inst_ids.count(inst.target_inst_id) != 0)
+            if (inst.target_inst_id != BAE_EDITOR_INST_ID_NONE &&
+                used_inst_ids.count(inst.target_inst_id) != 0)
             {
                 return true;
             }

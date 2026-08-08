@@ -617,7 +617,8 @@ BAEResult BAERmfEditorBank_GetInstrumentSampleInfo(BAEBankToken bankToken,
 
         if (useSoundModifierAsRootKey)
         {
-            if (miscParam1 > 0 && miscParam1 <= 127)
+            /* Root key 0 is valid (C-1). */
+            if (miscParam1 >= 0 && miscParam1 <= 127)
             {
                 outInfo->rootKey = (unsigned char)miscParam1;
             }
@@ -689,11 +690,10 @@ BAEResult BAERmfEditorBank_GetInstrumentSampleInfo(BAEBankToken bankToken,
                     outInfo->compressionSubType = PV_GetStoredCompressionSubTypeFromSnd(
                         sndData, sndSize, (uint32_t)sampleInfo.compressionType);
                     outInfo->opusRoundTripResample = XGetSoundOpusRoundTripFlag(sndData);
-                    /* When outInfo->rootKey was left 0 (!useSoundModifierAsRootKey),
-                     * the engine uses SND baseKey/baseFrequency as the sample root.
-                     * Prefer that over inferring from a single-key split range — the
-                     * split key is the mapping zone, not the sample's recorded pitch. */
-                    if (outInfo->rootKey == 0)
+                    /* When !useSoundModifierAsRootKey, rootKey was left 0 and the
+                     * engine uses SND baseKey. Do not overwrite a legitimate INST
+                     * root of 0 (useSoundModifierAsRootKey) with the SND pitch. */
+                    if (!useSoundModifierAsRootKey && outInfo->rootKey == 0)
                     {
                         if (sampleInfo.baseKey >= 0 && sampleInfo.baseKey <= 127)
                         {
@@ -3850,7 +3850,8 @@ BAEResult BAERmfEditorBank_GrowInstrumentSampleSlots(BAEBankToken bankToken,
 
         if (useSoundModifierAsRootKey)
         {
-            if (miscParam1 > 0 && miscParam1 <= 127)
+            /* Root key 0 is valid (C-1). */
+            if (miscParam1 >= 0 && miscParam1 <= 127)
             {
                 splitRoot = miscParam1;
             }
@@ -3871,7 +3872,8 @@ BAEResult BAERmfEditorBank_GrowInstrumentSampleSlots(BAEBankToken bankToken,
         XSetMemory(&newSplit, (int32_t)sizeof(newSplit), 0);
         newSplit.lowMidi = 0;
         newSplit.highMidi = 127;
-        newSplit.sndResourceID = 0;
+        /* Empty slot: 0xFFFF = no sample. SND id 0 is a real resource. */
+        newSplit.sndResourceID = (XShortResourceID)0xFFFFu;
         newSplit.miscParameter1 = (int16_t)defaultRoot;
         newSplit.miscParameter2 = defaultSplitVolume;
         XSetKeySplitFromPtr(grown, (int16_t)i, &newSplit);

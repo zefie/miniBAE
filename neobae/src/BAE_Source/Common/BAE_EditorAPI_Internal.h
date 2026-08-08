@@ -147,7 +147,7 @@ typedef struct BAERmfEditorSample
     XResourceType originalSndResourceType;
     BAESampleInfo sampleInfo;
     GM_Waveform *waveform;
-    uint32_t sampleAssetID;              /* shared audio asset identifier */
+    uint32_t sampleAssetID;              /* shared audio asset id; 0 valid; NONE=0xFFFFFFFF */
     /* Compression control */
     BAERmfEditorCompressionType targetCompressionType; /* desired output codec */
     BAERmfEditorOpusMode targetOpusMode;

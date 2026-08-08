@@ -621,7 +621,8 @@
     void CollectSndIdsFromInstResourceId(XLongResourceID inst_id,
                                          std::vector<XShortResourceID> &out_snd)
     {
-        if (!m_bank_token || inst_id == 0)
+        /* INST id 0 is valid — only reject a missing bank. */
+        if (!m_bank_token)
         {
             return;
         }
@@ -1891,7 +1892,8 @@
                 continue;
             }
             const uint32_t iid = row.is_alias ? row.target_inst_id : row.inst_id;
-            if (iid > 0 && iid <= 0xFFFFu)
+            /* INST id 0 is valid; only skip unset / out-of-range. */
+            if (iid != BAE_EDITOR_INST_ID_NONE && iid <= 0xFFFFu)
             {
                 inst_ids.push_back(static_cast<XShortResourceID>(static_cast<uint16_t>(iid)));
             }

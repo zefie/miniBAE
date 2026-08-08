@@ -1402,7 +1402,7 @@ BAEResult BAERmfEditorDocument_GetSampleAssetCount(BAERmfEditorDocument const *d
         uint32_t assetID;
 
         assetID = document->samples[i].sampleAssetID;
-        if (assetID == 0)
+        if (assetID == BAE_EDITOR_SAMPLE_ASSET_ID_NONE)
         {
             continue;
         }
@@ -1442,7 +1442,7 @@ BAEResult BAERmfEditorDocument_GetSampleAssetInfo(BAERmfEditorDocument const *do
         BAERmfEditorSample const *sample;
 
         sample = &document->samples[i];
-        if (sample->sampleAssetID == 0)
+        if (sample->sampleAssetID == BAE_EDITOR_SAMPLE_ASSET_ID_NONE)
         {
             continue;
         }
@@ -1481,7 +1481,7 @@ BAEResult BAERmfEditorDocument_GetSampleAssetUsageCount(BAERmfEditorDocument con
 {
     uint32_t usageCount;
 
-    if (!document || !outUsageCount || assetID == 0)
+    if (!document || !outUsageCount || assetID == BAE_EDITOR_SAMPLE_ASSET_ID_NONE)
     {
         return BAE_PARAM_ERR;
     }
@@ -1503,7 +1503,7 @@ BAEResult BAERmfEditorDocument_GetSampleAssetSampleIndex(BAERmfEditorDocument co
     uint32_t i;
     uint32_t hit;
 
-    if (!document || !outSampleIndex || assetID == 0)
+    if (!document || !outSampleIndex || assetID == BAE_EDITOR_SAMPLE_ASSET_ID_NONE)
     {
         return BAE_PARAM_ERR;
     }
@@ -1533,7 +1533,7 @@ BAEResult BAERmfEditorDocument_SetSampleAssetCompression(BAERmfEditorDocument *d
     BAERmfEditorCompressionType resolvedType;
     bool touched;
 
-    if (!document || assetID == 0)
+    if (!document || assetID == BAE_EDITOR_SAMPLE_ASSET_ID_NONE)
     {
         return BAE_PARAM_ERR;
     }
@@ -1576,7 +1576,8 @@ BAEResult BAERmfEditorDocument_SetSampleAssetForSample(BAERmfEditorDocument *doc
     BAERmfEditorSample *sourceAssetSample;
     BAERmfEditorCompressionType sourceCompression;
 
-    if (!document || sampleIndex >= document->sampleCount || assetID == 0)
+    if (!document || sampleIndex >= document->sampleCount ||
+        assetID == BAE_EDITOR_SAMPLE_ASSET_ID_NONE)
     {
         return BAE_PARAM_ERR;
     }
@@ -1824,7 +1825,8 @@ BAEResult BAERmfEditorDocument_DeleteInstrument(BAERmfEditorDocument *document, 
     uint32_t i;
     bool foundAny = FALSE;
 
-    if (!document || instID == 0)
+    /* INST id 0 is a valid resource id on some banks — do not reject it. */
+    if (!document)
     {
         return BAE_PARAM_ERR;
     }
@@ -2196,7 +2198,7 @@ BAEResult BAERmfEditorDocument_PropagateReplacementToAsset(BAERmfEditorDocument 
     }
     source = &document->samples[sourceSampleIndex];
     assetID = source->sampleAssetID;
-    if (assetID == 0)
+    if (assetID == BAE_EDITOR_SAMPLE_ASSET_ID_NONE)
     {
         return BAE_NO_ERROR;
     }
@@ -4721,7 +4723,8 @@ BAE_BOOL PV_ExportShouldEmbedInst(uint32_t resolvedInstID,
 bool PV_DocumentHasEmbeddedInstID(BAERmfEditorDocument const *document, uint32_t instID)
 {
     uint32_t i;
-    if (!document || instID == 0)
+    /* INST id 0 is valid — only reject a null document. */
+    if (!document)
     {
         return FALSE;
     }

@@ -1780,14 +1780,11 @@
         m_export_ghost_inst_ids.clear();
         for (const ExportInstrumentItem &item : m_export_items)
         {
-            if (item.inst_id == 0)
-            {
-                continue;
-            }
+            /* INST id 0 is valid (B0P000) — do not skip. */
             if (item.mode == ExportInstMode::Embed)
             {
                 m_export_embed_inst_ids.insert(item.inst_id);
-                if (item.requested_inst_id != 0 && item.requested_inst_id != item.inst_id)
+                if (item.requested_inst_id != item.inst_id)
                 {
                     m_export_embed_inst_ids.insert(item.requested_inst_id);
                 }
@@ -1795,7 +1792,7 @@
             else if (item.mode == ExportInstMode::Ghost)
             {
                 m_export_ghost_inst_ids.insert(item.inst_id);
-                if (item.requested_inst_id != 0 && item.requested_inst_id != item.inst_id)
+                if (item.requested_inst_id != item.inst_id)
                 {
                     m_export_ghost_inst_ids.insert(item.requested_inst_id);
                 }
@@ -5930,7 +5927,8 @@
         std::memset(&m_ie_ext, 0, sizeof(m_ie_ext));
         BAEResult r = BAE_PARAM_ERR;
         bool loaded_from_doc = false;
-        if (inst.from_song_document && m_document && m_ie_inst_id != 0)
+        /* INST id 0 is valid (e.g. B0P000) — do not treat 0 as unset. */
+        if (inst.from_song_document && m_document)
         {
             r = BAERmfEditorDocument_GetInstrumentExtInfo(m_document, m_ie_inst_id, &m_ie_ext);
             loaded_from_doc = (r == BAE_NO_ERROR);
@@ -5946,7 +5944,6 @@
         {
             m_ie_from_song = false;
             /* Resolve by INST id — flat promote after Apply can shift indexes. */
-            if (m_ie_inst_id != 0)
             {
                 uint32_t resolved = 0;
                 uint32_t index = m_ie_instrument_index;
@@ -5959,7 +5956,8 @@
             r = BAERmfEditorBank_GetInstrumentExtInfo(m_bank_token, m_ie_instrument_index, &m_ie_ext);
             if (r == BAE_NO_ERROR)
             {
-                m_ie_inst_id = m_ie_ext.instID ? m_ie_ext.instID : inst.inst_id;
+                /* Prefer bank Ext instID; 0 is valid — do not fall through on falsy. */
+                m_ie_inst_id = m_ie_ext.instID;
             }
         }
         if (r != BAE_NO_ERROR)
@@ -6123,10 +6121,14 @@
     {
         uint32_t patch_id = m_ie_inst_id;
         if (m_selected_instrument >= 0 &&
-            m_selected_instrument < static_cast<int>(m_instruments.size()) &&
-            m_instruments[static_cast<size_t>(m_selected_instrument)].target_inst_id != 0)
+            m_selected_instrument < static_cast<int>(m_instruments.size()))
         {
-            patch_id = m_instruments[static_cast<size_t>(m_selected_instrument)].target_inst_id;
+            const InstrumentRow &row = m_instruments[static_cast<size_t>(m_selected_instrument)];
+            /* Aliases: target_inst_id is the concrete INST (0 is valid). */
+            if (row.is_alias)
+            {
+                patch_id = row.target_inst_id;
+            }
         }
         return patch_id;
     }

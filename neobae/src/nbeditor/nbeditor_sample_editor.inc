@@ -881,7 +881,8 @@
                 m_sample_editor_channels = info.channels;
                 m_sample_editor_bit_depth = info.bitDepth;
                 m_sample_editor_snd_storage_type = info.sndStorageType;
-                m_sample_editor_snd_resource_id = static_cast<uint32_t>(info.sndResourceID);
+                m_sample_editor_snd_resource_id =
+                    static_cast<uint32_t>(static_cast<uint16_t>(info.sndResourceID));
                 m_sample_editor_root_key = static_cast<int>(info.rootKey);
                 detected = BankCompressionFromCodec(info.compressionType, info.compressionSubType);
             }
@@ -1060,7 +1061,7 @@
             m_sample_editor_loop_end = entry.loop_end;
             m_sample_editor_loop_enabled = true;
         }
-        if (entry.base_key > 0)
+        if (entry.base_key >= 0 && entry.base_key <= 127)
         {
             m_sample_editor_root_key = entry.base_key;
         }
@@ -1080,9 +1081,12 @@
         m_sample_editor_view_start = 0;
         m_sample_editor_view_end = m_sample_editor_frame_count;
         SeSyncFromCache();
+        /* Deferred compress only sets export prefs — clear that tag now so the
+         * sample list drops [MP3]/etc immediately. Preview already uses master PCM. */
+        ClearSessionExportTargetForSnd(m_sample_editor_snd_resource_id);
         m_sample_editor_dirty = true;
         m_sample_editor_has_uncompressed_master = true;
-        SetStatus("Loaded uncompressed master — Apply to write PCM into the bank sample");
+        SetStatus("Restored uncompressed master (export compression cleared)");
         return true;
     }
 
@@ -1203,6 +1207,7 @@
             m_sample_editor_loop_dirty = false;
             m_sample_editor_dirty = false;
             RefreshSongSamplesFromDocument();
+            SampleEditorSyncAuditionAfterApply(effective);
             SetStatus(closing ? "Song sample saved (editor closed)"
                               : (restore_master ? "Restored master PCM (no compression)"
                                                 : "Song sample compression set for export"));
@@ -1246,24 +1251,37 @@
         {
             SeRestoreCacheFromMaster();
             RememberSessionPcmFromSampleEditor(true);
+            /* Prefs-only Apply still creates a session PCM master — without this,
+             * "Restore Uncompressed" stays hidden (common for SND id 0 with no CaSd). */
+            m_sample_editor_has_uncompressed_master =
+                HasUncompressedMasterForSnd(m_sample_editor_snd_resource_id);
             m_sample_editor_preview_needs_reencode = false;
             m_sample_editor_loop_dirty = false;
             m_sample_editor_dirty = false;
-            m_sample_editor_audition_pcm.clear();
-            m_sample_editor_audition_frame_count = 0;
-            if (m_sample_editor_sample_row >= 0 &&
-                m_sample_editor_sample_row < static_cast<int>(m_samples.size()))
             {
-                m_samples[static_cast<size_t>(m_sample_editor_sample_row)].codec_label =
-                    FormatVisibleCodecLabelFromEditorType(effective);
+                const std::string label = FormatVisibleCodecLabelFromEditorType(effective);
+                const uint32_t snd_id = m_sample_editor_snd_resource_id;
+                for (SampleRow &row : m_samples)
+                {
+                    if (row.source == SampleSource::Bank &&
+                        (row.snd_resource_id == snd_id ||
+                         (m_sample_editor_sample_row >= 0 &&
+                          &row == &m_samples[static_cast<size_t>(m_sample_editor_sample_row)])))
+                    {
+                        row.codec_label = label;
+                    }
+                }
             }
             if (sample.bank >= 0 && sample.bank < 2)
             {
                 m_bank01_touched = true;
             }
+            SampleEditorSyncAuditionAfterApply(effective);
             SetStatus(closing ? "Compression set for export (editor closed)"
-                              : (std::string("Compression set for export: ") +
-                                 GetSampleCodecLabel(m_sample_editor_codec_type)));
+                              : (SeCodecIsUncompressedPcm(effective)
+                                     ? "Restored PCM for export (no deferred compression)"
+                                     : (std::string("Compression set for export: ") +
+                                        GetSampleCodecLabel(m_sample_editor_codec_type))));
             return true;
         }
 
@@ -1272,6 +1290,36 @@
             SetStatus("Sample write failed: bank not writable");
             return false;
         }
+
+        /* XReplace on INST is trash+append — GetIndexed order shifts. Pin by
+         * INST id / SND id; never re-resolve the editor from a stale index. */
+        uint32_t work_inst_index = sample.instrument_index;
+        const uint32_t keep_split = sample.split_index;
+        const uint32_t keep_snd = m_sample_editor_snd_resource_id;
+        uint32_t keep_inst_id = BAE_EDITOR_INST_ID_NONE;
+        if (!sample.unassigned)
+        {
+            BAERmfEditorBankInstrumentInfo iinfo;
+            std::memset(&iinfo, 0, sizeof(iinfo));
+            if (BAERmfEditorBank_GetInstrumentInfo(m_bank_token, work_inst_index, &iinfo) ==
+                BAE_NO_ERROR)
+            {
+                keep_inst_id = iinfo.instID;
+            }
+        }
+        auto sync_work_inst_index = [&]() {
+            if (keep_inst_id == BAE_EDITOR_INST_ID_NONE || !m_bank_token)
+            {
+                return;
+            }
+            uint32_t resolved = 0;
+            uint32_t index = work_inst_index;
+            if (BAERmfEditorBank_ResolveInstID(m_bank_token, keep_inst_id, &resolved, &index) ==
+                BAE_NO_ERROR)
+            {
+                work_inst_index = index;
+            }
+        };
 
         /* Keep the existing container type so same-type XReplace stays O(1).
          * CSND rewrap would LZMA-compress PCM — demote working-set to ESND. */
@@ -1292,11 +1340,46 @@
                 bank_storage = BAE_EDITOR_SND_STORAGE_ESND;
             }
         }
+
+        if (sample.unassigned)
+        {
+            /* Orphan SNDs have no stable instrument_index (row uses 0). Do not
+             * ReEncode through INST 0 — that rewrites an unrelated sample. */
+            SeRestoreCacheFromMaster();
+            RememberSessionPcmFromSampleEditor(true);
+            if (name_dirty && keep_snd <= 32767u)
+            {
+                (void)BAERmfEditorBank_RenameSampleResource(
+                    m_bank_token,
+                    static_cast<XShortResourceID>(keep_snd),
+                    m_sample_editor_sample_name.c_str());
+            }
+            m_sample_editor_preview_needs_reencode = false;
+            m_sample_editor_loop_dirty = false;
+            m_sample_editor_dirty = false;
+            RefreshListsFromBank();
+            m_sample_editor_sample_row = -1;
+            for (size_t i = 0; i < m_samples.size(); ++i)
+            {
+                if (m_samples[i].source == SampleSource::Bank &&
+                    m_samples[i].snd_resource_id == keep_snd)
+                {
+                    m_sample_editor_sample_row = static_cast<int>(i);
+                    break;
+                }
+            }
+            RefreshSampleEditorUsageText();
+            SampleEditorSyncAuditionAfterApply(effective);
+            SetStatus(closing ? "Unassigned sample prefs saved (editor closed)"
+                              : "Unassigned sample: export prefs saved (PCM bank write needs an instrument link)");
+            return true;
+        }
+
         const BAERmfEditorCompressionType bank_codec = BAE_EDITOR_COMPRESSION_PCM;
         const BAEResult result = BAERmfEditorBank_ReEncodeSampleFromPCMEx(
             m_bank_token,
-            sample.instrument_index,
-            sample.split_index,
+            work_inst_index,
+            keep_split,
             bank_codec,
             bank_storage,
             BAE_EDITOR_OPUS_MODE_AUDIO,
@@ -1313,66 +1396,77 @@
             return false;
         }
 
-        BAERmfEditorBankSampleInfo updated_info;
-        std::memset(&updated_info, 0, sizeof(updated_info));
-        if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
-                                                     sample.instrument_index,
-                                                     sample.split_index,
-                                                     &updated_info) == BAE_NO_ERROR)
+        /* SND id is stable across ReEncode; keep the editor's id (uint16). */
+        m_sample_editor_snd_resource_id = keep_snd;
+
+        if (keymap_dirty || m_sample_editor_loop_dirty)
         {
-            const uint32_t frames = (updated_info.frameCount > 0) ? updated_info.frameCount
-                                                                  : m_sample_editor_original_frame_count;
-            const uint32_t max_frame = (frames > 0) ? (frames - 1u) : 0u;
-            const uint32_t applied_start = std::min<uint32_t>(loop_start, max_frame);
-            uint32_t applied_end = std::min<uint32_t>(loop_end, frames);
-            if (applied_end < applied_start)
+            BAERmfEditorBankSampleInfo updated_info;
+            std::memset(&updated_info, 0, sizeof(updated_info));
+            if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
+                                                         work_inst_index,
+                                                         keep_split,
+                                                         &updated_info) == BAE_NO_ERROR)
             {
-                applied_end = applied_start;
-            }
+                const uint32_t frames = (updated_info.frameCount > 0)
+                                            ? updated_info.frameCount
+                                            : m_sample_editor_original_frame_count;
+                const uint32_t max_frame = (frames > 0) ? (frames - 1u) : 0u;
+                const uint32_t applied_start = std::min<uint32_t>(loop_start, max_frame);
+                uint32_t applied_end = std::min<uint32_t>(loop_end, frames);
+                if (applied_end < applied_start)
+                {
+                    applied_end = applied_start;
+                }
 
-            updated_info.loopStart = applied_start;
-            updated_info.loopEnd = applied_end;
-            updated_info.rootKey = static_cast<unsigned char>(want_root);
-            /* sampleRate==0 → INST keymap only when rate already matches bank SND. */
-            updated_info.sampleRate =
-                (have_bank_info && bank_info.sampleRate == m_sample_editor_sample_rate_hz)
-                    ? 0u
-                    : m_sample_editor_sample_rate_hz;
-            const BAEResult info_result = BAERmfEditorBank_SetInstrumentSampleInfo(
-                m_bank_token, sample.instrument_index, sample.split_index, &updated_info);
-            if (info_result != BAE_NO_ERROR)
-            {
-                SetStatus(std::string("Sample info update failed: ") + FormatBAEError(info_result));
-                return false;
-            }
+                updated_info.loopStart = applied_start;
+                updated_info.loopEnd = applied_end;
+                updated_info.rootKey = static_cast<unsigned char>(want_root);
+                /* Preserve SND linkage — never let a zeroed/stale field remint. */
+                updated_info.sndResourceID =
+                    static_cast<XShortResourceID>(static_cast<uint16_t>(keep_snd));
+                bool root_in_snd = true;
+                {
+                    BAERmfEditorInstrumentExtInfo ext{};
+                    if (BAERmfEditorBank_GetInstrumentExtInfo(
+                            m_bank_token, work_inst_index, &ext) == BAE_NO_ERROR)
+                    {
+                        root_in_snd =
+                            !TEST_FLAG_VALUE(ext.flags2, ZBF_useSoundModifierAsRootKey);
+                    }
+                }
+                const bool snd_meta_dirty =
+                    !have_bank_info ||
+                    bank_info.sampleRate != m_sample_editor_sample_rate_hz ||
+                    bank_info.loopStart != applied_start ||
+                    bank_info.loopEnd != applied_end ||
+                    (root_in_snd && static_cast<uint32_t>(bank_info.rootKey) != want_root);
+                updated_info.sampleRate =
+                    snd_meta_dirty ? m_sample_editor_sample_rate_hz : 0u;
+                const BAEResult info_result = BAERmfEditorBank_SetInstrumentSampleInfo(
+                    m_bank_token, work_inst_index, keep_split, &updated_info);
+                if (info_result != BAE_NO_ERROR)
+                {
+                    SetStatus(std::string("Sample info update failed: ") +
+                              FormatBAEError(info_result));
+                    return false;
+                }
+                /* INST XReplace shifts GetIndexed order. */
+                sync_work_inst_index();
 
-            if (m_sample_editor_loop_enabled)
-            {
-                m_sample_editor_loop_start = applied_start;
-                m_sample_editor_loop_end = applied_end;
+                if (m_sample_editor_loop_enabled)
+                {
+                    m_sample_editor_loop_start = applied_start;
+                    m_sample_editor_loop_end = applied_end;
+                }
             }
-            m_sample_editor_snd_resource_id = static_cast<uint32_t>(updated_info.sndResourceID);
         }
 
-        if (restore_master)
+        SeRestoreCacheFromMaster();
         {
-            SeRestoreCacheFromMaster();
             SampleRow refreshed = sample;
             refreshed.snd_resource_id = m_sample_editor_snd_resource_id;
             m_sample_editor_compressed_bytes = QueryBankSampleResourceBytes(refreshed);
-        }
-        else
-        {
-            SeRestoreCacheFromMaster();
-            BAERmfEditorBankSampleInfo info;
-            std::memset(&info, 0, sizeof(info));
-            if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
-                                                         sample.instrument_index,
-                                                         sample.split_index,
-                                                         &info) == BAE_NO_ERROR)
-            {
-                m_sample_editor_snd_resource_id = static_cast<uint32_t>(info.sndResourceID);
-            }
         }
 
         /* Persist SND resource name only when it actually changed. */
@@ -1391,43 +1485,50 @@
         m_sample_editor_preview_needs_reencode = false;
         m_sample_editor_loop_dirty = false;
         m_sample_editor_dirty = false;
-        m_sample_editor_audition_pcm.clear();
-        m_sample_editor_audition_frame_count = 0;
 
-        const uint32_t keep_inst = sample.instrument_index;
-        const uint32_t keep_split = sample.split_index;
-        const uint32_t keep_snd = m_sample_editor_snd_resource_id;
+        /* Capture export prefs before list rebuild — RefreshListsFromBank reads
+         * m_session_pcm_cache for the visible [codec] tag. */
+        RememberSessionPcmFromSampleEditor(true);
+
+        sync_work_inst_index();
         RefreshListsFromBank();
+        /* Rebind by SND id (stable). Prefer the row on the same INST/split. */
         m_sample_editor_sample_row = -1;
+        int snd_fallback = -1;
         for (size_t i = 0; i < m_samples.size(); ++i)
         {
-            if (m_samples[i].source == SampleSource::Bank &&
-                m_samples[i].instrument_index == keep_inst &&
-                m_samples[i].split_index == keep_split)
+            const SampleRow &row = m_samples[i];
+            if (row.source != SampleSource::Bank || row.snd_resource_id != keep_snd)
+            {
+                continue;
+            }
+            if (snd_fallback < 0)
+            {
+                snd_fallback = static_cast<int>(i);
+            }
+            if (!row.unassigned && row.instrument_index == work_inst_index &&
+                row.split_index == keep_split)
             {
                 m_sample_editor_sample_row = static_cast<int>(i);
                 break;
             }
         }
-        if (m_sample_editor_sample_row < 0 && keep_snd != kNoSndResourceId)
+        if (m_sample_editor_sample_row < 0)
         {
-            for (size_t i = 0; i < m_samples.size(); ++i)
+            m_sample_editor_sample_row = snd_fallback;
+        }
+        {
+            const std::string label = FormatVisibleCodecLabelFromEditorType(effective);
+            for (SampleRow &row : m_samples)
             {
-                if (m_samples[i].source == SampleSource::Bank &&
-                    m_samples[i].snd_resource_id == keep_snd)
+                if (row.source == SampleSource::Bank && row.snd_resource_id == keep_snd)
                 {
-                    m_sample_editor_sample_row = static_cast<int>(i);
-                    break;
+                    row.codec_label = label;
                 }
             }
         }
-        if (m_sample_editor_sample_row >= 0 &&
-            m_sample_editor_sample_row < static_cast<int>(m_samples.size()))
-        {
-            m_samples[static_cast<size_t>(m_sample_editor_sample_row)].codec_label =
-                FormatVisibleCodecLabelFromEditorType(effective);
-        }
-        RememberSessionPcmFromSampleEditor(true);
+        RefreshSampleEditorUsageText();
+        SampleEditorSyncAuditionAfterApply(effective);
         m_sample_editor_has_uncompressed_master =
             HasUncompressedMasterForSnd(m_sample_editor_snd_resource_id);
         if (sample.bank >= 0 && sample.bank < 2)
@@ -1745,12 +1846,46 @@
         Audition = 2, /* compression round-trip buffer */
     };
 
+    static bool SampleEditorCodecUsesAudition(BAERmfEditorCompressionType type)
+    {
+        return type != BAE_EDITOR_COMPRESSION_PCM &&
+               type != BAE_EDITOR_COMPRESSION_DONT_CHANGE;
+    }
+
+    /* After Apply, bank stays PCM — live Play/keys use the decode buffer. */
+    SePreviewSource SampleEditorLivePreviewSource() const
+    {
+        if (SampleEditorCodecUsesAudition(m_sample_editor_codec_type) &&
+            !m_sample_editor_audition_pcm.empty() &&
+            m_sample_editor_audition_frame_count > 0)
+        {
+            return SePreviewSource::Audition;
+        }
+        return SePreviewSource::Cache;
+    }
+
     void StartSampleEditorNote(int midi_note,
                                unsigned char velocity = 100,
                                SePreviewSource source = SePreviewSource::Cache)
     {
         midi_note = std::clamp(midi_note, 0, 127);
         velocity = static_cast<unsigned char>(std::clamp<int>(velocity, 1, 127));
+        if (source == SePreviewSource::Cache)
+        {
+            source = SampleEditorLivePreviewSource();
+        }
+        /* Export codec is set but bank stays PCM — encode into audition on first play. */
+        if (source != SePreviewSource::Master &&
+            source != SePreviewSource::Audition &&
+            SampleEditorCodecUsesAudition(m_sample_editor_codec_type) &&
+            (m_sample_editor_audition_pcm.empty() ||
+             m_sample_editor_audition_frame_count == 0))
+        {
+            if (PrepareCompressionPreviewAudition())
+            {
+                source = SePreviewSource::Audition;
+            }
+        }
 
         const std::vector<unsigned char> *pcm = &m_sample_editor_cached_pcm;
         uint32_t frames = m_sample_editor_cached_frame_count;
@@ -1891,7 +2026,26 @@
 
     void StartSampleEditorPreview(bool use_original)
     {
-        StartSampleEditorPreview(use_original ? SePreviewSource::Master : SePreviewSource::Cache);
+        StartSampleEditorPreview(use_original ? SePreviewSource::Master
+                                              : SampleEditorLivePreviewSource());
+    }
+
+    /* Bank Apply keeps PCM. Keep an existing compressed decode from Preview;
+     * do not re-encode here (that froze Apply on large samples / SND 0). */
+    void SampleEditorSyncAuditionAfterApply(BAERmfEditorCompressionType effective)
+    {
+        if (!SampleEditorCodecUsesAudition(effective))
+        {
+            m_sample_editor_audition_pcm.clear();
+            m_sample_editor_audition_frame_count = 0;
+            return;
+        }
+        if (!m_sample_editor_audition_pcm.empty() &&
+            m_sample_editor_audition_frame_count > 0)
+        {
+            return;
+        }
+        /* No prior Preview — leave audition empty; Play uses master until Preview. */
     }
 
     bool PrepareCompressionPreviewAudition()

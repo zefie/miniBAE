@@ -205,6 +205,10 @@ typedef struct BAERmfEditorSampleAssetInfo
  * Valid instIDs are small non-negative integers (0..~511); 0xFFFFFFFF is never a real ID. */
 #define BAE_EDITOR_INST_ID_NONE    0xFFFFFFFFu
 
+/* Sentinel for BAERmfEditorSample.sampleAssetID / document asset APIs.
+ * Asset id 0 is valid (matches bank SND id 0). Never treat 0 as unset. */
+#define BAE_EDITOR_SAMPLE_ASSET_ID_NONE    0xFFFFFFFFu
+
 #define BAE_EDITOR_MAX_ADSR_STAGES 32
 #define BAE_RMF_MAX_ADSR_STAGES     8  /* hard limit for RMF/HSB format; > 8 stages forces ZMF/ZSB */
 #define BAE_EDITOR_MAX_LFOS        6

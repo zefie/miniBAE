@@ -369,23 +369,26 @@ uint32_t PV_AllocateSampleAssetID(BAERmfEditorDocument *document)
 
     if (!document)
     {
-        return 0;
+        return BAE_EDITOR_SAMPLE_ASSET_ID_NONE;
     }
-    if (document->nextSampleAssetID == 0)
+    /* Synthetic alloc starts at 1 so bank SND id 0 stays free for real samples.
+     * Asset id 0 is valid when assigned from a bank SND — never treat it as unset. */
+    if (document->nextSampleAssetID == 0 ||
+        document->nextSampleAssetID == BAE_EDITOR_SAMPLE_ASSET_ID_NONE)
     {
         document->nextSampleAssetID = 1;
     }
     newID = document->nextSampleAssetID;
 
-    /* Some legacy INST entries use sndResourceID=0. In that case we synthesize
-       an internal asset ID, but it must never collide with real SND IDs present
-       in the loaded resource map (or already assigned sample assets), otherwise
-       unrelated instruments become grouped under the same asset in the editor. */
     for (;;)
     {
         bool reserved;
 
         reserved = FALSE;
+        if (newID == BAE_EDITOR_SAMPLE_ASSET_ID_NONE)
+        {
+            return BAE_EDITOR_SAMPLE_ASSET_ID_NONE;
+        }
         for (i = 0; i < document->originalResourceCount; ++i)
         {
             XResourceType type;
@@ -414,25 +417,33 @@ uint32_t PV_AllocateSampleAssetID(BAERmfEditorDocument *document)
             break;
         }
         newID++;
-        if (newID == 0)
+        if (newID == 0 || newID == BAE_EDITOR_SAMPLE_ASSET_ID_NONE)
         {
-            return 0;
+            return BAE_EDITOR_SAMPLE_ASSET_ID_NONE;
         }
     }
 
     document->nextSampleAssetID = newID + 1;
+    if (document->nextSampleAssetID == 0)
+    {
+        document->nextSampleAssetID = BAE_EDITOR_SAMPLE_ASSET_ID_NONE;
+    }
     return newID;
 }
 
 
 void PV_NoteSampleAssetID(BAERmfEditorDocument *document, uint32_t assetID)
 {
-    if (!document || assetID == 0)
+    if (!document || assetID == BAE_EDITOR_SAMPLE_ASSET_ID_NONE)
     {
         return;
     }
-    if (document->nextSampleAssetID <= assetID)
+    /* assetID 0 is valid (bank SND 0). */
+    if (document->nextSampleAssetID == 0 ||
+        document->nextSampleAssetID == BAE_EDITOR_SAMPLE_ASSET_ID_NONE ||
+        document->nextSampleAssetID <= assetID)
     {
+        /* 0xFFFFFFFE + 1 wraps to NONE — allocator treats that as exhausted. */
         document->nextSampleAssetID = assetID + 1;
     }
 }
@@ -475,7 +486,8 @@ void PV_ReserveBankSoundResourceIDs(BAERmfEditorDocument *document, XFILE bankFi
             if (sndData)
             {
                 XDisposePtr(sndData);
-                if (sndID > 0 && sndID <= 32767)
+                /* SND id 0 is valid — reserve it so song-local alloc does not steal it. */
+                if (sndID >= 0 && sndID <= 32767)
                 {
                     PV_NoteSampleAssetID(document, (uint32_t)sndID);
                 }
@@ -489,7 +501,7 @@ BAERmfEditorSample *PV_FindFirstSampleForAsset(BAERmfEditorDocument *document, u
 {
     uint32_t i;
 
-    if (!document || assetID == 0)
+    if (!document || assetID == BAE_EDITOR_SAMPLE_ASSET_ID_NONE)
     {
         return NULL;
     }
@@ -509,7 +521,7 @@ uint32_t PV_CountSamplesForAsset(BAERmfEditorDocument const *document, uint32_t 
     uint32_t i;
     uint32_t count;
 
-    if (!document || assetID == 0)
+    if (!document || assetID == BAE_EDITOR_SAMPLE_ASSET_ID_NONE)
     {
         return 0;
     }
@@ -553,7 +565,7 @@ bool PV_AssetSupportsDontChange(BAERmfEditorDocument const *document, uint32_t a
     uint32_t i;
     bool sawAny;
 
-    if (!document || assetID == 0)
+    if (!document || assetID == BAE_EDITOR_SAMPLE_ASSET_ID_NONE)
     {
         return FALSE;
     }
@@ -1354,7 +1366,8 @@ bool PV_CanReuseSndResourceForSamples(BAERmfEditorSample const *left,
     {
         return FALSE;
     }
-    if (left->sampleAssetID == 0 || left->sampleAssetID != right->sampleAssetID)
+    if (left->sampleAssetID == BAE_EDITOR_SAMPLE_ASSET_ID_NONE ||
+        left->sampleAssetID != right->sampleAssetID)
     {
         return FALSE;
     }

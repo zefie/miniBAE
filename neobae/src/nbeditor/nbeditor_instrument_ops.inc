@@ -480,10 +480,7 @@
 
     void StripInstrumentFromSessionSongs(uint32_t inst_id)
     {
-        if (inst_id == 0)
-        {
-            return;
-        }
+        /* INST id 0 is valid (B0P000); never treat as unset. */
         (void)CommitActiveSessionSong();
 
         auto strip_doc = [inst_id](BAERmfEditorDocument *doc) {

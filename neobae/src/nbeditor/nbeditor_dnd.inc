@@ -147,7 +147,12 @@
                     if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token, i, s, &sample) ==
                         BAE_NO_ERROR)
                     {
-                        referenced.insert(static_cast<uint32_t>(sample.sndResourceID));
+                        const uint16_t sid = static_cast<uint16_t>(sample.sndResourceID);
+                        /* SND id 0 is valid; only 0xFFFF means no sample. */
+                        if (sid != 0xFFFFu)
+                        {
+                            referenced.insert(static_cast<uint32_t>(sid));
+                        }
                     }
                 }
             }
