@@ -570,53 +570,67 @@ BAEResult BAERmfEditorBank_GetInstrumentSampleInfo(BAEBankToken bankToken,
     baseVolume = (int16_t)XGetShort(&inst->miscParameter2);
     useSoundModifierAsRootKey = TEST_FLAG_VALUE(inst->flags2, ZBF_useSoundModifierAsRootKey);
     miscParam1 = (int16_t)XGetShort(&inst->miscParameter1);
-    /* Last-resort root if SND baseKey is unreadable. Prefer per-split misc
-     * over the INST header word; never treat misc as authoritative when SND
-     * is present (see fill below). */
+
+    if (splitCount > 0)
     {
-        int16_t fallbackRoot = baseRootKey;
+        /* This is a split instrument - get info from the key split */
+        XGetKeySplitFromPtr(inst, (int16_t)sampleIndex, &split);
+        sndID = split.sndResourceID;
 
-        if (splitCount > 0)
+        outInfo->lowKey = (unsigned char)split.lowMidi;
+        outInfo->highKey = (unsigned char)split.highMidi;
+        /* Do not expose offset/smod words as "Vol" (e.g. 192 half-word). */
+        outInfo->splitVolume = PV_InstMiscParameter2IsVolume(inst->flags2)
+                                   ? split.miscParameter2
+                                   : (int16_t)0;
+
+        /* Sample rootKey for editor: when useSoundModifierAsRootKey, miscParameter1
+         * is the root; otherwise the SND baseFrequency is
+         * (INST midiRootKey is masterRootKey transpose, not the sample root). */
+        if (useSoundModifierAsRootKey)
         {
-            /* This is a split instrument - get info from the key split */
-            XGetKeySplitFromPtr(inst, (int16_t)sampleIndex, &split);
-            sndID = split.sndResourceID;
-
-            outInfo->lowKey = (unsigned char)split.lowMidi;
-            outInfo->highKey = (unsigned char)split.highMidi;
-            /* Do not expose offset/smod words as "Vol" (e.g. 192 half-word). */
-            outInfo->splitVolume = PV_InstMiscParameter2IsVolume(inst->flags2)
-                                       ? split.miscParameter2
-                                       : (int16_t)0;
-            if (useSoundModifierAsRootKey &&
-                split.miscParameter1 >= 0 && split.miscParameter1 <= 127)
+            int16_t splitRoot = split.miscParameter1;
+            if (split.lowMidi == split.highMidi && splitRoot == 0)
             {
-                fallbackRoot = split.miscParameter1;
+                splitRoot = (int16_t)split.lowMidi;
             }
-            else if (split.lowMidi == split.highMidi)
+            if (splitRoot < 0 || splitRoot > 127)
             {
-                fallbackRoot = (int16_t)split.lowMidi;
+                splitRoot = baseRootKey;
+            }
+            outInfo->rootKey = (unsigned char)splitRoot;
+        }
+        else
+        {
+            outInfo->rootKey = 0; /* filled from SND baseKey below */
+        }
+    }
+    else
+    {
+        /* Non-split instrument - use base sample */
+        sndID = (XShortResourceID)XGetShort(&inst->sndResourceID);
+        outInfo->lowKey = 0;
+        outInfo->highKey = 127;
+        outInfo->splitVolume = PV_InstMiscParameter2IsVolume(inst->flags2)
+                                   ? baseVolume
+                                   : (int16_t)0;
+
+        if (useSoundModifierAsRootKey)
+        {
+            /* Root key 0 is valid (C-1). */
+            if (miscParam1 >= 0 && miscParam1 <= 127)
+            {
+                outInfo->rootKey = (unsigned char)miscParam1;
+            }
+            else
+            {
+                outInfo->rootKey = (unsigned char)baseRootKey;
             }
         }
         else
         {
-            /* Non-split instrument - use base sample */
-            sndID = (XShortResourceID)XGetShort(&inst->sndResourceID);
-            outInfo->lowKey = 0;
-            outInfo->highKey = 127;
-            outInfo->splitVolume = PV_InstMiscParameter2IsVolume(inst->flags2)
-                                       ? baseVolume
-                                       : (int16_t)0;
-            if (useSoundModifierAsRootKey && miscParam1 >= 0 && miscParam1 <= 127)
-            {
-                fallbackRoot = miscParam1;
-            }
+            outInfo->rootKey = 0; /* filled from SND baseKey below */
         }
-
-        /* Editor rootKey is the SND baseKey/baseFrequency. Leave 0 until SND
-         * fill; reuse miscParam1 as the fallback root below. */
-        outInfo->rootKey = 0;
-        miscParam1 = fallbackRoot;
     }
 
     outInfo->sndResourceID = sndID;
@@ -627,7 +641,7 @@ BAEResult BAERmfEditorBank_GetInstrumentSampleInfo(BAEBankToken bankToken,
         static const XResourceType sndTypes[] = { ID_ESND, ID_CSND, ID_SND, 0 };
         int32_t typeIdx;
         XResourceType foundSndType;
-        bool rootFilled = FALSE;
+        bool rootFilled = useSoundModifierAsRootKey; /* INST/split misc already set */
 
         sndData = NULL;
         foundSndType = 0;
@@ -677,11 +691,15 @@ BAEResult BAERmfEditorBank_GetInstrumentSampleInfo(BAEBankToken bankToken,
                     outInfo->compressionSubType = PV_GetStoredCompressionSubTypeFromSnd(
                         sndData, sndSize, (uint32_t)sampleInfo.compressionType);
                     outInfo->opusRoundTripResample = XGetSoundOpusRoundTripFlag(sndData);
-                    /* Always prefer SND baseKey for editor/live-preview root. */
-                    if (sampleInfo.baseKey >= 0 && sampleInfo.baseKey <= 127)
+                    /* When !useSoundModifierAsRootKey, editor root is SND baseKey.
+                     * Do not overwrite a legitimate INST/split root of 0. */
+                    if (!useSoundModifierAsRootKey && outInfo->rootKey == 0)
                     {
-                        outInfo->rootKey = (unsigned char)sampleInfo.baseKey;
-                        rootFilled = TRUE;
+                        if (sampleInfo.baseKey >= 0 && sampleInfo.baseKey <= 127)
+                        {
+                            outInfo->rootKey = (unsigned char)sampleInfo.baseKey;
+                            rootFilled = TRUE;
+                        }
                     }
                 }
             }
@@ -695,9 +713,10 @@ BAEResult BAERmfEditorBank_GetInstrumentSampleInfo(BAEBankToken bankToken,
             {
                 outInfo->rootKey = outInfo->lowKey;
             }
-            else if (miscParam1 >= 0 && miscParam1 <= 127)
+            else if (!useSoundModifierAsRootKey && baseRootKey >= 0 && baseRootKey <= 127)
             {
-                outInfo->rootKey = (unsigned char)miscParam1;
+                /* Last resort only — midiRootKey is often 60 ("no transpose"). */
+                outInfo->rootKey = (unsigned char)baseRootKey;
             }
             else
             {
@@ -2353,7 +2372,8 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
             if (curHz == info->sampleRate &&
                 sampleInfo.loopStart == info->loopStart &&
                 sampleInfo.loopEnd == info->loopEnd &&
-                sampleInfo.baseKey == (int16_t)info->rootKey)
+                (useSoundModifierAsRootKey ||
+                 sampleInfo.baseKey == (int16_t)info->rootKey))
             {
                 XDisposePtr(sndPlain);
                 return BAE_NO_ERROR;
@@ -2365,10 +2385,13 @@ BAEResult BAERmfEditorBank_SetInstrumentSampleInfo(BAEBankToken bankToken,
         XSetSoundSampleRate(sndPlain, sampleRate);
         XSetSoundLoopPoints(sndPlain, (int32_t)info->loopStart, (int32_t)info->loopEnd);
 
-        /* Editor root is always the SND baseKey. When useSoundModifierAsRootKey
-         * is set, INST/split miscParameter1 is also updated above so live
-         * pitch stays aligned — do not leave the SND key stale. */
-        XSetSoundBaseKey(sndPlain, (int16_t)info->rootKey);
+        /* When useSoundModifierAsRootKey is clear, the sample root is the SND
+         * baseKey/baseFrequency.  When set, INST miscParameter1 owns the root
+         * and the SND key stays as the sample's recorded pitch. */
+        if (!useSoundModifierAsRootKey)
+        {
+            XSetSoundBaseKey(sndPlain, (int16_t)info->rootKey);
+        }
     }
 
     sndWrapped = NULL;

@@ -12068,11 +12068,9 @@ static void PV_PatchInstrumentEnvelopes(GM_Instrument *theI,
     theI->volumeADSRRecord.sustainingDecayLevel = XFIXED_1;
 
     /* INST header pitch / root flags — IE "MIDI root key" and flag toggles.
-     * Do not trust INST miscParameter1 as the sample root (shared with smod /
-     * sample-offset words; keysplit header misc is not per-sample). When the
-     * engine pitches via useSoundModifierAsRootKey, keep misc in sync with the
-     * SND baseMidiPitch instead. Never stamp parent-header misc onto keymap
-     * split children (bogus playPitch → phase wrap / garbage / crashes). */
+     * When useSoundModifierAsRootKey, miscParameter1 is the pitch root (do not
+     * overwrite it from SND baseMidiPitch — that is often middle-C / 60).
+     * Never stamp parent-header misc onto keymap split children. */
     theI->masterRootKey = info->midiRootKey;
     theI->useSoundModifierAsRootKey =
         TEST_FLAG_VALUE(info->flags2, ZBF_useSoundModifierAsRootKey) ? TRUE : FALSE;
@@ -12081,11 +12079,7 @@ static void PV_PatchInstrumentEnvelopes(GM_Instrument *theI,
         !theI->doKeymapSplit &&
         !theI->sampleOffsetStartEnabled)
     {
-        int16_t sndRoot = (int16_t)theI->u.w.baseMidiPitch;
-        if (sndRoot >= 0 && sndRoot <= 127)
-        {
-            theI->miscParameter1 = sndRoot;
-        }
+        theI->miscParameter1 = info->miscParameter1;
     }
 
     /* Live IE preview: INST flags2 is authoritative for the toggle (including
@@ -12245,9 +12239,9 @@ BAEResult BAESong_PatchLoadedInstrumentExtInfo(BAESong song,
         PV_PatchInstrumentEnvelopes(theI, info,
                                     theI->doKeymapSplit ? FALSE : TRUE);
 
-        /* If this is a keysplit instrument, propagate envelopes/LFOs/flags to
-         * sub-instruments. Per-split pitch root follows each child's SND
-         * baseMidiPitch — not the parent header miscParameter1. */
+        /* Propagate envelopes/LFOs/flags to keymap splits. Leave each split's
+         * miscParameter1 (useSoundModifierAsRootKey pitch root) alone unless a
+         * sampleOverride supplies a new root — do not stomp with SND baseKey. */
         if (theI->doKeymapSplit)
         {
             uint16_t splitCount = theI->u.k.KeymapSplitCount;
@@ -12259,24 +12253,13 @@ BAEResult BAESong_PatchLoadedInstrumentExtInfo(BAESong song,
                 if (theS)
                 {
                     PV_PatchInstrumentEnvelopes(theS, info, FALSE);
-                    if (theS->useSoundModifierAsRootKey &&
-                        !theS->sampleOffsetStartEnabled)
-                    {
-                        int16_t sndRoot = (int16_t)theS->u.w.baseMidiPitch;
-                        if (sndRoot >= 0 && sndRoot <= 127)
-                        {
-                            theS->miscParameter1 = sndRoot;
-                            ks->miscParameter1 = sndRoot;
-                        }
-                    }
                 }
             }
         }
 
         /* Sample-level overrides (root key, sample rate, loop, key range).
-         * sampleRootKey is the editor root: SND baseMidiPitch when
-         * !useSoundModifierAsRootKey, else the per-split pitch root. Never
-         * treat INST header miscParameter1 as a universal root source. */
+         * sampleRootKey is SND baseMidiPitch when !useSoundModifierAsRootKey,
+         * else the per-split / INST misc pitch root. */
         if (info->hasSampleOverride)
         {
             uint32_t idx = info->sampleOverrideIndex;
@@ -12299,14 +12282,15 @@ BAEResult BAESong_PatchLoadedInstrumentExtInfo(BAESong song,
                             theS->u.w.startLoop = (uint32_t)info->sampleLoopStart;
                             theS->u.w.endLoop = (uint32_t)info->sampleLoopEnd;
                         }
-                        /* Editor root == SND baseMidiPitch. */
-                        theS->u.w.baseMidiPitch = (uint16_t)info->sampleRootKey;
                         if (theS->useSoundModifierAsRootKey &&
                             !theS->sampleOffsetStartEnabled)
                         {
-                            /* Keep engine pitch path aligned with SND root. */
                             ks->miscParameter1 = (int16_t)info->sampleRootKey;
                             theS->miscParameter1 = (int16_t)info->sampleRootKey;
+                        }
+                        else
+                        {
+                            theS->u.w.baseMidiPitch = (uint16_t)info->sampleRootKey;
                         }
                         theS->miscParameter2 = (int16_t)info->sampleSplitVolume;
                     }
@@ -12323,11 +12307,14 @@ BAEResult BAESong_PatchLoadedInstrumentExtInfo(BAESong song,
                         theI->u.w.startLoop = (uint32_t)info->sampleLoopStart;
                         theI->u.w.endLoop = (uint32_t)info->sampleLoopEnd;
                     }
-                    theI->u.w.baseMidiPitch = (uint16_t)info->sampleRootKey;
                     if (theI->useSoundModifierAsRootKey &&
                         !theI->sampleOffsetStartEnabled)
                     {
                         theI->miscParameter1 = (int16_t)info->sampleRootKey;
+                    }
+                    else
+                    {
+                        theI->u.w.baseMidiPitch = (uint16_t)info->sampleRootKey;
                     }
                     theI->miscParameter2 = (int16_t)info->sampleSplitVolume;
                 }
