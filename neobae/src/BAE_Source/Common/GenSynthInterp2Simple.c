@@ -127,13 +127,21 @@ static inline int32_t PV_CubicHermiteInterp(int32_t s0, int32_t s1, int32_t s2, 
 
 // Fetch a sample with loop-wrapping for cubic Hermite boundary cases.
 // idx is the sample index to fetch, which may be outside [loopStart, loopEnd).
+// Extreme pitch can land more than one loop length past the end — use modulo.
 static inline int32_t PV_LoopWrapSample16(int16_t *source, int32_t idx, int32_t loopStart, int32_t loopEnd)
 {
     int32_t loopLen = loopEnd - loopStart;
+    if (loopLen <= 0)
+        return (int32_t)source[loopStart];
     if (idx < loopStart)
-        idx += loopLen;
+    {
+        int32_t d = (loopStart - idx) % loopLen;
+        idx = (d == 0) ? loopStart : (loopEnd - d);
+    }
     else if (idx >= loopEnd)
-        idx -= loopLen;
+    {
+        idx = loopStart + ((idx - loopStart) % loopLen);
+    }
     return (int32_t)source[idx];
 }
 

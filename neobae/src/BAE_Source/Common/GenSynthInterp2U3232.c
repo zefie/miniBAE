@@ -110,10 +110,17 @@ static inline int32_t PV_CubicHermiteInterpU3232(int32_t s0, int32_t s1, int32_t
 static inline int32_t PV_LoopWrapSample16U3232(int16_t *source, int32_t idx, int32_t loopStart, int32_t loopEnd)
 {
     int32_t loopLen = loopEnd - loopStart;
+    if (loopLen <= 0)
+        return (int32_t)source[loopStart];
     if (idx < loopStart)
-        idx += loopLen;
+    {
+        int32_t d = (loopStart - idx) % loopLen;
+        idx = (d == 0) ? loopStart : (loopEnd - d);
+    }
     else if (idx >= loopEnd)
-        idx -= loopLen;
+    {
+        idx = loopStart + ((idx - loopStart) % loopLen);
+    }
     return (int32_t)source[idx];
 }
 

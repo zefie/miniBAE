@@ -295,14 +295,19 @@
 #define ALLOW_DEBUG_STEREO      0           // 1 - allow keyboard debugging of stereo code
 #define USE_DLS                 0           // 1 - allow DLS changes, 0 - IGOR // Old DLS code not Native DLS
 
+/* Extreme pitch can step past more than one loop length per output sample.
+ * One subtract leaves the index past end_wave and the next source[] read OOBs.
+ * Wrap until inside the loop; if wave_adjust is 0/invalid, kill the voice. */
 #if USE_CALLBACKS
 // a macro to handle broken loops and partial buffers in the inner loop code
 #define THE_CHECK(TYPE) \
     if (cur_wave >= end_wave)\
     {\
-        if (looping)\
+        if (looping && wave_adjust > 0)\
         {\
-            cur_wave -= wave_adjust;    /* back off pointer for previous sample*/ \
+            do {\
+                cur_wave -= wave_adjust;\
+            } while (cur_wave >= end_wave);\
             if (this_voice->doubleBufferProc)\
             {\
                 /* we hit the end of the loop call double buffer to notify swap*/ \
@@ -312,6 +317,17 @@
                     end_wave = (XFIXED)(this_voice->NoteLoopEnd - this_voice->NotePtr) << STEP_BIT_RANGE;\
                     wave_adjust =  (XFIXED)(this_voice->NoteLoopEnd - this_voice->NoteLoopPtr) << STEP_BIT_RANGE;\
                     source = (TYPE) this_voice->NotePtr;\
+                    if (wave_adjust > 0)\
+                    {\
+                        while (cur_wave >= end_wave)\
+                            cur_wave -= wave_adjust;\
+                    }\
+                    if (cur_wave >= end_wave)\
+                    {\
+                        this_voice->voiceMode = VOICE_UNUSED;\
+                        PV_DoCallBack(this_voice);\
+                        goto FINISH;\
+                    }\
                 }\
                 else\
                 {\
@@ -331,9 +347,11 @@
 #define THE_CHECK(TYPE) \
     if (cur_wave >= end_wave)\
     {\
-        if (looping)\
+        if (looping && wave_adjust > 0)\
         {\
-            cur_wave -= wave_adjust;    /* back off pointer for previous sample*/ \
+            do {\
+                cur_wave -= wave_adjust;\
+            } while (cur_wave >= end_wave);\
         }\
         else\
         {\
@@ -374,9 +392,13 @@ typedef struct U3232
 #define THE_CHECK_U3232(TYPE) \
     if (cur_wave_i >= end_wave)\
     {\
-        if (looping)\
+        if (looping && wave_adjust > 0)\
         {\
-            cur_wave_i -= wave_adjust;  /* back off pointer for previous sample*/\
+            /* Extreme pitch: step may exceed one loop length — wrap with modulo. */\
+            {\
+                U32 loop_start = end_wave - wave_adjust;\
+                cur_wave_i = loop_start + ((cur_wave_i - loop_start) % wave_adjust);\
+            }\
 /*          cur_wave_f = 0; TRY PUTTING THIS IN SOME DAY, MIGHT SOUND BETTER */\
             if (this_voice->doubleBufferProc)\
             {\
@@ -387,6 +409,17 @@ typedef struct U3232
                     end_wave = this_voice->NoteLoopEnd - this_voice->NotePtr;\
                     wave_adjust = this_voice->NoteLoopEnd - this_voice->NoteLoopPtr;\
                     source = (TYPE)this_voice->NotePtr;\
+                    if (wave_adjust > 0 && cur_wave_i >= end_wave)\
+                    {\
+                        U32 loop_start = end_wave - wave_adjust;\
+                        cur_wave_i = loop_start + ((cur_wave_i - loop_start) % wave_adjust);\
+                    }\
+                    if (cur_wave_i >= end_wave)\
+                    {\
+                        this_voice->voiceMode = VOICE_UNUSED;\
+                        PV_DoCallBack(this_voice);\
+                        goto FINISH;\
+                    }\
                 }\
                 else\
                 {\
@@ -405,9 +438,12 @@ typedef struct U3232
 #define THE_CHECK_U3232(TYPE) \
     if (cur_wave_i >= end_wave)\
     {\
-        if (looping)\
+        if (looping && wave_adjust > 0)\
         {\
-            cur_wave_i -= wave_adjust;  /* back off pointer for previous sample*/\
+            {\
+                U32 loop_start = end_wave - wave_adjust;\
+                cur_wave_i = loop_start + ((cur_wave_i - loop_start) % wave_adjust);\
+            }\
 /*          cur_wave_f = 0; TRY PUTTING THIS IN SOME DAY, MIGHT SOUND BETTER */\
         }\
         else\
@@ -425,9 +461,11 @@ typedef struct U3232
 #define THE_CHECK_FLOAT(TYPE) \
     if (cur_wave >= end_wave)\
     {\
-        if (looping)\
+        if (looping && wave_adjust > 0)\
         {\
-            cur_wave -= wave_adjust;    /* back off pointer for previous sample*/ \
+            do {\
+                cur_wave -= wave_adjust;\
+            } while (cur_wave >= end_wave);\
             if (this_voice->doubleBufferProc)\
             {\
                 /* we hit the end of the loop call double buffer to notify swap*/ \
@@ -437,6 +475,17 @@ typedef struct U3232
                     end_wave = (this_voice->NoteLoopEnd - this_voice->NotePtr);\
                     wave_adjust = (this_voice->NoteLoopEnd - this_voice->NoteLoopPtr);\
                     source = (TYPE) this_voice->NotePtr;\
+                    if (wave_adjust > 0)\
+                    {\
+                        while (cur_wave >= end_wave)\
+                            cur_wave -= wave_adjust;\
+                    }\
+                    if (cur_wave >= end_wave)\
+                    {\
+                        this_voice->voiceMode = VOICE_UNUSED;\
+                        PV_DoCallBack(this_voice);\
+                        goto FINISH;\
+                    }\
                 }\
                 else\
                 {\
@@ -455,9 +504,11 @@ typedef struct U3232
 #define THE_CHECK_FLOAT(TYPE) \
     if (cur_wave >= end_wave)\
     {\
-        if (looping)\
+        if (looping && wave_adjust > 0)\
         {\
-            cur_wave -= wave_adjust;    /* back off pointer for previous sample*/ \
+            do {\
+                cur_wave -= wave_adjust;\
+            } while (cur_wave >= end_wave);\
         }\
         else\
         {\
@@ -558,7 +609,7 @@ struct GM_Voice
     GM_SoundDoneCallbackPtr     NoteEndCallback;    // sample done callback proc
 #endif
 
-    int16_t                  NoteNextSize;           // number of samples per slice. Use 0 to recalculate
+    int32_t                  NoteNextSize;           // frames advanced per slice. Use 0 to recalculate (int32: high pitch overflows int16)
     signed char                  NoteMIDIPitch;          // midi note pitch to start note
     signed char                  noteOffsetStart;        // at the start of the midi note, what was the offset
     int16_t                  ProcessedPitch;         // actual pitch to play (proccessed)

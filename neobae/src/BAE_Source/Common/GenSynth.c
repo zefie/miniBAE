@@ -1620,11 +1620,36 @@ static INLINE int32_t PV_RemapOscPhaseByPulseWidth(int32_t where, int32_t pulseW
     }
 }
 
+/* PolyBLEP: polynomial band-limited step. Softens naive square/saw/pulse
+ * discontinuities so high notes don't alias into noise. t,dt in [0,1). */
+static INLINE float PV_OscPolyBlep(float t, float dt)
+{
+    if (dt <= 0.0f)
+        return 0.0f;
+    if (t < dt)
+    {
+        t /= dt;
+        return t + t - t * t - 1.0f;
+    }
+    if (t > 1.0f - dt)
+    {
+        t = (t - 1.0f) / dt;
+        return t * t + t + t + 1.0f;
+    }
+    return 0.0f;
+}
+
 /* Audio-rate oscillator shape. NOIS/PLSE are oscillator-only; SINE→real sine;
  * other shapes match LFO (TRIA/SAWT/SQUA). Pulse width: PLSE = duty cycle
- * (high first); Sine/Tri/Saw/Square = phase remap (50% = identity). */
-static INLINE int32_t PV_GetOscWaveShape(int32_t where, int32_t what_kind, int32_t pulseWidth, uint32_t *noiseState)
+ * (high first); Sine/Tri/Saw/Square = phase remap (50% = identity).
+ * phase/phaseInc are the U32 accumulator (full circle = 2^32) for PolyBLEP. */
+static INLINE int32_t PV_GetOscWaveShape(uint32_t phase, uint32_t phaseInc,
+                                         int32_t what_kind, int32_t pulseWidth,
+                                         uint32_t *noiseState)
 {
+    int32_t where = (int32_t)(phase >> 16);
+    float t, dt, s;
+
     if (what_kind == NOISE_OSC_WAVE)
     {
         if (noiseState)
@@ -1645,21 +1670,65 @@ static INLINE int32_t PV_GetOscWaveShape(int32_t where, int32_t what_kind, int32
     if (pulseWidth > 65535)
         pulseWidth = 65535;
 
-    /* PLSE: variable duty, high for first `pulseWidth` of the cycle.
-     * Not the same as SQUA (which is high in the second half at 50%). */
-    if (what_kind == PULSE_OSC_WAVE)
-    {
-        return (where < pulseWidth) ? 65536 : -65536;
-    }
-
-    /* Sine / Triangle / Saw / Square: PWM via phase remapping. */
-    where = PV_RemapOscPhaseByPulseWidth(where, pulseWidth);
-
     /* SAWW → same as LFO SAWT; file/LFO SINE → real sine for oscillators */
     if (what_kind == SAWTOOTH_OSC_WAVE)
         what_kind = SAWTOOTH_WAVE;
+    if (what_kind == SQUARE_WAVE2)
+        what_kind = SQUARE_WAVE;
     if (what_kind == SINE_WAVE)
         what_kind = SINE_WAVE_REAL;
+
+    t = (float)phase * (1.0f / 4294967296.0f);
+    dt = (float)phaseInc * (1.0f / 4294967296.0f);
+
+    /* PLSE: variable duty, high for first `pulseWidth` of the cycle. */
+    if (what_kind == PULSE_OSC_WAVE)
+    {
+        float d = (float)pulseWidth * (1.0f / 65536.0f);
+        float td;
+        s = (where < pulseWidth) ? 1.0f : -1.0f;
+        s += PV_OscPolyBlep(t, dt);
+        td = t - d;
+        if (td < 0.0f)
+            td += 1.0f;
+        s -= PV_OscPolyBlep(td, dt);
+        return (int32_t)(s * 65536.0f);
+    }
+
+    /* Square: naive is high in the second half. With PWM remap, duty becomes
+     * `pulseWidth` (same edges as PLSE but inverted polarity vs PLSE). */
+    if (what_kind == SQUARE_WAVE)
+    {
+        float d = (float)pulseWidth * (1.0f / 65536.0f);
+        float td;
+        /* After identity remap (pw=50%) high when t>=0.5; with PWM, high when t>=d. */
+        s = (t >= d) ? 1.0f : -1.0f;
+        s -= PV_OscPolyBlep(t, dt);
+        td = t - d;
+        if (td < 0.0f)
+            td += 1.0f;
+        s += PV_OscPolyBlep(td, dt);
+        return (int32_t)(s * 65536.0f);
+    }
+
+    /* Saw: falling ramp (1→-1), jump up at wrap. PWM remaps phase first. */
+    if (what_kind == SAWTOOTH_WAVE || what_kind == SAWTOOTH_WAVE2)
+    {
+        int32_t w = PV_RemapOscPhaseByPulseWidth(where, pulseWidth);
+        if (what_kind == SAWTOOTH_WAVE2)
+            s = ((float)(w - 32768) * 2.0f) * (1.0f / 65536.0f); /* rising */
+        else
+            s = ((float)(32768 - w) * 2.0f) * (1.0f / 65536.0f); /* falling */
+        /* Soften wrap discontinuity. Rising saw uses opposite blep polarity. */
+        if (what_kind == SAWTOOTH_WAVE2)
+            s -= PV_OscPolyBlep(t, dt);
+        else
+            s += PV_OscPolyBlep(t, dt);
+        return (int32_t)(s * 65536.0f);
+    }
+
+    /* Sine / Triangle: continuous enough; PWM via phase remapping only. */
+    where = PV_RemapOscPhaseByPulseWidth(where, pulseWidth);
     return PV_GetWaveShape(where, what_kind);
 }
 
@@ -1783,7 +1852,6 @@ static void PV_ServeOscillatorBuffer(GM_Voice *pVoice)
     register int32_t amplitudeL, amplitudeR;
     int32_t amplitudeLincrement, amplitudeRincrement;
     int32_t ampValueL, ampValueR;
-    int32_t where;
     int32_t pw;
     int32_t oscVol;
     uint32_t phase;
@@ -1881,8 +1949,7 @@ static void PV_ServeOscillatorBuffer(GM_Voice *pVoice)
             }
             else
             {
-                where = (int32_t)(phase >> 16);
-                sample = PV_GetOscWaveShape(where, oscShape, pw, NULL);
+                sample = PV_GetOscWaveShape(phase, phaseInc, oscShape, pw, NULL);
                 phase += phaseInc;
             }
             /* Match ~8-bit-scaled mix range used by filtered PCM path */
@@ -2448,22 +2515,33 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
         if (pVoice->NoteNextSize == 0)
         {
 #if USE_FLOAT == FALSE
-            // use fixed code
-            XFIXED fwave_increment, result;
+            // use fixed code (64-bit: high pitch * slice can overflow int32)
+            XFIXED fwave_increment;
+            int64_t result;
 
             fwave_increment = PV_GetWavePitchFixed(pVoice->NotePitch);
 
-            result = (fwave_increment * (pMixer->One_Slice + 1)) / XFIXED_1;
-            pVoice->NoteNextSize = (int16_t)result;
+            result = ((int64_t)fwave_increment * (int64_t)(pMixer->One_Slice + 1)) / (int64_t)XFIXED_1;
+            if (result < 1)
+                result = 1;
+            if (result > 0x7fffffffLL)
+                result = 0x7fffffffLL;
+            pVoice->NoteNextSize = (int32_t)result;
 #else
             // use floating point code
             UFLOAT fwave_increment;
+            double result;
 
             fwave_increment = PV_GetWavePitchFloat(pVoice->NotePitch);
-            pVoice->NoteNextSize = (int16_t)(fwave_increment * (pMixer->One_Slice + 1)) + 1;
+            result = (double)fwave_increment * (double)(pMixer->One_Slice + 1) + 1.0;
+            if (result < 1.0)
+                result = 1.0;
+            if (result > (double)0x7fffffff)
+                result = (double)0x7fffffff;
+            pVoice->NoteNextSize = (int32_t)result;
 #endif
         }
-        size = pVoice->NoteNextSize;
+        size = (uint32_t)pVoice->NoteNextSize;
         start = pVoice->samplePosition.i;
         end = pVoice->NotePtrEnd - pVoice->NotePtr;
         break;
@@ -2472,11 +2550,17 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
         if (pVoice->NoteNextSize == 0)
         {
             UFLOAT fwave_increment;
+            double result;
 
             fwave_increment = PV_GetWavePitchFloat(pVoice->NotePitch);
-            pVoice->NoteNextSize = (int16_t)(fwave_increment * (pMixer->One_Slice + 1)) + 1;
+            result = (double)fwave_increment * (double)(pMixer->One_Slice + 1) + 1.0;
+            if (result < 1.0)
+                result = 1.0;
+            if (result > (double)0x7fffffff)
+                result = (double)0x7fffffff;
+            pVoice->NoteNextSize = (int32_t)result;
         }
-        size = pVoice->NoteNextSize;
+        size = (uint32_t)pVoice->NoteNextSize;
         start = pVoice->samplePosition_f;
         end = pVoice->NotePtrEnd - pVoice->NotePtr;
         break;
@@ -2485,12 +2569,19 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
         if (pVoice->NoteNextSize == 0)
         {
             register XFIXED wave_increment;
+            int64_t result;
 
             wave_increment = PV_GetWavePitch(pVoice->NotePitch);
-            pVoice->NoteNextSize =
-                (int16_t)((wave_increment * (pMixer->One_Slice + 1) + STEP_FULL_RANGE) >> STEP_BIT_RANGE);
+            result = (((int64_t)wave_increment * (int64_t)(pMixer->One_Slice + 1) +
+                       (int64_t)STEP_FULL_RANGE) >>
+                      STEP_BIT_RANGE);
+            if (result < 1)
+                result = 1;
+            if (result > 0x7fffffffLL)
+                result = 0x7fffffffLL;
+            pVoice->NoteNextSize = (int32_t)result;
         }
-        size = pVoice->NoteNextSize;
+        size = (uint32_t)pVoice->NoteNextSize;
         start = pVoice->NoteWave >> STEP_BIT_RANGE;
         end = (unsigned char *)pVoice->NotePtrEnd - (unsigned char *)pVoice->NotePtr;
         break;

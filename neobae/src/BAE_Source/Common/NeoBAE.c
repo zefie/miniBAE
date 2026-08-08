@@ -2019,7 +2019,7 @@ const char *BAE_GetCompileInfo()
 
 const char *BAE_GetFeatureString()
 {
-    static char featBuf[512];
+    static char featBuf[1024];
     featBuf[0] = '\0';
     bool first = TRUE;
 
@@ -2145,7 +2145,7 @@ if ((rtx && rtx[0]) || (adp && adp[0]) || (mthc && mthc[0]) || (nokia_patch && n
         first = FALSE;
     }
 
-    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", ")");
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), ")");
 }
 
 #if USE_QOA_SUPPORT == TRUE
