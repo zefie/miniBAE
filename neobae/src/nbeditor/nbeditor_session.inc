@@ -6130,6 +6130,7 @@
         }
         m_ie_ext.displayName = m_ie_display_name.empty() ? nullptr : m_ie_display_name.c_str();
         m_ie_dirty = false;
+        m_ie_live_osc_persisted = (m_ie_ext.useOscillator != FALSE);
         m_ie_page = 0;
         m_ie_selected_split = -1;
         m_ie_ext_pristine = m_ie_ext;
@@ -6280,19 +6281,32 @@
                 }
             }
         }
+        const bool root_in_snd =
+            !TEST_FLAG_VALUE(m_ie_ext.flags2, ZBF_useSoundModifierAsRootKey);
         const uint32_t n = std::min(split_count, want);
         for (uint32_t s = 0; s < n; ++s)
         {
             const IePristineSplit &snap = splits[s];
             BAERmfEditorBankSampleInfo info;
             std::memset(&info, 0, sizeof(info));
+            /* Prefer current SND metadata so root-in-SND restore can rewrite
+             * baseKey (sampleRate==0 only updates INST keymap fields). */
+            if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
+                                                         m_ie_instrument_index,
+                                                         s,
+                                                         &info) != BAE_NO_ERROR)
+            {
+                std::memset(&info, 0, sizeof(info));
+            }
             info.lowKey = snap.lowKey;
             info.highKey = snap.highKey;
             info.rootKey = snap.rootKey;
             info.splitVolume = snap.splitVolume;
             info.sndResourceID = static_cast<XShortResourceID>(snap.sndResourceID);
-            /* INST keymap only — same sentinel as the Vol/Low/High commit path. */
-            info.sampleRate = 0;
+            if (!root_in_snd || info.sampleRate == 0)
+            {
+                info.sampleRate = 0;
+            }
             if (BAERmfEditorBank_SetInstrumentSampleInfo(
                     m_bank_token, m_ie_instrument_index, s, &info) != BAE_NO_ERROR)
             {
@@ -6427,15 +6441,18 @@
         }
 #if USE_ZMF_SUPPORT == TRUE
         /* Persist OSCL + PWID/WIDX so NoteOn from bank/doc hears generators
-         * before Apply. Soft-patch carries the audible change; do not force an
-         * audition unload/reload here (Apply may have already cleared SND links). */
-        if (m_ie_ext.useOscillator)
+         * before Apply. Also rewrite when clearing a previously live-written
+         * OSCL (toggle off / Revert / Close) — otherwise bank stays stuck on. */
+        if (m_ie_ext.useOscillator || m_ie_live_osc_persisted)
         {
             BindInstrumentEditorDisplayName();
             m_ie_ext.flags1 = static_cast<unsigned char>(
                 m_ie_ext.flags1 & static_cast<unsigned char>(~ZBF_ghostInstrument));
-            m_ie_ext.flags1 = static_cast<unsigned char>(m_ie_ext.flags1 | ZBF_extendedFormat);
-            m_ie_ext.hasExtendedData = TRUE;
+            if (m_ie_ext.useOscillator)
+            {
+                m_ie_ext.flags1 = static_cast<unsigned char>(m_ie_ext.flags1 | ZBF_extendedFormat);
+                m_ie_ext.hasExtendedData = TRUE;
+            }
             if (m_ie_from_song && m_document)
             {
                 if (BAERmfEditorDocument_SetInstrumentExtInfo(m_document, m_ie_inst_id, &m_ie_ext) ==
@@ -6457,6 +6474,7 @@
                 }
                 MarkBank01TouchedIfNeeded(m_ie_bank);
             }
+            m_ie_live_osc_persisted = (m_ie_ext.useOscillator != FALSE);
         }
 #endif
         /* Inst ID 0 is valid (bank 0 program 0). */
@@ -6482,6 +6500,95 @@
             else
             {
                 LivePatchInstrumentOnSong(m_song, inst, /*reload_samples=*/false, false);
+            }
+        }
+    }
+
+    /* Unload/reload loaded patches that reference a bank SND so song/IE hear
+     * waveform changes. Does not Stop() the song (UnloadInstrument no longer
+     * treats mInstrumentsLoadedCount==0 as end-of-playback). */
+    void LiveReloadInstrumentsUsingSnd(uint32_t snd_id)
+    {
+        if (!m_bank_token || snd_id == kNoSndResourceId)
+        {
+            return;
+        }
+
+        std::unordered_set<uint32_t> patch_ids;
+        for (const SampleRow &row : m_samples)
+        {
+            if (row.source != SampleSource::Bank || row.unassigned ||
+                row.snd_resource_id != snd_id)
+            {
+                continue;
+            }
+            BAERmfEditorBankInstrumentInfo info{};
+            if (BAERmfEditorBank_GetInstrumentInfo(m_bank_token, row.instrument_index, &info) !=
+                BAE_NO_ERROR)
+            {
+                continue;
+            }
+            patch_ids.insert(info.instID);
+        }
+        for (const InstrumentRow &row : m_instruments)
+        {
+            if (row.is_alias && patch_ids.count(row.target_inst_id) != 0)
+            {
+                patch_ids.insert(row.inst_id);
+            }
+        }
+        if (patch_ids.empty())
+        {
+            return;
+        }
+
+        EnsureBankAuditionSong();
+        auto remount = [&](BAESong song, bool load_if_missing) {
+            if (!song)
+            {
+                return;
+            }
+            for (uint32_t id : patch_ids)
+            {
+                const BAE_INSTRUMENT inst = static_cast<BAE_INSTRUMENT>(id);
+                BAE_BOOL loaded = FALSE;
+                const bool was_loaded =
+                    (BAESong_IsInstrumentLoaded(song, inst, &loaded) == BAE_NO_ERROR && loaded);
+                if (!was_loaded && !load_if_missing)
+                {
+                    continue;
+                }
+                /* Unload/reload only — do not PatchLoadedInstrumentExtInfo with
+                 * m_ie_ext (that belongs to the open IE instrument, not every SND user). */
+                int guard = 0;
+                while (guard++ < 64 &&
+                       BAESong_IsInstrumentLoaded(song, inst, &loaded) == BAE_NO_ERROR &&
+                       loaded)
+                {
+                    if (BAESong_UnloadInstrument(song, inst) != BAE_NO_ERROR)
+                    {
+                        break;
+                    }
+                }
+                (void)BAESong_LoadInstrument(song, inst);
+            }
+        };
+
+        BAESong audition = GetAuditionSong();
+        /* Audition keyboard: only remount patches already loaded there. */
+        remount(audition, false);
+        if (m_song && m_song != audition)
+        {
+            remount(m_song, false);
+        }
+
+        /* Reloaded INST drops soft ExtInfo; re-apply if IE is open on one of them. */
+        if (m_instrument_editor_open && !m_ie_from_song)
+        {
+            const uint32_t ie_id = InstrumentEditorPatchId();
+            if (patch_ids.count(ie_id) != 0 || patch_ids.count(m_ie_inst_id) != 0)
+            {
+                LivePatchInstrumentEditor(false);
             }
         }
     }
@@ -6564,7 +6671,7 @@
         SetStatus("Instrument editor: redo");
     }
 
-    void InstrumentEditorRevert()
+    void InstrumentEditorRevert(bool announce = true)
     {
         m_ie_ext = m_ie_ext_pristine;
         BindInstrumentEditorDisplayName();
@@ -6585,7 +6692,10 @@
 #else
         LivePatchInstrumentEditor(true);
 #endif
-        SetStatus("Instrument editor: reverted to opened state");
+        if (announce)
+        {
+            SetStatus("Instrument editor: reverted to opened state");
+        }
     }
 
     void ClearInstrumentEditorHistory()
@@ -6595,6 +6705,7 @@
         m_ie_ext_pristine = m_ie_ext;
         m_ie_ext_pre_edit = m_ie_ext;
         m_ie_undo_pushed_for_gesture = false;
+        m_ie_live_osc_persisted = (m_ie_ext.useOscillator != FALSE);
         CaptureInstrumentEditorPristineSplits();
     }
 
@@ -7091,7 +7202,7 @@
                         MarkInstrumentEditorDirty(false);
                         m_ie_ext.lfoCount--;
                         std::memset(&m_ie_ext.lfos[m_ie_ext.lfoCount], 0, sizeof(m_ie_ext.lfos[0]));
-                        m_ie_lfo_control_mode[m_ie_ext.lfoCount] = kLfoModeBoth;
+                        RemoveLfoControlModeAt(m_ie_ext.lfoCount);
                         LivePatchInstrumentEditor();
                     }
                     if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
@@ -7208,13 +7319,14 @@
             {
                 /* Defer off the ImGui frame so busy UI can paint before
                  * EnsureWritable / ZINS work on large banks. */
+                m_ie_close_after_apply = false;
                 m_long_op = LongOp::ApplyInstrument;
                 ArmBusyProgress("Applying instrument…");
             }
             ImGui::SameLine();
             if (ImGui::Button("Close"))
             {
-                open = false;
+                RequestCloseInstrumentEditor();
             }
         }
         else
@@ -7222,22 +7334,90 @@
             m_instrument_editor_focused = false;
         }
         ImGui::End();
+        /* Title-bar X sets open=false — same confirm path as Close. */
         if (m_instrument_editor_open && !open)
         {
-            if (m_mouse_active_note >= 0)
-            {
-                NoteOff(m_mouse_active_note);
-                m_key_mouse_held[static_cast<size_t>(m_mouse_active_note)] = false;
-                m_mouse_active_note = -1;
-            }
-            if (m_ie_note_song)
-            {
-                BAESong_KillActiveNotes(m_ie_note_song);
-                m_ie_note_song = nullptr;
-            }
-            m_instrument_editor_focused = false;
+            RequestCloseInstrumentEditor();
         }
-        m_instrument_editor_open = open;
+        DrawInstrumentEditorCloseConfirm();
+    }
+
+    void FinishCloseInstrumentEditor(bool discard_changes)
+    {
+        if (m_mouse_active_note >= 0)
+        {
+            NoteOff(m_mouse_active_note);
+            m_key_mouse_held[static_cast<size_t>(m_mouse_active_note)] = false;
+            m_mouse_active_note = -1;
+        }
+        if (m_ie_note_song)
+        {
+            BAESong_KillActiveNotes(m_ie_note_song);
+            m_ie_note_song = nullptr;
+        }
+        m_instrument_editor_focused = false;
+        m_confirm_ie_close_open = false;
+        m_ie_close_after_apply = false;
+        if (discard_changes && m_ie_dirty)
+        {
+            /* Generator (and other) live writes can hit bank/doc before Apply. */
+            InstrumentEditorRevert(false);
+        }
+        m_instrument_editor_open = false;
+    }
+
+    void RequestCloseInstrumentEditor()
+    {
+        if (!m_instrument_editor_open)
+        {
+            return;
+        }
+        if (m_ie_dirty)
+        {
+            m_confirm_ie_close_open = true;
+            return;
+        }
+        FinishCloseInstrumentEditor(false);
+    }
+
+    void DrawInstrumentEditorCloseConfirm()
+    {
+        if (m_confirm_ie_close_open)
+        {
+            ImGui::OpenPopup("Unsaved Instrument Changes");
+        }
+        if (!ImGui::BeginPopupModal("Unsaved Instrument Changes",
+                                    &m_confirm_ie_close_open,
+                                    ImGuiWindowFlags_AlwaysAutoResize))
+        {
+            return;
+        }
+        ImGui::TextWrapped(
+            "This instrument has unapplied changes.\n"
+            "Apply them to the bank/song, or discard and close?");
+        ImGui::Spacing();
+        if (ImGui::Button("Apply and Close", ImVec2(150.0f, 0.0f)))
+        {
+            m_confirm_ie_close_open = false;
+            m_ie_close_after_apply = true;
+            m_long_op = LongOp::ApplyInstrument;
+            ArmBusyProgress("Applying instrument…");
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Discard", ImVec2(120.0f, 0.0f)))
+        {
+            m_confirm_ie_close_open = false;
+            FinishCloseInstrumentEditor(true);
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120.0f, 0.0f)))
+        {
+            m_confirm_ie_close_open = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
     }
 
     int FindSampleRowForInstrumentSplit(uint32_t instrument_index,
@@ -7588,6 +7768,20 @@
                  * typing does not rebuild INST on every keystroke. */
                 /* sampleRate==0 → INST-only replace (skip SND open/decompress).
                  * Root-in-SND still needs a real sampleRate so the SND baseKey updates. */
+                auto live_patch_split = [this, s](const BAERmfEditorBankSampleInfo &split) {
+                    m_ie_ext.hasSampleOverride = TRUE;
+                    m_ie_ext.sampleOverrideIndex = s;
+                    m_ie_ext.sampleRootKey = split.rootKey;
+                    m_ie_ext.sampleLowKey = split.lowKey;
+                    m_ie_ext.sampleHighKey = split.highKey;
+                    m_ie_ext.sampleSplitVolume = split.splitVolume;
+                    m_ie_ext.sampleRate = split.sampleRate;
+                    m_ie_ext.sampleLoopStart = split.loopStart;
+                    m_ie_ext.sampleLoopEnd = split.loopEnd;
+                    LivePatchInstrumentEditor(false);
+                    /* Ephemeral preview fields — do not bake into Apply/pristine. */
+                    m_ie_ext.hasSampleOverride = FALSE;
+                };
                 auto commit_split = [&](bool may_touch_snd_root) {
                     /* XReplace fails on read-only banks; EnsureWritable first so
                      * INST Vol never falls into a multi-second full Replace. */
@@ -7607,8 +7801,15 @@
                          * the next frame reads a different INST (often all Vol=192). */
                         SyncInstrumentEditorBankIndex();
                         m_ie_dirty = true;
+                        info.sampleRate = saved_rate;
+                        /* Soft-patch audition/playback so Root/Low/High/Vol are heard
+                         * without waiting for Apply / instrument reload. */
+                        live_patch_split(info);
                     }
-                    info.sampleRate = saved_rate;
+                    else
+                    {
+                        info.sampleRate = saved_rate;
+                    }
                 };
                 ImGui::TableSetColumnIndex(1);
                 ImGui::SetNextItemWidth(-FLT_MIN);

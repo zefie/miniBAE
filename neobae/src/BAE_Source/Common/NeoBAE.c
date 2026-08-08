@@ -12057,6 +12057,23 @@ static void PV_PatchInstrumentEnvelopes(GM_Instrument *theI,
         theI->volumeADSRRecord.ADSRTime[i] = 0;
         theI->volumeADSRRecord.ADSRFlags[i] = ADSR_OFF;
     }
+    /* Stage remove / shrink must reset playback so the next NoteOn does not
+     * continue from a removed stage index. */
+    theI->volumeADSRRecord.currentTime = 0;
+    theI->volumeADSRRecord.currentPosition = 0;
+    theI->volumeADSRRecord.currentLevel = 0;
+    theI->volumeADSRRecord.previousTarget = 0;
+    theI->volumeADSRRecord.mode = 0;
+    theI->volumeADSRRecord.sustainingDecayLevel = XFIXED_1;
+
+    /* INST header pitch / root flags — IE "MIDI root key" and flag toggles. */
+    theI->masterRootKey = info->midiRootKey;
+    theI->useSoundModifierAsRootKey =
+        TEST_FLAG_VALUE(info->flags2, ZBF_useSoundModifierAsRootKey) ? TRUE : FALSE;
+    if (theI->useSoundModifierAsRootKey && !theI->doKeymapSplit)
+    {
+        theI->miscParameter1 = info->miscParameter1;
+    }
 
     /* LPF */
     theI->LPF_frequency = info->LPF_frequency;
@@ -12079,61 +12096,86 @@ static void PV_PatchInstrumentEnvelopes(GM_Instrument *theI,
     }
 #endif
 
-    /* LFOs - patch only the editor-known LFOs; preserve any extra
-     * engine-added records (e.g. the default mod-wheel pitch LFO that
-     * PV_GetEnvelopeData appends when INST_DEFAULT_MOD is absent). */
+    /* LFOs — replace the editor list. Optionally keep one trailing engine
+     * default mod-wheel pitch LFO (PV_GetEnvelopeData when !INST_DEFAULT_MOD).
+     * The old "restore originalLFOCount" path left removed IE LFOs audible. */
     {
         int32_t originalLFOCount = theI->LFORecordCount;
+        int32_t patchedCount;
+        GM_LFO savedDefault;
+        bool haveDefault = FALSE;
+
+        XSetMemory(&savedDefault, (int32_t)sizeof(savedDefault), 0);
+        if (!info->hasDefaultMod)
+        {
+            for (i = 0; i < originalLFOCount && i < MAX_LFOS; i++)
+            {
+                GM_LFO *p = &theI->LFORecords[i];
+                /* Match GenPatch.c default mod-wheel pitch LFO signature. */
+                if (p->where_to_feed == PITCH_LFO && p->period == 180000 &&
+                    p->DC_feed == 0 && p->level == 64)
+                {
+                    savedDefault = *p;
+                    haveDefault = TRUE;
+                }
+            }
+        }
+
         theI->LFORecordCount = 0;
         for (i = 0; i < (int32_t)info->lfoCount && i < MAX_LFOS; i++)
-    {
-        GM_LFO *pLFO = &theI->LFORecords[i];
-        pLFO->where_to_feed = PV_TranslateFromFileToMemoryID(
-            (uint32_t)info->lfos[i].destination);
+        {
+            GM_LFO *pLFO = &theI->LFORecords[i];
+            pLFO->where_to_feed = PV_TranslateFromFileToMemoryID(
+                (uint32_t)info->lfos[i].destination);
 #if DEBUG
-        debug_message("  lfo[%d] dest=0x%x->%d period=%d shape=0x%x dc=%d level=%d adsr.stages=%u\n",
-                   (int)i, (unsigned)info->lfos[i].destination, (int)pLFO->where_to_feed,
-                   (int)info->lfos[i].period, (unsigned)info->lfos[i].waveShape,
-                   (int)info->lfos[i].DC_feed, (int)info->lfos[i].level,
-                   (unsigned)info->lfos[i].adsr.stageCount);
+            debug_message("  lfo[%d] dest=0x%x->%d period=%d shape=0x%x dc=%d level=%d adsr.stages=%u\n",
+                       (int)i, (unsigned)info->lfos[i].destination, (int)pLFO->where_to_feed,
+                       (int)info->lfos[i].period, (unsigned)info->lfos[i].waveShape,
+                       (int)info->lfos[i].DC_feed, (int)info->lfos[i].level,
+                       (unsigned)info->lfos[i].adsr.stageCount);
 #endif
-        pLFO->period = info->lfos[i].period;
-        if (pLFO->period != 0 && pLFO->period <= 512)
-            pLFO->period = 0; // disable invalid LFO period
-        pLFO->waveShape = PV_TranslateFromFileToMemoryID(
-            (uint32_t)info->lfos[i].waveShape);
-        pLFO->DC_feed = info->lfos[i].DC_feed;
-        pLFO->level = info->lfos[i].level;
+            pLFO->period = info->lfos[i].period;
+            if (pLFO->period != 0 && pLFO->period <= 512)
+                pLFO->period = 0; // disable invalid LFO period
+            pLFO->waveShape = PV_TranslateFromFileToMemoryID(
+                (uint32_t)info->lfos[i].waveShape);
+            pLFO->DC_feed = info->lfos[i].DC_feed;
+            pLFO->level = info->lfos[i].level;
 
-        for (j = 0; j < (int32_t)info->lfos[i].adsr.stageCount && j < ADSR_STAGES; j++)
-        {
-            pLFO->a.ADSRLevel[j] = info->lfos[i].adsr.stages[j].level;
-            pLFO->a.ADSRTime[j] = info->lfos[i].adsr.stages[j].time;
-            pLFO->a.ADSRFlags[j] = PV_TranslateFromFileToMemoryID(
-                (uint32_t)info->lfos[i].adsr.stages[j].flags);
+            for (j = 0; j < (int32_t)info->lfos[i].adsr.stageCount && j < ADSR_STAGES; j++)
+            {
+                pLFO->a.ADSRLevel[j] = info->lfos[i].adsr.stages[j].level;
+                pLFO->a.ADSRTime[j] = info->lfos[i].adsr.stages[j].time;
+                pLFO->a.ADSRFlags[j] = PV_TranslateFromFileToMemoryID(
+                    (uint32_t)info->lfos[i].adsr.stages[j].flags);
+            }
+            for (; j < ADSR_STAGES; j++)
+            {
+                pLFO->a.ADSRLevel[j] = 0;
+                pLFO->a.ADSRTime[j] = 0;
+                pLFO->a.ADSRFlags[j] = ADSR_OFF;
+            }
+            pLFO->a.currentTime = 0;
+            pLFO->a.currentPosition = 0;
+            pLFO->a.currentLevel = 0;
+            pLFO->a.previousTarget = 0;
+            pLFO->a.mode = 0;
+            pLFO->a.sustainingDecayLevel = XFIXED_1;
+            pLFO->currentWaveValue = 0;
+            pLFO->currentTime = 0;
+            pLFO->LFOcurrentTime = 0;
+            theI->LFORecordCount++;
         }
-        for (; j < ADSR_STAGES; j++)
+        patchedCount = theI->LFORecordCount;
+        for (i = patchedCount; i < MAX_LFOS; i++)
         {
-            pLFO->a.ADSRLevel[j] = 0;
-            pLFO->a.ADSRTime[j] = 0;
-            pLFO->a.ADSRFlags[j] = ADSR_OFF;
+            XSetMemory(&theI->LFORecords[i], (int32_t)sizeof(GM_LFO), 0);
         }
-        pLFO->a.currentTime = 0;
-        pLFO->a.currentPosition = 0;
-        pLFO->a.currentLevel = 0;
-        pLFO->a.previousTarget = 0;
-        pLFO->a.mode = 0;
-        pLFO->a.sustainingDecayLevel = XFIXED_1;
-        pLFO->currentWaveValue = 0;
-        pLFO->currentTime = 0;
-        pLFO->LFOcurrentTime = 0;
-        theI->LFORecordCount++;
-    }
-    /* Restore the original count if the engine had more LFOs (e.g. the
-     * default mod-wheel pitch LFO added by PV_GetEnvelopeData).  Those
-     * extra records are still in the array - we just didn't overwrite them. */
-    if (originalLFOCount > theI->LFORecordCount)
-        theI->LFORecordCount = originalLFOCount;
+        if (haveDefault && patchedCount < MAX_LFOS)
+        {
+            theI->LFORecords[patchedCount] = savedDefault;
+            theI->LFORecordCount = patchedCount + 1;
+        }
     }
 }
 
@@ -12216,9 +12258,13 @@ BAEResult BAESong_PatchLoadedInstrumentExtInfo(BAESong song,
                     if (theS && !theS->doKeymapSplit)
                     {
                         theS->u.w.baseMidiPitch = (uint16_t)info->sampleRootKey;
-                        theS->u.w.sampledRate = (XFIXED)((uint32_t)info->sampleRate << 16);
-                        theS->u.w.startLoop = (uint32_t)info->sampleLoopStart;
-                        theS->u.w.endLoop = (uint32_t)info->sampleLoopEnd;
+                        /* sampleRate==0 means keymap-only edit — do not silence. */
+                        if (info->sampleRate != 0)
+                        {
+                            theS->u.w.sampledRate = (XFIXED)((uint32_t)info->sampleRate << 16);
+                            theS->u.w.startLoop = (uint32_t)info->sampleLoopStart;
+                            theS->u.w.endLoop = (uint32_t)info->sampleLoopEnd;
+                        }
                         /* GenSynth uses miscParameter1/2 from the sub-instrument
                          * when useSoundModifierAsRootKey is TRUE (HSB/SF2 banks). */
                         if (theS->useSoundModifierAsRootKey)
@@ -12235,9 +12281,12 @@ BAEResult BAESong_PatchLoadedInstrumentExtInfo(BAESong song,
                 if (idx == 0)
                 {
                     theI->u.w.baseMidiPitch = (uint16_t)info->sampleRootKey;
-                    theI->u.w.sampledRate = (XFIXED)((uint32_t)info->sampleRate << 16);
-                    theI->u.w.startLoop = (uint32_t)info->sampleLoopStart;
-                    theI->u.w.endLoop = (uint32_t)info->sampleLoopEnd;
+                    if (info->sampleRate != 0)
+                    {
+                        theI->u.w.sampledRate = (XFIXED)((uint32_t)info->sampleRate << 16);
+                        theI->u.w.startLoop = (uint32_t)info->sampleLoopStart;
+                        theI->u.w.endLoop = (uint32_t)info->sampleLoopEnd;
+                    }
                     if (theI->useSoundModifierAsRootKey)
                     {
                         theI->miscParameter1 = (int16_t)info->sampleRootKey;

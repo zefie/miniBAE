@@ -980,15 +980,12 @@ BAEResult PV_BankReplaceSndResourceInPlace(XFILE bankFile,
         return BAE_NO_ERROR;
     }
 
-    /* Type change on a writable bank: soft-delete old container + append new type.
-     * Avoids PV_BankReplaceMultipleSndResources (full SND-table copy) which freezes
-     * multi‑MB banks like zpatches for seconds on a single sample Apply. */
+    /* Type change on a writable bank: retire old container as GONE + append new
+     * type. Avoids full SND-table rebuild (zpatches freeze) and does not pollute
+     * Edit→Trash the way legacy XDeleteFileResource→TRSH did. */
     if (oldSndType != newSndType)
     {
-        (void)XDeleteFileResource(bankFile,
-                                  oldSndType,
-                                  (XLongResourceID)sndID,
-                                  FALSE);
+        (void)XRetireFileResource(bankFile, oldSndType, (XLongResourceID)sndID);
         if (XAddFileResource(bankFile,
                              newSndType,
                              (XLongResourceID)sndID,
@@ -4095,6 +4092,10 @@ BAEResult PV_BankSaveToMemory(BAEBankToken bankToken,
         return BAE_PARAM_ERR;
     }
     bankFile = (XFILE)bankToken;
+
+    /* Drop XReplaceFileResource debris before cloning the image — same-format
+     * save is a raw byte copy and would otherwise persist GONE forever. */
+    (void)XCompactFileGoneResources(bankFile);
 
     /* Read the source bank's map header to determine IREZ vs ZREZ */
     if (XFileSetPosition(bankFile, 0L) != 0 ||

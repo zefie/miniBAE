@@ -1446,6 +1446,15 @@ public:
             UpdateBusyProgress(0.25f, "Writing instrument…");
             ApplyInstrumentEditor(true);
             EndBusyProgress();
+            if (m_ie_close_after_apply)
+            {
+                const bool applied_ok = !m_ie_dirty;
+                m_ie_close_after_apply = false;
+                if (applied_ok)
+                {
+                    FinishCloseInstrumentEditor(false);
+                }
+            }
         }
     }
 
@@ -7061,6 +7070,12 @@ private:
     bool m_instrument_editor_focused = false;
     int m_ie_page = 0;
     bool m_ie_dirty = false;
+    /* True after a live IE write pushed OSCL into bank/doc (or instrument
+     * opened already using a generator). Lets toggle-off / Revert / Close
+     * persist useOscillator=false so the bank is not left stuck on. */
+    bool m_ie_live_osc_persisted = false;
+    bool m_confirm_ie_close_open = false;
+    bool m_ie_close_after_apply = false;
     bool m_ie_from_song = false;
     uint32_t m_ie_inst_id = 0;
     uint32_t m_ie_instrument_index = 0;

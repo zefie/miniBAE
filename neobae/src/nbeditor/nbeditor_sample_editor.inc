@@ -1081,12 +1081,22 @@
         m_sample_editor_view_start = 0;
         m_sample_editor_view_end = m_sample_editor_frame_count;
         SeSyncFromCache();
+        /* Drop compression audition so SE Play / live remount hear master. */
+        m_sample_editor_audition_pcm.clear();
+        m_sample_editor_audition_frame_count = 0;
+        m_app_compression_cache.erase(m_sample_editor_snd_resource_id);
         /* Deferred compress only sets export prefs — clear that tag now so the
-         * sample list drops [MP3]/etc immediately. Preview already uses master PCM. */
+         * sample list drops [MP3]/etc immediately. */
         ClearSessionExportTargetForSnd(m_sample_editor_snd_resource_id);
         m_sample_editor_dirty = true;
         m_sample_editor_has_uncompressed_master = true;
-        SetStatus("Restored uncompressed master (export compression cleared)");
+        /* Commit PCM + remount song/IE instruments immediately (same as Apply). */
+        if (!ApplySampleEditorChanges(false))
+        {
+            SetStatus("Restored uncompressed master in editor (Apply failed — press Apply)");
+            return false;
+        }
+        SetStatus("Restored uncompressed master (live preview updated)");
         return true;
     }
 
@@ -1277,6 +1287,23 @@
                 m_bank01_touched = true;
             }
             SampleEditorSyncAuditionAfterApply(effective);
+            if (!sample.unassigned)
+            {
+                uint32_t prefs_inst_id = BAE_EDITOR_INST_ID_NONE;
+                BAERmfEditorBankInstrumentInfo prefs_iinfo{};
+                if (BAERmfEditorBank_GetInstrumentInfo(m_bank_token,
+                                                       sample.instrument_index,
+                                                       &prefs_iinfo) == BAE_NO_ERROR)
+                {
+                    prefs_inst_id = prefs_iinfo.instID;
+                }
+                SampleEditorHotReloadLivePreview(sample.instrument_index,
+                                                sample.split_index,
+                                                m_sample_editor_snd_resource_id,
+                                                prefs_inst_id,
+                                                effective,
+                                                /*bank_pcm_rewritten=*/false);
+            }
             SetStatus(closing ? "Compression set for export (editor closed)"
                               : (SeCodecIsUncompressedPcm(effective)
                                      ? "Restored PCM for export (no deferred compression)"
@@ -1529,6 +1556,12 @@
         }
         RefreshSampleEditorUsageText();
         SampleEditorSyncAuditionAfterApply(effective);
+        SampleEditorHotReloadLivePreview(work_inst_index,
+                                        keep_split,
+                                        keep_snd,
+                                        keep_inst_id,
+                                        effective,
+                                        /*bank_pcm_rewritten=*/true);
         m_sample_editor_has_uncompressed_master =
             HasUncompressedMasterForSnd(m_sample_editor_snd_resource_id);
         if (sample.bank >= 0 && sample.bank < 2)
@@ -2046,6 +2079,117 @@
             return;
         }
         /* No prior Preview — leave audition empty; Play uses master until Preview. */
+    }
+
+    /* Hot-reload song/IE instruments after sample Apply without Stop()'ing
+     * playback. Bank working-set stays PCM master: when a compression audition
+     * exists, briefly write the decode for remount, then restore master. */
+    void SampleEditorHotReloadLivePreview(uint32_t work_inst_index,
+                                          uint32_t keep_split,
+                                          uint32_t keep_snd,
+                                          uint32_t keep_inst_id,
+                                          BAERmfEditorCompressionType effective,
+                                          bool bank_pcm_rewritten)
+    {
+        if (!m_bank_token || keep_snd == kNoSndResourceId)
+        {
+            return;
+        }
+
+        const bool want_lossy_live =
+            SampleEditorCodecUsesAudition(effective) &&
+            !m_sample_editor_audition_pcm.empty() &&
+            m_sample_editor_audition_frame_count > 0;
+        if (!want_lossy_live && !bank_pcm_rewritten)
+        {
+            return;
+        }
+
+        auto sync_inst_index = [&]() {
+            if (keep_inst_id == BAE_EDITOR_INST_ID_NONE || !m_bank_token)
+            {
+                return;
+            }
+            uint32_t resolved = 0;
+            uint32_t index = work_inst_index;
+            if (BAERmfEditorBank_ResolveInstID(m_bank_token, keep_inst_id, &resolved, &index) ==
+                BAE_NO_ERROR)
+            {
+                work_inst_index = index;
+            }
+        };
+
+        auto write_bank_pcm = [&](const void *pcm,
+                                  uint32_t frames,
+                                  uint16_t bit_size,
+                                  uint16_t channels,
+                                  BAE_UNSIGNED_FIXED rate) -> bool {
+            if (!pcm || frames == 0 || !EnsureActiveBankWritable())
+            {
+                return false;
+            }
+            sync_inst_index();
+            BAERmfEditorSndStorageType storage = BAE_EDITOR_SND_STORAGE_ESND;
+            BAERmfEditorBankSampleInfo sinfo{};
+            if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
+                                                         work_inst_index,
+                                                         keep_split,
+                                                         &sinfo) == BAE_NO_ERROR)
+            {
+                storage = sinfo.sndStorageType;
+                if (storage == BAE_EDITOR_SND_STORAGE_CSND)
+                {
+                    storage = BAE_EDITOR_SND_STORAGE_ESND;
+                }
+            }
+            const bool ok = BAERmfEditorBank_ReEncodeSampleFromPCMEx(
+                                m_bank_token,
+                                work_inst_index,
+                                keep_split,
+                                BAE_EDITOR_COMPRESSION_PCM,
+                                storage,
+                                BAE_EDITOR_OPUS_MODE_AUDIO,
+                                FALSE,
+                                pcm,
+                                frames,
+                                bit_size,
+                                channels,
+                                rate) == BAE_NO_ERROR;
+            sync_inst_index();
+            return ok;
+        };
+
+        if (want_lossy_live)
+        {
+            const BAE_UNSIGNED_FIXED aud_rate =
+                m_sample_editor_audition_sample_rate
+                    ? m_sample_editor_audition_sample_rate
+                    : LONG_TO_UNSIGNED_FIXED(m_sample_editor_sample_rate_hz
+                                                 ? m_sample_editor_sample_rate_hz
+                                                 : 44100u);
+            if (write_bank_pcm(m_sample_editor_audition_pcm.data(),
+                               m_sample_editor_audition_frame_count,
+                               m_sample_editor_audition_bit_size,
+                               m_sample_editor_audition_channels,
+                               aud_rate))
+            {
+                LiveReloadInstrumentsUsingSnd(keep_snd);
+                const BAE_UNSIGNED_FIXED master_rate =
+                    m_sample_editor_original_sample_rate
+                        ? m_sample_editor_original_sample_rate
+                        : LONG_TO_UNSIGNED_FIXED(m_sample_editor_sample_rate_hz
+                                                     ? m_sample_editor_sample_rate_hz
+                                                     : 44100u);
+                (void)write_bank_pcm(m_sample_editor_original_pcm.data(),
+                                     m_sample_editor_original_frame_count,
+                                     m_sample_editor_original_bit_size,
+                                     m_sample_editor_original_channels,
+                                     master_rate);
+                return;
+            }
+        }
+
+        LiveReloadInstrumentsUsingSnd(keep_snd);
     }
 
     bool PrepareCompressionPreviewAudition()
@@ -3524,7 +3668,9 @@
             }
             if (ImGui::IsItemHovered())
             {
-                ImGui::SetTooltip("Reload session PCM / CaSd master for this SND");
+                ImGui::SetTooltip(
+                    "Reload session PCM / CaSd master, clear export compression, "
+                    "and update live song/IE preview");
             }
         }
         ImGui::SameLine();

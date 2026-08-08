@@ -749,6 +749,9 @@ typedef struct XBankToken XBankToken;
 #define XFILERESOURCE_ZMF_ID    FOUR_CHAR('Z','R','E','Z')  // ZREZ (ZMF: RMF with modern codecs)
 #define XFILECACHE_ID           FOUR_CHAR('C','A','C','H')  // CACH
 #define XFILETRASH_ID           FOUR_CHAR('T','R','S','H')  // TRSH
+/* Superseded flat resource from XReplaceFileResource (not user Trash).
+ * Body kept in-place for O(1) editor edits; stripped on save/rebuild. */
+#define XFILEGONE_ID            FOUR_CHAR('G','O','N','E')  // GONE
 /* NeoBAE trash payload wrapper (body of a TRSH resource). Preserves original
  * type/id so Move to Trash / Restore round-trips. Legacy Beatnik TRSH entries
  * have no wrapper — type/id were overwritten in-place to TRSH/0. */
@@ -1014,7 +1017,7 @@ bool   XOmitFileResources(XFILE fileRef,
                           int32_t omitCount);
 
 /* Fast replace for editor mutations on writable memory banks.
- * Flat INST: TRASH-mark old + append (no full-bank rebuild).
+ * Flat resource: mark old as GONE + append (no full-bank rebuild, not Trash).
  * ZINS-only INST/ALIAS: append a flat peer that shadows the packed entry. */
 bool   XReplaceFileResource(XFILE fileRef,
                             XResourceType resourceType,
@@ -1022,6 +1025,15 @@ bool   XReplaceFileResource(XFILE fileRef,
                             void const *pResourceName,
                             void *pData,
                             int32_t length);
+
+/* O(1) supersede marker: type→GONE (keeps original id). Not user Trash.
+ * Used by replace / SND type-change; CompactFileGone strips them. */
+bool   XRetireFileResource(XFILE fileRef,
+                           XResourceType resourceType,
+                           XLongResourceID resourceID);
+
+/* Drop all GONE entries (replace debris). No-op if none. */
+bool   XCompactFileGoneResources(XFILE fileRef);
 
 /* Remove every TRSH entry from the file (Empty Trash). */
 bool   XEmptyFileTrash(XFILE fileRef);

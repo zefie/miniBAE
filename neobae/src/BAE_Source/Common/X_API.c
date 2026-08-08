@@ -1652,12 +1652,14 @@ static bool PV_PackInstResourcesIntoZmfBlock(XFILE fileRef)
 
         item = &srcRef->pCache->cached[i];
         if (item->resourceType == ID_INST || item->resourceType == ID_ALIAS ||
-            item->resourceType == ID_ZINS)
+            item->resourceType == ID_ZINS ||
+            item->resourceType == XFILEGONE_ID)
         {
             continue;
         }
         /* Raw copy — don't expand ZSHD payload-refs via XGetFileResource.
-         * TRSH entries are preserved so editor trash survives Clean/pack. */
+         * TRSH entries are preserved so editor trash survives Clean/pack.
+         * GONE (replace debris) is dropped. */
         name[0] = 0;
         data = NULL;
         size = 0;
@@ -2142,7 +2144,8 @@ static bool PV_PackSongResourcesIntoZmfBlock(XFILE fileRef)
         char name[256];
 
         item = &srcRef->pCache->cached[i];
-        if (item->resourceType == ID_SONG || item->resourceType == ID_ZSNG)
+        if (item->resourceType == ID_SONG || item->resourceType == ID_ZSNG ||
+            item->resourceType == XFILEGONE_ID)
         {
             continue;
         }
@@ -2575,7 +2578,8 @@ static bool PV_PackBankResourcesIntoZmfBlock(XFILE fileRef)
         char name[256];
 
         if (item->resourceType == ID_BANK || item->resourceType == ID_MIDI ||
-            item->resourceType == ID_MIDI_OLD || item->resourceType == ID_ZBNK)
+            item->resourceType == ID_MIDI_OLD || item->resourceType == ID_ZBNK ||
+            item->resourceType == XFILEGONE_ID)
         {
             continue;
         }
@@ -3204,7 +3208,7 @@ static bool PV_PackSndHeaderResourcesIntoZmfBlock(XFILE fileRef)
 
         item = &srcRef->pCache->cached[i];
         rtype = (XResourceType)item->resourceType;
-        if (rtype == ID_ZSHD)
+        if (rtype == ID_ZSHD || rtype == XFILEGONE_ID)
         {
             continue;
         }
@@ -6258,6 +6262,117 @@ XFILERESOURCECACHE * XCreateAccessCache(XFILE fileRef)
 }
 
 
+/* In-place type/id rewrite for a flat resource (TRSH retire, GONE supersede). */
+static bool PV_MarkFileResourceTypeID(XFILE fileRef,
+                                      XResourceType resourceType,
+                                      XLongResourceID resourceID,
+                                      XResourceType newType,
+                                      XLongResourceID newID)
+{
+    XFILENAME           *pReference;
+    int32_t                err = 0;
+    XFILERESOURCEMAP    map;
+    int32_t                data, next;
+    int32_t                count, total;
+    int32_t                whereType;
+    XFILE_CACHED_ITEM   *pCachedItem;
+
+    pReference = fileRef;
+    if (!PV_XFileValid(fileRef))
+    {
+        return FALSE;
+    }
+    /* Writable memory files support in-place marking via XFileWrite.
+     * (Older code rejected all pResourceData handles, which broke deletes
+     * after EnsureWritable cloned a bank into RAM.) */
+    if (PV_IsXFileLocked(fileRef) ||
+        (pReference->pResourceData && pReference->resizeResourceData == FALSE))
+    {
+        return FALSE;
+    }
+
+    if (pReference->pCache)
+    {
+        pCachedItem = PV_XGetCacheEntry(fileRef, resourceType, resourceID);
+        if (pCachedItem)
+        {
+            pCachedItem->resourceType = newType;
+            pCachedItem->resourceID = newID;
+            whereType = pCachedItem->fileOffsetName;
+            whereType -= (int32_t)(sizeof(resourceType) + sizeof(resourceID));
+            err = XFileSetPosition(fileRef, whereType);
+            if (err != -1)
+            {
+                XPutLong(&data, (int32_t)newType);
+                err = XFileWrite(fileRef, &data, (int32_t)sizeof(int32_t));
+                if (err == 0)
+                {
+                    XPutLong(&data, (int32_t)newID);
+                    err = XFileWrite(fileRef, &data, (int32_t)sizeof(int32_t));
+                }
+            }
+            else
+            {
+                err = -7;
+            }
+            return (err == 0);
+        }
+    }
+
+    XFileSetPosition(fileRef, 0L);
+    if (XFileRead(fileRef, &map, (int32_t)sizeof(XFILERESOURCEMAP)) != 0)
+    {
+        return FALSE;
+    }
+    if (!XFILERESOURCE_ID_IS_VALID(XGetLong(&map.mapID)))
+    {
+        return FALSE;
+    }
+    next = sizeof(XFILERESOURCEMAP);
+    total = XGetLong(&map.totalResources);
+    for (count = 0; (count < total) && (err == 0); count++)
+    {
+        err = XFileSetPosition(fileRef, next);
+        if (err != 0)
+        {
+            err = -3;
+            break;
+        }
+        err = XFileRead(fileRef, &next, (int32_t)sizeof(int32_t));
+        next = XGetLong(&next);
+        if (next == -1L)
+        {
+            err = -4;
+            break;
+        }
+        whereType = XFileGetPosition(fileRef);
+        err = XFileRead(fileRef, &data, (int32_t)sizeof(int32_t));
+        if ((XResourceType)XGetLong(&data) != resourceType)
+        {
+            continue;
+        }
+        err = XFileRead(fileRef, &data, (int32_t)sizeof(int32_t));
+        if ((XLongResourceID)XGetLong(&data) != resourceID)
+        {
+            continue;
+        }
+        err = XFileSetPosition(fileRef, whereType);
+        XPutLong(&data, (int32_t)newType);
+        err = XFileWrite(fileRef, &data, (int32_t)sizeof(int32_t));
+        if (err == 0)
+        {
+            XPutLong(&data, (int32_t)newID);
+            err = XFileWrite(fileRef, &data, (int32_t)sizeof(int32_t));
+        }
+        else
+        {
+            err = -5;
+        }
+        break;
+    }
+    return (err == 0);
+}
+
 //  Marks the selected resource as a 'TRSH' type w/ID of 0 (legacy soft-delete:
 //  original type/id are lost; body + Pascal name remain). Prefer XTrashFileResource
 //  for recoverable deletes. collectTrash=TRUE calls XEmptyFileTrash.
@@ -6269,124 +6384,12 @@ bool XEmptyFileTrash(XFILE fileRef); /* used by XDeleteFileResource(collectTrash
 
 bool XDeleteFileResource(XFILE fileRef, XResourceType resourceType, XLongResourceID resourceID, bool collectTrash )
 {
-    XFILENAME           *pReference;
-    int32_t                err=0;
-    XFILERESOURCEMAP    map;
-    int32_t                data, next;
-    int32_t                count, total;
-    int32_t                whereType;
-    XFILE_CACHED_ITEM   *pCachedItem;
+    int32_t err = 0;
 
-    pReference = fileRef;
-    if (PV_XFileValid(fileRef))
+    if (PV_MarkFileResourceTypeID(fileRef, resourceType, resourceID,
+                                  XFILETRASH_ID, 0) == FALSE)
     {
-        /* Writable memory files support in-place TRASH marking via XFileWrite.
-         * (Older code rejected all pResourceData handles, which broke deletes
-         * after EnsureWritable cloned a bank into RAM.) */
-        if (PV_IsXFileLocked(fileRef) ||
-            (pReference->pResourceData && pReference->resizeResourceData == FALSE))
-        {
-            return FALSE;
-        }
-
-        // do we have a cache?  
-        if (pReference->pCache)
-        {
-            pCachedItem = PV_XGetCacheEntry(fileRef, resourceType, resourceID);
-            if (pCachedItem)
-            {
-                pCachedItem->resourceType = XFILETRASH_ID;
-                pCachedItem->resourceID = 0;
-                whereType = pCachedItem->fileOffsetName;
-                whereType -= ( sizeof(resourceType) + sizeof(resourceID) );
-                err = XFileSetPosition(fileRef, whereType );
-                if (err != -1)
-                {
-                    XPutLong(&data, XFILETRASH_ID);
-                    err = XFileWrite(fileRef, &data, (int32_t)sizeof(int32_t));                       // put type
-
-                    if (err == 0)
-                    {
-                        XPutLong(&data, 0);
-                        err = XFileWrite(fileRef, &data, (int32_t)sizeof(int32_t));                   // put ID
-                    }
-                }
-                else
-                {
-                    err = -7;
-                }
-            }
-            else
-            {
-                goto deleteanyways;
-            }
-        }
-        else
-        {
-deleteanyways:
-            XFileSetPosition(fileRef, 0L);      // at start
-            if (XFileRead(fileRef, &map, (int32_t)sizeof(XFILERESOURCEMAP)) == 0)
-            {
-                if (XFILERESOURCE_ID_IS_VALID(XGetLong(&map.mapID)))
-                {
-                    next = sizeof(XFILERESOURCEMAP);
-                    total = XGetLong(&map.totalResources);
-                    for (count = 0; (count < total) && (err == 0); count++)
-                    {
-                        err = XFileSetPosition(fileRef, next);      // at start
-                        if (err == 0)
-                        {
-                            err = XFileRead(fileRef, &next, (int32_t)sizeof(int32_t));        // get next pointer
-                            next = XGetLong(&next);
-                            if (next != -1L)
-                            {   
-                                whereType = XFileGetPosition(fileRef);  // get current pos
-
-                                err = XFileRead(fileRef, &data, (int32_t)sizeof(int32_t));        // get type
-                                if ((XResourceType)XGetLong(&data) == resourceType)
-                                {
-                                    err = XFileRead(fileRef, &data, (int32_t)sizeof(int32_t));        // get ID
-                                    if ((XLongResourceID)XGetLong(&data) == resourceID)
-                                    {
-                                        //We found it!
-                                        //Now 'TRASH' everything
-                                        //td - added to properly overwrite existing id
-                                        err = XFileSetPosition(fileRef, whereType);
-
-                                        XPutLong(&data, XFILETRASH_ID);
-                                        err = XFileWrite(fileRef, &data, (int32_t)sizeof(int32_t));                       // put type
-    
-                                        if (err == 0)
-                                        {
-                                            XPutLong(&data, 0);
-                                            err = XFileWrite(fileRef, &data, (int32_t)sizeof(int32_t));                   // put ID
-                                            break;
-                                        }
-                                        else
-                                        {
-                                            err = -5;
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                err = -4;
-                                debug_message("Next offset is bad\n");
-                                break;
-                            }
-                        }
-                        else
-                        {
-                            err = -3;
-                            debug_message("Can't set next position\n");
-                            break;
-                        }
-                    }
-                }
-            }
-        }
+        err = -1;
     }
 
     if (collectTrash)
@@ -6397,6 +6400,16 @@ deleteanyways:
         }
     }
     return (err == 0);
+}
+
+bool XRetireFileResource(XFILE fileRef,
+                         XResourceType resourceType,
+                         XLongResourceID resourceID)
+{
+    /* Keep original id so multiple supersedes of the same INST stay distinct
+     * from TRSH/0 clutter; lookups are by (type,id) so GONE never shadows INST. */
+    return PV_MarkFileResourceTypeID(fileRef, resourceType, resourceID,
+                                     XFILEGONE_ID, resourceID);
 }
 
 /* ---- NeoBAE recoverable trash (ZTRS) ------------------------------------ */
@@ -6686,6 +6699,11 @@ static bool PV_RebuildFileForTrashOps(XFILE fileRef,
         int32_t size = 0;
         char name[256];
 
+        /* Replace debris — never carry GONE through rebuilds. */
+        if (rtype == XFILEGONE_ID)
+        {
+            continue;
+        }
         if (rtype == XFILETRASH_ID)
         {
             int32_t thisTrash = trashSeen;
@@ -7030,6 +7048,10 @@ bool XOmitFileResources(XFILE fileRef,
         {
             continue;
         }
+        if (rtype == XFILEGONE_ID)
+        {
+            continue;
+        }
         if (!keepZshd && rtype == ID_ZSHD)
         {
             continue;
@@ -7193,10 +7215,12 @@ bool XReplaceFileResource(XFILE fileRef,
         XCreateAccessCache(fileRef);
     }
 
-    /* Fast path: flat resource — soft-delete + append (no SND walk). */
+    /* Fast path: flat resource — mark GONE + append (no SND walk, not Trash).
+     * Legacy used XDeleteFileResource→TRSH which filled Edit→Trash with a
+     * "*legacy" INST on every instrument-editor write. */
     if (pReference->pCache && PV_XGetCacheEntry(fileRef, resourceType, resourceID))
     {
-        if (XDeleteFileResource(fileRef, resourceType, resourceID, FALSE) == FALSE)
+        if (XRetireFileResource(fileRef, resourceType, resourceID) == FALSE)
         {
             return FALSE;
         }
@@ -7630,6 +7654,21 @@ bool XPurgeFileInstrumentAndSoundLists(XFILE fileRef,
     }
     XFileClose(outFile);
     return TRUE;
+}
+
+bool XCompactFileGoneResources(XFILE fileRef)
+{
+    if (!PV_XFileValid(fileRef))
+    {
+        return FALSE;
+    }
+    if (XCountFileResourcesOfType(fileRef, XFILEGONE_ID) <= 0)
+    {
+        return TRUE;
+    }
+    /* Rebuild skips GONE unconditionally. */
+    return PV_RebuildFileForTrashOps(fileRef, 0, 0, FALSE, -1, NULL, 0,
+                                     NULL, 0, NULL, 0);
 }
 
 bool XEmptyFileTrash(XFILE fileRef)
