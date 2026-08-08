@@ -847,6 +847,11 @@ XFILE   XFileOpenVirtualResource(int32_t resourceID);
 // Copies pResource (caller retains ownership of the input buffer).
 XFILE   XFileOpenWritableResourceFromMemory(XPTR pResource, uint32_t resourceLength);
 
+// Like XFileOpenWritableResourceFromMemory, but takes ownership of pResource (no
+// second full-image copy). On success the caller must not dispose pResource;
+// XFileClose frees it. On failure, ownership remains with the caller.
+XFILE   XFileOpenWritableResourceAdoptMemory(XPTR pResource, uint32_t resourceLength);
+
 // Open file as a read only file from a memory pointer. Don't dispose of pMemoryBlock until you
 // have closed the file.
 XFILE XFileOpenForReadFromMemory(XPTR pMemoryBlock, uint32_t memoryBlockSize);

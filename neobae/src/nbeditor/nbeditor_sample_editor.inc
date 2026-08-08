@@ -2861,7 +2861,7 @@
         {
             SampleEditorUndo();
         }
-        if (ImGui::MenuItem("Redo", "Ctrl+Y", false, !m_sample_editor_redo.empty()))
+        if (ImGui::MenuItem("Redo", "Ctrl+Y / Ctrl+Shift+Z", false, !m_sample_editor_redo.empty()))
         {
             SampleEditorRedo();
         }
@@ -3460,6 +3460,7 @@
     {
         if (!m_sample_editor_open)
         {
+            m_sample_editor_focused = false;
             return;
         }
 
@@ -3475,6 +3476,7 @@
         ImGui::SetNextWindowSize(ImVec2(780.0f, 430.0f), ImGuiCond_FirstUseEver);
         if (!ImGui::Begin(title, &open, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_MenuBar))
         {
+            m_sample_editor_focused = false;
             ImGui::End();
             if (!open)
             {
@@ -3482,6 +3484,7 @@
             }
             return;
         }
+        m_sample_editor_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
 
         DrawSampleEditorMenuBar(&open);
 
@@ -3571,16 +3574,20 @@
                 }
                 if (ImGui::IsKeyPressed(ImGuiKey_Z, false))
                 {
-                    SampleEditorUndo();
+                    if (ImGui::GetIO().KeyShift)
+                    {
+                        SampleEditorRedo();
+                    }
+                    else
+                    {
+                        SampleEditorUndo();
+                    }
                 }
                 if (ImGui::IsKeyPressed(ImGuiKey_Y, false))
                 {
                     SampleEditorRedo();
                 }
-                if (ImGui::IsKeyPressed(ImGuiKey_S, false))
-                {
-                    ApplySampleEditorChanges(false);
-                }
+                /* Ctrl+S Apply: HandleGlobalAppShortcuts when sample editor focused. */
             }
         }
 
@@ -3617,6 +3624,7 @@
         m_sample_editor_preview_needs_reencode = false;
         m_sample_editor_drag_mode = SeDragMode::None;
         m_sample_editor_open = false;
+        m_sample_editor_focused = false;
         m_sample_editor_audition_pcm.clear();
         m_sample_editor_audition_frame_count = 0;
     }

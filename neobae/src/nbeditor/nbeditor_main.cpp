@@ -1527,6 +1527,8 @@ public:
 #endif
         /* After menus/dialogs arm a long-op, paint busy before Present. */
         DrawBusyProgressOverlay();
+        /* After windows update focus flags (sample/IE/MIDI). */
+        HandleGlobalAppShortcuts();
     }
 
     void HandleDroppedPath(const char *path)
@@ -3065,6 +3067,25 @@ private:
         std::set<uint32_t> referenced;
         CollectBankReferencedSndIdsAll(token, referenced);
         int unused = 0;
+        /* Prefer access cache — XGetIndexedFileResource loads full sample bodies. */
+        XFILENAME *ref = reinterpret_cast<XFILENAME *>(bank);
+        if (ref && ref->pCache && ref->pCache->totalResources > 0)
+        {
+            for (int32_t i = 0; i < ref->pCache->totalResources; ++i)
+            {
+                const XFILE_CACHED_ITEM &item = ref->pCache->cached[i];
+                if (item.resourceType != ID_SND && item.resourceType != ID_CSND &&
+                    item.resourceType != ID_ESND)
+                {
+                    continue;
+                }
+                if (referenced.count(static_cast<uint32_t>(item.resourceID)) == 0)
+                {
+                    ++unused;
+                }
+            }
+            return unused;
+        }
         const XResourceType snd_types[] = {ID_ESND, ID_CSND, ID_SND};
         for (XResourceType stype : snd_types)
         {
@@ -3126,23 +3147,44 @@ private:
 
         std::vector<XResourceType> omit_types;
         std::vector<XLongResourceID> omit_ids;
-        const XResourceType snd_types[] = {ID_ESND, ID_CSND, ID_SND};
-        for (XResourceType stype : snd_types)
+        XFILENAME *ref = reinterpret_cast<XFILENAME *>(bank);
+        if (ref && ref->pCache && ref->pCache->totalResources > 0)
         {
-            const int32_t count = XCountFileResourcesOfType(bank, stype);
-            for (int32_t i = 0; i < count; ++i)
+            for (int32_t i = 0; i < ref->pCache->totalResources; ++i)
             {
-                XLongResourceID rid = 0;
-                int32_t size = 0;
-                XPTR data = XGetIndexedFileResource(bank, stype, &rid, i, nullptr, &size);
-                if (data)
+                const XFILE_CACHED_ITEM &item = ref->pCache->cached[i];
+                if (item.resourceType != ID_SND && item.resourceType != ID_CSND &&
+                    item.resourceType != ID_ESND)
                 {
-                    XDisposePtr(data);
+                    continue;
                 }
-                if (referenced.count(static_cast<uint32_t>(rid)) == 0)
+                if (referenced.count(static_cast<uint32_t>(item.resourceID)) == 0)
                 {
-                    omit_types.push_back(stype);
-                    omit_ids.push_back(rid);
+                    omit_types.push_back(static_cast<XResourceType>(item.resourceType));
+                    omit_ids.push_back(item.resourceID);
+                }
+            }
+        }
+        else
+        {
+            const XResourceType snd_types[] = {ID_ESND, ID_CSND, ID_SND};
+            for (XResourceType stype : snd_types)
+            {
+                const int32_t count = XCountFileResourcesOfType(bank, stype);
+                for (int32_t i = 0; i < count; ++i)
+                {
+                    XLongResourceID rid = 0;
+                    int32_t size = 0;
+                    XPTR data = XGetIndexedFileResource(bank, stype, &rid, i, nullptr, &size);
+                    if (data)
+                    {
+                        XDisposePtr(data);
+                    }
+                    if (referenced.count(static_cast<uint32_t>(rid)) == 0)
+                    {
+                        omit_types.push_back(stype);
+                        omit_ids.push_back(rid);
+                    }
                 }
             }
         }
@@ -6394,6 +6436,7 @@ private:
     std::set<uint32_t> m_session_custom_inst_ids;
 
     SessionTab m_session_tab = SessionTab::Songs;
+    bool m_session_window_focused = false;
     int m_pending_session_tab = -1; /* one-shot ImGuiTabItemFlags_SetSelected */
     bool m_scroll_to_selected_sample = false;
     SessionDropTarget m_dnd_hover_target = SessionDropTarget::None;
@@ -6479,6 +6522,7 @@ private:
 
 #if NBEDITOR_MVP
     bool m_sample_editor_open = false;
+    bool m_sample_editor_focused = false;
     bool m_sample_editor_is_song_sample = false;
     uint32_t m_sample_editor_document_sample_index = 0;
     int m_sample_editor_sample_row = -1;
@@ -6897,6 +6941,7 @@ private:
     bool m_song_info_pan_fix = false;
 
     bool m_instrument_editor_open = false;
+    bool m_instrument_editor_focused = false;
     int m_ie_page = 0;
     bool m_ie_dirty = false;
     bool m_ie_from_song = false;

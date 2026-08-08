@@ -8,31 +8,25 @@
         }
         if (ImGui::BeginMenu("File"))
         {
-            if (ImGui::MenuItem("New Session"))
+            if (ImGui::MenuItem("New Session", "Ctrl+N"))
             {
                 RequestNewSessionConfirm();
             }
-            if (ImGui::MenuItem("Open / Import..."))
+            if (ImGui::MenuItem("Open / Import...", "Ctrl+O"))
             {
                 OpenLoadDialog();
             }
             ImGui::Separator();
-            if (ImGui::MenuItem("Save Session",
-                                nullptr,
-                                false,
-                                !m_loaded_session_path.empty() &&
-                                    (m_document != nullptr || m_bank_token != 0 || !m_session_songs.empty())))
+            if (ImGui::MenuItem("Save Session", "Ctrl+S", false, CanSaveSessionNow()))
             {
-                m_long_op = LongOp::SaveSession;
-                m_long_op_path = m_loaded_session_path;
-                ArmBusyProgress("Saving Session…");
+                RequestSaveSession();
             }
             if (ImGui::MenuItem("Save Session As...",
-                                nullptr,
+                                "Ctrl+Shift+S",
                                 false,
-                                m_document != nullptr || m_bank_token != 0 || !m_session_songs.empty()))
+                                CanSaveSessionNow()))
             {
-                OpenSaveSessionDialog();
+                RequestSaveSessionAs();
             }
             if (ImGui::MenuItem("Revert Session to Saved",
                                 nullptr,
@@ -3616,9 +3610,12 @@
     {
         if (!ImGui::Begin("Session"))
         {
+            m_session_window_focused = false;
             ImGui::End();
             return;
         }
+        m_session_window_focused =
+            ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
 
         if (ImGui::BeginTabBar("##SessionTabs"))
         {
@@ -3658,7 +3655,7 @@
             m_pending_session_tab = -1;
             ImGui::EndTabBar();
         }
-        HandleSessionListShortcuts();
+        /* Session list Ctrl/Del shortcuts: HandleGlobalAppShortcuts (end of DrawUI). */
         if (ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows))
         {
             switch (m_session_tab)
@@ -6401,6 +6398,7 @@
     {
         if (!m_instrument_editor_open)
         {
+            m_instrument_editor_focused = false;
             return;
         }
 
@@ -6469,6 +6467,8 @@
         ImGui::SetNextWindowSize(ImVec2(900, 690), ImGuiCond_FirstUseEver);
         if (ImGui::Begin("Instrument Editor", &open))
         {
+            m_instrument_editor_focused =
+                ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
             InstrumentEditorRefreshPreEditSnapshot();
 
             ImGui::Text("%s  instID=%u  B%dP%03d  %s",
@@ -6502,7 +6502,7 @@
             ImGui::EndDisabled();
             if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
             {
-                ImGui::SetTooltip("Ctrl+Y");
+                ImGui::SetTooltip("Ctrl+Y / Ctrl+Shift+Z");
             }
             ImGui::SameLine();
             if (ImGui::Button("Revert"))
@@ -6514,12 +6514,19 @@
                 ImGui::SetTooltip("Restore instrument as opened");
             }
 
-            const bool ie_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
-            if (ie_focused && !ImGui::GetIO().WantTextInput && ImGui::GetIO().KeyCtrl)
+            if (m_instrument_editor_focused && !ImGui::GetIO().WantTextInput &&
+                ImGui::GetIO().KeyCtrl)
             {
                 if (ImGui::IsKeyPressed(ImGuiKey_Z, false))
                 {
-                    InstrumentEditorUndo();
+                    if (ImGui::GetIO().KeyShift)
+                    {
+                        InstrumentEditorRedo();
+                    }
+                    else
+                    {
+                        InstrumentEditorUndo();
+                    }
                 }
                 if (ImGui::IsKeyPressed(ImGuiKey_Y, false))
                 {
@@ -6926,6 +6933,10 @@
                 open = false;
             }
         }
+        else
+        {
+            m_instrument_editor_focused = false;
+        }
         ImGui::End();
         if (m_instrument_editor_open && !open)
         {
@@ -6940,6 +6951,7 @@
                 BAESong_KillActiveNotes(m_ie_note_song);
                 m_ie_note_song = nullptr;
             }
+            m_instrument_editor_focused = false;
         }
         m_instrument_editor_open = open;
     }

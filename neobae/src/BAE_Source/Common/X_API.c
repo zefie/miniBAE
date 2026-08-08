@@ -4618,35 +4618,47 @@ XFILE XFileOpenVirtualResource(int32_t resourceID)
     return pReference;
 }
 
-XFILE XFileOpenWritableResourceFromMemory(XPTR pResource, uint32_t resourceLength)
+static XFILE PV_OpenWritableResourceMemory(XPTR image,
+                                           uint32_t resourceLength,
+                                           bool adoptImage)
 {
     XFILENAME *pReference;
     XFILERESOURCEMAP map;
-    XPTR image;
+    XPTR owned;
 
-    if (!pResource || resourceLength < (uint32_t)sizeof(XFILERESOURCEMAP))
+    if (!image || resourceLength < (uint32_t)sizeof(XFILERESOURCEMAP))
     {
         return NULL;
     }
 
-    XBlockMove(pResource, &map, (int32_t)sizeof(XFILERESOURCEMAP));
+    XBlockMove(image, &map, (int32_t)sizeof(XFILERESOURCEMAP));
     if (!XFILERESOURCE_ID_IS_VALID(XGetLong(&map.mapID)) ||
         !XFILERESOURCE_VERSION_IS_VALID(XGetLong(&map.version)))
     {
         return NULL;
     }
 
-    image = XNewPtr((int32_t)resourceLength);
-    if (!image)
+    if (adoptImage)
     {
-        return NULL;
+        owned = image;
     }
-    XBlockMove(pResource, image, (int32_t)resourceLength);
+    else
+    {
+        owned = XNewPtr((int32_t)resourceLength);
+        if (!owned)
+        {
+            return NULL;
+        }
+        XBlockMove(image, owned, (int32_t)resourceLength);
+    }
 
     pReference = (XFILENAME *)XNewPtr((int32_t)sizeof(XFILENAME));
     if (!pReference)
     {
-        XDisposePtr(image);
+        if (!adoptImage)
+        {
+            XDisposePtr(owned);
+        }
         return NULL;
     }
 
@@ -4656,7 +4668,7 @@ XFILE XFileOpenWritableResourceFromMemory(XPTR pResource, uint32_t resourceLengt
     pReference->resourceFile = TRUE;
     pReference->readOnly = FALSE;
     pReference->allowMemCopy = TRUE;
-    pReference->pResourceData = image;
+    pReference->pResourceData = owned;
     pReference->resMemLength = (int32_t)resourceLength;
     pReference->resMemOffset = 0;
     pReference->ownsResourceData = TRUE;
@@ -4665,13 +4677,29 @@ XFILE XFileOpenWritableResourceFromMemory(XPTR pResource, uint32_t resourceLengt
 
     if (PV_AddResourceFileToOpenFiles(pReference))
     {
-        XDisposePtr(image);
+        if (!adoptImage)
+        {
+            XDisposePtr(owned);
+        }
+        /* Adopt failure: caller still owns image — detach before free. */
+        pReference->pResourceData = NULL;
+        pReference->ownsResourceData = FALSE;
         XDisposePtr(pReference);
         return NULL;
     }
 
     pReference->pCache = XCreateAccessCache(pReference);
     return pReference;
+}
+
+XFILE XFileOpenWritableResourceFromMemory(XPTR pResource, uint32_t resourceLength)
+{
+    return PV_OpenWritableResourceMemory(pResource, resourceLength, FALSE);
+}
+
+XFILE XFileOpenWritableResourceAdoptMemory(XPTR pResource, uint32_t resourceLength)
+{
+    return PV_OpenWritableResourceMemory(pResource, resourceLength, TRUE);
 }
 
 XFILE XFileOpenForReadFromMemory(XPTR pMemoryBlock, uint32_t memoryBlockSize)

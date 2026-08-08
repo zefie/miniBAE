@@ -15,7 +15,7 @@
     static constexpr EditorTip kEditorTips[] = {
         {
             "Welcome to NeoBAE Editor",
-            "NBEditor builds Beatnik-style banks and songs (RMF/ZMF) around a "
+            "NeoBAE Editor builds Beatnik-style banks (HSB/ZSB) and songs (RMF/ZMF) around a "
             "Session: Songs, Instruments, and Samples live together. Save with "
             "File → Save Session so you can reopen the whole project later.",
         },

@@ -1223,8 +1223,12 @@ bool SessionHasPendingSndExportEncode() const
     return false;
 }
 
-/* Apply pending codec/storage to a writable bank clone (Export only). */
-bool ApplySessionExportTargetsToBank(BAEBankToken bank_token, const char **out_error)
+/* Apply pending codec/storage to a writable bank clone (Export only).
+ * One encode per unique SND id (shared multisamples share one resource). */
+bool ApplySessionExportTargetsToBank(BAEBankToken bank_token,
+                                     const char **out_error,
+                                     float progress_lo = 0.20f,
+                                     float progress_hi = 0.50f)
 {
     if (out_error)
     {
@@ -1253,7 +1257,15 @@ bool ApplySessionExportTargetsToBank(BAEBankToken bank_token, const char **out_e
         return false;
     }
 
-    (void)BAERmfEditorBank_BeginBatchSnd(bank_token);
+    struct EncodeJob
+    {
+        uint32_t instrument_index = 0;
+        uint32_t sample_index = 0;
+        uint32_t snd_id = 0;
+    };
+    std::vector<EncodeJob> jobs;
+    std::unordered_set<uint32_t> seen_snd;
+
     for (uint32_t ii = 0; ii < inst_count; ++ii)
     {
         uint32_t split_count = 0;
@@ -1289,32 +1301,69 @@ bool ApplySessionExportTargetsToBank(BAEBankToken bank_token, const char **out_e
             {
                 continue;
             }
-            const BAE_UNSIGNED_FIXED rate =
-                pcm.sample_rate ? pcm.sample_rate : UNSIGNED_LONG_TO_XFIXED(44100);
-            const BAEResult rr = BAERmfEditorBank_ReEncodeSampleFromPCMEx(
-                bank_token,
-                ii,
-                si,
-                pcm.export_compression,
-                pcm.export_storage,
-                pcm.export_opus_mode,
-                pcm.export_opus_roundtrip ? TRUE : FALSE,
-                pcm.pcm.data(),
-                pcm.frame_count,
-                pcm.bit_size,
-                pcm.channels,
-                rate);
-            if (rr != BAE_NO_ERROR && rr != BAE_COMPRESSION_INEFFECTIVE)
+            if (!seen_snd.insert(snd_id).second)
             {
-                (void)BAERmfEditorBank_AbortBatchSnd(bank_token);
-                if (out_error)
-                {
-                    *out_error = "export sample encode failed";
-                }
-                return false;
+                continue; /* shared SND already queued */
             }
+            jobs.push_back(EncodeJob{ii, si, snd_id});
         }
     }
+
+    if (jobs.empty())
+    {
+        return true;
+    }
+
+    (void)BAERmfEditorBank_BeginBatchSnd(bank_token);
+    const float span = std::max(0.0f, progress_hi - progress_lo);
+    for (size_t ji = 0; ji < jobs.size(); ++ji)
+    {
+        const EncodeJob &job = jobs[ji];
+        const auto pcm_it = m_session_pcm_cache.find(job.snd_id);
+        if (pcm_it == m_session_pcm_cache.end())
+        {
+            continue;
+        }
+        const SessionPcmCacheEntry &pcm = pcm_it->second;
+        {
+            char detail[96];
+            std::snprintf(detail,
+                          sizeof(detail),
+                          "Encoding sample %zu / %zu (SND:%u)…",
+                          ji + 1,
+                          jobs.size(),
+                          job.snd_id);
+            const float t = (jobs.size() <= 1)
+                                ? 1.0f
+                                : static_cast<float>(ji) / static_cast<float>(jobs.size() - 1);
+            UpdateBusyProgress(progress_lo + span * t, detail);
+        }
+        const BAE_UNSIGNED_FIXED rate =
+            pcm.sample_rate ? pcm.sample_rate : UNSIGNED_LONG_TO_XFIXED(44100);
+        const BAEResult rr = BAERmfEditorBank_ReEncodeSampleFromPCMEx(
+            bank_token,
+            job.instrument_index,
+            job.sample_index,
+            pcm.export_compression,
+            pcm.export_storage,
+            pcm.export_opus_mode,
+            pcm.export_opus_roundtrip ? TRUE : FALSE,
+            pcm.pcm.data(),
+            pcm.frame_count,
+            pcm.bit_size,
+            pcm.channels,
+            rate);
+        if (rr != BAE_NO_ERROR && rr != BAE_COMPRESSION_INEFFECTIVE)
+        {
+            (void)BAERmfEditorBank_AbortBatchSnd(bank_token);
+            if (out_error)
+            {
+                *out_error = "export sample encode failed";
+            }
+            return false;
+        }
+    }
+    UpdateBusyProgress(progress_hi, "Committing encoded samples…");
     (void)BAERmfEditorBank_CommitBatchSnd(bank_token);
     return true;
 }

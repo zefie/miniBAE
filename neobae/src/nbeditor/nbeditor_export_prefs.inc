@@ -728,50 +728,119 @@
             return;
         }
 
-        UpdateBusyProgress(0.08f, "Snapshotting bank…");
+        /* One-copy flat working clone (no Pack, no second memcpy via
+         * OpenWritableResourceFromMemory). Old SaveToMemoryEx(pack=TRUE) could
+         * LZMA-pack here — that hung early progress before any encode work. */
+        UpdateBusyProgress(0.08f, "Cloning bank image…");
         unsigned char *bank_bytes = nullptr;
         uint32_t bank_size = 0;
-        BAEResult sr =
-            BAERmfEditorBank_SaveToMemoryEx(m_bank_token, target_map, &bank_bytes, &bank_size);
-        if (sr != BAE_NO_ERROR || !bank_bytes || bank_size == 0)
         {
-            if (bank_bytes)
+            XFILE src = reinterpret_cast<XFILE>(m_bank_token);
+            const int32_t image_size = XFileGetLength(src);
+            if (image_size <= static_cast<int32_t>(sizeof(XFILERESOURCEMAP)))
             {
-                XDisposePtr(bank_bytes);
+                SetStatus("Export Bank failed: snapshot: bad bank length");
+                return;
             }
-            SetStatus(std::string("Export Bank failed: snapshot: ") + FormatBAEError(sr));
-            return;
+            XFILERESOURCEMAP src_map;
+            std::memset(&src_map, 0, sizeof(src_map));
+            if (XFileSetPosition(src, 0L) != 0 ||
+                XFileRead(src, &src_map, static_cast<int32_t>(sizeof(src_map))) != 0)
+            {
+                SetStatus("Export Bank failed: snapshot: read map");
+                return;
+            }
+            const int32_t source_id = static_cast<int32_t>(XGetLong(&src_map.mapID));
+            if (!XFILERESOURCE_ID_IS_VALID(source_id))
+            {
+                SetStatus("Export Bank failed: snapshot: bad map");
+                return;
+            }
+            /* Same container, or IREZ→ZREZ stamp-only (flat resources OK). */
+            const bool can_memcpy_clone =
+                (target_map == source_id) ||
+                (source_id == XFILERESOURCE_ID && target_map == XFILERESOURCE_ZMF_ID);
+            if (can_memcpy_clone)
+            {
+                bank_bytes = static_cast<unsigned char *>(XNewPtr(image_size));
+                if (!bank_bytes)
+                {
+                    SetStatus("Export Bank failed: snapshot: out of memory");
+                    return;
+                }
+                if (XFileSetPosition(src, 0L) != 0 ||
+                    XFileRead(src, bank_bytes, image_size) != 0)
+                {
+                    XDisposePtr(bank_bytes);
+                    SetStatus("Export Bank failed: snapshot: read image");
+                    return;
+                }
+                bank_size = static_cast<uint32_t>(image_size);
+                if (target_map != source_id)
+                {
+                    XFILERESOURCEMAP hdr;
+                    XBlockMove(bank_bytes, &hdr, static_cast<int32_t>(sizeof(hdr)));
+                    XPutLong(&hdr.mapID, static_cast<uint32_t>(target_map));
+                    XPutLong(&hdr.version,
+                             static_cast<uint32_t>(XFILERESOURCE_VERSION_FOR_ID(target_map)));
+                    XBlockMove(&hdr, bank_bytes, static_cast<int32_t>(sizeof(hdr)));
+                }
+            }
+            else
+            {
+                const BAEResult sr =
+                    BAERmfEditorBank_SaveToMemoryExFlags(m_bank_token,
+                                                         target_map,
+                                                         FALSE,
+                                                         &bank_bytes,
+                                                         &bank_size);
+                if (sr != BAE_NO_ERROR || !bank_bytes || bank_size == 0)
+                {
+                    if (bank_bytes)
+                    {
+                        XDisposePtr(bank_bytes);
+                    }
+                    SetStatus(std::string("Export Bank failed: snapshot: ") + FormatBAEError(sr));
+                    return;
+                }
+            }
         }
 
-        /* Writable clone in one copy — skip mixer AddBank + EnsureWritable
-         * (those kept a second full image of large banks like zpatches). */
-        UpdateBusyProgress(0.15f, "Opening writable clone…");
-        XFILE temp_file = XFileOpenWritableResourceFromMemory(bank_bytes, bank_size);
-        XDisposePtr(bank_bytes);
-        bank_bytes = nullptr;
+        UpdateBusyProgress(0.12f, "Building resource index…");
+        XFILE temp_file = XFileOpenWritableResourceAdoptMemory(bank_bytes, bank_size);
         if (!temp_file)
         {
+            XDisposePtr(bank_bytes);
             SetStatus("Export Bank failed: could not open writable clone");
             return;
         }
+        bank_bytes = nullptr; /* owned by temp_file */
         BAEBankToken temp_token = reinterpret_cast<BAEBankToken>(temp_file);
+        UpdateBusyProgress(0.16f, "Writable clone ready…");
+
+        /* Heavy stages (encode/encrypt) own most of the bar; stage advances
+         * monotonically so the meter never jumps backward. */
+        float stage = 0.18f;
 
         if (need_export_encode)
         {
-            UpdateBusyProgress(0.20f, "Encoding samples for export…");
+            const float enc_lo = stage;
+            const float enc_hi = need_encrypt ? 0.48f : 0.72f;
+            UpdateBusyProgress(enc_lo, "Encoding samples for export…");
             const char *enc_err = nullptr;
-            if (!ApplySessionExportTargetsToBank(temp_token, &enc_err))
+            if (!ApplySessionExportTargetsToBank(temp_token, &enc_err, enc_lo, enc_hi))
             {
                 SetStatus(std::string("Export Bank failed: ") +
                           (enc_err ? enc_err : "sample encode"));
                 XFileClose(temp_file);
                 return;
             }
+            stage = enc_hi;
         }
 
         if (need_song_strip)
         {
-            UpdateBusyProgress(0.25f,
+            UpdateBusyProgress(stage,
                                m_export_bank_include_groovoids
                                    ? "Removing Session songs…"
                                    : "Removing songs…");
@@ -793,11 +862,12 @@
                 XFileClose(temp_file);
                 return;
             }
+            stage = std::min(stage + 0.02f, 0.54f);
         }
 
         if (need_casd_strip)
         {
-            UpdateBusyProgress(0.28f, "Removing CaSd masters…");
+            UpdateBusyProgress(stage, "Removing CaSd masters…");
             const char *casd_err = nullptr;
             if (!StripCasdFromBankFile(temp_file, &casd_err))
             {
@@ -806,11 +876,12 @@
                 XFileClose(temp_file);
                 return;
             }
+            stage = std::min(stage + 0.015f, 0.56f);
         }
 
         if (need_add_groovoids)
         {
-            UpdateBusyProgress(0.35f, "Adding session songs as groovoids…");
+            UpdateBusyProgress(stage, "Adding session songs as groovoids…");
             for (size_t i = 0; i < m_session_songs.size(); ++i)
             {
                 const SessionSongEntry &entry = m_session_songs[i];
@@ -870,6 +941,7 @@
                                        XGetPtrSize(song_res));
                 XDisposeSongPtr(song_res);
             }
+            stage = std::min(stage + 0.02f, 0.58f);
         }
 
         if (need_encrypt)
@@ -878,19 +950,19 @@
             const int32_t csnd = XCountFileResourcesOfType(temp_file, ID_CSND);
             if (plain_snd > 0 || csnd > 0)
             {
-                UpdateBusyProgress(0.45f, "Encrypting samples (batch)…");
-                (void)BAERmfEditorBank_BeginBatchSnd(temp_token);
+                struct EncryptJob
+                {
+                    uint32_t instrument_index = 0;
+                    uint32_t sample_index = 0;
+                    uint32_t snd_id = 0;
+                };
+                std::vector<EncryptJob> crypt_jobs;
+                std::unordered_set<uint32_t> seen_snd;
                 uint32_t inst_count = 0;
                 if (BAERmfEditorBank_GetInstrumentCount(temp_token, &inst_count) == BAE_NO_ERROR)
                 {
                     for (uint32_t ii = 0; ii < inst_count; ++ii)
                     {
-                        if ((ii & 31u) == 0u && inst_count > 0u)
-                        {
-                            UpdateBusyProgress(0.45f + 0.30f * (static_cast<float>(ii) /
-                                                                static_cast<float>(inst_count)),
-                                               "Encrypting samples (batch)…");
-                        }
                         uint32_t split_count = 0;
                         if (BAERmfEditorBank_GetInstrumentSampleCount(temp_token, ii, &split_count) !=
                             BAE_NO_ERROR)
@@ -914,23 +986,60 @@
                             {
                                 continue;
                             }
-                            (void)BAERmfEditorBank_SetSampleSndStorageType(
-                                temp_token, ii, si, BAE_EDITOR_SND_STORAGE_ESND);
+                            const uint32_t snd_id =
+                                static_cast<uint32_t>(static_cast<uint16_t>(sinfo.sndResourceID));
+                            if (snd_id == kNoSndResourceId || !seen_snd.insert(snd_id).second)
+                            {
+                                continue;
+                            }
+                            crypt_jobs.push_back(EncryptJob{ii, si, snd_id});
                         }
                     }
                 }
-                UpdateBusyProgress(0.78f, "Committing encrypted samples…");
-                (void)BAERmfEditorBank_CommitBatchSnd(temp_token);
+
+                if (!crypt_jobs.empty())
+                {
+                    const float crypt_lo = stage;
+                    const float crypt_hi = 0.85f;
+                    UpdateBusyProgress(crypt_lo, "Encrypting samples…");
+                    (void)BAERmfEditorBank_BeginBatchSnd(temp_token);
+                    const float crypt_span = std::max(0.0f, crypt_hi - crypt_lo);
+                    for (size_t ji = 0; ji < crypt_jobs.size(); ++ji)
+                    {
+                        const EncryptJob &job = crypt_jobs[ji];
+                        char detail[96];
+                        std::snprintf(detail,
+                                      sizeof(detail),
+                                      "Encrypting sample %zu / %zu (SND:%u)…",
+                                      ji + 1,
+                                      crypt_jobs.size(),
+                                      job.snd_id);
+                        const float t =
+                            (crypt_jobs.size() <= 1)
+                                ? 1.0f
+                                : static_cast<float>(ji) /
+                                      static_cast<float>(crypt_jobs.size() - 1);
+                        UpdateBusyProgress(crypt_lo + crypt_span * t, detail);
+                        (void)BAERmfEditorBank_SetSampleSndStorageType(
+                            temp_token,
+                            job.instrument_index,
+                            job.sample_index,
+                            BAE_EDITOR_SND_STORAGE_ESND);
+                    }
+                    UpdateBusyProgress(crypt_hi, "Committing encrypted samples…");
+                    (void)BAERmfEditorBank_CommitBatchSnd(temp_token);
+                    stage = crypt_hi;
+                }
             }
         }
 
         if (need_drop)
         {
-            UpdateBusyProgress(0.85f, "Dropping unused samples…");
+            UpdateBusyProgress(std::max(stage, 0.88f), "Dropping unused samples…");
             (void)DropUnreferencedSamplesFromBankFile(temp_file, temp_token);
         }
 
-        UpdateBusyProgress(0.92f, "Writing bank file…");
+        UpdateBusyProgress(0.94f, "Writing bank file…");
         /* Direct image write — avoids SaveToFile's second full serialize. */
         const bool wrote = WriteBankFileImageToPath(temp_file, out_path);
         XFileClose(temp_file);

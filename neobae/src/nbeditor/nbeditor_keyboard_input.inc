@@ -393,3 +393,181 @@
             }
         }
     }
+
+    bool CanSaveSessionNow() const
+    {
+        return m_document != nullptr || m_bank_token != 0 || !m_session_songs.empty();
+    }
+
+    void RequestSaveSession()
+    {
+        if (!CanSaveSessionNow())
+        {
+            SetStatus("Nothing to save");
+            return;
+        }
+        if (m_loaded_session_path.empty())
+        {
+            OpenSaveSessionDialog();
+            return;
+        }
+        m_long_op = LongOp::SaveSession;
+        m_long_op_path = m_loaded_session_path;
+        ArmBusyProgress("Saving Session…");
+    }
+
+    void RequestSaveSessionAs()
+    {
+        if (!CanSaveSessionNow())
+        {
+            SetStatus("Nothing to save");
+            return;
+        }
+        OpenSaveSessionDialog();
+    }
+
+    /* App-wide shortcuts (File Ctrl+* + session Edit). Sub-editors handle their
+     * own undo/clipboard when focused; call after windows update focus flags. */
+    void HandleGlobalAppShortcuts()
+    {
+        const ImGuiIO &io = ImGui::GetIO();
+        if (io.WantTextInput)
+        {
+            return;
+        }
+        if (ImGui::GetTopMostPopupModal() != nullptr)
+        {
+            return;
+        }
+        if (m_long_op != LongOp::None)
+        {
+            return;
+        }
+
+        const bool shift = io.KeyShift;
+#if NBEDITOR_MVP
+        const bool se_focused = m_sample_editor_open && m_sample_editor_focused;
+#else
+        const bool se_focused = false;
+#endif
+        const bool ie_focused = m_instrument_editor_open && m_instrument_editor_focused;
+        const bool me_focused = m_midi_editor_open && m_midi_editor_focused;
+        const bool editor_owns_keys = se_focused || ie_focused || me_focused;
+
+        if (io.KeyCtrl)
+        {
+            if (ImGui::IsKeyPressed(ImGuiKey_S, false))
+            {
+#if NBEDITOR_MVP
+                if (se_focused)
+                {
+                    ApplySampleEditorChanges(false);
+                    return;
+                }
+#endif
+                if (shift)
+                {
+                    RequestSaveSessionAs();
+                }
+                else
+                {
+                    RequestSaveSession();
+                }
+                return;
+            }
+
+            if (!shift && ImGui::IsKeyPressed(ImGuiKey_O, false))
+            {
+                OpenLoadDialog();
+                return;
+            }
+            if (!shift && ImGui::IsKeyPressed(ImGuiKey_N, false))
+            {
+                RequestNewSessionConfirm();
+                return;
+            }
+
+            /* Session list clipboard — skip when a sub-editor owns the keys. */
+            if (!editor_owns_keys)
+            {
+                if (ImGui::IsKeyPressed(ImGuiKey_A, false))
+                {
+                    SessionSelectAllVisible();
+                }
+                if (ImGui::IsKeyPressed(ImGuiKey_C, false))
+                {
+                    switch (m_session_tab)
+                    {
+                    case SessionTab::Songs:
+                        CopySongsSelection(false);
+                        break;
+                    case SessionTab::Instruments:
+                        BeginCopyInstrumentsForClip();
+                        break;
+                    case SessionTab::Samples:
+                        CopySamplesSelection(false);
+                        break;
+                    }
+                }
+                if (ImGui::IsKeyPressed(ImGuiKey_X, false))
+                {
+                    switch (m_session_tab)
+                    {
+                    case SessionTab::Songs:
+                        CopySongsSelection(true);
+                        break;
+                    case SessionTab::Instruments:
+                        CutInstrumentsSelection();
+                        break;
+                    case SessionTab::Samples:
+                        CopySamplesSelection(true);
+                        break;
+                    }
+                }
+                if (ImGui::IsKeyPressed(ImGuiKey_V, false) &&
+                    CanPasteForSessionTab(m_session_tab))
+                {
+                    switch (m_session_tab)
+                    {
+                    case SessionTab::Songs:
+                        PasteSongsClipboard();
+                        break;
+                    case SessionTab::Instruments:
+                        PasteInstrumentsSelection();
+                        break;
+                    case SessionTab::Samples:
+                        PasteSamplesSelection();
+                        break;
+                    }
+                }
+            }
+        }
+
+        /* Del/Backspace only while Session is focused (avoid nuking selection
+         * from Player/Status). Clipboard Ctrl+* matches Edit menu (global). */
+        if (!editor_owns_keys && m_session_window_focused &&
+            (ImGui::IsKeyPressed(ImGuiKey_Delete, false) ||
+             ImGui::IsKeyPressed(ImGuiKey_Backspace, false)))
+        {
+            switch (m_session_tab)
+            {
+            case SessionTab::Songs:
+                RequestDeleteSessionSongs(CollectTargetSongIndices());
+                break;
+            case SessionTab::Instruments:
+            {
+                std::vector<int> indices = CollectTargetInstrumentIndices();
+                std::sort(indices.begin(), indices.end(), std::greater<int>());
+                for (int idx : indices)
+                {
+                    DeleteInstrumentAt(idx);
+                }
+                m_multi_instruments.clear();
+                break;
+            }
+            case SessionTab::Samples:
+                DeleteSamplesAtListIndices(CollectTargetSampleIndices());
+                break;
+            }
+        }
+    }
