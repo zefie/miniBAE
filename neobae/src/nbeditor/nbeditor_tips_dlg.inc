@@ -17,7 +17,10 @@
             "Welcome to NeoBAE Editor",
             "NeoBAE Editor builds Beatnik-style banks (HSB/ZSB) and songs (RMF/ZMF) around a "
             "Session: Songs, Instruments, and Samples live together. Save with "
-            "File → Save Session so you can reopen the whole project later.",
+            "File → Save Session so you can reopen the whole project later — "
+            "including your list filters, sort order, and active song."
+            "\n\n"
+            "NOTE: NeoBAE Editor is currently in Beta, please save often and make backups of your sessions.",
         },
         {
             "Backwards compatible",
@@ -32,7 +35,9 @@
             "A Session (.bsn / .zsn) is your working project. The bank holds "
             "instruments and samples; songs reference them by program. Export "
             "RMF/ZMF when you want a distributable song+bank package — keep "
-            "saving the Session while you edit.",
+            "saving the Session while you edit, Saving your session also "
+            "remembers Instruments/Samples filters, sort, text filter, and "
+            "the active song.",
         },
         {
             "Open / Import almost anything",
@@ -147,8 +152,7 @@
             "Song Info & metadata",
             "Song → Song Info… sets title, composer, copyright, and notes "
             "embedded on export. Use Apply Player Reverb / Velocity Curve to "
-            "stamp the Player panel mix as tick-0 NRPNs. Session Info covers "
-            "the project file itself.",
+            "stamp the Player panel mix as tick-0 NRPNs."
         },
         {
             "Resource usage",

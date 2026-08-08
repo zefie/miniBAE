@@ -1001,7 +1001,7 @@
         RefreshSongSamplesFromDocument();
         m_instrument_editor_open = false;
         m_song_info_open = false;
-        /* Player mix is session-scoped (nBeT); reset to defaults on new session. */
+        /* Player mix + list UI are session-scoped (nBeT); reset on new session. */
         m_volume_percent = 100;
         m_song_settings_tempo_percent = 100;
         m_transpose_semitones = 0;
@@ -1009,6 +1009,18 @@
         m_velocity_curve = 1;
         m_song_info_apply_player_reverb = false;
         m_song_info_apply_player_velocity_curve = false;
+        m_instrument_list_sort = InstrumentListSort::ByProgram;
+        m_sample_list_sort = SampleListSort::ByName;
+        m_sample_show_filter = SampleShowFilter::Custom;
+        m_song_show_filter = SongShowFilter::Custom;
+        m_show_empty_instrument_slots = false;
+        m_instrument_text_filter[0] = '\0';
+        m_sample_text_filter[0] = '\0';
+        m_session_tab = SessionTab::Songs;
+        m_nbet_restore_has_list_ui = false;
+        m_nbet_restore_session_song_index = -1;
+        RebuildInstrumentFilters();
+        SelectInstrumentFilterByBankCategory(-2, 0); /* Custom Melodic */
         ApplyPlayerMixSettings();
         m_session_undocked_layout = m_pref_default_undocked_layout;
         ApplyWorkspaceLayoutMode();

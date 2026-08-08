@@ -4720,6 +4720,31 @@ private:
         }
     }
 
+    void SelectInstrumentFilterByBankCategory(int bank, int category)
+    {
+        for (size_t i = 0; i < m_instrument_filters.size(); ++i)
+        {
+            if (m_instrument_filters[i].bank == bank &&
+                m_instrument_filters[i].category == category)
+            {
+                m_instrument_filter_index = static_cast<int>(i);
+                return;
+            }
+        }
+        m_instrument_filter_index = DefaultInstrumentFilterIndex();
+    }
+
+    void ApplyRestoredSessionListUi()
+    {
+        if (!m_nbet_restore_has_list_ui)
+        {
+            return;
+        }
+        SelectInstrumentFilterByBankCategory(m_nbet_restore_inst_filter_bank,
+                                             m_nbet_restore_inst_filter_category);
+        m_nbet_restore_has_list_ui = false;
+    }
+
     int DefaultInstrumentFilterIndex() const
     {
         /* Prefer Custom Melodic (any bank) so Bank 2+ / promoted customs show. */
@@ -7051,6 +7076,10 @@ private:
     bool m_nbet_restore_ie_from_song = false;
     int m_nbet_restore_se_sample_row = -1;
     bool m_nbet_restore_se_is_song = false;
+    bool m_nbet_restore_has_list_ui = false;
+    int m_nbet_restore_inst_filter_bank = -2;
+    int m_nbet_restore_inst_filter_category = 0;
+    int m_nbet_restore_session_song_index = -1;
 
     /* Export Bank dialog options. */
     bool m_export_bank_open = false;

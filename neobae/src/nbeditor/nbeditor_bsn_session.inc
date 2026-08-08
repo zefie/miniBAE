@@ -30,6 +30,23 @@ static void NbetPutBE32(std::vector<unsigned char> &out, uint32_t v)
     out.push_back(static_cast<unsigned char>(v & 0xff));
 }
 
+static void NbetPutBytes(std::vector<unsigned char> &out, const void *data, size_t len)
+{
+    const unsigned char *p = static_cast<const unsigned char *>(data);
+    out.insert(out.end(), p, p + len);
+}
+
+static void NbetPutFixedCString(std::vector<unsigned char> &out, const char *s, size_t fixed_len)
+{
+    std::vector<unsigned char> buf(fixed_len, 0);
+    if (s && s[0] && fixed_len > 0)
+    {
+        const size_t n = std::min(fixed_len - 1, std::strlen(s));
+        std::memcpy(buf.data(), s, n);
+    }
+    NbetPutBytes(out, buf.data(), fixed_len);
+}
+
 static uint32_t NbetReadBE32(const unsigned char *p)
 {
     return (static_cast<uint32_t>(p[0]) << 24) |
@@ -2059,11 +2076,22 @@ std::vector<unsigned char> CaptureNbetLayoutBlob(bool include_layout = true)
         }
     }
 
-    /* Version 3: v2 + player mix (volume / tempo / reverb) before ImGui ini.
-     * When include_layout is false (ZSN marker / prefs off), still store mix. */
-    blob.reserve(76 + ini_len);
+    /* Version 4: v3 + session list UI (filters/sort/text/active song/tab).
+     * When include_layout is false (ZSN marker / prefs off), still store mix + UI. */
+    int inst_filter_bank = -2;
+    int inst_filter_category = 0;
+    if (m_instrument_filter_index >= 0 &&
+        m_instrument_filter_index < static_cast<int>(m_instrument_filters.size()))
+    {
+        inst_filter_bank =
+            m_instrument_filters[static_cast<size_t>(m_instrument_filter_index)].bank;
+        inst_filter_category =
+            m_instrument_filters[static_cast<size_t>(m_instrument_filter_index)].category;
+    }
+
+    blob.reserve(240 + ini_len);
     NbetPutBE32(blob, FOUR_CHAR('n', 'B', 'e', 'T'));
-    NbetPutBE32(blob, 3u);
+    NbetPutBE32(blob, 4u);
     NbetPutBE32(blob, static_cast<uint32_t>(x));
     NbetPutBE32(blob, static_cast<uint32_t>(y));
     NbetPutBE32(blob, static_cast<uint32_t>(w));
@@ -2098,6 +2126,18 @@ std::vector<unsigned char> CaptureNbetLayoutBlob(bool include_layout = true)
     NbetPutBE32(blob, static_cast<uint32_t>(m_volume_percent));
     NbetPutBE32(blob, static_cast<uint32_t>(m_song_settings_tempo_percent));
     NbetPutBE32(blob, static_cast<uint32_t>(m_reverb_type));
+    /* v4 UI state (always written; not gated on include_layout). */
+    NbetPutBE32(blob, static_cast<uint32_t>(inst_filter_bank));
+    NbetPutBE32(blob, static_cast<uint32_t>(inst_filter_category));
+    NbetPutBE32(blob, static_cast<uint32_t>(m_instrument_list_sort));
+    NbetPutBE32(blob, static_cast<uint32_t>(m_sample_show_filter));
+    NbetPutBE32(blob, static_cast<uint32_t>(m_sample_list_sort));
+    NbetPutBE32(blob, static_cast<uint32_t>(m_song_show_filter));
+    NbetPutBE32(blob, static_cast<uint32_t>(m_session_song_index));
+    NbetPutBE32(blob, static_cast<uint32_t>(m_session_tab));
+    NbetPutBE32(blob, m_show_empty_instrument_slots ? 1u : 0u);
+    NbetPutFixedCString(blob, m_instrument_text_filter, sizeof(m_instrument_text_filter));
+    NbetPutFixedCString(blob, m_sample_text_filter, sizeof(m_sample_text_filter));
     NbetPutBE32(blob, ini_len);
     if (ini_len > 0 && ini)
     {
@@ -2180,7 +2220,7 @@ void ApplyNbetLayoutBlob(const unsigned char *data, size_t size)
     const uint32_t magic = NbetReadBE32(data + 0);
     const uint32_t version = NbetReadBE32(data + 4);
     if (magic != static_cast<uint32_t>(FOUR_CHAR('n', 'B', 'e', 'T')) ||
-        (version != 1 && version != 2 && version != 3))
+        (version != 1 && version != 2 && version != 3 && version != 4))
     {
         return;
     }
@@ -2193,6 +2233,10 @@ void ApplyNbetLayoutBlob(const unsigned char *data, size_t size)
     size_t ini_off = 32;
     uint32_t ini_len = 0;
     m_nbet_restore_open_flags = 0;
+    m_nbet_restore_session_song_index = -1;
+    m_nbet_restore_inst_filter_bank = -2;
+    m_nbet_restore_inst_filter_category = 0;
+    m_nbet_restore_has_list_ui = false;
     if (version == 1)
     {
         ini_len = NbetReadBE32(data + 28);
@@ -2216,7 +2260,7 @@ void ApplyNbetLayoutBlob(const unsigned char *data, size_t size)
         ini_len = NbetReadBE32(data + 60);
         ini_off = 64;
     }
-    else
+    else if (version == 3)
     {
         /* v3: v2 fields + volume/tempo/reverb (76 bytes before ini). */
         if (size < 76)
@@ -2238,11 +2282,70 @@ void ApplyNbetLayoutBlob(const unsigned char *data, size_t size)
         ini_off = 76;
         ApplyPlayerMixSettings();
     }
+    else
+    {
+        /* v4: v3 + list UI state (240 bytes before ini). */
+        if (size < 240)
+        {
+            return;
+        }
+        m_nbet_restore_open_flags = NbetReadBE32(data + 28);
+        m_nbet_restore_ie_inst_id = NbetReadBE32(data + 32);
+        m_nbet_restore_ie_instrument_index = NbetReadBE32(data + 36);
+        m_nbet_restore_ie_bank = NbetReadBE32Signed(data + 40);
+        m_nbet_restore_ie_program = NbetReadBE32Signed(data + 44);
+        m_nbet_restore_ie_from_song = (NbetReadBE32(data + 48) != 0);
+        m_nbet_restore_se_sample_row = NbetReadBE32Signed(data + 52);
+        m_nbet_restore_se_is_song = (NbetReadBE32(data + 56) != 0);
+        m_volume_percent = static_cast<int>(NbetReadBE32(data + 60));
+        m_song_settings_tempo_percent = static_cast<int>(NbetReadBE32(data + 64));
+        m_reverb_type = static_cast<int>(NbetReadBE32(data + 68));
+        m_nbet_restore_inst_filter_bank = NbetReadBE32Signed(data + 72);
+        m_nbet_restore_inst_filter_category = NbetReadBE32Signed(data + 76);
+        {
+            const uint32_t inst_sort = NbetReadBE32(data + 80);
+            if (inst_sort <= 1u)
+            {
+                m_instrument_list_sort = static_cast<InstrumentListSort>(inst_sort);
+            }
+            const uint32_t sample_show = NbetReadBE32(data + 84);
+            if (sample_show <= 3u)
+            {
+                m_sample_show_filter = static_cast<SampleShowFilter>(sample_show);
+            }
+            const uint32_t sample_sort = NbetReadBE32(data + 88);
+            if (sample_sort <= 1u)
+            {
+                m_sample_list_sort = static_cast<SampleListSort>(sample_sort);
+            }
+            const uint32_t song_show = NbetReadBE32(data + 92);
+            if (song_show <= 2u)
+            {
+                m_song_show_filter = static_cast<SongShowFilter>(song_show);
+            }
+            m_nbet_restore_session_song_index = NbetReadBE32Signed(data + 96);
+            const uint32_t tab = NbetReadBE32(data + 100);
+            if (tab <= 2u)
+            {
+                m_session_tab = static_cast<SessionTab>(tab);
+                m_pending_session_tab = static_cast<int>(tab);
+            }
+            m_show_empty_instrument_slots = (NbetReadBE32(data + 104) != 0);
+            std::memcpy(m_instrument_text_filter, data + 108, sizeof(m_instrument_text_filter));
+            m_instrument_text_filter[sizeof(m_instrument_text_filter) - 1] = '\0';
+            std::memcpy(m_sample_text_filter, data + 172, sizeof(m_sample_text_filter));
+            m_sample_text_filter[sizeof(m_sample_text_filter) - 1] = '\0';
+        }
+        m_nbet_restore_has_list_ui = true;
+        ini_len = NbetReadBE32(data + 236);
+        ini_off = 240;
+        ApplyPlayerMixSettings();
+    }
     if (ini_off + ini_len > size)
     {
         return;
     }
-    /* Player mix (v3) already applied; layout/editors are optional. */
+    /* Player mix + list UI (v3/v4) already applied; window/ini/editors optional. */
     if (m_pref_ignore_session_layout)
     {
         m_nbet_restore_open_flags = 0;
@@ -2399,6 +2502,7 @@ bool LoadSessionBsnFromPath(const char *path)
     LoadSessionExportTargetsFromBank();
     /* Bank load refreshed the sample list before nEnc prefs existed. */
     RefreshListsFromBank();
+    ApplyRestoredSessionListUi();
 
     char status[256];
     const char *kind = EndsWith(path_owned, ".zsn") ? "Session .zsn" : "Session .bsn";
@@ -2415,7 +2519,14 @@ bool LoadSessionBsnFromPath(const char *path)
         return true;
     }
 
-    const bool ok = ActivateSessionSongAt(0);
+    int song_index = 0;
+    if (m_nbet_restore_session_song_index >= 0 &&
+        m_nbet_restore_session_song_index < static_cast<int>(m_session_songs.size()))
+    {
+        song_index = m_nbet_restore_session_song_index;
+    }
+    m_nbet_restore_session_song_index = -1;
+    const bool ok = ActivateSessionSongAt(song_index);
     ApplyPlayerMixSettings();
     std::snprintf(status,
                   sizeof(status),
