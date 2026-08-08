@@ -12010,14 +12010,14 @@ BAEResult BAESong_UnloadInstrument(BAESong song, BAE_INSTRUMENT instrument)
         if (song->pSong) // MOVE THIS CHECK INTO ENGINE
         {
             err = GM_UnloadSongInstrument(song->pSong, (XLongResourceID)instrument);
-            if (song->mInstrumentsLoadedCount)
+            /* mInstrumentsLoadedCount only tracks BAESong_LoadInstrument calls.
+             * Songs loaded via GM_LoadSongInstruments leave it at 0; treating
+             * that as "last instrument" and Stop()'ing here killed RMF preview
+             * whenever the editor remounted a single INST (keysplit sample
+             * change, etc.). Only adjust the counter on successful unload. */
+            if (err == NO_ERR && song->mInstrumentsLoadedCount)
             {
                 song->mInstrumentsLoadedCount--;
-            }
-            else
-            {
-                song->mInMixer = FALSE;
-                PV_BAESong_Stop(song, FALSE); // remove from bae mixer
             }
         }
         else

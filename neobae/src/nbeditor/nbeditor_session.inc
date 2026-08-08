@@ -6012,6 +6012,7 @@
                 continue;
             }
             char label[320];
+            const char *nm = sample.name.empty() ? "Sample" : sample.name.c_str();
             if (sample.unassigned)
             {
                 if (sample.codec_label.empty())
@@ -6020,7 +6021,7 @@
                                   sizeof(label),
                                   "SND %u  %s",
                                   sample.snd_resource_id,
-                                  sample.name.c_str());
+                                  nm);
                 }
                 else
                 {
@@ -6028,7 +6029,7 @@
                                   sizeof(label),
                                   "SND %u  %s [%s]",
                                   sample.snd_resource_id,
-                                  sample.name.c_str(),
+                                  nm,
                                   sample.codec_label.c_str());
                 }
             }
@@ -6036,8 +6037,9 @@
             {
                 std::snprintf(label,
                               sizeof(label),
-                              "SND %u  B%dP%03d",
+                              "SND %u  %s (B%dP%03d)",
                               sample.snd_resource_id,
+                              nm,
                               sample.bank,
                               sample.program);
             }
@@ -6045,8 +6047,9 @@
             {
                 std::snprintf(label,
                               sizeof(label),
-                              "SND %u  B%dP%03d [%s]",
+                              "SND %u  %s (B%dP%03d) [%s]",
                               sample.snd_resource_id,
+                              nm,
                               sample.bank,
                               sample.program,
                               sample.codec_label.c_str());
@@ -6137,6 +6140,7 @@
         m_ie_adsr_selected_stage = -1;
         m_ie_adsr_selected_owner = 0;
         SyncLfoControlModesFromExt();
+        m_ie_sample_splits_backup.clear();
         CaptureInstrumentEditorPristineSplits();
         m_instrument_editor_open = true;
         LivePatchInstrumentEditor(true);
@@ -6149,9 +6153,21 @@
         m_ie_ext.displayName = m_ie_display_name.empty() ? nullptr : m_ie_display_name.c_str();
     }
 
-    void CaptureInstrumentEditorPristineSplits()
+    static bool IeSplitsHaveSample(const std::vector<IePristineSplit> &splits)
     {
-        m_ie_pristine_splits.clear();
+        for (const IePristineSplit &snap : splits)
+        {
+            if (static_cast<uint32_t>(snap.sndResourceID) != kNoSndResourceId)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void CaptureInstrumentEditorSplitsFromBank(std::vector<IePristineSplit> &out)
+    {
+        out.clear();
         if (!m_bank_token || m_ie_from_song)
         {
             return;
@@ -6163,7 +6179,7 @@
         {
             return;
         }
-        m_ie_pristine_splits.reserve(split_count);
+        out.reserve(split_count);
         for (uint32_t s = 0; s < split_count; ++s)
         {
             IePristineSplit snap;
@@ -6175,7 +6191,7 @@
                                                          &info) != BAE_NO_ERROR)
             {
                 snap.sndResourceID = static_cast<uint16_t>(kNoSndResourceId);
-                m_ie_pristine_splits.push_back(snap);
+                out.push_back(snap);
                 continue;
             }
             snap.lowKey = info.lowKey;
@@ -6183,13 +6199,37 @@
             snap.rootKey = info.rootKey;
             snap.splitVolume = info.splitVolume;
             snap.sndResourceID = static_cast<uint16_t>(info.sndResourceID);
-            m_ie_pristine_splits.push_back(snap);
+            out.push_back(snap);
         }
     }
 
-    void RestoreInstrumentEditorPristineSplits()
+    void CaptureInstrumentEditorPristineSplits()
     {
-        if (!m_bank_token || m_ie_from_song || m_ie_pristine_splits.empty())
+        CaptureInstrumentEditorSplitsFromBank(m_ie_pristine_splits);
+        /* Refresh sample backup when the bank still has real SND links.
+         * Do not clear the backup here — Apply+generator captures SND=none into
+         * pristine afterward and must keep the pre-clear keymap. */
+        if (IeSplitsHaveSample(m_ie_pristine_splits))
+        {
+            m_ie_sample_splits_backup = m_ie_pristine_splits;
+        }
+    }
+
+    /* Snapshot current bank keymap into the sample backup if it still has SNDs
+     * (call before clearing links for oscillator mode). */
+    void CaptureInstrumentEditorSampleBackupIfPresent()
+    {
+        std::vector<IePristineSplit> cur;
+        CaptureInstrumentEditorSplitsFromBank(cur);
+        if (IeSplitsHaveSample(cur))
+        {
+            m_ie_sample_splits_backup = std::move(cur);
+        }
+    }
+
+    void RestoreInstrumentEditorSplits(const std::vector<IePristineSplit> &splits)
+    {
+        if (!m_bank_token || m_ie_from_song || splits.empty())
         {
             return;
         }
@@ -6207,7 +6247,7 @@
         {
             return;
         }
-        const uint32_t want = static_cast<uint32_t>(m_ie_pristine_splits.size());
+        const uint32_t want = static_cast<uint32_t>(splits.size());
         /* Align split count so Vol/Low/High/Root/SND can all be restored. */
         while (split_count > want)
         {
@@ -6243,7 +6283,7 @@
         const uint32_t n = std::min(split_count, want);
         for (uint32_t s = 0; s < n; ++s)
         {
-            const IePristineSplit &snap = m_ie_pristine_splits[s];
+            const IePristineSplit &snap = splits[s];
             BAERmfEditorBankSampleInfo info;
             std::memset(&info, 0, sizeof(info));
             info.lowKey = snap.lowKey;
@@ -6260,6 +6300,29 @@
             }
             SyncInstrumentEditorBankIndex();
         }
+    }
+
+    void RestoreInstrumentEditorPristineSplits()
+    {
+        RestoreInstrumentEditorSplits(m_ie_pristine_splits);
+    }
+
+    /* Prefer pre-oscillator sample keymap; fall back to pristine. */
+    void RestoreInstrumentEditorSampleSplits()
+    {
+        if (IeSplitsHaveSample(m_ie_sample_splits_backup))
+        {
+            RestoreInstrumentEditorSplits(m_ie_sample_splits_backup);
+            return;
+        }
+        RestoreInstrumentEditorPristineSplits();
+    }
+
+    bool InstrumentEditorBankSplitsAreNone()
+    {
+        std::vector<IePristineSplit> cur;
+        CaptureInstrumentEditorSplitsFromBank(cur);
+        return !IeSplitsHaveSample(cur);
     }
 
     uint32_t InstrumentEditorPatchId() const
@@ -6346,12 +6409,15 @@
         (void)BAESong_PatchLoadedInstrumentExtInfo(song, inst, &m_ie_ext);
     }
 
-    /* reload_samples_from_bank: unload/reload on the keyboard audition song only.
-     * Never unload/reload m_song — sample-cache refs are shared; dropping the
-     * audition INST after Apply cleared bank SND ids can free waveforms still
-     * used by the playing song and leave Play unable to recover.
-     * m_song is always soft-patched in place when the INST is already loaded. */
-    void LivePatchInstrumentEditor(bool reload_samples_from_bank = false)
+    /* reload_samples_from_bank: unload/reload so keysplit/SND edits are heard.
+     * reload_playback_song: also unload/reload m_song (live song preview). Soft
+     * PatchLoadedInstrumentExtInfo alone does not pick up SND remaps.
+     * Keep reload_playback_song false when Apply has cleared SND links for a
+     * generator — hard-reload of audition would drop shared sample-cache refs
+     * still used by m_song. Unload on m_song itself is safe (NeoBAE no longer
+     * Stop()'s when mInstrumentsLoadedCount is 0). */
+    void LivePatchInstrumentEditor(bool reload_samples_from_bank = false,
+                                   bool reload_playback_song = false)
     {
         EnsureBankAuditionSong();
         BAESong audition = GetAuditionSong();
@@ -6403,7 +6469,20 @@
         }
         if (m_song && m_song != audition)
         {
-            LivePatchInstrumentOnSong(m_song, inst, /*reload_samples=*/false, false);
+            if (reload_samples_from_bank && reload_playback_song)
+            {
+                /* Only refresh instruments already cached in the playing song —
+                 * do not pull unused programs into its instrument table. */
+                BAE_BOOL loaded = FALSE;
+                if (BAESong_IsInstrumentLoaded(m_song, inst, &loaded) == BAE_NO_ERROR && loaded)
+                {
+                    LivePatchInstrumentOnSong(m_song, inst, true, false);
+                }
+            }
+            else
+            {
+                LivePatchInstrumentOnSong(m_song, inst, /*reload_samples=*/false, false);
+            }
         }
     }
 
@@ -6537,11 +6616,15 @@
                 splits_changed = true;
                 if (osc_now)
                 {
+                    CaptureInstrumentEditorSampleBackupIfPresent();
                     SetInstrumentEditorSplitSndIds(static_cast<uint16_t>(kNoSndResourceId));
                 }
-                else
+                else if (InstrumentEditorBankSplitsAreNone())
                 {
-                    RestoreInstrumentEditorPristineSplits();
+                    /* User already picked a sample after unchecking generator —
+                     * do not wipe it with a pristine snapshot that may be SND=none
+                     * from the prior generator Apply. */
+                    RestoreInstrumentEditorSampleSplits();
                 }
                 RefreshListsFromBank();
             }
@@ -7267,8 +7350,10 @@
             else
             {
                 /* Restore sample links so reload can succeed; clearing useOscillator
-                 * on a NULL-waveform voice crashes on note-on. */
-                RestoreInstrumentEditorPristineSplits();
+                 * on a NULL-waveform voice crashes on note-on. Prefer the
+                 * pre-generator sample backup — pristine may be SND=none after a
+                 * prior Apply with the generator on. */
+                RestoreInstrumentEditorSampleSplits();
                 RefreshListsFromBank();
                 MarkInstrumentEditorDirty(false);
                 SyncInstrumentEditorOscillatorPreview();
@@ -7614,8 +7699,12 @@
                                         SyncInstrumentEditorBankIndex();
                                         m_session_custom_snd_ids.insert(choice.first);
                                         m_ie_dirty = true;
+                                        /* Keep sample backup in sync with the new pick. */
+                                        CaptureInstrumentEditorSampleBackupIfPresent();
                                         RefreshListsFromBank();
-                                        LivePatchInstrumentEditor(true);
+                                        /* SND remap needs unload/reload on both the
+                                         * audition keyboard and the live song preview. */
+                                        LivePatchInstrumentEditor(true, true);
                                         SetStatus(std::string("Keysplit sample → SND ") +
                                                   std::to_string(choice.first));
                                     }

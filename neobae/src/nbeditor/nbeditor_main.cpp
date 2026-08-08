@@ -4745,6 +4745,22 @@ private:
         }
     }
 
+    /* Declared before session.inc — helpers there take IePristineSplit& in
+     * parameter types (not a complete-class context for nested types). */
+    struct IePristineSplit
+    {
+        unsigned char lowKey = 0;
+        unsigned char highKey = 0;
+        unsigned char rootKey = 0;
+        int16_t splitVolume = 0;
+        uint16_t sndResourceID = 0;
+    };
+    std::vector<IePristineSplit> m_ie_pristine_splits;
+    /* Last non-empty sample keymap before oscillator cleared SND links.
+     * Pristine alone is wrong after Apply+generator: it captures SND=none, so
+     * turning the generator off would "restore" none over the user's sample. */
+    std::vector<IePristineSplit> m_ie_sample_splits_backup;
+
     // Session / IE / Song Info / Export helpers
 #include "nbeditor_session.inc"
 #include "nbeditor_bsn_session.inc"
@@ -7064,16 +7080,6 @@ private:
     ImGuiID m_ie_adsr_selected_owner = 0;
     /* Per-LFO UI: ADSR-only / Wave-only / Both (explicit). Not persisted in INST. */
     int m_ie_lfo_control_mode[BAE_EDITOR_MAX_LFOS] = {};
-    /* Keymap snapshot at IE open / after Apply — Revert restores these (bank-side). */
-    struct IePristineSplit
-    {
-        unsigned char lowKey = 0;
-        unsigned char highKey = 0;
-        unsigned char rootKey = 0;
-        int16_t splitVolume = 0;
-        uint16_t sndResourceID = 0;
-    };
-    std::vector<IePristineSplit> m_ie_pristine_splits;
 
     bool m_dock_layout_initialized = false;
 
