@@ -70,7 +70,7 @@ With **Native DLS** enabled, both playbae and zefidi play **mobileBAE** content 
 - `libNeoBAE` — embeddable engine library
 - Android: `neobae/src/NeoBAEDroid`
 - WebAssembly: `make -f Makefile.emcc` from `neobae/`
-- CLI: `songtool`, `rmfinfo`, `mid2rmf`, `rmf2mid`, `mid2rmi`, `mod2rmf`, `ringtone2mid`, `sf2-to-hsb`, `bankrecomp`, `adp2wav`, `adx2wav`, `mthc_decomp`, and related utilities
+- CLI: `songtool`, `rmfutil`, `rmiutil`, `xmfutil`, `mod2rmf`, `ringtone2mid`, `sf2-hsb`, `bankrecomp`, `adp2wav`, `adx2wav`, `mthc_decomp`, and related utilities
 
 ## Quick start
 

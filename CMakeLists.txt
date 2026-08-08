@@ -221,7 +221,7 @@ set(BAE_NBEDITOR_FONT_ITALIC "${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/thirdparty/
 option(USE_SDL2 "Prefer SDL2 as the platform backend (default if SDL2 is found and SDL3 is not found)" OFF)
 option(BUILD_PLAYBAE "Build playbae when a non-Dummy/non-Ansi backend is selected" ON)
 option(BUILD_ZEFIDI "Build zefidi when SDL2/SDL3 backend and matching SDL_ttf are available" ON)
-option(BUILD_CLITOOLS "Build CLI tools (songtool, rmf2mid, mid2rmf, mid2rmi, sf2-hsb, mod2rmf, instdump, bankrecomp)" ON)
+option(BUILD_CLITOOLS "Build CLI tools (songtool, rmfutil, rmiutil, xmfutil, sf2-hsb, mod2rmf, bankrecomp, ringtone2mid, …)" ON)
 option(BUILD_NBEDITOR "Build NeoBAE Editor (Dear ImGui + SDL3)" ON)
 option(BAE_ENABLE_LIB_HYPHEN "nbeditor: syllable Apply-text via vendored libhyphen" ON)
 set(CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING "Build type (Debug, Release, RelWithDebInfo, MinSizeRel)" FORCE)

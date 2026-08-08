@@ -121,7 +121,7 @@ nbeditor embeds Regular + Italic Liberation Sans automatically when those files 
 | `BUILD_PLAYBAE` | `ON` | Build `playbae` when a non-Dummy/non-Ansi backend is selected. |
 | `BUILD_ZEFIDI` | `ON` | Build `zefidi` when SDL2/SDL3 backend and matching SDL_ttf are available. |
 | `BUILD_ZEFIDI2` | `ON` | Build `zefidi2` slim ImGui player when SDL3 + Dear ImGui sources are available (no SDL_ttf). |
-| `BUILD_CLITOOLS` | `ON` | Build CLI tools: `songtool`, `rmf2mid`, `mid2rmf`, `mid2rmi`, `sf2-hsb`, `mod2rmf`, `instdump`, `bankrecomp`. |
+| `BUILD_CLITOOLS` | `ON` | Build CLI tools: `songtool`, `rmfutil`, `rmiutil`, `xmfutil`, `sf2-hsb`, `mod2rmf`, `bankrecomp`, `ringtone2mid`, plus codec helpers (`adp2wav`, `adx2wav`, `mthc_decomp`) when enabled. |
 | `BUILD_NBEDITOR` | `ON` | Build NeoBAE Editor (`nbeditor`, Dear ImGui + SDL3). Requires SDL3 headers/library and `neobae/src/nbeditor` + `neobae/src/thirdparty/imgui` sources. |
 
 ## Internal Compatibility Variables
