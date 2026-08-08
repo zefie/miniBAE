@@ -7,8 +7,12 @@ function checkexit() {
 
 REPO_ROOT="$(pwd)"
 
-# Build the project
-/opt/llvm-mingw/wrapper.sh --cmake -DNEOBAE_STATIC=1 -DBAE_PLATFORM=SDL3 -DNEOBAE_BUILD_VCLIB=1 -DBAE_ENABLE_MIDI_HARDWARE=1 "${@}"
+# Build all MinGW arches. --noinstall: packaging is CPack into out/, not
+# cmake --install into /opt/llvm-mingw/<triple> (not writable; fails once
+# NeoBAEInstall.cmake defines real install rules).
+/opt/llvm-mingw/wrapper.sh --noinstall --cmake \
+	-DNEOBAE_STATIC=1 -DBAE_PLATFORM=SDL3 -DNEOBAE_BUILD_VCLIB=1 \
+	-DBAE_ENABLE_MIDI_HARDWARE=1 "${@}"
 QUEUE_EXIT=$?
 
 # we now have build-aarch64-w64-mingw32, build-armv7-w64-mingw32, build-x86_64-w64-mingw32, and build-i686-w64-mingw32
@@ -20,9 +24,9 @@ if [ "${QUEUE_EXIT}" != 0 ]; then
 fi
 
 for t in aarch64 armv7 x86_64 i686; do
-    echo " *** Packaging suite + sdk ZIPs for ${t} with CPack..."
-    cpack --config "${REPO_ROOT}/build-${t}-w64-mingw32/CPackConfig.cmake" -G ZIP -B "${REPO_ROOT}/out"
-    checkexit "$?"
+	echo " *** Packaging suite + sdk ZIPs for ${t} with CPack..."
+	cpack --config "${REPO_ROOT}/build-${t}-w64-mingw32/CPackConfig.cmake" -G ZIP -B "${REPO_ROOT}/out"
+	checkexit "$?"
 done
 
 if [ "${1}" == "--clean" ]; then

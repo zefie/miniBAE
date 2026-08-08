@@ -24,7 +24,10 @@ export CFLAGS="-march=x86-64 -mtune=znver4"
 export CXXFLAGS="$CFLAGS"
 
 REPO_ROOT="$(pwd)"
-mkdir -p "build-${TARGET}"
+# Staging prefix only (writable). Do not install into the toolchain tree;
+# CPack packages from the build tree via cmake_install.cmake.
+INSTALL_PREFIX="${REPO_ROOT}/out/cmake-install-${TARGET}"
+mkdir -p "build-${TARGET}" "${INSTALL_PREFIX}"
 pushd "build-${TARGET}"
 
 cmake .. \
@@ -32,7 +35,7 @@ cmake .. \
     -DCMAKE_C_COMPILER="${CC}" \
     -DCMAKE_CXX_COMPILER="${CXX}" \
     -DCMAKE_RC_COMPILER="${RC}" \
-    -DCMAKE_INSTALL_PREFIX="${TOOLCHAIN_PREFIX}/${TARGET}" \
+    -DCMAKE_INSTALL_PREFIX="${INSTALL_PREFIX}" \
     -DCMAKE_BUILD_TYPE=Release \
     -DNEOBAE_STATIC=1 -DBAE_PLATFORM=SDL3 -DNEOBAE_BUILD_VCLIB=1 -DBAE_ENABLE_MIDI_HARDWARE=1 -DBUILD_NBEDITOR=1 "${@}"
 checkexit "$?"
