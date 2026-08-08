@@ -498,10 +498,13 @@
     }
 
     /* Batch ZTRS trash — one omit rebuild + one Refresh. Looping DeleteSampleAt
-     * on Zpatches-sized banks freezes (full Clean per sample). */
+     * on Zpatches-sized banks freezes (full Clean per sample).
+     * Song-document rows are deleted from the open document (no ZTRS). When a
+     * bank SND is trashed, matching document asset rows are purged too so they
+     * cannot reappear as [Song] on refresh. */
     void DeleteSamplesAtListIndices(const std::vector<int> &indices)
     {
-        if (!m_bank_token || indices.empty())
+        if (indices.empty())
         {
             return;
         }
@@ -515,7 +518,8 @@
         };
         std::vector<TrashItem> items;
         std::set<uint32_t> seen_snd;
-        bool saw_song_doc = false;
+        std::set<uint32_t> bank_assets_to_purge;
+        std::vector<uint32_t> song_doc_indices;
         bool saw_referenced = false;
 
         for (int sample_list_index : indices)
@@ -526,9 +530,26 @@
                 continue;
             }
             const SampleRow &sample = m_samples[static_cast<size_t>(sample_list_index)];
-            if (sample.source != SampleSource::Bank)
+            if (sample.source == SampleSource::Song)
             {
-                saw_song_doc = true;
+                if (m_document)
+                {
+                    song_doc_indices.push_back(sample.document_sample_index);
+                    if (sample.snd_resource_id != 0 &&
+                        sample.snd_resource_id != BAE_EDITOR_SAMPLE_ASSET_ID_NONE)
+                    {
+                        bank_assets_to_purge.insert(sample.snd_resource_id);
+                    }
+                }
+                continue;
+            }
+            if (sample.source != SampleSource::Bank || !m_bank_token)
+            {
+                continue;
+            }
+            if (sample.snd_resource_id == 0xFFFFu ||
+                sample.snd_resource_id == BAE_EDITOR_SAMPLE_ASSET_ID_NONE)
+            {
                 continue;
             }
             if (!seen_snd.insert(sample.snd_resource_id).second)
@@ -539,6 +560,7 @@
             {
                 saw_referenced = true;
             }
+            bank_assets_to_purge.insert(sample.snd_resource_id);
 
             XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
             const XLongResourceID sid = static_cast<XLongResourceID>(sample.snd_resource_id);
@@ -559,27 +581,13 @@
             items.push_back(TrashItem{found, sid, sample.snd_resource_id, sample.unassigned});
         }
 
-        if (items.empty())
-        {
-            if (saw_song_doc)
-            {
-                SetStatus("Song-document samples: remove via the instrument / export path");
-            }
-            return;
-        }
-        if (!EnsureActiveBankWritable())
+        if (items.empty() && song_doc_indices.empty() && bank_assets_to_purge.empty())
         {
             return;
         }
-
-        std::vector<XResourceType> types;
-        std::vector<XLongResourceID> ids;
-        types.reserve(items.size());
-        ids.reserve(items.size());
-        for (const TrashItem &it : items)
+        if (!items.empty() && !EnsureActiveBankWritable())
         {
-            types.push_back(it.type);
-            ids.push_back(it.id);
+            return;
         }
 
         const bool nested_busy = m_busy_active;
@@ -589,34 +597,85 @@
             UpdateBusyProgress(0.15f, "Writing Trash entries…");
         }
 
-        XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
-        const bool ok = XTrashFileResources(bank,
-                                            types.data(),
-                                            ids.data(),
-                                            static_cast<int32_t>(types.size())) != FALSE;
+        bool trash_ok = true;
+        if (!items.empty())
+        {
+            std::vector<XResourceType> types;
+            std::vector<XLongResourceID> ids;
+            types.reserve(items.size());
+            ids.reserve(items.size());
+            for (const TrashItem &it : items)
+            {
+                types.push_back(it.type);
+                ids.push_back(it.id);
+            }
+
+            XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
+            trash_ok = XTrashFileResources(bank,
+                                           types.data(),
+                                           ids.data(),
+                                           static_cast<int32_t>(types.size())) != FALSE;
+            if (!trash_ok)
+            {
+                if (!nested_busy && m_busy_active)
+                {
+                    EndBusyProgress();
+                }
+                SetStatus("Failed to move sample(s) to Trash");
+                return;
+            }
+
+            for (const TrashItem &it : items)
+            {
+                m_session_custom_snd_ids.erase(it.snd_id);
+                m_session_pcm_cache.erase(it.snd_id);
+                m_app_compression_cache.erase(it.snd_id);
+            }
+        }
 
         if (!nested_busy && m_busy_active)
         {
             UpdateBusyProgress(0.85f, "Refreshing sample list…");
         }
 
-        if (!ok)
+        /* Gather every song-doc row to drop in one pass (selection + rows that
+         * share a trashed bank SND asset) so indices stay valid until delete. */
+        int song_removed = 0;
+        if (m_document)
         {
-            if (!nested_busy && m_busy_active)
+            if (!bank_assets_to_purge.empty())
             {
-                EndBusyProgress();
+                uint32_t sample_count = 0;
+                if (BAERmfEditorDocument_GetSampleCount(m_document, &sample_count) ==
+                    BAE_NO_ERROR)
+                {
+                    for (uint32_t si = 0; si < sample_count; ++si)
+                    {
+                        uint32_t asset_id = BAE_EDITOR_SAMPLE_ASSET_ID_NONE;
+                        if (BAERmfEditorDocument_GetSampleAssetIDForSample(
+                                m_document, si, &asset_id) != BAE_NO_ERROR ||
+                            asset_id == BAE_EDITOR_SAMPLE_ASSET_ID_NONE)
+                        {
+                            continue;
+                        }
+                        if (bank_assets_to_purge.count(asset_id) != 0)
+                        {
+                            song_doc_indices.push_back(si);
+                        }
+                    }
+                }
             }
-            SetStatus("Failed to move sample(s) to Trash");
-            return;
+            song_removed = DeleteDocumentSamplesByIndex(std::move(song_doc_indices));
         }
 
-        for (const TrashItem &it : items)
+        if (m_bank_token)
         {
-            m_session_custom_snd_ids.erase(it.snd_id);
-            m_session_pcm_cache.erase(it.snd_id);
-            m_app_compression_cache.erase(it.snd_id);
+            RefreshListsFromBank();
         }
-        RefreshListsFromBank();
+        else
+        {
+            RefreshSongSamplesFromDocument();
+        }
         m_selected_sample = -1;
         m_multi_samples.clear();
 
@@ -626,7 +685,7 @@
         }
 
         char status[192];
-        if (items.size() == 1)
+        if (!items.empty() && items.size() == 1 && song_removed == 0)
         {
             if (items[0].unassigned)
             {
@@ -641,19 +700,36 @@
                               items[0].snd_id);
             }
         }
-        else if (saw_referenced)
+        else if (!items.empty() && song_removed > 0)
+        {
+            std::snprintf(status,
+                          sizeof(status),
+                          "Moved %zu sample(s) to Trash; removed %d song-doc ref(s)",
+                          items.size(),
+                          song_removed);
+        }
+        else if (!items.empty() && saw_referenced)
         {
             std::snprintf(status,
                           sizeof(status),
                           "Moved %zu samples to Trash (some INST refs may show [missing])",
                           items.size());
         }
-        else
+        else if (!items.empty())
         {
             std::snprintf(status, sizeof(status), "Moved %zu unused samples to Trash",
                           items.size());
         }
+        else if (song_removed > 0)
+        {
+            std::snprintf(status, sizeof(status), "Removed %d song sample(s)", song_removed);
+        }
+        else
+        {
+            std::snprintf(status, sizeof(status), "No samples removed");
+        }
         SetStatus(status);
+        (void)trash_ok;
     }
 
     void DeleteSampleAt(int sample_list_index)

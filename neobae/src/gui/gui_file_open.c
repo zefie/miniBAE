@@ -178,7 +178,8 @@ static bool path_is_bank_file(const char *ext)
     if (!ext)
         return false;
 #ifdef _WIN32
-    bool is_bank_file = _stricmp(ext, ".hsb") == 0 || _stricmp(ext, ".zsb") == 0;
+    bool is_bank_file = _stricmp(ext, ".hsb") == 0 || _stricmp(ext, ".zsb") == 0 ||
+                        _stricmp(ext, ".bsn") == 0 || _stricmp(ext, ".zsn") == 0;
 #if USE_SF2_SUPPORT == TRUE
     if (!is_bank_file)
         is_bank_file = _stricmp(ext, ".sf2") == 0;
@@ -194,7 +195,8 @@ static bool path_is_bank_file(const char *ext)
 #endif
 #endif
 #else
-    bool is_bank_file = strcasecmp(ext, ".hsb") == 0 || strcasecmp(ext, ".zsb") == 0;
+    bool is_bank_file = strcasecmp(ext, ".hsb") == 0 || strcasecmp(ext, ".zsb") == 0 ||
+                        strcasecmp(ext, ".bsn") == 0 || strcasecmp(ext, ".zsn") == 0;
 #if USE_SF2_SUPPORT == TRUE
     if (!is_bank_file)
         is_bank_file = strcasecmp(ext, ".sf2") == 0;
@@ -211,6 +213,17 @@ static bool path_is_bank_file(const char *ext)
 #endif
 #endif
     return is_bank_file;
+}
+
+static bool path_ext_is_editor_session(const char *ext)
+{
+    if (!ext)
+        return false;
+#ifdef _WIN32
+    return _stricmp(ext, ".bsn") == 0 || _stricmp(ext, ".zsn") == 0;
+#else
+    return strcasecmp(ext, ".bsn") == 0 || strcasecmp(ext, ".zsn") == 0;
+#endif
 }
 
 static bool path_is_playlist_file(const char *ext)
@@ -241,15 +254,50 @@ void gui_file_open_path(const char *path, GuiFileOpenSource src,
 
     if (is_bank_file)
     {
+        const bool is_session = path_ext_is_editor_session(ext);
+
         if (src == GUI_FILE_OPEN_DROP)
-            BAE_PRINTF("Drag and drop: Loading bank file: %s\n", path);
+            BAE_PRINTF("Drag and drop: Loading %s file: %s\n",
+                       is_session ? "editor session" : "bank", path);
         if (load_bank(path, *ctx->playing, ctx->transpose, ctx->tempo, ctx->volume,
                       ctx->loop_enabled, ctx->reverb_type, ctx->ch_enable, true))
         {
             if (src == GUI_FILE_OPEN_EXTERNAL_IPC)
-                set_status_message("Loaded bank from external request");
+                set_status_message(is_session ? "Loaded session bank from external request"
+                                              : "Loaded bank from external request");
             else
-                BAE_PRINTF("Successfully loaded dropped bank: %s\n", path);
+                BAE_PRINTF("Successfully loaded dropped %s: %s\n",
+                           is_session ? "session bank" : "bank", path);
+
+            /* Prefer custom/session songs, else first groovoid; bank-only if neither. */
+            if (is_session
+#if SUPPORT_MIDI_HW == TRUE
+                && !g_midi_input_enabled
+#endif
+            )
+            {
+                if (bae_load_song_with_settings(path, ctx->transpose, ctx->tempo, ctx->volume,
+                                                ctx->loop_enabled, ctx->reverb_type,
+                                                ctx->ch_enable, false))
+                {
+#if SUPPORT_PLAYLIST == TRUE
+                    if (g_playlist.enabled)
+                        playlist_update_current_file(path);
+#endif
+                    *ctx->duration = bae_get_len_ms();
+                    *ctx->progress = 0;
+                    *ctx->playing = false;
+                    bae_play(ctx->playing);
+                    if (src == GUI_FILE_OPEN_DROP)
+                        BAE_PRINTF("Playing song from session bank: %s\n", path);
+                }
+                else
+                {
+                    /* Instruments-only session is still a successful bank load. */
+                    BAE_PRINTF("Session bank loaded (no song/groovoid to play): %s\n", path);
+                    set_status_message("Loaded session bank (no songs)");
+                }
+            }
         }
         else
         {

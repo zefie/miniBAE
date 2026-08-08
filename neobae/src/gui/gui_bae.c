@@ -698,8 +698,13 @@ bool load_bank(const char *path, bool current_playing_state, int transpose, int 
     }
 #endif
 
-    // Auto-reload current song if one was loaded
-    if (had_song && current_song_path[0] != '\0')
+    // Auto-reload current song if one was loaded.
+    // Editor sessions (.bsn/.zsn) own their instruments; do not reload a prior
+    // session path via LoadRmfFromFile (closes a temp XFILE under live tokens),
+    // and do not auto-reload an unrelated song when the new bank is a session.
+    if (had_song && current_song_path[0] != '\0' &&
+        !path_is_editor_session(path) &&
+        !path_is_editor_session(current_song_path))
     {
         BAE_PRINTF("Auto-reloading song with new bank: %s\n", current_song_path);
         set_status_message("Reloading song with new bank...");
@@ -929,6 +934,18 @@ void bae_shutdown(void)
     memset(&g_bae, 0, sizeof(g_bae));
     audio_current_position = 0;
     audio_total_frames = 0;
+}
+
+bool path_is_editor_session(const char *path)
+{
+    const char *ext;
+
+    if (!path || !path[0])
+        return false;
+    ext = strrchr(path, '.');
+    if (!ext)
+        return false;
+    return strcasecmp(ext, ".bsn") == 0 || strcasecmp(ext, ".zsn") == 0;
 }
 
 bool bae_load_bank(const char *bank_path)
@@ -1220,7 +1237,21 @@ bool bae_load_song(const char *path, bool use_embedded_banks)
     if (!g_bae.song)
         return false;
 
-    if (ftype == BAE_RMF)
+    if (path_is_editor_session(path))
+    {
+        /* Sessions are banks: content probe would call them BAE_RMF and
+         * LoadRmfFromFile closes the XFILE while instruments still reference it. */
+        if (!g_bae.bank_loaded || strcasecmp(g_current_bank_path, path) != 0)
+        {
+            BAE_PRINTF("Editor session song requires matching open bank: %s\n", path);
+            BAESong_Delete(g_bae.song);
+            g_bae.song = NULL;
+            return false;
+        }
+        sr = BAESong_LoadSongFromMixerBank(g_bae.song, 0, TRUE);
+        g_bae.is_rmf_file = true;
+    }
+    else if (ftype == BAE_RMF)
     {
         sr = BAESong_LoadRmfFromFile(g_bae.song, (BAEPathName)path, 0, TRUE);
         g_bae.is_rmf_file = true;

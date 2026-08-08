@@ -6155,19 +6155,66 @@
         }
     }
 
+    void LivePatchInstrumentOnSong(BAESong song,
+                                   BAE_INSTRUMENT inst,
+                                   bool reload_samples_from_bank,
+                                   bool always_load)
+    {
+        if (!song)
+        {
+            return;
+        }
+        if (reload_samples_from_bank)
+        {
+            /* GM_LoadInstrument caches INST; unload so keysplit/SND/oscillator
+             * bank edits are picked up. */
+            BAE_BOOL loaded = FALSE;
+            int guard = 0;
+            while (guard++ < 64 &&
+                   BAESong_IsInstrumentLoaded(song, inst, &loaded) == BAE_NO_ERROR &&
+                   loaded)
+            {
+                if (BAESong_UnloadInstrument(song, inst) != BAE_NO_ERROR)
+                {
+                    break;
+                }
+            }
+            (void)BAESong_LoadInstrument(song, inst);
+        }
+        else if (always_load)
+        {
+            (void)BAESong_LoadInstrument(song, inst);
+        }
+        else
+        {
+            /* Playback song: only touch patches already cached so we do not
+             * pull unused programs into the playing song's instrument table. */
+            BAE_BOOL loaded = FALSE;
+            if (BAESong_IsInstrumentLoaded(song, inst, &loaded) != BAE_NO_ERROR || !loaded)
+            {
+                return;
+            }
+        }
+        (void)BAESong_PatchLoadedInstrumentExtInfo(song, inst, &m_ie_ext);
+    }
+
+    /* reload_samples_from_bank: unload/reload on the keyboard audition song only.
+     * Never unload/reload m_song — sample-cache refs are shared; dropping the
+     * audition INST after Apply cleared bank SND ids can free waveforms still
+     * used by the playing song and leave Play unable to recover.
+     * m_song is always soft-patched in place when the INST is already loaded. */
     void LivePatchInstrumentEditor(bool reload_samples_from_bank = false)
     {
         EnsureBankAuditionSong();
         BAESong audition = GetAuditionSong();
-        if (!audition)
+        if (!audition && !m_song)
         {
             return;
         }
 #if USE_ZMF_SUPPORT == TRUE
-        /* Oscillator audition NoteOn often loads from the bank/doc, not the
-         * patched in-memory instrument. Persist OSCL + PWID/WIDX LFOs so wave
-         * index and PWM modulators are audible before Apply (PW slider already
-         * went through SyncInstrumentEditorOscillatorPreview for the same reason). */
+        /* Persist OSCL + PWID/WIDX so NoteOn from bank/doc hears generators
+         * before Apply. Soft-patch carries the audible change; do not force an
+         * audition unload/reload here (Apply may have already cleared SND links). */
         if (m_ie_ext.useOscillator)
         {
             BindInstrumentEditorDisplayName();
@@ -6190,30 +6237,20 @@
                                                             &m_ie_ext);
                 MarkBank01TouchedIfNeeded(m_ie_bank);
             }
-            reload_samples_from_bank = true;
         }
 #endif
         /* Inst ID 0 is valid (bank 0 program 0). */
         const uint32_t patch_id = InstrumentEditorPatchId();
         const BAE_INSTRUMENT inst = static_cast<BAE_INSTRUMENT>(patch_id);
-        if (reload_samples_from_bank)
+
+        if (audition)
         {
-            /* GM_LoadInstrument keeps a cached instrument; unload so keysplit/SND
-             * edits in the bank are picked up for the preview keyboard. */
-            BAE_BOOL loaded = FALSE;
-            int guard = 0;
-            while (guard++ < 64 &&
-                   BAESong_IsInstrumentLoaded(audition, inst, &loaded) == BAE_NO_ERROR &&
-                   loaded)
-            {
-                if (BAESong_UnloadInstrument(audition, inst) != BAE_NO_ERROR)
-                {
-                    break;
-                }
-            }
+            LivePatchInstrumentOnSong(audition, inst, reload_samples_from_bank, true);
         }
-        (void)BAESong_LoadInstrument(audition, inst);
-        (void)BAESong_PatchLoadedInstrumentExtInfo(audition, inst, &m_ie_ext);
+        if (m_song && m_song != audition)
+        {
+            LivePatchInstrumentOnSong(m_song, inst, /*reload_samples=*/false, false);
+        }
     }
 
     void InstrumentEditorRefreshPreEditSnapshot()
@@ -6337,11 +6374,10 @@
 #if USE_ZMF_SUPPORT == TRUE
         /* Only rewrite split SND ids when oscillator mode actually toggled.
          * ADSR/LPF/LFO Apply used to restore every split (N full bank rebuilds). */
-        if (m_bank_token && !m_ie_from_song)
         {
             const bool osc_now = m_ie_ext.useOscillator != FALSE;
             const bool osc_was = m_ie_ext_pristine.useOscillator != FALSE;
-            if (osc_now != osc_was)
+            if (m_bank_token && !m_ie_from_song && osc_now != osc_was)
             {
                 splits_changed = true;
                 if (osc_now)
@@ -6353,6 +6389,13 @@
                     RestoreInstrumentEditorPristineSplits();
                 }
                 RefreshListsFromBank();
+            }
+            /* Song instrument → generator: drop its document sample rows so they
+             * don't linger as undeletable [Song] orphans. */
+            if (m_ie_from_song && m_document && osc_now && !osc_was)
+            {
+                (void)DeleteDocumentSamplesForInstrument(m_ie_inst_id);
+                RefreshSongSamplesFromDocument();
             }
         }
 #endif
@@ -6387,10 +6430,12 @@
         MarkBank01TouchedIfNeeded(m_ie_bank);
         if (live_patch)
         {
-            /* Ext-only Apply: patch in-memory voice. Reload samples only when
-             * keysplit SND linkage changed (oscillator toggle). */
-            LivePatchInstrumentEditor(splits_changed);
+            /* Soft-patch only. Hard-reloading the audition song after Apply has
+             * cleared INST→SND links drops shared sample-cache refs still used
+             * by m_song. Live edits already patched both songs. */
+            LivePatchInstrumentEditor(false);
         }
+        (void)splits_changed;
         SetStatus("Instrument applied");
     }
 

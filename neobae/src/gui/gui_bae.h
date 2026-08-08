@@ -110,6 +110,8 @@ bool bae_init(int sampleRateHz);
 void bae_shutdown(void);
 
 // Song loading and playback
+/* Editor session (.bsn/.zsn): instruments + optional SONG; must load as bank. */
+bool path_is_editor_session(const char *path);
 bool bae_load_song(const char *path, bool use_embedded_banks);
 bool bae_load_song_with_settings(const char *path, int transpose, int tempo, int volume,
                                  bool loop_enabled, int reverb_type, bool ch_enable[16], bool use_embedded_banks);

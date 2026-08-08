@@ -2635,6 +2635,20 @@ extern "C"
                                       int16_t songIndex,
                                       BAE_BOOL ignoreBadInstruments);
 
+    // BAESong_LoadSongFromMixerBank()
+    // ------------------------------------
+    // Loads a playable SONG from the mixer's currently open patch bank
+    // (host bank XFILE stays open). Use this for editor sessions (.bsn/.zsn)
+    // after BAEMixer_LoadBank* — do not use LoadRmfFromFile on session files
+    // (that path closes a temporary XFILE under live bank tokens).
+    // songIndex selects among preferred playables: custom/session songs first
+    // (DATe-stamped / Midi), then groovoids; returns BAE_RESOURCE_NOT_FOUND
+    // when the bank has neither.
+    // ------------------------------------
+    BAEResult BAESong_LoadSongFromMixerBank(BAESong song,
+                                            int16_t songIndex,
+                                            BAE_BOOL ignoreBadInstruments);
+
 #if USE_XMF_SUPPORT == TRUE
 #include "GenXMF.h"
 #endif

@@ -3334,6 +3334,92 @@ private:
         return true;
     }
 
+    /* Remove open-document sample rows by document index (high→low). */
+    int DeleteDocumentSamplesByIndex(std::vector<uint32_t> sample_indices)
+    {
+        if (!m_document || sample_indices.empty())
+        {
+            return 0;
+        }
+        std::sort(sample_indices.begin(),
+                  sample_indices.end(),
+                  [](uint32_t a, uint32_t b) { return a > b; });
+        sample_indices.erase(std::unique(sample_indices.begin(), sample_indices.end()),
+                             sample_indices.end());
+        int removed = 0;
+        for (uint32_t sample_index : sample_indices)
+        {
+            if (BAERmfEditorDocument_DeleteSample(m_document, sample_index) == BAE_NO_ERROR)
+            {
+                ++removed;
+            }
+        }
+        if (removed > 0)
+        {
+            m_document_dirty = true;
+        }
+        return removed;
+    }
+
+    /* Drop song-doc sample rows that point at these bank SND / asset ids.
+     * Needed after trashing a bank SND — otherwise RefreshSongSamplesFromDocument
+     * resurrects the row as [Song] and refuses further deletes. */
+    int DeleteDocumentSamplesWithAssetIDs(const std::set<uint32_t> &asset_ids)
+    {
+        if (!m_document || asset_ids.empty())
+        {
+            return 0;
+        }
+        std::vector<uint32_t> to_remove;
+        uint32_t sample_count = 0;
+        if (BAERmfEditorDocument_GetSampleCount(m_document, &sample_count) != BAE_NO_ERROR)
+        {
+            return 0;
+        }
+        for (uint32_t si = 0; si < sample_count; ++si)
+        {
+            uint32_t asset_id = BAE_EDITOR_SAMPLE_ASSET_ID_NONE;
+            if (BAERmfEditorDocument_GetSampleAssetIDForSample(m_document, si, &asset_id) !=
+                    BAE_NO_ERROR ||
+                asset_id == BAE_EDITOR_SAMPLE_ASSET_ID_NONE)
+            {
+                continue;
+            }
+            if (asset_ids.count(asset_id) != 0)
+            {
+                to_remove.push_back(si);
+            }
+        }
+        return DeleteDocumentSamplesByIndex(std::move(to_remove));
+    }
+
+    /* Remove every document sample tied to an instrument (e.g. oscillator on). */
+    int DeleteDocumentSamplesForInstrument(uint32_t inst_id)
+    {
+        if (!m_document || inst_id == BAE_EDITOR_INST_ID_NONE)
+        {
+            return 0;
+        }
+        std::vector<uint32_t> to_remove;
+        uint32_t sample_count = 0;
+        if (BAERmfEditorDocument_GetSampleCount(m_document, &sample_count) != BAE_NO_ERROR)
+        {
+            return 0;
+        }
+        for (uint32_t si = 0; si < sample_count; ++si)
+        {
+            uint32_t sample_inst = BAE_EDITOR_INST_ID_NONE;
+            if (BAERmfEditorDocument_GetInstIDForSample(m_document, si, &sample_inst) !=
+                    BAE_NO_ERROR ||
+                sample_inst != inst_id)
+            {
+                continue;
+            }
+            to_remove.push_back(si);
+        }
+        return DeleteDocumentSamplesByIndex(std::move(to_remove));
+    }
+
     /* Song export: remove sample rows whose assets are no longer used.
      * GetSampleAssetUsageCount returns PARAM_ERR when usage is 0. */
     int DropUnreferencedSamplesFromDocument(BAERmfEditorDocument *doc)
@@ -5492,10 +5578,14 @@ private:
                 {
                     OpenResourceUsageForSample(static_cast<int>(i));
                 }
-                if (ImGui::MenuItem("Move Sample to Trash",
+                if (ImGui::MenuItem(sample.source == SampleSource::Song
+                                        ? "Remove Song Sample"
+                                        : "Move Sample to Trash",
                                     nullptr,
                                     false,
-                                    m_bank_token != 0 && sample.source == SampleSource::Bank))
+                                    (m_bank_token != 0 && sample.source == SampleSource::Bank) ||
+                                        (m_document != nullptr &&
+                                         sample.source == SampleSource::Song)))
                 {
                     DeleteSampleAt(static_cast<int>(i));
                     m_multi_samples.erase(static_cast<int>(i));

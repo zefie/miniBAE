@@ -10997,6 +10997,373 @@ BAEResult TranslateInstrumentToBankProgram(uint32_t rmfInstId, uint32_t *bankId,
 // --------------------------------------
 //
 //
+/* Collect DATe-stamped SONG / Midi object ids (same rules as nbeditor). */
+static void PV_CollectDateStampedSongKeys(XFILE fileRef,
+                                          uint32_t *songIds, int32_t *songCount, int32_t songMax,
+                                          uint32_t *midiIds, int32_t *midiCount, int32_t midiMax)
+{
+    XResourceType dateType = FOUR_CHAR('D', 'A', 'T', 'e');
+    int32_t dateCount;
+    int32_t di;
+
+    *songCount = 0;
+    *midiCount = 0;
+    if (!fileRef || !songIds || !midiIds || songMax <= 0 || midiMax <= 0)
+    {
+        return;
+    }
+
+    dateCount = XCountFileResourcesOfType(fileRef, dateType);
+    for (di = 0; di < dateCount; di++)
+    {
+        XLongResourceID dateId = 0;
+        int32_t dateSize = 0;
+        XPTR dateData = XGetIndexedFileResource(fileRef, dateType, &dateId, di, NULL, &dateSize);
+        const unsigned char *body;
+        int32_t off;
+
+        if (!dateData || dateSize <= 0)
+        {
+            if (dateData)
+            {
+                XDisposePtr(dateData);
+            }
+            continue;
+        }
+        body = (const unsigned char *)dateData;
+        for (off = 0; off + 12 <= dateSize; off += 12)
+        {
+            uint32_t type = XGetLong(body + off);
+            uint32_t id = XGetLong(body + off + 4);
+            uint32_t ts = XGetLong(body + off + 8);
+            int32_t i;
+            bool found;
+
+            if (type == 0 && id == 0 && ts == 0)
+            {
+                break;
+            }
+            if (type == (uint32_t)ID_SONG)
+            {
+                found = FALSE;
+                for (i = 0; i < *songCount; i++)
+                {
+                    if (songIds[i] == id)
+                    {
+                        found = TRUE;
+                        break;
+                    }
+                }
+                if (!found && *songCount < songMax)
+                {
+                    songIds[(*songCount)++] = id;
+                }
+            }
+            else if (type == (uint32_t)ID_MIDI || type == (uint32_t)ID_EMID ||
+                     type == (uint32_t)ID_ECMI || type == (uint32_t)ID_CMID)
+            {
+                found = FALSE;
+                for (i = 0; i < *midiCount; i++)
+                {
+                    if (midiIds[i] == id)
+                    {
+                        found = TRUE;
+                        break;
+                    }
+                }
+                if (!found && *midiCount < midiMax)
+                {
+                    midiIds[(*midiCount)++] = id;
+                }
+            }
+        }
+        XDisposePtr(dateData);
+    }
+}
+
+static bool PV_IdInList(uint32_t id, const uint32_t *ids, int32_t count)
+{
+    int32_t i;
+    for (i = 0; i < count; i++)
+    {
+        if (ids[i] == id)
+        {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+/* Preferred play order: custom/session songs, then groovoids. outIndices are
+ * XGetIndexedFileResource(ID_SONG) indices. Returns how many were collected. */
+static int16_t PV_CollectMixerBankPreferredSongIndices(XFILE fileRef,
+                                                       int16_t *outIndices,
+                                                       int16_t maxOut)
+{
+    enum { kMaxDateKeys = 512, kMaxSongs = 512 };
+    uint32_t datedSongIds[kMaxDateKeys];
+    uint32_t datedMidiIds[kMaxDateKeys];
+    int32_t datedSongCount = 0;
+    int32_t datedMidiCount = 0;
+    bool useDateFilter;
+    int16_t customIdx[kMaxSongs];
+    int16_t groovoidIdx[kMaxSongs];
+    int16_t customCount = 0;
+    int16_t groovoidCount = 0;
+    int32_t songCount;
+    int32_t i;
+    bool prevForce;
+    int16_t outCount = 0;
+
+    if (!fileRef || !outIndices || maxOut <= 0)
+    {
+        return 0;
+    }
+
+    prevForce = XFileGetForceZsbFeatures(fileRef);
+    XFileSetForceZsbFeatures(fileRef, TRUE);
+
+    PV_CollectDateStampedSongKeys(fileRef,
+                                  datedSongIds, &datedSongCount, kMaxDateKeys,
+                                  datedMidiIds, &datedMidiCount, kMaxDateKeys);
+    useDateFilter = (datedSongCount > 0 || datedMidiCount > 0);
+
+    songCount = XCountFileResourcesOfType(fileRef, ID_SONG);
+    for (i = 0; i < songCount && (customCount + groovoidCount) < kMaxSongs; i++)
+    {
+        XLongResourceID songId = 0;
+        int32_t songSize = 0;
+        XPTR songData;
+        const unsigned char *body;
+        uint16_t objectId;
+        unsigned char songType;
+        bool hasMidi;
+        bool hasEmid;
+        bool dated;
+        bool isCustom;
+        bool isGroovoid;
+
+        songData = XGetIndexedFileResource(fileRef, ID_SONG, &songId, i, NULL, &songSize);
+        if (!songData || songSize < 8)
+        {
+            if (songData)
+            {
+                XDisposePtr(songData);
+            }
+            continue;
+        }
+        body = (const unsigned char *)songData;
+        objectId = XGetShort(body);
+        songType = body[6];
+        XDisposePtr(songData);
+        if (songType != 1)
+        {
+            continue;
+        }
+
+        hasMidi =
+            XExistsFileResource(fileRef, ID_MIDI, (XLongResourceID)objectId) ||
+            XExistsFileResource(fileRef, ID_MIDI_OLD, (XLongResourceID)objectId);
+        hasEmid =
+            XExistsFileResource(fileRef, ID_EMID, (XLongResourceID)objectId) ||
+            XExistsFileResource(fileRef, ID_ECMI, (XLongResourceID)objectId) ||
+            XExistsFileResource(fileRef, ID_CMID, (XLongResourceID)objectId);
+        if (!hasMidi && !hasEmid)
+        {
+            continue;
+        }
+
+        dated = PV_IdInList((uint32_t)songId, datedSongIds, datedSongCount) ||
+                PV_IdInList((uint32_t)objectId, datedMidiIds, datedMidiCount);
+
+        /* Match nbeditor: DATe stamps mark Custom Session songs; undated Midi
+         * with a date table present are converted bank groovoids; without any
+         * DATe song stamps, every Midi-backed SONG is treated as custom. */
+        isCustom = FALSE;
+        if (useDateFilter)
+        {
+            isCustom = dated;
+        }
+        else if (hasMidi)
+        {
+            isCustom = TRUE;
+        }
+
+        isGroovoid = FALSE;
+        if (!isCustom)
+        {
+            if (hasEmid)
+            {
+                isGroovoid = TRUE;
+            }
+            else if (hasMidi && useDateFilter)
+            {
+                isGroovoid = TRUE;
+            }
+        }
+
+        if (isCustom && customCount < kMaxSongs)
+        {
+            customIdx[customCount++] = (int16_t)i;
+        }
+        else if (isGroovoid && groovoidCount < kMaxSongs)
+        {
+            groovoidIdx[groovoidCount++] = (int16_t)i;
+        }
+    }
+
+    for (i = 0; i < customCount && outCount < maxOut; i++)
+    {
+        outIndices[outCount++] = customIdx[i];
+    }
+    for (i = 0; i < groovoidCount && outCount < maxOut; i++)
+    {
+        outIndices[outCount++] = groovoidIdx[i];
+    }
+
+    XFileSetForceZsbFeatures(fileRef, prevForce);
+    return outCount;
+}
+
+BAEResult BAESong_LoadSongFromMixerBank(BAESong song, int16_t songIndex, BAE_BOOL ignoreBadInstruments)
+{
+#if USE_FULL_RMF_SUPPORT == TRUE
+    SongResource *pXSong;
+    GM_Song *pSong;
+    OPErr theErr;
+    XLongResourceID theID;
+    int32_t size;
+    XFILE fileRef;
+    bool isZmfContainer;
+    XFILERESOURCEMAP mapHdr;
+    int16_t preferred[512];
+    int16_t preferredCount;
+    int16_t fileSongIndex;
+
+    theErr = NO_ERR;
+    isZmfContainer = FALSE;
+    if (!song || song->mID != OBJECT_ID)
+    {
+        return BAE_NULL_OBJECT;
+    }
+    if (songIndex < 0)
+    {
+        return BAE_PARAM_ERR;
+    }
+    if (!song->mixer || !song->mixer->pPatchFiles || song->mixer->numPatchFiles <= 0)
+    {
+        return BAE_NOT_SETUP;
+    }
+
+    BAE_AcquireMutex(song->mLock);
+    fileRef = song->mixer->pPatchFiles[song->mixer->numPatchFiles - 1];
+    if (!fileRef)
+    {
+        BAE_ReleaseMutex(song->mLock);
+        return BAE_BAD_FILE;
+    }
+    XFileUseThisResourceFile(fileRef);
+
+    XFileSetPosition(fileRef, 0L);
+    if (XFileRead(fileRef, &mapHdr, (int32_t)sizeof(XFILERESOURCEMAP)) == 0)
+    {
+        if (XGetLong(&mapHdr.mapID) == XFILERESOURCE_ZMF_ID)
+        {
+#if USE_ZMF_SUPPORT == TRUE
+            isZmfContainer = TRUE;
+#else
+            BAE_ReleaseMutex(song->mLock);
+            return BAE_UNSUPPORTED_FORMAT;
+#endif
+        }
+    }
+
+    preferredCount = PV_CollectMixerBankPreferredSongIndices(fileRef, preferred, 512);
+    if (preferredCount <= 0 || songIndex >= preferredCount)
+    {
+        BAE_ReleaseMutex(song->mLock);
+        return BAE_RESOURCE_NOT_FOUND;
+    }
+    fileSongIndex = preferred[songIndex];
+
+    pXSong = (SongResource *)XGetIndexedFileResource(fileRef, ID_SONG, &theID, fileSongIndex, NULL, &size);
+    if (!pXSong)
+    {
+        BAE_ReleaseMutex(song->mLock);
+        return BAE_RESOURCE_NOT_FOUND;
+    }
+
+    PV_TagSongResourceContainerType(pXSong, isZmfContainer);
+    if (!song->pSong)
+    {
+        XDisposePtr(pXSong);
+        BAE_ReleaseMutex(song->mLock);
+        return BAE_GENERAL_BAD;
+    }
+
+    PV_BAESong_Unload(song);
+#if USE_SF2_SUPPORT == TRUE
+    if (GM_SF2_IsActive())
+    {
+        GM_ResetSF2();
+    }
+#endif
+    {
+        /* Bank stays open — token is the mixer patch file, not a temp RMF XFILE. */
+        XBankToken songBankToken = CreateBankToken();
+        pSong = GM_LoadSong(song->mixer->pMixer,
+                            NULL,
+                            song,
+                            (XShortResourceID)theID,
+                            (void *)pXSong,
+                            NULL,
+                            0L,
+                            NULL,
+                            FALSE, /* instruments after song shell exists */
+                            ignoreBadInstruments,
+                            songBankToken,
+                            &theErr);
+        if (pSong)
+        {
+            pSong->songFlags = SONG_FLAG_IS_RMF;
+            theErr = GM_LoadSongInstruments(pSong, NULL, songBankToken, TRUE);
+            if (theErr != NO_ERR)
+            {
+                GM_FreeSong(NULL, pSong);
+                pSong = NULL;
+            }
+        }
+        if (pSong)
+        {
+            GM_SetDisposeSongDataWhenDoneFlag(pSong, TRUE);
+            GM_SetSongLoopFlag(pSong, FALSE);
+            GM_SetVelocityCurveType(pSong, (VelocityCurveType)g_defaultVelocityCurve);
+            song->pSong = pSong;
+#if USE_SF2_SUPPORT == TRUE
+            if (GM_SF2_IsActive())
+            {
+                GM_EnableSF2ForSong(song->pSong, TRUE);
+            }
+#endif
+            theErr = NO_ERR;
+        }
+        else
+        {
+            PV_BAESong_InitLiveSong(song, FALSE);
+            theErr = BAD_FILE;
+        }
+    }
+    XDisposePtr(pXSong);
+    BAE_ReleaseMutex(song->mLock);
+    return BAE_TranslateOPErr(theErr);
+#else
+    (void)song;
+    (void)songIndex;
+    (void)ignoreBadInstruments;
+    return BAE_NOT_SETUP;
+#endif
+}
+
 BAEResult BAESong_LoadRmfFromFile(BAESong song, BAEPathName filePath, int16_t songIndex, BAE_BOOL ignoreBadInstruments)
 {
 #if USE_FULL_RMF_SUPPORT == TRUE
