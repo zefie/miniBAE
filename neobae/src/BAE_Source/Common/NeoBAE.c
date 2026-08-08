@@ -2120,33 +2120,33 @@ const char *BAE_GetFeatureString()
 
 if ((rtx && rtx[0]) || (adp && adp[0]) || (mthc && mthc[0]) || (nokia_patch && nokia_patch[0])) {
     snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", "Nokia Features (");
-}
-if (rtx && rtx[0])
-{
-    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : "", rtx);
-    first = FALSE;
-}
 
-if (adp && adp[0])
-{
-    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : (rtx && rtx[0]) ? ", " : "", adp);
-    first = FALSE;
+    if (rtx && rtx[0])
+    {
+        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : "", rtx);
+        first = FALSE;
+    }
+
+    if (adp && adp[0])
+    {
+        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : (rtx && rtx[0]) ? ", " : "", adp);
+        first = FALSE;
+    }
+
+    if (mthc && mthc[0])
+    {
+        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : (rtx && rtx[0]) || (adp && adp[0]) ? ", " : "", mthc);
+        first = FALSE;
+    }
+
+    if (nokia_patch && nokia_patch[0])
+    {
+        snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : (rtx && rtx[0]) || (adp && adp[0]) || (mthc && mthc[0]) ? ", " : "", nokia_patch);
+        first = FALSE;
+    }
+
+    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", ")");
 }
-
-if (mthc && mthc[0])
-{
-    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : (rtx && rtx[0]) || (adp && adp[0]) ? ", " : "", mthc);
-    first = FALSE;
-}
-
-if (nokia_patch && nokia_patch[0])
-{
-    snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : (rtx && rtx[0]) || (adp && adp[0]) || (mthc && mthc[0]) ? ", " : "", nokia_patch);
-    first = FALSE;
-}
-
-snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", (rtx && rtx[0]) || (adp && adp[0]) || (mthc && mthc[0]) || (nokia_patch && nokia_patch[0]) ? ")" : "", "");
-
 
 #if USE_QOA_SUPPORT == TRUE
     const char *qoa = "QOA (Quite OK Audio) Support";
@@ -2167,7 +2167,7 @@ snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", (
 #endif
 
 #if USE_NATIVE_DLS == TRUE
-    const char *native_dls = "Native DLS Support";
+    const char *native_dls = "DLS Support";
     snprintf(featBuf + strlen(featBuf), sizeof(featBuf) - strlen(featBuf), "%s%s", first ? "" : ", ", native_dls);
     first = FALSE;
 #endif
