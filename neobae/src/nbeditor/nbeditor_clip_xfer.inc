@@ -2085,23 +2085,71 @@
         switch (m_session_tab)
         {
         case SessionTab::Songs:
+            /* Groovoids are not in m_multi_songs; only select session songs when shown. */
             m_multi_songs.clear();
-            for (int i = 0; i < static_cast<int>(m_session_songs.size()); ++i)
+            if (m_song_show_filter != SongShowFilter::Groovoids)
             {
-                m_multi_songs.insert(i);
+                for (int i = 0; i < static_cast<int>(m_session_songs.size()); ++i)
+                {
+                    m_multi_songs.insert(i);
+                }
             }
             break;
         case SessionTab::Instruments:
+        {
             m_multi_instruments.clear();
+            const InstrumentFilterOption *active_filter = nullptr;
+            if (m_instrument_filter_index >= 0 &&
+                m_instrument_filter_index < static_cast<int>(m_instrument_filters.size()))
+            {
+                active_filter =
+                    &m_instrument_filters[static_cast<size_t>(m_instrument_filter_index)];
+            }
+            const bool used_by_song = active_filter && active_filter->bank == -3;
+            if (used_by_song)
+            {
+                if (m_document_dirty)
+                {
+                    m_song_used_keys_dirty = true;
+                }
+                if (m_song_used_keys_dirty)
+                {
+                    CollectCurrentSongUsedInstrumentKeys(m_song_used_inst_ids,
+                                                         m_song_used_instrument_indexes);
+                    m_song_used_keys_dirty = false;
+                }
+            }
             for (int i = 0; i < static_cast<int>(m_instruments.size()); ++i)
             {
+                const InstrumentRow &inst = m_instruments[static_cast<size_t>(i)];
+                if (!InstrumentMatchesFilter(inst))
+                {
+                    continue;
+                }
+                if (used_by_song &&
+                    !InstrumentUsedByCurrentSong(inst,
+                                                 m_song_used_inst_ids,
+                                                 m_song_used_instrument_indexes))
+                {
+                    continue;
+                }
+                if (!InstrumentMatchesTextFilter(inst))
+                {
+                    continue;
+                }
                 m_multi_instruments.insert(i);
             }
             break;
+        }
         case SessionTab::Samples:
             m_multi_samples.clear();
             for (int i = 0; i < static_cast<int>(m_samples.size()); ++i)
             {
+                const SampleRow &sample = m_samples[static_cast<size_t>(i)];
+                if (!SampleMatchesShowFilter(sample) || !SampleMatchesTextFilter(sample))
+                {
+                    continue;
+                }
                 m_multi_samples.insert(i);
             }
             break;
