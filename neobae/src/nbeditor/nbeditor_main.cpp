@@ -4189,6 +4189,9 @@ private:
         m_instruments.clear();
         m_selected_sample = -1;
         m_selected_instrument = -1;
+        /* Indices into m_samples / m_instruments are invalid after rebuild+sort. */
+        m_multi_samples.clear();
+        m_multi_instruments.clear();
         RebuildInstrumentFilters();
         RefreshGroovoidsFromBank();
 

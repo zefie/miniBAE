@@ -749,6 +749,57 @@
 
     /* ---------------- Open ---------------- */
 
+    /* INST XReplace (sample apply / IE keymap) shifts GetIndexed order, so
+     * SampleRow.instrument_index/split_index can point at a different INST's
+     * split while snd_resource_id / the list label stay correct. Always key by SND. */
+    bool ResolveBankSplitForSnd(uint32_t snd_id,
+                                uint32_t *out_inst_index,
+                                uint32_t *out_split_index,
+                                BAERmfEditorBankSampleInfo *out_info) const
+    {
+        if (!m_bank_token || snd_id == kNoSndResourceId || !out_inst_index || !out_split_index)
+        {
+            return false;
+        }
+        uint32_t instrument_count = 0;
+        if (BAERmfEditorBank_GetInstrumentCount(m_bank_token, &instrument_count) != BAE_NO_ERROR)
+        {
+            return false;
+        }
+        const uint16_t want = static_cast<uint16_t>(snd_id);
+        for (uint32_t ii = 0; ii < instrument_count; ++ii)
+        {
+            uint32_t split_count = 0;
+            if (BAERmfEditorBank_GetInstrumentSampleCount(m_bank_token, ii, &split_count) !=
+                BAE_NO_ERROR)
+            {
+                continue;
+            }
+            for (uint32_t si = 0; si < split_count; ++si)
+            {
+                BAERmfEditorBankSampleInfo info;
+                std::memset(&info, 0, sizeof(info));
+                if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token, ii, si, &info) !=
+                    BAE_NO_ERROR)
+                {
+                    continue;
+                }
+                if (static_cast<uint16_t>(info.sndResourceID) != want)
+                {
+                    continue;
+                }
+                *out_inst_index = ii;
+                *out_split_index = si;
+                if (out_info)
+                {
+                    *out_info = info;
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
     void OpenSampleEditorForSelection()
     {
         if (m_selected_sample < 0 || m_selected_sample >= static_cast<int>(m_samples.size()))
@@ -850,28 +901,45 @@
                 SetStatus("Sample editor: no bank loaded");
                 return;
             }
-            if (sample.unassigned || sample.snd_resource_id != 0xFFFFu)
-            {
-                /* Prefer decode-by-SND-id for unassigned rows (incl. ID 0), and as
-                 * a fallback when instrument/split indices are stale after clip import. */
-                m_sample_editor_snd_resource_id = sample.snd_resource_id;
-                m_sample_editor_root_key = sample.root_key;
-                m_sample_editor_loop_start = sample.loop_start;
-                m_sample_editor_loop_end = sample.loop_end;
-                m_sample_editor_frame_count = sample.frame_count;
-                m_sample_editor_sample_rate_hz = sample.sample_rate_hz;
-                m_sample_editor_channels = sample.channels;
-                m_sample_editor_bit_depth = sample.bit_depth;
-            }
+
+            /* List identity is snd_resource_id — never overwrite from a stale split. */
+            m_sample_editor_snd_resource_id = sample.snd_resource_id;
+            m_sample_editor_root_key = sample.root_key;
+            m_sample_editor_loop_start = sample.loop_start;
+            m_sample_editor_loop_end = sample.loop_end;
+            m_sample_editor_frame_count = sample.frame_count;
+            m_sample_editor_sample_rate_hz = sample.sample_rate_hz;
+            m_sample_editor_channels = sample.channels;
+            m_sample_editor_bit_depth = sample.bit_depth;
 
             BAERmfEditorBankSampleInfo info;
             std::memset(&info, 0, sizeof(info));
-            const bool have_split_info =
-                !sample.unassigned &&
-                BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
-                                                         sample.instrument_index,
-                                                         sample.split_index,
-                                                         &info) == BAE_NO_ERROR;
+            uint32_t resolved_inst = sample.instrument_index;
+            uint32_t resolved_split = sample.split_index;
+            bool have_split_info = false;
+            if (!sample.unassigned && sample.snd_resource_id != kNoSndResourceId)
+            {
+                /* Prefer a live bank scan by SND; fall back to row indices only
+                 * when that split still points at the same SND. */
+                if (ResolveBankSplitForSnd(sample.snd_resource_id,
+                                           &resolved_inst,
+                                           &resolved_split,
+                                           &info))
+                {
+                    have_split_info = true;
+                }
+                else if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
+                                                                  sample.instrument_index,
+                                                                  sample.split_index,
+                                                                  &info) == BAE_NO_ERROR &&
+                         static_cast<uint16_t>(info.sndResourceID) ==
+                             static_cast<uint16_t>(sample.snd_resource_id))
+                {
+                    resolved_inst = sample.instrument_index;
+                    resolved_split = sample.split_index;
+                    have_split_info = true;
+                }
+            }
             if (have_split_info)
             {
                 m_sample_editor_loop_start = info.loopStart;
@@ -881,32 +949,21 @@
                 m_sample_editor_channels = info.channels;
                 m_sample_editor_bit_depth = info.bitDepth;
                 m_sample_editor_snd_storage_type = info.sndStorageType;
-                m_sample_editor_snd_resource_id =
-                    static_cast<uint32_t>(static_cast<uint16_t>(info.sndResourceID));
                 m_sample_editor_root_key = static_cast<int>(info.rootKey);
                 detected = BankCompressionFromCodec(info.compressionType, info.compressionSubType);
+                /* Keep list SND id — do not adopt info.sndResourceID from a mismatch. */
+                m_sample_editor_snd_resource_id = sample.snd_resource_id;
+                /* Refresh cached GetIndexed pointers on the list row. */
+                m_samples[static_cast<size_t>(m_selected_sample)].instrument_index =
+                    resolved_inst;
+                m_samples[static_cast<size_t>(m_selected_sample)].split_index =
+                    resolved_split;
             }
 
+            /* Decode by SND id so a stale instrument_index cannot load the wrong PCM. */
             BAEResult wave_r = BAE_BAD_FILE;
-            if (!sample.unassigned && have_split_info)
+            if (sample.snd_resource_id != kNoSndResourceId)
             {
-                wave_r = BAERmfEditorBank_GetSampleWaveformData(m_bank_token,
-                                                               sample.instrument_index,
-                                                               sample.split_index,
-                                                               &wave_data,
-                                                               &frame_count,
-                                                               &bit_size,
-                                                               &channels,
-                                                               &sample_rate);
-            }
-            if ((wave_r != BAE_NO_ERROR || !wave_data || frame_count == 0) &&
-                sample.snd_resource_id != kNoSndResourceId)
-            {
-                if (wave_data)
-                {
-                    BAERmfEditorBank_FreeWaveformData(wave_data);
-                    wave_data = nullptr;
-                }
                 wave_r = BAERmfEditorBank_GetSndWaveformData(m_bank_token,
                                                             sample.snd_resource_id,
                                                             &wave_data,
@@ -914,6 +971,23 @@
                                                             &bit_size,
                                                             &channels,
                                                             &sample_rate);
+            }
+            if ((wave_r != BAE_NO_ERROR || !wave_data || frame_count == 0) &&
+                have_split_info)
+            {
+                if (wave_data)
+                {
+                    BAERmfEditorBank_FreeWaveformData(wave_data);
+                    wave_data = nullptr;
+                }
+                wave_r = BAERmfEditorBank_GetSampleWaveformData(m_bank_token,
+                                                               resolved_inst,
+                                                               resolved_split,
+                                                               &wave_data,
+                                                               &frame_count,
+                                                               &bit_size,
+                                                               &channels,
+                                                               &sample_rate);
             }
             if (wave_r != BAE_NO_ERROR || !wave_data || frame_count == 0)
             {
@@ -1242,14 +1316,31 @@
         /* Codec/storage Apply is an export preference. Skip bank I/O unless the
          * working-set sample itself changed — forcing ESND/CSND→SND used to run
          * a full-bank SND rebuild (multi-second freeze on zpatches). */
+        const uint32_t keep_snd = m_sample_editor_snd_resource_id;
+        uint32_t work_inst_index = sample.instrument_index;
+        uint32_t keep_split = sample.split_index;
         BAERmfEditorBankSampleInfo bank_info;
         std::memset(&bank_info, 0, sizeof(bank_info));
-        const bool have_bank_info =
-            !sample.unassigned &&
-            BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
-                                                     sample.instrument_index,
-                                                     sample.split_index,
-                                                     &bank_info) == BAE_NO_ERROR;
+        bool have_bank_info = false;
+        if (!sample.unassigned && keep_snd != kNoSndResourceId)
+        {
+            /* Re-find INST/split by SND — SampleRow indices go stale after XReplace. */
+            if (ResolveBankSplitForSnd(keep_snd, &work_inst_index, &keep_split, &bank_info))
+            {
+                have_bank_info = true;
+            }
+            else if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token,
+                                                              sample.instrument_index,
+                                                              sample.split_index,
+                                                              &bank_info) == BAE_NO_ERROR &&
+                     static_cast<uint16_t>(bank_info.sndResourceID) ==
+                         static_cast<uint16_t>(keep_snd))
+            {
+                work_inst_index = sample.instrument_index;
+                keep_split = sample.split_index;
+                have_bank_info = true;
+            }
+        }
         const uint32_t want_root =
             static_cast<uint32_t>(std::clamp(m_sample_editor_root_key, 0, 127));
         const bool keymap_dirty =
@@ -1294,18 +1385,18 @@
                 m_bank01_touched = true;
             }
             SampleEditorSyncAuditionAfterApply(effective);
-            if (!sample.unassigned)
+            if (have_bank_info)
             {
                 uint32_t prefs_inst_id = BAE_EDITOR_INST_ID_NONE;
                 BAERmfEditorBankInstrumentInfo prefs_iinfo{};
                 if (BAERmfEditorBank_GetInstrumentInfo(m_bank_token,
-                                                       sample.instrument_index,
+                                                       work_inst_index,
                                                        &prefs_iinfo) == BAE_NO_ERROR)
                 {
                     prefs_inst_id = prefs_iinfo.instID;
                 }
-                SampleEditorHotReloadLivePreview(sample.instrument_index,
-                                                sample.split_index,
+                SampleEditorHotReloadLivePreview(work_inst_index,
+                                                keep_split,
                                                 m_sample_editor_snd_resource_id,
                                                 prefs_inst_id,
                                                 effective,
@@ -1327,11 +1418,8 @@
 
         /* XReplace on INST is trash+append — GetIndexed order shifts. Pin by
          * INST id / SND id; never re-resolve the editor from a stale index. */
-        uint32_t work_inst_index = sample.instrument_index;
-        const uint32_t keep_split = sample.split_index;
-        const uint32_t keep_snd = m_sample_editor_snd_resource_id;
         uint32_t keep_inst_id = BAE_EDITOR_INST_ID_NONE;
-        if (!sample.unassigned)
+        if (have_bank_info)
         {
             BAERmfEditorBankInstrumentInfo iinfo;
             std::memset(&iinfo, 0, sizeof(iinfo));
@@ -1375,10 +1463,10 @@
             }
         }
 
-        if (sample.unassigned)
+        if (sample.unassigned || !have_bank_info)
         {
-            /* Orphan SNDs have no stable instrument_index (row uses 0). Do not
-             * ReEncode through INST 0 — that rewrites an unrelated sample. */
+            /* Orphan SNDs / unresolved splits: never ReEncode through a stale
+             * instrument_index (that rewrites an unrelated sample). */
             SeRestoreCacheFromMaster();
             RememberSessionPcmFromSampleEditor(true);
             if (name_dirty && keep_snd <= 32767u)
@@ -1404,8 +1492,15 @@
             }
             RefreshSampleEditorUsageText();
             SampleEditorSyncAuditionAfterApply(effective);
-            SetStatus(closing ? "Unassigned sample prefs saved (editor closed)"
-                              : "Unassigned sample: export prefs saved (PCM bank write needs an instrument link)");
+            if (sample.unassigned)
+            {
+                SetStatus(closing ? "Unassigned sample prefs saved (editor closed)"
+                                  : "Unassigned sample: export prefs saved (PCM bank write needs an instrument link)");
+            }
+            else
+            {
+                SetStatus("Sample prefs saved; could not resolve instrument split for bank PCM write");
+            }
             return true;
         }
 
