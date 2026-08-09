@@ -4774,7 +4774,9 @@ BAEResult BAERmfEditorBank_ExportSndResourceToFile(BAEBankToken bankToken,
     XFILE bankFile;
     XPTR sndData;
     int32_t sndSize;
-    static const XResourceType sndTypes[] = { ID_SND, ID_CSND, ID_ESND, 0 };
+    /* Prefer ESND/CSND over plain SND — session promote can leave a colliding
+     * GM SND beside the intended custom container (same as waveform fetch). */
+    static const XResourceType sndTypes[] = { ID_ESND, ID_CSND, ID_SND, 0 };
     int32_t typeIdx;
     SampleDataInfo sdi;
     BAEResult passResult;
@@ -4813,6 +4815,17 @@ BAEResult BAERmfEditorBank_ExportSndResourceToFile(BAEBankToken bankToken,
             }
             else if (sndTypes[typeIdx] == ID_ESND)
             {
+                /* Never decrypt in place — XGetFileResource may return a borrowed
+                 * memory-bank pointer. */
+                XPTR copy = XNewPtr(sndSize);
+                if (!copy)
+                {
+                    XDisposePtr(sndData);
+                    return BAE_MEMORY_ERR;
+                }
+                XBlockMove(sndData, copy, sndSize);
+                XDisposePtr(sndData);
+                sndData = copy;
                 XDecryptData(sndData, (uint32_t)sndSize);
             }
             break;
@@ -4885,6 +4898,7 @@ BAEResult BAERmfEditorBank_ExportSndResourceToFile(BAEBankToken bankToken,
     wave.baseMidiPitch = (uint16_t)sdi.baseKey;
     wave.startLoop = sdi.loopStart;
     wave.endLoop = sdi.loopEnd;
+    wave.compressionType = C_NONE; /* decoded PCM — required by GM_WriteFileFromMemory */
 
     ext = strrchr(filePath, '.');
     if (ext && (!XStrCmp(ext, ".aif") || !XStrCmp(ext, ".aiff") ||
@@ -4905,7 +4919,19 @@ BAEResult BAERmfEditorBank_ExportSndResourceToFile(BAEBankToken bankToken,
         XDisposePtr(pcmOwner);
     }
     XDisposePtr(sndData);
-    return (opErr == NO_ERR) ? BAE_NO_ERROR : BAE_FILE_IO_ERROR;
+    if (opErr == NO_ERR)
+    {
+        return BAE_NO_ERROR;
+    }
+    if (opErr == PARAM_ERR || opErr == NOT_SETUP)
+    {
+        return BAE_PARAM_ERR;
+    }
+    if (opErr == MEMORY_ERR)
+    {
+        return BAE_MEMORY_ERR;
+    }
+    return BAE_FILE_IO_ERROR;
 }
 
 

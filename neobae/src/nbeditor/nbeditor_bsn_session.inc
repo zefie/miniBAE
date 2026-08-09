@@ -2014,8 +2014,14 @@ void TeardownForSessionReload()
     ClearSongOverrides();
     m_session_songs.clear();
     m_session_song_index = -1;
+    m_session_casd_count = 0;
     m_session_pcm_cache.clear();
     m_app_compression_cache.clear();
+    /* Full session token replace (.zsn/.bsn): drop ZMF/RMF promote flags so the
+     * next bank's Bank 0/1 INST ids are not still treated as "custom". */
+    m_session_custom_snd_ids.clear();
+    m_session_custom_inst_ids.clear();
+    m_bank01_touched = false;
 }
 
 std::vector<unsigned char> CaptureNbetLayoutBlob(bool include_layout = true)

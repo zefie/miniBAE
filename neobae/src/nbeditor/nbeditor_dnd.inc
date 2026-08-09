@@ -506,8 +506,12 @@
         }
     }
 
-    /* Same cleanup Unload Bank uses; ok if Bank 0/1 is already empty. */
-    bool UnloadBank01KeepingBank2(bool quiet_if_empty = false)
+    /* Same cleanup Unload Bank uses; ok if Bank 0/1 is already empty.
+     * keep_bank01_customs: File → Unload Bank keeps RMF/ZMF Bank 0/1 promotes.
+     * Merge/replace Bank 0/1 from a donor must pass false so those overrides
+     * are dropped with the rest of Bank 0/1 (Bank 2+ still kept). */
+    bool UnloadBank01KeepingBank2(bool quiet_if_empty = false,
+                                  bool keep_bank01_customs = true)
     {
         if (!m_bank_token)
         {
@@ -524,8 +528,8 @@
         std::set<uint32_t> bank2_snds;
         CollectBankReferencedSndIds(bank01_snds, bank2_snds);
 
-        /* INST to drop: Bank 0/1 only. Keep Bank 2+ and session-custom INST
-         * even if they happen to live on Bank 0/1 (RMF promote). */
+        /* INST to drop: Bank 0/1 only. Optionally keep session-custom INST
+         * even if they live on Bank 0/1 (RMF promote / Unload Bank). */
         std::vector<XLongResourceID> omit_inst;
         uint32_t inst_count = 0;
         if (BAERmfEditorBank_GetInstrumentCount(m_bank_token, &inst_count) == BAE_NO_ERROR)
@@ -542,7 +546,8 @@
                 {
                     continue;
                 }
-                if (m_session_custom_inst_ids.count(info.instID) != 0)
+                if (keep_bank01_customs &&
+                    m_session_custom_inst_ids.count(info.instID) != 0)
                 {
                     continue;
                 }
@@ -562,30 +567,33 @@
          * Never use (all SNDs − protect) — if Bank 2 sample collection misses
          * anything, that wiped every sample including Bank 2+. */
         std::set<uint32_t> protect = bank2_snds;
-        protect.insert(m_session_custom_snd_ids.begin(), m_session_custom_snd_ids.end());
-        for (uint32_t custom_id : m_session_custom_inst_ids)
+        if (keep_bank01_customs)
         {
-            uint32_t resolved = 0;
-            uint32_t index = 0;
-            if (BAERmfEditorBank_ResolveInstID(m_bank_token, custom_id, &resolved, &index) !=
-                BAE_NO_ERROR)
+            protect.insert(m_session_custom_snd_ids.begin(), m_session_custom_snd_ids.end());
+            for (uint32_t custom_id : m_session_custom_inst_ids)
             {
-                continue;
-            }
-            uint32_t split_count = 0;
-            if (BAERmfEditorBank_GetInstrumentSampleCount(m_bank_token, index, &split_count) !=
-                BAE_NO_ERROR)
-            {
-                continue;
-            }
-            for (uint32_t s = 0; s < split_count; ++s)
-            {
-                BAERmfEditorBankSampleInfo sinfo;
-                std::memset(&sinfo, 0, sizeof(sinfo));
-                if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token, index, s, &sinfo) ==
+                uint32_t resolved = 0;
+                uint32_t index = 0;
+                if (BAERmfEditorBank_ResolveInstID(m_bank_token, custom_id, &resolved, &index) !=
                     BAE_NO_ERROR)
                 {
-                    protect.insert(static_cast<uint32_t>(sinfo.sndResourceID));
+                    continue;
+                }
+                uint32_t split_count = 0;
+                if (BAERmfEditorBank_GetInstrumentSampleCount(m_bank_token, index, &split_count) !=
+                    BAE_NO_ERROR)
+                {
+                    continue;
+                }
+                for (uint32_t s = 0; s < split_count; ++s)
+                {
+                    BAERmfEditorBankSampleInfo sinfo;
+                    std::memset(&sinfo, 0, sizeof(sinfo));
+                    if (BAERmfEditorBank_GetInstrumentSampleInfo(m_bank_token, index, s, &sinfo) ==
+                        BAE_NO_ERROR)
+                    {
+                        protect.insert(static_cast<uint32_t>(sinfo.sndResourceID));
+                    }
                 }
             }
         }
@@ -645,7 +653,8 @@
                     const uint32_t from_id =
                         static_cast<uint32_t>(XGetLong(&alias->list[a].aliasFrom));
                     if ((from_id / 256u) < 2u &&
-                        m_session_custom_inst_ids.count(from_id) == 0)
+                        (!keep_bank01_customs ||
+                         m_session_custom_inst_ids.count(from_id) == 0))
                     {
                         alias_from.push_back(from_id);
                     }
@@ -667,7 +676,9 @@
                 {
                     continue;
                 }
-                if (row.bank >= 2 || m_session_custom_inst_ids.count(row.inst_id) != 0)
+                if (row.bank >= 2 ||
+                    (keep_bank01_customs &&
+                     m_session_custom_inst_ids.count(row.inst_id) != 0))
                 {
                     must_keep_inst.push_back(row.inst_id);
                 }
@@ -686,7 +697,11 @@
                 XDisposePtr(data);
             }
             std::set<uint32_t> must_keep_snd = bank2_snds;
-            must_keep_snd.insert(m_session_custom_snd_ids.begin(), m_session_custom_snd_ids.end());
+            if (keep_bank01_customs)
+            {
+                must_keep_snd.insert(m_session_custom_snd_ids.begin(),
+                                     m_session_custom_snd_ids.end());
+            }
             for (uint32_t snd_id : must_keep_snd)
             {
                 if (!BankSndResourceExists(snd_id))
@@ -735,10 +750,51 @@
             return false;
         }
 
-        /* Safe unload of current Bank 0/1 (same as Unload Bank menu). */
-        if (!UnloadBank01KeepingBank2(true))
+        /* Safe unload of current Bank 0/1 — drop Bank 0/1 RMF/ZMF promotes too;
+         * File → Unload Bank keeps those, but Replace Bank 0/1 must not. */
+        if (!UnloadBank01KeepingBank2(true, /*keep_bank01_customs=*/false))
         {
             return false;
+        }
+
+        /* Drop ZMF/RMF custom tracking that is no longer Bank 2+ so
+         * PurgeOrphanBankSamples does not protect orphan promote SNDs. */
+        {
+            std::set<uint32_t> bank01_snds;
+            std::set<uint32_t> bank2_snds;
+            CollectBankReferencedSndIds(bank01_snds, bank2_snds);
+            for (auto it = m_session_custom_snd_ids.begin();
+                 it != m_session_custom_snd_ids.end();)
+            {
+                if (bank2_snds.count(*it) == 0)
+                {
+                    it = m_session_custom_snd_ids.erase(it);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+            for (auto it = m_session_custom_inst_ids.begin();
+                 it != m_session_custom_inst_ids.end();)
+            {
+                uint32_t resolved = 0;
+                uint32_t index = 0;
+                BAERmfEditorBankInstrumentInfo info;
+                std::memset(&info, 0, sizeof(info));
+                if (BAERmfEditorBank_ResolveInstID(m_bank_token, *it, &resolved, &index) !=
+                        BAE_NO_ERROR ||
+                    BAERmfEditorBank_GetInstrumentInfo(m_bank_token, index, &info) !=
+                        BAE_NO_ERROR ||
+                    info.bank < 2)
+                {
+                    it = m_session_custom_inst_ids.erase(it);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
         }
 
         XFILE dest = reinterpret_cast<XFILE>(m_bank_token);

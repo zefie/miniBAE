@@ -2576,9 +2576,24 @@ BAEResult BAERmfEditorDocument_ExportSampleToFile(BAERmfEditorDocument const *do
     }
 
     waveCopy = *sample->waveform;
+    /* theWaveform is decoded PCM; a leftover codec tag makes GM_Write fail as
+     * PARAM_ERR, which callers previously remapped to FILE_IO. */
+    waveCopy.compressionType = C_NONE;
     XConvertPathToXFILENAME(filePath, &fileName);
     opErr = GM_WriteFileFromMemory(&fileName, &waveCopy, outType);
-    return (opErr == NO_ERR) ? BAE_NO_ERROR : BAE_FILE_IO_ERROR;
+    if (opErr == NO_ERR)
+    {
+        return BAE_NO_ERROR;
+    }
+    if (opErr == PARAM_ERR || opErr == NOT_SETUP)
+    {
+        return BAE_PARAM_ERR;
+    }
+    if (opErr == MEMORY_ERR)
+    {
+        return BAE_MEMORY_ERR;
+    }
+    return BAE_FILE_IO_ERROR;
 }
 
 

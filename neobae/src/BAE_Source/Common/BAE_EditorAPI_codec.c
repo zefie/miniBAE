@@ -1799,8 +1799,7 @@ bool PV_IsBitstreamPassthroughCodec(SndCompressionType srcCodec)
     case C_QOA:
         return TRUE;
 #endif
-    case C_IMA2:
-        return TRUE;
+    /* C_IMA2 / ADPCM / IMA decode to WAV — not a native bitstream container. */
     default:
         return FALSE;
     }

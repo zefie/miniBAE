@@ -517,7 +517,8 @@
             else
             {
                 ImGui::TextDisabled(
-                    "Bank 0/1 will be replaced (Unload Bank style). Bank 2+ / custom samples are kept.");
+                    "Bank 0/1 (including prior session overrides) are replaced. "
+                    "Bank 2+ instruments are kept when present.");
             }
         }
         if (!is_revert)
@@ -1083,9 +1084,10 @@
                 SetStatus("Not a NeoBAE Session .zsn (missing session layout)");
                 return;
             }
-            /* Bank-shaped .bsn: full replace unless Bank 2+/customs must stay.
-             * Avoid merging onto the Init built-in (orphan SNDs leak into export). */
-            ClearSessionSongState(false);
+            /* Bank-shaped .bsn: full replace unless real Bank 2+ must stay.
+             * Clear ZMF/RMF Bank 0/1 promote flags first so they don't force a
+             * merge that keeps orphan custom samples from the prior session. */
+            ClearSessionSongState(true);
             LoadBankFromPath(selected_path.c_str(), ShouldPreserveBank2OnBankLoad());
             return;
         }
@@ -1096,10 +1098,10 @@
         }
         if (IsBankExtension(ext))
         {
-            /* Pure bank (.zsb/.hsb): replace the built-in token when there is
-             * nothing to preserve. RMF sessions still keep built-in underneath
-             * (OpenRmfAsSession) so Bank 0 overrides like EndGame work. */
-            ClearSessionSongState(false);
+            /* Pure bank (.zsb/.hsb): drop prior session custom INST/SND tracking
+             * so ZMF promotes don't survive into the new bank (merge only when
+             * Bank 2+ instruments are actually present). */
+            ClearSessionSongState(true);
             LoadBankFromPath(selected_path.c_str(), ShouldPreserveBank2OnBankLoad());
             return;
         }
@@ -2524,7 +2526,12 @@
             return;
         }
         const SampleRow &sample = m_samples[static_cast<size_t>(m_export_native_sample_row)];
-        std::string path = path_in;
+        /* SDL/clipboard may hand back file:// URIs — strip before fopen. */
+        std::string path = ClipboardPathFromText(path_in.c_str());
+        if (path.empty())
+        {
+            path = path_in;
+        }
         const std::string want_ext = "." + (m_export_native_sample_ext.empty()
                                                 ? std::string("wav")
                                                 : m_export_native_sample_ext);

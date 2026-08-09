@@ -2229,6 +2229,12 @@ private:
         m_bank_token = token;
         m_song_used_keys_dirty = true;
         EnableEditorBankZsCompatibility(m_bank_token);
+        /* Full token replace: previous session's Bank 0/1 promote / custom IDs
+         * and deferred-encode caches must not bleed into the new bank. */
+        m_session_custom_snd_ids.clear();
+        m_session_custom_inst_ids.clear();
+        m_session_pcm_cache.clear();
+        m_app_compression_cache.clear();
         m_bank01_touched = false;
         m_instrument_filter_index = -1; /* full replace → default Custom Melodic */
         RefreshListsFromBank();
