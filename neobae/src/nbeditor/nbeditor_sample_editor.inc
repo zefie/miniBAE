@@ -998,6 +998,34 @@
                 SetStatus("Sample editor: waveform decode failed");
                 return;
             }
+
+            /* Unassigned / no-INST path: list row may still have defaults; prefer
+             * values from the decoded SND waveform. */
+            if (!have_split_info && sample_rate != 0)
+            {
+                const uint32_t hz = (static_cast<uint32_t>(sample_rate) >= (1000u << 16))
+                                        ? static_cast<uint32_t>(sample_rate >> 16)
+                                        : static_cast<uint32_t>(sample_rate);
+                if (hz > 0)
+                {
+                    m_sample_editor_sample_rate_hz = hz;
+                }
+            }
+            if (!have_split_info)
+            {
+                if (frame_count > 0)
+                {
+                    m_sample_editor_frame_count = frame_count;
+                }
+                if (bit_size > 0)
+                {
+                    m_sample_editor_bit_depth = static_cast<int>(bit_size);
+                }
+                if (channels > 0)
+                {
+                    m_sample_editor_channels = static_cast<int>(channels);
+                }
+            }
         }
 
         m_sample_editor_codec_type = detected;

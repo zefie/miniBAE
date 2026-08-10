@@ -2218,7 +2218,7 @@
             return false;
         }
 
-        const std::string title = "Untitled Song";
+        const std::string title = MakeUniqueSessionSongName("Untitled Song");
         const uint32_t bpm = 120;
         const uint16_t tpq = 480;
         (void)BAERmfEditorDocument_SetTempoBPM(doc, bpm);
@@ -2289,7 +2289,11 @@
         RefreshSongSamplesFromDocument();
         (void)ReloadPlaybackFromDocument(true);
         OpenMidiEditor();
-        SetStatus("Created empty song \"Untitled Song\"");
+        {
+            char status[160];
+            std::snprintf(status, sizeof(status), "Created empty song \"%s\"", title.c_str());
+            SetStatus(status);
+        }
         return true;
     }
 
@@ -3954,6 +3958,7 @@
 
             for (int i = 0; i < static_cast<int>(m_session_songs.size()); ++i)
             {
+                ImGui::PushID(i);
                 const SessionSongEntry &entry = m_session_songs[static_cast<size_t>(i)];
                 const char *tag = entry.source_type.empty() ? "Song" : entry.source_type.c_str();
                 if (entry.source_type.empty() && !m_loaded_session_path.empty())
@@ -3995,9 +4000,7 @@
                     }
                     PlaySessionSong();
                 }
-                char ctx_id[64];
-                std::snprintf(ctx_id, sizeof(ctx_id), "song_ctx_%d", i);
-                if (ImGui::BeginPopupContextItem(ctx_id))
+                if (ImGui::BeginPopupContextItem("song_ctx"))
                 {
                     if (ImGui::MenuItem("Play"))
                     {
@@ -4097,6 +4100,7 @@
                     }
                     ImGui::EndPopup();
                 }
+                ImGui::PopID();
                 drew_any = true;
             }
         }

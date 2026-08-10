@@ -1842,7 +1842,7 @@
         for (const SessionSongEntry &src : m_song_clipboard)
         {
             SessionSongEntry entry = src;
-            entry.name += " copy";
+            entry.name = MakeUniqueSessionSongName(src.name + " copy");
             entry.song_resource_id = 0;
             entry.midi_resource_id = 0;
             m_session_songs.push_back(std::move(entry));

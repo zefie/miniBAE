@@ -8969,7 +8969,9 @@ int32_t XAddFileResource(XFILE fileRef, XResourceType resourceType,
                                                 // Now we add this to the native RAM cache
                                                 if (pReference->pCache)
                                                 {
+#if USE_CREATION_API == TRUE
                                                     PV_AddToAccessCache(fileRef, &cacheItem );
+#endif
                                                 }
                                             }
                                         }

@@ -4144,11 +4144,11 @@ private:
             bool object_is_midi = false;
             if (has_midi)
             {
-                if (!use_date_filter && BankFileHasSessionDocument(bank))
+                if (BankFileHasSessionDocument(bank))
                 {
-                    /* Session document without Midi/SONG DATe stamps: Midi rows
-                     * are Custom Songs. Playback banks (no BePf/nBeT) keep
-                     * undated SONG→Midi as groovoids — Export strips DATe. */
+                    /* Session banks: plain Midi is a Custom Song whether or not
+                     * some other Midi/SONG already has a DATe stamp. Playback
+                     * banks (no BePf/nBeT) keep undated SONG→Midi as groovoids. */
                     continue;
                 }
                 object_is_midi = true;
@@ -4156,6 +4156,23 @@ private:
             else
             {
                 object_is_midi = false;
+            }
+
+            /* Align with export: never list an in-memory Session song as a Groovoid. */
+            bool is_session_song = false;
+            for (const SessionSongEntry &ss : m_session_songs)
+            {
+                if ((ss.song_resource_id != 0 &&
+                     ss.song_resource_id == static_cast<uint32_t>(song_id)) ||
+                    (ss.midi_resource_id != 0 && ss.midi_resource_id == object_id))
+                {
+                    is_session_song = true;
+                    break;
+                }
+            }
+            if (is_session_song)
+            {
+                continue;
             }
 
             GroovoidEntry entry;
@@ -4532,6 +4549,17 @@ private:
                                 orphan.frame_count = sdi.frames;
                                 orphan.bit_depth = sdi.bitSize ? sdi.bitSize : 16;
                                 orphan.channels = sdi.channels ? sdi.channels : 1;
+                                orphan.loop_start = sdi.loopStart;
+                                orphan.loop_end = sdi.loopEnd;
+                                {
+                                    const uint32_t hz =
+                                        static_cast<uint32_t>(XFIXED_TO_UNSIGNED_LONG(sdi.rate));
+                                    orphan.sample_rate_hz = (hz > 0) ? hz : 44100;
+                                }
+                                if (sdi.baseKey >= 0 && sdi.baseKey <= 127)
+                                {
+                                    orphan.root_key = sdi.baseKey;
+                                }
                                 auto pref = m_session_pcm_cache.find(static_cast<uint32_t>(snd_id));
                                 if (pref != m_session_pcm_cache.end() &&
                                     pref->second.has_export_target &&

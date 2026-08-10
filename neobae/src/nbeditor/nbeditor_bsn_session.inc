@@ -387,6 +387,35 @@ std::string EnforceBankSavePath(const std::string &path, bool *out_remapped = nu
     return ReplacePathExtension(path, ".zsb");
 }
 
+std::string MakeUniqueSessionSongName(const std::string &base) const
+{
+    const std::string root = base.empty() ? std::string("Untitled Song") : base;
+    auto name_taken = [&](const std::string &candidate) -> bool {
+        for (const SessionSongEntry &entry : m_session_songs)
+        {
+            if (entry.name == candidate)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    if (!name_taken(root))
+    {
+        return root;
+    }
+    for (int n = 2; n < 10000; ++n)
+    {
+        char buf[512];
+        std::snprintf(buf, sizeof(buf), "%s (%d)", root.c_str(), n);
+        if (!name_taken(buf))
+        {
+            return buf;
+        }
+    }
+    return root + " (dup)";
+}
+
 bool SyncSessionSongsFromDocument()
 {
     if (!m_document)
@@ -451,6 +480,13 @@ bool SyncSessionSongsFromDocument()
     else
     {
         /* No selection (or empty list): append a new song slot — never overwrite [0]. */
+        const std::string unique = MakeUniqueSessionSongName(name);
+        if (unique != name)
+        {
+            name = unique;
+            m_song_row.name = unique;
+            (void)BAERmfEditorDocument_SetInfo(m_document, TITLE_INFO, unique.c_str());
+        }
         SessionSongEntry entry;
         entry.song_resource_id = 0;
         entry.midi_resource_id = 0;

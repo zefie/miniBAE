@@ -386,8 +386,10 @@
 // Thread-local storage for the active GM_Mixer (MusicGlobals).
 #if defined(_MSC_VER)
     #define BAE_THREAD_LOCAL __declspec(thread)
-#elif defined(__cplusplus)
+#elif defined(__cplusplus) && (__cplusplus >= 201103L)
     #define BAE_THREAD_LOCAL thread_local
+#elif defined(__cplusplus)
+    #define BAE_THREAD_LOCAL __thread
 #elif defined(__STDC_VERSION__) && (__STDC_VERSION__ >= 201112L)
     #define BAE_THREAD_LOCAL _Thread_local
 #else
