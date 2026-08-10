@@ -4452,6 +4452,8 @@
     static constexpr int32_t kAdsrVolumeRange = 4096;
     static constexpr int kAdsrBeatnikLevelMin = 0;
     static constexpr int kAdsrBeatnikLevelMax = 200; /* FULL_RANGE — BE2 envelope limit */
+    /* LFO/filter ADSR may be bipolar (−200…200); volume ADSR stays unipolar (0…200). */
+    static constexpr int kAdsrBeatnikLevelMinSigned = -kAdsrBeatnikLevelMax;
     /* UI times are milliseconds; engine stores microseconds. Cap avoids int32 overflow. */
     static constexpr int kAdsrTimeMsMax =
         static_cast<int>((std::numeric_limits<int32_t>::max)() / 1000);
@@ -4461,9 +4463,9 @@
         const int64_t bias = (raw >= 0) ? (kAdsrVolumeRange / 2) : -(kAdsrVolumeRange / 2);
         return static_cast<int>((n + bias) / kAdsrVolumeRange);
     }
-    static int32_t AdsrLevelFromBeatnik(int display)
+    static int32_t AdsrLevelFromBeatnik(int display, int min_disp = kAdsrBeatnikLevelMin)
     {
-        display = std::clamp(display, kAdsrBeatnikLevelMin, kAdsrBeatnikLevelMax);
+        display = std::clamp(display, min_disp, kAdsrBeatnikLevelMax);
         return static_cast<int32_t>((static_cast<int64_t>(display) * kAdsrVolumeRange) / 100);
     }
     /* BE2 TIME (MS): µs↔ms. SUST stored as 0 shows as 12000 (classic scale/5 display). */
@@ -4822,7 +4824,8 @@
 
         if (show_adsr)
         {
-            DrawAdsrStageEditor(lfo.adsr, "lfo_adsr", beatnik_levels);
+            /* Negatives OK for LFO/filter envelopes; volume ADSR stays ≥0. */
+            DrawAdsrStageEditor(lfo.adsr, "lfo_adsr", beatnik_levels, true);
         }
         ImGui::PopID();
     }
@@ -5128,8 +5131,12 @@
                                const char *id,
                                float height = 180.0f,
                                bool editable = false,
-                               bool beatnik_level_scale = false)
+                               bool beatnik_level_scale = false,
+                               bool allow_negative_levels = false)
     {
+        const int beatnik_min =
+            (beatnik_level_scale && allow_negative_levels) ? kAdsrBeatnikLevelMinSigned
+                                                          : kAdsrBeatnikLevelMin;
         /* BE2-style envelope: Y in % (100=unity), X in ms with split timeline
          * (attack | gray sustain band | release axis resets to 0). */
         ImGui::PushID(id);
@@ -5190,9 +5197,9 @@
         }
         if (beatnik_level_scale)
         {
-            /* Fixed BE2 envelope range: 0% … 200%. */
+            /* Fixed BE2 envelope range: 0%…200% (volume) or −200%…200% (LFO/filter). */
             max_disp_level = kAdsrBeatnikLevelMax;
-            min_disp_level = kAdsrBeatnikLevelMin;
+            min_disp_level = beatnik_min;
         }
         else
         {
@@ -5209,14 +5216,12 @@
             {
                 return raw;
             }
-            return std::clamp(AdsrLevelToBeatnik(raw),
-                              kAdsrBeatnikLevelMin,
-                              kAdsrBeatnikLevelMax);
+            return std::clamp(AdsrLevelToBeatnik(raw), beatnik_min, kAdsrBeatnikLevelMax);
         };
         auto level_to_y = [&](int disp) -> float {
             if (beatnik_level_scale)
             {
-                disp = std::clamp(disp, kAdsrBeatnikLevelMin, kAdsrBeatnikLevelMax);
+                disp = std::clamp(disp, beatnik_min, kAdsrBeatnikLevelMax);
             }
             const double norm =
                 static_cast<double>(disp - min_disp_level) / static_cast<double>(level_span);
@@ -5267,14 +5272,15 @@
         dl->AddLine(ImVec2(graph_l, graph_b), ImVec2(graph_r, graph_b), IM_COL32(70, 70, 70, 255));
         if (beatnik_level_scale)
         {
-            for (int pct : {0, 100, 200})
+            for (int pct : {-200, 0, 100, 200})
             {
                 if (pct < min_disp_level || pct > max_disp_level)
                 {
                     continue;
                 }
                 const float y = level_to_y(pct);
-                const ImU32 col = (pct == 100) ? IM_COL32(110, 110, 110, 255) : IM_COL32(55, 55, 55, 255);
+                const ImU32 col = (pct == 100 || pct == 0) ? IM_COL32(110, 110, 110, 255)
+                                                           : IM_COL32(55, 55, 55, 255);
                 dl->AddLine(ImVec2(graph_l, y), ImVec2(graph_r, y), col);
                 char lab[16];
                 std::snprintf(lab, sizeof(lab), "%d%%", pct);
@@ -5579,10 +5585,9 @@
                 if (beatnik_level_scale)
                 {
                     const int start_disp = AdsrLevelToBeatnik(s_drag_start_level);
-                    const int new_disp = std::clamp(start_disp + disp_delta,
-                                                   kAdsrBeatnikLevelMin,
-                                                   kAdsrBeatnikLevelMax);
-                    const int32_t new_raw = AdsrLevelFromBeatnik(new_disp);
+                    const int new_disp =
+                        std::clamp(start_disp + disp_delta, beatnik_min, kAdsrBeatnikLevelMax);
+                    const int32_t new_raw = AdsrLevelFromBeatnik(new_disp, beatnik_min);
                     if (new_raw != adsr.stages[i].level)
                     {
                         adsr.stages[i].level = new_raw;
@@ -5755,11 +5760,16 @@
 
     void DrawAdsrStageEditor(BAERmfEditorADSRInfo &adsr,
                              const char *id,
-                             bool beatnik_level_scale = false)
+                             bool beatnik_level_scale = false,
+                             bool allow_negative_levels = false)
     {
         ImGui::PushID(id);
         m_ie_adsr_default_focus_id = id ? id : "";
-        DrawAdsrEnvelopeGraph(adsr, "graph", 188.0f, true, beatnik_level_scale);
+        const int beatnik_min =
+            (beatnik_level_scale && allow_negative_levels) ? kAdsrBeatnikLevelMinSigned
+                                                          : kAdsrBeatnikLevelMin;
+        DrawAdsrEnvelopeGraph(
+            adsr, "graph", 188.0f, true, beatnik_level_scale, allow_negative_levels);
         int stages = static_cast<int>(adsr.stageCount);
         auto init_stage = [&](int index) {
             if (index < 0 || index >= BAE_EDITOR_MAX_ADSR_STAGES)
@@ -5902,8 +5912,8 @@
                         if (ImGui::InputInt("##lvl", &level, 0, 0))
                         {
                             MarkInstrumentEditorDirty(false);
-                            level = std::clamp(level, kAdsrBeatnikLevelMin, kAdsrBeatnikLevelMax);
-                            adsr.stages[i].level = AdsrLevelFromBeatnik(level);
+                            level = std::clamp(level, beatnik_min, kAdsrBeatnikLevelMax);
+                            adsr.stages[i].level = AdsrLevelFromBeatnik(level, beatnik_min);
                             LivePatchInstrumentEditor();
                         }
                     }
@@ -6035,8 +6045,8 @@
                         if (ImGui::InputInt("##lvl", &level))
                         {
                             MarkInstrumentEditorDirty(false);
-                            level = std::clamp(level, kAdsrBeatnikLevelMin, kAdsrBeatnikLevelMax);
-                            adsr.stages[i].level = AdsrLevelFromBeatnik(level);
+                            level = std::clamp(level, beatnik_min, kAdsrBeatnikLevelMax);
+                            adsr.stages[i].level = AdsrLevelFromBeatnik(level, beatnik_min);
                             LivePatchInstrumentEditor();
                         }
                     }

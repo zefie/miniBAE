@@ -560,7 +560,9 @@ extern "C"
     };
     typedef unsigned char VelocityCurveType;
 
+#ifndef MAX_VOICES
 #define MAX_VOICES 1024     // max voices at once
+#endif
 #define MAX_INSTRUMENTS 128 // MIDI number of programs per patch bank
 #define MAX_BANKS 6         // three GM banks; three user banks
 #define MAX_TRACKS 65       // max MIDI file tracks to process (64 + tempo track)
@@ -572,7 +574,9 @@ extern "C"
 #define MAX_LFOS 6                // max LFO's, make sure to add one extra for MOD wheel support
 #define MAX_MASTER_VOLUME 256     // max volume level for master volume level
 #define MAX_SAMPLES 2048           // max number of samples that can be loaded
+#ifndef MAX_SONGS
 #define MAX_SONGS 16              // max number of songs that can play at one time
+#endif
 #define PERCUSSION_CHANNEL 9      // which channel (zero based) is the default percussion channel
 #define MAX_SAMPLE_FRAMES 1048576 // max number of sample frames that we can play in one voice
                                   // 1024 * 1024 = 1MB. This limit exisits only in DROP_SAMPLE, TERP1, TERP2 cases
