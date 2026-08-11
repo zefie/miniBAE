@@ -118,10 +118,15 @@ static bool dls_synth_has_eggs_bank(const DLS_Synth* synth) {
 }
 
 static bool dls_bank_spmidi(const DLS_Bank* bank) {
-    /* microQ/eggs banks are incomplete GM sets; SP-MIDI substitute patches
+    /* microQ/eggs banks are incomplete GM sets; SP-MIDI substitutes
      * (e.g. Glint PC1→0, PC24→17) change arrangement vs MobileBAE silence. */
     if (bank && bank->eggsArticulators) return false;
-    return !dls_bank_quirks(bank);
+    /* MobileBAE / pgal: missing presets stay silent (no Figure 6/7 fill). */
+    if (bank && (bank->forceQuirks || bank->isMobileBAE)) return false;
+    /* Generic SP-MIDI profile banks (e.g. Sagem 13-timbre Myx): always
+     * remap holes in-bank so patches111 does not steal Brass→Trumpet etc.
+     * Independent of MobileBAE quirks articulation defaults. */
+    return true;
 }
 
 static bool dls_synth_quirks(const DLS_Synth* synth) {
@@ -2557,12 +2562,28 @@ static void dls_mip_rebuild_mask(DLS_Synth* synth)
     /* mBAE sub_11FDC60: enable channels whose MIP level <= device polyphony. */
     int32_t budget = synth->maxVoices > 0 ? synth->maxVoices : DLS_MAX_VOICE_POOL;
     uint16_t mask = 0;
+    uint16_t listed = 0;
+    uint8_t maxLevel = 0;
     for (uint8_t i = 0; i < synth->mipPairCount; i++) {
         uint8_t level = synth->mipLevel[i];
+        uint8_t ch = (uint8_t)(synth->mipChannel[i] & 15);
+        listed = (uint16_t)(listed | (uint16_t)(1u << ch));
         if (level == 0) break;
+        if (level > maxLevel) maxLevel = level;
         if ((int32_t)level <= budget) {
-            mask = (uint16_t)(mask | (uint16_t)(1u << (synth->mipChannel[i] & 15)));
+            mask = (uint16_t)(mask | (uint16_t)(1u << ch));
         }
+    }
+    /*
+     * Strict SP-MIDI leaves channels omitted from the MIP message muted at
+     * every polyphony level. Handset MIDIs often forget a used channel in the
+     * table (e.g. Phone startup.mid channel 9) while SF2/HSB/PMA ignore MIP
+     * entirely. When this device can already play the full authored MIP set,
+     * also enable omitted channels so those notes are not dropped; under
+     * real SP scale-down (maxLevel > budget) omission stays a hard mute.
+     */
+    if (mask != 0 && maxLevel > 0 && (int32_t)maxLevel <= budget) {
+        mask = (uint16_t)(mask | (uint16_t)(~listed));
     }
     synth->mipChannelMask = mask ? mask : 0xFFFF;
 }
@@ -2827,47 +2848,44 @@ void GM_DLS_ResetForSong(GM_Song* pSong)
 
 static DLS_Instrument* DLS_Bank_FindSelector(DLS_Bank* bank, uint32_t selector);
 
-/* SP-MIDI 1.0b Figure 6: each entry lists all program numbers in one
-   instrument group, terminated by -1.  When searching for a group match,
-   every member is tried in priority order (first = canonical target). */
-static const int8_t g_spmidi_melodic_groups[][18] = {
-    {0,1,2,3,4,5,6,7,-1},           /* Piano → 0 Acoustic Grand */
-    {8,9,10,11,13,14,15,16,46,47,99,109,-1}, /* Chromatic Perc → 12 Vibraphone */
-    {17,18,19,20,21,22,23,24,110,-1}, /* Organ → 17 Drawbar */
-    {25,26,27,28,29,30,31,32,105,106,107,108,-1}, /* Guitar → 28 Clean */
-    {33,34,35,36,37,38,39,40,-1},     /* Bass → 34 Finger */
-    {41,42,43,44,111,-1},             /* Strings → 41 Violin */
-    {45,49,50,51,52,-1},              /* Ensemble → 49 String Ens1 */
-    {48,56,113,114,115,116,117,118,119,-1}, /* Percussive → 115 SteelDrums */
-    {53,54,55,89,91,92,93,94,95,96,97,98,100,101,102,103,104,-1}, /* Pad/Synth → 90 WarmPad */
-    {57,58,59,60,61,62,63,64,-1},     /* Brass → 57 Trumpet */
-    {65,66,67,68,69,70,71,72,112,-1}, /* Reed → 67 TenorSax */
-    {73,74,75,76,77,78,79,80,-1},     /* Pipe → 74 Flute */
-    {81,82,83,84,85,86,87,88,-1},     /* Synth Lead → 82 Saw */
+/* SP-MIDI 1.0b / 3GPP profile Figure 6 (Optional Sound Mapping).
+   Values are 0-based MIDI program numbers (Program Change data byte),
+   converted from the spec's 1-based PROG# column (e.g. Trumpet PROG#57
+   / 38H → 56). First member is the Minimum Sound Set substitute; the
+   rest of the group remaps to the first present member in the bank. */
+static const int8_t g_spmidi_melodic_groups[][20] = {
+    {0,1,2,3,4,5,6,7,-1},             /* Piano → 0 Acoustic Grand */
+    {11,8,9,10,12,13,14,15,45,46,98,108,-1}, /* Chromatic Perc → 11 Vibraphone */
+    {16,17,18,19,20,21,22,23,109,-1}, /* Organ → 16 Drawbar */
+    {27,24,25,26,28,29,30,31,104,105,106,107,-1}, /* Guitar → 27 Clean */
+    {33,32,34,35,36,37,38,39,-1},     /* Bass → 33 Finger */
+    {40,41,42,43,110,-1},             /* Strings → 40 Violin */
+    {48,44,49,50,51,-1},              /* Ensemble → 48 String Ens1 */
+    {56,57,58,59,60,61,62,63,-1},     /* Brass → 56 Trumpet */
+    {66,64,65,67,68,69,70,71,111,-1}, /* Reed → 66 TenorSax */
+    {73,72,74,75,76,77,78,79,-1},     /* Pipe → 73 Flute */
+    {81,80,82,83,84,85,86,87,-1},     /* Synth Lead → 81 Saw */
+    {89,52,53,54,88,90,91,92,93,94,95,96,97,99,100,101,102,103,-1}, /* Pad → 89 Warm */
+    {114,47,55,112,113,115,116,117,118,-1}, /* Percussive → 114 SteelDrums */
     {-1}                              /* sentinel */
 };
 
+/* SP-MIDI 1.0b / 3GPP profile Figure 7. MIDI note numbers; first = substitute. */
 static const int8_t g_spmidi_percussion_groups[][16] = {
-    {36,35,-1},       /* Bass Drum → 36 */
-    {40,38,39,-1},    /* Snare → 40 */
-    {42,44,71,80,-1}, /* Closed HH → 42 */
-    {46,55,-1},       /* Open HH → 46 */
-    {49,57,-1},       /* Crash → 49 */
-    {50,47,48,-1},    /* High Tom → 50 */
-    {45,41,43,-1},    /* Low Tom → 45 */
-    {51,52,53,59,-1}, /* Ride → 51 */
-    {54,-1},          /* Tambourine → 54 */
-    {62,60,65,78,-1}, /* Mute Hi Conga → 62 */
-    {64,61,63,66,79,-1}, /* Low Conga → 64 */
-    {70,69,-1},       /* Maracas → 70 */
-    {75,37,56,-1},    /* Claves → 75 */
-    {67,68,-1},       /* Agogo → 67 */
-    {72,-1},          /* Long Whistle → 72 */
-    {73,-1},          /* Short Guiro → 73 */
-    {74,-1},          /* Long Guiro → 74 */
-    {76,77,-1},       /* Wood Block → 76 */
-    {81,-1},          /* Open Triangle → 81 */
-    {-1}              /* sentinel */
+    {36,35,-1},              /* Bass Drum → 36 */
+    {40,38,-1},              /* Snare → 40 */
+    {42,44,71,80,-1},        /* Closed HH → 42 */
+    {46,55,58,74,81,72,-1},  /* Open HH → 46 */
+    {49,57,-1},              /* Crash → 49 */
+    {50,48,-1},              /* High Tom → 50 */
+    {45,43,41,47,-1},        /* Low Tom → 45 */
+    {51,52,53,59,-1},        /* Ride → 51 */
+    {54,39,-1},              /* Tambourine → 54 */
+    {62,60,65,78,-1},        /* Mute Hi Conga → 62 */
+    {64,61,63,66,79,-1},     /* Low Conga → 64 */
+    {70,69,-1},              /* Maracas → 70 */
+    {75,37,56,67,68,76,77,-1}, /* Claves → 75 */
+    {-1}                     /* sentinel */
 };
 
 /* SP-MIDI 1.0b Figure 7: percussion key remap.  Each group's first
