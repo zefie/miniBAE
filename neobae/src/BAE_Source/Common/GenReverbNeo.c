@@ -114,6 +114,19 @@
 static const int32_t neo_tap_delays[] = {4410, 8820, 13230, 17640};
 static const int32_t neo_tap_gains[] = {XFIXED_1, 52428, 39321, 26214};  // Descending gains
 
+static void PV_AddWetPairToDry(int32_t *destP, int frame, int32_t wetL, int32_t wetR)
+{
+    if (MusicGlobals && MusicGlobals->generateStereoOutput)
+    {
+        destP[frame * 2] += wetL;
+        destP[frame * 2 + 1] += wetR;
+    }
+    else
+    {
+        destP[frame] += (wetL / 2) + (wetR / 2);
+    }
+}
+
 
 // ==============================================================================
 // MobileBAE Types
@@ -707,8 +720,9 @@ static void PV_ProcessNeoTapReverb(int32_t *sourceP, int32_t *destP, int numFram
         {
             int32_t wetL = PV_MulQ16_Round(params->mFilterMemoryL, params->mWetGain);
             int32_t wetR = PV_MulQ16_Round(params->mFilterMemoryR, params->mWetGain);
-            destP[frame * 2] += (int32_t)(((int64_t)wetL) << NEO_WETSHIFT);
-            destP[frame * 2 + 1] += (int32_t)(((int64_t)wetR) << NEO_WETSHIFT);
+            PV_AddWetPairToDry(destP, frame,
+                               (int32_t)(((int64_t)wetL) << NEO_WETSHIFT),
+                               (int32_t)(((int64_t)wetR) << NEO_WETSHIFT));
         }
     }
 }
@@ -850,8 +864,9 @@ static void PV_ProcessNeoCustomReverb(int32_t *sourceP, int32_t *destP, int numF
         {
             int32_t wetL = PV_MulQ16_Round(params->mFilterMemoryL, params->mWetGain);
             int32_t wetR = PV_MulQ16_Round(params->mFilterMemoryR, params->mWetGain);
-            destP[frame * 2] += (int32_t)(((int64_t)wetL) << NEO_WETSHIFT);
-            destP[frame * 2 + 1] += (int32_t)(((int64_t)wetR) << NEO_WETSHIFT);
+            PV_AddWetPairToDry(destP, frame,
+                               (int32_t)(((int64_t)wetL) << NEO_WETSHIFT),
+                               (int32_t)(((int64_t)wetR) << NEO_WETSHIFT));
         }
     }
 }
@@ -1241,7 +1256,7 @@ void CheckMobileReverbType(void) {
     }
 }
 
-static void addStereoWet(int32_t *stereoMix, int wet) {
+static void addStereoWet(int32_t *destP, int frame, int wet) {
     int oldL = gMobileReverb.stereoL[gMobileReverb.stereoRead];
     int oldR = gMobileReverb.stereoR[gMobileReverb.stereoRead];
     int deltaL = mobile_mulShift(26214, wet - oldL, 16);
@@ -1258,11 +1273,10 @@ static void addStereoWet(int32_t *stereoMix, int wet) {
     outL = PV_MulQ16_Round(outL, params->mWetGain);
     outR = PV_MulQ16_Round(outR, params->mWetGain);
     
-    // Add to stereo output
+    // Add to dry output (stereo-interleaved, or packed mono)
     // The Java original uses << 10, but miniBAE's mix headroom is different.
     // Shift << 9 tames the hotness (-6dB) and integrates better with the dry mix.
-    stereoMix[0] += outL << 9;
-    stereoMix[1] += outR << 9;
+    PV_AddWetPairToDry(destP, frame, outL << 9, outR << 9);
     
     gMobileReverb.stereoRead = (gMobileReverb.stereoRead + 1) & 0x1FF;
     gMobileReverb.stereoWrite = (gMobileReverb.stereoWrite + 1) & 0x1FF;
@@ -1304,7 +1318,7 @@ void RunMobileReverb(int32_t *sourceP, int32_t *destP, int numFrames) {
         int target = diffusionSum + earlyValue + 2 * earlyOld;
         gMobileReverb.wetSmoothingState = mobile_clamp16(gMobileReverb.wetSmoothingState + mobile_mulShift(gMobileReverb.wetSmoothingGain, target - gMobileReverb.wetSmoothingState, 16));
         
-        addStereoWet(&destP[frame * 2], gMobileReverb.wetSmoothingState);
+        addStereoWet(destP, frame, gMobileReverb.wetSmoothingState);
     }
 }
 

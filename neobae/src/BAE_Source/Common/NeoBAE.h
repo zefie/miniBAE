@@ -112,7 +112,8 @@ extern "C"
     {
         BAE_DROP_SAMPLE = 0,
         BAE_2_POINT_INTERPOLATION,
-        BAE_LINEAR_INTERPOLATION
+        BAE_LINEAR_INTERPOLATION,
+        BAE_SINC_INTERPOLATION
     } BAETerpMode;
 
     // Supported sample rates
@@ -2063,6 +2064,11 @@ extern "C"
     // and no chorus processing in the fixed reverb path.
     BAEResult BAE_SetClassicChorus(BAE_BOOL enable);
     BAEResult BAE_GetClassicChorus(BAE_BOOL *outEnable);
+
+    // Classic (BAE 1.x) LFO/envelope slice clock. Default off uses the 2.x
+    // mixer-buffer-scaled lfoBufferTime.
+    BAEResult BAE_SetClassicLFO(BAE_BOOL enable);
+    BAEResult BAE_GetClassicLFO(BAE_BOOL *outEnable);
 
 #if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
     // Per-channel voice capture (for per-channel dry STEM recording)

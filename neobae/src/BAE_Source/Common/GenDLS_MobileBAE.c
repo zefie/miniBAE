@@ -4637,6 +4637,7 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
     int32_t voiceLimit = DLS_MAX_VOICE_POOL;
     int scalar_modifier = -2;
     const int dlsGainFactor = 5;
+    bool stereoOut = pSong->pMixer->generateStereoOutput ? TRUE : FALSE;
     /* Main bank and XMF overlay can have independent balance scales. */
     int32_t balMainQ16 = (int32_t)(GM_BankBalance_GetMixScale(GM_BANK_ENGINE_DLS) * 65536.0f);
     int32_t balXmfQ16 = (int32_t)(GM_BankBalance_GetMixScale(GM_BANK_ENGINE_DLS_XMF) * 65536.0f);
@@ -4906,8 +4907,18 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
             }
         }
         
-        int64_t mixedLeft = (int64_t)pBuffer[f * 2] + ((32 * leftOut) >> dlsGainFactor);
-        int64_t mixedRight = (int64_t)pBuffer[f * 2 + 1] + ((32 * rightOut) >> dlsGainFactor);
+        int64_t mixedLeft;
+        int64_t mixedRight;
+        if (stereoOut)
+        {
+            mixedLeft = (int64_t)pBuffer[f * 2] + ((32 * leftOut) >> dlsGainFactor);
+            mixedRight = (int64_t)pBuffer[f * 2 + 1] + ((32 * rightOut) >> dlsGainFactor);
+        }
+        else
+        {
+            mixedLeft = (int64_t)pBuffer[f] + ((32 * ((leftOut + rightOut) / 2)) >> dlsGainFactor);
+            mixedRight = mixedLeft;
+        }
 
         {
             const int64_t limit = (int64_t)32767 << OUTPUT_SCALAR;
@@ -4939,8 +4950,15 @@ void GM_DLS_RenderAudioSlice(GM_Song* pSong, int32_t* pBuffer, int32_t* pReverbB
             if (mixedRight > limit) mixedRight = limit;
             else if (mixedRight < -limit) mixedRight = -limit;
         }
-        pBuffer[f * 2] = (int32_t)mixedLeft;
-        pBuffer[f * 2 + 1] = (int32_t)mixedRight;
+        if (stereoOut)
+        {
+            pBuffer[f * 2] = (int32_t)mixedLeft;
+            pBuffer[f * 2 + 1] = (int32_t)mixedRight;
+        }
+        else
+        {
+            pBuffer[f] = (int32_t)mixedLeft;
+        }
         if (pReverbBuffer) {
             int64_t mixedReverb = (int64_t)pReverbBuffer[f] + ((20 * revOut) >> dlsGainFactor);
             pReverbBuffer[f] = (int32_t)(mixedReverb > INT32_MAX ? INT32_MAX : (mixedReverb < INT32_MIN ? INT32_MIN : mixedReverb));

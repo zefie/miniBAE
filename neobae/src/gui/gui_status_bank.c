@@ -978,7 +978,7 @@ else                               \
         sbg.a = 180;
     }
     if (g_show_settings_dialog)
-        sbg = g_button_base;
+        sbg = g_button_press;
     draw_rect(R, settingsBtn, sbg);
     draw_frame(R, settingsBtn, g_button_border);
     int tw = 0, th = 0;
@@ -986,10 +986,9 @@ else                               \
     draw_text(R, settingsBtn.x + (settingsBtn.w - tw) / 2, settingsBtn.y + (settingsBtn.h - th) / 2, "Settings", g_button_text);
     if (settingsEnabled && !modal_block && ui_mclick && overSettings)
     {
-        g_show_settings_dialog = !g_show_settings_dialog;
-        if (g_show_settings_dialog)
+        settings_window_toggle();
+        if (settings_window_is_visible())
         {
-            g_volumeCurveDropdownOpen = false;
             g_show_rmf_info_dialog = false;
         }
     }
@@ -1006,7 +1005,7 @@ else                               \
         g_show_about_dialog = !g_show_about_dialog;
         if (g_show_about_dialog)
         {
-            g_show_settings_dialog = false;
+            settings_window_hide();
             g_show_rmf_info_dialog = false;
             g_about_page = 0;
             g_about_credits_scroll = 0;

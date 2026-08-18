@@ -2728,6 +2728,7 @@ static BAE_BOOL PV_BAEMixer_ValidateObject(BAEMixer mixer, void *theObject, BAE_
 static BAEResult PV_BAEMixer_AddBank(BAEMixer mixer, XFILE newPatchFile);
 static void PV_BAEMixer_SubmitBankOrder(BAEMixer mixer);
 static bool PV_XFileHasModernCodecSamples(XFILE fileRef);
+static void PV_EnableZmfCompatIfMixerHasZsb(BAESong song);
 static GM_Waveform *PV_ReadADPIntoMemoryFromMemory(void *pMemoryFile, uint32_t memoryFileSize, OPErr *pErr);
 
 static BAE_FIXED PV_CalculateTimeDeltaForFade(
@@ -3180,6 +3181,26 @@ BAEResult BAE_GetClassicChorus(BAE_BOOL *outEnable)
 #endif
 }
 
+BAEResult BAE_SetClassicLFO(BAE_BOOL enable)
+{
+    GM_Mixer *pMixer = MusicGlobals;
+    if (!pMixer)
+        return BAE_NOT_SETUP;
+    pMixer->classicLFO = (bool)enable;
+    return BAE_NO_ERROR;
+}
+
+BAEResult BAE_GetClassicLFO(BAE_BOOL *outEnable)
+{
+    if (!outEnable)
+        return BAE_PARAM_ERR;
+    GM_Mixer *pMixer = MusicGlobals;
+    if (!pMixer)
+        return BAE_NOT_SETUP;
+    *outEnable = (BAE_BOOL)pMixer->classicLFO;
+    return BAE_NO_ERROR;
+}
+
 #if !defined(__ANDROID__) && !defined(__EMSCRIPTEN__)
 
 BAEResult BAE_EnableChannelCapture(BAEMixer mixer, const char *outputDir)
@@ -3322,6 +3343,66 @@ BAEResult BAESong_SetZmfCompatibilityMode(BAESong song, BAE_BOOL enable)
         song->pSong->engineConfigFlags &= ~((uint32_t)SONG_CONFIG_CONTAINER_IS_ZMF);
     }
     return BAE_NO_ERROR;
+}
+
+static bool PV_XFileIsZsbContainer(XFILE fileRef)
+{
+#if USE_ZMF_SUPPORT == TRUE
+    XFILERESOURCEMAP map;
+    int32_t savedPos;
+
+    if (!fileRef)
+    {
+        return FALSE;
+    }
+    if (XFileGetForceZsbFeatures(fileRef))
+    {
+        return TRUE;
+    }
+    savedPos = XFileGetPosition(fileRef);
+    if (savedPos < 0)
+    {
+        return FALSE;
+    }
+    if (XFileSetPosition(fileRef, 0L) != 0)
+    {
+        return FALSE;
+    }
+    if (XFileRead(fileRef, (XPTR)&map, (int32_t)sizeof(XFILERESOURCEMAP)) != 0)
+    {
+        (void)XFileSetPosition(fileRef, savedPos);
+        return FALSE;
+    }
+    (void)XFileSetPosition(fileRef, savedPos);
+    return (XGetLong(&map.mapID) == XFILERESOURCE_ZMF_ID) ? TRUE : FALSE;
+#else
+    (void)fileRef;
+    return FALSE;
+#endif
+}
+
+/* MIDI + ZSB: SONG_TYPE_SMS merge zeros engineConfigFlags, so short loops and
+ * other ZMF gates would stay off unless we re-tag from the open bank. */
+static void PV_EnableZmfCompatIfMixerHasZsb(BAESong song)
+{
+#if USE_ZMF_SUPPORT == TRUE
+    int16_t i;
+
+    if (!song || song->mID != OBJECT_ID || !song->pSong || !song->mixer)
+    {
+        return;
+    }
+    for (i = 0; i < song->mixer->numPatchFiles; i++)
+    {
+        if (PV_XFileIsZsbContainer(song->mixer->pPatchFiles[i]))
+        {
+            song->pSong->engineConfigFlags |= SONG_CONFIG_CONTAINER_IS_ZMF;
+            return;
+        }
+    }
+#else
+    (void)song;
+#endif
 }
 
 #if 0
@@ -4030,6 +4111,13 @@ static TerpMode PV_GetDefaultTerp(BAETerpMode t)
         theTerp = E_2_POINT_INTERPOLATION;
         break;
 #endif
+    case BAE_SINC_INTERPOLATION:
+#if LOOPS_USED == U3232_LOOPS
+        theTerp = E_SINC_INTERPOLATION_U3232;
+        break;
+#endif
+        /* Fall back to linear on mixers that never got U3232. */
+        /* FALLTHROUGH */
     default:
     case BAE_LINEAR_INTERPOLATION:
 #if USE_TERP2 == TRUE
@@ -4105,6 +4193,7 @@ BAEResult BAEMixer_Open(BAEMixer mixer,
             case BAE_DROP_SAMPLE:
             case BAE_2_POINT_INTERPOLATION:
             case BAE_LINEAR_INTERPOLATION:
+            case BAE_SINC_INTERPOLATION:
                 theTerp = PV_GetDefaultTerp(t);
                 break;
             default:
@@ -4119,7 +4208,7 @@ BAEResult BAEMixer_Open(BAEMixer mixer,
             }
             else
             {
-                am &= BAE_USE_16; // 8 bit
+                am &= ~BAE_USE_16; // 8 bit (do not drop BAE_USE_STEREO)
             }
 
             if ((am & BAE_USE_STEREO) && XIsStereoSupported())
@@ -5053,6 +5142,7 @@ BAEResult BAEMixer_ChangeAudioModes(BAEMixer mixer, BAERate q, BAETerpMode t, BA
         case BAE_DROP_SAMPLE:
         case BAE_2_POINT_INTERPOLATION:
         case BAE_LINEAR_INTERPOLATION:
+        case BAE_SINC_INTERPOLATION:
             theTerp = PV_GetDefaultTerp(t);
             break;
         default:
@@ -9813,6 +9903,7 @@ static BAEResult PV_BAESong_InitLiveSong(BAESong song, BAE_BOOL addToMixer)
 #if USE_SF2_SUPPORT == TRUE
             if (GM_SF2_IsActive()) { GM_EnableSF2ForSong(song->pSong, TRUE); }
 #endif
+            PV_EnableZmfCompatIfMixerHasZsb(song);
             /* Keep the mixer's current reverb type (per-mixer, not process-global). */
             GM_SetReverbType(GM_GetReverbType());
 
@@ -10327,6 +10418,7 @@ BAEResult BAESong_LoadMidiFromMemory(BAESong song, void const *pMidiData, uint32
                         GM_SetSongLoopFlag(pSong, FALSE);               // don't loop song
                         GM_SetVelocityCurveType(pSong, (VelocityCurveType)g_defaultVelocityCurve);
                         song->pSong = pSong;                            // preserve for use later
+                        PV_EnableZmfCompatIfMixerHasZsb(song);
 #if USE_SF2_SUPPORT == TRUE
                         if (GM_SF2_IsActive()) { GM_EnableSF2ForSong(song->pSong, TRUE); }
 #endif
@@ -15089,6 +15181,9 @@ static BAETerpMode PV_TranslateTerpModeToBAETerpMode(TerpMode mode_in)
     case E_LINEAR_INTERPOLATION_FLOAT:
     case E_LINEAR_INTERPOLATION_U3232:
         mode_out = BAE_LINEAR_INTERPOLATION;
+        break;
+    case E_SINC_INTERPOLATION_U3232:
+        mode_out = BAE_SINC_INTERPOLATION;
         break;
     default:
         BAE_ASSERT(FALSE);

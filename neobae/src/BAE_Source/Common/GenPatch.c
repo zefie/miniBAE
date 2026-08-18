@@ -866,8 +866,10 @@ static GM_Instrument * PV_CreateInstrumentFromResource(GM_Instrument *theMaster,
 #endif
                 theI->useSampleRate = FALSE;
                 theI->sampleAndHold = FALSE;
-                theI->minLoopSize = (unsigned char)MIN_LOOP_SIZE_RMF;
                 theI->sourceIsZsb = PV_IsZsbBankToken(bankToken);
+                theI->minLoopSize = theI->sourceIsZsb
+                                        ? (unsigned char)MIN_LOOP_SIZE_ZMF
+                                        : (unsigned char)MIN_LOOP_SIZE_RMF;
             }
             theI->u.w.bitSize = sndInfo->bitSize;
             theI->u.w.channels = sndInfo->channels;
@@ -900,9 +902,13 @@ static GM_Instrument * PV_CreateInstrumentFromResource(GM_Instrument *theMaster,
     return theI;
 }
 
-static unsigned char PV_GetInstrumentMinLoopSize(const GM_Song *pSong)
+static unsigned char PV_GetInstrumentMinLoopSize(const GM_Song *pSong, XBankToken bankToken)
 {
     if (pSong && (pSong->engineConfigFlags & SONG_CONFIG_CONTAINER_IS_ZMF))
+    {
+        return (unsigned char)MIN_LOOP_SIZE_ZMF;
+    }
+    if (PV_IsZsbBankToken(bankToken))
     {
         return (unsigned char)MIN_LOOP_SIZE_ZMF;
     }
@@ -1009,7 +1015,7 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                         TEST_FLAG_VALUE(sndInfo->sndFlags, XSOUND_ADVANCED_INTERPOLATION) ||
                         TEST_FLAG_VALUE(header.flags2, ZBF_advancedInterpolation);
                     theI->sampleOffsetStartEnabled = TEST_FLAG_VALUE(header.flags2, ZBF_enableSampleOffsetStart);
-                    theI->minLoopSize = PV_GetInstrumentMinLoopSize(pSong);
+                    theI->minLoopSize = PV_GetInstrumentMinLoopSize(pSong, bankToken);
                     theI->useSoundModifierAsRootKey = TEST_FLAG_VALUE(header.flags2, ZBF_useSoundModifierAsRootKey);
                     PV_GetEnvelopeData(theX, theI, patchSize);
                     theI->u.w.bitSize = sndInfo->bitSize;
@@ -1066,7 +1072,7 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                     theI->sampleAndHold = TEST_FLAG_VALUE(header.flags1, ZBF_sampleAndHold);
                     theI->advancedInterpolation = FALSE;
                     theI->sampleOffsetStartEnabled = FALSE;
-                    theI->minLoopSize = PV_GetInstrumentMinLoopSize(pSong);
+                    theI->minLoopSize = PV_GetInstrumentMinLoopSize(pSong, bankToken);
                     theI->useSoundModifierAsRootKey = TEST_FLAG_VALUE(header.flags2, ZBF_useSoundModifierAsRootKey);
                     PV_GetEnvelopeData(theX, theI, patchSize);
                     if (!theI->useOscillator)
@@ -1142,7 +1148,7 @@ GM_Instrument * PV_GetInstrument(GM_Mixer *pMixer, GM_Song *pSong,
                 theI->sampleOffsetStartEnabled = TEST_FLAG_VALUE(header.flags2, ZBF_enableSampleOffsetStart);
                 /* Propagated to splits in PV_CreateInstrumentFromResource (OR with per-SND bit). */
                 theI->advancedInterpolation = TEST_FLAG_VALUE(header.flags2, ZBF_advancedInterpolation);
-                theI->minLoopSize = PV_GetInstrumentMinLoopSize(pSong);
+                theI->minLoopSize = PV_GetInstrumentMinLoopSize(pSong, bankToken);
                 theI->useSoundModifierAsRootKey = TEST_FLAG_VALUE(header.flags2, ZBF_useSoundModifierAsRootKey);
                 PV_GetEnvelopeData(theX, theI, patchSize);
                 theI->u.k.KeymapSplitCount = header.keySplitCount;

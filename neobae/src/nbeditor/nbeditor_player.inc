@@ -13,6 +13,11 @@
         }
     }
 
+    void ResetPeakVoices()
+    {
+        m_peak_voices = 0;
+    }
+
     bool FindNrpnAtTick0(unsigned char msb,
                          unsigned char lsb,
                          uint16_t *out_track,
@@ -658,11 +663,32 @@
                 BAEMixer_GetRealtimeStatus(m_mixer, &info);
             }
             UpdateKeyboardVoiceActivity(info);
+            if (m_song && static_cast<int>(info.voicesActive) > m_peak_voices)
+            {
+                m_peak_voices = static_cast<int>(info.voicesActive);
+            }
+            const int voice_cap = std::max(1, m_song_settings_voices);
             const float voices_ratio =
-                std::min(1.0f, static_cast<float>(info.voicesActive) / 128.0f);
-            char voices_label[32];
-            std::snprintf(voices_label, sizeof(voices_label), "Voices %d", static_cast<int>(info.voicesActive));
-            ImGui::ProgressBar(voices_ratio, ImVec2(-1.0f, 14.0f), voices_label);
+                std::min(1.0f, static_cast<float>(info.voicesActive) / static_cast<float>(voice_cap));
+            char voices_label[48];
+            if (m_show_peak_voices)
+            {
+                std::snprintf(voices_label,
+                              sizeof(voices_label),
+                              "Voices %d (peak %d)",
+                              static_cast<int>(info.voicesActive),
+                              m_peak_voices);
+            }
+            else
+            {
+                std::snprintf(voices_label, sizeof(voices_label), "Voices %d",
+                              static_cast<int>(info.voicesActive));
+            }
+            ImGui::ProgressBar(voices_ratio, ImVec2(-1.0f, ImGui::GetFrameHeight()), voices_label);
+            if (ImGui::Checkbox("Show peak voices", &m_show_peak_voices))
+            {
+                SaveEditorPrefsToDisk();
+            }
         }
         ImGui::EndChild();
         ImGui::PopStyleColor();

@@ -824,7 +824,7 @@ static GM_ReverbConfigure verbTypes[MAX_REVERB_TYPES] =
         (kNumberOfDiffusionStages * kDiffusionBufferFrameSize * sizeof(int32_t)) +
             (sizeof(int32_t) * kStereoizerBufferFrameSize * 2) + 
             ((kCombBufferFrameSize*kNumberOfCombFilters + kEarlyReflectionBufferFrameSize) * sizeof(int32_t)),
-        NULL,
+        PV_RunStereoNewReverb,
         PV_RunStereoNewReverb
     },
     {   // Basement (variable verb)
@@ -834,7 +834,7 @@ static GM_ReverbConfigure verbTypes[MAX_REVERB_TYPES] =
         (kNumberOfDiffusionStages * kDiffusionBufferFrameSize * sizeof(int32_t)) +
             (sizeof(int32_t) * kStereoizerBufferFrameSize * 2) + 
             ((kCombBufferFrameSize*kNumberOfCombFilters + kEarlyReflectionBufferFrameSize) * sizeof(int32_t)),
-        NULL,
+        PV_RunStereoNewReverb,
         PV_RunStereoNewReverb
     },
     {   // Banquet hall (variable verb)
@@ -844,7 +844,7 @@ static GM_ReverbConfigure verbTypes[MAX_REVERB_TYPES] =
         (kNumberOfDiffusionStages * kDiffusionBufferFrameSize * sizeof(int32_t)) +
             (sizeof(int32_t) * kStereoizerBufferFrameSize * 2) + 
             ((kCombBufferFrameSize*kNumberOfCombFilters + kEarlyReflectionBufferFrameSize) * sizeof(int32_t)),
-        NULL,
+        PV_RunStereoNewReverb,
         PV_RunStereoNewReverb
     },
     {   // Catacombs (variable verb)
@@ -854,7 +854,7 @@ static GM_ReverbConfigure verbTypes[MAX_REVERB_TYPES] =
         (kNumberOfDiffusionStages * kDiffusionBufferFrameSize * sizeof(int32_t)) +
             (sizeof(int32_t) * kStereoizerBufferFrameSize * 2) + 
             ((kCombBufferFrameSize*kNumberOfCombFilters + kEarlyReflectionBufferFrameSize) * sizeof(int32_t)),
-        NULL,
+        PV_RunStereoNewReverb,
         PV_RunStereoNewReverb
 #if USE_NEO_EFFECTS == TRUE        
     },
@@ -902,7 +902,7 @@ static GM_ReverbConfigure verbTypes[MAX_REVERB_TYPES] =
         0,                              // No threshold - always enabled when selected
         TRUE,                           // fixed (uses separate buffer system)
         0,                              // Uses own buffer allocation
-        NULL,
+        PV_RunStereoNeoReverb,
         PV_RunStereoNeoReverb
     },
     {   // MT-32 Hall (Neo reverb)
@@ -910,7 +910,7 @@ static GM_ReverbConfigure verbTypes[MAX_REVERB_TYPES] =
         0,                              // No threshold - always enabled when selected
         TRUE,                           // fixed (uses separate buffer system)
         0,                              // Uses own buffer allocation
-        NULL,
+        PV_RunStereoNeoReverb,
         PV_RunStereoNeoReverb
     },
     {   // MT-32 Tap Delay (Neo reverb)
@@ -918,7 +918,7 @@ static GM_ReverbConfigure verbTypes[MAX_REVERB_TYPES] =
         0,                              // No threshold - always enabled when selected
         TRUE,                           // fixed (uses separate buffer system)
         0,                              // Uses own buffer allocation
-        NULL,
+        PV_RunStereoNeoReverb,
         PV_RunStereoNeoReverb
     },
     {   // MT-32 Tap Delay (Neo reverb)
@@ -926,7 +926,7 @@ static GM_ReverbConfigure verbTypes[MAX_REVERB_TYPES] =
         0,                              // No threshold - always enabled when selected
         TRUE,                           // fixed (uses separate buffer system)
         0,                              // Uses own buffer allocation
-        NULL,
+        PV_RunStereoNeoReverb,
         PV_RunStereoNeoReverb
     },
     {   // MT-32 Tap Delay (Neo reverb)
@@ -934,7 +934,7 @@ static GM_ReverbConfigure verbTypes[MAX_REVERB_TYPES] =
         0,                              // No threshold - always enabled when selected
         TRUE,                           // fixed (uses separate buffer system)
         0,                              // Uses own buffer allocation
-        NULL,
+        PV_RunStereoNeoReverb,
         PV_RunStereoNeoReverb
     },
     {   // MobileBAE (Neo reverb)
@@ -942,7 +942,7 @@ static GM_ReverbConfigure verbTypes[MAX_REVERB_TYPES] =
         0,                              // No threshold - always enabled when selected
         TRUE,                           // fixed (uses separate buffer system)
         0,                              // Uses own buffer allocation
-        NULL,
+        PV_RunStereoMobileReverb,
         PV_RunStereoMobileReverb
     },
     {   // MT-32 Tap Delay (Neo reverb)
@@ -950,7 +950,7 @@ static GM_ReverbConfigure verbTypes[MAX_REVERB_TYPES] =
         0,                              // No threshold - always enabled when selected
         TRUE,                           // fixed (uses separate buffer system)
         0,                              // Uses own buffer allocation
-        NULL,
+        PV_RunStereoNeoReverb,
         PV_RunStereoNeoReverb
     }   
 #endif

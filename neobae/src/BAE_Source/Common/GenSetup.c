@@ -630,6 +630,7 @@ OPErr GM_InitGeneralSound(void *threadContext, Rate theRate, TerpMode theTerp, A
         case E_LINEAR_INTERPOLATION:
         case E_LINEAR_INTERPOLATION_FLOAT:
         case E_LINEAR_INTERPOLATION_U3232:
+        case E_SINC_INTERPOLATION_U3232:
             break;
         default:
             theErr = PARAM_ERR;
@@ -772,6 +773,7 @@ OPErr GM_InitGeneralSound(void *threadContext, Rate theRate, TerpMode theTerp, A
 #if BAE_CLASSIC_CHORUS
         pMixer->classicChorus = FALSE;      // use DLS-spec chorus ordering by default
 #endif
+        pMixer->classicLFO = FALSE;
         pMixer->syncCount = XMicroseconds();
         pMixer->samplesPlayed = 0;
         pMixer->samplesWritten = 0;
@@ -840,6 +842,7 @@ OPErr GM_ChangeAudioModes(void *threadContext,
             case E_LINEAR_INTERPOLATION:
             case E_LINEAR_INTERPOLATION_FLOAT:
             case E_LINEAR_INTERPOLATION_U3232:
+            case E_SINC_INTERPOLATION_U3232:
                 break;
             default:
                 theErr = PARAM_ERR;

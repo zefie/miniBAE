@@ -603,7 +603,7 @@ if (showKeyboard || (g_bae.is_audio_file && g_bae.sound))
                 measure_text(nb, &tw, &th);
                 draw_text(R, x + 2, kbY + kbH - (th + 2), nb, g_is_dark_mode ? (SDL_Color){20, 20, 25, 255} : (SDL_Color){30, 30, 30, 255});
             }
-            if (!g_keyboard_channel_dd_open && !modal_block && !g_reverbDropdownOpen && !g_exportDropdownOpen &&
+            if (!g_keyboard_channel_dd_open && !modal_block && !g_reverbDropdownOpen &&
                  !g_exporting && ui_mx >= x && ui_mx < x + w && ui_my >= kbY && ui_my < kbY + kbH)
             {
                 mouseNoteCandidateWhite = n;
@@ -664,7 +664,7 @@ if (showKeyboard || (g_bae.is_audio_file && g_bae.sound))
                 keyCol = g_highlight_color;
             draw_rect(R, (Rect){bx, kbY, bw, bh}, keyCol);
             draw_frame(R, (Rect){bx, kbY, bw, bh}, g_panel_border);
-            if (!g_keyboard_channel_dd_open && !modal_block && !g_reverbDropdownOpen && !g_exportDropdownOpen && 
+            if (!g_keyboard_channel_dd_open && !modal_block && !g_reverbDropdownOpen && 
 #if SUPPORT_MIDI_HW == TRUE
 #endif                        
                 !g_exporting && ui_mx >= bx && ui_mx < bx + bw && ui_my >= kbY && ui_my < kbY + bh)
@@ -676,7 +676,7 @@ if (showKeyboard || (g_bae.is_audio_file && g_bae.sound))
     // Determine hovered note (black takes precedence over white)
     int mouseNote = (mouseNoteCandidateBlack != -1) ? mouseNoteCandidateBlack : mouseNoteCandidateWhite;
     // Interaction: monophonic click-n-drag play (velocity varies by vertical position)
-    if (!modal_block && !g_keyboard_channel_dd_open && !g_reverbDropdownOpen && !g_exportDropdownOpen && 
+    if (!modal_block && !g_keyboard_channel_dd_open && !g_reverbDropdownOpen && 
 #if SUPPORT_MIDI_HW == TRUE
 #endif
         !g_exporting)

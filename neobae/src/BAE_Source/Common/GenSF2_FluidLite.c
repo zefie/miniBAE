@@ -1489,6 +1489,12 @@ void GM_SF2_RenderAudioSlice(GM_Song* pSong, int32_t* mixBuffer, int32_t* reverb
         return;
     }
 
+    {
+        GM_Mixer *pMixer = pSong->pMixer ? pSong->pMixer : GM_GetCurrentMixer();
+        if (pMixer)
+            g_fluidsynth_mono_mode = !pMixer->generateStereoOutput;
+    }
+
     
     // Update channel activity decay
     PV_SF2_DecayChannelActivity();

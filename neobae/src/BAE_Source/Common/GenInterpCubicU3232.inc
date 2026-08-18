@@ -36,7 +36,9 @@ static inline int32_t PV_LoopWrapSample16U3232_Shared(int16_t *source, int32_t i
     return (int32_t)source[idx];
 }
 
-/* Mono 16-bit fetch: linear or cubic, scaled >> 6 for LPF mixer paths. */
+#include "GenInterpSincU3232.inc"
+
+/* Mono 16-bit fetch: linear, cubic, or mixer-wide sinc; scaled >> 6 for LPF. */
 static inline int32_t PV_FilterFetchInterp16(GM_Voice *this_voice,
                                              int16_t *source,
                                              U32 cur_wave_i,
@@ -45,6 +47,11 @@ static inline int32_t PV_FilterFetchInterp16(GM_Voice *this_voice,
 {
     int32_t b, c;
 
+    if (PV_U3232UseSincInterp())
+    {
+        return PV_SincInterp16Stride(this_voice, source, (int32_t)cur_wave_i, cur_wave_f,
+                                     looping ? 1 : 0, 1, 0) >> 6;
+    }
     if (!this_voice->advancedInterpolation)
     {
         b = source[cur_wave_i];
@@ -85,6 +92,14 @@ static inline void PV_FilterFetchInterp16Stereo(GM_Voice *this_voice,
                                                 int32_t *outL,
                                                 int32_t *outR)
 {
+    if (PV_U3232UseSincInterp())
+    {
+        *outL = PV_SincInterp16Stride(this_voice, source, (int32_t)cur_wave_i, cur_wave_f,
+                                      looping ? 1 : 0, 2, 0) >> 6;
+        *outR = PV_SincInterp16Stride(this_voice, source, (int32_t)cur_wave_i, cur_wave_f,
+                                      looping ? 1 : 0, 2, 1) >> 6;
+        return;
+    }
     if (!this_voice->advancedInterpolation)
     {
         int16_t *cs = source + cur_wave_i * 2;

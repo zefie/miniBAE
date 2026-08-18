@@ -466,6 +466,8 @@ static const char usageExtra[] =
     "                 -mr {sample rate in Hz (default: 44100)}\n"
     "                 -ns {mono output (no stereo)}\n"
     "                 -2p {2-point interpolation instead of linear}\n"
+    "                 -sinc {windowed sinc interpolation}\n"
+    "                 -8 {8-bit mixer output}\n"
     "                 -mv {max MIDI voices (default: 64)}\n"
     "                 -cl {list velocity curves}\n"
     "                 -rl {list reverb types}\n"
@@ -1992,6 +1994,10 @@ int main(int argc, char *argv[])
         mods &= ~BAE_USE_STEREO; /* mono */
     if (PV_ParseCommands(argc, argv, "-2p", 0, NULL))
         interpol = BAE_2_POINT_INTERPOLATION;
+    if (PV_ParseCommands(argc, argv, "-sinc", 0, NULL))
+        interpol = BAE_SINC_INTERPOLATION;
+    if (PV_ParseCommands(argc, argv, "-8", 0, NULL))
+        mods &= ~BAE_USE_16;
     if (PV_ParseCommands(argc, argv, "-mv", 1, tmpBuf)) {
         maxVoices = atoi(tmpBuf);
         if (maxVoices < BAE_MIN_VOICES) maxVoices = BAE_MIN_VOICES;

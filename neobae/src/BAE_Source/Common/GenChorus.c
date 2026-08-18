@@ -441,14 +441,16 @@ void RunChorus(int32_t *sourceP, int32_t *destP, int nSampleFrames)
         
     
 
-    // write to output
-#if 1
-        *destP++ += (tapL ) ;
-        *destP++ += (tapR ) ;
-#else
-        *destP++ = 0;
-        *destP++ = 0;
-#endif
+    // write to output (dry bus is stereo-interleaved, or packed mono)
+        if (MusicGlobals && MusicGlobals->generateStereoOutput)
+        {
+            *destP++ += tapL;
+            *destP++ += tapR;
+        }
+        else
+        {
+            *destP++ += (tapL / 2) + (tapR / 2);
+        }
     
     // increment the read head by fractional amounts    
         readIndexL += readIndexIncrL;

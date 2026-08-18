@@ -491,7 +491,7 @@ static void * PV_FindSongResourceTypePointer(SongResource_RMF *songRMF, SongReso
 //
 // dataTarget or lengthTarget can be NULL. If not NULL, then data will be placed there
 // if both are non-NULL, *lengthTarget is assumed to be the length in bytes of the block at dataTarget
-static void PV_FillSongResource(SongResourceType resourceType, int16_t resourceCount, bool encrypted, 
+static bool PV_FillSongResource(SongResourceType resourceType, int16_t resourceCount, bool encrypted, 
                                 void* pResourceData, uint32_t resourceDataLength, 
                                 void* dataTarget, uint32_t* lengthTarget)
 {
@@ -499,9 +499,11 @@ static void PV_FillSongResource(SongResourceType resourceType, int16_t resourceC
     int16_t           count, subCount;
     SongResourceType    type;
     bool               fill;
+    bool               filled;
     uint32_t       length;
     uint32_t       textBytes;
 
+    filled = FALSE;
     if (pResourceData && resourceCount && resourceDataLength)
     {
         pUnit = (char *)pResourceData;
@@ -586,16 +588,34 @@ static void PV_FillSongResource(SongResourceType resourceType, int16_t resourceC
                 case R_INSTRUMENT_REMAP:
                     subCount = (int16_t)XGetShort(pUnit);
                     pUnit += 2;
-                    // format is word count followed by x number of (word, word)
-                    pUnit += sizeof(int16_t) * subCount;
+                    length = sizeof(int16_t) * (uint32_t)subCount;
+                    if (fill)
+                    {
+                        if (dataTarget && length > 0)
+                        {
+                            uint32_t copyBytes = length;
+                            if (lengthTarget && copyBytes > *lengthTarget)
+                            {
+                                copyBytes = *lengthTarget;
+                            }
+                            XBlockMove(pUnit, dataTarget, copyBytes);
+                        }
+                        if (lengthTarget)
+                        {
+                            *lengthTarget = length;
+                        }
+                    }
+                    pUnit += (int32_t)length;
                     break;
             }
             if (fill)
             {
+                filled = TRUE;
                 break;
             }
         }
     }
+    return filled;
 }
 #endif  //USE_FULL_RMF_SUPPORT == TRUE
 
@@ -1754,7 +1774,8 @@ static const SongResourceType   rmf_processTypes[] =
             R_LICENSE_TERM, R_EXPIRATION_DATE, R_COMPOSER_NOTES, 
             R_INDEX_NUMBER, R_PERFORMED_BY, R_GENRE, R_SUB_GENRE,
             R_TEMPO, R_ORIGINAL_SOURCE,
-            R_MANUFACTURER, R_MISC1, R_MISC2, R_MISC3, R_MISC4, R_MISC5, R_MISC6, R_MISC7, R_MISC8 
+            R_MANUFACTURER, R_MISC1, R_MISC2, R_MISC3, R_MISC4, R_MISC5, R_MISC6, R_MISC7, R_MISC8,
+            R_INSTRUMENT_REMAP
             };
 
 SongResource_Info * XGetSongResourceInfo(SongResource *pSong, int32_t songSize)
@@ -1791,6 +1812,25 @@ SongResource_Info * XGetSongResourceInfo(SongResource *pSong, int32_t songSize)
                     pInfo->objectResourceID = (XShortResourceID)XGetShort(&songSMS->midiResourceID);
                     pInfo->songTempo = (uint16_t)XGetShort(&songSMS->songTempo);
                     pInfo->songPitchShift = songSMS->songPitchShift;
+                    {
+                        int16_t maps = (int16_t)XGetShort(&songSMS->remapCount);
+                        if (maps > 0)
+                        {
+                            uint32_t remapBytes = sizeof(int16_t) * 2u * (uint32_t)maps;
+                            pInfo->remaps = (int16_t *)XNewPtr((int32_t)remapBytes);
+                            if (pInfo->remaps)
+                            {
+                                Remap *pMap = (Remap *)&songSMS->remaps;
+                                int16_t mi;
+                                pInfo->remapCount = maps;
+                                for (mi = 0; mi < maps; mi++)
+                                {
+                                    pInfo->remaps[mi * 2] = (int16_t)XGetShort(&pMap[mi].instrumentNumber);
+                                    pInfo->remaps[mi * 2 + 1] = (int16_t)XGetShort(&pMap[mi].ResourceINSTID);
+                                }
+                            }
+                        }
+                    }
                     break;
 
                 case SONG_TYPE_RMF:
@@ -1838,6 +1878,36 @@ SongResource_Info * XGetSongResourceInfo(SongResource *pSong, int32_t songSize)
                 {
                     XGetSongInformation(pSong, songSize, type, text, 8192L);
                     PV_SetStringItemFromResource_info(pInfo, rmf_processTypes[count], XDuplicateStr(text));
+                }
+            }
+            if (((SongResource_SMS *)pSong)->songType == SONG_TYPE_RMF)
+            {
+                songRMF = (SongResource_RMF *)pSong;
+                {
+                    int16_t scratch[(MAX_INSTRUMENTS * MAX_BANKS) * 2];
+                    uint32_t remapBytes = (uint32_t)sizeof(scratch);
+                    uint32_t i;
+
+                    if (PV_FillSongResource(R_INSTRUMENT_REMAP,
+                                        (int16_t)XGetShort(&songRMF->resourceCount),
+                                        (songRMF->locked ? TRUE : FALSE),
+                                        &songRMF->resourceData,
+                                        (uint32_t)(songSize > 0 ? songSize : 0),
+                                        scratch,
+                                        &remapBytes) &&
+                        remapBytes >= (sizeof(int16_t) * 2u) &&
+                        (remapBytes % (sizeof(int16_t) * 2u)) == 0)
+                    {
+                        pInfo->remaps = (int16_t *)XNewPtr((int32_t)remapBytes);
+                        if (pInfo->remaps)
+                        {
+                            pInfo->remapCount = (int16_t)(remapBytes / (sizeof(int16_t) * 2u));
+                            for (i = 0; i < (uint32_t)(pInfo->remapCount * 2); i++)
+                            {
+                                pInfo->remaps[i] = (int16_t)XGetShort(&scratch[i]);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1901,6 +1971,10 @@ SongResource * XNewSongFromSongResourceInfo(SongResource_Info *pSongInfo)
                 for (count = 0; count < max; count++)
                 {
                     type = pProcess[count];
+                    if (type == R_INSTRUMENT_REMAP)
+                    {
+                        continue;
+                    }
                     resourceName = PV_GetStringItemFromResource_info(pSongInfo, type);
                     resourceLength = XStrLen(resourceName);
                     if (resourceLength)
@@ -1914,6 +1988,31 @@ SongResource * XNewSongFromSongResourceInfo(SongResource_Info *pSongInfo)
                             newSong = otherNew;
                         }
                     }
+                }
+            }
+            if (pSongInfo->remapCount > 0 && pSongInfo->remaps &&
+                pSongInfo->songType == SONG_TYPE_RMF)
+            {
+                int16_t wordCount = (int16_t)(pSongInfo->remapCount * 2);
+                int32_t blobLen = (int32_t)(sizeof(int16_t) + (sizeof(int16_t) * (uint32_t)wordCount));
+                char *blob = (char *)XNewPtr(blobLen);
+                if (blob)
+                {
+                    int16_t wi;
+                    XPutShort(blob, (uint16_t)wordCount);
+                    for (wi = 0; wi < wordCount; wi++)
+                    {
+                        XPutShort(blob + sizeof(int16_t) + (sizeof(int16_t) * (uint32_t)wi),
+                                  (uint16_t)pSongInfo->remaps[wi]);
+                    }
+                    otherNew = XChangeSongResource(newSong, XGetPtrSize(newSong),
+                                                   R_INSTRUMENT_REMAP, blob, blobLen);
+                    if (otherNew)
+                    {
+                        XDisposeSongPtr(newSong);
+                        newSong = otherNew;
+                    }
+                    XDisposePtr(blob);
                 }
             }
         }

@@ -714,35 +714,43 @@ static const unsigned char volumeScaleTwoTimesExp[] = {
     18, 16, 16, 14, 14, 12, 12, 10, 10, 8,
     8, 6, 6, 4, 4, 2, 2, 0};
 
-#if 0
 static uint32_t PV_AdjustTimeFromRate(uint32_t time)
 {
     Rate q = MusicGlobals->outputRate;
     uint32_t mixerRate;
     uint32_t realMixerRate;
 
-    mixerRate = GM_ConvertFromOutputRateToPerceivedRate(q);
     realMixerRate = GM_ConvertFromOutputRateToRate(q);
-    if (mixerRate != realMixerRate)
+    if (q == Q_RATE_11K_TERP_22K)
     {
-        // time = time * mixerRate) / realMixerRate
+        mixerRate = 11025;
+    }
+    else if (q == Q_RATE_22K_TERP_44K)
+    {
+        mixerRate = 22050;
+    }
+    else
+    {
+        mixerRate = realMixerRate;
+    }
+    if (mixerRate != realMixerRate && realMixerRate != 0)
+    {
         time = XFixedMultiply(time, mixerRate);
         time = XFixedDivide(time, realMixerRate);
     }
     return time;
 }
-#endif
 
 // This value returns is the clock the evelope's and LFO run on. In microseconds.
 static uint32_t PV_GetLFOAdjustedTimeInMicroseconds(void)
 {
-#if 1
-    return MusicGlobals->lfoBufferTime;
-#else
-    uint32_t time = (FIXED_BUFFER_SLICE_TIME * MAX_CHUNK_SIZE / FIXED_MAX_CHUNK_SIZE) - 610;
+    if (MusicGlobals && MusicGlobals->classicLFO)
+    {
+        uint32_t time = (FIXED_BUFFER_SLICE_TIME * MAX_CHUNK_SIZE / FIXED_MAX_CHUNK_SIZE) - 610;
 
-    return PV_AdjustTimeFromRate(time);
-#endif
+        return PV_AdjustTimeFromRate(time);
+    }
+    return MusicGlobals->lfoBufferTime;
 }
 
 // given a midi volume, translate it via a table to a new value
@@ -1161,6 +1169,7 @@ uint32_t PV_GetPositionFromVoice(GM_Voice *pVoice)
 #endif
 #if LOOPS_USED == U3232_LOOPS
     case E_LINEAR_INTERPOLATION_U3232:
+    case E_SINC_INTERPOLATION_U3232:
         pos = pVoice->samplePosition.i;
         break;
 #endif
@@ -1190,6 +1199,7 @@ void PV_SetPositionFromVoice(GM_Voice *pVoice, uint32_t pos)
 #endif
 #if LOOPS_USED == U3232_LOOPS
     case E_LINEAR_INTERPOLATION_U3232:
+    case E_SINC_INTERPOLATION_U3232:
         pVoice->samplePosition.i = pos;
         pVoice->samplePosition.f = 0;
         break;
@@ -2512,6 +2522,7 @@ static void PV_ServeThisInstrument(GM_Voice *pVoice)
     {
 #if LOOPS_USED == U3232_LOOPS
     case E_LINEAR_INTERPOLATION_U3232:
+    case E_SINC_INTERPOLATION_U3232:
         if (pVoice->NoteNextSize == 0)
         {
 #if USE_FLOAT == FALSE
@@ -3884,6 +3895,7 @@ static bool PV_SetupProcessFunctions(GM_Mixer *pMixer)
         break;
 #endif
     case E_LINEAR_INTERPOLATION_U3232:
+    case E_SINC_INTERPOLATION_U3232:
 #if LOOPS_USED == U3232_LOOPS
         if (pMixer->generateStereoOutput)
         {
@@ -3947,6 +3959,7 @@ static bool PV_SetupProcessFunctions(GM_Mixer *pMixer)
         break;
 #elif LOOPS_USED == U3232_LOOPS
     case E_LINEAR_INTERPOLATION_U3232:
+    case E_SINC_INTERPOLATION_U3232:
         if (pMixer->generateStereoOutput)
         {
             pMixer->filterPartialBufferProc = PV_ServeU3232StereoFilterPartialBuffer;
@@ -4584,7 +4597,9 @@ void PV_StartMIDINote(GM_Song *pSong, int16_t the_instrument,
 
     loopstart = pInstrument->u.w.startLoop;
     loopend = pInstrument->u.w.endLoop;
-    minLoopSize = pInstrument->minLoopSize ? pInstrument->minLoopSize : MIN_LOOP_SIZE_RMF;
+    minLoopSize = pInstrument->minLoopSize
+                      ? pInstrument->minLoopSize
+                      : (pInstrument->sourceIsZsb ? MIN_LOOP_SIZE_ZMF : MIN_LOOP_SIZE_RMF);
     if ((pInstrument->disableSndLooping) ||
         (loopstart == loopend) ||
         (loopstart > loopend) ||
@@ -5385,7 +5400,8 @@ int16_t GM_GetAudioSampleFrame(int16_t *pLeft, int16_t *pRight)
         }
         else
         {
-            for (count = 0; count < pMixer->Four_Loop; count++)
+            /* Packed mono dry buffer. Duplicate to pRight so L/R meters match. */
+            for (count = 0; count < size; count++)
             {
                 i = (*sourceL++ >> OUTPUT_SCALAR);
                 i += k8000;
@@ -5396,80 +5412,10 @@ int16_t GM_GetAudioSampleFrame(int16_t *pLeft, int16_t *pRight)
                     else
                         i = 0;
                 }
-                *pLeft++ = (int16_t)(i - k8000);
-                i = (*sourceL++ >> OUTPUT_SCALAR);
-                i += k8000;
-                if (i & 0xFFFF0000)
-                {
-                    if (i > 0)
-                        i = 0xFFFE;
-                    else
-                        i = 0;
-                }
-                *pLeft++ = (int16_t)(i - k8000);
-
-                i = (*sourceL++ >> OUTPUT_SCALAR);
-                i += k8000;
-                if (i & 0xFFFF0000)
-                {
-                    if (i > 0)
-                        i = 0xFFFE;
-                    else
-                        i = 0;
-                }
-                *pLeft++ = (int16_t)(i - k8000);
-                i = (*sourceL++ >> OUTPUT_SCALAR);
-                i += k8000;
-                if (i & 0xFFFF0000)
-                {
-                    if (i > 0)
-                        i = 0xFFFE;
-                    else
-                        i = 0;
-                }
-                *pLeft++ = (int16_t)(i - k8000);
-
-                i = (*sourceL++ >> OUTPUT_SCALAR);
-                i += k8000;
-                if (i & 0xFFFF0000)
-                {
-                    if (i > 0)
-                        i = 0xFFFE;
-                    else
-                        i = 0;
-                }
-                *pLeft++ = (int16_t)(i - k8000);
-                i = (*sourceL++ >> OUTPUT_SCALAR);
-                i += k8000;
-                if (i & 0xFFFF0000)
-                {
-                    if (i > 0)
-                        i = 0xFFFE;
-                    else
-                        i = 0;
-                }
-                *pLeft++ = (int16_t)(i - k8000);
-
-                i = (*sourceL++ >> OUTPUT_SCALAR);
-                i += k8000;
-                if (i & 0xFFFF0000)
-                {
-                    if (i > 0)
-                        i = 0xFFFE;
-                    else
-                        i = 0;
-                }
-                *pLeft++ = (int16_t)(i - k8000);
-                i = (*sourceL++ >> OUTPUT_SCALAR);
-                i += k8000;
-                if (i & 0xFFFF0000)
-                {
-                    if (i > 0)
-                        i = 0xFFFE;
-                    else
-                        i = 0;
-                }
-                *pLeft++ = (int16_t)(i - k8000);
+                i = (int32_t)(int16_t)(i - k8000);
+                *pLeft++ = (int16_t)i;
+                if (pRight)
+                    *pRight++ = (int16_t)i;
             }
         }
     }

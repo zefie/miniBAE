@@ -2647,8 +2647,8 @@ BAEResult BAERmfEditorBank_SetSampleSndStorageType(BAEBankToken bankToken,
         return BAE_NO_ERROR;
     }
 
-    /* Load existing payload, decode container wrapper, then rewrap for target type.
-       This avoids PCM decode/re-encode while still honoring CSND compression/encryption. */
+    /* Unwrap to plain SND, then rewrap. ESND is XOR-encrypted; CSND is compressed
+       plaintext. Never compress an ESND payload — decrypt to SND first. */
     resName[0] = 0;
     result = PV_BankFindSndResource(bankFile,
                                     (XShortResourceID)sampleInfo.sndResourceID,

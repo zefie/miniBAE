@@ -22,8 +22,9 @@
  * Usage: rmfutil <command> [options...]
  *
  * Commands:
- *   extract <input.rmf> <output.mid>
- *       Extract MIDI data from an RMF/ZMF file.
+ *   extract [--all] <input.rmf|input.bsn> <output.mid|outdir>
+ *       Extract MIDI from an RMF/ZMF song, or all Custom Songs from a
+ *       session BSN/ZSN (use --all to include groovoids).
  *
  *   create [<bank.hsb|bank.zsb>|-] <song.mid|song.rmf> [output.rmf] [-q]
  *       Embed bank instruments into a song and save as RMF/ZMF.
@@ -47,9 +48,13 @@
 #include <string.h>
 #include <stdint.h>
 #include <errno.h>
+#include <ctype.h>
+#include <sys/stat.h>
 #ifdef _MSC_VER
 #define strcasecmp _stricmp
 #define strncasecmp _strnicmp
+#else
+#include <unistd.h>
 #endif
 #include <NeoBAE.h>
 #include <BAE_API.h>
@@ -112,11 +117,338 @@ static const char *bool_text(int value)
     return value ? "Yes" : "No";
 }
 
+#define RUF_BEPF FOUR_CHAR('B','e','P','f')
+#define RUF_NBET FOUR_CHAR('n','B','e','T')
+#define RUF_BEPF2 FOUR_CHAR('B','E','P','F')
+#define RUF_DATE FOUR_CHAR('D','A','T','e')
+
+static int ruf_is_dir(const char *path)
+{
+    struct stat st;
+    if (!path || stat(path, &st) != 0)
+        return 0;
+    return S_ISDIR(st.st_mode) ? 1 : 0;
+}
+
+static int ruf_ensure_dir(const char *path)
+{
+    if (ruf_is_dir(path))
+        return 0;
+#ifdef _WIN32
+    if (mkdir(path) != 0 && errno != EEXIST)
+#else
+    if (mkdir(path, 0755) != 0 && errno != EEXIST)
+#endif
+    {
+        return -1;
+    }
+    return ruf_is_dir(path) ? 0 : -1;
+}
+
+static int ruf_file_is_session(XFILE file)
+{
+    if (!file)
+        return 0;
+    if (XCountFileResourcesOfType(file, RUF_BEPF) > 0)
+        return 1;
+    if (XCountFileResourcesOfType(file, RUF_NBET) > 0)
+        return 1;
+    if (XCountFileResourcesOfType(file, RUF_BEPF2) > 0)
+        return 1;
+    return 0;
+}
+
+static void ruf_pascal_name(const char *raw, char *out, size_t out_size)
+{
+    unsigned int n;
+    if (!out || out_size == 0)
+        return;
+    out[0] = 0;
+    if (!raw)
+        return;
+    n = (unsigned char)raw[0];
+    if (n > 0 && n < 255 && n + 1 < out_size)
+    {
+        memcpy(out, raw + 1, n);
+        out[n] = 0;
+    }
+}
+
+static void ruf_sanitize_filename(char *name)
+{
+    char *p;
+    for (p = name; *p; ++p)
+    {
+        if (*p == '/' || *p == '\\' || *p == ':' || *p == '*' || *p == '?' ||
+            *p == '"' || *p == '<' || *p == '>' || *p == '|')
+        {
+            *p = '_';
+        }
+    }
+}
+
+static int ruf_date_contains(XFILE file, uint32_t song_id, uint32_t midi_id)
+{
+    int32_t date_count = XCountFileResourcesOfType(file, RUF_DATE);
+    int32_t di;
+    int found = 0;
+    if (date_count <= 0)
+        return 0;
+    for (di = 0; di < date_count && !found; ++di)
+    {
+        XLongResourceID date_id = 0;
+        int32_t date_size = 0;
+        XPTR date_data = XGetIndexedFileResource(file, RUF_DATE, &date_id, di, NULL, &date_size);
+        unsigned char *body;
+        size_t off;
+        if (!date_data || date_size < 12)
+        {
+            if (date_data)
+                XDisposePtr(date_data);
+            continue;
+        }
+        body = (unsigned char *)date_data;
+        for (off = 0; off + 12 <= (size_t)date_size; off += 12)
+        {
+            uint32_t type = read_be32(body + off);
+            uint32_t id = read_be32(body + off + 4);
+            uint32_t ts = read_be32(body + off + 8);
+            if (type == 0 && id == 0 && ts == 0)
+                break;
+            if ((type == ID_SONG && id == song_id) ||
+                (type == ID_MIDI && id == midi_id) ||
+                (type == ID_EMID && id == midi_id) ||
+                (type == ID_ECMI && id == midi_id) ||
+                (type == ID_CMID && id == midi_id))
+            {
+                found = 1;
+                break;
+            }
+        }
+        XDisposePtr(date_data);
+    }
+    return found;
+}
+
+static int ruf_date_has_any_song(XFILE file)
+{
+    int32_t date_count = XCountFileResourcesOfType(file, RUF_DATE);
+    int32_t di;
+    if (date_count <= 0)
+        return 0;
+    for (di = 0; di < date_count; ++di)
+    {
+        XLongResourceID date_id = 0;
+        int32_t date_size = 0;
+        XPTR date_data = XGetIndexedFileResource(file, RUF_DATE, &date_id, di, NULL, &date_size);
+        unsigned char *body;
+        size_t off;
+        if (!date_data || date_size < 12)
+        {
+            if (date_data)
+                XDisposePtr(date_data);
+            continue;
+        }
+        body = (unsigned char *)date_data;
+        for (off = 0; off + 12 <= (size_t)date_size; off += 12)
+        {
+            uint32_t type = read_be32(body + off);
+            uint32_t id = read_be32(body + off + 4);
+            uint32_t ts = read_be32(body + off + 8);
+            if (type == 0 && id == 0 && ts == 0)
+                break;
+            if (type == ID_SONG || type == ID_MIDI || type == ID_EMID ||
+                type == ID_ECMI || type == ID_CMID)
+            {
+                XDisposePtr(date_data);
+                return 1;
+            }
+        }
+        XDisposePtr(date_data);
+    }
+    return 0;
+}
+
+static int ruf_write_midi_file(const char *path, const void *data, int32_t size)
+{
+    FILE *out = fopen(path, "wb");
+    if (!out)
+        return -1;
+    if ((int32_t)fwrite(data, 1, (size_t)size, out) != size)
+    {
+        fclose(out);
+        return -1;
+    }
+    fclose(out);
+    return 0;
+}
+
+static int cmd_extract_session_songs(XFILE file, const char *outdir, int all_songs)
+{
+    int32_t song_count;
+    int32_t i;
+    int written = 0;
+    int use_date_filter;
+
+    if (ruf_ensure_dir(outdir) != 0)
+    {
+        fprintf(stderr, "Error: Cannot create output directory '%s'\n", outdir);
+        return -1;
+    }
+    use_date_filter = (!all_songs && ruf_date_has_any_song(file));
+    song_count = XCountFileResourcesOfType(file, ID_SONG);
+    for (i = 0; i < song_count; ++i)
+    {
+        XLongResourceID song_id = 0;
+        int32_t song_size = 0;
+        char song_name_raw[256];
+        char song_name[256];
+        XPTR song_data;
+        const unsigned char *song_body;
+        uint16_t midi_id;
+        unsigned char song_type;
+        int32_t midi_size = 0;
+        char midi_name_raw[256];
+        char midi_name[256];
+        XPTR midi_data;
+        const unsigned char *midi_body;
+        char out_path[1024];
+        char file_base[256];
+
+        song_name_raw[0] = 0;
+        song_data = XGetIndexedFileResource(file, ID_SONG, &song_id, i, song_name_raw, &song_size);
+        if (!song_data || song_size < 8)
+        {
+            if (song_data)
+                XDisposePtr(song_data);
+            continue;
+        }
+        song_body = (const unsigned char *)song_data;
+        midi_id = read_be16(song_body);
+        song_type = song_body[6];
+        ruf_pascal_name(song_name_raw, song_name, sizeof(song_name));
+        XDisposePtr(song_data);
+        if (song_type != 1)
+            continue;
+
+        midi_name_raw[0] = 0;
+        midi_data = XGetFileResource(file, ID_MIDI, (XLongResourceID)midi_id, midi_name_raw, &midi_size);
+        if (!midi_data || midi_size < 4)
+        {
+            if (midi_data)
+                XDisposePtr(midi_data);
+            continue;
+        }
+        midi_body = (const unsigned char *)midi_data;
+        if (!(midi_body[0] == 'M' && midi_body[1] == 'T' && midi_body[2] == 'h' && midi_body[3] == 'd'))
+        {
+            XDisposePtr(midi_data);
+            continue;
+        }
+        if (use_date_filter && !ruf_date_contains(file, (uint32_t)song_id, midi_id))
+        {
+            XDisposePtr(midi_data);
+            continue;
+        }
+        ruf_pascal_name(midi_name_raw, midi_name, sizeof(midi_name));
+        if (song_name[0])
+            snprintf(file_base, sizeof(file_base), "%s", song_name);
+        else if (midi_name[0])
+            snprintf(file_base, sizeof(file_base), "%s", midi_name);
+        else
+            snprintf(file_base, sizeof(file_base), "song_%ld", (long)song_id);
+        ruf_sanitize_filename(file_base);
+        snprintf(out_path, sizeof(out_path), "%s/%s.mid", outdir, file_base);
+        if (ruf_write_midi_file(out_path, midi_data, midi_size) == 0)
+        {
+            printf("Wrote %s (SONG %ld, Midi %u)\n", out_path, (long)song_id, (unsigned)midi_id);
+            written++;
+        }
+        else
+        {
+            fprintf(stderr, "Error: Failed to write '%s'\n", out_path);
+        }
+        XDisposePtr(midi_data);
+    }
+    if (written == 0)
+    {
+        fprintf(stderr, "Error: No MIDI songs found to extract%s\n",
+                use_date_filter ? " (try --all for groovoids)" : "");
+        return -1;
+    }
+    printf("Extracted %d MIDI file%s to %s\n", written, written == 1 ? "" : "s", outdir);
+    return 0;
+}
+
+typedef enum {
+    OUTPUT_NORMAL,
+    OUTPUT_CSV,
+    OUTPUT_JSON
+} OutputFormat;
+
+static void ruf_print_session_info(XFILE file, int output_format)
+{
+    int is_session = ruf_file_is_session(file);
+    int32_t song_count = XCountFileResourcesOfType(file, ID_SONG);
+    int32_t i;
+    const char *kind = is_session ? "session" : (song_count > 1 ? "bank" : "song");
+
+    if (output_format == OUTPUT_CSV)
+    {
+        printf("container,kind,%s\n", kind);
+        printf("container,session,%s\n", is_session ? "yes" : "no");
+    }
+    else if (output_format == OUTPUT_JSON)
+    {
+        printf("  \"container\": {\"kind\": \"%s\", \"session\": %s},\n",
+               kind, is_session ? "true" : "false");
+        printf("  \"songs\": [\n");
+    }
+    else
+    {
+        printf("Container: %s%s\n", kind, is_session ? " (BePf/nBeT/BEPF)" : "");
+        printf("Songs:\n");
+    }
+    for (i = 0; i < song_count; ++i)
+    {
+        XLongResourceID song_id = 0;
+        int32_t song_size = 0;
+        char song_name_raw[256];
+        char song_name[256];
+        XPTR song_data;
+        uint16_t midi_id = 0;
+        song_name_raw[0] = 0;
+        song_data = XGetIndexedFileResource(file, ID_SONG, &song_id, i, song_name_raw, &song_size);
+        if (song_data && song_size >= 8)
+            midi_id = read_be16((const unsigned char *)song_data);
+        ruf_pascal_name(song_name_raw, song_name, sizeof(song_name));
+        if (song_data)
+            XDisposePtr(song_data);
+        if (output_format == OUTPUT_CSV)
+        {
+            printf("song,%ld,%s (midi %u)\n", (long)song_id, song_name[0] ? song_name : "(unnamed)", (unsigned)midi_id);
+        }
+        else if (output_format == OUTPUT_JSON)
+        {
+            printf("    {\"id\": %ld, \"name\": \"%s\", \"midiId\": %u}%s\n",
+                   (long)song_id, song_name[0] ? song_name : "", (unsigned)midi_id,
+                   (i + 1 < song_count) ? "," : "");
+        }
+        else
+        {
+            printf("  SONG %ld  midi %u  %s\n", (long)song_id, (unsigned)midi_id,
+                   song_name[0] ? song_name : "(unnamed)");
+        }
+    }
+    if (output_format == OUTPUT_JSON)
+        printf("  ],\n");
+}
+
 /*****************************************************************************
- * extract - RMF/ZMF to MIDI
+ * extract - RMF/ZMF/BSN/ZSN to MIDI
  *****************************************************************************/
 
-static int cmd_extract(const char *input_rmf, const char *output_mid)
+static int cmd_extract(const char *input_rmf, const char *output_mid, int all_songs)
 {
     XFILE rmf_file = NULL;
     XFILENAME xfilename;
@@ -126,6 +458,7 @@ static int cmd_extract(const char *input_rmf, const char *output_mid)
     XResourceType resource_type;
     FILE *output_file = NULL;
     int result = -1;
+    int32_t song_count;
 
     if (!verify_rmf_header(input_rmf))
     {
@@ -140,6 +473,14 @@ static int cmd_extract(const char *input_rmf, const char *output_mid)
     {
         fprintf(stderr, "Error: Cannot open RMF file '%s'\n", input_rmf);
         return -1;
+    }
+
+    song_count = XCountFileResourcesOfType(rmf_file, ID_SONG);
+    if (ruf_file_is_session(rmf_file) || song_count > 1 || ruf_is_dir(output_mid))
+    {
+        result = cmd_extract_session_songs(rmf_file, output_mid, all_songs);
+        XFileClose(rmf_file);
+        return result;
     }
 
     SongResource *song_res = (SongResource *)XGetIndexedFileResource(rmf_file, ID_SONG, &resource_id, 0, NULL, &midi_size);
@@ -1207,12 +1548,6 @@ static int cmd_instinfo(int argc, char *argv[])
  * info - RMF/ZMF file inspection (was rmfinfo)
  *****************************************************************************/
 
-typedef enum {
-    OUTPUT_NORMAL,
-    OUTPUT_CSV,
-    OUTPUT_JSON
-} OutputFormat;
-
 typedef struct {
     XResourceType type;
     XLongResourceID id;
@@ -1253,7 +1588,11 @@ static const XResourceType k_rmf_resource_types[] = {
     ID_PASSWORD,
     ID_ALIAS,
     ID_VERS,
-    ID_TEXT
+    ID_TEXT,
+    RUF_BEPF,
+    RUF_NBET,
+    RUF_BEPF2,
+    RUF_DATE
 };
 
 static const char *rmf_info_label(BAEInfoType t)
@@ -1962,6 +2301,18 @@ static int cmd_info(const char *filename, OutputFormat output_format)
         printf("Metadata:\n");
     }
 
+    {
+        XFILENAME xf;
+        XFILE xf_file;
+        XConvertPathToXFILENAME((void *)filename, &xf);
+        xf_file = XFileOpenResource(&xf, TRUE);
+        if (xf_file)
+        {
+            ruf_print_session_info(xf_file, (int)output_format);
+            XFileClose(xf_file);
+        }
+    }
+
     print_metadata(output_format, report.song_info, &first_field, &has_any_info);
     if (output_format == OUTPUT_JSON)
     {
@@ -1999,8 +2350,9 @@ static void print_usage(const char *prog)
             "Usage: %s <command> [options...]\n"
             "\n"
             "Commands:\n"
-            "  extract <song.rmf|song.zmf> <output.mid>\n"
-            "      Extract MIDI data from an RMF/ZMF file.\n"
+            "  extract [--all] <song.rmf|song.zmf|session.bsn|session.zsn> <output.mid|outdir>\n"
+            "      Extract MIDI from an RMF/ZMF song, or all Custom Songs from a BSN/ZSN session.\n"
+            "      --all  also extract groovoid (bank) SONG->Midi entries\n"
             "\n"
             "  create [<bank.hsb|bank.zsb>|-] <song.mid|song.rmf|song.zmf> [output.rmf] [-q]\n"
             "      Load song, optionally embed instruments from a bank, and save as RMF/ZMF.\n"
@@ -2009,8 +2361,8 @@ static void print_usage(const char *prog)
             "  dump <song.rmf|song.zmf|bank.hsb|bank.zsb> <output_dir>\n"
             "      Extract MIDI and all sample resources as WAV files.\n"
             "\n"
-            "  info [-c|-j] <song.rmf|song.zmf|bank.hsb|bank.zsb>\n"
-            "      Print structured information about an RMF/ZMF file.\n"
+            "  info [-c|-j] <song.rmf|song.zmf|bank.hsb|bank.zsb|session.bsn|session.zsn>\n"
+            "      Print structured information about an RMF/ZMF/session file.\n"
             "      -c  Output as CSV\n"
             "      -j  Output as JSON\n"
             "\n"
@@ -2055,11 +2407,23 @@ int main(int argc, char *argv[])
 
     if (!strcmp(argv[1], "extract"))
     {
-        if (argc != 4)
+        int all_songs = 0;
+        int argi = 2;
+        const char *input_path;
+        const char *output_path;
+
+        if (argi < argc && !strcmp(argv[argi], "--all"))
         {
-            fprintf(stderr, "Usage: %s extract <input.rmf> <output.mid>\n", argv[0]);
+            all_songs = 1;
+            argi++;
+        }
+        if (argc - argi != 2)
+        {
+            fprintf(stderr, "Usage: %s extract [--all] <input.rmf|input.bsn> <output.mid|outdir>\n", argv[0]);
             return 1;
         }
+        input_path = argv[argi];
+        output_path = argv[argi + 1];
 
         BAEResult err = BAE_Setup();
         if (err != BAE_NO_ERROR)
@@ -2068,14 +2432,14 @@ int main(int argc, char *argv[])
             return 1;
         }
 
-        if (!file_exists(argv[2]))
+        if (!file_exists(input_path))
         {
-            fprintf(stderr, "Error: Cannot open input file '%s'\n", argv[2]);
+            fprintf(stderr, "Error: Cannot open input file '%s'\n", input_path);
             BAE_Cleanup();
             return 1;
         }
 
-        int result = cmd_extract(argv[2], argv[3]);
+        int result = cmd_extract(input_path, output_path, all_songs);
         BAE_Cleanup();
         return (result == 0) ? 0 : 1;
     }

@@ -293,6 +293,90 @@ static void PV_SetTempo(GM_Song *pSong, int32_t masterTempo)
     }
 }
 
+#if USE_FULL_RMF_SUPPORT == TRUE
+static uint32_t PV_RmfSkipStringResource(const char *pUnit, bool encrypted)
+{
+    if (encrypted)
+    {
+        return (uint32_t)XEncryptedStrLen(pUnit) + 1u;
+    }
+    return (uint32_t)XStrLen(pUnit) + 1u;
+}
+
+static void PV_ApplyRmfInstrumentRemaps(SongResource_RMF *songRMF, GM_Song *theSong)
+{
+    char *pUnit;
+    int16_t count;
+    int16_t resourceCount;
+    int16_t subCount;
+    int16_t wordIndex;
+    int16_t number;
+    SongResourceType type;
+    uint32_t length;
+
+    if (!songRMF || !theSong)
+    {
+        return;
+    }
+    resourceCount = (int16_t)XGetShort(&songRMF->resourceCount);
+    pUnit = (char *)&songRMF->resourceData;
+    for (count = 0; count < resourceCount; count++)
+    {
+        type = (SongResourceType)XGetLong(pUnit);
+        pUnit += sizeof(SongResourceType);
+        switch (type)
+        {
+        default:
+            return;
+        case R_TITLE:
+        case R_PERFORMED_BY:
+        case R_COMPOSER:
+        case R_COPYRIGHT_DATE:
+        case R_COPYRIGHT_LINE:
+        case R_PUBLISHER_CONTACT:
+        case R_LICENSED_TO_URL:
+        case R_USE_OF_LICENSE:
+        case R_LICENSE_TERM:
+        case R_EXPIRATION_DATE:
+        case R_COMPOSER_NOTES:
+        case R_INDEX_NUMBER:
+        case R_GENRE:
+        case R_SUB_GENRE:
+        case R_TEMPO:
+        case R_ORIGINAL_SOURCE:
+        case R_MANUFACTURER:
+        case R_MISC1:
+        case R_MISC2:
+        case R_MISC3:
+        case R_MISC4:
+        case R_MISC5:
+        case R_MISC6:
+        case R_MISC7:
+        case R_MISC8:
+            pUnit += (int32_t)PV_RmfSkipStringResource(pUnit, songRMF->locked ? TRUE : FALSE);
+            break;
+        case R_VELOCITY_CURVE:
+            pUnit += 256;
+            break;
+        case R_INSTRUMENT_REMAP:
+            subCount = (int16_t)XGetShort(pUnit);
+            pUnit += 2;
+            /* First word is remaining word count, then (midi program, INST ID) pairs. */
+            for (wordIndex = 0; wordIndex + 1 < subCount; wordIndex += 2)
+            {
+                number = XGetShort(pUnit + (wordIndex * (int16_t)sizeof(int16_t)));
+                number = (int16_t)(number & ((MAX_INSTRUMENTS * MAX_BANKS) - 1));
+                theSong->remapArray[number] =
+                    XGetShort(pUnit + ((wordIndex + 1) * (int16_t)sizeof(int16_t)));
+            }
+            length = sizeof(int16_t) * (uint32_t)subCount;
+            pUnit += (int32_t)length;
+            break;
+        }
+    }
+}
+#endif
+
 void GM_MergeExternalSong(void *theExternalSong, XShortResourceID theSongID, GM_Song *theSong)
 {
     int16_t maps;
@@ -372,6 +456,9 @@ void GM_MergeExternalSong(void *theExternalSong, XShortResourceID theSongID, GM_
                 // ZMF file, clamp to valid bits to filter out any remaining garbage
                 theSong->engineConfigFlags &= SONG_CONFIG_VALID_BITS_MASK;
             }
+#if USE_FULL_RMF_SUPPORT == TRUE
+            PV_ApplyRmfInstrumentRemaps(songRMF, theSong);
+#endif
             break;
         }
     }
@@ -783,6 +870,7 @@ OPErr GM_SetupSongRemaps(GM_Song *pSong, bool checkForAliases)
     int16_t count;
     XAliasLinkResource *pAlias;
     XLongResourceID newInstrumentID;
+    XLongResourceID savedRemaps[MAX_INSTRUMENTS * MAX_BANKS];
     OPErr err;
 
     err = NO_ERR;
@@ -790,9 +878,10 @@ OPErr GM_SetupSongRemaps(GM_Song *pSong, bool checkForAliases)
     {
         pAlias = NULL;
         pSong->checkedForAliases = checkForAliases;
-        // Fill in remap first
         if (checkForAliases)
         {
+            /* Keep SONG remaps (SMS header / RMF RMAP) across alias refresh. */
+            XBlockMove(pSong->remapArray, savedRemaps, sizeof(savedRemaps));
             pAlias = XGetAliasLink(); // get current aliases
         }
         for (count = 0; count < MAX_INSTRUMENTS * MAX_BANKS; count++)
@@ -803,6 +892,10 @@ OPErr GM_SetupSongRemaps(GM_Song *pSong, bool checkForAliases)
                 if (XLookupAlias(pAlias, (XLongResourceID)count, &newInstrumentID) == 0)
                 {
                     pSong->remapArray[count] = newInstrumentID;
+                }
+                if (savedRemaps[count] != (XLongResourceID)count)
+                {
+                    pSong->remapArray[count] = savedRemaps[count];
                 }
             }
         }

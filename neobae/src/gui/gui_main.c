@@ -603,6 +603,36 @@ int main(int argc, char *argv[])
     {
         g_disable_webtv_progress_bar = settings.disable_webtv_progress_bar;
     }
+    if (settings.has_stereo)
+    {
+        g_stereo_output = settings.stereo_output;
+    }
+    if (settings.has_output_16bit)
+    {
+        g_output_16bit = settings.output_16bit;
+    }
+    if (settings.has_terp_mode)
+    {
+        g_terp_mode = settings.terp_mode;
+        if (g_terp_mode < BAE_DROP_SAMPLE || g_terp_mode > BAE_SINC_INTERPOLATION)
+            g_terp_mode = BAE_LINEAR_INTERPOLATION;
+    }
+    if (settings.has_classic_lfo)
+    {
+        g_classic_lfo_enabled = settings.classic_lfo_enabled;
+    }
+#if BAE_CLASSIC_CHORUS
+    if (settings.has_classic_chorus)
+    {
+        g_classic_chorus_enabled = settings.classic_chorus_enabled;
+    }
+#endif
+#if BAE_FIX_SPAN_DC
+    if (settings.has_panfix)
+    {
+        g_panfix_enabled = settings.panfix_enabled;
+    }
+#endif
     // Apply stored default velocity (aka volume) curve to global engine setting so new songs adopt it
     if (settings.has_volume_curve)
     {
@@ -626,9 +656,9 @@ int main(int argc, char *argv[])
 #endif
 
 #if BAE_CLASSIC_CHORUS
-    // Apply classic chorus ordering (default is on; user can disable in settings)
     BAE_SetClassicChorus(g_classic_chorus_enabled ? TRUE : FALSE);
 #endif
+    BAE_SetClassicLFO(g_classic_lfo_enabled ? TRUE : FALSE);
 
 #if SUPPORT_BAESCRIPT == TRUE
     // Restore script editor state from settings
@@ -935,6 +965,9 @@ int main(int argc, char *argv[])
                 continue;
             }
 #endif
+            if (settings_handle_event(&e)) {
+                continue;
+            }
             switch (e.type)
             {
 #if USE_SDL2 == TRUE
@@ -967,11 +1000,13 @@ int main(int argc, char *argv[])
             case SDL_WINDOWEVENT:
                 if (e.window.event == SDL_WINDOWEVENT_CLOSE)
                 {
+                    settings_window_hide();
                     running = false;
                 }
                 break;
 #else
             case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+                settings_window_hide();
                 running = false;
                 break;
 #endif
@@ -2220,8 +2255,8 @@ int main(int argc, char *argv[])
         // Exporting will dim and lock most UI, but the Stop button remains active.
         extern bool g_show_preset_delete_confirm_dialog;
         extern bool g_show_eq_dialog;
-        bool modal_block = g_show_settings_dialog || g_show_about_dialog || (g_show_rmf_info_dialog && g_bae.is_rmf_file) || g_exporting || g_show_custom_reverb_dialog || g_show_preset_name_dialog || g_show_preset_delete_confirm_dialog || g_show_eq_dialog; // block when any modal/dialog open or export in progress
-        bool modal_block_transport = g_show_settings_dialog || g_show_about_dialog || (g_show_rmf_info_dialog && g_bae.is_rmf_file) || g_exporting || g_show_preset_name_dialog || g_show_preset_delete_confirm_dialog || g_show_eq_dialog; // Custom reverb dialog doesn't block transport controls
+        bool modal_block = g_show_about_dialog || (g_show_rmf_info_dialog && g_bae.is_rmf_file) || g_exporting || g_show_custom_reverb_dialog || g_show_preset_name_dialog || g_show_preset_delete_confirm_dialog || g_show_eq_dialog; // block when any modal/dialog open or export in progress
+        bool modal_block_transport = g_show_about_dialog || (g_show_rmf_info_dialog && g_bae.is_rmf_file) || g_exporting || g_show_preset_name_dialog || g_show_preset_delete_confirm_dialog || g_show_eq_dialog; // Custom reverb dialog doesn't block transport controls
         // When a modal is active we fully swallow background hover/drag/click by using off-screen, inert inputs
         int ui_mx = mx, ui_my = my;
         bool ui_mdown = mdown;
@@ -2657,14 +2692,6 @@ int main(int argc, char *argv[])
             render_rmf_info_dialog(R, mx, my, mclick);
         }
 
-        // Settings dialog rendering moved to gui_settings.c
-        if (g_show_settings_dialog)
-        {
-            render_settings_dialog(R, mx, my, mclick, mdown,
-                                   &transpose, &tempo, &volume, &loopPlay,
-                                   &reverbType, ch_enable, &progress, &duration, &playing);
-        }
-
         // Custom reverb dialog (must render on top of everything)
 #if USE_NEO_EFFECTS
         if (g_show_custom_reverb_dialog)
@@ -2736,86 +2763,6 @@ int main(int argc, char *argv[])
             render_about_dialog(R, mx, my, mclick);
         }
 
-        // Render export dropdown when Settings dialog is open and the export dropdown was triggered there
-#if USE_MPEG_ENCODER != FALSE
-        if (g_show_settings_dialog && g_exportDropdownOpen)
-        {
-            // expRect defined in settings dialog: position dropdown beneath it
-            // Compute using same dialog math as the settings dialog so dropdown aligns with the control
-            int dlgW = 560;
-            int dlgH = 352; // must match settings dialog (gui_settings.c)
-            int pad = 10;
-            int controlW = 150;
-            int dlgX = (WINDOW_W - dlgW) / 2;
-            int dlgY = (g_window_h - dlgH) / 2;
-            int colW = (dlgW - pad * 3) / 2;
-            int leftX = dlgX + pad;
-            int controlRightX = leftX + colW - controlW;
-            Rect expRect = {controlRightX, dlgY + 104, controlW, 24};
-            int codecCount = g_exportCodecCount;
-            int cols = 2;
-            int rows = (codecCount + cols - 1) / cols;
-            int gapX = 6;
-            int itemH = expRect.h;
-            int itemW = expRect.w;
-            int boxW = itemW * cols + gapX * (cols - 1);
-            int boxH = itemH * rows;
-            // Render below if there's room, otherwise render above
-            int boxY;
-            if (expRect.y + expRect.h + 1 + boxH < g_window_h) {
-                boxY = expRect.y + expRect.h + 1;
-            } else if (expRect.y - boxH - 1 >= 0) {
-                boxY = expRect.y - boxH - 1;
-            } else {
-                boxY = expRect.y + expRect.h + 1;
-            }
-            Rect box = {expRect.x, boxY, boxW, boxH};
-            SDL_Color ddBg = g_panel_bg;
-            ddBg.a = 255;
-            Rect shadowRect = {box.x + 2, box.y + 2, box.w, box.h};
-            SDL_Color shadow = {0, 0, 0, g_is_dark_mode ? 160 : 120};
-            draw_rect(R, shadowRect, shadow);
-            draw_rect(R, box, ddBg);
-            draw_frame(R, box, g_panel_border);
-            for (int i = 0; i < codecCount; ++i)
-            {
-                int col = i / rows;
-                int row = i % rows;
-                Rect ir = {box.x + col * (itemW + gapX), box.y + row * itemH, itemW, itemH};
-                bool over = point_in(mx, my, ir);
-                SDL_Color ibg = (i == g_exportCodecIndex) ? g_highlight_color : g_panel_bg;
-                if (over)
-                    ibg = g_button_hover;
-                draw_rect(R, ir, ibg);
-                if (row < rows - 1)
-                {
-                    SDL_SetRenderDrawColor(R, g_panel_border.r, g_panel_border.g, g_panel_border.b, 255);
-#if USE_SDL2 == TRUE
-                    SDL_RenderDrawLine(R, ir.x, ir.y + ir.h, ir.x + ir.w, ir.y + ir.h);
-#else
-                    SDL_RenderLine(R, ir.x, ir.y + ir.h, ir.x + ir.w, ir.y + ir.h);
-#endif
-                }
-                draw_text(R, ir.x + 6, ir.y + 6, g_exportCodecNames[i], g_button_text);
-                if (over && mclick)
-                {
-                    int oldExportIdx = g_exportCodecIndex;
-                    g_exportCodecIndex = i;
-                    g_exportDropdownOpen = false;
-                    if (oldExportIdx != g_exportCodecIndex)
-                    {
-                        // Persist user's chosen export codec so it survives restarts
-                        save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, reverbType, loopPlay);
-                    }
-                }
-            }
-            // Close dropdown if clicked outside
-            if (mclick && !point_in(mx, my, box) && !point_in(mx, my, expRect))
-                g_exportDropdownOpen = false;
-        }
-#endif
-#if SUPPORT_MIDI_HW == TRUE
-#endif
         // If exporting, render a slight dim overlay that disables everything except the Stop button.
         if (g_exporting)
         {
@@ -2855,6 +2802,9 @@ int main(int argc, char *argv[])
             }
         }
         SDL_RenderPresent(R);
+
+        settings_window_render(&transpose, &tempo, &volume, &loopPlay,
+                               &reverbType, ch_enable, &progress, &duration, &playing);
         
 #if _DEBUG == TRUE
         // Render debug console if visible

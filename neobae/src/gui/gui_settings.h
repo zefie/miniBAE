@@ -67,6 +67,12 @@ typedef struct
     bool has_classic_chorus;
     bool classic_chorus_enabled;
 #endif
+    bool has_classic_lfo;
+    bool classic_lfo_enabled;
+    bool has_terp_mode;
+    int terp_mode;
+    bool has_output_16bit;
+    bool output_16bit;
     bool has_eq;
     bool eq_enabled;
     float eq_gains[5];
@@ -145,6 +151,9 @@ extern bool g_panfix_enabled;
 #if BAE_CLASSIC_CHORUS
 extern bool g_classic_chorus_enabled;
 #endif
+extern bool g_classic_lfo_enabled;
+extern int g_terp_mode;
+extern bool g_output_16bit;
 extern bool g_normalize_enabled;
 
 // Settings persistence functions
@@ -176,9 +185,13 @@ void render_preset_delete_confirm_dialog(SDL_Renderer *R, int mx, int my, bool m
 void apply_settings_to_ui(const Settings *settings, int *transpose, int *tempo, int *volume,
                           bool *loopPlay, int *reverbType);
 
-// Settings dialog rendering
-void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool mdown,
-                            int *transpose, int *tempo, int *volume, bool *loopPlay,
+// Settings popup window (separate SDL window, like BAEScript)
+void settings_window_show(void);
+void settings_window_hide(void);
+void settings_window_toggle(void);
+bool settings_window_is_visible(void);
+bool settings_handle_event(SDL_Event *event);
+void settings_window_render(int *transpose, int *tempo, int *volume, bool *loopPlay,
                             int *reverbType, bool ch_enable[16], int *progress, int *duration, bool *playing);
 
 // Settings initialization/cleanup

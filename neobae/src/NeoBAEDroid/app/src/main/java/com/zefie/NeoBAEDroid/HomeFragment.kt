@@ -1857,20 +1857,17 @@ class HomeFragment : Fragment() {
     }
 
     private fun finishStartNormalizedSong(song: Song, file: File) {
+        if (song.isSF2Song() || song.isDLSSong()) {
+            try {
+                song.preroll()
+                song.seekToMs(0)
+            } catch (_: Exception) {}
+        }
         val r = song.start()
         if (r == 0) {
             if (song.hasEmbeddedBank()) {
                 applyEmbeddedBankUi(song)
                 refreshBankBadges()
-            }
-            if (song.isSF2Song() || song.isDLSSong()) {
-                song.pause()
-                song.seekToMs(0)
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    try {
-                        if (currentSong === song) song.resume()
-                    } catch (_: Exception) {}
-                }, 250)
             }
 
             if (baeScriptEnabled.value && ensureSongScriptLoaded(song)) {

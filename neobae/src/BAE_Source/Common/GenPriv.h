@@ -815,6 +815,7 @@ struct GM_Mixer
 #if BAE_CLASSIC_CHORUS
     bool       /*9*/   classicChorus;                  // if TRUE, use pre-DLS chorus ordering (reverb before chorus, no chorus in fixed reverb)
 #endif
+    bool               classicLFO;                     // if TRUE, use BAE 1.x fixed LFO slice clock
     unsigned char       /*0*/   processExternalMidiQueue;       // counter flag to lock processing of queue. 0 means process
     GM_SampleCacheEntry *sampleCaches[MAX_SAMPLES];     // cache of samples loaded
 

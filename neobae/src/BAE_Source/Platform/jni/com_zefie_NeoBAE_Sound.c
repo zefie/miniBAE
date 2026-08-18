@@ -575,7 +575,22 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Song__1startSong
 	BAESong_SetMicrosecondPosition(song, 0);
 	BAESong_Preroll(song);
 	BAESong_SetMicrosecondPosition(song, 0);
-	BAEResult r = BAESong_Start(song, 0);
+	BAEResult r = BAE_NO_ERROR;
+	/* Disengage hardware while the first Start arms DLS/SF2 so AudioTrack
+	 * cannot pull cold fallback programs for the opening chord. Export already
+	 * starts into a file sink (no live callback). Seek-to-0 is warm. */
+	{
+		BAEMixer mixer = NULL;
+		if (BAESong_GetMixer(song, &mixer) == BAE_NO_ERROR && mixer)
+		{
+			(void)BAEMixer_DisengageAudio(mixer);
+		}
+		r = BAESong_Start(song, 0);
+		if (mixer)
+		{
+			(void)BAEMixer_ReengageAudio(mixer);
+		}
+	}
 	__android_log_print(ANDROID_LOG_DEBUG, "neoBAE", "BAESong_Start returned %d", r);
 	return (jint)r;
 }

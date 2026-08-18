@@ -47,8 +47,288 @@ extern bool g_dls_compat_tooltip_visible;
 extern Rect g_dls_compat_tooltip_rect;
 extern char g_dls_compat_tooltip_text[520];
 
-// Settings dialog state
+// Settings dialog state (kept in sync with the popup window)
 bool g_show_settings_dialog = false;
+
+static SDL_Window *g_settings_window = NULL;
+static SDL_Renderer *g_settings_renderer = NULL;
+static int g_settings_mx = -10000;
+static int g_settings_my = -10000;
+static bool g_settings_mdown = false;
+static bool g_settings_mclick = false;
+
+typedef struct {
+    int w, h;
+    int lfoOff, terpOff, bitOff, stereoOff;
+#if SUPPORT_MIDI_HW == TRUE
+    int midiOff;
+#endif
+} SettingsDlgMetrics;
+
+static SettingsDlgMetrics settings_metrics(void)
+{
+    SettingsDlgMetrics m;
+    m.w = 560;
+    /* Right column: checkboxes through chorus, then LFO, interpolation,
+     * 16-bit, and stereo. MIDI device rows sit below that stack. */
+    m.lfoOff = 216;
+#if BAE_CLASSIC_CHORUS != TRUE
+    m.lfoOff = 180;
+#endif
+    m.terpOff = m.lfoOff + 32;
+    m.bitOff = m.terpOff + 28;
+    m.stereoOff = m.bitOff + 24;
+    m.h = 352;
+#if SUPPORT_MIDI_HW == TRUE
+    m.midiOff = m.stereoOff + 32;
+    m.h = m.midiOff + 100;
+    if (m.h < 352)
+        m.h = 352;
+#else
+    if (m.stereoOff + 48 > m.h)
+        m.h = m.stereoOff + 48;
+#endif
+    return m;
+}
+
+extern bool g_volumeCurveDropdownOpen;
+extern bool g_sampleRateDropdownOpen;
+extern bool g_midi_input_device_dd_open;
+extern bool g_midi_output_device_dd_open;
+
+static void settings_close_dropdowns(void)
+{
+    g_volumeCurveDropdownOpen = false;
+    g_sampleRateDropdownOpen = false;
+    g_exportDropdownOpen = false;
+#if SUPPORT_MIDI_HW == TRUE
+    g_midi_input_device_dd_open = false;
+    g_midi_output_device_dd_open = false;
+    g_midiRecordFormatDropdownOpen = false;
+#endif
+}
+
+void settings_window_hide(void)
+{
+    if (!g_show_settings_dialog)
+        return;
+    settings_close_dropdowns();
+    if (g_settings_window)
+        SDL_HideWindow(g_settings_window);
+    g_show_settings_dialog = false;
+    g_settings_mdown = false;
+    g_settings_mclick = false;
+    g_settings_mx = g_settings_my = -10000;
+}
+
+void settings_window_show(void)
+{
+    if (g_show_settings_dialog)
+        return;
+
+    SettingsDlgMetrics met = settings_metrics();
+    if (!g_settings_window)
+    {
+        int main_x = 100, main_y = 100;
+        if (g_main_window)
+        {
+            SDL_GetWindowPosition(g_main_window, &main_x, &main_y);
+            int main_w = 0, main_h = 0;
+            SDL_GetWindowSize(g_main_window, &main_w, &main_h);
+            main_x += main_w + 8;
+        }
+
+        g_settings_window = SDL_CreateWindow(
+            "Settings",
+#if USE_SDL2 == TRUE
+            main_x, main_y,
+#endif
+            met.w,
+            met.h,
+            0);
+        if (!g_settings_window)
+            return;
+#if USE_SDL2 != TRUE
+        SDL_SetWindowPosition(g_settings_window, main_x, main_y);
+#endif
+#if USE_SDL2 == TRUE
+        g_settings_renderer = SDL_CreateRenderer(g_settings_window, -1, 0);
+#else
+        g_settings_renderer = SDL_CreateRenderer(g_settings_window, NULL);
+#endif
+        if (!g_settings_renderer)
+        {
+            SDL_DestroyWindow(g_settings_window);
+            g_settings_window = NULL;
+            return;
+        }
+    }
+
+    SDL_ShowWindow(g_settings_window);
+    SDL_RaiseWindow(g_settings_window);
+    g_show_settings_dialog = true;
+}
+
+void settings_window_toggle(void)
+{
+    if (g_show_settings_dialog)
+        settings_window_hide();
+    else
+        settings_window_show();
+}
+
+bool settings_window_is_visible(void)
+{
+    return g_show_settings_dialog;
+}
+
+bool settings_handle_event(SDL_Event *event)
+{
+    if (!g_show_settings_dialog || !g_settings_window || !event)
+        return false;
+
+#if USE_SDL2 == TRUE
+    Uint32 set_win_id = SDL_GetWindowID(g_settings_window);
+#else
+    SDL_WindowID set_win_id = SDL_GetWindowID(g_settings_window);
+#endif
+    bool is_ours = false;
+
+    switch (event->type)
+    {
+#if USE_SDL2 == TRUE
+    case SDL_WINDOWEVENT:
+#else
+    case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+    case SDL_EVENT_WINDOW_SHOWN:
+    case SDL_EVENT_WINDOW_HIDDEN:
+    case SDL_EVENT_WINDOW_EXPOSED:
+    case SDL_EVENT_WINDOW_MOVED:
+    case SDL_EVENT_WINDOW_RESIZED:
+    case SDL_EVENT_WINDOW_MINIMIZED:
+    case SDL_EVENT_WINDOW_MAXIMIZED:
+    case SDL_EVENT_WINDOW_RESTORED:
+    case SDL_EVENT_WINDOW_MOUSE_ENTER:
+    case SDL_EVENT_WINDOW_MOUSE_LEAVE:
+    case SDL_EVENT_WINDOW_FOCUS_GAINED:
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+#endif
+        is_ours = (event->window.windowID == set_win_id);
+        break;
+#if USE_SDL2 == TRUE
+    case SDL_KEYDOWN:
+    case SDL_KEYUP:
+#else
+    case SDL_EVENT_KEY_DOWN:
+    case SDL_EVENT_KEY_UP:
+#endif
+        is_ours = (event->key.windowID == set_win_id);
+        break;
+#if USE_SDL2 == TRUE
+    case SDL_MOUSEMOTION:
+#else
+    case SDL_EVENT_MOUSE_MOTION:
+#endif
+        is_ours = (event->motion.windowID == set_win_id);
+        break;
+#if USE_SDL2 == TRUE
+    case SDL_MOUSEBUTTONDOWN:
+    case SDL_MOUSEBUTTONUP:
+#else
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+    case SDL_EVENT_MOUSE_BUTTON_UP:
+#endif
+        is_ours = (event->button.windowID == set_win_id);
+        break;
+#if USE_SDL2 == TRUE
+    case SDL_MOUSEWHEEL:
+#else
+    case SDL_EVENT_MOUSE_WHEEL:
+#endif
+        is_ours = (event->wheel.windowID == set_win_id);
+        break;
+    }
+
+    if (!is_ours)
+        return false;
+
+#if USE_SDL2 == TRUE
+    if (event->type == SDL_WINDOWEVENT && event->window.event == SDL_WINDOWEVENT_CLOSE)
+#else
+    if (event->type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
+#endif
+    {
+        settings_window_hide();
+        return true;
+    }
+
+#if USE_SDL2 == TRUE
+    if (event->type == SDL_WINDOWEVENT && event->window.event == SDL_WINDOWEVENT_LEAVE)
+#else
+    if (event->type == SDL_EVENT_WINDOW_MOUSE_LEAVE)
+#endif
+    {
+        g_settings_mx = g_settings_my = -10000;
+        return true;
+    }
+
+#if USE_SDL2 == TRUE
+    if (event->type == SDL_MOUSEMOTION)
+    {
+        g_settings_mx = event->motion.x;
+        g_settings_my = event->motion.y;
+        return true;
+    }
+    if (event->type == SDL_MOUSEBUTTONDOWN && event->button.button == SDL_BUTTON_LEFT)
+    {
+        g_settings_mdown = true;
+        g_settings_mx = event->button.x;
+        g_settings_my = event->button.y;
+        return true;
+    }
+    if (event->type == SDL_MOUSEBUTTONUP && event->button.button == SDL_BUTTON_LEFT)
+    {
+        g_settings_mdown = false;
+        g_settings_mclick = true;
+        g_settings_mx = event->button.x;
+        g_settings_my = event->button.y;
+        return true;
+    }
+    if (event->type == SDL_KEYDOWN && event->key.keysym.sym == SDLK_ESCAPE)
+    {
+        settings_window_hide();
+        return true;
+    }
+#else
+    if (event->type == SDL_EVENT_MOUSE_MOTION)
+    {
+        g_settings_mx = (int)event->motion.x;
+        g_settings_my = (int)event->motion.y;
+        return true;
+    }
+    if (event->type == SDL_EVENT_MOUSE_BUTTON_DOWN && event->button.button == SDL_BUTTON_LEFT)
+    {
+        g_settings_mdown = true;
+        g_settings_mx = (int)event->button.x;
+        g_settings_my = (int)event->button.y;
+        return true;
+    }
+    if (event->type == SDL_EVENT_MOUSE_BUTTON_UP && event->button.button == SDL_BUTTON_LEFT)
+    {
+        g_settings_mdown = false;
+        g_settings_mclick = true;
+        g_settings_mx = (int)event->button.x;
+        g_settings_my = (int)event->button.y;
+        return true;
+    }
+    if (event->type == SDL_EVENT_KEY_DOWN && event->key.key == SDLK_ESCAPE)
+    {
+        settings_window_hide();
+        return true;
+    }
+#endif
+    return true;
+}
 
 bool g_midi_input_device_dd_open = false;
 bool g_midi_output_device_dd_open = false;
@@ -71,6 +351,9 @@ bool g_panfix_enabled = true;
 #if BAE_CLASSIC_CHORUS
 bool g_classic_chorus_enabled = false;
 #endif
+bool g_classic_lfo_enabled = false;
+int g_terp_mode = BAE_LINEAR_INTERPOLATION;
+bool g_output_16bit = true;
 bool g_normalize_enabled = false;
 
 // External globals we need access to
@@ -282,6 +565,25 @@ Settings load_settings(void)
             settings.has_classic_chorus = true;
         }
 #endif
+        else if (strncmp(line, "classic_lfo_enabled=", 20) == 0)
+        {
+            settings.classic_lfo_enabled = (atoi(line + 20) != 0);
+            settings.has_classic_lfo = true;
+        }
+        else if (strncmp(line, "terp_mode=", 10) == 0)
+        {
+            settings.terp_mode = atoi(line + 10);
+            if (settings.terp_mode < BAE_DROP_SAMPLE || settings.terp_mode > BAE_SINC_INTERPOLATION)
+            {
+                settings.terp_mode = BAE_LINEAR_INTERPOLATION;
+            }
+            settings.has_terp_mode = true;
+        }
+        else if (strncmp(line, "output_16bit=", 13) == 0)
+        {
+            settings.output_16bit = (atoi(line + 13) != 0);
+            settings.has_output_16bit = true;
+        }
         else if (strncmp(line, "eq_enabled=", 11) == 0)
         {
             settings.eq_enabled = (atoi(line + 11) != 0);
@@ -379,6 +681,8 @@ void save_settings(const char *last_bank_path, int reverb_type, bool loop_enable
         fprintf(f, "volume_curve=%d\n", g_volume_curve);
         fprintf(f, "stereo_output=%d\n", g_stereo_output ? 1 : 0);
         fprintf(f, "sample_rate=%d\n", g_sample_rate_hz);
+        fprintf(f, "terp_mode=%d\n", g_terp_mode);
+        fprintf(f, "output_16bit=%d\n", g_output_16bit ? 1 : 0);
         fprintf(f, "show_keyboard=%d\n", g_show_virtual_keyboard ? 1 : 0);
 #if USE_NATIVE_DLS == TRUE
         fprintf(f, "dls_compatibility_mode=%d\n", g_use_dls_compatiblity_mode ? 1 : 0);
@@ -392,6 +696,7 @@ void save_settings(const char *last_bank_path, int reverb_type, bool loop_enable
 #if BAE_CLASSIC_CHORUS
         fprintf(f, "classic_chorus_enabled=%d\n", g_classic_chorus_enabled ? 1 : 0);
 #endif
+        fprintf(f, "classic_lfo_enabled=%d\n", g_classic_lfo_enabled ? 1 : 0);
         if (g_bae.mixer)
         {
             BAE_BOOL eq_on = FALSE;
@@ -542,6 +847,14 @@ void save_full_settings(const Settings *settings)
         {
             fprintf(f, "sample_rate=%d\n", settings->sample_rate_hz);
         }
+        if (settings->has_terp_mode)
+        {
+            fprintf(f, "terp_mode=%d\n", settings->terp_mode);
+        }
+        if (settings->has_output_16bit)
+        {
+            fprintf(f, "output_16bit=%d\n", settings->output_16bit ? 1 : 0);
+        }
         if (settings->has_show_keyboard)
         {
             fprintf(f, "show_keyboard=%d\n", settings->show_keyboard ? 1 : 0);
@@ -605,6 +918,10 @@ void save_full_settings(const Settings *settings)
             fprintf(f, "classic_chorus_enabled=%d\n", settings->classic_chorus_enabled ? 1 : 0);
         }
 #endif
+        if (settings->has_classic_lfo)
+        {
+            fprintf(f, "classic_lfo_enabled=%d\n", settings->classic_lfo_enabled ? 1 : 0);
+        }
         if (settings->has_eq)
         {
             fprintf(f, "eq_enabled=%d\n", settings->eq_enabled ? 1 : 0);
@@ -779,6 +1096,22 @@ void apply_settings_to_ui(const Settings *settings, int *transpose, int *tempo, 
         g_classic_chorus_enabled = settings->classic_chorus_enabled;
     }
 #endif
+    if (settings->has_classic_lfo)
+    {
+        g_classic_lfo_enabled = settings->classic_lfo_enabled;
+    }
+    if (settings->has_terp_mode)
+    {
+        g_terp_mode = settings->terp_mode;
+        if (g_terp_mode < BAE_DROP_SAMPLE || g_terp_mode > BAE_SINC_INTERPOLATION)
+        {
+            g_terp_mode = BAE_LINEAR_INTERPOLATION;
+        }
+    }
+    if (settings->has_output_16bit)
+    {
+        g_output_16bit = settings->output_16bit;
+    }
 }
 
 #if SUPPORT_PLAYLIST == TRUE
@@ -794,23 +1127,45 @@ void save_playlist_settings(void)
 }
 #endif
 
+static void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool mdown,
+                            int *transpose, int *tempo, int *volume, bool *loopPlay,
+                            int *reverbType, bool ch_enable[16], int *progress, int *duration, bool *playing);
+
+void settings_window_render(int *transpose, int *tempo, int *volume, bool *loopPlay,
+                            int *reverbType, bool ch_enable[16], int *progress, int *duration, bool *playing)
+{
+    if (!g_show_settings_dialog || !g_settings_window || !g_settings_renderer)
+        return;
+
+    bool mclick = g_settings_mclick;
+    g_settings_mclick = false;
+    render_settings_dialog(g_settings_renderer, g_settings_mx, g_settings_my, mclick, g_settings_mdown,
+                           transpose, tempo, volume, loopPlay, reverbType, ch_enable, progress, duration, playing);
+    SDL_RenderPresent(g_settings_renderer);
+}
+
 // Settings dialog rendering
-void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool mdown,
+static void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool mdown,
                             int *transpose, int *tempo, int *volume, bool *loopPlay,
                             int *reverbType, bool ch_enable[16], int *progress, int *duration, bool *playing)
 {
     if (!g_show_settings_dialog)
         return;
 
-    // Dim background
-    SDL_Color dim = g_is_dark_mode ? (SDL_Color){0, 0, 0, 120} : (SDL_Color){0, 0, 0, 90};
-    draw_rect(R, (Rect){0, 0, WINDOW_W, g_window_h}, dim);
-    int dlgW = 560;
-    int dlgH = 352;
-    int pad = 10; // dialog size (wider two-column)
-    Rect dlg = {(WINDOW_W - dlgW) / 2, (g_window_h - dlgH) / 2, dlgW, dlgH};
+    SettingsDlgMetrics met = settings_metrics();
+    int dlgW = met.w;
+    int lfoOff = met.lfoOff;
+    int terpOff = met.terpOff;
+    int bitOff = met.bitOff;
+    int stereoOff = met.stereoOff;
+    int dlgH = met.h;
+#if SUPPORT_MIDI_HW == TRUE
+    int midiOff = met.midiOff;
+#endif
+    int pad = 10;
+    Rect dlg = {0, 0, dlgW, dlgH};
     SDL_Color dlgBg = g_panel_bg;
-    dlgBg.a = 240;
+    dlgBg.a = 255;
     SDL_Color dlgFrame = g_panel_border;
     draw_rect(R, dlg, dlgBg);
     draw_frame(R, dlg, dlgFrame);
@@ -825,11 +1180,8 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
     draw_text(R, closeBtn.x + 4, closeBtn.y - 1, "X", g_button_text);
     if (mclick && overClose)
     {
-        g_show_settings_dialog = false;
-        g_volumeCurveDropdownOpen = false;
-#if SUPPORT_MIDI_HW == TRUE
-        g_midiRecordFormatDropdownOpen = false;
-#endif
+        settings_window_hide();
+        return;
     }
 
     // Two-column geometry
@@ -846,9 +1198,9 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
     Rect expRect = {controlRightX, dlg.y + 104, controlW, 24};
 #endif
 #if SUPPORT_MIDI_HW == TRUE
-    Rect midiDevRect = {controlRightX, dlg.y + 208, controlW + 200, 24};
-    Rect midiOutDevRect = {controlRightX, dlg.y + 236, controlW + 200, 24};
-    Rect recordCodecRect = {controlRightX, dlg.y + 264, controlW + 200, 24};
+    Rect midiDevRect = {controlRightX, dlg.y + midiOff, controlW + 200, 24};
+    Rect midiOutDevRect = {controlRightX, dlg.y + midiOff + 28, controlW + 200, 24};
+    Rect recordCodecRect = {controlRightX, dlg.y + midiOff + 56, controlW + 200, 24};
 #endif
 
     // Left column controls (stacked)
@@ -986,7 +1338,7 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
 #endif
 #if SUPPORT_MIDI_HW == TRUE
     // MIDI input enable checkbox and device selector (left column, below Export)
-    Rect midiEnRect = {leftX, dlg.y + 212, 18, 18};
+    Rect midiEnRect = {leftX, dlg.y + midiOff + 4, 18, 18};
     if (ui_toggle(R, midiEnRect, &g_midi_input_enabled, "MIDI Input", mx, my, mclick))
     {
         // initialize or shutdown midi input as requested
@@ -1297,7 +1649,7 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
     }
 
     // MIDI output checkbox and device selector (placed next to input)
-    Rect midiOutEnRect = {leftX, dlg.y + 240, 18, 18};
+    Rect midiOutEnRect = {leftX, dlg.y + midiOff + 32, 18, 18};
     // Disable MIDI Output toggle while exporting or when export dropdown is open
     bool midiOut_toggle_allowed = !g_exporting && !g_exportDropdownOpen && !g_midiRecordFormatDropdownOpen;
     if (!midiOut_toggle_allowed)
@@ -1400,7 +1752,7 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
     }
 
     // Record Codec selector (left column, below MIDI Output)
-    draw_text(R, leftX, dlg.y + 268, "MIDI In Record:", g_text_color);
+    draw_text(R, leftX, dlg.y + midiOff + 60, "MIDI In Record:", g_text_color);
     bool recordCodecEnabled = !(g_volumeCurveDropdownOpen || g_sampleRateDropdownOpen || g_exportDropdownOpen || g_midi_input_device_dd_open || g_midi_output_device_dd_open);
     SDL_Color rc_bg = g_button_base;
     SDL_Color rc_txt = g_button_text;
@@ -1500,6 +1852,67 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
     }
 #endif
 
+    {
+        int lfoY = dlg.y + lfoOff;
+        Rect lfoRect = {rightX, lfoY, 18, 18};
+        if (!rightColumnCheckboxesEnabled)
+        {
+            bool over = point_in(mx, my, lfoRect);
+            draw_custom_checkbox(R, lfoRect, g_classic_lfo_enabled, over);
+            draw_text(R, lfoRect.x + lfoRect.w + 6, lfoRect.y + 2, "Classic LFO timing", g_text_color);
+        }
+        else if (ui_toggle(R, lfoRect, &g_classic_lfo_enabled, "Classic LFO timing", mx, my, mclick))
+        {
+            BAE_SetClassicLFO(g_classic_lfo_enabled ? TRUE : FALSE);
+            save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, *loopPlay);
+        }
+
+        static const char *terpNames[] = {"Drop", "2-point", "Linear", "Sinc"};
+        int terpIndex = g_terp_mode;
+        int terpY = dlg.y + terpOff;
+        if (terpIndex < 0 || terpIndex > 3)
+            terpIndex = 2;
+        draw_text(R, rightX, terpY + 4, "Interpolation:", g_text_color);
+        Rect terpRect = {rightX + 100, terpY, 130, 24};
+        SDL_Color tbg = point_in(mx, my, terpRect) ? g_button_hover : g_button_base;
+        draw_rect(R, terpRect, tbg);
+        draw_frame(R, terpRect, g_button_border);
+        draw_text(R, terpRect.x + 6, terpRect.y + 3, terpNames[terpIndex], g_button_text);
+        if (point_in(mx, my, terpRect) && mclick)
+        {
+            int next = (terpIndex + 1) % 4;
+            g_terp_mode = next;
+            save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, *loopPlay);
+            (void)recreate_mixer_and_restore(g_sample_rate_hz, *reverbType, *transpose, *tempo, *volume, *loopPlay, ch_enable);
+        }
+
+        Rect bitRect = {rightX, dlg.y + bitOff, 18, 18};
+        if (!rightColumnCheckboxesEnabled)
+        {
+            bool over = point_in(mx, my, bitRect);
+            draw_custom_checkbox(R, bitRect, g_output_16bit, over);
+            draw_text(R, bitRect.x + bitRect.w + 6, bitRect.y + 2, "16-bit output", g_text_color);
+        }
+        else if (ui_toggle(R, bitRect, &g_output_16bit, "16-bit output", mx, my, mclick))
+        {
+            save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, *loopPlay);
+            (void)recreate_mixer_and_restore(g_sample_rate_hz, *reverbType, *transpose, *tempo, *volume, *loopPlay, ch_enable);
+        }
+
+        Rect stereoRect = {rightX, dlg.y + stereoOff, 18, 18};
+        if (!rightColumnCheckboxesEnabled)
+        {
+            bool over = point_in(mx, my, stereoRect);
+            draw_custom_checkbox(R, stereoRect, g_stereo_output, over);
+            draw_text(R, stereoRect.x + stereoRect.w + 6, stereoRect.y + 2, "Stereo output", g_text_color);
+        }
+        else if (ui_toggle(R, stereoRect, &g_stereo_output, "Stereo output", mx, my, mclick))
+        {
+            save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, *loopPlay);
+            (void)recreate_mixer_and_restore(g_sample_rate_hz, *reverbType, *transpose, *tempo, *volume, *loopPlay, ch_enable);
+        }
+    }
+
 #if USE_NATIVE_DLS == TRUE
     Rect compatDlsRect = {leftX, dlg.y + 144, 18, 18};
     if (!rightColumnCheckboxesEnabled)
@@ -1526,8 +1939,8 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
                 tooltip_w = 500;
             int tooltip_x = mx + 10;
             int tooltip_y = my - 30;
-            if (tooltip_x + tooltip_w > WINDOW_W - 4)
-                tooltip_x = WINDOW_W - tooltip_w - 4;
+            if (tooltip_x + tooltip_w > dlg.w - 4)
+                tooltip_x = dlg.w - tooltip_w - 4;
             if (tooltip_y < 4)
                 tooltip_y = my + 25;
             ui_set_tooltip((Rect){tooltip_x, tooltip_y, tooltip_w, tooltip_h}, tooltip_text,
@@ -1574,8 +1987,8 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
                 tooltip_w = 500;
             int tooltip_x = mx + 10;
             int tooltip_y = my - 30;
-            if (tooltip_x + tooltip_w > WINDOW_W - 4)
-                tooltip_x = WINDOW_W - tooltip_w - 4;
+            if (tooltip_x + tooltip_w > dlg.w - 4)
+                tooltip_x = dlg.w - tooltip_w - 4;
             if (tooltip_y < 4)
                 tooltip_y = my + 25;
             ui_set_tooltip((Rect){tooltip_x, tooltip_y, tooltip_w, tooltip_h}, tooltip_text,
@@ -1894,10 +2307,61 @@ void render_settings_dialog(SDL_Renderer *R, int mx, int my, bool mclick, bool m
             g_volumeCurveDropdownOpen = false;
     }
 
-    // Discard clicks outside dialog (after dropdown so it doesn't immediately close on open)
-    if (mclick && !point_in(mx, my, dlg))
-    { /* swallow */
+#if USE_MPEG_ENCODER == TRUE
+    if (g_exportDropdownOpen)
+    {
+        int codecCount = g_exportCodecCount;
+        int cols = 2;
+        int rows = (codecCount + cols - 1) / cols;
+        int gapX = 6;
+        int itemH = expRect.h;
+        int itemW = expRect.w;
+        int boxW = itemW * cols + gapX * (cols - 1);
+        int boxH = itemH * rows;
+        int boxY = expRect.y + expRect.h + 1;
+        if (boxY + boxH > dlg.h && expRect.y - boxH - 1 >= 0)
+            boxY = expRect.y - boxH - 1;
+        Rect box = {expRect.x, boxY, boxW, boxH};
+        SDL_Color ddBg = g_panel_bg;
+        ddBg.a = 255;
+        Rect shadowRect = {box.x + 2, box.y + 2, box.w, box.h};
+        SDL_Color shadow = {0, 0, 0, g_is_dark_mode ? 160 : 120};
+        draw_rect(R, shadowRect, shadow);
+        draw_rect(R, box, ddBg);
+        draw_frame(R, box, g_panel_border);
+        for (int i = 0; i < codecCount; ++i)
+        {
+            int col = i / rows;
+            int row = i % rows;
+            Rect ir = {box.x + col * (itemW + gapX), box.y + row * itemH, itemW, itemH};
+            bool over = point_in(mx, my, ir);
+            SDL_Color ibg = (i == g_exportCodecIndex) ? g_highlight_color : g_panel_bg;
+            if (over)
+                ibg = g_button_hover;
+            draw_rect(R, ir, ibg);
+            if (row < rows - 1)
+            {
+                SDL_SetRenderDrawColor(R, g_panel_border.r, g_panel_border.g, g_panel_border.b, 255);
+#if USE_SDL2 == TRUE
+                SDL_RenderDrawLine(R, ir.x, ir.y + ir.h, ir.x + ir.w, ir.y + ir.h);
+#else
+                SDL_RenderLine(R, ir.x, ir.y + ir.h, ir.x + ir.w, ir.y + ir.h);
+#endif
+            }
+            draw_text(R, ir.x + 6, ir.y + 6, g_exportCodecNames[i], g_button_text);
+            if (over && mclick)
+            {
+                int oldExportIdx = g_exportCodecIndex;
+                g_exportCodecIndex = i;
+                g_exportDropdownOpen = false;
+                if (oldExportIdx != g_exportCodecIndex)
+                    save_settings(g_current_bank_path[0] ? g_current_bank_path : NULL, *reverbType, *loopPlay);
+            }
+        }
+        if (mclick && !point_in(mx, my, box) && !point_in(mx, my, expRect))
+            g_exportDropdownOpen = false;
     }
+#endif
 
     if (g_dls_compat_tooltip_visible)
     {
@@ -1919,6 +2383,9 @@ void settings_init(void)
 #if BAE_CLASSIC_CHORUS == TRUE
     g_classic_chorus_enabled = false;
 #endif
+    g_classic_lfo_enabled = false;
+    g_terp_mode = BAE_LINEAR_INTERPOLATION;
+    g_output_16bit = true;
     g_selected_eq_preset = 0;
     g_current_custom_eq_preset[0] = '\0';
     g_preset_dialog_is_eq = false;
@@ -1928,6 +2395,16 @@ void settings_init(void)
 
 void settings_cleanup(void)
 {
+    if (g_settings_renderer)
+    {
+        SDL_DestroyRenderer(g_settings_renderer);
+        g_settings_renderer = NULL;
+    }
+    if (g_settings_window)
+    {
+        SDL_DestroyWindow(g_settings_window);
+        g_settings_window = NULL;
+    }
     g_show_settings_dialog = false;
     g_volumeCurveDropdownOpen = false;
     g_sampleRateDropdownOpen = false;

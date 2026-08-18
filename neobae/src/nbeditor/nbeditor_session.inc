@@ -1435,6 +1435,7 @@
         BAESong_Preroll(song);
         BAESong_SetLoops(song, m_loop_enabled ? 32767 : 0);
         BAEMixer_SetOutputGain(m_mixer, m_volume_percent);
+        ResetPeakVoices();
         BAESong_Start(song, 1);
         m_song = song;
         m_song_started = true;
@@ -1454,6 +1455,7 @@
         BAESong_SetMicrosecondPosition(m_song, 0);
         BAESong_SetLoops(m_song, m_loop_enabled ? 32767 : 0);
         BAESong_Preroll(m_song);
+        ResetPeakVoices();
         BAESong_Start(m_song, 1);
         m_song_started = true;
     }
@@ -1526,6 +1528,7 @@
             }
             BAESong_SetLoops(m_song, m_loop_enabled ? 32767 : 0);
             BAESong_Preroll(m_song);
+            ResetPeakVoices();
             /* Priority > preview song so keyboard/SE audition NoteOns don't steal. */
             BAESong_Start(m_song, 1);
             m_song_started = true;

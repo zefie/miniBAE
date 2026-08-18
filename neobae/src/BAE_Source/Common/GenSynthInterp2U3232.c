@@ -106,6 +106,19 @@ static inline int32_t PV_CubicHermiteInterpU3232(int32_t s0, int32_t s1, int32_t
     return s1 + r;
 }
 
+#include "GenInterpSincU3232.inc"
+
+#define PV_HQ16_AUTO(s0, s1, s2, s3, frac) \
+    (PV_U3232UseSincInterp() \
+         ? PV_SincInterp16Auto(this_voice, source, (int32_t)cur_wave_i, (frac), \
+                               (this_voice->NoteLoopEnd > this_voice->NoteLoopPtr)) \
+         : PV_CubicHermiteInterpU3232((s0), (s1), (s2), (s3), (frac)))
+#define PV_HQ16_CH(s0, s1, s2, s3, frac, off) \
+    (PV_U3232UseSincInterp() \
+         ? PV_SincInterp16Stride(this_voice, source, (int32_t)cur_wave_i, (frac), \
+                                 (this_voice->NoteLoopEnd > this_voice->NoteLoopPtr), 2, (off)) \
+         : PV_CubicHermiteInterpU3232((s0), (s1), (s2), (s3), (frac)))
+
 // Fetch a 16-bit sample with loop-wrapping for cubic Hermite boundary cases.
 static inline int32_t PV_LoopWrapSample16U3232(int16_t *source, int32_t idx, int32_t loopStart, int32_t loopEnd)
 {
@@ -552,7 +565,7 @@ void PV_ServeU3232FullBuffer16 (GM_Voice *this_voice)
     {
         if (this_voice->channels == 1)
         {
-            if (this_voice->advancedInterpolation)
+            if (PV_U3232UseSincInterp() || this_voice->advancedInterpolation)
             {
                 for (a = MusicGlobals->Four_Loop; a > 0; --a)
                 {
@@ -566,7 +579,7 @@ void PV_ServeU3232FullBuffer16 (GM_Voice *this_voice)
                         int32_t s1 = source[pos];
                         int32_t s2 = source[pos1];
                         int32_t s3 = source[pos2];
-                        dest[ii] += (PV_CubicHermiteInterpU3232(s0, s1, s2, s3, cur_wave_f) * amplitude) >> 4;
+                        dest[ii] += (PV_HQ16_AUTO(s0, s1, s2, s3, cur_wave_f) * amplitude) >> 4;
                         ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
                     }
                     dest += 4;
@@ -604,7 +617,7 @@ void PV_ServeU3232FullBuffer16 (GM_Voice *this_voice)
         }
         else
         {   // stereo 16 bit instrument
-            if (this_voice->advancedInterpolation)
+            if (PV_U3232UseSincInterp() || this_voice->advancedInterpolation)
             {
                 for (a = MusicGlobals->Four_Loop; a > 0; --a)
                 {
@@ -618,7 +631,7 @@ void PV_ServeU3232FullBuffer16 (GM_Voice *this_voice)
                         int32_t s1 = source[pos*2] + source[pos*2 + 1];
                         int32_t s2 = source[pos1*2] + source[pos1*2 + 1];
                         int32_t s3 = source[pos2*2] + source[pos2*2 + 1];
-                        sample = PV_CubicHermiteInterpU3232(s0, s1, s2, s3, cur_wave_f);
+                        sample = PV_HQ16_AUTO(s0, s1, s2, s3, cur_wave_f);
                         *dest += (sample * amplitude) >> 5;
                         dest++;
                         ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
@@ -694,7 +707,7 @@ void PV_ServeU3232PartialBuffer16 (GM_Voice *this_voice, bool looping)
     {
         if (this_voice->channels == 1)
         {
-            if (this_voice->advancedInterpolation)
+            if (PV_U3232UseSincInterp() || this_voice->advancedInterpolation)
             {
                 // Cubic Hermite with loop-aware boundary handling
                 int32_t loopStartIdx = (int32_t)(this_voice->NoteLoopPtr - this_voice->NotePtr);
@@ -721,7 +734,7 @@ void PV_ServeU3232PartialBuffer16 (GM_Voice *this_voice, bool looping)
                             s2 = source[(pos + 1 < totalFrames) ? pos + 1 : pos];
                             s3 = source[(pos + 2 < totalFrames) ? pos + 2 : (pos + 1 < totalFrames) ? pos + 1 : pos];
                         }
-                        dest[0] += (PV_CubicHermiteInterpU3232(s0, s1, s2, s3, cur_wave_f) * amplitude) >> 4;
+                        dest[0] += (PV_HQ16_AUTO(s0, s1, s2, s3, cur_wave_f) * amplitude) >> 4;
                         ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
                         dest++;
                     }
@@ -775,7 +788,7 @@ void PV_ServeU3232PartialBuffer16 (GM_Voice *this_voice, bool looping)
         }
         else
         {
-            if (this_voice->advancedInterpolation)
+            if (PV_U3232UseSincInterp() || this_voice->advancedInterpolation)
             {
                 // Cubic Hermite for stereo with loop-aware boundary handling
                 int32_t loopStartIdx = (int32_t)(this_voice->NoteLoopPtr - this_voice->NotePtr);
@@ -809,7 +822,7 @@ void PV_ServeU3232PartialBuffer16 (GM_Voice *this_voice, bool looping)
                         int32_t s1 = source[pos*2] + source[pos*2 + 1];
                         int32_t s2 = source[idx2*2] + source[idx2*2 + 1];
                         int32_t s3 = source[idx3*2] + source[idx3*2 + 1];
-                        sample = PV_CubicHermiteInterpU3232(s0, s1, s2, s3, cur_wave_f);
+                        sample = PV_HQ16_AUTO(s0, s1, s2, s3, cur_wave_f);
                         *dest += ((sample >> 1) * amplitude) >> 5;
                         dest++;
                         ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
@@ -889,7 +902,7 @@ void PV_ServeU3232StereoFullBuffer16 (GM_Voice *this_voice)
     {
         if (this_voice->channels == 1)
         {   // mono instrument
-            if (this_voice->advancedInterpolation)
+            if (PV_U3232UseSincInterp() || this_voice->advancedInterpolation)
             {
                 for (a = MusicGlobals->Four_Loop; a > 0; --a)
                 {
@@ -902,7 +915,7 @@ void PV_ServeU3232StereoFullBuffer16 (GM_Voice *this_voice)
                         int32_t s1 = source[pos];
                         int32_t s2 = source[pos1];
                         int32_t s3 = source[pos2];
-                        sample = PV_CubicHermiteInterpU3232(s0, s1, s2, s3, cur_wave_f);
+                        sample = PV_HQ16_AUTO(s0, s1, s2, s3, cur_wave_f);
                         destL[0] += (sample * amplitudeL) >> 4;
                         destL[1] += (sample * amplitudeR) >> 4;
                         ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
@@ -952,7 +965,7 @@ void PV_ServeU3232StereoFullBuffer16 (GM_Voice *this_voice)
         }
         else
         {   // stereo 16 bit instrument
-            if (this_voice->advancedInterpolation)
+            if (PV_U3232UseSincInterp() || this_voice->advancedInterpolation)
             {
                 for (a = MusicGlobals->Four_Loop; a > 0; --a)
                 {
@@ -967,13 +980,13 @@ void PV_ServeU3232StereoFullBuffer16 (GM_Voice *this_voice)
                         int32_t sL1 = source[pos*2];
                         int32_t sL2 = source[pos1*2];
                         int32_t sL3 = source[pos2*2];
-                        destL[0] += (PV_CubicHermiteInterpU3232(sL0, sL1, sL2, sL3, cur_wave_f) * amplitudeL) >> 4;
+                        destL[0] += (PV_HQ16_CH(sL0, sL1, sL2, sL3, cur_wave_f, 0) * amplitudeL) >> 4;
                         // Right channel
                         int32_t sR0 = source[prev_pos*2 + 1];
                         int32_t sR1 = source[pos*2 + 1];
                         int32_t sR2 = source[pos1*2 + 1];
                         int32_t sR3 = source[pos2*2 + 1];
-                        destL[1] += (PV_CubicHermiteInterpU3232(sR0, sR1, sR2, sR3, cur_wave_f) * amplitudeR) >> 4;
+                        destL[1] += (PV_HQ16_CH(sR0, sR1, sR2, sR3, cur_wave_f, 1) * amplitudeR) >> 4;
                         destL += 2;
                         ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
                     }
@@ -1064,7 +1077,7 @@ void PV_ServeU3232StereoPartialBuffer16 (GM_Voice *this_voice, bool looping)
     {
         if (this_voice->channels == 1)
         {   // mono instrument
-            if (this_voice->advancedInterpolation)
+            if (PV_U3232UseSincInterp() || this_voice->advancedInterpolation)
             {
                 // Cubic Hermite with loop-aware boundary handling
                 int32_t loopStartIdx = (int32_t)(this_voice->NoteLoopPtr - this_voice->NotePtr);
@@ -1091,7 +1104,7 @@ void PV_ServeU3232StereoPartialBuffer16 (GM_Voice *this_voice, bool looping)
                             s2 = source[(pos + 1 < totalFrames) ? pos + 1 : pos];
                             s3 = source[(pos + 2 < totalFrames) ? pos + 2 : (pos + 1 < totalFrames) ? pos + 1 : pos];
                         }
-                        sample = PV_CubicHermiteInterpU3232(s0, s1, s2, s3, cur_wave_f);
+                        sample = PV_HQ16_AUTO(s0, s1, s2, s3, cur_wave_f);
                         destL[0] += (sample * amplitudeL) >> 4;
                         destL[1] += (sample * amplitudeR) >> 4;
                         ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
@@ -1161,7 +1174,7 @@ void PV_ServeU3232StereoPartialBuffer16 (GM_Voice *this_voice, bool looping)
         }
         else
         {   // Stereo 16 bit instrument
-            if (this_voice->advancedInterpolation)
+            if (PV_U3232UseSincInterp() || this_voice->advancedInterpolation)
             {
                 int32_t loopStartIdx = (int32_t)(this_voice->NoteLoopPtr - this_voice->NotePtr);
                 int32_t loopEndIdx = (int32_t)(this_voice->NoteLoopEnd - this_voice->NotePtr);
@@ -1195,13 +1208,13 @@ void PV_ServeU3232StereoPartialBuffer16 (GM_Voice *this_voice, bool looping)
                         int32_t sL1 = source[pos*2];
                         int32_t sL2 = source[idx2*2];
                         int32_t sL3 = source[idx3*2];
-                        destL[0] += (PV_CubicHermiteInterpU3232(sL0, sL1, sL2, sL3, cur_wave_f) * amplitudeL) >> 4;
+                        destL[0] += (PV_HQ16_CH(sL0, sL1, sL2, sL3, cur_wave_f, 0) * amplitudeL) >> 4;
                         // Right channel
                         int32_t sR0 = source[idx0*2 + 1];
                         int32_t sR1 = source[pos*2 + 1];
                         int32_t sR2 = source[idx2*2 + 1];
                         int32_t sR3 = source[idx3*2 + 1];
-                        destL[1] += (PV_CubicHermiteInterpU3232(sR0, sR1, sR2, sR3, cur_wave_f) * amplitudeR) >> 4;
+                        destL[1] += (PV_HQ16_CH(sR0, sR1, sR2, sR3, cur_wave_f, 1) * amplitudeR) >> 4;
                         destL += 2;
                         ADD_U3232(cur_wave_i, cur_wave_f, wave_increment);
                     }

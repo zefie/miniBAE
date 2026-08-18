@@ -228,6 +228,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 
@@ -266,8 +267,15 @@ static BAEDeviceID          g_currentDeviceID = BAE_WAVEOUT;
 static uint32_t        g_memory_buoy = 0;          // amount of memory allocated at this moment
 static uint32_t        g_memory_buoy_max = 0;
 
-// Format of output buffer.
+// Format of output buffer (always 16-bit stereo at the device).
 static WAVEFORMATEX    g_waveFormat;
+static uint32_t        g_mixerChannels = 2;
+static uint32_t        g_mixerBits = 16;
+static void            *g_mixerSliceBuf = NULL;
+static uint32_t        g_mixerSliceBytes = 0;
+
+#define PV_DEVICE_CHANNELS 2
+#define PV_DEVICE_BITS 16
 
 // Recorder/export state for WinOS backend (mirrors SDL2/SDL3 behavior).
 static CRITICAL_SECTION g_recorder_cs;
@@ -433,14 +441,14 @@ static void PV_ProcessGeneratedAudio(const void *buffer, int32_t bytes)
         (void)fwrite(buffer, 1, (size_t)bytes, g_mp3_rec_pcm_fp);
     }
 
-    sample_bytes = (int)(g_waveFormat.nChannels * (g_waveFormat.wBitsPerSample / 8));
+    sample_bytes = (int)(g_mixerChannels * (g_mixerBits / 8));
     if (sample_bytes <= 0)
     {
         PV_RecorderUnlock();
         return;
     }
 
-    if (g_waveFormat.wBitsPerSample != 16)
+    if (g_mixerBits != 16)
     {
         PV_RecorderUnlock();
         return;
@@ -451,7 +459,7 @@ static void PV_ProcessGeneratedAudio(const void *buffer, int32_t bytes)
 
     if ((g_flac_recorder_callback || g_vorbis_recorder_callback || g_opus_recorder_callback) && frames > 0)
     {
-        if (g_waveFormat.nChannels == 1)
+        if (g_mixerChannels == 1)
         {
             if (g_flac_recorder_callback)
             {
@@ -466,7 +474,7 @@ static void PV_ProcessGeneratedAudio(const void *buffer, int32_t bytes)
                 g_opus_recorder_callback((int16_t *)samples, (int16_t *)samples, (int)frames);
             }
         }
-        else if (g_waveFormat.nChannels == 2)
+        else if (g_mixerChannels == 2)
         {
             if (PV_EnsureSplitBuffers(frames))
             {
@@ -573,6 +581,85 @@ static int32_t                 g_lastPos;
 
  // number of samples per audio frame to generate
 int32_t                        g_audioFramesToGenerate;
+
+static int PV_MixerFrameBytes(void)
+{
+    return (int)((g_mixerBits / 8) * g_mixerChannels);
+}
+
+static void PV_StoreMixerFormat(uint32_t channels, uint32_t bits)
+{
+    g_mixerChannels = (channels >= 2) ? 2 : 1;
+    g_mixerBits = (bits == 8) ? 8 : 16;
+}
+
+static int PV_EnsureMixerSlice(int frames)
+{
+    uint32_t need = (uint32_t)(frames * PV_MixerFrameBytes());
+    if (need == 0)
+        return 0;
+    if (g_mixerSliceBuf && g_mixerSliceBytes >= need)
+        return 1;
+    if (g_mixerSliceBuf)
+        BAE_Deallocate(g_mixerSliceBuf);
+    g_mixerSliceBuf = BAE_Allocate(need);
+    g_mixerSliceBytes = g_mixerSliceBuf ? need : 0;
+    return g_mixerSliceBuf ? 1 : 0;
+}
+
+static void PV_ConvertMixerToS16Stereo(const void *src, int16_t *dst, int frames)
+{
+    int i;
+    if (g_mixerBits == 16 && g_mixerChannels == 2)
+    {
+        memcpy(dst, src, (size_t)frames * 4);
+        return;
+    }
+    if (g_mixerBits == 16 && g_mixerChannels == 1)
+    {
+        const int16_t *s = (const int16_t *)src;
+        for (i = 0; i < frames; i++)
+            dst[i * 2] = dst[i * 2 + 1] = s[i];
+        return;
+    }
+    {
+        const unsigned char *s8 = (const unsigned char *)src;
+        if (g_mixerChannels == 2)
+        {
+            for (i = 0; i < frames * 2; i++)
+                dst[i] = (int16_t)(((int)s8[i] - 128) << 8);
+        }
+        else
+        {
+            for (i = 0; i < frames; i++)
+            {
+                int16_t v = (int16_t)(((int)s8[i] - 128) << 8);
+                dst[i * 2] = dst[i * 2 + 1] = v;
+            }
+        }
+    }
+}
+
+static void PV_FillDeviceFromMixer(void *threadContext, void *deviceBuf)
+{
+    int frames = (int)g_audioFramesToGenerate;
+    int mixerBytes = frames * PV_MixerFrameBytes();
+    if (!deviceBuf || !PV_EnsureMixerSlice(frames))
+        return;
+    BAE_BuildMixerSlice(threadContext, g_mixerSliceBuf, mixerBytes, frames);
+    PV_ProcessGeneratedAudio(g_mixerSliceBuf, mixerBytes);
+    PV_ConvertMixerToS16Stereo(g_mixerSliceBuf, (int16_t *)deviceBuf, frames);
+}
+
+static void PV_ReleaseMixerSlice(void)
+{
+    if (g_mixerSliceBuf)
+    {
+        BAE_Deallocate(g_mixerSliceBuf);
+        g_mixerSliceBuf = NULL;
+        g_mixerSliceBytes = 0;
+    }
+}
 
 // How many audio frames to generate at one time 
 static unsigned int         g_synthFramesPerBlock;  // setup upon runtime
@@ -1433,10 +1520,8 @@ static void PV_AudioWaveOutFrameThread(void* threadContext)
             pFillBuffer = (char *)g_audioBufferBlock[waveHeaderCount];
             for (count = 0; count < (int32_t)g_synthFramesPerBlock; count++)
             {
-                // Generate one frame audio
-                BAE_BuildMixerSlice(threadContext, pFillBuffer, g_audioByteBufferSize,
-                                                            g_audioFramesToGenerate);
-                    PV_ProcessGeneratedAudio(pFillBuffer, g_audioByteBufferSize);
+                // Generate one frame of mixer-native PCM, then upconvert for the device
+                PV_FillDeviceFromMixer(threadContext, pFillBuffer);
                 pFillBuffer += g_audioByteBufferSize;
 
                 if (g_shutDownDoubleBuffer)
@@ -1625,10 +1710,8 @@ static void PV_AudioDirectSoundFrameThread(void* threadContext)
                 {
                     pFillBuffer = ((char *)lpWrite) + count * g_SPD.uiSynthFrameBytes;
 
-                    // Generate new audio samples, putting the directly
-                    // into the output buffer.
-                    BAE_BuildMixerSlice(threadContext, pFillBuffer, g_audioByteBufferSize, g_audioFramesToGenerate);
-                    PV_ProcessGeneratedAudio(pFillBuffer, g_audioByteBufferSize);
+                    // Generate mixer-native PCM, then upconvert into the DirectSound buffer.
+                    PV_FillDeviceFromMixer(threadContext, pFillBuffer);
 
                     // I am incrementing g_lastPos right after the write operation
                     // to lessen the chance of a device open/close messing us up in the wait loop.
@@ -2296,12 +2379,14 @@ int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t chan
         }
         #endif
 
-        // Use waveOut API
+        PV_StoreMixerFormat(channels, bits);
+
+        // Device is always 16-bit stereo; mixer PCM is converted on fill.
         waveFormat.wFormatTag = WAVE_FORMAT_PCM;
 
         waveFormat.nSamplesPerSec = sampleRate;
-        waveFormat.nChannels = (uint16_t)channels;
-        waveFormat.wBitsPerSample = (uint16_t)bits;
+        waveFormat.nChannels = PV_DEVICE_CHANNELS;
+        waveFormat.wBitsPerSample = PV_DEVICE_BITS;
 
         // Calculate size in bytes of an audio sample
         waveFormat.nBlockAlign =  waveFormat.nChannels * waveFormat.wBitsPerSample / 8;
@@ -2309,15 +2394,7 @@ int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t chan
         waveFormat.cbSize = 0;
         g_waveFormat = waveFormat;
 
-        if (waveFormat.wBitsPerSample == 8)
-        {
-            bufferSize = (sizeof(char) * g_audioFramesToGenerate);
-        }
-        else
-        {
-            bufferSize = (sizeof(int16_t) * g_audioFramesToGenerate);
-        }
-        bufferSize *= waveFormat.nChannels;
+        bufferSize = (sizeof(int16_t) * g_audioFramesToGenerate) * PV_DEVICE_CHANNELS;
         g_audioByteBufferSize = bufferSize;
 
 
@@ -2404,10 +2481,11 @@ int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t chan
 
         g_shutDownDoubleBuffer = FALSE;
         g_activeDoubleBuffer = TRUE;    // must enable process, before thread begins
-        g_audioByteBufferSize = g_audioFramesToGenerate * channels * (bits / 8);
+        PV_StoreMixerFormat(channels, bits);
+        g_audioByteBufferSize = g_audioFramesToGenerate * PV_DEVICE_CHANNELS * (PV_DEVICE_BITS / 8);
 
         // create direct sound buffers, and control threads
-        flag = PV_SetupDirectSound(threadContext, sampleRate, channels, bits, TRUE);
+        flag = PV_SetupDirectSound(threadContext, sampleRate, PV_DEVICE_CHANNELS, PV_DEVICE_BITS, TRUE);
         if (flag != 0)
         {
             // something failed
@@ -2470,6 +2548,7 @@ int BAE_ReleaseAudioCard(void *threadContext)
             g_audioBufferBlock = NULL;
         }
     }
+    PV_ReleaseMixerSlice();
     BAE_SleepFrameThread(threadContext, 20);    // wait 20 ms to let system settle down.
 
     return 0;

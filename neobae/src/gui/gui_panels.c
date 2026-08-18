@@ -51,7 +51,7 @@ extern void send_bank_select_for_current_channel(void);
 bool ui_modal_blocking(void)
 {
     // Mirror the modal blocking condition used throughout gui_main.c
-    if (g_show_settings_dialog || g_show_about_dialog || (g_show_rmf_info_dialog && g_bae.is_rmf_file) || g_exporting || g_show_custom_reverb_dialog || g_show_eq_dialog)
+    if (g_show_about_dialog || (g_show_rmf_info_dialog && g_bae.is_rmf_file) || g_exporting || g_show_custom_reverb_dialog || g_show_eq_dialog)
         return true;
     return false;
 }

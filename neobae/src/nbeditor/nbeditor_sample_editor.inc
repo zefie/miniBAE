@@ -1471,25 +1471,10 @@
             }
         };
 
-        /* Keep the existing container type so same-type XReplace stays O(1).
-         * CSND rewrap would LZMA-compress PCM — demote working-set to ESND. */
-        BAERmfEditorSndStorageType bank_storage = BAE_EDITOR_SND_STORAGE_ESND;
-        if (have_bank_info)
-        {
-            bank_storage = bank_info.sndStorageType;
-            if (bank_storage == BAE_EDITOR_SND_STORAGE_CSND)
-            {
-                bank_storage = BAE_EDITOR_SND_STORAGE_ESND;
-            }
-        }
-        if (restore_master)
-        {
-            /* "No Recompression" restores master PCM; keep container cheap. */
-            if (bank_storage == BAE_EDITOR_SND_STORAGE_CSND)
-            {
-                bank_storage = BAE_EDITOR_SND_STORAGE_ESND;
-            }
-        }
+        /* CSND compresses a plain SND. Never encrypt (ESND) first — wrapping
+         * ciphertext is pointless. ReEncode writes PCM as SND/ESND, or SND then
+         * CSND compress, matching the requested type. */
+        BAERmfEditorSndStorageType want_storage = m_sample_editor_snd_storage_type;
 
         if (sample.unassigned || !have_bank_info)
         {
@@ -1538,7 +1523,7 @@
             work_inst_index,
             keep_split,
             bank_codec,
-            bank_storage,
+            want_storage,
             BAE_EDITOR_OPUS_MODE_AUDIO,
             FALSE,
             m_sample_editor_original_pcm.data(),
@@ -1555,6 +1540,7 @@
 
         /* SND id is stable across ReEncode; keep the editor's id (uint16). */
         m_sample_editor_snd_resource_id = keep_snd;
+        m_sample_editor_original_snd_storage_type = want_storage;
 
         if (keymap_dirty || m_sample_editor_loop_dirty)
         {
@@ -3656,6 +3642,10 @@
         if (ImGui::Combo("Storage", &storage_index, storage_labels, IM_ARRAYSIZE(storage_labels)))
         {
             m_sample_editor_snd_storage_type = static_cast<BAERmfEditorSndStorageType>(storage_index);
+            if (m_sample_editor_snd_storage_type != m_sample_editor_original_snd_storage_type)
+            {
+                m_sample_editor_dirty = true;
+            }
         }
 
         const BAERmfEditorCompressionType selected_codec =

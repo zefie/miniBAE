@@ -877,17 +877,46 @@ static bool EndsWith(const std::string &value, const char *suffix)
     return lower.compare(lower.size() - sfx.size(), sfx.size(), sfx) == 0;
 }
 
+static const int kMixerSampleRates[] = {
+    BAE_RATE_8K, BAE_RATE_11K, BAE_RATE_16K, BAE_RATE_22K, BAE_RATE_32K, BAE_RATE_44K, BAE_RATE_48K};
+
+static int ClampMixerSampleRateHz(int hz)
+{
+    int best = kMixerSampleRates[0];
+    int best_diff = std::abs(hz - best);
+    for (int r : kMixerSampleRates)
+    {
+        if (r == hz)
+        {
+            return r;
+        }
+        const int d = std::abs(hz - r);
+        if (d < best_diff)
+        {
+            best_diff = d;
+            best = r;
+        }
+    }
+    return best;
+}
+
 static BAERate RateFromHz(int hz)
 {
-    switch (hz)
+    switch (ClampMixerSampleRateHz(hz))
     {
-    case 11025:
+    case BAE_RATE_8K:
+        return BAE_RATE_8K;
+    case BAE_RATE_11K:
         return BAE_RATE_11K;
-    case 22050:
+    case BAE_RATE_16K:
+        return BAE_RATE_16K;
+    case BAE_RATE_22K:
         return BAE_RATE_22K;
-    case 48000:
+    case BAE_RATE_32K:
+        return BAE_RATE_32K;
+    case BAE_RATE_48K:
         return BAE_RATE_48K;
-    case 44100:
+    case BAE_RATE_44K:
     default:
         return BAE_RATE_44K;
     }
@@ -1295,6 +1324,7 @@ public:
 
         m_bae_initialized = true;
         m_dialog_mutex = SDL_CreateMutex();
+        LoadEditorPrefsFromDisk();
         if (!CreateMixer(true))
         {
             SetStatus("Audio init failed; running UI without engine");
@@ -1302,7 +1332,6 @@ public:
         }
 
         LoadRecentSessionsFromDisk();
-        LoadEditorPrefsFromDisk();
         m_session_undocked_layout = m_pref_default_undocked_layout;
         CleanupStaleClipPackagesOnStartup();
         /* Clean slate by default; optional reopen via Preferences. */
@@ -1978,6 +2007,58 @@ private:
 
     bool CreateMixer(bool initial)
     {
+        BAEMixer old_mixer = m_mixer;
+
+        if (m_preview_song)
+        {
+            BAESong_Stop(m_preview_song, FALSE);
+            BAESong_Delete(m_preview_song);
+            m_preview_song = nullptr;
+        }
+        for (SePreviewVoice &voice : m_se_preview_voices)
+        {
+            if (voice.sound)
+            {
+                BAESound_Stop(voice.sound, FALSE);
+                BAESound_Delete(voice.sound);
+            }
+            voice = SePreviewVoice{};
+        }
+        if (m_song)
+        {
+            BAESong_Stop(m_song, FALSE);
+            BAESong_Delete(m_song);
+            m_song = nullptr;
+            m_song_started = false;
+        }
+        if (m_midi_click_hi)
+        {
+            BAESound_Stop(m_midi_click_hi, FALSE);
+            BAESound_Delete(m_midi_click_hi);
+            m_midi_click_hi = nullptr;
+        }
+        if (m_midi_click_lo)
+        {
+            BAESound_Stop(m_midi_click_lo, FALSE);
+            BAESound_Delete(m_midi_click_lo);
+            m_midi_click_lo = nullptr;
+        }
+        m_midi_click_hi_pcm.clear();
+        m_midi_click_lo_pcm.clear();
+
+        if (old_mixer)
+        {
+            /* Drop delay lines before the device rate changes. */
+            GM_CleanupReverb();
+            ShutdownNewReverb();
+#if USE_NEO_EFFECTS == TRUE
+            ShutdownNeoReverb();
+#endif
+            BAEMixer_Delete(old_mixer);
+            m_mixer = nullptr;
+            m_bank_token = 0;
+        }
+
         BAEMixer new_mixer = BAEMixer_New();
         if (!new_mixer)
         {
@@ -2003,7 +2084,7 @@ private:
                                               TRUE);
         if (open_result != BAE_NO_ERROR)
         {
-            BAEMixer_Close(new_mixer);
+            BAEMixer_Delete(new_mixer);
             SetStatus(std::string("BAEMixer_Open failed: ") + FormatBAEError(open_result));
             return false;
         }
@@ -2014,7 +2095,7 @@ private:
         BAESong new_preview = BAESong_New(new_mixer);
         if (!new_preview)
         {
-            BAEMixer_Close(new_mixer);
+            BAEMixer_Delete(new_mixer);
             SetStatus("BAESong_New for preview failed");
             return false;
         }
@@ -2035,35 +2116,10 @@ private:
                     BAESound_Delete(new_se_sounds[static_cast<size_t>(j)]);
                 }
                 BAESong_Delete(new_preview);
-                BAEMixer_Close(new_mixer);
+                BAEMixer_Delete(new_mixer);
                 SetStatus("BAESound_New for sample preview failed");
                 return false;
             }
-        }
-
-        if (m_preview_song)
-        {
-            BAESong_Stop(m_preview_song, FALSE);
-            BAESong_Delete(m_preview_song);
-        }
-        for (SePreviewVoice &voice : m_se_preview_voices)
-        {
-            if (voice.sound)
-            {
-                BAESound_Stop(voice.sound, FALSE);
-                BAESound_Delete(voice.sound);
-            }
-            voice = SePreviewVoice{};
-        }
-        if (m_song)
-        {
-            BAESong_Stop(m_song, FALSE);
-            BAESong_Delete(m_song);
-            m_song = nullptr;
-        }
-        if (m_mixer)
-        {
-            BAEMixer_Close(m_mixer);
         }
 
         m_mixer = new_mixer;
@@ -2516,6 +2572,7 @@ private:
         BAESong_SetLoops(song, m_loop_enabled ? 32767 : 0);
         BAEMixer_SetOutputGain(m_mixer, m_volume_percent);
         (void)BAESong_SetTranspose(song, std::clamp(m_transpose_semitones, -24, 24));
+        ResetPeakVoices();
 
         /* Preroll only — Start+Pause dispatches and kills tick-0 notes before Play.
          * Preview song (RebuildPreviewSongFromPath) still Start+Pauses for audition. */
@@ -6906,6 +6963,8 @@ private:
 
     int m_sample_rate_hz = 44100;
     int m_sample_rate_index = 2;
+    int m_peak_voices = 0;
+    bool m_show_peak_voices = false;
     bool m_stereo = true;
     int m_reverb_type = static_cast<int>(BAE_REVERB_TYPE_1);
     int m_volume_percent = 100;
@@ -7116,6 +7175,8 @@ private:
     bool m_tips_dont_show_again = false;
     bool m_pref_show_tips_at_startup = true;
     bool m_prefs_draft_show_tips = true;
+    bool m_prefs_draft_show_peak_voices = false;
+    int m_prefs_draft_sample_rate_hz = 44100;
     int m_tips_next = 0; /* next tip index to show on startup (persisted) */
     std::vector<uint8_t> m_tips_seen;
     bool m_trash_open = false;

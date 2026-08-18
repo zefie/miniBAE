@@ -1069,9 +1069,20 @@ void RunNewReverb(int32_t *sourceP, int32_t *destP, int nSampleFrames)
         CIRCULAR_INCREMENT( stereoReadIndex, kStereoizerBufferMask);
         CIRCULAR_INCREMENT( stereoWriteIndex, kStereoizerBufferMask);
 
-        // ADD in reverb to output buffer
-        *destP++ += (int32_t)(((unsigned int)reverbOutL) << (INPUTSHIFT));
-        *destP++ += (int32_t)(((unsigned int)reverbOutR) << (INPUTSHIFT));
+        // ADD in reverb to output buffer (stereo-interleaved, or packed mono)
+        {
+            int32_t wetL = (int32_t)(((unsigned int)reverbOutL) << (INPUTSHIFT));
+            int32_t wetR = (int32_t)(((unsigned int)reverbOutR) << (INPUTSHIFT));
+            if (MusicGlobals && MusicGlobals->generateStereoOutput)
+            {
+                *destP++ += wetL;
+                *destP++ += wetR;
+            }
+            else
+            {
+                *destP++ += (wetL / 2) + (wetR / 2);
+            }
+        }
     }
 
 

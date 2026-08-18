@@ -24,6 +24,7 @@
 #include "gui_midi.h"    // For gui_midi_event_callback and midi output functions
 #include "gui_karaoke.h" // For karaoke functions
 #include "X_API.h"
+#include "BAE_API.h"
 #include "NeoBAE.h"
 #include "NeoBAEConfigPath.h"
 #include "GenRingtone.h"
@@ -943,10 +944,14 @@ bool bae_init(int sampleRateHz)
         return false;
     }
 
-    BAEAudioModifiers modifiers = BAE_USE_16 | BAE_USE_STEREO;
+    BAEAudioModifiers modifiers = 0;
+    if (g_stereo_output)
+        modifiers |= BAE_USE_STEREO;
+    if (g_output_16bit)
+        modifiers |= BAE_USE_16;
     BAEResult result = BAEMixer_Open(g_bae.mixer,
                                      sampleRateHz,
-                                     E_LINEAR_INTERPOLATION,
+                                     g_terp_mode,
                                      modifiers,
                                      64,    // maxMidiVoices
                                      8,     // maxSoundVoices
@@ -962,6 +967,7 @@ bool bae_init(int sampleRateHz)
     }
 
     gui_apply_eq_from_settings();
+    BAE_SetClassicLFO(g_classic_lfo_enabled ? TRUE : FALSE);
 
     BAE_PRINTF("BAE initialized: %d Hz\n", sampleRateHz);
 
@@ -2493,8 +2499,12 @@ bool recreate_mixer_and_restore(int sampleRateHz, int reverbType,
     GM_SetMixerSF2Mode(wasSF2);
 #endif
     BAERate rate = map_rate_from_hz(sampleRateHz);
-    BAEAudioModifiers mods = BAE_USE_16 | BAE_USE_STEREO;
-    BAEResult mr = BAEMixer_Open(g_bae.mixer, rate, BAE_LINEAR_INTERPOLATION, mods, 32, 8, 32, TRUE);
+    BAEAudioModifiers mods = 0;
+    if (g_stereo_output)
+        mods |= BAE_USE_STEREO;
+    if (g_output_16bit)
+        mods |= BAE_USE_16;
+    BAEResult mr = BAEMixer_Open(g_bae.mixer, rate, g_terp_mode, mods, 32, 8, 32, TRUE);
     if (mr != BAE_NO_ERROR)
     {
         char msg[96];
@@ -2507,6 +2517,7 @@ bool recreate_mixer_and_restore(int sampleRateHz, int reverbType,
     BAEMixer_SetAudioTask(g_bae.mixer, gui_audio_task, g_bae.mixer);
     BAEMixer_ReengageAudio(g_bae.mixer);
     gui_apply_eq_from_settings();
+    BAE_SetClassicLFO(g_classic_lfo_enabled ? TRUE : FALSE);
     // reverbType may be a UI index beyond BAE_REVERB_TYPE_COUNT when using custom presets
     bae_set_reverb(reverbType);
     BAEMixer_SetMasterVolume(g_bae.mixer, FLOAT_TO_UNSIGNED_FIXED(g_last_requested_master_volume));

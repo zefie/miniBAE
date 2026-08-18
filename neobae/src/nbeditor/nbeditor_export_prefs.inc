@@ -109,6 +109,8 @@
         m_pref_compress_session_on_save = false;
         m_pref_default_undocked_layout = false;
         m_pref_show_tips_at_startup = true;
+        m_show_peak_voices = false;
+        m_sample_rate_hz = 44100;
         m_tips_seen.clear();
         m_tips_next = 0;
         m_pref_adsr_default_valid = false;
@@ -169,6 +171,14 @@
             else if (key == "show_tips_at_startup")
             {
                 m_pref_show_tips_at_startup = PrefParseBool(value, true);
+            }
+            else if (key == "show_peak_voices")
+            {
+                m_show_peak_voices = PrefParseBool(value, false);
+            }
+            else if (key == "mixer_sample_rate")
+            {
+                m_sample_rate_hz = ClampMixerSampleRateHz(std::atoi(value.c_str()));
             }
             else if (key == "tips_seen")
             {
@@ -320,6 +330,8 @@
         out << "default_undocked_layout=" << (m_pref_default_undocked_layout ? "1" : "0") << '\n';
         out << "compress_session_on_save=" << (m_pref_compress_session_on_save ? "1" : "0") << '\n';
         out << "show_tips_at_startup=" << (m_pref_show_tips_at_startup ? "1" : "0") << '\n';
+        out << "show_peak_voices=" << (m_show_peak_voices ? "1" : "0") << '\n';
+        out << "mixer_sample_rate=" << m_sample_rate_hz << '\n';
         out << "tips_next=" << m_tips_next << '\n';
         {
             out << "tips_seen=";
@@ -380,6 +392,8 @@
         m_prefs_draft_compress_session = m_pref_compress_session_on_save;
         m_prefs_draft_default_undocked = m_pref_default_undocked_layout;
         m_prefs_draft_show_tips = m_pref_show_tips_at_startup;
+        m_prefs_draft_show_peak_voices = m_show_peak_voices;
+        m_prefs_draft_sample_rate_hz = ClampMixerSampleRateHz(m_sample_rate_hz);
 #if SUPPORT_MIDI_HW == TRUE
         m_prefs_draft_midi_hw_enabled = m_midi_hw_enabled;
         m_prefs_draft_midi_hw_device_index = m_midi_hw_device_index;
@@ -447,6 +461,50 @@
                 "Also available from Help → Tips…\n"
                 "Enabled by default.");
         }
+        ImGui::Checkbox("Show peak voices", &m_prefs_draft_show_peak_voices);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+        {
+            ImGui::SetTooltip(
+                "Player meter shows Voices N (peak P) while a song is loaded.\n"
+                "Peak resets on load/start. Also available on the Player mix row.");
+        }
+        {
+            int rate_index = 0;
+            for (int i = 0; i < static_cast<int>(IM_ARRAYSIZE(kMixerSampleRates)); ++i)
+            {
+                if (kMixerSampleRates[i] == m_prefs_draft_sample_rate_hz)
+                {
+                    rate_index = i;
+                    break;
+                }
+            }
+            char rate_preview[32];
+            std::snprintf(rate_preview, sizeof(rate_preview), "%d Hz",
+                          kMixerSampleRates[rate_index]);
+            ImGui::SetNextItemWidth(160.0f);
+            if (ImGui::BeginCombo("Mixer sample rate", rate_preview))
+            {
+                for (int i = 0; i < static_cast<int>(IM_ARRAYSIZE(kMixerSampleRates)); ++i)
+                {
+                    char label[32];
+                    std::snprintf(label, sizeof(label), "%d Hz", kMixerSampleRates[i]);
+                    const bool selected = (i == rate_index);
+                    if (ImGui::Selectable(label, selected))
+                    {
+                        m_prefs_draft_sample_rate_hz = kMixerSampleRates[i];
+                    }
+                    if (selected)
+                    {
+                        ImGui::SetItemDefaultFocus();
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal))
+            {
+                ImGui::SetTooltip("Recreates the mixer, same as Apply Voices.");
+            }
+        }
         DrawMidiHwPreferencesSection();
         ImGui::Spacing();
         if (ImGui::Button("OK", ImVec2(80, 0)))
@@ -457,6 +515,19 @@
             m_pref_compress_session_on_save = m_prefs_draft_compress_session;
             m_pref_default_undocked_layout = m_prefs_draft_default_undocked;
             m_pref_show_tips_at_startup = m_prefs_draft_show_tips;
+            m_show_peak_voices = m_prefs_draft_show_peak_voices;
+            {
+                const int new_rate = ClampMixerSampleRateHz(m_prefs_draft_sample_rate_hz);
+                const bool rate_changed = (new_rate != m_sample_rate_hz);
+                m_sample_rate_hz = new_rate;
+                if (rate_changed && m_mixer)
+                {
+                    if (CreateMixer(false))
+                    {
+                        SetStatus("Mixer reopened with new sample rate");
+                    }
+                }
+            }
 #if SUPPORT_MIDI_HW == TRUE
             m_midi_hw_enabled = m_prefs_draft_midi_hw_enabled;
             m_midi_hw_device_index = m_prefs_draft_midi_hw_device_index;

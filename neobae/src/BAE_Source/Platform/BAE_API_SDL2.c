@@ -49,6 +49,54 @@ extern int16_t BAE_GetMaxSamplePerSlice(void); // ensure visible for sizing
 
 static Uint8 *g_sliceStatic = NULL;
 static size_t g_sliceStaticSize = 0;
+/* Host device is always S16 stereo. Mixer PCM (g_bits/g_channels) is converted
+ * into this buffer so WASAPI/DirectSound never see U8 or mono streams. */
+static Uint8 *g_deviceSlice = NULL;
+static size_t g_deviceSliceSize = 0;
+
+#define PV_DEVICE_CHANNELS 2
+#define PV_DEVICE_SAMPLE_BYTES 4
+
+static void PV_EnsureDeviceSlice(size_t bytes)
+{
+    if (g_deviceSliceSize >= bytes)
+        return;
+    free(g_deviceSlice);
+    g_deviceSlice = (Uint8 *)calloc(1, bytes);
+    g_deviceSliceSize = g_deviceSlice ? bytes : 0;
+}
+
+/* Mixer PCM stays native (8/16, mono/stereo). Host only upconverts for the device. */
+static void PV_ConvertMixerToS16Stereo(const void *src, int16_t *dst, int frames)
+{
+    int i;
+    if (g_bits == 16 && g_channels == 2)
+    {
+        memcpy(dst, src, (size_t)frames * 4);
+        return;
+    }
+    if (g_bits == 16 && g_channels == 1)
+    {
+        const int16_t *s = (const int16_t *)src;
+        for (i = 0; i < frames; i++)
+            dst[i * 2] = dst[i * 2 + 1] = s[i];
+        return;
+    }
+    const uint8_t *s8 = (const uint8_t *)src;
+    if (g_channels == 2)
+    {
+        for (i = 0; i < frames * 2; i++)
+            dst[i] = (int16_t)(((int)s8[i] - 128) << 8);
+    }
+    else
+    {
+        for (i = 0; i < frames; i++)
+        {
+            int16_t v = (int16_t)(((int)s8[i] - 128) << 8);
+            dst[i * 2] = dst[i * 2 + 1] = v;
+        }
+    }
+}
 
 // PCM recorder state (writes raw PCM slices produced by audio callback to WAV)
 static FILE *g_pcm_rec_fp = NULL;
@@ -317,11 +365,11 @@ static void audio_callback(void *userdata, Uint8 *stream, int len)
 
     int remaining = len;
     Uint8 *out = stream;
-    const int sampleBytes = (g_bits / 8) * (int)g_channels;
+    const int mixerSampleBytes = (g_bits / 8) * (int)g_channels;
 
-    if (sampleBytes <= 0)
+    if (mixerSampleBytes <= 0)
     {
-        BAE_PRINTF("ERROR: Invalid sample byte size: %d\n", sampleBytes);
+        BAE_PRINTF("ERROR: Invalid sample byte size: %d\n", mixerSampleBytes);
         memset(stream, 0, len);
         return;
     }
@@ -340,11 +388,11 @@ static void audio_callback(void *userdata, Uint8 *stream, int len)
                 BAE_PRINTF("ERROR: No slice buffer allocated\n");
             }
             memset(out, 0, remaining);
-            g_totalSamplesPlayed += (uint32_t)(remaining / sampleBytes);
+            g_totalSamplesPlayed += (uint32_t)(remaining / PV_DEVICE_SAMPLE_BYTES);
             break;
         }
 
-        int32_t frames = sliceBytes / sampleBytes;
+        int32_t frames = sliceBytes / mixerSampleBytes;
         if (frames <= 0)
         {
             BAE_PRINTF("ERROR: Invalid frame count: %d\n", frames);
@@ -593,17 +641,26 @@ static void audio_callback(void *userdata, Uint8 *stream, int len)
         }
     after_ring_write:
 
-        if (sliceBytes > remaining)
+        PV_EnsureDeviceSlice((size_t)frames * PV_DEVICE_SAMPLE_BYTES);
+        if (!g_deviceSlice)
         {
-            memcpy(out, g_sliceStatic, remaining);
-            g_totalSamplesPlayed += (uint32_t)(remaining / sampleBytes);
+            memset(out, 0, remaining);
+            break;
+        }
+        PV_ConvertMixerToS16Stereo(g_sliceStatic, (int16_t *)g_deviceSlice, frames);
+        int32_t deviceBytes = frames * PV_DEVICE_SAMPLE_BYTES;
+
+        if (deviceBytes > remaining)
+        {
+            memcpy(out, g_deviceSlice, remaining);
+            g_totalSamplesPlayed += (uint32_t)(remaining / PV_DEVICE_SAMPLE_BYTES);
             remaining = 0;
         }
         else
         {
-            memcpy(out, g_sliceStatic, sliceBytes);
-            out += sliceBytes;
-            remaining -= sliceBytes;
+            memcpy(out, g_deviceSlice, deviceBytes);
+            out += deviceBytes;
+            remaining -= deviceBytes;
             g_totalSamplesPlayed += (uint32_t)frames;
         }
         g_lastCallbackFrames = (uint32_t)frames;
@@ -881,11 +938,16 @@ int32_t BAE_GetAudioByteBufferSize(void) { return g_audioByteBufferSize; }
 int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t channels, uint32_t bits)
 {
     g_mixerThreadContext = threadContext;
-    BAE_PRINTF("BAE_AcquireAudioCard called: %u Hz, %u ch, %u bits\n", sampleRate, channels, bits);
+    BAE_PRINTF("BAE_AcquireAudioCard called: %u Hz, %u ch, %u bits (device always S16 stereo)\n", sampleRate, channels, bits);
+
+    g_sampleRate = sampleRate;
+    g_channels = channels;
+    g_bits = bits;
+    PV_ComputeSliceSizeFromEngine();
 
     if (g_audioDevice)
     {
-        BAE_PRINTF("Audio device already acquired\n");
+        BAE_PRINTF("Audio device already acquired; mixer format updated to %u ch/%u-bit\n", g_channels, g_bits);
         return 0;
     }
 
@@ -900,17 +962,12 @@ int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t chan
         g_initialized = 1;
         BAE_PRINTF("SDL audio subsystem initialized successfully\n");
     }
-    g_sampleRate = sampleRate;
-    g_channels = channels;
-    g_bits = bits;
-    BAE_PRINTF("Computing provisional slice size from engine (pre SDL_OpenAudioDevice)...\n");
-    PV_ComputeSliceSizeFromEngine();
 
     SDL_AudioSpec want;
     SDL_zero(want);
     want.freq = (int)sampleRate;
-    want.channels = (Uint8)channels;
-    want.format = (bits == 16) ? AUDIO_S16SYS : AUDIO_U8;
+    want.channels = (Uint8)PV_DEVICE_CHANNELS;
+    want.format = AUDIO_S16SYS;
     // request buffer roughly equal to one slice; SDL may choose different
     // Request a device buffer roughly equal to one engine slice (capped) so callback cadence
     // matches engine timing closely even at very low sample rates.
@@ -935,15 +992,15 @@ int BAE_AcquireAudioCard(void *threadContext, uint32_t sampleRate, uint32_t chan
                g_have.freq, g_have.channels, g_have.format, g_have.samples);
 
     // If SDL adjusted the frequency or channel count, update and recompute slice.
-    if ((uint32_t)g_have.freq != g_sampleRate || (uint32_t)g_have.channels != g_channels)
+    if ((uint32_t)g_have.freq != g_sampleRate || g_have.channels != PV_DEVICE_CHANNELS)
     {
-        BAE_PRINTF("SDL adjusted audio format (requested %u Hz/%u ch -> got %d Hz/%d ch). Keeping requested callback format.\n",
-                   g_sampleRate, g_channels, g_have.freq, g_have.channels);
+        BAE_PRINTF("SDL adjusted audio format (requested %u Hz/%d ch -> got %d Hz/%d ch). Mixer remains %u ch/%u-bit.\n",
+                   g_sampleRate, PV_DEVICE_CHANNELS, g_have.freq, g_have.channels, g_channels, g_bits);
     }
 
     SDL_PauseAudioDevice(g_audioDevice, 0);
-    BAE_PRINTF("SDL2 audio device active: %u Hz, %u ch, dev buf %u frames, slice %u frames (%d bytes)\n",
-               g_sampleRate, g_channels, g_have.samples, g_framesPerSlice, g_audioByteBufferSize);
+    BAE_PRINTF("SDL2 audio device active: %u Hz S16 stereo (mixer %u ch/%u-bit), dev buf %u frames, slice %u frames (%d bytes)\n",
+               g_sampleRate, g_channels, g_bits, g_have.samples, g_framesPerSlice, g_audioByteBufferSize);
     return 0;
 }
 
