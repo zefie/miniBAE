@@ -228,6 +228,12 @@ static bool BsnResourceTypeEquals(uint32_t type, char a, char b, char c, char d)
     return type == want;
 }
 
+/* SMS (0) and structured RMF (1) both point at a Midi object. Linear RMF (2) does not. */
+static bool BsnSongTypeHasMidiObject(unsigned char song_type)
+{
+    return song_type == SONG_TYPE_SMS || song_type == SONG_TYPE_RMF;
+}
+
 static bool ParseIrezResources(const unsigned char *data,
                                size_t size,
                                std::vector<BsnIrezResource> &out)
@@ -320,6 +326,8 @@ static bool ReadEntireFileBytes(const char *path, std::vector<unsigned char> &ou
 
 static bool IsBe2SessionDocument(const std::vector<BsnIrezResource> &resources)
 {
+    bool has_bepf = false;
+    bool has_song = false;
     for (const BsnIrezResource &r : resources)
     {
         /* Classic BE2 Session .bsn */
@@ -327,13 +335,23 @@ static bool IsBe2SessionDocument(const std::vector<BsnIrezResource> &resources)
         {
             return true;
         }
+        /* Beatnik bank/session trailer (DinoPark Tycoon.bsn and similar). */
+        if (BsnResourceTypeEquals(r.type, 'B', 'E', 'P', 'F'))
+        {
+            has_bepf = true;
+        }
         /* NeoBAE .zsn (and optional NeoBAE layout on .bsn) */
         if (BsnResourceTypeEquals(r.type, 'n', 'B', 'e', 'T'))
         {
             return true;
         }
+        if (BsnResourceTypeEquals(r.type, 'S', 'O', 'N', 'G'))
+        {
+            has_song = true;
+        }
     }
-    return false;
+    /* Playback banks with a BEPF trailer and SONG/Midi (no Session Prefs). */
+    return has_bepf && has_song;
 }
 
 /* BE2 DATe stamps editor-touched resources. Custom Session songs get SONG and
@@ -438,7 +456,7 @@ static void CollectSessionUserSongs(const std::vector<BsnIrezResource> &resource
         }
         const uint16_t midi_id = BsnReadBE16(r.body.data());
         const unsigned char song_type = r.body[6];
-        if (song_type != 1)
+        if (!BsnSongTypeHasMidiObject(song_type))
         {
             continue;
         }
@@ -548,7 +566,7 @@ static void CollectSessionUserSongsFromBank(XFILE bank,
         const uint16_t midi_id = BsnReadBE16(song_body);
         const unsigned char song_type = song_body[6];
         XDisposePtr(song_data);
-        if (song_type != 1)
+        if (!BsnSongTypeHasMidiObject(song_type))
         {
             continue;
         }
@@ -3704,7 +3722,7 @@ private:
                 static_cast<uint16_t>((static_cast<uint16_t>(body[0]) << 8) | body[1]);
             const unsigned char song_type = body[6];
             XDisposePtr(song_data);
-            if (song_type != 1)
+            if (!BsnSongTypeHasMidiObject(song_type))
             {
                 continue;
             }
@@ -4006,7 +4024,7 @@ private:
                 static_cast<uint16_t>((static_cast<uint16_t>(body[0]) << 8) | body[1]);
             const unsigned char song_type = body[6];
             XDisposePtr(song_data);
-            if (song_type != 1)
+            if (!BsnSongTypeHasMidiObject(song_type))
             {
                 continue;
             }
@@ -4170,7 +4188,7 @@ private:
             const unsigned char song_type = body[6];
             XDisposePtr(song_data);
 
-            if (song_type != 1)
+            if (!BsnSongTypeHasMidiObject(song_type))
             {
                 continue;
             }

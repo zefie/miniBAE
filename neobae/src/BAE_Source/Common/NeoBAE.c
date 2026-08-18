@@ -11248,7 +11248,8 @@ static int16_t PV_CollectMixerBankPreferredSongIndices(XFILE fileRef,
         objectId = XGetShort(body);
         songType = body[6];
         XDisposePtr(songData);
-        if (songType != 1)
+        /* SMS (0) and structured RMF (1) both reference Midi. */
+        if (songType != SONG_TYPE_SMS && songType != SONG_TYPE_RMF)
         {
             continue;
         }

@@ -12,6 +12,7 @@
 
 #include "com_zefie_NeoBAE_Sound.h"
 #include "NeoBAE.h"
+#include "BAE_API.h"
 #include "GenSnd.h"
 #include "GenSF2_FluidLite.h"
 
@@ -576,20 +577,35 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Song__1startSong
 	BAESong_Preroll(song);
 	BAESong_SetMicrosecondPosition(song, 0);
 	BAEResult r = BAE_NO_ERROR;
-	/* Disengage hardware while the first Start arms DLS/SF2 so AudioTrack
-	 * cannot pull cold fallback programs for the opening chord. Export already
-	 * starts into a file sink (no live callback). Seek-to-0 is warm. */
+	/* DLS/SF2 first Start can bind programs one slice late (Jitters.mid).
+	 * Mute, let a few live slices arm the cache, then seek to 0 and unmute.
+	 * Do not DisengageAudio: tearing down OpenSL primes two silent buffers
+	 * and the opening notes never make it to the device. */
 	{
 		BAEMixer mixer = NULL;
-		if (BAESong_GetMixer(song, &mixer) == BAE_NO_ERROR && mixer)
+		int muted = 0;
+		int need_warm = 0;
+#if USE_NATIVE_DLS == TRUE
+		if (BAESong_IsDLSSong(song))
+			need_warm = 1;
+#endif
+#if USE_SF2_SUPPORT == TRUE
+		if (BAESong_IsSF2Song(song))
+			need_warm = 1;
+#endif
+		if (need_warm && BAESong_GetMixer(song, &mixer) == BAE_NO_ERROR && mixer)
 		{
-			(void)BAEMixer_DisengageAudio(mixer);
+			if (BAEMixer_Mute(mixer) == BAE_NO_ERROR)
+				muted = 1;
 		}
 		r = BAESong_Start(song, 0);
-		if (mixer)
+		if (need_warm && r == BAE_NO_ERROR)
 		{
-			(void)BAEMixer_ReengageAudio(mixer);
+			BAE_WaitMicroseconds(40000);
+			BAESong_SetMicrosecondPosition(song, 0);
 		}
+		if (muted && mixer)
+			(void)BAEMixer_Unmute(mixer);
 	}
 	__android_log_print(ANDROID_LOG_DEBUG, "neoBAE", "BAESong_Start returned %d", r);
 	return (jint)r;

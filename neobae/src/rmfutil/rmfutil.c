@@ -23,8 +23,8 @@
  *
  * Commands:
  *   extract [--all] <input.rmf|input.bsn> <output.mid|outdir>
- *       Extract MIDI from an RMF/ZMF song, or all Custom Songs from a
- *       session BSN/ZSN (use --all to include groovoids).
+ *       Extract MIDI from an RMF/ZMF song, or MIDI-backed SONG entries from a
+ *       session/bank BSN/ZSN (use --all to include groovoids).
  *
  *   create [<bank.hsb|bank.zsb>|-] <song.mid|song.rmf> [output.rmf] [-q]
  *       Embed bank instruments into a song and save as RMF/ZMF.
@@ -328,7 +328,8 @@ static int cmd_extract_session_songs(XFILE file, const char *outdir, int all_son
         song_type = song_body[6];
         ruf_pascal_name(song_name_raw, song_name, sizeof(song_name));
         XDisposePtr(song_data);
-        if (song_type != 1)
+        /* SMS (0) and structured RMF (1) both reference Midi; skip linear RMF (2). */
+        if (song_type != 0 && song_type != 1)
             continue;
 
         midi_name_raw[0] = 0;
@@ -2351,7 +2352,7 @@ static void print_usage(const char *prog)
             "\n"
             "Commands:\n"
             "  extract [--all] <song.rmf|song.zmf|session.bsn|session.zsn> <output.mid|outdir>\n"
-            "      Extract MIDI from an RMF/ZMF song, or all Custom Songs from a BSN/ZSN session.\n"
+            "      Extract MIDI from an RMF/ZMF song, or MIDI-backed SONG entries from a BSN/ZSN.\n"
             "      --all  also extract groovoid (bank) SONG->Midi entries\n"
             "\n"
             "  create [<bank.hsb|bank.zsb>|-] <song.mid|song.rmf|song.zmf> [output.rmf] [-q]\n"
