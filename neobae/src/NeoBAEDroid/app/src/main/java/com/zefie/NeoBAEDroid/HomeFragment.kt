@@ -1857,12 +1857,6 @@ class HomeFragment : Fragment() {
     }
 
     private fun finishStartNormalizedSong(song: Song, file: File) {
-        if (song.isSF2Song() || song.isDLSSong()) {
-            try {
-                song.preroll()
-                song.seekToMs(0)
-            } catch (_: Exception) {}
-        }
         val r = song.start()
         if (r == 0) {
             if (song.hasEmbeddedBank()) {

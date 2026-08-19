@@ -12,7 +12,6 @@
 
 #include "com_zefie_NeoBAE_Sound.h"
 #include "NeoBAE.h"
-#include "BAE_API.h"
 #include "GenSnd.h"
 #include "GenSF2_FluidLite.h"
 
@@ -148,6 +147,10 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Sound__1loadSound__Landroid_content
 			BAEResult sr = BAESong_LoadMidiFromMemory(song, (void const*)mem, (uint32_t)read_total, TRUE);
 			free(mem);
 			if(sr != BAE_NO_ERROR){ BAESong_Delete(song); __android_log_print(ANDROID_LOG_ERROR, "neoBAE", "BAESong_LoadMidiFromMemory failed %d", sr); return (jint)sr; }
+			{
+				uint64_t lenUs = 0;
+				(void)BAESong_GetMicrosecondLength64(song, &lenUs);
+			}
 			BAESong_Preroll(song);
 			sr = BAESong_Start(song, 0);
 			if(sr != BAE_NO_ERROR){ BAESong_Stop(song, FALSE); BAESong_Delete(song); __android_log_print(ANDROID_LOG_ERROR, "neoBAE", "BAESong_Start failed %d", sr); return (jint)sr; }
@@ -573,40 +576,19 @@ JNIEXPORT jint JNICALL Java_com_zefie_NeoBAE_Song__1startSong
 	BAE_UNSIGNED_FIXED cur;
 	if(BAESong_GetVolume(song, &cur) == BAE_NO_ERROR){ BAESong_SetVolume(song, cur); }
 	__android_log_print(ANDROID_LOG_DEBUG, "neoBAE", "_startSong song=%p", (void*)(intptr_t)songReference);
-	BAESong_SetMicrosecondPosition(song, 0);
-	BAESong_Preroll(song);
-	BAESong_SetMicrosecondPosition(song, 0);
-	BAEResult r = BAE_NO_ERROR;
-	/* DLS/SF2 first Start can bind programs one slice late (Jitters.mid).
-	 * Mute, let a few live slices arm the cache, then seek to 0 and unmute.
-	 * Do not DisengageAudio: tearing down OpenSL primes two silent buffers
-	 * and the opening notes never make it to the device. */
+	/* Cache duration before the first live slice. HomeFragment polls
+	 * getLengthMs() as soon as isPlaying is set; that walk calls
+	 * PV_ConfigureMusic -> GM_DLS_ResetForSong on the shared synth and
+	 * kills Jitters.mid's tick-0 pad chord (ch4), leaving the ch3 note-97
+	 * chirp. zefidi/playbae cache length at load, so they never do this
+	 * during playback. Do not SetPosition(0) around Start: that seek walk
+	 * also resets the live DLS/SF2 synth from JNI while OpenSL is mixing. */
 	{
-		BAEMixer mixer = NULL;
-		int muted = 0;
-		int need_warm = 0;
-#if USE_NATIVE_DLS == TRUE
-		if (BAESong_IsDLSSong(song))
-			need_warm = 1;
-#endif
-#if USE_SF2_SUPPORT == TRUE
-		if (BAESong_IsSF2Song(song))
-			need_warm = 1;
-#endif
-		if (need_warm && BAESong_GetMixer(song, &mixer) == BAE_NO_ERROR && mixer)
-		{
-			if (BAEMixer_Mute(mixer) == BAE_NO_ERROR)
-				muted = 1;
-		}
-		r = BAESong_Start(song, 0);
-		if (need_warm && r == BAE_NO_ERROR)
-		{
-			BAE_WaitMicroseconds(40000);
-			BAESong_SetMicrosecondPosition(song, 0);
-		}
-		if (muted && mixer)
-			(void)BAEMixer_Unmute(mixer);
+		uint64_t lenUs = 0;
+		(void)BAESong_GetMicrosecondLength64(song, &lenUs);
 	}
+	BAESong_Preroll(song);
+	BAEResult r = BAESong_Start(song, 0);
 	__android_log_print(ANDROID_LOG_DEBUG, "neoBAE", "BAESong_Start returned %d", r);
 	return (jint)r;
 }
