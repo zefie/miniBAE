@@ -11,7 +11,11 @@ set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/zefie/NeoBAE")
 set(CPACK_PACKAGE_VERSION "${BAE_VERSION}")
 set(CPACK_PACKAGE_CHECKSUM "SHA256")
 set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
-set(CPACK_STRIP_FILES ON)
+if(BUILD_DEBUG_INFO)
+  set(CPACK_STRIP_FILES OFF)
+else()
+  set(CPACK_STRIP_FILES ON)
+endif()
 
 # Sanitize version for Debian package metadata (must start with a digit).
 string(REGEX REPLACE "[^A-Za-z0-9.+~-]" "-" CPACK_DEBIAN_PACKAGE_VERSION "${BAE_VERSION}")

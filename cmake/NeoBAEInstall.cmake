@@ -68,6 +68,33 @@ if(NEOBAE_TOOL_TARGETS)
   )
 endif()
 
+# Sidecar PDBs for crash-log symbolication (BUILD_DEBUG_INFO Windows builds).
+if(BUILD_DEBUG_INFO AND WIN32)
+  foreach(_neobae_pdb_tool IN LISTS NEOBAE_TOOL_TARGETS)
+    install(FILES
+        "$<TARGET_FILE_DIR:${_neobae_pdb_tool}>/$<TARGET_FILE_BASE_NAME:${_neobae_pdb_tool}>.pdb"
+      DESTINATION "${NEOBAE_INSTALL_TOOL_DIR}"
+      COMPONENT Tools
+      OPTIONAL
+    )
+  endforeach()
+  unset(_neobae_pdb_tool)
+  if(NEOBAE_SHARED_LIBNEOBAE)
+    install(FILES
+        "$<TARGET_FILE_DIR:neobae>/$<TARGET_FILE_BASE_NAME:neobae>.pdb"
+      DESTINATION "${NEOBAE_INSTALL_RUNTIME_DIR}"
+      COMPONENT Runtime
+      OPTIONAL
+    )
+    install(FILES
+        "$<TARGET_FILE_DIR:neobae>/$<TARGET_FILE_BASE_NAME:neobae>.pdb"
+      DESTINATION "${NEOBAE_INSTALL_SDK_RUNTIME_DIR}"
+      COMPONENT Development
+      OPTIONAL
+    )
+  endif()
+endif()
+
 # nbeditor hyphen data:
 #   Windows suite: Tools/nbeditor/ (next to nbeditor.exe) with EN+RU .dic
 #   Linux: catalog/README under share/neobae/nbeditor (binary name is nbeditor)

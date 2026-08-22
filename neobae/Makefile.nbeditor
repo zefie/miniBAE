@@ -52,7 +52,9 @@ endif
 LIBS = -lpthread -lm -lSDL3
 
 ifeq ($(WINDOWS),1)
-    LIBS += -limm32 -lwinmm -lsetupapi -lcfgmgr32 -lversion
+    LIBS += -limm32 -lwinmm -lsetupapi -lcfgmgr32 -lversion -ldbghelp
+else
+    LDFLAGS += -rdynamic
 endif
 
 ifneq ($(BAE_LIBS),)

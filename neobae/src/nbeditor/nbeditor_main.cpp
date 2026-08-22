@@ -9,6 +9,7 @@
 
 #include "NeoBAE.h"
 #include "NeoBAEConfigPath.h"
+#include "nbeditor_crash.h"
 #include "X_API.h"
 #include "X_Formats.h"
 #include "X_EditorTools.h"
@@ -7549,6 +7550,7 @@ public:
 int main(int argc, char **argv)
 {
 #if NBEDITOR
+    NbEditorInstallCrashHandler();
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD))
     {
         std::printf("SDL_Init failed: %s\n", SDL_GetError());

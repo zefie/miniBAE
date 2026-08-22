@@ -934,6 +934,7 @@ else
 									else							
 										ifeq ($(NBEDITOR),1)
 											SRC += src/nbeditor/nbeditor_main.cpp \
+												src/nbeditor/nbeditor_crash.cpp \
 												src/thirdparty/imgui/imgui.cpp \
 												src/thirdparty/imgui/imgui_draw.cpp \
 												src/thirdparty/imgui/imgui_tables.cpp \

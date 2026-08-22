@@ -223,8 +223,30 @@ option(BUILD_PLAYBAE "Build playbae when a non-Dummy/non-Ansi backend is selecte
 option(BUILD_ZEFIDI "Build zefidi when SDL2/SDL3 backend and matching SDL_ttf are available" ON)
 option(BUILD_CLITOOLS "Build CLI tools (songtool, rmfutil, rmiutil, xmfutil, sf2-hsb, mod2rmf, bankrecomp, ringtone2mid, …)" ON)
 option(BUILD_NBEDITOR "Build NeoBAE Editor (Dear ImGui + SDL3); requires BAE_ENABLE_RMF_EDITOR" ON)
+option(BUILD_DEBUG_INFO "Emit debug symbols / PDBs for executables and libneobae" OFF)
 option(BAE_DISABLE_LIB_HYPHEN "nbeditor: syllable Apply-text via vendored libhyphen" OFF)
 set(CMAKE_BUILD_TYPE "${CMAKE_BUILD_TYPE}" CACHE STRING "Build type (Debug, Release, RelWithDebInfo, MinSizeRel)" FORCE)
+
+# BUILD_DEBUG_INFO is independent of LDEBUG: keep existing -O2 (or LDEBUG's -O0)
+# and only add symbols / PDBs so crash backtraces can resolve.
+if(BUILD_DEBUG_INFO)
+  add_compile_definitions(BUILD_DEBUG_INFO=1)
+  if(MSVC)
+    add_compile_options(/Zi)
+    add_link_options(/DEBUG)
+    message(STATUS "BUILD_DEBUG_INFO: MSVC /Zi /DEBUG (PDBs next to exes/DLLs)")
+  elseif(WIN32 AND CMAKE_C_COMPILER_ID MATCHES "Clang")
+    add_compile_options(-g -gcodeview -fno-omit-frame-pointer)
+    message(STATUS "BUILD_DEBUG_INFO: CodeView + PDBs (llvm-mingw/Clang)")
+  else()
+    add_compile_options(-g -fno-omit-frame-pointer)
+    if(WIN32)
+      message(STATUS "BUILD_DEBUG_INFO: DWARF symbols (PDB requires MSVC or llvm-mingw)")
+    else()
+      message(STATUS "BUILD_DEBUG_INFO: DWARF symbols")
+    endif()
+  endif()
+endif()
 
 # Internal compatibility booleans: keep existing logic in terms of ENABLE vars.
 set(BAE_ENABLE_RMF_EDITOR ON)
@@ -2283,6 +2305,7 @@ if(BUILD_NBEDITOR)
     if(EXISTS ${NBEDITOR_MAIN} AND EXISTS ${NBEDITOR_IMGUI_DIR}/imgui.cpp)
       set(NBEDITOR_SOURCES
         ${NBEDITOR_MAIN}
+        ${CMAKE_CURRENT_SOURCE_DIR}/neobae/src/nbeditor/nbeditor_crash.cpp
         ${NBEDITOR_IMGUI_DIR}/imgui.cpp
         ${NBEDITOR_IMGUI_DIR}/imgui_draw.cpp
         ${NBEDITOR_IMGUI_DIR}/imgui_tables.cpp
@@ -2456,7 +2479,10 @@ if(BUILD_NBEDITOR)
         message(STATUS "nbeditor: hardware MIDI input disabled.")
       endif()
       if(WIN32)
-        target_link_libraries(nbeditor PRIVATE imm32 winmm setupapi cfgmgr32 version)
+        target_link_libraries(nbeditor PRIVATE imm32 winmm setupapi cfgmgr32 version dbghelp)
+      endif()
+      if(UNIX AND NOT APPLE)
+        target_link_options(nbeditor PRIVATE -rdynamic)
       endif()
       if(NBEDITOR_LIBXMP_LITE_AVAILABLE)
         message(STATUS "nbeditor: libxmp-lite module loading enabled.")
@@ -2751,6 +2777,37 @@ foreach(_neobae_tool
   endif()
 endforeach()
 unset(_neobae_tool)
+
+# Emit sidecar PDBs next to linked images when BUILD_DEBUG_INFO is on.
+# Compile flags are applied globally above; this only names/places the PDB.
+function(neobae_emit_debug_info target)
+  if(NOT BUILD_DEBUG_INFO)
+    return()
+  endif()
+  if(NOT TARGET ${target})
+    return()
+  endif()
+  get_target_property(_neobae_dbg_type ${target} TYPE)
+  if(NOT _neobae_dbg_type STREQUAL "EXECUTABLE" AND
+     NOT _neobae_dbg_type STREQUAL "SHARED_LIBRARY")
+    return()
+  endif()
+  if(MSVC)
+    set_target_properties(${target} PROPERTIES
+      PDB_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+      COMPILE_PDB_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+    )
+  elseif(WIN32 AND CMAKE_C_COMPILER_ID MATCHES "Clang")
+    target_link_options(${target} PRIVATE
+      "-Wl,--pdb=$<TARGET_FILE_DIR:${target}>/$<TARGET_FILE_BASE_NAME:${target}>.pdb")
+  endif()
+endfunction()
+
+neobae_emit_debug_info(neobae)
+foreach(_neobae_dbg_target IN LISTS NEOBAE_TOOL_TARGETS)
+  neobae_emit_debug_info(${_neobae_dbg_target})
+endforeach()
+unset(_neobae_dbg_target)
 
 include(cmake/NeoBAEInstall.cmake)
 include(cmake/NeoBAECpack.cmake)

@@ -19,6 +19,7 @@ Run configure from the repository root (where the top-level `CMakeLists.txt` liv
 |------|---------|-------------|
 | `DEBUG` | `OFF` | Enable debug build (zefidi debug console). Enables debug output from the NeoBAE engine. |
 | `LDEBUG` | `OFF` | Enable full debug build (zefidi debug console, gdb debugging). Disables compile-time optimizations, retains debug symbols, and implies `DEBUG`. |
+| `BUILD_DEBUG_INFO` | `OFF` | Emit debug symbols without changing optimization. On MSVC and llvm-mingw this writes `.pdb` files next to each exe and shared `libneobae`. On GCC/Clang Unix this adds DWARF (`-g`) and keeps frame pointers. Independent of `LDEBUG` (which is `-O0`). Used so nbeditor crash logs can resolve backtraces. |
 | `NEOBAE_STATIC` | `OFF` | Enable static linking for NeoBAE apps and dependencies (best support on MinGW). When enabled and `NEOBAE_EXTERNAL_CODECS` is not already set, it is forced `ON`. When enabled and `NEOBAE_SHARED_LIBNEOBAE` is not already set, it is forced `ON`. On MinGW, sets static suffixes and link options. |
 | `NEOBAE_BUILD_VCLIB` | `OFF` | Build an additional MSVC-style import library for `libneobae.dll` using `dlltool`. Only meaningful for MinGW shared `libneobae.dll` builds. |
 | `USE_SDL2` | `OFF` | Prefer SDL2 as the platform backend when both SDL2 and SDL3 are available. Default auto-select prefers SDL3 when present. |

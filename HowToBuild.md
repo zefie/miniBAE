@@ -229,6 +229,18 @@ cmake --build build --parallel $(nproc) --target nbeditor
 ./build/bin/nbeditor
 ```
 
+On a fatal crash (segfault, abort, unhandled exception) nbeditor writes `nbeditor_crash.log` next to the executable when that directory is writable, otherwise to the NeoBAE config directory (`%APPDATA%/NeoBAE` on Windows, `~/.config/neobae` on Linux).
+
+For symbolicated backtraces, configure with `-DBUILD_DEBUG_INFO=ON`. That keeps `-O2` (unlike `LDEBUG`) and emits:
+
+- Windows MSVC / llvm-mingw: `nbeditor.pdb` (and `libneobae.pdb` when the engine is a DLL) next to the binary. Keep the PDB beside the exe when reproducing crashes.
+- Linux: DWARF in the binary (`-g`); do not strip. nbeditor is linked `-rdynamic` so `backtrace_symbols` can print names.
+
+```bash
+cmake -B build -DBUILD_NBEDITOR=ON -DBUILD_DEBUG_INFO=ON .
+cmake --build build --parallel $(nproc) --target nbeditor
+```
+
 Legacy Makefile:
 
 ```bash
