@@ -1439,7 +1439,8 @@ bool SessionHasPendingSndExportEncode() const
     return false;
 }
 
-/* Apply pending codec/storage to a writable bank clone (Export only).
+/* Apply pending codec/storage to a writable bank (Export clone, or
+ * Delete uncompressed originals on the live editor bank).
  * One encode per unique SND id (shared multisamples share one resource). */
 bool ApplySessionExportTargetsToBank(BAEBankToken bank_token,
                                      const char **out_error,

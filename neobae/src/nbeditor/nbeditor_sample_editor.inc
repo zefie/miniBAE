@@ -68,6 +68,20 @@
         {
             loop_end = source_frames;
         }
+        /* IMA4 decode pads to 64-frame blocks. Stretching loops into that pad
+         * detunes the loop the same way save-time remap used to. Keep source
+         * domain markers; they still fit in the padded buffer. */
+        if (source_frames != target_frames)
+        {
+            const uint32_t ima4_padded =
+                ((source_frames + 63u) / 64u) * 64u;
+            if (target_frames == ima4_padded)
+            {
+                *io_loop_start = loop_start;
+                *io_loop_end = loop_end;
+                return;
+            }
+        }
         if (source_frames != target_frames)
         {
             const uint32_t mapped_start = static_cast<uint32_t>(

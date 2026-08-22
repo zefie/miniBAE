@@ -98,6 +98,77 @@ static void PV_ConvertMixerToS16Stereo(const void *src, int16_t *dst, int frames
     }
 }
 
+/* Deinterleaved S16 L/R for FLAC/Vorbis/Opus recorders. Handles 8-bit and mono mixer PCM. */
+static int16_t *g_recLeft = NULL;
+static int16_t *g_recRight = NULL;
+static uint32_t g_recCapFrames = 0;
+
+static int PV_PrepareRecorderS16LR(const void *src, uint32_t frames)
+{
+    uint32_t i;
+
+    if (!src || frames == 0)
+    {
+        return -1;
+    }
+    if (frames > g_recCapFrames)
+    {
+        int16_t *newL = (int16_t *)malloc((size_t)frames * sizeof(int16_t));
+        int16_t *newR = (int16_t *)malloc((size_t)frames * sizeof(int16_t));
+        if (!newL || !newR)
+        {
+            free(newL);
+            free(newR);
+            return -1;
+        }
+        free(g_recLeft);
+        free(g_recRight);
+        g_recLeft = newL;
+        g_recRight = newR;
+        g_recCapFrames = frames;
+    }
+
+    if (g_bits == 16 && g_channels == 2)
+    {
+        const int16_t *s = (const int16_t *)src;
+        for (i = 0; i < frames; i++)
+        {
+            g_recLeft[i] = s[i * 2];
+            g_recRight[i] = s[i * 2 + 1];
+        }
+        return 0;
+    }
+    if (g_bits == 16 && g_channels == 1)
+    {
+        const int16_t *s = (const int16_t *)src;
+        memcpy(g_recLeft, s, (size_t)frames * sizeof(int16_t));
+        memcpy(g_recRight, s, (size_t)frames * sizeof(int16_t));
+        return 0;
+    }
+
+    {
+        const uint8_t *s8 = (const uint8_t *)src;
+        if (g_channels == 2)
+        {
+            for (i = 0; i < frames; i++)
+            {
+                g_recLeft[i] = (int16_t)(((int)s8[i * 2] - 128) << 8);
+                g_recRight[i] = (int16_t)(((int)s8[i * 2 + 1] - 128) << 8);
+            }
+        }
+        else
+        {
+            for (i = 0; i < frames; i++)
+            {
+                int16_t v = (int16_t)(((int)s8[i] - 128) << 8);
+                g_recLeft[i] = v;
+                g_recRight[i] = v;
+            }
+        }
+    }
+    return 0;
+}
+
 // PCM recorder state (writes raw PCM slices produced by audio callback to WAV)
 static FILE *g_pcm_rec_fp = NULL;
 static uint64_t g_pcm_rec_data_bytes = 0;
@@ -417,164 +488,39 @@ static void audio_callback(void *userdata, Uint8 *stream, int len)
                 BAE_PRINTF("Warning: platform pcm recorder write short: %zu/%ld\n", wrote, (long)sliceBytes);
             }
         }
-        // If FLAC recorder callback is active, call it with the audio data
-        if (g_flac_recorder_callback)
+        // FLAC/Vorbis/Opus recorders want deinterleaved S16. Convert 8-bit/mono mixer PCM first.
         {
-            const uint32_t frames = (uint32_t)(sliceBytes / (g_channels * (g_bits / 8)));
-            if (frames && g_bits == 16)
-            {
-                int16_t *samples = (int16_t *)g_sliceStatic;
-                if (g_channels == 1)
-                {
-                    // Mono - pass the same data as both left and right
-                    g_flac_recorder_callback(samples, samples, frames);
-                }
-                else if (g_channels == 2)
-                {
-                    // Stereo - need to deinterleave
-                    static int16_t *left_temp = NULL, *right_temp = NULL;
-                    static uint32_t temp_frames = 0;
-                    
-                    if (frames > temp_frames)
-                    {
-                        /*
-                         * Avoid assigning realloc() directly to the tracked pointer
-                         * because a failing realloc() would lose the original pointer
-                         * and cause a leak. Allocate new buffers and only replace
-                         * the old ones if allocation succeeds for both.
-                         */
-                        int16_t *new_left = (int16_t *)malloc(frames * sizeof(int16_t));
-                        int16_t *new_right = (int16_t *)malloc(frames * sizeof(int16_t));
-                        if (new_left && new_right)
-                        {
-                            free(left_temp);
-                            free(right_temp);
-                            left_temp = new_left;
-                            right_temp = new_right;
-                            temp_frames = frames;
-                        }
-                        else
-                        {
-                            /* Allocation failed; free any partial alloc and keep existing buffers */
-                            free(new_left);
-                            free(new_right);
-                        }
-                    }
-                    
-                    if (left_temp && right_temp)
-                    {
-                        for (uint32_t i = 0; i < frames; i++)
-                        {
-                            left_temp[i] = samples[i * 2];
-                            right_temp[i] = samples[i * 2 + 1];
-                        }
-                        g_flac_recorder_callback(left_temp, right_temp, frames);
-                    }
-                }
-            }
-        }
+            int wantRec = (g_flac_recorder_callback != NULL);
 #if USE_VORBIS_ENCODER == TRUE
-        // If Vorbis recorder callback is active, call it with the audio data
-        if (g_vorbis_recorder_callback)
-        {
-            const uint32_t frames = (uint32_t)(sliceBytes / (g_channels * (g_bits / 8)));
-            if (frames && g_bits == 16)
-            {
-                int16_t *samples = (int16_t *)g_sliceStatic;
-                if (g_channels == 1)
-                {
-                    // Mono - pass the same data as both left and right
-                    g_vorbis_recorder_callback(samples, samples, frames);
-                }
-                else if (g_channels == 2)
-                {
-                    // Stereo - need to deinterleave (reuse FLAC temp buffers for efficiency)
-                    static int16_t *left_temp = NULL, *right_temp = NULL;
-                    static uint32_t temp_frames = 0;
-                    
-                    if (frames > temp_frames)
-                    {
-                        int16_t *new_left = (int16_t *)malloc(frames * sizeof(int16_t));
-                        int16_t *new_right = (int16_t *)malloc(frames * sizeof(int16_t));
-                        if (new_left && new_right)
-                        {
-                            free(left_temp);
-                            free(right_temp);
-                            left_temp = new_left;
-                            right_temp = new_right;
-                            temp_frames = frames;
-                        }
-                        else
-                        {
-                            free(new_left);
-                            free(new_right);
-                        }
-                    }
-                    
-                    if (left_temp && right_temp)
-                    {
-                        for (uint32_t i = 0; i < frames; i++)
-                        {
-                            left_temp[i] = samples[i * 2];
-                            right_temp[i] = samples[i * 2 + 1];
-                        }
-                        g_vorbis_recorder_callback(left_temp, right_temp, frames);
-                    }
-                }
-            }
-        }
+            wantRec = wantRec || (g_vorbis_recorder_callback != NULL);
 #endif
 #if USE_OPUS_ENCODER == TRUE
-        // If Opus recorder callback is active, call it with the audio data
-        if (g_opus_recorder_callback)
-        {
-            const uint32_t frames = (uint32_t)(sliceBytes / (g_channels * (g_bits / 8)));
-            if (frames && g_bits == 16)
+            wantRec = wantRec || (g_opus_recorder_callback != NULL);
+#endif
+            if (wantRec)
             {
-                int16_t *samples = (int16_t *)g_sliceStatic;
-                if (g_channels == 1)
+                const uint32_t recFrames = (uint32_t)(sliceBytes / (g_channels * (g_bits / 8)));
+                if (recFrames && PV_PrepareRecorderS16LR(g_sliceStatic, recFrames) == 0)
                 {
-                    // Mono - pass the same data as both left and right
-                    g_opus_recorder_callback(samples, samples, frames);
-                }
-                else if (g_channels == 2)
-                {
-                    // Stereo - need to deinterleave
-                    static int16_t *left_temp = NULL, *right_temp = NULL;
-                    static uint32_t temp_frames = 0;
-
-                    if (frames > temp_frames)
+                    if (g_flac_recorder_callback)
                     {
-                        int16_t *new_left = (int16_t *)malloc(frames * sizeof(int16_t));
-                        int16_t *new_right = (int16_t *)malloc(frames * sizeof(int16_t));
-                        if (new_left && new_right)
-                        {
-                            free(left_temp);
-                            free(right_temp);
-                            left_temp = new_left;
-                            right_temp = new_right;
-                            temp_frames = frames;
-                        }
-                        else
-                        {
-                            free(new_left);
-                            free(new_right);
-                        }
+                        g_flac_recorder_callback(g_recLeft, g_recRight, recFrames);
                     }
-
-                    if (left_temp && right_temp)
+#if USE_VORBIS_ENCODER == TRUE
+                    if (g_vorbis_recorder_callback)
                     {
-                        for (uint32_t i = 0; i < frames; i++)
-                        {
-                            left_temp[i] = samples[i * 2];
-                            right_temp[i] = samples[i * 2 + 1];
-                        }
-                        g_opus_recorder_callback(left_temp, right_temp, frames);
+                        g_vorbis_recorder_callback(g_recLeft, g_recRight, recFrames);
                     }
+#endif
+#if USE_OPUS_ENCODER == TRUE
+                    if (g_opus_recorder_callback)
+                    {
+                        g_opus_recorder_callback(g_recLeft, g_recRight, recFrames);
+                    }
+#endif
                 }
             }
         }
-#endif
         // If MP3 recorder is active, push PCM to encoder ring buffer
         if (g_mp3enc && g_mp3enc->accepting)
         {

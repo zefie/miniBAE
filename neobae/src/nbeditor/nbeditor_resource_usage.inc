@@ -65,66 +65,77 @@
     {
         const size_t pcm_entries = m_session_pcm_cache.size();
         const size_t pcm_bytes = SessionPcmCacheBytes();
+        const bool had_pending = SessionHasPendingSndExportEncode();
+        const int casd_before = CountBankCasdResources();
         int casd_deleted = 0;
 
-        if (m_bank_token && (pcm_entries > 0 || CountBankCasdResources() > 0))
+        if (m_bank_token && (pcm_entries > 0 || casd_before > 0 || had_pending))
         {
-            if (EnsureActiveBankWritable())
+            if (!EnsureActiveBankWritable())
             {
-                XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
-                /* Delete CaSd IDs tracked in session PCM cache first. */
-                for (const auto &kv : m_session_pcm_cache)
-                {
-                    const XLongResourceID id = static_cast<XLongResourceID>(kv.first);
-                    if (XExistsFileResource(bank, kCasdType(), id) != FALSE)
-                    {
-                        if (XDeleteFileResource(bank, kCasdType(), id, FALSE) != FALSE)
-                        {
-                            ++casd_deleted;
-                        }
-                    }
-                }
-                /* Also remove any remaining CaSd resources (session masters on disk). */
-                for (;;)
-                {
-                    const int32_t remaining = XCountFileResourcesOfType(bank, kCasdType());
-                    if (remaining <= 0)
-                    {
-                        break;
-                    }
-                    XLongResourceID rid = 0;
-                    int32_t size = 0;
-                    char name[256];
-                    name[0] = 0;
-                    XPTR data = XGetIndexedFileResource(bank, kCasdType(), &rid, 0, name, &size);
-                    if (data)
-                    {
-                        XDisposePtr(data);
-                    }
-                    if (XDeleteFileResource(bank, kCasdType(), rid, FALSE) == FALSE)
-                    {
-                        break;
-                    }
-                    ++casd_deleted;
-                    if (casd_deleted > 10000)
-                    {
-                        break; /* safety */
-                    }
-                }
-                (void)XFinalizeEditorResourceFile(bank);
+                SetStatus("Could not make bank writable to delete uncompressed originals");
+                return;
             }
+
+            XFILE bank = reinterpret_cast<XFILE>(m_bank_token);
+            if (had_pending)
+            {
+                const char *enc_err = nullptr;
+                const bool nested_busy = m_busy_active;
+                if (!nested_busy)
+                {
+                    BeginBusyProgress("Encoding pending samples…");
+                }
+                const bool enc_ok =
+                    ApplySessionExportTargetsToBank(m_bank_token, &enc_err, 0.05f, 0.80f);
+                if (!nested_busy && m_busy_active)
+                {
+                    EndBusyProgress();
+                }
+                if (!enc_ok)
+                {
+                    SetStatus(std::string("Delete uncompressed aborted: ") +
+                              (enc_err ? enc_err : "pending encode failed"));
+                    return;
+                }
+            }
+
+            const char *casd_err = nullptr;
+            if (!StripCasdFromBankFile(bank, &casd_err))
+            {
+                SetStatus(std::string("Could not remove CaSd masters: ") +
+                          (casd_err ? casd_err : "omit failed"));
+                return;
+            }
+            casd_deleted = casd_before;
         }
 
         m_session_pcm_cache.clear();
         m_session_casd_count = 0;
+        if (m_bank_token)
+        {
+            RefreshListsFromBank();
+        }
 
         char status[256];
-        std::snprintf(status,
-                      sizeof(status),
-                      "Deleted uncompressed originals: %zu PCM (%zu bytes), %d CaSd",
-                      pcm_entries,
-                      pcm_bytes,
-                      casd_deleted);
+        if (had_pending)
+        {
+            std::snprintf(status,
+                          sizeof(status),
+                          "Encoded pending codecs, deleted uncompressed originals: %zu PCM (%zu bytes), %d CaSd",
+                          pcm_entries,
+                          pcm_bytes,
+                          casd_deleted);
+        }
+        else
+        {
+            std::snprintf(status,
+                          sizeof(status),
+                          "Deleted uncompressed originals: %zu PCM (%zu bytes), %d CaSd",
+                          pcm_entries,
+                          pcm_bytes,
+                          casd_deleted);
+        }
         SetStatus(status);
     }
 
@@ -172,6 +183,7 @@
             const size_t bytes = SessionPcmCacheBytes();
             const int casd = CountBankCasdResources();
             ImGui::TextUnformatted("Delete uncompressed PCM masters from this session?");
+            ImGui::TextDisabled("Pending export codecs (ADPCM, MPEG, Opus, ...) are written into bank samples first.");
             ImGui::TextDisabled("Committed bank samples (esnd/csnd/snd) stay.");
             ImGui::TextDisabled("App compression preview cache is not cleared.");
             ImGui::Separator();

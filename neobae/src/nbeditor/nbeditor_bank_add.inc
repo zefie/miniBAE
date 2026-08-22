@@ -574,11 +574,17 @@
                     break;
                 }
             }
-            if (found == 0)
+            if (found != 0)
             {
-                continue;
+                items.push_back(TrashItem{found, sid, sample.snd_resource_id, sample.unassigned});
             }
-            items.push_back(TrashItem{found, sid, sample.snd_resource_id, sample.unassigned});
+            {
+                const XResourceType casd = FOUR_CHAR('C', 'a', 'S', 'd');
+                if (XExistsFileResource(bank, casd, sid) != FALSE)
+                {
+                    items.push_back(TrashItem{casd, sid, sample.snd_resource_id, sample.unassigned});
+                }
+            }
         }
 
         if (items.empty() && song_doc_indices.empty() && bank_assets_to_purge.empty())

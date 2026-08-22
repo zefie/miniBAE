@@ -5584,6 +5584,15 @@ BAEResult PV_BankReEncodeSampleCore(XFILE bankFile,
             return BAE_BAD_FILE;
         }
 
+        /* IMA4 decode reports ceil(frames/64)*64. Trim to the source PCM count so
+         * preview/audition loops stay in the original frame domain. */
+        if (compType == C_IMA4 &&
+            writeWaveform.waveFrames > 0 &&
+            previewInfo.frames > writeWaveform.waveFrames)
+        {
+            previewInfo.frames = writeWaveform.waveFrames;
+        }
+
         pcmSize = (int32_t)(previewInfo.frames *
                             (previewInfo.bitSize / 8) *
                             previewInfo.channels);

@@ -1918,6 +1918,7 @@ static void PV_ServeOscillatorBuffer(GM_Voice *pVoice)
 
     {
         int32_t oscShape = PV_ResolveOscWaveShape(pVoice);
+        bool stereoOut = MusicGlobals->generateStereoOutput ? TRUE : FALSE;
 
 #if REVERB_USED == VARIABLE_REVERB
     /* songBufferReverb/Chorus are MONO (One_Loop frames), unlike stereo dry.
@@ -1972,9 +1973,18 @@ static void PV_ServeOscillatorBuffer(GM_Voice *pVoice)
             {
                 sample = PV_OscFilterStep(pVoice, sample, Xn, Z1, Zn, &z1value, &zIndex);
             }
-            dest[0] += sample * amplitudeL;
-            dest[1] += sample * amplitudeR;
-            dest += 2;
+            /* Dry bus is packed mono when generateStereoOutput is false. */
+            if (stereoOut)
+            {
+                dest[0] += sample * amplitudeL;
+                dest[1] += sample * amplitudeR;
+                dest += 2;
+            }
+            else
+            {
+                dest[0] += sample * ((amplitudeL + amplitudeR) >> 1);
+                dest += 1;
+            }
 #if REVERB_USED == VARIABLE_REVERB
             if (sendReverb && destReverb && destChorus)
             {

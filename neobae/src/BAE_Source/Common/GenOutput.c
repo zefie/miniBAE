@@ -105,6 +105,24 @@
     #define PHASE_OFFSET    0x80    // silence is 128
 #endif
 
+#if USE_8_BIT_OUTPUT == TRUE
+static OUTSAMPLE8 PV_ClampToU8(int32_t v)
+{
+    if (v < 0)
+    {
+        return (OUTSAMPLE8)0;
+    }
+    if (v > 255)
+    {
+        return (OUTSAMPLE8)255;
+    }
+    return (OUTSAMPLE8)v;
+}
+
+#define PV_DRY_TO_U8(sample) \
+    PV_ClampToU8(((sample) >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET)
+#endif
+
 #if (USE_8_BIT_OUTPUT == TRUE) && (USE_STEREO_OUTPUT == TRUE)
 void PV_Generate8outputStereo(OUTSAMPLE8 * dest8)
 {
@@ -121,14 +139,14 @@ void PV_Generate8outputStereo(OUTSAMPLE8 * dest8)
         // native sample rates
         for (count = MusicGlobals->Four_Loop; count > 0; --count)
         {
-            dest8[0] = (sourceLR[0] >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
-            dest8[1] = (sourceLR[1] >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
-            dest8[2] = (sourceLR[2] >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
-            dest8[3] = (sourceLR[3] >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
-            dest8[4] = (sourceLR[4] >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
-            dest8[5] = (sourceLR[5] >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
-            dest8[6] = (sourceLR[6] >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
-            dest8[7] = (sourceLR[7] >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
+            dest8[0] = PV_DRY_TO_U8(sourceLR[0]);
+            dest8[1] = PV_DRY_TO_U8(sourceLR[1]);
+            dest8[2] = PV_DRY_TO_U8(sourceLR[2]);
+            dest8[3] = PV_DRY_TO_U8(sourceLR[3]);
+            dest8[4] = PV_DRY_TO_U8(sourceLR[4]);
+            dest8[5] = PV_DRY_TO_U8(sourceLR[5]);
+            dest8[6] = PV_DRY_TO_U8(sourceLR[6]);
+            dest8[7] = PV_DRY_TO_U8(sourceLR[7]);
             dest8 += 8;
             sourceLR += 8;
         }
@@ -139,29 +157,29 @@ void PV_Generate8outputStereo(OUTSAMPLE8 * dest8)
         // 11k terped to 22k, and 22k terped to 44k
         for (count = MusicGlobals->Four_Loop; count > 0; --count)
         {
-            b =  (*sourceLR++ >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
-            c =  (*sourceLR++ >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
+            b =  PV_DRY_TO_U8(*sourceLR++);
+            c =  PV_DRY_TO_U8(*sourceLR++);
             dest8[0] = (OUTSAMPLE8)b;
             dest8[1] = (OUTSAMPLE8)c;
             dest8[2] = (OUTSAMPLE8)b;
             dest8[3] = (OUTSAMPLE8)c;
 
-            b = (*sourceLR++ >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
-            c = (*sourceLR++ >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
+            b = PV_DRY_TO_U8(*sourceLR++);
+            c = PV_DRY_TO_U8(*sourceLR++);
             dest8[4] = (OUTSAMPLE8)b;
             dest8[5] = (OUTSAMPLE8)c;
             dest8[6] = (OUTSAMPLE8)b;
             dest8[7] = (OUTSAMPLE8)c;
 
-            b = (*sourceLR++ >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
-            c = (*sourceLR++ >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
+            b = PV_DRY_TO_U8(*sourceLR++);
+            c = PV_DRY_TO_U8(*sourceLR++);
             dest8[8] = (OUTSAMPLE8)b;
             dest8[9] = (OUTSAMPLE8)c;
             dest8[10] = (OUTSAMPLE8)b;
             dest8[11] = (OUTSAMPLE8)c;
 
-            b = (*sourceLR++ >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
-            c = (*sourceLR++ >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
+            b = PV_DRY_TO_U8(*sourceLR++);
+            c = PV_DRY_TO_U8(*sourceLR++);
             dest8[12] = (OUTSAMPLE8)b;
             dest8[13] = (OUTSAMPLE8)c;
             dest8[14] = (OUTSAMPLE8)b;
@@ -191,10 +209,10 @@ void PV_Generate8outputMono(OUTSAMPLE8 * dest8)
         // native sample rates
         for (count = MusicGlobals->Four_Loop; count > 0; --count)
         {
-            dest8[0] = (source[0] >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
-            dest8[1] = (source[1] >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
-            dest8[2] = (source[2] >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
-            dest8[3] = (source[3] >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
+            dest8[0] = PV_DRY_TO_U8(source[0]);
+            dest8[1] = PV_DRY_TO_U8(source[1]);
+            dest8[2] = PV_DRY_TO_U8(source[2]);
+            dest8[3] = PV_DRY_TO_U8(source[3]);
             source += 4;
             dest8 += 4;
         }
@@ -204,19 +222,19 @@ void PV_Generate8outputMono(OUTSAMPLE8 * dest8)
         // 11k terped to 22k, and 22k terped to 44k
         for (count = MusicGlobals->Four_Loop; count > 0; --count)
         {
-            b = (*source++ >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
+            b = PV_DRY_TO_U8(*source++);
             dest8[0] = (OUTSAMPLE8)b;
             dest8[1] = (OUTSAMPLE8)b;
 
-            b = (*source++ >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
+            b = PV_DRY_TO_U8(*source++);
             dest8[2] = (OUTSAMPLE8)b;
             dest8[3] = (OUTSAMPLE8)b;
 
-            b = (*source++ >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
+            b = PV_DRY_TO_U8(*source++);
             dest8[4] = (OUTSAMPLE8)b;
             dest8[5] = (OUTSAMPLE8)b;
 
-            b = (*source++ >> (OUTPUT_SCALAR + 8)) + PHASE_OFFSET;
+            b = PV_DRY_TO_U8(*source++);
             dest8[6] = (OUTSAMPLE8)b;
             dest8[7] = (OUTSAMPLE8)b;
             dest8 += 8;
