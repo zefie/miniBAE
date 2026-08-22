@@ -1207,12 +1207,42 @@
         }
         m_song = song;
         m_document_dirty = false;
+        m_playback_stale = false;
         ApplyChannelMutes();
         MeApplyTrackMutes();
         RebuildPreviewSongFromDocument();
         ApplyVelocityCurveToSongs();
         LyResetPreview();
         LyWirePreviewCallback();
+        return true;
+    }
+
+    /* Rebuild the live song so bank ALIS / INST edits reach remapArray.
+     * Keeps pause vs play and song position when possible. */
+    bool ReloadPlaybackPreservingTransport()
+    {
+        uint32_t restore_us = 0;
+        bool was_paused = true;
+
+        if (!m_document)
+        {
+            return false;
+        }
+        if (m_song)
+        {
+            BAE_BOOL paused = TRUE;
+            (void)BAESong_GetMicrosecondPosition(m_song, &restore_us);
+            (void)BAESong_IsPaused(m_song, &paused);
+            was_paused = (paused != FALSE) || !m_song_started;
+        }
+        if (!ReloadPlaybackFromDocument(was_paused))
+        {
+            return false;
+        }
+        if (m_song && restore_us > 0)
+        {
+            (void)BAESong_SetMicrosecondPosition(m_song, restore_us);
+        }
         return true;
     }
 
@@ -1486,7 +1516,7 @@
             MeAttachRecordToSongClock();
             attach_tick = m_midi_playhead_tick;
         }
-        if (m_document && (m_document_dirty || !m_song))
+        if (m_document && (m_document_dirty || m_playback_stale || !m_song))
         {
             if (!ReloadPlaybackFromDocument(false))
             {

@@ -294,6 +294,11 @@
         RefreshListsFromBank();
         EnsureInstrumentFilterShows(m_inst_dest_bank, m_inst_dest_percussion);
         SelectInstrumentByInstId(dest_id);
+        if (completed_mode == InstDestMode::Alias)
+        {
+            MarkPlaybackStale();
+            (void)ReloadPlaybackPreservingTransport();
+        }
         if (completed_mode == InstDestMode::Move ||
             completed_mode == InstDestMode::Clone ||
             completed_mode == InstDestMode::Paste)
@@ -1010,6 +1015,8 @@
         std::snprintf(status, sizeof(status), "Removed alias instID %u", row.inst_id);
         SetStatus(status);
         RefreshListsFromBank();
+        MarkPlaybackStale();
+        (void)ReloadPlaybackPreservingTransport();
     }
 
     void DeleteInstrumentAt(int list_index)

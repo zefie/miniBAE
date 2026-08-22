@@ -6934,6 +6934,7 @@ private:
     bool m_scroll_to_selected_sample = false;
     SessionDropTarget m_dnd_hover_target = SessionDropTarget::None;
     bool m_bank01_touched = false;
+    bool m_playback_stale = false;
     bool m_confirm_bank_merge_open = false;
     std::string m_pending_bank_merge_path;
     bool m_sample_editor_has_uncompressed_master = false;

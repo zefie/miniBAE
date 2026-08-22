@@ -15,11 +15,17 @@
                ext == "bsn" || ext == "zsn" || ext == "nbs";
     }
 
+    void MarkPlaybackStale()
+    {
+        m_playback_stale = true;
+    }
+
     void MarkBank01TouchedIfNeeded(int bank)
     {
         if (bank >= 0 && bank < 2)
         {
             m_bank01_touched = true;
+            m_playback_stale = true;
         }
     }
 

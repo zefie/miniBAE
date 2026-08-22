@@ -1162,6 +1162,11 @@
         RefreshListsFromBank();
         EnsureInstrumentFilterShows(m_bank_add_bank, m_bank_add_percussion);
         SelectInstrumentByInstId(inst_id);
+        if (m_bank_add_mode == BankAddMode::Alias)
+        {
+            MarkPlaybackStale();
+            (void)ReloadPlaybackPreservingTransport();
+        }
         if (m_bank_add_mode == BankAddMode::MakeInstrument &&
             m_bank_add_snd_id != kNoSndResourceId)
         {

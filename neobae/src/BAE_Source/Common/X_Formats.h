@@ -1170,8 +1170,9 @@ bool XGetSongEmbeddedStatus(SongResource *pSong);
 void XSetSongEmbeddedStatus(SongResource *pSong, bool embedded);
 
 // Return an AliasLinkResource, and deal with endian issues. Always safe for host.
+// thisFile == 0 merges ALIS from all open resource files (same as XGetAliasLink).
 XAliasLinkResource * XGetAliasLinkFromFile(XFILE thisFile);
-// Return an AliasLinkResource, and deal with endian issues. Always safe for host.
+// Return a merged AliasLinkResource from all open files (front file wins on aliasFrom).
 XAliasLinkResource * XGetAliasLink(void);
 // Given a alias structure and a sourceID, this will return in pDest a valid alias. -1 will
 // be returned via int32_t if there's no alias present

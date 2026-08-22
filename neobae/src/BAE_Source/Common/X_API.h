@@ -881,6 +881,10 @@ bool    XFileGetForceZsbFeatures(XFILE fileRef);
 // get current most recently opened resource file, or NULL if nothing is open
 XFILE   XFileGetCurrentResourceFile(void);
 
+// Snapshot currently open resource files (front / most recently used first).
+// Returns the number of entries written to outFiles (capped at maxFiles).
+int16_t XFileGetOpenResourceFiles(XFILE *outFiles, int16_t maxFiles);
+
 // delete file. 0 is ok, -1 for failure
 int32_t XFileDelete(XFILENAME *file);
 

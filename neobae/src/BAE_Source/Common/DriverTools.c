@@ -194,6 +194,8 @@
 **  3/28/2001   jsc: fixed XGetAliasLink to look in all open resource files instead of
 **              only the current (playing an RMF with a bank-containing-aliases would not
 **              play the aliases correctly, as it only looked in the RMF for the alias link)
+**  8/22/2026   Merge ALIS from all open files in XGetAliasLink. First-match
+**              still hid bank aliases when a temp RMF wrote EmbeddedInstrumentAliases.
 **  6/1/2001    Moved XGetBankStatus outside of ifdef
 **  12/4/2001   Fixed some compile time issues with USE_FULL_RMF_SUPPORT = FALSE and USE_CREATION_API = TRUE
 **  1/28/2002   Fixed some warnings
@@ -2522,9 +2524,127 @@ void XGetBankStatus(BankStatus *pStatus)
 }
 
 // Return an AliasLinkResource, and deal with endian issues. Always safe for host.
+// Merges ALIS from every open resource file (front file wins on aliasFrom).
+// A temp RMF's EmbeddedInstrumentAliases must not hide the mixer bank's table.
 XAliasLinkResource * XGetAliasLink(void)
 {
-    return XGetAliasLinkFromFile(0);
+    XFILE openFiles[MAX_OPEN_XFILES];
+    int16_t fileCount;
+    int16_t fileIndex;
+    uint32_t uniqueCount;
+    uint32_t uniqueCap;
+    XLongResourceID *fromList;
+    XLongResourceID *toList;
+    XAliasLinkResource *merged;
+    uint32_t i;
+    int32_t blobBytes;
+
+    fileCount = XFileGetOpenResourceFiles(openFiles, MAX_OPEN_XFILES);
+    if (fileCount <= 0)
+    {
+        return NULL;
+    }
+
+    uniqueCap = 0;
+    for (fileIndex = 0; fileIndex < fileCount; fileIndex++)
+    {
+        XAliasLinkResource *pLink;
+        const unsigned char *pBase;
+
+        pLink = XGetAliasLinkFromFile(openFiles[fileIndex]);
+        if (!pLink)
+        {
+            continue;
+        }
+        pBase = (const unsigned char *)pLink;
+        uniqueCap += XGetLong(pBase + 4);
+        XDisposePtr((XPTR)pLink);
+    }
+    if (uniqueCap == 0)
+    {
+        return NULL;
+    }
+
+    fromList = (XLongResourceID *)XNewPtr((int32_t)(uniqueCap * sizeof(XLongResourceID)));
+    toList = (XLongResourceID *)XNewPtr((int32_t)(uniqueCap * sizeof(XLongResourceID)));
+    if (!fromList || !toList)
+    {
+        XDisposePtr((XPTR)fromList);
+        XDisposePtr((XPTR)toList);
+        return NULL;
+    }
+
+    uniqueCount = 0;
+    for (fileIndex = 0; fileIndex < fileCount; fileIndex++)
+    {
+        XAliasLinkResource *pLink;
+        const unsigned char *pBase;
+        uint32_t aliasCount;
+        uint32_t aliasIndex;
+
+        pLink = XGetAliasLinkFromFile(openFiles[fileIndex]);
+        if (!pLink)
+        {
+            continue;
+        }
+        pBase = (const unsigned char *)pLink;
+        aliasCount = XGetLong(pBase + 4);
+        for (aliasIndex = 0; aliasIndex < aliasCount; aliasIndex++)
+        {
+            const unsigned char *pEntry;
+            XLongResourceID aliasFrom;
+            XLongResourceID aliasTo;
+            uint32_t seen;
+
+            pEntry = pBase + 8 + (aliasIndex * 8);
+            aliasFrom = (XLongResourceID)XGetLong(pEntry);
+            aliasTo = (XLongResourceID)XGetLong(pEntry + 4);
+            for (seen = 0; seen < uniqueCount; seen++)
+            {
+                if (fromList[seen] == aliasFrom)
+                {
+                    break;
+                }
+            }
+            if (seen < uniqueCount)
+            {
+                continue;
+            }
+            fromList[uniqueCount] = aliasFrom;
+            toList[uniqueCount] = aliasTo;
+            uniqueCount++;
+        }
+        XDisposePtr((XPTR)pLink);
+    }
+
+    if (uniqueCount == 0)
+    {
+        XDisposePtr((XPTR)fromList);
+        XDisposePtr((XPTR)toList);
+        return NULL;
+    }
+
+    blobBytes = (int32_t)(8u + (uniqueCount * 8u));
+    merged = (XAliasLinkResource *)XNewPtr(blobBytes);
+    if (!merged)
+    {
+        XDisposePtr((XPTR)fromList);
+        XDisposePtr((XPTR)toList);
+        return NULL;
+    }
+    XPutLong((unsigned char *)merged, ALIAS_ID_RESOURCE_VERSION);
+    XPutLong((unsigned char *)merged + 4, uniqueCount);
+    for (i = 0; i < uniqueCount; i++)
+    {
+        unsigned char *pEntry;
+
+        pEntry = (unsigned char *)merged + 8 + (i * 8);
+        XPutLong(pEntry, (uint32_t)fromList[i]);
+        XPutLong(pEntry + 4, (uint32_t)toList[i]);
+    }
+    XDisposePtr((XPTR)fromList);
+    XDisposePtr((XPTR)toList);
+    return merged;
 }
 
 // Given a alias structure and a sourceID, this will return in pDest a valid alias. -1 will
@@ -2570,14 +2690,12 @@ XAliasLinkResource * XGetAliasLinkFromFile(XFILE thisFile)
     XAliasLinkResource  *pLink;
     uint32_t            version;
 
-    if (thisFile)
+    if (!thisFile)
     {
-        pLink = (XAliasLinkResource *)XGetFileResource(thisFile, ID_ALIAS, DEFAULT_RESOURCE_ALIAS_ID, NULL, NULL);
+        return XGetAliasLink();
     }
-    else
-    {
-        pLink = (XAliasLinkResource *)XGetAndDetachResource(ID_ALIAS, DEFAULT_RESOURCE_ALIAS_ID, NULL);
-    }
+
+    pLink = (XAliasLinkResource *)XGetFileResource(thisFile, ID_ALIAS, DEFAULT_RESOURCE_ALIAS_ID, NULL, NULL);
     if (pLink)
     {
         // Read version using byte-wise access to avoid alignment issues on arm64

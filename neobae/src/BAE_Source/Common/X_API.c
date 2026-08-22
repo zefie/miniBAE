@@ -9433,6 +9433,11 @@ XFILE XFileGetCurrentResourceFile(void)
     return PV_GetFrontOpenResourceFile();
 }
 
+int16_t XFileGetOpenResourceFiles(XFILE *outFiles, int16_t maxFiles)
+{
+    return PV_SnapshotOpenResourceFiles(outFiles, maxFiles);
+}
+
 // make sure this resource file is first in the scan list
 void XFileUseThisResourceFile(XFILE fileRef)
 {
